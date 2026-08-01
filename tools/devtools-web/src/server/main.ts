@@ -146,7 +146,7 @@ const server = Bun.serve<SocketData>({
       const entryPath = path.join(CONFIG.examplesPath ?? "examples", entry);
       const entryDir = path.dirname(entryPath);
       const tmp = mkdtempSync(path.join(os.tmpdir(), "rae-web-app-"));
-      const out = path.join(tmp, "index.html");
+      const out = path.join(tmp, "app.mjs");
       const profile = payload.profile === "debug" ? "dev" : "release";
       const emcc = Bun.which("emcc");
       const buildPath = emcc
@@ -178,7 +178,7 @@ const server = Bun.serve<SocketData>({
         if (activeWebApp) rmSync(activeWebApp.dir, { recursive: true, force: true });
         const id = randomUUID();
         activeWebApp = { id, dir: tmp };
-        return new Response(JSON.stringify({ url: `/api/examples/web-app/${id}/index.html` }), {
+        return new Response(JSON.stringify({ moduleUrl: `/api/examples/web-app/${id}/app.mjs` }), {
           headers: { "Content-Type": "application/json" }
         });
       } catch (error) {
@@ -631,6 +631,7 @@ function getContentType(filePath: string): string {
   if (filePath.endsWith(".html")) return "text/html; charset=utf-8";
   if (filePath.endsWith(".css")) return "text/css; charset=utf-8";
   if (filePath.endsWith(".js")) return "text/javascript; charset=utf-8";
+  if (filePath.endsWith(".mjs")) return "text/javascript; charset=utf-8";
   if (filePath.endsWith(".json")) return "application/json; charset=utf-8";
   if (filePath.endsWith(".svg")) return "image/svg+xml";
   if (filePath.endsWith(".wasm")) return "application/wasm";

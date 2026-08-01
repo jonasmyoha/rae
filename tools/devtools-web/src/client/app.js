@@ -244,7 +244,7 @@ let selectedExampleFile = null;
 let activeExampleRunId = null;
 let exampleRunActive = false;
 let exampleWatchActive = false;
-let activeWasmWebAppWindow = null;
+let activeWasmWebAppModule = null;
 let activeExampleActionId = null;
 let exampleEditMode = false;
 let exampleEditorDirty = false;
@@ -1892,8 +1892,7 @@ function showExampleViewer(example) {
   const active = Boolean(d) && getGlobalTarget() === "wasm";
   viewer.hidden = !active;
   if (active) {
-    const usesWebApp = Boolean(example.wasmWebApp);
-    canvas.hidden = usesWebApp;
+    canvas.hidden = false;
     // Assigning canvas.width/height ALWAYS clears the bitmap (even to the same
     // value), so only do it when the size actually changes — otherwise the
     // re-render triggered after a draw (updateExampleButtons) would wipe the
@@ -1905,25 +1904,26 @@ function showExampleViewer(example) {
     // examples like a mobile UI) instead of a fixed-height letterboxed box.
     const stage = canvas.closest(".example-viewer__stage");
     if (stage) {
-      stage.hidden = usesWebApp;
+      stage.hidden = false;
       stage.style.setProperty("--arw", d.width);
       stage.style.setProperty("--arh", d.height);
     }
   }
 }
 
+function resetExampleViewerCanvas() {
+  const canvas = document.getElementById("example-viewer-canvas");
+  if (!canvas) return null;
+  const replacement = canvas.cloneNode(false);
+  canvas.replaceWith(replacement);
+  return replacement;
+}
+
 async function runWasmWebApp(example) {
   const statusEl = document.getElementById("example-viewer-status");
   if (!example.display) return;
-  const appWindow = window.open("about:blank", `rae-wasm-${example.id}`);
-  if (!appWindow) {
-    appendExampleOutput("Browser blocked the WebGPU app window; allow popups for Devtools.", "stderr");
-    setExampleStatus("Popup blocked", "is-failure", "WASM");
-    return;
-  }
-  activeWasmWebAppWindow = appWindow;
-  appWindow.document.title = "Building Rae browser app…";
-  appWindow.document.body.textContent = "Building Rae browser app…";
+  const canvas = resetExampleViewerCanvas();
+  if (!canvas) return;
   showExampleViewer(example);
   exampleRunActive = true;
   setExampleStatus("Building browser WASM…", "is-running", "WASM");
@@ -1937,25 +1937,34 @@ async function runWasmWebApp(example) {
       body: JSON.stringify({ entry, profile: getGlobalProfile() })
     });
     const result = await res.json();
-    if (!res.ok || !result.url) throw new Error(result.error || `HTTP ${res.status}`);
-    appWindow.location.href = result.url;
-    if (statusEl) statusEl.textContent = "running SDL3 + WebGPU in app window";
-    setExampleStatus("Running · Browser", "is-success", "WASM");
-    appendExampleOutput("Browser WASM bundle built; running in dedicated WebGPU app window.", "stdout");
+    if (!res.ok || !result.moduleUrl) throw new Error(result.error || `HTTP ${res.status}`);
+    const imported = await import(`${result.moduleUrl}?run=${Date.now()}`);
+    const createRaeApp = imported.default;
+    if (typeof createRaeApp !== "function") throw new Error("Browser module has no default factory export");
+    activeWasmWebAppModule = await createRaeApp({
+      canvas,
+      locateFile: (file) => new URL(file, new URL(result.moduleUrl, window.location.href)).href,
+      print: (line) => appendExampleOutput(String(line), "stdout"),
+      printErr: (line) => appendExampleOutput(String(line), "stderr")
+    });
+    canvas.tabIndex = 0;
+    canvas.focus();
+    if (statusEl) statusEl.textContent = "running SDL3 + WebGPU in embedded render area";
+    setExampleStatus("Running · Embedded", "is-success", "WASM");
+    appendExampleOutput("Browser WASM bundle built; running in the embedded WebGPU canvas.", "stdout");
   } catch (error) {
     const message = getErrorMessage(error);
     if (statusEl) statusEl.textContent = `build failed: ${message}`;
     appendExampleOutput(message, "stderr");
     setExampleStatus("WASM build failed", "is-failure", "WASM");
-    appWindow.close();
-    activeWasmWebAppWindow = null;
+    activeWasmWebAppModule = null;
     exampleRunActive = false;
     updateExampleButtons();
   }
 }
 
 async function runWasmInBrowser(example) {
-  const canvas = document.getElementById("example-viewer-canvas");
+  const canvas = resetExampleViewerCanvas();
   const statusEl = document.getElementById("example-viewer-status");
   const d = example.display;
   if (!canvas || !d) return;
@@ -2011,7 +2020,7 @@ async function runWasmInBrowser(example) {
 // runner worker; the page just draws the framebuffer it posts back. Needs
 // cross-origin isolation (COOP/COEP, set by the server). Used for wasmRealThreads.
 async function runWasmSpawn(example) {
-  const canvas = document.getElementById("example-viewer-canvas");
+  const canvas = resetExampleViewerCanvas();
   const statusEl = document.getElementById("example-viewer-status");
   const d = example.display;
   if (!canvas || !d) return;
@@ -2081,7 +2090,7 @@ async function runWasmSpawn(example) {
 // the packed f32 scene buffer), the per-pixel path tracing runs as a WGSL
 // compute shader on the GPU (raytrace.wgsl). Used for examples flagged webgpu.
 async function runWebGPU(example) {
-  const canvas = document.getElementById("example-viewer-canvas");
+  const canvas = resetExampleViewerCanvas();
   const statusEl = document.getElementById("example-viewer-status");
   const d = example.display;
   if (!canvas || !d) return;
@@ -2865,8 +2874,11 @@ async function triggerExampleRun(mode = "run", targetId = null, actionId = null)
 }
 
 async function stopExampleRun() {
-  if (activeWasmWebAppWindow && !activeWasmWebAppWindow.closed) activeWasmWebAppWindow.close();
-  activeWasmWebAppWindow = null;
+  if (activeWasmWebAppModule?._rae_browser_request_stop) {
+    activeWasmWebAppModule._rae_browser_request_stop();
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  }
+  activeWasmWebAppModule = null;
   try {
     await Promise.all([
       fetch("/api/examples/stop", { method: "POST" }),
