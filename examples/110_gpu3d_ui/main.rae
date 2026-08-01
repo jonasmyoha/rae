@@ -300,12 +300,13 @@ func main() ret Int {
     let cameraInput: Bool = uiPointerCaptured(input: uiInput) is false and uiState.paused is false
     if cameraInput and gpu2d.pointerDown() {
       if dragging {
-        cameraController.yaw = cameraController.yaw + (px - lastX) * 0.008
         if cameraController.mode is CameraMode.orbit {
+          cameraController.yaw = cameraController.yaw + (px - lastX) * 0.008
           cameraController.orbitPitch = cameraController.orbitPitch - (py - lastY) * 0.008
           if cameraController.orbitPitch > 1.45 { cameraController.orbitPitch = 1.45 }
           if cameraController.orbitPitch < 0.05 { cameraController.orbitPitch = 0.05 }
         } else {
+          cameraController.yaw = cameraController.yaw - (px - lastX) * 0.008
           cameraController.freePitch = cameraController.freePitch - (py - lastY) * 0.008
           if cameraController.freePitch > 1.45 { cameraController.freePitch = 1.45 }
           if cameraController.freePitch < 0.0 - 1.45 { cameraController.freePitch = 0.0 - 1.45 }
@@ -324,8 +325,10 @@ func main() ret Int {
         if sdl3.isKeyDown(key: 83) { cameraController.distance = cameraController.distance + dt * 6.0 }
         if sdl3.isKeyDown(key: 65) { cameraController.yaw = cameraController.yaw - dt * 1.2 }
         if sdl3.isKeyDown(key: 68) { cameraController.yaw = cameraController.yaw + dt * 1.2 }
-        if sdl3.isKeyDown(key: 81) { camera.target.z = camera.target.z - dt * 6.0 }
-        if sdl3.isKeyDown(key: 69) { camera.target.z = camera.target.z + dt * 6.0 }
+        if sdl3.isKeyDown(key: 81) { cameraController.orbitPitch = cameraController.orbitPitch - dt * 1.2 }
+        if sdl3.isKeyDown(key: 69) { cameraController.orbitPitch = cameraController.orbitPitch + dt * 1.2 }
+        if cameraController.orbitPitch > 1.45 { cameraController.orbitPitch = 1.45 }
+        if cameraController.orbitPitch < 0.05 { cameraController.orbitPitch = 0.05 }
         if cameraController.distance < 4.0 { cameraController.distance = 4.0 }
         if cameraController.distance > 30.0 { cameraController.distance = 30.0 }
       } else {
@@ -335,8 +338,8 @@ func main() ret Int {
         let up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
         if sdl3.isKeyDown(key: 87) { cameraController.freePosition = vec3.vadd(a: cameraController.freePosition, b: vec3.vscale(a: forward, s: moveStep)) }
         if sdl3.isKeyDown(key: 83) { cameraController.freePosition = vec3.vsub(a: cameraController.freePosition, b: vec3.vscale(a: forward, s: moveStep)) }
-        if sdl3.isKeyDown(key: 65) { cameraController.freePosition = vec3.vadd(a: cameraController.freePosition, b: vec3.vscale(a: right, s: moveStep)) }
-        if sdl3.isKeyDown(key: 68) { cameraController.freePosition = vec3.vsub(a: cameraController.freePosition, b: vec3.vscale(a: right, s: moveStep)) }
+        if sdl3.isKeyDown(key: 65) { cameraController.freePosition = vec3.vsub(a: cameraController.freePosition, b: vec3.vscale(a: right, s: moveStep)) }
+        if sdl3.isKeyDown(key: 68) { cameraController.freePosition = vec3.vadd(a: cameraController.freePosition, b: vec3.vscale(a: right, s: moveStep)) }
         if sdl3.isKeyDown(key: 81) { cameraController.freePosition = vec3.vsub(a: cameraController.freePosition, b: vec3.vscale(a: up, s: moveStep)) }
         if sdl3.isKeyDown(key: 69) { cameraController.freePosition = vec3.vadd(a: cameraController.freePosition, b: vec3.vscale(a: up, s: moveStep)) }
       }
