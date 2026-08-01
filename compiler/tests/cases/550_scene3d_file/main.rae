@@ -1,0 +1,21 @@
+import core
+import scene3d
+import scene3d_file
+open scene3d
+open scene3d_file
+
+func main() {
+  var meshes: MeshRegistry3d = createMeshRegistry3d()
+  registerMesh3d(reg: meshes, key: "sphere", handle: meshHandle(id: 7, generation: 3))
+
+  let asset: Scene3dAsset = loadScene3dFile(path: "tests/cases/550_scene3d_file/scene.raescene", meshes: meshes)
+  log("ok={asset.ok} materials={asset.scene.materials.length} meshes={asset.scene.meshRenderers.length} sdf={asset.scene.sdfPrimitives.length}")
+  let ball: Int = scene3dAssetEntity(asset: asset, nodeId: "Ball")
+  let blob: Int = scene3dAssetEntity(asset: asset, nodeId: "Blob")
+  log("ball={ball} blob={blob}")
+  let renderer: MeshRenderer = asset.scene.meshRenderers.at(index: 0)
+  log("mesh={renderer.mesh.id}:{renderer.mesh.generation} fov={asset.camera.fovYDeg} exposure={asset.light.exposure}")
+
+  let bad: Scene3dAsset = reloadScene3dFile(path: "tests/cases/550_scene3d_file/bad.raescene", meshes: meshes)
+  log("bad={bad.ok} error={bad.errorMsg}")
+}
