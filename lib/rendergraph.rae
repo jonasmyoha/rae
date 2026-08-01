@@ -99,6 +99,7 @@ type Edge {
   resource: Int
   access: Int
   isWrite: Bool
+  isModify: Bool   # read-then-write (load-preserving attachment, ping-pong)
 }
 
 type RenderGraph {
@@ -146,11 +147,26 @@ func addPass(g: mod RenderGraph, name: view String, kind: view Int, tag: view In
 }
 
 func passReads(g: mod RenderGraph, pass: view Int, resource: view Int, access: view Int) pub {
-  g.edges.add(value: Edge { pass: pass, resource: resource, access: access, isWrite: false })
+  g.edges.add(value: Edge { pass: pass, resource: resource, access: access, isWrite: false, isModify: false })
 }
 
 func passWrites(g: mod RenderGraph, pass: view Int, resource: view Int, access: view Int) pub {
-  g.edges.add(value: Edge { pass: pass, resource: resource, access: access, isWrite: true })
+  g.edges.add(value: Edge { pass: pass, resource: resource, access: access, isWrite: true, isModify: false })
+}
+
+# Read-modify-write: the pass consumes the resource's current contents and
+# produces its new contents. A load-preserving attachment (the UI overlay
+# painting over the resolved 3D colour) is exactly this, and it cannot be
+# expressed as a plain write — two plain writers is an error, and a plain
+# read would not order the overlay after the scene.
+#
+# ORDERING NOTE, stated plainly: producers of one resource form a CHAIN
+# ordered by declaration order. That is not a derived fact and cannot be —
+# "who paints over whom" is a semantic decision by the frame author, not
+# something a dependency graph can infer. Ordering BETWEEN the chain and
+# every other pass is still derived normally.
+func passModifies(g: mod RenderGraph, pass: view Int, resource: view Int, access: view Int) pub {
+  g.edges.add(value: Edge { pass: pass, resource: resource, access: access, isWrite: true, isModify: true })
 }
 
 # ----- queries --------------------------------------------------------
@@ -158,17 +174,34 @@ func passWrites(g: mod RenderGraph, pass: view Int, resource: view Int, access: 
 # writer per resource per frame; compile() reports a violation rather than
 # picking one arbitrarily.
 func writerOf(g: view RenderGraph, resource: view Int) ret Int {
+  var last: Int = 0 - 1
   var i: Int = 0
   loop i < g.edges.length {
     let e: Edge = g.edges.at(index: i)
     if e.isWrite {
       if e.resource is resource {
-        ret e.pass
+        last = e.pass
       }
     }
     i = i + 1
   }
-  ret 0 - 1
+  ret last
+}
+
+# The producer immediately before `edgeIndex` in `resource`'s chain, or -1.
+func producerBefore(g: view RenderGraph, resource: view Int, edgeIndex: view Int) ret Int {
+  var prev: Int = 0 - 1
+  var i: Int = 0
+  loop i < edgeIndex {
+    let e: Edge = g.edges.at(index: i)
+    if e.isWrite {
+      if e.resource is resource {
+        prev = e.pass
+      }
+    }
+    i = i + 1
+  }
+  ret prev
 }
 
 func resourceLifetime(g: view RenderGraph, resource: view Int) ret Int {
@@ -193,18 +226,22 @@ func compile(g: mod RenderGraph) pub ret Int {
   loop i < g.edges.length {
     let a: Edge = g.edges.at(index: i)
     if a.isWrite {
+      if not a.isModify {
       var j: Int = i + 1
       loop j < g.edges.length {
         let b: Edge = g.edges.at(index: j)
         if b.isWrite {
+          if not b.isModify {
           if b.resource is a.resource {
             g.status = graphErrDoubleWrite
             g.errorPass = b.pass
             g.errorResource = b.resource
             ret g.status
           }
+          }
         }
         j = j + 1
+      }
       }
     }
     i = i + 1
@@ -250,13 +287,22 @@ func compile(g: mod RenderGraph) pub ret Int {
         loop k < g.edges.length {
           let e: Edge = g.edges.at(index: k)
           if e.pass is p {
-            if not e.isWrite {
-              let w: Int = writerOf(g: g, resource: e.resource)
-              if w >= 0 {
-                if w is not p {
-                  if not emitted.at(index: w) {
-                    ready = false
-                  }
+            # A pure reader waits for the LAST producer in the chain (it
+            # wants the finished contents). A modifier waits only for the
+            # producer immediately BEFORE it, so a chain sequences
+            # correctly instead of deadlocking on itself.
+            var dep: Int = 0 - 1
+            if e.isModify {
+              dep = producerBefore(g: g, resource: e.resource, edgeIndex: k)
+            } else {
+              if not e.isWrite {
+                dep = writerOf(g: g, resource: e.resource)
+              }
+            }
+            if dep >= 0 {
+              if dep is not p {
+                if not emitted.at(index: dep) {
+                  ready = false
                 }
               }
             }
