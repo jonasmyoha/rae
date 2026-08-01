@@ -7,6 +7,7 @@ import core
 import gpu2d
 import math
 import sdf_text
+import sdl3
 import vec3
 open gpu3d
 open math3d
@@ -32,6 +33,52 @@ import ui/transform
 
 let designW: Float = 1280.0
 let designH: Float = 800.0
+
+enum CameraMode {
+  orbit
+  free
+}
+
+type CameraController {
+  mode: CameraMode
+  yaw: Float
+  orbitPitch: Float
+  freePitch: Float
+  distance: Float
+  freePosition: Vec3
+  uiRevision: Int
+  appliedUiRevision: Int
+  telemetryElapsed: Float
+}
+
+func createCameraController(camera: view Camera3d) ret CameraController {
+  ret CameraController {
+    mode: CameraMode.orbit
+    yaw: 0.0
+    orbitPitch: 0.38
+    freePitch: 0.0 - 0.38
+    distance: 12.5
+    freePosition: camera.position
+    uiRevision: 1
+    appliedUiRevision: 0
+    telemetryElapsed: 0.0
+  }
+}
+
+func cameraForward(controller: view CameraController) ret Vec3 {
+  let cp: Float = math.cos(x: controller.freePitch)
+  ret vec3.create(
+    x: (0.0 - math.sin(x: controller.yaw)) * cp
+    y: math.cos(x: controller.yaw) * cp
+    z: math.sin(x: controller.freePitch)
+  )
+}
+
+func cameraRight(controller: view CameraController) ret Vec3 {
+  let forward: Vec3 = cameraForward(controller: controller)
+  let up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  ret vec3.vnorm(a: vec3.vcross(a: forward, b: up))
+}
 
 type DemoUiResource {
   paused: Bool
@@ -106,7 +153,52 @@ func syncDemoUi(world: mod UiWorld, state: mod DemoUiResource) ret Bool {
   ret layoutDirty
 }
 
-func dispatchUiActions(input: view UiInput, state: mod DemoUiResource) {
+func syncCameraUi(world: mod UiWorld, controller: mod CameraController, camera: view Camera3d) {
+  if controller.appliedUiRevision is controller.uiRevision { ret }
+  var modeName: String = "Orbit"
+  var buttonLabel: String = "Switch to WASD free camera"
+  var hint: String = "Orbit: W/S zoom  A/D rotate"
+  var statusHint: String = "Drag to orbit | wheel or W/S zoom"
+  var pitchDeg: Int = (controller.orbitPitch * 57.2957795).toInt()
+  if controller.mode is CameraMode.free {
+    modeName = "WASD free"
+    buttonLabel = "Switch to orbit camera"
+    hint = "Free: W/S move  A/D strafe  Q/E down/up"
+    statusHint = "Drag to look | WASD move | Q/E vertical"
+    pitchDeg = (controller.freePitch * 57.2957795).toInt()
+  }
+  let yawDeg: Int = (controller.yaw * 57.2957795).toInt()
+  let fovDeg: Int = camera.fovYDeg.toInt()
+  let px: Int = camera.position.x.toInt()
+  let py: Int = camera.position.y.toInt()
+  let pz: Int = camera.position.z.toInt()
+  setNodeText(world: world, nodeId: "CameraModeLabel", value: "Mode: {modeName}")
+  setNodeText(world: world, nodeId: "CameraFovLabel", value: "Vertical FOV: {fovDeg} deg")
+  setNodeText(world: world, nodeId: "CameraPositionLabel", value: "Position: {px}, {py}, {pz}")
+  setNodeText(world: world, nodeId: "CameraAnglesLabel", value: "Yaw: {yawDeg} deg  Pitch: {pitchDeg} deg")
+  setNodeText(world: world, nodeId: "CameraHint", value: hint)
+  setNodeText(world: world, nodeId: "CameraModeButtonLabel", value: buttonLabel)
+  setNodeText(world: world, nodeId: "HintLabel", value: statusHint)
+  controller.appliedUiRevision = controller.uiRevision
+}
+
+func toggleCameraMode(controller: mod CameraController, camera: mod Camera3d) {
+  if controller.mode is CameraMode.orbit {
+    controller.mode = CameraMode.free
+    controller.freePosition = camera.position
+    controller.freePitch = 0.0 - controller.orbitPitch
+  } else {
+    let forward: Vec3 = cameraForward(controller: controller)
+    controller.orbitPitch = 0.0 - controller.freePitch
+    if controller.orbitPitch < 0.05 { controller.orbitPitch = 0.05 }
+    if controller.orbitPitch > 1.45 { controller.orbitPitch = 1.45 }
+    camera.target = vec3.vadd(a: controller.freePosition, b: vec3.vscale(a: forward, s: controller.distance))
+    controller.mode = CameraMode.orbit
+  }
+  controller.uiRevision = controller.uiRevision + 1
+}
+
+func dispatchUiActions(input: view UiInput, state: mod DemoUiResource, controller: mod CameraController, camera: mod Camera3d) {
   var i: Int = 0
   loop i < input.events.length {
     let event: UiActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
@@ -121,6 +213,9 @@ func dispatchUiActions(input: view UiInput, state: mod DemoUiResource) {
     if event.actionId.equals(other: "animation.mode") {
       state.fullMotion = not state.fullMotion
       state.revision = state.revision + 1
+    }
+    if event.actionId.equals(other: "camera.mode") {
+      toggleCameraMode(controller: controller, camera: camera)
     }
     i = i + 1
   }
@@ -177,21 +272,23 @@ func main() ret Int {
 
   var uiInput: UiInput = createUiInput()
   var uiState: DemoUiResource = createDemoUiResource()
+  var camera: Camera3d = defaultCamera3d()
+  var cameraController: CameraController = createCameraController(camera: camera)
   let testState: String = getEnv(name: "RAE_GPU3D_UI_TEST_STATE")
   if testState.equals(other: "pause") { uiState.paused = true }
   if testState.equals(other: "debug") { uiState.debugOpen = true }
+  if testState.equals(other: "free") {
+    toggleCameraMode(controller: cameraController, camera: camera)
+  }
   let initialUiLayoutDirty: Bool = syncDemoUi(world: uiWorld, state: uiState)
   if initialUiLayoutDirty {
     layoutSystem(world: uiWorld)
     transformSystem(world: uiWorld)
     visualBoundsSystem(world: uiWorld, res: gpuUi)
   }
+  syncCameraUi(world: uiWorld, controller: cameraController, camera: camera)
 
-  var camera: Camera3d = defaultCamera3d()
   var light: Light3d = defaultLight3d()
-  var yaw: Float = 0.0
-  var pitch: Float = 0.38
-  var distance: Float = 12.5
   var lastX: Float = 0.0
   var lastY: Float = 0.0
   var dragging: Bool = false
@@ -207,7 +304,7 @@ func main() ret Int {
     if dt > 0.1 { dt = 0.1 }
 
     updateUiInput(input: uiInput, world: uiWorld)
-    dispatchUiActions(input: uiInput, state: uiState)
+    dispatchUiActions(input: uiInput, state: uiState, controller: cameraController, camera: camera)
     let uiLayoutDirty: Bool = syncDemoUi(world: uiWorld, state: uiState)
     if uiLayoutDirty {
       layoutSystem(world: uiWorld)
@@ -220,10 +317,16 @@ func main() ret Int {
     let cameraInput: Bool = uiPointerCaptured(input: uiInput) is false and uiState.paused is false
     if cameraInput and gpu2d.pointerDown() {
       if dragging {
-        yaw = yaw + (px - lastX) * 0.008
-        pitch = pitch - (py - lastY) * 0.008
-        if pitch > 1.45 { pitch = 1.45 }
-        if pitch < 0.05 { pitch = 0.05 }
+        cameraController.yaw = cameraController.yaw + (px - lastX) * 0.008
+        if cameraController.mode is CameraMode.orbit {
+          cameraController.orbitPitch = cameraController.orbitPitch - (py - lastY) * 0.008
+          if cameraController.orbitPitch > 1.45 { cameraController.orbitPitch = 1.45 }
+          if cameraController.orbitPitch < 0.05 { cameraController.orbitPitch = 0.05 }
+        } else {
+          cameraController.freePitch = cameraController.freePitch - (py - lastY) * 0.008
+          if cameraController.freePitch > 1.45 { cameraController.freePitch = 1.45 }
+          if cameraController.freePitch < 0.0 - 1.45 { cameraController.freePitch = 0.0 - 1.45 }
+        }
       }
       dragging = true
     } else {
@@ -232,9 +335,26 @@ func main() ret Int {
     lastX = px
     lastY = py
     if cameraInput {
-      distance = distance - gpu2d.wheelMove() * 0.8
-      if distance < 4.0 { distance = 4.0 }
-      if distance > 30.0 { distance = 30.0 }
+      if cameraController.mode is CameraMode.orbit {
+        cameraController.distance = cameraController.distance - gpu2d.wheelMove() * 0.8
+        if sdl3.isKeyDown(key: 87) { cameraController.distance = cameraController.distance - dt * 6.0 }
+        if sdl3.isKeyDown(key: 83) { cameraController.distance = cameraController.distance + dt * 6.0 }
+        if sdl3.isKeyDown(key: 65) { cameraController.yaw = cameraController.yaw - dt * 1.2 }
+        if sdl3.isKeyDown(key: 68) { cameraController.yaw = cameraController.yaw + dt * 1.2 }
+        if cameraController.distance < 4.0 { cameraController.distance = 4.0 }
+        if cameraController.distance > 30.0 { cameraController.distance = 30.0 }
+      } else {
+        let moveStep: Float = dt * 6.0
+        let forward: Vec3 = cameraForward(controller: cameraController)
+        let right: Vec3 = cameraRight(controller: cameraController)
+        let up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
+        if sdl3.isKeyDown(key: 87) { cameraController.freePosition = vec3.vadd(a: cameraController.freePosition, b: vec3.vscale(a: forward, s: moveStep)) }
+        if sdl3.isKeyDown(key: 83) { cameraController.freePosition = vec3.vsub(a: cameraController.freePosition, b: vec3.vscale(a: forward, s: moveStep)) }
+        if sdl3.isKeyDown(key: 65) { cameraController.freePosition = vec3.vsub(a: cameraController.freePosition, b: vec3.vscale(a: right, s: moveStep)) }
+        if sdl3.isKeyDown(key: 68) { cameraController.freePosition = vec3.vadd(a: cameraController.freePosition, b: vec3.vscale(a: right, s: moveStep)) }
+        if sdl3.isKeyDown(key: 81) { cameraController.freePosition = vec3.vsub(a: cameraController.freePosition, b: vec3.vscale(a: up, s: moveStep)) }
+        if sdl3.isKeyDown(key: 69) { cameraController.freePosition = vec3.vadd(a: cameraController.freePosition, b: vec3.vscale(a: up, s: moveStep)) }
+      }
     }
 
     if uiState.paused is false {
@@ -242,7 +362,19 @@ func main() ret Int {
       if uiState.fullMotion is false { motionScale = 0.25 }
       simTime = simTime + dt * motionScale
     }
-    camera.position = orbitEye(targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z, yaw: yaw, pitch: pitch, dist: distance)
+    if cameraController.mode is CameraMode.orbit {
+      camera.position = orbitEye(targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z, yaw: cameraController.yaw, pitch: cameraController.orbitPitch, dist: cameraController.distance)
+    } else {
+      let forward: Vec3 = cameraForward(controller: cameraController)
+      camera.position = cameraController.freePosition
+      camera.target = vec3.vadd(a: camera.position, b: forward)
+    }
+    cameraController.telemetryElapsed = cameraController.telemetryElapsed + dt
+    if cameraController.telemetryElapsed >= 0.15 {
+      cameraController.telemetryElapsed = 0.0
+      cameraController.uiRevision = cameraController.uiRevision + 1
+      syncCameraUi(world: uiWorld, controller: cameraController, camera: camera)
+    }
     light.sunDir = vec3.create(x: 0.0 - math.cos(x: simTime * 0.22) * 0.7, y: 0.0 - 0.7 - math.sin(x: simTime * 0.22) * 0.25, z: 0.0 - 1.0)
     var torusTransform: Transform3d = scene.transforms.at(index: torusEntity)
     torusTransform.rotation = vec3.create(x: simTime * 0.35, y: 0.0, z: simTime * 0.62)
