@@ -43,6 +43,20 @@ func resolveTextSize(theme: view ResolvedTheme, styleId: view String) pub ret Fl
   ret sz
 }
 
+func resolveTextWeight(theme: view ResolvedTheme, styleId: view String) pub ret Float {
+  let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
+  if i < 0 { ret 400.0 }
+  let weight: Float = theme.textWeights.get(index: i)
+  ret weight
+}
+
+func resolveTextLineHeight(theme: view ResolvedTheme, styleId: view String) pub ret Float {
+  let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
+  if i < 0 { ret 1.0 }
+  let lineHeight: Float = theme.textLineHeights.get(index: i)
+  ret lineHeight
+}
+
 func resolveTextColor(theme: view ResolvedTheme, styleId: view String) pub ret RgbaColor {
   let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
   if i < 0 {
