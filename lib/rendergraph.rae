@@ -1,0 +1,325 @@
+# rendergraph — pass scheduling for the Rae renderer (#331).
+#
+# A REAL graph, not a renamed pass list: logical resources with
+# descriptions, pass nodes with explicit read/write declarations,
+# dependency derivation from those declarations, topological execution
+# order, and validation of invalid dependency structures.
+#
+# See `docs/render-graph-and-gi-plan.md` for the architecture this
+# implements and why.
+#
+# THE GRAPH KNOWS NOTHING ABOUT RENDERING TECHNIQUES. There is no `ssao`,
+# `gi`, `shadow`, `sdf` or `taa` anywhere in this file, and there must
+# never be. A pass is "an operation that reads these resources and writes
+# those". That is precisely what lets techniques be added, reordered or
+# removed without touching the scheduler.
+#
+# HOW PASSES EXECUTE: Rae has no first-class function references (see
+# lib/ui/registry.rae), so a pass cannot carry an `execute` closure. Each
+# pass instead carries an opaque `tag: Int` that this module NEVER
+# interprets. The renderer owns a dispatch that switches on the tag and
+# records the actual GPU work. Keeping the tag opaque is what preserves
+# the "graph knows nothing" property under that language constraint.
+#
+# DATA SHAPE: every struct stored in a List is primitive-only, and the
+# read/write declarations are a flat edge list rather than nested
+# `List` fields. That is both the data-oriented shape a scheduler wants
+# (dependency derivation is one linear scan) and a deliberate avoidance
+# of Rae's `List(Struct)` inner-heap-field ownership gap.
+#
+# This module is pure scheduling logic with no GPU coupling at all, so it
+# is unit-testable headlessly — see tests/cases/552_render_graph.
+import core
+
+# ----- resource kinds -------------------------------------------------
+const resTexture2d: Int = 0
+const resTexture3d: Int = 1
+const resDepth: Int = 2
+const resStorageBuffer: Int = 3
+const resUniformBuffer: Int = 4
+
+# ----- lifetime classes -----------------------------------------------
+# Transient  — created and discarded within one frame.
+# Persistent — survives across frames (TAA history, SDF cascades, probes).
+#              This is in v1 even though pooling is not: cross-frame
+#              resources are a SEMANTIC property, and a graph that cannot
+#              express them is wrong rather than merely unoptimised.
+# External   — owned elsewhere (swapchain, the gpu2d offscreen target).
+const lifeTransient: Int = 0
+const lifePersistent: Int = 1
+const lifeExternal: Int = 2
+
+# ----- access intent --------------------------------------------------
+# Recorded precisely from v1 even though v1 only uses read-vs-write for
+# ordering. Barrier inference later needs intent, and retrofitting it
+# would mean revisiting every pass author.
+const accAttachmentWrite: Int = 0
+const accAttachmentRead: Int = 1
+const accSampledRead: Int = 2
+const accStorageRead: Int = 3
+const accStorageWrite: Int = 4
+const accUniformRead: Int = 5
+
+# ----- pass kinds -----------------------------------------------------
+# Raster and compute are peer node kinds. This is NOT a technique tag.
+const passRaster: Int = 0
+const passCompute: Int = 1
+
+# ----- validation status ----------------------------------------------
+const graphOk: Int = 0
+const graphErrUnwritten: Int = 1     # a pass reads a resource nobody writes
+const graphErrDoubleWrite: Int = 2   # two passes write the same resource
+const graphErrCycle: Int = 3         # dependencies form a cycle
+
+# Sizing is a policy, resolved against the frame target by the renderer.
+const sizeFull: Int = 0
+const sizeHalf: Int = 1
+const sizeQuarter: Int = 2
+const sizeFixed: Int = 3
+const sizeVolume: Int = 4
+
+# ----- data -----------------------------------------------------------
+# Primitive-only so it is safe inside List(...). Names live in parallel
+# String lists (see the Rae List(Struct) note in the header).
+type ResourceDesc {
+  kind: Int
+  format: Int      # backend-specific format id; the graph never inspects it
+  sizing: Int
+  lifetime: Int
+}
+
+type PassDesc {
+  kind: Int        # passRaster | passCompute
+  tag: Int         # OPAQUE to this module — the renderer's dispatch key
+}
+
+# One declaration that pass `pass` touches resource `resource`.
+type Edge {
+  pass: Int
+  resource: Int
+  access: Int
+  isWrite: Bool
+}
+
+type RenderGraph {
+  resourceNames: List(String)
+  resources: List(ResourceDesc)
+  passNames: List(String)
+  passes: List(PassDesc)
+  edges: List(Edge)
+  order: List(Int)      # topologically sorted pass indices; empty until compiled
+  status: Int
+  errorPass: Int        # pass index implicated by a validation failure, else -1
+  errorResource: Int    # resource index implicated, else -1
+}
+
+func createRenderGraph() pub ret RenderGraph {
+  ret RenderGraph {
+    resourceNames: createList(String, cap: 16),
+    resources: createList(ResourceDesc, cap: 16),
+    passNames: createList(String, cap: 16),
+    passes: createList(PassDesc, cap: 16),
+    edges: createList(Edge, cap: 64),
+    order: createList(Int, cap: 16),
+    status: graphOk,
+    errorPass: 0 - 1,
+    errorResource: 0 - 1
+  }
+}
+
+# ----- declaration ----------------------------------------------------
+func addResource(g: mod RenderGraph, name: view String, kind: view Int, format: view Int, sizing: view Int, lifetime: view Int) pub ret Int {
+  let id: Int = g.resources.length
+  # NB: `add(value: name)`, not `add(value: "{name}")` — adding an
+  # INTERPOLATED string to a List(String) corrupts the element and
+  # double-frees on teardown (compiler bug, see QUEUE).
+  g.resourceNames.add(value: name)
+  g.resources.add(value: ResourceDesc { kind: kind, format: format, sizing: sizing, lifetime: lifetime })
+  ret id
+}
+
+func addPass(g: mod RenderGraph, name: view String, kind: view Int, tag: view Int) pub ret Int {
+  let id: Int = g.passes.length
+  g.passNames.add(value: name)
+  g.passes.add(value: PassDesc { kind: kind, tag: tag })
+  ret id
+}
+
+func passReads(g: mod RenderGraph, pass: view Int, resource: view Int, access: view Int) pub {
+  g.edges.add(value: Edge { pass: pass, resource: resource, access: access, isWrite: false })
+}
+
+func passWrites(g: mod RenderGraph, pass: view Int, resource: view Int, access: view Int) pub {
+  g.edges.add(value: Edge { pass: pass, resource: resource, access: access, isWrite: true })
+}
+
+# ----- queries --------------------------------------------------------
+# Index of the pass that writes `resource`, or -1. v1 permits at most one
+# writer per resource per frame; compile() reports a violation rather than
+# picking one arbitrarily.
+func writerOf(g: view RenderGraph, resource: view Int) ret Int {
+  var i: Int = 0
+  loop i < g.edges.length {
+    let e: Edge = g.edges.at(index: i)
+    if e.isWrite {
+      if e.resource is resource {
+        ret e.pass
+      }
+    }
+    i = i + 1
+  }
+  ret 0 - 1
+}
+
+func resourceLifetime(g: view RenderGraph, resource: view Int) ret Int {
+  ret g.resources.at(index: resource).lifetime
+}
+
+# ----- compilation ----------------------------------------------------
+# Derives dependencies from the declarations and produces a topological
+# order. Pass B depends on pass A when B reads a resource A writes.
+#
+# Kahn's algorithm: repeatedly emit any pass whose dependencies are all
+# already emitted. If a round emits nothing while passes remain, the
+# remaining passes form a cycle.
+func compile(g: mod RenderGraph) pub ret Int {
+  g.order = createList(Int, cap: g.passes.length)
+  g.status = graphOk
+  g.errorPass = 0 - 1
+  g.errorResource = 0 - 1
+
+  # --- validation: at most one writer per resource ---
+  var i: Int = 0
+  loop i < g.edges.length {
+    let a: Edge = g.edges.at(index: i)
+    if a.isWrite {
+      var j: Int = i + 1
+      loop j < g.edges.length {
+        let b: Edge = g.edges.at(index: j)
+        if b.isWrite {
+          if b.resource is a.resource {
+            g.status = graphErrDoubleWrite
+            g.errorPass = b.pass
+            g.errorResource = b.resource
+            ret g.status
+          }
+        }
+        j = j + 1
+      }
+    }
+    i = i + 1
+  }
+
+  # --- validation: every read resolves to a writer, unless External ---
+  # External resources (swapchain, gpu2d offscreen) are produced outside
+  # the graph, so reading one without an in-graph writer is legitimate.
+  i = 0
+  loop i < g.edges.length {
+    let e: Edge = g.edges.at(index: i)
+    if not e.isWrite {
+      if writerOf(g: g, resource: e.resource) < 0 {
+        if resourceLifetime(g: g, resource: e.resource) is not lifeExternal {
+          g.status = graphErrUnwritten
+          g.errorPass = e.pass
+          g.errorResource = e.resource
+          ret g.status
+        }
+      }
+    }
+    i = i + 1
+  }
+
+  # --- topological order ---
+  let emitted: List(Bool) = createList(Bool, cap: g.passes.length)
+  var p: Int = 0
+  loop p < g.passes.length {
+    emitted.add(value: false)
+    p = p + 1
+  }
+
+  var remaining: Int = g.passes.length
+  loop remaining > 0 {
+    var progressed: Bool = false
+    p = 0
+    loop p < g.passes.length {
+      if not emitted.at(index: p) {
+        # ready when every resource this pass reads is either External or
+        # written by a pass already emitted
+        var ready: Bool = true
+        var k: Int = 0
+        loop k < g.edges.length {
+          let e: Edge = g.edges.at(index: k)
+          if e.pass is p {
+            if not e.isWrite {
+              let w: Int = writerOf(g: g, resource: e.resource)
+              if w >= 0 {
+                if w is not p {
+                  if not emitted.at(index: w) {
+                    ready = false
+                  }
+                }
+              }
+            }
+          }
+          k = k + 1
+        }
+        if ready {
+          g.order.add(value: p)
+          emitted.set(index: p, value: true)
+          remaining = remaining - 1
+          progressed = true
+        }
+      }
+      p = p + 1
+    }
+    if not progressed {
+      # nothing became ready and passes remain -> cycle
+      g.status = graphErrCycle
+      var q: Int = 0
+      loop q < g.passes.length {
+        if not emitted.at(index: q) {
+          if g.errorPass < 0 {
+            g.errorPass = q
+          }
+        }
+        q = q + 1
+      }
+      ret g.status
+    }
+  }
+  ret g.status
+}
+
+# ----- introspection --------------------------------------------------
+# The graph can describe itself; per-pass GPU timing gets a natural home
+# here later.
+func describe(g: view RenderGraph) pub ret String {
+  var out: String = "rendergraph: {g.passes.length} passes, {g.resources.length} resources\n"
+  if g.status is not graphOk {
+    out = "{out}  INVALID (status {g.status}, pass {g.errorPass}, resource {g.errorResource})\n"
+    ret out
+  }
+  var i: Int = 0
+  loop i < g.order.length {
+    let p: Int = g.order.at(index: i)
+    out = "{out}  {i}: {g.passNames.at(index: p)}\n"
+    i = i + 1
+  }
+  ret out
+}
+
+func statusName(status: view Int) pub ret String {
+  if status is graphOk {
+    ret "ok"
+  }
+  if status is graphErrUnwritten {
+    ret "reads-unwritten-resource"
+  }
+  if status is graphErrDoubleWrite {
+    ret "resource-written-twice"
+  }
+  if status is graphErrCycle {
+    ret "dependency-cycle"
+  }
+  ret "unknown"
+}
