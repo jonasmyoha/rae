@@ -860,10 +860,15 @@ static bool write_vm_chunk_file(const Chunk* chunk, const char* out_path) {
           ok = false;
           break;
         }
-        const char* data = value->as.string_value.chars ? value->as.string_value.chars : "";
+        const uint8_t* data = value->as.string_value.chars;
         ok = ok && write_u32(out, (uint32_t)len);
         if (len > 0) {
-          ok = ok && write_bytes(out, data, len);
+          if (!data) {
+            fprintf(stderr, "error: VM string constant has length but no data\n");
+            ok = false;
+          } else {
+            ok = ok && write_bytes(out, data, len);
+          }
         }
         break;
       }
