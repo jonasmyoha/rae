@@ -61,7 +61,46 @@ const compilerMetricsPath = path.resolve(
   "stats",
   "compiler_metrics.jsonl"
 );
-let activeWebApp: { id: string; dir: string } | null = null;
+let activeWebApp: {
+  id: string;
+  dir: string;
+  entryFile: string;
+  process: ReturnType<typeof Bun.spawn> | null;
+} | null = null;
+
+async function disposeActiveWebApp(): Promise<void> {
+  const current = activeWebApp;
+  activeWebApp = null;
+  if (!current) return;
+  if (current.process) {
+    current.process.kill();
+    await Promise.race([
+      current.process.exited.catch(() => undefined),
+      new Promise((resolve) => setTimeout(resolve, 2000))
+    ]);
+  }
+  rmSync(current.dir, { recursive: true, force: true });
+}
+
+function launchManagedWebGpuBrowser(url: string, profileDir: string) {
+  const candidates = process.platform === "darwin"
+    ? ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
+    : process.platform === "win32"
+      ? [
+          "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+          "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
+        ]
+      : [Bun.which("google-chrome"), Bun.which("chromium"), Bun.which("chromium-browser")];
+  const executable = candidates.find((candidate) => candidate && Bun.file(candidate).size > 0);
+  if (!executable) throw new Error("No managed WebGPU browser found; install Google Chrome");
+  return Bun.spawn([
+    executable,
+    `--app=${url}`,
+    `--user-data-dir=${profileDir}`,
+    "--no-first-run",
+    "--no-default-browser-check"
+  ], { stdout: "ignore", stderr: "ignore" });
+}
 
 const server = Bun.serve<SocketData>({
   port: CONFIG.port,
@@ -146,7 +185,9 @@ const server = Bun.serve<SocketData>({
       const entryPath = path.join(CONFIG.examplesPath ?? "examples", entry);
       const entryDir = path.dirname(entryPath);
       const tmp = mkdtempSync(path.join(os.tmpdir(), "rae-web-app-"));
-      const out = path.join(tmp, "app.mjs");
+      const presentation = payload.presentation === "external" ? "external" : "embedded";
+      const entryFile = presentation === "external" ? "index.html" : "app.mjs";
+      const out = path.join(tmp, entryFile);
       const profile = payload.profile === "debug" ? "dev" : "release";
       const emcc = Bun.which("emcc");
       const buildPath = emcc
@@ -175,10 +216,13 @@ const server = Bun.serve<SocketData>({
             headers: { "Content-Type": "application/json" }
           });
         }
-        if (activeWebApp) rmSync(activeWebApp.dir, { recursive: true, force: true });
+        await disposeActiveWebApp();
         const id = randomUUID();
-        activeWebApp = { id, dir: tmp };
-        return new Response(JSON.stringify({ moduleUrl: `/api/examples/web-app/${id}/app.mjs` }), {
+        activeWebApp = { id, dir: tmp, entryFile, process: null };
+        const appPath = `/api/examples/web-app/${id}/${entryFile}`;
+        return new Response(JSON.stringify(
+          presentation === "external" ? { pageUrl: appPath } : { moduleUrl: appPath }
+        ), {
           headers: { "Content-Type": "application/json" }
         });
       } catch (error) {
@@ -190,9 +234,35 @@ const server = Bun.serve<SocketData>({
       }
     }
 
+    if (url.pathname === "/api/examples/web-app/open" && req.method === "POST") {
+      if (!activeWebApp || activeWebApp.entryFile !== "index.html") {
+        return new Response(JSON.stringify({ error: "No external browser app is ready" }), {
+          status: 409,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      try {
+        const pageUrl = new URL(
+          `/api/examples/web-app/${activeWebApp.id}/${activeWebApp.entryFile}`,
+          req.url
+        ).href;
+        activeWebApp.process = launchManagedWebGpuBrowser(
+          pageUrl,
+          path.join(activeWebApp.dir, "chrome-profile")
+        );
+        return new Response(JSON.stringify({ ok: true, pageUrl }), {
+          headers: { "Content-Type": "application/json" }
+        });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: (error as Error).message }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+    }
+
     if (url.pathname === "/api/examples/web-app" && req.method === "DELETE") {
-      if (activeWebApp) rmSync(activeWebApp.dir, { recursive: true, force: true });
-      activeWebApp = null;
+      await disposeActiveWebApp();
       return new Response(JSON.stringify({ ok: true }), {
         headers: { "Content-Type": "application/json" }
       });
