@@ -76,6 +76,7 @@ export type ExampleDescriptor = {
   category?: string;
   display?: { width: number; height: number };
   wasmRealThreads?: boolean;
+  wasmWebApp?: boolean;
   webgpu?: boolean;
 };
 

@@ -244,6 +244,7 @@ let selectedExampleFile = null;
 let activeExampleRunId = null;
 let exampleRunActive = false;
 let exampleWatchActive = false;
+let activeWasmWebAppWindow = null;
 let activeExampleActionId = null;
 let exampleEditMode = false;
 let exampleEditorDirty = false;
@@ -1891,6 +1892,8 @@ function showExampleViewer(example) {
   const active = Boolean(d) && getGlobalTarget() === "wasm";
   viewer.hidden = !active;
   if (active) {
+    const usesWebApp = Boolean(example.wasmWebApp);
+    canvas.hidden = usesWebApp;
     // Assigning canvas.width/height ALWAYS clears the bitmap (even to the same
     // value), so only do it when the size actually changes — otherwise the
     // re-render triggered after a draw (updateExampleButtons) would wipe the
@@ -1902,9 +1905,52 @@ function showExampleViewer(example) {
     // examples like a mobile UI) instead of a fixed-height letterboxed box.
     const stage = canvas.closest(".example-viewer__stage");
     if (stage) {
+      stage.hidden = usesWebApp;
       stage.style.setProperty("--arw", d.width);
       stage.style.setProperty("--arh", d.height);
     }
+  }
+}
+
+async function runWasmWebApp(example) {
+  const statusEl = document.getElementById("example-viewer-status");
+  if (!example.display) return;
+  const appWindow = window.open("about:blank", `rae-wasm-${example.id}`);
+  if (!appWindow) {
+    appendExampleOutput("Browser blocked the WebGPU app window; allow popups for Devtools.", "stderr");
+    setExampleStatus("Popup blocked", "is-failure", "WASM");
+    return;
+  }
+  activeWasmWebAppWindow = appWindow;
+  appWindow.document.title = "Building Rae browser app…";
+  appWindow.document.body.textContent = "Building Rae browser app…";
+  showExampleViewer(example);
+  exampleRunActive = true;
+  setExampleStatus("Building browser WASM…", "is-running", "WASM");
+  if (statusEl) statusEl.textContent = "building SDL3 + WebGPU browser bundle…";
+  updateExampleButtons();
+  try {
+    const entry = resolveExampleEntry(example, "wasm");
+    const res = await fetch("/api/examples/web-app", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entry, profile: getGlobalProfile() })
+    });
+    const result = await res.json();
+    if (!res.ok || !result.url) throw new Error(result.error || `HTTP ${res.status}`);
+    appWindow.location.href = result.url;
+    if (statusEl) statusEl.textContent = "running SDL3 + WebGPU in app window";
+    setExampleStatus("Running · Browser", "is-success", "WASM");
+    appendExampleOutput("Browser WASM bundle built; running in dedicated WebGPU app window.", "stdout");
+  } catch (error) {
+    const message = getErrorMessage(error);
+    if (statusEl) statusEl.textContent = `build failed: ${message}`;
+    appendExampleOutput(message, "stderr");
+    setExampleStatus("WASM build failed", "is-failure", "WASM");
+    appWindow.close();
+    activeWasmWebAppWindow = null;
+    exampleRunActive = false;
+    updateExampleButtons();
   }
 }
 
@@ -2749,7 +2795,8 @@ async function triggerExampleRun(mode = "run", targetId = null, actionId = null)
     if (mode === "restart" && exampleRunActive) {
       await stopExampleRun();
     }
-    if (example.webgpu) await runWebGPU(example);
+    if (example.wasmWebApp) await runWasmWebApp(example);
+    else if (example.webgpu) await runWebGPU(example);
     else if (example.wasmRealThreads) await runWasmSpawn(example);
     else await runWasmInBrowser(example);
     return;
@@ -2818,8 +2865,13 @@ async function triggerExampleRun(mode = "run", targetId = null, actionId = null)
 }
 
 async function stopExampleRun() {
+  if (activeWasmWebAppWindow && !activeWasmWebAppWindow.closed) activeWasmWebAppWindow.close();
+  activeWasmWebAppWindow = null;
   try {
-    await fetch("/api/examples/stop", { method: "POST" });
+    await Promise.all([
+      fetch("/api/examples/stop", { method: "POST" }),
+      fetch("/api/examples/web-app", { method: "DELETE" })
+    ]);
   } catch (error) {
     recordError("Example run", getErrorMessage(error));
   } finally {
