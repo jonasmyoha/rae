@@ -56,12 +56,15 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           SCREENSHOT="$TMP_OUT/gpu3d.bmp"
           if RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
              perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app" > "$TMP_OUT/render.log" 2>&1 \
-             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" > "$TMP_OUT/screenshot.log" 2>&1; then
-            echo "PASS: $EXAMPLE_NAME (non-blank 3D screenshot)"
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" > "$TMP_OUT/screenshot.log" 2>&1 \
+             && RAE_SDL_HEADLESS_MS=250 RAE_GPU3D_DRAW_LIMIT=4 \
+                perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app" > "$TMP_OUT/overflow.log" 2>&1 \
+             && [ "$(grep -c '\[gpu3d\] ERROR: draw limit exceeded: configured=4 hardMaximum=4096' "$TMP_OUT/overflow.log")" -eq 1 ]; then
+            echo "PASS: $EXAMPLE_NAME (non-blank 3D screenshot, loud draw-limit guard)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (3D screenshot)"
-            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
+            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" "$TMP_OUT/overflow.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
         else

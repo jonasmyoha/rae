@@ -46,6 +46,8 @@ static WGPUBuffer   g3d_draw_sbuf = NULL;    /* per-draw storage array, fixed ca
 static WGPUBindGroup g3d_bind = NULL;
 static float        g3d_draw_cpu[G3D_MAX_DRAWS * G3D_DRAW_FLOATS];
 static int          g3d_draw_count = 0;
+static int          g3d_draw_limit = G3D_MAX_DRAWS;
+static bool         g3d_draw_overflow_reported = false;
 
 static WGPUCommandEncoder    g3d_enc = NULL;
 static WGPURenderPassEncoder g3d_pass = NULL;
@@ -142,8 +144,25 @@ static void g3d_log_cb(WGPULogLevel level, WGPUStringView message, void* userdat
     fprintf(stderr, "[wgpu] %.*s\n", (int)message.length, message.data ? message.data : "");
 }
 
+static void g3d_configure_draw_limit(void) {
+    g3d_draw_limit = G3D_MAX_DRAWS;
+    const char* text = getenv("RAE_GPU3D_DRAW_LIMIT");
+    if (!text || !text[0]) return;
+    char* end = NULL;
+    long requested = strtol(text, &end, 10);
+    if (end != text && *end == '\0' && requested > 0 && requested <= G3D_MAX_DRAWS) {
+        g3d_draw_limit = (int)requested;
+        return;
+    }
+    fprintf(stderr,
+            "[gpu3d] WARNING: ignoring invalid RAE_GPU3D_DRAW_LIMIT=%s; "
+            "expected 1..%d\n",
+            text, G3D_MAX_DRAWS);
+}
+
 static void g3d_init_pipeline(void) {
     if (g3d_pipeline) return;
+    g3d_configure_draw_limit();
     if (getenv("RAE_GPU3D_DEBUG")) {
         wgpuSetLogCallback(g3d_log_cb, NULL);
         wgpuSetLogLevel(WGPULogLevel_Warn);
@@ -340,7 +359,16 @@ void rae_ext_gpu3d_draw(int64_t mesh, const double* model,
     if (!g3d_pass || !model) return;
     int slot = (int)mesh - 1;
     if (slot < 0 || slot >= g3d_mesh_n) return;
-    if (g3d_draw_count >= G3D_MAX_DRAWS) return;
+    if (g3d_draw_count >= g3d_draw_limit) {
+        if (!g3d_draw_overflow_reported) {
+            fprintf(stderr,
+                    "[gpu3d] ERROR: draw limit exceeded: configured=%d hardMaximum=%d; "
+                    "discarding additional draws\n",
+                    g3d_draw_limit, G3D_MAX_DRAWS);
+            g3d_draw_overflow_reported = true;
+        }
+        return;
+    }
     float* d = g3d_draw_cpu + g3d_draw_count * G3D_DRAW_FLOATS;
     for (int i = 0; i < 16; i++) d[i] = (float)model[i];
     d[16] = (float)r; d[17] = (float)g; d[18] = (float)b; d[19] = (float)metallic;
@@ -426,4 +454,6 @@ void rae_ext_gpu3d_shutdown(void) {
     if (g3d_depth_view) { wgpuTextureViewRelease(g3d_depth_view); g3d_depth_view = NULL; }
     if (g3d_depth_tex)  { wgpuTextureRelease(g3d_depth_tex); g3d_depth_tex = NULL; }
     g3d_target_w = 0; g3d_target_h = 0;
+    g3d_draw_limit = G3D_MAX_DRAWS;
+    g3d_draw_overflow_reported = false;
 }
