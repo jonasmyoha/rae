@@ -160,7 +160,7 @@ func main() {
   var autoExitSec: Float = 0.0
   if autoExitEnv.length() > 0 { autoExitSec = autoExitEnv.toFloat() }
   autoExitSec = headlessApplyAutoExitDefault(headless: isHeadless, current: autoExitSec)
-  let bootTime: Float = uiNowSeconds()
+  let bootTime: Float64 = uiNowSeconds()
 
   # `RAE_UI_WAIT_TRACE=1` logs every `waitEventsTimeout` whose actual
   # sleep exceeded 5 ms vs the requested timeout — diagnoses GLFW not
@@ -562,7 +562,7 @@ func main() {
             timeout = 0.001
           }
         }
-        let preWait: Float = uiNowSeconds()
+        let preWait: Float64 = uiNowSeconds()
         uiWaitEvents(timeoutSec: timeout)
         let waitDt: Float = uiNowSeconds() - preWait
         if waitTraceEnabled {
@@ -761,7 +761,7 @@ func main() {
           # AFTER the affected page has been re-mounted (so the
           # target hero exists with the right rect).
 
-          let now: Float = uiNowSeconds()
+          let now: Float64 = uiNowSeconds()
           # Data-sync phase. Playback/Spotify/history/assets update
           # state first; UI-diff and overlay systems then translate the
           # changed data into component mutations.

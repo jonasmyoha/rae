@@ -45,7 +45,7 @@ type ScrollFsm pub {
   # Wall-clock seconds at which a wheel/trackpad event last fired.
   # Spring + momentum paths gate on `now - lastWheelTime > 0.05`
   # so they don't fight live wheel input.
-  lastWheelTime: Float
+  lastWheelTime: Float64
 }
 
 func createScrollFsm(initialScrollY: view Float) ret ScrollFsm {
@@ -144,7 +144,7 @@ func applyDragPhysics(
     # Physics step: OOB → spring; in-bounds with momentum → decay.
     # Both gated on `wheelQuiet` so live trackpad momentum isn't
     # fought by the spring (caused the "5 bounces" symptom).
-    let nowSec: Float = uiNowSeconds()
+    let nowSec: Float64 = uiNowSeconds()
     let wheelIdleSec: Float = nowSec - fsm.lastWheelTime
     let wheelQuiet: Bool = wheelIdleSec > 0.05
     let isOOB: Bool = fsm.scrollY > scrollMax or fsm.scrollY < scrollMin

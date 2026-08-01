@@ -124,7 +124,9 @@ type DebugSystem {
 
   # Rolling FPS buffer: timestamps of the last few frames. Trimmed to
   # the most recent `fpsWindowSec` worth of samples each call.
-  fpsTimes: List(Float)
+  # Absolute epoch stamps — Float64: in f32 two frames' timestamps are
+  # identical (~128s granularity), so the window span is 0 and fps reads 0.
+  fpsTimes: List(Float64)
   fpsWindowSec: Float
 
   # Cached output of the most recent `updateAndRenderDebugOverlay` so
@@ -196,7 +198,7 @@ func createDebugSystem() pub ret DebugSystem {
     buttonSize: defaultSize
     screenW: 498.0
     screenH: 1079.0
-    fpsTimes: createList(Float, cap: 256)
+    fpsTimes: createList(Float64, cap: 256)
     fpsWindowSec: 3.0
     lastFps: 0.0
     lastRssKb: 0
@@ -231,7 +233,7 @@ func setDebugButtonPosition(debug: mod DebugSystem, x: view Float, y: view Float
 # *now*; the FPS label tells you the rate it ran at when it last did.
 func pruneFpsBuffer(debug: mod DebugSystem) {
   let capN: Int = 16
-  let times: mod List(Float) => debug.fpsTimes
+  let times: mod List(Float64) => debug.fpsTimes
   loop times.length > capN {
     times.remove(index: 0)
   }
@@ -253,9 +255,9 @@ func pruneFpsBuffer(debug: mod DebugSystem) {
 # The frame-skipping itself is reflected in the heartbeat — when the
 # heartbeat is frozen, the loop is idle even though the FPS label
 # still shows the last active rate.
-func recordDebugFrame(debug: mod DebugSystem, now: view Float, didRealWork: view Bool) pub {
+func recordDebugFrame(debug: mod DebugSystem, now: view Float64, didRealWork: view Bool) pub {
   if didRealWork {
-    let times: mod List(Float) => debug.fpsTimes
+    let times: mod List(Float64) => debug.fpsTimes
     times.add(value: now)
     pruneFpsBuffer(debug: debug)
   }
@@ -268,8 +270,8 @@ func recordDebugFrame(debug: mod DebugSystem, now: view Float, didRealWork: view
   let n: Int = debug.fpsTimes.length
   var fps: Float = 0.0
   if n >= 2 {
-    let oldest: Float = debug.fpsTimes.get(index: 0)
-    let newest: Float = debug.fpsTimes.get(index: n - 1)
+    let oldest: Float64 = debug.fpsTimes.get(index: 0)
+    let newest: Float64 = debug.fpsTimes.get(index: n - 1)
     let span: Float = newest - oldest
     if span > 0.0 {
       fps = (n - 1).toFloat() / span
@@ -898,7 +900,7 @@ func drawDebugLabels(debug: view DebugSystem) {
 # (and after any hero overlay) so the labels paint on top of the host
 # UI. The button itself is drawn by renderSystem because it lives in
 # the ECS world.
-func updateAndRenderDebugOverlay(debug: mod DebugSystem, now: view Float, didRealWork: view Bool) pub {
+func updateAndRenderDebugOverlay(debug: mod DebugSystem, now: view Float64, didRealWork: view Bool) pub {
   recordDebugFrame(debug: debug, now: now, didRealWork: didRealWork)
   if debug.showLabels {
     drawDebugLabels(debug: debug)
