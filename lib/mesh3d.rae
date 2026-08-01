@@ -10,6 +10,7 @@
 # lies in the XY plane with its tube sweeping around +Z.
 import core
 import math
+import noise
 
 type MeshData {
   verts: List(Float)
@@ -102,6 +103,86 @@ func makePlane(size: view Float, segments: view Int) pub ret MeshData {
     y2 = y2 + 1
   }
   let vertCount: Int = (segments + 1) * (segments + 1)
+  ret MeshData { verts: own verts, indices: own indices, vertCount: vertCount }
+}
+
+# Static CPU-generated terrain. Noise is sampled once into a height grid;
+# smooth normals then reuse neighboring heights instead of reevaluating FBM.
+# Animated or very dense displacement should use lib/noise.wgsl on the GPU.
+func makeFbmTerrain(size: view Float, segments: view Int, heightScale: view Float, frequency: view Float, octaves: view Int, seed: view Int) pub ret MeshData {
+  let stride: Int = segments + 1
+  let vertCount: Int = stride * stride
+  let heights: List(Float) = createList(Float, cap: vertCount)
+  let verts: List(Float) = createList(Float, cap: vertCount * 8)
+  let indices: List(Int) = createList(Int, cap: segments * segments * 6)
+
+  var yi: Int = 0
+  loop yi <= segments {
+    let vy: Float = yi.toFloat() / segments.toFloat()
+    var xi: Int = 0
+    loop xi <= segments {
+      let vx: Float = xi.toFloat() / segments.toFloat()
+      let px: Float = (vx - 0.5) * size
+      let py: Float = (vy - 0.5) * size
+      let height: Float = noise.fbm2(x: px * frequency, y: py * frequency, octaves: octaves, lacunarity: 2.0, gain: 0.5, seed: seed) * heightScale
+      heights.add(value: height)
+      xi = xi + 1
+    }
+    yi = yi + 1
+  }
+
+  let step: Float = size / segments.toFloat()
+  yi = 0
+  loop yi <= segments {
+    let vy: Float = yi.toFloat() / segments.toFloat()
+    var xi: Int = 0
+    loop xi <= segments {
+      let vx: Float = xi.toFloat() / segments.toFloat()
+      var leftX: Int = xi - 1
+      var rightX: Int = xi + 1
+      var downY: Int = yi - 1
+      var upY: Int = yi + 1
+      if leftX < 0 { leftX = 0 }
+      if rightX > segments { rightX = segments }
+      if downY < 0 { downY = 0 }
+      if upY > segments { upY = segments }
+      let center: Float = heights.at(index: yi * stride + xi)
+      let left: Float = heights.at(index: yi * stride + leftX)
+      let right: Float = heights.at(index: yi * stride + rightX)
+      let down: Float = heights.at(index: downY * stride + xi)
+      let up: Float = heights.at(index: upY * stride + xi)
+      let dx: Float = (rightX - leftX).toFloat() * step
+      let dy: Float = (upY - downY).toFloat() * step
+      let slopeX: Float = (right - left) / dx
+      let slopeY: Float = (up - down) / dy
+      let normalLen: Float = math.sqrt(x: slopeX * slopeX + slopeY * slopeY + 1.0)
+      pushVert(
+        verts: verts,
+        px: (vx - 0.5) * size, py: (vy - 0.5) * size, pz: center,
+        nx: (0.0 - slopeX) / normalLen, ny: (0.0 - slopeY) / normalLen, nz: 1.0 / normalLen,
+        u: vx, v: vy
+      )
+      xi = xi + 1
+    }
+    yi = yi + 1
+  }
+
+  var y2: Int = 0
+  loop y2 < segments {
+    var x2: Int = 0
+    loop x2 < segments {
+      let a: Int = y2 * stride + x2
+      let b: Int = a + stride
+      indices.add(value: a)
+      indices.add(value: a + 1)
+      indices.add(value: b)
+      indices.add(value: b)
+      indices.add(value: a + 1)
+      indices.add(value: b + 1)
+      x2 = x2 + 1
+    }
+    y2 = y2 + 1
+  }
   ret MeshData { verts: own verts, indices: own indices, vertCount: vertCount }
 }
 

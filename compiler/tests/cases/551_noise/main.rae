@@ -1,0 +1,40 @@
+import core
+import math
+import mesh3d
+import noise
+open mesh3d
+open noise
+
+func near(a: view Float, b: view Float, epsilon: view Float) ret Bool {
+  ret math.abs(n: a - b) <= epsilon
+}
+
+func inUnit(value: view Float) ret Bool {
+  ret value >= 0.0 and value <= 1.0
+}
+
+func main() {
+  let h2: Float = hash2(x: -7, y: 13, seed: 42)
+  let h3: Float = hash3(x: -7, y: 13, z: 5, seed: 42)
+  log("hashRange={inUnit(value: h2) and inUnit(value: h3)}")
+  log("hashStable={h2 is hash2(x: -7, y: 13, seed: 42)} seedChanges={h2 is not hash2(x: -7, y: 13, seed: 43)}")
+
+  let lattice: Float = value2(x: -7.0, y: 13.0, seed: 42)
+  log("valueLattice={near(a: lattice, b: h2, epsilon: 0.000000001)} valueRange={inUnit(value: value3(x: 1.25, y: -2.5, z: 4.75, seed: 9))}")
+  log("perlinOrigin={near(a: perlin3(x: 0.0, y: 0.0, z: 0.0, seed: 7), b: 0.0, epsilon: 0.000000001)} simplexOrigin={near(a: simplex2(x: 0.0, y: 0.0, seed: 7), b: 0.0, epsilon: 0.000000001)}")
+
+  let f: Float = fbm2(x: 0.37, y: -1.19, octaves: 5, lacunarity: 2.0, gain: 0.5, seed: 17)
+  let warp: NoiseWarp2 = domainWarp2(x: 0.37, y: -1.19, octaves: 4, lacunarity: 2.0, gain: 0.5, strength: 1.4, seed: 17)
+  log("fbmStable={f is fbm2(x: 0.37, y: -1.19, octaves: 5, lacunarity: 2.0, gain: 0.5, seed: 17)} fbmRange={f >= -1.1 and f <= 1.1}")
+  log("warpMoved={warp.x is not 0.37 or warp.y is not -1.19} warpRange={warp.value >= -1.1 and warp.value <= 1.1}")
+
+  let terrain: MeshData = makeFbmTerrain(size: 8.0, segments: 4, heightScale: 1.5, frequency: 0.22, octaves: 4, seed: 29)
+  let nx: Float = terrain.verts.at(index: 3)
+  let ny: Float = terrain.verts.at(index: 4)
+  let nz: Float = terrain.verts.at(index: 5)
+  let normalLength: Float = math.sqrt(x: nx * nx + ny * ny + nz * nz)
+  let firstHeight: Float = terrain.verts.at(index: 2)
+  let centerHeight: Float = terrain.verts.at(index: (2 * 5 + 2) * 8 + 2)
+  log("terrainCounts={terrain.vertCount is 25 and terrain.verts.length is 200 and terrain.indices.length is 96}")
+  log("terrainVaries={firstHeight is not centerHeight} normalUnit={near(a: normalLength, b: 1.0, epsilon: 0.000001)}")
+}

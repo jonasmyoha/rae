@@ -1,0 +1,17 @@
+# Loads the shared WGSL noise prelude before an application shader.
+# Composition happens once at pipeline creation; render frames execute only the
+# compiled GPU functions and do not perform file IO or string construction.
+import core
+
+func rae_ext_rae_sys_read_file(path: String) extern ret String
+
+func noiseWgslSource() pub ret String {
+  ret rae_ext_rae_sys_read_file(path: "lib/noise.wgsl")
+}
+
+func loadNoiseShader(path: view String) pub ret String {
+  let prelude: String = noiseWgslSource()
+  let shader: String = rae_ext_rae_sys_read_file(path: path)
+  let separated: String = prelude.concat(other: "\n")
+  ret separated.concat(other: shader)
+}
