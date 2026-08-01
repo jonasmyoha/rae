@@ -1,0 +1,94 @@
+# renderer3d — the frame, expressed as a render graph (#332).
+#
+# This is the layer that knows what a "3D scene pass" or a "present pass"
+# IS. `lib/rendergraph.rae` deliberately does not: it only sees resources,
+# read/write declarations and an opaque tag. This module owns the tags and
+# the dispatch that turns them into actual GPU work.
+#
+# Rae has no first-class function references, so dispatch is a switch on
+# the tag — the same pattern lib/ui/registry.rae uses for components. The
+# graph never inspects a tag, so that constraint does not leak into it.
+#
+# WHAT CHANGED, AND WHAT DID NOT (#332): the frame previously ran because
+# main() called beginScene -> renderScene -> endFrame in that written
+# order. It now runs because the graph DERIVES that order from declared
+# resource dependencies: the present pass reads sceneColor, the scene pass
+# writes it, so present must follow. The GPU work per pass is byte-for-byte
+# the same calls in the same order — the port is verified by byte-identical
+# headless screenshots (RAE_FIXED_DT + RAE_HEADLESS_FRAMES).
+import core
+open rendergraph
+open scene3d
+open gpu3d
+
+# ----- pass tags (renderer-owned; opaque to the graph) ----------------
+const tagScenePass: Int = 1    # 3D raster + depth-integrated SDF geometry
+const tagPresent: Int = 2      # resolve/screenshot/present the frame
+
+type Renderer3d {
+  graph: RenderGraph
+  sceneColor: Int   # resource id
+  sceneDepth: Int
+  scenePass: Int    # pass id
+  presentPass: Int
+}
+
+# Declare the frame. Passes are declared in a deliberately arbitrary order
+# to make the point that execution order comes from the DECLARATIONS, not
+# from the sequence of these calls.
+func createRenderer3d() pub ret Renderer3d {
+  var g: RenderGraph = createRenderGraph()
+
+  # sceneColor is External: it is gpu2d's persistent offscreen target,
+  # created and owned outside the graph. sceneDepth is transient.
+  let colorId: Int = addResource(g: g, name: "sceneColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeExternal)
+  let depthId: Int = addResource(g: g, name: "sceneDepth", kind: resDepth, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+
+  # Present declared FIRST, scene SECOND — the graph must still order them
+  # scene-then-present, because present reads what scene writes.
+  let present: Int = addPass(g: g, name: "present", kind: passRaster, tag: tagPresent)
+  let scene: Int = addPass(g: g, name: "scene3d", kind: passRaster, tag: tagScenePass)
+
+  passWrites(g: g, pass: scene, resource: colorId, access: accAttachmentWrite)
+  passWrites(g: g, pass: scene, resource: depthId, access: accAttachmentWrite)
+  passReads(g: g, pass: present, resource: colorId, access: accAttachmentRead)
+
+  ret Renderer3d {
+    graph: own g,
+    sceneColor: colorId,
+    sceneDepth: depthId,
+    scenePass: scene,
+    presentPass: present
+  }
+}
+
+# Compile the graph once at startup. Returns a rendergraph status code;
+# a non-ok result means the frame declaration is malformed and the caller
+# should not render.
+func compileRenderer(r: mod Renderer3d) pub ret Int {
+  ret compile(g: r.graph)
+}
+
+# Execute one frame by walking the DERIVED order and dispatching on tag.
+# Per-pass inputs arrive through this call rather than through captured
+# state, because passes cannot carry closures.
+func renderFrame(r: view Renderer3d, scene: view Scene3d, camera: view Camera3d, light: view Light3d, aspect: view Float, time: view Float) pub {
+  var i: Int = 0
+  loop i < r.graph.order.length {
+    let p: Int = r.graph.order.at(index: i)
+    let tag: Int = r.graph.passes.at(index: p).tag
+    if tag is tagScenePass {
+      beginScene(camera: camera, light: light, aspect: aspect, time: time)
+      renderScene(scene: scene)
+    }
+    if tag is tagPresent {
+      endFrame()
+    }
+    i = i + 1
+  }
+}
+
+# Frame structure for logs/diagnostics — the graph describing itself.
+func describeFrame(r: view Renderer3d) pub ret String {
+  ret describe(g: r.graph)
+}

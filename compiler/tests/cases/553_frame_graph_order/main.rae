@@ -1,0 +1,17 @@
+# #332: the frame's execution order is DERIVED from declared resource
+# dependencies, not from the order passes were added.
+#
+# renderer3d declares `present` BEFORE `scene3d`, but present reads the
+# colour target scene3d writes, so the graph must order them scene->present.
+# If this ever prints present first, the port has silently regressed to
+# insertion order.
+import core
+open rendergraph
+open renderer3d
+
+func main() {
+  var r: Renderer3d = createRenderer3d()
+  let st: Int = compileRenderer(r: r)
+  log("status={statusName(status: st)}")
+  log("{describeFrame(r: r)}")
+}
