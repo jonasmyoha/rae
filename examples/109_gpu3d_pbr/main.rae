@@ -106,7 +106,9 @@ func main() ret Int {
     if gpu2d.pointerDown() {
       if dragging {
         yaw = yaw + (px - lastX) * 0.008
-        pitch = pitch + (py - lastY) * 0.008
+        # Screen Y grows downward, so invert it: dragging upward raises the
+        # orbit camera and dragging downward lowers it.
+        pitch = pitch - (py - lastY) * 0.008
         if pitch > 1.45 {
           pitch = 1.45
         }
