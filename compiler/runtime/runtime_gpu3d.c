@@ -455,9 +455,10 @@ void rae_ext_gpu3d_submit(void) {
 /* End the standalone 3D frame and reuse the 2D path's screenshot +
  * present-from-offscreen behavior. UI composition uses endPass instead. */
 void rae_ext_gpu3d_end(void) {
+    rae_g2d_tick_virtual_clock();
     if (!rae_g3d_finish_pass()) return;
 
-    if (g_sdl_headless_ms > 0) {
+    if (g_sdl_headless_ms > 0 || g_sdl_headless_frames > 0) {
         const char* shot = getenv("RAE_GPU2D_SCREENSHOT");
         if (shot) rae_g2d_save_screenshot(shot);
     }

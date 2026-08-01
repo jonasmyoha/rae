@@ -102,6 +102,10 @@ static void rae_g2d_save_screenshot(const char* path) {
 }
 
 void rae_ext_gpu2d_endFrame(void) {
+    /* One frame presented -> advance the deterministic clock (no-op unless
+     * RAE_FIXED_DT is set). Placed at frame end so all reads within a
+     * frame observe the same time. */
+    rae_g2d_tick_virtual_clock();
     if (!g_g2d_pass) return;
     rae_ext_gpu2d_flush();
     wgpuRenderPassEncoderEnd(g_g2d_pass);
@@ -120,7 +124,9 @@ void rae_ext_gpu2d_endFrame(void) {
 
     /* Headless screenshot reads the offscreen target — works even when the
      * surface can't vend a drawable. */
-    if (g_sdl_headless_ms > 0) {
+    /* Either headless budget enables the capture: the ms budget (legacy)
+     * or the deterministic frame budget. */
+    if (g_sdl_headless_ms > 0 || g_sdl_headless_frames > 0) {
         const char* shot = getenv("RAE_GPU2D_SCREENSHOT");
         if (shot) rae_g2d_save_screenshot(shot);
     }
