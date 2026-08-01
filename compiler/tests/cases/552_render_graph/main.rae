@@ -1,0 +1,82 @@
+# Render graph v1 (#331): dependency derivation, topological ordering and
+# validation. The graph is pure scheduling logic with no GPU coupling, so
+# this runs headlessly with no device.
+import core
+open rendergraph
+
+# Build the pipeline shape from docs/render-graph-and-gi-plan.md, declared
+# deliberately OUT OF ORDER so the ordering below is derived rather than
+# just the insertion order.
+func buildPipeline() ret RenderGraph {
+  var g: RenderGraph = createRenderGraph()
+
+  let depth: Int = addResource(g: g, name: "depth", kind: resDepth, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let normal: Int = addResource(g: g, name: "normal", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let ao: Int = addResource(g: g, name: "ao", kind: resTexture2d, format: 0, sizing: sizeHalf, lifetime: lifeTransient)
+  let hdr: Int = addResource(g: g, name: "hdrColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let ldr: Int = addResource(g: g, name: "ldrColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeExternal)
+
+  # Declared last-to-first on purpose.
+  let tonemap: Int = addPass(g: g, name: "tonemap", kind: passCompute, tag: 40)
+  let lighting: Int = addPass(g: g, name: "lighting", kind: passRaster, tag: 30)
+  let ssao: Int = addPass(g: g, name: "ssao", kind: passCompute, tag: 20)
+  let prepass: Int = addPass(g: g, name: "prepass", kind: passRaster, tag: 10)
+
+  passWrites(g: g, pass: prepass, resource: depth, access: accAttachmentWrite)
+  passWrites(g: g, pass: prepass, resource: normal, access: accAttachmentWrite)
+
+  passReads(g: g, pass: ssao, resource: depth, access: accSampledRead)
+  passReads(g: g, pass: ssao, resource: normal, access: accSampledRead)
+  passWrites(g: g, pass: ssao, resource: ao, access: accStorageWrite)
+
+  passReads(g: g, pass: lighting, resource: depth, access: accSampledRead)
+  passReads(g: g, pass: lighting, resource: ao, access: accSampledRead)
+  passWrites(g: g, pass: lighting, resource: hdr, access: accAttachmentWrite)
+
+  passReads(g: g, pass: tonemap, resource: hdr, access: accSampledRead)
+  passWrites(g: g, pass: tonemap, resource: ldr, access: accStorageWrite)
+  ret g
+}
+
+func main() {
+  var g: RenderGraph = buildPipeline()
+  let st: Int = compile(g: g)
+  log("compile: {statusName(status: st)}")
+  log("{describe(g: g)}")
+
+  # A read of an External resource with no in-graph writer is legitimate:
+  # the swapchain is produced outside the graph.
+  var ext: RenderGraph = createRenderGraph()
+  let swap: Int = addResource(g: ext, name: "swapchain", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeExternal)
+  let blit: Int = addPass(g: ext, name: "blit", kind: passRaster, tag: 1)
+  passReads(g: ext, pass: blit, resource: swap, access: accAttachmentRead)
+  log("external-read: {statusName(status: compile(g: ext))}")
+
+  # Reading a Transient resource nobody writes is an error.
+  var bad: RenderGraph = createRenderGraph()
+  let orphan: Int = addResource(g: bad, name: "orphan", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let reader: Int = addPass(g: bad, name: "reader", kind: passCompute, tag: 1)
+  passReads(g: bad, pass: reader, resource: orphan, access: accSampledRead)
+  log("unwritten: {statusName(status: compile(g: bad))}")
+
+  # Two passes writing one resource in a frame is an error.
+  var dw: RenderGraph = createRenderGraph()
+  let target: Int = addResource(g: dw, name: "target", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let w1: Int = addPass(g: dw, name: "w1", kind: passRaster, tag: 1)
+  let w2: Int = addPass(g: dw, name: "w2", kind: passRaster, tag: 2)
+  passWrites(g: dw, pass: w1, resource: target, access: accAttachmentWrite)
+  passWrites(g: dw, pass: w2, resource: target, access: accAttachmentWrite)
+  log("double-write: {statusName(status: compile(g: dw))}")
+
+  # A cycle must be reported, not hang.
+  var cy: RenderGraph = createRenderGraph()
+  let ra: Int = addResource(g: cy, name: "a", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let rb: Int = addResource(g: cy, name: "b", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let pa: Int = addPass(g: cy, name: "pa", kind: passCompute, tag: 1)
+  let pb: Int = addPass(g: cy, name: "pb", kind: passCompute, tag: 2)
+  passWrites(g: cy, pass: pa, resource: ra, access: accStorageWrite)
+  passReads(g: cy, pass: pa, resource: rb, access: accStorageRead)
+  passWrites(g: cy, pass: pb, resource: rb, access: accStorageWrite)
+  passReads(g: cy, pass: pb, resource: ra, access: accStorageRead)
+  log("cycle: {statusName(status: compile(g: cy))}")
+}
