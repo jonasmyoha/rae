@@ -89,6 +89,11 @@ func closeWindow() extern
 # the given linear RGBA colour (components 0..1). Must be paired with endFrame.
 func beginFrame(r: Float, g: Float, b: Float, a: Float) extern
 
+# Begin a 2D/UI overlay pass that preserves the persistent offscreen color
+# target produced by a preceding renderer pass. Pair with endFrame; this is the
+# only pass that should screenshot/present the composed frame.
+func beginFrameLoad() extern
+
 # Finish the render pass, submit the command buffer, and present the frame.
 func endFrame() extern
 
