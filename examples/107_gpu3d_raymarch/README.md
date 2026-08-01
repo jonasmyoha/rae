@@ -7,7 +7,7 @@ current production-ready pieces:
 - WebGPU compute through `lib/gpu.rae`
 - SDL3 window/presentation through `lib/sdl3.rae`
 - data-oriented scene packing from Rae ECS-like component lists
-- WGSL procedural raymarching with noise, PBR-inspired materials, AO, shadowing,
+- WGSL procedural raymarching with shared `lib/noise.wgsl`, PBR-inspired materials, AO, shadowing,
   and interactive camera controls
 
 It is intentionally not the final raster 3D engine. The future renderer should

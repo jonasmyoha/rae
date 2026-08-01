@@ -52,34 +52,6 @@ fn materialAt(index: u32) -> Material {
   return m;
 }
 
-fn hash21(p: vec2<f32>) -> f32 {
-  let p3 = fract(vec3<f32>(p.x, p.y, p.x) * 0.1031);
-  let q = p3 + dot(p3, p3.yzx + vec3<f32>(33.33));
-  return fract((q.x + q.y) * q.z);
-}
-
-// Quintic value noise and FBM provide a compact, derivative-friendly base for
-// terrain, materials, particles and later SSAO kernel rotation textures.
-fn valueNoise(p: vec2<f32>) -> f32 {
-  let i = floor(p);
-  let f = fract(p);
-  let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-  return mix(mix(hash21(i), hash21(i + vec2<f32>(1.0, 0.0)), u.x),
-             mix(hash21(i + vec2<f32>(0.0, 1.0)), hash21(i + vec2<f32>(1.0, 1.0)), u.x), u.y);
-}
-
-fn fbm(p0: vec2<f32>) -> f32 {
-  var p = p0;
-  var amplitude = 0.5;
-  var sum = 0.0;
-  for (var octave = 0; octave < 5; octave = octave + 1) {
-    sum = sum + amplitude * valueNoise(p);
-    p = mat2x2<f32>(1.6, -1.2, 1.2, 1.6) * p + vec2<f32>(11.7, 7.3);
-    amplitude = amplitude * 0.5;
-  }
-  return sum;
-}
-
 fn sdSphere(p: vec3<f32>, radius: f32) -> f32 { return length(p) - radius; }
 
 fn sdBox(p: vec3<f32>, bounds: vec3<f32>) -> f32 {
@@ -112,7 +84,7 @@ fn mapScene(p: vec3<f32>) -> Surface {
     } else if (kind == 1u) {
       distance = sdBox(local, scale);
       if (i == 0u) {
-        distance = distance + (fbm(local.xy * 0.7) - 0.5) * 0.035;
+        distance = distance + (raeNoiseFbmValue2(local.xy * 0.7, 5u, 2.0, 0.5, 0u) - 0.5) * 0.035;
       }
     } else {
       // Rotate the torus from Z-axis into a more readable standing pose.
@@ -211,7 +183,7 @@ fn shade(p: vec3<f32>, n: vec3<f32>, viewDir: vec3<f32>, material: Material) -> 
 fn skyColor(rd: vec3<f32>) -> vec3<f32> {
   let horizon = pow(max(0.0, 1.0 - abs(rd.z)), 5.0);
   let gradient = mix(vec3<f32>(0.012, 0.018, 0.045), vec3<f32>(0.09, 0.18, 0.31), max(rd.z, 0.0));
-  let stars = step(0.9978, hash21(floor((rd.xy / max(abs(rd.z), 0.08)) * 180.0))) * max(rd.z, 0.0);
+  let stars = step(0.9978, raeNoiseHash2(vec2<i32>(floor((rd.xy / max(abs(rd.z), 0.08)) * 180.0)), 0u)) * max(rd.z, 0.0);
   return gradient + vec3<f32>(0.08, 0.16, 0.24) * horizon + vec3<f32>(stars);
 }
 
@@ -255,7 +227,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   } else {
     // Stable subpixel jitter gives inexpensive temporal edge smoothing while
     // moving; quality 3 uses deterministic 2x2 supersampling.
-    let jitter = vec2<f32>(hash21(base + f32(P.frame)), hash21(base.yx + f32(P.frame) + 19.0)) - 0.5;
+    let jitter = vec2<f32>(
+      raeNoiseHash2(vec2<i32>(base + f32(P.frame)), 0u),
+      raeNoiseHash2(vec2<i32>(base.yx + f32(P.frame) + 19.0), 0u)) - 0.5;
     color = renderSample(base + vec2<f32>(0.5) + jitter * 0.45);
   }
   color = tonemap(color);

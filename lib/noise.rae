@@ -1,0 +1,335 @@
+# Deterministic procedural noise for CPU-side generation and tooling.
+#
+# CPU noise is appropriate for generated meshes, stable spawn distributions,
+# cache baking, SSAO kernels, tests, and other data produced once or sparsely.
+# Dense animated vertex/pixel work belongs in WGSL; lib/noise.wgsl implements
+# the same 32-bit lattice hash and matching noise families for that path.
+#
+# Contracts:
+# - hash/value noise return [0, 1]
+# - Perlin/simplex and normalized FBM return approximately [-1, 1]
+# - all functions are deterministic for coordinates + seed and allocate nothing
+import math
+
+type NoiseWarp2 {
+  x: Float
+  y: Float
+  value: Float
+}
+
+type NoiseWarp3 {
+  x: Float
+  y: Float
+  z: Float
+  value: Float
+}
+
+func wrap32(value: view Int) ret Int {
+  ret value bitand 0xffffffff
+}
+
+# Chris Wellons-style 32-bit finalizer. Every operation is masked so Rae's
+# signed 64-bit Int produces the same low word as WGSL u32 arithmetic.
+func hashWord(value: view Int) pub ret Int {
+  var h: Int = wrap32(value: value)
+  h = wrap32(value: h bitxor (h shr 16))
+  h = wrap32(value: h * 0x7feb352d)
+  h = wrap32(value: h bitxor (h shr 15))
+  h = wrap32(value: h * 0x846ca68b)
+  h = wrap32(value: h bitxor (h shr 16))
+  ret h
+}
+
+func hashLattice2(x: view Int, y: view Int, seed: view Int) ret Int {
+  var h: Int = wrap32(value: seed bitxor 0x9e3779b9)
+  h = hashWord(value: h bitxor wrap32(value: x * 0x85ebca6b))
+  h = hashWord(value: h bitxor wrap32(value: y * 0xc2b2ae35))
+  ret h
+}
+
+func hashLattice3(x: view Int, y: view Int, z: view Int, seed: view Int) ret Int {
+  var h: Int = hashLattice2(x: x, y: y, seed: seed)
+  h = hashWord(value: h bitxor wrap32(value: z * 0x27d4eb2f))
+  ret h
+}
+
+func hashToUnit(hash: view Int) ret Float {
+  ret hash.toFloat() / 4294967295.0
+}
+
+func hash2(x: view Int, y: view Int, seed: view Int) pub ret Float {
+  ret hashToUnit(hash: hashLattice2(x: x, y: y, seed: seed))
+}
+
+func hash3(x: view Int, y: view Int, z: view Int, seed: view Int) pub ret Float {
+  ret hashToUnit(hash: hashLattice3(x: x, y: y, z: z, seed: seed))
+}
+
+func fade(t: view Float) ret Float {
+  ret t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
+}
+
+func noiseLerp(a: view Float, b: view Float, t: view Float) ret Float {
+  ret a + (b - a) * t
+}
+
+func floorInt(value: view Float) ret Int {
+  ret math.floor(x: value).toInt()
+}
+
+func value2(x: view Float, y: view Float, seed: view Int) pub ret Float {
+  let ix: Int = floorInt(value: x)
+  let iy: Int = floorInt(value: y)
+  let fx: Float = x - ix.toFloat()
+  let fy: Float = y - iy.toFloat()
+  let ux: Float = fade(t: fx)
+  let uy: Float = fade(t: fy)
+  let a: Float = noiseLerp(a: hash2(x: ix, y: iy, seed: seed), b: hash2(x: ix + 1, y: iy, seed: seed), t: ux)
+  let b: Float = noiseLerp(a: hash2(x: ix, y: iy + 1, seed: seed), b: hash2(x: ix + 1, y: iy + 1, seed: seed), t: ux)
+  ret noiseLerp(a: a, b: b, t: uy)
+}
+
+func value3(x: view Float, y: view Float, z: view Float, seed: view Int) pub ret Float {
+  let ix: Int = floorInt(value: x)
+  let iy: Int = floorInt(value: y)
+  let iz: Int = floorInt(value: z)
+  let ux: Float = fade(t: x - ix.toFloat())
+  let uy: Float = fade(t: y - iy.toFloat())
+  let uz: Float = fade(t: z - iz.toFloat())
+  let x00: Float = noiseLerp(a: hash3(x: ix, y: iy, z: iz, seed: seed), b: hash3(x: ix + 1, y: iy, z: iz, seed: seed), t: ux)
+  let x10: Float = noiseLerp(a: hash3(x: ix, y: iy + 1, z: iz, seed: seed), b: hash3(x: ix + 1, y: iy + 1, z: iz, seed: seed), t: ux)
+  let x01: Float = noiseLerp(a: hash3(x: ix, y: iy, z: iz + 1, seed: seed), b: hash3(x: ix + 1, y: iy, z: iz + 1, seed: seed), t: ux)
+  let x11: Float = noiseLerp(a: hash3(x: ix, y: iy + 1, z: iz + 1, seed: seed), b: hash3(x: ix + 1, y: iy + 1, z: iz + 1, seed: seed), t: ux)
+  ret noiseLerp(a: noiseLerp(a: x00, b: x10, t: uy), b: noiseLerp(a: x01, b: x11, t: uy), t: uz)
+}
+
+func grad2(hash: view Int, x: view Float, y: view Float) ret Float {
+  let h: Int = hash bitand 7
+  if h is 0 { ret x }
+  if h is 1 { ret 0.0 - x }
+  if h is 2 { ret y }
+  if h is 3 { ret 0.0 - y }
+  if h is 4 { ret (x + y) * 0.7071067811865476 }
+  if h is 5 { ret (0.0 - x + y) * 0.7071067811865476 }
+  if h is 6 { ret (x - y) * 0.7071067811865476 }
+  ret (0.0 - x - y) * 0.7071067811865476
+}
+
+func grad3(hash: view Int, x: view Float, y: view Float, z: view Float) ret Float {
+  let h: Int = hash % 12
+  if h is 0 { ret x + y }
+  if h is 1 { ret 0.0 - x + y }
+  if h is 2 { ret x - y }
+  if h is 3 { ret 0.0 - x - y }
+  if h is 4 { ret x + z }
+  if h is 5 { ret 0.0 - x + z }
+  if h is 6 { ret x - z }
+  if h is 7 { ret 0.0 - x - z }
+  if h is 8 { ret y + z }
+  if h is 9 { ret 0.0 - y + z }
+  if h is 10 { ret y - z }
+  ret 0.0 - y - z
+}
+
+func perlin2(x: view Float, y: view Float, seed: view Int) pub ret Float {
+  let ix: Int = floorInt(value: x)
+  let iy: Int = floorInt(value: y)
+  let fx: Float = x - ix.toFloat()
+  let fy: Float = y - iy.toFloat()
+  let ux: Float = fade(t: fx)
+  let uy: Float = fade(t: fy)
+  let a: Float = noiseLerp(
+    a: grad2(hash: hashLattice2(x: ix, y: iy, seed: seed), x: fx, y: fy),
+    b: grad2(hash: hashLattice2(x: ix + 1, y: iy, seed: seed), x: fx - 1.0, y: fy), t: ux
+  )
+  let b: Float = noiseLerp(
+    a: grad2(hash: hashLattice2(x: ix, y: iy + 1, seed: seed), x: fx, y: fy - 1.0),
+    b: grad2(hash: hashLattice2(x: ix + 1, y: iy + 1, seed: seed), x: fx - 1.0, y: fy - 1.0), t: ux
+  )
+  ret noiseLerp(a: a, b: b, t: uy) * 1.4142135623730951
+}
+
+func perlin3(x: view Float, y: view Float, z: view Float, seed: view Int) pub ret Float {
+  let ix: Int = floorInt(value: x)
+  let iy: Int = floorInt(value: y)
+  let iz: Int = floorInt(value: z)
+  let fx: Float = x - ix.toFloat()
+  let fy: Float = y - iy.toFloat()
+  let fz: Float = z - iz.toFloat()
+  let ux: Float = fade(t: fx)
+  let uy: Float = fade(t: fy)
+  let uz: Float = fade(t: fz)
+  let x00: Float = noiseLerp(a: grad3(hash: hashLattice3(x: ix, y: iy, z: iz, seed: seed), x: fx, y: fy, z: fz), b: grad3(hash: hashLattice3(x: ix + 1, y: iy, z: iz, seed: seed), x: fx - 1.0, y: fy, z: fz), t: ux)
+  let x10: Float = noiseLerp(a: grad3(hash: hashLattice3(x: ix, y: iy + 1, z: iz, seed: seed), x: fx, y: fy - 1.0, z: fz), b: grad3(hash: hashLattice3(x: ix + 1, y: iy + 1, z: iz, seed: seed), x: fx - 1.0, y: fy - 1.0, z: fz), t: ux)
+  let x01: Float = noiseLerp(a: grad3(hash: hashLattice3(x: ix, y: iy, z: iz + 1, seed: seed), x: fx, y: fy, z: fz - 1.0), b: grad3(hash: hashLattice3(x: ix + 1, y: iy, z: iz + 1, seed: seed), x: fx - 1.0, y: fy, z: fz - 1.0), t: ux)
+  let x11: Float = noiseLerp(a: grad3(hash: hashLattice3(x: ix, y: iy + 1, z: iz + 1, seed: seed), x: fx, y: fy - 1.0, z: fz - 1.0), b: grad3(hash: hashLattice3(x: ix + 1, y: iy + 1, z: iz + 1, seed: seed), x: fx - 1.0, y: fy - 1.0, z: fz - 1.0), t: ux)
+  ret noiseLerp(a: noiseLerp(a: x00, b: x10, t: uy), b: noiseLerp(a: x01, b: x11, t: uy), t: uz)
+}
+
+func simplexCorner2(hash: view Int, x: view Float, y: view Float) ret Float {
+  var t: Float = 0.5 - x * x - y * y
+  if t <= 0.0 { ret 0.0 }
+  t = t * t
+  ret t * t * grad2(hash: hash, x: x, y: y)
+}
+
+func simplex2(x: view Float, y: view Float, seed: view Int) pub ret Float {
+  let f2: Float = 0.3660254037844386
+  let g2: Float = 0.2113248654051871
+  let skew: Float = (x + y) * f2
+  let i: Int = floorInt(value: x + skew)
+  let j: Int = floorInt(value: y + skew)
+  let unskew: Float = (i + j).toFloat() * g2
+  let x0: Float = x - (i.toFloat() - unskew)
+  let y0: Float = y - (j.toFloat() - unskew)
+  var i1: Int = 0
+  var j1: Int = 1
+  if x0 > y0 {
+    i1 = 1
+    j1 = 0
+  }
+  let x1: Float = x0 - i1.toFloat() + g2
+  let y1: Float = y0 - j1.toFloat() + g2
+  let x2: Float = x0 - 1.0 + 2.0 * g2
+  let y2: Float = y0 - 1.0 + 2.0 * g2
+  let n0: Float = simplexCorner2(hash: hashLattice2(x: i, y: j, seed: seed), x: x0, y: y0)
+  let n1: Float = simplexCorner2(hash: hashLattice2(x: i + i1, y: j + j1, seed: seed), x: x1, y: y1)
+  let n2: Float = simplexCorner2(hash: hashLattice2(x: i + 1, y: j + 1, seed: seed), x: x2, y: y2)
+  ret 70.0 * (n0 + n1 + n2)
+}
+
+func simplexCorner3(hash: view Int, x: view Float, y: view Float, z: view Float) ret Float {
+  var t: Float = 0.6 - x * x - y * y - z * z
+  if t <= 0.0 { ret 0.0 }
+  t = t * t
+  ret t * t * grad3(hash: hash, x: x, y: y, z: z)
+}
+
+func simplex3(x: view Float, y: view Float, z: view Float, seed: view Int) pub ret Float {
+  let skew: Float = (x + y + z) / 3.0
+  let i: Int = floorInt(value: x + skew)
+  let j: Int = floorInt(value: y + skew)
+  let k: Int = floorInt(value: z + skew)
+  let unskew: Float = (i + j + k).toFloat() / 6.0
+  let x0: Float = x - (i.toFloat() - unskew)
+  let y0: Float = y - (j.toFloat() - unskew)
+  let z0: Float = z - (k.toFloat() - unskew)
+  var i1: Int = 0
+  var j1: Int = 0
+  var k1: Int = 0
+  var i2: Int = 0
+  var j2: Int = 0
+  var k2: Int = 0
+  if x0 >= y0 {
+    if y0 >= z0 {
+      i1 = 1
+      i2 = 1
+      j2 = 1
+    }
+    else {
+      if x0 >= z0 {
+        i1 = 1
+        i2 = 1
+        k2 = 1
+      }
+      else {
+        k1 = 1
+        i2 = 1
+        k2 = 1
+      }
+    }
+  } else {
+    if y0 < z0 {
+      k1 = 1
+      j2 = 1
+      k2 = 1
+    }
+    else {
+      if x0 < z0 {
+        j1 = 1
+        j2 = 1
+        k2 = 1
+      }
+      else {
+        j1 = 1
+        i2 = 1
+        j2 = 1
+      }
+    }
+  }
+  let x1: Float = x0 - i1.toFloat() + 1.0 / 6.0
+  let y1: Float = y0 - j1.toFloat() + 1.0 / 6.0
+  let z1: Float = z0 - k1.toFloat() + 1.0 / 6.0
+  let x2: Float = x0 - i2.toFloat() + 1.0 / 3.0
+  let y2: Float = y0 - j2.toFloat() + 1.0 / 3.0
+  let z2: Float = z0 - k2.toFloat() + 1.0 / 3.0
+  let x3: Float = x0 - 0.5
+  let y3: Float = y0 - 0.5
+  let z3: Float = z0 - 0.5
+  let n0: Float = simplexCorner3(hash: hashLattice3(x: i, y: j, z: k, seed: seed), x: x0, y: y0, z: z0)
+  let n1: Float = simplexCorner3(hash: hashLattice3(x: i + i1, y: j + j1, z: k + k1, seed: seed), x: x1, y: y1, z: z1)
+  let n2: Float = simplexCorner3(hash: hashLattice3(x: i + i2, y: j + j2, z: k + k2, seed: seed), x: x2, y: y2, z: z2)
+  let n3: Float = simplexCorner3(hash: hashLattice3(x: i + 1, y: j + 1, z: k + 1, seed: seed), x: x3, y: y3, z: z3)
+  ret 32.0 * (n0 + n1 + n2 + n3)
+}
+
+func fbm2(x: view Float, y: view Float, octaves: view Int, lacunarity: view Float, gain: view Float, seed: view Int) pub ret Float {
+  var px: Float = x
+  var py: Float = y
+  var amplitude: Float = 1.0
+  var sum: Float = 0.0
+  var weight: Float = 0.0
+  var octave: Int = 0
+  loop octave < octaves {
+    sum = sum + simplex2(x: px, y: py, seed: seed + octave * 1013) * amplitude
+    weight = weight + amplitude
+    let nextX: Float = (px * 0.8 - py * 0.6) * lacunarity + 17.17
+    py = (px * 0.6 + py * 0.8) * lacunarity + 31.31
+    px = nextX
+    amplitude = amplitude * gain
+    octave = octave + 1
+  }
+  if weight <= 0.0 { ret 0.0 }
+  ret sum / weight
+}
+
+func fbm3(x: view Float, y: view Float, z: view Float, octaves: view Int, lacunarity: view Float, gain: view Float, seed: view Int) pub ret Float {
+  var px: Float = x
+  var py: Float = y
+  var pz: Float = z
+  var amplitude: Float = 1.0
+  var sum: Float = 0.0
+  var weight: Float = 0.0
+  var octave: Int = 0
+  loop octave < octaves {
+    sum = sum + simplex3(x: px, y: py, z: pz, seed: seed + octave * 1013) * amplitude
+    weight = weight + amplitude
+    let nextX: Float = (px * 0.8 - py * 0.6) * lacunarity + 17.17
+    let nextY: Float = (px * 0.6 + py * 0.8) * lacunarity + 31.31
+    pz = (pz * 0.91 + px * 0.27) * lacunarity + 47.47
+    px = nextX
+    py = nextY
+    amplitude = amplitude * gain
+    octave = octave + 1
+  }
+  if weight <= 0.0 { ret 0.0 }
+  ret sum / weight
+}
+
+func domainWarp2(x: view Float, y: view Float, octaves: view Int, lacunarity: view Float, gain: view Float, strength: view Float, seed: view Int) pub ret NoiseWarp2 {
+  let qx: Float = fbm2(x: x, y: y, octaves: octaves, lacunarity: lacunarity, gain: gain, seed: seed)
+  let qy: Float = fbm2(x: x + 5.2, y: y + 1.3, octaves: octaves, lacunarity: lacunarity, gain: gain, seed: seed + 101)
+  let wx: Float = x + qx * strength
+  let wy: Float = y + qy * strength
+  ret NoiseWarp2 { x: wx, y: wy, value: fbm2(x: wx, y: wy, octaves: octaves, lacunarity: lacunarity, gain: gain, seed: seed + 211) }
+}
+
+func domainWarp3(x: view Float, y: view Float, z: view Float, octaves: view Int, lacunarity: view Float, gain: view Float, strength: view Float, seed: view Int) pub ret NoiseWarp3 {
+  let qx: Float = fbm3(x: x, y: y, z: z, octaves: octaves, lacunarity: lacunarity, gain: gain, seed: seed)
+  let qy: Float = fbm3(x: x + 5.2, y: y + 1.3, z: z + 7.1, octaves: octaves, lacunarity: lacunarity, gain: gain, seed: seed + 101)
+  let qz: Float = fbm3(x: x + 8.3, y: y + 2.8, z: z + 3.4, octaves: octaves, lacunarity: lacunarity, gain: gain, seed: seed + 211)
+  let wx: Float = x + qx * strength
+  let wy: Float = y + qy * strength
+  let wz: Float = z + qz * strength
+  ret NoiseWarp3 { x: wx, y: wy, z: wz, value: fbm3(x: wx, y: wy, z: wz, octaves: octaves, lacunarity: lacunarity, gain: gain, seed: seed + 307) }
+}

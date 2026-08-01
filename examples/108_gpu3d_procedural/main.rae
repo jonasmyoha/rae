@@ -10,7 +10,9 @@ import gpu
 import sdl3
 import image
 import filesystem
+import noise_wgsl
 import vec3
+open noise_wgsl
 
 type Transform3d {
     position: Vec3
@@ -143,7 +145,7 @@ func rae_ext_rae_sys_read_file(path: String) extern ret String
 
 func main() {
     let scene: Scene3d = buildScene()
-    let wgsl: String = rae_ext_rae_sys_read_file(path: "examples/108_gpu3d_procedural/raymarch.wgsl")
+    let wgsl: String = loadNoiseShader(path: "examples/108_gpu3d_procedural/raymarch.wgsl")
     sdl3.initWindow(width: 1280, height: 720, title: "Rae 3D — Procedural Scene — GPT-5.6-Sol")
     sdl3.setTargetFPS(fps: 0)
 

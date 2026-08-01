@@ -31,43 +31,6 @@ fn camFwd() -> vec3<f32> { return normalize(vec3<f32>(camera[4], camera[5], came
 fn camRight() -> vec3<f32> { return normalize(vec3<f32>(camera[8], camera[9], camera[10])); }
 fn camUp() -> vec3<f32> { return normalize(vec3<f32>(camera[12], camera[13], camera[14])); }
 
-fn hash31(p: vec3<f32>) -> f32 {
-  let q: vec3<f32> = fract(p * 0.1031);
-  let d: f32 = dot(q, q.yzx + vec3<f32>(33.33, 33.33, 33.33));
-  return fract((q.x + q.y) * (q.z + d));
-}
-
-fn valueNoise(p: vec3<f32>) -> f32 {
-  let i: vec3<f32> = floor(p);
-  let f: vec3<f32> = fract(p);
-  let u: vec3<f32> = f * f * (vec3<f32>(3.0, 3.0, 3.0) - 2.0 * f);
-  let n000: f32 = hash31(i + vec3<f32>(0.0, 0.0, 0.0));
-  let n100: f32 = hash31(i + vec3<f32>(1.0, 0.0, 0.0));
-  let n010: f32 = hash31(i + vec3<f32>(0.0, 1.0, 0.0));
-  let n110: f32 = hash31(i + vec3<f32>(1.0, 1.0, 0.0));
-  let n001: f32 = hash31(i + vec3<f32>(0.0, 0.0, 1.0));
-  let n101: f32 = hash31(i + vec3<f32>(1.0, 0.0, 1.0));
-  let n011: f32 = hash31(i + vec3<f32>(0.0, 1.0, 1.0));
-  let n111: f32 = hash31(i + vec3<f32>(1.0, 1.0, 1.0));
-  let nx00: f32 = mix(n000, n100, u.x);
-  let nx10: f32 = mix(n010, n110, u.x);
-  let nx01: f32 = mix(n001, n101, u.x);
-  let nx11: f32 = mix(n011, n111, u.x);
-  return mix(mix(nx00, nx10, u.y), mix(nx01, nx11, u.y), u.z);
-}
-
-fn fbm(p0: vec3<f32>) -> f32 {
-  var p: vec3<f32> = p0;
-  var a: f32 = 0.5;
-  var v: f32 = 0.0;
-  for (var i: u32 = 0u; i < 4u; i = i + 1u) {
-    v = v + valueNoise(p) * a;
-    p = p * 2.03 + vec3<f32>(11.7, 3.1, 5.4);
-    a = a * 0.5;
-  }
-  return v;
-}
-
 fn sdSphere(p: vec3<f32>, r: f32) -> f32 {
   return length(p) - r;
 }
@@ -106,7 +69,7 @@ fn objectDistance(i: u32, p: vec3<f32>, t: f32) -> Hit {
   }
 
   if (noiseAmp > 0.0) {
-    d = d + (fbm(q * 3.2 + vec3<f32>(0.0, 0.0, t * 0.15)) - 0.5) * noiseAmp;
+    d = d + (raeNoiseFbmValue3(q * 3.2 + vec3<f32>(0.0, 0.0, t * 0.15), 4u, 2.03, 0.5, 0u) - 0.5) * noiseAmp;
   }
   return Hit(d, mat);
 }
@@ -250,8 +213,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let y: u32 = gid.y;
   if (x >= P.width || y >= P.height) { return; }
 
-  let seed: f32 = hash31(vec3<f32>(f32(x), f32(y), f32(P.frame)));
-  let jitter: vec2<f32> = vec2<f32>(seed - 0.5, hash31(vec3<f32>(f32(y), f32(P.frame), f32(x))) - 0.5) * 0.45;
+  let seed: f32 = raeNoiseHash3(vec3<i32>(i32(x), i32(y), i32(P.frame)), 0u);
+  let jitter: vec2<f32> = vec2<f32>(seed - 0.5, raeNoiseHash3(vec3<i32>(i32(y), i32(P.frame), i32(x)), 0u) - 0.5) * 0.45;
   let uv: vec2<f32> = (vec2<f32>(f32(x), f32(y)) + vec2<f32>(0.5, 0.5) + jitter) / vec2<f32>(f32(P.width), f32(P.height));
   let ndc: vec2<f32> = vec2<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
   let fovScale: f32 = tan(52.0 * PI / 360.0);
