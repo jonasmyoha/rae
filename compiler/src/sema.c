@@ -1669,7 +1669,11 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
     if (type_ref->parts) {
         Str name = type_ref->parts->text;
         if (str_eq_cstr(name, "Int")) base = type_get_int(ctx->type_registry);
-        else if (str_eq_cstr(name, "Float")) base = type_get_float(ctx->type_registry);
+        /* `Float` and `Float32` deliberately resolve to the SAME TypeInfo:
+         * Float is an alias of Float32, not a third float type. Float64 is a
+         * distinct type. See docs/primitive-types.md. */
+        else if (str_eq_cstr(name, "Float") || str_eq_cstr(name, "Float32")) base = type_get_float(ctx->type_registry);
+        else if (str_eq_cstr(name, "Float64")) base = type_get_float64(ctx->type_registry);
         else if (str_eq_cstr(name, "Bool")) base = type_get_bool(ctx->type_registry);
         else if (str_eq_cstr(name, "String")) base = type_get_string(ctx->type_registry);
         else if (str_eq_cstr(name, "Char")) base = type_get_char(ctx->type_registry);

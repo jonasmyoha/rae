@@ -154,7 +154,7 @@ bool is_primitive_ref(CFuncContext* ctx, const AstTypeRef* tr) {
     // the pointer. String stays a ref under view/mod because it is
     // heap-owning at the language level (the ref avoids deep copies).
     bool is_num_prim = str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int64") ||
-        str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float64") ||
+        str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32") || str_eq_cstr(base, "Float64") ||
         str_eq_cstr(base, "Bool") || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32");
     if (is_num_prim) return tr->is_mod;
     if (str_eq_cstr(base, "String")) return true;
@@ -465,7 +465,7 @@ bool c_spawn_threadable(CFuncContext* ctx, const AstFuncDecl* f) {
     if (p->type->is_mod) return false;            // mod = pointer into parent
     Str base = get_base_type_name(p->type);
     bool is_scalar = str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int64")
-                  || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float64")
+                  || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32") || str_eq_cstr(base, "Float64")
                   || str_eq_cstr(base, "Bool")
                   || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32");
     if (is_scalar) continue;                      // view-numeric is by value; own/copy/plain too
@@ -512,7 +512,8 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
       // fprintf(stderr, "emit_type_ref_as_c_type: kind=%d name=%.*s\n", t->kind, (int)t->name.len, t->name.data);
 
       if (t->kind == TYPE_INT) { if (is_ptr) fprintf(out, "rae_%s_Int64", type->is_mod ? "Mod" : "View"); else fprintf(out, "int64_t"); return true; }
-      if (t->kind == TYPE_FLOAT) { if (is_ptr) fprintf(out, "rae_%s_Float64", type->is_mod ? "Mod" : "View"); else fprintf(out, "double"); return true; }
+      if (t->kind == TYPE_FLOAT) { if (is_ptr) fprintf(out, "rae_%s_Float", type->is_mod ? "Mod" : "View"); else fprintf(out, "float"); return true; }
+      if (t->kind == TYPE_FLOAT64) { if (is_ptr) fprintf(out, "rae_%s_Float64", type->is_mod ? "Mod" : "View"); else fprintf(out, "double"); return true; }
       if (t->kind == TYPE_BOOL) { if (is_ptr) fprintf(out, "rae_%s_Bool", type->is_mod ? "Mod" : "View"); else fprintf(out, "rae_Bool"); return true; }
       if (t->kind == TYPE_CHAR) { if (is_ptr) fprintf(out, "rae_%s_Char", type->is_mod ? "Mod" : "View"); else fprintf(out, "uint32_t"); return true; }
       if (t->kind == TYPE_STRING) { if (is_ptr) fprintf(out, "rae_%s_String", type->is_mod ? "Mod" : "View"); else fprintf(out, "rae_String"); return true; }
@@ -547,7 +548,8 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
   if (type->is_opt) { fprintf(out, "RaeAny"); if (is_ptr) fprintf(out, "*"); return true; }
   Str base = type->parts->text; bool is_mod = type->is_mod;
   if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int")) { if (is_ptr) fprintf(out, "rae_%s_Int64", is_mod ? "Mod" : "View"); else fprintf(out, "int64_t"); return true; }
-  if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float")) { if (is_ptr) fprintf(out, "rae_%s_Float64", is_mod ? "Mod" : "View"); else fprintf(out, "double"); return true; }
+  if (str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32")) { if (is_ptr) fprintf(out, "rae_%s_Float", is_mod ? "Mod" : "View"); else fprintf(out, "float"); return true; }
+  if (str_eq_cstr(base, "Float64")) { if (is_ptr) fprintf(out, "rae_%s_Float64", is_mod ? "Mod" : "View"); else fprintf(out, "double"); return true; }
   if (str_eq_cstr(base, "Bool")) { if (is_ptr) fprintf(out, "rae_%s_Bool", is_mod ? "Mod" : "View"); else fprintf(out, "rae_Bool"); return true; }
   if (str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) { if (is_ptr) fprintf(out, "rae_%s_Char%s", is_mod ? "Mod" : "View", str_eq_cstr(base, "Char32") ? "32" : ""); else fprintf(out, "uint32_t"); return true; }
   if (str_eq_cstr(base, "String")) { if (is_ptr) fprintf(out, "rae_%s_String", is_mod ? "Mod" : "View"); else fprintf(out, "rae_String"); return true; }
@@ -637,7 +639,8 @@ const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
     }
     if (is_primitive_type(base)) {
         if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int")) return is_ptr ? (is_mod ? "rae_Mod_Int64" : "rae_View_Int64") : "int64_t";
-        if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float")) return is_ptr ? (is_mod ? "rae_Mod_Float64" : "rae_View_Float64") : "double";
+        if (str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32")) return is_ptr ? (is_mod ? "rae_Mod_Float" : "rae_View_Float") : "float";
+        if (str_eq_cstr(base, "Float64")) return is_ptr ? (is_mod ? "rae_Mod_Float64" : "rae_View_Float64") : "double";
         if (str_eq_cstr(base, "Bool")) return is_ptr ? (is_mod ? "rae_Mod_Bool" : "rae_View_Bool") : "rae_Bool";
         if (str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) return is_ptr ? (is_mod ? "rae_Mod_Char32" : "rae_View_Char32") : "uint32_t";
         if (str_eq_cstr(base, "String")) return is_ptr ? (is_mod ? "rae_Mod_String" : "rae_View_String") : "rae_String";
