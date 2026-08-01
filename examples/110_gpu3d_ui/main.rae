@@ -11,6 +11,7 @@ import scene3d_file
 import sdl3
 import vec3
 open gpu3d
+open renderer3d
 open math3d
 open mesh3d
 open scene3d
@@ -341,6 +342,14 @@ func main() ret Int {
   var simTime: Float = 0.0
   # Epoch seconds must stay Float64 (see docs/primitive-types.md); only the
   # small per-frame delta is narrowed to Float.
+  # Frame declared as a render graph with a load-preserving UI overlay.
+  var renderer: Renderer3d = createRenderer3dWithUi()
+  let gstatus: Int = compileRenderer(r: renderer)
+  if gstatus is not 0 {
+    log("render graph invalid: {gstatus}")
+    ret 1
+  }
+
   var lastFrame: Float64 = gpu2d.nowSeconds()
   var fpsAccum: Float = 0.0
   var fpsFrames: Int = 0
@@ -447,14 +456,29 @@ func main() ret Int {
     }
 
     let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
-    beginScene(camera: camera, light: light, aspect: aspect, time: simTime)
-    if uiState.activeScene is 1 { renderScene(scene: scene1.scene) }
-    if uiState.activeScene is 2 { renderScene(scene: scene2.scene) }
-    if uiState.activeScene is 3 { renderScene(scene: scene3.scene) }
-    endPass()
-    gpu2d.beginFrameLoad()
-    renderSystemGpu2d(world: uiWorld, res: gpuUi)
-    gpu2d.endFrame()
+    # Frame order is DERIVED by the render graph (#331/#332): scene3d
+    # writes the colour target, the UI overlay MODIFIES it (load-preserving),
+    # present reads it. The passes are declared backwards in
+    # createRenderer3dWithUi; this loop runs them in dependency order.
+    var pi3: Int = 0
+    loop pi3 < frameOrderLength(r: renderer) {
+      let tag: Int = frameTagAt(r: renderer, i: pi3)
+      if tag is tagScenePass {
+        beginScene(camera: camera, light: light, aspect: aspect, time: simTime)
+        if uiState.activeScene is 1 { renderScene(scene: scene1.scene) }
+        if uiState.activeScene is 2 { renderScene(scene: scene2.scene) }
+        if uiState.activeScene is 3 { renderScene(scene: scene3.scene) }
+        endPass()
+      }
+      if tag is tagUiOverlay {
+        gpu2d.beginFrameLoad()
+        renderSystemGpu2d(world: uiWorld, res: gpuUi)
+      }
+      if tag is tagPresent {
+        gpu2d.endFrame()
+      }
+      pi3 = pi3 + 1
+    }
   }
   shutdown()
   gpu2d.closeWindow()

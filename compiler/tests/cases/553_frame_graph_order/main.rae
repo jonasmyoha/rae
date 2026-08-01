@@ -14,4 +14,14 @@ func main() {
   let st: Int = compileRenderer(r: r)
   log("status={statusName(status: st)}")
   log("{describeFrame(r: r)}")
+
+  # Three-pass frame with a load-preserving UI overlay. Declared
+  # present -> ui -> scene, i.e. exactly backwards. The overlay MODIFIES
+  # the colour target (read-modify-write), which must order it after the
+  # scene that writes it and before the present that reads it — and must
+  # NOT be rejected as a second writer.
+  var ru: Renderer3d = createRenderer3dWithUi()
+  let stu: Int = compileRenderer(r: ru)
+  log("ui-status={statusName(status: stu)}")
+  log("{describeFrame(r: ru)}")
 }
