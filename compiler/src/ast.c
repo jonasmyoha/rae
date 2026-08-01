@@ -243,6 +243,11 @@ static void dump_expr(const AstExpr* expr, FILE* out) {
       dump_expr(expr->as.binary.rhs, out);
       fputc(')', out);
       break;
+    case AST_EXPR_CAST:
+      fputs("(", out);
+      dump_expr(expr->as.cast.operand, out);
+      fputs(" as ...)", out);
+      break;
     case AST_EXPR_UNARY:
       fputc('(', out);
       fputs(unary_op_name(expr->as.unary.op), out);

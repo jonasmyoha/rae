@@ -345,7 +345,8 @@ func main() {
     var cachedHistoryWindow: Int = 0 - 1
     let uiRefresh: UiRefreshCache = createUiRefreshCache(historyLen: 0, playbackRevision: playback.revision, sheetEpoch: 0)
     var lastHoverAnimDirty: Bool = false
-    var lastFrameTime: Float = 0.0
+    # Absolute timestamps -> Float64 (see docs/primitive-types.md).
+    var lastFrameTime: Float64 = 0.0
     # InputSystem outlives world rebuilds so a held press carries
     # `pressedEntity` across them. Cleared on screen change.
     let input: InputSystem = createInputSystem()
@@ -373,7 +374,8 @@ func main() {
     # Active-render window: any activity keeps the loop rendering at
     # display cadence for 0.5s (then idle), so animation tails don't
     # depend on dirty-detection and stutter. Idle = event-wait.
-    var renderUntil: Float = 0.0
+    # Absolute deadline compared against nowSeconds() -> Float64.
+    var renderUntil: Float64 = 0.0
 
     loop running {
       let profileKeyAtBuild: String = profileAvatarKey()
@@ -525,7 +527,7 @@ func main() {
         # Suppress the playback-driven 60Hz animation gate while the
         # user is wheel-scrolling (the per-frame playback tick competed
         # with scroll). Progress resumes ~250ms after the last wheel tick.
-        let scrollActiveTimeSec: Float = uiNowSeconds() - scrollFsm.lastWheelTime
+        let scrollActiveTimeSec: Float = (uiNowSeconds() - scrollFsm.lastWheelTime) as Float
         let recentlyScrolling: Bool = scrollActiveTimeSec < 0.25
         var playbackAnimating: Bool = false
         if playback.isPlaying {
@@ -553,7 +555,7 @@ func main() {
         # actually fires on time — otherwise an idle iteration could
         # sleep for `idleCapSec` (30 s) past the requested exit time.
         if autoExitSec > 0.0 {
-          let elapsed: Float = uiNowSeconds() - bootTime
+          let elapsed: Float = (uiNowSeconds() - bootTime) as Float
           let remaining: Float = autoExitSec - elapsed
           if remaining < timeout {
             timeout = remaining
@@ -564,7 +566,7 @@ func main() {
         }
         let preWait: Float64 = uiNowSeconds()
         uiWaitEvents(timeoutSec: timeout)
-        let waitDt: Float = uiNowSeconds() - preWait
+        let waitDt: Float = (uiNowSeconds() - preWait) as Float
         if waitTraceEnabled {
           if waitDt > 0.005 {
             log("[wait] dt={waitDt} timeout={timeout}")
@@ -770,7 +772,7 @@ func main() {
             applyPlaybackFrame = true
           }
           if playback.isPlaying {
-            let wheelAgeSec: Float = now - scrollFsm.lastWheelTime
+            let wheelAgeSec: Float = (now - scrollFsm.lastWheelTime) as Float
             if wheelAgeSec >= 0.25 {
               applyPlaybackFrame = true
             }
@@ -875,7 +877,7 @@ func main() {
           let currentHovered: EntityId = activeDecision.currentHovered
           let currentMouseBtns: Int = activeDecision.currentMouseBtns
           syncDesktopCursor(world: world, hovered: currentHovered, lastKind: lastCursorKind)
-          lastHoverAnimDirty = hoverScaleSystem(world: world, hovered: currentHovered, dt: now - lastFrameTime)
+          lastHoverAnimDirty = hoverScaleSystem(world: world, hovered: currentHovered, dt: (now - lastFrameTime) as Float)
           lastFrameTime = now
           if lastHoverAnimDirty { active = true }
           # Any activity this frame extends the active-render window.

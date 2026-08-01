@@ -143,6 +143,7 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
             break;
         }
         case AST_EXPR_BINARY: discover_specializations_expr_impl(ctx, expr->as.binary.lhs); discover_specializations_expr_impl(ctx, expr->as.binary.rhs); break;
+        case AST_EXPR_CAST: discover_specializations_expr_impl(ctx, expr->as.cast.operand); break;
         case AST_EXPR_UNARY: discover_specializations_expr_impl(ctx, expr->as.unary.operand); break;
         case AST_EXPR_MEMBER: discover_specializations_expr_impl(ctx, expr->as.member.object); break;
         case AST_EXPR_INDEX: discover_specializations_expr_impl(ctx, expr->as.index.target); discover_specializations_expr_impl(ctx, expr->as.index.index); break;

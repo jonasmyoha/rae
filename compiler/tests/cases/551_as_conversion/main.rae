@@ -1,0 +1,50 @@
+# `as` explicit numeric conversion + the no-implicit-conversion rule.
+# Rae has NO implicit numeric conversions: every change of numeric
+# representation is written out. See docs/primitive-types.md.
+import core
+
+func takesFloat(v: view Float) ret Float {
+  ret v * 2.0
+}
+
+func takesF64(v: view Float64) ret Float64 {
+  ret v * 2.0
+}
+
+func main() {
+  # Contextually typed literals need NO cast — a literal is materialised
+  # directly in the destination type, it is not a converted runtime value.
+  let a: Float = 1.5
+  let b: Float64 = 1.5
+  let i: Int = 42
+
+  # Float and Float32 are the SAME type: assigning between them is not a
+  # conversion and needs no `as`.
+  let alias: Float32 = a
+  let back: Float = alias
+
+  # Explicit narrowing and widening.
+  let narrowed: Float = b as Float
+  let widened: Float64 = a as Float64
+
+  # Int <-> Float, both directions, explicit.
+  let fromInt: Float = i as Float
+  let toInt: Int = a as Int
+
+  # `as` inside a larger expression binds tighter than binary operators,
+  # so this is (b as Float) * 2.0, not b as (Float * 2.0).
+  let expr: Float = b as Float * 2.0
+
+  # Chained conversion.
+  let chained: Float64 = i as Float as Float64
+
+  # Conversions at call boundaries.
+  let called: Float = takesFloat(v: b as Float)
+  let called64: Float64 = takesF64(v: a as Float64)
+
+  log("a={a} b={b} alias={alias} back={back}")
+  log("narrowed={narrowed} widened={widened}")
+  log("fromInt={fromInt} toInt={toInt}")
+  log("expr={expr} chained={chained}")
+  log("called={called} called64={called64}")
+}

@@ -133,6 +133,7 @@ typedef enum {
   AST_EXPR_NONE,
   AST_EXPR_BINARY,
   AST_EXPR_UNARY,
+  AST_EXPR_CAST,  // `value as Type` — explicit numeric conversion
   AST_EXPR_CALL,
   AST_EXPR_MEMBER,
   AST_EXPR_OBJECT, // This now maps to AstObjectLiteral
@@ -200,6 +201,12 @@ struct AstExpr {
       AstExpr* operand;
       AstUnaryOp op;
     } unary;
+    /* `value as Type`. Rae has NO implicit numeric conversions, so every
+     * change of numeric representation is one of these nodes. */
+    struct {
+      AstExpr* operand;
+      AstTypeRef* target;
+    } cast;
     struct {
       AstExpr* callee;
       AstCallArg* args;

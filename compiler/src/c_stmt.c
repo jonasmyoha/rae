@@ -366,6 +366,8 @@ static int count_ident_refs_expr(const AstExpr* e, Str name) {
              count_ident_refs_expr(e->as.binary.rhs, name);
     case AST_EXPR_UNARY:
       return count_ident_refs_expr(e->as.unary.operand, name);
+    case AST_EXPR_CAST:
+      return count_ident_refs_expr(e->as.cast.operand, name);
     case AST_EXPR_CALL:
       return count_ident_refs_expr(e->as.call.callee, name) +
              count_ident_refs_args(e->as.call.args, name);
