@@ -5,13 +5,13 @@
  * the surface + persistent offscreen target and present/screenshot
  * machinery (runtime_gpu2d_platform.c / runtime_gpu2d_frame.c).
  *
- * Frame model: gpu3d owns the whole frame (an app uses EITHER the 2D
- * beginFrame/endFrame OR gpu3d begin/end per frame). The 3D pass renders
+ * Frame model: gpu3d can own a standalone frame through begin/end, or submit
+ * without presenting so gpu2d can append one load-preserving UI pass. The 3D pass renders
  * into a 4x MSAA color target with a Depth32Float attachment and
  * RESOLVES into the same persistent offscreen texture the 2D path uses
  * (g_g2d_off_view), so present-to-surface and the RAE_GPU2D_SCREENSHOT
- * headless readback keep working unchanged. A later milestone draws the
- * 2D pass on top (LoadOp_Load) for HUD/text overlays.
+ * headless readback keep working unchanged. gpu2d's LoadOp_Load overlay path
+ * then screenshots and presents the composed frame exactly once.
  *
  * Draw model: meshes are immutable vertex/index buffers (interleaved
  * pos3/nrm3/uv2 float32). Per-draw uniforms (model matrix + material)
@@ -387,10 +387,9 @@ void rae_ext_gpu3d_draw(int64_t mesh, const double* model,
     g3d_draw_count++;
 }
 
-/* End the 3D frame: upload the accumulated per-draw uniforms (queue
- * writes execute before the submitted pass), submit, then reuse the 2D
- * path's screenshot + present-from-offscreen behavior. */
-void rae_ext_gpu3d_end(void) {
+/* Finish and submit the 3D pass. The caller decides whether to present now or
+ * append a load-preserving gpu2d/UI pass first. */
+static int rae_g3d_finish_pass(void) {
     if (getenv("RAE_GPU3D_DEBUG")) {
         static int logged = 0;
         if (!logged) {
@@ -404,7 +403,7 @@ void rae_ext_gpu3d_end(void) {
             logged = 1;
         }
     }
-    if (!g3d_pass) return;
+    if (!g3d_pass) return 0;
     if (g3d_draw_count > 0) {
         wgpuQueueWriteBuffer(g_wgpu_queue, g3d_draw_sbuf, 0, g3d_draw_cpu,
                              (size_t)g3d_draw_count * G3D_DRAW_FLOATS * sizeof(float));
@@ -415,6 +414,17 @@ void rae_ext_gpu3d_end(void) {
     wgpuCommandBufferRelease(cb);
     wgpuRenderPassEncoderRelease(g3d_pass); g3d_pass = NULL;
     wgpuCommandEncoderRelease(g3d_enc); g3d_enc = NULL;
+    return 1;
+}
+
+void rae_ext_gpu3d_submit(void) {
+    if (rae_g3d_finish_pass()) rae_wgpu_poll(0);
+}
+
+/* End the standalone 3D frame and reuse the 2D path's screenshot +
+ * present-from-offscreen behavior. UI composition uses endPass instead. */
+void rae_ext_gpu3d_end(void) {
+    if (!rae_g3d_finish_pass()) return;
 
     if (g_sdl_headless_ms > 0) {
         const char* shot = getenv("RAE_GPU2D_SCREENSHOT");
