@@ -46,9 +46,6 @@ type CameraController {
   freePitch: Float
   distance: Float
   freePosition: Vec3
-  uiRevision: Int
-  appliedUiRevision: Int
-  telemetryElapsed: Float
 }
 
 func createCameraController(camera: view Camera3d) ret CameraController {
@@ -59,9 +56,6 @@ func createCameraController(camera: view Camera3d) ret CameraController {
     freePitch: 0.0 - 0.38
     distance: 12.5
     freePosition: camera.position
-    uiRevision: 1
-    appliedUiRevision: 0
-    telemetryElapsed: 0.0
   }
 }
 
@@ -88,7 +82,7 @@ type DemoUiResource {
   appliedRevision: Int
   fpsRevision: Int
   appliedFpsRevision: Int
-  frameMs: Float
+  fps: Int
 }
 
 func createDemoUiResource() ret DemoUiResource {
@@ -100,7 +94,7 @@ func createDemoUiResource() ret DemoUiResource {
     appliedRevision: 0
     fpsRevision: 1
     appliedFpsRevision: 0
-    frameMs: 0.0
+    fps: 0
   }
 }
 
@@ -147,24 +141,17 @@ func syncDemoUi(world: mod UiWorld, state: mod DemoUiResource) ret Bool {
     layoutDirty = true
   }
   if state.appliedFpsRevision is not state.fpsRevision {
-    setNodeText(world: world, nodeId: "FpsLabel", value: "Frame time: {state.frameMs} ms")
+    setNodeText(world: world, nodeId: "FpsLabel", value: "fps: {state.fps}")
     state.appliedFpsRevision = state.fpsRevision
   }
   ret layoutDirty
 }
 
 func syncCameraUi(world: mod UiWorld, controller: mod CameraController, camera: view Camera3d) {
-  if controller.appliedUiRevision is controller.uiRevision { ret }
   var modeName: String = "Orbit"
-  var buttonLabel: String = "Switch to WASD free camera"
-  var hint: String = "Orbit: W/S zoom  A/D rotate"
-  var statusHint: String = "Drag to orbit | wheel or W/S zoom"
   var pitchDeg: Int = (controller.orbitPitch * 57.2957795).toInt()
   if controller.mode is CameraMode.free {
-    modeName = "WASD free"
-    buttonLabel = "Switch to orbit camera"
-    hint = "Free: W/S move  A/D strafe  Q/E down/up"
-    statusHint = "Drag to look | WASD move | Q/E vertical"
+    modeName = "WASD"
     pitchDeg = (controller.freePitch * 57.2957795).toInt()
   }
   let yawDeg: Int = (controller.yaw * 57.2957795).toInt()
@@ -172,14 +159,11 @@ func syncCameraUi(world: mod UiWorld, controller: mod CameraController, camera: 
   let px: Int = camera.position.x.toInt()
   let py: Int = camera.position.y.toInt()
   let pz: Int = camera.position.z.toInt()
-  setNodeText(world: world, nodeId: "CameraModeLabel", value: "Mode: {modeName}")
-  setNodeText(world: world, nodeId: "CameraFovLabel", value: "Vertical FOV: {fovDeg} deg")
-  setNodeText(world: world, nodeId: "CameraPositionLabel", value: "Position: {px}, {py}, {pz}")
-  setNodeText(world: world, nodeId: "CameraAnglesLabel", value: "Yaw: {yawDeg} deg  Pitch: {pitchDeg} deg")
-  setNodeText(world: world, nodeId: "CameraHint", value: hint)
-  setNodeText(world: world, nodeId: "CameraModeButtonLabel", value: buttonLabel)
-  setNodeText(world: world, nodeId: "HintLabel", value: statusHint)
-  controller.appliedUiRevision = controller.uiRevision
+  setNodeText(world: world, nodeId: "CameraModeLabel", value: modeName)
+  setNodeText(world: world, nodeId: "CameraFovLabel", value: "FOV {fovDeg}°")
+  setNodeText(world: world, nodeId: "CameraPositionLabel", value: "Pos {px}, {py}, {pz}")
+  setNodeText(world: world, nodeId: "CameraYawLabel", value: "Yaw {yawDeg}°")
+  setNodeText(world: world, nodeId: "CameraPitchLabel", value: "Pitch {pitchDeg}°")
 }
 
 func toggleCameraMode(controller: mod CameraController, camera: mod Camera3d) {
@@ -195,7 +179,6 @@ func toggleCameraMode(controller: mod CameraController, camera: mod Camera3d) {
     camera.target = vec3.vadd(a: controller.freePosition, b: vec3.vscale(a: forward, s: controller.distance))
     controller.mode = CameraMode.orbit
   }
-  controller.uiRevision = controller.uiRevision + 1
 }
 
 func dispatchUiActions(input: view UiInput, state: mod DemoUiResource, controller: mod CameraController, camera: mod Camera3d) {
@@ -369,12 +352,7 @@ func main() ret Int {
       camera.position = cameraController.freePosition
       camera.target = vec3.vadd(a: camera.position, b: forward)
     }
-    cameraController.telemetryElapsed = cameraController.telemetryElapsed + dt
-    if cameraController.telemetryElapsed >= 0.15 {
-      cameraController.telemetryElapsed = 0.0
-      cameraController.uiRevision = cameraController.uiRevision + 1
-      syncCameraUi(world: uiWorld, controller: cameraController, camera: camera)
-    }
+    syncCameraUi(world: uiWorld, controller: cameraController, camera: camera)
     light.sunDir = vec3.create(x: 0.0 - math.cos(x: simTime * 0.22) * 0.7, y: 0.0 - 0.7 - math.sin(x: simTime * 0.22) * 0.25, z: 0.0 - 1.0)
     var torusTransform: Transform3d = scene.transforms.at(index: torusEntity)
     torusTransform.rotation = vec3.create(x: simTime * 0.35, y: 0.0, z: simTime * 0.62)
@@ -383,7 +361,7 @@ func main() ret Int {
     fpsAccum = fpsAccum + dt
     fpsFrames = fpsFrames + 1
     if fpsAccum >= 0.5 {
-      uiState.frameMs = (fpsAccum * 1000.0) / fpsFrames.toFloat()
+      uiState.fps = (fpsFrames.toFloat() / fpsAccum + 0.5).toInt()
       uiState.fpsRevision = uiState.fpsRevision + 1
       fpsAccum = 0.0
       fpsFrames = 0

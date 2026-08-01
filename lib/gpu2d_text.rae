@@ -53,7 +53,7 @@ func emitRange(font: view SdfFont, text: view String, start: copy Int, end: copy
             }
             pen = pen + g.advance * scale
         }
-        i = i + 1
+        i = i + sdf_text.sdfUtf8ByteWidth(cp: cp)
     }
     ret pen
 }
@@ -116,7 +116,7 @@ func drawTextWrappedEx(font: view SdfFont, text: view String, x: copy Float, y: 
                 width = 0.0
             } else {
                 width = width + advance
-                i = i + 1
+                i = i + sdf_text.sdfUtf8ByteWidth(cp: cp)
             }
         }
     }
