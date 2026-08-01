@@ -20,7 +20,7 @@ Controls: `W/S/A/D/E/Q` move, arrow keys or left-drag look, `1/2/3` select
 - The Compiled backend can drive an interactive SDL3 + WebGPU frame loop.
 - Scene state is data-oriented: identity/renderable, transform, and material
   arrays are extracted into a stable GPU buffer in one O(n) pass.
-- WGSL supplies procedural sphere/box/torus geometry, quintic value noise and
+- WGSL supplies procedural sphere/box/torus geometry, shared quintic value noise and
   FBM, soft shadows, SDF ambient occlusion, metal/rough PBR-inspired lighting,
   HDR-ish shading, filmic tonemapping, and scalable supersampling.
 
