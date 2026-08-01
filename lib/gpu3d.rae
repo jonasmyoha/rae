@@ -31,6 +31,11 @@
 # draw until the inverse-transpose normal matrix lands. Tonemapping also
 # happens inside the material shader, which makes the output effectively
 # LDR; a separate HDR target + tonemap pass is queued.
+#
+# DRAW CAPACITY: the backend accepts at most 4096 mesh draws per frame.
+# Additional draws are safely discarded and emit one renderer-lifetime error
+# instead of failing silently. `RAE_GPU3D_DRAW_LIMIT=N` can lower the effective
+# limit for diagnostics/tests, but cannot raise the hard capacity.
 import core
 import math
 open vec3
