@@ -232,18 +232,18 @@ func buildScene1(sphere: view MeshHandle, torus: view MeshHandle, ground: view M
   let red: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.88, y: 0.20, z: 0.14), metallic: 0.72, roughness: 0.20, emission: zero)
   let teal: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.08, y: 0.58, z: 0.55), metallic: 0.32, roughness: 0.32, emission: zero)
   let gold: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.95, y: 0.58, z: 0.12), metallic: 0.92, roughness: 0.16, emission: vec3.create(x: 0.05, y: 0.018, z: 0.0))
-  let metaball: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.48, y: 0.12, z: 0.82), metallic: 0.58, roughness: 0.19, emission: vec3.create(x: 0.025, y: 0.004, z: 0.055))
+  let metaball: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.04, y: 0.36, z: 0.92), metallic: 0.72, roughness: 0.14, emission: vec3.create(x: 0.0, y: 0.018, z: 0.075))
   let floor: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.20, y: 0.23, z: 0.28), metallic: 0.05, roughness: 0.86, emission: zero)
   let left: Int = addMeshInstance(scene: scene, mesh: sphere, material: red, position: vec3.create(x: 0.0 - 2.7, y: 0.0, z: 0.45), rotation: zero, scale: unit)
   let right: Int = addMeshInstance(scene: scene, mesh: sphere, material: teal, position: vec3.create(x: 2.7, y: 0.0, z: 0.45), rotation: zero, scale: unit)
   let center: Int = addMeshInstance(scene: scene, mesh: torus, material: gold, position: vec3.create(x: 0.0, y: 0.0, z: 1.35), rotation: zero, scale: unit)
   let plane: Int = addMeshInstance(scene: scene, mesh: ground, material: floor, position: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.75), rotation: zero, scale: unit)
-  let ballScale: Vec3 = vec3.create(x: 0.78, y: 0.78, z: 0.78)
-  let ball1: Int = addSdfInstance(scene: scene, shape: 0, material: metaball, position: vec3.create(x: 0.0 - 0.9, y: 2.0, z: 1.7), scale: ballScale, noise: 0.0)
-  let ball2: Int = addSdfInstance(scene: scene, shape: 0, material: metaball, position: vec3.create(x: 0.0, y: 2.1, z: 2.2), scale: ballScale, noise: 0.0)
-  let ball3: Int = addSdfInstance(scene: scene, shape: 0, material: metaball, position: vec3.create(x: 0.9, y: 2.0, z: 1.7), scale: ballScale, noise: 0.0)
-  let ball4: Int = addSdfInstance(scene: scene, shape: 0, material: metaball, position: vec3.create(x: 0.0 - 0.45, y: 2.2, z: 1.0), scale: ballScale, noise: 0.0)
-  let ball5: Int = addSdfInstance(scene: scene, shape: 0, material: metaball, position: vec3.create(x: 0.45, y: 2.2, z: 1.0), scale: ballScale, noise: 0.0)
+  let ballScale: Vec3 = vec3.create(x: 1.48, y: 1.48, z: 1.48)
+  let ball1: Int = addSdfInstance(scene: scene, shape: 0, material: metaball, position: vec3.create(x: 3.5, y: 2.1, z: 2.0), scale: ballScale, noise: 0.0)
+  let ball2: Int = addSdfInstance(scene: scene, shape: 0, material: metaball, position: vec3.create(x: 4.3, y: 2.3, z: 2.7), scale: ballScale, noise: 0.0)
+  let ball3: Int = addSdfInstance(scene: scene, shape: 0, material: metaball, position: vec3.create(x: 5.2, y: 2.1, z: 2.1), scale: ballScale, noise: 0.0)
+  let ball4: Int = addSdfInstance(scene: scene, shape: 0, material: metaball, position: vec3.create(x: 4.0, y: 2.4, z: 1.3), scale: ballScale, noise: 0.0)
+  let ball5: Int = addSdfInstance(scene: scene, shape: 0, material: metaball, position: vec3.create(x: 4.9, y: 2.4, z: 1.3), scale: ballScale, noise: 0.0)
   ret scene
 }
 
@@ -331,11 +331,11 @@ func animateScene1(scene: mod Scene3d, time: view Float) {
     var transform: Transform3d = scene.transforms.at(index: sdf.entity)
     let phase: Float = i.toFloat() * 1.2566371
     transform.position = vec3.create(
-      x: math.cos(x: time * 0.72 + phase) * (0.72 + (i % 2).toFloat() * 0.22),
-      y: 2.05 + math.sin(x: time * 0.41 + phase * 1.7) * 0.38,
-      z: 1.55 + math.sin(x: time * 0.83 + phase) * 0.72
+      x: 4.55 + math.cos(x: time * 0.72 + phase) * (1.05 + (i % 2).toFloat() * 0.24),
+      y: 2.25 + math.sin(x: time * 0.41 + phase * 1.7) * 0.45,
+      z: 2.05 + math.sin(x: time * 0.83 + phase) * 0.85
     )
-    let radius: Float = 0.72 + math.sin(x: time * 0.67 + phase * 2.0) * 0.10
+    let radius: Float = 1.45 + math.sin(x: time * 0.67 + phase * 2.0) * 0.16
     transform.scale = vec3.create(x: radius, y: radius, z: radius)
     scene.transforms.set(index: sdf.entity, value: transform)
     i = i + 1
