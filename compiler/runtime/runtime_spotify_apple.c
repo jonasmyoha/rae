@@ -401,8 +401,8 @@ rae_String rae_ext_sys_spotify_trackName(void)   { return rae_spotify_read_field
 rae_String rae_ext_sys_spotify_artistName(void)  { return rae_spotify_read_field(&g_spotify_cache.artistName); }
 rae_String rae_ext_sys_spotify_albumName(void)   { return rae_spotify_read_field(&g_spotify_cache.albumName); }
 rae_String rae_ext_sys_spotify_artworkUrl(void)  { return rae_spotify_read_field(&g_spotify_cache.artworkUrl); }
-double rae_ext_sys_spotify_position(void)        { pthread_mutex_lock(&g_spotify_mu); double v = g_spotify_cache.positionSec; pthread_mutex_unlock(&g_spotify_mu); return v; }
-double rae_ext_sys_spotify_duration(void)        { pthread_mutex_lock(&g_spotify_mu); double v = g_spotify_cache.durationSec; pthread_mutex_unlock(&g_spotify_mu); return v; }
+float rae_ext_sys_spotify_position(void){ pthread_mutex_lock(&g_spotify_mu); double v = g_spotify_cache.positionSec; pthread_mutex_unlock(&g_spotify_mu); return v; }
+float rae_ext_sys_spotify_duration(void){ pthread_mutex_lock(&g_spotify_mu); double v = g_spotify_cache.durationSec; pthread_mutex_unlock(&g_spotify_mu); return v; }
 
 /* Completeness check for a downloaded artwork file. Interrupted curl
  * writes leave truncated files (sizes are clean 4 KiB multiples), and
@@ -665,8 +665,8 @@ rae_String rae_ext_sys_spotify_trackName(void)  { return (rae_String){NULL, 0, 0
 rae_String rae_ext_sys_spotify_artistName(void) { return (rae_String){NULL, 0, 0, 0}; }
 rae_String rae_ext_sys_spotify_albumName(void)  { return (rae_String){NULL, 0, 0, 0}; }
 rae_String rae_ext_sys_spotify_artworkUrl(void) { return (rae_String){NULL, 0, 0, 0}; }
-double rae_ext_sys_spotify_position(void)       { return 0.0; }
-double rae_ext_sys_spotify_duration(void)       { return 0.0; }
+float rae_ext_sys_spotify_position(void){ return 0.0; }
+float rae_ext_sys_spotify_duration(void){ return 0.0; }
 void rae_ext_sys_spotify_playUri(rae_String uri) { (void)uri; }
 void rae_ext_sys_spotify_playQuery(rae_String query) { (void)query; }
 rae_Bool rae_ext_sys_spotify_fetchArtwork(rae_String url, rae_String outPath) { (void)url; (void)outPath; return false; }

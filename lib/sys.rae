@@ -19,7 +19,9 @@ func rae_sys_lock_file(path: String) extern ret Bool
 
 func rae_sys_unlock_file(path: String) extern ret Bool
 
-func rae_sys_file_mtime(path: String) extern ret Float
+# Epoch seconds. Float64 deliberately: a ~1.7e9 timestamp in f32 has ~128s
+# granularity, which would make file-watching useless.
+func rae_sys_file_mtime(path: String) extern ret Float64
 
 func rae_sys_rss_kb() extern ret Int
 
@@ -77,7 +79,7 @@ func unlockFile(path: view String) ret Bool {
 # (sub-second precision on platforms that support nanosecond stat).
 # Returns 0.0 if `path` does not exist or stat fails — callers should
 # treat 0.0 as "missing / unknown" rather than a real timestamp.
-func fileModTime(path: view String) ret Float {
+func fileModTime(path: view String) ret Float64 {
   ret rae_sys_file_mtime(path: path)
 }
 

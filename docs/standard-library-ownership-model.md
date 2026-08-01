@@ -47,7 +47,7 @@ specialization in ways ordinary Rae code cannot yet express.
 
 Remain compiler-known for the foreseeable future:
 
-- primitive scalars: `Int`, `Int64`, `Float`, `Float64`, `Bool`, `Char`;
+- primitive scalars: `Int`, `Int64`, `Float` (= `Float32`, f32), `Float64` (f64), `Bool`, `Char`;
 - function types and call ABI;
 - `type` parameters and generic specialization metadata;
 - `opt T` representation and unwrap checks;

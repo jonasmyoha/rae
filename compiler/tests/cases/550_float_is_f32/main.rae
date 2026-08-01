@@ -1,0 +1,43 @@
+# Rae language decision: `Float` is an ALIAS of `Float32` (IEEE-754 binary32);
+# `Float64` is the distinct high-precision type. See docs/primitive-types.md.
+#
+# The discriminator is 2^24 = 16777216, the last integer f32 represents
+# exactly: in f32, 2^24 + 1 == 2^24, while in f64 it is 16777217. Comparing
+# rather than printing keeps the check independent of float formatting.
+import core
+
+func addOneF(v: view Float) ret Float {
+  ret v + 1.0
+}
+
+func addOneD(v: view Float64) ret Float64 {
+  ret v + 1.0
+}
+
+func main() {
+  let a32: Float = 16777216.0
+  let a32b: Float32 = 16777216.0
+  let a64: Float64 = 16777216.0
+
+  # 1-3: Float has f32 semantics; Float32 spells the same type; Float64 differs.
+  if addOneF(v: a32) is a32 { log("Float f32: yes") } else { log("Float f32: NO") }
+  if addOneF(v: a32b) is a32b { log("Float32 f32: yes") } else { log("Float32 f32: NO") }
+  if addOneD(v: a64) is a64 { log("Float64 f64: NO") } else { log("Float64 f64: yes") }
+
+  # 4: Float and Float32 are interchangeable — same type, not just same width.
+  let mixed: Float32 = a32
+  let back: Float = mixed
+  if back is a32 { log("alias interchange: yes") } else { log("alias interchange: NO") }
+
+  # 5: List(Float) and List(Float32) are ONE instantiation (identical identity).
+  let lf: List(Float) = createList(Float, cap: 2)
+  lf.add(value: 1.5)
+  let l32: List(Float32) = createList(Float32, cap: 2)
+  l32.add(value: 2.5)
+  log("lists: {lf.at(index: 0)} {l32.at(index: 0)}")
+
+  # 6: explicit Float64 keeps full precision through a round trip.
+  let precise: Float64 = 0.1
+  let doubled: Float64 = precise + precise
+  if doubled > 0.19999 { log("Float64 precision: yes") } else { log("Float64 precision: NO") }
+}

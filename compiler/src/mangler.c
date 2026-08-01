@@ -57,8 +57,10 @@ const char* map_rae_type_to_c(Str type_name) {
   if (str_eq_cstr(type_name, "UInt32")) return "uint32_t";
   if (str_eq_cstr(type_name, "Id")) return "int64_t";
   if (str_eq_cstr(type_name, "Key")) return "rae_String";
-  if (str_eq_cstr(type_name, "Float64") || str_eq_cstr(type_name, "Float")) return "double";
-  if (str_eq_cstr(type_name, "Float32")) return "float";
+  /* Float IS Float32 (f32); Float64 is the distinct high-precision type.
+   * Emitted as plain C `float`/`double` — no Rae-specific numeric typedefs. */
+  if (str_eq_cstr(type_name, "Float") || str_eq_cstr(type_name, "Float32")) return "float";
+  if (str_eq_cstr(type_name, "Float64")) return "double";
   if (str_eq_cstr(type_name, "Bool")) return "rae_Bool";
   if (str_eq_cstr(type_name, "Char32")) return "uint32_t";
   if (str_eq_cstr(type_name, "String")) return "rae_String";
@@ -96,6 +98,7 @@ bool is_primitive_type(Str type_name) {
            str_eq_cstr(type_name, "uint32_t") ||
            str_eq_cstr(type_name, "double") ||
            str_eq_cstr(type_name, "float") ||
+           str_eq_cstr(type_name, "float") ||
            str_eq_cstr(type_name, "int8_t") ||
            str_eq_cstr(type_name, "rae_Bool") ||
            str_eq_cstr(type_name, "const_char_p") ||
@@ -132,14 +135,20 @@ static Str get_base_type_name(const AstTypeRef* type) {
 
 static bool mangle_primitive_ref(const AstTypeRef* type, Str base, char* buf, size_t* pos, size_t cap) {
     bool is_prim = str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int64") ||
-                   str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float64") ||
+                   str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32") ||
+                   str_eq_cstr(base, "Float64") ||
                    str_eq_cstr(base, "Bool") || str_eq_cstr(base, "String") ||
                    str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32");
 
     if (is_prim && (type->is_view || type->is_mod)) {
         *pos += snprintf(buf + *pos, cap - *pos, "rae_%s_", type->is_mod ? "Mod" : "View");
         if (str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int64")) *pos += snprintf(buf + *pos, cap - *pos, "Int64");
-        else if (str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float64")) *pos += snprintf(buf + *pos, cap - *pos, "Float64");
+        /* Float and Float32 are the same type, so they MUST mangle
+         * identically; Float64 must not collide with them (it used to,
+         * which would have given List(Float) and List(Float64) one
+         * monomorphization with different element sizes). */
+        else if (str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32")) *pos += snprintf(buf + *pos, cap - *pos, "Float");
+        else if (str_eq_cstr(base, "Float64")) *pos += snprintf(buf + *pos, cap - *pos, "Float64");
         else if (str_eq_cstr(base, "Bool")) *pos += snprintf(buf + *pos, cap - *pos, "Bool");
         else if (str_eq_cstr(base, "String")) *pos += snprintf(buf + *pos, cap - *pos, "String");
         else if (str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) *pos += snprintf(buf + *pos, cap - *pos, "Char");
@@ -181,7 +190,7 @@ static void mangle_type_recursive(CompilerContext* ctx, const struct AstIdentifi
         } else {
             *pos += snprintf(buf + *pos, cap - *pos, "%s", mapped);
         }
-    } else if (str_eq_cstr(base, "int64_t") || str_eq_cstr(base, "double") || str_eq_cstr(base, "rae_String") || str_starts_with_cstr(base, "rae_")) {
+    } else if (str_eq_cstr(base, "int64_t") || str_eq_cstr(base, "double") || str_eq_cstr(base, "float") || str_eq_cstr(base, "rae_String") || str_starts_with_cstr(base, "rae_")) {
         *pos += snprintf(buf + *pos, cap - *pos, "%.*s", (int)base.len, base.data);
     } else {
         *pos += snprintf(buf + *pos, cap - *pos, "rae_%.*s", (int)base.len, base.data);
@@ -249,7 +258,7 @@ static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct
         } else {
             *pos += snprintf(buf + *pos, cap - *pos, "%s", mapped);
         }
-    } else if (str_eq_cstr(base, "int64_t") || str_eq_cstr(base, "double") || str_eq_cstr(base, "rae_String") || str_starts_with_cstr(base, "rae_")) {
+    } else if (str_eq_cstr(base, "int64_t") || str_eq_cstr(base, "double") || str_eq_cstr(base, "float") || str_eq_cstr(base, "rae_String") || str_starts_with_cstr(base, "rae_")) {
         *pos += snprintf(buf + *pos, cap - *pos, "%.*s", (int)base.len, base.data);
     } else if (is_raylib_builtin_type(base)) {
         *pos += snprintf(buf + *pos, cap - *pos, "%.*s", (int)base.len, base.data);

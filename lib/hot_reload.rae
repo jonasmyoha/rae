@@ -106,7 +106,9 @@ type ReloadSignal {
 
 type ReloadSignalWatcher {
   path: String
-  lastMtime: Float
+  # Epoch seconds — Float64 so a ~1.7e9 timestamp keeps sub-second
+  # resolution (f32 would quantise it to ~128s and never detect a change).
+  lastMtime: Float64
 }
 
 func emptySignal() ret ReloadSignal {
@@ -123,7 +125,7 @@ func emptySignal() ret ReloadSignal {
 # version; we only react to *new* writes after the app started.
 func createReloadSignalWatcher() pub ret ReloadSignalWatcher {
   let p: String = hotReloadSignalPath()
-  let mt: Float = fileModTime(path: p)
+  let mt: Float64 = fileModTime(path: p)
   ret ReloadSignalWatcher {
     path: p
     lastMtime: mt
@@ -232,7 +234,7 @@ func parseReloadVerb(token: view String) ret ReloadVerb {
 # watcher forever, and the supervisor will write a fresh signal
 # next time around.
 func pollReloadSignal(w: mod ReloadSignalWatcher) pub ret ReloadSignal {
-  let mt: Float = fileModTime(path: w.path)
+  let mt: Float64 = fileModTime(path: w.path)
   if mt is w.lastMtime {
     ret emptySignal()
   }

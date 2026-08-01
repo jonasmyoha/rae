@@ -24,7 +24,9 @@ import core
 
 type WatchEntry {
   path: String
-  lastMtime: Float
+  # Epoch seconds — Float64 so a ~1.7e9 timestamp keeps sub-second
+  # resolution (f32 would quantise it to ~128s and never detect a change).
+  lastMtime: Float64
 }
 
 type FileWatcher {
@@ -42,7 +44,7 @@ func createFileWatcher(paths: view List(String), enabled: view Bool, intervalSec
   var i: Int = 0
   loop i < paths.length {
     let p: String = paths.get(index: i)
-    let mt: Float = fileModTime(path: p)
+    let mt: Float64 = fileModTime(path: p)
     let entry: WatchEntry = { path: p, lastMtime: mt }
     entries.add(value: entry)
     i = i + 1
@@ -75,7 +77,7 @@ func checkForChanges(watcher: mod FileWatcher, now: view Float) ret Bool {
     # to a struct without a runtime tag check. The pattern matches
     # `lib/ui/scene.rae:sceneNodeIndex`.
     let entry: WatchEntry = rae_ext_rae_buf_get(buf: watcher.entries.data, index: i)
-    let mt: Float = fileModTime(path: entry.path)
+    let mt: Float64 = fileModTime(path: entry.path)
     if mt is not entry.lastMtime {
       let updated: WatchEntry = { path: entry.path, lastMtime: mt }
       rae_ext_rae_buf_set(buf: watcher.entries.data, index: i, value: updated)

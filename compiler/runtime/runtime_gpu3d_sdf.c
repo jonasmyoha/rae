@@ -181,10 +181,10 @@ static void g3d_sdf_init_pipeline(void) {
     wgpuBindGroupLayoutRelease(bgl);
 }
 
-void rae_ext_gpu3d_drawMetaballs(const double* packedBalls, int64_t count,
-                                 double r, double g, double b,
-                                 double metallic, double roughness,
-                                 double emR, double emG, double emB) {
+void rae_ext_gpu3d_drawMetaballs(const float* packedBalls, int64_t count,
+                                 float r, float g, float b,
+                                 float metallic, float roughness,
+                                 float emR, float emG, float emB){
     if (!g3d_pass || !packedBalls || count <= 0) return;
     g3d_sdf_init_pipeline();
     if (!g3d_sdf_pipeline || !g3d_sdf_bind) return;

@@ -476,9 +476,9 @@ static float rae_sdf_median(float a, float b, float c) {
 /* sx0..sy1: dest rect in framebuffer pixels (sy0 top, sy1 bottom). au0..av1:
  * source rect in atlas pixels, top-left origin. */
 void rae_ext_sdf_text_blitGlyph(int64_t* fb, int64_t fbW, int64_t fbH, int64_t atlas,
-                          double sx0, double sy0, double sx1, double sy1,
-                          double au0, double av0, double au1, double av1,
-                          double screenPxRange, int64_t rgb) {
+                          float sx0, float sy0, float sx1, float sy1,
+                          float au0, float av0, float au1, float av1,
+                          float screenPxRange, int64_t rgb){
     if (!fb || atlas < 1 || atlas > g_sdf_atlas_n) return;
     const unsigned char* ap = g_sdf_atlas[atlas - 1];
     int aw = g_sdf_atlas_w[atlas - 1], ah = g_sdf_atlas_h[atlas - 1];

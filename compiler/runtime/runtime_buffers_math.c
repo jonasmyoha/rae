@@ -23,7 +23,7 @@ static uint32_t rae_next_u32(void) {
   return (uint32_t)(g_rae_random_state >> 32);
 }
 
-double rae_ext_rae_random(void) {
+float rae_ext_rae_random(void){
   return (double)rae_next_u32() / (double)4294967295.0;
 }
 
@@ -33,8 +33,8 @@ int64_t rae_ext_rae_random_int(int64_t min, int64_t max) {
   return min + (int64_t)(rae_next_u32() % range);
 }
 
-double rae_ext_rae_int_to_float(int64_t v) { return (double)v; }
-int64_t rae_ext_rae_float_to_int(double v) { return (int64_t)v; }
+float rae_ext_rae_int_to_float(int64_t v){ return (double)v; }
+int64_t rae_ext_rae_float_to_int(float v){ return (int64_t)v; }
 /* Debug-only bounds checking for rae_buf_get/set. Compiled in when the
  * binary is built with `-DRAE_DEBUG_BOUNDS`. Tracks (ptr -> count, elem_size)
  * in a small open-addressed hash; on every get/set the entry is looked up
@@ -214,20 +214,26 @@ RaeAny rae_ext_rae_buf_get_any(void* buf, int64_t index) {
   return ((RaeAny*)buf)[index];
 }
 
-double rae_ext_math_sin(double x) { return sin(x); }
-double rae_ext_math_cos(double x) { return cos(x); }
-double rae_ext_math_tan(double x) { return tan(x); }
-double rae_ext_math_asin(double x) { return asin(x); }
-double rae_ext_math_acos(double x) { return acos(x); }
-double rae_ext_math_atan(double x) { return atan(x); }
-double rae_ext_math_atan2(double y, double x) { return atan2(y, x); }
-double rae_ext_math_sqrt(double x) { return sqrt(x); }
-double rae_ext_math_pow(double base, double exp) { return pow(base, exp); }
-double rae_ext_math_exp(double x) { return exp(x); }
-double rae_ext_math_math_log(double x) { return log(x); }
-double rae_ext_math_floor(double x) { return floor(x); }
-double rae_ext_math_ceil(double x) { return ceil(x); }
-double rae_ext_math_round(double x) { return round(x); }
+/* lib/math.rae declares these over `Float`, which is f32 (see
+ * docs/primitive-types.md), so the C side takes and returns `float` and uses
+ * the f-suffixed libm entry points. Computing in float rather than
+ * round-tripping through double keeps the CPU result in the same
+ * representation the GPU uses, which is the point of an f32 default.
+ * Higher-precision variants belong on explicit Float64 APIs. */
+float rae_ext_math_sin(float x) { return sinf(x); }
+float rae_ext_math_cos(float x) { return cosf(x); }
+float rae_ext_math_tan(float x) { return tanf(x); }
+float rae_ext_math_asin(float x) { return asinf(x); }
+float rae_ext_math_acos(float x) { return acosf(x); }
+float rae_ext_math_atan(float x) { return atanf(x); }
+float rae_ext_math_atan2(float y, float x) { return atan2f(y, x); }
+float rae_ext_math_sqrt(float x) { return sqrtf(x); }
+float rae_ext_math_pow(float base, float exp) { return powf(base, exp); }
+float rae_ext_math_exp(float x) { return expf(x); }
+float rae_ext_math_math_log(float x) { return logf(x); }
+float rae_ext_math_floor(float x) { return floorf(x); }
+float rae_ext_math_ceil(float x) { return ceilf(x); }
+float rae_ext_math_round(float x) { return roundf(x); }
 
 /* JSON helpers for C backend */
 static const char* rae_json_find_key(const char* json, int64_t json_len, const char* key) {

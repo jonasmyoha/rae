@@ -191,14 +191,14 @@ static void rae_g2d_fill_clip_uniform(int clipidx, float* cu) {
     }
 }
 
-void rae_ext_gpu2d_pushClipRect(double x, double y, double w, double h) {
+void rae_ext_gpu2d_pushClipRect(float x, float y, float w, float h){
     rae_g2d_push_clip(x, y, w, h, 0.0);
 }
 
 /* #118: rounded clip. The box pipeline applies the rounded-rect SDF in the
  * fragment shader (analytic AA on the corners); the axis-aligned scissor
  * (#144) still bounds all pipelines to the clip bbox. */
-void rae_ext_gpu2d_pushClipRoundedRect(double x, double y, double w, double h, double radius) {
+void rae_ext_gpu2d_pushClipRoundedRect(float x, float y, float w, float h, float radius){
     rae_g2d_push_clip(x, y, w, h, radius);
 }
 
@@ -404,7 +404,7 @@ rae_Bool rae_ext_gpu2d_pollClose(void) {
  * drain. Passing NULL means SDL doesn't dequeue the event. This is the idle
  * half of the hybrid loop: busy-render while animating, park here when idle so
  * the app sits at ~0% CPU until input arrives. timeoutSec <= 0 returns at once. */
-void rae_ext_gpu2d_waitEvents(double timeoutSec) {
+void rae_ext_gpu2d_waitEvents(float timeoutSec){
     int ms = (int)(timeoutSec * 1000.0);
     if (ms < 0) ms = 0;
     SDL_WaitEventTimeout(NULL, ms);
@@ -424,14 +424,14 @@ static void rae_g2d_pointer_design(double* dx, double* dy) {
     *dx = (xf[2] != 0.0f) ? (physX - xf[4]) / xf[2] : physX;
     *dy = (xf[3] != 0.0f) ? (physY - xf[5]) / xf[3] : physY;
 }
-double rae_ext_gpu2d_pointerX(void) { double x, y; rae_g2d_pointer_design(&x, &y); return x; }
-double rae_ext_gpu2d_pointerY(void) { double x, y; rae_g2d_pointer_design(&x, &y); return y; }
+float rae_ext_gpu2d_pointerX(void){ double x, y; rae_g2d_pointer_design(&x, &y); return x; }
+float rae_ext_gpu2d_pointerY(void){ double x, y; rae_g2d_pointer_design(&x, &y); return y; }
 /* Left mouse button held this frame (button index 1 in SDL). */
 rae_Bool rae_ext_gpu2d_pointerDown(void) { return g_sdl_mouse[SDL_BUTTON_LEFT] != 0; }
 rae_Bool rae_ext_gpu2d_pointerPressed(void) { return g_sdl_mouse_pressed[SDL_BUTTON_LEFT] != 0; }
 rae_Bool rae_ext_gpu2d_pointerReleased(void) { return g_sdl_mouse_released[SDL_BUTTON_LEFT] != 0; }
 /* Per-frame wheel delta (positive = wheel/scroll up). */
-double rae_ext_gpu2d_wheelMove(void) { return (double)g_g2d_wheel; }
+float rae_ext_gpu2d_wheelMove(void){ return (double)g_g2d_wheel; }
 
 void rae_ext_gpu2d_setMouseCursor(int64_t kind) {
     if (!g_sdl_win) return;
@@ -459,7 +459,7 @@ void rae_ext_gpu2d_setMouseCursor(int64_t kind) {
 }
 /* Monotonic wall-clock seconds since process start — for scroll timing without
  * pulling in the raylib-backed getTime. */
-double rae_ext_gpu2d_nowSeconds(void) { return (double)rae_ext_nowMs() / 1000.0; }
+double rae_ext_gpu2d_nowSeconds(void){ return (double)rae_ext_nowMs() / 1000.0; }
 
 int64_t rae_ext_gpu2d_windowWidth(void) { return g_sdl_w; }
 int64_t rae_ext_gpu2d_windowHeight(void) { return g_sdl_h; }
@@ -487,12 +487,12 @@ rae_Bool rae_ext_gpu2d_windowResized(void) {
 }
 
 /* Coordinate system (#112). */
-void rae_ext_gpu2d_setDesignResolution(double w, double h, int64_t fit) {
+void rae_ext_gpu2d_setDesignResolution(float w, float h, int64_t fit){
     g_g2d_design_w = w; g_g2d_design_h = h; g_g2d_fit_mode = (int)fit;
 }
-double rae_ext_gpu2d_designWidth(void)  { return (g_g2d_design_w > 0.0) ? g_g2d_design_w : (double)g_sdl_w; }
-double rae_ext_gpu2d_designHeight(void) { return (g_g2d_design_h > 0.0) ? g_g2d_design_h : (double)g_sdl_h; }
-double rae_ext_gpu2d_dpr(void) {
+float rae_ext_gpu2d_designWidth(void){ return (g_g2d_design_w > 0.0) ? g_g2d_design_w : (double)g_sdl_w; }
+float rae_ext_gpu2d_designHeight(void){ return (g_g2d_design_h > 0.0) ? g_g2d_design_h : (double)g_sdl_h; }
+float rae_ext_gpu2d_dpr(void){
     int lw = 0, lh = 0; if (g_sdl_win) SDL_GetWindowSize(g_sdl_win, &lw, &lh);
     (void)lh; return (lw > 0) ? (double)g_sdl_w / (double)lw : 1.0;
 }
