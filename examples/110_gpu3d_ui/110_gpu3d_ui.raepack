@@ -1,0 +1,25 @@
+pack Gpu3dUi {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "3D Renderer — ECS Scene UI"
+  description: "A WebGPU PBR scene composed with a persistent ECS UI loaded from .raescene files. Demonstrates UI-priority input, typed narrow state refresh, pause/settings overlays, MSDF text and icons, and one native or browser present."
+  category: "3D Renderer"
+  wasmWebApp: "true"
+  display: {
+    width: 1280
+    height: 800
+  }
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "main.rae"
+      sources: { source: { path: ".", emit: compiled } }
+    }
+    target wasm: {
+      label: "WASM (WebGPU)"
+      entry: "main.rae"
+      sources: { source: { path: ".", emit: compiled } }
+    }
+  }
+}
