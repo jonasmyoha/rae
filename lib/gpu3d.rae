@@ -1,4 +1,4 @@
-# gpu3d — raster backend of the unified 3D renderer (Assembly 2026 arc).
+# gpu3d — raster + bounded SDF backend of the unified 3D renderer.
 #
 # Renders `scene3d` triangle meshes (MeshRenderer components) with PBR
 # lighting through wgpu-native into the same SDL3 window/surface gpu2d
@@ -32,6 +32,11 @@
 # happens inside the material shader, which makes the output effectively
 # LDR; a separate HDR target + tonemap pass is queued.
 #
+# Sphere SdfPrimitive components are submitted as one smooth-union metaball
+# group using the first primitive's material. The fragment raymarch pass writes
+# depth into the same attachment as meshes, so both geometry types occlude.
+# Other SDF shapes and multiple material groups remain follow-up work.
+#
 # DRAW CAPACITY: the backend accepts at most 4096 mesh draws per frame.
 # Additional draws are safely discarded and emit one renderer-lifetime error
 # instead of failing silently. `RAE_GPU3D_DRAW_LIMIT=N` can lower the effective
@@ -46,6 +51,7 @@ open math3d
 func meshCreate(verts: view Buffer(Float), vertCount: Int, indices: view Buffer(Int), indexCount: Int) extern ret Int
 func begin(frame: view Buffer(Float), count: Int) extern
 func draw(mesh: Int, model: view Buffer(Float), r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
+func drawMetaballs(packedBalls: view Buffer(Float), count: Int, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
 func end() extern
 func submit() extern
 func shutdown() extern
@@ -145,8 +151,8 @@ func drawInstance(mesh: view MeshHandle, transform: view Transform3d, material: 
   )
 }
 
-# Render every visible MeshRenderer in a scene. This is the world-oriented
-# entry point — apps should not hand-roll a per-entity draw loop.
+# Render visible mesh components, then depth-integrated sphere SDF components.
+# This is the world-oriented entry point; apps do not submit geometry manually.
 func renderScene(scene: view Scene3d) pub {
   var i: Int = 0
   loop i < scene.meshRenderers.length {
@@ -157,6 +163,34 @@ func renderScene(scene: view Scene3d) pub {
       drawInstance(mesh: r.mesh, transform: t, material: m)
     }
     i = i + 1
+  }
+  if scene.sdfPrimitives.length > 0 {
+    let packed: List(Float) = createList(Float, cap: scene.sdfPrimitives.length * 4)
+    var materialIndex: Int = 0
+    var ballCount: Int = 0
+    i = 0
+    loop i < scene.sdfPrimitives.length {
+      let sdf: SdfPrimitive = scene.sdfPrimitives.at(index: i)
+      if sdf.shape is 0 {
+        let transform: Transform3d = scene.transforms.at(index: sdf.entity)
+        packed.add(value: transform.position.x)
+        packed.add(value: transform.position.y)
+        packed.add(value: transform.position.z)
+        packed.add(value: transform.scale.x)
+        if ballCount is 0 { materialIndex = sdf.material }
+        ballCount = ballCount + 1
+      }
+      i = i + 1
+    }
+    if ballCount > 0 {
+      let material: Material3d = scene.materials.at(index: materialIndex)
+      drawMetaballs(
+        packedBalls: packed.data, count: ballCount,
+        r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
+        metallic: material.metallic, roughness: material.roughness,
+        emR: material.emission.x, emG: material.emission.y, emB: material.emission.z
+      )
+    }
   }
 }
 
