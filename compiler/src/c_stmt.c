@@ -19,7 +19,6 @@
 // File-local helpers.
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
-static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
                                      const AstExpr* value, FILE* out);
 
@@ -698,12 +697,6 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     emit_implicit_drops_for_body(ctx, out, saved_locals);
     ctx->local_count = saved_locals;
     fprintf(out, "  }\n");
-    return true;
-}
-
-static bool emit_match(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
-    (void)ctx; (void)stmt; (void)out;
-    fprintf(stderr, "warning: match stmt not yet implemented in unified C backend\n");
     return true;
 }
 

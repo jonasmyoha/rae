@@ -166,7 +166,9 @@ static Value value_to_string_internal(Value val) {
           if (i > 0) offset += snprintf(buf + offset, sizeof(buf) - offset, ", ");
           Value field_str = value_to_string_internal(val.as.object_value.fields[i]);
           if (field_str.type == VAL_STRING) {
-              offset += snprintf(buf + offset, sizeof(buf) - offset, "%.*s", (int)field_str.as.string_value.length, field_str.as.string_value.chars);
+              offset += snprintf(buf + offset, sizeof(buf) - offset, "%.*s",
+                                 (int)field_str.as.string_value.length,
+                                 (const char*)field_str.as.string_value.chars);
               value_free(&field_str);
           }
           if (offset >= sizeof(buf) - 10) break;
@@ -195,11 +197,13 @@ static Value value_to_string_internal(Value val) {
         strcpy(buf, "Key(\"");
         memcpy(buf + 5, val.as.key_value.chars, len);
         strcpy(buf + 5 + len, "\")");
-        Value res = value_string_take(buf, len + 7);
+        Value res = value_string_take((uint8_t*)buf, len + 7);
         return res;
       }
       return value_string_copy("<key:error>", 11);
     }
+    case VAL_TASK:
+      return value_string_copy("<task>", 6);
   }
   return value_string_copy("?", 1);
 }
@@ -344,6 +348,13 @@ static const Value* deref_value(const Value* v) {
     return v;
 }
 
+static rae_String vm_string_view(const Value* value) {
+  return (rae_String){
+      .data = value->as.string_value.chars,
+      .len = value->as.string_value.length,
+  };
+}
+
 static bool native_rae_str_concat(struct VM* vm,
                                 VmNativeResult* out_result,
                                 const Value* args,
@@ -356,8 +367,8 @@ static bool native_rae_str_concat(struct VM* vm,
   Value a_str_obj = value_to_string_object(args[0]);
   Value b_str_obj = value_to_string_object(args[1]);
   
-  rae_String a = { a_str_obj.as.string_value.chars, a_str_obj.as.string_value.length };
-  rae_String b = { b_str_obj.as.string_value.chars, b_str_obj.as.string_value.length };
+  rae_String a = vm_string_view(&a_str_obj);
+  rae_String b = vm_string_view(&b_str_obj);
   rae_String res = rae_ext_rae_str_concat(a, b);
 
   out_result->has_value = true;
@@ -380,7 +391,7 @@ static bool native_rae_str_len(struct VM* vm, VmNativeResult* out_result, const 
 
   if (s_val->type != VAL_STRING) return false;
 
-  rae_String s = { s_val->as.string_value.chars, s_val->as.string_value.length };
+  rae_String s = vm_string_view(s_val);
 
   out_result->has_value = true;
 
@@ -402,9 +413,9 @@ static bool native_rae_str_compare(struct VM* vm, VmNativeResult* out_result, co
 
   if (a_val->type != VAL_STRING || b_val->type != VAL_STRING) return false;
 
-  rae_String a = { a_val->as.string_value.chars, a_val->as.string_value.length };
+  rae_String a = vm_string_view(a_val);
 
-  rae_String b = { b_val->as.string_value.chars, b_val->as.string_value.length };
+  rae_String b = vm_string_view(b_val);
 
   out_result->has_value = true;
 
@@ -425,7 +436,7 @@ static bool native_rae_str_sub(struct VM* vm,
   const Value* start_val = deref_value(&args[1]);
   const Value* len_val = deref_value(&args[2]);
   if (s_val->type != VAL_STRING || start_val->type != VAL_INT || len_val->type != VAL_INT) return false;
-  rae_String s = { s_val->as.string_value.chars, s_val->as.string_value.length };
+  rae_String s = vm_string_view(s_val);
   rae_String res = rae_ext_rae_str_sub(s, start_val->as.int_value, len_val->as.int_value);
   out_result->has_value = true;
   out_result->value = value_string_take(res.data, (size_t)res.len);
@@ -444,7 +455,7 @@ static bool native_rae_string_copy(struct VM* vm,
   if (arg_count != 1) return false;
   const Value* s_val = deref_value(&args[0]);
   if (s_val->type != VAL_STRING) return false;
-  rae_String s = { s_val->as.string_value.chars, s_val->as.string_value.length };
+  rae_String s = vm_string_view(s_val);
   rae_String res = rae_string_copy(s);
   out_result->has_value = true;
   out_result->value = value_string_take(res.data, (size_t)res.len);
@@ -461,8 +472,8 @@ static bool native_rae_str_contains(struct VM* vm,
   const Value* s_val = deref_value(&args[0]);
   const Value* sub_val = deref_value(&args[1]);
   if (s_val->type != VAL_STRING || sub_val->type != VAL_STRING) return false;
-  rae_String s = { s_val->as.string_value.chars, s_val->as.string_value.length };
-  rae_String sub = { sub_val->as.string_value.chars, sub_val->as.string_value.length };
+  rae_String s = vm_string_view(s_val);
+  rae_String sub = vm_string_view(sub_val);
   out_result->has_value = true;
   out_result->value = value_bool(rae_ext_rae_str_contains(s, sub));
   return true;
@@ -478,8 +489,8 @@ static bool native_rae_str_starts_with(struct VM* vm,
   const Value* s_val = deref_value(&args[0]);
   const Value* prefix_val = deref_value(&args[1]);
   if (s_val->type != VAL_STRING || prefix_val->type != VAL_STRING) return false;
-  rae_String s = { s_val->as.string_value.chars, s_val->as.string_value.length };
-  rae_String pre = { prefix_val->as.string_value.chars, prefix_val->as.string_value.length };
+  rae_String s = vm_string_view(s_val);
+  rae_String pre = vm_string_view(prefix_val);
   out_result->has_value = true;
   out_result->value = value_bool(rae_ext_rae_str_starts_with(s, pre));
   return true;
@@ -495,8 +506,8 @@ static bool native_rae_str_ends_with(struct VM* vm,
   const Value* s_val = deref_value(&args[0]);
   const Value* suffix_val = deref_value(&args[1]);
   if (s_val->type != VAL_STRING || suffix_val->type != VAL_STRING) return false;
-  rae_String s = { s_val->as.string_value.chars, s_val->as.string_value.length };
-  rae_String suf = { suffix_val->as.string_value.chars, suffix_val->as.string_value.length };
+  rae_String s = vm_string_view(s_val);
+  rae_String suf = vm_string_view(suffix_val);
   out_result->has_value = true;
   out_result->value = value_bool(rae_ext_rae_str_ends_with(s, suf));
   return true;
@@ -512,8 +523,8 @@ static bool native_rae_str_index_of(struct VM* vm,
   const Value* s_val = deref_value(&args[0]);
   const Value* sub_val = deref_value(&args[1]);
   if (s_val->type != VAL_STRING || sub_val->type != VAL_STRING) return false;
-  rae_String s = { s_val->as.string_value.chars, s_val->as.string_value.length };
-  rae_String sub = { sub_val->as.string_value.chars, sub_val->as.string_value.length };
+  rae_String s = vm_string_view(s_val);
+  rae_String sub = vm_string_view(sub_val);
   out_result->has_value = true;
   out_result->value = value_int(rae_ext_rae_str_index_of(s, sub));
   return true;
@@ -529,7 +540,7 @@ static bool native_rae_str_trim(struct VM* vm, VmNativeResult* out_result, const
 
   if (s_val->type != VAL_STRING) return false;
 
-  rae_String s = { s_val->as.string_value.chars, s_val->as.string_value.length };
+  rae_String s = vm_string_view(s_val);
 
   rae_String trimmed = rae_ext_rae_str_trim(s);
 
@@ -551,7 +562,7 @@ static bool native_rae_str_to_lower(struct VM* vm, VmNativeResult* out_result, c
 
   if (s_val->type != VAL_STRING) return false;
 
-  rae_String s = { s_val->as.string_value.chars, s_val->as.string_value.length };
+  rae_String s = vm_string_view(s_val);
 
   rae_String lower = rae_ext_rae_str_to_lower(s);
 
@@ -577,7 +588,7 @@ static bool native_rae_str_at(struct VM* vm, VmNativeResult* out_result, const V
 
   if (s_val->type != VAL_STRING || idx_val->type != VAL_INT) return false;
 
-  rae_String s = { s_val->as.string_value.chars, s_val->as.string_value.length };
+  rae_String s = vm_string_view(s_val);
 
   out_result->has_value = true;
 
@@ -599,9 +610,9 @@ static bool native_rae_str_eq(struct VM* vm, VmNativeResult* out_result, const V
 
   if (a_val->type != VAL_STRING || b_val->type != VAL_STRING) return false;
 
-  rae_String a = { a_val->as.string_value.chars, a_val->as.string_value.length };
+  rae_String a = vm_string_view(a_val);
 
-  rae_String b = { b_val->as.string_value.chars, b_val->as.string_value.length };
+  rae_String b = vm_string_view(b_val);
 
   out_result->has_value = true;
 
@@ -621,7 +632,7 @@ static bool native_rae_str_hash(struct VM* vm, VmNativeResult* out_result, const
 
   if (s_val->type != VAL_STRING) return false;
 
-  rae_String s = { s_val->as.string_value.chars, s_val->as.string_value.length };
+  rae_String s = vm_string_view(s_val);
 
   out_result->has_value = true;
 
@@ -641,7 +652,7 @@ static bool native_rae_str_to_f64(struct VM* vm, VmNativeResult* out_result, con
 
   if (s_val->type != VAL_STRING) return false;
 
-  rae_String s = { s_val->as.string_value.chars, s_val->as.string_value.length };
+  rae_String s = vm_string_view(s_val);
 
   out_result->has_value = true;
 
@@ -661,7 +672,7 @@ static bool native_rae_str_to_i64(struct VM* vm, VmNativeResult* out_result, con
 
   if (s_val->type != VAL_STRING) return false;
 
-  rae_String s = { s_val->as.string_value.chars, s_val->as.string_value.length };
+  rae_String s = vm_string_view(s_val);
 
   out_result->has_value = true;
 
@@ -720,7 +731,7 @@ static bool native_rae_sys_get_env(struct VM* vm,
   if (arg_count != 1) return false;
   const Value* name_val = deref_value(&args[0]);
   if (name_val->type != VAL_STRING) return false;
-  rae_String name = { name_val->as.string_value.chars, name_val->as.string_value.length };
+  rae_String name = vm_string_view(name_val);
   rae_String res = rae_ext_rae_sys_get_env(name);
   out_result->has_value = true;
   if (res.data) out_result->value = value_string_take(res.data, (size_t)res.len);
@@ -737,7 +748,7 @@ static bool native_rae_sys_list_dir(struct VM* vm,
   if (arg_count != 1) return false;
   const Value* folder_val = deref_value(&args[0]);
   if (folder_val->type != VAL_STRING) return false;
-  rae_String folder = { folder_val->as.string_value.chars, folder_val->as.string_value.length };
+  rae_String folder = vm_string_view(folder_val);
   rae_String res = rae_ext_rae_sys_list_dir(folder);
   out_result->has_value = true;
   if (res.data) out_result->value = value_string_take(res.data, (size_t)res.len);
@@ -754,7 +765,7 @@ static bool native_rae_sys_read_file(struct VM* vm,
   if (arg_count != 1) return false;
   const Value* path_val = deref_value(&args[0]);
   if (path_val->type != VAL_STRING) return false;
-  rae_String path = { path_val->as.string_value.chars, path_val->as.string_value.length };
+  rae_String path = vm_string_view(path_val);
   rae_String res = rae_ext_rae_sys_read_file(path);
   out_result->has_value = true;
   if (res.data) out_result->value = value_string_take(res.data, (size_t)res.len);
@@ -776,7 +787,7 @@ static bool native_rae_sys_read_file_or_empty(struct VM* vm,
   if (arg_count != 1) return false;
   const Value* path_val = deref_value(&args[0]);
   if (path_val->type != VAL_STRING) return false;
-  rae_String path = { path_val->as.string_value.chars, path_val->as.string_value.length };
+  rae_String path = vm_string_view(path_val);
   rae_String res = rae_ext_rae_sys_read_file(path);
   out_result->has_value = true;
   if (res.data) out_result->value = value_string_take(res.data, (size_t)res.len);
@@ -794,8 +805,8 @@ static bool native_rae_sys_write_file(struct VM* vm,
   const Value* path_val = deref_value(&args[0]);
   const Value* content_val = deref_value(&args[1]);
   if (path_val->type != VAL_STRING || content_val->type != VAL_STRING) return false;
-  rae_String path = { path_val->as.string_value.chars, path_val->as.string_value.length };
-  rae_String content = { content_val->as.string_value.chars, content_val->as.string_value.length };
+  rae_String path = vm_string_view(path_val);
+  rae_String content = vm_string_view(content_val);
   bool ok = rae_ext_rae_sys_write_file(path, content);
   out_result->has_value = true;
   out_result->value = value_bool(ok);
@@ -811,7 +822,7 @@ static bool native_rae_sys_file_mtime(struct VM* vm,
   if (arg_count != 1) return false;
   const Value* path_val = deref_value(&args[0]);
   if (path_val->type != VAL_STRING) return false;
-  rae_String path = { path_val->as.string_value.chars, path_val->as.string_value.length };
+  rae_String path = vm_string_view(path_val);
   double mt = rae_ext_rae_sys_file_mtime(path);
   out_result->has_value = true;
   out_result->value = value_float(mt);
@@ -876,7 +887,7 @@ static bool native_rae_sys_exists(struct VM* vm,
   if (arg_count != 1) return false;
   const Value* path_val = deref_value(&args[0]);
   if (path_val->type != VAL_STRING) return false;
-  rae_String path = { path_val->as.string_value.chars, path_val->as.string_value.length };
+  rae_String path = vm_string_view(path_val);
   bool ok = rae_ext_rae_sys_exists(path);
   out_result->has_value = true;
   out_result->value = value_bool(ok);
@@ -892,7 +903,7 @@ static bool native_rae_sys_delete(struct VM* vm,
   if (arg_count != 1) return false;
   const Value* path_val = deref_value(&args[0]);
   if (path_val->type != VAL_STRING) return false;
-  rae_String path = { path_val->as.string_value.chars, path_val->as.string_value.length };
+  rae_String path = vm_string_view(path_val);
   bool ok = rae_ext_rae_sys_delete(path);
   out_result->has_value = true;
   out_result->value = value_bool(ok);
@@ -909,8 +920,8 @@ static bool native_rae_sys_rename(struct VM* vm,
   const Value* old_val = deref_value(&args[0]);
   const Value* new_val = deref_value(&args[1]);
   if (old_val->type != VAL_STRING || new_val->type != VAL_STRING) return false;
-  rae_String oldPath = { old_val->as.string_value.chars, old_val->as.string_value.length };
-  rae_String newPath = { new_val->as.string_value.chars, new_val->as.string_value.length };
+  rae_String oldPath = vm_string_view(old_val);
+  rae_String newPath = vm_string_view(new_val);
   bool ok = rae_ext_rae_sys_rename(oldPath, newPath);
   out_result->has_value = true;
   out_result->value = value_bool(ok);
@@ -926,7 +937,7 @@ static bool native_rae_sys_make_dir(struct VM* vm,
   if (arg_count != 1) return false;
   const Value* path_val = deref_value(&args[0]);
   if (path_val->type != VAL_STRING) return false;
-  rae_String path = { path_val->as.string_value.chars, path_val->as.string_value.length };
+  rae_String path = vm_string_view(path_val);
   bool ok = rae_ext_rae_sys_make_dir(path);
   out_result->has_value = true;
   out_result->value = value_bool(ok);
@@ -1076,7 +1087,7 @@ static bool native_rae_math_pow(struct VM* vm, VmNativeResult* out_result, const
 }
 
 static bool native_rae_ext_rae_buf_alloc(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
-  (void)vm; (void)user_data;
+  (void)vm; (void)arg_count; (void)user_data;
   const Value* val_size = deref_value(&args[0]);
   out_result->has_value = true;
   out_result->value = value_buffer(val_size->as.int_value);
@@ -1084,14 +1095,13 @@ static bool native_rae_ext_rae_buf_alloc(struct VM* vm, VmNativeResult* out_resu
 }
 
 static bool native_rae_ext_rae_buf_free(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
-  (void)vm; (void)user_data;
-  const Value* val = deref_value(&args[0]);
+  (void)vm; (void)args; (void)arg_count; (void)user_data;
   out_result->has_value = false;
   return true;
 }
 
 static bool native_rae_ext_rae_buf_copy(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
-  (void)vm; (void)user_data;
+  (void)vm; (void)arg_count; (void)user_data;
   const Value* src_val = deref_value(&args[0]);
   const Value* src_off = deref_value(&args[1]);
   const Value* dst_val = deref_value(&args[2]);
@@ -1118,7 +1128,7 @@ static bool native_rae_ext_rae_buf_copy(struct VM* vm, VmNativeResult* out_resul
 }
 
 static bool native_rae_ext_rae_buf_set(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
-  (void)vm; (void)user_data;
+  (void)vm; (void)arg_count; (void)user_data;
   const Value* buf_val = deref_value(&args[0]);
   const Value* index = deref_value(&args[1]);
   const Value* value = deref_value(&args[2]);
@@ -1173,7 +1183,7 @@ static bool native_rae_ext_rae_mem_stats_outstanding(struct VM* vm, VmNativeResu
 }
 
 static bool native_rae_ext_rae_buf_get(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
-  (void)vm; (void)user_data;
+  (void)vm; (void)arg_count; (void)user_data;
   const Value* buf_val = deref_value(&args[0]);
   const Value* index = deref_value(&args[1]);
   if (buf_val->type != VAL_BUFFER || index->type != VAL_INT) {
@@ -1193,7 +1203,7 @@ static bool native_rae_ext_rae_buf_get(struct VM* vm, VmNativeResult* out_result
 }
 
 static bool native_sizeof(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
-  (void)vm; (void)args; (void)user_data;
+  (void)vm; (void)args; (void)arg_count; (void)user_data;
   // In the current VM, all values (Int, Float, Bool, String, etc.) are stored in the 
   // 16-byte Value struct (8-byte union + type tag). 
   // However, for Buffer/List storage, we currently store the union part (8 bytes).
