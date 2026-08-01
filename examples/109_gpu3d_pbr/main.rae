@@ -97,7 +97,8 @@ func main() ret Int {
   var lastX: Float = 0.0
   var lastY: Float = 0.0
   var dragging: Bool = false
-  let startT: Float = gpu2d.nowSeconds()
+  # Epoch seconds stay Float64; the elapsed delta below is small enough for Float.
+  let startT: Float64 = gpu2d.nowSeconds()
 
   loop not gpu2d.pollClose() {
     # ---- input: orbit camera -----------------------------------------
