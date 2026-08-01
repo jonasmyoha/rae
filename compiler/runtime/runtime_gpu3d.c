@@ -60,6 +60,7 @@ static const char* G3D_WGSL =
 "  sunColor: vec4<f32>,\n"
 "  ambSky: vec4<f32>,\n"
 "  ambGround: vec4<f32>,\n"
+"  invViewProj: mat4x4<f32>,\n"
 "};\n"
 "struct DrawU {\n"
 "  model: mat4x4<f32>,\n"
@@ -138,6 +139,33 @@ static const char* G3D_WGSL =
 "  c = pow(c, vec3<f32>(1.0 / 2.2));\n"
 "  return vec4<f32>(c, 1.0);\n"
 "}\n";
+
+#include "runtime_gpu3d_sdf.c"
+
+static int g3d_invert_mat4(const float* m, float* out) {
+    float inv[16];
+    inv[0] = m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15] + m[9] * m[7] * m[14] + m[13] * m[6] * m[11] - m[13] * m[7] * m[10];
+    inv[4] = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15] - m[8] * m[7] * m[14] - m[12] * m[6] * m[11] + m[12] * m[7] * m[10];
+    inv[8] = m[4] * m[9] * m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15] + m[8] * m[7] * m[13] + m[12] * m[5] * m[11] - m[12] * m[7] * m[9];
+    inv[12] = -m[4] * m[9] * m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14] - m[8] * m[6] * m[13] - m[12] * m[5] * m[10] + m[12] * m[6] * m[9];
+    inv[1] = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15] - m[9] * m[3] * m[14] - m[13] * m[2] * m[11] + m[13] * m[3] * m[10];
+    inv[5] = m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15] + m[8] * m[3] * m[14] + m[12] * m[2] * m[11] - m[12] * m[3] * m[10];
+    inv[9] = -m[0] * m[9] * m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15] - m[8] * m[3] * m[13] - m[12] * m[1] * m[11] + m[12] * m[3] * m[9];
+    inv[13] = m[0] * m[9] * m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14] + m[8] * m[2] * m[13] + m[12] * m[1] * m[10] - m[12] * m[2] * m[9];
+    inv[2] = m[1] * m[6] * m[15] - m[1] * m[7] * m[14] - m[5] * m[2] * m[15] + m[5] * m[3] * m[14] + m[13] * m[2] * m[7] - m[13] * m[3] * m[6];
+    inv[6] = -m[0] * m[6] * m[15] + m[0] * m[7] * m[14] + m[4] * m[2] * m[15] - m[4] * m[3] * m[14] - m[12] * m[2] * m[7] + m[12] * m[3] * m[6];
+    inv[10] = m[0] * m[5] * m[15] - m[0] * m[7] * m[13] - m[4] * m[1] * m[15] + m[4] * m[3] * m[13] + m[12] * m[1] * m[7] - m[12] * m[3] * m[5];
+    inv[14] = -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] + m[4] * m[1] * m[14] - m[4] * m[2] * m[13] - m[12] * m[1] * m[6] + m[12] * m[2] * m[5];
+    inv[3] = -m[1] * m[6] * m[11] + m[1] * m[7] * m[10] + m[5] * m[2] * m[11] - m[5] * m[3] * m[10] - m[9] * m[2] * m[7] + m[9] * m[3] * m[6];
+    inv[7] = m[0] * m[6] * m[11] - m[0] * m[7] * m[10] - m[4] * m[2] * m[11] + m[4] * m[3] * m[10] + m[8] * m[2] * m[7] - m[8] * m[3] * m[6];
+    inv[11] = -m[0] * m[5] * m[11] + m[0] * m[7] * m[9] + m[4] * m[1] * m[11] - m[4] * m[3] * m[9] - m[8] * m[1] * m[7] + m[8] * m[3] * m[5];
+    inv[15] = m[0] * m[5] * m[10] - m[0] * m[6] * m[9] - m[4] * m[1] * m[10] + m[4] * m[2] * m[9] + m[8] * m[1] * m[6] - m[8] * m[2] * m[5];
+    float det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
+    if (det == 0.0f) return 0;
+    det = 1.0f / det;
+    for (int i = 0; i < 16; i++) out[i] = inv[i] * det;
+    return 1;
+}
 
 #ifndef __EMSCRIPTEN__
 static void g3d_log_cb(WGPULogLevel level, WGPUStringView message, void* userdata) {
@@ -219,7 +247,7 @@ static void g3d_init_pipeline(void) {
     if (!g3d_pipeline) { fprintf(stderr, "[gpu3d] render pipeline creation FAILED\n"); return; }
 
     WGPUBufferDescriptor ud; memset(&ud, 0, sizeof(ud));
-    ud.size = 160; /* Frame struct */
+    ud.size = 208; /* Frame struct, including inverse view-projection */
     ud.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
     g3d_frame_ubuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &ud);
 
@@ -230,7 +258,7 @@ static void g3d_init_pipeline(void) {
 
     WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g3d_pipeline, 0);
     WGPUBindGroupEntry e[2]; memset(e, 0, sizeof(e));
-    e[0].binding = 0; e[0].buffer = g3d_frame_ubuf; e[0].size = 160;
+    e[0].binding = 0; e[0].buffer = g3d_frame_ubuf; e[0].size = 208;
     e[1].binding = 1; e[1].buffer = g3d_draw_sbuf;  e[1].size = sd.size;
     WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
     bgd.layout = bgl; bgd.entryCount = 2; bgd.entries = e;
@@ -311,14 +339,15 @@ void rae_ext_gpu3d_begin(const double* frame, int64_t count) {
     if (!g3d_msaa_view || !g3d_depth_view) return;
     g3d_draw_count = 0;
 
-    float u[40];
+    float u[52]; memset(u, 0, sizeof(u));
     for (int i = 0; i < 16; i++) u[i] = (float)frame[i];       /* viewProj */
     u[16] = (float)frame[16]; u[17] = (float)frame[17]; u[18] = (float)frame[18]; u[19] = (float)frame[19];  /* camPos+time */
     u[20] = (float)frame[20]; u[21] = (float)frame[21]; u[22] = (float)frame[22]; u[23] = (float)frame[23];  /* sunDir+exposure */
     u[24] = (float)frame[24]; u[25] = (float)frame[25]; u[26] = (float)frame[26]; u[27] = 0.0f;              /* sunColor */
     u[28] = (float)frame[27]; u[29] = (float)frame[28]; u[30] = (float)frame[29]; u[31] = 0.0f;              /* ambSky */
     u[32] = (float)frame[30]; u[33] = (float)frame[31]; u[34] = (float)frame[32]; u[35] = 0.0f;              /* ambGround */
-    wgpuQueueWriteBuffer(g_wgpu_queue, g3d_frame_ubuf, 0, u, 160);
+    g3d_invert_mat4(u, u + 36);
+    wgpuQueueWriteBuffer(g_wgpu_queue, g3d_frame_ubuf, 0, u, sizeof(u));
     if (getenv("RAE_GPU3D_DEBUG")) {
         static int logged2 = 0;
         if (!logged2) {
@@ -456,6 +485,7 @@ void rae_ext_gpu3d_end(void) {
 }
 
 void rae_ext_gpu3d_shutdown(void) {
+    g3d_sdf_shutdown();
     for (int i = 0; i < g3d_mesh_n; i++) {
         if (g3d_mesh_vbuf[i]) { wgpuBufferRelease(g3d_mesh_vbuf[i]); g3d_mesh_vbuf[i] = NULL; }
         if (g3d_mesh_ibuf[i]) { wgpuBufferRelease(g3d_mesh_ibuf[i]); g3d_mesh_ibuf[i] = NULL; }
