@@ -2682,7 +2682,7 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
  * than the browser's SDL3 + WebGPU APIs. */
 static bool emcc_link_c_to_web(const char* entry_rae_file,
                                const char* c_path,
-                               const char* out_html,
+                               const char* out_path,
                                bool uses_raylib,
                                bool uses_sdl3,
                                bool uses_webgpu,
@@ -2691,7 +2691,17 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
     fprintf(stderr, "error: --target wasm does not support raylib; use SDL3/WebGPU\n");
     return false;
   }
-  if (!ensure_parent_directory(out_html)) return false;
+  if (!ensure_parent_directory(out_path)) return false;
+
+  size_t out_len = strlen(out_path);
+  bool emits_html = out_len >= 5 && strcmp(out_path + out_len - 5, ".html") == 0;
+  bool emits_module =
+      (out_len >= 3 && strcmp(out_path + out_len - 3, ".js") == 0) ||
+      (out_len >= 4 && strcmp(out_path + out_len - 4, ".mjs") == 0);
+  if (!emits_html && !emits_module) {
+    fprintf(stderr, "error: browser WASM output must end in .html, .js, or .mjs\n");
+    return false;
+  }
 
   char runtime_c[PATH_MAX];
   char shell_html[PATH_MAX];
@@ -2740,8 +2750,20 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
   }
   args[n++] = "-sALLOW_MEMORY_GROWTH=1";
   args[n++] = "-sASYNCIFY";
-  args[n++] = "--shell-file";
-  args[n++] = shell_html;
+  if (emits_html) {
+    args[n++] = "--shell-file";
+    args[n++] = shell_html;
+  } else {
+    /* Modular output lets tooling provide its own canvas and lifecycle instead
+     * of opening an Emscripten-owned HTML page. */
+    args[n++] = "-sMODULARIZE=1";
+    args[n++] = "-sEXPORT_ES6=1";
+    args[n++] = "-sEXPORT_NAME=createRaeApp";
+    /* SDL3 replaces this hook while creating its browser window. Exporting it
+     * keeps the modularized Module property writable instead of a legacy
+     * read-only compatibility getter. */
+    args[n++] = "-sEXPORTED_RUNTIME_METHODS=requestFullscreen";
+  }
   if (uses_sdl3) {
     args[n++] = "-DRAE_HAS_SDL3";
     args[n++] = "-sUSE_SDL=3";
@@ -2755,7 +2777,7 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
   for (int i = 0; i < extra_count; i++) args[n++] = extra_paths[i];
   args[n++] = include_flag;
   args[n++] = "-o";
-  args[n++] = out_html;
+  args[n++] = out_path;
   args[n] = NULL;
 
   pid_t pid = fork();
@@ -2773,7 +2795,7 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
     fprintf(stderr, "error: Emscripten browser build failed\n");
     return false;
   }
-  fprintf(stderr, "built WASM browser bundle: %s\n", out_html);
+  fprintf(stderr, "built WASM browser bundle: %s\n", out_path);
   return true;
 }
 
