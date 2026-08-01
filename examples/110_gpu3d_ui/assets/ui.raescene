@@ -1,0 +1,107 @@
+{
+  "type": "Scene",
+  "version": 2,
+  "sceneId": "gpu3d-ui",
+  "root": "UiRoot",
+  "nodes": {
+    "UiRoot": {
+      "Rect": { "x": 0, "y": 0, "w": 1280, "h": 800 },
+      "Children": ["StatusCard", "PauseButton", "DebugButton", "Crosshair", "DebugPanel", "PauseLayer"]
+    },
+    "StatusCard": {
+      "Rect": { "x": 24, "y": 24, "w": 310, "h": 100 },
+      "Shape": { "kind": "Rectangle", "fill": { "r": 10, "g": 18, "b": 29, "a": 218 }, "radius": 18 },
+      "Children": ["Title", "FpsLabel", "HintLabel"]
+    },
+    "Title": {
+      "Rect": { "x": 20, "y": 14, "w": 270, "h": 30 },
+      "Text": { "text": "Rae PBR Lab", "styleId": "title" }
+    },
+    "FpsLabel": {
+      "Rect": { "x": 20, "y": 48, "w": 270, "h": 22 },
+      "Text": { "text": "Frame time: warming up", "styleId": "body" }
+    },
+    "HintLabel": {
+      "Rect": { "x": 20, "y": 74, "w": 270, "h": 18 },
+      "Text": { "text": "Drag scene to orbit · wheel to zoom", "styleId": "muted" }
+    },
+    "PauseButton": {
+      "Rect": { "x": 1046, "y": 24, "w": 98, "h": 48 },
+      "Shape": { "kind": "Rectangle", "fill": { "r": 14, "g": 27, "b": 42, "a": 230 }, "radius": 24 },
+      "OnClick": { "actionId": "scene.pause" },
+      "Children": ["PauseLabel"]
+    },
+    "PauseLabel": {
+      "Rect": { "x": 0, "y": 8, "w": 98, "h": 30 },
+      "Text": { "text": "Pause", "styleId": "button" }
+    },
+    "DebugButton": {
+      "Rect": { "x": 1158, "y": 24, "w": 98, "h": 48 },
+      "Shape": { "kind": "Rectangle", "fill": { "r": 75, "g": 204, "b": 192, "a": 235 }, "radius": 24 },
+      "Sprite": { "textureKey": "mat:tune", "tint": { "r": 7, "g": 28, "b": 31, "a": 255 }, "scaleMode": "Fit" },
+      "OnClick": { "actionId": "ui.debug" }
+    },
+    "Crosshair": {
+      "Rect": { "x": 622, "y": 382, "w": 36, "h": 36 },
+      "Sprite": { "textureKey": "mat:add", "tint": { "r": 244, "g": 248, "b": 255, "a": 180 }, "scaleMode": "Fit" }
+    },
+    "DebugPanel": {
+      "Rect": { "x": 934, "y": 88, "w": 322, "h": 188 },
+      "Shape": { "kind": "Rectangle", "fill": { "r": 9, "g": 16, "b": 27, "a": 238 }, "radius": 18 },
+      "Active": { "value": false },
+      "Children": ["DebugTitle", "MotionLabel", "MotionButton", "DebugHint"]
+    },
+    "DebugTitle": {
+      "Rect": { "x": 20, "y": 18, "w": 282, "h": 30 },
+      "Text": { "text": "Render settings", "styleId": "title" }
+    },
+    "MotionLabel": {
+      "Rect": { "x": 20, "y": 60, "w": 282, "h": 24 },
+      "Text": { "text": "Animation: Full", "styleId": "body" }
+    },
+    "MotionButton": {
+      "Rect": { "x": 20, "y": 94, "w": 282, "h": 46 },
+      "Shape": { "kind": "Rectangle", "fill": { "r": 31, "g": 52, "b": 70, "a": 255 }, "radius": 14 },
+      "OnClick": { "actionId": "animation.mode" },
+      "Children": ["MotionButtonLabel"]
+    },
+    "MotionButtonLabel": {
+      "Rect": { "x": 0, "y": 7, "w": 282, "h": 30 },
+      "Text": { "text": "Toggle animation", "styleId": "button" }
+    },
+    "DebugHint": {
+      "Rect": { "x": 20, "y": 151, "w": 282, "h": 20 },
+      "Text": { "text": "State patches this panel without remounting.", "styleId": "muted" }
+    },
+    "PauseLayer": {
+      "Rect": { "x": 0, "y": 0, "w": 1280, "h": 800 },
+      "Shape": { "kind": "Rectangle", "fill": { "r": 3, "g": 7, "b": 13, "a": 170 }, "radius": 0 },
+      "Active": { "value": false },
+      "OnClick": { "actionId": "scene.pause" },
+      "Children": ["PausePanel"]
+    },
+    "PausePanel": {
+      "Rect": { "x": 430, "y": 270, "w": 420, "h": 260 },
+      "Shape": { "kind": "Rectangle", "fill": { "r": 10, "g": 19, "b": 31, "a": 250 }, "radius": 24 },
+      "Children": ["PauseTitle", "PauseBody", "ResumeButton"]
+    },
+    "PauseTitle": {
+      "Rect": { "x": 40, "y": 38, "w": 340, "h": 42 },
+      "Text": { "text": "Scene paused", "styleId": "center" }
+    },
+    "PauseBody": {
+      "Rect": { "x": 40, "y": 94, "w": 340, "h": 48 },
+      "Text": { "text": "The ECS UI remains interactive while simulation time is stopped.", "styleId": "muted" }
+    },
+    "ResumeButton": {
+      "Rect": { "x": 80, "y": 174, "w": 260, "h": 54 },
+      "Shape": { "kind": "Rectangle", "fill": { "r": 75, "g": 204, "b": 192, "a": 255 }, "radius": 27 },
+      "OnClick": { "actionId": "scene.pause" },
+      "Children": ["ResumeLabel"]
+    },
+    "ResumeLabel": {
+      "Rect": { "x": 0, "y": 10, "w": 260, "h": 32 },
+      "Text": { "text": "Resume", "styleId": "button" }
+    }
+  }
+}
