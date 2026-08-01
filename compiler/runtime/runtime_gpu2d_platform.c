@@ -324,10 +324,9 @@ void rae_ext_gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
  * only this frame. */
 rae_Bool rae_ext_gpu2d_pollClose(void) {
 #ifdef __EMSCRIPTEN__
-    /* Asyncify turns this into the browser frame boundary for Rae's existing
-     * blocking render-loop shape. A callback-based app loop can replace this
-     * compatibility path once Rae exposes first-class frame callbacks. */
-    emscripten_sleep(0);
+    /* Browser WebGPU presents at requestAnimationFrame boundaries. Asyncify
+     * lets the current Rae loop await that boundary without source changes. */
+    rae_browser_next_frame();
 #endif
     memset(g_sdl_pressed, 0, sizeof(g_sdl_pressed));
     memset(g_sdl_mouse_pressed, 0, sizeof(g_sdl_mouse_pressed));

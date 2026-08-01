@@ -19,6 +19,13 @@
 #include <webgpu/webgpu.h>
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
+
+/* Asyncify bridge for Rae's current blocking application-loop shape. Unlike
+ * emscripten_sleep(0), this yields at an actual browser animation frame, which
+ * is when WebGPU canvas textures are presented (including inside iframes). */
+EM_ASYNC_JS(void, rae_browser_next_frame, (), {
+    await new Promise(resolve => requestAnimationFrame(resolve));
+});
 #else
 #include <webgpu/wgpu.h>
 #endif
