@@ -139,10 +139,12 @@ static const char* G3D_WGSL =
 "  return vec4<f32>(c, 1.0);\n"
 "}\n";
 
+#ifndef __EMSCRIPTEN__
 static void g3d_log_cb(WGPULogLevel level, WGPUStringView message, void* userdata) {
     (void)level; (void)userdata;
     fprintf(stderr, "[wgpu] %.*s\n", (int)message.length, message.data ? message.data : "");
 }
+#endif
 
 static void g3d_configure_draw_limit(void) {
     g3d_draw_limit = G3D_MAX_DRAWS;
@@ -163,10 +165,12 @@ static void g3d_configure_draw_limit(void) {
 static void g3d_init_pipeline(void) {
     if (g3d_pipeline) return;
     g3d_configure_draw_limit();
+#ifndef __EMSCRIPTEN__
     if (getenv("RAE_GPU3D_DEBUG")) {
         wgpuSetLogCallback(g3d_log_cb, NULL);
         wgpuSetLogLevel(WGPULogLevel_Warn);
     }
+#endif
     WGPUShaderSourceWGSL src; memset(&src, 0, sizeof(src));
     src.chain.sType = WGPUSType_ShaderSourceWGSL;
     src.code = rae_wgpu_sv(G3D_WGSL);
@@ -432,11 +436,13 @@ void rae_ext_gpu3d_end(void) {
         WGPUCommandBuffer pcb = wgpuCommandEncoderFinish(penc, NULL);
         wgpuQueueSubmit(g_wgpu_queue, 1, &pcb);
         wgpuCommandBufferRelease(pcb); wgpuCommandEncoderRelease(penc);
+#ifndef __EMSCRIPTEN__
         wgpuSurfacePresent(g_g2d_surface);
+#endif
         g_g2d_last_present_ok = 1;
     }
     if (st.texture) wgpuTextureRelease(st.texture);
-    if (g_wgpu_dev) wgpuDevicePoll(g_wgpu_dev, false, NULL);
+    rae_wgpu_poll(0);
 }
 
 void rae_ext_gpu3d_shutdown(void) {

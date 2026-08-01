@@ -22,7 +22,9 @@
  * g_sdl_w/h) are shared with the SDL3 block so sdl3 input works.
  * Tier 0 slice: window + clear-colour present.
  * ============================================================ */
+#ifndef __EMSCRIPTEN__
 static SDL_MetalView g_g2d_metal_view = NULL;
+#endif
 static WGPUSurface   g_g2d_surface = NULL;
 static WGPUTextureFormat g_g2d_fmt = WGPUTextureFormat_BGRA8Unorm;
 
@@ -252,21 +254,36 @@ void rae_ext_gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
         return;
     }
     const char* t = title.data ? (const char*)title.data : "Rae (GPU 2D)";
-    g_sdl_win = SDL_CreateWindow(t, (int)width, (int)height,
-                                 SDL_WINDOW_RESIZABLE | SDL_WINDOW_METAL | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+#ifndef __EMSCRIPTEN__
+    flags |= SDL_WINDOW_METAL;
+#endif
+    g_sdl_win = SDL_CreateWindow(t, (int)width, (int)height, flags);
     if (!g_sdl_win) { fprintf(stderr, "[gpu2d] window failed: %s\n", SDL_GetError()); return; }
     SDL_RaiseWindow(g_sdl_win);
+#ifndef __EMSCRIPTEN__
     g_g2d_metal_view = SDL_Metal_CreateView(g_sdl_win);
     if (!g_g2d_metal_view) { fprintf(stderr, "[gpu2d] metal view failed: %s\n", SDL_GetError()); return; }
     void* layer = SDL_Metal_GetLayer(g_g2d_metal_view);
+#endif
 
     if (!rae_wgpu_init()) { fprintf(stderr, "[gpu2d] wgpu init failed\n"); return; }
 
+#ifdef __EMSCRIPTEN__
+    WGPUEmscriptenSurfaceSourceCanvasHTMLSelector cs; memset(&cs, 0, sizeof(cs));
+    cs.chain.sType = WGPUSType_EmscriptenSurfaceSourceCanvasHTMLSelector;
+    cs.selector = rae_wgpu_sv("#canvas");
+#else
     WGPUSurfaceSourceMetalLayer ms; memset(&ms, 0, sizeof(ms));
     ms.chain.sType = WGPUSType_SurfaceSourceMetalLayer;
     ms.layer = layer;
+#endif
     WGPUSurfaceDescriptor sd; memset(&sd, 0, sizeof(sd));
+#ifdef __EMSCRIPTEN__
+    sd.nextInChain = &cs.chain;
+#else
     sd.nextInChain = &ms.chain;
+#endif
     g_g2d_surface = wgpuInstanceCreateSurface(g_wgpu_inst, &sd);
     if (!g_g2d_surface) { fprintf(stderr, "[gpu2d] surface failed\n"); return; }
 
@@ -306,6 +323,12 @@ void rae_ext_gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
  * (g_sdl_pressed) and the wheel delta are reset each call so they describe
  * only this frame. */
 rae_Bool rae_ext_gpu2d_pollClose(void) {
+#ifdef __EMSCRIPTEN__
+    /* Asyncify turns this into the browser frame boundary for Rae's existing
+     * blocking render-loop shape. A callback-based app loop can replace this
+     * compatibility path once Rae exposes first-class frame callbacks. */
+    emscripten_sleep(0);
+#endif
     memset(g_sdl_pressed, 0, sizeof(g_sdl_pressed));
     memset(g_sdl_mouse_pressed, 0, sizeof(g_sdl_mouse_pressed));
     memset(g_sdl_mouse_released, 0, sizeof(g_sdl_mouse_released));
@@ -465,4 +488,3 @@ double rae_ext_gpu2d_dpr(void) {
     int lw = 0, lh = 0; if (g_sdl_win) SDL_GetWindowSize(g_sdl_win, &lw, &lh);
     (void)lh; return (lw > 0) ? (double)g_sdl_w / (double)lw : 1.0;
 }
-
