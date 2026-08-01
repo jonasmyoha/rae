@@ -7,7 +7,7 @@ static bool native_tinyExprEval(struct VM* vm, VmNativeResult* out, const Value*
     if (count != 1) return false;
     if (args[0].type != VAL_STRING) return false;
     
-    int64_t result = tinyExprEval(args[0].as.string_value.chars);
+    int64_t result = tinyExprEval((const char*)args[0].as.string_value.chars);
     out->has_value = true;
     out->value = value_int(result);
     return true;
