@@ -71,6 +71,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           SCREENSHOT="$TMP_OUT/gpu3d-ui.bmp"
           FREE_SCREENSHOT="$TMP_OUT/gpu3d-ui-free.bmp"
           PAUSE_SCREENSHOT="$TMP_OUT/gpu3d-ui-pause.bmp"
+          SETTINGS_SCREENSHOT="$TMP_OUT/gpu3d-ui-settings.bmp"
+          SCENE2_SCREENSHOT="$TMP_OUT/gpu3d-ui-scene2.bmp"
+          SCENE3_SCREENSHOT="$TMP_OUT/gpu3d-ui-scene3.bmp"
           if (cd .. && RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
              perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --gpu3d-ui > "$TMP_OUT/screenshot.log" 2>&1 \
@@ -79,12 +82,21 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && python3 tools/assert_nonblank_bmp.py "$FREE_SCREENSHOT" --gpu3d-ui > "$TMP_OUT/free-screenshot.log" 2>&1 \
              && (cd .. && RAE_GPU3D_UI_TEST_STATE=pause RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$PAUSE_SCREENSHOT" \
                 perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/pause-render.log" 2>&1 \
-             && python3 tools/assert_nonblank_bmp.py "$PAUSE_SCREENSHOT" --gpu3d-ui > "$TMP_OUT/pause-screenshot.log" 2>&1; then
-            echo "PASS: $EXAMPLE_NAME (3D + orbit/free camera UI and pause-overlay screenshots)"
+             && python3 tools/assert_nonblank_bmp.py "$PAUSE_SCREENSHOT" --gpu3d-ui > "$TMP_OUT/pause-screenshot.log" 2>&1 \
+             && (cd .. && RAE_GPU3D_UI_TEST_STATE=debug RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SETTINGS_SCREENSHOT" \
+                perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/settings-render.log" 2>&1 \
+             && python3 tools/assert_nonblank_bmp.py "$SETTINGS_SCREENSHOT" --gpu3d-ui > "$TMP_OUT/settings-screenshot.log" 2>&1 \
+             && (cd .. && RAE_GPU3D_UI_TEST_STATE=scene2 RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCENE2_SCREENSHOT" \
+                perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/scene2-render.log" 2>&1 \
+             && python3 tools/assert_nonblank_bmp.py "$SCENE2_SCREENSHOT" --gpu3d-ui > "$TMP_OUT/scene2-screenshot.log" 2>&1 \
+             && (cd .. && RAE_GPU3D_UI_TEST_STATE=scene3 RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCENE3_SCREENSHOT" \
+                perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/scene3-render.log" 2>&1 \
+             && python3 tools/assert_nonblank_bmp.py "$SCENE3_SCREENSHOT" --gpu3d-ui > "$TMP_OUT/scene3-screenshot.log" 2>&1; then
+            echo "PASS: $EXAMPLE_NAME (3D scenes + camera, settings and pause UI screenshots)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (3D/UI screenshot)"
-            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" "$TMP_OUT/free-render.log" "$TMP_OUT/free-screenshot.log" "$TMP_OUT/pause-render.log" "$TMP_OUT/pause-screenshot.log" 2>/dev/null | sed 's/^/  /'
+            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" "$TMP_OUT/free-render.log" "$TMP_OUT/free-screenshot.log" "$TMP_OUT/pause-render.log" "$TMP_OUT/pause-screenshot.log" "$TMP_OUT/settings-render.log" "$TMP_OUT/settings-screenshot.log" "$TMP_OUT/scene2-render.log" "$TMP_OUT/scene2-screenshot.log" "$TMP_OUT/scene3-render.log" "$TMP_OUT/scene3-screenshot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
         else
