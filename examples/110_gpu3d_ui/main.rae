@@ -78,7 +78,7 @@ func cameraRight(controller: view CameraController) ret Vec3 {
 
 type DemoUiResource {
   paused: Bool
-  fullMotion: Bool
+  fullSpeed: Bool
   debugOpen: Bool
   activeScene: Int
   revision: Int
@@ -91,7 +91,7 @@ type DemoUiResource {
 func createDemoUiResource() ret DemoUiResource {
   ret DemoUiResource {
     paused: false
-    fullMotion: true
+    fullSpeed: false
     debugOpen: false
     activeScene: 1
     revision: 1
@@ -139,10 +139,10 @@ func syncDemoUi(world: mod UiWorld, state: mod DemoUiResource) ret Bool {
     } else {
       setNodeText(world: world, nodeId: "PauseLabel", value: "Pause")
     }
-    if state.fullMotion {
-      setNodeText(world: world, nodeId: "MotionLabel", value: "Animation: Full")
+    if state.fullSpeed {
+      setNodeText(world: world, nodeId: "MotionButtonLabel", value: "Full")
     } else {
-      setNodeText(world: world, nodeId: "MotionLabel", value: "Animation: Reduced")
+      setNodeText(world: world, nodeId: "MotionButtonLabel", value: "Reduced")
     }
     state.appliedRevision = state.revision
     layoutDirty = true
@@ -200,8 +200,8 @@ func dispatchUiActions(input: view UiInput, state: mod DemoUiResource, controlle
       state.debugOpen = not state.debugOpen
       state.revision = state.revision + 1
     }
-    if event.actionId.equals(other: "animation.mode") {
-      state.fullMotion = not state.fullMotion
+    if event.actionId.equals(other: "animation.speed") {
+      state.fullSpeed = not state.fullSpeed
       state.revision = state.revision + 1
     }
     if event.actionId.equals(other: "camera.mode") {
@@ -410,7 +410,7 @@ func main() ret Int {
 
     if uiState.paused is false {
       var motionScale: Float = 1.0
-      if uiState.fullMotion is false { motionScale = 0.25 }
+      if uiState.fullSpeed is false { motionScale = 0.25 }
       simTime = simTime + dt * motionScale
     }
     if cameraController.mode is CameraMode.orbit {
