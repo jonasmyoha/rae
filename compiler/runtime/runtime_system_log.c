@@ -369,12 +369,12 @@ void rae_ext_rae_log_stream_key(rae_String value) {
   rae_ext_rae_log_stream_string(value);
 }
 
-void rae_ext_rae_log_float(double value) {
+void rae_ext_rae_log_float(float value){
   printf("%g\n", value);
   rae_flush_stdout();
 }
 
-void rae_ext_rae_log_stream_float(double value) {
+void rae_ext_rae_log_stream_float(float value){
   printf("%g", value);
   rae_flush_stdout();
 }

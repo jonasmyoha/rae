@@ -148,8 +148,8 @@ RAE_UNUSED static void rae_log_stream_uint32_t_(uint32_t v) { printf("%lc", (win
 RAE_UNUSED static void rae_log_stream_RaeAny_(RaeAny v) { rae_ext_rae_log_stream_any(v); }
 
 /* Conversion Helpers */
-RAE_UNUSED double rae_ext_rae_int_to_float(int64_t v);
-RAE_UNUSED int64_t rae_ext_rae_float_to_int(double v);
+RAE_UNUSED float rae_ext_rae_int_to_float(int64_t v);
+RAE_UNUSED int64_t rae_ext_rae_float_to_int(float v);
 RAE_UNUSED static RaeAny rae_any_int(int64_t v) { return (RaeAny){.type = RAE_TYPE_INT64, .as.i = v}; }
 RAE_UNUSED static RaeAny rae_any_int32(int32_t v) { return (RaeAny){.type = RAE_TYPE_INT32, .as.i = v}; }
 RAE_UNUSED static RaeAny rae_any_uint64(uint64_t v) { return (RaeAny){.type = RAE_TYPE_UINT64, .as.i = (int64_t)v}; }
@@ -209,6 +209,11 @@ typedef struct { uint64_t* ptr; } rae_View_UInt64;
 typedef struct { uint64_t* ptr; } rae_Mod_UInt64;
 typedef struct { uint32_t* ptr; } rae_View_UInt32;
 typedef struct { uint32_t* ptr; } rae_Mod_UInt32;
+/* Float (== Float32, f32) is Rae's default float; Float64 is the explicit
+ * high-precision type. Both view/mod wrappers exist so the two never alias
+ * each other's pointer width. */
+typedef struct { float* ptr; }  rae_View_Float;
+typedef struct { float* ptr; }  rae_Mod_Float;
 typedef struct { double* ptr; } rae_View_Float64;
 typedef struct { double* ptr; } rae_Mod_Float64;
 typedef struct { float* ptr; } rae_View_Float32;
@@ -309,8 +314,8 @@ void rae_ext_rae_log_id(int64_t value);
 void rae_ext_rae_log_stream_id(int64_t value);
 void rae_ext_rae_log_key(rae_String value);
 void rae_ext_rae_log_stream_key(rae_String value);
-void rae_ext_rae_log_float(double value);
-void rae_ext_rae_log_stream_float(double value);
+void rae_ext_rae_log_float(float value);
+void rae_ext_rae_log_stream_float(float value);
 
 void rae_ext_rae_log_list_fields(RaeAny* items, int64_t length, int64_t capacity);
 void rae_ext_rae_log_stream_list_fields(RaeAny* items, int64_t length, int64_t capacity);
@@ -501,7 +506,7 @@ int64_t rae_ext_rae_mem_stats_buf_outstanding(void);
 int64_t rae_ext_rae_mem_stats_buf_outstanding_bytes(void);
 
 void rae_ext_rae_seed(int64_t seed);
-double rae_ext_rae_random(void);
+float rae_ext_rae_random(void);
 int64_t rae_ext_rae_random_int(int64_t min, int64_t max);
 
 /* Channel(T) MPSC cross-thread channel (#271) — see lib/channel.rae. */
@@ -534,6 +539,7 @@ rae_String rae_ext_rae_str_i64(int64_t v);
 rae_String rae_ext_rae_str_i64_ptr(const int64_t* v);
 rae_String rae_ext_rae_str_f64(double v);
 rae_String rae_ext_rae_str_f64_ptr(const double* v);
+rae_String rae_ext_rae_str_f32_ptr(const float* v);
 rae_String rae_ext_rae_str_bool(rae_Bool v);
 rae_String rae_ext_rae_str_bool_ptr(const rae_Bool* v);
 rae_String rae_ext_rae_str_char(uint32_t v);
@@ -563,20 +569,20 @@ void rae_ext_rae_sleep(int64_t ms);
 rae_String rae_ext_time_formatTimestamp(int64_t epoch_ms);
 rae_String rae_ext_time_formatDate(int64_t epoch_ms);
 
-double rae_ext_math_sin(double x);
-double rae_ext_math_cos(double x);
-double rae_ext_math_tan(double x);
-double rae_ext_math_asin(double x);
-double rae_ext_math_acos(double x);
-double rae_ext_math_atan(double x);
-double rae_ext_math_atan2(double y, double x);
-double rae_ext_math_sqrt(double x);
-double rae_ext_math_pow(double b, double e);
-double rae_ext_math_exp(double x);
-double rae_ext_math_math_log(double x);
-double rae_ext_math_floor(double x);
-double rae_ext_math_ceil(double x);
-double rae_ext_math_round(double x);
+float rae_ext_math_sin(float x);
+float rae_ext_math_cos(float x);
+float rae_ext_math_tan(float x);
+float rae_ext_math_asin(float x);
+float rae_ext_math_acos(float x);
+float rae_ext_math_atan(float x);
+float rae_ext_math_atan2(float y, float x);
+float rae_ext_math_sqrt(float x);
+float rae_ext_math_pow(float b, float e);
+float rae_ext_math_exp(float x);
+float rae_ext_math_math_log(float x);
+float rae_ext_math_floor(float x);
+float rae_ext_math_ceil(float x);
+float rae_ext_math_round(float x);
 
 RaeAny rae_ext_json_get(const char* json, const char* field);
 
@@ -677,7 +683,7 @@ void rae_ext_setTargetFPS(int64_t fps);
  * an unbounded wait -- prefer waitEvents() for that intent.
  * postEmptyEvent() wakes any thread currently blocked in a wait.
  * Must be called after initWindow(). */
-void rae_ext_waitEventsTimeout(double seconds);
+void rae_ext_waitEventsTimeout(float seconds);
 void rae_ext_waitEvents(void);
 void rae_ext_postEmptyEvent(void);
 void rae_ext_beginDrawing(void);
@@ -699,35 +705,35 @@ void rae_ext_setWindowSize(int64_t width, int64_t height);
 void rae_ext_setWindowPosition(int64_t x, int64_t y);
 int64_t rae_ext_getWindowPositionX(void);
 int64_t rae_ext_getWindowPositionY(void);
-double rae_ext_getTime(void);
-void rae_ext_drawCircle(double x, double y, double radius, Color color);
-void rae_ext_drawCircleGradient(int64_t x, int64_t y, double radius, Color color1, Color color2);
-void rae_ext_drawRectangle(double x, double y, double width, double height, Color color);
-void rae_ext_drawRectangleLines(double x, double y, double width, double height, Color color);
-void rae_ext_drawRectangleRounded(double x, double y, double width, double height, double roundness, int64_t segments, Color color);
+float rae_ext_getTime(void);
+void rae_ext_drawCircle(float x, float y, float radius, Color color);
+void rae_ext_drawCircleGradient(int64_t x, int64_t y, float radius, Color color1, Color color2);
+void rae_ext_drawRectangle(float x, float y, float width, float height, Color color);
+void rae_ext_drawRectangleLines(float x, float y, float width, float height, Color color);
+void rae_ext_drawRectangleRounded(float x, float y, float width, float height, float roundness, int64_t segments, Color color);
 void rae_ext_drawRectangleGradientV(int64_t x, int64_t y, int64_t width, int64_t height, Color color1, Color color2);
 void rae_ext_drawRectangleGradientH(int64_t x, int64_t y, int64_t width, int64_t height, Color color1, Color color2);
-void rae_ext_drawText(rae_String text, double x, double y, double fontSize, Color color);
-void rae_ext_drawSphere(Vector3 centerPos, double radius, Color color);
-void rae_ext_drawCube(Vector3 pos, double width, double height, double length, Color color);
-void rae_ext_drawCubeWires(Vector3 pos, double width, double height, double length, Color color);
-void rae_ext_drawCylinder(Vector3 position, double radiusTop, double radiusBottom, double height, int64_t slices, Color color);
-void rae_ext_drawGrid(int64_t slices, double spacing);
+void rae_ext_drawText(rae_String text, float x, float y, float fontSize, Color color);
+void rae_ext_drawSphere(Vector3 centerPos, float radius, Color color);
+void rae_ext_drawCube(Vector3 pos, float width, float height, float length, Color color);
+void rae_ext_drawCubeWires(Vector3 pos, float width, float height, float length, Color color);
+void rae_ext_drawCylinder(Vector3 position, float radiusTop, float radiusBottom, float height, int64_t slices, Color color);
+void rae_ext_drawGrid(int64_t slices, float spacing);
 void rae_ext_beginMode3D(Camera3D camera);
 void rae_ext_endMode3D(void);
 void rae_ext_beginMode2D(Camera2D camera);
 void rae_ext_endMode2D(void);
-Color rae_ext_colorFromHSV(double hue, double saturation, double value);
+Color rae_ext_colorFromHSV(float hue, float saturation, float value);
 void rae_ext_takeScreenshot(rae_String fileName);
 Texture rae_ext_loadTexture(rae_String fileName);
 void rae_ext_unloadTexture(Texture texture);
-void rae_ext_drawTexture(Texture texture, double x, double y, Color tint);
-void rae_ext_drawTextureEx(Texture texture, Vector2 pos, double rotation, double scale, Color tint);
+void rae_ext_drawTexture(Texture texture, float x, float y, Color tint);
+void rae_ext_drawTextureEx(Texture texture, Vector2 pos, float rotation, float scale, Color tint);
 int64_t rae_ext_measureText(rae_String text, int64_t fontSize);
 void rae_ext_loadFontInto(int64_t slot, rae_String path, int64_t fontSize);
 void rae_ext_unloadFontSlot(int64_t slot);
 rae_Bool rae_ext_isFontSlotLoaded(int64_t slot);
-void rae_ext_drawTextWithFont(int64_t slot, rae_String text, double x, double y, double fontSize, double spacing, Color color);
+void rae_ext_drawTextWithFont(int64_t slot, rae_String text, float x, float y, float fontSize, float spacing, Color color);
 #endif
 
 #define rae_ext_rae_str(X) _Generic((X), \
@@ -737,6 +743,8 @@ void rae_ext_drawTextWithFont(int64_t slot, rae_String text, double x, double y,
     double: rae_ext_rae_str_f64, \
     double*: rae_ext_rae_str_f64_ptr, \
     const double*: rae_ext_rae_str_f64_ptr, \
+    float*: rae_ext_rae_str_f32_ptr, \
+    const float*: rae_ext_rae_str_f32_ptr, \
     float: rae_ext_rae_str_f64, \
     bool: rae_ext_rae_str_bool, \
     int8_t: rae_ext_rae_str_bool, \

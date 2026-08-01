@@ -299,7 +299,7 @@ static char g_g2d_img_key[RAE_G2D_MAX_IMG_KEYS][96];
 static int  g_g2d_img_key_handle[RAE_G2D_MAX_IMG_KEYS];
 static int  g_g2d_img_key_n = 0;
 
-void rae_ext_gpu2d_drawImage(double x, double y, double w, double h, double radius, int64_t handle, int64_t tint);  /* defined below */
+void rae_ext_gpu2d_drawImage(float x, float y, float w, float h, float radius, int64_t handle, int64_t tint);  /* defined below */
 
 static int rae_g2d_handle_for_key(const char* k) {
     if (!k) return 0;
@@ -332,7 +332,7 @@ rae_Bool rae_ext_gpu2d_hasImageKey(rae_String key) {
 }
 
 /* Draw a registered image by key (no-op if the key isn't registered). */
-void rae_ext_gpu2d_drawImageKey(rae_String key, double x, double y, double w, double h, double radius, int64_t tint) {
+void rae_ext_gpu2d_drawImageKey(rae_String key, float x, float y, float w, float h, float radius, int64_t tint){
     if (!key.data) return;
     int handle = rae_g2d_handle_for_key((const char*)key.data);
     if (handle > 0) rae_ext_gpu2d_drawImage(x, y, w, h, radius, (int64_t)handle, tint);
@@ -362,11 +362,11 @@ static void rae_g2d_queue_image(double x, double y, double w, double h, double r
 /* Queue an image draw for this frame (handle from loadImage). tint is
  * 0xAARRGGBB applied multiplicatively (use 0xFFFFFFFF for the unmodified
  * image). radius rounds the corners (design units). */
-void rae_ext_gpu2d_drawImage(double x, double y, double w, double h, double radius, int64_t handle, int64_t tint) {
+void rae_ext_gpu2d_drawImage(float x, float y, float w, float h, float radius, int64_t handle, int64_t tint){
     rae_g2d_queue_image(x, y, w, h, radius, handle, tint, 0.0f, 0.0f, 1.0f, 1.0f);
 }
 
-void rae_ext_gpu2d_drawImageKeyScaled(rae_String key, double x, double y, double w, double h, double radius, int64_t tint, int64_t scaleMode) {
+void rae_ext_gpu2d_drawImageKeyScaled(rae_String key, float x, float y, float w, float h, float radius, int64_t tint, int64_t scaleMode){
     if (!key.data) return;
     int handle = rae_g2d_handle_for_key((const char*)key.data);
     if (handle <= 0 || handle > g_g2d_img_n || w <= 0.0 || h <= 0.0) return;

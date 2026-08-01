@@ -206,7 +206,7 @@ rae_String rae_ext_rae_sys_list_dir(rae_String folder) {
   return (rae_String){finalBuf, (int64_t)len, (int64_t)(len + 1), 1};
 }
 
-double rae_ext_rae_sys_file_mtime(rae_String path) {
+double rae_ext_rae_sys_file_mtime(rae_String path){
     if (!path.data) return 0.0;
     struct stat st;
     if (stat((const char*)path.data, &st) != 0) return 0.0;
@@ -237,6 +237,12 @@ rae_String rae_ext_rae_str_f64(double v) {
 
 rae_String rae_ext_rae_str_f64_ptr(const double* v) {
   return rae_ext_rae_str_f64(*v);
+}
+
+/* Float (f32) views. Formatting promotes to double, so the shared f64
+ * formatter produces the same text a plain Float would. */
+rae_String rae_ext_rae_str_f32_ptr(const float* v) {
+  return rae_ext_rae_str_f64((double)*v);
 }
 
 rae_String rae_ext_rae_str_bool(rae_Bool v) {

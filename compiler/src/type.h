@@ -15,7 +15,8 @@ typedef enum {
     TYPE_VOID,
     TYPE_BOOL,
     TYPE_INT,
-    TYPE_FLOAT,
+    TYPE_FLOAT,   // f32 / IEEE-754 binary32. `Float` and `Float32` both resolve here.
+    TYPE_FLOAT64, // f64 / IEEE-754 binary64. Distinct type, never aliased by `Float`.
     TYPE_STRING,
     TYPE_CHAR,
     TYPE_STRUCT, // A concrete struct instance (possibly specialized)
@@ -96,7 +97,8 @@ void type_registry_add_specialization(TypeRegistry* r, struct AstDecl* generic_d
 TypeInfo* type_get_void(TypeRegistry* registry);
 TypeInfo* type_get_bool(TypeRegistry* registry);
 TypeInfo* type_get_int(TypeRegistry* registry);
-TypeInfo* type_get_float(TypeRegistry* registry);
+TypeInfo* type_get_float(TypeRegistry* registry);   // Float == Float32 (f32)
+TypeInfo* type_get_float64(TypeRegistry* registry); // Float64 (f64)
 TypeInfo* type_get_string(TypeRegistry* registry);
 TypeInfo* type_get_char(TypeRegistry* registry);
 TypeInfo* type_get_any(TypeRegistry* registry);
