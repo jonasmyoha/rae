@@ -102,7 +102,7 @@ static bool native_initWindow(struct VM* vm, VmNativeResult* out, const Value* a
     int h = (args[1].type == VAL_FLOAT) ? (int)args[1].as.float_value : (int)args[1].as.int_value;
     const char* title = "Rae Window";
     if (args[2].type == VAL_STRING && args[2].as.string_value.chars) {
-        title = args[2].as.string_value.chars;
+        title = (const char*)args[2].as.string_value.chars;
     } else {
         fprintf(stderr, "error: initWindow expects string for title, got type %d\n", args[2].type);
     }
@@ -188,7 +188,7 @@ static bool native_loadTexture(struct VM* vm, VmNativeResult* out, const Value* 
         fprintf(stderr, "error: loadTexture expects 1 string arg, got %zu\n", count);
         return false;
     }
-    Texture t = LoadTexture(args[0].as.string_value.chars);
+    Texture t = LoadTexture((const char*)args[0].as.string_value.chars);
     out->has_value = true;
     out->value = value_object(5, "Texture");
     out->value.as.object_value.fields[0] = value_int((int64_t)t.id);
@@ -205,7 +205,7 @@ static bool native_loadCircleCroppedTexture(struct VM* vm, VmNativeResult* out, 
         fprintf(stderr, "error: loadCircleCroppedTexture expects 1 string arg, got %zu\n", count);
         return false;
     }
-    Image img = LoadImage(args[0].as.string_value.chars);
+    Image img = LoadImage((const char*)args[0].as.string_value.chars);
     Texture t = {0};
     if (img.data != NULL) {
         ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
@@ -244,7 +244,7 @@ static bool native_loadRoundedCroppedTexture(struct VM* vm, VmNativeResult* out,
         return false;
     }
     double radiusArg = (args[1].type == VAL_FLOAT) ? args[1].as.float_value : (double)args[1].as.int_value;
-    Image img = LoadImage(args[0].as.string_value.chars);
+    Image img = LoadImage((const char*)args[0].as.string_value.chars);
     Texture t = {0};
     if (img.data != NULL) {
         ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
@@ -752,7 +752,7 @@ static bool native_measureText(struct VM* vm, VmNativeResult* out, const Value* 
         fprintf(stderr, "error: measureText expects text as string\n");
         return false;
     }
-    const char* text = args[0].as.string_value.chars;
+    const char* text = (const char*)args[0].as.string_value.chars;
     int fontSize = (args[1].type == VAL_FLOAT) ? (int)args[1].as.float_value : (int)args[1].as.int_value;
     out->has_value = true;
     out->value = value_int(MeasureText(text, fontSize));
@@ -854,7 +854,7 @@ static bool native_drawText(struct VM* vm, VmNativeResult* out, const Value* arg
     
     const char* text = "???";
     if (args[0].type == VAL_STRING) {
-        text = args[0].as.string_value.chars;
+        text = (const char*)args[0].as.string_value.chars;
     } else {
         fprintf(stderr, "error: drawText expects string, got type %d\n", args[0].type);
     }
@@ -1277,7 +1277,7 @@ static bool native_loadFontInto(struct VM* vm, VmNativeResult* out, const Value*
         fprintf(stderr, "error: loadFontInto expects path as string\n");
         return false;
     }
-    const char* path = args[1].as.string_value.chars;
+    const char* path = (const char*)args[1].as.string_value.chars;
     int fontSize = (args[2].type == VAL_FLOAT) ? (int)args[2].as.float_value : (int)args[2].as.int_value;
     if (slot < 0 || slot >= VM_FONT_SLOTS) {
         out->has_value = false;
@@ -1339,7 +1339,7 @@ static bool native_drawTextWithFont(struct VM* vm, VmNativeResult* out, const Va
         fprintf(stderr, "error: drawTextWithFont expects text as string\n");
         return false;
     }
-    const char* text = args[1].as.string_value.chars;
+    const char* text = (const char*)args[1].as.string_value.chars;
     float x = (args[2].type == VAL_FLOAT) ? (float)args[2].as.float_value : (float)args[2].as.int_value;
     float y = (args[3].type == VAL_FLOAT) ? (float)args[3].as.float_value : (float)args[3].as.int_value;
     float fontSize = (args[4].type == VAL_FLOAT) ? (float)args[4].as.float_value : (float)args[4].as.int_value;
@@ -1373,7 +1373,7 @@ static bool native_measureTextWithFont(struct VM* vm, VmNativeResult* out, const
         fprintf(stderr, "error: measureTextWithFont expects text as string\n");
         return false;
     }
-    const char* text = args[1].as.string_value.chars;
+    const char* text = (const char*)args[1].as.string_value.chars;
     float fontSize = (args[2].type == VAL_FLOAT) ? (float)args[2].as.float_value : (float)args[2].as.int_value;
     float spacing = (args[3].type == VAL_FLOAT) ? (float)args[3].as.float_value : (float)args[3].as.int_value;
     int64_t width = 0;
