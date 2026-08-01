@@ -2706,6 +2706,8 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
   char runtime_c[PATH_MAX];
   char shell_html[PATH_MAX];
   char include_flag[PATH_MAX + 3];
+  char assets_path[PATH_MAX];
+  char preload_assets[PATH_MAX * 2 + 4];
   snprintf(runtime_c, sizeof(runtime_c), "%s/rae_runtime.c", RAE_RUNTIME_SOURCE_DIR);
   snprintf(shell_html, sizeof(shell_html), "%s/web_shell.html", RAE_RUNTIME_SOURCE_DIR);
   snprintf(include_flag, sizeof(include_flag), "-I%s", RAE_RUNTIME_SOURCE_DIR);
@@ -2716,6 +2718,15 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
   snprintf(src_dir, sizeof(src_dir), "%s", entry_rae_file);
   char* last_sep = strrchr(src_dir, '/');
   if (last_sep) *last_sep = '\0'; else snprintf(src_dir, sizeof(src_dir), ".");
+  snprintf(assets_path, sizeof(assets_path), "%s/assets", src_dir);
+  struct stat assets_stat;
+  bool has_assets = stat(assets_path, &assets_stat) == 0 && S_ISDIR(assets_stat.st_mode);
+  if (has_assets) {
+    /* Preserve the source-relative path expected by Compiled applications.
+     * This makes `.raescene`, fonts, images, and other project assets
+     * available through the same filesystem API in browser WASM. */
+    snprintf(preload_assets, sizeof(preload_assets), "%s@/%s", assets_path, assets_path);
+  }
   DIR* d = opendir(src_dir);
   if (d) {
     struct dirent* ent;
@@ -2771,6 +2782,10 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
   if (uses_webgpu) {
     args[n++] = "-DRAE_HAS_WEBGPU";
     args[n++] = "--use-port=emdawnwebgpu";
+  }
+  if (has_assets) {
+    args[n++] = "--preload-file";
+    args[n++] = preload_assets;
   }
   args[n++] = c_path;
   args[n++] = runtime_c;

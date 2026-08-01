@@ -1,0 +1,277 @@
+# 3D Renderer — PBR scene with persistent ECS/.raescene UI.
+#
+# Frame ownership is explicit: Scene3d renders first, gpu3d.endPass submits
+# without presenting, GPU2D loads the resolved color target and paints UiWorld,
+# then GPU2D presents once. UI hit-testing has priority over orbit input.
+import core
+import gpu2d
+import math
+import sdf_text
+import vec3
+open gpu3d
+open math3d
+open mesh3d
+open scene3d
+open ui/ecs
+open ui/input_gpu2d
+open ui/layout
+open ui/render_gpu2d
+open ui/scene_file
+open ui/scene_loader
+open ui/theme_resolved
+open ui/transform
+import ui/ecs
+import ui/input_gpu2d
+import ui/layout
+import ui/render_gpu2d
+import ui/scene
+import ui/scene_file
+import ui/scene_loader
+import ui/theme_resolved
+import ui/transform
+
+let designW: Float = 1280.0
+let designH: Float = 800.0
+
+type DemoUiResource {
+  paused: Bool
+  fullMotion: Bool
+  debugOpen: Bool
+  revision: Int
+  appliedRevision: Int
+  fpsRevision: Int
+  appliedFpsRevision: Int
+  frameMs: Float
+}
+
+func createDemoUiResource() ret DemoUiResource {
+  ret DemoUiResource {
+    paused: false
+    fullMotion: true
+    debugOpen: false
+    revision: 1
+    appliedRevision: 0
+    fpsRevision: 1
+    appliedFpsRevision: 0
+    frameMs: 0.0
+  }
+}
+
+func nodeEntity(world: view UiWorld, nodeId: view String) ret EntityId {
+  let found: opt Int = world.nodeIds.get(k: nodeId)
+  if found is none { ret noEntity() }
+  let raw: Int = found
+  ret entityId(v: raw)
+}
+
+func setNodeActive(world: mod UiWorld, nodeId: view String, value: view Bool) {
+  let entity: EntityId = nodeEntity(world: world, nodeId: nodeId)
+  if isNone(this: entity) { ret }
+  let active: Active = { value: value }
+  componentSet(this: world.actives, entity: entity, data: active)
+}
+
+func setNodeText(world: mod UiWorld, nodeId: view String, value: view String) {
+  let entity: EntityId = nodeEntity(world: world, nodeId: nodeId)
+  if isNone(this: entity) { ret }
+  if componentHas(this: world.texts, entity: entity) is false { ret }
+  let text: mod Text => componentMod(this: world.texts, entity: entity)
+  text.text = "{value}"
+}
+
+# Narrow UI diff: persistent entities are patched only when their typed
+# resource revision changes. No scene remount or per-frame widget rebuilding.
+func syncDemoUi(world: mod UiWorld, state: mod DemoUiResource) ret Bool {
+  var layoutDirty: Bool = false
+  if state.appliedRevision is not state.revision {
+    setNodeActive(world: world, nodeId: "PauseLayer", value: state.paused)
+    setNodeActive(world: world, nodeId: "DebugPanel", value: state.debugOpen)
+    if state.paused {
+      setNodeText(world: world, nodeId: "PauseLabel", value: "Resume")
+    } else {
+      setNodeText(world: world, nodeId: "PauseLabel", value: "Pause")
+    }
+    if state.fullMotion {
+      setNodeText(world: world, nodeId: "MotionLabel", value: "Animation: Full")
+    } else {
+      setNodeText(world: world, nodeId: "MotionLabel", value: "Animation: Reduced")
+    }
+    state.appliedRevision = state.revision
+    layoutDirty = true
+  }
+  if state.appliedFpsRevision is not state.fpsRevision {
+    setNodeText(world: world, nodeId: "FpsLabel", value: "Frame time: {state.frameMs} ms")
+    state.appliedFpsRevision = state.fpsRevision
+  }
+  ret layoutDirty
+}
+
+func dispatchUiActions(input: view UiInput, state: mod DemoUiResource) {
+  var i: Int = 0
+  loop i < input.events.length {
+    let event: UiActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
+    if event.actionId.equals(other: "scene.pause") {
+      state.paused = not state.paused
+      state.revision = state.revision + 1
+    }
+    if event.actionId.equals(other: "ui.debug") {
+      state.debugOpen = not state.debugOpen
+      state.revision = state.revision + 1
+    }
+    if event.actionId.equals(other: "animation.mode") {
+      state.fullMotion = not state.fullMotion
+      state.revision = state.revision + 1
+    }
+    i = i + 1
+  }
+}
+
+func uploadMeshData(mesh: view MeshData) ret MeshHandle {
+  ret uploadMesh(verts: mesh.verts, vertCount: mesh.vertCount, indices: mesh.indices)
+}
+
+func buildScene(sphere: view MeshHandle, torus: view MeshHandle, ground: view MeshHandle) ret Scene3d {
+  var scene: Scene3d = createScene3d()
+  let zero: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let unit: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  let red: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.88, y: 0.20, z: 0.14), metallic: 0.72, roughness: 0.20, emission: zero)
+  let teal: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.08, y: 0.58, z: 0.55), metallic: 0.32, roughness: 0.32, emission: zero)
+  let gold: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.95, y: 0.58, z: 0.12), metallic: 0.92, roughness: 0.16, emission: vec3.create(x: 0.05, y: 0.018, z: 0.0))
+  let floor: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.20, y: 0.23, z: 0.28), metallic: 0.05, roughness: 0.86, emission: zero)
+  let left: Int = addMeshInstance(scene: scene, mesh: sphere, material: red, position: vec3.create(x: 0.0 - 2.7, y: 0.0, z: 0.45), rotation: zero, scale: unit)
+  let right: Int = addMeshInstance(scene: scene, mesh: sphere, material: teal, position: vec3.create(x: 2.7, y: 0.0, z: 0.45), rotation: zero, scale: unit)
+  let center: Int = addMeshInstance(scene: scene, mesh: torus, material: gold, position: vec3.create(x: 0.0, y: 0.0, z: 1.35), rotation: zero, scale: unit)
+  let plane: Int = addMeshInstance(scene: scene, mesh: ground, material: floor, position: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.75), rotation: zero, scale: unit)
+  ret scene
+}
+
+func main() ret Int {
+  gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — ECS Scene UI")
+  gpu2d.setDesignResolution(width: designW, height: designH, fit: 0)
+
+  let sphereData: MeshData = makeSphere(rings: 32, segments: 48)
+  let torusData: MeshData = makeTorus(majorR: 1.55, minorR: 0.42, majorSegs: 96, minorSegs: 40)
+  let planeData: MeshData = makePlane(size: 36.0, segments: 1)
+  let sphere: MeshHandle = uploadMeshData(mesh: sphereData)
+  let torus: MeshHandle = uploadMeshData(mesh: torusData)
+  let ground: MeshHandle = uploadMeshData(mesh: planeData)
+  var scene: Scene3d = buildScene(sphere: sphere, torus: torus, ground: ground)
+  let torusEntity: Int = scene.meshRenderers.at(index: 2).entity
+
+  let base: String = "examples/110_gpu3d_ui/assets/"
+  let textFont: SdfFont = sdf_text.loadSdfFont(jsonPath: "{base}Roboto-Regular.mtsdf.json", rawAtlasPath: "{base}Roboto-Regular.mtsdf.raw")
+  let iconFont: SdfFont = sdf_text.loadSdfFont(jsonPath: "{base}MaterialIconsRound-Regular.mtsdf.json", rawAtlasPath: "{base}MaterialIconsRound-Regular.mtsdf.raw")
+  let themeScene: Scene = loadSceneFile(path: "{base}theme.raescene")
+  let theme: ResolvedTheme = parseTheme(scene: themeScene)
+  setActiveThemeTokens(theme: theme)
+  let gpuUi: Gpu2dUi = { textFont: textFont, iconFont: iconFont, theme: theme }
+
+  var uiWorld: UiWorld = createUiWorld()
+  uiWorld.layoutW = designW
+  uiWorld.layoutH = designH
+  let uiScene: Scene = loadSceneFile(path: "{base}ui.raescene")
+  let uiRoot: EntityId = loadScene(world: uiWorld, scene: uiScene)
+  layoutSystem(world: uiWorld)
+  transformSystem(world: uiWorld)
+  visualBoundsSystem(world: uiWorld, res: gpuUi)
+
+  var uiInput: UiInput = createUiInput()
+  var uiState: DemoUiResource = createDemoUiResource()
+  let testState: String = getEnv(name: "RAE_GPU3D_UI_TEST_STATE")
+  if testState.equals(other: "pause") { uiState.paused = true }
+  if testState.equals(other: "debug") { uiState.debugOpen = true }
+  let initialUiLayoutDirty: Bool = syncDemoUi(world: uiWorld, state: uiState)
+  if initialUiLayoutDirty {
+    layoutSystem(world: uiWorld)
+    transformSystem(world: uiWorld)
+    visualBoundsSystem(world: uiWorld, res: gpuUi)
+  }
+
+  var camera: Camera3d = defaultCamera3d()
+  var light: Light3d = defaultLight3d()
+  var yaw: Float = 0.0
+  var pitch: Float = 0.38
+  var distance: Float = 12.5
+  var lastX: Float = 0.0
+  var lastY: Float = 0.0
+  var dragging: Bool = false
+  var simTime: Float = 0.0
+  var lastFrame: Float = gpu2d.nowSeconds()
+  var fpsAccum: Float = 0.0
+  var fpsFrames: Int = 0
+
+  loop not gpu2d.pollClose() {
+    let now: Float = gpu2d.nowSeconds()
+    var dt: Float = now - lastFrame
+    lastFrame = now
+    if dt > 0.1 { dt = 0.1 }
+
+    updateUiInput(input: uiInput, world: uiWorld)
+    dispatchUiActions(input: uiInput, state: uiState)
+    let uiLayoutDirty: Bool = syncDemoUi(world: uiWorld, state: uiState)
+    if uiLayoutDirty {
+      layoutSystem(world: uiWorld)
+      transformSystem(world: uiWorld)
+    }
+    visualBoundsSystem(world: uiWorld, res: gpuUi)
+
+    let px: Float = gpu2d.pointerX()
+    let py: Float = gpu2d.pointerY()
+    let cameraInput: Bool = uiPointerCaptured(input: uiInput) is false and uiState.paused is false
+    if cameraInput and gpu2d.pointerDown() {
+      if dragging {
+        yaw = yaw + (px - lastX) * 0.008
+        pitch = pitch - (py - lastY) * 0.008
+        if pitch > 1.45 { pitch = 1.45 }
+        if pitch < 0.05 { pitch = 0.05 }
+      }
+      dragging = true
+    } else {
+      dragging = false
+    }
+    lastX = px
+    lastY = py
+    if cameraInput {
+      distance = distance - gpu2d.wheelMove() * 0.8
+      if distance < 4.0 { distance = 4.0 }
+      if distance > 30.0 { distance = 30.0 }
+    }
+
+    if uiState.paused is false {
+      var motionScale: Float = 1.0
+      if uiState.fullMotion is false { motionScale = 0.25 }
+      simTime = simTime + dt * motionScale
+    }
+    camera.position = orbitEye(targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z, yaw: yaw, pitch: pitch, dist: distance)
+    light.sunDir = vec3.create(x: 0.0 - math.cos(x: simTime * 0.22) * 0.7, y: 0.0 - 0.7 - math.sin(x: simTime * 0.22) * 0.25, z: 0.0 - 1.0)
+    var torusTransform: Transform3d = scene.transforms.at(index: torusEntity)
+    torusTransform.rotation = vec3.create(x: simTime * 0.35, y: 0.0, z: simTime * 0.62)
+    scene.transforms.set(index: torusEntity, value: torusTransform)
+
+    fpsAccum = fpsAccum + dt
+    fpsFrames = fpsFrames + 1
+    if fpsAccum >= 0.5 {
+      uiState.frameMs = (fpsAccum * 1000.0) / fpsFrames.toFloat()
+      uiState.fpsRevision = uiState.fpsRevision + 1
+      fpsAccum = 0.0
+      fpsFrames = 0
+      let fpsLayoutDirty: Bool = syncDemoUi(world: uiWorld, state: uiState)
+      if fpsLayoutDirty {
+        layoutSystem(world: uiWorld)
+        transformSystem(world: uiWorld)
+      }
+      visualBoundsSystem(world: uiWorld, res: gpuUi)
+    }
+
+    let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
+    beginScene(camera: camera, light: light, aspect: aspect, time: simTime)
+    renderScene(scene: scene)
+    endPass()
+    gpu2d.beginFrameLoad()
+    renderSystemGpu2d(world: uiWorld, res: gpuUi)
+    gpu2d.endFrame()
+  }
+  shutdown()
+  gpu2d.closeWindow()
+  ret 0
+}
