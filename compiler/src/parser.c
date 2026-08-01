@@ -87,6 +87,23 @@ static bool is_keyword(TokenKind kind) {
   return kind >= TOK_KW_TYPE && kind <= TOK_KW_PARALLELLOOP;
 }
 
+/* Placeholder returned when an identifier was required but not found. Callers
+ * get a non-NULL name so they can keep building a partial AST instead of
+ * dereferencing NULL (the old crash), while the diagnostic is what the user
+ * actually sees. */
+static const Token kDummyIdent = { TOK_IDENT, { "dummy", 5 }, 0, 0 };
+
+/* Panic-mode recovery: consume the offending token so the parser is
+ * GUARANTEED to make forward progress. Without this the caller re-examines
+ * the same token, fails identically, and the parser spins forever — a hang
+ * is not an improvement over the crash this recovery replaced. Never step
+ * past EOF, which would run off the token array. */
+static void parser_recover(Parser* parser) {
+  if (parser_peek(parser)->kind != TOK_EOF) {
+    parser_advance(parser);
+  }
+}
+
 static const Token* parser_consume(Parser* parser, TokenKind kind, const char* message) {
   if (parser_check(parser, kind)) {
     return parser_advance(parser);
@@ -96,11 +113,10 @@ static const Token* parser_consume(Parser* parser, TokenKind kind, const char* m
     if (is_keyword(token->kind)) {
       parser_error(parser, token, "'%.*s' is a reserved keyword", (int)token->lexeme.len, token->lexeme.data);
       return parser_advance(parser);
-    } else {
-      parser_error(parser, token, message);
-      static const Token dummy_ident = { TOK_IDENT, { "dummy", 5 }, 0, 0 };
-      return &dummy_ident;
     }
+    parser_error(parser, token, message);
+    parser_recover(parser);
+    return &kDummyIdent;
   }
   parser_error(parser, token, message);
   return NULL;
@@ -124,8 +140,8 @@ static const Token* parser_consume_ident(Parser* parser, const char* message) {
     return parser_advance(parser);
   }
   parser_error(parser, token, message);
-  static const Token dummy_ident = { TOK_IDENT, { "dummy", 5 }, 0, 0 };
-  return &dummy_ident;
+  parser_recover(parser);
+  return &kDummyIdent;
 }
 
 // Like parser_consume_ident, but also accepts a keyword token as a name. Used
