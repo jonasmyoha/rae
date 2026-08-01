@@ -271,6 +271,10 @@ void rae_ext_gpu2d_flush(void) {
 }
 
 void rae_ext_gpu2d_closeWindow(void) {
+    /* Persist size+position so a hot-reload relaunch reopens where the
+     * developer left it. No-op outside the dev loop — see the policy note
+     * in runtime_gpu2d_platform.c. */
+    g2d_save_geometry();
     if (g_g2d_off_view) { wgpuTextureViewRelease(g_g2d_off_view); g_g2d_off_view = NULL; }
     if (g_g2d_off_tex)  { wgpuTextureRelease(g_g2d_off_tex);  g_g2d_off_tex = NULL; }
     g_g2d_off_w = 0; g_g2d_off_h = 0;
