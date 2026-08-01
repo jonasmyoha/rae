@@ -28,6 +28,7 @@ import gpu2d
 import vec3
 open scene3d
 open gpu3d
+open renderer3d
 open math3d
 open mesh3d
 
@@ -98,6 +99,16 @@ func main() ret Int {
   var lastY: Float = 0.0
   var dragging: Bool = false
   # Epoch seconds stay Float64; the elapsed delta below is small enough for Float.
+  # The frame is a render graph (#331/#332): passes declare what they read
+  # and write, and execution order is DERIVED from those declarations
+  # rather than from the order of calls written below.
+  var renderer: Renderer3d = createRenderer3d()
+  let gs: Int = compileRenderer(r: renderer)
+  if gs is not 0 {
+    log("render graph invalid: {gs}")
+    ret 1
+  }
+
   let startT: Float64 = gpu2d.nowSeconds()
 
   loop not gpu2d.pollClose() {
@@ -150,9 +161,7 @@ func main() ret Int {
     scene.transforms.set(index: torusEntity, value: torusT)
 
     let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
-    beginScene(camera: camera, light: light, aspect: aspect, time: t)
-    renderScene(scene: scene)
-    endFrame()
+    renderFrame(r: renderer, scene: scene, camera: camera, light: light, aspect: aspect, time: t)
   }
   shutdown()
   gpu2d.closeWindow()
