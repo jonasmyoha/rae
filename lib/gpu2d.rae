@@ -72,7 +72,10 @@ func wheelMove() extern ret Float
 # 4=vertical resize, 5=crosshair, 6=not-allowed.
 func setMouseCursor(kind: Int) extern
 # Monotonic wall-clock seconds since process start (for scroll/animation timing).
-func nowSeconds() extern ret Float
+# Epoch seconds. Float64 deliberately: as f32 two calls one frame apart
+# return the SAME value (~1.7e9 has ~128s granularity), so every frame delta
+# would be exactly 0.0. See docs/primitive-types.md.
+func nowSeconds() extern ret Float64
 
 # --- Idle wait (hybrid loop) ---------------------------------------------
 # Block up to `timeoutSec` for the next OS event (returns immediately if one is
