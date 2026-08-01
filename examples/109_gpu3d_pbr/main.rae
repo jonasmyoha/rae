@@ -131,7 +131,9 @@ func main() ret Int {
       dist = 40.0
     }
 
-    let t: Float = gpu2d.nowSeconds() - startT
+    # Elapsed seconds: the subtraction happens in Float64 (full epoch
+    # precision) and only the small delta is narrowed, explicitly.
+    let t: Float = (gpu2d.nowSeconds() - startT) as Float
     camera.position = orbitEye(targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z, yaw: yaw, pitch: pitch, dist: dist)
 
     # Slowly orbiting sun keeps the specular highlight sweeping. Z-up: the

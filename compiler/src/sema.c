@@ -13,6 +13,9 @@
 // check that forbids raw rae_ext_rae_buf_set with cascade-drop element
 // types outside stdlib. NULL = unknown / top-level scope.
 static const char* s_current_decl_origin = NULL;
+/* Module under analysis, so deep helpers (ensure_type_match) can flag a
+ * hard error and actually fail the build rather than just printing. */
+static AstModule* s_current_module = NULL;
 
 // Per-file import/open directives (docs/module-namespacing.md). Registered from
 // the module graph before sema; consulted via s_current_decl_origin so a call
@@ -326,6 +329,10 @@ static AstExpr* clone_expr(Arena* arena, const AstExpr* expr) {
             break;
         case AST_EXPR_UNARY:
             res->as.unary.operand = clone_expr(arena, expr->as.unary.operand);
+            break;
+        case AST_EXPR_CAST:
+            res->as.cast.operand = clone_expr(arena, expr->as.cast.operand);
+            res->as.cast.target = clone_type_ref(arena, expr->as.cast.target);
             break;
         case AST_EXPR_CALL:
             res->as.call.callee = clone_expr(arena, expr->as.call.callee);
@@ -1207,10 +1214,66 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
     }
 }
 
+/* Distinct numeric types never convert implicitly — see
+ * docs/primitive-types.md. `Float` and `Float32` are the SAME type so they
+ * are not a conversion; `Float`(f32) and `Float64` are different types and
+ * require an explicit `as`. */
+static bool sema_is_numeric_kind(TypeKind k) {
+    return k == TYPE_INT || k == TYPE_FLOAT || k == TYPE_FLOAT64;
+}
+
+/* An unsuffixed literal is not a typed runtime value being converted — the
+ * compiler materialises it directly in the destination type, so
+ * `let x: Float64 = 1.5` needs no cast. Only already-typed values do. */
+static bool sema_is_numeric_literal(const AstExpr* e) {
+    if (!e) return false;
+    if (e->kind == AST_EXPR_FLOAT || e->kind == AST_EXPR_INTEGER) return true;
+    /* -1.5 and +1.5 are still literals. */
+    if (e->kind == AST_EXPR_UNARY && e->as.unary.op == AST_UNARY_NEG) {
+        return sema_is_numeric_literal(e->as.unary.operand);
+    }
+    /* Constant-folded literal arithmetic stays literal (1.0 / 3.0). */
+    if (e->kind == AST_EXPR_BINARY) {
+        return sema_is_numeric_literal(e->as.binary.lhs) &&
+               sema_is_numeric_literal(e->as.binary.rhs);
+    }
+    return false;
+}
+
+static const char* sema_numeric_name(TypeKind k) {
+    switch (k) {
+        case TYPE_INT: return "Int";
+        case TYPE_FLOAT: return "Float";
+        case TYPE_FLOAT64: return "Float64";
+        default: return "?";
+    }
+}
+
 static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr** expr_ptr) {
     if (!expected || !expr_ptr || !*expr_ptr) return;
     AstExpr* expr = *expr_ptr;
     if (!expr->resolved_type) return;
+    /* HARD ERROR on implicit numeric conversion (both widening and
+     * narrowing). Silently narrowing a Float64 epoch to f32 destroyed
+     * animation timing and FPS in the gpu3d examples; a warning would not
+     * have stopped it. Literals are exempt: they are materialised directly
+     * in the destination type, not converted. */
+    if (sema_is_numeric_kind(expected->kind) &&
+        sema_is_numeric_kind(expr->resolved_type->kind) &&
+        expected->kind != expr->resolved_type->kind &&
+        expr->kind != AST_EXPR_CAST &&
+        !sema_is_numeric_literal(expr)) {
+        char buf[240];
+        snprintf(buf, sizeof(buf),
+            "cannot implicitly convert %s to %s; Rae has no implicit numeric conversions - write `value as %s`",
+            sema_numeric_name(expr->resolved_type->kind),
+            sema_numeric_name(expected->kind),
+            sema_numeric_name(expected->kind));
+        const char* err_file = s_current_decl_origin ? s_current_decl_origin : NULL;
+        diag_error(err_file, (int)expr->line, (int)expr->column, buf);
+        if (s_current_module) s_current_module->had_error = true;
+        return;
+    }
     if (expected->kind == TYPE_ANY && expr->resolved_type->kind != TYPE_ANY) {
         AstExpr* box = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
         *box = (AstExpr){.kind = AST_EXPR_BOX, .resolved_type = expected, .line = expr->line, .column = expr->column};
@@ -1257,6 +1320,25 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             if (expr->as.binary.op >= AST_BIN_LT && expr->as.binary.op <= AST_BIN_OR) expr->resolved_type = type_get_bool(ctx->type_registry);
             else if (expr->as.binary.lhs && expr->as.binary.lhs->resolved_type) expr->resolved_type = expr->as.binary.lhs->resolved_type;
             break;
+        case AST_EXPR_CAST: {
+            sema_analyze_expr(ctx, module, symbols, expr->as.cast.operand);
+            TypeInfo* target = sema_resolve_type_internal(ctx, module, symbols, expr->as.cast.target);
+            expr->resolved_type = target;
+            TypeInfo* src = expr->as.cast.operand ? expr->as.cast.operand->resolved_type : NULL;
+            if (target && src) {
+                /* `as` converts numeric representations. It is not a
+                 * type-system escape hatch: anything else is rejected. */
+                bool ok = sema_is_numeric_kind(target->kind) && sema_is_numeric_kind(src->kind);
+                if (!ok && target->kind == src->kind) ok = true; /* Float as Float32: same type, no-op */
+                if (!ok) {
+                    const char* cf = s_current_decl_origin ? s_current_decl_origin : NULL;
+                    diag_error(cf, (int)expr->line, (int)expr->column,
+                               "unsupported conversion: `as` converts between numeric types");
+                    if (s_current_module) s_current_module->had_error = true;
+                }
+            }
+            break;
+        }
         case AST_EXPR_UNARY:
             sema_analyze_expr(ctx, module, symbols, expr->as.unary.operand);
             if (expr->as.unary.op == AST_UNARY_NOT) expr->resolved_type = type_get_bool(ctx->type_registry);
@@ -1708,6 +1790,7 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
 }
 
 bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
+    s_current_module = module;
     if (!ctx->type_registry) {
         ctx->type_registry = arena_alloc(ctx->ast_arena, sizeof(TypeRegistry));
         type_registry_init(ctx->type_registry, ctx->ast_arena);

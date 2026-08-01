@@ -435,8 +435,10 @@ func parseRgbaString(s: view String) ret RgbaColor {
     b = rae_str_to_i64(s: bs)
   }
   if parts.length > 3 {
-    let as: String = parts.get(index: 3)
-    a = rae_str_to_i64(s: as)
+    # `as` is now a keyword (explicit conversion), so this alpha component
+    # string follows the rs/gs/bs naming instead.
+    let alphaStr: String = parts.get(index: 3)
+    a = rae_str_to_i64(s: alphaStr)
   }
   ret RgbaColor { r: r, g: g, b: b, a: a }
 }
