@@ -88,6 +88,7 @@ type ExampleMetadata = {
   // to the terminal.
   display?: { width: number; height: number };
   wasmRealThreads?: boolean;
+  wasmWebApp?: boolean;
   webgpu?: boolean;
 };
 
@@ -252,6 +253,7 @@ function makeMultiFileExample(
     category: metadata?.category,
     display: metadata?.display,
     wasmRealThreads: metadata?.wasmRealThreads,
+    wasmWebApp: metadata?.wasmWebApp,
     webgpu: metadata?.webgpu
   };
   return descriptor;
@@ -442,6 +444,7 @@ function parseRaePackMetadata(contents: string): ExampleMetadata {
   const category = readTopLevelStringField(contents, "category");
   const defaultTarget = readTopLevelBareField(contents, "defaultTarget");
   const wasmRealThreads = readTopLevelBoolishField(contents, "wasmRealThreads");
+  const wasmWebApp = readTopLevelBoolishField(contents, "wasmWebApp");
   const webgpu = readTopLevelBoolishField(contents, "webgpu");
   const displayBlock = readTopLevelBlock(contents, "display");
   const actionsBlock = readTopLevelBlock(contents, "actions");
@@ -451,6 +454,7 @@ function parseRaePackMetadata(contents: string): ExampleMetadata {
   if (category) metadata.category = category;
   if (defaultTarget) metadata.defaultTargetId = defaultTarget;
   if (wasmRealThreads !== undefined) metadata.wasmRealThreads = wasmRealThreads;
+  if (wasmWebApp !== undefined) metadata.wasmWebApp = wasmWebApp;
   if (webgpu !== undefined) metadata.webgpu = webgpu;
   if (displayBlock) {
     const width = readNumericField(displayBlock, "width");

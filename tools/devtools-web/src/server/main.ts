@@ -61,6 +61,7 @@ const compilerMetricsPath = path.resolve(
   "stats",
   "compiler_metrics.jsonl"
 );
+let activeWebApp: { id: string; dir: string } | null = null;
 
 const server = Bun.serve<SocketData>({
   port: CONFIG.port,
@@ -133,6 +134,82 @@ const server = Bun.serve<SocketData>({
       } finally {
         rmSync(tmp, { recursive: true, force: true });
       }
+    }
+
+    if (url.pathname === "/api/examples/web-app" && req.method === "POST") {
+      const payload = await safeJson(req);
+      const entry = typeof payload.entry === "string" ? payload.entry : "";
+      if (!entry || entry.includes("..")) {
+        return new Response(JSON.stringify({ error: "Missing or invalid entry" }), { status: 400 });
+      }
+      const cwd = resolveCompilerPath(CONFIG);
+      const entryPath = path.join(CONFIG.examplesPath ?? "examples", entry);
+      const entryDir = path.dirname(entryPath);
+      const tmp = mkdtempSync(path.join(os.tmpdir(), "rae-web-app-"));
+      const out = path.join(tmp, "index.html");
+      const profile = payload.profile === "debug" ? "dev" : "release";
+      const emcc = Bun.which("emcc");
+      const buildPath = emcc
+        ? `${path.dirname(emcc)}:${process.env.PATH ?? ""}`
+        : process.env.PATH;
+      try {
+        const proc = Bun.spawn([
+          path.join(cwd, "compiler/bin/rae"),
+          "build", "--target", "wasm", "--profile", profile,
+          "--project", entryDir, "--out", out, entryPath
+        ], {
+          cwd,
+          /* GUI-launched Devtools can put Xcode's Python 3.9 ahead of the
+           * Python bundled with current Emscripten. Put emcc's own bin dir
+           * first so its env-based Python launcher resolves consistently. */
+          env: { ...process.env, PATH: buildPath },
+          stdout: "pipe",
+          stderr: "pipe"
+        });
+        const code = await proc.exited;
+        if (code !== 0) {
+          const err = await new Response(proc.stderr).text();
+          rmSync(tmp, { recursive: true, force: true });
+          return new Response(JSON.stringify({ error: err || `Build exited ${code}` }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        if (activeWebApp) rmSync(activeWebApp.dir, { recursive: true, force: true });
+        const id = randomUUID();
+        activeWebApp = { id, dir: tmp };
+        return new Response(JSON.stringify({ url: `/api/examples/web-app/${id}/index.html` }), {
+          headers: { "Content-Type": "application/json" }
+        });
+      } catch (error) {
+        rmSync(tmp, { recursive: true, force: true });
+        return new Response(JSON.stringify({ error: (error as Error).message }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+    }
+
+    if (url.pathname === "/api/examples/web-app" && req.method === "DELETE") {
+      if (activeWebApp) rmSync(activeWebApp.dir, { recursive: true, force: true });
+      activeWebApp = null;
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    if (url.pathname.startsWith("/api/examples/web-app/") && req.method === "GET") {
+      const parts = url.pathname.slice("/api/examples/web-app/".length).split("/");
+      const id = parts.shift();
+      const relative = parts.join("/") || "index.html";
+      if (!activeWebApp || id !== activeWebApp.id || relative.includes("..")) {
+        return new Response("Not found", { status: 404 });
+      }
+      const file = Bun.file(path.join(activeWebApp.dir, relative));
+      if (!(await file.exists())) return new Response("Not found", { status: 404 });
+      return new Response(file, {
+        headers: { "Content-Type": file.type || getContentType(relative), ...COI_HEADERS }
+      });
     }
 
     if (url.pathname === "/api/tests/run" && req.method === "POST") {
