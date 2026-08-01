@@ -38,7 +38,8 @@ func main() {
   let winW: Float = windowW
   let winH: Float = windowH
   uiInitWindow(width: winW.toInt(), height: winH.toInt(), title: "Rae Mobile UI — {backendEnv}")
-  uiSetWindowPosition(x: 50, y: 50)
+  # Window placement is handled by the runtime (size+position persist
+  # across hot reload automatically); no per-app placement code needed.
   # Backend-agnostic window/input hooks are no-ops on GPU2D when the SDL3
   # backend already owns the corresponding event state.
   uiInstallWindowCloseWaker()
@@ -98,9 +99,6 @@ func main() {
   let canvasEnv: String = getEnv(name: "RAE_UI_CANVAS")
   if canvasEnv.equals(other: "1") {
     appState.canvasOpen = true
-  }
-  if appState.hasWindowPosition {
-    uiSetWindowPosition(x: appState.windowX, y: appState.windowY)
   }
   # Persisted recently-played. CDN artwork is re-downloaded lazily in
   # the loop (refetchHistoryArtChunk, a few/frame) so it never blocks.

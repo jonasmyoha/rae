@@ -248,6 +248,71 @@ static void rae_g2d_configure(int pw, int ph) {
     }
 }
 
+/* ---- window geometry across hot reload -------------------------------
+ *
+ * Hot reload is exit + relaunch, so window size/position must persist
+ * outside the process or every rebuild snaps the window back to its
+ * requested geometry and its default position. Doing this per app costs
+ * ~5 touch points each (state field, serialise, deserialise, default,
+ * restore) and drifts — example 106 hand-rolled it and only ever
+ * persisted position, never size.
+ *
+ * Policy, deliberately narrow:
+ *  - Saved on closeWindow, restored on initWindow, and CONSUMED on
+ *    restore so it can only ever apply once.
+ *  - Restored only if the saved geometry is FRESH (a few seconds old).
+ *    A reload relaunch happens in ~1s; a cold start hours later sees a
+ *    stale file and ignores it, so `initWindow(1280, 800)` still means
+ *    what it says on a fresh run. That is the guardrail that keeps
+ *    examples reproducible for someone running them the first time.
+ *  - Disabled entirely for headless/screenshot runs. Restoring a stale
+ *    size there would silently change capture resolution and break the
+ *    byte-identical screenshot harness — exactly the class of silent
+ *    nondeterminism RAE_FIXED_DT/RAE_HEADLESS_FRAMES exist to remove.
+ *  - RAE_NO_WINDOW_RESTORE=1 opts out (kiosk, device-simulation presets).
+ */
+#define RAE_G2D_GEOMETRY_PATH ".rae/window.geometry"
+#define RAE_G2D_GEOMETRY_FRESH_SEC 10.0
+
+static bool g2d_geometry_enabled(void) {
+    if (getenv("RAE_NO_WINDOW_RESTORE")) return false;
+    /* any headless/capture mode: geometry must be exactly what was asked for */
+    if (getenv("RAE_HEADLESS_FRAMES")) return false;
+    if (getenv("RAE_SDL_HEADLESS_MS")) return false;
+    if (getenv("RAE_GPU2D_SCREENSHOT")) return false;
+    if (getenv("RAE_UI_DEVICE")) return false;   /* device preset owns the size */
+    return true;
+}
+
+static void g2d_save_geometry(void) {
+    if (!g2d_geometry_enabled() || !g_sdl_win) return;
+    int x = 0, y = 0, w = 0, h = 0;
+    SDL_GetWindowPosition(g_sdl_win, &x, &y);
+    SDL_GetWindowSize(g_sdl_win, &w, &h);
+    if (w <= 0 || h <= 0) return;
+    FILE* f = fopen(RAE_G2D_GEOMETRY_PATH, "wb");
+    if (!f) return;   /* no .rae dir => not a dev-loop run; silently skip */
+    fprintf(f, "%d %d %d %d\n", x, y, w, h);
+    fclose(f);
+}
+
+/* Returns true and fills the out params when fresh saved geometry exists.
+ * Always consumes the file, so a stale entry cannot linger. */
+static bool g2d_take_geometry(int* x, int* y, int* w, int* h) {
+    if (!g2d_geometry_enabled()) return false;
+    struct stat st;
+    if (stat(RAE_G2D_GEOMETRY_PATH, &st) != 0) return false;
+    bool fresh = (difftime(time(NULL), st.st_mtime) <= RAE_G2D_GEOMETRY_FRESH_SEC);
+    FILE* f = fopen(RAE_G2D_GEOMETRY_PATH, "rb");
+    bool ok = false;
+    if (f) {
+        ok = (fscanf(f, "%d %d %d %d", x, y, w, h) == 4);
+        fclose(f);
+    }
+    remove(RAE_G2D_GEOMETRY_PATH);   /* consume either way */
+    return ok && fresh && *w > 0 && *h > 0;
+}
+
 void rae_ext_gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         fprintf(stderr, "[gpu2d] SDL init failed: %s\n", SDL_GetError());
@@ -258,8 +323,12 @@ void rae_ext_gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
 #ifndef __EMSCRIPTEN__
     flags |= SDL_WINDOW_METAL;
 #endif
+    int rx = 0, ry = 0, rw = 0, rh = 0;
+    bool restored = g2d_take_geometry(&rx, &ry, &rw, &rh);
+    if (restored) { width = rw; height = rh; }
     g_sdl_win = SDL_CreateWindow(t, (int)width, (int)height, flags);
     if (!g_sdl_win) { fprintf(stderr, "[gpu2d] window failed: %s\n", SDL_GetError()); return; }
+    if (restored) SDL_SetWindowPosition(g_sdl_win, rx, ry);
     SDL_RaiseWindow(g_sdl_win);
 #ifndef __EMSCRIPTEN__
     g_g2d_metal_view = SDL_Metal_CreateView(g_sdl_win);
