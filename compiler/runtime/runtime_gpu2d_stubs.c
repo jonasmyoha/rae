@@ -34,6 +34,7 @@ double rae_ext_gpu2d_designWidth(void) { return 0.0; }
 double rae_ext_gpu2d_designHeight(void) { return 0.0; }
 double rae_ext_gpu2d_dpr(void) { return 1.0; }
 void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) { (void)r; (void)g; (void)b; (void)a; }
+void rae_ext_gpu2d_beginFrameLoad(void) {}
 void rae_ext_gpu2d_endFrame(void) {}
 rae_Bool rae_ext_gpu2d_lastPresentOk(void) { return 0; }
 void rae_ext_gpu2d_flush(void) {}

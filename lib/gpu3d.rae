@@ -47,6 +47,7 @@ func meshCreate(verts: view Buffer(Float), vertCount: Int, indices: view Buffer(
 func begin(frame: view Buffer(Float), count: Int) extern
 func draw(mesh: Int, model: view Buffer(Float), r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
 func end() extern
+func submit() extern
 func shutdown() extern
 
 # ----- frame parameter block (internal encoding) ----------------------
@@ -161,6 +162,13 @@ func renderScene(scene: view Scene3d) pub {
 
 func endFrame() pub {
   end()
+}
+
+# Submit the 3D pass without screenshot or present. Follow with
+# gpu2d.beginFrameLoad(), the ECS UI render pass, and gpu2d.endFrame() so the
+# composed frame is presented exactly once.
+func endPass() pub {
+  submit()
 }
 
 # Upload interleaved mesh data and get a typed handle back.
