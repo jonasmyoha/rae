@@ -1,0 +1,437 @@
+# Typed `.raescene` loading for Scene3d worlds.
+#
+# The file stays resource-independent: MeshRenderer stores a stable mesh key,
+# not a backend handle. MeshRegistry3d resolves that key to an already-uploaded
+# MeshHandle, so parsing or reloading scene data never rebuilds GPU resources.
+# Material references use material node IDs from the same file. Geometry node
+# IDs are retained in Scene3dAsset for animation and reload-stable lookup.
+import core
+import json
+import scene3d
+import vec3
+import ui/scene
+open scene3d
+open vec3
+open ui/scene
+
+type MeshRegistry3d {
+  keys: List(String)
+  handles: List(MeshHandle)
+}
+
+# Materials are scene-local values rather than GPU resources, but references
+# still resolve through a key registry so node order never becomes an ABI.
+type MaterialRegistry3d {
+  keys: List(String)
+  indices: List(Int)
+}
+
+func createMaterialRegistry3d() ret MaterialRegistry3d {
+  ret MaterialRegistry3d {
+    keys: createList(String, cap: 8)
+    indices: createList(Int, cap: 8)
+  }
+}
+
+func registerMaterial3d(reg: mod MaterialRegistry3d, key: view String, index: view Int) {
+  reg.keys.add(value: rae_ext_rae_string_copy(s: key))
+  reg.indices.add(value: index)
+}
+
+func materialRegistry3dGet(reg: view MaterialRegistry3d, key: view String) ret Int {
+  var i: Int = 0
+  loop i < reg.keys.length {
+    let candidate: String = reg.keys.get(index: i)
+    if candidate.equals(other: key) { ret reg.indices.at(index: i) }
+    i = i + 1
+  }
+  ret -1
+}
+
+func createMeshRegistry3d() pub ret MeshRegistry3d {
+  ret MeshRegistry3d {
+    keys: createList(String, cap: 8)
+    handles: createList(MeshHandle, cap: 8)
+  }
+}
+
+func meshRegistry3dIndex(reg: view MeshRegistry3d, key: view String) pub ret Int {
+  var i: Int = 0
+  loop i < reg.keys.length {
+    let candidate: String = reg.keys.get(index: i)
+    if candidate.equals(other: key) { ret i }
+    i = i + 1
+  }
+  ret -1
+}
+
+func registerMesh3d(reg: mod MeshRegistry3d, key: view String, handle: view MeshHandle) pub {
+  let existing: Int = meshRegistry3dIndex(reg: reg, key: key)
+  if existing >= 0 {
+    reg.handles.set(index: existing, value: handle)
+    ret
+  }
+  reg.keys.add(value: rae_ext_rae_string_copy(s: key))
+  reg.handles.add(value: handle)
+}
+
+func meshRegistry3dGet(reg: view MeshRegistry3d, key: view String) pub ret MeshHandle {
+  let idx: Int = meshRegistry3dIndex(reg: reg, key: key)
+  if idx < 0 { ret meshHandleNone() }
+  ret reg.handles.at(index: idx)
+}
+
+type Scene3dAsset {
+  scene: Scene3d
+  camera: Camera3d
+  light: Light3d
+  nodeIds: List(String)
+  entityIds: List(Int)
+  ok: Bool
+  errorMsg: String
+}
+
+func emptyScene3dAsset() ret Scene3dAsset {
+  ret Scene3dAsset {
+    scene: createScene3d()
+    camera: defaultCamera3d()
+    light: defaultLight3d()
+    nodeIds: createList(String, cap: 16)
+    entityIds: createList(Int, cap: 16)
+    ok: false
+    errorMsg: ""
+  }
+}
+
+func scene3dAssetEntity(asset: view Scene3dAsset, nodeId: view String) pub ret Int {
+  var i: Int = 0
+  loop i < asset.nodeIds.length {
+    let candidate: String = asset.nodeIds.get(index: i)
+    if candidate.equals(other: nodeId) { ret asset.entityIds.at(index: i) }
+    i = i + 1
+  }
+  ret -1
+}
+
+func failScene3dAsset(asset: mod Scene3dAsset, message: view String) {
+  asset.ok = false
+  asset.errorMsg = rae_ext_rae_string_copy(s: message)
+}
+
+func nodeComponent(doc: view JsonDoc, node: view SceneNode, name: view String) ret JsonValue {
+  let bag: JsonValue = json.jsonValueAt(doc: doc, idx: node.componentsValueIdx)
+  let idx: Int = json.jsonField(doc: doc, this: bag, key: name)
+  ret json.jsonValueAt(doc: doc, idx: idx)
+}
+
+func nodeHasComponent(doc: view JsonDoc, node: view SceneNode, name: view String) ret Bool {
+  let bag: JsonValue = json.jsonValueAt(doc: doc, idx: node.componentsValueIdx)
+  ret json.jsonField(doc: doc, this: bag, key: name) >= 0
+}
+
+func objectField(doc: view JsonDoc, object: view JsonValue, key: view String) ret JsonValue {
+  let idx: Int = json.jsonField(doc: doc, this: object, key: key)
+  ret json.jsonValueAt(doc: doc, idx: idx)
+}
+
+func vec3FieldValid(doc: view JsonDoc, object: view JsonValue, key: view String) ret Bool {
+  let value: JsonValue = objectField(doc: doc, object: object, key: key)
+  if value.kind is not JsonKind.object { ret false }
+  let x: JsonValue = objectField(doc: doc, object: value, key: "x")
+  let y: JsonValue = objectField(doc: doc, object: value, key: "y")
+  let z: JsonValue = objectField(doc: doc, object: value, key: "z")
+  ret x.kind is JsonKind.number and y.kind is JsonKind.number and z.kind is JsonKind.number
+}
+
+func readVec3Field(doc: view JsonDoc, object: view JsonValue, key: view String) ret Vec3 {
+  let value: JsonValue = objectField(doc: doc, object: object, key: key)
+  let x: JsonValue = objectField(doc: doc, object: value, key: "x")
+  let y: JsonValue = objectField(doc: doc, object: value, key: "y")
+  let z: JsonValue = objectField(doc: doc, object: value, key: "z")
+  ret vec3.create(
+    x: json.jsonFloat(this: x, fallback: 0.0)
+    y: json.jsonFloat(this: y, fallback: 0.0)
+    z: json.jsonFloat(this: z, fallback: 0.0)
+  )
+}
+
+func numberFieldValid(doc: view JsonDoc, object: view JsonValue, key: view String) ret Bool {
+  let value: JsonValue = objectField(doc: doc, object: object, key: key)
+  ret value.kind is JsonKind.number
+}
+
+func stringFieldValid(doc: view JsonDoc, object: view JsonValue, key: view String) ret Bool {
+  let value: JsonValue = objectField(doc: doc, object: object, key: key)
+  ret value.kind is JsonKind.string
+}
+
+func readNumberField(doc: view JsonDoc, object: view JsonValue, key: view String, fallback: view Float) ret Float {
+  let value: JsonValue = objectField(doc: doc, object: object, key: key)
+  ret json.jsonFloat(this: value, fallback: fallback)
+}
+
+func readStringField(doc: view JsonDoc, object: view JsonValue, key: view String) ret String {
+  let value: JsonValue = objectField(doc: doc, object: object, key: key)
+  ret json.jsonString(this: value, fallback: "")
+}
+
+func transform3dValid(doc: view JsonDoc, value: view JsonValue) ret Bool {
+  if value.kind is not JsonKind.object { ret false }
+  if vec3FieldValid(doc: doc, object: value, key: "position") is false { ret false }
+  if vec3FieldValid(doc: doc, object: value, key: "rotation") is false { ret false }
+  if vec3FieldValid(doc: doc, object: value, key: "scale") is false { ret false }
+  ret true
+}
+
+func readTransform3d(doc: view JsonDoc, value: view JsonValue) ret Transform3d {
+  ret Transform3d {
+    position: readVec3Field(doc: doc, object: value, key: "position")
+    rotation: readVec3Field(doc: doc, object: value, key: "rotation")
+    scale: readVec3Field(doc: doc, object: value, key: "scale")
+  }
+}
+
+func material3dValid(doc: view JsonDoc, value: view JsonValue) ret Bool {
+  if value.kind is not JsonKind.object { ret false }
+  if vec3FieldValid(doc: doc, object: value, key: "baseColor") is false { ret false }
+  if numberFieldValid(doc: doc, object: value, key: "metallic") is false { ret false }
+  if numberFieldValid(doc: doc, object: value, key: "roughness") is false { ret false }
+  if vec3FieldValid(doc: doc, object: value, key: "emission") is false { ret false }
+  ret true
+}
+
+func camera3dValid(doc: view JsonDoc, value: view JsonValue) ret Bool {
+  if value.kind is not JsonKind.object { ret false }
+  if vec3FieldValid(doc: doc, object: value, key: "position") is false { ret false }
+  if vec3FieldValid(doc: doc, object: value, key: "target") is false { ret false }
+  if numberFieldValid(doc: doc, object: value, key: "fovYDeg") is false { ret false }
+  if numberFieldValid(doc: doc, object: value, key: "nearZ") is false { ret false }
+  if numberFieldValid(doc: doc, object: value, key: "farZ") is false { ret false }
+  ret true
+}
+
+func light3dValid(doc: view JsonDoc, value: view JsonValue) ret Bool {
+  if value.kind is not JsonKind.object { ret false }
+  if vec3FieldValid(doc: doc, object: value, key: "sunDir") is false { ret false }
+  if vec3FieldValid(doc: doc, object: value, key: "sunColor") is false { ret false }
+  if vec3FieldValid(doc: doc, object: value, key: "ambSky") is false { ret false }
+  if vec3FieldValid(doc: doc, object: value, key: "ambGround") is false { ret false }
+  if numberFieldValid(doc: doc, object: value, key: "exposure") is false { ret false }
+  if vec3FieldValid(doc: doc, object: value, key: "clearColor") is false { ret false }
+  ret true
+}
+
+func addAssetEntity(asset: mod Scene3dAsset, nodeId: view String, entity: view Int) {
+  asset.nodeIds.add(value: rae_ext_rae_string_copy(s: nodeId))
+  asset.entityIds.add(value: entity)
+}
+
+func parseScene3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret Scene3dAsset {
+  let parsed: Scene = parseScene(source: source)
+  let asset: Scene3dAsset = emptyScene3dAsset()
+  if parsed.ok is false {
+    failScene3dAsset(asset: asset, message: parsed.errorMsg)
+    ret asset
+  }
+
+  let doc: view JsonDoc => parsed.doc
+  let materials: MaterialRegistry3d = createMaterialRegistry3d()
+
+  # Pass 1: materials are node-addressable resources, independent of node order.
+  var i: Int = 0
+  loop i < parsed.nodes.length {
+    let node: view SceneNode => sceneNodeAt(this: parsed, idx: i)
+    if nodeHasComponent(doc: doc, node: node, name: "Material3d") {
+      let value: JsonValue = nodeComponent(doc: doc, node: node, name: "Material3d")
+      if material3dValid(doc: doc, value: value) is false {
+        failScene3dAsset(asset: asset, message: "Material3d must define baseColor, metallic, roughness and emission")
+        ret asset
+      }
+      let metallic: Float = readNumberField(doc: doc, object: value, key: "metallic", fallback: 0.0)
+      let roughness: Float = readNumberField(doc: doc, object: value, key: "roughness", fallback: 0.5)
+      if metallic < 0.0 or metallic > 1.0 or roughness < 0.0 or roughness > 1.0 {
+        failScene3dAsset(asset: asset, message: "Material3d metallic and roughness must be between 0 and 1")
+        ret asset
+      }
+      let materialIdx: Int = addMaterial(
+        scene: asset.scene,
+        baseColor: readVec3Field(doc: doc, object: value, key: "baseColor"),
+        metallic: metallic,
+        roughness: roughness,
+        emission: readVec3Field(doc: doc, object: value, key: "emission")
+      )
+      registerMaterial3d(reg: materials, key: node.nodeId, index: materialIdx)
+    }
+    i = i + 1
+  }
+
+  var cameraCount: Int = 0
+  var lightCount: Int = 0
+  i = 0
+  loop i < parsed.nodes.length {
+    let node: view SceneNode => sceneNodeAt(this: parsed, idx: i)
+    let hasMesh: Bool = nodeHasComponent(doc: doc, node: node, name: "MeshRenderer")
+    let hasSdf: Bool = nodeHasComponent(doc: doc, node: node, name: "SdfPrimitive")
+    if hasMesh and hasSdf {
+      failScene3dAsset(asset: asset, message: "a 3D node cannot contain both MeshRenderer and SdfPrimitive")
+      ret asset
+    }
+    if hasMesh or hasSdf {
+      if nodeHasComponent(doc: doc, node: node, name: "Transform3d") is false {
+        failScene3dAsset(asset: asset, message: "renderable 3D nodes require Transform3d")
+        ret asset
+      }
+      let transformValue: JsonValue = nodeComponent(doc: doc, node: node, name: "Transform3d")
+      if transform3dValid(doc: doc, value: transformValue) is false {
+        failScene3dAsset(asset: asset, message: "Transform3d must define numeric position, rotation and scale vectors")
+        ret asset
+      }
+      let transform: Transform3d = readTransform3d(doc: doc, value: transformValue)
+      if hasMesh {
+        let renderer: JsonValue = nodeComponent(doc: doc, node: node, name: "MeshRenderer")
+        if renderer.kind is not JsonKind.object {
+          failScene3dAsset(asset: asset, message: "MeshRenderer requires string mesh and material keys")
+          ret asset
+        }
+        if stringFieldValid(doc: doc, object: renderer, key: "mesh") is false {
+          failScene3dAsset(asset: asset, message: "MeshRenderer requires string mesh and material keys")
+          ret asset
+        }
+        if stringFieldValid(doc: doc, object: renderer, key: "material") is false {
+          failScene3dAsset(asset: asset, message: "MeshRenderer requires string mesh and material keys")
+          ret asset
+        }
+        let meshKey: String = readStringField(doc: doc, object: renderer, key: "mesh")
+        let materialKey: String = readStringField(doc: doc, object: renderer, key: "material")
+        let mesh: MeshHandle = meshRegistry3dGet(reg: meshes, key: meshKey)
+        if meshHandleIsValid(h: mesh) is false {
+          failScene3dAsset(asset: asset, message: "MeshRenderer references an unknown mesh key")
+          ret asset
+        }
+        let materialIdx: Int = materialRegistry3dGet(reg: materials, key: materialKey)
+        if materialIdx < 0 {
+          failScene3dAsset(asset: asset, message: "MeshRenderer references an unknown material node")
+          ret asset
+        }
+        let entity: Int = addMeshInstance(
+          scene: asset.scene, mesh: mesh, material: materialIdx,
+          position: transform.position, rotation: transform.rotation, scale: transform.scale
+        )
+        let visibleValue: JsonValue = objectField(doc: doc, object: renderer, key: "visible")
+        if visibleValue.kind is JsonKind.bool and visibleValue.asBool is false {
+          let rendererIdx: Int = asset.scene.meshRenderers.length - 1
+          var stored: MeshRenderer = asset.scene.meshRenderers.at(index: rendererIdx)
+          stored.visible = false
+          asset.scene.meshRenderers.set(index: rendererIdx, value: stored)
+        }
+        addAssetEntity(asset: asset, nodeId: node.nodeId, entity: entity)
+      } else {
+        let sdf: JsonValue = nodeComponent(doc: doc, node: node, name: "SdfPrimitive")
+        if sdf.kind is not JsonKind.object {
+          failScene3dAsset(asset: asset, message: "SdfPrimitive requires string shape and material keys")
+          ret asset
+        }
+        if stringFieldValid(doc: doc, object: sdf, key: "shape") is false {
+          failScene3dAsset(asset: asset, message: "SdfPrimitive requires string shape and material keys")
+          ret asset
+        }
+        if stringFieldValid(doc: doc, object: sdf, key: "material") is false {
+          failScene3dAsset(asset: asset, message: "SdfPrimitive requires string shape and material keys")
+          ret asset
+        }
+        let shapeName: String = readStringField(doc: doc, object: sdf, key: "shape")
+        var shape: Int = -1
+        if shapeName.equals(other: "sphere") { shape = 0 }
+        if shapeName.equals(other: "box") { shape = 1 }
+        if shapeName.equals(other: "torus") { shape = 2 }
+        if shape < 0 {
+          failScene3dAsset(asset: asset, message: "SdfPrimitive shape must be sphere, box or torus")
+          ret asset
+        }
+        let materialKey: String = readStringField(doc: doc, object: sdf, key: "material")
+        let materialIdx: Int = materialRegistry3dGet(reg: materials, key: materialKey)
+        if materialIdx < 0 {
+          failScene3dAsset(asset: asset, message: "SdfPrimitive references an unknown material node")
+          ret asset
+        }
+        var noise: Float = 0.0
+        let noiseValue: JsonValue = objectField(doc: doc, object: sdf, key: "noise")
+        if noiseValue.kind is JsonKind.number { noise = noiseValue.asNumber }
+        let entity: Int = addSdfInstance(
+          scene: asset.scene, shape: shape, material: materialIdx,
+          position: transform.position, scale: transform.scale, noise: noise
+        )
+        addAssetEntity(asset: asset, nodeId: node.nodeId, entity: entity)
+      }
+    }
+
+    if nodeHasComponent(doc: doc, node: node, name: "Camera3d") {
+      cameraCount = cameraCount + 1
+      let value: JsonValue = nodeComponent(doc: doc, node: node, name: "Camera3d")
+      if cameraCount > 1 or camera3dValid(doc: doc, value: value) is false {
+        failScene3dAsset(asset: asset, message: "scene requires exactly one valid Camera3d")
+        ret asset
+      }
+      let fovYDeg: Float = readNumberField(doc: doc, object: value, key: "fovYDeg", fallback: 50.0)
+      let nearZ: Float = readNumberField(doc: doc, object: value, key: "nearZ", fallback: 0.1)
+      let farZ: Float = readNumberField(doc: doc, object: value, key: "farZ", fallback: 200.0)
+      if fovYDeg <= 0.0 or fovYDeg >= 180.0 or nearZ <= 0.0 or farZ <= nearZ {
+        failScene3dAsset(asset: asset, message: "Camera3d requires 0 < fovYDeg < 180 and 0 < nearZ < farZ")
+        ret asset
+      }
+      asset.camera = Camera3d {
+        position: readVec3Field(doc: doc, object: value, key: "position")
+        target: readVec3Field(doc: doc, object: value, key: "target")
+        fovYDeg: fovYDeg
+        nearZ: nearZ
+        farZ: farZ
+      }
+    }
+    if nodeHasComponent(doc: doc, node: node, name: "Light3d") {
+      lightCount = lightCount + 1
+      let value: JsonValue = nodeComponent(doc: doc, node: node, name: "Light3d")
+      if lightCount > 1 or light3dValid(doc: doc, value: value) is false {
+        failScene3dAsset(asset: asset, message: "scene requires exactly one valid Light3d")
+        ret asset
+      }
+      let exposure: Float = readNumberField(doc: doc, object: value, key: "exposure", fallback: 1.0)
+      if exposure < 0.0 {
+        failScene3dAsset(asset: asset, message: "Light3d exposure cannot be negative")
+        ret asset
+      }
+      asset.light = Light3d {
+        sunDir: readVec3Field(doc: doc, object: value, key: "sunDir")
+        sunColor: readVec3Field(doc: doc, object: value, key: "sunColor")
+        ambSky: readVec3Field(doc: doc, object: value, key: "ambSky")
+        ambGround: readVec3Field(doc: doc, object: value, key: "ambGround")
+        exposure: exposure
+        clearColor: readVec3Field(doc: doc, object: value, key: "clearColor")
+      }
+    }
+    i = i + 1
+  }
+
+  if cameraCount is not 1 {
+    failScene3dAsset(asset: asset, message: "scene requires exactly one Camera3d")
+    ret asset
+  }
+  if lightCount is not 1 {
+    failScene3dAsset(asset: asset, message: "scene requires exactly one Light3d")
+    ret asset
+  }
+  asset.ok = true
+  ret asset
+}
+
+func rae_ext_rae_sys_read_file(path: String) extern ret String
+
+func loadScene3dFile(path: view String, meshes: view MeshRegistry3d) pub ret Scene3dAsset {
+  let source: String = rae_ext_rae_sys_read_file(path: path)
+  ret parseScene3dAsset(source: source, meshes: meshes)
+}
+
+# Reloading reparses only authored data. The caller-owned mesh registry and its
+# GPU handles remain untouched, so replacing the returned asset is resource-safe.
+func reloadScene3dFile(path: view String, meshes: view MeshRegistry3d) pub ret Scene3dAsset {
+  ret loadScene3dFile(path: path, meshes: meshes)
+}
