@@ -135,6 +135,24 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         }
         break;
     }
+    case AST_EXPR_CAST: {
+      /* `value as Type` lowers to a plain C cast. The type system already
+       * verified the conversion is a supported numeric one, and Float /
+       * Float32 resolve to the same TypeInfo so that spelling is a no-op. */
+      const char* cname = NULL;
+      if (expr->resolved_type) {
+        switch (expr->resolved_type->kind) {
+          case TYPE_FLOAT:   cname = "float";   break;
+          case TYPE_FLOAT64: cname = "double";  break;
+          case TYPE_INT:     cname = "int64_t"; break;
+          default: break;
+        }
+      }
+      if (cname) fprintf(out, "((%s)(", cname); else fprintf(out, "((");
+      emit_expr(ctx, expr->as.cast.operand, out, PREC_LOWEST, false, false);
+      fprintf(out, "))");
+      break;
+    }
     case AST_EXPR_BINARY: {
       // `x is none` / `x is not none`: emit a runtime tag check rather than
       // `==` / `!=`, because RaeAny is a struct and struct equality is invalid

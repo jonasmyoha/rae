@@ -820,6 +820,9 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
     static AstIdentifierPart kString_part = { .text = { .data = "String", .len = 6 } };
     static AstTypeRef kString_tr = { .parts = &kString_part };
     switch (expr->kind) {
+        /* A cast's type IS its target — this is what stops the backend
+         * re-inferring the operand's (pre-conversion) type. */
+        case AST_EXPR_CAST: return expr->as.cast.target;
         case AST_EXPR_INTEGER: return &kInt_tr;
         case AST_EXPR_FLOAT: return &kFloat_tr;
         case AST_EXPR_BOOL: return &kBool_tr;
