@@ -450,7 +450,10 @@ func setWindowPosition(x: Int, y: Int) extern
 func getWindowPositionX() extern ret Int
 func getWindowPositionY() extern ret Int
 
-func getTime() extern ret Float
+# Seconds since window init. Float64 like the other clock sources: f32
+# seconds degrade to ~8ms steps after a few hours of uptime, which is
+# visible in frame timing. See docs/primitive-types.md.
+func getTime() extern ret Float64
 
 func colorFromHSV(hue: Float, saturation: Float, value: Float) extern ret Color
 
