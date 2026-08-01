@@ -64,7 +64,7 @@ static void rae_g2d_save_screenshot(const char* path) {
     WGPUBufferMapCallbackInfo mci; memset(&mci, 0, sizeof(mci));
     mci.mode = WGPUCallbackMode_AllowProcessEvents; mci.callback = rae_wgpu_on_map;
     wgpuBufferMapAsync(staging, WGPUMapMode_Read, 0, bytes, mci);
-    while (!g_wgpu_map_done) wgpuDevicePoll(g_wgpu_dev, true, NULL);
+    while (!g_wgpu_map_done) rae_wgpu_poll(1);
     const unsigned char* px = (const unsigned char*)wgpuBufferGetConstMappedRange(staging, 0, bytes);
     if (px) {
         unsigned char* rgba = (unsigned char*)malloc((size_t)w * (size_t)h * 4u);
@@ -130,7 +130,11 @@ void rae_ext_gpu2d_endFrame(void) {
         WGPUCommandBuffer pcb = wgpuCommandEncoderFinish(penc, NULL);
         wgpuQueueSubmit(g_wgpu_queue, 1, &pcb);
         wgpuCommandBufferRelease(pcb); wgpuCommandEncoderRelease(penc);
+#ifndef __EMSCRIPTEN__
+        /* Browser WebGPU presents the canvas texture when control returns to
+         * the browser; Emdawn rejects explicit wgpuSurfacePresent calls. */
         wgpuSurfacePresent(g_g2d_surface);
+#endif
         g_g2d_last_present_ok = 1;
     }
     if (st.texture) wgpuTextureRelease(st.texture);
@@ -139,7 +143,7 @@ void rae_ext_gpu2d_endFrame(void) {
      * without any readback/map path, so per-frame buffers/bind groups that
      * were released above otherwise sit in the backend's pending queues and
      * show up as a slow RSS climb while the UI is actively animating. */
-    if (g_wgpu_dev) wgpuDevicePoll(g_wgpu_dev, false, NULL);
+    rae_wgpu_poll(0);
 }
 
 rae_Bool rae_ext_gpu2d_lastPresentOk(void) {
@@ -314,6 +318,8 @@ void rae_ext_gpu2d_closeWindow(void) {
         if (g_g2d_cursors[i]) { SDL_DestroyCursor(g_g2d_cursors[i]); g_g2d_cursors[i] = NULL; }
     }
     g_g2d_cursor_kind = -1;
+#ifndef __EMSCRIPTEN__
     if (g_g2d_metal_view) { SDL_Metal_DestroyView(g_g2d_metal_view); g_g2d_metal_view = NULL; }
+#endif
     if (g_sdl_win) { SDL_DestroyWindow(g_sdl_win); g_sdl_win = NULL; }
 }

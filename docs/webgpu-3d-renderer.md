@@ -9,6 +9,28 @@ Sequenced **after** the 2D/UI renderer Tier 0–1.
 **Target:** Compiled (C backend) + Web, via WebGPU-everywhere (WGSL single
 source). Live VM is frozen and a non-goal (`docs/live-vm-status.md`).
 
+### Browser build
+
+The browser path is a first-class Compiled deployment target:
+
+```sh
+compiler/bin/rae build --target wasm --profile release \
+  --project examples/109_gpu3d_pbr \
+  --out examples/109_gpu3d_pbr/build/web/index.html \
+  examples/109_gpu3d_pbr/main.rae
+```
+
+This emits `index.html`, `index.js`, and `index.wasm` through Emscripten. SDL3
+owns the browser canvas and input; EmdawnWebGPU supplies the WebGPU C API. The
+runtime creates its surface from `#canvas`, omits wgpu-native-only logging and
+polling calls, and lets the browser present at its frame boundary. Rae's current
+blocking application loop is kept compatible with `-sASYNCIFY`; a future
+first-class frame-callback API should replace that compatibility layer without
+changing renderer APIs.
+
+The existing `compiler/tools/wasm_build.sh` remains the standalone WASI route
+for CPU examples. It is intentionally separate from this browser target.
+
 ---
 
 ## 1. What this is

@@ -165,7 +165,7 @@ static int64_t rae_malloc_size_safe(void* p) {
 }
 
 static inline uint32_t rae_mem_hash_ix(void* ptr) {
-  uintptr_t x = (uintptr_t)ptr;
+  uint64_t x = (uint64_t)(uintptr_t)ptr;
   /* Mix high and low bits — malloc returns 16-byte aligned blocks on
    * macOS, so the low 4 bits are usually 0; shifting + xor avoids
    * clustering on the bottom of the table. */
@@ -350,4 +350,3 @@ int64_t rae_ext_rae_mem_stats_buf_outstanding_bytes(void) {
   if (!g_mem_stats_enabled) return 0;
   return g_mem_buf_alloc_b - g_mem_buf_free_b;
 }
-
