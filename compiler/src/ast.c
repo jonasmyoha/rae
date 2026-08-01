@@ -115,6 +115,8 @@ static const char* binary_op_name(AstBinaryOp op) {
       return ">=";
     case AST_BIN_IS:
       return "is";
+    case AST_BIN_NEQ:
+      return "is not";
     case AST_BIN_AND:
       return "and";
     case AST_BIN_OR:

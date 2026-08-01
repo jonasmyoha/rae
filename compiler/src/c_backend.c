@@ -142,6 +142,7 @@ bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstType
 
 /* Forward declarations for these now live in c_backend_internal.h. */
 bool is_primitive_ref(CFuncContext* ctx, const AstTypeRef* tr) {
+    (void)ctx;
     if (!tr || !(tr->is_view || tr->is_mod)) return false;
     Str base = get_base_type_name(tr);
     // Buffer and List are already pointers — no wrapper struct
@@ -807,13 +808,13 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
     if (!expr) return NULL;
     // Cache primitive literal type-refs in static storage so callers can hold a
     // pointer past the function return.
-    static AstIdentifierPart kInt_part = { .text = { .data = (uint8_t*)"Int", .len = 3 } };
+    static AstIdentifierPart kInt_part = { .text = { .data = "Int", .len = 3 } };
     static AstTypeRef kInt_tr = { .parts = &kInt_part };
-    static AstIdentifierPart kFloat_part = { .text = { .data = (uint8_t*)"Float", .len = 5 } };
+    static AstIdentifierPart kFloat_part = { .text = { .data = "Float", .len = 5 } };
     static AstTypeRef kFloat_tr = { .parts = &kFloat_part };
-    static AstIdentifierPart kBool_part = { .text = { .data = (uint8_t*)"Bool", .len = 4 } };
+    static AstIdentifierPart kBool_part = { .text = { .data = "Bool", .len = 4 } };
     static AstTypeRef kBool_tr = { .parts = &kBool_part };
-    static AstIdentifierPart kString_part = { .text = { .data = (uint8_t*)"String", .len = 6 } };
+    static AstIdentifierPart kString_part = { .text = { .data = "String", .len = 6 } };
     static AstTypeRef kString_tr = { .parts = &kString_part };
     switch (expr->kind) {
         case AST_EXPR_INTEGER: return &kInt_tr;
@@ -1143,6 +1144,7 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
 }
 
 bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const char* out_path, struct VmRegistry* registry, bool* out_uses_raylib) {
+  (void)out_uses_raylib;
   if (!module) return false;
   g_emitted_spec_func_count = 0; // Reset dedup for this compilation
   ctx->all_decl_count = 0; collect_decls_from_module(ctx, module); ctx->current_module = (AstModule*)module;

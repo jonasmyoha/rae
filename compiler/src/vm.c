@@ -480,7 +480,8 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
           diag_error(NULL, 0, 0, "not enough arguments on stack for native call");
           return VM_RUNTIME_ERROR;
         }
-        const VmNativeEntry* entry = vm_registry_find_native(vm->registry, symbol.as.string_value.chars);
+        const VmNativeEntry* entry = vm_registry_find_native(
+            vm->registry, (const char*)symbol.as.string_value.chars);
         if (!entry || !entry->callback) {
           char buffer[128];
           snprintf(buffer, sizeof(buffer), "native function not registered: %s", symbol.as.string_value.chars);
@@ -1163,7 +1164,7 @@ VMResult vm_run(VM* vm, Chunk* chunk) {
         uint32_t type_name_index = read_uint32(vm);
         const char* type_name = NULL;
         if (type_name_index != 0xFFFFFFFF) {
-            type_name = vm->chunk->constants[type_name_index].as.string_value.chars;
+            type_name = (const char*)vm->chunk->constants[type_name_index].as.string_value.chars;
         }
         Value obj = value_object(field_count, type_name);
         for (int i = (int)field_count - 1; i >= 0; --i) {

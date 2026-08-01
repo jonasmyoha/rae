@@ -440,6 +440,8 @@ static AstStmt* clone_stmt(Arena* arena, const AstStmt* stmt) {
 }
 
 static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* generic_decl, TypeInfo** args, size_t arg_count, size_t line, size_t column) {
+    (void)line;
+    (void)column;
     AstDecl* existing = type_registry_find_specialization(ctx->type_registry, generic_decl, args, arg_count);
     if (existing) return existing;
     AstDecl* spec = arena_alloc(ctx->ast_arena, sizeof(AstDecl));
@@ -534,15 +536,16 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
             for (size_t i = 0; i < arg_count; i++) {
                 Str arg_mangled = type_mangle_name(ctx->ast_arena, args[i]);
                 // Strip 'rae_' prefix from arg name for the internal TypeInfo name
-                const uint8_t* arg_data = arg_mangled.data; size_t arg_len = arg_mangled.len;
+                const char* arg_data = arg_mangled.data; size_t arg_len = arg_mangled.len;
                 if (arg_len > 4 && memcmp(arg_data, "rae_", 4) == 0) { arg_data += 4; arg_len -= 4; }
                 
                 name_pos += snprintf(name_buf + name_pos, sizeof(name_buf) - name_pos, "%.*s", (int)arg_len, arg_data);
                 if (i < arg_count - 1) name_pos += snprintf(name_buf + name_pos, sizeof(name_buf) - name_pos, "_");
             }
         }
-        spec_ti->name = (Str){ .data = (uint8_t*)arena_alloc(ctx->ast_arena, name_pos + 1), .len = name_pos };
-        memcpy((void*)spec_ti->name.data, name_buf, name_pos + 1);
+        char* spec_name = arena_alloc(ctx->ast_arena, name_pos + 1);
+        memcpy(spec_name, name_buf, name_pos + 1);
+        spec_ti->name = (Str){ .data = spec_name, .len = name_pos };
 
         spec->resolved_type = spec_ti;
 
