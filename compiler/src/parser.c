@@ -84,7 +84,7 @@ static bool parser_match(Parser* parser, TokenKind kind) {
 }
 
 static bool is_keyword(TokenKind kind) {
-  return kind >= TOK_KW_TYPE && kind <= TOK_KW_PARALLELLOOP;
+  return kind >= TOK_KW_TYPE && kind <= TOK_KW_AS;
 }
 
 /* Placeholder returned when an identifier was required but not found. Callers
@@ -1628,8 +1628,31 @@ static AstExpr* parse_unary(Parser* parser) {
   return parse_postfix(parser);
 }
 
+/* `value as Type` — explicit numeric conversion (an approved Rae feature).
+ *
+ * Binds tighter than every binary operator, so `a as Float * b` parses as
+ * `(a as Float) * b`, matching the reading everyone expects from Rust/Kotlin.
+ * Left-associative and chainable: `x as Int32 as Float`.
+ *
+ * The conversion is REQUIRED: Rae has no implicit numeric conversions, so
+ * this node is the only way a value changes numeric representation. Sema
+ * decides whether the specific conversion is supported.
+ */
+static AstExpr* parse_cast(Parser* parser) {
+  AstExpr* expr = parse_unary(parser);
+  while (parser_check(parser, TOK_KW_AS)) {
+    const Token* as_token = parser_advance(parser);
+    AstTypeRef* target = parse_type_ref(parser);
+    AstExpr* cast = new_expr(parser, AST_EXPR_CAST, as_token);
+    cast->as.cast.operand = expr;
+    cast->as.cast.target = target;
+    expr = cast;
+  }
+  return expr;
+}
+
 static AstExpr* parse_binary(Parser* parser, int min_prec) {
-  AstExpr* left = parse_unary(parser);
+  AstExpr* left = parse_cast(parser);
   for (;;) {
     BinaryInfo info = get_binary_info(parser_peek(parser)->kind);
     if (info.precedence < min_prec) {

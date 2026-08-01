@@ -156,6 +156,97 @@ let a: Float   = 0.1   # f32
 let b: Float64 = 0.1   # f64
 ```
 
+## No implicit numeric conversions
+
+**Numeric types never silently change representation.** Rae has no implicit
+numeric conversions — not narrowing, and not the "safe" widening ones
+either. Every conversion between distinct numeric types is written out by
+the programmer. Attempting one implicitly is a hard compile-time error, not
+a warning:
+
+```
+cannot implicitly convert Float64 to Float; Rae has no implicit numeric
+conversions - write `value as Float`
+```
+
+This is not pedantry. The f32 migration produced a concrete instance of the
+bug class it prevents: an absolute `Float64` epoch timestamp assigned into a
+`Float` was silently quantised to ~128-second granularity, so every
+per-frame delta became exactly `0.0`. Animation froze and the FPS readout
+showed zero, with no diagnostic anywhere. A warning would have scrolled past.
+An error stops it.
+
+Note that widening is rejected too. `Float` → `Float64` loses nothing
+numerically, but permitting it would mean the compiler quietly decides where
+representations change — and the moment that is allowed in one direction,
+"where did this value's precision come from?" stops being answerable by
+reading the code.
+
+## Explicit conversion: `as`
+
+```rae
+value as TargetType
+```
+
+```rae
+let elapsed: Float    = timestamp as Float
+let precise: Float64  = value as Float64
+let count: Float      = total as Float
+```
+
+`as` means *convert this expression to that type using Rae's conversion
+rules*. It is not an escape hatch for making something type-check:
+non-numeric conversions are rejected.
+
+`as` binds tighter than every binary operator, so `b as Float * 2.0` is
+`(b as Float) * 2.0` — the reading you expect. Conversions chain:
+`i as Float as Float64`.
+
+### Aliases are not conversions
+
+Because `Float` **is** `Float32`, these are not conversions and need no
+`as`:
+
+```rae
+let a: Float   = 1.5
+let b: Float32 = a     # same type — no cast
+let c: Float   = b     # same type — no cast
+```
+
+### Literals are not conversions
+
+An unsuffixed literal is materialised directly in the destination type, so
+it never needs a cast:
+
+```rae
+let x: Float   = 1.5   # fine
+let y: Float64 = 1.5   # fine
+let i: Int     = 42    # fine
+```
+
+`let x: Float = 1.5 as Float` is unnecessary noise.
+
+### The timestamp pattern
+
+This is the canonical case, and the reason the rule exists:
+
+```rae
+# Absolute times are Float64. The subtraction keeps full epoch precision;
+# only the small delta narrows, and that narrowing is visible in the source.
+var lastFrame: Float64 = gpu2d.nowSeconds()
+let now: Float64       = gpu2d.nowSeconds()
+let dt: Float          = (now - lastFrame) as Float
+```
+
+A `Vec3` position stays `Float`; a precise clock stays `Float64`; the
+boundary between them is spelled out:
+
+```rae
+let position: Vec3
+let preciseTime: Float64
+let renderTime: Float = preciseTime as Float   # deliberate: precision drops here
+```
+
 ## Verifying the semantics
 
 The discriminator used by the test suite is 2²⁴ = 16777216, the last integer
@@ -167,4 +258,5 @@ let a: Float = 16777216.0
 if a + 1.0 is a { log("Float is f32") }
 ```
 
-See `compiler/tests/cases/550_float_is_f32`.
+See `compiler/tests/cases/550_float_is_f32` (widths and identity) and
+`551_as_conversion` (explicit conversion).

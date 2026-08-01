@@ -67,6 +67,7 @@ typedef enum {
   TOK_KW_DEFER,
   TOK_KW_TASKSCOPE,
   TOK_KW_PARALLELLOOP,
+  TOK_KW_AS,   /* explicit numeric conversion: `value as Type` */
 
   /* Operators */
   TOK_ASSIGN,
