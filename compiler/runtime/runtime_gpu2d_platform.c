@@ -313,6 +313,13 @@ void rae_ext_gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
     g_sdl_start_ms = rae_ext_nowMs();
     const char* hm = getenv("RAE_SDL_HEADLESS_MS");
     if (hm) g_sdl_headless_ms = (int64_t)atoll(hm);
+    /* RAE_HEADLESS_FRAMES runs an EXACT number of frames instead of an
+     * elapsed wall-clock budget. A duration budget lets frame count vary
+     * with machine speed, so screenshots are not reproducible; a frame
+     * budget plus RAE_FIXED_DT makes a headless capture byte-identical
+     * across runs and across refactors. */
+    const char* hf = getenv("RAE_HEADLESS_FRAMES");
+    if (hf) g_sdl_headless_frames = (int64_t)atoll(hf);
 }
 
 /* Pump the OS event queue once per frame AND record input state into the
@@ -395,6 +402,11 @@ rae_Bool rae_ext_gpu2d_pollClose(void) {
         }
     }
     if (quit) return 1;
+    if (g_sdl_headless_frames > 0) {
+        if (g_sdl_frames_done >= g_sdl_headless_frames) return 1;
+        g_sdl_frames_done++;
+        return 0;   /* frame budget takes precedence over the ms budget */
+    }
     if (g_sdl_headless_ms > 0 && (rae_ext_nowMs() - g_sdl_start_ms) >= g_sdl_headless_ms) return 1;
     return 0;
 }
@@ -459,7 +471,43 @@ void rae_ext_gpu2d_setMouseCursor(int64_t kind) {
 }
 /* Monotonic wall-clock seconds since process start — for scroll timing without
  * pulling in the raylib-backed getTime. */
-double rae_ext_gpu2d_nowSeconds(void){ return (double)rae_ext_nowMs() / 1000.0; }
+/* Deterministic virtual clock for reproducible rendering tests.
+ *
+ * Animated examples derive everything from nowSeconds(), so a headless
+ * capture lands on an arbitrary frame and screenshots are not reproducible
+ * — which makes byte-identical regression testing of the renderer
+ * impossible. With RAE_FIXED_DT=<seconds> the clock instead advances by
+ * exactly that step once per presented frame, so frame N is identical
+ * across runs and across refactors.
+ *
+ * The base is an arbitrary fixed epoch rather than 0 so that code treating
+ * the value as a real timestamp still sees a plausible one, and so f32
+ * misuse of it stays as visible as it would be in production. */
+static double g_g2d_fixed_dt = -1.0;   /* <0 = real clock */
+static double g_g2d_virtual_now = 1700000000.0;
+static bool   g_g2d_fixed_dt_read = false;
+
+static void g2d_fixed_dt_init(void) {
+    if (g_g2d_fixed_dt_read) return;
+    g_g2d_fixed_dt_read = true;
+    const char* e = getenv("RAE_FIXED_DT");
+    if (e && *e) {
+        double v = atof(e);
+        if (v > 0.0) g_g2d_fixed_dt = v;
+    }
+}
+
+/* Called once per presented frame by the frame path. */
+void rae_g2d_tick_virtual_clock(void) {
+    g2d_fixed_dt_init();
+    if (g_g2d_fixed_dt > 0.0) g_g2d_virtual_now += g_g2d_fixed_dt;
+}
+
+double rae_ext_gpu2d_nowSeconds(void){
+    g2d_fixed_dt_init();
+    if (g_g2d_fixed_dt > 0.0) return g_g2d_virtual_now;
+    return (double)rae_ext_nowMs() / 1000.0;
+}
 
 int64_t rae_ext_gpu2d_windowWidth(void) { return g_sdl_w; }
 int64_t rae_ext_gpu2d_windowHeight(void) { return g_sdl_h; }
