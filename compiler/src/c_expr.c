@@ -399,7 +399,6 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         // Built-in method: toJson() → rae_toJson_TYPE_(&object)
         if (str_eq_cstr(expr->as.method_call.method_name, "toJson") && !expr->as.method_call.args) {
             const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.method_call.object);
-            Str obj_base = get_base_type_name(obj_tr);
             const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, obj_tr);
             fprintf(out, "rae_toJson_%s_(&", mangled);
             emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, true, false);
@@ -487,7 +486,6 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             }
         }
         const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.member.object);
-        Str obj_base = get_base_type_name(obj_tr);
         bool use_arrow = (obj_tr && (obj_tr->is_view || obj_tr->is_mod));
         emit_expr(ctx, expr->as.member.object, out, PREC_CALL, true, false);
         fprintf(out, "%s%.*s", use_arrow ? "->" : ".", (int)expr->as.member.member.len, expr->as.member.member.data);

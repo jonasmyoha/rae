@@ -59,43 +59,6 @@ static uint64_t hash_type(TypeKind kind, const void* key_data, size_t key_len) {
     return hash;
 }
 
-static TypeInfo* find_interned(TypeRegistry* reg, uint64_t hash, TypeKind kind, const void* key_data, size_t key_len) {
-    size_t idx = hash % reg->capacity;
-    TypeInfo* curr = reg->buckets[idx];
-    while (curr) {
-        if (curr->kind == kind) {
-            // Simplified check: usually we'd store the key too, but here we reconstruct or check
-            // For now, let's assume hash collision is rare enough or handled by deeper equality checks
-            // But strict interning needs exact match.
-            // Let's implement exact match logic based on kind.
-            bool match = false;
-            switch (kind) {
-                case TYPE_VOID: case TYPE_BOOL: case TYPE_INT: case TYPE_FLOAT: 
-                case TYPE_STRING: case TYPE_CHAR: case TYPE_ANY:
-                    match = true; // Singletons
-                    break;
-                case TYPE_REF:
-                    if (curr->as.ref.is_mod == ((bool*)key_data)[0] && 
-                        curr->as.ref.base == ((TypeInfo**)key_data)[1]) match = true;
-                    break;
-                case TYPE_OPT:
-                case TYPE_BUFFER:
-                case TYPE_TASK:
-                    if (curr->as.opt.base == *(TypeInfo**)key_data) match = true;
-                    break;
-                case TYPE_GENERIC_PARAM:
-                    if (str_eq(curr->as.generic_param.param_name, *(Str*)key_data)) match = true;
-                    break;
-                 // Structs need more complex key data (decl pointer + args array)
-                 default: break;
-            }
-            if (match) return curr;
-        }
-        curr = curr->next_interned;
-    }
-    return NULL;
-}
-
 static void add_interned(TypeRegistry* reg, uint64_t hash, TypeInfo* type) {
     size_t idx = hash % reg->capacity;
     type->next_interned = reg->buckets[idx];
@@ -111,7 +74,7 @@ TypeInfo* type_get_void(TypeRegistry* r) {
     if (!t) {
         t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
         t->kind = TYPE_VOID;
-        t->name = (Str){(uint8_t*)"Void", 4};
+        t->name = (Str){"Void", 4};
         add_interned(r, hash_type(TYPE_VOID, NULL, 0), t);
     }
     return t;
@@ -122,7 +85,7 @@ TypeInfo* type_get_bool(TypeRegistry* r) {
     if (!t) {
         t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
         t->kind = TYPE_BOOL;
-        t->name = (Str){(uint8_t*)"Bool", 4};
+        t->name = (Str){"Bool", 4};
         add_interned(r, hash_type(TYPE_BOOL, NULL, 0), t);
     }
     return t;
@@ -133,7 +96,7 @@ TypeInfo* type_get_int(TypeRegistry* r) {
     if (!t) {
         t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
         t->kind = TYPE_INT;
-        t->name = (Str){(uint8_t*)"Int", 3};
+        t->name = (Str){"Int", 3};
         add_interned(r, hash_type(TYPE_INT, NULL, 0), t);
     }
     return t;
@@ -144,7 +107,7 @@ TypeInfo* type_get_float(TypeRegistry* r) {
     if (!t) {
         t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
         t->kind = TYPE_FLOAT;
-        t->name = (Str){(uint8_t*)"Float", 5};
+        t->name = (Str){"Float", 5};
         add_interned(r, hash_type(TYPE_FLOAT, NULL, 0), t);
     }
     return t;
@@ -155,7 +118,7 @@ TypeInfo* type_get_string(TypeRegistry* r) {
     if (!t) {
         t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
         t->kind = TYPE_STRING;
-        t->name = (Str){(uint8_t*)"String", 6};
+        t->name = (Str){"String", 6};
         add_interned(r, hash_type(TYPE_STRING, NULL, 0), t);
     }
     return t;
@@ -166,7 +129,7 @@ TypeInfo* type_get_char(TypeRegistry* r) {
     if (!t) {
         t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
         t->kind = TYPE_CHAR;
-        t->name = (Str){(uint8_t*)"Char", 4};
+        t->name = (Str){"Char", 4};
         add_interned(r, hash_type(TYPE_CHAR, NULL, 0), t);
     }
     return t;
@@ -177,7 +140,7 @@ TypeInfo* type_get_any(TypeRegistry* r) {
     if (!t) {
         t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
         t->kind = TYPE_ANY;
-        t->name = (Str){(uint8_t*)"Any", 3};
+        t->name = (Str){"Any", 3};
         add_interned(r, hash_type(TYPE_ANY, NULL, 0), t);
     }
     return t;
@@ -397,6 +360,8 @@ static void type_mangle_recursive(Arena* arena, TypeInfo* t, char* buf, size_t* 
         case TYPE_GENERIC_PARAM:
             *pos += snprintf(buf + *pos, cap - *pos, "rae_%.*s", (int)t->as.generic_param.param_name.len, t->as.generic_param.param_name.data);
             break;
+        default:
+            break;
     }
 }
 
@@ -414,7 +379,7 @@ Str type_mangle_name(Arena* arena, TypeInfo* t) {
     
     char* res = arena_alloc(arena, pos + 1);
     memcpy(res, buf, pos + 1);
-    return (Str){(uint8_t*)res, pos};
+    return (Str){res, pos};
 }
 
 bool type_is_same(TypeInfo* a, TypeInfo* b) {

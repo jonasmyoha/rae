@@ -34,11 +34,11 @@ bool native_crypto_argon2i(struct VM* vm, VmNativeResult* out, const Value* args
     if (count != 6) return false; // password, salt, nb_blocks, nb_iterations, hash_buf, hash_len
     
     if (args[0].type != VAL_STRING) return false;
-    const char* password = args[0].as.string_value.chars;
+    const char* password = (const char*)args[0].as.string_value.chars;
     size_t password_len = args[0].as.string_value.length;
     
     if (args[1].type != VAL_STRING) return false;
-    const char* salt = args[1].as.string_value.chars;
+    const char* salt = (const char*)args[1].as.string_value.chars;
     size_t salt_len = args[1].as.string_value.length;
     
     if (args[2].type != VAL_INT) return false;

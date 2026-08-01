@@ -224,7 +224,9 @@ Value value_to_json(const Value* value, VmFieldNamesResolver resolver, void* use
     }
     case VAL_STRING: {
       // Very basic escaping for now
-      int len = snprintf(buffer, sizeof(buffer), "\"%s\"", value->as.string_value.chars ? value->as.string_value.chars : "");
+      const char* chars = value->as.string_value.chars
+          ? (const char*)value->as.string_value.chars : "";
+      int len = snprintf(buffer, sizeof(buffer), "\"%s\"", chars);
       return value_string_copy(buffer, len);
     }
     case VAL_OBJECT: {
@@ -256,12 +258,12 @@ Value value_to_json(const Value* value, VmFieldNamesResolver resolver, void* use
           strcat(res, field_names[i]);
           strcat(res, "\": ");
           Value field_json = value_to_json(&value->as.object_value.fields[i], resolver, user_data);
-          strcat(res, field_json.as.string_value.chars);
+          strcat(res, (const char*)field_json.as.string_value.chars);
           value_free(&field_json);
           if (i < field_count - 1) strcat(res, ", ");
       }
       strcat(res, "}");
-      Value result = value_string_take(res, total_len);
+      Value result = value_string_take((uint8_t*)res, total_len);
       return result;
     }
     default:

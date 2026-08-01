@@ -29,7 +29,21 @@
 #define STBI_ONLY_JPEG
 #define STBI_NO_STDIO
 #define STBI_MAX_DIMENSIONS 16384
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-parameter"
+#pragma clang diagnostic ignored "-Wunused-function"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#pragma GCC diagnostic ignored "-Wunused-function"
+#endif
 #include "stb_image.h"
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 /* Save w*h*4 top-down RGBA8 bytes to `path` as a PNG. Returns 0 on success. */
 static int rae_png_save_rgba32(const char* path, const unsigned char* rgba, int w, int h) {
