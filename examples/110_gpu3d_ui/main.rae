@@ -232,43 +232,18 @@ func buildScene1(sphere: view MeshHandle, torus: view MeshHandle, ground: view M
   let red: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.88, y: 0.20, z: 0.14), metallic: 0.72, roughness: 0.20, emission: zero)
   let teal: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.08, y: 0.58, z: 0.55), metallic: 0.32, roughness: 0.32, emission: zero)
   let gold: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.95, y: 0.58, z: 0.12), metallic: 0.92, roughness: 0.16, emission: vec3.create(x: 0.05, y: 0.018, z: 0.0))
-  let blue: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.16, y: 0.30, z: 0.92), metallic: 0.55, roughness: 0.24, emission: zero)
-  let pearl: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.82, y: 0.88, z: 0.96), metallic: 0.12, roughness: 0.18, emission: zero)
+  let metaball: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.48, y: 0.12, z: 0.82), metallic: 0.58, roughness: 0.19, emission: vec3.create(x: 0.025, y: 0.004, z: 0.055))
   let floor: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.20, y: 0.23, z: 0.28), metallic: 0.05, roughness: 0.86, emission: zero)
+  let left: Int = addMeshInstance(scene: scene, mesh: sphere, material: red, position: vec3.create(x: 0.0 - 2.7, y: 0.0, z: 0.45), rotation: zero, scale: unit)
+  let right: Int = addMeshInstance(scene: scene, mesh: sphere, material: teal, position: vec3.create(x: 2.7, y: 0.0, z: 0.45), rotation: zero, scale: unit)
+  let center: Int = addMeshInstance(scene: scene, mesh: torus, material: gold, position: vec3.create(x: 0.0, y: 0.0, z: 1.35), rotation: zero, scale: unit)
   let plane: Int = addMeshInstance(scene: scene, mesh: ground, material: floor, position: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.75), rotation: zero, scale: unit)
-  let center: Int = addMeshInstance(scene: scene, mesh: torus, material: gold, position: vec3.create(x: 0.0, y: 0.0, z: 1.45), rotation: zero, scale: unit)
-
-  # A dense material garden replaces the original three-object study.
-  var i: Int = 0
-  loop i < 16 {
-    let angle: Float = i.toFloat() * 0.3926991
-    let ring: Float = 4.4 + math.sin(x: angle * 3.0) * 0.55
-    let size: Float = 0.52 + (i % 4).toFloat() * 0.11
-    var material: Int = red
-    if i % 5 is 1 { material = teal }
-    if i % 5 is 2 { material = blue }
-    if i % 5 is 3 { material = pearl }
-    if i % 5 is 4 { material = gold }
-    let orb: Int = addMeshInstance(
-      scene: scene, mesh: sphere, material: material,
-      position: vec3.create(x: math.cos(x: angle) * ring, y: math.sin(x: angle) * ring, z: 0.35 + math.sin(x: angle * 2.0) * 0.75),
-      rotation: zero, scale: vec3.create(x: size, y: size, z: size)
-    )
-    i = i + 1
-  }
-  i = 0
-  loop i < 7 {
-    let angle: Float = i.toFloat() * 0.8975979
-    let size: Float = 0.58 + (i % 3).toFloat() * 0.14
-    let clusterOrb: Int = addMeshInstance(
-      scene: scene, mesh: sphere, material: teal,
-      position: vec3.create(x: math.cos(x: angle) * 1.55, y: math.sin(x: angle) * 1.1, z: 1.05 + math.sin(x: angle * 2.0) * 0.48),
-      rotation: zero, scale: vec3.create(x: size, y: size, z: size)
-    )
-    i = i + 1
-  }
-  let ringA: Int = addMeshInstance(scene: scene, mesh: torus, material: red, position: vec3.create(x: 0.0 - 3.0, y: 1.7, z: 1.1), rotation: zero, scale: vec3.create(x: 0.72, y: 0.72, z: 0.72))
-  let ringB: Int = addMeshInstance(scene: scene, mesh: torus, material: blue, position: vec3.create(x: 3.0, y: 1.7, z: 1.1), rotation: zero, scale: vec3.create(x: 0.72, y: 0.72, z: 0.72))
+  let ballScale: Vec3 = vec3.create(x: 0.78, y: 0.78, z: 0.78)
+  let ball1: Int = addSdfInstance(scene: scene, shape: 0, material: metaball, position: vec3.create(x: 0.0 - 0.9, y: 2.0, z: 1.7), scale: ballScale, noise: 0.0)
+  let ball2: Int = addSdfInstance(scene: scene, shape: 0, material: metaball, position: vec3.create(x: 0.0, y: 2.1, z: 2.2), scale: ballScale, noise: 0.0)
+  let ball3: Int = addSdfInstance(scene: scene, shape: 0, material: metaball, position: vec3.create(x: 0.9, y: 2.0, z: 1.7), scale: ballScale, noise: 0.0)
+  let ball4: Int = addSdfInstance(scene: scene, shape: 0, material: metaball, position: vec3.create(x: 0.0 - 0.45, y: 2.2, z: 1.0), scale: ballScale, noise: 0.0)
+  let ball5: Int = addSdfInstance(scene: scene, shape: 0, material: metaball, position: vec3.create(x: 0.45, y: 2.2, z: 1.0), scale: ballScale, noise: 0.0)
   ret scene
 }
 
@@ -341,6 +316,28 @@ func animateScene(scene: mod Scene3d, sceneId: view Int, time: view Float) {
     let phase: Float = i.toFloat() * 0.173 + sceneId.toFloat()
     transform.rotation = vec3.create(x: time * (0.08 + sceneId.toFloat() * 0.04), y: math.sin(x: time * 0.18 + phase) * 0.28, z: time * (0.12 + (i % 5).toFloat() * 0.025))
     scene.transforms.set(index: renderer.entity, value: transform)
+    i = i + 1
+  }
+}
+
+func animateScene1(scene: mod Scene3d, time: view Float) {
+  let torusEntity: Int = scene.meshRenderers.at(index: 2).entity
+  var torusTransform: Transform3d = scene.transforms.at(index: torusEntity)
+  torusTransform.rotation = vec3.create(x: time * 0.35, y: 0.0, z: time * 0.62)
+  scene.transforms.set(index: torusEntity, value: torusTransform)
+  var i: Int = 0
+  loop i < scene.sdfPrimitives.length {
+    let sdf: SdfPrimitive = scene.sdfPrimitives.at(index: i)
+    var transform: Transform3d = scene.transforms.at(index: sdf.entity)
+    let phase: Float = i.toFloat() * 1.2566371
+    transform.position = vec3.create(
+      x: math.cos(x: time * 0.72 + phase) * (0.72 + (i % 2).toFloat() * 0.22),
+      y: 2.05 + math.sin(x: time * 0.41 + phase * 1.7) * 0.38,
+      z: 1.55 + math.sin(x: time * 0.83 + phase) * 0.72
+    )
+    let radius: Float = 0.72 + math.sin(x: time * 0.67 + phase * 2.0) * 0.10
+    transform.scale = vec3.create(x: radius, y: radius, z: radius)
+    scene.transforms.set(index: sdf.entity, value: transform)
     i = i + 1
   }
 }
@@ -484,7 +481,7 @@ func main() ret Int {
     }
     syncCameraUi(world: uiWorld, controller: cameraController, camera: camera)
     light.sunDir = vec3.create(x: 0.0 - math.cos(x: simTime * 0.22) * 0.7, y: 0.0 - 0.7 - math.sin(x: simTime * 0.22) * 0.25, z: 0.0 - 1.0)
-    if uiState.activeScene is 1 { animateScene(scene: scene1, sceneId: 1, time: simTime) }
+    if uiState.activeScene is 1 { animateScene1(scene: scene1, time: simTime) }
     if uiState.activeScene is 2 { animateScene(scene: scene2, sceneId: 2, time: simTime) }
     if uiState.activeScene is 3 { animateScene(scene: scene3, sceneId: 3, time: simTime) }
 
