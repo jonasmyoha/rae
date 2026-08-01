@@ -12,8 +12,12 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
-if len(sys.argv) != 2:
-    fail("usage: assert_nonblank_bmp.py <screenshot.bmp>")
+if len(sys.argv) not in (2, 3):
+    fail("usage: assert_nonblank_bmp.py <screenshot.bmp> [--gpu3d-ui]")
+
+gpu3d_ui = len(sys.argv) == 3 and sys.argv[2] == "--gpu3d-ui"
+if len(sys.argv) == 3 and not gpu3d_ui:
+    fail(f"unknown validation mode: {sys.argv[2]}")
 
 path = Path(sys.argv[1])
 if not path.is_file():
@@ -46,6 +50,12 @@ if required_size > len(data):
 def pixel(x: int, y: int) -> tuple[int, int, int]:
     offset = pixel_offset + y * row_stride + x * bytes_per_pixel
     return tuple(data[offset : offset + 3])
+
+
+def rgb_pixel(x: int, storage_y: int) -> tuple[int, int, int]:
+    """Return RGB for a BMP storage-row coordinate."""
+    blue, green, red = pixel(x, storage_y)
+    return red, green, blue
 
 
 # The renderer clears to one background color. Derive it from a sparse border
@@ -81,6 +91,37 @@ if len(colors) < 32:
     fail(f"only {len(colors)} sampled colors")
 if changed_fraction < 0.01:
     fail(f"only {changed_fraction:.2%} of sampled pixels differ from the background")
+
+if gpu3d_ui:
+    # Prove that this is the composed 110 frame rather than merely a non-blank
+    # 3D target. The top-left HUD contains bright MSDF text over a dark card,
+    # and the top-right settings control contains a saturated teal icon plate.
+    bright_counts = [0, 0]
+    teal_counts = [0, 0]
+    # Runtime screenshots have existed with both BMP row orientations. Check
+    # the authored top region in both storage directions so this validates UI
+    # content rather than depending on the writer's height-sign convention.
+    for orientation in (0, 1):
+        for y in range(height * 3 // 100, height * 16 // 100, max(1, height // 300)):
+            storage_y = y if orientation == 0 else height - 1 - y
+            for x in range(width * 2 // 100, width * 28 // 100, max(1, width // 400)):
+                red, green, blue = rgb_pixel(x, storage_y)
+                # The offscreen screenshot stores linear color values, so
+                # visually white glyphs are around 80 rather than 255.
+                if min(red, green, blue) > 35 and max(red, green, blue) - min(red, green, blue) < 25:
+                    bright_counts[orientation] += 1
+        for y in range(height * 3 // 100, height * 15 // 100, max(1, height // 300)):
+            storage_y = y if orientation == 0 else height - 1 - y
+            for x in range(width * 88 // 100, width * 99 // 100, max(1, width // 400)):
+                red, green, blue = rgb_pixel(x, storage_y)
+                if green > red + 10 and blue > red + 10:
+                    teal_counts[orientation] += 1
+    bright_hud = max(bright_counts)
+    teal_control = max(teal_counts)
+    if bright_hud < 8:
+        fail(f"GPU3D UI HUD text missing: only {bright_hud} bright samples")
+    if teal_control < 8:
+        fail(f"GPU3D UI settings control missing: only {teal_control} teal samples")
 
 print(
     f"non-blank BMP {width}x{height}: {len(colors)}+ colors, "
