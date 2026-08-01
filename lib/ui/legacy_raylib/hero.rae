@@ -47,7 +47,7 @@ type HeroAnim {
   tintG: Int
   tintB: Int
   tintA: Int
-  startTime: Float
+  startTime: Float64
   duration: Float
   srcX: Float
   srcY: Float
@@ -226,7 +226,7 @@ func captureHeroTargetFromEntity(anim: mod HeroAnim, world: view UiWorld, e: vie
   ret true
 }
 
-func startHeroTransition(anim: mod HeroAnim, key: own String, durationSec: view Float, now: view Float) pub {
+func startHeroTransition(anim: mod HeroAnim, key: own String, durationSec: view Float, now: view Float64) pub {
   anim.active = true
   anim.key = key
   anim.startTime = now
@@ -378,7 +378,7 @@ func heroLerp(a: view Float, b: view Float, t: view Float) ret Float {
 # transition still has frames left to render. When it returns false
 # the host should put the new world back into its normal state
 # (set the hero's visible to true and stop calling renderHeroOverlay).
-func updateHeroAnim(anim: mod HeroAnim, now: view Float) pub ret Bool {
+func updateHeroAnim(anim: mod HeroAnim, now: view Float64) pub ret Bool {
   if anim.active is false {
     ret false
   }
@@ -393,7 +393,7 @@ func updateHeroAnim(anim: mod HeroAnim, now: view Float) pub ret Bool {
 # Paint the hero at its interpolated rect. Designed to be called AFTER
 # `renderSystem` so the overlay sits on top of the destination
 # world's render. Single draw call, no extra entities allocated.
-func renderHeroOverlay(anim: view HeroAnim, reg: view TextureRegistry, now: view Float) pub {
+func renderHeroOverlay(anim: view HeroAnim, reg: view TextureRegistry, now: view Float64) pub {
   if anim.active is false {
     ret
   }

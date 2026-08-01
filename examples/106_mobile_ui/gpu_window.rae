@@ -59,7 +59,9 @@ func uiWaitEvents(timeoutSec: view Float) pub {
   gpu2d.waitEvents(timeoutSec: timeoutSec)
 }
 
-func uiNowSeconds() pub ret Float {
+# Epoch seconds — Float64: an f32 epoch (~1.7e9) quantises to ~128s, so
+# two calls in one frame return the SAME value and every delta is 0.0.
+func uiNowSeconds() pub ret Float64 {
   ret gpu2d.nowSeconds()
 }
 
