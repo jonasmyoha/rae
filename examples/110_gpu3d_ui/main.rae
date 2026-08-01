@@ -7,12 +7,14 @@ import core
 import gpu2d
 import math
 import sdf_text
+import scene3d_file
 import sdl3
 import vec3
 open gpu3d
 open math3d
 open mesh3d
 open scene3d
+open scene3d_file
 open ui/ecs
 open ui/input_gpu2d
 open ui/layout
@@ -225,89 +227,6 @@ func uploadMeshData(mesh: view MeshData) ret MeshHandle {
   ret uploadMesh(verts: mesh.verts, vertCount: mesh.vertCount, indices: mesh.indices)
 }
 
-func buildScene1(sphere: view MeshHandle, torus: view MeshHandle, ground: view MeshHandle) ret Scene3d {
-  var scene: Scene3d = createScene3d()
-  let zero: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
-  let unit: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
-  let red: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.88, y: 0.20, z: 0.14), metallic: 0.72, roughness: 0.20, emission: zero)
-  let teal: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.08, y: 0.58, z: 0.55), metallic: 0.32, roughness: 0.32, emission: zero)
-  let gold: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.95, y: 0.58, z: 0.12), metallic: 0.92, roughness: 0.16, emission: vec3.create(x: 0.05, y: 0.018, z: 0.0))
-  let metaball: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.04, y: 0.36, z: 0.92), metallic: 0.72, roughness: 0.14, emission: vec3.create(x: 0.0, y: 0.018, z: 0.075))
-  let floor: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.20, y: 0.23, z: 0.28), metallic: 0.05, roughness: 0.86, emission: zero)
-  let left: Int = addMeshInstance(scene: scene, mesh: sphere, material: red, position: vec3.create(x: 0.0 - 2.7, y: 0.0, z: 0.45), rotation: zero, scale: unit)
-  let right: Int = addMeshInstance(scene: scene, mesh: sphere, material: teal, position: vec3.create(x: 2.7, y: 0.0, z: 0.45), rotation: zero, scale: unit)
-  let center: Int = addMeshInstance(scene: scene, mesh: torus, material: gold, position: vec3.create(x: 0.0, y: 0.0, z: 1.35), rotation: zero, scale: unit)
-  let plane: Int = addMeshInstance(scene: scene, mesh: ground, material: floor, position: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.75), rotation: zero, scale: unit)
-  let ballScale: Vec3 = vec3.create(x: 1.48, y: 1.48, z: 1.48)
-  let ball1: Int = addSdfInstance(scene: scene, shape: 0, material: metaball, position: vec3.create(x: 3.5, y: 2.1, z: 2.0), scale: ballScale, noise: 0.0)
-  let ball2: Int = addSdfInstance(scene: scene, shape: 0, material: metaball, position: vec3.create(x: 4.3, y: 2.3, z: 2.7), scale: ballScale, noise: 0.0)
-  let ball3: Int = addSdfInstance(scene: scene, shape: 0, material: metaball, position: vec3.create(x: 5.2, y: 2.1, z: 2.1), scale: ballScale, noise: 0.0)
-  let ball4: Int = addSdfInstance(scene: scene, shape: 0, material: metaball, position: vec3.create(x: 4.0, y: 2.4, z: 1.3), scale: ballScale, noise: 0.0)
-  let ball5: Int = addSdfInstance(scene: scene, shape: 0, material: metaball, position: vec3.create(x: 4.9, y: 2.4, z: 1.3), scale: ballScale, noise: 0.0)
-  ret scene
-}
-
-func buildScene2(sphere: view MeshHandle, torus: view MeshHandle, ground: view MeshHandle) ret Scene3d {
-  var scene: Scene3d = createScene3d()
-  let zero: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
-  let unit: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
-  let ink: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.025, y: 0.05, z: 0.10), metallic: 0.55, roughness: 0.30, emission: zero)
-  let cyan: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.05, y: 0.72, z: 0.90), metallic: 0.65, roughness: 0.16, emission: vec3.create(x: 0.01, y: 0.06, z: 0.08))
-  let coral: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.96, y: 0.24, z: 0.22), metallic: 0.25, roughness: 0.24, emission: zero)
-  let white: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.90, y: 0.94, z: 1.0), metallic: 0.15, roughness: 0.12, emission: zero)
-  let floor: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.045, y: 0.07, z: 0.12), metallic: 0.15, roughness: 0.72, emission: zero)
-  let plane: Int = addMeshInstance(scene: scene, mesh: ground, material: floor, position: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.9), rotation: zero, scale: unit)
-  let core: Int = addMeshInstance(scene: scene, mesh: sphere, material: white, position: vec3.create(x: 0.0, y: 0.0, z: 1.8), rotation: zero, scale: vec3.create(x: 1.15, y: 1.15, z: 1.15))
-  let torusLow: Int = addMeshInstance(scene: scene, mesh: torus, material: cyan, position: vec3.create(x: 0.0, y: 0.0, z: 0.25), rotation: zero, scale: vec3.create(x: 1.22, y: 1.22, z: 1.22))
-  let torusMid: Int = addMeshInstance(scene: scene, mesh: torus, material: coral, position: vec3.create(x: 0.0, y: 0.0, z: 1.8), rotation: zero, scale: vec3.create(x: 1.55, y: 1.55, z: 1.55))
-  let torusHigh: Int = addMeshInstance(scene: scene, mesh: torus, material: ink, position: vec3.create(x: 0.0, y: 0.0, z: 3.35), rotation: zero, scale: vec3.create(x: 1.18, y: 1.18, z: 1.18))
-  var i: Int = 0
-  loop i < 12 {
-    let angle: Float = i.toFloat() * 0.5235988
-    var material: Int = cyan
-    if i % 2 is 1 { material = coral }
-    let satellite: Int = addMeshInstance(
-      scene: scene, mesh: sphere, material: material,
-      position: vec3.create(x: math.cos(x: angle) * 5.0, y: math.sin(x: angle) * 3.2, z: 1.45 + math.sin(x: angle * 3.0) * 1.1),
-      rotation: zero, scale: vec3.create(x: 0.42, y: 0.42, z: 0.42)
-    )
-    i = i + 1
-  }
-  ret scene
-}
-
-func buildScene3(sphere: view MeshHandle, torus: view MeshHandle, ground: view MeshHandle) ret Scene3d {
-  var scene: Scene3d = createScene3d()
-  let zero: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
-  let unit: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
-  let violet: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.42, y: 0.16, z: 0.86), metallic: 0.68, roughness: 0.22, emission: vec3.create(x: 0.025, y: 0.006, z: 0.06))
-  let amber: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.98, y: 0.48, z: 0.06), metallic: 0.78, roughness: 0.17, emission: vec3.create(x: 0.05, y: 0.012, z: 0.0))
-  let jade: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.04, y: 0.62, z: 0.36), metallic: 0.35, roughness: 0.28, emission: zero)
-  let graphite: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.09, y: 0.10, z: 0.14), metallic: 0.72, roughness: 0.38, emission: zero)
-  let floor: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.13, y: 0.09, z: 0.16), metallic: 0.08, roughness: 0.82, emission: zero)
-  let plane: Int = addMeshInstance(scene: scene, mesh: ground, material: floor, position: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.8), rotation: zero, scale: unit)
-  var row: Int = 0
-  loop row < 4 {
-    var col: Int = 0
-    loop col < 5 {
-      let stagger: Float = (row % 2).toFloat() * 0.9
-      let x: Float = (col.toFloat() - 2.0) * 2.15 + stagger
-      let y: Float = (row.toFloat() - 1.5) * 2.0
-      let height: Float = 0.4 + (row + col).toFloat() * 0.26
-      var material: Int = violet
-      if (row + col) % 3 is 1 { material = amber }
-      if (row + col) % 3 is 2 { material = jade }
-      let orb: Int = addMeshInstance(scene: scene, mesh: sphere, material: material, position: vec3.create(x: x, y: y, z: height), rotation: zero, scale: vec3.create(x: 0.62, y: 0.62, z: 0.62))
-      col = col + 1
-    }
-    row = row + 1
-  }
-  let haloA: Int = addMeshInstance(scene: scene, mesh: torus, material: graphite, position: vec3.create(x: 0.0 - 3.2, y: 0.0, z: 2.1), rotation: zero, scale: vec3.create(x: 0.82, y: 0.82, z: 0.82))
-  let haloB: Int = addMeshInstance(scene: scene, mesh: torus, material: amber, position: vec3.create(x: 0.0, y: 0.0, z: 3.1), rotation: zero, scale: vec3.create(x: 0.95, y: 0.95, z: 0.95))
-  let haloC: Int = addMeshInstance(scene: scene, mesh: torus, material: graphite, position: vec3.create(x: 3.2, y: 0.0, z: 2.1), rotation: zero, scale: vec3.create(x: 0.82, y: 0.82, z: 0.82))
-  ret scene
-}
-
 func animateScene(scene: mod Scene3d, sceneId: view Int, time: view Float) {
   var i: Int = 1
   loop i < scene.meshRenderers.length {
@@ -320,15 +239,15 @@ func animateScene(scene: mod Scene3d, sceneId: view Int, time: view Float) {
   }
 }
 
-func animateScene1(scene: mod Scene3d, time: view Float) {
-  let torusEntity: Int = scene.meshRenderers.at(index: 2).entity
-  var torusTransform: Transform3d = scene.transforms.at(index: torusEntity)
+func animateScene1(asset: mod Scene3dAsset, time: view Float) {
+  let torusEntity: Int = scene3dAssetEntity(asset: asset, nodeId: "heroTorus")
+  var torusTransform: Transform3d = asset.scene.transforms.at(index: torusEntity)
   torusTransform.rotation = vec3.create(x: time * 0.35, y: 0.0, z: time * 0.62)
-  scene.transforms.set(index: torusEntity, value: torusTransform)
+  asset.scene.transforms.set(index: torusEntity, value: torusTransform)
   var i: Int = 0
-  loop i < scene.sdfPrimitives.length {
-    let sdf: SdfPrimitive = scene.sdfPrimitives.at(index: i)
-    var transform: Transform3d = scene.transforms.at(index: sdf.entity)
+  loop i < asset.scene.sdfPrimitives.length {
+    let sdf: SdfPrimitive = asset.scene.sdfPrimitives.at(index: i)
+    var transform: Transform3d = asset.scene.transforms.at(index: sdf.entity)
     let phase: Float = i.toFloat() * 1.2566371
     transform.position = vec3.create(
       x: 4.55 + math.cos(x: time * 0.72 + phase) * (1.05 + (i % 2).toFloat() * 0.24),
@@ -337,7 +256,7 @@ func animateScene1(scene: mod Scene3d, time: view Float) {
     )
     let radius: Float = 1.45 + math.sin(x: time * 0.67 + phase * 2.0) * 0.16
     transform.scale = vec3.create(x: radius, y: radius, z: radius)
-    scene.transforms.set(index: sdf.entity, value: transform)
+    asset.scene.transforms.set(index: sdf.entity, value: transform)
     i = i + 1
   }
 }
@@ -352,11 +271,33 @@ func main() ret Int {
   let sphere: MeshHandle = uploadMeshData(mesh: sphereData)
   let torus: MeshHandle = uploadMeshData(mesh: torusData)
   let ground: MeshHandle = uploadMeshData(mesh: planeData)
-  var scene1: Scene3d = buildScene1(sphere: sphere, torus: torus, ground: ground)
-  var scene2: Scene3d = buildScene2(sphere: sphere, torus: torus, ground: ground)
-  var scene3: Scene3d = buildScene3(sphere: sphere, torus: torus, ground: ground)
-
   let base: String = "examples/110_gpu3d_ui/assets/"
+  var meshRegistry: MeshRegistry3d = createMeshRegistry3d()
+  registerMesh3d(reg: meshRegistry, key: "sphere", handle: sphere)
+  registerMesh3d(reg: meshRegistry, key: "torus", handle: torus)
+  registerMesh3d(reg: meshRegistry, key: "ground", handle: ground)
+  var scene1: Scene3dAsset = loadScene3dFile(path: "{base}scene1.raescene", meshes: meshRegistry)
+  var scene2: Scene3dAsset = loadScene3dFile(path: "{base}scene2.raescene", meshes: meshRegistry)
+  var scene3: Scene3dAsset = loadScene3dFile(path: "{base}scene3.raescene", meshes: meshRegistry)
+  if scene1.ok is false {
+    log("[scene3d] scene 1 failed: {scene1.errorMsg}")
+    shutdown()
+    gpu2d.closeWindow()
+    ret 1
+  }
+  if scene2.ok is false {
+    log("[scene3d] scene 2 failed: {scene2.errorMsg}")
+    shutdown()
+    gpu2d.closeWindow()
+    ret 1
+  }
+  if scene3.ok is false {
+    log("[scene3d] scene 3 failed: {scene3.errorMsg}")
+    shutdown()
+    gpu2d.closeWindow()
+    ret 1
+  }
+
   let textFont: SdfFont = sdf_text.loadSdfFont(jsonPath: "{base}Roboto-Regular.mtsdf.json", rawAtlasPath: "{base}Roboto-Regular.mtsdf.raw")
   let iconFont: SdfFont = sdf_text.loadSdfFont(jsonPath: "{base}MaterialIconsRound-Regular.mtsdf.json", rawAtlasPath: "{base}MaterialIconsRound-Regular.mtsdf.raw")
   let themeScene: Scene = loadSceneFile(path: "{base}theme.raescene")
@@ -375,7 +316,7 @@ func main() ret Int {
 
   var uiInput: UiInput = createUiInput()
   var uiState: DemoUiResource = createDemoUiResource()
-  var camera: Camera3d = defaultCamera3d()
+  var camera: Camera3d = scene1.camera
   var cameraController: CameraController = createCameraController(camera: camera)
   let testState: String = getEnv(name: "RAE_GPU3D_UI_TEST_STATE")
   if testState.equals(other: "pause") { uiState.paused = true }
@@ -393,7 +334,7 @@ func main() ret Int {
   }
   syncCameraUi(world: uiWorld, controller: cameraController, camera: camera)
 
-  var light: Light3d = defaultLight3d()
+  var light: Light3d = scene1.light
   var lastX: Float = 0.0
   var lastY: Float = 0.0
   var dragging: Bool = false
@@ -480,10 +421,13 @@ func main() ret Int {
       camera.target = vec3.vadd(a: camera.position, b: forward)
     }
     syncCameraUi(world: uiWorld, controller: cameraController, camera: camera)
+    if uiState.activeScene is 1 { light = scene1.light }
+    if uiState.activeScene is 2 { light = scene2.light }
+    if uiState.activeScene is 3 { light = scene3.light }
     light.sunDir = vec3.create(x: 0.0 - math.cos(x: simTime * 0.22) * 0.7, y: 0.0 - 0.7 - math.sin(x: simTime * 0.22) * 0.25, z: 0.0 - 1.0)
-    if uiState.activeScene is 1 { animateScene1(scene: scene1, time: simTime) }
-    if uiState.activeScene is 2 { animateScene(scene: scene2, sceneId: 2, time: simTime) }
-    if uiState.activeScene is 3 { animateScene(scene: scene3, sceneId: 3, time: simTime) }
+    if uiState.activeScene is 1 { animateScene1(asset: scene1, time: simTime) }
+    if uiState.activeScene is 2 { animateScene(scene: scene2.scene, sceneId: 2, time: simTime) }
+    if uiState.activeScene is 3 { animateScene(scene: scene3.scene, sceneId: 3, time: simTime) }
 
     fpsAccum = fpsAccum + dt
     fpsFrames = fpsFrames + 1
@@ -502,9 +446,9 @@ func main() ret Int {
 
     let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
     beginScene(camera: camera, light: light, aspect: aspect, time: simTime)
-    if uiState.activeScene is 1 { renderScene(scene: scene1) }
-    if uiState.activeScene is 2 { renderScene(scene: scene2) }
-    if uiState.activeScene is 3 { renderScene(scene: scene3) }
+    if uiState.activeScene is 1 { renderScene(scene: scene1.scene) }
+    if uiState.activeScene is 2 { renderScene(scene: scene2.scene) }
+    if uiState.activeScene is 3 { renderScene(scene: scene3.scene) }
     endPass()
     gpu2d.beginFrameLoad()
     renderSystemGpu2d(world: uiWorld, res: gpuUi)
