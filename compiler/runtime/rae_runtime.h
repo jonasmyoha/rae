@@ -705,7 +705,7 @@ void rae_ext_setWindowSize(int64_t width, int64_t height);
 void rae_ext_setWindowPosition(int64_t x, int64_t y);
 int64_t rae_ext_getWindowPositionX(void);
 int64_t rae_ext_getWindowPositionY(void);
-float rae_ext_getTime(void);
+double rae_ext_getTime(void);
 void rae_ext_drawCircle(float x, float y, float radius, Color color);
 void rae_ext_drawCircleGradient(int64_t x, int64_t y, float radius, Color color1, Color color2);
 void rae_ext_drawRectangle(float x, float y, float width, float height, Color color);

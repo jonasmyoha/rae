@@ -130,7 +130,7 @@ void rae_ext_drawRectangleGradientH(int64_t x, int64_t y, int64_t width, int64_t
     DrawRectangleGradientH((int)x, (int)y, (int)width, (int)height, color1, color2);
 }
 
-float rae_ext_getTime(void){
+double rae_ext_getTime(void){
     return GetTime();
 }
 
