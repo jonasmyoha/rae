@@ -5,7 +5,7 @@
  * No behavior or ABI changes are intended here.
  */
 
-void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) {
+static void rae_g2d_begin_frame(WGPULoadOp load_op, double r, double g, double b, double a) {
     g_g2d_last_present_ok = 0;
     g_g2d_prim_count = 0;
     for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) g_g2d_text_count[i] = 0;
@@ -23,13 +23,24 @@ void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) {
     WGPURenderPassColorAttachment ca; memset(&ca, 0, sizeof(ca));
     ca.view = g_g2d_off_view;
     ca.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
-    ca.loadOp = WGPULoadOp_Clear;
+    ca.loadOp = load_op;
     ca.storeOp = WGPUStoreOp_Store;
     ca.clearValue.r = r; ca.clearValue.g = g; ca.clearValue.b = b; ca.clearValue.a = a;
     WGPURenderPassDescriptor rp; memset(&rp, 0, sizeof(rp));
     rp.colorAttachmentCount = 1;
     rp.colorAttachments = &ca;
     g_g2d_pass = wgpuCommandEncoderBeginRenderPass(g_g2d_enc, &rp);
+}
+
+void rae_ext_gpu2d_beginFrame(double r, double g, double b, double a) {
+    rae_g2d_begin_frame(WGPULoadOp_Clear, r, g, b, a);
+}
+
+void rae_ext_gpu2d_beginFrameLoad(void) {
+    /* The previous pass must have initialized the persistent offscreen color
+     * target. This pass preserves it and composites 2D/UI before the one
+     * endFrame screenshot/present operation. */
+    rae_g2d_begin_frame(WGPULoadOp_Load, 0.0, 0.0, 0.0, 0.0);
 }
 
 /* Headless verification: copy the just-rendered surface texture back to a
