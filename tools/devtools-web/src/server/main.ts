@@ -65,6 +65,8 @@ let activeWebApp: {
   id: string;
   dir: string;
   entryFile: string;
+  width: number;
+  height: number;
   process: ReturnType<typeof Bun.spawn> | null;
 } | null = null;
 
@@ -82,7 +84,7 @@ async function disposeActiveWebApp(): Promise<void> {
   rmSync(current.dir, { recursive: true, force: true });
 }
 
-function launchManagedWebGpuBrowser(url: string, profileDir: string) {
+function launchManagedWebGpuBrowser(url: string, profileDir: string, width: number, height: number) {
   const candidates = process.platform === "darwin"
     ? ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
     : process.platform === "win32"
@@ -96,6 +98,7 @@ function launchManagedWebGpuBrowser(url: string, profileDir: string) {
   return Bun.spawn([
     executable,
     `--app=${url}`,
+    `--window-size=${width},${height}`,
     `--user-data-dir=${profileDir}`,
     "--no-first-run",
     "--no-default-browser-check"
@@ -186,6 +189,14 @@ const server = Bun.serve<SocketData>({
       const entryDir = path.dirname(entryPath);
       const tmp = mkdtempSync(path.join(os.tmpdir(), "rae-web-app-"));
       const presentation = payload.presentation === "external" ? "external" : "embedded";
+      const requestedWidth = Number(payload.width);
+      const requestedHeight = Number(payload.height);
+      const width = Number.isInteger(requestedWidth) && requestedWidth >= 320 && requestedWidth <= 3840
+        ? requestedWidth
+        : 1280;
+      const height = Number.isInteger(requestedHeight) && requestedHeight >= 240 && requestedHeight <= 2160
+        ? requestedHeight
+        : 800;
       const entryFile = presentation === "external" ? "index.html" : "app.mjs";
       const out = path.join(tmp, entryFile);
       const profile = payload.profile === "debug" ? "dev" : "release";
@@ -218,7 +229,7 @@ const server = Bun.serve<SocketData>({
         }
         await disposeActiveWebApp();
         const id = randomUUID();
-        activeWebApp = { id, dir: tmp, entryFile, process: null };
+        activeWebApp = { id, dir: tmp, entryFile, width, height, process: null };
         const appPath = `/api/examples/web-app/${id}/${entryFile}`;
         return new Response(JSON.stringify(
           presentation === "external" ? { pageUrl: appPath } : { moduleUrl: appPath }
@@ -248,7 +259,9 @@ const server = Bun.serve<SocketData>({
         ).href;
         activeWebApp.process = launchManagedWebGpuBrowser(
           pageUrl,
-          path.join(activeWebApp.dir, "chrome-profile")
+          path.join(activeWebApp.dir, "chrome-profile"),
+          activeWebApp.width,
+          activeWebApp.height
         );
         return new Response(JSON.stringify({ ok: true, pageUrl }), {
           headers: { "Content-Type": "application/json" }
