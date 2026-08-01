@@ -341,6 +341,7 @@ func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, 
   let t: view Text => componentView(this: world.texts, entity: e)
   if t.text.length() is 0 { ret }
   var size: Float = resolveTextSize(theme: res.theme, styleId: t.styleId)
+  let weight: Float = resolveTextWeight(theme: res.theme, styleId: t.styleId)
   var baseCol: RgbaColor = resolveTextColor(theme: res.theme, styleId: t.styleId)
   # Tier-2 style override (#236): size/color patch over the resolved
   # style for the sparse set of entities that carry one; base styleId
@@ -351,6 +352,11 @@ func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, 
     baseCol = styleOverrideColor(base: baseCol, so: so)
   }
   let col: RgbaColor = g2dChain(c: baseCol, chain255: chain255)
+  var boldWidth: Float = 0.0
+  if weight > 450.0 {
+    boldWidth = ((weight - 400.0) / 300.0) * size * 0.025
+    if boldWidth > 1.5 { boldWidth = 1.5 }
+  }
   var centerX: Bool = resolveTextIsCentered(theme: res.theme, styleId: t.styleId)
   var rightX: Bool = resolveTextIsRightAligned(theme: res.theme, styleId: t.styleId)
   var optical: OpticalAlign = { enabled: false, centerX: false, centerY: false, bias: Vec2 { x: 0.0, y: 0.0 } }
@@ -379,6 +385,22 @@ func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, 
     let bounds: SdfTextBounds = visualBoundsAt(world: world, e: e, text: t.text, isIcon: false, sizePx: size, res: res)
     if optical.centerX { drawX = wt.x + cr.w / 2.0 - (bounds.left + bounds.right) / 2.0 + optical.bias.x }
     if optical.centerY { drawY = wt.y + cr.h / 2.0 - (bounds.top + bounds.bottom) / 2.0 + optical.bias.y }
+  }
+  if t.wrapWidthMode is WrapWidthMode.nodeWidth {
+    let lineHeight: Float = size * resolveTextLineHeight(theme: res.theme, styleId: t.styleId)
+    gpu2d_text.drawTextWrappedEx(
+      font: res.textFont
+      text: t.text
+      x: drawX
+      y: drawY
+      sizePx: size
+      color: g2dColor(c: col)
+      maxWidth: cr.w
+      lineHeight: lineHeight
+      outlineWidth: boldWidth
+      outlineColor: g2dColor(c: col)
+    )
+    ret
   }
   # Text shadow (#232). Precedence per §7's override ladder:
   #   1. a raw TextShadow component (the last-resort per-entity
@@ -425,8 +447,8 @@ func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, 
       y: drawY
       sizePx: size
       color: g2dColor(c: col)
-      outlineColor: 0
-      outlineWidth: 0.0
+      outlineColor: g2dColor(c: col)
+      outlineWidth: boldWidth
       shadowColor: g2dColor(c: shChained)
       shadowOffX: shOffX
       shadowOffY: shOffY
@@ -434,7 +456,14 @@ func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, 
     )
     ret
   }
-  gpu2d_text.drawText(font: res.textFont, text: t.text, x: drawX, y: drawY, sizePx: size, color: g2dColor(c: col))
+  if boldWidth > 0.0 {
+    gpu2d_text.drawTextEx(font: res.textFont, text: t.text, x: drawX, y: drawY, sizePx: size,
+                          color: g2dColor(c: col), outlineColor: g2dColor(c: col),
+                          outlineWidth: boldWidth, shadowColor: 0, shadowOffX: 0.0,
+                          shadowOffY: 0.0, shadowSoftness: 1.0)
+  } else {
+    gpu2d_text.drawText(font: res.textFont, text: t.text, x: drawX, y: drawY, sizePx: size, color: g2dColor(c: col))
+  }
 }
 
 func paintEntityG(world: view UiWorld, e: view EntityId, res: view Gpu2dUi) {
