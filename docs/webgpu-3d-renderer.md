@@ -28,6 +28,13 @@ blocking application loop is kept compatible with `-sASYNCIFY`; a future
 first-class frame-callback API should replace that compatibility layer without
 changing renderer APIs.
 
+Tooling can request an embeddable ES module by using a `.mjs` (or `.js`)
+output path instead of `.html`. That build exports an asynchronous
+`createRaeApp` factory; the host passes its canvas, output callbacks, and WASM
+asset resolver to the factory. Rae Devtools uses this path for packages marked
+`wasmWebApp`, while one-shot WASI framebuffer examples keep the existing
+capture-and-draw canvas path.
+
 The existing `compiler/tools/wasm_build.sh` remains the standalone WASI route
 for CPU examples. It is intentionally separate from this browser target.
 
