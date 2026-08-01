@@ -1930,13 +1930,38 @@ async function runWasmWebApp(example) {
   if (statusEl) statusEl.textContent = "building SDL3 + WebGPU browser bundle…";
   updateExampleButtons();
   try {
+    let embeddedWebGpu = false;
+    try {
+      embeddedWebGpu = Boolean(await navigator.gpu?.requestAdapter());
+    } catch {
+      embeddedWebGpu = false;
+    }
     const entry = resolveExampleEntry(example, "wasm");
     const res = await fetch("/api/examples/web-app", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ entry, profile: getGlobalProfile() })
+      body: JSON.stringify({
+        entry,
+        profile: getGlobalProfile(),
+        presentation: embeddedWebGpu ? "embedded" : "external"
+      })
     });
     const result = await res.json();
+    if (!embeddedWebGpu) {
+      if (!res.ok || !result.pageUrl) throw new Error(result.error || `HTTP ${res.status}`);
+      const openRes = await fetch("/api/examples/web-app/open", { method: "POST" });
+      const openResult = await openRes.json();
+      if (!openRes.ok) throw new Error(openResult.error || `HTTP ${openRes.status}`);
+      const stage = canvas.closest(".example-viewer__stage");
+      if (stage) stage.hidden = true;
+      if (statusEl) statusEl.textContent = "embedded WebGPU unavailable; running in managed Chrome window";
+      setExampleStatus("Running · Chrome", "is-success", "WASM");
+      appendExampleOutput(
+        "Embedded browser has no WebGPU adapter; launched the WASM app in a managed Chrome window.",
+        "stdout"
+      );
+      return;
+    }
     if (!res.ok || !result.moduleUrl) throw new Error(result.error || `HTTP ${res.status}`);
     const imported = await import(`${result.moduleUrl}?run=${Date.now()}`);
     const createRaeApp = imported.default;
@@ -2889,6 +2914,7 @@ async function stopExampleRun() {
   } finally {
     exampleRunActive = false;
     exampleWatchActive = false;
+    setExampleStatus("Idle", "", null);
     updateExampleButtons();
   }
 }
