@@ -15,13 +15,18 @@ import gpu2d
 # character with an optional outline (outlineWidth px of outlineColor). Returns
 # the pen x advance. drawText / drawTextEx build on this.
 func emitRun(font: view SdfFont, text: view String, x: copy Float, y: copy Float, sizePx: copy Float, color: copy Int, outlineWidth: copy Float, outlineColor: copy Int, softness: copy Float) ret Float {
+    ret emitRange(font: font, text: text, start: 0, end: text.length(), x: x, y: y, sizePx: sizePx,
+                  color: color, outlineWidth: outlineWidth, outlineColor: outlineColor, softness: softness)
+}
+
+# Allocation-free subset emitter used by word wrapping. `end` is exclusive.
+func emitRange(font: view SdfFont, text: view String, start: copy Int, end: copy Int, x: copy Float, y: copy Float, sizePx: copy Float, color: copy Int, outlineWidth: copy Float, outlineColor: copy Int, softness: copy Float) ret Float {
     let scale: Float = sizePx / font.emSize
     let aw: Float = font.atlasWidth
     let ah: Float = font.atlasHeight
     var pen: Float = x
-    let n: Int = text.length()
-    var i: Int = 0
-    loop i < n {
+    var i: Int = start
+    loop i < end {
         let cp: Int = text.at(index: i).toInt()
         let gi: Int = sdf_text.sdfGlyphIndex(font: font, cp: cp)
         if gi >= 0 {
@@ -51,6 +56,77 @@ func emitRun(font: view SdfFont, text: view String, x: copy Float, y: copy Float
         i = i + 1
     }
     ret pen
+}
+
+func glyphAdvance(font: view SdfFont, cp: view Int, sizePx: view Float) ret Float {
+    let gi: Int = sdf_text.sdfGlyphIndex(font: font, cp: cp)
+    if gi < 0 { ret 0.0 }
+    let glyph: SdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: gi)
+    ret glyph.advance * (sizePx / font.emSize)
+}
+
+# Draw allocation-free word-wrapped text. Wrapping occurs at spaces where
+# possible and falls back to a character boundary for a single long word.
+func drawTextWrappedEx(font: view SdfFont, text: view String, x: copy Float, y: copy Float,
+                       sizePx: copy Float, color: copy Int, maxWidth: copy Float,
+                       lineHeight: copy Float, outlineWidth: copy Float,
+                       outlineColor: copy Int) ret Int {
+    if maxWidth <= 0.0 {
+        emitRun(font: font, text: text, x: x, y: y, sizePx: sizePx, color: color,
+                outlineWidth: outlineWidth, outlineColor: outlineColor, softness: 1.0)
+        ret 1
+    }
+    let n: Int = text.length()
+    var lineStart: Int = 0
+    var lastSpace: Int = 0 - 1
+    var width: Float = 0.0
+    var baseline: Float = y
+    var lines: Int = 0
+    var i: Int = 0
+    loop i < n {
+        let cp: Int = text.at(index: i).toInt()
+        if cp is 10 {
+            emitRange(font: font, text: text, start: lineStart, end: i, x: x, y: baseline,
+                      sizePx: sizePx, color: color, outlineWidth: outlineWidth,
+                      outlineColor: outlineColor, softness: 1.0)
+            lines = lines + 1
+            baseline = baseline + lineHeight
+            i = i + 1
+            lineStart = i
+            lastSpace = 0 - 1
+            width = 0.0
+        } else {
+            let advance: Float = glyphAdvance(font: font, cp: cp, sizePx: sizePx)
+            if cp is 32 { lastSpace = i }
+            if width + advance > maxWidth and i > lineStart {
+                var lineEnd: Int = i
+                var nextStart: Int = i
+                if lastSpace >= lineStart {
+                    lineEnd = lastSpace
+                    nextStart = lastSpace + 1
+                }
+                emitRange(font: font, text: text, start: lineStart, end: lineEnd, x: x, y: baseline,
+                          sizePx: sizePx, color: color, outlineWidth: outlineWidth,
+                          outlineColor: outlineColor, softness: 1.0)
+                lines = lines + 1
+                baseline = baseline + lineHeight
+                lineStart = nextStart
+                i = nextStart
+                lastSpace = 0 - 1
+                width = 0.0
+            } else {
+                width = width + advance
+                i = i + 1
+            }
+        }
+    }
+    if lineStart < n {
+        emitRange(font: font, text: text, start: lineStart, end: n, x: x, y: baseline,
+                  sizePx: sizePx, color: color, outlineWidth: outlineWidth,
+                  outlineColor: outlineColor, softness: 1.0)
+        lines = lines + 1
+    }
+    ret lines
 }
 
 # Draw `text` with baseline pen at (x, y) in pixels, `sizePx` tall em,
