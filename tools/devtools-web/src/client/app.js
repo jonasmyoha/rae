@@ -1943,7 +1943,9 @@ async function runWasmWebApp(example) {
       body: JSON.stringify({
         entry,
         profile: getGlobalProfile(),
-        presentation: embeddedWebGpu ? "embedded" : "external"
+        presentation: embeddedWebGpu ? "embedded" : "external",
+        width: example.display.width,
+        height: example.display.height
       })
     });
     const result = await res.json();
