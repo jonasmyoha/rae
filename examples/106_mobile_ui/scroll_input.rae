@@ -145,7 +145,7 @@ func applyDragPhysics(
     # Both gated on `wheelQuiet` so live trackpad momentum isn't
     # fought by the spring (caused the "5 bounces" symptom).
     let nowSec: Float64 = uiNowSeconds()
-    let wheelIdleSec: Float = nowSec - fsm.lastWheelTime
+    let wheelIdleSec: Float = (nowSec - fsm.lastWheelTime) as Float
     let wheelQuiet: Bool = wheelIdleSec > 0.05
     let isOOB: Bool = fsm.scrollY > scrollMax or fsm.scrollY < scrollMin
     if isOOB {
