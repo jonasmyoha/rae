@@ -20,4 +20,14 @@ test -s "$TMP/index.js"
 test -s "$TMP/index.wasm"
 grep -q 'id="canvas"' "$TMP/index.html"
 
-echo "PASS wasm_webgpu_smoke: 109 browser bundle built"
+perl -e 'alarm shift; exec @ARGV' 240 compiler/bin/rae build \
+  --target wasm --profile dev \
+  --project examples/109_gpu3d_pbr \
+  --out "$TMP/app.mjs" \
+  examples/109_gpu3d_pbr/main.rae >/dev/null
+
+test -s "$TMP/app.mjs"
+test -s "$TMP/app.wasm"
+grep -q 'createRaeApp' "$TMP/app.mjs"
+
+echo "PASS wasm_webgpu_smoke: 109 browser page and embeddable module built"

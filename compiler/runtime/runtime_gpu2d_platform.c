@@ -322,11 +322,20 @@ void rae_ext_gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
  * window path never calls — hence the duplication here.) Edge state
  * (g_sdl_pressed) and the wheel delta are reset each call so they describe
  * only this frame. */
+#ifdef __EMSCRIPTEN__
+static rae_Bool g_rae_browser_stop_requested = 0;
+
+EMSCRIPTEN_KEEPALIVE void rae_browser_request_stop(void) {
+    g_rae_browser_stop_requested = 1;
+}
+#endif
+
 rae_Bool rae_ext_gpu2d_pollClose(void) {
 #ifdef __EMSCRIPTEN__
     /* Browser WebGPU presents at requestAnimationFrame boundaries. Asyncify
      * lets the current Rae loop await that boundary without source changes. */
     rae_browser_next_frame();
+    if (g_rae_browser_stop_requested) return 1;
 #endif
     memset(g_sdl_pressed, 0, sizeof(g_sdl_pressed));
     memset(g_sdl_mouse_pressed, 0, sizeof(g_sdl_mouse_pressed));
