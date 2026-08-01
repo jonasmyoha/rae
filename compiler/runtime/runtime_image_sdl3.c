@@ -231,6 +231,11 @@ static unsigned char* g_sdl_scratch = NULL;   /* RGBA8 expansion of the last fra
 static int64_t g_sdl_scratch_px = 0;
 static int64_t g_sdl_start_ms = 0;
 static int64_t g_sdl_headless_ms = 0;          /* >0 => auto-close after this budget */
+/* Frame-count budget for reproducible captures. A duration budget lets the
+ * frame count vary with machine speed, so screenshots are not comparable
+ * across runs; RAE_HEADLESS_FRAMES + RAE_FIXED_DT makes them byte-identical. */
+static int64_t g_sdl_headless_frames = 0;
+static int64_t g_sdl_frames_done = 0;
 static int64_t g_sdl_target_fps = 0;           /* >0 => cap present rate */
 static int64_t g_sdl_last_present_ms = 0;
 static unsigned char g_sdl_pressed[SDL_SCANCODE_COUNT]; /* went-down-this-frame edges */
