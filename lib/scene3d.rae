@@ -116,17 +116,28 @@ type SdfPrimitive {
 
 type Scene3d {
   transforms: List(Transform3d)
+  # Previous-frame transforms, same entity indexing (#336). Motion vectors
+  # (TAA #335) need where each entity WAS; kept in lockstep by addTransform
+  # and advanced once per frame by snapshotPrevTransforms.
+  prevTransforms: List(Transform3d)
   materials: List(Material3d)
   meshRenderers: List(MeshRenderer)
   sdfPrimitives: List(SdfPrimitive)
+  # Monotonic change counter (#336). Bumped by every authoring call and by
+  # setTransform; a consumer (dirty-region GI updates, #338) remembers the
+  # revision it last processed and compares. Mutating component lists
+  # directly bypasses this — setTransform is the sanctioned mutation path.
+  revision: Int
 }
 
 func createScene3d() pub ret Scene3d {
   ret Scene3d {
     transforms: createList(Transform3d, cap: 16),
+    prevTransforms: createList(Transform3d, cap: 16),
     materials: createList(Material3d, cap: 8),
     meshRenderers: createList(MeshRenderer, cap: 16),
-    sdfPrimitives: createList(SdfPrimitive, cap: 16)
+    sdfPrimitives: createList(SdfPrimitive, cap: 16),
+    revision: 0
   }
 }
 
@@ -134,7 +145,33 @@ func createScene3d() pub ret Scene3d {
 func addTransform(scene: mod Scene3d, position: view Vec3, rotation: view Vec3, scale: view Vec3) pub ret Int {
   let entity: Int = scene.transforms.length
   scene.transforms.add(value: Transform3d { position: position, rotation: rotation, scale: scale })
+  # A new entity has no history; its previous transform IS its first one,
+  # so its first motion vector is zero rather than a streak from origin.
+  scene.prevTransforms.add(value: Transform3d { position: position, rotation: rotation, scale: scale })
+  scene.revision = scene.revision + 1
   ret entity
+}
+
+# The sanctioned way to move an entity. Writes the component AND bumps the
+# revision, so change consumers (GI dirty regions) see it. prevTransforms
+# is untouched here — it advances once per frame via snapshotPrevTransforms,
+# not per mutation, so multiple writes in one frame yield one clean delta.
+func setTransform(scene: mod Scene3d, entity: view Int, transform: view Transform3d) pub {
+  scene.transforms.set(index: entity, value: transform)
+  scene.revision = scene.revision + 1
+}
+
+# Advance frame history: current transforms become the previous frame's.
+# Call exactly once per rendered frame, AFTER extraction/draw and before
+# the next frame's mutations. Forgetting this makes motion vectors read
+# zero (history always equals current) — not garbage, but TAA/velocity silently
+# degrade to camera-only.
+func snapshotPrevTransforms(scene: mod Scene3d) pub {
+  var i: Int = 0
+  loop i < scene.transforms.length {
+    scene.prevTransforms.set(index: i, value: scene.transforms.at(index: i))
+    i = i + 1
+  }
 }
 
 func addMaterial(scene: mod Scene3d, baseColor: view Vec3, metallic: view Float, roughness: view Float, emission: view Vec3) pub ret Int {
