@@ -46,6 +46,8 @@ static WGPUBuffer   g3d_mesh_ibuf[G3D_MAX_MESHES];
 static uint32_t     g3d_mesh_icount[G3D_MAX_MESHES];
 static int          g3d_mesh_n = 0;
 
+static WGPUTexture     g3d_hdr_tex = NULL;       /* rgba16f linear scene colour (#334) */
+static WGPUTextureView g3d_hdr_view = NULL;
 static WGPUTexture     g3d_depth_tex = NULL;
 static WGPUTextureView g3d_depth_view = NULL;
 static WGPUTexture     g3d_normal_tex = NULL;    /* rgba16f world normals */
@@ -70,6 +72,16 @@ static bool         g3d_draw_overflow_reported = false;
 
 static WGPUCommandEncoder    g3d_enc = NULL;
 static WGPURenderPassEncoder g3d_pass = NULL;
+
+/* Tonemap pass (#334): scene shaders output LINEAR HDR into g3d_hdr_view;
+ * this fullscreen pass applies exposure + ACES + gamma and writes the LDR
+ * result into gpu2d's offscreen. Accumulating light on tonemapped values
+ * is wrong (light does not add after a nonlinear curve), so every future
+ * indirect-lighting pass reads/writes the HDR target and tonemap stays
+ * the LAST radiometric operation of the frame. */
+static WGPURenderPipeline g3d_tonemap_pipeline = NULL;
+static WGPUBindGroup      g3d_tonemap_bind = NULL;   /* rebuilt when targets resize */
+static bool               g3d_tonemap_pending = false;
 
 static const char* G3D_WGSL =
 "struct Frame {\n"
@@ -141,10 +153,6 @@ static const char* G3D_WGSL =
 "fn fresnel(VoH: f32, f0: vec3<f32>) -> vec3<f32> {\n"
 "  return f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - VoH, 5.0);\n"
 "}\n"
-"fn aces(x: vec3<f32>) -> vec3<f32> {\n"
-"  return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14),\n"
-"               vec3<f32>(0.0), vec3<f32>(1.0));\n"
-"}\n"
 "struct FsOut {\n"
 "  @location(0) color: vec4<f32>,\n"
 "  @location(1) normal: vec4<f32>,\n"
@@ -173,14 +181,47 @@ static const char* G3D_WGSL =
 "  let hemi = mix(F.ambGround.rgb, F.ambSky.rgb, N.y * 0.5 + 0.5);\n"
 "  let ambF = fresnel(NoV, f0);\n"
 "  let ambient = hemi * albedo * (1.0 - metallic) + hemi * ambF * (1.0 - rough * 0.7);\n"
-"  var c = direct + ambient + d.emissiveRoughness.rgb;\n"
-"  c = aces(c * F.sunDir.w);\n"
-"  c = pow(c, vec3<f32>(1.0 / 2.2));\n"
+/* LINEAR HDR out (#334) — exposure/ACES/gamma live in the tonemap pass. */
+"  let c = direct + ambient + d.emissiveRoughness.rgb;\n"
 "  var o: FsOut;\n"
 "  o.color = vec4<f32>(c, 1.0);\n"
 "  o.normal = vec4<f32>(N, 1.0);\n"
 "  o.velocity = motionVec(in.clipNow, in.clipPrev);\n"
 "  return o;\n"
+"}\n";
+
+/* Tonemap: HDR (rgba16f, linear) -> LDR offscreen. textureLoad by pixel
+ * coordinate — 1:1 fullscreen needs no sampler. Exposure rides in
+ * F.sunDir.w exactly as it did inside the material shaders. */
+static const char* G3D_TONEMAP_WGSL =
+"struct Frame {\n"
+"  viewProj: mat4x4<f32>,\n"
+"  camPos: vec4<f32>,\n"
+"  sunDir: vec4<f32>,\n"
+"  sunColor: vec4<f32>,\n"
+"  ambSky: vec4<f32>,\n"
+"  ambGround: vec4<f32>,\n"
+"  invViewProj: mat4x4<f32>,\n"
+"  prevViewProj: mat4x4<f32>,\n"
+"};\n"
+"@group(0) @binding(0) var<uniform> F: Frame;\n"
+"@group(0) @binding(1) var hdrTex: texture_2d<f32>;\n"
+"@vertex\n"
+"fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {\n"
+"  var points = array<vec2<f32>, 3>(\n"
+"    vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));\n"
+"  return vec4<f32>(points[vi], 0.0, 1.0);\n"
+"}\n"
+"fn aces(x: vec3<f32>) -> vec3<f32> {\n"
+"  return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14),\n"
+"               vec3<f32>(0.0), vec3<f32>(1.0));\n"
+"}\n"
+"@fragment\n"
+"fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {\n"
+"  let hdr = textureLoad(hdrTex, vec2<i32>(pos.xy), 0).rgb;\n"
+"  var c = aces(hdr * F.sunDir.w);\n"
+"  c = pow(c, vec3<f32>(1.0 / 2.2));\n"
+"  return vec4<f32>(c, 1.0);\n"
 "}\n";
 
 #include "runtime_gpu3d_sdf.c"
@@ -260,7 +301,7 @@ static void g3d_init_pipeline(void) {
     vbl.attributeCount = 3; vbl.attributes = attrs;
 
     WGPUColorTargetState cts[3]; memset(cts, 0, sizeof(cts));
-    cts[0].format = g_g2d_fmt;                      cts[0].writeMask = WGPUColorWriteMask_All; /* opaque, no blend */
+    cts[0].format = WGPUTextureFormat_RGBA16Float;  cts[0].writeMask = WGPUColorWriteMask_All; /* linear HDR, opaque */
     cts[1].format = WGPUTextureFormat_RGBA16Float;  cts[1].writeMask = WGPUColorWriteMask_All; /* world normals */
     cts[2].format = WGPUTextureFormat_RG16Float;    cts[2].writeMask = WGPUColorWriteMask_All; /* motion vectors */
     WGPUFragmentState fs; memset(&fs, 0, sizeof(fs));
@@ -311,6 +352,45 @@ static void g3d_init_pipeline(void) {
     wgpuBindGroupLayoutRelease(bgl);
 }
 
+static void g3d_init_tonemap_pipeline(void) {
+    if (g3d_tonemap_pipeline) return;
+    WGPUShaderSourceWGSL src; memset(&src, 0, sizeof(src));
+    src.chain.sType = WGPUSType_ShaderSourceWGSL;
+    src.code = rae_wgpu_sv(G3D_TONEMAP_WGSL);
+    WGPUShaderModuleDescriptor smd; memset(&smd, 0, sizeof(smd));
+    smd.nextInChain = &src.chain;
+    WGPUShaderModule mod = wgpuDeviceCreateShaderModule(g_wgpu_dev, &smd);
+
+    WGPUColorTargetState cts; memset(&cts, 0, sizeof(cts));
+    cts.format = g_g2d_fmt; cts.writeMask = WGPUColorWriteMask_All;
+    WGPUFragmentState fs; memset(&fs, 0, sizeof(fs));
+    fs.module = mod; fs.entryPoint = rae_wgpu_sv("fs"); fs.targetCount = 1; fs.targets = &cts;
+    WGPURenderPipelineDescriptor pd; memset(&pd, 0, sizeof(pd));
+    pd.vertex.module = mod; pd.vertex.entryPoint = rae_wgpu_sv("vs");
+    pd.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+    pd.primitive.frontFace = WGPUFrontFace_CCW;
+    pd.primitive.cullMode = WGPUCullMode_None;
+    pd.multisample.count = 1; pd.multisample.mask = 0xFFFFFFFFu;
+    pd.fragment = &fs;
+    g3d_tonemap_pipeline = wgpuDeviceCreateRenderPipeline(g_wgpu_dev, &pd);
+    wgpuShaderModuleRelease(mod);
+    if (!g3d_tonemap_pipeline) fprintf(stderr, "[gpu3d] tonemap pipeline creation FAILED\n");
+}
+
+/* Bind group references the HDR view, so it must be rebuilt whenever
+ * g3d_ensure_targets recreates the textures (it nulls this then). */
+static void g3d_ensure_tonemap_bind(void) {
+    if (g3d_tonemap_bind || !g3d_tonemap_pipeline || !g3d_hdr_view) return;
+    WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g3d_tonemap_pipeline, 0);
+    WGPUBindGroupEntry e[2]; memset(e, 0, sizeof(e));
+    e[0].binding = 0; e[0].buffer = g3d_frame_ubuf; e[0].size = 272;
+    e[1].binding = 1; e[1].textureView = g3d_hdr_view;
+    WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
+    bgd.layout = bgl; bgd.entryCount = 2; bgd.entries = e;
+    g3d_tonemap_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
+    wgpuBindGroupLayoutRelease(bgl);
+}
+
 /* (Re)create the prepass targets (depth/normal/velocity) to match the
  * offscreen color target's size. Called from begin(); cheap when unchanged.
  * All three carry TextureBinding: their whole reason to exist is being
@@ -320,6 +400,9 @@ static void g3d_ensure_targets(void) {
     int w = g_g2d_off_w, h = g_g2d_off_h;
     if (w <= 0 || h <= 0) return;
     if (g3d_depth_view && w == g3d_target_w && h == g3d_target_h) return;
+    if (g3d_tonemap_bind) { wgpuBindGroupRelease(g3d_tonemap_bind); g3d_tonemap_bind = NULL; }
+    if (g3d_hdr_view) { wgpuTextureViewRelease(g3d_hdr_view); g3d_hdr_view = NULL; }
+    if (g3d_hdr_tex)  { wgpuTextureRelease(g3d_hdr_tex); g3d_hdr_tex = NULL; }
     if (g3d_depth_view) { wgpuTextureViewRelease(g3d_depth_view); g3d_depth_view = NULL; }
     if (g3d_depth_tex)  { wgpuTextureRelease(g3d_depth_tex); g3d_depth_tex = NULL; }
     if (g3d_normal_view) { wgpuTextureViewRelease(g3d_normal_view); g3d_normal_view = NULL; }
@@ -331,6 +414,9 @@ static void g3d_ensure_targets(void) {
     td.size.width = (uint32_t)w; td.size.height = (uint32_t)h; td.size.depthOrArrayLayers = 1;
     td.mipLevelCount = 1; td.sampleCount = 1;
     td.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding;
+    td.format = WGPUTextureFormat_RGBA16Float;   /* linear HDR scene colour */
+    g3d_hdr_tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
+    g3d_hdr_view = wgpuTextureCreateView(g3d_hdr_tex, NULL);
     td.format = WGPUTextureFormat_Depth32Float;
     g3d_depth_tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
     g3d_depth_view = wgpuTextureCreateView(g3d_depth_tex, NULL);
@@ -391,8 +477,9 @@ void rae_ext_gpu3d_begin(const float* frame, int64_t count){
     if (!g_wgpu_dev || !g_g2d_off_view || !frame || count < 36) return;
     g3d_init_pipeline();
     g3d_ensure_targets();
-    if (!g3d_depth_view || !g3d_normal_view || !g3d_velocity_view) return;
+    if (!g3d_hdr_view || !g3d_depth_view || !g3d_normal_view || !g3d_velocity_view) return;
     g3d_draw_count = 0;
+    g3d_tonemap_pending = true;
 
     float u[68]; memset(u, 0, sizeof(u));
     for (int i = 0; i < 16; i++) u[i] = (float)frame[i];       /* viewProj */
@@ -420,7 +507,7 @@ void rae_ext_gpu3d_begin(const float* frame, int64_t count){
 
     g3d_enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
     WGPURenderPassColorAttachment ca[3]; memset(ca, 0, sizeof(ca));
-    ca[0].view = g_g2d_off_view;   /* single-sampled, straight to the shared offscreen */
+    ca[0].view = g3d_hdr_view;     /* linear HDR; tonemap writes the offscreen (#334) */
     ca[0].depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
     ca[0].loadOp = WGPULoadOp_Clear;
     ca[0].storeOp = WGPUStoreOp_Store;
@@ -515,11 +602,48 @@ void rae_ext_gpu3d_submit(void) {
     if (rae_g3d_finish_pass()) rae_wgpu_poll(0);
 }
 
+/* Tonemap pass (#334): resolve linear HDR into the LDR offscreen. Ends the
+ * scene pass first if the caller has not, so the HDR image is complete.
+ * Graph-driven frames dispatch this between the scene pass and whatever
+ * composites in LDR (UI overlay, present). */
+void rae_ext_gpu3d_tonemap(void) {
+    rae_g3d_finish_pass();
+    if (!g3d_tonemap_pending || !g3d_hdr_view || !g_g2d_off_view) return;
+    g3d_init_tonemap_pipeline();
+    g3d_ensure_tonemap_bind();
+    if (!g3d_tonemap_pipeline || !g3d_tonemap_bind) return;
+    g3d_tonemap_pending = false;
+    WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
+    WGPURenderPassColorAttachment ca; memset(&ca, 0, sizeof(ca));
+    ca.view = g_g2d_off_view;
+    ca.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
+    ca.loadOp = WGPULoadOp_Clear;   /* fullscreen triangle overwrites every pixel */
+    ca.storeOp = WGPUStoreOp_Store;
+    WGPURenderPassDescriptor rp; memset(&rp, 0, sizeof(rp));
+    rp.colorAttachmentCount = 1;
+    rp.colorAttachments = &ca;
+    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(enc, &rp);
+    wgpuRenderPassEncoderSetPipeline(pass, g3d_tonemap_pipeline);
+    wgpuRenderPassEncoderSetBindGroup(pass, 0, g3d_tonemap_bind, 0, NULL);
+    wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
+    wgpuRenderPassEncoderEnd(pass);
+    WGPUCommandBuffer cb = wgpuCommandEncoderFinish(enc, NULL);
+    wgpuQueueSubmit(g_wgpu_queue, 1, &cb);
+    wgpuCommandBufferRelease(cb);
+    wgpuRenderPassEncoderRelease(pass);
+    wgpuCommandEncoderRelease(enc);
+}
+
 /* End the standalone 3D frame and reuse the 2D path's screenshot +
  * present-from-offscreen behavior. UI composition uses endPass instead. */
 void rae_ext_gpu3d_end(void) {
     rae_g2d_tick_virtual_clock();
-    if (!rae_g3d_finish_pass()) return;
+    rae_g3d_finish_pass();
+    /* Presenting reads the LDR offscreen, which only tonemap writes. A
+     * graph-driven frame has already dispatched it (no-op here); a legacy
+     * begin/draw/end caller has not, so run it now rather than presenting
+     * whatever the offscreen held last. */
+    if (g3d_tonemap_pending) rae_ext_gpu3d_tonemap();
 
     if (g_sdl_headless_ms > 0 || g_sdl_headless_frames > 0) {
         const char* shot = getenv("RAE_GPU2D_SCREENSHOT");
@@ -561,6 +685,10 @@ void rae_ext_gpu3d_shutdown(void) {
     if (g3d_draw_sbuf) { wgpuBufferRelease(g3d_draw_sbuf); g3d_draw_sbuf = NULL; }
     if (g3d_frame_ubuf) { wgpuBufferRelease(g3d_frame_ubuf); g3d_frame_ubuf = NULL; }
     if (g3d_pipeline) { wgpuRenderPipelineRelease(g3d_pipeline); g3d_pipeline = NULL; }
+    if (g3d_tonemap_bind) { wgpuBindGroupRelease(g3d_tonemap_bind); g3d_tonemap_bind = NULL; }
+    if (g3d_tonemap_pipeline) { wgpuRenderPipelineRelease(g3d_tonemap_pipeline); g3d_tonemap_pipeline = NULL; }
+    if (g3d_hdr_view) { wgpuTextureViewRelease(g3d_hdr_view); g3d_hdr_view = NULL; }
+    if (g3d_hdr_tex)  { wgpuTextureRelease(g3d_hdr_tex); g3d_hdr_tex = NULL; }
     if (g3d_depth_view) { wgpuTextureViewRelease(g3d_depth_view); g3d_depth_view = NULL; }
     if (g3d_depth_tex)  { wgpuTextureRelease(g3d_depth_tex); g3d_depth_tex = NULL; }
     if (g3d_normal_view) { wgpuTextureViewRelease(g3d_normal_view); g3d_normal_view = NULL; }
@@ -569,6 +697,7 @@ void rae_ext_gpu3d_shutdown(void) {
     if (g3d_velocity_tex)  { wgpuTextureRelease(g3d_velocity_tex); g3d_velocity_tex = NULL; }
     g3d_target_w = 0; g3d_target_h = 0;
     g3d_have_prev = false;
+    g3d_tonemap_pending = false;
     g3d_draw_limit = G3D_MAX_DRAWS;
     g3d_draw_overflow_reported = false;
 }
