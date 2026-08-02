@@ -158,10 +158,12 @@ func main() ret Int {
     # Spin the torus about +Z and tumble it about +X.
     var torusT: Transform3d = scene.transforms.at(index: torusEntity)
     torusT.rotation = vec3.create(x: t * 0.4, y: 0.0, z: t * 0.6)
-    scene.transforms.set(index: torusEntity, value: torusT)
+    setTransform(scene: scene, entity: torusEntity, transform: torusT)
 
     let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
     renderFrame(r: renderer, scene: scene, camera: camera, light: light, aspect: aspect, time: t)
+    # Frame history for motion vectors (#336): current becomes previous.
+    snapshotPrevTransforms(scene: scene)
   }
   shutdown()
   gpu2d.closeWindow()
