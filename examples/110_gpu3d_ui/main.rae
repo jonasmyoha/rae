@@ -470,6 +470,12 @@ func main() ret Int {
         if uiState.activeScene is 3 { renderScene(scene: scene3.scene) }
         endPass()
       }
+      if tag is tagTonemap {
+        # HDR -> LDR resolve (#334). The UI overlay below composites in
+        # display space, so it must come after this, which the graph
+        # guarantees: tonemap writes the LDR target the overlay modifies.
+        tonemapPass()
+      }
       if tag is tagUiOverlay {
         gpu2d.beginFrameLoad()
         renderSystemGpu2d(world: uiWorld, res: gpuUi)

@@ -83,9 +83,6 @@ static const char* G3D_SDF_WGSL =
 "fn fresnel(VoH: f32, f0: vec3<f32>) -> vec3<f32> {\n"
 "  return f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - VoH, 5.0);\n"
 "}\n"
-"fn aces(x: vec3<f32>) -> vec3<f32> {\n"
-"  return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), vec3<f32>(0.0), vec3<f32>(1.0));\n"
-"}\n"
 "struct FsOut {\n"
 "  @location(0) color: vec4<f32>,\n"
 "  @location(1) normal: vec4<f32>,\n"
@@ -125,8 +122,8 @@ static const char* G3D_SDF_WGSL =
 "  let direct = (kd * albedo / PI + spec) * F.sunColor.rgb * NoL;\n"
 "  let hemi = mix(F.ambGround.rgb, F.ambSky.rgb, N.z * 0.5 + 0.5);\n"
 "  let ambient = hemi * albedo * (1.0 - metallic) + hemi * Fs * (1.0 - rough * 0.7);\n"
-"  var c = aces((direct + ambient + P.emissiveRoughness.rgb) * F.sunDir.w);\n"
-"  c = pow(c, vec3<f32>(1.0 / 2.2));\n"
+/* LINEAR HDR out (#334) — exposure/ACES/gamma live in the tonemap pass. */
+"  let c = direct + ambient + P.emissiveRoughness.rgb;\n"
 "  let clip = F.viewProj * vec4<f32>(worldPos, 1.0);\n"
 /* Prepass outputs (#333): the raymarch hit contributes normal + velocity
  * exactly like raster geometry, so AO/GI/TAA never special-case SDFs.
@@ -150,7 +147,7 @@ static void g3d_sdf_init_pipeline(void) {
     WGPUShaderModule mod = wgpuDeviceCreateShaderModule(g_wgpu_dev, &smd);
 
     WGPUColorTargetState cts[3]; memset(cts, 0, sizeof(cts));
-    cts[0].format = g_g2d_fmt;                      cts[0].writeMask = WGPUColorWriteMask_All;
+    cts[0].format = WGPUTextureFormat_RGBA16Float;  cts[0].writeMask = WGPUColorWriteMask_All;
     cts[1].format = WGPUTextureFormat_RGBA16Float;  cts[1].writeMask = WGPUColorWriteMask_All;
     cts[2].format = WGPUTextureFormat_RG16Float;    cts[2].writeMask = WGPUColorWriteMask_All;
     WGPUFragmentState fs; memset(&fs, 0, sizeof(fs));
