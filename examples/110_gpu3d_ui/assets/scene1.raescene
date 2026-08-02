@@ -1,22 +1,748 @@
 {
-  "type": "Scene", "version": 2, "sceneId": "gpu3d-pbr-lab", "root": "World",
-  "nodes": {
-    "World": { "Children": ["red", "teal", "gold", "metaball", "floor", "leftSphere", "rightSphere", "heroTorus", "ground", "metaball1", "metaball2", "metaball3", "metaball4", "metaball5", "Camera", "Light"] },
-    "red": { "Material3d": { "baseColor": { "x": 0.88, "y": 0.20, "z": 0.14 }, "metallic": 0.72, "roughness": 0.20, "emission": { "x": 0, "y": 0, "z": 0 } } },
-    "teal": { "Material3d": { "baseColor": { "x": 0.08, "y": 0.58, "z": 0.55 }, "metallic": 0.32, "roughness": 0.32, "emission": { "x": 0, "y": 0, "z": 0 } } },
-    "gold": { "Material3d": { "baseColor": { "x": 0.95, "y": 0.58, "z": 0.12 }, "metallic": 0.92, "roughness": 0.16, "emission": { "x": 0.05, "y": 0.018, "z": 0 } } },
-    "metaball": { "Material3d": { "baseColor": { "x": 0.04, "y": 0.36, "z": 0.92 }, "metallic": 0.72, "roughness": 0.14, "emission": { "x": 0, "y": 0.018, "z": 0.075 } } },
-    "floor": { "Material3d": { "baseColor": { "x": 0.20, "y": 0.23, "z": 0.28 }, "metallic": 0.05, "roughness": 0.86, "emission": { "x": 0, "y": 0, "z": 0 } } },
-    "leftSphere": { "Transform3d": { "position": { "x": -2.7, "y": 0, "z": 0.45 }, "rotation": { "x": 0, "y": 0, "z": 0 }, "scale": { "x": 1, "y": 1, "z": 1 } }, "MeshRenderer": { "mesh": "sphere", "material": "red" } },
-    "rightSphere": { "Transform3d": { "position": { "x": 2.7, "y": 0, "z": 0.45 }, "rotation": { "x": 0, "y": 0, "z": 0 }, "scale": { "x": 1, "y": 1, "z": 1 } }, "MeshRenderer": { "mesh": "sphere", "material": "teal" } },
-    "heroTorus": { "Transform3d": { "position": { "x": 0, "y": 0, "z": 1.35 }, "rotation": { "x": 0, "y": 0, "z": 0 }, "scale": { "x": 1, "y": 1, "z": 1 } }, "MeshRenderer": { "mesh": "torus", "material": "gold" } },
-    "ground": { "Transform3d": { "position": { "x": 0, "y": 0, "z": -0.75 }, "rotation": { "x": 0, "y": 0, "z": 0 }, "scale": { "x": 1, "y": 1, "z": 1 } }, "MeshRenderer": { "mesh": "ground", "material": "floor" } },
-    "metaball1": { "Transform3d": { "position": { "x": 3.5, "y": 2.1, "z": 2.0 }, "rotation": { "x": 0, "y": 0, "z": 0 }, "scale": { "x": 1.48, "y": 1.48, "z": 1.48 } }, "SdfPrimitive": { "shape": "sphere", "material": "metaball", "noise": 0 } },
-    "metaball2": { "Transform3d": { "position": { "x": 4.3, "y": 2.3, "z": 2.7 }, "rotation": { "x": 0, "y": 0, "z": 0 }, "scale": { "x": 1.48, "y": 1.48, "z": 1.48 } }, "SdfPrimitive": { "shape": "sphere", "material": "metaball", "noise": 0 } },
-    "metaball3": { "Transform3d": { "position": { "x": 5.2, "y": 2.1, "z": 2.1 }, "rotation": { "x": 0, "y": 0, "z": 0 }, "scale": { "x": 1.48, "y": 1.48, "z": 1.48 } }, "SdfPrimitive": { "shape": "sphere", "material": "metaball", "noise": 0 } },
-    "metaball4": { "Transform3d": { "position": { "x": 4.0, "y": 2.4, "z": 1.3 }, "rotation": { "x": 0, "y": 0, "z": 0 }, "scale": { "x": 1.48, "y": 1.48, "z": 1.48 } }, "SdfPrimitive": { "shape": "sphere", "material": "metaball", "noise": 0 } },
-    "metaball5": { "Transform3d": { "position": { "x": 4.9, "y": 2.4, "z": 1.3 }, "rotation": { "x": 0, "y": 0, "z": 0 }, "scale": { "x": 1.48, "y": 1.48, "z": 1.48 } }, "SdfPrimitive": { "shape": "sphere", "material": "metaball", "noise": 0 } },
-    "Camera": { "Camera3d": { "position": { "x": 0, "y": -12, "z": 4 }, "target": { "x": 0, "y": 0, "z": 0.5 }, "fovYDeg": 50, "nearZ": 0.1, "farZ": 200 } },
-    "Light": { "Light3d": { "sunDir": { "x": -0.4, "y": 0.3, "z": -1 }, "sunColor": { "x": 3.2, "y": 3.0, "z": 2.7 }, "ambSky": { "x": 0.25, "y": 0.3, "z": 0.4 }, "ambGround": { "x": 0.12, "y": 0.1, "z": 0.09 }, "exposure": 1, "clearColor": { "x": 0.02, "y": 0.02, "z": 0.03 } } }
+ "type": "Scene",
+ "version": 2,
+ "sceneId": "gpu3d-pbr-lab",
+ "root": "World",
+ "nodes": {
+  "World": {
+   "Children": [
+    "red",
+    "teal",
+    "gold",
+    "metaball",
+    "floor",
+    "leftSphere",
+    "rightSphere",
+    "heroTorus",
+    "ground",
+    "metaball1",
+    "metaball2",
+    "metaball3",
+    "metaball4",
+    "metaball5",
+    "Camera",
+    "Light",
+    "obsidian1",
+    "obsidian2",
+    "obsidian3",
+    "obsidian4",
+    "ember1",
+    "ember2",
+    "ember3",
+    "ember4",
+    "ember5"
+   ]
+  },
+  "red": {
+   "Material3d": {
+    "baseColor": {
+     "x": 0.88,
+     "y": 0.2,
+     "z": 0.14
+    },
+    "metallic": 0.72,
+    "roughness": 0.2,
+    "emission": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  "teal": {
+   "Material3d": {
+    "baseColor": {
+     "x": 0.08,
+     "y": 0.58,
+     "z": 0.55
+    },
+    "metallic": 0.32,
+    "roughness": 0.32,
+    "emission": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  "gold": {
+   "Material3d": {
+    "baseColor": {
+     "x": 0.95,
+     "y": 0.58,
+     "z": 0.12
+    },
+    "metallic": 0.92,
+    "roughness": 0.16,
+    "emission": {
+     "x": 0.05,
+     "y": 0.018,
+     "z": 0
+    }
+   }
+  },
+  "metaball": {
+   "Material3d": {
+    "baseColor": {
+     "x": 0.04,
+     "y": 0.36,
+     "z": 0.92
+    },
+    "metallic": 0.72,
+    "roughness": 0.14,
+    "emission": {
+     "x": 0,
+     "y": 0.018,
+     "z": 0.075
+    }
+   }
+  },
+  "floor": {
+   "Material3d": {
+    "baseColor": {
+     "x": 0.2,
+     "y": 0.23,
+     "z": 0.28
+    },
+    "metallic": 0.05,
+    "roughness": 0.86,
+    "emission": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  "leftSphere": {
+   "Transform3d": {
+    "position": {
+     "x": -2.7,
+     "y": 0,
+     "z": 0.45
+    },
+    "rotation": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "scale": {
+     "x": 1,
+     "y": 1,
+     "z": 1
+    }
+   },
+   "MeshRenderer": {
+    "mesh": "sphere",
+    "material": "red"
+   }
+  },
+  "rightSphere": {
+   "Transform3d": {
+    "position": {
+     "x": 2.7,
+     "y": 0,
+     "z": 0.45
+    },
+    "rotation": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "scale": {
+     "x": 1,
+     "y": 1,
+     "z": 1
+    }
+   },
+   "MeshRenderer": {
+    "mesh": "sphere",
+    "material": "teal"
+   }
+  },
+  "heroTorus": {
+   "Transform3d": {
+    "position": {
+     "x": 0,
+     "y": 0,
+     "z": 1.35
+    },
+    "rotation": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "scale": {
+     "x": 1,
+     "y": 1,
+     "z": 1
+    }
+   },
+   "MeshRenderer": {
+    "mesh": "torus",
+    "material": "gold"
+   }
+  },
+  "ground": {
+   "Transform3d": {
+    "position": {
+     "x": 0,
+     "y": 0,
+     "z": -0.75
+    },
+    "rotation": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "scale": {
+     "x": 1,
+     "y": 1,
+     "z": 1
+    }
+   },
+   "MeshRenderer": {
+    "mesh": "ground",
+    "material": "floor"
+   }
+  },
+  "metaball1": {
+   "Transform3d": {
+    "position": {
+     "x": 3.5,
+     "y": 2.1,
+     "z": 2.0
+    },
+    "rotation": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "scale": {
+     "x": 1.48,
+     "y": 1.48,
+     "z": 1.48
+    }
+   },
+   "SdfPrimitive": {
+    "shape": "sphere",
+    "material": "metaball",
+    "noise": 0,
+    "cluster": 0,
+    "smoothing": 0.62
+   }
+  },
+  "metaball2": {
+   "Transform3d": {
+    "position": {
+     "x": 4.3,
+     "y": 2.3,
+     "z": 2.7
+    },
+    "rotation": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "scale": {
+     "x": 1.48,
+     "y": 1.48,
+     "z": 1.48
+    }
+   },
+   "SdfPrimitive": {
+    "shape": "sphere",
+    "material": "metaballCyan",
+    "noise": 0,
+    "cluster": 0,
+    "smoothing": 0.62
+   }
+  },
+  "metaball3": {
+   "Transform3d": {
+    "position": {
+     "x": 5.2,
+     "y": 2.1,
+     "z": 2.1
+    },
+    "rotation": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "scale": {
+     "x": 1.48,
+     "y": 1.48,
+     "z": 1.48
+    }
+   },
+   "SdfPrimitive": {
+    "shape": "sphere",
+    "material": "metaball",
+    "noise": 0,
+    "cluster": 0,
+    "smoothing": 0.62
+   }
+  },
+  "metaball4": {
+   "Transform3d": {
+    "position": {
+     "x": 4.0,
+     "y": 2.4,
+     "z": 1.3
+    },
+    "rotation": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "scale": {
+     "x": 1.48,
+     "y": 1.48,
+     "z": 1.48
+    }
+   },
+   "SdfPrimitive": {
+    "shape": "sphere",
+    "material": "metaballViolet",
+    "noise": 0,
+    "cluster": 0,
+    "smoothing": 0.62
+   }
+  },
+  "metaball5": {
+   "Transform3d": {
+    "position": {
+     "x": 4.9,
+     "y": 2.4,
+     "z": 1.3
+    },
+    "rotation": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "scale": {
+     "x": 1.48,
+     "y": 1.48,
+     "z": 1.48
+    }
+   },
+   "SdfPrimitive": {
+    "shape": "sphere",
+    "material": "metaballCyan",
+    "noise": 0,
+    "cluster": 0,
+    "smoothing": 0.62
+   }
+  },
+  "Camera": {
+   "Camera3d": {
+    "position": {
+     "x": 0,
+     "y": -12,
+     "z": 4
+    },
+    "target": {
+     "x": 0,
+     "y": 0,
+     "z": 0.5
+    },
+    "fovYDeg": 50,
+    "nearZ": 0.1,
+    "farZ": 200
+   }
+  },
+  "Light": {
+   "Light3d": {
+    "sunDir": {
+     "x": -0.4,
+     "y": 0.3,
+     "z": -1
+    },
+    "sunColor": {
+     "x": 3.2,
+     "y": 3.0,
+     "z": 2.7
+    },
+    "ambSky": {
+     "x": 0.25,
+     "y": 0.3,
+     "z": 0.4
+    },
+    "ambGround": {
+     "x": 0.12,
+     "y": 0.1,
+     "z": 0.09
+    },
+    "exposure": 1,
+    "clearColor": {
+     "x": 0.02,
+     "y": 0.02,
+     "z": 0.03
+    }
+   }
+  },
+  "metaballCyan": {
+   "Material3d": {
+    "baseColor": {
+     "x": 0.05,
+     "y": 0.62,
+     "z": 0.85
+    },
+    "metallic": 0.72,
+    "roughness": 0.14,
+    "emission": {
+     "x": 0,
+     "y": 0.02,
+     "z": 0.05
+    }
+   }
+  },
+  "metaballViolet": {
+   "Material3d": {
+    "baseColor": {
+     "x": 0.28,
+     "y": 0.16,
+     "z": 0.86
+    },
+    "metallic": 0.72,
+    "roughness": 0.14,
+    "emission": {
+     "x": 0.01,
+     "y": 0,
+     "z": 0.05
+    }
+   }
+  },
+  "obsidianCore": {
+   "Material3d": {
+    "baseColor": {
+     "x": 0.015,
+     "y": 0.015,
+     "z": 0.02
+    },
+    "metallic": 0.94,
+    "roughness": 0.1,
+    "emission": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  "obsidianEdge": {
+   "Material3d": {
+    "baseColor": {
+     "x": 0.055,
+     "y": 0.045,
+     "z": 0.085
+    },
+    "metallic": 0.94,
+    "roughness": 0.16,
+    "emission": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  "obsidianWarm": {
+   "Material3d": {
+    "baseColor": {
+     "x": 0.085,
+     "y": 0.035,
+     "z": 0.03
+    },
+    "metallic": 0.94,
+    "roughness": 0.13,
+    "emission": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  "obsidian1": {
+   "Transform3d": {
+    "position": {
+     "x": -5.35,
+     "y": 2.05,
+     "z": 1.55
+    },
+    "rotation": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "scale": {
+     "x": 1.02,
+     "y": 1.02,
+     "z": 1.02
+    }
+   },
+   "SdfPrimitive": {
+    "shape": "sphere",
+    "material": "obsidianCore",
+    "noise": 0,
+    "cluster": 1,
+    "smoothing": 0.3
+   }
+  },
+  "obsidian2": {
+   "Transform3d": {
+    "position": {
+     "x": -4.35,
+     "y": 2.55,
+     "z": 2.05
+    },
+    "rotation": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "scale": {
+     "x": 0.8,
+     "y": 0.8,
+     "z": 0.8
+    }
+   },
+   "SdfPrimitive": {
+    "shape": "sphere",
+    "material": "obsidianEdge",
+    "noise": 0,
+    "cluster": 1,
+    "smoothing": 0.3
+   }
+  },
+  "obsidian3": {
+   "Transform3d": {
+    "position": {
+     "x": -6.15,
+     "y": 2.35,
+     "z": 2.35
+    },
+    "rotation": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "scale": {
+     "x": 0.74,
+     "y": 0.74,
+     "z": 0.74
+    }
+   },
+   "SdfPrimitive": {
+    "shape": "sphere",
+    "material": "obsidianWarm",
+    "noise": 0,
+    "cluster": 1,
+    "smoothing": 0.3
+   }
+  },
+  "obsidian4": {
+   "Transform3d": {
+    "position": {
+     "x": -5.05,
+     "y": 1.75,
+     "z": 2.75
+    },
+    "rotation": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "scale": {
+     "x": 0.62,
+     "y": 0.62,
+     "z": 0.62
+    }
+   },
+   "SdfPrimitive": {
+    "shape": "sphere",
+    "material": "obsidianEdge",
+    "noise": 0,
+    "cluster": 1,
+    "smoothing": 0.3
+   }
+  },
+  "emberDeep": {
+   "Material3d": {
+    "baseColor": {
+     "x": 0.55,
+     "y": 0.055,
+     "z": 0.02
+    },
+    "metallic": 0.15,
+    "roughness": 0.55,
+    "emission": {
+     "x": 0.12,
+     "y": 0.012,
+     "z": 0.0
+    }
+   }
+  },
+  "emberMid": {
+   "Material3d": {
+    "baseColor": {
+     "x": 0.95,
+     "y": 0.28,
+     "z": 0.03
+    },
+    "metallic": 0.15,
+    "roughness": 0.42,
+    "emission": {
+     "x": 0.38,
+     "y": 0.07,
+     "z": 0.0
+    }
+   }
+  },
+  "emberHot": {
+   "Material3d": {
+    "baseColor": {
+     "x": 1.0,
+     "y": 0.72,
+     "z": 0.16
+    },
+    "metallic": 0.15,
+    "roughness": 0.3,
+    "emission": {
+     "x": 0.85,
+     "y": 0.42,
+     "z": 0.06
+    }
+   }
+  },
+  "ember1": {
+   "Transform3d": {
+    "position": {
+     "x": -0.35,
+     "y": 5.3,
+     "z": 2.3
+    },
+    "rotation": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "scale": {
+     "x": 1.3,
+     "y": 1.3,
+     "z": 1.3
+    }
+   },
+   "SdfPrimitive": {
+    "shape": "sphere",
+    "material": "emberDeep",
+    "noise": 0,
+    "cluster": 2,
+    "smoothing": 1.15
+   }
+  },
+  "ember2": {
+   "Transform3d": {
+    "position": {
+     "x": 0.95,
+     "y": 5.05,
+     "z": 1.9999999999999998
+    },
+    "rotation": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "scale": {
+     "x": 0.7,
+     "y": 0.7,
+     "z": 0.7
+    }
+   },
+   "SdfPrimitive": {
+    "shape": "sphere",
+    "material": "emberMid",
+    "noise": 0,
+    "cluster": 2,
+    "smoothing": 1.15
+   }
+  },
+  "ember3": {
+   "Transform3d": {
+    "position": {
+     "x": -1.55,
+     "y": 5.55,
+     "z": 1.8
+    },
+    "rotation": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "scale": {
+     "x": 0.55,
+     "y": 0.55,
+     "z": 0.55
+    }
+   },
+   "SdfPrimitive": {
+    "shape": "sphere",
+    "material": "emberHot",
+    "noise": 0,
+    "cluster": 2,
+    "smoothing": 1.15
+   }
+  },
+  "ember4": {
+   "Transform3d": {
+    "position": {
+     "x": 0.15,
+     "y": 5.15,
+     "z": 3.2
+    },
+    "rotation": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "scale": {
+     "x": 0.85,
+     "y": 0.85,
+     "z": 0.85
+    }
+   },
+   "SdfPrimitive": {
+    "shape": "sphere",
+    "material": "emberMid",
+    "noise": 0,
+    "cluster": 2,
+    "smoothing": 1.15
+   }
+  },
+  "ember5": {
+   "Transform3d": {
+    "position": {
+     "x": -0.95,
+     "y": 5.45,
+     "z": 2.8
+    },
+    "rotation": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "scale": {
+     "x": 0.45,
+     "y": 0.45,
+     "z": 0.45
+    }
+   },
+   "SdfPrimitive": {
+    "shape": "sphere",
+    "material": "emberHot",
+    "noise": 0,
+    "cluster": 2,
+    "smoothing": 1.15
+   }
   }
+ }
 }
