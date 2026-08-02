@@ -30,6 +30,8 @@ type Renderer3d {
   graph: RenderGraph
   sceneColor: Int   # resource id
   sceneDepth: Int
+  sceneNormal: Int    # rgba16f world normals (#333 prepass output)
+  sceneVelocity: Int  # rg16f UV-space motion vectors (#333)
   scenePass: Int    # pass id
   presentPass: Int
   uiPass: Int       # -1 when the frame has no UI overlay
@@ -46,6 +48,11 @@ func createRenderer3d() pub ret Renderer3d {
   # created and owned outside the graph. sceneDepth is transient.
   let colorId: Int = addResource(g: g, name: "sceneColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeExternal)
   let depthId: Int = addResource(g: g, name: "sceneDepth", kind: resDepth, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  # #333 prepass outputs: written by the scene pass, unread until SSAO/TAA/GI
+  # land. Declaring them now keeps the graph a truthful description of the
+  # frame rather than a subset of it.
+  let normalId: Int = addResource(g: g, name: "sceneNormal", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let velocityId: Int = addResource(g: g, name: "sceneVelocity", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
 
   # Present declared FIRST, scene SECOND — the graph must still order them
   # scene-then-present, because present reads what scene writes.
@@ -54,12 +61,16 @@ func createRenderer3d() pub ret Renderer3d {
 
   passWrites(g: g, pass: scene, resource: colorId, access: accAttachmentWrite)
   passWrites(g: g, pass: scene, resource: depthId, access: accAttachmentWrite)
+  passWrites(g: g, pass: scene, resource: normalId, access: accAttachmentWrite)
+  passWrites(g: g, pass: scene, resource: velocityId, access: accAttachmentWrite)
   passReads(g: g, pass: present, resource: colorId, access: accAttachmentRead)
 
   ret Renderer3d {
     graph: own g,
     sceneColor: colorId,
     sceneDepth: depthId,
+    sceneNormal: normalId,
+    sceneVelocity: velocityId,
     scenePass: scene,
     presentPass: present,
     uiPass: 0 - 1,
@@ -76,6 +87,8 @@ func createRenderer3dWithUi() pub ret Renderer3d {
   var g: RenderGraph = createRenderGraph()
   let colorId: Int = addResource(g: g, name: "sceneColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeExternal)
   let depthId: Int = addResource(g: g, name: "sceneDepth", kind: resDepth, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let normalId: Int = addResource(g: g, name: "sceneNormal", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let velocityId: Int = addResource(g: g, name: "sceneVelocity", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
 
   # Declared present -> ui -> scene, i.e. exactly backwards.
   let present: Int = addPass(g: g, name: "present", kind: passRaster, tag: tagPresent)
@@ -84,6 +97,8 @@ func createRenderer3dWithUi() pub ret Renderer3d {
 
   passWrites(g: g, pass: scene, resource: colorId, access: accAttachmentWrite)
   passWrites(g: g, pass: scene, resource: depthId, access: accAttachmentWrite)
+  passWrites(g: g, pass: scene, resource: normalId, access: accAttachmentWrite)
+  passWrites(g: g, pass: scene, resource: velocityId, access: accAttachmentWrite)
   passModifies(g: g, pass: ui, resource: colorId, access: accAttachmentRead)
   passReads(g: g, pass: present, resource: colorId, access: accAttachmentRead)
 
@@ -91,6 +106,8 @@ func createRenderer3dWithUi() pub ret Renderer3d {
     graph: own g,
     sceneColor: colorId,
     sceneDepth: depthId,
+    sceneNormal: normalId,
+    sceneVelocity: velocityId,
     scenePass: scene,
     presentPass: present,
     uiPass: ui,
