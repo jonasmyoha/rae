@@ -250,12 +250,29 @@ func animateScene1(asset: mod Scene3dAsset, time: view Float) {
     let sdf: SdfPrimitive = asset.scene.sdfPrimitives.at(index: i)
     var transform: Transform3d = asset.scene.transforms.at(index: sdf.entity)
     let phase: Float = i.toFloat() * 1.2566371
+    # Excursion: every third ball periodically breaks away TOWARD THE
+    # CAMERA (-y, into the empty foreground; straight up would leave the
+    # frame) far enough that the smooth-union (k 0.62) pinches off and it
+    # reads as a DISCONNECTED droplet, then drifts back and merges. The
+    # half-wave pulse is cubed so a ball spends most of its cycle in the
+    # cluster and the departure is a distinct event rather than constant
+    # drift; it also shrinks while away, which makes the pinch-off
+    # decisive and reads naturally (a droplet is smaller than the mass it
+    # left).
+    var excursion: Float = 0.0
+    if i % 3 is 0 {
+      var pulse: Float = math.sin(x: time * 0.26 + phase * 3.1)
+      if pulse < 0.0 {
+        pulse = 0.0
+      }
+      excursion = pulse * pulse * pulse * 6.0
+    }
     transform.position = vec3.create(
-      x: 4.55 + math.cos(x: time * 0.72 + phase) * (1.05 + (i % 2).toFloat() * 0.24),
-      y: 2.25 + math.sin(x: time * 0.41 + phase * 1.7) * 0.45,
-      z: 2.05 + math.sin(x: time * 0.83 + phase) * 0.85
+      x: 4.55 + math.cos(x: time * 0.72 + phase) * (1.05 + (i % 2).toFloat() * 0.24) - 0.8 * math.cos(x: phase) * excursion,
+      y: 2.25 + math.sin(x: time * 0.41 + phase * 1.7) * 0.45 - excursion,
+      z: 2.05 + math.sin(x: time * 0.83 + phase) * 0.85 + 0.25 * excursion
     )
-    let radius: Float = 1.45 + math.sin(x: time * 0.67 + phase * 2.0) * 0.16
+    let radius: Float = 1.45 + math.sin(x: time * 0.67 + phase * 2.0) * 0.16 - 0.08 * excursion
     transform.scale = vec3.create(x: radius, y: radius, z: radius)
     setTransform(scene: asset.scene, entity: sdf.entity, transform: transform)
     i = i + 1
