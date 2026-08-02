@@ -3,9 +3,12 @@
 # Renders `scene3d` triangle meshes (MeshRenderer components) with PBR
 # lighting through wgpu-native into the same SDL3 window/surface gpu2d
 # owns. An app opens the window with gpu2d.initWindow(...) then drives
-# frames with gpu3d. MSAA 4x, Depth32Float, resolved into gpu2d's
-# persistent offscreen so present + RAE_GPU2D_SCREENSHOT + the planned
-# 2D HUD overlay all keep working unchanged.
+# frames with gpu3d. Single-sampled since #333 (MSAA dropped so depth is
+# sampleable; TAA #335 takes over antialiasing): the scene pass writes
+# linear HDR (rgba16f) plus depth/normal/velocity prepass targets, and the
+# tonemap pass (#334) resolves HDR into gpu2d's persistent LDR offscreen,
+# so present + RAE_GPU2D_SCREENSHOT + the 2D UI overlay all keep working
+# unchanged.
 #
 # WORLD CONVENTION: right-handed Z-up (Blender) per
 # `docs/coordinate-system.md`. Only mat4Perspective knows about WebGPU
@@ -23,14 +26,13 @@
 # lib/mesh3d.rae or build your own.
 #
 # Lighting (single uber-shader): Cook-Torrance GGX specular + Lambert
-# diffuse, one directional sun, hemisphere ambient (sky/ground), emissive,
-# exposure + ACES tonemap.
+# diffuse, one directional sun, hemisphere ambient (sky/ground), emissive.
+# The shader outputs LINEAR radiance; exposure + ACES + gamma happen once,
+# in the tonemap pass — never inside material shaders (#334).
 #
 # KNOWN LIMITATION (queued): normals are transformed by the model matrix
 # directly, so NON-UNIFORM scale skews lighting — use uniform scale per
-# draw until the inverse-transpose normal matrix lands. Tonemapping also
-# happens inside the material shader, which makes the output effectively
-# LDR; a separate HDR target + tonemap pass is queued.
+# draw until the inverse-transpose normal matrix lands.
 #
 # Sphere SdfPrimitive components are submitted as one smooth-union metaball
 # group using the first primitive's material. The fragment raymarch pass writes
@@ -54,6 +56,7 @@ func draw(mesh: Int, model: view Buffer(Float), r: Float, g: Float, b: Float, me
 func drawMetaballs(packedBalls: view Buffer(Float), count: Int, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
 func end() extern
 func submit() extern
+func tonemap() extern
 func shutdown() extern
 
 # ----- frame parameter block (internal encoding) ----------------------
@@ -203,6 +206,14 @@ func endFrame() pub {
 # composed frame is presented exactly once.
 func endPass() pub {
   submit()
+}
+
+# Resolve the linear HDR scene target into the LDR offscreen (#334):
+# exposure + ACES + gamma, the frame's LAST radiometric operation. The
+# render graph dispatches this between the scene pass and any LDR
+# composition (UI overlay, present). Ends the scene pass if still open.
+func tonemapPass() pub {
+  tonemap()
 }
 
 # Upload interleaved mesh data and get a typed handle back.
