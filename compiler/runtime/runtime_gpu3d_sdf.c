@@ -3,8 +3,10 @@
  * This is renderer policy and therefore a future Rae-migration candidate.
  * The C implementation currently owns only the WebGPU pipeline and packed ABI
  * needed to render Scene3d SdfPrimitive data beside raster meshes. The pass
- * writes fragment depth into gpu3d's shared MSAA depth attachment, so implicit
- * and triangle geometry occlude each other normally.
+ * writes fragment depth into gpu3d's shared single-sampled depth attachment,
+ * so implicit and triangle geometry occlude each other normally — and since
+ * #333 it also writes the normal + velocity prepass targets, so downstream
+ * techniques (SSAO/TAA/GI) see SDF hits exactly like raster geometry.
  */
 
 #define G3D_MAX_SDF_BALLS 16
@@ -23,6 +25,7 @@ static const char* G3D_SDF_WGSL =
 "  ambSky: vec4<f32>,\n"
 "  ambGround: vec4<f32>,\n"
 "  invViewProj: mat4x4<f32>,\n"
+"  prevViewProj: mat4x4<f32>,\n"
 "};\n"
 "struct Params {\n"
 "  info: vec4<u32>,\n"
@@ -85,6 +88,8 @@ static const char* G3D_SDF_WGSL =
 "}\n"
 "struct FsOut {\n"
 "  @location(0) color: vec4<f32>,\n"
+"  @location(1) normal: vec4<f32>,\n"
+"  @location(2) velocity: vec2<f32>,\n"
 "  @builtin(frag_depth) depth: f32,\n"
 "};\n"
 "@fragment\n"
@@ -123,7 +128,15 @@ static const char* G3D_SDF_WGSL =
 "  var c = aces((direct + ambient + P.emissiveRoughness.rgb) * F.sunDir.w);\n"
 "  c = pow(c, vec3<f32>(1.0 / 2.2));\n"
 "  let clip = F.viewProj * vec4<f32>(worldPos, 1.0);\n"
-"  var out: FsOut; out.color = vec4<f32>(c, 1.0); out.depth = clamp(clip.z / clip.w, 0.0, 1.0);\n"
+/* Prepass outputs (#333): the raymarch hit contributes normal + velocity
+ * exactly like raster geometry, so AO/GI/TAA never special-case SDFs.
+ * Velocity is camera-only reprojection until #336 (same as raster). */
+"  let clipPrev = F.prevViewProj * vec4<f32>(worldPos, 1.0);\n"
+"  var out: FsOut;\n"
+"  out.color = vec4<f32>(c, 1.0);\n"
+"  out.normal = vec4<f32>(N, 1.0);\n"
+"  out.velocity = (clip.xy / clip.w - clipPrev.xy / clipPrev.w) * vec2<f32>(0.5, -0.5);\n"
+"  out.depth = clamp(clip.z / clip.w, 0.0, 1.0);\n"
 "  return out;\n"
 "}\n";
 
@@ -136,10 +149,12 @@ static void g3d_sdf_init_pipeline(void) {
     smd.nextInChain = &src.chain;
     WGPUShaderModule mod = wgpuDeviceCreateShaderModule(g_wgpu_dev, &smd);
 
-    WGPUColorTargetState cts; memset(&cts, 0, sizeof(cts));
-    cts.format = g_g2d_fmt; cts.writeMask = WGPUColorWriteMask_All;
+    WGPUColorTargetState cts[3]; memset(cts, 0, sizeof(cts));
+    cts[0].format = g_g2d_fmt;                      cts[0].writeMask = WGPUColorWriteMask_All;
+    cts[1].format = WGPUTextureFormat_RGBA16Float;  cts[1].writeMask = WGPUColorWriteMask_All;
+    cts[2].format = WGPUTextureFormat_RG16Float;    cts[2].writeMask = WGPUColorWriteMask_All;
     WGPUFragmentState fs; memset(&fs, 0, sizeof(fs));
-    fs.module = mod; fs.entryPoint = rae_wgpu_sv("fs"); fs.targetCount = 1; fs.targets = &cts;
+    fs.module = mod; fs.entryPoint = rae_wgpu_sv("fs"); fs.targetCount = 3; fs.targets = cts;
     WGPUDepthStencilState ds; memset(&ds, 0, sizeof(ds));
     ds.format = WGPUTextureFormat_Depth32Float;
     ds.depthWriteEnabled = WGPUOptionalBool_True;
@@ -156,7 +171,7 @@ static void g3d_sdf_init_pipeline(void) {
     pd.primitive.frontFace = WGPUFrontFace_CCW;
     pd.primitive.cullMode = WGPUCullMode_None;
     pd.depthStencil = &ds;
-    pd.multisample.count = 4; pd.multisample.mask = 0xFFFFFFFFu;
+    pd.multisample.count = 1; pd.multisample.mask = 0xFFFFFFFFu;
     pd.fragment = &fs;
     g3d_sdf_pipeline = wgpuDeviceCreateRenderPipeline(g_wgpu_dev, &pd);
     wgpuShaderModuleRelease(mod);
@@ -172,7 +187,7 @@ static void g3d_sdf_init_pipeline(void) {
 
     WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g3d_sdf_pipeline, 0);
     WGPUBindGroupEntry e[3]; memset(e, 0, sizeof(e));
-    e[0].binding = 0; e[0].buffer = g3d_frame_ubuf; e[0].size = 208;
+    e[0].binding = 0; e[0].buffer = g3d_frame_ubuf; e[0].size = 272;
     e[1].binding = 1; e[1].buffer = g3d_sdf_ball_sbuf; e[1].size = G3D_MAX_SDF_BALLS * 4u * sizeof(float);
     e[2].binding = 2; e[2].buffer = g3d_sdf_param_ubuf; e[2].size = 48;
     WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
