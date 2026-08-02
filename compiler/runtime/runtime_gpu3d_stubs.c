@@ -14,10 +14,10 @@ void rae_ext_gpu3d_draw(int64_t mesh, const float* model,
     (void)metallic; (void)roughness; (void)emR; (void)emG; (void)emB;
 }
 void rae_ext_gpu3d_drawMetaballs(const float* packedBalls, int64_t count,
-                                 float r, float g, float b,
+                                 const float* packedColors, float smoothing,
                                  float metallic, float roughness,
                                  float emR, float emG, float emB){
-    (void)packedBalls; (void)count; (void)r; (void)g; (void)b;
+    (void)packedBalls; (void)count; (void)packedColors; (void)smoothing;
     (void)metallic; (void)roughness; (void)emR; (void)emG; (void)emB;
 }
 void rae_ext_gpu3d_end(void) {}
