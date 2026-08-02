@@ -10,11 +10,21 @@
  */
 
 #define G3D_MAX_SDF_BALLS 16
+#define G3D_MAX_SDF_GROUPS 8
 
+/* One buffer set PER GROUP per frame, not one shared set.
+ * wgpuQueueWriteBuffer is applied when the command buffer is submitted, not
+ * where it appears between encoded draws — so writing one shared buffer
+ * once per cluster leaves every draw reading the LAST cluster's data and
+ * only that blob renders (three times over). Each group therefore gets its
+ * own buffers + bind group, selected by a per-frame slot counter. */
 static WGPURenderPipeline g3d_sdf_pipeline = NULL;
-static WGPUBuffer g3d_sdf_ball_sbuf = NULL;
-static WGPUBuffer g3d_sdf_param_ubuf = NULL;
-static WGPUBindGroup g3d_sdf_bind = NULL;
+static WGPUBuffer g3d_sdf_ball_sbuf[G3D_MAX_SDF_GROUPS];
+static WGPUBuffer g3d_sdf_color_sbuf[G3D_MAX_SDF_GROUPS];   /* per-ball albedo */
+static WGPUBuffer g3d_sdf_param_ubuf[G3D_MAX_SDF_GROUPS];
+static WGPUBindGroup g3d_sdf_bind[G3D_MAX_SDF_GROUPS];
+static int g3d_sdf_group = 0;          /* next free slot this frame */
+static bool g3d_sdf_group_overflow = false;
 
 static const char* G3D_SDF_WGSL =
 "struct Frame {\n"
@@ -29,12 +39,14 @@ static const char* G3D_SDF_WGSL =
 "};\n"
 "struct Params {\n"
 "  info: vec4<u32>,\n"
-"  baseColorMetallic: vec4<f32>,\n"
+"  baseColorMetallic: vec4<f32>,\n"   /* rgb unused (per-ball albedo); a = metallic */
 "  emissiveRoughness: vec4<f32>,\n"
+"  blend: vec4<f32>,\n"               /* x = smoothing k ("stickiness") */
 "};\n"
 "@group(0) @binding(0) var<uniform> F: Frame;\n"
 "@group(0) @binding(1) var<storage, read> balls: array<vec4<f32>>;\n"
 "@group(0) @binding(2) var<uniform> P: Params;\n"
+"@group(0) @binding(3) var<storage, read> ballColors: array<vec4<f32>>;\n"
 "struct VsOut {\n"
 "  @builtin(position) pos: vec4<f32>,\n"
 "  @location(0) ndc: vec2<f32>,\n"
@@ -52,16 +64,38 @@ static const char* G3D_SDF_WGSL =
 "  let h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);\n"
 "  return mix(b, a, h) - k * h * (1.0 - h);\n"
 "}\n"
+/* Distance only — used for marching and normals, where colour is dead
+ * weight. k comes from the cluster now instead of being hardcoded: it is
+ * the "stickiness", the distance over which two balls fuse. */
 "fn mapScene(p: vec3<f32>) -> f32 {\n"
 "  var d = 10000.0;\n"
 "  var i = 0u;\n"
 "  loop {\n"
 "    if (i >= P.info.x) { break; }\n"
 "    let b = balls[i];\n"
-"    d = smoothMin(d, length(p - b.xyz) - b.w, 0.62);\n"
+"    d = smoothMin(d, length(p - b.xyz) - b.w, P.blend.x);\n"
 "    i = i + 1u;\n"
 "  }\n"
 "  return d;\n"
+"}\n"
+/* Albedo at a surface point: the SAME blend weight h that fuses the
+ * distances also mixes the colours, so a ball's colour bleeds across
+ * exactly the region where its surface merges. Evaluated once at the hit
+ * point, not per march step. */
+"fn sceneAlbedo(p: vec3<f32>) -> vec3<f32> {\n"
+"  var d = 10000.0;\n"
+"  var col = vec3<f32>(0.0);\n"
+"  var i = 0u;\n"
+"  loop {\n"
+"    if (i >= P.info.x) { break; }\n"
+"    let b = balls[i];\n"
+"    let di = length(p - b.xyz) - b.w;\n"
+"    let h = clamp(0.5 + 0.5 * (di - d) / P.blend.x, 0.0, 1.0);\n"
+"    col = mix(ballColors[i].rgb, col, h);\n"
+"    d = mix(di, d, h) - P.blend.x * h * (1.0 - h);\n"
+"    i = i + 1u;\n"
+"  }\n"
+"  return col;\n"
 "}\n"
 "fn sceneNormal(p: vec3<f32>) -> vec3<f32> {\n"
 "  let e = 0.003;\n"
@@ -112,7 +146,7 @@ static const char* G3D_SDF_WGSL =
 "  let H = normalize(V + L);\n"
 "  let NoV = max(dot(N, V), 1e-4); let NoL = max(dot(N, L), 0.0);\n"
 "  let NoH = max(dot(N, H), 0.0); let VoH = max(dot(V, H), 0.0);\n"
-"  let albedo = P.baseColorMetallic.rgb;\n"
+"  let albedo = sceneAlbedo(worldPos);\n"
 "  let metallic = clamp(P.baseColorMetallic.a, 0.0, 1.0);\n"
 "  let rough = clamp(P.emissiveRoughness.a, 0.045, 1.0);\n"
 "  let f0 = mix(vec3<f32>(0.04), albedo, metallic);\n"
@@ -175,31 +209,46 @@ static void g3d_sdf_init_pipeline(void) {
     if (!g3d_sdf_pipeline) { fprintf(stderr, "[gpu3d] SDF pipeline creation FAILED\n"); return; }
 
     WGPUBufferDescriptor bd; memset(&bd, 0, sizeof(bd));
-    bd.size = G3D_MAX_SDF_BALLS * 4u * sizeof(float);
-    bd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
-    g3d_sdf_ball_sbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
-    bd.size = 48;
-    bd.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
-    g3d_sdf_param_ubuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
-
     WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g3d_sdf_pipeline, 0);
-    WGPUBindGroupEntry e[3]; memset(e, 0, sizeof(e));
-    e[0].binding = 0; e[0].buffer = g3d_frame_ubuf; e[0].size = 272;
-    e[1].binding = 1; e[1].buffer = g3d_sdf_ball_sbuf; e[1].size = G3D_MAX_SDF_BALLS * 4u * sizeof(float);
-    e[2].binding = 2; e[2].buffer = g3d_sdf_param_ubuf; e[2].size = 48;
-    WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
-    bgd.layout = bgl; bgd.entryCount = 3; bgd.entries = e;
-    g3d_sdf_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
+    const uint64_t ballBytes = G3D_MAX_SDF_BALLS * 4u * sizeof(float);
+    for (int g = 0; g < G3D_MAX_SDF_GROUPS; g++) {
+        bd.size = ballBytes;
+        bd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
+        g3d_sdf_ball_sbuf[g] = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
+        g3d_sdf_color_sbuf[g] = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
+        bd.size = 64;
+        bd.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+        g3d_sdf_param_ubuf[g] = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
+
+        WGPUBindGroupEntry e[4]; memset(e, 0, sizeof(e));
+        e[0].binding = 0; e[0].buffer = g3d_frame_ubuf; e[0].size = 272;
+        e[1].binding = 1; e[1].buffer = g3d_sdf_ball_sbuf[g]; e[1].size = ballBytes;
+        e[2].binding = 2; e[2].buffer = g3d_sdf_param_ubuf[g]; e[2].size = 64;
+        e[3].binding = 3; e[3].buffer = g3d_sdf_color_sbuf[g]; e[3].size = ballBytes;
+        WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
+        bgd.layout = bgl; bgd.entryCount = 4; bgd.entries = e;
+        g3d_sdf_bind[g] = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
+    }
     wgpuBindGroupLayoutRelease(bgl);
 }
 
 void rae_ext_gpu3d_drawMetaballs(const float* packedBalls, int64_t count,
-                                 float r, float g, float b,
+                                 const float* packedColors, float smoothing,
                                  float metallic, float roughness,
                                  float emR, float emG, float emB){
-    if (!g3d_pass || !packedBalls || count <= 0) return;
+    if (!g3d_pass || !packedBalls || !packedColors || count <= 0) return;
     g3d_sdf_init_pipeline();
-    if (!g3d_sdf_pipeline || !g3d_sdf_bind) return;
+    if (!g3d_sdf_pipeline) return;
+    if (g3d_sdf_group >= G3D_MAX_SDF_GROUPS) {
+        if (!g3d_sdf_group_overflow) {
+            fprintf(stderr, "[gpu3d] ERROR: more than %d metaball clusters in one frame; "
+                            "discarding the rest\n", G3D_MAX_SDF_GROUPS);
+            g3d_sdf_group_overflow = true;
+        }
+        return;
+    }
+    const int slot = g3d_sdf_group++;
+    if (!g3d_sdf_bind[slot]) return;
     if (count > G3D_MAX_SDF_BALLS) count = G3D_MAX_SDF_BALLS;
     if (getenv("RAE_GPU3D_SDF_TEST_LOG")) {
         static int logged = 0;
@@ -209,35 +258,45 @@ void rae_ext_gpu3d_drawMetaballs(const float* packedBalls, int64_t count,
         }
     }
     float balls[G3D_MAX_SDF_BALLS * 4];
+    float colors[G3D_MAX_SDF_BALLS * 4];
     for (int64_t i = 0; i < count * 4; i++) balls[i] = (float)packedBalls[i];
+    for (int64_t i = 0; i < count * 4; i++) colors[i] = (float)packedColors[i];
     struct {
         uint32_t info[4];
         float baseColorMetallic[4];
         float emissiveRoughness[4];
+        float blend[4];
     } params;
     memset(&params, 0, sizeof(params));
     params.info[0] = (uint32_t)count;
-    params.baseColorMetallic[0] = (float)r;
-    params.baseColorMetallic[1] = (float)g;
-    params.baseColorMetallic[2] = (float)b;
+    /* rgb unused: albedo is per-ball now. `a` still carries metallic. */
     params.baseColorMetallic[3] = (float)metallic;
+    /* k must stay positive — smoothMin divides by it. */
+    params.blend[0] = smoothing > 0.001f ? (float)smoothing : 0.001f;
     params.emissiveRoughness[0] = (float)emR;
     params.emissiveRoughness[1] = (float)emG;
     params.emissiveRoughness[2] = (float)emB;
     params.emissiveRoughness[3] = (float)roughness;
-    wgpuQueueWriteBuffer(g_wgpu_queue, g3d_sdf_ball_sbuf, 0, balls,
+    wgpuQueueWriteBuffer(g_wgpu_queue, g3d_sdf_ball_sbuf[slot], 0, balls,
                          (size_t)count * 4u * sizeof(float));
-    wgpuQueueWriteBuffer(g_wgpu_queue, g3d_sdf_param_ubuf, 0, &params, sizeof(params));
+    wgpuQueueWriteBuffer(g_wgpu_queue, g3d_sdf_color_sbuf[slot], 0, colors,
+                         (size_t)count * 4u * sizeof(float));
+    wgpuQueueWriteBuffer(g_wgpu_queue, g3d_sdf_param_ubuf[slot], 0, &params, sizeof(params));
     wgpuRenderPassEncoderSetPipeline(g3d_pass, g3d_sdf_pipeline);
-    wgpuRenderPassEncoderSetBindGroup(g3d_pass, 0, g3d_sdf_bind, 0, NULL);
+    wgpuRenderPassEncoderSetBindGroup(g3d_pass, 0, g3d_sdf_bind[slot], 0, NULL);
     wgpuRenderPassEncoderDraw(g3d_pass, 3, 1, 0, 0);
     wgpuRenderPassEncoderSetPipeline(g3d_pass, g3d_pipeline);
     wgpuRenderPassEncoderSetBindGroup(g3d_pass, 0, g3d_bind, 0, NULL);
 }
 
 static void g3d_sdf_shutdown(void) {
-    if (g3d_sdf_bind) { wgpuBindGroupRelease(g3d_sdf_bind); g3d_sdf_bind = NULL; }
-    if (g3d_sdf_param_ubuf) { wgpuBufferRelease(g3d_sdf_param_ubuf); g3d_sdf_param_ubuf = NULL; }
-    if (g3d_sdf_ball_sbuf) { wgpuBufferRelease(g3d_sdf_ball_sbuf); g3d_sdf_ball_sbuf = NULL; }
+    for (int g = 0; g < G3D_MAX_SDF_GROUPS; g++) {
+        if (g3d_sdf_bind[g]) { wgpuBindGroupRelease(g3d_sdf_bind[g]); g3d_sdf_bind[g] = NULL; }
+        if (g3d_sdf_param_ubuf[g]) { wgpuBufferRelease(g3d_sdf_param_ubuf[g]); g3d_sdf_param_ubuf[g] = NULL; }
+        if (g3d_sdf_color_sbuf[g]) { wgpuBufferRelease(g3d_sdf_color_sbuf[g]); g3d_sdf_color_sbuf[g] = NULL; }
+        if (g3d_sdf_ball_sbuf[g]) { wgpuBufferRelease(g3d_sdf_ball_sbuf[g]); g3d_sdf_ball_sbuf[g] = NULL; }
+    }
+    g3d_sdf_group = 0;
+    g3d_sdf_group_overflow = false;
     if (g3d_sdf_pipeline) { wgpuRenderPipelineRelease(g3d_sdf_pipeline); g3d_sdf_pipeline = NULL; }
 }
