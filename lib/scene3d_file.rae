@@ -357,9 +357,19 @@ func parseScene3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
         var noise: Float = 0.0
         let noiseValue: JsonValue = objectField(doc: doc, object: sdf, key: "noise")
         if noiseValue.kind is JsonKind.number { noise = noiseValue.asNumber }
+        # Optional: which blob this primitive belongs to, and how sticky
+        # that blob is. Defaults keep single-cluster scenes authored before
+        # clusters existed rendering exactly as before.
+        var cluster: Int = 0
+        let clusterValue: JsonValue = objectField(doc: doc, object: sdf, key: "cluster")
+        if clusterValue.kind is JsonKind.number { cluster = clusterValue.asNumber.toInt() }
+        var smoothing: Float = 0.62
+        let smoothingValue: JsonValue = objectField(doc: doc, object: sdf, key: "smoothing")
+        if smoothingValue.kind is JsonKind.number { smoothing = smoothingValue.asNumber }
         let entity: Int = addSdfInstance(
           scene: asset.scene, shape: shape, material: materialIdx,
-          position: transform.position, scale: transform.scale, noise: noise
+          position: transform.position, scale: transform.scale, noise: noise,
+          cluster: cluster, smoothing: smoothing
         )
         addAssetEntity(asset: asset, nodeId: node.nodeId, entity: entity)
       }

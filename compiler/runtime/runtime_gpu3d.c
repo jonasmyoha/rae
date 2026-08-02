@@ -479,6 +479,7 @@ void rae_ext_gpu3d_begin(const float* frame, int64_t count){
     g3d_ensure_targets();
     if (!g3d_hdr_view || !g3d_depth_view || !g3d_normal_view || !g3d_velocity_view) return;
     g3d_draw_count = 0;
+    g3d_sdf_group = 0;   /* metaball cluster slots are per-frame */
     g3d_tonemap_pending = true;
 
     float u[68]; memset(u, 0, sizeof(u));

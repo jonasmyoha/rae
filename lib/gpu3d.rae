@@ -53,7 +53,7 @@ open math3d
 func meshCreate(verts: view Buffer(Float), vertCount: Int, indices: view Buffer(Int), indexCount: Int) extern ret Int
 func begin(frame: view Buffer(Float), count: Int) extern
 func draw(mesh: Int, model: view Buffer(Float), r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
-func drawMetaballs(packedBalls: view Buffer(Float), count: Int, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
+func drawMetaballs(packedBalls: view Buffer(Float), count: Int, packedColors: view Buffer(Float), smoothing: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
 func end() extern
 func submit() extern
 func tonemap() extern
@@ -167,32 +167,69 @@ func renderScene(scene: view Scene3d) pub {
     }
     i = i + 1
   }
+  # Sphere SDF primitives render as smooth-union metaball clusters: one
+  # raymarch pass per cluster, so separate blobs occlude each other via
+  # depth but never fuse into one another. Within a cluster every ball
+  # contributes its OWN material colour, blended by the same weight that
+  # fuses the distances; the surface's metallic/roughness/emission and the
+  # cluster's stickiness come from its first primitive, since those
+  # describe the fused surface rather than any one ball.
+  #
+  # Clusters are found by scanning for unseen ids rather than sorting,
+  # because a scene has a handful of clusters and this keeps the pass
+  # allocation-free beyond the two packed buffers.
   if scene.sdfPrimitives.length > 0 {
-    let packed: List(Float) = createList(Float, cap: scene.sdfPrimitives.length * 4)
-    var materialIndex: Int = 0
-    var ballCount: Int = 0
-    i = 0
-    loop i < scene.sdfPrimitives.length {
-      let sdf: SdfPrimitive = scene.sdfPrimitives.at(index: i)
-      if sdf.shape is 0 {
-        let transform: Transform3d = scene.transforms.at(index: sdf.entity)
-        packed.add(value: transform.position.x)
-        packed.add(value: transform.position.y)
-        packed.add(value: transform.position.z)
-        packed.add(value: transform.scale.x)
-        if ballCount is 0 { materialIndex = sdf.material }
-        ballCount = ballCount + 1
+    var clusterScan: Int = 0
+    loop clusterScan < scene.sdfPrimitives.length {
+      let head: SdfPrimitive = scene.sdfPrimitives.at(index: clusterScan)
+      # Only the first primitive of a cluster emits a draw; later members
+      # of an already-drawn cluster are skipped.
+      var alreadyDrawn: Bool = false
+      var back: Int = 0
+      loop back < clusterScan {
+        let prior: SdfPrimitive = scene.sdfPrimitives.at(index: back)
+        if prior.shape is 0 {
+          if prior.cluster is head.cluster { alreadyDrawn = true }
+        }
+        back = back + 1
       }
-      i = i + 1
-    }
-    if ballCount > 0 {
-      let material: Material3d = scene.materials.at(index: materialIndex)
-      drawMetaballs(
-        packedBalls: packed.data, count: ballCount,
-        r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
-        metallic: material.metallic, roughness: material.roughness,
-        emR: material.emission.x, emG: material.emission.y, emB: material.emission.z
-      )
+      if head.shape is 0 {
+        if alreadyDrawn is false {
+          let packed: List(Float) = createList(Float, cap: scene.sdfPrimitives.length * 4)
+          let colors: List(Float) = createList(Float, cap: scene.sdfPrimitives.length * 4)
+          var ballCount: Int = 0
+          i = 0
+          loop i < scene.sdfPrimitives.length {
+            let sdf: SdfPrimitive = scene.sdfPrimitives.at(index: i)
+            if sdf.shape is 0 {
+              if sdf.cluster is head.cluster {
+                let transform: Transform3d = scene.transforms.at(index: sdf.entity)
+                packed.add(value: transform.position.x)
+                packed.add(value: transform.position.y)
+                packed.add(value: transform.position.z)
+                packed.add(value: transform.scale.x)
+                let ballMaterial: Material3d = scene.materials.at(index: sdf.material)
+                colors.add(value: ballMaterial.baseColor.x)
+                colors.add(value: ballMaterial.baseColor.y)
+                colors.add(value: ballMaterial.baseColor.z)
+                colors.add(value: 0.0)
+                ballCount = ballCount + 1
+              }
+            }
+            i = i + 1
+          }
+          if ballCount > 0 {
+            let material: Material3d = scene.materials.at(index: head.material)
+            drawMetaballs(
+              packedBalls: packed.data, count: ballCount,
+              packedColors: colors.data, smoothing: head.smoothing,
+              metallic: material.metallic, roughness: material.roughness,
+              emR: material.emission.x, emG: material.emission.y, emB: material.emission.z
+            )
+          }
+        }
+      }
+      clusterScan = clusterScan + 1
     }
   }
 }

@@ -107,11 +107,25 @@ type MeshRenderer {
 }
 
 # shape: 0 sphere, 1 box, 2 torus — matches the raymarch shaders' switch.
+#
+# `cluster` groups primitives that fuse with each other. Only primitives
+# sharing a cluster id blend; separate clusters are independent surfaces
+# that merely occlude one another, so a scene can hold several blobs with
+# different looks. `smoothing` is the cluster's stickiness — the distance
+# over which two balls merge — and is read from the cluster's FIRST
+# primitive (it is a property of the group, not of one ball).
+#
+# Albedo IS per-primitive: each ball's material colour bleeds across the
+# region where its surface merges, using the same weight that fuses the
+# distances. Metallic/roughness/emission come from the first primitive,
+# because those shade the fused surface as a whole.
 type SdfPrimitive {
   entity: Int
   shape: Int
   material: Int
   noise: Float
+  cluster: Int
+  smoothing: Float
 }
 
 type Scene3d {
@@ -188,10 +202,10 @@ func addMeshInstance(scene: mod Scene3d, mesh: view MeshHandle, material: view I
 }
 
 # Attach an SDF primitive to a fresh entity. Raymarch backend renders these.
-func addSdfInstance(scene: mod Scene3d, shape: view Int, material: view Int, position: view Vec3, scale: view Vec3, noise: view Float) pub ret Int {
+func addSdfInstance(scene: mod Scene3d, shape: view Int, material: view Int, position: view Vec3, scale: view Vec3, noise: view Float, cluster: view Int, smoothing: view Float) pub ret Int {
   let zero: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let entity: Int = addTransform(scene: scene, position: position, rotation: zero, scale: scale)
-  scene.sdfPrimitives.add(value: SdfPrimitive { entity: entity, shape: shape, material: material, noise: noise })
+  scene.sdfPrimitives.add(value: SdfPrimitive { entity: entity, shape: shape, material: material, noise: noise, cluster: cluster, smoothing: smoothing })
   ret entity
 }
 

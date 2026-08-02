@@ -63,8 +63,9 @@ Everything *above* geometry unifies cleanly. So the architecture is:
   MeshRenderer                    SdfPrimitive     <-- tagged split
         |                               |
   lib/gpu3d.rae                  raymarch backend
-  (raster: render pass,          (compute/fullscreen
-   depth, MSAA, PBR)              pass over SDF data)
+  (raster: render pass,          (fullscreen pass per
+   depth, PBR; single-           metaball CLUSTER over
+   sampled since #333)            SDF data)
         |                               |
         +---------------+---------------+
                         |
@@ -73,6 +74,19 @@ Everything *above* geometry unifies cleanly. So the architecture is:
 
 A scene is authored once; each backend renders the component kind it
 understands and ignores the other. That is the honest edge of unification.
+
+**SDF clusters.** `SdfPrimitive` carries a `cluster` id and a `smoothing`
+value. Only primitives sharing a cluster fuse; different clusters are
+independent surfaces that merely occlude each other, so one scene can hold
+several blobs with different looks. `smoothing` is the cluster's
+stickiness — the distance over which balls merge — read from the cluster's
+first primitive, since it describes the group.
+
+Albedo is **per primitive**: the weight that fuses two distances also mixes
+their colours, so a ball's colour bleeds exactly across the region where
+its surface merges and a cluster can hold a gradient. Metallic, roughness
+and emission come from the cluster's first primitive, because those shade
+the fused surface as a whole rather than any one ball.
 
 ## Decisions where the reviews disagreed
 
