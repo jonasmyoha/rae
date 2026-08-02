@@ -235,7 +235,7 @@ func animateScene(scene: mod Scene3d, sceneId: view Int, time: view Float) {
     var transform: Transform3d = scene.transforms.at(index: renderer.entity)
     let phase: Float = i.toFloat() * 0.173 + sceneId.toFloat()
     transform.rotation = vec3.create(x: time * (0.08 + sceneId.toFloat() * 0.04), y: math.sin(x: time * 0.18 + phase) * 0.28, z: time * (0.12 + (i % 5).toFloat() * 0.025))
-    scene.transforms.set(index: renderer.entity, value: transform)
+    setTransform(scene: scene, entity: renderer.entity, transform: transform)
     i = i + 1
   }
 }
@@ -244,7 +244,7 @@ func animateScene1(asset: mod Scene3dAsset, time: view Float) {
   let torusEntity: Int = scene3dAssetEntity(asset: asset, nodeId: "heroTorus")
   var torusTransform: Transform3d = asset.scene.transforms.at(index: torusEntity)
   torusTransform.rotation = vec3.create(x: time * 0.35, y: 0.0, z: time * 0.62)
-  asset.scene.transforms.set(index: torusEntity, value: torusTransform)
+  setTransform(scene: asset.scene, entity: torusEntity, transform: torusTransform)
   var i: Int = 0
   loop i < asset.scene.sdfPrimitives.length {
     let sdf: SdfPrimitive = asset.scene.sdfPrimitives.at(index: i)
@@ -257,7 +257,7 @@ func animateScene1(asset: mod Scene3dAsset, time: view Float) {
     )
     let radius: Float = 1.45 + math.sin(x: time * 0.67 + phase * 2.0) * 0.16
     transform.scale = vec3.create(x: radius, y: radius, z: radius)
-    asset.scene.transforms.set(index: sdf.entity, value: transform)
+    setTransform(scene: asset.scene, entity: sdf.entity, transform: transform)
     i = i + 1
   }
 }
@@ -479,6 +479,13 @@ func main() ret Int {
       }
       pi3 = pi3 + 1
     }
+    # Frame history for motion vectors (#336): the ACTIVE scene's current
+    # transforms become its previous-frame set. Inactive scenes are not
+    # snapshotted — they aren't rendered, so they have no frame history to
+    # advance, and their first frame back re-syncs on the next snapshot.
+    if uiState.activeScene is 1 { snapshotPrevTransforms(scene: scene1.scene) }
+    if uiState.activeScene is 2 { snapshotPrevTransforms(scene: scene2.scene) }
+    if uiState.activeScene is 3 { snapshotPrevTransforms(scene: scene3.scene) }
   }
   shutdown()
   gpu2d.closeWindow()
