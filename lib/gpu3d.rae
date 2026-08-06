@@ -58,6 +58,7 @@ func end() extern
 func submit() extern
 func tonemap() extern
 func taa() extern
+func ssao() extern
 func shutdown() extern
 
 # ----- frame parameter block (internal encoding) ----------------------
@@ -258,6 +259,14 @@ func endPass() pub {
 # composition (UI overlay, present). Ends the scene pass if still open.
 func tonemapPass() pub {
   tonemap()
+}
+
+# Ambient occlusion (#337): horizon-search AO with a visibility bitmask,
+# generated at half resolution and composited onto the INDIRECT term only.
+# Runs before TAA so the half-res noise resolves temporally, and before
+# tonemap so it modulates linear radiance.
+func ssaoPass() pub {
+  ssao()
 }
 
 # Temporal antialiasing resolve (#335): reproject the previous frame

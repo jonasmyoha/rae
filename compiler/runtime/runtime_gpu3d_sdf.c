@@ -121,6 +121,7 @@ static const char* G3D_SDF_WGSL =
 "  @location(0) color: vec4<f32>,\n"
 "  @location(1) normal: vec4<f32>,\n"
 "  @location(2) velocity: vec2<f32>,\n"
+"  @location(3) ambient: vec4<f32>,\n"
 "  @builtin(frag_depth) depth: f32,\n"
 "};\n"
 "@fragment\n"
@@ -156,8 +157,10 @@ static const char* G3D_SDF_WGSL =
 "  let direct = (kd * albedo / PI + spec) * F.sunColor.rgb * NoL;\n"
 "  let hemi = mix(F.ambGround.rgb, F.ambSky.rgb, N.z * 0.5 + 0.5);\n"
 "  let ambient = hemi * albedo * (1.0 - metallic) + hemi * Fs * (1.0 - rough * 0.7);\n"
-/* LINEAR HDR out (#334) — exposure/ACES/gamma live in the tonemap pass. */
-"  let c = direct + ambient + P.emissiveRoughness.rgb;\n"
+/* Indirect kept separate so SSAO can attenuate it alone (#337) — the SDF
+ * surface must split the same way as raster, or AO would apply to one and
+ * not the other. */
+"  let c = direct + P.emissiveRoughness.rgb;\n"
 "  let clip = F.viewProj * vec4<f32>(worldPos, 1.0);\n"
 /* Prepass outputs (#333): the raymarch hit contributes normal + velocity
  * exactly like raster geometry, so AO/GI/TAA never special-case SDFs.
@@ -167,6 +170,7 @@ static const char* G3D_SDF_WGSL =
 "  out.color = vec4<f32>(c, 1.0);\n"
 "  out.normal = vec4<f32>(N, 1.0);\n"
 "  out.velocity = (clip.xy / clip.w - clipPrev.xy / clipPrev.w) * vec2<f32>(0.5, -0.5);\n"
+"  out.ambient = vec4<f32>(ambient, 1.0);\n"
 "  out.depth = clamp(clip.z / clip.w, 0.0, 1.0);\n"
 "  return out;\n"
 "}\n";
@@ -180,12 +184,13 @@ static void g3d_sdf_init_pipeline(void) {
     smd.nextInChain = &src.chain;
     WGPUShaderModule mod = wgpuDeviceCreateShaderModule(g_wgpu_dev, &smd);
 
-    WGPUColorTargetState cts[3]; memset(cts, 0, sizeof(cts));
+    WGPUColorTargetState cts[4]; memset(cts, 0, sizeof(cts));
     cts[0].format = WGPUTextureFormat_RGBA16Float;  cts[0].writeMask = WGPUColorWriteMask_All;
     cts[1].format = WGPUTextureFormat_RGBA16Float;  cts[1].writeMask = WGPUColorWriteMask_All;
     cts[2].format = WGPUTextureFormat_RG16Float;    cts[2].writeMask = WGPUColorWriteMask_All;
+    cts[3].format = WGPUTextureFormat_RGBA16Float;  cts[3].writeMask = WGPUColorWriteMask_All;
     WGPUFragmentState fs; memset(&fs, 0, sizeof(fs));
-    fs.module = mod; fs.entryPoint = rae_wgpu_sv("fs"); fs.targetCount = 3; fs.targets = cts;
+    fs.module = mod; fs.entryPoint = rae_wgpu_sv("fs"); fs.targetCount = 4; fs.targets = cts;
     WGPUDepthStencilState ds; memset(&ds, 0, sizeof(ds));
     ds.format = WGPUTextureFormat_Depth32Float;
     ds.depthWriteEnabled = WGPUOptionalBool_True;
