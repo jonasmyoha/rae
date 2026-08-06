@@ -169,34 +169,34 @@ func restore110State(raw: view String, ui: mod DemoUiResource, controller: mod C
   if parts.length < state110Fields {
     ret false
   }
-  if string.toInt(this: parts.at(index: 0).trim()) is not state110Version {
+  if parts.at(index: 0).trim().toInt() is not state110Version {
     ret false
   }
-  ui.activeScene = string.toInt(this: parts.at(index: 1).trim())
+  ui.activeScene = parts.at(index: 1).trim().toInt()
   if ui.activeScene < 1 { ui.activeScene = 1 }
   if ui.activeScene > 3 { ui.activeScene = 3 }
-  ui.paused = string.toInt(this: parts.at(index: 2).trim()) is 1
-  ui.fullSpeed = string.toInt(this: parts.at(index: 3).trim()) is 1
-  ui.debugOpen = string.toInt(this: parts.at(index: 4).trim()) is 1
-  if string.toInt(this: parts.at(index: 5).trim()) is 1 {
+  ui.paused = parts.at(index: 2).trim().toInt() is 1
+  ui.fullSpeed = parts.at(index: 3).trim().toInt() is 1
+  ui.debugOpen = parts.at(index: 4).trim().toInt() is 1
+  if parts.at(index: 5).trim().toInt() is 1 {
     controller.mode = CameraMode.free
   } else {
     controller.mode = CameraMode.orbit
   }
-  controller.yaw = string.toFloat(this: parts.at(index: 6).trim())
-  controller.orbitPitch = string.toFloat(this: parts.at(index: 7).trim())
-  controller.freePitch = string.toFloat(this: parts.at(index: 8).trim())
-  controller.distance = string.toFloat(this: parts.at(index: 9).trim())
+  controller.yaw = parts.at(index: 6).trim().toFloat()
+  controller.orbitPitch = parts.at(index: 7).trim().toFloat()
+  controller.freePitch = parts.at(index: 8).trim().toFloat()
+  controller.distance = parts.at(index: 9).trim().toFloat()
   controller.freePosition = vec3.create(
-    x: string.toFloat(this: parts.at(index: 10).trim()),
-    y: string.toFloat(this: parts.at(index: 11).trim()),
-    z: string.toFloat(this: parts.at(index: 12).trim())
+    x: parts.at(index: 10).trim().toFloat(),
+    y: parts.at(index: 11).trim().toFloat(),
+    z: parts.at(index: 12).trim().toFloat()
   )
   # Orbit needs the target restored too, or the camera returns to the
   # right angle around the wrong point.
   camera.target = vec3.create(
-    x: string.toFloat(this: parts.at(index: 13).trim()),
-    y: string.toFloat(this: parts.at(index: 14).trim()),
+    x: parts.at(index: 13).trim().toFloat(),
+    y: parts.at(index: 14).trim().toFloat(),
     z: camera.target.z
   )
   # A snapshot written by a build with different clamps should still land

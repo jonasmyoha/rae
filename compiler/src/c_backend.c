@@ -864,7 +864,88 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
             break;
         }
         case AST_EXPR_CALL:
-        case AST_EXPR_METHOD_CALL: if (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC) return expr->decl_link->as.func_decl.returns ? expr->decl_link->as.func_decl.returns->type : NULL; break;
+            if (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC) return expr->decl_link->as.func_decl.returns ? expr->decl_link->as.func_decl.returns->type : NULL;
+            break;
+        case AST_EXPR_METHOD_CALL: {
+            const AstDecl* mdecl = (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC)
+                                 ? expr->decl_link : NULL;
+            /* Sema leaves a GENERIC method call unresolved (no decl_link, no
+             * type) because its receiver-type matching compares a mangled
+             * instantiation name against the written template name. Recover the
+             * callee here by name + receiver base type, exactly the way the
+             * lowering below picks it. Without this the receiver of a CHAINED
+             * call types as nothing and the next method binds a same-named
+             * overload for a different type. */
+            if (!mdecl) {
+                const AstTypeRef* rtr = infer_expr_type_ref(ctx, expr->as.method_call.object);
+                Str rbase = get_base_type_name(rtr);
+                if (rbase.len > 0) {
+                    for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+                        const AstDecl* d = ctx->compiler_ctx->all_decls[i];
+                        if (d->kind != AST_DECL_FUNC) continue;
+                        const AstFuncDecl* cfd = &d->as.func_decl;
+                        if (!str_eq(cfd->name, expr->as.method_call.method_name)) continue;
+                        if (cfd->specialization_args) continue;
+                        if (!cfd->params || !str_eq_cstr(cfd->params->name, "this")) continue;
+                        if (!str_eq(get_base_type_name(cfd->params->type), rbase)) continue;
+                        mdecl = d; break;
+                    }
+                }
+            }
+            if (!mdecl) break;
+            const AstFuncDecl* mfd = &mdecl->as.func_decl;
+            if (!mfd->returns) return NULL;
+            const AstTypeRef* rt = mfd->returns->type;
+            /* A generic method declared `ret T` returns its OWN type parameter.
+             * Handing that back verbatim makes a CHAINED call resolve against
+             * the name "T": `parts.at(i).toInt()` then binds whatever overload
+             * of `toInt` comes first (the Int one), and the mismatch only
+             * surfaces as a C type error — sema believed it resolved fine.
+             *
+             * Substitute from the receiver: find where the type parameter sits
+             * in the `this` parameter's written type (`view List(T)` -> slot 0)
+             * and take the receiver's generic argument in the same slot
+             * (`List(String)` -> String). Same positional matching
+             * infer_generic_args does, so a method whose type params appear in
+             * a different order than the struct's still maps correctly.
+             *
+             * Deliberately confined to the BACKEND's type inference: earlier
+             * attempts to fix this in sema's overload selection regressed eight
+             * generic-container tests, because anything that changes which
+             * candidate is chosen perturbs ECS/StringMap resolution. This only
+             * answers "what type does this expression have", which was simply
+             * wrong before. A specialization whose return is already concrete
+             * falls through untouched. */
+            const AstIdentifierPart* gps = mfd->generic_params;
+            if (!gps && mfd->generic_template && mfd->generic_template->kind == AST_DECL_FUNC) {
+                gps = mfd->generic_template->as.func_decl.generic_params;
+            }
+            if (gps && mfd->params) {
+                Str rname = get_base_type_name(rt);
+                bool is_type_param = false;
+                for (const AstIdentifierPart* gp = gps; gp; gp = gp->next) {
+                    if (str_eq(gp->text, rname)) { is_type_param = true; break; }
+                }
+                if (is_type_param) {
+                    /* Locate the slot of `rname` in the receiver parameter's
+                     * written generic args. */
+                    size_t slot = 0; bool found_slot = false;
+                    for (const AstTypeRef* pa = mfd->params->type ? mfd->params->type->generic_args : NULL;
+                         pa; pa = pa->next, slot++) {
+                        if (str_eq(get_base_type_name(pa), rname)) { found_slot = true; break; }
+                    }
+                    if (found_slot) {
+                        const AstTypeRef* recv = infer_expr_type_ref(ctx, expr->as.method_call.object);
+                        if (recv) {
+                            const AstTypeRef* ga = recv->generic_args;
+                            for (size_t k = 0; k < slot && ga; k++) ga = ga->next;
+                            if (ga) return ga;
+                        }
+                    }
+                }
+            }
+            return rt;
+        }
         default: break;
     }
     return NULL;
