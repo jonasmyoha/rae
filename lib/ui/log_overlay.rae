@@ -1,0 +1,213 @@
+# On-screen log overlay — a reusable diagnostic HUD.
+#
+# Shows the most recent log lines over the app, colour-coded by level.
+# Draws directly through gpu2d rather than mounting ECS entities: a
+# diagnostic overlay that participates in layout could itself perturb the
+# thing you are diagnosing, and creating/destroying entities per line
+# would churn the component tables it is meant to be observing.
+#
+# PERFORMANCE (this is a perf-monitoring tool, so it must not distort the
+# measurement it sits next to):
+#   - Fixed-capacity ring buffer; appending never grows or reallocates.
+#   - Draws at most `maxLines`, further clamped so the block never exceeds
+#     half the window height.
+#   - The background panel is a fixed fraction of the window instead of
+#     the width of the longest line, so no text measuring happens per
+#     frame — measuring N lines every frame is the obvious way to make an
+#     overlay cost more than what it reports on.
+#   - `revision` lets a change-driven render loop include "log changed"
+#     in its dirty check, so appending a line shows up without forcing an
+#     app to redraw continuously.
+#
+# Levels are 0..4. Callers normally use the named helpers rather than the
+# numbers, but the numeric floor (`minLevel`) makes it easy to mute
+# chatter without touching call sites.
+import core
+import gpu2d
+import gpu2d_text
+open sdf_text
+
+const logTrace: Int = 0
+const logDebug: Int = 1
+const logInfo: Int = 2
+const logWarn: Int = 3
+const logError: Int = 4
+
+# Anchor corners. Left-hand corners only for now: log lines read
+# left-to-right, so a right-anchored block would need per-line measuring
+# (see the performance note above).
+const logAnchorTopLeft: Int = 0
+const logAnchorBottomLeft: Int = 1
+
+type LogOverlay {
+  texts: List(String)   # ring buffer of `capacity` slots
+  levels: List(Int)
+  head: Int             # next slot to write
+  filled: Int           # valid entries, saturates at capacity
+  capacity: Int
+  minLevel: Int         # entries below this are dropped at append time
+  visible: Bool
+  anchor: Int
+  fontSize: Float
+  lineGap: Float
+  maxLines: Int
+  # Inset from the anchored corner. Configurable because a phone-shaped app
+  # has a status bar / safe area to clear, and the widget must not have to
+  # know about device insets to stay out of their way.
+  marginX: Float
+  marginY: Float
+  revision: Int         # bumped on every accepted append
+}
+
+# `capacity` is the scrollback kept in memory; `maxLines` is how many are
+# drawn. Keeping more than are shown costs a little memory and means a
+# larger window can reveal more history without losing lines.
+func createLogOverlay(capacity: view Int, maxLines: view Int, anchor: view Int, fontSize: view Float) pub ret LogOverlay {
+  var cap: Int = capacity
+  if cap < 1 { cap = 1 }
+  let t: List(String) = createList(String, cap: cap)
+  let l: List(Int) = createList(Int, cap: cap)
+  var i: Int = 0
+  loop i < cap {
+    t.add(value: "")
+    l.add(value: logInfo)
+    i = i + 1
+  }
+  ret LogOverlay {
+    texts: own t,
+    levels: own l,
+    head: 0,
+    filled: 0,
+    capacity: cap,
+    minLevel: logTrace,
+    visible: true,
+    anchor: anchor,
+    fontSize: fontSize,
+    lineGap: 4.0,
+    maxLines: maxLines,
+    marginX: 12.0,
+    marginY: 12.0,
+    revision: 0
+  }
+}
+
+func logOverlayLineHeight(ov: view LogOverlay) ret Float {
+  ret ov.fontSize + ov.lineGap
+}
+
+# Append one line. Overwrites the oldest slot once full — a diagnostic log
+# should keep running rather than stop recording, and the newest lines are
+# the interesting ones.
+func logLine(ov: mod LogOverlay, level: view Int, text: view String) pub {
+  if level < ov.minLevel {
+    ret
+  }
+  # `List.set` takes `value: own T`, so it takes ownership of what it is
+  # given. Handing it this borrowed `view String` directly would make the
+  # ring buffer alias the caller's string and free it on overwrite/teardown
+  # — a double free. Interpolation gives the buffer a string of its own.
+  let owned: String = "{text}"
+  ov.texts.set(index: ov.head, value: owned)
+  ov.levels.set(index: ov.head, value: level)
+  ov.head = ov.head + 1
+  if ov.head >= ov.capacity {
+    ov.head = 0
+  }
+  if ov.filled < ov.capacity {
+    ov.filled = ov.filled + 1
+  }
+  ov.revision = ov.revision + 1
+}
+
+func logTraceLine(ov: mod LogOverlay, text: view String) pub {
+  logLine(ov: ov, level: logTrace, text: text)
+}
+
+func logDebugLine(ov: mod LogOverlay, text: view String) pub {
+  logLine(ov: ov, level: logDebug, text: text)
+}
+
+func logInfoLine(ov: mod LogOverlay, text: view String) pub {
+  logLine(ov: ov, level: logInfo, text: text)
+}
+
+func logWarnLine(ov: mod LogOverlay, text: view String) pub {
+  logLine(ov: ov, level: logWarn, text: text)
+}
+
+func logErrorLine(ov: mod LogOverlay, text: view String) pub {
+  logLine(ov: ov, level: logError, text: text)
+}
+
+# Normal lines white, warnings yellow, errors red; the two levels below
+# `info` are dimmed so ordinary output stays the thing you read first.
+# 0xAARRGGBB.
+func logLevelColor(level: view Int) ret Int {
+  if level is logError { ret 0xFFFF5A52 }
+  if level is logWarn { ret 0xFFFFC53D }
+  if level is logDebug { ret 0xFFAFBACC }
+  if level is logTrace { ret 0xFF8A93A3 }
+  ret 0xFFFFFFFF
+}
+
+# How many lines will actually be drawn at this window size: bounded by
+# what has been logged, by `maxLines`, and by the half-height budget.
+func logOverlayVisibleCount(ov: view LogOverlay, screenH: view Float) pub ret Int {
+  var n: Int = ov.filled
+  if n > ov.maxLines { n = ov.maxLines }
+  let budget: Float = screenH * 0.5
+  let lineH: Float = logOverlayLineHeight(ov: ov)
+  if lineH > 0.0 {
+    let fits: Int = (budget / lineH).toInt()
+    if n > fits { n = fits }
+  }
+  if n < 0 { n = 0 }
+  ret n
+}
+
+# Draw the overlay. Call AFTER the app's own UI so it sits on top, and
+# pass the window's logical size (the same units the UI lays out in).
+func drawLogOverlay(ov: view LogOverlay, font: view SdfFont, screenW: view Float, screenH: view Float) pub {
+  if ov.visible is false {
+    ret
+  }
+  let n: Int = logOverlayVisibleCount(ov: ov, screenH: screenH)
+  if n < 1 {
+    ret
+  }
+  let marginX: Float = ov.marginX
+  let marginY: Float = ov.marginY
+  let pad: Float = 8.0
+  let lineH: Float = logOverlayLineHeight(ov: ov)
+  let blockH: Float = n.toFloat() * lineH
+  var panelW: Float = screenW * 0.5
+  if panelW > 620.0 { panelW = 620.0 }
+  if panelW > screenW - marginX - marginX { panelW = screenW - marginX - marginX }
+
+  # `top` is the panel's top edge; text baselines step down from it.
+  var top: Float = marginY
+  if ov.anchor is logAnchorBottomLeft {
+    top = screenH - marginY - blockH - pad - pad
+  }
+  gpu2d.drawBox(
+    x: marginX, y: top, w: panelW, h: blockH + pad + pad, radius: 8.0,
+    fill: 0xB2050A12, borderWidth: 0.0, border: 0x00000000
+  )
+
+  # Oldest of the visible window first, so the newest line is nearest the
+  # bottom in both anchor modes — log order should not flip with position.
+  let start: Int = ov.filled - n
+  var i: Int = 0
+  loop i < n {
+    let slot: Int = (ov.head - ov.filled + start + i + ov.capacity + ov.capacity) % ov.capacity
+    let text: String = ov.texts.at(index: slot)
+    let level: Int = ov.levels.at(index: slot)
+    # +fontSize because drawText takes a baseline, not a top edge.
+    let baseline: Float = top + pad + ov.fontSize + i.toFloat() * lineH
+    gpu2d_text.drawText(
+      font: font, text: text, x: marginX + pad, y: baseline,
+      sizePx: ov.fontSize, color: logLevelColor(level: level)
+    )
+    i = i + 1
+  }
+}
