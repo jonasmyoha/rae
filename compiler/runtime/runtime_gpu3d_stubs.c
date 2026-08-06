@@ -6,11 +6,11 @@ int64_t rae_ext_gpu3d_meshCreate(const float* verts, int64_t vertCount,
     (void)verts; (void)vertCount; (void)indices; (void)indexCount; return 0;
 }
 void rae_ext_gpu3d_begin(const float* frame, int64_t count){ (void)frame; (void)count; }
-void rae_ext_gpu3d_draw(int64_t mesh, const float* model,
+void rae_ext_gpu3d_draw(int64_t mesh, const float* model, const float* prevModel,
                         float r, float g, float b,
                         float metallic, float roughness,
                         float emR, float emG, float emB){
-    (void)mesh; (void)model; (void)r; (void)g; (void)b;
+    (void)mesh; (void)model; (void)prevModel; (void)r; (void)g; (void)b;
     (void)metallic; (void)roughness; (void)emR; (void)emG; (void)emB;
 }
 void rae_ext_gpu3d_drawMetaballs(const float* packedBalls, int64_t count,
@@ -23,4 +23,5 @@ void rae_ext_gpu3d_drawMetaballs(const float* packedBalls, int64_t count,
 void rae_ext_gpu3d_end(void) {}
 void rae_ext_gpu3d_submit(void) {}
 void rae_ext_gpu3d_tonemap(void) {}
+void rae_ext_gpu3d_taa(void) {}
 void rae_ext_gpu3d_shutdown(void) {}
