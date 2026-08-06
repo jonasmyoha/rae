@@ -19,8 +19,9 @@
  * inputs SSAO (#337), TAA (#335) and GI gathering (#338+) sample; the SDF
  * metaball pass writes all of them too, so implicit and triangle geometry
  * are indistinguishable to any downstream technique.
- * Velocity is CAMERA motion only until scene3d carries previous-frame
- * transforms (#336); object motion then adds a prev-model term.
+ * Velocity is full per-object motion since #335: each draw carries its
+ * PREVIOUS model matrix, so moving geometry reports its own motion and
+ * not merely the camera's.
  * gpu2d's LoadOp_Load overlay path then screenshots and presents the
  * composed frame exactly once.
  *
@@ -33,13 +34,21 @@
  *
  * Lighting: single WGSL uber-shader — Cook-Torrance GGX + Smith +
  * Schlick Fresnel, one directional sun + hemisphere ambient, emissive,
- * exposure + ACES tonemap + gamma. Antialiasing: none until TAA (#335);
- * MSAA was dropped by design, not by accident (see above).
+ * exposure + ACES tonemap + gamma live in the tonemap pass (#334), not
+ * in the material shaders.
+ *
+ * Antialiasing is TAA (#335), not MSAA: the scene is jittered by a
+ * Halton(2,3) sub-pixel offset each frame and resolved against a
+ * reprojected history buffer. Frame order is
+ *   scene -> taa -> tonemap -> (ui) -> present
+ * with TAA operating on LINEAR HDR, before the tone curve, so
+ * accumulation stays radiometrically correct — the same reason GI will
+ * live in that slot. `RAE_NO_TAA=1` disables it for A/B comparison.
  */
 
 #define G3D_MAX_MESHES 256
 #define G3D_MAX_DRAWS  4096
-#define G3D_DRAW_FLOATS 24  /* mat4 model (16) + baseColor+metallic (4) + emissive+roughness (4) */
+#define G3D_DRAW_FLOATS 40  /* mat4 model + mat4 prevModel + baseColor+metallic + emissive+roughness */
 
 static WGPUBuffer   g3d_mesh_vbuf[G3D_MAX_MESHES];
 static WGPUBuffer   g3d_mesh_ibuf[G3D_MAX_MESHES];
@@ -61,6 +70,19 @@ static int             g3d_target_w = 0, g3d_target_h = 0;
 static float g3d_prev_viewproj[16];
 static bool  g3d_have_prev = false;
 
+/* TAA (#335). Sub-pixel jitter walks a Halton(2,3) sequence: low
+ * discrepancy, so N frames of history land on a well-spread set of
+ * sample positions instead of clumping the way rand() would. */
+static int   g3d_taa_frame = 0;
+static bool  g3d_taa_enabled = true;
+static float g3d_jitter_x = 0.0f, g3d_jitter_y = 0.0f;
+
+static float g3d_halton(int index, int base) {
+    float f = 1.0f, r = 0.0f;
+    while (index > 0) { f /= (float)base; r += f * (float)(index % base); index /= base; }
+    return r;
+}
+
 static WGPURenderPipeline g3d_pipeline = NULL;
 static WGPUBuffer   g3d_frame_ubuf = NULL;   /* frame uniforms (camera/sun/ambient) */
 static WGPUBuffer   g3d_draw_sbuf = NULL;    /* per-draw storage array, fixed cap */
@@ -80,8 +102,24 @@ static WGPURenderPassEncoder g3d_pass = NULL;
  * indirect-lighting pass reads/writes the HDR target and tonemap stays
  * the LAST radiometric operation of the frame. */
 static WGPURenderPipeline g3d_tonemap_pipeline = NULL;
-static WGPUBindGroup      g3d_tonemap_bind = NULL;   /* rebuilt when targets resize */
+static WGPUBindGroup      g3d_tonemap_bind[2] = {NULL, NULL};
 static bool               g3d_tonemap_pending = false;
+
+/* TAA resolve (#335). Two rgba16f history buffers ping-pong: this frame
+ * reads hist[1-cur] and writes hist[cur], and tonemap then reads hist[cur].
+ * Ping-ponging avoids a full-screen copy per frame and, more importantly,
+ * avoids reading and writing one texture in the same pass.
+ * History is PERSISTENT (cross-frame) — the lifetime class the render
+ * graph was given in #331 precisely so temporal techniques could be
+ * expressed honestly rather than bolted on. */
+static WGPUTexture     g3d_taa_tex[2] = {NULL, NULL};
+static WGPUTextureView g3d_taa_view[2] = {NULL, NULL};
+static WGPURenderPipeline g3d_taa_pipeline = NULL;
+static WGPUBindGroup   g3d_taa_bind[2] = {NULL, NULL};
+static WGPUSampler     g3d_taa_sampler = NULL;
+static int             g3d_taa_cur = 0;
+static bool            g3d_taa_history_valid = false;
+static bool            g3d_taa_pending = false;
 
 static const char* G3D_WGSL =
 "struct Frame {\n"
@@ -93,9 +131,11 @@ static const char* G3D_WGSL =
 "  ambGround: vec4<f32>,\n"
 "  invViewProj: mat4x4<f32>,\n"
 "  prevViewProj: mat4x4<f32>,\n"
+"  jitter: vec4<f32>,\n"   /* xy = this frame's sub-pixel clip offset (#335) */
 "};\n"
 "struct DrawU {\n"
 "  model: mat4x4<f32>,\n"
+"  prevModel: mat4x4<f32>,\n"
 "  baseColorMetallic: vec4<f32>,\n"
 "  emissiveRoughness: vec4<f32>,\n"
 "};\n"
@@ -123,10 +163,16 @@ static const char* G3D_WGSL =
 "  o.nrm = normalize((d.model * vec4<f32>(n, 0.0)).xyz);\n"
 "  o.uv = uv;\n"
 "  o.inst = ii;\n"
+/* Motion vectors use UNJITTERED clip positions: jitter is a rasterisation
+ * trick, and letting it leak into velocity would make every static pixel
+ * report sub-pixel motion and smear the history. clipPrev runs the
+ * PREVIOUS model matrix through the PREVIOUS viewProj, so a moving object
+ * reports its own motion, not just the camera's (#335/#336). */
 "  o.clipNow = o.pos;\n"
-/* Camera-only motion: reproject THIS frame's world position through the
- * previous viewProj. Object motion needs prev model matrices (#336). */
-"  o.clipPrev = F.prevViewProj * wp;\n"
+"  o.clipPrev = F.prevViewProj * (d.prevModel * vec4<f32>(p, 1.0));\n"
+/* Jitter AFTER clipNow is captured. Multiplying by w keeps the offset a
+ * constant sub-pixel amount in NDC after the perspective divide. */
+"  o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);\n"
 "  return o;\n"
 "}\n"
 /* UV-space motion vector from two clip positions. Perspective divide in
@@ -224,6 +270,67 @@ static const char* G3D_TONEMAP_WGSL =
 "  return vec4<f32>(c, 1.0);\n"
 "}\n";
 
+/* TAA resolve: reproject last frame through the velocity buffer, clamp it
+ * to the neighbourhood of the current pixel, and blend.
+ *
+ * The neighbourhood clamp is what makes temporal accumulation safe: an
+ * unclamped history smears whenever reprojection is wrong (disocclusion,
+ * shading changes, anything velocity cannot describe). Clipping history
+ * to the min/max of the 3x3 current neighbourhood bounds the error to
+ * something the current frame actually contains.
+ *
+ * Blending is luminance-weighted (Karis): weighting each sample by
+ * 1/(1+luma) stops a single very bright pixel from dominating the
+ * average and flickering between frames, which plain averaging in HDR
+ * does badly. */
+static const char* G3D_TAA_WGSL =
+"@group(0) @binding(0) var curTex: texture_2d<f32>;\n"
+"@group(0) @binding(1) var histTex: texture_2d<f32>;\n"
+"@group(0) @binding(2) var velTex: texture_2d<f32>;\n"
+"@group(0) @binding(3) var histSampler: sampler;\n"
+"@group(0) @binding(4) var<uniform> P: vec4<f32>;\n"   /* x=blend, y=historyValid */
+"@vertex\n"
+"fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {\n"
+"  var pts = array<vec2<f32>, 3>(\n"
+"    vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));\n"
+"  return vec4<f32>(pts[vi], 0.0, 1.0);\n"
+"}\n"
+"fn lumaWeight(c: vec3<f32>) -> f32 {\n"
+"  return 1.0 / (1.0 + max(max(c.r, c.g), c.b));\n"
+"}\n"
+"@fragment\n"
+"fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {\n"
+"  let ipos = vec2<i32>(pos.xy);\n"
+"  let dims = vec2<f32>(textureDimensions(curTex));\n"
+"  let cur = textureLoad(curTex, ipos, 0).rgb;\n"
+"  if (P.y < 0.5) { return vec4<f32>(cur, 1.0); }\n"
+/* 3x3 neighbourhood bounds of the current frame. */
+"  var lo = cur;\n"
+"  var hi = cur;\n"
+"  for (var dy = -1; dy <= 1; dy = dy + 1) {\n"
+"    for (var dx = -1; dx <= 1; dx = dx + 1) {\n"
+"      let q = clamp(ipos + vec2<i32>(dx, dy), vec2<i32>(0), vec2<i32>(dims) - vec2<i32>(1));\n"
+"      let s = textureLoad(curTex, q, 0).rgb;\n"
+"      lo = min(lo, s); hi = max(hi, s);\n"
+"    }\n"
+"  }\n"
+/* Reproject: velocity is (now - prev) in UV, so the history sample sits
+ * at uv - velocity. Sampled bilinearly because it lands off-grid. */
+"  let uv = (pos.xy) / dims;\n"
+"  let vel = textureLoad(velTex, ipos, 0).rg;\n"
+"  let prevUv = uv - vel;\n"
+/* Off-screen history is no history: reject rather than clamp to edge. */
+"  if (prevUv.x < 0.0 || prevUv.x > 1.0 || prevUv.y < 0.0 || prevUv.y > 1.0) {\n"
+"    return vec4<f32>(cur, 1.0);\n"
+"  }\n"
+"  let histRaw = textureSampleLevel(histTex, histSampler, prevUv, 0.0).rgb;\n"
+"  let hist = clamp(histRaw, lo, hi);\n"
+"  let wc = lumaWeight(cur) * (1.0 - P.x);\n"
+"  let wh = lumaWeight(hist) * P.x;\n"
+"  let outC = (cur * wc + hist * wh) / max(wc + wh, 1e-5);\n"
+"  return vec4<f32>(outC, 1.0);\n"
+"}\n";
+
 #include "runtime_gpu3d_sdf.c"
 
 static int g3d_invert_mat4(const float* m, float* out) {
@@ -258,6 +365,17 @@ static void g3d_log_cb(WGPULogLevel level, WGPUStringView message, void* userdat
 }
 #endif
 
+static void g3d_configure_taa(void) {
+    static bool done = false;
+    if (done) return;
+    done = true;
+    /* Deterministic captures stay valid: TAA is a pure function of the
+     * frame sequence, so a fixed frame count still converges identically.
+     * The switch exists for A/B comparison and for isolating TAA when a
+     * later temporal technique misbehaves. */
+    if (getenv("RAE_NO_TAA")) g3d_taa_enabled = false;
+}
+
 static void g3d_configure_draw_limit(void) {
     g3d_draw_limit = G3D_MAX_DRAWS;
     const char* text = getenv("RAE_GPU3D_DRAW_LIMIT");
@@ -276,6 +394,7 @@ static void g3d_configure_draw_limit(void) {
 
 static void g3d_init_pipeline(void) {
     if (g3d_pipeline) return;
+    g3d_configure_taa();
     g3d_configure_draw_limit();
 #ifndef __EMSCRIPTEN__
     if (getenv("RAE_GPU3D_DEBUG")) {
@@ -333,7 +452,7 @@ static void g3d_init_pipeline(void) {
     if (!g3d_pipeline) { fprintf(stderr, "[gpu3d] render pipeline creation FAILED\n"); return; }
 
     WGPUBufferDescriptor ud; memset(&ud, 0, sizeof(ud));
-    ud.size = 272; /* Frame struct: 5 mat4 + 5 vec4 (incl. invViewProj + prevViewProj) */
+    ud.size = 288; /* Frame: 3 mat4 (viewProj/inv/prev) + 6 vec4 (incl. jitter) */
     ud.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
     g3d_frame_ubuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &ud);
 
@@ -344,7 +463,7 @@ static void g3d_init_pipeline(void) {
 
     WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g3d_pipeline, 0);
     WGPUBindGroupEntry e[2]; memset(e, 0, sizeof(e));
-    e[0].binding = 0; e[0].buffer = g3d_frame_ubuf; e[0].size = 272;
+    e[0].binding = 0; e[0].buffer = g3d_frame_ubuf; e[0].size = 288;
     e[1].binding = 1; e[1].buffer = g3d_draw_sbuf;  e[1].size = sd.size;
     WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
     bgd.layout = bgl; bgd.entryCount = 2; bgd.entries = e;
@@ -379,15 +498,80 @@ static void g3d_init_tonemap_pipeline(void) {
 
 /* Bind group references the HDR view, so it must be rebuilt whenever
  * g3d_ensure_targets recreates the textures (it nulls this then). */
+static WGPUBuffer g3d_taa_param_ubuf = NULL;
+
+static void g3d_init_taa_pipeline(void) {
+    if (g3d_taa_pipeline) return;
+    WGPUShaderSourceWGSL src; memset(&src, 0, sizeof(src));
+    src.chain.sType = WGPUSType_ShaderSourceWGSL;
+    src.code = rae_wgpu_sv(G3D_TAA_WGSL);
+    WGPUShaderModuleDescriptor smd; memset(&smd, 0, sizeof(smd));
+    smd.nextInChain = &src.chain;
+    WGPUShaderModule mod = wgpuDeviceCreateShaderModule(g_wgpu_dev, &smd);
+    WGPUColorTargetState cts; memset(&cts, 0, sizeof(cts));
+    cts.format = WGPUTextureFormat_RGBA16Float; cts.writeMask = WGPUColorWriteMask_All;
+    WGPUFragmentState fs; memset(&fs, 0, sizeof(fs));
+    fs.module = mod; fs.entryPoint = rae_wgpu_sv("fs"); fs.targetCount = 1; fs.targets = &cts;
+    WGPURenderPipelineDescriptor pd; memset(&pd, 0, sizeof(pd));
+    pd.vertex.module = mod; pd.vertex.entryPoint = rae_wgpu_sv("vs");
+    pd.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+    pd.primitive.frontFace = WGPUFrontFace_CCW;
+    pd.primitive.cullMode = WGPUCullMode_None;
+    pd.multisample.count = 1; pd.multisample.mask = 0xFFFFFFFFu;
+    pd.fragment = &fs;
+    g3d_taa_pipeline = wgpuDeviceCreateRenderPipeline(g_wgpu_dev, &pd);
+    wgpuShaderModuleRelease(mod);
+    if (!g3d_taa_pipeline) { fprintf(stderr, "[gpu3d] TAA pipeline creation FAILED\n"); return; }
+    WGPUSamplerDescriptor sd; memset(&sd, 0, sizeof(sd));
+    sd.addressModeU = WGPUAddressMode_ClampToEdge;
+    sd.addressModeV = WGPUAddressMode_ClampToEdge;
+    sd.addressModeW = WGPUAddressMode_ClampToEdge;
+    sd.magFilter = WGPUFilterMode_Linear;   /* reprojection lands off-grid */
+    sd.minFilter = WGPUFilterMode_Linear;
+    sd.mipmapFilter = WGPUMipmapFilterMode_Nearest;
+    sd.maxAnisotropy = 1;
+    g3d_taa_sampler = wgpuDeviceCreateSampler(g_wgpu_dev, &sd);
+    WGPUBufferDescriptor bd; memset(&bd, 0, sizeof(bd));
+    bd.size = 16; bd.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+    g3d_taa_param_ubuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
+}
+
+/* Bind group t resolves INTO history[t], reading history[1-t]. */
+static void g3d_ensure_taa_bind(void) {
+    if (!g3d_taa_pipeline || !g3d_hdr_view || !g3d_velocity_view) return;
+    WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g3d_taa_pipeline, 0);
+    for (int t = 0; t < 2; t++) {
+        if (g3d_taa_bind[t] || !g3d_taa_view[t] || !g3d_taa_view[1 - t]) continue;
+        WGPUBindGroupEntry e[5]; memset(e, 0, sizeof(e));
+        e[0].binding = 0; e[0].textureView = g3d_hdr_view;
+        e[1].binding = 1; e[1].textureView = g3d_taa_view[1 - t];
+        e[2].binding = 2; e[2].textureView = g3d_velocity_view;
+        e[3].binding = 3; e[3].sampler = g3d_taa_sampler;
+        e[4].binding = 4; e[4].buffer = g3d_taa_param_ubuf; e[4].size = 16;
+        WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
+        bgd.layout = bgl; bgd.entryCount = 5; bgd.entries = e;
+        g3d_taa_bind[t] = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
+    }
+    wgpuBindGroupLayoutRelease(bgl);
+}
+
+/* Tonemap reads whichever image is the frame's final HDR: the TAA output
+ * when TAA ran, the raw scene target when it did not. Slot 0 = raw HDR,
+ * slot 1+t = TAA history buffer t. */
 static void g3d_ensure_tonemap_bind(void) {
-    if (g3d_tonemap_bind || !g3d_tonemap_pipeline || !g3d_hdr_view) return;
+    if (!g3d_tonemap_pipeline || !g3d_hdr_view) return;
     WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g3d_tonemap_pipeline, 0);
-    WGPUBindGroupEntry e[2]; memset(e, 0, sizeof(e));
-    e[0].binding = 0; e[0].buffer = g3d_frame_ubuf; e[0].size = 272;
-    e[1].binding = 1; e[1].textureView = g3d_hdr_view;
-    WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
-    bgd.layout = bgl; bgd.entryCount = 2; bgd.entries = e;
-    g3d_tonemap_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
+    for (int t = 0; t < 2; t++) {
+        if (g3d_tonemap_bind[t]) continue;
+        WGPUTextureView src = g3d_taa_enabled ? g3d_taa_view[t] : g3d_hdr_view;
+        if (!src) continue;
+        WGPUBindGroupEntry e[2]; memset(e, 0, sizeof(e));
+        e[0].binding = 0; e[0].buffer = g3d_frame_ubuf; e[0].size = 288;
+        e[1].binding = 1; e[1].textureView = src;
+        WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
+        bgd.layout = bgl; bgd.entryCount = 2; bgd.entries = e;
+        g3d_tonemap_bind[t] = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
+    }
     wgpuBindGroupLayoutRelease(bgl);
 }
 
@@ -400,7 +584,13 @@ static void g3d_ensure_targets(void) {
     int w = g_g2d_off_w, h = g_g2d_off_h;
     if (w <= 0 || h <= 0) return;
     if (g3d_depth_view && w == g3d_target_w && h == g3d_target_h) return;
-    if (g3d_tonemap_bind) { wgpuBindGroupRelease(g3d_tonemap_bind); g3d_tonemap_bind = NULL; }
+    for (int t = 0; t < 2; t++) {
+        if (g3d_tonemap_bind[t]) { wgpuBindGroupRelease(g3d_tonemap_bind[t]); g3d_tonemap_bind[t] = NULL; }
+        if (g3d_taa_bind[t]) { wgpuBindGroupRelease(g3d_taa_bind[t]); g3d_taa_bind[t] = NULL; }
+        if (g3d_taa_view[t]) { wgpuTextureViewRelease(g3d_taa_view[t]); g3d_taa_view[t] = NULL; }
+        if (g3d_taa_tex[t]) { wgpuTextureRelease(g3d_taa_tex[t]); g3d_taa_tex[t] = NULL; }
+    }
+    g3d_taa_history_valid = false;   /* a resize invalidates reprojection */
     if (g3d_hdr_view) { wgpuTextureViewRelease(g3d_hdr_view); g3d_hdr_view = NULL; }
     if (g3d_hdr_tex)  { wgpuTextureRelease(g3d_hdr_tex); g3d_hdr_tex = NULL; }
     if (g3d_depth_view) { wgpuTextureViewRelease(g3d_depth_view); g3d_depth_view = NULL; }
@@ -426,6 +616,11 @@ static void g3d_ensure_targets(void) {
     td.format = WGPUTextureFormat_RG16Float;
     g3d_velocity_tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
     g3d_velocity_view = wgpuTextureCreateView(g3d_velocity_tex, NULL);
+    td.format = WGPUTextureFormat_RGBA16Float;   /* TAA history ping-pong */
+    for (int t = 0; t < 2; t++) {
+        g3d_taa_tex[t] = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
+        g3d_taa_view[t] = wgpuTextureCreateView(g3d_taa_tex[t], NULL);
+    }
     g3d_target_w = w; g3d_target_h = h;
 }
 
@@ -478,11 +673,23 @@ void rae_ext_gpu3d_begin(const float* frame, int64_t count){
     g3d_init_pipeline();
     g3d_ensure_targets();
     if (!g3d_hdr_view || !g3d_depth_view || !g3d_normal_view || !g3d_velocity_view) return;
+    /* Halton offsets are in [0,1); recentre to [-0.5,0.5) pixels, then
+     * convert to NDC (2/size) since the shader adds them in clip space. */
+    if (g3d_taa_enabled && g3d_target_w > 0 && g3d_target_h > 0) {
+        const int hi = (g3d_taa_frame % 16) + 1;   /* skip index 0 => no zero-offset frame */
+        g3d_jitter_x = (g3d_halton(hi, 2) - 0.5f) * 2.0f / (float)g3d_target_w;
+        g3d_jitter_y = (g3d_halton(hi, 3) - 0.5f) * 2.0f / (float)g3d_target_h;
+    } else {
+        g3d_jitter_x = 0.0f; g3d_jitter_y = 0.0f;
+    }
     g3d_draw_count = 0;
     g3d_sdf_group = 0;   /* metaball cluster slots are per-frame */
     g3d_tonemap_pending = true;
+    g3d_taa_pending = true;
+    g3d_taa_cur = 1 - g3d_taa_cur;   /* resolve into the slot not read this frame */
+    g3d_taa_frame++;
 
-    float u[68]; memset(u, 0, sizeof(u));
+    float u[72]; memset(u, 0, sizeof(u));
     for (int i = 0; i < 16; i++) u[i] = (float)frame[i];       /* viewProj */
     u[16] = (float)frame[16]; u[17] = (float)frame[17]; u[18] = (float)frame[18]; u[19] = (float)frame[19];  /* camPos+time */
     u[20] = (float)frame[20]; u[21] = (float)frame[21]; u[22] = (float)frame[22]; u[23] = (float)frame[23];  /* sunDir+exposure */
@@ -493,6 +700,7 @@ void rae_ext_gpu3d_begin(const float* frame, int64_t count){
     if (!g3d_have_prev) { memcpy(g3d_prev_viewproj, u, 16 * sizeof(float)); g3d_have_prev = true; }
     memcpy(u + 52, g3d_prev_viewproj, 16 * sizeof(float));   /* prevViewProj */
     memcpy(g3d_prev_viewproj, u, 16 * sizeof(float));        /* becomes prev next frame */
+    u[68] = g3d_jitter_x; u[69] = g3d_jitter_y;              /* jitter (#335) */
     wgpuQueueWriteBuffer(g_wgpu_queue, g3d_frame_ubuf, 0, u, sizeof(u));
     if (getenv("RAE_GPU3D_DEBUG")) {
         static int logged2 = 0;
@@ -538,7 +746,7 @@ void rae_ext_gpu3d_begin(const float* frame, int64_t count){
 /* Queue one mesh draw. model = 16 Floats column-major. Uniform data is
  * written CPU-side (uploaded once at end); the draw is encoded now with
  * firstInstance = draw index so the shader picks its DrawU slot. */
-void rae_ext_gpu3d_draw(int64_t mesh, const float* model,
+void rae_ext_gpu3d_draw(int64_t mesh, const float* model, const float* prevModel,
                         float r, float g, float b,
                         float metallic, float roughness,
                         float emR, float emG, float emB){
@@ -557,8 +765,14 @@ void rae_ext_gpu3d_draw(int64_t mesh, const float* model,
     }
     float* d = g3d_draw_cpu + g3d_draw_count * G3D_DRAW_FLOATS;
     for (int i = 0; i < 16; i++) d[i] = (float)model[i];
-    d[16] = (float)r; d[17] = (float)g; d[18] = (float)b; d[19] = (float)metallic;
-    d[20] = (float)emR; d[21] = (float)emG; d[22] = (float)emB; d[23] = (float)roughness;
+    /* No previous transform (first frame, or a caller that does not track
+     * one) means "did not move": reusing the current model yields zero
+     * velocity, which is right, where zeros would project to the origin
+     * and smear a full-screen streak. */
+    if (prevModel) { for (int i = 0; i < 16; i++) d[16 + i] = (float)prevModel[i]; }
+    else           { for (int i = 0; i < 16; i++) d[16 + i] = (float)model[i]; }
+    d[32] = (float)r; d[33] = (float)g; d[34] = (float)b; d[35] = (float)metallic;
+    d[36] = (float)emR; d[37] = (float)emG; d[38] = (float)emB; d[39] = (float)roughness;
     wgpuRenderPassEncoderSetVertexBuffer(g3d_pass, 0, g3d_mesh_vbuf[slot], 0,
                                          wgpuBufferGetSize(g3d_mesh_vbuf[slot]));
     wgpuRenderPassEncoderSetIndexBuffer(g3d_pass, g3d_mesh_ibuf[slot],
@@ -580,7 +794,7 @@ static int rae_g3d_finish_pass(void) {
             if (g3d_draw_count > 0) {
                 float* d = g3d_draw_cpu;
                 fprintf(stderr, "[gpu3d] draw0 model col3=(%.2f,%.2f,%.2f,%.2f) color=(%.2f,%.2f,%.2f) m=%.2f r=%.2f\n",
-                        d[12], d[13], d[14], d[15], d[16], d[17], d[18], d[19], d[23]);
+                        d[12], d[13], d[14], d[15], d[32], d[33], d[34], d[35], d[39]);
             }
             logged = 1;
         }
@@ -603,16 +817,58 @@ void rae_ext_gpu3d_submit(void) {
     if (rae_g3d_finish_pass()) rae_wgpu_poll(0);
 }
 
+/* TAA resolve (#335). Ends the scene pass first so the HDR image and
+ * velocity buffer are complete, then accumulates into history[cur].
+ * Tonemap afterwards reads history[cur] rather than the raw HDR. */
+void rae_ext_gpu3d_taa(void) {
+    if (!g3d_taa_enabled || !g3d_taa_pending) return;
+    rae_g3d_finish_pass();
+    g3d_init_taa_pipeline();
+    g3d_ensure_taa_bind();
+    if (!g3d_taa_pipeline || !g3d_taa_bind[g3d_taa_cur]) return;
+    g3d_taa_pending = false;
+
+    /* 0.9 keeps ~10 frames of history: enough to converge the jitter
+     * pattern, short enough that clamp failures wash out quickly. */
+    float params[4] = { 0.9f, g3d_taa_history_valid ? 1.0f : 0.0f, 0.0f, 0.0f };
+    wgpuQueueWriteBuffer(g_wgpu_queue, g3d_taa_param_ubuf, 0, params, sizeof(params));
+
+    WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
+    WGPURenderPassColorAttachment ca; memset(&ca, 0, sizeof(ca));
+    ca.view = g3d_taa_view[g3d_taa_cur];
+    ca.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
+    ca.loadOp = WGPULoadOp_Clear;
+    ca.storeOp = WGPUStoreOp_Store;
+    WGPURenderPassDescriptor rp; memset(&rp, 0, sizeof(rp));
+    rp.colorAttachmentCount = 1; rp.colorAttachments = &ca;
+    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(enc, &rp);
+    wgpuRenderPassEncoderSetPipeline(pass, g3d_taa_pipeline);
+    wgpuRenderPassEncoderSetBindGroup(pass, 0, g3d_taa_bind[g3d_taa_cur], 0, NULL);
+    wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
+    wgpuRenderPassEncoderEnd(pass);
+    WGPUCommandBuffer cb = wgpuCommandEncoderFinish(enc, NULL);
+    wgpuQueueSubmit(g_wgpu_queue, 1, &cb);
+    wgpuCommandBufferRelease(cb);
+    wgpuRenderPassEncoderRelease(pass);
+    wgpuCommandEncoderRelease(enc);
+    g3d_taa_history_valid = true;
+}
+
 /* Tonemap pass (#334): resolve linear HDR into the LDR offscreen. Ends the
  * scene pass first if the caller has not, so the HDR image is complete.
  * Graph-driven frames dispatch this between the scene pass and whatever
  * composites in LDR (UI overlay, present). */
 void rae_ext_gpu3d_tonemap(void) {
     rae_g3d_finish_pass();
+    /* Same safety net as tonemap-in-end: a caller whose frame does not
+     * dispatch TAA explicitly still gets it, so history keeps advancing
+     * and tonemap never samples a stale slot. */
+    if (g3d_taa_enabled && g3d_taa_pending) rae_ext_gpu3d_taa();
     if (!g3d_tonemap_pending || !g3d_hdr_view || !g_g2d_off_view) return;
     g3d_init_tonemap_pipeline();
     g3d_ensure_tonemap_bind();
-    if (!g3d_tonemap_pipeline || !g3d_tonemap_bind) return;
+    const int tmSlot = g3d_taa_enabled ? g3d_taa_cur : 0;
+    if (!g3d_tonemap_pipeline || !g3d_tonemap_bind[tmSlot]) return;
     g3d_tonemap_pending = false;
     WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
     WGPURenderPassColorAttachment ca; memset(&ca, 0, sizeof(ca));
@@ -625,7 +881,7 @@ void rae_ext_gpu3d_tonemap(void) {
     rp.colorAttachments = &ca;
     WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(enc, &rp);
     wgpuRenderPassEncoderSetPipeline(pass, g3d_tonemap_pipeline);
-    wgpuRenderPassEncoderSetBindGroup(pass, 0, g3d_tonemap_bind, 0, NULL);
+    wgpuRenderPassEncoderSetBindGroup(pass, 0, g3d_tonemap_bind[tmSlot], 0, NULL);
     wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
     wgpuRenderPassEncoderEnd(pass);
     WGPUCommandBuffer cb = wgpuCommandEncoderFinish(enc, NULL);
@@ -686,8 +942,17 @@ void rae_ext_gpu3d_shutdown(void) {
     if (g3d_draw_sbuf) { wgpuBufferRelease(g3d_draw_sbuf); g3d_draw_sbuf = NULL; }
     if (g3d_frame_ubuf) { wgpuBufferRelease(g3d_frame_ubuf); g3d_frame_ubuf = NULL; }
     if (g3d_pipeline) { wgpuRenderPipelineRelease(g3d_pipeline); g3d_pipeline = NULL; }
-    if (g3d_tonemap_bind) { wgpuBindGroupRelease(g3d_tonemap_bind); g3d_tonemap_bind = NULL; }
+    for (int t = 0; t < 2; t++) if (g3d_tonemap_bind[t]) { wgpuBindGroupRelease(g3d_tonemap_bind[t]); g3d_tonemap_bind[t] = NULL; }
     if (g3d_tonemap_pipeline) { wgpuRenderPipelineRelease(g3d_tonemap_pipeline); g3d_tonemap_pipeline = NULL; }
+    for (int t = 0; t < 2; t++) {
+        if (g3d_taa_bind[t]) { wgpuBindGroupRelease(g3d_taa_bind[t]); g3d_taa_bind[t] = NULL; }
+        if (g3d_taa_view[t]) { wgpuTextureViewRelease(g3d_taa_view[t]); g3d_taa_view[t] = NULL; }
+        if (g3d_taa_tex[t]) { wgpuTextureRelease(g3d_taa_tex[t]); g3d_taa_tex[t] = NULL; }
+    }
+    if (g3d_taa_sampler) { wgpuSamplerRelease(g3d_taa_sampler); g3d_taa_sampler = NULL; }
+    if (g3d_taa_param_ubuf) { wgpuBufferRelease(g3d_taa_param_ubuf); g3d_taa_param_ubuf = NULL; }
+    if (g3d_taa_pipeline) { wgpuRenderPipelineRelease(g3d_taa_pipeline); g3d_taa_pipeline = NULL; }
+    g3d_taa_history_valid = false; g3d_taa_pending = false; g3d_taa_cur = 0; g3d_taa_frame = 0;
     if (g3d_hdr_view) { wgpuTextureViewRelease(g3d_hdr_view); g3d_hdr_view = NULL; }
     if (g3d_hdr_tex)  { wgpuTextureRelease(g3d_hdr_tex); g3d_hdr_tex = NULL; }
     if (g3d_depth_view) { wgpuTextureViewRelease(g3d_depth_view); g3d_depth_view = NULL; }
