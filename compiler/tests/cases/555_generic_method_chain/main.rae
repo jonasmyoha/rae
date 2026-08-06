@@ -1,0 +1,26 @@
+# A CHAINED call on a generic method's result used to bind a same-named
+# overload for a DIFFERENT receiver type, surfacing as an inscrutable C
+# type error rather than an overload diagnostic (#349).
+#
+# `parts.at(i)` returns the generic `T`. Sema cannot match the method
+# because it compares the instantiated struct's mangled name
+# (`List_String`) against the template written in the parameter
+# (`view List(T)`), so the call gets no decl_link and no type — and the
+# NEXT call in the chain then resolves against nothing. `length()` bound
+# to List2Int.length and passed a String where an Int* was expected.
+#
+# Fixed in the backend's type inference (not sema's overload selection —
+# changing that regressed eight generic-container tests): recover the
+# callee by name + receiver base type, then substitute the receiver's
+# generic argument for the returned type parameter positionally.
+import core
+import string
+
+func main() {
+  let raw: String = " 1 42 3.5 "
+  let parts: List(String) = raw.trim().split(sep: " ")
+  log("len={parts.at(index: 1).length()}")
+  log("int={parts.at(index: 1).toInt()}")
+  log("float={parts.at(index: 2).toFloat()}")
+  log("chain={parts.at(index: 1).trim().toInt()}")
+}
