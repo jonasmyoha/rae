@@ -827,6 +827,15 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
         case AST_EXPR_FLOAT: return &kFloat_tr;
         case AST_EXPR_BOOL: return &kBool_tr;
         case AST_EXPR_STRING: return &kString_tr;
+        /* Interpolation ALWAYS produces a freshly-allocated String, so its
+         * type is never in doubt. Leaving this unhandled (returning NULL)
+         * silently disabled every ownership decision that asks "is this
+         * argument a String?" — most visibly the pool_take wrap in
+         * c_call.c, whose own guard lists AST_EXPR_INTERP but could never
+         * fire, so `list.add(value: "{x}")` stored a pooled pointer that
+         * the statement flush then freed (#343: garbage element + a
+         * double-free abort at drop). */
+        case AST_EXPR_INTERP: return &kString_tr;
         case AST_EXPR_IDENT: {
             const AstTypeRef* lt = get_local_type_ref(ctx, expr->as.ident);
             if (lt) return lt;
