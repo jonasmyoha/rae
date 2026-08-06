@@ -131,9 +131,6 @@ func createRenderGraph() pub ret RenderGraph {
 # ----- declaration ----------------------------------------------------
 func addResource(g: mod RenderGraph, name: view String, kind: view Int, format: view Int, sizing: view Int, lifetime: view Int) pub ret Int {
   let id: Int = g.resources.length
-  # NB: `add(value: name)`, not `add(value: "{name}")` — adding an
-  # INTERPOLATED string to a List(String) corrupts the element and
-  # double-frees on teardown (compiler bug, see QUEUE).
   g.resourceNames.add(value: name)
   g.resources.add(value: ResourceDesc { kind: kind, format: format, sizing: sizing, lifetime: lifetime })
   ret id

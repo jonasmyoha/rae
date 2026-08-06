@@ -1,0 +1,30 @@
+# #343: adding an INTERPOLATED string to a List(String) corrupted the
+# element and double-freed at teardown.
+#
+# `List.add` takes `value: own T`, so the caller must detach a
+# pool-registered temporary before handing ownership over. c_call.c has a
+# pool_take wrap for exactly that, but its guard asks
+# infer_expr_type_ref whether the argument is a String — and inference
+# had no case for AST_EXPR_INTERP, so it answered NULL and the wrap never
+# fired. The statement-scope pool flush then freed the heap the list had
+# just stored: garbage on read, SIGABRT on drop.
+#
+# Reading back the exact strings AND exiting cleanly are both the test;
+# the original failure aborted in malloc during teardown.
+import core
+import string
+
+func main() {
+  let m: String = "gamma"
+  var l: List(String) = createList(String, cap: 8)
+  l.add(value: "literal")          # static: never pooled
+  l.add(value: m)                  # plain binding: already detached
+  l.add(value: "{m}")              # interpolation: the #343 case
+  l.add(value: "pre-{m}-post")     # interpolation with surrounding text
+  l.add(value: m.concat(other: "-tail"))   # call result, same ownership path
+  var i: Int = 0
+  loop i < l.length {
+    log("[{i}]={l.at(index: i)}")
+    i = i + 1
+  }
+}
