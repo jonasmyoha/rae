@@ -40,6 +40,8 @@ open ui/theme_resolved
 open ui/transform
 open ui/event_loop
 open ui/frame_stats
+open ui/log_overlay
+open hot_reload
 import ui/ecs
 import ui/input_gpu2d
 import ui/layout
@@ -51,6 +53,8 @@ import ui/theme_resolved
 import ui/transform
 import ui/event_loop
 import ui/frame_stats
+import ui/log_overlay
+import hot_reload
 
 enum CameraMode {
   orbit
@@ -505,6 +509,21 @@ func main() ret Int {
   transformSystem(world: uiWorld)
   visualBoundsSystem(world: uiWorld, res: gpuUi)
 
+  # Diagnostic log overlay (lib/ui/log_overlay.rae), bottom-left here and
+  # top-left in the mobile UI example — same widget, different corner.
+  var logView: LogOverlay = createLogOverlay(capacity: 64, maxLines: 10, anchor: logAnchorBottomLeft, fontSize: 14.0)
+  # First use case: make hot reloads visible. A rebuilt binary that failed
+  # to relaunch looks exactly like one that reloaded and changed nothing,
+  # so print the launch generation — watching 5 become 6 is the proof.
+  let reloadGen: Int = nextReloadGeneration()
+  logInfoLine(ov: logView, text: "hot reload {reloadGen}")
+  logDebugLine(ov: logView, text: "scene1/2/3 loaded, renderer graph compiled")
+  # Real conditions, not decoration: surface a degraded renderer state so
+  # it cannot be mistaken for how the app normally looks.
+  if getEnv(name: "RAE_NO_TAA").length() > 0 {
+    logWarnLine(ov: logView, text: "TAA disabled (RAE_NO_TAA) - edges will alias")
+  }
+
   var uiInput: UiInput = createUiInput()
   var uiState: DemoUiResource = createDemoUiResource()
   var camera: Camera3d = scene1.camera
@@ -552,6 +571,7 @@ func main() ret Int {
   # gated on explicit change flags, and the UI paint only happens inside a
   # rendered frame, so an idle app touches neither.
   var renderedOnce: Bool = false
+  var lastLogRevision: Int = 0 - 1
   # TAA converges over several frames, so stopping the instant motion ends
   # would freeze a half-resolved image. Keep drawing a few extra frames
   # after the last change, then idle on a fully converged picture.
@@ -675,8 +695,10 @@ func main() ret Int {
     # few frames after motion stops, so keep drawing until it settles or
     # edges would stay half-resolved on the final image.
     let sceneAnimating: Bool = uiState.paused is false
+    let logChanged: Bool = logView.revision is not lastLogRevision
     var needsRender: Bool = sceneAnimating or cameraMoved or uiLayoutDirty
-      or extentChanged or hadUiEvents or fpsDirty or renderedOnce is false
+      or extentChanged or hadUiEvents or fpsDirty or logChanged
+      or renderedOnce is false
     if taaSettleFrames > 0 { needsRender = true }
     if needsRender is false {
       # Nothing to draw: park until the OS has something to say, or until
@@ -742,6 +764,9 @@ func main() ret Int {
         if tag is tagUiOverlay {
           gpu2d.beginFrameLoad()
           renderSystemGpu2d(world: uiWorld, res: gpuUi)
+          # After the app UI, so the diagnostic is never what gets covered up.
+          drawLogOverlay(ov: logView, font: textFont, screenW: extentW, screenH: extentH)
+          lastLogRevision = logView.revision
         }
         if tag is tagPresent {
           gpu2d.endFrame()

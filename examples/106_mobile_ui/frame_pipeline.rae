@@ -218,6 +218,9 @@ func renderGpu2dFrame(
   world: mod UiWorld
   gpuUi: view Gpu2dUi
   debug: mod DebugSystem
+  logView: view LogOverlay
+  logW: view Float
+  logH: view Float
   renderCache: mod RenderCache
   bg: view RgbaColor
   now: view Float64
@@ -234,6 +237,9 @@ func renderGpu2dFrame(
     uiBeginFrame(clear: bg)
     renderSystemGpu2d(world: world, res: gpuUi)
     updateAndRenderDebugOverlayGpu2d(debug: debug, now: now, didRealWork: active, font: gpuUi.textFont)
+    # Shared log overlay (lib/ui/log_overlay.rae) — top-left here, bottom-left
+    # in the 3D example. Drawn last so it is never covered by app UI.
+    drawLogOverlay(ov: logView, font: gpuUi.textFont, screenW: logW, screenH: logH)
     uiEndFrame()
     renderCacheDirty(world: world, cache: renderCache)
     ret FrameRenderResult {

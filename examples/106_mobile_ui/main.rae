@@ -1,6 +1,8 @@
 open hot_reload
 open ui/ecs
 open ui/event_loop
+open ui/log_overlay
+open hot_reload
 # Mobile-UI demo entrypoint. The actual work — scene loading, world
 # building, screen routing — lives in sibling `.rae` files in this same
 # directory, which Rae auto-imports because they share the project
@@ -24,6 +26,8 @@ import sdf_text
 import sys/spotify
 import ui/ecs
 import ui/event_loop
+import ui/log_overlay
+import hot_reload
 import ui/fit
 import ui/layout
 import ui/theme
@@ -125,6 +129,16 @@ func main() {
   var viewport: Viewport = createViewportFromWindow()
   uiSetDesignResolution(width: viewport.layoutW, height: viewport.layoutH, fit: 0)
   let frameName: String = frameIdName(id: viewport.forcedFrameId)
+  # Shared diagnostic log overlay, top-left (the 3D example anchors it
+  # bottom-left). First line makes hot reloads visible: a rebuilt binary
+  # that failed to relaunch looks identical to one that reloaded and
+  # changed nothing, so the generation number is the proof.
+  var logView: LogOverlay = createLogOverlay(capacity: 64, maxLines: 10, anchor: logAnchorTopLeft, fontSize: 13.0)
+  # Clear the status bar / safe-area inset rather than drawing under it.
+  logView.marginY = 44.0
+  let reloadGen: Int = nextReloadGeneration()
+  logInfoLine(ov: logView, text: "hot reload {reloadGen}")
+
   log("[viewport] windowPt={viewport.windowPtW}x{viewport.windowPtH} fbPx={viewport.framebufferPxW}x{viewport.framebufferPxH} dpr={viewport.dpr} unitScale={viewport.unitScale} layout={viewport.layoutW}x{viewport.layoutH} deviceActive={viewport.devicePresetActive} frame={frameName} safe={viewport.safeInsetsDu.l},{viewport.safeInsetsDu.t},{viewport.safeInsetsDu.r},{viewport.safeInsetsDu.b}")
 
   # Spotify-mode integration. ON by default; opt out with
@@ -902,6 +916,9 @@ func main() {
             world: world
             gpuUi: gpuUi
             debug: debug
+            logView: logView
+            logW: viewport.layoutW
+            logH: viewport.layoutH
             renderCache: renderCache
             bg: pageBgColor
             now: now
