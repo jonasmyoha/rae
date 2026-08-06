@@ -1,5 +1,6 @@
 open hot_reload
 open ui/ecs
+open ui/event_loop
 # Mobile-UI demo entrypoint. The actual work — scene loading, world
 # building, screen routing — lives in sibling `.rae` files in this same
 # directory, which Rae auto-imports because they share the project
@@ -22,6 +23,7 @@ import hot_reload
 import sdf_text
 import sys/spotify
 import ui/ecs
+import ui/event_loop
 import ui/fit
 import ui/layout
 import ui/theme
@@ -537,7 +539,7 @@ func main() {
         let busyAnimating: Bool = anim.active or scrollAnimating or lastHoverAnimDirty or assetsLoading or uiPointerButtonDown(button: mouseButtonLeft)
         var timeout: Float = 0.0
         if busyAnimating is false {
-          timeout = nextWaitTimeoutSec(animating: playbackAnimating or uiNowSeconds() < renderUntil, mouseDown: false, pollWatcher: true, frameSec: targetFrameSec)
+          timeout = nextWaitTimeoutSec(animating: playbackAnimating or uiNowSeconds() < renderUntil, mouseDown: false, pollWatcher: true, frameSec: targetFrameSec, heartbeatSec: 0.0)
         }
         # Heartbeat: prints once per frame BEFORE the wait. If this
         # line stops appearing in the log, the loop has stalled
