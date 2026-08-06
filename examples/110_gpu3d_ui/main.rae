@@ -3,6 +3,20 @@
 # Frame ownership is explicit: Scene3d renders first, gpu3d.endPass submits
 # without presenting, GPU2D loads the resolved color target and paints UiWorld,
 # then GPU2D presents once. UI hit-testing has priority over orbit input.
+#
+# RESPONSIVE, NOT SCALED: the design resolution tracks the window's logical
+# size, so the design->pixel transform is identity. Fonts keep their
+# authored point size at every window size, and there are no letterbox
+# bars. The UI scene is authored at absolute coordinates, so
+# `anchorUiToExtent` re-places the root-level nodes whenever the extent
+# changes — intent ("centred", "right-aligned", "full-bleed") lives there
+# rather than in resolution-specific constants.
+#
+# IDLE COSTS NOTHING: the loop only draws when something it depends on
+# changed — simulation running, camera moved, UI event, resize, or TAA
+# still converging. Otherwise it parks in `gpu2d.waitEvents`, so a paused
+# app sits at 0% CPU instead of re-rendering an identical image at frame
+# rate (measured: 0.0% paused vs ~12% animating).
 import core
 import gpu2d
 import math
@@ -33,9 +47,6 @@ import ui/scene_file
 import ui/scene_loader
 import ui/theme_resolved
 import ui/transform
-
-let designW: Float = 1280.0
-let designH: Float = 800.0
 
 enum CameraMode {
   orbit
@@ -224,6 +235,125 @@ func dispatchUiActions(input: view UiInput, state: mod DemoUiResource, controlle
   }
 }
 
+# ----- responsive layout ----------------------------------------------
+# The UI scene is authored at absolute coordinates in a 1280x800 space,
+# which is why it used to be presented through a letterboxed design
+# resolution: fixed constants only line up at one window size. That put
+# black bars around the UI, shrank every font with the window width, and
+# clipped the pause dimmer to a 16:10 box in the middle.
+#
+# Instead the design resolution now MATCHES the window's logical size (so
+# the transform is identity: fonts render at their authored point size at
+# any window size) and the handful of root-level nodes are re-anchored
+# here whenever the extent changes. Only intent lives in this function —
+# "centred", "right-aligned", "full-bleed" — not pixel constants tied to
+# one resolution.
+func setNodeRect(world: mod UiWorld, nodeId: view String, x: view Float, y: view Float, w: view Float, h: view Float) {
+  let entity: EntityId = nodeEntity(world: world, nodeId: nodeId)
+  if isNone(this: entity) { ret }
+  if componentHas(this: world.rects, entity: entity) is false { ret }
+  let r: mod Rect => componentMod(this: world.rects, entity: entity)
+  r.x = x
+  r.y = y
+  r.w = w
+  r.h = h
+}
+
+func nodeRectW(world: view UiWorld, nodeId: view String) ret Float {
+  let entity: EntityId = nodeEntity(world: world, nodeId: nodeId)
+  if isNone(this: entity) { ret 0.0 }
+  if componentHas(this: world.rects, entity: entity) is false { ret 0.0 }
+  let r: Rect = componentGet(this: world.rects, entity: entity)
+  ret r.w
+}
+
+# Place one readout inside the camera bar if it fits, otherwise hide it and
+# every readout after it. Truncation is SEQUENTIAL on purpose: letting a
+# narrow later readout slot into the gap left by a wide one that did not
+# fit shows an arbitrary subset, so the bar would reorder itself as the
+# window resizes. Returns the x cursor for the next readout, or a negative
+# cursor once truncated.
+func placeBarReadout(world: mod UiWorld, nodeId: view String, x: view Float, w: view Float, barW: view Float) ret Float {
+  var fits: Bool = x >= 0.0
+  if fits {
+    if x + w + 10.0 > barW { fits = false }
+  }
+  setNodeActive(world: world, nodeId: nodeId, value: fits)
+  if fits is false {
+    ret 0.0 - 1.0
+  }
+  setNodeRect(world: world, nodeId: nodeId, x: x, y: 16.0, w: w, h: 22.0)
+  ret x + w + 14.0
+}
+
+func anchorUiToExtent(world: mod UiWorld, w: view Float, h: view Float) {
+  let margin: Float = 24.0
+  # Full-bleed: the root and the pause dimmer must cover the whole window,
+  # not a fixed-size box inside it.
+  setNodeRect(world: world, nodeId: "UiRoot", x: 0.0, y: 0.0, w: w, h: h)
+  setNodeRect(world: world, nodeId: "PauseLayer", x: 0.0, y: 0.0, w: w, h: h)
+
+  # Right-aligned controls, measured from the live width.
+  let debugW: Float = nodeRectW(world: world, nodeId: "DebugButton")
+  let pauseW: Float = nodeRectW(world: world, nodeId: "PauseButton")
+  let debugX: Float = w - margin - debugW
+  setNodeRect(world: world, nodeId: "DebugButton", x: debugX, y: 24.0, w: debugW, h: 52.0)
+  let pauseX: Float = debugX - 12.0 - pauseW
+  setNodeRect(world: world, nodeId: "PauseButton", x: pauseX, y: 24.0, w: pauseW, h: 52.0)
+  setNodeRect(world: world, nodeId: "FpsLabel", x: w - margin - 86.0, y: 82.0, w: 86.0, h: 16.0)
+
+  # The camera bar sits at the top, centred in the space left of the
+  # buttons, and shrinks rather than overlapping them on narrow windows.
+  let barMax: Float = 774.0
+  var barW: Float = pauseX - margin - 12.0 - margin
+  if barW > barMax { barW = barMax }
+  if barW < 120.0 { barW = 120.0 }
+  var barX: Float = (pauseX - margin - barW) * 0.5
+  if barX < margin { barX = margin }
+  setNodeRect(world: world, nodeId: "CameraBar", x: barX, y: 24.0, w: barW, h: 52.0)
+
+  # Crosshair tracks the true viewport centre.
+  setNodeRect(world: world, nodeId: "Crosshair", x: (w - 36.0) * 0.5, y: (h - 36.0) * 0.5, w: 36.0, h: 36.0)
+
+  # The bar's readouts are absolutely placed, so a narrower bar would let
+  # the right-hand ones spill past its edge and over the buttons. Lay them
+  # out from the live bar width instead, and DROP the ones that no longer
+  # fit rather than overlapping — progressive disclosure beats a collision.
+  let modeW: Float = 104.0
+  var cursorX: Float = 6.0 + modeW + 22.0
+  setNodeRect(world: world, nodeId: "CameraModeButton", x: 6.0, y: 6.0, w: modeW, h: 40.0)
+  cursorX = placeBarReadout(world: world, nodeId: "CameraFovLabel", x: cursorX, w: 92.0, barW: barW)
+  cursorX = placeBarReadout(world: world, nodeId: "CameraPositionLabel", x: cursorX, w: 196.0, barW: barW)
+  cursorX = placeBarReadout(world: world, nodeId: "CameraYawLabel", x: cursorX, w: 132.0, barW: barW)
+  cursorX = placeBarReadout(world: world, nodeId: "CameraPitchLabel", x: cursorX, w: 160.0, barW: barW)
+
+  # Panels: the pause dialog centres in the window; the debug panel hangs
+  # off the top-right under its button. Both are children of full-bleed
+  # parents, so their offsets are relative to the window, not to a canvas.
+  let pausePanelW: Float = 420.0
+  let pausePanelH: Float = 260.0
+  setNodeRect(world: world, nodeId: "PausePanel", x: (w - pausePanelW) * 0.5, y: (h - pausePanelH) * 0.5, w: pausePanelW, h: pausePanelH)
+  let debugPanelW: Float = 322.0
+  let debugPanelH: Float = 286.0
+  var debugPanelX: Float = w - margin - debugPanelW
+  if debugPanelX < margin { debugPanelX = margin }
+  setNodeRect(world: world, nodeId: "DebugPanel", x: debugPanelX, y: 88.0, w: debugPanelW, h: debugPanelH)
+}
+
+# Logical (point) size of the window. Layout and text want points, not
+# physical pixels, or everything halves on a retina display.
+func windowExtentW() ret Float {
+  let ratio: Float = gpu2d.dpr()
+  if ratio < 0.1 { ret gpu2d.windowWidth().toFloat() }
+  ret gpu2d.windowWidth().toFloat() / ratio
+}
+
+func windowExtentH() ret Float {
+  let ratio: Float = gpu2d.dpr()
+  if ratio < 0.1 { ret gpu2d.windowHeight().toFloat() }
+  ret gpu2d.windowHeight().toFloat() / ratio
+}
+
 func uploadMeshData(mesh: view MeshData) ret MeshHandle {
   ret uploadMesh(verts: mesh.verts, vertCount: mesh.vertCount, indices: mesh.indices)
 }
@@ -314,7 +444,12 @@ func animateScene1(asset: mod Scene3dAsset, time: view Float) {
 
 func main() ret Int {
   gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — ECS Scene UI")
-  gpu2d.setDesignResolution(width: designW, height: designH, fit: 0)
+  # Design resolution tracks the window's LOGICAL size, so the transform is
+  # identity: no letterbox bars, and fonts keep their authored point size
+  # instead of shrinking with window width.
+  var extentW: Float = windowExtentW()
+  var extentH: Float = windowExtentH()
+  gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
 
   let sphereData: MeshData = makeSphere(rings: 32, segments: 48)
   let torusData: MeshData = makeTorus(majorR: 1.55, minorR: 0.42, majorSegs: 96, minorSegs: 40)
@@ -357,10 +492,11 @@ func main() ret Int {
   let gpuUi: Gpu2dUi = { textFont: textFont, iconFont: iconFont, theme: theme }
 
   var uiWorld: UiWorld = createUiWorld()
-  uiWorld.layoutW = designW
-  uiWorld.layoutH = designH
+  uiWorld.layoutW = extentW
+  uiWorld.layoutH = extentH
   let uiScene: Scene = loadSceneFile(path: "{base}ui.raescene")
   let uiRoot: EntityId = loadScene(world: uiWorld, scene: uiScene)
+  anchorUiToExtent(world: uiWorld, w: extentW, h: extentH)
   layoutSystem(world: uiWorld)
   transformSystem(world: uiWorld)
   visualBoundsSystem(world: uiWorld, res: gpuUi)
@@ -403,6 +539,15 @@ func main() ret Int {
   var lastFrame: Float64 = gpu2d.nowSeconds()
   var fpsAccum: Float = 0.0
   var fpsFrames: Int = 0
+  # Idle policy (see docs/ui-render-loop-performance.md): busy-render while
+  # anything is moving, park in waitEvents when nothing is. Relayout is
+  # gated on explicit change flags, and the UI paint only happens inside a
+  # rendered frame, so an idle app touches neither.
+  var renderedOnce: Bool = false
+  # TAA converges over several frames, so stopping the instant motion ends
+  # would freeze a half-resolved image. Keep drawing a few extra frames
+  # after the last change, then idle on a fully converged picture.
+  var taaSettleFrames: Int = 0
 
   loop not gpu2d.pollClose() {
     let now: Float64 = gpu2d.nowSeconds()
@@ -410,15 +555,36 @@ func main() ret Int {
     lastFrame = now
     if dt > 0.1 { dt = 0.1 }
 
+    # Re-anchor on resize. The window's logical size is the layout extent,
+    # so a resize re-runs placement instead of rescaling a fixed canvas.
+    var extentChanged: Bool = false
+    if gpu2d.windowResized() {
+      extentW = windowExtentW()
+      extentH = windowExtentH()
+      if extentW > 0.0 and extentH > 0.0 {
+        gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
+        uiWorld.layoutW = extentW
+        uiWorld.layoutH = extentH
+        anchorUiToExtent(world: uiWorld, w: extentW, h: extentH)
+        extentChanged = true
+      }
+    }
+
     updateUiInput(input: uiInput, world: uiWorld)
+    let hadUiEvents: Bool = uiInput.events.length > 0
     dispatchUiActions(input: uiInput, state: uiState, controller: cameraController, camera: camera)
     let uiLayoutDirty: Bool = syncDemoUi(world: uiWorld, state: uiState)
-    if uiLayoutDirty {
+    if uiLayoutDirty or extentChanged {
       layoutSystem(world: uiWorld)
       transformSystem(world: uiWorld)
+      visualBoundsSystem(world: uiWorld, res: gpuUi)
     }
-    visualBoundsSystem(world: uiWorld, res: gpuUi)
 
+    let camYaw0: Float = cameraController.yaw
+    let camPitch0: Float = cameraController.orbitPitch
+    let camFreePitch0: Float = cameraController.freePitch
+    let camDist0: Float = cameraController.distance
+    let camPos0: Vec3 = cameraController.freePosition
     let px: Float = gpu2d.pointerX()
     let py: Float = gpu2d.pointerY()
     let cameraInput: Bool = uiPointerCaptured(input: uiInput) is false and uiState.paused is false
@@ -469,79 +635,112 @@ func main() ret Int {
       }
     }
 
-    if uiState.paused is false {
-      var motionScale: Float = 1.0
-      if uiState.fullSpeed is false { motionScale = 0.25 }
-      simTime = simTime + dt * motionScale
-    }
-    if cameraController.mode is CameraMode.orbit {
-      camera.position = orbitEye(targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z, yaw: cameraController.yaw, pitch: cameraController.orbitPitch, dist: cameraController.distance)
-    } else {
-      let forward: Vec3 = cameraForward(controller: cameraController)
-      camera.position = cameraController.freePosition
-      camera.target = vec3.vadd(a: camera.position, b: forward)
-    }
-    syncCameraUi(world: uiWorld, controller: cameraController, camera: camera)
-    if uiState.activeScene is 1 { light = scene1.light }
-    if uiState.activeScene is 2 { light = scene2.light }
-    if uiState.activeScene is 3 { light = scene3.light }
-    light.sunDir = vec3.create(x: 0.0 - math.cos(x: simTime * 0.22) * 0.7, y: 0.0 - 0.7 - math.sin(x: simTime * 0.22) * 0.25, z: 0.0 - 1.0)
-    if uiState.activeScene is 1 { animateScene1(asset: scene1, time: simTime) }
-    if uiState.activeScene is 2 { animateScene(scene: scene2.scene, sceneId: 2, time: simTime) }
-    if uiState.activeScene is 3 { animateScene(scene: scene3.scene, sceneId: 3, time: simTime) }
+    let cameraMoved: Bool = cameraController.yaw is not camYaw0
+      or cameraController.orbitPitch is not camPitch0
+      or cameraController.freePitch is not camFreePitch0
+      or cameraController.distance is not camDist0
+      or cameraController.freePosition.x is not camPos0.x
+      or cameraController.freePosition.y is not camPos0.y
+      or cameraController.freePosition.z is not camPos0.z
 
-    fpsAccum = fpsAccum + dt
-    fpsFrames = fpsFrames + 1
-    if fpsAccum >= 0.5 {
-      uiState.fps = (fpsFrames.toFloat() / fpsAccum + 0.5).toInt()
-      uiState.fpsRevision = uiState.fpsRevision + 1
+    # The frame is only worth drawing if something it depends on changed.
+    # While paused the 3D scene is frozen, so the presented image is still
+    # valid — redrawing it would burn a GPU frame to produce the same
+    # pixels. TAA is the one caveat: its history is still converging for a
+    # few frames after motion stops, so keep drawing until it settles or
+    # edges would stay half-resolved on the final image.
+    let sceneAnimating: Bool = uiState.paused is false
+    var needsRender: Bool = sceneAnimating or cameraMoved or uiLayoutDirty
+      or extentChanged or hadUiEvents or renderedOnce is false
+    if taaSettleFrames > 0 { needsRender = true }
+    if needsRender is false {
+      # Nothing to do: park until the OS has something to say. This is
+      # what takes idle CPU and GPU to ~zero instead of spinning at
+      # frame rate re-rendering an identical image.
+      gpu2d.waitEvents(timeoutSec: 0.5)
       fpsAccum = 0.0
       fpsFrames = 0
-      let fpsLayoutDirty: Bool = syncDemoUi(world: uiWorld, state: uiState)
-      if fpsLayoutDirty {
-        layoutSystem(world: uiWorld)
-        transformSystem(world: uiWorld)
+    } else {
+      if sceneAnimating or cameraMoved or uiLayoutDirty or extentChanged or hadUiEvents {
+        taaSettleFrames = 6
+      } else {
+        taaSettleFrames = taaSettleFrames - 1
       }
-      visualBoundsSystem(world: uiWorld, res: gpuUi)
-    }
+      renderedOnce = true
+      if uiState.paused is false {
+        var motionScale: Float = 1.0
+        if uiState.fullSpeed is false { motionScale = 0.25 }
+        simTime = simTime + dt * motionScale
+      }
+      if cameraController.mode is CameraMode.orbit {
+        camera.position = orbitEye(targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z, yaw: cameraController.yaw, pitch: cameraController.orbitPitch, dist: cameraController.distance)
+      } else {
+        let forward: Vec3 = cameraForward(controller: cameraController)
+        camera.position = cameraController.freePosition
+        camera.target = vec3.vadd(a: camera.position, b: forward)
+      }
+      syncCameraUi(world: uiWorld, controller: cameraController, camera: camera)
+      if uiState.activeScene is 1 { light = scene1.light }
+      if uiState.activeScene is 2 { light = scene2.light }
+      if uiState.activeScene is 3 { light = scene3.light }
+      light.sunDir = vec3.create(x: 0.0 - math.cos(x: simTime * 0.22) * 0.7, y: 0.0 - 0.7 - math.sin(x: simTime * 0.22) * 0.25, z: 0.0 - 1.0)
+      if uiState.activeScene is 1 { animateScene1(asset: scene1, time: simTime) }
+      if uiState.activeScene is 2 { animateScene(scene: scene2.scene, sceneId: 2, time: simTime) }
+      if uiState.activeScene is 3 { animateScene(scene: scene3.scene, sceneId: 3, time: simTime) }
 
-    let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
-    # Frame order is DERIVED by the render graph (#331/#332): scene3d
-    # writes the colour target, the UI overlay MODIFIES it (load-preserving),
-    # present reads it. The passes are declared backwards in
-    # createRenderer3dWithUi; this loop runs them in dependency order.
-    var pi3: Int = 0
-    loop pi3 < frameOrderLength(r: renderer) {
-      let tag: Int = frameTagAt(r: renderer, i: pi3)
-      if tag is tagScenePass {
-        beginScene(camera: camera, light: light, aspect: aspect, time: simTime)
-        if uiState.activeScene is 1 { renderScene(scene: scene1.scene) }
-        if uiState.activeScene is 2 { renderScene(scene: scene2.scene) }
-        if uiState.activeScene is 3 { renderScene(scene: scene3.scene) }
-        endPass()
+      fpsAccum = fpsAccum + dt
+      fpsFrames = fpsFrames + 1
+      if fpsAccum >= 0.5 {
+        uiState.fps = (fpsFrames.toFloat() / fpsAccum + 0.5).toInt()
+        uiState.fpsRevision = uiState.fpsRevision + 1
+        fpsAccum = 0.0
+        fpsFrames = 0
+        let fpsLayoutDirty: Bool = syncDemoUi(world: uiWorld, state: uiState)
+        if fpsLayoutDirty {
+          layoutSystem(world: uiWorld)
+          transformSystem(world: uiWorld)
+        }
+        visualBoundsSystem(world: uiWorld, res: gpuUi)
       }
-      if tag is tagTonemap {
-        # HDR -> LDR resolve (#334). The UI overlay below composites in
-        # display space, so it must come after this, which the graph
-        # guarantees: tonemap writes the LDR target the overlay modifies.
-        tonemapPass()
+
+      let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
+      # Frame order is DERIVED by the render graph (#331/#332): scene3d
+      # writes the colour target, the UI overlay MODIFIES it (load-preserving),
+      # present reads it. The passes are declared backwards in
+      # createRenderer3dWithUi; this loop runs them in dependency order.
+      var pi3: Int = 0
+      loop pi3 < frameOrderLength(r: renderer) {
+        let tag: Int = frameTagAt(r: renderer, i: pi3)
+        if tag is tagScenePass {
+          beginScene(camera: camera, light: light, aspect: aspect, time: simTime)
+          if uiState.activeScene is 1 { renderScene(scene: scene1.scene) }
+          if uiState.activeScene is 2 { renderScene(scene: scene2.scene) }
+          if uiState.activeScene is 3 { renderScene(scene: scene3.scene) }
+          endPass()
+        }
+        if tag is tagTonemap {
+          # HDR -> LDR resolve (#334). The UI overlay below composites in
+          # display space, so it must come after this, which the graph
+          # guarantees: tonemap writes the LDR target the overlay modifies.
+          tonemapPass()
+        }
+        if tag is tagUiOverlay {
+          gpu2d.beginFrameLoad()
+          renderSystemGpu2d(world: uiWorld, res: gpuUi)
+        }
+        if tag is tagPresent {
+          gpu2d.endFrame()
+        }
+        pi3 = pi3 + 1
       }
-      if tag is tagUiOverlay {
-        gpu2d.beginFrameLoad()
-        renderSystemGpu2d(world: uiWorld, res: gpuUi)
-      }
-      if tag is tagPresent {
-        gpu2d.endFrame()
-      }
-      pi3 = pi3 + 1
+      # Frame history for motion vectors (#336): the ACTIVE scene's current
+      # transforms become its previous-frame set. Inactive scenes are not
+      # snapshotted — they aren't rendered, so they have no frame history to
+      # advance, and their first frame back re-syncs on the next snapshot.
+      if uiState.activeScene is 1 { snapshotPrevTransforms(scene: scene1.scene) }
+      if uiState.activeScene is 2 { snapshotPrevTransforms(scene: scene2.scene) }
+      if uiState.activeScene is 3 { snapshotPrevTransforms(scene: scene3.scene) }
     }
-    # Frame history for motion vectors (#336): the ACTIVE scene's current
-    # transforms become its previous-frame set. Inactive scenes are not
-    # snapshotted — they aren't rendered, so they have no frame history to
-    # advance, and their first frame back re-syncs on the next snapshot.
-    if uiState.activeScene is 1 { snapshotPrevTransforms(scene: scene1.scene) }
-    if uiState.activeScene is 2 { snapshotPrevTransforms(scene: scene2.scene) }
-    if uiState.activeScene is 3 { snapshotPrevTransforms(scene: scene3.scene) }
   }
   shutdown()
   gpu2d.closeWindow()
