@@ -1,0 +1,42 @@
+# Idle/wait policy for the GPU2D + SDL3 window seam — the shared version.
+#
+# This was duplicated per app (examples/106_mobile_ui carried its own copy)
+# even though the policy is not app-specific: an app that animates wants a
+# frame-length timeout, an app that is idle wants a long one, and getting
+# that wrong is the difference between smooth motion and a starved loop.
+# See docs/ui-render-loop-performance.md for why a wait-based loop cannot
+# drive continuous animation on its own.
+#
+# `lib/ui/legacy_raylib/event_loop.rae` keeps its own copy on purpose: it
+# targets the raylib backend, whose frame/vsync model differs.
+#
+# Deliberately dependency-free: the monitor-refresh helper that used to sit
+# beside this lives with its backend accessor instead, so lib/ui does not
+# have to know how a window reports its refresh rate.
+import core
+
+let watcherPollSec: Float = 0.05
+let idleCapSec: Float = 30.0
+
+# How long to block in waitEvents before waking on our own.
+#
+# `animating` MUST be true for every continuous motion source in the app —
+# a new animation that forgets to feed this flag silently degrades to the
+# watcher poll rate instead of failing loudly.
+#
+# `heartbeatSec > 0` requests a wake-up cadence while otherwise idle, for
+# an app that displays something time-derived (an FPS readout, a clock).
+# Pass 0 to sleep as long as possible.
+func nextWaitTimeoutSec(
+  animating: view Bool
+  mouseDown: view Bool
+  pollWatcher: view Bool
+  frameSec: view Float
+  heartbeatSec: view Float
+) pub ret Float {
+  if animating { ret frameSec }
+  if mouseDown { ret frameSec }
+  if pollWatcher { ret watcherPollSec }
+  if heartbeatSec > 0.0 { ret heartbeatSec }
+  ret idleCapSec
+}

@@ -1,180 +1,656 @@
 {
-  "type": "Scene",
-  "version": 2,
-  "sceneId": "gpu3d-ui",
-  "root": "UiRoot",
-  "nodes": {
-    "UiRoot": {
-      "Rect": { "x": 0, "y": 0, "w": 1280, "h": 800 },
-      "Children": ["CameraBar", "PauseButton", "DebugButton", "FpsLabel", "Crosshair", "DebugPanel", "PauseLayer"]
+ "type": "Scene",
+ "version": 2,
+ "sceneId": "gpu3d-ui",
+ "root": "UiRoot",
+ "nodes": {
+  "UiRoot": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 1280,
+    "h": 800
+   },
+   "Children": [
+    "CameraBar",
+    "PauseButton",
+    "DebugButton",
+    "Crosshair",
+    "DebugPanel",
+    "PauseLayer",
+    "FpsLabel"
+   ]
+  },
+  "CameraBar": {
+   "Rect": {
+    "x": 246,
+    "y": 24,
+    "w": 774,
+    "h": 52
+   },
+   "Shape": {
+    "kind": "Rectangle",
+    "fill": {
+     "r": 10,
+     "g": 18,
+     "b": 29,
+     "a": 225
     },
-    "CameraBar": {
-      "Rect": { "x": 246, "y": 24, "w": 774, "h": 52 },
-      "Shape": { "kind": "Rectangle", "fill": { "r": 10, "g": 18, "b": 29, "a": 225 }, "radius": 18 },
-      "Children": ["CameraModeButton", "CameraFovLabel", "CameraPositionLabel", "CameraYawLabel", "CameraPitchLabel"]
+    "radius": 18
+   },
+   "Children": [
+    "CameraModeButton",
+    "CameraFovLabel",
+    "CameraPositionLabel",
+    "CameraYawLabel",
+    "CameraPitchLabel"
+   ]
+  },
+  "CameraModeButton": {
+   "Rect": {
+    "x": 6,
+    "y": 6,
+    "w": 104,
+    "h": 40
+   },
+   "Shape": {
+    "kind": "Rectangle",
+    "fill": {
+     "r": 31,
+     "g": 52,
+     "b": 70,
+     "a": 255
     },
-    "CameraModeButton": {
-      "Rect": { "x": 6, "y": 6, "w": 104, "h": 40 },
-      "Shape": { "kind": "Rectangle", "fill": { "r": 31, "g": 52, "b": 70, "a": 255 }, "radius": 20 },
-      "OnClick": { "actionId": "camera.mode" },
-      "Children": ["CameraModeLabel"]
+    "radius": 20
+   },
+   "OnClick": {
+    "actionId": "camera.mode"
+   },
+   "Children": [
+    "CameraModeLabel"
+   ]
+  },
+  "CameraModeLabel": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 104,
+    "h": 40
+   },
+   "Text": {
+    "text": "Orbit",
+    "styleId": "cameraMode"
+   },
+   "OpticalAlign": {
+    "centerX": true,
+    "centerY": true
+   }
+  },
+  "CameraFovLabel": {
+   "Rect": {
+    "x": 132,
+    "y": 16,
+    "w": 92,
+    "h": 22
+   },
+   "Text": {
+    "text": "FOV 50\u00b0",
+    "styleId": "cameraData"
+   }
+  },
+  "CameraPositionLabel": {
+   "Rect": {
+    "x": 238,
+    "y": 16,
+    "w": 196,
+    "h": 22
+   },
+   "Text": {
+    "text": "Pos 0, -12, 4",
+    "styleId": "cameraData"
+   }
+  },
+  "CameraYawLabel": {
+   "Rect": {
+    "x": 448,
+    "y": 16,
+    "w": 132,
+    "h": 22
+   },
+   "Text": {
+    "text": "Yaw 0\u00b0",
+    "styleId": "cameraData"
+   }
+  },
+  "CameraPitchLabel": {
+   "Rect": {
+    "x": 594,
+    "y": 16,
+    "w": 160,
+    "h": 22
+   },
+   "Text": {
+    "text": "Pitch 22\u00b0",
+    "styleId": "cameraData"
+   }
+  },
+  "FpsLabel": {
+   "Rect": {
+    "x": 1170,
+    "y": 82,
+    "w": 86,
+    "h": 16
+   },
+   "Text": {
+    "text": "fps: --",
+    "styleId": "fpsTiny"
+   }
+  },
+  "PauseButton": {
+   "Rect": {
+    "x": 1046,
+    "y": 24,
+    "w": 98,
+    "h": 48
+   },
+   "Shape": {
+    "kind": "Rectangle",
+    "fill": {
+     "r": 14,
+     "g": 27,
+     "b": 42,
+     "a": 230
     },
-    "CameraModeLabel": {
-      "Rect": { "x": 0, "y": 0, "w": 104, "h": 40 },
-      "Text": { "text": "Orbit", "styleId": "cameraMode" },
-      "OpticalAlign": { "centerX": true, "centerY": true }
+    "radius": 24
+   },
+   "OnClick": {
+    "actionId": "scene.pause"
+   },
+   "Children": [
+    "PauseLabel"
+   ]
+  },
+  "PauseLabel": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 98,
+    "h": 48
+   },
+   "Text": {
+    "text": "Pause",
+    "styleId": "button"
+   },
+   "OpticalAlign": {
+    "centerX": true,
+    "centerY": true
+   }
+  },
+  "DebugButton": {
+   "Rect": {
+    "x": 1158,
+    "y": 24,
+    "w": 98,
+    "h": 48
+   },
+   "Shape": {
+    "kind": "Rectangle",
+    "fill": {
+     "r": 75,
+     "g": 204,
+     "b": 192,
+     "a": 235
     },
-    "CameraFovLabel": {
-      "Rect": { "x": 132, "y": 16, "w": 92, "h": 22 },
-      "Text": { "text": "FOV 50°", "styleId": "cameraData" }
+    "radius": 24
+   },
+   "Sprite": {
+    "textureKey": "mat:tune",
+    "tint": {
+     "r": 7,
+     "g": 28,
+     "b": 31,
+     "a": 255
     },
-    "CameraPositionLabel": {
-      "Rect": { "x": 238, "y": 16, "w": 196, "h": 22 },
-      "Text": { "text": "Pos 0, -12, 4", "styleId": "cameraData" }
+    "scaleMode": "Fit"
+   },
+   "OnClick": {
+    "actionId": "ui.debug"
+   }
+  },
+  "Crosshair": {
+   "Rect": {
+    "x": 622,
+    "y": 382,
+    "w": 36,
+    "h": 36
+   },
+   "Sprite": {
+    "textureKey": "mat:add",
+    "tint": {
+     "r": 244,
+     "g": 248,
+     "b": 255,
+     "a": 180
     },
-    "CameraYawLabel": {
-      "Rect": { "x": 448, "y": 16, "w": 132, "h": 22 },
-      "Text": { "text": "Yaw 0°", "styleId": "cameraData" }
+    "scaleMode": "Fit"
+   }
+  },
+  "DebugPanel": {
+   "Rect": {
+    "x": 934,
+    "y": 88,
+    "w": 322,
+    "h": 286
+   },
+   "Shape": {
+    "kind": "Rectangle",
+    "fill": {
+     "r": 9,
+     "g": 16,
+     "b": 27,
+     "a": 238
     },
-    "CameraPitchLabel": {
-      "Rect": { "x": 594, "y": 16, "w": 160, "h": 22 },
-      "Text": { "text": "Pitch 22°", "styleId": "cameraData" }
+    "radius": 18
+   },
+   "Active": {
+    "value": false
+   },
+   "Children": [
+    "DebugTitle",
+    "MotionLabel",
+    "MotionButton",
+    "SceneLabel",
+    "Scene1Button",
+    "Scene2Button",
+    "Scene3Button",
+    "DebugHint"
+   ]
+  },
+  "DebugTitle": {
+   "Rect": {
+    "x": 20,
+    "y": 18,
+    "w": 282,
+    "h": 30
+   },
+   "Text": {
+    "text": "Render settings",
+    "styleId": "title"
+   }
+  },
+  "MotionLabel": {
+   "Rect": {
+    "x": 20,
+    "y": 60,
+    "w": 282,
+    "h": 24
+   },
+   "Text": {
+    "text": "Animation speed",
+    "styleId": "body"
+   }
+  },
+  "MotionButton": {
+   "Rect": {
+    "x": 20,
+    "y": 94,
+    "w": 282,
+    "h": 46
+   },
+   "Shape": {
+    "kind": "Rectangle",
+    "fill": {
+     "r": 31,
+     "g": 52,
+     "b": 70,
+     "a": 255
     },
-    "FpsLabel": {
-      "Rect": { "x": 1170, "y": 82, "w": 86, "h": 16 },
-      "Text": { "text": "fps: --", "styleId": "fpsTiny" }
+    "radius": 14
+   },
+   "OnClick": {
+    "actionId": "animation.speed"
+   },
+   "Children": [
+    "MotionButtonLabel"
+   ]
+  },
+  "MotionButtonLabel": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 282,
+    "h": 46
+   },
+   "Text": {
+    "text": "Reduced",
+    "styleId": "button"
+   },
+   "OpticalAlign": {
+    "centerX": true,
+    "centerY": true
+   }
+  },
+  "SceneLabel": {
+   "Rect": {
+    "x": 20,
+    "y": 153,
+    "w": 282,
+    "h": 24
+   },
+   "Text": {
+    "text": "Scene",
+    "styleId": "body"
+   }
+  },
+  "Scene1Button": {
+   "Rect": {
+    "x": 20,
+    "y": 186,
+    "w": 82,
+    "h": 46
+   },
+   "Shape": {
+    "kind": "Rectangle",
+    "fill": {
+     "r": 31,
+     "g": 52,
+     "b": 70,
+     "a": 255
     },
-    "PauseButton": {
-      "Rect": { "x": 1046, "y": 24, "w": 98, "h": 48 },
-      "Shape": { "kind": "Rectangle", "fill": { "r": 14, "g": 27, "b": 42, "a": 230 }, "radius": 24 },
-      "OnClick": { "actionId": "scene.pause" },
-      "Children": ["PauseLabel"]
+    "radius": 14
+   },
+   "OnClick": {
+    "actionId": "scene.select.1"
+   },
+   "Children": [
+    "Scene1Selected",
+    "Scene1Label"
+   ]
+  },
+  "Scene1Selected": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 82,
+    "h": 46
+   },
+   "Shape": {
+    "kind": "Rectangle",
+    "fill": {
+     "r": 75,
+     "g": 204,
+     "b": 192,
+     "a": 255
     },
-    "PauseLabel": {
-      "Rect": { "x": 0, "y": 0, "w": 98, "h": 48 },
-      "Text": { "text": "Pause", "styleId": "button" },
-      "OpticalAlign": { "centerX": true, "centerY": true }
+    "radius": 14
+   }
+  },
+  "Scene1Label": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 82,
+    "h": 46
+   },
+   "Text": {
+    "text": "1",
+    "styleId": "button"
+   },
+   "OpticalAlign": {
+    "centerX": true,
+    "centerY": true
+   }
+  },
+  "Scene2Button": {
+   "Rect": {
+    "x": 120,
+    "y": 186,
+    "w": 82,
+    "h": 46
+   },
+   "Shape": {
+    "kind": "Rectangle",
+    "fill": {
+     "r": 31,
+     "g": 52,
+     "b": 70,
+     "a": 255
     },
-    "DebugButton": {
-      "Rect": { "x": 1158, "y": 24, "w": 98, "h": 48 },
-      "Shape": { "kind": "Rectangle", "fill": { "r": 75, "g": 204, "b": 192, "a": 235 }, "radius": 24 },
-      "Sprite": { "textureKey": "mat:tune", "tint": { "r": 7, "g": 28, "b": 31, "a": 255 }, "scaleMode": "Fit" },
-      "OnClick": { "actionId": "ui.debug" }
+    "radius": 14
+   },
+   "OnClick": {
+    "actionId": "scene.select.2"
+   },
+   "Children": [
+    "Scene2Selected",
+    "Scene2Label"
+   ]
+  },
+  "Scene2Selected": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 82,
+    "h": 46
+   },
+   "Shape": {
+    "kind": "Rectangle",
+    "fill": {
+     "r": 75,
+     "g": 204,
+     "b": 192,
+     "a": 255
     },
-    "Crosshair": {
-      "Rect": { "x": 622, "y": 382, "w": 36, "h": 36 },
-      "Sprite": { "textureKey": "mat:add", "tint": { "r": 244, "g": 248, "b": 255, "a": 180 }, "scaleMode": "Fit" }
+    "radius": 14
+   },
+   "Active": {
+    "value": false
+   }
+  },
+  "Scene2Label": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 82,
+    "h": 46
+   },
+   "Text": {
+    "text": "2",
+    "styleId": "button"
+   },
+   "OpticalAlign": {
+    "centerX": true,
+    "centerY": true
+   }
+  },
+  "Scene3Button": {
+   "Rect": {
+    "x": 220,
+    "y": 186,
+    "w": 82,
+    "h": 46
+   },
+   "Shape": {
+    "kind": "Rectangle",
+    "fill": {
+     "r": 31,
+     "g": 52,
+     "b": 70,
+     "a": 255
     },
-    "DebugPanel": {
-      "Rect": { "x": 934, "y": 88, "w": 322, "h": 286 },
-      "Shape": { "kind": "Rectangle", "fill": { "r": 9, "g": 16, "b": 27, "a": 238 }, "radius": 18 },
-      "Active": { "value": false },
-      "Children": ["DebugTitle", "MotionLabel", "MotionButton", "SceneLabel", "Scene1Button", "Scene2Button", "Scene3Button", "DebugHint"]
+    "radius": 14
+   },
+   "OnClick": {
+    "actionId": "scene.select.3"
+   },
+   "Children": [
+    "Scene3Selected",
+    "Scene3Label"
+   ]
+  },
+  "Scene3Selected": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 82,
+    "h": 46
+   },
+   "Shape": {
+    "kind": "Rectangle",
+    "fill": {
+     "r": 75,
+     "g": 204,
+     "b": 192,
+     "a": 255
     },
-    "DebugTitle": {
-      "Rect": { "x": 20, "y": 18, "w": 282, "h": 30 },
-      "Text": { "text": "Render settings", "styleId": "title" }
+    "radius": 14
+   },
+   "Active": {
+    "value": false
+   }
+  },
+  "Scene3Label": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 82,
+    "h": 46
+   },
+   "Text": {
+    "text": "3",
+    "styleId": "button"
+   },
+   "OpticalAlign": {
+    "centerX": true,
+    "centerY": true
+   }
+  },
+  "DebugHint": {
+   "Rect": {
+    "x": 20,
+    "y": 248,
+    "w": 282,
+    "h": 20
+   },
+   "Text": {
+    "text": "State patches this panel without remounting.",
+    "styleId": "muted"
+   }
+  },
+  "PauseLayer": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 1280,
+    "h": 800
+   },
+   "Shape": {
+    "kind": "Rectangle",
+    "fill": {
+     "r": 3,
+     "g": 7,
+     "b": 13,
+     "a": 170
     },
-    "MotionLabel": {
-      "Rect": { "x": 20, "y": 60, "w": 282, "h": 24 },
-      "Text": { "text": "Animation speed", "styleId": "body" }
+    "radius": 0
+   },
+   "Active": {
+    "value": false
+   },
+   "OnClick": {
+    "actionId": "scene.pause"
+   },
+   "Children": [
+    "PausePanel"
+   ]
+  },
+  "PausePanel": {
+   "Rect": {
+    "x": 430,
+    "y": 270,
+    "w": 420,
+    "h": 260
+   },
+   "Shape": {
+    "kind": "Rectangle",
+    "fill": {
+     "r": 10,
+     "g": 19,
+     "b": 31,
+     "a": 250
     },
-    "MotionButton": {
-      "Rect": { "x": 20, "y": 94, "w": 282, "h": 46 },
-      "Shape": { "kind": "Rectangle", "fill": { "r": 31, "g": 52, "b": 70, "a": 255 }, "radius": 14 },
-      "OnClick": { "actionId": "animation.speed" },
-      "Children": ["MotionButtonLabel"]
+    "radius": 24
+   },
+   "Children": [
+    "PauseTitle",
+    "PauseBody",
+    "ResumeButton"
+   ]
+  },
+  "PauseTitle": {
+   "Rect": {
+    "x": 40,
+    "y": 38,
+    "w": 340,
+    "h": 42
+   },
+   "Text": {
+    "text": "Scene paused",
+    "styleId": "center"
+   }
+  },
+  "PauseBody": {
+   "Rect": {
+    "x": 40,
+    "y": 94,
+    "w": 340,
+    "h": 64
+   },
+   "Text": {
+    "text": "The ECS UI remains interactive while simulation time is stopped.",
+    "styleId": "pauseBody",
+    "wrapWidthMode": "NodeWidth"
+   }
+  },
+  "ResumeButton": {
+   "Rect": {
+    "x": 80,
+    "y": 174,
+    "w": 260,
+    "h": 54
+   },
+   "Shape": {
+    "kind": "Rectangle",
+    "fill": {
+     "r": 75,
+     "g": 204,
+     "b": 192,
+     "a": 255
     },
-    "MotionButtonLabel": {
-      "Rect": { "x": 0, "y": 0, "w": 282, "h": 46 },
-      "Text": { "text": "Reduced", "styleId": "button" },
-      "OpticalAlign": { "centerX": true, "centerY": true }
-    },
-    "SceneLabel": {
-      "Rect": { "x": 20, "y": 153, "w": 282, "h": 24 },
-      "Text": { "text": "Scene", "styleId": "body" }
-    },
-    "Scene1Button": {
-      "Rect": { "x": 20, "y": 186, "w": 82, "h": 46 },
-      "Shape": { "kind": "Rectangle", "fill": { "r": 31, "g": 52, "b": 70, "a": 255 }, "radius": 14 },
-      "OnClick": { "actionId": "scene.select.1" },
-      "Children": ["Scene1Selected", "Scene1Label"]
-    },
-    "Scene1Selected": {
-      "Rect": { "x": 0, "y": 0, "w": 82, "h": 46 },
-      "Shape": { "kind": "Rectangle", "fill": { "r": 75, "g": 204, "b": 192, "a": 255 }, "radius": 14 }
-    },
-    "Scene1Label": {
-      "Rect": { "x": 0, "y": 0, "w": 82, "h": 46 },
-      "Text": { "text": "1", "styleId": "button" },
-      "OpticalAlign": { "centerX": true, "centerY": true }
-    },
-    "Scene2Button": {
-      "Rect": { "x": 120, "y": 186, "w": 82, "h": 46 },
-      "Shape": { "kind": "Rectangle", "fill": { "r": 31, "g": 52, "b": 70, "a": 255 }, "radius": 14 },
-      "OnClick": { "actionId": "scene.select.2" },
-      "Children": ["Scene2Selected", "Scene2Label"]
-    },
-    "Scene2Selected": {
-      "Rect": { "x": 0, "y": 0, "w": 82, "h": 46 },
-      "Shape": { "kind": "Rectangle", "fill": { "r": 75, "g": 204, "b": 192, "a": 255 }, "radius": 14 },
-      "Active": { "value": false }
-    },
-    "Scene2Label": {
-      "Rect": { "x": 0, "y": 0, "w": 82, "h": 46 },
-      "Text": { "text": "2", "styleId": "button" },
-      "OpticalAlign": { "centerX": true, "centerY": true }
-    },
-    "Scene3Button": {
-      "Rect": { "x": 220, "y": 186, "w": 82, "h": 46 },
-      "Shape": { "kind": "Rectangle", "fill": { "r": 31, "g": 52, "b": 70, "a": 255 }, "radius": 14 },
-      "OnClick": { "actionId": "scene.select.3" },
-      "Children": ["Scene3Selected", "Scene3Label"]
-    },
-    "Scene3Selected": {
-      "Rect": { "x": 0, "y": 0, "w": 82, "h": 46 },
-      "Shape": { "kind": "Rectangle", "fill": { "r": 75, "g": 204, "b": 192, "a": 255 }, "radius": 14 },
-      "Active": { "value": false }
-    },
-    "Scene3Label": {
-      "Rect": { "x": 0, "y": 0, "w": 82, "h": 46 },
-      "Text": { "text": "3", "styleId": "button" },
-      "OpticalAlign": { "centerX": true, "centerY": true }
-    },
-    "DebugHint": {
-      "Rect": { "x": 20, "y": 248, "w": 282, "h": 20 },
-      "Text": { "text": "State patches this panel without remounting.", "styleId": "muted" }
-    },
-    "PauseLayer": {
-      "Rect": { "x": 0, "y": 0, "w": 1280, "h": 800 },
-      "Shape": { "kind": "Rectangle", "fill": { "r": 3, "g": 7, "b": 13, "a": 170 }, "radius": 0 },
-      "Active": { "value": false },
-      "OnClick": { "actionId": "scene.pause" },
-      "Children": ["PausePanel"]
-    },
-    "PausePanel": {
-      "Rect": { "x": 430, "y": 270, "w": 420, "h": 260 },
-      "Shape": { "kind": "Rectangle", "fill": { "r": 10, "g": 19, "b": 31, "a": 250 }, "radius": 24 },
-      "Children": ["PauseTitle", "PauseBody", "ResumeButton"]
-    },
-    "PauseTitle": {
-      "Rect": { "x": 40, "y": 38, "w": 340, "h": 42 },
-      "Text": { "text": "Scene paused", "styleId": "center" }
-    },
-    "PauseBody": {
-      "Rect": { "x": 40, "y": 94, "w": 340, "h": 64 },
-      "Text": { "text": "The ECS UI remains interactive while simulation time is stopped.", "styleId": "pauseBody", "wrapWidthMode": "NodeWidth" }
-    },
-    "ResumeButton": {
-      "Rect": { "x": 80, "y": 174, "w": 260, "h": 54 },
-      "Shape": { "kind": "Rectangle", "fill": { "r": 75, "g": 204, "b": 192, "a": 255 }, "radius": 27 },
-      "OnClick": { "actionId": "scene.pause" },
-      "Children": ["ResumeLabel"]
-    },
-    "ResumeLabel": {
-      "Rect": { "x": 0, "y": 0, "w": 260, "h": 54 },
-      "Text": { "text": "Resume", "styleId": "button" },
-      "OpticalAlign": { "centerX": true, "centerY": true }
-    }
+    "radius": 27
+   },
+   "OnClick": {
+    "actionId": "scene.pause"
+   },
+   "Children": [
+    "ResumeLabel"
+   ]
+  },
+  "ResumeLabel": {
+   "Rect": {
+    "x": 0,
+    "y": 0,
+    "w": 260,
+    "h": 54
+   },
+   "Text": {
+    "text": "Resume",
+    "styleId": "button"
+   },
+   "OpticalAlign": {
+    "centerX": true,
+    "centerY": true
+   }
   }
+ }
 }

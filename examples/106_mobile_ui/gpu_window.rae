@@ -153,3 +153,14 @@ func uiMonitorHeight(monitor: view Int) pub ret Int {
 func uiMonitorRefreshRate(monitor: view Int) pub ret Int {
   ret 60
 }
+
+# Monitor-derived frame budget for the wait-based loop. Lives here rather
+# than in lib/ui/event_loop.rae because it needs this module's monitor
+# accessors; the shared module stays dependency-free.
+func displayFrameSec() pub ret Float {
+  let hz: Int = uiMonitorRefreshRate(monitor: uiCurrentMonitor())
+  if hz < 30 or hz > 360 {
+    ret 0.016667
+  }
+  ret 1.0 / hz.toFloat()
+}
