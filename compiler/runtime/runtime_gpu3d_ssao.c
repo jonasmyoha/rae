@@ -269,6 +269,16 @@ static void g3d_configure_ssao(void) {
         else fprintf(stderr, "[gpu3d] WARNING: unknown RAE_SSAO_QUALITY='%s'; "
                              "expected mobile|low|desktop|high\n", q);
     }
+    /* Exponent on the visibility term. AO applies to the INDIRECT term
+     * alone, so in a scene dominated by a strong directional sun the effect
+     * is inherently understated — that is correct, not weak. This knob
+     * deepens it for art direction without reintroducing the physical error
+     * of occluding direct light. */
+    const char* it = getenv("RAE_SSAO_INTENSITY");
+    if (it && it[0]) {
+        float v = (float)atof(it);
+        if (v > 0.0f) g3d_ssao_intensity = v;
+    }
     const char* r = getenv("RAE_SSAO_RADIUS");
     if (r && r[0]) {
         float v = (float)atof(r);
