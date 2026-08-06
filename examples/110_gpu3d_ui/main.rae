@@ -12,6 +12,13 @@
 # changes — intent ("centred", "right-aligned", "full-bleed") lives there
 # rather than in resolution-specific constants.
 #
+# STATE SURVIVES HOT RELOAD: selected scene, pause/speed/debug toggles and
+# the full camera (orbit-vs-WASD mode, yaw/pitch, distance, free position,
+# target) round-trip through lib/hot_reload.rae's state file, so a rebuild
+# drops you back where you were instead of re-aiming the camera every
+# time. Saved on change (throttled), not only at exit, because nothing
+# guarantees this process gets a chance to shut down cleanly.
+#
 # IDLE COSTS NOTHING: the loop only draws when something it depends on
 # changed — simulation running, camera moved, UI event, resize, or TAA
 # still converging. Otherwise it parks in `gpu2d.waitEvents`, so a paused
@@ -42,6 +49,7 @@ open ui/event_loop
 open ui/frame_stats
 open ui/log_overlay
 open hot_reload
+import string
 import ui/ecs
 import ui/input_gpu2d
 import ui/layout
@@ -120,6 +128,85 @@ func createDemoUiResource() ret DemoUiResource {
     appliedFpsRevision: 0
     fps: 0
   }
+}
+
+# ----- state that survives a hot reload -------------------------------
+# A hot reload is a process exit + relaunch, so anything held only in
+# locals is gone. Losing the camera on every rebuild is the single most
+# disruptive part of iterating on a 3D scene: you stop editing and start
+# re-aiming the camera.
+#
+# Stored through lib/hot_reload.rae's state file, under an APP-SCOPED path
+# so it cannot collide with another example's snapshot in the same tree.
+#
+# Format is one space-separated line behind a version tag rather than
+# JSON: the payload is a dozen numbers, a bad or older line must degrade
+# to "start fresh" rather than half-apply, and a version mismatch is then
+# a single comparison. Restoring a partially-parsed camera would be worse
+# than not restoring at all.
+const state110Version: Int = 1
+const state110AppId: String = "110_gpu3d_ui"
+const state110Fields: Int = 15
+
+func serialize110State(ui: view DemoUiResource, controller: view CameraController, camera: view Camera3d) ret String {
+  var modeNum: Int = 0
+  if controller.mode is CameraMode.free { modeNum = 1 }
+  var pausedNum: Int = 0
+  if ui.paused { pausedNum = 1 }
+  var fullNum: Int = 0
+  if ui.fullSpeed { fullNum = 1 }
+  var debugNum: Int = 0
+  if ui.debugOpen { debugNum = 1 }
+  ret "{state110Version} {ui.activeScene} {pausedNum} {fullNum} {debugNum} {modeNum} {controller.yaw} {controller.orbitPitch} {controller.freePitch} {controller.distance} {controller.freePosition.x} {controller.freePosition.y} {controller.freePosition.z} {camera.target.x} {camera.target.y}"
+}
+
+# Returns true when a full, version-matched snapshot was applied.
+func restore110State(raw: view String, ui: mod DemoUiResource, controller: mod CameraController, camera: mod Camera3d) ret Bool {
+  if raw.length() < 1 {
+    ret false
+  }
+  let parts: List(String) = raw.trim().split(sep: " ")
+  if parts.length < state110Fields {
+    ret false
+  }
+  if string.toInt(this: parts.at(index: 0).trim()) is not state110Version {
+    ret false
+  }
+  ui.activeScene = string.toInt(this: parts.at(index: 1).trim())
+  if ui.activeScene < 1 { ui.activeScene = 1 }
+  if ui.activeScene > 3 { ui.activeScene = 3 }
+  ui.paused = string.toInt(this: parts.at(index: 2).trim()) is 1
+  ui.fullSpeed = string.toInt(this: parts.at(index: 3).trim()) is 1
+  ui.debugOpen = string.toInt(this: parts.at(index: 4).trim()) is 1
+  if string.toInt(this: parts.at(index: 5).trim()) is 1 {
+    controller.mode = CameraMode.free
+  } else {
+    controller.mode = CameraMode.orbit
+  }
+  controller.yaw = string.toFloat(this: parts.at(index: 6).trim())
+  controller.orbitPitch = string.toFloat(this: parts.at(index: 7).trim())
+  controller.freePitch = string.toFloat(this: parts.at(index: 8).trim())
+  controller.distance = string.toFloat(this: parts.at(index: 9).trim())
+  controller.freePosition = vec3.create(
+    x: string.toFloat(this: parts.at(index: 10).trim()),
+    y: string.toFloat(this: parts.at(index: 11).trim()),
+    z: string.toFloat(this: parts.at(index: 12).trim())
+  )
+  # Orbit needs the target restored too, or the camera returns to the
+  # right angle around the wrong point.
+  camera.target = vec3.create(
+    x: string.toFloat(this: parts.at(index: 13).trim()),
+    y: string.toFloat(this: parts.at(index: 14).trim()),
+    z: camera.target.z
+  )
+  # A snapshot written by a build with different clamps should still land
+  # inside this build's limits.
+  if controller.distance < 4.0 { controller.distance = 4.0 }
+  if controller.distance > 30.0 { controller.distance = 30.0 }
+  if controller.orbitPitch < 0.05 { controller.orbitPitch = 0.05 }
+  if controller.orbitPitch > 1.45 { controller.orbitPitch = 1.45 }
+  ui.revision = ui.revision + 1
+  ret true
 }
 
 func nodeEntity(world: view UiWorld, nodeId: view String) ret EntityId {
@@ -528,6 +615,13 @@ func main() ret Int {
   var uiState: DemoUiResource = createDemoUiResource()
   var camera: Camera3d = scene1.camera
   var cameraController: CameraController = createCameraController(camera: camera)
+  # Restore before the test-state hook, so an explicit env override still
+  # wins over whatever the previous run left behind.
+  let savedState: String = readHotReloadStateFor(appId: state110AppId)
+  if restore110State(raw: savedState, ui: uiState, controller: cameraController, camera: camera) {
+    logInfoLine(ov: logView, text: "state restored: scene {uiState.activeScene}, camera kept")
+  }
+
   let testState: String = getEnv(name: "RAE_GPU3D_UI_TEST_STATE")
   if testState.equals(other: "pause") { uiState.paused = true }
   if testState.equals(other: "debug") { uiState.debugOpen = true }
@@ -572,6 +666,15 @@ func main() ret Int {
   # rendered frame, so an idle app touches neither.
   var renderedOnce: Bool = false
   var lastLogRevision: Int = 0 - 1
+  # Save on CHANGE rather than only at exit: 110 does not watch for a
+  # reload signal, so a supervisor is free to kill it without warning and
+  # an exit-only save would lose everything. Throttled because a camera
+  # drag changes state every frame and one file write per frame would be
+  # exactly the kind of hidden cost this app is meant to measure.
+  var stateDirty: Bool = false
+  var lastStateSave: Float64 = gpu2d.nowSeconds()
+  var lastSavedScene: Int = uiState.activeScene
+  var lastSavedRevision: Int = uiState.revision
   # TAA converges over several frames, so stopping the instant motion ends
   # would freeze a half-resolved image. Keep drawing a few extra frames
   # after the last change, then idle on a fully converged picture.
@@ -695,6 +798,12 @@ func main() ret Int {
     # few frames after motion stops, so keep drawing until it settles or
     # edges would stay half-resolved on the final image.
     let sceneAnimating: Bool = uiState.paused is false
+    # Any UI-state change or camera movement makes the snapshot stale.
+    if uiState.revision is not lastSavedRevision or uiState.activeScene is not lastSavedScene {
+      stateDirty = true
+      lastSavedRevision = uiState.revision
+      lastSavedScene = uiState.activeScene
+    }
     let logChanged: Bool = logView.revision is not lastLogRevision
     var needsRender: Bool = sceneAnimating or cameraMoved or uiLayoutDirty
       or extentChanged or hadUiEvents or fpsDirty or logChanged
@@ -717,6 +826,17 @@ func main() ret Int {
         taaSettleFrames = taaSettleFrames - 1
       }
       renderedOnce = true
+      if cameraMoved { stateDirty = true }
+      # Flush at most 4x/sec. The snapshot is a dozen numbers, so the cost
+      # is the file write, not the formatting.
+      if stateDirty {
+        let sinceSave: Float = (now - lastStateSave) as Float
+        if sinceSave >= 0.25 {
+          writeHotReloadStateFor(appId: state110AppId, state: serialize110State(ui: uiState, controller: cameraController, camera: camera))
+          lastStateSave = now
+          stateDirty = false
+        }
+      }
       if uiState.paused is false {
         var motionScale: Float = 1.0
         if uiState.fullSpeed is false { motionScale = 0.25 }
@@ -782,6 +902,8 @@ func main() ret Int {
       if uiState.activeScene is 3 { snapshotPrevTransforms(scene: scene3.scene) }
     }
   }
+  # Final flush: the throttle may have a pending change when the loop ends.
+  writeHotReloadStateFor(appId: state110AppId, state: serialize110State(ui: uiState, controller: cameraController, camera: camera))
   shutdown()
   gpu2d.closeWindow()
   ret 0

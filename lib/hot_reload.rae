@@ -86,6 +86,26 @@ func writeHotReloadState(state: view String) pub ret Bool {
   ret writeFile(path: hotReloadStatePath(), content: state)
 }
 
+# ----- app-scoped state -----------------------------------------------
+#
+# `state.json` is a single well-known path, so two apps run from the same
+# working tree would overwrite each other's snapshot and then try to parse
+# the other's schema. Apps that want their own slot pass an id; the plain
+# `readHotReloadState`/`writeHotReloadState` pair keeps the legacy path so
+# existing callers are untouched.
+func hotReloadStatePathFor(appId: view String) pub ret String {
+  ret ".rae/state.{appId}.json"
+}
+
+func readHotReloadStateFor(appId: view String) pub ret String {
+  ret rae_ext_rae_sys_read_file(path: hotReloadStatePathFor(appId: appId))
+}
+
+func writeHotReloadStateFor(appId: view String, state: view String) pub ret Bool {
+  makeDir(path: hotReloadDir())
+  ret writeFile(path: hotReloadStatePathFor(appId: appId), content: state)
+}
+
 # ----- launch generation ----------------------------------------------
 
 # A monotonic counter of how many times this app has started in this
