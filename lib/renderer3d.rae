@@ -26,6 +26,7 @@ const tagScenePass: Int = 1    # 3D raster + depth-integrated SDF geometry
 const tagPresent: Int = 2      # resolve/screenshot/present the frame
 const tagUiOverlay: Int = 3    # load-preserving 2D UI painted over the 3D frame
 const tagTonemap: Int = 4      # HDR -> LDR resolve (#334); last radiometric op
+const tagTaa: Int = 5          # temporal resolve (#335); HDR in, HDR out
 
 type Renderer3d {
   graph: RenderGraph
@@ -59,18 +60,26 @@ func createRenderer3d() pub ret Renderer3d {
   # frame rather than a subset of it.
   let normalId: Int = addResource(g: g, name: "sceneNormal", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
   let velocityId: Int = addResource(g: g, name: "sceneVelocity", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  # TAA history is PERSISTENT: it is read next frame, not this one. This is
+  # the lifetime class #331 insisted on having in v1 precisely so temporal
+  # techniques could be declared truthfully instead of hidden in C statics.
+  let taaId: Int = addResource(g: g, name: "taaColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifePersistent)
 
   # Present declared FIRST, scene SECOND — the graph must still order them
   # scene-then-present, because present reads what scene writes.
   let present: Int = addPass(g: g, name: "present", kind: passRaster, tag: tagPresent)
   let tonemap: Int = addPass(g: g, name: "tonemap", kind: passRaster, tag: tagTonemap)
+  let taa: Int = addPass(g: g, name: "taa", kind: passRaster, tag: tagTaa)
   let scene: Int = addPass(g: g, name: "scene3d", kind: passRaster, tag: tagScenePass)
 
   passWrites(g: g, pass: scene, resource: hdrId, access: accAttachmentWrite)
   passWrites(g: g, pass: scene, resource: depthId, access: accAttachmentWrite)
   passWrites(g: g, pass: scene, resource: normalId, access: accAttachmentWrite)
   passWrites(g: g, pass: scene, resource: velocityId, access: accAttachmentWrite)
-  passReads(g: g, pass: tonemap, resource: hdrId, access: accSampledRead)
+  passReads(g: g, pass: taa, resource: hdrId, access: accSampledRead)
+  passReads(g: g, pass: taa, resource: velocityId, access: accSampledRead)
+  passWrites(g: g, pass: taa, resource: taaId, access: accAttachmentWrite)
+  passReads(g: g, pass: tonemap, resource: taaId, access: accSampledRead)
   passWrites(g: g, pass: tonemap, resource: colorId, access: accAttachmentWrite)
   passReads(g: g, pass: present, resource: colorId, access: accAttachmentRead)
 
@@ -100,6 +109,7 @@ func createRenderer3dWithUi() pub ret Renderer3d {
   let depthId: Int = addResource(g: g, name: "sceneDepth", kind: resDepth, format: 0, sizing: sizeFull, lifetime: lifeTransient)
   let normalId: Int = addResource(g: g, name: "sceneNormal", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
   let velocityId: Int = addResource(g: g, name: "sceneVelocity", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let taaId: Int = addResource(g: g, name: "taaColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifePersistent)
 
   # Declared present -> ui -> tonemap -> scene, i.e. exactly backwards.
   # The UI overlay modifies the LDR target AFTER tonemap: UI colours are
@@ -107,13 +117,17 @@ func createRenderer3dWithUi() pub ret Renderer3d {
   let present: Int = addPass(g: g, name: "present", kind: passRaster, tag: tagPresent)
   let ui: Int = addPass(g: g, name: "uiOverlay", kind: passRaster, tag: tagUiOverlay)
   let tonemap: Int = addPass(g: g, name: "tonemap", kind: passRaster, tag: tagTonemap)
+  let taa: Int = addPass(g: g, name: "taa", kind: passRaster, tag: tagTaa)
   let scene: Int = addPass(g: g, name: "scene3d", kind: passRaster, tag: tagScenePass)
 
   passWrites(g: g, pass: scene, resource: hdrId, access: accAttachmentWrite)
   passWrites(g: g, pass: scene, resource: depthId, access: accAttachmentWrite)
   passWrites(g: g, pass: scene, resource: normalId, access: accAttachmentWrite)
   passWrites(g: g, pass: scene, resource: velocityId, access: accAttachmentWrite)
-  passReads(g: g, pass: tonemap, resource: hdrId, access: accSampledRead)
+  passReads(g: g, pass: taa, resource: hdrId, access: accSampledRead)
+  passReads(g: g, pass: taa, resource: velocityId, access: accSampledRead)
+  passWrites(g: g, pass: taa, resource: taaId, access: accAttachmentWrite)
+  passReads(g: g, pass: tonemap, resource: taaId, access: accSampledRead)
   passWrites(g: g, pass: tonemap, resource: colorId, access: accAttachmentWrite)
   passModifies(g: g, pass: ui, resource: colorId, access: accAttachmentRead)
   passReads(g: g, pass: present, resource: colorId, access: accAttachmentRead)
@@ -150,6 +164,9 @@ func renderFrame(r: view Renderer3d, scene: view Scene3d, camera: view Camera3d,
     if tag is tagScenePass {
       beginScene(camera: camera, light: light, aspect: aspect, time: time)
       renderScene(scene: scene)
+    }
+    if tag is tagTaa {
+      taaPass()
     }
     if tag is tagTonemap {
       tonemapPass()
