@@ -54,6 +54,13 @@ func hotReloadBuildStatusPath() pub ret String {
   ret ".rae/build.status"
 }
 
+# Deliberately NOT state.json: that file belongs to the app's own schema
+# (examples/106_mobile_ui stores playback state there), and a shared
+# counter writing into it would clobber whatever the app saved.
+func hotReloadGenerationPath() pub ret String {
+  ret ".rae/reload.generation"
+}
+
 # ----- state file -----------------------------------------------------
 
 # Native shortcut: `lib/sys.readFile` returns `opt String`, but the
@@ -77,6 +84,34 @@ func readHotReloadState() pub ret String {
 # defensively).
 func writeHotReloadState(state: view String) pub ret Bool {
   ret writeFile(path: hotReloadStatePath(), content: state)
+}
+
+# ----- launch generation ----------------------------------------------
+
+# A monotonic counter of how many times this app has started in this
+# working tree, incremented and persisted on each call. Since a hot reload
+# is a process exit + relaunch, "did my change actually get picked up?" is
+# otherwise surprisingly hard to answer by eye — a rebuilt binary that
+# silently failed to relaunch looks identical to one that reloaded and
+# changed nothing. Logging this number makes the reload visible: 5 becomes
+# 6 in front of you.
+#
+# Call ONCE at startup. Returns 1 on the first ever launch. A corrupt or
+# missing file restarts at 1 rather than failing: this is a diagnostic,
+# and it should never be the reason an app does not boot.
+func nextReloadGeneration() pub ret Int {
+  let raw: String = rae_ext_rae_sys_read_file(path: hotReloadGenerationPath())
+  var n: Int = 0
+  if raw.length() > 0 {
+    n = raw.trim().toInt()
+  }
+  if n < 0 {
+    n = 0
+  }
+  let next: Int = n + 1
+  makeDir(path: hotReloadDir())
+  writeFile(path: hotReloadGenerationPath(), content: "{next}")
+  ret next
 }
 
 # Remove `state.json`. Call once after a successful restore so the
