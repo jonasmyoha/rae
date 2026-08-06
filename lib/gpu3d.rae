@@ -52,11 +52,12 @@ open math3d
 # ----- raw C ABI (implementation detail; prefer the typed API below) ---
 func meshCreate(verts: view Buffer(Float), vertCount: Int, indices: view Buffer(Int), indexCount: Int) extern ret Int
 func begin(frame: view Buffer(Float), count: Int) extern
-func draw(mesh: Int, model: view Buffer(Float), r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
+func draw(mesh: Int, model: view Buffer(Float), prevModel: view Buffer(Float), r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
 func drawMetaballs(packedBalls: view Buffer(Float), count: Int, packedColors: view Buffer(Float), smoothing: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
 func end() extern
 func submit() extern
 func tonemap() extern
+func taa() extern
 func shutdown() extern
 
 # ----- frame parameter block (internal encoding) ----------------------
@@ -140,14 +141,17 @@ func modelMatrix(t: view Transform3d) pub ret List(Float) {
   ret mat4Mul(a: tr, b: rot)
 }
 
-# Draw one mesh with a typed transform + material.
-func drawInstance(mesh: view MeshHandle, transform: view Transform3d, material: view Material3d) pub {
+# Draw one mesh with a typed transform + material. `prevTransform` is
+# where the instance was LAST frame; it drives per-object motion vectors
+# for TAA (#335). Pass the same transform when an object did not move.
+func drawInstance(mesh: view MeshHandle, transform: view Transform3d, prevTransform: view Transform3d, material: view Material3d) pub {
   if not meshHandleIsValid(h: mesh) {
     ret
   }
   let model: List(Float) = modelMatrix(t: transform)
+  let prevModel: List(Float) = modelMatrix(t: prevTransform)
   draw(
-    mesh: mesh.id, model: model.data,
+    mesh: mesh.id, model: model.data, prevModel: prevModel.data,
     r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
     metallic: material.metallic, roughness: material.roughness,
     emR: material.emission.x, emG: material.emission.y, emB: material.emission.z
@@ -162,8 +166,11 @@ func renderScene(scene: view Scene3d) pub {
     let r: MeshRenderer = scene.meshRenderers.at(index: i)
     if r.visible {
       let t: Transform3d = scene.transforms.at(index: r.entity)
+      # prevTransforms is kept in lockstep with transforms by addTransform,
+      # so this index is always valid (#336).
+      let pt: Transform3d = scene.prevTransforms.at(index: r.entity)
       let m: Material3d = scene.materials.at(index: r.material)
-      drawInstance(mesh: r.mesh, transform: t, material: m)
+      drawInstance(mesh: r.mesh, transform: t, prevTransform: pt, material: m)
     }
     i = i + 1
   }
@@ -251,6 +258,13 @@ func endPass() pub {
 # composition (UI overlay, present). Ends the scene pass if still open.
 func tonemapPass() pub {
   tonemap()
+}
+
+# Temporal antialiasing resolve (#335): reproject the previous frame
+# through the velocity buffer, clamp it to the current neighbourhood and
+# blend. Runs on HDR, BEFORE tonemap, so accumulation stays linear.
+func taaPass() pub {
+  taa()
 }
 
 # Upload interleaved mesh data and get a typed handle back.
