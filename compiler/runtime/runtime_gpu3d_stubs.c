@@ -24,4 +24,5 @@ void rae_ext_gpu3d_end(void) {}
 void rae_ext_gpu3d_submit(void) {}
 void rae_ext_gpu3d_tonemap(void) {}
 void rae_ext_gpu3d_taa(void) {}
+void rae_ext_gpu3d_ssao(void) {}
 void rae_ext_gpu3d_shutdown(void) {}

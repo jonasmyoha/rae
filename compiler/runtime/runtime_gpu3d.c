@@ -37,6 +37,14 @@
  * exposure + ACES tonemap + gamma live in the tonemap pass (#334), not
  * in the material shaders.
  *
+ * Ambient occlusion (#337) is a horizon search with a visibility bitmask,
+ * generated at half resolution between the scene pass and TAA. It applies
+ * to the INDIRECT term only, which is why the scene pass writes ambient to
+ * its own attachment: direct light must not be occluded, and keeping the
+ * split is also what stops AO double-darkening once GI lands.
+ * `RAE_SSAO_QUALITY=mobile|low|desktop|high`, `RAE_SSAO_RADIUS=<world>`,
+ * `RAE_NO_SSAO=1`, `RAE_SSAO_DEBUG=1` (view the raw AO buffer).
+ *
  * Antialiasing is TAA (#335), not MSAA: the scene is jittered by a
  * Halton(2,3) sub-pixel offset each frame and resolved against a
  * reprojected history buffer. Frame order is
@@ -63,12 +71,17 @@ static WGPUTexture     g3d_normal_tex = NULL;    /* rgba16f world normals */
 static WGPUTextureView g3d_normal_view = NULL;
 static WGPUTexture     g3d_velocity_tex = NULL;  /* rg16f UV-space motion */
 static WGPUTextureView g3d_velocity_view = NULL;
+static WGPUTexture     g3d_ambient_tex = NULL;   /* rgba16f indirect term (#337) */
+static WGPUTextureView g3d_ambient_view = NULL;
 static int             g3d_target_w = 0, g3d_target_h = 0;
 
 /* Previous frame's viewProj for motion vectors. First frame reuses the
  * current matrix so velocity starts at zero instead of garbage. */
 static float g3d_prev_viewproj[16];
 static bool  g3d_have_prev = false;
+/* Frame values the post passes reuse instead of recomputing (#337). */
+static float g3d_frame_inv_viewproj[16];
+static float g3d_frame_campos[3];
 
 /* TAA (#335). Sub-pixel jitter walks a Halton(2,3) sequence: low
  * discrepancy, so N frames of history land on a well-spread set of
@@ -203,6 +216,7 @@ static const char* G3D_WGSL =
 "  @location(0) color: vec4<f32>,\n"
 "  @location(1) normal: vec4<f32>,\n"
 "  @location(2) velocity: vec2<f32>,\n"
+"  @location(3) ambient: vec4<f32>,\n"
 "};\n"
 "@fragment\n"
 "fn fs(in: VsOut) -> FsOut {\n"
@@ -227,10 +241,15 @@ static const char* G3D_WGSL =
 "  let hemi = mix(F.ambGround.rgb, F.ambSky.rgb, N.y * 0.5 + 0.5);\n"
 "  let ambF = fresnel(NoV, f0);\n"
 "  let ambient = hemi * albedo * (1.0 - metallic) + hemi * ambF * (1.0 - rough * 0.7);\n"
-/* LINEAR HDR out (#334) — exposure/ACES/gamma live in the tonemap pass. */
-"  let c = direct + ambient + d.emissiveRoughness.rgb;\n"
+/* LINEAR HDR out (#334) — exposure/ACES/gamma live in the tonemap pass.
+ * The INDIRECT term goes to its own target instead of into colour (#337):
+ * ambient occlusion must attenuate indirect light only. A surface in
+ * direct sun inside a crevice is still lit, and keeping the split is also
+ * what stops AO double-darkening once real GI lands. */
+"  let c = direct + d.emissiveRoughness.rgb;\n"
 "  var o: FsOut;\n"
 "  o.color = vec4<f32>(c, 1.0);\n"
+"  o.ambient = vec4<f32>(ambient, 1.0);\n"
 "  o.normal = vec4<f32>(N, 1.0);\n"
 "  o.velocity = motionVec(in.clipNow, in.clipPrev);\n"
 "  return o;\n"
@@ -332,6 +351,7 @@ static const char* G3D_TAA_WGSL =
 "}\n";
 
 #include "runtime_gpu3d_sdf.c"
+#include "runtime_gpu3d_ssao.c"
 
 static int g3d_invert_mat4(const float* m, float* out) {
     float inv[16];
@@ -419,12 +439,13 @@ static void g3d_init_pipeline(void) {
     vbl.stepMode = WGPUVertexStepMode_Vertex;
     vbl.attributeCount = 3; vbl.attributes = attrs;
 
-    WGPUColorTargetState cts[3]; memset(cts, 0, sizeof(cts));
-    cts[0].format = WGPUTextureFormat_RGBA16Float;  cts[0].writeMask = WGPUColorWriteMask_All; /* linear HDR, opaque */
+    WGPUColorTargetState cts[4]; memset(cts, 0, sizeof(cts));
+    cts[0].format = WGPUTextureFormat_RGBA16Float;  cts[0].writeMask = WGPUColorWriteMask_All; /* direct+emissive HDR */
     cts[1].format = WGPUTextureFormat_RGBA16Float;  cts[1].writeMask = WGPUColorWriteMask_All; /* world normals */
     cts[2].format = WGPUTextureFormat_RG16Float;    cts[2].writeMask = WGPUColorWriteMask_All; /* motion vectors */
+    cts[3].format = WGPUTextureFormat_RGBA16Float;  cts[3].writeMask = WGPUColorWriteMask_All; /* indirect/ambient */
     WGPUFragmentState fs; memset(&fs, 0, sizeof(fs));
-    fs.module = mod; fs.entryPoint = rae_wgpu_sv("fs"); fs.targetCount = 3; fs.targets = cts;
+    fs.module = mod; fs.entryPoint = rae_wgpu_sv("fs"); fs.targetCount = 4; fs.targets = cts;
 
     WGPUDepthStencilState ds; memset(&ds, 0, sizeof(ds));
     ds.format = WGPUTextureFormat_Depth32Float;
@@ -599,6 +620,8 @@ static void g3d_ensure_targets(void) {
     if (g3d_normal_tex)  { wgpuTextureRelease(g3d_normal_tex); g3d_normal_tex = NULL; }
     if (g3d_velocity_view) { wgpuTextureViewRelease(g3d_velocity_view); g3d_velocity_view = NULL; }
     if (g3d_velocity_tex)  { wgpuTextureRelease(g3d_velocity_tex); g3d_velocity_tex = NULL; }
+    if (g3d_ambient_view) { wgpuTextureViewRelease(g3d_ambient_view); g3d_ambient_view = NULL; }
+    if (g3d_ambient_tex)  { wgpuTextureRelease(g3d_ambient_tex); g3d_ambient_tex = NULL; }
     WGPUTextureDescriptor td; memset(&td, 0, sizeof(td));
     td.dimension = WGPUTextureDimension_2D;
     td.size.width = (uint32_t)w; td.size.height = (uint32_t)h; td.size.depthOrArrayLayers = 1;
@@ -616,6 +639,9 @@ static void g3d_ensure_targets(void) {
     td.format = WGPUTextureFormat_RG16Float;
     g3d_velocity_tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
     g3d_velocity_view = wgpuTextureCreateView(g3d_velocity_tex, NULL);
+    td.format = WGPUTextureFormat_RGBA16Float;
+    g3d_ambient_tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
+    g3d_ambient_view = wgpuTextureCreateView(g3d_ambient_tex, NULL);
     td.format = WGPUTextureFormat_RGBA16Float;   /* TAA history ping-pong */
     for (int t = 0; t < 2; t++) {
         g3d_taa_tex[t] = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
@@ -672,7 +698,7 @@ void rae_ext_gpu3d_begin(const float* frame, int64_t count){
     if (!g_wgpu_dev || !g_g2d_off_view || !frame || count < 36) return;
     g3d_init_pipeline();
     g3d_ensure_targets();
-    if (!g3d_hdr_view || !g3d_depth_view || !g3d_normal_view || !g3d_velocity_view) return;
+    if (!g3d_hdr_view || !g3d_depth_view || !g3d_normal_view || !g3d_velocity_view || !g3d_ambient_view) return;
     /* Halton offsets are in [0,1); recentre to [-0.5,0.5) pixels, then
      * convert to NDC (2/size) since the shader adds them in clip space. */
     if (g3d_taa_enabled && g3d_target_w > 0 && g3d_target_h > 0) {
@@ -685,6 +711,7 @@ void rae_ext_gpu3d_begin(const float* frame, int64_t count){
     g3d_draw_count = 0;
     g3d_sdf_group = 0;   /* metaball cluster slots are per-frame */
     g3d_tonemap_pending = true;
+    g3d_ssao_pending = true;
     g3d_taa_pending = true;
     g3d_taa_cur = 1 - g3d_taa_cur;   /* resolve into the slot not read this frame */
     g3d_taa_frame++;
@@ -697,6 +724,8 @@ void rae_ext_gpu3d_begin(const float* frame, int64_t count){
     u[28] = (float)frame[27]; u[29] = (float)frame[28]; u[30] = (float)frame[29]; u[31] = 0.0f;              /* ambSky */
     u[32] = (float)frame[30]; u[33] = (float)frame[31]; u[34] = (float)frame[32]; u[35] = 0.0f;              /* ambGround */
     g3d_invert_mat4(u, u + 36);
+    memcpy(g3d_frame_inv_viewproj, u + 36, 16 * sizeof(float));
+    g3d_frame_campos[0] = u[16]; g3d_frame_campos[1] = u[17]; g3d_frame_campos[2] = u[18];
     if (!g3d_have_prev) { memcpy(g3d_prev_viewproj, u, 16 * sizeof(float)); g3d_have_prev = true; }
     memcpy(u + 52, g3d_prev_viewproj, 16 * sizeof(float));   /* prevViewProj */
     memcpy(g3d_prev_viewproj, u, 16 * sizeof(float));        /* becomes prev next frame */
@@ -715,7 +744,7 @@ void rae_ext_gpu3d_begin(const float* frame, int64_t count){
     }
 
     g3d_enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
-    WGPURenderPassColorAttachment ca[3]; memset(ca, 0, sizeof(ca));
+    WGPURenderPassColorAttachment ca[4]; memset(ca, 0, sizeof(ca));
     ca[0].view = g3d_hdr_view;     /* linear HDR; tonemap writes the offscreen (#334) */
     ca[0].depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
     ca[0].loadOp = WGPULoadOp_Clear;
@@ -729,13 +758,17 @@ void rae_ext_gpu3d_begin(const float* frame, int64_t count){
     ca[2].depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
     ca[2].loadOp = WGPULoadOp_Clear;     /* zero motion where nothing renders */
     ca[2].storeOp = WGPUStoreOp_Store;   /* sampled by TAA */
+    ca[3].view = g3d_ambient_view;
+    ca[3].depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
+    ca[3].loadOp = WGPULoadOp_Clear;
+    ca[3].storeOp = WGPUStoreOp_Store;   /* sampled by the SSAO composite */
     WGPURenderPassDepthStencilAttachment da; memset(&da, 0, sizeof(da));
     da.view = g3d_depth_view;
     da.depthLoadOp = WGPULoadOp_Clear;
     da.depthStoreOp = WGPUStoreOp_Store; /* the point of #333: depth is sampleable */
     da.depthClearValue = 1.0f;
     WGPURenderPassDescriptor rp; memset(&rp, 0, sizeof(rp));
-    rp.colorAttachmentCount = 3;
+    rp.colorAttachmentCount = 4;
     rp.colorAttachments = ca;
     rp.depthStencilAttachment = &da;
     g3d_pass = wgpuCommandEncoderBeginRenderPass(g3d_enc, &rp);
@@ -863,6 +896,7 @@ void rae_ext_gpu3d_tonemap(void) {
     /* Same safety net as tonemap-in-end: a caller whose frame does not
      * dispatch TAA explicitly still gets it, so history keeps advancing
      * and tonemap never samples a stale slot. */
+    if (g3d_ssao_enabled && g3d_ssao_pending) rae_ext_gpu3d_ssao();
     if (g3d_taa_enabled && g3d_taa_pending) rae_ext_gpu3d_taa();
     if (!g3d_tonemap_pending || !g3d_hdr_view || !g_g2d_off_view) return;
     g3d_init_tonemap_pipeline();
@@ -933,6 +967,7 @@ void rae_ext_gpu3d_end(void) {
 
 void rae_ext_gpu3d_shutdown(void) {
     g3d_sdf_shutdown();
+    g3d_ssao_shutdown();
     for (int i = 0; i < g3d_mesh_n; i++) {
         if (g3d_mesh_vbuf[i]) { wgpuBufferRelease(g3d_mesh_vbuf[i]); g3d_mesh_vbuf[i] = NULL; }
         if (g3d_mesh_ibuf[i]) { wgpuBufferRelease(g3d_mesh_ibuf[i]); g3d_mesh_ibuf[i] = NULL; }
@@ -961,6 +996,8 @@ void rae_ext_gpu3d_shutdown(void) {
     if (g3d_normal_tex)  { wgpuTextureRelease(g3d_normal_tex); g3d_normal_tex = NULL; }
     if (g3d_velocity_view) { wgpuTextureViewRelease(g3d_velocity_view); g3d_velocity_view = NULL; }
     if (g3d_velocity_tex)  { wgpuTextureRelease(g3d_velocity_tex); g3d_velocity_tex = NULL; }
+    if (g3d_ambient_view) { wgpuTextureViewRelease(g3d_ambient_view); g3d_ambient_view = NULL; }
+    if (g3d_ambient_tex)  { wgpuTextureRelease(g3d_ambient_tex); g3d_ambient_tex = NULL; }
     g3d_target_w = 0; g3d_target_h = 0;
     g3d_have_prev = false;
     g3d_tonemap_pending = false;
