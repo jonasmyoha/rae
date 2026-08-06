@@ -38,6 +38,8 @@ open ui/scene_file
 open ui/scene_loader
 open ui/theme_resolved
 open ui/transform
+open ui/event_loop
+open ui/frame_stats
 import ui/ecs
 import ui/input_gpu2d
 import ui/layout
@@ -47,6 +49,8 @@ import ui/scene_file
 import ui/scene_loader
 import ui/theme_resolved
 import ui/transform
+import ui/event_loop
+import ui/frame_stats
 
 enum CameraMode {
   orbit
@@ -537,8 +541,12 @@ func main() ret Int {
   }
 
   var lastFrame: Float64 = gpu2d.nowSeconds()
-  var fpsAccum: Float = 0.0
-  var fpsFrames: Int = 0
+  # Shared sliding-window sampler (lib/ui/frame_stats.rae): it records only
+  # frames that actually rendered, so an idle app's reading decays to ~1
+  # instead of freezing at the last busy value.
+  var frameStats: FrameStats = createFrameStats()
+  var lastFpsShown: Int = 0 - 1
+  var lastFpsRefresh: Float64 = gpu2d.nowSeconds()
   # Idle policy (see docs/ui-render-loop-performance.md): busy-render while
   # anything is moving, park in waitEvents when nothing is. Relayout is
   # gated on explicit change flags, and the UI paint only happens inside a
@@ -567,6 +575,23 @@ func main() ret Int {
         uiWorld.layoutH = extentH
         anchorUiToExtent(world: uiWorld, w: extentW, h: extentH)
         extentChanged = true
+      }
+    }
+
+    # Refresh the readout about once a second. This is deliberately the
+    # ONLY thing that keeps an otherwise-idle app awake: the wake-up
+    # renders one frame, so the counter settles at ~1 fps — which is the
+    # honest reading for "alive but doing nothing", and distinguishable
+    # from a frozen counter.
+    var fpsDirty: Bool = false
+    if (now - lastFpsRefresh) as Float >= 1.0 {
+      lastFpsRefresh = now
+      let fpsNow: Int = frameStatsFpsInt(stats: frameStats)
+      if fpsNow is not lastFpsShown {
+        lastFpsShown = fpsNow
+        uiState.fps = fpsNow
+        uiState.fpsRevision = uiState.fpsRevision + 1
+        fpsDirty = true
       }
     }
 
@@ -651,15 +676,18 @@ func main() ret Int {
     # edges would stay half-resolved on the final image.
     let sceneAnimating: Bool = uiState.paused is false
     var needsRender: Bool = sceneAnimating or cameraMoved or uiLayoutDirty
-      or extentChanged or hadUiEvents or renderedOnce is false
+      or extentChanged or hadUiEvents or fpsDirty or renderedOnce is false
     if taaSettleFrames > 0 { needsRender = true }
     if needsRender is false {
-      # Nothing to do: park until the OS has something to say. This is
-      # what takes idle CPU and GPU to ~zero instead of spinning at
-      # frame rate re-rendering an identical image.
-      gpu2d.waitEvents(timeoutSec: 0.5)
-      fpsAccum = 0.0
-      fpsFrames = 0
+      # Nothing to draw: park until the OS has something to say, or until
+      # the readout heartbeat is due. Shared policy from
+      # lib/ui/event_loop.rae rather than a hardcoded timeout.
+      let idleTimeout: Float = nextWaitTimeoutSec(
+        animating: false, mouseDown: false, pollWatcher: false,
+        frameSec: 0.016667, heartbeatSec: 1.0
+      )
+      gpu2d.waitEvents(timeoutSec: idleTimeout)
+      recordFrame(stats: frameStats, now: now, didRender: false)
     } else {
       if sceneAnimating or cameraMoved or uiLayoutDirty or extentChanged or hadUiEvents {
         taaSettleFrames = 6
@@ -688,20 +716,7 @@ func main() ret Int {
       if uiState.activeScene is 2 { animateScene(scene: scene2.scene, sceneId: 2, time: simTime) }
       if uiState.activeScene is 3 { animateScene(scene: scene3.scene, sceneId: 3, time: simTime) }
 
-      fpsAccum = fpsAccum + dt
-      fpsFrames = fpsFrames + 1
-      if fpsAccum >= 0.5 {
-        uiState.fps = (fpsFrames.toFloat() / fpsAccum + 0.5).toInt()
-        uiState.fpsRevision = uiState.fpsRevision + 1
-        fpsAccum = 0.0
-        fpsFrames = 0
-        let fpsLayoutDirty: Bool = syncDemoUi(world: uiWorld, state: uiState)
-        if fpsLayoutDirty {
-          layoutSystem(world: uiWorld)
-          transformSystem(world: uiWorld)
-        }
-        visualBoundsSystem(world: uiWorld, res: gpuUi)
-      }
+      recordFrame(stats: frameStats, now: now, didRender: true)
 
       let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
       # Frame order is DERIVED by the render graph (#331/#332): scene3d

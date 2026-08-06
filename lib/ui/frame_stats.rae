@@ -1,0 +1,77 @@
+# Frame-rate sampler shared by apps that show an FPS readout. Extracted
+# from examples/106_mobile_ui's debug overlay, whose version is entangled
+# with RSS sampling and HUD drawing.
+#
+# THE POINT: only frames that did REAL WORK are recorded. A loop that parks
+# in waitEvents when idle still iterates on wake-ups, and counting those
+# would report a frame rate the app is not actually producing. Equally, a
+# counter that simply STOPS updating when idle is worse than useless — it
+# freezes at whatever the app was last doing (120, say) and reads as if
+# nothing changed. Recording real frames only, over a wall-clock window,
+# makes an idle app report the truth: ~1.
+#
+# The rate is the COUNT of frames inside a one-second window, which is
+# literally frames per second — no division, and no special case for the
+# first sample.
+#
+# Storage is a fixed-capacity ring buffer because Rae's List has no
+# removeLast/truncate: trimming from the front would mean rebuilding the
+# list every frame, on the hot path.
+import core
+
+let fpsWindowSec: Float = 1.0
+let fpsSlots: Int = 256
+
+type FrameStats {
+  times: List(Float64)   # ring buffer, fpsSlots entries
+  head: Int              # next slot to write
+  filled: Int            # valid samples so far (saturates at fpsSlots)
+  lastFps: Float
+}
+
+func createFrameStats() pub ret FrameStats {
+  let t: List(Float64) = createList(Float64, cap: fpsSlots)
+  var i: Int = 0
+  loop i < fpsSlots {
+    t.add(value: 0.0)
+    i = i + 1
+  }
+  ret FrameStats { times: own t, head: 0, filled: 0, lastFps: 0.0 }
+}
+
+# Call once per loop iteration. `didRender` distinguishes a frame that
+# actually produced pixels from an idle wake-up.
+func recordFrame(stats: mod FrameStats, now: view Float64, didRender: view Bool) pub {
+  if didRender {
+    stats.times.set(index: stats.head, value: now)
+    stats.head = stats.head + 1
+    if stats.head >= fpsSlots {
+      stats.head = 0
+    }
+    if stats.filled < fpsSlots {
+      stats.filled = stats.filled + 1
+    }
+  }
+  var inWindow: Int = 0
+  var i: Int = 0
+  loop i < stats.filled {
+    let t: Float64 = stats.times.at(index: i)
+    let age64: Float64 = now - t
+    let age: Float = age64 as Float
+    if age >= 0.0 {
+      if age <= fpsWindowSec {
+        inWindow = inWindow + 1
+      }
+    }
+    i = i + 1
+  }
+  stats.lastFps = inWindow.toFloat()
+}
+
+func frameStatsFps(stats: view FrameStats) pub ret Float {
+  ret stats.lastFps
+}
+
+func frameStatsFpsInt(stats: view FrameStats) pub ret Int {
+  ret (stats.lastFps + 0.5).toInt()
+}
