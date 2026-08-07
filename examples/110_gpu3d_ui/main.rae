@@ -623,9 +623,19 @@ func main() ret Int {
   var cameraController: CameraController = createCameraController(camera: camera)
   # Restore before the test-state hook, so an explicit env override still
   # wins over whatever the previous run left behind.
-  let savedState: String = readHotReloadStateFor(appId: state110AppId)
-  if restore110State(raw: savedState, ui: uiState, controller: cameraController, camera: camera) {
-    logInfoLine(ov: logView, text: "state restored: scene {uiState.activeScene}, camera kept")
+  #
+  # A HEADLESS run never restores. Headless means a screenshot or smoke
+  # test, and those assert against a defined starting state — inheriting
+  # whatever scene a developer happened to leave selected makes the result
+  # depend on machine-local history. That is not hypothetical: it turned
+  # the metaball assertion red on a dev machine while staying green on a
+  # clean checkout, which is the worst way for a gate to fail.
+  let headless: Bool = getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0
+  if not headless {
+    let savedState: String = readHotReloadStateFor(appId: state110AppId)
+    if restore110State(raw: savedState, ui: uiState, controller: cameraController, camera: camera) {
+      logInfoLine(ov: logView, text: "state restored: scene {uiState.activeScene}, camera kept")
+    }
   }
 
   let testState: String = getEnv(name: "RAE_GPU3D_UI_TEST_STATE")
@@ -835,7 +845,7 @@ func main() ret Int {
       if cameraMoved { stateDirty = true }
       # Flush at most 4x/sec. The snapshot is a dozen numbers, so the cost
       # is the file write, not the formatting.
-      if stateDirty {
+      if stateDirty and not headless {
         let sinceSave: Float = (now - lastStateSave) as Float
         if sinceSave >= 0.25 {
           writeHotReloadStateFor(appId: state110AppId, state: serialize110State(ui: uiState, controller: cameraController, camera: camera))
@@ -909,7 +919,11 @@ func main() ret Int {
     }
   }
   # Final flush: the throttle may have a pending change when the loop ends.
-  writeHotReloadStateFor(appId: state110AppId, state: serialize110State(ui: uiState, controller: cameraController, camera: camera))
+  # Headless runs neither read nor write the snapshot — a smoke test must
+  # not clobber the scene and camera a developer left set up.
+  if not headless {
+    writeHotReloadStateFor(appId: state110AppId, state: serialize110State(ui: uiState, controller: cameraController, camera: camera))
+  }
   shutdown()
   gpu2d.closeWindow()
   ret 0
