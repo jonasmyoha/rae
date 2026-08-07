@@ -1,0 +1,19 @@
+# `[]` is not part of List's API.
+#
+# It parsed and lowered, but no Rae code ever used it: List access is
+# .get(index:) -> opt T (bounds-checked) or .at(index:) -> T (asserts).
+# Brackets could express NEITHER contract — `xs[i]` silently behaved like
+# `at`, so the spelling that looks like the simple safe primitive was the
+# sharp one.
+#
+# `[]` belongs to Array(T, cap: N) and the internal Buffer, where the
+# length is part of the type and a constant index is checked at compile
+# time. A List's length is a runtime value and never can be.
+import core
+
+func main() {
+  var xs: List(String) = createList(String, cap: 2)
+  xs.add(value: "a")
+  let bad: String = xs[0]
+  log("unreachable {bad}")
+}
