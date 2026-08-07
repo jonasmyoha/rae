@@ -24,10 +24,12 @@ import gbuffer
 import scene3d
 import vec3
 import math3d
+import renderer_deferred
 open scene3d
 open gbuffer
 open math3d
 open vec3
+open renderer_deferred
 
 func rae_ext_rae_mem_alloc_total() extern ret Int
 
@@ -64,24 +66,29 @@ func main() {
   let camera: Camera3d = defaultCamera3d()
   let light: Light3d = defaultLight3d()
 
+  # The measured entry point is the WHOLE frame, not just the draw calls:
+  # renderDeferredFrame also walks the graph's derived order and reads a
+  # PassDesc per pass. That read is exactly the kind of thing that
+  # allocates without anyone noticing, so it belongs inside the
+  # measurement rather than outside it.
+  var renderer: DeferredRenderer = createDeferredRenderer()
+  let st: Int = compileDeferred(r: renderer)
+
   # One warm-up frame OUTSIDE the measurement. Anything a first call
-  # allocates once (lazy setup) is not a per-object cost, and folding it
+  # allocates once (lazy setup) is not a per-frame cost, and folding it
   # into the sample would either fail the test for the wrong reason or,
   # worse, hide a real per-object allocation behind a tolerance.
-  beginPass(camera: camera, light: light, aspect: 1.6)
-  gbuffer.renderScene(scene: scene)
-  endPass()
+  renderDeferredFrame(r: renderer, scene: scene, camera: camera, light: light, aspect: 1.6)
 
   let before: Int = rae_ext_rae_mem_alloc_total()
   var f: Int = 0
   loop f < frames {
-    beginPass(camera: camera, light: light, aspect: 1.6)
-    gbuffer.renderScene(scene: scene)
-    endPass()
+    renderDeferredFrame(r: renderer, scene: scene, camera: camera, light: light, aspect: 1.6)
     f = f + 1
   }
   let allocations: Int = rae_ext_rae_mem_alloc_total() - before
 
+  log("graph status: {st}")
   log("objects per frame: {objects}")
   log("frames measured: {frames}")
   log("allocations: {allocations}")

@@ -39,3 +39,22 @@ void rae_ext_gbuffer_debugView(int64_t mode, float zNear, float zFar){
 }
 void rae_ext_gbuffer_present(void) {}
 void rae_ext_gbuffer_shutdown(void) {}
+
+/* The passes downstream of the G-buffer are pure GPU work — there is no
+ * CPU-side path in them to exercise, unlike the per-object transform
+ * build above — so these are no-ops with nothing to preserve. */
+void rae_ext_gbuffer_depthPyramid(void) {}
+void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure,
+                              float sunX, float sunY, float sunZ,
+                              float sunR, float sunG, float sunB,
+                              float skyR, float skyG, float skyB,
+                              float gndR, float gndG, float gndB){
+    (void)camX; (void)camY; (void)camZ; (void)exposure;
+    (void)sunX; (void)sunY; (void)sunZ;
+    (void)sunR; (void)sunG; (void)sunB;
+    (void)skyR; (void)skyG; (void)skyB;
+    (void)gndR; (void)gndG; (void)gndB;
+}
+void rae_ext_gbuffer_composite(float exposure) { (void)exposure; }
+int64_t rae_ext_gbuffer_pyramidMips(void) { return 0; }
+void rae_ext_gbuffer_deferredShutdown(void) {}

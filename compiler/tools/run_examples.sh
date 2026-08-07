@@ -80,25 +80,27 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # states the real expectation. Normals and linearised depth are
           # continuous and pass the standard check.
           GB_OK=1
-          for GB_VIEW in albedo normal material depth; do
+          for GB_VIEW in lit albedo normal material depth; do
             GB_SHOT="$TMP_OUT/gbuffer-$GB_VIEW.bmp"
             case "$GB_VIEW" in
               albedo|material) GB_ARGS="--min-colors=20" ;;
               *)               GB_ARGS="" ;;
             esac
-            if ! (RAE_GBUFFER_VIEW="$GB_VIEW" RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$GB_SHOT" \
+            if ! (RAE_GBUFFER_VIEW="$GB_VIEW" RAE_GBUFFER_DEBUG=1 RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$GB_SHOT" \
                   perl -e 'alarm shift; exec @ARGV' 25 "$TMP_OUT/app" > "$TMP_OUT/gb-$GB_VIEW.log" 2>&1 \
                   && python3 tools/assert_nonblank_bmp.py "$GB_SHOT" $GB_ARGS >> "$TMP_OUT/gb-$GB_VIEW.log" 2>&1); then
               GB_OK=0
             fi
           done
-          # Order is DERIVED from the graph's resource edges, never written.
-          # Asserting it here (not only in test 572) is what ties the derived
-          # sequence to real GPU work rather than to a printed string.
+          # Order is DERIVED from the graph's resource edges, never written,
+          # and the pyramid must actually have been built — a silently
+          # skipped pass would still leave a correct-looking lit image,
+          # since nothing reads the pyramid yet.
           if [ "$GB_OK" = "1" ] \
-             && [ "$(grep -c '  0: gbuffer' "$TMP_OUT/gb-albedo.log")" -ge 1 ] \
-             && [ "$(grep -c '  4: present' "$TMP_OUT/gb-albedo.log")" -ge 1 ]; then
-            echo "PASS: $EXAMPLE_NAME (albedo/normal/material/depth channels, derived pass order)"
+             && [ "$(grep -c '  0: gbuffer' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
+             && [ "$(grep -c '  4: present' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
+             && [ "$(grep -c 'depth pyramid: .* mips' "$TMP_OUT/gb-lit.log")" -ge 1 ]; then
+            echo "PASS: $EXAMPLE_NAME (lit frame + 4 G-buffer channels, pyramid built, derived pass order)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (deferred G-buffer)"
