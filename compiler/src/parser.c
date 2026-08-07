@@ -237,6 +237,8 @@ static AstTypeRef* append_type_ref_list(AstTypeRef* head, AstTypeRef* node) {
   return head;
 }
 
+static AstExpr* parse_expression(Parser* parser);
+
 static AstTypeRef* parse_type_ref(Parser* parser) {
   const Token* start_token = parser_peek(parser);
   AstTypeRef* type = parser_alloc(parser, sizeof(AstTypeRef));
@@ -307,8 +309,43 @@ static AstTypeRef* parse_type_ref(Parser* parser) {
   if (parser_match(parser, TOK_LPAREN)) {
     AstTypeRef* generic_params_head = NULL;
     do {
+      /* A VALUE generic argument: `cap: 16`. Rae's rule is that type
+       * arguments are positional and value arguments are named, so a value
+       * argument is recognised by the `ident :` that a type can never
+       * begin with. The keyword is required — a bare `Array(Float, 16)`
+       * falls through to parse_type_ref and reports "expected type", which
+       * is the diagnostic we want.  */
+      if (is_ident_like(parser_peek(parser)->kind) && parser_check_at(parser, 1, TOK_COLON)) {
+        const Token* name_tok = parser_advance(parser);
+        parser_advance(parser); // ':'
+        AstTypeRef* value_arg = parser_alloc(parser, sizeof(AstTypeRef));
+        value_arg->line = name_tok->line;
+        value_arg->column = name_tok->column;
+        value_arg->is_value_arg = true;
+        value_arg->value_name = parser_copy_str(parser, name_tok->lexeme);
+        value_arg->value_expr = parse_expression(parser);
+        generic_params_head = append_type_ref_list(generic_params_head, value_arg);
+        if (parser_check(parser, TOK_RPAREN)) break;
+        parser_consume(parser, TOK_COMMA, "expected ',' or ')' in generic type list");
+        if (parser_check(parser, TOK_RPAREN)) break;
+        continue;
+      }
+
+      /* A bare number in a generic argument list is the mistake this rule
+       * exists to make impossible to write by accident. Say so directly
+       * rather than letting it fall through to "expected type". */
+      if (parser_check(parser, TOK_INTEGER) || parser_check(parser, TOK_FLOAT)) {
+        parser_error(parser, parser_peek(parser),
+                     "value generic arguments must be named (write 'cap: N', not a bare number)");
+        parser_advance(parser);
+        if (parser_check(parser, TOK_RPAREN)) break;
+        parser_consume(parser, TOK_COMMA, "expected ',' or ')' in generic type list");
+        if (parser_check(parser, TOK_RPAREN)) break;
+        continue;
+      }
+
       AstTypeRef* generic_param = parse_type_ref(parser); // Recursive call for nested generics
-      
+
       // Reject references in generic arguments
       if (generic_param->is_view || generic_param->is_mod) {
           parser_error(parser, start_token, "references (view/mod) cannot be used as generic type arguments");
