@@ -1,0 +1,85 @@
+# vec4 — a 4D vector value type, mirroring lib/vec3.rae's API shape.
+#
+# Named fields rather than `Array(Float, cap: 4)`, for the same reason as
+# vec2: components have meanings and `v.w` beats `v[3]`. Both are equally
+# allocation-free.
+#
+# A Vec4 is 16 contiguous bytes, which is the shape a future SIMD lowering
+# wants (#357) and the natural unit for an RGBA colour or a homogeneous
+# position.
+#
+#   import vec4
+#   let c: Vec4 = { x: 1.0, y: 0.5, z: 0.0, w: 1.0 }
+
+import math
+import vec3
+open vec3
+
+type Vec4 {
+    x: Float
+    y: Float
+    z: Float
+    w: Float
+}
+
+func create(x: view Float, y: view Float, z: view Float, w: view Float) ret Vec4 {
+    ret Vec4 { x: x, y: y, z: z, w: w }
+}
+
+# A point in homogeneous coordinates (w = 1): translation applies.
+func fromPoint(v: view Vec3) ret Vec4 {
+    ret Vec4 { x: v.x, y: v.y, z: v.z, w: 1.0 }
+}
+
+# A direction in homogeneous coordinates (w = 0): translation does NOT
+# apply. Using fromPoint for a direction is the classic transform bug.
+func fromDirection(v: view Vec3) ret Vec4 {
+    ret Vec4 { x: v.x, y: v.y, z: v.z, w: 0.0 }
+}
+
+func xyz(a: view Vec4) ret Vec3 {
+    ret Vec3 { x: a.x, y: a.y, z: a.z }
+}
+
+func vadd(a: view Vec4, b: view Vec4) ret Vec4 {
+    ret Vec4 { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z, w: a.w + b.w }
+}
+
+func vsub(a: view Vec4, b: view Vec4) ret Vec4 {
+    ret Vec4 { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z, w: a.w - b.w }
+}
+
+func vscale(a: view Vec4, s: view Float) ret Vec4 {
+    ret Vec4 { x: a.x * s, y: a.y * s, z: a.z * s, w: a.w * s }
+}
+
+# Component-wise multiply (e.g. colour * tint).
+func vmul(a: view Vec4, b: view Vec4) ret Vec4 {
+    ret Vec4 { x: a.x * b.x, y: a.y * b.y, z: a.z * b.z, w: a.w * b.w }
+}
+
+func vneg(a: view Vec4) ret Vec4 {
+    ret Vec4 { x: 0.0 - a.x, y: 0.0 - a.y, z: 0.0 - a.z, w: 0.0 - a.w }
+}
+
+func vdot(a: view Vec4, b: view Vec4) ret Float {
+    ret a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w
+}
+
+func vlenSq(a: view Vec4) ret Float {
+    ret a.x * a.x + a.y * a.y + a.z * a.z + a.w * a.w
+}
+
+func vlen(a: view Vec4) ret Float {
+    ret math.sqrt(x: vec4.vlenSq(a: a))
+}
+
+func vnorm(a: view Vec4) ret Vec4 {
+    let l: Float = vec4.vlen(a: a)
+    ret Vec4 { x: a.x / l, y: a.y / l, z: a.z / l, w: a.w / l }
+}
+
+# Perspective divide: homogeneous clip space -> normalised device coords.
+func perspectiveDivide(a: view Vec4) ret Vec3 {
+    ret Vec3 { x: a.x / a.w, y: a.y / a.w, z: a.z / a.w }
+}
