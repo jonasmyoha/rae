@@ -46,6 +46,22 @@ bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstType
     if (!type) return true;
     
     if (type->resolved_type) {
+        if (type->resolved_type->kind == TYPE_ARRAY) {
+            /* Emit the element type first, then the wrapper struct. Handled
+             * ahead of the generic-argument scan below, which would bail out
+             * on the `cap:` value argument (it has no base type name). */
+            TypeInfo* at = type->resolved_type;
+            const char* amangled = type_mangle_name(ctx->ast_arena, at).data;
+            if (emitted_list_contains(emitted, amangled)) return true;
+            if (type->generic_args) emit_type_recursive(ctx, m, type->generic_args, out, emitted, visiting, ray);
+            AstTypeRef elem = {0}; elem.resolved_type = at->as.array.base;
+            CFuncContext tctx = {0}; tctx.compiler_ctx = ctx; tctx.module = m; tctx.uses_raylib = ray;
+            fprintf(out, "typedef struct { ");
+            emit_type_ref_as_c_type(&tctx, &elem, out, false);
+            fprintf(out, " v[%lld]; } %s;\n\n", (long long)(at->as.array.count > 0 ? at->as.array.count : 1), amangled);
+            emitted_list_add(emitted, amangled);
+            return true;
+        }
         if (type->resolved_type->kind == TYPE_BUFFER) {
             // Buffer(T) - T might need registration but Buffer is a pointer
             if (type->generic_args) emit_type_recursive(ctx, m, type->generic_args, out, emitted, visiting, ray);
@@ -291,6 +307,8 @@ void register_function_specialization(CompilerContext* ctx, const AstFuncDecl* d
 void register_generic_type(CompilerContext* ctx, const AstTypeRef* type) {
     if (!type || !is_concrete_type(type)) return;
     if ((uintptr_t)type < 0x1000) return;
+    /* A `cap: N` value argument is not a type and has nothing to register. */
+    if (type->is_value_arg) return;
     // Don't register types with void generic args (spurious specializations)
     for (const AstTypeRef* a = type->generic_args; a; a = a->next) {
         Str ab = get_base_type_name(a);
@@ -518,6 +536,18 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
       if (t->kind == TYPE_CHAR) { if (is_ptr) fprintf(out, "rae_%s_Char", type->is_mod ? "Mod" : "View"); else fprintf(out, "uint32_t"); return true; }
       if (t->kind == TYPE_STRING) { if (is_ptr) fprintf(out, "rae_%s_String", type->is_mod ? "Mod" : "View"); else fprintf(out, "rae_String"); return true; }
       if (t->kind == TYPE_ANY || t->kind == TYPE_OPT) { fprintf(out, "RaeAny"); if (is_ptr) fprintf(out, "*"); return true; }
+      if (t->kind == TYPE_ARRAY) {
+          /* Array(T, cap: N) lowers to a STRUCT wrapping T[N], never a bare
+           * T[N]: a bare C array decays to a pointer on assignment and
+           * parameter passing, so `a = b` would copy a pointer and silently
+           * reintroduce aliasing. The struct gives real by-value semantics
+           * with identical layout and no ABI cost.
+           * See docs/value-aggregates-and-ownership.md §1.5. */
+          if (type->is_view) fprintf(out, "const ");
+          fprintf(out, "%s", type_mangle_name(ctx->compiler_ctx->ast_arena, t).data);
+          if (is_ptr) fprintf(out, "*");
+          return true;
+      }
       if (t->kind == TYPE_BUFFER) {
           if (type->is_view) fprintf(out, "const ");
           if (t->as.buffer.base->kind == TYPE_ANY || t->as.buffer.base->kind == TYPE_VOID) fprintf(out, "void*");
