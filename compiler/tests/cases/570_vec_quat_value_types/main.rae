@@ -1,0 +1,52 @@
+# Vec2 / Vec4 / Quat value types (#354).
+#
+# These use NAMED FIELDS rather than Array(Float, cap: N): components have
+# meanings, `v.w` reads better than `v[3]`, and both spellings are equally
+# allocation-free. Array earns its place where the count is large and the
+# elements are homogeneous — a matrix or a palette — not here.
+import core
+import math
+import vec2
+import vec3
+import vec4
+import quat
+import math3d
+open vec3
+open math3d
+
+func main() {
+  let a: Vec2 = vec2.create(x: 3.0, y: 4.0)
+  log("vec2 len={vec2.vlen(a: a)} cross={vec2.vcross(a: a, b: vec2.create(x: 0.0, y: 1.0))}")
+
+  # w distinguishes a point (translation applies) from a direction (it
+  # does not) — using the wrong one is the classic transform bug.
+  let p: Vec4 = vec4.fromPoint(v: vec3.create(x: 1.0, y: 2.0, z: 3.0))
+  let d: Vec4 = vec4.fromDirection(v: vec3.create(x: 1.0, y: 2.0, z: 3.0))
+  log("vec4 pw={p.w} dw={d.w} dot={vec4.vdot(a: p, b: p)}")
+
+  # Right-handed yaw of 90 degrees about +Z takes +X to +Y (Z-up Blender
+  # convention, docs/coordinate-system.md).
+  let q: Quat = quat.fromAxisAngle(axis: vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: 1.5707963)
+  let r: Vec3 = quat.rotate(q: q, v: vec3.create(x: 1.0, y: 0.0, z: 0.0))
+  log("yaw90 y={r.y} zeroish={r.x < 0.001} z={r.z}")
+
+  # The matrix form of the same rotation must agree with rotating directly.
+  let qm: Mat4 = quat.toMat4(q: q)
+  log("quatMat col0y={qm.m[1]} zeroish={qm.m[0] < 0.001}")
+
+  # slerp: midpoint is exactly 45 degrees, and t=1 reproduces the target.
+  let i: Quat = quat.identity()
+  let mid: Vec3 = quat.rotate(q: quat.slerp(a: i, b: q, t: 0.5), v: vec3.create(x: 1.0, y: 0.0, z: 0.0))
+  log("slerp mid=({mid.x} {mid.y})")
+  let endq: Quat = quat.slerp(a: i, b: q, t: 1.0)
+  log("slerp end w={endq.w} target={q.w}")
+
+  # Composition order matches mat4Mul: qmul(a, b) applies b first.
+  let half: Quat = quat.fromAxisAngle(axis: vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: 0.78539815)
+  let composed: Vec3 = quat.rotate(q: quat.qmul(a: half, b: half), v: vec3.create(x: 1.0, y: 0.0, z: 0.0))
+  log("half*half y={composed.y} zeroish={composed.x < 0.001}")
+
+  # Conjugate inverts a unit quaternion.
+  let backv: Vec3 = quat.rotate(q: quat.conjugate(a: q), v: r)
+  log("inverse x={backv.x} zeroish={backv.y < 0.001}")
+}

@@ -84,11 +84,43 @@ func createFrame3d() pub ret Frame3d {
   ret Frame3d { data: own d }
 }
 
-func setViewProj(frame: mod Frame3d, m: view List(Float)) {
+func setViewProj(frame: mod Frame3d, m: view Mat4) {
   var i: Int = 0
   loop i < 16 {
-    frame.data.set(index: i, value: rae_ext_rae_buf_get(buf: m.data, index: i))
+    frame.data.set(index: i, value: m.m[i])
     i = i + 1
+  }
+}
+
+# Scratch storage for the extern boundary.
+#
+# gpu3d's C entry points take a raw `const float*`. A Mat4 is a value with
+# no Buffer to hand over, so these module-level lists are filled and passed
+# instead. They are allocated ONCE for the process, not per draw: the point
+# of #354 is that building a matrix no longer allocates, and copying 16
+# floats into a preallocated buffer is not a meaningful cost next to a draw
+# call. Two are needed because `draw` takes the current AND previous model
+# matrix in one call.
+#
+# Retyping the externs to take `view Mat4` would remove even the copy, but
+# the runtime's prototype lives in a separate translation unit and would
+# then disagree with the generated one — worth doing deliberately, not as a
+# side effect of this port.
+var g_modelScratch: List(Float) = createList(Float, cap: 16)
+var g_prevModelScratch: List(Float) = createList(Float, cap: 16)
+
+func matToScratch(m: view Mat4, dst: mod List(Float)) {
+  if dst.length < 16 {
+    var i: Int = 0
+    loop i < 16 {
+      dst.add(value: 0.0)
+      i = i + 1
+    }
+  }
+  var j: Int = 0
+  loop j < 16 {
+    dst.set(index: j, value: m.m[j])
+    j = j + 1
   }
 }
 
@@ -108,13 +140,13 @@ func setTime(frame: mod Frame3d, t: view Float) pub {
 func beginScene(camera: view Camera3d, light: view Light3d, aspect: view Float, time: view Float) pub {
   var frame: Frame3d = createFrame3d()
   let worldUp: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
-  let viewM: List(Float) = mat4LookAt(
+  let viewM: Mat4 = mat4LookAt(
     eyeX: camera.position.x, eyeY: camera.position.y, eyeZ: camera.position.z,
     atX: camera.target.x, atY: camera.target.y, atZ: camera.target.z,
     upX: worldUp.x, upY: worldUp.y, upZ: worldUp.z
   )
-  let proj: List(Float) = mat4Perspective(fovYDeg: camera.fovYDeg, aspect: aspect, near: camera.nearZ, far: camera.farZ)
-  let viewProj: List(Float) = mat4Mul(a: proj, b: viewM)
+  let proj: Mat4 = mat4Perspective(fovYDeg: camera.fovYDeg, aspect: aspect, near: camera.nearZ, far: camera.farZ)
+  let viewProj: Mat4 = mat4Mul(a: proj, b: viewM)
   setViewProj(frame: frame, m: viewProj)
   setVec3At(frame: frame, base: 16, v: camera.position)
   setTime(frame: frame, t: time)
@@ -130,15 +162,15 @@ func beginScene(camera: view Camera3d, light: view Light3d, aspect: view Float, 
 # Build a model matrix from a typed transform: M = T * Rz * Ry * Rx * S.
 # Rotation is Euler XYZ radians, right-handed (yaw about +Z, pitch about
 # +X) per docs/coordinate-system.md.
-func modelMatrix(t: view Transform3d) pub ret List(Float) {
-  let s: List(Float) = mat4ScaleXYZ(x: t.scale.x, y: t.scale.y, z: t.scale.z)
-  let rx: List(Float) = mat4RotateX(angle: t.rotation.x)
-  let ry: List(Float) = mat4RotateY(angle: t.rotation.y)
-  let rz: List(Float) = mat4RotateZ(angle: t.rotation.z)
-  let tr: List(Float) = mat4Translate(x: t.position.x, y: t.position.y, z: t.position.z)
-  let rxs: List(Float) = mat4Mul(a: rx, b: s)
-  let ryrxs: List(Float) = mat4Mul(a: ry, b: rxs)
-  let rot: List(Float) = mat4Mul(a: rz, b: ryrxs)
+func modelMatrix(t: view Transform3d) pub ret Mat4 {
+  let s: Mat4 = mat4ScaleXYZ(x: t.scale.x, y: t.scale.y, z: t.scale.z)
+  let rx: Mat4 = mat4RotateX(angle: t.rotation.x)
+  let ry: Mat4 = mat4RotateY(angle: t.rotation.y)
+  let rz: Mat4 = mat4RotateZ(angle: t.rotation.z)
+  let tr: Mat4 = mat4Translate(x: t.position.x, y: t.position.y, z: t.position.z)
+  let rxs: Mat4 = mat4Mul(a: rx, b: s)
+  let ryrxs: Mat4 = mat4Mul(a: ry, b: rxs)
+  let rot: Mat4 = mat4Mul(a: rz, b: ryrxs)
   ret mat4Mul(a: tr, b: rot)
 }
 
@@ -149,10 +181,12 @@ func drawInstance(mesh: view MeshHandle, transform: view Transform3d, prevTransf
   if not meshHandleIsValid(h: mesh) {
     ret
   }
-  let model: List(Float) = modelMatrix(t: transform)
-  let prevModel: List(Float) = modelMatrix(t: prevTransform)
+  let model: Mat4 = modelMatrix(t: transform)
+  let prevModel: Mat4 = modelMatrix(t: prevTransform)
+  matToScratch(m: model, dst: g_modelScratch)
+  matToScratch(m: prevModel, dst: g_prevModelScratch)
   draw(
-    mesh: mesh.id, model: model.data, prevModel: prevModel.data,
+    mesh: mesh.id, model: g_modelScratch.data, prevModel: g_prevModelScratch.data,
     r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
     metallic: material.metallic, roughness: material.roughness,
     emR: material.emission.x, emG: material.emission.y, emB: material.emission.z
