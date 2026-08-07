@@ -1,0 +1,30 @@
+# Array(T, cap: N) is a drop target exactly when T is (#352, slice 3).
+#
+# Array(String, cap: N) must cascade — each element gets dropped — while
+# Array(Float, cap: N) must emit NO drop code at all. The primitive case
+# is the renderer's, and it has to stay exactly free.
+#
+# The loop is the real assertion: a missing drop leaks and a double drop
+# aborts, so completing 2000 iterations cleanly is what proves the
+# per-element cascade is correct rather than merely present.
+import core
+
+func makeNames(tag: view String) ret Array(String, cap: 2) {
+  var names: Array(String, cap: 2) = Array(String, cap: 2)
+  names[0] = "first-{tag}"
+  names[1] = "second-{tag}"
+  ret names
+}
+
+func main() {
+  let names: Array(String, cap: 2) = makeNames(tag: "x")
+  log("n0={names[0]} n1={names[1]}")
+
+  var i: Int = 0
+  loop i < 2000 {
+    let tmp: Array(String, cap: 2) = makeNames(tag: "{i}")
+    if tmp[0].length() < 1 { log("empty") }
+    i = i + 1
+  }
+  log("survived {i} iterations")
+}
