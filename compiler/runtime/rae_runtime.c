@@ -55,9 +55,20 @@
 #include "runtime_gpu2d_image.c"
 #include "runtime_gpu2d_frame.c"
 #include "runtime_gpu3d.c"
+/* After runtime_gpu3d.c: the deferred geometry pass shares mesh storage
+ * (an asset, not a frame resource) and the platform present with it. */
+#include "runtime_gpu3d_gbuffer.c"
 #else
 #include "runtime_gpu2d_stubs.c"
 #include "runtime_gpu3d_stubs.c"
 #endif /* RAE_HAS_SDL3 */
 #endif /* RAE_HAS_WEBGPU */
+
+/* The deferred G-buffer's CPU path (transform building through Mat4) is
+ * meaningful without a GPU, so its stubs cover every build that did not
+ * compile the real pass — including builds with no WebGPU at all, which
+ * the gpu2d/gpu3d stubs above deliberately do not. */
+#if !defined(RAE_HAS_WEBGPU) || !defined(RAE_HAS_SDL3)
+#include "runtime_gbuffer_stubs.c"
+#endif
 #include "runtime_spotify_apple.c"

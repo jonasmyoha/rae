@@ -67,6 +67,44 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" "$TMP_OUT/overflow.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
+        elif [ "$EXAMPLE_NAME" = "111_deferred_gbuffer" ]; then
+          # The deferred G-buffer (#356). Each channel is checked separately
+          # because they fail differently: a broken albedo write still leaves
+          # plausible normals, and a broken normal transform still leaves
+          # correct albedo. One composite screenshot would hide either.
+          #
+          # Albedo and material are UNSHADED, so they legitimately contain
+          # about as many colours as the scene has materials (25 spheres +
+          # ground + clear = 27) — the default 32-colour floor assumes a lit
+          # image and would fail them for being correct. --min-colors=20
+          # states the real expectation. Normals and linearised depth are
+          # continuous and pass the standard check.
+          GB_OK=1
+          for GB_VIEW in albedo normal material depth; do
+            GB_SHOT="$TMP_OUT/gbuffer-$GB_VIEW.bmp"
+            case "$GB_VIEW" in
+              albedo|material) GB_ARGS="--min-colors=20" ;;
+              *)               GB_ARGS="" ;;
+            esac
+            if ! (RAE_GBUFFER_VIEW="$GB_VIEW" RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$GB_SHOT" \
+                  perl -e 'alarm shift; exec @ARGV' 25 "$TMP_OUT/app" > "$TMP_OUT/gb-$GB_VIEW.log" 2>&1 \
+                  && python3 tools/assert_nonblank_bmp.py "$GB_SHOT" $GB_ARGS >> "$TMP_OUT/gb-$GB_VIEW.log" 2>&1); then
+              GB_OK=0
+            fi
+          done
+          # Order is DERIVED from the graph's resource edges, never written.
+          # Asserting it here (not only in test 572) is what ties the derived
+          # sequence to real GPU work rather than to a printed string.
+          if [ "$GB_OK" = "1" ] \
+             && [ "$(grep -c '  0: gbuffer' "$TMP_OUT/gb-albedo.log")" -ge 1 ] \
+             && [ "$(grep -c '  4: present' "$TMP_OUT/gb-albedo.log")" -ge 1 ]; then
+            echo "PASS: $EXAMPLE_NAME (albedo/normal/material/depth channels, derived pass order)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (deferred G-buffer)"
+            cat "$TMP_OUT"/gb-*.log 2>/dev/null | sed 's/^/  /'
+            ((FAILED++))
+          fi
         elif [ "$EXAMPLE_NAME" = "110_gpu3d_ui" ]; then
           SCREENSHOT="$TMP_OUT/gpu3d-ui.bmp"
           FREE_SCREENSHOT="$TMP_OUT/gpu3d-ui-free.bmp"

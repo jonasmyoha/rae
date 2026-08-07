@@ -1,0 +1,147 @@
+# gbuffer — the deferred frame's geometry pass (#356, Track B).
+#
+# This module is to `renderer_deferred` what `gpu3d` is to `renderer3d`:
+# the GPU seam. `renderer_deferred` owns the frame graph and dispatches
+# passes; this owns the typed encoding of one of them.
+#
+# WHAT MAKES IT DEFERRED. The pass writes surface ATTRIBUTES — albedo,
+# world normal, metallic/roughness, depth — and performs no lighting at
+# all. Lighting later reads those attributes once per pixel, so its cost
+# stops scaling with the number of objects that contributed. That is the
+# entire reason the frame is being rebuilt this way; a version of this
+# module that shaded here would be the forward renderer wearing a new
+# name.
+#
+# WHY THE G-BUFFER IS EXACTLY THIS WIDE. Every channel is something the
+# BRDF cannot be evaluated without: albedo is the reflectance, the normal
+# is the surface orientation, metallic selects the F0/diffuse split and
+# roughness drives the specular lobe. World position is NOT stored — it
+# reconstructs from depth, which has to be written anyway, so storing it
+# would be three redundant channels. Emissive is absent on purpose: it is
+# an additive term nothing reads back, not a BRDF input, so it belongs
+# with the lighting pass rather than in a buffer sized for BRDF inputs.
+#
+# ALLOCATION-FREE PER OBJECT (#356's acceptance criterion). Transforms
+# flow through `Mat4` from lib/math3d.rae — 16 Floats by value, an
+# `Array(Float, cap: 16)` that lives on the stack. `beginPass` builds the
+# view-projection from value types and hands it over by view; `drawInstance`
+# builds a model matrix the same way. Neither touches the allocator, and
+# test 573 asserts that by counting allocations across a many-object frame
+# rather than trusting this paragraph.
+#
+# WORLD CONVENTION: right-handed Z-up (Blender), per
+# docs/coordinate-system.md — the same as the forward path.
+import core
+import math
+import vec3
+open vec3
+open scene3d
+open math3d
+
+# ----- raw C ABI (implementation detail; prefer the typed API below) ---
+func begin(viewProj: view Mat4, clearR: Float, clearG: Float, clearB: Float) extern
+func draw(mesh: Int, model: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float) extern
+func end() extern
+func drawCount() extern ret Int
+func debugView(mode: Int, zNear: Float, zFar: Float) extern
+func present() extern
+func shutdown() pub extern
+
+# ----- G-buffer inspector modes ---------------------------------------
+# Permanent equipment, not scaffolding: when a lit image is wrong the
+# first question is always WHICH attribute is wrong, and that cannot be
+# answered without looking at the channels directly.
+const viewLit: Int = 0       # the composed/lit image (once lighting lands)
+const viewAlbedo: Int = 1
+const viewNormal: Int = 2
+const viewMaterial: Int = 3  # r = metallic, g = roughness
+const viewDepth: Int = 4     # linearised for display
+
+# Start the geometry pass. `aspect` is width/height of the target.
+#
+# The view-projection is built here from value types and passed by view:
+# mat4LookAt, mat4Perspective and mat4Mul all return `Mat4` by value, so
+# the whole chain is stack traffic. The forward path packs an equivalent
+# block into a List(Float) — one allocation per frame — which this
+# deliberately does not inherit.
+func beginPass(camera: view Camera3d, light: view Light3d, aspect: view Float) pub {
+  let worldUp: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  let viewM: Mat4 = mat4LookAt(
+    eyeX: camera.position.x, eyeY: camera.position.y, eyeZ: camera.position.z,
+    atX: camera.target.x, atY: camera.target.y, atZ: camera.target.z,
+    upX: worldUp.x, upY: worldUp.y, upZ: worldUp.z
+  )
+  let proj: Mat4 = mat4Perspective(fovYDeg: camera.fovYDeg, aspect: aspect, near: camera.nearZ, far: camera.farZ)
+  let viewProj: Mat4 = mat4Mul(a: proj, b: viewM)
+  begin(viewProj: viewProj, clearR: light.clearColor.x, clearG: light.clearColor.y, clearB: light.clearColor.z)
+}
+
+# Model matrix for a typed transform: M = T * Rz * Ry * Rx * S, Euler XYZ
+# radians, right-handed. Same construction as the forward path's — the two
+# frames must agree about where an object IS, whatever they disagree about
+# in how it is shaded.
+func modelMatrixOf(t: view Transform3d) pub ret Mat4 {
+  let s: Mat4 = mat4ScaleXYZ(x: t.scale.x, y: t.scale.y, z: t.scale.z)
+  let rx: Mat4 = mat4RotateX(angle: t.rotation.x)
+  let ry: Mat4 = mat4RotateY(angle: t.rotation.y)
+  let rz: Mat4 = mat4RotateZ(angle: t.rotation.z)
+  let tr: Mat4 = mat4Translate(x: t.position.x, y: t.position.y, z: t.position.z)
+  let rxs: Mat4 = mat4Mul(a: rx, b: s)
+  let ryrxs: Mat4 = mat4Mul(a: ry, b: rxs)
+  let rot: Mat4 = mat4Mul(a: rz, b: ryrxs)
+  ret mat4Mul(a: tr, b: rot)
+}
+
+# Write one mesh instance's surface attributes. Note what is NOT passed:
+# no light, no camera, no emission. A geometry pass that needed any of
+# those would not be a geometry pass.
+func drawInstance(mesh: view MeshHandle, transform: view Transform3d, material: view Material3d) pub {
+  if not meshHandleIsValid(h: mesh) {
+    ret
+  }
+  let model: Mat4 = modelMatrixOf(t: transform)
+  draw(
+    mesh: mesh.id, model: model,
+    r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
+    metallic: material.metallic, roughness: material.roughness
+  )
+}
+
+# Fill the G-buffer from a scene's mesh components.
+#
+# SDF primitives are absent by design, not oversight: the forward path
+# raymarches them in the material shader, and the deferred equivalent is a
+# raymarch that writes G-buffer attributes instead of colour. That is its
+# own pass with its own pipeline, and it lands once the lighting side is
+# real enough to shade what it writes.
+func renderScene(scene: view Scene3d) pub {
+  var i: Int = 0
+  loop i < scene.meshRenderers.length {
+    let r: MeshRenderer = scene.meshRenderers.at(index: i)
+    if r.visible {
+      let t: Transform3d = scene.transforms.at(index: r.entity)
+      let m: Material3d = scene.materials.at(index: r.material)
+      drawInstance(mesh: r.mesh, transform: t, material: m)
+    }
+    i = i + 1
+  }
+}
+
+func endPass() pub {
+  end()
+}
+
+# How many instances the last pass actually submitted. Lets a caller (or a
+# test) distinguish "drew nothing" from "drew and the image is wrong".
+func passDrawCount() pub ret Int {
+  ret drawCount()
+}
+
+# Paint one G-buffer channel into the presentable target.
+func inspect(mode: view Int, zNear: view Float, zFar: view Float) pub {
+  debugView(mode: mode, zNear: zNear, zFar: zFar)
+}
+
+func presentFrame() pub {
+  present()
+}

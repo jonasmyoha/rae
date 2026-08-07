@@ -1,0 +1,95 @@
+# #356's ACCEPTANCE CRITERION: the deferred frame's per-object transform
+# path allocates nothing.
+#
+# This is the property the whole Track B value-type effort (#354: Mat4 as
+# `Array(Float, cap: 16)`) exists to buy. The forward path builds its frame
+# block as a `List(Float)` and used to build per-draw matrices the same
+# way; at a few thousand objects that is a few thousand allocations per
+# frame, every frame, and no amount of GPU work saved by deferring makes
+# that back.
+#
+# HOW IT IS MEASURED. `rae_ext_rae_mem_alloc_total` counts CUMULATIVE
+# allocations — String bodies plus List/Buffer storage — and is always
+# live, with no env var to forget. Cumulative is the important part: a path
+# that allocates a scratch matrix per object and frees it again has still
+# allocated per object, and an outstanding-allocation counter would report
+# that as clean.
+#
+# The GPU is not involved. Under the stub runtime the externs are no-ops,
+# so what runs here is exactly the Rae-side per-object path — mat4Scale /
+# mat4Rotate* / mat4Translate / mat4Mul, then the extern call — which is
+# the part that could regress by someone reaching for a List.
+import core
+import gbuffer
+import scene3d
+import vec3
+import math3d
+open scene3d
+open gbuffer
+open math3d
+open vec3
+
+func rae_ext_rae_mem_alloc_total() extern ret Int
+
+func buildScene(objects: view Int) ret Scene3d {
+  var scene: Scene3d = createScene3d()
+  let noEmit: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let unit: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  # Mesh id 1 need not exist on the GPU: the extern is a no-op under the
+  # stub runtime and the handle only has to be VALID, so the Rae path runs
+  # end to end including the model-matrix build.
+  let mesh: MeshHandle = meshHandle(id: 1, generation: 1)
+  var i: Int = 0
+  loop i < objects {
+    let f: Float = i.toFloat()
+    let mat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.9, y: 0.3, z: 0.2), metallic: 0.5, roughness: 0.4, emission: noEmit)
+    # Rotation and non-unit scale on purpose: they force the full
+    # T * Rz * Ry * Rx * S chain — five matrices and four multiplies per
+    # object — rather than a translation-only fast path.
+    let e: Int = addMeshInstance(
+      scene: scene, mesh: mesh, material: mat,
+      position: vec3.create(x: f * 0.5, y: f * 0.25, z: 1.0),
+      rotation: vec3.create(x: f * 0.1, y: f * 0.2, z: f * 0.3),
+      scale: vec3.create(x: 1.5, y: 1.5, z: 1.5)
+    )
+    i = i + 1
+  }
+  ret scene
+}
+
+func main() {
+  let objects: Int = 512
+  let frames: Int = 20
+  var scene: Scene3d = buildScene(objects: objects)
+  let camera: Camera3d = defaultCamera3d()
+  let light: Light3d = defaultLight3d()
+
+  # One warm-up frame OUTSIDE the measurement. Anything a first call
+  # allocates once (lazy setup) is not a per-object cost, and folding it
+  # into the sample would either fail the test for the wrong reason or,
+  # worse, hide a real per-object allocation behind a tolerance.
+  beginPass(camera: camera, light: light, aspect: 1.6)
+  gbuffer.renderScene(scene: scene)
+  endPass()
+
+  let before: Int = rae_ext_rae_mem_alloc_total()
+  var f: Int = 0
+  loop f < frames {
+    beginPass(camera: camera, light: light, aspect: 1.6)
+    gbuffer.renderScene(scene: scene)
+    endPass()
+    f = f + 1
+  }
+  let allocations: Int = rae_ext_rae_mem_alloc_total() - before
+
+  log("objects per frame: {objects}")
+  log("frames measured: {frames}")
+  log("allocations: {allocations}")
+  # Not "small", not "bounded" — zero. A per-object allocation would show
+  # up here as 10240 (512 x 20), so this number failing is unambiguous.
+  if allocations is 0 {
+    log("verdict: OK")
+  } else {
+    log("verdict: REGRESSED")
+  }
+}

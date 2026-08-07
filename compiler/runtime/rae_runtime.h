@@ -504,6 +504,10 @@ void rae_ext_rae_mem_stats_dump(void);
 int64_t rae_ext_rae_mem_stats_outstanding(void);
 int64_t rae_ext_rae_mem_stats_buf_outstanding(void);
 int64_t rae_ext_rae_mem_stats_buf_outstanding_bytes(void);
+/* Cumulative allocation count (strings + buffers), ALWAYS live — no env
+ * var. Sample either side of a hot path and assert the delta to pin an
+ * "allocates nothing" guarantee. */
+int64_t rae_ext_rae_mem_alloc_total(void);
 
 void rae_ext_rae_seed(int64_t seed);
 float rae_ext_rae_random(void);
