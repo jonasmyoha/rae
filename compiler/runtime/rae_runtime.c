@@ -58,6 +58,9 @@
 /* After runtime_gpu3d.c: the deferred geometry pass shares mesh storage
  * (an asset, not a frame resource) and the platform present with it. */
 #include "runtime_gpu3d_gbuffer.c"
+/* After the G-buffer: the pyramid, lighting and composite all read what it
+ * produced, and reuse its targets' generation counter. */
+#include "runtime_gpu3d_deferred.c"
 #else
 #include "runtime_gpu2d_stubs.c"
 #include "runtime_gpu3d_stubs.c"

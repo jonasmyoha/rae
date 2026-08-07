@@ -6,15 +6,17 @@
 # replace or reuse the forward path, and neither shares a resource with the
 # other.
 #
-# WHAT IS ACTUALLY RUNNING. The geometry pass writes surface attributes —
-# albedo, world normal, metallic/roughness, depth — and performs no
-# lighting. The lighting pass that consumes them is not built yet, so the
-# composite paints a G-buffer channel instead of a lit image. That is the
-# inspector, permanent equipment in a deferred renderer rather than
-# scaffolding to delete: `RAE_GBUFFER_VIEW=albedo|normal|material|depth`
-# picks the channel, and it stays useful for exactly the same reason it is
-# useful now — when a lit image is wrong, the first question is which
-# attribute is wrong.
+# WHAT IS ACTUALLY RUNNING. The full chain: the geometry pass writes
+# surface attributes and performs no lighting; the depth pyramid reduces
+# depth with MIN into a mip chain; one fullscreen lighting pass evaluates
+# the BRDF over the G-buffer into linear HDR; the composite tonemaps that
+# to the presentable target. Lighting cost is per pixel, not per
+# object-pixel — the point of the whole split.
+#
+# `RAE_GBUFFER_VIEW=albedo|normal|material|depth` swaps the composite for
+# the G-buffer inspector, which is permanent equipment rather than
+# scaffolding: when a lit image is wrong, the first question is always
+# which attribute is wrong. Unset (or `lit`) gives the lit frame.
 #
 # ORDER IS DERIVED. Nothing here says gbuffer-then-composite-then-present.
 # renderDeferredFrame walks the sequence the graph computed from the
@@ -32,8 +34,9 @@
 # Compiled-target only; needs wgpu-native + SDL3.
 #   rae run --target compiled main.rae
 # Headless screenshot:
-#   RAE_GBUFFER_VIEW=normal RAE_SDL_HEADLESS_MS=1000 \
-#     RAE_GPU2D_SCREENSHOT=/tmp/gb.bmp rae run --target compiled main.rae
+#   RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT=/tmp/lit.bmp \
+#     rae run --target compiled main.rae
+#   RAE_GBUFFER_VIEW=normal ... (same, but the normal channel)
 import core
 import math
 import sys
@@ -90,8 +93,8 @@ func buildScene(sphere: view MeshHandle, ground: view MeshHandle) ret Scene3d {
   ret scene
 }
 
-# Channel selection by name. Defaults to albedo: it is the channel whose
-# correctness is judged fastest by eye.
+# Channel selection by name. Defaults to the lit frame; the G-buffer
+# channels are opt-in for inspection.
 func selectedView() ret Int {
   let v: String = sys.getEnv(name: "RAE_GBUFFER_VIEW")
   if v is "normal" {
@@ -103,7 +106,7 @@ func selectedView() ret Int {
   if v is "depth" {
     ret viewDepth
   }
-  ret viewAlbedo
+  ret viewLit
 }
 
 func main() ret Int {
@@ -169,7 +172,7 @@ func main() ret Int {
     let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
     renderDeferredFrame(r: renderer, scene: scene, camera: camera, light: light, aspect: aspect)
   }
-  gbuffer.shutdown()
+  gbuffer.shutdownAll()
   gpu2d.closeWindow()
   ret 0
 }
