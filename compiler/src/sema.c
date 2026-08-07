@@ -1744,6 +1744,100 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
 
 TypeInfo* sema_resolve_type(CompilerContext* ctx, AstTypeRef* type_ref) { return sema_resolve_type_internal(ctx, NULL, NULL, type_ref); }
 
+/* Fold a VALUE generic argument (`cap: 16`) to a compile-time Int.
+ *
+ * Reuses the same `const_eval` that backs `const` bindings, so the accepted
+ * grammar is identical — literals, earlier constants, enum cases and
+ * arithmetic on them — rather than a second, subtly different notion of
+ * "compile-time" existing only for type arguments.
+ *
+ * Returns false and reports a diagnostic if the expression is not a
+ * compile-time Int. */
+static bool sema_resolve_value_arg(AstModule* module, SymbolTable* symbols,
+                                   AstTypeRef* arg, int64_t* out) {
+    ConstResult r = const_eval(symbols, arg->value_expr);
+    const char* file = module ? module->file_path : NULL;
+    if (!r.ok || !r.numeric) {
+        char buf[256];
+        snprintf(buf, sizeof buf,
+                 "generic value argument '%.*s' must be a compile-time constant "
+                 "(a literal, a 'const' binding, or arithmetic on them)",
+                 (int)arg->value_name.len, arg->value_name.data);
+        diag_error(file, (int)arg->line, (int)arg->column, buf);
+        if (module) module->had_error = true;
+        return false;
+    }
+    if (r.is_float) {
+        char buf[256];
+        snprintf(buf, sizeof buf,
+                 "generic value argument '%.*s' must be an Int, not a Float",
+                 (int)arg->value_name.len, arg->value_name.data);
+        diag_error(file, (int)arg->line, (int)arg->column, buf);
+        if (module) module->had_error = true;
+        return false;
+    }
+    *out = (int64_t)r.i;
+    return true;
+}
+
+/* Array(T, cap: N) — the built-in fixed-size by-value aggregate.
+ *
+ * Spelled like a user generic but implemented as a builtin, because no Rae
+ * type can express inline N-element storage; that is the feature being added.
+ * See docs/value-aggregates-and-ownership.md §1.4. */
+static TypeInfo* sema_resolve_array_type(CompilerContext* ctx, AstModule* module,
+                                         SymbolTable* symbols, AstTypeRef* type_ref,
+                                         TypeInfo* (*resolve)(CompilerContext*, AstModule*, SymbolTable*, AstTypeRef*)) {
+    const char* file = module ? module->file_path : NULL;
+    AstTypeRef* elem_ref = NULL;
+    AstTypeRef* cap_ref = NULL;
+    for (AstTypeRef* a = type_ref->generic_args; a; a = a->next) {
+        if (a->is_value_arg) {
+            if (!str_eq_cstr(a->value_name, "cap")) {
+                char buf[256];
+                snprintf(buf, sizeof buf, "Array takes a 'cap:' value argument; got '%.*s'",
+                         (int)a->value_name.len, a->value_name.data);
+                diag_error(file, (int)a->line, (int)a->column, buf);
+                if (module) module->had_error = true;
+                return NULL;
+            }
+            if (cap_ref) {
+                diag_error(file, (int)a->line, (int)a->column, "Array given 'cap:' more than once");
+                if (module) module->had_error = true;
+                return NULL;
+            }
+            cap_ref = a;
+        } else {
+            if (elem_ref) {
+                diag_error(file, (int)a->line, (int)a->column,
+                           "Array takes exactly one element type");
+                if (module) module->had_error = true;
+                return NULL;
+            }
+            elem_ref = a;
+        }
+    }
+    if (!elem_ref || !cap_ref) {
+        diag_error(file, (int)type_ref->line, (int)type_ref->column,
+                   "Array must be written 'Array(T, cap: N)' with an element type and a compile-time cap");
+        if (module) module->had_error = true;
+        return NULL;
+    }
+
+    int64_t count = 0;
+    if (!sema_resolve_value_arg(module, symbols, cap_ref, &count)) return NULL;
+    if (count < 0) {
+        char buf[128];
+        snprintf(buf, sizeof buf, "Array cap must not be negative (got %lld)", (long long)count);
+        diag_error(file, (int)cap_ref->line, (int)cap_ref->column, buf);
+        if (module) module->had_error = true;
+        return NULL;
+    }
+
+    TypeInfo* elem = resolve(ctx, module, symbols, elem_ref);
+    return type_get_array(ctx->type_registry, elem, count);
+}
+
 static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstTypeRef* type_ref) {
     if (!type_ref) return type_get_void(ctx->type_registry);
     if (type_ref->resolved_type) return type_ref->resolved_type;
@@ -1765,6 +1859,10 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
             if (type_ref->generic_args) arg = sema_resolve_type_internal(ctx, module, symbols, type_ref->generic_args);
             base = type_get_buffer(ctx->type_registry, arg);
         }
+        else if (str_eq_cstr(name, "Array")) {
+            base = sema_resolve_array_type(ctx, module, symbols, type_ref, sema_resolve_type_internal);
+            if (!base) base = type_get_void(ctx->type_registry);
+        }
         else if (str_eq_cstr(name, "Task")) {
             TypeInfo* arg = type_get_void(ctx->type_registry);
             if (type_ref->generic_args) arg = sema_resolve_type_internal(ctx, module, symbols, type_ref->generic_args);
@@ -1773,8 +1871,27 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
             Symbol* sym = symbol_table_lookup(symbols, name);
             if (sym && sym->type) {
                 if (type_ref->generic_args && sym->decl && sym->decl->kind == AST_DECL_TYPE) {
+                    /* Value generic arguments are a builtin-only capability for
+                     * now (Array is the sole consumer). User generics would need
+                     * the value substituted into the specialized body, which is
+                     * a larger feature with no caller yet — so reject it clearly
+                     * rather than resolving the value as if it were a type. */
+                    for (AstTypeRef* a = type_ref->generic_args; a; a = a->next) {
+                        if (a->is_value_arg) {
+                            char vbuf[256];
+                            snprintf(vbuf, sizeof vbuf,
+                                     "'%.*s' does not take value generic arguments; only built-in types do",
+                                     (int)name.len, name.data);
+                            diag_error(module ? module->file_path : NULL, (int)a->line, (int)a->column, vbuf);
+                            if (module) module->had_error = true;
+                            break;
+                        }
+                    }
                     TypeInfo* args[16]; size_t ac = 0; AstTypeRef* curr = type_ref->generic_args;
-                    while (curr && ac < 16) { args[ac++] = sema_resolve_type_internal(ctx, module, symbols, curr); curr = curr->next; }
+                    while (curr && ac < 16) {
+                        if (curr->is_value_arg) { curr = curr->next; continue; }
+                        args[ac++] = sema_resolve_type_internal(ctx, module, symbols, curr); curr = curr->next;
+                    }
                     base = type_get_struct(ctx->type_registry, sym->decl, args, ac);
                     register_generic_type(ctx, type_ref);
                     if (!type_registry_find_specialization(ctx->type_registry, sym->decl, args, ac)) specialize_decl(ctx, module, symbols, sym->decl, args, ac, type_ref->line, type_ref->column);
