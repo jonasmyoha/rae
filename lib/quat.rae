@@ -32,13 +32,12 @@ func identity() ret Quat {
     ret Quat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }
 }
 
-# Named `fromXYZW` rather than `create` because a same-arity, same-param-type
-# `create` already exists in vec4, and Rae mangles neither the module nor the
-# return type into the symbol — the two would collide at the C level. The
-# distinct name is also honest: these components are not coordinates, and
-# building a quaternion from raw parts is a rarer, more deliberate act than
-# building a vector. See queue #362.
-func fromXYZW(x: view Float, y: view Float, z: view Float, w: view Float) ret Quat {
+# Mirrors vec2/vec3/vec4's `create`. This used to have to be called
+# `fromXYZW`: vec4.create had the same arity and parameter types, and the
+# mangler encoded parameters but not the defining module, so the two
+# collided at the C level. Fixed in #362 — symbols are module-qualified now,
+# so parallel value-type APIs can share the obvious names.
+func create(x: view Float, y: view Float, z: view Float, w: view Float) ret Quat {
     ret Quat { x: x, y: y, z: z, w: w }
 }
 
