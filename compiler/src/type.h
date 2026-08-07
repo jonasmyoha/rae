@@ -47,7 +47,13 @@ typedef enum {
     /* Array(T, cap: N) — a fixed-size, contiguous, BY-VALUE aggregate.
      * Distinct from TYPE_BUFFER, which is a bare `T*` with no length in the
      * type. See docs/value-aggregates-and-ownership.md §1.3. */
-    TYPE_ARRAY
+    TYPE_ARRAY,
+
+    /* Sentinel: one past the last valid kind. Range checks must use this
+     * rather than naming whichever kind happens to be last today — an
+     * appended kind silently fell outside a hard-coded bound once already
+     * and was mangled as "rae_unresolved". Keep it last. */
+    TYPE__COUNT
 } TypeKind;
 
 typedef struct TypeInfo TypeInfo;

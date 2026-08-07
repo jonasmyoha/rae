@@ -365,9 +365,9 @@ static void type_mangle_recursive(Arena* arena, TypeInfo* t, char* buf, size_t* 
     /* Bad-kind guard: sema can construct a partially-initialized
      * TypeInfo (zeroed memory) for an unresolved type name. Reading
      * its `as.structure.*` fields would deref garbage. The valid
-     * enum range is TYPE_VOID..TYPE_GENERIC_PARAM; anything outside
-     * is a stale / uninitialised TypeInfo. */
-    if ((int)t->kind < 0 || (int)t->kind > (int)TYPE_GENERIC_PARAM) {
+     * enum range is TYPE_VOID..TYPE__COUNT-1; anything outside is a
+     * stale / uninitialised TypeInfo. */
+    if ((int)t->kind < 0 || (int)t->kind >= (int)TYPE__COUNT) {
         *pos += snprintf(buf + *pos, cap - *pos, "rae_unresolved");
         return;
     }
