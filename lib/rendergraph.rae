@@ -131,14 +131,17 @@ func createRenderGraph() pub ret RenderGraph {
 # ----- declaration ----------------------------------------------------
 func addResource(g: mod RenderGraph, name: view String, kind: view Int, format: view Int, sizing: view Int, lifetime: view Int) pub ret Int {
   let id: Int = g.resources.length
-  g.resourceNames.add(value: name)
+  # A COPY: the graph owns resourceNames and drops it, and `name` is a
+  # view we do not own. Storing the borrow would free the caller's buffer.
+  g.resourceNames.add(value: "{name}")
   g.resources.add(value: ResourceDesc { kind: kind, format: format, sizing: sizing, lifetime: lifetime })
   ret id
 }
 
 func addPass(g: mod RenderGraph, name: view String, kind: view Int, tag: view Int) pub ret Int {
   let id: Int = g.passes.length
-  g.passNames.add(value: name)
+  # Copy for the same reason as addResource above.
+  g.passNames.add(value: "{name}")
   g.passes.add(value: PassDesc { kind: kind, tag: tag })
   ret id
 }
