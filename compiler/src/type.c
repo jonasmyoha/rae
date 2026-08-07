@@ -232,6 +232,52 @@ TypeInfo* type_get_buffer(TypeRegistry* r, TypeInfo* base) {
     return t;
 }
 
+/* Intern a compile-time Int used as a generic argument.
+ *
+ * Interning is the whole point: two spellings of the same count —
+ * `Array(Float, cap: 16)` and `Array(Float, cap: sixteen)` for a
+ * `const sixteen: Int = 16` — must yield the SAME pointer, so they collapse to
+ * one monomorphization rather than two identical specializations. */
+TypeInfo* type_get_const_int(TypeRegistry* r, int64_t value) {
+    uint64_t h = hash_type(TYPE_CONST_INT, &value, sizeof(value));
+    size_t idx = h % r->capacity;
+    TypeInfo* curr = r->buckets[idx];
+    while (curr) {
+        if (curr->kind == TYPE_CONST_INT && curr->as.const_int.value == value) return curr;
+        curr = curr->next_interned;
+    }
+
+    TypeInfo* t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
+    t->kind = TYPE_CONST_INT;
+    t->as.const_int.value = value;
+    char buf[32];
+    int n = snprintf(buf, sizeof buf, "%lld", (long long)value);
+    char* nm = arena_alloc(r->arena, (size_t)n + 1);
+    memcpy(nm, buf, (size_t)n + 1);
+    t->name = (Str){ nm, (size_t)n };
+    add_interned(r, h, t);
+    return t;
+}
+
+TypeInfo* type_get_array(TypeRegistry* r, TypeInfo* base, int64_t count) {
+    struct { TypeInfo* b; int64_t c; } key = { base, count };
+    uint64_t h = hash_type(TYPE_ARRAY, &key, sizeof(key));
+    size_t idx = h % r->capacity;
+    TypeInfo* curr = r->buckets[idx];
+    while (curr) {
+        if (curr->kind == TYPE_ARRAY && curr->as.array.base == base && curr->as.array.count == count) return curr;
+        curr = curr->next_interned;
+    }
+
+    TypeInfo* t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
+    t->kind = TYPE_ARRAY;
+    t->as.array.base = base;
+    t->as.array.count = count;
+    t->name = (Str){ "Array", 5 };
+    add_interned(r, h, t);
+    return t;
+}
+
 TypeInfo* type_get_task(TypeRegistry* r, TypeInfo* base) {
     uint64_t h = hash_type(TYPE_TASK, &base, sizeof(base));
     size_t idx = h % r->capacity;
@@ -342,6 +388,14 @@ static void type_mangle_recursive(Arena* arena, TypeInfo* t, char* buf, size_t* 
         case TYPE_TASK:
             *pos += snprintf(buf + *pos, cap - *pos, "Task_");
             type_mangle_recursive(arena, t->as.task.base, buf, pos, cap, depth + 1);
+            break;
+        case TYPE_CONST_INT:
+            *pos += snprintf(buf + *pos, cap - *pos, "%lld", (long long)t->as.const_int.value);
+            break;
+        case TYPE_ARRAY:
+            *pos += snprintf(buf + *pos, cap - *pos, "rae_Array_");
+            type_mangle_recursive(arena, t->as.array.base, buf, pos, cap, depth + 1);
+            *pos += snprintf(buf + *pos, cap - *pos, "_%lld", (long long)t->as.array.count);
             break;
         case TYPE_REF:
             *pos += snprintf(buf + *pos, cap - *pos, t->as.ref.is_mod ? "rae_Mod_" : "rae_View_");
