@@ -87,7 +87,9 @@ func collectLibraryCoverKeys(albums: view List(Album), library: view List(String
 func buildLibraryCoverTile(world: mod UiWorld, key: view String, size: view Float, rounded: view Bool) pub ret EntityId {
   let tile: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: tile, w: size, h: size)
-  let copiedForHero: String = key
+  # `let x = someViewParam` ALIASES, it does not copy — the interpolation
+  # is what actually produces an owned String for the `own` parameter.
+  let copiedForHero: String = "{key}"
   setHeroWidget(world: world, entity: tile, key: copiedForHero)
   let albumOpen: String = "album.open"
   setOnClick(world: world, entity: tile, actionId: albumOpen)
@@ -101,7 +103,7 @@ func buildLibraryCoverTile(world: mod UiWorld, key: view String, size: view Floa
   let albumsSource: DataResourceId = dataResourceAlbums()
   let allField: DataFieldId = dataFieldAll()
   setDataDependency(world: world, entity: tile, resource: albumsSource, field: allField, observedRevision: 0)
-  setSpriteFill(world: world, entity: tile, key: key, tint: imageTintColor)
+  setSpriteFill(world: world, entity: tile, key: "{key}", tint: imageTintColor)
   if rounded {
     let cr: CornerRadius = { radius: 26.024096385542165 }
     componentSet(this: world.cornerRadiuses, entity: tile, data: cr)
