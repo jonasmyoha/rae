@@ -31,8 +31,11 @@
 # path touches the allocator zero times.
 import core
 import math3d
+import gbuffer
 open rendergraph
 open math3d
+open scene3d
+open gbuffer
 
 # ----- pass tags ------------------------------------------------------
 # Distinct from renderer3d's tags: these identify passes of the deferred
@@ -50,6 +53,10 @@ type DeferredRenderer {
   lightingPass: Int
   compositePass: Int
   presentPass: Int
+  # Which channel the composite paints. `viewLit` is the real frame; the
+  # others are the G-buffer inspector (lib/gbuffer.rae), which is permanent
+  # equipment in a deferred renderer rather than temporary scaffolding.
+  debugView: Int
 }
 
 # Declare the deferred frame. Pass declaration order here is deliberately
@@ -117,8 +124,14 @@ func createDeferredRenderer() pub ret DeferredRenderer {
     pyramidPass: pyramid,
     lightingPass: lighting,
     compositePass: composite,
-    presentPass: present
+    presentPass: present,
+    debugView: viewAlbedo
   }
+}
+
+# Choose which channel the composite pass paints (see gbuffer.view*).
+func setDebugView(r: mod DeferredRenderer, mode: view Int) pub {
+  r.debugView = mode
 }
 
 func compileDeferred(r: mod DeferredRenderer) pub ret Int {
@@ -127,4 +140,52 @@ func compileDeferred(r: mod DeferredRenderer) pub ret Int {
 
 func describeDeferred(r: view DeferredRenderer) pub ret String {
   ret describe(g: r.graph)
+}
+
+# Execute one deferred frame.
+#
+# The loop walks `r.graph.order` — the sequence the graph DERIVED from the
+# resource edges — and switches on the pass tag. There is no written
+# ordering here to disagree with the declaration: adding an edge in
+# createDeferredRenderer changes what runs when, and this function does not
+# need editing for that to take effect. Rae has no first-class function
+# references, so dispatch is a tag switch, the same pattern renderer3d and
+# lib/ui/registry.rae use; the graph never inspects a tag, so that
+# constraint stays out of it.
+#
+# Passes not yet implemented are skipped rather than faked. They are
+# declared because they are real parts of this frame and their edges are
+# what order the ones that DO run — the pyramid is why depth is stored,
+# lighting is why all four attachments are stored. Skipping them is
+# honest; omitting them would make the derived order a smaller frame's
+# order and reshape it later.
+func renderDeferredFrame(r: view DeferredRenderer, scene: view Scene3d, camera: view Camera3d, light: view Light3d, aspect: view Float) pub {
+  var i: Int = 0
+  loop i < r.graph.order.length {
+    let p: Int = r.graph.order.at(index: i)
+    let tag: Int = r.graph.passes.at(index: p).tag
+    if tag is tagGbuffer {
+      beginPass(camera: camera, light: light, aspect: aspect)
+      gbuffer.renderScene(scene: scene)
+      endPass()
+    }
+    # tagDepthPyramid: Hi-Z / SSAO source. Not built yet.
+    # tagLighting: reads the G-buffer, writes litColor. Not built yet.
+    if tag is tagComposite {
+      # Until lighting writes litColor there is no lit image to resolve,
+      # so the composite paints the selected G-buffer channel. The
+      # inspector is not a stand-in that gets deleted — it stays as the
+      # `debugView != viewLit` branch once lighting lands.
+      inspect(mode: r.debugView, zNear: camera.nearZ, zFar: camera.farZ)
+    }
+    if tag is tagPresentD {
+      presentFrame()
+    }
+    i = i + 1
+  }
+}
+
+# How many instances the G-buffer pass submitted last frame.
+func deferredDrawCount(r: view DeferredRenderer) pub ret Int {
+  ret passDrawCount()
 }
