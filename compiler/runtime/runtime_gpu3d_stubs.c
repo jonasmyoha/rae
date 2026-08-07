@@ -6,7 +6,34 @@ int64_t rae_ext_gpu3d_meshCreate(const float* verts, int64_t vertCount,
     (void)verts; (void)vertCount; (void)indices; (void)indexCount; return 0;
 }
 void rae_ext_gpu3d_begin(const float* frame, int64_t count){ (void)frame; (void)count; }
-void rae_ext_gpu3d_draw(int64_t mesh, const float* model, const float* prevModel,
+/* Mirror of the Rae-side `Mat4` layout, for the gpu3d extern boundary.
+ *
+ * `lib/math3d.rae` declares `type Mat4 { m: Array(Float, cap: 16) }`, and the
+ * compiler emits exactly these two declarations into the generated
+ * translation unit. Repeating them here is not duplication for its own sake:
+ * C compatibility across translation units (C11 6.2.7) requires the same tag
+ * and member names/types, so declaring the SAME shape makes the runtime's
+ * definition of rae_ext_gpu3d_draw compatible with the prototype the
+ * generated code calls through. A `const float*` parameter would have the
+ * same ABI but an incompatible type, which is undefined behaviour rather
+ * than merely untidy.
+ *
+ * These live in the runtime .c files, never in rae_runtime.h — generated code
+ * includes that header and emits its own copy of these types, so putting them
+ * there would be a redefinition.
+ *
+ * The static assert is the guard: if Mat4's size ever diverges from 16 floats
+ * the build fails here instead of silently reading the wrong bytes.
+ */
+#ifndef RAE_GPU3D_MAT4_FFI
+#define RAE_GPU3D_MAT4_FFI
+typedef struct { float v[16]; } rae_Array_float_16;
+typedef struct rae_Mat4 { rae_Array_float_16 m; } rae_Mat4;
+_Static_assert(sizeof(rae_Mat4) == 16 * sizeof(float),
+               "Rae Mat4 must stay 16 contiguous floats for the gpu3d extern boundary");
+#endif
+
+void rae_ext_gpu3d_draw(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
                         float r, float g, float b,
                         float metallic, float roughness,
                         float emR, float emG, float emB){
