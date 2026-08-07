@@ -177,9 +177,19 @@ static void pp_check_comments(PrettyPrinter* pp, size_t line) {
   }
 }
 
+static void pp_expr(PrettyPrinter* pp, const AstExpr* expr);
+
 static void pp_write_type(PrettyPrinter* pp, const AstTypeRef* type) {
   if (!type) {
     pp_write(pp, "<type>");
+    return;
+  }
+  if (type->is_value_arg) {
+    /* `cap: 16` — a compile-time value generic argument. Printed as
+     * `name: expr` so the formatter round-trips it exactly as written. */
+    pp_write_str(pp, type->value_name);
+    pp_write(pp, ": ");
+    pp_expr(pp, type->value_expr);
     return;
   }
   if (type->is_opt) pp_write(pp, "opt ");
