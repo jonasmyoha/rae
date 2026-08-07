@@ -70,6 +70,12 @@ static WGPUTextureView gb_material_view = NULL;
 static WGPUTexture     gb_depth_tex = NULL;    /* depth32float, sampleable */
 static WGPUTextureView gb_depth_view = NULL;
 static int             gb_target_w = 0, gb_target_h = 0;
+/* Bumped every time the G-buffer textures are recreated. Anything holding
+ * a bind group that references those views (the inspector, the pyramid,
+ * lighting) compares against this and rebuilds — a bind group outliving
+ * its texture is a use-after-free the validation layer catches only
+ * sometimes, and a stale one silently samples the pre-resize image. */
+static int             gb_targets_gen = 0;
 
 static WGPURenderPipeline gb_pipeline = NULL;
 static WGPUBuffer         gb_frame_ubuf = NULL;
@@ -81,6 +87,14 @@ static bool               gb_overflow_reported = false;
 
 static WGPUCommandEncoder    gb_enc = NULL;
 static WGPURenderPassEncoder gb_pass = NULL;
+
+/* This frame's view-projection and clear colour, kept for the LIGHTING
+ * pass. Lighting reconstructs world position from depth, which needs the
+ * inverse of exactly the matrix the geometry pass rendered with — deriving
+ * it from a camera the app might have moved since would put the lighting a
+ * frame out of step with the depth it is reading. */
+static float gb_viewproj[16];
+static float gb_clear[3];
 
 static WGPURenderPipeline gb_view_pipeline = NULL;
 static WGPUBindGroup      gb_view_bind = NULL;
@@ -225,6 +239,7 @@ static void gb_ensure_targets(void) {
     gb_depth_view = wgpuTextureCreateView(gb_depth_tex, NULL);
 
     gb_target_w = w; gb_target_h = h;
+    gb_targets_gen++;
 }
 
 static void gb_init_pipeline(void) {
@@ -366,6 +381,8 @@ void rae_ext_gbuffer_begin(rae_Mat4* viewProj, float clearR, float clearG, float
     if (!gb_pipeline || !gb_albedo_view || !gb_normal_view || !gb_material_view || !gb_depth_view) return;
 
     gb_draw_count = 0;
+    memcpy(gb_viewproj, viewProj->m.v, 16 * sizeof(float));
+    gb_clear[0] = clearR; gb_clear[1] = clearG; gb_clear[2] = clearB;
     wgpuQueueWriteBuffer(g_wgpu_queue, gb_frame_ubuf, 0, viewProj->m.v, GB_FRAME_BYTES);
 
     gb_enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);

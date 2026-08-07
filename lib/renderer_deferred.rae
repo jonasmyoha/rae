@@ -125,7 +125,7 @@ func createDeferredRenderer() pub ret DeferredRenderer {
     lightingPass: lighting,
     compositePass: composite,
     presentPass: present,
-    debugView: viewAlbedo
+    debugView: viewLit
   }
 }
 
@@ -153,12 +153,12 @@ func describeDeferred(r: view DeferredRenderer) pub ret String {
 # lib/ui/registry.rae use; the graph never inspects a tag, so that
 # constraint stays out of it.
 #
-# Passes not yet implemented are skipped rather than faked. They are
-# declared because they are real parts of this frame and their edges are
-# what order the ones that DO run — the pyramid is why depth is stored,
-# lighting is why all four attachments are stored. Skipping them is
-# honest; omitting them would make the derived order a smaller frame's
-# order and reshape it later.
+# Every declared pass now executes. The depth pyramid is the one whose
+# CONSUMER is still missing — Hi-Z culling and a deferred SSAO are what
+# will read it — so it is built and unread for now. That is a real pass
+# doing real work early, not a placeholder: building it now is what lets
+# those techniques arrive as consumers of an existing resource instead of
+# as a reshaping of the frame.
 func renderDeferredFrame(r: view DeferredRenderer, scene: view Scene3d, camera: view Camera3d, light: view Light3d, aspect: view Float) pub {
   var i: Int = 0
   loop i < r.graph.order.length {
@@ -169,14 +169,21 @@ func renderDeferredFrame(r: view DeferredRenderer, scene: view Scene3d, camera: 
       gbuffer.renderScene(scene: scene)
       endPass()
     }
-    # tagDepthPyramid: Hi-Z / SSAO source. Not built yet.
-    # tagLighting: reads the G-buffer, writes litColor. Not built yet.
+    if tag is tagDepthPyramid {
+      buildDepthPyramid()
+    }
+    if tag is tagLighting {
+      lightingPass(camera: camera, light: light)
+    }
     if tag is tagComposite {
-      # Until lighting writes litColor there is no lit image to resolve,
-      # so the composite paints the selected G-buffer channel. The
-      # inspector is not a stand-in that gets deleted — it stays as the
-      # `debugView != viewLit` branch once lighting lands.
-      inspect(mode: r.debugView, zNear: camera.nearZ, zFar: camera.farZ)
+      # The lit frame is the normal path; the inspector is the branch for
+      # any other selection. Both are permanent — a deferred renderer that
+      # cannot show its own G-buffer is one you debug by guessing.
+      if r.debugView is viewLit {
+        compositePass(exposure: light.exposure)
+      } else {
+        inspect(mode: r.debugView, zNear: camera.nearZ, zFar: camera.farZ)
+      }
     }
     if tag is tagPresentD {
       presentFrame()
@@ -188,4 +195,9 @@ func renderDeferredFrame(r: view DeferredRenderer, scene: view Scene3d, camera: 
 # How many instances the G-buffer pass submitted last frame.
 func deferredDrawCount(r: view DeferredRenderer) pub ret Int {
   ret passDrawCount()
+}
+
+# Mip levels in the depth pyramid built by the last frame.
+func deferredPyramidMips(r: view DeferredRenderer) pub ret Int {
+  ret depthPyramidMips()
 }
