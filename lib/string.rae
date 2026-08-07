@@ -220,7 +220,11 @@ func trim(this: view String) ret String {
 func split(this: view String, sep: view String) ret List(String) {
   let result: List(String) = createList(String, cap: 4)
   if sep.length() is 0 {
-    result.add(value: this)
+    # A COPY, not the borrow. `result` is returned and eventually dropped,
+    # and dropping it would free the caller's buffer — `this` is a view we
+    # do not own. Caught by the own-argument check once the stdlib stopped
+    # being exempt from it.
+    result.add(value: "{this}")
     ret result
   }
   var remaining: String = this
