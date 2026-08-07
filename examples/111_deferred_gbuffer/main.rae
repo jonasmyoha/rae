@@ -1,0 +1,175 @@
+# Deferred renderer — the G-buffer pass (#356, Track B).
+#
+# The deferred frame rendering a real scene: the same authored `scene3d`
+# components example 109 uses, driven through `renderer_deferred`'s graph
+# instead of `renderer3d`'s. The two frames coexist — this one does not
+# replace or reuse the forward path, and neither shares a resource with the
+# other.
+#
+# WHAT IS ACTUALLY RUNNING. The geometry pass writes surface attributes —
+# albedo, world normal, metallic/roughness, depth — and performs no
+# lighting. The lighting pass that consumes them is not built yet, so the
+# composite paints a G-buffer channel instead of a lit image. That is the
+# inspector, permanent equipment in a deferred renderer rather than
+# scaffolding to delete: `RAE_GBUFFER_VIEW=albedo|normal|material|depth`
+# picks the channel, and it stays useful for exactly the same reason it is
+# useful now — when a lit image is wrong, the first question is which
+# attribute is wrong.
+#
+# ORDER IS DERIVED. Nothing here says gbuffer-then-composite-then-present.
+# renderDeferredFrame walks the sequence the graph computed from the
+# resource edges declared in lib/renderer_deferred.rae. Test 572 pins that
+# sequence; this example is what proves the same declaration also drives
+# real GPU work.
+#
+# PER-OBJECT COST. Transforms flow through `Mat4` value types, so a frame's
+# per-object path allocates nothing regardless of object count. Test 573 is
+# the standing assertion; this is the scene it was modelled on.
+#
+# WORLD CONVENTION: right-handed Z-up (Blender), docs/coordinate-system.md.
+#
+# Controls: drag to orbit, wheel to zoom.
+# Compiled-target only; needs wgpu-native + SDL3.
+#   rae run --target compiled main.rae
+# Headless screenshot:
+#   RAE_GBUFFER_VIEW=normal RAE_SDL_HEADLESS_MS=1000 \
+#     RAE_GPU2D_SCREENSHOT=/tmp/gb.bmp rae run --target compiled main.rae
+import core
+import math
+import sys
+import gpu2d
+import vec3
+import gbuffer
+open scene3d
+open gpu3d
+open gbuffer
+open renderer_deferred
+open rendergraph
+open math3d
+open mesh3d
+
+func uploadMeshData(m: view MeshData) ret MeshHandle {
+  ret uploadMesh(verts: m.verts, vertCount: m.vertCount, indices: m.indices)
+}
+
+# A metallic x roughness sphere grid plus a ground plane. Deliberately the
+# same material study as 109: the G-buffer's whole job is to carry these
+# two parameters to the lighting pass intact, so a scene that sweeps both
+# is what makes a wrong material channel visible rather than plausible.
+func buildScene(sphere: view MeshHandle, ground: view MeshHandle) ret Scene3d {
+  var scene: Scene3d = createScene3d()
+  let noEmit: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let noRot: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let unit: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
+
+  var row: Int = 0
+  loop row < 5 {
+    var col: Int = 0
+    loop col < 5 {
+      let metallic: Float = row.toFloat() / 4.0
+      var roughness: Float = col.toFloat() / 4.0
+      if roughness < 0.05 {
+        roughness = 0.05
+      }
+      # Hue varies across the grid so the albedo channel is legible as
+      # something other than one flat colour.
+      let mat: Int = addMaterial(
+        scene: scene,
+        baseColor: vec3.create(x: 0.85, y: 0.2 + row.toFloat() * 0.15, z: 0.25 + col.toFloat() * 0.15),
+        metallic: metallic, roughness: roughness, emission: noEmit
+      )
+      let pos: Vec3 = vec3.create(x: (col.toFloat() - 2.0) * 2.4, y: (row.toFloat() - 2.0) * 2.4, z: 0.5)
+      let e: Int = addMeshInstance(scene: scene, mesh: sphere, material: mat, position: pos, rotation: noRot, scale: unit)
+      col = col + 1
+    }
+    row = row + 1
+  }
+
+  let groundMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.42, y: 0.43, z: 0.45), metallic: 0.0, roughness: 0.9, emission: noEmit)
+  let groundE: Int = addMeshInstance(scene: scene, mesh: ground, material: groundMat, position: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.7), rotation: noRot, scale: unit)
+  ret scene
+}
+
+# Channel selection by name. Defaults to albedo: it is the channel whose
+# correctness is judged fastest by eye.
+func selectedView() ret Int {
+  let v: String = sys.getEnv(name: "RAE_GBUFFER_VIEW")
+  if v is "normal" {
+    ret viewNormal
+  }
+  if v is "material" {
+    ret viewMaterial
+  }
+  if v is "depth" {
+    ret viewDepth
+  }
+  ret viewAlbedo
+}
+
+func main() ret Int {
+  gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — deferred G-buffer (Z-up)")
+
+  let sphereData: MeshData = makeSphere(rings: 32, segments: 48)
+  let planeData: MeshData = makePlane(size: 40.0, segments: 1)
+  let sphere: MeshHandle = uploadMeshData(m: sphereData)
+  let ground: MeshHandle = uploadMeshData(m: planeData)
+
+  var scene: Scene3d = buildScene(sphere: sphere, ground: ground)
+  var camera: Camera3d = defaultCamera3d()
+  var light: Light3d = defaultLight3d()
+
+  var renderer: DeferredRenderer = createDeferredRenderer()
+  let gs: Int = compileDeferred(r: renderer)
+  if gs is not 0 {
+    log("deferred graph invalid: {statusName(status: gs)}")
+    ret 1
+  }
+  setDebugView(r: renderer, mode: selectedView())
+  log("{describeDeferred(r: renderer)}")
+
+  var yaw: Float = 0.0
+  var pitch: Float = 0.35
+  var dist: Float = 14.0
+  var lastX: Float = 0.0
+  var lastY: Float = 0.0
+  var dragging: Bool = false
+  let startT: Float64 = gpu2d.nowSeconds()
+
+  loop not gpu2d.pollClose() {
+    let px: Float = gpu2d.pointerX()
+    let py: Float = gpu2d.pointerY()
+    if gpu2d.pointerDown() {
+      if dragging {
+        yaw = yaw + (px - lastX) * 0.008
+        pitch = pitch - (py - lastY) * 0.008
+        if pitch > 1.45 {
+          pitch = 1.45
+        }
+        if pitch < 0.05 {
+          pitch = 0.05
+        }
+      }
+      dragging = true
+    } else {
+      dragging = false
+    }
+    lastX = px
+    lastY = py
+    dist = dist - gpu2d.wheelMove() * 0.8
+    if dist < 4.0 {
+      dist = 4.0
+    }
+    if dist > 40.0 {
+      dist = 40.0
+    }
+
+    let t: Float = (gpu2d.nowSeconds() - startT) as Float
+    camera.position = orbitEye(targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z, yaw: yaw, pitch: pitch, dist: dist)
+
+    let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
+    renderDeferredFrame(r: renderer, scene: scene, camera: camera, light: light, aspect: aspect)
+  }
+  gbuffer.shutdown()
+  gpu2d.closeWindow()
+  ret 0
+}
