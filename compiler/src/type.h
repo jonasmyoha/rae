@@ -27,7 +27,27 @@ typedef enum {
     TYPE_ANY, // Type-erased Any
     TYPE_BUFFER, // Built-in Buffer(T)
     TYPE_TASK, // Built-in Task(T) — a concurrent task handle
-    TYPE_GENERIC_PARAM // T, U, V inside a generic definition
+    TYPE_GENERIC_PARAM, // T, U, V inside a generic definition
+
+    /* A compile-time Int appearing in a generic ARGUMENT position, e.g. the
+     * 16 in `Array(Float, cap: 16)`.
+     *
+     * Modelled as a TypeInfo on purpose. Generic identity throughout the
+     * compiler is interned-POINTER identity — `type_is_same` is `a == b`, and
+     * `type_registry_find_specialization` compares a `TypeInfo*[]` element by
+     * element. Interning the value here means monomorphization, specialization
+     * caching and name mangling all keep working unchanged, instead of every
+     * one of them needing a parallel "and also these value arguments" path.
+     *
+     * Int only, deliberately. Counts are the only value arguments with a
+     * principled use today; Bool/Float/String const arguments would be
+     * generality without a language-level justification. */
+    TYPE_CONST_INT,
+
+    /* Array(T, cap: N) — a fixed-size, contiguous, BY-VALUE aggregate.
+     * Distinct from TYPE_BUFFER, which is a bare `T*` with no length in the
+     * type. See docs/value-aggregates-and-ownership.md §1.3. */
+    TYPE_ARRAY
 } TypeKind;
 
 typedef struct TypeInfo TypeInfo;
@@ -66,6 +86,15 @@ struct TypeInfo {
         struct {
              Str param_name; // e.g. "T"
         } generic_param;
+
+        struct {
+             int64_t value;
+        } const_int;
+
+        struct {
+             TypeInfo* base;  // element type
+             int64_t count;   // element count, >= 0, known at compile time
+        } array;
     } as;
 };
 
@@ -107,6 +136,8 @@ TypeInfo* type_get_ref(TypeRegistry* registry, TypeInfo* base, bool is_mod);
 TypeInfo* type_get_opt(TypeRegistry* registry, TypeInfo* base);
 TypeInfo* type_get_buffer(TypeRegistry* registry, TypeInfo* base);
 TypeInfo* type_get_task(TypeRegistry* registry, TypeInfo* base);
+TypeInfo* type_get_const_int(TypeRegistry* registry, int64_t value);
+TypeInfo* type_get_array(TypeRegistry* registry, TypeInfo* base, int64_t count);
 TypeInfo* type_get_struct(TypeRegistry* registry, struct AstDecl* decl, TypeInfo** args, size_t arg_count);
 TypeInfo* type_get_generic_param(TypeRegistry* registry, Str name);
 

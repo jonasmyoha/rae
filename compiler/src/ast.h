@@ -40,6 +40,16 @@ typedef struct AstTypeRef {
   size_t column;
   struct AstTypeRef* generic_args; // Head of a linked list of AstTypeRef for generic arguments
   struct AstTypeRef* next; // For linking AstTypeRef nodes in a list (e.g., generic_args list)
+
+  /* A compile-time VALUE generic argument — the `cap: 16` in
+   * `Array(Float, cap: 16)`. Rae's rule is that type arguments are positional
+   * and value arguments are named, so a value argument always carries its
+   * keyword. When this is set, `parts` is empty and `value_expr` holds a
+   * const-expression that sema folds to an Int.
+   * See docs/value-aggregates-and-ownership.md §1.2. */
+  bool is_value_arg;
+  Str value_name;
+  AstExpr* value_expr;
 } AstTypeRef;
 
 
