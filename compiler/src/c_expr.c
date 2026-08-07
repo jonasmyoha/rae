@@ -512,22 +512,12 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
     case AST_EXPR_INDEX: {
         // List(T) is a struct, not a raw array; lower `xs[i]` to a typed
         // buffer access on the data pointer.
+        /* No List branch: sema rejects `xs[i]` on a List and points at
+         * .get(index:) / .at(index:), so nothing reaches codegen. `[]` is
+         * for Array(T, cap: N) and the internal Buffer. */
         const AstTypeRef* tgt_tr = infer_expr_type_ref(ctx, expr->as.index.target);
         Str tgt_base = get_base_type_name(tgt_tr);
-        if (str_eq_cstr(tgt_base, "List")) {
-            const AstTypeRef* elem_tr = tgt_tr ? tgt_tr->generic_args : NULL;
-            AstTypeRef* sub = elem_tr ? substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, elem_tr) : NULL;
-            fprintf(out, "(*(");
-            if (sub) emit_type_ref_as_c_type(ctx, sub, out, false); else fprintf(out, "RaeAny");
-            fprintf(out, "*)( (char*)((");
-            emit_expr(ctx, expr->as.index.target, out, PREC_CALL, false, false);
-            fprintf(out, ").data) + (");
-            emit_expr(ctx, expr->as.index.index, out, PREC_LOWEST, false, false);
-            fprintf(out, ") * sizeof(");
-            if (sub) emit_type_ref_as_c_type(ctx, sub, out, false); else fprintf(out, "RaeAny");
-            fprintf(out, ") ))");
-            break;
-        }
+        (void)tgt_base;
         /* Array(T, cap: N) is a struct wrapping T[N] (see §1.5), so indexing
          * goes through the `.v` member. A view/mod parameter is a pointer to
          * that struct, hence `->`. */
