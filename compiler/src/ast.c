@@ -59,6 +59,14 @@ static void dump_type_ref(const AstTypeRef* type, FILE* out) {
     fputs("<type?>", out);
     return;
   }
+  if (type->is_value_arg) {
+    /* A compile-time value generic argument, e.g. the `cap: 16` of
+     * Array(Float, cap: 16). It has no `parts` — the expression is the
+     * argument. */
+    print_str(out, type->value_name);
+    fputs(": <const>", out);
+    return;
+  }
   if (type->is_opt) fputs("opt ", out);
   if (type->is_view) fputs("view ", out);
   if (type->is_mod) fputs("mod ", out);
