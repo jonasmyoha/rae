@@ -1116,16 +1116,19 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             // rebinding the local itself.)
             bool immut = !stmt->as.let_stmt.is_var;
             Symbol* sym = symbol_table_define(symbols, ctx->ast_arena, stmt->as.let_stmt.name, NULL, t, immut);
-            /* One-hop alias tracking (§2.4): a binding initialised DIRECTLY
-             * from something that does not own — a global, a view/mod
-             * parameter, a field read through one — is itself an alias, not
-             * an owner. This is the #222 shape (`let x = someGlobal` then
-             * passing x to `own String`). One bit, fixed here at
-             * declaration; deliberately not dataflow, and deliberately only
-             * one hop, so `let a = g; let b = a` is not caught in v1. */
-            if (sym && stmt->as.let_stmt.value && !expr_is_owning(symbols, stmt->as.let_stmt.value)) {
-                sym->is_non_owning = true;
-            }
+            /* No alias marking on `let` bindings.
+             *
+             * §2.4 proposed one-hop tracking on the assumption that
+             * `let x = <borrow>` aliases. Measuring codegen showed it does
+             * not: ident, field and element initialisers all deep-copy —
+             * `=` copies, which is the language rule. A binding therefore
+             * always owns what it holds, and marking it non-owning was a
+             * false positive that rejected working code.
+             *
+             * The hazards that remain are at CALL SITES, where an `own`
+             * parameter does not copy: passing a borrow, or a field read
+             * through one, straight into `own`. Those are caught by
+             * expr_is_owning. */
             if (stmt->as.let_stmt.is_const) {
                 sym->bind_kind = BIND_CONST;
                 sema_fold_const(ctx, module, symbols, stmt->as.let_stmt.value, sym, stmt->line, stmt->column);

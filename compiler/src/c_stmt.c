@@ -896,11 +896,30 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 // rae_deep_copy_<T>, evaluate to the temp.
                 bool deep_copy_ident = false;
                 bool deep_copy_string_ident = false;
+                /* `=` COPIES. Any initialiser that READS AN EXISTING
+                 * LOCATION — a bare ident, a field, an element — binds a
+                 * fresh owned value, never an alias of the source.
+                 *
+                 * MEMBER and INDEX used to fall through to the pool_take
+                 * path below, so `let m: String = h.name` took ownership of
+                 * the struct's field buffer without copying it and then
+                 * dropped it at scope exit, freeing storage the struct still
+                 * pointed at. Nothing in `=` suggests a transfer; that is
+                 * what `own` is for.
+                 *
+                 * Fresh-value initialisers (a call result, an interpolation)
+                 * are deliberately NOT here: they produce a new string that
+                 * genuinely needs detaching from the temp pool, which is
+                 * what pool_take does. */
+                bool init_reads_location =
+                    stmt->as.let_stmt.value->kind == AST_EXPR_IDENT
+                    || stmt->as.let_stmt.value->kind == AST_EXPR_MEMBER
+                    || stmt->as.let_stmt.value->kind == AST_EXPR_INDEX;
                 if (stmt->as.let_stmt.type
                     && !stmt->as.let_stmt.type->is_view
                     && !stmt->as.let_stmt.type->is_mod
                     && !stmt->as.let_stmt.type->is_opt
-                    && stmt->as.let_stmt.value->kind == AST_EXPR_IDENT
+                    && init_reads_location
                     && type_needs_deep_copy(ctx->compiler_ctx, ctx->module,
                                             stmt->as.let_stmt.type, 0)) {
                     Str lbase = get_base_type_name(stmt->as.let_stmt.type);
