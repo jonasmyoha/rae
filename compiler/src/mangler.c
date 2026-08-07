@@ -388,6 +388,35 @@ void rae_mangle_module_path(const char* module_path, char* out, size_t out_cap) 
     out[j] = '\0';
 }
 
+/* Prefix a defined (non-extern) function's C symbol with its module.
+ *
+ * Without this, two functions in DIFFERENT modules with the same name and
+ * the same parameter types mangle to one symbol — `vec4.create(x,y,z,w)`
+ * and `quat.create(x,y,z,w)` both became
+ * `rae_create_rae_View_Float_x4` and the C compiler reported "conflicting
+ * types". The mangler encoded parameters but not provenance, which silently
+ * required every module in a program to have globally-unique signatures.
+ * That constraint gets worse the more parallel value types lib/ grows, and
+ * it is the wrong shape for a language with modules.
+ *
+ * Externs are deliberately untouched: their symbols name real C runtime
+ * entry points and are not ours to rename. The entry/project module has no
+ * module_name, so `main` and single-file programs mangle exactly as before.
+ * Queue #362. */
+static size_t mangle_func_prefix(CompilerContext* ctx, const AstFuncDecl* func,
+                                 char* buf, size_t cap) {
+    (void)ctx;
+    if (str_starts_with_cstr(func->name, "rae_")) {
+        return snprintf(buf, cap, "%.*s_", (int)func->name.len, func->name.data);
+    }
+    if (func->module_name && func->module_name[0]) {
+        char mp[256];
+        rae_mangle_module_path(func->module_name, mp, sizeof(mp));
+        return snprintf(buf, cap, "rae_%s_%.*s_", mp, (int)func->name.len, func->name.data);
+    }
+    return snprintf(buf, cap, "rae_%.*s_", (int)func->name.len, func->name.data);
+}
+
 const char* rae_mangle_function(CompilerContext* ctx, const AstFuncDecl* func) {
     if (!func) return "unknown";
     if (func->specialization_args) return rae_mangle_specialized_function(ctx, func, func->specialization_args);
@@ -451,9 +480,7 @@ const char* rae_mangle_function(CompilerContext* ctx, const AstFuncDecl* func) {
         char* res = arena_alloc(ctx->ast_arena, func->name.len + 9); sprintf(res, "rae_ext_%.*s", (int)func->name.len, func->name.data); return res;
     }
 
-    char buf[2048]; size_t pos = 0;
-    if (str_starts_with_cstr(func->name, "rae_")) pos = snprintf(buf, sizeof(buf), "%.*s_", (int)func->name.len, func->name.data);
-    else pos = snprintf(buf, sizeof(buf), "rae_%.*s_", (int)func->name.len, func->name.data);
+    char buf[2048]; size_t pos = mangle_func_prefix(ctx, func, buf, sizeof(buf));
     for (const AstParam* p = func->params; p; p = p->next) { const char* mangled_param = rae_mangle_type(ctx, func->generic_params, p->type); pos += snprintf(buf + pos, sizeof(buf) - pos, "%s_", mangled_param); }
     char* result = arena_alloc(ctx->ast_arena, pos + 1); memcpy(result, buf, pos + 1);
     sanitize_mangled_name(result); return result;
@@ -463,9 +490,7 @@ const char* rae_mangle_specialized_function(CompilerContext* ctx, const AstFuncD
     if (!func) return "unknown";
     if (!concrete_args) return rae_mangle_function(ctx, func);
 
-    char buf[2048]; size_t pos = 0;
-    if (str_starts_with_cstr(func->name, "rae_")) pos = snprintf(buf, sizeof(buf), "%.*s_", (int)func->name.len, func->name.data);
-    else pos = snprintf(buf, sizeof(buf), "rae_%.*s_", (int)func->name.len, func->name.data);
+    char buf[2048]; size_t pos = mangle_func_prefix(ctx, func, buf, sizeof(buf));
 
     const AstIdentifierPart* gp = func->generic_params;
     if (!gp && func->generic_template && func->generic_template->kind == AST_DECL_FUNC) gp = func->generic_template->as.func_decl.generic_params;
