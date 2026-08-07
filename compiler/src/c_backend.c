@@ -853,6 +853,23 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
         /* A cast's type IS its target — this is what stops the backend
          * re-inferring the operand's (pre-conversion) type. */
         case AST_EXPR_CAST: return expr->as.cast.target;
+        /* Indexing an Array(T, cap: N) yields T. Sema already recorded it;
+         * surfacing it here is what lets the ordinary assignment path see a
+         * String target and wrap the RHS in rae_string_pool_take, exactly as
+         * it does for a struct field. Without it, an interpolation assigned
+         * into an Array element stays pool-owned and is freed twice. */
+        case AST_EXPR_INDEX: {
+            const TypeInfo* tt = expr->as.index.target ? expr->as.index.target->resolved_type : NULL;
+            if (tt && tt->kind == TYPE_REF) tt = tt->as.ref.base;
+            if (tt && tt->kind == TYPE_ARRAY && expr->resolved_type) {
+                if (expr->resolved_type->kind == TYPE_STRING) return &kString_tr;
+                AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+                memset(tr, 0, sizeof(*tr));
+                tr->resolved_type = expr->resolved_type;
+                return tr;
+            }
+            break;
+        }
         case AST_EXPR_INTEGER: return &kInt_tr;
         case AST_EXPR_FLOAT: return &kFloat_tr;
         case AST_EXPR_BOOL: return &kBool_tr;
@@ -1574,6 +1591,56 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     drop_entries[drop_entry_count++] = (StructDropEntry){
       .decl = tdecl, .type_ref = gt, .mangled = mangled,
     };
+  }
+  // Array(T, cap: N) drop helpers.
+  //
+  // Emitted by their own pass rather than through StructDropEntry: an Array
+  // has no AstDecl and no fields, just N identical elements, so the body is a
+  // loop where the struct path is a field walk. Only arrays whose ELEMENT
+  // cascades appear here — Array(Float, cap: 16) gets no helper at all, which
+  // is the renderer case and must stay exactly free.
+  const TypeInfo* array_drops[128];
+  size_t array_drop_count = 0;
+  for (size_t gi = 0; gi < ctx->generic_type_count && array_drop_count < 128; gi++) {
+    const AstTypeRef* gt = ctx->generic_types[gi];
+    if (!gt || gt->is_view || gt->is_mod || !gt->resolved_type) continue;
+    const TypeInfo* at = gt->resolved_type;
+    if (at->kind == TYPE_REF) at = at->as.ref.base;
+    if (!at || at->kind != TYPE_ARRAY) continue;
+    if (!type_needs_cascade_drop(ctx, module, (AstTypeRef*)gt, 0)) continue;
+    bool seen = false;
+    for (size_t k = 0; k < array_drop_count; k++) if (array_drops[k] == at) { seen = true; break; }
+    if (!seen) array_drops[array_drop_count++] = at;
+  }
+  for (size_t i = 0; i < array_drop_count; i++) {
+    const TypeInfo* at = array_drops[i];
+    const char* am = type_mangle_name(ctx->ast_arena, (TypeInfo*)at).data;
+    fprintf(out, "RAE_UNUSED static void rae_drop_struct_%s(%s* this);\n", am, am);
+    fprintf(out, "RAE_UNUSED static void rae_drop_struct_%s_alias(%s* this);\n", am, am);
+  }
+  for (size_t i = 0; i < array_drop_count; i++) {
+    const TypeInfo* at = array_drops[i];
+    const char* am = type_mangle_name(ctx->ast_arena, (TypeInfo*)at).data;
+    AstTypeRef elem = {0}; elem.resolved_type = (TypeInfo*)at->as.array.base;
+    const char* em = type_mangle_name(ctx->ast_arena, (TypeInfo*)at->as.array.base).data;
+    bool elem_is_string = at->as.array.base->kind == TYPE_STRING;
+    for (int is_alias = 0; is_alias < 2; is_alias++) {
+      fprintf(out, "RAE_UNUSED static void rae_drop_struct_%s%s(%s* this) {\n",
+              am, is_alias ? "_alias" : "", am);
+      /* The _alias variant skips String elements for the same reason the
+       * struct path does: a call-result local's Strings may alias the
+       * callee's storage, and freeing them would double-free. */
+      if (!(is_alias && elem_is_string)) {
+        fprintf(out, "  for (int64_t __i = 0; __i < %lld; __i++) {\n",
+                (long long)at->as.array.count);
+        if (elem_is_string) fprintf(out, "    rae_string_drop(&this->v[__i]);\n");
+        else fprintf(out, "    rae_drop_struct_%s%s(&this->v[__i]);\n", em, is_alias ? "_alias" : "");
+        fprintf(out, "  }\n");
+      } else {
+        fprintf(out, "  (void)this;\n");
+      }
+      fprintf(out, "}\n");
+    }
   }
   // Forward declarations — each struct drop AND each container-drop
   // we plan to call from the bodies. The container-drop forward
