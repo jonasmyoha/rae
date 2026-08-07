@@ -1,0 +1,130 @@
+# renderer_deferred — the deferred frame, declared as a render graph.
+#
+# Track B (#356). This is NOT a port of the forward prototype in
+# renderer3d.rae. That one computes lighting inside each material's
+# fragment shader, so shading cost scales with (objects x lights) and every
+# lit pixel is shaded whether or not it survives depth. The deferred frame
+# separates the two: the G-buffer pass writes surface attributes once per
+# visible pixel, and lighting reads them once per pixel regardless of how
+# many objects contributed.
+#
+# The frame is:
+#
+#   gbuffer -> depthPyramid -> lighting -> composite -> present
+#
+# but that order is NEVER written down. Passes are declared deliberately
+# out of order below and the sequence is DERIVED from which resources each
+# one reads and writes — the same property 553 pins for the forward frame.
+# Getting this wrong is a class of bug that otherwise shows up as a subtly
+# wrong image rather than an error.
+#
+# WHY THE DEPTH PYRAMID IS IN THE SLICE. It is not decoration: a mip chain
+# of depth is what Hi-Z occlusion culling and SSAO's coarse steps both
+# read, and the reference engine shares one pyramid between them rather
+# than building two. Declaring it now means the slice's dependency edges
+# are the real ones, so when culling arrives it slots in rather than
+# reshaping the frame.
+#
+# ALLOCATION-FREE PER OBJECT is the acceptance criterion (#356), which is
+# why transforms flow through the #354 value types: a Mat4 is 16 floats by
+# value and modelMatrix no longer allocates, so a frame's per-object data
+# path touches the allocator zero times.
+import core
+import math3d
+open rendergraph
+open math3d
+
+# ----- pass tags ------------------------------------------------------
+# Distinct from renderer3d's tags: these identify passes of the deferred
+# frame, and the two frames are separate graphs that never mix.
+const tagGbuffer: Int = 10      # writes surface attributes, no lighting
+const tagDepthPyramid: Int = 11 # mip chain of depth, for Hi-Z + SSAO
+const tagLighting: Int = 12     # reads the G-buffer, writes radiance
+const tagComposite: Int = 13    # radiance -> the frame's colour target
+const tagPresentD: Int = 14     # resolve/present
+
+type DeferredRenderer {
+  graph: RenderGraph
+  gbufferPass: Int
+  pyramidPass: Int
+  lightingPass: Int
+  compositePass: Int
+  presentPass: Int
+}
+
+# Declare the deferred frame. Pass declaration order here is deliberately
+# scrambled — present first, gbuffer last — so that a regression to
+# insertion order is visible immediately in the derived sequence.
+func createDeferredRenderer() pub ret DeferredRenderer {
+  var g: RenderGraph = createRenderGraph()
+
+  # --- resources ---
+  # sceneColor is External: the target gpu2d owns and presents.
+  let colorId: Int = addResource(g: g, name: "sceneColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeExternal)
+
+  # The G-buffer. Three attachments is the minimum that supports a real
+  # BRDF: albedo, a world-space normal, and packed metallic/roughness.
+  # Splitting them (rather than one fat target) keeps each format as narrow
+  # as it can be, which is bandwidth the deferred design exists to save.
+  let albedoId: Int = addResource(g: g, name: "gAlbedo", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let normalId: Int = addResource(g: g, name: "gNormal", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let materialId: Int = addResource(g: g, name: "gMaterial", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let depthId: Int = addResource(g: g, name: "gDepth", kind: resDepth, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+
+  # Hi-Z / coarse-trace source. Half-res because the top mip is gDepth
+  # itself; this is the chain below it.
+  let pyramidId: Int = addResource(g: g, name: "depthPyramid", kind: resTexture2d, format: 0, sizing: sizeHalf, lifetime: lifeTransient)
+
+  # Linear HDR radiance. Everything radiometric happens here; only
+  # composite writes the presentable target.
+  let litId: Int = addResource(g: g, name: "litColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+
+  # --- passes, declared backwards on purpose ---
+  let present: Int = addPass(g: g, name: "present", kind: passRaster, tag: tagPresentD)
+  let composite: Int = addPass(g: g, name: "composite", kind: passRaster, tag: tagComposite)
+  let lighting: Int = addPass(g: g, name: "lighting", kind: passRaster, tag: tagLighting)
+  let pyramid: Int = addPass(g: g, name: "depthPyramid", kind: passCompute, tag: tagDepthPyramid)
+  let gbuffer: Int = addPass(g: g, name: "gbuffer", kind: passRaster, tag: tagGbuffer)
+
+  # --- edges: these, and only these, determine the order ---
+  passWrites(g: g, pass: gbuffer, resource: albedoId, access: accAttachmentWrite)
+  passWrites(g: g, pass: gbuffer, resource: normalId, access: accAttachmentWrite)
+  passWrites(g: g, pass: gbuffer, resource: materialId, access: accAttachmentWrite)
+  passWrites(g: g, pass: gbuffer, resource: depthId, access: accAttachmentWrite)
+
+  # The pyramid is built from finished depth, so it must follow gbuffer.
+  passReads(g: g, pass: pyramid, resource: depthId, access: accSampledRead)
+  passWrites(g: g, pass: pyramid, resource: pyramidId, access: accStorageWrite)
+
+  # Lighting consumes every G-buffer attachment plus the pyramid, and is
+  # the only writer of radiance.
+  passReads(g: g, pass: lighting, resource: albedoId, access: accSampledRead)
+  passReads(g: g, pass: lighting, resource: normalId, access: accSampledRead)
+  passReads(g: g, pass: lighting, resource: materialId, access: accSampledRead)
+  passReads(g: g, pass: lighting, resource: depthId, access: accSampledRead)
+  passReads(g: g, pass: lighting, resource: pyramidId, access: accStorageRead)
+  passWrites(g: g, pass: lighting, resource: litId, access: accAttachmentWrite)
+
+  # Composite is the only writer of the presentable target.
+  passReads(g: g, pass: composite, resource: litId, access: accSampledRead)
+  passWrites(g: g, pass: composite, resource: colorId, access: accAttachmentWrite)
+
+  passReads(g: g, pass: present, resource: colorId, access: accSampledRead)
+
+  ret DeferredRenderer {
+    graph: g,
+    gbufferPass: gbuffer,
+    pyramidPass: pyramid,
+    lightingPass: lighting,
+    compositePass: composite,
+    presentPass: present
+  }
+}
+
+func compileDeferred(r: mod DeferredRenderer) pub ret Int {
+  ret compile(g: r.graph)
+}
+
+func describeDeferred(r: view DeferredRenderer) pub ret String {
+  ret describe(g: r.graph)
+}

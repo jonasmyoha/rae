@@ -1,0 +1,24 @@
+# The deferred frame's execution order is DERIVED (#356, Track B).
+#
+# renderer_deferred declares its passes backwards — present first, gbuffer
+# last — so this asserts the graph reorders them from the resource edges
+# alone. If it ever prints present first, the slice has silently regressed
+# to insertion order, which would show up as a subtly wrong image rather
+# than an error.
+#
+# The dependency chain being pinned:
+#   gbuffer writes gAlbedo/gNormal/gMaterial/gDepth
+#   depthPyramid reads gDepth, writes depthPyramid
+#   lighting reads all four + the pyramid, writes litColor
+#   composite reads litColor, writes sceneColor
+#   present reads sceneColor
+import core
+open rendergraph
+open renderer_deferred
+
+func main() {
+  var r: DeferredRenderer = createDeferredRenderer()
+  let st: Int = compileDeferred(r: r)
+  log("status={statusName(status: st)}")
+  log("{describeDeferred(r: r)}")
+}
