@@ -250,7 +250,11 @@ static AstTypeRef* clone_type_ref(Arena* arena, const AstTypeRef* tr) {
     if (!tr) return NULL;
     AstTypeRef* res = arena_alloc(arena, sizeof(AstTypeRef));
     *res = *tr;
-    res->resolved_type = NULL;
+    /* Same rule as substitute_type_ref: an Array's count lives in the
+     * TypeInfo, not in its name, so clearing resolved_type would make the
+     * clone unresolvable and mangle every cap to the same name. */
+    res->resolved_type = (tr->resolved_type && tr->resolved_type->kind == TYPE_ARRAY)
+        ? tr->resolved_type : NULL;
     if (tr->parts) {
         AstIdentifierPart* head = NULL; AstIdentifierPart* tail = NULL; AstIdentifierPart* curr = tr->parts;
         while (curr) {
@@ -1828,8 +1832,12 @@ static bool sema_check_value_arg(AstModule* module, ConstResult r, Str arg_name,
 
 static bool sema_resolve_value_arg(AstModule* module, SymbolTable* symbols,
                                    AstTypeRef* arg, int64_t* out) {
-    return sema_check_value_arg(module, const_eval(symbols, arg->value_expr),
-                                arg->value_name, arg->line, arg->column, out);
+    if (arg->value_is_folded) { *out = arg->value_folded; return true; }
+    if (!sema_check_value_arg(module, const_eval(symbols, arg->value_expr),
+                              arg->value_name, arg->line, arg->column, out)) return false;
+    arg->value_folded = *out;
+    arg->value_is_folded = true;
+    return true;
 }
 
 /* Array(T, cap: N) — the built-in fixed-size by-value aggregate.
