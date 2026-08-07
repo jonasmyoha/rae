@@ -1166,11 +1166,40 @@ static void pp_print_enum_decl(PrettyPrinter* pp, const AstDecl* decl) {
   pp_newline(pp);
 }
 
+/* Module-level `let` / `var` / `const`.
+ *
+ * Mirrors pp_print_let_stmt, but reads the let_decl arm of the AstDecl union
+ * rather than the AstStmt one. Without this case the dispatcher below fell
+ * through to pp_print_func_decl, which read func_decl fields out of a
+ * let_decl — a SIGSEGV on any file with a global binding. */
+static void pp_print_global_let_decl(PrettyPrinter* pp, const AstDecl* decl) {
+  pp_check_comments(pp, decl->line);
+  if (decl->as.let_decl.is_const) {
+    pp_write(pp, "const ");
+  } else if (decl->as.let_decl.is_var) {
+    pp_write(pp, "var ");
+  } else {
+    pp_write(pp, "let ");
+  }
+  pp_write_str(pp, decl->as.let_decl.name);
+  if (decl->as.let_decl.type) {
+    pp_write(pp, ": ");
+    pp_write_type(pp, decl->as.let_decl.type);
+  }
+  if (decl->as.let_decl.value) {
+    pp_write(pp, decl->as.let_decl.is_bind ? " => " : " = ");
+    pp_expr(pp, decl->as.let_decl.value);
+  }
+  pp_newline(pp);
+}
+
 static void pp_print_decl(PrettyPrinter* pp, const AstDecl* decl) {
   if (decl->kind == AST_DECL_TYPE) {
     pp_print_type_decl(pp, decl);
   } else if (decl->kind == AST_DECL_ENUM) {
     pp_print_enum_decl(pp, decl);
+  } else if (decl->kind == AST_DECL_GLOBAL_LET) {
+    pp_print_global_let_decl(pp, decl);
   } else {
     pp_print_func_decl(pp, decl);
   }
