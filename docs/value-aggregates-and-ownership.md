@@ -1,7 +1,12 @@
 # Fixed-size value aggregates + checked ownership transfer
 
-Status: **design, approved for implementation as #352/#353/#354.** No
-compiler code is written under this document (#351 is design only).
+Status: **design. Revision 2 — Part 1 spelling changed, awaiting approval;
+Part 2 unchanged from revision 1.** No compiler code is written under this
+document (#351 is design only).
+
+Revision 2 replaces the proposed `[N]T` syntax with `Array(T, count: N)`
+after review pushed back on it. §1.2 records why the original rejection of
+`Array(T, N)` was wrong on the facts, not merely a matter of taste.
 
 Parent: `language-readiness-for-renderer.md` §3, §4, Track A. These two
 features are co-designed because they meet at exactly one place — what
@@ -19,32 +24,138 @@ allocation. Today `lib/math3d.rae` uses `List(Float)` and `mat4Mul`
 heap-allocates per call; `gpu3d.modelMatrix()` costs eight allocation/free
 pairs per object per frame. Rae has no way to say "N of T, by value".
 
-### 1.2 Spelling: `[N]T`
+### 1.2 Spelling: `Array(T, count: N)`
+
+**Revised.** The first draft of this document proposed `[N]T` and rejected
+`Array(T, N)` on the grounds that "Rae's generic machinery substitutes types,
+not values, so a count in a generic argument slot would be a new kind of
+thing in an existing position."
+
+That reasoning was wrong on the facts, and wrong in method — it started from
+a supposed implementation constraint and worked backward into syntax, for a
+decision this fundamental. The audit below shows the constraint barely
+exists. The spelling is now:
 
 ```rae
-type Mat4 { m: [16]Float }
-type Quat { v: [4]Float }
-var palette: [128]Mat3x4
+type Mat4 { m: Array(Float, count: 16) }
+type Quat { v: Array(Float, count: 4) }
+var palette: Array(Mat3x4, count: 128)
 ```
 
-Chosen over `Array(T, N)` because Rae's generic machinery substitutes
-**types**, not values — `N` in a generic argument slot would be a new kind
-of thing in an existing position. `[N]T` puts the count in its own syntactic
-slot and reads consistently with Rae's other prefix type modifiers (`view
-T`, `mod T`, `opt T`).
+#### Why the original objection collapses
 
-`N` is a **const-expression of type `Int`**: an integer literal or a `const`
-binding, evaluated at compile time. Not a runtime value, not a generic
-parameter in v1. `[16]Float` and `[maxJoints]Mat3x4` are both legal where
-`const maxJoints: Int = 128`.
+Generic parameters in Rae are **already declared as a named parameter list
+with type annotations**. From `lib/core.rae`:
 
-Rejected alternatives, for the record:
-- `T[N]` (C-style postfix) — collides visually with indexing and reads
-  badly under the existing prefix modifiers (`view Float[16]`).
-- Making it generic (`Array(T)(N)`) — needs value-generics, a much larger
-  feature, for no benefit here.
+```rae
+type List(T: type)
+func createList(T: type, cap: view Int) ret List(T)
+```
 
-### 1.3 A distinct type kind, not sugar over `Buffer`
+`type` is not a special syntactic slot — it is an *annotation* in an ordinary
+parameter list. So:
+
+```rae
+type Array(T: type, count: Int)
+```
+
+is not a new kind of thing in an existing position. It is the **existing**
+declaration form with `Int` where `List` writes `type`. A value parameter is
+simply an annotation that isn't `type`.
+
+The use-site convention already exists too. `createList(Float, cap: 16)`
+mixes a positional type argument with a named value argument. `Array(Float,
+count: 16)` is that same convention, applied to type application instead of
+function application.
+
+#### The rule this establishes
+
+> In a generic argument list, **type arguments are positional; value
+> arguments are named.**
+
+`List(Float)`, `Map(String, Int)`, `Array(Float, count: 16)`. The name is not
+decoration: it keeps a bare magic number out of the type, and it makes value
+arguments syntactically distinguishable from type arguments at the parse
+site — for the parser, for a reader, and for an agent generating code. This
+is worth adopting as a language-wide rule now, before there is a second value
+generic to be inconsistent with.
+
+`count:` is chosen over `cap:` deliberately. `cap` is `List`'s word and
+carries `List`'s meaning — reserved space that length may not have reached.
+An `Array` has no such distinction: it is exactly N elements, always. Using
+`cap` would imply a length field that does not exist.
+
+`N` is a **const-expression of type `Int`** — an integer literal, a `const`
+binding, or arithmetic on them. Both `Array(Float, count: 16)` and
+`Array(Mat3x4, count: maxJoints)` are legal where `const maxJoints: Int =
+128`.
+
+#### What it costs to implement (audited, not estimated)
+
+Three facts make this cheap:
+
+1. **Const evaluation already exists.** `sema.c` has `const_eval` returning a
+   `ConstResult`, and `const` bindings already fold to literals and store
+   `const_i` on the symbol. The evaluator already accepts "literals, earlier
+   constants, enum cases, and arithmetic on them" — exactly the const-
+   expression grammar this needs. Nothing new is required here.
+2. **Generic identity is interned-pointer identity.**
+   `type_registry_find_specialization` keys on
+   `(generic_decl, TypeInfo*[] args)` compared by pointer, because interning
+   guarantees `type_is_same(a, b)` is `a == b`. Intern the value `16` as a
+   `TypeInfo` of a new kind `TYPE_CONST_INT { int64_t value; }` and
+   `generic_args` stays `TypeInfo**` — monomorphization, specialization
+   caching and name mangling all work **unchanged**, by construction.
+3. **The parser already loops over a comma-separated generic argument
+   list.** It needs to accept an integer literal or `name: expr` inside that
+   loop instead of erroring "expected type".
+
+The genuinely new work is the same either way: a new type kind with inline
+storage, its layout, and its drop/copy classification. That work does not
+depend on the spelling at all — which is exactly why the spelling should be
+decided on language-design grounds, as the user argued, and not on
+implementation convenience.
+
+Rejected alternative, for the record: `T[N]` (C-style postfix) — collides
+visually with indexing and reads badly under the existing prefix modifiers
+(`view Float[16]`).
+
+### 1.3 Why not reuse `List`, and what `Buffer` actually is
+
+The three abstractions are distinguished by their **storage contract**, and
+Rae ends up needing all three:
+
+| | Storage | Length | Owns | Lowers to |
+|---|---|---|---|---|
+| `Buffer(T)` | heap, caller-managed | **not in the type** | no | `T*` |
+| `List(T)` | heap, dynamic | runtime field | yes | `{ T* data; len; cap; }` |
+| `Array(T, count: N)` | **inline, by value** | **in the type** | iff `T` does | `struct { T v[N]; }` |
+
+**`Buffer` is not the Array we want.** Audited: `TYPE_BUFFER` lowers to a
+bare `T*` (`c_backend.c`), carries no length in the type, and is not an
+owning type — `List` allocates it with `rae_ext_rae_buf_alloc` and frees it
+in `List.drop`. Its role today is twofold: the compiler-internal primitive
+underneath `List`/`StringMap`/`IntMap`, and the FFI type for handing a raw
+contiguous block to C (`gpu3d.draw(model: view Buffer(Float))`). It is a
+*pointer*, and its entire purpose is indirection — the opposite of what a
+value aggregate is for.
+
+**`List` cannot be reused either.** `List(T)` is `{ data: Buffer(T), length,
+cap }` — heap-backed by definition. Making it sometimes-inline would make its
+representation conditional on a type argument, which destroys the one
+property the renderer needs most: a predictable, inspectable ABI for
+something that gets memcpy'd into a GPU buffer.
+
+So the answer to "is Buffer already Array?" is a clear no, and the three-way
+split above is the right end state rather than an accident.
+
+One consequence worth noting for later: once `Mat4` is
+`Array(Float, count: 16)`, the FFI signatures that currently say `view
+Buffer(Float)` can say `view Mat4` and be *better* typed — the count moves
+from an untyped side-channel argument into the type. That is a follow-on
+cleanup for #354, not part of #352.
+
+### 1.4 A distinct type kind
 
 Add `TYPE_ARRAY` to `TypeKind` in `compiler/src/type.h`:
 
@@ -52,45 +163,48 @@ Add `TYPE_ARRAY` to `TypeKind` in `compiler/src/type.h`:
 struct { TypeInfo* base; size_t count; } array;
 ```
 
-**Not** a compile-time-length `Buffer(T)`. `TYPE_BUFFER` is a *pointer to
-heap storage* — it carries no length in the type, and its whole purpose is
-indirection. Reusing it would make "is this by value?" a property the
-compiler cannot answer structurally, and every one of `ownership.c`'s
-classification helpers (`is_drop_target_type`, `type_owns_heap_storage`,
-`type_needs_cascade_drop`, `type_needs_deep_copy`) needs exactly that
-answer. A distinct kind lets all four stay simple.
+Every one of `ownership.c`'s four classification helpers
+(`is_drop_target_type`, `type_owns_heap_storage`, `type_needs_cascade_drop`,
+`type_needs_deep_copy`) must answer "is this by value?" **structurally**. A
+distinct kind lets all four stay simple — and is why this is not modelled as
+a `Buffer` carrying a length.
 
-### 1.4 C lowering: wrapped in a struct, deliberately
+`Array` is spelled like a user generic but is a **builtin type constructor**,
+alongside `Buffer(T)` and `Task(T)`. It cannot be written in Rae, because no
+Rae type can express inline N-element storage — that is the feature being
+added.
+
+### 1.5 C lowering: wrapped in a struct, deliberately
 
 ```c
-typedef struct { float v[16]; } rae_Array16_Float;
+typedef struct { float v[16]; } rae_Array_Float_16;
 ```
 
-**Not** a bare `float[16]`. Bare C arrays decay to pointers on assignment
-and parameter passing, so `a = b` would copy a pointer and silently
-reintroduce aliasing — precisely the bug class Part 2 exists to remove.
-Wrapping in a struct gives real by-value assignment, parameter passing and
-return, with identical memory layout and no ABI cost. This also makes
-`Vec4`/`Quat` a contiguous 16-byte value, which is the precondition for the
-SIMD lowering in #357.
+**Not** a bare `float[16]`. Bare C arrays decay to pointers on assignment and
+parameter passing, so `a = b` would copy a pointer and silently reintroduce
+aliasing — precisely the bug class Part 2 exists to remove. Wrapping in a
+struct gives real by-value assignment, parameter passing and return, with
+identical memory layout and no ABI cost. This also makes `Vec4`/`Quat` a
+contiguous 16-byte value, which is the precondition for the SIMD lowering in
+#357.
 
-### 1.5 Value semantics and drops
+### 1.6 Value semantics and drops
 
 - **Copy**: assignment and parameter passing copy the whole aggregate. For
-  primitive `T` this is a `memcpy`/struct assignment the C compiler will
-  inline or vectorise.
-- **Drop**: `[N]T` is a drop target **iff `T` is**. For primitive `T` —
-  `Float`, `Int`, `Bool` — there is no drop, no cascade, no per-element
-  loop. This is the renderer case and it must be exactly free.
-- **Cascade**: when `T` does own heap storage (e.g. `[4]String`), drop and
-  deep-copy iterate elements, reusing the machinery
-  `type_needs_cascade_drop` already drives.
-- **Ownership modes**: `view [16]Float` passes a pointer (no copy) — the
-  right default for a large aggregate read-only. `own`/`copy` behave as for
-  any value type. A `[N]T` of primitives never *needs* `own`, since copying
-  is total.
+  primitive `T` this is a struct assignment the C compiler will inline or
+  vectorise.
+- **Drop**: `Array(T, count: N)` is a drop target **iff `T` is**. For
+  primitive `T` — `Float`, `Int`, `Bool` — there is no drop, no cascade, no
+  per-element loop. This is the renderer case and it must be exactly free.
+- **Cascade**: when `T` does own heap storage (e.g.
+  `Array(String, count: 4)`), drop and deep-copy iterate elements, reusing
+  the machinery `type_needs_cascade_drop` already drives.
+- **Ownership modes**: `view Array(Float, count: 16)` passes a pointer (no
+  copy) — the right default for a large read-only aggregate. `own`/`copy`
+  behave as for any value type. An array of primitives never *needs* `own`,
+  since copying is total.
 
-### 1.6 Bounds policy: constant-checked always, dynamic-checked in debug
+### 1.7 Bounds policy: constant-checked always, dynamic-checked in debug
 
 Three cases, deliberately different:
 
@@ -106,9 +220,9 @@ builds. This is a stated policy, not an accident — and it is the one part of
 this design where a later reversal (always-checked) would be a performance
 regression, so it is called out for explicit approval.
 
-### 1.7 Interaction with existing generics
+### 1.8 Interaction with existing generics
 
-`List([16]Float)` must work: the element is a value type of statically known
+`List(Array(Float, count: 16))` must work: the element is a value type of statically known
 size, so the existing `Buffer` element stride (`sizeof(T)`) is correct
 without change. This combination — a value aggregate inside a container — is
 exactly what Part 2's tests must cover, because it is what a skinning
@@ -267,10 +381,11 @@ Grouped by what each proves. Every test is a compiler test case under
 
 ### D. Value aggregates through containers (the renderer combination)
 
-16. `List([16]Float)` — add, read back, assert values and zero aliasing.
-17. `[N]T` embedded in a struct stored in a `List`; assert by-value copy.
-18. `[4]String` (aggregate of heap elements) — assert element cascade drop
-    and no leak.
+16. `List(Array(Float, count: 16))` — add, read back, assert values and zero
+    aliasing.
+17. `Array` embedded in a struct stored in a `List`; assert by-value copy.
+18. `Array(String, count: 4)` (aggregate of heap elements) — assert element
+    cascade drop and no leak.
 19. Aggregate returned from a function and moved into a container.
 
 ### E. Value semantics
@@ -278,8 +393,12 @@ Grouped by what each proves. Every test is a compiler test case under
 20. Assignment copies: `var a = b; a[0] = 9;` leaves `b[0]` unchanged.
 21. Parameter passing copies for `own`/`copy`; `view` does not.
 22. Constant out-of-range index is a **compile error**.
+22b. `count:` as a `const` binding and as const arithmetic both resolve;
+     two spellings of the same count share one monomorphization.
+22c. A non-const `count:` (a runtime `var`) is a **compile error** with a
+     diagnostic naming `const`.
 23. Dynamic out-of-range index aborts in debug with a useful location.
-24. `[N]T` of primitives triggers no drop code. Verified the way 416/417
+24. `Array` of primitives triggers no drop code. Verified the way 416/417
     verify drops — allocator/RSS behaviour at runtime, not by reading
     emitted C.
 
@@ -295,7 +414,7 @@ Grouped by what each proves. Every test is a compiler test case under
 
 ## Part 4 — Open questions for approval
 
-1. **Bounds policy (§1.6)** — unchecked dynamic indexing in release is a
+1. **Bounds policy (§1.7)** — unchecked dynamic indexing in release is a
    deliberate performance choice. Approve, or require always-checked?
 2. **`copy` as the sanctioned fix** — this makes `copy` appear in ordinary
    container code (`list.add(value: copy name)`). Acceptable ergonomics, or
@@ -303,3 +422,7 @@ Grouped by what each proves. Every test is a compiler test case under
 3. **Scope of the rule** — apply to all `own T` parameters, or only where
    `T` owns heap storage? This document assumes the latter (primitives
    unaffected), which keeps the rule invisible in numeric code.
+4. **The positional-types / named-values rule (§1.2)** — adopting this as a
+   language-wide convention now, rather than only for `Array`, is the part of
+   this revision with reach beyond #352. It is the moment to say no if
+   `Array(Float, 16)` is preferred bare.
