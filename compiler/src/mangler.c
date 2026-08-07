@@ -179,6 +179,23 @@ static void mangle_type_recursive(CompilerContext* ctx, const struct AstIdentifi
             *pos += snprintf(buf + *pos, cap - *pos, "%.*s", (int)m.len, m.data);
             return;
         }
+        /* Unresolved copy of an Array ref (internal clones do not always
+         * carry resolved_type). Mangle from the written arguments, using the
+         * count sema folded onto the value-argument node. Without this the
+         * `cap:` argument mangles as "int64_t" and every cap collides. */
+        if (str_eq_cstr(base, "Array")) {
+            const AstTypeRef* elem = NULL; const AstTypeRef* capa = NULL;
+            for (const AstTypeRef* a = type->generic_args; a; a = a->next) {
+                if (a->is_value_arg) { if (!capa) capa = a; }
+                else if (!elem) elem = a;
+            }
+            if (elem && capa && capa->value_is_folded) {
+                *pos += snprintf(buf + *pos, cap - *pos, "rae_Array_");
+                mangle_type_recursive(ctx, generic_params, elem, buf, pos, cap, false);
+                *pos += snprintf(buf + *pos, cap - *pos, "_%lld", (long long)capa->value_folded);
+                return;
+            }
+        }
     }
 
     if (!type->parts) {
@@ -238,6 +255,23 @@ static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct
             Str m = type_mangle_name(ctx->ast_arena, (TypeInfo*)at);
             *pos += snprintf(buf + *pos, cap - *pos, "%.*s", (int)m.len, m.data);
             return;
+        }
+        /* Unresolved copy of an Array ref (internal clones do not always
+         * carry resolved_type). Mangle from the written arguments, using the
+         * count sema folded onto the value-argument node. Without this the
+         * `cap:` argument mangles as "int64_t" and every cap collides. */
+        if (str_eq_cstr(base, "Array")) {
+            const AstTypeRef* elem = NULL; const AstTypeRef* capa = NULL;
+            for (const AstTypeRef* a = type->generic_args; a; a = a->next) {
+                if (a->is_value_arg) { if (!capa) capa = a; }
+                else if (!elem) elem = a;
+            }
+            if (elem && capa && capa->value_is_folded) {
+                *pos += snprintf(buf + *pos, cap - *pos, "rae_Array_");
+                mangle_type_recursive(ctx, generic_params, elem, buf, pos, cap, false);
+                *pos += snprintf(buf + *pos, cap - *pos, "_%lld", (long long)capa->value_folded);
+                return;
+            }
         }
     }
 
