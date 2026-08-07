@@ -1,0 +1,18 @@
+# Array(T, cap: N) end to end (#352, slice 2): zero-init, indexing, and
+# the property the whole feature exists for — assignment COPIES.
+#
+# If Array lowered to a bare C array instead of a struct wrapping one, the
+# copy below would alias and a0 would read 99. That is the aliasing bug
+# class the struct wrapper exists to prevent (§1.5).
+import core
+
+func main() {
+  var a: Array(Float, cap: 4) = Array(Float, cap: 4)
+  a[0] = 1.5
+  a[3] = 9.25
+  log("a0={a[0]} a3={a[3]} unset={a[1]}")
+
+  var b: Array(Float, cap: 4) = a
+  b[0] = 99.0
+  log("copy independent: a0={a[0]} b0={b[0]}")
+}

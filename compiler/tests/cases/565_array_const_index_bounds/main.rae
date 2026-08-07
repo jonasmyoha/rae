@@ -1,0 +1,10 @@
+# A compile-time-constant index is bounds-checked at COMPILE time, in every
+# build (§1.7). Matrix code is full of constant indices, and verifying them
+# costs nothing, so an out-of-range constant must never reach runtime.
+import core
+
+func main() {
+  var a: Array(Float, cap: 4) = Array(Float, cap: 4)
+  a[4] = 1.0
+  log("unreachable")
+}
