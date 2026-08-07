@@ -1457,6 +1457,29 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                                 }
                             }
                         }
+                    } else {
+                        /* Unresolved call. If an argument is a raw
+                         * `Array(T, cap: N)`, that is almost certainly the
+                         * known gap (#361) rather than a typo: the same
+                         * spelling is both a type and a value, and a
+                         * `T: type` parameter slot cannot currently take the
+                         * value form. Say so, and name the fix, instead of
+                         * letting it fall through to a wall of C compiler
+                         * errors from the generated file. */
+                        for (AstCallArg* ca = expr->as.call.args; ca; ca = ca->next) {
+                            if (ca->value && ca->value->kind == AST_EXPR_CALL
+                                && ca->value->as.call.callee
+                                && ca->value->as.call.callee->kind == AST_EXPR_IDENT
+                                && str_eq_cstr(ca->value->as.call.callee->as.ident, "Array")) {
+                                diag_error(module ? module->file_path : NULL,
+                                           (int)expr->line, (int)expr->column,
+                                           "a bare 'Array(T, cap: N)' cannot be used as a type argument here; "
+                                           "wrap it in a named type (e.g. `type Mat4 { m: Array(Float, cap: 16) }`) "
+                                           "and pass that instead");
+                                if (module) module->had_error = true;
+                                break;
+                            }
+                        }
                     }
                 }
             }

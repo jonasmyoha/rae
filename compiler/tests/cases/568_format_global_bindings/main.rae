@@ -1,0 +1,15 @@
+# `rae format` used to SIGSEGV on ANY module-level binding: pp_print_decl
+# had no case for AST_DECL_GLOBAL_LET, so it fell through to the function
+# printer and read func_decl fields out of a let_decl union.
+#
+# It survived a long time because format/lex/parse/pack tests were skipped
+# on the compiled target — they are frontend commands that used to run
+# under the now-frozen live target, so they stopped running anywhere. This
+# test only has value because that gate was removed.
+const maxJoints: Int = 128
+let greeting: String = "hi"
+var counter: Int = 0
+
+func main() {
+  log("{greeting} {maxJoints} {counter}")
+}

@@ -32,6 +32,17 @@ RUNTIME_DIR = $(abspath runtime)
 
 CFLAGS += -DRAE_RUNTIME_SOURCE_DIR=\"$(RUNTIME_DIR)\"
 
+# Header dependency tracking. Without this, the pattern rule below lists only
+# the .c file, so editing a header does NOT rebuild the objects that include
+# it. That is not a slow-build annoyance — a struct field added to ast.h left
+# stale objects compiled against the OLD layout, and the mismatched reads
+# produced plausible-looking garbage (a count that was really the ASCII bytes
+# of a nearby string) rather than a crash. -MMD writes a .d file of real
+# prerequisites per object; -MP adds phony targets for each header so a
+# deleted/renamed header does not break the build with "No rule to make
+# target".
+CFLAGS += -MMD -MP
+
 SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/arena.c \
        $(SRC_DIR)/str.c \
@@ -67,6 +78,8 @@ EXT_SRCS = ../third_party/tinyexpr/rae_tinyexpr.c ../third_party/monocypher/mono
 
 OBJS = $(SRCS:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
 OBJS += $(BUILD_DIR)/rae_tinyexpr.o $(BUILD_DIR)/monocypher.o
+
+DEPS = $(OBJS:.o=.d)
 
 TARGET = $(BIN_DIR)/rae
 TEST_RUNNER = tools/run_tests.sh
@@ -140,3 +153,8 @@ smoke: build
 clean:
 	rm -rf $(BUILD_DIR) $(BIN_DIR) ../build
 	@echo "Cleaned build artifacts"
+
+# Pull in the generated per-object header dependencies. Placed last, and with
+# a leading `-` so the very first build (when no .d files exist yet) is not an
+# error.
+-include $(DEPS)
