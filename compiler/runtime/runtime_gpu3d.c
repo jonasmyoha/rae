@@ -779,7 +779,34 @@ void rae_ext_gpu3d_begin(const float* frame, int64_t count){
 /* Queue one mesh draw. model = 16 Floats column-major. Uniform data is
  * written CPU-side (uploaded once at end); the draw is encoded now with
  * firstInstance = draw index so the shader picks its DrawU slot. */
-void rae_ext_gpu3d_draw(int64_t mesh, const float* model, const float* prevModel,
+/* Mirror of the Rae-side `Mat4` layout, for the gpu3d extern boundary.
+ *
+ * `lib/math3d.rae` declares `type Mat4 { m: Array(Float, cap: 16) }`, and the
+ * compiler emits exactly these two declarations into the generated
+ * translation unit. Repeating them here is not duplication for its own sake:
+ * C compatibility across translation units (C11 6.2.7) requires the same tag
+ * and member names/types, so declaring the SAME shape makes the runtime's
+ * definition of rae_ext_gpu3d_draw compatible with the prototype the
+ * generated code calls through. A `const float*` parameter would have the
+ * same ABI but an incompatible type, which is undefined behaviour rather
+ * than merely untidy.
+ *
+ * These live in the runtime .c files, never in rae_runtime.h — generated code
+ * includes that header and emits its own copy of these types, so putting them
+ * there would be a redefinition.
+ *
+ * The static assert is the guard: if Mat4's size ever diverges from 16 floats
+ * the build fails here instead of silently reading the wrong bytes.
+ */
+#ifndef RAE_GPU3D_MAT4_FFI
+#define RAE_GPU3D_MAT4_FFI
+typedef struct { float v[16]; } rae_Array_float_16;
+typedef struct rae_Mat4 { rae_Array_float_16 m; } rae_Mat4;
+_Static_assert(sizeof(rae_Mat4) == 16 * sizeof(float),
+               "Rae Mat4 must stay 16 contiguous floats for the gpu3d extern boundary");
+#endif
+
+void rae_ext_gpu3d_draw(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
                         float r, float g, float b,
                         float metallic, float roughness,
                         float emR, float emG, float emB){
@@ -797,13 +824,13 @@ void rae_ext_gpu3d_draw(int64_t mesh, const float* model, const float* prevModel
         return;
     }
     float* d = g3d_draw_cpu + g3d_draw_count * G3D_DRAW_FLOATS;
-    for (int i = 0; i < 16; i++) d[i] = (float)model[i];
+    for (int i = 0; i < 16; i++) d[i] = model->m.v[i];
     /* No previous transform (first frame, or a caller that does not track
      * one) means "did not move": reusing the current model yields zero
      * velocity, which is right, where zeros would project to the origin
      * and smear a full-screen streak. */
-    if (prevModel) { for (int i = 0; i < 16; i++) d[16 + i] = (float)prevModel[i]; }
-    else           { for (int i = 0; i < 16; i++) d[16 + i] = (float)model[i]; }
+    if (prevModel) { for (int i = 0; i < 16; i++) d[16 + i] = prevModel->m.v[i]; }
+    else           { for (int i = 0; i < 16; i++) d[16 + i] = model->m.v[i]; }
     d[32] = (float)r; d[33] = (float)g; d[34] = (float)b; d[35] = (float)metallic;
     d[36] = (float)emR; d[37] = (float)emG; d[38] = (float)emB; d[39] = (float)roughness;
     wgpuRenderPassEncoderSetVertexBuffer(g3d_pass, 0, g3d_mesh_vbuf[slot], 0,
