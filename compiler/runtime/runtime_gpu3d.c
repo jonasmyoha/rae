@@ -954,15 +954,16 @@ void rae_ext_gpu3d_tonemap(void) {
 
 /* End the standalone 3D frame and reuse the 2D path's screenshot +
  * present-from-offscreen behavior. UI composition uses endPass instead. */
-void rae_ext_gpu3d_end(void) {
-    rae_g2d_tick_virtual_clock();
-    rae_g3d_finish_pass();
-    /* Presenting reads the LDR offscreen, which only tonemap writes. A
-     * graph-driven frame has already dispatched it (no-op here); a legacy
-     * begin/draw/end caller has not, so run it now rather than presenting
-     * whatever the offscreen held last. */
-    if (g3d_tonemap_pending) rae_ext_gpu3d_tonemap();
-
+/* Screenshot + present the LDR offscreen.
+ *
+ * This is PLATFORM work, not frame-graph work: it copies whatever the
+ * offscreen currently holds into the surface drawable. Both the forward
+ * frame and the deferred frame (#356) end this way — they disagree about
+ * how the offscreen got its pixels, not about how a composed image
+ * reaches the window. Sharing it here is why the deferred present pass
+ * does not have to call into renderer3d's frame logic to show anything.
+ */
+static void rae_g3d_present_offscreen(void) {
     if (g_sdl_headless_ms > 0 || g_sdl_headless_frames > 0) {
         const char* shot = getenv("RAE_GPU2D_SCREENSHOT");
         if (shot) rae_g2d_save_screenshot(shot);
@@ -990,6 +991,17 @@ void rae_ext_gpu3d_end(void) {
     }
     if (st.texture) wgpuTextureRelease(st.texture);
     rae_wgpu_poll(0);
+}
+
+void rae_ext_gpu3d_end(void) {
+    rae_g2d_tick_virtual_clock();
+    rae_g3d_finish_pass();
+    /* Presenting reads the LDR offscreen, which only tonemap writes. A
+     * graph-driven frame has already dispatched it (no-op here); a legacy
+     * begin/draw/end caller has not, so run it now rather than presenting
+     * whatever the offscreen held last. */
+    if (g3d_tonemap_pending) rae_ext_gpu3d_tonemap();
+    rae_g3d_present_offscreen();
 }
 
 void rae_ext_gpu3d_shutdown(void) {

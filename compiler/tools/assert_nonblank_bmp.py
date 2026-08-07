@@ -13,10 +13,24 @@ def fail(message: str) -> None:
 
 
 if len(sys.argv) not in (2, 3):
-    fail("usage: assert_nonblank_bmp.py <screenshot.bmp> [--gpu3d-ui]")
+    fail("usage: assert_nonblank_bmp.py <screenshot.bmp> [--gpu3d-ui|--min-colors=N]")
 
 gpu3d_ui = len(sys.argv) == 3 and sys.argv[2] == "--gpu3d-ui"
-if len(sys.argv) == 3 and not gpu3d_ui:
+
+# The default colour floor (32) assumes a SHADED image, where lighting
+# spreads every surface across many values. A raw G-buffer channel is not
+# shaded: flat albedo over N materials has close to N colours by
+# construction, and asserting 32+ on it would be asserting that the
+# renderer is doing something the geometry pass exists not to do. Callers
+# that know the expected variety state it instead — the deferred example
+# checks its albedo channel against the material count it authored.
+min_colors = 32
+if len(sys.argv) == 3 and sys.argv[2].startswith("--min-colors="):
+    try:
+        min_colors = int(sys.argv[2].split("=", 1)[1])
+    except ValueError:
+        fail(f"--min-colors needs an integer, got: {sys.argv[2]}")
+elif len(sys.argv) == 3 and not gpu3d_ui:
     fail(f"unknown validation mode: {sys.argv[2]}")
 
 path = Path(sys.argv[1])
@@ -87,8 +101,8 @@ for y in range(0, height, sample_step):
             colors.add(color)
 
 changed_fraction = changed_count / sample_count
-if len(colors) < 32:
-    fail(f"only {len(colors)} sampled colors")
+if len(colors) < min_colors:
+    fail(f"only {len(colors)} sampled colors (need {min_colors})")
 if changed_fraction < 0.01:
     fail(f"only {changed_fraction:.2%} of sampled pixels differ from the background")
 
