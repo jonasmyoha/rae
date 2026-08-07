@@ -1,0 +1,22 @@
+# A value aggregate flowing through a container — the combination the
+# renderer leans on hardest (#352, slice 4): a skinning palette and a
+# draw-command buffer are both this shape.
+#
+# The assertion that matters is p0 vs p1: the source is mutated between
+# the two adds, so if the container stored an alias rather than a copy
+# both would read 99.
+import core
+
+type Mat4 {
+  m: Array(Float, cap: 16)
+}
+
+func main() {
+  var palette: List(Mat4) = createList(Mat4, cap: 4)
+  var a: Mat4 = { m: Array(Float, cap: 16) }
+  a.m[0] = 1.0
+  palette.add(value: a)
+  a.m[0] = 99.0
+  palette.add(value: a)
+  log("len={palette.length} p0={palette.at(index: 0).m[0]} p1={palette.at(index: 1).m[0]}")
+}

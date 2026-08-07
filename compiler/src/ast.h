@@ -50,6 +50,12 @@ typedef struct AstTypeRef {
   bool is_value_arg;
   Str value_name;
   AstExpr* value_expr;
+  /* The const-folded value, stamped by sema once the expression is
+   * evaluated. Held on the node so it survives clone/substitute — those
+   * copy the struct wholesale — and so the mangler never has to re-fold
+   * (which it could not do for a `const` identifier anyway). */
+  int64_t value_folded;
+  bool value_is_folded;
 } AstTypeRef;
 
 
