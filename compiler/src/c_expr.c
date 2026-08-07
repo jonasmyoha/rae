@@ -528,6 +528,27 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             fprintf(out, ") ))");
             break;
         }
+        /* Array(T, cap: N) is a struct wrapping T[N] (see §1.5), so indexing
+         * goes through the `.v` member. A view/mod parameter is a pointer to
+         * that struct, hence `->`. */
+        {
+            /* Prefer the target's own resolved type: for a nested access
+             * like grid[1][0] the inner `grid[1]` is an INDEX expression
+             * whose element type sema already recorded, and which
+             * infer_expr_type_ref does not reconstruct. */
+            const TypeInfo* ti = expr->as.index.target->resolved_type;
+            if (!ti && tgt_tr) ti = tgt_tr->resolved_type;
+            if (ti && ti->kind == TYPE_REF) ti = ti->as.ref.base;
+            if ((ti && ti->kind == TYPE_ARRAY) || str_eq_cstr(tgt_base, "Array")) {
+                /* Always `.v` — emit_expr already dereferences a view/mod
+                 * parameter, so the target is a value here, never a pointer. */
+                emit_expr(ctx, expr->as.index.target, out, PREC_CALL, false, false);
+                fprintf(out, ".v[");
+                emit_expr(ctx, expr->as.index.index, out, PREC_LOWEST, false, false);
+                fprintf(out, "]");
+                break;
+            }
+        }
         emit_expr(ctx, expr->as.index.target, out, PREC_CALL, false, false); fprintf(out, "["); emit_expr(ctx, expr->as.index.index, out, PREC_LOWEST, false, false); fprintf(out, "]"); break;
     }
     case AST_EXPR_BOX: {
