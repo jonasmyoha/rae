@@ -4,7 +4,7 @@ Status: **design. Revision 2 — Part 1 spelling changed, awaiting approval;
 Part 2 unchanged from revision 1.** No compiler code is written under this
 document (#351 is design only).
 
-Revision 2 replaces the proposed `[N]T` syntax with `Array(T, count: N)`
+Revision 2 replaces the proposed `[N]T` syntax with `Array(T, cap: N)`
 after review pushed back on it. §1.2 records why the original rejection of
 `Array(T, N)` was wrong on the facts, not merely a matter of taste.
 
@@ -24,7 +24,7 @@ allocation. Today `lib/math3d.rae` uses `List(Float)` and `mat4Mul`
 heap-allocates per call; `gpu3d.modelMatrix()` costs eight allocation/free
 pairs per object per frame. Rae has no way to say "N of T, by value".
 
-### 1.2 Spelling: `Array(T, count: N)`
+### 1.2 Spelling: `Array(T, cap: N)`
 
 **Revised.** The first draft of this document proposed `[N]T` and rejected
 `Array(T, N)` on the grounds that "Rae's generic machinery substitutes types,
@@ -37,9 +37,9 @@ decision this fundamental. The audit below shows the constraint barely
 exists. The spelling is now:
 
 ```rae
-type Mat4 { m: Array(Float, count: 16) }
-type Quat { v: Array(Float, count: 4) }
-var palette: Array(Mat3x4, count: 128)
+type Mat4 { m: Array(Float, cap: 16) }
+type Quat { v: Array(Float, cap: 4) }
+var palette: Array(Mat3x4, cap: 128)
 ```
 
 #### Why the original objection collapses
@@ -56,7 +56,7 @@ func createList(T: type, cap: view Int) ret List(T)
 parameter list. So:
 
 ```rae
-type Array(T: type, count: Int)
+type Array(T: type, cap: Int)
 ```
 
 is not a new kind of thing in an existing position. It is the **existing**
@@ -65,7 +65,7 @@ simply an annotation that isn't `type`.
 
 The use-site convention already exists too. `createList(Float, cap: 16)`
 mixes a positional type argument with a named value argument. `Array(Float,
-count: 16)` is that same convention, applied to type application instead of
+cap: 16)` is that same convention, applied to type application instead of
 function application.
 
 #### The rule this establishes
@@ -73,21 +73,28 @@ function application.
 > In a generic argument list, **type arguments are positional; value
 > arguments are named.**
 
-`List(Float)`, `Map(String, Int)`, `Array(Float, count: 16)`. The name is not
+`List(Float)`, `Map(String, Int)`, `Array(Float, cap: 16)`. The name is not
 decoration: it keeps a bare magic number out of the type, and it makes value
 arguments syntactically distinguishable from type arguments at the parse
 site — for the parser, for a reader, and for an agent generating code. This
 is worth adopting as a language-wide rule now, before there is a second value
 generic to be inconsistent with.
 
-`count:` is chosen over `cap:` deliberately. `cap` is `List`'s word and
-carries `List`'s meaning — reserved space that length may not have reached.
-An `Array` has no such distinction: it is exactly N elements, always. Using
-`cap` would imply a length field that does not exist.
+`cap:` is chosen over `count:` to make the `List` → `Array` swap mechanical:
+`createList(Float, cap: 16)` becomes `Array(Float, cap: 16)` with the keyword
+unchanged, so migrating a hot path is a one-token edit rather than a rename
+across every call site.
+
+The cost is a small semantic stretch — in `List`, `cap` is reserved space
+that `length` may not have reached, whereas an `Array` has no such
+distinction and is exactly N elements always. Accepted deliberately:
+migration ergonomics on a large existing codebase outweigh a shade of
+imprecision in one keyword, and "capacity == length, always" is a simple
+enough rule to state once.
 
 `N` is a **const-expression of type `Int`** — an integer literal, a `const`
-binding, or arithmetic on them. Both `Array(Float, count: 16)` and
-`Array(Mat3x4, count: maxJoints)` are legal where `const maxJoints: Int =
+binding, or arithmetic on them. Both `Array(Float, cap: 16)` and
+`Array(Mat3x4, cap: maxJoints)` are legal where `const maxJoints: Int =
 128`.
 
 #### What it costs to implement (audited, not estimated)
@@ -129,7 +136,7 @@ Rae ends up needing all three:
 |---|---|---|---|---|
 | `Buffer(T)` | heap, caller-managed | **not in the type** | no | `T*` |
 | `List(T)` | heap, dynamic | runtime field | yes | `{ T* data; len; cap; }` |
-| `Array(T, count: N)` | **inline, by value** | **in the type** | iff `T` does | `struct { T v[N]; }` |
+| `Array(T, cap: N)` | **inline, by value** | **in the type** | iff `T` does | `struct { T v[N]; }` |
 
 **`Buffer` is not the Array we want.** Audited: `TYPE_BUFFER` lowers to a
 bare `T*` (`c_backend.c`), carries no length in the type, and is not an
@@ -150,7 +157,7 @@ So the answer to "is Buffer already Array?" is a clear no, and the three-way
 split above is the right end state rather than an accident.
 
 One consequence worth noting for later: once `Mat4` is
-`Array(Float, count: 16)`, the FFI signatures that currently say `view
+`Array(Float, cap: 16)`, the FFI signatures that currently say `view
 Buffer(Float)` can say `view Mat4` and be *better* typed — the count moves
 from an untyped side-channel argument into the type. That is a follow-on
 cleanup for #354, not part of #352.
@@ -193,13 +200,13 @@ contiguous 16-byte value, which is the precondition for the SIMD lowering in
 - **Copy**: assignment and parameter passing copy the whole aggregate. For
   primitive `T` this is a struct assignment the C compiler will inline or
   vectorise.
-- **Drop**: `Array(T, count: N)` is a drop target **iff `T` is**. For
+- **Drop**: `Array(T, cap: N)` is a drop target **iff `T` is**. For
   primitive `T` — `Float`, `Int`, `Bool` — there is no drop, no cascade, no
   per-element loop. This is the renderer case and it must be exactly free.
 - **Cascade**: when `T` does own heap storage (e.g.
-  `Array(String, count: 4)`), drop and deep-copy iterate elements, reusing
+  `Array(String, cap: 4)`), drop and deep-copy iterate elements, reusing
   the machinery `type_needs_cascade_drop` already drives.
-- **Ownership modes**: `view Array(Float, count: 16)` passes a pointer (no
+- **Ownership modes**: `view Array(Float, cap: 16)` passes a pointer (no
   copy) — the right default for a large read-only aggregate. `own`/`copy`
   behave as for any value type. An array of primitives never *needs* `own`,
   since copying is total.
@@ -222,7 +229,7 @@ regression, so it is called out for explicit approval.
 
 ### 1.8 Interaction with existing generics
 
-`List(Array(Float, count: 16))` must work: the element is a value type of statically known
+`List(Array(Float, cap: 16))` must work: the element is a value type of statically known
 size, so the existing `Buffer` element stride (`sizeof(T)`) is correct
 without change. This combination — a value aggregate inside a container — is
 exactly what Part 2's tests must cover, because it is what a skinning
@@ -381,10 +388,10 @@ Grouped by what each proves. Every test is a compiler test case under
 
 ### D. Value aggregates through containers (the renderer combination)
 
-16. `List(Array(Float, count: 16))` — add, read back, assert values and zero
+16. `List(Array(Float, cap: 16))` — add, read back, assert values and zero
     aliasing.
 17. `Array` embedded in a struct stored in a `List`; assert by-value copy.
-18. `Array(String, count: 4)` (aggregate of heap elements) — assert element
+18. `Array(String, cap: 4)` (aggregate of heap elements) — assert element
     cascade drop and no leak.
 19. Aggregate returned from a function and moved into a container.
 
@@ -393,9 +400,9 @@ Grouped by what each proves. Every test is a compiler test case under
 20. Assignment copies: `var a = b; a[0] = 9;` leaves `b[0]` unchanged.
 21. Parameter passing copies for `own`/`copy`; `view` does not.
 22. Constant out-of-range index is a **compile error**.
-22b. `count:` as a `const` binding and as const arithmetic both resolve;
+22b. `cap:` as a `const` binding and as const arithmetic both resolve;
      two spellings of the same count share one monomorphization.
-22c. A non-const `count:` (a runtime `var`) is a **compile error** with a
+22c. A non-const `cap:` (a runtime `var`) is a **compile error** with a
      diagnostic naming `const`.
 23. Dynamic out-of-range index aborts in debug with a useful location.
 24. `Array` of primitives triggers no drop code. Verified the way 416/417
@@ -424,5 +431,11 @@ Grouped by what each proves. Every test is a compiler test case under
    unaffected), which keeps the rule invisible in numeric code.
 4. **The positional-types / named-values rule (§1.2)** — adopting this as a
    language-wide convention now, rather than only for `Array`, is the part of
-   this revision with reach beyond #352. It is the moment to say no if
-   `Array(Float, 16)` is preferred bare.
+   this revision with reach beyond #352. **Approved** along with `cap:` as
+   the keyword.
+5. **Does `Array(T, cap: N)` also spell construction?** `let m: Mat4 = ...`
+   needs a right-hand side, and the `List` line it replaces had one
+   (`createList(...)`). Proposal: the type application doubles as a
+   zero-initialising constructor expression, so `Array(Float, cap: 16)` is
+   both the type and a valid value — which is what actually makes the swap a
+   one-line edit. Needs confirmation before #352.
