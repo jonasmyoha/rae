@@ -166,6 +166,21 @@ static void mangle_type_recursive(CompilerContext* ctx, const struct AstIdentifi
     Str base = get_base_type_name(type);
     if (mangle_primitive_ref(type, base, buf, pos, cap)) return;
 
+    /* Array(T, cap: N) carries its count in the type, so delegate to the
+     * TypeInfo mangler rather than walking generic_args here — the `cap:`
+     * argument is a value, not a type, and would otherwise mangle as
+     * "int64_t" and collide across every cap. */
+    {
+        const TypeInfo* at = type->resolved_type;
+        /* `view`/`mod Array(...)` resolves to a TYPE_REF around the array. */
+        if (at && at->kind == TYPE_REF) at = at->as.ref.base;
+        if (at && at->kind == TYPE_ARRAY) {
+            Str m = type_mangle_name(ctx->ast_arena, (TypeInfo*)at);
+            *pos += snprintf(buf + *pos, cap - *pos, "%.*s", (int)m.len, m.data);
+            return;
+        }
+    }
+
     if (!type->parts) {
         if (type->resolved_type) {
             Str m = type_mangle_name(ctx->ast_arena, type->resolved_type);
@@ -210,6 +225,21 @@ static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct
 
     Str base = get_base_type_name(type);
     if (mangle_primitive_ref(type, base, buf, pos, cap)) return;
+
+    /* Array(T, cap: N) carries its count in the type, so delegate to the
+     * TypeInfo mangler rather than walking generic_args here — the `cap:`
+     * argument is a value, not a type, and would otherwise mangle as
+     * "int64_t" and collide across every cap. */
+    {
+        const TypeInfo* at = type->resolved_type;
+        /* `view`/`mod Array(...)` resolves to a TYPE_REF around the array. */
+        if (at && at->kind == TYPE_REF) at = at->as.ref.base;
+        if (at && at->kind == TYPE_ARRAY) {
+            Str m = type_mangle_name(ctx->ast_arena, (TypeInfo*)at);
+            *pos += snprintf(buf + *pos, cap - *pos, "%.*s", (int)m.len, m.data);
+            return;
+        }
+    }
 
     if (!type->parts) {
         if (type->resolved_type) {
