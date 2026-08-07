@@ -3,6 +3,7 @@
 #include "ast.h"
 #include "diag.h"
 #include "mangler.h"
+#include "ownership.h"
 #include "c_backend.h"
 #include <string.h>
 #include <stdlib.h>
@@ -161,6 +162,13 @@ struct Symbol {
     int scope_depth;
     bool is_immutable;
     BindKind bind_kind;
+    /* The own-argument rule (docs/value-aggregates-and-ownership.md §2.2):
+     * this binding does NOT own its heap storage, so passing it to an
+     * `own T` parameter would hand the callee something it must not free.
+     * Set for view/mod params, for globals, and — one hop only, §2.4 — for
+     * a local initialised directly from one of those. It is one bit fixed
+     * at declaration, never dataflow. */
+    bool is_non_owning;
     // Folded value for `const` symbols (so later consts can reference them).
     bool const_is_number;
     bool const_is_float;
@@ -195,6 +203,7 @@ static Symbol* symbol_table_define(SymbolTable* table, Arena* arena, Str name, A
     // Default: an immutable symbol is a read-only borrow (view param) unless a
     // caller refines it to BIND_LET / BIND_CONST.
     sym->bind_kind = is_immutable ? BIND_READONLY_REF : BIND_MUTABLE;
+    sym->is_non_owning = false;
     sym->const_is_number = false;
     sym->const_is_float = false;
     sym->const_d = 0.0;
@@ -234,6 +243,8 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
 static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr);
 static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt, TypeInfo* current_return_type);
 static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstTypeRef* type_ref);
+static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, const AstFuncDecl* fd, AstCallArg* args, bool skip_receiver);
+static bool expr_is_owning(SymbolTable* symbols, const AstExpr* e);
 static TypeInfo* sema_array_type_from_call(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr);
 static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr** expr_ptr);
 static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* generic_decl, TypeInfo** args, size_t arg_count, size_t line, size_t column);
@@ -919,7 +930,12 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
                 } else if (param->type && param->type->is_view) {
                     is_view_param = true;
                 }
-                symbol_table_define(symbols, ctx->ast_arena, param->name, NULL, t, is_view_param);
+                Symbol* psym = symbol_table_define(symbols, ctx->ast_arena, param->name, NULL, t, is_view_param);
+                /* A borrow is someone else's value: the callee may read or
+                 * mutate it but never free it, so it can't satisfy `own`. */
+                if (psym && param->type && (param->type->is_view || param->type->is_mod)) {
+                    psym->is_non_owning = true;
+                }
                 param = param->next;
             }
             if (decl->as.func_decl.body) {
@@ -941,6 +957,21 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
             if (gs) {
                 bool immut = !decl->as.let_decl.is_var;
                 gs->is_immutable = immut;
+                /* A global outlives every callee — handing one to `own`
+                 * frees storage the rest of the program still refers to.
+                 * This is the #222 shape.
+                 *
+                 * EXCEPT a global bound to a string literal, which is the
+                 * overwhelmingly common `let actionId: String = "x"`
+                 * constant. A literal's buffer is static: rae_string_drop
+                 * is guarded on `is_owned`, so a callee "freeing" it is a
+                 * no-op and there is nothing to dangle. Marking those
+                 * non-owning produced six false positives in
+                 * 106_mobile_ui alone — a rule that fires on the
+                 * idiomatic spelling of a constant would just be
+                 * turned off. */
+                gs->is_non_owning = !(decl->as.let_decl.value
+                                      && decl->as.let_decl.value->kind == AST_EXPR_STRING);
                 if (decl->as.let_decl.is_const) {
                     gs->bind_kind = BIND_CONST;
                     sema_fold_const(ctx, module, symbols, decl->as.let_decl.value, gs, decl->line, decl->column);
@@ -1085,6 +1116,16 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             // rebinding the local itself.)
             bool immut = !stmt->as.let_stmt.is_var;
             Symbol* sym = symbol_table_define(symbols, ctx->ast_arena, stmt->as.let_stmt.name, NULL, t, immut);
+            /* One-hop alias tracking (§2.4): a binding initialised DIRECTLY
+             * from something that does not own — a global, a view/mod
+             * parameter, a field read through one — is itself an alias, not
+             * an owner. This is the #222 shape (`let x = someGlobal` then
+             * passing x to `own String`). One bit, fixed here at
+             * declaration; deliberately not dataflow, and deliberately only
+             * one hop, so `let a = g; let b = a` is not caught in v1. */
+            if (sym && stmt->as.let_stmt.value && !expr_is_owning(symbols, stmt->as.let_stmt.value)) {
+                sym->is_non_owning = true;
+            }
             if (stmt->as.let_stmt.is_const) {
                 sym->bind_kind = BIND_CONST;
                 sema_fold_const(ctx, module, symbols, stmt->as.let_stmt.value, sym, stmt->line, stmt->column);
@@ -1420,6 +1461,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                         if (resolved->as.func_decl.returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, resolved->as.func_decl.returns->type);
                         AstParam* p = resolved->as.func_decl.params; AstCallArg* a = expr->as.call.args;
                         while (p && a) { TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, p->type); ensure_type_match(ctx, pt, &a->value); p = p->next; a = a->next; }
+                        sema_check_own_args(ctx, module, symbols, &resolved->as.func_decl, expr->as.call.args, false);
                         // Forbid raw rae_ext_rae_buf_set with a cascade-drop V
                         // outside of stdlib. Stdlib (lib/core.rae and friends)
                         // pairs each raw set with a rae_ext_rae_buf_drop_at or
@@ -1565,6 +1607,12 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                     AstParam* p = resolved->as.func_decl.params;
                     AstCallArg* a = qargs;
                     while (p && a) { TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, p->type); ensure_type_match(ctx, pt, &a->value); p = p->next; a = a->next; }
+                    /* A UFCS/qualified method call is REWRITTEN into a plain
+                     * CALL here, receiver included as the first argument —
+                     * so it reaches neither the ordinary call hook (which
+                     * runs under resolve_function_overload) nor the
+                     * method-call one. `xs.add(value: text)` arrives here. */
+                    sema_check_own_args(ctx, module, symbols, &resolved->as.func_decl, qargs, false);
                 }
                 break;
                 } // if (modname.data)
@@ -1749,6 +1797,16 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                     AstCallArg* a = expr->as.method_call.args;
                     while (p && a) { TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, p->type); ensure_type_match(ctx, pt, &a->value); p = p->next; a = a->next; }
                 }
+            }
+            /* Own-argument rule for method calls — `xs.add(value: text)` is
+             * the log_overlay shape. Keyed on decl_link rather than on the
+             * `found` flag above, because a method can be bound through
+             * several routes (method table, generic overload search, general
+             * UFCS) and only some of them set it. The receiver occupies the
+             * first parameter, hence skip_receiver. */
+            if (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC) {
+                sema_check_own_args(ctx, module, symbols, &expr->decl_link->as.func_decl,
+                                    expr->as.method_call.args, true);
             }
             break;
         case AST_EXPR_INDEX:
@@ -1984,6 +2042,124 @@ static TypeInfo* sema_array_type_from_call(CompilerContext* ctx, AstModule* modu
     reg->line = expr->line; reg->column = expr->column;
     register_generic_type(ctx, reg);
     return arr;
+}
+
+
+/* ---------------------------------------------------------------------
+ * The own-argument rule. docs/value-aggregates-and-ownership.md §2.2.
+ *
+ * Where a parameter is `own T` and T owns heap storage, the argument must
+ * be an OWNING expression. Passing a borrow or a global hands the callee
+ * something it will free but does not own — the shape behind log_overlay's
+ * double-free and queue #222's dangling global.
+ *
+ * Checkable from types and expression kinds alone: no dataflow, no new IR.
+ * Deliberately does NOT catch use-after-move within a function (§2.3).
+ * ------------------------------------------------------------------- */
+
+/* Does this expression produce a value the callee may take ownership of? */
+static bool expr_is_owning(SymbolTable* symbols, const AstExpr* e) {
+    if (!e) return true;  /* nothing to say; don't invent an error */
+    switch (e->kind) {
+        /* Fresh values: the callee is the only owner. */
+        case AST_EXPR_CALL:
+        case AST_EXPR_METHOD_CALL:
+        case AST_EXPR_INTERP:
+        case AST_EXPR_OBJECT:
+        case AST_EXPR_COLLECTION_LITERAL:
+        case AST_EXPR_LIST:
+        case AST_EXPR_STRING:
+            return true;
+        /* Explicit transfer — the author has said this is intentional. */
+        case AST_EXPR_OWN:
+            return true;
+        /* A local is owning unless it was bound from something that isn't
+         * (§2.4, one hop). A view/mod parameter and a global are marked
+         * non-owning where their symbols are created. */
+        case AST_EXPR_IDENT: {
+            Symbol* sym = symbol_table_lookup(symbols, e->as.ident);
+            if (sym && sym->is_non_owning) return false;
+            return true;
+        }
+        /* Reading a field out of a borrow yields storage owned by whatever
+         * the borrow points at. */
+        case AST_EXPR_MEMBER: {
+            const AstExpr* obj = e->as.member.object;
+            if (obj && obj->kind == AST_EXPR_IDENT) {
+                Symbol* sym = symbol_table_lookup(symbols, obj->as.ident);
+                if (sym && sym->is_non_owning) return false;
+            }
+            return true;
+        }
+        /* Boxing/unboxing is a representation change, not a transfer. */
+        case AST_EXPR_BOX:
+        case AST_EXPR_UNBOX:
+            return expr_is_owning(symbols, e->as.unary.operand);
+        default:
+            return true;
+    }
+}
+
+/* Would handing this expression to `own T` free storage someone else owns?
+ * Only fires when T actually owns heap storage — the rule stays invisible
+ * in numeric code (open question 3, answered as the narrow reading). */
+static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                                const AstFuncDecl* fd, AstCallArg* args, bool skip_receiver) {
+    if (!fd || !module) return;
+    const AstParam* p = fd->params;
+    AstCallArg* a = args;
+    if (skip_receiver && p) p = p->next;
+    while (p && a) {
+        /* `type_needs_cascade_drop`, not `type_owns_heap_storage`: the
+         * latter does not count a bare String (it only reports types whose
+         * FIELDS own heap), and String is the single most common `own`
+         * parameter. The question here is "would the callee free
+         * something?", which is exactly cascade-drop.
+         *
+         * The param type is also consulted through the ARGUMENT's resolved
+         * type, because a generic container's parameter is the
+         * unsubstituted `T` — `List(String).add(value: own T)` is the
+         * log_overlay shape and `T` alone says nothing about heap. The
+         * argument must typecheck against the parameter, so its type is the
+         * same type, just already substituted. */
+        bool owns_heap = false;
+        if (p->type && p->type->is_own) {
+            owns_heap = type_needs_cascade_drop(ctx, module, p->type, 0);
+            if (!owns_heap && a->value && a->value->resolved_type) {
+                AstTypeRef argtr = {0};
+                argtr.resolved_type = a->value->resolved_type;
+                if (argtr.resolved_type->kind == TYPE_REF) argtr.resolved_type = argtr.resolved_type->as.ref.base;
+                owns_heap = type_needs_cascade_drop(ctx, module, &argtr, 0);
+            }
+        }
+        if (p->type && p->type->is_own && owns_heap
+            && !expr_is_owning(symbols, a->value)) {
+            Str pbase = get_base_type_name(p->type);
+            if (a->value && a->value->resolved_type) {
+                TypeInfo* at = a->value->resolved_type;
+                if (at->kind == TYPE_REF) at = at->as.ref.base;
+                /* Report the concrete type; "own T" would not help a reader. */
+                if (pbase.len <= 1 && at->name.len > 0) pbase = at->name;
+            }
+            char buf[320];
+            snprintf(buf, sizeof buf,
+                     "argument for '%.*s' does not own its value, but the parameter is 'own %.*s'. "
+                     "Write '\"{%.*s}\"' (or another expression that produces a fresh value) to give "
+                     "the callee its own copy, or 'own <expr>' to transfer ownership deliberately",
+                     (int)p->name.len, p->name.data,
+                     (int)pbase.len, pbase.data,
+                     (int)(a->value && a->value->kind == AST_EXPR_IDENT ? a->value->as.ident.len : 0),
+                     (a->value && a->value->kind == AST_EXPR_IDENT ? a->value->as.ident.data : ""));
+            /* The merged AstModule remembers one file path, but decls come
+             * from many — use the enclosing decl's origin so the location
+             * points at the file the reader actually has open. Same reason
+             * the rae_ext_rae_buf_set check uses it. */
+            const char* own_file = s_current_decl_origin ? s_current_decl_origin : module->file_path;
+            diag_error(own_file, (int)a->value->line, (int)a->value->column, buf);
+            module->had_error = true;
+        }
+        p = p->next; a = a->next;
+    }
 }
 
 static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstTypeRef* type_ref) {
