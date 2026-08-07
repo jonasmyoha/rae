@@ -74,6 +74,13 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     }
 
     // -- INTRINSICS / SPECIAL CASES --
+    /* `Array(T, cap: N)` in expression position is the zero-initialising
+     * constructor. A compound literal gives every element a defined value
+     * without a memset call. */
+    if (str_eq_cstr(name, "Array") && expr->resolved_type && expr->resolved_type->kind == TYPE_ARRAY) {
+        fprintf(out, "(%s){0}", type_mangle_name(ctx->compiler_ctx->ast_arena, expr->resolved_type).data);
+        return true;
+    }
     if (str_eq_cstr(name, "sizeof")) {
         const AstTypeRef* tr = expr->as.call.generic_args;
         if (!tr && expr->as.call.args) tr = infer_expr_type_ref(ctx, expr->as.call.args->value);

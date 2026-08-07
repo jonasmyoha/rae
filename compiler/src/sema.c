@@ -234,6 +234,7 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
 static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr);
 static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt, TypeInfo* current_return_type);
 static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstTypeRef* type_ref);
+static TypeInfo* sema_array_type_from_call(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr);
 static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr** expr_ptr);
 static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* generic_decl, TypeInfo** args, size_t arg_count, size_t line, size_t column);
 
@@ -277,7 +278,13 @@ AstTypeRef* substitute_type_ref(CompilerContext* ctx, const AstIdentifierPart* g
                 *result = *match;
                 result->next = NULL;
                 result->parts = clone_parts(ctx, match->parts);
-                result->resolved_type = NULL;
+                /* resolved_type is normally cleared so the substituted ref
+                 * re-resolves in its new context. Array(T, cap: N) must keep
+                 * it: its count lives in the TypeInfo, not in the name, so a
+                 * bare "Array" ref cannot be re-resolved and would report a
+                 * malformed-Array error against synthesized, line-0 nodes. */
+                result->resolved_type = (match->resolved_type && match->resolved_type->kind == TYPE_ARRAY)
+                    ? match->resolved_type : NULL;
                 if (type->is_view) result->is_view = true;
                 if (type->is_mod) result->is_mod = true;
                 if (type->is_own) result->is_own = true;
@@ -1396,6 +1403,12 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             if (expr->as.call.callee->kind == AST_EXPR_IDENT) {
                 Str name = expr->as.call.callee->as.ident;
                 if (str_eq_cstr(name, "sizeof")) { expr->is_builtin_sizeof = true; expr->resolved_type = type_get_int(ctx->type_registry); }
+                /* `Array(Float, cap: 16)` doubles as a zero-initialising
+                 * constructor, so the type application and the value share
+                 * one spelling. That is what makes replacing a
+                 * `createList(T, cap: N)` line with an Array a one-token
+                 * edit instead of a rewrite. */
+                else if (str_eq_cstr(name, "Array")) { expr->resolved_type = sema_array_type_from_call(ctx, module, symbols, expr); }
                 else {
                     AstDecl* resolved = resolve_function_overload(ctx, module, symbols, name, expr->as.call.args, expr->as.call.generic_args, expr->line, expr->column);
                     if (resolved) {
@@ -1717,6 +1730,28 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 TypeInfo* t = expr->as.index.target->resolved_type; if (t->kind == TYPE_REF) t = t->as.ref.base;
                 if (t->kind == TYPE_BUFFER) expr->resolved_type = t->as.buffer.base;
                 else if (t->kind == TYPE_STRUCT && str_eq_cstr(t->name, "List") && t->as.structure.generic_count > 0) expr->resolved_type = t->as.structure.generic_args[0];
+                else if (t->kind == TYPE_ARRAY) {
+                    expr->resolved_type = t->as.array.base;
+                    /* Bounds policy (docs/value-aggregates-and-ownership.md §1.7):
+                     * a CONSTANT index is checked at compile time, always, in
+                     * every build. Matrix code is full of constant indices
+                     * (m[5], m[10]) and verifying them costs nothing, so an
+                     * out-of-range constant must never reach runtime. Dynamic
+                     * indices are a separate policy — checked in debug,
+                     * unchecked in release — and are not handled here. */
+                    ConstResult ci = const_eval(symbols, expr->as.index.index);
+                    if (ci.ok && ci.numeric && !ci.is_float &&
+                        (ci.i < 0 || ci.i >= t->as.array.count)) {
+                        char buf[192];
+                        snprintf(buf, sizeof buf,
+                                 "index %lld is out of bounds for Array(cap: %lld); valid indices are 0..%lld",
+                                 (long long)ci.i, (long long)t->as.array.count,
+                                 (long long)(t->as.array.count - 1));
+                        diag_error(module ? module->file_path : NULL,
+                                   (int)expr->line, (int)expr->column, buf);
+                        if (module) module->had_error = true;
+                    }
+                }
             }
             break;
         case AST_EXPR_BOX: sema_analyze_expr(ctx, module, symbols, expr->as.unary.operand); break;
@@ -1753,10 +1788,12 @@ TypeInfo* sema_resolve_type(CompilerContext* ctx, AstTypeRef* type_ref) { return
  *
  * Returns false and reports a diagnostic if the expression is not a
  * compile-time Int. */
-static bool sema_resolve_value_arg(AstModule* module, SymbolTable* symbols,
-                                   AstTypeRef* arg, int64_t* out) {
-    ConstResult r = const_eval(symbols, arg->value_expr);
+static bool sema_check_value_arg(AstModule* module, ConstResult r, Str arg_name,
+                                 size_t line, size_t column, int64_t* out) {
     const char* file = module ? module->file_path : NULL;
+    AstTypeRef arg_stack = {0}; arg_stack.value_name = arg_name;
+    AstTypeRef* arg = &arg_stack;
+    arg->line = line; arg->column = column;
     if (!r.ok || !r.numeric) {
         char buf[256];
         snprintf(buf, sizeof buf,
@@ -1776,8 +1813,23 @@ static bool sema_resolve_value_arg(AstModule* module, SymbolTable* symbols,
         if (module) module->had_error = true;
         return false;
     }
+    if (r.i < 0) {
+        char buf[192];
+        snprintf(buf, sizeof buf,
+                 "generic value argument '%.*s' must not be negative (got %lld)",
+                 (int)arg->value_name.len, arg->value_name.data, (long long)r.i);
+        diag_error(file, (int)arg->line, (int)arg->column, buf);
+        if (module) module->had_error = true;
+        return false;
+    }
     *out = (int64_t)r.i;
     return true;
+}
+
+static bool sema_resolve_value_arg(AstModule* module, SymbolTable* symbols,
+                                   AstTypeRef* arg, int64_t* out) {
+    return sema_check_value_arg(module, const_eval(symbols, arg->value_expr),
+                                arg->value_name, arg->line, arg->column, out);
 }
 
 /* Array(T, cap: N) — the built-in fixed-size by-value aggregate.
@@ -1819,23 +1871,88 @@ static TypeInfo* sema_resolve_array_type(CompilerContext* ctx, AstModule* module
     }
     if (!elem_ref || !cap_ref) {
         diag_error(file, (int)type_ref->line, (int)type_ref->column,
-                   "Array must be written 'Array(T, cap: N)' with an element type and a compile-time cap");
+                   "Array type must be written 'Array(T, cap: N)' with an element type and a compile-time cap");
         if (module) module->had_error = true;
         return NULL;
     }
 
     int64_t count = 0;
     if (!sema_resolve_value_arg(module, symbols, cap_ref, &count)) return NULL;
-    if (count < 0) {
-        char buf[128];
-        snprintf(buf, sizeof buf, "Array cap must not be negative (got %lld)", (long long)count);
-        diag_error(file, (int)cap_ref->line, (int)cap_ref->column, buf);
+
+    TypeInfo* elem = resolve(ctx, module, symbols, elem_ref);
+    return type_get_array(ctx->type_registry, elem, count);
+}
+
+/* Resolve `Array(T, cap: N)` written in EXPRESSION position — the
+ * zero-initialising constructor form. The parser sees an ordinary call, so
+ * the element type arrives as an identifier expression rather than a type
+ * ref; rebuild the type ref and resolve it through the normal path so the
+ * constructor and the type annotation can never disagree.
+ *
+ * Returns NULL (with a diagnostic) if the call is not a well-formed Array. */
+static TypeInfo* sema_array_type_from_call(CompilerContext* ctx, AstModule* module,
+                                           SymbolTable* symbols, AstExpr* expr) {
+    const char* file = module ? module->file_path : NULL;
+    AstCallArg* elem_arg = NULL;
+    AstCallArg* cap_arg = NULL;
+    for (AstCallArg* a = expr->as.call.args; a; a = a->next) {
+        if (a->name.len > 0) {
+            if (!str_eq_cstr(a->name, "cap")) {
+                char buf[256];
+                snprintf(buf, sizeof buf, "Array takes a 'cap:' value argument; got '%.*s'",
+                         (int)a->name.len, a->name.data);
+                diag_error(file, (int)expr->line, (int)expr->column, buf);
+                if (module) module->had_error = true;
+                return NULL;
+            }
+            cap_arg = a;
+        } else if (!elem_arg) {
+            elem_arg = a;
+        }
+    }
+    if (!elem_arg || !cap_arg) {
+        diag_error(file, (int)expr->line, (int)expr->column,
+                   "Array constructor must be written 'Array(T, cap: N)' with an element type and a compile-time cap");
         if (module) module->had_error = true;
         return NULL;
     }
 
-    TypeInfo* elem = resolve(ctx, module, symbols, elem_ref);
-    return type_get_array(ctx->type_registry, elem, count);
+    int64_t count = 0;
+    if (!sema_check_value_arg(module, const_eval(symbols, cap_arg->value),
+                              cap_arg->name, expr->line, expr->column, &count)) return NULL;
+
+    TypeInfo* elem = NULL;
+    if (elem_arg->value->kind == AST_EXPR_IDENT) {
+        AstTypeRef* tr = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+        memset(tr, 0, sizeof(*tr));
+        AstIdentifierPart* part = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart));
+        memset(part, 0, sizeof(*part));
+        part->text = elem_arg->value->as.ident;
+        tr->parts = part;
+        tr->line = expr->line; tr->column = expr->column;
+        elem = sema_resolve_type_internal(ctx, module, symbols, tr);
+    } else if (elem_arg->value->kind == AST_EXPR_CALL &&
+               elem_arg->value->as.call.callee->kind == AST_EXPR_IDENT &&
+               str_eq_cstr(elem_arg->value->as.call.callee->as.ident, "Array")) {
+        elem = sema_array_type_from_call(ctx, module, symbols, elem_arg->value);
+    }
+    if (!elem || elem->kind == TYPE_VOID) {
+        diag_error(file, (int)expr->line, (int)expr->column,
+                   "Array's first argument must name an element type");
+        if (module) module->had_error = true;
+        return NULL;
+    }
+    TypeInfo* arr = type_get_array(ctx->type_registry, elem, count);
+    /* Register for typedef emission. `let a = Array(Float, cap: 4)` has no
+     * type annotation anywhere, so without this the struct would be used and
+     * never declared. Registration is keyed on an AstTypeRef, so synthesize
+     * one carrying the resolved type. */
+    AstTypeRef* reg = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+    memset(reg, 0, sizeof(*reg));
+    reg->resolved_type = arr;
+    reg->line = expr->line; reg->column = expr->column;
+    register_generic_type(ctx, reg);
+    return arr;
 }
 
 static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstTypeRef* type_ref) {
@@ -1862,6 +1979,7 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
         else if (str_eq_cstr(name, "Array")) {
             base = sema_resolve_array_type(ctx, module, symbols, type_ref, sema_resolve_type_internal);
             if (!base) base = type_get_void(ctx->type_registry);
+            else register_generic_type(ctx, type_ref);
         }
         else if (str_eq_cstr(name, "Task")) {
             TypeInfo* arg = type_get_void(ctx->type_registry);
