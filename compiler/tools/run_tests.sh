@@ -129,10 +129,16 @@ for TARGET in "${TARGETS[@]}"; do
             306_*|318_*|332_*|334_*|338_*|339_*|343_*|382_*|385_*)
                 RUN_THIS=0 ;;
         esac
-        # C backend only handles 'run' or 'build' commands in this loop
+        # C backend only handles 'run' or 'build' commands in this loop.
+        #
+        # lex/parse/format/pack are NOT backend commands — they exercise the
+        # frontend and are target-independent. They used to run under the live
+        # target; when live was frozen they stopped running anywhere, silently
+        # dropping 30+ cases. With `compiled` the only target, running them
+        # here runs them exactly once. (A crash in `rae format` on any global
+        # binding sat undetected behind this gap.)
         case "${CMD_ARGS[0]}" in
             hot-reload) RUN_THIS=0 ;;
-            lex|parse|format|pack) RUN_THIS=0 ;;
         esac
     fi
     # Live mode does not yet implement `copy T` parameter deep-copy
