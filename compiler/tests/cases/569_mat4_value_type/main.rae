@@ -1,0 +1,61 @@
+# Mat4 as an allocation-free value type (#354). These were List(Float)
+# until the port, so every matrix was a heap allocation and `modelMatrix`
+# cost eight alloc/free pairs per object per frame.
+#
+# The values checked here are the ones a wrong port would quietly change:
+# the perspective terms, the look-at basis, and composition order.
+import core
+import math3d
+open math3d
+
+func main() {
+  let id: Mat4 = mat4Identity()
+  log("id={id.m[0]} {id.m[5]} {id.m[10]} {id.m[15]} off={id.m[1]}")
+
+  # mat4Mul(a, b) applies b FIRST, then a. T*S must scale then translate,
+  # leaving the translation column untouched by the scale.
+  let t: Mat4 = mat4Translate(x: 1.0, y: 2.0, z: 3.0)
+  let s: Mat4 = mat4Scale(s: 2.0)
+  let ts: Mat4 = mat4Mul(a: t, b: s)
+  log("TS diag={ts.m[0]} {ts.m[5]} {ts.m[10]} trans={ts.m[12]} {ts.m[13]} {ts.m[14]}")
+
+  # Identity is a unit on both sides.
+  let ti: Mat4 = mat4Mul(a: t, b: id)
+  let it: Mat4 = mat4Mul(a: id, b: t)
+  log("T*I={ti.m[12]} {ti.m[13]} {ti.m[14]} I*T={it.m[12]} {it.m[13]} {it.m[14]}")
+
+  # Right-handed perspective, WebGPU depth range [0,1].
+  let p: Mat4 = mat4Perspective(fovYDeg: 60.0, aspect: 1.5, near: 0.1, far: 100.0)
+  log("persp={p.m[0]} {p.m[5]} {p.m[10]} {p.m[11]} {p.m[14]}")
+
+  # Camera at -Y looking at the origin, Z up: right is +X, and the
+  # translation row is -(basis . eye).
+  let v: Mat4 = mat4LookAt(eyeX: 0.0, eyeY: 0.0 - 5.0, eyeZ: 0.0, atX: 0.0, atY: 0.0, atZ: 0.0, upX: 0.0, upY: 0.0, upZ: 1.0)
+  log("look={v.m[0]} {v.m[5]} {v.m[10]} {v.m[14]}")
+
+  # Mat3x4 drops the implied (0,0,0,1) row and restores it exactly for an
+  # affine matrix.
+  let packed: Mat3x4 = mat4ToMat3x4(a: ts)
+  let back: Mat4 = mat3x4ToMat4(a: packed)
+  log("roundtrip={back.m[0]} {back.m[5]} {back.m[10]} {back.m[12]} {back.m[13]} {back.m[14]} {back.m[15]}")
+
+  # Value semantics: a Mat4 assignment copies, so mutating the copy must
+  # leave the source alone. If Mat4 aliased, both would read 42.
+  var a: Mat4 = mat4Identity()
+  var b: Mat4 = a
+  b.m[0] = 42.0
+  log("copy a0={a.m[0]} b0={b.m[0]}")
+
+  # A transform-heavy loop: allocation-free by construction, and a
+  # regression that reintroduced per-matrix allocation would show up as a
+  # leak or a slowdown here.
+  var i: Int = 0
+  var acc: Float = 0.0
+  loop i < 20000 {
+    let r: Mat4 = mat4RotateZ(angle: 0.001 * (i as Float))
+    let m: Mat4 = mat4Mul(a: t, b: r)
+    acc = acc + m.m[0]
+    i = i + 1
+  }
+  log("loop done i={i} accFinite={acc > 0.0 - 1000000.0}")
+}
