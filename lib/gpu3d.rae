@@ -52,7 +52,7 @@ open math3d
 # ----- raw C ABI (implementation detail; prefer the typed API below) ---
 func meshCreate(verts: view Buffer(Float), vertCount: Int, indices: view Buffer(Int), indexCount: Int) extern ret Int
 func begin(frame: view Buffer(Float), count: Int) extern
-func draw(mesh: Int, model: view Buffer(Float), prevModel: view Buffer(Float), r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
+func draw(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
 func drawMetaballs(packedBalls: view Buffer(Float), count: Int, packedColors: view Buffer(Float), smoothing: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
 func end() extern
 func submit() extern
@@ -92,37 +92,7 @@ func setViewProj(frame: mod Frame3d, m: view Mat4) {
   }
 }
 
-# Scratch storage for the extern boundary.
-#
-# gpu3d's C entry points take a raw `const float*`. A Mat4 is a value with
-# no Buffer to hand over, so these module-level lists are filled and passed
-# instead. They are allocated ONCE for the process, not per draw: the point
-# of #354 is that building a matrix no longer allocates, and copying 16
-# floats into a preallocated buffer is not a meaningful cost next to a draw
-# call. Two are needed because `draw` takes the current AND previous model
-# matrix in one call.
-#
-# Retyping the externs to take `view Mat4` would remove even the copy, but
-# the runtime's prototype lives in a separate translation unit and would
-# then disagree with the generated one — worth doing deliberately, not as a
-# side effect of this port.
-var g_modelScratch: List(Float) = createList(Float, cap: 16)
-var g_prevModelScratch: List(Float) = createList(Float, cap: 16)
 
-func matToScratch(m: view Mat4, dst: mod List(Float)) {
-  if dst.length < 16 {
-    var i: Int = 0
-    loop i < 16 {
-      dst.add(value: 0.0)
-      i = i + 1
-    }
-  }
-  var j: Int = 0
-  loop j < 16 {
-    dst.set(index: j, value: m.m[j])
-    j = j + 1
-  }
-}
 
 func setVec3At(frame: mod Frame3d, base: view Int, v: view Vec3) {
   frame.data.set(index: base, value: v.x)
@@ -183,10 +153,8 @@ func drawInstance(mesh: view MeshHandle, transform: view Transform3d, prevTransf
   }
   let model: Mat4 = modelMatrix(t: transform)
   let prevModel: Mat4 = modelMatrix(t: prevTransform)
-  matToScratch(m: model, dst: g_modelScratch)
-  matToScratch(m: prevModel, dst: g_prevModelScratch)
   draw(
-    mesh: mesh.id, model: g_modelScratch.data, prevModel: g_prevModelScratch.data,
+    mesh: mesh.id, model: model, prevModel: prevModel,
     r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
     metallic: material.metallic, roughness: material.roughness,
     emR: material.emission.x, emG: material.emission.y, emB: material.emission.z
