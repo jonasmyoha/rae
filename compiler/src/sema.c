@@ -1098,6 +1098,24 @@ static void sema_fold_const(CompilerContext* ctx, AstModule* module, SymbolTable
     }
 }
 
+/* Is this struct type an instantiation of the named generic?
+ *
+ * A specialized `List(String)` does NOT carry the name "List", so comparing
+ * `t->name` silently never matches — which is why the List branch in the
+ * index handler below was dead code for as long as it existed. Ask the
+ * generic template for its name instead. */
+static bool sema_struct_template_is(const TypeInfo* t, const char* name) {
+    if (!t || t->kind != TYPE_STRUCT) return false;
+    Str tn = t->name;
+    if (t->as.structure.decl && t->as.structure.decl->kind == AST_DECL_TYPE) {
+        AstDecl* tmpl = t->as.structure.decl->as.type_decl.generic_template;
+        tn = (tmpl && tmpl->kind == AST_DECL_TYPE)
+             ? tmpl->as.type_decl.name
+             : t->as.structure.decl->as.type_decl.name;
+    }
+    return str_eq_cstr(tn, name);
+}
+
 static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt, TypeInfo* current_return_type) {
     if (!stmt) return;
     switch (stmt->kind) {
@@ -1817,7 +1835,28 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             if (expr->as.index.target->resolved_type) {
                 TypeInfo* t = expr->as.index.target->resolved_type; if (t->kind == TYPE_REF) t = t->as.ref.base;
                 if (t->kind == TYPE_BUFFER) expr->resolved_type = t->as.buffer.base;
-                else if (t->kind == TYPE_STRUCT && str_eq_cstr(t->name, "List") && t->as.structure.generic_count > 0) expr->resolved_type = t->as.structure.generic_args[0];
+                else if (t->kind == TYPE_STRUCT && sema_struct_template_is(t, "List")) {
+                    /* Bracket indexing is NOT part of List's API.
+                     *
+                     * `[]` belongs to Array(T, cap: N) and to the internal
+                     * Buffer, where the length is part of the type and a
+                     * constant index is checked at compile time. A List's
+                     * length is a runtime value, so brackets could never
+                     * offer that — and worse, they cannot express which
+                     * bounds contract is wanted: `get` returns `opt T`,
+                     * `at` returns `T` and asserts. `xs[i]` silently picked
+                     * the unchecked one, so the spelling that LOOKS like the
+                     * simple safe primitive was the sharp one.
+                     *
+                     * No Rae code ever used it; it just parsed. */
+                    diag_error(s_current_decl_origin ? s_current_decl_origin : (module ? module->file_path : NULL),
+                               (int)expr->line, (int)expr->column,
+                               "a List is not indexed with '[]' — write '.get(index: i)' for a bounds-checked 'opt T', "
+                               "or '.at(index: i)' to assert the index is in range. "
+                               "'[]' is for Array(T, cap: N), whose length is part of its type");
+                    if (module) module->had_error = true;
+                    if (t->as.structure.generic_count > 0) expr->resolved_type = t->as.structure.generic_args[0];
+                }
                 else if (t->kind == TYPE_ARRAY) {
                     expr->resolved_type = t->as.array.base;
                     /* Bounds policy (docs/value-aggregates-and-ownership.md §1.7):
