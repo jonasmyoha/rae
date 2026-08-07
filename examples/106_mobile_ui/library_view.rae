@@ -87,9 +87,7 @@ func collectLibraryCoverKeys(albums: view List(Album), library: view List(String
 func buildLibraryCoverTile(world: mod UiWorld, key: view String, size: view Float, rounded: view Bool) pub ret EntityId {
   let tile: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: tile, w: size, h: size)
-  # `let x = someViewParam` ALIASES, it does not copy — the interpolation
-  # is what actually produces an owned String for the `own` parameter.
-  let copiedForHero: String = "{key}"
+  let copiedForHero: String = key
   setHeroWidget(world: world, entity: tile, key: copiedForHero)
   let albumOpen: String = "album.open"
   setOnClick(world: world, entity: tile, actionId: albumOpen)
