@@ -9,6 +9,7 @@
 #include "c_backend_internal.h"
 #include "diag.h"
 #include "mangler.h"
+#include "ownership.h"
 #include "sema.h"
 #include "str.h"
 
@@ -644,6 +645,64 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         const AstCallArg* a = expr->as.call.args; const AstParam* p = fd->params;
         int arg_index = 0;
         while (a) {
+            /* Own-argument rule, backend half (#363).
+             *
+             * The sema half (#353) covers direct calls, but sema never
+             * binds generic CONTAINER method calls to a decl — `decl_link`
+             * is NULL for `xs.add(value: text)`, the same limitation that
+             * forced #349's fix down here. This is the one place the callee
+             * is actually resolved, so the log_overlay shape is caught here
+             * or nowhere.
+             *
+             * Narrow on purpose: only a bare `view`/`mod` argument handed to
+             * an `own` parameter. Codegen genuinely does not copy for `own`
+             * (copy_arg_kind requires is_copy and excludes is_own), so the
+             * callee frees a buffer the caller still owns. Bindings are NOT
+             * suspect — `=` deep-copies (ident, field and element alike), so
+             * a local always owns what it holds. */
+            if (p && p->type && p->type->is_own && a->value
+                && a->value->kind != AST_EXPR_OWN) {
+                /* `own x` at the call site is the escape hatch, and a better
+                 * one than a block would be: it is per-argument, it states
+                 * WHAT is being asserted ("I am transferring this
+                 * deliberately") rather than a blanket "trust me", and it
+                 * already exists in the language. Code that genuinely hands
+                 * a borrow onward says so, in the one place a reviewer
+                 * looks. */
+                const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
+                bool arg_is_borrow = arg_tr && (arg_tr->is_view || arg_tr->is_mod);
+                /* Ask whether the POINTEE owns heap: type_needs_cascade_drop
+                 * answers false for any view/mod ref by design ("a borrow
+                 * does not own"), which is exactly the question's premise
+                 * here, not its answer. */
+                AstTypeRef owned_form = {0};
+                if (arg_is_borrow) { owned_form = *arg_tr; owned_form.is_view = false; owned_form.is_mod = false; owned_form.next = NULL; }
+                if (arg_is_borrow
+                    && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, &owned_form, 0)) {
+                    Str ab = get_base_type_name(arg_tr);
+                    char obuf[320];
+                    snprintf(obuf, sizeof obuf,
+                             "argument for '%.*s' is a borrowed '%.*s', but the parameter is 'own' — "
+                             "the callee would free storage the caller still owns. "
+                             "Write '\"{...}\"' to pass a fresh copy, or take the parameter as 'view'/'copy'",
+                             (int)p->name.len, p->name.data, (int)ab.len, ab.data);
+                    /* Report against the ENCLOSING function's origin file.
+                     * The merged module remembers one path while decls come
+                     * from many, and specialization clones carry the
+                     * template's line numbers — so without this the location
+                     * can point at a line the named file does not have.
+                     *
+                     * NO stdlib exemption. Trusting lib/ because it is lib/
+                     * would be invisible at the call site, unreviewable, and
+                     * weakest exactly where the consequences are largest,
+                     * since everything depends on it. Stdlib says `own x`
+                     * like anyone else. */
+                    const char* site = ctx->func_decl ? ctx->func_decl->origin_file : NULL;
+                    diag_error(site ? site : (ctx->module ? ctx->module->file_path : NULL),
+                               (int)a->value->line, (int)a->value->column, obuf);
+                    if (ctx->module) ((AstModule*)ctx->module)->had_error = true;
+                }
+            }
             // Stage 3 move tracking (continued): a bare local ident passed
             // as a plain-T parameter (i.e. neither `view T` nor `mod T`) is
             // moved into the callee. Per the language design (plain T is
