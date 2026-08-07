@@ -140,6 +140,23 @@ static int64_t g_mem_pool_flush_freed;
 
 static int g_mem_stats_enabled = 0;
 
+/* ---- Always-on cumulative allocation counter (#356) ----
+ *
+ * The per-site machinery above is opt-in because the side hash table is
+ * expensive. That makes it the wrong tool for an ACCEPTANCE CRITERION: a
+ * test that asserts "this path allocates nothing" must fail loudly on a
+ * regression, and one gated behind an env var silently reports zeros when
+ * the env var is absent — passing for the wrong reason.
+ *
+ * This counter is a single unconditional increment per allocation, so it
+ * is always correct and costs nothing measurable. It counts CUMULATIVE
+ * allocations, not outstanding ones: a path that allocates a scratch list
+ * per object and frees it again has still allocated per object, which is
+ * exactly the regression the deferred renderer's per-object path must not
+ * have. `rae_ext_rae_mem_stats_outstanding` cannot see that; this can.
+ */
+static int64_t g_mem_alloc_total_n;
+
 /* Side hash table: ptr → site. Allocated only when mem-stats is on.
  * 4M slots sized for ~2M outstanding allocations (peak observed in
  * the 20K mobile-UI stress is ~1.2M). Two parallel arrays keep the
@@ -243,6 +260,10 @@ static uint8_t rae_mem_hash_remove(void* ptr) {
 }
 
 static inline void rae_mem_str_tag(void* ptr, int64_t bytes, uint8_t site) {
+  /* Counted BEFORE the opt-in gate: see g_mem_alloc_total_n. Every String
+   * body allocation in the runtime funnels through here, so this is a
+   * complete count of Rae's string heap traffic. */
+  g_mem_alloc_total_n++;
   if (!g_mem_stats_enabled) return;
   g_mem_site_alloc_n[site]++;
   g_mem_site_alloc_b[site] += bytes;
@@ -339,6 +360,17 @@ int64_t rae_ext_rae_mem_stats_outstanding(void) {
     total += g_mem_site_alloc_n[i] - g_mem_site_free_n[i];
   }
   return total;
+}
+
+/* Total heap allocations made through Rae semantics since process start:
+ * String bodies plus List/Buffer storage (allocs and resizes both count —
+ * a growing list reallocates, and that is an allocation).
+ *
+ * Unlike the *_outstanding counters this is ALWAYS live, with no env var
+ * to forget, which is what lets it back a hard "allocates nothing" test.
+ * Sample it either side of the work under test and assert the delta. */
+int64_t rae_ext_rae_mem_alloc_total(void) {
+  return g_mem_alloc_total_n + g_mem_buf_alloc_n;
 }
 
 int64_t rae_ext_rae_mem_stats_buf_outstanding(void) {
