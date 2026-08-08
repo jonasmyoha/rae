@@ -69,13 +69,15 @@ func createDeferredRenderer() pub ret DeferredRenderer {
   # sceneColor is External: the target gpu2d owns and presents.
   let colorId: Int = addResource(g: g, name: "sceneColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeExternal)
 
-  # The G-buffer. Three attachments is the minimum that supports a real
-  # BRDF: albedo, a world-space normal, and packed metallic/roughness.
-  # Splitting them (rather than one fat target) keeps each format as narrow
-  # as it can be, which is bandwidth the deferred design exists to save.
-  let albedoId: Int = addResource(g: g, name: "gAlbedo", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
-  let normalId: Int = addResource(g: g, name: "gNormal", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
-  let materialId: Int = addResource(g: g, name: "gMaterial", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  # The G-buffer (#366). Three attachments plus depth, 16 bytes/pixel, with
+  # attributes packed ACROSS the targets rather than one per target: A holds
+  # the octahedral normal and a shading mode, B albedo and roughness, C
+  # motion, metallic and occlusion-or-emissive. Named A/B/C rather than by
+  # content precisely because no target holds one thing — a name like
+  # "gNormal" would be a lie about where roughness lives.
+  let albedoId: Int = addResource(g: g, name: "gbufferA", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let normalId: Int = addResource(g: g, name: "gbufferB", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let materialId: Int = addResource(g: g, name: "gbufferC", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
   let depthId: Int = addResource(g: g, name: "gDepth", kind: resDepth, format: 0, sizing: sizeFull, lifetime: lifeTransient)
 
   # Hi-Z / coarse-trace source. Half-res because the top mip is gDepth

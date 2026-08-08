@@ -170,6 +170,33 @@ func mat4RotateZ(angle: view Float) pub ret Mat4 {
 }
 
 # Right-handed perspective, WebGPU depth range [0,1].
+# Reverse-Z projection: near maps to 1, far maps to 0 — the opposite of
+# mat4Perspective above.
+#
+# WHY. A float depth buffer has most of its precision near 0, and standard
+# Z puts the near plane there, where the projection is already densest.
+# The two effects fight and most of the buffer's precision is wasted on
+# geometry a metre from the camera. Reverse-Z lines the float's dense
+# region up with the far plane, where the projection is sparse, and the
+# two cancel almost exactly — the classic result is that depth precision
+# becomes nearly uniform for free.
+#
+# This is a SEPARATE function rather than a change to mat4Perspective on
+# purpose. The forward frame and every pass reading its depth assume the
+# standard convention; flipping it globally would silently invert every
+# depth comparison in renderer3d. A caller opts in, and its pipeline must
+# then clear depth to 0.0 and compare with Greater.
+func mat4PerspectiveReverseZ(fovYDeg: view Float, aspect: view Float, near: view Float, far: view Float) pub ret Mat4 {
+  var m: Mat4 = mat4Zero()
+  let f: Float = 1.0 / math.tan(x: fovYDeg * 0.008726646259971648)  # deg->rad, /2
+  m.m[0] = f / aspect
+  m.m[5] = f
+  m.m[10] = near / (far - near)
+  m.m[11] = 0.0 - 1.0
+  m.m[14] = far * near / (far - near)
+  ret m
+}
+
 func mat4Perspective(fovYDeg: view Float, aspect: view Float, near: view Float, far: view Float) pub ret Mat4 {
   var m: Mat4 = mat4Zero()
   let f: Float = 1.0 / math.tan(x: fovYDeg * 0.008726646259971648)  # deg->rad, /2
