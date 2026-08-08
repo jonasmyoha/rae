@@ -12,14 +12,21 @@
 # module that shaded here would be the forward renderer wearing a new
 # name.
 #
-# WHY THE G-BUFFER IS EXACTLY THIS WIDE. Every channel is something the
-# BRDF cannot be evaluated without: albedo is the reflectance, the normal
-# is the surface orientation, metallic selects the F0/diffuse split and
-# roughness drives the specular lobe. World position is NOT stored — it
-# reconstructs from depth, which has to be written anyway, so storing it
-# would be three redundant channels. Emissive is absent on purpose: it is
-# an additive term nothing reads back, not a BRDF input, so it belongs
-# with the lighting pass rather than in a buffer sized for BRDF inputs.
+# WHY THE G-BUFFER IS PACKED THE WAY IT IS (#366). Three targets plus
+# depth, 16 bytes per pixel, with channels packed ACROSS targets rather
+# than grouped by meaning — bandwidth is the point, and an unused channel
+# is bandwidth spent on nothing:
+#
+#   A  oct(normal).xy at 10 bits, reserved, 2-bit shading mode
+#   B  albedo.rgb, roughness
+#   C  motion.xy, metallic, occlusion-or-emissive
+#
+# Octahedral normals are what make it fit: a unit vector has two degrees of
+# freedom, so three channels waste one. The 10-bit depth is not incidental
+# — 8-bit octahedral bands visibly on smooth surfaces.
+#
+# World position is still not stored: it reconstructs from depth, which is
+# written anyway, so storing it would be three redundant channels.
 #
 # ALLOCATION-FREE PER OBJECT (#356's acceptance criterion). Transforms
 # flow through `Mat4` from lib/math3d.rae — 16 Floats by value, an
@@ -40,7 +47,7 @@ open math3d
 
 # ----- raw C ABI (implementation detail; prefer the typed API below) ---
 func begin(viewProj: view Mat4, clearR: Float, clearG: Float, clearB: Float) extern
-func draw(mesh: Int, model: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float) extern
+func draw(mesh: Int, model: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emissive: Float) extern
 func end() extern
 func drawCount() extern ret Int
 func debugView(mode: Int, zNear: Float, zFar: Float) extern
@@ -59,7 +66,7 @@ func deferredShutdown() extern
 const viewLit: Int = 0       # the composed/lit image (once lighting lands)
 const viewAlbedo: Int = 1
 const viewNormal: Int = 2
-const viewMaterial: Int = 3  # r = metallic, g = roughness
+const viewMaterial: Int = 3  # r = metallic, g = roughness, b = occlusion/emissive
 const viewDepth: Int = 4     # linearised for display
 
 # Start the geometry pass. `aspect` is width/height of the target.
@@ -76,7 +83,10 @@ func beginPass(camera: view Camera3d, light: view Light3d, aspect: view Float) p
     atX: camera.target.x, atY: camera.target.y, atZ: camera.target.z,
     upX: worldUp.x, upY: worldUp.y, upZ: worldUp.z
   )
-  let proj: Mat4 = mat4Perspective(fovYDeg: camera.fovYDeg, aspect: aspect, near: camera.nearZ, far: camera.farZ)
+  # Reverse-Z (#367): near maps to 1, far to 0, which is what the geometry
+  # pass's Greater depth test and 0.0 clear expect. The forward frame keeps
+  # mat4Perspective — the two conventions must not be mixed.
+  let proj: Mat4 = mat4PerspectiveReverseZ(fovYDeg: camera.fovYDeg, aspect: aspect, near: camera.nearZ, far: camera.farZ)
   let viewProj: Mat4 = mat4Mul(a: proj, b: viewM)
   begin(viewProj: viewProj, clearR: light.clearColor.x, clearG: light.clearColor.y, clearB: light.clearColor.z)
 }
@@ -105,10 +115,21 @@ func drawInstance(mesh: view MeshHandle, transform: view Transform3d, material: 
     ret
   }
   let model: Mat4 = modelMatrixOf(t: transform)
+  # Emissive is ONE scalar, not a colour: an emitter's base colour is the
+  # colour it emits, so the G-buffer stores intensity and lighting tints it
+  # by albedo. The brightest component is the intensity — using luminance
+  # would dim a saturated single-channel emitter to near nothing.
+  var emissive: Float = material.emission.x
+  if material.emission.y > emissive {
+    emissive = material.emission.y
+  }
+  if material.emission.z > emissive {
+    emissive = material.emission.z
+  }
   draw(
     mesh: mesh.id, model: model,
     r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
-    metallic: material.metallic, roughness: material.roughness
+    metallic: material.metallic, roughness: material.roughness, emissive: emissive
   )
 }
 

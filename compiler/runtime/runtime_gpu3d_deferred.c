@@ -6,11 +6,14 @@
  * runtime_gpu3d.c is already the cautionary tale for letting a renderer
  * family accumulate in one file (queue #364).
  *
- * DEPTH PYRAMID. A mip chain of depth reduced with MIN, not average. The
- * consumer is occlusion: "is anything in this screen region closer than my
- * bounding box" is answered by the NEAREST depth in the region, and an
+ * DEPTH PYRAMID. A mip chain of depth reduced to the NEAREST value, not an
+ * average. The consumer is occlusion: "is anything in this screen region
+ * closer than my bounding box" is answered by the nearest depth, and an
  * averaged pyramid would report a plausible-looking value that is
  * conservative in neither direction — it would cull visible geometry.
+ * Under reverse-Z (#367) nearest is the MAXIMUM, so the reduction is max;
+ * it was min before the depth convention flipped, and a pyramid reducing
+ * the wrong way is invisible until something culls with it.
  * Built with fragment passes rather than compute for the same reason the
  * SSAO pass is: they run everywhere WebGPU runs, with no workgroup-size
  * guess. Hi-Z culling and a deferred SSAO are the intended readers; the
@@ -76,14 +79,16 @@ GB_FULLSCREEN_VS
 "fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) f32 {\n"
 "  let px = vec2<i32>(pos.xy) * 2;\n"
 "  let dim = vec2<i32>(textureDimensions(srcTex, 0)) - vec2<i32>(1);\n"
-/* Clamp rather than skip: on an odd-sized level the 2x2 footprint runs off
- * the edge, and sampling out of bounds returns zero — which as a MINIMUM
- * would claim the nearest possible occluder along the whole border. */
+/* Clamp rather than skip: on an odd-sized level the 2x2 footprint runs
+ * off the edge, and sampling out of bounds returns zero — which under
+ * reverse-Z is the FAR plane, so an unclamped border would report nothing
+ * occluding rather than something wrongly close. Clamping keeps the border
+ * honest either way. */
 "  let a = textureLoad(srcTex, min(px,                  dim), 0);\n"
 "  let b = textureLoad(srcTex, min(px + vec2<i32>(1,0), dim), 0);\n"
 "  let c = textureLoad(srcTex, min(px + vec2<i32>(0,1), dim), 0);\n"
 "  let d = textureLoad(srcTex, min(px + vec2<i32>(1,1), dim), 0);\n"
-"  return min(min(a, b), min(c, d));\n"
+"  return max(max(a, b), max(c, d));\n"
 "}\n";
 
 /* Mip n from mip n-1. Same reduction, non-depth source format. */
@@ -98,7 +103,7 @@ GB_FULLSCREEN_VS
 "  let b = textureLoad(srcTex, min(px + vec2<i32>(1,0), dim), 0).r;\n"
 "  let c = textureLoad(srcTex, min(px + vec2<i32>(0,1), dim), 0).r;\n"
 "  let d = textureLoad(srcTex, min(px + vec2<i32>(1,1), dim), 0).r;\n"
-"  return min(min(a, b), min(c, d));\n"
+"  return max(max(a, b), max(c, d));\n"
 "}\n";
 
 /* Deferred lighting. Reads the G-buffer, writes linear HDR radiance.
@@ -118,10 +123,11 @@ static const char* GB_LIGHT_WGSL =
 "  clearColor: vec4<f32>,\n"
 "};\n"
 "@group(0) @binding(0) var<uniform> L: LightU;\n"
-"@group(0) @binding(1) var albedoTex: texture_2d<f32>;\n"
-"@group(0) @binding(2) var normalTex: texture_2d<f32>;\n"
-"@group(0) @binding(3) var materialTex: texture_2d<f32>;\n"
+"@group(0) @binding(1) var gbaTex: texture_2d<f32>;\n"
+"@group(0) @binding(2) var gbbTex: texture_2d<f32>;\n"
+"@group(0) @binding(3) var gbcTex: texture_2d<f32>;\n"
 "@group(0) @binding(4) var depthTex: texture_depth_2d;\n"
+GB_OCT_WGSL
 GB_FULLSCREEN_VS
 "const PI: f32 = 3.14159265;\n"
 "fn dGGX(NoH: f32, rough: f32) -> f32 {\n"
@@ -143,27 +149,47 @@ GB_FULLSCREEN_VS
 "fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {\n"
 "  let px = vec2<i32>(pos.xy);\n"
 "  let depth = textureLoad(depthTex, px, 0);\n"
-/* Depth still at the far plane means the geometry pass wrote nothing here.
- * Reconstructing a position from it would place the pixel at infinity and
- * light it as if it were a surface; the background is not a surface, so it
- * passes through as the clear colour. */
-"  if (depth >= 1.0) {\n"
+/* REVERSE-Z (#367): the far plane is 0, not 1. Depth still at 0 means the
+ * geometry pass wrote nothing here. Reconstructing a position from it
+ * would place the pixel at infinity and light it as if it were a surface;
+ * the background is not a surface, so it passes through as the clear
+ * colour. Getting this comparison the wrong way round after the reverse-Z
+ * switch would light the sky and discard the scene. */
+"  if (depth <= 0.0) {\n"
 "    return vec4<f32>(L.clearColor.rgb, 1.0);\n"
 "  }\n"
-"  let dim = vec2<f32>(textureDimensions(albedoTex, 0));\n"
+"  let gbb = textureLoad(gbbTex, px, 0);\n"
+"  let albedo = gbb.rgb;\n"
+"  let gba = textureLoad(gbaTex, px, 0);\n"
+"  let mode = gba.w;\n"
+/* Unlit surfaces skip every calculation below and emit albedo directly.
+ * This early-out is a real part of why the mode field earns its 2 bits. */
+"  if (mode > 0.5) {\n"
+"    return vec4<f32>(albedo, 1.0);\n"
+"  }\n"
+"  let dim = vec2<f32>(textureDimensions(gbbTex, 0));\n"
 "  let uv = (vec2<f32>(px) + vec2<f32>(0.5)) / dim;\n"
 /* WebGPU clip space: xy in [-1,1] with +y UP, z in [0,1]. UV runs +y DOWN,
  * hence the flip. Getting this backwards mirrors the lighting vertically,
  * which reads as "the sun is in the wrong place" rather than as a
- * reconstruction bug. */
+ * reconstruction bug. The depth value goes in as-is: it is inverted by the
+ * projection matrix, and invViewProj is that same matrix's inverse. */
 "  let ndc = vec4<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0);\n"
 "  let wpos4 = L.invViewProj * ndc;\n"
 "  let wpos = wpos4.xyz / wpos4.w;\n"
-"  let albedo = textureLoad(albedoTex, px, 0).rgb;\n"
-"  let N = normalize(textureLoad(normalTex, px, 0).xyz);\n"
-"  let mat = textureLoad(materialTex, px, 0);\n"
-"  let metallic = clamp(mat.r, 0.0, 1.0);\n"
-"  let rough = clamp(mat.g, 0.045, 1.0);\n"
+"  let N = octDecode(gba.xy);\n"
+"  let gbc = textureLoad(gbcTex, px, 0);\n"
+"  let metallic = clamp(gbc.z, 0.0, 1.0);\n"
+"  let rough = clamp(gbb.a, 0.045, 1.0);\n"
+/* C.w is occlusion for a lit surface and log-encoded emissive for an
+ * emitter — the mode decides which, so an emitter is never also occluded
+ * and an occluded surface never also glows. */
+"  var ao = gbc.w;\n"
+"  var emissive = 0.0;\n"
+"  if (mode > 0.0) {\n"
+"    emissive = exp(ao * 6.91) - 1.0;\n"
+"    ao = 1.0;\n"
+"  }\n"
 "  let V = normalize(L.camPos.xyz - wpos);\n"
 "  let Ldir = normalize(-L.sunDir.xyz);\n"
 "  let H = normalize(V + Ldir);\n"
@@ -182,10 +208,13 @@ GB_FULLSCREEN_VS
  * disagreement is real and tracked, and this is the correct one. */
 "  let hemi = mix(L.ambGround.rgb, L.ambSky.rgb, N.z * 0.5 + 0.5);\n"
 "  let ambF = fresnel(NoV, f0);\n"
-"  let ambient = hemi * albedo * (1.0 - metallic) + hemi * ambF * (1.0 - rough * 0.7);\n"
+"  let ambient = (hemi * albedo * (1.0 - metallic) + hemi * ambF * (1.0 - rough * 0.7)) * ao;\n"
+/* Emissive tints by albedo, matching how it is authored: an emitter's base
+ * colour IS the colour it emits, which is why one scalar suffices. */
+"  let emit = albedo * emissive;\n"
 /* LINEAR HDR out. Exposure, ACES and gamma belong to the composite, so a
  * later SSAO/GI pass can attenuate radiance rather than tonemapped values. */
-"  return vec4<f32>(direct + ambient, 1.0);\n"
+"  return vec4<f32>(direct + ambient + emit, 1.0);\n"
 "}\n";
 
 /* Composite: linear HDR radiance -> the presentable LDR offscreen. */
@@ -385,7 +414,7 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
                               float sunR, float sunG, float sunB,
                               float skyR, float skyG, float skyB,
                               float gndR, float gndG, float gndB) {
-    if (!g_wgpu_dev || !gb_albedo_view) return;
+    if (!g_wgpu_dev || !gb_a_view) return;
     gb_deferred_init_pipelines();
     gb_deferred_ensure();
     if (!gb_light_pipeline || !gb_lit_view) return;
@@ -413,9 +442,9 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
         WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(gb_light_pipeline, 0);
         WGPUBindGroupEntry e[5]; memset(e, 0, sizeof(e));
         e[0].binding = 0; e[0].buffer = gb_light_ubuf; e[0].size = GB_LIGHT_BYTES;
-        e[1].binding = 1; e[1].textureView = gb_albedo_view;
-        e[2].binding = 2; e[2].textureView = gb_normal_view;
-        e[3].binding = 3; e[3].textureView = gb_material_view;
+        e[1].binding = 1; e[1].textureView = gb_a_view;
+        e[2].binding = 2; e[2].textureView = gb_b_view;
+        e[3].binding = 3; e[3].textureView = gb_c_view;
         e[4].binding = 4; e[4].textureView = gb_depth_view;
         WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
         bgd.layout = bgl; bgd.entryCount = 5; bgd.entries = e;
