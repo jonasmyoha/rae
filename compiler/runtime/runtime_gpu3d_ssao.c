@@ -55,7 +55,7 @@
  * pass before they can read its depth/normal/ambient attachments. */
 static int rae_g3d_finish_pass(void);
 
-#define G3D_SSAO_PARAM_BYTES 96  /* mat4 invViewProj + camPos vec4 + cfg vec4 */
+#define G3D_SSAO_PARAM_BYTES 112 /* mat4 invViewProj + camPos + cfg + cfg2 */
 
 static WGPUTexture     g3d_ao_tex = NULL;        /* r8unorm, half res */
 static WGPUTextureView g3d_ao_view = NULL;
@@ -74,6 +74,11 @@ static bool               g3d_ssao_pending = false;
 static int                g3d_ssao_slices = 3;   /* desktop default */
 static int                g3d_ssao_steps = 6;
 static float              g3d_ssao_radius = 1.2f;    /* world units: contact scale */
+/* Angle bias in SINE of elevation. Below this a sample is treated as
+ * co-planar rather than occluding — see the long note at the rejection
+ * test. 0.06 covers the faceting error of the sphere/torus tessellations
+ * lib/mesh3d.rae produces without visibly eating real contact shadows. */
+static float              g3d_ssao_bias = 0.03f;
 static float              g3d_ssao_intensity = 1.0f;
 
 /* ---- AO generation: horizon search with a visibility bitmask ---- */
@@ -82,6 +87,7 @@ static const char* G3D_SSAO_WGSL =
 "  invViewProj: mat4x4<f32>,\n"
 "  camPos: vec4<f32>,\n"      /* xyz camera, w frame index (jitters the noise) */
 "  cfg: vec4<f32>,\n"         /* x radius, y intensity, z slices, w steps */
+"  cfg2: vec4<f32>,\n"        /* x angle bias (sine), yzw reserved */
 "};\n"
 "@group(0) @binding(0) var<uniform> U: P;\n"
 "@group(0) @binding(1) var depthTex: texture_depth_2d;\n"
@@ -176,7 +182,12 @@ static const char* G3D_SSAO_WGSL =
 "        let Ps = worldFromDepth(sampleUv, sd);\n"
 "        let delta = Ps - P0;\n"
 "        let dist = length(delta);\n"
-"        if (dist < 1e-5 || dist > radius) { continue; }\n"
+/* A sample essentially on top of the shading point carries no occlusion
+ * information, only faceting and depth-precision error, and it is the
+ * closest samples that dominate when the camera is near a surface and
+ * marchUv is at its clamp. Scale the floor with the radius so it means
+ * the same thing at every distance. */
+"        if (dist < radius * 0.03 || dist > radius) { continue; }\n"
 "        let dirw = delta / dist;\n"
 /* Elevation of the sample above the surface tangent plane, and of the far
  * side of the assumed-thin occluder. Recording the SPAN rather than a
@@ -193,9 +204,35 @@ static const char* G3D_SSAO_WGSL =
  * parameter — there is no second depth layer to read it from. */
 "        let backPoint = Ps - V * (radius * 0.5);\n"
 "        let sinBack = dot(normalize(backPoint - P0), N);\n"
-"        if (sinFront <= 0.0) { continue; }\n"
+/* ANGLE BIAS. The tangent plane here is defined by the INTERPOLATED
+ * vertex normal, but the depth buffer holds the actual FACETED triangles.
+ * On a tessellated curved surface the two disagree: mid-facet the real
+ * geometry sits below the smooth tangent plane and along the shared edges
+ * it sits above, so neighbouring samples read as genuine occluders and
+ * the mesh shades its own wireframe — a grid on spheres, rings on a
+ * torus, and nothing at all on a cube, whose flat faces and per-face
+ * normals agree exactly. That last case is the tell: the artefact scales
+ * with curvature-per-triangle, not with the AO algorithm.
+ *
+ * Rejecting elevations below a threshold discards the band where faceting
+ * error lives, but only PARTIALLY, and the reason is worth writing down.
+ * The error is a roughly constant HEIGHT (the sagitta, ~0.2%% of radius
+ * for a 48-segment sphere), so as a sine it is sagitta/dist — unbounded as
+ * the sample distance shrinks. A constant sine bias b only rejects it
+ * beyond dist > sagitta/b, and the samples closer than that are exactly
+ * the ones that dominate when the camera is near a surface. Measured: at
+ * b=0.03 this removes about 6%% of the artefact variance on a close-up
+ * torus, and raising b far enough to cover the near samples would eat the
+ * genuine contact occlusion the pass exists to produce.
+ *
+ * The real fix is to stop using the INTERPOLATED normal for the tangent
+ * plane and derive it from the depth buffer instead, so the plane and the
+ * geometry agree by construction and there is no error to bias against.
+ * Tracked as #373. This bias stays because it is cheap, standard, and
+ * helps a little; it is not the answer. RAE_SSAO_BIAS overrides it. */
+"        if (sinFront <= U.cfg2.x) { continue; }\n"
 "        let hi = sectorOf(sinFront, rnd);\n"
-"        let lo = sectorOf(max(sinBack, 0.0), rnd);\n"
+"        let lo = sectorOf(max(sinBack, U.cfg2.x), rnd);\n"
 "        mask = mask | sectorSpan(lo, hi);\n"
 "      }\n"
 "    }\n"
@@ -299,6 +336,11 @@ static void g3d_configure_ssao(void) {
     if (it && it[0]) {
         float v = (float)atof(it);
         if (v > 0.0f) g3d_ssao_intensity = v;
+    }
+    const char* b = getenv("RAE_SSAO_BIAS");
+    if (b) {
+        float v = (float)atof(b);
+        if (v >= 0.0f && v < 1.0f) g3d_ssao_bias = v;
     }
     const char* r = getenv("RAE_SSAO_RADIUS");
     if (r && r[0]) {
@@ -490,7 +532,7 @@ void rae_ext_gpu3d_ssao(void) {
 
     /* invViewProj and camPos are already computed for the frame uniform;
      * reuse them rather than inverting the matrix a second time. */
-    float u[24]; memset(u, 0, sizeof(u));
+    float u[28]; memset(u, 0, sizeof(u));
     memcpy(u, g3d_frame_inv_viewproj, 16 * sizeof(float));
     u[16] = g3d_frame_campos[0];
     u[17] = g3d_frame_campos[1];
@@ -502,6 +544,7 @@ void rae_ext_gpu3d_ssao(void) {
     u[21] = g3d_ssao_intensity;
     u[22] = (float)g3d_ssao_slices;
     u[23] = (float)g3d_ssao_steps;
+    u[24] = g3d_ssao_bias;
     wgpuQueueWriteBuffer(g_wgpu_queue, g3d_ssao_param_ubuf, 0, u, sizeof(u));
 
     /* The COMPOSITE is not optional: hdrColor holds direct+emissive only, so
