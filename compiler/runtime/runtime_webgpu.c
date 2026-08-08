@@ -52,6 +52,10 @@ static WGPUAdapter g_wgpu_adapter; static int g_wgpu_adapter_done;
 static void rae_wgpu_on_adapter(WGPURequestAdapterStatus st, WGPUAdapter a, WGPUStringView m, void* u1, void* u2) {
     (void)st;(void)m;(void)u1;(void)u2; g_wgpu_adapter = a; g_wgpu_adapter_done = 1;
 }
+/* Set during device creation; read by renderers choosing a target format.
+ * Zero means the adapter did not offer the feature and the fallback path
+ * must be used. */
+static int g_wgpu_have_rg11b10 = 0;
 static int g_wgpu_device_done;
 static void rae_wgpu_on_device(WGPURequestDeviceStatus st, WGPUDevice d, WGPUStringView m, void* u1, void* u2) {
     (void)st;(void)m;(void)u1;(void)u2; g_wgpu_dev = d; g_wgpu_device_done = 1;
@@ -71,9 +75,27 @@ static int rae_wgpu_init(void) {
     wgpuInstanceRequestAdapter(g_wgpu_inst, &ao, aci);
     while (!g_wgpu_adapter_done) rae_wgpu_poll(1);
     if (!g_wgpu_adapter) { fprintf(stderr, "[wgpu] no adapter\n"); return 0; }
+    /* Optional device features, requested only when the adapter reports
+     * them. WebGPU rejects the whole device request if you ask for a
+     * feature that is not there, so this must be negotiated rather than
+     * assumed — and everything downstream must have a fallback path,
+     * because a mobile or WASM adapter legitimately may not offer these.
+     *
+     * rg11b10ufloat-renderable lets an HDR target be 4 bytes/pixel instead
+     * of 8 (#370). Renderers that need it check g_wgpu_have_rg11b10 and
+     * fall back to rgba16float. */
+    WGPUFeatureName want[1];
+    size_t want_n = 0;
+    if (wgpuAdapterHasFeature(g_wgpu_adapter, WGPUFeatureName_RG11B10UfloatRenderable)) {
+        want[want_n++] = WGPUFeatureName_RG11B10UfloatRenderable;
+        g_wgpu_have_rg11b10 = 1;
+    }
+    WGPUDeviceDescriptor dd; memset(&dd, 0, sizeof(dd));
+    dd.requiredFeatureCount = want_n;
+    dd.requiredFeatures = want_n ? want : NULL;
     WGPURequestDeviceCallbackInfo dci; memset(&dci, 0, sizeof(dci));
     dci.mode = WGPUCallbackMode_AllowProcessEvents; dci.callback = rae_wgpu_on_device;
-    wgpuAdapterRequestDevice(g_wgpu_adapter, NULL, dci);
+    wgpuAdapterRequestDevice(g_wgpu_adapter, &dd, dci);
     while (!g_wgpu_device_done) rae_wgpu_poll(1);
     if (!g_wgpu_dev) { fprintf(stderr, "[wgpu] no device\n"); return 0; }
     g_wgpu_queue = wgpuDeviceGetQueue(g_wgpu_dev);

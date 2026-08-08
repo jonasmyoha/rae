@@ -43,8 +43,14 @@ static WGPUTextureView gb_pyramid_src[GB_PYRAMID_MAX_MIPS];  /* one per mip, as 
 static int             gb_pyramid_mips = 0;
 static int             gb_pyramid_w = 0, gb_pyramid_h = 0;
 
-static WGPUTexture     gb_lit_tex = NULL;        /* rgba16float, linear HDR radiance */
+static WGPUTexture     gb_lit_tex = NULL;        /* linear HDR radiance */
 static WGPUTextureView gb_lit_view = NULL;
+/* HDR radiance format (#370). rg11b10ufloat halves the bandwidth of the
+ * largest full-res float target in the frame, but it is an optional
+ * WebGPU feature; when the adapter does not offer it we fall back to
+ * rgba16float, which is guaranteed. The pipeline is created from this
+ * same variable, so the two cannot drift apart. */
+static WGPUTextureFormat gb_lit_format = WGPUTextureFormat_RGBA16Float;
 
 static WGPURenderPipeline gb_pyr_from_depth_pipeline = NULL;  /* depth32f -> r32f */
 static WGPURenderPipeline gb_pyr_reduce_pipeline = NULL;      /* r32f -> r32f */
@@ -214,7 +220,14 @@ GB_FULLSCREEN_VS
 "  let emit = albedo * emissive;\n"
 /* LINEAR HDR out. Exposure, ACES and gamma belong to the composite, so a
  * later SSAO/GI pass can attenuate radiance rather than tonemapped values. */
-"  return vec4<f32>(direct + ambient + emit, 1.0);\n"
+/* Clamp before writing. rg11b10ufloat (#370) is UNSIGNED with a limited
+ * exponent range, so a negative value from a stray term or an unbounded
+ * emitter does not merely lose precision — it becomes a NaN or a huge
+ * positive, and one such pixel survives every subsequent blur and bloom.
+ * The bound is the format's, applied even on the rgba16float fallback so
+ * both paths produce the same image. */
+"  let radiance = clamp(direct + ambient + emit, vec3<f32>(0.0), vec3<f32>(64000.0));\n"
+"  return vec4<f32>(radiance, 1.0);\n"
 "}\n";
 
 /* Composite: linear HDR radiance -> the presentable LDR offscreen. */
@@ -318,7 +331,7 @@ static void gb_deferred_ensure(void) {
     td.size.depthOrArrayLayers = 1;
     td.mipLevelCount = 1; td.sampleCount = 1;
     td.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding;
-    td.format = WGPUTextureFormat_RGBA16Float;   /* linear HDR radiance */
+    td.format = gb_lit_format;
     gb_lit_tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
     gb_lit_view = wgpuTextureCreateView(gb_lit_tex, NULL);
 
@@ -333,8 +346,10 @@ static void gb_deferred_init_pipelines(void) {
         gb_pyr_reduce_pipeline = gb_make_fullscreen_pipeline(
             GB_PYR_REDUCE_WGSL, WGPUTextureFormat_R32Float, "depth-pyramid reduce");
     if (!gb_light_pipeline) {
+        gb_lit_format = g_wgpu_have_rg11b10 ? WGPUTextureFormat_RG11B10Ufloat
+                                            : WGPUTextureFormat_RGBA16Float;
         gb_light_pipeline = gb_make_fullscreen_pipeline(
-            GB_LIGHT_WGSL, WGPUTextureFormat_RGBA16Float, "lighting");
+            GB_LIGHT_WGSL, gb_lit_format, "lighting");
         WGPUBufferDescriptor ud; memset(&ud, 0, sizeof(ud));
         ud.size = GB_LIGHT_BYTES;
         ud.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
