@@ -59,7 +59,7 @@ func uploadMeshData(m: view MeshData) ret MeshHandle {
 # same material study as 109: the G-buffer's whole job is to carry these
 # two parameters to the lighting pass intact, so a scene that sweeps both
 # is what makes a wrong material channel visible rather than plausible.
-func buildScene(sphere: view MeshHandle, ground: view MeshHandle) ret Scene3d {
+func buildScene(sphere: view MeshHandle, ground: view MeshHandle, torus: view MeshHandle) ret Scene3d {
   var scene: Scene3d = createScene3d()
   let noEmit: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let noRot: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
@@ -88,6 +88,15 @@ func buildScene(sphere: view MeshHandle, ground: view MeshHandle) ret Scene3d {
     row = row + 1
   }
 
+  # An EMITTER, to exercise the G-buffer's shading-mode field and the
+  # logarithmic emissive channel (#366). Its base colour is the colour it
+  # emits — the G-buffer stores one intensity scalar and lighting tints by
+  # albedo, so an emitter is authored by setting both. A value above 1
+  # is the point: it proves the log encoding carries HDR range that a
+  # plain 8-bit channel could not.
+  let emitMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.35, y: 0.7, z: 1.0), metallic: 0.0, roughness: 0.5, emission: vec3.create(x: 4.0, y: 4.0, z: 4.0))
+  let torusE: Int = addMeshInstance(scene: scene, mesh: torus, material: emitMat, position: vec3.create(x: 0.0, y: 0.0, z: 3.6), rotation: noRot, scale: unit)
+
   let groundMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.42, y: 0.43, z: 0.45), metallic: 0.0, roughness: 0.9, emission: noEmit)
   let groundE: Int = addMeshInstance(scene: scene, mesh: ground, material: groundMat, position: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.7), rotation: noRot, scale: unit)
   ret scene
@@ -114,10 +123,12 @@ func main() ret Int {
 
   let sphereData: MeshData = makeSphere(rings: 32, segments: 48)
   let planeData: MeshData = makePlane(size: 40.0, segments: 1)
+  let torusData: MeshData = makeTorus(majorR: 1.0, minorR: 0.35, majorSegs: 96, minorSegs: 48)
   let sphere: MeshHandle = uploadMeshData(m: sphereData)
   let ground: MeshHandle = uploadMeshData(m: planeData)
+  let torus: MeshHandle = uploadMeshData(m: torusData)
 
-  var scene: Scene3d = buildScene(sphere: sphere, ground: ground)
+  var scene: Scene3d = buildScene(sphere: sphere, ground: ground, torus: torus)
   var camera: Camera3d = defaultCamera3d()
   var light: Light3d = defaultLight3d()
 
