@@ -483,11 +483,23 @@ func animateScene1(asset: mod Scene3dAsset, time: view Float) {
   var torusTransform: Transform3d = asset.scene.transforms.at(index: torusEntity)
   torusTransform.rotation = vec3.create(x: time * 0.35, y: 0.0, z: time * 0.62)
   setTransform(scene: asset.scene, entity: torusEntity, transform: torusTransform)
-  # Heights are chosen against the ground plane at z=-0.75: each cluster's
-  # lowest swing brings its balls within the SSAO contact radius (~1.2
-  # world units) so they actually cast occlusion onto the plane. Floating
-  # them higher looks fine in isolation but produces no contact shadow,
-  # which reads as objects hovering in a void.
+  # Heights are chosen against the ground plane at z=-0.75 so every ball
+  # stays INSIDE the SSAO contact radius (~1.2 world units) for its whole
+  # cycle, not merely at the bottom of its swing.
+  #
+  # This was the difference between "SSAO does not work on the ground" and
+  # "SSAO works and has nothing to land on". Measured: the sky, where the
+  # shader returns AO=1.0 outright, and open ground read the SAME value, so
+  # the plane is genuinely unoccluded rather than self-occluding; ground
+  # touching a cube base reads ~20% darker. The occlusion was real, just
+  # confined to contact scale while the objects floated 1.5-2 units up.
+  #
+  # Each base height is set so the ball's LOWEST extent (base - swing
+  # amplitude - its largest radius) clears the plane by a few centimetres,
+  # and the amplitudes are reduced so it hovers near the plane throughout
+  # rather than diving at it once per cycle. Widening the SSAO radius would
+  # have been the wrong fix — #337 keeps it at contact scale deliberately,
+  # because a wide-radius SSAO double-darkens once real GI lands.
   #
   # Three metaball clusters, each with its own motion character. Speed and
   # amplitude are per-cluster so the blobs never read as one animation
@@ -505,7 +517,7 @@ func animateScene1(asset: mod Scene3dAsset, time: view Float) {
       transform.position = vec3.create(
         x: 0.0 - 5.25 + math.cos(x: slow + phase) * 0.62,
         y: 2.15 + math.sin(x: slow * 0.7 + phase * 1.3) * 0.30,
-        z: 1.15 + math.sin(x: slow * 1.1 + phase) * 0.58
+        z: 0.46 + math.sin(x: slow * 1.1 + phase) * 0.20
       )
       let obsidianR: Float = 0.82 + math.sin(x: time * 0.29 + phase * 1.7) * 0.14
       transform.scale = vec3.create(x: obsidianR, y: obsidianR, z: obsidianR)
@@ -519,7 +531,7 @@ func animateScene1(asset: mod Scene3dAsset, time: view Float) {
       transform.position = vec3.create(
         x: 0.0 - 0.35 + math.cos(x: fast + phase * 1.4) * 1.18,
         y: 5.25 + math.sin(x: fast * 0.55 + phase) * 0.40,
-        z: 1.35 + math.sin(x: fast * 0.85 + phase * 1.9) * 0.72
+        z: 0.75 + math.sin(x: fast * 0.85 + phase * 1.9) * 0.25
       )
       let emberR: Float = 0.78 + math.sin(x: fast * 0.62 + phase * 2.3) * 0.42
       transform.scale = vec3.create(x: emberR, y: emberR, z: emberR)
@@ -546,7 +558,7 @@ func animateScene1(asset: mod Scene3dAsset, time: view Float) {
       transform.position = vec3.create(
       x: 4.55 + math.cos(x: time * 0.72 + phase) * (1.05 + (i % 2).toFloat() * 0.24) - 0.8 * math.cos(x: phase) * excursion,
       y: 2.25 + math.sin(x: time * 0.41 + phase * 1.7) * 0.45 - excursion,
-      z: 1.70 + math.sin(x: time * 0.83 + phase) * 0.85 + 0.25 * excursion
+      z: 1.21 + math.sin(x: time * 0.83 + phase) * 0.30 + 0.25 * excursion
       )
       let radius: Float = 1.45 + math.sin(x: time * 0.67 + phase * 2.0) * 0.16 - 0.08 * excursion
       transform.scale = vec3.create(x: radius, y: radius, z: radius)
