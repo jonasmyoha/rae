@@ -29,8 +29,9 @@ void rae_ext_gbuffer_begin(rae_Mat4* viewProj, float clearR, float clearG, float
 }
 void rae_ext_gbuffer_draw(int64_t mesh, rae_Mat4* model,
                           float r, float g, float b,
-                          float metallic, float roughness){
-    (void)mesh; (void)model; (void)r; (void)g; (void)b; (void)metallic; (void)roughness;
+                          float metallic, float roughness, float emissive){
+    (void)mesh; (void)model; (void)r; (void)g; (void)b;
+    (void)metallic; (void)roughness; (void)emissive;
 }
 void rae_ext_gbuffer_end(void) {}
 int64_t rae_ext_gbuffer_drawCount(void) { return 0; }
