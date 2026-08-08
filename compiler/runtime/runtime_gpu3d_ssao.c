@@ -35,9 +35,13 @@
  *     this low-frequency.
  *   - Quality is one knob: slices x steps. The mobile preset is 2x4 = 8
  *     depth taps per pixel at quarter the pixels; desktop is 3x6.
- *   - Interleaved gradient noise rotates the slice basis per pixel, so the
- *     8 taps behave like many more once TAA (#335) accumulates them. This
- *     is the first real consumer of the noise work in #320.
+ *   - Interleaved gradient noise rotates the slice basis per pixel AND
+ *     jitters the sector boundary, so the 8 taps behave like many more
+ *     once TAA (#335) accumulates them. This is the first real consumer of
+ *     the noise work in #320. The sector jitter matters as much as the
+ *     rotation: bitmask occlusion is quantised by construction, and
+ *     undithered quantisation is spatially coherent, which is exactly what
+ *     the eye reads as banding.
  *   - Fragment passes, not compute: they run everywhere WebGPU runs,
  *     including the WASM/mobile targets, without a workgroup-size guess.
  *
@@ -103,10 +107,26 @@ static const char* G3D_SSAO_WGSL =
 "  let p = px + 5.588238 * frame;\n"
 "  return fract(52.9829189 * fract(0.06711056 * p.x + 0.00583715 * p.y));\n"
 "}\n"
-/* Map a signed elevation angle to a sector index. Uniform in SIN, so a
- * popcount of the mask approximates the COSINE-weighted integral. */
-"fn sectorOf(sinA: f32) -> i32 {\n"
-"  return i32(clamp((sinA * 0.5 + 0.5) * 32.0, 0.0, 31.0));\n"
+/* Map an elevation angle to a sector index. Uniform in SIN, so a popcount
+ * of the mask approximates the COSINE-weighted integral.
+ *
+ * The domain is [0,1], not [-1,1]. Only elevations ABOVE the tangent plane
+ * can be occluded — the search rejects `sinFront <= 0` and clamps sinBack
+ * at 0 — so a signed mapping spent the bottom 16 bits of the mask on
+ * angles that can never be set. Using the full 32 sectors for the upper
+ * hemisphere doubles the angular resolution of the occlusion estimate for
+ * no extra samples and no extra memory: AO now quantises to 32 levels per
+ * slice rather than 16, which is the single largest source of the banding
+ * that shows up on smooth close-up gradients.
+ *
+ * `jitter` moves the sector boundary per pixel using the same interleaved
+ * gradient noise that rotates the slice basis. Without it the remaining
+ * quantisation is spatially COHERENT — neighbouring pixels round to the
+ * same level, which is precisely what the eye reads as a band. Dithering
+ * converts that into high-frequency noise, which the bilateral upsample
+ * and TAA then resolve. */
+"fn sectorOf(sinA: f32, jitter: f32) -> i32 {\n"
+"  return i32(clamp(sinA * 32.0 + jitter, 0.0, 31.0));\n"
 "}\n"
 "fn sectorSpan(lo: i32, hi: i32) -> u32 {\n"
 "  let a = min(lo, hi);\n"
@@ -174,16 +194,17 @@ static const char* G3D_SSAO_WGSL =
 "        let backPoint = Ps - V * (radius * 0.5);\n"
 "        let sinBack = dot(normalize(backPoint - P0), N);\n"
 "        if (sinFront <= 0.0) { continue; }\n"
-"        let hi = sectorOf(sinFront);\n"
-"        let lo = sectorOf(max(sinBack, 0.0));\n"
+"        let hi = sectorOf(sinFront, rnd);\n"
+"        let lo = sectorOf(max(sinBack, 0.0), rnd);\n"
 "        mask = mask | sectorSpan(lo, hi);\n"
 "      }\n"
 "    }\n"
-/* Only the upper half of the sector range is above the tangent plane; the
- * lower 16 sectors can never be occluded by definition, so normalise
- * against 16 rather than 32. */
+/* All 32 sectors now span the upper hemisphere (see sectorOf), so the
+ * normaliser is 32 rather than 16. Getting these two out of step scales
+ * the whole AO term by 2x or 0.5x, which reads as "SSAO is far too strong"
+ * rather than as a normalisation bug. */
 "    let occluded = f32(countOneBits(mask));\n"
-"    visible = visible + clamp(1.0 - occluded / 16.0, 0.0, 1.0);\n"
+"    visible = visible + clamp(1.0 - occluded / 32.0, 0.0, 1.0);\n"
 "    sliceCount = sliceCount + 1.0;\n"
 "  }\n"
 "  var ao = select(1.0, visible / sliceCount, sliceCount > 0.0);\n"
