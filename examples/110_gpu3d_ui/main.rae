@@ -89,6 +89,30 @@ func createCameraController(camera: view Camera3d) ret CameraController {
   }
 }
 
+# Orbit pitch limit, shared by the drag and keyboard paths so they cannot
+# drift apart.
+#
+# SYMMETRIC: the camera orbits as far BELOW the horizon as above it. It
+# used to stop at +0.05 rad, which pinned it to almost exactly horizontal
+# and made it feel stuck against an invisible floor.
+#
+# The magnitude stops just short of a right angle because the view matrix
+# uses a fixed +Z world up: at exactly +/-90 degrees the view direction is
+# parallel to that up vector, their cross product is zero, and the basis
+# collapses. 1.45 rad is about 83 degrees, close enough to straight
+# down/up to feel unrestricted while staying well clear of the
+# singularity.
+func clampOrbitPitch(pitch: view Float) ret Float {
+  let limit: Float = 1.45
+  if pitch > limit {
+    ret limit
+  }
+  if pitch < 0.0 - limit {
+    ret 0.0 - limit
+  }
+  ret pitch
+}
+
 func cameraForward(controller: view CameraController) ret Vec3 {
   let cp: Float = math.cos(x: controller.freePitch)
   ret vec3.create(
@@ -236,7 +260,6 @@ func setNodeText(world: mod UiWorld, nodeId: view String, value: view String) {
 func syncDemoUi(world: mod UiWorld, state: mod DemoUiResource) ret Bool {
   var layoutDirty: Bool = false
   if state.appliedRevision is not state.revision {
-    setNodeActive(world: world, nodeId: "PauseLayer", value: state.paused)
     setNodeActive(world: world, nodeId: "DebugPanel", value: state.debugOpen)
     setNodeActive(world: world, nodeId: "Scene1Selected", value: state.activeScene is 1)
     setNodeActive(world: world, nodeId: "Scene2Selected", value: state.activeScene is 2)
@@ -386,7 +409,6 @@ func anchorUiToExtent(world: mod UiWorld, w: view Float, h: view Float) {
   # Full-bleed: the root and the pause dimmer must cover the whole window,
   # not a fixed-size box inside it.
   setNodeRect(world: world, nodeId: "UiRoot", x: 0.0, y: 0.0, w: w, h: h)
-  setNodeRect(world: world, nodeId: "PauseLayer", x: 0.0, y: 0.0, w: w, h: h)
 
   # Right-aligned controls, measured from the live width.
   let debugW: Float = nodeRectW(world: world, nodeId: "DebugButton")
@@ -425,9 +447,6 @@ func anchorUiToExtent(world: mod UiWorld, w: view Float, h: view Float) {
   # Panels: the pause dialog centres in the window; the debug panel hangs
   # off the top-right under its button. Both are children of full-bleed
   # parents, so their offsets are relative to the window, not to a canvas.
-  let pausePanelW: Float = 420.0
-  let pausePanelH: Float = 260.0
-  setNodeRect(world: world, nodeId: "PausePanel", x: (w - pausePanelW) * 0.5, y: (h - pausePanelH) * 0.5, w: pausePanelW, h: pausePanelH)
   let debugPanelW: Float = 322.0
   let debugPanelH: Float = 286.0
   var debugPanelX: Float = w - margin - debugPanelW
@@ -782,14 +801,18 @@ func main() ret Int {
     let camPos0: Vec3 = cameraController.freePosition
     let px: Float = gpu2d.pointerX()
     let py: Float = gpu2d.pointerY()
-    let cameraInput: Bool = uiPointerCaptured(input: uiInput) is false and uiState.paused is false
+    # Pause freezes the SIMULATION, not the camera. With no modal dialog
+    # over the scene there is nothing for a pointer-block to protect, and
+    # being able to orbit a frozen frame is the main reason to pause at
+    # all. `cameraMoved` already forces a redraw, so the idle wait-loop
+    # still wakes for it.
+    let cameraInput: Bool = uiPointerCaptured(input: uiInput) is false
     if cameraInput and gpu2d.pointerDown() {
       if dragging {
         if cameraController.mode is CameraMode.orbit {
           cameraController.yaw = cameraController.yaw + (px - lastX) * 0.008
           cameraController.orbitPitch = cameraController.orbitPitch - (py - lastY) * 0.008
-          if cameraController.orbitPitch > 1.45 { cameraController.orbitPitch = 1.45 }
-          if cameraController.orbitPitch < 0.05 { cameraController.orbitPitch = 0.05 }
+          cameraController.orbitPitch = clampOrbitPitch(pitch: cameraController.orbitPitch)
         } else {
           cameraController.yaw = cameraController.yaw - (px - lastX) * 0.008
           cameraController.freePitch = cameraController.freePitch - (py - lastY) * 0.008
@@ -812,8 +835,7 @@ func main() ret Int {
         if sdl3.isKeyDown(key: 68) { cameraController.yaw = cameraController.yaw + dt * 1.2 }
         if sdl3.isKeyDown(key: 81) { cameraController.orbitPitch = cameraController.orbitPitch - dt * 1.2 }
         if sdl3.isKeyDown(key: 69) { cameraController.orbitPitch = cameraController.orbitPitch + dt * 1.2 }
-        if cameraController.orbitPitch > 1.45 { cameraController.orbitPitch = 1.45 }
-        if cameraController.orbitPitch < 0.05 { cameraController.orbitPitch = 0.05 }
+        cameraController.orbitPitch = clampOrbitPitch(pitch: cameraController.orbitPitch)
         if cameraController.distance < 4.0 { cameraController.distance = 4.0 }
         if cameraController.distance > 30.0 { cameraController.distance = 30.0 }
       } else {
