@@ -132,6 +132,29 @@ static WGPUBuffer         gb_view_ubuf = NULL;
  * roughly [0, 1000] of linear radiance into one 8-bit channel. */
 #define GB_EMISSIVE_LOG_K 6.91f
 
+/* ZERO MOTION, and why it is 128/255 rather than 0.5.
+ *
+ * Motion is signed and target C is rgba8unorm, so the encoding is biased:
+ * store m * 0.5 + BIAS, decode raw * 2 - 2*BIAS. The bias must be a value
+ * the 8-bit channel can represent EXACTLY, or "did not move" does not
+ * survive the round trip. 128/255 quantises to integer 128 exactly;
+ * 0.5 is 127.5, which lands half a step off whichever way it rounds, and
+ * decodes to a small but nonzero velocity on every static pixel. A
+ * temporal pass reading that reprojects each still pixel slightly off
+ * itself and softens the image — a defect that looks like "TAA is blurry"
+ * rather than like an encoding bug, which is what makes it worth getting
+ * right before anything consumes the channel.
+ *
+ * The decode constant is paired: 2 * (128/255) = 256/255. Whoever adds the
+ * temporal pass must use that pairing, not 1.0, or the exactness is lost
+ * at the other end.
+ *
+ * A raw value of EXACTLY (0,0) is left free as a sentinel meaning "this
+ * pixel opted out of temporal accumulation", which is distinguishable from
+ * every encoded velocity precisely because zero motion is 128/255. */
+#define GB_MOTION_ZERO (128.0f / 255.0f)
+#define GB_MOTION_ZERO_WGSL "0.50196078"   /* 128.0/255.0 */
+
 /* Geometry pass. The vertex stage is deliberately close to the forward
  * one — the same mesh layout feeds both — but the fragment stage does no
  * lighting at all: it resolves the material and writes it out. That is the
@@ -185,17 +208,16 @@ GB_OCT_WGSL
  * gets the same floor without having to remember it. A zero-roughness GGX
  * lobe is a division by zero at the highlight. */
 "  let rough = clamp(d.params.x, 0.045, 1.0);\n"
-/* Motion vectors: the channels exist and hold "no motion". They are unorm
- * and motion is signed, so zero motion is 0.5, not 0.0 — writing 0.0 here
- * would encode a large negative velocity and smear the whole frame the
- * moment a temporal pass reads it. Nothing produces real motion until the
- * deferred frame carries previous transforms, and nothing consumes it
- * until it has a temporal pass; the bias is what makes the placeholder
- * safe rather than merely unused. */
+/* Motion vectors: the channels exist and hold "no motion" — the biased
+ * zero, 128/255, which is the one value an 8-bit channel reproduces
+ * exactly. See GB_MOTION_ZERO for why that matters more than it looks.
+ * Nothing produces real motion until the deferred frame carries previous
+ * transforms, and nothing consumes it until it has a temporal pass. */
 "  var o: FsOut;\n"
 "  o.gba = vec4<f32>(oct.x, oct.y, 0.5, d.params.z);\n"
 "  o.gbb = vec4<f32>(d.albedoMetallic.rgb, rough);\n"
-"  o.gbc = vec4<f32>(0.5, 0.5, clamp(d.albedoMetallic.a, 0.0, 1.0), d.params.y);\n"
+"  o.gbc = vec4<f32>(" GB_MOTION_ZERO_WGSL ", " GB_MOTION_ZERO_WGSL ",\n"
+"                     clamp(d.albedoMetallic.a, 0.0, 1.0), d.params.y);\n"
 "  return o;\n"
 "}\n";
 
@@ -441,6 +463,12 @@ void rae_ext_gbuffer_begin(rae_Mat4* viewProj, float clearR, float clearG, float
     ca[0].depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
     ca[0].loadOp = WGPULoadOp_Clear;
     ca[0].storeOp = WGPUStoreOp_Store;
+    /* (0.5, 0.5) is the octahedral encoding of +Z, so an unwritten pixel
+     * decodes to a valid up-facing unit normal rather than to whatever
+     * oct(0,0) happens to produce — which is a real direction too, just an
+     * arbitrary one, and it showed up as a wrongly-coloured background in
+     * the normal inspector. Mode 0 = lit. */
+    ca[0].clearValue.r = 0.5; ca[0].clearValue.g = 0.5; ca[0].clearValue.b = 0.0; ca[0].clearValue.a = 0.0;
     /* A is the oct-normal/mode target now, so the clear colour belongs on
      * B (albedo) instead. Clearing albedo to the sky colour is not a
      * shortcut for a sky pass — it is what the inspector shows where no
@@ -455,6 +483,12 @@ void rae_ext_gbuffer_begin(rae_Mat4* viewProj, float clearR, float clearG, float
     ca[2].depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
     ca[2].loadOp = WGPULoadOp_Clear;
     ca[2].storeOp = WGPUStoreOp_Store;
+    /* Background: no motion (the exactly-representable biased zero), not
+     * metallic, and unoccluded. Clearing this to zeros would tell a
+     * temporal pass the background is moving fast and an ambient pass that
+     * it is fully occluded. */
+    ca[2].clearValue.r = GB_MOTION_ZERO; ca[2].clearValue.g = GB_MOTION_ZERO;
+    ca[2].clearValue.b = 0.0; ca[2].clearValue.a = 1.0;
     WGPURenderPassDepthStencilAttachment da; memset(&da, 0, sizeof(da));
     da.view = gb_depth_view;
     da.depthLoadOp = WGPULoadOp_Clear;
