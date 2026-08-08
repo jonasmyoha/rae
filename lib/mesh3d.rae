@@ -56,12 +56,26 @@ func makeSphere(rings: view Int, segments: view Int) pub ret MeshData {
     loop si < segments {
       let a: Int = ri * stride + si
       let b: Int = a + stride
+      # Winding is (a, b, a+1) / (b, b+1, a+1) — the same convention
+      # makeTorus uses, and the REVERSE of makePlane's.
+      #
+      # It has to differ from the plane's: the sphere's parametrisation
+      # advances `ri` from the +Z pole DOWNWARD while `si` advances
+      # counter-clockwise seen from +Z, and those two together flip the
+      # handedness of the (ri, si) patch relative to the outward normal.
+      # Sharing the plane's order here produced triangles wound clockwise
+      # seen from outside, so back-face culling kept the FAR hemisphere of
+      # every sphere: the depth buffer held the back surface and the
+      # interpolated normals pointed away from the camera. Lighting still
+      # looked smooth, which is what let it survive — it showed up as
+      # inside-out ambient occlusion, because AO is the first thing that
+      # reads depth and normals together.
       indices.add(value: a)
-      indices.add(value: a + 1)
-      indices.add(value: b)
       indices.add(value: b)
       indices.add(value: a + 1)
+      indices.add(value: b)
       indices.add(value: b + 1)
+      indices.add(value: a + 1)
       si = si + 1
     }
     ri = ri + 1
@@ -187,6 +201,69 @@ func makeFbmTerrain(size: view Float, segments: view Int, heightScale: view Floa
 }
 
 # Torus with its ring in the XY plane: `majorR` ring radius, `minorR` tube radius.
+# A unit-ish axis-aligned box centred on the origin, `size` across.
+#
+# FLAT SHADED, which is why it has 24 vertices rather than 8: a cube's
+# corner belongs to three faces with three different normals, and a shared
+# vertex can only carry one. Eight vertices would force the corner normals
+# to be averaged, rounding off exactly the hard edges a box exists to have.
+# Each face therefore gets its own four vertices and its own normal.
+#
+# Winding matches makePlane's convention per face, checked against the
+# outward normal — see the note in makeSphere for what an inverted winding
+# costs.
+func makeBox(size: view Float) pub ret MeshData {
+  let verts: List(Float) = createList(Float, cap: 24 * 8)
+  let indices: List(Int) = createList(Int, cap: 36)
+  let h: Float = size * 0.5
+
+  # Per face: outward normal, then the four corners in counter-clockwise
+  # order seen from OUTSIDE along that normal.
+  # +X
+  pushVert(verts: verts, px: h, py: 0.0 - h, pz: 0.0 - h, nx: 1.0, ny: 0.0, nz: 0.0, u: 0.0, v: 0.0)
+  pushVert(verts: verts, px: h, py: h, pz: 0.0 - h, nx: 1.0, ny: 0.0, nz: 0.0, u: 1.0, v: 0.0)
+  pushVert(verts: verts, px: h, py: h, pz: h, nx: 1.0, ny: 0.0, nz: 0.0, u: 1.0, v: 1.0)
+  pushVert(verts: verts, px: h, py: 0.0 - h, pz: h, nx: 1.0, ny: 0.0, nz: 0.0, u: 0.0, v: 1.0)
+  # -X
+  pushVert(verts: verts, px: 0.0 - h, py: h, pz: 0.0 - h, nx: 0.0 - 1.0, ny: 0.0, nz: 0.0, u: 0.0, v: 0.0)
+  pushVert(verts: verts, px: 0.0 - h, py: 0.0 - h, pz: 0.0 - h, nx: 0.0 - 1.0, ny: 0.0, nz: 0.0, u: 1.0, v: 0.0)
+  pushVert(verts: verts, px: 0.0 - h, py: 0.0 - h, pz: h, nx: 0.0 - 1.0, ny: 0.0, nz: 0.0, u: 1.0, v: 1.0)
+  pushVert(verts: verts, px: 0.0 - h, py: h, pz: h, nx: 0.0 - 1.0, ny: 0.0, nz: 0.0, u: 0.0, v: 1.0)
+  # +Y
+  pushVert(verts: verts, px: h, py: h, pz: 0.0 - h, nx: 0.0, ny: 1.0, nz: 0.0, u: 0.0, v: 0.0)
+  pushVert(verts: verts, px: 0.0 - h, py: h, pz: 0.0 - h, nx: 0.0, ny: 1.0, nz: 0.0, u: 1.0, v: 0.0)
+  pushVert(verts: verts, px: 0.0 - h, py: h, pz: h, nx: 0.0, ny: 1.0, nz: 0.0, u: 1.0, v: 1.0)
+  pushVert(verts: verts, px: h, py: h, pz: h, nx: 0.0, ny: 1.0, nz: 0.0, u: 0.0, v: 1.0)
+  # -Y
+  pushVert(verts: verts, px: 0.0 - h, py: 0.0 - h, pz: 0.0 - h, nx: 0.0, ny: 0.0 - 1.0, nz: 0.0, u: 0.0, v: 0.0)
+  pushVert(verts: verts, px: h, py: 0.0 - h, pz: 0.0 - h, nx: 0.0, ny: 0.0 - 1.0, nz: 0.0, u: 1.0, v: 0.0)
+  pushVert(verts: verts, px: h, py: 0.0 - h, pz: h, nx: 0.0, ny: 0.0 - 1.0, nz: 0.0, u: 1.0, v: 1.0)
+  pushVert(verts: verts, px: 0.0 - h, py: 0.0 - h, pz: h, nx: 0.0, ny: 0.0 - 1.0, nz: 0.0, u: 0.0, v: 1.0)
+  # +Z (top)
+  pushVert(verts: verts, px: 0.0 - h, py: 0.0 - h, pz: h, nx: 0.0, ny: 0.0, nz: 1.0, u: 0.0, v: 0.0)
+  pushVert(verts: verts, px: h, py: 0.0 - h, pz: h, nx: 0.0, ny: 0.0, nz: 1.0, u: 1.0, v: 0.0)
+  pushVert(verts: verts, px: h, py: h, pz: h, nx: 0.0, ny: 0.0, nz: 1.0, u: 1.0, v: 1.0)
+  pushVert(verts: verts, px: 0.0 - h, py: h, pz: h, nx: 0.0, ny: 0.0, nz: 1.0, u: 0.0, v: 1.0)
+  # -Z (bottom)
+  pushVert(verts: verts, px: 0.0 - h, py: h, pz: 0.0 - h, nx: 0.0, ny: 0.0, nz: 0.0 - 1.0, u: 0.0, v: 0.0)
+  pushVert(verts: verts, px: h, py: h, pz: 0.0 - h, nx: 0.0, ny: 0.0, nz: 0.0 - 1.0, u: 1.0, v: 0.0)
+  pushVert(verts: verts, px: h, py: 0.0 - h, pz: 0.0 - h, nx: 0.0, ny: 0.0, nz: 0.0 - 1.0, u: 1.0, v: 1.0)
+  pushVert(verts: verts, px: 0.0 - h, py: 0.0 - h, pz: 0.0 - h, nx: 0.0, ny: 0.0, nz: 0.0 - 1.0, u: 0.0, v: 1.0)
+
+  var f: Int = 0
+  loop f < 6 {
+    let base: Int = f * 4
+    indices.add(value: base)
+    indices.add(value: base + 1)
+    indices.add(value: base + 2)
+    indices.add(value: base)
+    indices.add(value: base + 2)
+    indices.add(value: base + 3)
+    f = f + 1
+  }
+  ret MeshData { verts: own verts, indices: own indices, vertCount: 24 }
+}
+
 func makeTorus(majorR: view Float, minorR: view Float, majorSegs: view Int, minorSegs: view Int) pub ret MeshData {
   let verts: List(Float) = createList(Float, cap: (majorSegs + 1) * (minorSegs + 1) * 8)
   let indices: List(Int) = createList(Int, cap: majorSegs * minorSegs * 6)

@@ -466,6 +466,19 @@ func animateScene(scene: mod Scene3d, sceneId: view Int, time: view Float) {
 }
 
 func animateScene1(asset: mod Scene3dAsset, time: view Float) {
+  # Two free cubes tumbling on different axes at different rates. Boxes are
+  # the useful shape to watch here: a sphere looks identical under any
+  # rotation, so it cannot show a wrong rotation order or a skewed normal
+  # transform, and a flat-shaded cube shows both immediately.
+  let cubeAEntity: Int = scene3dAssetEntity(asset: asset, nodeId: "spinCubeA")
+  var cubeA: Transform3d = asset.scene.transforms.at(index: cubeAEntity)
+  cubeA.rotation = vec3.create(x: time * 0.7, y: time * 0.31, z: 0.0)
+  setTransform(scene: asset.scene, entity: cubeAEntity, transform: cubeA)
+  let cubeBEntity: Int = scene3dAssetEntity(asset: asset, nodeId: "spinCubeB")
+  var cubeB: Transform3d = asset.scene.transforms.at(index: cubeBEntity)
+  cubeB.rotation = vec3.create(x: 0.0, y: time * 0.55, z: time * 0.9)
+  setTransform(scene: asset.scene, entity: cubeBEntity, transform: cubeB)
+
   let torusEntity: Int = scene3dAssetEntity(asset: asset, nodeId: "heroTorus")
   var torusTransform: Transform3d = asset.scene.transforms.at(index: torusEntity)
   torusTransform.rotation = vec3.create(x: time * 0.35, y: 0.0, z: time * 0.62)
@@ -555,14 +568,20 @@ func main() ret Int {
   let sphereData: MeshData = makeSphere(rings: 32, segments: 48)
   let torusData: MeshData = makeTorus(majorR: 1.55, minorR: 0.42, majorSegs: 96, minorSegs: 40)
   let planeData: MeshData = makePlane(size: 36.0, segments: 1)
+  # Unit box, flat shaded (24 verts, not 8 — a shared corner cannot carry
+  # three face normals). Scene 1 uses it for the voxel mountains and the
+  # two spinning cubes.
+  let boxData: MeshData = makeBox(size: 1.0)
   let sphere: MeshHandle = uploadMeshData(mesh: sphereData)
   let torus: MeshHandle = uploadMeshData(mesh: torusData)
   let ground: MeshHandle = uploadMeshData(mesh: planeData)
+  let boxMesh: MeshHandle = uploadMeshData(mesh: boxData)
   let base: String = "examples/110_gpu3d_ui/assets/"
   var meshRegistry: MeshRegistry3d = createMeshRegistry3d()
   registerMesh3d(reg: meshRegistry, key: "sphere", handle: sphere)
   registerMesh3d(reg: meshRegistry, key: "torus", handle: torus)
   registerMesh3d(reg: meshRegistry, key: "ground", handle: ground)
+  registerMesh3d(reg: meshRegistry, key: "box", handle: boxMesh)
   var scene1: Scene3dAsset = loadScene3dFile(path: "{base}scene1.raescene", meshes: meshRegistry)
   var scene2: Scene3dAsset = loadScene3dFile(path: "{base}scene2.raescene", meshes: meshRegistry)
   var scene3: Scene3dAsset = loadScene3dFile(path: "{base}scene3.raescene", meshes: meshRegistry)
