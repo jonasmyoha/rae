@@ -680,7 +680,12 @@ func main() ret Int {
   # depend on machine-local history. That is not hypothetical: it turned
   # the metaball assertion red on a dev machine while staying green on a
   # clean checkout, which is the worst way for a gate to fail.
+  # BOTH headless vars, not just the timed one. RAE_HEADLESS_FRAMES is the
+  # deterministic variant used for exact-frame captures, so it is precisely
+  # the mode that must not inherit machine-local camera state — checking
+  # only RAE_SDL_HEADLESS_MS left the stricter mode unguarded.
   let headless: Bool = getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0
+    or getEnv(name: "RAE_HEADLESS_FRAMES").length() > 0
   if not headless {
     let savedState: String = readHotReloadStateFor(appId: state110AppId)
     if restore110State(raw: savedState, ui: uiState, controller: cameraController, camera: camera) {
