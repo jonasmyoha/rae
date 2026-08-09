@@ -1,0 +1,55 @@
+# glTF loader unit tests — SELF-CONTAINED, no model asset required.
+#
+# This deliberately ships no .glb. Test fixtures that are downloaded or
+# copied models carry someone else's licence, and a test suite is a bad
+# place to inherit one; the parts of the loader worth pinning are testable
+# without a model anyway.
+#
+# What is covered:
+#   - readF32, against hand-computed IEEE-754 bit patterns. This is the
+#     subtlest code in the loader — Rae has no Int/Float bit-cast, so the
+#     value is rebuilt arithmetically from sign, exponent and mantissa —
+#     and it is the one place a silent error would corrupt every vertex
+#     without failing to load.
+#   - readU16 / readU32 little-endian assembly.
+#   - The container's rejection paths, which are what stand between a
+#     malformed file and an out-of-bounds read.
+#
+# NOT covered here: reading a real exported model end to end. That needs a
+# model, and belongs in an example with a clearly-licensed asset.
+import core
+import gltf
+open gltf
+
+# Build a byte list from four little-endian bytes of a known float.
+func bytesOf(b0: view Int, b1: view Int, b2: view Int, b3: view Int) ret List(Int) {
+  let out: List(Int) = createList(Int, cap: 4)
+  out.add(value: b0)
+  out.add(value: b1)
+  out.add(value: b2)
+  out.add(value: b3)
+  ret own out
+}
+
+func main() {
+  # 1.0f  = 0x3F800000, so little-endian bytes are 00 00 80 3F.
+  log("one={readF32(b: bytesOf(b0: 0, b1: 0, b2: 128, b3: 63), pos: 0)}")
+  # -2.5f = 0xC0200000 -> 00 00 20 C0
+  log("negTwoAndHalf={readF32(b: bytesOf(b0: 0, b1: 0, b2: 32, b3: 192), pos: 0)}")
+  # 0.0f  = 0x00000000. Exercises the exponent-0 branch, which is the one
+  # that would otherwise produce a denormal instead of a clean zero.
+  log("zero={readF32(b: bytesOf(b0: 0, b1: 0, b2: 0, b3: 0), pos: 0)}")
+  # 0.5f  = 0x3F000000 -> 00 00 00 3F
+  log("half={readF32(b: bytesOf(b0: 0, b1: 0, b2: 0, b3: 63), pos: 0)}")
+
+  # Little-endian integer assembly.
+  log("u16={readU16(b: bytesOf(b0: 1, b1: 2, b2: 0, b3: 0), pos: 0)}")
+  log("u32={readU32(b: bytesOf(b0: 1, b1: 2, b2: 3, b3: 4), pos: 0)}")
+
+  # Rejection paths. A loader that reads past the end of a malformed file
+  # is worse than one that refuses it, so these are the guarantee.
+  let missing: Glb = loadGlb(path: "definitely/not/a/real/path.glb")
+  log("missing.ok={missing.ok}")
+  let notGlb: Glb = loadGlb(path: "../lib/gltf.rae")
+  log("notGlb.ok={notGlb.ok}")
+}
