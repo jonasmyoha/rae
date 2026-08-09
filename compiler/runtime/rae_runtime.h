@@ -524,6 +524,10 @@ void rae_ext_rae_chan_free(int64_t ch);
 void rae_ext_rae_sys_exit(int64_t code);
 rae_String rae_ext_rae_sys_get_env(rae_String name);
 rae_String rae_ext_rae_sys_read_file(rae_String path);
+/* Binary counterpart: a Buffer of one-byte-per-Int values, for container
+ * formats whose content is not text. */
+void* rae_ext_rae_sys_read_file_bytes(rae_String path, rae_Mod_Int64 out);
+rae_String rae_ext_rae_sys_read_file_text(rae_String path, int64_t offset, int64_t len);
 rae_String rae_ext_rae_sys_list_dir(rae_String folder);
 /* captureAndBlurRegion and loadCircleCroppedTexture are declared
  * in the raylib.h-scope helper block above (RAE_HAS_RAYLIB);
