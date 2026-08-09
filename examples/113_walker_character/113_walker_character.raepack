@@ -1,0 +1,21 @@
+pack WalkerCharacter {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "3D Renderer — Walker Character (multi-primitive glTF) — Claude Fable"
+  description: "Loads a 65-joint rigged character from a glTF binary and renders it in bind pose. Where the Fox example is a single primitive with no normals and no index buffer, this model is 10 meshes / 12 primitives, all indexed — so it exercises the merge path, which rebases each primitive's indices by the running vertex total. Framing is computed from the loaded bounds rather than hard-coded, so a different model still lands centred and correctly scaled. Interactive orbit camera: drag to rotate, wheel to zoom."
+  category: "3D Renderer"
+  display: {
+    width: 1280
+    height: 800
+  }
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "main.rae"
+      sources: {
+        source: { path: ".", emit: compiled }
+      }
+    }
+  }
+}
