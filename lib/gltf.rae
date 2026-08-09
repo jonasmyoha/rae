@@ -604,3 +604,44 @@ func meshBounds(m: view MeshData) pub ret List(Float) {
   out.add(value: maxZ)
   ret own out
 }
+
+# ----- per-primitive access --------------------------------------------
+# `loadAllPrimitives` merges everything into one buffer and therefore
+# cannot keep per-primitive materials. These let a caller walk the
+# primitives itself and give each one its own material, which is what
+# colouring a multi-part character requires.
+
+func meshCount(g: view Glb) pub ret Int {
+  if g.ok is false {
+    ret 0
+  }
+  ret jsonArrayLen(this: arrayField(g: g, obj: jsonRoot(doc: g.doc), key: "meshes"))
+}
+
+func primitiveCount(g: view Glb, meshIndex: view Int) pub ret Int {
+  if g.ok is false {
+    ret 0
+  }
+  let meshes: JsonValue = arrayField(g: g, obj: jsonRoot(doc: g.doc), key: "meshes")
+  if meshIndex < 0 or meshIndex >= jsonArrayLen(this: meshes) {
+    ret 0
+  }
+  let mesh: JsonValue = jsonArrayAt(doc: g.doc, this: meshes, idx: meshIndex)
+  ret jsonArrayLen(this: arrayField(g: g, obj: mesh, key: "primitives"))
+}
+
+# The mesh's authored name, which is how a caller tells one part of a
+# character from another. Exporters carry the modelling-tool object names
+# through — "flicka.006", "Cylinder.001" — so a name is the only handle on
+# WHICH part a primitive belongs to when the materials say nothing.
+func meshName(g: view Glb, meshIndex: view Int) pub ret String {
+  if g.ok is false {
+    ret ""
+  }
+  let meshes: JsonValue = arrayField(g: g, obj: jsonRoot(doc: g.doc), key: "meshes")
+  if meshIndex < 0 or meshIndex >= jsonArrayLen(this: meshes) {
+    ret ""
+  }
+  let mesh: JsonValue = jsonArrayAt(doc: g.doc, this: meshes, idx: meshIndex)
+  ret jsonString(this: objField(g: g, obj: mesh, key: "name"), fallback: "")
+}
