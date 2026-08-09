@@ -1,0 +1,176 @@
+# Walker character — a multi-primitive rigged glTF model (#356 arc).
+#
+# Loads the walker project's character from .glb and renders it in bind
+# pose. Where example 112 (the Fox) is one primitive with no normals and
+# no indices, this is the opposite shape: 65 joints, 10 meshes / 12
+# primitives, every one of them indexed and carrying normals. Between them
+# they cover both ends of what real exporters produce.
+#
+# WHAT THIS EXAMPLE EXISTS TO PROVE. `loadAllPrimitives` merges every
+# primitive of every mesh into one buffer, rebasing each primitive's
+# indices by the running vertex total. A character is rarely one
+# primitive — glTF splits geometry per material — and loading only the
+# first renders a disembodied fragment that looks like a broken import
+# rather than a partial one.
+#
+# FRAMING IS COMPUTED, NOT HARD-CODED. Exporters leave a model wherever it
+# sat in the authoring scene; this one sits about 13 units above its own
+# origin. Rather than bake an offset that is correct for exactly this
+# file, the example measures the loaded bounds and places and scales from
+# them, so dropping in a different model still frames it.
+#
+# The model is Y-up (glTF's convention); Rae is Z-up
+# (docs/coordinate-system.md), hence the rotation.
+#
+# See assets/ATTRIBUTION.md for provenance — the mesh is the walker
+# project's, the skeleton is Mixamo's — and tools/README.md for how the
+# .glb is regenerated from the source FBX.
+#
+# Compiled-target only; needs wgpu-native + SDL3.
+#   rae run --target compiled main.rae
+# Headless screenshot:
+#   RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT=/tmp/walker.bmp \
+#     rae run --target compiled main.rae
+import core
+import math
+import gpu2d
+import vec3
+import gltf
+open scene3d
+open gpu3d
+open renderer3d
+open rendergraph
+open math3d
+open mesh3d
+open gltf
+
+func uploadMeshData(m: view MeshData) ret MeshHandle {
+  ret uploadMesh(verts: m.verts, vertCount: m.vertCount, indices: m.indices)
+}
+
+func main() ret Int {
+  gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — walker character (bind pose)")
+
+  let g: Glb = loadGlb(path: "examples/113_walker_character/assets/walker.glb")
+  if g.ok is false {
+    log("[gltf] {g.errorMsg}")
+    log("[gltf] regenerate assets/walker.glb — see tools/README.md")
+    gpu2d.closeWindow()
+    ret 1
+  }
+  let charData: MeshData = loadAllPrimitives(g: g)
+  if charData.vertCount is 0 {
+    log("[gltf] model contained no readable primitives")
+    gpu2d.closeWindow()
+    ret 1
+  }
+  log("[gltf] walker: {charData.vertCount} verts, {charData.indices.length / 3} triangles")
+
+  # Measure what was loaded and derive the placement from it. `height` is
+  # the model's own Y extent (still glTF's Y-up at this point), and the
+  # scale maps that to a fixed on-screen height so any model arrives the
+  # same size regardless of the units it was authored in.
+  let b: List(Float) = meshBounds(m: charData)
+  let height: Float = b.at(index: 4) - b.at(index: 1)
+  let targetHeight: Float = 2.0
+  var modelScale: Float = 1.0
+  if height > 0.0 {
+    modelScale = targetHeight / height
+  }
+  # Centre of the model's footprint, and the height of its lowest point,
+  # both in model units. Subtracting them puts the model's feet on the
+  # ground plane and its centre on the world axis.
+  let midX: Float = (b.at(index: 0) + b.at(index: 3)) * 0.5
+  let midZ: Float = (b.at(index: 2) + b.at(index: 5)) * 0.5
+  let footY: Float = b.at(index: 1)
+  log("[gltf] bounds height {height}, scale {modelScale}")
+
+  let planeData: MeshData = makePlane(size: 20.0, segments: 1)
+  let character: MeshHandle = uploadMeshData(m: charData)
+  let ground: MeshHandle = uploadMeshData(m: planeData)
+
+  var scene: Scene3d = createScene3d()
+  let noEmit: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let noRot: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let groundZ: Float = 0.0 - 1.0
+
+  let bodyMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.72, y: 0.60, z: 0.52), metallic: 0.0, roughness: 0.65, emission: noEmit)
+  # Y-up -> Z-up is +90 degrees about X. After that rotation the model's
+  # own Y becomes world Z, so the Y-based offsets below are applied along
+  # the axes they land on rather than the ones they came from.
+  let charE: Int = addMeshInstance(
+    scene: scene, mesh: character, material: bodyMat,
+    position: vec3.create(
+      x: 0.0 - midX * modelScale,
+      y: 0.0 - midZ * modelScale,
+      z: groundZ - footY * modelScale
+    ),
+    rotation: vec3.create(x: 1.5707963, y: 0.0, z: 0.0),
+    scale: vec3.create(x: modelScale, y: modelScale, z: modelScale)
+  )
+
+  let groundMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.40, y: 0.41, z: 0.43), metallic: 0.0, roughness: 0.9, emission: noEmit)
+  let groundE: Int = addMeshInstance(
+    scene: scene, mesh: ground, material: groundMat,
+    position: vec3.create(x: 0.0, y: 0.0, z: groundZ), rotation: noRot,
+    scale: vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  )
+
+  var camera: Camera3d = defaultCamera3d()
+  var light: Light3d = defaultLight3d()
+  camera.target = vec3.create(x: 0.0, y: 0.0, z: groundZ + targetHeight * 0.5)
+
+  var renderer: Renderer3d = createRenderer3d()
+  let gs: Int = compileRenderer(r: renderer)
+  if gs is not 0 {
+    log("render graph invalid: {statusName(status: gs)}")
+    gpu2d.closeWindow()
+    ret 1
+  }
+
+  var yaw: Float = 0.6
+  var pitch: Float = 0.18
+  var dist: Float = 4.2
+  var lastX: Float = 0.0
+  var lastY: Float = 0.0
+  var dragging: Bool = false
+  let startT: Float64 = gpu2d.nowSeconds()
+
+  loop not gpu2d.pollClose() {
+    let px: Float = gpu2d.pointerX()
+    let py: Float = gpu2d.pointerY()
+    if gpu2d.pointerDown() {
+      if dragging {
+        yaw = yaw + (px - lastX) * 0.008
+        pitch = pitch - (py - lastY) * 0.008
+        if pitch > 1.45 {
+          pitch = 1.45
+        }
+        if pitch < 0.0 - 1.45 {
+          pitch = 0.0 - 1.45
+        }
+      }
+      dragging = true
+    } else {
+      dragging = false
+    }
+    lastX = px
+    lastY = py
+    dist = dist - gpu2d.wheelMove() * 0.4
+    if dist < 1.2 {
+      dist = 1.2
+    }
+    if dist > 20.0 {
+      dist = 20.0
+    }
+
+    let t: Float = (gpu2d.nowSeconds() - startT) as Float
+    camera.position = orbitEye(targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z, yaw: yaw, pitch: pitch, dist: dist)
+    let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
+    renderFrame(r: renderer, scene: scene, camera: camera, light: light, aspect: aspect, time: t)
+    snapshotPrevTransforms(scene: scene)
+  }
+  shutdown()
+  gpu2d.closeWindow()
+  ret 0
+}
