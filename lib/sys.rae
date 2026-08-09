@@ -39,6 +39,41 @@ func getEnv(name: view String) ret String {
   ret rae_sys_get_env(name: name)
 }
 
+func rae_sys_read_file_bytes(path: String, outLen: mod Int) extern ret Buffer(Int)
+func rae_sys_read_file_text(path: String, offset: Int, len: Int) extern ret String
+
+# Read a byte range of a file as text. For text chunks embedded in binary
+# containers — a .glb's JSON chunk, for instance — where the caller has
+# already located the range.
+func readFileTextRange(path: view String, offset: view Int, len: view Int) pub ret String {
+  ret rae_sys_read_file_text(path: path, offset: offset, len: len)
+}
+
+# Read a file as raw bytes.
+#
+# `readFile` decodes to a String, whose `at` yields a Char32 — fine for
+# text, useless for a .glb or a .png where individual byte values are the
+# content. This is the binary counterpart.
+#
+# Returns an empty list when the file is missing or empty; both mean "no
+# bytes", and a caller that needs to tell them apart should stat the path
+# separately rather than have every caller pay for an opt.
+func readFileBytes(path: view String) pub ret List(Int) {
+  var count: Int = 0
+  let raw: Buffer(Int) = rae_sys_read_file_bytes(path: path, outLen: count)
+  let out: List(Int) = createList(Int, cap: count)
+  if count is 0 {
+    ret own out
+  }
+  var i: Int = 0
+  loop i < count {
+    out.add(value: rae_ext_rae_buf_get(V: Int, buf: raw, index: i))
+    i = i + 1
+  }
+  rae_ext_rae_buf_free(buf: raw)
+  ret own out
+}
+
 func readFile(path: view String) ret opt String {
   ret rae_sys_read_file(path: path)
 }
