@@ -67,6 +67,24 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" "$TMP_OUT/overflow.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
+        elif [ "$EXAMPLE_NAME" = "113_walker_character" ]; then
+          # The multi-primitive gate. 6717 verts / 3465 triangles is every
+          # primitive of all 10 meshes merged; loading only the first would
+          # report a fraction of that and still render something plausible,
+          # which is exactly why the count is asserted rather than just
+          # "did it draw".
+          SHOT="$TMP_OUT/walker.bmp"
+          if (cd .. && RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
+                perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             && python3 tools/assert_nonblank_bmp.py "$SHOT" --min-colors=20 > "$TMP_OUT/shot.log" 2>&1 \
+             && [ "$(grep -c "walker: 6717 verts, 3465 triangles" "$TMP_OUT/render.log")" -eq 1 ]; then
+            echo "PASS: $EXAMPLE_NAME (12 primitives merged: 6717 verts / 3465 tris)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (walker character)"
+            cat "$TMP_OUT/render.log" "$TMP_OUT/shot.log" 2>/dev/null | sed 's/^/  /'
+            ((FAILED++))
+          fi
         elif [ "$EXAMPLE_NAME" = "112_gltf_character" ]; then
           # The glTF loader gate. Asserts the COUNTS it reports, not just
           # that something rendered: a loader reading half a buffer still

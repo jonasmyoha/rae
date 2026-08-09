@@ -496,3 +496,111 @@ func loadPrimitive(g: view Glb, meshIndex: view Int, primIndex: view Int) pub re
   }
   ret MeshData { verts: own verts, indices: own indices, vertCount: vertCount }
 }
+
+# ----- whole-model loading ---------------------------------------------
+
+# Load EVERY primitive of every mesh, merged into one MeshData.
+#
+# A character is rarely one primitive. glTF splits geometry per material,
+# and a clothed figure routinely arrives as ten meshes and a dozen
+# primitives; `loadPrimitive` would render one of them and silently drop
+# the rest, which looks like a broken import rather than a partial one.
+#
+# Merging means index REBASING: each primitive's indices are local to its
+# own vertex array, so they shift by the running vertex total as the
+# arrays are concatenated. Getting that wrong draws triangles between
+# unrelated body parts, which is unmistakable and is why it is worth
+# stating.
+#
+# MATERIALS ARE DROPPED. The merge produces one buffer, so the per-
+# primitive material assignment cannot survive it; every primitive renders
+# with whatever material the caller supplies. That is the right trade for
+# displaying a model, and the wrong one for shading it properly — when
+# per-material draws matter, the split has to be preserved instead.
+#
+# NODE TRANSFORMS ARE IGNORED, correctly: glTF specifies that a SKINNED
+# mesh is posed entirely by its skin, and its node's transform must not be
+# applied. For an unskinned model this would need the node hierarchy
+# walked instead.
+func loadAllPrimitives(g: view Glb) pub ret MeshData {
+  let verts: List(Float) = createList(Float, cap: 0)
+  let indices: List(Int) = createList(Int, cap: 0)
+  var total: Int = 0
+  if g.ok is false {
+    ret MeshData { verts: own verts, indices: own indices, vertCount: 0 }
+  }
+  let root: JsonValue = jsonRoot(doc: g.doc)
+  let meshes: JsonValue = arrayField(g: g, obj: root, key: "meshes")
+  let meshCount: Int = jsonArrayLen(this: meshes)
+  var m: Int = 0
+  loop m < meshCount {
+    let mesh: JsonValue = jsonArrayAt(doc: g.doc, this: meshes, idx: m)
+    let prims: JsonValue = arrayField(g: g, obj: mesh, key: "primitives")
+    let primCount: Int = jsonArrayLen(this: prims)
+    var p: Int = 0
+    loop p < primCount {
+      let part: MeshData = loadPrimitive(g: g, meshIndex: m, primIndex: p)
+      var i: Int = 0
+      loop i < part.verts.length {
+        verts.add(value: part.verts.at(index: i))
+        i = i + 1
+      }
+      var k: Int = 0
+      loop k < part.indices.length {
+        indices.add(value: part.indices.at(index: k) + total)
+        k = k + 1
+      }
+      total = total + part.vertCount
+      p = p + 1
+    }
+    m = m + 1
+  }
+  ret MeshData { verts: own verts, indices: own indices, vertCount: total }
+}
+
+# Axis-aligned bounds of a loaded mesh, as six Floats:
+# [minX, minY, minZ, maxX, maxY, maxZ].
+#
+# Exporters place a model wherever it happened to sit in the authoring
+# scene — this walker sits ~13 units above its own origin — so a caller
+# that assumes models are centred on the origin puts them off-screen. This
+# lets an example FRAME whatever it loaded instead of hard-coding an
+# offset that is right for exactly one file.
+func meshBounds(m: view MeshData) pub ret List(Float) {
+  let out: List(Float) = createList(Float, cap: 6)
+  if m.vertCount is 0 {
+    var z: Int = 0
+    loop z < 6 {
+      out.add(value: 0.0)
+      z = z + 1
+    }
+    ret own out
+  }
+  var minX: Float = m.verts.at(index: 0)
+  var minY: Float = m.verts.at(index: 1)
+  var minZ: Float = m.verts.at(index: 2)
+  var maxX: Float = minX
+  var maxY: Float = minY
+  var maxZ: Float = minZ
+  var i: Int = 0
+  loop i < m.vertCount {
+    # Stride is 8: pos3, nrm3, uv2.
+    let x: Float = m.verts.at(index: i * 8)
+    let y: Float = m.verts.at(index: i * 8 + 1)
+    let z: Float = m.verts.at(index: i * 8 + 2)
+    if x < minX { minX = x }
+    if y < minY { minY = y }
+    if z < minZ { minZ = z }
+    if x > maxX { maxX = x }
+    if y > maxY { maxY = y }
+    if z > maxZ { maxZ = z }
+    i = i + 1
+  }
+  out.add(value: minX)
+  out.add(value: minY)
+  out.add(value: minZ)
+  out.add(value: maxX)
+  out.add(value: maxY)
+  out.add(value: maxZ)
+  ret own out
+}
