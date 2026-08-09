@@ -58,6 +58,75 @@ rae_String rae_ext_rae_sys_read_file(rae_String path) {
   return (rae_String){buffer, (int64_t)len, (int64_t)len + 1, 1};
 }
 
+/* Read a file as raw BYTES.
+ *
+ * rae_ext_rae_sys_read_file already opens "rb" and carries an explicit
+ * length, so binary content survives it — but the Rae-side String API
+ * decodes UTF-8 (`at` yields a Char32), so there is no way to get at
+ * individual bytes of a .glb or .png through it. This returns a Buffer
+ * whose elements are one byte each, widened to Int, which is the shape
+ * lib/png.rae and lib/gltf.rae already work in.
+ *
+ * The buffer comes from rae_ext_rae_buf_alloc so the caller frees it with
+ * rae_ext_rae_buf_free and it lands in the same accounting as every other
+ * Rae allocation. Returns NULL with *outLen = 0 when the file cannot be
+ * read; an empty file returns NULL too, which is the same "nothing to
+ * read" answer and needs no separate case at the call site.
+ */
+void* rae_ext_rae_sys_read_file_bytes(rae_String path, rae_Mod_Int64 out) {
+  int64_t* outLen = out.ptr;
+  if (outLen) *outLen = 0;
+  if (!path.data) return NULL;
+  FILE* f = fopen((const char*)path.data, "rb");
+  if (!f) return NULL;
+  fseek(f, 0, SEEK_END);
+  long len = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  if (len <= 0) { fclose(f); return NULL; }
+  int64_t* buf = (int64_t*)rae_ext_rae_buf_alloc((int64_t)len, (int64_t)sizeof(int64_t));
+  if (!buf) { fclose(f); return NULL; }
+  /* Read into a separate byte buffer, then widen. An earlier version read
+   * into the TAIL of the Int allocation and widened downward to save the
+   * second allocation; that is wrong. Writing buf[i] spans bytes
+   * [8i, 8i+8), which for the last few indices overlaps source bytes that
+   * have not been consumed yet, so the final bytes of every file came back
+   * corrupted — the .glb magic still read correctly, and the damage only
+   * showed up at the end of the buffer. Not worth one malloc. */
+  uint8_t* raw = (uint8_t*)malloc((size_t)len);
+  if (!raw) { rae_ext_rae_buf_free(buf); fclose(f); return NULL; }
+  size_t got = fread(raw, 1, (size_t)len, f);
+  fclose(f);
+  if (got != (size_t)len) { free(raw); rae_ext_rae_buf_free(buf); return NULL; }
+  for (long i = 0; i < len; i++) buf[i] = (int64_t)raw[i];
+  free(raw);
+  if (outLen) *outLen = (int64_t)len;
+  return buf;
+}
+
+/* Read a byte RANGE of a file as text.
+ *
+ * Binary containers embed text chunks — a .glb's JSON, an ID3 tag, an EXIF
+ * block — at an offset the caller has already located. Widening those
+ * bytes to Int and back through Rae would be both slow and lossy, since
+ * Rae's String indexes codepoints rather than bytes. Handing the range
+ * straight to the String constructor keeps it exact.
+ */
+rae_String rae_ext_rae_sys_read_file_text(rae_String path, int64_t offset, int64_t len) {
+  if (!path.data || len <= 0 || offset < 0) return (rae_String){NULL, 0, 0, 0};
+  FILE* f = fopen((const char*)path.data, "rb");
+  if (!f) return (rae_String){NULL, 0, 0, 0};
+  if (fseek(f, (long)offset, SEEK_SET) != 0) { fclose(f); return (rae_String){NULL, 0, 0, 0}; }
+  uint8_t* tmp = (uint8_t*)malloc((size_t)len);
+  if (!tmp) { fclose(f); return (rae_String){NULL, 0, 0, 0}; }
+  size_t got = fread(tmp, 1, (size_t)len, f);
+  fclose(f);
+  rae_String out = (got == (size_t)len)
+      ? rae_ext_rae_str_from_buf(tmp, (int64_t)len)
+      : (rae_String){NULL, 0, 0, 0};
+  free(tmp);
+  return out;
+}
+
 rae_Bool rae_ext_rae_sys_write_file(rae_String path, rae_String content) {
   if (!path.data || !content.data) return false;
   FILE* f = fopen((const char*)path.data, "wb");

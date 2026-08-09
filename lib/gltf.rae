@@ -1,0 +1,433 @@
+# gltf — glTF 2.0 binary (.glb) loading.
+#
+# Increment 1 of the skinning work (#356's last acceptance item): the
+# CONTAINER and the accessor machinery. Skins, palettes and animation
+# build on this and land separately, because a loader that cannot be
+# trusted to read a buffer correctly is not a foundation to put skinning
+# on top of.
+#
+# WHY .glb AND NOT .gltf. The binary container keeps the JSON and every
+# buffer in one file, so loading is one read with no relative-path
+# resolution and no base64 data URIs. It is also what every exporter emits
+# by default.
+#
+# LAYOUT. A 12-byte header (magic "glTF", version, total length) followed
+# by chunks, each an 8-byte header (length, type) plus payload:
+#
+#   chunk 0  type 0x4E4F534A  "JSON"  the glTF document
+#   chunk 1  type 0x004E4942  "BIN "  the buffer every accessor indexes
+#
+# The spec allows further chunks and requires readers to skip unknown
+# ones, which is why this walks the chunk list rather than assuming two.
+#
+# ACCESSORS. Vertex data is reached through three levels: an accessor says
+# "N elements of this type and component type, at this offset into a
+# bufferView"; the bufferView says "this byte range of a buffer, with this
+# stride"; the buffer is the BIN chunk. The indirection exists so several
+# attributes can interleave in one range, so the stride must be honoured
+# rather than assuming elements are packed.
+#
+# ENDIANNESS. glTF is little-endian everywhere. The readers below are
+# explicit about that instead of relying on the host, because a silent
+# byte-order assumption is the kind of thing that works on every machine
+# anyone tests on and then does not.
+import core
+import json
+import sys
+import math
+import mesh3d
+open json
+open mesh3d
+
+const glbMagic: Int = 1179937895      # "glTF" little-endian
+const chunkJson: Int = 1313821514     # "JSON"
+const chunkBin: Int = 5130562         # "BIN\0"
+
+# glTF component types, from the spec's enum.
+const compByte: Int = 5120
+const compUByte: Int = 5121
+const compShort: Int = 5122
+const compUShort: Int = 5123
+const compUInt: Int = 5125
+const compFloat: Int = 5126
+
+type Glb {
+  ok: Bool
+  errorMsg: String
+  # The JSON chunk, already parsed. Callers walk it with lib/json.
+  doc: JsonDoc
+  # Byte offset of the BIN chunk payload within `bytes`, and its length.
+  binOffset: Int
+  binLength: Int
+  bytes: List(Int)
+}
+
+# A failed load still has to return a whole Glb, so `doc` needs SOME valid
+# document. `null` is the cheapest one; an empty object cannot be written
+# here anyway, since a literal brace pair starts string interpolation.
+# Callers branch on `ok`, never on the contents of `doc`.
+func glbFailed(msg: view String) ret Glb {
+  ret Glb {
+    ok: false,
+    errorMsg: "{msg}",
+    doc: parseJson(source: "null"),
+    binOffset: 0, binLength: 0, bytes: createList(Int, cap: 0)
+  }
+}
+
+# ----- little-endian scalar readers -----------------------------------
+
+func readU32(b: view List(Int), pos: view Int) pub ret Int {
+  ret b.at(index: pos)
+    bitor (b.at(index: pos + 1) shl 8)
+    bitor (b.at(index: pos + 2) shl 16)
+    bitor (b.at(index: pos + 3) shl 24)
+}
+
+func readU16(b: view List(Int), pos: view Int) pub ret Int {
+  ret b.at(index: pos) bitor (b.at(index: pos + 1) shl 8)
+}
+
+# IEEE-754 binary32 from four bytes.
+#
+# Rae has no bit-cast between Int and Float, so this reconstructs the value
+# arithmetically: sign, exponent and mantissa are extracted and recombined
+# with a power of two. Denormals and the exponent-0 case are handled
+# explicitly — a mesh with a legitimately tiny coordinate would otherwise
+# come back as garbage rather than as a small number.
+func readF32(b: view List(Int), pos: view Int) pub ret Float {
+  let bits: Int = readU32(b: b, pos: pos)
+  let sign: Int = (bits shr 31) bitand 1
+  let exponent: Int = (bits shr 23) bitand 255
+  let mantissa: Int = bits bitand 8388607
+  var value: Float = 0.0
+  if exponent is 0 {
+    # Denormal (or zero): no implicit leading 1, fixed exponent of -126.
+    value = mantissa.toFloat() / 8388608.0 * math.pow(base: 2.0, exp: 0.0 - 126.0)
+  } else {
+    if exponent is 255 {
+      # Inf/NaN. A mesh containing either is broken; report zero rather
+      # than propagate a value that poisons every matrix it touches.
+      value = 0.0
+    } else {
+      let frac: Float = 1.0 + mantissa.toFloat() / 8388608.0
+      value = frac * math.pow(base: 2.0, exp: (exponent - 127).toFloat())
+    }
+  }
+  if sign is 1 {
+    value = 0.0 - value
+  }
+  ret value
+}
+
+# ----- container ------------------------------------------------------
+
+# Parse a .glb: validate the header, locate the JSON and BIN chunks, and
+# parse the JSON. The BIN chunk is NOT copied — accessors index into
+# `bytes` at `binOffset`, so a 500 KB model costs one read.
+func loadGlb(path: view String) pub ret Glb {
+  let bytes: List(Int) = sys.readFileBytes(path: path)
+  if bytes.length < 12 {
+    ret glbFailed(msg: "not a glb: fewer than 12 bytes at {path}")
+  }
+  if readU32(b: bytes, pos: 0) is not glbMagic {
+    ret glbFailed(msg: "not a glb: bad magic in {path}")
+  }
+  let version: Int = readU32(b: bytes, pos: 4)
+  if version is not 2 {
+    ret glbFailed(msg: "unsupported glb version {version} in {path}")
+  }
+  let total: Int = readU32(b: bytes, pos: 8)
+  if total > bytes.length {
+    ret glbFailed(msg: "truncated glb: header says {total} bytes, file has {bytes.length}")
+  }
+
+  var jsonStart: Int = 0
+  var jsonLen: Int = 0
+  var binStart: Int = 0
+  var binLen: Int = 0
+  # Walk the chunk list rather than assuming JSON-then-BIN. The spec
+  # permits extra chunks and requires unknown ones to be skipped, and a
+  # reader that assumes the order breaks on the first exporter that adds
+  # one.
+  var pos: Int = 12
+  loop pos + 8 <= total {
+    let clen: Int = readU32(b: bytes, pos: pos)
+    let ctype: Int = readU32(b: bytes, pos: pos + 4)
+    let payload: Int = pos + 8
+    if payload + clen > total {
+      ret glbFailed(msg: "truncated chunk at byte {pos} in {path}")
+    }
+    if ctype is chunkJson {
+      jsonStart = payload
+      jsonLen = clen
+    }
+    if ctype is chunkBin {
+      binStart = payload
+      binLen = clen
+    }
+    # Chunks are 4-byte aligned; the padding is inside the declared length
+    # for JSON (spaces) and BIN (zeros), so no extra rounding is needed.
+    pos = payload + clen
+  }
+  if jsonLen is 0 {
+    ret glbFailed(msg: "glb has no JSON chunk: {path}")
+  }
+
+  # The JSON chunk is read back from the file as text rather than rebuilt
+  # from `bytes`: Rae's String indexes codepoints, so assembling one byte
+  # at a time would be both quadratic and wrong for any non-ASCII string
+  # inside the document (node names routinely are).
+  let text: String = sys.readFileTextRange(path: path, offset: jsonStart, len: jsonLen)
+  let doc: JsonDoc = parseJson(source: text)
+  if doc.ok is false {
+    ret glbFailed(msg: "glb JSON chunk did not parse: {path}")
+  }
+
+  ret Glb {
+    ok: true, errorMsg: "", doc: own doc,
+    binOffset: binStart, binLength: binLen, bytes: own bytes
+  }
+}
+
+# ----- JSON convenience ------------------------------------------------
+# glTF documents are deeply nested, so reaching "the byteOffset of the
+# bufferView of the accessor of an attribute" is four lookups. These keep
+# the accessor code readable instead of a wall of valueAt(jsonField(...)).
+
+func objField(g: view Glb, obj: view JsonValue, key: view String) ret JsonValue {
+  ret valueAt(doc: g.doc, idx: jsonField(doc: g.doc, this: obj, key: key))
+}
+
+# Missing numeric fields are COMMON and legal in glTF — byteOffset,
+# byteStride and normalized are all optional with defined defaults — so a
+# missing key returns the fallback rather than being an error.
+func intField(g: view Glb, obj: view JsonValue, key: view String, fallback: view Int) ret Int {
+  let idx: Int = jsonField(doc: g.doc, this: obj, key: key)
+  if idx < 0 {
+    ret fallback
+  }
+  ret jsonInt(this: valueAt(doc: g.doc, idx: idx), fallback: fallback)
+}
+
+func arrayField(g: view Glb, obj: view JsonValue, key: view String) ret JsonValue {
+  ret objField(g: g, obj: obj, key: key)
+}
+
+# ----- accessors -------------------------------------------------------
+
+# Bytes per component, from the glTF component-type enum.
+func componentSize(componentType: view Int) ret Int {
+  if componentType is compByte { ret 1 }
+  if componentType is compUByte { ret 1 }
+  if componentType is compShort { ret 2 }
+  if componentType is compUShort { ret 2 }
+  ret 4
+}
+
+# Components per element, from the accessor's `type` string.
+func typeComponents(t: view String) ret Int {
+  if t.equals(other: "SCALAR") { ret 1 }
+  if t.equals(other: "VEC2") { ret 2 }
+  if t.equals(other: "VEC3") { ret 3 }
+  if t.equals(other: "VEC4") { ret 4 }
+  if t.equals(other: "MAT4") { ret 16 }
+  ret 0
+}
+
+type Accessor {
+  ok: Bool
+  count: Int
+  components: Int
+  componentType: Int
+  # Absolute byte offset of element 0 within Glb.bytes, and the byte step
+  # from one element to the next.
+  start: Int
+  stride: Int
+}
+
+# Resolve accessor -> bufferView -> BIN chunk into flat byte arithmetic.
+#
+# The three-level indirection exists so several attributes can share one
+# interleaved range, which is why byteStride is honoured rather than
+# assuming elements are packed end to end. When the bufferView omits it
+# the elements ARE packed and the stride is the element size.
+func accessorAt(g: view Glb, index: view Int) pub ret Accessor {
+  let root: JsonValue = jsonRoot(doc: g.doc)
+  let accessors: JsonValue = arrayField(g: g, obj: root, key: "accessors")
+  if index < 0 or index >= jsonArrayLen(this: accessors) {
+    ret Accessor { ok: false, count: 0, components: 0, componentType: 0, start: 0, stride: 0 }
+  }
+  let acc: JsonValue = jsonArrayAt(doc: g.doc, this: accessors, idx: index)
+  let typeName: String = jsonString(this: objField(g: g, obj: acc, key: "type"), fallback: "")
+  let comps: Int = typeComponents(t: typeName)
+  let compType: Int = intField(g: g, obj: acc, key: "componentType", fallback: 0)
+  let count: Int = intField(g: g, obj: acc, key: "count", fallback: 0)
+  if comps is 0 or count is 0 {
+    ret Accessor { ok: false, count: 0, components: 0, componentType: 0, start: 0, stride: 0 }
+  }
+  let elemSize: Int = comps * componentSize(componentType: compType)
+
+  let bvIndex: Int = intField(g: g, obj: acc, key: "bufferView", fallback: 0 - 1)
+  if bvIndex < 0 {
+    # A bufferView-less accessor is legal and means "all zeros" (used for
+    # sparse bases). Report it as empty rather than reading from offset 0,
+    # which would silently return whatever the previous attribute holds.
+    ret Accessor { ok: false, count: 0, components: 0, componentType: 0, start: 0, stride: 0 }
+  }
+  let views: JsonValue = arrayField(g: g, obj: root, key: "bufferViews")
+  let bv: JsonValue = jsonArrayAt(doc: g.doc, this: views, idx: bvIndex)
+  let bvOffset: Int = intField(g: g, obj: bv, key: "byteOffset", fallback: 0)
+  var stride: Int = intField(g: g, obj: bv, key: "byteStride", fallback: 0)
+  if stride is 0 {
+    stride = elemSize
+  }
+  let accOffset: Int = intField(g: g, obj: acc, key: "byteOffset", fallback: 0)
+  ret Accessor {
+    ok: true, count: count, components: comps, componentType: compType,
+    start: g.binOffset + bvOffset + accOffset, stride: stride
+  }
+}
+
+# Read a float accessor as a flat list, `components` values per element.
+# Integer component types are normalised to [0,1] the way the spec says,
+# which is what WEIGHTS_0 stored as ubyte needs.
+func readFloats(g: view Glb, index: view Int) pub ret List(Float) {
+  let a: Accessor = accessorAt(g: g, index: index)
+  let out: List(Float) = createList(Float, cap: a.count * a.components)
+  if a.ok is false {
+    ret own out
+  }
+  let compSize: Int = componentSize(componentType: a.componentType)
+  var e: Int = 0
+  loop e < a.count {
+    var c: Int = 0
+    loop c < a.components {
+      let at: Int = a.start + e * a.stride + c * compSize
+      if a.componentType is compFloat {
+        out.add(value: readF32(b: g.bytes, pos: at))
+      } else {
+        if a.componentType is compUByte {
+          out.add(value: g.bytes.at(index: at).toFloat() / 255.0)
+        } else {
+          if a.componentType is compUShort {
+            out.add(value: readU16(b: g.bytes, pos: at).toFloat() / 65535.0)
+          } else {
+            out.add(value: 0.0)
+          }
+        }
+      }
+      c = c + 1
+    }
+    e = e + 1
+  }
+  ret own out
+}
+
+# Read an integer accessor as a flat list. Indices are ushort or uint in
+# practice; joint indices are ubyte or ushort.
+func readInts(g: view Glb, index: view Int) pub ret List(Int) {
+  let a: Accessor = accessorAt(g: g, index: index)
+  let out: List(Int) = createList(Int, cap: a.count * a.components)
+  if a.ok is false {
+    ret own out
+  }
+  let compSize: Int = componentSize(componentType: a.componentType)
+  var e: Int = 0
+  loop e < a.count {
+    var c: Int = 0
+    loop c < a.components {
+      let at: Int = a.start + e * a.stride + c * compSize
+      if a.componentType is compUByte {
+        out.add(value: g.bytes.at(index: at))
+      } else {
+        if a.componentType is compUShort {
+          out.add(value: readU16(b: g.bytes, pos: at))
+        } else {
+          out.add(value: readU32(b: g.bytes, pos: at))
+        }
+      }
+      c = c + 1
+    }
+    e = e + 1
+  }
+  ret own out
+}
+
+# ----- mesh ------------------------------------------------------------
+
+# Load one primitive as a `mesh3d.MeshData`: interleaved pos3/nrm3/uv2 per
+# vertex plus a triangle index list, which is the layout gpu3d uploads.
+#
+# A primitive missing NORMAL or TEXCOORD_0 is legal glTF; both are filled
+# with defaults rather than refused, so a model exported without UVs still
+# renders instead of failing to load. A missing POSITION is not
+# recoverable and returns an empty mesh.
+func loadPrimitive(g: view Glb, meshIndex: view Int, primIndex: view Int) pub ret MeshData {
+  let root: JsonValue = jsonRoot(doc: g.doc)
+  let meshes: JsonValue = arrayField(g: g, obj: root, key: "meshes")
+  let mesh: JsonValue = jsonArrayAt(doc: g.doc, this: meshes, idx: meshIndex)
+  let prims: JsonValue = arrayField(g: g, obj: mesh, key: "primitives")
+  let prim: JsonValue = jsonArrayAt(doc: g.doc, this: prims, idx: primIndex)
+  let attrs: JsonValue = objField(g: g, obj: prim, key: "attributes")
+
+  let posAcc: Int = intField(g: g, obj: attrs, key: "POSITION", fallback: 0 - 1)
+  let nrmAcc: Int = intField(g: g, obj: attrs, key: "NORMAL", fallback: 0 - 1)
+  let uvAcc: Int = intField(g: g, obj: attrs, key: "TEXCOORD_0", fallback: 0 - 1)
+  let idxAcc: Int = intField(g: g, obj: prim, key: "indices", fallback: 0 - 1)
+
+  let verts: List(Float) = createList(Float, cap: 0)
+  let indices: List(Int) = createList(Int, cap: 0)
+  if posAcc < 0 {
+    ret MeshData { verts: own verts, indices: own indices, vertCount: 0 }
+  }
+
+  let pos: List(Float) = readFloats(g: g, index: posAcc)
+  let vertCount: Int = pos.length / 3
+  let nrm: List(Float) = readFloats(g: g, index: nrmAcc)
+  let uv: List(Float) = readFloats(g: g, index: uvAcc)
+  let hasNrm: Bool = nrm.length >= vertCount * 3
+  let hasUv: Bool = uv.length >= vertCount * 2
+
+  var i: Int = 0
+  loop i < vertCount {
+    var nx: Float = 0.0
+    var ny: Float = 0.0
+    var nz: Float = 1.0
+    if hasNrm {
+      nx = nrm.at(index: i * 3)
+      ny = nrm.at(index: i * 3 + 1)
+      nz = nrm.at(index: i * 3 + 2)
+    }
+    var u: Float = 0.0
+    var v: Float = 0.0
+    if hasUv {
+      u = uv.at(index: i * 2)
+      v = uv.at(index: i * 2 + 1)
+    }
+    pushVert(
+      verts: verts,
+      px: pos.at(index: i * 3), py: pos.at(index: i * 3 + 1), pz: pos.at(index: i * 3 + 2),
+      nx: nx, ny: ny, nz: nz, u: u, v: v
+    )
+    i = i + 1
+  }
+
+  if idxAcc >= 0 {
+    let src: List(Int) = readInts(g: g, index: idxAcc)
+    var k: Int = 0
+    loop k < src.length {
+      indices.add(value: src.at(index: k))
+      k = k + 1
+    }
+  } else {
+    # Non-indexed primitive: vertices are already in triangle order, so a
+    # trivial index list keeps one upload path instead of two.
+    var k: Int = 0
+    loop k < vertCount {
+      indices.add(value: k)
+      k = k + 1
+    }
+  }
+  ret MeshData { verts: own verts, indices: own indices, vertCount: vertCount }
+}

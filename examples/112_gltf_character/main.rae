@@ -1,0 +1,153 @@
+# glTF character — loading a real skinned model (#356 skinning arc).
+#
+# Renders the mesh of a 39-joint glTF character loaded from .glb at
+# runtime, in its BIND POSE. The skin and its Mat3x4 palette come next,
+# then animation; this increment proves the loader reads real exported
+# geometry correctly, which is the thing skinning has to stand on.
+#
+# WHY BIND POSE FIRST. A skinned mesh in bind pose is exactly the mesh
+# glTF stores — no joint transforms applied. So if this renders correctly,
+# positions, normals, UVs and the index buffer are all being read right,
+# and any later breakage is attributable to the skinning maths rather than
+# to the loader. Skipping this step means debugging both at once.
+#
+# THIS EXAMPLE NEEDS A MODEL YOU SUPPLY. `assets/character.glb` is not in
+# the repository: the model this was developed against turned out to carry
+# unclear third-party licensing, and a language repo is the wrong place to
+# inherit that. Drop any skinned glTF binary at that path and it will
+# load — the loader reads standard glTF 2.0, not a particular model.
+#
+# Known-good, clearly-licensed options are the Khronos glTF-Sample-Models
+# (CesiumMan and RiggedFigure are both skinned characters with documented
+# licences). Without a model the example exits with a message rather than
+# rendering, which is why the example harness only compile-checks it.
+#
+# The character is upright in Y-up glTF space; Rae is Z-up
+# (docs/coordinate-system.md), so the transform below rotates it.
+#
+# Compiled-target only; needs wgpu-native + SDL3.
+#   rae run --target compiled main.rae
+# Headless screenshot:
+#   RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT=/tmp/char.bmp \
+#     rae run --target compiled main.rae
+import core
+import math
+import gpu2d
+import vec3
+import gltf
+open scene3d
+open gpu3d
+open renderer3d
+open rendergraph
+open math3d
+open mesh3d
+open gltf
+
+func uploadMeshData(m: view MeshData) ret MeshHandle {
+  ret uploadMesh(verts: m.verts, vertCount: m.vertCount, indices: m.indices)
+}
+
+func main() ret Int {
+  gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — glTF character (bind pose)")
+
+  let g: Glb = loadGlb(path: "examples/112_gltf_character/assets/character.glb")
+  if g.ok is false {
+    log("[gltf] {g.errorMsg}")
+    log("[gltf] place a skinned .glb at assets/character.glb — see the note at the top of this file")
+    gpu2d.closeWindow()
+    ret 1
+  }
+  let charData: MeshData = loadPrimitive(g: g, meshIndex: 0, primIndex: 0)
+  if charData.vertCount is 0 {
+    log("[gltf] primitive had no POSITION accessor")
+    gpu2d.closeWindow()
+    ret 1
+  }
+  log("[gltf] character: {charData.vertCount} verts, {charData.indices.length / 3} triangles")
+
+  let planeData: MeshData = makePlane(size: 20.0, segments: 1)
+  let character: MeshHandle = uploadMeshData(m: charData)
+  let ground: MeshHandle = uploadMeshData(m: planeData)
+
+  var scene: Scene3d = createScene3d()
+  let noEmit: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let noRot: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+
+  let skinMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.78, y: 0.66, z: 0.58), metallic: 0.0, roughness: 0.62, emission: noEmit)
+  # glTF is Y-up; Rae is Z-up. A +90 degree turn about X maps one to the
+  # other. The model is also authored in centimetres-ish units, so it is
+  # scaled to something that shares a scene with a 20-unit ground plane.
+  let charE: Int = addMeshInstance(
+    scene: scene, mesh: character, material: skinMat,
+    position: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0),
+    rotation: vec3.create(x: 1.5707963, y: 0.0, z: 0.0),
+    scale: vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  )
+
+  let groundMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.40, y: 0.41, z: 0.43), metallic: 0.0, roughness: 0.9, emission: noEmit)
+  let groundE: Int = addMeshInstance(
+    scene: scene, mesh: ground, material: groundMat,
+    position: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0), rotation: noRot,
+    scale: vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  )
+
+  var camera: Camera3d = defaultCamera3d()
+  var light: Light3d = defaultLight3d()
+  # Aim at the character's midriff rather than the origin under its
+  # feet, so it sits centred in frame instead of low in it.
+  camera.target = vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.25)
+
+  var renderer: Renderer3d = createRenderer3d()
+  let gs: Int = compileRenderer(r: renderer)
+  if gs is not 0 {
+    log("render graph invalid: {statusName(status: gs)}")
+    gpu2d.closeWindow()
+    ret 1
+  }
+
+  var yaw: Float = 0.0
+  var pitch: Float = 0.25
+  var dist: Float = 2.6
+  var lastX: Float = 0.0
+  var lastY: Float = 0.0
+  var dragging: Bool = false
+  let startT: Float64 = gpu2d.nowSeconds()
+
+  loop not gpu2d.pollClose() {
+    let px: Float = gpu2d.pointerX()
+    let py: Float = gpu2d.pointerY()
+    if gpu2d.pointerDown() {
+      if dragging {
+        yaw = yaw + (px - lastX) * 0.008
+        pitch = pitch - (py - lastY) * 0.008
+        if pitch > 1.45 {
+          pitch = 1.45
+        }
+        if pitch < 0.0 - 1.45 {
+          pitch = 0.0 - 1.45
+        }
+      }
+      dragging = true
+    } else {
+      dragging = false
+    }
+    lastX = px
+    lastY = py
+    dist = dist - gpu2d.wheelMove() * 0.4
+    if dist < 1.5 {
+      dist = 1.5
+    }
+    if dist > 20.0 {
+      dist = 20.0
+    }
+
+    let t: Float = (gpu2d.nowSeconds() - startT) as Float
+    camera.position = orbitEye(targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z, yaw: yaw, pitch: pitch, dist: dist)
+    let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
+    renderFrame(r: renderer, scene: scene, camera: camera, light: light, aspect: aspect, time: t)
+    snapshotPrevTransforms(scene: scene)
+  }
+  shutdown()
+  gpu2d.closeWindow()
+  ret 0
+}
