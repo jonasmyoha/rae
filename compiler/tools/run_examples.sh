@@ -67,6 +67,24 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" "$TMP_OUT/overflow.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
+        elif [ "$EXAMPLE_NAME" = "112_gltf_character" ]; then
+          # The glTF loader gate. Asserts the COUNTS it reports, not just
+          # that something rendered: a loader reading half a buffer still
+          # draws a plausible blob, and counts are the cheapest thing that
+          # cannot be faked by accident. 1728 verts / 576 triangles is the
+          # Khronos Fox — non-indexed, hence exactly verts/3 triangles.
+          SHOT="$TMP_OUT/gltf-character.bmp"
+          if (cd .. && RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
+                perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             && python3 tools/assert_nonblank_bmp.py "$SHOT" --min-colors=20 > "$TMP_OUT/shot.log" 2>&1 \
+             && [ "$(grep -c "character: 1728 verts, 576 triangles" "$TMP_OUT/render.log")" -eq 1 ]; then
+            echo "PASS: $EXAMPLE_NAME (glb loaded: 1728 verts / 576 tris, non-blank render)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (glTF character)"
+            cat "$TMP_OUT/render.log" "$TMP_OUT/shot.log" 2>/dev/null | sed 's/^/  /'
+            ((FAILED++))
+          fi
         elif [ "$EXAMPLE_NAME" = "111_deferred_gbuffer" ]; then
           # The deferred G-buffer (#356). Each channel is checked separately
           # because they fail differently: a broken albedo write still leaves

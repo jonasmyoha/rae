@@ -11,19 +11,16 @@
 # and any later breakage is attributable to the skinning maths rather than
 # to the loader. Skipping this step means debugging both at once.
 #
-# THIS EXAMPLE NEEDS A MODEL YOU SUPPLY. `assets/character.glb` is not in
-# the repository: the model this was developed against turned out to carry
-# unclear third-party licensing, and a language repo is the wrong place to
-# inherit that. Drop any skinned glTF binary at that path and it will
-# load — the loader reads standard glTF 2.0, not a particular model.
+# THE MODEL. `assets/character.glb` is the Khronos Fox sample — CC0 model,
+# CC-BY rigging — with its licence recorded in assets/ATTRIBUTION.md. It
+# was chosen for being clearly licensed AND for being awkward: it ships no
+# NORMAL attribute and no index buffer, so it exercises the spec's
+# flat-normal generation and the non-indexed path rather than the easy
+# case every exporter produces. Any rigged .glb can replace it.
 #
-# Known-good, clearly-licensed options are the Khronos glTF-Sample-Models
-# (CesiumMan and RiggedFigure are both skinned characters with documented
-# licences). Without a model the example exits with a message rather than
-# rendering, which is why the example harness only compile-checks it.
-#
-# The character is upright in Y-up glTF space; Rae is Z-up
-# (docs/coordinate-system.md), so the transform below rotates it.
+# The model is Y-up (glTF's convention); Rae is Z-up
+# (docs/coordinate-system.md), so the transform below rotates it. It is
+# also authored at roughly 80 units tall, hence the scale.
 #
 # Compiled-target only; needs wgpu-native + SDL3.
 #   rae run --target compiled main.rae
@@ -53,7 +50,7 @@ func main() ret Int {
   let g: Glb = loadGlb(path: "examples/112_gltf_character/assets/character.glb")
   if g.ok is false {
     log("[gltf] {g.errorMsg}")
-    log("[gltf] place a skinned .glb at assets/character.glb — see the note at the top of this file")
+    log("[gltf] expected a rigged .glb at assets/character.glb — see assets/ATTRIBUTION.md")
     gpu2d.closeWindow()
     ret 1
   }
@@ -74,14 +71,15 @@ func main() ret Int {
   let noRot: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
 
   let skinMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.78, y: 0.66, z: 0.58), metallic: 0.0, roughness: 0.62, emission: noEmit)
-  # glTF is Y-up; Rae is Z-up. A +90 degree turn about X maps one to the
-  # other. The model is also authored in centimetres-ish units, so it is
-  # scaled to something that shares a scene with a 20-unit ground plane.
+  # glTF is Y-up; Rae is Z-up, so a +90 degree turn about X maps one to
+  # the other. The Fox is authored ~80 units tall, so it is scaled to
+  # share a scene with a 20-unit ground plane rather than dwarfing it.
+  let modelScale: Float = 0.025
   let charE: Int = addMeshInstance(
     scene: scene, mesh: character, material: skinMat,
     position: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0),
     rotation: vec3.create(x: 1.5707963, y: 0.0, z: 0.0),
-    scale: vec3.create(x: 1.0, y: 1.0, z: 1.0)
+    scale: vec3.create(x: modelScale, y: modelScale, z: modelScale)
   )
 
   let groundMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.40, y: 0.41, z: 0.43), metallic: 0.0, roughness: 0.9, emission: noEmit)
@@ -105,9 +103,11 @@ func main() ret Int {
     ret 1
   }
 
-  var yaw: Float = 0.0
-  var pitch: Float = 0.25
-  var dist: Float = 2.6
+  # Three-quarter view: head-on hides the silhouette that makes the
+  # flat-shaded faceting legible.
+  var yaw: Float = 0.9
+  var pitch: Float = 0.30
+  var dist: Float = 4.0
   var lastX: Float = 0.0
   var lastY: Float = 0.0
   var dragging: Bool = false
