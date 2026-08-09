@@ -6,12 +6,23 @@
 # primitives, every one of them indexed and carrying normals. Between them
 # they cover both ends of what real exporters produce.
 #
-# WHAT THIS EXAMPLE EXISTS TO PROVE. `loadAllPrimitives` merges every
-# primitive of every mesh into one buffer, rebasing each primitive's
-# indices by the running vertex total. A character is rarely one
-# primitive — glTF splits geometry per material — and loading only the
-# first renders a disembodied fragment that looks like a broken import
-# rather than a partial one.
+# WHAT THIS EXAMPLE EXISTS TO PROVE. Each of the model's twelve
+# primitives is loaded and drawn SEPARATELY, so each can carry its own
+# material. A character is rarely one primitive — glTF splits geometry
+# per material — and loading only the first renders a disembodied
+# fragment that looks like a broken import rather than a partial one.
+# (`loadAllPrimitives` merges them into one buffer instead, which is
+# cheaper but cannot keep per-primitive materials.)
+#
+# COLOURS ARE AUTHORED HERE, NOT LOADED. This model carries no colour of
+# its own: its glTF materials have no baseColorFactor, its COLOR_0
+# attribute is uniformly white, and the "colors_texture" PNG beside it in
+# the Unity project is an unused backup whose UVs do not match the mesh —
+# every vertex samples the blank region. In Unity it rendered grey through
+# a toon shader whose material colours are also grey. So the palette below
+# is a choice, matched to primitives by their authored mesh names, and
+# would be replaced by real material data the moment the model carries
+# any.
 #
 # FRAMING IS COMPUTED, NOT HARD-CODED. Exporters leave a model wherever it
 # sat in the authoring scene; this one sits about 13 units above its own
@@ -48,6 +59,33 @@ func uploadMeshData(m: view MeshData) ret MeshHandle {
   ret uploadMesh(verts: m.verts, vertCount: m.vertCount, indices: m.indices)
 }
 
+# Colour for a part, keyed on its authored mesh name.
+#
+# Name-matching is a blunt instrument and it is used here only because the
+# model supplies nothing better: no material colours, no usable vertex
+# colours, no matching texture. A model that carries real materials should
+# read them instead — this function is the seam where that swap happens.
+#
+# The names come from the modelling tool ("flicka" is the body, the
+# primitives named after Blender primitives are the props), so they are
+# stable for THIS model and meaningless for any other.
+func colorForPart(name: view String) ret Vec3 {
+  if name.startsWith(prefix: "flicka") {
+    # Body and clothing: warm skin tone.
+    ret vec3.create(x: 0.85, y: 0.68, z: 0.55)
+  }
+  if name.startsWith(prefix: "Torus") {
+    ret vec3.create(x: 0.72, y: 0.24, z: 0.22)
+  }
+  if name.startsWith(prefix: "Cylinder") {
+    ret vec3.create(x: 0.52, y: 0.38, z: 0.24)
+  }
+  if name.startsWith(prefix: "Cube") {
+    ret vec3.create(x: 0.30, y: 0.42, z: 0.58)
+  }
+  ret vec3.create(x: 0.70, y: 0.70, z: 0.72)
+}
+
 func main() ret Int {
   gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — walker character (bind pose)")
 
@@ -58,6 +96,8 @@ func main() ret Int {
     gpu2d.closeWindow()
     ret 1
   }
+  # Load once merged, purely to measure the whole model's bounds — the
+  # framing below has to consider every part, not just the first.
   let charData: MeshData = loadAllPrimitives(g: g)
   if charData.vertCount is 0 {
     log("[gltf] model contained no readable primitives")
@@ -86,7 +126,6 @@ func main() ret Int {
   log("[gltf] bounds height {height}, scale {modelScale}")
 
   let planeData: MeshData = makePlane(size: 20.0, segments: 1)
-  let character: MeshHandle = uploadMeshData(m: charData)
   let ground: MeshHandle = uploadMeshData(m: planeData)
 
   var scene: Scene3d = createScene3d()
@@ -94,20 +133,49 @@ func main() ret Int {
   let noRot: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let groundZ: Float = 0.0 - 1.0
 
-  let bodyMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.72, y: 0.60, z: 0.52), metallic: 0.0, roughness: 0.65, emission: noEmit)
   # Y-up -> Z-up is +90 degrees about X. After that rotation the model's
   # own Y becomes world Z, so the Y-based offsets below are applied along
-  # the axes they land on rather than the ones they came from.
-  let charE: Int = addMeshInstance(
-    scene: scene, mesh: character, material: bodyMat,
-    position: vec3.create(
-      x: 0.0 - midX * modelScale,
-      y: 0.0 - midZ * modelScale,
-      z: groundZ - footY * modelScale
-    ),
-    rotation: vec3.create(x: 1.5707963, y: 0.0, z: 0.0),
-    scale: vec3.create(x: modelScale, y: modelScale, z: modelScale)
+  # the axes they land on rather than the ones they came from. Every part
+  # shares this transform, which is what keeps them assembled.
+  let partPos: Vec3 = vec3.create(
+    x: 0.0 - midX * modelScale,
+    y: 0.0 - midZ * modelScale,
+    z: groundZ - footY * modelScale
   )
+  let partRot: Vec3 = vec3.create(x: 1.5707963, y: 0.0, z: 0.0)
+  let partScale: Vec3 = vec3.create(x: modelScale, y: modelScale, z: modelScale)
+
+  # One instance per primitive, each with its own material. The colour is
+  # chosen from the primitive's authored mesh name, which is the only
+  # handle on which body part it is when the materials carry nothing.
+  var parts: Int = 0
+  var mi: Int = 0
+  loop mi < meshCount(g: g) {
+    let name: String = meshName(g: g, meshIndex: mi)
+    let tint: Vec3 = colorForPart(name: name)
+    var rough: Float = 0.68
+    if name.startsWith(prefix: "Cylinder") {
+      # The staff and its metal fittings read as the one non-cloth
+      # surface, so they get the only low-roughness material.
+      rough = 0.35
+    }
+    let mat: Int = addMaterial(scene: scene, baseColor: tint, metallic: 0.0, roughness: rough, emission: noEmit)
+    var pi: Int = 0
+    loop pi < primitiveCount(g: g, meshIndex: mi) {
+      let part: MeshData = loadPrimitive(g: g, meshIndex: mi, primIndex: pi)
+      if part.vertCount > 0 {
+        let handle: MeshHandle = uploadMeshData(m: part)
+        let e: Int = addMeshInstance(
+          scene: scene, mesh: handle, material: mat,
+          position: partPos, rotation: partRot, scale: partScale
+        )
+        parts = parts + 1
+      }
+      pi = pi + 1
+    }
+    mi = mi + 1
+  }
+  log("[gltf] parts drawn: {parts}")
 
   let groundMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.40, y: 0.41, z: 0.43), metallic: 0.0, roughness: 0.9, emission: noEmit)
   let groundE: Int = addMeshInstance(
