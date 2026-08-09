@@ -1,0 +1,21 @@
+pack GltfCharacter {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "3D Renderer — glTF Character Loader — Claude Fable"
+  description: "Loads a rigged glTF 2.0 binary (.glb) at runtime and renders it in bind pose. The .glb container and its accessor layer are implemented in pure Rae (lib/gltf.rae): chunk walking, bufferView/accessor resolution with byteStride, and IEEE-754 float decoding without an Int/Float bit-cast. The sample model ships no NORMAL attribute and no index buffer, so it exercises the spec's flat-normal generation and the non-indexed path rather than the easy case. Skinning (a Mat3x4 joint palette) and animation sampling follow. Interactive orbit camera: drag to rotate, wheel to zoom."
+  category: "3D Renderer"
+  display: {
+    width: 1280
+    height: 800
+  }
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "main.rae"
+      sources: {
+        source: { path: ".", emit: compiled }
+      }
+    }
+  }
+}
