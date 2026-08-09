@@ -384,10 +384,84 @@ func loadPrimitive(g: view Glb, meshIndex: view Int, primIndex: view Int) pub re
 
   let pos: List(Float) = readFloats(g: g, index: posAcc)
   let vertCount: Int = pos.length / 3
-  let nrm: List(Float) = readFloats(g: g, index: nrmAcc)
+  var nrm: List(Float) = readFloats(g: g, index: nrmAcc)
   let uv: List(Float) = readFloats(g: g, index: uvAcc)
-  let hasNrm: Bool = nrm.length >= vertCount * 3
+  var hasNrm: Bool = nrm.length >= vertCount * 3
   let hasUv: Bool = uv.length >= vertCount * 2
+
+  # Read the index list up front: flat-normal generation below needs to
+  # know which vertices share a face, and a non-indexed primitive is just
+  # the identity index list.
+  let tri: List(Int) = createList(Int, cap: vertCount)
+  if idxAcc >= 0 {
+    let src: List(Int) = readInts(g: g, index: idxAcc)
+    var k: Int = 0
+    loop k < src.length {
+      tri.add(value: src.at(index: k))
+      k = k + 1
+    }
+  } else {
+    var k: Int = 0
+    loop k < vertCount {
+      tri.add(value: k)
+      k = k + 1
+    }
+  }
+
+  # NORMAL is OPTIONAL in glTF, and the spec says a client must then
+  # compute FLAT face normals — not pick a constant. Real exports rely on
+  # this (the Khronos Fox sample ships no normals at all), and defaulting
+  # to a fixed +Z instead lights every face identically, which reads as a
+  # flat silhouette rather than as a missing attribute.
+  #
+  # Flat, not smoothed: the spec is explicit, and averaging across shared
+  # vertices would round off hard edges the artist may have meant. Each
+  # triangle writes its own geometric normal to its three corners; where
+  # vertices are shared the last triangle wins, which is the accepted cost
+  # of flat shading an indexed mesh.
+  if hasNrm is false {
+    nrm = createList(Float, cap: vertCount * 3)
+    var z: Int = 0
+    loop z < vertCount * 3 {
+      nrm.add(value: 0.0)
+      z = z + 1
+    }
+    var f: Int = 0
+    loop f + 2 < tri.length {
+      let i0: Int = tri.at(index: f)
+      let i1: Int = tri.at(index: f + 1)
+      let i2: Int = tri.at(index: f + 2)
+      let ax: Float = pos.at(index: i1 * 3) - pos.at(index: i0 * 3)
+      let ay: Float = pos.at(index: i1 * 3 + 1) - pos.at(index: i0 * 3 + 1)
+      let az: Float = pos.at(index: i1 * 3 + 2) - pos.at(index: i0 * 3 + 2)
+      let bx: Float = pos.at(index: i2 * 3) - pos.at(index: i0 * 3)
+      let by: Float = pos.at(index: i2 * 3 + 1) - pos.at(index: i0 * 3 + 1)
+      let bz: Float = pos.at(index: i2 * 3 + 2) - pos.at(index: i0 * 3 + 2)
+      var cx: Float = ay * bz - az * by
+      var cy: Float = az * bx - ax * bz
+      var cz: Float = ax * by - ay * bx
+      let len: Float = math.sqrt(x: cx * cx + cy * cy + cz * cz)
+      # A degenerate triangle has no normal to give. Leave its corners at
+      # zero rather than dividing by it; a neighbouring face will usually
+      # overwrite them, and a zero normal is at least obviously wrong
+      # rather than a NaN that propagates through the whole lighting pass.
+      if len > 0.0 {
+        cx = cx / len
+        cy = cy / len
+        cz = cz / len
+        var c: Int = 0
+        loop c < 3 {
+          let vi: Int = tri.at(index: f + c)
+          nrm.set(index: vi * 3, value: cx)
+          nrm.set(index: vi * 3 + 1, value: cy)
+          nrm.set(index: vi * 3 + 2, value: cz)
+          c = c + 1
+        }
+      }
+      f = f + 3
+    }
+    hasNrm = true
+  }
 
   var i: Int = 0
   loop i < vertCount {
@@ -413,21 +487,12 @@ func loadPrimitive(g: view Glb, meshIndex: view Int, primIndex: view Int) pub re
     i = i + 1
   }
 
-  if idxAcc >= 0 {
-    let src: List(Int) = readInts(g: g, index: idxAcc)
-    var k: Int = 0
-    loop k < src.length {
-      indices.add(value: src.at(index: k))
-      k = k + 1
-    }
-  } else {
-    # Non-indexed primitive: vertices are already in triangle order, so a
-    # trivial index list keeps one upload path instead of two.
-    var k: Int = 0
-    loop k < vertCount {
-      indices.add(value: k)
-      k = k + 1
-    }
+  # `tri` was already resolved above (indexed or the identity list for a
+  # non-indexed primitive), so there is one upload path rather than two.
+  var k: Int = 0
+  loop k < tri.length {
+    indices.add(value: tri.at(index: k))
+    k = k + 1
   }
   ret MeshData { verts: own verts, indices: own indices, vertCount: vertCount }
 }
