@@ -283,3 +283,42 @@ func uploadMesh(verts: view List(Float), vertCount: view Int, indices: view List
   let raw: Int = meshCreate(verts: verts.data, vertCount: vertCount, indices: indices.data, indexCount: indices.length)
   ret meshHandle(id: raw, generation: 0)
 }
+
+# ----- skinned meshes (#374) ------------------------------------------
+# A second vertex format and pipeline for skeletally animated geometry.
+# Separate from the static path because a ground plane should not carry
+# joint indices it can never read — see runtime_gpu3d_skin.c.
+func skinnedMeshCreate(verts: view Buffer(Float), vertCount: Int, indices: view Buffer(Int), indexCount: Int) extern ret Int
+func setPalette(rows: view Buffer(Float), jointCount: Int) extern
+func drawSkinned(mesh: Int, model: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float) extern
+func skinFrameBegin() extern
+func skinDrawCount() extern ret Int
+func skinShutdown() extern
+
+# Upload a skinned mesh. `verts` is 16 Floats per vertex: pos3, nrm3, uv2,
+# four joint indices (as Floats) and four weights.
+func uploadSkinnedMesh(verts: view List(Float), vertCount: view Int, indices: view List(Int)) pub ret MeshHandle {
+  let id: Int = skinnedMeshCreate(verts: verts.data, vertCount: vertCount, indices: indices.data, indexCount: indices.length)
+  if id is 0 {
+    ret meshHandleNone()
+  }
+  ret meshHandle(id: id, generation: 1)
+}
+
+# Upload the joint palette for this frame: 12 Floats per joint, three vec4
+# rows of an affine transform. Per FRAME, not per draw — every part of a
+# character shares one skeleton.
+func uploadPalette(rows: view List(Float), jointCount: view Int) pub {
+  setPalette(rows: rows.data, jointCount: jointCount)
+}
+
+func drawSkinnedInstance(mesh: view MeshHandle, model: view Mat4, material: view Material3d) pub {
+  if not meshHandleIsValid(h: mesh) {
+    ret
+  }
+  drawSkinned(
+    mesh: mesh.id, model: model,
+    r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
+    metallic: material.metallic, roughness: material.roughness
+  )
+}
