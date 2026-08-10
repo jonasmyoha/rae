@@ -697,9 +697,18 @@ func main() ret Int {
             count: 3, resolution: 2048, lambda: 0.7, backExtent: 30.0
           )
           beginShadowPass(c: cascades)
-          if uiState.activeScene is 1 { renderSceneShadow(scene: scene1.scene) }
-          if uiState.activeScene is 2 { renderSceneShadow(scene: scene2.scene) }
-          if uiState.activeScene is 3 { renderSceneShadow(scene: scene3.scene) }
+          if uiState.activeScene is 1 {
+            renderSceneShadow(scene: scene1.scene)
+            renderSceneShadowSdf(scene: scene1.scene)
+          }
+          if uiState.activeScene is 2 {
+            renderSceneShadow(scene: scene2.scene)
+            renderSceneShadowSdf(scene: scene2.scene)
+          }
+          if uiState.activeScene is 3 {
+            renderSceneShadow(scene: scene3.scene)
+            renderSceneShadowSdf(scene: scene3.scene)
+          }
           endShadowPass()
           if shadowLogged is false {
             log("[shadow] casters {shadowCasterCount()}, {cascades.count} cascades at {cascades.resolution}")

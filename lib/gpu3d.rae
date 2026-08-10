@@ -170,6 +170,55 @@ func drawInstance(mesh: view MeshHandle, transform: view Transform3d, prevTransf
 # no materials and no previous transforms, and skips the SDF metaball
 # clusters entirely — those have no triangles, and shadowing them is
 # Layer C's job once the GI representation exists (#386).
+# Submit a scene's metaball clusters as shadow CASTERS. They have no
+# triangles, so the cascade pass raymarches the field from the light
+# instead of rasterising — see the note in runtime_gpu3d_shadow.c. Cluster
+# discovery mirrors the render walk exactly, or a blob would cast a shadow
+# that does not match its shape.
+func renderSceneShadowSdf(scene: view Scene3d) pub {
+  if scene.sdfPrimitives.length is 0 {
+    ret
+  }
+  var clusterScan: Int = 0
+  loop clusterScan < scene.sdfPrimitives.length {
+    let head: SdfPrimitive = scene.sdfPrimitives.at(index: clusterScan)
+    var alreadyDrawn: Bool = false
+    var back: Int = 0
+    loop back < clusterScan {
+      let prior: SdfPrimitive = scene.sdfPrimitives.at(index: back)
+      if prior.shape is 0 {
+        if prior.cluster is head.cluster { alreadyDrawn = true }
+      }
+      back = back + 1
+    }
+    if head.shape is 0 {
+      if alreadyDrawn is false {
+        let packed: List(Float) = createList(Float, cap: scene.sdfPrimitives.length * 4)
+        var ballCount: Int = 0
+        var i: Int = 0
+        loop i < scene.sdfPrimitives.length {
+          let sdf: SdfPrimitive = scene.sdfPrimitives.at(index: i)
+          if sdf.shape is 0 {
+            if sdf.cluster is head.cluster {
+              let t: Transform3d = scene.transforms.at(index: sdf.entity)
+              packed.add(value: t.position.x)
+              packed.add(value: t.position.y)
+              packed.add(value: t.position.z)
+              packed.add(value: t.scale.x)
+              ballCount = ballCount + 1
+            }
+          }
+          i = i + 1
+        }
+        if ballCount > 0 {
+          shadowMetaballs(packedBalls: packed.data, count: ballCount, smoothing: head.smoothing)
+        }
+      }
+    }
+    clusterScan = clusterScan + 1
+  }
+}
+
 func renderSceneShadow(scene: view Scene3d) pub {
   var i: Int = 0
   loop i < scene.meshRenderers.length {
@@ -312,6 +361,7 @@ func shadowBegin(cascades: view Buffer(Float), count: Int, resolution: Int,
                  depthRange: view Buffer(Float)) extern
 func shadowDraw(mesh: Int, model: view Mat4) extern
 func shadowDrawSkinned(mesh: Int, model: view Mat4) extern
+func shadowMetaballs(packedBalls: view Buffer(Float), count: Int, smoothing: Float) extern
 func shadowEnd() extern
 func shadowDrawCount() extern ret Int
 func shadowShutdown() extern
