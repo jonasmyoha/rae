@@ -68,18 +68,25 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             ((FAILED++))
           fi
         elif [ "$EXAMPLE_NAME" = "113_walker_character" ]; then
-          # The multi-primitive gate. 6717 verts / 3465 triangles is every
-          # primitive of all 10 meshes merged; loading only the first would
-          # report a fraction of that and still render something plausible,
-          # which is exactly why the count is asserted rather than just
-          # "did it draw".
+          # The multi-primitive gate, plus the skinning and colour chain.
+          # 6717 verts / 3465 triangles is every primitive of all 10 meshes
+          # merged; loading only the first would report a fraction of that
+          # and still render something plausible, which is exactly why the
+          # counts are asserted rather than just "did it draw". The
+          # skeleton, clip and atlas lines each cover a stage that fails
+          # silently on its own: 65 joints (skin parsed), 195 channels
+          # retargeted onto it (animation), 512x512 (the pure-Rae PNG
+          # decode that feeds per-vertex colour).
           SHOT="$TMP_OUT/walker.bmp"
           if (cd .. && RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
                 perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SHOT" --min-colors=20 > "$TMP_OUT/shot.log" 2>&1 \
              && [ "$(grep -c "walker: 6717 verts, 3465 triangles" "$TMP_OUT/render.log")" -eq 1 ] \
-             && [ "$(grep -c "parts drawn: 12" "$TMP_OUT/render.log")" -eq 1 ]; then
-            echo "PASS: $EXAMPLE_NAME (12 parts drawn separately, 6717 verts / 3465 tris)"
+             && [ "$(grep -c "skeleton: 65 joints, 76 nodes" "$TMP_OUT/render.log")" -eq 1 ] \
+             && [ "$(grep -c "walk 195 ch" "$TMP_OUT/render.log")" -eq 1 ] \
+             && [ "$(grep -c "palette atlas 512x512" "$TMP_OUT/render.log")" -eq 1 ] \
+             && [ "$(grep -c "skinned parts: 12" "$TMP_OUT/render.log")" -eq 1 ]; then
+            echo "PASS: $EXAMPLE_NAME (12 skinned parts, 65 joints, clip retargeted, atlas decoded)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (walker character)"

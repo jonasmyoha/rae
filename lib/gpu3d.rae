@@ -295,8 +295,9 @@ func skinFrameBegin() extern
 func skinDrawCount() extern ret Int
 func skinShutdown() extern
 
-# Upload a skinned mesh. `verts` is 16 Floats per vertex: pos3, nrm3, uv2,
-# four joint indices (as Floats) and four weights.
+# Upload a skinned mesh. `verts` is 20 Floats per vertex: pos3, nrm3, uv2,
+# four joint indices (as Floats), four weights and an RGBA vertex colour
+# that MULTIPLIES the material's base colour — white is a no-op (#378).
 func uploadSkinnedMesh(verts: view List(Float), vertCount: view Int, indices: view List(Int)) pub ret MeshHandle {
   let id: Int = skinnedMeshCreate(verts: verts.data, vertCount: vertCount, indices: indices.data, indexCount: indices.length)
   if id is 0 {
