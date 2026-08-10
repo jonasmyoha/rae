@@ -33,7 +33,6 @@ static WGPUBuffer    gb_sdf_color_sbuf[GB_SDF_MAX_GROUPS];
 static WGPUBuffer    gb_sdf_param_ubuf[GB_SDF_MAX_GROUPS];
 static WGPUBuffer    gb_sdf_frame_ubuf = NULL;
 static WGPUBindGroup gb_sdf_bind[GB_SDF_MAX_GROUPS];
-static int           gb_sdf_group = 0;
 
 /* Own frame uniform: the raymarch needs the camera position and the
  * inverse view-projection to build a ray, neither of which the geometry
@@ -281,6 +280,16 @@ void rae_ext_gbuffer_drawMetaballs(const float* packedBalls, int64_t count,
     }
     if (!gb_sdf_bind[gi]) return;
 
+    /* Same diagnostic line and same env gate as the forward path, so
+     * 110's gate keeps asserting that metaballs actually reached the
+     * renderer after the migration rather than losing that coverage. */
+    if (getenv("RAE_GPU3D_SDF_TEST_LOG")) {
+        static int gb_sdf_logged = 0;
+        if (!gb_sdf_logged) {
+            fprintf(stderr, "[gpu3d] SDF metaballs: count=%lld\n", (long long)count);
+            gb_sdf_logged = 1;
+        }
+    }
     wgpuRenderPassEncoderSetPipeline(gb_pass, gb_sdf_pipeline);
     wgpuRenderPassEncoderSetBindGroup(gb_pass, 0, gb_sdf_bind[gi], 0, NULL);
     wgpuRenderPassEncoderDraw(gb_pass, 3, 1, 0, 0);

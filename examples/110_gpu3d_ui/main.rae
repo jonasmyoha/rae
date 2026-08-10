@@ -32,7 +32,8 @@ import scene3d_file
 import sdl3
 import vec3
 open gpu3d
-open renderer3d
+open renderer_deferred
+open gbuffer
 open math3d
 open mesh3d
 open scene3d
@@ -66,6 +67,8 @@ import hot_reload
 import app3d/camera_rig
 import app3d/camera_bar
 import shadow3d
+import renderer_deferred
+import gbuffer
 import app3d/ui_shell
 open app3d/camera_rig
 open app3d/camera_bar
@@ -518,8 +521,8 @@ func main() ret Int {
   # Epoch seconds must stay Float64 (see docs/primitive-types.md); only the
   # small per-frame delta is narrowed to Float.
   # Frame declared as a render graph with a load-preserving UI overlay.
-  var renderer: Renderer3d = createRenderer3dWithUi()
-  let gstatus: Int = compileRenderer(r: renderer)
+  var renderer: DeferredRenderer = createDeferredRendererWithUi()
+  let gstatus: Int = compileDeferred(r: renderer)
   if gstatus is not 0 {
     log("render graph invalid: {gstatus}")
     ret 1
@@ -680,9 +683,9 @@ func main() ret Int {
       # present reads it. The passes are declared backwards in
       # createRenderer3dWithUi; this loop runs them in dependency order.
       var pi3: Int = 0
-      loop pi3 < frameOrderLength(r: renderer) {
-        let tag: Int = frameTagAt(r: renderer, i: pi3)
-        if tag is tagShadow {
+      loop pi3 < deferredOrderLength(r: renderer) {
+        let tag: Int = deferredTagAt(r: renderer, i: pi3)
+        if tag is tagShadowD {
           # Fit the cascades to THIS frame's camera and sun, then
           # rasterise every visible mesh into them (#382). The graph put
           # this before the scene pass because the scene pass declares a
@@ -703,27 +706,40 @@ func main() ret Int {
             shadowLogged = true
           }
         }
-        if tag is tagScenePass {
-          beginScene(camera: camera, light: light, aspect: aspect, time: simTime)
-          if uiState.activeScene is 1 { renderScene(scene: scene1.scene) }
-          if uiState.activeScene is 2 { renderScene(scene: scene2.scene) }
-          if uiState.activeScene is 3 { renderScene(scene: scene3.scene) }
-          endPass()
+        if tag is tagGbuffer {
+          # App-owned so the ACTIVE scene is the one submitted. Qualified
+          # calls: gpu3d and gbuffer both export beginPass/endPass and this
+          # example opens both, so an unqualified call silently picks the
+          # forward path's — which leaves the G-buffer unsubmitted and
+          # renders a black frame with a working UI (found in 113).
+          gbuffer.beginPass(camera: camera, light: light, aspect: aspect)
+          if uiState.activeScene is 1 {
+            gbuffer.renderScene(scene: scene1.scene)
+            renderSceneSdf(scene: scene1.scene, camera: camera)
+          }
+          if uiState.activeScene is 2 {
+            gbuffer.renderScene(scene: scene2.scene)
+            renderSceneSdf(scene: scene2.scene, camera: camera)
+          }
+          if uiState.activeScene is 3 {
+            gbuffer.renderScene(scene: scene3.scene)
+            renderSceneSdf(scene: scene3.scene, camera: camera)
+          }
+          gbuffer.endPass()
         }
-        if tag is tagTonemap {
-          # HDR -> LDR resolve (#334). The UI overlay below composites in
-          # display space, so it must come after this, which the graph
-          # guarantees: tonemap writes the LDR target the overlay modifies.
-          tonemapPass()
+        if tag is tagSsaoD or tag is tagDepthPyramid or tag is tagLighting
+          or tag is tagTaaD or tag is tagComposite {
+          renderDeferredPass(r: renderer, tag: tag, scene: scene1.scene,
+                             camera: camera, light: light, aspect: aspect)
         }
-        if tag is tagUiOverlay {
+        if tag is tagUiOverlayD {
           gpu2d.beginFrameLoad()
           renderSystemGpu2d(world: uiWorld, res: gpuUi)
           # After the app UI, so the diagnostic is never what gets covered up.
           drawLogOverlay(ov: logView, font: gpuUi.textFont, screenW: extentW, screenH: extentH)
           lastLogRevision = logView.revision
         }
-        if tag is tagPresent {
+        if tag is tagPresentD {
           gpu2d.endFrame()
         }
         pi3 = pi3 + 1
