@@ -124,7 +124,7 @@ static const char* G3D_SHADOW_SKIN_WGSL =
  */
 #define G3D_SM_SDF_MAX_CLUSTERS 8
 #define G3D_SM_SDF_MAX_BALLS 64
-#define G3D_SM_SDF_UBYTES 160   /* 2 mat4 + lightDir vec4 + params vec4 */
+#define G3D_SM_SDF_UBYTES 176   /* 2 mat4 + lightDir + params + ndc bounds (#398) */
 
 static WGPURenderPipeline g3d_sm_sdf_pipeline = NULL;
 static WGPUBuffer    g3d_sm_sdf_ball_sbuf[G3D_SM_SDF_MAX_CLUSTERS];
@@ -141,6 +141,7 @@ static const char* G3D_SM_SDF_WGSL =
 "  invLightViewProj: mat4x4<f32>,\n"
 "  lightDir: vec4<f32>,\n"
 "  params: vec4<f32>,\n"   /* x = ball count, y = smoothing, z = march span */
+"  bounds: vec4<f32>,\n"   /* xy = min NDC, zw = max NDC (#398) */
 "};\n"
 "@group(0) @binding(0) var<uniform> U0: U;\n"
 "@group(0) @binding(1) var<storage, read> balls: array<vec4<f32>>;\n"
@@ -164,13 +165,21 @@ static const char* G3D_SM_SDF_WGSL =
 "  @builtin(position) pos: vec4<f32>,\n"
 "  @location(0) ndc: vec2<f32>,\n"
 "};\n"
+/* A QUAD OVER THE CLUSTER'S PROJECTED EXTENT, not a fullscreen triangle
+ * (#398). A 2-metre blob covers a tiny fraction of a 2048 shadow map, and
+ * the fullscreen version paid for a raymarch at every one of those four
+ * million pixels only to discard almost all of them. Same image, because
+ * every pixel outside these bounds missed anyway. */
 "@vertex\n"
 "fn vs(@builtin(vertex_index) vi: u32) -> VsOut {\n"
-"  var pts = array<vec2<f32>, 3>(\n"
-"    vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));\n"
+"  var corner = array<vec2<f32>, 6>(\n"
+"    vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0),\n"
+"    vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0), vec2<f32>(0.0, 1.0));\n"
+"  let c = corner[vi];\n"
+"  let p = mix(U0.bounds.xy, U0.bounds.zw, c);\n"
 "  var o: VsOut;\n"
-"  o.pos = vec4<f32>(pts[vi], 0.0, 1.0);\n"
-"  o.ndc = pts[vi];\n"
+"  o.pos = vec4<f32>(p, 0.0, 1.0);\n"
+"  o.ndc = p;\n"
 "  return o;\n"
 "}\n"
 "@fragment\n"
@@ -606,6 +615,51 @@ void rae_ext_gpu3d_shadowEnd(void) {
             /* March span: the cascade's whole depth range, so a blob
              * anywhere between the light and the far plane is found. */
             u[38] = g3d_sm_depth_range[c] > 0.0f ? g3d_sm_depth_range[c] : 100.0f;
+
+            /* Project the cluster's world AABB into this cascade and keep
+             * only that rectangle. The box is grown by the smoothing
+             * distance because the smooth union BULGES beyond the union of
+             * the spheres — clipping to the raw spheres would shave the
+             * edge off every fused shadow. */
+            const float* bp = g3d_sm_sdf_balls_cpu + ci * G3D_SM_SDF_MAX_BALLS * 4;
+            float lo[3] = { 1e30f, 1e30f, 1e30f }, hi[3] = { -1e30f, -1e30f, -1e30f };
+            for (int b = 0; b < g3d_sm_sdf_count[ci]; b++) {
+                float r = bp[b * 4 + 3] + g3d_sm_sdf_smoothing[ci];
+                for (int a = 0; a < 3; a++) {
+                    float v = bp[b * 4 + a];
+                    if (v - r < lo[a]) lo[a] = v - r;
+                    if (v + r > hi[a]) hi[a] = v + r;
+                }
+            }
+            float nx0 = 1e30f, ny0 = 1e30f, nx1 = -1e30f, ny1 = -1e30f;
+            const float* M = g3d_sm_cascade_vp + c * 16;
+            for (int k = 0; k < 8; k++) {
+                float wx = (k & 1) ? hi[0] : lo[0];
+                float wy = (k & 2) ? hi[1] : lo[1];
+                float wz = (k & 4) ? hi[2] : lo[2];
+                float cx = M[0]*wx + M[4]*wy + M[8]*wz + M[12];
+                float cy = M[1]*wx + M[5]*wy + M[9]*wz + M[13];
+                float cw = M[3]*wx + M[7]*wy + M[11]*wz + M[15];
+                if (cw <= 0.0f) cw = 1.0f;   /* ortho: w is 1 */
+                float px = cx / cw, py = cy / cw;
+                if (px < nx0) nx0 = px;
+                if (px > nx1) nx1 = px;
+                if (py < ny0) ny0 = py;
+                if (py > ny1) ny1 = py;
+            }
+            /* Clip to the cascade and skip entirely when off it. */
+            if (nx0 < -1.0f) nx0 = -1.0f;
+            if (ny0 < -1.0f) ny0 = -1.0f;
+            if (nx1 >  1.0f) nx1 =  1.0f;
+            if (ny1 >  1.0f) ny1 =  1.0f;
+            if (nx1 <= nx0 || ny1 <= ny0) continue;
+            /* SKIP CASCADES WHERE THE BLOB IS SUB-TEXEL. In a far cascade a
+             * small cluster covers less than a texel, so it can write
+             * nothing a sample would ever read. */
+            float wpx = (nx1 - nx0) * 0.5f * (float)g3d_sm_res;
+            float hpx = (ny1 - ny0) * 0.5f * (float)g3d_sm_res;
+            if (wpx < 2.0f || hpx < 2.0f) continue;
+            u[40] = nx0; u[41] = ny0; u[42] = nx1; u[43] = ny1;
             wgpuQueueWriteBuffer(g_wgpu_queue, g3d_sm_sdf_ubuf[ui], 0, u, G3D_SM_SDF_UBYTES);
             wgpuQueueWriteBuffer(g_wgpu_queue, g3d_sm_sdf_ball_sbuf[ci], 0,
                                  g3d_sm_sdf_balls_cpu + ci * G3D_SM_SDF_MAX_BALLS * 4,
@@ -624,7 +678,7 @@ void rae_ext_gpu3d_shadowEnd(void) {
             if (!g3d_sm_sdf_bind[ui]) continue;
             wgpuRenderPassEncoderSetPipeline(pass, g3d_sm_sdf_pipeline);
             wgpuRenderPassEncoderSetBindGroup(pass, 0, g3d_sm_sdf_bind[ui], 0, NULL);
-            wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
+            wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 0);
         }
         wgpuRenderPassEncoderEnd(pass);
         wgpuRenderPassEncoderRelease(pass);
