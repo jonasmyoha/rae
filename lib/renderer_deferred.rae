@@ -42,6 +42,7 @@ open gbuffer
 # frame, and the two frames are separate graphs that never mix.
 const tagGbuffer: Int = 10      # writes surface attributes, no lighting
 const tagDepthPyramid: Int = 11 # mip chain of depth, for Hi-Z + SSAO
+const tagSsaoD: Int = 15        # screen-space AO from G-buffer depth+normal (#387)
 const tagLighting: Int = 12     # reads the G-buffer, writes radiance
 const tagComposite: Int = 13    # radiance -> the frame's colour target
 const tagPresentD: Int = 14     # resolve/present
@@ -87,11 +88,16 @@ func createDeferredRenderer() pub ret DeferredRenderer {
   # Linear HDR radiance. Everything radiometric happens here; only
   # composite writes the presentable target.
   let litId: Int = addResource(g: g, name: "litColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  # AO is full-resolution for now. It is low-frequency and belongs at half
+  # res with a depth-aware upsample, which is a tier knob rather than a
+  # correctness question — declared truthfully as Full until it moves.
+  let aoId: Int = addResource(g: g, name: "aoTex", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
 
   # --- passes, declared backwards on purpose ---
   let present: Int = addPass(g: g, name: "present", kind: passRaster, tag: tagPresentD)
   let composite: Int = addPass(g: g, name: "composite", kind: passRaster, tag: tagComposite)
   let lighting: Int = addPass(g: g, name: "lighting", kind: passRaster, tag: tagLighting)
+  let ssaoP: Int = addPass(g: g, name: "ssao", kind: passRaster, tag: tagSsaoD)
   let pyramid: Int = addPass(g: g, name: "depthPyramid", kind: passCompute, tag: tagDepthPyramid)
   let gbuffer: Int = addPass(g: g, name: "gbuffer", kind: passRaster, tag: tagGbuffer)
 
@@ -107,6 +113,12 @@ func createDeferredRenderer() pub ret DeferredRenderer {
 
   # Lighting consumes every G-buffer attachment plus the pyramid, and is
   # the only writer of radiance.
+  # SSAO reads what the G-buffer wrote and lighting reads the AO, so the
+  # graph derives gbuffer -> ssao -> lighting with nobody stating it.
+  passReads(g: g, pass: ssaoP, resource: normalId, access: accSampledRead)
+  passReads(g: g, pass: ssaoP, resource: depthId, access: accSampledRead)
+  passWrites(g: g, pass: ssaoP, resource: aoId, access: accAttachmentWrite)
+  passReads(g: g, pass: lighting, resource: aoId, access: accSampledRead)
   passReads(g: g, pass: lighting, resource: albedoId, access: accSampledRead)
   passReads(g: g, pass: lighting, resource: normalId, access: accSampledRead)
   passReads(g: g, pass: lighting, resource: materialId, access: accSampledRead)
@@ -173,6 +185,9 @@ func renderDeferredFrame(r: view DeferredRenderer, scene: view Scene3d, camera: 
     }
     if tag is tagDepthPyramid {
       buildDepthPyramid()
+    }
+    if tag is tagSsaoD {
+      ssaoPass(camera: camera)
     }
     if tag is tagLighting {
       lightingPass(camera: camera, light: light)
