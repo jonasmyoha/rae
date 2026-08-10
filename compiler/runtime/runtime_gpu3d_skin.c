@@ -38,7 +38,7 @@
 #define G3D_SKIN_MAX_DRAWS  256
 #define G3D_SKIN_DRAW_FLOATS 24   /* mat4 model + vec4 albedo/metallic + vec4 rough + palette base */
 #define G3D_SKIN_MAX_JOINTS 256
-#define G3D_SKIN_VERT_FLOATS 16   /* pos3 nrm3 uv2 joints4 weights4 */
+#define G3D_SKIN_VERT_FLOATS 20   /* pos3 nrm3 uv2 joints4 weights4 color4 */
 
 static WGPUBuffer g3d_skin_vbuf[G3D_SKIN_MAX_MESHES];
 static WGPUBuffer g3d_skin_ibuf[G3D_SKIN_MAX_MESHES];
@@ -85,6 +85,7 @@ static const char* G3D_SKIN_WGSL =
 "  @location(3) @interpolate(flat) inst: u32,\n"
 "  @location(4) clipNow: vec4<f32>,\n"
 "  @location(5) clipPrev: vec4<f32>,\n"
+"  @location(6) vcol: vec3<f32>,\n"
 "};\n"
 /* Rebuild a joint's affine transform from its three stored rows. */
 "fn jointMat(j: u32) -> mat4x4<f32> {\n"
@@ -104,7 +105,8 @@ static const char* G3D_SKIN_WGSL =
 "@vertex\n"
 "fn vs(@builtin(instance_index) ii: u32,\n"
 "      @location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec2<f32>,\n"
-"      @location(3) jf: vec4<f32>, @location(4) w: vec4<f32>) -> VsOut {\n"
+"      @location(3) jf: vec4<f32>, @location(4) w: vec4<f32>,\n"
+"      @location(5) vc: vec4<f32>) -> VsOut {\n"
 "  let d = draws[ii];\n"
 /* Joint indices travelled as floats through the vertex buffer; see the
  * note in lib/gltf.rae. */
@@ -127,6 +129,7 @@ static const char* G3D_SKIN_WGSL =
 "  let sn = skin * vec4<f32>(n, 0.0);\n"
 "  o.nrm = normalize((d.model * vec4<f32>(sn.xyz, 0.0)).xyz);\n"
 "  o.uv = uv;\n"
+"  o.vcol = vc.rgb;\n"
 "  o.inst = ii;\n"
 "  o.clipNow = o.pos;\n"
 /* No previous palette is kept yet, so a skinned vertex reports only its
@@ -171,7 +174,7 @@ static const char* G3D_SKIN_WGSL =
 "@fragment\n"
 "fn fs(in: VsOut) -> FsOut {\n"
 "  let d = draws[in.inst];\n"
-"  let albedo = d.baseColorMetallic.rgb;\n"
+"  let albedo = d.baseColorMetallic.rgb * in.vcol;\n"
 "  let metallic = clamp(d.baseColorMetallic.a, 0.0, 1.0);\n"
 "  let rough = clamp(d.emissiveRoughness.a, 0.045, 1.0);\n"
 "  let N = normalize(in.nrm);\n"
@@ -208,16 +211,20 @@ static void g3d_skin_init_pipeline(void) {
     smd.nextInChain = &src.chain;
     WGPUShaderModule mod = wgpuDeviceCreateShaderModule(g_wgpu_dev, &smd);
 
-    WGPUVertexAttribute attrs[5]; memset(attrs, 0, sizeof(attrs));
+    WGPUVertexAttribute attrs[6]; memset(attrs, 0, sizeof(attrs));
     attrs[0].format = WGPUVertexFormat_Float32x3; attrs[0].offset = 0;  attrs[0].shaderLocation = 0;
     attrs[1].format = WGPUVertexFormat_Float32x3; attrs[1].offset = 12; attrs[1].shaderLocation = 1;
     attrs[2].format = WGPUVertexFormat_Float32x2; attrs[2].offset = 24; attrs[2].shaderLocation = 2;
     attrs[3].format = WGPUVertexFormat_Float32x4; attrs[3].offset = 32; attrs[3].shaderLocation = 3;
     attrs[4].format = WGPUVertexFormat_Float32x4; attrs[4].offset = 48; attrs[4].shaderLocation = 4;
+    /* Per-vertex albedo tint (#378). A model with no colour data bakes
+     * white here, which multiplies to a no-op, so the channel costs
+     * correctness nothing when it is unused. */
+    attrs[5].format = WGPUVertexFormat_Float32x4; attrs[5].offset = 64; attrs[5].shaderLocation = 5;
     WGPUVertexBufferLayout vbl; memset(&vbl, 0, sizeof(vbl));
     vbl.arrayStride = G3D_SKIN_VERT_FLOATS * sizeof(float);
     vbl.stepMode = WGPUVertexStepMode_Vertex;
-    vbl.attributeCount = 5; vbl.attributes = attrs;
+    vbl.attributeCount = 6; vbl.attributes = attrs;
 
     /* Same four targets and depth state as the static forward pass, so
      * both pipelines are valid inside the same render pass. */
@@ -275,7 +282,7 @@ static void g3d_skin_init_pipeline(void) {
     wgpuBindGroupLayoutRelease(bgl);
 }
 
-/* Upload a skinned mesh: 16 Floats per vertex, indices as Rae Ints. */
+/* Upload a skinned mesh: 20 Floats per vertex, indices as Rae Ints. */
 int64_t rae_ext_gpu3d_skinnedMeshCreate(const float* verts, int64_t vertCount,
                                         const int64_t* indices, int64_t indexCount) {
     if (!g_wgpu_dev || !verts || !indices) return 0;
