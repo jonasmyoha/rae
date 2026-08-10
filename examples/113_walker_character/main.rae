@@ -443,6 +443,7 @@ func main() ret Int {
   # for a reload signal, so a supervisor is free to kill it without
   # warning and an exit-only save would lose everything. Throttled,
   # because a camera drag changes state every frame.
+  var shadowLogged: Bool = false
   var stateDirty: Bool = false
   var lastStateSave: Float64 = gpu2d.nowSeconds()
   # Counted, not assumed: a panel whose host node id does not match the
@@ -583,6 +584,10 @@ func main() ret Int {
           sp = sp + 1
         }
         endShadowPass()
+        if shadowLogged is false {
+          log("[shadow] casters {shadowCasterCount()}, {cascades.count} cascades at {cascades.resolution}")
+          shadowLogged = true
+        }
       }
       if tag is tagScenePass {
         beginScene(camera: camera, light: light, aspect: aspect, time: t)
