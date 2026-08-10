@@ -88,6 +88,7 @@ import sys
 import app3d/camera_rig
 import app3d/ui_shell
 import app3d/control_panel
+import app3d/camera_bar
 import ui/ecs
 import ui/input_gpu2d
 import ui/render_gpu2d
@@ -104,6 +105,7 @@ open png
 open app3d/camera_rig
 open app3d/ui_shell
 open app3d/control_panel
+open app3d/camera_bar
 open ui/ecs
 open ui/components
 open ui/input_gpu2d
@@ -325,7 +327,10 @@ func main() ret Int {
   # Counted, not assumed: a panel whose host node id does not match the
   # scene builds nothing and renders as an empty card, which a
   # "did anything paint" check cannot tell from a working one.
-  log("[ui] panel buttons: {clipPanel.buttonEntities.length} clip, {transport.buttonEntities.length} transport")
+  # The camera readout bar is the SAME component example 110 uses; this
+  # example only supplies the slot it mounts into.
+  let barOk: Bool = mountCameraBar(world: uiWorld, res: gpuUi, hostNodeId: "CameraBarSlot")
+  log("[ui] panel buttons: {clipPanel.buttonEntities.length} clip, {transport.buttonEntities.length} transport, camera bar {barOk}")
 
   let startT: Float64 = gpu2d.nowSeconds()
   var prevT: Float64 = startT
@@ -380,6 +385,7 @@ func main() ret Int {
       runUiSystems(world: uiWorld, res: gpuUi)
     }
 
+    handleCameraBar(input: uiInput, rig: rig, camera: camera)
     updateCameraRig(rig: rig, camera: camera,
                     allowInput: uiPointerCaptured(input: uiInput) is false, dt: dt)
 
@@ -404,6 +410,7 @@ func main() ret Int {
     let palette: List(Float) = buildPalette(sk: sk)
 
     applyCameraRig(rig: rig, camera: camera)
+    syncCameraBar(world: uiWorld, rig: rig, camera: camera)
     let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
     let t: Float = (now - startT) as Float
 
