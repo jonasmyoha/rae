@@ -208,6 +208,44 @@ func mat4Perspective(fovYDeg: view Float, aspect: view Float, near: view Float, 
   ret m
 }
 
+# Right-handed orthographic projection matching mat4Perspective's
+# conventions: view space looks down -Z, clip depth is WebGPU's [0,1].
+#
+# Used for directional-light shadow cascades. Note that reverse-Z is
+# deliberately NOT offered here: reverse-Z buys precision from the float
+# exponent against perspective's 1/z, and ortho depth is linear, so it
+# would buy nothing while risking a convention mismatch with the main
+# pass (docs/shadow-system-design.md §3).
+func mat4Ortho(left: view Float, right: view Float, bottom: view Float, top: view Float,
+               near: view Float, far: view Float) pub ret Mat4 {
+  var m: Mat4 = mat4Zero()
+  let rl: Float = right - left
+  let tb: Float = top - bottom
+  let nf: Float = near - far
+  if rl is 0.0 or tb is 0.0 or nf is 0.0 {
+    ret mat4Identity()
+  }
+  m.m[0] = 2.0 / rl
+  m.m[5] = 2.0 / tb
+  m.m[10] = 1.0 / nf
+  m.m[12] = 0.0 - (right + left) / rl
+  m.m[13] = 0.0 - (top + bottom) / tb
+  m.m[14] = near / nf
+  m.m[15] = 1.0
+  ret m
+}
+
+# Transform a point by a matrix (w assumed 1, result de-homogenised only
+# for the affine case this is used in). Column-major, so the x row reads
+# m[0], m[4], m[8], m[12].
+func mat4TransformPoint(m: view Mat4, p: view Vec3) pub ret Vec3 {
+  ret vec3.create(
+    x: m.m[0] * p.x + m.m[4] * p.y + m.m[8] * p.z + m.m[12]
+    y: m.m[1] * p.x + m.m[5] * p.y + m.m[9] * p.z + m.m[13]
+    z: m.m[2] * p.x + m.m[6] * p.y + m.m[10] * p.z + m.m[14]
+  )
+}
+
 # Right-handed Z-up look-at view matrix (docs/coordinate-system.md §Camera):
 #   forward = normalize(target - position)
 #   right   = normalize(cross(forward, worldUp))

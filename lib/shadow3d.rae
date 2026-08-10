@@ -1,0 +1,220 @@
+# shadow3d — cascade fitting for the directional sun (#382).
+#
+# The CPU half of the shadow system: given a camera and a sun direction,
+# produce one orthographic light view-projection per cascade. The GPU half
+# (rendering depth into the cascade array, sampling it in the lighting
+# shader) is in the runtime; this is here because it is pure arithmetic,
+# and pure arithmetic can be tested without a GPU. See
+# docs/shadow-system-design.md §3 Layer A.
+#
+# THREE RULES, EACH FIXING A NAMED ARTEFACT.
+#
+# 1. BOUNDING-SPHERE FIT, not frustum corners. A box fitted to the eight
+#    corners of a frustum slice changes size as the camera rotates, so the
+#    world size of a shadow texel changes with yaw and the shadow edges
+#    crawl when you turn. A sphere is rotation-invariant: same camera
+#    position, same fit, whatever direction you look.
+#
+# 2. TEXEL SNAPPING. The fitted centre is quantised to whole shadow-map
+#    texels in LIGHT SPACE. Without it, sub-texel camera motion slides the
+#    shadow sampling grid across the geometry and every shadow edge
+#    shimmers. This is the single most-noticed shadow artefact and the one
+#    people describe as "pixelation".
+#
+# 3. PRACTICAL SPLIT SCHEME. Cascade ranges blend logarithmic and uniform
+#    distribution (Zhang et al.). Pure logarithmic wastes the near
+#    cascades on a few centimetres; pure uniform leaves the near field
+#    with too few texels, which is where the eye actually looks.
+import core
+import math
+import vec3
+open math3d
+
+# A fitted cascade set. `viewProj` is `count` matrices flattened, because
+# a List of Mat4 would copy 64 bytes per element access on every lookup.
+# `splitFar` holds each cascade's far distance in view space, which the
+# shader needs to choose a cascade per pixel.
+type ShadowCascades {
+  count: Int
+  resolution: Int
+  viewProj: List(Float)
+  splitFar: List(Float)
+  # World-space size of one shadow texel per cascade. The lighting shader
+  # scales its normal-offset bias by this: bias must be measured in
+  # texels, and a texel is a different world size in every cascade.
+  texelWorld: List(Float)
+}
+
+func emptyShadowCascades() pub ret ShadowCascades {
+  ret ShadowCascades {
+    count: 0, resolution: 0,
+    viewProj: createList(Float, cap: 0),
+    splitFar: createList(Float, cap: 0),
+    texelWorld: createList(Float, cap: 0)
+  }
+}
+
+# Practical split scheme. `lambda` 0 is uniform, 1 is fully logarithmic;
+# 0.7 is the usual compromise and what this defaults to at the call site.
+func cascadeSplit(near: view Float, far: view Float, i: view Int, count: view Int,
+                  lambda: view Float) pub ret Float {
+  let f: Float = (i + 1).toFloat() / count.toFloat()
+  let uniform: Float = near + (far - near) * f
+  var logSplit: Float = uniform
+  if near > 0.0 and far > near {
+    logSplit = near * math.pow(base: far / near, exp: f)
+  }
+  ret lambda * logSplit + (1.0 - lambda) * uniform
+}
+
+# Fit `count` cascades to the camera frustum for a sun pointing along
+# `sunDir` (the direction light TRAVELS, so a sun overhead is (0,0,-1)).
+#
+# `backExtent` pushes the light's eye further back along the light
+# direction than the fitted sphere requires, so casters standing outside
+# the view frustum still make it into the depth map. Without it, an object
+# just off-screen stops casting the moment it leaves the view — a
+# distractingly visible pop.
+func fitShadowCascades(camPos: view Vec3, camTarget: view Vec3,
+                       fovYDeg: view Float, aspect: view Float,
+                       near: view Float, far: view Float,
+                       sunDir: view Vec3, count: view Int, resolution: view Int,
+                       lambda: view Float, backExtent: view Float) pub ret ShadowCascades {
+  let vp: List(Float) = createList(Float, cap: count * 16)
+  let splits: List(Float) = createList(Float, cap: count)
+  let texels: List(Float) = createList(Float, cap: count)
+  if count < 1 or resolution < 1 {
+    ret ShadowCascades { count: 0, resolution: 0, viewProj: own vp, splitFar: own splits, texelWorld: own texels }
+  }
+
+  let forward: Vec3 = vec3.vnorm(a: vec3.vsub(a: camTarget, b: camPos))
+  let light: Vec3 = vec3.vnorm(a: sunDir)
+  # tan of the half angles, for the slice corner radius.
+  let tanY: Float = math.tan(x: fovYDeg * 0.008726646259971648)
+  let tanX: Float = tanY * aspect
+
+  var i: Int = 0
+  var sliceNear: Float = near
+  loop i < count {
+    let sliceFar: Float = cascadeSplit(near: near, far: far, i: i, count: count, lambda: lambda)
+
+    # Bounding sphere of the frustum slice, in closed form. For a
+    # symmetric frustum the sphere centre lies on the view axis; solving
+    # for the point equidistant from the near and far corner rings gives
+    # the offset below. Falls back to the slice midpoint when the
+    # geometry degenerates (very wide angles), which is conservative
+    # rather than wrong.
+    let k2: Float = tanX * tanX + tanY * tanY
+    var centreDist: Float = (sliceNear + sliceFar) * 0.5
+    let denom: Float = 2.0 * (sliceFar - sliceNear)
+    if denom > 0.0001 {
+      let candidate: Float = (sliceFar - sliceNear) * 0.5 * (1.0 + k2)
+        + sliceNear * k2 + (sliceNear + sliceFar) * 0.5
+      if candidate > sliceNear and candidate < sliceFar * 4.0 {
+        centreDist = candidate
+      }
+    }
+    let centre: Vec3 = vec3.vadd(a: camPos, b: vec3.vscale(a: forward, s: centreDist))
+    # Radius is the distance to the far corner ring, which is always the
+    # farthest point of the slice from a centre on the axis.
+    let dz: Float = sliceFar - centreDist
+    let rx: Float = sliceFar * tanX
+    let ry: Float = sliceFar * tanY
+    var radius: Float = math.sqrt(x: dz * dz + rx * rx + ry * ry)
+    # Also check the near ring; for the first cascade it can dominate.
+    let dzn: Float = centreDist - sliceNear
+    let rxn: Float = sliceNear * tanX
+    let ryn: Float = sliceNear * tanY
+    let rNear: Float = math.sqrt(x: dzn * dzn + rxn * rxn + ryn * ryn)
+    if rNear > radius {
+      radius = rNear
+    }
+    if radius < 0.001 {
+      radius = 0.001
+    }
+
+    # Light basis. Any up vector not parallel to the light works; pick the
+    # one that is most perpendicular so the basis never collapses.
+    var up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
+    var lz: Float = light.z
+    if lz < 0.0 {
+      lz = 0.0 - lz
+    }
+    if lz > 0.99 {
+      up = vec3.create(x: 0.0, y: 1.0, z: 0.0)
+    }
+
+    # THE LIGHT VIEW IS A PURE ROTATION, anchored at the world origin.
+    #
+    # The obvious construction — eye at `centre - light * backDist`,
+    # looking at `centre` — is wrong for snapping, and wrong in a way that
+    # is invisible until you measure it: the view matrix then translates
+    # continuously with the camera, so light space itself slides, and
+    # quantising a coordinate inside a sliding space locks nothing. Test
+    # 579 caught exactly this as a 7.8e-05 residual on a sub-texel nudge.
+    #
+    # With the rotation anchored to the world, ALL camera-dependent
+    # translation lives in the ortho bounds below, where snapping it
+    # actually pins the sampling grid to the world.
+    let lightView: Mat4 = mat4LookAt(
+      eyeX: 0.0, eyeY: 0.0, eyeZ: 0.0,
+      atX: light.x, atY: light.y, atZ: light.z,
+      upX: up.x, upY: up.y, upZ: up.z
+    )
+
+    # RULE 2: quantise the centre to whole texels IN LIGHT SPACE.
+    let texel: Float = 2.0 * radius / resolution.toFloat()
+    let centreLs: Vec3 = mat4TransformPoint(m: lightView, p: centre)
+    let snappedX: Float = math.floor(x: centreLs.x / texel) * texel
+    let snappedY: Float = math.floor(x: centreLs.y / texel) * texel
+
+    # Depth range along the light axis. View space looks down -Z, so a
+    # point in front sits at negative z and its distance is -z. The near
+    # plane is pulled back by `backExtent` so casters outside the view
+    # frustum still reach the map; depth needs no snapping, because
+    # quantising it would fix nothing and only cost precision.
+    let backDist: Float = radius + backExtent
+    var zNear: Float = 0.0 - centreLs.z - backDist
+    let zFar: Float = 0.0 - centreLs.z + radius
+    if zNear < 0.01 {
+      zNear = 0.01
+    }
+
+    let proj: Mat4 = mat4Ortho(
+      left: snappedX - radius, right: snappedX + radius,
+      bottom: snappedY - radius, top: snappedY + radius,
+      near: zNear, far: zFar
+    )
+    let lightViewProj: Mat4 = mat4Mul(a: proj, b: lightView)
+
+    var c: Int = 0
+    loop c < 16 {
+      vp.add(value: lightViewProj.m[c])
+      c = c + 1
+    }
+    splits.add(value: sliceFar)
+    texels.add(value: texel)
+
+    sliceNear = sliceFar
+    i = i + 1
+  }
+
+  ret ShadowCascades {
+    count: count, resolution: resolution,
+    viewProj: own vp, splitFar: own splits, texelWorld: own texels
+  }
+}
+
+# One cascade's matrix, copied out for a caller that needs a Mat4.
+func cascadeMatrix(c: view ShadowCascades, index: view Int) pub ret Mat4 {
+  var m: Mat4 = mat4Identity()
+  if index < 0 or index >= c.count {
+    ret m
+  }
+  var i: Int = 0
+  loop i < 16 {
+    m.m[i] = c.viewProj.at(index: index * 16 + i)
+    i = i + 1
+  }
+  ret m
+}
