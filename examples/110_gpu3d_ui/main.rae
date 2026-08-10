@@ -65,9 +65,11 @@ import ui/log_overlay
 import hot_reload
 import app3d/camera_rig
 import app3d/camera_bar
+import shadow3d
 import app3d/ui_shell
 open app3d/camera_rig
 open app3d/camera_bar
+open shadow3d
 open app3d/ui_shell
 
 type DemoUiResource {
@@ -678,6 +680,23 @@ func main() ret Int {
       var pi3: Int = 0
       loop pi3 < frameOrderLength(r: renderer) {
         let tag: Int = frameTagAt(r: renderer, i: pi3)
+        if tag is tagShadow {
+          # Fit the cascades to THIS frame's camera and sun, then
+          # rasterise every visible mesh into them (#382). The graph put
+          # this before the scene pass because the scene pass declares a
+          # read of what it writes.
+          let cascades: ShadowCascades = fitShadowCascades(
+            camPos: camera.position, camTarget: camera.target,
+            fovYDeg: camera.fovYDeg, aspect: aspect,
+            near: camera.nearZ, far: 45.0, sunDir: light.sunDir,
+            count: 3, resolution: 2048, lambda: 0.7, backExtent: 30.0
+          )
+          beginShadowPass(c: cascades)
+          if uiState.activeScene is 1 { renderSceneShadow(scene: scene1.scene) }
+          if uiState.activeScene is 2 { renderSceneShadow(scene: scene2.scene) }
+          if uiState.activeScene is 3 { renderSceneShadow(scene: scene3.scene) }
+          endShadowPass()
+        }
         if tag is tagScenePass {
           beginScene(camera: camera, light: light, aspect: aspect, time: simTime)
           if uiState.activeScene is 1 { renderScene(scene: scene1.scene) }

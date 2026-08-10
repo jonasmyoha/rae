@@ -77,6 +77,18 @@ static const char* G3D_SKIN_WGSL =
 "@group(0) @binding(1) var<storage, read> draws: array<DrawU>;\n"
 /* Three rows per joint; see the note on Mat3x4 above. */
 "@group(0) @binding(2) var<storage, read> palette: array<vec4<f32>>;\n"
+/* Shadow cascades (#382), same layout and bindings as the static pass.
+ * A skinned surface and a static one under the same sun must agree about
+ * shadowing as much as they agree about the BRDF. */
+"struct ShadowU {\n"
+"  lightViewProj: array<mat4x4<f32>, 4>,\n"
+"  splitFar: vec4<f32>,\n"
+"  texelWorld: vec4<f32>,\n"
+"  shadowCfg: vec4<f32>,\n"
+"};\n"
+"@group(0) @binding(3) var<uniform> SH: ShadowU;\n"
+"@group(0) @binding(4) var shadowTex: texture_depth_2d_array;\n"
+"@group(0) @binding(5) var shadowSamp: sampler_comparison;\n"
 "struct VsOut {\n"
 "  @builtin(position) pos: vec4<f32>,\n"
 "  @location(0) wpos: vec3<f32>,\n"
@@ -162,6 +174,25 @@ static const char* G3D_SKIN_WGSL =
 "fn fresnel(VoH: f32, f0: vec3<f32>) -> vec3<f32> {\n"
 "  return f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - VoH, 5.0);\n"
 "}\n"
+"fn sunVisibility(wpos: vec3<f32>, N: vec3<f32>, viewDepth: f32) -> f32 {\n"
+"  let count = i32(SH.shadowCfg.x);\n"
+"  if (count <= 0) { return 1.0; }\n"
+"  var c = 0;\n"
+"  if (viewDepth > SH.splitFar.x) { c = 1; }\n"
+"  if (viewDepth > SH.splitFar.y) { c = 2; }\n"
+"  if (viewDepth > SH.splitFar.z) { c = 3; }\n"
+"  if (c >= count) { return 1.0; }\n"
+"  var texel = SH.texelWorld.x;\n"
+"  if (c == 1) { texel = SH.texelWorld.y; }\n"
+"  if (c == 2) { texel = SH.texelWorld.z; }\n"
+"  if (c == 3) { texel = SH.texelWorld.w; }\n"
+"  let offset = wpos + N * (texel * 1.5);\n"
+"  let lp = SH.lightViewProj[c] * vec4<f32>(offset, 1.0);\n"
+"  let ndc = lp.xyz / lp.w;\n"
+"  let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);\n"
+"  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0) { return 1.0; }\n"
+"  return textureSampleCompareLevel(shadowTex, shadowSamp, uv, c, ndc.z);\n"
+"}\n"
 "struct FsOut {\n"
 "  @location(0) color: vec4<f32>,\n"
 "  @location(1) normal: vec4<f32>,\n"
@@ -190,7 +221,9 @@ static const char* G3D_SKIN_WGSL =
 "  let spec = dGGX(NoH, rough) * gSmith(NoV, NoL, rough) * Fs\n"
 "           / max(4.0 * NoV * NoL, 1e-4);\n"
 "  let kd = (vec3<f32>(1.0) - Fs) * (1.0 - metallic);\n"
-"  let direct = (kd * albedo / PI + spec) * F.sunColor.rgb * NoL;\n"
+"  let viewDepth = length(F.camPos.xyz - in.wpos);\n"
+"  let sunVis = sunVisibility(in.wpos, N, viewDepth);\n"
+"  let direct = (kd * albedo / PI + spec) * F.sunColor.rgb * NoL * sunVis;\n"
 "  let hemi = mix(F.ambGround.rgb, F.ambSky.rgb, N.y * 0.5 + 0.5);\n"
 "  let ambF = fresnel(NoV, f0);\n"
 "  let ambient = hemi * albedo * (1.0 - metallic) + hemi * ambF * (1.0 - rough * 0.7);\n"
@@ -272,12 +305,15 @@ static void g3d_skin_init_pipeline(void) {
     g3d_skin_palette_sbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &pl);
 
     WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g3d_skin_pipeline, 0);
-    WGPUBindGroupEntry e[3]; memset(e, 0, sizeof(e));
+    WGPUBindGroupEntry e[6]; memset(e, 0, sizeof(e));
     e[0].binding = 0; e[0].buffer = g3d_frame_ubuf; e[0].size = 288;
     e[1].binding = 1; e[1].buffer = g3d_skin_draw_sbuf; e[1].size = sd.size;
     e[2].binding = 2; e[2].buffer = g3d_skin_palette_sbuf; e[2].size = pl.size;
+    e[3].binding = 3; e[3].buffer = g3d_sm_frame_ubuf; e[3].size = 304;
+    e[4].binding = 4; e[4].textureView = g3d_sm_array_view;
+    e[5].binding = 5; e[5].sampler = g3d_sm_sampler;
     WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
-    bgd.layout = bgl; bgd.entryCount = 3; bgd.entries = e;
+    bgd.layout = bgl; bgd.entryCount = 6; bgd.entries = e;
     g3d_skin_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
     wgpuBindGroupLayoutRelease(bgl);
 }
@@ -325,6 +361,17 @@ void rae_ext_gpu3d_setPalette(const float* rows, int64_t jointCount) {
     memcpy(g3d_skin_palette_cpu, rows, (size_t)jointCount * 12 * sizeof(float));
     g3d_skin_joint_count = (int)jointCount;
     g3d_skin_palette_dirty = true;
+    /* Upload EAGERLY as well as lazily. The lazy path uploads on the
+     * first skinned draw, which is inside the scene pass — but the shadow
+     * pass (#382) runs BEFORE that and reads the same buffer, so a
+     * lazy-only upload would shadow the character in last frame's pose,
+     * or in no pose at all on frame one. Cheap: one write per frame. */
+    if (g3d_skin_palette_sbuf && g3d_skin_joint_count > 0) {
+        wgpuQueueWriteBuffer(g_wgpu_queue, g3d_skin_palette_sbuf, 0,
+                             g3d_skin_palette_cpu,
+                             (size_t)g3d_skin_joint_count * 12 * sizeof(float));
+        g3d_skin_palette_dirty = false;
+    }
 }
 
 /* Queue a skinned draw into the scene pass that is already open. */

@@ -44,6 +44,8 @@
 # instead of failing silently. `RAE_GPU3D_DRAW_LIMIT=N` can lower the effective
 # limit for diagnostics/tests, but cannot raise the hard capacity.
 import core
+import shadow3d
+open shadow3d
 import math
 open vec3
 open scene3d
@@ -163,6 +165,23 @@ func drawInstance(mesh: view MeshHandle, transform: view Transform3d, prevTransf
 
 # Render visible mesh components, then depth-integrated sphere SDF components.
 # This is the world-oriented entry point; apps do not submit geometry manually.
+# Submit a scene's meshes as shadow CASTERS. Deliberately separate from
+# renderScene rather than a flag on it: the shadow pass runs first, needs
+# no materials and no previous transforms, and skips the SDF metaball
+# clusters entirely — those have no triangles, and shadowing them is
+# Layer C's job once the GI representation exists (#386).
+func renderSceneShadow(scene: view Scene3d) pub {
+  var i: Int = 0
+  loop i < scene.meshRenderers.length {
+    let r: MeshRenderer = scene.meshRenderers.at(index: i)
+    if r.visible {
+      let t: Transform3d = scene.transforms.at(index: r.entity)
+      drawShadowCaster(mesh: r.mesh, model: modelMatrix(t: t))
+    }
+    i = i + 1
+  }
+}
+
 func renderScene(scene: view Scene3d) pub {
   var i: Int = 0
   loop i < scene.meshRenderers.length {
@@ -282,6 +301,43 @@ func taaPass() pub {
 func uploadMesh(verts: view List(Float), vertCount: view Int, indices: view List(Int)) pub ret MeshHandle {
   let raw: Int = meshCreate(verts: verts.data, vertCount: vertCount, indices: indices.data, indexCount: indices.length)
   ret meshHandle(id: raw, generation: 0)
+}
+
+# ----- shadows (#382) -------------------------------------------------
+# Cascaded shadow maps for the sun. The cascade FIT is in lib/shadow3d.rae
+# (pure arithmetic, unit-tested); these only move it to the GPU and
+# rasterise the casters.
+func shadowBegin(cascades: view Buffer(Float), count: Int, resolution: Int,
+                 splits: view Buffer(Float), texelWorld: view Buffer(Float)) extern
+func shadowDraw(mesh: Int, model: view Mat4) extern
+func shadowDrawSkinned(mesh: Int, model: view Mat4) extern
+func shadowEnd() extern
+func shadowDrawCount() extern ret Int
+func shadowShutdown() extern
+
+# Open the shadow pass for a fitted cascade set. Everything drawn between
+# this and `endShadowPass` casts.
+func beginShadowPass(c: view ShadowCascades) pub {
+  shadowBegin(cascades: c.viewProj.data, count: c.count, resolution: c.resolution,
+              splits: c.splitFar.data, texelWorld: c.texelWorld.data)
+}
+
+func drawShadowCaster(mesh: view MeshHandle, model: view Mat4) pub {
+  if not meshHandleIsValid(h: mesh) {
+    ret
+  }
+  shadowDraw(mesh: mesh.id, model: model)
+}
+
+func drawShadowCasterSkinned(mesh: view MeshHandle, model: view Mat4) pub {
+  if not meshHandleIsValid(h: mesh) {
+    ret
+  }
+  shadowDrawSkinned(mesh: mesh.id, model: model)
+}
+
+func endShadowPass() pub {
+  shadowEnd()
 }
 
 # ----- skinned meshes (#374) ------------------------------------------

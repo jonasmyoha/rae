@@ -54,6 +54,18 @@
  * live in that slot. `RAE_NO_TAA=1` disables it for A/B comparison.
  */
 
+/* Shadows (#382) live in runtime_gpu3d_shadow.c, which is included AFTER
+ * this file because it reads this file's mesh tables. The scene pipeline
+ * needs its texture and sampler at bind-group creation time, hence these
+ * forward declarations. */
+static void g3d_shadow_init(void);
+static void g3d_shadow_ensure_targets(int res, int layers);
+static WGPUTextureView g3d_sm_array_view;
+static WGPUSampler     g3d_sm_sampler;
+static WGPUBuffer      g3d_sm_frame_ubuf;
+#define G3D_SHADOW_DEFAULT_RES 2048
+#define G3D_SHADOW_DEFAULT_CASCADES 3
+
 #define G3D_MAX_MESHES 256
 #define G3D_MAX_DRAWS  4096
 #define G3D_DRAW_FLOATS 40  /* mat4 model + mat4 prevModel + baseColor+metallic + emissive+roughness */
@@ -154,6 +166,17 @@ static const char* G3D_WGSL =
 "};\n"
 "@group(0) @binding(0) var<uniform> F: Frame;\n"
 "@group(0) @binding(1) var<storage, read> draws: array<DrawU>;\n"
+/* Shadow cascades (#382). `shadowCfg.x` is the live cascade count, so
+ * zero disables the whole thing without swapping pipelines. */
+"struct ShadowU {\n"
+"  lightViewProj: array<mat4x4<f32>, 4>,\n"
+"  splitFar: vec4<f32>,\n"
+"  texelWorld: vec4<f32>,\n"
+"  shadowCfg: vec4<f32>,\n"
+"};\n"
+"@group(0) @binding(2) var<uniform> SH: ShadowU;\n"
+"@group(0) @binding(3) var shadowTex: texture_depth_2d_array;\n"
+"@group(0) @binding(4) var shadowSamp: sampler_comparison;\n"
 "struct VsOut {\n"
 "  @builtin(position) pos: vec4<f32>,\n"
 "  @location(0) wpos: vec3<f32>,\n"
@@ -212,6 +235,35 @@ static const char* G3D_WGSL =
 "fn fresnel(VoH: f32, f0: vec3<f32>) -> vec3<f32> {\n"
 "  return f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - VoH, 5.0);\n"
 "}\n"
+/* Sun visibility in [0,1]. Cascade chosen by view depth; the comparison
+ * sampler gives 2x2 PCF in one tap, which is M1's entire softening (#382).
+ *
+ * NORMAL-OFFSET BIAS, not just depth bias: the receiver position is
+ * pushed along its geometric normal by about one shadow texel before
+ * projection. Depth bias alone detaches a contact shadow from its object
+ * (peter-panning), which is the very artefact this system exists to fix,
+ * so it is scaled per cascade by that cascade's world texel size. */
+"fn sunVisibility(wpos: vec3<f32>, N: vec3<f32>, viewDepth: f32) -> f32 {\n"
+"  let count = i32(SH.shadowCfg.x);\n"
+"  if (count <= 0) { return 1.0; }\n"
+"  var c = 0;\n"
+"  if (viewDepth > SH.splitFar.x) { c = 1; }\n"
+"  if (viewDepth > SH.splitFar.y) { c = 2; }\n"
+"  if (viewDepth > SH.splitFar.z) { c = 3; }\n"
+"  if (c >= count) { return 1.0; }\n"
+"  var texel = SH.texelWorld.x;\n"
+"  if (c == 1) { texel = SH.texelWorld.y; }\n"
+"  if (c == 2) { texel = SH.texelWorld.z; }\n"
+"  if (c == 3) { texel = SH.texelWorld.w; }\n"
+"  let offset = wpos + N * (texel * 1.5);\n"
+"  let lp = SH.lightViewProj[c] * vec4<f32>(offset, 1.0);\n"
+"  let ndc = lp.xyz / lp.w;\n"
+"  let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);\n"
+/* Outside the cascade, or behind the light: unshadowed rather than
+ * black. A pixel the map cannot see is not evidence of an occluder. */
+"  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0) { return 1.0; }\n"
+"  return textureSampleCompareLevel(shadowTex, shadowSamp, uv, c, ndc.z);\n"
+"}\n"
 "struct FsOut {\n"
 "  @location(0) color: vec4<f32>,\n"
 "  @location(1) normal: vec4<f32>,\n"
@@ -237,7 +289,12 @@ static const char* G3D_WGSL =
 "  let spec = dGGX(NoH, rough) * gSmith(NoV, NoL, rough) * Fs\n"
 "           / max(4.0 * NoV * NoL, 1e-4);\n"
 "  let kd = (vec3<f32>(1.0) - Fs) * (1.0 - metallic);\n"
-"  let direct = (kd * albedo / PI + spec) * F.sunColor.rgb * NoL;\n"
+/* Shadow multiplies DIRECT only, never the ambient below. That split is
+ * the composition invariant from docs/shadow-system-design.md §5, and it
+ * is what keeps AO (indirect) and shadows (direct) from double-darkening. */
+"  let viewDepth = length(F.camPos.xyz - in.wpos);\n"
+"  let sunVis = sunVisibility(in.wpos, N, viewDepth);\n"
+"  let direct = (kd * albedo / PI + spec) * F.sunColor.rgb * NoL * sunVis;\n"
 "  let hemi = mix(F.ambGround.rgb, F.ambSky.rgb, N.y * 0.5 + 0.5);\n"
 "  let ambF = fresnel(NoV, f0);\n"
 "  let ambient = hemi * albedo * (1.0 - metallic) + hemi * ambF * (1.0 - rough * 0.7);\n"
@@ -482,12 +539,27 @@ static void g3d_init_pipeline(void) {
     sd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
     g3d_draw_sbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &sd);
 
+    /* Shadow targets are created EAGERLY at a fixed size, before the bind
+     * group that references them. Recreating them later would invalidate
+     * this bind group, and resolution is a tier knob (#385) rather than
+     * something that changes mid-run. */
+    g3d_shadow_init();
+    g3d_shadow_ensure_targets(G3D_SHADOW_DEFAULT_RES, G3D_SHADOW_DEFAULT_CASCADES);
+
+    WGPUBufferDescriptor shd; memset(&shd, 0, sizeof(shd));
+    shd.size = 304;   /* 4 mat4 + splitFar + texelWorld + cfg */
+    shd.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+    g3d_sm_frame_ubuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &shd);
+
     WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g3d_pipeline, 0);
-    WGPUBindGroupEntry e[2]; memset(e, 0, sizeof(e));
+    WGPUBindGroupEntry e[5]; memset(e, 0, sizeof(e));
     e[0].binding = 0; e[0].buffer = g3d_frame_ubuf; e[0].size = 288;
     e[1].binding = 1; e[1].buffer = g3d_draw_sbuf;  e[1].size = sd.size;
+    e[2].binding = 2; e[2].buffer = g3d_sm_frame_ubuf; e[2].size = 304;
+    e[3].binding = 3; e[3].textureView = g3d_sm_array_view;
+    e[4].binding = 4; e[4].sampler = g3d_sm_sampler;
     WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
-    bgd.layout = bgl; bgd.entryCount = 2; bgd.entries = e;
+    bgd.layout = bgl; bgd.entryCount = 5; bgd.entries = e;
     g3d_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
     wgpuBindGroupLayoutRelease(bgl);
 }
