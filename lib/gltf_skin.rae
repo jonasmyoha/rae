@@ -59,7 +59,27 @@ type SkinnedMeshData {
   vertCount: Int
 }
 
+# SMOOTH NORMALS BY DEFAULT (see mesh3d.smoothMeshNormals). Exporter
+# chains routinely hand over per-face normals — the walker character
+# arrives 97.4% flat — and a character shaded as flat plates is almost
+# never what was intended, least of all under a cel shader, which turns
+# every facet into a distinct region. Callers that genuinely want the
+# authored normals ask for them with `loadSkinnedPrimitiveFlat`.
 func loadSkinnedPrimitive(g: view Glb, meshIndex: view Int, primIndex: view Int) pub ret SkinnedMeshData {
+  ret loadSkinnedPrimitiveSmoothed(g: g, meshIndex: meshIndex, primIndex: primIndex,
+                                   smoothAngleDeg: meshSmoothAngleDefault)
+}
+
+# The authored normals, untouched.
+func loadSkinnedPrimitiveFlat(g: view Glb, meshIndex: view Int, primIndex: view Int) pub ret SkinnedMeshData {
+  # A negative angle merges nothing, so this shares one code path with
+  # the smoothed case rather than duplicating the whole loader.
+  ret loadSkinnedPrimitiveSmoothed(g: g, meshIndex: meshIndex, primIndex: primIndex,
+                                   smoothAngleDeg: 0.0 - 1.0)
+}
+
+func loadSkinnedPrimitiveSmoothed(g: view Glb, meshIndex: view Int, primIndex: view Int,
+                                  smoothAngleDeg: view Float) pub ret SkinnedMeshData {
   let verts: List(Float) = createList(Float, cap: 0)
   let indices: List(Int) = createList(Int, cap: 0)
   if g.ok is false {
@@ -74,7 +94,10 @@ func loadSkinnedPrimitive(g: view Glb, meshIndex: view Int, primIndex: view Int)
 
   # Geometry comes from the existing loader so the two paths cannot
   # disagree about positions, generated normals or index rebasing.
-  let base: MeshData = loadPrimitive(g: g, meshIndex: meshIndex, primIndex: primIndex)
+  var base: MeshData = loadPrimitive(g: g, meshIndex: meshIndex, primIndex: primIndex)
+  if smoothAngleDeg > 0.0 {
+    base = smoothMeshNormals(m: base, angleDeg: smoothAngleDeg)
+  }
   if base.vertCount is 0 {
     ret SkinnedMeshData { verts: own verts, indices: own indices, vertCount: 0 }
   }
