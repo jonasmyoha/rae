@@ -118,6 +118,110 @@ GB_FULLSCREEN_VS
  * the two disagree is a bug in one of them, and keeping them identical is
  * what makes the forward frame a usable reference image while the deferred
  * frame is being built. */
+
+/* ----- SSAO on the deferred frame (#387) -----------------------------
+ *
+ * The forward frame computed AO in runtime_gpu3d_ssao.c against ITS depth
+ * and normal targets and wrote into its separate ambient attachment. The
+ * G-buffer has no ambient attachment — lighting computes the indirect term
+ * itself — so the deferred version produces an AO texture that the
+ * lighting pass samples and applies to the INDIRECT term only.
+ *
+ * That invariant (docs/shadow-system-design.md §5) is why AO is a separate
+ * texture rather than something folded into radiance: once it is mixed
+ * into a single lit value there is no way to keep it off direct light, and
+ * no way to shrink its influence when GI lands.
+ *
+ * HORIZON SEARCH, not hemisphere sampling — the same choice #337 made and
+ * for the same reason: a horizon search integrates a whole angular sector
+ * per sample instead of testing one direction, so few samples still
+ * produce smooth occlusion.
+ *
+ * FULL RESOLUTION for now. AO is low-frequency and belongs at half res
+ * with a depth-aware upsample (the forward path does this), but that is a
+ * second pass and a sampler; correctness first, cost second. Half-res is a
+ * tier knob and is tracked rather than pretended at.
+ */
+static WGPUTexture     gb_ao_tex = NULL;
+static WGPUTextureView gb_ao_view = NULL;
+static WGPURenderPipeline gb_ao_pipeline = NULL;
+static WGPUBindGroup   gb_ao_bind = NULL;
+
+static const char* GB_AO_WGSL =
+"struct LightU {\n"
+"  invViewProj: mat4x4<f32>,\n"
+"  camPos: vec4<f32>,\n"
+"  sunDir: vec4<f32>,\n"
+"  sunColor: vec4<f32>,\n"
+"  ambSky: vec4<f32>,\n"
+"  ambGround: vec4<f32>,\n"
+"  clearColor: vec4<f32>,\n"
+"};\n"
+"@group(0) @binding(0) var<uniform> L: LightU;\n"
+"@group(0) @binding(1) var gbaTex: texture_2d<f32>;\n"
+"@group(0) @binding(2) var depthTex: texture_depth_2d;\n"
+GB_OCT_WGSL
+GB_FULLSCREEN_VS
+/* Contact scale, matching #337: a large radius would be obsoleted by real
+ * world-space GI and would double-darken against it. */
+"const AO_RADIUS: f32 = 1.2;\n"
+"const AO_SLICES: i32 = 2;\n"
+"const AO_STEPS: i32 = 6;\n"
+"fn ign(pix: vec2<f32>) -> f32 {\n"
+"  return fract(52.9829189 * fract(dot(pix, vec2<f32>(0.06711056, 0.00583715))));\n"
+"}\n"
+/* World position from reverse-Z depth, the same reconstruction the
+ * lighting pass uses — two different reconstructions of one quantity is a
+ * bug waiting to happen. */
+"fn worldAt(px: vec2<i32>, dim: vec2<i32>) -> vec3<f32> {\n"
+"  let d = textureLoad(depthTex, px, 0);\n"
+"  let uv = (vec2<f32>(px) + vec2<f32>(0.5)) / vec2<f32>(dim);\n"
+"  let ndc = vec4<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, d, 1.0);\n"
+"  let w = L.invViewProj * ndc;\n"
+"  return w.xyz / w.w;\n"
+"}\n"
+"@fragment\n"
+"fn fs(@builtin(position) fc: vec4<f32>) -> @location(0) vec4<f32> {\n"
+"  let dim = vec2<i32>(textureDimensions(depthTex));\n"
+"  let px = vec2<i32>(fc.xy);\n"
+"  let d = textureLoad(depthTex, px, 0);\n"
+/* Reverse-Z: 0 is the far plane, so an untouched pixel is sky. Shading it
+ * would darken the background, which AO must never do. */
+"  if (d <= 0.0) { return vec4<f32>(1.0, 1.0, 1.0, 1.0); }\n"
+"  let P = worldAt(px, dim);\n"
+"  let gba = textureLoad(gbaTex, px, 0);\n"
+"  let N = octDecode(gba.xy);\n"
+"  let noise = ign(fc.xy);\n"
+"  var occl = 0.0;\n"
+"  for (var s = 0; s < AO_SLICES; s = s + 1) {\n"
+"    let ang = (f32(s) + noise) * 3.14159265 / f32(AO_SLICES);\n"
+"    let dir = vec2<f32>(cos(ang), sin(ang));\n"
+"    var maxSin = 0.0;\n"
+"    for (var t = 1; t <= AO_STEPS; t = t + 1) {\n"
+"      let stepPx = dir * f32(t) * 3.0;\n"
+"      let sp = px + vec2<i32>(stepPx);\n"
+"      if (sp.x < 0 || sp.y < 0 || sp.x >= dim.x || sp.y >= dim.y) { break; }\n"
+"      let sd = textureLoad(depthTex, sp, 0);\n"
+"      if (sd <= 0.0) { continue; }\n"
+"      let S = worldAt(sp, dim);\n"
+"      let v = S - P;\n"
+"      let dist = length(v);\n"
+"      if (dist < 0.001 || dist > AO_RADIUS) { continue; }\n"
+/* The horizon angle above the tangent plane. sin(elevation) = N.v/|v|,
+ * and tracking its MAXIMUM along the march is the horizon search: one
+ * value summarises every occluder in this direction. */
+"      let sinE = dot(N, v) / dist;\n"
+/* Attenuate with distance so a far occluder does not count as much as a
+ * touching one; without it AO reads as a hard disc at the radius. */
+"      let falloff = 1.0 - (dist / AO_RADIUS) * (dist / AO_RADIUS);\n"
+"      maxSin = max(maxSin, sinE * falloff);\n"
+"    }\n"
+"    occl = occl + clamp(maxSin, 0.0, 1.0);\n"
+"  }\n"
+"  let ao = clamp(1.0 - occl / f32(AO_SLICES), 0.0, 1.0);\n"
+"  return vec4<f32>(ao, ao, ao, 1.0);\n"
+"}\n";
+
 static const char* GB_LIGHT_WGSL =
 "struct LightU {\n"
 "  invViewProj: mat4x4<f32>,\n"
@@ -133,6 +237,7 @@ static const char* GB_LIGHT_WGSL =
 "@group(0) @binding(2) var gbbTex: texture_2d<f32>;\n"
 "@group(0) @binding(3) var gbcTex: texture_2d<f32>;\n"
 "@group(0) @binding(4) var depthTex: texture_depth_2d;\n"
+"@group(0) @binding(5) var aoTex: texture_2d<f32>;\n"
 GB_OCT_WGSL
 GB_FULLSCREEN_VS
 "const PI: f32 = 3.14159265;\n"
@@ -214,7 +319,10 @@ GB_FULLSCREEN_VS
  * disagreement is real and tracked, and this is the correct one. */
 "  let hemi = mix(L.ambGround.rgb, L.ambSky.rgb, N.z * 0.5 + 0.5);\n"
 "  let ambF = fresnel(NoV, f0);\n"
-"  let ambient = (hemi * albedo * (1.0 - metallic) + hemi * ambF * (1.0 - rough * 0.7)) * ao;\n"
+/* Screen-space AO multiplies the baked occlusion, and the product
+   touches INDIRECT only — never `direct` above. */
+"  let ssao = textureLoad(aoTex, px, 0).r;\n"
+"  let ambient = (hemi * albedo * (1.0 - metallic) + hemi * ambF * (1.0 - rough * 0.7)) * ao * ssao;\n"
 /* Emissive tints by albedo, matching how it is authored: an emitter's base
  * colour IS the colour it emits, which is why one scalar suffices. */
 "  let emit = albedo * emissive;\n"
@@ -283,6 +391,9 @@ static void gb_deferred_release_targets(void) {
     if (gb_pyramid_tex)    { wgpuTextureRelease(gb_pyramid_tex); gb_pyramid_tex = NULL; }
     if (gb_light_bind)     { wgpuBindGroupRelease(gb_light_bind); gb_light_bind = NULL; }
     if (gb_composite_bind) { wgpuBindGroupRelease(gb_composite_bind); gb_composite_bind = NULL; }
+    if (gb_ao_view)        { wgpuTextureViewRelease(gb_ao_view); gb_ao_view = NULL; }
+    if (gb_ao_tex)         { wgpuTextureRelease(gb_ao_tex); gb_ao_tex = NULL; }
+    if (gb_ao_bind)        { wgpuBindGroupRelease(gb_ao_bind); gb_ao_bind = NULL; }
     if (gb_lit_view)       { wgpuTextureViewRelease(gb_lit_view); gb_lit_view = NULL; }
     if (gb_lit_tex)        { wgpuTextureRelease(gb_lit_tex); gb_lit_tex = NULL; }
     gb_pyramid_mips = 0;
@@ -335,6 +446,16 @@ static void gb_deferred_ensure(void) {
     gb_lit_tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
     gb_lit_view = wgpuTextureCreateView(gb_lit_tex, NULL);
 
+    /* AO target (#387). Full resolution and r8unorm: one byte per pixel,
+     * and a fragment pass can write r8unorm as a colour attachment even
+     * though it is not a writable STORAGE format. */
+    td.size.width = (uint32_t)gb_target_w;
+    td.size.height = (uint32_t)gb_target_h;
+    td.mipLevelCount = 1;
+    td.format = WGPUTextureFormat_R8Unorm;
+    gb_ao_tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
+    gb_ao_view = wgpuTextureCreateView(gb_ao_tex, NULL);
+
     gb_deferred_gen = gb_targets_gen;
 }
 
@@ -348,6 +469,8 @@ static void gb_deferred_init_pipelines(void) {
     if (!gb_light_pipeline) {
         gb_lit_format = g_wgpu_have_rg11b10 ? WGPUTextureFormat_RG11B10Ufloat
                                             : WGPUTextureFormat_RGBA16Float;
+        gb_ao_pipeline = gb_make_fullscreen_pipeline(
+            GB_AO_WGSL, WGPUTextureFormat_R8Unorm, "ssao");
         gb_light_pipeline = gb_make_fullscreen_pipeline(
             GB_LIGHT_WGSL, gb_lit_format, "lighting");
         WGPUBufferDescriptor ud; memset(&ud, 0, sizeof(ud));
@@ -365,6 +488,19 @@ static void gb_deferred_init_pipelines(void) {
 }
 
 /* One fullscreen pass: bind, draw three vertices, submit. */
+static void gb_ensure_ao_bind(void) {
+    if (gb_ao_bind || !gb_ao_pipeline || !gb_a_view || !gb_depth_view) return;
+    WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(gb_ao_pipeline, 0);
+    WGPUBindGroupEntry e[3]; memset(e, 0, sizeof(e));
+    e[0].binding = 0; e[0].buffer = gb_light_ubuf; e[0].size = GB_LIGHT_BYTES;
+    e[1].binding = 1; e[1].textureView = gb_a_view;
+    e[2].binding = 2; e[2].textureView = gb_depth_view;
+    WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
+    bgd.layout = bgl; bgd.entryCount = 3; bgd.entries = e;
+    gb_ao_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
+    wgpuBindGroupLayoutRelease(bgl);
+}
+
 static void gb_run_fullscreen(WGPURenderPipeline pipeline, WGPUBindGroup bind,
                               WGPUTextureView target) {
     if (!pipeline || !bind || !target) return;
@@ -424,6 +560,30 @@ void rae_ext_gbuffer_depthPyramid(void) {
 
 /* Deferred lighting. Sun direction points TOWARD the scene, matching
  * Light3d and the forward path. */
+/* SSAO (#387). Runs BEFORE lighting, so it writes the part of the light
+ * uniform it needs itself — invViewProj and camPos, both derived from the
+ * geometry pass's viewProj. Lighting rewrites the same values later; they
+ * cannot disagree because both come from gb_viewproj. */
+void rae_ext_gbuffer_ssao(float camX, float camY, float camZ) {
+    if (!g_wgpu_dev || !gb_a_view) return;
+    gb_deferred_init_pipelines();
+    gb_deferred_ensure();
+    if (!gb_ao_pipeline || !gb_ao_view) return;
+
+    float u[GB_LIGHT_BYTES / 4];
+    memset(u, 0, sizeof(u));
+    if (!g3d_invert_mat4(gb_viewproj, u)) {
+        memset(u, 0, 16 * sizeof(float));
+        u[0] = 1.0f; u[5] = 1.0f; u[10] = 1.0f; u[15] = 1.0f;
+    }
+    u[16] = camX; u[17] = camY; u[18] = camZ; u[19] = 0.0f;
+    wgpuQueueWriteBuffer(g_wgpu_queue, gb_light_ubuf, 0, u, GB_LIGHT_BYTES);
+
+    gb_ensure_ao_bind();
+    if (!gb_ao_bind) return;
+    gb_run_fullscreen(gb_ao_pipeline, gb_ao_bind, gb_ao_view);
+}
+
 void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure,
                               float sunX, float sunY, float sunZ,
                               float sunR, float sunG, float sunB,
@@ -455,14 +615,15 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
 
     if (!gb_light_bind) {
         WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(gb_light_pipeline, 0);
-        WGPUBindGroupEntry e[5]; memset(e, 0, sizeof(e));
+        WGPUBindGroupEntry e[6]; memset(e, 0, sizeof(e));
         e[0].binding = 0; e[0].buffer = gb_light_ubuf; e[0].size = GB_LIGHT_BYTES;
         e[1].binding = 1; e[1].textureView = gb_a_view;
         e[2].binding = 2; e[2].textureView = gb_b_view;
         e[3].binding = 3; e[3].textureView = gb_c_view;
         e[4].binding = 4; e[4].textureView = gb_depth_view;
+        e[5].binding = 5; e[5].textureView = gb_ao_view;
         WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
-        bgd.layout = bgl; bgd.entryCount = 5; bgd.entries = e;
+        bgd.layout = bgl; bgd.entryCount = 6; bgd.entries = e;
         gb_light_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
         wgpuBindGroupLayoutRelease(bgl);
     }
