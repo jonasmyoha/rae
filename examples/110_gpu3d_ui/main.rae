@@ -64,7 +64,11 @@ import ui/frame_stats
 import ui/log_overlay
 import hot_reload
 import app3d/camera_rig
+import app3d/camera_bar
+import app3d/ui_shell
 open app3d/camera_rig
+open app3d/camera_bar
+open app3d/ui_shell
 
 type DemoUiResource {
   paused: Bool
@@ -148,28 +152,6 @@ func restore110State(raw: view String, ui: mod DemoUiResource, rig: mod CameraRi
   ret true
 }
 
-func nodeEntity(world: view UiWorld, nodeId: view String) ret EntityId {
-  let found: opt Int = world.nodeIds.get(k: nodeId)
-  if found is none { ret noEntity() }
-  let raw: Int = found
-  ret entityId(v: raw)
-}
-
-func setNodeActive(world: mod UiWorld, nodeId: view String, value: view Bool) {
-  let entity: EntityId = nodeEntity(world: world, nodeId: nodeId)
-  if isNone(this: entity) { ret }
-  let active: Active = { value: value }
-  componentSet(this: world.actives, entity: entity, data: active)
-}
-
-func setNodeText(world: mod UiWorld, nodeId: view String, value: view String) {
-  let entity: EntityId = nodeEntity(world: world, nodeId: nodeId)
-  if isNone(this: entity) { ret }
-  if componentHas(this: world.texts, entity: entity) is false { ret }
-  let text: mod Text => componentMod(this: world.texts, entity: entity)
-  text.text = "{value}"
-}
-
 # Narrow UI diff: persistent entities are patched only when their typed
 # resource revision changes. No scene remount or per-frame widget rebuilding.
 func syncDemoUi(world: mod UiWorld, state: mod DemoUiResource) ret Bool {
@@ -199,24 +181,6 @@ func syncDemoUi(world: mod UiWorld, state: mod DemoUiResource) ret Bool {
   ret layoutDirty
 }
 
-func syncCameraUi(world: mod UiWorld, rig: view CameraRig, camera: view Camera3d) {
-  let modeName: String = cameraRigModeName(rig: rig)
-  var pitchDeg: Int = (rig.orbitPitch * 57.2957795).toInt()
-  if rig.mode is CameraRigMode.free {
-    pitchDeg = (rig.freePitch * 57.2957795).toInt()
-  }
-  let yawDeg: Int = (rig.yaw * 57.2957795).toInt()
-  let fovDeg: Int = camera.fovYDeg.toInt()
-  let px: Int = camera.position.x.toInt()
-  let py: Int = camera.position.y.toInt()
-  let pz: Int = camera.position.z.toInt()
-  setNodeText(world: world, nodeId: "CameraModeLabel", value: modeName)
-  setNodeText(world: world, nodeId: "CameraFovLabel", value: "FOV {fovDeg}°")
-  setNodeText(world: world, nodeId: "CameraPositionLabel", value: "Pos {px}, {py}, {pz}")
-  setNodeText(world: world, nodeId: "CameraYawLabel", value: "Yaw {yawDeg}°")
-  setNodeText(world: world, nodeId: "CameraPitchLabel", value: "Pitch {pitchDeg}°")
-}
-
 func dispatchUiActions(input: view UiInput, state: mod DemoUiResource, rig: mod CameraRig, camera: mod Camera3d) {
   var i: Int = 0
   loop i < input.events.length {
@@ -232,9 +196,6 @@ func dispatchUiActions(input: view UiInput, state: mod DemoUiResource, rig: mod 
     if event.actionId.equals(other: "animation.speed") {
       state.fullSpeed = not state.fullSpeed
       state.revision = state.revision + 1
-    }
-    if event.actionId.equals(other: "camera.mode") {
-      toggleCameraRigMode(rig: rig, camera: camera)
     }
     if event.actionId.equals(other: "scene.select.1") {
       state.activeScene = 1
@@ -265,45 +226,7 @@ func dispatchUiActions(input: view UiInput, state: mod DemoUiResource, rig: mod 
 # here whenever the extent changes. Only intent lives in this function —
 # "centred", "right-aligned", "full-bleed" — not pixel constants tied to
 # one resolution.
-func setNodeRect(world: mod UiWorld, nodeId: view String, x: view Float, y: view Float, w: view Float, h: view Float) {
-  let entity: EntityId = nodeEntity(world: world, nodeId: nodeId)
-  if isNone(this: entity) { ret }
-  if componentHas(this: world.rects, entity: entity) is false { ret }
-  let r: mod Rect => componentMod(this: world.rects, entity: entity)
-  r.x = x
-  r.y = y
-  r.w = w
-  r.h = h
-}
-
-func nodeRectW(world: view UiWorld, nodeId: view String) ret Float {
-  let entity: EntityId = nodeEntity(world: world, nodeId: nodeId)
-  if isNone(this: entity) { ret 0.0 }
-  if componentHas(this: world.rects, entity: entity) is false { ret 0.0 }
-  let r: Rect = componentGet(this: world.rects, entity: entity)
-  ret r.w
-}
-
-# Place one readout inside the camera bar if it fits, otherwise hide it and
-# every readout after it. Truncation is SEQUENTIAL on purpose: letting a
-# narrow later readout slot into the gap left by a wide one that did not
-# fit shows an arbitrary subset, so the bar would reorder itself as the
-# window resizes. Returns the x cursor for the next readout, or a negative
-# cursor once truncated.
-func placeBarReadout(world: mod UiWorld, nodeId: view String, x: view Float, w: view Float, barW: view Float) ret Float {
-  var fits: Bool = x >= 0.0
-  if fits {
-    if x + w + 10.0 > barW { fits = false }
-  }
-  setNodeActive(world: world, nodeId: nodeId, value: fits)
-  if fits is false {
-    ret 0.0 - 1.0
-  }
-  setNodeRect(world: world, nodeId: nodeId, x: x, y: 16.0, w: w, h: 22.0)
-  ret x + w + 14.0
-}
-
-func anchorUiToExtent(world: mod UiWorld, w: view Float, h: view Float) {
+func anchorUiToExtent(world: mod UiWorld, res: view Gpu2dUi, w: view Float, h: view Float) {
   let margin: Float = 24.0
   # Full-bleed: the root and the pause dimmer must cover the whole window,
   # not a fixed-size box inside it.
@@ -319,29 +242,19 @@ func anchorUiToExtent(world: mod UiWorld, w: view Float, h: view Float) {
   setNodeRect(world: world, nodeId: "FpsLabel", x: w - margin - 86.0, y: 82.0, w: 86.0, h: 16.0)
 
   # The camera bar sits at the top, centred in the space left of the
-  # buttons, and shrinks rather than overlapping them on narrow windows.
-  let barMax: Float = 774.0
-  var barW: Float = pauseX - margin - 12.0 - margin
-  if barW > barMax { barW = barMax }
-  if barW < 120.0 { barW = 120.0 }
+  # buttons. It is the SHARED component (lib/app3d/camera_bar.rae), so
+  # this only says where it may live and how much room it has; the bar
+  # flows its own children and sheds readouts that do not fit.
+  let barAvail: Float = pauseX - margin - 12.0 - margin
+  fitCameraBar(world: world, res: res, hostNodeId: "CameraBarSlot", availW: barAvail)
+  let barW: Float = nodeRectW(world: world, nodeId: "CameraBarSlot")
   var barX: Float = (pauseX - margin - barW) * 0.5
   if barX < margin { barX = margin }
-  setNodeRect(world: world, nodeId: "CameraBar", x: barX, y: 24.0, w: barW, h: 52.0)
+  setNodeRect(world: world, nodeId: "CameraBarSlot", x: barX, y: 24.0,
+              w: barW, h: nodeRectH(world: world, nodeId: "CameraBarSlot"))
 
   # Crosshair tracks the true viewport centre.
   setNodeRect(world: world, nodeId: "Crosshair", x: (w - 36.0) * 0.5, y: (h - 36.0) * 0.5, w: 36.0, h: 36.0)
-
-  # The bar's readouts are absolutely placed, so a narrower bar would let
-  # the right-hand ones spill past its edge and over the buttons. Lay them
-  # out from the live bar width instead, and DROP the ones that no longer
-  # fit rather than overlapping — progressive disclosure beats a collision.
-  let modeW: Float = 104.0
-  var cursorX: Float = 6.0 + modeW + 22.0
-  setNodeRect(world: world, nodeId: "CameraModeButton", x: 6.0, y: 6.0, w: modeW, h: 40.0)
-  cursorX = placeBarReadout(world: world, nodeId: "CameraFovLabel", x: cursorX, w: 92.0, barW: barW)
-  cursorX = placeBarReadout(world: world, nodeId: "CameraPositionLabel", x: cursorX, w: 196.0, barW: barW)
-  cursorX = placeBarReadout(world: world, nodeId: "CameraYawLabel", x: cursorX, w: 132.0, barW: barW)
-  cursorX = placeBarReadout(world: world, nodeId: "CameraPitchLabel", x: cursorX, w: 160.0, barW: barW)
 
   # Panels: the pause dialog centres in the window; the debug panel hangs
   # off the top-right under its button. Both are children of full-bleed
@@ -351,20 +264,6 @@ func anchorUiToExtent(world: mod UiWorld, w: view Float, h: view Float) {
   var debugPanelX: Float = w - margin - debugPanelW
   if debugPanelX < margin { debugPanelX = margin }
   setNodeRect(world: world, nodeId: "DebugPanel", x: debugPanelX, y: 88.0, w: debugPanelW, h: debugPanelH)
-}
-
-# Logical (point) size of the window. Layout and text want points, not
-# physical pixels, or everything halves on a retina display.
-func windowExtentW() ret Float {
-  let ratio: Float = gpu2d.dpr()
-  if ratio < 0.1 { ret gpu2d.windowWidth().toFloat() }
-  ret gpu2d.windowWidth().toFloat() / ratio
-}
-
-func windowExtentH() ret Float {
-  let ratio: Float = gpu2d.dpr()
-  if ratio < 0.1 { ret gpu2d.windowHeight().toFloat() }
-  ret gpu2d.windowHeight().toFloat() / ratio
 }
 
 func uploadMeshData(mesh: view MeshData) ret MeshHandle {
@@ -534,19 +433,23 @@ func main() ret Int {
     ret 1
   }
 
-  let textFont: SdfFont = sdf_text.loadSdfFont(jsonPath: "{base}Roboto-Regular.mtsdf.json", rawAtlasPath: "{base}Roboto-Regular.mtsdf.raw")
-  let iconFont: SdfFont = sdf_text.loadSdfFont(jsonPath: "{base}MaterialIconsRound-Regular.mtsdf.json", rawAtlasPath: "{base}MaterialIconsRound-Regular.mtsdf.raw")
-  let themeScene: Scene = loadSceneFile(path: "{base}theme.raescene")
-  let theme: ResolvedTheme = parseTheme(scene: themeScene)
-  setActiveThemeTokens(theme: theme)
-  let gpuUi: Gpu2dUi = { textFont: textFont, iconFont: iconFont, theme: theme }
+  # Fonts + theme through the shared loader, which also bridges the
+  # theme's PALETTE into the active theme — the step that was missing
+  # here and is why a slot-coloured component would otherwise render in
+  # the built-in light palette.
+  let gpuUi: Gpu2dUi = loadUiAssets(dir: base, textFontName: "Roboto-Regular",
+                                    iconFontName: "MaterialIconsRound-Regular",
+                                    themeFile: "theme.raescene")
 
   var uiWorld: UiWorld = createUiWorld()
   uiWorld.layoutW = extentW
   uiWorld.layoutH = extentH
   let uiScene: Scene = loadSceneFile(path: "{base}ui.raescene")
   let uiRoot: EntityId = loadScene(world: uiWorld, scene: uiScene)
-  anchorUiToExtent(world: uiWorld, w: extentW, h: extentH)
+  # The camera readout bar is the SHARED component; this scene supplies
+  # only the slot it mounts into. Example 113 mounts the same one.
+  mountCameraBar(world: uiWorld, res: gpuUi, hostNodeId: "CameraBarSlot")
+  anchorUiToExtent(world: uiWorld, res: gpuUi, w: extentW, h: extentH)
   layoutSystem(world: uiWorld)
   transformSystem(world: uiWorld)
   visualBoundsSystem(world: uiWorld, res: gpuUi)
@@ -606,7 +509,7 @@ func main() ret Int {
     transformSystem(world: uiWorld)
     visualBoundsSystem(world: uiWorld, res: gpuUi)
   }
-  syncCameraUi(world: uiWorld, rig: cameraRig, camera: camera)
+  syncCameraBar(world: uiWorld, rig: cameraRig, camera: camera)
 
   var light: Light3d = scene1.light
   var simTime: Float = 0.0
@@ -663,7 +566,7 @@ func main() ret Int {
         gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
         uiWorld.layoutW = extentW
         uiWorld.layoutH = extentH
-        anchorUiToExtent(world: uiWorld, w: extentW, h: extentH)
+        anchorUiToExtent(world: uiWorld, res: gpuUi, w: extentW, h: extentH)
         extentChanged = true
       }
     }
@@ -686,6 +589,7 @@ func main() ret Int {
     }
 
     updateUiInput(input: uiInput, world: uiWorld)
+    handleCameraBar(input: uiInput, rig: cameraRig, camera: camera)
     let hadUiEvents: Bool = uiInput.events.length > 0
     dispatchUiActions(input: uiInput, state: uiState, rig: cameraRig, camera: camera)
     let uiLayoutDirty: Bool = syncDemoUi(world: uiWorld, state: uiState)
@@ -755,7 +659,7 @@ func main() ret Int {
         simTime = simTime + dt * motionScale
       }
       applyCameraRig(rig: cameraRig, camera: camera)
-      syncCameraUi(world: uiWorld, rig: cameraRig, camera: camera)
+      syncCameraBar(world: uiWorld, rig: cameraRig, camera: camera)
       if uiState.activeScene is 1 { light = scene1.light }
       if uiState.activeScene is 2 { light = scene2.light }
       if uiState.activeScene is 3 { light = scene3.light }
@@ -791,7 +695,7 @@ func main() ret Int {
           gpu2d.beginFrameLoad()
           renderSystemGpu2d(world: uiWorld, res: gpuUi)
           # After the app UI, so the diagnostic is never what gets covered up.
-          drawLogOverlay(ov: logView, font: textFont, screenW: extentW, screenH: extentH)
+          drawLogOverlay(ov: logView, font: gpuUi.textFont, screenW: extentW, screenH: extentH)
           lastLogRevision = logView.revision
         }
         if tag is tagPresent {
