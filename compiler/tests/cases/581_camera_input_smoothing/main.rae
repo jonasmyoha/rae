@@ -1,0 +1,84 @@
+# Camera input smoothing (lib/app3d/camera_rig.rae).
+#
+# Smoothing is judged by feel, which makes it exactly the kind of thing
+# that silently regresses. These are the properties that feel depends on:
+#
+#   1. FRAME-RATE INDEPENDENCE. The whole reason for exponential decay
+#      over `gap * rate * dt`. One 0.1s step must land where ten 0.01s
+#      steps land, or the camera is a different camera on a 144Hz screen
+#      than on a 60Hz one, and nobody tuning the rate can tell which one
+#      they are tuning for.
+#   2. NO OVERSHOOT ON A LONG FRAME. The naive filter passes the target
+#      and oscillates once rate*dt exceeds 1 — a hitch, a stall, then a
+#      visible wobble. Decay cannot cross the target however long the
+#      frame is.
+#   3. SMOOTHING OFF IS BIT-EXACT. Off must mean untouched, not
+#      "converges quickly": a camera that eases 1% when the toggle says
+#      off is a bug nobody can see but everybody can feel.
+#   4. IT ACTUALLY ARRIVES. An exponential never reaches its target in
+#      exact arithmetic, so without the epsilon snap the rig reports
+#      movement forever and an idle-aware loop never sleeps.
+import core
+import math
+import vec3
+import scene3d
+import app3d/camera_rig
+open scene3d
+open app3d/camera_rig
+
+func approxEq(a: view Float, b: view Float, tol: view Float) ret Bool {
+  var d: Float = a - b
+  if d < 0.0 { d = 0.0 - d }
+  ret d < tol
+}
+
+func main() {
+  # 1. One long step == many short steps covering the same time.
+  let rate: Float = 12.0
+  let oneStep: Float = smoothTowards(current: 0.0, target: 10.0, rate: rate, dt: 0.1)
+  var many: Float = 0.0
+  var i: Int = 0
+  loop i < 10 {
+    many = smoothTowards(current: many, target: 10.0, rate: rate, dt: 0.01)
+    i = i + 1
+  }
+  log("framerate independent: {approxEq(a: oneStep, b: many, tol: 0.0001)}")
+
+  # 2. A 2-second frame at a high rate must not sail past the target.
+  let huge: Float = smoothTowards(current: 0.0, target: 10.0, rate: 30.0, dt: 2.0)
+  log("no overshoot on a long frame: {huge <= 10.0 and huge > 9.99}")
+
+  # 3. Rate 0 is the "smoothing off" path and must be exact.
+  let off: Float = smoothTowards(current: 3.25, target: 7.5, rate: 0.0, dt: 0.016)
+  log("off snaps exactly: {off is 7.5}")
+
+  # 4. Repeated easing converges to the target EXACTLY, so movement stops.
+  var conv: Float = 0.0
+  var n: Int = 0
+  loop n < 500 {
+    conv = smoothTowards(current: conv, target: 1.0, rate: 20.0, dt: 0.016)
+    n = n + 1
+  }
+  log("converges exactly: {conv is 1.0}")
+
+  # The rate picker: with both sources smoothed the SLOWER rate wins, so
+  # the gap left by the smoother source is the one that governs.
+  let cam: Camera3d = {
+    position: vec3.create(x: 0.0, y: 0.0 - 12.0, z: 5.0)
+    target: vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    fovYDeg: 50.0
+    nearZ: 0.1
+    farZ: 200.0
+  }
+  var rig: CameraRig = createCameraRig(camera: cam)
+  rig.mouseSmoothRate = 22.0
+  rig.keySmoothRate = 12.0
+  log("neither smoothed rate: {rigRotationRate(rig: rig)}")
+  rig.smoothMouse = true
+  log("mouse only rate: {rigRotationRate(rig: rig)}")
+  rig.smoothMouse = false
+  rig.smoothKeys = true
+  log("keys only rate: {rigRotationRate(rig: rig)}")
+  rig.smoothMouse = true
+  log("both smoothed takes the slower: {rigRotationRate(rig: rig)}")
+}
