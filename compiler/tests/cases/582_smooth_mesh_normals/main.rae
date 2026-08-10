@@ -1,0 +1,83 @@
+# Smooth normals with a crease angle (lib/mesh3d.rae).
+#
+# The reason this is not just "average the normals at each position":
+# doing that rounds the corners off a cube. What has to hold is that
+# joins BELOW the angle merge and creases ABOVE it survive, and those two
+# fail in opposite directions — a threshold that is too generous flattens
+# every hard edge, one that is too strict silently does nothing at all
+# and the mesh still shades as plates.
+#
+#   1. Two nearly-aligned normals at one position merge.
+#   2. A 90-degree crease at that SAME position is excluded from the
+#      merge, so the corner stays sharp.
+#   3. A vertex at a different position is never merged, however closely
+#      its normal happens to agree.
+#   4. Vertex and index counts, and every non-normal attribute, come
+#      through untouched — this rewrites normals, nothing else.
+import core
+import math
+import mesh3d
+open mesh3d
+
+func addVert(v: mod List(Float), px: view Float, py: view Float, pz: view Float,
+             nx: view Float, ny: view Float, nz: view Float, u: view Float) {
+  v.add(value: px)
+  v.add(value: py)
+  v.add(value: pz)
+  v.add(value: nx)
+  v.add(value: ny)
+  v.add(value: nz)
+  v.add(value: u)
+  v.add(value: 0.0)
+}
+
+func deg(a: view Float) ret Int {
+  ret (a * 57.2957795 + 0.5).toInt()
+}
+
+# Angle between a vertex's resulting normal and a reference direction.
+func angleTo(m: view MeshData, i: view Int,
+             rx: view Float, ry: view Float, rz: view Float) ret Int {
+  let nx: Float = m.verts.at(index: i * 8 + 3)
+  let ny: Float = m.verts.at(index: i * 8 + 4)
+  let nz: Float = m.verts.at(index: i * 8 + 5)
+  var d: Float = nx * rx + ny * ry + nz * rz
+  if d > 1.0 { d = 1.0 }
+  if d < 0.0 - 1.0 { d = 0.0 - 1.0 }
+  ret deg(a: math.acos(x: d))
+}
+
+func main() {
+  var verts: List(Float) = createList(Float, cap: 32)
+  # Three vertices sharing one position: +X, 10 degrees off +X, and +Y.
+  addVert(v: verts, px: 0.0, py: 0.0, pz: 0.0, nx: 1.0, ny: 0.0, nz: 0.0, u: 0.25)
+  addVert(v: verts, px: 0.0, py: 0.0, pz: 0.0, nx: 0.9848, ny: 0.1736, nz: 0.0, u: 0.5)
+  addVert(v: verts, px: 0.0, py: 0.0, pz: 0.0, nx: 0.0, ny: 1.0, nz: 0.0, u: 0.75)
+  # A fourth somewhere else entirely, pointing the same way as the first.
+  addVert(v: verts, px: 5.0, py: 0.0, pz: 0.0, nx: 1.0, ny: 0.0, nz: 0.0, u: 1.0)
+  var indices: List(Int) = createList(Int, cap: 3)
+  indices.add(value: 0)
+  indices.add(value: 1)
+  indices.add(value: 2)
+  let src: MeshData = { verts: own verts, indices: own indices, vertCount: 4 }
+
+  let out: MeshData = smoothMeshNormals(m: src, angleDeg: 60.0)
+
+  # 1 + 2: v0 merges only the 10-degree neighbour, landing halfway
+  # between them, and is NOT dragged toward +Y by the crease.
+  log("v0 angle from +X: {angleTo(m: out, i: 0, rx: 1.0, ry: 0.0, rz: 0.0)}")
+  log("v0 angle from +Y: {angleTo(m: out, i: 2 - 2, rx: 0.0, ry: 1.0, rz: 0.0)}")
+  # The crease vertex keeps its own direction exactly.
+  log("v2 still +Y: {angleTo(m: out, i: 2, rx: 0.0, ry: 1.0, rz: 0.0)}")
+  # 3: the distant vertex is untouched despite an identical normal.
+  log("v3 still +X: {angleTo(m: out, i: 3, rx: 1.0, ry: 0.0, rz: 0.0)}")
+
+  # A threshold below the join angle must merge NOTHING — the failure
+  # mode where smoothing silently does nothing has to be distinguishable.
+  let strict: MeshData = smoothMeshNormals(m: src, angleDeg: 5.0)
+  log("strict v0 unchanged: {angleTo(m: strict, i: 0, rx: 1.0, ry: 0.0, rz: 0.0)}")
+
+  # 4: counts and other attributes survive.
+  log("vertCount {out.vertCount}, indices {out.indices.length}")
+  log("uv preserved: {out.verts.at(index: 2 * 8 + 6)}")
+}
