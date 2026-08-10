@@ -63,70 +63,8 @@ import ui/event_loop
 import ui/frame_stats
 import ui/log_overlay
 import hot_reload
-
-enum CameraMode {
-  orbit
-  free
-}
-
-type CameraController {
-  mode: CameraMode
-  yaw: Float
-  orbitPitch: Float
-  freePitch: Float
-  distance: Float
-  freePosition: Vec3
-}
-
-func createCameraController(camera: view Camera3d) ret CameraController {
-  ret CameraController {
-    mode: CameraMode.orbit
-    yaw: 0.0
-    orbitPitch: 0.38
-    freePitch: 0.0 - 0.38
-    distance: 12.5
-    freePosition: camera.position
-  }
-}
-
-# Orbit pitch limit, shared by the drag and keyboard paths so they cannot
-# drift apart.
-#
-# SYMMETRIC: the camera orbits as far BELOW the horizon as above it. It
-# used to stop at +0.05 rad, which pinned it to almost exactly horizontal
-# and made it feel stuck against an invisible floor.
-#
-# The magnitude stops just short of a right angle because the view matrix
-# uses a fixed +Z world up: at exactly +/-90 degrees the view direction is
-# parallel to that up vector, their cross product is zero, and the basis
-# collapses. 1.45 rad is about 83 degrees, close enough to straight
-# down/up to feel unrestricted while staying well clear of the
-# singularity.
-func clampOrbitPitch(pitch: view Float) ret Float {
-  let limit: Float = 1.45
-  if pitch > limit {
-    ret limit
-  }
-  if pitch < 0.0 - limit {
-    ret 0.0 - limit
-  }
-  ret pitch
-}
-
-func cameraForward(controller: view CameraController) ret Vec3 {
-  let cp: Float = math.cos(x: controller.freePitch)
-  ret vec3.create(
-    x: (0.0 - math.sin(x: controller.yaw)) * cp
-    y: math.cos(x: controller.yaw) * cp
-    z: math.sin(x: controller.freePitch)
-  )
-}
-
-func cameraRight(controller: view CameraController) ret Vec3 {
-  let forward: Vec3 = cameraForward(controller: controller)
-  let up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
-  ret vec3.vnorm(a: vec3.vcross(a: forward, b: up))
-}
+import app3d/camera_rig
+open app3d/camera_rig
 
 type DemoUiResource {
   paused: Bool
@@ -172,20 +110,21 @@ const state110Version: Int = 1
 const state110AppId: String = "110_gpu3d_ui"
 const state110Fields: Int = 15
 
-func serialize110State(ui: view DemoUiResource, controller: view CameraController, camera: view Camera3d) ret String {
-  var modeNum: Int = 0
-  if controller.mode is CameraMode.free { modeNum = 1 }
+func serialize110State(ui: view DemoUiResource, rig: view CameraRig, camera: view Camera3d) ret String {
   var pausedNum: Int = 0
   if ui.paused { pausedNum = 1 }
   var fullNum: Int = 0
   if ui.fullSpeed { fullNum = 1 }
   var debugNum: Int = 0
   if ui.debugOpen { debugNum = 1 }
-  ret "{state110Version} {ui.activeScene} {pausedNum} {fullNum} {debugNum} {modeNum} {controller.yaw} {controller.orbitPitch} {controller.freePitch} {controller.distance} {controller.freePosition.x} {controller.freePosition.y} {controller.freePosition.z} {camera.target.x} {camera.target.y}"
+  # This example owns the first five fields; the camera's ten are the
+  # rig's format, so the two cannot drift out of step when either side
+  # gains a field.
+  ret "{state110Version} {ui.activeScene} {pausedNum} {fullNum} {debugNum} {cameraRigStateString(rig: rig, camera: camera)}"
 }
 
 # Returns true when a full, version-matched snapshot was applied.
-func restore110State(raw: view String, ui: mod DemoUiResource, controller: mod CameraController, camera: mod Camera3d) ret Bool {
+func restore110State(raw: view String, ui: mod DemoUiResource, rig: mod CameraRig, camera: mod Camera3d) ret Bool {
   if raw.length() < 1 {
     ret false
   }
@@ -202,33 +141,9 @@ func restore110State(raw: view String, ui: mod DemoUiResource, controller: mod C
   ui.paused = parts.at(index: 2).trim().toInt() is 1
   ui.fullSpeed = parts.at(index: 3).trim().toInt() is 1
   ui.debugOpen = parts.at(index: 4).trim().toInt() is 1
-  if parts.at(index: 5).trim().toInt() is 1 {
-    controller.mode = CameraMode.free
-  } else {
-    controller.mode = CameraMode.orbit
+  if applyCameraRigState(parts: parts, offset: 5, rig: rig, camera: camera) is false {
+    ret false
   }
-  controller.yaw = parts.at(index: 6).trim().toFloat()
-  controller.orbitPitch = parts.at(index: 7).trim().toFloat()
-  controller.freePitch = parts.at(index: 8).trim().toFloat()
-  controller.distance = parts.at(index: 9).trim().toFloat()
-  controller.freePosition = vec3.create(
-    x: parts.at(index: 10).trim().toFloat(),
-    y: parts.at(index: 11).trim().toFloat(),
-    z: parts.at(index: 12).trim().toFloat()
-  )
-  # Orbit needs the target restored too, or the camera returns to the
-  # right angle around the wrong point.
-  camera.target = vec3.create(
-    x: parts.at(index: 13).trim().toFloat(),
-    y: parts.at(index: 14).trim().toFloat(),
-    z: camera.target.z
-  )
-  # A snapshot written by a build with different clamps should still land
-  # inside this build's limits.
-  if controller.distance < 4.0 { controller.distance = 4.0 }
-  if controller.distance > 30.0 { controller.distance = 30.0 }
-  if controller.orbitPitch < 0.05 { controller.orbitPitch = 0.05 }
-  if controller.orbitPitch > 1.45 { controller.orbitPitch = 1.45 }
   ui.revision = ui.revision + 1
   ret true
 }
@@ -284,14 +199,13 @@ func syncDemoUi(world: mod UiWorld, state: mod DemoUiResource) ret Bool {
   ret layoutDirty
 }
 
-func syncCameraUi(world: mod UiWorld, controller: mod CameraController, camera: view Camera3d) {
-  var modeName: String = "Orbit"
-  var pitchDeg: Int = (controller.orbitPitch * 57.2957795).toInt()
-  if controller.mode is CameraMode.free {
-    modeName = "WASD"
-    pitchDeg = (controller.freePitch * 57.2957795).toInt()
+func syncCameraUi(world: mod UiWorld, rig: view CameraRig, camera: view Camera3d) {
+  let modeName: String = cameraRigModeName(rig: rig)
+  var pitchDeg: Int = (rig.orbitPitch * 57.2957795).toInt()
+  if rig.mode is CameraRigMode.free {
+    pitchDeg = (rig.freePitch * 57.2957795).toInt()
   }
-  let yawDeg: Int = (controller.yaw * 57.2957795).toInt()
+  let yawDeg: Int = (rig.yaw * 57.2957795).toInt()
   let fovDeg: Int = camera.fovYDeg.toInt()
   let px: Int = camera.position.x.toInt()
   let py: Int = camera.position.y.toInt()
@@ -303,22 +217,7 @@ func syncCameraUi(world: mod UiWorld, controller: mod CameraController, camera: 
   setNodeText(world: world, nodeId: "CameraPitchLabel", value: "Pitch {pitchDeg}°")
 }
 
-func toggleCameraMode(controller: mod CameraController, camera: mod Camera3d) {
-  if controller.mode is CameraMode.orbit {
-    controller.mode = CameraMode.free
-    controller.freePosition = camera.position
-    controller.freePitch = 0.0 - controller.orbitPitch
-  } else {
-    let forward: Vec3 = cameraForward(controller: controller)
-    controller.orbitPitch = 0.0 - controller.freePitch
-    if controller.orbitPitch < 0.05 { controller.orbitPitch = 0.05 }
-    if controller.orbitPitch > 1.45 { controller.orbitPitch = 1.45 }
-    camera.target = vec3.vadd(a: controller.freePosition, b: vec3.vscale(a: forward, s: controller.distance))
-    controller.mode = CameraMode.orbit
-  }
-}
-
-func dispatchUiActions(input: view UiInput, state: mod DemoUiResource, controller: mod CameraController, camera: mod Camera3d) {
+func dispatchUiActions(input: view UiInput, state: mod DemoUiResource, rig: mod CameraRig, camera: mod Camera3d) {
   var i: Int = 0
   loop i < input.events.length {
     let event: UiActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
@@ -335,7 +234,7 @@ func dispatchUiActions(input: view UiInput, state: mod DemoUiResource, controlle
       state.revision = state.revision + 1
     }
     if event.actionId.equals(other: "camera.mode") {
-      toggleCameraMode(controller: controller, camera: camera)
+      toggleCameraRigMode(rig: rig, camera: camera)
     }
     if event.actionId.equals(other: "scene.select.1") {
       state.activeScene = 1
@@ -670,7 +569,7 @@ func main() ret Int {
   var uiInput: UiInput = createUiInput()
   var uiState: DemoUiResource = createDemoUiResource()
   var camera: Camera3d = scene1.camera
-  var cameraController: CameraController = createCameraController(camera: camera)
+  var cameraRig: CameraRig = createCameraRig(camera: camera)
   # Restore before the test-state hook, so an explicit env override still
   # wins over whatever the previous run left behind.
   #
@@ -688,7 +587,7 @@ func main() ret Int {
     or getEnv(name: "RAE_HEADLESS_FRAMES").length() > 0
   if not headless {
     let savedState: String = readHotReloadStateFor(appId: state110AppId)
-    if restore110State(raw: savedState, ui: uiState, controller: cameraController, camera: camera) {
+    if restore110State(raw: savedState, ui: uiState, rig: cameraRig, camera: camera) {
       logInfoLine(ov: logView, text: "state restored: scene {uiState.activeScene}, camera kept")
     }
   }
@@ -699,7 +598,7 @@ func main() ret Int {
   if testState.equals(other: "scene2") { uiState.activeScene = 2 }
   if testState.equals(other: "scene3") { uiState.activeScene = 3 }
   if testState.equals(other: "free") {
-    toggleCameraMode(controller: cameraController, camera: camera)
+    toggleCameraRigMode(rig: cameraRig, camera: camera)
   }
   let initialUiLayoutDirty: Bool = syncDemoUi(world: uiWorld, state: uiState)
   if initialUiLayoutDirty {
@@ -707,12 +606,9 @@ func main() ret Int {
     transformSystem(world: uiWorld)
     visualBoundsSystem(world: uiWorld, res: gpuUi)
   }
-  syncCameraUi(world: uiWorld, controller: cameraController, camera: camera)
+  syncCameraUi(world: uiWorld, rig: cameraRig, camera: camera)
 
   var light: Light3d = scene1.light
-  var lastX: Float = 0.0
-  var lastY: Float = 0.0
-  var dragging: Bool = false
   var simTime: Float = 0.0
   # Epoch seconds must stay Float64 (see docs/primitive-types.md); only the
   # small per-frame delta is narrowed to Float.
@@ -791,7 +687,7 @@ func main() ret Int {
 
     updateUiInput(input: uiInput, world: uiWorld)
     let hadUiEvents: Bool = uiInput.events.length > 0
-    dispatchUiActions(input: uiInput, state: uiState, controller: cameraController, camera: camera)
+    dispatchUiActions(input: uiInput, state: uiState, rig: cameraRig, camera: camera)
     let uiLayoutDirty: Bool = syncDemoUi(world: uiWorld, state: uiState)
     if uiLayoutDirty or extentChanged {
       layoutSystem(world: uiWorld)
@@ -799,71 +695,13 @@ func main() ret Int {
       visualBoundsSystem(world: uiWorld, res: gpuUi)
     }
 
-    let camYaw0: Float = cameraController.yaw
-    let camPitch0: Float = cameraController.orbitPitch
-    let camFreePitch0: Float = cameraController.freePitch
-    let camDist0: Float = cameraController.distance
-    let camPos0: Vec3 = cameraController.freePosition
-    let px: Float = gpu2d.pointerX()
-    let py: Float = gpu2d.pointerY()
     # Pause freezes the SIMULATION, not the camera. With no modal dialog
     # over the scene there is nothing for a pointer-block to protect, and
     # being able to orbit a frozen frame is the main reason to pause at
     # all. `cameraMoved` already forces a redraw, so the idle wait-loop
     # still wakes for it.
     let cameraInput: Bool = uiPointerCaptured(input: uiInput) is false
-    if cameraInput and gpu2d.pointerDown() {
-      if dragging {
-        if cameraController.mode is CameraMode.orbit {
-          cameraController.yaw = cameraController.yaw + (px - lastX) * 0.008
-          cameraController.orbitPitch = cameraController.orbitPitch - (py - lastY) * 0.008
-          cameraController.orbitPitch = clampOrbitPitch(pitch: cameraController.orbitPitch)
-        } else {
-          cameraController.yaw = cameraController.yaw - (px - lastX) * 0.008
-          cameraController.freePitch = cameraController.freePitch - (py - lastY) * 0.008
-          if cameraController.freePitch > 1.45 { cameraController.freePitch = 1.45 }
-          if cameraController.freePitch < 0.0 - 1.45 { cameraController.freePitch = 0.0 - 1.45 }
-        }
-      }
-      dragging = true
-    } else {
-      dragging = false
-    }
-    lastX = px
-    lastY = py
-    if cameraInput {
-      if cameraController.mode is CameraMode.orbit {
-        cameraController.distance = cameraController.distance - gpu2d.wheelMove() * 0.8
-        if sdl3.isKeyDown(key: 87) { cameraController.distance = cameraController.distance - dt * 6.0 }
-        if sdl3.isKeyDown(key: 83) { cameraController.distance = cameraController.distance + dt * 6.0 }
-        if sdl3.isKeyDown(key: 65) { cameraController.yaw = cameraController.yaw - dt * 1.2 }
-        if sdl3.isKeyDown(key: 68) { cameraController.yaw = cameraController.yaw + dt * 1.2 }
-        if sdl3.isKeyDown(key: 81) { cameraController.orbitPitch = cameraController.orbitPitch - dt * 1.2 }
-        if sdl3.isKeyDown(key: 69) { cameraController.orbitPitch = cameraController.orbitPitch + dt * 1.2 }
-        cameraController.orbitPitch = clampOrbitPitch(pitch: cameraController.orbitPitch)
-        if cameraController.distance < 4.0 { cameraController.distance = 4.0 }
-        if cameraController.distance > 30.0 { cameraController.distance = 30.0 }
-      } else {
-        let moveStep: Float = dt * 6.0
-        let forward: Vec3 = cameraForward(controller: cameraController)
-        let right: Vec3 = cameraRight(controller: cameraController)
-        let up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
-        if sdl3.isKeyDown(key: 87) { cameraController.freePosition = vec3.vadd(a: cameraController.freePosition, b: vec3.vscale(a: forward, s: moveStep)) }
-        if sdl3.isKeyDown(key: 83) { cameraController.freePosition = vec3.vsub(a: cameraController.freePosition, b: vec3.vscale(a: forward, s: moveStep)) }
-        if sdl3.isKeyDown(key: 65) { cameraController.freePosition = vec3.vsub(a: cameraController.freePosition, b: vec3.vscale(a: right, s: moveStep)) }
-        if sdl3.isKeyDown(key: 68) { cameraController.freePosition = vec3.vadd(a: cameraController.freePosition, b: vec3.vscale(a: right, s: moveStep)) }
-        if sdl3.isKeyDown(key: 81) { cameraController.freePosition = vec3.vsub(a: cameraController.freePosition, b: vec3.vscale(a: up, s: moveStep)) }
-        if sdl3.isKeyDown(key: 69) { cameraController.freePosition = vec3.vadd(a: cameraController.freePosition, b: vec3.vscale(a: up, s: moveStep)) }
-      }
-    }
-
-    let cameraMoved: Bool = cameraController.yaw is not camYaw0
-      or cameraController.orbitPitch is not camPitch0
-      or cameraController.freePitch is not camFreePitch0
-      or cameraController.distance is not camDist0
-      or cameraController.freePosition.x is not camPos0.x
-      or cameraController.freePosition.y is not camPos0.y
-      or cameraController.freePosition.z is not camPos0.z
+    let cameraMoved: Bool = updateCameraRig(rig: cameraRig, camera: camera, allowInput: cameraInput, dt: dt)
 
     # The frame is only worth drawing if something it depends on changed.
     # While paused the 3D scene is frozen, so the presented image is still
@@ -906,7 +744,7 @@ func main() ret Int {
       if stateDirty and not headless {
         let sinceSave: Float = (now - lastStateSave) as Float
         if sinceSave >= 0.25 {
-          writeHotReloadStateFor(appId: state110AppId, state: serialize110State(ui: uiState, controller: cameraController, camera: camera))
+          writeHotReloadStateFor(appId: state110AppId, state: serialize110State(ui: uiState, rig: cameraRig, camera: camera))
           lastStateSave = now
           stateDirty = false
         }
@@ -916,14 +754,8 @@ func main() ret Int {
         if uiState.fullSpeed is false { motionScale = 0.25 }
         simTime = simTime + dt * motionScale
       }
-      if cameraController.mode is CameraMode.orbit {
-        camera.position = orbitEye(targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z, yaw: cameraController.yaw, pitch: cameraController.orbitPitch, dist: cameraController.distance)
-      } else {
-        let forward: Vec3 = cameraForward(controller: cameraController)
-        camera.position = cameraController.freePosition
-        camera.target = vec3.vadd(a: camera.position, b: forward)
-      }
-      syncCameraUi(world: uiWorld, controller: cameraController, camera: camera)
+      applyCameraRig(rig: cameraRig, camera: camera)
+      syncCameraUi(world: uiWorld, rig: cameraRig, camera: camera)
       if uiState.activeScene is 1 { light = scene1.light }
       if uiState.activeScene is 2 { light = scene2.light }
       if uiState.activeScene is 3 { light = scene3.light }
@@ -980,7 +812,7 @@ func main() ret Int {
   # Headless runs neither read nor write the snapshot — a smoke test must
   # not clobber the scene and camera a developer left set up.
   if not headless {
-    writeHotReloadStateFor(appId: state110AppId, state: serialize110State(ui: uiState, controller: cameraController, camera: camera))
+    writeHotReloadStateFor(appId: state110AppId, state: serialize110State(ui: uiState, rig: cameraRig, camera: camera))
   }
   shutdown()
   gpu2d.closeWindow()
