@@ -1,0 +1,98 @@
+# Per-vertex colour baked from a palette atlas (#378).
+#
+# The claim being tested is narrow and checkable: for a FLAT palette
+# atlas, sampling per vertex is not an approximation of texturing — it
+# reproduces the texture exactly wherever a triangle's corners share a
+# swatch. So the assertions are on actual COLOUR VALUES against an
+# independently computed reference, not on "something was written".
+#
+# Three properties, each failing differently:
+#
+#   1. The stride widened to 20 floats. A format change that the loader
+#      and the GPU layout disagree about renders as garbage geometry
+#      rather than as wrong colour, so it is worth pinning separately.
+#   2. Two known vertices carry their real swatch. Vertex 0 of the body
+#      lands on leather; vertex 100 lands on skin. A V-flip bug — the one
+#      this example's history records — sends both into the atlas's blank
+#      region and returns white for each, which property 3 alone would
+#      not catch if the whole primitive went white together.
+#   3. The primitive is not one flat colour. The body was the worst case
+#      for the hand-written table it replaces: 61% skin across 17
+#      swatches. If baking collapsed it back to a single colour, the
+#      change bought nothing.
+import core
+import gltf
+import gltf_skin
+import png
+import sys
+open gltf
+open gltf_skin
+open png
+
+func near(a: view Float, b: view Float) ret Bool {
+  var d: Float = a - b
+  if d < 0.0 {
+    d = 0.0 - d
+  }
+  ret d < 0.002
+}
+
+func main() {
+  let assets: String = "../examples/113_walker_character/assets/"
+  let g: Glb = loadGlb(path: "{assets}walker.glb")
+  if g.ok is false {
+    log("glb load failed")
+    ret
+  }
+  let pngBytes: List(Int) = sys.readFileBytes(path: "{assets}walker_palette.png")
+  var w: Int = 0
+  var h: Int = 0
+  let atlas: List(Int) = decodePng(png: pngBytes, len: pngBytes.length, width: w, height: h)
+  log("atlas {w}x{h}")
+
+  # Mesh 9 primitive 0 is the body: the primitive the old table flattened.
+  let raw: SkinnedMeshData = loadSkinnedPrimitive(g: g, meshIndex: 9, primIndex: 0)
+  let m: SkinnedMeshData = withAtlasColors(m: raw, atlas: atlas, width: w, height: h)
+
+  # 1: stride.
+  if m.verts.length is m.vertCount * 20 {
+    log("stride 20: yes")
+  } else {
+    log("stride 20: NO ({m.verts.length} floats for {m.vertCount} verts)")
+  }
+
+  # 2: two known vertices, against values computed independently from the
+  # same PNG and the same sRGB transfer function.
+  let leatherOk: Bool = near(a: m.verts.at(index: 16), b: 0.2122)
+    and near(a: m.verts.at(index: 17), b: 0.1356)
+    and near(a: m.verts.at(index: 18), b: 0.0844)
+  if leatherOk {
+    log("vertex 0 is leather: yes")
+  } else {
+    log("vertex 0 is leather: NO ({m.verts.at(index: 16)} {m.verts.at(index: 17)} {m.verts.at(index: 18)})")
+  }
+  let skinOk: Bool = near(a: m.verts.at(index: 100 * 20 + 16), b: 1.0)
+    and near(a: m.verts.at(index: 100 * 20 + 17), b: 0.6939)
+    and near(a: m.verts.at(index: 100 * 20 + 18), b: 0.3613)
+  if skinOk {
+    log("vertex 100 is skin: yes")
+  } else {
+    log("vertex 100 is skin: NO ({m.verts.at(index: 100 * 20 + 16)} {m.verts.at(index: 100 * 20 + 17)} {m.verts.at(index: 100 * 20 + 18)})")
+  }
+
+  # 3: more than one swatch across the primitive.
+  var distinct: Int = 1
+  var i: Int = 1
+  loop i < m.vertCount {
+    if not near(a: m.verts.at(index: i * 20 + 16), b: m.verts.at(index: 16)) {
+      distinct = 2
+      i = m.vertCount
+    }
+    i = i + 1
+  }
+  if distinct > 1 {
+    log("body is multi-swatch: yes")
+  } else {
+    log("body is multi-swatch: NO — baking flattened it")
+  }
+}
