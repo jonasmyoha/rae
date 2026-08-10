@@ -33,6 +33,12 @@ void rae_ext_gbuffer_draw(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
     (void)mesh; (void)model; (void)prevModel; (void)r; (void)g; (void)b;
     (void)metallic; (void)roughness; (void)emissive;
 }
+void rae_ext_gbuffer_drawSkinned(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
+                                 float r, float g, float b,
+                                 float metallic, float roughness, float emissive){
+    (void)mesh; (void)model; (void)prevModel; (void)r; (void)g; (void)b;
+    (void)metallic; (void)roughness; (void)emissive;
+}
 void rae_ext_gbuffer_end(void) {}
 int64_t rae_ext_gbuffer_drawCount(void) { return 0; }
 void rae_ext_gbuffer_debugView(int64_t mode, float zNear, float zFar){
