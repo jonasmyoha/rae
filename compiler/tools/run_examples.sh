@@ -86,8 +86,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && [ "$(grep -c "walk 195 ch" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "palette atlas 512x512" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "skinned parts: 12" "$TMP_OUT/render.log")" -eq 1 ] \
-             && [ "$(grep -c "panel buttons: 4 clip, 3 transport" "$TMP_OUT/render.log")" -eq 1 ]; then
-            echo "PASS: $EXAMPLE_NAME (12 skinned parts, 65 joints, clip retargeted, atlas decoded, 7 panel buttons)"
+             && [ "$(grep -c "panel buttons: 4 clip, 3 transport" "$TMP_OUT/render.log")" -eq 1 ] \
+             && [ "$(grep -c "\[shadow\] casters 13, 3 cascades" "$TMP_OUT/render.log")" -eq 1 ]; then
+            echo "PASS: $EXAMPLE_NAME (12 skinned parts + ground casting shadows, clip retargeted, atlas decoded)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (walker character)"
@@ -164,6 +165,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --gpu3d-ui > "$TMP_OUT/screenshot.log" 2>&1 \
              && [ "$(grep -c '\[gpu3d\] SDF metaballs: count=5' "$TMP_OUT/render.log")" -eq 1 ] \
+             && [ "$(grep -c '\[shadow\] casters 17, 3 cascades' "$TMP_OUT/render.log")" -eq 1 ] \
              && (cd .. && RAE_GPU3D_UI_TEST_STATE=free RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$FREE_SCREENSHOT" \
                 perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/free-render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$FREE_SCREENSHOT" --gpu3d-ui > "$TMP_OUT/free-screenshot.log" 2>&1 \
