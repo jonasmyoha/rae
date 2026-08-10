@@ -26,6 +26,7 @@ double rae_ext_gpu2d_nowSeconds(void){ return 0.0; }
 int64_t rae_ext_gpu2d_windowWidth(void) { return 0; }
 int64_t rae_ext_gpu2d_windowHeight(void) { return 0; }
 void rae_ext_gpu2d_setWindowPosition(int64_t x, int64_t y) { (void)x; (void)y; }
+void rae_ext_gpu2d_setWindowSize(int64_t w, int64_t h) { (void)w; (void)h; }
 int64_t rae_ext_gpu2d_windowPositionX(void) { return 0; }
 int64_t rae_ext_gpu2d_windowPositionY(void) { return 0; }
 rae_Bool rae_ext_gpu2d_windowResized(void) { return 0; }

@@ -1,0 +1,74 @@
+# app3d/playback — playback-rate stepping for a transport control.
+#
+# A single fixed step is wrong at both ends of a speed range. At 25% a
+# 25% step is the entire useful slow range in one press; at 100% it steps
+# straight past the value you actually want to compare against.
+#
+# So the step depends on where you are: 5% normally, refined to 1% in the
+# two bands that matter — almost-stopped, and around real time. Those are
+# the two places a person looks closely at an animation: crawling through
+# a cycle to see a pose, and checking whether something is subtly off
+# 1.0x.
+#
+# ABOVE THE REAL-TIME BAND THE STEP GOES BACK TO 5%. Keeping 1% steps all
+# the way to the ceiling would make the top of the range unreachable in
+# practice — 3.0x is 205 presses from 0.95x. The fine band is there for
+# precision near 1.0, not as a global policy.
+#
+# THE RESULT SNAPS TO ITS STEP GRID. Crossing a band boundary otherwise
+# leaves the value off-grid forever (1.06, 1.11, 1.16 …), which reads as
+# a rounding bug in the readout.
+import core
+import math
+
+const speedMin: Float = 0.01
+const speedMax: Float = 3.0
+const speedFineStep: Float = 0.01
+const speedCoarseStep: Float = 0.05
+
+# The step to use at `v`. The bands are compared with a small epsilon
+# because the caller probes just past the current value to decide which
+# band the move is heading into, and exact float equality on 0.05 is not
+# something to rely on.
+func speedStepSize(v: view Float) pub ret Float {
+  if v <= 0.0501 {
+    ret speedFineStep
+  }
+  if v >= 0.9499 and v <= 1.0501 {
+    ret speedFineStep
+  }
+  ret speedCoarseStep
+}
+
+func nextSpeed(current: view Float, up: view Bool) pub ret Float {
+  var step: Float = speedCoarseStep
+  var v: Float = current
+  if up {
+    step = speedStepSize(v: v + 0.0001)
+    v = v + step
+  } else {
+    step = speedStepSize(v: v - 0.0001)
+    v = v - step
+  }
+  # Snap to the grid of the step just taken, so a move that crosses a band
+  # boundary lands back on round numbers instead of carrying the old
+  # band's offset forever.
+  v = math.floor(x: v / step + 0.5) * step
+  # ...then to whole percent, because repeated float arithmetic drifts and
+  # a readout showing 34% while holding 0.3399999 is how an off-by-one
+  # gets into a later comparison.
+  v = math.floor(x: v * 100.0 + 0.5) / 100.0
+  if v < speedMin {
+    v = speedMin
+  }
+  if v > speedMax {
+    v = speedMax
+  }
+  ret v
+}
+
+# Whole percent, for a readout. One place, so the label and any assertion
+# about it cannot round differently.
+func speedPercent(v: view Float) pub ret Int {
+  ret math.floor(x: v * 100.0 + 0.5).toInt()
+}

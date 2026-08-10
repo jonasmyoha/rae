@@ -1,0 +1,62 @@
+# Playback speed ladder (lib/app3d/playback.rae).
+#
+# The behaviour worth pinning is not "it changes the number" but WHERE the
+# step size changes and that the value stays on a tidy grid across those
+# boundaries. Each assertion below fails differently:
+#
+#   1. Coarse band steps by 5. A regression here is invisible in normal
+#      use — 5% and 1% both look like "it got slower".
+#   2. Both fine bands step by 1. This is the whole point of the change:
+#      25% used to be the floor AND the step.
+#   3. Crossing a boundary lands on the grid. Without the snap the value
+#      carries the old band's offset forever (1.06, 1.11, 1.16 …) and the
+#      readout looks like a rounding bug.
+#   4. The floor is reachable and holds. Stepping down forever must end at
+#      1%, not at 0 or a negative rate that would play the clip backwards.
+import core
+import app3d/playback
+open app3d/playback
+
+func check(label: view String, got: view Int, want: view Int) {
+  if got is want {
+    log("{label}: {got}")
+  } else {
+    log("{label}: {got} WANT {want}")
+  }
+}
+
+func main() {
+  # 1: coarse band, both directions.
+  check(label: "0.50 down", got: speedPercent(v: nextSpeed(current: 0.5, up: false)), want: 45)
+  check(label: "0.50 up", got: speedPercent(v: nextSpeed(current: 0.5, up: true)), want: 55)
+
+  # 2: fine near zero, and fine around real time.
+  check(label: "0.05 down", got: speedPercent(v: nextSpeed(current: 0.05, up: false)), want: 4)
+  check(label: "1.00 down", got: speedPercent(v: nextSpeed(current: 1.0, up: false)), want: 99)
+  check(label: "1.00 up", got: speedPercent(v: nextSpeed(current: 1.0, up: true)), want: 101)
+  check(label: "0.95 up", got: speedPercent(v: nextSpeed(current: 0.95, up: true)), want: 96)
+
+  # 3: leaving a fine band snaps back onto the 5% grid rather than
+  # carrying 1.06 -> 1.11 -> 1.16.
+  check(label: "1.06 up", got: speedPercent(v: nextSpeed(current: 1.06, up: true)), want: 110)
+  # ...and entering one from above lands on a whole percent.
+  check(label: "1.10 down", got: speedPercent(v: nextSpeed(current: 1.10, up: false)), want: 105)
+
+  # 4: the floor is reachable by pressing, and holds.
+  var v: Float = 0.5
+  var i: Int = 0
+  loop i < 60 {
+    v = nextSpeed(current: v, up: false)
+    i = i + 1
+  }
+  check(label: "floor", got: speedPercent(v: v), want: 1)
+
+  # ...and the ceiling likewise.
+  var u: Float = 1.0
+  var k: Int = 0
+  loop k < 200 {
+    u = nextSpeed(current: u, up: true)
+    k = k + 1
+  }
+  check(label: "ceiling", got: speedPercent(v: u), want: 300)
+}
