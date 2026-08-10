@@ -43,8 +43,13 @@ const panelButtonH: Float = 34.0
 
 # Theme palette slots. Named here so a panel picks up an app's theme
 # rather than carrying colours of its own — see the note above.
-const panelSlotIdle: String = "surfaceVariant"
-const panelSlotSelected: String = "primary"
+# These are SLOT NAMES FROM A FIXED VOCABULARY, not free-form keys.
+# lib/ui/theme.rae resolves a closed set (background, surface, surfaceAlt,
+# textPrimary, textMuted, outline, accent, accentText, accentTextMuted,
+# imageTint) and paints anything else magenta. A theme may re-colour these
+# two; it may not rename them.
+const panelSlotIdle: String = "surfaceAlt"
+const panelSlotSelected: String = "accent"
 
 type ControlPanel {
   # The .raescene node the buttons are built into. Its Layout does the
@@ -182,6 +187,17 @@ func buildControlPanel(panel: mod ControlPanel, world: mod UiWorld, res: view Gp
     labelKids.add(value: labelE)
     let buttonChildren: Children = { ids: own labelKids }
     componentSet(this: world.childrens, entity: buttonE, data: buttonChildren)
+
+    # PARENT IS NOT OPTIONAL. `layoutSystem` treats every entity with no
+    # Parent as a layout root and places it at the origin, so a button
+    # that is only listed in its host's Children — without the back
+    # pointer — silently lays out at (0,0) on top of its siblings rather
+    # than flowing through the host's Layout. Children and Parent are two
+    # halves of one edge; the scene loader sets both, and so must this.
+    let buttonParent: Parent = { parent: host }
+    componentSet(this: world.parents, entity: buttonE, data: buttonParent)
+    let labelParent: Parent = { parent: buttonE }
+    componentSet(this: world.parents, entity: labelE, data: labelParent)
 
     buttons.add(value: buttonE)
     labels.add(value: labelE)
