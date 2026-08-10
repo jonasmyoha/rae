@@ -34,6 +34,7 @@ open ui/render_gpu2d
 open ui/scene
 open ui/scene_file
 open ui/scene_loader
+open ui/theme
 open ui/theme_resolved
 open ui/transform
 
@@ -65,6 +66,49 @@ func syncDesignResolution() pub {
 
 # ----- assets ---------------------------------------------------------
 
+# Push a parsed theme's PALETTE into the active Theme.
+#
+# `setActiveThemeTokens` deliberately covers only space, radius, padding
+# and container tokens; palette slots resolve through a different global
+# (lib/ui/theme.rae's `activeTheme`), and nothing was bridging the two.
+# The consequence is quiet and confusing: a scene's `"fill": "surfaceAlt"`
+# renders in the BUILT-IN light theme's mint rather than the app's colour,
+# which reads as "my theme file is being ignored" — and is, for exactly
+# one of its five sections.
+#
+# The vocabulary is closed (see themeColorByName): a theme may re-colour
+# these ten slots, not add an eleventh. Any slot the file omits keeps the
+# built-in value rather than going transparent.
+func applyThemePalette(theme: view ResolvedTheme) pub {
+  var t: Theme = currentTheme()
+  t.palette = ThemePalette {
+    background: themeSlotOr(theme: theme, slot: "background", fallback: t.palette.background)
+    surface: themeSlotOr(theme: theme, slot: "surface", fallback: t.palette.surface)
+    surfaceAlt: themeSlotOr(theme: theme, slot: "surfaceAlt", fallback: t.palette.surfaceAlt)
+    textPrimary: themeSlotOr(theme: theme, slot: "textPrimary", fallback: t.palette.textPrimary)
+    textMuted: themeSlotOr(theme: theme, slot: "textMuted", fallback: t.palette.textMuted)
+    outline: themeSlotOr(theme: theme, slot: "outline", fallback: t.palette.outline)
+    accent: themeSlotOr(theme: theme, slot: "accent", fallback: t.palette.accent)
+    accentText: themeSlotOr(theme: theme, slot: "accentText", fallback: t.palette.accentText)
+    accentTextMuted: themeSlotOr(theme: theme, slot: "accentTextMuted", fallback: t.palette.accentTextMuted)
+    imageTint: themeSlotOr(theme: theme, slot: "imageTint", fallback: t.palette.imageTint)
+  }
+  setActiveTheme(theme: own t)
+}
+
+func themeSlotOr(theme: view ResolvedTheme, slot: view String, fallback: view RgbaColor) pub ret RgbaColor {
+  let idx: Int = themePaletteIndex(theme: theme, slot: slot)
+  if idx < 0 {
+    ret RgbaColor { r: fallback.r, g: fallback.g, b: fallback.b, a: fallback.a }
+  }
+  ret RgbaColor {
+    r: theme.palR.at(index: idx)
+    g: theme.palG.at(index: idx)
+    b: theme.palB.at(index: idx)
+    a: theme.palA.at(index: idx)
+  }
+}
+
 # Load the two MSDF fonts and the theme, and make the theme's tokens
 # active. `dir` is a directory prefix including its trailing slash; the
 # three names are file stems, since the .json/.raw pairing is a property
@@ -91,6 +135,7 @@ func loadUiAssets(dir: view String, textFontName: view String,
   let themeScene: Scene = loadSceneFile(path: "{dir}{themeFile}")
   let theme: ResolvedTheme = parseTheme(scene: themeScene)
   setActiveThemeTokens(theme: theme)
+  applyThemePalette(theme: theme)
   # `own` on every field: this struct crosses a function boundary, and
   # ResolvedTheme and SdfFont both carry heap state. Returning them by
   # plain value drops the locals at return and hands the caller freed

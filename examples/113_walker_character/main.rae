@@ -17,11 +17,14 @@
 # A clip PLAYS FROM THE FIRST FRAME. An example that opens paused
 # demonstrates nothing until someone clicks it.
 #
-# THE OVERLAY IS IMMEDIATE-MODE, not lib/ui. Six controls with fixed
-# positions do not need an ECS, a theme and three .raescene files; the
-# whole panel below is one function and a hit test. lib/ui earns its
-# weight in example 110, which has responsive layout, hot reload and a
-# dozen interacting widgets.
+# THE UI IS A REAL .raescene, built on the shared app3d modules. The
+# scene (assets/ui.raescene) authors only the panel CHROME — a vertical
+# card with two auto-laid-out rows — and the buttons are declared in code
+# and inserted by lib/app3d/control_panel.rae. Nothing here places a
+# button by coordinate, so adding one is one line. Colours come from
+# assets/theme.raescene through palette slots, and the camera comes from
+# lib/app3d/camera_rig.rae, so this example shares its look and its feel
+# with example 110 rather than reimplementing both.
 #
 # WHAT THIS EXAMPLE EXISTS TO PROVE. Each of the model's twelve
 # primitives is loaded and drawn SEPARATELY, so each can carry its own
@@ -76,7 +79,6 @@
 import core
 import math
 import gpu2d
-import gpu2d_text
 import sdf_text
 import vec3
 import gltf
@@ -84,6 +86,11 @@ import gltf_skin
 import png
 import sys
 import app3d/camera_rig
+import app3d/ui_shell
+import app3d/control_panel
+import ui/ecs
+import ui/input_gpu2d
+import ui/render_gpu2d
 open scene3d
 open gpu3d
 open renderer3d
@@ -95,53 +102,15 @@ open gltf_skin
 open sdf_text
 open png
 open app3d/camera_rig
+open app3d/ui_shell
+open app3d/control_panel
+open ui/ecs
+open ui/components
+open ui/input_gpu2d
+open ui/render_gpu2d
 
 func uploadMeshData(m: view MeshData) ret MeshHandle {
   ret uploadMesh(verts: m.verts, vertCount: m.vertCount, indices: m.indices)
-}
-
-# ----- overlay --------------------------------------------------------
-# Colours are 0xAARRGGBB and authored in DISPLAY space: the overlay pass
-# runs after tonemap, so these are not tone-curved.
-const uiPanelBg: Int = 0xC0141821
-const uiButtonBg: Int = 0xFF232A38
-const uiButtonOn: Int = 0xFF3D6BE0
-const uiText: Int = 0xFFE6EAF2
-const uiLabel: Int = 0xFF9AA4B8
-
-func inRect(px: view Float, py: view Float, x: view Float, y: view Float, w: view Float, h: view Float) ret Bool {
-  ret px >= x and px <= x + w and py >= y and py <= y + h
-}
-
-# Draw one button and report whether it was clicked this frame. Drawing
-# and hit-testing share the rect on purpose: two copies of a rectangle
-# drift, and a control whose visual and clickable areas disagree is the
-# single most confusing UI bug to look at.
-func drawButton(font: view SdfFont, label: view String, x: view Float, y: view Float,
-                w: view Float, h: view Float, active: view Bool,
-                px: view Float, py: view Float, pressed: view Bool) ret Bool {
-  var bg: Int = uiButtonBg
-  if active {
-    bg = uiButtonOn
-  }
-  gpu2d.drawRect(x: x, y: y, w: w, h: h, color: bg)
-  let tw: Float = gpu2d_text.measureText(font: font, text: label, sizePx: 15.0)
-  gpu2d_text.drawText(font: font, text: label, x: x + (w - tw) * 0.5, y: y + h * 0.66, sizePx: 15.0, color: uiText)
-  ret pressed and inRect(px: px, py: py, x: x, y: y, w: w, h: h)
-}
-
-# Logical (point) size of the window. Text and hit-testing want points,
-# not physical pixels, or the panel halves on a retina display.
-func windowExtentW() ret Float {
-  let ratio: Float = gpu2d.dpr()
-  if ratio < 0.1 { ret gpu2d.windowWidth().toFloat() }
-  ret gpu2d.windowWidth().toFloat() / ratio
-}
-
-func windowExtentH() ret Float {
-  let ratio: Float = gpu2d.dpr()
-  if ratio < 0.1 { ret gpu2d.windowHeight().toFloat() }
-  ret gpu2d.windowHeight().toFloat() / ratio
 }
 
 func main() ret Int {
@@ -151,9 +120,14 @@ func main() ret Int {
   gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
 
   let assets: String = "examples/113_walker_character/assets/"
-  let font: SdfFont = sdf_text.loadSdfFont(
-    jsonPath: "{assets}Roboto-Regular.mtsdf.json",
-    rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw")
+  # Fonts + theme + a UiWorld with assets/ui.raescene mounted. The empty
+  # icon-font name says "no `mat:` glyphs here", so this example does not
+  # ship the megabyte icon atlas it would never sample.
+  let gpuUi: Gpu2dUi = loadUiAssets(dir: assets, textFontName: "Roboto-Regular",
+                                    iconFontName: "", themeFile: "theme.raescene")
+  var uiWorld: UiWorld = createUiWorld()
+  let uiRoot: EntityId = mountUiScene(world: uiWorld, path: "{assets}ui.raescene", res: gpuUi)
+  var uiInput: UiInput = createUiInput()
 
   let g: Glb = loadGlb(path: "{assets}walker.glb")
   if g.ok is false {
@@ -327,12 +301,36 @@ func main() ret Int {
   var speed: Float = 1.0
   var animTime: Float = 0.0
 
+  # The controls. Two panels because the scene authors two auto-laid-out
+  # rows; neither this code nor the scene positions a single button.
+  # Group 1 is a radio set, so selecting one clip deselects the rest.
+  var clipPanel: ControlPanel = createControlPanel(hostNodeId: "ClipRow")
+  addPanelButton(panel: clipPanel, id: "idle", label: "Idle", actionId: "clip.idle", group: 1)
+  addPanelButton(panel: clipPanel, id: "walk", label: "Walk", actionId: "clip.walk", group: 1)
+  addPanelButton(panel: clipPanel, id: "walkFast", label: "Walk fast", actionId: "clip.walkFast", group: 1)
+  addPanelButton(panel: clipPanel, id: "run", label: "Run", actionId: "clip.run", group: 1)
+  buildControlPanel(panel: clipPanel, world: uiWorld, res: gpuUi)
+
+  # Group 0: independent controls, not a radio set. Play is a toggle;
+  # the two speed buttons are plain actions.
+  var transport: ControlPanel = createControlPanel(hostNodeId: "TransportRow")
+  addPanelButton(panel: transport, id: "play", label: "Pause", actionId: "anim.play", group: 0)
+  addPanelButton(panel: transport, id: "slower", label: "Slower", actionId: "anim.slower", group: 0)
+  addPanelButton(panel: transport, id: "faster", label: "Faster", actionId: "anim.faster", group: 0)
+  transport.buttonW = 84.0
+  buildControlPanel(panel: transport, world: uiWorld, res: gpuUi)
+
+  setPanelSelection(panel: clipPanel, world: uiWorld, group: 1, id: "walk")
+  setPanelButtonOn(panel: transport, world: uiWorld, id: "play", on: true)
+  # Counted, not assumed: a panel whose host node id does not match the
+  # scene builds nothing and renders as an empty card, which a
+  # "did anything paint" check cannot tell from a working one.
+  log("[ui] panel buttons: {clipPanel.buttonEntities.length} clip, {transport.buttonEntities.length} transport")
+
   let startT: Float64 = gpu2d.nowSeconds()
   var prevT: Float64 = startT
   loop not gpu2d.pollClose() {
-    extentW = windowExtentW()
-    extentH = windowExtentH()
-    gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
+    resizeUiToWindow(world: uiWorld, res: gpuUi)
 
     let now: Float64 = gpu2d.nowSeconds()
     var dt: Float = (now - prevT) as Float
@@ -346,20 +344,44 @@ func main() ret Int {
       dt = 0.0
     }
 
-    # Panel geometry, computed once and used for BOTH the hit test below
-    # and the drawing further down.
-    let panelW: Float = 452.0
-    let panelH: Float = 106.0
-    let panelX: Float = 16.0
-    let panelY: Float = extentH - panelH - 16.0
-    let px: Float = gpu2d.pointerX()
-    let py: Float = gpu2d.pointerY()
-    let overUi: Bool = inRect(px: px, py: py, x: panelX, y: panelY, w: panelW, h: panelH)
-    let pressed: Bool = gpu2d.pointerPressed()
+    # ----- controls ---------------------------------------------------
+    # Hit-testing happens against the UI's real rectangles, so the camera
+    # is suppressed by what is actually under the pointer rather than by
+    # a hand-maintained copy of the panel's bounds.
+    updateUiInput(input: uiInput, world: uiWorld)
+    let clipHit: String = panelClickedId(panel: clipPanel, input: uiInput)
+    if clipHit.length() > 0 {
+      if clipHit.equals(other: "idle") { clipIndex = 0 }
+      if clipHit.equals(other: "walk") { clipIndex = 1 }
+      if clipHit.equals(other: "walkFast") { clipIndex = 2 }
+      if clipHit.equals(other: "run") { clipIndex = 3 }
+      animTime = 0.0
+      setPanelSelection(panel: clipPanel, world: uiWorld, group: 1, id: clipHit)
+    }
+    let transportHit: String = panelClickedId(panel: transport, input: uiInput)
+    if transportHit.equals(other: "play") {
+      playing = not playing
+      var playLabel: String = "Pause"
+      if not playing {
+        playLabel = "Play"
+      }
+      setPanelButtonLabel(panel: transport, world: uiWorld, id: "play", label: playLabel)
+      setPanelButtonOn(panel: transport, world: uiWorld, id: "play", on: playing)
+    }
+    if transportHit.equals(other: "slower") { speed = speed - 0.25 }
+    if transportHit.equals(other: "faster") { speed = speed + 0.25 }
+    if speed < 0.25 { speed = 0.25 }
+    if speed > 3.0 { speed = 3.0 }
+    if transportHit.length() > 0 {
+      let pct: Int = math.floor(x: speed * 100.0 + 0.5).toInt()
+      setNodeText(world: uiWorld, nodeId: "SpeedLabel", value: "Speed {pct}%")
+    }
+    if uiActionCount(input: uiInput) > 0 {
+      runUiSystems(world: uiWorld, res: gpuUi)
+    }
 
-    # The rig owns drag tracking, clamps and wheel zoom; the example only
-    # says WHEN input belongs to the camera rather than to the panel.
-    updateCameraRig(rig: rig, camera: camera, allowInput: not overUi, dt: dt)
+    updateCameraRig(rig: rig, camera: camera,
+                    allowInput: uiPointerCaptured(input: uiInput) is false, dt: dt)
 
     # ----- animation -------------------------------------------------
     # "Walk fast" is the walk clip at 1.6x, not a fourth asset.
@@ -426,54 +448,10 @@ func main() ret Int {
         tonemapPass()
       }
       if tag is tagUiOverlay {
+        # Load-preserving: the 2D pass paints over the resolved 3D image
+        # rather than clearing it. One call paints the whole scene tree.
         gpu2d.beginFrameLoad()
-        gpu2d.drawRect(x: panelX, y: panelY, w: panelW, h: panelH, color: uiPanelBg)
-
-        # Row 1: which clip.
-        let bw: Float = 104.0
-        let bh: Float = 32.0
-        let bx: Float = panelX + 12.0
-        let by: Float = panelY + 12.0
-        if drawButton(font: font, label: "Idle", x: bx, y: by, w: bw, h: bh, active: clipIndex is 0, px: px, py: py, pressed: pressed) {
-          clipIndex = 0
-          animTime = 0.0
-        }
-        if drawButton(font: font, label: "Walk", x: bx + bw + 8.0, y: by, w: bw, h: bh, active: clipIndex is 1, px: px, py: py, pressed: pressed) {
-          clipIndex = 1
-          animTime = 0.0
-        }
-        if drawButton(font: font, label: "Walk fast", x: bx + (bw + 8.0) * 2.0, y: by, w: bw, h: bh, active: clipIndex is 2, px: px, py: py, pressed: pressed) {
-          clipIndex = 2
-          animTime = 0.0
-        }
-        if drawButton(font: font, label: "Run", x: bx + (bw + 8.0) * 3.0, y: by, w: bw, h: bh, active: clipIndex is 3, px: px, py: py, pressed: pressed) {
-          clipIndex = 3
-          animTime = 0.0
-        }
-
-        # Row 2: transport and speed.
-        let by2: Float = by + bh + 10.0
-        var transport: String = "Pause"
-        if not playing {
-          transport = "Play"
-        }
-        if drawButton(font: font, label: transport, x: bx, y: by2, w: bw, h: bh, active: playing, px: px, py: py, pressed: pressed) {
-          playing = not playing
-        }
-        if drawButton(font: font, label: "Slower", x: bx + bw + 8.0, y: by2, w: 78.0, h: bh, active: false, px: px, py: py, pressed: pressed) {
-          speed = speed - 0.25
-        }
-        if drawButton(font: font, label: "Faster", x: bx + bw + 94.0, y: by2, w: 78.0, h: bh, active: false, px: px, py: py, pressed: pressed) {
-          speed = speed + 0.25
-        }
-        if speed < 0.25 {
-          speed = 0.25
-        }
-        if speed > 3.0 {
-          speed = 3.0
-        }
-        let pct: Int = math.floor(x: speed * 100.0 + 0.5).toInt()
-        gpu2d_text.drawText(font: font, text: "Speed {pct}%", x: bx + (bw + 8.0) * 3.0, y: by2 + bh * 0.66, sizePx: 15.0, color: uiLabel)
+        renderSystemGpu2d(world: uiWorld, res: gpuUi)
       }
       if tag is tagPresent {
         gpu2d.endFrame()
