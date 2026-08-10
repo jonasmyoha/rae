@@ -63,6 +63,8 @@
 /* Shadows read both mesh tables, so they come after skin (#382). */
 #include "runtime_gpu3d_shadow.c"
 #include "runtime_gpu3d_gbuffer.c"
+/* Metaballs into the G-buffer (#392); reads the gbuffer pass state. */
+#include "runtime_gpu3d_gbuffer_sdf.c"
 /* After the G-buffer: the pyramid, lighting and composite all read what it
  * produced, and reuse its targets' generation counter. */
 #include "runtime_gpu3d_deferred.c"
