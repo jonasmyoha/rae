@@ -28,6 +28,7 @@ const tagUiOverlay: Int = 3    # load-preserving 2D UI painted over the 3D frame
 const tagTonemap: Int = 4      # HDR -> LDR resolve (#334); last radiometric op
 const tagTaa: Int = 5          # temporal resolve (#335); HDR in, HDR out
 const tagSsao: Int = 6         # ambient occlusion (#337); modifies hdrColor
+const tagShadow: Int = 7       # sun cascade depth (#382); the scene pass reads it
 
 type Renderer3d {
   graph: RenderGraph
@@ -69,6 +70,9 @@ func createRenderer3d() pub ret Renderer3d {
   # touching direct light; aoTex is HALF resolution (#337).
   let ambientId: Int = addResource(g: g, name: "sceneAmbient", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
   let aoId: Int = addResource(g: g, name: "aoTex", kind: resTexture2d, format: 0, sizing: sizeHalf, lifetime: lifeTransient)
+  # Sun cascades (#382). Fixed-size rather than screen-relative: shadow
+  # resolution is a quality tier, not a function of the window.
+  let shadowId: Int = addResource(g: g, name: "shadowMap", kind: resDepth, format: 0, sizing: sizeFull, lifetime: lifeTransient)
 
   # Present declared FIRST, scene SECOND — the graph must still order them
   # scene-then-present, because present reads what scene writes.
@@ -77,7 +81,12 @@ func createRenderer3d() pub ret Renderer3d {
   let ssao: Int = addPass(g: g, name: "ssao", kind: passRaster, tag: tagSsao)
   let taa: Int = addPass(g: g, name: "taa", kind: passRaster, tag: tagTaa)
   let scene: Int = addPass(g: g, name: "scene3d", kind: passRaster, tag: tagScenePass)
+  let shadow: Int = addPass(g: g, name: "shadow", kind: passRaster, tag: tagShadow)
 
+  # The scene pass READS the cascades, so the graph derives shadow-then-
+  # scene ordering rather than anyone asserting it.
+  passWrites(g: g, pass: shadow, resource: shadowId, access: accAttachmentWrite)
+  passReads(g: g, pass: scene, resource: shadowId, access: accSampledRead)
   passWrites(g: g, pass: scene, resource: hdrId, access: accAttachmentWrite)
   passWrites(g: g, pass: scene, resource: depthId, access: accAttachmentWrite)
   passWrites(g: g, pass: scene, resource: normalId, access: accAttachmentWrite)
@@ -128,6 +137,9 @@ func createRenderer3dWithUi() pub ret Renderer3d {
   # touching direct light; aoTex is HALF resolution (#337).
   let ambientId: Int = addResource(g: g, name: "sceneAmbient", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
   let aoId: Int = addResource(g: g, name: "aoTex", kind: resTexture2d, format: 0, sizing: sizeHalf, lifetime: lifeTransient)
+  # Sun cascades (#382). Fixed-size rather than screen-relative: shadow
+  # resolution is a quality tier, not a function of the window.
+  let shadowId: Int = addResource(g: g, name: "shadowMap", kind: resDepth, format: 0, sizing: sizeFull, lifetime: lifeTransient)
 
   # Declared present -> ui -> tonemap -> scene, i.e. exactly backwards.
   # The UI overlay modifies the LDR target AFTER tonemap: UI colours are
@@ -138,7 +150,12 @@ func createRenderer3dWithUi() pub ret Renderer3d {
   let ssao: Int = addPass(g: g, name: "ssao", kind: passRaster, tag: tagSsao)
   let taa: Int = addPass(g: g, name: "taa", kind: passRaster, tag: tagTaa)
   let scene: Int = addPass(g: g, name: "scene3d", kind: passRaster, tag: tagScenePass)
+  let shadow: Int = addPass(g: g, name: "shadow", kind: passRaster, tag: tagShadow)
 
+  # The scene pass READS the cascades, so the graph derives shadow-then-
+  # scene ordering rather than anyone asserting it.
+  passWrites(g: g, pass: shadow, resource: shadowId, access: accAttachmentWrite)
+  passReads(g: g, pass: scene, resource: shadowId, access: accSampledRead)
   passWrites(g: g, pass: scene, resource: hdrId, access: accAttachmentWrite)
   passWrites(g: g, pass: scene, resource: depthId, access: accAttachmentWrite)
   passWrites(g: g, pass: scene, resource: normalId, access: accAttachmentWrite)

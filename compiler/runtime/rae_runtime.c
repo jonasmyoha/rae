@@ -60,6 +60,8 @@
  * pipeline between draws; the deferred geometry pass shares mesh storage
  * (an asset, not a frame resource) and the platform present. */
 #include "runtime_gpu3d_skin.c"
+/* Shadows read both mesh tables, so they come after skin (#382). */
+#include "runtime_gpu3d_shadow.c"
 #include "runtime_gpu3d_gbuffer.c"
 /* After the G-buffer: the pyramid, lighting and composite all read what it
  * produced, and reuse its targets' generation counter. */
