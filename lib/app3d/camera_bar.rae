@@ -1,0 +1,163 @@
+# app3d/camera_bar — the shared camera readout bar.
+#
+# Example 110 authored this bar node by node in its own .raescene, then
+# re-placed every child from code on each resize, with a bespoke
+# sequential-truncation routine to stop the readouts spilling past the
+# card's edge. It was the best-looking control in the tree and the least
+# reusable: none of it could move to another example without moving all
+# of it.
+#
+# Now the CHROME is a scene this module owns (scenes/camera_bar.raescene)
+# and any app mounts it into a host node of its own. The host says WHERE;
+# the scene says WHAT.
+#
+# THE ABSOLUTE PLACEMENT IS GONE. The bar is a horizontal `Layout` with a
+# gap, so its children flow and it hugs its own content. That deletes the
+# per-child x-cursor arithmetic outright rather than relocating it —
+# which is the difference between sharing code and sharing a copy.
+#
+# TRUNCATION SURVIVES, because it is a real behaviour and not an artifact
+# of the old approach: on a narrow window the bar must shed readouts
+# rather than overlap whatever sits beside it. It is now expressed by
+# hiding a node and asking the layout engine to re-measure, instead of by
+# re-deriving widths this module would have to keep in sync with the
+# scene.
+#
+# SEQUENTIAL, NEVER REORDERING. Readouts drop from the right. Letting a
+# narrow later readout fill the gap left by a wide one that did not fit
+# shows an arbitrary subset, so the bar would visibly reshuffle as the
+# window resizes.
+import core
+import sys
+open ui/ecs
+open ui/components
+open ui/registry
+open ui/input_gpu2d
+open ui/render_gpu2d
+open ui/scene
+open ui/scene_file
+open ui/scene_instance
+open app3d/ui_shell
+open app3d/camera_rig
+open scene3d
+
+# The action the mode button emits. Exposed so an app can respond to it
+# without duplicating the string that lives in the scene file.
+const cameraBarModeAction: String = "camera.mode"
+
+# Readouts, widest-optional-first in DISPLAY order. Truncation walks this
+# backwards; the mode button is never dropped, because a control that
+# disappears is worse than a readout that does.
+const cameraBarReadoutCount: Int = 4
+
+func cameraBarReadoutId(index: view Int) ret String {
+  if index is 0 { ret "CameraFovLabel" }
+  if index is 1 { ret "CameraPositionLabel" }
+  if index is 2 { ret "CameraYawLabel" }
+  ret "CameraPitchLabel"
+}
+
+# Where this module's shared scenes live.
+#
+# Paths resolve against the process's working directory, which for an
+# in-tree example is the repository root. A packaged app that relocates
+# its assets sets RAE_APP3D_SCENES rather than forking the module — the
+# whole point of the shared folder is that the next app does not copy
+# the file just to change where it sits.
+func app3dSceneDir() pub ret String {
+  let override: String = sys.getEnv(name: "RAE_APP3D_SCENES")
+  if override.length() > 0 {
+    ret "{override}"
+  }
+  ret "lib/app3d/scenes/"
+}
+
+# Mount the bar into an app-authored host node.
+#
+# The host keeps its own placement components (Rect / Size / Align /
+# Offset), so the app decides where the bar sits and the scene decides
+# what it contains. Returns false when the host id is not in the world,
+# which is the one mistake worth reporting: everything else degrades to a
+# missing label.
+func mountCameraBar(world: mod UiWorld, res: view Gpu2dUi, hostNodeId: view String) pub ret Bool {
+  let host: EntityId = nodeEntityFor(world: world, nodeId: hostNodeId)
+  if isNone(this: host) {
+    ret false
+  }
+  let scene: Scene = loadSceneFile(path: "{app3dSceneDir()}camera_bar.raescene")
+  if scene.ok is false {
+    ret false
+  }
+  let overrides: List(SceneOverride) = createList(SceneOverride, cap: 0)
+  let root: EntityId = mountSceneInstance(
+    world: world, mountEntity: host, scene: scene, overrides: overrides
+  )
+  if isNone(this: root) {
+    ret false
+  }
+  runUiSystems(world: world, res: res)
+  ret true
+}
+
+# Push the rig's state into the readouts. Degrees and whole units,
+# because this is a glanceable readout rather than a debugger: a yaw
+# printed to six decimals is unreadable at a glance and changes every
+# frame of a drag, which makes the whole bar look like noise.
+func syncCameraBar(world: mod UiWorld, rig: view CameraRig, camera: view Camera3d) pub {
+  var pitchDeg: Int = (rig.orbitPitch * 57.2957795).toInt()
+  if rig.mode is CameraRigMode.free {
+    pitchDeg = (rig.freePitch * 57.2957795).toInt()
+  }
+  let yawDeg: Int = (rig.yaw * 57.2957795).toInt()
+  setNodeText(world: world, nodeId: "CameraModeLabel", value: cameraRigModeName(rig: rig))
+  setNodeText(world: world, nodeId: "CameraFovLabel", value: "FOV {camera.fovYDeg.toInt()}°")
+  setNodeText(world: world, nodeId: "CameraPositionLabel",
+              value: "Pos {camera.position.x.toInt()}, {camera.position.y.toInt()}, {camera.position.z.toInt()}")
+  setNodeText(world: world, nodeId: "CameraYawLabel", value: "Yaw {yawDeg}°")
+  setNodeText(world: world, nodeId: "CameraPitchLabel", value: "Pitch {pitchDeg}°")
+}
+
+# Shed readouts from the right until the bar fits `availW`.
+#
+# Measured, not predicted: every step shows all readouts, re-runs layout
+# and reads the bar's ACTUAL width, so the widths live in the scene file
+# alone. Predicting them here would mean two copies of every number, and
+# the copy in the code is the one that silently goes stale when someone
+# edits the scene.
+func fitCameraBar(world: mod UiWorld, res: view Gpu2dUi, hostNodeId: view String,
+                  availW: view Float) pub {
+  var visible: Int = cameraBarReadoutCount
+  var i: Int = 0
+  loop i < cameraBarReadoutCount {
+    setNodeActive(world: world, nodeId: cameraBarReadoutId(index: i), value: true)
+    i = i + 1
+  }
+  runUiSystems(world: world, res: res)
+  # At most one drop per readout, so this terminates even if the host is
+  # narrower than the mode button alone — in which case the button stays
+  # and overflows, which is the lesser failure.
+  var guard: Int = 0
+  loop guard < cameraBarReadoutCount {
+    if nodeRectW(world: world, nodeId: hostNodeId) <= availW {
+      ret
+    }
+    visible = visible - 1
+    if visible < 0 {
+      ret
+    }
+    setNodeActive(world: world, nodeId: cameraBarReadoutId(index: visible), value: false)
+    runUiSystems(world: world, res: res)
+    guard = guard + 1
+  }
+}
+
+# Handle the bar's own action. Returns whether the mode changed, so a
+# caller that gates rendering on state changes does not have to compare
+# the rig before and after.
+func handleCameraBar(input: view UiInput, rig: mod CameraRig, camera: mod Camera3d) pub ret Bool {
+  if uiActionFired(input: input, actionId: cameraBarModeAction) is false {
+    ret false
+  }
+  toggleCameraRigMode(rig: rig, camera: camera)
+  ret true
+}
