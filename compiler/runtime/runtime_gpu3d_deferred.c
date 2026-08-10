@@ -319,8 +319,23 @@ static const char* GB_LIGHT_WGSL =
 "@group(0) @binding(3) var gbcTex: texture_2d<f32>;\n"
 "@group(0) @binding(4) var depthTex: texture_depth_2d;\n"
 "@group(0) @binding(5) var aoTex: texture_2d<f32>;\n"
+/* Sun shadows (#382/#384) reach the deferred frame through the SAME
+ * shared lookup the forward and skinned shaders use — one definition,
+ * three callers, so the three cannot disagree about where a shadow
+ * falls. Only the binding numbers differ. */
+"struct ShadowU {\n"
+"  lightViewProj: array<mat4x4<f32>, 4>,\n"
+"  splitFar: vec4<f32>,\n"
+"  texelWorld: vec4<f32>,\n"
+"  depthRange: vec4<f32>,\n"
+"  shadowCfg: vec4<f32>,\n"
+"};\n"
+"@group(0) @binding(6) var<uniform> SH: ShadowU;\n"
+"@group(0) @binding(7) var shadowTex: texture_depth_2d_array;\n"
+"@group(0) @binding(8) var shadowSamp: sampler_comparison;\n"
 GB_OCT_WGSL
 GB_FULLSCREEN_VS
+G3D_SHADOW_FN_WGSL
 "const PI: f32 = 3.14159265;\n"
 "fn dGGX(NoH: f32, rough: f32) -> f32 {\n"
 "  let a = rough * rough;\n"
@@ -394,7 +409,11 @@ GB_FULLSCREEN_VS
 "  let spec = dGGX(NoH, rough) * gSmith(NoV, NoL, rough) * Fs\n"
 "           / max(4.0 * NoV * NoL, 1e-4);\n"
 "  let kd = (vec3<f32>(1.0) - Fs) * (1.0 - metallic);\n"
-"  let direct = (kd * albedo / PI + spec) * L.sunColor.rgb * NoL;\n"
+/* Shadow multiplies DIRECT only — never the ambient below. Same §5
+ * invariant the forward path enforces, and the deferred frame keeps the
+ * two terms separate anyway, so it is structural here too. */
+"  let sunVis = sunVisibility(wpos, N, length(L.camPos.xyz - wpos), vec2<f32>(px));\n"
+"  let direct = (kd * albedo / PI + spec) * L.sunColor.rgb * NoL * sunVis;\n"
 /* Z-up world (docs/coordinate-system.md), so the hemisphere blends on N.z.
  * The forward pass blends on N.y because it predates the convention — that
  * disagreement is real and tracked, and this is the correct one. */
@@ -568,6 +587,14 @@ static void gb_deferred_init_pipelines(void) {
     if (!gb_light_pipeline) {
         gb_lit_format = g_wgpu_have_rg11b10 ? WGPUTextureFormat_RG11B10Ufloat
                                             : WGPUTextureFormat_RGBA16Float;
+        /* The lighting bind group references the shadow cascades, so
+         * they must EXIST even for an app that never runs a shadow pass —
+         * wgpu aborts the process on a null binding rather than returning
+         * an error. An unrendered cascade is never sampled, because
+         * shadowCfg.x stays 0 and sunVisibility returns 1.0 before
+         * touching the texture. */
+        g3d_shadow_init();
+        g3d_shadow_ensure_targets(G3D_SHADOW_DEFAULT_RES, G3D_SHADOW_DEFAULT_CASCADES);
         gb_taa_pipeline = gb_make_fullscreen_pipeline(
             GB_TAA_WGSL, gb_lit_format, "taa");
         gb_ao_pipeline = gb_make_fullscreen_pipeline(
@@ -717,15 +744,18 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
 
     if (!gb_light_bind) {
         WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(gb_light_pipeline, 0);
-        WGPUBindGroupEntry e[6]; memset(e, 0, sizeof(e));
+        WGPUBindGroupEntry e[9]; memset(e, 0, sizeof(e));
         e[0].binding = 0; e[0].buffer = gb_light_ubuf; e[0].size = GB_LIGHT_BYTES;
         e[1].binding = 1; e[1].textureView = gb_a_view;
         e[2].binding = 2; e[2].textureView = gb_b_view;
         e[3].binding = 3; e[3].textureView = gb_c_view;
         e[4].binding = 4; e[4].textureView = gb_depth_view;
         e[5].binding = 5; e[5].textureView = gb_ao_view;
+        e[6].binding = 6; e[6].buffer = g3d_sm_frame_ubuf; e[6].size = 320;
+        e[7].binding = 7; e[7].textureView = g3d_sm_array_view;
+        e[8].binding = 8; e[8].sampler = g3d_sm_sampler;
         WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
-        bgd.layout = bgl; bgd.entryCount = 6; bgd.entries = e;
+        bgd.layout = bgl; bgd.entryCount = 9; bgd.entries = e;
         gb_light_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
         wgpuBindGroupLayoutRelease(bgl);
     }
