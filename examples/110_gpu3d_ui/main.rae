@@ -538,6 +538,8 @@ func main() ret Int {
   # rendered frame, so an idle app touches neither.
   var renderedOnce: Bool = false
   var lastLogRevision: Int = 0 - 1
+  # Once, not per frame: this is a gate assertion, not a readout.
+  var shadowLogged: Bool = false
   # Save on CHANGE rather than only at exit: 110 does not watch for a
   # reload signal, so a supervisor is free to kill it without warning and
   # an exit-only save would lose everything. Throttled because a camera
@@ -696,6 +698,10 @@ func main() ret Int {
           if uiState.activeScene is 2 { renderSceneShadow(scene: scene2.scene) }
           if uiState.activeScene is 3 { renderSceneShadow(scene: scene3.scene) }
           endShadowPass()
+          if shadowLogged is false {
+            log("[shadow] casters {shadowCasterCount()}, {cascades.count} cascades at {cascades.resolution}")
+            shadowLogged = true
+          }
         }
         if tag is tagScenePass {
           beginScene(camera: camera, light: light, aspect: aspect, time: simTime)
