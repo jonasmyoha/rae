@@ -27,10 +27,10 @@ _Static_assert(sizeof(rae_Mat4) == 16 * sizeof(float),
 void rae_ext_gbuffer_begin(rae_Mat4* viewProj, float clearR, float clearG, float clearB){
     (void)viewProj; (void)clearR; (void)clearG; (void)clearB;
 }
-void rae_ext_gbuffer_draw(int64_t mesh, rae_Mat4* model,
+void rae_ext_gbuffer_draw(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
                           float r, float g, float b,
                           float metallic, float roughness, float emissive){
-    (void)mesh; (void)model; (void)r; (void)g; (void)b;
+    (void)mesh; (void)model; (void)prevModel; (void)r; (void)g; (void)b;
     (void)metallic; (void)roughness; (void)emissive;
 }
 void rae_ext_gbuffer_end(void) {}
