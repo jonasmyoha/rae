@@ -2,8 +2,8 @@ pack WalkerCharacter {
   format: "raepack"
   version: 1
   defaultTarget: compiled
-  name: "3D Renderer — Walker Character (multi-primitive glTF) — Claude Fable"
-  description: "Loads a 65-joint rigged character from a glTF binary and renders it in bind pose. Where the Fox example is a single primitive with no normals and no index buffer, this model is 10 meshes / 12 primitives, all indexed — so it exercises the merge path, which rebases each primitive's indices by the running vertex total. Framing is computed from the loaded bounds rather than hard-coded, so a different model still lands centred and correctly scaled. Interactive orbit camera: drag to rotate, wheel to zoom."
+  name: "3D Renderer — Walker Character (skinned + animated glTF)"
+  description: "A 65-joint rigged character, skinned on the GPU and playing Mixamo clips loaded from separate .glb files and retargeted by joint name. 10 meshes / 12 primitives, each drawn separately so it keeps its own material. Per-vertex colour is baked at load by sampling the model's palette atlas, decoded by a pure-Rae PNG decoder. The control panel is a .raescene whose buttons are inserted from code (lib/app3d/control_panel), and the orbit camera is the shared rig (lib/app3d/camera_rig). Clip selection, play-pause and speed; a clip plays from the first frame."
   category: "3D Renderer"
   display: {
     width: 1280
