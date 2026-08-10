@@ -58,6 +58,7 @@ func lighting(camX: Float, camY: Float, camZ: Float, exposure: Float, sunX: Floa
 func composite(exposure: Float) extern
 func pyramidMips() extern ret Int
 func ssao(camX: Float, camY: Float, camZ: Float) extern
+func taa() extern
 func deferredShutdown() extern
 
 # ----- G-buffer inspector modes ---------------------------------------
@@ -200,6 +201,14 @@ func buildDepthPyramid() pub {
 # INDIRECT term only.
 func ssaoPass(camera: view Camera3d) pub {
   ssao(camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z)
+}
+
+# Temporal resolve (#390). Reads the radiance lighting wrote plus last
+# frame's history, reprojected through the G-buffer's motion channel;
+# composite then reads the resolved image. Runs on HDR, before tonemap,
+# so accumulation stays linear.
+func taaPass() pub {
+  taa()
 }
 
 func lightingPass(camera: view Camera3d, light: view Light3d) pub {

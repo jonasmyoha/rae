@@ -61,8 +61,12 @@ static WGPUBindGroup      gb_light_bind = NULL;
 static WGPUBuffer         gb_light_ubuf = NULL;
 
 static WGPURenderPipeline gb_composite_pipeline = NULL;
-static WGPUBindGroup      gb_composite_bind = NULL;
+/* One per history slot: the composite's source alternates with the TAA
+ * ping-pong, and a single cached bind group would pin frame one's
+ * choice forever. */
+static WGPUBindGroup      gb_composite_bind[2] = {NULL, NULL};
 static WGPUBuffer         gb_composite_ubuf = NULL;
+static WGPUBuffer         gb_taa_ubuf = NULL;
 
 static int gb_deferred_gen = -1;   /* gb_targets_gen this file's binds were built for */
 
@@ -118,6 +122,83 @@ GB_FULLSCREEN_VS
  * the two disagree is a bug in one of them, and keeping them identical is
  * what makes the forward frame a usable reference image while the deferred
  * frame is being built. */
+
+
+/* ----- TAA on the deferred frame (#390) ------------------------------
+ *
+ * Two history buffers, ping-ponged: the resolve reads the one it did not
+ * write last frame and writes the other, so a frame never reads and
+ * writes the same texture. Persistent, not transient — the whole point is
+ * that it survives to next frame, which is the lifetime class #331 put in
+ * the graph v1 precisely so temporal techniques could be declared
+ * truthfully.
+ *
+ * REPROJECTION USES THE G-BUFFER'S MOTION CHANNEL (#390 part 1), decoded
+ * with the paired `raw * 2 - 256/255` — the encode and decode constants
+ * must change together or every pixel reprojects to the wrong place.
+ *
+ * NEIGHBOURHOOD CLAMP is what makes it usable rather than a smear. The
+ * history is clamped to the min/max of the 3x3 neighbourhood around the
+ * current pixel, so a disoccluded pixel — one whose history belongs to
+ * geometry no longer there — is pulled back to something plausible
+ * instead of ghosting. Without it TAA trades aliasing for trailing, which
+ * is a worse artefact.
+ */
+static WGPUTexture     gb_taa_tex[2] = {NULL, NULL};
+static WGPUTextureView gb_taa_view[2] = {NULL, NULL};
+static WGPURenderPipeline gb_taa_pipeline = NULL;
+static WGPUBindGroup   gb_taa_bind[2] = {NULL, NULL};
+static int  gb_taa_cur = 0;
+static bool gb_taa_have_history = false;
+/* Sub-pixel jitter (#390). WITHOUT IT TAA IS NOT ANTIALIASING: every
+ * frame samples the same point inside each pixel, so accumulating them
+ * adds nothing and only risks ghosting. The jitter is what makes
+ * successive frames carry different information. */
+static float gb_jitter_x = 0.0f, gb_jitter_y = 0.0f;
+static int   gb_taa_frame = 0;
+static bool  gb_taa_enabled = true;
+
+static const char* GB_TAA_WGSL =
+"@group(0) @binding(0) var litTex: texture_2d<f32>;\n"
+"@group(0) @binding(1) var histTex: texture_2d<f32>;\n"
+"@group(0) @binding(2) var gbcTex: texture_2d<f32>;\n"
+"@group(0) @binding(3) var<uniform> P: vec4<f32>;\n"   /* x = have history */
+GB_FULLSCREEN_VS
+"@fragment\n"
+"fn fs(@builtin(position) fc: vec4<f32>) -> @location(0) vec4<f32> {\n"
+"  let dim = vec2<i32>(textureDimensions(litTex));\n"
+"  let px = vec2<i32>(fc.xy);\n"
+"  let cur = textureLoad(litTex, px, 0).rgb;\n"
+"  if (P.x < 0.5) { return vec4<f32>(cur, 1.0); }\n"
+/* Paired with the G-buffer's encode: bias 128/255, so the inverse is
+ * raw*2 - 256/255. */
+"  let mRaw = textureLoad(gbcTex, px, 0).xy;\n"
+"  let motion = mRaw * 2.0 - vec2<f32>(256.0 / 255.0);\n"
+"  let uv = (vec2<f32>(px) + vec2<f32>(0.5)) / vec2<f32>(dim);\n"
+"  let prevUv = uv - motion;\n"
+/* Off-screen history is no history. Using the clamped edge would smear
+ * the border inward, which reads as a dirty frame edge. */
+"  if (prevUv.x < 0.0 || prevUv.x > 1.0 || prevUv.y < 0.0 || prevUv.y > 1.0) {\n"
+"    return vec4<f32>(cur, 1.0);\n"
+"  }\n"
+"  let hp = vec2<i32>(prevUv * vec2<f32>(dim));\n"
+"  var hist = textureLoad(histTex, hp, 0).rgb;\n"
+/* Neighbourhood clamp — see the note above on why this is not optional. */
+"  var lo = cur;\n"
+"  var hi = cur;\n"
+"  for (var dy = -1; dy <= 1; dy = dy + 1) {\n"
+"    for (var dx = -1; dx <= 1; dx = dx + 1) {\n"
+"      let q = clamp(px + vec2<i32>(dx, dy), vec2<i32>(0), dim - vec2<i32>(1));\n"
+"      let c = textureLoad(litTex, q, 0).rgb;\n"
+"      lo = min(lo, c);\n"
+"      hi = max(hi, c);\n"
+"    }\n"
+"  }\n"
+"  hist = clamp(hist, lo, hi);\n"
+/* 0.9 history is the usual compromise: enough frames to converge the
+ * jitter, few enough that a clamped-but-wrong sample washes out fast. */
+"  return vec4<f32>(mix(cur, hist, 0.9), 1.0);\n"
+"}\n";
 
 /* ----- SSAO on the deferred frame (#387) -----------------------------
  *
@@ -390,7 +471,15 @@ static void gb_deferred_release_targets(void) {
     }
     if (gb_pyramid_tex)    { wgpuTextureRelease(gb_pyramid_tex); gb_pyramid_tex = NULL; }
     if (gb_light_bind)     { wgpuBindGroupRelease(gb_light_bind); gb_light_bind = NULL; }
-    if (gb_composite_bind) { wgpuBindGroupRelease(gb_composite_bind); gb_composite_bind = NULL; }
+    for (int i = 0; i < 2; i++) {
+        if (gb_composite_bind[i]) { wgpuBindGroupRelease(gb_composite_bind[i]); gb_composite_bind[i] = NULL; }
+    }
+    for (int i = 0; i < 2; i++) {
+        if (gb_taa_view[i]) { wgpuTextureViewRelease(gb_taa_view[i]); gb_taa_view[i] = NULL; }
+        if (gb_taa_tex[i])  { wgpuTextureRelease(gb_taa_tex[i]); gb_taa_tex[i] = NULL; }
+        if (gb_taa_bind[i]) { wgpuBindGroupRelease(gb_taa_bind[i]); gb_taa_bind[i] = NULL; }
+    }
+    gb_taa_have_history = false;
     if (gb_ao_view)        { wgpuTextureViewRelease(gb_ao_view); gb_ao_view = NULL; }
     if (gb_ao_tex)         { wgpuTextureRelease(gb_ao_tex); gb_ao_tex = NULL; }
     if (gb_ao_bind)        { wgpuBindGroupRelease(gb_ao_bind); gb_ao_bind = NULL; }
@@ -456,6 +545,16 @@ static void gb_deferred_ensure(void) {
     gb_ao_tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
     gb_ao_view = wgpuTextureCreateView(gb_ao_tex, NULL);
 
+    /* TAA history, same format as radiance: the resolve accumulates
+     * LINEAR HDR, before the composite's tone curve. Accumulating
+     * tonemapped values would make convergence depend on exposure. */
+    td.format = gb_lit_format;
+    for (int i = 0; i < 2; i++) {
+        gb_taa_tex[i] = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
+        gb_taa_view[i] = wgpuTextureCreateView(gb_taa_tex[i], NULL);
+    }
+    gb_taa_have_history = false;
+
     gb_deferred_gen = gb_targets_gen;
 }
 
@@ -469,6 +568,8 @@ static void gb_deferred_init_pipelines(void) {
     if (!gb_light_pipeline) {
         gb_lit_format = g_wgpu_have_rg11b10 ? WGPUTextureFormat_RG11B10Ufloat
                                             : WGPUTextureFormat_RGBA16Float;
+        gb_taa_pipeline = gb_make_fullscreen_pipeline(
+            GB_TAA_WGSL, gb_lit_format, "taa");
         gb_ao_pipeline = gb_make_fullscreen_pipeline(
             GB_AO_WGSL, WGPUTextureFormat_R8Unorm, "ssao");
         gb_light_pipeline = gb_make_fullscreen_pipeline(
@@ -484,6 +585,7 @@ static void gb_deferred_init_pipelines(void) {
         WGPUBufferDescriptor ud; memset(&ud, 0, sizeof(ud));
         ud.size = 16; ud.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
         gb_composite_ubuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &ud);
+        gb_taa_ubuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &ud);
     }
 }
 
@@ -631,6 +733,39 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
 }
 
 /* Composite radiance into the presentable offscreen. */
+/* TAA resolve (#390). Reads the radiance the lighting pass wrote plus
+ * last frame's history, writes this frame's. The composite then reads
+ * the resolved image rather than raw radiance. */
+void rae_ext_gbuffer_taa(void) {
+    if (!g_wgpu_dev || !gb_lit_view) return;
+    gb_deferred_init_pipelines();
+    gb_deferred_ensure();
+    if (!gb_taa_pipeline || !gb_taa_view[0] || !gb_taa_view[1]) return;
+    if (!gb_taa_enabled) return;
+
+    /* Resolve INTO the slot not read this frame, so no pass reads and
+     * writes one texture. */
+    gb_taa_cur = 1 - gb_taa_cur;
+
+    float p[4] = { gb_taa_have_history ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f };
+    wgpuQueueWriteBuffer(g_wgpu_queue, gb_taa_ubuf, 0, p, sizeof(p));
+
+    if (!gb_taa_bind[gb_taa_cur]) {
+        WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(gb_taa_pipeline, 0);
+        WGPUBindGroupEntry e[4]; memset(e, 0, sizeof(e));
+        e[0].binding = 0; e[0].textureView = gb_lit_view;
+        e[1].binding = 1; e[1].textureView = gb_taa_view[1 - gb_taa_cur];
+        e[2].binding = 2; e[2].textureView = gb_c_view;
+        e[3].binding = 3; e[3].buffer = gb_taa_ubuf; e[3].size = 16;
+        WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
+        bgd.layout = bgl; bgd.entryCount = 4; bgd.entries = e;
+        gb_taa_bind[gb_taa_cur] = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
+        wgpuBindGroupLayoutRelease(bgl);
+    }
+    gb_run_fullscreen(gb_taa_pipeline, gb_taa_bind[gb_taa_cur], gb_taa_view[gb_taa_cur]);
+    gb_taa_have_history = true;
+}
+
 void rae_ext_gbuffer_composite(float exposure) {
     if (!g_wgpu_dev || !g_g2d_off_view) return;
     gb_deferred_init_pipelines();
@@ -639,17 +774,22 @@ void rae_ext_gbuffer_composite(float exposure) {
 
     float p[4] = { exposure, 0.0f, 0.0f, 0.0f };
     wgpuQueueWriteBuffer(g_wgpu_queue, gb_composite_ubuf, 0, p, sizeof(p));
-    if (!gb_composite_bind) {
+    if (!gb_composite_bind[gb_taa_cur]) {
         WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(gb_composite_pipeline, 0);
         WGPUBindGroupEntry e[2]; memset(e, 0, sizeof(e));
         e[0].binding = 0; e[0].buffer = gb_composite_ubuf; e[0].size = 16;
-        e[1].binding = 1; e[1].textureView = gb_lit_view;
+        /* The composite reads whatever the last radiometric pass wrote:
+         * the TAA resolve when it ran, raw radiance when it did not. The
+         * resolve's first frame copies radiance through unchanged, so
+         * this is valid from frame one. */
+        e[1].binding = 1; e[1].textureView = (gb_taa_enabled && gb_taa_view[gb_taa_cur])
+                                              ? gb_taa_view[gb_taa_cur] : gb_lit_view;
         WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
         bgd.layout = bgl; bgd.entryCount = 2; bgd.entries = e;
-        gb_composite_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
+        gb_composite_bind[gb_taa_cur] = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
         wgpuBindGroupLayoutRelease(bgl);
     }
-    gb_run_fullscreen(gb_composite_pipeline, gb_composite_bind, g_g2d_off_view);
+    gb_run_fullscreen(gb_composite_pipeline, gb_composite_bind[gb_taa_cur], g_g2d_off_view);
 }
 
 /* Number of mip levels in the pyramid — 0 before the first build. Lets a
@@ -664,5 +804,7 @@ void rae_ext_gbuffer_deferredShutdown(void) {
     if (gb_light_ubuf)              { wgpuBufferRelease(gb_light_ubuf); gb_light_ubuf = NULL; }
     if (gb_composite_pipeline)      { wgpuRenderPipelineRelease(gb_composite_pipeline); gb_composite_pipeline = NULL; }
     if (gb_composite_ubuf)          { wgpuBufferRelease(gb_composite_ubuf); gb_composite_ubuf = NULL; }
+    if (gb_taa_ubuf)                { wgpuBufferRelease(gb_taa_ubuf); gb_taa_ubuf = NULL; }
+    if (gb_taa_pipeline)            { wgpuRenderPipelineRelease(gb_taa_pipeline); gb_taa_pipeline = NULL; }
     gb_deferred_gen = -1;
 }

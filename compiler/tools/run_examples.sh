@@ -145,7 +145,8 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           if [ "$GB_OK" = "1" ] \
              && [ "$(grep -c '  0: gbuffer' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
              && [ "$(grep -c '  1: ssao' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
-             && [ "$(grep -c '  5: present' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
+             && [ "$(grep -c '  4: taa' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
+             && [ "$(grep -c '  6: present' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
              && [ "$(grep -c 'depth pyramid: .* mips' "$TMP_OUT/gb-lit.log")" -ge 1 ]; then
             echo "PASS: $EXAMPLE_NAME (lit frame + 4 G-buffer channels, pyramid built, derived pass order)"
             ((PASSED++))
