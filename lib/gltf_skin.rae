@@ -25,13 +25,21 @@ open quat
 # ----- skinned primitives (#374) ---------------------------------------
 
 # A primitive with its skinning attributes, ready for the skinned GPU
-# pipeline. 16 Floats per vertex:
+# pipeline. 20 Floats per vertex:
 #
 #   [0..2]   position
 #   [3..5]   normal
 #   [6..7]   uv
 #   [8..11]  joint indices  (as Floats; see below)
 #   [12..15] joint weights
+#   [16..19] RGBA vertex colour, LINEAR, MULTIPLIED into the material's
+#            base colour by the shader (#378)
+#
+# THE COLOUR CHANNEL DEFAULTS TO WHITE, which multiplies to a no-op. A
+# model that carries no colour data pays four floats per vertex and gets
+# exactly what it got before; only a model that has colour spends the
+# channel on anything. That is what makes it safe to put in the format
+# unconditionally rather than behind a second pipeline.
 #
 # SEPARATE FROM MeshData ON PURPOSE. The static layout is 8 Floats and is
 # hardcoded in mesh3d, in gpu3d's vertex layout and in the WGSL. Widening
@@ -123,6 +131,12 @@ func loadSkinnedPrimitive(g: view Glb, meshIndex: view Int, primIndex: view Int)
       verts.add(value: 0.0)
       verts.add(value: 0.0)
     }
+    # Vertex colour: white, i.e. the material's base colour unmodified.
+    # `withAtlasColors` overwrites this when the model has a palette.
+    verts.add(value: 1.0)
+    verts.add(value: 1.0)
+    verts.add(value: 1.0)
+    verts.add(value: 1.0)
     i = i + 1
   }
   var k2: Int = 0
@@ -131,6 +145,88 @@ func loadSkinnedPrimitive(g: view Glb, meshIndex: view Int, primIndex: view Int)
     k2 = k2 + 1
   }
   ret SkinnedMeshData { verts: own verts, indices: own indices, vertCount: base.vertCount }
+}
+
+# ----- palette-atlas colour baking (#378) ------------------------------
+
+# sRGB transfer function, inverted. Texture bytes are sRGB-encoded and the
+# renderer works in linear radiance, so skipping this makes every mid-tone
+# roughly 20% too bright — a difference that reads as "washed out" rather
+# than as a bug, which is why it is spelled out rather than approximated
+# with a 2.2 power.
+func srgbToLinear(c: view Float) ret Float {
+  if c <= 0.04045 {
+    ret c / 12.92
+  }
+  ret math.pow(base: (c + 0.055) / 1.055, exp: 2.4)
+}
+
+# Return a copy of `m` whose vertex colour channel is the atlas colour at
+# each vertex's UV. `atlas` is 0xAARRGGBB pixels, row-major from the TOP.
+#
+# This is the honest version of what example 113 used to approximate with
+# a hand-written table of dominant swatches: nine of that model's twelve
+# primitives sample a single swatch and were exact, but the body (61% skin
+# across 17 swatches), the trim (51%) and the boots (86%) were flattened.
+# Per-vertex sampling is not an approximation of texturing for a FLAT
+# palette atlas — every triangle whose three corners land in one swatch
+# interpolates to that swatch exactly, which is every triangle here.
+#
+# NEAREST, NOT BILINEAR. The atlas is solid blocks with hard edges; a
+# bilinear tap near a swatch boundary would blend two unrelated colours
+# and show up as a stray fringe on one vertex.
+#
+# NO V FLIP. glTF's UV origin is the TOP-LEFT with v increasing downward,
+# which is already the atlas's row order. The OpenGL-style flip is the
+# mistake this example's header records: it sent every lookup into the
+# atlas's blank region, which returns white and looks exactly like "wrong
+# texture" rather than "wrong maths".
+#
+# COLOR_0 IS DELIBERATELY NOT USED. This model carries one, but it is
+# Blender's vertex paint, not the palette; multiplying both sources would
+# darken twice. The atlas is the model's albedo, so it is the one source.
+func withAtlasColors(m: view SkinnedMeshData, atlas: view List(Int),
+                     width: view Int, height: view Int) pub ret SkinnedMeshData {
+  let out: List(Float) = createList(Float, cap: m.verts.length)
+  var i: Int = 0
+  loop i < m.verts.length {
+    out.add(value: m.verts.at(index: i))
+    i = i + 1
+  }
+  if width <= 0 or height <= 0 or atlas.length < width * height {
+    ret SkinnedMeshData { verts: own out, indices: own copyIndices(src: m.indices), vertCount: m.vertCount }
+  }
+  var v: Int = 0
+  loop v < m.vertCount {
+    let base: Int = v * 20
+    var x: Int = math.floor(x: out.at(index: base + 6) * width.toFloat()).toInt()
+    var y: Int = math.floor(x: out.at(index: base + 7) * height.toFloat()).toInt()
+    # Clamp rather than wrap. A UV marginally outside [0,1] is exporter
+    # rounding on a swatch edge, and wrapping would fetch the colour from
+    # the opposite side of the atlas — a vivid wrong pixel instead of the
+    # right one.
+    if x < 0 { x = 0 }
+    if y < 0 { y = 0 }
+    if x >= width { x = width - 1 }
+    if y >= height { y = height - 1 }
+    let px: Int = atlas.at(index: y * width + x)
+    out.set(index: base + 16, value: srgbToLinear(c: ((px shr 16) bitand 255).toFloat() / 255.0))
+    out.set(index: base + 17, value: srgbToLinear(c: ((px shr 8) bitand 255).toFloat() / 255.0))
+    out.set(index: base + 18, value: srgbToLinear(c: (px bitand 255).toFloat() / 255.0))
+    out.set(index: base + 19, value: 1.0)
+    v = v + 1
+  }
+  ret SkinnedMeshData { verts: own out, indices: own copyIndices(src: m.indices), vertCount: m.vertCount }
+}
+
+func copyIndices(src: view List(Int)) ret List(Int) {
+  let out: List(Int) = createList(Int, cap: src.length)
+  var i: Int = 0
+  loop i < src.length {
+    out.add(value: src.at(index: i))
+    i = i + 1
+  }
+  ret own out
 }
 
 # ----- skeleton and joint palette (#375) -------------------------------
