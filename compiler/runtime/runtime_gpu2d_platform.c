@@ -583,6 +583,15 @@ int64_t rae_ext_gpu2d_windowHeight(void) { return g_sdl_h; }
 void rae_ext_gpu2d_setWindowPosition(int64_t x, int64_t y) {
     if (g_sdl_win) SDL_SetWindowPosition(g_sdl_win, (int)x, (int)y);
 }
+/* Counterpart to setWindowPosition, so an app can restore the whole
+ * placement it saved. Restoring the position without the size drops the
+ * window back in the right corner at the wrong shape, which looks more
+ * broken than not restoring at all. */
+void rae_ext_gpu2d_setWindowSize(int64_t w, int64_t h) {
+    if (!g_sdl_win) return;
+    if (w <= 0 || h <= 0) return;
+    SDL_SetWindowSize(g_sdl_win, (int)w, (int)h);
+}
 int64_t rae_ext_gpu2d_windowPositionX(void) {
     int x = 0, y = 0;
     if (g_sdl_win) SDL_GetWindowPosition(g_sdl_win, &x, &y);

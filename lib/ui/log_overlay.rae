@@ -38,6 +38,11 @@ const logError: Int = 4
 # (see the performance note above).
 const logAnchorTopLeft: Int = 0
 const logAnchorBottomLeft: Int = 1
+# Right-hand variants, added because an app with a bottom-left control
+# panel has no free corner on that side. The panel is right-ALIGNED, not
+# mirrored: text still reads left to right inside it.
+const logAnchorTopRight: Int = 2
+const logAnchorBottomRight: Int = 3
 
 type LogOverlay {
   texts: List(String)   # ring buffer of `capacity` slots
@@ -186,11 +191,15 @@ func drawLogOverlay(ov: view LogOverlay, font: view SdfFont, screenW: view Float
 
   # `top` is the panel's top edge; text baselines step down from it.
   var top: Float = marginY
-  if ov.anchor is logAnchorBottomLeft {
+  if ov.anchor is logAnchorBottomLeft or ov.anchor is logAnchorBottomRight {
     top = screenH - marginY - blockH - pad - pad
   }
+  var left: Float = marginX
+  if ov.anchor is logAnchorTopRight or ov.anchor is logAnchorBottomRight {
+    left = screenW - marginX - panelW
+  }
   gpu2d.drawBox(
-    x: marginX, y: top, w: panelW, h: blockH + pad + pad, radius: 8.0,
+    x: left, y: top, w: panelW, h: blockH + pad + pad, radius: 8.0,
     fill: 0xB2050A12, borderWidth: 0.0, border: 0x00000000
   )
 
@@ -205,7 +214,7 @@ func drawLogOverlay(ov: view LogOverlay, font: view SdfFont, screenW: view Float
     # +fontSize because drawText takes a baseline, not a top edge.
     let baseline: Float = top + pad + ov.fontSize + i.toFloat() * lineH
     gpu2d_text.drawText(
-      font: font, text: text, x: marginX + pad, y: baseline,
+      font: font, text: text, x: left + pad, y: baseline,
       sizePx: ov.fontSize, color: logLevelColor(level: level)
     )
     i = i + 1
