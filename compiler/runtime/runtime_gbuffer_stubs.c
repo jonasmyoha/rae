@@ -87,6 +87,9 @@ void rae_ext_gpu3d_shadowBegin(const float* cascades, int64_t count, int64_t res
 }
 void rae_ext_gpu3d_shadowDraw(int64_t mesh, rae_Mat4* model){ (void)mesh; (void)model; }
 void rae_ext_gpu3d_shadowDrawSkinned(int64_t mesh, rae_Mat4* model){ (void)mesh; (void)model; }
+void rae_ext_gpu3d_shadowMetaballs(const float* packedBalls, int64_t count, float smoothing){
+    (void)packedBalls; (void)count; (void)smoothing;
+}
 void rae_ext_gpu3d_shadowEnd(void) {}
 int64_t rae_ext_gpu3d_shadowDrawCount(void) { return 0; }
 void rae_ext_gpu3d_shadowShutdown(void) {}
