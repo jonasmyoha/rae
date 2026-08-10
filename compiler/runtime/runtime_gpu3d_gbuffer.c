@@ -47,8 +47,8 @@
  */
 
 #define GB_MAX_DRAWS   4096
-#define GB_DRAW_FLOATS 24   /* mat4 model + vec4 albedo/metallic + vec4 rough/emissive/mode */
-#define GB_FRAME_BYTES 64   /* one mat4 viewProj; the geometry pass needs nothing else */
+#define GB_DRAW_FLOATS 40   /* mat4 model + mat4 prevModel + vec4 albedo/metallic + vec4 rough/emissive/mode */
+#define GB_FRAME_BYTES 128  /* viewProj + prevViewProj (#390) */
 
 /* Debug view selectors, mirrored by lib/gbuffer.rae. A G-buffer inspector
  * is permanent equipment in a deferred renderer, not scaffolding: when the
@@ -93,6 +93,11 @@ static WGPURenderPassEncoder gb_pass = NULL;
  * it from a camera the app might have moved since would put the lighting a
  * frame out of step with the depth it is reading. */
 static float gb_viewproj[16];
+/* Last frame's view-projection, for motion vectors (#390). First frame
+ * reuses this frame's, which yields zero motion — correct, and better
+ * than an uninitialised matrix projecting every pixel to the origin. */
+static float gb_prev_viewproj[16];
+static bool  gb_have_prev_vp = false;
 static float gb_clear[3];
 
 static WGPURenderPipeline gb_view_pipeline = NULL;
@@ -162,9 +167,11 @@ static WGPUBuffer         gb_view_ubuf = NULL;
 static const char* GB_WGSL =
 "struct Frame {\n"
 "  viewProj: mat4x4<f32>,\n"
+"  prevViewProj: mat4x4<f32>,\n"
 "};\n"
 "struct DrawU {\n"
 "  model: mat4x4<f32>,\n"
+"  prevModel: mat4x4<f32>,\n"
 "  albedoMetallic: vec4<f32>,\n"
 "  params: vec4<f32>,\n"          /* x = roughness, y = emissive (encoded), z = mode */
 "};\n"
@@ -175,6 +182,8 @@ GB_OCT_WGSL
 "  @builtin(position) pos: vec4<f32>,\n"
 "  @location(0) nrm: vec3<f32>,\n"
 "  @location(1) @interpolate(flat) inst: u32,\n"
+"  @location(2) clipNow: vec4<f32>,\n"
+"  @location(3) clipPrev: vec4<f32>,\n"
 "};\n"
 "@vertex\n"
 "fn vs(@builtin(instance_index) ii: u32,\n"
@@ -188,6 +197,13 @@ GB_OCT_WGSL
  * disagree about which way a surface faces. */
 "  o.nrm = normalize((d.model * vec4<f32>(n, 0.0)).xyz);\n"
 "  o.inst = ii;\n"
+/* Motion (#390): where this vertex is now, and where the SAME vertex was
+ * last frame — its previous model through the previous view-projection.
+ * Both unjittered; if a jitter is added later it is a rasterisation
+ * offset, not scene motion, and including it would make every static
+ * pixel appear to move. */
+"  o.clipNow = o.pos;\n"
+"  o.clipPrev = F.prevViewProj * (d.prevModel * vec4<f32>(p, 1.0));\n"
 "  return o;\n"
 "}\n"
 "struct FsOut {\n"
@@ -208,15 +224,22 @@ GB_OCT_WGSL
  * gets the same floor without having to remember it. A zero-roughness GGX
  * lobe is a division by zero at the highlight. */
 "  let rough = clamp(d.params.x, 0.045, 1.0);\n"
-/* Motion vectors: the channels exist and hold "no motion" — the biased
- * zero, 128/255, which is the one value an 8-bit channel reproduces
- * exactly. See GB_MOTION_ZERO for why that matters more than it looks.
- * Nothing produces real motion until the deferred frame carries previous
- * transforms, and nothing consumes it until it has a temporal pass. */
+/* Motion vectors, now REAL (#390). UV-space displacement since last
+ * frame, biased into an unsigned 8-bit channel: 128/255 is zero, and it
+ * is the one value rgba8unorm reproduces exactly, which is why the clear
+ * colour uses it too. The decode is the paired
+ * `raw * 2 - 256/255` — the two must change together. */
+"  let now = in.clipNow.xy / in.clipNow.w;\n"
+"  let prev = in.clipPrev.xy / in.clipPrev.w;\n"
+"  let motion = (now - prev) * vec2<f32>(0.5, -0.5);\n"
+/* Clamp before biasing: a fast object can move more than half a screen in
+ * one frame, and wrapping would encode huge motion as tiny motion — the
+ * worst possible failure for a temporal filter, since it looks valid. */
+"  let mEnc = clamp(motion, vec2<f32>(-0.5), vec2<f32>(0.5)) + vec2<f32>(" GB_MOTION_ZERO_WGSL ");\n"
 "  var o: FsOut;\n"
 "  o.gba = vec4<f32>(oct.x, oct.y, 0.5, d.params.z);\n"
 "  o.gbb = vec4<f32>(d.albedoMetallic.rgb, rough);\n"
-"  o.gbc = vec4<f32>(" GB_MOTION_ZERO_WGSL ", " GB_MOTION_ZERO_WGSL ",\n"
+"  o.gbc = vec4<f32>(mEnc.x, mEnc.y,\n"
 "                     clamp(d.albedoMetallic.a, 0.0, 1.0), d.params.y);\n"
 "  return o;\n"
 "}\n";
@@ -455,7 +478,19 @@ void rae_ext_gbuffer_begin(rae_Mat4* viewProj, float clearR, float clearG, float
     gb_draw_count = 0;
     memcpy(gb_viewproj, viewProj->m.v, 16 * sizeof(float));
     gb_clear[0] = clearR; gb_clear[1] = clearG; gb_clear[2] = clearB;
-    wgpuQueueWriteBuffer(g_wgpu_queue, gb_frame_ubuf, 0, viewProj->m.v, GB_FRAME_BYTES);
+    /* First frame has no previous view-projection; reusing this one gives
+     * zero motion, which is right — an uninitialised matrix would project
+     * every pixel to the origin and read as the whole screen streaking. */
+    if (!gb_have_prev_vp) {
+        memcpy(gb_prev_viewproj, viewProj->m.v, 16 * sizeof(float));
+        gb_have_prev_vp = true;
+    }
+    float fu[32];
+    memcpy(fu, viewProj->m.v, 16 * sizeof(float));
+    memcpy(fu + 16, gb_prev_viewproj, 16 * sizeof(float));
+    wgpuQueueWriteBuffer(g_wgpu_queue, gb_frame_ubuf, 0, fu, GB_FRAME_BYTES);
+    /* Remember for NEXT frame, after this frame's copy is on the GPU. */
+    memcpy(gb_prev_viewproj, viewProj->m.v, 16 * sizeof(float));
 
     gb_enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
     WGPURenderPassColorAttachment ca[3]; memset(ca, 0, sizeof(ca));
@@ -506,7 +541,7 @@ void rae_ext_gbuffer_begin(rae_Mat4* viewProj, float clearR, float clearG, float
 /* Queue one mesh into the G-buffer. `model` arrives as a Mat4 by value —
  * 16 floats the caller already had on the stack — and is memcpy'd into a
  * preallocated slot. Nothing on this path touches the allocator. */
-void rae_ext_gbuffer_draw(int64_t mesh, rae_Mat4* model,
+void rae_ext_gbuffer_draw(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
                           float r, float g, float b,
                           float metallic, float roughness, float emissive) {
     if (!gb_pass || !model) return;
@@ -522,21 +557,25 @@ void rae_ext_gbuffer_draw(int64_t mesh, rae_Mat4* model,
     }
     float* d = gb_draw_cpu + gb_draw_count * GB_DRAW_FLOATS;
     memcpy(d, model->m.v, 16 * sizeof(float));
-    d[16] = r; d[17] = g; d[18] = b; d[19] = metallic;
-    d[20] = roughness;
+    /* No previous transform means "did not move": reusing the current
+     * model yields zero motion, where zeros would project the object to
+     * the origin and streak the whole screen toward it. */
+    memcpy(d + 16, prevModel ? prevModel->m.v : model->m.v, 16 * sizeof(float));
+    d[32] = r; d[33] = g; d[34] = b; d[35] = metallic;
+    d[36] = roughness;
     /* Log-encode emissive into the 8-bit channel it shares with occlusion,
      * and flip the shading mode so lighting knows which it is. A
      * non-emitter stores 1.0 there, which reads as "unoccluded" — the
      * correct default until an AO pass writes something better. */
     if (emissive > 0.0f) {
         float e = logf(1.0f + emissive) / GB_EMISSIVE_LOG_K;
-        d[21] = e > 1.0f ? 1.0f : e;
-        d[22] = GB_MODE_EMISSIVE;
+        d[37] = e > 1.0f ? 1.0f : e;
+        d[38] = GB_MODE_EMISSIVE;
     } else {
-        d[21] = 1.0f;
-        d[22] = GB_MODE_LIT;
+        d[37] = 1.0f;
+        d[38] = GB_MODE_LIT;
     }
-    d[23] = 0.0f;
+    d[39] = 0.0f;
     wgpuRenderPassEncoderSetVertexBuffer(gb_pass, 0, g3d_mesh_vbuf[slot], 0,
                                          wgpuBufferGetSize(g3d_mesh_vbuf[slot]));
     wgpuRenderPassEncoderSetIndexBuffer(gb_pass, g3d_mesh_ibuf[slot],
