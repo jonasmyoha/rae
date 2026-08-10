@@ -89,6 +89,8 @@ import app3d/camera_rig
 import app3d/ui_shell
 import app3d/control_panel
 import app3d/camera_bar
+import renderer_deferred
+import gbuffer
 import shadow3d
 import app3d/playback
 import hot_reload
@@ -98,7 +100,8 @@ import ui/input_gpu2d
 import ui/render_gpu2d
 open scene3d
 open gpu3d
-open renderer3d
+open renderer_deferred
+open gbuffer
 open rendergraph
 open math3d
 open mesh3d
@@ -366,8 +369,8 @@ func main() ret Int {
 
   # The UI variant of the frame: the overlay MODIFIES the LDR target after
   # tonemap, and the graph derives that ordering from the declaration.
-  var renderer: Renderer3d = createRenderer3dWithUi()
-  let gs: Int = compileRenderer(r: renderer)
+  var renderer: DeferredRenderer = createDeferredRendererWithUi()
+  let gs: Int = compileDeferred(r: renderer)
   if gs is not 0 {
     log("render graph invalid: {statusName(status: gs)}")
     gpu2d.closeWindow()
@@ -560,9 +563,9 @@ func main() ret Int {
     # hdrColor, tonemap resolves it to sceneColor, the overlay modifies
     # that, present reads it. This loop walks the derived order.
     var oi: Int = 0
-    loop oi < frameOrderLength(r: renderer) {
-      let tag: Int = frameTagAt(r: renderer, i: oi)
-      if tag is tagShadow {
+    loop oi < deferredOrderLength(r: renderer) {
+      let tag: Int = deferredTagAt(r: renderer, i: oi)
+      if tag is tagShadowD {
         # Cascades fitted to this frame, then every caster rasterised into
         # them (#382). The ground comes from the scene; the character's
         # twelve skinned parts are submitted individually, through the
@@ -589,49 +592,48 @@ func main() ret Int {
           shadowLogged = true
         }
       }
-      if tag is tagScenePass {
-        beginScene(camera: camera, light: light, aspect: aspect, time: t)
-        renderScene(scene: scene)
-        # Skinned draws go into the pass the static path just opened. The
-        # palette is per FRAME and shared by every part, so it uploads
-        # once regardless of how many primitives follow.
-        skinFrameBegin()
+      if tag is tagGbuffer {
+        # The app owns this tag rather than letting renderDeferredPass
+        # handle it, because the character's twelve SKINNED parts have to
+        # land inside the same G-buffer pass as the ground. Same seam the
+        # UI overlay uses: the graph still decides when this runs.
+        # QUALIFIED. gpu3d and gbuffer both export beginPass/endPass, and
+        # this example opens both — an unqualified call silently picks the
+        # forward path's, which ends a pass that was never begun and
+        # leaves the G-buffer unsubmitted. The symptom is a black 3D frame
+        # with a working UI, which looks like a lighting bug.
+        gbuffer.beginPass(camera: camera, light: light, aspect: aspect)
+        gbuffer.renderScene(scene: scene)
         uploadPalette(rows: palette, jointCount: jointCount(sk: sk))
         var p: Int = 0
         loop p < partIds.length {
           let handle: MeshHandle = meshHandle(id: partIds.at(index: p), generation: 1)
           # White base colour: the shader multiplies it by the vertex
-          # colour baked from the atlas, so white means "whatever the
-          # texture says".
+          # colour baked from the atlas (#378).
           let mat: Material3d = {
             baseColor: vec3.create(x: 1.0, y: 1.0, z: 1.0),
             metallic: 0.0,
             roughness: partRough.at(index: p),
             emission: noEmit
           }
-          drawSkinnedInstance(mesh: handle, model: partModel, material: mat)
+          gbuffer.drawSkinnedInstance(mesh: handle, model: partModel,
+                                      prevModel: partModel, material: mat)
           p = p + 1
         }
-        endPass()
+        gbuffer.endPass()
       }
-      if tag is tagSsao {
-        ssaoPass()
+      if tag is tagSsaoD or tag is tagDepthPyramid or tag is tagLighting
+        or tag is tagTaaD or tag is tagComposite {
+        renderDeferredPass(r: renderer, tag: tag, scene: scene,
+                           camera: camera, light: light, aspect: aspect)
       }
-      if tag is tagTaa {
-        taaPass()
-      }
-      if tag is tagTonemap {
-        tonemapPass()
-      }
-      if tag is tagUiOverlay {
-        # Load-preserving: the 2D pass paints over the resolved 3D image
-        # rather than clearing it. One call paints the whole scene tree.
+      if tag is tagUiOverlayD {
+        # Load-preserving: paints over the composited frame.
         gpu2d.beginFrameLoad()
         renderSystemGpu2d(world: uiWorld, res: gpuUi)
-        # After the app UI, so the diagnostic is never what gets covered.
         drawLogOverlay(ov: logView, font: gpuUi.textFont, screenW: windowExtentW(), screenH: windowExtentH())
       }
-      if tag is tagPresent {
+      if tag is tagPresentD {
         gpu2d.endFrame()
       }
       oi = oi + 1

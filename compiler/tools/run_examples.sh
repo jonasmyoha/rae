@@ -143,10 +143,11 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # skipped pass would still leave a correct-looking lit image,
           # since nothing reads the pyramid yet.
           if [ "$GB_OK" = "1" ] \
-             && [ "$(grep -c '  0: gbuffer' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
-             && [ "$(grep -c '  1: ssao' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
-             && [ "$(grep -c '  4: taa' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
-             && [ "$(grep -c '  6: present' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
+             && [ "$(grep -c '  0: shadow' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
+             && [ "$(grep -c '  1: gbuffer' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
+             && [ "$(grep -c '  2: ssao' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
+             && [ "$(grep -c '  5: taa' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
+             && [ "$(grep -c '  7: present' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
              && [ "$(grep -c 'depth pyramid: .* mips' "$TMP_OUT/gb-lit.log")" -ge 1 ]; then
             echo "PASS: $EXAMPLE_NAME (lit frame + 4 G-buffer channels, pyramid built, derived pass order)"
             ((PASSED++))
