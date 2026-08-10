@@ -309,3 +309,102 @@ func makeTorus(majorR: view Float, minorR: view Float, majorSegs: view Int, mino
   let vertCount: Int = (majorSegs + 1) * (minorSegs + 1)
   ret MeshData { verts: own verts, indices: own indices, vertCount: vertCount }
 }
+
+# ----- smooth normals -------------------------------------------------
+# Average the normals meeting at a shared position, so a mesh authored
+# with per-face normals shades as a curved surface rather than as a set
+# of flat plates.
+#
+# WHY THIS EXISTS. An exporter chain decides this, not the artist: the
+# walker character's .glb arrives 97.4% flat — 3374 of its 3465 triangles
+# carry one constant normal across the face — because the FBX->glTF
+# conversion produced per-face normals, while the engine it was authored
+# against recalculated them with a smoothing angle. Same source asset,
+# two different normal sets, and the faceted one is the reason a cel
+# shader on this model looks like folded paper: a hard lighting threshold
+# turns each facet's constant N.L into a visibly distinct flat region.
+# Smooth shading hides that; toon shading cannot.
+#
+# THE ANGLE IS WHAT MAKES IT USABLE. Averaging everything at a position
+# would round off the corners of a cube. Only normals within `angleDeg`
+# of each other are merged, so a genuine crease stays a crease and only
+# the joins that were meant to be smooth become smooth. 60 degrees is the
+# long-standing default across DCC tools and engines.
+const meshSmoothAngleDefault: Float = 60.0
+
+# O(n^2) within a primitive, deliberately. Primitives are the unit an
+# exporter splits by, so they are small — the largest here is ~2000
+# vertices — and welding ACROSS them would fuse parts that are meant to
+# have a hard seam. A position hash would trade that clarity for time
+# this does not need to save: it runs once, at load.
+func smoothMeshNormals(m: view MeshData, angleDeg: view Float) pub ret MeshData {
+  let verts: List(Float) = createList(Float, cap: m.verts.length)
+  let indices: List(Int) = createList(Int, cap: m.indices.length)
+  var c: Int = 0
+  loop c < m.verts.length {
+    verts.add(value: m.verts.at(index: c))
+    c = c + 1
+  }
+  var k: Int = 0
+  loop k < m.indices.length {
+    indices.add(value: m.indices.at(index: k))
+    k = k + 1
+  }
+  if m.vertCount < 2 {
+    ret MeshData { verts: own verts, indices: own indices, vertCount: m.vertCount }
+  }
+  let cosLimit: Float = math.cos(x: angleDeg * 3.14159265 / 180.0)
+  # Positions are compared with a tolerance rather than exactly: the
+  # duplicated corners of a flat-shaded seam come from one source value,
+  # but a mesh that has been through a float round-trip can differ in the
+  # last bit, and a seam that fails to weld is invisible until it is lit.
+  let eps: Float = 0.000001
+  var i: Int = 0
+  loop i < m.vertCount {
+    let px: Float = m.verts.at(index: i * 8 + 0)
+    let py: Float = m.verts.at(index: i * 8 + 1)
+    let pz: Float = m.verts.at(index: i * 8 + 2)
+    let nx: Float = m.verts.at(index: i * 8 + 3)
+    let ny: Float = m.verts.at(index: i * 8 + 4)
+    let nz: Float = m.verts.at(index: i * 8 + 5)
+    var ax: Float = 0.0
+    var ay: Float = 0.0
+    var az: Float = 0.0
+    var j: Int = 0
+    loop j < m.vertCount {
+      let qx: Float = m.verts.at(index: j * 8 + 0)
+      let qy: Float = m.verts.at(index: j * 8 + 1)
+      let qz: Float = m.verts.at(index: j * 8 + 2)
+      var dx: Float = qx - px
+      var dy: Float = qy - py
+      var dz: Float = qz - pz
+      if dx < 0.0 { dx = 0.0 - dx }
+      if dy < 0.0 { dy = 0.0 - dy }
+      if dz < 0.0 { dz = 0.0 - dz }
+      if dx <= eps and dy <= eps and dz <= eps {
+        let mx: Float = m.verts.at(index: j * 8 + 3)
+        let my: Float = m.verts.at(index: j * 8 + 4)
+        let mz: Float = m.verts.at(index: j * 8 + 5)
+        # The crease test, against THIS vertex's own normal rather than
+        # against a running average: an average drifts as it accumulates,
+        # so which faces merge would depend on the order they are visited.
+        if nx * mx + ny * my + nz * mz >= cosLimit {
+          ax = ax + mx
+          ay = ay + my
+          az = az + mz
+        }
+      }
+      j = j + 1
+    }
+    let len: Float = math.sqrt(x: ax * ax + ay * ay + az * az)
+    # A degenerate sum — opposed normals cancelling — keeps the original
+    # rather than producing a zero vector that would shade as black.
+    if len > 0.00001 {
+      verts.set(index: i * 8 + 3, value: ax / len)
+      verts.set(index: i * 8 + 4, value: ay / len)
+      verts.set(index: i * 8 + 5, value: az / len)
+    }
+    i = i + 1
+  }
+  ret MeshData { verts: own verts, indices: own indices, vertCount: m.vertCount }
+}
