@@ -89,6 +89,7 @@ import app3d/camera_rig
 import app3d/ui_shell
 import app3d/control_panel
 import app3d/camera_bar
+import shadow3d
 import app3d/playback
 import hot_reload
 import ui/log_overlay
@@ -109,6 +110,7 @@ open app3d/camera_rig
 open app3d/ui_shell
 open app3d/control_panel
 open app3d/camera_bar
+open shadow3d
 open app3d/playback
 open hot_reload
 open ui/log_overlay
@@ -559,6 +561,29 @@ func main() ret Int {
     var oi: Int = 0
     loop oi < frameOrderLength(r: renderer) {
       let tag: Int = frameTagAt(r: renderer, i: oi)
+      if tag is tagShadow {
+        # Cascades fitted to this frame, then every caster rasterised into
+        # them (#382). The ground comes from the scene; the character's
+        # twelve skinned parts are submitted individually, through the
+        # SKINNED shadow pipeline so they cast in their animated pose
+        # rather than in bind pose.
+        let cascades: ShadowCascades = fitShadowCascades(
+          camPos: camera.position, camTarget: camera.target,
+          fovYDeg: camera.fovYDeg, aspect: aspect,
+          near: camera.nearZ, far: 24.0, sunDir: light.sunDir,
+          count: 3, resolution: 2048, lambda: 0.75, backExtent: 12.0
+        )
+        uploadPalette(rows: palette, jointCount: jointCount(sk: sk))
+        beginShadowPass(c: cascades)
+        renderSceneShadow(scene: scene)
+        var sp: Int = 0
+        loop sp < partIds.length {
+          let sh: MeshHandle = meshHandle(id: partIds.at(index: sp), generation: 1)
+          drawShadowCasterSkinned(mesh: sh, model: partModel)
+          sp = sp + 1
+        }
+        endShadowPass()
+      }
       if tag is tagScenePass {
         beginScene(camera: camera, light: light, aspect: aspect, time: t)
         renderScene(scene: scene)
