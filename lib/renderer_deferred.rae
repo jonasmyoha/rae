@@ -48,6 +48,7 @@ const tagLighting: Int = 12     # reads the G-buffer, writes radiance
 const tagComposite: Int = 13    # radiance -> the frame's colour target
 const tagPresentD: Int = 14     # resolve/present
 const tagUiOverlayD: Int = 16   # load-preserving 2D UI painted over the composited frame (#389)
+const tagTaaD: Int = 17         # temporal resolve (#390); HDR in, HDR out
 
 type DeferredRenderer {
   graph: RenderGraph
@@ -99,12 +100,17 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
   # res with a depth-aware upsample, which is a tier knob rather than a
   # correctness question — declared truthfully as Full until it moves.
   let aoId: Int = addResource(g: g, name: "aoTex", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  # PERSISTENT, not transient: the history is read NEXT frame, which is
+  # the lifetime class #331 put in graph v1 so temporal techniques could
+  # be declared truthfully instead of hidden in C statics.
+  let taaId: Int = addResource(g: g, name: "taaColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifePersistent)
 
   # --- passes, declared backwards on purpose ---
   let present: Int = addPass(g: g, name: "present", kind: passRaster, tag: tagPresentD)
   let composite: Int = addPass(g: g, name: "composite", kind: passRaster, tag: tagComposite)
   let lighting: Int = addPass(g: g, name: "lighting", kind: passRaster, tag: tagLighting)
   let ssaoP: Int = addPass(g: g, name: "ssao", kind: passRaster, tag: tagSsaoD)
+  let taaP: Int = addPass(g: g, name: "taa", kind: passRaster, tag: tagTaaD)
   let pyramid: Int = addPass(g: g, name: "depthPyramid", kind: passCompute, tag: tagDepthPyramid)
   let gbuffer: Int = addPass(g: g, name: "gbuffer", kind: passRaster, tag: tagGbuffer)
 
@@ -133,8 +139,15 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
   passReads(g: g, pass: lighting, resource: pyramidId, access: accStorageRead)
   passWrites(g: g, pass: lighting, resource: litId, access: accAttachmentWrite)
 
+  # TAA reads radiance and the motion the G-buffer packed, and writes the
+  # history the composite then reads — so the graph derives
+  # lighting -> taa -> composite.
+  passReads(g: g, pass: taaP, resource: litId, access: accSampledRead)
+  passReads(g: g, pass: taaP, resource: materialId, access: accSampledRead)
+  passWrites(g: g, pass: taaP, resource: taaId, access: accAttachmentWrite)
+
   # Composite is the only writer of the presentable target.
-  passReads(g: g, pass: composite, resource: litId, access: accSampledRead)
+  passReads(g: g, pass: composite, resource: taaId, access: accSampledRead)
   passWrites(g: g, pass: composite, resource: colorId, access: accAttachmentWrite)
 
   # The UI overlay MODIFIES the composited target rather than writing it:
@@ -258,6 +271,9 @@ func renderDeferredPass(r: view DeferredRenderer, tag: view Int, scene: view Sce
   }
   if tag is tagLighting {
     lightingPass(camera: camera, light: light)
+  }
+  if tag is tagTaaD {
+    taaPass()
   }
   if tag is tagComposite {
     if r.debugView is viewLit {
