@@ -1,0 +1,76 @@
+# Bind-pose palette identity (#375).
+#
+# THE check that separates a palette bug from an animation bug later.
+#
+# A skin's inverse bind matrix is by definition the inverse of that
+# joint's world transform in the bind pose. So with the node hierarchy
+# left exactly as the file stores it — no animation applied — every
+# palette entry must come out as the IDENTITY:
+#
+#     palette[j] = world(joint j) * inverseBind[j] = I
+#
+# If that holds, then the joint order, the parent map inverted from the
+# children lists, the T*R*S composition order, the root-down multiply and
+# the column-major row extraction are all correct together. If it does
+# not, the skeleton is wrong and no amount of correct animation sampling
+# will produce a right-looking pose.
+#
+# Deliberately asserted on the REAL 65-joint rig rather than a synthetic
+# one: hand-built skeletons are shallow and symmetric, and the bugs this
+# catches live in deep chains with non-uniform scale.
+import core
+import gltf
+import math
+open gltf
+
+func main() {
+  let g: Glb = loadGlb(path: "../examples/113_walker_character/assets/walker.glb")
+  if g.ok is false {
+    log("load failed: {g.errorMsg}")
+    ret
+  }
+  let sk: Skeleton = loadSkeleton(g: g, skinIndex: 0)
+  log("joints={jointCount(sk: sk)}")
+  log("nodes={sk.nodeCount}")
+
+  let palette: List(Float) = buildPalette(sk: sk)
+  log("palette floats={palette.length}")
+
+  # Largest absolute deviation from identity across every joint. The
+  # expected identity value for a slot depends on where it sits in the
+  # 3x4: element (r, r) is 1, everything else 0.
+  var worst: Float = 0.0
+  var j: Int = 0
+  loop j < jointCount(sk: sk) {
+    var r: Int = 0
+    loop r < 3 {
+      var c: Int = 0
+      loop c < 4 {
+        let v: Float = palette.at(index: j * 12 + r * 4 + c)
+        var expected: Float = 0.0
+        if r is c {
+          expected = 1.0
+        }
+        var d: Float = v - expected
+        if d < 0.0 {
+          d = 0.0 - d
+        }
+        if d > worst {
+          worst = d
+        }
+        c = c + 1
+      }
+      r = r + 1
+    }
+    j = j + 1
+  }
+  # A tolerance, not equality: the inverse bind matrices are float32 in
+  # the file and the world transforms are recomposed from TRS, so the
+  # round trip carries ordinary float error. 1e-3 is far tighter than any
+  # ordering or transposition mistake could survive.
+  if worst < 0.001 {
+    log("bind pose palette: identity")
+  } else {
+    log("bind pose palette: DEVIATES by {worst}")
+  }
+}

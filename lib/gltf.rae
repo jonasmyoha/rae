@@ -36,8 +36,12 @@ import json
 import sys
 import math
 import mesh3d
+import math3d
+import quat
 open json
 open mesh3d
+open math3d
+open quat
 
 const glbMagic: Int = 1179937895      # "glTF" little-endian
 const chunkJson: Int = 1313821514     # "JSON"
@@ -755,4 +759,229 @@ func loadSkinnedPrimitive(g: view Glb, meshIndex: view Int, primIndex: view Int)
     k2 = k2 + 1
   }
   ret SkinnedMeshData { verts: own verts, indices: own indices, vertCount: base.vertCount }
+}
+
+# ----- skeleton and joint palette (#375) -------------------------------
+
+# A skin's skeleton, flattened for per-frame palette evaluation.
+#
+# `jointNodes` maps palette slot -> node index, which is the order the
+# vertex JOINTS_0 attribute indexes. `parent` is node -> parent node (-1
+# for a root), derived by inverting the children lists, because glTF
+# stores the hierarchy downward and posing needs it upward.
+#
+# Local transforms are kept as TRS rather than composed matrices so an
+# animation can overwrite one channel without disturbing the others —
+# a clip that animates only rotation must leave translation alone.
+type Skeleton {
+  ok: Bool
+  jointNodes: List(Int)
+  # 16 Floats per joint, column-major, as glTF stores them.
+  inverseBind: List(Float)
+  nodeCount: Int
+  parent: List(Int)
+  # Per NODE (not per joint): 3, 4 and 3 Floats respectively.
+  localT: List(Float)
+  localR: List(Float)
+  localS: List(Float)
+}
+
+func emptySkeleton() ret Skeleton {
+  ret Skeleton {
+    ok: false, jointNodes: createList(Int, cap: 0), inverseBind: createList(Float, cap: 0),
+    nodeCount: 0, parent: createList(Int, cap: 0),
+    localT: createList(Float, cap: 0), localR: createList(Float, cap: 0),
+    localS: createList(Float, cap: 0)
+  }
+}
+
+func loadSkeleton(g: view Glb, skinIndex: view Int) pub ret Skeleton {
+  if g.ok is false {
+    ret emptySkeleton()
+  }
+  let root: JsonValue = jsonRoot(doc: g.doc)
+  let skins: JsonValue = arrayField(g: g, obj: root, key: "skins")
+  if skinIndex < 0 or skinIndex >= jsonArrayLen(this: skins) {
+    ret emptySkeleton()
+  }
+  let skin: JsonValue = jsonArrayAt(doc: g.doc, this: skins, idx: skinIndex)
+  let jointsArr: JsonValue = arrayField(g: g, obj: skin, key: "joints")
+  let jointCount: Int = jsonArrayLen(this: jointsArr)
+  let jointNodes: List(Int) = createList(Int, cap: jointCount)
+  var i: Int = 0
+  loop i < jointCount {
+    jointNodes.add(value: jsonInt(this: jsonArrayAt(doc: g.doc, this: jointsArr, idx: i), fallback: 0))
+    i = i + 1
+  }
+  let ibmAcc: Int = intField(g: g, obj: skin, key: "inverseBindMatrices", fallback: 0 - 1)
+  let inverseBind: List(Float) = readFloats(g: g, index: ibmAcc)
+
+  let nodes: JsonValue = arrayField(g: g, obj: root, key: "nodes")
+  let nodeCount: Int = jsonArrayLen(this: nodes)
+  let parent: List(Int) = createList(Int, cap: nodeCount)
+  let localT: List(Float) = createList(Float, cap: nodeCount * 3)
+  let localR: List(Float) = createList(Float, cap: nodeCount * 4)
+  let localS: List(Float) = createList(Float, cap: nodeCount * 3)
+  var n: Int = 0
+  loop n < nodeCount {
+    parent.add(value: 0 - 1)
+    # Defaults are the glTF-specified ones, applied per CHANNEL: a node
+    # with only a rotation still has unit scale and no translation, and
+    # zeroing the lot would collapse the skeleton to a point.
+    localT.add(value: 0.0)
+    localT.add(value: 0.0)
+    localT.add(value: 0.0)
+    localR.add(value: 0.0)
+    localR.add(value: 0.0)
+    localR.add(value: 0.0)
+    localR.add(value: 1.0)
+    localS.add(value: 1.0)
+    localS.add(value: 1.0)
+    localS.add(value: 1.0)
+    n = n + 1
+  }
+  n = 0
+  loop n < nodeCount {
+    let node: JsonValue = jsonArrayAt(doc: g.doc, this: nodes, idx: n)
+    let tIdx: Int = jsonField(doc: g.doc, this: node, key: "translation")
+    if tIdx >= 0 {
+      let tv: JsonValue = valueAt(doc: g.doc, idx: tIdx)
+      var c: Int = 0
+      loop c < 3 {
+        localT.set(index: n * 3 + c, value: jsonFloat(this: jsonArrayAt(doc: g.doc, this: tv, idx: c), fallback: 0.0))
+        c = c + 1
+      }
+    }
+    let rIdx: Int = jsonField(doc: g.doc, this: node, key: "rotation")
+    if rIdx >= 0 {
+      let rv: JsonValue = valueAt(doc: g.doc, idx: rIdx)
+      var c: Int = 0
+      loop c < 4 {
+        localR.set(index: n * 4 + c, value: jsonFloat(this: jsonArrayAt(doc: g.doc, this: rv, idx: c), fallback: 0.0))
+        c = c + 1
+      }
+    }
+    let sIdx: Int = jsonField(doc: g.doc, this: node, key: "scale")
+    if sIdx >= 0 {
+      let sv: JsonValue = valueAt(doc: g.doc, idx: sIdx)
+      var c: Int = 0
+      loop c < 3 {
+        localS.set(index: n * 3 + c, value: jsonFloat(this: jsonArrayAt(doc: g.doc, this: sv, idx: c), fallback: 1.0))
+        c = c + 1
+      }
+    }
+    # Invert the children list into a parent map.
+    let cIdx: Int = jsonField(doc: g.doc, this: node, key: "children")
+    if cIdx >= 0 {
+      let cv: JsonValue = valueAt(doc: g.doc, idx: cIdx)
+      var k: Int = 0
+      loop k < jsonArrayLen(this: cv) {
+        let child: Int = jsonInt(this: jsonArrayAt(doc: g.doc, this: cv, idx: k), fallback: 0 - 1)
+        if child >= 0 and child < nodeCount {
+          parent.set(index: child, value: n)
+        }
+        k = k + 1
+      }
+    }
+    n = n + 1
+  }
+  ret Skeleton {
+    ok: true, jointNodes: own jointNodes, inverseBind: own inverseBind,
+    nodeCount: nodeCount, parent: own parent,
+    localT: own localT, localR: own localR, localS: own localS
+  }
+}
+
+# A node's local transform, composed T * R * S.
+#
+# That order is the spec's, and it is not interchangeable: scaling after
+# rotating shears the result, and translating before rotating swings the
+# node around the parent's origin instead of its own.
+func nodeLocalMatrix(sk: view Skeleton, node: view Int) ret Mat4 {
+  let t: Mat4 = mat4Translate(
+    x: sk.localT.at(index: node * 3),
+    y: sk.localT.at(index: node * 3 + 1),
+    z: sk.localT.at(index: node * 3 + 2)
+  )
+  let q: Quat = quat.create(
+    x: sk.localR.at(index: node * 4),
+    y: sk.localR.at(index: node * 4 + 1),
+    z: sk.localR.at(index: node * 4 + 2),
+    w: sk.localR.at(index: node * 4 + 3)
+  )
+  let r: Mat4 = quat.toMat4(q: q)
+  let s: Mat4 = mat4ScaleXYZ(
+    x: sk.localS.at(index: node * 3),
+    y: sk.localS.at(index: node * 3 + 1),
+    z: sk.localS.at(index: node * 3 + 2)
+  )
+  ret mat4Mul(a: t, b: mat4Mul(a: r, b: s))
+}
+
+# A node's world transform: every local transform from the root down.
+#
+# Walks UP to collect the chain, then multiplies DOWN. Multiplying while
+# walking up would compose the transforms in reverse, which produces a
+# skeleton that is subtly inside-out rather than obviously broken.
+func nodeWorldMatrix(sk: view Skeleton, node: view Int) ret Mat4 {
+  let chain: List(Int) = createList(Int, cap: 16)
+  var cur: Int = node
+  # The guard is against a malformed file whose parent links form a cycle;
+  # without it a bad export hangs the frame instead of rendering wrong.
+  var guard: Int = 0
+  loop cur >= 0 and guard < sk.nodeCount + 1 {
+    chain.add(value: cur)
+    cur = sk.parent.at(index: cur)
+    guard = guard + 1
+  }
+  var m: Mat4 = mat4Identity()
+  var i: Int = chain.length - 1
+  loop i >= 0 {
+    m = mat4Mul(a: m, b: nodeLocalMatrix(sk: sk, node: chain.at(index: i)))
+    i = i - 1
+  }
+  ret m
+}
+
+# Build the GPU joint palette: 12 Floats per joint, three vec4 rows.
+#
+#     palette[j] = worldMatrix(joint j) * inverseBind[j]
+#
+# The inverse bind takes a vertex from model space into the joint's local
+# space; the world matrix puts it back wherever that joint now is. Only
+# three rows are stored because a joint transform is affine and its fourth
+# row is always (0,0,0,1) — this is the Mat3x4 saving #354 exists for.
+func buildPalette(sk: view Skeleton) pub ret List(Float) {
+  let out: List(Float) = createList(Float, cap: sk.jointNodes.length * 12)
+  if sk.ok is false {
+    ret own out
+  }
+  var j: Int = 0
+  loop j < sk.jointNodes.length {
+    let world: Mat4 = nodeWorldMatrix(sk: sk, node: sk.jointNodes.at(index: j))
+    var ib: Mat4 = mat4Identity()
+    if sk.inverseBind.length >= (j + 1) * 16 {
+      var c: Int = 0
+      loop c < 16 {
+        ib.m[c] = sk.inverseBind.at(index: j * 16 + c)
+        c = c + 1
+      }
+    }
+    let m: Mat4 = mat4Mul(a: world, b: ib)
+    # Column-major storage, so row r is elements r, r+4, r+8, r+12.
+    var r: Int = 0
+    loop r < 3 {
+      out.add(value: m.m[r])
+      out.add(value: m.m[r + 4])
+      out.add(value: m.m[r + 8])
+      out.add(value: m.m[r + 12])
+      r = r + 1
+    }
+    j = j + 1
+  }
+  ret own out
+}
+
+func jointCount(sk: view Skeleton) pub ret Int {
+  ret sk.jointNodes.length
 }
