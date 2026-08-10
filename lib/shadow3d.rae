@@ -43,6 +43,10 @@ type ShadowCascades {
   # scales its normal-offset bias by this: bias must be measured in
   # texels, and a texel is a different world size in every cascade.
   texelWorld: List(Float)
+  # World distance spanned by each cascade's [0,1] depth range. The
+  # lighting shader needs it to turn an NDC depth difference into the
+  # world-space receiver-to-blocker gap that sets penumbra width (#384).
+  depthRange: List(Float)
 }
 
 func emptyShadowCascades() pub ret ShadowCascades {
@@ -50,7 +54,8 @@ func emptyShadowCascades() pub ret ShadowCascades {
     count: 0, resolution: 0,
     viewProj: createList(Float, cap: 0),
     splitFar: createList(Float, cap: 0),
-    texelWorld: createList(Float, cap: 0)
+    texelWorld: createList(Float, cap: 0),
+    depthRange: createList(Float, cap: 0)
   }
 }
 
@@ -83,8 +88,9 @@ func fitShadowCascades(camPos: view Vec3, camTarget: view Vec3,
   let vp: List(Float) = createList(Float, cap: count * 16)
   let splits: List(Float) = createList(Float, cap: count)
   let texels: List(Float) = createList(Float, cap: count)
+  let ranges: List(Float) = createList(Float, cap: count)
   if count < 1 or resolution < 1 {
-    ret ShadowCascades { count: 0, resolution: 0, viewProj: own vp, splitFar: own splits, texelWorld: own texels }
+    ret ShadowCascades { count: 0, resolution: 0, viewProj: own vp, splitFar: own splits, texelWorld: own texels, depthRange: own ranges }
   }
 
   let forward: Vec3 = vec3.vnorm(a: vec3.vsub(a: camTarget, b: camPos))
@@ -194,6 +200,7 @@ func fitShadowCascades(camPos: view Vec3, camTarget: view Vec3,
     }
     splits.add(value: sliceFar)
     texels.add(value: texel)
+    ranges.add(value: zFar - zNear)
 
     sliceNear = sliceFar
     i = i + 1
@@ -201,7 +208,8 @@ func fitShadowCascades(camPos: view Vec3, camTarget: view Vec3,
 
   ret ShadowCascades {
     count: count, resolution: resolution,
-    viewProj: own vp, splitFar: own splits, texelWorld: own texels
+    viewProj: own vp, splitFar: own splits, texelWorld: own texels,
+    depthRange: own ranges
   }
 }
 

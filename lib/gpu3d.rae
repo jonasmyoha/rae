@@ -308,7 +308,8 @@ func uploadMesh(verts: view List(Float), vertCount: view Int, indices: view List
 # (pure arithmetic, unit-tested); these only move it to the GPU and
 # rasterise the casters.
 func shadowBegin(cascades: view Buffer(Float), count: Int, resolution: Int,
-                 splits: view Buffer(Float), texelWorld: view Buffer(Float)) extern
+                 splits: view Buffer(Float), texelWorld: view Buffer(Float),
+                 depthRange: view Buffer(Float)) extern
 func shadowDraw(mesh: Int, model: view Mat4) extern
 func shadowDrawSkinned(mesh: Int, model: view Mat4) extern
 func shadowEnd() extern
@@ -319,7 +320,8 @@ func shadowShutdown() extern
 # this and `endShadowPass` casts.
 func beginShadowPass(c: view ShadowCascades) pub {
   shadowBegin(cascades: c.viewProj.data, count: c.count, resolution: c.resolution,
-              splits: c.splitFar.data, texelWorld: c.texelWorld.data)
+              splits: c.splitFar.data, texelWorld: c.texelWorld.data,
+              depthRange: c.depthRange.data)
 }
 
 func drawShadowCaster(mesh: view MeshHandle, model: view Mat4) pub {

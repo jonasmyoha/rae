@@ -57,6 +57,7 @@ static int   g3d_sm_cascade_count = 0;
 static float g3d_sm_cascade_vp[G3D_SHADOW_MAX_CASCADES * 16];
 static float g3d_sm_split_far[G3D_SHADOW_MAX_CASCADES];
 static float g3d_sm_texel_world[G3D_SHADOW_MAX_CASCADES];
+static float g3d_sm_depth_range[G3D_SHADOW_MAX_CASCADES];
 static bool  g3d_sm_enabled = false;
 
 static const char* G3D_SHADOW_WGSL =
@@ -285,7 +286,7 @@ static void g3d_shadow_ensure_binds(void) {
  * `count` split distances and `count` texel world sizes. */
 void rae_ext_gpu3d_shadowBegin(const float* cascades, int64_t count,
                                int64_t resolution, const float* splits,
-                               const float* texelWorld) {
+                               const float* texelWorld, const float* depthRange) {
     g3d_sm_enabled = false;
     g3d_sm_draw_count = 0;
     if (!g_wgpu_dev || !cascades || count < 1) return;
@@ -307,6 +308,7 @@ void rae_ext_gpu3d_shadowBegin(const float* cascades, int64_t count,
     for (int i = 0; i < count; i++) {
         g3d_sm_split_far[i] = splits ? splits[i] : 0.0f;
         g3d_sm_texel_world[i] = texelWorld ? texelWorld[i] : 0.0f;
+        g3d_sm_depth_range[i] = depthRange ? depthRange[i] : 1.0f;
         wgpuQueueWriteBuffer(g_wgpu_queue, g3d_sm_cascade_ubuf[i], 0,
                              cascades + i * 16, 16 * sizeof(float));
     }
@@ -315,13 +317,17 @@ void rae_ext_gpu3d_shadowBegin(const float* cascades, int64_t count,
      * `cfg.x` carries the live count, so the shader needs no separate
      * enable flag and an app that never calls this simply gets 1.0. */
     if (g3d_sm_frame_ubuf) {
-        float u[76]; memset(u, 0, sizeof(u));
+        float u[80]; memset(u, 0, sizeof(u));
         memcpy(u, cascades, (size_t)count * 16 * sizeof(float));
         for (int i = 0; i < count; i++) {
             u[64 + i] = g3d_sm_split_far[i];
             u[68 + i] = g3d_sm_texel_world[i];
+            u[72 + i] = g3d_sm_depth_range[i];
         }
-        u[72] = (float)count;
+        u[76] = (float)count;
+        /* Resolution rides along so the shader can turn a UV radius into
+         * texels without a second uniform. */
+        u[77] = (float)resolution;
         wgpuQueueWriteBuffer(g_wgpu_queue, g3d_sm_frame_ubuf, 0, u, sizeof(u));
     }
     g3d_sm_enabled = true;
