@@ -49,6 +49,7 @@ const tagComposite: Int = 13    # radiance -> the frame's colour target
 const tagPresentD: Int = 14     # resolve/present
 const tagUiOverlayD: Int = 16   # load-preserving 2D UI painted over the composited frame (#389)
 const tagTaaD: Int = 17         # temporal resolve (#390); HDR in, HDR out
+const tagShadowD: Int = 18      # sun cascade depth (#382); lighting reads it
 
 type DeferredRenderer {
   graph: RenderGraph
@@ -104,6 +105,7 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
   # the lifetime class #331 put in graph v1 so temporal techniques could
   # be declared truthfully instead of hidden in C statics.
   let taaId: Int = addResource(g: g, name: "taaColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifePersistent)
+  let shadowId: Int = addResource(g: g, name: "shadowMap", kind: resDepth, format: 0, sizing: sizeFull, lifetime: lifeTransient)
 
   # --- passes, declared backwards on purpose ---
   let present: Int = addPass(g: g, name: "present", kind: passRaster, tag: tagPresentD)
@@ -111,6 +113,7 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
   let lighting: Int = addPass(g: g, name: "lighting", kind: passRaster, tag: tagLighting)
   let ssaoP: Int = addPass(g: g, name: "ssao", kind: passRaster, tag: tagSsaoD)
   let taaP: Int = addPass(g: g, name: "taa", kind: passRaster, tag: tagTaaD)
+  let shadowP: Int = addPass(g: g, name: "shadow", kind: passRaster, tag: tagShadowD)
   let pyramid: Int = addPass(g: g, name: "depthPyramid", kind: passCompute, tag: tagDepthPyramid)
   let gbuffer: Int = addPass(g: g, name: "gbuffer", kind: passRaster, tag: tagGbuffer)
 
@@ -131,6 +134,11 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
   passReads(g: g, pass: ssaoP, resource: normalId, access: accSampledRead)
   passReads(g: g, pass: ssaoP, resource: depthId, access: accSampledRead)
   passWrites(g: g, pass: ssaoP, resource: aoId, access: accAttachmentWrite)
+  # Lighting reads the cascades, so the graph orders shadow before it —
+  # and, since shadow has no other edges, before the G-buffer too, which
+  # is fine: the cascades depend on the scene, not on the G-buffer.
+  passWrites(g: g, pass: shadowP, resource: shadowId, access: accAttachmentWrite)
+  passReads(g: g, pass: lighting, resource: shadowId, access: accSampledRead)
   passReads(g: g, pass: lighting, resource: aoId, access: accSampledRead)
   passReads(g: g, pass: lighting, resource: albedoId, access: accSampledRead)
   passReads(g: g, pass: lighting, resource: normalId, access: accSampledRead)
@@ -266,6 +274,11 @@ func renderDeferredPass(r: view DeferredRenderer, tag: view Int, scene: view Sce
     renderSceneSdf(scene: scene, camera: camera)
     endPass()
   }
+  # tagShadowD is deliberately NOT handled here. Filling the cascades
+  # needs a walk of the scene as CASTERS, which is the app's business —
+  # the same reason the UI overlay is app-owned. An app that skips it
+  # renders unshadowed, which is what a frame with no shadow pass should
+  # look like.
   if tag is tagDepthPyramid {
     buildDepthPyramid()
   }

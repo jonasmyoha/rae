@@ -247,6 +247,18 @@ static void g3d_shadow_init(void) {
         ud.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
         g3d_sm_cascade_ubuf[i] = wgpuDeviceCreateBuffer(g_wgpu_dev, &ud);
     }
+
+    /* The uniform the LIGHTING passes read. Created here, where the
+     * shadow module owns it, rather than alongside the forward pipeline:
+     * the deferred frame binds it too and never builds that pipeline, so
+     * leaving it there made a deferred-only app abort inside
+     * wgpuDeviceCreateBindGroup on a null buffer. */
+    if (!g3d_sm_frame_ubuf) {
+        WGPUBufferDescriptor sd; memset(&sd, 0, sizeof(sd));
+        sd.size = 320;
+        sd.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+        g3d_sm_frame_ubuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &sd);
+    }
 }
 
 static void g3d_shadow_ensure_binds(void) {
