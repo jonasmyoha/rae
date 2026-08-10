@@ -108,23 +108,39 @@ banding into noise the denoiser can eat.
 sample disc radius is then
 
 ```
-penumbraTexels ≈ (receiverDepth − blockerDepth) / blockerDepth × lightSizeUV
+penumbraWorld ≈ (receiverDepth − blockerDepth) × tan(sunAngularDiameter)
+penumbraTexels = penumbraWorld / cascadeTexelWorldSize
 ```
 
-with `lightSizeUV` derived from the sun's true angular diameter. The sun
-subtends **~0.53°**, so a blocker 2 m above a surface casts a penumbra
-about **2 m × tan(0.53°) ≈ 1.9 cm** wide. That number is worth writing
-down because it is the sanity check: shadows should be *nearly sharp* at
-contact and visibly soft only for distant blockers. Most "soft shadow"
-implementations are far too soft at contact, which is what makes them
-read as blurry rather than as real.
+NOT the textbook PCSS form `(dR − dB)/dB × lightSize`. That formula is
+for an area light at finite distance, where penumbra grows with the
+*ratio* of distances. The sun is directional: penumbra depends only on
+the receiver-to-blocker *gap*, linearly. Using the PCSS form with an
+arbitrary "light size" is exactly how implementations end up far too
+soft at contact — the error is largest when `dB` is small, which is the
+contact case.
 
-**A3. Denoise through machinery we already own.** 1-2 taps/pixel/frame is
-noisy. It is resolved by:
+The sun subtends **~0.53°**, so a blocker 2 m above a surface casts a
+penumbra about **2 m × tan(0.53°) ≈ 1.9 cm** wide. That number is the
+sanity check: shadows should be *nearly sharp* at contact and visibly
+soft only for distant blockers — near-sharp contact is most of why a
+shadow reads as real.
 
-* **TAA (#335)** — already shipping, already has motion vectors from the
-  G-buffer's motion channel. An 8-frame history turns 1 spp into ~8 spp
-  for free on static geometry.
+**A3. Denoise, in two stages that must not be conflated.** 1-2
+taps/pixel/frame is noisy. Two distinct mechanisms can absorb it:
+
+* **Colour TAA (#335), for free.** The noisy mask multiplies the direct
+  term, so shadow noise becomes shading noise, and the existing TAA
+  eats it like any other shading noise. Zero new machinery — this is
+  what step 1 ships with. Its limit: the colour-space clamp cannot tell
+  shadow noise from detail, so convergence in a penumbra is slower and
+  a fast-moving penumbra can shimmer.
+* **A dedicated mask history (step 3).** Accumulate the mask itself,
+  before lighting, with its own rejection on mask delta. Sharper
+  penumbrae and faster convergence, at the cost of one r8 history
+  buffer (~2 MB) and a real reprojection pass. This is NOT "machinery
+  we already own" — it is new, and it is deferred until measurement
+  shows colour TAA is not enough.
 * **A depth-aware spatial blur** — #372 already calls for a dedicated
   depth-aware SSAO blur. The shadow mask wants the *same* filter with a
   different radius. Build it once, parameterised.
@@ -254,11 +270,15 @@ out      = direct + indirect + emissive
    correction, not a global multiplier. Budget for shrinking AO's
    influence when GI arrives rather than discovering the conflict in an
    image.
-4. **Layers A, B and C combine with `min()`, never by multiplication.**
-   Three estimates of one physical quantity — the fraction of the sun
-   disc visible — must not compound. Multiplying them is the classic
-   triple-darkening bug at contact points, where all three layers fire at
-   once.
+4. **Layers A, B and C combine with `min()`, not by multiplication.**
+   They are three estimates of one physical quantity — the fraction of
+   the sun disc visible — and at contact points all three see the SAME
+   occluder, so multiplying compounds one occlusion three times. The
+   honest caveat: when two DIFFERENT occluders each half-shadow a pixel,
+   `min()` under-darkens (true visibility is closer to the product).
+   That case is rarer and less visible than triple-darkened contacts,
+   which is why `min()` wins — but it is a chosen approximation, not a
+   law.
 
 ---
 
@@ -275,7 +295,7 @@ itself must not learn the word "shadow" — see `render-graph-and-gi-plan.md`
 | Shadow map format | Depth16Unorm | Depth16Unorm | Depth32Float |
 | Layer A samples/px/frame | 1, fixed radius (no blocker search) | 1 + 8-tap blocker search | 2-4 + 16-tap blocker search |
 | Layer B (contact) | off | 8 steps | 16 steps |
-| Layer C (SDF trace) | **this is the whole shadow system** | far-field + SDF geometry | far-field + SDF geometry |
+| Layer C (SDF trace) | **the whole shadow system, once it exists** | far-field + SDF geometry | far-field + SDF geometry |
 | Denoise | spatial only | spatial + TAA | spatial + TAA |
 | Mask resolution | half | full | full |
 
@@ -287,17 +307,45 @@ the depth range per cascade is small, and 16 bits is enough; it halves
 shadow-map bandwidth, which on a tiled mobile GPU is the dominant cost.
 The desktop tier keeps 32-bit because the far cascade's range is large.
 
-**The low tier is genuinely a different technique, not a degraded one.**
-Rather than 1 crunchy cascade with visible aliasing, it uses Layer C
-alone: SDF cone tracing at low cascade resolution. Shadows come out soft
-and stable — no shimmer, no texel grid, no bias artefacts — at the cost
-of missing small-scale contact detail. That is the right trade for a
-phone, and it is a *better-looking* image than a low-resolution shadow
-map, not just a cheaper one.
+**The low tier comes in two eras.** Until Layer C exists (build steps
+1-4), low is the honest degraded version of Layer A: one 1024² cascade,
+one sample, spatial denoise, half-res mask. Once #339 lands, low
+switches to Layer C alone: SDF cone tracing, which is soft and stable —
+no shimmer, no texel grid, no bias artefacts — at the cost of missing
+small-scale contact detail.
 
-That is the single most important structural claim in this document: it
-is only possible because the SDF representation is being built for GI
-anyway.
+**And the cost claim there needs honesty.** SDF tracing is not cheaper
+per PIXEL — a 16-32 step march through a 3D texture costs more resolve
+ALU than a couple of shadow-map taps. What it eliminates is the entire
+shadow GEOMETRY pass (re-rasterising the scene N times per frame, which
+scales with scene complexity) and the shadow-map memory. So it wins on
+geometry-heavy scenes and on total memory, and loses on resolve-bound
+ones; whether it is a net win on a given phone is a measurement, not an
+assumption. The claim that survives either way: it *looks* better than
+a crunchy 1024 map, because its failure mode is softness rather than
+aliasing.
+
+The structural point stands: this option exists only because the SDF
+representation is being built for GI anyway.
+
+### Implementation notes the diagram hides
+
+* **r8unorm is not a writable storage format in WebGPU**, so a compute
+  `shadowMask` pass cannot write it directly. Options: write `r32float`
+  storage and blit down (wastes bandwidth), or produce the mask in a
+  fragment pass with an r8unorm colour attachment (fine — the pass is
+  full-screen either way). Decide in step 1; the graph does not care.
+* **Every vertex format needs a depth-only pipeline.** The cascade pass
+  re-rasterises the scene, so the static (32-byte) and skinned (80-byte,
+  #374) formats each need a shadow variant — the skinned one runs the
+  same palette skinning with a null fragment stage. Forgetting this
+  means the walker casts no shadow, silently.
+* **Cascades do not all need re-rendering every frame.** The far
+  cascade moves slowly; updating it every 2-4 frames (or only when the
+  camera crosses a texel) is one of the biggest costs levers on mobile
+  and costs nothing visually if the transition dither covers it. Design
+  the cascade pass as N independent graph passes so the graph can skip
+  some — do not bake "render all cascades" into one node.
 
 ---
 
@@ -328,8 +376,9 @@ here should start before #359's rebuild gate.
 3. **A2 + A3** — blocker search, variable penumbra, TAA history. *Gate:
    measured penumbra width grows linearly with blocker distance and
    matches the 0.53° prediction within a few percent.*
-4. **Tier knobs + mobile** — Depth16Unorm, 1-cascade path, half-res mask.
-   *Gate: measured frame cost ratio between tiers is ≥5x.*
+4. **Tier knobs + mobile** — Depth16Unorm, the interim 1-cascade low
+   tier (§6), half-res mask, cascade update-rate throttling. *Gate:
+   measured frame cost ratio between tiers is ≥5x.*
 5. **Layer C** — after #339 gives an SDF representation. Far-field and
    SDF-geometry shadows, then the low tier switches to it entirely.
 
