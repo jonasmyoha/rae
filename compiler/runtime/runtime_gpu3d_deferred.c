@@ -374,6 +374,17 @@ GB_OCT_WGSL
 GB_FULLSCREEN_VS
 G3D_SHADOW_FN_WGSL
 "const PI: f32 = 3.14159265;\n"
+/* Quantise [0,1] into `bands` steps with a SOFTENED edge (#396). A bare
+ * floor() aliases along the terminator, and that edge moves whenever the
+ * light or the object does, so it crawls — the one artefact a stylised
+ * look cannot hide. Smoothstepping across the step keeps the band reading
+ * flat while giving the boundary a pixel or two to resolve in. */
+"fn toonBand(x: f32, bands: f32) -> f32 {\n"
+"  let s = clamp(x, 0.0, 1.0) * bands;\n"
+"  let i = floor(s);\n"
+"  let f = s - i;\n"
+"  return (i + smoothstep(0.4, 0.6, f)) / bands;\n"
+"}\n"
 "fn dGGX(NoH: f32, rough: f32) -> f32 {\n"
 "  let a = rough * rough;\n"
 "  let a2 = a * a;\n"
@@ -406,9 +417,18 @@ G3D_SHADOW_FN_WGSL
 "  let albedo = gbb.rgb;\n"
 "  let gba = textureLoad(gbaTex, px, 0);\n"
 "  let mode = gba.w;\n"
+/* The four modes are the quantisation points of 2 bits — 0, 1/3, 2/3, 1 —
+ * so each is tested as a BAND rather than with an open-ended comparison.
+ * Adding toon at 1.0 (#396) is exactly why: the old `mode > 0.5` for
+ * unlit and `mode > 0.0` for emissive would both have swallowed it, and a
+ * toon surface would have rendered as flat albedo with its occlusion
+ * channel decoded as an emissive intensity. */
+"  let isEmissive = mode > 0.16 && mode < 0.5;\n"
+"  let isUnlit = mode > 0.5 && mode < 0.83;\n"
+"  let isToon = mode > 0.83;\n"
 /* Unlit surfaces skip every calculation below and emit albedo directly.
  * This early-out is a real part of why the mode field earns its 2 bits. */
-"  if (mode > 0.5) {\n"
+"  if (isUnlit) {\n"
 "    return vec4<f32>(albedo, 1.0);\n"
 "  }\n"
 "  let dim = vec2<f32>(textureDimensions(gbbTex, 0));\n"
@@ -430,7 +450,7 @@ G3D_SHADOW_FN_WGSL
  * and an occluded surface never also glows. */
 "  var ao = gbc.w;\n"
 "  var emissive = 0.0;\n"
-"  if (mode > 0.0) {\n"
+"  if (isEmissive) {\n"
 "    emissive = exp(ao * 6.91) - 1.0;\n"
 "    ao = 1.0;\n"
 "  }\n"
@@ -451,11 +471,64 @@ G3D_SHADOW_FN_WGSL
  * two terms separate anyway, so it is structural here too. */
 "  let sunVis = sunVisibility(wpos, N, length(L.camPos.xyz - wpos), vec2<f32>(px));\n"
 "  let direct = (kd * albedo / PI + spec) * L.sunColor.rgb * NoL * sunVis;\n"
+
 /* Z-up world (docs/coordinate-system.md), so the hemisphere blends on N.z.
  * The forward pass blends on N.y because it predates the convention — that
  * disagreement is real and tracked, and this is the correct one. */
 "  let hemi = mix(L.ambGround.rgb, L.ambSky.rgb, N.z * 0.5 + 0.5);\n"
 "  let ambF = fresnel(NoV, f0);\n"
+/* TOON (#396), rebuilt to match how stylised shaders actually work.
+ *
+ * The first attempt quantised the PBR result — floor(N.L * bands) times
+ * albedo, plus a thresholded GGX highlight and a rim. That produces
+ * "banded PBR", not cel shading, and it reads as wrong for reasons worth
+ * writing down, because they are the whole technique:
+ *
+ *   1. A CEL SHADOW IS A COLOUR, NOT A DARKER ALBEDO. The defining move
+ *      is lerping between authored light and shadow TONES. Multiplying
+ *      albedo by a fraction keeps the same hue at lower value, which is
+ *      exactly the muddy look this replaces. Real cel shadows shift hue —
+ *      here toward the sky ambient, so shadows read cool against warm
+ *      light, which is what makes them look deliberate.
+ *   2. ONE OR TWO BOUNDARIES, NOT N EVEN BANDS. Even quantisation gives
+ *      a smooth gradient's staircase. Stylised shaders place a small
+ *      number of thresholds explicitly, and the placement is the art.
+ *   3. THE THRESHOLD RUNS ON HALF-LAMBERT, not raw N.L. Remapping to
+ *      N.L * 0.5 + 0.5 spreads the terminator across the whole sphere,
+ *      so a threshold has resolution to sit in and can be moved past the
+ *      geometric terminator. On raw N.L everything below zero is one
+ *      flat clamp and half the control range does nothing.
+ *   4. NO SPECULAR OR RIM BY DEFAULT. Both are opt-in extras in the
+ *      shaders this follows, and the reference material this was checked
+ *      against had both switched OFF. Adding them unasked is most of why
+ *      the first attempt looked busy.
+ */
+"  let hl = dot(N, Ldir) * 0.5 + 0.5;\n"
+/* Two thresholds: a hard terminator, and an earlier softer one that adds
+ * a mid-tone so the result is three tones rather than a hard two. */
+"  let toonT1 = smoothstep(0.0, 0.03, clamp(hl - 0.50, 0.0, 1.0));\n"
+"  let toonT2 = smoothstep(0.0, 0.07, clamp(hl - 0.62, 0.0, 1.0));\n"
+/* The shadow tint. Pushing toward the sky ambient rather than to grey is
+ * what stops the shadow reading as "the same colour with the brightness
+ * turned down". */
+"  let shadeTint = mix(vec3<f32>(1.0), normalize(max(L.ambSky.rgb, vec3<f32>(0.001))) * 1.732, 0.5);\n"
+"  let toonLit = albedo;\n"
+"  let toonMid = albedo * 0.62 * shadeTint;\n"
+"  let toonDeep = albedo * 0.34 * shadeTint;\n"
+/* Applied mid FIRST and deep second, so all three tones survive. Doing it
+ * the other way round lets the second lerp overwrite the first in deep
+ * shadow and collapses the result back to two tones. */
+"  var toonCol = mix(toonMid, toonLit, toonT2);\n"
+"  toonCol = mix(toonDeep, toonCol, toonT1);\n"
+/* The cast shadow stays a CONTINUOUS multiplier (§5): it pushes toward
+ * the deep tone rather than being quantised into the bands, so the soft
+ * penumbra survives instead of being staircased. Not all the way to the
+ * deep tone, or a shadowed object goes featureless. */
+"  toonCol = mix(toonDeep, toonCol, mix(1.0, sunVis, 0.85));\n"
+/* Sit in the same exposure range as the PBR path, so toggling the style
+ * does not also change the apparent brightness of the scene. */
+"  let toonLight = L.sunColor.rgb * 0.34 + hemi * 0.75;\n"
+"  let toonShaded = toonCol * toonLight;\n"
 /* Screen-space AO multiplies the baked occlusion, and the product
    touches INDIRECT only — never `direct` above. */
 /* DEPTH-AWARE 3x3 AVERAGE. The AO pass rotates its sampling per pixel
@@ -494,7 +567,11 @@ G3D_SHADOW_FN_WGSL
  * positive, and one such pixel survives every subsequent blur and bloom.
  * The bound is the format's, applied even on the rgba16float fallback so
  * both paths produce the same image. */
-"  let radiance = clamp(direct + ambient + emit, vec3<f32>(0.0), vec3<f32>(64000.0));\n"
+"  var lit = direct + ambient + emit;\n"
+/* Occlusion still applies to the stylised result — a cel character with
+ * no contact darkening floats. */
+"  if (isToon) { lit = toonShaded * mix(1.0, ao * ssao, 0.6); }\n"
+"  let radiance = clamp(lit, vec3<f32>(0.0), vec3<f32>(64000.0));\n"
 "  return vec4<f32>(radiance, 1.0);\n"
 "}\n";
 

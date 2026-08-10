@@ -73,6 +73,11 @@ func main() {
   var rig: CameraRig = createCameraRig(camera: cam)
   rig.mouseSmoothRate = 22.0
   rig.keySmoothRate = 12.0
+  # Set both explicitly rather than leaning on the constructor's
+  # defaults: what this pins is the rate PICKER, and a test that fails
+  # when the shipped default flips is testing the wrong thing.
+  rig.smoothMouse = false
+  rig.smoothKeys = false
   log("neither smoothed rate: {rigRotationRate(rig: rig)}")
   rig.smoothMouse = true
   log("mouse only rate: {rigRotationRate(rig: rig)}")
