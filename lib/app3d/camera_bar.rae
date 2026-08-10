@@ -44,6 +44,13 @@ open scene3d
 # The action the mode button emits. Exposed so an app can respond to it
 # without duplicating the string that lives in the scene file.
 const cameraBarModeAction: String = "camera.mode"
+const cameraBarSmoothMouseAction: String = "camera.smoothMouse"
+const cameraBarSmoothKeysAction: String = "camera.smoothKeys"
+
+# The on/off palette slots, matching the control panel's so a toggle
+# reads the same wherever it appears.
+const cameraBarSlotOn: String = "accent"
+const cameraBarSlotOff: String = "surfaceAlt"
 
 # Readouts, widest-optional-first in DISPLAY order. Truncation walks this
 # backwards; the mode button is never dropped, because a control that
@@ -110,6 +117,16 @@ func syncCameraBar(world: mod UiWorld, rig: view CameraRig, camera: view Camera3
   }
   let yawDeg: Int = (rig.yaw * 57.2957795).toInt()
   setNodeText(world: world, nodeId: "CameraModeLabel", value: cameraRigModeName(rig: rig))
+  # THE TOGGLES ARE PAINTED FROM THE RIG, not from a copy of the state
+  # kept beside the button. A restored snapshot flips the rig's fields
+  # without a click ever happening, and a button that tracked its own
+  # boolean would then show the opposite of what the camera is doing.
+  var mouseSlot: String = cameraBarSlotOff
+  if rig.smoothMouse { mouseSlot = cameraBarSlotOn }
+  var keysSlot: String = cameraBarSlotOff
+  if rig.smoothKeys { keysSlot = cameraBarSlotOn }
+  setNodeFillSlot(world: world, nodeId: "CameraSmoothMouseButton", slot: mouseSlot)
+  setNodeFillSlot(world: world, nodeId: "CameraSmoothKeysButton", slot: keysSlot)
   setNodeText(world: world, nodeId: "CameraFovLabel", value: "FOV {camera.fovYDeg.toInt()}°")
   setNodeText(world: world, nodeId: "CameraPositionLabel",
               value: "Pos {camera.position.x.toInt()}, {camera.position.y.toInt()}, {camera.position.z.toInt()}")
@@ -155,9 +172,27 @@ func fitCameraBar(world: mod UiWorld, res: view Gpu2dUi, hostNodeId: view String
 # caller that gates rendering on state changes does not have to compare
 # the rig before and after.
 func handleCameraBar(input: view UiInput, rig: mod CameraRig, camera: mod Camera3d) pub ret Bool {
-  if uiActionFired(input: input, actionId: cameraBarModeAction) is false {
-    ret false
+  if uiActionFired(input: input, actionId: cameraBarModeAction) {
+    toggleCameraRigMode(rig: rig, camera: camera)
+    ret true
   }
-  toggleCameraRigMode(rig: rig, camera: camera)
-  ret true
+  # Turning smoothing OFF must not leave the display mid-glide — it would
+  # keep easing after the switch says there is none, which reads as the
+  # toggle not having taken. Snapping once neither source is smoothed
+  # covers both buttons.
+  if uiActionFired(input: input, actionId: cameraBarSmoothMouseAction) {
+    rig.smoothMouse = not rig.smoothMouse
+    if rig.smoothMouse is false and rig.smoothKeys is false {
+      snapCameraRigView(rig: rig)
+    }
+    ret true
+  }
+  if uiActionFired(input: input, actionId: cameraBarSmoothKeysAction) {
+    rig.smoothKeys = not rig.smoothKeys
+    if rig.smoothKeys is false and rig.smoothMouse is false {
+      snapCameraRigView(rig: rig)
+    }
+    ret true
+  }
+  ret false
 }
