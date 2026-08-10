@@ -146,6 +146,108 @@ static int             g3d_taa_cur = 0;
 static bool            g3d_taa_history_valid = false;
 static bool            g3d_taa_pending = false;
 
+/* Shared shadow lookup (#382/#384). ONE definition used by both the
+ * static and the skinned shader — they must agree about shadowing as
+ * exactly as they agree about the BRDF, and two copies of thirty lines of
+ * WGSL drift. Each shader declares its own bindings (the numbers differ)
+ * with these names; the function below references only the names. */
+#define G3D_SHADOW_FN_WGSL \
+"const SUN_TAN_HALF: f32 = 0.00463;\n" \
+"fn poissonDisc(i: i32) -> vec2<f32> {\n" \
+"  var p = array<vec2<f32>, 12>(\n" \
+"    vec2<f32>(-0.326, -0.406), vec2<f32>(-0.840, -0.074),\n" \
+"    vec2<f32>(-0.696,  0.457), vec2<f32>(-0.203,  0.621),\n" \
+"    vec2<f32>( 0.962, -0.195), vec2<f32>( 0.473, -0.480),\n" \
+"    vec2<f32>( 0.519,  0.767), vec2<f32>( 0.185, -0.893),\n" \
+"    vec2<f32>( 0.507,  0.064), vec2<f32>( 0.896,  0.412),\n" \
+"    vec2<f32>(-0.322, -0.933), vec2<f32>(-0.792, -0.598));\n" \
+"  return p[i];\n" \
+"}\n" \
+/* Interleaved gradient noise, the same generator the SSAO pass uses, so
+ * the two dithers are at least drawn from one family rather than being
+ * two arbitrary hashes. */ \
+"fn shadowNoise(pix: vec2<f32>) -> f32 {\n" \
+"  return fract(52.9829189 * fract(dot(pix, vec2<f32>(0.06711056, 0.00583715))));\n" \
+"}\n" \
+"fn shadowCascadeIndex(viewDepth: f32, count: i32) -> i32 {\n" \
+"  var c = 0;\n" \
+"  if (viewDepth > SH.splitFar.x) { c = 1; }\n" \
+"  if (viewDepth > SH.splitFar.y) { c = 2; }\n" \
+"  if (viewDepth > SH.splitFar.z) { c = 3; }\n" \
+"  return c;\n" \
+"}\n" \
+"fn cascadeTexel(c: i32) -> f32 {\n" \
+"  if (c == 1) { return SH.texelWorld.y; }\n" \
+"  if (c == 2) { return SH.texelWorld.z; }\n" \
+"  if (c == 3) { return SH.texelWorld.w; }\n" \
+"  return SH.texelWorld.x;\n" \
+"}\n" \
+"fn cascadeDepthRange(c: i32) -> f32 {\n" \
+"  if (c == 1) { return SH.depthRange.y; }\n" \
+"  if (c == 2) { return SH.depthRange.z; }\n" \
+"  if (c == 3) { return SH.depthRange.w; }\n" \
+"  return SH.depthRange.x;\n" \
+"}\n" \
+"fn sunVisibility(wpos: vec3<f32>, N: vec3<f32>, viewDepth: f32, pix: vec2<f32>) -> f32 {\n" \
+"  let count = i32(SH.shadowCfg.x);\n" \
+"  if (count <= 0) { return 1.0; }\n" \
+"  let c = shadowCascadeIndex(viewDepth, count);\n" \
+"  if (c >= count) { return 1.0; }\n" \
+"  let texel = cascadeTexel(c);\n" \
+/* Normal-offset bias: push the receiver along its geometric normal by
+ * about a texel before projecting. Depth bias alone detaches a contact
+ * shadow from its object, which is the artefact this whole system exists
+ * to remove. */ \
+"  let offset = wpos + N * (texel * 1.5);\n" \
+"  let lp = SH.lightViewProj[c] * vec4<f32>(offset, 1.0);\n" \
+"  let ndc = lp.xyz / lp.w;\n" \
+"  let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);\n" \
+"  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0) { return 1.0; }\n" \
+"  let res = SH.shadowCfg.y;\n" \
+"  let extent = texel * res;\n" \
+/* BLOCKER SEARCH. Average the depth of everything nearer to the light
+ * than this receiver, over a small fixed disc. textureLoad rather than a
+ * sampler: this reads depth VALUES, it does not compare them. */ \
+"  let searchTexels = 4.0;\n" \
+"  let searchUv = searchTexels / res;\n" \
+"  var blockerSum = 0.0;\n" \
+"  var blockerCount = 0.0;\n" \
+"  let ang = shadowNoise(pix) * 6.2831853;\n" \
+"  let ca = cos(ang);\n" \
+"  let sa = sin(ang);\n" \
+"  for (var i = 0; i < 8; i = i + 1) {\n" \
+"    let d0 = poissonDisc(i);\n" \
+"    let d = vec2<f32>(d0.x * ca - d0.y * sa, d0.x * sa + d0.y * ca) * searchUv;\n" \
+"    let t = uv + d;\n" \
+"    if (t.x < 0.0 || t.x > 1.0 || t.y < 0.0 || t.y > 1.0) { continue; }\n" \
+"    let px = vec2<i32>(i32(t.x * res), i32(t.y * res));\n" \
+"    let z = textureLoad(shadowTex, px, c, 0);\n" \
+"    if (z < ndc.z) { blockerSum = blockerSum + z; blockerCount = blockerCount + 1.0; }\n" \
+"  }\n" \
+/* Fully lit: nothing between this point and the sun. */ \
+"  if (blockerCount < 0.5) { return 1.0; }\n" \
+"  let blockerZ = blockerSum / blockerCount;\n" \
+/* PENUMBRA FOR A DIRECTIONAL LIGHT: width grows with the receiver-to-
+ * blocker GAP alone, not with the ratio of distances. The PCSS ratio form
+ * is for an area light at finite distance and is far too soft at contact,
+ * which is precisely where a shadow must stay sharp to read as contact.
+ * See docs/shadow-system-design.md §3 A2. */ \
+"  let gapWorld = (ndc.z - blockerZ) * cascadeDepthRange(c);\n" \
+"  let penumbraWorld = gapWorld * SUN_TAN_HALF * 2.0;\n" \
+"  var radiusUv = penumbraWorld / max(extent, 1e-4);\n" \
+/* Floor at one texel so the filter always covers the hardware's own\n" \
+ * bilinear footprint; ceiling bounds the cost and stops a distant blocker
+ * smearing a shadow across the cascade. */ \
+"  radiusUv = clamp(radiusUv, 1.0 / res, 16.0 / res);\n" \
+"  var sum = 0.0;\n" \
+"  for (var i = 0; i < 12; i = i + 1) {\n" \
+"    let d0 = poissonDisc(i);\n" \
+"    let d = vec2<f32>(d0.x * ca - d0.y * sa, d0.x * sa + d0.y * ca) * radiusUv;\n" \
+"    sum = sum + textureSampleCompareLevel(shadowTex, shadowSamp, uv + d, c, ndc.z);\n" \
+"  }\n" \
+"  return sum / 12.0;\n" \
+"}\n"
+
 static const char* G3D_WGSL =
 "struct Frame {\n"
 "  viewProj: mat4x4<f32>,\n"
@@ -172,6 +274,7 @@ static const char* G3D_WGSL =
 "  lightViewProj: array<mat4x4<f32>, 4>,\n"
 "  splitFar: vec4<f32>,\n"
 "  texelWorld: vec4<f32>,\n"
+"  depthRange: vec4<f32>,\n"
 "  shadowCfg: vec4<f32>,\n"
 "};\n"
 "@group(0) @binding(2) var<uniform> SH: ShadowU;\n"
@@ -235,35 +338,7 @@ static const char* G3D_WGSL =
 "fn fresnel(VoH: f32, f0: vec3<f32>) -> vec3<f32> {\n"
 "  return f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - VoH, 5.0);\n"
 "}\n"
-/* Sun visibility in [0,1]. Cascade chosen by view depth; the comparison
- * sampler gives 2x2 PCF in one tap, which is M1's entire softening (#382).
- *
- * NORMAL-OFFSET BIAS, not just depth bias: the receiver position is
- * pushed along its geometric normal by about one shadow texel before
- * projection. Depth bias alone detaches a contact shadow from its object
- * (peter-panning), which is the very artefact this system exists to fix,
- * so it is scaled per cascade by that cascade's world texel size. */
-"fn sunVisibility(wpos: vec3<f32>, N: vec3<f32>, viewDepth: f32) -> f32 {\n"
-"  let count = i32(SH.shadowCfg.x);\n"
-"  if (count <= 0) { return 1.0; }\n"
-"  var c = 0;\n"
-"  if (viewDepth > SH.splitFar.x) { c = 1; }\n"
-"  if (viewDepth > SH.splitFar.y) { c = 2; }\n"
-"  if (viewDepth > SH.splitFar.z) { c = 3; }\n"
-"  if (c >= count) { return 1.0; }\n"
-"  var texel = SH.texelWorld.x;\n"
-"  if (c == 1) { texel = SH.texelWorld.y; }\n"
-"  if (c == 2) { texel = SH.texelWorld.z; }\n"
-"  if (c == 3) { texel = SH.texelWorld.w; }\n"
-"  let offset = wpos + N * (texel * 1.5);\n"
-"  let lp = SH.lightViewProj[c] * vec4<f32>(offset, 1.0);\n"
-"  let ndc = lp.xyz / lp.w;\n"
-"  let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);\n"
-/* Outside the cascade, or behind the light: unshadowed rather than
- * black. A pixel the map cannot see is not evidence of an occluder. */
-"  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0) { return 1.0; }\n"
-"  return textureSampleCompareLevel(shadowTex, shadowSamp, uv, c, ndc.z);\n"
-"}\n"
+G3D_SHADOW_FN_WGSL
 "struct FsOut {\n"
 "  @location(0) color: vec4<f32>,\n"
 "  @location(1) normal: vec4<f32>,\n"
@@ -293,7 +368,7 @@ static const char* G3D_WGSL =
  * the composition invariant from docs/shadow-system-design.md §5, and it
  * is what keeps AO (indirect) and shadows (direct) from double-darkening. */
 "  let viewDepth = length(F.camPos.xyz - in.wpos);\n"
-"  let sunVis = sunVisibility(in.wpos, N, viewDepth);\n"
+"  let sunVis = sunVisibility(in.wpos, N, viewDepth, in.pos.xy);\n"
 "  let direct = (kd * albedo / PI + spec) * F.sunColor.rgb * NoL * sunVis;\n"
 "  let hemi = mix(F.ambGround.rgb, F.ambSky.rgb, N.y * 0.5 + 0.5);\n"
 "  let ambF = fresnel(NoV, f0);\n"
@@ -547,7 +622,7 @@ static void g3d_init_pipeline(void) {
     g3d_shadow_ensure_targets(G3D_SHADOW_DEFAULT_RES, G3D_SHADOW_DEFAULT_CASCADES);
 
     WGPUBufferDescriptor shd; memset(&shd, 0, sizeof(shd));
-    shd.size = 304;   /* 4 mat4 + splitFar + texelWorld + cfg */
+    shd.size = 320;   /* 4 mat4 + splitFar + texelWorld + depthRange + cfg */
     shd.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
     g3d_sm_frame_ubuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &shd);
 
@@ -555,7 +630,7 @@ static void g3d_init_pipeline(void) {
     WGPUBindGroupEntry e[5]; memset(e, 0, sizeof(e));
     e[0].binding = 0; e[0].buffer = g3d_frame_ubuf; e[0].size = 288;
     e[1].binding = 1; e[1].buffer = g3d_draw_sbuf;  e[1].size = sd.size;
-    e[2].binding = 2; e[2].buffer = g3d_sm_frame_ubuf; e[2].size = 304;
+    e[2].binding = 2; e[2].buffer = g3d_sm_frame_ubuf; e[2].size = 320;
     e[3].binding = 3; e[3].textureView = g3d_sm_array_view;
     e[4].binding = 4; e[4].sampler = g3d_sm_sampler;
     WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
