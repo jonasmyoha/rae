@@ -262,6 +262,18 @@ func setNodeActive(world: mod UiWorld, nodeId: view String, value: view Bool) pu
   componentSet(this: world.actives, entity: entity, data: active)
 }
 
+# Repaint a scene node from the palette. The value must be one of the
+# theme's slot names — the vocabulary is closed, and an invented slot
+# paints debug magenta rather than failing, which is a long way from the
+# call site that caused it.
+func setNodeFillSlot(world: mod UiWorld, nodeId: view String, slot: view String) pub {
+  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entity) { ret }
+  if componentHas(this: world.shapes, entity: entity) is false { ret }
+  let shape: mod Shape => componentMod(this: world.shapes, entity: entity)
+  shape.fillSlot = "{slot}"
+}
+
 func setNodeRect(world: mod UiWorld, nodeId: view String, x: view Float, y: view Float,
                  w: view Float, h: view Float) pub {
   let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
