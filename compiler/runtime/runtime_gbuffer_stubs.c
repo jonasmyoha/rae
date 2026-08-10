@@ -56,6 +56,7 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
     (void)skyR; (void)skyG; (void)skyB;
     (void)gndR; (void)gndG; (void)gndB;
 }
+void rae_ext_gbuffer_ssao(float camX, float camY, float camZ){ (void)camX; (void)camY; (void)camZ; }
 void rae_ext_gbuffer_composite(float exposure) { (void)exposure; }
 int64_t rae_ext_gbuffer_pyramidMips(void) { return 0; }
 void rae_ext_gbuffer_deferredShutdown(void) {}
