@@ -186,6 +186,54 @@ func resizeUiToWindow(world: mod UiWorld, res: view Gpu2dUi) pub ret Bool {
   ret true
 }
 
+# ----- window placement snapshot --------------------------------------
+# Four numbers an app can fold into its own hot-reload state, so a
+# rebuild reopens the window where the developer left it rather than
+# back in the middle of the screen.
+#
+# POSITION AND SIZE TOGETHER. Restoring one without the other puts the
+# window in the right corner at the wrong shape, which reads as more
+# broken than not restoring at all.
+#
+# POINTS, NOT PIXELS. `gpu2d.windowWidth()` reports PIXELS
+# (SDL_GetWindowSizeInPixels), while setWindowSize takes POINTS. Saving
+# the former and restoring it as the latter doubles the window on a
+# retina display — and doubles it again on the next reload, so it walks
+# off the screen within a few rebuilds. Position needs no conversion:
+# SDL reports and accepts it in points already.
+
+const windowPlacementFields: Int = 4
+
+func windowPlacementString() pub ret String {
+  ret "{gpu2d.windowPositionX()} {gpu2d.windowPositionY()} {windowExtentW().toInt()} {windowExtentH().toInt()}"
+}
+
+# Apply `windowPlacementFields` values starting at `offset`. Returns false
+# — changing nothing — when they are not all present or are not sane, so a
+# truncated or corrupt line cannot strand the window off-screen.
+func applyWindowPlacement(parts: view List(String), offset: view Int) pub ret Bool {
+  if parts.length < offset + windowPlacementFields {
+    ret false
+  }
+  let x: Int = parts.at(index: offset).trim().toInt()
+  let y: Int = parts.at(index: offset + 1).trim().toInt()
+  let w: Int = parts.at(index: offset + 2).trim().toInt()
+  let h: Int = parts.at(index: offset + 3).trim().toInt()
+  # A zero or negative size means the snapshot predates a window, and a
+  # wildly negative position means it was written on a monitor layout that
+  # no longer exists. Either way, keep the default placement.
+  if w < 160 or h < 120 {
+    ret false
+  }
+  if x < 0 - 10000 or y < 0 - 10000 {
+    ret false
+  }
+  gpu2d.setWindowSize(w: w, h: h)
+  gpu2d.setWindowPosition(x: x, y: y)
+  syncDesignResolution()
+  ret true
+}
+
 # ----- named-node access ----------------------------------------------
 # A .raescene names its nodes; this is how an app talks to them. Every
 # helper is a no-op on an unknown id rather than an error: a UI that
