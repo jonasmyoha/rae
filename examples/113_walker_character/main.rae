@@ -89,6 +89,9 @@ import app3d/camera_rig
 import app3d/ui_shell
 import app3d/control_panel
 import app3d/camera_bar
+import app3d/playback
+import hot_reload
+import ui/log_overlay
 import ui/ecs
 import ui/input_gpu2d
 import ui/render_gpu2d
@@ -106,6 +109,9 @@ open app3d/camera_rig
 open app3d/ui_shell
 open app3d/control_panel
 open app3d/camera_bar
+open app3d/playback
+open hot_reload
+open ui/log_overlay
 open ui/ecs
 open ui/components
 open ui/input_gpu2d
@@ -113,6 +119,78 @@ open ui/render_gpu2d
 
 func uploadMeshData(m: view MeshData) ret MeshHandle {
   ret uploadMesh(verts: m.verts, vertCount: m.vertCount, indices: m.indices)
+}
+
+
+# The clip button ids, indexed the same way `clipIndex` is. One table
+# rather than two if-chains: a restored index and a click have to agree
+# on which button is selected, and two copies drift.
+func clipButtonId(index: view Int) ret String {
+  if index is 0 { ret "idle" }
+  if index is 1 { ret "walk" }
+  if index is 2 { ret "walkFast" }
+  ret "run"
+}
+
+# ----- state that survives a hot reload -------------------------------
+# A hot reload is a process exit and relaunch, so anything held only in
+# locals is gone. For this example that means the camera, the window, and
+# which clip was playing — re-choosing all three after every rebuild is
+# most of the friction in iterating on an animation.
+#
+# One space-separated line behind a version tag rather than JSON: a bad or
+# older line must degrade to "start fresh" rather than half-apply, and a
+# version mismatch is then a single comparison. The camera's ten fields
+# and the window's four are the shared formats from lib/app3d, so this
+# example only owns the four at the front.
+const state113Version: Int = 2
+const state113AppId: String = "113_walker_character"
+const state113OwnFields: Int = 4
+
+func serialize113State(clipIndex: view Int, playing: view Bool, speed: view Float,
+                       rig: view CameraRig, camera: view Camera3d) ret String {
+  var playingNum: Int = 0
+  if playing {
+    playingNum = 1
+  }
+  ret "{state113Version} {clipIndex} {playingNum} {speed} {cameraRigStateString(rig: rig, camera: camera)} {windowPlacementString()}"
+}
+
+func restore113State(raw: view String, clipIndex: mod Int, playing: mod Bool, speed: mod Float,
+                     rig: mod CameraRig, camera: mod Camera3d) ret Bool {
+  if raw.length() < 1 {
+    ret false
+  }
+  let parts: List(String) = raw.trim().split(sep: " ")
+  if parts.length < state113OwnFields {
+    ret false
+  }
+  if parts.at(index: 0).trim().toInt() is not state113Version {
+    ret false
+  }
+  clipIndex = parts.at(index: 1).trim().toInt()
+  if clipIndex < 0 {
+    clipIndex = 0
+  }
+  if clipIndex > 3 {
+    clipIndex = 3
+  }
+  playing = parts.at(index: 2).trim().toInt() is 1
+  speed = parts.at(index: 3).trim().toFloat()
+  if speed < speedMin {
+    speed = speedMin
+  }
+  if speed > speedMax {
+    speed = speedMax
+  }
+  if applyCameraRigState(parts: parts, offset: state113OwnFields, rig: rig, camera: camera) is false {
+    ret false
+  }
+  # The window is the one part allowed to fail on its own: a snapshot
+  # written on a monitor that is no longer attached should still restore
+  # the camera and the clip.
+  applyWindowPlacement(parts: parts, offset: state113OwnFields + cameraRigFields)
+  ret true
 }
 
 func main() ret Int {
@@ -130,6 +208,15 @@ func main() ret Int {
   var uiWorld: UiWorld = createUiWorld()
   let uiRoot: EntityId = mountUiScene(world: uiWorld, path: "{assets}ui.raescene", res: gpuUi)
   var uiInput: UiInput = createUiInput()
+
+  # Diagnostic log overlay (lib/ui/log_overlay.rae), bottom-right so it
+  # does not sit under the control panel. Its first job is making hot
+  # reloads visible: a rebuilt binary that failed to relaunch looks
+  # exactly like one that reloaded and changed nothing, so the launch
+  # generation is printed — watching 5 become 6 is the proof.
+  var logView: LogOverlay = createLogOverlay(capacity: 64, maxLines: 8, anchor: logAnchorBottomRight, fontSize: 14.0)
+  let reloadGen: Int = nextReloadGeneration()
+  logInfoLine(ov: logView, text: "hot reload {reloadGen}")
 
   let g: Glb = loadGlb(path: "{assets}walker.glb")
   if g.ok is false {
@@ -322,8 +409,40 @@ func main() ret Int {
   transport.buttonW = 84.0
   buildControlPanel(panel: transport, world: uiWorld, res: gpuUi)
 
-  setPanelSelection(panel: clipPanel, world: uiWorld, group: 1, id: "walk")
-  setPanelButtonOn(panel: transport, world: uiWorld, id: "play", on: true)
+  # A HEADLESS run never restores. Headless means a screenshot or a smoke
+  # test, and those assert against a defined starting state; inheriting
+  # whatever clip and camera a developer left behind makes the result
+  # depend on machine-local history. Example 110 learned this the hard
+  # way — a restored camera turned its gate red on one machine and green
+  # on a clean checkout.
+  let headless: Bool = sys.getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0
+    or sys.getEnv(name: "RAE_HEADLESS_FRAMES").length() > 0
+  if not headless {
+    let saved: String = readHotReloadStateFor(appId: state113AppId)
+    if restore113State(raw: saved, clipIndex: clipIndex, playing: playing, speed: speed,
+                       rig: rig, camera: camera) {
+      let pctR: Int = speedPercent(v: speed)
+      logInfoLine(ov: logView, text: "state restored: clip {clipIndex}, speed {pctR}%, camera and window kept")
+    }
+  }
+
+  setPanelSelection(panel: clipPanel, world: uiWorld, group: 1, id: clipButtonId(index: clipIndex))
+  setPanelButtonOn(panel: transport, world: uiWorld, id: "play", on: playing)
+  var playLabel0: String = "Pause"
+  if not playing {
+    playLabel0 = "Play"
+  }
+  setPanelButtonLabel(panel: transport, world: uiWorld, id: "play", label: playLabel0)
+  let pct0: Int = speedPercent(v: speed)
+  setNodeText(world: uiWorld, nodeId: "SpeedLabel", value: "Speed {pct0}%")
+  runUiSystems(world: uiWorld, res: gpuUi)
+
+  # Save on CHANGE rather than only at exit: this example does not watch
+  # for a reload signal, so a supervisor is free to kill it without
+  # warning and an exit-only save would lose everything. Throttled,
+  # because a camera drag changes state every frame.
+  var stateDirty: Bool = false
+  var lastStateSave: Float64 = gpu2d.nowSeconds()
   # Counted, not assumed: a panel whose host node id does not match the
   # scene builds nothing and renders as an empty card, which a
   # "did anything paint" check cannot tell from a working one.
@@ -373,21 +492,41 @@ func main() ret Int {
       setPanelButtonLabel(panel: transport, world: uiWorld, id: "play", label: playLabel)
       setPanelButtonOn(panel: transport, world: uiWorld, id: "play", on: playing)
     }
-    if transportHit.equals(other: "slower") { speed = speed - 0.25 }
-    if transportHit.equals(other: "faster") { speed = speed + 0.25 }
-    if speed < 0.25 { speed = 0.25 }
-    if speed > 3.0 { speed = 3.0 }
+    if transportHit.equals(other: "slower") { speed = nextSpeed(current: speed, up: false) }
+    if transportHit.equals(other: "faster") { speed = nextSpeed(current: speed, up: true) }
     if transportHit.length() > 0 {
-      let pct: Int = math.floor(x: speed * 100.0 + 0.5).toInt()
+      let pct: Int = speedPercent(v: speed)
       setNodeText(world: uiWorld, nodeId: "SpeedLabel", value: "Speed {pct}%")
+    }
+    if clipHit.length() > 0 or transportHit.length() > 0 {
+      stateDirty = true
     }
     if uiActionCount(input: uiInput) > 0 {
       runUiSystems(world: uiWorld, res: gpuUi)
     }
 
-    handleCameraBar(input: uiInput, rig: rig, camera: camera)
-    updateCameraRig(rig: rig, camera: camera,
-                    allowInput: uiPointerCaptured(input: uiInput) is false, dt: dt)
+    if handleCameraBar(input: uiInput, rig: rig, camera: camera) {
+      stateDirty = true
+    }
+    if updateCameraRig(rig: rig, camera: camera,
+                       allowInput: uiPointerCaptured(input: uiInput) is false, dt: dt) {
+      stateDirty = true
+    }
+    if gpu2d.windowResized() {
+      stateDirty = true
+    }
+
+    # Flush at most 4x/sec. The snapshot is twenty numbers, so the cost is
+    # the file write rather than the formatting.
+    if stateDirty and not headless {
+      if (now - lastStateSave) as Float >= 0.25 {
+        writeHotReloadStateFor(appId: state113AppId,
+                               state: serialize113State(clipIndex: clipIndex, playing: playing,
+                                                        speed: speed, rig: rig, camera: camera))
+        lastStateSave = now
+        stateDirty = false
+      }
+    }
 
     # ----- animation -------------------------------------------------
     # "Walk fast" is the walk clip at 1.6x, not a fourth asset.
@@ -459,6 +598,8 @@ func main() ret Int {
         # rather than clearing it. One call paints the whole scene tree.
         gpu2d.beginFrameLoad()
         renderSystemGpu2d(world: uiWorld, res: gpuUi)
+        # After the app UI, so the diagnostic is never what gets covered.
+        drawLogOverlay(ov: logView, font: gpuUi.textFont, screenW: windowExtentW(), screenH: windowExtentH())
       }
       if tag is tagPresent {
         gpu2d.endFrame()
