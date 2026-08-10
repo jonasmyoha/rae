@@ -48,7 +48,7 @@
 
 #define GB_MAX_DRAWS   4096
 #define GB_DRAW_FLOATS 40   /* mat4 model + mat4 prevModel + vec4 albedo/metallic + vec4 rough/emissive/mode */
-#define GB_FRAME_BYTES 128  /* viewProj + prevViewProj (#390) */
+#define GB_FRAME_BYTES 144  /* viewProj + prevViewProj + jitter (#390/#397) */
 
 /* Debug view selectors, mirrored by lib/gbuffer.rae. A G-buffer inspector
  * is permanent equipment in a deferred renderer, not scaffolding: when the
@@ -93,6 +93,14 @@ static WGPURenderPassEncoder gb_pass = NULL;
  * it from a camera the app might have moved since would put the lighting a
  * frame out of step with the depth it is reading. */
 static float gb_viewproj[16];
+/* The matrix the geometry was actually RASTERISED with, jitter included.
+ * Reconstruction from depth must invert this one, not the clean matrix:
+ * the depth at a pixel came from the jittered ray, and inverting the
+ * unjittered projection would place every reconstructed world position
+ * off by up to half a pixel — small, but it is the input to AO and to
+ * lighting. */
+static float gb_viewproj_jittered[16];
+static int   gb_jitter_frame = 0;
 /* Last frame's view-projection, for motion vectors (#390). First frame
  * reuses this frame's, which yields zero motion — correct, and better
  * than an uninitialised matrix projecting every pixel to the origin. */
@@ -168,6 +176,7 @@ static const char* GB_WGSL =
 "struct Frame {\n"
 "  viewProj: mat4x4<f32>,\n"
 "  prevViewProj: mat4x4<f32>,\n"
+"  jitter: vec4<f32>,\n"   /* xy = this frame's sub-pixel clip offset (#397) */
 "};\n"
 "struct DrawU {\n"
 "  model: mat4x4<f32>,\n"
@@ -204,6 +213,11 @@ GB_OCT_WGSL
  * pixel appear to move. */
 "  o.clipNow = o.pos;\n"
 "  o.clipPrev = F.prevViewProj * (d.prevModel * vec4<f32>(p, 1.0));\n"
+/* Jitter LAST, after clipNow is captured (#397). It is a rasterisation
+ * offset, not scene motion: including it in the motion vector would make
+ * every static pixel appear to move by the jitter delta, which is the
+ * one thing guaranteed to defeat the filter it exists to feed. */
+"  o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);\n"
 "  return o;\n"
 "}\n"
 "struct FsOut {\n"
@@ -485,9 +499,31 @@ void rae_ext_gbuffer_begin(rae_Mat4* viewProj, float clearR, float clearG, float
         memcpy(gb_prev_viewproj, viewProj->m.v, 16 * sizeof(float));
         gb_have_prev_vp = true;
     }
-    float fu[32];
+    /* Halton(2,3), the same low-discrepancy sequence the forward path
+     * uses. Index 0 is skipped so no frame lands on a zero offset, which
+     * would be a frame that contributes nothing new. */
+    float jx = 0.0f, jy = 0.0f;
+    if (gb_target_w > 0 && gb_target_h > 0) {
+        const int hi = (gb_jitter_frame % 16) + 1;
+        jx = (g3d_halton(hi, 2) - 0.5f) * 2.0f / (float)gb_target_w;
+        jy = (g3d_halton(hi, 3) - 0.5f) * 2.0f / (float)gb_target_h;
+    }
+    gb_jitter_frame++;
+
+    /* The rasterised matrix = jitter * viewProj. A clip-space xy offset
+     * proportional to w is exactly adding jx*(row 3) to row 0 and
+     * jy*(row 3) to row 1; column-major, row r of column c is m[c*4+r]. */
+    memcpy(gb_viewproj_jittered, viewProj->m.v, 16 * sizeof(float));
+    for (int c = 0; c < 4; c++) {
+        gb_viewproj_jittered[c * 4 + 0] += jx * gb_viewproj_jittered[c * 4 + 3];
+        gb_viewproj_jittered[c * 4 + 1] += jy * gb_viewproj_jittered[c * 4 + 3];
+    }
+
+    float fu[36];
+    memset(fu, 0, sizeof(fu));
     memcpy(fu, viewProj->m.v, 16 * sizeof(float));
     memcpy(fu + 16, gb_prev_viewproj, 16 * sizeof(float));
+    fu[32] = jx; fu[33] = jy;
     wgpuQueueWriteBuffer(g_wgpu_queue, gb_frame_ubuf, 0, fu, GB_FRAME_BYTES);
     /* Remember for NEXT frame, after this frame's copy is on the GPU. */
     memcpy(gb_prev_viewproj, viewProj->m.v, 16 * sizeof(float));
