@@ -1,10 +1,27 @@
-# Walker character — a multi-primitive rigged glTF model (#356 arc).
+# Walker character — a multi-primitive rigged glTF model, ANIMATED (#377).
 #
-# Loads the walker project's character from .glb and renders it in bind
-# pose. Where example 112 (the Fox) is one primitive with no normals and
-# no indices, this is the opposite shape: 65 joints, 10 meshes / 12
-# primitives, every one of them indexed and carrying normals. Between them
-# they cover both ends of what real exporters produce.
+# Loads the walker project's character from .glb, skins it on the GPU and
+# plays Mixamo clips on it. Where example 112 (the Fox) is one primitive
+# with no normals and no indices, this is the opposite shape: 65 joints,
+# 10 meshes / 12 primitives, every one of them indexed and carrying
+# normals. Between them they cover both ends of what real exporters
+# produce.
+#
+# THE CLIPS LIVE IN THEIR OWN FILES. idle/walk/run are separate .glb
+# exports that contain animation and no mesh — the standard way animation
+# libraries ship — so each is retargeted onto this character's skeleton by
+# JOINT NAME at load (see lib/gltf_skin.rae). "Walk fast" is the walk clip
+# played at 1.6x rather than a fourth file, which is what a speed control
+# is for.
+#
+# A clip PLAYS FROM THE FIRST FRAME. An example that opens paused
+# demonstrates nothing until someone clicks it.
+#
+# THE OVERLAY IS IMMEDIATE-MODE, not lib/ui. Six controls with fixed
+# positions do not need an ECS, a theme and three .raescene files; the
+# whole panel below is one function and a hit test. lib/ui earns its
+# weight in example 110, which has responsive layout, hot reload and a
+# dozen interacting widgets.
 #
 # WHAT THIS EXAMPLE EXISTS TO PROVE. Each of the model's twelve
 # primitives is loaded and drawn SEPARATELY, so each can carry its own
@@ -61,8 +78,11 @@
 import core
 import math
 import gpu2d
+import gpu2d_text
+import sdf_text
 import vec3
 import gltf
+import gltf_skin
 open scene3d
 open gpu3d
 open renderer3d
@@ -70,9 +90,41 @@ open rendergraph
 open math3d
 open mesh3d
 open gltf
+open gltf_skin
+open sdf_text
 
 func uploadMeshData(m: view MeshData) ret MeshHandle {
   ret uploadMesh(verts: m.verts, vertCount: m.vertCount, indices: m.indices)
+}
+
+# ----- overlay --------------------------------------------------------
+# Colours are 0xAARRGGBB and authored in DISPLAY space: the overlay pass
+# runs after tonemap, so these are not tone-curved.
+const uiPanelBg: Int = 0xC0141821
+const uiButtonBg: Int = 0xFF232A38
+const uiButtonOn: Int = 0xFF3D6BE0
+const uiText: Int = 0xFFE6EAF2
+const uiLabel: Int = 0xFF9AA4B8
+
+func inRect(px: view Float, py: view Float, x: view Float, y: view Float, w: view Float, h: view Float) ret Bool {
+  ret px >= x and px <= x + w and py >= y and py <= y + h
+}
+
+# Draw one button and report whether it was clicked this frame. Drawing
+# and hit-testing share the rect on purpose: two copies of a rectangle
+# drift, and a control whose visual and clickable areas disagree is the
+# single most confusing UI bug to look at.
+func drawButton(font: view SdfFont, label: view String, x: view Float, y: view Float,
+                w: view Float, h: view Float, active: view Bool,
+                px: view Float, py: view Float, pressed: view Bool) ret Bool {
+  var bg: Int = uiButtonBg
+  if active {
+    bg = uiButtonOn
+  }
+  gpu2d.drawRect(x: x, y: y, w: w, h: h, color: bg)
+  let tw: Float = gpu2d_text.measureText(font: font, text: label, sizePx: 15.0)
+  gpu2d_text.drawText(font: font, text: label, x: x + (w - tw) * 0.5, y: y + h * 0.66, sizePx: 15.0, color: uiText)
+  ret pressed and inRect(px: px, py: py, x: x, y: y, w: w, h: h)
 }
 
 # Dominant palette colour per primitive, in LINEAR space.
@@ -103,10 +155,32 @@ func colorForPrimitive(meshIndex: view Int, primIndex: view Int) ret Vec3 {
   ret vec3.create(x: 0.7, y: 0.7, z: 0.72)
 }
 
-func main() ret Int {
-  gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — walker character (bind pose)")
+# Logical (point) size of the window. Text and hit-testing want points,
+# not physical pixels, or the panel halves on a retina display.
+func windowExtentW() ret Float {
+  let ratio: Float = gpu2d.dpr()
+  if ratio < 0.1 { ret gpu2d.windowWidth().toFloat() }
+  ret gpu2d.windowWidth().toFloat() / ratio
+}
 
-  let g: Glb = loadGlb(path: "examples/113_walker_character/assets/walker.glb")
+func windowExtentH() ret Float {
+  let ratio: Float = gpu2d.dpr()
+  if ratio < 0.1 { ret gpu2d.windowHeight().toFloat() }
+  ret gpu2d.windowHeight().toFloat() / ratio
+}
+
+func main() ret Int {
+  gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — walker character (animated)")
+  var extentW: Float = windowExtentW()
+  var extentH: Float = windowExtentH()
+  gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
+
+  let assets: String = "examples/113_walker_character/assets/"
+  let font: SdfFont = sdf_text.loadSdfFont(
+    jsonPath: "{assets}Roboto-Regular.mtsdf.json",
+    rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw")
+
+  let g: Glb = loadGlb(path: "{assets}walker.glb")
   if g.ok is false {
     log("[gltf] {g.errorMsg}")
     log("[gltf] regenerate assets/walker.glb — see tools/README.md")
@@ -142,6 +216,26 @@ func main() ret Int {
   let footY: Float = b.at(index: 1)
   log("[gltf] bounds height {height}, scale {modelScale}")
 
+  # The skeleton. Everything below animates by mutating its node TRS and
+  # rebuilding the palette; the vertex buffers never change.
+  var sk: Skeleton = loadSkeleton(g: g, skinIndex: 0)
+  if sk.ok is false {
+    log("[gltf] walker.glb has no skin — cannot animate")
+    gpu2d.closeWindow()
+    ret 1
+  }
+  log("[gltf] skeleton: {jointCount(sk: sk)} joints, {sk.nodeCount} nodes")
+
+  # Clips, retargeted onto `sk` by joint name at load. Loaded from their
+  # own files, each of which carries animation and no geometry.
+  let idleGlb: Glb = loadGlb(path: "{assets}idle.glb")
+  let walkGlb: Glb = loadGlb(path: "{assets}walk.glb")
+  let runGlb: Glb = loadGlb(path: "{assets}run.glb")
+  let idleClip: Clip = loadClip(g: idleGlb, animIndex: 0, sk: sk)
+  let walkClip: Clip = loadClip(g: walkGlb, animIndex: 0, sk: sk)
+  let runClip: Clip = loadClip(g: runGlb, animIndex: 0, sk: sk)
+  log("[anim] idle {clipChannelCount(c: idleClip)} ch / {idleClip.duration}s, walk {clipChannelCount(c: walkClip)} ch / {walkClip.duration}s, run {clipChannelCount(c: runClip)} ch / {runClip.duration}s")
+
   let planeData: MeshData = makePlane(size: 20.0, segments: 1)
   let ground: MeshHandle = uploadMeshData(m: planeData)
 
@@ -154,18 +248,25 @@ func main() ret Int {
   # own Y becomes world Z, so the Y-based offsets below are applied along
   # the axes they land on rather than the ones they came from. Every part
   # shares this transform, which is what keeps them assembled.
-  let partPos: Vec3 = vec3.create(
-    x: 0.0 - midX * modelScale,
-    y: 0.0 - midZ * modelScale,
-    z: groundZ - footY * modelScale
-  )
-  let partRot: Vec3 = vec3.create(x: 1.5707963, y: 0.0, z: 0.0)
-  let partScale: Vec3 = vec3.create(x: modelScale, y: modelScale, z: modelScale)
+  let partTransform: Transform3d = {
+    position: vec3.create(
+      x: 0.0 - midX * modelScale,
+      y: 0.0 - midZ * modelScale,
+      z: groundZ - footY * modelScale
+    ),
+    rotation: vec3.create(x: 1.5707963, y: 0.0, z: 0.0),
+    scale: vec3.create(x: modelScale, y: modelScale, z: modelScale)
+  }
+  # Constant for the life of the program: skinning moves the VERTICES, so
+  # the model matrix that places the character in the world never changes.
+  let partModel: Mat4 = modelMatrix(t: partTransform)
 
-  # One instance per primitive, each with its own material. The colour is
-  # chosen from the primitive's authored mesh name, which is the only
+  # One SKINNED mesh per primitive, each with its own material. The colour
+  # is chosen from the primitive's authored mesh name, which is the only
   # handle on which body part it is when the materials carry nothing.
-  var parts: Int = 0
+  let partIds: List(Int) = createList(Int, cap: 16)
+  let partColor: List(Float) = createList(Float, cap: 48)
+  let partRough: List(Float) = createList(Float, cap: 16)
   var mi: Int = 0
   loop mi < meshCount(g: g) {
     let name: String = meshName(g: g, meshIndex: mi)
@@ -177,25 +278,31 @@ func main() ret Int {
     }
     var pi: Int = 0
     loop pi < primitiveCount(g: g, meshIndex: mi) {
-      let part: MeshData = loadPrimitive(g: g, meshIndex: mi, primIndex: pi)
+      let part: SkinnedMeshData = loadSkinnedPrimitive(g: g, meshIndex: mi, primIndex: pi)
       if part.vertCount > 0 {
-        # The material is per PRIMITIVE, not per mesh: the body mesh alone
-        # carries skin, trim and boots as three primitives with three
-        # different swatches.
-        let tint: Vec3 = colorForPrimitive(meshIndex: mi, primIndex: pi)
-        let mat: Int = addMaterial(scene: scene, baseColor: tint, metallic: 0.0, roughness: rough, emission: noEmit)
-        let handle: MeshHandle = uploadMeshData(m: part)
-        let e: Int = addMeshInstance(
-          scene: scene, mesh: handle, material: mat,
-          position: partPos, rotation: partRot, scale: partScale
-        )
-        parts = parts + 1
+        let handle: MeshHandle = uploadSkinnedMesh(verts: part.verts, vertCount: part.vertCount, indices: part.indices)
+        if meshHandleIsValid(h: handle) {
+          # The material is per PRIMITIVE, not per mesh: the body mesh
+          # alone carries skin, trim and boots as three primitives with
+          # three different swatches.
+          let tint: Vec3 = colorForPrimitive(meshIndex: mi, primIndex: pi)
+          partIds.add(value: handle.id)
+          partColor.add(value: tint.x)
+          partColor.add(value: tint.y)
+          partColor.add(value: tint.z)
+          partRough.add(value: rough)
+        }
       }
       pi = pi + 1
     }
     mi = mi + 1
   }
-  log("[gltf] parts drawn: {parts}")
+  log("[gltf] skinned parts: {partIds.length}")
+  if partIds.length is 0 {
+    log("[gltf] no skinned primitives uploaded")
+    gpu2d.closeWindow()
+    ret 1
+  }
 
   let groundMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.40, y: 0.41, z: 0.43), metallic: 0.0, roughness: 0.9, emission: noEmit)
   let groundE: Int = addMeshInstance(
@@ -208,7 +315,9 @@ func main() ret Int {
   var light: Light3d = defaultLight3d()
   camera.target = vec3.create(x: 0.0, y: 0.0, z: groundZ + targetHeight * 0.5)
 
-  var renderer: Renderer3d = createRenderer3d()
+  # The UI variant of the frame: the overlay MODIFIES the LDR target after
+  # tonemap, and the graph derives that ordering from the declaration.
+  var renderer: Renderer3d = createRenderer3dWithUi()
   let gs: Int = compileRenderer(r: renderer)
   if gs is not 0 {
     log("render graph invalid: {statusName(status: gs)}")
@@ -222,13 +331,52 @@ func main() ret Int {
   var lastX: Float = 0.0
   var lastY: Float = 0.0
   var dragging: Bool = false
-  let startT: Float64 = gpu2d.nowSeconds()
+  var dragOnUi: Bool = false
 
+  # Animation state. Clip 1 (walk) plays from the first frame — see the
+  # note in the file header.
+  var clipIndex: Int = 1
+  var playing: Bool = true
+  var speed: Float = 1.0
+  var animTime: Float = 0.0
+
+  let startT: Float64 = gpu2d.nowSeconds()
+  var prevT: Float64 = startT
   loop not gpu2d.pollClose() {
+    extentW = windowExtentW()
+    extentH = windowExtentH()
+    gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
+
+    let now: Float64 = gpu2d.nowSeconds()
+    var dt: Float = (now - prevT) as Float
+    prevT = now
+    # A long stall (a resize, a breakpoint) must not teleport the pose a
+    # second and a half forward; clamp rather than integrate the gap.
+    if dt > 0.1 {
+      dt = 0.1
+    }
+    if dt < 0.0 {
+      dt = 0.0
+    }
+
+    # Panel geometry, computed once and used for BOTH the hit test below
+    # and the drawing further down.
+    let panelW: Float = 452.0
+    let panelH: Float = 106.0
+    let panelX: Float = 16.0
+    let panelY: Float = extentH - panelH - 16.0
     let px: Float = gpu2d.pointerX()
     let py: Float = gpu2d.pointerY()
+    let overUi: Bool = inRect(px: px, py: py, x: panelX, y: panelY, w: panelW, h: panelH)
+    let pressed: Bool = gpu2d.pointerPressed()
+
+    # Orbit, but never while the drag STARTED on the panel: pressing a
+    # button and slipping a pixel should not spin the camera.
     if gpu2d.pointerDown() {
-      if dragging {
+      if not dragging {
+        dragOnUi = overUi
+      }
+      if dragging and not dragOnUi {
         yaw = yaw + (px - lastX) * 0.008
         pitch = pitch - (py - lastY) * 0.008
         if pitch > 1.45 {
@@ -241,10 +389,13 @@ func main() ret Int {
       dragging = true
     } else {
       dragging = false
+      dragOnUi = false
     }
     lastX = px
     lastY = py
-    dist = dist - gpu2d.wheelMove() * 0.4
+    if not overUi {
+      dist = dist - gpu2d.wheelMove() * 0.4
+    }
     if dist < 1.2 {
       dist = 1.2
     }
@@ -252,12 +403,129 @@ func main() ret Int {
       dist = 20.0
     }
 
-    let t: Float = (gpu2d.nowSeconds() - startT) as Float
+    # ----- animation -------------------------------------------------
+    # "Walk fast" is the walk clip at 1.6x, not a fourth asset.
+    var clipRate: Float = 1.0
+    if clipIndex is 2 {
+      clipRate = 1.6
+    }
+    if playing {
+      animTime = animTime + dt * speed * clipRate
+    }
+    if clipIndex is 0 {
+      applyClip(sk: sk, c: idleClip, time: animTime)
+    }
+    if clipIndex is 1 or clipIndex is 2 {
+      applyClip(sk: sk, c: walkClip, time: animTime)
+    }
+    if clipIndex is 3 {
+      applyClip(sk: sk, c: runClip, time: animTime)
+    }
+    let palette: List(Float) = buildPalette(sk: sk)
+
     camera.position = orbitEye(targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z, yaw: yaw, pitch: pitch, dist: dist)
     let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
-    renderFrame(r: renderer, scene: scene, camera: camera, light: light, aspect: aspect, time: t)
+    let t: Float = (now - startT) as Float
+
+    # Frame order is DERIVED by the render graph: the scene pass writes
+    # hdrColor, tonemap resolves it to sceneColor, the overlay modifies
+    # that, present reads it. This loop walks the derived order.
+    var oi: Int = 0
+    loop oi < frameOrderLength(r: renderer) {
+      let tag: Int = frameTagAt(r: renderer, i: oi)
+      if tag is tagScenePass {
+        beginScene(camera: camera, light: light, aspect: aspect, time: t)
+        renderScene(scene: scene)
+        # Skinned draws go into the pass the static path just opened. The
+        # palette is per FRAME and shared by every part, so it uploads
+        # once regardless of how many primitives follow.
+        skinFrameBegin()
+        uploadPalette(rows: palette, jointCount: jointCount(sk: sk))
+        var p: Int = 0
+        loop p < partIds.length {
+          let handle: MeshHandle = meshHandle(id: partIds.at(index: p), generation: 1)
+          let mat: Material3d = {
+            baseColor: vec3.create(
+              x: partColor.at(index: p * 3),
+              y: partColor.at(index: p * 3 + 1),
+              z: partColor.at(index: p * 3 + 2)
+            ),
+            metallic: 0.0,
+            roughness: partRough.at(index: p),
+            emission: noEmit
+          }
+          drawSkinnedInstance(mesh: handle, model: partModel, material: mat)
+          p = p + 1
+        }
+        endPass()
+      }
+      if tag is tagSsao {
+        ssaoPass()
+      }
+      if tag is tagTaa {
+        taaPass()
+      }
+      if tag is tagTonemap {
+        tonemapPass()
+      }
+      if tag is tagUiOverlay {
+        gpu2d.beginFrameLoad()
+        gpu2d.drawRect(x: panelX, y: panelY, w: panelW, h: panelH, color: uiPanelBg)
+
+        # Row 1: which clip.
+        let bw: Float = 104.0
+        let bh: Float = 32.0
+        let bx: Float = panelX + 12.0
+        let by: Float = panelY + 12.0
+        if drawButton(font: font, label: "Idle", x: bx, y: by, w: bw, h: bh, active: clipIndex is 0, px: px, py: py, pressed: pressed) {
+          clipIndex = 0
+          animTime = 0.0
+        }
+        if drawButton(font: font, label: "Walk", x: bx + bw + 8.0, y: by, w: bw, h: bh, active: clipIndex is 1, px: px, py: py, pressed: pressed) {
+          clipIndex = 1
+          animTime = 0.0
+        }
+        if drawButton(font: font, label: "Walk fast", x: bx + (bw + 8.0) * 2.0, y: by, w: bw, h: bh, active: clipIndex is 2, px: px, py: py, pressed: pressed) {
+          clipIndex = 2
+          animTime = 0.0
+        }
+        if drawButton(font: font, label: "Run", x: bx + (bw + 8.0) * 3.0, y: by, w: bw, h: bh, active: clipIndex is 3, px: px, py: py, pressed: pressed) {
+          clipIndex = 3
+          animTime = 0.0
+        }
+
+        # Row 2: transport and speed.
+        let by2: Float = by + bh + 10.0
+        var transport: String = "Pause"
+        if not playing {
+          transport = "Play"
+        }
+        if drawButton(font: font, label: transport, x: bx, y: by2, w: bw, h: bh, active: playing, px: px, py: py, pressed: pressed) {
+          playing = not playing
+        }
+        if drawButton(font: font, label: "Slower", x: bx + bw + 8.0, y: by2, w: 78.0, h: bh, active: false, px: px, py: py, pressed: pressed) {
+          speed = speed - 0.25
+        }
+        if drawButton(font: font, label: "Faster", x: bx + bw + 94.0, y: by2, w: 78.0, h: bh, active: false, px: px, py: py, pressed: pressed) {
+          speed = speed + 0.25
+        }
+        if speed < 0.25 {
+          speed = 0.25
+        }
+        if speed > 3.0 {
+          speed = 3.0
+        }
+        let pct: Int = math.floor(x: speed * 100.0 + 0.5).toInt()
+        gpu2d_text.drawText(font: font, text: "Speed {pct}%", x: bx + (bw + 8.0) * 3.0, y: by2 + bh * 0.66, sizePx: 15.0, color: uiLabel)
+      }
+      if tag is tagPresent {
+        gpu2d.endFrame()
+      }
+      oi = oi + 1
+    }
     snapshotPrevTransforms(scene: scene)
   }
+  skinShutdown()
   shutdown()
   gpu2d.closeWindow()
   ret 0
