@@ -1,0 +1,66 @@
+# Deferred frame with a UI overlay (#389).
+#
+# The overlay MODIFIES the composited target — it loads the finished 3D
+# image and paints over it. That distinction is the whole test:
+#
+#   * declared as a second WRITE, the graph would reject it (two writers)
+#   * declared as a plain READ, nothing would order it after composite,
+#     and the UI could be painted before the image it sits on
+#
+# Only `passModifies` states it truthfully, and the proof is that the
+# derived order puts uiOverlay strictly between composite and present
+# WITHOUT anyone writing that sequence down.
+#
+# Also asserts the no-UI graph is unchanged, because the two builders are
+# now one parameterised function and a regression there would silently
+# add a UI pass to every deferred app.
+import core
+import renderer_deferred
+import rendergraph
+open renderer_deferred
+open rendergraph
+
+# By TAG, not by name: the tag is the renderer's dispatch key and the
+# graph deliberately does not store names. Asserting on the thing the
+# frame actually switches on is also the stronger test.
+func indexOfTag(r: view DeferredRenderer, tag: view Int) ret Int {
+  var i: Int = 0
+  loop i < deferredOrderLength(r: r) {
+    if deferredTagAt(r: r, i: i) is tag {
+      ret i
+    }
+    i = i + 1
+  }
+  ret 0 - 1
+}
+
+func main() {
+  var plain: DeferredRenderer = createDeferredRenderer()
+  let ps: Int = compileDeferred(r: plain)
+  log("plain status={statusName(status: ps)} passes={deferredOrderLength(r: plain)}")
+  if indexOfTag(r: plain, tag: tagUiOverlayD) is 0 - 1 {
+    log("plain has no ui pass: yes")
+  } else {
+    log("plain has no ui pass: NO")
+  }
+
+  var withUi: DeferredRenderer = createDeferredRendererWithUi()
+  let us: Int = compileDeferred(r: withUi)
+  log("ui status={statusName(status: us)} passes={deferredOrderLength(r: withUi)}")
+
+  let composite: Int = indexOfTag(r: withUi, tag: tagComposite)
+  let ui: Int = indexOfTag(r: withUi, tag: tagUiOverlayD)
+  let present: Int = indexOfTag(r: withUi, tag: tagPresentD)
+  if composite >= 0 and ui > composite and present > ui {
+    log("derived composite -> ui -> present: yes")
+  } else {
+    log("derived composite -> ui -> present: NO ({composite} {ui} {present})")
+  }
+  # The overlay must sit AFTER everything radiometric. UI colours are
+  # authored in display space and must never be tone-curved.
+  if ui > indexOfTag(r: withUi, tag: tagLighting) {
+    log("ui after lighting: yes")
+  } else {
+    log("ui after lighting: NO")
+  }
+}
