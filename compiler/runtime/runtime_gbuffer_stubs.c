@@ -60,6 +60,17 @@ void rae_ext_gbuffer_composite(float exposure) { (void)exposure; }
 int64_t rae_ext_gbuffer_pyramidMips(void) { return 0; }
 void rae_ext_gbuffer_deferredShutdown(void) {}
 
+/* Shadows (#382). Stubbed for builds without the GPU backend. */
+void rae_ext_gpu3d_shadowBegin(const float* cascades, int64_t count, int64_t resolution,
+                               const float* splits, const float* texelWorld){
+    (void)cascades; (void)count; (void)resolution; (void)splits; (void)texelWorld;
+}
+void rae_ext_gpu3d_shadowDraw(int64_t mesh, rae_Mat4* model){ (void)mesh; (void)model; }
+void rae_ext_gpu3d_shadowDrawSkinned(int64_t mesh, rae_Mat4* model){ (void)mesh; (void)model; }
+void rae_ext_gpu3d_shadowEnd(void) {}
+int64_t rae_ext_gpu3d_shadowDrawCount(void) { return 0; }
+void rae_ext_gpu3d_shadowShutdown(void) {}
+
 /* Skinning (#374). Stubbed for builds without the GPU backend. */
 int64_t rae_ext_gpu3d_skinnedMeshCreate(const float* verts, int64_t vertCount,
                                         const int64_t* indices, int64_t indexCount){

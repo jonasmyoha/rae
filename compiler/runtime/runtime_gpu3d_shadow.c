@@ -1,0 +1,426 @@
+/* gpu3d shadows — cascaded shadow maps for the directional sun (#382).
+ *
+ * The GPU half of docs/shadow-system-design.md §3 Layer A. The cascade
+ * FITTING is not here: it is pure arithmetic and lives in Rae
+ * (lib/shadow3d.rae) where test 579 can check the anti-shimmer property
+ * without a GPU. This file only rasterises depth into the cascades and
+ * exposes them for sampling.
+ *
+ * WHY A SEPARATE PASS BEFORE THE SCENE PASS. The scene pass encodes draws
+ * as they arrive, so by the time it is open the draw list is already
+ * being consumed — there is no point at which "all draws are known but
+ * nothing is encoded". Shadows therefore need their own explicit pass
+ * with its own walk of the scene, which is also what the render graph
+ * wants: shadowMap is written by one pass and read by another, and the
+ * ordering falls out of that declaration rather than being asserted.
+ *
+ * ONE PIPELINE PER VERTEX FORMAT. Static (32-byte) and skinned (80-byte,
+ * #374) geometry each need a depth-only variant, the skinned one running
+ * the same palette skinning with no fragment stage. Miss this and the
+ * character silently casts no shadow while everything else does — which
+ * reads as a shadow bug, not as a missing pipeline.
+ *
+ * NOT REVERSE-Z. The main pass uses reverse-Z because it buys float
+ * precision against perspective's 1/z. Cascades are orthographic, where
+ * depth is linear, so reverse-Z would buy nothing and only risk a
+ * convention mismatch. Standard Less depth test, clear to 1.0.
+ */
+
+#define G3D_SHADOW_MAX_CASCADES 4
+#define G3D_SHADOW_MAX_DRAWS 4096
+
+static WGPUTexture     g3d_sm_tex = NULL;
+static WGPUTextureView g3d_sm_array_view = NULL;                      /* sampled by the lighting pass */
+static WGPUTextureView g3d_sm_layer_view[G3D_SHADOW_MAX_CASCADES];    /* render targets */
+static WGPUSampler     g3d_sm_sampler = NULL;                         /* comparison sampler */
+static int g3d_sm_res = 0;
+static int g3d_sm_layers = 0;
+/* Bumped whenever the texture is recreated, so bind groups built against
+ * the old view can be invalidated rather than silently sampling a freed
+ * texture. Same pattern as the G-buffer's gb_targets_gen. */
+static int g3d_sm_gen = 0;
+
+static WGPURenderPipeline g3d_sm_pipeline = NULL;        /* static vertex format */
+static WGPURenderPipeline g3d_sm_pipeline_skin = NULL;   /* skinned vertex format */
+static WGPUBuffer    g3d_sm_cascade_ubuf[G3D_SHADOW_MAX_CASCADES];
+static WGPUBindGroup g3d_sm_bind[G3D_SHADOW_MAX_CASCADES];
+static WGPUBindGroup g3d_sm_bind_skin[G3D_SHADOW_MAX_CASCADES];
+static WGPUBuffer    g3d_sm_model_sbuf = NULL;
+
+/* The shadow pass keeps its OWN draw list rather than sharing the scene
+ * pass's: it runs first, so the scene list does not exist yet. */
+static float g3d_sm_model_cpu[G3D_SHADOW_MAX_DRAWS * 16];
+static int   g3d_sm_draw_mesh[G3D_SHADOW_MAX_DRAWS];
+static int   g3d_sm_draw_skinned[G3D_SHADOW_MAX_DRAWS];
+static int   g3d_sm_draw_count = 0;
+static int   g3d_sm_cascade_count = 0;
+static float g3d_sm_cascade_vp[G3D_SHADOW_MAX_CASCADES * 16];
+static float g3d_sm_split_far[G3D_SHADOW_MAX_CASCADES];
+static float g3d_sm_texel_world[G3D_SHADOW_MAX_CASCADES];
+static bool  g3d_sm_enabled = false;
+
+static const char* G3D_SHADOW_WGSL =
+"struct SU { lightViewProj: mat4x4<f32> };\n"
+"@group(0) @binding(0) var<uniform> S: SU;\n"
+"@group(0) @binding(1) var<storage, read> models: array<mat4x4<f32>>;\n"
+"@vertex\n"
+"fn vs(@builtin(instance_index) ii: u32, @location(0) p: vec3<f32>) -> @builtin(position) vec4<f32> {\n"
+"  return S.lightViewProj * (models[ii] * vec4<f32>(p, 1.0));\n"
+"}\n";
+
+/* Skinned variant: same output, but the position is skinned by the joint
+ * palette first. The palette layout matches runtime_gpu3d_skin.c exactly
+ * (three vec4 rows per joint) — two decoders of one format is a bug
+ * waiting to happen, so this one is a literal transcription. */
+static const char* G3D_SHADOW_SKIN_WGSL =
+"struct SU { lightViewProj: mat4x4<f32> };\n"
+"@group(0) @binding(0) var<uniform> S: SU;\n"
+"@group(0) @binding(1) var<storage, read> models: array<mat4x4<f32>>;\n"
+"@group(0) @binding(2) var<storage, read> palette: array<vec4<f32>>;\n"
+"fn jointMat(j: u32) -> mat4x4<f32> {\n"
+"  let r0 = palette[j * 3u + 0u];\n"
+"  let r1 = palette[j * 3u + 1u];\n"
+"  let r2 = palette[j * 3u + 2u];\n"
+"  return mat4x4<f32>(\n"
+"    vec4<f32>(r0.x, r1.x, r2.x, 0.0),\n"
+"    vec4<f32>(r0.y, r1.y, r2.y, 0.0),\n"
+"    vec4<f32>(r0.z, r1.z, r2.z, 0.0),\n"
+"    vec4<f32>(r0.w, r1.w, r2.w, 1.0));\n"
+"}\n"
+"@vertex\n"
+"fn vs(@builtin(instance_index) ii: u32,\n"
+"      @location(0) p: vec3<f32>,\n"
+"      @location(3) jf: vec4<f32>, @location(4) w: vec4<f32>) -> @builtin(position) vec4<f32> {\n"
+"  let j = vec4<u32>(u32(jf.x), u32(jf.y), u32(jf.z), u32(jf.w));\n"
+"  var skin = jointMat(j.x) * w.x;\n"
+"  skin = skin + jointMat(j.y) * w.y;\n"
+"  skin = skin + jointMat(j.z) * w.z;\n"
+"  skin = skin + jointMat(j.w) * w.w;\n"
+"  let sp = skin * vec4<f32>(p, 1.0);\n"
+"  return S.lightViewProj * (models[ii] * vec4<f32>(sp.xyz, 1.0));\n"
+"}\n";
+
+static void g3d_shadow_release_targets(void) {
+    for (int i = 0; i < G3D_SHADOW_MAX_CASCADES; i++) {
+        if (g3d_sm_layer_view[i]) { wgpuTextureViewRelease(g3d_sm_layer_view[i]); g3d_sm_layer_view[i] = NULL; }
+        if (g3d_sm_bind[i]) { wgpuBindGroupRelease(g3d_sm_bind[i]); g3d_sm_bind[i] = NULL; }
+        if (g3d_sm_bind_skin[i]) { wgpuBindGroupRelease(g3d_sm_bind_skin[i]); g3d_sm_bind_skin[i] = NULL; }
+    }
+    if (g3d_sm_array_view) { wgpuTextureViewRelease(g3d_sm_array_view); g3d_sm_array_view = NULL; }
+    if (g3d_sm_tex) { wgpuTextureRelease(g3d_sm_tex); g3d_sm_tex = NULL; }
+}
+
+static void g3d_shadow_ensure_targets(int res, int layers) {
+    if (g3d_sm_tex && g3d_sm_res == res && g3d_sm_layers == layers) return;
+    g3d_shadow_release_targets();
+
+    WGPUTextureDescriptor td; memset(&td, 0, sizeof(td));
+    td.dimension = WGPUTextureDimension_2D;
+    td.size.width = (uint32_t)res;
+    td.size.height = (uint32_t)res;
+    td.size.depthOrArrayLayers = (uint32_t)layers;
+    td.mipLevelCount = 1;
+    td.sampleCount = 1;
+    td.format = WGPUTextureFormat_Depth32Float;
+    td.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding;
+    g3d_sm_tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
+    if (!g3d_sm_tex) { fprintf(stderr, "[shadow] cascade texture creation FAILED\n"); return; }
+
+    WGPUTextureViewDescriptor vd; memset(&vd, 0, sizeof(vd));
+    vd.format = WGPUTextureFormat_Depth32Float;
+    vd.dimension = WGPUTextureViewDimension_2DArray;
+    vd.mipLevelCount = 1;
+    vd.arrayLayerCount = (uint32_t)layers;
+    vd.aspect = WGPUTextureAspect_DepthOnly;
+    g3d_sm_array_view = wgpuTextureCreateView(g3d_sm_tex, &vd);
+
+    for (int i = 0; i < layers; i++) {
+        WGPUTextureViewDescriptor lv; memset(&lv, 0, sizeof(lv));
+        lv.format = WGPUTextureFormat_Depth32Float;
+        lv.dimension = WGPUTextureViewDimension_2D;
+        lv.baseArrayLayer = (uint32_t)i;
+        lv.arrayLayerCount = 1;
+        lv.mipLevelCount = 1;
+        lv.aspect = WGPUTextureAspect_DepthOnly;
+        g3d_sm_layer_view[i] = wgpuTextureCreateView(g3d_sm_tex, &lv);
+    }
+
+    if (!g3d_sm_sampler) {
+        /* A COMPARISON sampler: the hardware does the depth test and the
+         * bilinear filter together, so one textureSampleCompare gives
+         * 2x2 PCF for the price of one tap. That is the cheapest real
+         * softening available and the reason M1 does not need a manual
+         * kernel. */
+        WGPUSamplerDescriptor sd; memset(&sd, 0, sizeof(sd));
+        sd.addressModeU = WGPUAddressMode_ClampToEdge;
+        sd.addressModeV = WGPUAddressMode_ClampToEdge;
+        sd.addressModeW = WGPUAddressMode_ClampToEdge;
+        sd.magFilter = WGPUFilterMode_Linear;
+        sd.minFilter = WGPUFilterMode_Linear;
+        sd.mipmapFilter = WGPUMipmapFilterMode_Nearest;
+        sd.lodMaxClamp = 1.0f;
+        sd.compare = WGPUCompareFunction_Less;
+        sd.maxAnisotropy = 1;
+        g3d_sm_sampler = wgpuDeviceCreateSampler(g_wgpu_dev, &sd);
+    }
+
+    g3d_sm_res = res;
+    g3d_sm_layers = layers;
+    g3d_sm_gen++;
+}
+
+static WGPURenderPipeline g3d_shadow_make_pipeline(const char* wgsl, bool skinned) {
+    WGPUShaderSourceWGSL src; memset(&src, 0, sizeof(src));
+    src.chain.sType = WGPUSType_ShaderSourceWGSL;
+    src.code = rae_wgpu_sv(wgsl);
+    WGPUShaderModuleDescriptor smd; memset(&smd, 0, sizeof(smd));
+    smd.nextInChain = &src.chain;
+    WGPUShaderModule mod = wgpuDeviceCreateShaderModule(g_wgpu_dev, &smd);
+
+    WGPUVertexAttribute attrs[3]; memset(attrs, 0, sizeof(attrs));
+    attrs[0].format = WGPUVertexFormat_Float32x3; attrs[0].offset = 0; attrs[0].shaderLocation = 0;
+    int attrCount = 1;
+    if (skinned) {
+        attrs[1].format = WGPUVertexFormat_Float32x4; attrs[1].offset = 32; attrs[1].shaderLocation = 3;
+        attrs[2].format = WGPUVertexFormat_Float32x4; attrs[2].offset = 48; attrs[2].shaderLocation = 4;
+        attrCount = 3;
+    }
+    WGPUVertexBufferLayout vbl; memset(&vbl, 0, sizeof(vbl));
+    vbl.arrayStride = skinned ? (20 * sizeof(float)) : (8 * sizeof(float));
+    vbl.stepMode = WGPUVertexStepMode_Vertex;
+    vbl.attributeCount = (size_t)attrCount;
+    vbl.attributes = attrs;
+
+    WGPUDepthStencilState ds; memset(&ds, 0, sizeof(ds));
+    ds.format = WGPUTextureFormat_Depth32Float;
+    ds.depthWriteEnabled = WGPUOptionalBool_True;
+    ds.depthCompare = WGPUCompareFunction_Less;
+    ds.stencilFront.compare = WGPUCompareFunction_Always;
+    ds.stencilFront.failOp = WGPUStencilOperation_Keep;
+    ds.stencilFront.depthFailOp = WGPUStencilOperation_Keep;
+    ds.stencilFront.passOp = WGPUStencilOperation_Keep;
+    ds.stencilBack = ds.stencilFront;
+    ds.stencilReadMask = 0xFFFFFFFFu; ds.stencilWriteMask = 0xFFFFFFFFu;
+    /* A constant depth bias in the RASTERISER, not in the shader. It is
+     * applied in depth units after projection, which is exactly where
+     * acne originates, and it costs nothing. Slope-scaled is the part
+     * that matters at grazing angles. */
+    ds.depthBias = 2;
+    ds.depthBiasSlopeScale = 2.5f;
+    ds.depthBiasClamp = 0.0f;
+
+    WGPURenderPipelineDescriptor pd; memset(&pd, 0, sizeof(pd));
+    pd.layout = NULL;
+    pd.vertex.module = mod; pd.vertex.entryPoint = rae_wgpu_sv("vs");
+    pd.vertex.bufferCount = 1; pd.vertex.buffers = &vbl;
+    pd.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+    pd.primitive.frontFace = WGPUFrontFace_CCW;
+    /* FRONT-face culling in the shadow pass. Rendering back faces puts
+     * the stored depth on the far side of the occluder, which moves the
+     * acne into the shadow interior where nothing samples it. Costs
+     * nothing and removes most of the bias tuning. */
+    pd.primitive.cullMode = WGPUCullMode_Front;
+    pd.depthStencil = &ds;
+    pd.multisample.count = 1; pd.multisample.mask = 0xFFFFFFFFu;
+    pd.fragment = NULL;   /* depth only */
+    WGPURenderPipeline p = wgpuDeviceCreateRenderPipeline(g_wgpu_dev, &pd);
+    wgpuShaderModuleRelease(mod);
+    if (!p) fprintf(stderr, "[shadow] %s pipeline creation FAILED\n", skinned ? "skinned" : "static");
+    return p;
+}
+
+static void g3d_shadow_init(void) {
+    if (g3d_sm_pipeline) return;
+    g3d_sm_pipeline = g3d_shadow_make_pipeline(G3D_SHADOW_WGSL, false);
+    g3d_sm_pipeline_skin = g3d_shadow_make_pipeline(G3D_SHADOW_SKIN_WGSL, true);
+    if (!g3d_sm_pipeline) return;
+
+    WGPUBufferDescriptor md; memset(&md, 0, sizeof(md));
+    md.size = (uint64_t)G3D_SHADOW_MAX_DRAWS * 16 * sizeof(float);
+    md.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
+    g3d_sm_model_sbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &md);
+
+    for (int i = 0; i < G3D_SHADOW_MAX_CASCADES; i++) {
+        WGPUBufferDescriptor ud; memset(&ud, 0, sizeof(ud));
+        ud.size = 64;   /* one mat4 */
+        ud.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+        g3d_sm_cascade_ubuf[i] = wgpuDeviceCreateBuffer(g_wgpu_dev, &ud);
+    }
+}
+
+static void g3d_shadow_ensure_binds(void) {
+    if (!g3d_sm_pipeline || !g3d_sm_model_sbuf) return;
+    for (int i = 0; i < g3d_sm_layers && i < G3D_SHADOW_MAX_CASCADES; i++) {
+        if (!g3d_sm_bind[i]) {
+            WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g3d_sm_pipeline, 0);
+            WGPUBindGroupEntry e[2]; memset(e, 0, sizeof(e));
+            e[0].binding = 0; e[0].buffer = g3d_sm_cascade_ubuf[i]; e[0].size = 64;
+            e[1].binding = 1; e[1].buffer = g3d_sm_model_sbuf;
+            e[1].size = (uint64_t)G3D_SHADOW_MAX_DRAWS * 16 * sizeof(float);
+            WGPUBindGroupDescriptor bd; memset(&bd, 0, sizeof(bd));
+            bd.layout = bgl; bd.entryCount = 2; bd.entries = e;
+            g3d_sm_bind[i] = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bd);
+            wgpuBindGroupLayoutRelease(bgl);
+        }
+        if (!g3d_sm_bind_skin[i] && g3d_sm_pipeline_skin && g3d_skin_palette_sbuf) {
+            WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g3d_sm_pipeline_skin, 0);
+            WGPUBindGroupEntry e[3]; memset(e, 0, sizeof(e));
+            e[0].binding = 0; e[0].buffer = g3d_sm_cascade_ubuf[i]; e[0].size = 64;
+            e[1].binding = 1; e[1].buffer = g3d_sm_model_sbuf;
+            e[1].size = (uint64_t)G3D_SHADOW_MAX_DRAWS * 16 * sizeof(float);
+            e[2].binding = 2; e[2].buffer = g3d_skin_palette_sbuf;
+            e[2].size = (uint64_t)G3D_SKIN_MAX_JOINTS * 12 * sizeof(float);
+            WGPUBindGroupDescriptor bd; memset(&bd, 0, sizeof(bd));
+            bd.layout = bgl; bd.entryCount = 3; bd.entries = e;
+            g3d_sm_bind_skin[i] = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bd);
+            wgpuBindGroupLayoutRelease(bgl);
+        }
+    }
+}
+
+/* ----- Rae-facing API ------------------------------------------------ */
+
+/* Start collecting casters. `cascades` is count*16 floats of light
+ * view-projection (fitted in Rae by lib/shadow3d.rae), followed by
+ * `count` split distances and `count` texel world sizes. */
+void rae_ext_gpu3d_shadowBegin(const float* cascades, int64_t count,
+                               int64_t resolution, const float* splits,
+                               const float* texelWorld) {
+    g3d_sm_enabled = false;
+    g3d_sm_draw_count = 0;
+    if (!g_wgpu_dev || !cascades || count < 1) return;
+    if (count > G3D_SHADOW_MAX_CASCADES) count = G3D_SHADOW_MAX_CASCADES;
+    if (resolution < 256) resolution = 256;
+    if (resolution > 4096) resolution = 4096;
+
+    /* The scene pipeline owns the uniform this pass fills and the bind
+     * group that samples the result, and shadows run BEFORE it on the
+     * first frame — so make sure it exists. Idempotent. */
+    g3d_init_pipeline();
+    g3d_shadow_init();
+    if (!g3d_sm_pipeline) return;
+    g3d_shadow_ensure_targets((int)resolution, (int)count);
+    if (!g3d_sm_tex) return;
+
+    g3d_sm_cascade_count = (int)count;
+    memcpy(g3d_sm_cascade_vp, cascades, (size_t)count * 16 * sizeof(float));
+    for (int i = 0; i < count; i++) {
+        g3d_sm_split_far[i] = splits ? splits[i] : 0.0f;
+        g3d_sm_texel_world[i] = texelWorld ? texelWorld[i] : 0.0f;
+        wgpuQueueWriteBuffer(g_wgpu_queue, g3d_sm_cascade_ubuf[i], 0,
+                             cascades + i * 16, 16 * sizeof(float));
+    }
+
+    /* Publish to the lighting pass. Unused cascade slots stay zeroed and
+     * `cfg.x` carries the live count, so the shader needs no separate
+     * enable flag and an app that never calls this simply gets 1.0. */
+    if (g3d_sm_frame_ubuf) {
+        float u[76]; memset(u, 0, sizeof(u));
+        memcpy(u, cascades, (size_t)count * 16 * sizeof(float));
+        for (int i = 0; i < count; i++) {
+            u[64 + i] = g3d_sm_split_far[i];
+            u[68 + i] = g3d_sm_texel_world[i];
+        }
+        u[72] = (float)count;
+        wgpuQueueWriteBuffer(g_wgpu_queue, g3d_sm_frame_ubuf, 0, u, sizeof(u));
+    }
+    g3d_sm_enabled = true;
+}
+
+static void g3d_shadow_queue(int64_t mesh, rae_Mat4* model, int skinned) {
+    if (!g3d_sm_enabled || !model) return;
+    int slot = (int)mesh - 1;
+    if (slot < 0) return;
+    if (g3d_sm_draw_count >= G3D_SHADOW_MAX_DRAWS) return;
+    float* d = g3d_sm_model_cpu + g3d_sm_draw_count * 16;
+    for (int i = 0; i < 16; i++) d[i] = model->m.v[i];
+    g3d_sm_draw_mesh[g3d_sm_draw_count] = slot;
+    g3d_sm_draw_skinned[g3d_sm_draw_count] = skinned;
+    g3d_sm_draw_count++;
+}
+
+void rae_ext_gpu3d_shadowDraw(int64_t mesh, rae_Mat4* model) {
+    g3d_shadow_queue(mesh, model, 0);
+}
+
+void rae_ext_gpu3d_shadowDrawSkinned(int64_t mesh, rae_Mat4* model) {
+    g3d_shadow_queue(mesh, model, 1);
+}
+
+/* Rasterise every queued caster into every cascade.
+ *
+ * One render pass per cascade, because each writes a different array
+ * layer. They share the model buffer and the pipelines, so the cost is
+ * the geometry, which is why §6 of the design doc wants far cascades on
+ * a reduced update cadence later. */
+void rae_ext_gpu3d_shadowEnd(void) {
+    if (!g3d_sm_enabled || !g3d_sm_tex) return;
+    if (g3d_sm_draw_count > 0) {
+        wgpuQueueWriteBuffer(g_wgpu_queue, g3d_sm_model_sbuf, 0, g3d_sm_model_cpu,
+                             (size_t)g3d_sm_draw_count * 16 * sizeof(float));
+    }
+    g3d_shadow_ensure_binds();
+
+    WGPUCommandEncoderDescriptor ed; memset(&ed, 0, sizeof(ed));
+    WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, &ed);
+
+    for (int c = 0; c < g3d_sm_cascade_count; c++) {
+        WGPURenderPassDepthStencilAttachment dsa; memset(&dsa, 0, sizeof(dsa));
+        dsa.view = g3d_sm_layer_view[c];
+        dsa.depthLoadOp = WGPULoadOp_Clear;
+        dsa.depthStoreOp = WGPUStoreOp_Store;
+        dsa.depthClearValue = 1.0f;   /* NOT reverse-Z; see the file header */
+        dsa.stencilLoadOp = WGPULoadOp_Undefined;
+        dsa.stencilStoreOp = WGPUStoreOp_Undefined;
+
+        WGPURenderPassDescriptor rp; memset(&rp, 0, sizeof(rp));
+        rp.colorAttachmentCount = 0;
+        rp.depthStencilAttachment = &dsa;
+        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(enc, &rp);
+
+        for (int i = 0; i < g3d_sm_draw_count; i++) {
+            int slot = g3d_sm_draw_mesh[i];
+            WGPUBuffer vb = NULL, ib = NULL;
+            uint32_t icount = 0;
+            if (g3d_sm_draw_skinned[i]) {
+                if (slot >= g3d_skin_mesh_n || !g3d_sm_pipeline_skin || !g3d_sm_bind_skin[c]) continue;
+                vb = g3d_skin_vbuf[slot]; ib = g3d_skin_ibuf[slot]; icount = g3d_skin_icount[slot];
+                wgpuRenderPassEncoderSetPipeline(pass, g3d_sm_pipeline_skin);
+                wgpuRenderPassEncoderSetBindGroup(pass, 0, g3d_sm_bind_skin[c], 0, NULL);
+            } else {
+                if (slot >= g3d_mesh_n || !g3d_sm_bind[c]) continue;
+                vb = g3d_mesh_vbuf[slot]; ib = g3d_mesh_ibuf[slot]; icount = g3d_mesh_icount[slot];
+                wgpuRenderPassEncoderSetPipeline(pass, g3d_sm_pipeline);
+                wgpuRenderPassEncoderSetBindGroup(pass, 0, g3d_sm_bind[c], 0, NULL);
+            }
+            if (!vb || !ib || icount == 0) continue;
+            wgpuRenderPassEncoderSetVertexBuffer(pass, 0, vb, 0, WGPU_WHOLE_SIZE);
+            wgpuRenderPassEncoderSetIndexBuffer(pass, ib, WGPUIndexFormat_Uint32, 0, WGPU_WHOLE_SIZE);
+            /* The instance index selects this draw's model matrix, so one
+             * instance is drawn per queued caster. */
+            wgpuRenderPassEncoderDrawIndexed(pass, icount, 1, 0, 0, (uint32_t)i);
+        }
+        wgpuRenderPassEncoderEnd(pass);
+        wgpuRenderPassEncoderRelease(pass);
+    }
+
+    WGPUCommandBufferDescriptor cbd; memset(&cbd, 0, sizeof(cbd));
+    WGPUCommandBuffer cb = wgpuCommandEncoderFinish(enc, &cbd);
+    wgpuQueueSubmit(g_wgpu_queue, 1, &cb);
+    wgpuCommandBufferRelease(cb);
+    wgpuCommandEncoderRelease(enc);
+}
+
+int64_t rae_ext_gpu3d_shadowDrawCount(void) { return (int64_t)g3d_sm_draw_count; }
+
+void rae_ext_gpu3d_shadowShutdown(void) {
+    g3d_shadow_release_targets();
+    if (g3d_sm_sampler) { wgpuSamplerRelease(g3d_sm_sampler); g3d_sm_sampler = NULL; }
+    if (g3d_sm_pipeline) { wgpuRenderPipelineRelease(g3d_sm_pipeline); g3d_sm_pipeline = NULL; }
+    if (g3d_sm_pipeline_skin) { wgpuRenderPipelineRelease(g3d_sm_pipeline_skin); g3d_sm_pipeline_skin = NULL; }
+    if (g3d_sm_model_sbuf) { wgpuBufferRelease(g3d_sm_model_sbuf); g3d_sm_model_sbuf = NULL; }
+    for (int i = 0; i < G3D_SHADOW_MAX_CASCADES; i++) {
+        if (g3d_sm_cascade_ubuf[i]) { wgpuBufferRelease(g3d_sm_cascade_ubuf[i]); g3d_sm_cascade_ubuf[i] = NULL; }
+    }
+    g3d_sm_res = 0; g3d_sm_layers = 0; g3d_sm_enabled = false;
+}
