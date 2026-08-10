@@ -1,0 +1,235 @@
+# app3d/ui_shell — the lib/ui bootstrap every example was copying.
+#
+# Standing up a .raescene UI is the same eight steps every time: work out
+# the window's LOGICAL size, point the design resolution at it, load two
+# MSDF fonts and a theme, build a UiWorld, mount the scene, run the three
+# systems, and thereafter push text and visibility into named nodes. None
+# of that is example-specific, and all of it was pasted into example 110
+# and would have been pasted into the next one.
+#
+# WHY FREE FUNCTIONS AND NOT A SHELL OBJECT. The obvious shape is a
+# `UiShell` struct owning the UiWorld. It is the wrong shape here: UiWorld
+# is an ECS whose component stores are heap-backed, and reaching them
+# through a second struct's field adds an aliasing hop that Rae's
+# ownership rules make easy to get subtly wrong (see
+# docs/ownership-model.md). The world stays a plain local the caller owns,
+# exactly as lib/ui's own systems take it, and this module only adds the
+# steps around it.
+#
+# LOGICAL SIZE, NOT PIXELS. Every measurement here is in points. On a
+# retina display the window reports twice the pixels, and a UI laid out in
+# pixels renders at half the intended size — the failure looks like "the
+# font is too small" rather than like a unit bug, which is why the
+# conversion lives in one place.
+import core
+import gpu2d
+import sdf_text
+open sdf_text
+open ui/ecs
+open ui/components
+open ui/registry
+open ui/input_gpu2d
+open ui/layout
+open ui/render_gpu2d
+open ui/scene
+open ui/scene_file
+open ui/scene_loader
+open ui/theme_resolved
+open ui/transform
+
+# ----- window extent --------------------------------------------------
+
+func windowExtentW() pub ret Float {
+  let ratio: Float = gpu2d.dpr()
+  if ratio < 0.1 { ret gpu2d.windowWidth().toFloat() }
+  ret gpu2d.windowWidth().toFloat() / ratio
+}
+
+func windowExtentH() pub ret Float {
+  let ratio: Float = gpu2d.dpr()
+  if ratio < 0.1 { ret gpu2d.windowHeight().toFloat() }
+  ret gpu2d.windowHeight().toFloat() / ratio
+}
+
+# Point the design resolution at the window's logical size, so the
+# design->pixel transform is IDENTITY: no letterbox bars, and fonts keep
+# their authored point size at every window size rather than shrinking
+# with the width.
+func syncDesignResolution() pub {
+  let w: Float = windowExtentW()
+  let h: Float = windowExtentH()
+  if w > 0.0 and h > 0.0 {
+    gpu2d.setDesignResolution(width: w, height: h, fit: 0)
+  }
+}
+
+# ----- assets ---------------------------------------------------------
+
+# Load the two MSDF fonts and the theme, and make the theme's tokens
+# active. `dir` is a directory prefix including its trailing slash; the
+# three names are file stems, since the .json/.raw pairing is a property
+# of the format rather than of any caller.
+#
+# The theme is set active as a side effect on purpose: text styles resolve
+# through a module-level token table, and a Gpu2dUi built from a theme
+# that was never activated renders every styled string in fallback colours
+# — which looks like a theme authoring mistake, not a missing call.
+func loadUiAssets(dir: view String, textFontName: view String,
+                  iconFontName: view String, themeFile: view String) pub ret Gpu2dUi {
+  let textFont: SdfFont = sdf_text.loadSdfFont(
+    jsonPath: "{dir}{textFontName}.mtsdf.json",
+    rawAtlasPath: "{dir}{textFontName}.mtsdf.raw")
+  # An empty icon name reuses the text font. The icon atlas is a megabyte
+  # per example, and an app with no `mat:` glyphs should not have to ship
+  # one just to satisfy a struct field.
+  var iconFont: SdfFont = textFont
+  if iconFontName.length() > 0 {
+    iconFont = sdf_text.loadSdfFont(
+      jsonPath: "{dir}{iconFontName}.mtsdf.json",
+      rawAtlasPath: "{dir}{iconFontName}.mtsdf.raw")
+  }
+  let themeScene: Scene = loadSceneFile(path: "{dir}{themeFile}")
+  let theme: ResolvedTheme = parseTheme(scene: themeScene)
+  setActiveThemeTokens(theme: theme)
+  # `own` on every field: this struct crosses a function boundary, and
+  # ResolvedTheme and SdfFont both carry heap state. Returning them by
+  # plain value drops the locals at return and hands the caller freed
+  # lists — which surfaces as a theme whose tokens all miss, not as a
+  # crash. Example 110 never hit this because it built its Gpu2dUi in
+  # the same scope as the loads.
+  ret Gpu2dUi { textFont: own textFont, iconFont: own iconFont, theme: own theme }
+}
+
+# Create a world sized to the current window and mount `path` into it.
+# The caller keeps the world; this only removes the four lines that are
+# identical everywhere and the one that is easy to forget (setting
+# layoutW/layoutH before the first layout pass, without which everything
+# lays out against a zero-sized root).
+func mountUiScene(world: mod UiWorld, path: view String, res: view Gpu2dUi) pub ret EntityId {
+  world.layoutW = windowExtentW()
+  world.layoutH = windowExtentH()
+  let scene: Scene = loadSceneFile(path: path)
+  let root: EntityId = loadScene(world: world, scene: scene)
+  runUiSystems(world: world, res: res)
+  ret root
+}
+
+# Layout -> transform -> visual bounds, in that order and always all
+# three. Running a subset is the classic source of a UI that is
+# positioned correctly but hit-tests against last frame's rectangles.
+func runUiSystems(world: mod UiWorld, res: view Gpu2dUi) pub {
+  layoutSystem(world: world)
+  transformSystem(world: world)
+  visualBoundsSystem(world: world, res: res)
+}
+
+# Re-fit the world to the window after a resize. Returns whether anything
+# changed, which the caller feeds into its redraw decision.
+func resizeUiToWindow(world: mod UiWorld, res: view Gpu2dUi) pub ret Bool {
+  if gpu2d.windowResized() is false {
+    ret false
+  }
+  let w: Float = windowExtentW()
+  let h: Float = windowExtentH()
+  if w <= 0.0 or h <= 0.0 {
+    ret false
+  }
+  gpu2d.setDesignResolution(width: w, height: h, fit: 0)
+  world.layoutW = w
+  world.layoutH = h
+  runUiSystems(world: world, res: res)
+  ret true
+}
+
+# ----- named-node access ----------------------------------------------
+# A .raescene names its nodes; this is how an app talks to them. Every
+# helper is a no-op on an unknown id rather than an error: a UI that
+# silently omits a label it cannot find is far easier to work with than
+# one that refuses to start because a scene was edited.
+
+func nodeEntityFor(world: view UiWorld, nodeId: view String) pub ret EntityId {
+  let found: opt Int = world.nodeIds.get(k: nodeId)
+  if found is none { ret noEntity() }
+  let raw: Int = found
+  ret entityId(v: raw)
+}
+
+func setNodeText(world: mod UiWorld, nodeId: view String, value: view String) pub {
+  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entity) { ret }
+  if componentHas(this: world.texts, entity: entity) is false { ret }
+  let text: mod Text => componentMod(this: world.texts, entity: entity)
+  text.text = "{value}"
+}
+
+func setNodeActive(world: mod UiWorld, nodeId: view String, value: view Bool) pub {
+  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entity) { ret }
+  let active: Active = { value: value }
+  componentSet(this: world.actives, entity: entity, data: active)
+}
+
+func setNodeRect(world: mod UiWorld, nodeId: view String, x: view Float, y: view Float,
+                 w: view Float, h: view Float) pub {
+  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entity) { ret }
+  if componentHas(this: world.rects, entity: entity) is false { ret }
+  let r: mod Rect => componentMod(this: world.rects, entity: entity)
+  r.x = x
+  r.y = y
+  r.w = w
+  r.h = h
+}
+
+func nodeRectW(world: view UiWorld, nodeId: view String) pub ret Float {
+  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entity) { ret 0.0 }
+  if componentHas(this: world.rects, entity: entity) is false { ret 0.0 }
+  let r: Rect = componentGet(this: world.rects, entity: entity)
+  ret r.w
+}
+
+func nodeRectH(world: view UiWorld, nodeId: view String) pub ret Float {
+  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entity) { ret 0.0 }
+  if componentHas(this: world.rects, entity: entity) is false { ret 0.0 }
+  let r: Rect = componentGet(this: world.rects, entity: entity)
+  ret r.h
+}
+
+# ----- action events --------------------------------------------------
+# `OnClick` in a .raescene carries an actionId string; the app reacts to
+# those rather than to entities, so a scene can be rewritten without
+# touching the code that handles its buttons.
+#
+# The accessor exists so callers do not reach into the event buffer
+# themselves: a List of structs needs rae_ext_rae_buf_get rather than
+# .at() (see the note in docs/ownership-model.md), and that is exactly
+# the kind of detail that gets copied wrong.
+
+func uiActionCount(input: view UiInput) pub ret Int {
+  ret input.events.length
+}
+
+func uiActionAt(input: view UiInput, index: view Int) pub ret String {
+  if index < 0 or index >= input.events.length {
+    ret ""
+  }
+  let event: UiActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: index)
+  ret "{event.actionId}"
+}
+
+# True when `actionId` fired this frame. The common case is a handful of
+# buttons, so a scan per button is cheaper than building a set — and it
+# reads as a list of things the app responds to, which is the point.
+func uiActionFired(input: view UiInput, actionId: view String) pub ret Bool {
+  var i: Int = 0
+  loop i < input.events.length {
+    let event: UiActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
+    if event.actionId.equals(other: actionId) {
+      ret true
+    }
+    i = i + 1
+  }
+  ret false
+}

@@ -1,0 +1,285 @@
+# app3d/control_panel — a panel an app fills with its own buttons.
+#
+# The gap this closes: example 110 authored every button, its label, its
+# rectangle and its highlight by hand in a .raescene, then re-placed them
+# from code on every resize through a bespoke `anchorUiToExtent`. That is
+# fine for one example and unshippable as a pattern — the next example
+# needs different buttons, so it copies all of it.
+#
+# Here the example authors ONLY a host node in its .raescene, carrying a
+# `Layout` (horizontal or vertical, with a gap), `Padding` and a `Shape`.
+# Buttons are then declared in code and built into that host. Because the
+# host lays out its children, adding or removing a button needs no
+# coordinates anywhere — which is what makes "insert your own buttons"
+# a real capability rather than a documented convention.
+#
+# BUILT FROM COMPONENTS, NOT FROM A PREFAB FILE. lib/ui can mount a
+# .raescene fragment per button, and that was the first design. It was
+# dropped because it puts a file dependency in a library — every example
+# would have to copy `panel-button.raescene` into its own assets to use a
+# shared module, which recreates the duplication this exists to remove.
+# Appearance still comes from one shared place: the THEME. Colours and
+# the text style are palette slots resolved at paint, so a panel matches
+# whatever theme the app loaded without this module knowing any colours.
+#
+# GROUPS ARE RADIO SETS. A button with group 0 is independent (a toggle
+# or an action). A button with a positive group is one of a mutually
+# exclusive set — clip selection, camera mode, scene choice — where
+# selecting one deselects its siblings. Radio behaviour is the single
+# most-repeated piece of UI state code, and it is exactly the part that
+# is easy to leave half-implemented, so it lives here.
+import core
+open ui/ecs
+open ui/components
+open ui/registry
+open ui/input_gpu2d
+open ui/render_gpu2d
+open app3d/ui_shell
+
+# Fallback geometry, used when the caller does not override it. These are
+# points, matching ui_shell's logical-size convention.
+const panelButtonW: Float = 104.0
+const panelButtonH: Float = 34.0
+
+# Theme palette slots. Named here so a panel picks up an app's theme
+# rather than carrying colours of its own — see the note above.
+const panelSlotIdle: String = "surfaceVariant"
+const panelSlotSelected: String = "primary"
+
+type ControlPanel {
+  # The .raescene node the buttons are built into. Its Layout does the
+  # placement, so this module never computes a position.
+  hostNodeId: String
+  # Parallel arrays rather than a List of structs: the label and action
+  # are Strings, and a List(Struct) carrying Strings does not deep-copy
+  # on add (docs/ownership-model.md), which is a sharp edge to hand to
+  # every caller of a shared module.
+  ids: List(String)
+  actionIds: List(String)
+  groups: List(Int)
+  buttonEntities: List(EntityId)
+  labelEntities: List(EntityId)
+  selectedIds: List(String)
+  buttonW: Float
+  buttonH: Float
+  textStyleId: String
+}
+
+func createControlPanel(hostNodeId: view String) pub ret ControlPanel {
+  ret ControlPanel {
+    hostNodeId: "{hostNodeId}"
+    ids: createList(String, cap: 8)
+    actionIds: createList(String, cap: 8)
+    groups: createList(Int, cap: 8)
+    buttonEntities: createList(EntityId, cap: 8)
+    labelEntities: createList(EntityId, cap: 8)
+    selectedIds: createList(String, cap: 4)
+    buttonW: panelButtonW
+    buttonH: panelButtonH
+    textStyleId: "panelButton"
+  }
+}
+
+# Declare a button. Nothing is created until `buildControlPanel` runs, so
+# the whole panel can be described before a world exists — which keeps
+# the description next to the state it drives rather than interleaved
+# with ECS calls.
+#
+# `group` 0 means independent; a positive group makes the button one of a
+# radio set.
+func addPanelButton(panel: mod ControlPanel, id: view String, label: view String,
+                    actionId: view String, group: view Int) pub {
+  let idList: mod List(String) => panel.ids
+  let actionList: mod List(String) => panel.actionIds
+  let groupList: mod List(Int) => panel.groups
+  let labelList: mod List(String) => panel.selectedIds
+  idList.add(value: "{id}")
+  actionList.add(value: "{actionId}")
+  groupList.add(value: group)
+  # `selectedIds` doubles as the pending label store until build time:
+  # one list, filled in declaration order, read once. It is re-purposed
+  # to hold the per-group selection afterwards.
+  labelList.add(value: "{label}")
+}
+
+func panelIndexOf(panel: view ControlPanel, id: view String) pub ret Int {
+  var i: Int = 0
+  loop i < panel.ids.length {
+    if panel.ids.at(index: i).equals(other: id) {
+      ret i
+    }
+    i = i + 1
+  }
+  ret 0 - 1
+}
+
+# Create the entities and attach them to the host node's children.
+#
+# Two entities per button: the button itself carries the shape and the
+# click, and a child carries the text. They are separate because
+# OpticalAlign centres TEXT within a box, which needs a box to centre
+# inside — collapsing them would centre the button within its parent
+# instead, which is the layout's job.
+func buildControlPanel(panel: mod ControlPanel, world: mod UiWorld, res: view Gpu2dUi) pub ret Bool {
+  let host: EntityId = nodeEntityFor(world: world, nodeId: panel.hostNodeId)
+  if isNone(this: host) {
+    ret false
+  }
+  let buttons: mod List(EntityId) => panel.buttonEntities
+  let labels: mod List(EntityId) => panel.labelEntities
+  # APPEND rather than replace. A host may already have authored
+  # children — a title, a readout — and a panel that overwrote them would
+  # silently delete part of the scene it was asked to extend.
+  let kids: List(EntityId) = createList(EntityId, cap: panel.ids.length + 4)
+  if componentHas(this: world.childrens, entity: host) {
+    let existing: view Children => componentView(this: world.childrens, entity: host)
+    var e: Int = 0
+    loop e < existing.ids.length {
+      kids.add(value: existing.ids.at(index: e))
+      e = e + 1
+    }
+  }
+  var i: Int = 0
+  loop i < panel.ids.length {
+    let buttonE: EntityId = createEntity(world: world)
+    let labelE: EntityId = createEntity(world: world)
+
+    let rect: Rect = { x: 0.0, y: 0.0, w: panel.buttonW, h: panel.buttonH }
+    componentSet(this: world.rects, entity: buttonE, data: rect)
+    let shape: Shape = {
+      kind: ShapeKind.roundedRect
+      fill: RgbaColor { r: 35, g: 42, b: 56, a: 255 }
+      stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+      fillSlot: panelSlotIdle
+      strokeSlot: ""
+      strokeWidth: 0.0
+      radius: 8.0
+    }
+    componentSet(this: world.shapes, entity: buttonE, data: shape)
+    let click: OnClick = {
+      actionId: "{panel.actionIds.at(index: i)}"
+      actionIdDouble: ""
+      actionIdTriple: ""
+      maxDelayMs: 0
+    }
+    componentSet(this: world.onClicks, entity: buttonE, data: click)
+
+    let labelRect: Rect = { x: 0.0, y: 0.0, w: panel.buttonW, h: panel.buttonH }
+    componentSet(this: world.rects, entity: labelE, data: labelRect)
+    let text: Text = {
+      text: "{panel.selectedIds.at(index: i)}"
+      styleId: "{panel.textStyleId}"
+      wrapWidthMode: WrapWidthMode.none
+    }
+    componentSet(this: world.texts, entity: labelE, data: text)
+    let optical: OpticalAlign = {
+      enabled: true, centerX: true, centerY: true,
+      bias: Vec2 { x: 0.0, y: 0.0 }
+    }
+    componentSet(this: world.opticalAligns, entity: labelE, data: optical)
+
+    let labelKids: List(EntityId) = createList(EntityId, cap: 1)
+    labelKids.add(value: labelE)
+    let buttonChildren: Children = { ids: own labelKids }
+    componentSet(this: world.childrens, entity: buttonE, data: buttonChildren)
+
+    buttons.add(value: buttonE)
+    labels.add(value: labelE)
+    kids.add(value: buttonE)
+    i = i + 1
+  }
+  let hostChildren: Children = { ids: own kids }
+  componentSet(this: world.childrens, entity: host, data: hostChildren)
+
+  # `selectedIds` held the pending labels until now; from here it holds
+  # one selected id per group, indexed by group number.
+  let sel: mod List(String) => panel.selectedIds
+  sel.clear()
+  var g: Int = 0
+  loop g < panel.ids.length + 1 {
+    sel.add(value: "")
+    g = g + 1
+  }
+  runUiSystems(world: world, res: res)
+  ret true
+}
+
+func setPanelButtonLabel(panel: view ControlPanel, world: mod UiWorld,
+                         id: view String, label: view String) pub {
+  let idx: Int = panelIndexOf(panel: panel, id: id)
+  if idx < 0 {
+    ret
+  }
+  let entity: EntityId = panel.labelEntities.at(index: idx)
+  if componentHas(this: world.texts, entity: entity) is false {
+    ret
+  }
+  let text: mod Text => componentMod(this: world.texts, entity: entity)
+  text.text = "{label}"
+}
+
+# Select `id` within its group, repainting every button in that group.
+#
+# The repaint is over the GROUP rather than over the newly selected
+# button alone: the previous selection has to be cleared, and the only
+# way to know which one that was without tracking it is to set all of
+# them. That also makes the function idempotent, so a caller can drive it
+# from state every frame without accumulating highlights.
+func setPanelSelection(panel: mod ControlPanel, world: mod UiWorld,
+                       group: view Int, id: view String) pub {
+  if group <= 0 {
+    ret
+  }
+  let sel: mod List(String) => panel.selectedIds
+  if group < sel.length {
+    sel.set(index: group, value: "{id}")
+  }
+  var i: Int = 0
+  loop i < panel.ids.length {
+    if panel.groups.at(index: i) is group {
+      let entity: EntityId = panel.buttonEntities.at(index: i)
+      if componentHas(this: world.shapes, entity: entity) {
+        let shape: mod Shape => componentMod(this: world.shapes, entity: entity)
+        if panel.ids.at(index: i).equals(other: id) {
+          shape.fillSlot = panelSlotSelected
+        } else {
+          shape.fillSlot = panelSlotIdle
+        }
+      }
+    }
+    i = i + 1
+  }
+}
+
+# Highlight a group-0 button as on/off — a toggle rather than a radio.
+func setPanelButtonOn(panel: view ControlPanel, world: mod UiWorld,
+                      id: view String, on: view Bool) pub {
+  let idx: Int = panelIndexOf(panel: panel, id: id)
+  if idx < 0 {
+    ret
+  }
+  let entity: EntityId = panel.buttonEntities.at(index: idx)
+  if componentHas(this: world.shapes, entity: entity) is false {
+    ret
+  }
+  let shape: mod Shape => componentMod(this: world.shapes, entity: entity)
+  if on {
+    shape.fillSlot = panelSlotSelected
+  } else {
+    shape.fillSlot = panelSlotIdle
+  }
+}
+
+# The id of the button whose action fired this frame, or "" for none.
+# Callers switch on the returned id rather than on action strings, so a
+# panel can be re-labelled or re-ordered without touching its handler.
+func panelClickedId(panel: view ControlPanel, input: view UiInput) pub ret String {
+  var i: Int = 0
+  loop i < panel.ids.length {
+    if uiActionFired(input: input, actionId: panel.actionIds.at(index: i)) {
+      ret "{panel.ids.at(index: i)}"
+    }
+    i = i + 1
+  }
+  ret ""
+}
