@@ -249,6 +249,15 @@ GB_FULLSCREEN_VS
 "const AO_RADIUS: f32 = 1.2;\n"
 "const AO_SLICES: i32 = 3;\n"
 "const AO_STEPS: i32 = 6;\n"
+/* A SPHERE IS FACETED IN THE DEPTH BUFFER BUT SMOOTH IN THE NORMAL
+ * BUFFER. Normals are interpolated across each triangle, while neighbour
+ * positions are reconstructed from depth and so lie on flat facets. Points
+ * on the next facet therefore sit fractionally above the tangent plane and
+ * register as occluders, drawing a dark seam along every triangle edge —
+ * the square grid visible on the spheres. Ignoring horizons this shallow
+ * costs nothing real: a true occluder at grazing elevation contributes
+ * almost no occlusion anyway. */
+"const AO_BIAS: f32 = 0.06;\n"
 "fn ign(pix: vec2<f32>) -> f32 {\n"
 "  return fract(52.9829189 * fract(dot(pix, vec2<f32>(0.06711056, 0.00583715))));\n"
 "}\n"
@@ -298,8 +307,16 @@ GB_FULLSCREEN_VS
 "    let ang = (f32(s) + noise) * 3.14159265 / f32(AO_SLICES);\n"
 "    let dir = vec2<f32>(cos(ang), sin(ang));\n"
 "    var maxSin = 0.0;\n"
+/* JITTER THE MARCH RADIALLY, not just the slice angle. Without this every
+ * pixel samples the same six radii, so the pixels whose occluder first
+ * falls in step 3 form a contour — which is exactly the ring banding seen
+ * on spheres, the torus and metaballs. Offsetting each pixel's whole
+ * march by a sub-step amount turns that contour into noise the filter
+ * below averages away. The offset is per-slice so the three slices do not
+ * band together. */
+"    let radialJitter = fract(noise + f32(s) * 0.6180339887);\n"
 "    for (var t = 1; t <= AO_STEPS; t = t + 1) {\n"
-"      let stepPx = dir * (f32(t) * stepPxLen);\n"
+"      let stepPx = dir * ((f32(t) - 1.0 + radialJitter) * stepPxLen);\n"
 "      let sp = px + vec2<i32>(stepPx);\n"
 "      if (sp.x < 0 || sp.y < 0 || sp.x >= dim.x || sp.y >= dim.y) { break; }\n"
 "      let sd = textureLoad(depthTex, sp, 0);\n"
@@ -311,7 +328,7 @@ GB_FULLSCREEN_VS
 /* The horizon angle above the tangent plane. sin(elevation) = N.v/|v|,
  * and tracking its MAXIMUM along the march is the horizon search: one
  * value summarises every occluder in this direction. */
-"      let sinE = dot(N, v) / dist;\n"
+"      let sinE = dot(N, v) / dist - AO_BIAS;\n"
 /* Attenuate with distance so a far occluder does not count as much as a
  * touching one; without it AO reads as a hard disc at the radius. */
 "      let falloff = 1.0 - (dist / AO_RADIUS) * (dist / AO_RADIUS);\n"
