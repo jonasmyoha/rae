@@ -46,6 +46,15 @@ type Renderer3d {
 # Declare the frame. Passes are declared in a deliberately arbitrary order
 # to make the point that execution order comes from the DECLARATIONS, not
 # from the sequence of these calls.
+# Which lighting path this module implements, for window titles and
+# diagnostics. Deliberately shares its NAME with the deferred renderer's
+# version: an example opens one renderer, so the word follows the module
+# it actually uses and cannot go stale when it migrates. Opening both is
+# an ambiguity error, which is the correct failure mode.
+func rendererPathName() pub ret String {
+  ret "forward"
+}
+
 func createRenderer3d() pub ret Renderer3d {
   var g: RenderGraph = createRenderGraph()
 
