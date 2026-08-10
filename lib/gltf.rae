@@ -645,3 +645,114 @@ func meshName(g: view Glb, meshIndex: view Int) pub ret String {
   let mesh: JsonValue = jsonArrayAt(doc: g.doc, this: meshes, idx: meshIndex)
   ret jsonString(this: objField(g: g, obj: mesh, key: "name"), fallback: "")
 }
+
+# ----- skinned primitives (#374) ---------------------------------------
+
+# A primitive with its skinning attributes, ready for the skinned GPU
+# pipeline. 16 Floats per vertex:
+#
+#   [0..2]   position
+#   [3..5]   normal
+#   [6..7]   uv
+#   [8..11]  joint indices  (as Floats; see below)
+#   [12..15] joint weights
+#
+# SEPARATE FROM MeshData ON PURPOSE. The static layout is 8 Floats and is
+# hardcoded in mesh3d, in gpu3d's vertex layout and in the WGSL. Widening
+# it would ripple through every mesh generator and every 3D example, and
+# would make a ground plane carry 32 bytes per vertex of joint data it can
+# never read. Skinned and static geometry are different enough to deserve
+# different buffers.
+#
+# JOINT INDICES TRAVEL AS FLOATS. glTF stores them as unsigned bytes or
+# shorts and the shader wants integers, but the vertex path here is
+# float-only, so they are widened on load and cast back in the shader.
+# Exact for every index a 24-bit float mantissa can hold, which is every
+# skeleton anyone will build.
+type SkinnedMeshData {
+  verts: List(Float)
+  indices: List(Int)
+  vertCount: Int
+}
+
+func loadSkinnedPrimitive(g: view Glb, meshIndex: view Int, primIndex: view Int) pub ret SkinnedMeshData {
+  let verts: List(Float) = createList(Float, cap: 0)
+  let indices: List(Int) = createList(Int, cap: 0)
+  if g.ok is false {
+    ret SkinnedMeshData { verts: own verts, indices: own indices, vertCount: 0 }
+  }
+  let root: JsonValue = jsonRoot(doc: g.doc)
+  let meshes: JsonValue = arrayField(g: g, obj: root, key: "meshes")
+  let mesh: JsonValue = jsonArrayAt(doc: g.doc, this: meshes, idx: meshIndex)
+  let prims: JsonValue = arrayField(g: g, obj: mesh, key: "primitives")
+  let prim: JsonValue = jsonArrayAt(doc: g.doc, this: prims, idx: primIndex)
+  let attrs: JsonValue = objField(g: g, obj: prim, key: "attributes")
+
+  # Geometry comes from the existing loader so the two paths cannot
+  # disagree about positions, generated normals or index rebasing.
+  let base: MeshData = loadPrimitive(g: g, meshIndex: meshIndex, primIndex: primIndex)
+  if base.vertCount is 0 {
+    ret SkinnedMeshData { verts: own verts, indices: own indices, vertCount: 0 }
+  }
+
+  let jointAcc: Int = intField(g: g, obj: attrs, key: "JOINTS_0", fallback: 0 - 1)
+  let weightAcc: Int = intField(g: g, obj: attrs, key: "WEIGHTS_0", fallback: 0 - 1)
+  # readInts, not readFloats: joint indices are INDICES, and readFloats
+  # normalises unsigned integer types to [0,1], which would turn joint 37
+  # into 0.145 and silently bind every vertex to joint 0.
+  let joints: List(Int) = readInts(g: g, index: jointAcc)
+  let weights: List(Float) = readFloats(g: g, index: weightAcc)
+  let hasSkin: Bool = joints.length >= base.vertCount * 4 and weights.length >= base.vertCount * 4
+
+  var i: Int = 0
+  loop i < base.vertCount {
+    var c: Int = 0
+    loop c < 8 {
+      verts.add(value: base.verts.at(index: i * 8 + c))
+      c = c + 1
+    }
+    if hasSkin {
+      var k: Int = 0
+      loop k < 4 {
+        verts.add(value: joints.at(index: i * 4 + k).toFloat())
+        k = k + 1
+      }
+      # Renormalise: glTF requires the four weights to sum to 1, but
+      # quantised exports drift, and an un-normalised set scales the whole
+      # vertex toward or away from the origin instead of merely posing it.
+      var sum: Float = 0.0
+      var w: Int = 0
+      loop w < 4 {
+        sum = sum + weights.at(index: i * 4 + w)
+        w = w + 1
+      }
+      if sum <= 0.0 {
+        sum = 1.0
+      }
+      w = 0
+      loop w < 4 {
+        verts.add(value: weights.at(index: i * 4 + w) / sum)
+        w = w + 1
+      }
+    } else {
+      # Unskinned primitive inside a skinned model — props parented to a
+      # bone rather than weighted. Bind it rigidly to joint 0 with full
+      # weight, which is what "follows the root" means in palette terms.
+      verts.add(value: 0.0)
+      verts.add(value: 0.0)
+      verts.add(value: 0.0)
+      verts.add(value: 0.0)
+      verts.add(value: 1.0)
+      verts.add(value: 0.0)
+      verts.add(value: 0.0)
+      verts.add(value: 0.0)
+    }
+    i = i + 1
+  }
+  var k2: Int = 0
+  loop k2 < base.indices.length {
+    indices.add(value: base.indices.at(index: k2))
+    k2 = k2 + 1
+  }
+  ret SkinnedMeshData { verts: own verts, indices: own indices, vertCount: base.vertCount }
+}

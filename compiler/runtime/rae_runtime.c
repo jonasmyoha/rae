@@ -55,8 +55,11 @@
 #include "runtime_gpu2d_image.c"
 #include "runtime_gpu2d_frame.c"
 #include "runtime_gpu3d.c"
-/* After runtime_gpu3d.c: the deferred geometry pass shares mesh storage
- * (an asset, not a frame resource) and the platform present with it. */
+/* Both come after runtime_gpu3d.c and build on it. Skinning shares its
+ * frame uniform, its open render pass and its static pipeline, switching
+ * pipeline between draws; the deferred geometry pass shares mesh storage
+ * (an asset, not a frame resource) and the platform present. */
+#include "runtime_gpu3d_skin.c"
 #include "runtime_gpu3d_gbuffer.c"
 /* After the G-buffer: the pyramid, lighting and composite all read what it
  * produced, and reuse its targets' generation counter. */
