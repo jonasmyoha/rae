@@ -101,6 +101,171 @@ static const char* G3D_SHADOW_SKIN_WGSL =
 "  return S.lightViewProj * (models[ii] * vec4<f32>(sp.xyz, 1.0));\n"
 "}\n";
 
+
+/* ----- metaball clusters as shadow CASTERS ---------------------------
+ *
+ * Metaballs have no triangles, so the cascade pass cannot rasterise them
+ * and they were the one thing in example 110 that floated without a
+ * shadow. The design doc assigns SDF shadowing to Layer C (#386), which
+ * cone-traces the GI representation — but that is for RECEIVING soft
+ * far-field shadows and needs a representation that does not exist yet.
+ * Making a metaball CAST into an existing cascade is much smaller: march
+ * the same field from the light instead of from the eye, and write depth.
+ *
+ * ORTHOGRAPHIC RAYS. Under a directional light every ray is parallel, so
+ * the ray direction is constant and only the origin varies per shadow-map
+ * pixel. That is why this needs the cascade matrix's INVERSE: to turn a
+ * shadow-map pixel back into a world-space point on the near plane.
+ *
+ * The field evaluation is the same transcription as the G-buffer's, for
+ * the same reason — WGSL has no include. A divergence here would make a
+ * blob cast a shadow shaped differently from the blob, which is worse
+ * than no shadow at all.
+ */
+#define G3D_SM_SDF_MAX_CLUSTERS 8
+#define G3D_SM_SDF_MAX_BALLS 64
+#define G3D_SM_SDF_UBYTES 160   /* 2 mat4 + lightDir vec4 + params vec4 */
+
+static WGPURenderPipeline g3d_sm_sdf_pipeline = NULL;
+static WGPUBuffer    g3d_sm_sdf_ball_sbuf[G3D_SM_SDF_MAX_CLUSTERS];
+static WGPUBuffer    g3d_sm_sdf_ubuf[G3D_SHADOW_MAX_CASCADES * G3D_SM_SDF_MAX_CLUSTERS];
+static WGPUBindGroup g3d_sm_sdf_bind[G3D_SHADOW_MAX_CASCADES * G3D_SM_SDF_MAX_CLUSTERS];
+static float g3d_sm_sdf_balls_cpu[G3D_SM_SDF_MAX_CLUSTERS * G3D_SM_SDF_MAX_BALLS * 4];
+static int   g3d_sm_sdf_count[G3D_SM_SDF_MAX_CLUSTERS];
+static float g3d_sm_sdf_smoothing[G3D_SM_SDF_MAX_CLUSTERS];
+static int   g3d_sm_sdf_clusters = 0;
+
+static const char* G3D_SM_SDF_WGSL =
+"struct U {\n"
+"  lightViewProj: mat4x4<f32>,\n"
+"  invLightViewProj: mat4x4<f32>,\n"
+"  lightDir: vec4<f32>,\n"
+"  params: vec4<f32>,\n"   /* x = ball count, y = smoothing, z = march span */
+"};\n"
+"@group(0) @binding(0) var<uniform> U0: U;\n"
+"@group(0) @binding(1) var<storage, read> balls: array<vec4<f32>>;\n"
+"fn smoothMin(a: f32, b: f32, k: f32) -> f32 {\n"
+"  let h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);\n"
+"  return mix(b, a, h) - k * h * (1.0 - h);\n"
+"}\n"
+"fn mapScene(p: vec3<f32>) -> f32 {\n"
+"  var d = 10000.0;\n"
+"  var i = 0u;\n"
+"  let n = u32(U0.params.x);\n"
+"  loop {\n"
+"    if (i >= n) { break; }\n"
+"    let b = balls[i];\n"
+"    d = smoothMin(d, length(p - b.xyz) - b.w, U0.params.y);\n"
+"    i = i + 1u;\n"
+"  }\n"
+"  return d;\n"
+"}\n"
+"struct VsOut {\n"
+"  @builtin(position) pos: vec4<f32>,\n"
+"  @location(0) ndc: vec2<f32>,\n"
+"};\n"
+"@vertex\n"
+"fn vs(@builtin(vertex_index) vi: u32) -> VsOut {\n"
+"  var pts = array<vec2<f32>, 3>(\n"
+"    vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));\n"
+"  var o: VsOut;\n"
+"  o.pos = vec4<f32>(pts[vi], 0.0, 1.0);\n"
+"  o.ndc = pts[vi];\n"
+"  return o;\n"
+"}\n"
+"@fragment\n"
+"fn fs(in: VsOut) -> @builtin(frag_depth) f32 {\n"
+/* The cascade is NOT reverse-Z (see the file header), so z=0 is the near
+ * plane. Unproject this shadow-map pixel there to get the ray origin. */
+"  let nearH = U0.invLightViewProj * vec4<f32>(in.ndc, 0.0, 1.0);\n"
+"  let origin = nearH.xyz / nearH.w;\n"
+"  let dir = normalize(U0.lightDir.xyz);\n"
+"  var travel = 0.0;\n"
+"  var hit = false;\n"
+"  var step = 0u;\n"
+"  let span = U0.params.z;\n"
+"  loop {\n"
+"    if (step >= 96u || travel > span) { break; }\n"
+"    let d = mapScene(origin + dir * travel);\n"
+"    if (d < 0.004) { hit = true; break; }\n"
+"    travel = travel + max(d * 0.8, 0.005);\n"
+"    step = step + 1u;\n"
+"  }\n"
+/* A miss must leave the cascade's cleared 1.0 in place, or the whole
+ * shadow map would read as "occluded at the near plane" and black the
+ * scene out. */
+"  if (!hit) { discard; }\n"
+"  let world = origin + dir * travel;\n"
+"  let clip = U0.lightViewProj * vec4<f32>(world, 1.0);\n"
+"  return clamp(clip.z / clip.w, 0.0, 1.0);\n"
+"}\n";
+
+static void g3d_sm_sdf_init(void) {
+    if (g3d_sm_sdf_pipeline) return;
+    WGPUShaderSourceWGSL src; memset(&src, 0, sizeof(src));
+    src.chain.sType = WGPUSType_ShaderSourceWGSL;
+    src.code = rae_wgpu_sv(G3D_SM_SDF_WGSL);
+    WGPUShaderModuleDescriptor smd; memset(&smd, 0, sizeof(smd));
+    smd.nextInChain = &src.chain;
+    WGPUShaderModule mod = wgpuDeviceCreateShaderModule(g_wgpu_dev, &smd);
+
+    WGPUDepthStencilState ds; memset(&ds, 0, sizeof(ds));
+    ds.format = WGPUTextureFormat_Depth32Float;
+    ds.depthWriteEnabled = WGPUOptionalBool_True;
+    ds.depthCompare = WGPUCompareFunction_Less;
+    ds.stencilFront.compare = WGPUCompareFunction_Always;
+    ds.stencilFront.failOp = WGPUStencilOperation_Keep;
+    ds.stencilFront.depthFailOp = WGPUStencilOperation_Keep;
+    ds.stencilFront.passOp = WGPUStencilOperation_Keep;
+    ds.stencilBack = ds.stencilFront;
+    ds.stencilReadMask = 0xFFFFFFFFu; ds.stencilWriteMask = 0xFFFFFFFFu;
+
+    WGPUFragmentState fs; memset(&fs, 0, sizeof(fs));
+    fs.module = mod; fs.entryPoint = rae_wgpu_sv("fs"); fs.targetCount = 0;
+
+    WGPURenderPipelineDescriptor pd; memset(&pd, 0, sizeof(pd));
+    pd.layout = NULL;
+    pd.vertex.module = mod; pd.vertex.entryPoint = rae_wgpu_sv("vs");
+    pd.vertex.bufferCount = 0;
+    pd.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+    pd.primitive.frontFace = WGPUFrontFace_CCW;
+    pd.primitive.cullMode = WGPUCullMode_None;
+    pd.depthStencil = &ds;
+    pd.multisample.count = 1; pd.multisample.mask = 0xFFFFFFFFu;
+    pd.fragment = &fs;
+    g3d_sm_sdf_pipeline = wgpuDeviceCreateRenderPipeline(g_wgpu_dev, &pd);
+    wgpuShaderModuleRelease(mod);
+    if (!g3d_sm_sdf_pipeline) { fprintf(stderr, "[shadow] SDF caster pipeline FAILED\n"); return; }
+
+    for (int i = 0; i < G3D_SM_SDF_MAX_CLUSTERS; i++) {
+        WGPUBufferDescriptor bd; memset(&bd, 0, sizeof(bd));
+        bd.size = (uint64_t)G3D_SM_SDF_MAX_BALLS * 4 * sizeof(float);
+        bd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
+        g3d_sm_sdf_ball_sbuf[i] = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
+    }
+    for (int i = 0; i < G3D_SHADOW_MAX_CASCADES * G3D_SM_SDF_MAX_CLUSTERS; i++) {
+        WGPUBufferDescriptor ud; memset(&ud, 0, sizeof(ud));
+        ud.size = G3D_SM_SDF_UBYTES;
+        ud.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+        g3d_sm_sdf_ubuf[i] = wgpuDeviceCreateBuffer(g_wgpu_dev, &ud);
+    }
+}
+
+/* Queue a metaball cluster as a caster. Called between shadowBegin and
+ * shadowEnd, like the mesh casters. */
+void rae_ext_gpu3d_shadowMetaballs(const float* packedBalls, int64_t count, float smoothing) {
+    if (!g3d_sm_enabled || !packedBalls || count < 1) return;
+    if (g3d_sm_sdf_clusters >= G3D_SM_SDF_MAX_CLUSTERS) return;
+    if (count > G3D_SM_SDF_MAX_BALLS) count = G3D_SM_SDF_MAX_BALLS;
+    g3d_sm_sdf_init();
+    if (!g3d_sm_sdf_pipeline) return;
+    int ci = g3d_sm_sdf_clusters++;
+    memcpy(g3d_sm_sdf_balls_cpu + ci * G3D_SM_SDF_MAX_BALLS * 4, packedBalls,
+           (size_t)count * 4 * sizeof(float));
+    g3d_sm_sdf_count[ci] = (int)count;
+    g3d_sm_sdf_smoothing[ci] = smoothing > 0.0001f ? smoothing : 0.0001f;
+}
+
 static void g3d_shadow_release_targets(void) {
     for (int i = 0; i < G3D_SHADOW_MAX_CASCADES; i++) {
         if (g3d_sm_layer_view[i]) { wgpuTextureViewRelease(g3d_sm_layer_view[i]); g3d_sm_layer_view[i] = NULL; }
@@ -301,6 +466,7 @@ void rae_ext_gpu3d_shadowBegin(const float* cascades, int64_t count,
                                const float* texelWorld, const float* depthRange) {
     g3d_sm_enabled = false;
     g3d_sm_draw_count = 0;
+    g3d_sm_sdf_clusters = 0;
     if (!g_wgpu_dev || !cascades || count < 1) return;
     if (count > G3D_SHADOW_MAX_CASCADES) count = G3D_SHADOW_MAX_CASCADES;
     if (resolution < 256) resolution = 256;
@@ -417,6 +583,48 @@ void rae_ext_gpu3d_shadowEnd(void) {
             /* The instance index selects this draw's model matrix, so one
              * instance is drawn per queued caster. */
             wgpuRenderPassEncoderDrawIndexed(pass, icount, 1, 0, 0, (uint32_t)i);
+        }
+        /* Metaball clusters, after the triangles: each is a fullscreen
+         * raymarch over this cascade that writes only depth. */
+        for (int ci = 0; ci < g3d_sm_sdf_clusters; ci++) {
+            int ui = c * G3D_SM_SDF_MAX_CLUSTERS + ci;
+            float u[G3D_SM_SDF_UBYTES / 4];
+            memset(u, 0, sizeof(u));
+            memcpy(u, g3d_sm_cascade_vp + c * 16, 16 * sizeof(float));
+            if (!g3d_invert_mat4(g3d_sm_cascade_vp + c * 16, u + 16)) continue;
+            /* Direction the light TRAVELS, recovered from the cascade
+             * matrix rather than passed in again: the matrix is the only
+             * definition of where this cascade looks from, so deriving it
+             * cannot disagree with the fit. Row 2 of the light view is
+             * -forward, and the ortho projection leaves it unrotated. */
+            u[32] = 0.0f - g3d_sm_cascade_vp[c * 16 + 2];
+            u[33] = 0.0f - g3d_sm_cascade_vp[c * 16 + 6];
+            u[34] = 0.0f - g3d_sm_cascade_vp[c * 16 + 10];
+            u[35] = 0.0f;
+            u[36] = (float)g3d_sm_sdf_count[ci];
+            u[37] = g3d_sm_sdf_smoothing[ci];
+            /* March span: the cascade's whole depth range, so a blob
+             * anywhere between the light and the far plane is found. */
+            u[38] = g3d_sm_depth_range[c] > 0.0f ? g3d_sm_depth_range[c] : 100.0f;
+            wgpuQueueWriteBuffer(g_wgpu_queue, g3d_sm_sdf_ubuf[ui], 0, u, G3D_SM_SDF_UBYTES);
+            wgpuQueueWriteBuffer(g_wgpu_queue, g3d_sm_sdf_ball_sbuf[ci], 0,
+                                 g3d_sm_sdf_balls_cpu + ci * G3D_SM_SDF_MAX_BALLS * 4,
+                                 (size_t)g3d_sm_sdf_count[ci] * 4 * sizeof(float));
+            if (!g3d_sm_sdf_bind[ui]) {
+                WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g3d_sm_sdf_pipeline, 0);
+                WGPUBindGroupEntry e[2]; memset(e, 0, sizeof(e));
+                e[0].binding = 0; e[0].buffer = g3d_sm_sdf_ubuf[ui]; e[0].size = G3D_SM_SDF_UBYTES;
+                e[1].binding = 1; e[1].buffer = g3d_sm_sdf_ball_sbuf[ci];
+                e[1].size = (uint64_t)G3D_SM_SDF_MAX_BALLS * 4 * sizeof(float);
+                WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
+                bgd.layout = bgl; bgd.entryCount = 2; bgd.entries = e;
+                g3d_sm_sdf_bind[ui] = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
+                wgpuBindGroupLayoutRelease(bgl);
+            }
+            if (!g3d_sm_sdf_bind[ui]) continue;
+            wgpuRenderPassEncoderSetPipeline(pass, g3d_sm_sdf_pipeline);
+            wgpuRenderPassEncoderSetBindGroup(pass, 0, g3d_sm_sdf_bind[ui], 0, NULL);
+            wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
         }
         wgpuRenderPassEncoderEnd(pass);
         wgpuRenderPassEncoderRelease(pass);
