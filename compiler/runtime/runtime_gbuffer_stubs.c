@@ -59,3 +59,20 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
 void rae_ext_gbuffer_composite(float exposure) { (void)exposure; }
 int64_t rae_ext_gbuffer_pyramidMips(void) { return 0; }
 void rae_ext_gbuffer_deferredShutdown(void) {}
+
+/* Skinning (#374). Stubbed for builds without the GPU backend. */
+int64_t rae_ext_gpu3d_skinnedMeshCreate(const float* verts, int64_t vertCount,
+                                        const int64_t* indices, int64_t indexCount){
+    (void)verts; (void)vertCount; (void)indices; (void)indexCount; return 0;
+}
+void rae_ext_gpu3d_setPalette(const float* rows, int64_t jointCount){
+    (void)rows; (void)jointCount;
+}
+void rae_ext_gpu3d_drawSkinned(int64_t mesh, rae_Mat4* model,
+                               float r, float g, float b,
+                               float metallic, float roughness){
+    (void)mesh; (void)model; (void)r; (void)g; (void)b; (void)metallic; (void)roughness;
+}
+void rae_ext_gpu3d_skinFrameBegin(void) {}
+int64_t rae_ext_gpu3d_skinDrawCount(void) { return 0; }
+void rae_ext_gpu3d_skinShutdown(void) {}
