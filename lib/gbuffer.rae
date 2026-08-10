@@ -47,7 +47,7 @@ open math3d
 
 # ----- raw C ABI (implementation detail; prefer the typed API below) ---
 func begin(viewProj: view Mat4, clearR: Float, clearG: Float, clearB: Float) extern
-func draw(mesh: Int, model: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emissive: Float) extern
+func draw(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emissive: Float) extern
 func end() extern
 func drawCount() extern ret Int
 func debugView(mode: Int, zNear: Float, zFar: Float) extern
@@ -111,11 +111,15 @@ func modelMatrixOf(t: view Transform3d) pub ret Mat4 {
 # Write one mesh instance's surface attributes. Note what is NOT passed:
 # no light, no camera, no emission. A geometry pass that needed any of
 # those would not be a geometry pass.
-func drawInstance(mesh: view MeshHandle, transform: view Transform3d, material: view Material3d) pub {
+# `prevTransform` is where the instance was LAST frame; it drives the
+# G-buffer's motion channel, which TAA reads (#390). Pass the same
+# transform when an object did not move.
+func drawInstance(mesh: view MeshHandle, transform: view Transform3d, prevTransform: view Transform3d, material: view Material3d) pub {
   if not meshHandleIsValid(h: mesh) {
     ret
   }
   let model: Mat4 = modelMatrixOf(t: transform)
+  let prevModel: Mat4 = modelMatrixOf(t: prevTransform)
   # Emissive is ONE scalar, not a colour: an emitter's base colour is the
   # colour it emits, so the G-buffer stores intensity and lighting tints it
   # by albedo. The brightest component is the intensity — using luminance
@@ -128,7 +132,7 @@ func drawInstance(mesh: view MeshHandle, transform: view Transform3d, material: 
     emissive = material.emission.z
   }
   draw(
-    mesh: mesh.id, model: model,
+    mesh: mesh.id, model: model, prevModel: prevModel,
     r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
     metallic: material.metallic, roughness: material.roughness, emissive: emissive
   )
@@ -147,8 +151,11 @@ func renderScene(scene: view Scene3d) pub {
     let r: MeshRenderer = scene.meshRenderers.at(index: i)
     if r.visible {
       let t: Transform3d = scene.transforms.at(index: r.entity)
+      # prevTransforms is kept in lockstep with transforms by addTransform
+      # (#336), so this index is always valid.
+      let pt: Transform3d = scene.prevTransforms.at(index: r.entity)
       let m: Material3d = scene.materials.at(index: r.material)
-      drawInstance(mesh: r.mesh, transform: t, material: m)
+      drawInstance(mesh: r.mesh, transform: t, prevTransform: pt, material: m)
     }
     i = i + 1
   }
