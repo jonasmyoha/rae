@@ -674,7 +674,7 @@ void rae_ext_gbuffer_ssao(float camX, float camY, float camZ) {
 
     float u[GB_LIGHT_BYTES / 4];
     memset(u, 0, sizeof(u));
-    if (!g3d_invert_mat4(gb_viewproj, u)) {
+    if (!g3d_invert_mat4(gb_viewproj_jittered, u)) {
         memset(u, 0, 16 * sizeof(float));
         u[0] = 1.0f; u[5] = 1.0f; u[10] = 1.0f; u[15] = 1.0f;
     }
@@ -700,7 +700,7 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
     memset(u, 0, sizeof(u));
     /* Invert THIS frame's view-projection — the one the geometry pass
      * rendered with — so reconstruction matches the depth being read. */
-    if (!g3d_invert_mat4(gb_viewproj, u)) {
+    if (!g3d_invert_mat4(gb_viewproj_jittered, u)) {
         /* Singular: a degenerate camera. Leaving the matrix zeroed would
          * collapse every pixel to the origin and light the frame from
          * inside itself; identity at least fails visibly and predictably. */
