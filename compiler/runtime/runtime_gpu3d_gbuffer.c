@@ -258,6 +258,112 @@ GB_OCT_WGSL
 "  return o;\n"
 "}\n";
 
+
+/* ----- skinned geometry into the G-buffer (#391) ---------------------
+ *
+ * The deferred counterpart of runtime_gpu3d_skin.c's forward pipeline.
+ * Same 20-float vertex format, same joint palette, same linear blend —
+ * only the fragment output differs, writing packed surface attributes
+ * instead of lit colour. That is the whole point of deferred: a second
+ * GEOMETRY kind needs a second geometry pipeline, not a second lighting
+ * path.
+ *
+ * The palette is SHARED with the forward and shadow pipelines rather than
+ * duplicated. One buffer, one upload, three readers: two decoders of one
+ * format is how a pose ends up subtly sheared in exactly one pass.
+ */
+static WGPURenderPipeline gb_skin_pipeline = NULL;
+static WGPUBindGroup      gb_skin_bind = NULL;
+
+static const char* GB_SKIN_WGSL =
+"struct Frame {\n"
+"  viewProj: mat4x4<f32>,\n"
+"  prevViewProj: mat4x4<f32>,\n"
+"  jitter: vec4<f32>,\n"
+"};\n"
+"struct DrawU {\n"
+"  model: mat4x4<f32>,\n"
+"  prevModel: mat4x4<f32>,\n"
+"  albedoMetallic: vec4<f32>,\n"
+"  params: vec4<f32>,\n"
+"};\n"
+"@group(0) @binding(0) var<uniform> F: Frame;\n"
+"@group(0) @binding(1) var<storage, read> draws: array<DrawU>;\n"
+"@group(0) @binding(2) var<storage, read> palette: array<vec4<f32>>;\n"
+GB_OCT_WGSL
+"fn jointMat(j: u32) -> mat4x4<f32> {\n"
+"  let r0 = palette[j * 3u + 0u];\n"
+"  let r1 = palette[j * 3u + 1u];\n"
+"  let r2 = palette[j * 3u + 2u];\n"
+"  return mat4x4<f32>(\n"
+"    vec4<f32>(r0.x, r1.x, r2.x, 0.0),\n"
+"    vec4<f32>(r0.y, r1.y, r2.y, 0.0),\n"
+"    vec4<f32>(r0.z, r1.z, r2.z, 0.0),\n"
+"    vec4<f32>(r0.w, r1.w, r2.w, 1.0));\n"
+"}\n"
+"struct VsOut {\n"
+"  @builtin(position) pos: vec4<f32>,\n"
+"  @location(0) nrm: vec3<f32>,\n"
+"  @location(1) @interpolate(flat) inst: u32,\n"
+"  @location(2) clipNow: vec4<f32>,\n"
+"  @location(3) clipPrev: vec4<f32>,\n"
+"  @location(4) vcol: vec3<f32>,\n"
+"};\n"
+"@vertex\n"
+"fn vs(@builtin(instance_index) ii: u32,\n"
+"      @location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec2<f32>,\n"
+"      @location(3) jf: vec4<f32>, @location(4) w: vec4<f32>,\n"
+"      @location(5) vc: vec4<f32>) -> VsOut {\n"
+"  let d = draws[ii];\n"
+"  let j = vec4<u32>(u32(jf.x), u32(jf.y), u32(jf.z), u32(jf.w));\n"
+"  var skin = jointMat(j.x) * w.x;\n"
+"  skin = skin + jointMat(j.y) * w.y;\n"
+"  skin = skin + jointMat(j.z) * w.z;\n"
+"  skin = skin + jointMat(j.w) * w.w;\n"
+"  let sp = skin * vec4<f32>(p, 1.0);\n"
+"  var o: VsOut;\n"
+"  o.pos = F.viewProj * (d.model * vec4<f32>(sp.xyz, 1.0));\n"
+"  let sn = skin * vec4<f32>(n, 0.0);\n"
+"  o.nrm = normalize((d.model * vec4<f32>(sn.xyz, 0.0)).xyz);\n"
+"  o.inst = ii;\n"
+"  o.vcol = vc.rgb;\n"
+"  o.clipNow = o.pos;\n"
+/* NO PREVIOUS PALETTE EXISTS, so a skinned vertex reports only its OBJECT
+ * motion, not its limb motion. Velocity is therefore right for a
+ * character sliding across the screen and wrong for a swinging arm: TAA
+ * will smear the latter until a previous-frame palette is kept. The
+ * forward path has the identical limitation and the identical note —
+ * stated in both rather than discovered in an image. */
+"  o.clipPrev = F.prevViewProj * (d.prevModel * vec4<f32>(sp.xyz, 1.0));\n"
+"  o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);\n"
+"  return o;\n"
+"}\n"
+"struct FsOut {\n"
+"  @location(0) gba: vec4<f32>,\n"
+"  @location(1) gbb: vec4<f32>,\n"
+"  @location(2) gbc: vec4<f32>,\n"
+"};\n"
+"@fragment\n"
+"fn fs(in: VsOut) -> FsOut {\n"
+"  let d = draws[in.inst];\n"
+"  let n = normalize(in.nrm);\n"
+"  let oct = octEncode(n);\n"
+"  let rough = clamp(d.params.x, 0.045, 1.0);\n"
+"  let now = in.clipNow.xy / in.clipNow.w;\n"
+"  let prev = in.clipPrev.xy / in.clipPrev.w;\n"
+"  let motion = (now - prev) * vec2<f32>(0.5, -0.5);\n"
+"  let mEnc = clamp(motion, vec2<f32>(-0.5), vec2<f32>(0.5)) + vec2<f32>(" GB_MOTION_ZERO_WGSL ");\n"
+"  var o: FsOut;\n"
+"  o.gba = vec4<f32>(oct.x, oct.y, 0.5, d.params.z);\n"
+/* Vertex colour MULTIPLIES the material's base colour, exactly as in the
+ * forward skinned shader (#378) — white is a no-op, so a model with no
+ * baked colour is unaffected. */
+"  o.gbb = vec4<f32>(d.albedoMetallic.rgb * in.vcol, rough);\n"
+"  o.gbc = vec4<f32>(mEnc.x, mEnc.y,\n"
+"                     clamp(d.albedoMetallic.a, 0.0, 1.0), d.params.y);\n"
+"  return o;\n"
+"}\n";
+
 /* G-buffer inspector. Fullscreen triangle, textureLoad by pixel (1:1, so
  * no sampler), one channel selected by a uniform. */
 static const char* GB_VIEW_WGSL =
@@ -401,6 +507,39 @@ static void gb_init_pipeline(void) {
     gb_pipeline = wgpuDeviceCreateRenderPipeline(g_wgpu_dev, &pd);
     wgpuShaderModuleRelease(mod);
     if (!gb_pipeline) { fprintf(stderr, "[gbuffer] pipeline creation FAILED\n"); return; }
+
+    /* Skinned variant (#391): same targets, same depth state — both must
+     * be valid inside ONE render pass, since a frame switches pipeline
+     * between static and skinned draws. */
+    {
+        WGPUShaderSourceWGSL ssrc; memset(&ssrc, 0, sizeof(ssrc));
+        ssrc.chain.sType = WGPUSType_ShaderSourceWGSL;
+        ssrc.code = rae_wgpu_sv(GB_SKIN_WGSL);
+        WGPUShaderModuleDescriptor ssmd; memset(&ssmd, 0, sizeof(ssmd));
+        ssmd.nextInChain = &ssrc.chain;
+        WGPUShaderModule smod = wgpuDeviceCreateShaderModule(g_wgpu_dev, &ssmd);
+
+        WGPUVertexAttribute sattrs[6]; memset(sattrs, 0, sizeof(sattrs));
+        sattrs[0].format = WGPUVertexFormat_Float32x3; sattrs[0].offset = 0;  sattrs[0].shaderLocation = 0;
+        sattrs[1].format = WGPUVertexFormat_Float32x3; sattrs[1].offset = 12; sattrs[1].shaderLocation = 1;
+        sattrs[2].format = WGPUVertexFormat_Float32x2; sattrs[2].offset = 24; sattrs[2].shaderLocation = 2;
+        sattrs[3].format = WGPUVertexFormat_Float32x4; sattrs[3].offset = 32; sattrs[3].shaderLocation = 3;
+        sattrs[4].format = WGPUVertexFormat_Float32x4; sattrs[4].offset = 48; sattrs[4].shaderLocation = 4;
+        sattrs[5].format = WGPUVertexFormat_Float32x4; sattrs[5].offset = 64; sattrs[5].shaderLocation = 5;
+        WGPUVertexBufferLayout svbl; memset(&svbl, 0, sizeof(svbl));
+        svbl.arrayStride = 80; svbl.stepMode = WGPUVertexStepMode_Vertex;
+        svbl.attributeCount = 6; svbl.attributes = sattrs;
+
+        WGPUFragmentState sfs; memset(&sfs, 0, sizeof(sfs));
+        sfs.module = smod; sfs.entryPoint = rae_wgpu_sv("fs"); sfs.targetCount = 3; sfs.targets = cts;
+        WGPURenderPipelineDescriptor spd = pd;
+        spd.vertex.module = smod;
+        spd.vertex.buffers = &svbl;
+        spd.fragment = &sfs;
+        gb_skin_pipeline = wgpuDeviceCreateRenderPipeline(g_wgpu_dev, &spd);
+        wgpuShaderModuleRelease(smod);
+        if (!gb_skin_pipeline) fprintf(stderr, "[gbuffer] skinned pipeline creation FAILED\n");
+    }
 
     WGPUBufferDescriptor ud; memset(&ud, 0, sizeof(ud));
     ud.size = GB_FRAME_BYTES;
@@ -577,6 +716,64 @@ void rae_ext_gbuffer_begin(rae_Mat4* viewProj, float clearR, float clearG, float
 /* Queue one mesh into the G-buffer. `model` arrives as a Mat4 by value —
  * 16 floats the caller already had on the stack — and is memcpy'd into a
  * preallocated slot. Nothing on this path touches the allocator. */
+/* Queue a SKINNED mesh into the G-buffer (#391). Shares the draw record
+ * and the storage buffer with the static path — the layouts are identical
+ * — and switches pipeline for the duration of the draw, then hands the
+ * pass back so a following static draw is unaffected. */
+void rae_ext_gbuffer_drawSkinned(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
+                                 float r, float g, float b,
+                                 float metallic, float roughness, float emissive) {
+    if (!gb_pass || !model || !gb_skin_pipeline) return;
+    int slot = (int)mesh - 1;
+    if (slot < 0 || slot >= g3d_skin_mesh_n) return;
+    if (gb_draw_count >= GB_MAX_DRAWS) return;
+
+    if (!gb_skin_bind && g3d_skin_palette_sbuf) {
+        WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(gb_skin_pipeline, 0);
+        WGPUBindGroupEntry e[3]; memset(e, 0, sizeof(e));
+        e[0].binding = 0; e[0].buffer = gb_frame_ubuf; e[0].size = GB_FRAME_BYTES;
+        e[1].binding = 1; e[1].buffer = gb_draw_sbuf;
+        e[1].size = (uint64_t)GB_MAX_DRAWS * GB_DRAW_FLOATS * sizeof(float);
+        e[2].binding = 2; e[2].buffer = g3d_skin_palette_sbuf;
+        e[2].size = (uint64_t)G3D_SKIN_MAX_JOINTS * 12 * sizeof(float);
+        WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
+        bgd.layout = bgl; bgd.entryCount = 3; bgd.entries = e;
+        gb_skin_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
+        wgpuBindGroupLayoutRelease(bgl);
+    }
+    if (!gb_skin_bind) return;
+
+    float* d = gb_draw_cpu + gb_draw_count * GB_DRAW_FLOATS;
+    memcpy(d, model->m.v, 16 * sizeof(float));
+    memcpy(d + 16, prevModel ? prevModel->m.v : model->m.v, 16 * sizeof(float));
+    d[32] = r; d[33] = g; d[34] = b; d[35] = metallic;
+    d[36] = roughness;
+    if (emissive > 0.0f) {
+        float e = logf(1.0f + emissive) / GB_EMISSIVE_LOG_K;
+        d[37] = e > 1.0f ? 1.0f : e;
+        d[38] = GB_MODE_EMISSIVE;
+    } else {
+        d[37] = 1.0f;
+        d[38] = GB_MODE_LIT;
+    }
+    d[39] = 0.0f;
+
+    wgpuRenderPassEncoderSetPipeline(gb_pass, gb_skin_pipeline);
+    wgpuRenderPassEncoderSetBindGroup(gb_pass, 0, gb_skin_bind, 0, NULL);
+    wgpuRenderPassEncoderSetVertexBuffer(gb_pass, 0, g3d_skin_vbuf[slot], 0,
+                                         wgpuBufferGetSize(g3d_skin_vbuf[slot]));
+    wgpuRenderPassEncoderSetIndexBuffer(gb_pass, g3d_skin_ibuf[slot],
+                                        WGPUIndexFormat_Uint32, 0,
+                                        wgpuBufferGetSize(g3d_skin_ibuf[slot]));
+    wgpuRenderPassEncoderDrawIndexed(gb_pass, g3d_skin_icount[slot], 1, 0, 0,
+                                     (uint32_t)gb_draw_count);
+    gb_draw_count++;
+    /* Hand the pass back to the static pipeline; anything drawn after
+     * this is static unless it asks otherwise. */
+    wgpuRenderPassEncoderSetPipeline(gb_pass, gb_pipeline);
+    wgpuRenderPassEncoderSetBindGroup(gb_pass, 0, gb_bind, 0, NULL);
+}
+
 void rae_ext_gbuffer_draw(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
                           float r, float g, float b,
                           float metallic, float roughness, float emissive) {
@@ -693,5 +890,7 @@ void rae_ext_gbuffer_shutdown(void) {
     if (gb_draw_sbuf)     { wgpuBufferRelease(gb_draw_sbuf); gb_draw_sbuf = NULL; }
     if (gb_frame_ubuf)    { wgpuBufferRelease(gb_frame_ubuf); gb_frame_ubuf = NULL; }
     if (gb_pipeline)      { wgpuRenderPipelineRelease(gb_pipeline); gb_pipeline = NULL; }
+    if (gb_skin_pipeline) { wgpuRenderPipelineRelease(gb_skin_pipeline); gb_skin_pipeline = NULL; }
+    if (gb_skin_bind)     { wgpuBindGroupRelease(gb_skin_bind); gb_skin_bind = NULL; }
     gb_target_w = 0; gb_target_h = 0;
 }
