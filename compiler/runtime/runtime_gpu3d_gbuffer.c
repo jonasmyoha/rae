@@ -82,6 +82,10 @@ static WGPUBuffer         gb_draw_sbuf = NULL;
 static WGPUBindGroup      gb_bind = NULL;
 static float              gb_draw_cpu[GB_MAX_DRAWS * GB_DRAW_FLOATS];
 static int                gb_draw_count = 0;
+/* Metaball cluster slots are PER FRAME (#392). Declared here because the
+ * reset belongs beside every other per-frame counter, while the buffers
+ * live in runtime_gpu3d_gbuffer_sdf.c, which is included after this. */
+static int                gb_sdf_group;
 static bool               gb_overflow_reported = false;
 
 static WGPUCommandEncoder    gb_enc = NULL;
@@ -634,6 +638,11 @@ void rae_ext_gbuffer_begin(rae_Mat4* viewProj, float clearR, float clearG, float
     if (!gb_pipeline || !gb_a_view || !gb_b_view || !gb_c_view || !gb_depth_view) return;
 
     gb_draw_count = 0;
+    /* Without this the counter climbs past GB_SDF_MAX_GROUPS after a few
+     * frames and every later cluster is silently dropped — metaballs that
+     * render for two frames and then vanish, with no error anywhere. The
+     * forward path resets its equivalent in exactly this place. */
+    gb_sdf_group = 0;
     memcpy(gb_viewproj, viewProj->m.v, 16 * sizeof(float));
     gb_clear[0] = clearR; gb_clear[1] = clearG; gb_clear[2] = clearB;
     /* First frame has no previous view-projection; reusing this one gives
