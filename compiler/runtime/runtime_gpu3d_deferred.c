@@ -35,7 +35,7 @@
  */
 
 #define GB_PYRAMID_MAX_MIPS 16
-#define GB_LIGHT_BYTES 160   /* mat4 invViewProj + 6 vec4 */
+#define GB_LIGHT_BYTES 224   /* mat4 invViewProj + 6 vec4 + mat4 viewProj (#387 march) */
 
 static WGPUTexture     gb_pyramid_tex = NULL;    /* r32float, half res, mip chain */
 static WGPUTextureView gb_pyramid_rt[GB_PYRAMID_MAX_MIPS];   /* one per mip, as target */
@@ -237,6 +237,7 @@ static const char* GB_AO_WGSL =
 "  ambSky: vec4<f32>,\n"
 "  ambGround: vec4<f32>,\n"
 "  clearColor: vec4<f32>,\n"
+"  viewProj: mat4x4<f32>,\n"
 "};\n"
 "@group(0) @binding(0) var<uniform> L: LightU;\n"
 "@group(0) @binding(1) var gbaTex: texture_2d<f32>;\n"
@@ -246,7 +247,7 @@ GB_FULLSCREEN_VS
 /* Contact scale, matching #337: a large radius would be obsoleted by real
  * world-space GI and would double-darken against it. */
 "const AO_RADIUS: f32 = 1.2;\n"
-"const AO_SLICES: i32 = 2;\n"
+"const AO_SLICES: i32 = 3;\n"
 "const AO_STEPS: i32 = 6;\n"
 "fn ign(pix: vec2<f32>) -> f32 {\n"
 "  return fract(52.9829189 * fract(dot(pix, vec2<f32>(0.06711056, 0.00583715))));\n"
@@ -261,6 +262,12 @@ GB_FULLSCREEN_VS
 "  let w = L.invViewProj * ndc;\n"
 "  return w.xyz / w.w;\n"
 "}\n"
+/* World position to screen UV, for measuring the radius in pixels. */
+"fn Pclip(w: vec3<f32>) -> vec2<f32> {\n"
+"  let c = L.viewProj * vec4<f32>(w, 1.0);\n"
+"  let n = c.xy / max(c.w, 1e-4);\n"
+"  return vec2<f32>(n.x * 0.5 + 0.5, 0.5 - n.y * 0.5);\n"
+"}\n"
 "@fragment\n"
 "fn fs(@builtin(position) fc: vec4<f32>) -> @location(0) vec4<f32> {\n"
 "  let dim = vec2<i32>(textureDimensions(depthTex));\n"
@@ -273,13 +280,26 @@ GB_FULLSCREEN_VS
 "  let gba = textureLoad(gbaTex, px, 0);\n"
 "  let N = octDecode(gba.xy);\n"
 "  let noise = ign(fc.xy);\n"
+/* SCREEN-SPACE MARCH LENGTH FROM THE WORLD RADIUS, not a fixed pixel
+ * count. A fixed count ignores distance and field of view, so the
+ * darkened region stays the same size on screen however close the
+ * surface is — which reads as a small hard patch rather than contact
+ * shading. Project a point one radius to the side and measure how far
+ * it moved in pixels; that is the same derivation the forward pass
+ * uses. */
+"  let side = P + vec3<f32>(AO_RADIUS, 0.0, 0.0);\n"
+"  let sideClip = Pclip(side);\n"
+"  let pClip = Pclip(P);\n"
+"  var marchPx = length((sideClip - pClip) * vec2<f32>(dim)) * 0.5;\n"
+"  marchPx = clamp(marchPx, 4.0, 96.0);\n"
+"  let stepPxLen = marchPx / f32(AO_STEPS);\n"
 "  var occl = 0.0;\n"
 "  for (var s = 0; s < AO_SLICES; s = s + 1) {\n"
 "    let ang = (f32(s) + noise) * 3.14159265 / f32(AO_SLICES);\n"
 "    let dir = vec2<f32>(cos(ang), sin(ang));\n"
 "    var maxSin = 0.0;\n"
 "    for (var t = 1; t <= AO_STEPS; t = t + 1) {\n"
-"      let stepPx = dir * f32(t) * 3.0;\n"
+"      let stepPx = dir * (f32(t) * stepPxLen);\n"
 "      let sp = px + vec2<i32>(stepPx);\n"
 "      if (sp.x < 0 || sp.y < 0 || sp.x >= dim.x || sp.y >= dim.y) { break; }\n"
 "      let sd = textureLoad(depthTex, sp, 0);\n"
@@ -421,7 +441,30 @@ G3D_SHADOW_FN_WGSL
 "  let ambF = fresnel(NoV, f0);\n"
 /* Screen-space AO multiplies the baked occlusion, and the product
    touches INDIRECT only — never `direct` above. */
-"  let ssao = textureLoad(aoTex, px, 0).r;\n"
+/* DEPTH-AWARE 3x3 AVERAGE. The AO pass rotates its sampling per pixel
+ * with interleaved gradient noise, which is what stops banding — but raw,
+ * that noise reads as a halftone screen. The forward path dissolves it in
+ * its bilateral upsample; this frame renders AO at full resolution and so
+ * has no upsample to hide behind, and needs the filter explicitly.
+ *
+ * Weighted by DEPTH similarity, not distance alone: a flat blur would
+ * pull occlusion across silhouettes and darken the background behind an
+ * object's edge. */
+"  var aoSum = 0.0;\n"
+"  var aoW = 0.0;\n"
+"  let dims = vec2<i32>(textureDimensions(aoTex));\n"
+"  for (var dy = -1; dy <= 1; dy = dy + 1) {\n"
+"    for (var dx = -1; dx <= 1; dx = dx + 1) {\n"
+"      let q = clamp(px + vec2<i32>(dx, dy), vec2<i32>(0), dims - vec2<i32>(1));\n"
+"      let qd = textureLoad(depthTex, q, 0);\n"
+"      if (qd <= 0.0) { continue; }\n"
+"      let w = 1.0 / (1.0 + abs(qd - depth) * 800.0);\n"
+"      aoSum = aoSum + textureLoad(aoTex, q, 0).r * w;\n"
+"      aoW = aoW + w;\n"
+"    }\n"
+"  }\n"
+"  var ssao = 1.0;\n"
+"  if (aoW > 0.0) { ssao = aoSum / aoW; }\n"
 "  let ambient = (hemi * albedo * (1.0 - metallic) + hemi * ambF * (1.0 - rough * 0.7)) * ao * ssao;\n"
 /* Emissive tints by albedo, matching how it is authored: an emitter's base
  * colour IS the colour it emits, which is why one scalar suffices. */
@@ -706,6 +749,7 @@ void rae_ext_gbuffer_ssao(float camX, float camY, float camZ) {
         u[0] = 1.0f; u[5] = 1.0f; u[10] = 1.0f; u[15] = 1.0f;
     }
     u[16] = camX; u[17] = camY; u[18] = camZ; u[19] = 0.0f;
+    memcpy(u + 40, gb_viewproj_jittered, 16 * sizeof(float));
     wgpuQueueWriteBuffer(g_wgpu_queue, gb_light_ubuf, 0, u, GB_LIGHT_BYTES);
 
     gb_ensure_ao_bind();
@@ -740,6 +784,7 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
     u[28] = skyR; u[29] = skyG; u[30] = skyB; u[31] = 0.0f;
     u[32] = gndR; u[33] = gndG; u[34] = gndB; u[35] = 0.0f;
     u[36] = gb_clear[0]; u[37] = gb_clear[1]; u[38] = gb_clear[2]; u[39] = 0.0f;
+    memcpy(u + 40, gb_viewproj_jittered, 16 * sizeof(float));
     wgpuQueueWriteBuffer(g_wgpu_queue, gb_light_ubuf, 0, u, GB_LIGHT_BYTES);
 
     if (!gb_light_bind) {
