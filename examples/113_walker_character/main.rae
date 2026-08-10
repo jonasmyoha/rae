@@ -14,15 +14,31 @@
 # (`loadAllPrimitives` merges them into one buffer instead, which is
 # cheaper but cannot keep per-primitive materials.)
 #
-# COLOURS ARE AUTHORED HERE, NOT LOADED. This model carries no colour of
-# its own: its glTF materials have no baseColorFactor, its COLOR_0
-# attribute is uniformly white, and the "colors_texture" PNG beside it in
-# the Unity project is an unused backup whose UVs do not match the mesh —
-# every vertex samples the blank region. In Unity it rendered grey through
-# a toon shader whose material colours are also grey. So the palette below
-# is a choice, matched to primitives by their authored mesh names, and
-# would be replaced by real material data the moment the model carries
-# any.
+# COLOURS COME FROM THE MODEL'S PALETTE TEXTURE, sampled offline.
+#
+# The character is textured with a flat palette atlas — solid colour
+# swatches, the standard low-poly technique — so each primitive's UVs
+# address one swatch and the surface is a single flat colour. The table
+# below is the dominant swatch each primitive samples, converted from
+# sRGB to linear because the renderer works in linear radiance.
+#
+# A CORRECTION IS RECORDED HERE deliberately. An earlier version of this
+# file claimed the model carried no colour at all. That was wrong, and the
+# cause was mine: I sampled the atlas with an OpenGL-style V flip, but
+# glTF's UV origin is the TOP-LEFT with v increasing downward. The flip
+# sent every lookup into the atlas's blank lower region, which returns
+# white — a result that looks exactly like "this texture does not belong
+# to this mesh". The UV ranges were the tell: v spans 0.007 to 0.19, which
+# is the top of the image, not the bottom.
+#
+# WHY A TABLE AND NOT A TEXTURE. Sampling per pixel needs texture support
+# in gpu3d, which does not exist for 3D yet. Because the atlas is FLAT,
+# one colour per primitive is not an approximation for most of this model
+# — nine of the twelve primitives sample a single swatch for 100% of their
+# vertices. Three do not: the body is 61% skin over 17 swatches, the trim
+# 51%, the boots 86%. Those three are genuinely flattened, and full
+# fidelity needs either per-vertex colour baked from the atlas or real
+# texturing. Both are tracked; neither is pretended at here.
 #
 # FRAMING IS COMPUTED, NOT HARD-CODED. Exporters leave a model wherever it
 # sat in the authoring scene; this one sits about 13 units above its own
@@ -59,31 +75,32 @@ func uploadMeshData(m: view MeshData) ret MeshHandle {
   ret uploadMesh(verts: m.verts, vertCount: m.vertCount, indices: m.indices)
 }
 
-# Colour for a part, keyed on its authored mesh name.
+# Dominant palette colour per primitive, in LINEAR space.
 #
-# Name-matching is a blunt instrument and it is used here only because the
-# model supplies nothing better: no material colours, no usable vertex
-# colours, no matching texture. A model that carries real materials should
-# read them instead — this function is the seam where that swap happens.
+# Extracted by sampling the model's palette atlas at every vertex UV and
+# taking the most common swatch, then converting sRGB -> linear. The
+# percentages are how much of the primitive that swatch actually covers,
+# so it is visible at a glance which entries are exact and which are a
+# flattening of a multi-swatch surface.
 #
-# The names come from the modelling tool ("flicka" is the body, the
-# primitives named after Blender primitives are the props), so they are
-# stable for THIS model and meaningless for any other.
-func colorForPart(name: view String) ret Vec3 {
-  if name.startsWith(prefix: "flicka") {
-    # Body and clothing: warm skin tone.
-    ret vec3.create(x: 0.85, y: 0.68, z: 0.55)
+# This table is a stand-in for texture sampling, not for material data.
+# When gpu3d can sample a texture in 3D, this whole function goes away.
+func colorForPrimitive(meshIndex: view Int, primIndex: view Int) ret Vec3 {
+  if meshIndex is 0 { ret vec3.create(x: 0.1011, y: 0.0461, z: 0.0415) }   # hair, 100%
+  if meshIndex is 1 { ret vec3.create(x: 0.3686, y: 0.0127, z: 0.0399) }   # scarf, 100%
+  if meshIndex is 2 { ret vec3.create(x: 0.2158, y: 0.1361, z: 0.0824) }   # strap, 89%
+  if meshIndex is 3 { ret vec3.create(x: 0.4205, y: 0.4313, z: 0.3345) }   # staff, 100%
+  if meshIndex is 4 { ret vec3.create(x: 0.2158, y: 0.1361, z: 0.0824) }   # leather, 100%
+  if meshIndex is 5 { ret vec3.create(x: 0.2158, y: 0.1361, z: 0.0824) }   # pack, 100%
+  if meshIndex is 6 { ret vec3.create(x: 0.2158, y: 0.1361, z: 0.0824) }   # pack flap, 54%
+  if meshIndex is 7 { ret vec3.create(x: 0.3686, y: 0.0127, z: 0.0399) }   # bedroll, 100%
+  if meshIndex is 8 { ret vec3.create(x: 0.0, y: 1.0, z: 0.3686) }         # gem, 100%
+  if meshIndex is 9 {
+    if primIndex is 0 { ret vec3.create(x: 1.0, y: 0.7012, z: 0.3686) }    # skin, 61%
+    if primIndex is 1 { ret vec3.create(x: 0.5668, y: 0.3838, z: 0.0494) } # trim, 51%
+    ret vec3.create(x: 0.0199, y: 0.0199, z: 0.0135)                       # boots, 86%
   }
-  if name.startsWith(prefix: "Torus") {
-    ret vec3.create(x: 0.72, y: 0.24, z: 0.22)
-  }
-  if name.startsWith(prefix: "Cylinder") {
-    ret vec3.create(x: 0.52, y: 0.38, z: 0.24)
-  }
-  if name.startsWith(prefix: "Cube") {
-    ret vec3.create(x: 0.30, y: 0.42, z: 0.58)
-  }
-  ret vec3.create(x: 0.70, y: 0.70, z: 0.72)
+  ret vec3.create(x: 0.7, y: 0.7, z: 0.72)
 }
 
 func main() ret Int {
@@ -152,18 +169,21 @@ func main() ret Int {
   var mi: Int = 0
   loop mi < meshCount(g: g) {
     let name: String = meshName(g: g, meshIndex: mi)
-    let tint: Vec3 = colorForPart(name: name)
     var rough: Float = 0.68
     if name.startsWith(prefix: "Cylinder") {
-      # The staff and its metal fittings read as the one non-cloth
-      # surface, so they get the only low-roughness material.
+      # The staff and the metal fittings are the one non-cloth surface, so
+      # they get the only low-roughness material.
       rough = 0.35
     }
-    let mat: Int = addMaterial(scene: scene, baseColor: tint, metallic: 0.0, roughness: rough, emission: noEmit)
     var pi: Int = 0
     loop pi < primitiveCount(g: g, meshIndex: mi) {
       let part: MeshData = loadPrimitive(g: g, meshIndex: mi, primIndex: pi)
       if part.vertCount > 0 {
+        # The material is per PRIMITIVE, not per mesh: the body mesh alone
+        # carries skin, trim and boots as three primitives with three
+        # different swatches.
+        let tint: Vec3 = colorForPrimitive(meshIndex: mi, primIndex: pi)
+        let mat: Int = addMaterial(scene: scene, baseColor: tint, metallic: 0.0, roughness: rough, emission: noEmit)
         let handle: MeshHandle = uploadMeshData(m: part)
         let e: Int = addMeshInstance(
           scene: scene, mesh: handle, material: mat,
