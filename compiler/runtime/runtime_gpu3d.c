@@ -621,11 +621,6 @@ static void g3d_init_pipeline(void) {
     g3d_shadow_init();
     g3d_shadow_ensure_targets(G3D_SHADOW_DEFAULT_RES, G3D_SHADOW_DEFAULT_CASCADES);
 
-    WGPUBufferDescriptor shd; memset(&shd, 0, sizeof(shd));
-    shd.size = 320;   /* 4 mat4 + splitFar + texelWorld + depthRange + cfg */
-    shd.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
-    g3d_sm_frame_ubuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &shd);
-
     WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g3d_pipeline, 0);
     WGPUBindGroupEntry e[5]; memset(e, 0, sizeof(e));
     e[0].binding = 0; e[0].buffer = g3d_frame_ubuf; e[0].size = 288;

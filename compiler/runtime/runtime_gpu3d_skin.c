@@ -218,6 +218,14 @@ G3D_SHADOW_FN_WGSL
 "  return o;\n"
 "}\n";
 
+static void g3d_skin_ensure_palette_buffer(void) {
+    if (g3d_skin_palette_sbuf || !g_wgpu_dev) return;
+    WGPUBufferDescriptor pl; memset(&pl, 0, sizeof(pl));
+    pl.size = (uint64_t)G3D_SKIN_MAX_JOINTS * 12 * sizeof(float);
+    pl.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
+    g3d_skin_palette_sbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &pl);
+}
+
 static void g3d_skin_init_pipeline(void) {
     if (g3d_skin_pipeline) return;
     WGPUShaderSourceWGSL src; memset(&src, 0, sizeof(src));
@@ -282,10 +290,9 @@ static void g3d_skin_init_pipeline(void) {
     sd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
     g3d_skin_draw_sbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &sd);
 
+    g3d_skin_ensure_palette_buffer();
     WGPUBufferDescriptor pl; memset(&pl, 0, sizeof(pl));
     pl.size = (uint64_t)G3D_SKIN_MAX_JOINTS * 12 * sizeof(float);
-    pl.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
-    g3d_skin_palette_sbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &pl);
 
     WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g3d_skin_pipeline, 0);
     WGPUBindGroupEntry e[6]; memset(e, 0, sizeof(e));
@@ -331,6 +338,14 @@ int64_t rae_ext_gpu3d_skinnedMeshCreate(const float* verts, int64_t vertCount,
 /* Replace the joint palette. `rows` is 12 Floats per joint: three vec4
  * rows of the affine transform. */
 void rae_ext_gpu3d_setPalette(const float* rows, int64_t jointCount) {
+    /* Ensure the palette BUFFER alone — not the whole forward pipeline.
+     * The deferred and shadow paths read this buffer and may be the only
+     * ones drawing, so it cannot depend on the forward pipeline having
+     * been built. Building that pipeline here instead was worse than the
+     * bug: its bind group references the shadow targets, which do not
+     * exist yet on the first frame, and wgpu aborts the process rather
+     * than returning null. */
+    g3d_skin_ensure_palette_buffer();
     if (!rows || jointCount <= 0) { g3d_skin_joint_count = 0; return; }
     if (jointCount > G3D_SKIN_MAX_JOINTS) {
         static bool warned = false;
