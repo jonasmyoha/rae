@@ -1,0 +1,293 @@
+# app3d/camera_rig — the orbit/free camera every 3D example was rewriting.
+#
+# Extracted from example 110, which had the only complete version: orbit
+# and WASD-fly modes, pointer drag, wheel zoom, keyboard nudges, a pitch
+# clamp that both input paths share, and a snapshot format for hot
+# reload. Examples 112 and 113 each carried a partial reimplementation
+# with its own clamps and its own sign conventions, which is how a camera
+# ends up feeling different in every example of the same renderer.
+#
+# WHY A RIG AND NOT A CAMERA. Camera3d is what the renderer consumes:
+# a position, a target, a field of view. This is the CONTROL state behind
+# it — yaw, pitch, distance — which is not derivable from the camera
+# after the fact (many rigs produce the same eye point). Keeping them
+# separate is what lets `applyCameraRig` stay a pure function of the rig.
+#
+# LIMITS ARE FIELDS, NOT CONSTANTS. An example that frames a 2-metre
+# character needs a different distance range from one framing a 36-metre
+# scene. Making them fields is what stops the next example from forking
+# the module to change one number.
+import core
+import math
+import gpu2d
+import sdl3
+import vec3
+open scene3d
+open math3d
+
+# SDL scancodes for the fly/orbit keys. Named because `87` at a call site
+# is unreviewable — nobody can tell a typo from an intent.
+const keyW: Int = 87
+const keyA: Int = 65
+const keyS: Int = 83
+const keyD: Int = 68
+const keyQ: Int = 81
+const keyE: Int = 69
+
+enum CameraRigMode {
+  orbit
+  free
+}
+
+type CameraRig {
+  mode: CameraRigMode
+  yaw: Float
+  orbitPitch: Float
+  freePitch: Float
+  distance: Float
+  freePosition: Vec3
+  # Tunables. See the note above on why these are fields.
+  minDistance: Float
+  maxDistance: Float
+  pitchLimit: Float
+  dragSpeed: Float
+  wheelSpeed: Float
+  keyTurnSpeed: Float
+  moveSpeed: Float
+  # Drag tracking. Held here rather than in the app because every caller
+  # needs exactly the same three variables and gets them subtly wrong —
+  # the common bug is orbiting on the first frame of a press, which
+  # snaps the view by however far the pointer was from its last position.
+  dragging: Bool
+  lastX: Float
+  lastY: Float
+}
+
+func createCameraRig(camera: view Camera3d) pub ret CameraRig {
+  ret CameraRig {
+    mode: CameraRigMode.orbit
+    yaw: 0.0
+    orbitPitch: 0.38
+    freePitch: 0.0 - 0.38
+    distance: 12.5
+    freePosition: camera.position
+    minDistance: 4.0
+    maxDistance: 30.0
+    pitchLimit: 1.45
+    dragSpeed: 0.008
+    wheelSpeed: 0.8
+    keyTurnSpeed: 1.2
+    moveSpeed: 6.0
+    dragging: false
+    lastX: 0.0
+    lastY: 0.0
+  }
+}
+
+# Orbit pitch limit, shared by the drag and keyboard paths so they cannot
+# drift apart.
+#
+# SYMMETRIC: the camera orbits as far BELOW the horizon as above it. An
+# earlier version stopped at +0.05 rad, which pinned it to almost exactly
+# horizontal and made it feel stuck against an invisible floor.
+#
+# The magnitude stops just short of a right angle because the view matrix
+# uses a fixed +Z world up: at exactly +/-90 degrees the view direction is
+# parallel to that up vector, their cross product is zero, and the basis
+# collapses. The default 1.45 rad is about 83 degrees — close enough to
+# straight down to feel unrestricted, far enough to stay off the
+# singularity.
+func clampRigPitch(rig: view CameraRig, pitch: view Float) pub ret Float {
+  if pitch > rig.pitchLimit {
+    ret rig.pitchLimit
+  }
+  if pitch < 0.0 - rig.pitchLimit {
+    ret 0.0 - rig.pitchLimit
+  }
+  ret pitch
+}
+
+func cameraRigForward(rig: view CameraRig) pub ret Vec3 {
+  let cp: Float = math.cos(x: rig.freePitch)
+  ret vec3.create(
+    x: (0.0 - math.sin(x: rig.yaw)) * cp
+    y: math.cos(x: rig.yaw) * cp
+    z: math.sin(x: rig.freePitch)
+  )
+}
+
+func cameraRigRight(rig: view CameraRig) pub ret Vec3 {
+  let forward: Vec3 = cameraRigForward(rig: rig)
+  let up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  ret vec3.vnorm(a: vec3.vcross(a: forward, b: up))
+}
+
+func cameraRigModeName(rig: view CameraRig) pub ret String {
+  if rig.mode is CameraRigMode.free {
+    ret "WASD"
+  }
+  ret "Orbit"
+}
+
+# Swap between orbit and fly WITHOUT the view jumping. Each mode stores
+# its own pitch because their sign conventions differ (orbit pitch raises
+# the eye, free pitch aims it), and the orbit target is recovered by
+# walking `distance` along the current view direction — otherwise
+# switching back to orbit re-centres on wherever the target happened to
+# be left, which reads as the camera teleporting.
+func toggleCameraRigMode(rig: mod CameraRig, camera: mod Camera3d) pub {
+  if rig.mode is CameraRigMode.orbit {
+    rig.mode = CameraRigMode.free
+    rig.freePosition = camera.position
+    rig.freePitch = 0.0 - rig.orbitPitch
+  } else {
+    let forward: Vec3 = cameraRigForward(rig: rig)
+    rig.orbitPitch = clampRigPitch(rig: rig, pitch: 0.0 - rig.freePitch)
+    camera.target = vec3.vadd(a: rig.freePosition, b: vec3.vscale(a: forward, s: rig.distance))
+    rig.mode = CameraRigMode.orbit
+  }
+}
+
+# Read pointer, wheel and keyboard into the rig. Returns whether anything
+# actually moved, which is what an idle-aware render loop gates on.
+#
+# `allowInput` is false when the UI has captured the pointer, so pressing
+# a button does not also spin the camera. Note that it gates the KEYBOARD
+# too: a text field would otherwise steer the view while being typed in.
+func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
+                     allowInput: view Bool, dt: view Float) pub ret Bool {
+  let yaw0: Float = rig.yaw
+  let orbitPitch0: Float = rig.orbitPitch
+  let freePitch0: Float = rig.freePitch
+  let dist0: Float = rig.distance
+  let pos0: Vec3 = rig.freePosition
+
+  let px: Float = gpu2d.pointerX()
+  let py: Float = gpu2d.pointerY()
+  if allowInput and gpu2d.pointerDown() {
+    # Only orbit once a drag is ESTABLISHED. On the press frame there is
+    # no previous position to difference against, and using the stale one
+    # snaps the view by the distance the pointer travelled while up.
+    if rig.dragging {
+      if rig.mode is CameraRigMode.orbit {
+        rig.yaw = rig.yaw + (px - rig.lastX) * rig.dragSpeed
+        rig.orbitPitch = clampRigPitch(rig: rig, pitch: rig.orbitPitch - (py - rig.lastY) * rig.dragSpeed)
+      } else {
+        # Fly mode drags the WORLD past a fixed eye, so yaw runs opposite
+        # to orbit, where the drag carries the eye around the subject.
+        rig.yaw = rig.yaw - (px - rig.lastX) * rig.dragSpeed
+        rig.freePitch = clampRigPitch(rig: rig, pitch: rig.freePitch - (py - rig.lastY) * rig.dragSpeed)
+      }
+    }
+    rig.dragging = true
+  } else {
+    rig.dragging = false
+  }
+  rig.lastX = px
+  rig.lastY = py
+
+  if allowInput {
+    if rig.mode is CameraRigMode.orbit {
+      rig.distance = rig.distance - gpu2d.wheelMove() * rig.wheelSpeed
+      if sdl3.isKeyDown(key: keyW) { rig.distance = rig.distance - dt * rig.moveSpeed }
+      if sdl3.isKeyDown(key: keyS) { rig.distance = rig.distance + dt * rig.moveSpeed }
+      if sdl3.isKeyDown(key: keyA) { rig.yaw = rig.yaw - dt * rig.keyTurnSpeed }
+      if sdl3.isKeyDown(key: keyD) { rig.yaw = rig.yaw + dt * rig.keyTurnSpeed }
+      if sdl3.isKeyDown(key: keyQ) { rig.orbitPitch = rig.orbitPitch - dt * rig.keyTurnSpeed }
+      if sdl3.isKeyDown(key: keyE) { rig.orbitPitch = rig.orbitPitch + dt * rig.keyTurnSpeed }
+      rig.orbitPitch = clampRigPitch(rig: rig, pitch: rig.orbitPitch)
+      if rig.distance < rig.minDistance { rig.distance = rig.minDistance }
+      if rig.distance > rig.maxDistance { rig.distance = rig.maxDistance }
+    } else {
+      let step: Float = dt * rig.moveSpeed
+      let forward: Vec3 = cameraRigForward(rig: rig)
+      let right: Vec3 = cameraRigRight(rig: rig)
+      let up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
+      if sdl3.isKeyDown(key: keyW) { rig.freePosition = vec3.vadd(a: rig.freePosition, b: vec3.vscale(a: forward, s: step)) }
+      if sdl3.isKeyDown(key: keyS) { rig.freePosition = vec3.vsub(a: rig.freePosition, b: vec3.vscale(a: forward, s: step)) }
+      if sdl3.isKeyDown(key: keyA) { rig.freePosition = vec3.vsub(a: rig.freePosition, b: vec3.vscale(a: right, s: step)) }
+      if sdl3.isKeyDown(key: keyD) { rig.freePosition = vec3.vadd(a: rig.freePosition, b: vec3.vscale(a: right, s: step)) }
+      if sdl3.isKeyDown(key: keyQ) { rig.freePosition = vec3.vsub(a: rig.freePosition, b: vec3.vscale(a: up, s: step)) }
+      if sdl3.isKeyDown(key: keyE) { rig.freePosition = vec3.vadd(a: rig.freePosition, b: vec3.vscale(a: up, s: step)) }
+    }
+  }
+
+  ret rig.yaw is not yaw0
+    or rig.orbitPitch is not orbitPitch0
+    or rig.freePitch is not freePitch0
+    or rig.distance is not dist0
+    or rig.freePosition.x is not pos0.x
+    or rig.freePosition.y is not pos0.y
+    or rig.freePosition.z is not pos0.z
+}
+
+# Derive the camera from the rig. Pure in the rig: calling it twice with
+# no input between gives the same camera, which is what makes the
+# moved-flag above safe to gate rendering on.
+func applyCameraRig(rig: view CameraRig, camera: mod Camera3d) pub {
+  if rig.mode is CameraRigMode.orbit {
+    camera.position = orbitEye(
+      targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z,
+      yaw: rig.yaw, pitch: rig.orbitPitch, dist: rig.distance
+    )
+  } else {
+    let forward: Vec3 = cameraRigForward(rig: rig)
+    camera.position = rig.freePosition
+    camera.target = vec3.vadd(a: camera.position, b: forward)
+  }
+}
+
+# ----- snapshot -------------------------------------------------------
+# Space-separated numbers rather than JSON: the payload is nine values, a
+# malformed or older line must degrade to "start fresh" rather than
+# half-apply, and the caller already owns a version tag for the rest of
+# its state. Restoring a partially-parsed camera is worse than not
+# restoring one.
+
+# Ten values: mode, yaw, two pitches, distance, free position xyz, and
+# the orbit target's x/y.
+const cameraRigFields: Int = 10
+
+func cameraRigStateString(rig: view CameraRig, camera: view Camera3d) pub ret String {
+  var modeNum: Int = 0
+  if rig.mode is CameraRigMode.free { modeNum = 1 }
+  ret "{modeNum} {rig.yaw} {rig.orbitPitch} {rig.freePitch} {rig.distance} {rig.freePosition.x} {rig.freePosition.y} {rig.freePosition.z} {camera.target.x} {camera.target.y}"
+}
+
+# Apply `cameraRigFields` values starting at `offset` in an
+# already-split snapshot. Returns false — changing nothing — when the
+# fields are not all present, so a truncated line cannot leave the rig
+# half-restored.
+func applyCameraRigState(parts: view List(String), offset: view Int,
+                         rig: mod CameraRig, camera: mod Camera3d) pub ret Bool {
+  if parts.length < offset + cameraRigFields {
+    ret false
+  }
+  if parts.at(index: offset).trim().toInt() is 1 {
+    rig.mode = CameraRigMode.free
+  } else {
+    rig.mode = CameraRigMode.orbit
+  }
+  rig.yaw = parts.at(index: offset + 1).trim().toFloat()
+  rig.orbitPitch = parts.at(index: offset + 2).trim().toFloat()
+  rig.freePitch = parts.at(index: offset + 3).trim().toFloat()
+  rig.distance = parts.at(index: offset + 4).trim().toFloat()
+  rig.freePosition = vec3.create(
+    x: parts.at(index: offset + 5).trim().toFloat(),
+    y: parts.at(index: offset + 6).trim().toFloat(),
+    z: parts.at(index: offset + 7).trim().toFloat()
+  )
+  # Orbit needs the target restored too, or the camera returns to the
+  # right angle around the wrong point.
+  camera.target = vec3.create(
+    x: parts.at(index: offset + 8).trim().toFloat(),
+    y: parts.at(index: offset + 9).trim().toFloat(),
+    z: camera.target.z
+  )
+  # A snapshot written by a build with different limits should still land
+  # inside this build's.
+  if rig.distance < rig.minDistance { rig.distance = rig.minDistance }
+  if rig.distance > rig.maxDistance { rig.distance = rig.maxDistance }
+  rig.orbitPitch = clampRigPitch(rig: rig, pitch: rig.orbitPitch)
+  ret true
+}

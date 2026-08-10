@@ -83,6 +83,7 @@ import gltf
 import gltf_skin
 import png
 import sys
+import app3d/camera_rig
 open scene3d
 open gpu3d
 open renderer3d
@@ -93,6 +94,7 @@ open gltf
 open gltf_skin
 open sdf_text
 open png
+open app3d/camera_rig
 
 func uploadMeshData(m: view MeshData) ret MeshHandle {
   ret uploadMesh(verts: m.verts, vertCount: m.vertCount, indices: m.indices)
@@ -307,13 +309,16 @@ func main() ret Int {
     ret 1
   }
 
-  var yaw: Float = 0.6
-  var pitch: Float = 0.18
-  var dist: Float = 4.2
-  var lastX: Float = 0.0
-  var lastY: Float = 0.0
-  var dragging: Bool = false
-  var dragOnUi: Bool = false
+  # Shared orbit/fly rig (lib/app3d/camera_rig.rae). Only the framing
+  # numbers are per-example: this scene is a 2-metre character, not the
+  # 36-metre one the rig's defaults are sized for.
+  var rig: CameraRig = createCameraRig(camera: camera)
+  rig.yaw = 0.6
+  rig.orbitPitch = 0.18
+  rig.distance = 4.2
+  rig.minDistance = 1.2
+  rig.maxDistance = 20.0
+  rig.wheelSpeed = 0.4
 
   # Animation state. Clip 1 (walk) plays from the first frame — see the
   # note in the file header.
@@ -352,38 +357,9 @@ func main() ret Int {
     let overUi: Bool = inRect(px: px, py: py, x: panelX, y: panelY, w: panelW, h: panelH)
     let pressed: Bool = gpu2d.pointerPressed()
 
-    # Orbit, but never while the drag STARTED on the panel: pressing a
-    # button and slipping a pixel should not spin the camera.
-    if gpu2d.pointerDown() {
-      if not dragging {
-        dragOnUi = overUi
-      }
-      if dragging and not dragOnUi {
-        yaw = yaw + (px - lastX) * 0.008
-        pitch = pitch - (py - lastY) * 0.008
-        if pitch > 1.45 {
-          pitch = 1.45
-        }
-        if pitch < 0.0 - 1.45 {
-          pitch = 0.0 - 1.45
-        }
-      }
-      dragging = true
-    } else {
-      dragging = false
-      dragOnUi = false
-    }
-    lastX = px
-    lastY = py
-    if not overUi {
-      dist = dist - gpu2d.wheelMove() * 0.4
-    }
-    if dist < 1.2 {
-      dist = 1.2
-    }
-    if dist > 20.0 {
-      dist = 20.0
-    }
+    # The rig owns drag tracking, clamps and wheel zoom; the example only
+    # says WHEN input belongs to the camera rather than to the panel.
+    updateCameraRig(rig: rig, camera: camera, allowInput: not overUi, dt: dt)
 
     # ----- animation -------------------------------------------------
     # "Walk fast" is the walk clip at 1.6x, not a fourth asset.
@@ -405,7 +381,7 @@ func main() ret Int {
     }
     let palette: List(Float) = buildPalette(sk: sk)
 
-    camera.position = orbitEye(targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z, yaw: yaw, pitch: pitch, dist: dist)
+    applyCameraRig(rig: rig, camera: camera)
     let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
     let t: Float = (now - startT) as Float
 
