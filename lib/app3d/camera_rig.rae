@@ -54,6 +54,32 @@ type CameraRig {
   wheelSpeed: Float
   keyTurnSpeed: Float
   moveSpeed: Float
+  # Input smoothing, mouse and keyboard toggled INDEPENDENTLY because they
+  # want different answers: a mouse flick is a noisy signal worth
+  # filtering, while a held key is already clean and only wants
+  # acceleration. Someone who likes damped movement often still wants the
+  # look to track the pointer exactly, so one shared switch would be the
+  # wrong control.
+  smoothMouse: Bool
+  smoothKeys: Bool
+  # Rate in units of e-folds per second: the gap to the target shrinks by
+  # 1/e every 1/rate seconds. 22 is a ~45ms time constant, enough to take
+  # the steps out of a jittery pointer without reading as lag; keys ramp
+  # slower because that is the point of smoothing them.
+  mouseSmoothRate: Float
+  keySmoothRate: Float
+  # DISPLAY STATE — what the camera is actually derived from, as opposed
+  # to the target fields above that input writes. With smoothing off these
+  # track the targets exactly and every path below is a no-op; with it on
+  # they chase. Keeping them apart is what lets the readout and the
+  # snapshot report where the camera is GOING rather than an intermediate
+  # frame of the easing, so a hot reload does not save a half-finished
+  # movement.
+  viewYaw: Float
+  viewOrbitPitch: Float
+  viewFreePitch: Float
+  viewDistance: Float
+  viewPosition: Vec3
   # Drag tracking. Held here rather than in the app because every caller
   # needs exactly the same three variables and gets them subtly wrong —
   # the common bug is orbiting on the first frame of a press, which
@@ -78,6 +104,18 @@ func createCameraRig(camera: view Camera3d) pub ret CameraRig {
     wheelSpeed: 0.8
     keyTurnSpeed: 1.2
     moveSpeed: 6.0
+    # Off by default: smoothing is a preference, and a camera that ignores
+    # the pointer by default is the kind of thing nobody can find the
+    # cause of. The examples persist whatever the user picks.
+    smoothMouse: false
+    smoothKeys: false
+    mouseSmoothRate: 22.0
+    keySmoothRate: 12.0
+    viewYaw: 0.0
+    viewOrbitPitch: 0.38
+    viewFreePitch: 0.0 - 0.38
+    viewDistance: 12.5
+    viewPosition: camera.position
     dragging: false
     lastX: 0.0
     lastY: 0.0
@@ -107,13 +145,78 @@ func clampRigPitch(rig: view CameraRig, pitch: view Float) pub ret Float {
   ret pitch
 }
 
+# Move `current` toward `target`, FRAME-RATE INDEPENDENTLY.
+#
+# The obvious version — current + (target - current) * rate * dt — is a
+# different filter at every frame rate: the same rate feels sluggish at
+# 30fps and snappy at 144, and a long frame can overshoot past the target
+# and oscillate. Decaying the REMAINING GAP exponentially is the same
+# curve sampled at whatever moments the frames land on, so the camera
+# behaves identically however the frame rate moves around. That property
+# is what test 581 pins.
+#
+# The epsilon snap matters for more than tidiness: an exponential never
+# actually arrives, so without it `updateCameraRig` would report movement
+# forever and an idle-aware render loop would never get to sleep.
+const rigSmoothEpsilon: Float = 0.00001
+
+func smoothTowards(current: view Float, target: view Float,
+                   rate: view Float, dt: view Float) pub ret Float {
+  if rate <= 0.0 {
+    ret target
+  }
+  let gap: Float = target - current
+  if gap < rigSmoothEpsilon and gap > 0.0 - rigSmoothEpsilon {
+    ret target
+  }
+  ret target - gap * math.exp(x: 0.0 - rate * dt)
+}
+
+# Which rate the rotation and zoom easing runs at. Those quantities are
+# driven by BOTH mouse and keys, so the rate depends on which sources are
+# being smoothed; with both on, the slower one wins, because the gap left
+# by the smoother source is the one still closing.
+func rigRotationRate(rig: view CameraRig) pub ret Float {
+  if rig.smoothMouse and rig.smoothKeys {
+    if rig.keySmoothRate < rig.mouseSmoothRate {
+      ret rig.keySmoothRate
+    }
+    ret rig.mouseSmoothRate
+  }
+  if rig.smoothMouse {
+    ret rig.mouseSmoothRate
+  }
+  if rig.smoothKeys {
+    ret rig.keySmoothRate
+  }
+  # Neither smoothed: 0 means "snap", and display already equals target.
+  ret 0.0
+}
+
+# Built from the DISPLAYED orientation, not the target. This is both what
+# the user sees and what they expect to fly along — moving toward where
+# the camera is still turning to face would feel like the controls were
+# fighting the view.
 func cameraRigForward(rig: view CameraRig) pub ret Vec3 {
-  let cp: Float = math.cos(x: rig.freePitch)
+  let cp: Float = math.cos(x: rig.viewFreePitch)
   ret vec3.create(
-    x: (0.0 - math.sin(x: rig.yaw)) * cp
-    y: math.cos(x: rig.yaw) * cp
-    z: math.sin(x: rig.freePitch)
+    x: (0.0 - math.sin(x: rig.viewYaw)) * cp
+    y: math.cos(x: rig.viewYaw) * cp
+    z: math.sin(x: rig.viewFreePitch)
   )
+}
+
+# Zoom range, shared by the wheel, the keys, the easing and the snapshot
+# restore for the same reason the pitch clamp is shared: four copies of a
+# bound is four chances for one of them to disagree.
+func clampRigDistance(rig: view CameraRig, dist: view Float) pub ret Float {
+  if dist < rig.minDistance {
+    ret rig.minDistance
+  }
+  if dist > rig.maxDistance {
+    ret rig.maxDistance
+  }
+  ret dist
 }
 
 func cameraRigRight(rig: view CameraRig) pub ret Vec3 {
@@ -146,6 +249,8 @@ func toggleCameraRigMode(rig: mod CameraRig, camera: mod Camera3d) pub {
     camera.target = vec3.vadd(a: rig.freePosition, b: vec3.vscale(a: forward, s: rig.distance))
     rig.mode = CameraRigMode.orbit
   }
+  # A mode switch is a deliberate re-anchor, so it must not be eased.
+  snapCameraRigView(rig: rig)
 }
 
 # Read pointer, wheel and keyboard into the rig. Returns whether anything
@@ -162,6 +267,24 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
   let dist0: Float = rig.distance
   let pos0: Vec3 = rig.freePosition
 
+  let viewYaw0: Float = rig.viewYaw
+  let viewOrbit0: Float = rig.viewOrbitPitch
+  let viewFree0: Float = rig.viewFreePitch
+  let viewDist0: Float = rig.viewDistance
+  let viewPos0: Vec3 = rig.viewPosition
+
+  # This frame's input, kept apart by SOURCE until it is applied, because
+  # the two sources can be smoothed independently even though they drive
+  # the same yaw, pitch and distance.
+  var mouseYaw: Float = 0.0
+  var mouseOrbitPitch: Float = 0.0
+  var mouseFreePitch: Float = 0.0
+  var mouseDist: Float = 0.0
+  var keyYaw: Float = 0.0
+  var keyOrbitPitch: Float = 0.0
+  var keyDist: Float = 0.0
+  var keyMove: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+
   let px: Float = gpu2d.pointerX()
   let py: Float = gpu2d.pointerY()
   if allowInput and gpu2d.pointerDown() {
@@ -170,13 +293,13 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
     # snaps the view by the distance the pointer travelled while up.
     if rig.dragging {
       if rig.mode is CameraRigMode.orbit {
-        rig.yaw = rig.yaw + (px - rig.lastX) * rig.dragSpeed
-        rig.orbitPitch = clampRigPitch(rig: rig, pitch: rig.orbitPitch - (py - rig.lastY) * rig.dragSpeed)
+        mouseYaw = (px - rig.lastX) * rig.dragSpeed
+        mouseOrbitPitch = 0.0 - (py - rig.lastY) * rig.dragSpeed
       } else {
         # Fly mode drags the WORLD past a fixed eye, so yaw runs opposite
         # to orbit, where the drag carries the eye around the subject.
-        rig.yaw = rig.yaw - (px - rig.lastX) * rig.dragSpeed
-        rig.freePitch = clampRigPitch(rig: rig, pitch: rig.freePitch - (py - rig.lastY) * rig.dragSpeed)
+        mouseYaw = 0.0 - (px - rig.lastX) * rig.dragSpeed
+        mouseFreePitch = 0.0 - (py - rig.lastY) * rig.dragSpeed
       }
     }
     rig.dragging = true
@@ -187,29 +310,89 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
   rig.lastY = py
 
   if allowInput {
+    # The wheel is a pointer device, so it rides the mouse toggle.
+    mouseDist = 0.0 - gpu2d.wheelMove() * rig.wheelSpeed
     if rig.mode is CameraRigMode.orbit {
-      rig.distance = rig.distance - gpu2d.wheelMove() * rig.wheelSpeed
-      if sdl3.isKeyDown(key: keyW) { rig.distance = rig.distance - dt * rig.moveSpeed }
-      if sdl3.isKeyDown(key: keyS) { rig.distance = rig.distance + dt * rig.moveSpeed }
-      if sdl3.isKeyDown(key: keyA) { rig.yaw = rig.yaw - dt * rig.keyTurnSpeed }
-      if sdl3.isKeyDown(key: keyD) { rig.yaw = rig.yaw + dt * rig.keyTurnSpeed }
-      if sdl3.isKeyDown(key: keyQ) { rig.orbitPitch = rig.orbitPitch - dt * rig.keyTurnSpeed }
-      if sdl3.isKeyDown(key: keyE) { rig.orbitPitch = rig.orbitPitch + dt * rig.keyTurnSpeed }
-      rig.orbitPitch = clampRigPitch(rig: rig, pitch: rig.orbitPitch)
-      if rig.distance < rig.minDistance { rig.distance = rig.minDistance }
-      if rig.distance > rig.maxDistance { rig.distance = rig.maxDistance }
+      if sdl3.isKeyDown(key: keyW) { keyDist = keyDist - dt * rig.moveSpeed }
+      if sdl3.isKeyDown(key: keyS) { keyDist = keyDist + dt * rig.moveSpeed }
+      if sdl3.isKeyDown(key: keyA) { keyYaw = keyYaw - dt * rig.keyTurnSpeed }
+      if sdl3.isKeyDown(key: keyD) { keyYaw = keyYaw + dt * rig.keyTurnSpeed }
+      if sdl3.isKeyDown(key: keyQ) { keyOrbitPitch = keyOrbitPitch - dt * rig.keyTurnSpeed }
+      if sdl3.isKeyDown(key: keyE) { keyOrbitPitch = keyOrbitPitch + dt * rig.keyTurnSpeed }
     } else {
       let step: Float = dt * rig.moveSpeed
       let forward: Vec3 = cameraRigForward(rig: rig)
       let right: Vec3 = cameraRigRight(rig: rig)
       let up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
-      if sdl3.isKeyDown(key: keyW) { rig.freePosition = vec3.vadd(a: rig.freePosition, b: vec3.vscale(a: forward, s: step)) }
-      if sdl3.isKeyDown(key: keyS) { rig.freePosition = vec3.vsub(a: rig.freePosition, b: vec3.vscale(a: forward, s: step)) }
-      if sdl3.isKeyDown(key: keyA) { rig.freePosition = vec3.vsub(a: rig.freePosition, b: vec3.vscale(a: right, s: step)) }
-      if sdl3.isKeyDown(key: keyD) { rig.freePosition = vec3.vadd(a: rig.freePosition, b: vec3.vscale(a: right, s: step)) }
-      if sdl3.isKeyDown(key: keyQ) { rig.freePosition = vec3.vsub(a: rig.freePosition, b: vec3.vscale(a: up, s: step)) }
-      if sdl3.isKeyDown(key: keyE) { rig.freePosition = vec3.vadd(a: rig.freePosition, b: vec3.vscale(a: up, s: step)) }
+      if sdl3.isKeyDown(key: keyW) { keyMove = vec3.vadd(a: keyMove, b: vec3.vscale(a: forward, s: step)) }
+      if sdl3.isKeyDown(key: keyS) { keyMove = vec3.vsub(a: keyMove, b: vec3.vscale(a: forward, s: step)) }
+      if sdl3.isKeyDown(key: keyA) { keyMove = vec3.vsub(a: keyMove, b: vec3.vscale(a: right, s: step)) }
+      if sdl3.isKeyDown(key: keyD) { keyMove = vec3.vadd(a: keyMove, b: vec3.vscale(a: right, s: step)) }
+      if sdl3.isKeyDown(key: keyQ) { keyMove = vec3.vsub(a: keyMove, b: vec3.vscale(a: up, s: step)) }
+      if sdl3.isKeyDown(key: keyE) { keyMove = vec3.vadd(a: keyMove, b: vec3.vscale(a: up, s: step)) }
     }
+  }
+
+  # THE TARGET TAKES EVERYTHING; THE DISPLAY TAKES ONLY WHAT IS NOT
+  # SMOOTHED. That split is the whole mechanism: an unsmoothed source
+  # lands in both and so has exactly zero added lag, while a smoothed one
+  # moves the target and leaves a gap for the easing below to close. It
+  # also means the two toggles compose — with the mouse smoothed and keys
+  # raw, a key press still responds instantly on the same frame that a
+  # drag is easing.
+  rig.yaw = rig.yaw + mouseYaw + keyYaw
+  rig.orbitPitch = clampRigPitch(rig: rig, pitch: rig.orbitPitch + mouseOrbitPitch + keyOrbitPitch)
+  rig.freePitch = clampRigPitch(rig: rig, pitch: rig.freePitch + mouseFreePitch)
+  rig.distance = clampRigDistance(rig: rig, dist: rig.distance + mouseDist + keyDist)
+  rig.freePosition = vec3.vadd(a: rig.freePosition, b: keyMove)
+
+  if not rig.smoothMouse {
+    rig.viewYaw = rig.viewYaw + mouseYaw
+    rig.viewOrbitPitch = rig.viewOrbitPitch + mouseOrbitPitch
+    rig.viewFreePitch = rig.viewFreePitch + mouseFreePitch
+    rig.viewDistance = rig.viewDistance + mouseDist
+  }
+  if not rig.smoothKeys {
+    rig.viewYaw = rig.viewYaw + keyYaw
+    rig.viewOrbitPitch = rig.viewOrbitPitch + keyOrbitPitch
+    rig.viewDistance = rig.viewDistance + keyDist
+    rig.viewPosition = vec3.vadd(a: rig.viewPosition, b: keyMove)
+  }
+
+  # Close whatever gap the smoothed sources left. With both toggles off
+  # every gap is already zero and each of these is the identity.
+  let rotRate: Float = rigRotationRate(rig: rig)
+  rig.viewYaw = smoothTowards(current: rig.viewYaw, target: rig.yaw, rate: rotRate, dt: dt)
+  rig.viewOrbitPitch = smoothTowards(current: rig.viewOrbitPitch, target: rig.orbitPitch, rate: rotRate, dt: dt)
+  rig.viewFreePitch = smoothTowards(current: rig.viewFreePitch, target: rig.freePitch, rate: rotRate, dt: dt)
+  rig.viewDistance = smoothTowards(current: rig.viewDistance, target: rig.distance, rate: rotRate, dt: dt)
+  # Position is keyboard-driven only, so it follows that toggle alone.
+  var moveRate: Float = 0.0
+  if rig.smoothKeys { moveRate = rig.keySmoothRate }
+  rig.viewPosition = vec3.create(
+    x: smoothTowards(current: rig.viewPosition.x, target: rig.freePosition.x, rate: moveRate, dt: dt),
+    y: smoothTowards(current: rig.viewPosition.y, target: rig.freePosition.y, rate: moveRate, dt: dt),
+    z: smoothTowards(current: rig.viewPosition.z, target: rig.freePosition.z, rate: moveRate, dt: dt)
+  )
+  # A snapshot restored under different limits, or a target clamped after
+  # the display already passed the old bound, must not leave the visible
+  # camera outside the range.
+  rig.viewOrbitPitch = clampRigPitch(rig: rig, pitch: rig.viewOrbitPitch)
+  rig.viewFreePitch = clampRigPitch(rig: rig, pitch: rig.viewFreePitch)
+  rig.viewDistance = clampRigDistance(rig: rig, dist: rig.viewDistance)
+
+  # THE DISPLAY MOVING COUNTS AS MOVEMENT. Easing continues for a while
+  # after the last event, and a loop that only watched the target would
+  # drop to its idle rate mid-glide and show the smoothing as a stutter —
+  # the same starvation trap documented for every other animation source.
+  if rig.viewYaw is not viewYaw0
+    or rig.viewOrbitPitch is not viewOrbit0
+    or rig.viewFreePitch is not viewFree0
+    or rig.viewDistance is not viewDist0
+    or rig.viewPosition.x is not viewPos0.x
+    or rig.viewPosition.y is not viewPos0.y
+    or rig.viewPosition.z is not viewPos0.z {
+    ret true
   }
 
   ret rig.yaw is not yaw0
@@ -228,13 +411,25 @@ func applyCameraRig(rig: view CameraRig, camera: mod Camera3d) pub {
   if rig.mode is CameraRigMode.orbit {
     camera.position = orbitEye(
       targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z,
-      yaw: rig.yaw, pitch: rig.orbitPitch, dist: rig.distance
+      yaw: rig.viewYaw, pitch: rig.viewOrbitPitch, dist: rig.viewDistance
     )
   } else {
     let forward: Vec3 = cameraRigForward(rig: rig)
-    camera.position = rig.freePosition
+    camera.position = rig.viewPosition
     camera.target = vec3.vadd(a: camera.position, b: forward)
   }
+}
+
+# Collapse any easing in flight, putting the camera on its target NOW.
+# Used wherever the view is meant to jump rather than glide — a mode
+# switch, a restored snapshot — because easing across a deliberate
+# teleport is a swoop through the scene, not smoothing.
+func snapCameraRigView(rig: mod CameraRig) pub {
+  rig.viewYaw = rig.yaw
+  rig.viewOrbitPitch = rig.orbitPitch
+  rig.viewFreePitch = rig.freePitch
+  rig.viewDistance = rig.distance
+  rig.viewPosition = rig.freePosition
 }
 
 # ----- snapshot -------------------------------------------------------
@@ -244,14 +439,22 @@ func applyCameraRig(rig: view CameraRig, camera: mod Camera3d) pub {
 # its state. Restoring a partially-parsed camera is worse than not
 # restoring one.
 
-# Ten values: mode, yaw, two pitches, distance, free position xyz, and
-# the orbit target's x/y.
-const cameraRigFields: Int = 10
+# Twelve values: mode, yaw, two pitches, distance, free position xyz, the
+# orbit target's x/y, and the two smoothing toggles.
+#
+# Only TARGET state is written. The display fields are mid-easing values
+# with no meaning across a restart, and saving them would persist a
+# half-finished movement.
+const cameraRigFields: Int = 12
 
 func cameraRigStateString(rig: view CameraRig, camera: view Camera3d) pub ret String {
   var modeNum: Int = 0
   if rig.mode is CameraRigMode.free { modeNum = 1 }
-  ret "{modeNum} {rig.yaw} {rig.orbitPitch} {rig.freePitch} {rig.distance} {rig.freePosition.x} {rig.freePosition.y} {rig.freePosition.z} {camera.target.x} {camera.target.y}"
+  var smoothM: Int = 0
+  if rig.smoothMouse { smoothM = 1 }
+  var smoothK: Int = 0
+  if rig.smoothKeys { smoothK = 1 }
+  ret "{modeNum} {rig.yaw} {rig.orbitPitch} {rig.freePitch} {rig.distance} {rig.freePosition.x} {rig.freePosition.y} {rig.freePosition.z} {camera.target.x} {camera.target.y} {smoothM} {smoothK}"
 }
 
 # Apply `cameraRigFields` values starting at `offset` in an
@@ -284,10 +487,15 @@ func applyCameraRigState(parts: view List(String), offset: view Int,
     y: parts.at(index: offset + 9).trim().toFloat(),
     z: camera.target.z
   )
+  rig.smoothMouse = parts.at(index: offset + 10).trim().toInt() is 1
+  rig.smoothKeys = parts.at(index: offset + 11).trim().toInt() is 1
   # A snapshot written by a build with different limits should still land
   # inside this build's.
-  if rig.distance < rig.minDistance { rig.distance = rig.minDistance }
-  if rig.distance > rig.maxDistance { rig.distance = rig.maxDistance }
+  rig.distance = clampRigDistance(rig: rig, dist: rig.distance)
   rig.orbitPitch = clampRigPitch(rig: rig, pitch: rig.orbitPitch)
+  # Start ON the restored camera rather than easing to it from wherever
+  # the defaults put the display — that would play a swoop on every
+  # reload, which is the opposite of preserving the view.
+  snapCameraRigView(rig: rig)
   ret true
 }
