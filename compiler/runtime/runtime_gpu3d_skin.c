@@ -84,6 +84,7 @@ static const char* G3D_SKIN_WGSL =
 "  lightViewProj: array<mat4x4<f32>, 4>,\n"
 "  splitFar: vec4<f32>,\n"
 "  texelWorld: vec4<f32>,\n"
+"  depthRange: vec4<f32>,\n"
 "  shadowCfg: vec4<f32>,\n"
 "};\n"
 "@group(0) @binding(3) var<uniform> SH: ShadowU;\n"
@@ -174,25 +175,7 @@ static const char* G3D_SKIN_WGSL =
 "fn fresnel(VoH: f32, f0: vec3<f32>) -> vec3<f32> {\n"
 "  return f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - VoH, 5.0);\n"
 "}\n"
-"fn sunVisibility(wpos: vec3<f32>, N: vec3<f32>, viewDepth: f32) -> f32 {\n"
-"  let count = i32(SH.shadowCfg.x);\n"
-"  if (count <= 0) { return 1.0; }\n"
-"  var c = 0;\n"
-"  if (viewDepth > SH.splitFar.x) { c = 1; }\n"
-"  if (viewDepth > SH.splitFar.y) { c = 2; }\n"
-"  if (viewDepth > SH.splitFar.z) { c = 3; }\n"
-"  if (c >= count) { return 1.0; }\n"
-"  var texel = SH.texelWorld.x;\n"
-"  if (c == 1) { texel = SH.texelWorld.y; }\n"
-"  if (c == 2) { texel = SH.texelWorld.z; }\n"
-"  if (c == 3) { texel = SH.texelWorld.w; }\n"
-"  let offset = wpos + N * (texel * 1.5);\n"
-"  let lp = SH.lightViewProj[c] * vec4<f32>(offset, 1.0);\n"
-"  let ndc = lp.xyz / lp.w;\n"
-"  let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);\n"
-"  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0) { return 1.0; }\n"
-"  return textureSampleCompareLevel(shadowTex, shadowSamp, uv, c, ndc.z);\n"
-"}\n"
+G3D_SHADOW_FN_WGSL
 "struct FsOut {\n"
 "  @location(0) color: vec4<f32>,\n"
 "  @location(1) normal: vec4<f32>,\n"
@@ -222,7 +205,7 @@ static const char* G3D_SKIN_WGSL =
 "           / max(4.0 * NoV * NoL, 1e-4);\n"
 "  let kd = (vec3<f32>(1.0) - Fs) * (1.0 - metallic);\n"
 "  let viewDepth = length(F.camPos.xyz - in.wpos);\n"
-"  let sunVis = sunVisibility(in.wpos, N, viewDepth);\n"
+"  let sunVis = sunVisibility(in.wpos, N, viewDepth, in.pos.xy);\n"
 "  let direct = (kd * albedo / PI + spec) * F.sunColor.rgb * NoL * sunVis;\n"
 "  let hemi = mix(F.ambGround.rgb, F.ambSky.rgb, N.y * 0.5 + 0.5);\n"
 "  let ambF = fresnel(NoV, f0);\n"
@@ -309,7 +292,7 @@ static void g3d_skin_init_pipeline(void) {
     e[0].binding = 0; e[0].buffer = g3d_frame_ubuf; e[0].size = 288;
     e[1].binding = 1; e[1].buffer = g3d_skin_draw_sbuf; e[1].size = sd.size;
     e[2].binding = 2; e[2].buffer = g3d_skin_palette_sbuf; e[2].size = pl.size;
-    e[3].binding = 3; e[3].buffer = g3d_sm_frame_ubuf; e[3].size = 304;
+    e[3].binding = 3; e[3].buffer = g3d_sm_frame_ubuf; e[3].size = 320;
     e[4].binding = 4; e[4].textureView = g3d_sm_array_view;
     e[5].binding = 5; e[5].sampler = g3d_sm_sampler;
     WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));

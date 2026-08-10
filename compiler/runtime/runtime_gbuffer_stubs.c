@@ -62,8 +62,10 @@ void rae_ext_gbuffer_deferredShutdown(void) {}
 
 /* Shadows (#382). Stubbed for builds without the GPU backend. */
 void rae_ext_gpu3d_shadowBegin(const float* cascades, int64_t count, int64_t resolution,
-                               const float* splits, const float* texelWorld){
+                               const float* splits, const float* texelWorld,
+                               const float* depthRange){
     (void)cascades; (void)count; (void)resolution; (void)splits; (void)texelWorld;
+    (void)depthRange;
 }
 void rae_ext_gpu3d_shadowDraw(int64_t mesh, rae_Mat4* model){ (void)mesh; (void)model; }
 void rae_ext_gpu3d_shadowDrawSkinned(int64_t mesh, rae_Mat4* model){ (void)mesh; (void)model; }
