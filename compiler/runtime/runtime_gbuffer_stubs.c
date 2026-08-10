@@ -39,6 +39,16 @@ void rae_ext_gbuffer_drawSkinned(int64_t mesh, rae_Mat4* model, rae_Mat4* prevMo
     (void)mesh; (void)model; (void)prevModel; (void)r; (void)g; (void)b;
     (void)metallic; (void)roughness; (void)emissive;
 }
+void rae_ext_gbuffer_drawMetaballs(const float* packedBalls, int64_t count,
+                                   const float* packedColors, float smoothing,
+                                   float camX, float camY, float camZ,
+                                   float metallic, float roughness,
+                                   float emR, float emG, float emB){
+    (void)packedBalls; (void)count; (void)packedColors; (void)smoothing;
+    (void)camX; (void)camY; (void)camZ; (void)metallic; (void)roughness;
+    (void)emR; (void)emG; (void)emB;
+}
+void rae_ext_gbuffer_sdfShutdown(void) {}
 void rae_ext_gbuffer_end(void) {}
 int64_t rae_ext_gbuffer_drawCount(void) { return 0; }
 void rae_ext_gbuffer_debugView(int64_t mode, float zNear, float zFar){

@@ -261,6 +261,9 @@ func renderDeferredPass(r: view DeferredRenderer, tag: view Int, scene: view Sce
   if tag is tagGbuffer {
     beginPass(camera: camera, light: light, aspect: aspect)
     gbuffer.renderScene(scene: scene)
+    # Metaballs go into the SAME pass as the triangles, so the two kinds
+    # depth-test against each other rather than compositing (#392).
+    renderSceneSdf(scene: scene, camera: camera)
     endPass()
   }
   if tag is tagDepthPyramid {

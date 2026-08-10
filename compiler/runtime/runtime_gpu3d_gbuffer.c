@@ -140,6 +140,11 @@ static WGPUBuffer         gb_view_ubuf = NULL;
 #define GB_MODE_LIT      0.0f
 #define GB_MODE_EMISSIVE (1.0f / 3.0f)
 #define GB_MODE_UNLIT    (2.0f / 3.0f)
+/* WGSL-literal forms of the same constants, so the deferred SDF pass
+ * cannot drift from the raster pass's encoding. */
+#define GB_MODE_LIT_WGSL       "0.0"
+#define GB_MODE_EMISSIVE_WGSL  "0.33333333"
+#define GB_EMISSIVE_LOG_K_WGSL "6.91"
 
 /* Emissive is stored as log(1+E)/K and decoded as exp(e*K)-1, which fits
  * roughly [0, 1000] of linear radiance into one 8-bit channel. */

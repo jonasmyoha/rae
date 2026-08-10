@@ -49,6 +49,8 @@ open math3d
 func begin(viewProj: view Mat4, clearR: Float, clearG: Float, clearB: Float) extern
 func draw(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emissive: Float) extern
 func drawSkinned(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emissive: Float) extern
+func drawMetaballs(packedBalls: view Buffer(Float), count: Int, packedColors: view Buffer(Float), smoothing: Float, camX: Float, camY: Float, camZ: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
+func sdfShutdown() extern
 func end() extern
 func drawCount() extern ret Int
 func debugView(mode: Int, zNear: Float, zFar: Float) extern
@@ -166,11 +168,71 @@ func drawSkinnedInstance(mesh: view MeshHandle, model: view Mat4, prevModel: vie
 
 # Fill the G-buffer from a scene's mesh components.
 #
-# SDF primitives are absent by design, not oversight: the forward path
-# raymarches them in the material shader, and the deferred equivalent is a
-# raymarch that writes G-buffer attributes instead of colour. That is its
-# own pass with its own pipeline, and it lands once the lighting side is
-# real enough to shade what it writes.
+# SDF primitives now participate too (#392): the raymarch writes packed
+# G-buffer attributes and frag_depth, so a metaball surface is shaded by
+# the same lighting pass as every triangle and depth-tests against them.
+# Metaball clusters into the G-buffer. Cluster discovery mirrors the
+# forward path exactly — scan for unseen cluster ids rather than sorting,
+# since a scene has a handful of clusters — because the two frames must
+# group the same balls into the same surfaces or they render different
+# geometry from one scene.
+func renderSceneSdf(scene: view Scene3d, camera: view Camera3d) pub {
+  if scene.sdfPrimitives.length is 0 {
+    ret
+  }
+  var clusterScan: Int = 0
+  loop clusterScan < scene.sdfPrimitives.length {
+    let head: SdfPrimitive = scene.sdfPrimitives.at(index: clusterScan)
+    var alreadyDrawn: Bool = false
+    var back: Int = 0
+    loop back < clusterScan {
+      let prior: SdfPrimitive = scene.sdfPrimitives.at(index: back)
+      if prior.shape is 0 {
+        if prior.cluster is head.cluster { alreadyDrawn = true }
+      }
+      back = back + 1
+    }
+    if head.shape is 0 {
+      if alreadyDrawn is false {
+        let packed: List(Float) = createList(Float, cap: scene.sdfPrimitives.length * 4)
+        let colors: List(Float) = createList(Float, cap: scene.sdfPrimitives.length * 4)
+        var ballCount: Int = 0
+        var i: Int = 0
+        loop i < scene.sdfPrimitives.length {
+          let sdf: SdfPrimitive = scene.sdfPrimitives.at(index: i)
+          if sdf.shape is 0 {
+            if sdf.cluster is head.cluster {
+              let transform: Transform3d = scene.transforms.at(index: sdf.entity)
+              packed.add(value: transform.position.x)
+              packed.add(value: transform.position.y)
+              packed.add(value: transform.position.z)
+              packed.add(value: transform.scale.x)
+              let ballMaterial: Material3d = scene.materials.at(index: sdf.material)
+              colors.add(value: ballMaterial.baseColor.x)
+              colors.add(value: ballMaterial.baseColor.y)
+              colors.add(value: ballMaterial.baseColor.z)
+              colors.add(value: 0.0)
+              ballCount = ballCount + 1
+            }
+          }
+          i = i + 1
+        }
+        if ballCount > 0 {
+          let material: Material3d = scene.materials.at(index: head.material)
+          drawMetaballs(
+            packedBalls: packed.data, count: ballCount,
+            packedColors: colors.data, smoothing: head.smoothing,
+            camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z,
+            metallic: material.metallic, roughness: material.roughness,
+            emR: material.emission.x, emG: material.emission.y, emB: material.emission.z
+          )
+        }
+      }
+    }
+    clusterScan = clusterScan + 1
+  }
+}
+
 func renderScene(scene: view Scene3d) pub {
   var i: Int = 0
   loop i < scene.meshRenderers.length {
