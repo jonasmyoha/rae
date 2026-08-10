@@ -1,0 +1,610 @@
+# gltf_skin — skinning and animation for glTF models.
+#
+# Split from lib/gltf.rae, which hit the project's 1000-line cap. The
+# split is along a real seam rather than an arbitrary line count: gltf.rae
+# reads the CONTAINER and its geometry, this reads what makes geometry
+# move. A caller that only draws static models never needs this module.
+#
+# Three pieces, each with its own note below:
+#   - the skinned vertex format (#374)
+#   - the skeleton and its Mat3x4 joint palette (#375)
+#   - animation clips and sampling (#376)
+import core
+import math
+import json
+import gltf
+import mesh3d
+import math3d
+import quat
+open json
+open gltf
+open mesh3d
+open math3d
+open quat
+
+# ----- skinned primitives (#374) ---------------------------------------
+
+# A primitive with its skinning attributes, ready for the skinned GPU
+# pipeline. 16 Floats per vertex:
+#
+#   [0..2]   position
+#   [3..5]   normal
+#   [6..7]   uv
+#   [8..11]  joint indices  (as Floats; see below)
+#   [12..15] joint weights
+#
+# SEPARATE FROM MeshData ON PURPOSE. The static layout is 8 Floats and is
+# hardcoded in mesh3d, in gpu3d's vertex layout and in the WGSL. Widening
+# it would ripple through every mesh generator and every 3D example, and
+# would make a ground plane carry 32 bytes per vertex of joint data it can
+# never read. Skinned and static geometry are different enough to deserve
+# different buffers.
+#
+# JOINT INDICES TRAVEL AS FLOATS. glTF stores them as unsigned bytes or
+# shorts and the shader wants integers, but the vertex path here is
+# float-only, so they are widened on load and cast back in the shader.
+# Exact for every index a 24-bit float mantissa can hold, which is every
+# skeleton anyone will build.
+type SkinnedMeshData {
+  verts: List(Float)
+  indices: List(Int)
+  vertCount: Int
+}
+
+func loadSkinnedPrimitive(g: view Glb, meshIndex: view Int, primIndex: view Int) pub ret SkinnedMeshData {
+  let verts: List(Float) = createList(Float, cap: 0)
+  let indices: List(Int) = createList(Int, cap: 0)
+  if g.ok is false {
+    ret SkinnedMeshData { verts: own verts, indices: own indices, vertCount: 0 }
+  }
+  let root: JsonValue = jsonRoot(doc: g.doc)
+  let meshes: JsonValue = arrayField(g: g, obj: root, key: "meshes")
+  let mesh: JsonValue = jsonArrayAt(doc: g.doc, this: meshes, idx: meshIndex)
+  let prims: JsonValue = arrayField(g: g, obj: mesh, key: "primitives")
+  let prim: JsonValue = jsonArrayAt(doc: g.doc, this: prims, idx: primIndex)
+  let attrs: JsonValue = objField(g: g, obj: prim, key: "attributes")
+
+  # Geometry comes from the existing loader so the two paths cannot
+  # disagree about positions, generated normals or index rebasing.
+  let base: MeshData = loadPrimitive(g: g, meshIndex: meshIndex, primIndex: primIndex)
+  if base.vertCount is 0 {
+    ret SkinnedMeshData { verts: own verts, indices: own indices, vertCount: 0 }
+  }
+
+  let jointAcc: Int = intField(g: g, obj: attrs, key: "JOINTS_0", fallback: 0 - 1)
+  let weightAcc: Int = intField(g: g, obj: attrs, key: "WEIGHTS_0", fallback: 0 - 1)
+  # readInts, not readFloats: joint indices are INDICES, and readFloats
+  # normalises unsigned integer types to [0,1], which would turn joint 37
+  # into 0.145 and silently bind every vertex to joint 0.
+  let joints: List(Int) = readInts(g: g, index: jointAcc)
+  let weights: List(Float) = readFloats(g: g, index: weightAcc)
+  let hasSkin: Bool = joints.length >= base.vertCount * 4 and weights.length >= base.vertCount * 4
+
+  var i: Int = 0
+  loop i < base.vertCount {
+    var c: Int = 0
+    loop c < 8 {
+      verts.add(value: base.verts.at(index: i * 8 + c))
+      c = c + 1
+    }
+    if hasSkin {
+      var k: Int = 0
+      loop k < 4 {
+        verts.add(value: joints.at(index: i * 4 + k).toFloat())
+        k = k + 1
+      }
+      # Renormalise: glTF requires the four weights to sum to 1, but
+      # quantised exports drift, and an un-normalised set scales the whole
+      # vertex toward or away from the origin instead of merely posing it.
+      var sum: Float = 0.0
+      var w: Int = 0
+      loop w < 4 {
+        sum = sum + weights.at(index: i * 4 + w)
+        w = w + 1
+      }
+      if sum <= 0.0 {
+        sum = 1.0
+      }
+      w = 0
+      loop w < 4 {
+        verts.add(value: weights.at(index: i * 4 + w) / sum)
+        w = w + 1
+      }
+    } else {
+      # Unskinned primitive inside a skinned model — props parented to a
+      # bone rather than weighted. Bind it rigidly to joint 0 with full
+      # weight, which is what "follows the root" means in palette terms.
+      verts.add(value: 0.0)
+      verts.add(value: 0.0)
+      verts.add(value: 0.0)
+      verts.add(value: 0.0)
+      verts.add(value: 1.0)
+      verts.add(value: 0.0)
+      verts.add(value: 0.0)
+      verts.add(value: 0.0)
+    }
+    i = i + 1
+  }
+  var k2: Int = 0
+  loop k2 < base.indices.length {
+    indices.add(value: base.indices.at(index: k2))
+    k2 = k2 + 1
+  }
+  ret SkinnedMeshData { verts: own verts, indices: own indices, vertCount: base.vertCount }
+}
+
+# ----- skeleton and joint palette (#375) -------------------------------
+
+# A skin's skeleton, flattened for per-frame palette evaluation.
+#
+# `jointNodes` maps palette slot -> node index, which is the order the
+# vertex JOINTS_0 attribute indexes. `parent` is node -> parent node (-1
+# for a root), derived by inverting the children lists, because glTF
+# stores the hierarchy downward and posing needs it upward.
+#
+# Local transforms are kept as TRS rather than composed matrices so an
+# animation can overwrite one channel without disturbing the others —
+# a clip that animates only rotation must leave translation alone.
+type Skeleton {
+  ok: Bool
+  jointNodes: List(Int)
+  # 16 Floats per joint, column-major, as glTF stores them.
+  inverseBind: List(Float)
+  nodeCount: Int
+  parent: List(Int)
+  # Node names, so a clip stored in a DIFFERENT file can be retargeted by
+  # name rather than by index. See applyClip.
+  nodeNames: List(String)
+  # Per NODE (not per joint): 3, 4 and 3 Floats respectively.
+  localT: List(Float)
+  localR: List(Float)
+  localS: List(Float)
+}
+
+func emptySkeleton() ret Skeleton {
+  ret Skeleton {
+    ok: false, jointNodes: createList(Int, cap: 0), inverseBind: createList(Float, cap: 0),
+    nodeCount: 0, parent: createList(Int, cap: 0), nodeNames: createList(String, cap: 0),
+    localT: createList(Float, cap: 0), localR: createList(Float, cap: 0),
+    localS: createList(Float, cap: 0)
+  }
+}
+
+func loadSkeleton(g: view Glb, skinIndex: view Int) pub ret Skeleton {
+  if g.ok is false {
+    ret emptySkeleton()
+  }
+  let root: JsonValue = jsonRoot(doc: g.doc)
+  let skins: JsonValue = arrayField(g: g, obj: root, key: "skins")
+  if skinIndex < 0 or skinIndex >= jsonArrayLen(this: skins) {
+    ret emptySkeleton()
+  }
+  let skin: JsonValue = jsonArrayAt(doc: g.doc, this: skins, idx: skinIndex)
+  let jointsArr: JsonValue = arrayField(g: g, obj: skin, key: "joints")
+  let jointCount: Int = jsonArrayLen(this: jointsArr)
+  let jointNodes: List(Int) = createList(Int, cap: jointCount)
+  var i: Int = 0
+  loop i < jointCount {
+    jointNodes.add(value: jsonInt(this: jsonArrayAt(doc: g.doc, this: jointsArr, idx: i), fallback: 0))
+    i = i + 1
+  }
+  let ibmAcc: Int = intField(g: g, obj: skin, key: "inverseBindMatrices", fallback: 0 - 1)
+  let inverseBind: List(Float) = readFloats(g: g, index: ibmAcc)
+
+  let nodes: JsonValue = arrayField(g: g, obj: root, key: "nodes")
+  let nodeCount: Int = jsonArrayLen(this: nodes)
+  let parent: List(Int) = createList(Int, cap: nodeCount)
+  let nodeNames: List(String) = createList(String, cap: nodeCount)
+  let localT: List(Float) = createList(Float, cap: nodeCount * 3)
+  let localR: List(Float) = createList(Float, cap: nodeCount * 4)
+  let localS: List(Float) = createList(Float, cap: nodeCount * 3)
+  var n: Int = 0
+  loop n < nodeCount {
+    parent.add(value: 0 - 1)
+    nodeNames.add(value: "")
+    # Defaults are the glTF-specified ones, applied per CHANNEL: a node
+    # with only a rotation still has unit scale and no translation, and
+    # zeroing the lot would collapse the skeleton to a point.
+    localT.add(value: 0.0)
+    localT.add(value: 0.0)
+    localT.add(value: 0.0)
+    localR.add(value: 0.0)
+    localR.add(value: 0.0)
+    localR.add(value: 0.0)
+    localR.add(value: 1.0)
+    localS.add(value: 1.0)
+    localS.add(value: 1.0)
+    localS.add(value: 1.0)
+    n = n + 1
+  }
+  n = 0
+  loop n < nodeCount {
+    let node: JsonValue = jsonArrayAt(doc: g.doc, this: nodes, idx: n)
+    nodeNames.set(index: n, value: jsonString(this: objField(g: g, obj: node, key: "name"), fallback: ""))
+    let tIdx: Int = jsonField(doc: g.doc, this: node, key: "translation")
+    if tIdx >= 0 {
+      let tv: JsonValue = valueAt(doc: g.doc, idx: tIdx)
+      var c: Int = 0
+      loop c < 3 {
+        localT.set(index: n * 3 + c, value: jsonFloat(this: jsonArrayAt(doc: g.doc, this: tv, idx: c), fallback: 0.0))
+        c = c + 1
+      }
+    }
+    let rIdx: Int = jsonField(doc: g.doc, this: node, key: "rotation")
+    if rIdx >= 0 {
+      let rv: JsonValue = valueAt(doc: g.doc, idx: rIdx)
+      var c: Int = 0
+      loop c < 4 {
+        localR.set(index: n * 4 + c, value: jsonFloat(this: jsonArrayAt(doc: g.doc, this: rv, idx: c), fallback: 0.0))
+        c = c + 1
+      }
+    }
+    let sIdx: Int = jsonField(doc: g.doc, this: node, key: "scale")
+    if sIdx >= 0 {
+      let sv: JsonValue = valueAt(doc: g.doc, idx: sIdx)
+      var c: Int = 0
+      loop c < 3 {
+        localS.set(index: n * 3 + c, value: jsonFloat(this: jsonArrayAt(doc: g.doc, this: sv, idx: c), fallback: 1.0))
+        c = c + 1
+      }
+    }
+    # Invert the children list into a parent map.
+    let cIdx: Int = jsonField(doc: g.doc, this: node, key: "children")
+    if cIdx >= 0 {
+      let cv: JsonValue = valueAt(doc: g.doc, idx: cIdx)
+      var k: Int = 0
+      loop k < jsonArrayLen(this: cv) {
+        let child: Int = jsonInt(this: jsonArrayAt(doc: g.doc, this: cv, idx: k), fallback: 0 - 1)
+        if child >= 0 and child < nodeCount {
+          parent.set(index: child, value: n)
+        }
+        k = k + 1
+      }
+    }
+    n = n + 1
+  }
+  ret Skeleton {
+    ok: true, jointNodes: own jointNodes, inverseBind: own inverseBind,
+    nodeCount: nodeCount, parent: own parent, nodeNames: own nodeNames,
+    localT: own localT, localR: own localR, localS: own localS
+  }
+}
+
+# A node's local transform, composed T * R * S.
+#
+# That order is the spec's, and it is not interchangeable: scaling after
+# rotating shears the result, and translating before rotating swings the
+# node around the parent's origin instead of its own.
+func nodeLocalMatrix(sk: view Skeleton, node: view Int) ret Mat4 {
+  let t: Mat4 = mat4Translate(
+    x: sk.localT.at(index: node * 3),
+    y: sk.localT.at(index: node * 3 + 1),
+    z: sk.localT.at(index: node * 3 + 2)
+  )
+  let q: Quat = quat.create(
+    x: sk.localR.at(index: node * 4),
+    y: sk.localR.at(index: node * 4 + 1),
+    z: sk.localR.at(index: node * 4 + 2),
+    w: sk.localR.at(index: node * 4 + 3)
+  )
+  let r: Mat4 = quat.toMat4(q: q)
+  let s: Mat4 = mat4ScaleXYZ(
+    x: sk.localS.at(index: node * 3),
+    y: sk.localS.at(index: node * 3 + 1),
+    z: sk.localS.at(index: node * 3 + 2)
+  )
+  ret mat4Mul(a: t, b: mat4Mul(a: r, b: s))
+}
+
+# A node's world transform: every local transform from the root down.
+#
+# Walks UP to collect the chain, then multiplies DOWN. Multiplying while
+# walking up would compose the transforms in reverse, which produces a
+# skeleton that is subtly inside-out rather than obviously broken.
+func nodeWorldMatrix(sk: view Skeleton, node: view Int) ret Mat4 {
+  let chain: List(Int) = createList(Int, cap: 16)
+  var cur: Int = node
+  # The guard is against a malformed file whose parent links form a cycle;
+  # without it a bad export hangs the frame instead of rendering wrong.
+  var guard: Int = 0
+  loop cur >= 0 and guard < sk.nodeCount + 1 {
+    chain.add(value: cur)
+    cur = sk.parent.at(index: cur)
+    guard = guard + 1
+  }
+  var m: Mat4 = mat4Identity()
+  var i: Int = chain.length - 1
+  loop i >= 0 {
+    m = mat4Mul(a: m, b: nodeLocalMatrix(sk: sk, node: chain.at(index: i)))
+    i = i - 1
+  }
+  ret m
+}
+
+# Build the GPU joint palette: 12 Floats per joint, three vec4 rows.
+#
+#     palette[j] = worldMatrix(joint j) * inverseBind[j]
+#
+# The inverse bind takes a vertex from model space into the joint's local
+# space; the world matrix puts it back wherever that joint now is. Only
+# three rows are stored because a joint transform is affine and its fourth
+# row is always (0,0,0,1) — this is the Mat3x4 saving #354 exists for.
+func buildPalette(sk: view Skeleton) pub ret List(Float) {
+  let out: List(Float) = createList(Float, cap: sk.jointNodes.length * 12)
+  if sk.ok is false {
+    ret own out
+  }
+  var j: Int = 0
+  loop j < sk.jointNodes.length {
+    let world: Mat4 = nodeWorldMatrix(sk: sk, node: sk.jointNodes.at(index: j))
+    var ib: Mat4 = mat4Identity()
+    if sk.inverseBind.length >= (j + 1) * 16 {
+      var c: Int = 0
+      loop c < 16 {
+        ib.m[c] = sk.inverseBind.at(index: j * 16 + c)
+        c = c + 1
+      }
+    }
+    let m: Mat4 = mat4Mul(a: world, b: ib)
+    # Column-major storage, so row r is elements r, r+4, r+8, r+12.
+    var r: Int = 0
+    loop r < 3 {
+      out.add(value: m.m[r])
+      out.add(value: m.m[r + 4])
+      out.add(value: m.m[r + 8])
+      out.add(value: m.m[r + 12])
+      r = r + 1
+    }
+    j = j + 1
+  }
+  ret own out
+}
+
+func jointCount(sk: view Skeleton) pub ret Int {
+  ret sk.jointNodes.length
+}
+
+# ----- animation clips (#376) ------------------------------------------
+
+const pathTranslation: Int = 0
+const pathRotation: Int = 1
+const pathScale: Int = 2
+
+const interpLinear: Int = 0
+const interpStep: Int = 1
+
+# One animation, flattened into parallel arrays.
+#
+# Channels are stored side by side rather than as a list of structs so
+# sampling walks contiguous memory and allocates nothing per frame — the
+# same discipline #356's acceptance criterion imposes on the transform
+# path. `targetNode` is resolved AT LOAD to an index in the target
+# skeleton, so sampling never does a name lookup.
+type Clip {
+  ok: Bool
+  name: String
+  duration: Float
+  targetNode: List(Int)
+  path: List(Int)
+  interp: List(Int)
+  timeStart: List(Int)
+  timeCount: List(Int)
+  times: List(Float)
+  valueStart: List(Int)
+  values: List(Float)
+}
+
+func emptyClip() ret Clip {
+  ret Clip {
+    ok: false, name: "", duration: 0.0,
+    targetNode: createList(Int, cap: 0), path: createList(Int, cap: 0),
+    interp: createList(Int, cap: 0), timeStart: createList(Int, cap: 0),
+    timeCount: createList(Int, cap: 0), times: createList(Float, cap: 0),
+    valueStart: createList(Int, cap: 0), values: createList(Float, cap: 0)
+  }
+}
+
+# Find a node in the skeleton by name. Linear, but this runs once per
+# channel at LOAD, never per frame.
+func nodeByName(sk: view Skeleton, name: view String) ret Int {
+  var i: Int = 0
+  loop i < sk.nodeNames.length {
+    if sk.nodeNames.at(index: i).equals(other: name) {
+      ret i
+    }
+    i = i + 1
+  }
+  ret 0 - 1
+}
+
+# Load an animation, RETARGETED onto `sk` by joint name.
+#
+# The clip may live in a different .glb from the character — the standard
+# way animation libraries ship — and that file has its own node list. Its
+# node INDICES therefore mean nothing to the character's skeleton, so each
+# channel's target is resolved through the clip's node name to the
+# skeleton's node of the same name. Channels naming a joint the skeleton
+# does not have are dropped rather than misapplied.
+#
+# For the walker's own clips the two index spaces happen to coincide, both
+# having come from one Blender setup — but relying on that would break on
+# the first clip from anywhere else, and would break SILENTLY, producing a
+# scrambled pose rather than an error.
+func loadClip(g: view Glb, animIndex: view Int, sk: view Skeleton) pub ret Clip {
+  if g.ok is false or sk.ok is false {
+    ret emptyClip()
+  }
+  let root: JsonValue = jsonRoot(doc: g.doc)
+  let anims: JsonValue = arrayField(g: g, obj: root, key: "animations")
+  if animIndex < 0 or animIndex >= jsonArrayLen(this: anims) {
+    ret emptyClip()
+  }
+  let anim: JsonValue = jsonArrayAt(doc: g.doc, this: anims, idx: animIndex)
+  let name: String = jsonString(this: objField(g: g, obj: anim, key: "name"), fallback: "clip")
+  let samplers: JsonValue = arrayField(g: g, obj: anim, key: "samplers")
+  let channels: JsonValue = arrayField(g: g, obj: anim, key: "channels")
+  let nodes: JsonValue = arrayField(g: g, obj: root, key: "nodes")
+
+  let targetNode: List(Int) = createList(Int, cap: 0)
+  let pathList: List(Int) = createList(Int, cap: 0)
+  let interpList: List(Int) = createList(Int, cap: 0)
+  let timeStart: List(Int) = createList(Int, cap: 0)
+  let timeCount: List(Int) = createList(Int, cap: 0)
+  let times: List(Float) = createList(Float, cap: 0)
+  let valueStart: List(Int) = createList(Int, cap: 0)
+  let values: List(Float) = createList(Float, cap: 0)
+  var duration: Float = 0.0
+
+  var c: Int = 0
+  loop c < jsonArrayLen(this: channels) {
+    let ch: JsonValue = jsonArrayAt(doc: g.doc, this: channels, idx: c)
+    let target: JsonValue = objField(g: g, obj: ch, key: "target")
+    let clipNode: Int = intField(g: g, obj: target, key: "node", fallback: 0 - 1)
+    let pathName: String = jsonString(this: objField(g: g, obj: target, key: "path"), fallback: "")
+    var p: Int = 0 - 1
+    if pathName.equals(other: "translation") { p = pathTranslation }
+    if pathName.equals(other: "rotation") { p = pathRotation }
+    if pathName.equals(other: "scale") { p = pathScale }
+    # "weights" targets morph targets, which this loader does not do. Skip
+    # rather than misinterpret it as a transform channel.
+    if p >= 0 and clipNode >= 0 {
+      let clipNodeObj: JsonValue = jsonArrayAt(doc: g.doc, this: nodes, idx: clipNode)
+      let clipName: String = jsonString(this: objField(g: g, obj: clipNodeObj, key: "name"), fallback: "")
+      let skNode: Int = nodeByName(sk: sk, name: clipName)
+      if skNode >= 0 {
+        let samplerIdx: Int = intField(g: g, obj: ch, key: "sampler", fallback: 0 - 1)
+        let sampler: JsonValue = jsonArrayAt(doc: g.doc, this: samplers, idx: samplerIdx)
+        let interpName: String = jsonString(this: objField(g: g, obj: sampler, key: "interpolation"), fallback: "LINEAR")
+        var ip: Int = interpLinear
+        if interpName.equals(other: "STEP") { ip = interpStep }
+        # CUBICSPLINE stores tangents either side of each value, so a
+        # LINEAR read of it would treat tangents as keyframes. Falling
+        # back to STEP is visibly wrong rather than subtly wrong, which is
+        # the right failure for a format this loader does not implement.
+        if interpName.equals(other: "CUBICSPLINE") { ip = interpStep }
+
+        let inAcc: Int = intField(g: g, obj: sampler, key: "input", fallback: 0 - 1)
+        let outAcc: Int = intField(g: g, obj: sampler, key: "output", fallback: 0 - 1)
+        let t: List(Float) = readFloats(g: g, index: inAcc)
+        let v: List(Float) = readFloats(g: g, index: outAcc)
+        if t.length > 0 and v.length > 0 {
+          targetNode.add(value: skNode)
+          pathList.add(value: p)
+          interpList.add(value: ip)
+          timeStart.add(value: times.length)
+          timeCount.add(value: t.length)
+          valueStart.add(value: values.length)
+          var i: Int = 0
+          loop i < t.length {
+            times.add(value: t.at(index: i))
+            i = i + 1
+          }
+          if t.at(index: t.length - 1) > duration {
+            duration = t.at(index: t.length - 1)
+          }
+          i = 0
+          loop i < v.length {
+            values.add(value: v.at(index: i))
+            i = i + 1
+          }
+        }
+      }
+    }
+    c = c + 1
+  }
+  ret Clip {
+    ok: true, name: "{name}", duration: duration,
+    targetNode: own targetNode, path: own pathList, interp: own interpList,
+    timeStart: own timeStart, timeCount: own timeCount, times: own times,
+    valueStart: own valueStart, values: own values
+  }
+}
+
+func clipChannelCount(c: view Clip) pub ret Int {
+  ret c.targetNode.length
+}
+
+# Pose the skeleton from a clip at `time` seconds, looping.
+#
+# Writes only the channels the clip actually carries: a clip that animates
+# rotation leaves each node's translation and scale as the bind pose left
+# them, which is why the skeleton keeps TRS separately rather than
+# composed matrices.
+func applyClip(sk: mod Skeleton, c: view Clip, time: view Float) pub {
+  if sk.ok is false or c.ok is false or c.duration <= 0.0 {
+    ret
+  }
+  # Wrap into the clip. Negative times wrap forward, so a caller counting
+  # down does not fall off the front of the keyframes.
+  var t: Float = time - c.duration * (time / c.duration).floor()
+  if t < 0.0 {
+    t = t + c.duration
+  }
+
+  var ci: Int = 0
+  loop ci < c.targetNode.length {
+    let node: Int = c.targetNode.at(index: ci)
+    let p: Int = c.path.at(index: ci)
+    let ts: Int = c.timeStart.at(index: ci)
+    let tn: Int = c.timeCount.at(index: ci)
+    let vs: Int = c.valueStart.at(index: ci)
+    var comps: Int = 3
+    if p is pathRotation {
+      comps = 4
+    }
+
+    # Locate the keyframe span containing t. Linear scan: these clips have
+    # tens of keys per channel, and a binary search would cost more in
+    # branch overhead than it saves.
+    var k: Int = 0
+    loop k + 1 < tn and c.times.at(index: ts + k + 1) < t {
+      k = k + 1
+    }
+    var k1: Int = k + 1
+    if k1 >= tn {
+      k1 = tn - 1
+    }
+    let t0: Float = c.times.at(index: ts + k)
+    let t1: Float = c.times.at(index: ts + k1)
+    var alpha: Float = 0.0
+    if c.interp.at(index: ci) is interpLinear and t1 > t0 {
+      alpha = (t - t0) / (t1 - t0)
+      if alpha < 0.0 { alpha = 0.0 }
+      if alpha > 1.0 { alpha = 1.0 }
+    }
+
+    if p is pathRotation {
+      let qa: Quat = quat.create(
+        x: c.values.at(index: vs + k * 4), y: c.values.at(index: vs + k * 4 + 1),
+        z: c.values.at(index: vs + k * 4 + 2), w: c.values.at(index: vs + k * 4 + 3)
+      )
+      let qb: Quat = quat.create(
+        x: c.values.at(index: vs + k1 * 4), y: c.values.at(index: vs + k1 * 4 + 1),
+        z: c.values.at(index: vs + k1 * 4 + 2), w: c.values.at(index: vs + k1 * 4 + 3)
+      )
+      # SLERP, not a component-wise lerp. Lerping quaternions shortens the
+      # result, which shows up as limbs subtly shrinking mid-swing, and it
+      # takes the wrong path entirely when the two are far apart. This is
+      # the whole reason lib/quat.rae has slerp.
+      let q: Quat = quat.slerp(a: qa, b: qb, t: alpha)
+      sk.localR.set(index: node * 4, value: q.x)
+      sk.localR.set(index: node * 4 + 1, value: q.y)
+      sk.localR.set(index: node * 4 + 2, value: q.z)
+      sk.localR.set(index: node * 4 + 3, value: q.w)
+    } else {
+      var comp: Int = 0
+      loop comp < comps {
+        let a: Float = c.values.at(index: vs + k * comps + comp)
+        let bv: Float = c.values.at(index: vs + k1 * comps + comp)
+        let v: Float = a + (bv - a) * alpha
+        if p is pathTranslation {
+          sk.localT.set(index: node * 3 + comp, value: v)
+        } else {
+          sk.localS.set(index: node * 3 + comp, value: v)
+        }
+        comp = comp + 1
+      }
+    }
+    ci = ci + 1
+  }
+}
