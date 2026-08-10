@@ -57,6 +57,7 @@ func depthPyramid() extern
 func lighting(camX: Float, camY: Float, camZ: Float, exposure: Float, sunX: Float, sunY: Float, sunZ: Float, sunR: Float, sunG: Float, sunB: Float, skyR: Float, skyG: Float, skyB: Float, gndR: Float, gndG: Float, gndB: Float) extern
 func composite(exposure: Float) extern
 func pyramidMips() extern ret Int
+func ssao(camX: Float, camY: Float, camZ: Float) extern
 func deferredShutdown() extern
 
 # ----- G-buffer inspector modes ---------------------------------------
@@ -187,6 +188,13 @@ func buildDepthPyramid() pub {
 # the payoff of the split: the cost is per pixel, not per object-pixel, so
 # it no longer matters how many objects contributed to a pixel — only that
 # one of them won the depth test.
+# Screen-space AO for the deferred frame (#387). Runs between the depth
+# pyramid and lighting; lighting samples the result and applies it to the
+# INDIRECT term only.
+func ssaoPass(camera: view Camera3d) pub {
+  ssao(camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z)
+}
+
 func lightingPass(camera: view Camera3d, light: view Light3d) pub {
   lighting(
     camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z,
