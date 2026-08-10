@@ -1111,6 +1111,14 @@ static void rae_g3d_present_offscreen(void) {
         if (shot) rae_g2d_save_screenshot(shot);
     }
 
+    /* NO WINDOW MEANS NOTHING TO PRESENT TO. An offscreen-only frame (the
+     * headless zero-alloc tests, and any future render-to-texture caller)
+     * never creates a surface, and wgpuSurfaceGetCurrentTexture aborts the
+     * process on a null one rather than reporting a status we could skip
+     * on. The screenshot above has already captured the frame, which is the
+     * whole point of running headless, so returning here loses nothing. */
+    if (!g_g2d_surface) { rae_wgpu_poll(0); return; }
+
     /* Present best-effort: copy the resolved offscreen image into the
      * surface drawable (same policy as the 2D endFrame). */
     WGPUSurfaceTexture st; memset(&st, 0, sizeof(st));
