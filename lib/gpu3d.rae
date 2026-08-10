@@ -342,6 +342,14 @@ func endShadowPass() pub {
   shadowEnd()
 }
 
+# How many casters the shadow pass rasterised. Exposed because a shadow
+# pass that draws NOTHING still produces a lit, non-blank frame — so a
+# screenshot check cannot tell a working pass from a dead one, and only a
+# count can (#388).
+func shadowCasterCount() pub ret Int {
+  ret shadowDrawCount()
+}
+
 # ----- skinned meshes (#374) ------------------------------------------
 # A second vertex format and pipeline for skeletally animated geometry.
 # Separate from the static path because a ground plane should not carry
