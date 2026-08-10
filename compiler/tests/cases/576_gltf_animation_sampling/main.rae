@@ -1,0 +1,85 @@
+# Animation sampling and retargeting (#376).
+#
+# The clip lives in a DIFFERENT .glb from the character — the standard way
+# animation libraries ship — so this exercises retargeting by joint name,
+# not just interpolation.
+#
+# Four properties, each chosen because it fails differently:
+#
+#   1. Every channel retargets. The walk clip animates 65 joints; if name
+#      resolution were broken, channels would be silently DROPPED and the
+#      character would half-move rather than error.
+#   2. Sampling moves the skeleton. Comparing the posed palette against
+#      the bind pose catches a sampler that runs but writes nothing —
+#      which would look exactly like "the animation has not started yet".
+#   3. It LOOPS. sample(t) must equal sample(t + duration); a wrap bug
+#      shows up as a hitch once per cycle, easy to miss by eye.
+#   4. It is DETERMINISTIC. Sampling the same time twice gives the same
+#      pose, so nothing is accumulating frame to frame.
+import core
+import gltf
+import gltf_skin
+import math
+open gltf
+open gltf_skin
+
+# Largest absolute difference between two palettes, as a single number so
+# the assertions below read as comparisons rather than loops.
+func paletteDelta(a: view List(Float), b: view List(Float)) ret Float {
+  var worst: Float = 0.0
+  var i: Int = 0
+  loop i < a.length and i < b.length {
+    var d: Float = a.at(index: i) - b.at(index: i)
+    if d < 0.0 {
+      d = 0.0 - d
+    }
+    if d > worst {
+      worst = d
+    }
+    i = i + 1
+  }
+  ret worst
+}
+
+func main() {
+  let charGlb: Glb = loadGlb(path: "../examples/113_walker_character/assets/walker.glb")
+  let clipGlb: Glb = loadGlb(path: "../examples/113_walker_character/assets/walk.glb")
+  if charGlb.ok is false or clipGlb.ok is false {
+    log("load failed")
+    ret
+  }
+  var sk: Skeleton = loadSkeleton(g: charGlb, skinIndex: 0)
+  let bind: List(Float) = buildPalette(sk: sk)
+
+  let clip: Clip = loadClip(g: clipGlb, animIndex: 0, sk: sk)
+  log("clip channels={clipChannelCount(c: clip)}")
+
+  # A pose partway through the cycle.
+  applyClip(sk: sk, c: clip, time: clip.duration * 0.35)
+  let posed: List(Float) = buildPalette(sk: sk)
+
+  # 2: the pose must actually differ from the bind pose.
+  if paletteDelta(a: bind, b: posed) > 0.01 {
+    log("posed differs from bind: yes")
+  } else {
+    log("posed differs from bind: NO — sampler wrote nothing")
+  }
+
+  # 4: determinism. Re-sampling the same time reproduces the same pose.
+  applyClip(sk: sk, c: clip, time: clip.duration * 0.35)
+  let again: List(Float) = buildPalette(sk: sk)
+  if paletteDelta(a: posed, b: again) < 0.0001 {
+    log("deterministic: yes")
+  } else {
+    log("deterministic: NO")
+  }
+
+  # 3: looping. One full period later must land on the same pose.
+  applyClip(sk: sk, c: clip, time: clip.duration * 0.35 + clip.duration)
+  let wrapped: List(Float) = buildPalette(sk: sk)
+  if paletteDelta(a: posed, b: wrapped) < 0.001 {
+    log("loops cleanly: yes")
+  } else {
+    log("loops cleanly: NO")
+  }
+}
