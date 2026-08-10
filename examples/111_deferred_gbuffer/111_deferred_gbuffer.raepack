@@ -1,0 +1,21 @@
+pack DeferredGbuffer {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "3D Renderer — Deferred G-buffer"
+  description: "The deferred rendering path (#356): a geometry pass packs albedo, octahedral normals, material and motion into 16 bytes per pixel across three targets plus reverse-Z depth, then a depth pyramid, a lighting pass and an ACES composite read them back. Pass ordering is DERIVED by the render graph from declared resource edges rather than written by hand. Press the debug keys to inspect each G-buffer channel separately — a lit frame that looks right can still hide a wrong normal or motion channel, so each is viewable on its own."
+  category: "3D Renderer"
+  display: {
+    width: 1280
+    height: 800
+  }
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "main.rae"
+      sources: {
+        source: { path: ".", emit: compiled }
+      }
+    }
+  }
+}
