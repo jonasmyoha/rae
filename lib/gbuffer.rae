@@ -48,6 +48,7 @@ open math3d
 # ----- raw C ABI (implementation detail; prefer the typed API below) ---
 func begin(viewProj: view Mat4, clearR: Float, clearG: Float, clearB: Float) extern
 func draw(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emissive: Float) extern
+func drawSkinned(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emissive: Float) extern
 func end() extern
 func drawCount() extern ret Int
 func debugView(mode: Int, zNear: Float, zFar: Float) extern
@@ -133,6 +134,30 @@ func drawInstance(mesh: view MeshHandle, transform: view Transform3d, prevTransf
     emissive = material.emission.z
   }
   draw(
+    mesh: mesh.id, model: model, prevModel: prevModel,
+    r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
+    metallic: material.metallic, roughness: material.roughness, emissive: emissive
+  )
+}
+
+# Queue a SKINNED mesh (#391). Same materials and the same G-buffer
+# layout as a static draw; the difference is only that the vertex stage
+# poses the mesh by the joint palette first. The palette is uploaded once
+# per frame by gpu3d.uploadPalette and shared by every pipeline that
+# reads it.
+func drawSkinnedInstance(mesh: view MeshHandle, model: view Mat4, prevModel: view Mat4,
+                         material: view Material3d) pub {
+  if not meshHandleIsValid(h: mesh) {
+    ret
+  }
+  var emissive: Float = material.emission.x
+  if material.emission.y > emissive {
+    emissive = material.emission.y
+  }
+  if material.emission.z > emissive {
+    emissive = material.emission.z
+  }
+  drawSkinned(
     mesh: mesh.id, model: model, prevModel: prevModel,
     r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
     metallic: material.metallic, roughness: material.roughness, emissive: emissive
