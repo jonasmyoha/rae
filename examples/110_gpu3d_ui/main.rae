@@ -34,6 +34,7 @@ import vec3
 open gpu3d
 open renderer_deferred
 open sky
+open sky_hosek
 open gbuffer
 open math3d
 open mesh3d
@@ -70,6 +71,7 @@ import app3d/camera_bar
 import shadow3d
 import renderer_deferred
 import sky
+import sky_hosek
 import gbuffer
 import app3d/ui_shell
 open app3d/camera_rig
@@ -531,7 +533,8 @@ func main() ret Int {
   var renderer: DeferredRenderer = createDeferredRendererWithUiSky(
     # Hosek-Wilkie rather than Preetham: this scene's horizon is on screen, and
     # that is exactly where the two differ most. groundAlbedo 0.25 = grass.
-    sky: createSkyHosek(sunDir: light.sunDir, sunColor: light.sunColor,
+    sky: createSkyHosek(data: loadDefaultHosekDataset(),
+                        sunDir: light.sunDir, sunColor: light.sunColor,
                         turbidity: 2.5, groundAlbedo: 0.25))
   let gstatus: Int = compileDeferred(r: renderer)
   if gstatus is not 0 {
