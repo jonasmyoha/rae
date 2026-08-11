@@ -491,7 +491,8 @@ func main() ret Int {
   # selection it cannot honour rather than hiding the control (see 594).
   var settings: SettingsState = createSettingsState(scene: 1, sceneCount: 1,
                                                     speed: speed, toon: toonShading,
-                                                    hour: 12.0)
+                                                    hour: 12.0,
+                                                    skyModel: SettingsSkyModel.hosek)
   let settingsOk: Bool = mountSettingsDialog(world: uiWorld, res: gpuUi,
                                              hostNodeId: "SettingsDialogSlot")
   if settingsOk is false {
@@ -499,6 +500,12 @@ func main() ret Int {
   }
   settingsApplyToWorld(s: settings, world: uiWorld)
   setNodeActive(world: uiWorld, nodeId: "SidePanelBody", value: settings.open)
+  # The renderer is built before the panel exists, so the panel's default sky
+  # is applied here rather than at construction.
+  renderer.sky = settingsBuildSky(s: settings, data: hosekData,
+                                  turbidity: 3.0, groundAlbedo: 0.30)
+  light.sunDir = settingsSunDir(s: settings)
+  light.sunColor = settingsSunColor(s: settings)
   log("[ui] panel buttons: {clipPanel.buttonEntities.length} clip, {transport.buttonEntities.length} transport, camera bar {barOk}")
 
   let startT: Float64 = gpu2d.nowSeconds()

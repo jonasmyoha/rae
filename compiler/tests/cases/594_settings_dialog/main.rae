@@ -31,7 +31,8 @@ func check(label: view String, ok: view Bool) {
 func main() {
   # Three scenes, as 110 has.
   var s: SettingsState = createSettingsState(scene: 1, sceneCount: 3, speed: 1.0,
-                                             toon: false, hour: 12.0)
+                                             toon: false, hour: 12.0,
+                                             skyModel: SettingsSkyModel.hosek)
   # The panel is a panel, not a dialog: it is showing to begin with, and one
   # action toggles it. There is no separate close, because the button that hides
   # it is the button that shows it — and that button stays visible either way,
@@ -66,7 +67,8 @@ func main() {
   # One scene, as 113 has. The buttons still EXIST — hiding controls per app is
   # how two dialogs drift apart — but they cannot select what is not there.
   var one: SettingsState = createSettingsState(scene: 1, sceneCount: 1, speed: 1.0,
-                                               toon: true, hour: 8.0)
+                                               toon: true, hour: 8.0,
+                                               skyModel: SettingsSkyModel.preetham)
   check(label: "single-scene app refuses scene 2", ok: settingsHandleAction(s: one, actionId: "settings.scene.2") is false and one.scene is 1)
   check(label: "single-scene app keeps its other settings", ok: settingsHandleAction(s: one, actionId: "settings.toon") and one.toon is false)
 
@@ -76,7 +78,18 @@ func main() {
   check(label: "midnight formats", ok: formatHour(hour: 0.0).equals(other: "00:00"))
   check(label: "end of day clamps inside the day", ok: formatHour(hour: 24.0).equals(other: "23:59"))
 
-  # The slider is bound to the same hour the app reads.
-  check(label: "slider carries the hour", ok: one.timeSlider.value is 8.0)
-  check(label: "slider spans a day", ok: one.timeSlider.minValue is 0.0 and one.timeSlider.maxValue is 24.0)
+  # The hour is held flat, not inside a nested Slider: a nested struct passed as
+  # `mod` does not reliably write back here, and the slider silently never moved
+  # when it was stored that way.
+  check(label: "hour is carried", ok: one.hour is 8.0)
+  check(label: "starts not dragging", ok: one.timeDragging is false)
+  check(label: "a day spans 0..24", ok: settingsHourMin is 0.0 and settingsHourMax is 24.0)
+
+  # Each app picks its own starting model: 110 is the realistic scene and opens
+  # on Preetham, 113 the stylised one and opens on Hosek.
+  check(label: "sky default is per app", ok: s.skyModel is SettingsSkyModel.hosek and one.skyModel is SettingsSkyModel.preetham)
+
+  # Play/pause is shared, so both examples show the same word for it.
+  check(label: "starts playing", ok: one.playing)
+  check(label: "playback toggles", ok: settingsHandleAction(s: one, actionId: "settings.playback") and one.playing is false)
 }
