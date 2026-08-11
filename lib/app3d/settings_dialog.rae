@@ -23,12 +23,18 @@
 import core
 import math
 import string
+import vec3
+import sky_hosek
+import sky
 open ui/ecs
 open ui/components
 open ui/input_gpu2d
 open app3d/ui_shell
 open app3d/playback
 open app3d/slider
+open vec3
+open sky_hosek
+open sky
 open app3d/camera_bar
 
 # Which sky model the dialog is asking for. Deliberately not SkyKind: that enum
@@ -38,8 +44,8 @@ open app3d/camera_bar
 enum SettingsSkyModel {
   # Hosek-Wilkie: the fitted physical model.
   hosek
-  # The earlier default — Preetham, plus the authored hemisphere ambient.
-  classic
+  # The model used before Hosek-Wilkie landed.
+  preetham
 }
 
 const settingsHourMin: Float = 0.0
@@ -144,8 +150,8 @@ func settingsHandleAction(s: mod SettingsState, actionId: view String) pub ret B
     s.skyModel = SettingsSkyModel.hosek
     ret true
   }
-  if actionId.equals(other: "settings.sky.classic") {
-    s.skyModel = SettingsSkyModel.classic
+  if actionId.equals(other: "settings.sky.preetham") {
+    s.skyModel = SettingsSkyModel.preetham
     ret true
   }
   # Scene selection is clamped to what the app actually has, so the buttons can
@@ -199,8 +205,8 @@ func settingsApplyToWorld(s: view SettingsState, world: mod UiWorld) pub {
                   slot: settingsSlotFor(on: s.toon))
   setNodeFillSlot(world: world, nodeId: "SettingsSkyHosek",
                   slot: settingsSlotFor(on: s.skyModel is SettingsSkyModel.hosek))
-  setNodeFillSlot(world: world, nodeId: "SettingsSkyClassic",
-                  slot: settingsSlotFor(on: s.skyModel is SettingsSkyModel.classic))
+  setNodeFillSlot(world: world, nodeId: "SettingsSkyPreetham",
+                  slot: settingsSlotFor(on: s.skyModel is SettingsSkyModel.preetham))
   setNodeFillSlot(world: world, nodeId: "SettingsScene1", slot: settingsSlotFor(on: s.scene is 1))
   setNodeFillSlot(world: world, nodeId: "SettingsScene2", slot: settingsSlotFor(on: s.scene is 2))
   setNodeFillSlot(world: world, nodeId: "SettingsScene3", slot: settingsSlotFor(on: s.scene is 3))
@@ -216,4 +222,40 @@ func settingsSlotFor(on: view Bool) ret String {
     ret "accent"
   }
   ret "surfaceAlt"
+}
+
+# ----- driving the scene ----------------------------------------------
+#
+# The panel holds values; these turn them into the things a renderer takes. They
+# live here so 110 and 113 cannot disagree about what "10:00, Hosek" means.
+
+# Where the sun is, for this hour. Both the sky and the key light take it, so
+# the visible sun and the cast shadows cannot drift apart.
+func settingsSunDir(s: view SettingsState) pub ret Vec3 {
+  ret sunDirForHour(hour: s.hour)
+}
+
+# Warm at the horizon, neutral overhead, and dimmed as the sun sets — the sky
+# model reddens on its own, but the direct light would otherwise stay white and
+# full-strength through a sunset.
+func settingsSunColor(s: view SettingsState) pub ret Vec3 {
+  let base: Vec3 = sunColorForHour(hour: s.hour)
+  var lift: Float = sunHeightForHour(hour: s.hour)
+  # Never fully black: a scene lit by nothing reads as broken rather than as
+  # night, and there is no night sky model here yet.
+  lift = 0.15 + 0.85 * lift
+  ret vec3.create(x: base.x * lift, y: base.y * lift, z: base.z * lift)
+}
+
+# Build the sky the panel is asking for. `data` is only read by the Hosek
+# branch; a caller with no dataset can pass an empty one and still get Preetham.
+func settingsBuildSky(s: view SettingsState, data: view HosekDataset,
+                      turbidity: view Float, groundAlbedo: view Float) pub ret Sky {
+  let dir: Vec3 = settingsSunDir(s: s)
+  let col: Vec3 = settingsSunColor(s: s)
+  if s.skyModel is SettingsSkyModel.preetham {
+    ret createSkyProcedural(sunDir: dir, sunColor: col, turbidity: turbidity)
+  }
+  ret createSkyHosek(data: data, sunDir: dir, sunColor: col,
+                     turbidity: turbidity, groundAlbedo: groundAlbedo)
 }
