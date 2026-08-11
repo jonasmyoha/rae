@@ -241,25 +241,16 @@ func anchorUiToExtent(world: mod UiWorld, res: view Gpu2dUi, w: view Float, h: v
   setNodeRect(world: world, nodeId: "UiRoot", x: 0.0, y: 0.0, w: w, h: h)
 
   # Right-aligned controls, measured from the live width.
-  let debugW: Float = 0.0
-  let pauseW: Float = nodeRectW(world: world, nodeId: "PauseButton")
-  let debugX: Float = w - margin - debugW
 
-  let pauseX: Float = debugX - 12.0 - pauseW
-  setNodeRect(world: world, nodeId: "PauseButton", x: pauseX, y: 24.0, w: pauseW, h: 52.0)
-  setNodeRect(world: world, nodeId: "FpsLabel", x: w - margin - 86.0, y: 82.0, w: 86.0, h: 16.0)
+  setNodeRect(world: world, nodeId: "FpsLabel", x: w - 320.0 - margin - 86.0, y: 24.0, w: 86.0, h: 16.0)
 
-  # The camera bar sits at the top, centred in the space left of the
-  # buttons. It is the SHARED component (lib/app3d/camera_bar.rae), so
-  # this only says where it may live and how much room it has; the bar
-  # flows its own children and sheds readouts that do not fit.
-  let barAvail: Float = pauseX - margin - 12.0 - margin
+  # The camera bar is placed by the top row's layout now, as it is in 113;
+  # this only tells the SHARED component how much room it has, so it can shed
+  # readouts that do not fit.
+  let sidePanelW: Float = 320.0
+  var barAvail: Float = w - sidePanelW - 160.0
+  if barAvail < 200.0 { barAvail = 200.0 }
   fitCameraBar(world: world, res: res, hostNodeId: "CameraBarSlot", availW: barAvail)
-  let barW: Float = nodeRectW(world: world, nodeId: "CameraBarSlot")
-  var barX: Float = (pauseX - margin - barW) * 0.5
-  if barX < margin { barX = margin }
-  setNodeRect(world: world, nodeId: "CameraBarSlot", x: barX, y: 24.0,
-              w: barW, h: nodeRectH(world: world, nodeId: "CameraBarSlot"))
 
   # Crosshair tracks the true viewport centre.
   setNodeRect(world: world, nodeId: "Crosshair", x: (w - 36.0) * 0.5, y: (h - 36.0) * 0.5, w: 36.0, h: 36.0)
@@ -269,10 +260,6 @@ func anchorUiToExtent(world: mod UiWorld, res: view Gpu2dUi, w: view Float, h: v
   # parents, so their offsets are relative to the window, not to a canvas.
   # The side panel owns the right edge, full height — the same shape 113 uses,
   # so the two examples read as one app family rather than two demos.
-  let sidePanelW: Float = 320.0
-  var sidePanelX: Float = w - sidePanelW
-  if sidePanelX < 0.0 { sidePanelX = 0.0 }
-  setNodeRect(world: world, nodeId: "SidePanel", x: sidePanelX, y: 0.0, w: sidePanelW, h: h)
 }
 
 func uploadMeshData(mesh: view MeshData) ret MeshHandle {
