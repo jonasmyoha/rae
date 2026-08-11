@@ -572,6 +572,13 @@ rae_String rae_ext_rae_str_cstr_ptr(const char** s); // Legacy/helper
 
 int64_t rae_ext_nextTick(void);
 int64_t rae_ext_nowMs(void);
+
+/* Hosek-Wilkie sky: cooked coefficients read one scalar at a time.
+ * channel 0..2 = RGB; index 0..8 = analytic coefficients, 9 = radiance scale.
+ * Dataset and interpolation in third_party/hosek_wilkie (BSD, see its README);
+ * the per-direction formula lives in lib/sky.rae and in the WGSL lighting pass. */
+double rae_ext_hosek_config(double turbidity, double albedo, double elevation,
+                            int64_t channel, int64_t index);
 int64_t rae_ext_nowNs(void);
 void rae_ext_rae_sleep(int64_t ms);
 rae_String rae_ext_time_formatTimestamp(int64_t epoch_ms);
