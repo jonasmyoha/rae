@@ -40,7 +40,7 @@
  * own buffer because the background and the ambient are the same
  * environment: two buffers is two chances for the sky you see and the
  * sky you are lit by to be a frame apart. */
-#define GB_LIGHT_BYTES 272
+#define GB_LIGHT_BYTES 416
 
 static WGPUTexture     gb_pyramid_tex = NULL;    /* r32float, half res, mip chain */
 static WGPUTextureView gb_pyramid_rt[GB_PYRAMID_MAX_MIPS];   /* one per mip, as target */
@@ -245,7 +245,12 @@ static const char* GB_AO_WGSL =
 "  viewProj: mat4x4<f32>,\n"
 "  skyParams: vec4<f32>,\n"   /* x kind, y turbidity, z exposure, w sun angular size */
 "  skyZenith: vec4<f32>,\n"   /* stylised zenith colour, w = band sharpness */
-"  skyHorizon: vec4<f32>,\n"  /* stylised horizon colour, w = sun disc intensity */
+"  skyHorizon: vec4<f32>,\n"
+/* Cooked Hosek-Wilkie state: 3 channels x (9 coefficients + radiance)
+ * = 30 floats in 9 vec4 (three per channel, last one half used). Packed by
+ * gb_pack_hosek on the CPU from the SAME memoized cook lib/sky.rae
+ * calls, so the CPU irradiance and the GPU background cannot disagree. */
+"  hosek: array<vec4<f32>, 9>,\n"  /* stylised horizon colour, w = sun disc intensity */
 "};\n"
 "@group(0) @binding(0) var<uniform> L: LightU;\n"
 "@group(0) @binding(1) var gbaTex: texture_2d<f32>;\n"
@@ -365,6 +370,11 @@ static const char* GB_LIGHT_WGSL =
 "  skyParams: vec4<f32>,\n"
 "  skyZenith: vec4<f32>,\n"
 "  skyHorizon: vec4<f32>,\n"
+/* Cooked Hosek-Wilkie state: 3 channels x (9 coefficients + radiance)
+ * = 30 floats in 9 vec4 (three per channel, last one half used). Packed by
+ * gb_pack_hosek on the CPU from the SAME memoized cook lib/sky.rae
+ * calls, so the CPU irradiance and the GPU background cannot disagree. */
+"  hosek: array<vec4<f32>, 9>,\n"
 "};\n"
 "@group(0) @binding(0) var<uniform> L: LightU;\n"
 "@group(0) @binding(1) var gbaTex: texture_2d<f32>;\n"
@@ -457,12 +467,46 @@ G3D_SHADOW_FN_WGSL
 "  c = c + L.sunColor.rgb * pow(g, 6.0) * 0.35;\n"
 "  return c;\n"
 "}\n"
+/* HOSEK-WILKIE: the analytic formula, nine coefficients per channel, cooked
+ * on the CPU from the fitted dataset (third_party/hosek_wilkie). Preetham
+ * above is kept as the table-free fallback; this is the better fit near the
+ * horizon and at low sun, and it is the only one of the two that responds to
+ * ground albedo. */
+"fn hosekChannel(base: i32, cosTheta: f32, cosGamma: f32, gamma: f32) -> f32 {\n"
+"  let c0 = L.hosek[base];\n"
+"  let c1 = L.hosek[base + 1];\n"
+"  let c2 = L.hosek[base + 2];\n"
+"  let expM = exp(c1.x * gamma);\n"
+"  let rayM = cosGamma * cosGamma;\n"
+"  let mieDen = 1.0 + c2.x * c2.x - 2.0 * c2.x * cosGamma;\n"
+"  var mieM = 0.0;\n"
+"  if (mieDen > 0.0) { mieM = (1.0 + rayM) / (mieDen * sqrt(mieDen)); }\n"
+"  let zen = sqrt(max(cosTheta, 0.0));\n"
+/* The +0.01 is the model's own horizon guard: cos(theta) reaches 0 there
+ * and the widening term would divide by zero. */
+"  let widening = 1.0 + c0.x * exp(c0.y / (cosTheta + 0.01));\n"
+"  let body = c0.z + c0.w * expM + c1.y * rayM + c1.z * mieM + c1.w * zen;\n"
+"  return widening * body;\n"
+"}\n"
+"fn skyHosek(dir: vec3<f32>, toSun: vec3<f32>) -> vec3<f32> {\n"
+"  let cosTheta = clamp(dir.z, -1.0, 1.0);\n"
+"  let cosGamma = clamp(dot(dir, toSun), -1.0, 1.0);\n"
+"  let gamma = acos(cosGamma);\n"
+"  let r = hosekChannel(0, cosTheta, cosGamma, gamma) * L.hosek[2].y;\n"
+"  let g = hosekChannel(3, cosTheta, cosGamma, gamma) * L.hosek[5].y;\n"
+"  let b = hosekChannel(6, cosTheta, cosGamma, gamma) * L.hosek[8].y;\n"
+/* Below the horizon the fit is not defined; fade to the ground-ish horizon
+ * colour rather than letting it diverge into the lower hemisphere. */
+"  let below = smoothstep(0.0, 0.06, dir.z);\n"
+"  return mix(L.skyHorizon.rgb, max(vec3<f32>(r, g, b), vec3<f32>(0.0)), below);\n"
+"}\n"
 "fn skyColor(dir: vec3<f32>) -> vec3<f32> {\n"
 "  let kind = L.skyParams.x;\n"
 "  let toSun = normalize(-L.sunDir.xyz);\n"
 "  var c = L.clearColor.rgb;\n"
 "  if (kind > 1.5 && kind < 2.5) { c = skyProcedural(dir, toSun, L.skyParams.y); }\n"
-"  if (kind > 2.5) { c = skyStylised(dir, toSun); }\n"
+"  if (kind > 2.5 && kind < 3.5) { c = skyStylised(dir, toSun); }\n"
+"  if (kind > 3.5) { c = skyHosek(dir, toSun); }\n"
 /* The sun DISC, added on top for every kind that has a sky. Separate
  * from the models above because it is ~1e5 times their radiance: folding
  * it in would make the whole expression's dynamic range about the disc.
@@ -970,7 +1014,7 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
                               float skyKind, float turbidity, float skyExposure,
                               float sunSizeRad, float zenR, float zenG, float zenB,
                               float bands, float horR, float horG, float horB,
-                              float discI) {
+                              float discI, float groundAlbedo) {
     if (!g_wgpu_dev || !gb_a_view) return;
     gb_deferred_init_pipelines();
     gb_deferred_ensure();
@@ -1001,6 +1045,31 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
     u[56] = skyKind; u[57] = turbidity; u[58] = skyExposure; u[59] = sunSizeRad;
     u[60] = zenR; u[61] = zenG; u[62] = zenB; u[63] = bands;
     u[64] = horR; u[65] = horG; u[66] = horB; u[67] = discI;
+    /* Cooked Hosek-Wilkie state at u[68..97] (8 vec4 = 32 floats, 30 used).
+     * Cooked HERE rather than passed in as 30 more arguments: this extern's
+     * signature is already 29 floats, and growing an argument list that long is
+     * how the sky parameters were silently dropped once already (the callee kept
+     * the old arity and the extras went nowhere, with no diagnostic). The C side
+     * calls the same memoized cook lib/sky.rae uses, so the CPU-side irradiance
+     * and this background cannot disagree about the same sky. */
+    memset(u + 68, 0, 36 * sizeof(float));
+    if (skyKind > 3.5f) {
+        /* sunDir points the way light TRAVELS, so the sun is at -sunDir and its
+         * elevation above the horizon is asin(-sunZ). Clamped just above 0
+         * because the dataset is not fitted below the horizon. */
+        double elev = asin(fmin(1.0, fmax(0.0001, (double)(-sunZ))));
+        double turb = (double)turbidity;
+        double alb = (double)groundAlbedo;
+        for (int ch = 0; ch < 3; ch++) {
+            float* dst = u + 68 + ch * 12;
+            for (int i = 0; i < 9; i++) {
+                dst[i] = (float)rae_ext_hosek_config(turb, alb, elev, ch, i);
+            }
+            /* Layout per channel: [0..3]=A B C D, [4..7]=E F G H, [8]=I,
+             * [9]=radiance — three vec4s, matching hosekChannel in the WGSL. */
+            dst[9] = (float)rae_ext_hosek_config(turb, alb, elev, ch, 9);
+        }
+    }
     wgpuQueueWriteBuffer(g_wgpu_queue, gb_light_ubuf, 0, u, GB_LIGHT_BYTES);
 
     if (!gb_light_bind) {
