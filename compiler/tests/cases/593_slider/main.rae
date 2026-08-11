@@ -68,4 +68,26 @@ func main() {
 
   # A fresh slider is not mid-drag; a stuck drag follows the pointer forever.
   check(label: "starts not dragging", ok: s.dragging is false)
+
+  # --- drag state ---------------------------------------------------------
+  #
+  # This is the part that was actually broken, twice, and neither failure was
+  # visible in a screenshot: the slider rendered perfectly and did nothing.
+  #
+  # The press EDGE and the held STATE do not necessarily both read true on the
+  # same frame. Requiring `down` on the press frame cancelled the drag at the
+  # instant it began, so it never started at all.
+  check(label: "press inside starts a drag even before down", ok: sliderDragActive(wasDragging: false, pressedInside: true, down: false, released: false))
+  check(label: "press inside starts a drag when down", ok: sliderDragActive(wasDragging: false, pressedInside: true, down: true, released: false))
+  check(label: "press outside does not start one", ok: sliderDragActive(wasDragging: false, pressedInside: false, down: true, released: false) is false)
+
+  # Once running it continues while held, INCLUDING when the pointer has left
+  # the track — otherwise it slips whenever the user moves faster than a frame.
+  check(label: "continues while held", ok: sliderDragActive(wasDragging: true, pressedInside: false, down: true, released: false))
+
+  # It ends on release, and also if the button is simply found to be up, so a
+  # release swallowed by a window switch cannot leave the knob stuck.
+  check(label: "release ends it", ok: sliderDragActive(wasDragging: true, pressedInside: false, down: true, released: true) is false)
+  check(label: "button up ends it", ok: sliderDragActive(wasDragging: true, pressedInside: false, down: false, released: false) is false)
+  check(label: "release wins over a press in the same frame", ok: sliderDragActive(wasDragging: false, pressedInside: true, down: true, released: true) is false)
 }
