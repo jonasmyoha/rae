@@ -94,6 +94,8 @@ import sky
 import gbuffer
 import shadow3d
 import app3d/playback
+import app3d/slider
+import app3d/settings_dialog
 import hot_reload
 import ui/log_overlay
 import ui/ecs
@@ -112,6 +114,7 @@ open gltf_skin
 open sdf_text
 open png
 open app3d/camera_rig
+open app3d/settings_dialog
 open app3d/ui_shell
 open app3d/control_panel
 open app3d/camera_bar
@@ -441,6 +444,9 @@ func main() ret Int {
   addPanelButton(panel: transport, id: "faster", label: "Faster", actionId: "anim.faster", group: 0)
   # Group 0, so it toggles independently rather than deselecting a clip.
   addPanelButton(panel: transport, id: "toon", label: "Toon", actionId: "style.toon", group: 0)
+  # Opens the SHARED dialog (lib/app3d/settings_dialog). The panel keeps its own
+  # quick controls; the dialog is where the settings both 3D examples share live.
+  addPanelButton(panel: transport, id: "settings", label: "Settings", actionId: "settings.open", group: 0)
   transport.buttonW = 84.0
   buildControlPanel(panel: transport, world: uiWorld, res: gpuUi)
 
@@ -486,6 +492,17 @@ func main() ret Int {
   # The camera readout bar is the SAME component example 110 uses; this
   # example only supplies the slot it mounts into.
   let barOk: Bool = mountCameraBar(world: uiWorld, res: gpuUi, hostNodeId: "CameraBarSlot")
+  # One scene here, but the chooser still appears: the dialog refuses a
+  # selection it cannot honour rather than hiding the control (see 594).
+  var settings: SettingsState = createSettingsState(scene: 1, sceneCount: 1,
+                                                    speed: speed, toon: toonShading,
+                                                    hour: 12.0)
+  let settingsOk: Bool = mountSettingsDialog(world: uiWorld, res: gpuUi,
+                                             hostNodeId: "SettingsDialogSlot")
+  if settingsOk is false {
+    logWarnLine(ov: logView, text: "settings dialog failed to mount")
+  }
+  settingsApplyToWorld(s: settings, world: uiWorld)
   log("[ui] panel buttons: {clipPanel.buttonEntities.length} clip, {transport.buttonEntities.length} transport, camera bar {barOk}")
 
   let startT: Float64 = gpu2d.nowSeconds()
@@ -539,7 +556,38 @@ func main() ret Int {
       let pct: Int = speedPercent(v: speed)
       setNodeText(world: uiWorld, nodeId: "SpeedLabel", value: "Speed {pct}%")
     }
+    # The shared dialog sees every action, including the panel's own — it
+    # ignores what it does not own, so there is no list to keep in sync here.
+    var settingsChanged: Bool = false
+    var ai: Int = 0
+    loop ai < uiActionCount(input: uiInput) {
+      if settingsHandleAction(s: settings, actionId: uiActionAt(input: uiInput, index: ai)) {
+        settingsChanged = true
+      }
+      ai = ai + 1
+    }
+    if settingsUpdatePointer(s: settings, world: uiWorld, input: uiInput) {
+      settingsChanged = true
+    }
+    if settingsChanged {
+      # The dialog is the source of truth for what it owns; the panel controls
+      # write INTO it above, so mirroring back keeps one value per setting
+      # rather than two that can disagree.
+      speed = settings.speed
+      if toonShading is not settings.toon {
+        toonShading = settings.toon
+        setPanelButtonOn(panel: transport, world: uiWorld, id: "toon", on: toonShading)
+      }
+      let pctS: Int = speedPercent(v: speed)
+      setNodeText(world: uiWorld, nodeId: "SpeedLabel", value: "Speed {pctS}%")
+      settingsApplyToWorld(s: settings, world: uiWorld)
+      stateDirty = true
+    }
     if clipHit.length() > 0 or transportHit.length() > 0 {
+      # Panel and dialog share these two values.
+      settings.speed = speed
+      settings.toon = toonShading
+      settingsApplyToWorld(s: settings, world: uiWorld)
       stateDirty = true
     }
     if uiActionCount(input: uiInput) > 0 {
