@@ -1,4 +1,4 @@
-# The shared settings dialog's state machine.
+# The shared settings panel's state machine.
 #
 # 110 and 113 had drifted to different controls for the same ideas — 110's
 # animation speed was a toggle, 113's a percentage with Slower/Faster. One state
@@ -8,6 +8,11 @@
 #
 # The chrome half (mounting, painting, dragging) needs a laid-out world and is
 # not covered here.
+#
+# This was a floating dialog first, with open/close as separate actions. It is a
+# section of the app's side panel now — one surface, one action — because a
+# dialog carrying the same controls the panel already showed meant the settings
+# button had to explain which of the two it opened.
 
 import core
 import math
@@ -27,9 +32,13 @@ func main() {
   # Three scenes, as 110 has.
   var s: SettingsState = createSettingsState(scene: 1, sceneCount: 3, speed: 1.0,
                                              toon: false, hour: 12.0)
-  check(label: "starts closed", ok: s.open is false)
-  check(label: "opens", ok: settingsHandleAction(s: s, actionId: "settings.open") and s.open)
-  check(label: "closes", ok: settingsHandleAction(s: s, actionId: "settings.close") and s.open is false)
+  # The panel is a panel, not a dialog: it is showing to begin with, and one
+  # action toggles it. There is no separate close, because the button that hides
+  # it is the button that shows it — and that button stays visible either way,
+  # or there would be no way back.
+  check(label: "starts showing", ok: s.open)
+  check(label: "toggles hidden", ok: settingsHandleAction(s: s, actionId: "settings.open") and s.open is false)
+  check(label: "toggles back", ok: settingsHandleAction(s: s, actionId: "settings.open") and s.open)
 
   # An action nobody here owns must be ignored, not mistaken for a change: the
   # app forwards every action it sees, including its own.
