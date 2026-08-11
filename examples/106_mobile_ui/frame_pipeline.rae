@@ -9,7 +9,7 @@ import ui/transform
 # systems now run through explicit phases: input dispatch, UI refresh/data sync,
 # layout/transform, animation, and GPU2D render.
 
-type FrameInputDispatchResult pub {
+type FrameInputDispatchResult {
   nextScreen: Screen
   hadActions: Bool
   canvasChanged: Bool
@@ -65,7 +65,7 @@ func runFrameInputDispatch(
   }
 }
 
-type FrameUiRefreshResult pub {
+type FrameUiRefreshResult {
   historyChanged: Bool
   playbackChanged: Bool
   sheetChanged: Bool
@@ -92,7 +92,7 @@ func refreshUiDiffs(
   }
 }
 
-type FrameDataSyncResult pub {
+type FrameDataSyncResult {
   assetsLoading: Bool
   profileBecameReady: Bool
   playbackChanged: Bool
@@ -117,7 +117,9 @@ func syncFrameData(
     applyOverlaysToWorld(world: world, playback: playback, state: appState)
   }
 
-  pollSpotify(state: spotifyState, world: world, reg: texReg, playback: playback, appState: appState, now: now)
+  # Wrap at the boundary: the frame pipeline still carries a raw Float64 clock,
+  # while the poller's throttle is expressed in Timestamp/Duration.
+  pollSpotify(state: spotifyState, world: world, reg: texReg, playback: playback, appState: appState, now: time.atSeconds(s: now))
   let spotifyRefresh: UiRefreshResult = refreshMountedUi(world: world, scenes: scenes, state: appState, playback: playback, visible: visible, cache: uiRefresh, viewport: viewport)
   if spotifyRefresh.playbackChanged {
     applyOverlaysToWorld(world: world, playback: playback, state: appState)
@@ -158,7 +160,7 @@ func runFrameLayoutTransform(
   visualBoundsSystem(world: world, res: gpuUi)
 }
 
-type FrameAnimationResult pub {
+type FrameAnimationResult {
   animating: Bool
   pendingSrc: Bool
   transitionArmed: Bool
@@ -208,7 +210,7 @@ func runFrameAnimation(
   }
 }
 
-type FrameRenderResult pub {
+type FrameRenderResult {
   forceRender: Bool
   # Float64: this holds an epoch TIMESTAMP, not a duration. An f32 near
   # 1.75e9 quantises to multiples of 128 s, which turns both tests below

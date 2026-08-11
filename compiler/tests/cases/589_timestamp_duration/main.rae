@@ -1,0 +1,103 @@
+# Timestamp and Duration are ordinary Rae types.
+#
+# A point in time and a span of time are both "seconds as a Float64", so before
+# these existed the compiler had no way to tell a reading from an interval — and
+# neither does a reader skimming a diff. Example 106 stored a wall-clock reading
+# in fields meant for intervals; an f32 at epoch magnitude has a 128-second ulp,
+# so every "has enough time passed?" test collapsed into a constant and the app
+# either polled every frame or never polled depending on the time of day (#407).
+#
+# They are two `type` definitions and nothing more: no language machinery, no
+# operator overloading, no compiler special cases. They are different types for
+# the ordinary reason that they are different declarations, and either can gain
+# fields later without any of this changing. Operations take `this`, so they
+# read as dot-calls.
+
+import core
+import time
+open time
+
+type Poller {
+  # The #407 fields, typed. `last` is a reading; `interval` is a span. Two
+  # different types, so the two can no longer be swapped by accident.
+  last: Timestamp
+  interval: Duration
+}
+
+func absF64(x: view Float64) ret Float64 {
+  if x < 0.0 {
+    ret (0.0 as Float64) - x
+  }
+  ret x
+}
+
+func near(a: view Float64, b: view Float64) ret Bool {
+  ret absF64(x: a - b) < 0.0001
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+# The shape the bug had, now with the two kinds of value held apart.
+func due(p: mod Poller, moment: view Timestamp) ret Bool {
+  if p.last.hasElapsed(now: moment, interval: p.interval) is false {
+    ret false
+  }
+  p.last = moment
+  ret true
+}
+
+func main() {
+  let base: Timestamp = atSeconds(s: 1750000037.5)
+  let earlier: Timestamp = atSeconds(s: 1750000035.0)
+
+  # Construction and the underlying value. `seconds` is an ordinary field, so
+  # both the accessor and direct field access work.
+  check(label: "atSeconds round trips", ok: near(a: base.epochSeconds(), b: 1750000037.5))
+  check(label: "the field is just a field", ok: near(a: base.seconds, b: base.epochSeconds()))
+  check(label: "seconds constructor", ok: near(a: seconds(n: 1.5).inSeconds(), b: 1.5))
+  check(label: "millis constructor", ok: near(a: millis(n: 250.0).inSeconds(), b: 0.25))
+  check(label: "inMillis", ok: near(a: seconds(n: 0.25).inMillis(), b: 250.0))
+
+  # Timestamp operations, as dot-calls.
+  let gap: Duration = base.since(earlier: earlier)
+  check(label: "since gives a Duration", ok: near(a: gap.inSeconds(), b: 2.5))
+
+  var cursor: Timestamp = earlier
+  cursor = base
+  check(label: "assignment within one type", ok: near(a: cursor.epochSeconds(), b: base.epochSeconds()))
+
+  cursor = cursor.advance(by: gap)
+  check(label: "advance moves forward", ok: near(a: cursor.epochSeconds(), b: 1750000040.0))
+  cursor = cursor.rewind(by: gap)
+  check(label: "rewind moves back", ok: near(a: cursor.epochSeconds(), b: 1750000037.5))
+
+  check(label: "isBefore / isAfter", ok: earlier.isBefore(other: base) and base.isAfter(other: earlier))
+  check(label: "never is never", ok: never().isNever() and base.isNever() is false)
+
+  # Duration operations.
+  let twice: Duration = gap.plus(other: gap)
+  check(label: "plus", ok: near(a: twice.inSeconds(), b: 5.0))
+  check(label: "minus", ok: near(a: gap.minus(other: gap).inSeconds(), b: 0.0))
+  check(label: "scaled", ok: near(a: gap.scaled(by: 2.0).inSeconds(), b: 5.0))
+  check(label: "ratio is a plain number", ok: near(a: twice.ratio(to: gap), b: 2.0))
+  check(label: "ratio guards zero", ok: near(a: gap.ratio(to: zero()), b: 0.0))
+  check(label: "isLongerThan / isShorterThan", ok: twice.isLongerThan(other: gap) and gap.isShorterThan(other: twice))
+
+  # Chaining reads naturally, which is the reason for the `this` convention.
+  let chained: Timestamp = base.advance(by: seconds(n: 1.0).plus(other: millis(n: 500.0)))
+  check(label: "chained calls", ok: near(a: chained.epochSeconds(), b: 1750000039.0))
+
+  # They nest in other types like any Rae type, and the poller behaves: fires
+  # when unset, throttles inside the interval, fires again after it.
+  var p: Poller = { last: never(), interval: seconds(n: 1.0) }
+  let first: Bool = due(p: p, moment: base)
+  let immediately: Bool = due(p: p, moment: base)
+  let afterWait: Bool = due(p: p, moment: base.advance(by: seconds(n: 2.0)))
+  check(label: "poller fires, throttles, fires again", ok: first and immediately is false and afterWait)
+}
