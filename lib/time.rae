@@ -56,3 +56,169 @@ func elapsedSeconds(t: view Timer) ret Float {
   let ns: Int = elapsedNs(t)
   ret ns.toFloat() / 1000000000.0
 }
+
+# ======================================================================
+# Timestamp and Duration
+#
+# A point in time and a span of time, as two ordinary Rae types. They are
+# different types because they are different `type` definitions — no language
+# machinery is involved, and each can gain fields later (a clock id, a
+# calendar, a monotonic flag) without any of this changing.
+#
+# Why they exist: both are "seconds as a Float64", so before this the compiler
+# had no way to tell a reading from an interval — and neither does a reader
+# skimming a diff. Example 106 stored a wall-clock reading (~1.75e9 epoch
+# seconds) in fields meant for intervals; an f32 at that magnitude has a
+# 128-second ulp, so every "has enough time passed?" test collapsed into a
+# constant and the app either polled every frame or never polled, depending on
+# the time of day (#407). Widening the fields fixed the symptom; distinct types
+# are what stop the next mix-up being invisible.
+#
+# Operations are ordinary functions taking `this`, so they read as dot-calls:
+#
+#     var lastPoll: Timestamp = time.never()
+#     let interval: Duration = time.seconds(n: 1.0)
+#     ...
+#     let now: Timestamp = time.now()
+#     if lastPoll.hasElapsed(now: now, interval: interval) {
+#       lastPoll = now
+#       ... poll ...
+#     }
+#
+# There is no operator overloading: `now - last` does not compile, because
+# `-` is not defined for these types. `now.since(earlier: last)` says which of
+# the two possible subtractions was meant, which is the point.
+#
+# The `Timer` type above is an older, unrelated stopwatch (Int nanoseconds) and
+# is untouched.
+# ======================================================================
+
+type Timestamp {
+  # Seconds since the epoch. Float64 deliberately: an f32 holding ~1.75e9 has a
+  # 128-second ulp, which is what made the original bug unreproducible.
+  seconds: Float64
+}
+
+type Duration {
+  seconds: Float64
+}
+
+# ----- constructing ---------------------------------------------------
+
+# Wall-clock reading. Uses core's millisecond clock rather than the UI layer's,
+# so this module stays linkable in a headless program; both read the same
+# gettimeofday underneath, so the values are comparable with `uiNowSeconds()`.
+func now() ret Timestamp {
+  let ms: Int = nowMs()
+  let secs: Float64 = ms.toFloat() as Float64
+  ret Timestamp { seconds: secs / 1000.0 }
+}
+
+func atSeconds(s: view Float64) ret Timestamp {
+  ret Timestamp { seconds: s }
+}
+
+func seconds(n: view Float64) ret Duration {
+  ret Duration { seconds: n }
+}
+
+func millis(n: view Float64) ret Duration {
+  ret Duration { seconds: n / 1000.0 }
+}
+
+# The "no reading yet" sentinel. Negative so the first `hasElapsed` against it
+# is always true — the convention the hand-rolled versions of this used, now
+# spelled once.
+func never() ret Timestamp {
+  ret Timestamp { seconds: 0.0 - 1.0 }
+}
+
+func zero() ret Duration {
+  ret Duration { seconds: 0.0 }
+}
+
+# ----- reading the underlying value -----------------------------------
+#
+# Nothing is hidden: `t.seconds` is an ordinary field. These are here so call
+# sites read as intent rather than as field poking.
+
+func epochSeconds(this: view Timestamp) ret Float64 {
+  ret this.seconds
+}
+
+func inSeconds(this: view Duration) ret Float64 {
+  ret this.seconds
+}
+
+func inMillis(this: view Duration) ret Float64 {
+  ret this.seconds * 1000.0
+}
+
+# ----- Timestamp operations -------------------------------------------
+
+# How long from `earlier` to this reading. Negative when the arguments are the
+# wrong way round, which is a real answer rather than an error: callers
+# comparing against a sentinel rely on it.
+func since(this: view Timestamp, earlier: view Timestamp) ret Duration {
+  ret Duration { seconds: this.seconds - earlier.seconds }
+}
+
+func advance(this: view Timestamp, by: view Duration) ret Timestamp {
+  ret Timestamp { seconds: this.seconds + by.seconds }
+}
+
+func rewind(this: view Timestamp, by: view Duration) ret Timestamp {
+  ret Timestamp { seconds: this.seconds - by.seconds }
+}
+
+func isBefore(this: view Timestamp, other: view Timestamp) ret Bool {
+  ret this.seconds < other.seconds
+}
+
+func isAfter(this: view Timestamp, other: view Timestamp) ret Bool {
+  ret this.seconds > other.seconds
+}
+
+func isNever(this: view Timestamp) ret Bool {
+  ret this.seconds < 0.0
+}
+
+# Has at least `interval` passed since this reading? The throttle predicate —
+# the thing every polling loop in this repo was open-coding, and the shape that
+# broke when the stored reading lost precision.
+func hasElapsed(this: view Timestamp, now: view Timestamp, interval: view Duration) ret Bool {
+  let gap: Duration = now.since(earlier: this)
+  ret gap.seconds >= interval.seconds
+}
+
+# ----- Duration operations --------------------------------------------
+
+func plus(this: view Duration, other: view Duration) ret Duration {
+  ret Duration { seconds: this.seconds + other.seconds }
+}
+
+func minus(this: view Duration, other: view Duration) ret Duration {
+  ret Duration { seconds: this.seconds - other.seconds }
+}
+
+func scaled(this: view Duration, by: view Float64) ret Duration {
+  ret Duration { seconds: this.seconds * by }
+}
+
+# A ratio of two spans is a plain number, not a span. Zero denominator returns
+# zero rather than trapping: a ratio against an unset span is a display value,
+# not a reason to abort a frame.
+func ratio(this: view Duration, to: view Duration) ret Float64 {
+  if to.seconds is 0.0 {
+    ret 0.0
+  }
+  ret this.seconds / to.seconds
+}
+
+func isLongerThan(this: view Duration, other: view Duration) ret Bool {
+  ret this.seconds > other.seconds
+}
+
+func isShorterThan(this: view Duration, other: view Duration) ret Bool {
+  ret this.seconds < other.seconds
+}
