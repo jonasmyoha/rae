@@ -358,8 +358,13 @@ func hosekRadiance(sky: view HosekSky, dir: view Vec3, sunDir: view Vec3) pub re
 
 # Solar elevation from a sun direction, clamped just above the horizon: the fit
 # is not defined below it.
+#
+# `sunDir` is the direction light TRAVELS — the convention Light3d and the
+# shaders use, where `toSun = -sunDir` — so the sun is high when z is very
+# NEGATIVE. Reading z directly here would have made every elevation the mirror
+# of the real one, which renders as a plausible sky at the wrong time of day.
 func sunElevationRad(sunDir: view Vec3) pub ret Float {
-  var z: Float = sunDir.z
+  var z: Float = 0.0 - sunDir.z
   if z > 1.0 { z = 1.0 }
   if z < 0.0001 { z = 0.0001 }
   ret asin(x: z)
