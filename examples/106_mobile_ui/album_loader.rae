@@ -39,13 +39,13 @@ func rae_ext_rae_sys_read_file(path: String) extern ret String
 
 # ----- types ---------------------------------------------------------
 
-type Track pub {
+type Track {
   number: Int
   title: String
   durationMs: Int
 }
 
-type Album pub {
+type Album {
   # Folder name under `assets/albums/`, e.g. "mitski-puberty".
   # Doubles as the texture-registry key and the state-file
   # `currentAlbumStem`. Stable across renames so long as the
@@ -89,7 +89,7 @@ type Album pub {
 # AppState currently hosts the single instance in its `mediaLibrary`
 # field; lifting that value out of AppState into the SystemRegistry
 # (#262) is a mechanical follow-up once the registry is wired into 106.
-type MediaLibrarySystem pub {
+type MediaLibrarySystem {
   albums: List(Album)
   revision: Int
 }
