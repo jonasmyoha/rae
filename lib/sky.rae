@@ -29,6 +29,8 @@
 import core
 import math
 import vec3
+import sky_hosek
+open sky_hosek
 open scene3d
 
 enum SkyKind {
@@ -87,6 +89,9 @@ type Sky {
   # the atmosphere. 0.1 is dark rock, ~0.25 grass, 0.8 fresh snow. Ignored by
   # every other kind.
   groundAlbedo: Float
+  # The `hosek` payload: cooked from the fitted table when the sky is built,
+  # so the per-frame path is a copy rather than a table walk.
+  hosek: HosekSky
   # The `stylised` payload (#404). A ramp between two authored colours,
   # quantised into `bands` the same way the toon terminator is.
   zenithColor: Vec3
@@ -131,6 +136,7 @@ func createSkyStylised(sunDir: view Vec3, sunColor: view Vec3,
     sunAngularRadius: 0.05
     sunDiscIntensity: 2.0
     groundAlbedo: skyDefaultGroundAlbedo
+    hosek: emptyHosekSky()
     zenithColor: zenith
     horizonColor: horizon
     bands: bands
@@ -150,7 +156,7 @@ func createSkyStylised(sunDir: view Vec3, sunColor: view Vec3,
 # `turbidity` is haze: 2 is an exceptionally clear day, 3-6 ordinary, above 10
 # fog. `groundAlbedo` is how much light the ground bounces back up: ~0.1 dark
 # rock, 0.25 grass, 0.8 fresh snow.
-func createSkyHosek(sunDir: view Vec3, sunColor: view Vec3,
+func createSkyHosek(data: view HosekDataset, sunDir: view Vec3, sunColor: view Vec3,
                     turbidity: view Float, groundAlbedo: view Float) pub ret Sky {
   ret Sky {
     kind: SkyKind.hosek
@@ -169,6 +175,8 @@ func createSkyHosek(sunDir: view Vec3, sunColor: view Vec3,
     sunAngularRadius: 0.00465
     sunDiscIntensity: 12.0
     groundAlbedo: groundAlbedo
+    hosek: createHosekSky(data: data, turbidity: turbidity, albedo: groundAlbedo,
+                          solarElevationRad: sunElevationRad(sunDir: sunDir))
     # Below the horizon the fit is undefined, so the shader fades to
     # horizonColor there; it is a ground tone, not a stylised ramp anchor.
     zenithColor: vec3.create(x: 0.0, y: 0.0, z: 0.0)
@@ -191,6 +199,7 @@ func createSkyNone(light: view Light3d, clearColor: view Vec3) pub ret Sky {
     sunAngularRadius: 0.0047
     sunDiscIntensity: 0.0
     groundAlbedo: skyDefaultGroundAlbedo
+    hosek: emptyHosekSky()
     zenithColor: light.ambSky
     horizonColor: light.ambGround
     bands: 1.0
@@ -221,6 +230,7 @@ func createSkyProcedural(sunDir: view Vec3, sunColor: view Vec3,
     sunAngularRadius: 0.0047
     sunDiscIntensity: 40.0
     groundAlbedo: skyDefaultGroundAlbedo
+    hosek: emptyHosekSky()
     zenithColor: vec3.create(x: 0.25, y: 0.30, z: 0.40)
     horizonColor: vec3.create(x: 0.50, y: 0.55, z: 0.60)
     bands: 1.0
@@ -480,128 +490,4 @@ func preethamRadiance(dir: view Vec3, sunDir: view Vec3,
   # choice; the shape of the sky is above.
   let scale: Float = 0.05
   ret xyYToLinearRgb(x: zenithX * fx, y: zenithYc * fz, bigY: zenithY * fy * scale)
-}
-
-# ----- Hosek-Wilkie ---------------------------------------------------
-#
-# The procedural model this repo prefers. Hosek-Wilkie fits measured sky
-# radiance far better than Preetham near the horizon and at low sun — which is
-# exactly where a daylight sky is interesting and where Preetham visibly
-# flattens out. It also takes GROUND ALBEDO, so a scene over grass and the same
-# scene over snow get different sky light rather than the same blue dome.
-#
-# Preetham is kept above, not deleted: it is nine lines of arithmetic with no
-# data table behind it, which makes it the fallback worth having if the dataset
-# ever cannot be linked.
-#
-# Split of work: the 3861-line coefficient dataset and its interpolation live in
-# C (third_party/hosek_wilkie, BSD, provenance in that README) because the table
-# is only read once per sky change. The per-pixel formula is nine multiply-adds
-# and lives here — and again in WGSL for the deferred pass, which cannot call
-# into C.
-
-# One channel's cooked state: the nine analytic coefficients plus the radiance
-# scale for that channel.
-type HosekChannel {
-  a: Float
-  b: Float
-  c: Float
-  d: Float
-  e: Float
-  f: Float
-  g: Float
-  h: Float
-  i: Float
-  radiance: Float
-}
-
-type HosekSky {
-  r: HosekChannel
-  g: HosekChannel
-  b: HosekChannel
-}
-
-func rae_ext_hosek_config(turbidity: Float64, albedo: Float64, elevation: Float64,
-                          channel: Int, index: Int) extern ret Float64
-
-func hosekChannel(turbidity: view Float, albedo: view Float, elevationRad: view Float,
-                  channel: view Int) ret HosekChannel {
-  let t: Float64 = turbidity as Float64
-  let al: Float64 = albedo as Float64
-  let el: Float64 = elevationRad as Float64
-  ret HosekChannel {
-    a: rae_ext_hosek_config(turbidity: t, albedo: al, elevation: el, channel: channel, index: 0) as Float
-    b: rae_ext_hosek_config(turbidity: t, albedo: al, elevation: el, channel: channel, index: 1) as Float
-    c: rae_ext_hosek_config(turbidity: t, albedo: al, elevation: el, channel: channel, index: 2) as Float
-    d: rae_ext_hosek_config(turbidity: t, albedo: al, elevation: el, channel: channel, index: 3) as Float
-    e: rae_ext_hosek_config(turbidity: t, albedo: al, elevation: el, channel: channel, index: 4) as Float
-    f: rae_ext_hosek_config(turbidity: t, albedo: al, elevation: el, channel: channel, index: 5) as Float
-    g: rae_ext_hosek_config(turbidity: t, albedo: al, elevation: el, channel: channel, index: 6) as Float
-    h: rae_ext_hosek_config(turbidity: t, albedo: al, elevation: el, channel: channel, index: 7) as Float
-    i: rae_ext_hosek_config(turbidity: t, albedo: al, elevation: el, channel: channel, index: 8) as Float
-    radiance: rae_ext_hosek_config(turbidity: t, albedo: al, elevation: el, channel: channel, index: 9) as Float
-  }
-}
-
-# Cook the dataset for one sky. Call when turbidity / albedo / sun elevation
-# change, not per frame: this is 30 dataset reads behind a one-entry memo.
-func createHosekSky(turbidity: view Float, albedo: view Float,
-                    elevationRad: view Float) pub ret HosekSky {
-  ret HosekSky {
-    r: hosekChannel(turbidity: turbidity, albedo: albedo, elevationRad: elevationRad, channel: 0)
-    g: hosekChannel(turbidity: turbidity, albedo: albedo, elevationRad: elevationRad, channel: 1)
-    b: hosekChannel(turbidity: turbidity, albedo: albedo, elevationRad: elevationRad, channel: 2)
-  }
-}
-
-# The analytic formula, per channel.
-#   theta — angle from the ZENITH to the view direction
-#   gamma — angle between the view direction and the sun
-# The `cos(theta) + 0.01` guard is the model's, not ours: at the horizon
-# cos(theta) reaches 0 and the first term would divide by zero.
-func hosekChannelRadiance(c: view HosekChannel, theta: view Float, gamma: view Float) pub ret Float {
-  let cosGamma: Float = math.cos(x: gamma)
-  let cosTheta: Float = math.cos(x: theta)
-  let expM: Float = math.exp(x: c.e * gamma)
-  let rayM: Float = cosGamma * cosGamma
-  let mieDen: Float = 1.0 + c.i * c.i - 2.0 * c.i * cosGamma
-  var mieM: Float = 0.0
-  if mieDen > 0.0 {
-    mieM = (1.0 + cosGamma * cosGamma) / (mieDen * math.sqrt(x: mieDen))
-  }
-  var zenithTerm: Float = 0.0
-  if cosTheta > 0.0 {
-    zenithTerm = math.sqrt(x: cosTheta)
-  }
-  let widening: Float = 1.0 + c.a * math.exp(x: c.b / (cosTheta + 0.01))
-  let body: Float = c.c + c.d * expM + c.f * rayM + c.g * mieM + c.h * zenithTerm
-  ret widening * body
-}
-
-# Radiance toward `dir`, scaled by each channel's radiance term so the three
-# come out in consistent units. Z is up (see skyIrradiance).
-func hosekRadiance(sky: view HosekSky, dir: view Vec3, sunDir: view Vec3) pub ret Vec3 {
-  var cosTheta: Float = dir.z
-  if cosTheta > 1.0 { cosTheta = 1.0 }
-  if cosTheta < 0.0 - 1.0 { cosTheta = 0.0 - 1.0 }
-  let theta: Float = math.acos(x: cosTheta)
-
-  var cosGamma: Float = dir.x * sunDir.x + dir.y * sunDir.y + dir.z * sunDir.z
-  if cosGamma > 1.0 { cosGamma = 1.0 }
-  if cosGamma < 0.0 - 1.0 { cosGamma = 0.0 - 1.0 }
-  let gamma: Float = math.acos(x: cosGamma)
-
-  ret vec3.create(
-    x: hosekChannelRadiance(c: sky.r, theta: theta, gamma: gamma) * sky.r.radiance
-    y: hosekChannelRadiance(c: sky.g, theta: theta, gamma: gamma) * sky.g.radiance
-    z: hosekChannelRadiance(c: sky.b, theta: theta, gamma: gamma) * sky.b.radiance)
-}
-
-# Solar elevation from a sun direction, clamped just above the horizon: the
-# dataset is fitted for a sun at or above 0 and returns nonsense below it.
-func sunElevationRad(sunDir: view Vec3) pub ret Float {
-  var z: Float = sunDir.z
-  if z > 1.0 { z = 1.0 }
-  if z < 0.0001 { z = 0.0001 }
-  ret math.asin(x: z)
 }
