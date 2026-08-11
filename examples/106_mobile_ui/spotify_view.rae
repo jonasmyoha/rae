@@ -35,7 +35,19 @@ type SpotifyState pub {
   enabled: Bool
   # Wall-clock seconds at the last successful poll. 0 means "never";
   # the first frame will refresh immediately.
-  lastPollSec: Float
+  #
+  # Float64, NOT Float. uiNowSeconds() is epoch seconds (~1.75e9), and an
+  # f32 near 1.7e9 has a ulp of 128 s — storing the timestamp rounded it to
+  # a multiple of 128 s, up to 64 s away from the real time. The 1 Hz throttle
+  # below then computed nonsense: land on the low side of the bucket and
+  # `elapsed` is tens of seconds, so the poll fires EVERY FRAME (an AppleScript
+  # per frame, six Text writes per frame, and a permanently dirty render
+  # cache); land on the high side and `elapsed` is negative for up to a minute,
+  # so it never polls at all. Which side you get depends on where wall-clock
+  # time sits inside the current 128 s bucket — same binary, different
+  # behaviour depending on what time it is. Same hazard lib/sys.rae calls out
+  # for file mtimes.
+  lastPollSec: Float64
   # The trackId from the previous poll. When this changes, the
   # display refresh path knows to re-fetch artwork. Empty when no
   # track is loaded yet.
@@ -77,8 +89,16 @@ func updateNodeText(world: mod UiWorld, pageId: view String, nodeId: view String
   if componentHas(this: world.texts, entity: entity) is false {
     ret
   }
-  let cur: mod Text => componentMod(this: world.texts, entity: entity)
-  cur.text = "{value}"
+  # Compare BEFORE taking the mod ref: componentMod bumps the table
+  # generation eagerly (it cannot see whether the caller writes), so an
+  # unconditional "update" to an unchanged string marks the render cache
+  # dirty and costs a full repaint. This runs on every poll by design.
+  let cur: view Text => componentView(this: world.texts, entity: entity)
+  if cur.text.equals(other: value) {
+    ret
+  }
+  let slot: mod Text => componentMod(this: world.texts, entity: entity)
+  slot.text = "{value}"
 }
 
 # Fetch the current track's artwork to app_cache and register it as a
@@ -217,7 +237,7 @@ func pollSpotify(
   if state.enabled is false {
     ret
   }
-  let elapsed: Float = now - state.lastPollSec
+  let elapsed: Float64 = now - state.lastPollSec
   if elapsed < 1.0 {
     ret
   }

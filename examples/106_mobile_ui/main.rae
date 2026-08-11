@@ -145,7 +145,13 @@ func main() {
   # RAE_UI_NO_SPOTIFY=1 or RAE_UI_HEADLESS=1 (would focus Spotify).
   let spotifyState: SpotifyState = createSpotifyState()
   var spotifyOn: Bool = spotifyState.enabled
-  if isHeadless { spotifyOn = false }
+  # Clear `enabled` too, not just this local flag: `pollSpotify` gates on
+  # `state.enabled`, so headless skipped `startPoller` yet still polled (and
+  # wrote text) every frame against a cache nobody filled.
+  if isHeadless and spotifyForcedOn() is false {
+    spotifyOn = false
+    spotifyState.enabled = false
+  }
   if spotifyOn {
     log("[spotify] ON — launches lazily on first play (AppleScript play auto-launches).")
     # Refresh the Spotify cache on a BACKGROUND thread (#279) instead of
@@ -384,7 +390,7 @@ func main() {
     # One display frame from the monitor refresh rate (60/120 Hz); paces
     # the animation wait + render cap. lastRenderTime drives that cap.
     let targetFrameSec: Float = displayFrameSec()
-    var lastRenderTime: Float = 0.0
+    var lastRenderTime: Float64 = 0.0
     # Active-render window: any activity keeps the loop rendering at
     # display cadence for 0.5s (then idle), so animation tails don't
     # depend on dirty-detection and stutter. Idle = event-wait.
@@ -906,9 +912,9 @@ func main() {
           # `active=true` but the UI is frozen, the bug is downstream
           # in renderSystem / endDrawing.
           if loopDebugEnabled {
-            # `active` alone can't be diagnosed: it is the OR of the
-            # decideActive verdict, asset loading and hover easing, and the
-            # three have very different fixes. Print the parts.
+            # Print the parts: `active` is the OR of the decideActive
+            # verdict, asset loading and hover easing, which have
+            # very different fixes.
             log("[loop {loopDebugFrame}] input.events={input.events.length} pressed={input.pressedEntity.value} animating={animating} active={active} decide={activeDecision.active} assets={assetsLoading} hover={lastHoverAnimDirty}")
           }
 
