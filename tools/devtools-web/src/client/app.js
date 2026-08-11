@@ -219,6 +219,10 @@ const EXAMPLE_COLLECTIONS = {
     title: "Examples",
     subtitle: "High-performance logic, interactive simulations, and system design patterns."
   },
+  ui: {
+    title: "UI",
+    subtitle: "Application UI built on the Rae 2D renderer — scenes, layout, theming, scrolling and hot reload, at real app scale."
+  },
   renderer2d: {
     title: "2D renderer",
     subtitle: "Stepping examples for the Rae WebGPU 2D / UI renderer (docs/webgpu-2d-ui-renderer.md)."
@@ -234,6 +238,7 @@ const EXAMPLE_COLLECTIONS = {
 };
 // Category labels (.raepack "category") owned by a non-default collection.
 const COLLECTION_CATEGORIES = {
+  ui: ["UI"],
   renderer2d: ["2D Renderer"],
   renderer3d: ["3D Renderer"],
   raytracer: ["Raytracer"]
@@ -2809,7 +2814,13 @@ closeBatchReportBtn?.addEventListener("click", () => hideBatchReport());
 async function triggerExampleRun(mode = "run", targetId = null, actionId = null) {
   const example = getSelectedExample();
   if (!example) return;
-  const effectiveMode = mode === "restart" ? "run" : mode;
+  // RESTART PRESERVES WATCH. Restart used to resolve to "run"
+  // unconditionally, so restarting a watched app silently dropped it to a
+  // one-shot run: the app came back, the file watching did not, and the
+  // next save simply did nothing. Captured before stopExampleRun() below,
+  // which clears the flag.
+  const wasWatching = mode === "restart" && exampleWatchActive;
+  const effectiveMode = mode === "restart" ? (wasWatching ? "watch" : "run") : mode;
   // Honor the chosen target directly (global dropdown, or explicit from
   // run-all/actions). No silent fallback — the supportedTargets guard below
   // blocks genuinely-unsupported combos (e.g. a raylib example on WASM).
@@ -2857,7 +2868,7 @@ async function triggerExampleRun(mode = "run", targetId = null, actionId = null)
   exampleWatchActive = effectiveMode === "watch";
   const label =
     mode === "restart"
-      ? "Restarting…"
+      ? (wasWatching ? "Restarting watch…" : "Restarting…")
       : effectiveMode === "watch"
       ? "Starting watch…"
       : effectiveMode === "build"
