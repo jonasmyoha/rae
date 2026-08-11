@@ -169,3 +169,121 @@ func applySliderFill(s: view Slider, world: mod UiWorld) pub {
   let next: ComputedRect = { x: fr.x, y: fr.y, w: want, h: fr.h }
   componentSet(this: world.computedRects, entity: fill, data: next)
 }
+
+
+# ----- node-based slider ----------------------------------------------
+#
+# The functions above keep a Slider value; these take the track and handle node
+# ids directly, so a caller can hold nothing but the value it cares about. That
+# matters because a Slider stored INSIDE another struct cannot be updated: a
+# nested field passed as `mod` does not reliably write back in this compiler,
+# and the failure is silent.
+
+func nodeComputedRect(world: view UiWorld, nodeId: view String, out: mod ComputedRect) ret Bool {
+  let e: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: e) {
+    ret false
+  }
+  if componentHas(this: world.computedRects, entity: e) is false {
+    ret false
+  }
+  out = componentGet(this: world.computedRects, entity: e)
+  ret true
+}
+
+func pointInNode(world: view UiWorld, nodeId: view String,
+                 x: view Float, y: view Float) pub ret Bool {
+  let e: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: e) {
+    ret false
+  }
+  if componentHas(this: world.computedRects, entity: e) is false {
+    ret false
+  }
+  let r: ComputedRect = componentGet(this: world.computedRects, entity: e)
+  ret pointInRect(r: r, x: x, y: y)
+}
+
+# Where x falls across the node, 0..1.
+func fractionAcrossNode(world: view UiWorld, nodeId: view String, x: view Float) pub ret Float {
+  let e: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: e) {
+    ret 0.0
+  }
+  if componentHas(this: world.computedRects, entity: e) is false {
+    ret 0.0
+  }
+  let r: ComputedRect = componentGet(this: world.computedRects, entity: e)
+  if r.w <= 0.0 {
+    ret 0.0
+  }
+  ret sliderClamp(v: (x - r.x) / r.w, lo: 0.0, hi: 1.0)
+}
+
+# Resize `fillId` to a fraction of `trackId`. Writes only on a real change:
+# componentSet bumps the table generation either way, and a per-frame write to
+# an unchanged width keeps the render cache permanently dirty (#407).
+func setNodeFractionWidth(world: mod UiWorld, trackId: view String,
+                          fillId: view String, fraction: view Float) pub {
+  let te: EntityId = nodeEntityFor(world: world, nodeId: trackId)
+  let fe: EntityId = nodeEntityFor(world: world, nodeId: fillId)
+  if isNone(this: te) or isNone(this: fe) {
+    ret
+  }
+  if componentHas(this: world.computedRects, entity: te) is false {
+    ret
+  }
+  if componentHas(this: world.computedRects, entity: fe) is false {
+    ret
+  }
+  let tr: ComputedRect = componentGet(this: world.computedRects, entity: te)
+  let fr: ComputedRect = componentGet(this: world.computedRects, entity: fe)
+  let want: Float = tr.w * sliderClamp(v: fraction, lo: 0.0, hi: 1.0)
+  var delta: Float = want - fr.w
+  if delta < 0.0 {
+    delta = 0.0 - delta
+  }
+  if delta <= 0.05 {
+    ret
+  }
+  let next: ComputedRect = { x: tr.x, y: fr.y, w: want, h: fr.h }
+  componentSet(this: world.computedRects, entity: fe, data: next)
+}
+
+# Centre `handleId` on a fraction along `trackId` — the moving circle that makes
+# the control read as a slider rather than as a progress bar.
+func centreNodeAtFraction(world: mod UiWorld, trackId: view String,
+                          handleId: view String, fraction: view Float) pub {
+  let te: EntityId = nodeEntityFor(world: world, nodeId: trackId)
+  let he: EntityId = nodeEntityFor(world: world, nodeId: handleId)
+  if isNone(this: te) or isNone(this: he) {
+    ret
+  }
+  if componentHas(this: world.computedRects, entity: te) is false {
+    ret
+  }
+  if componentHas(this: world.computedRects, entity: he) is false {
+    ret
+  }
+  let tr: ComputedRect = componentGet(this: world.computedRects, entity: te)
+  let hr: ComputedRect = componentGet(this: world.computedRects, entity: he)
+  let f: Float = sliderClamp(v: fraction, lo: 0.0, hi: 1.0)
+  # Inset by half the handle so it stays inside the track at both ends rather
+  # than hanging off the edges.
+  let travel: Float = tr.w - hr.w
+  let wantX: Float = tr.x + travel * f
+  let wantY: Float = tr.y + (tr.h - hr.h) * 0.5
+  var dx: Float = wantX - hr.x
+  if dx < 0.0 {
+    dx = 0.0 - dx
+  }
+  var dy: Float = wantY - hr.y
+  if dy < 0.0 {
+    dy = 0.0 - dy
+  }
+  if dx <= 0.05 and dy <= 0.05 {
+    ret
+  }
+  let next: ComputedRect = { x: wantX, y: wantY, w: hr.w, h: hr.h }
+  componentSet(this: world.computedRects, entity: he, data: next)
+}

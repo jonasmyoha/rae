@@ -178,9 +178,12 @@ func createSkyHosek(data: view HosekDataset, sunDir: view Vec3, sunColor: view V
     hosek: createHosekSky(data: data, turbidity: turbidity, albedo: groundAlbedo,
                           solarElevationRad: sunElevationRad(sunDir: sunDir))
     # Below the horizon the fit is undefined, so the shader fades to
-    # horizonColor there; it is a ground tone, not a stylised ramp anchor.
+    # horizonColor there. A dark ground tone read as a band of mud wherever the
+    # scene's own ground stopped short of the horizon, which is most cameras;
+    # a pale haze reads as distance instead, and meets the sky's bottom edge
+    # without a seam.
     zenithColor: vec3.create(x: 0.0, y: 0.0, z: 0.0)
-    horizonColor: vec3.create(x: 0.22, y: 0.20, z: 0.17)
+    horizonColor: vec3.create(x: 0.52, y: 0.56, z: 0.60)
     bands: 0.0
   }
 }
