@@ -491,3 +491,68 @@ func preethamRadiance(dir: view Vec3, sunDir: view Vec3,
   let scale: Float = 0.05
   ret xyYToLinearRgb(x: zenithX * fx, y: zenithYc * fz, bigY: zenithY * fy * scale)
 }
+
+# ----- time of day ----------------------------------------------------
+#
+# One dial that drives the sun, so a settings UI has a single value to bind and
+# every consumer of "where is the sun" agrees. The sky models, the shadow
+# cascades and the key light all take their direction from here rather than
+# each holding their own idea of it — a sky and a light that disagree put every
+# shadow in the scene at odds with the visible sun.
+#
+# `hour` is 0..24 wall-clock. The path is a simple arc: due east at 06:00,
+# highest at 12:00, due west at 18:00, below the horizon outside 06-18. That is
+# an equinox at the equator, not an ephemeris — enough to make a time slider
+# feel right, and honest about not modelling latitude or season. Real solar
+# position wants a date and a latitude, which is a bigger interface than a
+# settings dialog should grow first.
+
+# Qualified CONSTANTS do not resolve (`math.pi` emits an undeclared `math`),
+# though qualified function calls do — so pi is named locally rather than
+# reaching into the module. Same family as #415.
+const skyPi: Float = 3.14159265358979
+
+const skyDayStartHour: Float = 6.0
+const skyDayEndHour: Float = 18.0
+
+# Sun DIRECTION OF TRAVEL — the way light moves, which is what Light3d.sunDir
+# and the shaders expect. It points from the sun toward the scene, so a high
+# midday sun has a strongly negative Z.
+func sunDirForHour(hour: view Float) pub ret Vec3 {
+  var h: Float = hour
+  if h < 0.0 { h = 0.0 }
+  if h > 24.0 { h = 24.0 }
+  # Fraction of the way through the lit part of the day, 0 at sunrise, 1 at
+  # sunset. Outside the window the sun is below the horizon; the value keeps
+  # going so dusk and dawn stay continuous rather than snapping.
+  let t: Float = (h - skyDayStartHour) / (skyDayEndHour - skyDayStartHour)
+  let angle: Float = t * skyPi
+  # East (+X) at sunrise, up (+Z) at noon, west (-X) at sunset.
+  let toSunX: Float = math.cos(x: angle)
+  let toSunZ: Float = math.sin(x: angle)
+  ret vec3.create(x: 0.0 - toSunX, y: 0.0, z: 0.0 - toSunZ)
+}
+
+# How high the sun is, 0 at the horizon and 1 at the zenith. Below the horizon
+# reads 0 rather than negative: callers use it to fade light down, and a
+# negative multiplier would light the scene from underneath.
+func sunHeightForHour(hour: view Float) pub ret Float {
+  let d: Vec3 = sunDirForHour(hour: hour)
+  var up: Float = 0.0 - d.z
+  if up < 0.0 { up = 0.0 }
+  ret up
+}
+
+# Warm at the horizon, neutral overhead. Not a fit to anything — the Hosek
+# model already reddens the SKY at low sun on its own; this is the KEY LIGHT,
+# which otherwise stays white through a sunset and looks wrong against it.
+func sunColorForHour(hour: view Float) pub ret Vec3 {
+  let up: Float = sunHeightForHour(hour: hour)
+  # Cube the blend so the warm end is confined to the last part of the descent,
+  # where a sunset actually happens, instead of tinting the whole afternoon.
+  let warm: Float = (1.0 - up) * (1.0 - up) * (1.0 - up)
+  let r: Float = 1.0
+  let g: Float = 1.0 - 0.45 * warm
+  let b: Float = 1.0 - 0.75 * warm
+  ret vec3.create(x: r, y: g, z: b)
+}
