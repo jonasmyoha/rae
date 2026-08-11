@@ -33,7 +33,9 @@ type PlayHistoryEntry pub {
   # `getTime()` reading at record time. Empty / 0.0 marks "boot
   # default"; main.rae stamps real wall times via the `now` floats
   # it already threads through `pollSpotify` etc.
-  playedAt: Float
+  # Float64: epoch seconds, and f32 buckets those into 128 s steps —
+  # enough to scramble the recently-played ordering and the dedup window.
+  playedAt: Float64
 }
 
 type PlayHistory pub {
