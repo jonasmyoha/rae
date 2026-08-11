@@ -202,18 +202,15 @@ func settingsUpdatePointer(s: mod SettingsState, world: view UiWorld,
   }
   # A press anywhere on the track starts a drag and jumps the handle there: the
   # handle is small and the track is the affordance.
+  var pressedInside: Bool = false
   if input.pointer.pressed {
-    if pointInNode(world: world, nodeId: "SettingsTimeTrack",
-                   x: input.pointer.x, y: input.pointer.y) {
-      s.timeDragging = true
-    }
+    pressedInside = pointInNode(world: world, nodeId: "SettingsTimeTrack",
+                                x: input.pointer.x, y: input.pointer.y)
   }
-  # Ends on release, and also whenever the button is simply found to be up, so a
-  # release swallowed by a window switch cannot leave the handle stuck.
-  if input.pointer.released or input.pointer.down is false {
-    s.timeDragging = false
-    ret false
-  }
+  s.timeDragging = sliderDragActive(wasDragging: s.timeDragging,
+                                    pressedInside: pressedInside,
+                                    down: input.pointer.down,
+                                    released: input.pointer.released)
   if s.timeDragging is false {
     ret false
   }
@@ -252,11 +249,9 @@ func settingsApplyToWorld(s: view SettingsState, world: mod UiWorld) pub {
   setNodeFillSlot(world: world, nodeId: "SettingsScene2", slot: settingsSlotFor(on: s.scene is 2))
   setNodeFillSlot(world: world, nodeId: "SettingsScene3", slot: settingsSlotFor(on: s.scene is 3))
 
-  # Fill up to the handle, then the handle itself centred on the value — that
-  # is what makes it read as a slider rather than a progress bar.
+  # Two drawn parts: the track, and the knob that travels along it. A filled
+  # portion made it read as a progress bar, which is a different control.
   let f: Float = (s.hour - settingsHourMin) / (settingsHourMax - settingsHourMin)
-  setNodeFractionWidth(world: world, trackId: "SettingsTimeTrack",
-                       fillId: "SettingsTimeFill", fraction: f)
   centreNodeAtFraction(world: world, trackId: "SettingsTimeTrack",
                        handleId: "SettingsTimeHandle", fraction: f)
 }
