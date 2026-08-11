@@ -271,8 +271,29 @@ static void rae_g2d_configure(int pw, int ph) {
  *    nondeterminism RAE_FIXED_DT/RAE_HEADLESS_FRAMES exist to remove.
  *  - RAE_NO_WINDOW_RESTORE=1 opts out (kiosk, device-simulation presets).
  */
-#define RAE_G2D_GEOMETRY_PATH ".rae/window.geometry"
+/* PER APP, not per working tree. This was one fixed path, so every app on the
+ * machine shared a single geometry file — and because a restore CONSUMES the
+ * file, running 106, 110 and 113 together meant whichever started first ate
+ * whatever another had saved. The symptoms were "it forgot my window" and
+ * "two examples opened exactly on top of each other", which are the same bug.
+ *
+ * The per-app directory is the one `rae watch` / `rae run` already hand each
+ * child in RAE_HOT_RELOAD_DIR for the hot-reload channel; falling back to the
+ * shared path only matters for a binary launched by hand, where there is one
+ * app by definition. */
+#define RAE_G2D_GEOMETRY_FALLBACK ".rae/window.geometry"
 #define RAE_G2D_GEOMETRY_FRESH_SEC 10.0
+
+static const char* g2d_geometry_path(void) {
+    static char path[1024];
+    const char* dir = getenv("RAE_HOT_RELOAD_DIR");
+    if (dir && *dir) {
+        snprintf(path, sizeof(path), "%s/window.geometry", dir);
+        return path;
+    }
+    return RAE_G2D_GEOMETRY_FALLBACK;
+}
+
 
 static bool g2d_geometry_enabled(void) {
     if (getenv("RAE_NO_WINDOW_RESTORE")) return false;
@@ -290,7 +311,7 @@ static void g2d_save_geometry(void) {
     SDL_GetWindowPosition(g_sdl_win, &x, &y);
     SDL_GetWindowSize(g_sdl_win, &w, &h);
     if (w <= 0 || h <= 0) return;
-    FILE* f = fopen(RAE_G2D_GEOMETRY_PATH, "wb");
+    FILE* f = fopen(g2d_geometry_path(), "wb");
     if (!f) return;   /* no .rae dir => not a dev-loop run; silently skip */
     fprintf(f, "%d %d %d %d\n", x, y, w, h);
     fclose(f);
@@ -301,15 +322,15 @@ static void g2d_save_geometry(void) {
 static bool g2d_take_geometry(int* x, int* y, int* w, int* h) {
     if (!g2d_geometry_enabled()) return false;
     struct stat st;
-    if (stat(RAE_G2D_GEOMETRY_PATH, &st) != 0) return false;
+    if (stat(g2d_geometry_path(), &st) != 0) return false;
     bool fresh = (difftime(time(NULL), st.st_mtime) <= RAE_G2D_GEOMETRY_FRESH_SEC);
-    FILE* f = fopen(RAE_G2D_GEOMETRY_PATH, "rb");
+    FILE* f = fopen(g2d_geometry_path(), "rb");
     bool ok = false;
     if (f) {
         ok = (fscanf(f, "%d %d %d %d", x, y, w, h) == 4);
         fclose(f);
     }
-    remove(RAE_G2D_GEOMETRY_PATH);   /* consume either way */
+    remove(g2d_geometry_path());   /* consume either way */
     return ok && fresh && *w > 0 && *h > 0;
 }
 
