@@ -1,0 +1,71 @@
+# Slider value mapping.
+#
+# The pointer/ECS half needs a laid-out world, so what is pinned here is the
+# arithmetic every slider gets wrong: the fraction/value round trip, clamping at
+# both ends, and a zero-width range dividing by itself. The 24-hour time-of-day
+# case is included because that is the first real user, and its range does not
+# start at zero — an implementation that assumed 0..max would pass a 0..1 test
+# and put noon at the wrong place on the bar.
+
+import core
+import math
+import string
+import app3d/slider
+open app3d/slider
+
+func absF(x: view Float) ret Float {
+  if x < 0.0 {
+    ret 0.0 - x
+  }
+  ret x
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret absF(x: a - b) < 0.0001
+}
+
+func main() {
+  var s: Slider = createSlider(trackId: "Track", fillId: "Fill",
+                               minValue: 0.0, maxValue: 24.0, value: 12.0)
+  check(label: "midpoint is half", ok: near(a: sliderFraction(s: s), b: 0.5))
+
+  sliderSetFraction(s: s, f: 0.0)
+  check(label: "fraction 0 gives min", ok: near(a: s.value, b: 0.0))
+  sliderSetFraction(s: s, f: 1.0)
+  check(label: "fraction 1 gives max", ok: near(a: s.value, b: 24.0))
+  sliderSetFraction(s: s, f: 0.25)
+  check(label: "fraction 0.25 gives 6h", ok: near(a: s.value, b: 6.0))
+  check(label: "round trips", ok: near(a: sliderFraction(s: s), b: 0.25))
+
+  # Out of range in either direction clamps rather than extrapolating: a drag
+  # runs past the ends of the track constantly.
+  sliderSetFraction(s: s, f: 0.0 - 0.5)
+  check(label: "below zero clamps to min", ok: near(a: s.value, b: 0.0))
+  sliderSetFraction(s: s, f: 1.7)
+  check(label: "above one clamps to max", ok: near(a: s.value, b: 24.0))
+
+  # A range that does not start at zero — speed 0.01..3.0, the animation dial.
+  var speed: Slider = createSlider(trackId: "T", fillId: "F",
+                                   minValue: 0.5, maxValue: 2.5, value: 1.5)
+  check(label: "offset range midpoint", ok: near(a: sliderFraction(s: speed), b: 0.5))
+  sliderSetFraction(s: speed, f: 0.0)
+  check(label: "offset range min", ok: near(a: speed.value, b: 0.5))
+  sliderSetFraction(s: speed, f: 1.0)
+  check(label: "offset range max", ok: near(a: speed.value, b: 2.5))
+
+  # Degenerate bounds must not divide by zero.
+  let flat: Slider = createSlider(trackId: "T", fillId: "F",
+                                  minValue: 5.0, maxValue: 5.0, value: 5.0)
+  check(label: "zero-width range is 0, not NaN", ok: near(a: sliderFraction(s: flat), b: 0.0))
+
+  # A fresh slider is not mid-drag; a stuck drag follows the pointer forever.
+  check(label: "starts not dragging", ok: s.dragging is false)
+}
