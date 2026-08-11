@@ -299,3 +299,29 @@ func centreNodeAtFraction(world: mod UiWorld, trackId: view String,
     componentSet(this: world.rects, entity: he, data: nextAuthored)
   }
 }
+
+# Should a drag be running after this frame's pointer state?
+#
+# Pulled out as a pure function because the bug it encodes cost two rounds and
+# is invisible in a screenshot: requiring `down` to be true cancelled the drag on
+# the very frame the press arrived, because the press EDGE and the held STATE do
+# not necessarily both read true on the same frame. The slider was not twitchy,
+# it was completely inert — and nothing about the rendered frame said why.
+#
+#   wasDragging — whether a drag was already running
+#   pressedInside — a press edge landed on the track this frame
+func sliderDragActive(wasDragging: view Bool, pressedInside: view Bool,
+                      down: view Bool, released: view Bool) pub ret Bool {
+  if released {
+    ret false
+  }
+  # A press counts as held even if `down` has not caught up yet.
+  let held: Bool = down or pressedInside
+  if held is false {
+    ret false
+  }
+  if pressedInside {
+    ret true
+  }
+  ret wasDragging
+}
