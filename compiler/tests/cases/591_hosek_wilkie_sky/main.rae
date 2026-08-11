@@ -125,9 +125,13 @@ func main() {
 
   # 3. The relationships the model exists to produce, which the raw numbers
   #    above would still satisfy if the channels were swapped.
-  let sunDir: Vec3 = vec3.create(x: math.cos(x: elevation), y: 0.0, z: math.sin(x: elevation))
+  # Direction of TRAVEL, the convention Light3d and the shaders use: the sun is
+  # up when z is negative. Built by negating the toward-the-sun vector so the
+  # relationship is visible rather than a sign to trust.
+  let toSun: Vec3 = vec3.create(x: math.cos(x: elevation), y: 0.0, z: math.sin(x: elevation))
+  let sunDir: Vec3 = vec3.create(x: 0.0 - toSun.x, y: 0.0, z: 0.0 - toSun.z)
   let zenith: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
-  let zr: Vec3 = hosekRadiance(sky: sky, dir: zenith, sunDir: sunDir)
+  let zr: Vec3 = hosekRadiance(sky: sky, dir: zenith, sunDir: toSun)
   let bluenessZ: Float = zr.z / zr.x
   if bluenessZ > 1.0 {
     log("ok   zenith is bluer than it is red")
@@ -138,8 +142,8 @@ func main() {
   # Toward the sun is brighter than away from it, at matched elevation.
   let near: Vec3 = dirFromThetaGamma(theta: 0.6, gamma: 0.2, elevationRad: elevation)
   let far: Vec3 = dirFromThetaGamma(theta: 0.6, gamma: 2.4, elevationRad: elevation)
-  let nearR: Vec3 = hosekRadiance(sky: sky, dir: near, sunDir: sunDir)
-  let farR: Vec3 = hosekRadiance(sky: sky, dir: far, sunDir: sunDir)
+  let nearR: Vec3 = hosekRadiance(sky: sky, dir: near, sunDir: toSun)
+  let farR: Vec3 = hosekRadiance(sky: sky, dir: far, sunDir: toSun)
   if nearR.y > farR.y {
     log("ok   brighter toward the sun")
   } else {
@@ -150,8 +154,8 @@ func main() {
   # is the axis Preetham does not have at all.
   let dark: HosekSky = createHosekSky(data: data, turbidity: turbidity, albedo: 0.0, solarElevationRad: elevation)
   let bright: HosekSky = createHosekSky(data: data, turbidity: turbidity, albedo: 0.9, solarElevationRad: elevation)
-  let dl: Vec3 = hosekRadiance(sky: dark, dir: zenith, sunDir: sunDir)
-  let bl: Vec3 = hosekRadiance(sky: bright, dir: zenith, sunDir: sunDir)
+  let dl: Vec3 = hosekRadiance(sky: dark, dir: zenith, sunDir: toSun)
+  let bl: Vec3 = hosekRadiance(sky: bright, dir: zenith, sunDir: toSun)
   if bl.y > dl.y {
     log("ok   ground albedo brightens the sky")
   } else {

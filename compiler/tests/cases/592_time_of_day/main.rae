@@ -1,0 +1,81 @@
+# Time of day drives the sun.
+#
+# One dial for a settings UI to bind, so the sky models, the shadow cascades and
+# the key light cannot each hold their own idea of where the sun is. This test
+# pins the RELATIONSHIPS rather than a table of numbers, because the arc is a
+# deliberate simplification (equinox at the equator, not an ephemeris) and the
+# exact angles are allowed to change if that assumption ever does. What must not
+# change is which way the light points at a given hour.
+#
+# `sunDir` is the direction of TRAVEL — from the sun toward the scene — because
+# that is what Light3d and the shaders take. A high sun therefore has a strongly
+# NEGATIVE z, which is the sign error worth having a test for.
+
+import core
+import math
+import string
+import vec3
+import sky
+import sky_hosek
+open sky
+open sky_hosek
+
+func absF(x: view Float) ret Float {
+  if x < 0.0 {
+    ret 0.0 - x
+  }
+  ret x
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() {
+  let dawn: Vec3 = sunDirForHour(hour: 6.0)
+  let noon: Vec3 = sunDirForHour(hour: 12.0)
+  let dusk: Vec3 = sunDirForHour(hour: 18.0)
+
+  # Noon: light travels almost straight down.
+  check(label: "noon light points down", ok: noon.z < 0.0 - 0.99)
+  check(label: "noon is not sideways", ok: absF(x: noon.x) < 0.01)
+
+  # Sunrise in the east means light travels WEST (-X); sunset the reverse.
+  check(label: "dawn light travels west", ok: dawn.x < 0.0 - 0.99)
+  check(label: "dusk light travels east", ok: dusk.x > 0.99)
+  check(label: "dawn is level", ok: absF(x: dawn.z) < 0.01)
+  check(label: "dusk is level", ok: absF(x: dusk.z) < 0.01)
+
+  # Height rises to noon and falls symmetrically.
+  check(label: "height peaks at noon", ok: sunHeightForHour(hour: 12.0) > 0.99)
+  check(label: "height zero at sunrise", ok: sunHeightForHour(hour: 6.0) < 0.01)
+  check(label: "morning and afternoon match", ok: absF(x: sunHeightForHour(hour: 9.0) - sunHeightForHour(hour: 15.0)) < 0.001)
+  # Below the horizon clamps to zero rather than going negative: callers scale
+  # light by this, and a negative would light the scene from underneath.
+  check(label: "night clamps to zero", ok: sunHeightForHour(hour: 2.0) is 0.0 and sunHeightForHour(hour: 23.0) is 0.0)
+
+  # The key light warms toward the horizon. The sky model reddens on its own;
+  # this is the direct light, which would otherwise stay white through a sunset.
+  let midday: Vec3 = sunColorForHour(hour: 12.0)
+  let sunset: Vec3 = sunColorForHour(hour: 18.0)
+  check(label: "midday light is neutral", ok: absF(x: midday.x - midday.z) < 0.01)
+  check(label: "sunset light is warm", ok: sunset.z < sunset.y and sunset.y < sunset.x)
+  check(label: "warmth is confined to low sun", ok: sunColorForHour(hour: 14.0).z > 0.9)
+
+  # And the dial feeds the sky model: a low sun must cook differently from a
+  # high one, which is the whole point of wiring the slider to it.
+  let data: HosekDataset = loadDefaultHosekDataset()
+  if data.loaded is false {
+    log("FAIL hosek dataset did not load")
+  } else {
+    let high: HosekSky = createHosekSky(data: data, turbidity: 3.0, albedo: 0.25,
+                                        solarElevationRad: sunElevationRad(sunDir: noon))
+    let low: HosekSky = createHosekSky(data: data, turbidity: 3.0, albedo: 0.25,
+                                       solarElevationRad: sunElevationRad(sunDir: sunDirForHour(hour: 7.0)))
+    check(label: "time of day changes the cooked sky", ok: absF(x: high.r.radiance - low.r.radiance) > 0.001)
+  }
+}
