@@ -1,0 +1,171 @@
+# A horizontal slider, driven by the pointer against a named track node.
+#
+# Lives in app3d rather than lib/ui because it is built out of the same
+# named-node access the other shared components use (`ui_shell`), not out of new
+# ECS components. Nothing here is 3D-specific; if a second family of apps wants
+# it, it moves down with no change to the interface.
+#
+# The app owns the CHROME — a track node and a fill node in its own scene, so
+# placement, colours and rounding stay the app's business — and this owns the
+# BEHAVIOUR: where the pointer is, whether a drag is in progress, and what
+# fraction that maps to. The split matches `control_panel.rae`.
+#
+# Dragging continues while the button is held even if the pointer leaves the
+# track, which is what every real slider does; releasing anywhere ends it. A
+# slider that only tracked while inside its own rect would slip whenever the
+# user moved faster than the frame rate.
+
+import core
+import math
+open ui/ecs
+open ui/components
+open ui/input_gpu2d
+open app3d/ui_shell
+
+type Slider {
+  # Node ids in the app's scene. `trackId` is the full-width bar the pointer is
+  # measured against; `fillId` is the portion left of the handle, resized here.
+  trackId: String
+  fillId: String
+  minValue: Float
+  maxValue: Float
+  value: Float
+  # True between press and release. Held here rather than derived per frame so
+  # a drag survives the pointer leaving the track.
+  dragging: Bool
+}
+
+func createSlider(trackId: view String, fillId: view String,
+                  minValue: view Float, maxValue: view Float,
+                  value: view Float) pub ret Slider {
+  ret Slider {
+    trackId: "{trackId}"
+    fillId: "{fillId}"
+    minValue: minValue
+    maxValue: maxValue
+    value: value
+    dragging: false
+  }
+}
+
+func sliderClamp(v: view Float, lo: view Float, hi: view Float) ret Float {
+  if v < lo {
+    ret lo
+  }
+  if v > hi {
+    ret hi
+  }
+  ret v
+}
+
+# Where the value sits in 0..1. Guards a zero-width range rather than dividing
+# by it: a slider whose bounds are equal is a mistake, not a crash.
+func sliderFraction(s: view Slider) pub ret Float {
+  let span: Float = s.maxValue - s.minValue
+  if span <= 0.0 {
+    ret 0.0
+  }
+  ret sliderClamp(v: (s.value - s.minValue) / span, lo: 0.0, hi: 1.0)
+}
+
+func sliderSetFraction(s: mod Slider, f: view Float) pub {
+  let span: Float = s.maxValue - s.minValue
+  s.value = s.minValue + sliderClamp(v: f, lo: 0.0, hi: 1.0) * span
+}
+
+# Pointer x -> value, using the track's laid-out rect. Returns the fraction so
+# the caller can decide what "changed" means for its own value.
+func sliderFractionForX(world: view UiWorld, trackId: view String, x: view Float) ret Float {
+  let e: EntityId = nodeEntityFor(world: world, nodeId: trackId)
+  if isNone(this: e) {
+    ret 0.0
+  }
+  if componentHas(this: world.computedRects, entity: e) is false {
+    ret 0.0
+  }
+  let r: ComputedRect = componentGet(this: world.computedRects, entity: e)
+  if r.w <= 0.0 {
+    ret 0.0
+  }
+  ret sliderClamp(v: (x - r.x) / r.w, lo: 0.0, hi: 1.0)
+}
+
+func pointInRect(r: view ComputedRect, x: view Float, y: view Float) ret Bool {
+  if x < r.x or x > r.x + r.w {
+    ret false
+  }
+  if y < r.y or y > r.y + r.h {
+    ret false
+  }
+  ret true
+}
+
+# Advance the slider for this frame. Returns true when the value moved, so a
+# caller can avoid recomputing whatever the slider drives on frames where the
+# user is only hovering.
+func updateSlider(s: mod Slider, world: view UiWorld, input: view UiInput) pub ret Bool {
+  let before: Float = s.value
+
+  if input.pointer.pressed {
+    let e: EntityId = nodeEntityFor(world: world, nodeId: s.trackId)
+    if isNone(this: e) is false {
+      if componentHas(this: world.computedRects, entity: e) {
+        let r: ComputedRect = componentGet(this: world.computedRects, entity: e)
+        # A press anywhere on the track jumps the handle there and begins a
+        # drag, rather than requiring the handle itself to be hit — the handle
+        # is a few pixels wide and the track is the affordance.
+        if pointInRect(r: r, x: input.pointer.x, y: input.pointer.y) {
+          s.dragging = true
+        }
+      }
+    }
+  }
+
+  if s.dragging {
+    sliderSetFraction(s: s, f: sliderFractionForX(world: world, trackId: s.trackId, x: input.pointer.x))
+  }
+
+  # Released, or the button came up somewhere we never saw: either way the drag
+  # is over. Checking `down` as well as `released` means a release swallowed by
+  # a window switch cannot leave the slider stuck to the pointer.
+  if input.pointer.released or input.pointer.down is false {
+    s.dragging = false
+  }
+
+  ret s.value is not before
+}
+
+# Resize the fill node to match the value. Separate from `updateSlider` because
+# the visual is the app's scene: a caller that paints its slider differently
+# uses `sliderFraction` and skips this.
+func applySliderFill(s: view Slider, world: mod UiWorld) pub {
+  let track: EntityId = nodeEntityFor(world: world, nodeId: s.trackId)
+  if isNone(this: track) {
+    ret
+  }
+  if componentHas(this: world.computedRects, entity: track) is false {
+    ret
+  }
+  let tr: ComputedRect = componentGet(this: world.computedRects, entity: track)
+  let fill: EntityId = nodeEntityFor(world: world, nodeId: s.fillId)
+  if isNone(this: fill) {
+    ret
+  }
+  if componentHas(this: world.computedRects, entity: fill) is false {
+    ret
+  }
+  let want: Float = tr.w * sliderFraction(s: s)
+  let fr: ComputedRect = componentGet(this: world.computedRects, entity: fill)
+  # Only write on a real change: componentSet bumps the table generation whether
+  # or not the value differs, and a per-frame write to an unchanged width keeps
+  # the render cache permanently dirty (#407).
+  var delta: Float = want - fr.w
+  if delta < 0.0 {
+    delta = 0.0 - delta
+  }
+  if delta <= 0.05 {
+    ret
+  }
+  let next: ComputedRect = { x: fr.x, y: fr.y, w: want, h: fr.h }
+  componentSet(this: world.computedRects, entity: fill, data: next)
+}
