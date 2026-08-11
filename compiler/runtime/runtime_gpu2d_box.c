@@ -71,7 +71,16 @@ static const char* G2D_BOX_WGSL =
 "  let p = prims[in.inst];\n"
 "  let halfSize = p.rect.zw * 0.5;\n"
 "  let center = in.local - halfSize;\n"
-"  let d = sdRoundBox(center, halfSize, p.radius);\n"
+/* CLAMP THE RADIUS. sdRoundBox is only defined for r <= min(halfSize);
+ * beyond that `abs(p) - b + r` is positive everywhere and the rounded box
+ * degenerates into a pointed shape. A "pill" radius is authored as a number
+ * large enough to round any button (20 in the app3d theme), so every control
+ * shorter than 40 units hit this — the camera bar's 34-tall buttons rendered
+ * as spear tips rather than pills. Clamping here rather than at each call
+ * site also covers buttons whose height only becomes small after layout. */
+"  let rmax = min(halfSize.x, halfSize.y);\n"
+"  let rad4 = min(p.radius, vec4<f32>(rmax, rmax, rmax, rmax));\n"
+"  let d = sdRoundBox(center, halfSize, rad4);\n"
 "  let aa = max(fwidth(d), 0.0001);\n"
 "  var cov = 1.0 - smoothstep(-aa, aa, d);\n"
 "  if (uClip[1].y > 0.5) {\n"                /* #118: rounded clip coverage */
