@@ -1,5 +1,10 @@
-# The shared settings dialog: scene chooser, animation speed, toon shading,
+# The shared settings SECTION: scene chooser, animation speed, toon shading,
 # sky model and time of day.
+#
+# It mounts INSIDE the app's side panel, not as a floating dialog. A dialog
+# holding the same controls the panel already showed meant two surfaces with one
+# job, and the settings button had to explain which one it opened. Now there is
+# one panel, and the button hides it.
 #
 # Same split as the other app3d components — this owns the CHROME
 # (`scenes/settings_dialog.raescene`) and the BEHAVIOUR, the app owns where it
@@ -41,6 +46,8 @@ const settingsHourMin: Float = 0.0
 const settingsHourMax: Float = 24.0
 
 type SettingsState {
+  # Whether the panel BODY is showing. The button that toggles this stays
+  # visible either way, or there would be no way to bring the panel back.
   open: Bool
   # 1..3. Kept even where an app has one scene, so the dialog does not need to
   # know which app it is in.
@@ -56,7 +63,7 @@ type SettingsState {
 func createSettingsState(scene: view Int, sceneCount: view Int, speed: view Float,
                          toon: view Bool, hour: view Float) pub ret SettingsState {
   ret SettingsState {
-    open: false
+    open: true
     scene: scene
     sceneCount: sceneCount
     speed: speed
@@ -115,12 +122,10 @@ func formatHour(hour: view Float) pub ret String {
 # rebuild only what the change affects. Unknown ids are ignored rather than
 # treated as an error: the app forwards every action it sees, including its own.
 func settingsHandleAction(s: mod SettingsState, actionId: view String) pub ret Bool {
+  # One action, and it TOGGLES: the button shows and hides the panel rather
+  # than opening a second surface.
   if actionId.equals(other: "settings.open") {
-    s.open = true
-    ret true
-  }
-  if actionId.equals(other: "settings.close") {
-    s.open = false
+    s.open = s.open is false
     ret true
   }
   if actionId.equals(other: "settings.toon") {
@@ -186,10 +191,6 @@ func settingsUpdatePointer(s: mod SettingsState, world: view UiWorld,
 # something changed; every write underneath is guarded against writing an
 # unchanged value.
 func settingsApplyToWorld(s: view SettingsState, world: mod UiWorld) pub {
-  setNodeActive(world: world, nodeId: "SettingsDialog", value: s.open)
-  if s.open is false {
-    ret
-  }
   let pct: Int = speedPercent(v: s.speed)
   setNodeText(world: world, nodeId: "SettingsSpeedRow", value: "Animation speed {pct}%")
   setNodeText(world: world, nodeId: "SettingsTimeLabel", value: "Time of day {formatHour(hour: s.hour)}")

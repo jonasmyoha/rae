@@ -440,10 +440,6 @@ func main() ret Int {
   # the two speed buttons are plain actions.
   var transport: ControlPanel = createControlPanel(hostNodeId: "TransportRow")
   addPanelButton(panel: transport, id: "play", label: "Pause", actionId: "anim.play", group: 0)
-  addPanelButton(panel: transport, id: "slower", label: "Slower", actionId: "anim.slower", group: 0)
-  addPanelButton(panel: transport, id: "faster", label: "Faster", actionId: "anim.faster", group: 0)
-  # Group 0, so it toggles independently rather than deselecting a clip.
-  addPanelButton(panel: transport, id: "toon", label: "Toon", actionId: "style.toon", group: 0)
   transport.buttonW = 84.0
   buildControlPanel(panel: transport, world: uiWorld, res: gpuUi)
 
@@ -500,6 +496,7 @@ func main() ret Int {
     logWarnLine(ov: logView, text: "settings dialog failed to mount")
   }
   settingsApplyToWorld(s: settings, world: uiWorld)
+  setNodeActive(world: uiWorld, nodeId: "SidePanelBody", value: settings.open)
   log("[ui] panel buttons: {clipPanel.buttonEntities.length} clip, {transport.buttonEntities.length} transport, camera bar {barOk}")
 
   let startT: Float64 = gpu2d.nowSeconds()
@@ -578,6 +575,7 @@ func main() ret Int {
       let pctS: Int = speedPercent(v: speed)
       setNodeText(world: uiWorld, nodeId: "SpeedLabel", value: "Speed {pctS}%")
       settingsApplyToWorld(s: settings, world: uiWorld)
+  setNodeActive(world: uiWorld, nodeId: "SidePanelBody", value: settings.open)
       stateDirty = true
     }
     if clipHit.length() > 0 or transportHit.length() > 0 {
@@ -585,6 +583,7 @@ func main() ret Int {
       settings.speed = speed
       settings.toon = toonShading
       settingsApplyToWorld(s: settings, world: uiWorld)
+  setNodeActive(world: uiWorld, nodeId: "SidePanelBody", value: settings.open)
       stateDirty = true
     }
     if uiActionCount(input: uiInput) > 0 {
