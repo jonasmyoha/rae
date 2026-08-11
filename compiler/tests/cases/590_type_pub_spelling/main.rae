@@ -1,0 +1,26 @@
+# A type property has ONE spelling: after a colon.
+#
+# `type Name pub { ... }` (no colon) used to be accepted and silently discarded.
+# That tolerance was added because the parser segfaulted on it, and people write
+# it by analogy with `func bar() pub` — but the colon slot is the real mechanism
+# (it carries `c_struct`, which the C backend reads), and parse_declaration
+# already tells users the canonical spelling is `type Name: pub`. Two spellings
+# for one marker, only one of which reaches the AST, is worse than an error.
+#
+# Both lines below must be rejected; the recorded output is the diagnostics.
+# Note the marker does nothing either way — types are always cross-file visible
+# in Rae, so `pub` on a type is noise even when spelled correctly. That is why
+# the diagnostic says so, and why the codebase does not use it.
+import core
+
+type BarePub pub {
+  x: Int
+}
+
+type BarePriv priv {
+  y: Int
+}
+
+func main() {
+  log("unreachable: this file must not compile")
+}
