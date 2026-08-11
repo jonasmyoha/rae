@@ -96,6 +96,7 @@ import shadow3d
 import app3d/playback
 import app3d/slider
 import app3d/settings_dialog
+import sky_hosek
 import hot_reload
 import ui/log_overlay
 import ui/ecs
@@ -115,6 +116,7 @@ open sdf_text
 open png
 open app3d/camera_rig
 open app3d/settings_dialog
+open sky_hosek
 open app3d/ui_shell
 open app3d/control_panel
 open app3d/camera_bar
@@ -379,6 +381,7 @@ func main() ret Int {
 
   var camera: Camera3d = defaultCamera3d()
   var light: Light3d = defaultLight3d()
+  let hosekData: HosekDataset = loadDefaultHosekDataset()
   camera.target = vec3.create(x: 0.0, y: 0.0, z: groundZ + targetHeight * 0.5)
 
   # The UI variant of the frame: the overlay MODIFIES the LDR target after
@@ -564,6 +567,13 @@ func main() ret Int {
       settingsChanged = true
     }
     if settingsChanged {
+      # The panel owns the sun now. Stylised stays the default look, so it is
+      # what "neither physical model asked for" means here; picking Hosek or
+      # Preetham swaps it, and the hour drives whichever is showing.
+      renderer.sky = settingsBuildSky(s: settings, data: hosekData,
+                                      turbidity: 3.0, groundAlbedo: 0.30)
+      light.sunDir = settingsSunDir(s: settings)
+      light.sunColor = settingsSunColor(s: settings)
       # The dialog is the source of truth for what it owns; the panel controls
       # write INTO it above, so mirroring back keeps one value per setting
       # rather than two that can disagree.
