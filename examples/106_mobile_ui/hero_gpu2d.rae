@@ -230,7 +230,9 @@ func updateHeroAnim(anim: mod HeroAnim, now: view Float64) pub ret Bool {
   if anim.active is false {
     ret false
   }
-  let elapsed: Float = now - anim.startTime
+  # A duration, not a timestamp: small enough that f32 is exact here.
+  let span: Float64 = now - anim.startTime
+  let elapsed: Float = span as Float
   if elapsed >= anim.duration {
     anim.active = false
     ret false
