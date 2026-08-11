@@ -1,0 +1,53 @@
+# Arithmetic on `view` / `mod` values produces a VALUE, not a reference.
+#
+# Binary expressions used to take the lhs's type verbatim, so `a - b` over
+# `view Float64` parameters carried the REFERENCE type outward. Two things
+# followed: `as` saw a non-numeric source and rejected the cast outright
+# ("unsupported conversion"), and the numeric-conversion check saw a
+# non-numeric type and skipped (#408). The identical expression written over
+# locals compiled and converted fine, which is what made this so confusing to
+# hit — the fix for one is the fix for the other.
+import core
+
+func absF(x: view Float) ret Float {
+  if x < 0.0 {
+    ret 0.0 - x
+  }
+  ret x
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+# The shape that failed: subtract two `view Float64`s and narrow the result.
+func spanAsFloat(a: view Float64, b: view Float64) ret Float {
+  ret (a - b) as Float
+}
+
+# `mod` on both sides, and a cast of a bare reference read.
+func narrowMod(x: mod Float64) ret Float {
+  ret x as Float
+}
+
+# Chained arithmetic keeps producing values, so it stays castable.
+func chained(a: view Float64, b: view Float64, c: view Float64) ret Float {
+  ret (a - b + c) as Float
+}
+
+func main() {
+  var wide: Float64 = 2.5
+  check(label: "(view - view) as Float", ok: absF(x: spanAsFloat(a: 3.0, b: 1.0) - 2.0) < 0.0001)
+  check(label: "mod read as Float", ok: absF(x: narrowMod(x: wide) - 2.5) < 0.0001)
+  check(label: "chained refs as Float", ok: absF(x: chained(a: 10.0, b: 4.0, c: 0.5) - 6.5) < 0.0001)
+
+  # The same expression over locals must keep behaving identically — the point
+  # is that reference-ness stops leaking, not that refs become special.
+  let a: Float64 = 3.0
+  let b: Float64 = 1.0
+  check(label: "locals agree with refs", ok: absF(x: ((a - b) as Float) - spanAsFloat(a: 3.0, b: 1.0)) < 0.0001)
+}
