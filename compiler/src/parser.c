@@ -2316,12 +2316,23 @@ static AstDecl* parse_type_declaration(Parser* parser) {
       parser_error(parser, parser_peek(parser), "expected property after ':' in type declaration");
     }
   }
-  /* Accept and skip a `pub` visibility marker before the body. Types
-   * are always cross-file visible in Rae right now, so this is a no-op
-   * — but users naturally write `type Foo pub { ... }` by analogy with
-   * `func bar() pub`, and the old parser segfaulted on it instead of
-   * just accepting or rejecting cleanly. */
-  if (parser_check(parser, TOK_KW_PUB)) {
+  /* ONE spelling for a type property. `pub` here (no colon) used to be
+   * accepted and silently discarded — a tolerance added because the parser
+   * segfaulted on it, and users write it by analogy with `func bar() pub`.
+   * But the properties slot above is the real mechanism (it carries
+   * `c_struct`, which the C backend reads), and parse_declaration already
+   * tells users the canonical spelling is `type Name: pub`. Two spellings for
+   * one marker, only one of which reaches the AST, is worse than an error.
+   *
+   * Note this marker does nothing either way: types are always cross-file
+   * visible in Rae, so `pub` on a type is noise even when spelled correctly. */
+  if (parser_check(parser, TOK_KW_PUB) || parser_check(parser, TOK_KW_PRIV)) {
+    const Token* vis = parser_peek(parser);
+    Str text = vis->lexeme;
+    parser_error(parser, vis,
+                 "type property '%.*s' must go in the properties section after a colon, as 'type Name: %.*s'. "
+                 "Note that types are always cross-file visible, so '%.*s' on a type has no effect.",
+                 (int)text.len, text.data, (int)text.len, text.data, (int)text.len, text.data);
     parser_advance(parser);
   }
   parser_consume(parser, TOK_LBRACE, "expected '{' to start type body");
