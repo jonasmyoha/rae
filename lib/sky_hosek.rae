@@ -168,8 +168,17 @@ func loadHosekDataset(path: view String) pub ret HosekDataset {
   }
 }
 
+# The table is looked up relative to the working directory, and the two roots
+# that matter differ: examples run from the repo root, the test harness runs
+# from `compiler/`. Try both rather than making every caller know which it is.
+const hosekDatasetPathFromCompiler: String = "../lib/data/hosek_wilkie_rgb.json"
+
 func loadDefaultHosekDataset() pub ret HosekDataset {
-  ret loadHosekDataset(path: hosekDatasetPath)
+  let first: HosekDataset = loadHosekDataset(path: hosekDatasetPath)
+  if first.loaded {
+    ret first
+  }
+  ret loadHosekDataset(path: hosekDatasetPathFromCompiler)
 }
 
 # Quintic Bezier weights over the cube root of solar elevation. The cube root is
