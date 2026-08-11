@@ -198,6 +198,16 @@ func playbackProgress(state: view PlaybackState) pub ret Float {
 # patched here; they are mounted from PlaybackState and refreshed by
 # `refreshPlaybackViewsIfNeeded` when the playback revision changes. Progress
 # fill remains a per-frame animation because it depends on elapsed time.
+# Sub-pixel width differences are invisible but would still bump the
+# component generation and re-trigger a full layout, so treat them as equal.
+func fillWidthChanged(current: view Float, next: view Float) ret Bool {
+  var delta: Float = next - current
+  if delta < 0.0 {
+    delta = 0.0 - delta
+  }
+  ret delta > 0.05
+}
+
 func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
   # Progress fill width: read the parent track's authored width from
   # its ComputedRect (layout has already filled it in), then scale by
@@ -225,25 +235,37 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
       }
       let p: Float = playbackProgress(state: state)
       let fillW: Float = trackW * p
+      # WRITE ONLY ON CHANGE. This runs every frame, and componentSet bumps
+      # the table generation whether or not the value differs. Writing the
+      # same width each frame therefore pinned the app busy forever: the Rect
+      # write marks layout dirty, layout rewrites all ~460 ComputedRects,
+      # transforms follow, renderCacheDirty trips, the frame repaints and
+      # re-arms `renderUntil` — a self-sustaining 60 Hz loop with the app
+      # sitting idle and nothing playing. Paused playback reports a constant
+      # progress, so the equality check settles it.
       if componentHas(this: world.computedRects, entity: fillEntity) {
         let fcr: ComputedRect = componentGet(this: world.computedRects, entity: fillEntity)
-        let nextCr: ComputedRect = {
-          x: fcr.x
-          y: fcr.y
-          w: fillW
-          h: fcr.h
+        if fillWidthChanged(current: fcr.w, next: fillW) {
+          let nextCr: ComputedRect = {
+            x: fcr.x
+            y: fcr.y
+            w: fillW
+            h: fcr.h
+          }
+          componentSet(this: world.computedRects, entity: fillEntity, data: nextCr)
         }
-        componentSet(this: world.computedRects, entity: fillEntity, data: nextCr)
       }
       if componentHas(this: world.rects, entity: fillEntity) {
         let fr: Rect = componentGet(this: world.rects, entity: fillEntity)
-        let nextRect: Rect = {
-          x: fr.x
-          y: fr.y
-          w: fillW
-          h: fr.h
+        if fillWidthChanged(current: fr.w, next: fillW) {
+          let nextRect: Rect = {
+            x: fr.x
+            y: fr.y
+            w: fillW
+            h: fr.h
+          }
+          componentSet(this: world.rects, entity: fillEntity, data: nextRect)
         }
-        componentSet(this: world.rects, entity: fillEntity, data: nextRect)
       }
     }
   }
