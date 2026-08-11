@@ -166,10 +166,7 @@ func playbackProcessCommands(this: mod PlaybackState) pub {
 func advancePlayback(state: mod PlaybackState, now: view Float64) pub {
   var dt: Float = 0.0
   if state.prevTime >= 0.0 {
-    # Bind the wide difference first: `as` on a parenthesised expression is
-    # not supported yet (queued as #409).
-    let step: Float64 = now - state.prevTime
-    dt = step as Float
+    dt = (now - state.prevTime) as Float
   }
   state.prevTime = now
   if state.isPlaying {
