@@ -1,0 +1,126 @@
+# Procedural physical sky (lib/sky.rae, #400).
+#
+# An analytic sky is easy to get subtly wrong and hard to eyeball: it
+# looks "like a sky" over a wide range of broken coefficients. So this
+# asserts the RELATIONSHIPS the model exists to produce, each of which
+# fails visibly and for a different reason:
+#
+#   1. The zenith is bluer than the horizon. This is the whole reason to
+#      use a physical model rather than a vertical gradient — get the
+#      chromaticity channels crossed and the sky is uniformly grey while
+#      still varying in brightness.
+#   2. AT EQUAL SUN ANGLE, the horizon is brighter than the zenith.
+#      Longer air path means more scattering; inverting it is the classic
+#      sign of the 1/cos(theta) term having the wrong sign. The "equal
+#      sun angle" qualifier is load-bearing — see the note at the
+#      assertion.
+#   3. Looking near the sun is brighter than looking away from it. The
+#      gamma term. Without it the sky has no sun glow at all and lighting
+#      derived from it has no directionality.
+#   4. A low sun is REDDER than a high one — sunset. This comes from the
+#      zenith-chromaticity polynomials, which are the fiddliest part to
+#      transcribe and the part with no visible effect at noon.
+#   5. Nothing is negative or non-finite ANYWHERE, including straight at
+#      the horizon where the model's exponential diverges. A single
+#      infinity here survives into the HDR target and takes the whole
+#      frame with it through the tonemapper.
+import core
+import math
+import vec3
+import sky
+open sky
+
+func norm(x: view Float, y: view Float, z: view Float) ret Vec3 {
+  let l: Float = math.sqrt(x: x * x + y * y + z * z)
+  ret vec3.create(x: x / l, y: y / l, z: z / l)
+}
+
+func lum(c: view Vec3) ret Float {
+  ret 0.2126 * c.x + 0.7152 * c.y + 0.0722 * c.z
+}
+
+# Blue-to-red ratio: how blue a colour is, independent of brightness.
+func blueness(c: view Vec3) ret Float {
+  var r: Float = c.x
+  if r < 0.0001 { r = 0.0001 }
+  ret c.z / r
+}
+
+func finiteNonNeg(c: view Vec3) ret Bool {
+  # NaN fails every comparison, so `not (v >= 0)` catches NaN as well as
+  # negatives. A large finite bound catches the divergence at the horizon.
+  if not (c.x >= 0.0) or not (c.y >= 0.0) or not (c.z >= 0.0) {
+    ret false
+  }
+  ret c.x < 100000.0 and c.y < 100000.0 and c.z < 100000.0
+}
+
+func main() {
+  let turb: Float = 3.0
+  # Sun high in the sky, off to one side.
+  let sunHigh: Vec3 = norm(x: 0.3, y: 0.2, z: 0.93)
+  let zenith: Vec3 = norm(x: 0.0, y: 0.0, z: 1.0)
+  # Just above the horizon, away from the sun.
+  let horizon: Vec3 = norm(x: 0.0 - 0.95, y: 0.0 - 0.3, z: 0.05)
+
+  let zc: Vec3 = preethamRadiance(dir: zenith, sunDir: sunHigh, turbidity: turb)
+  let hc: Vec3 = preethamRadiance(dir: horizon, sunDir: sunHigh, turbidity: turb)
+  log("zenith bluer than horizon: {blueness(c: zc) > blueness(c: hc)}")
+
+  # 2, ISOLATED FROM SUN GLOW. Comparing the zenith against the horizon
+  # directly does not test the air-path term: with a high sun the zenith
+  # sits close to it, and the glow (3.5x here) swamps the gradient
+  # (2.0x), so the zenith comes out brighter. That is physically correct
+  # and an earlier version of this test asserted the opposite.
+  #
+  # With the sun ON the horizon at +X, both the zenith and a direction
+  # at +Y are exactly 90 degrees from it, so the gamma term is identical
+  # and only the elevation differs. That isolates the term this asserts.
+  let sunEast: Vec3 = norm(x: 1.0, y: 0.0, z: 0.0)
+  let sideHorizon: Vec3 = norm(x: 0.0, y: 1.0, z: 0.05)
+  let zEq: Vec3 = preethamRadiance(dir: zenith, sunDir: sunEast, turbidity: turb)
+  let hEq: Vec3 = preethamRadiance(dir: sideHorizon, sunDir: sunEast, turbidity: turb)
+  log("at equal sun angle, horizon brighter than zenith: {lum(c: hEq) > lum(c: zEq)}")
+
+  # 3: near the sun against directly away from it, at the same elevation
+  # so only the sun angle differs.
+  let nearSun: Vec3 = norm(x: 0.32, y: 0.22, z: 0.92)
+  let awaySun: Vec3 = norm(x: 0.0 - 0.32, y: 0.0 - 0.22, z: 0.92)
+  let nc: Vec3 = preethamRadiance(dir: nearSun, sunDir: sunHigh, turbidity: turb)
+  let ac: Vec3 = preethamRadiance(dir: awaySun, sunDir: sunHigh, turbidity: turb)
+  log("brighter toward the sun: {lum(c: nc) > lum(c: ac)}")
+
+  # 4: sunset reddens. Compared at the zenith, where the effect is the
+  # chromaticity shift alone rather than the sun glow.
+  let sunLow: Vec3 = norm(x: 0.98, y: 0.0, z: 0.06)
+  let zLow: Vec3 = preethamRadiance(dir: zenith, sunDir: sunLow, turbidity: turb)
+  log("low sun is redder than high sun: {blueness(c: zLow) < blueness(c: zc)}")
+
+  # 5: sweep the whole visible hemisphere plus the horizon itself and a
+  # direction below it, across the useful turbidity range.
+  var allFinite: Bool = true
+  var ti: Int = 0
+  loop ti < 4 {
+    let t: Float = 2.0 + ti.toFloat() * 3.0
+    var i: Int = 0
+    loop i < 32 {
+      let a: Float = i.toFloat() * 0.19634954
+      var j: Int = 0
+      loop j < 5 {
+        let z: Float = 0.0 - 0.2 + j.toFloat() * 0.3
+        let d: Vec3 = norm(x: math.cos(x: a), y: math.sin(x: a), z: z)
+        if finiteNonNeg(c: preethamRadiance(dir: d, sunDir: sunHigh, turbidity: t)) is false {
+          allFinite = false
+        }
+        # A sun ON the horizon is the worst case for the divergence.
+        if finiteNonNeg(c: preethamRadiance(dir: d, sunDir: sunLow, turbidity: t)) is false {
+          allFinite = false
+        }
+        j = j + 1
+      }
+      i = i + 1
+    }
+    ti = ti + 1
+  }
+  log("finite and non-negative everywhere: {allFinite}")
+}

@@ -64,6 +64,9 @@ type Sky {
   ambSky: Vec3
   ambGround: Vec3
   clearColor: Vec3
+  # The `procedural` payload (#400). Haze: 2 is an exceptionally clear
+  # day, 3-6 ordinary, above 10 fog.
+  turbidity: Float
 }
 
 # The fallback sky, built from what a scene already has. Taking the
@@ -79,6 +82,30 @@ func createSkyNone(light: view Light3d, clearColor: view Vec3) pub ret Sky {
     ambSky: light.ambSky
     ambGround: light.ambGround
     clearColor: clearColor
+    turbidity: 3.0
+  }
+}
+
+# An analytic sky from a sun direction (#400). No asset, and it ANIMATES
+# — time of day is a parameter here, which a static HDRI cannot do at
+# all. `sunDir` points toward the scene, matching Light3d, and is
+# negated internally: the model is expressed from the surface toward the
+# sun, and having one convention at the boundary beats two everywhere.
+func createSkyProcedural(sunDir: view Vec3, sunColor: view Vec3,
+                         turbidity: view Float) pub ret Sky {
+  ret Sky {
+    kind: SkyKind.procedural
+    exposure: 1.0
+    yawDeg: 0.0
+    sunDir: sunDir
+    sunColor: sunColor
+    # Unused by this kind, but a Sky is one type: leaving them at zero
+    # would make a mis-dispatch render black rather than merely wrong,
+    # and black is harder to trace than "the old ambient".
+    ambSky: vec3.create(x: 0.25, y: 0.30, z: 0.40)
+    ambGround: vec3.create(x: 0.12, y: 0.10, z: 0.09)
+    clearColor: vec3.create(x: 0.02, y: 0.02, z: 0.03)
+    turbidity: turbidity
   }
 }
 
@@ -104,6 +131,23 @@ func hemisphereIrradiance(ambSky: view Vec3, ambGround: view Vec3,
 # EXPOSURE IS APPLIED HERE, not by the caller, so a sky cannot be shown
 # at one brightness and light the scene at another.
 func skyIrradiance(sky: view Sky, n: view Vec3) pub ret Vec3 {
+  if sky.kind is SkyKind.procedural {
+    # A STOPGAP, and marked as one. Ambient here is the model sampled at
+    # the zenith and at the horizon away from the sun, then blended as a
+    # hemisphere — which is the shape the lighting pass already consumes,
+    # so #400 needs no shader change. It is not the correct integral of
+    # the sky over the hemisphere; that is #401's SH9, and it will
+    # replace this function's body rather than sit beside it.
+    let up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
+    let toSun: Vec3 = vec3.create(x: 0.0 - sky.sunDir.x, y: 0.0 - sky.sunDir.y, z: 0.0 - sky.sunDir.z)
+    # Away from the sun, just above the horizon, so the anchor is sky
+    # rather than sun glow.
+    let horiz: Vec3 = vec3.create(x: 0.0 - toSun.x, y: 0.0 - toSun.y, z: 0.08)
+    let zc: Vec3 = preethamRadiance(dir: up, sunDir: toSun, turbidity: sky.turbidity)
+    let hc: Vec3 = preethamRadiance(dir: horiz, sunDir: toSun, turbidity: sky.turbidity)
+    let blended: Vec3 = hemisphereIrradiance(ambSky: zc, ambGround: hc, n: n)
+    ret vec3.vscale(a: blended, s: sky.exposure)
+  }
   var c: Vec3 = hemisphereIrradiance(ambSky: sky.ambSky, ambGround: sky.ambGround, n: n)
   if sky.kind is SkyKind.none {
     # EXACTLY the existing expression when exposure is 1, which is what
@@ -128,9 +172,14 @@ func skyRadiance(sky: view Sky, dir: view Vec3) pub ret Vec3 {
     }
     ret vec3.vscale(a: sky.clearColor, s: sky.exposure)
   }
-  # No other kind exists yet. Returning the clear colour rather than a
-  # loud magenta is deliberate: an unimplemented sky should look like no
-  # sky, not like a bug in the scene that binds it.
+  if sky.kind is SkyKind.procedural {
+    let toSun: Vec3 = vec3.create(x: 0.0 - sky.sunDir.x, y: 0.0 - sky.sunDir.y, z: 0.0 - sky.sunDir.z)
+    let c: Vec3 = preethamRadiance(dir: dir, sunDir: toSun, turbidity: sky.turbidity)
+    ret vec3.vscale(a: c, s: sky.exposure)
+  }
+  # No implementation yet for the remaining kinds. Returning the clear
+  # colour rather than a loud magenta is deliberate: an unimplemented sky
+  # should look like no sky, not like a bug in the scene that binds it.
   ret sky.clearColor
 }
 
@@ -139,4 +188,164 @@ func skyRadiance(sky: view Sky, dir: view Vec3) pub ret Vec3 {
 # binding one is an opt-in rather than a silent change to every scene.
 func skyIsFallback(sky: view Sky) pub ret Bool {
   ret sky.kind is SkyKind.none
+}
+
+# ----- procedural physical sky (#400) ---------------------------------
+# Preetham et al., "A Practical Analytic Model for Daylight" (1999).
+#
+# WHY THIS AND NOT HOSEK-WILKIN. Hosek-Wilkie is the better model — it
+# handles low sun angles and high turbidity where Preetham goes wrong,
+# and it carries a ground albedo term. It also needs a table of 9x6
+# fitted coefficients per channel that must be transcribed exactly. This
+# is the first sky in the engine and the shape of the interface matters
+# more than the last few percent of a sunset; Preetham is five closed-
+# form coefficients per channel, which fits in this file and can be read
+# and checked. Swapping the model later touches ONE function, which is
+# the point of §2 of the design doc.
+#
+# The model is xyY: a luminance channel Y and two chromaticity channels
+# x and y, each of the form
+#
+#   F(theta, gamma) = (1 + A e^(B/cos theta)) (1 + C e^(D gamma) + E cos^2 gamma)
+#
+# where theta is the angle from the zenith to the sample direction and
+# gamma is the angle between the sample direction and the sun. The whole
+# sky is that one function evaluated three times with different
+# coefficients, and the coefficients are linear in TURBIDITY.
+#
+# TURBIDITY is haze: 2 is an exceptionally clear day, 3-6 is ordinary,
+# above 10 is fog. It is the one dial worth exposing.
+
+type PreethamCoeffs {
+  a: Float
+  b: Float
+  c: Float
+  d: Float
+  e: Float
+}
+
+func preethamY(t: view Float) ret PreethamCoeffs {
+  ret PreethamCoeffs {
+    a: 0.1787 * t - 1.4630
+    b: 0.0 - 0.3554 * t + 0.4275
+    c: 0.0 - 0.0227 * t + 5.3251
+    d: 0.1206 * t - 2.5771
+    e: 0.0 - 0.0670 * t + 0.3703
+  }
+}
+
+func preethamX(t: view Float) ret PreethamCoeffs {
+  ret PreethamCoeffs {
+    a: 0.0 - 0.0193 * t - 0.2592
+    b: 0.0 - 0.0665 * t + 0.0008
+    c: 0.0 - 0.0004 * t + 0.2125
+    d: 0.0 - 0.0641 * t - 0.8989
+    e: 0.0 - 0.0033 * t + 0.0452
+  }
+}
+
+func preethamZ(t: view Float) ret PreethamCoeffs {
+  ret PreethamCoeffs {
+    a: 0.0 - 0.0167 * t - 0.2608
+    b: 0.0 - 0.0950 * t + 0.0092
+    c: 0.0 - 0.0079 * t + 0.2102
+    d: 0.0 - 0.0441 * t - 1.6537
+    e: 0.0 - 0.0109 * t + 0.0529
+  }
+}
+
+# The distribution function above. `cosTheta` is clamped away from zero
+# because the model's e^(B/cos theta) term diverges at the horizon —
+# below it the formula is not merely inaccurate, it is unbounded, and a
+# sky that returns infinity at the horizon takes the whole frame with it
+# once it reaches the tonemapper.
+func preethamF(c: view PreethamCoeffs, cosTheta: view Float, gamma: view Float) ret Float {
+  var ct: Float = cosTheta
+  if ct < 0.01 {
+    ct = 0.01
+  }
+  let cosGamma: Float = math.cos(x: gamma)
+  ret (1.0 + c.a * math.exp(x: c.b / ct))
+     * (1.0 + c.c * math.exp(x: c.d * gamma) + c.e * cosGamma * cosGamma)
+}
+
+# xyY -> linear sRGB. Two conversions, kept together because they are one
+# step conceptually and splitting them invites a caller to do half.
+func xyYToLinearRgb(x: view Float, y: view Float, bigY: view Float) pub ret Vec3 {
+  var yy: Float = y
+  if yy < 0.0001 {
+    yy = 0.0001
+  }
+  let bigX: Float = x * bigY / yy
+  let bigZ: Float = (1.0 - x - y) * bigY / yy
+  # sRGB primaries, D65. Negative results are out-of-gamut rather than
+  # wrong; clamping is left to the caller so a wide-gamut path can keep
+  # them if it ever wants to.
+  ret vec3.create(
+    x: 3.2406 * bigX - 1.5372 * bigY - 0.4986 * bigZ,
+    y: 0.0 - 0.9689 * bigX + 1.8758 * bigY + 0.0415 * bigZ,
+    z: 0.0557 * bigX - 0.2040 * bigY + 1.0570 * bigZ
+  )
+}
+
+# Sky radiance along `dir`, for a sun at `sunDir`. Both must be unit
+# vectors and Z-up. `dir.z < 0` is below the horizon.
+#
+# The sun DISC is deliberately not drawn here. It is a different
+# magnitude of radiance (about 1e5 times the sky), so folding it into
+# the same expression makes the whole function's dynamic range about the
+# disc; and the disc's size and colour are things a stylised sky wants
+# to control independently. It is added by the caller.
+func preethamRadiance(dir: view Vec3, sunDir: view Vec3,
+                      turbidity: view Float) pub ret Vec3 {
+  let cosTheta: Float = dir.z
+  var cosGamma: Float = dir.x * sunDir.x + dir.y * sunDir.y + dir.z * sunDir.z
+  if cosGamma > 1.0 { cosGamma = 1.0 }
+  if cosGamma < 0.0 - 1.0 { cosGamma = 0.0 - 1.0 }
+  let gamma: Float = math.acos(x: cosGamma)
+
+  var sunCosTheta: Float = sunDir.z
+  if sunCosTheta < 0.01 { sunCosTheta = 0.01 }
+  let thetaSun: Float = math.acos(x: sunCosTheta)
+
+  let cy: PreethamCoeffs = preethamY(t: turbidity)
+  let cx: PreethamCoeffs = preethamX(t: turbidity)
+  let cz: PreethamCoeffs = preethamZ(t: turbidity)
+
+  # NORMALISED BY THE ZENITH. The model gives relative radiance, so each
+  # channel is divided by its own value looking straight up with the sun
+  # where it is. Without this the sky's absolute brightness swings with
+  # turbidity for no physical reason a viewer would accept.
+  let fy: Float = preethamF(c: cy, cosTheta: cosTheta, gamma: gamma)
+     / preethamF(c: cy, cosTheta: 1.0, gamma: thetaSun)
+  let fx: Float = preethamF(c: cx, cosTheta: cosTheta, gamma: gamma)
+     / preethamF(c: cx, cosTheta: 1.0, gamma: thetaSun)
+  let fz: Float = preethamF(c: cz, cosTheta: cosTheta, gamma: gamma)
+     / preethamF(c: cz, cosTheta: 1.0, gamma: thetaSun)
+
+  # Zenith chromaticity and luminance for this sun elevation, from the
+  # same paper. These are what turn a relative distribution into an
+  # actual colour that reddens as the sun sets.
+  let t: Float = turbidity
+  let ts: Float = thetaSun
+  let ts2: Float = ts * ts
+  let ts3: Float = ts2 * ts
+  let chi: Float = (4.0 / 9.0 - t / 120.0) * (3.14159265 - 2.0 * ts)
+  var zenithY: Float = (4.0453 * t - 4.9710) * math.tan(x: chi) - 0.2155 * t + 2.4192
+  if zenithY < 0.0 {
+    zenithY = 0.0
+  }
+  let zenithX: Float =
+      (0.00166 * ts3 - 0.00375 * ts2 + 0.00209 * ts) * t * t
+    + (0.0 - 0.02903 * ts3 + 0.06377 * ts2 - 0.03202 * ts + 0.00394) * t
+    + (0.11693 * ts3 - 0.21196 * ts2 + 0.06052 * ts + 0.25886)
+  let zenithYc: Float =
+      (0.00275 * ts3 - 0.00610 * ts2 + 0.00317 * ts) * t * t
+    + (0.0 - 0.04214 * ts3 + 0.08970 * ts2 - 0.04153 * ts + 0.00516) * t
+    + (0.15346 * ts3 - 0.26756 * ts2 + 0.06670 * ts + 0.26688)
+
+  # cd/m^2 down to something a renderer's exposure expects. Purely a unit
+  # choice; the shape of the sky is above.
+  let scale: Float = 0.05
+  ret xyYToLinearRgb(x: zenithX * fx, y: zenithYc * fz, bigY: zenithY * fy * scale)
 }
