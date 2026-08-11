@@ -1,0 +1,73 @@
+# The shared settings dialog's state machine.
+#
+# 110 and 113 had drifted to different controls for the same ideas — 110's
+# animation speed was a toggle, 113's a percentage with Slower/Faster. One state
+# type means one behaviour and a new setting lands in both apps at once, so what
+# is worth pinning is the STATE TRANSITIONS: which action changes what, what is
+# refused, and what reports "nothing changed" so a caller can skip work.
+#
+# The chrome half (mounting, painting, dragging) needs a laid-out world and is
+# not covered here.
+
+import core
+import math
+import string
+import app3d/settings_dialog
+open app3d/settings_dialog
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() {
+  # Three scenes, as 110 has.
+  var s: SettingsState = createSettingsState(scene: 1, sceneCount: 3, speed: 1.0,
+                                             toon: false, hour: 12.0)
+  check(label: "starts closed", ok: s.open is false)
+  check(label: "opens", ok: settingsHandleAction(s: s, actionId: "settings.open") and s.open)
+  check(label: "closes", ok: settingsHandleAction(s: s, actionId: "settings.close") and s.open is false)
+
+  # An action nobody here owns must be ignored, not mistaken for a change: the
+  # app forwards every action it sees, including its own.
+  check(label: "unknown action is ignored", ok: settingsHandleAction(s: s, actionId: "camera.mode") is false)
+
+  check(label: "toon toggles on", ok: settingsHandleAction(s: s, actionId: "settings.toon") and s.toon)
+  check(label: "toon toggles off", ok: settingsHandleAction(s: s, actionId: "settings.toon") and s.toon is false)
+
+  # Speed is the shared step ladder, not a toggle.
+  let base: Float = s.speed
+  settingsHandleAction(s: s, actionId: "settings.anim.faster")
+  check(label: "faster raises speed", ok: s.speed > base)
+  settingsHandleAction(s: s, actionId: "settings.anim.slower")
+  check(label: "slower returns", ok: s.speed <= base + 0.0001 and s.speed >= base - 0.0001)
+
+  # Sky model is a radio, so re-picking the current one reports no change.
+  check(label: "defaults to hosek", ok: s.skyModel is SettingsSkyModel.hosek)
+  check(label: "switches to classic", ok: settingsHandleAction(s: s, actionId: "settings.sky.classic") and s.skyModel is SettingsSkyModel.classic)
+  check(label: "back to hosek", ok: settingsHandleAction(s: s, actionId: "settings.sky.hosek") and s.skyModel is SettingsSkyModel.hosek)
+
+  check(label: "scene 2 selects", ok: settingsHandleAction(s: s, actionId: "settings.scene.2") and s.scene is 2)
+  check(label: "re-selecting reports no change", ok: settingsHandleAction(s: s, actionId: "settings.scene.2") is false)
+  check(label: "scene 3 selects", ok: settingsHandleAction(s: s, actionId: "settings.scene.3") and s.scene is 3)
+
+  # One scene, as 113 has. The buttons still EXIST — hiding controls per app is
+  # how two dialogs drift apart — but they cannot select what is not there.
+  var one: SettingsState = createSettingsState(scene: 1, sceneCount: 1, speed: 1.0,
+                                               toon: true, hour: 8.0)
+  check(label: "single-scene app refuses scene 2", ok: settingsHandleAction(s: one, actionId: "settings.scene.2") is false and one.scene is 1)
+  check(label: "single-scene app keeps its other settings", ok: settingsHandleAction(s: one, actionId: "settings.toon") and one.toon is false)
+
+  # The time readout is hours and minutes; 6.5 on screen reads as a number.
+  check(label: "noon formats", ok: formatHour(hour: 12.0).equals(other: "12:00"))
+  check(label: "half past six formats", ok: formatHour(hour: 6.5).equals(other: "06:30"))
+  check(label: "midnight formats", ok: formatHour(hour: 0.0).equals(other: "00:00"))
+  check(label: "end of day clamps inside the day", ok: formatHour(hour: 24.0).equals(other: "23:59"))
+
+  # The slider is bound to the same hour the app reads.
+  check(label: "slider carries the hour", ok: one.timeSlider.value is 8.0)
+  check(label: "slider spans a day", ok: one.timeSlider.minValue is 0.0 and one.timeSlider.maxValue is 24.0)
+}
