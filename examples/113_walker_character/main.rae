@@ -148,21 +148,25 @@ func clipButtonId(index: view Int) ret String {
 # version mismatch is then a single comparison. The camera's ten fields
 # and the window's four are the shared formats from lib/app3d, so this
 # example only owns the four at the front.
-const state113Version: Int = 3
+const state113Version: Int = 4
 const state113AppId: String = "113_walker_character"
-const state113OwnFields: Int = 4
+const state113OwnFields: Int = 5
 
 func serialize113State(clipIndex: view Int, playing: view Bool, speed: view Float,
-                       rig: view CameraRig, camera: view Camera3d) ret String {
+                       toon: view Bool, rig: view CameraRig, camera: view Camera3d) ret String {
   var playingNum: Int = 0
   if playing {
     playingNum = 1
   }
-  ret "{state113Version} {clipIndex} {playingNum} {speed} {cameraRigStateString(rig: rig, camera: camera)} {windowPlacementString()}"
+  var toonNum: Int = 0
+  if toon {
+    toonNum = 1
+  }
+  ret "{state113Version} {clipIndex} {playingNum} {speed} {toonNum} {cameraRigStateString(rig: rig, camera: camera)} {windowPlacementString()}"
 }
 
 func restore113State(raw: view String, clipIndex: mod Int, playing: mod Bool, speed: mod Float,
-                     rig: mod CameraRig, camera: mod Camera3d) ret Bool {
+                     toon: mod Bool, rig: mod CameraRig, camera: mod Camera3d) ret Bool {
   if raw.length() < 1 {
     ret false
   }
@@ -188,6 +192,7 @@ func restore113State(raw: view String, clipIndex: mod Int, playing: mod Bool, sp
   if speed > speedMax {
     speed = speedMax
   }
+  toon = parts.at(index: 4).trim().toInt() is 1
   if applyCameraRigState(parts: parts, offset: state113OwnFields, rig: rig, camera: camera) is false {
     ret false
   }
@@ -356,7 +361,11 @@ func main() ret Int {
     ret 1
   }
 
-  let groundMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.40, y: 0.41, z: 0.43), metallic: 0.0, roughness: 0.9, emission: noEmit)
+  # Grass green. Base colours here are LINEAR, so these are not the
+  # numbers a colour picker would show for the same green — an sRGB
+  # 0.42/0.62/0.28 lands near this once the transfer curve is undone, and
+  # entering the sRGB values directly would render a washed-out mint.
+  let groundMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.148, y: 0.336, z: 0.064), metallic: 0.0, roughness: 0.9, emission: noEmit)
   let groundE: Int = addMeshInstance(
     scene: scene, mesh: ground, material: groundMat,
     position: vec3.create(x: 0.0, y: 0.0, z: groundZ), rotation: noRot,
@@ -394,6 +403,11 @@ func main() ret Int {
   var playing: Bool = true
   var speed: Float = 1.0
   var animTime: Float = 0.0
+  # Toon ON by default (#396): this example is the one that shows the
+  # style off, and a feature that has to be switched on to be seen mostly
+  # goes unseen. The ground stays PBR either way, so the frame always
+  # shows both shading models side by side.
+  var toonShading: Bool = true
 
   # The controls. Two panels because the scene authors two auto-laid-out
   # rows; neither this code nor the scene positions a single button.
@@ -411,6 +425,8 @@ func main() ret Int {
   addPanelButton(panel: transport, id: "play", label: "Pause", actionId: "anim.play", group: 0)
   addPanelButton(panel: transport, id: "slower", label: "Slower", actionId: "anim.slower", group: 0)
   addPanelButton(panel: transport, id: "faster", label: "Faster", actionId: "anim.faster", group: 0)
+  # Group 0, so it toggles independently rather than deselecting a clip.
+  addPanelButton(panel: transport, id: "toon", label: "Toon", actionId: "style.toon", group: 0)
   transport.buttonW = 84.0
   buildControlPanel(panel: transport, world: uiWorld, res: gpuUi)
 
@@ -425,7 +441,7 @@ func main() ret Int {
   if not headless {
     let saved: String = readHotReloadStateFor(appId: state113AppId)
     if restore113State(raw: saved, clipIndex: clipIndex, playing: playing, speed: speed,
-                       rig: rig, camera: camera) {
+                       toon: toonShading, rig: rig, camera: camera) {
       let pctR: Int = speedPercent(v: speed)
       logInfoLine(ov: logView, text: "state restored: clip {clipIndex}, speed {pctR}%, camera and window kept")
     }
@@ -433,6 +449,7 @@ func main() ret Int {
 
   setPanelSelection(panel: clipPanel, world: uiWorld, group: 1, id: clipButtonId(index: clipIndex))
   setPanelButtonOn(panel: transport, world: uiWorld, id: "play", on: playing)
+  setPanelButtonOn(panel: transport, world: uiWorld, id: "toon", on: toonShading)
   var playLabel0: String = "Pause"
   if not playing {
     playLabel0 = "Play"
@@ -498,6 +515,10 @@ func main() ret Int {
       setPanelButtonLabel(panel: transport, world: uiWorld, id: "play", label: playLabel)
       setPanelButtonOn(panel: transport, world: uiWorld, id: "play", on: playing)
     }
+    if transportHit.equals(other: "toon") {
+      toonShading = not toonShading
+      setPanelButtonOn(panel: transport, world: uiWorld, id: "toon", on: toonShading)
+    }
     if transportHit.equals(other: "slower") { speed = nextSpeed(current: speed, up: false) }
     if transportHit.equals(other: "faster") { speed = nextSpeed(current: speed, up: true) }
     if transportHit.length() > 0 {
@@ -528,7 +549,8 @@ func main() ret Int {
       if (now - lastStateSave) as Float >= 0.25 {
         writeHotReloadStateFor(appId: state113AppId,
                                state: serialize113State(clipIndex: clipIndex, playing: playing,
-                                                        speed: speed, rig: rig, camera: camera))
+                                                        speed: speed, toon: toonShading,
+                                                        rig: rig, camera: camera))
         lastStateSave = now
         stateDirty = false
       }
@@ -614,7 +636,12 @@ func main() ret Int {
             baseColor: vec3.create(x: 1.0, y: 1.0, z: 1.0),
             metallic: 0.0,
             roughness: partRough.at(index: p),
-            emission: noEmit
+            emission: noEmit,
+            # The style applies to the CHARACTER only, deliberately: the
+            # ground stays PBR so the two shading models are visible in
+            # one frame under one sun, which is the thing per-material
+            # toon buys over a whole-frame switch.
+            toon: toonShading
           }
           gbuffer.drawSkinnedInstance(mesh: handle, model: partModel,
                                       prevModel: partModel, material: mat)
