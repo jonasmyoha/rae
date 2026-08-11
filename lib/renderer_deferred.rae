@@ -33,10 +33,12 @@ import core
 import gpu2d
 import math3d
 import gbuffer
+import sky
 open rendergraph
 open math3d
 open scene3d
 open gbuffer
+open sky
 
 # ----- pass tags ------------------------------------------------------
 # Distinct from renderer3d's tags: these identify passes of the deferred
@@ -286,7 +288,18 @@ func renderDeferredPass(r: view DeferredRenderer, tag: view Int, scene: view Sce
     ssaoPass(camera: camera)
   }
   if tag is tagLighting {
-    lightingPass(camera: camera, light: light)
+    # THROUGH THE SKY INTERFACE, always (#399). Routing every deferred
+    # frame through it now — rather than only once a real sky exists —
+    # is what makes this a seam instead of an unused abstraction: when
+    # #401 replaces the hemisphere anchors with SH irradiance, there is
+    # exactly one call site to change and every example moves together.
+    #
+    # A scene that binds no sky gets the fallback built from its own
+    # light, whose irradiance at the two hemisphere anchors is by
+    # construction the values lightingPass passed directly. Test 583
+    # pins that equality, which is why this lands as a no-op.
+    let sky: Sky = createSkyNone(light: light, clearColor: light.clearColor)
+    lightingPassSky(camera: camera, light: light, sky: sky)
   }
   if tag is tagTaaD {
     taaPass()
