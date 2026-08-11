@@ -1407,13 +1407,21 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
         case AST_EXPR_BINARY:
             sema_analyze_expr(ctx, module, symbols, expr->as.binary.lhs); sema_analyze_expr(ctx, module, symbols, expr->as.binary.rhs);
             if (expr->as.binary.op >= AST_BIN_LT && expr->as.binary.op <= AST_BIN_OR) expr->resolved_type = type_get_bool(ctx->type_registry);
-            else if (expr->as.binary.lhs && expr->as.binary.lhs->resolved_type) expr->resolved_type = expr->as.binary.lhs->resolved_type;
+            /* Arithmetic on references yields a VALUE, not a reference. Taking
+             * the lhs type verbatim made `a - b` inherit `view Float64` when a
+             * was a `view` parameter, which then read as a non-numeric type:
+             * `(a - b) as Float` was rejected as an unsupported conversion,
+             * while the identical expression over locals compiled. */
+            else if (expr->as.binary.lhs && expr->as.binary.lhs->resolved_type) expr->resolved_type = sema_strip_ref(expr->as.binary.lhs->resolved_type);
             break;
         case AST_EXPR_CAST: {
             sema_analyze_expr(ctx, module, symbols, expr->as.cast.operand);
             TypeInfo* target = sema_resolve_type_internal(ctx, module, symbols, expr->as.cast.target);
             expr->resolved_type = target;
-            TypeInfo* src = expr->as.cast.operand ? expr->as.cast.operand->resolved_type : NULL;
+            /* Strip refs: casting a value read through `view`/`mod` is a cast
+             * of the value. Without this, `now as Float` on a `view Float64`
+             * parameter was rejected outright. */
+            TypeInfo* src = expr->as.cast.operand ? sema_strip_ref(expr->as.cast.operand->resolved_type) : NULL;
             if (target && src) {
                 /* `as` converts numeric representations. It is not a
                  * type-system escape hatch: anything else is rejected. */
