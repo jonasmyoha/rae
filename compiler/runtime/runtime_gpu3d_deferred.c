@@ -1006,6 +1006,18 @@ void rae_ext_gbuffer_ssao(float camX, float camY, float camZ) {
     gb_run_fullscreen(gb_ao_pipeline, gb_ao_bind, gb_ao_view);
 }
 
+/* Cooked Hosek-Wilkie coefficients, pushed from Rae before the lighting call.
+ * 3 channels x (9 coefficients + radiance), laid out three vec4 per channel to
+ * match `hosek` in the WGSL: [A B C D][E F G H][I radiance _ _]. One scalar per
+ * call keeps this off the lighting extern's already 28-long argument list,
+ * where a positional mistake is silent. */
+static float gb_hosek[36];
+
+void rae_ext_gbuffer_skyHosekPush(int64_t index, float value) {
+    if (index < 0 || index >= 36) return;
+    gb_hosek[index] = value;
+}
+
 void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure,
                               float sunX, float sunY, float sunZ,
                               float sunR, float sunG, float sunB,
@@ -1014,7 +1026,7 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
                               float skyKind, float turbidity, float skyExposure,
                               float sunSizeRad, float zenR, float zenG, float zenB,
                               float bands, float horR, float horG, float horB,
-                              float discI, float groundAlbedo) {
+                              float discI) {
     if (!g_wgpu_dev || !gb_a_view) return;
     gb_deferred_init_pipelines();
     gb_deferred_ensure();
@@ -1045,31 +1057,13 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
     u[56] = skyKind; u[57] = turbidity; u[58] = skyExposure; u[59] = sunSizeRad;
     u[60] = zenR; u[61] = zenG; u[62] = zenB; u[63] = bands;
     u[64] = horR; u[65] = horG; u[66] = horB; u[67] = discI;
-    /* Cooked Hosek-Wilkie state at u[68..97] (8 vec4 = 32 floats, 30 used).
-     * Cooked HERE rather than passed in as 30 more arguments: this extern's
-     * signature is already 29 floats, and growing an argument list that long is
-     * how the sky parameters were silently dropped once already (the callee kept
-     * the old arity and the extras went nowhere, with no diagnostic). The C side
-     * calls the same memoized cook lib/sky.rae uses, so the CPU-side irradiance
-     * and this background cannot disagree about the same sky. */
-    memset(u + 68, 0, 36 * sizeof(float));
-    if (skyKind > 3.5f) {
-        /* sunDir points the way light TRAVELS, so the sun is at -sunDir and its
-         * elevation above the horizon is asin(-sunZ). Clamped just above 0
-         * because the dataset is not fitted below the horizon. */
-        double elev = asin(fmin(1.0, fmax(0.0001, (double)(-sunZ))));
-        double turb = (double)turbidity;
-        double alb = (double)groundAlbedo;
-        for (int ch = 0; ch < 3; ch++) {
-            float* dst = u + 68 + ch * 12;
-            for (int i = 0; i < 9; i++) {
-                dst[i] = (float)rae_ext_hosek_config(turb, alb, elev, ch, i);
-            }
-            /* Layout per channel: [0..3]=A B C D, [4..7]=E F G H, [8]=I,
-             * [9]=radiance — three vec4s, matching hosekChannel in the WGSL. */
-            dst[9] = (float)rae_ext_hosek_config(turb, alb, elev, ch, 9);
-        }
-    }
+    /* Cooked Hosek-Wilkie state at u[68..103] (9 vec4). Rae computes these
+     * from the fitted table (lib/sky_hosek.rae + lib/data/*.json) and pushes
+     * them with rae_ext_gbuffer_skyHosekPush; this pass only copies them. The
+     * model's arithmetic deliberately does not live in C — see
+     * docs/tech-stack-and-dependencies.md, and lib/sky_hosek.rae's header for
+     * what the earlier C version cost. */
+    memcpy(u + 68, gb_hosek, 36 * sizeof(float));
     wgpuQueueWriteBuffer(g_wgpu_queue, gb_light_ubuf, 0, u, GB_LIGHT_BYTES);
 
     if (!gb_light_bind) {

@@ -42,6 +42,8 @@ import core
 import math
 import vec3
 import sky
+import sky_hosek
+open sky_hosek
 open vec3
 open scene3d
 open sky
@@ -59,7 +61,7 @@ func debugView(mode: Int, zNear: Float, zFar: Float) extern
 func present() extern
 func shutdown() extern
 func depthPyramid() extern
-func lighting(camX: Float, camY: Float, camZ: Float, exposure: Float, sunX: Float, sunY: Float, sunZ: Float, sunR: Float, sunG: Float, sunB: Float, skyR: Float, skyG: Float, skyB: Float, gndR: Float, gndG: Float, gndB: Float, skyKind: Float, turbidity: Float, skyExposure: Float, sunSizeRad: Float, zenR: Float, zenG: Float, zenB: Float, bands: Float, horR: Float, horG: Float, horB: Float, discI: Float, groundAlbedo: Float) extern
+func lighting(camX: Float, camY: Float, camZ: Float, exposure: Float, sunX: Float, sunY: Float, sunZ: Float, sunR: Float, sunG: Float, sunB: Float, skyR: Float, skyG: Float, skyB: Float, gndR: Float, gndG: Float, gndB: Float, skyKind: Float, turbidity: Float, skyExposure: Float, sunSizeRad: Float, zenR: Float, zenG: Float, zenB: Float, bands: Float, horR: Float, horG: Float, horB: Float, discI: Float) extern
 func composite(exposure: Float) extern
 func pyramidMips() extern ret Int
 func ssao(camX: Float, camY: Float, camZ: Float) extern
@@ -323,6 +325,25 @@ func taaPass() pub {
 # The sun still comes from Light3d. Extraction (#403) is what moves it,
 # and moving it before there is anything to extract from would just mean
 # copying the same numbers through a second place.
+func skyHosekPush(index: Int, value: Float) extern
+
+# Three vec4 per channel: [A B C D][E F G H][I radiance _ _], matching `hosek`
+# in the WGSL. Written out longhand rather than looped over a list because the
+# layout IS the contract with the shader, and a reader checking it against the
+# WGSL should see the same sixteen names in the same order.
+func pushHosekChannel(c: view HosekChannel, base: view Int) {
+  skyHosekPush(index: base + 0, value: c.a)
+  skyHosekPush(index: base + 1, value: c.b)
+  skyHosekPush(index: base + 2, value: c.c)
+  skyHosekPush(index: base + 3, value: c.d)
+  skyHosekPush(index: base + 4, value: c.e)
+  skyHosekPush(index: base + 5, value: c.f)
+  skyHosekPush(index: base + 6, value: c.g)
+  skyHosekPush(index: base + 7, value: c.h)
+  skyHosekPush(index: base + 8, value: c.i)
+  skyHosekPush(index: base + 9, value: c.radiance)
+}
+
 func lightingPassSky(camera: view Camera3d, light: view Light3d, sky: view Sky) pub {
   let up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
   let down: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0)
@@ -333,6 +354,11 @@ func lightingPassSky(camera: view Camera3d, light: view Light3d, sky: view Sky) 
   # correct for every kind that IS one, and it keeps M0 a no-op.
   let skyC: Vec3 = skyIrradiance(sky: sky, n: up)
   let gndC: Vec3 = skyIrradiance(sky: sky, n: down)
+  # The cooked table goes up first: the lighting pass copies whatever is here
+  # into the uniform, so pushing after it would show last frame's sky.
+  pushHosekChannel(c: sky.hosek.r, base: 0)
+  pushHosekChannel(c: sky.hosek.g, base: 12)
+  pushHosekChannel(c: sky.hosek.b, base: 24)
   lighting(
     camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z,
     exposure: light.exposure,
@@ -348,10 +374,7 @@ func lightingPassSky(camera: view Camera3d, light: view Light3d, sky: view Sky) 
     zenR: sky.zenithColor.x, zenG: sky.zenithColor.y, zenB: sky.zenithColor.z,
     bands: sky.bands,
     horR: sky.horizonColor.x, horG: sky.horizonColor.y, horB: sky.horizonColor.z,
-    discI: sky.sunDiscIntensity,
-    # Ground albedo is a Hosek-Wilkie input: a sky over snow is not the sky over
-    # grass. Preetham has no such axis, so it ignores this.
-    groundAlbedo: sky.groundAlbedo
+    discI: sky.sunDiscIntensity
   )
 }
 
@@ -366,7 +389,7 @@ func lightingPass(camera: view Camera3d, light: view Light3d) pub {
     # Kind 0: no sky, background stays the clear colour.
     skyKind: 0.0, turbidity: 3.0, skyExposure: 1.0, sunSizeRad: 0.0047,
     zenR: 0.0, zenG: 0.0, zenB: 0.0, bands: 1.0,
-    horR: 0.0, horG: 0.0, horB: 0.0, discI: 0.0, groundAlbedo: 0.0
+    horR: 0.0, horG: 0.0, horB: 0.0, discI: 0.0
   )
 }
 
