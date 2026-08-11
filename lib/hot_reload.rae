@@ -34,31 +34,46 @@ import core
 
 # ----- paths ----------------------------------------------------------
 #
-# Location convention: `.rae/` under the current working directory.
-# Same root the supervisor writes to. Centralized here so apps and
-# the (future) `rae watch` driver stay in lockstep.
+# Location convention: `.rae/` under the current working directory,
+# UNLESS the supervisor handed us a private channel via
+# `RAE_HOT_RELOAD_DIR` (an absolute path). Same root the supervisor
+# writes to. Centralized here so apps and the `rae watch` driver stay
+# in lockstep.
+#
+# WHY THE ENV VAR: the signal + status files are a broadcast channel.
+# One fixed path per working tree meant that with several apps running
+# at once — which the devtools now allows — every supervisor's rebuild
+# told EVERY running app to save state and exit, so apps reloaded
+# endlessly for changes that had nothing to do with them. Each `rae
+# watch` supervisor now owns `.rae/apps/<id>/` and points its own
+# children at it; an app started without a supervisor keeps the plain
+# `.rae` default, where nothing writes a signal.
 
 func hotReloadDir() pub ret String {
+  let override: String = getEnv(name: "RAE_HOT_RELOAD_DIR")
+  if override.length() > 0 {
+    ret override
+  }
   ret ".rae"
 }
 
 func hotReloadStatePath() pub ret String {
-  ret ".rae/state.json"
+  ret "{hotReloadDir()}/state.json"
 }
 
 func hotReloadSignalPath() pub ret String {
-  ret ".rae/reload.signal"
+  ret "{hotReloadDir()}/reload.signal"
 }
 
 func hotReloadBuildStatusPath() pub ret String {
-  ret ".rae/build.status"
+  ret "{hotReloadDir()}/build.status"
 }
 
 # Deliberately NOT state.json: that file belongs to the app's own schema
 # (examples/106_mobile_ui stores playback state there), and a shared
 # counter writing into it would clobber whatever the app saved.
 func hotReloadGenerationPath() pub ret String {
-  ret ".rae/reload.generation"
+  ret "{hotReloadDir()}/reload.generation"
 }
 
 # ----- state file -----------------------------------------------------
@@ -94,7 +109,7 @@ func writeHotReloadState(state: view String) pub ret Bool {
 # `readHotReloadState`/`writeHotReloadState` pair keeps the legacy path so
 # existing callers are untouched.
 func hotReloadStatePathFor(appId: view String) pub ret String {
-  ret ".rae/state.{appId}.json"
+  ret "{hotReloadDir()}/state.{appId}.json"
 }
 
 func readHotReloadStateFor(appId: view String) pub ret String {
