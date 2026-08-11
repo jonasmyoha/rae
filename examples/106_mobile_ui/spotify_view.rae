@@ -21,33 +21,31 @@ import core
 import json
 import sys
 import sys/spotify
+import time
 import ui/ecs
 # PlaybackState lives in this example's playback.rae — auto-imported
 # from the same project directory. We mutate it here to sync the local
 # mock's `isPlaying` from Spotify's reported state so the play-button
 # icon (driven by PlaybackState revision invalidation) matches reality.
 
+# How often to ask Spotify what is playing. A Duration, so it cannot be
+# swapped with the reading it is compared against.
+func spotifyPollInterval() ret Duration {
+  ret time.seconds(n: 1.0)
+}
+
 # Per-app-instance state for the Spotify display layer. One instance
 # lives in main.rae for the whole app lifetime.
-type SpotifyState pub {
+type SpotifyState {
   # Toggle read once at boot from RAE_UI_SPOTIFY. False → all the
   # update calls early-out so the local mock continues unchanged.
   enabled: Bool
-  # Wall-clock seconds at the last successful poll. 0 means "never";
-  # the first frame will refresh immediately.
-  #
-  # Float64, NOT Float. uiNowSeconds() is epoch seconds (~1.75e9), and an
-  # f32 near 1.7e9 has a ulp of 128 s — storing the timestamp rounded it to
-  # a multiple of 128 s, up to 64 s away from the real time. The 1 Hz throttle
-  # below then computed nonsense: land on the low side of the bucket and
-  # `elapsed` is tens of seconds, so the poll fires EVERY FRAME (an AppleScript
-  # per frame, six Text writes per frame, and a permanently dirty render
-  # cache); land on the high side and `elapsed` is negative for up to a minute,
-  # so it never polls at all. Which side you get depends on where wall-clock
-  # time sits inside the current 128 s bucket — same binary, different
-  # behaviour depending on what time it is. Same hazard lib/sys.rae calls out
-  # for file mtimes.
-  lastPollSec: Float64
+  # When the last successful poll happened. A Timestamp, so it cannot be
+  # confused with the interval it is compared against — this field held a
+  # wall-clock reading in a `Float`, where the f32 ulp at epoch magnitude
+  # (128 s) turned the 1 Hz throttle below into a constant: fire every frame,
+  # or never fire, depending on the time of day (#407).
+  lastPoll: Timestamp
   # The trackId from the previous poll. When this changes, the
   # display refresh path knows to re-fetch artwork. Empty when no
   # track is loaded yet.
@@ -70,7 +68,7 @@ func createSpotifyState() pub ret SpotifyState {
   let enabled: Bool = optOut.length() is 0
   ret SpotifyState {
     enabled: enabled
-    lastPollSec: 0.0 - 1.0
+    lastPoll: time.never()
     lastTrackId: ""
     artKey: "spotify-current"
   }
@@ -232,16 +230,15 @@ func pollSpotify(
   reg: mod TextureRegistry
   playback: mod PlaybackState
   appState: mod AppState
-  now: view Float64
+  now: view Timestamp
 ) pub {
   if state.enabled is false {
     ret
   }
-  let elapsed: Float64 = now - state.lastPollSec
-  if elapsed < 1.0 {
+  if state.lastPoll.hasElapsed(now: now, interval: spotifyPollInterval()) is false {
     ret
   }
-  state.lastPollSec = now
+  state.lastPoll = now
   let track: SpotifyTrack = spotify.current()
   let pos: Float = spotify.position()
   let dur: Float = spotify.duration()
@@ -311,7 +308,9 @@ func pollSpotify(
         artworkUrl: "{track.artworkUrl}"
         textureKey: own texKey
         durationSec: dur
-        playedAt: now
+        # PlayHistoryEntry stays on Float64: it is serialised to JSON, and
+        # migrating it belongs with the rest of the fields (#413).
+        playedAt: now.epochSeconds()
       }
       recordPlay(history: appState.playHistory, entry: own entry)
       saveHistoryToJson(history: appState.playHistory, path: historyFilePath)
