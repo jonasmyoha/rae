@@ -442,7 +442,6 @@ func main() ret Int {
   # Group 0: independent controls, not a radio set. Play is a toggle;
   # the two speed buttons are plain actions.
   var transport: ControlPanel = createControlPanel(hostNodeId: "TransportRow")
-  addPanelButton(panel: transport, id: "play", label: "Pause", actionId: "anim.play", group: 0)
   transport.buttonW = 84.0
   buildControlPanel(panel: transport, world: uiWorld, res: gpuUi)
 
@@ -578,6 +577,7 @@ func main() ret Int {
       # write INTO it above, so mirroring back keeps one value per setting
       # rather than two that can disagree.
       speed = settings.speed
+      playing = settings.playing
       if toonShading is not settings.toon {
         toonShading = settings.toon
         setPanelButtonOn(panel: transport, world: uiWorld, id: "toon", on: toonShading)
