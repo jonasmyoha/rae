@@ -526,12 +526,18 @@ func main() ret Int {
   # day. This example is the renderer's realistic end; 113 is the
   # stylised one, and they deliberately use different kinds behind the
   # same interface.
+  # The fitted table, read once. Cooking a sky from it afterwards is
+  # arithmetic, which is what lets the time-of-day slider drive it per frame.
+  let hosekData: HosekDataset = loadDefaultHosekDataset()
+  let skyTurbidity: Float = 2.5
+  let skyGroundAlbedo: Float = 0.25
   var renderer: DeferredRenderer = createDeferredRendererWithUiSky(
-    # Hosek-Wilkie rather than Preetham: this scene's horizon is on screen, and
-    # that is exactly where the two differ most. groundAlbedo 0.25 = grass.
-    sky: createSkyHosek(data: loadDefaultHosekDataset(),
-                        sunDir: light.sunDir, sunColor: light.sunColor,
-                        turbidity: 2.5, groundAlbedo: 0.25))
+    sky: settingsBuildSky(s: settings, data: hosekData,
+                          turbidity: skyTurbidity, groundAlbedo: skyGroundAlbedo))
+  # The sun the sky was built for drives the shadows too, or the visible sun and
+  # the cast shadows disagree.
+  light.sunDir = settingsSunDir(s: settings)
+  light.sunColor = settingsSunColor(s: settings)
   let gstatus: Int = compileDeferred(r: renderer)
   if gstatus is not 0 {
     log("render graph invalid: {gstatus}")
@@ -632,6 +638,14 @@ func main() ret Int {
       }
     }
     if settingsChanged {
+      # Sky model and time of day both feed this, so one rebuild covers both.
+      # Assigned on the local rather than through setRendererSky: writing a
+      # nested struct field through a `mod` parameter does not reliably land,
+      # and the failure is silent (see renderer_deferred's note).
+      renderer.sky = settingsBuildSky(s: settings, data: hosekData,
+                                      turbidity: skyTurbidity, groundAlbedo: skyGroundAlbedo)
+      light.sunDir = settingsSunDir(s: settings)
+      light.sunColor = settingsSunColor(s: settings)
       settingsApplyToWorld(s: settings, world: uiWorld)
       setNodeActive(world: uiWorld, nodeId: "SidePanelBody", value: settings.open)
       stateDirty = true
@@ -709,6 +723,11 @@ func main() ret Int {
       if uiState.activeScene is 1 { light = scene1.light }
       if uiState.activeScene is 2 { light = scene2.light }
       if uiState.activeScene is 3 { light = scene3.light }
+      # AFTER the scene's own light is restored, not before: this runs every
+      # frame, so setting the sun anywhere earlier is silently undone here and
+      # the time-of-day slider appears to do nothing.
+      light.sunDir = settingsSunDir(s: settings)
+      light.sunColor = settingsSunColor(s: settings)
       light.sunDir = vec3.create(x: 0.0 - math.cos(x: simTime * 0.22) * 0.7, y: 0.0 - 0.7 - math.sin(x: simTime * 0.22) * 0.25, z: 0.0 - 1.0)
       if uiState.activeScene is 1 { animateScene1(asset: scene1, time: simTime) }
       if uiState.activeScene is 2 { animateScene(scene: scene2.scene, sceneId: 2, time: simTime) }
