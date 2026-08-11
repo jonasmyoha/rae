@@ -1,11 +1,13 @@
 # Hosek-Wilkie sky: our implementation against the authors' reference.
 #
-# The model splits in two: a 3861-line fitted coefficient dataset with a
-# documented interpolation (quintic Bezier in the cube root of solar elevation,
-# blended over ground albedo and turbidity), and a nine-term analytic formula
-# evaluated per direction. The dataset and its interpolation are vendored C
-# (third_party/hosek_wilkie, 3-clause BSD, provenance in that README); the
-# formula is ours, here and again in WGSL for the deferred pass.
+# The model splits in two: a fitted coefficient TABLE with a documented
+# interpolation (quintic Bezier in the cube root of solar elevation, blended
+# over ground albedo and turbidity), and a nine-term analytic formula evaluated
+# per direction. Only the table is foreign — verbatim data in
+# lib/data/hosek_wilkie_rgb.json under a 3-clause BSD licence recorded in
+# lib/data/ATTRIBUTION.md. The interpolation and the formula are Rae
+# (lib/sky_hosek.rae), and the formula appears again in WGSL for the deferred
+# pass, which cannot call into Rae.
 #
 # WHERE THESE NUMBERS COME FROM. They are not hand-derived and not eyeballed:
 # the UNMODIFIED reference implementation from the authors' 1.4a archive was
@@ -13,9 +15,7 @@
 # the values below are transcribed from its output. A model like this cannot be
 # checked by inspection — "the sky looks blue" passes for an implementation with
 # the wrong turbidity axis — so an external oracle is the only assertion worth
-# making. The vendored cook was separately verified against the same reference
-# at full double precision: worst relative error 0.0 across 72 parameter
-# combinations, i.e. bit-identical.
+# making.
 #
 # Tolerance is 1% relative, which is about what f32 evaluation of a formula
 # containing exp() and pow(1.5) costs against the reference's doubles.
@@ -24,8 +24,8 @@ import core
 import math
 import string
 import vec3
-import sky
-open sky
+import sky_hosek
+open sky_hosek
 
 func relErr(got: view Float, want: view Float) ret Float {
   var d: Float = got - want
@@ -81,7 +81,16 @@ func main() {
   let turbidity: Float = 3.5
   let albedo: Float = 0.3
   let elevation: Float = 0.9
-  let sky: HosekSky = createHosekSky(turbidity: turbidity, albedo: albedo, elevationRad: elevation)
+  # The table is data on disk, so a run that cannot find it must fail loudly
+  # here rather than quietly produce a black sky.
+  let data: HosekDataset = loadDefaultHosekDataset()
+  if data.loaded is false {
+    log("FAIL dataset {hosekDatasetPath} did not load")
+  } else {
+    log("ok   dataset loaded")
+  }
+  let sky: HosekSky = createHosekSky(data: data, turbidity: turbidity, albedo: albedo,
+                                     solarElevationRad: elevation)
 
   # 1. The cooked coefficients, straight from the dataset. If the Bezier or the
   #    albedo/turbidity blend is wrong, everything downstream is wrong in a way
@@ -139,8 +148,8 @@ func main() {
 
   # Ground albedo feeds back into the sky: brighter ground, brighter sky. This
   # is the axis Preetham does not have at all.
-  let dark: HosekSky = createHosekSky(turbidity: turbidity, albedo: 0.0, elevationRad: elevation)
-  let bright: HosekSky = createHosekSky(turbidity: turbidity, albedo: 0.9, elevationRad: elevation)
+  let dark: HosekSky = createHosekSky(data: data, turbidity: turbidity, albedo: 0.0, solarElevationRad: elevation)
+  let bright: HosekSky = createHosekSky(data: data, turbidity: turbidity, albedo: 0.9, solarElevationRad: elevation)
   let dl: Vec3 = hosekRadiance(sky: dark, dir: zenith, sunDir: sunDir)
   let bl: Vec3 = hosekRadiance(sky: bright, dir: zenith, sunDir: sunDir)
   if bl.y > dl.y {
