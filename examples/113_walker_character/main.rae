@@ -90,6 +90,7 @@ import app3d/ui_shell
 import app3d/control_panel
 import app3d/camera_bar
 import renderer_deferred
+import sky
 import gbuffer
 import shadow3d
 import app3d/playback
@@ -101,6 +102,7 @@ import ui/render_gpu2d
 open scene3d
 open gpu3d
 open renderer_deferred
+open sky
 open gbuffer
 open rendergraph
 open math3d
@@ -378,7 +380,19 @@ func main() ret Int {
 
   # The UI variant of the frame: the overlay MODIFIES the LDR target after
   # tonemap, and the graph derives that ordering from the declaration.
-  var renderer: DeferredRenderer = createDeferredRendererWithUi()
+    # A PAINTED sky (#404), banded like the toon terminator.
+  #
+  # THE SAME TWO COLOURS FEED THE SKY AND THE AMBIENT, which is what
+  # keeps the character's shadows agreeing with what is behind them: the
+  # toon path tints shadows toward the sky ambient, so a sky whose
+  # palette was picked independently would put the two at odds. Warm pale
+  # horizon under a deeper blue zenith, three bands.
+  var renderer: DeferredRenderer = createDeferredRendererWithUiSky(
+    sky: createSkyStylised(
+      sunDir: light.sunDir, sunColor: light.sunColor,
+      zenith: vec3.create(x: 0.16, y: 0.34, z: 0.62),
+      horizon: vec3.create(x: 0.74, y: 0.80, z: 0.72),
+      bands: 3.0))
   let gs: Int = compileDeferred(r: renderer)
   if gs is not 0 {
     log("render graph invalid: {statusName(status: gs)}")

@@ -66,6 +66,11 @@ type DeferredRenderer {
   # others are the G-buffer inspector (lib/gbuffer.rae), which is permanent
   # equipment in a deferred renderer rather than temporary scaffolding.
   debugView: Int
+  # The bound environment (#399). A scene that never sets one keeps the
+  # authored hemisphere and the clear-colour background, so binding a sky
+  # is opt-in rather than a silent change to every existing example.
+  sky: Sky
+  hasSky: Bool
 }
 
 # Declare the deferred frame. Pass declaration order here is deliberately
@@ -183,6 +188,8 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
     uiPass: ui,
     hasUi: withUi,
     debugView: viewLit
+    sky: createSkyNone(light: defaultLight3d(), clearColor: vec3.create(x: 0.02, y: 0.02, z: 0.03))
+    hasSky: false
   }
 }
 
@@ -298,7 +305,10 @@ func renderDeferredPass(r: view DeferredRenderer, tag: view Int, scene: view Sce
     # light, whose irradiance at the two hemisphere anchors is by
     # construction the values lightingPass passed directly. Test 583
     # pins that equality, which is why this lands as a no-op.
-    let sky: Sky = createSkyNone(light: light, clearColor: light.clearColor)
+    var sky: Sky = createSkyNone(light: light, clearColor: light.clearColor)
+    if r.hasSky {
+      sky = r.sky
+    }
     lightingPassSky(camera: camera, light: light, sky: sky)
   }
   if tag is tagTaaD {
@@ -328,4 +338,27 @@ func deferredDrawCount(r: view DeferredRenderer) pub ret Int {
 # Mip levels in the depth pyramid built by the last frame.
 func deferredPyramidMips(r: view DeferredRenderer) pub ret Int {
   ret depthPyramidMips()
+}
+
+# Bind an environment. The frame's background and its ambient both come
+# from it after this, which is the whole point of #399's interface — a
+# scene cannot end up lit by one sky and drawn against another.
+func setRendererSky(r: mod DeferredRenderer, sky: view Sky) pub {
+  r.sky = sky
+  r.hasSky = true
+}
+
+# Build a UI-composited deferred frame with an environment already bound.
+#
+# A CONSTRUCTOR RATHER THAN A SETTER, deliberately. Assigning a nested
+# struct field through a `mod` parameter does not reliably write back in
+# this compiler yet, and the failure is silent: the caller keeps its old
+# value and the sky simply never reaches the shader, which looks exactly
+# like a uniform-packing bug and costs an afternoon to tell apart. Taking
+# the sky at construction sidesteps the whole class.
+func createDeferredRendererWithUiSky(sky: view Sky) pub ret DeferredRenderer {
+  var r: DeferredRenderer = buildDeferredGraph(withUi: true)
+  r.sky = sky
+  r.hasSky = true
+  ret r
 }

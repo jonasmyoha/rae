@@ -59,7 +59,7 @@ func debugView(mode: Int, zNear: Float, zFar: Float) extern
 func present() extern
 func shutdown() extern
 func depthPyramid() extern
-func lighting(camX: Float, camY: Float, camZ: Float, exposure: Float, sunX: Float, sunY: Float, sunZ: Float, sunR: Float, sunG: Float, sunB: Float, skyR: Float, skyG: Float, skyB: Float, gndR: Float, gndG: Float, gndB: Float) extern
+func lighting(camX: Float, camY: Float, camZ: Float, exposure: Float, sunX: Float, sunY: Float, sunZ: Float, sunR: Float, sunG: Float, sunB: Float, skyR: Float, skyG: Float, skyB: Float, gndR: Float, gndG: Float, gndB: Float, skyKind: Float, turbidity: Float, skyExposure: Float, sunSizeRad: Float, zenR: Float, zenG: Float, zenB: Float, bands: Float, horR: Float, horG: Float, horB: Float, discI: Float) extern
 func composite(exposure: Float) extern
 func pyramidMips() extern ret Int
 func ssao(camX: Float, camY: Float, camZ: Float) extern
@@ -339,7 +339,16 @@ func lightingPassSky(camera: view Camera3d, light: view Light3d, sky: view Sky) 
     sunX: light.sunDir.x, sunY: light.sunDir.y, sunZ: light.sunDir.z,
     sunR: light.sunColor.x, sunG: light.sunColor.y, sunB: light.sunColor.z,
     skyR: skyC.x, skyG: skyC.y, skyB: skyC.z,
-    gndR: gndC.x, gndG: gndC.y, gndB: gndC.z
+    gndR: gndC.x, gndG: gndC.y, gndB: gndC.z,
+    # The BACKGROUND half of the interface. Sent to the same shader as
+    # the ambient above, from the same Sky, so what the camera sees and
+    # what the scene is lit by cannot come from different environments.
+    skyKind: skyKindCode(sky: sky), turbidity: sky.turbidity,
+    skyExposure: sky.exposure, sunSizeRad: sky.sunAngularRadius,
+    zenR: sky.zenithColor.x, zenG: sky.zenithColor.y, zenB: sky.zenithColor.z,
+    bands: sky.bands,
+    horR: sky.horizonColor.x, horG: sky.horizonColor.y, horB: sky.horizonColor.z,
+    discI: sky.sunDiscIntensity
   )
 }
 
@@ -350,7 +359,11 @@ func lightingPass(camera: view Camera3d, light: view Light3d) pub {
     sunX: light.sunDir.x, sunY: light.sunDir.y, sunZ: light.sunDir.z,
     sunR: light.sunColor.x, sunG: light.sunColor.y, sunB: light.sunColor.z,
     skyR: light.ambSky.x, skyG: light.ambSky.y, skyB: light.ambSky.z,
-    gndR: light.ambGround.x, gndG: light.ambGround.y, gndB: light.ambGround.z
+    gndR: light.ambGround.x, gndG: light.ambGround.y, gndB: light.ambGround.z,
+    # Kind 0: no sky, background stays the clear colour.
+    skyKind: 0.0, turbidity: 3.0, skyExposure: 1.0, sunSizeRad: 0.0047,
+    zenR: 0.0, zenG: 0.0, zenB: 0.0, bands: 1.0,
+    horR: 0.0, horG: 0.0, horB: 0.0, discI: 0.0
   )
 }
 

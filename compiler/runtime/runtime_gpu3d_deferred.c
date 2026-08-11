@@ -35,7 +35,12 @@
  */
 
 #define GB_PYRAMID_MAX_MIPS 16
-#define GB_LIGHT_BYTES 224   /* mat4 invViewProj + 6 vec4 + mat4 viewProj (#387 march) */
+/* mat4 invViewProj + 6 vec4 + mat4 viewProj (#387 march) + 3 vec4 of sky
+ * (#400/#404). The sky rides the LIGHTING uniform rather than getting its
+ * own buffer because the background and the ambient are the same
+ * environment: two buffers is two chances for the sky you see and the
+ * sky you are lit by to be a frame apart. */
+#define GB_LIGHT_BYTES 272
 
 static WGPUTexture     gb_pyramid_tex = NULL;    /* r32float, half res, mip chain */
 static WGPUTextureView gb_pyramid_rt[GB_PYRAMID_MAX_MIPS];   /* one per mip, as target */
@@ -238,6 +243,9 @@ static const char* GB_AO_WGSL =
 "  ambGround: vec4<f32>,\n"
 "  clearColor: vec4<f32>,\n"
 "  viewProj: mat4x4<f32>,\n"
+"  skyParams: vec4<f32>,\n"   /* x kind, y turbidity, z exposure, w sun angular size */
+"  skyZenith: vec4<f32>,\n"   /* stylised zenith colour, w = band sharpness */
+"  skyHorizon: vec4<f32>,\n"  /* stylised horizon colour, w = sun disc intensity */
 "};\n"
 "@group(0) @binding(0) var<uniform> L: LightU;\n"
 "@group(0) @binding(1) var gbaTex: texture_2d<f32>;\n"
@@ -349,6 +357,14 @@ static const char* GB_LIGHT_WGSL =
 "  ambSky: vec4<f32>,\n"
 "  ambGround: vec4<f32>,\n"
 "  clearColor: vec4<f32>,\n"
+/* viewProj is not read here, but it IS in the buffer between clearColor
+ * and the sky block, so it must be declared or every sky field below
+ * would be read from the wrong offset — a silent desync that shows up as
+ * a sky coloured by whatever happened to be in the matrix. */
+"  viewProj: mat4x4<f32>,\n"
+"  skyParams: vec4<f32>,\n"
+"  skyZenith: vec4<f32>,\n"
+"  skyHorizon: vec4<f32>,\n"
 "};\n"
 "@group(0) @binding(0) var<uniform> L: LightU;\n"
 "@group(0) @binding(1) var gbaTex: texture_2d<f32>;\n"
@@ -374,6 +390,91 @@ GB_OCT_WGSL
 GB_FULLSCREEN_VS
 G3D_SHADOW_FN_WGSL
 "const PI: f32 = 3.14159265;\n"
+/* ---- sky (#400 procedural, #404 stylised) --------------------------
+ * The SAME model as lib/sky.rae, evaluated per pixel. Two copies of a
+ * formula is a real cost, and it is paid deliberately: the CPU one
+ * answers "what ambient does this scene get" once per frame, this one
+ * answers "what colour is this pixel of sky", and a round trip through a
+ * texture to share them would cost more than the duplication. Test 584
+ * pins the CPU one; the relationships it asserts are what this must also
+ * show, and a divergence is visible as a background that does not match
+ * the lighting.
+ */
+"fn preethamF(A: f32, B: f32, C: f32, D: f32, E: f32, ct: f32, g: f32) -> f32 {\n"
+/* Clamped away from zero: the model diverges at the horizon, and an
+ * infinity here reaches the tonemapper and takes the frame with it. */
+"  let c = max(ct, 0.01);\n"
+"  let cg = cos(g);\n"
+"  return (1.0 + A * exp(B / c)) * (1.0 + C * exp(D * g) + E * cg * cg);\n"
+"}\n"
+"fn skyProcedural(dir: vec3<f32>, toSun: vec3<f32>, t: f32) -> vec3<f32> {\n"
+"  let g = acos(clamp(dot(dir, toSun), -1.0, 1.0));\n"
+"  let ts = acos(clamp(max(toSun.z, 0.01), -1.0, 1.0));\n"
+"  let Ay = 0.1787 * t - 1.4630; let By = -0.3554 * t + 0.4275;\n"
+"  let Cy = -0.0227 * t + 5.3251; let Dy = 0.1206 * t - 2.5771;\n"
+"  let Ey = -0.0670 * t + 0.3703;\n"
+"  let Ax = -0.0193 * t - 0.2592; let Bx = -0.0665 * t + 0.0008;\n"
+"  let Cx = -0.0004 * t + 0.2125; let Dx = -0.0641 * t - 0.8989;\n"
+"  let Ex = -0.0033 * t + 0.0452;\n"
+"  let Az = -0.0167 * t - 0.2608; let Bz = -0.0950 * t + 0.0092;\n"
+"  let Cz = -0.0079 * t + 0.2102; let Dz = -0.0441 * t - 1.6537;\n"
+"  let Ez = -0.0109 * t + 0.0529;\n"
+"  let fy = preethamF(Ay,By,Cy,Dy,Ey, dir.z, g) / preethamF(Ay,By,Cy,Dy,Ey, 1.0, ts);\n"
+"  let fx = preethamF(Ax,Bx,Cx,Dx,Ex, dir.z, g) / preethamF(Ax,Bx,Cx,Dx,Ex, 1.0, ts);\n"
+"  let fz = preethamF(Az,Bz,Cz,Dz,Ez, dir.z, g) / preethamF(Az,Bz,Cz,Dz,Ez, 1.0, ts);\n"
+"  let ts2 = ts * ts; let ts3 = ts2 * ts;\n"
+"  let chi = (4.0 / 9.0 - t / 120.0) * (PI - 2.0 * ts);\n"
+"  let zY = max((4.0453 * t - 4.9710) * tan(chi) - 0.2155 * t + 2.4192, 0.0);\n"
+"  let zx = (0.00166*ts3 - 0.00375*ts2 + 0.00209*ts) * t * t\n"
+"         + (-0.02903*ts3 + 0.06377*ts2 - 0.03202*ts + 0.00394) * t\n"
+"         + (0.11693*ts3 - 0.21196*ts2 + 0.06052*ts + 0.25886);\n"
+"  let zy = (0.00275*ts3 - 0.00610*ts2 + 0.00317*ts) * t * t\n"
+"         + (-0.04214*ts3 + 0.08970*ts2 - 0.04153*ts + 0.00516) * t\n"
+"         + (0.15346*ts3 - 0.26756*ts2 + 0.06670*ts + 0.26688);\n"
+"  let xx = zx * fx; let yy = max(zy * fz, 0.0001); let YY = zY * fy * 0.05;\n"
+"  let X = xx * YY / yy; let Z = (1.0 - xx - yy) * YY / yy;\n"
+"  let rgb = vec3<f32>( 3.2406*X - 1.5372*YY - 0.4986*Z,\n"
+"                      -0.9689*X + 1.8758*YY + 0.0415*Z,\n"
+"                       0.0557*X - 0.2040*YY + 1.0570*Z);\n"
+"  return max(rgb, vec3<f32>(0.0));\n"
+"}\n"
+/* STYLISED: a vertical ramp between two authored colours, quantised the
+ * same way the toon terminator is. Bands rather than a smooth gradient is
+ * the point — a cel scene under a photographic gradient reads as models
+ * pasted onto a photograph, which is the failure §3C of the design doc
+ * exists to prevent. The colours come from the scene's palette, so the
+ * sky and the character's shadow tint agree by construction. */
+"fn skyStylised(dir: vec3<f32>, toSun: vec3<f32>) -> vec3<f32> {\n"
+"  let h = clamp(dir.z * 0.5 + 0.5, 0.0, 1.0);\n"
+"  let bands = max(L.skyZenith.w, 1.0);\n"
+"  let s = h * bands;\n"
+"  let i = floor(s);\n"
+"  let band = (i + smoothstep(0.35, 0.65, s - i)) / bands;\n"
+"  var c = mix(L.skyHorizon.rgb, L.skyZenith.rgb, band);\n"
+/* A warm glow toward the sun, kept broad and soft so it reads as painted
+ * light rather than as a lens artefact. */
+"  let g = clamp(dot(dir, toSun), 0.0, 1.0);\n"
+"  c = c + L.sunColor.rgb * pow(g, 6.0) * 0.35;\n"
+"  return c;\n"
+"}\n"
+"fn skyColor(dir: vec3<f32>) -> vec3<f32> {\n"
+"  let kind = L.skyParams.x;\n"
+"  let toSun = normalize(-L.sunDir.xyz);\n"
+"  var c = L.clearColor.rgb;\n"
+"  if (kind > 1.5 && kind < 2.5) { c = skyProcedural(dir, toSun, L.skyParams.y); }\n"
+"  if (kind > 2.5) { c = skyStylised(dir, toSun); }\n"
+/* The sun DISC, added on top for every kind that has a sky. Separate
+ * from the models above because it is ~1e5 times their radiance: folding
+ * it in would make the whole expression's dynamic range about the disc.
+ * A hard edge with one smoothstep of falloff, so it survives TAA. */
+"  if (kind > 1.5) {\n"
+"    let ca = dot(dir, toSun);\n"
+"    let cutoff = cos(max(L.skyParams.w, 0.001));\n"
+"    let disc = smoothstep(cutoff, mix(cutoff, 1.0, 0.35), ca);\n"
+"    c = c + L.sunColor.rgb * disc * L.skyHorizon.w;\n"
+"  }\n"
+"  return c * L.skyParams.z;\n"
+"}\n"
 /* Quantise [0,1] into `bands` steps with a SOFTENED edge (#396). A bare
  * floor() aliases along the terminator, and that edge moves whenever the
  * light or the object does, so it crawls — the one artefact a stylised
@@ -411,7 +512,17 @@ G3D_SHADOW_FN_WGSL
  * colour. Getting this comparison the wrong way round after the reverse-Z
  * switch would light the sky and discard the scene. */
 "  if (depth <= 0.0) {\n"
-"    return vec4<f32>(L.clearColor.rgb, 1.0);\n"
+/* THE BACKGROUND IS THE SKY (#400). Reconstructed from the same
+ * invViewProj the rest of this shader uses, at the far plane — reverse-Z,
+ * so far is z = 0. Deriving the ray from a separately-uploaded camera
+ * basis would let the background drift a frame away from the geometry
+ * during camera motion, which reads as the world sliding against the sky.
+ */
+"    let uvF = (vec2<f32>(px) + vec2<f32>(0.5)) / vec2<f32>(textureDimensions(gbbTex, 0));\n"
+"    let ndcF = vec4<f32>(uvF.x * 2.0 - 1.0, 1.0 - uvF.y * 2.0, 0.0, 1.0);\n"
+"    let farW = L.invViewProj * ndcF;\n"
+"    let dirF = normalize(farW.xyz / farW.w - L.camPos.xyz);\n"
+"    return vec4<f32>(skyColor(dirF), 1.0);\n"
 "  }\n"
 "  let gbb = textureLoad(gbbTex, px, 0);\n"
 "  let albedo = gbb.rgb;\n"
@@ -855,7 +966,11 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
                               float sunX, float sunY, float sunZ,
                               float sunR, float sunG, float sunB,
                               float skyR, float skyG, float skyB,
-                              float gndR, float gndG, float gndB) {
+                              float gndR, float gndG, float gndB,
+                              float skyKind, float turbidity, float skyExposure,
+                              float sunSizeRad, float zenR, float zenG, float zenB,
+                              float bands, float horR, float horG, float horB,
+                              float discI) {
     if (!g_wgpu_dev || !gb_a_view) return;
     gb_deferred_init_pipelines();
     gb_deferred_ensure();
@@ -879,6 +994,13 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
     u[32] = gndR; u[33] = gndG; u[34] = gndB; u[35] = 0.0f;
     u[36] = gb_clear[0]; u[37] = gb_clear[1]; u[38] = gb_clear[2]; u[39] = 0.0f;
     memcpy(u + 40, gb_viewproj_jittered, 16 * sizeof(float));
+    /* Sky (#400/#404), packed after viewProj to match LightU. The offsets
+     * are not free-standing numbers: 56 is exactly where viewProj ends,
+     * which is why the WGSL struct must declare viewProj even though the
+     * lighting shader never reads it. */
+    u[56] = skyKind; u[57] = turbidity; u[58] = skyExposure; u[59] = sunSizeRad;
+    u[60] = zenR; u[61] = zenG; u[62] = zenB; u[63] = bands;
+    u[64] = horR; u[65] = horG; u[66] = horB; u[67] = discI;
     wgpuQueueWriteBuffer(g_wgpu_queue, gb_light_ubuf, 0, u, GB_LIGHT_BYTES);
 
     if (!gb_light_bind) {

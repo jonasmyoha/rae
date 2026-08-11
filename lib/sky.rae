@@ -67,6 +67,58 @@ type Sky {
   # The `procedural` payload (#400). Haze: 2 is an exceptionally clear
   # day, 3-6 ordinary, above 10 fog.
   turbidity: Float
+  # The sun as a DISC, shared by every kind that draws a sky. Separate
+  # from sunColor's intensity because the disc is ~1e5 times the sky's
+  # radiance: folding it into the sky models would make their whole
+  # dynamic range about the disc.
+  sunAngularRadius: Float
+  sunDiscIntensity: Float
+  # The `stylised` payload (#404). A ramp between two authored colours,
+  # quantised into `bands` the same way the toon terminator is.
+  zenithColor: Vec3
+  horizonColor: Vec3
+  bands: Float
+}
+
+# The kind, as the number the shader switches on. One place that mapping
+# exists, so adding a kind cannot leave the GPU and CPU disagreeing about
+# which is which.
+func skyKindCode(sky: view Sky) pub ret Float {
+  if sky.kind is SkyKind.hdri { ret 1.0 }
+  if sky.kind is SkyKind.procedural { ret 2.0 }
+  if sky.kind is SkyKind.stylised { ret 3.0 }
+  ret 0.0
+}
+
+# A PAINTED sky, for a cel-shaded scene (#404).
+#
+# NOT an HDRI and not a smooth gradient: banded, from colours the scene
+# authors. A photographic environment behind a cel character reads as a
+# model pasted onto a photograph, and — more subtly — a sky whose palette
+# was chosen independently disagrees with the character's shadow tint,
+# which the toon path takes from the sky ambient. Passing the same
+# colours to both is what keeps them in step.
+func createSkyStylised(sunDir: view Vec3, sunColor: view Vec3,
+                       zenith: view Vec3, horizon: view Vec3,
+                       bands: view Float) pub ret Sky {
+  ret Sky {
+    kind: SkyKind.stylised
+    exposure: 1.0
+    yawDeg: 0.0
+    sunDir: sunDir
+    sunColor: sunColor
+    ambSky: zenith
+    ambGround: horizon
+    clearColor: horizon
+    turbidity: 3.0
+    # Larger and brighter than the real sun: a painted sky wants a sun
+    # you can see, not an accurate 0.53-degree disc.
+    sunAngularRadius: 0.05
+    sunDiscIntensity: 2.0
+    zenithColor: zenith
+    horizonColor: horizon
+    bands: bands
+  }
 }
 
 # The fallback sky, built from what a scene already has. Taking the
@@ -83,6 +135,11 @@ func createSkyNone(light: view Light3d, clearColor: view Vec3) pub ret Sky {
     ambGround: light.ambGround
     clearColor: clearColor
     turbidity: 3.0
+    sunAngularRadius: 0.0047
+    sunDiscIntensity: 0.0
+    zenithColor: light.ambSky
+    horizonColor: light.ambGround
+    bands: 1.0
   }
 }
 
@@ -106,6 +163,12 @@ func createSkyProcedural(sunDir: view Vec3, sunColor: view Vec3,
     ambGround: vec3.create(x: 0.12, y: 0.10, z: 0.09)
     clearColor: vec3.create(x: 0.02, y: 0.02, z: 0.03)
     turbidity: turbidity
+    # The real sun subtends about 0.53 degrees; this is its radius.
+    sunAngularRadius: 0.0047
+    sunDiscIntensity: 40.0
+    zenithColor: vec3.create(x: 0.25, y: 0.30, z: 0.40)
+    horizonColor: vec3.create(x: 0.50, y: 0.55, z: 0.60)
+    bands: 1.0
   }
 }
 
@@ -148,6 +211,14 @@ func skyIrradiance(sky: view Sky, n: view Vec3) pub ret Vec3 {
     let blended: Vec3 = hemisphereIrradiance(ambSky: zc, ambGround: hc, n: n)
     ret vec3.vscale(a: blended, s: sky.exposure)
   }
+  if sky.kind is SkyKind.stylised {
+    # DELIBERATELY NOT an integral of the painted sky. A cel scene wants
+    # CHOSEN ambient — the toon path tints shadows toward this value, so
+    # it has to be the palette the artist picked, not whatever averaging
+    # a gradient produces.
+    let blended: Vec3 = hemisphereIrradiance(ambSky: sky.zenithColor, ambGround: sky.horizonColor, n: n)
+    ret vec3.vscale(a: blended, s: sky.exposure)
+  }
   var c: Vec3 = hemisphereIrradiance(ambSky: sky.ambSky, ambGround: sky.ambGround, n: n)
   if sky.kind is SkyKind.none {
     # EXACTLY the existing expression when exposure is 1, which is what
@@ -171,6 +242,12 @@ func skyRadiance(sky: view Sky, dir: view Vec3) pub ret Vec3 {
       ret sky.clearColor
     }
     ret vec3.vscale(a: sky.clearColor, s: sky.exposure)
+  }
+  if sky.kind is SkyKind.stylised {
+    let up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
+    let t: Float = dir.z * 0.5 + 0.5
+    let c: Vec3 = hemisphereIrradiance(ambSky: sky.zenithColor, ambGround: sky.horizonColor, n: vec3.create(x: 0.0, y: 0.0, z: dir.z))
+    ret vec3.vscale(a: c, s: sky.exposure)
   }
   if sky.kind is SkyKind.procedural {
     let toSun: Vec3 = vec3.create(x: 0.0 - sky.sunDir.x, y: 0.0 - sky.sunDir.y, z: 0.0 - sky.sunDir.z)

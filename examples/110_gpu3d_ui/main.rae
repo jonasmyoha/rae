@@ -33,6 +33,7 @@ import sdl3
 import vec3
 open gpu3d
 open renderer_deferred
+open sky
 open gbuffer
 open math3d
 open mesh3d
@@ -68,6 +69,7 @@ import app3d/camera_rig
 import app3d/camera_bar
 import shadow3d
 import renderer_deferred
+import sky
 import gbuffer
 import app3d/ui_shell
 open app3d/camera_rig
@@ -521,7 +523,13 @@ func main() ret Int {
   # Epoch seconds must stay Float64 (see docs/primitive-types.md); only the
   # small per-frame delta is narrowed to Float.
   # Frame declared as a render graph with a load-preserving UI overlay.
-  var renderer: DeferredRenderer = createDeferredRendererWithUi()
+    # A REAL sky (#400): Preetham, from the same sun the scene is lit by,
+  # so the visible sun and the shadows agree. Turbidity 2.5 is a clear
+  # day. This example is the renderer's realistic end; 113 is the
+  # stylised one, and they deliberately use different kinds behind the
+  # same interface.
+  var renderer: DeferredRenderer = createDeferredRendererWithUiSky(
+    sky: createSkyProcedural(sunDir: light.sunDir, sunColor: light.sunColor, turbidity: 2.5))
   let gstatus: Int = compileDeferred(r: renderer)
   if gstatus is not 0 {
     log("render graph invalid: {gstatus}")
