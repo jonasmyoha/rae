@@ -82,3 +82,4 @@
 #include "runtime_gbuffer_stubs.c"
 #endif
 #include "runtime_spotify_apple.c"
+#include "runtime_sky_hosek.c"
