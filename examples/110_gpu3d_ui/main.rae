@@ -68,6 +68,8 @@ import ui/log_overlay
 import hot_reload
 import app3d/camera_rig
 import app3d/camera_bar
+import app3d/slider
+import app3d/settings_dialog
 import shadow3d
 import renderer_deferred
 import sky
@@ -76,6 +78,7 @@ import gbuffer
 import app3d/ui_shell
 open app3d/camera_rig
 open app3d/camera_bar
+open app3d/settings_dialog
 open shadow3d
 open app3d/ui_shell
 
@@ -480,6 +483,14 @@ func main() ret Int {
 
   var uiInput: UiInput = createUiInput()
   var uiState: DemoUiResource = createDemoUiResource()
+  # The shared dialog (lib/app3d/settings_dialog). Three scenes here, so its
+  # scene chooser is live; 113 mounts the same dialog with sceneCount 1.
+  var settings: SettingsState = createSettingsState(scene: uiState.activeScene, sceneCount: 3,
+                                                    speed: 1.0, toon: false, hour: 12.0)
+  if mountSettingsDialog(world: uiWorld, res: gpuUi, hostNodeId: "SettingsDialogSlot") is false {
+    logWarnLine(ov: logView, text: "settings dialog failed to mount")
+  }
+  settingsApplyToWorld(s: settings, world: uiWorld)
   var camera: Camera3d = scene1.camera
   var cameraRig: CameraRig = createCameraRig(camera: camera)
   # Restore before the test-state hook, so an explicit env override still
@@ -613,6 +624,32 @@ func main() ret Int {
     handleCameraBar(input: uiInput, rig: cameraRig, camera: camera)
     let hadUiEvents: Bool = uiInput.events.length > 0
     dispatchUiActions(input: uiInput, state: uiState, rig: cameraRig, camera: camera)
+    # The shared dialog sees every action and ignores what it does not own.
+    var settingsChanged: Bool = false
+    var sa: Int = 0
+    loop sa < uiActionCount(input: uiInput) {
+      if settingsHandleAction(s: settings, actionId: uiActionAt(input: uiInput, index: sa)) {
+        settingsChanged = true
+      }
+      sa = sa + 1
+    }
+    if settingsUpdatePointer(s: settings, world: uiWorld, input: uiInput) {
+      settingsChanged = true
+    }
+    # The scene chooser exists in both places here: the debug panel's own
+    # buttons and the dialog's. Keep them one value rather than two.
+    if settings.scene is not uiState.activeScene {
+      if settingsChanged {
+        uiState.activeScene = settings.scene
+        uiState.revision = uiState.revision + 1
+      } else {
+        settings.scene = uiState.activeScene
+      }
+    }
+    if settingsChanged {
+      settingsApplyToWorld(s: settings, world: uiWorld)
+      stateDirty = true
+    }
     let uiLayoutDirty: Bool = syncDemoUi(world: uiWorld, state: uiState)
     if uiLayoutDirty or extentChanged {
       layoutSystem(world: uiWorld)
@@ -676,7 +713,9 @@ func main() ret Int {
       }
       if uiState.paused is false {
         var motionScale: Float = 1.0
-        if uiState.fullSpeed is false { motionScale = 0.25 }
+        # Was a half-speed TOGGLE; now the shared percentage, so 110 and 113
+        # express animation speed the same way (settings_dialog).
+        motionScale = motionScale * settings.speed
         simTime = simTime + dt * motionScale
       }
       applyCameraRig(rig: cameraRig, camera: camera)
