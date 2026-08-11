@@ -1,0 +1,46 @@
+# The no-implicit-numeric-conversion rule must see through `view` / `mod`.
+#
+# A reference-mode parameter's type is a REF wrapping the numeric type, so a
+# check that looked only at the outer type kind skipped every value arriving as
+# `view Float64` / `mod Float64`. That is not a corner: it is how parameters are
+# normally written, and it let four epoch timestamps be silently narrowed into
+# `Float` fields in the mobile UI, where the 128 s f32 ulp at epoch magnitude
+# turned every "has enough time passed?" test into a constant (#407).
+#
+# Reading a value through a reference does not change its type, so the rule
+# must not change either. Every line below is expected to be an ERROR; the
+# recorded output is the diagnostic set.
+import core
+
+type Holder {
+  narrow: Float
+}
+
+func viaView(now: view Float64) {
+  let e: Float = now
+}
+
+func viaMod(now: mod Float64) {
+  let e: Float = now
+}
+
+# The exact shape of the bug: a wide clock reading stored into a narrow field
+# of a struct held by `mod`.
+func viaModField(h: mod Holder, now: view Float64) {
+  h.narrow = now
+}
+
+# Mixed arithmetic through a reference is still a conversion at the binding.
+func viaMixedArithmetic(h: view Holder, now: view Float64) {
+  let e: Float = now - h.narrow
+}
+
+# Widening is equally implicit and equally rejected — the rule is about
+# conversions, not about losing bits.
+func widening(small: view Float) {
+  let e: Float64 = small
+}
+
+func main() {
+  log("unreachable: this file must not compile")
+}
