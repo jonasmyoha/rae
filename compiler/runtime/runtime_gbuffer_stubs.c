@@ -71,7 +71,7 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
                               float skyKind, float turbidity, float skyExposure,
                               float sunSizeRad, float zenR, float zenG, float zenB,
                               float bands, float horR, float horG, float horB,
-                              float discI){
+                              float discI, float groundAlbedo){
     (void)camX; (void)camY; (void)camZ; (void)exposure;
     (void)sunX; (void)sunY; (void)sunZ;
     (void)sunR; (void)sunG; (void)sunB;
