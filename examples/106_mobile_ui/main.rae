@@ -906,7 +906,10 @@ func main() {
           # `active=true` but the UI is frozen, the bug is downstream
           # in renderSystem / endDrawing.
           if loopDebugEnabled {
-            log("[loop {loopDebugFrame}] input.events={input.events.length} pressed={input.pressedEntity.value} animating={animating} active={active}")
+            # `active` alone can't be diagnosed: it is the OR of the
+            # decideActive verdict, asset loading and hover easing, and the
+            # three have very different fixes. Print the parts.
+            log("[loop {loopDebugFrame}] input.events={input.events.length} pressed={input.pressedEntity.value} animating={animating} active={active} decide={activeDecision.active} assets={assetsLoading} hover={lastHoverAnimDirty}")
           }
 
           # GPU2D render phase. With wait-events, dirty detection
