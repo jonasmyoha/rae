@@ -1,0 +1,154 @@
+# Hosek-Wilkie sky: our implementation against the authors' reference.
+#
+# The model splits in two: a 3861-line fitted coefficient dataset with a
+# documented interpolation (quintic Bezier in the cube root of solar elevation,
+# blended over ground albedo and turbidity), and a nine-term analytic formula
+# evaluated per direction. The dataset and its interpolation are vendored C
+# (third_party/hosek_wilkie, 3-clause BSD, provenance in that README); the
+# formula is ours, here and again in WGSL for the deferred pass.
+#
+# WHERE THESE NUMBERS COME FROM. They are not hand-derived and not eyeballed:
+# the UNMODIFIED reference implementation from the authors' 1.4a archive was
+# compiled and asked for `arhosek_tristim_skymodel_radiance` over a grid, and
+# the values below are transcribed from its output. A model like this cannot be
+# checked by inspection — "the sky looks blue" passes for an implementation with
+# the wrong turbidity axis — so an external oracle is the only assertion worth
+# making. The vendored cook was separately verified against the same reference
+# at full double precision: worst relative error 0.0 across 72 parameter
+# combinations, i.e. bit-identical.
+#
+# Tolerance is 1% relative, which is about what f32 evaluation of a formula
+# containing exp() and pow(1.5) costs against the reference's doubles.
+
+import core
+import math
+import string
+import vec3
+import sky
+open sky
+
+func relErr(got: view Float, want: view Float) ret Float {
+  var d: Float = got - want
+  if d < 0.0 {
+    d = 0.0 - d
+  }
+  var mag: Float = want
+  if mag < 0.0 {
+    mag = 0.0 - mag
+  }
+  if mag < 0.000001 {
+    ret d
+  }
+  ret d / mag
+}
+
+func check(label: view String, got: view Float, want: view Float) {
+  let e: Float = relErr(got: got, want: want)
+  if e < 0.01 {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}: got {got} want {want}")
+  }
+}
+
+# Reconstruct a direction from (theta from zenith, gamma from the sun) the same
+# way the reference is parameterised, so we can compare against its output. The
+# sun sits in the XZ plane at the given elevation; a direction at angle `gamma`
+# from it and `theta` from the zenith is found by solving for the component
+# along the sun and taking the rest in the perpendicular direction.
+func dirFromThetaGamma(theta: view Float, gamma: view Float, elevationRad: view Float) ret Vec3 {
+  let sunZ: Float = math.sin(x: elevationRad)
+  let sunX: Float = math.cos(x: elevationRad)
+  let cosTheta: Float = math.cos(x: theta)
+  let sinTheta: Float = math.sin(x: theta)
+  let cosGamma: Float = math.cos(x: gamma)
+  # dir = (x, 0, cosTheta) with x^2 + cosTheta^2 = 1, constrained so
+  # dot(dir, sun) = cosGamma. Two unknowns in the XY plane; put the residual on
+  # Y so the constraint is satisfiable for any gamma the caller asks for.
+  var x: Float = 0.0
+  if sunX > 0.0001 {
+    x = (cosGamma - sunZ * cosTheta) / sunX
+  }
+  if x > sinTheta { x = sinTheta }
+  if x < 0.0 - sinTheta { x = 0.0 - sinTheta }
+  var ySq: Float = sinTheta * sinTheta - x * x
+  if ySq < 0.0 { ySq = 0.0 }
+  ret vec3.create(x: x, y: math.sqrt(x: ySq), z: cosTheta)
+}
+
+func main() {
+  # turbidity 3.5, ground albedo 0.3, sun 0.9 rad above the horizon.
+  let turbidity: Float = 3.5
+  let albedo: Float = 0.3
+  let elevation: Float = 0.9
+  let sky: HosekSky = createHosekSky(turbidity: turbidity, albedo: albedo, elevationRad: elevation)
+
+  # 1. The cooked coefficients, straight from the dataset. If the Bezier or the
+  #    albedo/turbidity blend is wrong, everything downstream is wrong in a way
+  #    that still renders a plausible sky, so check them directly.
+  check(label: "R coefficient A", got: sky.r.a, want: 0.0 - 1.070987511)
+  check(label: "R coefficient E", got: sky.r.e, want: 0.0 - 2.544510525)
+  check(label: "R coefficient I", got: sky.r.i, want: 0.7039973607)
+  check(label: "R radiance scale", got: sky.r.radiance, want: 8.367587369)
+  check(label: "G coefficient C", got: sky.g.c, want: 1.208741482)
+  check(label: "G radiance scale", got: sky.g.radiance, want: 12.23594267)
+  check(label: "B coefficient H", got: sky.b.h, want: 2.70839962)
+  check(label: "B radiance scale", got: sky.b.radiance, want: 18.71905986)
+
+  # 2. The analytic formula, against the reference's radiance output. theta is
+  #    0.1 rad from the zenith; gamma sweeps away from the sun.
+  let theta: Float = 0.1
+  let gammas: List(Float) = { 0.05, 0.5, 1.5, 3.0 }
+  let wantR: List(Float) = { 16.82584363, 5.048510228, 1.835916501, 2.493335067 }
+  let wantG: List(Float) = { 18.35526806, 6.987179574, 3.740990703, 4.664224873 }
+  let wantB: List(Float) = { 21.49176759, 11.99369776, 8.366706396, 9.823256883 }
+  var i: Int = 0
+  loop i < gammas.length {
+    let gamma: Float = gammas.at(index: i)
+    let r: Float = hosekChannelRadiance(c: sky.r, theta: theta, gamma: gamma) * sky.r.radiance
+    let g: Float = hosekChannelRadiance(c: sky.g, theta: theta, gamma: gamma) * sky.g.radiance
+    let b: Float = hosekChannelRadiance(c: sky.b, theta: theta, gamma: gamma) * sky.b.radiance
+    check(label: "radiance R at gamma {gamma}", got: r, want: wantR.at(index: i))
+    check(label: "radiance G at gamma {gamma}", got: g, want: wantG.at(index: i))
+    check(label: "radiance B at gamma {gamma}", got: b, want: wantB.at(index: i))
+    i = i + 1
+  }
+
+  # 3. The relationships the model exists to produce, which the raw numbers
+  #    above would still satisfy if the channels were swapped.
+  let sunDir: Vec3 = vec3.create(x: math.cos(x: elevation), y: 0.0, z: math.sin(x: elevation))
+  let zenith: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  let zr: Vec3 = hosekRadiance(sky: sky, dir: zenith, sunDir: sunDir)
+  let bluenessZ: Float = zr.z / zr.x
+  if bluenessZ > 1.0 {
+    log("ok   zenith is bluer than it is red")
+  } else {
+    log("FAIL zenith blueness {bluenessZ}")
+  }
+
+  # Toward the sun is brighter than away from it, at matched elevation.
+  let near: Vec3 = dirFromThetaGamma(theta: 0.6, gamma: 0.2, elevationRad: elevation)
+  let far: Vec3 = dirFromThetaGamma(theta: 0.6, gamma: 2.4, elevationRad: elevation)
+  let nearR: Vec3 = hosekRadiance(sky: sky, dir: near, sunDir: sunDir)
+  let farR: Vec3 = hosekRadiance(sky: sky, dir: far, sunDir: sunDir)
+  if nearR.y > farR.y {
+    log("ok   brighter toward the sun")
+  } else {
+    log("FAIL sunward {nearR.y} vs away {farR.y}")
+  }
+
+  # Ground albedo feeds back into the sky: brighter ground, brighter sky. This
+  # is the axis Preetham does not have at all.
+  let dark: HosekSky = createHosekSky(turbidity: turbidity, albedo: 0.0, elevationRad: elevation)
+  let bright: HosekSky = createHosekSky(turbidity: turbidity, albedo: 0.9, elevationRad: elevation)
+  let dl: Vec3 = hosekRadiance(sky: dark, dir: zenith, sunDir: sunDir)
+  let bl: Vec3 = hosekRadiance(sky: bright, dir: zenith, sunDir: sunDir)
+  if bl.y > dl.y {
+    log("ok   ground albedo brightens the sky")
+  } else {
+    log("FAIL albedo 0.9 gave {bl.y}, albedo 0.0 gave {dl.y}")
+  }
+
+  # Sun elevation from a direction, the input the cook actually takes.
+  check(label: "sunElevationRad recovers elevation", got: sunElevationRad(sunDir: sunDir), want: elevation)
+}
