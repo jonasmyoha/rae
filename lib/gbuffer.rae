@@ -59,7 +59,7 @@ func debugView(mode: Int, zNear: Float, zFar: Float) extern
 func present() extern
 func shutdown() extern
 func depthPyramid() extern
-func lighting(camX: Float, camY: Float, camZ: Float, exposure: Float, sunX: Float, sunY: Float, sunZ: Float, sunR: Float, sunG: Float, sunB: Float, skyR: Float, skyG: Float, skyB: Float, gndR: Float, gndG: Float, gndB: Float, skyKind: Float, turbidity: Float, skyExposure: Float, sunSizeRad: Float, zenR: Float, zenG: Float, zenB: Float, bands: Float, horR: Float, horG: Float, horB: Float, discI: Float) extern
+func lighting(camX: Float, camY: Float, camZ: Float, exposure: Float, sunX: Float, sunY: Float, sunZ: Float, sunR: Float, sunG: Float, sunB: Float, skyR: Float, skyG: Float, skyB: Float, gndR: Float, gndG: Float, gndB: Float, skyKind: Float, turbidity: Float, skyExposure: Float, sunSizeRad: Float, zenR: Float, zenG: Float, zenB: Float, bands: Float, horR: Float, horG: Float, horB: Float, discI: Float, groundAlbedo: Float) extern
 func composite(exposure: Float) extern
 func pyramidMips() extern ret Int
 func ssao(camX: Float, camY: Float, camZ: Float) extern
@@ -348,7 +348,10 @@ func lightingPassSky(camera: view Camera3d, light: view Light3d, sky: view Sky) 
     zenR: sky.zenithColor.x, zenG: sky.zenithColor.y, zenB: sky.zenithColor.z,
     bands: sky.bands,
     horR: sky.horizonColor.x, horG: sky.horizonColor.y, horB: sky.horizonColor.z,
-    discI: sky.sunDiscIntensity
+    discI: sky.sunDiscIntensity,
+    # Ground albedo is a Hosek-Wilkie input: a sky over snow is not the sky over
+    # grass. Preetham has no such axis, so it ignores this.
+    groundAlbedo: sky.groundAlbedo
   )
 }
 
@@ -363,7 +366,7 @@ func lightingPass(camera: view Camera3d, light: view Light3d) pub {
     # Kind 0: no sky, background stays the clear colour.
     skyKind: 0.0, turbidity: 3.0, skyExposure: 1.0, sunSizeRad: 0.0047,
     zenR: 0.0, zenG: 0.0, zenB: 0.0, bands: 1.0,
-    horR: 0.0, horG: 0.0, horB: 0.0, discI: 0.0
+    horR: 0.0, horG: 0.0, horB: 0.0, discI: 0.0, groundAlbedo: 0.0
   )
 }
 

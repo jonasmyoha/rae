@@ -42,7 +42,16 @@ enum SkyKind {
   procedural
   # Composited layers — gradient, clouds, sun, silhouettes (#404).
   stylised
+  # Hosek-Wilkie: the fitted physical model (#400). Distinct from `procedural`
+  # rather than replacing it so a scene can pick the table-free Preetham
+  # fallback deliberately, and so the two stay comparable.
+  hosek
 }
+
+# Ordinary vegetated ground. Named rather than repeated as 0.25 in each
+# constructor, because it is the value a reader has to recognise to know that a
+# sky was not authored with snow or asphalt in mind.
+const skyDefaultGroundAlbedo: Float = 0.25
 
 type Sky {
   kind: SkyKind
@@ -73,6 +82,11 @@ type Sky {
   # dynamic range about the disc.
   sunAngularRadius: Float
   sunDiscIntensity: Float
+  # A Hosek-Wilkie input, and the axis Preetham does not have: the sky over
+  # snow is not the sky over grass, because the ground bounces light back into
+  # the atmosphere. 0.1 is dark rock, ~0.25 grass, 0.8 fresh snow. Ignored by
+  # every other kind.
+  groundAlbedo: Float
   # The `stylised` payload (#404). A ramp between two authored colours,
   # quantised into `bands` the same way the toon terminator is.
   zenithColor: Vec3
@@ -87,6 +101,7 @@ func skyKindCode(sky: view Sky) pub ret Float {
   if sky.kind is SkyKind.hdri { ret 1.0 }
   if sky.kind is SkyKind.procedural { ret 2.0 }
   if sky.kind is SkyKind.stylised { ret 3.0 }
+  if sky.kind is SkyKind.hosek { ret 4.0 }
   ret 0.0
 }
 
@@ -115,6 +130,7 @@ func createSkyStylised(sunDir: view Vec3, sunColor: view Vec3,
     # you can see, not an accurate 0.53-degree disc.
     sunAngularRadius: 0.05
     sunDiscIntensity: 2.0
+    groundAlbedo: skyDefaultGroundAlbedo
     zenithColor: zenith
     horizonColor: horizon
     bands: bands
@@ -124,6 +140,43 @@ func createSkyStylised(sunDir: view Vec3, sunColor: view Vec3,
 # The fallback sky, built from what a scene already has. Taking the
 # anchors from an existing Light3d rather than from new numbers is what
 # makes M0 provably a no-op.
+# A PHYSICAL sky from a sun direction, using Hosek-Wilkie (#400).
+#
+# The default procedural sky. Preetham (createSkyProcedural) is retained
+# alongside it as the table-free fallback, but this is the better fit where a
+# daylight sky is actually looked at — near the horizon and at low sun — and it
+# is the only one of the two that responds to ground albedo.
+#
+# `turbidity` is haze: 2 is an exceptionally clear day, 3-6 ordinary, above 10
+# fog. `groundAlbedo` is how much light the ground bounces back up: ~0.1 dark
+# rock, 0.25 grass, 0.8 fresh snow.
+func createSkyHosek(sunDir: view Vec3, sunColor: view Vec3,
+                    turbidity: view Float, groundAlbedo: view Float) pub ret Sky {
+  ret Sky {
+    kind: SkyKind.hosek
+    exposure: 1.0
+    yawDeg: 0.0
+    sunDir: sunDir
+    sunColor: sunColor
+    # The hemisphere anchors stay populated: skyIrradiance still uses them until
+    # SH9 irradiance lands (#401), so a Hosek sky is currently lit by the same
+    # authored ambient as any other while its BACKGROUND is the fitted model.
+    # Leaving them zero would light the scene from nothing.
+    ambSky: vec3.create(x: 0.32, y: 0.45, z: 0.62)
+    ambGround: vec3.create(x: 0.18, y: 0.16, z: 0.13)
+    clearColor: vec3.create(x: 0.32, y: 0.45, z: 0.62)
+    turbidity: turbidity
+    sunAngularRadius: 0.00465
+    sunDiscIntensity: 12.0
+    groundAlbedo: groundAlbedo
+    # Below the horizon the fit is undefined, so the shader fades to
+    # horizonColor there; it is a ground tone, not a stylised ramp anchor.
+    zenithColor: vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    horizonColor: vec3.create(x: 0.22, y: 0.20, z: 0.17)
+    bands: 0.0
+  }
+}
+
 func createSkyNone(light: view Light3d, clearColor: view Vec3) pub ret Sky {
   ret Sky {
     kind: SkyKind.none
@@ -137,6 +190,7 @@ func createSkyNone(light: view Light3d, clearColor: view Vec3) pub ret Sky {
     turbidity: 3.0
     sunAngularRadius: 0.0047
     sunDiscIntensity: 0.0
+    groundAlbedo: skyDefaultGroundAlbedo
     zenithColor: light.ambSky
     horizonColor: light.ambGround
     bands: 1.0
@@ -166,6 +220,7 @@ func createSkyProcedural(sunDir: view Vec3, sunColor: view Vec3,
     # The real sun subtends about 0.53 degrees; this is its radius.
     sunAngularRadius: 0.0047
     sunDiscIntensity: 40.0
+    groundAlbedo: skyDefaultGroundAlbedo
     zenithColor: vec3.create(x: 0.25, y: 0.30, z: 0.40)
     horizonColor: vec3.create(x: 0.50, y: 0.55, z: 0.60)
     bands: 1.0

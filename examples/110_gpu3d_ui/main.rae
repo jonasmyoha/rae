@@ -529,7 +529,10 @@ func main() ret Int {
   # stylised one, and they deliberately use different kinds behind the
   # same interface.
   var renderer: DeferredRenderer = createDeferredRendererWithUiSky(
-    sky: createSkyProcedural(sunDir: light.sunDir, sunColor: light.sunColor, turbidity: 2.5))
+    # Hosek-Wilkie rather than Preetham: this scene's horizon is on screen, and
+    # that is exactly where the two differ most. groundAlbedo 0.25 = grass.
+    sky: createSkyHosek(sunDir: light.sunDir, sunColor: light.sunColor,
+                        turbidity: 2.5, groundAlbedo: 0.25))
   let gstatus: Int = compileDeferred(r: renderer)
   if gstatus is not 0 {
     log("render graph invalid: {gstatus}")
