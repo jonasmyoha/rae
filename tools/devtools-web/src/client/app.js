@@ -246,6 +246,18 @@ const COLLECTION_CATEGORIES = {
 let currentExampleCollection = "examples";
 let selectedExampleId = null;
 let selectedExampleFile = null;
+// LIVE-RUN ROSTER. runId -> { runId, exampleId, entry, mode, targetId,
+// targetLabel, actionId, actionLabel, startedAt, lines }. Mirrors the
+// server's map so the dock can show every running app, and so switching
+// examples or tabs no longer has to kill what is already running. The three
+// variables below stay as the *selected* example's view of that roster, which
+// is what the example page's buttons and status chip read.
+const activeExampleRuns = new Map();
+// Example whose start request is in flight. Without this, a roster update
+// triggered by some other app starting would clear the optimistic
+// "Starting…" state before this app's own started event arrives.
+let pendingExampleRunId = null;
+const RUN_LOG_LIMIT = 600;
 let activeExampleRunId = null;
 let exampleRunActive = false;
 let exampleWatchActive = false;
@@ -408,6 +420,9 @@ function handleServerEvent(payload) {
       break;
     case "example-run-artifacts":
       handleExampleArtifacts(payload);
+      break;
+    case "example-runs":
+      handleExampleRuns(payload);
       break;
     default:
       console.warn("Unknown payload", payload);
@@ -706,6 +721,24 @@ function handleBuildRunError(event) {
 }
 
 function handleExampleRunStarted(event) {
+  // Track EVERY run, not just the selected example's: the dock has to show
+  // apps whose page you are not looking at.
+  activeExampleRuns.set(event.runId, {
+    runId: event.runId,
+    exampleId: event.exampleId,
+    entry: event.entry,
+    mode: event.mode,
+    targetId: event.targetId,
+    targetLabel: event.targetLabel,
+    actionId: event.actionId,
+    actionLabel: event.actionLabel,
+    startedAt: Date.parse(event.timestamp) || Date.now(),
+    lines: []
+  });
+  if (pendingExampleRunId && pendingExampleRunId === event.exampleId) {
+    pendingExampleRunId = null;
+  }
+  renderRunningDock();
   if (!isExampleEventRelevant(event.exampleId, event.entry)) {
     return;
   }
@@ -736,6 +769,13 @@ function handleExampleRunStarted(event) {
 }
 
 function handleExampleRunOutput(event) {
+  // Keep a capped per-run backlog so opening a background app from the dock
+  // shows its recent output instead of an empty terminal.
+  const run = activeExampleRuns.get(event.runId);
+  if (run) {
+    run.lines.push({ text: event.line, stream: event.stream });
+    if (run.lines.length > RUN_LOG_LIMIT) run.lines.splice(0, run.lines.length - RUN_LOG_LIMIT);
+  }
   if (event.runId !== activeExampleRunId || !isExampleEventRelevant(event.exampleId, event.entry)) {
     return;
   }
@@ -743,6 +783,11 @@ function handleExampleRunOutput(event) {
 }
 
 function handleExampleRunCompleted(event) {
+  activeExampleRuns.delete(event.runId);
+  if (pendingExampleRunId && pendingExampleRunId === event.exampleId) {
+    pendingExampleRunId = null;
+  }
+  renderRunningDock();
   if (event.runId !== activeExampleRunId || !isExampleEventRelevant(event.exampleId, event.entry)) {
     return;
   }
@@ -786,6 +831,11 @@ function handleExampleRunCompleted(event) {
 }
 
 function handleExampleRunError(event) {
+  activeExampleRuns.delete(event.runId);
+  if (pendingExampleRunId && pendingExampleRunId === event.exampleId) {
+    pendingExampleRunId = null;
+  }
+  renderRunningDock();
   if (!isExampleEventRelevant(event.exampleId, event.entry)) {
     return;
   }
@@ -797,6 +847,283 @@ function handleExampleRunError(event) {
   activeExampleActionId = null;
   updateExampleButtons();
   activeExampleRunId = null;
+}
+
+// --- Running-apps dock -----------------------------------------------------
+// The server can now hold several example processes at once. This roster is
+// the client's mirror of that, plus the fixed overlay that keeps them visible
+// and controllable from any tab.
+
+const runningDock = document.getElementById("running-dock");
+const runningDockToggle = document.getElementById("running-dock-toggle");
+const runningDockChevron = document.getElementById("running-dock-chevron");
+const runningDockCount = document.getElementById("running-dock-count");
+const runningDockList = document.getElementById("running-dock-list");
+const runningDockStopAll = document.getElementById("running-dock-stop-all");
+let runningDockTicker = null;
+
+// Authoritative roster from the server. Reconciled rather than replaced so a
+// run's buffered output survives (and so a run we already know about doesn't
+// lose its lines every time some other app starts or stops).
+function handleExampleRuns(event) {
+  const incoming = Array.isArray(event.runs) ? event.runs : [];
+  const seen = new Set();
+  incoming.forEach((summary) => {
+    seen.add(summary.runId);
+    const existing = activeExampleRuns.get(summary.runId);
+    if (existing) {
+      Object.assign(existing, summary);
+    } else {
+      activeExampleRuns.set(summary.runId, { ...summary, lines: [] });
+    }
+  });
+  [...activeExampleRuns.keys()].forEach((runId) => {
+    if (!seen.has(runId)) activeExampleRuns.delete(runId);
+  });
+  syncSelectedRunState();
+  renderRunningDock();
+}
+
+function findRunForExample(example) {
+  if (!example) return null;
+  for (const run of activeExampleRuns.values()) {
+    if (isExampleRunForExample(run, example)) return run;
+  }
+  return null;
+}
+
+function isExampleRunForExample(run, example) {
+  if (run.exampleId && example.id === run.exampleId) return true;
+  if (run.exampleId) return false;
+  if (example.entry === run.entry) return true;
+  if (example.targetEntries) return Object.values(example.targetEntries).includes(run.entry);
+  return false;
+}
+
+// Re-derive the example page's run state from the roster. Left alone while a
+// start request for the selected example is still in flight, so the
+// optimistic "Starting…" state isn't stomped by an unrelated roster update.
+function syncSelectedRunState() {
+  const example = getSelectedExample();
+  if (!example) {
+    activeExampleRunId = null;
+    exampleRunActive = false;
+    exampleWatchActive = false;
+    return;
+  }
+  if (pendingExampleRunId === example.id) return;
+  const run = findRunForExample(example);
+  activeExampleRunId = run ? run.runId : null;
+  exampleRunActive = Boolean(run);
+  exampleWatchActive = run ? run.mode === "watch" : false;
+  activeExampleActionId = run?.actionId ?? null;
+  updateExampleButtons();
+}
+
+// Point the example page at whatever the newly selected example is doing:
+// re-derive the buttons/status from the roster and show that run's output
+// (or a clean terminal when it isn't running).
+function adoptSelectedExampleRun() {
+  const example = getSelectedExample();
+  if (!example) return;
+  const run = findRunForExample(example);
+  syncSelectedRunState();
+  if (run) {
+    replayExampleRunOutput(run);
+    setExampleStatus(
+      run.mode === "watch" ? "watching" : run.mode === "action" ? run.actionLabel ?? "action" : "running",
+      "is-running",
+      run.targetLabel
+    );
+  } else if (pendingExampleRunId !== example.id) {
+    clearExampleOutput();
+    allExampleLogLines = [];
+  }
+  renderRunningDock();
+}
+
+function renderRunningDock() {
+  if (!runningDock || !runningDockList) return;
+  const runs = [...activeExampleRuns.values()].sort((a, b) => b.startedAt - a.startedAt);
+  runningDock.hidden = runs.length === 0;
+  if (!runs.length) {
+    runningDockList.innerHTML = "";
+    stopRunningDockTicker();
+    return;
+  }
+  const watching = runs.filter((run) => run.mode === "watch").length;
+  runningDockCount.textContent =
+    `${runs.length} running` + (watching ? ` · ${watching} watching` : "");
+
+  runningDockList.innerHTML = "";
+  const fragment = document.createDocumentFragment();
+  runs.forEach((run) => {
+    const example = run.exampleId ? examples.find((ex) => ex.id === run.exampleId) : null;
+    const item = document.createElement("li");
+    item.className = "running-dock__item";
+    if (example && example.id === selectedExampleId) item.classList.add("is-selected");
+
+    const row = document.createElement("div");
+    row.className = "running-dock__row";
+    const mode = document.createElement("span");
+    mode.className = `running-dock__mode${run.mode === "watch" ? " is-watch" : ""}`;
+    mode.textContent = run.mode === "action" ? run.actionLabel ?? "action" : run.mode;
+    const name = document.createElement("span");
+    name.className = "running-dock__name";
+    const num = example ? exampleNumber(example) : null;
+    const label = example ? formatExampleName(example.name) : run.entry;
+    name.textContent = num ? `${num} ${label}` : label;
+    name.title = run.entry;
+    row.append(mode, name);
+
+    // Target + uptime share the action row rather than the title row: example
+    // names are long enough that competing for the same line truncated them
+    // to a couple of useless characters.
+    const actions = document.createElement("div");
+    actions.className = "running-dock__actions";
+    const meta = document.createElement("span");
+    meta.className = "running-dock__meta";
+    meta.textContent = `${run.targetLabel} · ${formatRunUptime(run.startedAt)}`;
+    actions.appendChild(meta);
+    if (example) {
+      const open = document.createElement("button");
+      open.type = "button";
+      open.textContent = "Open";
+      open.addEventListener("click", () => openExampleRun(run, example));
+      actions.appendChild(open);
+    }
+    const restart = document.createElement("button");
+    restart.type = "button";
+    restart.textContent = "Restart";
+    restart.addEventListener("click", () => restartExampleRun(run, example));
+    const stop = document.createElement("button");
+    stop.type = "button";
+    stop.className = "is-danger";
+    stop.textContent = "Stop";
+    stop.addEventListener("click", () => stopExampleRunById(run.runId));
+    actions.append(restart, stop);
+
+    item.append(row, actions);
+    fragment.appendChild(item);
+  });
+  runningDockList.appendChild(fragment);
+  startRunningDockTicker();
+}
+
+function formatRunUptime(startedAt) {
+  const seconds = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+// Only the uptime text needs the tick, so refresh the labels in place rather
+// than rebuilding the list (which would drop focus and thrash listeners).
+function startRunningDockTicker() {
+  if (runningDockTicker) return;
+  runningDockTicker = setInterval(() => {
+    const runs = [...activeExampleRuns.values()].sort((a, b) => b.startedAt - a.startedAt);
+    const metas = runningDockList?.querySelectorAll(".running-dock__meta") ?? [];
+    runs.forEach((run, index) => {
+      if (metas[index]) metas[index].textContent = `${run.targetLabel} · ${formatRunUptime(run.startedAt)}`;
+    });
+  }, 1000);
+}
+
+function stopRunningDockTicker() {
+  if (!runningDockTicker) return;
+  clearInterval(runningDockTicker);
+  runningDockTicker = null;
+}
+
+// Jump to a background app's control page: switch to whichever collection tab
+// owns it, select it, and replay its buffered output so the terminal isn't
+// blank for an app that has been running for minutes.
+function openExampleRun(run, example) {
+  const collection =
+    Object.keys(EXAMPLE_COLLECTIONS).find((key) => exampleBelongsToCollection(example, key)) ??
+    "examples";
+  selectedExampleId = example.id;
+  selectedExampleFile = example.files?.[0]?.path ?? null;
+  setActiveView(collection);
+  renderExampleList();
+  renderExampleDetail();
+  if (selectedExampleFile) loadExampleSource(selectedExampleFile);
+  replayExampleRunOutput(run);
+  syncSelectedRunState();
+  setExampleStatus(run.mode === "watch" ? "watching" : "running", "is-running", run.targetLabel);
+}
+
+function replayExampleRunOutput(run) {
+  clearExampleOutput();
+  allExampleLogLines = [];
+  if (!run?.lines?.length) return;
+  if (exampleOutput) exampleOutput.innerHTML = "";
+  run.lines.forEach((line) => appendExampleOutput(line.text, line.stream));
+}
+
+async function restartExampleRun(run, example) {
+  if (example) {
+    openExampleRun(run, example);
+    // Restart on the target the run is actually using, not whatever the global
+    // dropdown happens to say — otherwise restarting a background app can
+    // silently move it to a different target.
+    await triggerExampleRun("restart", run.targetId);
+    return;
+  }
+  // No example record (entry-only run) — nothing to re-issue from, so just
+  // stop it rather than pretend a restart happened.
+  await stopExampleRunById(run.runId);
+}
+
+async function stopExampleRunById(runId) {
+  try {
+    await fetch("/api/examples/stop", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ runId })
+    });
+  } catch (error) {
+    recordError("Example run", getErrorMessage(error));
+  }
+  activeExampleRuns.delete(runId);
+  syncSelectedRunState();
+  renderRunningDock();
+}
+
+runningDockToggle?.addEventListener("click", () => {
+  const collapsed = runningDock.classList.toggle("is-collapsed");
+  runningDockToggle.setAttribute("aria-expanded", String(!collapsed));
+  if (runningDockChevron) runningDockChevron.textContent = collapsed ? "▸" : "▾";
+});
+
+runningDockStopAll?.addEventListener("click", () => stopAllExampleRuns());
+
+async function stopAllExampleRuns() {
+  if (activeWasmWebAppModule?._rae_browser_request_stop) {
+    activeWasmWebAppModule._rae_browser_request_stop();
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  }
+  activeWasmWebAppModule = null;
+  try {
+    // No runId = stop everything, which is exactly what this control means.
+    await Promise.all([
+      fetch("/api/examples/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}"
+      }),
+      fetch("/api/examples/web-app", { method: "DELETE" })
+    ]);
+  } catch (error) {
+    recordError("Example run", getErrorMessage(error));
+  }
+  activeExampleRuns.clear();
+  syncSelectedRunState();
+  setExampleStatus("Idle", "", null);
+  updateExampleButtons();
+  renderRunningDock();
 }
 
 function setTestStatus(label, modifierClass, targetLabel) {
@@ -1413,8 +1740,9 @@ function applyExampleCollection(collection) {
   const visible = examplesForCurrentCollection();
   const selectionVisible = visible.some((ex) => ex.id === selectedExampleId);
   if (!selectionVisible) {
+    // Leaving an example's page no longer stops it — that is the whole point
+    // of the running-apps dock. The run keeps going and stays reachable there.
     const first = visible[0] ?? null;
-    if (exampleRunActive) stopExampleRun();
     selectedExampleId = first ? first.id : null;
     selectedExampleFile = first ? (first.files[0]?.path ?? null) : null;
     resetExampleArtifacts();
@@ -1422,6 +1750,7 @@ function applyExampleCollection(collection) {
   }
   renderExampleList();
   renderExampleDetail();
+  adoptSelectedExampleRun();
   updateExampleButtons();
 }
 
@@ -1502,7 +1831,8 @@ function renderExampleList() {
       button.innerHTML = `<h4>${numBadge}${displayName}${hiddenBadge}</h4><p>${targetSummary}</p>`;
       
       button.addEventListener("click", () => {
-        if (exampleRunActive) stopExampleRun();
+        // Selecting another example leaves any running app alone; the dock
+        // keeps it visible and the panel re-adopts whatever this one is doing.
         const previousId = selectedExampleId;
         selectedExampleId = example.id;
         if (previousId !== selectedExampleId) resetExampleArtifacts();
@@ -1510,6 +1840,7 @@ function renderExampleList() {
         renderExampleList();
         renderExampleDetail();
         if (selectedExampleFile) loadExampleSource(selectedExampleFile);
+        adoptSelectedExampleRun();
       });
       fragment.appendChild(button);
     });
@@ -2866,6 +3197,7 @@ async function triggerExampleRun(mode = "run", targetId = null, actionId = null)
   }
   exampleRunActive = true;
   exampleWatchActive = effectiveMode === "watch";
+  pendingExampleRunId = example.id;
   const label =
     mode === "restart"
       ? (wasWatching ? "Restarting watch…" : "Restarting…")
@@ -2905,30 +3237,42 @@ async function triggerExampleRun(mode = "run", targetId = null, actionId = null)
   } catch (error) {
     recordError("Example run", getErrorMessage(error));
     setExampleStatus("error", "is-failure", target.label);
+    pendingExampleRunId = null;
     exampleRunActive = false;
     exampleWatchActive = false;
     updateExampleButtons();
   }
 }
 
+// Stop the SELECTED example's run only. With concurrent runs, an unqualified
+// stop would take down every other app (including watch sessions the user is
+// mid-edit on); pass the run id so the server kills just this one.
 async function stopExampleRun() {
   if (activeWasmWebAppModule?._rae_browser_request_stop) {
     activeWasmWebAppModule._rae_browser_request_stop();
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   }
   activeWasmWebAppModule = null;
+  const runId = activeExampleRunId ?? findRunForExample(getSelectedExample())?.runId ?? null;
   try {
     await Promise.all([
-      fetch("/api/examples/stop", { method: "POST" }),
+      fetch("/api/examples/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(runId ? { runId } : {})
+      }),
       fetch("/api/examples/web-app", { method: "DELETE" })
     ]);
   } catch (error) {
     recordError("Example run", getErrorMessage(error));
   } finally {
+    if (runId) activeExampleRuns.delete(runId);
+    activeExampleRunId = null;
     exampleRunActive = false;
     exampleWatchActive = false;
     setExampleStatus("Idle", "", null);
     updateExampleButtons();
+    renderRunningDock();
   }
 }
 

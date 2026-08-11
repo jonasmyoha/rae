@@ -236,6 +236,27 @@ export type ExampleRunArtifactsMessage = {
   timestamp: string;
 };
 
+// One entry of the live-run roster. The server owns the truth about which
+// example processes are alive; the client mirrors this so the running-apps
+// overlay survives tab switches and page reloads.
+export type ExampleRunSummary = {
+  runId: string;
+  exampleId?: string;
+  entry: string;
+  mode: ExampleRunMode;
+  targetId: string;
+  targetLabel: string;
+  actionId?: string;
+  actionLabel?: string;
+  startedAt: number;
+};
+
+export type ExampleRunsMessage = {
+  type: "example-runs";
+  runs: ExampleRunSummary[];
+  timestamp: string;
+};
+
 export type TestRunCompletedMessage = {
   type: "test-run-completed";
   runId: string;
@@ -274,7 +295,8 @@ export type ServerEvent =
   | ExampleRunOutputMessage
   | ExampleRunCompletedMessage
   | ExampleRunErrorMessage
-  | ExampleRunArtifactsMessage;
+  | ExampleRunArtifactsMessage
+  | ExampleRunsMessage;
 
 export type ClientHelloMessage = {
   type: "client-hello";
