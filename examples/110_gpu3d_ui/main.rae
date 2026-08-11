@@ -169,11 +169,7 @@ func restore110State(raw: view String, ui: mod DemoUiResource, rig: mod CameraRi
 func syncDemoUi(world: mod UiWorld, state: mod DemoUiResource) ret Bool {
   var layoutDirty: Bool = false
   if state.appliedRevision is not state.revision {
-    setNodeActive(world: world, nodeId: "DebugPanel", value: state.debugOpen)
-    setNodeActive(world: world, nodeId: "Scene1Selected", value: state.activeScene is 1)
-    setNodeActive(world: world, nodeId: "Scene2Selected", value: state.activeScene is 2)
-    setNodeActive(world: world, nodeId: "Scene3Selected", value: state.activeScene is 3)
-    if state.paused {
+            if state.paused {
       setNodeText(world: world, nodeId: "PauseLabel", value: "Resume")
     } else {
       setNodeText(world: world, nodeId: "PauseLabel", value: "Pause")
@@ -245,10 +241,10 @@ func anchorUiToExtent(world: mod UiWorld, res: view Gpu2dUi, w: view Float, h: v
   setNodeRect(world: world, nodeId: "UiRoot", x: 0.0, y: 0.0, w: w, h: h)
 
   # Right-aligned controls, measured from the live width.
-  let debugW: Float = nodeRectW(world: world, nodeId: "DebugButton")
+  let debugW: Float = 0.0
   let pauseW: Float = nodeRectW(world: world, nodeId: "PauseButton")
   let debugX: Float = w - margin - debugW
-  setNodeRect(world: world, nodeId: "DebugButton", x: debugX, y: 24.0, w: debugW, h: 52.0)
+
   let pauseX: Float = debugX - 12.0 - pauseW
   setNodeRect(world: world, nodeId: "PauseButton", x: pauseX, y: 24.0, w: pauseW, h: 52.0)
   setNodeRect(world: world, nodeId: "FpsLabel", x: w - margin - 86.0, y: 82.0, w: 86.0, h: 16.0)
@@ -271,11 +267,12 @@ func anchorUiToExtent(world: mod UiWorld, res: view Gpu2dUi, w: view Float, h: v
   # Panels: the pause dialog centres in the window; the debug panel hangs
   # off the top-right under its button. Both are children of full-bleed
   # parents, so their offsets are relative to the window, not to a canvas.
-  let debugPanelW: Float = 322.0
-  let debugPanelH: Float = 286.0
-  var debugPanelX: Float = w - margin - debugPanelW
-  if debugPanelX < margin { debugPanelX = margin }
-  setNodeRect(world: world, nodeId: "DebugPanel", x: debugPanelX, y: 88.0, w: debugPanelW, h: debugPanelH)
+  # The side panel owns the right edge, full height — the same shape 113 uses,
+  # so the two examples read as one app family rather than two demos.
+  let sidePanelW: Float = 320.0
+  var sidePanelX: Float = w - sidePanelW
+  if sidePanelX < 0.0 { sidePanelX = 0.0 }
+  setNodeRect(world: world, nodeId: "SidePanel", x: sidePanelX, y: 0.0, w: sidePanelW, h: h)
 }
 
 func uploadMeshData(mesh: view MeshData) ret MeshHandle {
@@ -491,6 +488,7 @@ func main() ret Int {
     logWarnLine(ov: logView, text: "settings dialog failed to mount")
   }
   settingsApplyToWorld(s: settings, world: uiWorld)
+  setNodeActive(world: uiWorld, nodeId: "SidePanelBody", value: settings.open)
   var camera: Camera3d = scene1.camera
   var cameraRig: CameraRig = createCameraRig(camera: camera)
   # Restore before the test-state hook, so an explicit env override still
@@ -648,6 +646,7 @@ func main() ret Int {
     }
     if settingsChanged {
       settingsApplyToWorld(s: settings, world: uiWorld)
+      setNodeActive(world: uiWorld, nodeId: "SidePanelBody", value: settings.open)
       stateDirty = true
     }
     let uiLayoutDirty: Bool = syncDemoUi(world: uiWorld, state: uiState)
