@@ -36,9 +36,20 @@ func check(label: view String, ok: view Bool) {
 func main() {
   let dir: String = hotReloadDir()
 
-  # With no supervisor there is no override, so the legacy location stands.
-  # An app launched by hand must not start reading some other app's channel.
-  check(label: "default dir is .rae", ok: dir.equals(other: ".rae"))
+  # The directory is either the legacy shared location or a per-app override.
+  # Both `rae watch` and `rae run` now hand children a private directory — the
+  # window geometry lives there too — so an override is the normal case, not the
+  # exception. What must hold either way is that it is non-empty and that every
+  # path below derives from it.
+  # ONE assertion, not a branch: this test's output is compared byte for byte,
+  # so printing a different line depending on whether the variable happens to be
+  # set makes the expectation depend on how the test was launched.
+  let override: String = getEnv(name: "RAE_HOT_RELOAD_DIR")
+  var dirOk: Bool = dir.equals(other: ".rae")
+  if override.length() > 0 {
+    dirOk = dir.equals(other: override)
+  }
+  check(label: "dir is the override when set, else .rae", ok: dirOk)
 
   # Every channel file derives from the directory. If one of these were
   # hardcoded it would keep pointing at the shared path after a redirect,
@@ -52,9 +63,9 @@ func main() {
   # The file names themselves are the wire contract with the supervisor,
   # which writes them from C. A rename on either side silently stops the
   # app from ever noticing a rebuild.
-  check(label: "signal file name", ok: hotReloadSignalPath().equals(other: ".rae/reload.signal"))
-  check(label: "status file name", ok: hotReloadBuildStatusPath().equals(other: ".rae/build.status"))
-  check(label: "app state file name", ok: hotReloadStatePathFor(appId: "demo").equals(other: ".rae/state.demo.json"))
+  check(label: "signal file name", ok: hotReloadSignalPath().equals(other: "{dir}/reload.signal"))
+  check(label: "status file name", ok: hotReloadBuildStatusPath().equals(other: "{dir}/build.status"))
+  check(label: "app state file name", ok: hotReloadStatePathFor(appId: "demo").equals(other: "{dir}/state.demo.json"))
 
   # Two apps must never land on one state slot even inside a shared dir.
   let a: String = hotReloadStatePathFor(appId: "106_mobile_ui")
