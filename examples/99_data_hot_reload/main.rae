@@ -53,7 +53,9 @@ func main() {
   # the next frame should pick that up. We log every tick so the
   # expected output reads top-to-bottom.
   var tick: Int = 0
-  var now: Float = 0.0
+  # Float64 to match the clock type the watcher takes: it is a timestamp,
+  # and timestamps do not fit in an f32 once they carry a real epoch.
+  var now: Float64 = 0.0
   loop tick < 6 {
     if file_watch.checkForChanges(watcher: watcher, now: now) {
       log("tick {tick}: reloaded -> {loadConfig(path: configPath)}")
