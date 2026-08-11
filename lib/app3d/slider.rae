@@ -248,6 +248,11 @@ func setNodeFractionWidth(world: mod UiWorld, trackId: view String,
   }
   let next: ComputedRect = { x: tr.x, y: fr.y, w: want, h: fr.h }
   componentSet(this: world.computedRects, entity: fe, data: next)
+  if componentHas(this: world.rects, entity: fe) {
+    let ar: Rect = componentGet(this: world.rects, entity: fe)
+    let nextAuthored: Rect = { x: ar.x, y: ar.y, w: want, h: ar.h }
+    componentSet(this: world.rects, entity: fe, data: nextAuthored)
+  }
 }
 
 # Centre `handleId` on a fraction along `trackId` — the moving circle that makes
@@ -286,4 +291,11 @@ func centreNodeAtFraction(world: mod UiWorld, trackId: view String,
   }
   let next: ComputedRect = { x: wantX, y: wantY, w: hr.w, h: hr.h }
   componentSet(this: world.computedRects, entity: he, data: next)
+  if componentHas(this: world.rects, entity: he) {
+    let ar: Rect = componentGet(this: world.rects, entity: he)
+    # The authored rect is relative to the track, so store the offset rather
+    # than the absolute position layout just produced.
+    let nextAuthored: Rect = { x: travel * f, y: ar.y, w: ar.w, h: ar.h }
+    componentSet(this: world.rects, entity: he, data: nextAuthored)
+  }
 }
