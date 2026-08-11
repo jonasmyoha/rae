@@ -1313,6 +1313,19 @@ static bool sema_is_numeric_literal(const AstExpr* e) {
     return false;
 }
 
+/* See through `view T` / `mod T` for the numeric-conversion check.
+ *
+ * A reference-mode parameter's TypeInfo is TYPE_REF wrapping the numeric
+ * type, so a check that looked only at the outer kind silently skipped every
+ * value arriving as `view Float64` / `mod Float64` — which is exactly how
+ * four epoch timestamps ended up narrowed into `Float` fields in the mobile
+ * UI (#407). Reading through a reference does not change the value's type,
+ * so neither should the rule. */
+static TypeInfo* sema_strip_ref(TypeInfo* t) {
+    while (t && t->kind == TYPE_REF && t->as.ref.base) t = t->as.ref.base;
+    return t;
+}
+
 static const char* sema_numeric_name(TypeKind k) {
     switch (k) {
         case TYPE_INT: return "Int";
@@ -1331,17 +1344,20 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
      * animation timing and FPS in the gpu3d examples; a warning would not
      * have stopped it. Literals are exempt: they are materialised directly
      * in the destination type, not converted. */
-    if (sema_is_numeric_kind(expected->kind) &&
-        sema_is_numeric_kind(expr->resolved_type->kind) &&
-        expected->kind != expr->resolved_type->kind &&
+    TypeInfo* want_num = sema_strip_ref(expected);
+    TypeInfo* got_num = sema_strip_ref(expr->resolved_type);
+    if (want_num && got_num &&
+        sema_is_numeric_kind(want_num->kind) &&
+        sema_is_numeric_kind(got_num->kind) &&
+        want_num->kind != got_num->kind &&
         expr->kind != AST_EXPR_CAST &&
         !sema_is_numeric_literal(expr)) {
         char buf[240];
         snprintf(buf, sizeof(buf),
             "cannot implicitly convert %s to %s; Rae has no implicit numeric conversions - write `value as %s`",
-            sema_numeric_name(expr->resolved_type->kind),
-            sema_numeric_name(expected->kind),
-            sema_numeric_name(expected->kind));
+            sema_numeric_name(got_num->kind),
+            sema_numeric_name(want_num->kind),
+            sema_numeric_name(want_num->kind));
         const char* err_file = s_current_decl_origin ? s_current_decl_origin : NULL;
         diag_error(err_file, (int)expr->line, (int)expr->column, buf);
         if (s_current_module) s_current_module->had_error = true;
