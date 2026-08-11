@@ -71,7 +71,7 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
                               float skyKind, float turbidity, float skyExposure,
                               float sunSizeRad, float zenR, float zenG, float zenB,
                               float bands, float horR, float horG, float horB,
-                              float discI, float groundAlbedo){
+                              float discI){
     (void)camX; (void)camY; (void)camZ; (void)exposure;
     (void)sunX; (void)sunY; (void)sunZ;
     (void)sunR; (void)sunG; (void)sunB;
@@ -119,3 +119,5 @@ void rae_ext_gpu3d_drawSkinned(int64_t mesh, rae_Mat4* model,
 void rae_ext_gpu3d_skinFrameBegin(void) {}
 int64_t rae_ext_gpu3d_skinDrawCount(void) { return 0; }
 void rae_ext_gpu3d_skinShutdown(void) {}
+
+void rae_ext_gbuffer_skyHosekPush(int64_t index, float value){ (void)index; (void)value; }
