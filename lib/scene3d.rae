@@ -76,6 +76,17 @@ type Material3d {
   metallic: Float
   roughness: Float
   emission: Vec3
+  # Shade this surface in bands rather than with the PBR BRDF (#396).
+  #
+  # A MATERIAL FLAG, NOT A FRAME SETTING. The deferred G-buffer stores
+  # surface attributes independently of how they are lit, so the style is
+  # a different read of the same buffer — which means toon and PBR
+  # objects can share one frame and one sun. A frame-wide switch would
+  # have been simpler and could not express that.
+  #
+  # Deferred only. The forward path ignores it rather than growing a
+  # second implementation of the same look.
+  toon: Bool
 }
 
 type Camera3d {
@@ -190,8 +201,23 @@ func snapshotPrevTransforms(scene: mod Scene3d) pub {
 
 func addMaterial(scene: mod Scene3d, baseColor: view Vec3, metallic: view Float, roughness: view Float, emission: view Vec3) pub ret Int {
   let index: Int = scene.materials.length
-  scene.materials.add(value: Material3d { baseColor: baseColor, metallic: metallic, roughness: roughness, emission: emission })
+  scene.materials.add(value: Material3d { baseColor: baseColor, metallic: metallic, roughness: roughness, emission: emission, toon: false })
   ret index
+}
+
+# Switch an existing material between banded and PBR shading. Separate
+# from `addMaterial` so a style toggle does not have to rebuild a scene's
+# materials — the attribute lives on the material, and this flips it in
+# place for every instance already referring to it.
+func setMaterialToon(scene: mod Scene3d, index: view Int, toon: view Bool) pub {
+  if index < 0 or index >= scene.materials.length {
+    ret
+  }
+  let m: Material3d = scene.materials.at(index: index)
+  scene.materials.set(index: index, value: Material3d {
+    baseColor: m.baseColor, metallic: m.metallic, roughness: m.roughness,
+    emission: m.emission, toon: toon
+  })
 }
 
 # Attach a triangle mesh to a fresh entity. Raster backend renders these.
