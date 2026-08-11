@@ -29,15 +29,17 @@ void rae_ext_gbuffer_begin(rae_Mat4* viewProj, float clearR, float clearG, float
 }
 void rae_ext_gbuffer_draw(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
                           float r, float g, float b,
-                          float metallic, float roughness, float emissive){
+                          float metallic, float roughness, float emissive,
+                          int64_t toon){
     (void)mesh; (void)model; (void)prevModel; (void)r; (void)g; (void)b;
-    (void)metallic; (void)roughness; (void)emissive;
+    (void)metallic; (void)roughness; (void)emissive; (void)toon;
 }
 void rae_ext_gbuffer_drawSkinned(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
                                  float r, float g, float b,
-                                 float metallic, float roughness, float emissive){
+                                 float metallic, float roughness, float emissive,
+                                 int64_t toon){
     (void)mesh; (void)model; (void)prevModel; (void)r; (void)g; (void)b;
-    (void)metallic; (void)roughness; (void)emissive;
+    (void)metallic; (void)roughness; (void)emissive; (void)toon;
 }
 void rae_ext_gbuffer_drawMetaballs(const float* packedBalls, int64_t count,
                                    const float* packedColors, float smoothing,

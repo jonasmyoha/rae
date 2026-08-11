@@ -47,8 +47,8 @@ open math3d
 
 # ----- raw C ABI (implementation detail; prefer the typed API below) ---
 func begin(viewProj: view Mat4, clearR: Float, clearG: Float, clearB: Float) extern
-func draw(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emissive: Float) extern
-func drawSkinned(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emissive: Float) extern
+func draw(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emissive: Float, toon: Int) extern
+func drawSkinned(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emissive: Float, toon: Int) extern
 func drawMetaballs(packedBalls: view Buffer(Float), count: Int, packedColors: view Buffer(Float), smoothing: Float, camX: Float, camY: Float, camZ: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
 func sdfShutdown() extern
 func end() extern
@@ -118,6 +118,15 @@ func modelMatrixOf(t: view Transform3d) pub ret Mat4 {
 # `prevTransform` is where the instance was LAST frame; it drives the
 # G-buffer's motion channel, which TAA reads (#390). Pass the same
 # transform when an object did not move.
+# Bool -> Int at the extern boundary, where Rae's Bool has no defined
+# representation. One place to cross it, so both draw paths agree.
+func toonFlag(material: view Material3d) ret Int {
+  if material.toon {
+    ret 1
+  }
+  ret 0
+}
+
 func drawInstance(mesh: view MeshHandle, transform: view Transform3d, prevTransform: view Transform3d, material: view Material3d) pub {
   if not meshHandleIsValid(h: mesh) {
     ret
@@ -138,7 +147,8 @@ func drawInstance(mesh: view MeshHandle, transform: view Transform3d, prevTransf
   draw(
     mesh: mesh.id, model: model, prevModel: prevModel,
     r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
-    metallic: material.metallic, roughness: material.roughness, emissive: emissive
+    metallic: material.metallic, roughness: material.roughness, emissive: emissive,
+    toon: toonFlag(material: material)
   )
 }
 
@@ -162,7 +172,8 @@ func drawSkinnedInstance(mesh: view MeshHandle, model: view Mat4, prevModel: vie
   drawSkinned(
     mesh: mesh.id, model: model, prevModel: prevModel,
     r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
-    metallic: material.metallic, roughness: material.roughness, emissive: emissive
+    metallic: material.metallic, roughness: material.roughness, emissive: emissive,
+    toon: toonFlag(material: material)
   )
 }
 

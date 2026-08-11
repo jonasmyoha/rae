@@ -144,6 +144,15 @@ static WGPUBuffer         gb_view_ubuf = NULL;
 #define GB_MODE_LIT      0.0f
 #define GB_MODE_EMISSIVE (1.0f / 3.0f)
 #define GB_MODE_UNLIT    (2.0f / 3.0f)
+/* TOON (#396) takes the last of the four values. Being PER-MATERIAL
+ * rather than a whole-frame uniform is the point: the G-buffer already
+ * stores surface attributes independently of how they are lit, so a
+ * shading STYLE is a different read of the same buffer, and toon and PBR
+ * objects can stand in one frame lit by one sun. A frame-wide switch
+ * would have been one branch and no new bits, but could not mix — and
+ * mixing is the case worth having. It costs nothing here because the 2
+ * bits were already allocated and this value was spare. */
+#define GB_MODE_TOON     1.0f
 /* WGSL-literal forms of the same constants, so the deferred SDF pass
  * cannot drift from the raster pass's encoding. */
 #define GB_MODE_LIT_WGSL       "0.0"
@@ -736,7 +745,8 @@ void rae_ext_gbuffer_begin(rae_Mat4* viewProj, float clearR, float clearG, float
  * pass back so a following static draw is unaffected. */
 void rae_ext_gbuffer_drawSkinned(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
                                  float r, float g, float b,
-                                 float metallic, float roughness, float emissive) {
+                                 float metallic, float roughness, float emissive,
+                                 int64_t toon) {
     if (!gb_pass || !model || !gb_skin_pipeline) return;
     int slot = (int)mesh - 1;
     if (slot < 0 || slot >= g3d_skin_mesh_n) return;
@@ -762,7 +772,10 @@ void rae_ext_gbuffer_drawSkinned(int64_t mesh, rae_Mat4* model, rae_Mat4* prevMo
     memcpy(d + 16, prevModel ? prevModel->m.v : model->m.v, 16 * sizeof(float));
     d[32] = r; d[33] = g; d[34] = b; d[35] = metallic;
     d[36] = roughness;
-    if (emissive > 0.0f) {
+    if (toon) {
+        d[37] = 1.0f;
+        d[38] = GB_MODE_TOON;
+    } else if (emissive > 0.0f) {
         float e = logf(1.0f + emissive) / GB_EMISSIVE_LOG_K;
         d[37] = e > 1.0f ? 1.0f : e;
         d[38] = GB_MODE_EMISSIVE;
@@ -790,7 +803,8 @@ void rae_ext_gbuffer_drawSkinned(int64_t mesh, rae_Mat4* model, rae_Mat4* prevMo
 
 void rae_ext_gbuffer_draw(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
                           float r, float g, float b,
-                          float metallic, float roughness, float emissive) {
+                          float metallic, float roughness, float emissive,
+                          int64_t toon) {
     if (!gb_pass || !model) return;
     int slot = (int)mesh - 1;
     if (slot < 0 || slot >= g3d_mesh_n) return;
@@ -814,7 +828,14 @@ void rae_ext_gbuffer_draw(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
      * and flip the shading mode so lighting knows which it is. A
      * non-emitter stores 1.0 there, which reads as "unoccluded" — the
      * correct default until an AO pass writes something better. */
-    if (emissive > 0.0f) {
+    if (toon) {
+        /* Toon claims C.w as occlusion, so it cannot also carry an
+         * emissive intensity — the two want the same channel. Style wins
+         * over glow rather than silently producing a half-decoded value;
+         * a stylised emitter would want its own band treatment anyway. */
+        d[37] = 1.0f;
+        d[38] = GB_MODE_TOON;
+    } else if (emissive > 0.0f) {
         float e = logf(1.0f + emissive) / GB_EMISSIVE_LOG_K;
         d[37] = e > 1.0f ? 1.0f : e;
         d[38] = GB_MODE_EMISSIVE;
