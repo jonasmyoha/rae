@@ -3101,13 +3101,58 @@ static bool watch_wait_for_exit(pid_t pid, int timeout_ms, int* out_status) {
   return false;
 }
 
-static pid_t watch_spawn_child(const char* bin_path, const char* run_cwd) {
+// PER-APP HOT-RELOAD CHANNEL. `.rae/reload.signal` + `.rae/build.status`
+// used to be one fixed path per working tree, which was fine while only one
+// app could run at a time. With several apps running (devtools can now watch
+// more than one), every app polled the SAME signal file, so any supervisor's
+// rebuild made every other running app save-state-and-exit. Each supervisor
+// now owns `.rae/apps/<id>/` and tells its own children where to look; apps
+// launched without a supervisor keep the plain `.rae` default and therefore
+// see a file nobody writes.
+#define RAE_HOT_RELOAD_DIR_ENV "RAE_HOT_RELOAD_DIR"
+
+// Channel id from the project root (or the entry's own directory), reduced to
+// path-safe characters so it can name a directory.
+static void watch_channel_id(const char* project_root,
+                             const char* entry,
+                             char* out,
+                             size_t out_size) {
+  const char* source = (project_root && project_root[0]) ? project_root : entry;
+  char trimmed[PATH_MAX];
+  snprintf(trimmed, sizeof(trimmed), "%s", source ? source : "app");
+  // Drop a trailing slash so basename() of "a/b/" is "b", not "".
+  size_t len = strlen(trimmed);
+  while (len > 1 && trimmed[len - 1] == '/') { trimmed[--len] = '\0'; }
+  const char* base = strrchr(trimmed, '/');
+  base = base ? base + 1 : trimmed;
+  // An entry path reduces to a file name; strip the extension.
+  char name[PATH_MAX];
+  snprintf(name, sizeof(name), "%s", base);
+  char* dot = strrchr(name, '.');
+  if (dot && dot != name) *dot = '\0';
+
+  size_t o = 0;
+  for (size_t i = 0; name[i] && o + 1 < out_size; i++) {
+    unsigned char c = (unsigned char)name[i];
+    bool safe = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_';
+    out[o++] = safe ? (char)c : '_';
+  }
+  out[o] = '\0';
+  if (o == 0) snprintf(out, out_size, "app");
+}
+
+static pid_t watch_spawn_child(const char* bin_path,
+                               const char* run_cwd,
+                               const char* channel_dir) {
   pid_t pid = fork();
   if (pid < 0) {
     fprintf(stderr, "rae watch: fork failed (%s)\n", strerror(errno));
     return -1;
   }
   if (pid == 0) {
+    // The channel dir is absolute precisely because of the chdir below.
+    if (channel_dir && channel_dir[0]) setenv(RAE_HOT_RELOAD_DIR_ENV, channel_dir, 1);
     // Run with cwd = lib-root so root-relative asset paths resolve (same as
     // `rae run` and the devtools). bin_path is absolute, so this is safe.
     if (run_cwd && run_cwd[0]) { if (chdir(run_cwd) != 0) { /* best effort */ } }
@@ -3125,13 +3170,15 @@ static pid_t watch_spawn_child(const char* bin_path, const char* run_cwd) {
 // identically across targets.
 static pid_t watch_spawn_live_child(const char* rae_exe,
                                     const char* entry,
-                                    const char* project_root) {
+                                    const char* project_root,
+                                    const char* channel_dir) {
   pid_t pid = fork();
   if (pid < 0) {
     fprintf(stderr, "rae watch: fork failed (%s)\n", strerror(errno));
     return -1;
   }
   if (pid == 0) {
+    if (channel_dir && channel_dir[0]) setenv(RAE_HOT_RELOAD_DIR_ENV, channel_dir, 1);
     // execl: rae run --target live --project <root> <entry>
     if (project_root && project_root[0]) {
       execl(rae_exe, rae_exe, "run", "--target", "live",
@@ -3215,8 +3262,22 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
   char lib_root[PATH_MAX] = {0};
   if (run_opts->zero_config) find_lib_root(project_root, lib_root, sizeof(lib_root));
 
-  if (!ensure_directory_p(".rae/build")) {
-    fprintf(stderr, "rae watch: could not create .rae/build directory\n");
+  // Absolute path to cwd: the channel and build dirs hang off it, and the
+  // child chdir()s away before it reads them.
+  char cwd_abs[PATH_MAX];
+  if (!getcwd(cwd_abs, sizeof(cwd_abs))) {
+    snprintf(cwd_abs, sizeof(cwd_abs), ".");
+  }
+
+  // This supervisor's private hot-reload channel (see watch_channel_id).
+  char channel_id[128];
+  watch_channel_id(project_root, entry, channel_id, sizeof(channel_id));
+  char dotrae[PATH_MAX];
+  snprintf(dotrae, sizeof(dotrae), "%s/.rae/apps/%s", cwd_abs, channel_id);
+  char channel_build_root[PATH_MAX];
+  snprintf(channel_build_root, sizeof(channel_build_root), "%s/build", dotrae);
+  if (!ensure_directory_p(channel_build_root)) {
+    fprintf(stderr, "rae watch: could not create %s directory\n", channel_build_root);
     return 1;
   }
 
@@ -3229,12 +3290,6 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
     snprintf(watch_root, sizeof(watch_root), "%s", entry);
     char* slash = strrchr(watch_root, '/');
     if (slash) *slash = '\0'; else snprintf(watch_root, sizeof(watch_root), ".");
-  }
-
-  // Absolute path to cwd for build-dir construction below.
-  char cwd_abs[PATH_MAX];
-  if (!getcwd(cwd_abs, sizeof(cwd_abs))) {
-    snprintf(cwd_abs, sizeof(cwd_abs), ".");
   }
 
   // ---- Initial build ----
@@ -3254,20 +3309,20 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
       fprintf(stderr, "rae watch: entry file '%s' not found\n", entry);
       return 1;
     }
-    watch_write_build_status(".rae", true, "live");
+    watch_write_build_status(dotrae, true, "live");
   } else {
     build_seq = 1;
     snprintf(build_id, sizeof(build_id), "b%lld", build_seq);
     char build_dir[PATH_MAX];
-    snprintf(build_dir, sizeof(build_dir), "%s/.rae/build/build-%lld", cwd_abs, build_seq);
+    snprintf(build_dir, sizeof(build_dir), "%s/build-%lld", channel_build_root, build_seq);
     printf("rae watch: building %s (%s) ...\n", entry, build_id);
     fflush(stdout);
     if (!watch_build_into_dir(entry, project_root, build_dir, current_bin, run_opts->profile)) {
       fprintf(stderr, "rae watch: initial build failed\n");
-      watch_write_build_status(".rae", false, "initial build failed");
+      watch_write_build_status(dotrae, false, "initial build failed");
       return 1;
     }
-    watch_write_build_status(".rae", true, build_id);
+    watch_write_build_status(dotrae, true, build_id);
   }
 
   // ---- Source-set watcher ----
@@ -3302,8 +3357,8 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
 
   // ---- Spawn first child + arm health window ----
   pid_t child = is_live
-    ? watch_spawn_live_child(g_rae_executable_path, entry, project_root)
-    : watch_spawn_child(current_bin, lib_root);
+    ? watch_spawn_live_child(g_rae_executable_path, entry, project_root, dotrae)
+    : watch_spawn_child(current_bin, lib_root, dotrae);
   if (child < 0) {
     watch_state_free(&ws);
     return 1;
@@ -3348,12 +3403,12 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
           fprintf(stderr,
                   "rae watch: new build unhealthy; falling back to previous-good\n");
           fflush(stderr);
-          watch_write_build_status(".rae", false, "binary unhealthy; reverted");
+          watch_write_build_status(dotrae, false, "binary unhealthy; reverted");
           // Restore previous as current.
           strncpy(current_bin, previous_bin, sizeof(current_bin) - 1);
           current_bin[sizeof(current_bin) - 1] = '\0';
           previous_bin[0] = '\0';
-          child = watch_spawn_child(current_bin, lib_root);
+          child = watch_spawn_child(current_bin, lib_root, dotrae);
           if (child < 0) break;
           spawn_t = watch_now_ms();
           health_until = spawn_t + HEALTH_MS;
@@ -3408,28 +3463,28 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
       // Live: no compile step here. The VM JITs at spawn; if the
       // source is broken the new child will fail and we'll learn
       // about it via the health window. Optimistic build.status.
-      watch_write_build_status(".rae", true, "live");
+      watch_write_build_status(dotrae, true, "live");
     } else {
       build_seq += 1;
       snprintf(build_id, sizeof(build_id), "b%lld", build_seq);
       char build_dir[PATH_MAX];
       snprintf(build_dir, sizeof(build_dir),
-               "%s/.rae/build/build-%lld", cwd_abs, build_seq);
+               "%s/build-%lld", channel_build_root, build_seq);
 
       if (!watch_build_into_dir(entry, project_root, build_dir, new_bin, run_opts->profile)) {
         char msg[128];
         snprintf(msg, sizeof(msg), "build %s failed", build_id);
         fprintf(stderr, "rae watch: build failed; keeping running app\n");
         fflush(stderr);
-        watch_write_build_status(".rae", false, msg);
+        watch_write_build_status(dotrae, false, msg);
         continue;
       }
-      watch_write_build_status(".rae", true, build_id);
+      watch_write_build_status(dotrae, true, build_id);
     }
 
     // Tell the running child to save state and exit.
     if (child > 0) {
-      watch_write_reload_signal(".rae", "reload", build_id);
+      watch_write_reload_signal(dotrae, "reload", build_id);
       int wait_status = 0;
       if (!watch_wait_for_exit(child, 2000, &wait_status)) {
         fprintf(stderr, "rae watch: child didn't exit in 2s, forcing\n");
@@ -3452,8 +3507,8 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
 
     // Spawn the new child.
     child = is_live
-      ? watch_spawn_live_child(g_rae_executable_path, entry, project_root)
-      : watch_spawn_child(current_bin, lib_root);
+      ? watch_spawn_live_child(g_rae_executable_path, entry, project_root, dotrae)
+      : watch_spawn_child(current_bin, lib_root, dotrae);
     if (child < 0) break;
     spawn_t = watch_now_ms();
     health_until = spawn_t + HEALTH_MS;

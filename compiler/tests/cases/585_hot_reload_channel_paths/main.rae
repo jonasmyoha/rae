@@ -1,0 +1,63 @@
+# The hot-reload channel is per-app, not per-working-tree.
+#
+# `.rae/reload.signal` and `.rae/build.status` are a BROADCAST channel:
+# whoever writes them tells every polling app to save state and exit. While
+# only one app could run at a time a single fixed path was harmless. Once
+# several apps run at once (the devtools can watch more than one), a fixed
+# path meant one supervisor's rebuild reloaded every other running app, over
+# and over. `rae watch` now hands each child its own directory via
+# RAE_HOT_RELOAD_DIR and every path in lib/hot_reload is derived from it.
+#
+# This test pins the derivation. It cannot set the env var on itself, so it
+# asserts the part that is checkable in-process and is what actually broke:
+# every path hangs off `hotReloadDir()` rather than a literal, so redirecting
+# the directory redirects the whole channel — no path can be left behind.
+
+import core
+import string
+import sys
+open hot_reload
+
+func startsWith(s: view String, prefix: view String) ret Bool {
+  if prefix.length() > s.length() {
+    ret false
+  }
+  ret s.sub(start: 0, len: prefix.length()).equals(other: prefix)
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() {
+  let dir: String = hotReloadDir()
+
+  # With no supervisor there is no override, so the legacy location stands.
+  # An app launched by hand must not start reading some other app's channel.
+  check(label: "default dir is .rae", ok: dir.equals(other: ".rae"))
+
+  # Every channel file derives from the directory. If one of these were
+  # hardcoded it would keep pointing at the shared path after a redirect,
+  # which is exactly the crosstalk being fixed.
+  check(label: "state path derived", ok: startsWith(s: hotReloadStatePath(), prefix: "{dir}/"))
+  check(label: "signal path derived", ok: startsWith(s: hotReloadSignalPath(), prefix: "{dir}/"))
+  check(label: "status path derived", ok: startsWith(s: hotReloadBuildStatusPath(), prefix: "{dir}/"))
+  check(label: "generation path derived", ok: startsWith(s: hotReloadGenerationPath(), prefix: "{dir}/"))
+  check(label: "app state path derived", ok: startsWith(s: hotReloadStatePathFor(appId: "demo"), prefix: "{dir}/"))
+
+  # The file names themselves are the wire contract with the supervisor,
+  # which writes them from C. A rename on either side silently stops the
+  # app from ever noticing a rebuild.
+  check(label: "signal file name", ok: hotReloadSignalPath().equals(other: ".rae/reload.signal"))
+  check(label: "status file name", ok: hotReloadBuildStatusPath().equals(other: ".rae/build.status"))
+  check(label: "app state file name", ok: hotReloadStatePathFor(appId: "demo").equals(other: ".rae/state.demo.json"))
+
+  # Two apps must never land on one state slot even inside a shared dir.
+  let a: String = hotReloadStatePathFor(appId: "106_mobile_ui")
+  let b: String = hotReloadStatePathFor(appId: "113_walker_character")
+  check(label: "per-app state slots differ", ok: a.equals(other: b) is false)
+}
