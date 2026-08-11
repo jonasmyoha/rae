@@ -210,7 +210,13 @@ func runFrameAnimation(
 
 type FrameRenderResult pub {
   forceRender: Bool
-  lastRenderTime: Float
+  # Float64: this holds an epoch TIMESTAMP, not a duration. An f32 near
+  # 1.75e9 quantises to multiples of 128 s, which turns both tests below
+  # into constants — either every frame is "due" (no throttle at all) or
+  # none is (a visibly frozen app) for up to a minute at a time. Same for
+  # `renderUntil`, which is Float64 at its owner in main.rae and must not
+  # be narrowed on the way in.
+  lastRenderTime: Float64
   didRender: Bool
 }
 
@@ -225,11 +231,11 @@ func renderGpu2dFrame(
   bg: view RgbaColor
   now: view Float64
   targetFrameSec: view Float
-  lastRenderTime: view Float
+  lastRenderTime: view Float64
   busyAnimating: view Bool
   active: view Bool
   forceRender: view Bool
-  renderUntil: view Float
+  renderUntil: view Float64
   switching: view Bool
 ) pub ret FrameRenderResult {
   let frameDue: Bool = busyAnimating or forceRender or (now - lastRenderTime) >= targetFrameSec * 0.85
