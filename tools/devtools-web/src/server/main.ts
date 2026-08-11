@@ -462,8 +462,18 @@ const server = Bun.serve<SocketData>({
     }
 
     if (url.pathname === "/api/examples/stop" && req.method === "POST") {
-      await exampleRunner.stop();
+      // With concurrent runs, Stop is per-run. Omitting runId keeps the old
+      // "stop everything" behaviour, which the Stop-all control relies on.
+      const payload = await safeJson(req);
+      const runId = typeof payload.runId === "string" ? payload.runId : undefined;
+      await exampleRunner.stop(runId);
       return new Response(JSON.stringify({ ok: true }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    if (url.pathname === "/api/examples/runs" && req.method === "GET") {
+      return new Response(JSON.stringify({ runs: exampleRunner.list() }), {
         headers: { "Content-Type": "application/json" }
       });
     }
@@ -494,6 +504,15 @@ const server = Bun.serve<SocketData>({
       ws.subscribe(CHANNEL);
       ws.send(JSON.stringify(createServerInfoMessage()));
       ws.send(JSON.stringify(createStatusMessage("Connected to Rae DevTools server.")));
+      // Hand the fresh client the live-run roster so a page reload re-adopts
+      // whatever is still running instead of losing track of it.
+      ws.send(
+        JSON.stringify({
+          type: "example-runs",
+          runs: exampleRunner.list(),
+          timestamp: new Date().toISOString()
+        } satisfies ServerEvent)
+      );
       CONFIG_DEBUG_LINES.forEach((line) => {
         ws.send(JSON.stringify(createStatusMessage(`[debug] ${line}`)));
       });

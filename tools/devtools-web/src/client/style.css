@@ -1186,3 +1186,126 @@ button.btn-build-test:hover:not(:disabled) {
 }
 .run-dd__option:hover { background: rgba(255, 255, 255, 0.07); color: var(--text); }
 .run-dd__option.is-active { color: var(--accent); background: var(--accent-soft); }
+
+/* ---------------------------------------------------------------------------
+   Running-apps dock. Several examples can run concurrently, so the dock is
+   the persistent roster: it lives outside the tab panels and stays put while
+   you browse tests, builds, or another example's page.
+   ------------------------------------------------------------------------ */
+.running-dock {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 300;
+  width: 20rem;
+  max-width: calc(100vw - 2.5rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: rgba(24, 27, 35, 0.96);
+  border: 1px solid rgba(118, 225, 225, 0.35);
+  border-radius: 14px;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+}
+.running-dock[hidden] { display: none; }
+.running-dock__toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 0.6rem 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+}
+.running-dock__toggle:hover { background: rgba(255, 255, 255, 0.05); }
+.running-dock__chevron { margin-left: auto; color: var(--text-muted); }
+.running-dock.is-collapsed .running-dock__body { display: none; }
+.running-dock__pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.6);
+  animation: running-dock-pulse 1.8s ease-out infinite;
+  flex: 0 0 auto;
+}
+@keyframes running-dock-pulse {
+  70% { box-shadow: 0 0 0 7px rgba(52, 211, 153, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .running-dock__pulse { animation: none; }
+}
+.running-dock__list {
+  list-style: none;
+  max-height: 15rem;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+}
+.running-dock__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.55rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+.running-dock__item.is-selected { background: var(--accent-soft); }
+.running-dock__row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.running-dock__name {
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.running-dock__meta {
+  margin-right: auto;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.running-dock__mode {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.36rem;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+.running-dock__mode.is-watch { background: rgba(118, 225, 225, 0.18); color: var(--accent); }
+.running-dock__actions { display: flex; align-items: center; gap: 0.3rem; min-width: 0; }
+.running-dock__actions button {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  border-radius: 7px;
+  padding: 0.18rem 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.running-dock__actions button:hover { color: var(--text); background: rgba(255, 255, 255, 0.09); }
+.running-dock__actions button.is-danger:hover { color: var(--danger); border-color: rgba(248, 113, 113, 0.5); }
+.running-dock__footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.5rem 0.85rem;
+}

@@ -11,6 +11,7 @@ import type {
   ExampleRunOutputMessage,
   ExampleRunStartedMessage,
   ExampleRunArtifactsMessage,
+  ExampleRunSummary,
   ServerEvent
 } from "../shared/types";
 import type { RaeDevtoolsConfig, TargetConfig } from "./config";
@@ -26,6 +27,10 @@ type ExampleActionRequest = {
 
 type ActiveRun = {
   id: string;
+  // Identity of the *app*, as opposed to the run. Starting an app that is
+  // already running replaces its own run rather than everyone else's, which
+  // is what makes several apps (and several `watch` sessions) coexist.
+  key: string;
   entry: string;
   exampleId?: string;
   mode: ExampleRunMode;
@@ -48,7 +53,10 @@ export type ExampleRunOptions = {
 };
 
 export class ExampleRunner {
-  private activeRun: ActiveRun | null = null;
+  // MULTIPLE CONCURRENT RUNS. Keyed by run id. A single-slot `activeRun`
+  // used to mean starting anything killed everything else, which made it
+  // impossible to watch two apps at once — the main thing watch is for.
+  private runs = new Map<string, ActiveRun>();
 
   constructor(
     private config: RaeDevtoolsConfig,
@@ -61,7 +69,11 @@ export class ExampleRunner {
       return;
     }
 
-    await this.stop();
+    // Replace only this app's own run. Re-pressing Run/Watch on an app that
+    // is already up should not stack a second process for it, but must leave
+    // other apps alone.
+    const key = options.exampleId ?? entry;
+    await this.stopByKey(key);
 
     const target = resolveTarget(this.config, options.targetId);
     const action = options.action;
@@ -83,8 +95,9 @@ export class ExampleRunner {
       detached: true
     });
 
-    this.activeRun = {
+    const run: ActiveRun = {
       id: runId,
+      key,
       entry,
       exampleId: options.exampleId,
       mode,
@@ -96,6 +109,7 @@ export class ExampleRunner {
       tempOutputDir: prepared.tempDir,
       action
     };
+    this.runs.set(runId, run);
 
     this.broadcast({
       type: "example-run-started",
@@ -109,28 +123,29 @@ export class ExampleRunner {
       actionLabel: action?.label,
       timestamp: new Date().toISOString()
     } satisfies ExampleRunStartedMessage);
+    this.broadcastRoster();
 
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
 
-    child.stdout?.on("data", (chunk: string) => this.flushLines(chunk, "stdout"));
-    child.stderr?.on("data", (chunk: string) => this.flushLines(chunk, "stderr"));
+    child.stdout?.on("data", (chunk: string) => this.flushLines(run, chunk, "stdout"));
+    child.stderr?.on("data", (chunk: string) => this.flushLines(run, chunk, "stderr"));
 
     child.on("error", (error) => {
-      this.broadcastError(error);
-      this.cleanup();
+      this.broadcastError(run, error);
+      this.forget(run);
     });
 
     child.on("close", async (code) => {
-      this.flushRemainingBuffers();
-      const stopRequested = this.activeRun?.stopRequested ?? false;
+      this.flushRemainingBuffers(run);
+      const stopRequested = run.stopRequested;
       const exitCode = stopRequested ? 0 : code ?? null;
       const success = stopRequested ? true : code === 0;
 
       if (success && prepared.tempDir && mode === "build") {
         try {
           const files = await this.collectArtifacts(prepared.tempDir);
-          this.broadcastArtifacts(runId, entry, mode, target, files);
+          this.broadcastArtifacts(run, files);
         } catch (error) {
           console.warn("[examples] Failed to collect artifacts", error);
         }
@@ -153,71 +168,59 @@ export class ExampleRunner {
         durationMs: Date.now() - startedAt,
         timestamp: new Date().toISOString()
       } satisfies ExampleRunCompletedMessage);
-      this.cleanup();
+      this.forget(run);
     });
   }
 
-  private flushLines(chunk: string, stream: "stdout" | "stderr") {
-    if (!this.activeRun) return;
-    const buffer = this.activeRun.buffers[stream] + chunk;
+  private flushLines(run: ActiveRun, chunk: string, stream: "stdout" | "stderr") {
+    const buffer = run.buffers[stream] + chunk;
     const lines = buffer.split(/\r?\n/);
-    this.activeRun.buffers[stream] = lines.pop() ?? "";
+    run.buffers[stream] = lines.pop() ?? "";
 
     for (const line of lines) {
       if (!line.trim() && stream === "stdout") continue;
-      this.broadcast({
-        type: "example-run-output",
-        runId: this.activeRun.id,
-        exampleId: this.activeRun.exampleId,
-        entry: this.activeRun.entry,
-        mode: this.activeRun.mode,
-        targetId: this.activeRun.target.id,
-        targetLabel: this.activeRun.target.label,
-        actionId: this.activeRun.action?.id,
-        actionLabel: this.activeRun.action?.label,
-        stream,
-        line,
-        timestamp: new Date().toISOString()
-      } satisfies ExampleRunOutputMessage);
+      this.broadcastLine(run, stream, line);
     }
   }
 
-  private flushRemainingBuffers() {
-    if (!this.activeRun) return;
+  private flushRemainingBuffers(run: ActiveRun) {
     for (const stream of ["stdout", "stderr"] as const) {
-      const leftover = this.activeRun.buffers[stream];
+      const leftover = run.buffers[stream];
       if (leftover) {
-        this.broadcast({
-          type: "example-run-output",
-          runId: this.activeRun.id,
-          exampleId: this.activeRun.exampleId,
-          entry: this.activeRun.entry,
-          mode: this.activeRun.mode,
-          targetId: this.activeRun.target.id,
-          targetLabel: this.activeRun.target.label,
-          actionId: this.activeRun.action?.id,
-          actionLabel: this.activeRun.action?.label,
-          stream,
-          line: leftover,
-          timestamp: new Date().toISOString()
-        } satisfies ExampleRunOutputMessage);
+        this.broadcastLine(run, stream, leftover);
       }
-      this.activeRun.buffers[stream] = "";
+      run.buffers[stream] = "";
     }
   }
 
-  private broadcastError(error: unknown) {
-    if (!this.activeRun) return;
+  private broadcastLine(run: ActiveRun, stream: "stdout" | "stderr", line: string) {
+    this.broadcast({
+      type: "example-run-output",
+      runId: run.id,
+      exampleId: run.exampleId,
+      entry: run.entry,
+      mode: run.mode,
+      targetId: run.target.id,
+      targetLabel: run.target.label,
+      actionId: run.action?.id,
+      actionLabel: run.action?.label,
+      stream,
+      line,
+      timestamp: new Date().toISOString()
+    } satisfies ExampleRunOutputMessage);
+  }
+
+  private broadcastError(run: ActiveRun, error: unknown) {
     this.broadcast({
       type: "example-run-error",
-      runId: this.activeRun.id,
-      exampleId: this.activeRun.exampleId,
-      entry: this.activeRun.entry,
-      mode: this.activeRun.mode,
-      targetId: this.activeRun.target.id,
-      targetLabel: this.activeRun.target.label,
-      actionId: this.activeRun.action?.id,
-      actionLabel: this.activeRun.action?.label,
+      runId: run.id,
+      exampleId: run.exampleId,
+      entry: run.entry,
+      mode: run.mode,
+      targetId: run.target.id,
+      targetLabel: run.target.label,
+      actionId: run.action?.id,
+      actionLabel: run.action?.label,
       message: error instanceof Error ? error.message : String(error),
       timestamp: new Date().toISOString()
     } satisfies ExampleRunErrorMessage);
@@ -231,18 +234,60 @@ export class ExampleRunner {
     });
   }
 
-  private cleanup() {
-    this.activeRun = null;
+  /** Live-run roster, newest first, for the client's running-apps overlay. */
+  list(): ExampleRunSummary[] {
+    return [...this.runs.values()]
+      .sort((a, b) => b.startedAt - a.startedAt)
+      .map((run) => ({
+        runId: run.id,
+        exampleId: run.exampleId,
+        entry: run.entry,
+        mode: run.mode,
+        targetId: run.target.id,
+        targetLabel: run.target.label,
+        actionId: run.action?.id,
+        actionLabel: run.action?.label,
+        startedAt: run.startedAt
+      }));
   }
 
-  async stop(): Promise<void> {
-    if (!this.activeRun) return;
+  private broadcastRoster() {
+    this.broadcast({
+      type: "example-runs",
+      runs: this.list(),
+      timestamp: new Date().toISOString()
+    });
+  }
 
-    const run = this.activeRun;
+  private forget(run: ActiveRun) {
+    // Guard against a late close/error event for a run whose slot has
+    // already been taken over by a restart of the same app.
+    if (this.runs.get(run.id) === run) {
+      this.runs.delete(run.id);
+      this.broadcastRoster();
+    }
+  }
+
+  /** Stop one run by id, or every run when no id is given. */
+  async stop(runId?: string): Promise<void> {
+    if (runId) {
+      const run = this.runs.get(runId);
+      if (run) await this.stopRun(run);
+      return;
+    }
+    await Promise.all([...this.runs.values()].map((run) => this.stopRun(run)));
+  }
+
+  private async stopByKey(key: string): Promise<void> {
+    const matches = [...this.runs.values()].filter((run) => run.key === key);
+    await Promise.all(matches.map((run) => this.stopRun(run)));
+  }
+
+  private async stopRun(run: ActiveRun): Promise<void> {
     const pid = run.process.pid;
 
     if (!pid) {
-      this.activeRun = null;
+      this.forget(run);
       return;
     }
 
@@ -264,7 +309,7 @@ export class ExampleRunner {
       const finish = () => {
         clearTimeout(escalate);
         clearTimeout(giveup);
-        this.activeRun = null;
+        this.forget(run);
         resolve();
       };
 
@@ -383,22 +428,19 @@ export class ExampleRunner {
   }
 
   private broadcastArtifacts(
-    runId: string,
-    entry: string,
-    mode: ExampleRunMode,
-    target: TargetConfig,
+    run: ActiveRun,
     files: Array<{ path: string; size: number; hash: string }>
   ) {
     const payload: ExampleRunArtifactsMessage = {
       type: "example-run-artifacts",
-      runId,
-      exampleId: this.activeRun?.exampleId,
-      entry,
-      mode,
-      targetId: target.id,
-      targetLabel: target.label,
-      actionId: this.activeRun?.action?.id,
-      actionLabel: this.activeRun?.action?.label,
+      runId: run.id,
+      exampleId: run.exampleId,
+      entry: run.entry,
+      mode: run.mode,
+      targetId: run.target.id,
+      targetLabel: run.target.label,
+      actionId: run.action?.id,
+      actionLabel: run.action?.label,
       files,
       timestamp: new Date().toISOString()
     };
