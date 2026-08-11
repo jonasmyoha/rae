@@ -52,6 +52,9 @@ const settingsHourMin: Float = 0.0
 const settingsHourMax: Float = 24.0
 
 type SettingsState {
+  # Play/pause. Shared because both examples had one and they had drifted to
+  # different words for the same control — 110 said Resume, 113 said Play.
+  playing: Bool
   # Whether the panel BODY is showing. The button that toggles this stays
   # visible either way, or there would be no way to bring the panel back.
   open: Bool
@@ -69,6 +72,7 @@ type SettingsState {
 func createSettingsState(scene: view Int, sceneCount: view Int, speed: view Float,
                          toon: view Bool, hour: view Float) pub ret SettingsState {
   ret SettingsState {
+    playing: true
     open: true
     scene: scene
     sceneCount: sceneCount
@@ -134,6 +138,10 @@ func settingsHandleAction(s: mod SettingsState, actionId: view String) pub ret B
     s.open = s.open is false
     ret true
   }
+  if actionId.equals(other: "settings.playback") {
+    s.playing = s.playing is false
+    ret true
+  }
   if actionId.equals(other: "settings.toon") {
     s.toon = s.toon is false
     ret true
@@ -197,6 +205,13 @@ func settingsUpdatePointer(s: mod SettingsState, world: view UiWorld,
 # something changed; every write underneath is guarded against writing an
 # unchanged value.
 func settingsApplyToWorld(s: view SettingsState, world: mod UiWorld) pub {
+  var playLabel: String = "Pause"
+  if s.playing is false {
+    playLabel = "Play"
+  }
+  setNodeText(world: world, nodeId: "SettingsPlayLabel", value: playLabel)
+  setNodeFillSlot(world: world, nodeId: "SettingsPlayButton",
+                  slot: settingsSlotFor(on: s.playing is false))
   let pct: Int = speedPercent(v: s.speed)
   setNodeText(world: world, nodeId: "SettingsSpeedRow", value: "Animation speed {pct}%")
   setNodeText(world: world, nodeId: "SettingsTimeLabel", value: "Time of day {formatHour(hour: s.hour)}")

@@ -170,9 +170,7 @@ func syncDemoUi(world: mod UiWorld, state: mod DemoUiResource) ret Bool {
   var layoutDirty: Bool = false
   if state.appliedRevision is not state.revision {
             if state.paused {
-      setNodeText(world: world, nodeId: "PauseLabel", value: "Resume")
     } else {
-      setNodeText(world: world, nodeId: "PauseLabel", value: "Pause")
     }
     if state.fullSpeed {
       setNodeText(world: world, nodeId: "MotionButtonLabel", value: "Full")
@@ -193,10 +191,6 @@ func dispatchUiActions(input: view UiInput, state: mod DemoUiResource, rig: mod 
   var i: Int = 0
   loop i < input.events.length {
     let event: UiActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
-    if event.actionId.equals(other: "scene.pause") {
-      state.paused = not state.paused
-      state.revision = state.revision + 1
-    }
     if event.actionId.equals(other: "ui.debug") {
       state.debugOpen = not state.debugOpen
       state.revision = state.revision + 1
@@ -646,6 +640,9 @@ func main() ret Int {
                                       turbidity: skyTurbidity, groundAlbedo: skyGroundAlbedo)
       light.sunDir = settingsSunDir(s: settings)
       light.sunColor = settingsSunColor(s: settings)
+      # Pause is the shared control now; uiState still owns the flag the rest
+      # of this example reads.
+      uiState.paused = settings.playing is false
       settingsApplyToWorld(s: settings, world: uiWorld)
       setNodeActive(world: uiWorld, nodeId: "SidePanelBody", value: settings.open)
       stateDirty = true
