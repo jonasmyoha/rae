@@ -41,3 +41,12 @@ func headlessApplyAutoExitDefault(headless: view Bool, current: view Float) ret 
   }
   ret current
 }
+
+# Force the Spotify layer ON even under headless (`RAE_UI_SPOTIFY=1`).
+# Headless normally disables it because polling focuses Spotify.app, but
+# the poll path is where the 1 Hz throttle and the NowPlaying text updates
+# live, so it needs to be reachable without a visible window to test.
+func spotifyForcedOn() pub ret Bool {
+  let forceEnv: String = getEnv(name: "RAE_UI_SPOTIFY")
+  ret forceEnv.equals(other: "1")
+}
