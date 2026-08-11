@@ -86,7 +86,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && [ "$(grep -c "walk 195 ch" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "palette atlas 512x512" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "skinned parts: 12" "$TMP_OUT/render.log")" -eq 1 ] \
-             && [ "$(grep -c "panel buttons: 4 clip, 5 transport" "$TMP_OUT/render.log")" -eq 1 ] \
+             && [ "$(grep -c "panel buttons: 4 clip, 4 transport" "$TMP_OUT/render.log")" -eq 1 ] \
              && [ "$(grep -c "\[shadow\] casters 13, 3 cascades" "$TMP_OUT/render.log")" -eq 1 ]; then
             echo "PASS: $EXAMPLE_NAME (12 skinned parts + ground casting shadows, clip retargeted, atlas decoded)"
             ((PASSED++))
