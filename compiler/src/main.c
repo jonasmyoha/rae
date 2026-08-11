@@ -2606,6 +2606,13 @@ static int run_vm_file(const RunOptions* run_opts, const char* project_root) {
 // Shared by `rae run --target compiled` and `rae watch`. Returns true on
 // success; on failure, prints to stderr and returns false. The caller owns
 // the .c file (we don't unlink it here).
+/* Defined with the watch supervisor below; used by the plain `run` path to give
+ * each app its own directory (hot-reload channel + window geometry). */
+#define RAE_HOT_RELOAD_DIR_ENV "RAE_HOT_RELOAD_DIR"
+static void watch_channel_id(const char* project_root, const char* entry,
+                             char* out, size_t out_size);
+static bool ensure_directory_p(const char* path);
+
 static bool gcc_link_c_to_binary(const char* entry_rae_file,
                                  const char* c_path,
                                  const char* out_bin,
@@ -2884,6 +2891,20 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
     return 1;
   }
 
+  /* Give this run the same per-app directory `rae watch` gives its children.
+   * Nothing writes a reload signal for a plain run, so the hot-reload half is
+   * inert — but the WINDOW GEOMETRY lives there too, and without this two
+   * examples running side by side share one geometry file and land on top of
+   * each other. */
+  {
+    char cwd_abs[PATH_MAX];
+    if (!getcwd(cwd_abs, sizeof(cwd_abs))) snprintf(cwd_abs, sizeof(cwd_abs), ".");
+    char channel_id[128];
+    watch_channel_id(project_root, file_path, channel_id, sizeof(channel_id));
+    char channel_dir[PATH_MAX];
+    snprintf(channel_dir, sizeof(channel_dir), "%s/.rae/apps/%s", cwd_abs, channel_id);
+    if (ensure_directory_p(channel_dir)) setenv(RAE_HOT_RELOAD_DIR_ENV, channel_dir, 1);
+  }
   int result = system(temp_bin);
 
   if (chdired && have_saved) { if (chdir(saved_cwd) != 0) { /* best effort */ } }
@@ -3109,8 +3130,6 @@ static bool watch_wait_for_exit(pid_t pid, int timeout_ms, int* out_status) {
 // now owns `.rae/apps/<id>/` and tells its own children where to look; apps
 // launched without a supervisor keep the plain `.rae` default and therefore
 // see a file nobody writes.
-#define RAE_HOT_RELOAD_DIR_ENV "RAE_HOT_RELOAD_DIR"
-
 // Channel id from the project root (or the entry's own directory), reduced to
 // path-safe characters so it can name a directory.
 static void watch_channel_id(const char* project_root,
