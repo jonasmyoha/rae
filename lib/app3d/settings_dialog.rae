@@ -66,11 +66,19 @@ type SettingsState {
   toon: Bool
   skyModel: SettingsSkyModel
   hour: Float
-  timeSlider: Slider
+  # Drag state kept FLAT rather than as a nested Slider. Passing a nested struct
+  # field as a `mod` argument does not reliably write back in this compiler and
+  # fails silently — the slider looked wired, moved nothing, and reported no
+  # change. Same hazard renderer_deferred warns about for the sky.
+  timeDragging: Bool
 }
 
+# `skyModel` is the app's default, not a shared one: 110 is the realistic scene
+# and starts on Preetham, 113 is the stylised one and starts on Hosek. The panel
+# switches either.
 func createSettingsState(scene: view Int, sceneCount: view Int, speed: view Float,
-                         toon: view Bool, hour: view Float) pub ret SettingsState {
+                         toon: view Bool, hour: view Float,
+                         skyModel: SettingsSkyModel) pub ret SettingsState {
   ret SettingsState {
     playing: true
     open: true
@@ -78,11 +86,9 @@ func createSettingsState(scene: view Int, sceneCount: view Int, speed: view Floa
     sceneCount: sceneCount
     speed: speed
     toon: toon
-    skyModel: SettingsSkyModel.hosek
+    skyModel: skyModel
     hour: hour
-    timeSlider: createSlider(trackId: "SettingsTimeTrack", fillId: "SettingsTimeFill",
-                             minValue: settingsHourMin, maxValue: settingsHourMax,
-                             value: hour)
+    timeDragging: false
   }
 }
 
@@ -194,10 +200,30 @@ func settingsUpdatePointer(s: mod SettingsState, world: view UiWorld,
   if s.open is false {
     ret false
   }
-  if updateSlider(s: s.timeSlider, world: world, input: input) is false {
+  # A press anywhere on the track starts a drag and jumps the handle there: the
+  # handle is small and the track is the affordance.
+  if input.pointer.pressed {
+    if pointInNode(world: world, nodeId: "SettingsTimeTrack",
+                   x: input.pointer.x, y: input.pointer.y) {
+      s.timeDragging = true
+    }
+  }
+  # Ends on release, and also whenever the button is simply found to be up, so a
+  # release swallowed by a window switch cannot leave the handle stuck.
+  if input.pointer.released or input.pointer.down is false {
+    s.timeDragging = false
     ret false
   }
-  s.hour = s.timeSlider.value
+  if s.timeDragging is false {
+    ret false
+  }
+  let f: Float = fractionAcrossNode(world: world, nodeId: "SettingsTimeTrack",
+                                    x: input.pointer.x)
+  let next: Float = settingsHourMin + f * (settingsHourMax - settingsHourMin)
+  if next is s.hour {
+    ret false
+  }
+  s.hour = next
   ret true
 }
 
@@ -226,7 +252,13 @@ func settingsApplyToWorld(s: view SettingsState, world: mod UiWorld) pub {
   setNodeFillSlot(world: world, nodeId: "SettingsScene2", slot: settingsSlotFor(on: s.scene is 2))
   setNodeFillSlot(world: world, nodeId: "SettingsScene3", slot: settingsSlotFor(on: s.scene is 3))
 
-  applySliderFill(s: s.timeSlider, world: world)
+  # Fill up to the handle, then the handle itself centred on the value — that
+  # is what makes it read as a slider rather than a progress bar.
+  let f: Float = (s.hour - settingsHourMin) / (settingsHourMax - settingsHourMin)
+  setNodeFractionWidth(world: world, trackId: "SettingsTimeTrack",
+                       fillId: "SettingsTimeFill", fraction: f)
+  centreNodeAtFraction(world: world, trackId: "SettingsTimeTrack",
+                       handleId: "SettingsTimeHandle", fraction: f)
 }
 
 # The palette slots the shared components are allowed to name (see
