@@ -54,7 +54,12 @@ type PlaybackState pub {
   # first advance call. Storing the previous frame sample here rather
   # than computing a delta inside main.rae keeps the state struct
   # self-contained.
-  prevTime: Float
+  # Float64: an epoch TIMESTAMP, not a duration. Narrowed to f32 near
+  # 1.75e9 it quantises to 128 s steps, so `dt` below came out as either
+  # tens of seconds (the track races to its end and wraps, every frame)
+  # or negative — the playback clock was noise, and the resulting
+  # per-frame state changes kept the render cache permanently dirty.
+  prevTime: Float64
   # The actually-playing track. Distinct from `AppState.currentAlbumStem`
   # / `AppState.currentTrackIndex` which represent *browsed* state —
   # those move with the user's navigation even when nothing is playing.
@@ -161,7 +166,7 @@ func playbackProcessCommands(this: mod PlaybackState) pub {
 func advancePlayback(state: mod PlaybackState, now: view Float64) pub {
   var dt: Float = 0.0
   if state.prevTime >= 0.0 {
-    dt = now - state.prevTime
+    dt = (now - state.prevTime) as Float
   }
   state.prevTime = now
   if state.isPlaying {

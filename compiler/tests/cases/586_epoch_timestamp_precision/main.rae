@@ -1,0 +1,93 @@
+# Epoch timestamps must be Float64, never Float.
+#
+# The mobile UI stored wall-clock timestamps (uiNowSeconds(), ~1.75e9 epoch
+# seconds) in Float fields. An f32 near 1.75e9 has a ulp of 128 s, so the
+# stored value landed on a multiple of 128 and could sit up to 64 s away from
+# the real time. Every "has enough time passed?" test built on such a field
+# then degenerated into a constant: on the low side of the bucket the elapsed
+# time reads as tens of seconds, so a 1 Hz poll fires EVERY FRAME; on the high
+# side it reads negative, so it never fires at all. Which one you got depended
+# on where the clock happened to sit inside the 128 s bucket, so the same
+# binary behaved differently from launch to launch.
+#
+# This test pins the arithmetic, not the app: it shows the narrowing is fatal
+# at epoch magnitudes, that Float64 survives it, and that a frame-paced 1 Hz
+# throttle counts correctly only with the wide type.
+
+import core
+import string
+open math
+
+# A recent-ish epoch second. NOT a round number on purpose: at this
+# magnitude the f32 ulp is 128 s, so a value that happens to be an exact
+# multiple of 128 (1750000000 is one) round-trips perfectly and hides the
+# whole problem. Real clock readings are not so considerate.
+const epochNow: Float64 = 1750000037.0
+const frameSec: Float64 = 0.0166666
+const pollIntervalSec: Float64 = 1.0
+
+func absF64(x: view Float64) ret Float64 {
+  if x < 0.0 {
+    ret (0.0 as Float64) - x
+  }
+  ret x
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+# Count how many times a 1 Hz throttle fires over `frames` frames when the
+# last-fire timestamp is kept at f32 precision (`narrow: true`) or f64.
+func countPolls(frames: view Int, narrow: view Bool) ret Int {
+  var last: Float64 = epochNow - pollIntervalSec
+  var fired: Int = 0
+  var i: Int = 0
+  loop i < frames {
+    let now: Float64 = epochNow + (i.toFloat() as Float64) * frameSec
+    if now - last >= pollIntervalSec {
+      fired = fired + 1
+      if narrow {
+        # What the buggy field did: store through an f32.
+        let squashed: Float = now as Float
+        last = squashed as Float64
+      } else {
+        last = now
+      }
+    }
+    i = i + 1
+  }
+  ret fired
+}
+
+func main() {
+  # 1. The narrowing itself. A sub-second throttle cannot survive an error
+  #    this large — the value is not merely imprecise, it is unusable.
+  let narrowed: Float = epochNow as Float
+  let restored: Float64 = narrowed as Float64
+  let err: Float64 = absF64(x: restored - epochNow)
+  check(label: "f32 loses more than a second at epoch scale", ok: err > 1.0)
+  check(label: "f64 round-trip is exact", ok: (epochNow as Float64) is epochNow)
+
+  # 2. A short duration is fine in f32 — the bug is about MAGNITUDE, not
+  #    about Float being unusable for time in general. This is why storing
+  #    deltas stayed correct while storing timestamps did not.
+  let shortSpan: Float = 1.25
+  check(label: "f32 holds a small duration exactly", ok: (shortSpan as Float64) is 1.25)
+
+  # 3. Three seconds of 60 fps frames should fire a 1 Hz poll about 3 times.
+  let frames: Int = 180
+  let wide: Int = countPolls(frames: frames, narrow: false)
+  let squashed: Int = countPolls(frames: frames, narrow: true)
+  check(label: "Float64 throttle fires about once per second", ok: wide >= 2 and wide <= 4)
+  # The narrowed one either fires on every frame or stops firing entirely;
+  # either way it is nowhere near the intended rate. Asserting "not ~3"
+  # rather than an exact number keeps the test honest about which side of
+  # the 128 s bucket this particular constant lands on.
+  check(label: "f32 throttle does not fire at the intended rate", ok: squashed > 10 or squashed <= 1)
+  log("polls: wide={wide} narrowed={squashed} of {frames} frames")
+}
