@@ -87,7 +87,9 @@ func sliderFractionForX(world: view UiWorld, trackId: view String, x: view Float
   if r.w <= 0.0 {
     ret 0.0
   }
-  ret sliderClamp(v: (x - r.x) / r.w, lo: 0.0, hi: 1.0)
+  # Screen x, for the same reason as pointInNode.
+  let sx: Float = nodeScreenX(world: world, e: e)
+  ret sliderClamp(v: (x - sx) / r.w, lo: 0.0, hi: 1.0)
 }
 
 func pointInRect(r: view ComputedRect, x: view Float, y: view Float) ret Bool {
@@ -191,6 +193,43 @@ func nodeComputedRect(world: view UiWorld, nodeId: view String, out: mod Compute
   ret true
 }
 
+func debugNodeRect(world: view UiWorld, nodeId: view String) pub {
+  let e: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: e) {
+    log("[slider] {nodeId}: NO ENTITY")
+    ret
+  }
+  if componentHas(this: world.computedRects, entity: e) is false {
+    log("[slider] {nodeId}: no ComputedRect")
+    ret
+  }
+  let r: ComputedRect = componentGet(this: world.computedRects, entity: e)
+  log("[slider] {nodeId}: x={r.x} y={r.y} w={r.w} h={r.h}")
+}
+
+# POSITION COMES FROM WorldTransform, SIZE FROM ComputedRect.
+#
+# ComputedRect.x/y is PARENT-LOCAL — a control nested three deep in a panel
+# reports x=12 while sitting at x=952 on screen. Testing a pointer against it
+# compares screen coordinates to local ones, so a press is never inside and the
+# control is silently inert. uiHitTest gets this right (wt.x + cr.w) and is the
+# reference; these helpers now match it.
+func nodeScreenX(world: view UiWorld, e: view EntityId) ret Float {
+  if componentHas(this: world.worldTransforms, entity: e) is false {
+    ret 0.0
+  }
+  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
+  ret wt.x
+}
+
+func nodeScreenY(world: view UiWorld, e: view EntityId) ret Float {
+  if componentHas(this: world.worldTransforms, entity: e) is false {
+    ret 0.0
+  }
+  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
+  ret wt.y
+}
+
 func pointInNode(world: view UiWorld, nodeId: view String,
                  x: view Float, y: view Float) pub ret Bool {
   let e: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
@@ -201,7 +240,15 @@ func pointInNode(world: view UiWorld, nodeId: view String,
     ret false
   }
   let r: ComputedRect = componentGet(this: world.computedRects, entity: e)
-  ret pointInRect(r: r, x: x, y: y)
+  let sx: Float = nodeScreenX(world: world, e: e)
+  let sy: Float = nodeScreenY(world: world, e: e)
+  if x < sx or x > sx + r.w {
+    ret false
+  }
+  if y < sy or y > sy + r.h {
+    ret false
+  }
+  ret true
 }
 
 # Where x falls across the node, 0..1.
@@ -217,7 +264,9 @@ func fractionAcrossNode(world: view UiWorld, nodeId: view String, x: view Float)
   if r.w <= 0.0 {
     ret 0.0
   }
-  ret sliderClamp(v: (x - r.x) / r.w, lo: 0.0, hi: 1.0)
+  # Screen x, for the same reason as pointInNode.
+  let sx: Float = nodeScreenX(world: world, e: e)
+  ret sliderClamp(v: (x - sx) / r.w, lo: 0.0, hi: 1.0)
 }
 
 # Resize `fillId` to a fraction of `trackId`. Writes only on a real change:
@@ -267,37 +316,31 @@ func centreNodeAtFraction(world: mod UiWorld, trackId: view String,
   if componentHas(this: world.computedRects, entity: te) is false {
     ret
   }
-  if componentHas(this: world.computedRects, entity: he) is false {
+  if componentHas(this: world.rects, entity: he) is false {
     ret
   }
   let tr: ComputedRect = componentGet(this: world.computedRects, entity: te)
-  let hr: ComputedRect = componentGet(this: world.computedRects, entity: he)
+  let hr: Rect = componentGet(this: world.rects, entity: he)
   let f: Float = sliderClamp(v: fraction, lo: 0.0, hi: 1.0)
-  # Inset by half the handle so it stays inside the track at both ends rather
-  # than hanging off the edges.
+  # The handle is a CHILD of the track, so its authored x is already relative to
+  # the track's origin: the travel is the track's width less the handle's, so it
+  # stays inside at both ends instead of hanging off.
   let travel: Float = tr.w - hr.w
-  let wantX: Float = tr.x + travel * f
-  let wantY: Float = tr.y + (tr.h - hr.h) * 0.5
+  let wantX: Float = travel * f
   var dx: Float = wantX - hr.x
   if dx < 0.0 {
     dx = 0.0 - dx
   }
-  var dy: Float = wantY - hr.y
-  if dy < 0.0 {
-    dy = 0.0 - dy
-  }
-  if dx <= 0.05 and dy <= 0.05 {
+  # Only on a real change: componentSet bumps the table generation either way,
+  # and a per-frame write keeps the render cache permanently dirty (#407).
+  if dx <= 0.05 {
     ret
   }
-  let next: ComputedRect = { x: wantX, y: wantY, w: hr.w, h: hr.h }
-  componentSet(this: world.computedRects, entity: he, data: next)
-  if componentHas(this: world.rects, entity: he) {
-    let ar: Rect = componentGet(this: world.rects, entity: he)
-    # The authored rect is relative to the track, so store the offset rather
-    # than the absolute position layout just produced.
-    let nextAuthored: Rect = { x: travel * f, y: ar.y, w: ar.w, h: ar.h }
-    componentSet(this: world.rects, entity: he, data: nextAuthored)
-  }
+  # The AUTHORED rect, not the computed one. Layout recomputes ComputedRect from
+  # this every frame, so writing the computed rect alone is undone before it is
+  # ever drawn.
+  let next: Rect = { x: wantX, y: hr.y, w: hr.w, h: hr.h }
+  componentSet(this: world.rects, entity: he, data: next)
 }
 
 # Should a drag be running after this frame's pointer state?
