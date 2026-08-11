@@ -41,8 +41,10 @@
 import core
 import math
 import vec3
+import sky
 open vec3
 open scene3d
+open sky
 open math3d
 
 # ----- raw C ABI (implementation detail; prefer the typed API below) ---
@@ -307,6 +309,38 @@ func ssaoPass(camera: view Camera3d) pub {
 # so accumulation stays linear.
 func taaPass() pub {
   taa()
+}
+
+# Light the frame from a bound SKY rather than from the light's authored
+# ambient (#399).
+#
+# The sky is the single source of the environment: the values below are
+# the ones it reports, so the ambient the scene receives and the sky it
+# stands under cannot drift apart. Under SkyKind.none those values ARE
+# the light's own anchors, so this is bit-identical to lightingPass and
+# is the whole reason M0 can claim to change nothing.
+#
+# The sun still comes from Light3d. Extraction (#403) is what moves it,
+# and moving it before there is anything to extract from would just mean
+# copying the same numbers through a second place.
+func lightingPassSky(camera: view Camera3d, light: view Light3d, sky: view Sky) pub {
+  let up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  let down: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0)
+  # The shader interpolates between these two anchors, so the sky is
+  # asked for exactly the two directions that interpolation runs between.
+  # A sky whose irradiance is not a hemisphere blend (#401) will need the
+  # shader to evaluate it per normal instead; this is the shape that is
+  # correct for every kind that IS one, and it keeps M0 a no-op.
+  let skyC: Vec3 = skyIrradiance(sky: sky, n: up)
+  let gndC: Vec3 = skyIrradiance(sky: sky, n: down)
+  lighting(
+    camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z,
+    exposure: light.exposure,
+    sunX: light.sunDir.x, sunY: light.sunDir.y, sunZ: light.sunDir.z,
+    sunR: light.sunColor.x, sunG: light.sunColor.y, sunB: light.sunColor.z,
+    skyR: skyC.x, skyG: skyC.y, skyB: skyC.z,
+    gndR: gndC.x, gndG: gndC.y, gndB: gndC.z
+  )
 }
 
 func lightingPass(camera: view Camera3d, light: view Light3d) pub {

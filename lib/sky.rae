@@ -1,0 +1,142 @@
+# sky — the environment, as two questions and nothing else.
+#
+# Full rationale in docs/sky-system-design.md. The short version:
+#
+# EVERY SKY IMPLEMENTATION ANSWERS EXACTLY TWO QUESTIONS.
+#
+#   skyRadiance(dir)    what the camera sees looking that way
+#   skyIrradiance(n)    what a surface facing that way receives
+#
+# The first is the background and, later, the reflection source. The
+# second is ambient light. Fixing the interface at two functions is what
+# lets a photographic HDRI and a hand-painted stylised sky be swapped
+# without the lighting pass changing a line — and it is why this exists
+# before any sky does, rather than being retrofitted around whichever
+# one gets built first.
+#
+# WHAT THIS MODULE DELIBERATELY IS NOT. It is not a skybox. A skybox is
+# a background; this is a background AND the light that background
+# implies. Splitting them is how a scene ends up lit by hand-typed
+# ambient constants that disagree with what is visibly behind it — which
+# is exactly the state this replaces.
+#
+# M0 (#399) ships ONLY the seam and the existing behaviour behind it.
+# `SkyKind.none` reproduces the authored hemisphere blend the deferred
+# lighting pass already performs, exactly, so landing it changes no
+# pixel. That is the acceptance criterion, and test 583 is what pins it:
+# a seam that quietly alters the image is not a seam, it is a rewrite
+# with no way to tell which change caused what.
+import core
+import math
+import vec3
+open scene3d
+
+enum SkyKind {
+  # The authored two-colour hemisphere. Not a placeholder to be deleted:
+  # it stays as the fallback for a scene that binds no sky, and as the
+  # reference the other kinds are compared against.
+  none
+  # Equirectangular HDR photograph (#402).
+  hdri
+  # Analytic physical sky from a sun direction (#400).
+  procedural
+  # Composited layers — gradient, clouds, sun, silhouettes (#404).
+  stylised
+}
+
+type Sky {
+  kind: SkyKind
+  # Multiplies radiance and irradiance together, so the environment
+  # brightens as one thing. Separate sky and ambient exposures would let
+  # a scene be lit brighter than the sky it is standing under.
+  exposure: Float
+  # Rotate the environment about the up axis. NOT a convenience: it is
+  # the difference between an HDRI being usable and being re-exported
+  # from a DCC tool because its sun sits behind the camera.
+  yawDeg: Float
+  # Extracted from the image for `hdri` (#403), authored otherwise. Held
+  # here rather than only on Light3d so that "where the sun is" has one
+  # answer once a sky is bound — a sky and a light that disagree put
+  # every shadow in the scene at odds with the visible sun.
+  sunDir: Vec3
+  sunColor: Vec3
+  # The `none` payload: the hemisphere anchors and the background.
+  ambSky: Vec3
+  ambGround: Vec3
+  clearColor: Vec3
+}
+
+# The fallback sky, built from what a scene already has. Taking the
+# anchors from an existing Light3d rather than from new numbers is what
+# makes M0 provably a no-op.
+func createSkyNone(light: view Light3d, clearColor: view Vec3) pub ret Sky {
+  ret Sky {
+    kind: SkyKind.none
+    exposure: 1.0
+    yawDeg: 0.0
+    sunDir: light.sunDir
+    sunColor: light.sunColor
+    ambSky: light.ambSky
+    ambGround: light.ambGround
+    clearColor: clearColor
+  }
+}
+
+# The hemisphere blend, in ONE place.
+#
+# Z-UP (docs/coordinate-system.md), so this blends on n.z. The forward
+# renderer blends on n.y because it predates the convention; that
+# disagreement is known and tracked, and this is the correct one. Every
+# future sky kind reduces to a function of the same normal, so the
+# convention is fixed here once rather than per implementation.
+func hemisphereIrradiance(ambSky: view Vec3, ambGround: view Vec3,
+                          n: view Vec3) pub ret Vec3 {
+  let t: Float = n.z * 0.5 + 0.5
+  ret vec3.create(
+    x: ambGround.x + (ambSky.x - ambGround.x) * t,
+    y: ambGround.y + (ambSky.y - ambGround.y) * t,
+    z: ambGround.z + (ambSky.z - ambGround.z) * t
+  )
+}
+
+# Ambient arriving at a surface facing `n`.
+#
+# EXPOSURE IS APPLIED HERE, not by the caller, so a sky cannot be shown
+# at one brightness and light the scene at another.
+func skyIrradiance(sky: view Sky, n: view Vec3) pub ret Vec3 {
+  var c: Vec3 = hemisphereIrradiance(ambSky: sky.ambSky, ambGround: sky.ambGround, n: n)
+  if sky.kind is SkyKind.none {
+    # EXACTLY the existing expression when exposure is 1, which is what
+    # createSkyNone sets. Multiplying unconditionally would introduce a
+    # float rounding difference into a step whose entire claim is that
+    # it changes nothing.
+    if sky.exposure is 1.0 {
+      ret c
+    }
+  }
+  ret vec3.vscale(a: c, s: sky.exposure)
+}
+
+# What the camera sees looking along `dir`.
+#
+# For `none` this is the clear colour — which is what the lighting pass
+# already returns at far depth, so the background is unchanged too.
+func skyRadiance(sky: view Sky, dir: view Vec3) pub ret Vec3 {
+  if sky.kind is SkyKind.none {
+    if sky.exposure is 1.0 {
+      ret sky.clearColor
+    }
+    ret vec3.vscale(a: sky.clearColor, s: sky.exposure)
+  }
+  # No other kind exists yet. Returning the clear colour rather than a
+  # loud magenta is deliberate: an unimplemented sky should look like no
+  # sky, not like a bug in the scene that binds it.
+  ret sky.clearColor
+}
+
+# Is this sky merely reproducing the authored constants? Callers use it
+# to keep the old uniform path until a real sky is bound, so that
+# binding one is an opt-in rather than a silent change to every scene.
+func skyIsFallback(sky: view Sky) pub ret Bool {
+  ret sky.kind is SkyKind.none
+}

@@ -1,0 +1,93 @@
+# Sky interface, M0 fallback (lib/sky.rae, #399).
+#
+# M0's entire claim is that introducing the seam changes NOTHING. That is
+# a claim about equality, so it is testable exactly, and it is worth
+# testing exactly: the failure mode is a sky path that is subtly brighter
+# or dimmer than the constants it replaced, which nobody notices until
+# two scenes disagree and the cause is six commits back.
+#
+#   1. skyIrradiance under SkyKind.none reproduces the deferred lighting
+#      pass's hemisphere blend BIT-FOR-BIT — not "close". The expected
+#      values here are computed from the same expression the shader uses,
+#      written out independently below.
+#   2. The blend runs on Z (Z-up convention), so a normal facing up gets
+#      sky and one facing down gets ground. Blending the wrong axis is
+#      invisible on a sphere and obvious on a floor.
+#   3. Exposure scales irradiance and radiance TOGETHER, so a sky cannot
+#      light the scene at one brightness while being drawn at another.
+#   4. The background under `none` is the clear colour, unchanged.
+import core
+import vec3
+import scene3d
+import sky
+open scene3d
+open sky
+
+# The expression the deferred lighting pass performs today, written out
+# separately so the test does not check the implementation against
+# itself.
+func referenceHemisphere(ambSky: view Vec3, ambGround: view Vec3, nz: view Float) ret Vec3 {
+  let t: Float = nz * 0.5 + 0.5
+  ret vec3.create(
+    x: ambGround.x + (ambSky.x - ambGround.x) * t,
+    y: ambGround.y + (ambSky.y - ambGround.y) * t,
+    z: ambGround.z + (ambSky.z - ambGround.z) * t
+  )
+}
+
+func exact(a: view Vec3, b: view Vec3) ret Bool {
+  ret a.x is b.x and a.y is b.y and a.z is b.z
+}
+
+func main() {
+  let ambSky: Vec3 = vec3.create(x: 0.25, y: 0.30, z: 0.40)
+  let ambGround: Vec3 = vec3.create(x: 0.12, y: 0.10, z: 0.09)
+  let clear: Vec3 = vec3.create(x: 0.05, y: 0.06, z: 0.08)
+  let light: Light3d = {
+    sunDir: vec3.create(x: 0.3, y: 0.5, z: 0.0 - 0.8)
+    sunColor: vec3.create(x: 1.0, y: 0.96, z: 0.9)
+    ambSky: ambSky
+    ambGround: ambGround
+    exposure: 1.0
+  }
+  var s: Sky = createSkyNone(light: light, clearColor: clear)
+
+  # 1 + 2: every axis, including straight up and straight down.
+  var allExact: Bool = true
+  var i: Int = 0
+  let zs: List(Float) = createList(Float, cap: 5)
+  zs.add(value: 1.0)
+  zs.add(value: 0.0 - 1.0)
+  zs.add(value: 0.0)
+  zs.add(value: 0.5)
+  zs.add(value: 0.0 - 0.37)
+  loop i < zs.length {
+    let z: Float = zs.at(index: i)
+    let n: Vec3 = vec3.create(x: 0.0, y: 0.0, z: z)
+    let got: Vec3 = skyIrradiance(sky: s, n: n)
+    let want: Vec3 = referenceHemisphere(ambSky: ambSky, ambGround: ambGround, nz: z)
+    if exact(a: got, b: want) is false {
+      allExact = false
+    }
+    i = i + 1
+  }
+  log("fallback matches the hemisphere blend exactly: {allExact}")
+
+  # Facing up is sky, facing down is ground — the axis check.
+  let up: Vec3 = skyIrradiance(sky: s, n: vec3.create(x: 0.0, y: 0.0, z: 1.0))
+  let down: Vec3 = skyIrradiance(sky: s, n: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0))
+  log("up is sky: {exact(a: up, b: ambSky)}")
+  log("down is ground: {exact(a: down, b: ambGround)}")
+
+  # 4: background passes through untouched.
+  let bg: Vec3 = skyRadiance(sky: s, dir: vec3.create(x: 0.0, y: 1.0, z: 0.0))
+  log("background is the clear colour: {exact(a: bg, b: clear)}")
+  log("reports itself as the fallback: {skyIsFallback(sky: s)}")
+
+  # 3: one exposure moves both answers by the same factor.
+  s.exposure = 2.0
+  let litUp: Vec3 = skyIrradiance(sky: s, n: vec3.create(x: 0.0, y: 0.0, z: 1.0))
+  let litBg: Vec3 = skyRadiance(sky: s, dir: vec3.create(x: 0.0, y: 1.0, z: 0.0))
+  log("exposure scales irradiance: {litUp.x is ambSky.x * 2.0}")
+  log("exposure scales radiance: {litBg.x is clear.x * 2.0}")
+}
