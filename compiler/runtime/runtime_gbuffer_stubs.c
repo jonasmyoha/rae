@@ -67,12 +67,19 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
                               float sunX, float sunY, float sunZ,
                               float sunR, float sunG, float sunB,
                               float skyR, float skyG, float skyB,
-                              float gndR, float gndG, float gndB){
+                              float gndR, float gndG, float gndB,
+                              float skyKind, float turbidity, float skyExposure,
+                              float sunSizeRad, float zenR, float zenG, float zenB,
+                              float bands, float horR, float horG, float horB,
+                              float discI){
     (void)camX; (void)camY; (void)camZ; (void)exposure;
     (void)sunX; (void)sunY; (void)sunZ;
     (void)sunR; (void)sunG; (void)sunB;
     (void)skyR; (void)skyG; (void)skyB;
     (void)gndR; (void)gndG; (void)gndB;
+    (void)skyKind; (void)turbidity; (void)skyExposure; (void)sunSizeRad;
+    (void)zenR; (void)zenG; (void)zenB; (void)bands;
+    (void)horR; (void)horG; (void)horB; (void)discI;
 }
 void rae_ext_gbuffer_ssao(float camX, float camY, float camZ){ (void)camX; (void)camY; (void)camZ; }
 void rae_ext_gbuffer_taa(void) {}
