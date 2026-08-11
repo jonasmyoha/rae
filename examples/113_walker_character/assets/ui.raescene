@@ -12,8 +12,8 @@
         "h": 800
       },
       "Layout": {
-        "type": "Vertical",
-        "alignMain": "SpaceBetween",
+        "type": "Horizontal",
+        "alignMain": "Start",
         "alignCross": "Start"
       },
       "Padding": {
@@ -31,8 +31,8 @@
         }
       },
       "Children": [
-        "TopRow",
-        "ControlPanel",
+        "MainColumn",
+        "SidePanel",
         "SettingsDialogSlot"
       ]
     },
@@ -50,16 +50,11 @@
       },
       "Size": {
         "w": {
-          "mode": "Hug"
+          "mode": "Fill"
         },
         "h": {
           "mode": "Hug"
         }
-      },
-      "Shape": {
-        "kind": "RoundedRect",
-        "fill": "surface",
-        "radius": "radiusCard"
       },
       "Children": [
         "PanelTitle",
@@ -81,13 +76,13 @@
     },
     "ClipRow": {
       "Layout": {
-        "type": "Horizontal",
+        "type": "Vertical",
         "gap": "spaceS",
-        "alignCross": "Center"
+        "alignCross": "Stretch"
       },
       "Size": {
         "w": {
-          "mode": "Hug"
+          "mode": "Fill"
         },
         "h": {
           "mode": "Hug"
@@ -97,13 +92,13 @@
     },
     "TransportRow": {
       "Layout": {
-        "type": "Horizontal",
+        "type": "Vertical",
         "gap": "spaceS",
-        "alignCross": "Center"
+        "alignCross": "Stretch"
       },
       "Size": {
         "w": {
-          "mode": "Hug"
+          "mode": "Fill"
         },
         "h": {
           "mode": "Hug"
@@ -181,7 +176,15 @@
       },
       "Children": [
         "SettingsButtonLabel"
-      ]
+      ],
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fixed"
+        }
+      }
     },
     "SettingsButtonLabel": {
       "Rect": {
@@ -215,8 +218,67 @@
         }
       },
       "Children": [
-        "CameraBarSlot",
-        "SettingsButton"
+        "CameraBarSlot"
+      ],
+      "Padding": {
+        "l": "spaceS",
+        "t": "spaceS",
+        "r": "spaceL",
+        "b": "spaceS"
+      }
+    },
+    "MainColumn": {
+      "Layout": {
+        "type": "Vertical",
+        "alignMain": "SpaceBetween",
+        "alignCross": "Start"
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fill"
+        }
+      },
+      "Children": [
+        "TopRow"
+      ]
+    },
+    "SidePanel": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 320,
+        "h": 800
+      },
+      "Size": {
+        "w": {
+          "mode": "Fixed"
+        },
+        "h": {
+          "mode": "Fill"
+        }
+      },
+      "Layout": {
+        "type": "Vertical",
+        "alignMain": "Start",
+        "alignCross": "Stretch"
+      },
+      "Padding": {
+        "l": "spaceM",
+        "t": "spaceM",
+        "r": "spaceM",
+        "b": "spaceM"
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "surface",
+        "radius": "radiusCard"
+      },
+      "Children": [
+        "SettingsButton",
+        "ControlPanel"
       ]
     }
   }
