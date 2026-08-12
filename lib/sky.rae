@@ -518,39 +518,83 @@ const skyPi: Float = 3.14159265358979
 const skyDayStartHour: Float = 6.0
 const skyDayEndHour: Float = 18.0
 
+# ----- latitude ---------------------------------------------------------
+#
+# LATITUDE, not a sun-elevation dial. This is the input a physical sky needs
+# alongside the time of day, and it is what engines with a physical sky expose
+# (Unreal's Sun Position, Unity HDRP's Physically Based Sky): latitude plus a
+# clock, from which the sun is DERIVED. An elevation slider would be a second
+# control fighting the hour slider for the same value.
+#
+# Helsinki, because that is where this is written and because a high latitude is
+# the interesting default: the sun never climbs far, so the low-sun behaviour the
+# sky models are most stressed by is what you see without touching anything.
+const skyDefaultLatitudeDeg: Float = 60.17
+const skyLatitudeMin: Float = 0.0 - 90.0
+const skyLatitudeMax: Float = 90.0
+
 # Sun DIRECTION OF TRAVEL — the way light moves, which is what Light3d.sunDir
 # and the shaders expect. It points from the sun toward the scene, so a high
 # midday sun has a strongly negative Z.
-func sunDirForHour(hour: view Float) pub ret Vec3 {
+#
+# EQUINOX geometry. With the solar declination taken as zero the sun rises due
+# east at 06:00 and sets due west at 18:00 at every latitude, which is exactly
+# what skyDayStartHour/skyDayEndHour already assume — so the day window and the
+# sun path agree instead of being two independent approximations. Declination
+# needs a day of the year, and there is no date here to take one from.
+#
+# Local frame is x=east, y=north, z=up. With hour angle H and latitude phi the
+# sun's direction is (-sin H, -sin phi * cos H, cos phi * cos H): at noon it
+# stands due south at an elevation of 90 - phi, and at phi = 0 it reduces to the
+# overhead path this had before latitude existed.
+func sunDirForHourAt(hour: view Float, latitudeDeg: view Float) pub ret Vec3 {
   var h: Float = hour
   if h < 0.0 { h = 0.0 }
   if h > 24.0 { h = 24.0 }
-  # Fraction of the way through the lit part of the day, 0 at sunrise, 1 at
-  # sunset. Outside the window the sun is below the horizon; the value keeps
-  # going so dusk and dawn stay continuous rather than snapping.
-  let t: Float = (h - skyDayStartHour) / (skyDayEndHour - skyDayStartHour)
-  let angle: Float = t * skyPi
-  # East (+X) at sunrise, up (+Z) at noon, west (-X) at sunset.
-  let toSunX: Float = math.cos(x: angle)
-  let toSunZ: Float = math.sin(x: angle)
-  ret vec3.create(x: 0.0 - toSunX, y: 0.0, z: 0.0 - toSunZ)
+  var lat: Float = latitudeDeg
+  if lat < skyLatitudeMin { lat = skyLatitudeMin }
+  if lat > skyLatitudeMax { lat = skyLatitudeMax }
+  # Hour angle: 0 at solar noon, negative in the morning. The value keeps going
+  # outside the lit window so dusk and dawn stay continuous rather than snapping.
+  let hourAngle: Float = (h - 12.0) * skyPi / 12.0
+  let phi: Float = lat * skyPi / 180.0
+  let cosH: Float = math.cos(x: hourAngle)
+  let toSunX: Float = 0.0 - math.sin(x: hourAngle)
+  let toSunY: Float = 0.0 - math.sin(x: phi) * cosH
+  let toSunZ: Float = math.cos(x: phi) * cosH
+  ret vec3.create(x: 0.0 - toSunX, y: 0.0 - toSunY, z: 0.0 - toSunZ)
+}
+
+# The equator. Kept as its own name because it is the shape every caller assumed
+# before latitude existed, and because the sun passing directly overhead is the
+# clearest case to reason about.
+func sunDirForHour(hour: view Float) pub ret Vec3 {
+  ret sunDirForHourAt(hour: hour, latitudeDeg: 0.0)
 }
 
 # How high the sun is, 0 at the horizon and 1 at the zenith. Below the horizon
 # reads 0 rather than negative: callers use it to fade light down, and a
 # negative multiplier would light the scene from underneath.
-func sunHeightForHour(hour: view Float) pub ret Float {
-  let d: Vec3 = sunDirForHour(hour: hour)
+func sunHeightForHourAt(hour: view Float, latitudeDeg: view Float) pub ret Float {
+  let d: Vec3 = sunDirForHourAt(hour: hour, latitudeDeg: latitudeDeg)
   var up: Float = 0.0 - d.z
   if up < 0.0 { up = 0.0 }
   ret up
 }
 
+func sunHeightForHour(hour: view Float) pub ret Float {
+  ret sunHeightForHourAt(hour: hour, latitudeDeg: 0.0)
+}
+
 # How far the sun is above the horizon, SIGNED: +1 at the zenith, negative once
 # it has set. `sunHeightForHour` clamps at 0 because callers scale light by it;
 # this one keeps going, which is what a twilight fade needs.
+func sunHeightSignedForHourAt(hour: view Float, latitudeDeg: view Float) pub ret Float {
+  ret 0.0 - sunDirForHourAt(hour: hour, latitudeDeg: latitudeDeg).z
+}
+
 func sunHeightSignedForHour(hour: view Float) pub ret Float {
-  ret 0.0 - sunDirForHour(hour: hour).z
+  ret sunHeightSignedForHourAt(hour: hour, latitudeDeg: 0.0)
 }
 
 # How much daylight is left, 1 in full day and near 0 at night.
@@ -561,8 +605,8 @@ func sunHeightSignedForHour(hour: view Float) pub ret Float {
 # reddest, horizon-hugging look all night, which reads as the horizon burning
 # rather than as darkness. Fading the whole environment is honest about what the
 # model can say: nothing about night.
-func daylightFactorForHour(hour: view Float) pub ret Float {
-  let up: Float = sunHeightSignedForHour(hour: hour)
+func daylightFactorForHourAt(hour: view Float, latitudeDeg: view Float) pub ret Float {
+  let up: Float = sunHeightSignedForHourAt(hour: hour, latitudeDeg: latitudeDeg)
   if up >= 0.08 {
     ret 1.0
   }
@@ -574,11 +618,15 @@ func daylightFactorForHour(hour: view Float) pub ret Float {
   ret 0.02 + 0.98 * (up + 0.12) / 0.20
 }
 
+func daylightFactorForHour(hour: view Float) pub ret Float {
+  ret daylightFactorForHourAt(hour: hour, latitudeDeg: 0.0)
+}
+
 # Warm at the horizon, neutral overhead. Not a fit to anything — the Hosek
 # model already reddens the SKY at low sun on its own; this is the KEY LIGHT,
 # which otherwise stays white through a sunset and looks wrong against it.
-func sunColorForHour(hour: view Float) pub ret Vec3 {
-  let up: Float = sunHeightForHour(hour: hour)
+func sunColorForHourAt(hour: view Float, latitudeDeg: view Float) pub ret Vec3 {
+  let up: Float = sunHeightForHourAt(hour: hour, latitudeDeg: latitudeDeg)
   # Cube the blend so the warm end is confined to the last part of the descent,
   # where a sunset actually happens, instead of tinting the whole afternoon.
   let warm: Float = (1.0 - up) * (1.0 - up) * (1.0 - up)
@@ -586,4 +634,8 @@ func sunColorForHour(hour: view Float) pub ret Vec3 {
   let g: Float = 1.0 - 0.45 * warm
   let b: Float = 1.0 - 0.75 * warm
   ret vec3.create(x: r, y: g, z: b)
+}
+
+func sunColorForHour(hour: view Float) pub ret Vec3 {
+  ret sunColorForHourAt(hour: hour, latitudeDeg: 0.0)
 }
