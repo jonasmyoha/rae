@@ -572,6 +572,12 @@ func main() ret Int {
     if settingsUpdatePointer(s: settings, world: uiWorld, input: uiInput) {
       settingsChanged = true
     }
+    # The clock, if it is running. Feeding it into the same `settingsChanged`
+    # flag as a click means the sky, the sun and the readout all rebuild through
+    # one path rather than three.
+    if settingsAdvanceTime(s: settings, dt: dt) {
+      settingsChanged = true
+    }
     if settingsChanged {
       # The panel owns the sun now. Stylised stays the default look, so it is
       # what "neither physical model asked for" means here; picking Hosek or
