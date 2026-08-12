@@ -263,14 +263,28 @@ func animateScene(scene: mod Scene3d, sceneId: view Int, time: view Float) {
   }
 }
 
-# Scene 3 — the metaball lab. Seven clusters, 195 balls, every one of them an
-# SDF sphere; the only mesh in the scene is the ground for shadows to land on.
+# Scene 3 — the metaball lab. Seven clusters, 24 balls, every one of them an SDF
+# sphere; the only mesh in the scene is the ground for shadows to land on.
 #
-# TWO CLUSTERS SIT AT EXACTLY 64 BALLS, which is GB_SDF_MAX_BALLS in
-# runtime_gpu3d_gbuffer_sdf.c. That cap TRUNCATES SILENTLY — a cluster authored
-# with 100 draws 64 and simply looks wrong — so this scene is deliberately built
-# to the limit and not past it. Shadows cap at 8 clusters (G3D_SM_SDF_MAX_CLUSTERS);
-# seven leaves one spare.
+# BUDGETED FOR 60 FPS, and the budget is in BALLS, not clusters. Measured on an
+# M1 with startup excluded (time two frame counts, take the slope — timing whole
+# runs makes shader compilation look like render cost and the numbers come out
+# non-monotonic):
+#
+#     balls   24     26     28     35     195
+#     ms      16.7   18.1   19.0   22.5   122.3
+#     fps     60*    55     53     45     8
+#     (* vsync floor: 7 balls also measures 16.67 ms, so 24 still has headroom)
+#
+# CLUSTERS ARE NEARLY FREE. 195 balls cost the same over 3 clusters (7.4 fps) as
+# over 7 (7.0): each cluster raymarches its own balls, so the work follows the
+# TOTAL count however it is grouped. That is why the budget buys seven distinct
+# characters rather than one big blob — variation is the cheap axis.
+#
+# An earlier version of this scene ran 195 balls with two clusters at the
+# GB_SDF_MAX_BALLS cap of 64. It looked good and rendered at 8 fps. The cap is
+# still worth knowing because it TRUNCATES SILENTLY, but it is far above what
+# the frame budget allows here.
 #
 # Each cluster has its own character, because the point of a metaball lab is the
 # range: stickiness (smoothing) decides whether motion separates lobes or just
@@ -297,8 +311,8 @@ func animateScene3(asset: mod Scene3dAsset, time: view Float) {
     let away: Float = 1.0 - 0.42 * escape
 
     if sdf.cluster is 0 {
-      # Swarm: 64 small balls, low stickiness, wide slow churn. At this count
-      # and k=0.40 the cluster reads as a shoal rather than a blob.
+      # Swarm: the largest share of the budget, low stickiness (k=0.40) and a
+      # wide slow churn, so it separates into a shoal rather than one blob.
       let t: Float = time * 0.46
       transform.position = vec3.create(
         x: 0.0 - 6.0 + math.cos(x: t + phase) * (1.9 + escape * 4.4),
@@ -310,7 +324,7 @@ func animateScene3(asset: mod Scene3dAsset, time: view Float) {
       setTransform(scene: asset.scene, entity: sdf.entity, transform: transform)
     }
     if sdf.cluster is 1 {
-      # Titan: four very large, very sticky balls. Big radius plus k=1.35 means
+      # Titan: very large, very sticky balls. Big radius plus k=1.35 means
       # it never separates — it wallows, which is the opposite end of the range
       # from the swarm.
       let t: Float = time * 0.21
@@ -324,9 +338,8 @@ func animateScene3(asset: mod Scene3dAsset, time: view Float) {
       setTransform(scene: asset.scene, entity: sdf.entity, transform: transform)
     }
     if sdf.cluster is 2 {
-      # Mist: the other 64-ball cluster, small radii and k=0.18 — barely fusing,
-      # so it stays a cloud of droplets and shows what the cap looks like when
-      # the balls do NOT merge.
+      # Mist: small radii and k=0.18 — barely fusing, so it stays a cloud of
+      # separate droplets and shows what almost no smooth-union looks like.
       let t: Float = time * 0.63
       transform.position = vec3.create(
         x: 6.4 + math.cos(x: t * 0.9 + phase * 1.7) * (2.6 + escape * 3.2),
