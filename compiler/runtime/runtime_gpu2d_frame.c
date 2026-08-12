@@ -102,6 +102,9 @@ static void rae_g2d_save_screenshot(const char* path) {
 }
 
 void rae_ext_gpu2d_endFrame(void) {
+    /* Persist window geometry as it changes; see the note in
+     * runtime_gpu2d_platform.c for why closing is not enough. */
+    g2d_geometry_poll();
     /* One frame presented -> advance the deterministic clock (no-op unless
      * RAE_FIXED_DT is set). Placed at frame end so all reads within a
      * frame observe the same time. */
