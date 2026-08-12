@@ -603,7 +603,12 @@ func main() ret Int {
   setNodeActive(world: uiWorld, nodeId: "SidePanelBody", value: settings.open)
       stateDirty = true
     }
-    if uiActionCount(input: uiInput) > 0 {
+    # `settingsChanged` as well as the action count: a DRAG produces no action.
+    # Click actions arrive on release, so gating the systems on actions alone
+    # meant the slider knob's new rect was written every drag frame and only
+    # turned into draw data when the button came up — the knob appeared to jump
+    # on release instead of following the pointer.
+    if uiActionCount(input: uiInput) > 0 or settingsChanged {
       runUiSystems(world: uiWorld, res: gpuUi)
     }
 
