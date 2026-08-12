@@ -110,10 +110,20 @@ func createSettingsState(scene: view Int, sceneCount: view Int, speed: view Floa
 # Advance the clock. Returns true when the hour actually moved, so the caller
 # rebuilds the sky only on frames that changed it.
 #
+# PLAY/PAUSE IS THE MASTER. Pausing stops the clock too, whatever the Animate
+# time toggle says — pause means the app is not running, and a paused scene with
+# the sun still sweeping across it is not paused in any sense a user would
+# recognise. The toggle keeps its own value rather than being written to false,
+# so resuming restores exactly what was set; nothing in the UI needs to show
+# this, because the button already says the app is paused.
+#
 # A DRAG WINS. While the pointer owns the slider the clock holds still, or the
 # two would fight over the same value and the handle would crawl away from
 # where it was put.
 func settingsAdvanceTime(s: mod SettingsState, dt: view Float) ret Bool {
+  if s.playing is false {
+    ret false
+  }
   if s.animateTime is false {
     ret false
   }
