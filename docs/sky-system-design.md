@@ -69,7 +69,7 @@ prefiltered for lighting.
 **Source: Poly Haven.** CC0, which matters more here than quality: this
 repository has already had to rewrite its history once over an asset
 whose licence could not be established (see
-`examples/113_walker_character/assets/ATTRIBUTION.md`). CC0 removes that
+`examples/114_walker_character/assets/ATTRIBUTION.md`). CC0 removes that
 class of problem entirely. Their **"Pure Sky"** variants — sky isolated
 from the ground and surroundings — are the correct pick for a game
 skybox; a full-scene HDRI bakes someone else's terrain into our horizon.

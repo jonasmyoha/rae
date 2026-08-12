@@ -67,7 +67,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" "$TMP_OUT/overflow.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
-        elif [ "$EXAMPLE_NAME" = "113_walker_character" ]; then
+        elif [ "$EXAMPLE_NAME" = "114_walker_character" ]; then
           # The multi-primitive gate, plus the skinning and colour chain.
           # 6717 verts / 3465 triangles is every primitive of all 10 meshes
           # merged; loading only the first would report a fraction of that
@@ -95,7 +95,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/shot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
-        elif [ "$EXAMPLE_NAME" = "112_gltf_character" ]; then
+        elif [ "$EXAMPLE_NAME" = "113_gltf_character" ]; then
           # The glTF loader gate. Asserts the COUNTS it reports, not just
           # that something rendered: a loader reading half a buffer still
           # draws a plausible blob, and counts are the cheapest thing that
@@ -113,7 +113,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/shot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
-        elif [ "$EXAMPLE_NAME" = "111_deferred_gbuffer" ]; then
+        elif [ "$EXAMPLE_NAME" = "110_deferred_gbuffer" ]; then
           # The deferred G-buffer (#356). Each channel is checked separately
           # because they fail differently: a broken albedo write still leaves
           # plausible normals, and a broken normal transform still leaves
@@ -156,7 +156,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT"/gb-*.log 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
-        elif [ "$EXAMPLE_NAME" = "110_gpu3d_ui" ]; then
+        elif [ "$EXAMPLE_NAME" = "112_gpu3d_ui" ]; then
           SCREENSHOT="$TMP_OUT/gpu3d-ui.bmp"
           FREE_SCREENSHOT="$TMP_OUT/gpu3d-ui-free.bmp"
           PAUSE_SCREENSHOT="$TMP_OUT/gpu3d-ui-pause.bmp"
