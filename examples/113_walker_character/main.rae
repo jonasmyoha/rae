@@ -99,6 +99,8 @@ import app3d/settings_dialog
 import sky_hosek
 import hot_reload
 import ui/log_overlay
+import ui/event_loop
+import ui/debug_overlay
 import ui/ecs
 import ui/input_gpu2d
 import ui/render_gpu2d
@@ -124,6 +126,8 @@ open shadow3d
 open app3d/playback
 open hot_reload
 open ui/log_overlay
+open ui/event_loop
+open ui/debug_overlay
 open ui/ecs
 open ui/components
 open ui/input_gpu2d
@@ -232,6 +236,10 @@ func main() ret Int {
   # exactly like one that reloaded and changed nothing, so the launch
   # generation is printed — watching 5 become 6 is the proof.
   var logView: LogOverlay = createLogOverlay(capacity: 64, maxLines: 8, anchor: logAnchorBottomLeft, fontSize: 14.0)
+  # Shared debug instrumentation: amber button top right, fps/memory readouts
+  # and the moving update indicator. One line to opt in per feature.
+  var dbg: DebugOverlay = createDebugOverlay(button: true, fps: true,
+                                             memory: true, heartbeat: true)
   let reloadGen: Int = nextReloadGeneration()
   logInfoLine(ov: logView, text: "hot reload {reloadGen}")
 
@@ -480,6 +488,16 @@ func main() ret Int {
   # because a camera drag changes state every frame.
   var shadowLogged: Bool = false
   var stateDirty: Bool = false
+  # Idle gate. This example used to render every iteration unconditionally, so
+  # it never dropped below full speed even with the character and the clock both
+  # stopped — nothing in the animator forces it, there was simply nothing that
+  # could park. Mirrors 110's policy (docs/ui-render-loop-performance.md).
+  var renderedOnce: Bool = false
+  # The overlay samples fps before the render decision exists, so it counts the
+  # PREVIOUS frame — otherwise a parked app would report full speed.
+  var dbgDidWork: Bool = true
+  var lastLogRevision: Int = 0 - 1
+  var taaSettleFrames: Int = 0
   var lastStateSave: Float64 = gpu2d.nowSeconds()
   # Counted, not assumed: a panel whose host node id does not match the
   # scene builds nothing and renders as an empty card, which a
@@ -530,6 +548,12 @@ func main() ret Int {
     # is suppressed by what is actually under the pointer rather than by
     # a hand-maintained copy of the panel's bounds.
     updateUiInput(input: uiInput, world: uiWorld)
+    # The debug button sits over the side panel, so a press it takes has to be
+    # withdrawn from the UI world or the same click works the control beneath.
+    if updateDebugOverlay(d: dbg, screenW: windowExtentW(), screenH: windowExtentH(),
+                          now: now, didRealWork: dbgDidWork) {
+      suppressUiPress(input: uiInput)
+    }
     let clipHit: String = panelClickedId(panel: clipPanel, input: uiInput)
     if clipHit.length() > 0 {
       if clipHit.equals(other: "idle") { clipIndex = 0 }
@@ -621,8 +645,9 @@ func main() ret Int {
     if handleCameraBar(input: uiInput, rig: rig, camera: camera) {
       stateDirty = true
     }
-    if updateCameraRig(rig: rig, camera: camera,
-                       allowInput: uiPointerCaptured(input: uiInput) is false, dt: dt) {
+    let cameraMoved: Bool = updateCameraRig(rig: rig, camera: camera,
+                       allowInput: uiPointerCaptured(input: uiInput) is false, dt: dt)
+    if cameraMoved {
       stateDirty = true
     }
     if gpu2d.windowResized() {
@@ -642,116 +667,147 @@ func main() ret Int {
       }
     }
 
-    # ----- animation -------------------------------------------------
-    # "Walk fast" is the walk clip at 1.6x, not a fourth asset.
-    var clipRate: Float = 1.0
-    if clipIndex is 2 {
-      clipRate = 1.6
-    }
-    if playing {
-      animTime = animTime + dt * speed * clipRate
-    }
-    if clipIndex is 0 {
-      applyClip(sk: sk, c: idleClip, time: animTime)
-    }
-    if clipIndex is 1 or clipIndex is 2 {
-      applyClip(sk: sk, c: walkClip, time: animTime)
-    }
-    if clipIndex is 3 {
-      applyClip(sk: sk, c: runClip, time: animTime)
-    }
-    let palette: List(Float) = buildPalette(sk: sk)
-
-    applyCameraRig(rig: rig, camera: camera)
-    syncCameraBar(world: uiWorld, rig: rig, camera: camera)
-    let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
-    let t: Float = (now - startT) as Float
-
-    # Frame order is DERIVED by the render graph: the scene pass writes
-    # hdrColor, tonemap resolves it to sceneColor, the overlay modifies
-    # that, present reads it. This loop walks the derived order.
-    var oi: Int = 0
-    loop oi < deferredOrderLength(r: renderer) {
-      let tag: Int = deferredTagAt(r: renderer, i: oi)
-      if tag is tagShadowD {
-        # Cascades fitted to this frame, then every caster rasterised into
-        # them (#382). The ground comes from the scene; the character's
-        # twelve skinned parts are submitted individually, through the
-        # SKINNED shadow pipeline so they cast in their animated pose
-        # rather than in bind pose.
-        let cascades: ShadowCascades = fitShadowCascades(
-          camPos: camera.position, camTarget: camera.target,
-          fovYDeg: camera.fovYDeg, aspect: aspect,
-          near: camera.nearZ, far: 24.0, sunDir: light.sunDir,
-          count: 3, resolution: 2048, lambda: 0.75, backExtent: 12.0
-        )
-        uploadPalette(rows: palette, jointCount: jointCount(sk: sk))
-        beginShadowPass(c: cascades)
-        renderSceneShadow(scene: scene)
-        var sp: Int = 0
-        loop sp < partIds.length {
-          let sh: MeshHandle = meshHandle(id: partIds.at(index: sp), generation: 1)
-          drawShadowCasterSkinned(mesh: sh, model: partModel)
-          sp = sp + 1
-        }
-        endShadowPass()
-        if shadowLogged is false {
-          log("[shadow] casters {shadowCasterCount()}, {cascades.count} cascades at {cascades.resolution}")
-          shadowLogged = true
-        }
+    # ----- does this frame need drawing at all? -----------------------
+    # The character animating, the clock running, the camera moving, any pointer
+    # or UI activity, a resize, a new log line — or TAA still converging, since
+    # stopping mid-convergence would freeze a noisy frame on screen.
+    let hadUiEvents: Bool = uiInput.events.length > 0 or uiInput.pointer.down
+      or uiInput.pointer.pressed or uiInput.pointer.released
+    let logChanged: Bool = logView.revision is not lastLogRevision
+    let resized: Bool = gpu2d.windowResized()
+    var needsRender: Bool = playing or settingsChanged or cameraMoved
+      or hadUiEvents or logChanged or resized or renderedOnce is false
+    if taaSettleFrames > 0 { needsRender = true }
+    dbgDidWork = needsRender
+    if needsRender is false {
+      # Park until the OS has something to say. Shared policy from
+      # lib/ui/event_loop.rae rather than a hardcoded timeout.
+      gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
+        animating: false, mouseDown: false, pollWatcher: false,
+        frameSec: 0.016667, heartbeatSec: 1.0
+      ))
+    } else {
+      if playing or settingsChanged or cameraMoved or hadUiEvents or resized {
+        taaSettleFrames = 6
+      } else {
+        taaSettleFrames = taaSettleFrames - 1
       }
-      if tag is tagGbuffer {
-        # The app owns this tag rather than letting renderDeferredPass
-        # handle it, because the character's twelve SKINNED parts have to
-        # land inside the same G-buffer pass as the ground. Same seam the
-        # UI overlay uses: the graph still decides when this runs.
-        # QUALIFIED. gpu3d and gbuffer both export beginPass/endPass, and
-        # this example opens both — an unqualified call silently picks the
-        # forward path's, which ends a pass that was never begun and
-        # leaves the G-buffer unsubmitted. The symptom is a black 3D frame
-        # with a working UI, which looks like a lighting bug.
-        gbuffer.beginPass(camera: camera, light: light, aspect: aspect)
-        gbuffer.renderScene(scene: scene)
-        uploadPalette(rows: palette, jointCount: jointCount(sk: sk))
-        var p: Int = 0
-        loop p < partIds.length {
-          let handle: MeshHandle = meshHandle(id: partIds.at(index: p), generation: 1)
-          # White base colour: the shader multiplies it by the vertex
-          # colour baked from the atlas (#378).
-          let mat: Material3d = {
-            baseColor: vec3.create(x: 1.0, y: 1.0, z: 1.0),
-            metallic: 0.0,
-            roughness: partRough.at(index: p),
-            emission: noEmit,
-            # The style applies to the CHARACTER only, deliberately: the
-            # ground stays PBR so the two shading models are visible in
-            # one frame under one sun, which is the thing per-material
-            # toon buys over a whole-frame switch.
-            toon: toonShading
+      renderedOnce = true
+      lastLogRevision = logView.revision
+
+      # ----- animation -------------------------------------------------
+      # "Walk fast" is the walk clip at 1.6x, not a fourth asset.
+      var clipRate: Float = 1.0
+      if clipIndex is 2 {
+        clipRate = 1.6
+      }
+      if playing {
+        animTime = animTime + dt * speed * clipRate
+      }
+      if clipIndex is 0 {
+        applyClip(sk: sk, c: idleClip, time: animTime)
+      }
+      if clipIndex is 1 or clipIndex is 2 {
+        applyClip(sk: sk, c: walkClip, time: animTime)
+      }
+      if clipIndex is 3 {
+        applyClip(sk: sk, c: runClip, time: animTime)
+      }
+      let palette: List(Float) = buildPalette(sk: sk)
+
+      applyCameraRig(rig: rig, camera: camera)
+      syncCameraBar(world: uiWorld, rig: rig, camera: camera)
+      let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
+      let t: Float = (now - startT) as Float
+
+      # Frame order is DERIVED by the render graph: the scene pass writes
+      # hdrColor, tonemap resolves it to sceneColor, the overlay modifies
+      # that, present reads it. This loop walks the derived order.
+      var oi: Int = 0
+      loop oi < deferredOrderLength(r: renderer) {
+        let tag: Int = deferredTagAt(r: renderer, i: oi)
+        if tag is tagShadowD {
+          # Cascades fitted to this frame, then every caster rasterised into
+          # them (#382). The ground comes from the scene; the character's
+          # twelve skinned parts are submitted individually, through the
+          # SKINNED shadow pipeline so they cast in their animated pose
+          # rather than in bind pose.
+          let cascades: ShadowCascades = fitShadowCascades(
+            camPos: camera.position, camTarget: camera.target,
+            fovYDeg: camera.fovYDeg, aspect: aspect,
+            near: camera.nearZ, far: 24.0, sunDir: light.sunDir,
+            count: 3, resolution: 2048, lambda: 0.75, backExtent: 12.0
+          )
+          uploadPalette(rows: palette, jointCount: jointCount(sk: sk))
+          beginShadowPass(c: cascades)
+          renderSceneShadow(scene: scene)
+          var sp: Int = 0
+          loop sp < partIds.length {
+            let sh: MeshHandle = meshHandle(id: partIds.at(index: sp), generation: 1)
+            drawShadowCasterSkinned(mesh: sh, model: partModel)
+            sp = sp + 1
           }
-          gbuffer.drawSkinnedInstance(mesh: handle, model: partModel,
-                                      prevModel: partModel, material: mat)
-          p = p + 1
+          endShadowPass()
+          if shadowLogged is false {
+            log("[shadow] casters {shadowCasterCount()}, {cascades.count} cascades at {cascades.resolution}")
+            shadowLogged = true
+          }
         }
-        gbuffer.endPass()
+        if tag is tagGbuffer {
+          # The app owns this tag rather than letting renderDeferredPass
+          # handle it, because the character's twelve SKINNED parts have to
+          # land inside the same G-buffer pass as the ground. Same seam the
+          # UI overlay uses: the graph still decides when this runs.
+          # QUALIFIED. gpu3d and gbuffer both export beginPass/endPass, and
+          # this example opens both — an unqualified call silently picks the
+          # forward path's, which ends a pass that was never begun and
+          # leaves the G-buffer unsubmitted. The symptom is a black 3D frame
+          # with a working UI, which looks like a lighting bug.
+          gbuffer.beginPass(camera: camera, light: light, aspect: aspect)
+          gbuffer.renderScene(scene: scene)
+          uploadPalette(rows: palette, jointCount: jointCount(sk: sk))
+          var p: Int = 0
+          loop p < partIds.length {
+            let handle: MeshHandle = meshHandle(id: partIds.at(index: p), generation: 1)
+            # White base colour: the shader multiplies it by the vertex
+            # colour baked from the atlas (#378).
+            let mat: Material3d = {
+              baseColor: vec3.create(x: 1.0, y: 1.0, z: 1.0),
+              metallic: 0.0,
+              roughness: partRough.at(index: p),
+              emission: noEmit,
+              # The style applies to the CHARACTER only, deliberately: the
+              # ground stays PBR so the two shading models are visible in
+              # one frame under one sun, which is the thing per-material
+              # toon buys over a whole-frame switch.
+              toon: toonShading
+            }
+            gbuffer.drawSkinnedInstance(mesh: handle, model: partModel,
+                                        prevModel: partModel, material: mat)
+            p = p + 1
+          }
+          gbuffer.endPass()
+        }
+        if tag is tagSsaoD or tag is tagDepthPyramid or tag is tagLighting
+          or tag is tagTaaD or tag is tagComposite {
+          renderDeferredPass(r: renderer, tag: tag, scene: scene,
+                             camera: camera, light: light, aspect: aspect)
+        }
+        if tag is tagUiOverlayD {
+          # Load-preserving: paints over the composited frame.
+          gpu2d.beginFrameLoad()
+          renderSystemGpu2d(world: uiWorld, res: gpuUi)
+          drawLogOverlay(ov: logView, font: gpuUi.textFont, screenW: windowExtentW(), screenH: windowExtentH())
+          # LAST, so it is above the scene, the UI world and the log.
+          drawDebugOverlay(d: dbg, font: gpuUi.textFont, didRealWork: true)
+        }
+        if tag is tagPresentD {
+          gpu2d.endFrame()
+        }
+        oi = oi + 1
       }
-      if tag is tagSsaoD or tag is tagDepthPyramid or tag is tagLighting
-        or tag is tagTaaD or tag is tagComposite {
-        renderDeferredPass(r: renderer, tag: tag, scene: scene,
-                           camera: camera, light: light, aspect: aspect)
-      }
-      if tag is tagUiOverlayD {
-        # Load-preserving: paints over the composited frame.
-        gpu2d.beginFrameLoad()
-        renderSystemGpu2d(world: uiWorld, res: gpuUi)
-        drawLogOverlay(ov: logView, font: gpuUi.textFont, screenW: windowExtentW(), screenH: windowExtentH())
-      }
-      if tag is tagPresentD {
-        gpu2d.endFrame()
-      }
-      oi = oi + 1
+      snapshotPrevTransforms(scene: scene)
     }
-    snapshotPrevTransforms(scene: scene)
   }
   skinShutdown()
   shutdown()
