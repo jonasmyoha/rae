@@ -126,6 +126,15 @@ func updateUiInput(input: mod UiInput, world: view UiWorld) pub {
   }
 }
 
+# Drop the in-progress press and anything already queued, so a release cannot
+# turn into a click. Used when an overlay drawn OUTSIDE this world took the
+# press — the debug overlay sits over the side panel in 110 and 113, and without
+# this the same click would work the button underneath it too.
+func suppressUiPress(input: mod UiInput) pub {
+  clearUiActions(input: input)
+  input.pressedEntity = noEntity()
+}
+
 func uiPointerCaptured(input: view UiInput) pub ret Bool {
   if isNone(this: input.hoveredEntity) is false { ret true }
   if isNone(this: input.pressedEntity) is false { ret true }
