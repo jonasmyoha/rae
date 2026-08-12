@@ -59,8 +59,6 @@ func saveAppState(path: view String, state: view AppState, playback: view Playba
   # cross-launch route-restoration footguns.
   let tabOrdinal: Int = screenToInt(s: state.tab)
   let visibleOrdinal: Int = screenToInt(s: visibleScreen(state: state))
-  let winX: Int = uiWindowPositionX()
-  let winY: Int = uiWindowPositionY()
   let q: String = "\""
   # Literal `{` and `}` characters — built via the Unicode escape
   # because the lexer treats a bare `{` inside a string literal
@@ -78,8 +76,6 @@ func saveAppState(path: view String, state: view AppState, playback: view Playba
   let elapsedValue: String = "{elapsedMs}"
   let tabValue: String = "{tabOrdinal}"
   let screenValue: String = "{visibleOrdinal}"
-  let winXValue: String = "{winX}"
-  let winYValue: String = "{winY}"
 
   var content: String = ""
   content = content.concat(other: openBrace).concat(other: nl)
@@ -100,28 +96,21 @@ func saveAppState(path: view String, state: view AppState, playback: view Playba
   content = content.concat(other: comma).concat(other: nl)
   content = content.concat(other: "  ").concat(other: q).concat(other: "screen").concat(other: q)
   content = content.concat(other: colon).concat(other: " ").concat(other: screenValue)
-  content = content.concat(other: comma).concat(other: nl)
-  content = content.concat(other: "  ").concat(other: q).concat(other: "winX").concat(other: q)
-  content = content.concat(other: colon).concat(other: " ").concat(other: winXValue)
-  content = content.concat(other: comma).concat(other: nl)
-  content = content.concat(other: "  ").concat(other: q).concat(other: "winY").concat(other: q)
-  content = content.concat(other: colon).concat(other: " ").concat(other: winYValue)
   content = content.concat(other: nl).concat(other: closeBrace).concat(other: nl)
 
   let ok: Bool = rae_ext_rae_sys_write_file(path: path, content: content)
   if ok is false {
     log("[state] save failed: {path}")
   }
-  # Diagnostic so the user can confirm the persistence layer fired
-  # and inspect what got written without opening the JSON. Window
-  # dimensions are logged for context even though they aren't saved
-  # (the layout uses fixed phoneFrameW / phoneFrameH constants).
-  let winW: Int = uiFramebufferWidth()
-  let winH: Int = uiFramebufferHeight()
+  # Diagnostic so the user can confirm the persistence layer fired and inspect
+  # what got written without opening the JSON. WINDOW GEOMETRY IS NOT HERE: the
+  # runtime persists it for every app (runtime_gpu2d_platform.c). This file used
+  # to save winX/winY and never read them back, so the position was written every
+  # session and applied never.
   let visible: Screen = visibleScreen(state: state)
   let tabName: String = screenName(s: state.tab)
   let screenNameStr: String = screenName(s: visible)
-  log("[state] saved tab={tabName} (ord {tabOrdinal}) screen={screenNameStr} (ord {visibleOrdinal}) winPos=({winX},{winY}) winSize=({winW}x{winH})")
+  log("[state] saved tab={tabName} (ord {tabOrdinal}) screen={screenNameStr} (ord {visibleOrdinal})")
 }
 
 # Human-readable name for a Screen enum value. Used by the
@@ -240,14 +229,8 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
     let tabOrd: Int = json.jsonInt(this: json.jsonValueAt(doc: doc, idx: tabFieldIdx), fallback: 4)
     state.tab = intToScreen(n: tabOrd)
   }
-  let winXKey: String = "winX"
-  let winXIdx: Int = json.jsonField(doc: doc, this: root, key: winXKey)
-  let winYKey: String = "winY"
-  let winYIdx: Int = json.jsonField(doc: doc, this: root, key: winYKey)
-  if winXIdx >= 0 and winYIdx >= 0 {
-    state.windowX = json.jsonInt(this: json.jsonValueAt(doc: doc, idx: winXIdx), fallback: state.windowX)
-    state.windowY = json.jsonInt(this: json.jsonValueAt(doc: doc, idx: winYIdx), fallback: state.windowY)
-    state.hasWindowPosition = true
-  }
+  # winX / winY are deliberately NOT read. Window geometry belongs to the
+  # runtime now (runtime_gpu2d_platform.c), which persists it for every app.
+  # Older state files still carry the keys; ignoring them is the migration.
   log("[state] restored from {path}: stem={state.currentAlbumStem} track={state.currentTrackIndex} ms={(playback.elapsedSec * 1000.0).toInt()} playing={playback.isPlaying}")
 }
