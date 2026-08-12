@@ -26,6 +26,7 @@ import string
 import vec3
 import sky_hosek
 import sky
+import calendar
 open ui/ecs
 open ui/components
 open ui/input_gpu2d
@@ -35,6 +36,7 @@ open app3d/slider
 open vec3
 open sky_hosek
 open sky
+open calendar
 open app3d/camera_bar
 
 # Which sky model the dialog is asking for. Deliberately not SkyKind: that enum
@@ -56,6 +58,12 @@ const settingsPanelBodyNodeId: String = "SidePanelBody"
 
 const settingsHourMin: Float = 0.0
 const settingsHourMax: Float = 24.0
+
+# The June solstice, so a scene at the Helsinki default opens with the sun
+# actually up: at this latitude the December sun reaches 6 degrees, which is a
+# legitimate but very dark first impression for an example.
+const settingsDefaultDayOfYear: Int = 172
+const settingsDefaultYear: Int = 2026
 
 type SettingsState {
   # Play/pause. Shared because both examples had one and they had drifted to
@@ -81,11 +89,21 @@ type SettingsState {
   # to the sun is best demonstrated moving, and the slider is still there to
   # take over.
   animateTime: Bool
-  # Where on Earth, in degrees north. Together with the hour this DERIVES the
-  # sun, which is why there is no separate elevation control: one would fight
-  # the clock for the same value.
+  # Where on Earth, in degrees north. Together with the hour and the date this
+  # DERIVES the sun, which is why there is no separate elevation control: one
+  # would fight the clock for the same value.
   latitude: Float
   latDragging: Bool
+  # No longitude: with local solar time it does not move the sun. Add it with its first reader (clock-time conversion, or weather).
+  # The date, which is what makes seasons: declination swings noon elevation at
+  # Helsinki between 6.4 and 53.3 degrees over the year.
+  dayOfYear: Int
+  dateDragging: Bool
+  # The year has NO effect on the sun — the declination fit repeats annually. It
+  # is here because a clock that runs for long enough should roll a year over
+  # rather than silently restart, and because watching it tick is a small
+  # pleasure. lib/calendar gets the leap years right, so 29 February arrives.
+  year: Int
 }
 
 # A whole day in one minute. Fast enough to see dawn and dusk without waiting,
@@ -111,6 +129,9 @@ func createSettingsState(scene: view Int, sceneCount: view Int, speed: view Floa
     animateTime: true
     latitude: skyDefaultLatitudeDeg
     latDragging: false
+    dayOfYear: settingsDefaultDayOfYear
+    dateDragging: false
+    year: settingsDefaultYear
   }
 }
 
@@ -141,16 +162,65 @@ func settingsAdvanceTime(s: mod SettingsState, dt: view Float) ret Bool {
     ret false
   }
   var h: Float = s.hour + dt * 24.0 / settingsDaySeconds
-  # Midnight wraps rather than clamping: the point of the control is that it
-  # keeps going round.
+  # Midnight rolls the DATE, and the date rolls the YEAR. The point of the
+  # control is that it keeps going round, and a clock that wrapped the hour while
+  # leaving the calendar behind would be a clock that never reaches tomorrow.
+  # lib/calendar owns the year length, so a leap year gets its 29 February.
+  # LOCALS, then assigned back. Passing s.year / s.dayOfYear straight into a
+  # `mod` parameter is the nested-struct-field write-back hazard this file warns
+  # about at `timeDragging` — it compiles, runs, and silently keeps the old
+  # value, which here would look like a clock that never reaches tomorrow.
+  var rollYear: Int = s.year
+  var rollDay: Int = s.dayOfYear
   loop h >= 24.0 {
     h = h - 24.0
+    advanceOneDay(year: rollYear, dayOfYear: rollDay)
   }
+  s.year = rollYear
+  s.dayOfYear = rollDay
   if h is s.hour {
     ret false
   }
   s.hour = h
   ret true
+}
+
+# The date slider, over the real length of the current year.
+func settingsUpdateDatePointer(s: mod SettingsState, world: view UiWorld,
+                               input: view UiInput) ret Bool {
+  if s.open is false {
+    ret false
+  }
+  if s.timeDragging or s.latDragging {
+    ret false
+  }
+  var pressedInside: Bool = false
+  if input.pointer.pressed {
+    pressedInside = pointInNode(world: world, nodeId: "SettingsDateTrack",
+                                x: input.pointer.x, y: input.pointer.y)
+  }
+  s.dateDragging = sliderDragActive(wasDragging: s.dateDragging,
+                                    pressedInside: pressedInside,
+                                    down: input.pointer.down,
+                                    released: input.pointer.released)
+  if s.dateDragging is false {
+    ret false
+  }
+  let f: Float = fractionAcrossNode(world: world, nodeId: "SettingsDateTrack",
+                                    x: input.pointer.x)
+  let span: Int = daysInYear(year: s.year)
+  var next: Int = 1 + (f * (span - 1).toFloat() + 0.5).toInt()
+  next = clampDayOfYear(year: s.year, dayOfYear: next)
+  if next is s.dayOfYear {
+    ret false
+  }
+  s.dayOfYear = next
+  ret true
+}
+
+# The date this state is on.
+func settingsDate(s: view SettingsState) ret CalendarDate {
+  ret dateFromDayOfYear(year: s.year, dayOfYear: s.dayOfYear)
 }
 
 # Mounted the way camera_bar is: the app authors a host node and owns where the
@@ -365,7 +435,8 @@ func settingsApplyToWorld(s: view SettingsState, world: mod UiWorld) {
                   slot: settingsSlotFor(on: s.playing is false))
   let pct: Int = speedPercent(v: s.speed)
   setNodeText(world: world, nodeId: "SettingsSpeedRow", value: "Animation speed {pct}%")
-  setNodeText(world: world, nodeId: "SettingsTimeLabel", value: "Time of day {formatHour(hour: s.hour)}")
+  setNodeText(world: world, nodeId: "SettingsTimeLabel",
+              value: "Time of day {formatHour(hour: s.hour)} {formatCalendarDate(date: settingsDate(s: s))}")
   setNodeText(world: world, nodeId: "SettingsLatLabel", value: "Latitude {formatLatitude(latitudeDeg: s.latitude)}")
 
   setNodeFillSlot(world: world, nodeId: "SettingsToonButton",
@@ -385,6 +456,13 @@ func settingsApplyToWorld(s: view SettingsState, world: mod UiWorld) {
   let f: Float = (s.hour - settingsHourMin) / (settingsHourMax - settingsHourMin)
   centreNodeAtFraction(world: world, trackId: "SettingsTimeTrack",
                        handleId: "SettingsTimeHandle", fraction: f)
+  let dateSpan: Int = daysInYear(year: s.year) - 1
+  var dateF: Float = 0.0
+  if dateSpan > 0 {
+    dateF = (s.dayOfYear - 1).toFloat() / dateSpan.toFloat()
+  }
+  centreNodeAtFraction(world: world, trackId: "SettingsDateTrack",
+                       handleId: "SettingsDateHandle", fraction: dateF)
   let latF: Float = (s.latitude - skyLatitudeMin) / (skyLatitudeMax - skyLatitudeMin)
   centreNodeAtFraction(world: world, trackId: "SettingsLatTrack",
                        handleId: "SettingsLatHandle", fraction: latF)
@@ -408,15 +486,15 @@ func settingsSlotFor(on: view Bool) ret String {
 # Where the sun is, for this hour. Both the sky and the key light take it, so
 # the visible sun and the cast shadows cannot drift apart.
 func settingsSunDir(s: view SettingsState) ret Vec3 {
-  ret sunDirForHourAt(hour: s.hour, latitudeDeg: s.latitude)
+  ret sunDirForDate(hour: s.hour, dayOfYear: s.dayOfYear, latitudeDeg: s.latitude)
 }
 
 # Warm at the horizon, neutral overhead, and dimmed as the sun sets — the sky
 # model reddens on its own, but the direct light would otherwise stay white and
 # full-strength through a sunset.
 func settingsSunColor(s: view SettingsState) ret Vec3 {
-  let base: Vec3 = sunColorForHourAt(hour: s.hour, latitudeDeg: s.latitude)
-  var lift: Float = sunHeightForHourAt(hour: s.hour, latitudeDeg: s.latitude)
+  let base: Vec3 = sunColorForDate(hour: s.hour, dayOfYear: s.dayOfYear, latitudeDeg: s.latitude)
+  var lift: Float = sunHeightForDate(hour: s.hour, dayOfYear: s.dayOfYear, latitudeDeg: s.latitude)
   # Never fully black: a scene lit by nothing reads as broken rather than as
   # night, and there is no night sky model here yet.
   lift = 0.15 + 0.85 * lift
@@ -432,7 +510,7 @@ func settingsBuildSky(s: view SettingsState, data: view HosekDataset,
   # Both models are fitted only for a sun at or above the horizon, so the night
   # side is a fade rather than a different sky. Applied here, once, so the two
   # models darken together.
-  let day: Float = daylightFactorForHourAt(hour: s.hour, latitudeDeg: s.latitude)
+  let day: Float = daylightFactorForDate(hour: s.hour, dayOfYear: s.dayOfYear, latitudeDeg: s.latitude)
   if s.skyModel is SettingsSkyModel.preetham {
     var pre: Sky = createSkyProcedural(sunDir: dir, sunColor: col, turbidity: turbidity)
     pre.exposure = day
