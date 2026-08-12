@@ -248,41 +248,52 @@ static void rae_g2d_configure(int pw, int ph) {
     }
 }
 
-/* ---- window geometry across hot reload -------------------------------
+/* ---- window geometry, remembered across runs -------------------------
  *
- * Hot reload is exit + relaunch, so window size/position must persist
- * outside the process or every rebuild snaps the window back to its
- * requested geometry and its default position. Doing this per app costs
- * ~5 touch points each (state field, serialise, deserialise, default,
- * restore) and drifts — example 106 hand-rolled it and only ever
- * persisted position, never size.
+ * Where the user put the window is an APP feature, not a dev-loop one: it has
+ * to survive a hot reload, a kill, and a normal quit-and-reopen a day later,
+ * and it has to behave the same in every app. One mechanism here rather than
+ * per app — persisting it per app costs ~5 touch points each (state field,
+ * serialise, deserialise, default, restore) and drifts. It had drifted: 106
+ * wrote its position into state.json and never read it back, so it saved the
+ * value every session and applied it never.
  *
- * Policy, deliberately narrow:
- *  - Saved on closeWindow, restored on initWindow, and CONSUMED on
- *    restore so it can only ever apply once.
- *  - Restored only if the saved geometry is FRESH (a few seconds old).
- *    A reload relaunch happens in ~1s; a cold start hours later sees a
- *    stale file and ignores it, so `initWindow(1280, 800)` still means
- *    what it says on a fresh run. That is the guardrail that keeps
- *    examples reproducible for someone running them the first time.
- *  - Disabled entirely for headless/screenshot runs. Restoring a stale
- *    size there would silently change capture resolution and break the
- *    byte-identical screenshot harness — exactly the class of silent
- *    nondeterminism RAE_FIXED_DT/RAE_HEADLESS_FRAMES exist to remove.
+ * Policy:
+ *  - Saved on the window's own MOVE and RESIZE events, so a session that is
+ *    killed still has the geometry it ended with.
+ *  - Restored on initWindow and KEPT, not consumed, so it applies to every
+ *    later run and not just the next one.
+ *  - Per app. The key is RAE_HOT_RELOAD_DIR when the launcher provides one
+ *    (`rae run` and `rae watch` both do), otherwise the window title, so a
+ *    binary started by hand still gets its own slot instead of fighting over
+ *    one shared file with every other app on the machine.
+ *  - Disabled for headless/screenshot runs. Restoring a remembered size there
+ *    would silently change capture resolution and break byte-identical
+ *    screenshots — the class of nondeterminism RAE_FIXED_DT exists to remove.
  *  - RAE_NO_WINDOW_RESTORE=1 opts out (kiosk, device-simulation presets).
- */
-/* PER APP, not per working tree. This was one fixed path, so every app on the
- * machine shared a single geometry file — and because a restore CONSUMES the
- * file, running 106, 110 and 113 together meant whichever started first ate
- * whatever another had saved. The symptoms were "it forgot my window" and
- * "two examples opened exactly on top of each other", which are the same bug.
  *
- * The per-app directory is the one `rae watch` / `rae run` already hand each
- * child in RAE_HOT_RELOAD_DIR for the hot-reload channel; falling back to the
- * shared path only matters for a binary launched by hand, where there is one
- * app by definition. */
-#define RAE_G2D_GEOMETRY_FALLBACK ".rae/window.geometry"
-#define RAE_G2D_GEOMETRY_FRESH_SEC 10.0
+ * A first run has no file and gets exactly the size initWindow asked for, so
+ * examples still open as authored for someone running them for the first time.
+ * There is deliberately NO freshness window: an earlier version only restored
+ * a file written in the last ten seconds, which made this work across a hot
+ * reload and silently do nothing across a restart, which is the case a user
+ * actually notices.
+ */
+static char g_g2d_geometry_key[96];
+
+/* The window title, reduced to something safe in a filename. */
+static void g2d_geometry_set_key(const char* title) {
+    size_t j = 0;
+    for (size_t i = 0; title && title[i] && j + 1 < sizeof(g_g2d_geometry_key); i++) {
+        unsigned char c = (unsigned char)title[i];
+        int word = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+        if (word) g_g2d_geometry_key[j++] = (char)c;
+        else if (j > 0 && g_g2d_geometry_key[j - 1] != '_') g_g2d_geometry_key[j++] = '_';
+    }
+    while (j > 0 && g_g2d_geometry_key[j - 1] == '_') j--;
+    g_g2d_geometry_key[j] = 0;
+    if (j == 0) snprintf(g_g2d_geometry_key, sizeof(g_g2d_geometry_key), "app");
+}
 
 static const char* g2d_geometry_path(void) {
     static char path[1024];
@@ -291,7 +302,9 @@ static const char* g2d_geometry_path(void) {
         snprintf(path, sizeof(path), "%s/window.geometry", dir);
         return path;
     }
-    return RAE_G2D_GEOMETRY_FALLBACK;
+    snprintf(path, sizeof(path), ".rae/window.%s.geometry",
+             g_g2d_geometry_key[0] ? g_g2d_geometry_key : "app");
+    return path;
 }
 
 
@@ -312,7 +325,14 @@ static void g2d_save_geometry(void) {
     SDL_GetWindowSize(g_sdl_win, &w, &h);
     if (w <= 0 || h <= 0) return;
     FILE* f = fopen(g2d_geometry_path(), "wb");
-    if (!f) return;   /* no .rae dir => not a dev-loop run; silently skip */
+    if (!f) {
+        /* First run in a fresh directory has no .rae yet. Create it rather than
+         * skipping — otherwise the feature only ever works for someone who has
+         * already used the dev loop, which is the opposite of who needs it. */
+        mkdir(".rae", 0755);
+        f = fopen(g2d_geometry_path(), "wb");
+    }
+    if (!f) return;
     fprintf(f, "%d %d %d %d\n", x, y, w, h);
     fclose(f);
 }
@@ -362,21 +382,16 @@ static void g2d_geometry_settle(void) {
     g2d_geometry_flush();
 }
 
-/* Returns true and fills the out params when fresh saved geometry exists.
- * Always consumes the file, so a stale entry cannot linger. */
-static bool g2d_take_geometry(int* x, int* y, int* w, int* h) {
+/* Returns true and fills the out params when saved geometry exists. The file is
+ * KEPT: it describes where this app lives from now on, not a single handover
+ * between two processes. */
+static bool g2d_read_geometry(int* x, int* y, int* w, int* h) {
     if (!g2d_geometry_enabled()) return false;
-    struct stat st;
-    if (stat(g2d_geometry_path(), &st) != 0) return false;
-    bool fresh = (difftime(time(NULL), st.st_mtime) <= RAE_G2D_GEOMETRY_FRESH_SEC);
     FILE* f = fopen(g2d_geometry_path(), "rb");
-    bool ok = false;
-    if (f) {
-        ok = (fscanf(f, "%d %d %d %d", x, y, w, h) == 4);
-        fclose(f);
-    }
-    remove(g2d_geometry_path());   /* consume either way */
-    return ok && fresh && *w > 0 && *h > 0;
+    if (!f) return false;
+    bool ok = (fscanf(f, "%d %d %d %d", x, y, w, h) == 4);
+    fclose(f);
+    return ok && *w > 0 && *h > 0;
 }
 
 void rae_ext_gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
@@ -390,7 +405,8 @@ void rae_ext_gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
     flags |= SDL_WINDOW_METAL;
 #endif
     int rx = 0, ry = 0, rw = 0, rh = 0;
-    bool restored = g2d_take_geometry(&rx, &ry, &rw, &rh);
+    g2d_geometry_set_key(t);
+    bool restored = g2d_read_geometry(&rx, &ry, &rw, &rh);
     if (restored) { width = rw; height = rh; }
     g_sdl_win = SDL_CreateWindow(t, (int)width, (int)height, flags);
     if (!g_sdl_win) { fprintf(stderr, "[gpu2d] window failed: %s\n", SDL_GetError()); return; }
