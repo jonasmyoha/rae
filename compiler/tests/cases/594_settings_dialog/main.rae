@@ -89,6 +89,32 @@ func main() {
   # on Preetham, 113 the stylised one and opens on Hosek.
   check(label: "sky default is per app", ok: s.skyModel is SettingsSkyModel.hosek and one.skyModel is SettingsSkyModel.preetham)
 
+  # ----- the clock ----------------------------------------------------
+  # A whole day in one minute, so 2.5 real seconds is one hour.
+  check(label: "time animation defaults on", ok: one.animateTime)
+  var clock: SettingsState = createSettingsState(scene: 1, sceneCount: 1, speed: 1.0,
+                                                 toon: false, hour: 12.0,
+                                                 skyModel: SettingsSkyModel.hosek)
+  check(label: "2.5s advances one hour", ok: settingsAdvanceTime(s: clock, dt: 2.5) and clock.hour > 12.99 and clock.hour < 13.01)
+  # Half a real minute is half a day, and 13:00 plus twelve hours is 01:00 the
+  # next day — so this covers the rate and the MIDNIGHT WRAP at once. Clamping
+  # at 24 instead of wrapping would park the sun there and the day would only
+  # ever run once.
+  check(label: "half a minute is half a day, past midnight", ok: settingsAdvanceTime(s: clock, dt: 30.0) and clock.hour > 0.99 and clock.hour < 1.01)
+  # A whole day later it reads the same hour, so nothing CHANGED and the caller
+  # is told so rather than being made to rebuild the sky for an identical value.
+  check(label: "a full minute is a full day", ok: settingsAdvanceTime(s: clock, dt: 60.0) is false)
+  # A drag WINS: otherwise the clock and the pointer fight over one value and
+  # the handle crawls away from where it was put.
+  clock.timeDragging = true
+  let heldAt: Float = clock.hour
+  check(label: "a drag pauses the clock", ok: settingsAdvanceTime(s: clock, dt: 2.5) is false and clock.hour is heldAt)
+  clock.timeDragging = false
+  # And the toggle turns it off entirely.
+  check(label: "toggle turns animation off", ok: settingsHandleAction(s: clock, actionId: "settings.time.animate") and clock.animateTime is false)
+  let stoppedAt: Float = clock.hour
+  check(label: "a stopped clock does not move", ok: settingsAdvanceTime(s: clock, dt: 2.5) is false and clock.hour is stoppedAt)
+
   # Play/pause is shared, so both examples show the same word for it.
   check(label: "starts playing", ok: one.playing)
   check(label: "playback toggles", ok: settingsHandleAction(s: one, actionId: "settings.playback") and one.playing is false)
