@@ -1,0 +1,166 @@
+# Remember where the user put the window, across restarts.
+#
+# OPT IN, in three lines. An app that does not write them does not have this:
+#
+#     var geom: WindowGeometry = createWindowGeometry(dir: hotReloadDir(),
+#                                                     name: "window.geometry")
+#     restoreWindowGeometry(g: geom)          # after initWindow
+#     ...
+#     updateWindowGeometry(g: geom, now: now, resized: gpu2d.windowResized())
+#
+# This used to live in the runtime, in C, and applied to every app whether or
+# not its author asked for it: the C chose the file path, decided when to write,
+# and restored the window before any Rae code ran. Two things wrong with that.
+# It is app behaviour, so it belongs in Rae. And it was invisible — you could
+# not read an app and see that it had the feature, nor leave it out.
+#
+# What stays in C is only what C can do: notice the SDL events. `windowMoved`
+# and `windowResized` are one-shot flags in the same shape as the rest of the
+# gpu2d input surface, and everything below is built on them.
+import core
+import sys
+import gpu2d
+import filesystem
+open filesystem
+
+# Whole-file read. `sys.readFile` returns `opt String`, and the C backend has a
+# known bug comparing those against `none`; lib/hot_reload and lib/sky_hosek
+# declare the same raw extern for the same reason.
+func rae_ext_rae_sys_read_file(path: String) extern ret String
+
+# A move fires an event per frame of the drag, and the value that matters is the
+# one it ends on. Waiting for the drag to settle turns a drag into one write
+# rather than sixty.
+const windowGeometrySettleSec: Float = 0.25
+
+type WindowGeometry {
+  # Split so the directory can be created before writing into it, without this
+  # module having to pick apart a path string.
+  dir: String
+  path: String
+  # Set by an SDL move/resize event, cleared once written.
+  dirty: Bool
+  dirtyAt: Float64
+  # What was last written, so an event that did not actually change anything —
+  # SDL sends a resize when the window is merely shown — writes nothing.
+  lastX: Int
+  lastY: Int
+  lastW: Int
+  lastH: Int
+}
+
+# `dir` is the app's choice, and that is the point: an app wanting one window
+# per project passes its hot-reload channel directory, an installed app passes
+# somewhere in the user's config. Nothing here guesses.
+func createWindowGeometry(dir: view String, name: view String) pub ret WindowGeometry {
+  ret WindowGeometry {
+    dir: "{dir}"
+    path: "{dir}/{name}"
+    dirty: false
+    dirtyAt: 0.0
+    lastX: 0 - 1
+    lastY: 0 - 1
+    lastW: 0 - 1
+    lastH: 0 - 1
+  }
+}
+
+# Apply the saved geometry, if there is any. Returns true when it applied
+# something, so a caller can tell "restored" from "first run" — an app that
+# wants to centre itself on first launch needs to know which happened.
+#
+# CALL AFTER initWindow. There is no window to place before that.
+func restoreWindowGeometry(g: mod WindowGeometry) pub ret Bool {
+  let raw: String = rae_ext_rae_sys_read_file(path: g.path)
+  if raw.length() < 1 {
+    ret false
+  }
+  let parts: List(String) = raw.trim().split(sep: " ")
+  if parts.length < 4 {
+    ret false
+  }
+  let x: Int = parts.at(index: 0).trim().toInt()
+  let y: Int = parts.at(index: 1).trim().toInt()
+  let w: Int = parts.at(index: 2).trim().toInt()
+  let h: Int = parts.at(index: 3).trim().toInt()
+  # A zero or negative size is a corrupt or truncated line. Changing nothing is
+  # the right answer: a bad file must not be able to strand the window at 0x0 or
+  # off-screen, where the user cannot get at it to fix it.
+  if w <= 0 or h <= 0 {
+    ret false
+  }
+  gpu2d.setWindowSize(w: w, h: h)
+  gpu2d.setWindowPosition(x: x, y: y)
+  g.lastX = x
+  g.lastY = y
+  g.lastW = w
+  g.lastH = h
+  ret true
+}
+
+# UNITS MATTER HERE, and getting them wrong is not obvious from a screenshot.
+# gpu2d.windowWidth/Height are the DRAWABLE size in physical pixels, while
+# setWindowSize takes LOGICAL points — so on a 2x display, saving the physical
+# size and restoring it as logical doubles the window on every launch. It went
+# 900x640 -> 1800x1280 -> 3600x2560 across three runs before this converted.
+func writeWindowGeometry(g: mod WindowGeometry) pub {
+  let x: Int = gpu2d.windowPositionX()
+  let y: Int = gpu2d.windowPositionY()
+  var scale: Float = gpu2d.dpr()
+  if scale <= 0.0 {
+    scale = 1.0
+  }
+  let w: Int = (gpu2d.windowWidth().toFloat() / scale).toInt()
+  let h: Int = (gpu2d.windowHeight().toFloat() / scale).toInt()
+  if w <= 0 or h <= 0 {
+    ret
+  }
+  if x is g.lastX and y is g.lastY and w is g.lastW and h is g.lastH {
+    ret
+  }
+  makeDir(path: g.dir)
+  if sys.writeFile(path: g.path, content: "{x} {y} {w} {h}\n") {
+    g.lastX = x
+    g.lastY = y
+    g.lastW = w
+    g.lastH = h
+  }
+}
+
+# Once per frame. Consumes this frame's move/resize events and writes when the
+# drag has settled.
+#
+# EVENT-DRIVEN, NOT POLLED. It asks the OS for the window position only on a
+# frame where SDL actually reported a move or a resize; the rest of the time it
+# is one boolean test. These apps are built to idle at ~0% CPU
+# (docs/ui-render-loop-performance.md), and a feature that fires when a human
+# drags a window has no business waking anything.
+# `resized` is PASSED IN, not read here. gpu2d.windowResized() is one-shot —
+# reading it clears it — and the apps already read it to rebuild their layout.
+# A module that consumed it behind their back would make adding this feature
+# silently break resize handling, which is a rotten trade for one argument.
+func updateWindowGeometry(g: mod WindowGeometry, now: view Float64,
+                          resized: view Bool) pub {
+  if gpu2d.windowMoved() or resized {
+    g.dirty = true
+    g.dirtyAt = now
+  }
+  if g.dirty is false {
+    ret
+  }
+  if (now - g.dirtyAt) as Float < windowGeometrySettleSec {
+    ret
+  }
+  g.dirty = false
+  writeWindowGeometry(g: g)
+}
+
+# For an app that would rather write on its own schedule — on quit, say — than
+# let the settle timer do it.
+func flushWindowGeometry(g: mod WindowGeometry) pub {
+  if g.dirty is false {
+    ret
+  }
+  g.dirty = false
+  writeWindowGeometry(g: g)
+}
