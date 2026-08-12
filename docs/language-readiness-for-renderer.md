@@ -27,7 +27,7 @@ position. That has already happened repeatedly at small scale:
   `removeLast`; the natural implementation was impossible.
 - `lib/renderer3d.rae` dispatches passes through a tag switch because Rae
   has no function references.
-- Several loops in `examples/110_gpu3d_ui` are restructured around the
+- Several loops in `examples/112_gpu3d_ui` are restructured around the
   absence of `continue`.
 - `lib/ui/log_overlay.rae` carries a comment explaining an ownership
   workaround for `List.set` taking `own T`.

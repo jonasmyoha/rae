@@ -22,9 +22,9 @@ grep -q 'id="canvas"' "$TMP/index.html"
 
 perl -e 'alarm shift; exec @ARGV' 240 compiler/bin/rae build \
   --target wasm --profile dev \
-  --project examples/110_gpu3d_ui \
+  --project examples/112_gpu3d_ui \
   --out "$TMP/ui.html" \
-  examples/110_gpu3d_ui/main.rae >/dev/null
+  examples/112_gpu3d_ui/main.rae >/dev/null
 
 test -s "$TMP/ui.html"
 test -s "$TMP/ui.js"
