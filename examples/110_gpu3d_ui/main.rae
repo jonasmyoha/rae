@@ -51,6 +51,7 @@ open ui/transform
 open ui/event_loop
 open ui/frame_stats
 open ui/log_overlay
+open ui/debug_overlay
 open hot_reload
 import string
 import ui/ecs
@@ -65,6 +66,7 @@ import ui/transform
 import ui/event_loop
 import ui/frame_stats
 import ui/log_overlay
+import ui/debug_overlay
 import hot_reload
 import app3d/camera_rig
 import app3d/camera_bar
@@ -447,6 +449,13 @@ func main() ret Int {
   # Diagnostic log overlay (lib/ui/log_overlay.rae), bottom-left here and
   # top-left in the mobile UI example — same widget, different corner.
   var logView: LogOverlay = createLogOverlay(capacity: 64, maxLines: 10, anchor: logAnchorBottomLeft, fontSize: 14.0)
+  # Shared debug instrumentation: amber button top right, fps/memory readouts
+  # and the moving update indicator. One line to opt in per feature.
+  var dbg: DebugOverlay = createDebugOverlay(button: true, fps: true,
+                                             memory: true, heartbeat: true)
+  # This example PARKS when nothing moves, so "did real work" is the previous
+  # frame's render decision — it is not known yet this early in the frame.
+  var dbgDidWork: Bool = true
   # First use case: make hot reloads visible. A rebuilt binary that failed
   # to relaunch looks exactly like one that reloaded and changed nothing,
   # so print the launch generation — watching 5 become 6 is the proof.
@@ -607,6 +616,12 @@ func main() ret Int {
     }
 
     updateUiInput(input: uiInput, world: uiWorld)
+    # The debug button sits over the side panel, so a press it takes has to be
+    # withdrawn from the UI world or the same click works the control beneath.
+    if updateDebugOverlay(d: dbg, screenW: windowExtentW(), screenH: windowExtentH(),
+                          now: now, didRealWork: dbgDidWork) {
+      suppressUiPress(input: uiInput)
+    }
     handleCameraBar(input: uiInput, rig: cameraRig, camera: camera)
     let hadUiEvents: Bool = uiInput.events.length > 0
     dispatchUiActions(input: uiInput, state: uiState, rig: cameraRig, camera: camera)
@@ -691,6 +706,7 @@ func main() ret Int {
       or extentChanged or hadUiEvents or fpsDirty or logChanged
       or timeAnimating or renderedOnce is false
     if taaSettleFrames > 0 { needsRender = true }
+    dbgDidWork = needsRender
     if needsRender is false {
       # Nothing to draw: park until the OS has something to say, or until
       # the readout heartbeat is due. Shared policy from
@@ -813,6 +829,8 @@ func main() ret Int {
           renderSystemGpu2d(world: uiWorld, res: gpuUi)
           # After the app UI, so the diagnostic is never what gets covered up.
           drawLogOverlay(ov: logView, font: gpuUi.textFont, screenW: extentW, screenH: extentH)
+          # LAST, so it is above the scene, the UI world and the log.
+          drawDebugOverlay(d: dbg, font: gpuUi.textFont, didRealWork: dbgDidWork)
           lastLogRevision = logView.revision
         }
         if tag is tagPresentD {
