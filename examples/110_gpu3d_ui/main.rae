@@ -622,6 +622,13 @@ func main() ret Int {
     if settingsUpdatePointer(s: settings, world: uiWorld, input: uiInput) {
       settingsChanged = true
     }
+    # The clock, if it is running. This example PARKS in waitEvents when nothing
+    # is moving, so a running clock has to be declared as motion below or it
+    # starves to the heartbeat rate and the sky steps once a second.
+    let timeAnimating: Bool = settingsAdvanceTime(s: settings, dt: dt)
+    if timeAnimating {
+      settingsChanged = true
+    }
     # The scene chooser exists in both places here: the debug panel's own
     # buttons and the dialog's. Keep them one value rather than two.
     if settings.scene is not uiState.activeScene {
@@ -682,7 +689,7 @@ func main() ret Int {
     let logChanged: Bool = logView.revision is not lastLogRevision
     var needsRender: Bool = sceneAnimating or cameraMoved or uiLayoutDirty
       or extentChanged or hadUiEvents or fpsDirty or logChanged
-      or renderedOnce is false
+      or timeAnimating or renderedOnce is false
     if taaSettleFrames > 0 { needsRender = true }
     if needsRender is false {
       # Nothing to draw: park until the OS has something to say, or until
@@ -695,7 +702,8 @@ func main() ret Int {
       gpu2d.waitEvents(timeoutSec: idleTimeout)
       recordFrame(stats: frameStats, now: now, didRender: false)
     } else {
-      if sceneAnimating or cameraMoved or uiLayoutDirty or extentChanged or hadUiEvents {
+      if sceneAnimating or cameraMoved or uiLayoutDirty or extentChanged or hadUiEvents
+        or timeAnimating {
         taaSettleFrames = 6
       } else {
         taaSettleFrames = taaSettleFrames - 1
