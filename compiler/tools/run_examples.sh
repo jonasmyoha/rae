@@ -156,7 +156,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT"/gb-*.log 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
-        elif [ "$EXAMPLE_NAME" = "111_gpu3d_ui_forward" ]; then
+        elif [ "$EXAMPLE_NAME" = "111_metaballs_forward" ]; then
           # The forward twin: one screenshot is enough. 112 owns the deep
           # coverage (scene switching, pause, settings, free camera); repeating
           # all of it here would double the slowest example in the suite to
@@ -174,7 +174,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
-        elif [ "$EXAMPLE_NAME" = "112_gpu3d_ui" ]; then
+        elif [ "$EXAMPLE_NAME" = "112_metaballs_deferred" ]; then
           SCREENSHOT="$TMP_OUT/gpu3d-ui.bmp"
           FREE_SCREENSHOT="$TMP_OUT/gpu3d-ui-free.bmp"
           PAUSE_SCREENSHOT="$TMP_OUT/gpu3d-ui-pause.bmp"
