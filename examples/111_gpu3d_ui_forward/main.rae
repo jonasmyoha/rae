@@ -1,0 +1,760 @@
+# 3D Renderer — FORWARD path, with the same ECS/.raescene UI as example 112.
+#
+# THE TWIN OF 112. Same three scenes, same panel, same controls; the renderer
+# underneath is the whole difference, which is what makes the pair useful — open
+# both and the only variable is the lighting path.
+#
+# WHAT IS MISSING HERE, deliberately: the SKY. The sky interface (#399) and its
+# Hosek/Preetham/solid shaders live only in the deferred runtime, so this example
+# renders against the clear colour. The panel's sky model buttons and the visual
+# half of the time-of-day, date and latitude sliders therefore do NOTHING in this
+# example — they still move the SUN, so lighting and shadows track them, but the
+# background does not change. The controls are left in place rather than hidden
+# so the two examples stay the same panel; a control that is inert in one app is
+# easier to explain than two panels that have drifted apart.
+#
+# Frame ownership is explicit: Scene3d renders first, gpu3d.endPass submits
+# without presenting, GPU2D loads the resolved color target and paints UiWorld,
+# then GPU2D presents once. UI hit-testing has priority over orbit input.
+#
+# RESPONSIVE, NOT SCALED: the design resolution tracks the window's logical
+# size, so the design->pixel transform is identity. Fonts keep their
+# authored point size at every window size, and there are no letterbox
+# bars. The UI scene is authored at absolute coordinates, so
+# `anchorUiToExtent` re-places the root-level nodes whenever the extent
+# changes — intent ("centred", "right-aligned", "full-bleed") lives there
+# rather than in resolution-specific constants.
+#
+# STATE SURVIVES HOT RELOAD: selected scene, pause/speed/debug toggles and
+# the full camera (orbit-vs-WASD mode, yaw/pitch, distance, free position,
+# target) round-trip through lib/hot_reload.rae's state file, so a rebuild
+# drops you back where you were instead of re-aiming the camera every
+# time. Saved on change (throttled), not only at exit, because nothing
+# guarantees this process gets a chance to shut down cleanly.
+#
+# IDLE COSTS NOTHING: the loop only draws when something it depends on
+# changed — simulation running, camera moved, UI event, resize, or TAA
+# still converging. Otherwise it parks in `gpu2d.waitEvents`, so a paused
+# app sits at 0% CPU instead of re-rendering an identical image at frame
+# rate (measured: 0.0% paused vs ~12% animating).
+import core
+import gpu2d
+import math
+import sdf_text
+import scene3d_file
+import scene_animation
+import sdl3
+import vec3
+open gpu3d
+open renderer3d
+open math3d
+open mesh3d
+open scene3d
+open scene3d_file
+open scene_animation
+open ui/ecs
+open ui/input_gpu2d
+open ui/layout
+open ui/render_gpu2d
+open ui/scene_file
+open ui/scene_loader
+open ui/theme_resolved
+open ui/transform
+open ui/event_loop
+open ui/log_overlay
+open ui/window_geometry
+open ui/scroll_panel
+open ui/debug_overlay
+open hot_reload
+import string
+import ui/ecs
+import ui/input_gpu2d
+import ui/layout
+import ui/render_gpu2d
+import ui/scene
+import ui/scene_file
+import ui/scene_loader
+import ui/theme_resolved
+import ui/transform
+import ui/event_loop
+import ui/log_overlay
+import ui/window_geometry
+import ui/scroll_panel
+import ui/debug_overlay
+import hot_reload
+import app3d/camera_rig
+import app3d/camera_bar
+import app3d/slider
+import app3d/settings_dialog
+import shadow3d
+import renderer3d
+import app3d/ui_shell
+open app3d/camera_rig
+open app3d/camera_bar
+open app3d/settings_dialog
+open shadow3d
+open app3d/ui_shell
+
+type DemoUiResource {
+  paused: Bool
+  fullSpeed: Bool
+  debugOpen: Bool
+  activeScene: Int
+  revision: Int
+  appliedRevision: Int
+}
+
+func createDemoUiResource() ret DemoUiResource {
+  ret DemoUiResource {
+    paused: false
+    fullSpeed: false
+    debugOpen: false
+    activeScene: 1
+    revision: 1
+    appliedRevision: 0
+  }
+}
+
+# ----- state that survives a hot reload -------------------------------
+# A hot reload is a process exit + relaunch, so anything held only in
+# locals is gone. Losing the camera on every rebuild is the single most
+# disruptive part of iterating on a 3D scene: you stop editing and start
+# re-aiming the camera.
+#
+# Stored through lib/hot_reload.rae's state file, under an APP-SCOPED path
+# so it cannot collide with another example's snapshot in the same tree.
+#
+# Format is one space-separated line behind a version tag rather than
+# JSON: the payload is a dozen numbers, a bad or older line must degrade
+# to "start fresh" rather than half-apply, and a version mismatch is then
+# a single comparison. Restoring a partially-parsed camera would be worse
+# than not restoring at all.
+const state111Version: Int = 2
+const state111AppId: String = "111_gpu3d_ui_forward"
+const state111Fields: Int = 15
+
+func serialize111State(ui: view DemoUiResource, rig: view CameraRig, camera: view Camera3d) ret String {
+  var pausedNum: Int = 0
+  if ui.paused { pausedNum = 1 }
+  var fullNum: Int = 0
+  if ui.fullSpeed { fullNum = 1 }
+  var debugNum: Int = 0
+  if ui.debugOpen { debugNum = 1 }
+  # This example owns the first five fields; the camera's ten are the
+  # rig's format, so the two cannot drift out of step when either side
+  # gains a field.
+  ret "{state111Version} {ui.activeScene} {pausedNum} {fullNum} {debugNum} {cameraRigStateString(rig: rig, camera: camera)}"
+}
+
+# Returns true when a full, version-matched snapshot was applied.
+func restore111State(raw: view String, ui: mod DemoUiResource, rig: mod CameraRig, camera: mod Camera3d) ret Bool {
+  if raw.length() < 1 {
+    ret false
+  }
+  let parts: List(String) = raw.trim().split(sep: " ")
+  if parts.length < state111Fields {
+    ret false
+  }
+  if parts.at(index: 0).trim().toInt() is not state111Version {
+    ret false
+  }
+  ui.activeScene = parts.at(index: 1).trim().toInt()
+  if ui.activeScene < 1 { ui.activeScene = 1 }
+  if ui.activeScene > 3 { ui.activeScene = 3 }
+  ui.paused = parts.at(index: 2).trim().toInt() is 1
+  ui.fullSpeed = parts.at(index: 3).trim().toInt() is 1
+  ui.debugOpen = parts.at(index: 4).trim().toInt() is 1
+  if applyCameraRigState(parts: parts, offset: 5, rig: rig, camera: camera) is false {
+    ret false
+  }
+  ui.revision = ui.revision + 1
+  ret true
+}
+
+# Narrow UI diff: persistent entities are patched only when their typed
+# resource revision changes. No scene remount or per-frame widget rebuilding.
+func syncDemoUi(world: mod UiWorld, state: mod DemoUiResource) ret Bool {
+  var layoutDirty: Bool = false
+  if state.appliedRevision is not state.revision {
+            if state.paused {
+    } else {
+    }
+    if state.fullSpeed {
+      setNodeText(world: world, nodeId: "MotionButtonLabel", value: "Full")
+    } else {
+      setNodeText(world: world, nodeId: "MotionButtonLabel", value: "Reduced")
+    }
+    state.appliedRevision = state.revision
+    layoutDirty = true
+  }
+  ret layoutDirty
+}
+
+func dispatchUiActions(input: view UiInput, state: mod DemoUiResource, rig: mod CameraRig, camera: mod Camera3d) {
+  var i: Int = 0
+  loop i < input.events.length {
+    let event: UiActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
+    if event.actionId.equals(other: "ui.debug") {
+      state.debugOpen = not state.debugOpen
+      state.revision = state.revision + 1
+    }
+    if event.actionId.equals(other: "animation.speed") {
+      state.fullSpeed = not state.fullSpeed
+      state.revision = state.revision + 1
+    }
+    if event.actionId.equals(other: "scene.select.1") {
+      state.activeScene = 1
+      state.revision = state.revision + 1
+    }
+    if event.actionId.equals(other: "scene.select.2") {
+      state.activeScene = 2
+      state.revision = state.revision + 1
+    }
+    if event.actionId.equals(other: "scene.select.3") {
+      state.activeScene = 3
+      state.revision = state.revision + 1
+    }
+    i = i + 1
+  }
+}
+
+# ----- responsive layout ----------------------------------------------
+# The UI scene is authored at absolute coordinates in a 1280x800 space,
+# which is why it used to be presented through a letterboxed design
+# resolution: fixed constants only line up at one window size. That put
+# black bars around the UI, shrank every font with the window width, and
+# clipped the pause dimmer to a 16:10 box in the middle.
+#
+# Instead the design resolution now MATCHES the window's logical size (so
+# the transform is identity: fonts render at their authored point size at
+# any window size) and the handful of root-level nodes are re-anchored
+# here whenever the extent changes. Only intent lives in this function —
+# "centred", "right-aligned", "full-bleed" — not pixel constants tied to
+# one resolution.
+func anchorUiToExtent(world: mod UiWorld, res: view Gpu2dUi, w: view Float, h: view Float) {
+  let margin: Float = 24.0
+  # Full-bleed: the root and the pause dimmer must cover the whole window,
+  # not a fixed-size box inside it.
+  setNodeRect(world: world, nodeId: "UiRoot", x: 0.0, y: 0.0, w: w, h: h)
+
+  # Right-aligned controls, measured from the live width.
+
+
+  # The camera bar is placed by the top row's layout now, as it is in 113;
+  # this only tells the SHARED component how much room it has, so it can shed
+  # readouts that do not fit.
+  let sidePanelW: Float = 320.0
+  var barAvail: Float = w - sidePanelW - 160.0
+  if barAvail < 200.0 { barAvail = 200.0 }
+  fitCameraBar(world: world, res: res, hostNodeId: "CameraBarSlot", availW: barAvail)
+
+  # Crosshair tracks the true viewport centre.
+  setNodeRect(world: world, nodeId: "Crosshair", x: (w - 36.0) * 0.5, y: (h - 36.0) * 0.5, w: 36.0, h: 36.0)
+
+  # Panels: the pause dialog centres in the window; the debug panel hangs
+  # off the top-right under its button. Both are children of full-bleed
+  # parents, so their offsets are relative to the window, not to a canvas.
+  # The side panel owns the right edge, full height — the same shape 113 uses,
+  # so the two examples read as one app family rather than two demos.
+}
+
+func uploadMeshData(mesh: view MeshData) ret MeshHandle {
+  ret uploadMesh(verts: mesh.verts, vertCount: mesh.vertCount, indices: mesh.indices)
+}
+
+func main() ret Int {
+  gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — ECS Scene UI, forward [{rendererPathName()}]")
+  # Remember where the user put the window, across restarts. Opt-in, and the
+  # app picks the file: the hot-reload channel dir is per app, so two examples
+  # running at once do not share one window position.
+  var windowGeom: WindowGeometry = createWindowGeometry(dir: hotReloadDir(),
+                                                        name: "window.geometry")
+  restoreWindowGeometry(g: windowGeom)
+  # Design resolution tracks the window's LOGICAL size, so the transform is
+  # identity: no letterbox bars, and fonts keep their authored point size
+  # instead of shrinking with window width.
+  var extentW: Float = windowExtentW()
+  var extentH: Float = windowExtentH()
+  gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
+
+  let sphereData: MeshData = makeSphere(rings: 32, segments: 48)
+  let torusData: MeshData = makeTorus(majorR: 1.55, minorR: 0.42, majorSegs: 96, minorSegs: 40)
+  let planeData: MeshData = makePlane(size: 36.0, segments: 1)
+  # Unit box, flat shaded (24 verts, not 8 — a shared corner cannot carry
+  # three face normals). Scene 1 uses it for the voxel mountains and the
+  # two spinning cubes.
+  let boxData: MeshData = makeBox(size: 1.0)
+  let sphere: MeshHandle = uploadMeshData(mesh: sphereData)
+  let torus: MeshHandle = uploadMeshData(mesh: torusData)
+  let ground: MeshHandle = uploadMeshData(mesh: planeData)
+  let boxMesh: MeshHandle = uploadMeshData(mesh: boxData)
+  let base: String = "examples/112_gpu3d_ui/assets/"
+  var meshRegistry: MeshRegistry3d = createMeshRegistry3d()
+  registerMesh3d(reg: meshRegistry, key: "sphere", handle: sphere)
+  registerMesh3d(reg: meshRegistry, key: "torus", handle: torus)
+  registerMesh3d(reg: meshRegistry, key: "ground", handle: ground)
+  registerMesh3d(reg: meshRegistry, key: "box", handle: boxMesh)
+  var scene1: Scene3dAsset = loadScene3dFile(path: "{base}scene1.raescene", meshes: meshRegistry)
+  var scene2: Scene3dAsset = loadScene3dFile(path: "{base}scene2.raescene", meshes: meshRegistry)
+  var scene3: Scene3dAsset = loadScene3dFile(path: "{base}scene3.raescene", meshes: meshRegistry)
+  if scene1.ok is false {
+    log("[scene3d] scene 1 failed: {scene1.errorMsg}")
+    shutdown()
+    gpu2d.closeWindow()
+    ret 1
+  }
+  if scene2.ok is false {
+    log("[scene3d] scene 2 failed: {scene2.errorMsg}")
+    shutdown()
+    gpu2d.closeWindow()
+    ret 1
+  }
+  if scene3.ok is false {
+    log("[scene3d] scene 3 failed: {scene3.errorMsg}")
+    shutdown()
+    gpu2d.closeWindow()
+    ret 1
+  }
+
+  # Fonts + theme through the shared loader, which also bridges the
+  # theme's PALETTE into the active theme — the step that was missing
+  # here and is why a slot-coloured component would otherwise render in
+  # the built-in light palette.
+  let gpuUi: Gpu2dUi = loadUiAssets(dir: base, textFontName: "Roboto-Regular",
+                                    iconFontName: "MaterialIconsRound-Regular",
+                                    themeFile: "theme.raescene")
+
+  var uiWorld: UiWorld = createUiWorld()
+  uiWorld.layoutW = extentW
+  uiWorld.layoutH = extentH
+  let uiScene: Scene = loadSceneFile(path: "{base}ui.raescene")
+  let uiRoot: EntityId = loadScene(world: uiWorld, scene: uiScene)
+  # The camera readout bar is the SHARED component; this scene supplies
+  # only the slot it mounts into. Example 113 mounts the same one.
+  mountCameraBar(world: uiWorld, res: gpuUi, hostNodeId: "CameraBarSlot")
+  anchorUiToExtent(world: uiWorld, res: gpuUi, w: extentW, h: extentH)
+  layoutSystem(world: uiWorld)
+  transformSystem(world: uiWorld)
+  visualBoundsSystem(world: uiWorld, res: gpuUi)
+
+  # Diagnostic log overlay (lib/ui/log_overlay.rae), bottom-left here and
+  # top-left in the mobile UI example — same widget, different corner.
+  var logView: LogOverlay = createLogOverlay(capacity: 64, maxLines: 10, anchor: logAnchorBottomLeft, fontSize: 14.0)
+  # Shared debug instrumentation: amber button top right, fps/memory readouts
+  # and the moving update indicator. One line to opt in per feature.
+  var dbg: DebugOverlay = createDebugOverlay(button: true, fps: true,
+                                             memory: true, heartbeat: true)
+  # This example PARKS when nothing moves, so "did real work" is the previous
+  # frame's render decision — it is not known yet this early in the frame.
+  var dbgDidWork: Bool = true
+  # First use case: make hot reloads visible. A rebuilt binary that failed
+  # to relaunch looks exactly like one that reloaded and changed nothing,
+  # so print the launch generation — watching 5 become 6 is the proof.
+  let reloadGen: Int = nextReloadGeneration()
+  logInfoLine(ov: logView, text: "hot reload {reloadGen}")
+  logDebugLine(ov: logView, text: "scene1/2/3 loaded, renderer graph compiled")
+  # Real conditions, not decoration: surface a degraded renderer state so
+  # it cannot be mistaken for how the app normally looks.
+  if getEnv(name: "RAE_NO_TAA").length() > 0 {
+    logWarnLine(ov: logView, text: "TAA disabled (RAE_NO_TAA) - edges will alias")
+  }
+
+  var uiInput: UiInput = createUiInput()
+  var uiState: DemoUiResource = createDemoUiResource()
+  # The shared dialog (lib/app3d/settings_dialog). Three scenes here, so its
+  # scene chooser is live; 113 mounts the same dialog with sceneCount 1.
+  var settings: SettingsState = createSettingsState(scene: uiState.activeScene, sceneCount: 3,
+                                                    speed: 1.0, toon: false, hour: 12.0,
+                                                    skyModel: SettingsSkyModel.preetham)
+  if mountSettingsDialog(world: uiWorld, res: gpuUi, hostNodeId: "SettingsDialogSlot") is false {
+    logWarnLine(ov: logView, text: "settings dialog failed to mount")
+  }
+  settingsApplyToWorld(s: settings, world: uiWorld)
+  applySettingsPanelOpen(world: uiWorld, open: settings.open)
+  var camera: Camera3d = scene1.camera
+  var cameraRig: CameraRig = createCameraRig(camera: camera)
+  # Restore before the test-state hook, so an explicit env override still
+  # wins over whatever the previous run left behind.
+  #
+  # A HEADLESS run never restores. Headless means a screenshot or smoke
+  # test, and those assert against a defined starting state — inheriting
+  # whatever scene a developer happened to leave selected makes the result
+  # depend on machine-local history. That is not hypothetical: it turned
+  # the metaball assertion red on a dev machine while staying green on a
+  # clean checkout, which is the worst way for a gate to fail.
+  # BOTH headless vars, not just the timed one. RAE_HEADLESS_FRAMES is the
+  # deterministic variant used for exact-frame captures, so it is precisely
+  # the mode that must not inherit machine-local camera state — checking
+  # only RAE_SDL_HEADLESS_MS left the stricter mode unguarded.
+  let headless: Bool = getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0
+    or getEnv(name: "RAE_HEADLESS_FRAMES").length() > 0
+  if not headless {
+    let savedState: String = readHotReloadStateFor(appId: state111AppId)
+    if restore111State(raw: savedState, ui: uiState, rig: cameraRig, camera: camera) {
+      logInfoLine(ov: logView, text: "state restored: scene {uiState.activeScene}, camera kept")
+    }
+  }
+
+  let testState: String = getEnv(name: "RAE_GPU3D_UI_TEST_STATE")
+  if testState.equals(other: "pause") { uiState.paused = true }
+  if testState.equals(other: "debug") { uiState.debugOpen = true }
+  if testState.equals(other: "scene2") { uiState.activeScene = 2 }
+  if testState.equals(other: "scene3") { uiState.activeScene = 3 }
+  if testState.equals(other: "free") {
+    toggleCameraRigMode(rig: cameraRig, camera: camera)
+  }
+  let initialUiLayoutDirty: Bool = syncDemoUi(world: uiWorld, state: uiState)
+  if initialUiLayoutDirty {
+    layoutSystem(world: uiWorld)
+    transformSystem(world: uiWorld)
+    visualBoundsSystem(world: uiWorld, res: gpuUi)
+  }
+  syncCameraBar(world: uiWorld, rig: cameraRig, camera: camera)
+
+  var light: Light3d = scene1.light
+  var simTime: Float = 0.0
+  # Epoch seconds must stay Float64 (see docs/primitive-types.md); only the
+  # small per-frame delta is narrowed to Float.
+  # Frame declared as a render graph with a load-preserving UI overlay.
+    # A REAL sky (#400): Preetham, from the same sun the scene is lit by,
+  # so the visible sun and the shadows agree. Turbidity 2.5 is a clear
+  # day. This example is the renderer's realistic end; 113 is the
+  # stylised one, and they deliberately use different kinds behind the
+  # same interface.
+  # NO SKY on this path — the sky interface is deferred-only, so the background
+  # is the scene's clear colour. The SUN is still driven by the panel, because
+  # that part is app-side arithmetic: the time of day, date and latitude move
+  # the light and therefore the shading and shadows, and only the backdrop is
+  # missing.
+  var renderer: Renderer3d = createRenderer3dWithUi()
+  light.sunDir = settingsSunDir(s: settings)
+  light.sunColor = settingsSunColor(s: settings)
+  let gstatus: Int = compileRenderer(r: renderer)
+  if gstatus is not 0 {
+    log("render graph invalid: {gstatus}")
+    ret 1
+  }
+
+  var lastFrame: Float64 = gpu2d.nowSeconds()
+  # Shared sliding-window sampler (lib/ui/frame_stats.rae): it records only
+  # frames that actually rendered, so an idle app's reading decays to ~1
+  # instead of freezing at the last busy value.
+  # Idle policy (see docs/ui-render-loop-performance.md): busy-render while
+  # anything is moving, park in waitEvents when nothing is. Relayout is
+  # gated on explicit change flags, and the UI paint only happens inside a
+  # rendered frame, so an idle app touches neither.
+  # What the settings panel's scene chooser last read, so a change made IN the
+  # panel can be told apart from the panel merely holding a stale value.
+  var lastSettingsScene: Int = settings.scene
+  # The panel outgrew its space once the rendering toggles landed, so it
+  # scrolls: wheel when the pointer is over it, drag anywhere inside it.
+  var panelScroll: ScrollPanel = createScrollPanel(viewportId: "SidePanelBody",
+                                                   contentId: "SidePanelContent")
+  var renderedOnce: Bool = false
+  var lastLogRevision: Int = 0 - 1
+  # Once, not per frame: this is a gate assertion, not a readout.
+  var shadowLogged: Bool = false
+  # Save on CHANGE rather than only at exit: 110 does not watch for a
+  # reload signal, so a supervisor is free to kill it without warning and
+  # an exit-only save would lose everything. Throttled because a camera
+  # drag changes state every frame and one file write per frame would be
+  # exactly the kind of hidden cost this app is meant to measure.
+  var stateDirty: Bool = false
+  var lastStateSave: Float64 = gpu2d.nowSeconds()
+  var lastSavedScene: Int = uiState.activeScene
+  var lastSavedRevision: Int = uiState.revision
+  # TAA converges over several frames, so stopping the instant motion ends
+  # would freeze a half-resolved image. Keep drawing a few extra frames
+  # after the last change, then idle on a fully converged picture.
+  var taaSettleFrames: Int = 0
+
+  loop not gpu2d.pollClose() {
+    let now: Float64 = gpu2d.nowSeconds()
+    var dt: Float = (now - lastFrame) as Float
+    lastFrame = now
+    if dt > 0.1 { dt = 0.1 }
+
+    # Re-anchor on resize. The window's logical size is the layout extent,
+    # so a resize re-runs placement instead of rescaling a fixed canvas.
+    var extentChanged: Bool = false
+    let resized: Bool = gpu2d.windowResized()
+    updateWindowGeometry(g: windowGeom, now: now, resized: resized)
+    if resized {
+      extentW = windowExtentW()
+      extentH = windowExtentH()
+      if extentW > 0.0 and extentH > 0.0 {
+        gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
+        uiWorld.layoutW = extentW
+        uiWorld.layoutH = extentH
+        anchorUiToExtent(world: uiWorld, res: gpuUi, w: extentW, h: extentH)
+        extentChanged = true
+      }
+    }
+
+    # Refresh the readout about once a second. This is deliberately the
+
+    updateUiInput(input: uiInput, world: uiWorld)
+    let scrolled: Bool = updateScrollPanel(s: panelScroll, world: uiWorld, input: uiInput)
+    # The debug button sits over the side panel, so a press it takes has to be
+    # withdrawn from the UI world or the same click works the control beneath.
+    if updateDebugOverlay(d: dbg, screenW: windowExtentW(), screenH: windowExtentH(),
+                          now: now, didRealWork: dbgDidWork) {
+      suppressUiPress(input: uiInput)
+    }
+    handleCameraBar(input: uiInput, rig: cameraRig, camera: camera)
+    let hadUiEvents: Bool = uiInput.events.length > 0
+    dispatchUiActions(input: uiInput, state: uiState, rig: cameraRig, camera: camera)
+    # The shared dialog sees every action and ignores what it does not own.
+    var settingsChanged: Bool = false
+    var sa: Int = 0
+    loop sa < uiActionCount(input: uiInput) {
+      if settingsHandleAction(s: settings, actionId: uiActionAt(input: uiInput, index: sa)) {
+        settingsChanged = true
+      }
+      sa = sa + 1
+    }
+    if settingsUpdatePointer(s: settings, world: uiWorld, input: uiInput) {
+      settingsChanged = true
+    }
+    if settingsUpdateLatitudePointer(s: settings, world: uiWorld, input: uiInput) {
+      settingsChanged = true
+    }
+    if settingsUpdateDatePointer(s: settings, world: uiWorld, input: uiInput) {
+      settingsChanged = true
+    }
+    # The clock, if it is running. This example PARKS in waitEvents when nothing
+    # is moving, so a running clock has to be declared as motion below or it
+    # starves to the heartbeat rate and the sky steps once a second.
+    let timeAnimating: Bool = settingsAdvanceTime(s: settings, dt: dt)
+    if timeAnimating {
+      settingsChanged = true
+    }
+    # The scene chooser exists in both places here: the debug panel's own
+    # buttons and the dialog's. Keep them one value rather than two.
+    #
+    # THE DIALOG WINS ONLY WHEN THE DIALOG ACTUALLY MOVED. This used to key off
+    # `settingsChanged`, which meant "the user touched the panel" until the
+    # time-of-day clock started setting it every frame — after which the dialog
+    # won always, and silently reverted any scene chosen anywhere else. It ate
+    # both the RAE_GPU3D_UI_TEST_STATE=scene3 override and a restored snapshot,
+    # so the app opened on scene 1 whatever it had been told.
+    if settings.scene is not lastSettingsScene {
+      uiState.activeScene = settings.scene
+      uiState.revision = uiState.revision + 1
+      lastSettingsScene = settings.scene
+    } else {
+      if uiState.activeScene is not settings.scene {
+        settings.scene = uiState.activeScene
+        lastSettingsScene = uiState.activeScene
+      }
+    }
+    if settingsChanged {
+      # No sky to rebuild here; the sun still moves.
+      light.sunDir = settingsSunDir(s: settings)
+      light.sunColor = settingsSunColor(s: settings)
+      # Pause is the shared control now; uiState still owns the flag the rest
+      # of this example reads.
+      uiState.paused = settings.playing is false
+      settingsApplyToWorld(s: settings, world: uiWorld)
+      applySettingsPanelOpen(world: uiWorld, open: settings.open)
+      stateDirty = true
+    }
+    let uiLayoutDirty: Bool = syncDemoUi(world: uiWorld, state: uiState)
+    # `settingsChanged` too: a slider DRAG produces no action and does not dirty
+    # the demo UI, so without it the knob's new rect only reached the screen when
+    # the release finally produced one (see 113 for the same gate).
+    if uiLayoutDirty or extentChanged or settingsChanged {
+      layoutSystem(world: uiWorld)
+      transformSystem(world: uiWorld)
+      visualBoundsSystem(world: uiWorld, res: gpuUi)
+    }
+
+    # Pause freezes the SIMULATION, not the camera. With no modal dialog
+    # over the scene there is nothing for a pointer-block to protect, and
+    # being able to orbit a frozen frame is the main reason to pause at
+    # all. `cameraMoved` already forces a redraw, so the idle wait-loop
+    # still wakes for it.
+    let cameraInput: Bool = uiPointerCaptured(input: uiInput) is false
+    let cameraMoved: Bool = updateCameraRig(rig: cameraRig, camera: camera, allowInput: cameraInput, dt: dt)
+
+    # The frame is only worth drawing if something it depends on changed.
+    # While paused the 3D scene is frozen, so the presented image is still
+    # valid — redrawing it would burn a GPU frame to produce the same
+    # pixels. TAA is the one caveat: its history is still converging for a
+    # few frames after motion stops, so keep drawing until it settles or
+    # edges would stay half-resolved on the final image.
+    let sceneAnimating: Bool = uiState.paused is false
+    # Any UI-state change or camera movement makes the snapshot stale.
+    if uiState.revision is not lastSavedRevision or uiState.activeScene is not lastSavedScene {
+      stateDirty = true
+      lastSavedRevision = uiState.revision
+      lastSavedScene = uiState.activeScene
+    }
+    let logChanged: Bool = logView.revision is not lastLogRevision
+    var needsRender: Bool = sceneAnimating or cameraMoved or uiLayoutDirty
+      or extentChanged or hadUiEvents or logChanged
+      or timeAnimating or scrolled or renderedOnce is false
+    if taaSettleFrames > 0 { needsRender = true }
+    dbgDidWork = needsRender
+    if needsRender is false {
+      # Nothing to draw: park until the OS has something to say, or until
+      # the readout heartbeat is due. Shared policy from
+      # lib/ui/event_loop.rae rather than a hardcoded timeout.
+      let idleTimeout: Float = nextWaitTimeoutSec(
+        animating: false, mouseDown: false, pollWatcher: false,
+        frameSec: 0.016667, heartbeatSec: 1.0
+      )
+      gpu2d.waitEvents(timeoutSec: idleTimeout)
+    } else {
+      if sceneAnimating or cameraMoved or uiLayoutDirty or extentChanged or hadUiEvents
+        or timeAnimating {
+        taaSettleFrames = 6
+      } else {
+        taaSettleFrames = taaSettleFrames - 1
+      }
+      renderedOnce = true
+      if cameraMoved { stateDirty = true }
+      # Flush at most 4x/sec. The snapshot is a dozen numbers, so the cost
+      # is the file write, not the formatting.
+      if stateDirty and not headless {
+        let sinceSave: Float = (now - lastStateSave) as Float
+        if sinceSave >= 0.25 {
+          writeHotReloadStateFor(appId: state111AppId, state: serialize111State(ui: uiState, rig: cameraRig, camera: camera))
+          lastStateSave = now
+          stateDirty = false
+        }
+      }
+      if uiState.paused is false {
+        var motionScale: Float = 1.0
+        # Was a half-speed TOGGLE; now the shared percentage, so 110 and 113
+        # express animation speed the same way (settings_dialog).
+        motionScale = motionScale * settings.speed
+        simTime = simTime + dt * motionScale
+      }
+      applyCameraRig(rig: cameraRig, camera: camera)
+      syncCameraBar(world: uiWorld, rig: cameraRig, camera: camera)
+      if uiState.activeScene is 1 { light = scene1.light }
+      if uiState.activeScene is 2 { light = scene2.light }
+      if uiState.activeScene is 3 { light = scene3.light }
+      # AFTER the scene's own light is restored, not before: this runs every
+      # frame, so setting the sun anywhere earlier is silently undone here and
+      # the time-of-day slider appears to do nothing.
+      #
+      # AND NOTHING MAY ASSIGN sunDir BELOW THIS. A hardcoded sun that orbited on
+      # simTime used to sit on the next line, left over from before the panel
+      # owned the sun (#328). It won every frame, so the time-of-day slider did
+      # nothing at all — and because it keyed off simTime, PAUSING froze the sun
+      # solid, which is how the bug was noticed.
+      light.sunDir = settingsSunDir(s: settings)
+      light.sunColor = settingsSunColor(s: settings)
+      if uiState.activeScene is 1 { animateScene1(asset: scene1, time: simTime) }
+      if uiState.activeScene is 2 {
+        animateScene(scene: scene2.scene, sceneId: 2, time: simTime)
+        animateMetaballLab(asset: scene2, time: simTime)
+      }
+      if uiState.activeScene is 3 { animateScene3(asset: scene3, time: simTime) }
+
+
+      let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
+      # Frame order is DERIVED by the render graph (#331/#332): scene3d
+      # writes the colour target, the UI overlay MODIFIES it (load-preserving),
+      # present reads it. The passes are declared backwards in
+      # createRenderer3dWithUi; this loop runs them in dependency order.
+      # Frame order is DERIVED by the render graph, same as the deferred twin;
+      # the forward path simply declares fewer passes. gpu3d exports the scene
+      # pass, SSAO, TAA and tonemap, and the app owns shadows and the UI overlay
+      # for the same layering reason as in 112.
+      var pi3: Int = 0
+      loop pi3 < frameOrderLength(r: renderer) {
+        let tag: Int = frameTagAt(r: renderer, i: pi3)
+        if tag is tagShadow {
+          let cascades: ShadowCascades = fitShadowCascades(
+            camPos: camera.position, camTarget: camera.target,
+            fovYDeg: camera.fovYDeg, aspect: aspect,
+            near: camera.nearZ, far: 45.0, sunDir: light.sunDir,
+            count: 3, resolution: 2048, lambda: 0.7, backExtent: 30.0
+          )
+          beginShadowPass(c: cascades)
+          # SHADOWS OFF means filling no cascades — an empty cascade set renders
+          # unshadowed, which is what a frame with no shadow pass should look
+          # like, and needs no renderer flag.
+          if settings.shadows and uiState.activeScene is 1 {
+            renderSceneShadow(scene: scene1.scene)
+            renderSceneShadowSdf(scene: scene1.scene)
+          }
+          if settings.shadows and uiState.activeScene is 2 {
+            renderSceneShadow(scene: scene2.scene)
+            renderSceneShadowSdf(scene: scene2.scene)
+          }
+          if settings.shadows and uiState.activeScene is 3 {
+            renderSceneShadow(scene: scene3.scene)
+            renderSceneShadowSdf(scene: scene3.scene)
+          }
+          endShadowPass()
+          if shadowLogged is false {
+            log("[shadow] casters {shadowCasterCount()}, {cascades.count} cascades at {cascades.resolution}")
+            shadowLogged = true
+          }
+        }
+        if tag is tagScenePass {
+          # ONE pass writes lit colour here, where the deferred twin writes a
+          # G-buffer and lights it later. No qualification needed: this example
+          # opens gpu3d and not gbuffer, which is exactly the ambiguity 112's
+          # comment warns about.
+          #
+          # No separate SDF submit either: the forward renderScene raymarches
+          # the metaball clusters itself, where the deferred path needs
+          # renderSceneSdf as its own G-buffer write.
+          beginScene(camera: camera, light: light, aspect: aspect, time: simTime)
+          if uiState.activeScene is 1 {
+            renderScene(scene: scene1.scene)
+          }
+          if uiState.activeScene is 2 {
+            renderScene(scene: scene2.scene)
+          }
+          if uiState.activeScene is 3 {
+            renderScene(scene: scene3.scene)
+          }
+        }
+        if tag is tagSsao {
+          ssaoPass()
+        }
+        if tag is tagTaa {
+          taaPass()
+        }
+        if tag is tagTonemap {
+          tonemapPass()
+        }
+        if tag is tagUiOverlay {
+          gpu2d.beginFrameLoad()
+          renderSystemGpu2d(world: uiWorld, res: gpuUi)
+          # After the app UI, so the diagnostic is never what gets covered up.
+          drawLogOverlay(ov: logView, font: gpuUi.textFont, screenW: extentW, screenH: extentH)
+          # LAST, so it is above the scene, the UI world and the log.
+          drawDebugOverlay(d: dbg, font: gpuUi.textFont, didRealWork: dbgDidWork)
+          lastLogRevision = logView.revision
+        }
+        if tag is tagPresent {
+          gpu2d.endFrame()
+        }
+        pi3 = pi3 + 1
+      }
+      # Frame history for motion vectors (#336): the ACTIVE scene's current
+      # transforms become its previous-frame set. Inactive scenes are not
+      # snapshotted — they aren't rendered, so they have no frame history to
+      # advance, and their first frame back re-syncs on the next snapshot.
+      if uiState.activeScene is 1 { snapshotPrevTransforms(scene: scene1.scene) }
+      if uiState.activeScene is 2 { snapshotPrevTransforms(scene: scene2.scene) }
+      if uiState.activeScene is 3 { snapshotPrevTransforms(scene: scene3.scene) }
+    }
+  }
+  # Final flush: the throttle may have a pending change when the loop ends.
+  # Headless runs neither read nor write the snapshot — a smoke test must
+  # not clobber the scene and camera a developer left set up.
+  if not headless {
+    writeHotReloadStateFor(appId: state111AppId, state: serialize111State(ui: uiState, rig: cameraRig, camera: camera))
+  }
+  shutdown()
+  gpu2d.closeWindow()
+  ret 0
+}

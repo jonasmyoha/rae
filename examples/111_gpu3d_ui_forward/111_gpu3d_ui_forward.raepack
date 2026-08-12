@@ -1,0 +1,25 @@
+pack Gpu3dUiForward {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "3D Renderer — ECS Scene UI (forward)"
+  description: "The FORWARD-rendered twin of example 112. Same scenes, same ECS UI, same controls — the renderer underneath is the difference, which is the point: open both to compare the two lighting paths on identical content. The sky system is deferred-only, so this example has no sky and its sky controls are inert."
+  category: "3D Renderer"
+  wasmWebApp: "true"
+  display: {
+    width: 1280
+    height: 800
+  }
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "main.rae"
+      sources: { source: { path: ".", emit: compiled } }
+    }
+    target wasm: {
+      label: "WASM (WebGPU)"
+      entry: "main.rae"
+      sources: { source: { path: ".", emit: compiled } }
+    }
+  }
+}
