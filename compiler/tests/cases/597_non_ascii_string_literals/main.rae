@@ -1,0 +1,47 @@
+# Non-ASCII string literals must survive the C backend.
+#
+# They did not. The backend escaped bytes above 126 as C HEX escapes, and a C hex
+# escape is GREEDY — it swallows every hex digit that follows. So "Hošek" emitted
+# "Ho\xc5\xa1ek", which C reads as \xa1e: one escape, out of range, and the build
+# fails with "hex escape sequence out of range". Any literal with a non-ASCII byte
+# followed by [0-9a-fA-F] hit it — an umlaut before an 'e' was enough.
+#
+# Octal escapes are capped at three digits, so \303\244 cannot absorb what comes
+# after it. This test is here because the failure was a COMPILE error in generated
+# C, which no amount of Rae-level review would have caught.
+import core
+import string
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() ret Int {
+  # The case that broke: a two-byte character immediately before a hex digit.
+  let caron: String = "Hošek-Wilkie"
+  check(label: "s-caron literal survives the backend", ok: caron.length() is 13)
+  check(label: "s-caron decodes to U+0161", ok: caron.at(index: 2).toInt() is 353)
+  check(label: "the byte after it is not swallowed", ok: caron.at(index: 4).toInt() is 101)
+
+  # Umlauts before hex-digit letters: ä before 'e', ü before 'ß'.
+  let umlauts: String = "Grüße"
+  check(label: "u-umlaut and sharp s survive", ok: umlauts.at(index: 2).toInt() is 252 and umlauts.at(index: 4).toInt() is 223)
+  let nordic: String = "Hyvää yötä"
+  check(label: "a-umlaut decodes", ok: nordic.at(index: 3).toInt() is 228)
+  check(label: "o-umlaut decodes", ok: nordic.at(index: 9).toInt() is 246)
+  let ring: String = "Ångström"
+  check(label: "a-ring decodes", ok: ring.at(index: 0).toInt() is 197)
+  let upper: String = "ÄÖÅÜŠ"
+  check(label: "uppercase forms decode", ok: upper.at(index: 0).toInt() is 196 and upper.at(index: 8).toInt() is 352)
+  let deg: String = "60.2°N"
+  check(label: "degree sign decodes", ok: deg.at(index: 4).toInt() is 176)
+
+  # Byte length vs codepoint count: `length()` is BYTES, and at() decodes at a
+  # byte index. Both are load-bearing for the text renderer's walk.
+  check(label: "length counts bytes not codepoints", ok: upper.length() is 10)
+  ret 0
+}
