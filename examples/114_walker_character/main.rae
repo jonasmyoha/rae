@@ -164,11 +164,11 @@ func clipButtonId(index: view Int) ret String {
 # shared format from lib/app3d, so this example only owns the ones at the
 # front. The WINDOW is not here: the runtime persists window geometry for
 # every app, so an app that also saved it had two owners for one value.
-const state113Version: Int = 5
-const state113AppId: String = "113_walker_character"
-const state113OwnFields: Int = 5
+const state114Version: Int = 5
+const state114AppId: String = "114_walker_character"
+const state114OwnFields: Int = 5
 
-func serialize113State(clipIndex: view Int, playing: view Bool, speed: view Float,
+func serialize114State(clipIndex: view Int, playing: view Bool, speed: view Float,
                        toon: view Bool, rig: view CameraRig, camera: view Camera3d) ret String {
   var playingNum: Int = 0
   if playing {
@@ -178,19 +178,19 @@ func serialize113State(clipIndex: view Int, playing: view Bool, speed: view Floa
   if toon {
     toonNum = 1
   }
-  ret "{state113Version} {clipIndex} {playingNum} {speed} {toonNum} {cameraRigStateString(rig: rig, camera: camera)}"
+  ret "{state114Version} {clipIndex} {playingNum} {speed} {toonNum} {cameraRigStateString(rig: rig, camera: camera)}"
 }
 
-func restore113State(raw: view String, clipIndex: mod Int, playing: mod Bool, speed: mod Float,
+func restore114State(raw: view String, clipIndex: mod Int, playing: mod Bool, speed: mod Float,
                      toon: mod Bool, rig: mod CameraRig, camera: mod Camera3d) ret Bool {
   if raw.length() < 1 {
     ret false
   }
   let parts: List(String) = raw.trim().split(sep: " ")
-  if parts.length < state113OwnFields {
+  if parts.length < state114OwnFields {
     ret false
   }
-  if parts.at(index: 0).trim().toInt() is not state113Version {
+  if parts.at(index: 0).trim().toInt() is not state114Version {
     ret false
   }
   clipIndex = parts.at(index: 1).trim().toInt()
@@ -209,7 +209,7 @@ func restore113State(raw: view String, clipIndex: mod Int, playing: mod Bool, sp
     speed = speedMax
   }
   toon = parts.at(index: 4).trim().toInt() is 1
-  if applyCameraRigState(parts: parts, offset: state113OwnFields, rig: rig, camera: camera) is false {
+  if applyCameraRigState(parts: parts, offset: state114OwnFields, rig: rig, camera: camera) is false {
     ret false
   }
   # The WINDOW is deliberately absent. It used to ride along in this line, which
@@ -230,7 +230,7 @@ func main() ret Int {
   var extentH: Float = windowExtentH()
   gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
 
-  let assets: String = "examples/113_walker_character/assets/"
+  let assets: String = "examples/114_walker_character/assets/"
   # Fonts + theme + a UiWorld with assets/ui.raescene mounted. The empty
   # icon-font name says "no `mat:` glyphs here", so this example does not
   # ship the megabyte icon atlas it would never sample.
@@ -472,8 +472,8 @@ func main() ret Int {
   let headless: Bool = sys.getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0
     or sys.getEnv(name: "RAE_HEADLESS_FRAMES").length() > 0
   if not headless {
-    let saved: String = readHotReloadStateFor(appId: state113AppId)
-    if restore113State(raw: saved, clipIndex: clipIndex, playing: playing, speed: speed,
+    let saved: String = readHotReloadStateFor(appId: state114AppId)
+    if restore114State(raw: saved, clipIndex: clipIndex, playing: playing, speed: speed,
                        toon: toonShading, rig: rig, camera: camera) {
       let pctR: Int = speedPercent(v: speed)
       logInfoLine(ov: logView, text: "state restored: clip {clipIndex}, speed {pctR}%, camera and window kept")
@@ -683,8 +683,8 @@ func main() ret Int {
     # the file write rather than the formatting.
     if stateDirty and not headless {
       if (now - lastStateSave) as Float >= 0.25 {
-        writeHotReloadStateFor(appId: state113AppId,
-                               state: serialize113State(clipIndex: clipIndex, playing: playing,
+        writeHotReloadStateFor(appId: state114AppId,
+                               state: serialize114State(clipIndex: clipIndex, playing: playing,
                                                         speed: speed, toon: toonShading,
                                                         rig: rig, camera: camera))
         lastStateSave = now
