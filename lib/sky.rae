@@ -546,6 +546,34 @@ func sunHeightForHour(hour: view Float) pub ret Float {
   ret up
 }
 
+# How far the sun is above the horizon, SIGNED: +1 at the zenith, negative once
+# it has set. `sunHeightForHour` clamps at 0 because callers scale light by it;
+# this one keeps going, which is what a twilight fade needs.
+func sunHeightSignedForHour(hour: view Float) pub ret Float {
+  ret 0.0 - sunDirForHour(hour: hour).z
+}
+
+# How much daylight is left, 1 in full day and near 0 at night.
+#
+# The physical models are only fitted for a sun AT OR ABOVE the horizon, so the
+# elevation handed to them is clamped there. Without this factor that clamp
+# means midnight renders as a permanent sunset — the sky stays at its warmest,
+# reddest, horizon-hugging look all night, which reads as the horizon burning
+# rather than as darkness. Fading the whole environment is honest about what the
+# model can say: nothing about night.
+func daylightFactorForHour(hour: view Float) pub ret Float {
+  let up: Float = sunHeightSignedForHour(hour: hour)
+  if up >= 0.08 {
+    ret 1.0
+  }
+  # Never quite zero: a scene lit by nothing reads as broken rather than as
+  # night, and there is no night sky model here yet.
+  if up <= 0.0 - 0.12 {
+    ret 0.02
+  }
+  ret 0.02 + 0.98 * (up + 0.12) / 0.20
+}
+
 # Warm at the horizon, neutral overhead. Not a fit to anything — the Hosek
 # model already reddens the SKY at low sun on its own; this is the KEY LIGHT,
 # which otherwise stays white through a sunset and looks wrong against it.
