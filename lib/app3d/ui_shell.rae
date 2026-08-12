@@ -202,37 +202,12 @@ func resizeUiToWindow(world: mod UiWorld, res: view Gpu2dUi) pub ret Bool {
 # off the screen within a few rebuilds. Position needs no conversion:
 # SDL reports and accepts it in points already.
 
-const windowPlacementFields: Int = 4
-
-func windowPlacementString() pub ret String {
-  ret "{gpu2d.windowPositionX()} {gpu2d.windowPositionY()} {windowExtentW().toInt()} {windowExtentH().toInt()}"
-}
-
-# Apply `windowPlacementFields` values starting at `offset`. Returns false
-# — changing nothing — when they are not all present or are not sane, so a
-# truncated or corrupt line cannot strand the window off-screen.
-func applyWindowPlacement(parts: view List(String), offset: view Int) pub ret Bool {
-  if parts.length < offset + windowPlacementFields {
-    ret false
-  }
-  let x: Int = parts.at(index: offset).trim().toInt()
-  let y: Int = parts.at(index: offset + 1).trim().toInt()
-  let w: Int = parts.at(index: offset + 2).trim().toInt()
-  let h: Int = parts.at(index: offset + 3).trim().toInt()
-  # A zero or negative size means the snapshot predates a window, and a
-  # wildly negative position means it was written on a monitor layout that
-  # no longer exists. Either way, keep the default placement.
-  if w < 160 or h < 120 {
-    ret false
-  }
-  if x < 0 - 10000 or y < 0 - 10000 {
-    ret false
-  }
-  gpu2d.setWindowSize(w: w, h: h)
-  gpu2d.setWindowPosition(x: x, y: y)
-  syncDesignResolution()
-  ret true
-}
+# Window geometry is NOT persisted here. It is the runtime's
+# (runtime_gpu2d_platform.c), saved on the window's own move/resize events and
+# restored on every launch, so every app gets it identically and none of them
+# has to serialise it. This module used to offer windowPlacementString /
+# applyWindowPlacement for apps to fold into their own snapshots; that made two
+# owners for one value.
 
 # ----- named-node access ----------------------------------------------
 # A .raescene names its nodes; this is how an app talks to them. Every
