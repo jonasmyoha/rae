@@ -40,13 +40,13 @@ open ui/transform
 
 # ----- window extent --------------------------------------------------
 
-func windowExtentW() pub ret Float {
+func windowExtentW() ret Float {
   let ratio: Float = gpu2d.dpr()
   if ratio < 0.1 { ret gpu2d.windowWidth().toFloat() }
   ret gpu2d.windowWidth().toFloat() / ratio
 }
 
-func windowExtentH() pub ret Float {
+func windowExtentH() ret Float {
   let ratio: Float = gpu2d.dpr()
   if ratio < 0.1 { ret gpu2d.windowHeight().toFloat() }
   ret gpu2d.windowHeight().toFloat() / ratio
@@ -56,7 +56,7 @@ func windowExtentH() pub ret Float {
 # design->pixel transform is IDENTITY: no letterbox bars, and fonts keep
 # their authored point size at every window size rather than shrinking
 # with the width.
-func syncDesignResolution() pub {
+func syncDesignResolution() {
   let w: Float = windowExtentW()
   let h: Float = windowExtentH()
   if w > 0.0 and h > 0.0 {
@@ -79,7 +79,7 @@ func syncDesignResolution() pub {
 # The vocabulary is closed (see themeColorByName): a theme may re-colour
 # these ten slots, not add an eleventh. Any slot the file omits keeps the
 # built-in value rather than going transparent.
-func applyThemePalette(theme: view ResolvedTheme) pub {
+func applyThemePalette(theme: view ResolvedTheme) {
   var t: Theme = currentTheme()
   t.palette = ThemePalette {
     background: themeSlotOr(theme: theme, slot: "background", fallback: t.palette.background)
@@ -96,7 +96,7 @@ func applyThemePalette(theme: view ResolvedTheme) pub {
   setActiveTheme(theme: own t)
 }
 
-func themeSlotOr(theme: view ResolvedTheme, slot: view String, fallback: view RgbaColor) pub ret RgbaColor {
+func themeSlotOr(theme: view ResolvedTheme, slot: view String, fallback: view RgbaColor) ret RgbaColor {
   let idx: Int = themePaletteIndex(theme: theme, slot: slot)
   if idx < 0 {
     ret RgbaColor { r: fallback.r, g: fallback.g, b: fallback.b, a: fallback.a }
@@ -119,7 +119,7 @@ func themeSlotOr(theme: view ResolvedTheme, slot: view String, fallback: view Rg
 # that was never activated renders every styled string in fallback colours
 # — which looks like a theme authoring mistake, not a missing call.
 func loadUiAssets(dir: view String, textFontName: view String,
-                  iconFontName: view String, themeFile: view String) pub ret Gpu2dUi {
+                  iconFontName: view String, themeFile: view String) ret Gpu2dUi {
   let textFont: SdfFont = sdf_text.loadSdfFont(
     jsonPath: "{dir}{textFontName}.mtsdf.json",
     rawAtlasPath: "{dir}{textFontName}.mtsdf.raw")
@@ -150,7 +150,7 @@ func loadUiAssets(dir: view String, textFontName: view String,
 # identical everywhere and the one that is easy to forget (setting
 # layoutW/layoutH before the first layout pass, without which everything
 # lays out against a zero-sized root).
-func mountUiScene(world: mod UiWorld, path: view String, res: view Gpu2dUi) pub ret EntityId {
+func mountUiScene(world: mod UiWorld, path: view String, res: view Gpu2dUi) ret EntityId {
   world.layoutW = windowExtentW()
   world.layoutH = windowExtentH()
   let scene: Scene = loadSceneFile(path: path)
@@ -162,7 +162,7 @@ func mountUiScene(world: mod UiWorld, path: view String, res: view Gpu2dUi) pub 
 # Layout -> transform -> visual bounds, in that order and always all
 # three. Running a subset is the classic source of a UI that is
 # positioned correctly but hit-tests against last frame's rectangles.
-func runUiSystems(world: mod UiWorld, res: view Gpu2dUi) pub {
+func runUiSystems(world: mod UiWorld, res: view Gpu2dUi) {
   layoutSystem(world: world)
   transformSystem(world: world)
   visualBoundsSystem(world: world, res: res)
@@ -170,7 +170,7 @@ func runUiSystems(world: mod UiWorld, res: view Gpu2dUi) pub {
 
 # Re-fit the world to the window after a resize. Returns whether anything
 # changed, which the caller feeds into its redraw decision.
-func resizeUiToWindow(world: mod UiWorld, res: view Gpu2dUi) pub ret Bool {
+func resizeUiToWindow(world: mod UiWorld, res: view Gpu2dUi) ret Bool {
   if gpu2d.windowResized() is false {
     ret false
   }
@@ -215,14 +215,14 @@ func resizeUiToWindow(world: mod UiWorld, res: view Gpu2dUi) pub ret Bool {
 # silently omits a label it cannot find is far easier to work with than
 # one that refuses to start because a scene was edited.
 
-func nodeEntityFor(world: view UiWorld, nodeId: view String) pub ret EntityId {
+func nodeEntityFor(world: view UiWorld, nodeId: view String) ret EntityId {
   let found: opt Int = world.nodeIds.get(k: nodeId)
   if found is none { ret noEntity() }
   let raw: Int = found
   ret entityId(v: raw)
 }
 
-func setNodeText(world: mod UiWorld, nodeId: view String, value: view String) pub {
+func setNodeText(world: mod UiWorld, nodeId: view String, value: view String) {
   let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
   if isNone(this: entity) { ret }
   if componentHas(this: world.texts, entity: entity) is false { ret }
@@ -230,18 +230,34 @@ func setNodeText(world: mod UiWorld, nodeId: view String, value: view String) pu
   text.text = "{value}"
 }
 
-func setNodeActive(world: mod UiWorld, nodeId: view String, value: view Bool) pub {
+func setNodeActive(world: mod UiWorld, nodeId: view String, value: view Bool) {
   let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
   if isNone(this: entity) { ret }
   let active: Active = { value: value }
   componentSet(this: world.actives, entity: entity, data: active)
 }
 
+# Switch a node's HEIGHT sizing policy at runtime. Hug measures from the active
+# children plus padding, so a container whose body has been deactivated collapses
+# to whatever is left — which is how a panel shrinks to its header rather than
+# leaving an empty background the size it was authored at.
+func setNodeHeightMode(world: mod UiWorld, nodeId: view String, hug: view Bool) {
+  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entity) { ret }
+  if componentHas(this: world.sizes, entity: entity) is false { ret }
+  let size: mod Size => componentMod(this: world.sizes, entity: entity)
+  if hug {
+    size.h = SizeAxis { mode: SizeMode.hug, min: 0 - 1, max: 0 - 1 }
+  } else {
+    size.h = SizeAxis { mode: SizeMode.fill, min: 0 - 1, max: 0 - 1 }
+  }
+}
+
 # Repaint a scene node from the palette. The value must be one of the
 # theme's slot names — the vocabulary is closed, and an invented slot
 # paints debug magenta rather than failing, which is a long way from the
 # call site that caused it.
-func setNodeFillSlot(world: mod UiWorld, nodeId: view String, slot: view String) pub {
+func setNodeFillSlot(world: mod UiWorld, nodeId: view String, slot: view String) {
   let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
   if isNone(this: entity) { ret }
   if componentHas(this: world.shapes, entity: entity) is false { ret }
@@ -250,7 +266,7 @@ func setNodeFillSlot(world: mod UiWorld, nodeId: view String, slot: view String)
 }
 
 func setNodeRect(world: mod UiWorld, nodeId: view String, x: view Float, y: view Float,
-                 w: view Float, h: view Float) pub {
+                 w: view Float, h: view Float) {
   let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
   if isNone(this: entity) { ret }
   if componentHas(this: world.rects, entity: entity) is false { ret }
@@ -261,7 +277,7 @@ func setNodeRect(world: mod UiWorld, nodeId: view String, x: view Float, y: view
   r.h = h
 }
 
-func nodeRectW(world: view UiWorld, nodeId: view String) pub ret Float {
+func nodeRectW(world: view UiWorld, nodeId: view String) ret Float {
   let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
   if isNone(this: entity) { ret 0.0 }
   if componentHas(this: world.rects, entity: entity) is false { ret 0.0 }
@@ -269,7 +285,7 @@ func nodeRectW(world: view UiWorld, nodeId: view String) pub ret Float {
   ret r.w
 }
 
-func nodeRectH(world: view UiWorld, nodeId: view String) pub ret Float {
+func nodeRectH(world: view UiWorld, nodeId: view String) ret Float {
   let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
   if isNone(this: entity) { ret 0.0 }
   if componentHas(this: world.rects, entity: entity) is false { ret 0.0 }
@@ -287,11 +303,11 @@ func nodeRectH(world: view UiWorld, nodeId: view String) pub ret Float {
 # .at() (see the note in docs/ownership-model.md), and that is exactly
 # the kind of detail that gets copied wrong.
 
-func uiActionCount(input: view UiInput) pub ret Int {
+func uiActionCount(input: view UiInput) ret Int {
   ret input.events.length
 }
 
-func uiActionAt(input: view UiInput, index: view Int) pub ret String {
+func uiActionAt(input: view UiInput, index: view Int) ret String {
   if index < 0 or index >= input.events.length {
     ret ""
   }
@@ -302,7 +318,7 @@ func uiActionAt(input: view UiInput, index: view Int) pub ret String {
 # True when `actionId` fired this frame. The common case is a handful of
 # buttons, so a scan per button is cheaper than building a set — and it
 # reads as a list of things the app responds to, which is the point.
-func uiActionFired(input: view UiInput, actionId: view String) pub ret Bool {
+func uiActionFired(input: view UiInput, actionId: view String) ret Bool {
   var i: Int = 0
   loop i < input.events.length {
     let event: UiActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)

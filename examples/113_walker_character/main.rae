@@ -525,7 +525,7 @@ func main() ret Int {
     logWarnLine(ov: logView, text: "settings dialog failed to mount")
   }
   settingsApplyToWorld(s: settings, world: uiWorld)
-  setNodeActive(world: uiWorld, nodeId: "SidePanelBody", value: settings.open)
+      applySettingsPanelOpen(world: uiWorld, open: settings.open)
   # The renderer is built before the panel exists, so the panel's default sky
   # is applied here rather than at construction.
   renderer.sky = settingsBuildSky(s: settings, data: hosekData,
@@ -630,7 +630,7 @@ func main() ret Int {
       let pctS: Int = speedPercent(v: speed)
       setNodeText(world: uiWorld, nodeId: "SpeedLabel", value: "Speed {pctS}%")
       settingsApplyToWorld(s: settings, world: uiWorld)
-  setNodeActive(world: uiWorld, nodeId: "SidePanelBody", value: settings.open)
+      applySettingsPanelOpen(world: uiWorld, open: settings.open)
       stateDirty = true
     }
     if clipHit.length() > 0 or transportHit.length() > 0 {
@@ -638,7 +638,7 @@ func main() ret Int {
       settings.speed = speed
       settings.toon = toonShading
       settingsApplyToWorld(s: settings, world: uiWorld)
-  setNodeActive(world: uiWorld, nodeId: "SidePanelBody", value: settings.open)
+      applySettingsPanelOpen(world: uiWorld, open: settings.open)
       stateDirty = true
     }
     # `settingsChanged` as well as the action count: a DRAG produces no action.
