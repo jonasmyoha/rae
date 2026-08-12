@@ -51,6 +51,7 @@ open ui/transform
 open ui/event_loop
 open ui/frame_stats
 open ui/log_overlay
+open ui/window_geometry
 open ui/debug_overlay
 open hot_reload
 import string
@@ -66,6 +67,7 @@ import ui/transform
 import ui/event_loop
 import ui/frame_stats
 import ui/log_overlay
+import ui/window_geometry
 import ui/debug_overlay
 import hot_reload
 import app3d/camera_rig
@@ -379,6 +381,12 @@ func animateScene1(asset: mod Scene3dAsset, time: view Float) {
 
 func main() ret Int {
   gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — ECS Scene UI [{rendererPathName()}]")
+  # Remember where the user put the window, across restarts. Opt-in, and the
+  # app picks the file: the hot-reload channel dir is per app, so two examples
+  # running at once do not share one window position.
+  var windowGeom: WindowGeometry = createWindowGeometry(dir: hotReloadDir(),
+                                                        name: "window.geometry")
+  restoreWindowGeometry(g: windowGeom)
   # Design resolution tracks the window's LOGICAL size, so the transform is
   # identity: no letterbox bars, and fonts keep their authored point size
   # instead of shrinking with window width.
@@ -586,7 +594,9 @@ func main() ret Int {
     # Re-anchor on resize. The window's logical size is the layout extent,
     # so a resize re-runs placement instead of rescaling a fixed canvas.
     var extentChanged: Bool = false
-    if gpu2d.windowResized() {
+    let resized: Bool = gpu2d.windowResized()
+    updateWindowGeometry(g: windowGeom, now: now, resized: resized)
+    if resized {
       extentW = windowExtentW()
       extentH = windowExtentH()
       if extentW > 0.0 and extentH > 0.0 {

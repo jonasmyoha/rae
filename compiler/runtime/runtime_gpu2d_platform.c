@@ -248,151 +248,18 @@ static void rae_g2d_configure(int pw, int ph) {
     }
 }
 
-/* ---- window geometry, remembered across runs -------------------------
+/* ---- window MOVED, as an event flag ----------------------------------
  *
- * Where the user put the window is an APP feature, not a dev-loop one: it has
- * to survive a hot reload, a kill, and a normal quit-and-reopen a day later,
- * and it has to behave the same in every app. One mechanism here rather than
- * per app — persisting it per app costs ~5 touch points each (state field,
- * serialise, deserialise, default, restore) and drifts. It had drifted: 106
- * wrote its position into state.json and never read it back, so it saved the
- * value every session and applied it never.
+ * The mirror of the resize flag above, and that is all the C here does. An
+ * earlier version of this file also owned window-geometry PERSISTENCE — it
+ * chose the file path, decided when to write, and restored on startup before
+ * any Rae code ran. That was the wrong place for it twice over: it is app
+ * behaviour written in C, and it was invisible, so every app got it whether or
+ * not its author asked for anything. Persistence now lives in
+ * lib/ui/window_geometry.rae and an app that does not call it does not have it.
  *
- * Policy:
- *  - Saved on the window's own MOVE and RESIZE events, so a session that is
- *    killed still has the geometry it ended with.
- *  - Restored on initWindow and KEPT, not consumed, so it applies to every
- *    later run and not just the next one.
- *  - Per app. The key is RAE_HOT_RELOAD_DIR when the launcher provides one
- *    (`rae run` and `rae watch` both do), otherwise the window title, so a
- *    binary started by hand still gets its own slot instead of fighting over
- *    one shared file with every other app on the machine.
- *  - Disabled for headless/screenshot runs. Restoring a remembered size there
- *    would silently change capture resolution and break byte-identical
- *    screenshots — the class of nondeterminism RAE_FIXED_DT exists to remove.
- *  - RAE_NO_WINDOW_RESTORE=1 opts out (kiosk, device-simulation presets).
- *
- * A first run has no file and gets exactly the size initWindow asked for, so
- * examples still open as authored for someone running them for the first time.
- * There is deliberately NO freshness window: an earlier version only restored
- * a file written in the last ten seconds, which made this work across a hot
- * reload and silently do nothing across a restart, which is the case a user
- * actually notices.
- */
-static char g_g2d_geometry_key[96];
-
-/* The window title, reduced to something safe in a filename. */
-static void g2d_geometry_set_key(const char* title) {
-    size_t j = 0;
-    for (size_t i = 0; title && title[i] && j + 1 < sizeof(g_g2d_geometry_key); i++) {
-        unsigned char c = (unsigned char)title[i];
-        int word = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
-        if (word) g_g2d_geometry_key[j++] = (char)c;
-        else if (j > 0 && g_g2d_geometry_key[j - 1] != '_') g_g2d_geometry_key[j++] = '_';
-    }
-    while (j > 0 && g_g2d_geometry_key[j - 1] == '_') j--;
-    g_g2d_geometry_key[j] = 0;
-    if (j == 0) snprintf(g_g2d_geometry_key, sizeof(g_g2d_geometry_key), "app");
-}
-
-static const char* g2d_geometry_path(void) {
-    static char path[1024];
-    const char* dir = getenv("RAE_HOT_RELOAD_DIR");
-    if (dir && *dir) {
-        snprintf(path, sizeof(path), "%s/window.geometry", dir);
-        return path;
-    }
-    snprintf(path, sizeof(path), ".rae/window.%s.geometry",
-             g_g2d_geometry_key[0] ? g_g2d_geometry_key : "app");
-    return path;
-}
-
-
-static bool g2d_geometry_enabled(void) {
-    if (getenv("RAE_NO_WINDOW_RESTORE")) return false;
-    /* any headless/capture mode: geometry must be exactly what was asked for */
-    if (getenv("RAE_HEADLESS_FRAMES")) return false;
-    if (getenv("RAE_SDL_HEADLESS_MS")) return false;
-    if (getenv("RAE_GPU2D_SCREENSHOT")) return false;
-    if (getenv("RAE_UI_DEVICE")) return false;   /* device preset owns the size */
-    return true;
-}
-
-static void g2d_save_geometry(void) {
-    if (!g2d_geometry_enabled() || !g_sdl_win) return;
-    int x = 0, y = 0, w = 0, h = 0;
-    SDL_GetWindowPosition(g_sdl_win, &x, &y);
-    SDL_GetWindowSize(g_sdl_win, &w, &h);
-    if (w <= 0 || h <= 0) return;
-    FILE* f = fopen(g2d_geometry_path(), "wb");
-    if (!f) {
-        /* First run in a fresh directory has no .rae yet. Create it rather than
-         * skipping — otherwise the feature only ever works for someone who has
-         * already used the dev loop, which is the opposite of who needs it. */
-        mkdir(".rae", 0755);
-        f = fopen(g2d_geometry_path(), "wb");
-    }
-    if (!f) return;
-    fprintf(f, "%d %d %d %d\n", x, y, w, h);
-    fclose(f);
-}
-
-/* Save on the window's own MOVE and RESIZE events, not only on close.
- *
- * closeWindow was the single save site, which assumed apps exit normally. They
- * do not: `rae watch` kills the child to swap binaries, and a developer kills a
- * run far more often than they close its window — so the geometry a session
- * actually ended with was usually never written, and the window snapped back to
- * its authored size on the next reload.
- *
- * EVENT-DRIVEN, NOT POLLED. An earlier version checked the window every frame.
- * That is the wrong shape for this codebase: the UI examples are built to sit
- * at ~0% CPU when idle (docs/ui-render-loop-performance.md), and a per-frame
- * SDL_GetWindowPosition to service a feature that fires when a human drags a
- * window is exactly the kind of background work that keeps a laptop awake. SDL
- * already tells us when the window moved or resized; this listens instead.
- *
- * Coalesced with a dirty flag rather than written per event: dragging a window
- * emits a move event per frame of the drag, and the file only needs the value
- * the drag ended on. The flag is flushed when the drag settles — on focus loss,
- * on close, and whenever a later event arrives more than a moment after the
- * last one. */
-static int g_g2d_geometry_dirty = 0;
-static double g_g2d_geometry_dirty_at = 0.0;
-
-static void g2d_geometry_mark_dirty(void) {
-    if (!g2d_geometry_enabled()) return;
-    g_g2d_geometry_dirty = 1;
-    g_g2d_geometry_dirty_at = (double)rae_ext_nowMs() / 1000.0;
-}
-
-static void g2d_geometry_flush(void) {
-    if (!g_g2d_geometry_dirty) return;
-    g_g2d_geometry_dirty = 0;
-    g2d_save_geometry();
-}
-
-/* Backstop for a move that ends without a mouse-up we can see — a window
- * manager shortcut, a tiling tool, a drag released outside our window. Costs an
- * int test on a pump that has already been woken; it asks the OS nothing. */
-static void g2d_geometry_settle(void) {
-    if (!g_g2d_geometry_dirty) return;
-    double now_sec = (double)rae_ext_nowMs() / 1000.0;
-    if ((now_sec - g_g2d_geometry_dirty_at) < 0.2) return;
-    g2d_geometry_flush();
-}
-
-/* Returns true and fills the out params when saved geometry exists. The file is
- * KEPT: it describes where this app lives from now on, not a single handover
- * between two processes. */
-static bool g2d_read_geometry(int* x, int* y, int* w, int* h) {
-    if (!g2d_geometry_enabled()) return false;
-    FILE* f = fopen(g2d_geometry_path(), "rb");
-    if (!f) return false;
-    bool ok = (fscanf(f, "%d %d %d %d", x, y, w, h) == 4);
-    fclose(f);
-    return ok && *w > 0 && *h > 0;
-}
+ * What C keeps is what only C can do: notice the SDL event. */
+static int g_g2d_win_moved = 0;
 
 void rae_ext_gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -404,13 +271,8 @@ void rae_ext_gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
 #ifndef __EMSCRIPTEN__
     flags |= SDL_WINDOW_METAL;
 #endif
-    int rx = 0, ry = 0, rw = 0, rh = 0;
-    g2d_geometry_set_key(t);
-    bool restored = g2d_read_geometry(&rx, &ry, &rw, &rh);
-    if (restored) { width = rw; height = rh; }
     g_sdl_win = SDL_CreateWindow(t, (int)width, (int)height, flags);
     if (!g_sdl_win) { fprintf(stderr, "[gpu2d] window failed: %s\n", SDL_GetError()); return; }
-    if (restored) SDL_SetWindowPosition(g_sdl_win, rx, ry);
     SDL_RaiseWindow(g_sdl_win);
 #ifndef __EMSCRIPTEN__
     g_g2d_metal_view = SDL_Metal_CreateView(g_sdl_win);
@@ -510,11 +372,10 @@ rae_Bool rae_ext_gpu2d_pollClose(void) {
                 int pw = 0, ph = 0; SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
                 rae_g2d_configure(pw, ph);
                 g_g2d_win_resized = 1;   /* consumed once by gpu2d.windowResized() */
-                g2d_geometry_mark_dirty();
                 break;
             }
             case SDL_EVENT_WINDOW_MOVED:
-                g2d_geometry_mark_dirty();
+                g_g2d_win_moved = 1;   /* consumed once by gpu2d.windowMoved() */
                 break;
             case SDL_EVENT_KEY_DOWN:
                 if (e.key.key == SDLK_ESCAPE) quit = 1;
@@ -547,22 +408,15 @@ rae_Bool rae_ext_gpu2d_pollClose(void) {
                 g_g2d_wheel += e.wheel.y;
                 break;
             case SDL_EVENT_WINDOW_FOCUS_LOST:
-                g2d_geometry_flush();
                 memset(g_sdl_keydown, 0, sizeof(g_sdl_keydown));
                 memset(g_sdl_mouse, 0, sizeof(g_sdl_mouse));
                 memset(g_sdl_mouse_pressed, 0, sizeof(g_sdl_mouse_pressed));
                 memset(g_sdl_mouse_released, 0, sizeof(g_sdl_mouse_released));
                 if (g_sdl_mouse_captured) { SDL_CaptureMouse(false); g_sdl_mouse_captured = false; }
-                /* A window drag has ended by the time the button comes up, so
-                 * this is where a coalesced move is worth writing. */
-                g2d_geometry_flush();
                 break;
             default: break;
         }
     }
-    /* The drag has settled if no further move arrived; see g2d_geometry_settle.
-     * This runs on a pump that was already awake and asks the OS nothing. */
-    g2d_geometry_settle();
     if (quit) return 1;
     if (g_sdl_headless_frames > 0) {
         if (g_sdl_frames_done >= g_sdl_headless_frames) return 1;
@@ -703,6 +557,13 @@ rae_Bool rae_ext_gpu2d_windowResized(void) {
     rae_Bool r = (rae_Bool)g_g2d_win_resized;
     g_g2d_win_resized = 0;
     return r;
+}
+
+/* One-shot, same contract as windowResized: reading it clears it. */
+rae_Bool rae_ext_gpu2d_windowMoved(void) {
+    int v = g_g2d_win_moved;
+    g_g2d_win_moved = 0;
+    return v ? 1 : 0;
 }
 
 /* Coordinate system (#112). */
