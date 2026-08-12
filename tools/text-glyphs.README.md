@@ -1,7 +1,7 @@
 # tools/text-glyphs.txt — the shared UI text charset
 
 Fed to `msdf-atlas-gen -charset` by every example that bakes a Roboto MSDF
-atlas: `examples/106_mobile_ui`, `examples/112_gpu3d_ui`,
+atlas: `examples/106_mobile_ui`, `examples/112_metaballs_deferred`,
 `examples/114_walker_character`.
 
 **One file, on purpose.** Those examples mount the same `lib/ui` and
