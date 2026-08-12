@@ -9,7 +9,13 @@
  * techniques (SSAO/TAA/GI) see SDF hits exactly like raster geometry.
  */
 
-#define G3D_MAX_SDF_BALLS 16
+/* 64, matching GB_SDF_MAX_BALLS in the deferred path. It was 16, which
+ * TRUNCATED SILENTLY: example 111's 40-ball cluster drew its first 16 and
+ * dropped the rest, and because that scene's magenta balls are indices 30-39
+ * the whole cluster rendered in one colour. Two renderers meant to be compared
+ * side by side must not disagree about how much of the scene they draw. The
+ * clamp below stays as the backstop; only the ceiling moved. */
+#define G3D_MAX_SDF_BALLS 64
 #define G3D_MAX_SDF_GROUPS 8
 
 /* One buffer set PER GROUP per frame, not one shared set.
