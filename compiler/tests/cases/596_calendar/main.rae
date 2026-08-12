@@ -1,0 +1,83 @@
+# lib/calendar.rae — proleptic Gregorian arithmetic, in Rae, no platform date API.
+#
+# The leap rule is EXACT, so this asserts an exhaustive round trip rather than
+# spot values: every day of every year from 1700 to 2400 converts to a month/day
+# and back to the same day-of-year. That is the "few hundred years" claim,
+# checked rather than asserted.
+import core
+import calendar
+open calendar
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() ret Int {
+  # Divisible by 4 is long, except centuries, except centuries divisible by 400.
+  check(label: "2024 is leap", ok: isLeapYear(year: 2024))
+  check(label: "2025 is not leap", ok: isLeapYear(year: 2025) is false)
+  check(label: "1900 is not leap (century)", ok: isLeapYear(year: 1900) is false)
+  check(label: "2000 is leap (400)", ok: isLeapYear(year: 2000))
+  check(label: "2400 is leap (400)", ok: isLeapYear(year: 2400))
+  check(label: "1800 and 2100 are not leap", ok: isLeapYear(year: 1800) is false and isLeapYear(year: 2100) is false)
+  check(label: "year lengths", ok: daysInYear(year: 2024) is 366 and daysInYear(year: 2025) is 365)
+
+  check(label: "February follows the leap rule", ok: daysInMonth(year: 2024, month: 2) is 29 and daysInMonth(year: 2025, month: 2) is 28)
+  check(label: "thirty days hath September", ok: daysInMonth(year: 2025, month: 9) is 30 and daysInMonth(year: 2025, month: 4) is 30)
+  check(label: "and the rest have thirty-one", ok: daysInMonth(year: 2025, month: 1) is 31 and daysInMonth(year: 2025, month: 12) is 31)
+
+  # Day 60 is the one that moves: 29 February in a leap year, 1 March otherwise.
+  let leap60: CalendarDate = dateFromDayOfYear(year: 2024, dayOfYear: 60)
+  let plain60: CalendarDate = dateFromDayOfYear(year: 2025, dayOfYear: 60)
+  check(label: "day 60 of a leap year is 29 Feb", ok: leap60.month is 2 and leap60.day is 29)
+  check(label: "day 60 of a plain year is 1 Mar", ok: plain60.month is 3 and plain60.day is 1)
+  let last: CalendarDate = dateFromDayOfYear(year: 2024, dayOfYear: 366)
+  check(label: "day 366 of a leap year is 31 Dec", ok: last.month is 12 and last.day is 31)
+  let first: CalendarDate = dateFromDayOfYear(year: 2026, dayOfYear: 1)
+  check(label: "day 1 is 1 Jan", ok: first.month is 1 and first.day is 1)
+
+  # Out of range CLAMPS rather than failing: a slider or a corrupt saved value
+  # must not be able to produce a date that does not exist.
+  let low: CalendarDate = dateFromDayOfYear(year: 2025, dayOfYear: 0 - 5)
+  let high: CalendarDate = dateFromDayOfYear(year: 2025, dayOfYear: 400)
+  check(label: "below range clamps to 1 Jan", ok: low.month is 1 and low.day is 1)
+  check(label: "above range clamps to 31 Dec", ok: high.month is 12 and high.day is 31)
+  check(label: "day 366 clamps in a plain year", ok: clampDayOfYear(year: 2025, dayOfYear: 366) is 365)
+  check(label: "day 366 is valid in a leap year", ok: clampDayOfYear(year: 2024, dayOfYear: 366) is 366)
+
+  check(label: "formats a date", ok: formatCalendarDate(date: dateFromDayOfYear(year: 2026, dayOfYear: 172)).equals(other: "21 Jun 2026"))
+  check(label: "formats without the year", ok: formatDayMonth(date: dateFromDayOfYear(year: 2026, dayOfYear: 1)).equals(other: "1 Jan"))
+
+  # Rolling a day cannot be done without the year, so both move together.
+  var y: Int = 2024
+  var d: Int = 365
+  advanceOneDay(year: y, dayOfYear: d)
+  check(label: "a leap year gets its 366th day", ok: y is 2024 and d is 366)
+  advanceOneDay(year: y, dayOfYear: d)
+  check(label: "and then rolls to 1 Jan", ok: y is 2025 and d is 1)
+  y = 2025
+  d = 365
+  advanceOneDay(year: y, dayOfYear: d)
+  check(label: "a plain year rolls at 365", ok: y is 2026 and d is 1)
+
+  # THE EXHAUSTIVE ONE. 701 years, every day, day -> month/day -> day.
+  var mismatches: Int = 0
+  var year: Int = 1700
+  loop year <= 2400 {
+    var day: Int = 1
+    let len: Int = daysInYear(year: year)
+    loop day <= len {
+      if dayOfYearFromDate(date: dateFromDayOfYear(year: year, dayOfYear: day)) is not day {
+        mismatches = mismatches + 1
+      }
+      day = day + 1
+    }
+    year = year + 1
+  }
+  check(label: "every day of 1700..2400 round-trips", ok: mismatches is 0)
+  ret 0
+}
