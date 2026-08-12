@@ -81,6 +81,11 @@ type SettingsState {
   # to the sun is best demonstrated moving, and the slider is still there to
   # take over.
   animateTime: Bool
+  # Where on Earth, in degrees north. Together with the hour this DERIVES the
+  # sun, which is why there is no separate elevation control: one would fight
+  # the clock for the same value.
+  latitude: Float
+  latDragging: Bool
 }
 
 # A whole day in one minute. Fast enough to see dawn and dusk without waiting,
@@ -104,6 +109,8 @@ func createSettingsState(scene: view Int, sceneCount: view Int, speed: view Floa
     hour: hour
     timeDragging: false
     animateTime: true
+    latitude: skyDefaultLatitudeDeg
+    latDragging: false
   }
 }
 
@@ -282,6 +289,54 @@ func settingsUpdatePointer(s: mod SettingsState, world: view UiWorld,
   ret true
 }
 
+# The latitude slider, the same shape as the time one. Separate function rather
+# than a second block inside settingsUpdatePointer so that neither drag can
+# swallow the other's press: whichever track was hit owns the pointer.
+func settingsUpdateLatitudePointer(s: mod SettingsState, world: view UiWorld,
+                                   input: view UiInput) ret Bool {
+  if s.open is false {
+    ret false
+  }
+  if s.timeDragging {
+    ret false
+  }
+  var pressedInside: Bool = false
+  if input.pointer.pressed {
+    pressedInside = pointInNode(world: world, nodeId: "SettingsLatTrack",
+                                x: input.pointer.x, y: input.pointer.y)
+  }
+  s.latDragging = sliderDragActive(wasDragging: s.latDragging,
+                                   pressedInside: pressedInside,
+                                   down: input.pointer.down,
+                                   released: input.pointer.released)
+  if s.latDragging is false {
+    ret false
+  }
+  let f: Float = fractionAcrossNode(world: world, nodeId: "SettingsLatTrack",
+                                    x: input.pointer.x)
+  let next: Float = skyLatitudeMin + f * (skyLatitudeMax - skyLatitudeMin)
+  if next is s.latitude {
+    ret false
+  }
+  s.latitude = next
+  ret true
+}
+
+# 60.2N, not 60.17 — a hemisphere letter is how a latitude is read, and the
+# second decimal is noise on a slider a person drags.
+func formatLatitude(latitudeDeg: view Float) ret String {
+  var lat: Float = latitudeDeg
+  var suffix: String = "N"
+  if lat < 0.0 {
+    lat = 0.0 - lat
+    suffix = "S"
+  }
+  let tenths: Int = (lat * 10.0 + 0.5).toInt()
+  let whole: Int = tenths / 10
+  let frac: Int = tenths - whole * 10
+  ret "{whole}.{frac}{suffix}"
+}
+
 # Show or hide the panel BODY, and collapse the panel itself with it.
 #
 # Hiding the body alone left the panel background at its authored full height —
@@ -311,6 +366,7 @@ func settingsApplyToWorld(s: view SettingsState, world: mod UiWorld) {
   let pct: Int = speedPercent(v: s.speed)
   setNodeText(world: world, nodeId: "SettingsSpeedRow", value: "Animation speed {pct}%")
   setNodeText(world: world, nodeId: "SettingsTimeLabel", value: "Time of day {formatHour(hour: s.hour)}")
+  setNodeText(world: world, nodeId: "SettingsLatLabel", value: "Latitude {formatLatitude(latitudeDeg: s.latitude)}")
 
   setNodeFillSlot(world: world, nodeId: "SettingsToonButton",
                   slot: settingsSlotFor(on: s.toon))
@@ -329,6 +385,9 @@ func settingsApplyToWorld(s: view SettingsState, world: mod UiWorld) {
   let f: Float = (s.hour - settingsHourMin) / (settingsHourMax - settingsHourMin)
   centreNodeAtFraction(world: world, trackId: "SettingsTimeTrack",
                        handleId: "SettingsTimeHandle", fraction: f)
+  let latF: Float = (s.latitude - skyLatitudeMin) / (skyLatitudeMax - skyLatitudeMin)
+  centreNodeAtFraction(world: world, trackId: "SettingsLatTrack",
+                       handleId: "SettingsLatHandle", fraction: latF)
 }
 
 # The palette slots the shared components are allowed to name (see
@@ -349,15 +408,15 @@ func settingsSlotFor(on: view Bool) ret String {
 # Where the sun is, for this hour. Both the sky and the key light take it, so
 # the visible sun and the cast shadows cannot drift apart.
 func settingsSunDir(s: view SettingsState) ret Vec3 {
-  ret sunDirForHour(hour: s.hour)
+  ret sunDirForHourAt(hour: s.hour, latitudeDeg: s.latitude)
 }
 
 # Warm at the horizon, neutral overhead, and dimmed as the sun sets — the sky
 # model reddens on its own, but the direct light would otherwise stay white and
 # full-strength through a sunset.
 func settingsSunColor(s: view SettingsState) ret Vec3 {
-  let base: Vec3 = sunColorForHour(hour: s.hour)
-  var lift: Float = sunHeightForHour(hour: s.hour)
+  let base: Vec3 = sunColorForHourAt(hour: s.hour, latitudeDeg: s.latitude)
+  var lift: Float = sunHeightForHourAt(hour: s.hour, latitudeDeg: s.latitude)
   # Never fully black: a scene lit by nothing reads as broken rather than as
   # night, and there is no night sky model here yet.
   lift = 0.15 + 0.85 * lift
@@ -373,7 +432,7 @@ func settingsBuildSky(s: view SettingsState, data: view HosekDataset,
   # Both models are fitted only for a sun at or above the horizon, so the night
   # side is a fade rather than a different sky. Applied here, once, so the two
   # models darken together.
-  let day: Float = daylightFactorForHour(hour: s.hour)
+  let day: Float = daylightFactorForHourAt(hour: s.hour, latitudeDeg: s.latitude)
   if s.skyModel is SettingsSkyModel.preetham {
     var pre: Sky = createSkyProcedural(sunDir: dir, sunColor: col, turbidity: turbidity)
     pre.exposure = day
