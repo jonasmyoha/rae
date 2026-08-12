@@ -444,7 +444,13 @@ bool emit_string_literal(FILE* out, Str literal) {
     switch (c) {
       case '"': fprintf(out, "\\\""); break; case '\\': fprintf(out, "\\\\"); break; case '\n': fprintf(out, "\\n"); break;
       case '\r': fprintf(out, "\\r"); break; case '\t': fprintf(out, "\\t"); break;
-      default: { if ((unsigned char)c < 32 || (unsigned char)c > 126) fprintf(out, "\\x%02x", (unsigned char)c); else fputc(c, out); break; }
+      /* OCTAL, not hex. A C hex escape is GREEDY — it consumes every hex digit
+       * that follows — so "\xc5\xa1ek" is read as \xa1e, one escape out of
+       * range, and the C compiler rejects it. Any Rae literal with a non-ASCII
+       * byte followed by [0-9a-fA-F] hit this: "Hosek" with an s-caron, or any
+       * string with an umlaut before an 'e'. An octal escape is capped at three
+       * digits, so \303\244 is unambiguous whatever follows. */
+      default: { if ((unsigned char)c < 32 || (unsigned char)c > 126) fprintf(out, "\\%03o", (unsigned char)c); else fputc(c, out); break; }
     }
   }
   fprintf(out, "\", %lld}", (long long)literal.len); return true;
