@@ -1,0 +1,155 @@
+# Proleptic Gregorian calendar arithmetic, in Rae.
+#
+# No C, no library. The rules are three lines of integer arithmetic and a table
+# of twelve numbers; reaching for a platform date API would trade that for
+# locale behaviour, time zones and a dependency, none of which this needs.
+#
+# ACCURACY. The Gregorian leap rule is EXACT, not an approximation: a year is
+# long if it divides by 4, except centuries, except centuries dividing by 400.
+# So day-of-year and month/day round-trip exactly for any year this can
+# represent, centuries either side of now and well beyond. What is approximate
+# is the SOLAR declination in lib/sky.rae, which is a fit good to a fraction of
+# a degree — that is the limit on sun accuracy, not the calendar.
+#
+# The calendar is PROLEPTIC: the Gregorian rules are applied to years before its
+# 1582 adoption too, where history used the Julian calendar. For a sky control
+# that is the useful choice — a continuous rule with no ten-day hole in October
+# 1582 — but it means dates before 1582 are not what a historian would write.
+import core
+
+type CalendarDate {
+  year: Int
+  # 1..12 and 1..31. One-based because that is how a date is written and read;
+  # zero-based months are a reliable source of off-by-one bugs at every boundary
+  # between this and anything a person sees.
+  month: Int
+  day: Int
+}
+
+func isLeapYear(year: view Int) ret Bool {
+  if year % 4 is not 0 {
+    ret false
+  }
+  if year % 100 is not 0 {
+    ret true
+  }
+  ret year % 400 is 0
+}
+
+func daysInYear(year: view Int) ret Int {
+  if isLeapYear(year: year) {
+    ret 366
+  }
+  ret 365
+}
+
+func daysInMonth(year: view Int, month: view Int) ret Int {
+  if month is 2 {
+    if isLeapYear(year: year) {
+      ret 29
+    }
+    ret 28
+  }
+  if month is 4 or month is 6 or month is 9 or month is 11 {
+    ret 30
+  }
+  # Includes the out-of-range case: a caller passing 0 or 13 gets 31 rather than
+  # a crash, and the clamping in the converters below keeps it from mattering.
+  ret 31
+}
+
+func monthShortName(month: view Int) ret String {
+  if month is 1 { ret "Jan" }
+  if month is 2 { ret "Feb" }
+  if month is 3 { ret "Mar" }
+  if month is 4 { ret "Apr" }
+  if month is 5 { ret "May" }
+  if month is 6 { ret "Jun" }
+  if month is 7 { ret "Jul" }
+  if month is 8 { ret "Aug" }
+  if month is 9 { ret "Sep" }
+  if month is 10 { ret "Oct" }
+  if month is 11 { ret "Nov" }
+  ret "Dec"
+}
+
+# Day-of-year is 1-based: 1 is 1 January, 365 or 366 is 31 December.
+func dateFromDayOfYear(year: view Int, dayOfYear: view Int) ret CalendarDate {
+  var remaining: Int = dayOfYear
+  if remaining < 1 {
+    remaining = 1
+  }
+  let limit: Int = daysInYear(year: year)
+  if remaining > limit {
+    remaining = limit
+  }
+  var month: Int = 1
+  loop month <= 12 {
+    let len: Int = daysInMonth(year: year, month: month)
+    if remaining <= len {
+      ret CalendarDate { year: year, month: month, day: remaining }
+    }
+    remaining = remaining - len
+    month = month + 1
+  }
+  # Unreachable: the loop consumes at most daysInYear days and `remaining` was
+  # clamped to that. Returning 31 December rather than falling through keeps the
+  # function total, so no caller has to handle an impossible case.
+  ret CalendarDate { year: year, month: 12, day: 31 }
+}
+
+func dayOfYearFromDate(date: view CalendarDate) ret Int {
+  var month: Int = date.month
+  if month < 1 { month = 1 }
+  if month > 12 { month = 12 }
+  var day: Int = date.day
+  if day < 1 { day = 1 }
+  let len: Int = daysInMonth(year: date.year, month: month)
+  if day > len { day = len }
+  var total: Int = day
+  var m: Int = 1
+  loop m < month {
+    total = total + daysInMonth(year: date.year, month: m)
+    m = m + 1
+  }
+  ret total
+}
+
+# "21 Jun". The year is deliberately NOT here: callers that show a year want to
+# place it themselves, and one that does not should not have to strip it.
+func formatDayMonth(date: view CalendarDate) ret String {
+  ret "{date.day} {monthShortName(month: date.month)}"
+}
+
+# "21 Jun 2026".
+func formatCalendarDate(date: view CalendarDate) ret String {
+  ret "{formatDayMonth(date: date)} {date.year}"
+}
+
+# Advance one day, rolling into the next year at the year's real length — 365 or
+# 366, so a leap year gets its 29 February instead of skipping it.
+#
+# Both values are `mod` because the day cannot roll without the year: returning
+# only the day would leave the caller to duplicate the length check, which is
+# exactly where an off-by-one lives.
+func advanceOneDay(year: mod Int, dayOfYear: mod Int) {
+  var d: Int = dayOfYear + 1
+  if d > daysInYear(year: year) {
+    d = 1
+    year = year + 1
+  }
+  dayOfYear = d
+}
+
+# Clamp a day-of-year into a year's real range. Used when the year changes under
+# a fixed day — 366 is valid in 2024 and not in 2025.
+func clampDayOfYear(year: view Int, dayOfYear: view Int) ret Int {
+  if dayOfYear < 1 {
+    ret 1
+  }
+  let limit: Int = daysInYear(year: year)
+  if dayOfYear > limit {
+    ret limit
+  }
+  ret dayOfYear
+}

@@ -60,6 +60,29 @@ func main() {
 
   # The key light warms toward the horizon. The sky model reddens on its own;
   # this is the direct light, which would otherwise stay white through a sunset.
+  # ----- seasons ------------------------------------------------------
+  # Declination is the term that makes them: at Helsinki it swings noon
+  # elevation between about 6 and 53 degrees, which is the difference between a
+  # winter sun barely off the horizon and a proper summer day.
+  let hel: Float = 60.17
+  let winterNoon: Float = sunHeightForDate(hour: 12.0, dayOfYear: 355, latitudeDeg: hel)
+  let summerNoon: Float = sunHeightForDate(hour: 12.0, dayOfYear: 172, latitudeDeg: hel)
+  check(label: "summer noon is far higher than winter noon", ok: summerNoon > winterNoon * 5.0)
+  check(label: "winter noon is low but up", ok: winterNoon > 0.05 and winterNoon < 0.2)
+  check(label: "declination is zero-ish at the equinox", ok: absF(x: solarDeclinationRad(dayOfYear: 80)) < 0.03)
+  check(label: "declination peaks at the solstices", ok: solarDeclinationRad(dayOfYear: 172) > 0.4 and solarDeclinationRad(dayOfYear: 355) < 0.0 - 0.4)
+
+  # POLAR DAY AND NIGHT, reachable above 66.56 degrees and so reachable on the
+  # latitude slider. Nothing special-cases them: the sun simply never crosses
+  # the horizon, which is what falls out of the geometry.
+  check(label: "midnight sun at 78N in June", ok: sunHeightSignedForDate(hour: 0.0, dayOfYear: 172, latitudeDeg: 78.0) > 0.0)
+  check(label: "polar night at 78N in December", ok: sunHeightSignedForDate(hour: 12.0, dayOfYear: 355, latitudeDeg: 78.0) < 0.0)
+  check(label: "polar night is dark at noon", ok: daylightFactorForDate(hour: 12.0, dayOfYear: 355, latitudeDeg: 78.0) < 0.1)
+  check(label: "midnight sun is lit at midnight", ok: daylightFactorForDate(hour: 0.0, dayOfYear: 172, latitudeDeg: 78.0) > 0.9)
+
+  # The southern hemisphere is the mirror, not a special case.
+  check(label: "seasons invert south of the equator", ok: sunHeightForDate(hour: 12.0, dayOfYear: 355, latitudeDeg: 0.0 - hel) > sunHeightForDate(hour: 12.0, dayOfYear: 172, latitudeDeg: 0.0 - hel))
+
   let midday: Vec3 = sunColorForHour(hour: 12.0)
   let sunset: Vec3 = sunColorForHour(hour: 18.0)
   check(label: "midday light is neutral", ok: absF(x: midday.x - midday.z) < 0.01)
