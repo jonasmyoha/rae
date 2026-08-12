@@ -123,7 +123,7 @@ func createDemoUiResource() ret DemoUiResource {
 # a single comparison. Restoring a partially-parsed camera would be worse
 # than not restoring at all.
 const state112Version: Int = 2
-const state112AppId: String = "112_gpu3d_ui"
+const state112AppId: String = "112_metaballs_deferred"
 const state112Fields: Int = 15
 
 func serialize112State(ui: view DemoUiResource, rig: view CameraRig, camera: view Camera3d) ret String {
@@ -256,7 +256,7 @@ func uploadMeshData(mesh: view MeshData) ret MeshHandle {
 }
 
 func main() ret Int {
-  gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — ECS Scene UI [{rendererPathName()}]")
+  gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — Metaballs, deferred [{rendererPathName()}]")
   # Remember where the user put the window, across restarts. Opt-in, and the
   # app picks the file: the hot-reload channel dir is per app, so two examples
   # running at once do not share one window position.
@@ -281,7 +281,7 @@ func main() ret Int {
   let torus: MeshHandle = uploadMeshData(mesh: torusData)
   let ground: MeshHandle = uploadMeshData(mesh: planeData)
   let boxMesh: MeshHandle = uploadMeshData(mesh: boxData)
-  let base: String = "examples/112_gpu3d_ui/assets/"
+  let base: String = "examples/112_metaballs_deferred/assets/"
   var meshRegistry: MeshRegistry3d = createMeshRegistry3d()
   registerMesh3d(reg: meshRegistry, key: "sphere", handle: sphere)
   registerMesh3d(reg: meshRegistry, key: "torus", handle: torus)
