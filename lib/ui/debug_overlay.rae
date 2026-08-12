@@ -36,6 +36,8 @@ const debugPanelBorder: Int = 0x60FFBF00
 const debugBackdrop: Int = 0xA0000000
 const debugOnFill: Int = 0xFF34C759
 const debugOffFill: Int = 0xC0787880
+# The letter on the amber disc.
+const debugInk: Int = 0xFF101014
 
 # Text is measured rather than laid out: the SDF font here has no width query, so
 # widths come from the same 0.52-of-size-per-character estimate example 106 uses
@@ -83,7 +85,7 @@ func createDebugOverlay(button: view Bool, fps: view Bool, memory: view Bool,
     open: false
     screenW: 0.0
     screenH: 0.0
-    buttonSize: 34.0
+    buttonSize: 20.0
     margin: 12.0
     frameTimes: createList(Float64, cap: 256)
     fpsWindowSec: 2.0
@@ -311,23 +313,32 @@ func drawDebugHeartbeat(d: mod DebugOverlay, didRealWork: view Bool) {
                 fill: debugAmber, borderWidth: 0.0, border: 0x00000000)
 }
 
+# Example 106's mark: a FILLED amber disc with a black D. Solid amber carries
+# the "instrumentation, not part of the app" reading on its own, where an
+# outlined button competed with whatever it happened to sit over.
 func drawDebugButton(d: view DebugOverlay, font: view SdfFont) {
   let x: Float = debugButtonX(d: d)
-  var fill: Int = 0x40000000
+  # Open INVERTS rather than recolours: the same two colours, so the state is
+  # unmistakable without introducing a third.
+  var disc: Int = debugAmber
+  var glyph: Int = debugInk
   if d.open {
-    fill = 0x60FFBF00
+    disc = debugInk
+    glyph = debugAmber
   }
   gpu2d.drawBox(x: x, y: d.margin, w: d.buttonSize, h: d.buttonSize,
-                radius: d.buttonSize * 0.5, fill: fill,
-                borderWidth: 1.5, border: debugAmber)
-  # A "D". A hamburger reads as "menu", which is the wrong promise for a button
-  # that opens instrumentation.
-  let glyphSize: Float = d.buttonSize * 0.62
+                radius: d.buttonSize * 0.5, fill: disc,
+                borderWidth: 0.0, border: 0x00000000)
+  let glyphSize: Float = d.buttonSize * 0.66
   let glyphW: Float = debugTextWidth(text: "D", sizePx: glyphSize)
-  gpu2d_text.drawText(font: font, text: "D",
-                      x: x + (d.buttonSize - glyphW) * 0.5,
-                      y: d.margin + d.buttonSize * 0.5 + glyphSize * 0.36,
-                      sizePx: glyphSize, color: debugAmber)
+  # drawText places the PEN, and the glyph starts a little to the right of it.
+  # Centring on the pen alone leaves the letter visibly off-centre on a disc this
+  # small — measured at 10px of gap on the left against 5px on the right.
+  let bearing: Float = glyphSize * 0.09
+  let gx: Float = x + (d.buttonSize - glyphW) * 0.5 - bearing
+  let gy: Float = d.margin + d.buttonSize * 0.5 + glyphSize * 0.36
+  gpu2d_text.drawText(font: font, text: "D", x: gx, y: gy,
+                      sizePx: glyphSize, color: glyph)
 }
 
 func drawDebugReadouts(d: view DebugOverlay, font: view SdfFont) {
