@@ -634,9 +634,14 @@ func main() ret Int {
       # AFTER the scene's own light is restored, not before: this runs every
       # frame, so setting the sun anywhere earlier is silently undone here and
       # the time-of-day slider appears to do nothing.
+      #
+      # AND NOTHING MAY ASSIGN sunDir BELOW THIS. A hardcoded sun that orbited on
+      # simTime used to sit on the next line, left over from before the panel
+      # owned the sun (#328). It won every frame, so the time-of-day slider did
+      # nothing at all — and because it keyed off simTime, PAUSING froze the sun
+      # solid, which is how the bug was noticed.
       light.sunDir = settingsSunDir(s: settings)
       light.sunColor = settingsSunColor(s: settings)
-      light.sunDir = vec3.create(x: 0.0 - math.cos(x: simTime * 0.22) * 0.7, y: 0.0 - 0.7 - math.sin(x: simTime * 0.22) * 0.25, z: 0.0 - 1.0)
       if uiState.activeScene is 1 { animateScene1(asset: scene1, time: simTime) }
       if uiState.activeScene is 2 {
         animateScene(scene: scene2.scene, sceneId: 2, time: simTime)
