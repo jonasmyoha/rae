@@ -71,7 +71,15 @@ type SettingsState {
   # fails silently — the slider looked wired, moved nothing, and reported no
   # change. Same hazard renderer_deferred warns about for the sky.
   timeDragging: Bool
+  # Whether the clock runs on its own. On by default: a sky model that responds
+  # to the sun is best demonstrated moving, and the slider is still there to
+  # take over.
+  animateTime: Bool
 }
+
+# A whole day in one minute. Fast enough to see dawn and dusk without waiting,
+# slow enough that the sun does not strobe.
+const settingsDaySeconds: Float = 60.0
 
 # `skyModel` is the app's default, not a shared one: 110 is the realistic scene
 # and starts on Preetham, 113 is the stylised one and starts on Hosek. The panel
@@ -89,7 +97,37 @@ func createSettingsState(scene: view Int, sceneCount: view Int, speed: view Floa
     skyModel: skyModel
     hour: hour
     timeDragging: false
+    animateTime: true
   }
+}
+
+# Advance the clock. Returns true when the hour actually moved, so the caller
+# rebuilds the sky only on frames that changed it.
+#
+# A DRAG WINS. While the pointer owns the slider the clock holds still, or the
+# two would fight over the same value and the handle would crawl away from
+# where it was put.
+func settingsAdvanceTime(s: mod SettingsState, dt: view Float) pub ret Bool {
+  if s.animateTime is false {
+    ret false
+  }
+  if s.timeDragging {
+    ret false
+  }
+  if dt <= 0.0 {
+    ret false
+  }
+  var h: Float = s.hour + dt * 24.0 / settingsDaySeconds
+  # Midnight wraps rather than clamping: the point of the control is that it
+  # keeps going round.
+  loop h >= 24.0 {
+    h = h - 24.0
+  }
+  if h is s.hour {
+    ret false
+  }
+  s.hour = h
+  ret true
 }
 
 # Mounted the way camera_bar is: the app authors a host node and owns where the
@@ -146,6 +184,10 @@ func settingsHandleAction(s: mod SettingsState, actionId: view String) pub ret B
   }
   if actionId.equals(other: "settings.playback") {
     s.playing = s.playing is false
+    ret true
+  }
+  if actionId.equals(other: "settings.time.animate") {
+    s.animateTime = s.animateTime is false
     ret true
   }
   if actionId.equals(other: "settings.toon") {
@@ -241,6 +283,8 @@ func settingsApplyToWorld(s: view SettingsState, world: mod UiWorld) pub {
 
   setNodeFillSlot(world: world, nodeId: "SettingsToonButton",
                   slot: settingsSlotFor(on: s.toon))
+  setNodeFillSlot(world: world, nodeId: "SettingsAnimTimeButton",
+                  slot: settingsSlotFor(on: s.animateTime))
   setNodeFillSlot(world: world, nodeId: "SettingsSkyHosek",
                   slot: settingsSlotFor(on: s.skyModel is SettingsSkyModel.hosek))
   setNodeFillSlot(world: world, nodeId: "SettingsSkyPreetham",
