@@ -52,7 +52,7 @@ type WindowGeometry {
 # `dir` is the app's choice, and that is the point: an app wanting one window
 # per project passes its hot-reload channel directory, an installed app passes
 # somewhere in the user's config. Nothing here guesses.
-func createWindowGeometry(dir: view String, name: view String) pub ret WindowGeometry {
+func createWindowGeometry(dir: view String, name: view String) ret WindowGeometry {
   ret WindowGeometry {
     dir: "{dir}"
     path: "{dir}/{name}"
@@ -70,7 +70,7 @@ func createWindowGeometry(dir: view String, name: view String) pub ret WindowGeo
 # wants to centre itself on first launch needs to know which happened.
 #
 # CALL AFTER initWindow. There is no window to place before that.
-func restoreWindowGeometry(g: mod WindowGeometry) pub ret Bool {
+func restoreWindowGeometry(g: mod WindowGeometry) ret Bool {
   let raw: String = rae_ext_rae_sys_read_file(path: g.path)
   if raw.length() < 1 {
     ret false
@@ -103,7 +103,7 @@ func restoreWindowGeometry(g: mod WindowGeometry) pub ret Bool {
 # setWindowSize takes LOGICAL points — so on a 2x display, saving the physical
 # size and restoring it as logical doubles the window on every launch. It went
 # 900x640 -> 1800x1280 -> 3600x2560 across three runs before this converted.
-func writeWindowGeometry(g: mod WindowGeometry) pub {
+func writeWindowGeometry(g: mod WindowGeometry) {
   let x: Int = gpu2d.windowPositionX()
   let y: Int = gpu2d.windowPositionY()
   var scale: Float = gpu2d.dpr()
@@ -140,7 +140,7 @@ func writeWindowGeometry(g: mod WindowGeometry) pub {
 # A module that consumed it behind their back would make adding this feature
 # silently break resize handling, which is a rotten trade for one argument.
 func updateWindowGeometry(g: mod WindowGeometry, now: view Float64,
-                          resized: view Bool) pub {
+                          resized: view Bool) {
   if gpu2d.windowMoved() or resized {
     g.dirty = true
     g.dirtyAt = now
@@ -157,7 +157,7 @@ func updateWindowGeometry(g: mod WindowGeometry, now: view Float64,
 
 # For an app that would rather write on its own schedule — on quit, say — than
 # let the settle timer do it.
-func flushWindowGeometry(g: mod WindowGeometry) pub {
+func flushWindowGeometry(g: mod WindowGeometry) {
   if g.dirty is false {
     ret
   }
