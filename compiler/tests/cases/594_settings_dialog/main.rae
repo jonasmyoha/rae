@@ -18,7 +18,9 @@ import core
 import math
 import string
 import app3d/settings_dialog
+import calendar
 open app3d/settings_dialog
+open calendar
 
 func check(label: view String, ok: view Bool) {
   if ok {
@@ -127,6 +129,38 @@ func main() {
   check(label: "toggle turns animation off", ok: settingsHandleAction(s: clock, actionId: "settings.time.animate") and clock.animateTime is false)
   let stoppedAt: Float = clock.hour
   check(label: "a stopped clock does not move", ok: settingsAdvanceTime(s: clock, dt: 2.5) is false and clock.hour is stoppedAt)
+
+  # ----- the calendar rides the clock ---------------------------------
+  # One real minute is one day, so a minute later the DATE has moved. A clock
+  # that wrapped the hour and left the calendar behind would never reach
+  # tomorrow.
+  var cal: SettingsState = createSettingsState(scene: 1, sceneCount: 1, speed: 1.0,
+                                               toon: false, hour: 12.0,
+                                               skyModel: SettingsSkyModel.hosek)
+  check(label: "date defaults to the June solstice", ok: cal.dayOfYear is 172 and cal.year is 2026)
+  settingsAdvanceTime(s: cal, dt: 60.0)
+  check(label: "a day of clock advances the date", ok: cal.dayOfYear is 173 and cal.year is 2026)
+  # The year rolls at the year's REAL length, so 29 February exists in 2028 and
+  # does not in 2029.
+  cal.year = 2028
+  cal.dayOfYear = 59
+  settingsAdvanceTime(s: cal, dt: 60.0)
+  let feb29: CalendarDate = settingsDate(s: cal)
+  check(label: "29 Feb exists in a leap year", ok: feb29.month is 2 and feb29.day is 29)
+  cal.year = 2029
+  cal.dayOfYear = 59
+  settingsAdvanceTime(s: cal, dt: 60.0)
+  let mar1: CalendarDate = settingsDate(s: cal)
+  check(label: "and is skipped in a plain year", ok: mar1.month is 3 and mar1.day is 1)
+  cal.year = 2026
+  cal.dayOfYear = 365
+  settingsAdvanceTime(s: cal, dt: 60.0)
+  check(label: "new year rolls the year over", ok: cal.year is 2027 and cal.dayOfYear is 1)
+  # Pause is the master over the calendar too, not just the hour.
+  cal.playing = false
+  let heldDay: Int = cal.dayOfYear
+  settingsAdvanceTime(s: cal, dt: 600.0)
+  check(label: "pause holds the date as well", ok: cal.dayOfYear is heldDay)
 
   # Play/pause is shared, so both examples show the same word for it.
   check(label: "starts playing", ok: one.playing)
