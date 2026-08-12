@@ -5,6 +5,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ASSETS="$HERE/../assets"
 FONT="$HERE/../../106_mobile_ui/assets/Roboto-Regular.ttf"
+CHARSET="$HERE/../../../tools/text-glyphs.txt"
 GEN="${MSDF_ATLAS_GEN:-msdf-atlas-gen}"
 
 if ! command -v "$GEN" >/dev/null 2>&1 && [ ! -x "$GEN" ]; then
@@ -13,7 +14,7 @@ if ! command -v "$GEN" >/dev/null 2>&1 && [ ! -x "$GEN" ]; then
 fi
 command -v magick >/dev/null 2>&1 || { echo "error: ImageMagick magick not found" >&2; exit 1; }
 
-"$GEN" -font "$FONT" -charset "$HERE/text-glyphs.txt" \
+"$GEN" -font "$FONT" -charset "$CHARSET" \
   -type mtsdf -format png \
   -imageout "$ASSETS/Roboto-Regular.mtsdf.png" \
   -json "$ASSETS/Roboto-Regular.mtsdf.json" \

@@ -1,16 +1,16 @@
 #!/bin/bash
 # Bake 113's Roboto MTSDF atlas.
 #
-# The CHARSET is 110's (tools/text-glyphs.txt over there), deliberately shared:
-# both examples mount the same lib/app3d panel, so a glyph one of them needs the
-# other needs too. Two charset files would drift, and the failure is silent —
+# The CHARSET is the repo-wide tools/text-glyphs.txt, deliberately shared: these
+# examples mount the same lib/ui and lib/app3d components, so a glyph one needs
+# the others need too. Per-example lists would drift, and the failure is silent —
 # a missing glyph is skipped, so the text just loses a letter.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ASSETS="$HERE/../assets"
 FONT="$HERE/../../106_mobile_ui/assets/Roboto-Regular.ttf"
-CHARSET="$HERE/../../110_gpu3d_ui/tools/text-glyphs.txt"
+CHARSET="$HERE/../../../tools/text-glyphs.txt"
 GEN="${MSDF_ATLAS_GEN:-msdf-atlas-gen}"
 
 if ! command -v "$GEN" >/dev/null 2>&1 && [ ! -x "$GEN" ]; then
@@ -27,4 +27,4 @@ command -v magick >/dev/null 2>&1 || { echo "error: ImageMagick magick not found
 
 magick "$ASSETS/Roboto-Regular.mtsdf.png" -depth 8 RGBA:"$ASSETS/Roboto-Regular.mtsdf.raw"
 rm "$ASSETS/Roboto-Regular.mtsdf.png"
-echo "Baked 113 Roboto atlas from 110's shared charset."
+echo "Baked 113 Roboto atlas from the shared charset."
