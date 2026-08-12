@@ -100,6 +100,7 @@ import sky_hosek
 import hot_reload
 import ui/log_overlay
 import ui/window_geometry
+import ui/scroll_panel
 import ui/event_loop
 import ui/debug_overlay
 import ui/ecs
@@ -128,6 +129,7 @@ open app3d/playback
 open hot_reload
 open ui/log_overlay
 open ui/window_geometry
+open ui/scroll_panel
 open ui/event_loop
 open ui/debug_overlay
 open ui/ecs
@@ -500,6 +502,10 @@ func main() ret Int {
   # it never dropped below full speed even with the character and the clock both
   # stopped — nothing in the animator forces it, there was simply nothing that
   # could park. Mirrors 110's policy (docs/ui-render-loop-performance.md).
+  # The panel outgrew its space once the rendering toggles landed, so it
+  # scrolls: wheel when the pointer is over it, drag anywhere inside it.
+  var panelScroll: ScrollPanel = createScrollPanel(viewportId: "SidePanelBody",
+                                                   contentId: "SidePanelContent")
   var renderedOnce: Bool = false
   # The overlay samples fps before the render decision exists, so it counts the
   # PREVIOUS frame — otherwise a parked app would report full speed.
@@ -556,6 +562,7 @@ func main() ret Int {
     # is suppressed by what is actually under the pointer rather than by
     # a hand-maintained copy of the panel's bounds.
     updateUiInput(input: uiInput, world: uiWorld)
+    let scrolled: Bool = updateScrollPanel(s: panelScroll, world: uiWorld, input: uiInput)
     # The debug button sits over the side panel, so a press it takes has to be
     # withdrawn from the UI world or the same click works the control beneath.
     if updateDebugOverlay(d: dbg, screenW: windowExtentW(), screenH: windowExtentH(),
@@ -693,7 +700,7 @@ func main() ret Int {
       or uiInput.pointer.pressed or uiInput.pointer.released
     let logChanged: Bool = logView.revision is not lastLogRevision
     var needsRender: Bool = playing or settingsChanged or cameraMoved
-      or hadUiEvents or logChanged or resized or renderedOnce is false
+      or hadUiEvents or logChanged or resized or scrolled or renderedOnce is false
     if taaSettleFrames > 0 { needsRender = true }
     dbgDidWork = needsRender
     if needsRender is false {
@@ -756,6 +763,12 @@ func main() ret Int {
             count: 3, resolution: 2048, lambda: 0.75, backExtent: 12.0
           )
           uploadPalette(rows: palette, jointCount: jointCount(sk: sk))
+          # SHADOWS OFF means filling no cascades — see the note in 110. The
+          # palette upload stays outside the branch: it feeds the skinned MAIN
+          # pass too, so skipping it with the shadows would freeze the character
+          # in bind pose, which is a very confusing way for a shadow toggle to
+          # fail.
+          if settings.shadows {
           beginShadowPass(c: cascades)
           renderSceneShadow(scene: scene)
           var sp: Int = 0
@@ -765,6 +778,7 @@ func main() ret Int {
             sp = sp + 1
           }
           endShadowPass()
+          }
           if shadowLogged is false {
             log("[shadow] casters {shadowCasterCount()}, {cascades.count} cascades at {cascades.resolution}")
             shadowLogged = true

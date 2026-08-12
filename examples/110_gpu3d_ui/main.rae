@@ -53,6 +53,7 @@ open ui/transform
 open ui/event_loop
 open ui/log_overlay
 open ui/window_geometry
+open ui/scroll_panel
 open ui/debug_overlay
 open hot_reload
 import string
@@ -68,6 +69,7 @@ import ui/transform
 import ui/event_loop
 import ui/log_overlay
 import ui/window_geometry
+import ui/scroll_panel
 import ui/debug_overlay
 import hot_reload
 import app3d/camera_rig
@@ -441,6 +443,10 @@ func main() ret Int {
   # What the settings panel's scene chooser last read, so a change made IN the
   # panel can be told apart from the panel merely holding a stale value.
   var lastSettingsScene: Int = settings.scene
+  # The panel outgrew its space once the rendering toggles landed, so it
+  # scrolls: wheel when the pointer is over it, drag anywhere inside it.
+  var panelScroll: ScrollPanel = createScrollPanel(viewportId: "SidePanelBody",
+                                                   contentId: "SidePanelContent")
   var renderedOnce: Bool = false
   var lastLogRevision: Int = 0 - 1
   # Once, not per frame: this is a gate assertion, not a readout.
@@ -485,6 +491,7 @@ func main() ret Int {
     # Refresh the readout about once a second. This is deliberately the
 
     updateUiInput(input: uiInput, world: uiWorld)
+    let scrolled: Bool = updateScrollPanel(s: panelScroll, world: uiWorld, input: uiInput)
     # The debug button sits over the side panel, so a press it takes has to be
     # withdrawn from the UI world or the same click works the control beneath.
     if updateDebugOverlay(d: dbg, screenW: windowExtentW(), screenH: windowExtentH(),
@@ -588,7 +595,7 @@ func main() ret Int {
     let logChanged: Bool = logView.revision is not lastLogRevision
     var needsRender: Bool = sceneAnimating or cameraMoved or uiLayoutDirty
       or extentChanged or hadUiEvents or logChanged
-      or timeAnimating or renderedOnce is false
+      or timeAnimating or scrolled or renderedOnce is false
     if taaSettleFrames > 0 { needsRender = true }
     dbgDidWork = needsRender
     if needsRender is false {
@@ -670,15 +677,19 @@ func main() ret Int {
             count: 3, resolution: 2048, lambda: 0.7, backExtent: 30.0
           )
           beginShadowPass(c: cascades)
-          if uiState.activeScene is 1 {
+          # SHADOWS OFF means filling no cascades. renderer_deferred's note says
+          # an app that skips the shadow pass renders unshadowed, which is what a
+          # frame with no shadow pass should look like — so the toggle is simply
+          # not doing the work, with no renderer flag to thread through.
+          if settings.shadows and uiState.activeScene is 1 {
             renderSceneShadow(scene: scene1.scene)
             renderSceneShadowSdf(scene: scene1.scene)
           }
-          if uiState.activeScene is 2 {
+          if settings.shadows and uiState.activeScene is 2 {
             renderSceneShadow(scene: scene2.scene)
             renderSceneShadowSdf(scene: scene2.scene)
           }
-          if uiState.activeScene is 3 {
+          if settings.shadows and uiState.activeScene is 3 {
             renderSceneShadow(scene: scene3.scene)
             renderSceneShadowSdf(scene: scene3.scene)
           }

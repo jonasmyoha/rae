@@ -1,0 +1,197 @@
+# Vertical scrolling for a clipped panel: mouse wheel and drag.
+#
+# The shape is a VIEWPORT holding a CONTENT node. The viewport has a bounded
+# height and OverflowMode.clip, so anything outside it is scissored away; the
+# content keeps its natural (Hug) height and is moved by an Offset. Scrolling is
+# therefore one number — how far the content has slid up — and the renderer's
+# existing clip stack does the rest.
+#
+#     var scroll: ScrollPanel = createScrollPanel(viewportId: "PanelViewport",
+#                                                 contentId: "PanelContent")
+#     ...
+#     updateScrollPanel(s: scroll, world: uiWorld, input: uiInput)
+#
+# DRAG AND WHEEL BOTH, because a panel on a laptop is used with both and a
+# trackpad reports wheel while a touchscreen or a deliberate grab reports drag.
+#
+# There is no inertia here. Example 106 has a full scroll-physics module with
+# velocity and rubber-banding for its phone-shaped UI; a settings panel wants the
+# opposite — it should stop where it was let go, because the user is aiming at a
+# control rather than flicking through a list.
+import core
+import gpu2d
+open ui/ecs
+open ui/components
+open ui/input_gpu2d
+
+# Wheel notches are small integers; this turns one into a useful jump without
+# making a trackpad flick fly past the whole panel.
+const scrollWheelStep: Float = 48.0
+
+type ScrollPanel {
+  viewportId: String
+  contentId: String
+  # How far the content has slid UP, in layout units. Always >= 0.
+  offset: Float
+  # True between press-inside and release, so a drag survives the pointer
+  # leaving the panel — the same rule the sliders use.
+  dragging: Bool
+  lastPointerY: Float
+}
+
+func createScrollPanel(viewportId: view String, contentId: view String) ret ScrollPanel {
+  ret ScrollPanel {
+    viewportId: "{viewportId}"
+    contentId: "{contentId}"
+    offset: 0.0
+    dragging: false
+    lastPointerY: 0.0
+  }
+}
+
+# Node lookup, replicated from lib/app3d/ui_shell for the same layering reason
+# as the hit test below: lib/ui sits UNDER lib/app3d and cannot import it.
+func scrollNodeEntity(world: view UiWorld, nodeId: view String) ret EntityId {
+  let found: opt Int = world.nodeIds.get(k: nodeId)
+  if found is none {
+    ret noEntity()
+  }
+  let raw: Int = found
+  ret entityId(v: raw)
+}
+
+# POSITION COMES FROM WorldTransform, SIZE FROM ComputedRect. ComputedRect.x/y
+# is PARENT-LOCAL — a panel nested three deep reports x=12 while sitting at
+# x=952 on screen — so testing a pointer against it compares screen coordinates
+# to local ones and the panel is silently inert. app3d/slider carries the same
+# note; this is duplicated rather than imported because lib/ui must not depend
+# on lib/app3d, which is layered above it.
+func scrollPointInNode(world: view UiWorld, nodeId: view String,
+                       x: view Float, y: view Float) ret Bool {
+  let e: EntityId = scrollNodeEntity(world: world, nodeId: nodeId)
+  if isNone(this: e) {
+    ret false
+  }
+  if componentHas(this: world.computedRects, entity: e) is false {
+    ret false
+  }
+  if componentHas(this: world.worldTransforms, entity: e) is false {
+    ret false
+  }
+  let r: ComputedRect = componentGet(this: world.computedRects, entity: e)
+  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
+  if x < wt.x or x > wt.x + r.w {
+    ret false
+  }
+  if y < wt.y or y > wt.y + r.h {
+    ret false
+  }
+  ret true
+}
+
+# How far the content can slide before its bottom edge reaches the viewport's.
+# Zero when the content fits, which is what makes the whole thing inert until
+# the panel actually outgrows its space.
+func scrollRange(s: view ScrollPanel, world: view UiWorld) ret Float {
+  let viewport: EntityId = scrollNodeEntity(world: world, nodeId: s.viewportId)
+  let content: EntityId = scrollNodeEntity(world: world, nodeId: s.contentId)
+  if isNone(this: viewport) or isNone(this: content) {
+    ret 0.0
+  }
+  if componentHas(this: world.computedRects, entity: viewport) is false {
+    ret 0.0
+  }
+  if componentHas(this: world.computedRects, entity: content) is false {
+    ret 0.0
+  }
+  let vr: ComputedRect = componentGet(this: world.computedRects, entity: viewport)
+  let cr: ComputedRect = componentGet(this: world.computedRects, entity: content)
+  let over: Float = cr.h - vr.h
+  if over <= 0.0 {
+    ret 0.0
+  }
+  ret over
+}
+
+func clampScroll(value: view Float, maxOffset: view Float) ret Float {
+  if value < 0.0 {
+    ret 0.0
+  }
+  if value > maxOffset {
+    ret maxOffset
+  }
+  ret value
+}
+
+# Push the offset onto the content node. Writes only on a real change:
+# componentSet bumps the table generation either way, and a per-frame write to
+# an unchanged offset keeps the render cache permanently dirty (#407).
+func applyScrollOffset(s: view ScrollPanel, world: mod UiWorld) {
+  let content: EntityId = scrollNodeEntity(world: world, nodeId: s.contentId)
+  if isNone(this: content) {
+    ret
+  }
+  var currentY: Float = 0.0
+  if componentHas(this: world.offsets, entity: content) {
+    currentY = componentGet(this: world.offsets, entity: content).delta.y
+  }
+  let wantY: Float = 0.0 - s.offset
+  var delta: Float = wantY - currentY
+  if delta < 0.0 {
+    delta = 0.0 - delta
+  }
+  if delta <= 0.05 {
+    ret
+  }
+  let next: Offset = { delta: Vec2 { x: 0.0, y: wantY } }
+  componentSet(this: world.offsets, entity: content, data: next)
+}
+
+# Once per frame. Returns true when the offset moved, so a caller can rebuild
+# only on frames that scrolled.
+#
+# The wheel is consumed only when the pointer is OVER the panel, so scrolling
+# with the cursor on the 3D scene keeps belonging to the scene.
+func updateScrollPanel(s: mod ScrollPanel, world: mod UiWorld, input: view UiInput) ret Bool {
+  let maxOffset: Float = scrollRange(s: s, world: world)
+  let before: Float = s.offset
+  if maxOffset <= 0.0 {
+    # Content fits. Reset rather than leaving a stale offset behind: a panel
+    # that shrinks while scrolled would otherwise keep a gap at the top.
+    s.offset = 0.0
+    s.dragging = false
+    applyScrollOffset(s: s, world: world)
+    ret before is not s.offset
+  }
+
+  let inside: Bool = scrollPointInNode(world: world, nodeId: s.viewportId,
+                                       x: input.pointer.x, y: input.pointer.y)
+  let wheel: Float = gpu2d.wheelMove()
+  if inside and wheel is not 0.0 {
+    s.offset = clampScroll(value: s.offset - wheel * scrollWheelStep, maxOffset: maxOffset)
+  }
+
+  if input.pointer.pressed and inside {
+    s.dragging = true
+    s.lastPointerY = input.pointer.y
+  }
+  if input.pointer.released or input.pointer.down is false {
+    s.dragging = false
+  }
+  if s.dragging {
+    # Content follows the finger: dragging DOWN reveals what is above, so the
+    # offset decreases as the pointer's y increases.
+    let dy: Float = input.pointer.y - s.lastPointerY
+    s.lastPointerY = input.pointer.y
+    s.offset = clampScroll(value: s.offset - dy, maxOffset: maxOffset)
+  }
+
+  applyScrollOffset(s: s, world: world)
+  ret before is not s.offset
+}
+
+# Whether the panel is mid-drag, so a caller can suppress its own pointer
+# handling — a drag that started on the panel should not also orbit the camera.
+func scrollPanelDragging(s: view ScrollPanel) ret Bool {
+  ret s.dragging
+}
