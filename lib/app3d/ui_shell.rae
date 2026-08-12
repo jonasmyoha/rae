@@ -241,16 +241,27 @@ func setNodeActive(world: mod UiWorld, nodeId: view String, value: view Bool) {
 # children plus padding, so a container whose body has been deactivated collapses
 # to whatever is left — which is how a panel shrinks to its header rather than
 # leaving an empty background the size it was authored at.
+# A node with no Size component GETS ONE. Returning early instead is what made
+# this work in 113 and do nothing in 110: 113 authors `Size` on its side panel,
+# 110 relies on the authored Rect height, and a shared helper that silently
+# no-ops on a missing component produces exactly that — a fix that lands in one
+# app and vanishes in the other, with nothing to read that says why. The width
+# axis is preserved where a Size already exists, and defaults to Fixed (the
+# authored Rect width) where one is created.
 func setNodeHeightMode(world: mod UiWorld, nodeId: view String, hug: view Bool) {
   let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
   if isNone(this: entity) { ret }
-  if componentHas(this: world.sizes, entity: entity) is false { ret }
-  let size: mod Size => componentMod(this: world.sizes, entity: entity)
+  var next: SizeAxis = { mode: SizeMode.fill, min: 0 - 1, max: 0 - 1 }
   if hug {
-    size.h = SizeAxis { mode: SizeMode.hug, min: 0 - 1, max: 0 - 1 }
-  } else {
-    size.h = SizeAxis { mode: SizeMode.fill, min: 0 - 1, max: 0 - 1 }
+    next = { mode: SizeMode.hug, min: 0 - 1, max: 0 - 1 }
   }
+  if componentHas(this: world.sizes, entity: entity) {
+    let size: mod Size => componentMod(this: world.sizes, entity: entity)
+    size.h = next
+    ret
+  }
+  let created: Size = { w: defaultSizeAxis(), h: next }
+  componentSet(this: world.sizes, entity: entity, data: created)
 }
 
 # Repaint a scene node from the palette. The value must be one of the
