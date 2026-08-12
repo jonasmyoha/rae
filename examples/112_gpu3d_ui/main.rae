@@ -122,11 +122,11 @@ func createDemoUiResource() ret DemoUiResource {
 # to "start fresh" rather than half-apply, and a version mismatch is then
 # a single comparison. Restoring a partially-parsed camera would be worse
 # than not restoring at all.
-const state110Version: Int = 2
-const state110AppId: String = "110_gpu3d_ui"
-const state110Fields: Int = 15
+const state112Version: Int = 2
+const state112AppId: String = "112_gpu3d_ui"
+const state112Fields: Int = 15
 
-func serialize110State(ui: view DemoUiResource, rig: view CameraRig, camera: view Camera3d) ret String {
+func serialize112State(ui: view DemoUiResource, rig: view CameraRig, camera: view Camera3d) ret String {
   var pausedNum: Int = 0
   if ui.paused { pausedNum = 1 }
   var fullNum: Int = 0
@@ -136,19 +136,19 @@ func serialize110State(ui: view DemoUiResource, rig: view CameraRig, camera: vie
   # This example owns the first five fields; the camera's ten are the
   # rig's format, so the two cannot drift out of step when either side
   # gains a field.
-  ret "{state110Version} {ui.activeScene} {pausedNum} {fullNum} {debugNum} {cameraRigStateString(rig: rig, camera: camera)}"
+  ret "{state112Version} {ui.activeScene} {pausedNum} {fullNum} {debugNum} {cameraRigStateString(rig: rig, camera: camera)}"
 }
 
 # Returns true when a full, version-matched snapshot was applied.
-func restore110State(raw: view String, ui: mod DemoUiResource, rig: mod CameraRig, camera: mod Camera3d) ret Bool {
+func restore112State(raw: view String, ui: mod DemoUiResource, rig: mod CameraRig, camera: mod Camera3d) ret Bool {
   if raw.length() < 1 {
     ret false
   }
   let parts: List(String) = raw.trim().split(sep: " ")
-  if parts.length < state110Fields {
+  if parts.length < state112Fields {
     ret false
   }
-  if parts.at(index: 0).trim().toInt() is not state110Version {
+  if parts.at(index: 0).trim().toInt() is not state112Version {
     ret false
   }
   ui.activeScene = parts.at(index: 1).trim().toInt()
@@ -281,7 +281,7 @@ func main() ret Int {
   let torus: MeshHandle = uploadMeshData(mesh: torusData)
   let ground: MeshHandle = uploadMeshData(mesh: planeData)
   let boxMesh: MeshHandle = uploadMeshData(mesh: boxData)
-  let base: String = "examples/110_gpu3d_ui/assets/"
+  let base: String = "examples/112_gpu3d_ui/assets/"
   var meshRegistry: MeshRegistry3d = createMeshRegistry3d()
   registerMesh3d(reg: meshRegistry, key: "sphere", handle: sphere)
   registerMesh3d(reg: meshRegistry, key: "torus", handle: torus)
@@ -382,8 +382,8 @@ func main() ret Int {
   let headless: Bool = getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0
     or getEnv(name: "RAE_HEADLESS_FRAMES").length() > 0
   if not headless {
-    let savedState: String = readHotReloadStateFor(appId: state110AppId)
-    if restore110State(raw: savedState, ui: uiState, rig: cameraRig, camera: camera) {
+    let savedState: String = readHotReloadStateFor(appId: state112AppId)
+    if restore112State(raw: savedState, ui: uiState, rig: cameraRig, camera: camera) {
       logInfoLine(ov: logView, text: "state restored: scene {uiState.activeScene}, camera kept")
     }
   }
@@ -621,7 +621,7 @@ func main() ret Int {
       if stateDirty and not headless {
         let sinceSave: Float = (now - lastStateSave) as Float
         if sinceSave >= 0.25 {
-          writeHotReloadStateFor(appId: state110AppId, state: serialize110State(ui: uiState, rig: cameraRig, camera: camera))
+          writeHotReloadStateFor(appId: state112AppId, state: serialize112State(ui: uiState, rig: cameraRig, camera: camera))
           lastStateSave = now
           stateDirty = false
         }
@@ -752,7 +752,7 @@ func main() ret Int {
   # Headless runs neither read nor write the snapshot — a smoke test must
   # not clobber the scene and camera a developer left set up.
   if not headless {
-    writeHotReloadStateFor(appId: state110AppId, state: serialize110State(ui: uiState, rig: cameraRig, camera: camera))
+    writeHotReloadStateFor(appId: state112AppId, state: serialize112State(ui: uiState, rig: cameraRig, camera: camera))
   }
   shutdown()
   gpu2d.closeWindow()
