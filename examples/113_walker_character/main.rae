@@ -156,10 +156,11 @@ func clipButtonId(index: view Int) ret String {
 #
 # One space-separated line behind a version tag rather than JSON: a bad or
 # older line must degrade to "start fresh" rather than half-apply, and a
-# version mismatch is then a single comparison. The camera's ten fields
-# and the window's four are the shared formats from lib/app3d, so this
-# example only owns the four at the front.
-const state113Version: Int = 4
+# version mismatch is then a single comparison. The camera's fields are the
+# shared format from lib/app3d, so this example only owns the ones at the
+# front. The WINDOW is not here: the runtime persists window geometry for
+# every app, so an app that also saved it had two owners for one value.
+const state113Version: Int = 5
 const state113AppId: String = "113_walker_character"
 const state113OwnFields: Int = 5
 
@@ -173,7 +174,7 @@ func serialize113State(clipIndex: view Int, playing: view Bool, speed: view Floa
   if toon {
     toonNum = 1
   }
-  ret "{state113Version} {clipIndex} {playingNum} {speed} {toonNum} {cameraRigStateString(rig: rig, camera: camera)} {windowPlacementString()}"
+  ret "{state113Version} {clipIndex} {playingNum} {speed} {toonNum} {cameraRigStateString(rig: rig, camera: camera)}"
 }
 
 func restore113State(raw: view String, clipIndex: mod Int, playing: mod Bool, speed: mod Float,
@@ -207,10 +208,9 @@ func restore113State(raw: view String, clipIndex: mod Int, playing: mod Bool, sp
   if applyCameraRigState(parts: parts, offset: state113OwnFields, rig: rig, camera: camera) is false {
     ret false
   }
-  # The window is the one part allowed to fail on its own: a snapshot
-  # written on a monitor that is no longer attached should still restore
-  # the camera and the clip.
-  applyWindowPlacement(parts: parts, offset: state113OwnFields + cameraRigFields)
+  # The WINDOW is deliberately absent. It used to ride along in this line, which
+  # meant two mechanisms owned it — this one, and the runtime's. The runtime's
+  # persists for every app and survives a kill, so this one is gone.
   ret true
 }
 
