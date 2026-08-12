@@ -99,6 +99,7 @@ import app3d/settings_dialog
 import sky_hosek
 import hot_reload
 import ui/log_overlay
+import ui/window_geometry
 import ui/event_loop
 import ui/debug_overlay
 import ui/ecs
@@ -126,6 +127,7 @@ open shadow3d
 open app3d/playback
 open hot_reload
 open ui/log_overlay
+open ui/window_geometry
 open ui/event_loop
 open ui/debug_overlay
 open ui/ecs
@@ -216,6 +218,12 @@ func restore113State(raw: view String, clipIndex: mod Int, playing: mod Bool, sp
 
 func main() ret Int {
   gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — walker character (animated) [{rendererPathName()}]")
+  # Remember where the user put the window, across restarts. Opt-in, and the
+  # app picks the file: the hot-reload channel dir is per app, so two examples
+  # running at once do not share one window position.
+  var windowGeom: WindowGeometry = createWindowGeometry(dir: hotReloadDir(),
+                                                        name: "window.geometry")
+  restoreWindowGeometry(g: windowGeom)
   var extentW: Float = windowExtentW()
   var extentH: Float = windowExtentH()
   gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
@@ -650,9 +658,13 @@ func main() ret Int {
     if cameraMoved {
       stateDirty = true
     }
-    if gpu2d.windowResized() {
+    # ONE read. gpu2d.windowResized() is one-shot — reading it clears it — so
+    # two callers meant the second always saw false.
+    let resized: Bool = gpu2d.windowResized()
+    if resized {
       stateDirty = true
     }
+    updateWindowGeometry(g: windowGeom, now: now, resized: resized)
 
     # Flush at most 4x/sec. The snapshot is twenty numbers, so the cost is
     # the file write rather than the formatting.
@@ -674,7 +686,6 @@ func main() ret Int {
     let hadUiEvents: Bool = uiInput.events.length > 0 or uiInput.pointer.down
       or uiInput.pointer.pressed or uiInput.pointer.released
     let logChanged: Bool = logView.revision is not lastLogRevision
-    let resized: Bool = gpu2d.windowResized()
     var needsRender: Bool = playing or settingsChanged or cameraMoved
       or hadUiEvents or logChanged or resized or renderedOnce is false
     if taaSettleFrames > 0 { needsRender = true }
