@@ -295,9 +295,19 @@ func settingsBuildSky(s: view SettingsState, data: view HosekDataset,
                       turbidity: view Float, groundAlbedo: view Float) pub ret Sky {
   let dir: Vec3 = settingsSunDir(s: s)
   let col: Vec3 = settingsSunColor(s: s)
+  # Both models are fitted only for a sun at or above the horizon, so the night
+  # side is a fade rather than a different sky. Applied here, once, so the two
+  # models darken together.
+  let day: Float = daylightFactorForHour(hour: s.hour)
   if s.skyModel is SettingsSkyModel.preetham {
-    ret createSkyProcedural(sunDir: dir, sunColor: col, turbidity: turbidity)
+    var pre: Sky = createSkyProcedural(sunDir: dir, sunColor: col, turbidity: turbidity)
+    pre.exposure = day
+    pre.sunDiscIntensity = pre.sunDiscIntensity * day
+    ret pre
   }
-  ret createSkyHosek(data: data, sunDir: dir, sunColor: col,
-                     turbidity: turbidity, groundAlbedo: groundAlbedo)
+  var hos: Sky = createSkyHosek(data: data, sunDir: dir, sunColor: col,
+                                turbidity: turbidity, groundAlbedo: groundAlbedo)
+  hos.exposure = day
+  hos.sunDiscIntensity = hos.sunDiscIntensity * day
+  ret hos
 }

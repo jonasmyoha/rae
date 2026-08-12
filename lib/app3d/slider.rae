@@ -336,11 +336,18 @@ func centreNodeAtFraction(world: mod UiWorld, trackId: view String,
   if dx <= 0.05 {
     ret
   }
-  # The AUTHORED rect, not the computed one. Layout recomputes ComputedRect from
-  # this every frame, so writing the computed rect alone is undone before it is
-  # ever drawn.
+  # BOTH rects. The authored one is what layout recomputes from next frame; the
+  # computed one is what this frame draws, and writing only the authored rect
+  # leaves the knob a frame behind — or not moving at all where layout does not
+  # re-derive it.
   let next: Rect = { x: wantX, y: hr.y, w: hr.w, h: hr.h }
   componentSet(this: world.rects, entity: he, data: next)
+  if componentHas(this: world.computedRects, entity: he) {
+    let cr: ComputedRect = componentGet(this: world.computedRects, entity: he)
+    let trc: ComputedRect = componentGet(this: world.computedRects, entity: te)
+    let nextC: ComputedRect = { x: trc.x + wantX, y: cr.y, w: cr.w, h: cr.h }
+    componentSet(this: world.computedRects, entity: he, data: nextC)
+  }
 }
 
 # Should a drag be running after this frame's pointer state?
