@@ -48,6 +48,12 @@ enum SettingsSkyModel {
   preetham
 }
 
+# The panel node ids this component collapses. Named here rather than passed in:
+# both apps author the same two nodes, and a shared component that takes them as
+# arguments invites them to drift apart.
+const settingsPanelNodeId: String = "SidePanel"
+const settingsPanelBodyNodeId: String = "SidePanelBody"
+
 const settingsHourMin: Float = 0.0
 const settingsHourMax: Float = 24.0
 
@@ -86,7 +92,7 @@ const settingsDaySeconds: Float = 60.0
 # switches either.
 func createSettingsState(scene: view Int, sceneCount: view Int, speed: view Float,
                          toon: view Bool, hour: view Float,
-                         skyModel: SettingsSkyModel) pub ret SettingsState {
+                         skyModel: SettingsSkyModel) ret SettingsState {
   ret SettingsState {
     playing: true
     open: true
@@ -133,7 +139,7 @@ func settingsAdvanceTime(s: mod SettingsState, dt: view Float) ret Bool {
 # Mounted the way camera_bar is: the app authors a host node and owns where the
 # dialog sits; the chrome comes from the shared scene.
 func mountSettingsDialog(world: mod UiWorld, res: view Gpu2dUi,
-                         hostNodeId: view String) pub ret Bool {
+                         hostNodeId: view String) ret Bool {
   let host: EntityId = nodeEntityFor(world: world, nodeId: hostNodeId)
   if isNone(this: host) {
     ret false
@@ -155,7 +161,7 @@ func mountSettingsDialog(world: mod UiWorld, res: view Gpu2dUi,
 
 # 12:00, not 12.0 — an hours-and-minutes readout is what a time control means,
 # and 6.5 on screen reads as a number rather than as half past six.
-func formatHour(hour: view Float) pub ret String {
+func formatHour(hour: view Float) ret String {
   var h: Float = hour
   if h < 0.0 { h = 0.0 }
   if h >= 24.0 { h = 23.999 }
@@ -175,7 +181,7 @@ func formatHour(hour: view Float) pub ret String {
 # Apply one action id. Returns true when something changed, so the caller can
 # rebuild only what the change affects. Unknown ids are ignored rather than
 # treated as an error: the app forwards every action it sees, including its own.
-func settingsHandleAction(s: mod SettingsState, actionId: view String) pub ret Bool {
+func settingsHandleAction(s: mod SettingsState, actionId: view String) ret Bool {
   # One action, and it TOGGLES: the button shows and hides the panel rather
   # than opening a second surface.
   if actionId.equals(other: "settings.open") {
@@ -238,7 +244,7 @@ func settingsSelectScene(s: mod SettingsState, scene: view Int) ret Bool {
 # Pointer half: drag the time slider. Separate from the action half because
 # actions arrive as discrete events while a drag is a per-frame sample.
 func settingsUpdatePointer(s: mod SettingsState, world: view UiWorld,
-                           input: view UiInput) pub ret Bool {
+                           input: view UiInput) ret Bool {
   if s.open is false {
     ret false
   }
@@ -266,10 +272,25 @@ func settingsUpdatePointer(s: mod SettingsState, world: view UiWorld,
   ret true
 }
 
+# Show or hide the panel BODY, and collapse the panel itself with it.
+#
+# Hiding the body alone left the panel background at its authored full height —
+# an empty card down the side of the screen with one button at the top. The
+# container has to change its sizing policy too: Hug measures from the ACTIVE
+# children plus padding, so with the body deactivated the panel shrinks to the
+# settings button, which is the whole point of a button that hides a panel.
+#
+# Shared rather than repeated in each app: both examples had the setNodeActive
+# call, and both would have needed the same second line.
+func applySettingsPanelOpen(world: mod UiWorld, open: view Bool) {
+  setNodeActive(world: world, nodeId: settingsPanelBodyNodeId, value: open)
+  setNodeHeightMode(world: world, nodeId: settingsPanelNodeId, hug: open is false)
+}
+
 # Push the state onto the mounted chrome. Cheap enough to call whenever
 # something changed; every write underneath is guarded against writing an
 # unchanged value.
-func settingsApplyToWorld(s: view SettingsState, world: mod UiWorld) pub {
+func settingsApplyToWorld(s: view SettingsState, world: mod UiWorld) {
   var playLabel: String = "Pause"
   if s.playing is false {
     playLabel = "Play"
@@ -317,14 +338,14 @@ func settingsSlotFor(on: view Bool) ret String {
 
 # Where the sun is, for this hour. Both the sky and the key light take it, so
 # the visible sun and the cast shadows cannot drift apart.
-func settingsSunDir(s: view SettingsState) pub ret Vec3 {
+func settingsSunDir(s: view SettingsState) ret Vec3 {
   ret sunDirForHour(hour: s.hour)
 }
 
 # Warm at the horizon, neutral overhead, and dimmed as the sun sets — the sky
 # model reddens on its own, but the direct light would otherwise stay white and
 # full-strength through a sunset.
-func settingsSunColor(s: view SettingsState) pub ret Vec3 {
+func settingsSunColor(s: view SettingsState) ret Vec3 {
   let base: Vec3 = sunColorForHour(hour: s.hour)
   var lift: Float = sunHeightForHour(hour: s.hour)
   # Never fully black: a scene lit by nothing reads as broken rather than as
@@ -336,7 +357,7 @@ func settingsSunColor(s: view SettingsState) pub ret Vec3 {
 # Build the sky the panel is asking for. `data` is only read by the Hosek
 # branch; a caller with no dataset can pass an empty one and still get Preetham.
 func settingsBuildSky(s: view SettingsState, data: view HosekDataset,
-                      turbidity: view Float, groundAlbedo: view Float) pub ret Sky {
+                      turbidity: view Float, groundAlbedo: view Float) ret Sky {
   let dir: Vec3 = settingsSunDir(s: s)
   let col: Vec3 = settingsSunColor(s: s)
   # Both models are fitted only for a sun at or above the horizon, so the night
