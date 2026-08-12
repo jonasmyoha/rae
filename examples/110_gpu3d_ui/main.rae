@@ -649,7 +649,10 @@ func main() ret Int {
       stateDirty = true
     }
     let uiLayoutDirty: Bool = syncDemoUi(world: uiWorld, state: uiState)
-    if uiLayoutDirty or extentChanged {
+    # `settingsChanged` too: a slider DRAG produces no action and does not dirty
+    # the demo UI, so without it the knob's new rect only reached the screen when
+    # the release finally produced one (see 113 for the same gate).
+    if uiLayoutDirty or extentChanged or settingsChanged {
       layoutSystem(world: uiWorld)
       transformSystem(world: uiWorld)
       visualBoundsSystem(world: uiWorld, res: gpuUi)
