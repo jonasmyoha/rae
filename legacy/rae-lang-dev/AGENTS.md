@@ -17,6 +17,19 @@ These instructions define **how Codex should work**, communicate progress, and i
 - Type names MUST be `PascalCase` (e.g. `List`, `Map`, `HashMap`, `Ptr`)
 - Violations MUST produce a compiler diagnostic
 
+### `pub` is BAD STYLE — do not write it:
+- **Everything is cross-file visible by default.** `pub` on a function changes
+  nothing: a plain `func f()` in one module is already callable from another.
+  `pub` on a type changes nothing either — types are always cross-file visible,
+  which is why the compiler rejects the bare `type X pub` spelling outright.
+- So `pub` is pure noise. It reads as if it were load-bearing — as if some other
+  declaration nearby were private — and no such distinction exists. A reader who
+  believes it means something will draw wrong conclusions about the API surface.
+- Write `func createThing(...) ret Thing`, NOT `func createThing(...) pub ret Thing`.
+- The keyword is still accepted (in the `type Name: pub` position for types), so
+  existing occurrences are legal and do not need a sweep. Do not add new ones,
+  and drop them from code you are already editing.
+
 ---
 
 ## Project overview
