@@ -49,7 +49,6 @@ open ui/scene_loader
 open ui/theme_resolved
 open ui/transform
 open ui/event_loop
-open ui/frame_stats
 open ui/log_overlay
 open ui/window_geometry
 open ui/debug_overlay
@@ -65,7 +64,6 @@ import ui/scene_loader
 import ui/theme_resolved
 import ui/transform
 import ui/event_loop
-import ui/frame_stats
 import ui/log_overlay
 import ui/window_geometry
 import ui/debug_overlay
@@ -93,9 +91,6 @@ type DemoUiResource {
   activeScene: Int
   revision: Int
   appliedRevision: Int
-  fpsRevision: Int
-  appliedFpsRevision: Int
-  fps: Int
 }
 
 func createDemoUiResource() ret DemoUiResource {
@@ -106,9 +101,6 @@ func createDemoUiResource() ret DemoUiResource {
     activeScene: 1
     revision: 1
     appliedRevision: 0
-    fpsRevision: 1
-    appliedFpsRevision: 0
-    fps: 0
   }
 }
 
@@ -184,10 +176,6 @@ func syncDemoUi(world: mod UiWorld, state: mod DemoUiResource) ret Bool {
     state.appliedRevision = state.revision
     layoutDirty = true
   }
-  if state.appliedFpsRevision is not state.fpsRevision {
-    setNodeText(world: world, nodeId: "FpsLabel", value: "fps: {state.fps}")
-    state.appliedFpsRevision = state.fpsRevision
-  }
   ret layoutDirty
 }
 
@@ -240,7 +228,6 @@ func anchorUiToExtent(world: mod UiWorld, res: view Gpu2dUi, w: view Float, h: v
 
   # Right-aligned controls, measured from the live width.
 
-  setNodeRect(world: world, nodeId: "FpsLabel", x: w - 320.0 - margin - 86.0, y: 24.0, w: 86.0, h: 16.0)
 
   # The camera bar is placed by the top row's layout now, as it is in 113;
   # this only tells the SHARED component how much room it has, so it can shed
@@ -560,9 +547,6 @@ func main() ret Int {
   # Shared sliding-window sampler (lib/ui/frame_stats.rae): it records only
   # frames that actually rendered, so an idle app's reading decays to ~1
   # instead of freezing at the last busy value.
-  var frameStats: FrameStats = createFrameStats()
-  var lastFpsShown: Int = 0 - 1
-  var lastFpsRefresh: Float64 = gpu2d.nowSeconds()
   # Idle policy (see docs/ui-render-loop-performance.md): busy-render while
   # anything is moving, park in waitEvents when nothing is. Relayout is
   # gated on explicit change flags, and the UI paint only happens inside a
@@ -609,21 +593,6 @@ func main() ret Int {
     }
 
     # Refresh the readout about once a second. This is deliberately the
-    # ONLY thing that keeps an otherwise-idle app awake: the wake-up
-    # renders one frame, so the counter settles at ~1 fps — which is the
-    # honest reading for "alive but doing nothing", and distinguishable
-    # from a frozen counter.
-    var fpsDirty: Bool = false
-    if (now - lastFpsRefresh) as Float >= 1.0 {
-      lastFpsRefresh = now
-      let fpsNow: Int = frameStatsFpsInt(stats: frameStats)
-      if fpsNow is not lastFpsShown {
-        lastFpsShown = fpsNow
-        uiState.fps = fpsNow
-        uiState.fpsRevision = uiState.fpsRevision + 1
-        fpsDirty = true
-      }
-    }
 
     updateUiInput(input: uiInput, world: uiWorld)
     # The debug button sits over the side panel, so a press it takes has to be
@@ -713,7 +682,7 @@ func main() ret Int {
     }
     let logChanged: Bool = logView.revision is not lastLogRevision
     var needsRender: Bool = sceneAnimating or cameraMoved or uiLayoutDirty
-      or extentChanged or hadUiEvents or fpsDirty or logChanged
+      or extentChanged or hadUiEvents or logChanged
       or timeAnimating or renderedOnce is false
     if taaSettleFrames > 0 { needsRender = true }
     dbgDidWork = needsRender
@@ -726,7 +695,6 @@ func main() ret Int {
         frameSec: 0.016667, heartbeatSec: 1.0
       )
       gpu2d.waitEvents(timeoutSec: idleTimeout)
-      recordFrame(stats: frameStats, now: now, didRender: false)
     } else {
       if sceneAnimating or cameraMoved or uiLayoutDirty or extentChanged or hadUiEvents
         or timeAnimating {
@@ -768,7 +736,6 @@ func main() ret Int {
       if uiState.activeScene is 2 { animateScene(scene: scene2.scene, sceneId: 2, time: simTime) }
       if uiState.activeScene is 3 { animateScene(scene: scene3.scene, sceneId: 3, time: simTime) }
 
-      recordFrame(stats: frameStats, now: now, didRender: true)
 
       let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
       # Frame order is DERIVED by the render graph (#331/#332): scene3d
