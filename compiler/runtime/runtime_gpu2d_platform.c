@@ -317,36 +317,49 @@ static void g2d_save_geometry(void) {
     fclose(f);
 }
 
-/* Save on CHANGE, not only on close.
+/* Save on the window's own MOVE and RESIZE events, not only on close.
  *
  * closeWindow was the single save site, which assumed apps exit normally. They
  * do not: `rae watch` kills the child to swap binaries, and a developer kills a
  * run far more often than they close its window — so the geometry a session
  * actually ended with was usually never written, and the window snapped back to
- * its authored size on the next reload. That is the case this feature exists
- * for.
+ * its authored size on the next reload.
  *
- * Throttled to four writes a second, and only when the geometry actually
- * differs, so dragging a window does not turn into a write per frame and an
- * idle app writes nothing at all. */
-static void g2d_geometry_poll(void) {
-    if (!g2d_geometry_enabled() || !g_sdl_win) return;
+ * EVENT-DRIVEN, NOT POLLED. An earlier version checked the window every frame.
+ * That is the wrong shape for this codebase: the UI examples are built to sit
+ * at ~0% CPU when idle (docs/ui-render-loop-performance.md), and a per-frame
+ * SDL_GetWindowPosition to service a feature that fires when a human drags a
+ * window is exactly the kind of background work that keeps a laptop awake. SDL
+ * already tells us when the window moved or resized; this listens instead.
+ *
+ * Coalesced with a dirty flag rather than written per event: dragging a window
+ * emits a move event per frame of the drag, and the file only needs the value
+ * the drag ended on. The flag is flushed when the drag settles — on focus loss,
+ * on close, and whenever a later event arrives more than a moment after the
+ * last one. */
+static int g_g2d_geometry_dirty = 0;
+static double g_g2d_geometry_dirty_at = 0.0;
 
-    static int last_x = -1000000, last_y = -1000000, last_w = 0, last_h = 0;
-    static double last_write_sec = -1.0;
+static void g2d_geometry_mark_dirty(void) {
+    if (!g2d_geometry_enabled()) return;
+    g_g2d_geometry_dirty = 1;
+    g_g2d_geometry_dirty_at = (double)rae_ext_nowMs() / 1000.0;
+}
 
-    int x = 0, y = 0, w = 0, h = 0;
-    SDL_GetWindowPosition(g_sdl_win, &x, &y);
-    SDL_GetWindowSize(g_sdl_win, &w, &h);
-    if (w <= 0 || h <= 0) return;
-    if (x == last_x && y == last_y && w == last_w && h == last_h) return;
-
-    double now_sec = (double)rae_ext_nowMs() / 1000.0;
-    if (last_write_sec >= 0.0 && (now_sec - last_write_sec) < 0.25) return;
-
-    last_x = x; last_y = y; last_w = w; last_h = h;
-    last_write_sec = now_sec;
+static void g2d_geometry_flush(void) {
+    if (!g_g2d_geometry_dirty) return;
+    g_g2d_geometry_dirty = 0;
     g2d_save_geometry();
+}
+
+/* Backstop for a move that ends without a mouse-up we can see — a window
+ * manager shortcut, a tiling tool, a drag released outside our window. Costs an
+ * int test on a pump that has already been woken; it asks the OS nothing. */
+static void g2d_geometry_settle(void) {
+    if (!g_g2d_geometry_dirty) return;
+    double now_sec = (double)rae_ext_nowMs() / 1000.0;
+    if ((now_sec - g_g2d_geometry_dirty_at) < 0.2) return;
+    g2d_geometry_flush();
 }
 
 /* Returns true and fills the out params when fresh saved geometry exists.
@@ -481,8 +494,12 @@ rae_Bool rae_ext_gpu2d_pollClose(void) {
                 int pw = 0, ph = 0; SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
                 rae_g2d_configure(pw, ph);
                 g_g2d_win_resized = 1;   /* consumed once by gpu2d.windowResized() */
+                g2d_geometry_mark_dirty();
                 break;
             }
+            case SDL_EVENT_WINDOW_MOVED:
+                g2d_geometry_mark_dirty();
+                break;
             case SDL_EVENT_KEY_DOWN:
                 if (e.key.key == SDLK_ESCAPE) quit = 1;
                 if (e.key.scancode < SDL_SCANCODE_COUNT) {
@@ -514,15 +531,22 @@ rae_Bool rae_ext_gpu2d_pollClose(void) {
                 g_g2d_wheel += e.wheel.y;
                 break;
             case SDL_EVENT_WINDOW_FOCUS_LOST:
+                g2d_geometry_flush();
                 memset(g_sdl_keydown, 0, sizeof(g_sdl_keydown));
                 memset(g_sdl_mouse, 0, sizeof(g_sdl_mouse));
                 memset(g_sdl_mouse_pressed, 0, sizeof(g_sdl_mouse_pressed));
                 memset(g_sdl_mouse_released, 0, sizeof(g_sdl_mouse_released));
                 if (g_sdl_mouse_captured) { SDL_CaptureMouse(false); g_sdl_mouse_captured = false; }
+                /* A window drag has ended by the time the button comes up, so
+                 * this is where a coalesced move is worth writing. */
+                g2d_geometry_flush();
                 break;
             default: break;
         }
     }
+    /* The drag has settled if no further move arrived; see g2d_geometry_settle.
+     * This runs on a pump that was already awake and asks the OS nothing. */
+    g2d_geometry_settle();
     if (quit) return 1;
     if (g_sdl_headless_frames > 0) {
         if (g_sdl_frames_done >= g_sdl_headless_frames) return 1;
