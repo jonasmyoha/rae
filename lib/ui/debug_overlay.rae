@@ -76,7 +76,7 @@ type DebugOverlay {
 }
 
 func createDebugOverlay(button: view Bool, fps: view Bool, memory: view Bool,
-                        heartbeat: view Bool) pub ret DebugOverlay {
+                        heartbeat: view Bool) ret DebugOverlay {
   ret DebugOverlay {
     wantButton: button
     wantFps: fps
@@ -130,7 +130,7 @@ func debugPruneFrames(d: mod DebugOverlay, now: view Float64) {
 
 # Frames per second over a moving window rather than 1/dt: a single slow frame
 # should not make the readout jump, and the number is there to show a trend.
-func debugRecordFrame(d: mod DebugOverlay, now: view Float64, didRealWork: view Bool) pub {
+func debugRecordFrame(d: mod DebugOverlay, now: view Float64, didRealWork: view Bool) {
   if didRealWork {
     let times: mod List(Float64) => d.frameTimes
     times.add(value: now)
@@ -151,11 +151,11 @@ func debugRecordFrame(d: mod DebugOverlay, now: view Float64, didRealWork: view 
   }
 }
 
-func debugOverlayFps(d: view DebugOverlay) pub ret Float {
+func debugOverlayFps(d: view DebugOverlay) ret Float {
   ret d.lastFps
 }
 
-func debugOverlayMemKb(d: view DebugOverlay) pub ret Int {
+func debugOverlayMemKb(d: view DebugOverlay) ret Int {
   ret d.lastRssKb
 }
 
@@ -164,7 +164,7 @@ func debugOverlayMemKb(d: view DebugOverlay) pub ret Int {
 # Returns true when the overlay took the pointer, so the caller can skip its own
 # hit test for this frame.
 func updateDebugOverlay(d: mod DebugOverlay, screenW: view Float, screenH: view Float,
-                        now: view Float64, didRealWork: view Bool) pub ret Bool {
+                        now: view Float64, didRealWork: view Bool) ret Bool {
   d.screenW = screenW
   d.screenH = screenH
   debugRecordFrame(d: d, now: now, didRealWork: didRealWork)
@@ -242,7 +242,7 @@ func debugDialogPress(d: mod DebugOverlay, px: view Float, py: view Float) ret B
 
 # ----- formatting -----------------------------------------------------
 
-func formatDebugFps(fps: view Float) pub ret String {
+func formatDebugFps(fps: view Float) ret String {
   var rounded: Int = (fps + 0.5).toInt()
   if rounded < 0 {
     rounded = 0
@@ -252,7 +252,7 @@ func formatDebugFps(fps: view Float) pub ret String {
 
 # One decimal, computed in integers: megabytes to one place is the resolution
 # that makes a leak visible without the number twitching every frame.
-func formatDebugMem(kb: view Int) pub ret String {
+func formatDebugMem(kb: view Int) ret String {
   let tenths: Int = (kb * 10 + 512) / 1024
   let whole: Int = tenths / 10
   let frac: Int = tenths - whole * 10
@@ -369,7 +369,7 @@ func drawDebugReadouts(d: view DebugOverlay, font: view SdfFont) {
 # Call LAST in the frame. Everything here paints straight to gpu2d, so whatever
 # is drawn after it wins — which is the whole reason this is not an ECS layer.
 func drawDebugOverlay(d: mod DebugOverlay, font: view SdfFont,
-                      didRealWork: view Bool) pub {
+                      didRealWork: view Bool) {
   if d.wantHeartbeat {
     drawDebugHeartbeat(d: d, didRealWork: didRealWork)
   }
