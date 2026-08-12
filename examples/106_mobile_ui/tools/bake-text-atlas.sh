@@ -1,5 +1,5 @@
 #!/bin/bash
-# Bake 113's Roboto MTSDF atlas.
+# Bake 106's Roboto MTSDF atlas.
 #
 # The CHARSET is the repo-wide tools/text-glyphs.txt, deliberately shared: these
 # examples mount the same lib/ui and lib/app3d components, so a glyph one needs
@@ -9,7 +9,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ASSETS="$HERE/../assets"
-FONT="$HERE/../../106_mobile_ui/assets/Roboto-Regular.ttf"
+FONT="$HERE/../assets/Roboto-Regular.ttf"
 CHARSET="$HERE/../../../tools/text-glyphs.txt"
 GEN="${MSDF_ATLAS_GEN:-msdf-atlas-gen}"
 
@@ -27,4 +27,4 @@ command -v magick >/dev/null 2>&1 || { echo "error: ImageMagick magick not found
 
 magick "$ASSETS/Roboto-Regular.mtsdf.png" -depth 8 RGBA:"$ASSETS/Roboto-Regular.mtsdf.raw"
 rm "$ASSETS/Roboto-Regular.mtsdf.png"
-echo "Baked 113 Roboto atlas from the shared charset."
+echo "Baked 106 Roboto atlas from the shared charset."
