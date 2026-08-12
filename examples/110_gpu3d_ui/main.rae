@@ -263,6 +263,136 @@ func animateScene(scene: mod Scene3d, sceneId: view Int, time: view Float) {
   }
 }
 
+# Scene 3 — the metaball lab. Seven clusters, 195 balls, every one of them an
+# SDF sphere; the only mesh in the scene is the ground for shadows to land on.
+#
+# TWO CLUSTERS SIT AT EXACTLY 64 BALLS, which is GB_SDF_MAX_BALLS in
+# runtime_gpu3d_gbuffer_sdf.c. That cap TRUNCATES SILENTLY — a cluster authored
+# with 100 draws 64 and simply looks wrong — so this scene is deliberately built
+# to the limit and not past it. Shadows cap at 8 clusters (G3D_SM_SDF_MAX_CLUSTERS);
+# seven leaves one spare.
+#
+# Each cluster has its own character, because the point of a metaball lab is the
+# range: stickiness (smoothing) decides whether motion separates lobes or just
+# churns inside one mass, and radius decides whether that reads as a swarm or as
+# a single body. Colour is PER BALL — lib/gbuffer packs each primitive's own
+# material — so a cluster carries a gradient rather than a flat tint.
+func animateScene3(asset: mod Scene3dAsset, time: view Float) {
+  var i: Int = 0
+  loop i < asset.scene.sdfPrimitives.length {
+    let sdf: SdfPrimitive = asset.scene.sdfPrimitives.at(index: i)
+    var transform: Transform3d = asset.scene.transforms.at(index: sdf.entity)
+    let phase: Float = i.toFloat() * 0.7853981
+    let idx: Float = i.toFloat()
+
+    # ESCAPE. Most balls leave the mass periodically rather than orbiting inside
+    # it: a half-wave pulse, cubed, so a ball spends most of its cycle home and
+    # the departure is an event. Shrinking while away makes the smooth-union
+    # pinch off decisively instead of stretching a rubber neck.
+    var pulse: Float = math.sin(x: time * 0.31 + phase * 2.7 + idx * 0.21)
+    if pulse < 0.0 {
+      pulse = 0.0
+    }
+    let escape: Float = pulse * pulse * pulse
+    let away: Float = 1.0 - 0.42 * escape
+
+    if sdf.cluster is 0 {
+      # Swarm: 64 small balls, low stickiness, wide slow churn. At this count
+      # and k=0.40 the cluster reads as a shoal rather than a blob.
+      let t: Float = time * 0.46
+      transform.position = vec3.create(
+        x: 0.0 - 6.0 + math.cos(x: t + phase) * (1.9 + escape * 4.4),
+        y: 2.4 + math.sin(x: t * 0.73 + phase * 1.4) * (1.7 + escape * 2.1),
+        z: 1.5 + math.sin(x: t * 1.05 + phase * 0.6) * 0.9 + escape * 2.6
+      )
+      let r: Float = (0.30 + math.sin(x: time * 0.9 + phase) * 0.09) * away
+      transform.scale = vec3.create(x: r, y: r, z: r)
+      setTransform(scene: asset.scene, entity: sdf.entity, transform: transform)
+    }
+    if sdf.cluster is 1 {
+      # Titan: four very large, very sticky balls. Big radius plus k=1.35 means
+      # it never separates — it wallows, which is the opposite end of the range
+      # from the swarm.
+      let t: Float = time * 0.21
+      transform.position = vec3.create(
+        x: math.cos(x: t + phase) * 1.35,
+        y: 6.6 + math.sin(x: t * 0.8 + phase * 1.2) * 0.75,
+        z: 2.4 + math.sin(x: t * 1.3 + phase) * 0.55
+      )
+      let r: Float = 1.85 + math.sin(x: time * 0.37 + phase * 1.9) * 0.42
+      transform.scale = vec3.create(x: r, y: r, z: r)
+      setTransform(scene: asset.scene, entity: sdf.entity, transform: transform)
+    }
+    if sdf.cluster is 2 {
+      # Mist: the other 64-ball cluster, small radii and k=0.18 — barely fusing,
+      # so it stays a cloud of droplets and shows what the cap looks like when
+      # the balls do NOT merge.
+      let t: Float = time * 0.63
+      transform.position = vec3.create(
+        x: 6.4 + math.cos(x: t * 0.9 + phase * 1.7) * (2.6 + escape * 3.2),
+        y: 2.2 + math.sin(x: t + phase) * (2.4 + escape * 2.6),
+        z: 1.2 + math.sin(x: t * 1.4 + phase * 2.2) * 1.1 + escape * 3.1
+      )
+      let r: Float = (0.27 + math.sin(x: time * 1.5 + phase * 2.6) * 0.09) * away
+      transform.scale = vec3.create(x: r, y: r, z: r)
+      setTransform(scene: asset.scene, entity: sdf.entity, transform: transform)
+    }
+    if sdf.cluster is 3 {
+      # Ember: fast, hot, medium size, sticky enough to boil internally.
+      let t: Float = time * 1.45
+      transform.position = vec3.create(
+        x: 0.0 - 2.6 + math.cos(x: t + phase * 1.3) * (1.3 + escape * 3.0),
+        y: 0.0 - 1.8 + math.sin(x: t * 0.62 + phase) * (1.1 + escape * 1.9),
+        z: 1.1 + math.sin(x: t * 0.9 + phase * 1.8) * 0.6 + escape * 2.2
+      )
+      let r: Float = (0.62 + math.sin(x: t * 0.7 + phase * 2.1) * 0.26) * away
+      transform.scale = vec3.create(x: r, y: r, z: r)
+      setTransform(scene: asset.scene, entity: sdf.entity, transform: transform)
+    }
+    if sdf.cluster is 4 {
+      # Orchid: slow, large-ish, long escapes — the clearest place to watch a
+      # droplet pinch off and rejoin.
+      let t: Float = time * 0.38
+      transform.position = vec3.create(
+        x: 3.2 + math.cos(x: t + phase) * (1.2 + escape * 4.8),
+        y: 0.0 - 2.2 + math.sin(x: t * 1.1 + phase * 1.6) * (1.0 + escape * 1.4),
+        z: 1.6 + math.sin(x: t * 0.8 + phase) * 0.7 + escape * 3.4
+      )
+      let r: Float = (0.78 + math.sin(x: time * 0.5 + phase) * 0.20) * away
+      transform.scale = vec3.create(x: r, y: r, z: r)
+      setTransform(scene: asset.scene, entity: sdf.entity, transform: transform)
+    }
+    if sdf.cluster is 5 {
+      # Verdigris: the middle case — medium count, medium stickiness, a ring
+      # that breathes in and out through the centre of the frame.
+      let t: Float = time * 0.55
+      let ring: Float = 2.2 + math.sin(x: time * 0.33) * 0.9
+      transform.position = vec3.create(
+        x: 0.2 + math.cos(x: phase * 2.0 + t * 0.4) * (ring + escape * 3.6),
+        y: 1.2 + math.sin(x: phase * 2.0 + t * 0.4) * (ring * 0.7 + escape * 2.0),
+        z: 0.9 + math.sin(x: t * 1.2 + phase) * 0.5 + escape * 2.4
+      )
+      let r: Float = (0.44 + math.sin(x: t + phase * 1.5) * 0.14) * away
+      transform.scale = vec3.create(x: r, y: r, z: r)
+      setTransform(scene: asset.scene, entity: sdf.entity, transform: transform)
+    }
+    if sdf.cluster is 6 {
+      # Pearl: few, big, pale and nearly still — a rest for the eye, and the
+      # control case showing what the same smoothing looks like without motion.
+      let t: Float = time * 0.16
+      transform.position = vec3.create(
+        x: 0.0 - 4.4 + math.cos(x: t + phase) * 0.85,
+        y: 0.0 - 3.0 + math.sin(x: t * 0.9 + phase * 1.1) * 0.6,
+        z: 2.2 + math.sin(x: t * 1.4 + phase) * 0.45
+      )
+      let r: Float = 1.05 + math.sin(x: time * 0.24 + phase * 1.3) * 0.18
+      transform.scale = vec3.create(x: r, y: r, z: r)
+      setTransform(scene: asset.scene, entity: sdf.entity, transform: transform)
+    }
+    i = i + 1
+  }
+}
+
 func animateScene1(asset: mod Scene3dAsset, time: view Float) {
   # Two free cubes tumbling on different axes at different rates. Boxes are
   # the useful shape to watch here: a sphere looks identical under any
@@ -551,6 +681,9 @@ func main() ret Int {
   # anything is moving, park in waitEvents when nothing is. Relayout is
   # gated on explicit change flags, and the UI paint only happens inside a
   # rendered frame, so an idle app touches neither.
+  # What the settings panel's scene chooser last read, so a change made IN the
+  # panel can be told apart from the panel merely holding a stale value.
+  var lastSettingsScene: Int = settings.scene
   var renderedOnce: Bool = false
   var lastLogRevision: Int = 0 - 1
   # Once, not per frame: this is a gate assertion, not a readout.
@@ -631,12 +764,21 @@ func main() ret Int {
     }
     # The scene chooser exists in both places here: the debug panel's own
     # buttons and the dialog's. Keep them one value rather than two.
-    if settings.scene is not uiState.activeScene {
-      if settingsChanged {
-        uiState.activeScene = settings.scene
-        uiState.revision = uiState.revision + 1
-      } else {
+    #
+    # THE DIALOG WINS ONLY WHEN THE DIALOG ACTUALLY MOVED. This used to key off
+    # `settingsChanged`, which meant "the user touched the panel" until the
+    # time-of-day clock started setting it every frame — after which the dialog
+    # won always, and silently reverted any scene chosen anywhere else. It ate
+    # both the RAE_GPU3D_UI_TEST_STATE=scene3 override and a restored snapshot,
+    # so the app opened on scene 1 whatever it had been told.
+    if settings.scene is not lastSettingsScene {
+      uiState.activeScene = settings.scene
+      uiState.revision = uiState.revision + 1
+      lastSettingsScene = settings.scene
+    } else {
+      if uiState.activeScene is not settings.scene {
         settings.scene = uiState.activeScene
+        lastSettingsScene = uiState.activeScene
       }
     }
     if settingsChanged {
@@ -740,7 +882,7 @@ func main() ret Int {
       light.sunDir = vec3.create(x: 0.0 - math.cos(x: simTime * 0.22) * 0.7, y: 0.0 - 0.7 - math.sin(x: simTime * 0.22) * 0.25, z: 0.0 - 1.0)
       if uiState.activeScene is 1 { animateScene1(asset: scene1, time: simTime) }
       if uiState.activeScene is 2 { animateScene(scene: scene2.scene, sceneId: 2, time: simTime) }
-      if uiState.activeScene is 3 { animateScene(scene: scene3.scene, sceneId: 3, time: simTime) }
+      if uiState.activeScene is 3 { animateScene3(asset: scene3, time: simTime) }
 
 
       let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
