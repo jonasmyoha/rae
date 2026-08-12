@@ -110,6 +110,19 @@ func main() {
   let heldAt: Float = clock.hour
   check(label: "a drag pauses the clock", ok: settingsAdvanceTime(s: clock, dt: 2.5) is false and clock.hour is heldAt)
   clock.timeDragging = false
+  # PLAY/PAUSE IS THE MASTER. Pausing stops the clock whatever the Animate time
+  # toggle says — a paused scene with the sun still sweeping across it is not
+  # paused in any sense a user would recognise.
+  check(label: "animate time is on for the master test", ok: clock.animateTime)
+  clock.playing = false
+  let pausedAt: Float = clock.hour
+  check(label: "pause stops the clock", ok: settingsAdvanceTime(s: clock, dt: 2.5) is false and clock.hour is pausedAt)
+  # The toggle KEEPS its value rather than being written to false, so resuming
+  # restores exactly what was set instead of silently turning the feature off.
+  check(label: "pause does not clear the toggle", ok: clock.animateTime)
+  clock.playing = true
+  check(label: "resume starts the clock again", ok: settingsAdvanceTime(s: clock, dt: 2.5) and clock.hour is not pausedAt)
+
   # And the toggle turns it off entirely.
   check(label: "toggle turns animation off", ok: settingsHandleAction(s: clock, actionId: "settings.time.animate") and clock.animateTime is false)
   let stoppedAt: Float = clock.hour
