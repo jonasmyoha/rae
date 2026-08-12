@@ -481,10 +481,21 @@ G3D_SHADOW_FN_WGSL
 "  let mieDen = 1.0 + c2.x * c2.x - 2.0 * c2.x * cosGamma;\n"
 "  var mieM = 0.0;\n"
 "  if (mieDen > 0.0) { mieM = (1.0 + rayM) / (mieDen * sqrt(mieDen)); }\n"
-"  let zen = sqrt(max(cosTheta, 0.0));\n"
+"  let ct = max(cosTheta, 0.0);\n"
+"  let zen = sqrt(ct);\n"
 /* The +0.01 is the model's own horizon guard: cos(theta) reaches 0 there
  * and the widening term would divide by zero. */
-"  let widening = 1.0 + c0.x * exp(c0.y / (cosTheta + 0.01));\n"
+/* CLAMPED, and that clamp is load-bearing. The fit is defined for a sun and a
+ * view above the horizon; one hundredth below it this divisor reaches zero and
+ * the term overflows to +/-inf. The horizon blend below cannot mask that,
+ * because mix(a, b, 0) still evaluates a*(1-0) + b*0 and inf*0 is NaN — so an
+ * infinity generated in a direction that is supposed to contribute NOTHING
+ * poisoned the pixel anyway, zeroing whichever channels it hit. That is the
+ * red/yellow line one pixel tall that appeared at the anti-solar horizon around
+ * 05:55 and cleared by 06:10: the band is dir.z in (-0.01, 0), about half a
+ * degree, and which channels blow up depends on the cooked coefficients, hence
+ * red where two channels went and yellow where one did. */
+"  let widening = 1.0 + c0.x * exp(c0.y / (ct + 0.01));\n"
 "  let body = c0.z + c0.w * expM + c1.y * rayM + c1.z * mieM + c1.w * zen;\n"
 "  return widening * body;\n"
 "}\n"
