@@ -156,6 +156,24 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT"/gb-*.log 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
+        elif [ "$EXAMPLE_NAME" = "111_gpu3d_ui_forward" ]; then
+          # The forward twin: one screenshot is enough. 112 owns the deep
+          # coverage (scene switching, pause, settings, free camera); repeating
+          # all of it here would double the slowest example in the suite to
+          # re-test the UI rather than the renderer, which is the only thing
+          # that differs.
+          SCREENSHOT="$TMP_OUT/gpu3d-ui-forward.bmp"
+          if (cd .. && RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --gpu3d-ui > "$TMP_OUT/screenshot.log" 2>&1 \
+             && [ "$(grep -c '\[shadow\] casters 17, 3 cascades' "$TMP_OUT/render.log")" -eq 1 ]; then
+            echo "PASS: $EXAMPLE_NAME (forward path, lit frame + shadow cascades)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (forward 3D/UI screenshot)"
+            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
+            ((FAILED++))
+          fi
         elif [ "$EXAMPLE_NAME" = "112_gpu3d_ui" ]; then
           SCREENSHOT="$TMP_OUT/gpu3d-ui.bmp"
           FREE_SCREENSHOT="$TMP_OUT/gpu3d-ui-free.bmp"
