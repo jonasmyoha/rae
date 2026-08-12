@@ -1,0 +1,50 @@
+# The shared debug overlay (lib/ui/debug_overlay.rae): the readout maths and the
+# formatting. The drawing and hit testing need a window, so they are covered by
+# the examples rather than here.
+import core
+import ui/debug_overlay
+open ui/debug_overlay
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() ret Int {
+  var d: DebugOverlay = createDebugOverlay(button: true, fps: true,
+                                           memory: true, heartbeat: false)
+  check(label: "features are opted into individually", ok: d.wantButton and d.wantFps and d.wantMemory and d.wantHeartbeat is false)
+  check(label: "dialog starts closed", ok: d.open is false)
+
+  # FPS over a moving WINDOW, not 1/dt: one slow frame should not make the
+  # number jump. Ten frames 10 ms apart is 100 fps across the span.
+  var t: Float64 = 1000.0
+  var i: Int = 0
+  loop i < 11 {
+    debugRecordFrame(d: d, now: t, didRealWork: true)
+    t = t + 0.01
+    i = i + 1
+  }
+  check(label: "steady 10ms frames read as 100 fps", ok: debugOverlayFps(d: d) > 99.0 and debugOverlayFps(d: d) < 101.0)
+
+  # A frame that did NO work must not count, or an idle app parked in
+  # waitEvents would report a healthy frame rate it is not achieving.
+  let before: Float = debugOverlayFps(d: d)
+  debugRecordFrame(d: d, now: t + 5.0, didRealWork: false)
+  check(label: "idle frames do not count as work", ok: debugOverlayFps(d: d) is before)
+
+  # Memory is one decimal of MB: enough to watch a leak, not so much that the
+  # last digit twitches every frame.
+  check(label: "one megabyte formats", ok: formatDebugMem(kb: 1024).equals(other: "mem: 1.0 MB"))
+  check(label: "half a megabyte formats", ok: formatDebugMem(kb: 512).equals(other: "mem: 0.5 MB"))
+  check(label: "a big heap formats", ok: formatDebugMem(kb: 20480).equals(other: "mem: 20.0 MB"))
+  check(label: "zero formats", ok: formatDebugMem(kb: 0).equals(other: "mem: 0.0 MB"))
+
+  check(label: "fps rounds to whole frames", ok: formatDebugFps(fps: 59.6).equals(other: "fps: 60"))
+  # Never negative: the window can be degenerate before the second frame lands.
+  check(label: "fps never reads negative", ok: formatDebugFps(fps: 0.0 - 3.0).equals(other: "fps: 0"))
+  ret 0
+}
