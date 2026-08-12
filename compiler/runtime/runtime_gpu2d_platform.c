@@ -317,6 +317,38 @@ static void g2d_save_geometry(void) {
     fclose(f);
 }
 
+/* Save on CHANGE, not only on close.
+ *
+ * closeWindow was the single save site, which assumed apps exit normally. They
+ * do not: `rae watch` kills the child to swap binaries, and a developer kills a
+ * run far more often than they close its window — so the geometry a session
+ * actually ended with was usually never written, and the window snapped back to
+ * its authored size on the next reload. That is the case this feature exists
+ * for.
+ *
+ * Throttled to four writes a second, and only when the geometry actually
+ * differs, so dragging a window does not turn into a write per frame and an
+ * idle app writes nothing at all. */
+static void g2d_geometry_poll(void) {
+    if (!g2d_geometry_enabled() || !g_sdl_win) return;
+
+    static int last_x = -1000000, last_y = -1000000, last_w = 0, last_h = 0;
+    static double last_write_sec = -1.0;
+
+    int x = 0, y = 0, w = 0, h = 0;
+    SDL_GetWindowPosition(g_sdl_win, &x, &y);
+    SDL_GetWindowSize(g_sdl_win, &w, &h);
+    if (w <= 0 || h <= 0) return;
+    if (x == last_x && y == last_y && w == last_w && h == last_h) return;
+
+    double now_sec = (double)rae_ext_nowMs() / 1000.0;
+    if (last_write_sec >= 0.0 && (now_sec - last_write_sec) < 0.25) return;
+
+    last_x = x; last_y = y; last_w = w; last_h = h;
+    last_write_sec = now_sec;
+    g2d_save_geometry();
+}
+
 /* Returns true and fills the out params when fresh saved geometry exists.
  * Always consumes the file, so a stale entry cannot linger. */
 static bool g2d_take_geometry(int* x, int* y, int* w, int* h) {
