@@ -303,7 +303,14 @@ func main() ret Int {
   let torus: MeshHandle = uploadMeshData(mesh: torusData)
   let ground: MeshHandle = uploadMeshData(mesh: planeData)
   let boxMesh: MeshHandle = uploadMeshData(mesh: boxData)
-  let base: String = "examples/112_metaballs_deferred/assets/"
+  # THIS EXAMPLE'S OWN assets. It pointed at 112's for a while, left over from
+  # this example being created as a copy of it. Natively that still worked --
+  # the path resolves from the repo root, 112 is right there, and the two asset
+  # sets are identical -- so nothing looked wrong. In the browser it is fatal:
+  # the WASM bundle preloads only the entry example's assets directory, so the
+  # scene load failed, the app shut down before its first frame, and what showed
+  # was the page behind the canvas.
+  let base: String = "examples/111_metaballs_forward/assets/"
   var meshRegistry: MeshRegistry3d = createMeshRegistry3d()
   registerMesh3d(reg: meshRegistry, key: "sphere", handle: sphere)
   registerMesh3d(reg: meshRegistry, key: "torus", handle: torus)
