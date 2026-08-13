@@ -17,6 +17,20 @@ These instructions define **how Codex should work**, communicate progress, and i
 - Type names MUST be `PascalCase` (e.g. `List`, `Map`, `HashMap`, `Ptr`)
 - Violations MUST produce a compiler diagnostic
 
+### No single-letter names for parameters or meaningful locals:
+- Write `state`, `settings`, `world` — not `s`, `c`, `w`. A single letter says
+  nothing about what it holds, and the reader has to scroll back to the
+  signature to find out.
+- It is WORSE IN RAE THAN ELSEWHERE, because arguments are named at the call
+  site: the parameter name is what a reader sees at every call. `syncUi(world:
+  world, s: state)` puts a meaningless label in front of a meaningful value;
+  `syncUi(world: world, state: state)` reads. A one-letter parameter makes the
+  language's best readability feature carry no information.
+- Loop counters (`i`, `j`) and genuinely conventional maths (`x`, `y`, `dt`) are
+  fine — those names ARE the meaning.
+- Not yet swept through existing code. Fix it in files you are already editing;
+  do not open a mass rename.
+
 ### `pub` is BAD STYLE — do not write it:
 - **Everything is cross-file visible by default.** `pub` on a function changes
   nothing: a plain `func f()` in one module is already callable from another.
