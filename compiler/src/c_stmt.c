@@ -1319,6 +1319,16 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 const char* rt = c_return_type(ctx, ctx->func_decl);
                 fprintf(out, "    %s __ret_val = ", rt);
                 bool is_ref_return = ret_type && (ret_type->is_view || ret_type->is_mod);
+                // `ret none` from a function returning an optional REFERENCE is
+                // a null pointer (spec 4.1), not a boxed none whose address is
+                // then taken.
+                if (ret_type && ret_type->is_opt && is_ref_return
+                    && stmt->as.ret_stmt.values->value->kind == AST_EXPR_NONE) {
+                    fprintf(out, "NULL;\n");
+                    emit_implicit_drops_for_body(ctx, out, ctx->func_first_let_idx);
+                    fprintf(out, "    return __ret_val;\n  }\n");
+                    break;
+                }
                 bool is_prim_ref_return = is_ref_return && is_primitive_type(get_base_type_name(ret_type));
 
                 // === Stage 4: return-by-deep-copy for owning types ===
