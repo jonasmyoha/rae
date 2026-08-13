@@ -1,4 +1,5 @@
 #include "runtime_sky_wgsl.h"
+#include "runtime_sky_state.h"
 
 /* Deferred frame — depth pyramid, lighting, composite (#356, Track B).
  *
@@ -891,15 +892,14 @@ void rae_ext_gbuffer_ssao(float camX, float camY, float camZ) {
 }
 
 /* Cooked Hosek-Wilkie coefficients, pushed from Rae before the lighting call.
- * 3 channels x (9 coefficients + radiance), laid out three vec4 per channel to
- * match `hosek` in the WGSL: [A B C D][E F G H][I radiance _ _]. One scalar per
- * call keeps this off the lighting extern's already 28-long argument list,
- * where a positional mistake is silent. */
-static float gb_hosek[36];
-
+ * One scalar per call keeps this off the lighting extern's already 28-long
+ * argument list, where a positional mistake is silent.
+ *
+ * The table itself lives in runtime_sky_state.h, shared with the forward sky
+ * pass so the two renderers cannot end up under different skies. Layout is
+ * documented there. */
 void rae_ext_gbuffer_skyHosekPush(int64_t index, float value) {
-    if (index < 0 || index >= 36) return;
-    gb_hosek[index] = value;
+    rae_sky_hosek_push(index, value);
 }
 
 void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure,
@@ -947,7 +947,7 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
      * model's arithmetic deliberately does not live in C — see
      * docs/tech-stack-and-dependencies.md, and lib/sky_hosek.rae's header for
      * what the earlier C version cost. */
-    memcpy(u + 68, gb_hosek, 36 * sizeof(float));
+    memcpy(u + 68, rae_sky_hosek, 36 * sizeof(float));
     wgpuQueueWriteBuffer(g_wgpu_queue, gb_light_ubuf, 0, u, GB_LIGHT_BYTES);
 
     if (!gb_light_bind) {
