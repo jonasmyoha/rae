@@ -60,6 +60,45 @@ func main() {
   Outro — 2m 23s
 ```
 
+## Absence, and references
+
+`opt T` says a value may not be there — in the type, not in a convention. There
+is no null and no sentinel, so a caller cannot forget the empty case.
+
+```rae
+type Library {
+  tracks: List(Track)
+  current: Track
+  playing: Bool
+}
+
+# An optional REFERENCE: a view of a track the library owns, or nothing at all.
+func nowPlaying(lib: view Library) ret opt view Track {
+  if lib.playing is false {
+    ret none
+  }
+  ret view lib.current
+}
+
+# `if let` narrows it to a reference for the branch. `=>` binds; `=` would copy,
+# and is rejected here — a conditional binding has no business duplicating a
+# value.
+if let track: view Track => nowPlaying(lib: view lib) {
+  log("playing {track.title} — {formatDuration(seconds: track.seconds)}")
+} else {
+  log("nothing playing")
+}
+```
+
+```
+playing Middle Eight — 3m 32s
+nothing playing
+```
+
+An optional reference costs a nullable pointer — the same eight bytes as a plain
+one, with no box and no allocation — so `nowPlaying` hands back a window onto the
+library's own track rather than a copy of it.
+
 ## What the syntax is doing
 
 - **Named arguments, always.** `formatDuration(seconds: total)` rather than
@@ -70,6 +109,10 @@ func main() {
   value" should never be a thing you have to guess or go and check.
 - **`{}` is how a value becomes text.** Interpolation evaluates expressions and
   calls, so printing does not need a formatting mini-language.
+- **`=` copies, `=>` binds.** One character tells you whether a line produces an
+  independent value or a second name for an existing one — without knowing how
+  big the type is or what it holds. `=>` is required wherever the type contains
+  `view` or `mod`, and refused everywhere else.
 
 ## Targets
 
