@@ -53,3 +53,16 @@ void rae_ext_gpu3d_tonemap(void) {}
 void rae_ext_gpu3d_taa(void) {}
 void rae_ext_gpu3d_ssao(void) {}
 void rae_ext_gpu3d_shutdown(void) {}
+void rae_ext_gpu3d_skyHosekPush(int64_t index, float value){ (void)index; (void)value; }
+void rae_ext_gpu3d_skyDraw(float skyKind, float turbidity, float skyExposure, float sunSizeRad,
+                           float sunX, float sunY, float sunZ,
+                           float sunR, float sunG, float sunB,
+                           float zenR, float zenG, float zenB, float bands,
+                           float horR, float horG, float horB, float discI,
+                           float clearR, float clearG, float clearB){
+    (void)skyKind; (void)turbidity; (void)skyExposure; (void)sunSizeRad;
+    (void)sunX; (void)sunY; (void)sunZ; (void)sunR; (void)sunG; (void)sunB;
+    (void)zenR; (void)zenG; (void)zenB; (void)bands;
+    (void)horR; (void)horG; (void)horB; (void)discI;
+    (void)clearR; (void)clearG; (void)clearB;
+}
