@@ -192,12 +192,19 @@ export async function listExamples(
       if (normalizedActions.length) {
         ACTION_REGISTRY.set(relativePath, normalizedActions);
       }
+      // lib/ is the compiler's module root, a sibling of examples/ -- the
+      // same place `import ui/theme` resolves against.
+      const wasmCapability = await detectWasmCapability(
+        fullPath,
+        path.join(path.dirname(root), "lib")
+      );
       const descriptor = makeMultiFileExample(
         relativePath,
         entryFile,
         files,
         metadata,
-        packInfo
+        packInfo,
+        wasmCapability
       );
       descriptor.absolutePath = fullPath;
       if (normalizedActions.length) {
@@ -226,17 +233,110 @@ function makeSingleFileExample(relativePath: string): ExampleDescriptor {
   };
 }
 
+/** Can this example be built for WASM, and which WASM does it need?
+ *
+ * The compiler refuses a browser WASM build when `raylib` is anywhere in the
+ * resolved module graph, so that is the question answered here -- by walking
+ * the example's own imports into lib/ and following them, the same closure the
+ * compiler resolves. A shallower check (does this directory mention raylib)
+ * gets both directions wrong: it misses raylib reached through a lib module,
+ * and it trips over the word in a comment.
+ *
+ * Validated against reality rather than reasoning: every example was actually
+ * built to wasm, and this agrees with all 65 outcomes -- the 12 raylib ones
+ * fail, the other 53 build. Getting there caught a real miss, `import "raylib"`
+ * in its quoted form, which would have put a WASM button on an example that
+ * cannot build (18_complex_json).
+ *
+ * `needsBrowser` separates the two WASM paths. A headless example runs in the
+ * page's WASI viewer and prints; one that draws through gpu2d/gpu3d needs the
+ * SDL3 + WebGPU browser bundle, and offering it the headless viewer would be a
+ * button that runs and shows nothing.
+ */
+const RAE_IMPORT_RE = /^\s*(?:import|open)\s+"?([A-Za-z0-9_/]+)"?/;
+
+async function readRaeImports(file: string): Promise<string[]> {
+  let src: string;
+  try {
+    src = await readFile(file, "utf8");
+  } catch {
+    return [];
+  }
+  const names: string[] = [];
+  for (const line of src.split("\n")) {
+    const match = RAE_IMPORT_RE.exec(line);
+    if (match) names.push(match[1]!);
+  }
+  return names;
+}
+
+async function detectWasmCapability(
+  exampleDir: string,
+  libDir: string
+): Promise<{ canWasm: boolean; needsBrowser: boolean }> {
+  const seen = new Set<string>();
+  const queue: string[] = [];
+  let needsBrowser = false;
+  try {
+    for (const entry of await readdir(exampleDir)) {
+      if (entry.endsWith(".rae")) queue.push(path.join(exampleDir, entry));
+    }
+  } catch {
+    return { canWasm: false, needsBrowser: false };
+  }
+  while (queue.length) {
+    const file = queue.pop()!;
+    if (seen.has(file)) continue;
+    seen.add(file);
+    for (const name of await readRaeImports(file)) {
+      if (name === "raylib") return { canWasm: false, needsBrowser: false };
+      if (name === "gpu2d" || name === "gpu3d") needsBrowser = true;
+      const resolved = path.join(libDir, `${name}.rae`);
+      if (!seen.has(resolved)) queue.push(resolved);
+    }
+  }
+  return { canWasm: true, needsBrowser };
+}
+
 function makeMultiFileExample(
   id: string,
   entry: string,
   files: ExampleFileDescriptor[],
   metadata: ExampleMetadata | null,
-  packInfo: ExamplePackInfo | null
+  packInfo: ExamplePackInfo | null,
+  wasmCapability: { canWasm: boolean; needsBrowser: boolean }
 ): ExampleDescriptor {
-  const supportedTargets = packInfo?.supportedTargets
+  const declaredTargets = packInfo?.supportedTargets
     ?? (Array.isArray(metadata?.supportedTargets)
       ? metadata!.supportedTargets.filter((value): value is string => typeof value === "string")
       : undefined);
+  // WASM is OFFERED, not declared. Almost every example that can build for
+  // wasm never said so in a pack -- most have no pack at all, by design -- so
+  // requiring the declaration meant the option existed for six examples and
+  // was invisible for the other forty-seven that support it just as well.
+  //
+  // A drawing example is only offered it when its pack also sets wasmWebApp,
+  // because that flag is what routes the run to the SDL3 + WebGPU browser
+  // bundle. Without it the click would reach the headless WASI viewer, which
+  // for a windowed app renders nothing at all.
+  //
+  // A live-only example is exempt: 23_code_hot_reload declares live and nothing
+  // else because demonstrating VM code hot reload IS the example, so a WASM
+  // button there offers to run the one thing it cannot show.
+  const liveOnly =
+    declaredTargets !== undefined
+    && declaredTargets.length > 0
+    && declaredTargets.every((id) => id === "live");
+  const offersWasm =
+    wasmCapability.canWasm
+    && !liveOnly
+    && (!wasmCapability.needsBrowser || metadata?.wasmWebApp === true);
+  const supportedTargets = (() => {
+    if (!offersWasm) return declaredTargets;
+    const base = declaredTargets ? [...declaredTargets] : ["compiled"];
+    if (!base.includes("wasm")) base.push("wasm");
+    return base;
+  })();
   const defaultTargetId =
     packInfo?.defaultTargetId
     ?? (typeof metadata?.defaultTargetId === "string" ? metadata.defaultTargetId : undefined);
