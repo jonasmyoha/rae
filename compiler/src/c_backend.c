@@ -709,6 +709,11 @@ bool emit_auto_init(CFuncContext* ctx, const AstTypeRef* type, FILE* out) {
     else if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32")) fprintf(out, "0.0");
     else if (str_eq_cstr(base, "Bool")) fprintf(out, "false");
     else if (str_eq_cstr(base, "String")) fprintf(out, "(rae_String){0}");
+    /* Buffer and Ptr are emitted as C POINTERS, so their zero value is a null
+     * pointer, not a braced aggregate. `{0}` compiles but earns
+     * -Wbraced-scalar-init on every one -- fourteen of them in example 114
+     * alone, from the List globals whose `data` field is a Buffer. */
+    else if (str_eq_cstr(base, "Buffer") || str_eq_cstr(base, "Ptr")) fprintf(out, "NULL");
     else {
         const AstDecl* d = find_type_decl(ctx, ctx->module, base);
         if (d && d->kind == AST_DECL_TYPE) emit_struct_auto_init(ctx, d, type, out);
