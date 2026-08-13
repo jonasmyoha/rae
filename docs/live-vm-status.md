@@ -76,12 +76,13 @@ replacement (`docs/raepack-v2-and-packages.md`). A restart-based Compiled
 hot-reload path also exists (`rae watch` supervisor + `lib/hot_reload.rae` /
 `lib/file_watch.rae`).
 
-This remaining unique Live capability does **not** block deprecation. Examples
-that specifically demonstrate Live hot reload (`23_code_hot_reload`,
-`24_code_hybrid_hot_reload`, `99_data_hot_reload`, `100_code_hot_reload`) are
-kept but moved out of the normal workflow — relocated under `examples/legacy/live/`
-and/or hidden in devtools (QUEUE) — so they no longer influence the standard Rae
-experience.
+This remaining unique Live capability does **not** block deprecation.
+`23_code_hot_reload`, which demonstrated in-VM code patching and could run
+under no other target, has been DELETED — a deprecated example that only runs
+on a frozen target is a broken example, and git keeps the code for anyone who
+wants to read it. The others that touch hot reload (`24_code_hybrid_hot_reload`,
+`99_data_hot_reload`, `100_code_hot_reload`) build and run on Hybrid or
+Compiled, so they stay.
 
 ---
 
