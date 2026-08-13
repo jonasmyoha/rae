@@ -1,0 +1,8 @@
+# Rae has ONE spelling for the presence test: `is not none`. `some` is not a
+# keyword, and without a diagnostic here it survived to the C backend as an
+# undeclared identifier, which said nothing about Rae.
+func main() {
+  let t: opt Int = 250
+  # ERROR: 'some' is not a Rae keyword
+  if t is some { }
+}
