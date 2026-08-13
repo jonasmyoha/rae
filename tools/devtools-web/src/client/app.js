@@ -3574,10 +3574,39 @@ function setStatsListPlaceholder(listEl, message) {
   listEl.appendChild(empty);
 }
 
+// A duration a person can read at a glance. Test and build runs span four
+// orders of magnitude -- a unit test in 40 ms, a full suite in six minutes --
+// and raw milliseconds serve neither end: "362130.0 ms" has to be counted on
+// fingers before it means anything.
+//
+// The unit is chosen from the magnitude, and the largest unit always keeps a
+// second, smaller one where it exists, because "6 min" alone throws away the
+// difference between a suite that got slower and one that did not.
+function formatDurationMs(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return String(ms);
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  // EVERYTHING below is derived from ONE rounded second count. Deriving minutes
+  // from the unrounded value and seconds from the remainder disagrees at the
+  // boundaries: 59950 ms came out as "0 min 60 s".
+  const totalSeconds = Math.round(ms / 1000);
+  if (totalSeconds < 60) {
+    // Sub-minute keeps a decimal: 1.4 s and 1.9 s are meaningfully different.
+    return `${(ms / 1000).toFixed(1)} s`;
+  }
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (totalMinutes < 60) {
+    return seconds ? `${totalMinutes} min ${seconds} s` : `${totalMinutes} min`;
+  }
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes ? `${hours} h ${minutes} min` : `${hours} h`;
+}
+
 function formatMetricValue(metric, value) {
   if (typeof value === "number") {
     if (metric?.includes("duration")) {
-      return `${value.toFixed(1)} ms`;
+      return formatDurationMs(value);
     }
     return value.toFixed(2);
   }
