@@ -483,6 +483,9 @@ static const char* G3D_TAA_WGSL =
 "}\n";
 
 #include "runtime_gpu3d_sdf.c"
+/* The background, drawn inside the same scene pass; shares its encoder,
+ * its pipeline restore convention and the frame's camera. */
+#include "runtime_gpu3d_sky.c"
 #include "runtime_gpu3d_ssao.c"
 
 static int g3d_invert_mat4(const float* m, float* out) {
@@ -1156,6 +1159,7 @@ void rae_ext_gpu3d_end(void) {
 
 void rae_ext_gpu3d_shutdown(void) {
     g3d_sdf_shutdown();
+    g3d_sky_shutdown();
     g3d_ssao_shutdown();
     for (int i = 0; i < g3d_mesh_n; i++) {
         if (g3d_mesh_vbuf[i]) { wgpuBufferRelease(g3d_mesh_vbuf[i]); g3d_mesh_vbuf[i] = NULL; }

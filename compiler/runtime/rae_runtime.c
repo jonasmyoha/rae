@@ -43,6 +43,9 @@
 #include "runtime_strings_algorithms.c"
 #include "runtime_filesystem.c"
 #include "runtime_buffers_math.c"
+/* The cooked sky table. Ahead of every renderer that reads it, and outside
+ * the WebGPU guards because the stub builds answer the same push. */
+#include "runtime_sky_state.c"
 #include "runtime_platform_apple.c"
 #include "runtime_raylib.c"
 #include "runtime_image_sdl3.c"
