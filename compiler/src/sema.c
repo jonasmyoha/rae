@@ -1252,7 +1252,20 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             if (stmt->as.assign_stmt.target->kind == AST_EXPR_IDENT) {
                 // Rebinding the local itself: legal only for `var`.
                 Symbol* sym = symbol_table_lookup(symbols, stmt->as.assign_stmt.target->as.ident);
-                if (sym && sym->is_immutable) {
+                // ASSIGNING THROUGH A `mod` ALIAS IS NOT REBINDING IT.
+                //
+                // Spec 2.2: "Copying through a mod alias using `=` is legal and
+                // modifies the underlying target", and its example binds with
+                // `let`. What `let` forbids is REBINDING the name, which
+                // bind-once already forbids for every alias regardless. So a
+                // `let`-bound `mod` alias may be written through; the write
+                // lands in the aliased storage, not in the binding.
+                bool is_mod_alias = sym && sym->type
+                    && ((sym->type->kind == TYPE_REF && sym->type->as.ref.is_mod)
+                        || (sym->type->kind == TYPE_OPT && sym->type->as.opt.base
+                            && sym->type->as.opt.base->kind == TYPE_REF
+                            && sym->type->as.opt.base->as.ref.is_mod));
+                if (sym && sym->is_immutable && !is_mod_alias) {
                     char buffer[200];
                     int nl = (int)stmt->as.assign_stmt.target->as.ident.len;
                     const char* nm = stmt->as.assign_stmt.target->as.ident.data;
