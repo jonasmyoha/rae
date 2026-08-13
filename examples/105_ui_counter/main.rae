@@ -100,32 +100,31 @@ func createCounterState() ret CounterState {
 #
 # A list that grows without bound is a leak with a friendly name, so this keeps
 # exactly `historyRows` entries — the number the scene can show.
-func rememberValue(s: mod CounterState, value: view Int) {
+func rememberValue(state: mod CounterState, value: view Int) {
   var next: List(Int) = createList(Int, cap: historyRows)
   next.add(value: value)
   var i: Int = 0
-  loop i < s.history.length and next.length < historyRows {
-    next.add(value: s.history.at(index: i))
+  loop i < state.history.length and next.length < historyRows {
+    next.add(value: state.history.at(index: i))
     i = i + 1
   }
-  s.history = own next
+  state.history = own next
 }
 
 # The ONE function that turns state into what you see. Called when something
 # changed, never per frame.
 #
-# Note what it is not: there is no diffing, no virtual tree, no subscription. It
-# writes the text of the nodes whose text depends on the state, and switches off
-# the history rows that have no data behind them.
-func syncUi(world: mod UiWorld, s: view CounterState) {
-  setNodeText(world: world, nodeId: "ValueText", value: "{s.value}")
-  setNodeText(world: world, nodeId: "StepLabel", value: "Step {s.step}")
+# It writes the text of the nodes whose text depends on the state, and switches
+# off the history rows that have no data behind them.
+func syncUi(world: mod UiWorld, state: view CounterState) {
+  setNodeText(world: world, nodeId: "ValueText", value: "{state.value}")
+  setNodeText(world: world, nodeId: "StepLabel", value: "Step {state.step}")
 
   var row: Int = 0
   loop row < historyRows {
     let nodeId: String = "Hist{row}"
-    if row < s.history.length {
-      let entry: Int = s.history.at(index: row)
+    if row < state.history.length {
+      let entry: Int = state.history.at(index: row)
       # Newest row gets an arrow, so the ordering is visible rather than implied.
       if row is 0 {
         setNodeText(world: world, nodeId: nodeId, value: "-> {entry}")
@@ -143,7 +142,7 @@ func syncUi(world: mod UiWorld, s: view CounterState) {
 
   # The step buttons show which one is live by their fill, from the theme's
   # palette slots rather than a hardcoded colour.
-  if s.step is 1 {
+  if state.step is 1 {
     setNodeFillSlot(world: world, nodeId: "BtnStep1", slot: "accent")
     setNodeFillSlot(world: world, nodeId: "BtnStep5", slot: "surfaceAlt")
   } else {
@@ -158,32 +157,32 @@ func syncUi(world: mod UiWorld, s: view CounterState) {
 # UI ACTIONS FIRE ON RELEASE, and carry the id the .raescene author wrote in
 # `OnClick`. The app never asks "was the pointer inside that rectangle" — the
 # hit test already did, against the real laid-out geometry.
-func applyActions(s: mod CounterState, input: view UiInput) ret Bool {
+func applyActions(state: mod CounterState, input: view UiInput) ret Bool {
   var changed: Bool = false
 
   if uiActionFired(input: input, actionId: "counter.inc") {
-    s.value = s.value + s.step
+    state.value = state.value + state.step
     changed = true
   }
   if uiActionFired(input: input, actionId: "counter.dec") {
-    s.value = s.value - s.step
+    state.value = state.value - state.step
     changed = true
   }
   if uiActionFired(input: input, actionId: "counter.clear") {
-    s.value = 0
+    state.value = 0
     changed = true
   }
   # The step buttons change how much the others move, and are deliberately not
   # part of the history: they alter the next change rather than being one.
   if uiActionFired(input: input, actionId: "step.one") {
-    if s.step is not 1 {
-      s.step = 1
+    if state.step is not 1 {
+      state.step = 1
       changed = true
     }
   }
   if uiActionFired(input: input, actionId: "step.five") {
-    if s.step is not 5 {
-      s.step = 5
+    if state.step is not 5 {
+      state.step = 5
       changed = true
     }
   }
@@ -222,7 +221,7 @@ func main() ret Int {
   # Seed the history with the starting value so the card is not empty on the
   # first frame. Starting at 0 rather than some other number makes "Clear"
   # visibly different from "start".
-  rememberValue(s: state, value: state.value)
+  rememberValue(state: state, value: state.value)
 
   # A HEADLESS DEMO PATH, so the data-driven rebuild is verifiable without a
   # human clicking: RAE_UI_COUNTER_DEMO=n applies n increments through the same
@@ -235,12 +234,12 @@ func main() ret Int {
     var press: Int = 0
     loop press < presses {
       state.value = state.value + state.step
-      rememberValue(s: state, value: state.value)
+      rememberValue(state: state, value: state.value)
       press = press + 1
     }
   }
 
-  syncUi(world: world, s: state)
+  syncUi(world: world, state: state)
   runUiSystems(world: world, res: gpuUi)
 
   var input: UiInput = createUiInput()
@@ -260,14 +259,14 @@ func main() ret Int {
     updateUiInput(input: input, world: world)
     let hadEvents: Bool = input.events.length > 0
 
-    if applyActions(s: state, input: input) {
+    if applyActions(state: state, input: input) {
       # A value change is what the history records. The step buttons report a
       # change too, so the check is on the value itself, not on "something
       # changed".
       if state.history.length is 0 or state.history.at(index: 0) is not state.value {
-        rememberValue(s: state, value: state.value)
+        rememberValue(state: state, value: state.value)
       }
-      syncUi(world: world, s: state)
+      syncUi(world: world, state: state)
       changed = true
     }
 
