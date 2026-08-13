@@ -46,9 +46,11 @@ func main() {
   let winW: Float = windowW
   let winH: Float = windowH
   uiInitWindow(width: winW.toInt(), height: winH.toInt(), title: "Rae Mobile UI — {backendEnv}")
-  # Remember the window across restarts. Opt-in; the channel dir is per app.
-  var windowGeom: WindowGeometry = createWindowGeometry(dir: hotReloadDir(),
-                                                        name: "window.geometry")
+  # Remember the window across restarts. Opt-in. The name carries the app id:
+  # hotReloadDir() is ".rae" for every app, so a shared name is a shared window
+  # and the 3D examples were restoring this phone-shaped one. See lib/ui.
+  var windowGeom: WindowGeometry = createWindowGeometry(
+    dir: hotReloadDir(), name: "window.106_mobile_ui.geometry")
   restoreWindowGeometry(g: windowGeom)
   # Backend-agnostic window/input hooks are no-ops on GPU2D when the SDL3
   # backend already owns the corresponding event state.
