@@ -265,8 +265,21 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
           if (picked) { ctx->expected_type = *picked; ctx->has_expected_type = true; }
       }
       int prec = binary_op_precedence(expr->as.binary.op); bool is_bool_op = expr->as.binary.op >= AST_BIN_LT && expr->as.binary.op <= AST_BIN_OR;
+      /* A SHIFT parenthesises its operands further than C strictly requires.
+       * `(a + b) shl 1` is correctly emitted as `a + b << 1` -- in C, `+`
+       * binds tighter than `<<`, so the grouping survives -- but clang's
+       * -Wshift-op-parentheses flags it, on the reasonable grounds that a
+       * human reading `a + b << 1` will guess wrong. Every compiled example
+       * that inflates or deflates printed two of these, and a warning nobody
+       * can act on is a warning that hides real ones.
+       *
+       * Raising the operands' parent precedence to PREC_MUL adds parens
+       * without changing meaning: parens are always semantically safe, and
+       * the grouping being emitted is the AST's own. */
+      bool is_shift_op = expr->as.binary.op == AST_BIN_SHL || expr->as.binary.op == AST_BIN_SHR;
+      int operand_prec = is_shift_op ? PREC_MUL : prec;
       if (is_bool_op) fprintf(out, "(bool)("); if (prec < parent_prec) fprintf(out, "(");
-      emit_expr(ctx, expr->as.binary.lhs, out, prec, false, false);
+      emit_expr(ctx, expr->as.binary.lhs, out, operand_prec, false, false);
       switch (expr->as.binary.op) {
         case AST_BIN_ADD: fprintf(out, " + "); break; case AST_BIN_SUB: fprintf(out, " - "); break;
         case AST_BIN_MUL: fprintf(out, " * "); break; case AST_BIN_DIV: fprintf(out, " / "); break;
@@ -284,7 +297,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
        * `a - (b + c)` re-emitted as `a - b + c` silently flips signs
        * (the gpu3d mat4LookAt dot-product bug), `a / (b * c)` becomes
        * `(a / b) * c`. Equal-precedence LHS stays unparenthesized. */
-      emit_expr(ctx, expr->as.binary.rhs, out, prec + 1, false, false);
+      emit_expr(ctx, expr->as.binary.rhs, out, is_shift_op ? PREC_MUL : prec + 1, false, false);
       if (prec < parent_prec) fprintf(out, ")"); if (is_bool_op) fprintf(out, ")");
       ctx->has_expected_type = had_exp_bin;
       ctx->expected_type = saved_exp_bin;
