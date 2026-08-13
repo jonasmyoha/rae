@@ -716,6 +716,32 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     return true;
 }
 
+// Does this expression already yield a reference (a call whose declared return
+// type is `view T` / `mod T`)? Such a value needs no materialising -- it is
+// already a pointer to storage someone else owns.
+static bool ref_bind_value_returns_ref(CFuncContext* ctx, const AstExpr* val) {
+    if (!val) return false;
+    if (val->kind != AST_EXPR_CALL && val->kind != AST_EXPR_METHOD_CALL) return false;
+    const AstFuncDecl* vfd = val->decl_link ? &val->decl_link->as.func_decl : NULL;
+    if (vfd && vfd->returns && vfd->returns->type
+        && (vfd->returns->type->is_view || vfd->returns->type->is_mod)) return true;
+    // Sema does not always populate decl_link on free-function call sites;
+    // c_call.c re-resolves by name, so mirror that lookup here.
+    if (val->kind == AST_EXPR_CALL && val->as.call.callee
+        && val->as.call.callee->kind == AST_EXPR_IDENT && ctx && ctx->compiler_ctx) {
+        Str callee = val->as.call.callee->as.ident;
+        for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+            const AstDecl* d = ctx->compiler_ctx->all_decls[i];
+            if (d->kind != AST_DECL_FUNC) continue;
+            if (!str_eq(d->as.func_decl.name, callee)) continue;
+            const AstFuncDecl* cfd = &d->as.func_decl;
+            if (cfd->returns && cfd->returns->type
+                && (cfd->returns->type->is_view || cfd->returns->type->is_mod)) return true;
+        }
+    }
+    return false;
+}
+
 bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     if (!stmt) return true;
     switch (stmt->kind) {
@@ -738,11 +764,47 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             // copy gave it private heap), overriding the default
             // bare-ident-IDENT-aliases-source classification.
             bool let_did_deep_copy = false;
+            bool is_ref_bind = stmt->as.let_stmt.is_bind && stmt->as.let_stmt.type &&
+                               (stmt->as.let_stmt.type->is_view || stmt->as.let_stmt.type->is_mod);
+
+            // MATERIALISE a `=>` onto a produced value (spec 2.3).
+            //
+            // `let t: view Track => make()` is semantically valid whether or
+            // not the callee returns a place: the binding views the value, and
+            // the implementation owes it storage for the binding's lifetime.
+            // Previously the backend emitted `&make()` and the C compiler
+            // refused to take the address of an rvalue.
+            //
+            // The temporary is a plain local emitted just before, so its
+            // lifetime is the enclosing scope -- exactly the binding's.
+            // `__auto_type` avoids having to reconstruct the expression's C
+            // type here; the file already relies on GCC/Clang extensions.
+            int materialised_id = -1;
+            if (is_ref_bind && stmt->as.let_stmt.value
+                && !is_primitive_type(get_base_type_name(stmt->as.let_stmt.type))
+                && !ref_bind_value_returns_ref(ctx, stmt->as.let_stmt.value)) {
+                AstExprKind vk = stmt->as.let_stmt.value->kind;
+                if (vk == AST_EXPR_CALL || vk == AST_EXPR_METHOD_CALL
+                    || vk == AST_EXPR_OBJECT || vk == AST_EXPR_INDEX) {
+                    materialised_id = ctx->temp_counter++;
+                    fprintf(out, "  __auto_type __rae_bind%d = ", materialised_id);
+                    emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false);
+                    fprintf(out, ";\n");
+                }
+            }
+
             fprintf(out, "  ");
             emit_type_ref_as_c_type(ctx, stmt->as.let_stmt.type, out, false);
             fprintf(out, " %.*s = ", (int)stmt->as.let_stmt.name.len, stmt->as.let_stmt.name.data);
-            bool is_ref_bind = stmt->as.let_stmt.is_bind && stmt->as.let_stmt.type &&
-                               (stmt->as.let_stmt.type->is_view || stmt->as.let_stmt.type->is_mod);
+            if (materialised_id >= 0) {
+                fprintf(out, "&__rae_bind%d;\n", materialised_id);
+                if (ctx->local_count < 256) {
+                    ctx->locals[ctx->local_count] = stmt->as.let_stmt.name;
+                    ctx->local_type_refs[ctx->local_count] = stmt->as.let_stmt.type;
+                    ctx->local_count++;
+                }
+                break;
+            }
             if (is_ref_bind) {
                 Str base = get_base_type_name(stmt->as.let_stmt.type);
                 if (is_primitive_type(base)) {
