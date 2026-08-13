@@ -85,7 +85,34 @@ w = { x: 1, y: 2 }          # Legal: copies value into aliased storage
 # w => other.position()     # ERROR: alias rebinding is illegal
 ```
 
-### 2.3 Type Visibility Rule
+### 2.3 Semantic stability of `=` and `=>`
+
+The meaning of `=` and `=>` is **fixed by the operator alone**. It does not vary
+with the type on either side, with the size of that type, or with what the
+compiler is able to optimise.
+
+*   `=` means **copy**. The programmer reads `=` and knows a separate value is
+    produced, whether the type is `Int` or a struct holding lists and strings.
+*   `=>` means **bind**. The programmer reads `=>` and knows no independent value
+    is produced; the name refers to storage that already exists.
+
+Rae has no type-dependent assignment rule. There is no category of type that is
+silently referenced by `=`, and none that is silently copied by `=>`.
+
+**Optimisation is permitted; reinterpretation is not.** A compiler may implement
+a binding however it likes, provided every observable Rae semantic is preserved:
+
+*   `view T` is a **window**, not a snapshot. If the underlying storage changes
+    while the view is alive, reads through the view observe the new value. A
+    compiler may implement a `view` as a physical copy ONLY where it can
+    establish that no such change is observable during the binding's lifetime.
+*   `mod T` requires **true aliasing**. Writes through the alias must be
+    observable in the original. This is the meaning of `mod`, not a strategy for
+    implementing it.
+*   `=` may have its physical copy elided whenever the result is
+    indistinguishable.
+
+### 2.4 Type Visibility Rule
 
 With `let`, the binding's type MUST appear on the left side only. The right side must be type-free for the top-level expression.
 
@@ -147,9 +174,71 @@ let result: Int = v.some(that: (o or Pos {}))
 *   `opt T` represents an optional owned value.
 *   `opt` members in types are allowed.
 *   `opt` parameters are allowed.
-*   **`opt view T` and `opt mod T` are NOT allowed.** Optionality and aliasing must be handled separately to avoid hidden lifetime complexity.
+*   **`opt view T` and `opt mod T` are NOT allowed.** Optionality and aliasing must be handled separately to avoid hidden lifetime complexity. Viewing the value inside an optional is expressed by narrowing it with `if let` (§4.2), which never forms an optional reference type.
 
-### 4.2 Aliasing Scope
+### 4.2 Binding the payload of an optional (`if let`)
+
+`if let` conditionally introduces a binding to the value inside an optional, for
+the duration of the branch.
+
+```rae
+if let track: view Track => library.current {
+    log("{track.title}")
+} else {
+    log("nothing playing")
+}
+```
+
+*   The binding target MUST be `view T` or `mod T`, and the operator MUST be
+    `=>`. This follows from §2.2: `=>` is the binding operator, and it is legal
+    only for those two target types.
+*   **`=` is NOT permitted in `if let`.** `=` means copy (§2.3), and `if let`
+    exists to give access to a value, not to duplicate one. A copy is written as
+    an ordinary statement inside the branch, where it is visible as a copy:
+
+```rae
+if let track: view Track => library.current {
+    let mine: Track = track          # explicit copy, if one is wanted
+}
+```
+
+*   The binding is in scope only within the `if` branch. It is not in scope in
+    the `else` branch, where by definition there is no value.
+*   Bind-once applies (§2.2): the name introduced by `if let` may not be rebound.
+*   `mod` narrowing writes through to the optional's payload:
+
+```rae
+if let track: mod Track => library.current {
+    track.plays = track.plays + 1    # the stored track is updated
+}
+```
+
+**THIS DOES NOT INTRODUCE `opt view T`.** The optional remains `opt T` — an
+optional owned value. `if let` NARROWS it: inside the branch, the name denotes a
+`view T` or `mod T` onto the payload. The type `opt view T` is never formed, and
+§4.1 stands unchanged.
+
+The right-hand side may be any expression producing an optional, including a
+function call:
+
+```rae
+if let seconds: view Int => durations.get(k: "intro") { ... }
+```
+
+A binding to a produced value obliges the implementation to give that value
+storage for the lifetime of the binding. That is an implementation requirement,
+not a restriction on the programmer (§2.3).
+
+`is none` and `is not none` remain available and are preferred where the value
+itself is not wanted:
+
+```rae
+if found is none {
+    ret noEntity()
+}
+```
+
+### 4.3 Aliasing Scope
 
 `mod T` and `view T` references are short-lived handles.
 *   They may appear in: function parameters, return types, and local bindings.
