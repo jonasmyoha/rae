@@ -117,7 +117,35 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             }
         }
 
-        if (is_prim_ref && !is_lvalue && !suppress_deref) {
+        // A `view`/`mod` LOCAL of numeric primitive type is a real reference,
+        // even though the same type as a PARAMETER is passed by value.
+        //
+        // The two are not inconsistent. Spec 2.3 permits implementing a view as
+        // a copy exactly where no change to the source is observable during the
+        // binding's lifetime — true for a parameter across a call, false for a
+        // local whose source sits in the same scope and can be assigned on the
+        // next line. So the local keeps a pointer (the declaration already
+        // emits `{ .ptr = &x }`) and reads through it must dereference.
+        //
+        // Without this, `let v: view Int => a` bound fine and then failed to
+        // compile the moment it was read: rae_View_Int64 where int64_t was
+        // wanted. Locals are those at or after func_first_let_idx; anything
+        // before that index is a parameter.
+        bool is_local_prim_view = false;
+        if (!is_prim_ref && tr && tr->is_view && ctx->func_first_let_idx != (size_t)-1) {
+            Str vb = get_base_type_name(tr);
+            bool num = str_eq_cstr(vb, "Int") || str_eq_cstr(vb, "Int64") ||
+                       str_eq_cstr(vb, "Float") || str_eq_cstr(vb, "Float32") ||
+                       str_eq_cstr(vb, "Float64") || str_eq_cstr(vb, "Bool") ||
+                       str_eq_cstr(vb, "Char") || str_eq_cstr(vb, "Char32");
+            if (num) {
+                for (size_t li = ctx->func_first_let_idx; li < ctx->local_count; li++) {
+                    if (str_eq(ctx->locals[li], expr->as.ident)) { is_local_prim_view = true; break; }
+                }
+            }
+        }
+
+        if ((is_prim_ref || is_local_prim_view) && !is_lvalue && !suppress_deref) {
             fprintf(out, "(*%.*s.ptr)", (int)expr->as.ident.len, expr->as.ident.data);
         } else if (is_struct_view && !is_lvalue && !suppress_deref) {
             fprintf(out, "(*%.*s)", (int)expr->as.ident.len, expr->as.ident.data);
