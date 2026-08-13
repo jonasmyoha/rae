@@ -283,6 +283,21 @@ void rae_ext_gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
     if (!rae_wgpu_init()) { fprintf(stderr, "[gpu2d] wgpu init failed\n"); return; }
 
 #ifdef __EMSCRIPTEN__
+    /* "#canvas" IS REQUIRED, not a default worth parameterizing.
+     *
+     * Emscripten special-cases this one selector: it is the canvas the runtime
+     * treats as "the" canvas (Module.canvas). A surface created from any other
+     * selector is accepted and then presents nothing -- measured, with the
+     * selector plumbed correctly through to here and the element present and
+     * correctly sized: id="canvas" renders, id="raeCanvas" and
+     * id="example-viewer-canvas" produce a blank canvas and no error.
+     *
+     * So a host page embedding the modularized bundle must NAME ITS CANVAS
+     * "canvas". Devtools' example viewer did not, which is why an embedded 3D
+     * example started, logged normally and stayed blank. Making this
+     * configurable was tried and removed: a knob whose every value but one
+     * silently fails is worse than the constant it replaced.
+     */
     WGPUEmscriptenSurfaceSourceCanvasHTMLSelector cs; memset(&cs, 0, sizeof(cs));
     cs.chain.sType = WGPUSType_EmscriptenSurfaceSourceCanvasHTMLSelector;
     cs.selector = rae_wgpu_sv("#canvas");
