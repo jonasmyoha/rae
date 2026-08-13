@@ -193,6 +193,16 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
           const AstExpr* operand = (expr->as.binary.lhs->kind == AST_EXPR_NONE)
               ? expr->as.binary.rhs : expr->as.binary.lhs;
           ctx->suppress_opt_unbox = true;
+          // An OPTIONAL REFERENCE is a nullable pointer, not a box (spec 4.1),
+          // so its emptiness test is a null check rather than rae_any_is_none.
+          const AstTypeRef* otr = infer_expr_type_ref(ctx, operand);
+          if (otr && otr->is_opt && (otr->is_view || otr->is_mod)) {
+              fprintf(out, "((bool)(");
+              emit_expr(ctx, operand, out, PREC_LOWEST, true, true);
+              fprintf(out, expr->as.binary.op == AST_BIN_NEQ ? " != NULL))" : " == NULL))");
+              ctx->suppress_opt_unbox = saved_unbox;
+              break;
+          }
           // Wrap the result in (bool) so the `_Generic` rae_ext_rae_str macro
           // matches the rae_Bool branch in interpolation contexts.
           if (expr->as.binary.op == AST_BIN_NEQ) fprintf(out, "((bool)(!rae_any_is_none(");
@@ -1035,7 +1045,16 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         fprintf(out, ")");
         break;
     }
-    case AST_EXPR_NONE: fprintf(out, "rae_any_none()"); break;
+    case AST_EXPR_NONE:
+        // `none` for an optional REFERENCE is a null pointer; for an optional
+        // value it is the empty box. The expected type decides which.
+        if (ctx->has_expected_type && ctx->expected_type.is_opt
+            && (ctx->expected_type.is_view || ctx->expected_type.is_mod)) {
+            fprintf(out, "NULL");
+        } else {
+            fprintf(out, "rae_any_none()");
+        }
+        break;
     default: break;
   }
   return true;
