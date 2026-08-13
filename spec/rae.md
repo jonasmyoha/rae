@@ -71,9 +71,14 @@ Rae distinguishes between **value replacement** and **storage aliasing**.
 
 *   **`=` (Copy/Replace)**: Replaces the value in the current storage. SEMANTIC: Always a deep copy.
 *   **`=>` (Alias Binding)**: Creates a stable alias to an existing storage location. 
-    *   `=>` is **only** legal when the target type is `mod T` or `view T`. 
+    *   `=>` is **required, and only legal, when the target type contains `view` or `mod` at any level** — `view T`, `mod T`, and also `opt view T` and `opt mod T`.
     *   Alias bindings are **bind-once**. Rebinding an alias (using `=>` again on the same name) is illegal.
     *   Copying *through* a `mod` alias using `=` is legal and modifies the underlying target.
+
+The "at any level" rule keeps `=` honest. `=` produces an INDEPENDENT value; a
+type whose payload is a reference cannot be copied independently, because
+duplicating it would yield a second name onto the same storage. Requiring `=>`
+for those types means `=` never has to be explained away for a special case.
 
 Examples:
 ```rae
@@ -174,7 +179,29 @@ let result: Int = v.some(that: (o or Pos {}))
 *   `opt T` represents an optional owned value.
 *   `opt` members in types are allowed.
 *   `opt` parameters are allowed.
-*   **`opt view T` and `opt mod T` are NOT allowed.** Optionality and aliasing must be handled separately to avoid hidden lifetime complexity. Viewing the value inside an optional is expressed by narrowing it with `if let` (§4.2), which never forms an optional reference type.
+*   **`opt view T` and `opt mod T` are allowed**, in exactly the positions any
+    reference is allowed: function parameters, return types, and local bindings
+    (§4.3). They are bound with `=>`, per §2.2.
+
+`opt` composes with the reference modes rather than competing with them.
+Optionality adds no lifetime obligation to a reference: the `none` case has no
+referent at all, and the `some` case carries exactly the obligation `view T` or
+`mod T` already carries. The rule that keeps stored references from outliving
+their target is §4.3, which excludes ALL references from type members — optional
+or not — so `opt` is not what creates that risk.
+
+```rae
+func selected(list: view Playlist) ret opt view Track
+func draw(scene: view Scene, highlight: opt view Track)
+
+let sel: opt view Track => selected(list: playlist)
+```
+
+An earlier version of this specification prohibited these types, citing hidden
+lifetime complexity. That rationale did not hold: the complexity it named is
+handled by §4.3, and forbidding them made optionality behave differently
+depending on whether its payload was a value or a reference — the type-dependent
+rule §2.3 exists to rule out.
 
 ### 4.2 Binding the payload of an optional (`if let`)
 
@@ -213,10 +240,16 @@ if let track: mod Track => library.current {
 }
 ```
 
-**THIS DOES NOT INTRODUCE `opt view T`.** The optional remains `opt T` — an
-optional owned value. `if let` NARROWS it: inside the branch, the name denotes a
-`view T` or `mod T` onto the payload. The type `opt view T` is never formed, and
-§4.1 stands unchanged.
+`if let` NARROWS an optional: inside the branch, the name denotes a `view T` or
+`mod T` onto the payload, and the branch is entered only when there is one. The
+optional it narrows may be an `opt T`, an `opt view T` or an `opt mod T` — in the
+last two, narrowing yields a reference to the same storage the optional
+referenced, not a second level of indirection.
+
+Narrowing is the preferred way to reach the value inside an optional even where
+a local of reference-optional type would be legal, because absence is handled
+structurally by the branch rather than by a check the programmer must remember
+to write.
 
 The right-hand side may be any expression producing an optional, including a
 function call:
