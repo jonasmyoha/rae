@@ -1,0 +1,289 @@
+# A UI hello world: the counter, done the way Rae UI is meant to be written.
+#
+# A counter, grown just enough to be honest about a real app: a value, three
+# buttons that change it, a step size, and a list that is REBUILT FROM DATA
+# every time the value moves. Portrait, phone-shaped, because that is the shape
+# this UI stack is tuned for.
+#
+# THE SHAPE OF A RAE UI APP, and the reason it looks like this:
+#
+#   1. The LAYOUT IS DATA. Every node, its nesting, its padding, its colour and
+#      its corner radius live in assets/ui.raescene. There is no markup in this
+#      file and no builder chain — the tree is a document, so a designer can
+#      move a button without touching Rae, and a diff of a layout change reads
+#      as a layout change.
+#
+#   2. WIDGETS ARE ENTITIES, in an ECS world. `loadScene` turns the document
+#      into entities with components (Rect, Shape, Text, OnClick, Layout), and
+#      the systems below are plain functions over that world.
+#
+#   3. THE APP OWNS ITS STATE, in an ordinary struct. No signals, no closures
+#      capturing setters, nothing reactive. The loop reads input, decides what
+#      changed, and pushes the new text into the world. Which is the whole
+#      trick: because there is no hidden dependency graph, "what happens when I
+#      click +1" is answerable by reading forty lines in one direction.
+#
+#   4. REBUILD ONLY WHAT MOVED. `stateDirty` gates the sync, and the render loop
+#      only draws when something actually changed (see the idle note at the
+#      bottom). A UI that repaints an identical frame at 60 Hz is a UI that
+#      keeps a laptop fan on for no reason.
+#
+# WHAT IS DELIBERATELY ABSENT: a reactive graph. A framework that re-renders on
+# a signal write buys real brevity, and pays for it in indirection — the update
+# happens somewhere you cannot step through. Here the path from click to pixel
+# is a straight line, and the layout is a document rather than a macro
+# expansion. That is the trade this stack makes, stated so it can be argued with.
+import core
+import gpu2d
+import string
+import sys
+open sys
+import ui/ecs
+import ui/input_gpu2d
+import ui/layout
+import ui/render_gpu2d
+import ui/scene
+import ui/scene_file
+import ui/scene_loader
+# The node helpers (setNodeText / setNodeActive / setNodeFillSlot) and the
+# loadUiAssets + runUiSystems bootstrap live here. The `app3d/` in the path is
+# historical -- the module imports core, gpu2d, sdf_text and lib/ui and nothing
+# 3D, and its own header calls it "the lib/ui bootstrap every example was
+# copying". A 2D UI app is exactly its audience.
+import app3d/ui_shell
+open app3d/ui_shell
+open ui/ecs
+open ui/input_gpu2d
+open ui/layout
+open ui/render_gpu2d
+open ui/scene_file
+open ui/scene_loader
+open ui/theme_resolved
+open ui/transform
+
+# Phone-shaped, and the same numbers the scene was authored against so nothing
+# has to be scaled at load.
+const designW: Int = 440
+const designH: Int = 880
+
+# How many history rows the scene contains. The pool is FIXED and authored, and
+# the app switches rows on and off — rather than creating nodes at runtime —
+# because a fixed pool keeps the layout inspectable in the .raescene and costs
+# nothing per frame. Adding a row is a scene edit plus this constant.
+const historyRows: Int = 6
+
+# Everything the UI shows, in one place.
+type CounterState {
+  value: Int
+  step: Int
+  # Newest first. The history is the DERIVED data this example rebuilds the UI
+  # from: the rows below are a rendering of this list and nothing else.
+  history: List(Int)
+}
+
+func createCounterState() ret CounterState {
+  ret CounterState {
+    value: 0
+    step: 1
+    history: own createList(Int, cap: historyRows)
+  }
+}
+
+# Record a value as the newest entry, dropping the oldest when full.
+#
+# A list that grows without bound is a leak with a friendly name, so this keeps
+# exactly `historyRows` entries — the number the scene can show.
+func rememberValue(s: mod CounterState, value: view Int) {
+  var next: List(Int) = createList(Int, cap: historyRows)
+  next.add(value: value)
+  var i: Int = 0
+  loop i < s.history.length and next.length < historyRows {
+    next.add(value: s.history.at(index: i))
+    i = i + 1
+  }
+  s.history = own next
+}
+
+# The ONE function that turns state into what you see. Called when something
+# changed, never per frame.
+#
+# Note what it is not: there is no diffing, no virtual tree, no subscription. It
+# writes the text of the nodes whose text depends on the state, and switches off
+# the history rows that have no data behind them.
+func syncUi(world: mod UiWorld, s: view CounterState) {
+  setNodeText(world: world, nodeId: "ValueText", value: "{s.value}")
+  setNodeText(world: world, nodeId: "StepLabel", value: "Step {s.step}")
+
+  var row: Int = 0
+  loop row < historyRows {
+    let nodeId: String = "Hist{row}"
+    if row < s.history.length {
+      let entry: Int = s.history.at(index: row)
+      # Newest row gets an arrow, so the ordering is visible rather than implied.
+      if row is 0 {
+        setNodeText(world: world, nodeId: nodeId, value: "-> {entry}")
+      } else {
+        setNodeText(world: world, nodeId: nodeId, value: "   {entry}")
+      }
+      setNodeActive(world: world, nodeId: nodeId, value: true)
+    } else {
+      # An empty row is switched OFF, not filled with a blank string: a hidden
+      # node takes no layout space, so the card shrinks to its content.
+      setNodeActive(world: world, nodeId: nodeId, value: false)
+    }
+    row = row + 1
+  }
+
+  # The step buttons show which one is live by their fill, from the theme's
+  # palette slots rather than a hardcoded colour.
+  if s.step is 1 {
+    setNodeFillSlot(world: world, nodeId: "BtnStep1", slot: "accent")
+    setNodeFillSlot(world: world, nodeId: "BtnStep5", slot: "surfaceAlt")
+  } else {
+    setNodeFillSlot(world: world, nodeId: "BtnStep1", slot: "surfaceAlt")
+    setNodeFillSlot(world: world, nodeId: "BtnStep5", slot: "accent")
+  }
+}
+
+# Read this frame's UI actions and fold them into the state. Returns whether
+# anything changed, which is what gates both the re-sync and the redraw.
+#
+# UI ACTIONS FIRE ON RELEASE, and carry the id the .raescene author wrote in
+# `OnClick`. The app never asks "was the pointer inside that rectangle" — the
+# hit test already did, against the real laid-out geometry.
+func applyActions(s: mod CounterState, input: view UiInput) ret Bool {
+  var changed: Bool = false
+
+  if uiActionFired(input: input, actionId: "counter.inc") {
+    s.value = s.value + s.step
+    changed = true
+  }
+  if uiActionFired(input: input, actionId: "counter.dec") {
+    s.value = s.value - s.step
+    changed = true
+  }
+  if uiActionFired(input: input, actionId: "counter.clear") {
+    s.value = 0
+    changed = true
+  }
+  # The step buttons change how much the others move, and are deliberately not
+  # part of the history: they alter the next change rather than being one.
+  if uiActionFired(input: input, actionId: "step.one") {
+    if s.step is not 1 {
+      s.step = 1
+      changed = true
+    }
+  }
+  if uiActionFired(input: input, actionId: "step.five") {
+    if s.step is not 5 {
+      s.step = 5
+      changed = true
+    }
+  }
+  ret changed
+}
+
+func main() ret Int {
+  gpu2d.initWindow(width: designW, height: designH, title: "Rae UI — Counter")
+
+  let base: String = "examples/105_ui_counter/assets/"
+  # Fonts and theme in one call. The theme's palette is bridged into the active
+  # theme here, which is what makes the slot names in the .raescene ("surface",
+  # "accent") resolve to real colours at paint time.
+  let gpuUi: Gpu2dUi = loadUiAssets(dir: base, textFontName: "Roboto-Regular",
+                                    iconFontName: "MaterialIconsRound-Regular",
+                                    themeFile: "theme.raescene")
+
+  var world: UiWorld = createUiWorld()
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+
+  let scene: Scene = loadSceneFile(path: "{base}ui.raescene")
+  if scene.ok is false {
+    log("[ui] scene failed to load: {scene.errorMsg}")
+    gpu2d.closeWindow()
+    ret 1
+  }
+  let root: EntityId = loadScene(world: world, scene: scene)
+  if isNone(this: root) {
+    log("[ui] scene mounted no root")
+    gpu2d.closeWindow()
+    ret 1
+  }
+
+  var state: CounterState = createCounterState()
+  # Seed the history with the starting value so the card is not empty on the
+  # first frame. Starting at 0 rather than some other number makes "Clear"
+  # visibly different from "start".
+  rememberValue(s: state, value: state.value)
+
+  # A HEADLESS DEMO PATH, so the data-driven rebuild is verifiable without a
+  # human clicking: RAE_UI_COUNTER_DEMO=n applies n increments through the same
+  # state functions the buttons use, filling the history card. A screenshot then
+  # shows the feature rather than just the empty first frame.
+  let demo: String = getEnv(name: "RAE_UI_COUNTER_DEMO")
+  if demo.length() > 0 {
+    var presses: Int = demo.toInt()
+    if presses > 24 { presses = 24 }
+    var press: Int = 0
+    loop press < presses {
+      state.value = state.value + state.step
+      rememberValue(s: state, value: state.value)
+      press = press + 1
+    }
+  }
+
+  syncUi(world: world, s: state)
+  runUiSystems(world: world, res: gpuUi)
+
+  var input: UiInput = createUiInput()
+  var needsRender: Bool = true
+
+  loop not gpu2d.pollClose() {
+    # One call handles the whole resize: it consumes the event, converts pixels
+    # to POINTS (a UI laid out in pixels renders half-size on a retina display),
+    # re-points the design resolution and re-runs the systems.
+    if resizeUiToWindow(world: world, res: gpuUi) {
+      needsRender = true
+    }
+
+    updateUiInput(input: input, world: world)
+    let hadEvents: Bool = input.events.length > 0
+
+    if applyActions(s: state, input: input) {
+      # A value change is what the history records. The step buttons return true
+      # as well, so the check is on the value itself, not on "something changed".
+      if state.history.length is 0 or state.history.at(index: 0) is not state.value {
+        rememberValue(s: state, value: state.value)
+      }
+      syncUi(world: world, s: state)
+      needsRender = true
+    }
+
+    # The systems run when the world changed: layout, then transforms, then the
+    # visual bounds the renderer draws from. Order matters and is not a detail —
+    # bounds computed before layout are last frame's bounds.
+    if hadEvents or needsRender {
+      runUiSystems(world: world, res: gpuUi)
+    }
+
+    if needsRender {
+      gpu2d.beginFrame(r: 0.03, g: 0.05, b: 0.08, a: 1.0)
+      renderSystemGpu2d(world: world, res: gpuUi)
+      gpu2d.endFrame()
+      needsRender = false
+    } else {
+      # IDLE AT ~0% CPU. Nothing here animates, so there is nothing to wake up
+      # for except input: the loop blocks in the event wait instead of redrawing
+      # an identical frame sixty times a second. An app with animation needs the
+      # hybrid busy/wait loop instead — see docs/ui-render-loop-performance.md.
+      gpu2d.waitEvents(timeoutSec: 0.5)
+      if input.events.length > 0 {
+        needsRender = true
+      }
+    }
+  }
+
+  gpu2d.closeWindow()
+  ret 0
+}
