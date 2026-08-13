@@ -645,6 +645,16 @@ bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
 }
 
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
+    // `if let` (spec 4.2): the binding is emitted before the condition, inside
+    // a C block so the name cannot outlive the construct. The user-visible
+    // scope rule -- in the if-branch only -- is enforced by restoring
+    // local_count below, exactly as the branches already do.
+    size_t saved_locals_bind = ctx->local_count;
+    bool has_binding = stmt->as.if_stmt.binding != NULL;
+    if (has_binding) {
+        fprintf(out, "  {\n");
+        emit_stmt(ctx, stmt->as.if_stmt.binding, out);
+    }
     fprintf(out, "  if (");
     emit_expr(ctx, stmt->as.if_stmt.condition, out, PREC_LOWEST, false, false);
     fprintf(out, ") {\n");
@@ -669,6 +679,10 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         fprintf(out, "  }\n");
     } else {
         fprintf(out, "\n");
+    }
+    if (has_binding) {
+        fprintf(out, "  }\n");
+        ctx->local_count = saved_locals_bind;
     }
     return true;
 }
