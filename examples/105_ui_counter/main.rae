@@ -17,22 +17,14 @@
 #      into entities with components (Rect, Shape, Text, OnClick, Layout), and
 #      the systems below are plain functions over that world.
 #
-#   3. THE APP OWNS ITS STATE, in an ordinary struct. No signals, no closures
-#      capturing setters, nothing reactive. The loop reads input, decides what
-#      changed, and pushes the new text into the world. Which is the whole
-#      trick: because there is no hidden dependency graph, "what happens when I
-#      click +1" is answerable by reading forty lines in one direction.
+#   3. THE APP OWNS ITS STATE, in an ordinary struct. The loop reads input,
+#      decides what changed, and pushes the new text into the world, so "what
+#      happens when I click +1" is answered by reading this file top to bottom.
 #
 #   4. REBUILD ONLY WHAT MOVED. `stateDirty` gates the sync, and the render loop
 #      only draws when something actually changed (see the idle note at the
 #      bottom). A UI that repaints an identical frame at 60 Hz is a UI that
 #      keeps a laptop fan on for no reason.
-#
-# WHAT IS DELIBERATELY ABSENT: a reactive graph. A framework that re-renders on
-# a signal write buys real brevity, and pays for it in indirection — the update
-# happens somewhere you cannot step through. Here the path from click to pixel
-# is a straight line, and the layout is a document rather than a macro
-# expansion. That is the trade this stack makes, stated so it can be argued with.
 import core
 import gpu2d
 import string
