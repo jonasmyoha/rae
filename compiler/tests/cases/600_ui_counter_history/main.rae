@@ -1,0 +1,66 @@
+# The history buffer behind example 105's data-driven UI rebuild.
+#
+# The UI itself needs a window, so what is pinned here is the part that does
+# not: a bounded newest-first buffer. Two properties matter, and both are the
+# kind that break quietly rather than loudly.
+#
+#   1. NEWEST FIRST, and in order. The card reads top-down, so a reversal shows
+#      as a plausible-looking list that is simply wrong.
+#   2. BOUNDED. It keeps exactly as many entries as the scene has rows. An
+#      unbounded history is a leak with a friendly name, and it would not be
+#      visible on screen -- the extra entries have no row to render into.
+import core
+
+const historyRows: Int = 6
+
+type CounterState {
+  value: Int
+  step: Int
+  history: List(Int)
+}
+
+func createCounterState() ret CounterState {
+  ret CounterState { value: 0, step: 1, history: own createList(Int, cap: historyRows) }
+}
+
+func rememberValue(s: mod CounterState, value: view Int) {
+  var next: List(Int) = createList(Int, cap: historyRows)
+  next.add(value: value)
+  var i: Int = 0
+  loop i < s.history.length and next.length < historyRows {
+    next.add(value: s.history.at(index: i))
+    i = i + 1
+  }
+  s.history = own next
+}
+
+func render(s: view CounterState) ret String {
+  var out: String = ""
+  var i: Int = 0
+  loop i < s.history.length {
+    out = "{out} {s.history.at(index: i)}"
+    i = i + 1
+  }
+  ret out
+}
+
+func main() {
+  var s: CounterState = createCounterState()
+  log("empty: length {s.history.length}")
+
+  rememberValue(s: s, value: 1)
+  rememberValue(s: s, value: 2)
+  rememberValue(s: s, value: 3)
+  log("three:{render(s: s)}")
+  log("newest is first: {s.history.at(index: 0) is 3}")
+
+  # Push past the row count: the oldest must fall off, not accumulate.
+  var n: Int = 4
+  loop n <= 9 {
+    rememberValue(s: s, value: n)
+    n = n + 1
+  }
+  log("after nine:{render(s: s)}")
+  log("bounded at {historyRows}: {s.history.length is historyRows}")
+  log("oldest dropped: {s.history.at(index: historyRows - 1) is 4}")
+}
