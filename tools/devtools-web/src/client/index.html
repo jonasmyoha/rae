@@ -569,7 +569,10 @@
 
                 <section class="example-viewer" id="example-viewer" hidden>
                   <div class="example-viewer__stage">
-                    <canvas id="example-viewer-canvas" width="480" height="270"></canvas>
+                    <!-- id MUST be "canvas": Emscripten special-cases that one selector, and an
+                         embedded WASM example presents to nothing under any other id.
+                         Styling hangs off the class so the id stays free to be this. -->
+                    <canvas id="canvas" class="example-viewer__canvas" width="480" height="270"></canvas>
                   </div>
                   <div class="example-viewer__status" id="example-viewer-status">Press Run to render in the browser.</div>
                 </section>
