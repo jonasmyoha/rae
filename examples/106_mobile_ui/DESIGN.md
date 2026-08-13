@@ -550,7 +550,8 @@ one-line change to `loadScene(world, sceneId: "music-player-now-playing")`.
    but it's free if we keep the scene loader idempotent. (See
    `lib/file_watch.rae` for the primitive and `examples/99_data_hot_reload`
    for a standalone demo. Distinct from *code* hot reload — that's the
-   VM patching story in `examples/23_code_hot_reload`.)
+   VM patching story, in `examples/23_code_hot_reload` until that example was
+   deleted with the Live deprecation — see git history.)
 
 3. **Coordinate space**: raylib uses pixel coordinates with origin
    top-left. Authored scenes assume the same. No translation needed
