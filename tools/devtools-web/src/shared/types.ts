@@ -77,6 +77,8 @@ export type ExampleDescriptor = {
   display?: { width: number; height: number };
   wasmRealThreads?: boolean;
   wasmWebApp?: boolean;
+  /** Shown in the Featured tab in addition to its own category. */
+  featured?: boolean;
   webgpu?: boolean;
 };
 

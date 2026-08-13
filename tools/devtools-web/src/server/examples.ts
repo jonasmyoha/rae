@@ -89,6 +89,10 @@ type ExampleMetadata = {
   display?: { width: number; height: number };
   wasmRealThreads?: boolean;
   wasmWebApp?: boolean;
+  /** .raepack `featured: "true"`. Puts the example in the Featured tab AS WELL
+   * AS its own category -- it is a flag, not a category, precisely so an
+   * example does not have to leave 3D Renderer to be featured. */
+  featured?: boolean;
   webgpu?: boolean;
 };
 
@@ -356,6 +360,7 @@ function makeMultiFileExample(
     display: metadata?.display,
     wasmRealThreads: metadata?.wasmRealThreads,
     wasmWebApp: metadata?.wasmWebApp,
+    featured: metadata?.featured,
     webgpu: metadata?.webgpu
   };
   return descriptor;
@@ -547,6 +552,7 @@ function parseRaePackMetadata(contents: string): ExampleMetadata {
   const defaultTarget = readTopLevelBareField(contents, "defaultTarget");
   const wasmRealThreads = readTopLevelBoolishField(contents, "wasmRealThreads");
   const wasmWebApp = readTopLevelBoolishField(contents, "wasmWebApp");
+  const featured = readTopLevelBoolishField(contents, "featured");
   const webgpu = readTopLevelBoolishField(contents, "webgpu");
   const displayBlock = readTopLevelBlock(contents, "display");
   const actionsBlock = readTopLevelBlock(contents, "actions");
@@ -557,6 +563,7 @@ function parseRaePackMetadata(contents: string): ExampleMetadata {
   if (defaultTarget) metadata.defaultTargetId = defaultTarget;
   if (wasmRealThreads !== undefined) metadata.wasmRealThreads = wasmRealThreads;
   if (wasmWebApp !== undefined) metadata.wasmWebApp = wasmWebApp;
+  if (featured !== undefined) metadata.featured = featured;
   if (webgpu !== undefined) metadata.webgpu = webgpu;
   if (displayBlock) {
     const width = readNumericField(displayBlock, "width");

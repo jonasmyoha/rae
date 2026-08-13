@@ -8,6 +8,13 @@
   --accent: #76e1e1; /* Turquoise */
   --accent-soft: rgba(118, 225, 225, 0.1);
   --success: #34d399;
+  /* Featured: the emerald green already in this palette as --success, which
+     leans teal like --accent, so the Featured tab reads as part of the same
+     family rather than a fourth hue. Named separately because "featured" and
+     "a test passed" are unrelated meanings that should be free to diverge. */
+  --featured: #34d399;
+  --featured-bright: #6ee7b7;
+  --featured-soft: rgba(52, 211, 153, 0.12);
   --danger: #f87171;
   --warning: #fbbf24;
   --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif;
@@ -193,6 +200,38 @@ body {
   color: var(--text);
   border-color: var(--accent);
   background: var(--accent-soft);
+}
+
+/* Featured reads differently from the category tabs even when INACTIVE --
+   that is the point of it, a shortcut you can find without hunting. The green
+   is the palette's existing emerald, so it sits beside the turquoise accent
+   instead of fighting it. */
+.app-nav__item--featured {
+  color: var(--featured);
+  border-color: rgba(52, 211, 153, 0.45);
+  background: var(--featured-soft);
+  font-weight: 600;
+}
+
+/* `:not(:disabled)` is here for SPECIFICITY, not filtering. The generic
+   `button:hover:not(:disabled)` rule above is (0,2,1) and a plain
+   `.app-nav__item--featured:hover` is only (0,2,0), so without it the tab turns
+   turquoise-and-white the moment you point at the one thing that is supposed to
+   look green. Same reason on the active rule below, which otherwise loses its
+   gradient while hovered. */
+.app-nav__item--featured:hover:not(:disabled) {
+  border-color: var(--featured);
+  color: var(--featured-bright);
+  background: rgba(52, 211, 153, 0.2);
+}
+
+.app-nav__item--featured.is-active:not(:disabled) {
+  color: #08130f;
+  border-color: var(--featured-bright);
+  /* Filled when active: the one tab that inverts, so "I am in Featured" is
+     obvious at a glance from across the room. */
+  background: linear-gradient(135deg, var(--featured-bright) 0%, var(--featured) 100%);
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.15);
 }
 
 @media (max-width: 720px) {
@@ -437,6 +476,18 @@ button.btn-build-test:hover:not(:disabled) {
 .badge.pass { background: rgba(52, 211, 153, 0.1); color: var(--success); border-color: var(--success); }
 .badge.fail { background: rgba(248, 113, 113, 0.1); color: var(--danger); border-color: var(--danger); }
 .badge.pending { background: rgba(255, 255, 255, 0.05); color: var(--text-muted); }
+/* Carried by a featured example inside its OWN category list, to point it out
+   among its neighbours. Smaller and lighter than a status badge: it is a hint,
+   not a result, and it sits inside a card heading. */
+.badge--featured {
+  background: var(--featured-soft);
+  color: var(--featured);
+  border-color: rgba(52, 211, 153, 0.4);
+  font-size: 0.6rem;
+  padding: 0.1rem 0.45rem;
+  vertical-align: middle;
+  margin-left: 0.35rem;
+}
 
 /* Examples view */
 .examples-bg-canvas {
