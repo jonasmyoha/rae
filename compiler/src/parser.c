@@ -1703,6 +1703,16 @@ static AstExpr* parse_binary(Parser* parser, int min_prec) {
       parser_advance(parser);
       info.op = AST_BIN_NEQ;
     }
+    // `some` is not a Rae keyword: `is not none` is the one spelling for "has a
+    // value" (spec 4.2). Caught here because otherwise the identifier survives
+    // to the C backend and surfaces as "use of undeclared identifier 'some'",
+    // which tells the reader nothing about Rae.
+    if ((info.op == AST_BIN_IS || info.op == AST_BIN_NEQ)
+        && parser_check(parser, TOK_IDENT)
+        && str_eq_cstr(parser_peek(parser)->lexeme, "some")) {
+      parser_error(parser, parser_peek(parser),
+        "'some' is not a Rae keyword; write 'is not none' to test for a value, or 'is none' for its absence");
+    }
     AstExpr* right = parse_binary(parser, info.precedence + 1);
     // Mixing different bitwise operators without parens is rejected: they share
     // one precedence level, and silent left-association (e.g. `a bitand b bitor c`
