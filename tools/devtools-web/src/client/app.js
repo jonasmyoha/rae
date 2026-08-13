@@ -2169,13 +2169,18 @@ function getTargetById(targetId) {
   return availableTargets.find((target) => target.id === targetId) ?? null;
 }
 
+// Targets offered for an example that does not declare its own in a .raepack.
+//
+// COMPILED ONLY. This used to be live + every compiled variant, which put four
+// buttons under most examples: Live is deprecated (the bytecode VM is frozen),
+// and compiled-debug / compiled-profiler are build profiles rather than ways to
+// run an example -- a row of them reads as four things worth trying when there
+// is one. An example that genuinely runs somewhere else says so in its pack,
+// which is how the WASM examples get their button.
 function getDefaultCompilerTargetIds() {
-  // live + every compiled variant (compiled, compiled-debug,
-  // compiled-profiler, …) so newly added profiles surface as buttons
-  // automatically. Excludes hybrid, which stays opt-in per example.
   const curated = availableTargets
     .map((target) => target.id)
-    .filter((id) => id === "live" || id === "compiled" || id.startsWith("compiled-"));
+    .filter((id) => id === "compiled");
   if (curated.length) return curated;
   return availableTargets.map((target) => target.id);
 }
