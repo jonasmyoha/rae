@@ -45,6 +45,8 @@ import ui/render_gpu2d
 import ui/scene
 import ui/scene_file
 import ui/scene_loader
+import ui/event_loop
+open ui/event_loop
 # The node helpers (setNodeText / setNodeActive / setNodeFillSlot) and the
 # loadUiAssets + runUiSystems bootstrap live here. The `app3d/` in the path is
 # historical -- the module imports core, gpu2d, sdf_text and lib/ui and nothing
@@ -71,6 +73,19 @@ const designH: Int = 880
 # because a fixed pool keeps the layout inspectable in the .raescene and costs
 # nothing per frame. Adding a row is a scene edit plus this constant.
 const historyRows: Int = 6
+
+# HOW OFTEN AN IDLE WINDOW REPAINTS, and why it is not "never".
+#
+# A UI with nothing moving has nothing to redraw, and the pure form of that is
+# to present one frame and then sleep until an event. It is also how this
+# example rendered BLACK in a native window while looking fine in the browser: a
+# canvas keeps its last frame, a compositor does not promise to. So the loop
+# treats every wake as a repaint and keeps a slow heartbeat behind it.
+#
+# Two frames a second of a static UI is far below a busy loop -- example 106,
+# which does work natively, never sleeps longer than its 0.05 s watcher poll --
+# and it is what makes the window survive being covered, moved or reshown.
+const idleHeartbeatSec: Float = 0.5
 
 # Everything the UI shows, in one place.
 type CounterState {
@@ -237,50 +252,71 @@ func main() ret Int {
   runUiSystems(world: world, res: gpuUi)
 
   var input: UiInput = createUiInput()
-  var needsRender: Bool = true
+  # Has a frame actually reached the screen yet? A window is not presentable the
+  # instant it is created, so the first pass through the loop draws whether or
+  # not anything changed.
+  var renderedOnce: Bool = false
+  # Set when the idle wait returns, and consumed by the next iteration.
+  var wokeUp: Bool = false
 
   loop not gpu2d.pollClose() {
     # One call handles the whole resize: it consumes the event, converts pixels
     # to POINTS (a UI laid out in pixels renders half-size on a retina display),
     # re-points the design resolution and re-runs the systems.
-    if resizeUiToWindow(world: world, res: gpuUi) {
-      needsRender = true
-    }
+    var changed: Bool = resizeUiToWindow(world: world, res: gpuUi)
 
     updateUiInput(input: input, world: world)
     let hadEvents: Bool = input.events.length > 0
 
     if applyActions(s: state, input: input) {
-      # A value change is what the history records. The step buttons return true
-      # as well, so the check is on the value itself, not on "something changed".
+      # A value change is what the history records. The step buttons report a
+      # change too, so the check is on the value itself, not on "something
+      # changed".
       if state.history.length is 0 or state.history.at(index: 0) is not state.value {
         rememberValue(s: state, value: state.value)
       }
       syncUi(world: world, s: state)
-      needsRender = true
+      changed = true
     }
 
-    # The systems run when the world changed: layout, then transforms, then the
-    # visual bounds the renderer draws from. Order matters and is not a detail —
-    # bounds computed before layout are last frame's bounds.
-    if hadEvents or needsRender {
+    if hadEvents or changed {
+      # Layout, then transforms, then the visual bounds the renderer draws from.
+      # The order is not a detail: bounds computed before layout are last
+      # frame's bounds.
       runUiSystems(world: world, res: gpuUi)
     }
+
+    # DECIDED FRESH EVERY ITERATION, which is the whole point. An earlier
+    # version latched a `needsRender` flag false after drawing and then, in the
+    # idle branch, asked whether `input.events` was non-empty -- but that list is
+    # filled by updateUiInput at the TOP of the loop, so after the wait it still
+    # held the previous pass's already-consumed events. A click was read on the
+    # next iteration, ran the systems, and never drew: the app presented exactly
+    # one frame and then went quiet for good. In the browser that looks fine,
+    # because a canvas keeps its last frame; on a real window the first present
+    # lands before the window is composited and it stays black.
+    # `wokeUp` carries a wake across to the next iteration, so anything the OS
+    # woke us for -- an expose after another window passed over this one, a
+    # move, a focus change -- results in a repaint.
+    let needsRender: Bool = hadEvents or changed or wokeUp or renderedOnce is false
+    wokeUp = false
 
     if needsRender {
       gpu2d.beginFrame(r: 0.03, g: 0.05, b: 0.08, a: 1.0)
       renderSystemGpu2d(world: world, res: gpuUi)
       gpu2d.endFrame()
-      needsRender = false
+      renderedOnce = true
     } else {
-      # IDLE AT ~0% CPU. Nothing here animates, so there is nothing to wake up
-      # for except input: the loop blocks in the event wait instead of redrawing
-      # an identical frame sixty times a second. An app with animation needs the
-      # hybrid busy/wait loop instead — see docs/ui-render-loop-performance.md.
-      gpu2d.waitEvents(timeoutSec: 0.5)
-      if input.events.length > 0 {
-        needsRender = true
-      }
+      # IDLE AT ~0% CPU. Nothing here animates, so there is nothing to wake for
+      # except the OS: the loop blocks rather than redrawing an identical frame
+      # sixty times a second. The timeout is the shared policy from
+      # lib/ui/event_loop.rae, not a number invented here; an app WITH animation
+      # passes animating: true and gets a frame-length wait instead. See
+      # docs/ui-render-loop-performance.md.
+      gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
+        animating: false, mouseDown: false, pollWatcher: false,
+        frameSec: 0.016667, heartbeatSec: idleHeartbeatSec))
+      wokeUp = true
     }
   }
 
