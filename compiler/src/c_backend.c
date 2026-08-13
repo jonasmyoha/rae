@@ -581,7 +581,14 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
   }
   if (!type->parts) { fprintf(out, "int64_t"); return true; }
   bool is_ptr = (type->is_view || type->is_mod) && !skip_ptr;
-  if (type->is_opt) { fprintf(out, "RaeAny"); if (is_ptr) fprintf(out, "*"); return true; }
+  // `opt view T` / `opt mod T` (spec 4.1) lower to the SAME reference wrapper as
+  // `view T` / `mod T`, with a null `.ptr` meaning `none`. A reference is
+  // already a pointer, and "might not be there" is what a null pointer means --
+  // so an optional reference costs 8 bytes and no allocation, where boxing it
+  // into RaeAny would cost 48 and, for anything wider than the union, a malloc.
+  //
+  // Only a NON-reference optional needs the box.
+  if (type->is_opt && !(type->is_view || type->is_mod)) { fprintf(out, "RaeAny"); return true; }
   Str base = type->parts->text; bool is_mod = type->is_mod;
   if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int")) { if (is_ptr) fprintf(out, "rae_%s_Int64", is_mod ? "Mod" : "View"); else fprintf(out, "int64_t"); return true; }
   if (str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32")) { if (is_ptr) fprintf(out, "rae_%s_Float", is_mod ? "Mod" : "View"); else fprintf(out, "float"); return true; }
@@ -665,7 +672,10 @@ const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
   if (str_eq_cstr(func->name, "rae_ext_rae_buf_alloc") || str_eq_cstr(func->name, "__buf_alloc") || str_eq_cstr(func->name, "rae_ext_rae_buf_resize") || str_eq_cstr(func->name, "__buf_resize") || str_eq_cstr(func->name, "rae_ext_rae_str_to_cstr") || str_eq_cstr(func->name, "toCStr")) return "void*";
   if (str_eq_cstr(func->name, "rae_ext_rae_buf_free") || str_eq_cstr(func->name, "__buf_free") || str_eq_cstr(func->name, "rae_ext_rae_buf_copy") || str_eq_cstr(func->name, "__buf_copy")) return "void";
   if (func->returns && func->returns->type) {
-    AstTypeRef* tr = func->returns->type; if (tr->is_opt) return "RaeAny";
+    // An optional REFERENCE return is a nullable pointer, not a box (spec 4.1);
+    // only a non-reference optional needs RaeAny.
+    AstTypeRef* tr = func->returns->type;
+    if (tr->is_opt && !(tr->is_view || tr->is_mod)) return "RaeAny";
     bool is_view = tr->is_view, is_mod = tr->is_mod, is_ptr = is_view || is_mod;
     Str base = get_base_type_name(tr);
     // Check if return type is an enum — emit as int64_t

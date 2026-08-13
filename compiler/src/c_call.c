@@ -781,7 +781,13 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     && !str_eq_cstr(base, "Any")
                     && !str_eq_cstr(base, "String")) || concrete_is_num_prim;
                 bool view_is_value = is_num_prim && p->type->is_view && !p->type->is_mod;
-                if (!(arg_tr && (arg_tr->is_view || arg_tr->is_mod))) {
+                // `none` for an OPTIONAL REFERENCE parameter is already a null
+                // pointer (spec 4.1); taking its address would yield `&NULL`.
+                bool arg_is_none_literal = a->value && a->value->kind == AST_EXPR_NONE;
+                bool param_is_opt_ref = p->type->is_opt && (p->type->is_view || p->type->is_mod);
+                if (param_is_opt_ref && arg_is_none_literal) {
+                    // fall through: emit the literal, no wrapping at all
+                } else if (!(arg_tr && (arg_tr->is_view || arg_tr->is_mod))) {
                     if (view_is_value) {
                         // No wrap needed; emit the arg as a plain value.
                     } else if (is_primitive_type(base) && !str_eq_cstr(base, "Buffer") && !str_eq_cstr(base, "Any")) needs_prim_wrap = true;

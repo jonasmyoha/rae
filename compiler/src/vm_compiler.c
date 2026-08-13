@@ -549,14 +549,6 @@ bool collect_metadata(CompilerContext* ctx, const char* file_path, const AstModu
 
         for (uint32_t i = 0; i < param_count; ++i) {
 
-          if (p->type->is_opt && (p->type->is_view || p->type->is_mod)) {
-
-            diag_error(file_path, (int)p->type->line, (int)p->type->column, "opt view/mod not allowed");
-
-            return false;
-
-          }
-
           param_types[i] = get_type_name_with_refs(ctx, p->type);
 
           p = p->next;
@@ -572,14 +564,6 @@ bool collect_metadata(CompilerContext* ctx, const char* file_path, const AstModu
       Str return_type = (Str){0};
 
       if (decl->as.func_decl.returns) {
-
-          if (decl->as.func_decl.returns->type->is_opt && (decl->as.func_decl.returns->type->is_view || decl->as.func_decl.returns->type->is_mod)) {
-
-            diag_error(file_path, (int)decl->as.func_decl.returns->type->line, (int)decl->as.func_decl.returns->type->column, "opt view/mod not allowed");
-
-            return false;
-
-          }
 
           return_type = get_type_name_with_refs(ctx, decl->as.func_decl.returns->type);
 
@@ -612,14 +596,6 @@ bool collect_metadata(CompilerContext* ctx, const char* file_path, const AstModu
         if (f->type->is_view || f->type->is_mod) {
 
           diag_error(file_path, (int)f->type->line, (int)f->type->column, "view/mod not allowed in struct fields");
-
-          return false;
-
-        }
-
-        if (f->type->is_opt && (f->type->is_view || f->type->is_mod)) {
-
-          diag_error(file_path, (int)f->type->line, (int)f->type->column, "opt view/mod not allowed");
 
           return false;
 

@@ -1,0 +1,57 @@
+# Optional references (spec 4.1): `opt view T` and `opt mod T`, in the three
+# positions 4.3 allows — parameters, return types and local bindings.
+#
+# This replaces 382_reject_opt_alias and 385_reject_opt_alias_return, which
+# pinned the opposite rule. That prohibition was removed because it could not be
+# justified: optionality adds no lifetime obligation to a reference (the `none`
+# case has no referent), and what keeps stored references from outliving their
+# target is 4.3's exclusion of ALL references from type members.
+#
+# The representation is a nullable pointer, so `none` costs nothing and an
+# optional reference is not boxed.
+import core
+
+type Track { title: String, seconds: Int }
+type Library { current: Track, hasCurrent: Bool }
+
+func describe(t: opt view Track) ret String {
+  if t is none {
+    ret "(nothing)"
+  }
+  ret "a track"
+}
+
+# Writes through an optional mod reference must reach the original.
+func bump(t: opt mod Track) {
+  if t is none {
+    ret
+  }
+  t.seconds = t.seconds + 1
+}
+
+func selected(lib: view Library) ret opt view Track {
+  if lib.hasCurrent is false {
+    ret none
+  }
+  ret view lib.current
+}
+
+func main() {
+  var track: Track = { title: "Intro", seconds: 95 }
+
+  log("param, none:      {describe(t: none)}")
+  log("param, reference: {describe(t: view track)}")
+
+  bump(t: mod track)
+  log("mod through opt:  {track.seconds}")
+  bump(t: none)
+  log("none is a no-op:  {track.seconds}")
+
+  var lib: Library = { current: Track { title: "Outro", seconds: 143 }, hasCurrent: true }
+  let sel: opt view Track => selected(lib: view lib)
+  log("return present:   {sel is not none}")
+
+  lib.hasCurrent = false
+  let empty: opt view Track => selected(lib: view lib)
+  log("return absent:    {empty is none}")
+}
