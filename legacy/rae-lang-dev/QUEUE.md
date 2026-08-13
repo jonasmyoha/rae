@@ -322,3 +322,6 @@
 <!-- SUMU_QUEUE_END -->
 - [ ] #433 Investigate 491_wait_events_smoke: raylib InitWindow SIGSEGVs in rlglInit/rlLoadTexture on this machine (fails on a clean tree too, so it predates the sky work)
 - [ ] #434 114's animTime accumulates unbounded in f32 and never wraps; after a long suspend (now integrated in full, since the dt clamp is gone) its ULP can exceed a frame's increment and the animation freezes
+- [ ] #435 Browser WASM: the settings dialog fails to mount in 111 and 112 (log says "settings dialog failed to mount", panel renders empty); same in both, so it is a shared browser-path limitation, not renderer-specific
+- [ ] #436 Offer browser WASM for the 8 gpu2d/gpu3d examples that lack wasmWebApp (101-104, 106, 110, 113, 114): each needs the flag plus display dims in a pack, and each needs confirming that it actually renders in Chrome first
+- [ ] #437 Example 49 errors in the embedded WASM window and the 3D WASM examples fall back to the external Chrome window; find why the embedded path rejects them (46 is reportedly the only one that works embedded)
