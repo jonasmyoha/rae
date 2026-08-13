@@ -1,0 +1,22 @@
+# Spec 2.2: "Copying through a mod alias using `=` is legal and modifies the
+# underlying target" — and its example binds with `let`, not `var`.
+#
+# The compiler used to reject this as reassigning an immutable binding. It is
+# not a reassignment: what `let` forbids is REBINDING the name, which bind-once
+# already forbids for every alias. Writing through the alias lands in the
+# aliased storage.
+import core
+
+type Pos { x: Int, y: Int }
+type Transform { p: Pos }
+
+func position(t: mod Transform) ret mod Pos {
+  ret t.p
+}
+
+func main() {
+  var tr: Transform = { p: Pos { x: 5, y: 12 } }
+  let w: mod Pos => position(t: mod tr)
+  w = Pos { x: 1, y: 2 }
+  log("wrote through a let-bound mod alias: {tr.p.x}")
+}
