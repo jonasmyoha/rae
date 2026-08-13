@@ -2,8 +2,8 @@
 #
 # OPT IN, in three lines. An app that does not write them does not have this:
 #
-#     var geom: WindowGeometry = createWindowGeometry(dir: hotReloadDir(),
-#                                                     name: "window.geometry")
+#     var geom: WindowGeometry = createWindowGeometry(
+#       dir: hotReloadDir(), name: "window.{myAppId}.geometry")
 #     restoreWindowGeometry(g: geom)          # after initWindow
 #     ...
 #     updateWindowGeometry(g: geom, now: now, resized: gpu2d.windowResized())
@@ -52,6 +52,13 @@ type WindowGeometry {
 # `dir` is the app's choice, and that is the point: an app wanting one window
 # per project passes its hot-reload channel directory, an installed app passes
 # somewhere in the user's config. Nothing here guesses.
+#
+# PUT THE APP'S IDENTITY IN `name`. `hotReloadDir()` answers ".rae" for every
+# app unless RAE_HOT_RELOAD_DIR overrides it, so two apps passing the same name
+# share one file and therefore one window. That is not hypothetical: the
+# examples all passed "window.geometry", and the 3D ones opened at 599x1259
+# because they restored the phone-shaped mobile UI example's window. Nothing
+# errored -- each app faithfully applied a size another app had saved.
 func createWindowGeometry(dir: view String, name: view String) ret WindowGeometry {
   ret WindowGeometry {
     dir: "{dir}"
