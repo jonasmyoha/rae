@@ -1,0 +1,75 @@
+# The time-of-day clock must advance by the same amount of SIMULATED time for
+# the same amount of WALL time, whatever the frame rate.
+#
+# This is a regression test with a specific history. Examples 111 and 112 are
+# the same scene under the forward and deferred renderers, meant to be run side
+# by side; they were observed showing different dates after a while. The cause
+# was not the clock but the caller: both apps capped dt at 0.1 s before passing
+# it here, so every frame slower than 10 fps advanced the clock by less than the
+# wall clock had actually moved. The deferred twin is the slower one, so it lost
+# more, and the two drifted apart.
+#
+# At the apps' day length -- 24 simulated hours per 60 real seconds -- one real
+# second is 0.4 simulated hours. A single 250 ms hitch therefore cost 3.6
+# simulated MINUTES. The clamp is gone; this pins that it stays gone in spirit,
+# by checking the property the clamp broke.
+#
+# 5 fps is in the list deliberately: at 0.2 s per frame it is exactly the case
+# the old cap halved, turning a simulated day into twelve hours.
+import core
+import math
+import vec3
+import scene3d
+import app3d/settings_dialog
+open app3d/settings_dialog
+
+func approxEq(a: view Float, b: view Float, tol: view Float) ret Bool {
+  var d: Float = a - b
+  if d < 0.0 { d = 0.0 - d }
+  ret d < tol
+}
+
+# Total simulated hours after `frames` steps of `dt`.
+#
+# Days come from the DATE, not from watching the hour wrap. An earlier version
+# of this counted a roll whenever the hour went down, which cannot see a single
+# step that crosses two midnights -- it read a correct two-day jump as twelve
+# hours and failed a passing implementation.
+func hoursAfter(dt: view Float, frames: view Int) ret Float {
+  var s: SettingsState = createSettingsState(scene: 1, sceneCount: 3, speed: 1.0,
+                                             toon: false, hour: 0.0,
+                                             skyModel: SettingsSkyModel.preetham)
+  let startDay: Int = s.dayOfYear
+  var i: Int = 0
+  loop i < frames {
+    settingsAdvanceTime(s: s, dt: dt)
+    i = i + 1
+  }
+  # No year wrap in these runs: the default day is midsummer and the longest
+  # case here advances two days.
+  ret (s.dayOfYear - startDay).toFloat() * 24.0 + s.hour
+}
+
+func main() {
+  # 60 seconds of wall time at each rate. One day per 60 s, so each is 24 hours.
+  # The tolerance is 0.01 h (36 simulated seconds) -- loose enough for the f32
+  # accumulator's rounding, which is about 5 simulated seconds per day at
+  # 144 fps, and far tighter than the 12 HOURS the clamp used to lose at 5 fps.
+  let tol: Float = 0.01
+  log("144fps: {approxEq(a: hoursAfter(dt: 1.0 / 144.0, frames: 8640), b: 24.0, tol: tol)}")
+  log(" 60fps: {approxEq(a: hoursAfter(dt: 1.0 / 60.0, frames: 3600), b: 24.0, tol: tol)}")
+  log(" 30fps: {approxEq(a: hoursAfter(dt: 1.0 / 30.0, frames: 1800), b: 24.0, tol: tol)}")
+  log("  5fps: {approxEq(a: hoursAfter(dt: 1.0 / 5.0, frames: 300), b: 24.0, tol: tol)}")
+
+  # One long stall must be integrated in full, not rounded down to a frame:
+  # 2.5 s of stall is 1.0 simulated hour and has to arrive as one.
+  log("a 2.5s stall is one hour: {approxEq(a: hoursAfter(dt: 2.5, frames: 1), b: 1.0, tol: 0.0001)}")
+
+  # And a stall longer than a day still lands on the right hour, because the
+  # roll is a loop rather than a single subtraction.
+  # 150 s = 60 simulated hours = 2 days and 12 hours.
+  log("a 150s stall rolls two whole days: {approxEq(a: hoursAfter(dt: 150.0, frames: 1), b: 60.0, tol: 0.001)}")
+
+  # Time never runs backwards on a bad clock reading.
+  log("negative dt is refused: {approxEq(a: hoursAfter(dt: 0.0 - 1.0, frames: 10), b: 0.0, tol: 0.0001)}")
+}
