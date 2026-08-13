@@ -941,9 +941,9 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
     u[56] = skyKind; u[57] = turbidity; u[58] = skyExposure; u[59] = sunSizeRad;
     u[60] = zenR; u[61] = zenG; u[62] = zenB; u[63] = bands;
     u[64] = horR; u[65] = horG; u[66] = horB; u[67] = discI;
-    /* Cooked Hosek-Wilkie state at u[68..103] (9 vec4). Rae computes these
-     * from the fitted table (lib/sky_hosek.rae + lib/data/*.json) and pushes
-     * them with rae_ext_gbuffer_skyHosekPush; this pass only copies them. The
+    /* Cooked Hosek-Wilkie state at u[68..103] (9 vec4). Rae computes these from
+     * the fitted table (lib/sky_hosek.rae + lib/data/hosek_wilkie_rgb.json) and
+     * pushes them with rae_ext_gbuffer_skyHosekPush; this pass only copies. The
      * model's arithmetic deliberately does not live in C — see
      * docs/tech-stack-and-dependencies.md, and lib/sky_hosek.rae's header for
      * what the earlier C version cost. */
