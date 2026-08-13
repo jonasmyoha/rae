@@ -1,3 +1,25 @@
+# One step past Hello: functions, and how a value becomes text.
+#
+# Nothing here is specific to a backend or a runtime — this is just the
+# language. Read it top to bottom and you have seen most of what a Rae function
+# is: a name, named parameters, a declared mode for each one, a return type, and
+# an expression body.
+#
+# NAMED ARGUMENTS AT THE CALL SITE, always. `add(a: 2, b: 5)` rather than
+# `add(2, 5)`, so a call says what its numbers mean and swapping two arguments
+# of the same type is a compile error rather than a silent bug.
+#
+# `view` is a PARAMETER MODE. It says this function only reads the value. The
+# other modes are `copy`, `mod` (may write back) and `own` (takes ownership).
+# There is no bare `a: Int` — the mode is always written, because "does this
+# function change my value" should never be something you have to guess.
+#
+# EVERYTHING PRINTED GOES THROUGH "{}". String interpolation is how a value
+# becomes text: `"{add(a: 2, b: 5)}"` evaluates the call and formats the result.
+# That is the one way to print a number, which keeps `log` a function about
+# text rather than one that quietly stringifies whatever it is handed.
+import core
+
 func add(a: view Int, b: view Int) ret Int {
   ret a + b
 }
@@ -6,14 +28,35 @@ func triple(value: view Int) ret Int {
   ret value * 3
 }
 
+# Functions compose like any other expression: `triple` is called on the result
+# of an addition, and the whole thing is one `ret`.
 func chain(a: view Int, b: view Int, c: view Int) ret Int {
   ret triple(value: a + b) + c
 }
 
+# Interpolation is not limited to Int, and not limited to one value per string.
+func describe(label: view String, value: view Int) ret String {
+  ret "{label} is {value}, and twice that is {value * 2}"
+}
+
 func main() {
-  log("VM math demo start")
-  log(add(a: 2, b: 5))
-  log(triple(value: 4))
-  log(chain(a: 1, b: 2, c: 3))
-  log("VM math demo end")
+  log("Rae: a few functions and their results")
+  log("")
+
+  # The call happens inside the braces; what lands in the string is the result.
+  log("  add(a: 2, b: 5)         = {add(a: 2, b: 5)}")
+  log("  triple(value: 4)        = {triple(value: 4)}")
+  log("  chain(a: 1, b: 2, c: 3) = {chain(a: 1, b: 2, c: 3)}")
+  log("")
+
+  # Arithmetic works inside interpolation too, so a small derived value does
+  # not need a variable of its own.
+  let sum: Int = add(a: 20, b: 22)
+  log("  a variable:            {sum}")
+  log("  an expression:         {sum * 2 - 4}")
+  log("")
+
+  # A function returning String is interpolated the same way as an Int.
+  let label: String = "sum"
+  log("  {describe(label: label, value: sum)}")
 }
