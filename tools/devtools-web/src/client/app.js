@@ -215,6 +215,14 @@ let exampleCategories = [];
 // by which example categories they show. Raytracer/2D Renderer examples are
 // tagged via their .raepack "category"; the Examples tab shows the rest.
 const EXAMPLE_COLLECTIONS = {
+  // FIRST, and membership works differently from every other tab: the rest own
+  // a set of .raepack `category` labels, this one collects a `featured` FLAG.
+  // That is what lets an example be here AND in 3D Renderer at the same time,
+  // rather than having to give up its own category to be featured.
+  featured: {
+    title: "Featured",
+    subtitle: "The examples worth opening first — the most complete and the best looking, gathered from every category."
+  },
   examples: {
     title: "Examples",
     subtitle: "High-performance logic, interactive simulations, and system design patterns."
@@ -1041,8 +1049,12 @@ function stopRunningDockTicker() {
 // owns it, select it, and replay its buffered output so the terminal isn't
 // blank for an app that has been running for minutes.
 function openExampleRun(run, example) {
+  // Featured is skipped here: it is a shortcut, not where an example lives, and
+  // jumping a running app to it would lose the category context.
   const collection =
-    Object.keys(EXAMPLE_COLLECTIONS).find((key) => exampleBelongsToCollection(example, key)) ??
+    Object.keys(EXAMPLE_COLLECTIONS)
+      .filter((key) => key !== "featured")
+      .find((key) => exampleBelongsToCollection(example, key)) ??
     "examples";
   selectedExampleId = example.id;
   selectedExampleFile = example.files?.[0]?.path ?? null;
@@ -1717,6 +1729,11 @@ const SPECIAL_EXAMPLE_CATEGORIES = new Set(
 );
 
 function exampleBelongsToCollection(example, collection) {
+  // Featured is a flag, not a category. Deliberately checked BEFORE the
+  // category map and deliberately absent from COLLECTION_CATEGORIES: adding it
+  // there would make SPECIAL_EXAMPLE_CATEGORIES swallow the featured examples'
+  // real categories and empty out the other tabs.
+  if (collection === "featured") return example.featured === true;
   const cats = COLLECTION_CATEGORIES[collection];
   if (cats) return cats.includes(example.category);
   // Default "examples" collection: everything NOT owned by another collection.
@@ -1825,10 +1842,16 @@ function renderExampleList() {
       const displayName = formatExampleName(example.name);
       const targetSummary = describeExampleTargets(example);
       const hiddenBadge = example.hidden ? ' <span class="badge pending" style="font-size: 0.6rem; vertical-align: middle;">HIDDEN</span>' : '';
+      // Only OUTSIDE the Featured tab. In it, every card would carry the badge,
+      // which tells the reader nothing they cannot see from the tab they are on.
+      const featuredBadge =
+        example.featured && currentExampleCollection !== "featured"
+          ? ' <span class="badge badge--featured">Featured</span>'
+          : '';
       const num = exampleNumber(example);
       const numBadge = num ? `<span class="example-num">${num}</span>` : '';
 
-      button.innerHTML = `<h4>${numBadge}${displayName}${hiddenBadge}</h4><p>${targetSummary}</p>`;
+      button.innerHTML = `<h4>${numBadge}${displayName}${hiddenBadge}${featuredBadge}</h4><p>${targetSummary}</p>`;
       
       button.addEventListener("click", () => {
         // Selecting another example leaves any running app alone; the dock
