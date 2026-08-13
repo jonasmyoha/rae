@@ -2036,6 +2036,49 @@ static AstStmt* parse_return_statement(Parser* parser, const Token* ret_token) {
 
 static AstStmt* parse_if_statement(Parser* parser, const Token* if_token) {
   AstStmt* stmt = new_stmt(parser, AST_STMT_IF, if_token);
+
+  // `if let` (spec 4.2): conditionally bind the value inside an optional.
+  //
+  // Desugars to the binding plus a null test. The binding's declared type is
+  // the reference the programmer wrote, marked optional, so `is not none`
+  // lowers to the null check optional references already use — and because an
+  // optional reference and a reference are the same pointer, the narrowing
+  // itself costs nothing.
+  if (parser_check(parser, TOK_KW_LET)) {
+    const Token* let_token = parser_peek(parser);
+    parser_advance(parser);
+    AstStmt* bind = parse_binding_statement(parser, let_token, false, false);
+    if (bind && bind->kind == AST_STMT_LET) {
+      AstTypeRef* bt = bind->as.let_stmt.type;
+      if (!bt || !(bt->is_view || bt->is_mod)) {
+        parser_error(parser, let_token,
+          "'if let' binds a reference: write 'view T' or 'mod T' (spec 4.2)");
+      } else if (!bind->as.let_stmt.is_bind) {
+        // `=` would mean copy, and a conditional binding has no business
+        // duplicating a value (spec 2.3). The copy goes inside the branch.
+        parser_error(parser, let_token,
+          "'if let' requires '=>'; '=' means copy, which a conditional binding does not do (spec 4.2)");
+      } else {
+        bt->is_opt = true;
+        stmt->as.if_stmt.binding = bind;
+        // condition: <name> is not none
+        AstExpr* lhs = new_expr(parser, AST_EXPR_IDENT, let_token);
+        lhs->as.ident = bind->as.let_stmt.name;
+        AstExpr* rhs = new_expr(parser, AST_EXPR_NONE, let_token);
+        AstExpr* cond = new_expr(parser, AST_EXPR_BINARY, let_token);
+        cond->as.binary.op = AST_BIN_NEQ;
+        cond->as.binary.lhs = lhs;
+        cond->as.binary.rhs = rhs;
+        stmt->as.if_stmt.condition = cond;
+      }
+    }
+    stmt->as.if_stmt.then_block = parse_block(parser);
+    if (parser_match(parser, TOK_KW_ELSE)) {
+      stmt->as.if_stmt.else_block = parse_block(parser);
+    }
+    return stmt;
+  }
+
   stmt->as.if_stmt.condition = parse_expression(parser);
   stmt->as.if_stmt.then_block = parse_block(parser);
   if (parser_match(parser, TOK_KW_ELSE)) {
