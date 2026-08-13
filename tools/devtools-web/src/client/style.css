@@ -982,11 +982,20 @@ button.btn-build-test:hover:not(:disabled) {
 }
 
 /* Batch report */
+/* The report is RED ONLY WHEN SOMETHING FAILED. It used to be red always, so a
+   clean run announced success in the colour of failure -- the one glance the
+   panel exists for said the opposite of the result. The chrome is driven from
+   these three variables so the clean variant below is an override, not a
+   duplicate of the whole block. */
 .batch-report {
+  --report-accent: var(--danger);
+  --report-bg: rgba(248, 113, 113, 0.04);
+  --report-border: rgba(248, 113, 113, 0.15);
+  --report-rule: rgba(248, 113, 113, 0.1);
   margin: 2rem;
   padding: 2.5rem;
-  background: rgba(248, 113, 113, 0.04);
-  border: 1px solid rgba(248, 113, 113, 0.15);
+  background: var(--report-bg);
+  border: 1px solid var(--report-border);
   border-radius: 1.5rem;
   display: flex;
   flex-direction: column;
@@ -1001,14 +1010,28 @@ button.btn-build-test:hover:not(:disabled) {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  border-bottom: 1px solid rgba(248, 113, 113, 0.1);
+  border-bottom: 1px solid var(--report-rule);
   padding-bottom: 1.5rem;
 }
 
 .batch-report h3 {
   font-size: 1.5rem;
-  color: var(--danger);
+  color: var(--report-accent);
   margin-bottom: 0.5rem;
+}
+
+/* No failures. Skips are not failures, so a run that skipped an example it
+   cannot support still reads as clean -- the skipped entries below say so
+   themselves in their own colour. */
+.batch-report--clean {
+  --report-accent: var(--success);
+  --report-bg: rgba(52, 211, 153, 0.05);
+  --report-border: rgba(52, 211, 153, 0.2);
+  --report-rule: rgba(52, 211, 153, 0.15);
+}
+
+.batch-report--clean .batch-report-summary {
+  color: var(--success);
 }
 
 .batch-report-summary {

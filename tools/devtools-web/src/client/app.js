@@ -3136,6 +3136,12 @@ function renderBatchReport() {
   const mode = getGlobalTarget();
   
   summary.textContent = `[${mode}] ${successes} passed, ${failures} failed, ${skipped} skipped (${total} total).`;
+  // Green unless something actually FAILED. Skips are not failures -- an
+  // example that cannot run on the selected target has not gone wrong.
+  report.classList.toggle("batch-report--clean", failures === 0);
+  // Nothing to copy on a clean run, so do not offer to.
+  const copyBtn = document.getElementById("copy-batch-errors-btn");
+  if (copyBtn) copyBtn.hidden = failures === 0;
   
   content.innerHTML = "";
   const problemResults = batchResults.filter(r => !r.success);
@@ -3145,6 +3151,20 @@ function renderBatchReport() {
     p.className = "batch-report-summary";
     p.textContent = "All examples ran successfully without errors.";
     content.appendChild(p);
+  } else if (failures === 0) {
+    // Skips only. Say so before listing them, or a green panel full of entries
+    // looks like it is reporting problems.
+    const p = document.createElement("p");
+    p.className = "batch-report-summary";
+    p.textContent = `No failures. ${skipped} example${skipped === 1 ? "" : "s"} skipped:`;
+    content.appendChild(p);
+    problemResults.forEach(res => {
+      const div = document.createElement("div");
+      div.className = "batch-error-entry batch-error-entry--skipped";
+      const logContent = res.errors.length > 0 ? res.errors.join("\n") : "No details available.";
+      div.innerHTML = `<h4>${res.name} (skipped)</h4><div class="batch-error-log">${logContent}</div>`;
+      content.appendChild(div);
+    });
   } else {
     problemResults.forEach(res => {
       const div = document.createElement("div");
