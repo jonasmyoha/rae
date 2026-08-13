@@ -1,0 +1,93 @@
+# Re-centring the orbit camera (examples 111, 112 and 114).
+#
+# Those apps re-aim the orbit target at their subject whenever the camera bar
+# switches back from the WASD camera, instead of keeping the rig's no-jump
+# default. That is three lines of app code, and it leans on two properties of
+# lib/app3d/camera_rig.rae that nothing else states out loud:
+#
+#   1. THE RIG DOES NOT OWN THE ORBIT TARGET. camera.target is the pivot, and
+#      an app may overwrite it after a mode switch. If the rig ever started
+#      caching it, the apps would keep orbiting the old point and the only
+#      symptom would be a camera that feels wrong.
+#   2. AIMING IS ENOUGH. applyCameraRig derives the eye from
+#      target + yaw/pitch/distance, so moving the target moves the eye with it
+#      and the look direction follows. The apps therefore do NOT reset yaw or
+#      pitch, and this pins that they do not have to.
+#
+# It also pins the DEFAULT the apps are opting out of, so a change to the rig's
+# own recovery rule shows up here rather than in three examples at once.
+import core
+import math
+import vec3
+import scene3d
+import math3d
+import app3d/camera_rig
+open math3d
+open scene3d
+open app3d/camera_rig
+
+func approxEq(a: view Float, b: view Float, tol: view Float) ret Bool {
+  var d: Float = a - b
+  if d < 0.0 { d = 0.0 - d }
+  ret d < tol
+}
+
+func dist(a: view Vec3, b: view Vec3) ret Float {
+  ret vec3.vlen(a: vec3.vsub(a: a, b: b))
+}
+
+func main() {
+  var cam: Camera3d = defaultCamera3d()
+  var rig: CameraRig = createCameraRig(camera: cam)
+  # Smoothing off: this is about where the camera ends up, and easing would
+  # only mean sampling a curve mid-flight.
+  rig.smoothMouse = false
+  rig.smoothKeys = false
+  snapCameraRigView(rig: rig)
+
+  # Fly off somewhere and look away from the subject, which is the situation
+  # the apps care about.
+  toggleCameraRigMode(rig: rig, camera: cam)
+  log("switched to free: {cameraRigModeName(rig: rig)}")
+  rig.freePosition = vec3.create(x: 20.0, y: 18.0, z: 6.0)
+  rig.yaw = 2.4
+  rig.freePitch = 0.0 - 0.2
+  snapCameraRigView(rig: rig)
+
+  # Back to orbit. The rig's DEFAULT: the target is recovered along the view
+  # direction, so it lands out where the free camera was looking, not on the
+  # subject.
+  toggleCameraRigMode(rig: rig, camera: cam)
+  let origin: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  log("switched to orbit: {cameraRigModeName(rig: rig)}")
+  log("default target is off the subject: {dist(a: cam.target, b: origin) > 5.0}")
+
+  # What the apps then do, in full: one assignment.
+  cam.target = vec3.create(x: 0.0, y: 0.0, z: 0.5)
+  applyCameraRig(rig: rig, camera: cam)
+
+  # The pivot took, and the eye orbits it at the rig's distance -- so the app
+  # never had to touch yaw, pitch or distance.
+  log("target recentred: {approxEq(a: cam.target.x, b: 0.0, tol: 0.0001) and approxEq(a: cam.target.z, b: 0.5, tol: 0.0001)}")
+  log("eye orbits it at rig distance: {approxEq(a: dist(a: cam.position, b: cam.target), b: rig.viewDistance, tol: 0.001)}")
+
+  # The eye sits where the rig's OWN yaw/pitch put it around the NEW target --
+  # the check that the re-aim moved the whole orbit rather than just relabelling
+  # a pivot the eye had already been placed around. Compared against orbitEye
+  # recomputed from the target, so it fails if applyCameraRig ever anchors on
+  # anything else.
+  let expected: Vec3 = orbitEye(
+    targetX: cam.target.x, targetY: cam.target.y, targetZ: cam.target.z,
+    yaw: rig.viewYaw, pitch: rig.viewOrbitPitch, dist: rig.viewDistance
+  )
+  log("eye placed by yaw/pitch around it: {dist(a: cam.position, b: expected) < 0.0001}")
+  # And it is genuinely above the pivot by the pitch, not merely at the right
+  # radius -- a sign flip would keep the distance and put the camera underground.
+  log("pitch raises the eye: {cam.position.z > cam.target.z}")
+
+  # Re-aiming must not disturb the rig itself: a second apply with no input in
+  # between gives the same camera.
+  let before: Vec3 = cam.position
+  applyCameraRig(rig: rig, camera: cam)
+  log("stable under re-apply: {dist(a: before, b: cam.position) < 0.0001}")
+}
