@@ -1755,6 +1755,17 @@ function applyExampleCollection(collection) {
   if (subtitleEl) subtitleEl.textContent = meta.subtitle;
 
   const visible = examplesForCurrentCollection();
+  // Spell out what "Run all" will actually start. The label cannot say it
+  // without growing to a sentence, and the scope being invisible is what made
+  // the button surprising in the first place.
+  // Looked up here rather than using the module-level const, which is declared
+  // further down the file and would be in the temporal dead zone if this ever
+  // ran during initial evaluation.
+  const runAllBtn = document.getElementById("run-all-examples-btn");
+  if (runAllBtn) {
+    runAllBtn.title =
+      `Run the ${visible.length} example${visible.length === 1 ? "" : "s"} listed under ${meta.title}`;
+  }
   const selectionVisible = visible.some((ex) => ex.id === selectedExampleId);
   if (!selectionVisible) {
     // Leaving an example's page no longer stops it — that is the whole point
@@ -3001,9 +3012,17 @@ async function runAllExamples() {
   batchResults = [];
   hideBatchReport();
   
-  pushStatusItem(`Starting batch run of all examples (${targetId} mode)…`);
-  
-  for (const example of examples) {
+  // THIS TAB'S examples, not every example there is. The same list the sidebar
+  // is showing, so "Run all" runs exactly what you can see -- pressing it in
+  // "2D renderer" used to start all sixty-odd examples across every category.
+  const batchExamples = examplesForCurrentCollection();
+  const collectionTitle = EXAMPLE_COLLECTIONS[currentExampleCollection]?.title ?? "Examples";
+
+  pushStatusItem(
+    `Starting batch run of ${batchExamples.length} ${collectionTitle} example${batchExamples.length === 1 ? "" : "s"} (${targetId} mode)…`
+  );
+
+  for (const example of batchExamples) {
     if (!example.id) continue;
     
     // Skip examples that require manual staging or complex setup
@@ -3095,7 +3114,7 @@ async function runAllExamples() {
   }
   
   isBatchRunning = false;
-  pushStatusItem("Completed batch run of all examples.");
+  pushStatusItem(`Completed batch run of ${collectionTitle} examples.`);
   renderBatchReport();
 }
 
