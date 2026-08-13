@@ -320,9 +320,11 @@ function makeMultiFileExample(
   // bundle. Without it the click would reach the headless WASI viewer, which
   // for a windowed app renders nothing at all.
   //
-  // A live-only example is exempt: 23_code_hot_reload declares live and nothing
-  // else because demonstrating VM code hot reload IS the example, so a WASM
-  // button there offers to run the one thing it cannot show.
+  // An example that declares live and nothing else is exempt. No example does
+  // any more -- 23_code_hot_reload was the last, and it was deleted with the
+  // Live deprecation -- but the rule outlives it: a live-only example is one
+  // that exists to demonstrate the VM, so offering it WASM would offer to run
+  // the one thing it cannot show.
   const liveOnly =
     declaredTargets !== undefined
     && declaredTargets.length > 0
