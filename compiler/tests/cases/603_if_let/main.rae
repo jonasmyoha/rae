@@ -1,0 +1,40 @@
+# `if let` (spec 4.2): conditionally bind the value inside an optional for the
+# duration of the branch. `view T` or `mod T` with `=>`; `=` is rejected,
+# because `=` means copy and a conditional binding does not duplicate a value.
+#
+# Narrowing an optional reference costs nothing: both are the same pointer.
+import core
+type Track { title: String, seconds: Int }
+type Library { current: Track, hasCurrent: Bool }
+
+func selected(lib: view Library) ret opt view Track {
+  if lib.hasCurrent is false { ret none }
+  ret view lib.current
+}
+
+func bumpable(lib: mod Library) ret opt mod Track {
+  if lib.hasCurrent is false { ret none }
+  ret mod lib.current
+}
+
+func main() {
+  var lib: Library = { current: Track { title: "Outro", seconds: 143 }, hasCurrent: true }
+
+  if let track: view Track => selected(lib: view lib) {
+    log("present: {track.title} / {track.seconds}")
+  } else {
+    log("absent")
+  }
+
+  if let track: mod Track => bumpable(lib: mod lib) {
+    track.seconds = track.seconds + 1
+  }
+  log("after mod narrowing: {lib.current.seconds}  (expect 144)")
+
+  lib.hasCurrent = false
+  if let track: view Track => selected(lib: view lib) {
+    log("should not print: {track.title}")
+  } else {
+    log("absent branch taken")
+  }
+}

@@ -1,0 +1,13 @@
+# Spec 2.2: `=>` is required whenever the target type contains `view` or `mod`
+# AT ANY LEVEL — including `opt view T` and `opt mod T`.
+#
+# This is what keeps `=` honest. `=` produces an independent value; copying a
+# type whose payload is a reference would instead yield a second name onto the
+# same storage, which would make `=` mean something different for one type.
+type Track { title: String, seconds: Int }
+
+func main() {
+  var track: Track = { title: "Intro", seconds: 95 }
+  # ERROR: an optional reference must be bound with '=>' like any other reference
+  let bad: opt view Track = view track
+}
