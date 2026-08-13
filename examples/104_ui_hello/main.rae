@@ -1,0 +1,130 @@
+# UI hello world: a value and three buttons.
+#
+# The smallest thing that is still a real application: a window, a themed
+# layout, hit-tested buttons and a value on screen. The state is one Int and one
+# function decides what a press does to it; the layout is a document, in
+# assets/ui.raescene, where a layout belongs.
+#
+# Read it in one sitting:
+#
+#   the scene names the nodes and the actions   assets/ui.raescene
+#   the state is one Int                        `value`
+#   input becomes state                         applyActions
+#   state becomes pixels                        setNodeText
+#
+# For the same idea with more of it — a step size, palette-slot highlighting and
+# a list rebuilt from data — see example 105.
+import core
+import gpu2d
+import string
+import ui/ecs
+import ui/event_loop
+import ui/input_gpu2d
+import ui/layout
+import ui/render_gpu2d
+import ui/scene
+import ui/scene_file
+import ui/scene_loader
+import app3d/ui_shell
+open app3d/ui_shell
+open ui/ecs
+open ui/event_loop
+open ui/input_gpu2d
+open ui/layout
+open ui/render_gpu2d
+open ui/scene_file
+open ui/scene_loader
+open ui/transform
+
+const designW: Int = 440
+const designH: Int = 880
+
+# Where the counter starts.
+const initialValue: Int = 3
+
+# Fold this frame's button presses into the value and return it. The caller
+# compares it with what it had, and redraws only if it moved.
+#
+# The action ids are the ones assets/ui.raescene writes in each button's
+# `OnClick`. Nothing here asks where the pointer was: the hit test already did
+# that, against the laid-out geometry.
+func applyActions(value: view Int, input: view UiInput) ret Int {
+  if uiActionFired(input: input, actionId: "counter.inc") {
+    ret value + 1
+  }
+  if uiActionFired(input: input, actionId: "counter.dec") {
+    ret value - 1
+  }
+  if uiActionFired(input: input, actionId: "counter.clear") {
+    ret 0
+  }
+  ret value
+}
+
+func main() ret Int {
+  gpu2d.initWindow(width: designW, height: designH, title: "Rae UI — Hello")
+
+  let base: String = "examples/104_ui_hello/assets/"
+  let gpuUi: Gpu2dUi = loadUiAssets(dir: base, textFontName: "Roboto-Regular",
+                                    iconFontName: "MaterialIconsRound-Regular",
+                                    themeFile: "theme.raescene")
+
+  var world: UiWorld = createUiWorld()
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+
+  let scene: Scene = loadSceneFile(path: "{base}ui.raescene")
+  if scene.ok is false {
+    log("[ui] scene failed to load: {scene.errorMsg}")
+    gpu2d.closeWindow()
+    ret 1
+  }
+  loadScene(world: world, scene: scene)
+
+  var value: Int = initialValue
+  setNodeText(world: world, nodeId: "ValueText", value: "Value: {value}!")
+  runUiSystems(world: world, res: gpuUi)
+
+  var input: UiInput = createUiInput()
+  var renderedOnce: Bool = false
+  var wokeUp: Bool = false
+
+  loop not gpu2d.pollClose() {
+    var changed: Bool = resizeUiToWindow(world: world, res: gpuUi)
+
+    updateUiInput(input: input, world: world)
+    let hadEvents: Bool = input.events.length > 0
+
+    let next: Int = applyActions(value: value, input: input)
+    if next is not value {
+      value = next
+      setNodeText(world: world, nodeId: "ValueText", value: "Value: {value}!")
+      changed = true
+    }
+
+    if hadEvents or changed {
+      runUiSystems(world: world, res: gpuUi)
+    }
+
+    # Draw when something changed, when the OS woke us, and for the first frame
+    # — a window is not presentable the instant it is created, and a compositor
+    # does not promise to keep a frame that was presented once.
+    if hadEvents or changed or wokeUp or renderedOnce is false {
+      gpu2d.beginFrame(r: 0.03, g: 0.05, b: 0.08, a: 1.0)
+      renderSystemGpu2d(world: world, res: gpuUi)
+      gpu2d.endFrame()
+      renderedOnce = true
+      wokeUp = false
+    } else {
+      # Idle at ~0% CPU: block until the OS has something to say. The timeout is
+      # the shared policy from lib/ui/event_loop.rae.
+      gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
+        animating: false, mouseDown: false, pollWatcher: false,
+        frameSec: 0.016667, heartbeatSec: 0.5))
+      wokeUp = true
+    }
+  }
+
+  gpu2d.closeWindow()
+  ret 0
+}
