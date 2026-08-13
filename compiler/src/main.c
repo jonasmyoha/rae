@@ -2722,6 +2722,23 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
   char include_flag[PATH_MAX + 3];
   char assets_path[PATH_MAX];
   char preload_assets[PATH_MAX * 2 + 4];
+  /* Shared data the STDLIB reads at runtime, by cwd-relative path. A browser
+   * bundle preloading only the example's own assets/ leaves every one of these
+   * missing, and each fails quietly in its own way: the settings dialog and
+   * camera bar refuse to mount (their .raescene is not there), a Hosek sky
+   * cooks from an empty table, and the noise shader comes back blank. That is
+   * why 111 and 112 rendered a scene in Chrome but an empty settings panel.
+   *
+   * Mapped to the SAME path they are read from, so lib code needs no notion of
+   * running in a browser. Anything absent is skipped rather than failing the
+   * build -- a project that uses none of this should not have to have lib/. */
+  static const char* lib_runtime_paths[] = {
+    "lib/app3d/scenes",
+    "lib/data",
+    "lib/noise.wgsl"
+  };
+  char preload_lib[3][PATH_MAX * 2 + 4];
+  int preload_lib_count = 0;
   snprintf(runtime_c, sizeof(runtime_c), "%s/rae_runtime.c", RAE_RUNTIME_SOURCE_DIR);
   snprintf(shell_html, sizeof(shell_html), "%s/web_shell.html", RAE_RUNTIME_SOURCE_DIR);
   snprintf(include_flag, sizeof(include_flag), "-I%s", RAE_RUNTIME_SOURCE_DIR);
@@ -2735,6 +2752,13 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
   snprintf(assets_path, sizeof(assets_path), "%s/assets", src_dir);
   struct stat assets_stat;
   bool has_assets = stat(assets_path, &assets_stat) == 0 && S_ISDIR(assets_stat.st_mode);
+  for (size_t i = 0; i < sizeof(lib_runtime_paths) / sizeof(lib_runtime_paths[0]); i++) {
+    struct stat lib_stat;
+    if (stat(lib_runtime_paths[i], &lib_stat) != 0) continue;
+    snprintf(preload_lib[preload_lib_count], sizeof(preload_lib[0]), "%s@/%s",
+             lib_runtime_paths[i], lib_runtime_paths[i]);
+    preload_lib_count++;
+  }
   if (has_assets) {
     /* Preserve the source-relative path expected by Compiled applications.
      * This makes `.raescene`, fonts, images, and other project assets
@@ -2800,6 +2824,10 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
   if (has_assets) {
     args[n++] = "--preload-file";
     args[n++] = preload_assets;
+  }
+  for (int i = 0; i < preload_lib_count; i++) {
+    args[n++] = "--preload-file";
+    args[n++] = preload_lib[i];
   }
   args[n++] = c_path;
   args[n++] = runtime_c;
