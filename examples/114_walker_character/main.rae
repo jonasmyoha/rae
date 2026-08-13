@@ -168,6 +168,15 @@ const state114Version: Int = 5
 const state114AppId: String = "114_walker_character"
 const state114OwnFields: Int = 5
 
+# Where "Orbit" re-centres, on every switch back from the WASD camera.
+#
+# THE CHARACTER'S MIDDLE, not the world floor. The model is normalised to
+# `targetHeight` (2.0) tall standing on `groundZ` (-1.0), so it spans z -1..+1
+# and its centre is 0 -- the same point this example opens its camera on. The
+# head is up at +1; orbiting THAT would swing the body out of frame at close
+# distances, which is the opposite of what re-centring is for.
+const orbitFocusZ: Float = 0.0
+
 func serialize114State(clipIndex: view Int, playing: view Bool, speed: view Float,
                        toon: view Bool, rig: view CameraRig, camera: view Camera3d) ret String {
   var playingNum: Int = 0
@@ -663,8 +672,26 @@ func main() ret Int {
       runUiSystems(world: uiWorld, res: gpuUi)
     }
 
+    # RE-CENTRE ON SWITCHING TO ORBIT. The rig recovers the orbit target by
+    # walking `distance` along the free camera's view direction, so the view
+    # never jumps -- the right library default. But after flying around in WASD
+    # mode that lands the target wherever you happened to be looking, and
+    # "Orbit" then spins around a point in empty space with the scene off to
+    # one side. Here the switch should mean "put me back on the subject".
+    #
+    # AN APP CHOICE, not a rig behaviour: leaving these lines out gets the
+    # no-jump default back. Setting the target is the whole fix, because orbit
+    # derives the eye from target + yaw/pitch/distance and the look direction
+    # follows it.
+    #
+    # Before-and-after, because handleCameraBar also returns true for its two
+    # smoothing buttons -- the return value does not mean "the mode changed".
+    let wasOrbit: Bool = rig.mode is CameraRigMode.orbit
     if handleCameraBar(input: uiInput, rig: rig, camera: camera) {
       stateDirty = true
+    }
+    if wasOrbit is false and rig.mode is CameraRigMode.orbit {
+      camera.target = vec3.create(x: 0.0, y: 0.0, z: orbitFocusZ)
     }
     let cameraMoved: Bool = updateCameraRig(rig: rig, camera: camera,
                        allowInput: uiPointerCaptured(input: uiInput) is false, dt: dt)

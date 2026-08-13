@@ -138,6 +138,14 @@ func createDemoUiResource() ret DemoUiResource {
 # than not restoring at all.
 const state111Version: Int = 2
 const state111AppId: String = "111_metaballs_forward"
+
+# Where "Orbit" re-centres, on every switch back from the WASD camera.
+#
+# 0.5 is not a guess: it is the z the scene files frame the shot at, so
+# switching to Orbit puts you back on the app's home subject rather than
+# wherever the free camera was last pointed. Slightly above the floor, which is
+# where the metaball clusters and the props actually sit.
+const orbitFocusZ: Float = 0.5
 const state111Fields: Int = 15
 
 func serialize111State(ui: view DemoUiResource, rig: view CameraRig, camera: view Camera3d) ret String {
@@ -516,7 +524,25 @@ func main() ret Int {
                           now: now, didRealWork: dbgDidWork) {
       suppressUiPress(input: uiInput)
     }
+    # RE-CENTRE ON SWITCHING TO ORBIT. The rig recovers the orbit target by
+    # walking `distance` along the free camera's view direction, so the view
+    # never jumps -- the right library default. But after flying around in WASD
+    # mode that lands the target wherever you happened to be looking, and
+    # "Orbit" then spins around a point in empty space with the scene off to
+    # one side. Here the switch should mean "put me back on the subject".
+    #
+    # AN APP CHOICE, not a rig behaviour: leaving these lines out gets the
+    # no-jump default back. Setting the target is the whole fix, because orbit
+    # derives the eye from target + yaw/pitch/distance and the look direction
+    # follows it.
+    #
+    # Before-and-after, because handleCameraBar also returns true for its two
+    # smoothing buttons -- the return value does not mean "the mode changed".
+    let wasOrbit: Bool = cameraRig.mode is CameraRigMode.orbit
     handleCameraBar(input: uiInput, rig: cameraRig, camera: camera)
+    if wasOrbit is false and cameraRig.mode is CameraRigMode.orbit {
+      camera.target = vec3.create(x: 0.0, y: 0.0, z: orbitFocusZ)
+    }
     let hadUiEvents: Bool = uiInput.events.length > 0
     dispatchUiActions(input: uiInput, state: uiState, rig: cameraRig, camera: camera)
     # The shared dialog sees every action and ignores what it does not own.
