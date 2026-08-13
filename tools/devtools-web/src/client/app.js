@@ -2225,7 +2225,7 @@ function runWasmCaptureStdout(bytes) {
 
 function showExampleViewer(example) {
   const viewer = document.getElementById("example-viewer");
-  const canvas = document.getElementById("example-viewer-canvas");
+  const canvas = document.getElementById("canvas");
   const statusEl = document.getElementById("example-viewer-status");
   if (!viewer || !canvas) return;
   const d = example && example.display;
@@ -2253,7 +2253,7 @@ function showExampleViewer(example) {
 }
 
 function resetExampleViewerCanvas() {
-  const canvas = document.getElementById("example-viewer-canvas");
+  const canvas = document.getElementById("canvas");
   if (!canvas) return null;
   const replacement = canvas.cloneNode(false);
   canvas.replaceWith(replacement);
