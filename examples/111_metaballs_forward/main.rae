@@ -4,14 +4,17 @@
 # underneath is the whole difference, which is what makes the pair useful — open
 # both and the only variable is the lighting path.
 #
-# WHAT IS MISSING HERE, deliberately: the SKY. The sky interface (#399) and its
-# Hosek/Preetham/solid shaders live only in the deferred runtime, so this example
-# renders against the clear colour. The panel's sky model buttons and the visual
-# half of the time-of-day, date and latitude sliders therefore do NOTHING in this
-# example — they still move the SUN, so lighting and shadows track them, but the
-# background does not change. The controls are left in place rather than hidden
-# so the two examples stay the same panel; a control that is inert in one app is
-# easier to explain than two panels that have drifted apart.
+# THE SKY IS THE SAME SKY (#418). It used to be missing here: the sky shaders
+# lived inside the deferred lighting pass, so this example rendered against a
+# flat clear colour and the panel's sky buttons did nothing. The shader now sits
+# in runtime_sky_wgsl.h and both renderers include it, so Hosek, Preetham,
+# stylised and solid all look the same on either path.
+#
+# WHERE IT IS DRAWN is the difference, and it is forced by the architecture: the
+# deferred twin computes the sky for every pixel its G-buffer left empty, while
+# this path has no G-buffer to ask and instead draws it as a fullscreen triangle
+# at the start of the scene pass, writing no depth. One call, gpu3d.drawSky,
+# between beginScene and the geometry.
 #
 # Frame ownership is explicit: Scene3d renders first, gpu3d.endPass submits
 # without presenting, GPU2D loads the resolved color target and paints UiWorld,
@@ -89,11 +92,15 @@ import app3d/settings_dialog
 import shadow3d
 import renderer3d
 import app3d/ui_shell
+import sky
+import sky_hosek
 open app3d/camera_rig
 open app3d/camera_bar
 open app3d/settings_dialog
 open shadow3d
 open app3d/ui_shell
+open sky
+open sky_hosek
 
 type DemoUiResource {
   paused: Bool
@@ -421,11 +428,19 @@ func main() ret Int {
   # day. This example is the renderer's realistic end; 113 is the
   # stylised one, and they deliberately use different kinds behind the
   # same interface.
-  # NO SKY on this path — the sky interface is deferred-only, so the background
-  # is the scene's clear colour. The SUN is still driven by the panel, because
-  # that part is app-side arithmetic: the time of day, date and latitude move
-  # the light and therefore the shading and shadows, and only the backdrop is
-  # missing.
+  # The fitted table, read once. Cooking a sky from it afterwards is
+  # arithmetic, which is what lets the time-of-day slider drive it per frame.
+  # Same numbers as the deferred twin, or the pair would be comparing skies
+  # rather than renderers.
+  let hosekData: HosekDataset = loadDefaultHosekDataset()
+  let skyTurbidity: Float = 2.5
+  let skyGroundAlbedo: Float = 0.25
+  # HELD BY THE APP, not by the renderer. The deferred twin hands its sky to
+  # createDeferredRendererWithUiSky because its lighting pass needs it from
+  # inside the frame graph; here the sky is one draw the app makes itself, so it
+  # sits next to `light` — the other thing the panel drives every frame.
+  var sky: Sky = settingsBuildSky(s: settings, data: hosekData,
+                                  turbidity: skyTurbidity, groundAlbedo: skyGroundAlbedo)
   var renderer: Renderer3d = createRenderer3dWithUi()
   light.sunDir = settingsSunDir(s: settings)
   light.sunColor = settingsSunColor(s: settings)
@@ -549,7 +564,10 @@ func main() ret Int {
       }
     }
     if settingsChanged {
-      # No sky to rebuild here; the sun still moves.
+      # The sky is REBUILT, not nudged: a Hosek sky is a cook, and the panel can
+      # move turbidity's inputs (sun height) as well as the sun itself.
+      sky = settingsBuildSky(s: settings, data: hosekData,
+                             turbidity: skyTurbidity, groundAlbedo: skyGroundAlbedo)
       light.sunDir = settingsSunDir(s: settings)
       light.sunColor = settingsSunColor(s: settings)
       # Pause is the shared control now; uiState still owns the flag the rest
@@ -706,6 +724,10 @@ func main() ret Int {
           # the metaball clusters itself, where the deferred path needs
           # renderSceneSdf as its own G-buffer write.
           beginScene(camera: camera, light: light, aspect: aspect, time: simTime)
+          # BEFORE the geometry, and writing no depth, so everything drawn
+          # after it covers it normally. It is the background, not a backdrop
+          # object at the far plane.
+          drawSky(sky: sky, light: light)
           if uiState.activeScene is 1 {
             renderScene(scene: scene1.scene)
           }

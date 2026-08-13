@@ -46,6 +46,10 @@
 import core
 import shadow3d
 open shadow3d
+# The sky the forward background draws (#418). sky.rae does not import this,
+# so the dependency runs one way only.
+import sky
+open sky
 import math
 open vec3
 open scene3d
@@ -129,6 +133,74 @@ func beginScene(camera: view Camera3d, light: view Light3d, aspect: view Float, 
   setVec3At(frame: frame, base: 30, v: light.ambGround)
   setVec3At(frame: frame, base: 33, v: light.clearColor)
   begin(frame: frame.data.data, count: 36)
+}
+
+# ----- the sky (#418) -------------------------------------------------
+#
+# The background, for the FORWARD frame. The deferred path gets its sky from
+# gbuffer.lightingPassSky, which can compute it for every pixel the G-buffer
+# left empty; there is no G-buffer here, so the same shader runs as a
+# fullscreen draw at the start of the scene pass instead. One shader, shared in
+# runtime_sky_wgsl.h — examples 111 and 112 are the same scene under the two
+# renderers, and they must not disagree about what the sky looks like.
+#
+# OPT IN, one line, between beginScene and the geometry:
+#
+#     beginScene(camera: camera, light: light, aspect: aspect, time: t)
+#     drawSky(sky: sky, light: light)
+#     renderScene(scene: scene)
+#
+# An app that does not write that line keeps the flat clear colour.
+func skyHosekPush(index: Int, value: Float) extern
+func skyDraw(skyKind: Float, turbidity: Float, skyExposure: Float, sunSizeRad: Float,
+             sunX: Float, sunY: Float, sunZ: Float,
+             sunR: Float, sunG: Float, sunB: Float,
+             zenR: Float, zenG: Float, zenB: Float, bands: Float,
+             horR: Float, horG: Float, horB: Float, discI: Float,
+             clearR: Float, clearG: Float, clearB: Float) extern
+
+# Three vec4 per channel: [A B C D][E F G H][I radiance _ _], matching `hosek`
+# in the WGSL. The deferred path has the same walk in lib/gbuffer.rae, and the
+# two stay separate because a Rae extern's C name follows its module — they
+# land in the ONE table in runtime_sky_state.h, so the duplication is in how
+# the values are handed over, never in the values themselves.
+func pushForwardHosekChannel(c: view HosekChannel, base: view Int) {
+  skyHosekPush(index: base + 0, value: c.a)
+  skyHosekPush(index: base + 1, value: c.b)
+  skyHosekPush(index: base + 2, value: c.c)
+  skyHosekPush(index: base + 3, value: c.d)
+  skyHosekPush(index: base + 4, value: c.e)
+  skyHosekPush(index: base + 5, value: c.f)
+  skyHosekPush(index: base + 6, value: c.g)
+  skyHosekPush(index: base + 7, value: c.h)
+  skyHosekPush(index: base + 8, value: c.i)
+  skyHosekPush(index: base + 9, value: c.radiance)
+}
+
+# The SUN comes from the light, not from the sky, which is the same choice
+# lightingPassSky makes: the disc the camera sees and the shadows on the ground
+# then come from one direction by construction. A sky whose own sunDir differs
+# is telling the renderer where its HDRI's sun is (#403), not where to put the
+# shadows.
+func drawSky(sky: view Sky, light: view Light3d) pub {
+  # Before the draw: the pass copies whatever is in the table, so pushing
+  # afterwards would show last frame's sky.
+  pushForwardHosekChannel(c: sky.hosek.r, base: 0)
+  pushForwardHosekChannel(c: sky.hosek.g, base: 12)
+  pushForwardHosekChannel(c: sky.hosek.b, base: 24)
+  skyDraw(
+    skyKind: skyKindCode(sky: sky), turbidity: sky.turbidity,
+    skyExposure: sky.exposure, sunSizeRad: sky.sunAngularRadius,
+    sunX: light.sunDir.x, sunY: light.sunDir.y, sunZ: light.sunDir.z,
+    sunR: light.sunColor.x, sunG: light.sunColor.y, sunB: light.sunColor.z,
+    zenR: sky.zenithColor.x, zenG: sky.zenithColor.y, zenB: sky.zenithColor.z,
+    bands: sky.bands,
+    horR: sky.horizonColor.x, horG: sky.horizonColor.y, horB: sky.horizonColor.z,
+    discI: sky.sunDiscIntensity,
+    # Kind 0 shows this and nothing else, so an app can bind a `none` sky and
+    # get exactly the background it had before it called this at all.
+    clearR: sky.clearColor.x, clearG: sky.clearColor.y, clearB: sky.clearColor.z
+  )
 }
 
 # Build a model matrix from a typed transform: M = T * Rz * Ry * Rx * S.

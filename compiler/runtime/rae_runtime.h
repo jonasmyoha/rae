@@ -573,9 +573,20 @@ rae_String rae_ext_rae_str_cstr_ptr(const char** s); // Legacy/helper
 int64_t rae_ext_nextTick(void);
 int64_t rae_ext_nowMs(void);
 
-/* Cooked Hosek-Wilkie coefficients for the deferred sky, pushed from Rae.
- * index 0..35, laid out three vec4 per channel. */
+/* Cooked Hosek-Wilkie coefficients, pushed from Rae. index 0..35, laid out
+ * three vec4 per channel. Two entry points, ONE table (runtime_sky_state.h):
+ * the deferred sky is bound through lib/gbuffer.rae and the forward one
+ * through lib/gpu3d.rae, and a Rae extern's C name follows its module. */
 void rae_ext_gbuffer_skyHosekPush(int64_t index, float value);
+void rae_ext_gpu3d_skyHosekPush(int64_t index, float value);
+/* The forward background. Called between gpu3d.begin and the geometry; takes
+ * no camera because the frame's own is used. */
+void rae_ext_gpu3d_skyDraw(float skyKind, float turbidity, float skyExposure, float sunSizeRad,
+                           float sunX, float sunY, float sunZ,
+                           float sunR, float sunG, float sunB,
+                           float zenR, float zenG, float zenB, float bands,
+                           float horR, float horG, float horB, float discI,
+                           float clearR, float clearG, float clearB);
 int64_t rae_ext_nowNs(void);
 void rae_ext_rae_sleep(int64_t ms);
 rae_String rae_ext_time_formatTimestamp(int64_t epoch_ms);
