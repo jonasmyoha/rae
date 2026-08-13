@@ -1,16 +1,13 @@
 # Rae Programming Language
 
-A language for code that humans and AI agents both have to read.
+[![XKCD 927: Standards](https://imgs.xkcd.com/comics/standards.png)](https://xkcd.com/927/)
 
-Rae compiles to C. It is explicit where most languages are implicit — what a
-function does to your data is in its signature, what a call means is at the call
-site — because both a person skimming at midnight and a model editing at scale
-do better with a language that says what it is doing.
+A minimalistic language for code that humans and AI agents both have to read.
 
-**Early days.** The compiler, the standard library, the 2D and 3D renderers and
-the UI stack all work and are exercised by 318 test cases and 67 examples. The
-language is not stable, there is no package ecosystem, and the sharp edges are
-real. Read this as an account of what runs today, not a promise about tomorrow.
+Few concepts, few special cases, and nothing implicit. What a function does to
+your data is in its signature; what a call means is at the call site. That suits
+a person skimming at midnight and a model editing at scale for the same reason:
+neither has to hold the missing half in their head.
 
 ## A taste
 
@@ -73,24 +70,14 @@ func main() {
   value" should never be a thing you have to guess or go and check.
 - **`{}` is how a value becomes text.** Interpolation evaluates expressions and
   calls, so printing does not need a formatting mini-language.
-- **No visibility keyword.** Everything is visible across files, so there is no
-  `pub` to sprinkle and no false signal that something nearby is private.
-- **`camelCase` functions, `PascalCase` types.** Normative, and followed
-  throughout the tree — though the compiler does not yet reject a violation.
 
-## What runs today
+## Targets
 
-**Compiled (C backend)** is the default and the only target that matters for new
-work. `rae build` emits C and links a native binary.
+**Compiled** is the default: the compiler emits C and links a native binary.
 
 **Browser WASM** builds the same source into an SDL3 + WebGPU bundle with
-Emscripten, or a headless WASI module for programs that only print. Around fifty
-of the examples run in a browser.
-
-**Live (bytecode VM)** is preserved but unsupported. It is still invocable with
-`--target live`, and it is not a compatibility target for new language work; see
-`docs/live-vm-status.md`. **Hybrid** packages a compiled host with Live bundles
-and is in the same category.
+Emscripten, or a headless WASI module for programs that only print. 52 of the 67
+examples run in a browser.
 
 Built on top, all in Rae except the raw GPU and platform calls:
 
@@ -119,15 +106,42 @@ browser bundle; `rae watch` rebuilds and restarts on save, and an app using
 `lib/hot_reload` keeps its state across the restart. `rae init` scaffolds a
 project. `rae format` pretty-prints.
 
-Run the test suite with `make -C compiler test`.
+Run the test suite with `make -C compiler test` — 318 cases.
+
+## Devtools: the best way to see this
+
+[**rae-devtools-web**](https://github.com/jonaskivi/rae-devtools-web) is a local
+dashboard that browses every example, runs each one natively or in the browser
+with a click, and shows build health, the test tree and history.
+
+```sh
+git clone git@github.com:jonaskivi/rae-devtools-web.git   # next to this repo
+cd rae-devtools-web && bun install && make dev            # http://localhost:3000
+```
+
+Start on the **Featured** tab — a cross-section of what the language can do:
+
+| | |
+|---|---|
+| **Metaballs (deferred rendering)** | the 3D renderer, with a settings panel and a sky that moves with the time of day |
+| **3D Renderer — Walker Character** | a skinned, animated glTF character |
+| **Mobile UI — GPU2D** | a phone-shaped application at real app scale |
+| **2D Renderer — Vector shapes** | the 2D renderer's shape pipeline |
+| **Raytracer — GPU + MTSDF text** | a path tracer on the GPU with a crisp text overlay |
+| **Pong** and **Tetris 2D** | complete little games |
+| **Functions and interpolation** | one step past hello world, no graphics |
+
+The two UI examples are worth opening next: `104_ui_hello` is a value and three
+buttons — the smallest thing that is still an application — and `105_ui_counter`
+is the same idea with a `.raescene` layout, a theme and a list rebuilt from data.
+
+The dashboard runs examples Compiled by default, and the ones that support it
+also run in an embedded WebGPU canvas.
 
 ## Where to look next
 
 | | |
 |---|---|
-| `examples/104_ui_hello` | the smallest real application: a value and three buttons |
-| `examples/105_ui_counter` | the same idea with a scene, a theme and a list rebuilt from data |
-| `examples/112_metaballs_deferred` | the 3D renderer, with a settings panel and a live sky |
 | `spec/rae.md` | the language spec |
 | `docs/` | 72 design notes, including the ownership model and the renderer architecture |
 | `examples/` | 67 programs, from hello world up |
