@@ -452,6 +452,9 @@ static AstStmt* clone_stmt(Arena* arena, const AstStmt* stmt) {
             res->as.if_stmt.condition = clone_expr(arena, stmt->as.if_stmt.condition);
             res->as.if_stmt.then_block = clone_block(arena, stmt->as.if_stmt.then_block);
             res->as.if_stmt.else_block = clone_block(arena, stmt->as.if_stmt.else_block);
+            // The `if let` binding is part of the statement; without this a
+            // generic instantiation would silently lose it.
+            res->as.if_stmt.binding = clone_stmt(arena, stmt->as.if_stmt.binding);
             break;
         case AST_STMT_LOOP:
             res->as.loop_stmt.init = clone_stmt(arena, stmt->as.loop_stmt.init);
@@ -1167,6 +1170,11 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             break;
         }
         case AST_STMT_IF: {
+            if (stmt->as.if_stmt.binding) {
+                // The binding is introduced before the condition, and its name
+                // is visible in the then-branch. Scope handling below.
+                sema_analyze_stmt(ctx, module, symbols, stmt->as.if_stmt.binding, current_return_type);
+            }
             if (stmt->as.if_stmt.condition) sema_analyze_expr(ctx, module, symbols, stmt->as.if_stmt.condition);
             if (stmt->as.if_stmt.then_block) {
                 symbol_table_push_scope(symbols);
