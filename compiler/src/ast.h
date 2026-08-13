@@ -312,6 +312,10 @@ struct AstStmt {
       AstExpr* condition;
       AstBlock* then_block;
       AstBlock* else_block;
+      // `if let` (spec 4.2): the binding introduced before the condition is
+      // evaluated. NULL for a plain `if`. The backend wraps the whole
+      // statement in a C block so the name does not outlive the construct.
+      AstStmt* binding;
     } if_stmt;
     struct {
       AstStmt* init;
