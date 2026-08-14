@@ -1,0 +1,36 @@
+# Spec 4.2: `if let` applies the 2.3.1 matrix unchanged — the binding form
+# must match what the optional holds and where it lives. Three mismatches:
+# viewing a produced OWNED optional (nothing would own the value), taking
+# ownership from a stored optional (hides a deep copy of a place), and
+# taking ownership from an optional REFERENCE (there is no value to take).
+type Track {
+  title: String
+  seconds: Int
+}
+type Library {
+  maybe: opt Track
+}
+func getTrack() ret opt Track {
+  ret Track { title: "Fresh", seconds: 7 }
+}
+func getView(lib: view Library) ret opt view Track {
+  ret none
+}
+func viewProduced() {
+  if let track: view Track => getTrack() {
+    log("{track.title}")
+  }
+}
+func takeFromPlace(lib: view Library) {
+  if let track: Track = lib.maybe {
+    log("{track.title}")
+  }
+}
+func takeFromReference(lib: view Library) {
+  if let track: Track = getView(lib: view lib) {
+    log("{track.title}")
+  }
+}
+func main() {
+  log("should not run")
+}
