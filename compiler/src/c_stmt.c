@@ -816,6 +816,25 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             }
             if (is_ref_bind) {
                 Str base = get_base_type_name(stmt->as.let_stmt.type);
+                // Does the source ident ALREADY lower to a reference — a
+                // view/mod param or an earlier alias binding? Then it is a
+                // pointer (struct) or a .ptr handle (primitive), and `&` on
+                // it aliases the stack slot holding the pointer instead of
+                // the referent: `rae_Track* y = &x` with x already
+                // rae_Track* wrote 42 into the pointer cell and the caller
+                // never saw it (#461).
+                bool src_is_ref_local = false;
+                if (stmt->as.let_stmt.value
+                    && stmt->as.let_stmt.value->kind == AST_EXPR_IDENT) {
+                    Str vn = stmt->as.let_stmt.value->as.ident;
+                    for (int i = (int)ctx->local_count - 1; i >= 0; i--) {
+                        if (str_eq(ctx->locals[i], vn)) {
+                            const AstTypeRef* lt = ctx->local_type_refs[i];
+                            if (lt && (lt->is_view || lt->is_mod)) src_is_ref_local = true;
+                            break;
+                        }
+                    }
+                }
                 if (is_primitive_type(base)) {
                     // Check if the value is a function call returning a ref type
                     // (can't take address of rvalue — assign directly)
@@ -829,6 +848,12 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     if (value_returns_ref) {
                         // Function already returns ref wrapper — assign directly
                         emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false);
+                    } else if (src_is_ref_local) {
+                        // The source is itself a .ptr handle: alias the same
+                        // referent, not the handle's own stack slot.
+                        fprintf(out, "{ .ptr = %.*s.ptr }",
+                                (int)stmt->as.let_stmt.value->as.ident.len,
+                                stmt->as.let_stmt.value->as.ident.data);
                     } else {
                         // Primitive ref: rae_Mod_Int64 r = { .ptr = &x };
                         fprintf(out, "{ .ptr = &");
@@ -868,6 +893,18 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         emit_type_ref_as_c_type(ctx, stmt->as.let_stmt.type, out, false);
                         fprintf(out, ")");
                         emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_UNARY, false, false);
+                    } else if (src_is_ref_local) {
+                        // The source is already a T* (view/mod param or an
+                        // earlier alias): alias the referent directly. Emit
+                        // the raw name — emit_expr would dereference a
+                        // reference ident in value context. Cast for the
+                        // const difference between view and mod lowering;
+                        // read-only is enforced at the Rae level.
+                        fprintf(out, "(");
+                        emit_type_ref_as_c_type(ctx, stmt->as.let_stmt.type, out, false);
+                        fprintf(out, ")%.*s",
+                                (int)stmt->as.let_stmt.value->as.ident.len,
+                                stmt->as.let_stmt.value->as.ident.data);
                     } else {
                         fprintf(out, "&");
                         emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, true);

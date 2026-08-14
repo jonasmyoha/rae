@@ -1194,6 +1194,41 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 if (!t && stmt->as.let_stmt.value->resolved_type) t = stmt->as.let_stmt.value->resolved_type;
                 if (t) ensure_type_match(ctx, t, &stmt->as.let_stmt.value);
             }
+            // A `mod` binding mints mutable access, so its source must be
+            // mutable: an owned place, a mod param, a mod binding, or a call
+            // returning `mod T`. A view of any shape cannot be promoted —
+            // before this check, `let y: mod T => x` with `x: view T`
+            // compiled and the writes silently vanished (#460).
+            if (stmt->as.let_stmt.is_bind && stmt->as.let_stmt.type
+                && stmt->as.let_stmt.type->is_mod && stmt->as.let_stmt.value) {
+                const AstExpr* src = stmt->as.let_stmt.value;
+                while (src && (src->kind == AST_EXPR_MEMBER || src->kind == AST_EXPR_INDEX)) {
+                    src = (src->kind == AST_EXPR_MEMBER) ? src->as.member.object
+                                                         : src->as.index.target;
+                }
+                bool src_is_view = false;
+                if (src && src->kind == AST_EXPR_IDENT) {
+                    Symbol* ssym = symbol_table_lookup(symbols, src->as.ident);
+                    if (ssym && ((ssym->type && ssym->type->kind == TYPE_REF
+                                  && !ssym->type->as.ref.is_mod)
+                                 || (ssym->is_immutable
+                                     && ssym->bind_kind == BIND_READONLY_REF))) {
+                        src_is_view = true;
+                    }
+                } else if (src && src->kind == AST_EXPR_CALL && src->decl_link
+                           && src->decl_link->kind == AST_DECL_FUNC) {
+                    const AstFuncDecl* sfd = &src->decl_link->as.func_decl;
+                    if (sfd->returns && sfd->returns->type
+                        && sfd->returns->type->is_view && !sfd->returns->type->is_mod) {
+                        src_is_view = true;
+                    }
+                }
+                if (src_is_view) {
+                    diag_error(module->file_path, (int)stmt->line, (int)stmt->column,
+                               "cannot bind 'mod' to a read-only view: a view cannot be promoted to mutable access");
+                    module->had_error = true;
+                }
+            }
             // `let` and `const` are immutable bindings; only `var` may be
             // reassigned. (Mutating the value a `let` points at — container
             // methods, field/index writes — is unaffected; this only governs
@@ -1348,8 +1383,14 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     char buffer[200];
                     int nl = (int)stmt->as.assign_stmt.target->as.ident.len;
                     const char* nm = stmt->as.assign_stmt.target->as.ident.data;
+                    bool is_view_alias = sym->type && sym->type->kind == TYPE_REF
+                                         && !sym->type->as.ref.is_mod;
                     if (sym->bind_kind == BIND_CONST) {
                         snprintf(buffer, sizeof(buffer), "cannot assign to constant '%.*s'", nl, nm);
+                    } else if (is_view_alias) {
+                        // Suggesting `var` here would be a second error:
+                        // aliases are bind-once. The problem is the VIEW.
+                        snprintf(buffer, sizeof(buffer), "cannot assign through read-only view '%.*s'; bind with 'mod' to write through an alias", nl, nm);
                     } else if (sym->bind_kind == BIND_LET) {
                         snprintf(buffer, sizeof(buffer), "cannot reassign immutable 'let' binding '%.*s'; declare it with 'var' to allow reassignment", nl, nm);
                     } else {
@@ -1358,17 +1399,33 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     diag_error(module->file_path, (int)stmt->line, (int)stmt->column, buffer);
                     module->had_error = true;
                 }
-            } else if (stmt->as.assign_stmt.target->kind == AST_EXPR_MEMBER &&
-                       stmt->as.assign_stmt.target->as.member.object->kind == AST_EXPR_IDENT) {
-                // Mutating a FIELD. Only a read-only borrow (view param) forbids
-                // this — a `let`/`var` binding's value is mutable, only rebinding
-                // the local is governed by let/var.
-                Symbol* sym = symbol_table_lookup(symbols, stmt->as.assign_stmt.target->as.member.object->as.ident);
-                if (sym && sym->is_immutable && sym->bind_kind == BIND_READONLY_REF) {
+            } else if (stmt->as.assign_stmt.target->kind == AST_EXPR_MEMBER
+                       || stmt->as.assign_stmt.target->kind == AST_EXPR_INDEX) {
+                // Mutating a FIELD or element. Two read-only shapes forbid it:
+                //   - a view PARAM (bind_kind BIND_READONLY_REF), and
+                //   - a view BINDING (`let v: view T => x`), whose bind_kind is
+                //     BIND_LET but whose TYPE is a non-mod reference. The old
+                //     check only knew the first, so writes through a view
+                //     binding compiled and mutated the original (#459).
+                // Walk nested access (a.b.c, a[i].b) to the base name; the
+                // read-only property belongs to the base.
+                const AstExpr* base = stmt->as.assign_stmt.target;
+                while (base && (base->kind == AST_EXPR_MEMBER || base->kind == AST_EXPR_INDEX)) {
+                    base = (base->kind == AST_EXPR_MEMBER) ? base->as.member.object
+                                                           : base->as.index.target;
+                }
+                Symbol* sym = (base && base->kind == AST_EXPR_IDENT)
+                              ? symbol_table_lookup(symbols, base->as.ident) : NULL;
+                bool is_view_binding = sym && sym->type
+                    && ((sym->type->kind == TYPE_REF && !sym->type->as.ref.is_mod)
+                        || (sym->type->kind == TYPE_OPT && sym->type->as.opt.base
+                            && sym->type->as.opt.base->kind == TYPE_REF
+                            && !sym->type->as.opt.base->as.ref.is_mod));
+                if (sym && ((sym->is_immutable && sym->bind_kind == BIND_READONLY_REF)
+                            || is_view_binding)) {
                     char buffer[160];
-                    snprintf(buffer, sizeof(buffer), "cannot mutate field of read-only view '%.*s'",
-                        (int)stmt->as.assign_stmt.target->as.member.object->as.ident.len,
-                        stmt->as.assign_stmt.target->as.member.object->as.ident.data);
+                    snprintf(buffer, sizeof(buffer), "cannot mutate through read-only view '%.*s'",
+                        (int)base->as.ident.len, base->as.ident.data);
                     diag_error(module->file_path, (int)stmt->line, (int)stmt->column, buffer);
                     module->had_error = true;
                 }

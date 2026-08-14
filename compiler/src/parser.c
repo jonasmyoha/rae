@@ -2007,6 +2007,12 @@ static AstStmt* parse_binding_statement(Parser* parser, const Token* kw_token, b
     if (is_const) {
         parser_error(parser, parser_previous(parser), "'const' is a value, not an alias binding; use '='");
     }
+    // Aliases are bind-once (spec 2.2): rebinding is already rejected, so a
+    // `var` alias's var-ness could never be exercised — it would only
+    // misinform the reader.
+    if (is_var) {
+        parser_error(parser, parser_previous(parser), "aliases are bind-once; declare with 'let', not 'var'");
+    }
     if (!type || (!type->is_view && !type->is_mod)) {
         parser_error(parser, parser_previous(parser), "'=>' is only legal when the target type is mod T or view T");
     }
