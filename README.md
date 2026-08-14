@@ -114,6 +114,77 @@ library's own track rather than a copy of it.
   big the type is or what it holds. `=>` is required wherever the type contains
   `view` or `mod`, and refused everywhere else.
 
+## Refactoring stability: change the type, keep the meaning
+
+In most mainstream languages, what `=` does depends on the type. That makes a
+type change a semantic change — in lines that never appear in the diff.
+
+Dart, for example:
+
+```dart
+int process(int x) {
+  var y = x;      // copy: ints are values
+  y = 42;
+  return x;       // x is untouched
+}
+```
+
+Someone later promotes `int` to a class:
+
+```dart
+Track process(Track x) {
+  var y = x;      // same line — now an ALIAS: classes are references
+  y.value = 42;   // mutates the caller's object
+  return x;       // x is not what the caller sent
+}
+```
+
+`var y = x` silently changed from copy to alias. The line didn't change; the
+diff doesn't contain it; no call site admits that callers' objects now get
+mutated. Java, C#, Python, JavaScript and Kotlin work the same way — primitives
+copy, objects alias, and the boundary between the two is the type, not the
+code. Swift has the same flip one level up: turn a `struct` into a `class` and
+every `let y = x` in the program quietly stops copying. (C and C++ copy on
+assignment and spell aliasing in the type, and Rust's `=` flips between copy
+and move — but the borrow checker turns misuse into errors rather than silent
+behaviour, which is the part that matters.)
+
+In Rae the operator carries the meaning, so the meaning survives the refactor:
+
+```rae
+func process(x: view Track) ret Track {
+  var y: Track = x     # still a copy — `=` copies, whatever the type
+  y.value = 42         # mutates the copy only
+  ret x                # x is untouched, same as the Int version
+}
+```
+
+If aliasing is what you want, you have to say so — and saying so propagates:
+
+```rae
+func process(x: mod Track) ret Track {   # the signature must say mod
+  let y: mod Track => x                  # `=>` binds; `=` would refuse
+  y.value = 42                           # writes to the caller's track
+  ret x
+}
+```
+
+Now every caller reads `process(x: mod track)` — the mutation is admitted at
+the signature, at the call site, and at the binding. A read-only window can't
+be promoted along the way (`mod Track => x` is an error when `x` is `view`),
+and writing through a view is an error, full stop:
+
+```rae
+let v: view Track => x
+v.value = 42          # ERROR: v is a view
+```
+
+So the `Int` → `Track` refactor cannot silently succeed with a changed
+meaning. Either the behaviour is identical, or the compiler stops on every
+line whose intent has to be restated. For a human that is a safety property.
+For an AI agent editing hundreds of files, it is the difference between a type
+migration and a bug-injection campaign.
+
 ## Targets
 
 **Compiled** is the default: the compiler emits C and links a native binary.
