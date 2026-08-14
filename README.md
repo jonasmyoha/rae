@@ -80,9 +80,9 @@ func nowPlaying(lib: view Library) ret opt view Track {
   ret view lib.current
 }
 
-# `if let` narrows it to a reference for the branch. `=>` binds; `=` would copy,
-# and is rejected here — a conditional binding has no business duplicating a
-# value.
+# `if let` narrows it to a reference for the branch. `=>` binds — required
+# here because the optional holds a reference, and `=` never produces a
+# shared handle.
 if let track: view Track => nowPlaying(lib: view lib) {
   log("playing {track.title} — {formatDuration(seconds: track.seconds)}")
 } else {

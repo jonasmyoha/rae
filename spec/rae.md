@@ -172,8 +172,11 @@ The second line stays legal because the source's `view` declaration is in
 local scope — the reader sees both the viewness and the copy on adjacent
 lines.
 
-`if let` is the one deliberate exception to the first rule, and it is not a
-hidden owner: see §4.2.
+`if let` is NOT an exception to this table — it is the same matrix with a
+presence test in front. An owned optional produced by a call is taken with
+`= ` (ownership transfer); a reference optional is narrowed with `=>`; a view
+binding to a produced owned optional is rejected here for the same reason as
+above (§4.2).
 
 ### 2.4 Type Visibility Rule
 
@@ -274,18 +277,57 @@ if let track: view Track => library.current {
 }
 ```
 
-*   The binding target MUST be `view T` or `mod T`, and the operator MUST be
-    `=>`. This follows from §2.2: `=>` is the binding operator, and it is legal
-    only for those two target types.
-*   **`=` is NOT permitted in `if let`.** `=` means copy (§2.3), and `if let`
-    exists to give access to a value, not to duplicate one. A copy is written as
-    an ordinary statement inside the branch, where it is visible as a copy:
+`if let` adds a presence test to an ordinary binding — nothing more. It does
+not create an owner, extend a lifetime, or change what `=` and `=>` mean. Which
+form is legal therefore follows entirely from §2.3.1, applied to the payload:
+
+*   **`=>` with `view T` / `mod T`** is legal exactly where a plain binding to
+    the payload would be: when the optional is a **reference** (`opt view T`,
+    `opt mod T` — the reference already names storage that exists elsewhere),
+    or when it is an owned optional stored in a **place** (a field, an element,
+    a named binding — the payload's storage is the place itself, and the view
+    points into it). `library.current` above is the place case.
+*   **`= ` with owned `T`** is legal when the right-hand side is a **produced**
+    owned optional — a call returning `opt T`. This is ownership transfer, the
+    same `=` as `let t: Track = makeTrack()`: the binding takes the fresh
+    payload, owns it for the branch (an ordinary lexical scope), and drops it
+    at the end. Nothing pre-existing is copied, so no copy is hidden.
+
+```rae
+if let track: Track = getTrack() {      # getTrack() ret opt Track — take it
+    log("{track.title}")
+}
+
+if let track: view Track => getTrackView() {   # ret opt view Track — view it
+    log("{track.title}")
+}
+```
+
+*   The combinations those rules exclude are errors for the same reasons as
+    their plain-`let` counterparts (§2.3.1):
+
+```rae
+if let track: view Track => getTrack()   # ERROR: an owned result has no owner
+                                         # here — a view binding refuses
+                                         # ownership, and `if` adds only a
+                                         # presence test, not an owner
+if let track: Track = library.current    # ERROR: hides a deep copy of a place;
+                                          # view it, and copy in the branch
+```
+
+    A copy from a place is written as an ordinary statement inside the branch,
+    where it is visible as a copy:
 
 ```rae
 if let track: view Track => library.current {
     let mine: Track = track          # explicit copy, if one is wanted
 }
 ```
+
+This is a design pressure, not a workaround: a function that wants callers to
+**view** must say so in its type — `ret opt view Track`. A function declaring
+`ret opt Track` is offering ownership, and the caller takes it or does not
+call.
 
 *   The binding is in scope only within the `if` branch. It is not in scope in
     the `else` branch, where by definition there is no value.
@@ -298,11 +340,11 @@ if let track: mod Track => library.current {
 }
 ```
 
-`if let` NARROWS an optional: inside the branch, the name denotes a `view T` or
-`mod T` onto the payload, and the branch is entered only when there is one. The
-optional it narrows may be an `opt T`, an `opt view T` or an `opt mod T` — in the
-last two, narrowing yields a reference to the same storage the optional
-referenced, not a second level of indirection.
+`if let` NARROWS an optional: inside the branch, the name denotes the payload —
+owned, `view T` or `mod T`, per the rules above — and the branch is entered only
+when there is one. For `opt view T` and `opt mod T`, narrowing yields a
+reference to the same storage the optional referenced, not a second level of
+indirection.
 
 Narrowing is the preferred way to reach the value inside an optional even where
 a local of reference-optional type would be legal, because absence is handled
@@ -310,19 +352,17 @@ structurally by the branch rather than by a check the programmer must remember
 to write.
 
 The right-hand side may be any expression producing an optional, including a
-function call:
+function call — the binding form just has to match what the call hands back:
 
 ```rae
-if let seconds: view Int => durations.get(k: "intro") { ... }
+if let seconds: Int = durations.get(k: "intro") { ... }        # opt Int: take it
+if let track: view Track => byName.viewGet(key: "intro") { ... } # opt view: view it
 ```
 
-When the optional is a produced value (a call returning `opt T`), the **if
-statement itself owns that value**: it lives exactly as long as the statement,
-and is dropped when the statement ends. The binding views its payload. This is
-why `if let` may bind a produced value while a plain `let` may not (§2.3.1) —
-here the owner is not hidden, it is the construct the programmer is looking
-at, with a lifetime the reader can see: the branch. No copy of the payload is
-made.
+(Earlier drafts let a `view` binding take a produced owned optional by making
+the if statement own the value. That was an invented ownership rule — an owner
+appearing in no declaration, existing for one statement kind only — and it is
+withdrawn. §2.3.1 applies inside `if let` unchanged.)
 
 `is none` and `is not none` remain available and are preferred where the value
 itself is not wanted:
