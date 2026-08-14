@@ -7,6 +7,7 @@
 
 #include "c_backend.h"
 #include "c_backend_internal.h"
+#include "diag.h"
 #include "mangler.h"
 #include "ownership.h"
 #include "sema.h"
@@ -1502,8 +1503,60 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     fprintf(out, "){ .ptr = &"); emit_expr(ctx, ret_val, out, PREC_LOWEST, true, true);
                     fprintf(out, " }");
                 } else if (is_ref_return) {
-                    fprintf(out, "&");
-                    emit_expr(ctx, ret_val, out, PREC_UNARY, true, true);
+                    /* Taking the address of a Rae function's result is
+                     * wrong in both directions, and which way depends on
+                     * what the callee hands back.
+                     *
+                     * Forwarding a reference — `ret view nowPlaying(...)`
+                     * where nowPlaying itself returns `opt view Track` —
+                     * already has a pointer in hand, so `&` would build a
+                     * pointer-to-pointer. Emit the call bare.
+                     *
+                     * Returning a reference to a VALUE result — the
+                     * `tracks.at(index: i)` shape, where `at` is declared
+                     * `ret T` — names a temporary that dies with this
+                     * frame. That is a Rae error, not something to lower
+                     * into C that cannot build.
+                     *
+                     * Intrinsics and externs are the exception, and they
+                     * are why this cannot be a blanket "calls are not
+                     * lvalues" rule: `ret view rae_ext_rae_buf_get(...)`
+                     * is how the standard library spells a reference INTO
+                     * a buffer (componentView, componentMod, sceneNodeAt).
+                     * It lowers to element indexing, so it is an lvalue
+                     * and `&` on it is exactly right. */
+                    const AstExpr* inner = ret_val;
+                    if (inner->kind == AST_EXPR_UNARY
+                        && (inner->as.unary.op == AST_UNARY_VIEW
+                            || inner->as.unary.op == AST_UNARY_MOD)) {
+                        inner = inner->as.unary.operand;
+                    }
+                    const AstDecl* dl = inner->decl_link;
+                    bool callee_is_rae_func = dl && dl->kind == AST_DECL_FUNC
+                                              && !dl->as.func_decl.is_extern;
+                    bool yields_ref =
+                        (callee_is_rae_func && dl->as.func_decl.returns
+                         && dl->as.func_decl.returns->type
+                         && (dl->as.func_decl.returns->type->is_view
+                             || dl->as.func_decl.returns->type->is_mod))
+                        || (inner->resolved_type && inner->resolved_type->kind == TYPE_REF);
+                    /* An unresolved METHOD_CALL is the `tracks.at(...)`
+                     * shape: no method in the standard library returns a
+                     * reference, so its result is always a temporary. */
+                    bool is_temp_call = (inner->kind == AST_EXPR_METHOD_CALL && !yields_ref)
+                                        || (inner->kind == AST_EXPR_CALL && callee_is_rae_func
+                                            && !yields_ref);
+                    bool forwards_ref = (inner->kind == AST_EXPR_CALL
+                                         || inner->kind == AST_EXPR_METHOD_CALL) && yields_ref;
+                    if (is_temp_call) {
+                        diag_error(ctx->module ? ctx->module->file_path : NULL,
+                                   (int)ret_val->line, (int)ret_val->column,
+                                   "cannot return a reference to a temporary: this call returns a "
+                                   "value, which does not outlive the function");
+                    }
+                    if (!forwards_ref && !is_temp_call) fprintf(out, "&");
+                    emit_expr(ctx, (forwards_ref || is_temp_call) ? inner : ret_val,
+                              out, PREC_UNARY, true, true);
                 } else if (wrap_ret_string_copy) {
                     // String alias source — deep-copy via rae_string_copy
                     // so the caller's binding owns an independent heap.

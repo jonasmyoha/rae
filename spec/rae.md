@@ -277,6 +277,52 @@ if found is none {
 *   They may appear in: function parameters, return types, and local bindings.
 *   They **MUST NOT** be used as members of types.
 
+#### 4.3.1 A returned reference must outlive the call
+
+A function that returns `view T` or `mod T` hands the caller a reference, so
+whatever it names **MUST** still exist after the function returns. Three
+things satisfy that, and only those three:
+
+*   a **parameter** (the caller owns that storage),
+*   a **global**, and
+*   anything reached through one of those — a field, an element, or a
+    reference returned by another function and forwarded on.
+
+A `let`/`var` in the function's own body does not: its storage dies at `ret`.
+Returning a reference to one is an error — *reference escapes local storage*.
+
+Neither does a **temporary** — a value produced by the expression itself,
+with no storage of its own. So a reference to a value-returning call is an
+error too:
+
+```rae
+func pick(tracks: view List(Track)) ret opt view Track {
+  ret view tracks.at(index: 0)   # ERROR: `at` returns T — a value
+}
+```
+
+`at` is declared `ret T`, so its result is a fresh value that dies with
+`pick`. To hand back a window into the list, the accessor itself has to
+return a reference. Forwarding one is fine, because the reference then names
+storage that already outlives both calls:
+
+```rae
+func forward(lib: view Library) ret opt view Track {
+  ret view nowPlaying(lib: view lib)   # OK: nowPlaying returns a reference
+}
+```
+
+The same rule applies to arguments: if a call returns a reference, passing it
+a temporary is an error, because the returned reference may point into
+something that dies at the end of the statement.
+
+```rae
+let a: mod Int => xMod({ x: 1 })   # ERROR: reference to a temporary literal
+```
+
+Passing a temporary to a `view` parameter of a **value**-returning function is
+fine — the temporary outlives the call.
+
 ---
 
 ## 5. Core Language Rules
