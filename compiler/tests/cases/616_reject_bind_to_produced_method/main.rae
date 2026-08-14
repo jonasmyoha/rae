@@ -1,0 +1,16 @@
+# The method-call twin of 615: `l.at(index:)` returns T (a VALUE — test 610
+# has the viewAt that returns a reference). sema cannot resolve UFCS calls,
+# so this rejection comes from the C backend's binding emitter.
+import core
+
+type Track {
+  title: String
+  seconds: Int
+}
+
+func main() {
+  var l: List(Track) = createList(Track, cap: 1)
+  l.add(value: Track { title: "first", seconds: 1 })
+  let e: view Track => l.at(index: 0)
+  log("should not run")
+}
