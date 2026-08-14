@@ -131,24 +131,41 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
       return;
     }
   }
+  /* Pass-throughs: the value is ALREADY an optional (a RaeAny box), so the
+   * box transfers as-is. Suppress the call emitter's auto-unbox — without
+   * this, an opt-returning call in opt-field position emitted
+   * `call().as.s`, assigning the raw payload into the RaeAny field, which
+   * does not compile (test 531). */
   if (c_expr_is_nonextern_opt_call(value)) {
+    bool saved_unbox = ctx->suppress_opt_unbox;
+    ctx->suppress_opt_unbox = true;
     emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+    ctx->suppress_opt_unbox = saved_unbox;
     return;
   }
   if (value->kind == AST_EXPR_METHOD_CALL
       && str_eq_cstr(value->as.method_call.method_name, "get")) {
+    bool saved_unbox = ctx->suppress_opt_unbox;
+    ctx->suppress_opt_unbox = true;
     emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+    ctx->suppress_opt_unbox = saved_unbox;
     return;
   }
   if (value->kind == AST_EXPR_CALL && value->as.call.callee
       && value->as.call.callee->kind == AST_EXPR_IDENT
       && str_eq_cstr(value->as.call.callee->as.ident, "get")) {
+    bool saved_unbox = ctx->suppress_opt_unbox;
+    ctx->suppress_opt_unbox = true;
     emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+    ctx->suppress_opt_unbox = saved_unbox;
     return;
   }
   const AstTypeRef* val_tr = infer_expr_type_ref(ctx, value);
   if (val_tr && val_tr->is_opt && !c_expr_is_extern_opt_string_call(value)) {
+    bool saved_unbox = ctx->suppress_opt_unbox;
+    ctx->suppress_opt_unbox = true;
     emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+    ctx->suppress_opt_unbox = saved_unbox;
     return;
   }
   if (val_tr) {
