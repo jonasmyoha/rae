@@ -1,0 +1,21 @@
+# Spec 2.3.1 / #454 #455: a reference binding cannot take an owned result.
+# A fresh value needs an owner; a view/mod binding refuses ownership by
+# definition. This test replaces 606, which pinned the materialisation rule
+# this reverses (#443). The honest spellings: `let t: Track = make()` to own
+# the value, or `l.viewAt(index:)` to view into existing storage (test 610).
+# The method-call shape is caught in the backend and pinned by 616.
+type Track {
+  title: String
+  seconds: Int
+}
+
+func make() ret Track {
+  ret Track { title: "made", seconds: 7 }
+}
+
+func main() {
+  let viaCall: view Track => make()
+  let viaMod: mod Track => make()
+  let viaLiteral: view Track => { title: "temp", seconds: 1 }
+  log("should not run")
+}
