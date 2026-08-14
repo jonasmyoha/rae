@@ -1,0 +1,36 @@
+# `if let <name>: T = <call>` (spec 4.2): ownership transfer of a produced
+# optional's payload — the same `=` as `let t: Track = makeTrack()`, guarded
+# by a presence test. The binding owns the payload for the branch (its String
+# field is dropped at branch end by the normal drop pass), the absent branch
+# takes `else`, and primitives ride the same rule.
+type Track {
+  title: String
+  seconds: Int
+}
+func getTrack(want: view Bool) ret opt Track {
+  if want is false {
+    ret none
+  }
+  ret Track { title: "Fresh", seconds: 7 }
+}
+func getSeconds(want: view Bool) ret opt Int {
+  if want is false {
+    ret none
+  }
+  ret 42
+}
+func main() {
+  if let track: Track = getTrack(want: true) {
+    log("owned narrowing: {track.title} / {track.seconds}")
+  } else {
+    log("owned narrowing: none")
+  }
+  if let track: Track = getTrack(want: false) {
+    log("unexpected: {track.title}")
+  } else {
+    log("absent branch taken")
+  }
+  if let seconds: Int = getSeconds(want: true) {
+    log("primitive: {seconds}")
+  }
+}
