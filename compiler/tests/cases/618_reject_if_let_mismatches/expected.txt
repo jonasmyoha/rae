@@ -1,0 +1,9 @@
+tests/cases/618_reject_if_let_mismatches/main.rae:20:6: this call returns an owned optional; a view/mod binding refuses ownership and nothing else would own the value — take it with 'if let <name>: T = ...' (spec 4.2)
+    20 |   if let track: view Track => getTrack() {
+       |      ^~~~
+tests/cases/618_reject_if_let_mismatches/main.rae:25:6: 'if let <name>: T = ...' takes ownership, so it needs a call producing 'opt T'; narrowing a stored optional copies — bind 'view T =>' and copy inside the branch if a copy is wanted (spec 4.2)
+    25 |   if let track: Track = lib.maybe {
+       |      ^~~~
+tests/cases/618_reject_if_let_mismatches/main.rae:30:6: this call returns an optional REFERENCE; narrow it with 'if let <name>: view T => ...' (or mod) instead of taking ownership
+    30 |   if let track: Track = getView(lib: view lib) {
+       |      ^~~~
