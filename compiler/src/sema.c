@@ -1229,6 +1229,27 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     module->had_error = true;
                 }
             }
+            // Spec 2.3.1: an owned binding cannot take a reference-returning
+            // call — "copy what the view refers to" would hide a potentially
+            // deep copy behind a call whose viewness is only visible at its
+            // declaration. The two-step form keeps the copy next to a locally
+            // declared view; copying from a NAMED view binding stays legal.
+            if (!stmt->as.let_stmt.is_bind && stmt->as.let_stmt.type
+                && !stmt->as.let_stmt.type->is_view && !stmt->as.let_stmt.type->is_mod
+                && stmt->as.let_stmt.value
+                && stmt->as.let_stmt.value->kind == AST_EXPR_CALL
+                && stmt->as.let_stmt.value->decl_link
+                && stmt->as.let_stmt.value->decl_link->kind == AST_DECL_FUNC) {
+                const AstFuncDecl* vfd = &stmt->as.let_stmt.value->decl_link->as.func_decl;
+                if (vfd->returns && vfd->returns->type
+                    && (vfd->returns->type->is_view || vfd->returns->type->is_mod)
+                    && !vfd->returns->type->is_opt) {
+                    diag_error(module->file_path, (int)stmt->line, (int)stmt->column,
+                               "this call returns a reference; copying what it refers to must be spelled out: "
+                               "bind it first ('let source: view T => ...'), then copy from the named binding");
+                    module->had_error = true;
+                }
+            }
             // Spec 2.3.1: a reference binding cannot take an owned result. A
             // fresh value needs an owner, and a view/mod binding refuses
             // ownership by definition — accepting this would mean inventing a
