@@ -1229,6 +1229,36 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     module->had_error = true;
                 }
             }
+            // Spec 2.3.1: a reference binding cannot take an owned result. A
+            // fresh value needs an owner, and a view/mod binding refuses
+            // ownership by definition — accepting this would mean inventing a
+            // hidden owner (#454/#455, reversing #443's materialisation).
+            // Optional-reference bindings (is_opt) are excluded: their legal
+            // sources are reference-returning calls, checked elsewhere, and
+            // the if-let narrowing forms are handled by that construct.
+            if (stmt->as.let_stmt.is_bind && stmt->as.let_stmt.type
+                && (stmt->as.let_stmt.type->is_view || stmt->as.let_stmt.type->is_mod)
+                && !stmt->as.let_stmt.type->is_opt && stmt->as.let_stmt.value) {
+                const AstExpr* bv = stmt->as.let_stmt.value;
+                if (bv->kind == AST_EXPR_OBJECT || bv->kind == AST_EXPR_COLLECTION_LITERAL) {
+                    diag_error(module->file_path, (int)stmt->line, (int)stmt->column,
+                               "cannot bind a reference to a literal: a literal is a fresh value with no storage to view; "
+                               "write 'let name: T = ...' to own it");
+                    module->had_error = true;
+                } else if (bv->kind == AST_EXPR_CALL && bv->decl_link
+                           && bv->decl_link->kind == AST_DECL_FUNC) {
+                    const AstFuncDecl* bfd = &bv->decl_link->as.func_decl;
+                    bool returns_ref = bfd->returns && bfd->returns->type
+                        && (bfd->returns->type->is_view || bfd->returns->type->is_mod);
+                    if (bfd->returns && !returns_ref) {
+                        diag_error(module->file_path, (int)stmt->line, (int)stmt->column,
+                                   "cannot bind a reference to a call that returns ownership; "
+                                   "write 'let name: T = ...' to take the value, or use a reference-returning "
+                                   "accessor (viewAt, modAt, viewGet, modGet)");
+                        module->had_error = true;
+                    }
+                }
+            }
             // `let` and `const` are immutable bindings; only `var` may be
             // reassigned. (Mutating the value a `let` points at — container
             // methods, field/index writes — is unaffected; this only governs
@@ -1387,6 +1417,8 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                                          && !sym->type->as.ref.is_mod;
                     if (sym->bind_kind == BIND_CONST) {
                         snprintf(buffer, sizeof(buffer), "cannot assign to constant '%.*s'", nl, nm);
+                    } else if (is_view_alias && sym->bind_kind == BIND_READONLY_REF) {
+                        snprintf(buffer, sizeof(buffer), "cannot assign to read-only view parameter '%.*s'; declare it 'mod' to allow writes", nl, nm);
                     } else if (is_view_alias) {
                         // Suggesting `var` here would be a second error:
                         // aliases are bind-once. The problem is the VIEW.
