@@ -1,0 +1,39 @@
+# Returning a reference that a callee already handed back is FORWARDING,
+# not taking a new address. The backend used to emit `&call(...)` here,
+# which is a pointer to a pointer.
+type Track {
+  title: String
+  seconds: Int
+}
+
+type Library {
+  current: Track
+  playing: Bool
+}
+
+func nowPlaying(lib: view Library) ret opt view Track {
+  if lib.playing is false {
+    ret none
+  }
+  ret view lib.current
+}
+
+# Forwards nowPlaying's reference straight through.
+func forward(lib: view Library) ret opt view Track {
+  ret view nowPlaying(lib: view lib)
+}
+
+func main() {
+  var lib: Library = { current: { title: "Intro", seconds: 95 }, playing: true }
+  if let track: view Track => forward(lib: view lib) {
+    log("forwarded: {track.title} / {track.seconds}")
+  } else {
+    log("forwarded: nothing")
+  }
+  lib.playing = false
+  if let track: view Track => forward(lib: view lib) {
+    log("forwarded: {track.title}")
+  } else {
+    log("forwarded: nothing")
+  }
+}
