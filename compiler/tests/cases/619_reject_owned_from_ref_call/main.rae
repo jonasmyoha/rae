@@ -1,0 +1,20 @@
+# Spec 2.3.1 / #456: an owned binding cannot take a reference-returning call.
+# "Copy what the view refers to" would hide a potentially deep copy behind a
+# call whose viewness is only visible at its declaration. The two-step form
+# (bind the view, copy from the NAMED binding) stays legal — the copy is then
+# next to a locally declared `view`. Test 612 has the legal aliasing shapes.
+type Track {
+  title: String
+  seconds: Int
+}
+type Library {
+  current: Track
+}
+func nowPlaying(lib: view Library) ret view Track {
+  ret view lib.current
+}
+func main() {
+  var lib: Library = { current: { title: "Intro", seconds: 95 } }
+  let mine: Track = nowPlaying(lib: view lib)
+  log("should not run: {mine.title}")
+}
