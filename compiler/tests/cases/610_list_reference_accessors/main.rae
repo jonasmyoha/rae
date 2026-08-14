@@ -1,0 +1,40 @@
+# Reference-returning List accessors (#452). `at`/`get` hand back a COPY of
+# the element; viewAt/viewGet/modAt/modGet hand back a window into the list's
+# own storage. The write-through assertions are the point: if these copied,
+# the mutations below would not be visible through the list.
+type Track {
+  title: String
+  seconds: Int
+}
+
+func main() {
+  var tracks: List(Track) = createList(Track, cap: 4)
+  tracks.add(value: Track { title: "Intro", seconds: 95 })
+  tracks.add(value: Track { title: "Outro", seconds: 143 })
+
+  # read through a view, no copy
+  let first: view Track => tracks.viewAt(index: 0)
+  log("viewAt: {first.title} / {first.seconds}")
+
+  # checked: in range and out of range
+  if let found: view Track => tracks.viewGet(index: 1) {
+    log("viewGet(1): {found.title}")
+  } else {
+    log("viewGet(1): none")
+  }
+  if let missing: view Track => tracks.viewGet(index: 9) {
+    log("viewGet(9): {missing.title}")
+  } else {
+    log("viewGet(9): none")
+  }
+
+  # write in place through a mod reference
+  let second: mod Track => tracks.modAt(index: 1)
+  second.seconds = 200
+  log("after modAt: {tracks.at(index: 1).seconds}")
+
+  if let editable: mod Track => tracks.modGet(index: 0) {
+    editable.seconds = 99
+  }
+  log("after modGet: {tracks.at(index: 0).seconds}")
+}

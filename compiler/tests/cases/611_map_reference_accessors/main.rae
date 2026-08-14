@@ -1,0 +1,49 @@
+# Reference-returning map accessors (#452). Same idea as 610, over the two
+# hash maps: the probe walk is unchanged, only what comes back differs. The
+# slot is re-read as a reference at the end, because the `entry` local in the
+# probe loop is a copy that dies with the function.
+type Track {
+  title: String
+  seconds: Int
+}
+
+func main() {
+  var byName: StringMap(Track) = createStringMap(Track, cap: 8)
+  byName.set(k: "intro", value: Track { title: "Intro", seconds: 95 })
+
+  if let found: view Track => byName.viewGet(key: "intro") {
+    log("stringmap viewGet: {found.title} / {found.seconds}")
+  } else {
+    log("stringmap viewGet: none")
+  }
+  if let missing: view Track => byName.viewGet(key: "nope") {
+    log("stringmap missing: {missing.title}")
+  } else {
+    log("stringmap missing: none")
+  }
+  if let editable: mod Track => byName.modGet(key: "intro") {
+    editable.seconds = 111
+  }
+  if let after: view Track => byName.viewGet(key: "intro") {
+    log("stringmap after modGet: {after.seconds}")
+  }
+
+  var byId: IntMap(Track) = createIntMap(Track, cap: 8)
+  byId.set(k: 7, value: Track { title: "Seven", seconds: 42 })
+  if let found: view Track => byId.viewGet(key: 7) {
+    log("intmap viewGet: {found.title} / {found.seconds}")
+  } else {
+    log("intmap viewGet: none")
+  }
+  if let editable: mod Track => byId.modGet(key: 7) {
+    editable.seconds = 77
+  }
+  if let after: view Track => byId.viewGet(key: 7) {
+    log("intmap after modGet: {after.seconds}")
+  }
+  if let missing: view Track => byId.viewGet(key: 99) {
+    log("intmap missing: {missing.title}")
+  } else {
+    log("intmap missing: none")
+  }
+}
