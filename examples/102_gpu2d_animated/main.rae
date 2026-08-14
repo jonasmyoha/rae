@@ -197,6 +197,51 @@ func panelLines(x: view Float, y: view Float, w: view Float, h: view Float, t: v
   }
 }
 
+# --- Sound visualizer (old-school tracker spectrum) --------------------------
+
+# Ten vertical bars whose heights bounce like a 1995 Soundtracker / Protracker
+# VU meter. Each bar's level is a sum of sines at incommensurate rates, so the
+# motion looks random but stays smooth — no per-frame flicker. The lit portion
+# rises from a dark track, coloured green at the bottom through red at the peak
+# (the gradient is anchored to the full scale and revealed by a clip, so the
+# colour tracks absolute height, not the bar's own height), capped by a bright
+# peak marker.
+func soundBars(x: view Float, y: view Float, w: view Float, h: view Float, t: view Float) {
+  let bars: Int = 10
+  let areaLeft: Float = x + 30.0
+  let areaW: Float = w - 60.0
+  let gap: Float = 8.0
+  let barW: Float = (areaW - gap * (bars.toFloat() - 1.0)) / bars.toFloat()
+  let baseline: Float = y + h - 34.0
+  let maxH: Float = 150.0
+  var i: Int = 0
+  loop i < bars {
+    let fi: Float = i.toFloat()
+    let mix: Float = 0.30 * math.sin(x: t * 7.3 + fi * 1.7)
+                   + 0.26 * math.sin(x: t * 11.1 + fi * 2.3)
+                   + 0.22 * math.sin(x: t * 17.7 + fi * 0.9)
+    var level: Float = 0.5 + mix
+    if level < 0.08 {
+      level = 0.08
+    }
+    if level > 1.0 {
+      level = 1.0
+    }
+    let barX: Float = areaLeft + fi * (barW + gap)
+    let barH: Float = maxH * level
+    # Dark unlit track behind the bar.
+    gpu2d.drawRoundedRect(x: barX, y: baseline - maxH, w: barW, h: maxH, radius: 3.0, color: 0x55070B12)
+    # Lit portion: the full-scale gradient, clipped to the current height.
+    gpu2d.pushClipRect(x: barX, y: baseline - barH, w: barW, h: barH)
+    gpu2d.drawGradientRect(x: barX, y: baseline - maxH, w: barW, h: maxH, radius: 3.0,
+                           from: 0xFFEF4444, to: 0xFF3BE86B, angleDeg: 90.0)
+    gpu2d.popClipRect()
+    # Bright peak marker riding the top of the lit portion.
+    gpu2d.drawRoundedRect(x: barX, y: baseline - barH - 4.0, w: barW, h: 4.0, radius: 2.0, color: 0xFFEAF7FF)
+    i = i + 1
+  }
+}
+
 # --- Panel 6: orbiting translucent discs -------------------------------------
 
 func panelGlass(x: view Float, y: view Float, w: view Float, h: view Float, t: view Float) {
@@ -225,6 +270,8 @@ func panelGlass(x: view Float, y: view Float, w: view Float, h: view Float, t: v
   let sheenW: Float = 120.0
   let sheenX: Float = x + 24.0 + (w - 48.0 - sheenW) * wave(phase: t * 1.2)
   gpu2d.drawGradientRect(x: sheenX, y: cy - 10.0, w: sheenW, h: 22.0, radius: 11.0, from: 0x00FFFFFF, to: 0x66FFFFFF, angleDeg: 0.0)
+  # A tracker-style sound visualizer over the venn — bars bouncing like audio.
+  soundBars(x: x, y: y, w: w, h: h, t: t)
 }
 
 # --- Scrolling hero band -----------------------------------------------------
@@ -280,7 +327,7 @@ func main() ret Int {
 
   # The shared FPS debug widget from the 3D renderer examples: amber button
   # top-right, FPS readout, click for the toggle dialog.
-  var dbg: DebugOverlay = createDebugOverlay(button: true, fps: true, memory: false, heartbeat: false)
+  var dbg: DebugOverlay = createDebugOverlay(button: true, fps: true, memory: true, heartbeat: false)
 
   let start: Float64 = gpu2d.nowSeconds()
 
