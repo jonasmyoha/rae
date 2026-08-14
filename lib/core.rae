@@ -105,6 +105,42 @@ func at(T: type, this: view List(T), index: view Int) ret T {
   ret rae_ext_rae_buf_get(buf: this.data, index: index)
 }
 
+# A read-only window INTO the list's own storage, rather than a copy of the
+# element. `at` and `get` both hand back a value, so reading one field of a
+# big struct copies the whole struct — including a deep copy of every heap
+# field it owns. `viewAt` costs a pointer.
+#
+# Bounds are the caller's responsibility, as with `at`: there is no in-range
+# element to point at otherwise, and a reference has no empty state. Use
+# `viewGet` when the index might be out of range.
+func viewAt(T: type, this: view List(T), index: view Int) ret view T {
+  ret view rae_ext_rae_buf_get(buf: this.data, index: index)
+}
+
+# The checked counterpart: `none` when the index is out of range, otherwise a
+# window into the element. This is what `get` should be for anything bigger
+# than a machine word — same safety, no copy.
+func viewGet(T: type, this: view List(T), index: view Int) ret opt view T {
+  if index < 0 or index >= this.length {
+    ret none
+  }
+  ret view rae_ext_rae_buf_get(buf: this.data, index: index)
+}
+
+# Mutable window into the list's storage. Writing through the returned
+# reference writes the element in place — no read-modify-`set` round trip,
+# and no drop/re-add of the element's owned fields.
+func modAt(T: type, this: mod List(T), index: view Int) ret mod T {
+  ret mod rae_ext_rae_buf_get(buf: this.data, index: index)
+}
+
+func modGet(T: type, this: mod List(T), index: view Int) ret opt mod T {
+  if index < 0 or index >= this.length {
+    ret none
+  }
+  ret mod rae_ext_rae_buf_get(buf: this.data, index: index)
+}
+
 func set(T: type, this: mod List(T), index: view Int, value: own T) {
   if index < 0 or index >= this.length {
     ret
@@ -377,6 +413,63 @@ func set(V: type, this: mod StringMap(V), k: view String, value: own V) {
   }
 }
 
+# A window into the stored value, rather than a copy of it. Same probe as
+# `get`; the difference is only what comes back. `none` when the key is
+# absent — the reference has no empty state of its own.
+func viewGet(V: type, this: view StringMap(V), key: view String) ret opt view V {
+  if this.cap is 0 {
+    ret none
+  }
+  let hash: Int = rae_str_hash(s: key)
+  var idx: Int = hash % this.cap
+  if idx < 0 {
+    idx = -idx
+  }
+  let startIdx: Int = idx
+  loop true {
+    let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: idx)
+    if not entry.occupied {
+      ret none
+    }
+    if rae_str_eq(a: entry.k, b: key) {
+      # Read the slot again as a reference: `entry` above is a copy, so a
+      # view of ITS field would name a local that dies with this function.
+      ret view rae_ext_rae_buf_get(buf: this.data, index: idx).value
+    }
+    idx = (idx + 1) % this.cap
+    if idx is startIdx {
+      ret none
+    }
+  }
+}
+
+# Mutable window into the stored value. Writing through it updates the map
+# in place, with no drop-and-reinsert of the value's owned fields.
+func modGet(V: type, this: mod StringMap(V), key: view String) ret opt mod V {
+  if this.cap is 0 {
+    ret none
+  }
+  let hash: Int = rae_str_hash(s: key)
+  var idx: Int = hash % this.cap
+  if idx < 0 {
+    idx = -idx
+  }
+  let startIdx: Int = idx
+  loop true {
+    let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: idx)
+    if not entry.occupied {
+      ret none
+    }
+    if rae_str_eq(a: entry.k, b: key) {
+      ret mod rae_ext_rae_buf_get(buf: this.data, index: idx).value
+    }
+    idx = (idx + 1) % this.cap
+    if idx is startIdx {
+      ret none
+    }
+  }
+}
+
 func get(V: type, this: view StringMap(V), k: view String) ret opt V {
   if this.cap is 0 {
     ret none
@@ -555,6 +648,55 @@ func set(V: type, this: mod IntMap(V), k: view Int, value: own V) {
       ret
     }
     idx = (idx + 1) % this.cap
+  }
+}
+
+# See StringMap.viewGet — same shape, integer keys.
+func viewGet(V: type, this: view IntMap(V), key: view Int) ret opt view V {
+  if this.cap is 0 {
+    ret none
+  }
+  var idx: Int = key % this.cap
+  if idx < 0 {
+    idx = -idx
+  }
+  let startIdx: Int = idx
+  loop true {
+    let entry: IntMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: idx)
+    if not entry.occupied {
+      ret none
+    }
+    if entry.k is key {
+      ret view rae_ext_rae_buf_get(buf: this.data, index: idx).value
+    }
+    idx = (idx + 1) % this.cap
+    if idx is startIdx {
+      ret none
+    }
+  }
+}
+
+func modGet(V: type, this: mod IntMap(V), key: view Int) ret opt mod V {
+  if this.cap is 0 {
+    ret none
+  }
+  var idx: Int = key % this.cap
+  if idx < 0 {
+    idx = -idx
+  }
+  let startIdx: Int = idx
+  loop true {
+    let entry: IntMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: idx)
+    if not entry.occupied {
+      ret none
+    }
+    if entry.k is key {
+      ret mod rae_ext_rae_buf_get(buf: this.data, index: idx).value
+    }
+    idx = (idx + 1) % this.cap
+    if idx is startIdx {
+      ret none
+    }
   }
 }
 

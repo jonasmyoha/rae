@@ -256,7 +256,11 @@ static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt*
                 }
                 break;
             case AST_STMT_EXPR: discover_specializations_expr_impl(ctx, s->as.expr_stmt); break;
-            case AST_STMT_IF: discover_specializations_expr_impl(ctx, s->as.if_stmt.condition); if (s->as.if_stmt.then_block) discover_specializations_stmt_impl(ctx, s->as.if_stmt.then_block->first); if (s->as.if_stmt.else_block) discover_specializations_stmt_impl(ctx, s->as.if_stmt.else_block->first); break;
+            /* The `if let` binding holds the call being narrowed, so it has
+             * to be walked too — otherwise a generic called only from an
+             * `if let` head is never specialized and the C references a
+             * function that was never emitted. */
+            case AST_STMT_IF: if (s->as.if_stmt.binding) discover_specializations_stmt_impl(ctx, s->as.if_stmt.binding); discover_specializations_expr_impl(ctx, s->as.if_stmt.condition); if (s->as.if_stmt.then_block) discover_specializations_stmt_impl(ctx, s->as.if_stmt.then_block->first); if (s->as.if_stmt.else_block) discover_specializations_stmt_impl(ctx, s->as.if_stmt.else_block->first); break;
             case AST_STMT_LOOP: if (s->as.loop_stmt.init) discover_specializations_stmt_impl(ctx, s->as.loop_stmt.init); if (s->as.loop_stmt.condition) discover_specializations_expr_impl(ctx, s->as.loop_stmt.condition); if (s->as.loop_stmt.increment) discover_specializations_expr_impl(ctx, s->as.loop_stmt.increment); if (s->as.loop_stmt.body) discover_specializations_stmt_impl(ctx, s->as.loop_stmt.body->first); break;
             case AST_STMT_RET: if (s->as.ret_stmt.values && s->as.ret_stmt.values->value) discover_specializations_expr_impl(ctx, s->as.ret_stmt.values->value); break;
             case AST_STMT_MATCH: {

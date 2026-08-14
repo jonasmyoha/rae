@@ -726,11 +726,19 @@ static bool ref_bind_value_returns_ref(CFuncContext* ctx, const AstExpr* val) {
     const AstFuncDecl* vfd = val->decl_link ? &val->decl_link->as.func_decl : NULL;
     if (vfd && vfd->returns && vfd->returns->type
         && (vfd->returns->type->is_view || vfd->returns->type->is_mod)) return true;
-    // Sema does not always populate decl_link on free-function call sites;
-    // c_call.c re-resolves by name, so mirror that lookup here.
+    // Sema does not always populate decl_link on call sites; c_call.c
+    // re-resolves by name, so mirror that lookup here. Method calls need it
+    // too: `tracks.viewAt(index: 0)` arrives as a METHOD_CALL with no
+    // decl_link, and without this the binding would take the address of a
+    // pointer the callee already returned.
+    Str callee = (Str){0};
     if (val->kind == AST_EXPR_CALL && val->as.call.callee
-        && val->as.call.callee->kind == AST_EXPR_IDENT && ctx && ctx->compiler_ctx) {
-        Str callee = val->as.call.callee->as.ident;
+        && val->as.call.callee->kind == AST_EXPR_IDENT) {
+        callee = val->as.call.callee->as.ident;
+    } else if (val->kind == AST_EXPR_METHOD_CALL) {
+        callee = val->as.method_call.method_name;
+    }
+    if (callee.len > 0 && ctx && ctx->compiler_ctx) {
         for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
             const AstDecl* d = ctx->compiler_ctx->all_decls[i];
             if (d->kind != AST_DECL_FUNC) continue;
@@ -828,33 +836,12 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         fprintf(out, " }");
                     }
                 } else {
-                    bool value_returns_ref = false;
-                    if (stmt->as.let_stmt.value && (stmt->as.let_stmt.value->kind == AST_EXPR_CALL || stmt->as.let_stmt.value->kind == AST_EXPR_METHOD_CALL)) {
-                        const AstExpr* val = stmt->as.let_stmt.value;
-                        const AstFuncDecl* vfd = val->decl_link ? &val->decl_link->as.func_decl : NULL;
-                        if (vfd && vfd->returns && vfd->returns->type && (vfd->returns->type->is_view || vfd->returns->type->is_mod))
-                            value_returns_ref = true;
-                        // Sema doesn't always populate decl_link on free-
-                        // function call sites — c_call.c re-resolves by
-                        // name from the all_decls list. Mirror that
-                        // lookup here so we can ask "does the call return
-                        // view T / mod T?".
-                        if (!value_returns_ref && val->kind == AST_EXPR_CALL && val->as.call.callee
-                            && val->as.call.callee->kind == AST_EXPR_IDENT) {
-                            Str callee = val->as.call.callee->as.ident;
-                            for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
-                                const AstDecl* d = ctx->compiler_ctx->all_decls[i];
-                                if (d->kind != AST_DECL_FUNC) continue;
-                                if (!str_eq(d->as.func_decl.name, callee)) continue;
-                                const AstFuncDecl* cfd = &d->as.func_decl;
-                                if (cfd->returns && cfd->returns->type
-                                    && (cfd->returns->type->is_view || cfd->returns->type->is_mod)) {
-                                    value_returns_ref = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
+                    /* One implementation of "does this call already hand
+                     * back a pointer?", shared with the materialisation
+                     * decision above — they must agree, or the binding
+                     * either double-addresses or dangles. */
+                    bool value_returns_ref =
+                        ref_bind_value_returns_ref(ctx, stmt->as.let_stmt.value);
                     if (value_returns_ref) {
                         // The call already returns a pointer; cast away
                         // const so a `view T` binding (non-const C ptr)
