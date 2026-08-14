@@ -1,0 +1,57 @@
+# `if let` narrowing a VALUE optional -- `opt T` for a non-reference T, which is
+# a boxed RaeAny rather than a pointer.
+#
+# Two bugs met here. Sema wraps the bound value in an UNBOX node, which the
+# expression emitter lowers to `.as.ptr` -- already the payload pointer -- and
+# the binding path then took its ADDRESS, type-punning the box as a T. That
+# compiled and printed nonsense. And an `opt T` FIELD was never boxed at
+# construction: the raw payload was assigned straight into a RaeAny.
+import core
+
+type Track { title: String, seconds: Int }
+type Player { name: String, nowPlaying: opt Track }
+
+func find(tracks: view List(Track), title: view String) ret opt Track {
+  var i: Int = 0
+  loop i < tracks.length {
+    let track: Track = tracks.at(index: i)
+    if track.title is title {
+      ret track
+    }
+    i = i + 1
+  }
+  ret none
+}
+
+func main() {
+  var tracks: List(Track) = createList(Track, cap: 2)
+  tracks.add(value: Track { title: "Intro", seconds: 95 })
+  tracks.add(value: Track { title: "Outro", seconds: 143 })
+
+  if let track: view Track => find(tracks: tracks, title: "Outro") {
+    log("found {track.title} / {track.seconds}")
+  } else {
+    log("found nothing")
+  }
+
+  if let track: view Track => find(tracks: tracks, title: "Coda") {
+    log("unexpectedly found {track.title}")
+  } else {
+    log("no track called Coda")
+  }
+
+  # The same optional as a struct FIELD, present and absent.
+  let withTrack: Player = { name: "a", nowPlaying: Track { title: "Field", seconds: 7 } }
+  let without: Player = { name: "b", nowPlaying: none }
+
+  if let t: view Track => withTrack.nowPlaying {
+    log("field: {t.title} / {t.seconds}")
+  } else {
+    log("field: absent")
+  }
+  if let t: view Track => without.nowPlaying {
+    log("empty field: {t.title}")
+  } else {
+    log("empty field: absent")
+  }
+}

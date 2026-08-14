@@ -182,6 +182,12 @@ bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
 // Move-tracking skips drops for params that were returned or transferred.
 bool emit_implicit_drops_for_own_params(CFuncContext* ctx, FILE* out,
                                         size_t first_let_index);
+// Box a value into an `opt T` (a RaeAny). Shared by the return path and the
+// struct-literal field path -- an optional FIELD needs the same boxing an
+// optional return does.
+void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
+                              const AstExpr* value, FILE* out);
+
 // Ownership classifiers (is_drop_target_type, type_owns_heap_storage,
 // type_needs_cascade_drop, type_needs_deep_copy) moved to
 // ownership.h so both backends can share them. c_backend.h already
