@@ -144,10 +144,17 @@ diff doesn't contain it; no call site admits that callers' objects now get
 mutated. Java, C#, Python, JavaScript and Kotlin work the same way — primitives
 copy, objects alias, and the boundary between the two is the type, not the
 code. Swift has the same flip one level up: turn a `struct` into a `class` and
-every `let y = x` in the program quietly stops copying. (C and C++ copy on
-assignment and spell aliasing in the type, and Rust's `=` flips between copy
-and move — but the borrow checker turns misuse into errors rather than silent
-behaviour, which is the part that matters.)
+every `let y = x` in the program quietly stops copying.
+
+C and C++ don't have this flip at `=` — assignment copies, and refactoring
+`int` to `int*` is loud, because every use site has to change too. C++ has the
+same trap at the call boundary instead: change a parameter from `Track` to
+`Track&` and every existing call still compiles, unchanged — `process(x)` now
+mutates the caller's object and nothing at the call site says so. Rust avoids
+the problem at both places: `=` never aliases, borrowing is spelled at the
+binding and at the call site (`&mut x`), and when a type change turns a copy
+into a move, every later use of the moved-from value is a compile error rather
+than a change in behaviour.
 
 In Rae the operator carries the meaning, so the meaning survives the refactor:
 
