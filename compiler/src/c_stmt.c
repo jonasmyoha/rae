@@ -776,23 +776,39 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             bool is_ref_bind = stmt->as.let_stmt.is_bind && stmt->as.let_stmt.type &&
                                (stmt->as.let_stmt.type->is_view || stmt->as.let_stmt.type->is_mod);
 
-            // MATERIALISE a `=>` onto a produced value (spec 2.3).
+            // A `=>` onto a produced value. Two very different cases meet
+            // here (spec 2.3.1):
             //
-            // `let t: view Track => make()` is semantically valid whether or
-            // not the callee returns a place: the binding views the value, and
-            // the implementation owes it storage for the binding's lifetime.
-            // Previously the backend emitted `&make()` and the C compiler
-            // refused to take the address of an rvalue.
+            //   - A NON-OPT reference binding to a produced owned value is an
+            //     ERROR: a fresh value needs an owner and a view/mod binding
+            //     refuses ownership. This used to be materialised into a
+            //     hidden temporary (#443); that rule was withdrawn (#454/#455).
+            //     sema rejects the shapes it can resolve; this is the
+            //     catch-all for method calls it cannot.
+            //
+            //   - An OPT binding (an `if let` narrowing, or an optional-
+            //     reference local) still materialises: the optional VALUE the
+            //     construct consumes needs statement storage regardless of
+            //     what the binding form is. Its ownership story is #457.
             //
             // The temporary is a plain local emitted just before, so its
-            // lifetime is the enclosing scope -- exactly the binding's.
-            // `__auto_type` avoids having to reconstruct the expression's C
-            // type here; the file already relies on GCC/Clang extensions.
+            // lifetime is the enclosing scope. `__auto_type` avoids having to
+            // reconstruct the expression's C type here.
             int materialised_id = -1;
             if (is_ref_bind && stmt->as.let_stmt.value
                 && !is_primitive_type(get_base_type_name(stmt->as.let_stmt.type))
                 && !ref_bind_value_returns_ref(ctx, stmt->as.let_stmt.value)) {
                 AstExprKind vk = stmt->as.let_stmt.value->kind;
+                bool is_opt_bind = stmt->as.let_stmt.type && stmt->as.let_stmt.type->is_opt;
+                if (!is_opt_bind
+                    && (vk == AST_EXPR_CALL || vk == AST_EXPR_METHOD_CALL
+                        || vk == AST_EXPR_OBJECT)) {
+                    diag_error(ctx->module ? ctx->module->file_path : NULL,
+                               (int)stmt->line, (int)stmt->column,
+                               "cannot bind a reference to a call that returns ownership; "
+                               "write 'let name: T = ...' to take the value, or use a reference-returning "
+                               "accessor (viewAt, modAt, viewGet, modGet)");
+                } else
                 if (vk == AST_EXPR_CALL || vk == AST_EXPR_METHOD_CALL
                     || vk == AST_EXPR_OBJECT || vk == AST_EXPR_INDEX) {
                     materialised_id = ctx->temp_counter++;
