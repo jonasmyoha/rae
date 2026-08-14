@@ -169,6 +169,12 @@ struct Symbol {
      * a local initialised directly from one of those. It is one bit fixed
      * at declaration, never dataflow. */
     bool is_non_owning;
+    /* This binding's storage lives in the current function's frame, so a
+     * reference to it dies at `ret`. True for `let`/`var` inside a body;
+     * false for parameters (the caller owns that storage) and for globals
+     * (they outlive every frame). Drives the "reference escapes local
+     * storage" check. */
+    bool is_local_storage;
     // Folded value for `const` symbols (so later consts can reference them).
     bool const_is_number;
     bool const_is_float;
@@ -204,6 +210,7 @@ static Symbol* symbol_table_define(SymbolTable* table, Arena* arena, Str name, A
     // caller refines it to BIND_LET / BIND_CONST.
     sym->bind_kind = is_immutable ? BIND_READONLY_REF : BIND_MUTABLE;
     sym->is_non_owning = false;
+    sym->is_local_storage = false;
     sym->const_is_number = false;
     sym->const_is_float = false;
     sym->const_d = 0.0;
@@ -1119,6 +1126,62 @@ static bool sema_struct_template_is(const TypeInfo* t, const char* name) {
     return str_eq_cstr(tn, name);
 }
 
+/* Does this expression produce a fresh temporary — a value with no storage
+ * of its own that outlives the enclosing statement? */
+static bool sema_expr_is_temporary(const AstExpr* e) {
+    if (!e) return false;
+    switch (e->kind) {
+        case AST_EXPR_OBJECT:
+        case AST_EXPR_COLLECTION_LITERAL:
+            return true;
+        default:
+            return false;
+    }
+}
+
+/* `ret view x` / `ret mod x`: the caller receives a reference, so whatever it
+ * points at must outlive this frame. Parameters and globals do; a `let`/`var`
+ * in this body does not, and neither does a temporary produced right here.
+ *
+ * This is a semantic rule, not a codegen concern, so it lives in sema and
+ * therefore fires for every target. It used to exist only in the VM compiler,
+ * which meant the Compiled path silently emitted a dangling pointer (or, for
+ * a returned value, C that would not even build). */
+static void sema_check_returned_ref(CompilerContext* ctx, AstModule* module,
+                                    SymbolTable* symbols, AstExpr* value) {
+    (void)ctx;
+    if (!value || value->kind != AST_EXPR_UNARY) return;
+    if (value->as.unary.op != AST_UNARY_VIEW && value->as.unary.op != AST_UNARY_MOD) return;
+
+    const AstExpr* base = value->as.unary.operand;
+    while (base && (base->kind == AST_EXPR_MEMBER || base->kind == AST_EXPR_INDEX)) {
+        base = (base->kind == AST_EXPR_MEMBER) ? base->as.member.object
+                                               : base->as.index.target;
+    }
+    if (!base) return;
+
+    const char* file = module ? module->file_path : NULL;
+    if (base->kind == AST_EXPR_IDENT) {
+        Symbol* sym = symbol_table_lookup(symbols, base->as.ident);
+        if (sym && sym->is_local_storage) {
+            diag_report(file, (int)value->line, (int)value->column,
+                        "reference escapes local storage");
+            if (module) module->had_error = true;
+        }
+        return;
+    }
+    if (sema_expr_is_temporary(base)) {
+        diag_report(file, (int)value->line, (int)value->column,
+                    "cannot take reference to a temporary literal");
+        if (module) module->had_error = true;
+        return;
+    }
+    /* A reference to a CALL's result is decided in the C backend, not
+     * here: the distinguishing fact is whether the callee lowers to an
+     * lvalue, and sema does not resolve UFCS method calls or intrinsics
+     * yet. See the is_ref_return arm of emit_return in c_stmt.c. */
+}
+
 static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt, TypeInfo* current_return_type) {
     if (!stmt) return;
     switch (stmt->kind) {
@@ -1137,6 +1200,13 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             // rebinding the local itself.)
             bool immut = !stmt->as.let_stmt.is_var;
             Symbol* sym = symbol_table_define(symbols, ctx->ast_arena, stmt->as.let_stmt.name, NULL, t, immut);
+            /* A `let`/`var` in a body owns frame storage — unless it is
+             * itself a reference binding, which merely names storage that
+             * lives somewhere else and can be forwarded on. */
+            if (sym && !(stmt->as.let_stmt.type
+                         && (stmt->as.let_stmt.type->is_view || stmt->as.let_stmt.type->is_mod))) {
+                sym->is_local_storage = true;
+            }
             /* No alias marking on `let` bindings.
              *
              * §2.4 proposed one-hop tracking on the assumption that
@@ -1163,6 +1233,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             while (arg) {
                 if (arg->value) {
                     sema_analyze_expr(ctx, module, symbols, arg->value);
+                    sema_check_returned_ref(ctx, module, symbols, arg->value);
                     if (current_return_type) ensure_type_match(ctx, current_return_type, &arg->value);
                 }
                 arg = arg->next;
@@ -1528,6 +1599,39 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                         AstParam* p = resolved->as.func_decl.params; AstCallArg* a = expr->as.call.args;
                         while (p && a) { TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, p->type); ensure_type_match(ctx, pt, &a->value); p = p->next; a = a->next; }
                         sema_check_own_args(ctx, module, symbols, &resolved->as.func_decl, expr->as.call.args, false);
+                        /* If this call hands back a reference, that reference
+                         * may point into any of its `view`/`mod` arguments. A
+                         * temporary argument dies at the end of this
+                         * statement, so the returned reference would outlive
+                         * what it names.
+                         *
+                         * Note the rule is about the RETURNED reference, not
+                         * about temporaries as such: passing `{ x: 1 }` to a
+                         * `view Point` parameter of a value-returning function
+                         * is fine, because the temporary outlives the call. */
+                        if (resolved->as.func_decl.returns
+                            && resolved->as.func_decl.returns->type
+                            && (resolved->as.func_decl.returns->type->is_view
+                                || resolved->as.func_decl.returns->type->is_mod)) {
+                            AstParam* rp = resolved->as.func_decl.params;
+                            AstCallArg* ra = expr->as.call.args;
+                            while (rp && ra) {
+                                AstExpr* av = ra->value;
+                                if (av && av->kind == AST_EXPR_UNARY
+                                    && (av->as.unary.op == AST_UNARY_VIEW
+                                        || av->as.unary.op == AST_UNARY_MOD)) {
+                                    av = av->as.unary.operand;
+                                }
+                                if (rp->type && (rp->type->is_view || rp->type->is_mod)
+                                    && sema_expr_is_temporary(av)) {
+                                    diag_report(module ? module->file_path : NULL,
+                                                (int)ra->value->line, (int)ra->value->column,
+                                                "cannot take reference to a temporary literal");
+                                    if (module) module->had_error = true;
+                                }
+                                rp = rp->next; ra = ra->next;
+                            }
+                        }
                         // Forbid raw rae_ext_rae_buf_set with a cascade-drop V
                         // outside of stdlib. Stdlib (lib/core.rae and friends)
                         // pairs each raw set with a rae_ext_rae_buf_drop_at or
