@@ -19,8 +19,8 @@
 // File-local helpers.
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
-static void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
-                                     const AstExpr* value, FILE* out);
+void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
+                              const AstExpr* value, FILE* out);
 
 // Ownership classifiers (is_drop_target_type, type_owns_heap_storage,
 // type_needs_cascade_drop, type_needs_deep_copy) moved to
@@ -117,7 +117,7 @@ static bool c_optional_payload_is_boxed_pointer(CFuncContext* ctx,
   return true;
 }
 
-static void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
+void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
                                      const AstExpr* value, FILE* out) {
   if (!value || value->kind == AST_EXPR_NONE) {
     fprintf(out, "rae_any_none()");
@@ -861,6 +861,21 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         // Read-only invariant is upheld at the Rae level,
                         // not at the C level — the binding type tells
                         // emit_expr to refuse mutations.
+                        fprintf(out, "(");
+                        emit_type_ref_as_c_type(ctx, stmt->as.let_stmt.type, out, false);
+                        fprintf(out, ")");
+                        emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_UNARY, false, false);
+                    } else if (stmt->as.let_stmt.value->kind == AST_EXPR_UNBOX) {
+                        // NARROWING A BOXED OPTIONAL (`opt T` for a non-reference
+                        // T, which is a RaeAny). Sema wraps the value in an
+                        // UNBOX node, and the expression emitter lowers that to
+                        // `.as.ptr` -- which IS the payload pointer. Taking its
+                        // address would hand back the address of a pointer and
+                        // type-pun the box as a T; before this, that compiled
+                        // and printed nonsense.
+                        //
+                        // `rae_any_none()` leaves the payload null, so the
+                        // emptiness test `if let` emits still holds.
                         fprintf(out, "(");
                         emit_type_ref_as_c_type(ctx, stmt->as.let_stmt.type, out, false);
                         fprintf(out, ")");
