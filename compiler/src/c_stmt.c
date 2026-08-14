@@ -652,19 +652,75 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     // local_count below, exactly as the branches already do.
     size_t saved_locals_bind = ctx->local_count;
     bool has_binding = stmt->as.if_stmt.binding != NULL;
-    if (has_binding) {
-        fprintf(out, "  {\n");
-        emit_stmt(ctx, stmt->as.if_stmt.binding, out);
+    const AstStmt* bind = stmt->as.if_stmt.binding;
+    // OWNED narrowing (spec 4.2): `if let track: Track = getTrack()`. The
+    // optional VALUE is materialised for the statement, tested, and on the
+    // present path its payload MOVES into the binding — memcpy out of the
+    // box, free the box's shell without running its drop (the heap now
+    // belongs to the binding, which the branch's normal drop pass releases).
+    // The parser leaves the condition NULL for this form; the test on the
+    // box is emitted here, where the box has a name.
+    bool owned_bind = has_binding && bind->as.let_stmt.type
+                      && !bind->as.let_stmt.type->is_view
+                      && !bind->as.let_stmt.type->is_mod;
+    int ifopt_id = -1;
+    if (owned_bind) {
+        const AstExpr* src = bind->as.let_stmt.value;
+        if (src && src->kind == AST_EXPR_UNBOX) src = src->as.unary.operand;
+        ifopt_id = ctx->temp_counter++;
+        fprintf(out, "  { RaeAny __rae_ifopt%d = ", ifopt_id);
+        emit_expr(ctx, src, out, PREC_LOWEST, false, false);
+        fprintf(out, ";\n  if (!rae_any_is_none(__rae_ifopt%d)) {\n", ifopt_id);
+        Str obase = get_base_type_name(bind->as.let_stmt.type);
+        fprintf(out, "    ");
+        emit_type_ref_as_c_type(ctx, bind->as.let_stmt.type, out, false);
+        fprintf(out, " %.*s = ", (int)bind->as.let_stmt.name.len, bind->as.let_stmt.name.data);
+        if (str_eq_cstr(obase, "Int") || str_eq_cstr(obase, "Int64")
+            || str_eq_cstr(obase, "Char") || str_eq_cstr(obase, "Char32")) {
+            fprintf(out, "__rae_ifopt%d.as.i;\n", ifopt_id);
+        } else if (str_eq_cstr(obase, "Float") || str_eq_cstr(obase, "Float32")
+                   || str_eq_cstr(obase, "Float64")) {
+            fprintf(out, "__rae_ifopt%d.as.f;\n", ifopt_id);
+        } else if (str_eq_cstr(obase, "Bool")) {
+            fprintf(out, "__rae_ifopt%d.as.b;\n", ifopt_id);
+        } else if (str_eq_cstr(obase, "String")) {
+            // The box carried the string's heap; the binding owns it now.
+            fprintf(out, "__rae_ifopt%d.as.s;\n", ifopt_id);
+        } else {
+            fprintf(out, "*(");
+            emit_type_ref_as_c_type(ctx, bind->as.let_stmt.type, out, false);
+            fprintf(out, "*)__rae_ifopt%d.as.ptr;\n", ifopt_id);
+            fprintf(out, "    free(__rae_ifopt%d.as.ptr);\n", ifopt_id);
+        }
+        // Register the payload as an owning local so the branch's drop pass
+        // (and any early `ret` inside it) releases its heap. It uniquely
+        // owns: the heap moved out of the box, whose shell was freed above
+        // without running its drop.
+        if (ctx->local_count < 256) {
+            ctx->locals[ctx->local_count] = bind->as.let_stmt.name;
+            ctx->local_type_refs[ctx->local_count] = bind->as.let_stmt.type;
+            ctx->local_moved[ctx->local_count] = false;
+            ctx->local_struct_owns_heap[ctx->local_count] = true;
+            ctx->local_count++;
+        }
+    } else {
+        if (has_binding) {
+            fprintf(out, "  {\n");
+            emit_stmt(ctx, stmt->as.if_stmt.binding, out);
+        }
+        fprintf(out, "  if (");
+        emit_expr(ctx, stmt->as.if_stmt.condition, out, PREC_LOWEST, false, false);
+        fprintf(out, ") {\n");
     }
-    fprintf(out, "  if (");
-    emit_expr(ctx, stmt->as.if_stmt.condition, out, PREC_LOWEST, false, false);
-    fprintf(out, ") {\n");
     // Stage 2 scope tracking: save/restore local_count around each
     // branch so lets declared inside the block don't pollute the
     // outer scope's `ctx->locals` view. Without this, the end-of-body
     // drop pass would try to drop names that the C compiler can't
     // see (out-of-scope C identifiers).
-    size_t saved_locals_then = ctx->local_count;
+    // For owned narrowing the payload local belongs to the THEN branch: it
+    // is included in the branch's drop range (and unregistered with it), so
+    // its heap is released exactly where its scope ends.
+    size_t saved_locals_then = ctx->local_count - (owned_bind ? 1 : 0);
     if (stmt->as.if_stmt.then_block) {
         for (const AstStmt* s = stmt->as.if_stmt.then_block->first; s; s = s->next) emit_stmt(ctx, s, out);
     }
@@ -751,6 +807,30 @@ static bool ref_bind_value_returns_ref(CFuncContext* ctx, const AstExpr* val) {
     return false;
 }
 
+/* The backend twin of sema's spec-4.2 check, for the UFCS calls sema cannot
+ * resolve: does this call (by name) return an OWNED optional? A view/mod
+ * narrowing of one is rejected — before this, `if let t: view Track =>
+ * tracks.get(index: 0)` materialised the box, read garbage, and aborted. */
+static bool bind_value_returns_owned_opt(CFuncContext* ctx, const AstExpr* val) {
+    if (!val || !ctx || !ctx->compiler_ctx) return false;
+    Str mname = (Str){0};
+    if (val->kind == AST_EXPR_METHOD_CALL) {
+        mname = val->as.method_call.method_name;
+    } else if (val->kind == AST_EXPR_CALL && val->as.call.callee
+               && val->as.call.callee->kind == AST_EXPR_IDENT) {
+        mname = val->as.call.callee->as.ident;
+    }
+    if (!mname.len) return false;
+    for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+        const AstDecl* d = ctx->compiler_ctx->all_decls[i];
+        if (d->kind != AST_DECL_FUNC) continue;
+        if (!str_eq(d->as.func_decl.name, mname)) continue;
+        const AstTypeRef* rt = d->as.func_decl.returns ? d->as.func_decl.returns->type : NULL;
+        return rt && rt->is_opt && !rt->is_view && !rt->is_mod;
+    }
+    return false;
+}
+
 bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     if (!stmt) return true;
     switch (stmt->kind) {
@@ -808,6 +888,15 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                                "cannot bind a reference to a call that returns ownership; "
                                "write 'let name: T = ...' to take the value, or use a reference-returning "
                                "accessor (viewAt, modAt, viewGet, modGet)");
+                } else
+                if (is_opt_bind
+                    && (vk == AST_EXPR_CALL || vk == AST_EXPR_METHOD_CALL)
+                    && bind_value_returns_owned_opt(ctx, stmt->as.let_stmt.value)) {
+                    diag_error(ctx->module ? ctx->module->file_path : NULL,
+                               (int)stmt->line, (int)stmt->column,
+                               "this call returns an owned optional; a view/mod binding refuses ownership "
+                               "and nothing else would own the value — take it with "
+                               "'if let <name>: T = ...' (spec 4.2)");
                 } else
                 if (vk == AST_EXPR_CALL || vk == AST_EXPR_METHOD_CALL
                     || vk == AST_EXPR_OBJECT || vk == AST_EXPR_INDEX) {

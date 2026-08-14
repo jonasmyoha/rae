@@ -1,8 +1,8 @@
-# `if let` (spec 4.2): conditionally bind the value inside an optional for the
-# duration of the branch. `view T` or `mod T` with `=>`; `=` is rejected,
-# because `=` means copy and a conditional binding does not duplicate a value.
-#
+# `if let` over REFERENCE optionals (spec 4.2): both calls return
+# `opt view T` / `opt mod T`, so `=>` narrowing preserves the declared
+# relationship — the reference already names storage that exists elsewhere.
 # Narrowing an optional reference costs nothing: both are the same pointer.
+# (Produced OWNED optionals are taken with `=` instead — test 607.)
 import core
 type Track { title: String, seconds: Int }
 type Library { current: Track, hasCurrent: Bool }

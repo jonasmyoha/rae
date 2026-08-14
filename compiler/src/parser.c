@@ -2066,14 +2066,26 @@ static AstStmt* parse_if_statement(Parser* parser, const Token* if_token) {
     AstStmt* bind = parse_binding_statement(parser, let_token, false, false);
     if (bind && bind->kind == AST_STMT_LET) {
       AstTypeRef* bt = bind->as.let_stmt.type;
-      if (!bt || !(bt->is_view || bt->is_mod)) {
+      if (!bt) {
         parser_error(parser, let_token,
-          "'if let' binds a reference: write 'view T' or 'mod T' (spec 4.2)");
+          "'if let' needs the binding's type: 'view T'/'mod T' with '=>', or 'T' with '=' (spec 4.2)");
+      } else if (!(bt->is_view || bt->is_mod)) {
+        // OWNED narrowing (spec 4.2): `if let track: Track = getTrack()` is
+        // ownership transfer of a produced optional's payload — the same `=`
+        // as `let t: Track = makeTrack()`, guarded by a presence test. The
+        // binding owns the payload for the branch and drops it at the end.
+        // parse_binding_statement has already rejected `=>` for a non-ref
+        // type; sema rejects copying from a PLACE. The condition is left
+        // NULL: the payload cannot be tested against none, so the backend
+        // tests the optional value it materialises.
+        if (!bind->as.let_stmt.value) {
+          parser_error(parser, let_token, "'if let' requires an initializer");
+        }
+        stmt->as.if_stmt.binding = bind;
+        stmt->as.if_stmt.condition = NULL;
       } else if (!bind->as.let_stmt.is_bind) {
-        // `=` would mean copy, and a conditional binding has no business
-        // duplicating a value (spec 2.3). The copy goes inside the branch.
-        parser_error(parser, let_token,
-          "'if let' requires '=>'; '=' means copy, which a conditional binding does not do (spec 4.2)");
+        // A reference type with `=` — parse_binding_statement already
+        // reported "use '=>'"; nothing further to report here.
       } else {
         bt->is_opt = true;
         stmt->as.if_stmt.binding = bind;
