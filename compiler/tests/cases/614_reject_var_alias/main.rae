@@ -1,0 +1,11 @@
+# Spec 2.2 / #462: aliases are bind-once, so a `var` alias's var-ness could
+# never be exercised — it only misinforms the reader.
+type Track {
+  value: Int
+}
+
+func main() {
+  var t: Track = { value: 1 }
+  var window: view Track => t
+  log("should not run")
+}
