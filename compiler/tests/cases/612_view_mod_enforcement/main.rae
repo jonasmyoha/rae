@@ -1,0 +1,32 @@
+# Spec 2.3.1 / #459-#462 enforcement, the legal half. The rejects live in
+# 613; here every alias relationship the matrix ALLOWS must actually work,
+# including through parameters — the shapes that used to silently no-op.
+type Track {
+  value: Int
+}
+
+func mutateThroughAlias(x: mod Track) {
+  let y: mod Track => x
+  y.value = 42
+}
+
+func readThroughViewAlias(x: view Track) ret Int {
+  let y: view Track => x
+  ret y.value
+}
+
+func main() {
+  var t: Track = { value: 1 }
+  mutateThroughAlias(x: mod t)
+  log("mod alias of mod param writes back: {t.value}")
+  log("view alias of view param reads: {readThroughViewAlias(x: view t)}")
+
+  # liveness (#458): a view observes mutations made while it is alive,
+  # and a mod alias's writes are visible through the original.
+  let window: view Track => t
+  t.value = 50
+  log("view sees mutation: {window.value}")
+  let editor: mod Track => t
+  editor.value = 77
+  log("original sees mod write: {t.value}")
+}

@@ -1,0 +1,26 @@
+# Spec 2.3.1 / #459 #460: the rejection half of 612. A view is read-only in
+# every direction — it cannot be written through, assigned through, or
+# promoted to mod.
+type Track {
+  value: Int
+}
+
+func tryPromote(x: view Track) {
+  let y: mod Track => x
+  y.value = 42
+}
+
+func tryWrite(x: view Track) {
+  let window: view Track => x
+  window.value = 9
+}
+
+func tryAssign() {
+  var t: Track = { value: 1 }
+  let window: view Track => t
+  window = t
+}
+
+func main() {
+  log("should not run")
+}
