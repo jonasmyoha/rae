@@ -117,6 +117,64 @@ a binding however it likes, provided every observable Rae semantic is preserved:
 *   `=` may have its physical copy elided whenever the result is
     indistinguishable.
 
+#### 2.3.1 The binding matrix
+
+Every `let`/`var` line is one of these combinations. The rule is decided by
+two facts the reader can see: the declared type of the binding, and whether
+the right-hand side produces an **owned value** or hands back a **reference**
+(a call declared `ret view T` / `ret mod T`, or a place — a named binding, a
+field, an element).
+
+| destination | source: owned value | source: reference / place |
+|---|---|---|
+| `T =` | **valid** — the binding takes ownership | **rejected** from a call (see below); **valid** from a named `view`/`mod` binding — the copy is visible because the source's viewness is declared nearby |
+| `view T =` / `mod T =` | rejected — `=` never produces a shared handle (§2.2) | rejected — same |
+| `view T =>` / `mod T =>` | **rejected** — see below | **valid** — this is what `=>` is for |
+
+Two of these cells are load-bearing decisions rather than restatements:
+
+**A reference binding cannot take an owned result.**
+
+```rae
+let t: view Track => makeTrack()   # ERROR: makeTrack returns ownership
+let m: mod Track => makeTrack()    # ERROR: nothing else can even observe this
+```
+
+`=>` binds to storage that already exists. An owned return is a fresh value
+whose ownership is being handed over — and a `view`/`mod` binding, by
+definition, does not take ownership. Accepting this would force the compiler
+to invent a hidden owner for the value (invisible storage, invisible drop
+point), which is exactly the class of silent machinery Rae refuses. The
+honest spelling costs nothing: `let t: Track = makeTrack()` transfers the
+fresh value; it is a move, not a copy. To view an element rather than copy
+it, use an accessor that returns a reference (`viewAt`, `viewGet`, `modAt`,
+`modGet`, `componentView`, …).
+
+The same applies to a literal right-hand side: `let v: view Track =>
+{ title: "x" }` is rejected — there is no existing storage to view.
+
+**An owned binding cannot take a reference-returning call.**
+
+```rae
+let t: Track = returnsView()       # ERROR: crosses view -> owned implicitly
+```
+
+Although "copy what the view refers to" is a coherent meaning, it hides a
+potentially deep copy behind a call whose viewness is only visible at its
+declaration. The copy must be spelled where it happens:
+
+```rae
+let source: view Track => returnsView()
+let t: Track = source              # copy visible: source is declared view
+```
+
+The second line stays legal because the source's `view` declaration is in
+local scope — the reader sees both the viewness and the copy on adjacent
+lines.
+
+`if let` is the one deliberate exception to the first rule, and it is not a
+hidden owner: see §4.2.
+
 ### 2.4 Type Visibility Rule
 
 With `let`, the binding's type MUST appear on the left side only. The right side must be type-free for the top-level expression.
@@ -258,9 +316,13 @@ function call:
 if let seconds: view Int => durations.get(k: "intro") { ... }
 ```
 
-A binding to a produced value obliges the implementation to give that value
-storage for the lifetime of the binding. That is an implementation requirement,
-not a restriction on the programmer (§2.3).
+When the optional is a produced value (a call returning `opt T`), the **if
+statement itself owns that value**: it lives exactly as long as the statement,
+and is dropped when the statement ends. The binding views its payload. This is
+why `if let` may bind a produced value while a plain `let` may not (§2.3.1) —
+here the owner is not hidden, it is the construct the programmer is looking
+at, with a lifetime the reader can see: the branch. No copy of the payload is
+made.
 
 `is none` and `is not none` remain available and are preferred where the value
 itself is not wanted:
