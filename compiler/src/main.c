@@ -2366,7 +2366,13 @@ static bool build_c_backend_output(const char* entry_file,
       return false;
   }
 
+  int errs_before_emit = diag_error_count();
   bool ok = c_backend_emit_module(&ctx, &merged, out_file, &registry, out_uses_raylib);
+  /* The backend reports semantic errors it can only see with full type
+   * information (a reference returned to a temporary, for one). Emission
+   * still writes a file, so without this the pipeline would hand invalid
+   * C to the C compiler and bury the Rae diagnostic under its noise. */
+  if (diag_error_count() > errs_before_emit) ok = false;
   if (ok) {
     char out_dir[PATH_MAX];
     strncpy(out_dir, out_file, sizeof(out_dir) - 1);
@@ -2552,7 +2558,9 @@ static bool build_hybrid_output(const char* entry_file,
   }
   if (ok) {
     bool dummy_uses_raylib = false;
+    int errs_before = diag_error_count();
     ok = c_backend_emit_module(&ctx, &merged, c_path, &registry, &dummy_uses_raylib);
+    if (diag_error_count() > errs_before) ok = false;
   }
   if (ok) {
     ok = copy_runtime_assets(compiled_dir);

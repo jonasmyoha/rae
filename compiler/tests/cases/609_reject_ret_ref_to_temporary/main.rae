@@ -1,0 +1,18 @@
+type Track {
+  title: String
+  seconds: Int
+}
+
+# ERROR: `at` is declared `ret T`, so it hands back a VALUE. A reference to
+# that value would name a temporary that dies with this function.
+func pick(tracks: view List(Track)) ret opt view Track {
+  ret view tracks.at(index: 0)
+}
+
+func main() {
+  var tracks: List(Track) = createList(Track, cap: 2)
+  tracks.add(value: Track { title: "Intro", seconds: 95 })
+  if let track: view Track => pick(tracks: view tracks) {
+    log("{track.title}")
+  }
+}
