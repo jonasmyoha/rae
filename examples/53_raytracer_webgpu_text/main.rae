@@ -203,9 +203,16 @@ func main() {
     var tris: List(Triangle) = createList(Triangle, cap: 0)
     var skyMode: Int = 1
 
-    var camPos: Vec3 = vec3.create(x: 0.0, y: -1.6, z: 0.6)
-    var yaw: Float = pi / 2.0
-    var pitch: Float = -0.15
+    # Initial view: from the north-east and above, looking down at the cube
+    # (at the origin) and the surrounding balls — a diagonal 3/4 framing, on
+    # the opposite side from where the scene used to be viewed. yaw/pitch are
+    # derived from the look target so the angle stays correct if the position
+    # is retuned; WASD / arrows / mouse drive them from here.
+    var camPos: Vec3 = vec3.create(x: 2.4, y: 2.4, z: 1.85)
+    let lookTarget: Vec3 = vec3.create(x: -0.3, y: -0.1, z: 0.15)
+    let toTarget: Vec3 = vec3.vsub(a: lookTarget, b: camPos)
+    var yaw: Float = math.atan2(y: toTarget.y, x: toTarget.x)
+    var pitch: Float = math.atan2(y: toTarget.z, x: math.sqrt(x: toTarget.x * toTarget.x + toTarget.y * toTarget.y))
     let moveStep: Float = 0.08
     let rotStep: Float = 0.03
     let mouseSens: Float = 0.005
