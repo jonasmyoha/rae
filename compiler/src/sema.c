@@ -1310,6 +1310,58 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 // The binding is introduced before the condition, and its name
                 // is visible in the then-branch. Scope handling below.
                 sema_analyze_stmt(ctx, module, symbols, stmt->as.if_stmt.binding, current_return_type);
+                // Spec 4.2: `if let` is the 2.3.1 matrix with a presence test
+                // in front — which binding form is legal follows from what
+                // the optional holds and where it lives.
+                AstStmt* b = stmt->as.if_stmt.binding;
+                const AstTypeRef* btr = b->as.let_stmt.type;
+                const AstExpr* bsrc = b->as.let_stmt.value;
+                if (bsrc && bsrc->kind == AST_EXPR_UNBOX) bsrc = bsrc->as.unary.operand;
+                bool is_call_src = bsrc && (bsrc->kind == AST_EXPR_CALL
+                                            || bsrc->kind == AST_EXPR_METHOD_CALL);
+                if (btr && !(btr->is_view || btr->is_mod)) {
+                    // Owned narrowing takes ownership, so its source must be
+                    // a PRODUCED optional. From a place it would be a hidden
+                    // deep copy of a payload that stays behind — view the
+                    // place and copy inside the branch, where the copy is
+                    // visible.
+                    if (!is_call_src) {
+                        diag_error(module->file_path, (int)b->line, (int)b->column,
+                                   "'if let <name>: T = ...' takes ownership, so it needs a call producing "
+                                   "'opt T'; narrowing a stored optional copies — bind 'view T =>' and copy "
+                                   "inside the branch if a copy is wanted (spec 4.2)");
+                        module->had_error = true;
+                    } else if (bsrc->kind == AST_EXPR_CALL && bsrc->decl_link
+                               && bsrc->decl_link->kind == AST_DECL_FUNC) {
+                        const AstFuncDecl* cfd = &bsrc->decl_link->as.func_decl;
+                        const AstTypeRef* rt = cfd->returns ? cfd->returns->type : NULL;
+                        if (rt && rt->is_opt && (rt->is_view || rt->is_mod)) {
+                            diag_error(module->file_path, (int)b->line, (int)b->column,
+                                       "this call returns an optional REFERENCE; narrow it with "
+                                       "'if let <name>: view T => ...' (or mod) instead of taking ownership");
+                            module->had_error = true;
+                        } else if (rt && !rt->is_opt) {
+                            diag_error(module->file_path, (int)b->line, (int)b->column,
+                                       "'if let' narrows an optional, but this call does not return 'opt'");
+                            module->had_error = true;
+                        }
+                    }
+                } else if (btr && is_call_src && bsrc->kind == AST_EXPR_CALL
+                           && bsrc->decl_link && bsrc->decl_link->kind == AST_DECL_FUNC) {
+                    // Reference narrowing of a PRODUCED optional is legal only
+                    // when the optional holds a reference. A produced owned
+                    // optional has no owner a view could lean on — `if` adds a
+                    // presence test, not an owner. Take it with `=`.
+                    const AstFuncDecl* cfd = &bsrc->decl_link->as.func_decl;
+                    const AstTypeRef* rt = cfd->returns ? cfd->returns->type : NULL;
+                    if (rt && rt->is_opt && !(rt->is_view || rt->is_mod)) {
+                        diag_error(module->file_path, (int)b->line, (int)b->column,
+                                   "this call returns an owned optional; a view/mod binding refuses ownership "
+                                   "and nothing else would own the value — take it with "
+                                   "'if let <name>: T = ...' (spec 4.2)");
+                        module->had_error = true;
+                    }
+                }
             }
             if (stmt->as.if_stmt.condition) sema_analyze_expr(ctx, module, symbols, stmt->as.if_stmt.condition);
             if (stmt->as.if_stmt.then_block) {
