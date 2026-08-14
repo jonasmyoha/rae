@@ -694,6 +694,16 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx,
                     struct_decl->as.type_decl.generic_params,
                     obj_tr ? obj_tr->generic_args : NULL, field_tr);
+                // An `opt T` FIELD is a RaeAny and needs the same boxing an
+                // `opt T` return gets. Without this the raw payload was
+                // assigned straight into the box -- `.nowPlaying = (rae_Track){…}`
+                // into a RaeAny field, which does not compile.
+                if (sub->is_opt && !(sub->is_view || sub->is_mod)
+                    && f->value && f->value->kind != AST_EXPR_NONE) {
+                    emit_optional_boxed_expr(ctx, sub, f->value, out);
+                    if (f->next) fprintf(out, ", ");
+                    continue;
+                }
                 ctx->expected_type = *sub;
                 ctx->has_expected_type = true;
             } else {
