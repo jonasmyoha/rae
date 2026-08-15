@@ -3,17 +3,19 @@
 # A showcase of the rounded-box SDF pipeline: gradients, rounded-corner
 # progressions, concentric rings, bordered cards, line art, and translucent
 # overlap — all from one instanced draw with analytic antialiasing (no MSAA),
-# crisp at any size. Builds on the GPU surface from example 101.
+# crisp at any size. Example 102 animates this same dashboard.
 #
 # The whole thing is authored against a fixed 1280x800 DESIGN canvas and
 # scaled to fill the window, so it looks right at any size or pixel density
-# (see example 104 for the coordinate system itself).
+# (see example 104 for the coordinate system itself). The window remembers its
+# size and position across restarts.
 #
 # Compiled-target only; needs wgpu-native + SDL3.
-#   rae run --target compiled --project examples/102_gpu2d_vector main.rae
+#   rae run --target compiled --project examples/101_gpu2d_vector main.rae
 import core
 import gpu2d
 import math
+open ui/window_geometry
 
 # --- Design canvas -----------------------------------------------------------
 
@@ -193,9 +195,15 @@ func heroBand(x: view Float, y: view Float, w: view Float, h: view Float) {
 
 func main() ret Int {
   gpu2d.initWindow(width: 1280, height: 800, title: "Rae 2D — vector shapes")
+  # Remember the window's size and position across restarts (the name carries
+  # this app's id, since the dir ".rae" is shared with every other app).
+  var windowGeom: WindowGeometry = createWindowGeometry(dir: ".rae", name: "window.gpu2dVector.geometry")
+  restoreWindowGeometry(g: windowGeom)
   gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
 
   loop not gpu2d.pollClose() {
+    let now: Float64 = gpu2d.nowSeconds()
+    let resized: Bool = gpu2d.windowResized()
     gpu2d.beginFrame(r: 0.043, g: 0.055, b: 0.078, a: 1.0)
 
     # A subtle full-canvas vertical gradient behind everything.
@@ -224,6 +232,7 @@ func main() ret Int {
     panelGlass(x: col2, y: row1, w: colW, h: rowH)
 
     gpu2d.endFrame()
+    updateWindowGeometry(g: windowGeom, now: now, resized: resized)
     gpu2d.waitEvents(timeoutSec: 0.2)
   }
 
