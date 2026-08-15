@@ -1,29 +1,62 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Rae List access benchmark</title>
 <style>
-:root{--ink:#17201b;--paper:#f4f0e5;--card:#fffdf6;--line:#c9c1ad;--rae:#e05932;--c:#19647e;--rust:#8c5b3f}
+:root{--ink:#17201b;--paper:#f4f0e5;--card:#fffdf6;--line:#c9c1ad;--rae:#e05932;--c:#19647e;--rust:#8c5b3f;--javascript:#c89b20;--python:#356f9f}
 *{box-sizing:border-box} body{margin:0;background:radial-gradient(circle at 15% 0,#ffe0bd 0,transparent 32%),var(--paper);color:var(--ink);font:16px/1.55 Georgia,serif}
 main{max-width:1180px;margin:auto;padding:64px 24px} h1{font:700 clamp(42px,8vw,92px)/.92 Georgia,serif;letter-spacing:-.055em;margin:0 0 18px;max-width:900px}
 .lead{font-size:21px;max-width:780px} .stamp{display:inline-block;border:1px solid var(--ink);padding:7px 11px;margin:10px 0 40px;font:12px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em}
-h2{font-size:34px;margin-top:62px} h3{margin-top:0} .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:16px}
-.card{background:var(--card);border:1px solid var(--line);padding:20px;box-shadow:5px 5px 0 #d8cfbb} .barrow{display:grid;grid-template-columns:1fr;gap:3px;margin:13px 0}
-.barlabel,.value{font:12px ui-monospace,monospace} .value{color:#635d50} .track{height:9px;background:#e5dfd0;overflow:hidden} .bar{display:block;height:100%} .rae{background:var(--rae)} .c{background:var(--c)} .rust{background:var(--rust)}
+h2{font-size:34px;margin-top:62px} h3{margin:0 0 5px} .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:18px}
+.card{background:var(--card);border:1px solid var(--line);padding:20px;box-shadow:5px 5px 0 #d8cfbb} .scenario{margin:0 0 18px;color:#635d50;min-height:3em} .barrow{display:grid;grid-template-columns:1fr;gap:3px;margin:13px 0}
+.barlabel,.value{font:12px ui-monospace,monospace} .value{color:#635d50} .track{height:9px;background:#e5dfd0;overflow:hidden} .bar{display:block;height:100%} .rae{background:var(--rae)} .c{background:var(--c)} .rust{background:var(--rust)} .javascript{background:var(--javascript)} .python{background:var(--python)}
 .findings{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px} .metric{border-top:4px solid var(--rae);padding:14px 0;font-size:18px} .metric strong{display:block;font-size:34px}
 table{width:100%;border-collapse:collapse;background:var(--card);font:12px ui-monospace,monospace} th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left} .scroll{overflow:auto}
-pre{overflow:auto;background:#17201b;color:#e9f1e9;padding:18px;font:12px/1.5 ui-monospace,monospace} dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 18px} dt{font-weight:bold} dd{margin:0;overflow-wrap:anywhere}
+pre{overflow:auto;max-height:680px;background:#17201b;color:#e9f1e9;padding:18px;font:12px/1.5 ui-monospace,monospace} dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 18px} dt{font-weight:bold} dd{margin:0;overflow-wrap:anywhere} details{margin:10px 0;background:var(--card);border:1px solid var(--line)} summary{cursor:pointer;padding:13px 16px;font-weight:bold} details pre{margin:0;border-radius:0} .recommendation{background:#17201b;color:#fff;padding:22px 26px;margin:34px 0} .recommendation strong{font-size:23px} .recommendation ol{margin-bottom:0} code{font-family:ui-monospace,monospace} .codegrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:12px} .codegrid section{min-width:0} .codegrid pre{height:100%;margin:0;max-height:260px}
+@media(max-width:560px){main{padding:36px 14px}.grid{grid-template-columns:1fr}dl{grid-template-columns:1fr}}
 </style></head><body><main>
 <h1>Safe indexing, measured.</h1><p class="lead">Rae uses optional, logical-length-checked List indexed access. Collection loops lower to direct iteration without optional construction or per-element bounds checks.</p>
 <div class="stamp">65,536 elements · 8,388,608 accesses · median of 7 runs after 2 warmups</div>
-<h2>Results</h2><div class="grid"><section class="card"><h3>Int sequential</h3><div class="barrow"><div class="barlabel">c · int_sequential_unchecked</div><div class="track"><span class="bar c" style="width:48.1%"></span></div><div class="value">0.795 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">c · int_sequential_checked</div><div class="track"><span class="bar c" style="width:48.0%"></span></div><div class="value">0.793 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">rust · int_sequential_safe_index</div><div class="track"><span class="bar rust" style="width:48.3%"></span></div><div class="value">0.801 ms · 1.01×</div></div><div class="barrow"><div class="barlabel">rust · int_sequential_get</div><div class="track"><span class="bar rust" style="width:48.1%"></span></div><div class="value">0.795 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">rae · int_sequential_optional</div><div class="track"><span class="bar rae" style="width:48.4%"></span></div><div class="value">0.804 ms · 1.01×</div></div></section><section class="card"><h3>Int collection</h3><div class="barrow"><div class="barlabel">c · int_collection</div><div class="track"><span class="bar c" style="width:48.0%"></span></div><div class="value">0.797 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">rust · int_iterator</div><div class="track"><span class="bar rust" style="width:48.0%"></span></div><div class="value">0.798 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">rae · int_collection_value</div><div class="track"><span class="bar rae" style="width:48.2%"></span></div><div class="value">0.804 ms · 1.01×</div></div><div class="barrow"><div class="barlabel">rae · int_collection_view</div><div class="track"><span class="bar rae" style="width:48.2%"></span></div><div class="value">0.802 ms · 1.01×</div></div></section><section class="card"><h3>Int random</h3><div class="barrow"><div class="barlabel">c · int_random_checked</div><div class="track"><span class="bar c" style="width:48.4%"></span></div><div class="value">5.476 ms · 1.01×</div></div><div class="barrow"><div class="barlabel">rust · int_random_get</div><div class="track"><span class="bar rust" style="width:48.0%"></span></div><div class="value">5.401 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">rae · int_random_optional</div><div class="track"><span class="bar rae" style="width:48.3%"></span></div><div class="value">5.455 ms · 1.01×</div></div></section><section class="card"><h3>Mostly valid</h3><div class="barrow"><div class="barlabel">c · int_mostly_valid_checked</div><div class="track"><span class="bar c" style="width:48.4%"></span></div><div class="value">6.095 ms · 1.01×</div></div><div class="barrow"><div class="barlabel">rust · int_mostly_valid_get</div><div class="track"><span class="bar rust" style="width:50.3%"></span></div><div class="value">6.476 ms · 1.08×</div></div><div class="barrow"><div class="barlabel">rae · int_mostly_valid_optional</div><div class="track"><span class="bar rae" style="width:48.0%"></span></div><div class="value">6.017 ms · 1.00×</div></div></section><section class="card"><h3>25% invalid</h3><div class="barrow"><div class="barlabel">c · int_mixed_invalid_checked</div><div class="track"><span class="bar c" style="width:48.0%"></span></div><div class="value">4.077 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">rust · int_mixed_invalid_get</div><div class="track"><span class="bar rust" style="width:48.0%"></span></div><div class="value">4.071 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">rae · int_mixed_invalid_optional</div><div class="track"><span class="bar rae" style="width:48.3%"></span></div><div class="value">4.115 ms · 1.01×</div></div></section><section class="card"><h3>Struct sequential</h3><div class="barrow"><div class="barlabel">c · struct_sequential_value</div><div class="track"><span class="bar c" style="width:48.8%"></span></div><div class="value">5.641 ms · 1.03×</div></div><div class="barrow"><div class="barlabel">c · struct_sequential_pointer</div><div class="track"><span class="bar c" style="width:48.1%"></span></div><div class="value">5.520 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">rust · struct_sequential_copy</div><div class="track"><span class="bar rust" style="width:48.4%"></span></div><div class="value">5.581 ms · 1.01×</div></div><div class="barrow"><div class="barlabel">rust · struct_sequential_get</div><div class="track"><span class="bar rust" style="width:48.4%"></span></div><div class="value">5.572 ms · 1.01×</div></div><div class="barrow"><div class="barlabel">rae · struct_sequential_optional_value</div><div class="track"><span class="bar rae" style="width:48.4%"></span></div><div class="value">5.570 ms · 1.01×</div></div><div class="barrow"><div class="barlabel">rae · struct_sequential_optional_view</div><div class="track"><span class="bar rae" style="width:48.0%"></span></div><div class="value">5.503 ms · 1.00×</div></div></section><section class="card"><h3>Struct collection</h3><div class="barrow"><div class="barlabel">c · struct_collection_value</div><div class="track"><span class="bar c" style="width:48.0%"></span></div><div class="value">5.515 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">c · struct_collection_pointer</div><div class="track"><span class="bar c" style="width:48.2%"></span></div><div class="value">5.542 ms · 1.01×</div></div><div class="barrow"><div class="barlabel">rust · struct_iterator_copy</div><div class="track"><span class="bar rust" style="width:48.0%"></span></div><div class="value">5.518 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">rust · struct_iterator_ref</div><div class="track"><span class="bar rust" style="width:48.0%"></span></div><div class="value">5.511 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">rae · struct_collection_value</div><div class="track"><span class="bar rae" style="width:48.4%"></span></div><div class="value">5.588 ms · 1.01×</div></div><div class="barrow"><div class="barlabel">rae · struct_collection_view</div><div class="track"><span class="bar rae" style="width:48.3%"></span></div><div class="value">5.571 ms · 1.01×</div></div></section><section class="card"><h3>Struct random</h3><div class="barrow"><div class="barlabel">c · struct_random_pointer</div><div class="track"><span class="bar c" style="width:49.1%"></span></div><div class="value">6.546 ms · 1.04×</div></div><div class="barrow"><div class="barlabel">rust · struct_random_get</div><div class="track"><span class="bar rust" style="width:48.0%"></span></div><div class="value">6.324 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">rae · struct_random_optional_view</div><div class="track"><span class="bar rae" style="width:48.7%"></span></div><div class="value">6.475 ms · 1.02×</div></div></section></div>
+<div class="recommendation"><strong>Final recommendations</strong><ol>
+<li>Keep all public List indexed access optional and bounds-checked; these measurements do not justify an unsafe accessor.</li>
+<li>Use <code>loop item in list</code> for sequential hot paths and <code>viewAt + if let</code> for random access to large structs.</li>
+<li>Optimize Rae's general owned <code>opt T</code> representation separately; do not make List indexing unsafe to avoid RaeAny.</li>
+</ol></div>
+<h2>How to read this</h2><p>Each card performs the same useful work and checksum in every listed language. The ratio is relative to the fastest result in that card, so <strong>1.00× means tied at this measurement precision</strong>, not missing data. JavaScript and Python are included for scale and API comparison; their JIT/interpreter and heap-object data models are not direct C-backend code-generation competitors.</p>
+<h2>Results</h2><div class="grid"><section class="card"><h3>Int: sequential indexed access</h3><p class="scenario">All indices are valid; checked variants still perform optional/bounds semantics.</p><div class="barrow"><div class="barlabel">C unchecked index</div><div class="track"><span class="bar c" style="width:43.0%"></span></div><div class="value">0.776 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">C explicit bounds check</div><div class="track"><span class="bar c" style="width:43.6%"></span></div><div class="value">0.799 ms · 1.03×</div></div><div class="barrow"><div class="barlabel">Rust safe []</div><div class="track"><span class="bar rust" style="width:43.1%"></span></div><div class="value">0.780 ms · 1.01×</div></div><div class="barrow"><div class="barlabel">Rust get + if let</div><div class="track"><span class="bar rust" style="width:43.0%"></span></div><div class="value">0.774 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">Rust get_unchecked</div><div class="track"><span class="bar rust" style="width:44.0%"></span></div><div class="value">0.817 ms · 1.06×</div></div><div class="barrow"><div class="barlabel">Rae at + if let</div><div class="track"><span class="bar rae" style="width:43.1%"></span></div><div class="value">0.777 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">JavaScript native []</div><div class="track"><span class="bar javascript" style="width:100.0%"></span></div><div class="value">9.293 ms · 12.01×</div></div><div class="barrow"><div class="barlabel">JavaScript explicit optional check</div><div class="track"><span class="bar javascript" style="width:100.0%"></span></div><div class="value">42.792 ms · 55.30×</div></div><div class="barrow"><div class="barlabel">Python native []</div><div class="track"><span class="bar python" style="width:100.0%"></span></div><div class="value">313.138 ms · 404.64×</div></div><div class="barrow"><div class="barlabel">Python explicit optional check</div><div class="track"><span class="bar python" style="width:100.0%"></span></div><div class="value">750.995 ms · 970.43×</div></div></section><section class="card"><h3>Int: collection iteration</h3><p class="scenario">Idiomatic direct iteration; Rae lowers its collection loop without an optional or per-element check.</p><div class="barrow"><div class="barlabel">C · direct collection iteration</div><div class="track"><span class="bar c" style="width:43.0%"></span></div><div class="value">0.783 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">Rust · int iterator</div><div class="track"><span class="bar rust" style="width:43.1%"></span></div><div class="value">0.786 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">Rae · collection loop by value</div><div class="track"><span class="bar rae" style="width:43.0%"></span></div><div class="value">0.783 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">Rae · collection loop by view</div><div class="track"><span class="bar rae" style="width:43.5%"></span></div><div class="value">0.803 ms · 1.03×</div></div><div class="barrow"><div class="barlabel">JavaScript · direct collection iteration</div><div class="track"><span class="bar javascript" style="width:100.0%"></span></div><div class="value">8.539 ms · 10.91×</div></div><div class="barrow"><div class="barlabel">Python · direct collection iteration</div><div class="track"><span class="bar python" style="width:100.0%"></span></div><div class="value">190.632 ms · 243.48×</div></div></section><section class="card"><h3>Int: repeated valid index</h3><p class="scenario">Reads index 137 repeatedly; C/Rust/Rae use an opacity barrier to resist constant folding.</p><div class="barrow"><div class="barlabel">C · checked repeated index</div><div class="track"><span class="bar c" style="width:44.8%"></span></div><div class="value">2.981 ms · 1.10×</div></div><div class="barrow"><div class="barlabel">Rust · get + if let, repeated index</div><div class="track"><span class="bar rust" style="width:43.0%"></span></div><div class="value">2.710 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">Rae · at + if let, repeated index</div><div class="track"><span class="bar rae" style="width:45.7%"></span></div><div class="value">3.129 ms · 1.15×</div></div><div class="barrow"><div class="barlabel">JavaScript · checked repeated index</div><div class="track"><span class="bar javascript" style="width:100.0%"></span></div><div class="value">49.951 ms · 18.43×</div></div><div class="barrow"><div class="barlabel">Python · checked repeated index</div><div class="track"><span class="bar python" style="width:100.0%"></span></div><div class="value">718.232 ms · 265.07×</div></div></section><section class="card"><h3>Int: strided access</h3><p class="scenario">Visits 0, 4, 8, ... modulo length, with every access valid.</p><div class="barrow"><div class="barlabel">C · checked strided index</div><div class="track"><span class="bar c" style="width:44.0%"></span></div><div class="value">12.340 ms · 1.06×</div></div><div class="barrow"><div class="barlabel">Rust · get + if let, strided</div><div class="track"><span class="bar rust" style="width:43.0%"></span></div><div class="value">11.657 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">Rae · at + if let, strided</div><div class="track"><span class="bar rae" style="width:44.1%"></span></div><div class="value">12.363 ms · 1.06×</div></div><div class="barrow"><div class="barlabel">JavaScript · checked strided index</div><div class="track"><span class="bar javascript" style="width:73.7%"></span></div><div class="value">43.006 ms · 3.69×</div></div><div class="barrow"><div class="barlabel">Python · checked strided index</div><div class="track"><span class="bar python" style="width:100.0%"></span></div><div class="value">1023.316 ms · 87.79×</div></div></section><section class="card"><h3>Int: deterministic random access</h3><p class="scenario">Uses the same arithmetic index sequence in every language; every access is valid.</p><div class="barrow"><div class="barlabel">C · checked random index</div><div class="track"><span class="bar c" style="width:43.0%"></span></div><div class="value">5.361 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">Rust · get + if let, random</div><div class="track"><span class="bar rust" style="width:43.0%"></span></div><div class="value">5.366 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">Rae · at + if let, random</div><div class="track"><span class="bar rae" style="width:43.0%"></span></div><div class="value">5.359 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">JavaScript · checked random index</div><div class="track"><span class="bar javascript" style="width:100.0%"></span></div><div class="value">311.158 ms · 58.06×</div></div><div class="barrow"><div class="barlabel">Python · checked random index</div><div class="track"><span class="bar python" style="width:100.0%"></span></div><div class="value">1556.981 ms · 290.52×</div></div></section><section class="card"><h3>Int: 0.1% invalid</h3><p class="scenario">Every thousandth access is exactly length and must produce absence.</p><div class="barrow"><div class="barlabel">C · checked, 0.1% invalid</div><div class="track"><span class="bar c" style="width:43.0%"></span></div><div class="value">6.000 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">Rust · get + if let, 0.1% invalid</div><div class="track"><span class="bar rust" style="width:43.8%"></span></div><div class="value">6.264 ms · 1.04×</div></div><div class="barrow"><div class="barlabel">Rae · at + if let, 0.1% invalid</div><div class="track"><span class="bar rae" style="width:43.2%"></span></div><div class="value">6.066 ms · 1.01×</div></div><div class="barrow"><div class="barlabel">JavaScript · checked, 0.1% invalid</div><div class="track"><span class="bar javascript" style="width:100.0%"></span></div><div class="value">325.830 ms · 54.31×</div></div><div class="barrow"><div class="barlabel">Python · checked, 0.1% invalid</div><div class="track"><span class="bar python" style="width:100.0%"></span></div><div class="value">1831.723 ms · 305.29×</div></div></section><section class="card"><h3>Int: 25% invalid</h3><p class="scenario">Every fourth index is -1; negative indexing is explicitly rejected in JavaScript/Python too.</p><div class="barrow"><div class="barlabel">C · checked, 25% invalid</div><div class="track"><span class="bar c" style="width:43.2%"></span></div><div class="value">4.011 ms · 1.01×</div></div><div class="barrow"><div class="barlabel">Rust · get + if let, 25% invalid</div><div class="track"><span class="bar rust" style="width:43.2%"></span></div><div class="value">4.012 ms · 1.01×</div></div><div class="barrow"><div class="barlabel">Rae · at + if let, 25% invalid</div><div class="track"><span class="bar rae" style="width:43.0%"></span></div><div class="value">3.972 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">JavaScript · checked, 25% invalid</div><div class="track"><span class="bar javascript" style="width:100.0%"></span></div><div class="value">242.940 ms · 61.16×</div></div><div class="barrow"><div class="barlabel">Python · checked, 25% invalid</div><div class="track"><span class="bar python" style="width:100.0%"></span></div><div class="value">1565.558 ms · 394.14×</div></div></section><section class="card"><h3>64-byte struct: sequential</h3><p class="scenario">Rae/C/Rust compare inline value copies and references; JS objects and Python tuples are heap references.</p><div class="barrow"><div class="barlabel">C · inline struct copy</div><div class="track"><span class="bar c" style="width:43.1%"></span></div><div class="value">5.447 ms · 1.01×</div></div><div class="barrow"><div class="barlabel">C · struct pointer</div><div class="track"><span class="bar c" style="width:43.4%"></span></div><div class="value">5.529 ms · 1.02×</div></div><div class="barrow"><div class="barlabel">Rust · copied struct</div><div class="track"><span class="bar rust" style="width:43.3%"></span></div><div class="value">5.502 ms · 1.02×</div></div><div class="barrow"><div class="barlabel">Rust · get + borrowed struct</div><div class="track"><span class="bar rust" style="width:43.5%"></span></div><div class="value">5.558 ms · 1.03×</div></div><div class="barrow"><div class="barlabel">Rae · at + copied struct</div><div class="track"><span class="bar rae" style="width:43.1%"></span></div><div class="value">5.457 ms · 1.01×</div></div><div class="barrow"><div class="barlabel">Rae · viewAt + borrowed struct</div><div class="track"><span class="bar rae" style="width:43.0%"></span></div><div class="value">5.419 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">JavaScript · heap-object/tuple reference</div><div class="track"><span class="bar javascript" style="width:68.6%"></span></div><div class="value">16.601 ms · 3.06×</div></div><div class="barrow"><div class="barlabel">Python · heap-object/tuple reference</div><div class="track"><span class="bar python" style="width:100.0%"></span></div><div class="value">909.883 ms · 167.91×</div></div></section><section class="card"><h3>64-byte struct: collection</h3><p class="scenario">Direct collection iteration, with value/reference variants where the language has inline value structs.</p><div class="barrow"><div class="barlabel">C · collection by value</div><div class="track"><span class="bar c" style="width:43.3%"></span></div><div class="value">5.499 ms · 1.02×</div></div><div class="barrow"><div class="barlabel">C · pointer collection loop</div><div class="track"><span class="bar c" style="width:43.0%"></span></div><div class="value">5.402 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">Rust · iterator copied struct</div><div class="track"><span class="bar rust" style="width:43.2%"></span></div><div class="value">5.460 ms · 1.01×</div></div><div class="barrow"><div class="barlabel">Rust · iterator borrowed struct</div><div class="track"><span class="bar rust" style="width:43.2%"></span></div><div class="value">5.473 ms · 1.01×</div></div><div class="barrow"><div class="barlabel">Rae · collection by value</div><div class="track"><span class="bar rae" style="width:43.4%"></span></div><div class="value">5.517 ms · 1.02×</div></div><div class="barrow"><div class="barlabel">Rae · collection loop by view</div><div class="track"><span class="bar rae" style="width:43.2%"></span></div><div class="value">5.471 ms · 1.01×</div></div><div class="barrow"><div class="barlabel">JavaScript · object/tuple collection loop</div><div class="track"><span class="bar javascript" style="width:58.6%"></span></div><div class="value">11.240 ms · 2.08×</div></div><div class="barrow"><div class="barlabel">Python · object/tuple collection loop</div><div class="track"><span class="bar python" style="width:100.0%"></span></div><div class="value">371.786 ms · 68.82×</div></div></section><section class="card"><h3>64-byte struct: random reference</h3><p class="scenario">Random valid access without copying the struct in Rae/C/Rust.</p><div class="barrow"><div class="barlabel">C · random struct pointer</div><div class="track"><span class="bar c" style="width:43.0%"></span></div><div class="value">6.248 ms · 1.00×</div></div><div class="barrow"><div class="barlabel">Rust · random borrowed struct</div><div class="track"><span class="bar rust" style="width:43.3%"></span></div><div class="value">6.340 ms · 1.01×</div></div><div class="barrow"><div class="barlabel">Rae · random viewAt + if let</div><div class="track"><span class="bar rae" style="width:43.4%"></span></div><div class="value">6.393 ms · 1.02×</div></div><div class="barrow"><div class="barlabel">JavaScript · random object/tuple reference</div><div class="track"><span class="bar javascript" style="width:100.0%"></span></div><div class="value">395.801 ms · 63.35×</div></div><div class="barrow"><div class="barlabel">Python · random object/tuple reference</div><div class="track"><span class="bar python" style="width:100.0%"></span></div><div class="value">2041.326 ms · 326.72×</div></div></section></div>
 <h2>Headline ratios</h2><div class="findings">
-<div class="metric"><strong>1.01×</strong>Rae optional Int sequential vs C checked</div>
+<div class="metric"><strong>0.97×</strong>Rae optional Int sequential vs C checked</div>
 <div class="metric"><strong>1.00×</strong>Rae optional Int random vs C checked</div>
-<div class="metric"><strong>1.01×</strong>Rae collection view vs C pointer loop</div>
-<div class="metric"><strong>1.00×</strong>Rae optional struct view vs C pointer</div></div>
-<h2>Methodology</h2><p>All implementations use equivalent deterministic data and checksums. Timings exclude allocation/setup, use monotonic clocks, and include nine in-process repetitions; the first two are discarded. C and Rust include safe and explicitly unchecked baselines. Rae exposes no unchecked List API.</p>
-<dl><dt>platform</dt><dd>macOS-15.6.1-arm64-arm-64bit-Mach-O</dd><dt>machine</dt><dd>arm64</dd><dt>processor</dt><dd>Apple M1 Max</dd><dt>rae_commit</dt><dd>e2cacd6801f7f7bde1f149a4115892b38142bf0a</dd><dt>rae_worktree</dt><dd>dirty</dd><dt>c_compiler</dt><dd>Apple clang version 16.0.0 (clang-1600.0.26.3)</dd><dt>rust_compiler</dt><dd>rustc 1.93.1 (01f6ddf75 2026-02-11)</dd><dt>optimization</dt><dd>{&#x27;rae&#x27;: &#x27;release (-O2 -DNDEBUG)&#x27;, &#x27;c&#x27;: &#x27;-O3 -DNDEBUG&#x27;, &#x27;rust&#x27;: &#x27;-C opt-level=3&#x27;}</dd><dt>data_size</dt><dd>65536</dd><dt>passes</dt><dd>128</dd><dt>measured_repetitions</dt><dd>7</dd><dt>discarded_warmups</dt><dd>2</dd></dl>
-<h2>All measurements</h2><div class="scroll"><table><thead><tr><th>Language</th><th>Scenario</th><th>Median ms</th><th>Minimum ms</th><th>Stddev ms</th><th>Checksum</th></tr></thead><tbody><tr><td>c</td><td>int_collection</td><td>0.797</td><td>0.785</td><td>0.017</td><td>4227337856</td></tr><tr><td>c</td><td>int_constant_checked</td><td>3.065</td><td>3.008</td><td>0.038</td><td>2634022912</td></tr><tr><td>c</td><td>int_mixed_invalid_checked</td><td>4.077</td><td>3.985</td><td>0.062</td><td>3170409344</td></tr><tr><td>c</td><td>int_mostly_valid_checked</td><td>6.095</td><td>5.997</td><td>0.065</td><td>4223109862</td></tr><tr><td>c</td><td>int_random_checked</td><td>5.476</td><td>5.419</td><td>0.168</td><td>4227337856</td></tr><tr><td>c</td><td>int_sequential_checked</td><td>0.793</td><td>0.785</td><td>0.028</td><td>4227337856</td></tr><tr><td>c</td><td>int_sequential_unchecked</td><td>0.795</td><td>0.786</td><td>0.015</td><td>4227337856</td></tr><tr><td>c</td><td>int_strided_checked</td><td>12.493</td><td>12.449</td><td>0.080</td><td>4227174912</td></tr><tr><td>c</td><td>struct_collection_pointer</td><td>5.542</td><td>5.419</td><td>0.065</td><td>972888448</td></tr><tr><td>c</td><td>struct_collection_value</td><td>5.515</td><td>5.419</td><td>0.082</td><td>972888448</td></tr><tr><td>c</td><td>struct_random_pointer</td><td>6.546</td><td>6.295</td><td>0.155</td><td>972888448</td></tr><tr><td>c</td><td>struct_sequential_pointer</td><td>5.520</td><td>5.358</td><td>0.105</td><td>972888448</td></tr><tr><td>c</td><td>struct_sequential_value</td><td>5.641</td><td>5.516</td><td>0.086</td><td>972888448</td></tr><tr><td>rae</td><td>int_collection_value</td><td>0.804</td><td>0.785</td><td>0.014</td><td>4227337856</td></tr><tr><td>rae</td><td>int_collection_view</td><td>0.802</td><td>0.785</td><td>0.020</td><td>4227337856</td></tr><tr><td>rae</td><td>int_constant_optional</td><td>2.864</td><td>2.747</td><td>0.117</td><td>2634022912</td></tr><tr><td>rae</td><td>int_mixed_invalid_optional</td><td>4.115</td><td>4.005</td><td>0.055</td><td>3170409344</td></tr><tr><td>rae</td><td>int_mostly_valid_optional</td><td>6.017</td><td>5.917</td><td>0.070</td><td>4223109862</td></tr><tr><td>rae</td><td>int_random_optional</td><td>5.455</td><td>5.351</td><td>0.090</td><td>4227337856</td></tr><tr><td>rae</td><td>int_sequential_optional</td><td>0.804</td><td>0.785</td><td>0.023</td><td>4227337856</td></tr><tr><td>rae</td><td>int_strided_optional</td><td>12.555</td><td>12.479</td><td>0.056</td><td>4227174912</td></tr><tr><td>rae</td><td>struct_collection_value</td><td>5.588</td><td>5.400</td><td>0.126</td><td>972888448</td></tr><tr><td>rae</td><td>struct_collection_view</td><td>5.571</td><td>5.512</td><td>0.044</td><td>972888448</td></tr><tr><td>rae</td><td>struct_random_optional_view</td><td>6.475</td><td>6.189</td><td>0.183</td><td>972888448</td></tr><tr><td>rae</td><td>struct_sequential_optional_value</td><td>5.570</td><td>5.464</td><td>0.085</td><td>972888448</td></tr><tr><td>rae</td><td>struct_sequential_optional_view</td><td>5.503</td><td>5.397</td><td>0.084</td><td>972888448</td></tr><tr><td>rust</td><td>int_constant_get</td><td>2.786</td><td>2.688</td><td>0.060</td><td>2634022912</td></tr><tr><td>rust</td><td>int_iterator</td><td>0.798</td><td>0.785</td><td>0.024</td><td>4227337856</td></tr><tr><td>rust</td><td>int_mixed_invalid_get</td><td>4.071</td><td>3.976</td><td>0.061</td><td>3170409344</td></tr><tr><td>rust</td><td>int_mostly_valid_get</td><td>6.476</td><td>6.369</td><td>0.082</td><td>4223109862</td></tr><tr><td>rust</td><td>int_random_get</td><td>5.401</td><td>5.303</td><td>0.071</td><td>4227337856</td></tr><tr><td>rust</td><td>int_sequential_get</td><td>0.795</td><td>0.785</td><td>0.024</td><td>4227337856</td></tr><tr><td>rust</td><td>int_sequential_safe_index</td><td>0.801</td><td>0.786</td><td>0.025</td><td>4227337856</td></tr><tr><td>rust</td><td>int_strided_get</td><td>11.835</td><td>11.674</td><td>0.092</td><td>4227174912</td></tr><tr><td>rust</td><td>int_unchecked</td><td>0.802</td><td>0.785</td><td>0.014</td><td>4227337856</td></tr><tr><td>rust</td><td>struct_iterator_copy</td><td>5.518</td><td>5.353</td><td>0.118</td><td>972888448</td></tr><tr><td>rust</td><td>struct_iterator_ref</td><td>5.511</td><td>5.394</td><td>0.077</td><td>972888448</td></tr><tr><td>rust</td><td>struct_random_get</td><td>6.324</td><td>6.281</td><td>0.204</td><td>972888448</td></tr><tr><td>rust</td><td>struct_sequential_copy</td><td>5.581</td><td>5.442</td><td>0.093</td><td>972888448</td></tr><tr><td>rust</td><td>struct_sequential_get</td><td>5.572</td><td>5.455</td><td>0.065</td><td>972888448</td></tr></tbody></table></div>
-<h2>Representative generated C</h2><p>The generated accessor checks logical <code>length</code>. Collection loops snapshot the List header and length, then address the backing data directly.</p><pre>sh(__rae_spm); }
+<div class="metric"><strong>1.03×</strong>Rae collection view vs C pointer loop</div>
+<div class="metric"><strong>0.98×</strong>Rae optional struct view vs C pointer</div></div>
+<h2>What RaeAny means here</h2><p><code>opt view T</code> and <code>opt mod T</code> are nullable references: one null check, no allocation, and no element copy. A general owned <code>opt T</code> has to carry either <code>none</code> or an owned value of arbitrary size, so the current C ABI uses a 48-byte <code>RaeAny</code> tag/union/drop record. Values wider than its inline union, including the benchmark's 64-byte <code>Particle</code>, are heap-allocated; heap-owning structs are also deep-copied and later dropped.</p>
+<p><strong>This page does not measure that general RaeAny path.</strong> Its owned-value spelling is <code>if let particle: Particle = particles.at(...)</code>. The C backend recognizes this immediate narrowing and emits one logical-length check followed by a direct local copy, without constructing RaeAny. A stored, passed, or returned owned <code>opt Particle</code> may use RaeAny and therefore deserves separate correctness and performance work before it can be benchmarked honestly. Do not infer RaeAny overhead from the Particle numbers below.</p>
+<h2>Methodology</h2><p>All implementations use equivalent deterministic data, access counts, and validated checksums. Timings exclude allocation/setup, use each runtime's monotonic high-resolution clock, and include nine in-process repetitions; the first two are discarded. C and Rust include explicitly unchecked controls. Rae exposes no unchecked List API.</p>
+<p>Rae/C/Rust use contiguous 64-byte inline <code>Particle</code> structs. JavaScript uses ordinary heap objects and Python uses tuples; those struct results answer “what does idiomatic access cost in this runtime?” rather than “how does identical memory layout compile?”</p>
+<dl><dt>platform</dt><dd>macOS-15.6.1-arm64-arm-64bit-Mach-O</dd><dt>machine</dt><dd>arm64</dd><dt>processor</dt><dd>Apple M1 Max</dd><dt>rae_commit</dt><dd>2222151b1140ae7425f75c15d408f6a9bab1bb35</dd><dt>rae_worktree</dt><dd>dirty</dd><dt>c_compiler</dt><dd>Apple clang version 16.0.0 (clang-1600.0.26.3)</dd><dt>rust_compiler</dt><dd>rustc 1.93.1 (01f6ddf75 2026-02-11)</dd><dt>javascript_runtime</dt><dd>v26.5.1</dd><dt>python_runtime</dt><dd>Python 3.14.6</dd><dt>optimization</dt><dd>{&#x27;rae&#x27;: &#x27;release (-O2 -DNDEBUG)&#x27;, &#x27;c&#x27;: &#x27;-O3 -DNDEBUG&#x27;, &#x27;rust&#x27;: &#x27;-C opt-level=3&#x27;, &#x27;javascript&#x27;: &#x27;Node default optimizing JIT&#x27;, &#x27;python&#x27;: &#x27;CPython default interpreter&#x27;}</dd><dt>data_size</dt><dd>65536</dd><dt>passes</dt><dd>128</dd><dt>measured_repetitions</dt><dd>7</dd><dt>discarded_warmups</dt><dd>2</dd></dl>
+<h2>All measurements</h2><div class="scroll"><table><thead><tr><th>Language</th><th>Scenario</th><th>Median ms</th><th>Minimum ms</th><th>Stddev ms</th><th>Checksum</th></tr></thead><tbody><tr><td>C</td><td>direct collection iteration</td><td>0.783</td><td>0.770</td><td>0.024</td><td>4227337856</td></tr><tr><td>C</td><td>checked repeated index</td><td>2.981</td><td>2.927</td><td>0.083</td><td>2634022912</td></tr><tr><td>C</td><td>checked, 25% invalid</td><td>4.011</td><td>3.901</td><td>0.108</td><td>3170409344</td></tr><tr><td>C</td><td>checked, 0.1% invalid</td><td>6.000</td><td>5.790</td><td>0.113</td><td>4223109862</td></tr><tr><td>C</td><td>checked random index</td><td>5.361</td><td>5.212</td><td>0.084</td><td>4227337856</td></tr><tr><td>C</td><td>int sequential checked</td><td>0.799</td><td>0.770</td><td>0.016</td><td>4227337856</td></tr><tr><td>C</td><td>int sequential unchecked</td><td>0.776</td><td>0.771</td><td>0.024</td><td>4227337856</td></tr><tr><td>C</td><td>checked strided index</td><td>12.340</td><td>12.073</td><td>0.223</td><td>4227174912</td></tr><tr><td>C</td><td>pointer collection loop</td><td>5.402</td><td>5.268</td><td>0.163</td><td>972888448</td></tr><tr><td>C</td><td>collection by value</td><td>5.499</td><td>5.440</td><td>0.047</td><td>972888448</td></tr><tr><td>C</td><td>random struct pointer</td><td>6.248</td><td>6.068</td><td>0.192</td><td>972888448</td></tr><tr><td>C</td><td>struct pointer</td><td>5.529</td><td>5.278</td><td>0.127</td><td>972888448</td></tr><tr><td>C</td><td>inline struct copy</td><td>5.447</td><td>5.260</td><td>0.124</td><td>972888448</td></tr><tr><td>JavaScript</td><td>direct collection iteration</td><td>8.539</td><td>8.317</td><td>0.117</td><td>4227337856</td></tr><tr><td>JavaScript</td><td>checked repeated index</td><td>49.951</td><td>49.307</td><td>0.328</td><td>2634022912</td></tr><tr><td>JavaScript</td><td>checked, 25% invalid</td><td>242.940</td><td>242.454</td><td>0.829</td><td>3170409344</td></tr><tr><td>JavaScript</td><td>checked, 0.1% invalid</td><td>325.830</td><td>323.678</td><td>1.271</td><td>4223109862</td></tr><tr><td>JavaScript</td><td>checked random index</td><td>311.158</td><td>309.613</td><td>1.454</td><td>4227337856</td></tr><tr><td>JavaScript</td><td>int sequential checked</td><td>42.792</td><td>41.981</td><td>0.458</td><td>4227337856</td></tr><tr><td>JavaScript</td><td>int sequential native</td><td>9.293</td><td>9.200</td><td>0.121</td><td>4227337856</td></tr><tr><td>JavaScript</td><td>checked strided index</td><td>43.006</td><td>42.792</td><td>0.118</td><td>4227174912</td></tr><tr><td>JavaScript</td><td>object/tuple collection loop</td><td>11.240</td><td>10.997</td><td>0.151</td><td>972888448</td></tr><tr><td>JavaScript</td><td>random object/tuple reference</td><td>395.801</td><td>377.572</td><td>9.091</td><td>972888448</td></tr><tr><td>JavaScript</td><td>heap-object/tuple reference</td><td>16.601</td><td>16.053</td><td>0.234</td><td>972888448</td></tr><tr><td>Python</td><td>direct collection iteration</td><td>190.632</td><td>189.882</td><td>0.409</td><td>4227337856</td></tr><tr><td>Python</td><td>checked repeated index</td><td>718.232</td><td>715.847</td><td>1.291</td><td>2634022912</td></tr><tr><td>Python</td><td>checked, 25% invalid</td><td>1565.558</td><td>1541.404</td><td>20.036</td><td>3170409344</td></tr><tr><td>Python</td><td>checked, 0.1% invalid</td><td>1831.723</td><td>1809.731</td><td>14.247</td><td>4223109862</td></tr><tr><td>Python</td><td>checked random index</td><td>1556.981</td><td>1553.484</td><td>11.823</td><td>4227337856</td></tr><tr><td>Python</td><td>int sequential checked</td><td>750.995</td><td>750.461</td><td>1.949</td><td>4227337856</td></tr><tr><td>Python</td><td>int sequential native</td><td>313.138</td><td>311.756</td><td>0.807</td><td>4227337856</td></tr><tr><td>Python</td><td>checked strided index</td><td>1023.316</td><td>1021.829</td><td>2.338</td><td>4227174912</td></tr><tr><td>Python</td><td>object/tuple collection loop</td><td>371.786</td><td>370.946</td><td>0.655</td><td>972888448</td></tr><tr><td>Python</td><td>random object/tuple reference</td><td>2041.326</td><td>1987.667</td><td>24.477</td><td>972888448</td></tr><tr><td>Python</td><td>heap-object/tuple reference</td><td>909.883</td><td>906.588</td><td>1.622</td><td>972888448</td></tr><tr><td>Rae</td><td>collection loop by value</td><td>0.783</td><td>0.770</td><td>0.036</td><td>4227337856</td></tr><tr><td>Rae</td><td>collection loop by view</td><td>0.803</td><td>0.771</td><td>0.029</td><td>4227337856</td></tr><tr><td>Rae</td><td>at + if let, repeated index</td><td>3.129</td><td>2.753</td><td>0.171</td><td>2634022912</td></tr><tr><td>Rae</td><td>at + if let, 25% invalid</td><td>3.972</td><td>3.902</td><td>0.108</td><td>3170409344</td></tr><tr><td>Rae</td><td>at + if let, 0.1% invalid</td><td>6.066</td><td>5.895</td><td>0.115</td><td>4223109862</td></tr><tr><td>Rae</td><td>at + if let, random</td><td>5.359</td><td>5.215</td><td>0.198</td><td>4227337856</td></tr><tr><td>Rae</td><td>int sequential optional</td><td>0.777</td><td>0.771</td><td>0.022</td><td>4227337856</td></tr><tr><td>Rae</td><td>at + if let, strided</td><td>12.363</td><td>12.121</td><td>0.146</td><td>4227174912</td></tr><tr><td>Rae</td><td>collection by value</td><td>5.517</td><td>5.331</td><td>0.139</td><td>972888448</td></tr><tr><td>Rae</td><td>collection loop by view</td><td>5.471</td><td>5.324</td><td>0.110</td><td>972888448</td></tr><tr><td>Rae</td><td>random viewAt + if let</td><td>6.393</td><td>6.149</td><td>0.161</td><td>972888448</td></tr><tr><td>Rae</td><td>at + copied struct</td><td>5.457</td><td>5.361</td><td>0.056</td><td>972888448</td></tr><tr><td>Rae</td><td>viewAt + borrowed struct</td><td>5.419</td><td>5.294</td><td>0.084</td><td>972888448</td></tr><tr><td>Rust</td><td>get + if let, repeated index</td><td>2.710</td><td>2.601</td><td>0.064</td><td>2634022912</td></tr><tr><td>Rust</td><td>int iterator</td><td>0.786</td><td>0.770</td><td>0.019</td><td>4227337856</td></tr><tr><td>Rust</td><td>get + if let, 25% invalid</td><td>4.012</td><td>3.944</td><td>0.064</td><td>3170409344</td></tr><tr><td>Rust</td><td>get + if let, 0.1% invalid</td><td>6.264</td><td>6.234</td><td>0.157</td><td>4223109862</td></tr><tr><td>Rust</td><td>get + if let, random</td><td>5.366</td><td>5.224</td><td>0.108</td><td>4227337856</td></tr><tr><td>Rust</td><td>int sequential get</td><td>0.774</td><td>0.766</td><td>0.030</td><td>4227337856</td></tr><tr><td>Rust</td><td>int sequential safe index</td><td>0.780</td><td>0.774</td><td>0.025</td><td>4227337856</td></tr><tr><td>Rust</td><td>get + if let, strided</td><td>11.657</td><td>11.477</td><td>0.085</td><td>4227174912</td></tr><tr><td>Rust</td><td>int unchecked</td><td>0.817</td><td>0.766</td><td>0.025</td><td>4227337856</td></tr><tr><td>Rust</td><td>iterator copied struct</td><td>5.460</td><td>5.331</td><td>0.177</td><td>972888448</td></tr><tr><td>Rust</td><td>iterator borrowed struct</td><td>5.473</td><td>5.308</td><td>0.083</td><td>972888448</td></tr><tr><td>Rust</td><td>random borrowed struct</td><td>6.340</td><td>6.133</td><td>0.288</td><td>972888448</td></tr><tr><td>Rust</td><td>copied struct</td><td>5.502</td><td>5.344</td><td>0.146</td><td>972888448</td></tr><tr><td>Rust</td><td>get + borrowed struct</td><td>5.558</td><td>5.272</td><td>0.129</td><td>972888448</td></tr></tbody></table></div>
+<h2>What code is being compared?</h2><p>These are the central random-access forms used by the 64-byte struct benchmark. Rae, C, and Rust use contiguous inline structs; JavaScript objects and Python tuples are references to heap-managed values.</p><div class="codegrid"><section><h3>Rae</h3><pre>if let particle: view Particle =&gt; particles.viewAt(index: index) {
+    checksum = checksum + particle.px + particle.vz + particle.mass
+}</pre></section><section><h3>C</h3><pre>if ((uint64_t)index &lt; (uint64_t)length) {
+    const Particle *particle = &amp;particles[index];
+    checksum += particle-&gt;px + particle-&gt;vz + particle-&gt;mass;
+}</pre></section><section><h3>Rust</h3><pre>if let Some(particle) = particles.get(index) {
+    checksum += particle.px + particle.vz + particle.mass;
+}</pre></section><section><h3>JavaScript</h3><pre>const particle = index &gt;= 0 &amp;&amp; index &lt; particles.length
+  ? particles[index] : undefined;
+if (particle !== undefined)
+  checksum += particle.px + particle.vz + particle.mass;</pre></section><section><h3>Python</h3><pre>particle = PARTICLES[index] if 0 &lt;= index &lt; len(PARTICLES) else None
+if particle is not None:
+    checksum += particle[0] + particle[5] + particle[6]</pre></section></div>
+<h2>Collection-loop comparison</h2><p>These forms visit every element directly. Rae's collection loop is the preferred sequential hot path because it does not construct an optional or repeat a List bounds check.</p><div class="codegrid"><section><h3>Rae</h3><pre>loop particle: view Particle in particles {
+    checksum = checksum + particle.px + particle.vz + particle.mass
+}</pre></section><section><h3>C</h3><pre>for (int64_t index = 0; index &lt; length; index++) {
+    const Particle *particle = &amp;particles[index];
+    checksum += particle-&gt;px + particle-&gt;vz + particle-&gt;mass;
+}</pre></section><section><h3>Rust</h3><pre>for particle in &amp;particles {
+    checksum += particle.px + particle.vz + particle.mass;
+}</pre></section><section><h3>JavaScript</h3><pre>for (const particle of particles)
+  checksum += particle.px + particle.vz + particle.mass;</pre></section><section><h3>Python</h3><pre>for particle in PARTICLES:
+    checksum += particle[0] + particle[5] + particle[6]</pre></section></div>
+<h2>Representative generated C: immediate if let</h2><p>This hot path checks logical <code>length</code> and binds directly. It does not create RaeAny.</p><pre>sh(__rae_spm); }
   rae_string_pool_flush(__rae_spm_func);
 }
 
@@ -72,7 +105,765 @@ RAE_UNUSED static void rae_benchmarks_list_access_rae_main_intCollection_rae_Lis
 }
 
 RAE_UNUSED static voi</pre>
-<h2>Conclusions</h2><p>Optional view/mod access is a nullable pointer and does not allocate. The recorded Rae/C median ratios are 1.01× for sequential optional indexing, 1.00× for deterministic random indexing, 0.93× for the opaque repeated-index case, 1.01× for collection-view iteration, and 1.00× for 64-byte struct views; lower is faster. Differences this small can change direction between runs, so the raw samples and standard deviations matter more than declaring a winner. Owned <code>opt T</code> currently uses RaeAny, so value access can cost more for wide heap-owning structs; use <code>viewAt</code> when copying is not intended.</p>
-<p>The bounds check does not dominate the realistic sequential, random, or data-oriented struct cases measured here. The results support the always-optional public API and do not justify exposing unchecked List access. Collection loops remain the preferred sequential hot path because their lowering has one loop-bound comparison and no per-element optional or bounds check.</p>
+<h2>Complete compared source</h2><p>The exact Rae, handwritten C, Rust, JavaScript, and Python programs used for every number are embedded below.</p><details><summary>Rae source</summary><pre>import core
+
+func rae_ext_benchmarkOpaqueIndex(index: Int) extern ret Int
+
+type Particle {
+  px: Int
+  py: Int
+  pz: Int
+  vx: Int
+  vy: Int
+  vz: Int
+  mass: Int
+  flags: Int
+}
+
+func makeInts(size: view Int) ret List(Int) {
+  var values: List(Int) = createList(Int, cap: size)
+  var index: Int = 0
+  loop index &lt; size {
+    values.add(value: (index * 17 + 3) % 1009)
+    index = index + 1
+  }
+  ret values
+}
+
+func makeParticles(size: view Int) ret List(Particle) {
+  var particles: List(Particle) = createList(Particle, cap: size)
+  var index: Int = 0
+  loop index &lt; size {
+    particles.add(value: Particle {
+      px: index % 97
+      py: index % 89
+      pz: index % 83
+      vx: index % 79
+      vy: index % 73
+      vz: index % 71
+      mass: index % 67
+      flags: index % 61
+    })
+    index = index + 1
+  }
+  ret particles
+}
+
+func report(name: view String, startNs: view Int, checksum: view Int) {
+  let elapsed: Int = nowNs() - startNs
+  log(&quot;RESULT,rae,{name},{elapsed},{checksum}&quot;)
+}
+
+func intSequential(values: view List(Int), passes: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var pass: Int = 0
+  loop pass &lt; passes {
+    var index: Int = 0
+    loop index &lt; values.length {
+      if let value: Int = values.at(index: index) {
+        checksum = checksum + value
+      }
+      index = index + 1
+    }
+    pass = pass + 1
+  }
+  report(name: &quot;int_sequential_optional&quot;, startNs: startNs, checksum: checksum)
+}
+
+func intCollection(values: view List(Int), passes: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var pass: Int = 0
+  loop pass &lt; passes {
+    loop value: Int in values {
+      checksum = checksum + value
+    }
+    pass = pass + 1
+  }
+  report(name: &quot;int_collection_value&quot;, startNs: startNs, checksum: checksum)
+}
+
+func intCollectionView(values: view List(Int), passes: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var pass: Int = 0
+  loop pass &lt; passes {
+    loop value: view Int in values {
+      checksum = checksum + value
+    }
+    pass = pass + 1
+  }
+  report(name: &quot;int_collection_view&quot;, startNs: startNs, checksum: checksum)
+}
+
+func intConstant(values: view List(Int), operations: view Int) {
+  let constantIndex: Int = rae_ext_benchmarkOpaqueIndex(index: 137)
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var iteration: Int = 0
+  loop iteration &lt; operations {
+    if let value: Int = values.at(index: constantIndex) {
+      checksum = checksum + value
+    }
+    iteration = iteration + 1
+  }
+  report(name: &quot;int_constant_optional&quot;, startNs: startNs, checksum: checksum)
+}
+
+func intStrided(values: view List(Int), operations: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var index: Int = 0
+  var iteration: Int = 0
+  loop iteration &lt; operations {
+    if let value: Int = values.at(index: index) {
+      checksum = checksum + value
+    }
+    index = (index + 4) % values.length
+    iteration = iteration + 1
+  }
+  report(name: &quot;int_strided_optional&quot;, startNs: startNs, checksum: checksum)
+}
+
+func intRandom(values: view List(Int), operations: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var iteration: Int = 0
+  loop iteration &lt; operations {
+    let index: Int = (iteration * 48271 + 17) % values.length
+    if let value: Int = values.at(index: index) {
+      checksum = checksum + value
+    }
+    iteration = iteration + 1
+  }
+  report(name: &quot;int_random_optional&quot;, startNs: startNs, checksum: checksum)
+}
+
+func intMostlyValid(values: view List(Int), operations: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var iteration: Int = 0
+  loop iteration &lt; operations {
+    var index: Int = (iteration * 48271 + 17) % values.length
+    if iteration % 1000 is 0 {
+      index = values.length
+    }
+    if let value: Int = values.at(index: index) {
+      checksum = checksum + value
+    }
+    iteration = iteration + 1
+  }
+  report(name: &quot;int_mostly_valid_optional&quot;, startNs: startNs, checksum: checksum)
+}
+
+func intMixedInvalid(values: view List(Int), operations: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var iteration: Int = 0
+  loop iteration &lt; operations {
+    var index: Int = (iteration * 48271 + 17) % values.length
+    if iteration % 4 is 0 {
+      index = 0 - 1
+    }
+    if let value: Int = values.at(index: index) {
+      checksum = checksum + value
+    }
+    iteration = iteration + 1
+  }
+  report(name: &quot;int_mixed_invalid_optional&quot;, startNs: startNs, checksum: checksum)
+}
+
+func structSequentialValue(particles: view List(Particle), passes: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var pass: Int = 0
+  loop pass &lt; passes {
+    var index: Int = 0
+    loop index &lt; particles.length {
+      if let particle: Particle = particles.at(index: index) {
+        checksum = checksum + particle.px + particle.vz + particle.mass
+      }
+      index = index + 1
+    }
+    pass = pass + 1
+  }
+  report(name: &quot;struct_sequential_optional_value&quot;, startNs: startNs, checksum: checksum)
+}
+
+func structSequentialView(particles: view List(Particle), passes: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var pass: Int = 0
+  loop pass &lt; passes {
+    var index: Int = 0
+    loop index &lt; particles.length {
+      if let particle: view Particle =&gt; particles.viewAt(index: index) {
+        checksum = checksum + particle.px + particle.vz + particle.mass
+      }
+      index = index + 1
+    }
+    pass = pass + 1
+  }
+  report(name: &quot;struct_sequential_optional_view&quot;, startNs: startNs, checksum: checksum)
+}
+
+func structCollectionValue(particles: view List(Particle), passes: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var pass: Int = 0
+  loop pass &lt; passes {
+    loop particle: Particle in particles {
+      checksum = checksum + particle.px + particle.vz + particle.mass
+    }
+    pass = pass + 1
+  }
+  report(name: &quot;struct_collection_value&quot;, startNs: startNs, checksum: checksum)
+}
+
+func structCollectionView(particles: view List(Particle), passes: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var pass: Int = 0
+  loop pass &lt; passes {
+    loop particle: view Particle in particles {
+      checksum = checksum + particle.px + particle.vz + particle.mass
+    }
+    pass = pass + 1
+  }
+  report(name: &quot;struct_collection_view&quot;, startNs: startNs, checksum: checksum)
+}
+
+func structRandomView(particles: view List(Particle), operations: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var iteration: Int = 0
+  loop iteration &lt; operations {
+    let index: Int = (iteration * 48271 + 17) % particles.length
+    if let particle: view Particle =&gt; particles.viewAt(index: index) {
+      checksum = checksum + particle.px + particle.vz + particle.mass
+    }
+    iteration = iteration + 1
+  }
+  report(name: &quot;struct_random_optional_view&quot;, startNs: startNs, checksum: checksum)
+}
+
+func runSuite() {
+  let size: Int = 65536
+  let passes: Int = 128
+  let operations: Int = size * passes
+  let values: List(Int) = makeInts(size: size)
+  let particles: List(Particle) = makeParticles(size: size)
+  intSequential(values: values, passes: passes)
+  intCollection(values: values, passes: passes)
+  intCollectionView(values: values, passes: passes)
+  intConstant(values: values, operations: operations)
+  intStrided(values: values, operations: operations)
+  intRandom(values: values, operations: operations)
+  intMostlyValid(values: values, operations: operations)
+  intMixedInvalid(values: values, operations: operations)
+  structSequentialValue(particles: particles, passes: passes)
+  structSequentialView(particles: particles, passes: passes)
+  structCollectionValue(particles: particles, passes: passes)
+  structCollectionView(particles: particles, passes: passes)
+  structRandomView(particles: particles, operations: operations)
+}
+
+func main() {
+  var repetition: Int = 0
+  loop repetition &lt; 9 {
+    runSuite()
+    repetition = repetition + 1
+  }
+}
+</pre></details><details><summary>C reference source</summary><pre>#include &lt;stdint.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;time.h&gt;
+
+typedef struct {
+  int64_t px, py, pz, vx, vy, vz, mass, flags;
+} Particle;
+
+static int64_t now_ns(void) {
+  struct timespec value;
+  clock_gettime(CLOCK_MONOTONIC, &amp;value);
+  return (int64_t)value.tv_sec * 1000000000LL + value.tv_nsec;
+}
+
+static void report(const char* name, int64_t start, int64_t checksum) {
+  printf(&quot;RESULT,c,%s,%lld,%lld\n&quot;, name,
+         (long long)(now_ns() - start), (long long)checksum);
+}
+
+#define RUN_INT(NAME, BODY) do { \
+  int64_t start = now_ns(), checksum = 0; \
+  BODY \
+  report(NAME, start, checksum); \
+} while (0)
+
+#define RUN_STRUCT(NAME, BODY) RUN_INT(NAME, BODY)
+
+static void run_suite(const int64_t* values, const Particle* particles,
+                      int64_t length, int64_t passes) {
+  const int64_t operations = length * passes;
+  RUN_INT(&quot;int_sequential_unchecked&quot;, {
+    for (int64_t pass = 0; pass &lt; passes; pass++)
+      for (int64_t index = 0; index &lt; length; index++) checksum += values[index];
+  });
+  RUN_INT(&quot;int_sequential_checked&quot;, {
+    for (int64_t pass = 0; pass &lt; passes; pass++)
+      for (int64_t index = 0; index &lt; length; index++)
+        if ((uint64_t)index &lt; (uint64_t)length) checksum += values[index];
+  });
+  RUN_INT(&quot;int_collection&quot;, {
+    for (int64_t pass = 0; pass &lt; passes; pass++) {
+      const int64_t* end = values + length;
+      for (const int64_t* value = values; value != end; value++) checksum += *value;
+    }
+  });
+  RUN_INT(&quot;int_constant_checked&quot;, {
+    volatile int64_t constant_index = 137;
+    for (int64_t iteration = 0; iteration &lt; operations; iteration++)
+      if (constant_index &lt; length) checksum += values[constant_index];
+  });
+  RUN_INT(&quot;int_strided_checked&quot;, {
+    int64_t index = 0;
+    for (int64_t iteration = 0; iteration &lt; operations; iteration++) {
+      if ((uint64_t)index &lt; (uint64_t)length) checksum += values[index];
+      index = (index + 4) % length;
+    }
+  });
+  RUN_INT(&quot;int_random_checked&quot;, {
+    for (int64_t iteration = 0; iteration &lt; operations; iteration++) {
+      int64_t index = (iteration * 48271 + 17) % length;
+      if ((uint64_t)index &lt; (uint64_t)length) checksum += values[index];
+    }
+  });
+  RUN_INT(&quot;int_mostly_valid_checked&quot;, {
+    for (int64_t iteration = 0; iteration &lt; operations; iteration++) {
+      int64_t index = iteration % 1000 == 0 ? length : (iteration * 48271 + 17) % length;
+      if ((uint64_t)index &lt; (uint64_t)length) checksum += values[index];
+    }
+  });
+  RUN_INT(&quot;int_mixed_invalid_checked&quot;, {
+    for (int64_t iteration = 0; iteration &lt; operations; iteration++) {
+      int64_t index = iteration % 4 == 0 ? -1 : (iteration * 48271 + 17) % length;
+      if ((uint64_t)index &lt; (uint64_t)length) checksum += values[index];
+    }
+  });
+  RUN_STRUCT(&quot;struct_sequential_value&quot;, {
+    for (int64_t pass = 0; pass &lt; passes; pass++)
+      for (int64_t index = 0; index &lt; length; index++) {
+        Particle particle = particles[index];
+        checksum += particle.px + particle.vz + particle.mass;
+      }
+  });
+  RUN_STRUCT(&quot;struct_sequential_pointer&quot;, {
+    for (int64_t pass = 0; pass &lt; passes; pass++)
+      for (int64_t index = 0; index &lt; length; index++) {
+        const Particle* particle = &amp;particles[index];
+        checksum += particle-&gt;px + particle-&gt;vz + particle-&gt;mass;
+      }
+  });
+  RUN_STRUCT(&quot;struct_collection_value&quot;, {
+    for (int64_t pass = 0; pass &lt; passes; pass++)
+      for (int64_t index = 0; index &lt; length; index++) {
+        Particle particle = particles[index];
+        checksum += particle.px + particle.vz + particle.mass;
+      }
+  });
+  RUN_STRUCT(&quot;struct_collection_pointer&quot;, {
+    for (int64_t pass = 0; pass &lt; passes; pass++)
+      for (const Particle* particle = particles; particle != particles + length; particle++)
+        checksum += particle-&gt;px + particle-&gt;vz + particle-&gt;mass;
+  });
+  RUN_STRUCT(&quot;struct_random_pointer&quot;, {
+    for (int64_t iteration = 0; iteration &lt; operations; iteration++) {
+      int64_t index = (iteration * 48271 + 17) % length;
+      const Particle* particle = &amp;particles[index];
+      checksum += particle-&gt;px + particle-&gt;vz + particle-&gt;mass;
+    }
+  });
+}
+
+int main(void) {
+  const int64_t length = 65536, passes = 128;
+  int64_t* values = malloc((size_t)length * sizeof(*values));
+  Particle* particles = malloc((size_t)length * sizeof(*particles));
+  for (int64_t index = 0; index &lt; length; index++) {
+    values[index] = (index * 17 + 3) % 1009;
+    particles[index] = (Particle){index % 97, index % 89, index % 83,
+      index % 79, index % 73, index % 71, index % 67, index % 61};
+  }
+  for (int repetition = 0; repetition &lt; 9; repetition++)
+    run_suite(values, particles, length, passes);
+  free(particles);
+  free(values);
+  return 0;
+}
+</pre></details><details><summary>Rust reference source</summary><pre>use std::time::Instant;
+
+#[derive(Clone, Copy)]
+struct Particle {
+    px: i64, py: i64, pz: i64, vx: i64,
+    vy: i64, vz: i64, mass: i64, flags: i64,
+}
+
+fn report(name: &amp;str, start: Instant, checksum: i64) {
+    println!(&quot;RESULT,rust,{},{},{}&quot;, name, start.elapsed().as_nanos(), checksum);
+}
+
+macro_rules! bench {
+    ($name:expr, $checksum:ident, $body:block) =&gt; {{
+        let start = Instant::now();
+        let mut $checksum: i64 = 0;
+        $body
+        report($name, start, $checksum);
+    }};
+}
+
+fn run_suite(values: &amp;[i64], particles: &amp;[Particle], passes: i64) {
+    let length = values.len() as i64;
+    let operations = length * passes;
+    bench!(&quot;int_sequential_safe_index&quot;, checksum, {
+        for _pass in 0..passes { for index in 0..length { checksum += values[index as usize]; } }
+    });
+    bench!(&quot;int_sequential_get&quot;, checksum, {
+        for _pass in 0..passes { for index in 0..length { if let Some(value) = values.get(index as usize) { checksum += *value; } } }
+    });
+    bench!(&quot;int_iterator&quot;, checksum, {
+        for _pass in 0..passes { for value in values { checksum += *value; } }
+    });
+    bench!(&quot;int_unchecked&quot;, checksum, {
+        for _pass in 0..passes { for index in 0..length { unsafe { checksum += *values.get_unchecked(index as usize); } } }
+    });
+    bench!(&quot;int_constant_get&quot;, checksum, {
+        let constant_index = 137_usize;
+        for _iteration in 0..operations {
+            let index = unsafe { std::ptr::read_volatile(&amp;constant_index) };
+            if let Some(value) = values.get(index) { checksum += *value; }
+        }
+    });
+    bench!(&quot;int_strided_get&quot;, checksum, {
+        let mut index = 0_i64;
+        for _iteration in 0..operations {
+            if let Some(value) = values.get(index as usize) { checksum += *value; }
+            index = (index + 4) % length;
+        }
+    });
+    bench!(&quot;int_random_get&quot;, checksum, {
+        for iteration in 0..operations {
+            let index = (iteration * 48271 + 17) % length;
+            if let Some(value) = values.get(index as usize) { checksum += *value; }
+        }
+    });
+    bench!(&quot;int_mostly_valid_get&quot;, checksum, {
+        for iteration in 0..operations {
+            let index = if iteration % 1000 == 0 { length } else { (iteration * 48271 + 17) % length };
+            if let Some(value) = values.get(index as usize) { checksum += *value; }
+        }
+    });
+    bench!(&quot;int_mixed_invalid_get&quot;, checksum, {
+        for iteration in 0..operations {
+            let index = if iteration % 4 == 0 { usize::MAX } else { ((iteration * 48271 + 17) % length) as usize };
+            if let Some(value) = values.get(index) { checksum += *value; }
+        }
+    });
+    bench!(&quot;struct_sequential_copy&quot;, checksum, {
+        for _pass in 0..passes { for index in 0..length { let particle = particles[index as usize]; checksum += particle.px + particle.vz + particle.mass; } }
+    });
+    bench!(&quot;struct_sequential_get&quot;, checksum, {
+        for _pass in 0..passes { for index in 0..length { if let Some(particle) = particles.get(index as usize) { checksum += particle.px + particle.vz + particle.mass; } } }
+    });
+    bench!(&quot;struct_iterator_copy&quot;, checksum, {
+        for _pass in 0..passes { for &amp;particle in particles { checksum += particle.px + particle.vz + particle.mass; } }
+    });
+    bench!(&quot;struct_iterator_ref&quot;, checksum, {
+        for _pass in 0..passes { for particle in particles { checksum += particle.px + particle.vz + particle.mass; } }
+    });
+    bench!(&quot;struct_random_get&quot;, checksum, {
+        for iteration in 0..operations {
+            let index = ((iteration * 48271 + 17) % length) as usize;
+            if let Some(particle) = particles.get(index) { checksum += particle.px + particle.vz + particle.mass; }
+        }
+    });
+}
+
+fn main() {
+    let length = 65536_i64;
+    let passes = 128_i64;
+    let values: Vec&lt;i64&gt; = (0..length).map(|index| (index * 17 + 3) % 1009).collect();
+    let particles: Vec&lt;Particle&gt; = (0..length).map(|index| Particle {
+        px: index % 97, py: index % 89, pz: index % 83, vx: index % 79,
+        vy: index % 73, vz: index % 71, mass: index % 67, flags: index % 61,
+    }).collect();
+    let field_guard = particles[0].py + particles[0].pz + particles[0].vx
+        + particles[0].vy + particles[0].flags;
+    std::hint::black_box(field_guard);
+    for _repetition in 0..9 { run_suite(&amp;values, &amp;particles, passes); }
+}
+</pre></details><details><summary>JavaScript reference source</summary><pre>&quot;use strict&quot;;
+
+const length = 65536;
+const passes = 128;
+const operations = length * passes;
+const values = Array.from({length}, (_, index) =&gt; (index * 17 + 3) % 1009);
+const particles = Array.from({length}, (_, index) =&gt; ({
+  px: index % 97, py: index % 89, pz: index % 83, vx: index % 79,
+  vy: index % 73, vz: index % 71, mass: index % 67, flags: index % 61,
+}));
+
+function benchmark(name, body) {
+  const start = process.hrtime.bigint();
+  const checksum = body();
+  const elapsed = process.hrtime.bigint() - start;
+  console.log(`RESULT,javascript,${name},${elapsed},${checksum}`);
+}
+
+function runSuite() {
+  benchmark(&quot;int_sequential_native&quot;, () =&gt; {
+    let checksum = 0;
+    for (let pass = 0; pass &lt; passes; pass++)
+      for (let index = 0; index &lt; length; index++) checksum += values[index];
+    return checksum;
+  });
+  benchmark(&quot;int_sequential_checked&quot;, () =&gt; {
+    let checksum = 0;
+    for (let pass = 0; pass &lt; passes; pass++) {
+      for (let index = 0; index &lt; length; index++) {
+        const value = index &gt;= 0 &amp;&amp; index &lt; values.length ? values[index] : undefined;
+        if (value !== undefined) checksum += value;
+      }
+    }
+    return checksum;
+  });
+  benchmark(&quot;int_collection&quot;, () =&gt; {
+    let checksum = 0;
+    for (let pass = 0; pass &lt; passes; pass++)
+      for (const value of values) checksum += value;
+    return checksum;
+  });
+  benchmark(&quot;int_constant_checked&quot;, () =&gt; {
+    let checksum = 0;
+    const index = Number(process.env.BENCHMARK_INDEX || 137);
+    for (let iteration = 0; iteration &lt; operations; iteration++) {
+      const value = index &gt;= 0 &amp;&amp; index &lt; values.length ? values[index] : undefined;
+      if (value !== undefined) checksum += value;
+    }
+    return checksum;
+  });
+  benchmark(&quot;int_strided_checked&quot;, () =&gt; {
+    let checksum = 0;
+    let index = 0;
+    for (let iteration = 0; iteration &lt; operations; iteration++) {
+      const value = index &gt;= 0 &amp;&amp; index &lt; values.length ? values[index] : undefined;
+      if (value !== undefined) checksum += value;
+      index = (index + 4) % length;
+    }
+    return checksum;
+  });
+  benchmark(&quot;int_random_checked&quot;, () =&gt; {
+    let checksum = 0;
+    for (let iteration = 0; iteration &lt; operations; iteration++) {
+      const index = (iteration * 48271 + 17) % length;
+      const value = index &gt;= 0 &amp;&amp; index &lt; values.length ? values[index] : undefined;
+      if (value !== undefined) checksum += value;
+    }
+    return checksum;
+  });
+  benchmark(&quot;int_mostly_valid_checked&quot;, () =&gt; {
+    let checksum = 0;
+    for (let iteration = 0; iteration &lt; operations; iteration++) {
+      const index = iteration % 1000 === 0 ? length : (iteration * 48271 + 17) % length;
+      const value = index &gt;= 0 &amp;&amp; index &lt; values.length ? values[index] : undefined;
+      if (value !== undefined) checksum += value;
+    }
+    return checksum;
+  });
+  benchmark(&quot;int_mixed_invalid_checked&quot;, () =&gt; {
+    let checksum = 0;
+    for (let iteration = 0; iteration &lt; operations; iteration++) {
+      const index = iteration % 4 === 0 ? -1 : (iteration * 48271 + 17) % length;
+      const value = index &gt;= 0 &amp;&amp; index &lt; values.length ? values[index] : undefined;
+      if (value !== undefined) checksum += value;
+    }
+    return checksum;
+  });
+  benchmark(&quot;struct_sequential_ref&quot;, () =&gt; {
+    let checksum = 0;
+    for (let pass = 0; pass &lt; passes; pass++) {
+      for (let index = 0; index &lt; length; index++) {
+        const particle = index &gt;= 0 &amp;&amp; index &lt; particles.length ? particles[index] : undefined;
+        if (particle !== undefined) checksum += particle.px + particle.vz + particle.mass;
+      }
+    }
+    return checksum;
+  });
+  benchmark(&quot;struct_collection_ref&quot;, () =&gt; {
+    let checksum = 0;
+    for (let pass = 0; pass &lt; passes; pass++)
+      for (const particle of particles) checksum += particle.px + particle.vz + particle.mass;
+    return checksum;
+  });
+  benchmark(&quot;struct_random_ref&quot;, () =&gt; {
+    let checksum = 0;
+    for (let iteration = 0; iteration &lt; operations; iteration++) {
+      const index = (iteration * 48271 + 17) % length;
+      const particle = index &gt;= 0 &amp;&amp; index &lt; particles.length ? particles[index] : undefined;
+      if (particle !== undefined) checksum += particle.px + particle.vz + particle.mass;
+    }
+    return checksum;
+  });
+}
+
+for (let repetition = 0; repetition &lt; 9; repetition++) runSuite();
+</pre></details><details><summary>Python reference source</summary><pre>#!/usr/bin/env python3
+import os
+import time
+
+LENGTH = 65536
+PASSES = 128
+OPERATIONS = LENGTH * PASSES
+VALUES = [(index * 17 + 3) % 1009 for index in range(LENGTH)]
+PARTICLES = [
+    (index % 97, index % 89, index % 83, index % 79,
+     index % 73, index % 71, index % 67, index % 61)
+    for index in range(LENGTH)
+]
+
+
+def benchmark(name, body):
+    start = time.perf_counter_ns()
+    checksum = body()
+    elapsed = time.perf_counter_ns() - start
+    print(f&quot;RESULT,python,{name},{elapsed},{checksum}&quot;)
+
+
+def int_sequential_native():
+    checksum = 0
+    for _pass in range(PASSES):
+        for index in range(LENGTH):
+            checksum += VALUES[index]
+    return checksum
+
+
+def int_sequential_checked():
+    checksum = 0
+    for _pass in range(PASSES):
+        for index in range(LENGTH):
+            value = VALUES[index] if 0 &lt;= index &lt; len(VALUES) else None
+            if value is not None:
+                checksum += value
+    return checksum
+
+
+def int_collection():
+    checksum = 0
+    for _pass in range(PASSES):
+        for value in VALUES:
+            checksum += value
+    return checksum
+
+
+def int_constant_checked():
+    checksum = 0
+    index = int(os.environ.get(&quot;BENCHMARK_INDEX&quot;, &quot;137&quot;))
+    for _iteration in range(OPERATIONS):
+        value = VALUES[index] if 0 &lt;= index &lt; len(VALUES) else None
+        if value is not None:
+            checksum += value
+    return checksum
+
+
+def int_strided_checked():
+    checksum = 0
+    index = 0
+    for _iteration in range(OPERATIONS):
+        value = VALUES[index] if 0 &lt;= index &lt; len(VALUES) else None
+        if value is not None:
+            checksum += value
+        index = (index + 4) % LENGTH
+    return checksum
+
+
+def int_random_checked():
+    checksum = 0
+    for iteration in range(OPERATIONS):
+        index = (iteration * 48271 + 17) % LENGTH
+        value = VALUES[index] if 0 &lt;= index &lt; len(VALUES) else None
+        if value is not None:
+            checksum += value
+    return checksum
+
+
+def int_mostly_valid_checked():
+    checksum = 0
+    for iteration in range(OPERATIONS):
+        index = LENGTH if iteration % 1000 == 0 else (iteration * 48271 + 17) % LENGTH
+        value = VALUES[index] if 0 &lt;= index &lt; len(VALUES) else None
+        if value is not None:
+            checksum += value
+    return checksum
+
+
+def int_mixed_invalid_checked():
+    checksum = 0
+    for iteration in range(OPERATIONS):
+        index = -1 if iteration % 4 == 0 else (iteration * 48271 + 17) % LENGTH
+        value = VALUES[index] if 0 &lt;= index &lt; len(VALUES) else None
+        if value is not None:
+            checksum += value
+    return checksum
+
+
+def struct_sequential_ref():
+    checksum = 0
+    for _pass in range(PASSES):
+        for index in range(LENGTH):
+            particle = PARTICLES[index] if 0 &lt;= index &lt; len(PARTICLES) else None
+            if particle is not None:
+                checksum += particle[0] + particle[5] + particle[6]
+    return checksum
+
+
+def struct_collection_ref():
+    checksum = 0
+    for _pass in range(PASSES):
+        for particle in PARTICLES:
+            checksum += particle[0] + particle[5] + particle[6]
+    return checksum
+
+
+def struct_random_ref():
+    checksum = 0
+    for iteration in range(OPERATIONS):
+        index = (iteration * 48271 + 17) % LENGTH
+        particle = PARTICLES[index] if 0 &lt;= index &lt; len(PARTICLES) else None
+        if particle is not None:
+            checksum += particle[0] + particle[5] + particle[6]
+    return checksum
+
+
+SCENARIOS = [
+    (&quot;int_sequential_native&quot;, int_sequential_native),
+    (&quot;int_sequential_checked&quot;, int_sequential_checked),
+    (&quot;int_collection&quot;, int_collection),
+    (&quot;int_constant_checked&quot;, int_constant_checked),
+    (&quot;int_strided_checked&quot;, int_strided_checked),
+    (&quot;int_random_checked&quot;, int_random_checked),
+    (&quot;int_mostly_valid_checked&quot;, int_mostly_valid_checked),
+    (&quot;int_mixed_invalid_checked&quot;, int_mixed_invalid_checked),
+    (&quot;struct_sequential_ref&quot;, struct_sequential_ref),
+    (&quot;struct_collection_ref&quot;, struct_collection_ref),
+    (&quot;struct_random_ref&quot;, struct_random_ref),
+]
+
+for _repetition in range(9):
+    for scenario_name, scenario in SCENARIOS:
+        benchmark(scenario_name, scenario)
+</pre></details>
+<h2>Conclusions</h2><p><strong>Compiled result:</strong> Rae/C median ratios are 0.97× sequential, 1.00× random, 1.05× repeated-index, 1.03× collection-view, and 0.98× struct-view; lower is faster. Similar values are a real finding: optimized Rae optional access is usually the same branch-and-load shape as checked C.</p>
+<p><strong>Language-design result:</strong> keep optional public indexing. Prefer collection loops for sequential work and element views for large structs. JavaScript and Python provide useful runtime scale, but their JIT/interpreter and heap-managed data layouts do not alter the C-backend decision. General owned <code>opt T</code>/RaeAny remains a separate optimization target and was not measured here.</p>
 <p>Raw data: <code>../results/raw.csv</code>. Aggregates: <code>../results/summary.json</code>. Reproduce with <code>./run.sh</code>.</p>
 </main></body></html>
