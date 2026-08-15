@@ -19,6 +19,7 @@ import gpu2d
 import gpu2d_text
 import sdf_text
 import math
+open ui/window_geometry
 open ui/debug_overlay
 
 # --- Design canvas -----------------------------------------------------------
@@ -82,6 +83,33 @@ func hueColor(hue: view Float, alpha: view Int) ret Int {
 # An accent colour's RGB re-packed with a fresh alpha (for fading rings).
 func withAlpha(rgb: view Int, alpha: view Int) ret Int {
   ret (alpha shl 24) bitor rgb
+}
+
+# Clamp to [0,1], keeping a Float.
+func clampUnit(value: view Float) ret Float {
+  if value < 0.0 {
+    ret 0.0
+  }
+  if value > 1.0 {
+    ret 1.0
+  }
+  ret value
+}
+
+# HSV -> 0xAARRGGBB. Same hue geometry as hueColor, then desaturated toward
+# white by (1 - sat) and scaled by val. Lower saturation gives a richer,
+# tinted colour instead of a pure-RGB neon primary — nicer for the visualizer.
+func hsv(hue: view Float, sat: view Float, val: view Float, alpha: view Int) ret Int {
+  let wrapped: Float = frac(value: hue)
+  let hue6: Float = wrapped * 6.0
+  let pureR: Float = clampUnit(value: math.abs(n: hue6 - 3.0) - 1.0)
+  let pureG: Float = clampUnit(value: 2.0 - math.abs(n: hue6 - 2.0))
+  let pureB: Float = clampUnit(value: 2.0 - math.abs(n: hue6 - 4.0))
+  let floor: Float = 1.0 - sat
+  let redCh: Int = chan(value: (floor + sat * pureR) * val)
+  let greenCh: Int = chan(value: (floor + sat * pureG) * val)
+  let blueCh: Int = chan(value: (floor + sat * pureB) * val)
+  ret (alpha shl 24) bitor (redCh shl 16) bitor (greenCh shl 8) bitor blueCh
 }
 
 # --- Panel scaffold ----------------------------------------------------------
@@ -197,15 +225,39 @@ func panelLines(x: view Float, y: view Float, w: view Float, h: view Float, t: v
   }
 }
 
-# --- Sound visualizer (old-school tracker spectrum) --------------------------
+# --- Sound visualizer (old-school tracker EQ) --------------------------------
 
-# Ten vertical bars whose heights bounce like a 1995 Soundtracker / Protracker
-# VU meter. Each bar's level is a sum of sines at incommensurate rates, so the
-# motion looks random but stays smooth — no per-frame flicker. The lit portion
-# rises from a dark track, coloured green at the bottom through red at the peak
-# (the gradient is anchored to the full scale and revealed by a clip, so the
-# colour tracks absolute height, not the bar's own height), capped by a bright
-# peak marker.
+# Ten vertical bars laid out like a graphic EQ: a fixed frequency-response
+# shape (bass-heavy, scooped mids, a vocal peak in the highs) that wobbles
+# gently rather than slamming top-to-bottom, each bar in its own flashy hue
+# shifting from magenta at the bass to cyan-blue at the highs.
+
+# A fixed EQ frequency-response envelope with a small lively wobble on top:
+# strong bass, scooped mids, and a vocal-presence peak in the highs — rather
+# than every bar slamming bottom-to-top. The wobble is a sum of sines (smooth,
+# no flicker) and is larger for bass than treble, so the peaks stay calm.
+# Returns 0..1.
+func barLevel(index: view Int, bars: view Int, t: view Float) ret Float {
+  let p: Float = index.toFloat() / (bars.toFloat() - 1.0)   # 0 = bass, 1 = treble
+  # Bass hump near p=0; a vocal / presence hump near p=0.8.
+  let bass: Float = 0.38 * math.exp(x: 0.0 - (p * p) / 0.06)
+  let vocalD: Float = p - 0.80
+  let vocal: Float = 0.18 * math.exp(x: 0.0 - (vocalD * vocalD) / 0.012)
+  let base: Float = 0.20 + bass + vocal
+  # Small oscillation, bigger for bass and smaller for treble.
+  let amp: Float = 0.045 * (1.0 - p) + 0.025
+  let osc: Float = amp * (0.62 * math.sin(x: t * 7.0 + index.toFloat() * 1.7)
+                        + 0.38 * math.sin(x: t * 11.0 + index.toFloat() * 2.3))
+  var level: Float = base + osc
+  if level < 0.06 {
+    level = 0.06
+  }
+  if level > 1.0 {
+    level = 1.0
+  }
+  ret level
+}
+
 func soundBars(x: view Float, y: view Float, w: view Float, h: view Float, t: view Float) {
   let bars: Int = 10
   let areaLeft: Float = x + 30.0
@@ -216,28 +268,27 @@ func soundBars(x: view Float, y: view Float, w: view Float, h: view Float, t: vi
   let maxH: Float = 150.0
   var i: Int = 0
   loop i < bars {
-    let fi: Float = i.toFloat()
-    let mix: Float = 0.30 * math.sin(x: t * 7.3 + fi * 1.7)
-                   + 0.26 * math.sin(x: t * 11.1 + fi * 2.3)
-                   + 0.22 * math.sin(x: t * 17.7 + fi * 0.9)
-    var level: Float = 0.5 + mix
-    if level < 0.08 {
-      level = 0.08
-    }
-    if level > 1.0 {
-      level = 1.0
-    }
-    let barX: Float = areaLeft + fi * (barW + gap)
+    let p: Float = i.toFloat() / (bars.toFloat() - 1.0)
+    let level: Float = barLevel(index: i, bars: bars, t: t)
+    let barX: Float = areaLeft + i.toFloat() * (barW + gap)
     let barH: Float = maxH * level
+    # Per-bar band hue: hot magenta at the bass shifting toward cyan-blue at
+    # the highs, with a slow drift for a little shimmer.
+    let hue: Float = 0.92 - 0.38 * p + t * 0.02
     # Dark unlit track behind the bar.
     gpu2d.drawRoundedRect(x: barX, y: baseline - maxH, w: barW, h: maxH, radius: 3.0, color: 0x55070B12)
-    # Lit portion: the full-scale gradient, clipped to the current height.
+    # Lit portion: a flashy vertical gradient in the bar's own hue (richer at
+    # the bottom, a lighter hue-shifted highlight at the top), clipped to the
+    # current height so taller bars reveal more of the highlight.
+    let topCol: Int = hsv(hue: hue - 0.06, sat: 0.68, val: 1.0, alpha: 255)
+    let botCol: Int = hsv(hue: hue, sat: 0.88, val: 0.82, alpha: 255)
     gpu2d.pushClipRect(x: barX, y: baseline - barH, w: barW, h: barH)
     gpu2d.drawGradientRect(x: barX, y: baseline - maxH, w: barW, h: maxH, radius: 3.0,
-                           from: 0xFFEF4444, to: 0xFF3BE86B, angleDeg: 90.0)
+                           from: topCol, to: botCol, angleDeg: 90.0)
     gpu2d.popClipRect()
-    # Bright peak marker riding the top of the lit portion.
-    gpu2d.drawRoundedRect(x: barX, y: baseline - barH - 4.0, w: barW, h: 4.0, radius: 2.0, color: 0xFFEAF7FF)
+    # Bright, hue-tinted peak marker.
+    let capCol: Int = hsv(hue: hue - 0.06, sat: 0.30, val: 1.0, alpha: 255)
+    gpu2d.drawRoundedRect(x: barX, y: baseline - barH - 4.0, w: barW, h: 4.0, radius: 2.0, color: capCol)
     i = i + 1
   }
 }
@@ -318,6 +369,10 @@ func heroBand(x: view Float, y: view Float, w: view Float, h: view Float, t: vie
 
 func main() ret Int {
   gpu2d.initWindow(width: 1280, height: 800, title: "Rae 2D — animated vector shapes")
+  # Remember the window's size and position across restarts (the name carries
+  # this app's id, since the dir ".rae" is shared with every other app).
+  var windowGeom: WindowGeometry = createWindowGeometry(dir: ".rae", name: "window.gpu2dAnimated.geometry")
+  restoreWindowGeometry(g: windowGeom)
   gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
 
   let dir: String = "examples/102_gpu2d_animated/"
@@ -335,6 +390,7 @@ func main() ret Int {
   # no event-wait) — see docs/ui-render-loop-performance.md.
   loop not gpu2d.pollClose() {
     let now: Float64 = gpu2d.nowSeconds()
+    let resized: Bool = gpu2d.windowResized()
     let t: Float = (now - start) as Float
 
     gpu2d.beginFrame(r: 0.043, g: 0.055, b: 0.078, a: 1.0)
@@ -371,6 +427,7 @@ func main() ret Int {
     drawDebugOverlay(d: dbg, font: font, didRealWork: true)
 
     gpu2d.endFrame()
+    updateWindowGeometry(g: windowGeom, now: now, resized: resized)
   }
 
   gpu2d.closeWindow()
