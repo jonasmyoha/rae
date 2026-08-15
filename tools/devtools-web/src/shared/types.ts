@@ -80,6 +80,10 @@ export type ExampleDescriptor = {
   /** Shown in the Featured tab in addition to its own category. */
   featured?: boolean;
   webgpu?: boolean;
+  /** URL of the list/thumbnail screenshot (rae/docs/screenshots/<id>.png). */
+  thumbnail?: string;
+  /** URLs of all screenshots for the detail view, thumbnail first. */
+  screenshots?: string[];
 };
 
 export type ExampleRunMode = "run" | "watch" | "build" | "action";

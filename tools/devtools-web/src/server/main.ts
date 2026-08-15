@@ -421,6 +421,27 @@ const server = Bun.serve<SocketData>({
       }
     }
 
+    // Example screenshots live in rae/docs/screenshots (sibling of examples/).
+    // The filename is opaque and validated to a single path segment so this
+    // can never escape the folder.
+    if (url.pathname.startsWith("/example-screenshot/") && req.method === "GET") {
+      const file = decodeURIComponent(url.pathname.slice("/example-screenshot/".length));
+      if (!file || file.includes("/") || file.includes("..")) {
+        return new Response("Bad screenshot path", { status: 400 });
+      }
+      const abs = path.join(path.dirname(examplesRoot), "docs", "screenshots", file);
+      const bunFile = Bun.file(abs);
+      if (!(await bunFile.exists())) {
+        return new Response("Screenshot not found", { status: 404 });
+      }
+      return new Response(bunFile, {
+        headers: {
+          "Content-Type": contentTypeForAsset(file),
+          "Cache-Control": "public, max-age=3600"
+        }
+      });
+    }
+
     if (url.pathname === "/api/examples/run" && req.method === "POST") {
       const payload = await safeJson(req);
       const entry = typeof payload.entry === "string" ? payload.entry : null;

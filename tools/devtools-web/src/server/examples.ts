@@ -163,6 +163,33 @@ function applyExampleOrdering(examples: ExampleDescriptor[]): ExampleDescriptor[
   return decorated.map((item) => item.example);
 }
 
+// Screenshots live in rae/docs/screenshots (a sibling of examples/), named by
+// example id: `<id>.png` is the list thumbnail, `<id>.2.png`, `<id>.3.png` … are
+// extra shots shown only in the detail view. Served by the /example-screenshot
+// route in main.ts.
+async function screenshotsForExamples(
+  root: string,
+  examples: ExampleDescriptor[]
+): Promise<void> {
+  const dir = path.join(path.dirname(root), "docs", "screenshots");
+  const files = await safeReadDir(dir);
+  const names = new Set(files.filter((entry) => entry.isFile()).map((entry) => entry.name));
+  const urlFor = (file: string) => `/example-screenshot/${encodeURIComponent(file)}`;
+  for (const example of examples) {
+    const shots: string[] = [];
+    const primary = `${example.id}.png`;
+    if (names.has(primary)) shots.push(primary);
+    for (let n = 2; n <= 9; n++) {
+      const extra = `${example.id}.${n}.png`;
+      if (names.has(extra)) shots.push(extra);
+    }
+    if (shots.length) {
+      example.thumbnail = urlFor(shots[0]);
+      example.screenshots = shots.map(urlFor);
+    }
+  }
+}
+
 export async function listExamples(
   root: string,
   compilerBinPath: string
@@ -223,6 +250,7 @@ export async function listExamples(
     }
   }
 
+  await screenshotsForExamples(root, examples);
   return applyExampleOrdering(examples);
 }
 
