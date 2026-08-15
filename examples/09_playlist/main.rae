@@ -1,0 +1,84 @@
+# A small taste of the language: a type, a list of it, functions with explicit
+# parameter modes, method-call syntax, an optional result, and interpolation —
+# most of what a Rae program is made of, in one file. No graphics, no runtime
+# specifics; just the language.
+import core
+
+type Track {
+  title: String
+  seconds: Int
+  plays: Int
+}
+
+# Parameter modes are always written out. `view` reads, `mod` may write back,
+# `own` takes ownership — so a signature tells you what a call does to your data.
+func totalSeconds(tracks: view List(Track)) ret Int {
+  var total: Int = 0
+  var i: Int = 0
+  loop i < tracks.length {
+    total = total + tracks.at(index: i).seconds
+    i = i + 1
+  }
+  ret total
+}
+
+func formatDuration(seconds: view Int) ret String {
+  ret "{seconds / 60}m {seconds % 60}s"
+}
+
+# `mod Track` means this function may change the caller's track. It is called
+# below as `track.play()` — method-call syntax is sugar for `play(track: track)`.
+func play(track: mod Track) {
+  track.plays = track.plays + 1
+}
+
+# `opt Track` is a result that might be nothing — no null, no sentinel. The
+# caller has to handle the empty case; `if let` binds the value when there is one.
+func longest(tracks: view List(Track)) ret opt Track {
+  if tracks.length is 0 {
+    ret none
+  }
+  var best: Track = tracks.at(index: 0)
+  var i: Int = 1
+  loop i < tracks.length {
+    let candidate: Track = tracks.at(index: i)
+    if candidate.seconds > best.seconds {
+      best = candidate
+    }
+    i = i + 1
+  }
+  ret best
+}
+
+func main() {
+  # `let` because the binding is never reassigned — the list is still mutable
+  # through it (adding an element is not rebinding the name).
+  let tracks: List(Track) = createList(Track, cap: 3)
+  tracks.add(value: Track { title: "Intro", seconds: 95, plays: 0 })
+  tracks.add(value: Track { title: "Middle Eight", seconds: 212, plays: 0 })
+  tracks.add(value: Track { title: "Outro", seconds: 143, plays: 0 })
+
+  # Arguments are named at the call site, and "{}" is how a value becomes text.
+  log("{tracks.length} tracks, {formatDuration(seconds: totalSeconds(tracks: tracks))}")
+
+  var i: Int = 0
+  loop i < tracks.length {
+    # `viewAt` hands back a read-only window into the list, not a copy.
+    let track: view Track => tracks.viewAt(index: i)
+    log("  {track.title} — {formatDuration(seconds: track.seconds)}")
+    i = i + 1
+  }
+
+  # `modAt` hands back a mutable window; `play` writes through it, into the list.
+  let first: mod Track => tracks.modAt(index: 0)
+  first.play()
+  first.play()
+  log("{tracks.at(index: 0).title} played {tracks.at(index: 0).plays} times")
+
+  # The optional result, handled with `if let`.
+  if let top: Track = longest(tracks: tracks) {
+    log("longest: {top.title} ({formatDuration(seconds: top.seconds)})")
+  } else {
+    log("no tracks")
+  }
+}
