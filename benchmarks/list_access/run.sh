@@ -38,6 +38,10 @@ printf 'language,scenario,elapsed_ns,checksum\n' >> "$RESULTS/raw.csv"
 for executable in "$BUILD/rae_list_access" "$BUILD/c_list_access" "$BUILD/rust_list_access"; do
   run_with_timeout 300 "$executable" | sed -n 's/^RESULT,//p' >> "$RESULTS/raw.csv"
 done
+run_with_timeout 300 node "$HERE/javascript/list_access.js" \
+  | sed -n 's/^RESULT,//p' >> "$RESULTS/raw.csv"
+run_with_timeout 600 python3 "$HERE/python/list_access.py" \
+  | sed -n 's/^RESULT,//p' >> "$RESULTS/raw.csv"
 
 python3 - "$RAE_ROOT" "$RESULTS/metadata.json" <<'PY'
 import json, os, platform, subprocess, sys
@@ -54,7 +58,15 @@ metadata = {
     "rae_worktree": "dirty" if command("git", "-C", root, "status", "--porcelain") else "clean",
     "c_compiler": command("cc", "--version").splitlines()[0],
     "rust_compiler": command("rustc", "--version"),
-    "optimization": {"rae": "release (-O2 -DNDEBUG)", "c": "-O3 -DNDEBUG", "rust": "-C opt-level=3"},
+    "javascript_runtime": command("node", "--version"),
+    "python_runtime": command("python3", "--version"),
+    "optimization": {
+        "rae": "release (-O2 -DNDEBUG)",
+        "c": "-O3 -DNDEBUG",
+        "rust": "-C opt-level=3",
+        "javascript": "Node default optimizing JIT",
+        "python": "CPython default interpreter"
+    },
     "data_size": 65536,
     "passes": 128,
     "measured_repetitions": 7,
