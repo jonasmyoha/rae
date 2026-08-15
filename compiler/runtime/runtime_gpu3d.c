@@ -1126,6 +1126,7 @@ static void rae_g3d_present_offscreen(void) {
      * surface drawable (same policy as the 2D endFrame). */
     WGPUSurfaceTexture st; memset(&st, 0, sizeof(st));
     wgpuSurfaceGetCurrentTexture(g_g2d_surface, &st);
+    int presented = 0;
     if (st.texture &&
         (st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal ||
          st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal)) {
@@ -1141,9 +1142,16 @@ static void rae_g3d_present_offscreen(void) {
         wgpuSurfacePresent(g_g2d_surface);
 #endif
         g_g2d_last_present_ok = 1;
+        presented = 1;
     }
     if (st.texture) wgpuTextureRelease(st.texture);
-    rae_wgpu_poll(0);
+    /* Blocking poll on a presented frame retires the surface-present
+     * submission's resources, which a non-blocking poll leaves queued until
+     * they complete at the next vsync — a ~7 KB/frame RSS climb while busy-
+     * rendering. Same fix and rationale as the 2D endFrame; Fifo already
+     * paces to vsync so it costs no frame rate. Occluded/headless frames
+     * (nothing presented) keep the cheap non-blocking poll. */
+    rae_wgpu_poll(presented ? 1 : 0);
 }
 
 void rae_ext_gpu3d_end(void) {
