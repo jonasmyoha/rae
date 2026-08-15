@@ -164,6 +164,21 @@ func clipButtonId(index: view Int) ret String {
 # shared format from lib/app3d, so this example only owns the ones at the
 # front. The WINDOW is not here: the runtime persists window geometry for
 # every app, so an app that also saved it had two owners for one value.
+func statePart(parts: view List(String), index: view Int) ret String {
+  if let value: String = parts.at(index: index) { ret value }
+  ret ""
+}
+
+func walkerFloatAt(values: view List(Float), index: view Int) ret Float {
+  if let value: Float = values.at(index: index) { ret value }
+  ret 0.0
+}
+
+func walkerIntAt(values: view List(Int), index: view Int) ret Int {
+  if let value: Int = values.at(index: index) { ret value }
+  ret 0
+}
+
 const state114Version: Int = 5
 const state114AppId: String = "114_walker_character"
 const state114OwnFields: Int = 5
@@ -199,25 +214,25 @@ func restore114State(raw: view String, clipIndex: mod Int, playing: mod Bool, sp
   if parts.length < state114OwnFields {
     ret false
   }
-  if parts.at(index: 0).trim().toInt() is not state114Version {
+  if statePart(parts: parts, index: 0).trim().toInt() is not state114Version {
     ret false
   }
-  clipIndex = parts.at(index: 1).trim().toInt()
+  clipIndex = statePart(parts: parts, index: 1).trim().toInt()
   if clipIndex < 0 {
     clipIndex = 0
   }
   if clipIndex > 3 {
     clipIndex = 3
   }
-  playing = parts.at(index: 2).trim().toInt() is 1
-  speed = parts.at(index: 3).trim().toFloat()
+  playing = statePart(parts: parts, index: 2).trim().toInt() is 1
+  speed = statePart(parts: parts, index: 3).trim().toFloat()
   if speed < speedMin {
     speed = speedMin
   }
   if speed > speedMax {
     speed = speedMax
   }
-  toon = parts.at(index: 4).trim().toInt() is 1
+  toon = statePart(parts: parts, index: 4).trim().toInt() is 1
   if applyCameraRigState(parts: parts, offset: state114OwnFields, rig: rig, camera: camera) is false {
     ret false
   }
@@ -287,7 +302,7 @@ func main() ret Int {
   # scale maps that to a fixed on-screen height so any model arrives the
   # same size regardless of the units it was authored in.
   let b: List(Float) = meshBounds(m: charData)
-  let height: Float = b.at(index: 4) - b.at(index: 1)
+  let height: Float = walkerFloatAt(values: b, index: 4) - walkerFloatAt(values: b, index: 1)
   let targetHeight: Float = 2.0
   var modelScale: Float = 1.0
   if height > 0.0 {
@@ -296,9 +311,9 @@ func main() ret Int {
   # Centre of the model's footprint, and the height of its lowest point,
   # both in model units. Subtracting them puts the model's feet on the
   # ground plane and its centre on the world axis.
-  let midX: Float = (b.at(index: 0) + b.at(index: 3)) * 0.5
-  let midZ: Float = (b.at(index: 2) + b.at(index: 5)) * 0.5
-  let footY: Float = b.at(index: 1)
+  let midX: Float = (walkerFloatAt(values: b, index: 0) + walkerFloatAt(values: b, index: 3)) * 0.5
+  let midZ: Float = (walkerFloatAt(values: b, index: 2) + walkerFloatAt(values: b, index: 5)) * 0.5
+  let footY: Float = walkerFloatAt(values: b, index: 1)
   log("[gltf] bounds height {height}, scale {modelScale}")
 
   # The skeleton. Everything below animates by mutating its node TRS and
@@ -818,7 +833,7 @@ func main() ret Int {
           renderSceneShadow(scene: scene)
           var sp: Int = 0
           loop sp < partIds.length {
-            let sh: MeshHandle = meshHandle(id: partIds.at(index: sp), generation: 1)
+            let sh: MeshHandle = meshHandle(id: walkerIntAt(values: partIds, index: sp), generation: 1)
             drawShadowCasterSkinned(mesh: sh, model: partModel)
             sp = sp + 1
           }
@@ -844,13 +859,13 @@ func main() ret Int {
           uploadPalette(rows: palette, jointCount: jointCount(sk: sk))
           var p: Int = 0
           loop p < partIds.length {
-            let handle: MeshHandle = meshHandle(id: partIds.at(index: p), generation: 1)
+            let handle: MeshHandle = meshHandle(id: walkerIntAt(values: partIds, index: p), generation: 1)
             # White base colour: the shader multiplies it by the vertex
             # colour baked from the atlas (#378).
             let mat: Material3d = {
               baseColor: vec3.create(x: 1.0, y: 1.0, z: 1.0),
               metallic: 0.0,
-              roughness: partRough.at(index: p),
+              roughness: walkerFloatAt(values: partRough, index: p),
               emission: noEmit,
               # The style applies to the CHARACTER only, deliberately: the
               # ground stays PBR so the two shading models are visible in

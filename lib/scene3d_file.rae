@@ -41,8 +41,11 @@ func registerMaterial3d(reg: mod MaterialRegistry3d, key: view String, index: vi
 func materialRegistry3dGet(reg: view MaterialRegistry3d, key: view String) ret Int {
   var i: Int = 0
   loop i < reg.keys.length {
-    let candidate: String = reg.keys.get(index: i)
-    if candidate.equals(other: key) { ret reg.indices.at(index: i) }
+    if let candidate: String = reg.keys.at(index: i) {
+      if candidate.equals(other: key) {
+        if let index: Int = reg.indices.at(index: i) { ret index }
+      }
+    }
     i = i + 1
   }
   ret -1
@@ -58,8 +61,9 @@ func createMeshRegistry3d() pub ret MeshRegistry3d {
 func meshRegistry3dIndex(reg: view MeshRegistry3d, key: view String) pub ret Int {
   var i: Int = 0
   loop i < reg.keys.length {
-    let candidate: String = reg.keys.get(index: i)
-    if candidate.equals(other: key) { ret i }
+    if let candidate: String = reg.keys.at(index: i) {
+      if candidate.equals(other: key) { ret i }
+    }
     i = i + 1
   }
   ret -1
@@ -78,7 +82,8 @@ func registerMesh3d(reg: mod MeshRegistry3d, key: view String, handle: view Mesh
 func meshRegistry3dGet(reg: view MeshRegistry3d, key: view String) pub ret MeshHandle {
   let idx: Int = meshRegistry3dIndex(reg: reg, key: key)
   if idx < 0 { ret meshHandleNone() }
-  ret reg.handles.at(index: idx)
+  if let handle: MeshHandle = reg.handles.at(index: idx) { ret handle }
+  ret meshHandleNone()
 }
 
 type Scene3dAsset {
@@ -106,8 +111,11 @@ func emptyScene3dAsset() ret Scene3dAsset {
 func scene3dAssetEntity(asset: view Scene3dAsset, nodeId: view String) pub ret Int {
   var i: Int = 0
   loop i < asset.nodeIds.length {
-    let candidate: String = asset.nodeIds.get(index: i)
-    if candidate.equals(other: nodeId) { ret asset.entityIds.at(index: i) }
+    if let candidate: String = asset.nodeIds.at(index: i) {
+      if candidate.equals(other: nodeId) {
+        if let entity: Int = asset.entityIds.at(index: i) { ret entity }
+      }
+    }
     i = i + 1
   }
   ret -1
@@ -320,9 +328,10 @@ func parseScene3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
         let visibleValue: JsonValue = objectField(doc: doc, object: renderer, key: "visible")
         if visibleValue.kind is JsonKind.bool and visibleValue.asBool is false {
           let rendererIdx: Int = asset.scene.meshRenderers.length - 1
-          var stored: MeshRenderer = asset.scene.meshRenderers.at(index: rendererIdx)
-          stored.visible = false
-          asset.scene.meshRenderers.set(index: rendererIdx, value: stored)
+          if let stored: MeshRenderer = asset.scene.meshRenderers.at(index: rendererIdx) {
+            stored.visible = false
+            asset.scene.meshRenderers.set(index: rendererIdx, value: stored)
+          }
         }
         addAssetEntity(asset: asset, nodeId: node.nodeId, entity: entity)
       } else {

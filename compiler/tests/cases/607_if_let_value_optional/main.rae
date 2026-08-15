@@ -12,13 +12,10 @@ type Track { title: String, seconds: Int }
 type Player { name: String, nowPlaying: opt Track }
 
 func find(tracks: view List(Track), title: view String) ret opt Track {
-  var i: Int = 0
-  loop i < tracks.length {
-    let track: Track = tracks.at(index: i)
+  loop track: view Track in tracks {
     if track.title is title {
       ret track
     }
-    i = i + 1
   }
   ret none
 }

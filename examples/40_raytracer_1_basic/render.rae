@@ -3,6 +3,11 @@ import core
 import vec3
 import scene
 
+func sphereValueAt(world: view List(Sphere), index: view Int) ret Sphere {
+    if let sphere: Sphere = world.at(index: index) { ret sphere }
+    ret Sphere { center: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, radius: 1.0 }
+}
+
 # nearest hit t in (0.001, big], or -1.0 for miss
 func hitSphere(s: view Sphere, ro: view Vec3, rd: view Vec3) ret Float {
     let oc: Vec3 = vec3.vsub(a: ro, b: s.center)
@@ -22,8 +27,7 @@ func rayColor(world: view List(Sphere), ro: view Vec3, rd: view Vec3) ret Int {
     var best: Float = 1000000.0
     var hitIdx: Int = -1
     var i: Int = 0
-    loop i < world.length {
-        let s: Sphere = world.at(index: i)
+    loop s: view Sphere in world {
         let t: Float = hitSphere(s: s, ro: ro, rd: rd)
         if t > 0.001 {
             if t < best {
@@ -35,7 +39,7 @@ func rayColor(world: view List(Sphere), ro: view Vec3, rd: view Vec3) ret Int {
     }
     var col: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
     if hitIdx >= 0 {
-        let s: Sphere = world.at(index: hitIdx)
+        let s: Sphere = sphereValueAt(world: world, index: hitIdx)
         let p: Vec3 = vec3.vadd(a: ro, b: vec3.vscale(a: rd, s: best))
         let n: Vec3 = vec3.vscale(a: vec3.vsub(a: p, b: s.center), s: 1.0 / s.radius)
         col = Vec3 { x: 0.5 * (n.x + 1.0), y: 0.5 * (n.y + 1.0), z: 0.5 * (n.z + 1.0) }

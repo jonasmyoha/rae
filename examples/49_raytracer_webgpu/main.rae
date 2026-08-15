@@ -41,15 +41,12 @@ func main() {
     emitFloat(v: cam.lensRadius)
 
     let world: List(Sphere) = buildScene()
-    var i: Int = 0
-    loop i < world.length {
-        let sp: Sphere = world.at(index: i)
+    loop sp: view Sphere in world {
         emitVec3(a: sp.center)
         emitFloat(v: sp.radius)
         emitVec3(a: sp.material.albedo)
         emitFloat(v: sp.material.kind.toFloat())
         emitFloat(v: sp.material.fuzz)
         emitFloat(v: sp.material.ior)
-        i = i + 1
     }
 }

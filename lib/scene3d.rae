@@ -155,6 +155,35 @@ type Scene3d {
   revision: Int
 }
 
+# Renderer extraction reads component tables through scene invariants. Keep
+# failures defined if malformed scene data breaks those invariants.
+func sceneTransformAt(values: view List(Transform3d), index: view Int) ret Transform3d {
+  if let value: Transform3d = values.at(index: index) { ret value }
+  ret Transform3d {
+    position: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+    rotation: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+    scale: Vec3 { x: 1.0, y: 1.0, z: 1.0 }
+  }
+}
+
+func sceneMaterialAt(values: view List(Material3d), index: view Int) ret Material3d {
+  if let value: Material3d = values.at(index: index) { ret value }
+  ret Material3d {
+    baseColor: Vec3 { x: 1.0, y: 0.0, z: 1.0 }, metallic: 0.0,
+    roughness: 1.0, emission: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, toon: false
+  }
+}
+
+func sceneMeshRendererAt(values: view List(MeshRenderer), index: view Int) ret MeshRenderer {
+  if let value: MeshRenderer = values.at(index: index) { ret value }
+  ret MeshRenderer { entity: -1, mesh: meshHandleNone(), material: -1, visible: false }
+}
+
+func sceneSdfAt(values: view List(SdfPrimitive), index: view Int) ret SdfPrimitive {
+  if let value: SdfPrimitive = values.at(index: index) { ret value }
+  ret SdfPrimitive { entity: -1, shape: -1, material: -1, noise: 0.0, cluster: -1, smoothing: 0.0 }
+}
+
 func createScene3d() pub ret Scene3d {
   ret Scene3d {
     transforms: createList(Transform3d, cap: 16),
@@ -194,7 +223,9 @@ func setTransform(scene: mod Scene3d, entity: view Int, transform: view Transfor
 func snapshotPrevTransforms(scene: mod Scene3d) pub {
   var i: Int = 0
   loop i < scene.transforms.length {
-    scene.prevTransforms.set(index: i, value: scene.transforms.at(index: i))
+    if let transform: Transform3d = scene.transforms.at(index: i) {
+      scene.prevTransforms.set(index: i, value: transform)
+    }
     i = i + 1
   }
 }
@@ -213,11 +244,12 @@ func setMaterialToon(scene: mod Scene3d, index: view Int, toon: view Bool) pub {
   if index < 0 or index >= scene.materials.length {
     ret
   }
-  let m: Material3d = scene.materials.at(index: index)
-  scene.materials.set(index: index, value: Material3d {
-    baseColor: m.baseColor, metallic: m.metallic, roughness: m.roughness,
-    emission: m.emission, toon: toon
-  })
+  if let material: Material3d = scene.materials.at(index: index) {
+    scene.materials.set(index: index, value: Material3d {
+      baseColor: material.baseColor, metallic: material.metallic, roughness: material.roughness,
+      emission: material.emission, toon: toon
+    })
+  }
 }
 
 # Attach a triangle mesh to a fresh entity. Raster backend renders these.

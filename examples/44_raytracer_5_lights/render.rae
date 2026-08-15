@@ -10,6 +10,14 @@ import vec3
 import scene
 import camera
 
+func sphereValueAt(world: view List(Sphere), index: view Int) ret Sphere {
+    if let sphere: Sphere = world.at(index: index) { ret sphere }
+    ret Sphere {
+        center: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, radius: 1.0,
+        material: Material { kind: 0, albedo: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, fuzz: 0.0, ior: 1.0 }
+    }
+}
+
 func randomUnit() ret Vec3 {
     let a: Float = random() * tau
     let z: Float = random() * 2.0 - 1.0
@@ -67,8 +75,7 @@ func rayColor(world: view List(Sphere), r: view Ray, depth: view Int) ret Vec3 {
     var best: Float = 1000000.0
     var hitIdx: Int = -1
     var i: Int = 0
-    loop i < world.length {
-        let sp: Sphere = world.at(index: i)
+    loop sp: view Sphere in world {
         let t: Float = hitSphere(s: sp, r: r)
         if t > 0.001 {
             if t < best {
@@ -81,7 +88,7 @@ func rayColor(world: view List(Sphere), r: view Ray, depth: view Int) ret Vec3 {
     if hitIdx < 0 {
         ret skyColor(dir: r.dir)
     }
-    let sp: Sphere = world.at(index: hitIdx)
+    let sp: Sphere = sphereValueAt(world: world, index: hitIdx)
     # emissive: the surface is a light, its radiance is returned and the path ends
     if sp.material.kind is 3 {
         ret sp.material.albedo
