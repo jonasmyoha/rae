@@ -56,12 +56,12 @@ Direct mutation of the iterated List through `add`, `set`, `insert`, `remove`, `
 
 The reproducible suite is in `benchmarks/list_access`. On the recorded Apple M1 Max run, optimized Rae was within measurement noise of the equivalent optimized C checked access and pointer loops:
 
-- sequential `at` + `if let`: 1.01x C checked;
+- sequential `at` + `if let`: 0.97x C checked;
 - pseudo-random `at` + `if let`: 1.00x C checked;
-- collection `view` loop: 1.01x C pointer loop;
-- 64-byte struct `viewAt` + `if let`: 1.00x C pointer access.
+- collection `view` loop: 1.03x C pointer loop;
+- 64-byte struct `viewAt` + `if let`: 0.98x C pointer access.
 
-These results depend on the direct narrowing optimization. Calling an optional accessor and storing the owned optional without narrowing can still materialize Rae's general `RaeAny` representation. Hot code should narrow immediately or use a collection loop.
+These results depend on the direct narrowing optimization. They do **not** measure the general owned-optional ABI: storing, passing, or returning `opt T` can still materialize the 48-byte `RaeAny` representation. A wide payload may be heap-allocated, while a heap-owning payload may also require deep copy and drop work. That path needs separate correctness and performance work before drawing benchmark conclusions from it. Hot indexed code should currently narrow immediately; sequential code should use a collection loop.
 
 The measurements do not justify an unchecked public API.
 
