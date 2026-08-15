@@ -1,10 +1,8 @@
 # `[]` is not part of List's API.
 #
 # It parsed and lowered, but no Rae code ever used it: List access is
-# .get(index:) -> opt T (bounds-checked) or .at(index:) -> T (asserts).
-# Brackets could express NEITHER contract — `xs[i]` silently behaved like
-# `at`, so the spelling that looks like the simple safe primitive was the
-# sharp one.
+# .at(index:) -> opt T is bounds-checked. Brackets cannot express the
+# optional contract and previously behaved as unchecked direct access.
 #
 # `[]` belongs to Array(T, cap: N) and the internal Buffer, where the
 # length is part of the type and a constant index is checked at compile

@@ -3,6 +3,14 @@ import core
 import vec3
 import scene
 
+func sphereValueAt(world: view List(Sphere), index: view Int) ret Sphere {
+    if let sphere: Sphere = world.at(index: index) { ret sphere }
+    ret Sphere {
+        center: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, radius: 1.0,
+        albedo: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+    }
+}
+
 # A uniformly-distributed random unit vector (for diffuse scatter).
 func randomUnit() ret Vec3 {
     let a: Float = random() * tau
@@ -31,8 +39,7 @@ func rayColor(world: view List(Sphere), ro: view Vec3, rd: view Vec3, depth: vie
     var best: Float = 1000000.0
     var hitIdx: Int = -1
     var i: Int = 0
-    loop i < world.length {
-        let s: Sphere = world.at(index: i)
+    loop s: view Sphere in world {
         let t: Float = hitSphere(s: s, ro: ro, rd: rd)
         if t > 0.001 {
             if t < best {
@@ -47,7 +54,7 @@ func rayColor(world: view List(Sphere), ro: view Vec3, rd: view Vec3, depth: vie
         let tt: Float = 0.5 * (u.z + 1.0)
         ret vec3.create(x: (1.0 - tt) + tt * 0.5, y: (1.0 - tt) + tt * 0.7, z: (1.0 - tt) + tt * 1.0)
     }
-    let s: Sphere = world.at(index: hitIdx)
+    let s: Sphere = sphereValueAt(world: world, index: hitIdx)
     let p: Vec3 = vec3.vadd(a: ro, b: vec3.vscale(a: rd, s: best))
     let n: Vec3 = vec3.vscale(a: vec3.vsub(a: p, b: s.center), s: 1.0 / s.radius)
     # Lambertian scatter toward normal + random unit vector.

@@ -18,8 +18,8 @@ open vec3
 func animateScene(scene: mod Scene3d, sceneId: view Int, time: view Float) {
   var i: Int = 1
   loop i < scene.meshRenderers.length {
-    let renderer: MeshRenderer = scene.meshRenderers.at(index: i)
-    var transform: Transform3d = scene.transforms.at(index: renderer.entity)
+    let renderer: MeshRenderer = sceneMeshRendererAt(values: scene.meshRenderers, index: i)
+    var transform: Transform3d = sceneTransformAt(values: scene.transforms, index: renderer.entity)
     let phase: Float = i.toFloat() * 0.173 + sceneId.toFloat()
     transform.rotation = vec3.create(x: time * (0.08 + sceneId.toFloat() * 0.04), y: math.sin(x: time * 0.18 + phase) * 0.28, z: time * (0.12 + (i % 5).toFloat() * 0.025))
     setTransform(scene: scene, entity: renderer.entity, transform: transform)
@@ -58,8 +58,8 @@ func animateScene(scene: mod Scene3d, sceneId: view Int, time: view Float) {
 func animateMetaballLab(asset: mod Scene3dAsset, time: view Float) {
   var i: Int = 0
   loop i < asset.scene.sdfPrimitives.length {
-    let sdf: SdfPrimitive = asset.scene.sdfPrimitives.at(index: i)
-    var transform: Transform3d = asset.scene.transforms.at(index: sdf.entity)
+    let sdf: SdfPrimitive = sceneSdfAt(values: asset.scene.sdfPrimitives, index: i)
+    var transform: Transform3d = sceneTransformAt(values: asset.scene.transforms, index: sdf.entity)
     let phase: Float = i.toFloat() * 0.7853981
     let idx: Float = i.toFloat()
 
@@ -185,8 +185,8 @@ func animateMetaballLab(asset: mod Scene3dAsset, time: view Float) {
 func animateScene3(asset: mod Scene3dAsset, time: view Float) {
   var i: Int = 0
   loop i < asset.scene.sdfPrimitives.length {
-    let sdf: SdfPrimitive = asset.scene.sdfPrimitives.at(index: i)
-    var transform: Transform3d = asset.scene.transforms.at(index: sdf.entity)
+    let sdf: SdfPrimitive = sceneSdfAt(values: asset.scene.sdfPrimitives, index: i)
+    var transform: Transform3d = sceneTransformAt(values: asset.scene.transforms, index: sdf.entity)
     let phase: Float = i.toFloat() * 0.6283185
     let idx: Float = i.toFloat()
 
@@ -226,16 +226,16 @@ func animateScene1(asset: mod Scene3dAsset, time: view Float) {
   # rotation, so it cannot show a wrong rotation order or a skewed normal
   # transform, and a flat-shaded cube shows both immediately.
   let cubeAEntity: Int = scene3dAssetEntity(asset: asset, nodeId: "spinCubeA")
-  var cubeA: Transform3d = asset.scene.transforms.at(index: cubeAEntity)
+  var cubeA: Transform3d = sceneTransformAt(values: asset.scene.transforms, index: cubeAEntity)
   cubeA.rotation = vec3.create(x: time * 0.7, y: time * 0.31, z: 0.0)
   setTransform(scene: asset.scene, entity: cubeAEntity, transform: cubeA)
   let cubeBEntity: Int = scene3dAssetEntity(asset: asset, nodeId: "spinCubeB")
-  var cubeB: Transform3d = asset.scene.transforms.at(index: cubeBEntity)
+  var cubeB: Transform3d = sceneTransformAt(values: asset.scene.transforms, index: cubeBEntity)
   cubeB.rotation = vec3.create(x: 0.0, y: time * 0.55, z: time * 0.9)
   setTransform(scene: asset.scene, entity: cubeBEntity, transform: cubeB)
 
   let torusEntity: Int = scene3dAssetEntity(asset: asset, nodeId: "heroTorus")
-  var torusTransform: Transform3d = asset.scene.transforms.at(index: torusEntity)
+  var torusTransform: Transform3d = sceneTransformAt(values: asset.scene.transforms, index: torusEntity)
   torusTransform.rotation = vec3.create(x: time * 0.35, y: 0.0, z: time * 0.62)
   setTransform(scene: asset.scene, entity: torusEntity, transform: torusTransform)
   # Heights are chosen against the ground plane at z=-0.75 so every ball
@@ -262,8 +262,8 @@ func animateScene1(asset: mod Scene3dAsset, time: view Float) {
   # cluster is fast and loose, the blue cluster sits between them.
   var i: Int = 0
   loop i < asset.scene.sdfPrimitives.length {
-    let sdf: SdfPrimitive = asset.scene.sdfPrimitives.at(index: i)
-    var transform: Transform3d = asset.scene.transforms.at(index: sdf.entity)
+    let sdf: SdfPrimitive = sceneSdfAt(values: asset.scene.sdfPrimitives, index: i)
+    var transform: Transform3d = sceneTransformAt(values: asset.scene.transforms, index: sdf.entity)
     let phase: Float = i.toFloat() * 1.2566371
     if sdf.cluster is 1 {
       # Obsidian: slow, small orbits, gentle breathing. Its low stickiness

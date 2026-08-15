@@ -261,8 +261,8 @@ func deferredOrderLength(r: view DeferredRenderer) pub ret Int {
 }
 
 func deferredTagAt(r: view DeferredRenderer, i: view Int) pub ret Int {
-  let p: Int = r.graph.order.at(index: i)
-  ret r.graph.passes.at(index: p).tag
+  let p: Int = graphIntAt(values: r.graph.order, index: i)
+  ret graphPassAt(values: r.graph.passes, index: p).tag
 }
 
 # Run one pass of the deferred frame. Handles every tag EXCEPT the UI

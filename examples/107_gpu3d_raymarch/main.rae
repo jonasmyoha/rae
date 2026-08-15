@@ -96,21 +96,21 @@ func buildScene3d() ret Scene3d {
 func packObjects(scene: view Scene3d) ret List(Float) {
     let out: List(Float) = createList(Float, cap: scene.renderables.length * 12)
     var i: Int = 0
-    loop i < scene.renderables.length {
-        let tr: Transform3d = scene.transforms.at(index: i)
-        let rd: Renderable3d = scene.renderables.at(index: i)
-        out.add(value: rd.shape.toFloat())
-        out.add(value: rd.material.toFloat())
-        out.add(value: tr.x)
-        out.add(value: tr.y)
-        out.add(value: tr.z)
-        out.add(value: tr.sx)
-        out.add(value: tr.sy)
-        out.add(value: tr.sz)
-        out.add(value: rd.phase)
-        out.add(value: rd.noise)
-        out.add(value: 0.0)
-        out.add(value: 0.0)
+    loop renderable: view Renderable3d in scene.renderables {
+        if let transform: view Transform3d => scene.transforms.viewAt(index: i) {
+            out.add(value: renderable.shape.toFloat())
+            out.add(value: renderable.material.toFloat())
+            out.add(value: transform.x)
+            out.add(value: transform.y)
+            out.add(value: transform.z)
+            out.add(value: transform.sx)
+            out.add(value: transform.sy)
+            out.add(value: transform.sz)
+            out.add(value: renderable.phase)
+            out.add(value: renderable.noise)
+            out.add(value: 0.0)
+            out.add(value: 0.0)
+        }
         i = i + 1
     }
     ret out
@@ -118,18 +118,15 @@ func packObjects(scene: view Scene3d) ret List(Float) {
 
 func packMaterials(scene: view Scene3d) ret List(Float) {
     let out: List(Float) = createList(Float, cap: scene.materials.length * 8)
-    var i: Int = 0
-    loop i < scene.materials.length {
-        let m: Material3d = scene.materials.at(index: i)
-        out.add(value: m.r)
-        out.add(value: m.g)
-        out.add(value: m.b)
-        out.add(value: m.roughness)
-        out.add(value: m.metallic)
-        out.add(value: m.emissive)
+    loop material: view Material3d in scene.materials {
+        out.add(value: material.r)
+        out.add(value: material.g)
+        out.add(value: material.b)
+        out.add(value: material.roughness)
+        out.add(value: material.metallic)
+        out.add(value: material.emissive)
         out.add(value: 0.0)
         out.add(value: 0.0)
-        i = i + 1
     }
     ret out
 }
