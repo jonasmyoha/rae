@@ -268,8 +268,10 @@ Built on top, all in Rae except the raw GPU and platform calls:
 - **UI** — an ECS whose widgets are entities and whose layout is a `.raescene`
   document, with a theme of palette slots, spacing and text styles.
 
-  ![Mobile UI — home screen at real app scale](docs/screenshots/106_mobile_ui.png)
-  ![Mobile UI — now-playing screen](docs/screenshots/106_mobile_ui.2.png)
+  <p>
+    <img src="docs/screenshots/106_mobile_ui.png" alt="Mobile UI — home screen at real app scale" width="300" />
+    <img src="docs/screenshots/106_mobile_ui.2.png" alt="Mobile UI — now-playing screen" width="300" />
+  </p>
 
 - **Standard library** — 107 modules: containers, strings, JSON, files, maths,
   time, a calendar, crypto, PNG and DEFLATE written in Rae rather than bound.
