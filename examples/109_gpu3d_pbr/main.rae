@@ -86,7 +86,7 @@ func main() ret Int {
   var scene: Scene3d = buildScene(sphere: sphere, torus: torus, ground: ground)
   # The torus is the last-but-one instance; remember its entity so the
   # animation below can spin it in place.
-  let torusEntity: Int = scene.meshRenderers.at(index: scene.meshRenderers.length - 2).entity
+  let torusEntity: Int = sceneMeshRendererAt(values: scene.meshRenderers, index: scene.meshRenderers.length - 2).entity
 
   var camera: Camera3d = defaultCamera3d()
   var light: Light3d = defaultLight3d()
@@ -156,7 +156,7 @@ func main() ret Int {
     light.sunDir = vec3.create(x: 0.0 - math.cos(x: sunA) * 0.6, y: 0.0 - 0.7 - math.sin(x: sunA) * 0.3, z: 0.0 - 1.0)
 
     # Spin the torus about +Z and tumble it about +X.
-    var torusT: Transform3d = scene.transforms.at(index: torusEntity)
+    var torusT: Transform3d = sceneTransformAt(values: scene.transforms, index: torusEntity)
     torusT.rotation = vec3.create(x: t * 0.4, y: 0.0, z: t * 0.6)
     setTransform(scene: scene, entity: torusEntity, transform: torusT)
 

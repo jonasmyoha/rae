@@ -1,0 +1,47 @@
+import core
+
+type Particle {
+  x: Int
+  y: Int
+}
+
+type NamedParticle {
+  name: String
+  value: Int
+}
+
+func main() {
+  var values: List(Int) = { 1, 2, 3, 4 }
+  var valueSum: Int = 0
+  loop value: Int in values {
+    valueSum = valueSum + value
+  }
+  log("value sum: {valueSum}")
+
+  var particles: List(Particle) = createList(Particle, cap: 2)
+  particles.add(value: Particle { x: 3, y: 4 })
+  particles.add(value: Particle { x: 1, y: 2 })
+  var viewSum: Int = 0
+  loop particle: view Particle in particles {
+    viewSum = viewSum + particle.x + particle.y
+  }
+  log("view sum: {viewSum}")
+
+  loop particle: mod Particle in particles {
+    particle.x = particle.x + 1
+  }
+  var modSum: Int = 0
+  loop particle: view Particle in particles {
+    modSum = modSum + particle.x + particle.y
+  }
+  log("mod sum: {modSum}")
+
+  var named: List(NamedParticle) = createList(NamedParticle, cap: 1)
+  named.add(value: NamedParticle { name: "safe copy", value: 7 })
+  loop particle: NamedParticle in named {
+    log("owned value: {particle.name} {particle.value}")
+  }
+  loop particle: view NamedParticle in named {
+    log("source remains: {particle.name}")
+  }
+}

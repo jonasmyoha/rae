@@ -23,6 +23,102 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
                               const AstExpr* value, FILE* out);
 
+/* `if let element ... list.at/viewAt/modAt(index:)` is the hot-path spelling
+ * of checked indexing. Lower it directly instead of calling the generic Rae
+ * helper, whose ordinary function prologue carries temp-pool bookkeeping and
+ * whose owned optional representation is RaeAny. The language semantics stay
+ * optional; this only removes representation work that the branch makes
+ * unnecessary. */
+static bool emit_list_if_let(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
+  const AstStmt* binding = stmt->as.if_stmt.binding;
+  if (!binding || binding->kind != AST_STMT_LET || !binding->as.let_stmt.value
+      || binding->as.let_stmt.value->kind != AST_EXPR_METHOD_CALL
+      || !binding->as.let_stmt.type) return false;
+  const AstExpr* call = binding->as.let_stmt.value;
+  Str method = call->as.method_call.method_name;
+  bool owned = str_eq_cstr(method, "at") || str_eq_cstr(method, "get");
+  bool viewed = str_eq_cstr(method, "viewAt") || str_eq_cstr(method, "viewGet");
+  bool modified = str_eq_cstr(method, "modAt") || str_eq_cstr(method, "modGet");
+  if (!owned && !viewed && !modified) return false;
+  const AstTypeRef* list_type = infer_expr_type_ref(ctx, call->as.method_call.object);
+  if (!list_type || !str_eq_cstr(get_base_type_name(list_type), "List")) return false;
+  const AstCallArg* index_arg = call->as.method_call.args;
+  while (index_arg && !str_eq_cstr(index_arg->name, "index")) index_arg = index_arg->next;
+  if (!index_arg || !index_arg->value) return false;
+
+  int fast_id = ctx->temp_counter++;
+  bool list_is_ref = list_type->is_view || list_type->is_mod;
+  fprintf(out, "  {\n    __auto_type __rae_list%d = ", fast_id);
+  if (!list_is_ref) fprintf(out, "&(");
+  emit_expr(ctx, call->as.method_call.object, out, PREC_LOWEST, false, true);
+  if (!list_is_ref) fprintf(out, ")");
+  fprintf(out, ";\n    int64_t __rae_index%d = ", fast_id);
+  emit_expr(ctx, index_arg->value, out, PREC_LOWEST, false, false);
+  fprintf(out, ";\n    if ((uint64_t)__rae_index%d < (uint64_t)__rae_list%d->length) {\n      ",
+          fast_id, fast_id);
+
+  const AstTypeRef* element_type = binding->as.let_stmt.type;
+  AstTypeRef value_type = *element_type;
+  value_type.is_opt = false;
+  value_type.is_view = false;
+  value_type.is_mod = false;
+  value_type.resolved_type = NULL;
+  bool is_ref = element_type->is_view || element_type->is_mod;
+  bool primitive_ref = is_ref && is_primitive_type(get_base_type_name(element_type));
+  bool string_value = !is_ref && str_eq_cstr(get_base_type_name(element_type), "String");
+  bool deep_value = !is_ref && !string_value
+      && type_needs_deep_copy(ctx->compiler_ctx, ctx->module, &value_type, 0);
+
+  emit_type_ref_as_c_type(ctx, element_type, out, false);
+  fprintf(out, " %.*s", (int)binding->as.let_stmt.name.len,
+          binding->as.let_stmt.name.data);
+  if (deep_value) {
+    const char* type_name = rae_mangle_type_specialized(
+        ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &value_type);
+    fprintf(out, ";\n      rae_deep_copy_%s(&%.*s, &__rae_list%d->data[__rae_index%d])",
+            type_name, (int)binding->as.let_stmt.name.len,
+            binding->as.let_stmt.name.data, fast_id, fast_id);
+  } else {
+    fprintf(out, " = ");
+    if (primitive_ref) fprintf(out, "{ .ptr = &");
+    else if (is_ref) fprintf(out, "&");
+    else if (string_value) fprintf(out, "rae_string_copy(");
+    fprintf(out, "__rae_list%d->data[__rae_index%d]", fast_id, fast_id);
+    if (primitive_ref) fprintf(out, " }");
+    else if (string_value) fprintf(out, ")");
+  }
+  fprintf(out, ";\n");
+
+  size_t saved_locals = ctx->local_count;
+  if (ctx->local_count < 256) {
+    size_t local_index = ctx->local_count++;
+    ctx->locals[local_index] = binding->as.let_stmt.name;
+    ctx->local_type_refs[local_index] = element_type;
+    ctx->local_is_ptr[local_index] = is_ref;
+    ctx->local_is_mod[local_index] = element_type->is_mod;
+    ctx->local_moved[local_index] = false;
+    ctx->local_struct_owns_heap[local_index] = !is_ref;
+  }
+  if (stmt->as.if_stmt.then_block) {
+    for (const AstStmt* body_stmt = stmt->as.if_stmt.then_block->first;
+         body_stmt; body_stmt = body_stmt->next) emit_stmt(ctx, body_stmt, out);
+  }
+  emit_implicit_drops_for_body(ctx, out, saved_locals);
+  ctx->local_count = saved_locals;
+  fprintf(out, "    }");
+  if (stmt->as.if_stmt.else_block) {
+    fprintf(out, " else {\n");
+    size_t saved_else = ctx->local_count;
+    for (const AstStmt* else_stmt = stmt->as.if_stmt.else_block->first;
+         else_stmt; else_stmt = else_stmt->next) emit_stmt(ctx, else_stmt, out);
+    emit_implicit_drops_for_body(ctx, out, saved_else);
+    ctx->local_count = saved_else;
+    fprintf(out, "    }");
+  }
+  fprintf(out, "\n  }\n");
+  return true;
+}
+
 // Ownership classifiers (is_drop_target_type, type_owns_heap_storage,
 // type_needs_cascade_drop, type_needs_deep_copy) moved to
 // `ownership.{c,h}` so the Live VM emitter can share them with the C
@@ -663,6 +759,7 @@ bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
 }
 
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
+    if (emit_list_if_let(ctx, stmt, out)) return true;
     // `if let` (spec 4.2): the binding is emitted before the condition, inside
     // a C block so the name cannot outlive the construct. The user-visible
     // scope rule -- in the if-branch only -- is enforced by restoring
@@ -714,10 +811,13 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         // owns: the heap moved out of the box, whose shell was freed above
         // without running its drop.
         if (ctx->local_count < 256) {
-            ctx->locals[ctx->local_count] = bind->as.let_stmt.name;
-            ctx->local_type_refs[ctx->local_count] = bind->as.let_stmt.type;
-            ctx->local_moved[ctx->local_count] = false;
-            ctx->local_struct_owns_heap[ctx->local_count] = true;
+            size_t local_index = ctx->local_count;
+            ctx->locals[local_index] = bind->as.let_stmt.name;
+            ctx->local_type_refs[local_index] = bind->as.let_stmt.type;
+            ctx->local_is_ptr[local_index] = false;
+            ctx->local_is_mod[local_index] = false;
+            ctx->local_moved[local_index] = false;
+            ctx->local_struct_owns_heap[local_index] = true;
             ctx->local_count++;
         }
     } else {
@@ -762,6 +862,98 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
 }
 
 static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
+    if (stmt->as.loop_stmt.is_range) {
+        const AstStmt* binding = stmt->as.loop_stmt.init;
+        const AstTypeRef* binding_type = binding ? binding->as.let_stmt.type : NULL;
+        const AstTypeRef* collection_type = infer_expr_type_ref(
+            ctx, stmt->as.loop_stmt.condition);
+        if (!binding || binding->kind != AST_STMT_LET || !binding_type
+            || !collection_type) {
+            fprintf(out, "  /* invalid collection loop; rejected by sema */\n");
+            return true;
+        }
+
+        int loop_id = ctx->temp_counter++;
+        AstTypeRef collection_value_type = *collection_type;
+        collection_value_type.is_view = false;
+        collection_value_type.is_mod = false;
+        collection_value_type.is_opt = false;
+
+        /* Snapshot the List header once. This aliases its backing storage but
+         * does not own or drop it. The body iterates directly over `data`, so
+         * there is no optional construction and no per-element bounds check. */
+        fprintf(out, "  {\n    ");
+        emit_type_ref_as_c_type(ctx, &collection_value_type, out, false);
+        fprintf(out, " __rae_collection%d = ", loop_id);
+        bool collection_is_ref = collection_type->is_view || collection_type->is_mod;
+        if (collection_is_ref) fprintf(out, "*(");
+        emit_expr(ctx, stmt->as.loop_stmt.condition, out, PREC_LOWEST, false, false);
+        if (collection_is_ref) fprintf(out, ")");
+        fprintf(out, ";\n    int64_t __rae_collection_length%d = __rae_collection%d.length;\n",
+                loop_id, loop_id);
+        fprintf(out, "    for (int64_t __rae_collection_index%d = 0; "
+                     "__rae_collection_index%d < __rae_collection_length%d; "
+                     "__rae_collection_index%d++) {\n",
+                loop_id, loop_id, loop_id, loop_id);
+
+        size_t saved_locals = ctx->local_count;
+        fprintf(out, "      ");
+        emit_type_ref_as_c_type(ctx, binding_type, out, false);
+        fprintf(out, " %.*s", (int)binding->as.let_stmt.name.len,
+                binding->as.let_stmt.name.data);
+        bool binding_is_ref = binding_type->is_view || binding_type->is_mod;
+        bool copy_string = !binding_is_ref
+            && str_eq_cstr(get_base_type_name(binding_type), "String");
+        AstTypeRef binding_value_type = *binding_type;
+        binding_value_type.is_view = false;
+        binding_value_type.is_mod = false;
+        binding_value_type.is_opt = false;
+        bool deep_value = !binding_is_ref && !copy_string
+            && type_needs_deep_copy(ctx->compiler_ctx, ctx->module,
+                                    &binding_value_type, 0);
+        if (deep_value) {
+            const char* type_name = rae_mangle_type_specialized(
+                ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
+                &binding_value_type);
+            fprintf(out, ";\n      rae_deep_copy_%s(&%.*s, "
+                         "&__rae_collection%d.data[__rae_collection_index%d])",
+                    type_name, (int)binding->as.let_stmt.name.len,
+                    binding->as.let_stmt.name.data, loop_id, loop_id);
+        } else {
+            fprintf(out, " = ");
+            if (copy_string) fprintf(out, "rae_string_copy(");
+            bool primitive_ref = binding_is_ref
+                && is_primitive_type(get_base_type_name(binding_type));
+            if (primitive_ref) fprintf(out, "{ .ptr = &");
+            else if (binding_is_ref) fprintf(out, "&");
+            fprintf(out, "__rae_collection%d.data[__rae_collection_index%d]",
+                    loop_id, loop_id);
+            if (primitive_ref) fprintf(out, " }");
+            if (copy_string) fprintf(out, ")");
+        }
+        fprintf(out, ";\n");
+
+        if (ctx->local_count < 256) {
+            size_t local_index = ctx->local_count++;
+            ctx->locals[local_index] = binding->as.let_stmt.name;
+            ctx->local_type_refs[local_index] = binding_type;
+            ctx->local_is_ptr[local_index] = binding_is_ref;
+            ctx->local_is_mod[local_index] = binding_type->is_mod;
+            ctx->local_moved[local_index] = false;
+            ctx->local_struct_owns_heap[local_index] = !binding_is_ref;
+        }
+        if (stmt->as.loop_stmt.body) {
+            for (const AstStmt* body_stmt = stmt->as.loop_stmt.body->first;
+                 body_stmt; body_stmt = body_stmt->next) {
+                emit_stmt(ctx, body_stmt, out);
+            }
+        }
+        emit_implicit_drops_for_body(ctx, out, saved_locals);
+        ctx->local_count = saved_locals;
+        fprintf(out, "    }\n  }\n");
+        return true;
+    }
+
     fprintf(out, "  for (");
     // Save outer local_count so the loop's init-let + body-lets all
     // disappear from the locals view when the loop ends.
@@ -930,8 +1122,11 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             if (materialised_id >= 0) {
                 fprintf(out, "&__rae_bind%d;\n", materialised_id);
                 if (ctx->local_count < 256) {
-                    ctx->locals[ctx->local_count] = stmt->as.let_stmt.name;
-                    ctx->local_type_refs[ctx->local_count] = stmt->as.let_stmt.type;
+                    size_t local_index = ctx->local_count;
+                    ctx->locals[local_index] = stmt->as.let_stmt.name;
+                    ctx->local_type_refs[local_index] = stmt->as.let_stmt.type;
+                    ctx->local_is_ptr[local_index] = false;
+                    ctx->local_is_mod[local_index] = false;
                     ctx->local_count++;
                 }
                 break;
@@ -960,16 +1155,16 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 if (is_primitive_type(base)) {
                     // Check if the value is a function call returning a ref type
                     // (can't take address of rvalue — assign directly)
-                    bool value_returns_ref = false;
-                    if (stmt->as.let_stmt.value && (stmt->as.let_stmt.value->kind == AST_EXPR_CALL || stmt->as.let_stmt.value->kind == AST_EXPR_METHOD_CALL)) {
-                        const AstExpr* val = stmt->as.let_stmt.value;
-                        const AstFuncDecl* vfd = val->decl_link ? &val->decl_link->as.func_decl : NULL;
-                        if (vfd && vfd->returns && vfd->returns->type && (vfd->returns->type->is_view || vfd->returns->type->is_mod))
-                            value_returns_ref = true;
-                    }
+                    bool value_returns_ref = ref_bind_value_returns_ref(
+                        ctx, stmt->as.let_stmt.value);
                     if (value_returns_ref) {
-                        // Function already returns ref wrapper — assign directly
+                        // Optional primitive references cross a function
+                        // boundary as nullable raw pointers; locals keep the
+                        // normal primitive-ref wrapper used by expression
+                        // lowering, so install the returned pointer in it.
+                        if (stmt->as.let_stmt.type->is_opt) fprintf(out, "{ .ptr = ");
                         emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false);
+                        if (stmt->as.let_stmt.type->is_opt) fprintf(out, " }");
                     } else if (src_is_ref_local) {
                         // The source is itself a .ptr handle: alias the same
                         // referent, not the handle's own stack slot.
@@ -1076,7 +1271,15 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 }
                 // Skip the trailing ";\n" since we already emitted it
                 const char* tn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, stmt->as.let_stmt.type);
-                if (ctx->local_count < 256) { ctx->locals[ctx->local_count] = stmt->as.let_stmt.name; ctx->local_types[ctx->local_count] = str_from_cstr(tn); ctx->local_type_refs[ctx->local_count] = stmt->as.let_stmt.type; ctx->local_count++; }
+                if (ctx->local_count < 256) {
+                    size_t local_index = ctx->local_count;
+                    ctx->locals[local_index] = stmt->as.let_stmt.name;
+                    ctx->local_types[local_index] = str_from_cstr(tn);
+                    ctx->local_type_refs[local_index] = stmt->as.let_stmt.type;
+                    ctx->local_is_ptr[local_index] = false;
+                    ctx->local_is_mod[local_index] = false;
+                    ctx->local_count++;
+                }
                 break;
             } else if (stmt->as.let_stmt.value) {
                 // Set expected type so generic call resolution can infer from let type
@@ -1212,6 +1415,8 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             fprintf(out, ";\n");
             const char* tn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, stmt->as.let_stmt.type);
             if (ctx->local_count < 256) {
+                ctx->local_is_ptr[ctx->local_count] = false;
+                ctx->local_is_mod[ctx->local_count] = false;
                 ctx->locals[ctx->local_count] = stmt->as.let_stmt.name;
                 ctx->local_types[ctx->local_count] = str_from_cstr(tn);
                 ctx->local_type_refs[ctx->local_count] = stmt->as.let_stmt.type;
@@ -1548,6 +1753,11 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             // is about to receive. Move tracking above keeps the drop
             // pass from freeing a local whose data IS the return value.
             const AstTypeRef* ret_type = ctx->func_decl && ctx->func_decl->returns ? ctx->func_decl->returns->type : NULL;
+            if (ret_type && ctx->generic_params && ctx->generic_args) {
+                ret_type = substitute_type_ref(ctx->compiler_ctx,
+                                               ctx->generic_params,
+                                               ctx->generic_args, ret_type);
+            }
             bool has_value = stmt->as.ret_stmt.values && stmt->as.ret_stmt.values->value;
             bool is_main_fn = ctx->func_decl && str_eq_cstr(ctx->func_decl->name, "main");
 
@@ -1644,7 +1854,7 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     }
                 }
 
-                if (is_prim_ref_return) {
+                if (is_prim_ref_return && !ret_type->is_opt) {
                     fprintf(out, "("); emit_type_ref_as_c_type(ctx, ret_type, out, false);
                     fprintf(out, "){ .ptr = &"); emit_expr(ctx, ret_val, out, PREC_LOWEST, true, true);
                     fprintf(out, " }");

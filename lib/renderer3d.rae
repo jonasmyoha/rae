@@ -220,8 +220,8 @@ func compileRenderer(r: mod Renderer3d) pub ret Int {
 func renderFrame(r: view Renderer3d, scene: view Scene3d, camera: view Camera3d, light: view Light3d, aspect: view Float, time: view Float) pub {
   var i: Int = 0
   loop i < r.graph.order.length {
-    let p: Int = r.graph.order.at(index: i)
-    let tag: Int = r.graph.passes.at(index: p).tag
+    let p: Int = graphIntAt(values: r.graph.order, index: i)
+    let tag: Int = graphPassAt(values: r.graph.passes, index: p).tag
     if tag is tagScenePass {
       beginScene(camera: camera, light: light, aspect: aspect, time: time)
       renderScene(scene: scene)
@@ -254,8 +254,8 @@ func frameOrderLength(r: view Renderer3d) pub ret Int {
 }
 
 func frameTagAt(r: view Renderer3d, i: view Int) pub ret Int {
-  let p: Int = r.graph.order.at(index: i)
-  ret r.graph.passes.at(index: p).tag
+  let p: Int = graphIntAt(values: r.graph.order, index: i)
+  ret graphPassAt(values: r.graph.passes, index: p).tag
 }
 
 # Frame structure for logs/diagnostics — the graph describing itself.

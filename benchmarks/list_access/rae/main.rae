@@ -1,0 +1,271 @@
+import core
+
+func rae_ext_benchmarkOpaqueIndex(index: Int) extern ret Int
+
+type Particle {
+  px: Int
+  py: Int
+  pz: Int
+  vx: Int
+  vy: Int
+  vz: Int
+  mass: Int
+  flags: Int
+}
+
+func makeInts(size: view Int) ret List(Int) {
+  var values: List(Int) = createList(Int, cap: size)
+  var index: Int = 0
+  loop index < size {
+    values.add(value: (index * 17 + 3) % 1009)
+    index = index + 1
+  }
+  ret values
+}
+
+func makeParticles(size: view Int) ret List(Particle) {
+  var particles: List(Particle) = createList(Particle, cap: size)
+  var index: Int = 0
+  loop index < size {
+    particles.add(value: Particle {
+      px: index % 97
+      py: index % 89
+      pz: index % 83
+      vx: index % 79
+      vy: index % 73
+      vz: index % 71
+      mass: index % 67
+      flags: index % 61
+    })
+    index = index + 1
+  }
+  ret particles
+}
+
+func report(name: view String, startNs: view Int, checksum: view Int) {
+  let elapsed: Int = nowNs() - startNs
+  log("RESULT,rae,{name},{elapsed},{checksum}")
+}
+
+func intSequential(values: view List(Int), passes: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var pass: Int = 0
+  loop pass < passes {
+    var index: Int = 0
+    loop index < values.length {
+      if let value: Int = values.at(index: index) {
+        checksum = checksum + value
+      }
+      index = index + 1
+    }
+    pass = pass + 1
+  }
+  report(name: "int_sequential_optional", startNs: startNs, checksum: checksum)
+}
+
+func intCollection(values: view List(Int), passes: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var pass: Int = 0
+  loop pass < passes {
+    loop value: Int in values {
+      checksum = checksum + value
+    }
+    pass = pass + 1
+  }
+  report(name: "int_collection_value", startNs: startNs, checksum: checksum)
+}
+
+func intCollectionView(values: view List(Int), passes: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var pass: Int = 0
+  loop pass < passes {
+    loop value: view Int in values {
+      checksum = checksum + value
+    }
+    pass = pass + 1
+  }
+  report(name: "int_collection_view", startNs: startNs, checksum: checksum)
+}
+
+func intConstant(values: view List(Int), operations: view Int) {
+  let constantIndex: Int = rae_ext_benchmarkOpaqueIndex(index: 137)
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var iteration: Int = 0
+  loop iteration < operations {
+    if let value: Int = values.at(index: constantIndex) {
+      checksum = checksum + value
+    }
+    iteration = iteration + 1
+  }
+  report(name: "int_constant_optional", startNs: startNs, checksum: checksum)
+}
+
+func intStrided(values: view List(Int), operations: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var index: Int = 0
+  var iteration: Int = 0
+  loop iteration < operations {
+    if let value: Int = values.at(index: index) {
+      checksum = checksum + value
+    }
+    index = (index + 4) % values.length
+    iteration = iteration + 1
+  }
+  report(name: "int_strided_optional", startNs: startNs, checksum: checksum)
+}
+
+func intRandom(values: view List(Int), operations: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var iteration: Int = 0
+  loop iteration < operations {
+    let index: Int = (iteration * 48271 + 17) % values.length
+    if let value: Int = values.at(index: index) {
+      checksum = checksum + value
+    }
+    iteration = iteration + 1
+  }
+  report(name: "int_random_optional", startNs: startNs, checksum: checksum)
+}
+
+func intMostlyValid(values: view List(Int), operations: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var iteration: Int = 0
+  loop iteration < operations {
+    var index: Int = (iteration * 48271 + 17) % values.length
+    if iteration % 1000 is 0 {
+      index = values.length
+    }
+    if let value: Int = values.at(index: index) {
+      checksum = checksum + value
+    }
+    iteration = iteration + 1
+  }
+  report(name: "int_mostly_valid_optional", startNs: startNs, checksum: checksum)
+}
+
+func intMixedInvalid(values: view List(Int), operations: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var iteration: Int = 0
+  loop iteration < operations {
+    var index: Int = (iteration * 48271 + 17) % values.length
+    if iteration % 4 is 0 {
+      index = 0 - 1
+    }
+    if let value: Int = values.at(index: index) {
+      checksum = checksum + value
+    }
+    iteration = iteration + 1
+  }
+  report(name: "int_mixed_invalid_optional", startNs: startNs, checksum: checksum)
+}
+
+func structSequentialValue(particles: view List(Particle), passes: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var pass: Int = 0
+  loop pass < passes {
+    var index: Int = 0
+    loop index < particles.length {
+      if let particle: Particle = particles.at(index: index) {
+        checksum = checksum + particle.px + particle.vz + particle.mass
+      }
+      index = index + 1
+    }
+    pass = pass + 1
+  }
+  report(name: "struct_sequential_optional_value", startNs: startNs, checksum: checksum)
+}
+
+func structSequentialView(particles: view List(Particle), passes: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var pass: Int = 0
+  loop pass < passes {
+    var index: Int = 0
+    loop index < particles.length {
+      if let particle: view Particle => particles.viewAt(index: index) {
+        checksum = checksum + particle.px + particle.vz + particle.mass
+      }
+      index = index + 1
+    }
+    pass = pass + 1
+  }
+  report(name: "struct_sequential_optional_view", startNs: startNs, checksum: checksum)
+}
+
+func structCollectionValue(particles: view List(Particle), passes: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var pass: Int = 0
+  loop pass < passes {
+    loop particle: Particle in particles {
+      checksum = checksum + particle.px + particle.vz + particle.mass
+    }
+    pass = pass + 1
+  }
+  report(name: "struct_collection_value", startNs: startNs, checksum: checksum)
+}
+
+func structCollectionView(particles: view List(Particle), passes: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var pass: Int = 0
+  loop pass < passes {
+    loop particle: view Particle in particles {
+      checksum = checksum + particle.px + particle.vz + particle.mass
+    }
+    pass = pass + 1
+  }
+  report(name: "struct_collection_view", startNs: startNs, checksum: checksum)
+}
+
+func structRandomView(particles: view List(Particle), operations: view Int) {
+  let startNs: Int = nowNs()
+  var checksum: Int = 0
+  var iteration: Int = 0
+  loop iteration < operations {
+    let index: Int = (iteration * 48271 + 17) % particles.length
+    if let particle: view Particle => particles.viewAt(index: index) {
+      checksum = checksum + particle.px + particle.vz + particle.mass
+    }
+    iteration = iteration + 1
+  }
+  report(name: "struct_random_optional_view", startNs: startNs, checksum: checksum)
+}
+
+func runSuite() {
+  let size: Int = 65536
+  let passes: Int = 128
+  let operations: Int = size * passes
+  let values: List(Int) = makeInts(size: size)
+  let particles: List(Particle) = makeParticles(size: size)
+  intSequential(values: values, passes: passes)
+  intCollection(values: values, passes: passes)
+  intCollectionView(values: values, passes: passes)
+  intConstant(values: values, operations: operations)
+  intStrided(values: values, operations: operations)
+  intRandom(values: values, operations: operations)
+  intMostlyValid(values: values, operations: operations)
+  intMixedInvalid(values: values, operations: operations)
+  structSequentialValue(particles: particles, passes: passes)
+  structSequentialView(particles: particles, passes: passes)
+  structCollectionValue(particles: particles, passes: passes)
+  structCollectionView(particles: particles, passes: passes)
+  structRandomView(particles: particles, operations: operations)
+}
+
+func main() {
+  var repetition: Int = 0
+  loop repetition < 9 {
+    runSuite()
+    repetition = repetition + 1
+  }
+}

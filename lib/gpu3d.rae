@@ -253,11 +253,11 @@ func renderSceneShadowSdf(scene: view Scene3d) pub {
   }
   var clusterScan: Int = 0
   loop clusterScan < scene.sdfPrimitives.length {
-    let head: SdfPrimitive = scene.sdfPrimitives.at(index: clusterScan)
+    let head: SdfPrimitive = sceneSdfAt(values: scene.sdfPrimitives, index: clusterScan)
     var alreadyDrawn: Bool = false
     var back: Int = 0
     loop back < clusterScan {
-      let prior: SdfPrimitive = scene.sdfPrimitives.at(index: back)
+      let prior: SdfPrimitive = sceneSdfAt(values: scene.sdfPrimitives, index: back)
       if prior.shape is 0 {
         if prior.cluster is head.cluster { alreadyDrawn = true }
       }
@@ -269,10 +269,10 @@ func renderSceneShadowSdf(scene: view Scene3d) pub {
         var ballCount: Int = 0
         var i: Int = 0
         loop i < scene.sdfPrimitives.length {
-          let sdf: SdfPrimitive = scene.sdfPrimitives.at(index: i)
+          let sdf: SdfPrimitive = sceneSdfAt(values: scene.sdfPrimitives, index: i)
           if sdf.shape is 0 {
             if sdf.cluster is head.cluster {
-              let t: Transform3d = scene.transforms.at(index: sdf.entity)
+              let t: Transform3d = sceneTransformAt(values: scene.transforms, index: sdf.entity)
               packed.add(value: t.position.x)
               packed.add(value: t.position.y)
               packed.add(value: t.position.z)
@@ -294,9 +294,9 @@ func renderSceneShadowSdf(scene: view Scene3d) pub {
 func renderSceneShadow(scene: view Scene3d) pub {
   var i: Int = 0
   loop i < scene.meshRenderers.length {
-    let r: MeshRenderer = scene.meshRenderers.at(index: i)
+    let r: MeshRenderer = sceneMeshRendererAt(values: scene.meshRenderers, index: i)
     if r.visible {
-      let t: Transform3d = scene.transforms.at(index: r.entity)
+      let t: Transform3d = sceneTransformAt(values: scene.transforms, index: r.entity)
       drawShadowCaster(mesh: r.mesh, model: modelMatrix(t: t))
     }
     i = i + 1
@@ -306,13 +306,13 @@ func renderSceneShadow(scene: view Scene3d) pub {
 func renderScene(scene: view Scene3d) pub {
   var i: Int = 0
   loop i < scene.meshRenderers.length {
-    let r: MeshRenderer = scene.meshRenderers.at(index: i)
+    let r: MeshRenderer = sceneMeshRendererAt(values: scene.meshRenderers, index: i)
     if r.visible {
-      let t: Transform3d = scene.transforms.at(index: r.entity)
+      let t: Transform3d = sceneTransformAt(values: scene.transforms, index: r.entity)
       # prevTransforms is kept in lockstep with transforms by addTransform,
       # so this index is always valid (#336).
-      let pt: Transform3d = scene.prevTransforms.at(index: r.entity)
-      let m: Material3d = scene.materials.at(index: r.material)
+      let pt: Transform3d = sceneTransformAt(values: scene.prevTransforms, index: r.entity)
+      let m: Material3d = sceneMaterialAt(values: scene.materials, index: r.material)
       drawInstance(mesh: r.mesh, transform: t, prevTransform: pt, material: m)
     }
     i = i + 1
@@ -331,13 +331,13 @@ func renderScene(scene: view Scene3d) pub {
   if scene.sdfPrimitives.length > 0 {
     var clusterScan: Int = 0
     loop clusterScan < scene.sdfPrimitives.length {
-      let head: SdfPrimitive = scene.sdfPrimitives.at(index: clusterScan)
+      let head: SdfPrimitive = sceneSdfAt(values: scene.sdfPrimitives, index: clusterScan)
       # Only the first primitive of a cluster emits a draw; later members
       # of an already-drawn cluster are skipped.
       var alreadyDrawn: Bool = false
       var back: Int = 0
       loop back < clusterScan {
-        let prior: SdfPrimitive = scene.sdfPrimitives.at(index: back)
+        let prior: SdfPrimitive = sceneSdfAt(values: scene.sdfPrimitives, index: back)
         if prior.shape is 0 {
           if prior.cluster is head.cluster { alreadyDrawn = true }
         }
@@ -350,15 +350,15 @@ func renderScene(scene: view Scene3d) pub {
           var ballCount: Int = 0
           i = 0
           loop i < scene.sdfPrimitives.length {
-            let sdf: SdfPrimitive = scene.sdfPrimitives.at(index: i)
+            let sdf: SdfPrimitive = sceneSdfAt(values: scene.sdfPrimitives, index: i)
             if sdf.shape is 0 {
               if sdf.cluster is head.cluster {
-                let transform: Transform3d = scene.transforms.at(index: sdf.entity)
+                let transform: Transform3d = sceneTransformAt(values: scene.transforms, index: sdf.entity)
                 packed.add(value: transform.position.x)
                 packed.add(value: transform.position.y)
                 packed.add(value: transform.position.z)
                 packed.add(value: transform.scale.x)
-                let ballMaterial: Material3d = scene.materials.at(index: sdf.material)
+                let ballMaterial: Material3d = sceneMaterialAt(values: scene.materials, index: sdf.material)
                 colors.add(value: ballMaterial.baseColor.x)
                 colors.add(value: ballMaterial.baseColor.y)
                 colors.add(value: ballMaterial.baseColor.z)
@@ -369,7 +369,7 @@ func renderScene(scene: view Scene3d) pub {
             i = i + 1
           }
           if ballCount > 0 {
-            let material: Material3d = scene.materials.at(index: head.material)
+            let material: Material3d = sceneMaterialAt(values: scene.materials, index: head.material)
             drawMetaballs(
               packedBalls: packed.data, count: ballCount,
               packedColors: colors.data, smoothing: head.smoothing,

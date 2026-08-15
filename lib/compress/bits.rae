@@ -24,7 +24,7 @@ func getBit(this: mod BitReader) ret Int {
         this.overrun = true
         ret 0
     }
-    let b: Int = this.data.at(index: this.pos)
+    let b: Int = this.data.get(index: this.pos)
     let v: Int = (b shr this.bit) bitand 1
     this.bit = this.bit + 1
     if this.bit is 8 {
@@ -60,7 +60,7 @@ func getByte(this: mod BitReader) ret Int {
         this.overrun = true
         ret 0
     }
-    let b: Int = this.data.at(index: this.pos)
+    let b: Int = this.data.get(index: this.pos)
     this.pos = this.pos + 1
     ret b
 }
