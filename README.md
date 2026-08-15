@@ -11,12 +11,17 @@ neither has to hold the missing half in their head.
 
 ## A taste
 
+This is `examples/09_playlist`, verbatim — a type, a list of it, functions
+with explicit parameter modes, method-call syntax, an optional result, and
+interpolation, all in one file.
+
 ```rae
 import core
 
 type Track {
   title: String
   seconds: Int
+  plays: Int
 }
 
 # Parameter modes are always written out. `view` reads, `mod` may write back,
@@ -35,20 +40,60 @@ func formatDuration(seconds: view Int) ret String {
   ret "{seconds / 60}m {seconds % 60}s"
 }
 
+# `mod Track` means this function may change the caller's track. It is called
+# below as `track.play()` — method-call syntax is sugar for `play(track: track)`.
+func play(track: mod Track) {
+  track.plays = track.plays + 1
+}
+
+# `opt Track` is a result that might be nothing — no null, no sentinel. The
+# caller has to handle the empty case; `if let` binds the value when there is one.
+func longest(tracks: view List(Track)) ret opt Track {
+  if tracks.length is 0 {
+    ret none
+  }
+  var best: Track = tracks.at(index: 0)
+  var i: Int = 1
+  loop i < tracks.length {
+    let candidate: Track = tracks.at(index: i)
+    if candidate.seconds > best.seconds {
+      best = candidate
+    }
+    i = i + 1
+  }
+  ret best
+}
+
 func main() {
-  var tracks: List(Track) = createList(Track, cap: 3)
-  tracks.add(value: Track { title: "Intro", seconds: 95 })
-  tracks.add(value: Track { title: "Middle Eight", seconds: 212 })
-  tracks.add(value: Track { title: "Outro", seconds: 143 })
+  # `let` because the binding is never reassigned — the list is still mutable
+  # through it (adding an element is not rebinding the name).
+  let tracks: List(Track) = createList(Track, cap: 3)
+  tracks.add(value: Track { title: "Intro", seconds: 95, plays: 0 })
+  tracks.add(value: Track { title: "Middle Eight", seconds: 212, plays: 0 })
+  tracks.add(value: Track { title: "Outro", seconds: 143, plays: 0 })
 
   # Arguments are named at the call site, and "{}" is how a value becomes text.
   log("{tracks.length} tracks, {formatDuration(seconds: totalSeconds(tracks: tracks))}")
 
   var i: Int = 0
   loop i < tracks.length {
-    let track: Track = tracks.at(index: i)
+    # `viewAt` hands back a read-only window into the list, not a copy.
+    let track: view Track => tracks.viewAt(index: i)
     log("  {track.title} — {formatDuration(seconds: track.seconds)}")
     i = i + 1
+  }
+
+  # `modAt` hands back a mutable window; `play` writes through it, into the list.
+  let first: mod Track => tracks.modAt(index: 0)
+  first.play()
+  first.play()
+  log("{tracks.at(index: 0).title} played {tracks.at(index: 0).plays} times")
+
+  # The optional result, handled with `if let`.
+  if let top: Track = longest(tracks: tracks) {
+    log("longest: {top.title} ({formatDuration(seconds: top.seconds)})")
+  } else {
+    log("no tracks")
   }
 }
 ```
@@ -58,6 +103,8 @@ func main() {
   Intro — 1m 35s
   Middle Eight — 3m 32s
   Outro — 2m 23s
+Intro played 2 times
+longest: Middle Eight (3m 32s)
 ```
 
 ## Absence, and references
@@ -247,9 +294,10 @@ Start on the **Featured** tab — a cross-section of what the language can do:
 | **Metaballs (deferred rendering)** | the 3D renderer, with a settings panel and a sky that moves with the time of day |
 | **3D Renderer — Walker Character** | a skinned, animated glTF character |
 | **Mobile UI — GPU2D** | a phone-shaped application at real app scale |
-| **2D Renderer — Vector shapes** | the 2D renderer's shape pipeline |
+| **2D Renderer — Animated shapes** | the 2D shape pipeline in motion, with a sound-style EQ visualizer |
 | **Raytracer — GPU + MTSDF text** | a path tracer on the GPU with a crisp text overlay |
 | **Pong** and **Tetris 2D** | complete little games |
+| **Playlist** | the taste above, as a runnable program — most of the language, no graphics |
 | **Functions and interpolation** | one step past hello world, no graphics |
 
 The two UI examples are worth opening next: `104_ui_hello` is a value and three
