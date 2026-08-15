@@ -50,16 +50,13 @@ func main() {
     pushVec3(buf: sceneBuf, a: cam.up)
     sceneBuf.add(value: cam.lensRadius)
     let world: List(Sphere) = buildScene()
-    var i: Int = 0
-    loop i < world.length {
-        let sp: Sphere = world.at(index: i)
+    loop sp: view Sphere in world {
         pushVec3(buf: sceneBuf, a: sp.center)
         sceneBuf.add(value: sp.radius)
         pushVec3(buf: sceneBuf, a: sp.material.albedo)
         sceneBuf.add(value: sp.material.kind.toFloat())
         sceneBuf.add(value: sp.material.fuzz)
         sceneBuf.add(value: sp.material.ior)
-        i = i + 1
     }
 
     # Load the shared WGSL kernel (same file as the browser example). Read
@@ -67,7 +64,7 @@ func main() {
     let wgsl: String = rae_ext_rae_sys_read_file(path: "examples/50_raytracer_webgpu_native/raytrace.wgsl")
 
     let fb: List(Int) = createList(cap: width * height)
-    i = 0
+    var i: Int = 0
     loop i < width * height {
         fb.add(value: 0)
         i = i + 1

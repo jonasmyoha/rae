@@ -1182,6 +1182,100 @@ static void sema_check_returned_ref(CompilerContext* ctx, AstModule* module,
      * yet. See the is_ref_return arm of emit_return in c_stmt.c. */
 }
 
+static bool sema_same_place_expr(const AstExpr* left, const AstExpr* right) {
+    if (!left || !right || left->kind != right->kind) return false;
+    if (left->kind == AST_EXPR_IDENT) return str_eq(left->as.ident, right->as.ident);
+    if (left->kind == AST_EXPR_MEMBER) {
+        return str_eq(left->as.member.member, right->as.member.member)
+            && sema_same_place_expr(left->as.member.object, right->as.member.object);
+    }
+    return false;
+}
+
+static bool sema_expr_mutates_collection(const AstExpr* expr,
+                                         const AstExpr* collection) {
+    if (!expr) return false;
+    if (expr->kind == AST_EXPR_METHOD_CALL) {
+        Str method = expr->as.method_call.method_name;
+        bool mutates = str_eq_cstr(method, "add") || str_eq_cstr(method, "set")
+            || str_eq_cstr(method, "insert") || str_eq_cstr(method, "remove")
+            || str_eq_cstr(method, "swapRemove") || str_eq_cstr(method, "clear")
+            || str_eq_cstr(method, "drop") || str_eq_cstr(method, "grow")
+            || str_eq_cstr(method, "pop");
+        if (mutates && sema_same_place_expr(expr->as.method_call.object, collection)) {
+            return true;
+        }
+        if (sema_expr_mutates_collection(expr->as.method_call.object, collection)) return true;
+        for (const AstCallArg* arg = expr->as.method_call.args; arg; arg = arg->next) {
+            if (sema_expr_mutates_collection(arg->value, collection)) return true;
+        }
+        return false;
+    }
+    switch (expr->kind) {
+        case AST_EXPR_BINARY:
+            return sema_expr_mutates_collection(expr->as.binary.lhs, collection)
+                || sema_expr_mutates_collection(expr->as.binary.rhs, collection);
+        case AST_EXPR_UNARY:
+        case AST_EXPR_BOX:
+        case AST_EXPR_UNBOX:
+            return sema_expr_mutates_collection(expr->as.unary.operand, collection);
+        case AST_EXPR_CAST:
+            return sema_expr_mutates_collection(expr->as.cast.operand, collection);
+        case AST_EXPR_MEMBER:
+            return sema_expr_mutates_collection(expr->as.member.object, collection);
+        case AST_EXPR_INDEX:
+            return sema_expr_mutates_collection(expr->as.index.target, collection)
+                || sema_expr_mutates_collection(expr->as.index.index, collection);
+        case AST_EXPR_CALL:
+            if (sema_expr_mutates_collection(expr->as.call.callee, collection)) return true;
+            for (const AstCallArg* arg = expr->as.call.args; arg; arg = arg->next) {
+                if (sema_expr_mutates_collection(arg->value, collection)) return true;
+            }
+            return false;
+        default:
+            return false;
+    }
+}
+
+static bool sema_stmt_mutates_collection(const AstStmt* stmt,
+                                         const AstExpr* collection) {
+    if (!stmt) return false;
+    switch (stmt->kind) {
+        case AST_STMT_EXPR:
+            return sema_expr_mutates_collection(stmt->as.expr_stmt, collection);
+        case AST_STMT_LET:
+            return sema_expr_mutates_collection(stmt->as.let_stmt.value, collection);
+        case AST_STMT_ASSIGN:
+            return sema_same_place_expr(stmt->as.assign_stmt.target, collection)
+                || sema_expr_mutates_collection(stmt->as.assign_stmt.value, collection);
+        case AST_STMT_IF:
+            if (stmt->as.if_stmt.binding
+                && sema_stmt_mutates_collection(stmt->as.if_stmt.binding, collection)) return true;
+            if (sema_expr_mutates_collection(stmt->as.if_stmt.condition, collection)) return true;
+            for (const AstStmt* branch = stmt->as.if_stmt.then_block
+                     ? stmt->as.if_stmt.then_block->first : NULL;
+                 branch; branch = branch->next) {
+                if (sema_stmt_mutates_collection(branch, collection)) return true;
+            }
+            for (const AstStmt* branch = stmt->as.if_stmt.else_block
+                     ? stmt->as.if_stmt.else_block->first : NULL;
+                 branch; branch = branch->next) {
+                if (sema_stmt_mutates_collection(branch, collection)) return true;
+            }
+            return false;
+        case AST_STMT_LOOP:
+            if (sema_expr_mutates_collection(stmt->as.loop_stmt.condition, collection)) return true;
+            for (const AstStmt* body = stmt->as.loop_stmt.body
+                     ? stmt->as.loop_stmt.body->first : NULL;
+                 body; body = body->next) {
+                if (sema_stmt_mutates_collection(body, collection)) return true;
+            }
+            return false;
+        default:
+            return false;
+    }
+}
+
 static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt, TypeInfo* current_return_type) {
     if (!stmt) return;
     switch (stmt->kind) {
@@ -1336,6 +1430,22 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 // the optional holds and where it lives.
                 AstStmt* b = stmt->as.if_stmt.binding;
                 const AstTypeRef* btr = b->as.let_stmt.type;
+                if (btr && btr->is_opt && (btr->is_view || btr->is_mod)) {
+                    /* The declaration carries `opt` so its initializer can be
+                     * checked, but inside the successful branch the name is
+                     * the narrowed reference, not an optional. Keeping the
+                     * optional TypeInfo here previously relied on implicit
+                     * unboxing in every expression that used the binding. */
+                    AstTypeRef narrowed = *btr;
+                    narrowed.is_opt = false;
+                    narrowed.resolved_type = NULL;
+                    Symbol* narrowed_symbol = symbol_table_lookup(
+                        symbols, b->as.let_stmt.name);
+                    if (narrowed_symbol) {
+                        narrowed_symbol->type = sema_resolve_type_internal(
+                            ctx, module, symbols, &narrowed);
+                    }
+                }
                 const AstExpr* bsrc = b->as.let_stmt.value;
                 if (bsrc && bsrc->kind == AST_EXPR_UNBOX) bsrc = bsrc->as.unary.operand;
                 bool is_call_src = bsrc && (bsrc->kind == AST_EXPR_CALL
@@ -1401,12 +1511,70 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
         }
         case AST_STMT_LOOP: {
              symbol_table_push_scope(symbols);
-             if (stmt->as.loop_stmt.init) sema_analyze_stmt(ctx, module, symbols, stmt->as.loop_stmt.init, current_return_type);
-             if (stmt->as.loop_stmt.condition) sema_analyze_expr(ctx, module, symbols, stmt->as.loop_stmt.condition);
+             if (stmt->as.loop_stmt.is_range) {
+                 AstExpr* collection = stmt->as.loop_stmt.condition;
+                 if (collection) sema_analyze_expr(ctx, module, symbols, collection);
+                 TypeInfo* collection_type = collection ? collection->resolved_type : NULL;
+                 if (collection_type && collection_type->kind == TYPE_REF) {
+                     collection_type = collection_type->as.ref.base;
+                 }
+                 if (!sema_struct_template_is(collection_type, "List")
+                     || collection_type->as.structure.generic_count != 1) {
+                     diag_error(module->file_path, (int)stmt->line, (int)stmt->column,
+                                "collection loops currently require a List(T) expression");
+                     module->had_error = true;
+                 } else if (stmt->as.loop_stmt.init
+                            && stmt->as.loop_stmt.init->kind == AST_STMT_LET) {
+                     AstStmt* binding = stmt->as.loop_stmt.init;
+                     TypeInfo* element_type = collection_type->as.structure.generic_args[0];
+                     if (!binding->as.let_stmt.type) {
+                         AstTypeRef* inferred = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+                         *inferred = (AstTypeRef){0};
+                         inferred->resolved_type = element_type;
+                         binding->as.let_stmt.type = inferred;
+                     }
+                     TypeInfo* binding_type = sema_resolve_type_internal(
+                         ctx, module, symbols, binding->as.let_stmt.type);
+                     TypeInfo* binding_value_type = binding_type;
+                     if (binding_value_type && binding_value_type->kind == TYPE_REF) {
+                         binding_value_type = binding_value_type->as.ref.base;
+                     }
+                     if (!type_is_same(binding_value_type, element_type)) {
+                         diag_error(module->file_path, (int)binding->line, (int)binding->column,
+                                    "collection loop binding type must match the List element type");
+                         module->had_error = true;
+                     }
+                     if (binding->as.let_stmt.type->is_mod
+                         && collection && collection->resolved_type
+                         && collection->resolved_type->kind == TYPE_REF
+                         && !collection->resolved_type->as.ref.is_mod) {
+                         diag_error(module->file_path, (int)binding->line, (int)binding->column,
+                                    "a 'mod' collection loop requires mutable List storage");
+                         module->had_error = true;
+                     }
+                     sema_analyze_stmt(ctx, module, symbols, binding, current_return_type);
+                 }
+             } else {
+                 if (stmt->as.loop_stmt.init) sema_analyze_stmt(ctx, module, symbols, stmt->as.loop_stmt.init, current_return_type);
+                 if (stmt->as.loop_stmt.condition) sema_analyze_expr(ctx, module, symbols, stmt->as.loop_stmt.condition);
+             }
              if (stmt->as.loop_stmt.increment) sema_analyze_expr(ctx, module, symbols, stmt->as.loop_stmt.increment);
              if (stmt->as.loop_stmt.body) {
                  AstStmt* s = stmt->as.loop_stmt.body->first;
-                 while (s) { sema_analyze_stmt(ctx, module, symbols, s, current_return_type); s = s->next; }
+                 while (s) {
+                     if (stmt->as.loop_stmt.is_range
+                         && sema_stmt_mutates_collection(s, stmt->as.loop_stmt.condition)) {
+                         const AstExpr* error_expr = s->kind == AST_STMT_EXPR
+                             ? s->as.expr_stmt : NULL;
+                         int error_line = (int)(error_expr ? error_expr->line : s->line);
+                         int error_column = (int)(error_expr ? error_expr->column : s->column);
+                         diag_error(module->file_path, error_line, error_column,
+                                    "cannot mutate a List while a collection loop borrows its elements");
+                         module->had_error = true;
+                     }
+                     sema_analyze_stmt(ctx, module, symbols, s, current_return_type);
+                     s = s->next;
+                 }
              }
              symbol_table_pop_scope(symbols);
              break;
@@ -1589,6 +1757,38 @@ static const char* sema_numeric_name(TypeKind k) {
     }
 }
 
+static bool sema_is_list_index_optional(const AstExpr* expr) {
+    if (!expr) return false;
+    if (expr->kind == AST_EXPR_METHOD_CALL) {
+        Str method = expr->as.method_call.method_name;
+        bool accessor = str_eq_cstr(method, "at") || str_eq_cstr(method, "get")
+            || str_eq_cstr(method, "viewAt") || str_eq_cstr(method, "viewGet")
+            || str_eq_cstr(method, "modAt") || str_eq_cstr(method, "modGet");
+        if (!accessor || !expr->as.method_call.object) return false;
+        TypeInfo* receiver = expr->as.method_call.object->resolved_type;
+        while (receiver && (receiver->kind == TYPE_REF || receiver->kind == TYPE_OPT)) {
+            receiver = receiver->kind == TYPE_REF ? receiver->as.ref.base
+                                                  : receiver->as.opt.base;
+        }
+        return sema_struct_template_is(receiver, "List");
+    }
+    if (expr->kind == AST_EXPR_CALL && expr->decl_link
+        && expr->decl_link->kind == AST_DECL_FUNC) {
+        const AstFuncDecl* function = &expr->decl_link->as.func_decl;
+        bool accessor = str_eq_cstr(function->name, "at")
+            || str_eq_cstr(function->name, "get")
+            || str_eq_cstr(function->name, "viewAt")
+            || str_eq_cstr(function->name, "viewGet")
+            || str_eq_cstr(function->name, "modAt")
+            || str_eq_cstr(function->name, "modGet");
+        if (!accessor) return false;
+        const AstParam* receiver = function->params;
+        return receiver && receiver->type
+            && str_eq_cstr(get_base_type_name(receiver->type), "List");
+    }
+    return false;
+}
+
 static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr** expr_ptr) {
     if (!expected || !expr_ptr || !*expr_ptr) return;
     AstExpr* expr = *expr_ptr;
@@ -1626,9 +1826,18 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
         *unbox = (AstExpr){.kind = AST_EXPR_UNBOX, .resolved_type = expected, .line = expr->line, .column = expr->column};
         unbox->as.unary.operand = expr; *expr_ptr = unbox;
     } else if (expected->kind != TYPE_OPT && expr->resolved_type->kind == TYPE_OPT) {
-        AstExpr* unbox = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
-        *unbox = (AstExpr){.kind = AST_EXPR_UNBOX, .resolved_type = expected, .line = expr->line, .column = expr->column};
-        unbox->as.unary.operand = expr; *expr_ptr = unbox;
+        if (sema_is_list_index_optional(expr)) {
+            const char* err_file = s_current_decl_origin ? s_current_decl_origin : NULL;
+            diag_error(err_file, (int)expr->line, (int)expr->column,
+                       "List indexed access is optional; handle it with 'if let'");
+            if (s_current_module) s_current_module->had_error = true;
+        } else {
+            AstExpr* unbox = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
+            *unbox = (AstExpr){.kind = AST_EXPR_UNBOX, .resolved_type = expected,
+                               .line = expr->line, .column = expr->column};
+            unbox->as.unary.operand = expr;
+            *expr_ptr = unbox;
+        }
     }
 }
 
@@ -2153,18 +2362,16 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                      * Buffer, where the length is part of the type and a
                      * constant index is checked at compile time. A List's
                      * length is a runtime value, so brackets could never
-                     * offer that — and worse, they cannot express which
-                     * bounds contract is wanted: `get` returns `opt T`,
-                     * `at` returns `T` and asserts. `xs[i]` silently picked
-                     * the unchecked one, so the spelling that LOOKS like the
-                     * simple safe primitive was the sharp one.
+                     * offer that. List access is explicitly optional through
+                     * `at`, `viewAt`, or `modAt`; brackets cannot express the
+                     * required handling of absence.
                      *
                      * No Rae code ever used it; it just parsed. */
                     diag_error(s_current_decl_origin ? s_current_decl_origin : (module ? module->file_path : NULL),
                                (int)expr->line, (int)expr->column,
-                               "a List is not indexed with '[]' — write '.get(index: i)' for a bounds-checked 'opt T', "
-                               "or '.at(index: i)' to assert the index is in range. "
-                               "'[]' is for Array(T, cap: N), whose length is part of its type");
+                               "a List is not indexed with '[]'; use '.at(index: i)', '.viewAt(index: i)', "
+                               "or '.modAt(index: i)' and handle the optional result. '[]' is for "
+                               "Array(T, cap: N), whose length is part of its type");
                     if (module) module->had_error = true;
                     if (t->as.structure.generic_count > 0) expr->resolved_type = t->as.structure.generic_args[0];
                 }

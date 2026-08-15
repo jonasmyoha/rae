@@ -2,7 +2,7 @@
 # overload for a DIFFERENT receiver type, surfacing as an inscrutable C
 # type error rather than an overload diagnostic (#349).
 #
-# `parts.at(i)` returns the generic `T`. Sema cannot match the method
+# `parts.at(i)` returns `opt T`. Once `if let` narrows it, sema must match
 # because it compares the instantiated struct's mangled name
 # (`List_String`) against the template written in the parameter
 # (`view List(T)`), so the call gets no decl_link and no type — and the
@@ -19,8 +19,14 @@ import string
 func main() {
   let raw: String = " 1 42 3.5 "
   let parts: List(String) = raw.trim().split(sep: " ")
-  log("len={parts.at(index: 1).length()}")
-  log("int={parts.at(index: 1).toInt()}")
-  log("float={parts.at(index: 2).toFloat()}")
-  log("chain={parts.at(index: 1).trim().toInt()}")
+  if let part: String = parts.at(index: 1) {
+    log("len={part.length()}")
+    log("int={part.toInt()}")
+  }
+  if let part: String = parts.at(index: 2) {
+    log("float={part.toFloat()}")
+  }
+  if let part: String = parts.at(index: 1) {
+    log("chain={part.trim().toInt()}")
+  }
 }

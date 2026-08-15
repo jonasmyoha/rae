@@ -448,6 +448,11 @@ func snapCameraRigView(rig: mod CameraRig) pub {
 # half-finished movement.
 const cameraRigFields: Int = 12
 
+func cameraRigPart(parts: view List(String), index: view Int) ret String {
+  if let value: String = parts.at(index: index) { ret value }
+  ret ""
+}
+
 func cameraRigStateString(rig: view CameraRig, camera: view Camera3d) pub ret String {
   var modeNum: Int = 0
   if rig.mode is CameraRigMode.free { modeNum = 1 }
@@ -467,29 +472,29 @@ func applyCameraRigState(parts: view List(String), offset: view Int,
   if parts.length < offset + cameraRigFields {
     ret false
   }
-  if parts.at(index: offset).trim().toInt() is 1 {
+  if cameraRigPart(parts: parts, index: offset).trim().toInt() is 1 {
     rig.mode = CameraRigMode.free
   } else {
     rig.mode = CameraRigMode.orbit
   }
-  rig.yaw = parts.at(index: offset + 1).trim().toFloat()
-  rig.orbitPitch = parts.at(index: offset + 2).trim().toFloat()
-  rig.freePitch = parts.at(index: offset + 3).trim().toFloat()
-  rig.distance = parts.at(index: offset + 4).trim().toFloat()
+  rig.yaw = cameraRigPart(parts: parts, index: offset + 1).trim().toFloat()
+  rig.orbitPitch = cameraRigPart(parts: parts, index: offset + 2).trim().toFloat()
+  rig.freePitch = cameraRigPart(parts: parts, index: offset + 3).trim().toFloat()
+  rig.distance = cameraRigPart(parts: parts, index: offset + 4).trim().toFloat()
   rig.freePosition = vec3.create(
-    x: parts.at(index: offset + 5).trim().toFloat(),
-    y: parts.at(index: offset + 6).trim().toFloat(),
-    z: parts.at(index: offset + 7).trim().toFloat()
+    x: cameraRigPart(parts: parts, index: offset + 5).trim().toFloat(),
+    y: cameraRigPart(parts: parts, index: offset + 6).trim().toFloat(),
+    z: cameraRigPart(parts: parts, index: offset + 7).trim().toFloat()
   )
   # Orbit needs the target restored too, or the camera returns to the
   # right angle around the wrong point.
   camera.target = vec3.create(
-    x: parts.at(index: offset + 8).trim().toFloat(),
-    y: parts.at(index: offset + 9).trim().toFloat(),
+    x: cameraRigPart(parts: parts, index: offset + 8).trim().toFloat(),
+    y: cameraRigPart(parts: parts, index: offset + 9).trim().toFloat(),
     z: camera.target.z
   )
-  rig.smoothMouse = parts.at(index: offset + 10).trim().toInt() is 1
-  rig.smoothKeys = parts.at(index: offset + 11).trim().toInt() is 1
+  rig.smoothMouse = cameraRigPart(parts: parts, index: offset + 10).trim().toInt() is 1
+  rig.smoothKeys = cameraRigPart(parts: parts, index: offset + 11).trim().toInt() is 1
   # A snapshot written by a build with different limits should still land
   # inside this build's.
   rig.distance = clampRigDistance(rig: rig, dist: rig.distance)

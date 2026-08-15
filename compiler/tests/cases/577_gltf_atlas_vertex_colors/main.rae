@@ -63,28 +63,28 @@ func main() {
 
   # 2: two known vertices, against values computed independently from the
   # same PNG and the same sRGB transfer function.
-  let leatherOk: Bool = near(a: m.verts.at(index: 16), b: 0.2122)
-    and near(a: m.verts.at(index: 17), b: 0.1356)
-    and near(a: m.verts.at(index: 18), b: 0.0844)
+  let leatherOk: Bool = near(a: m.verts.get(index: 16), b: 0.2122)
+    and near(a: m.verts.get(index: 17), b: 0.1356)
+    and near(a: m.verts.get(index: 18), b: 0.0844)
   if leatherOk {
     log("vertex 0 is leather: yes")
   } else {
-    log("vertex 0 is leather: NO ({m.verts.at(index: 16)} {m.verts.at(index: 17)} {m.verts.at(index: 18)})")
+    log("vertex 0 is leather: NO ({m.verts.get(index: 16)} {m.verts.get(index: 17)} {m.verts.get(index: 18)})")
   }
-  let skinOk: Bool = near(a: m.verts.at(index: 100 * 20 + 16), b: 1.0)
-    and near(a: m.verts.at(index: 100 * 20 + 17), b: 0.6939)
-    and near(a: m.verts.at(index: 100 * 20 + 18), b: 0.3613)
+  let skinOk: Bool = near(a: m.verts.get(index: 100 * 20 + 16), b: 1.0)
+    and near(a: m.verts.get(index: 100 * 20 + 17), b: 0.6939)
+    and near(a: m.verts.get(index: 100 * 20 + 18), b: 0.3613)
   if skinOk {
     log("vertex 100 is skin: yes")
   } else {
-    log("vertex 100 is skin: NO ({m.verts.at(index: 100 * 20 + 16)} {m.verts.at(index: 100 * 20 + 17)} {m.verts.at(index: 100 * 20 + 18)})")
+    log("vertex 100 is skin: NO ({m.verts.get(index: 100 * 20 + 16)} {m.verts.get(index: 100 * 20 + 17)} {m.verts.get(index: 100 * 20 + 18)})")
   }
 
   # 3: more than one swatch across the primitive.
   var distinct: Int = 1
   var i: Int = 1
   loop i < m.vertCount {
-    if not near(a: m.verts.at(index: i * 20 + 16), b: m.verts.at(index: 16)) {
+    if not near(a: m.verts.get(index: i * 20 + 16), b: m.verts.get(index: 16)) {
       distinct = 2
       i = m.vertCount
     }

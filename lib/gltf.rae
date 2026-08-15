@@ -81,15 +81,25 @@ func glbFailed(msg: view String) ret Glb {
 
 # ----- little-endian scalar readers -----------------------------------
 
+func gltfIntAt(values: view List(Int), index: view Int) ret Int {
+  if let value: Int = values.at(index: index) { ret value }
+  ret 0
+}
+
+func gltfFloatAt(values: view List(Float), index: view Int) ret Float {
+  if let value: Float = values.at(index: index) { ret value }
+  ret 0.0
+}
+
 func readU32(b: view List(Int), pos: view Int) pub ret Int {
-  ret b.at(index: pos)
-    bitor (b.at(index: pos + 1) shl 8)
-    bitor (b.at(index: pos + 2) shl 16)
-    bitor (b.at(index: pos + 3) shl 24)
+  ret gltfIntAt(values: b, index: pos)
+    bitor (gltfIntAt(values: b, index: pos + 1) shl 8)
+    bitor (gltfIntAt(values: b, index: pos + 2) shl 16)
+    bitor (gltfIntAt(values: b, index: pos + 3) shl 24)
 }
 
 func readU16(b: view List(Int), pos: view Int) pub ret Int {
-  ret b.at(index: pos) bitor (b.at(index: pos + 1) shl 8)
+  ret gltfIntAt(values: b, index: pos) bitor (gltfIntAt(values: b, index: pos + 1) shl 8)
 }
 
 # IEEE-754 binary32 from four bytes.
@@ -312,7 +322,7 @@ func readFloats(g: view Glb, index: view Int) pub ret List(Float) {
         out.add(value: readF32(b: g.bytes, pos: at))
       } else {
         if a.componentType is compUByte {
-          out.add(value: g.bytes.at(index: at).toFloat() / 255.0)
+          out.add(value: gltfIntAt(values: g.bytes, index: at).toFloat() / 255.0)
         } else {
           if a.componentType is compUShort {
             out.add(value: readU16(b: g.bytes, pos: at).toFloat() / 65535.0)
@@ -343,7 +353,7 @@ func readInts(g: view Glb, index: view Int) pub ret List(Int) {
     loop c < a.components {
       let at: Int = a.start + e * a.stride + c * compSize
       if a.componentType is compUByte {
-        out.add(value: g.bytes.at(index: at))
+        out.add(value: gltfIntAt(values: g.bytes, index: at))
       } else {
         if a.componentType is compUShort {
           out.add(value: readU16(b: g.bytes, pos: at))
@@ -401,7 +411,7 @@ func loadPrimitive(g: view Glb, meshIndex: view Int, primIndex: view Int) pub re
     let src: List(Int) = readInts(g: g, index: idxAcc)
     var k: Int = 0
     loop k < src.length {
-      tri.add(value: src.at(index: k))
+      tri.add(value: gltfIntAt(values: src, index: k))
       k = k + 1
     }
   } else {
@@ -432,15 +442,15 @@ func loadPrimitive(g: view Glb, meshIndex: view Int, primIndex: view Int) pub re
     }
     var f: Int = 0
     loop f + 2 < tri.length {
-      let i0: Int = tri.at(index: f)
-      let i1: Int = tri.at(index: f + 1)
-      let i2: Int = tri.at(index: f + 2)
-      let ax: Float = pos.at(index: i1 * 3) - pos.at(index: i0 * 3)
-      let ay: Float = pos.at(index: i1 * 3 + 1) - pos.at(index: i0 * 3 + 1)
-      let az: Float = pos.at(index: i1 * 3 + 2) - pos.at(index: i0 * 3 + 2)
-      let bx: Float = pos.at(index: i2 * 3) - pos.at(index: i0 * 3)
-      let by: Float = pos.at(index: i2 * 3 + 1) - pos.at(index: i0 * 3 + 1)
-      let bz: Float = pos.at(index: i2 * 3 + 2) - pos.at(index: i0 * 3 + 2)
+      let i0: Int = gltfIntAt(values: tri, index: f)
+      let i1: Int = gltfIntAt(values: tri, index: f + 1)
+      let i2: Int = gltfIntAt(values: tri, index: f + 2)
+      let ax: Float = gltfFloatAt(values: pos, index: i1 * 3) - gltfFloatAt(values: pos, index: i0 * 3)
+      let ay: Float = gltfFloatAt(values: pos, index: i1 * 3 + 1) - gltfFloatAt(values: pos, index: i0 * 3 + 1)
+      let az: Float = gltfFloatAt(values: pos, index: i1 * 3 + 2) - gltfFloatAt(values: pos, index: i0 * 3 + 2)
+      let bx: Float = gltfFloatAt(values: pos, index: i2 * 3) - gltfFloatAt(values: pos, index: i0 * 3)
+      let by: Float = gltfFloatAt(values: pos, index: i2 * 3 + 1) - gltfFloatAt(values: pos, index: i0 * 3 + 1)
+      let bz: Float = gltfFloatAt(values: pos, index: i2 * 3 + 2) - gltfFloatAt(values: pos, index: i0 * 3 + 2)
       var cx: Float = ay * bz - az * by
       var cy: Float = az * bx - ax * bz
       var cz: Float = ax * by - ay * bx
@@ -455,7 +465,7 @@ func loadPrimitive(g: view Glb, meshIndex: view Int, primIndex: view Int) pub re
         cz = cz / len
         var c: Int = 0
         loop c < 3 {
-          let vi: Int = tri.at(index: f + c)
+          let vi: Int = gltfIntAt(values: tri, index: f + c)
           nrm.set(index: vi * 3, value: cx)
           nrm.set(index: vi * 3 + 1, value: cy)
           nrm.set(index: vi * 3 + 2, value: cz)
@@ -473,19 +483,19 @@ func loadPrimitive(g: view Glb, meshIndex: view Int, primIndex: view Int) pub re
     var ny: Float = 0.0
     var nz: Float = 1.0
     if hasNrm {
-      nx = nrm.at(index: i * 3)
-      ny = nrm.at(index: i * 3 + 1)
-      nz = nrm.at(index: i * 3 + 2)
+      nx = gltfFloatAt(values: nrm, index: i * 3)
+      ny = gltfFloatAt(values: nrm, index: i * 3 + 1)
+      nz = gltfFloatAt(values: nrm, index: i * 3 + 2)
     }
     var u: Float = 0.0
     var v: Float = 0.0
     if hasUv {
-      u = uv.at(index: i * 2)
-      v = uv.at(index: i * 2 + 1)
+      u = gltfFloatAt(values: uv, index: i * 2)
+      v = gltfFloatAt(values: uv, index: i * 2 + 1)
     }
     pushVert(
       verts: verts,
-      px: pos.at(index: i * 3), py: pos.at(index: i * 3 + 1), pz: pos.at(index: i * 3 + 2),
+      px: gltfFloatAt(values: pos, index: i * 3), py: gltfFloatAt(values: pos, index: i * 3 + 1), pz: gltfFloatAt(values: pos, index: i * 3 + 2),
       nx: nx, ny: ny, nz: nz, u: u, v: v
     )
     i = i + 1
@@ -495,7 +505,7 @@ func loadPrimitive(g: view Glb, meshIndex: view Int, primIndex: view Int) pub re
   # non-indexed primitive), so there is one upload path rather than two.
   var k: Int = 0
   loop k < tri.length {
-    indices.add(value: tri.at(index: k))
+    indices.add(value: gltfIntAt(values: tri, index: k))
     k = k + 1
   }
   ret MeshData { verts: own verts, indices: own indices, vertCount: vertCount }
@@ -546,12 +556,12 @@ func loadAllPrimitives(g: view Glb) pub ret MeshData {
       let part: MeshData = loadPrimitive(g: g, meshIndex: m, primIndex: p)
       var i: Int = 0
       loop i < part.verts.length {
-        verts.add(value: part.verts.at(index: i))
+        verts.add(value: gltfFloatAt(values: part.verts, index: i))
         i = i + 1
       }
       var k: Int = 0
       loop k < part.indices.length {
-        indices.add(value: part.indices.at(index: k) + total)
+        indices.add(value: gltfIntAt(values: part.indices, index: k) + total)
         k = k + 1
       }
       total = total + part.vertCount
@@ -580,18 +590,18 @@ func meshBounds(m: view MeshData) pub ret List(Float) {
     }
     ret own out
   }
-  var minX: Float = m.verts.at(index: 0)
-  var minY: Float = m.verts.at(index: 1)
-  var minZ: Float = m.verts.at(index: 2)
+  var minX: Float = gltfFloatAt(values: m.verts, index: 0)
+  var minY: Float = gltfFloatAt(values: m.verts, index: 1)
+  var minZ: Float = gltfFloatAt(values: m.verts, index: 2)
   var maxX: Float = minX
   var maxY: Float = minY
   var maxZ: Float = minZ
   var i: Int = 0
   loop i < m.vertCount {
     # Stride is 8: pos3, nrm3, uv2.
-    let x: Float = m.verts.at(index: i * 8)
-    let y: Float = m.verts.at(index: i * 8 + 1)
-    let z: Float = m.verts.at(index: i * 8 + 2)
+    let x: Float = gltfFloatAt(values: m.verts, index: i * 8)
+    let y: Float = gltfFloatAt(values: m.verts, index: i * 8 + 1)
+    let z: Float = gltfFloatAt(values: m.verts, index: i * 8 + 2)
     if x < minX { minX = x }
     if y < minY { minY = y }
     if z < minZ { minZ = z }

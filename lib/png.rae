@@ -18,9 +18,18 @@ func pushBE32(out: mod List(Int), value: view Int) {
     out.add(value: value bitand 255)
 }
 
+func pngIntAt(data: view List(Int), index: view Int) ret Int {
+    if let value: Int = data.at(index: index) {
+        ret value
+    }
+    ret 0
+}
+
 func readBE32(data: view List(Int), pos: view Int) ret Int {
-    ret (data.at(index: pos) shl 24) bitor (data.at(index: pos + 1) shl 16)
-        bitor (data.at(index: pos + 2) shl 8) bitor data.at(index: pos + 3)
+    ret (pngIntAt(data: data, index: pos) shl 24)
+        bitor (pngIntAt(data: data, index: pos + 1) shl 16)
+        bitor (pngIntAt(data: data, index: pos + 2) shl 8)
+        bitor pngIntAt(data: data, index: pos + 3)
 }
 
 # Write a PNG chunk: length, 4-byte type, data, CRC-32 over (type + data).
@@ -31,10 +40,10 @@ func writeChunk(out: mod List(Int), t0: view Int, t1: view Int, t2: view Int, t3
     let crcIn: List(Int) = createList(cap: data.length + 4)
     crcIn.add(value: t0) crcIn.add(value: t1) crcIn.add(value: t2) crcIn.add(value: t3)
     var i: Int = 0
-    loop i < data.length { crcIn.add(value: data.at(index: i)) i = i + 1 }
+    loop value: Int in data { crcIn.add(value: value) }
     out.add(value: t0) out.add(value: t1) out.add(value: t2) out.add(value: t3)
     i = 0
-    loop i < data.length { out.add(value: data.at(index: i)) i = i + 1 }
+    loop value: Int in data { out.add(value: value) }
     pushBE32(out: out, value: crc32(data: crcIn, len: crcIn.length))
 }
 
@@ -66,7 +75,7 @@ func encodePng(pixels: view List(Int), width: view Int, height: view Int, hasAlp
         let cur: List(Int) = createList(cap: stride)
         var x: Int = 0
         loop x < width {
-            let p: Int = pixels.at(index: y * width + x)
+            let p: Int = pngIntAt(data: pixels, index: y * width + x)
             cur.add(value: (p shr 16) bitand 255)
             cur.add(value: (p shr 8) bitand 255)
             cur.add(value: p bitand 255)
@@ -84,16 +93,16 @@ func encodePng(pixels: view List(Int), width: view Int, height: view Int, hasAlp
             var i: Int = 0
             loop i < stride {
                 var a: Int = 0
-                if i >= channels { a = cur.at(index: i - channels) }
+                if i >= channels { a = pngIntAt(data: cur, index: i - channels) }
                 var b: Int = 0
-                if havePrev { b = prevRow.at(index: i) }
+                if havePrev { b = pngIntAt(data: prevRow, index: i) }
                 var c: Int = 0
-                if havePrev and i >= channels { c = prevRow.at(index: i - channels) }
-                var v: Int = cur.at(index: i)
-                if ft is 1 { v = cur.at(index: i) - a }
-                if ft is 2 { v = cur.at(index: i) - b }
-                if ft is 3 { v = cur.at(index: i) - ((a + b) / 2) }
-                if ft is 4 { v = cur.at(index: i) - paeth(a: a, b: b, c: c) }
+                if havePrev and i >= channels { c = pngIntAt(data: prevRow, index: i - channels) }
+                var v: Int = pngIntAt(data: cur, index: i)
+                if ft is 1 { v = pngIntAt(data: cur, index: i) - a }
+                if ft is 2 { v = pngIntAt(data: cur, index: i) - b }
+                if ft is 3 { v = pngIntAt(data: cur, index: i) - ((a + b) / 2) }
+                if ft is 4 { v = pngIntAt(data: cur, index: i) - paeth(a: a, b: b, c: c) }
                 v = v bitand 255
                 cand.add(value: v)
                 cost = cost + signedAbs(b: v)
@@ -103,18 +112,15 @@ func encodePng(pixels: view List(Int), width: view Int, height: view Int, hasAlp
                 bestCost = cost
                 bestType = ft
                 best.clear()
-                var j: Int = 0
-                loop j < stride { best.add(value: cand.at(index: j)) j = j + 1 }
+                loop value: Int in cand { best.add(value: value) }
             }
             ft = ft + 1
         }
         raw.add(value: bestType)
-        var k: Int = 0
-        loop k < stride { raw.add(value: best.at(index: k)) k = k + 1 }
+        loop value: Int in best { raw.add(value: value) }
         # This row's RAW bytes become prevRow for the next iteration.
         prevRow.clear()
-        var m: Int = 0
-        loop m < stride { prevRow.add(value: cur.at(index: m)) m = m + 1 }
+        loop value: Int in cur { prevRow.add(value: value) }
         havePrev = true
         y = y + 1
     }
@@ -177,19 +183,22 @@ func decodePng(png: view List(Int), len: view Int, width: mod Int, height: mod I
     var pos: Int = 8                       # skip the 8-byte signature
     loop pos + 8 <= len {
         let clen: Int = readBE32(data: png, pos: pos)
-        let t0: Int = png.at(index: pos + 4)
-        let t1: Int = png.at(index: pos + 5)
-        let t2: Int = png.at(index: pos + 6)
-        let t3: Int = png.at(index: pos + 7)
+        let t0: Int = pngIntAt(data: png, index: pos + 4)
+        let t1: Int = pngIntAt(data: png, index: pos + 5)
+        let t2: Int = pngIntAt(data: png, index: pos + 6)
+        let t3: Int = pngIntAt(data: png, index: pos + 7)
         let dstart: Int = pos + 8
         if t0 is 73 and t1 is 72 and t2 is 68 and t3 is 82 {        # IHDR
             w = readBE32(data: png, pos: dstart)
             h = readBE32(data: png, pos: dstart + 4)
-            colorType = png.at(index: dstart + 9)
+            colorType = pngIntAt(data: png, index: dstart + 9)
         } else {
             if t0 is 73 and t1 is 68 and t2 is 65 and t3 is 84 {    # IDAT
                 var k: Int = 0
-                loop k < clen { idat.add(value: png.at(index: dstart + k)) k = k + 1 }
+                loop k < clen {
+                    idat.add(value: pngIntAt(data: png, index: dstart + k))
+                    k = k + 1
+                }
             } else {
                 if t0 is 73 and t1 is 69 and t2 is 78 and t3 is 68 { pos = len }  # IEND -> stop
             }
@@ -209,17 +218,17 @@ func decodePng(png: view List(Int), len: view Int, width: mod Int, height: mod I
     var rp: Int = 0                        # read cursor in `raw`
     var y: Int = 0
     loop y < h {
-        let ftype: Int = raw.at(index: rp)
+        let ftype: Int = pngIntAt(data: raw, index: rp)
         rp = rp + 1
         var i: Int = 0
         loop i < stride {
-            let cur: Int = raw.at(index: rp + i)
+            let cur: Int = pngIntAt(data: raw, index: rp + i)
             var a: Int = 0
-            if i >= channels { a = recon.at(index: y * stride + i - channels) }
+            if i >= channels { a = pngIntAt(data: recon, index: y * stride + i - channels) }
             var b: Int = 0
-            if y > 0 { b = recon.at(index: (y - 1) * stride + i) }
+            if y > 0 { b = pngIntAt(data: recon, index: (y - 1) * stride + i) }
             var c: Int = 0
-            if y > 0 and i >= channels { c = recon.at(index: (y - 1) * stride + i - channels) }
+            if y > 0 and i >= channels { c = pngIntAt(data: recon, index: (y - 1) * stride + i - channels) }
             var val: Int = cur
             if ftype is 1 { val = cur + a }
             if ftype is 2 { val = cur + b }
@@ -239,11 +248,11 @@ func decodePng(png: view List(Int), len: view Int, width: mod Int, height: mod I
         var px: Int = 0
         loop px < w {
             let base: Int = py * stride + px * channels
-            let r: Int = recon.at(index: base)
-            let g: Int = recon.at(index: base + 1)
-            let bl: Int = recon.at(index: base + 2)
+            let r: Int = pngIntAt(data: recon, index: base)
+            let g: Int = pngIntAt(data: recon, index: base + 1)
+            let bl: Int = pngIntAt(data: recon, index: base + 2)
             var al: Int = 255
-            if channels is 4 { al = recon.at(index: base + 3) }
+            if channels is 4 { al = pngIntAt(data: recon, index: base + 3) }
             pixels.add(value: (al shl 24) bitor (r shl 16) bitor (g shl 8) bitor bl)
             px = px + 1
         }

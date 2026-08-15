@@ -198,7 +198,13 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
           const AstTypeRef* otr = infer_expr_type_ref(ctx, operand);
           if (otr && otr->is_opt && (otr->is_view || otr->is_mod)) {
               fprintf(out, "((bool)(");
-              emit_expr(ctx, operand, out, PREC_LOWEST, true, true);
+              if (operand->kind == AST_EXPR_IDENT
+                  && is_primitive_type(get_base_type_name(otr))) {
+                  fprintf(out, "%.*s.ptr", (int)operand->as.ident.len,
+                          operand->as.ident.data);
+              } else {
+                  emit_expr(ctx, operand, out, PREC_LOWEST, true, true);
+              }
               fprintf(out, expr->as.binary.op == AST_BIN_NEQ ? " != NULL))" : " == NULL))");
               ctx->suppress_opt_unbox = saved_unbox;
               break;
