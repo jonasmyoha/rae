@@ -675,6 +675,10 @@ const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
     // An optional REFERENCE return is a nullable pointer, not a box (spec 4.1);
     // only a non-reference optional needs RaeAny.
     AstTypeRef* tr = func->returns->type;
+    if (ctx && ctx->generic_params && ctx->generic_args) {
+      tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
+                               ctx->generic_args, tr);
+    }
     if (tr->is_opt && !(tr->is_view || tr->is_mod)) return "RaeAny";
     bool is_view = tr->is_view, is_mod = tr->is_mod, is_ptr = is_view || is_mod;
     Str base = get_base_type_name(tr);
@@ -684,6 +688,18 @@ const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
         if (ed) return is_ptr ? "int64_t*" : "int64_t";
     }
     if (is_primitive_type(base)) {
+        if (tr->is_opt && is_ptr) {
+          const char* const_prefix = is_view ? "const " : "";
+          const char* primitive = "int64_t";
+          if (str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32")) primitive = "float";
+          else if (str_eq_cstr(base, "Float64")) primitive = "double";
+          else if (str_eq_cstr(base, "Bool")) primitive = "rae_Bool";
+          else if (str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) primitive = "uint32_t";
+          else if (str_eq_cstr(base, "String")) primitive = "rae_String";
+          char* pointer_type = malloc(strlen(const_prefix) + strlen(primitive) + 2);
+          sprintf(pointer_type, "%s%s*", const_prefix, primitive);
+          return pointer_type;
+        }
         if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int")) return is_ptr ? (is_mod ? "rae_Mod_Int64" : "rae_View_Int64") : "int64_t";
         if (str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32")) return is_ptr ? (is_mod ? "rae_Mod_Float" : "rae_View_Float") : "float";
         if (str_eq_cstr(base, "Float64")) return is_ptr ? (is_mod ? "rae_Mod_Float64" : "rae_View_Float64") : "double";

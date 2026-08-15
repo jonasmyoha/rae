@@ -114,6 +114,39 @@ type RenderGraph {
   errorResource: Int    # resource index implicated, else -1
 }
 
+# Internal invariant reads. Graph construction keeps these parallel lists in
+# range; malformed state still produces defined defaults rather than an
+# unchecked memory access.
+func graphEdgeAt(edges: view List(Edge), index: view Int) ret Edge {
+  if let edge: Edge = edges.at(index: index) { ret edge }
+  ret Edge { pass: -1, resource: -1, access: 0, isWrite: false, isModify: false }
+}
+
+func graphIntAt(values: view List(Int), index: view Int) ret Int {
+  if let value: Int = values.at(index: index) { ret value }
+  ret -1
+}
+
+func graphBoolAt(values: view List(Bool), index: view Int) ret Bool {
+  if let value: Bool = values.at(index: index) { ret value }
+  ret false
+}
+
+func graphResourceAt(values: view List(ResourceDesc), index: view Int) ret ResourceDesc {
+  if let value: ResourceDesc = values.at(index: index) { ret value }
+  ret ResourceDesc { kind: 0, format: 0, sizing: 0, lifetime: lifeTransient }
+}
+
+func graphPassAt(values: view List(PassDesc), index: view Int) ret PassDesc {
+  if let value: PassDesc = values.at(index: index) { ret value }
+  ret PassDesc { kind: passRaster, tag: -1 }
+}
+
+func graphStringAt(values: view List(String), index: view Int) ret String {
+  if let value: String = values.at(index: index) { ret value }
+  ret ""
+}
+
 func createRenderGraph() pub ret RenderGraph {
   ret RenderGraph {
     resourceNames: createList(String, cap: 16),
@@ -177,7 +210,7 @@ func writerOf(g: view RenderGraph, resource: view Int) ret Int {
   var last: Int = 0 - 1
   var i: Int = 0
   loop i < g.edges.length {
-    let e: Edge = g.edges.at(index: i)
+    let e: Edge = graphEdgeAt(edges: g.edges, index: i)
     if e.isWrite {
       if e.resource is resource {
         last = e.pass
@@ -193,7 +226,7 @@ func producerBefore(g: view RenderGraph, resource: view Int, edgeIndex: view Int
   var prev: Int = 0 - 1
   var i: Int = 0
   loop i < edgeIndex {
-    let e: Edge = g.edges.at(index: i)
+    let e: Edge = graphEdgeAt(edges: g.edges, index: i)
     if e.isWrite {
       if e.resource is resource {
         prev = e.pass
@@ -205,7 +238,7 @@ func producerBefore(g: view RenderGraph, resource: view Int, edgeIndex: view Int
 }
 
 func resourceLifetime(g: view RenderGraph, resource: view Int) ret Int {
-  ret g.resources.at(index: resource).lifetime
+  ret graphResourceAt(values: g.resources, index: resource).lifetime
 }
 
 # ----- compilation ----------------------------------------------------
@@ -224,12 +257,12 @@ func compile(g: mod RenderGraph) pub ret Int {
   # --- validation: at most one writer per resource ---
   var i: Int = 0
   loop i < g.edges.length {
-    let a: Edge = g.edges.at(index: i)
+    let a: Edge = graphEdgeAt(edges: g.edges, index: i)
     if a.isWrite {
       if not a.isModify {
       var j: Int = i + 1
       loop j < g.edges.length {
-        let b: Edge = g.edges.at(index: j)
+        let b: Edge = graphEdgeAt(edges: g.edges, index: j)
         if b.isWrite {
           if not b.isModify {
           if b.resource is a.resource {
@@ -252,7 +285,7 @@ func compile(g: mod RenderGraph) pub ret Int {
   # the graph, so reading one without an in-graph writer is legitimate.
   i = 0
   loop i < g.edges.length {
-    let e: Edge = g.edges.at(index: i)
+    let e: Edge = graphEdgeAt(edges: g.edges, index: i)
     if not e.isWrite {
       if writerOf(g: g, resource: e.resource) < 0 {
         if resourceLifetime(g: g, resource: e.resource) is not lifeExternal {
@@ -279,13 +312,13 @@ func compile(g: mod RenderGraph) pub ret Int {
     var progressed: Bool = false
     p = 0
     loop p < g.passes.length {
-      if not emitted.at(index: p) {
+      if not graphBoolAt(values: emitted, index: p) {
         # ready when every resource this pass reads is either External or
         # written by a pass already emitted
         var ready: Bool = true
         var k: Int = 0
         loop k < g.edges.length {
-          let e: Edge = g.edges.at(index: k)
+          let e: Edge = graphEdgeAt(edges: g.edges, index: k)
           if e.pass is p {
             # A pure reader waits for the LAST producer in the chain (it
             # wants the finished contents). A modifier waits only for the
@@ -301,7 +334,7 @@ func compile(g: mod RenderGraph) pub ret Int {
             }
             if dep >= 0 {
               if dep is not p {
-                if not emitted.at(index: dep) {
+                if not graphBoolAt(values: emitted, index: dep) {
                   ready = false
                 }
               }
@@ -323,7 +356,7 @@ func compile(g: mod RenderGraph) pub ret Int {
       g.status = graphErrCycle
       var q: Int = 0
       loop q < g.passes.length {
-        if not emitted.at(index: q) {
+        if not graphBoolAt(values: emitted, index: q) {
           if g.errorPass < 0 {
             g.errorPass = q
           }
@@ -347,8 +380,8 @@ func describe(g: view RenderGraph) pub ret String {
   }
   var i: Int = 0
   loop i < g.order.length {
-    let p: Int = g.order.at(index: i)
-    out = "{out}  {i}: {g.passNames.at(index: p)}\n"
+    let p: Int = graphIntAt(values: g.order, index: i)
+    out = "{out}  {i}: {graphStringAt(values: g.passNames, index: p)}\n"
     i = i + 1
   }
   ret out

@@ -17,7 +17,7 @@ func zlibCompress(data: view List(Int), n: view Int) ret List(Int) {
     let comp: List(Int) = deflateRaw(data: data, n: n)
     var i: Int = 0
     loop i < comp.length {
-        out.add(value: comp.at(index: i))
+        out.add(value: comp.get(index: i))
         i = i + 1
     }
     let ad: Int = adler32(data: data, len: n)
@@ -34,7 +34,7 @@ func zlibDecompress(data: view List(Int), n: view Int) ret List(Int) {
     let inner: List(Int) = createList(cap: n)
     var i: Int = 2
     loop i < n - 4 {
-        inner.add(value: data.at(index: i))
+        inner.add(value: data.get(index: i))
         i = i + 1
     }
     ret inflateRaw(data: inner, len: inner.length)
