@@ -136,6 +136,7 @@ void rae_ext_gpu2d_endFrame(void) {
      * asleep / headless), skip — the frame already rendered + screenshotted. */
     WGPUSurfaceTexture st; memset(&st, 0, sizeof(st));
     wgpuSurfaceGetCurrentTexture(g_g2d_surface, &st);
+    int presented = 0;
     if (st.texture &&
         (st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal ||
          st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal)) {
@@ -153,14 +154,30 @@ void rae_ext_gpu2d_endFrame(void) {
         wgpuSurfacePresent(g_g2d_surface);
 #endif
         g_g2d_last_present_ok = 1;
+        presented = 1;
     }
     if (st.texture) wgpuTextureRelease(st.texture);
     /* wgpu-native retires deferred object destruction and presentation work
-     * from device polling. Hover animation can render thousands of frames
-     * without any readback/map path, so per-frame buffers/bind groups that
-     * were released above otherwise sit in the backend's pending queues and
-     * show up as a slow RSS climb while the UI is actively animating. */
-    rae_wgpu_poll(0);
+     * from device polling. A NON-blocking poll retires the per-frame instance
+     * buffers and bind groups released above — that is why an occluded or
+     * headless window (present skipped) holds steady RSS.
+     *
+     * But the surface-present submission is different: wgpu-native does not
+     * retire ITS resources until that submission completes, and under Fifo
+     * that is at the next vsync — one frame later. A non-blocking poll never
+     * catches up, so on every presented frame ~7 KB is left queued and RSS
+     * climbs about 0.4 MB/s while animating (~2 GB over 15 minutes). Only a
+     * busy render loop that presents every frame hits this; an event-driven
+     * UI that idles in waitEvents presents rarely and barely shows it, which
+     * is why it went unnoticed until the animated example.
+     *
+     * On a presented frame, poll with wait=true so that submission is
+     * retired here. This does NOT cost frame rate: Fifo already paces the
+     * loop to vsync, and blocking here simply moves the wait that would
+     * otherwise happen inside the next wgpuSurfaceGetCurrentTexture. When
+     * nothing presented (occluded / headless), the cheap non-blocking poll
+     * is enough and must stay non-blocking so those paths never stall. */
+    rae_wgpu_poll(presented ? 1 : 0);
 }
 
 rae_Bool rae_ext_gpu2d_lastPresentOk(void) {
