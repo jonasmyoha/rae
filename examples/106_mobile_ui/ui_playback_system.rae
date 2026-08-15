@@ -22,6 +22,7 @@ open ui/ecs
 # (library grid, history list) will hold real scroll/selection state.
 import core
 import ui/ecs
+import gpu2d
 
 type UiPlaybackSystem {
   # Observe cache: the last PlaybackSystem `revision` (isPlaying) this UI
@@ -75,11 +76,26 @@ func uiPlaybackObserve(this: mod UiPlaybackSystem, world: mod UiWorld, playback:
 # playing, else the browsed album stem (so a fresh boot shows the browsed
 # cover, matching `rebindHero`). Once a track plays, `nowPlayingArtKey`
 # takes over and the observe step keeps the cover pointed at it.
-func nowPlayingCoverSeed(playback: view PlaybackState, browsedStem: view String) pub ret String {
-  if playback.nowPlayingArtKey.length() > 0 {
+# Resolve the now-playing cover to a key whose texture is actually LOADED.
+# The now-playing art is preferred, but only when the gpu2d registry has it:
+# a Spotify "spotify-current" key whose fetch failed (or any key not yet
+# registered) would otherwise render the mini-player / hero as a grey rect —
+# the long-standing bug. Fall through to the playing track's local album
+# cover (boot-loaded), then the browsed stem. All three are candidate covers;
+# the first LOADED one wins, so the widget never falls to the grey placeholder
+# when a real cover exists.
+func coverKeyResolved(playback: view PlaybackState, browsedStem: view String) pub ret String {
+  if playback.nowPlayingArtKey.length() > 0 and gpu2d.hasImageKey(key: playback.nowPlayingArtKey) {
     ret "{playback.nowPlayingArtKey}"
   }
+  if playback.playingAlbumStem.length() > 0 and gpu2d.hasImageKey(key: playback.playingAlbumStem) {
+    ret "{playback.playingAlbumStem}"
+  }
   ret "{browsedStem}"
+}
+
+func nowPlayingCoverSeed(playback: view PlaybackState, browsedStem: view String) pub ret String {
+  ret coverKeyResolved(playback: playback, browsedStem: browsedStem)
 }
 
 func tagPlaybackCoverDependency(world: mod UiWorld, pageId: view String, nodeId: view String, observedRevision: view Int, artKey: view String) pub {
@@ -139,7 +155,11 @@ func refreshPlaybackCoversIfNeeded(world: mod UiWorld, playback: view PlaybackSt
       if dep.field is coverField {
         if dep.observedRevision is not playback.nowPlayingRevision {
           if componentHas(this: world.sprites, entity: entity) {
-            repointCoverSprite(world: world, entity: entity, artKey: playback.nowPlayingArtKey)
+            # Repoint to a LOADED key, not the raw now-playing art: if that
+            # art isn't in the registry (failed Spotify fetch), show the
+            # playing track's local cover instead of a grey rect.
+            let coverKey: String = coverKeyResolved(playback: playback, browsedStem: playback.playingAlbumStem)
+            repointCoverSprite(world: world, entity: entity, artKey: coverKey)
           }
           setDataDependency(world: world, entity: entity, resource: playbackSource, field: coverField, observedRevision: playback.nowPlayingRevision)
         }
