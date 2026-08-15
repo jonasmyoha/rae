@@ -46,22 +46,23 @@ func play(track: mod Track) {
   track.plays = track.plays + 1
 }
 
-# `opt Track` is a result that might be nothing — no null, no sentinel. The
-# caller has to handle the empty case; `if let` binds the value when there is one.
-func longest(tracks: view List(Track)) ret opt Track {
+# `opt view Track` is a result that is either nothing or a VIEW into an existing
+# track — no null, no sentinel, and no copy of the track. The caller handles the
+# empty case; `if let` binds the view when there is one.
+func longest(tracks: view List(Track)) ret opt view Track {
   if tracks.length is 0 {
     ret none
   }
-  var best: Track = tracks.at(index: 0)
+  # Find the winner by index, so no track is copied, then hand back a view of it.
+  var bestIndex: Int = 0
   var i: Int = 1
   loop i < tracks.length {
-    let candidate: Track = tracks.at(index: i)
-    if candidate.seconds > best.seconds {
-      best = candidate
+    if tracks.at(index: i).seconds > tracks.at(index: bestIndex).seconds {
+      bestIndex = i
     }
     i = i + 1
   }
-  ret best
+  ret view tracks.viewAt(index: bestIndex)
 }
 
 func main() {
@@ -89,8 +90,8 @@ func main() {
   first.play()
   log("{tracks.at(index: 0).title} played {tracks.at(index: 0).plays} times")
 
-  # The optional result, handled with `if let`.
-  if let top: Track = longest(tracks: tracks) {
+  # The optional view, handled with `if let` — `=>` binds it, no copy.
+  if let top: view Track => longest(tracks: tracks) {
     log("longest: {top.title} ({formatDuration(seconds: top.seconds)})")
   } else {
     log("no tracks")

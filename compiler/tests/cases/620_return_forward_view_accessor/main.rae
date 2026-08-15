@@ -1,0 +1,38 @@
+# Forwarding a reference-returning accessor from a `ret view` is valid: the
+# reference points into the list's storage, which outlives the call. `viewAt`
+# is a UFCS method call sema leaves without a decl_link, so the return-lifetime
+# check resolves it by name (as the let-binding path already did). The
+# value-returning `at` stays rejected — test 609 pins that negative.
+import core
+
+type Track {
+  title: String
+  seconds: Int
+}
+
+func longest(tracks: view List(Track)) ret opt view Track {
+  if tracks.length is 0 {
+    ret none
+  }
+  var bestIndex: Int = 0
+  var i: Int = 1
+  loop i < tracks.length {
+    if tracks.at(index: i).seconds > tracks.at(index: bestIndex).seconds {
+      bestIndex = i
+    }
+    i = i + 1
+  }
+  ret view tracks.viewAt(index: bestIndex)
+}
+
+func main() {
+  var tracks: List(Track) = createList(Track, cap: 3)
+  tracks.add(value: Track { title: "Intro", seconds: 95 })
+  tracks.add(value: Track { title: "Middle Eight", seconds: 212 })
+  tracks.add(value: Track { title: "Outro", seconds: 143 })
+  if let top: view Track => longest(tracks: tracks) {
+    log("longest: {top.title} / {top.seconds}")
+  } else {
+    log("empty")
+  }
+}
