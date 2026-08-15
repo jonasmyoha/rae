@@ -1680,15 +1680,14 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     const AstDecl* dl = inner->decl_link;
                     bool callee_is_rae_func = dl && dl->kind == AST_DECL_FUNC
                                               && !dl->as.func_decl.is_extern;
+                    /* Does the call hand back a reference? ref_bind_value_
+                     * returns_ref resolves by NAME for both plain calls and
+                     * UFCS method calls, so it catches `tracks.viewAt(...)`
+                     * where sema left no decl_link — the value-returning
+                     * `tracks.at(...)` stays false and is rejected below. */
                     bool yields_ref =
-                        (callee_is_rae_func && dl->as.func_decl.returns
-                         && dl->as.func_decl.returns->type
-                         && (dl->as.func_decl.returns->type->is_view
-                             || dl->as.func_decl.returns->type->is_mod))
+                        ref_bind_value_returns_ref(ctx, inner)
                         || (inner->resolved_type && inner->resolved_type->kind == TYPE_REF);
-                    /* An unresolved METHOD_CALL is the `tracks.at(...)`
-                     * shape: no method in the standard library returns a
-                     * reference, so its result is always a temporary. */
                     bool is_temp_call = (inner->kind == AST_EXPR_METHOD_CALL && !yields_ref)
                                         || (inner->kind == AST_EXPR_CALL && callee_is_rae_func
                                             && !yields_ref);
