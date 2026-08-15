@@ -70,6 +70,21 @@ type ControlPanel {
   textStyleId: String
 }
 
+func panelStringAt(values: view List(String), index: view Int) ret String {
+  if let value: String = values.at(index: index) { ret value }
+  ret ""
+}
+
+func panelIntAt(values: view List(Int), index: view Int) ret Int {
+  if let value: Int = values.at(index: index) { ret value }
+  ret -1
+}
+
+func panelEntityAt(values: view List(EntityId), index: view Int) ret EntityId {
+  if let value: EntityId = values.at(index: index) { ret value }
+  ret noEntity()
+}
+
 func createControlPanel(hostNodeId: view String) pub ret ControlPanel {
   ret ControlPanel {
     hostNodeId: "{hostNodeId}"
@@ -110,7 +125,7 @@ func addPanelButton(panel: mod ControlPanel, id: view String, label: view String
 func panelIndexOf(panel: view ControlPanel, id: view String) pub ret Int {
   var i: Int = 0
   loop i < panel.ids.length {
-    if panel.ids.at(index: i).equals(other: id) {
+    if panelStringAt(values: panel.ids, index: i).equals(other: id) {
       ret i
     }
     i = i + 1
@@ -140,7 +155,7 @@ func buildControlPanel(panel: mod ControlPanel, world: mod UiWorld, res: view Gp
     let existing: view Children => componentView(this: world.childrens, entity: host)
     var e: Int = 0
     loop e < existing.ids.length {
-      kids.add(value: existing.ids.at(index: e))
+      kids.add(value: panelEntityAt(values: existing.ids, index: e))
       e = e + 1
     }
   }
@@ -162,7 +177,7 @@ func buildControlPanel(panel: mod ControlPanel, world: mod UiWorld, res: view Gp
     }
     componentSet(this: world.shapes, entity: buttonE, data: shape)
     let click: OnClick = {
-      actionId: "{panel.actionIds.at(index: i)}"
+      actionId: "{panelStringAt(values: panel.actionIds, index: i)}"
       actionIdDouble: ""
       actionIdTriple: ""
       maxDelayMs: 0
@@ -172,7 +187,7 @@ func buildControlPanel(panel: mod ControlPanel, world: mod UiWorld, res: view Gp
     let labelRect: Rect = { x: 0.0, y: 0.0, w: panel.buttonW, h: panel.buttonH }
     componentSet(this: world.rects, entity: labelE, data: labelRect)
     let text: Text = {
-      text: "{panel.selectedIds.at(index: i)}"
+      text: "{panelStringAt(values: panel.selectedIds, index: i)}"
       styleId: "{panel.textStyleId}"
       wrapWidthMode: WrapWidthMode.none
     }
@@ -226,7 +241,7 @@ func setPanelButtonLabel(panel: view ControlPanel, world: mod UiWorld,
   if idx < 0 {
     ret
   }
-  let entity: EntityId = panel.labelEntities.at(index: idx)
+  let entity: EntityId = panelEntityAt(values: panel.labelEntities, index: idx)
   if componentHas(this: world.texts, entity: entity) is false {
     ret
   }
@@ -252,11 +267,11 @@ func setPanelSelection(panel: mod ControlPanel, world: mod UiWorld,
   }
   var i: Int = 0
   loop i < panel.ids.length {
-    if panel.groups.at(index: i) is group {
-      let entity: EntityId = panel.buttonEntities.at(index: i)
+    if panelIntAt(values: panel.groups, index: i) is group {
+      let entity: EntityId = panelEntityAt(values: panel.buttonEntities, index: i)
       if componentHas(this: world.shapes, entity: entity) {
         let shape: mod Shape => componentMod(this: world.shapes, entity: entity)
-        if panel.ids.at(index: i).equals(other: id) {
+        if panelStringAt(values: panel.ids, index: i).equals(other: id) {
           shape.fillSlot = panelSlotSelected
         } else {
           shape.fillSlot = panelSlotIdle
@@ -274,7 +289,7 @@ func setPanelButtonOn(panel: view ControlPanel, world: mod UiWorld,
   if idx < 0 {
     ret
   }
-  let entity: EntityId = panel.buttonEntities.at(index: idx)
+  let entity: EntityId = panelEntityAt(values: panel.buttonEntities, index: idx)
   if componentHas(this: world.shapes, entity: entity) is false {
     ret
   }
@@ -292,8 +307,8 @@ func setPanelButtonOn(panel: view ControlPanel, world: mod UiWorld,
 func panelClickedId(panel: view ControlPanel, input: view UiInput) pub ret String {
   var i: Int = 0
   loop i < panel.ids.length {
-    if uiActionFired(input: input, actionId: panel.actionIds.at(index: i)) {
-      ret "{panel.ids.at(index: i)}"
+    if uiActionFired(input: input, actionId: panelStringAt(values: panel.actionIds, index: i)) {
+      ret "{panelStringAt(values: panel.ids, index: i)}"
     }
     i = i + 1
   }

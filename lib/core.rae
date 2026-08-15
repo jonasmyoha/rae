@@ -90,6 +90,8 @@ func add(T: type, this: mod List(T), value: own T) {
   this.length = this.length + 1
 }
 
+# Compatibility alias for older Rae code. New code should use `at`; indexed
+# List access is always optional.
 func get(T: type, this: view List(T), index: view Int) ret opt T {
   if index < 0 or index >= this.length {
     ret none
@@ -97,29 +99,25 @@ func get(T: type, this: view List(T), index: view Int) ret opt T {
   ret rae_ext_rae_buf_get(buf: this.data, index: index)
 }
 
-# Unchecked indexed access returning the element directly (not `opt T`). Use
-# when the index is known valid (e.g. hot loops over a list of structs) and you
-# don't want to unwrap an optional. No bounds check — the caller is
-# responsible. The checked counterpart is `get`, which returns `opt T`.
-func at(T: type, this: view List(T), index: view Int) ret T {
+func at(T: type, this: view List(T), index: view Int) ret opt T {
+  if index < 0 or index >= this.length {
+    ret none
+  }
   ret rae_ext_rae_buf_get(buf: this.data, index: index)
 }
 
 # A read-only window INTO the list's own storage, rather than a copy of the
-# element. `at` and `get` both hand back a value, so reading one field of a
+# element. `at` hands back an optional value, so reading one field of a
 # big struct copies the whole struct — including a deep copy of every heap
 # field it owns. `viewAt` costs a pointer.
-#
-# Bounds are the caller's responsibility, as with `at`: there is no in-range
-# element to point at otherwise, and a reference has no empty state. Use
-# `viewGet` when the index might be out of range.
-func viewAt(T: type, this: view List(T), index: view Int) ret view T {
+func viewAt(T: type, this: view List(T), index: view Int) ret opt view T {
+  if index < 0 or index >= this.length {
+    ret none
+  }
   ret view rae_ext_rae_buf_get(buf: this.data, index: index)
 }
 
-# The checked counterpart: `none` when the index is out of range, otherwise a
-# window into the element. This is what `get` should be for anything bigger
-# than a machine word — same safety, no copy.
+# Compatibility alias for older Rae code. New code should use `viewAt`.
 func viewGet(T: type, this: view List(T), index: view Int) ret opt view T {
   if index < 0 or index >= this.length {
     ret none
@@ -130,10 +128,14 @@ func viewGet(T: type, this: view List(T), index: view Int) ret opt view T {
 # Mutable window into the list's storage. Writing through the returned
 # reference writes the element in place — no read-modify-`set` round trip,
 # and no drop/re-add of the element's owned fields.
-func modAt(T: type, this: mod List(T), index: view Int) ret mod T {
+func modAt(T: type, this: mod List(T), index: view Int) ret opt mod T {
+  if index < 0 or index >= this.length {
+    ret none
+  }
   ret mod rae_ext_rae_buf_get(buf: this.data, index: index)
 }
 
+# Compatibility alias for older Rae code. New code should use `modAt`.
 func modGet(T: type, this: mod List(T), index: view Int) ret opt mod T {
   if index < 0 or index >= this.length {
     ret none

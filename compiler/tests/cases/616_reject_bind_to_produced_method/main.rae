@@ -1,6 +1,6 @@
-# The method-call twin of 615: `l.at(index:)` returns T (a VALUE — test 610
-# has the viewAt that returns a reference). sema cannot resolve UFCS calls,
-# so this rejection comes from the C backend's binding emitter.
+# The method-call twin of 615: `l.at(index:)` returns an optional owned value;
+# it cannot bind directly to a reference. Test 610 covers `viewAt`, which
+# returns an optional reference and narrows through `if let`.
 import core
 
 type Track {

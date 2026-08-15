@@ -160,11 +160,11 @@ func makeFbmTerrain(size: view Float, segments: view Int, heightScale: view Floa
       if rightX > segments { rightX = segments }
       if downY < 0 { downY = 0 }
       if upY > segments { upY = segments }
-      let center: Float = heights.at(index: yi * stride + xi)
-      let left: Float = heights.at(index: yi * stride + leftX)
-      let right: Float = heights.at(index: yi * stride + rightX)
-      let down: Float = heights.at(index: downY * stride + xi)
-      let up: Float = heights.at(index: upY * stride + xi)
+      let center: Float = heights.get(index: yi * stride + xi)
+      let left: Float = heights.get(index: yi * stride + leftX)
+      let right: Float = heights.get(index: yi * stride + rightX)
+      let down: Float = heights.get(index: downY * stride + xi)
+      let up: Float = heights.get(index: upY * stride + xi)
       let dx: Float = (rightX - leftX).toFloat() * step
       let dy: Float = (upY - downY).toFloat() * step
       let slopeX: Float = (right - left) / dx
@@ -342,12 +342,12 @@ func smoothMeshNormals(m: view MeshData, angleDeg: view Float) pub ret MeshData 
   let indices: List(Int) = createList(Int, cap: m.indices.length)
   var c: Int = 0
   loop c < m.verts.length {
-    verts.add(value: m.verts.at(index: c))
+    verts.add(value: m.verts.get(index: c))
     c = c + 1
   }
   var k: Int = 0
   loop k < m.indices.length {
-    indices.add(value: m.indices.at(index: k))
+    indices.add(value: m.indices.get(index: k))
     k = k + 1
   }
   if m.vertCount < 2 {
@@ -361,20 +361,20 @@ func smoothMeshNormals(m: view MeshData, angleDeg: view Float) pub ret MeshData 
   let eps: Float = 0.000001
   var i: Int = 0
   loop i < m.vertCount {
-    let px: Float = m.verts.at(index: i * 8 + 0)
-    let py: Float = m.verts.at(index: i * 8 + 1)
-    let pz: Float = m.verts.at(index: i * 8 + 2)
-    let nx: Float = m.verts.at(index: i * 8 + 3)
-    let ny: Float = m.verts.at(index: i * 8 + 4)
-    let nz: Float = m.verts.at(index: i * 8 + 5)
+    let px: Float = m.verts.get(index: i * 8 + 0)
+    let py: Float = m.verts.get(index: i * 8 + 1)
+    let pz: Float = m.verts.get(index: i * 8 + 2)
+    let nx: Float = m.verts.get(index: i * 8 + 3)
+    let ny: Float = m.verts.get(index: i * 8 + 4)
+    let nz: Float = m.verts.get(index: i * 8 + 5)
     var ax: Float = 0.0
     var ay: Float = 0.0
     var az: Float = 0.0
     var j: Int = 0
     loop j < m.vertCount {
-      let qx: Float = m.verts.at(index: j * 8 + 0)
-      let qy: Float = m.verts.at(index: j * 8 + 1)
-      let qz: Float = m.verts.at(index: j * 8 + 2)
+      let qx: Float = m.verts.get(index: j * 8 + 0)
+      let qy: Float = m.verts.get(index: j * 8 + 1)
+      let qz: Float = m.verts.get(index: j * 8 + 2)
       var dx: Float = qx - px
       var dy: Float = qy - py
       var dz: Float = qz - pz
@@ -382,9 +382,9 @@ func smoothMeshNormals(m: view MeshData, angleDeg: view Float) pub ret MeshData 
       if dy < 0.0 { dy = 0.0 - dy }
       if dz < 0.0 { dz = 0.0 - dz }
       if dx <= eps and dy <= eps and dz <= eps {
-        let mx: Float = m.verts.at(index: j * 8 + 3)
-        let my: Float = m.verts.at(index: j * 8 + 4)
-        let mz: Float = m.verts.at(index: j * 8 + 5)
+        let mx: Float = m.verts.get(index: j * 8 + 3)
+        let my: Float = m.verts.get(index: j * 8 + 4)
+        let mz: Float = m.verts.get(index: j * 8 + 5)
         # The crease test, against THIS vertex's own normal rather than
         # against a running average: an average drifts as it accumulates,
         # so which faces merge would depend on the order they are visited.

@@ -122,6 +122,11 @@ func createDemoUiResource() ret DemoUiResource {
 # to "start fresh" rather than half-apply, and a version mismatch is then
 # a single comparison. Restoring a partially-parsed camera would be worse
 # than not restoring at all.
+func statePart(parts: view List(String), index: view Int) ret String {
+  if let value: String = parts.at(index: index) { ret value }
+  ret ""
+}
+
 const state112Version: Int = 2
 const state112AppId: String = "112_metaballs_deferred"
 
@@ -156,15 +161,15 @@ func restore112State(raw: view String, ui: mod DemoUiResource, rig: mod CameraRi
   if parts.length < state112Fields {
     ret false
   }
-  if parts.at(index: 0).trim().toInt() is not state112Version {
+  if statePart(parts: parts, index: 0).trim().toInt() is not state112Version {
     ret false
   }
-  ui.activeScene = parts.at(index: 1).trim().toInt()
+  ui.activeScene = statePart(parts: parts, index: 1).trim().toInt()
   if ui.activeScene < 1 { ui.activeScene = 1 }
   if ui.activeScene > 3 { ui.activeScene = 3 }
-  ui.paused = parts.at(index: 2).trim().toInt() is 1
-  ui.fullSpeed = parts.at(index: 3).trim().toInt() is 1
-  ui.debugOpen = parts.at(index: 4).trim().toInt() is 1
+  ui.paused = statePart(parts: parts, index: 2).trim().toInt() is 1
+  ui.fullSpeed = statePart(parts: parts, index: 3).trim().toInt() is 1
+  ui.debugOpen = statePart(parts: parts, index: 4).trim().toInt() is 1
   if applyCameraRigState(parts: parts, offset: 5, rig: rig, camera: camera) is false {
     ret false
   }
