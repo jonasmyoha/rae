@@ -71,6 +71,7 @@ const testErrorsLog = document.getElementById("test-errors-log");
 const copyTestErrorsBtn = document.getElementById("copy-test-errors-btn");
 const exampleTitle = document.getElementById("example-title");
 const exampleEntryLabel = document.getElementById("example-entry");
+const exampleScreenshotsEl = document.getElementById("example-screenshots");
 const exampleFilesList = document.getElementById("example-files");
 const exampleSourceTitle = document.getElementById("example-source-title");
 const exampleSourceCode = document.getElementById("example-source-code");
@@ -1861,8 +1862,12 @@ function renderExampleList() {
           : '';
       const num = exampleNumber(example);
       const numBadge = num ? `<span class="example-num">${num}</span>` : '';
+      // The list thumbnail is the example's primary screenshot, if it has one.
+      const thumb = example.thumbnail
+        ? `<img class="example-thumb" src="${example.thumbnail}" alt="" loading="lazy" />`
+        : '';
 
-      button.innerHTML = `<h4>${numBadge}${displayName}${hiddenBadge}${featuredBadge}</h4><p>${targetSummary}</p>`;
+      button.innerHTML = `${thumb}<div class="example-card__text"><h4>${numBadge}${displayName}${hiddenBadge}${featuredBadge}</h4><p>${targetSummary}</p></div>`;
       
       button.addEventListener("click", () => {
         // Selecting another example leaves any running app alone; the dock
@@ -1965,6 +1970,10 @@ function renderExampleDetail() {
   if (!example) {
     exampleTitle.textContent = "Select an example";
     exampleEntryLabel.textContent = "";
+    if (exampleScreenshotsEl) {
+      exampleScreenshotsEl.hidden = true;
+      exampleScreenshotsEl.innerHTML = "";
+    }
     exampleRunActive = false;
     exampleWatchActive = false;
     if (exampleCustomActions) {
@@ -1993,6 +2002,7 @@ function renderExampleDetail() {
     details.push(example.description);
   }
   exampleEntryLabel.textContent = details.join(" · ");
+  renderExampleScreenshots(example);
   updateExampleButtons();
   renderExampleFiles(example);
   loadExampleDownloads(example.id);
@@ -2011,6 +2021,20 @@ function renderExampleDetail() {
   } else {
     updateExampleEditorView();
   }
+}
+
+function renderExampleScreenshots(example) {
+  if (!exampleScreenshotsEl) return;
+  const shots = example.screenshots ?? (example.thumbnail ? [example.thumbnail] : []);
+  if (!shots.length) {
+    exampleScreenshotsEl.hidden = true;
+    exampleScreenshotsEl.innerHTML = "";
+    return;
+  }
+  exampleScreenshotsEl.hidden = false;
+  exampleScreenshotsEl.innerHTML = shots
+    .map((src) => `<a class="example-shot" href="${src}" target="_blank" rel="noopener"><img src="${src}" alt="${formatExampleName(example.name)} screenshot" loading="lazy" /></a>`)
+    .join("");
 }
 
 function renderExampleFiles(example) {
