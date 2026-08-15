@@ -2,6 +2,8 @@
 
 [![XKCD 927: Standards](https://imgs.xkcd.com/comics/standards.png)](https://xkcd.com/927/)
 
+![Metaballs, deferred rendering — SDF metaballs under a physical sky](docs/screenshots/112_metaballs_deferred.2.png)
+
 A minimalistic language for code that humans and AI agents both have to read.
 
 Few concepts, few special cases, and nothing implicit. What a function does to
@@ -252,11 +254,23 @@ Built on top, all in Rae except the raw GPU and platform calls:
 
 - **2D renderer** — WebGPU through wgpu-native and SDL3: shapes, MSDF text,
   images, clipping, a design-resolution coordinate system.
+
+  ![2D renderer — animated vector shapes with an EQ visualizer](docs/screenshots/102_gpu2d_animated.png)
+
 - **3D renderer** — forward and deferred paths over the same scenes, with PBR
   materials, cascaded shadows, SSAO, TAA, SDF metaballs, glTF loading and
   skinned animation, and a physical sky (Preetham and Hosek-Wilkie).
+
+  ![3D renderer — metaballs scene](docs/screenshots/112_metaballs_deferred.png)
+  ![3D renderer — skinned, animated glTF walker character](docs/screenshots/114_walker_character.png)
+  ![Raytracer — a GPU path tracer with a crisp MTSDF text overlay](docs/screenshots/53_raytracer_webgpu_text.png)
+
 - **UI** — an ECS whose widgets are entities and whose layout is a `.raescene`
   document, with a theme of palette slots, spacing and text styles.
+
+  ![Mobile UI — home screen at real app scale](docs/screenshots/106_mobile_ui.png)
+  ![Mobile UI — now-playing screen](docs/screenshots/106_mobile_ui.2.png)
+
 - **Standard library** — 107 modules: containers, strings, JSON, files, maths,
   time, a calendar, crypto, PNG and DEFLATE written in Rae rather than bound.
 
@@ -300,6 +314,9 @@ Start on the **Featured** tab — a cross-section of what the language can do:
 | **Pong** and **Tetris 2D** | complete little games |
 | **Playlist** | the taste above, as a runnable program — most of the language, no graphics |
 | **Functions and interpolation** | one step past hello world, no graphics |
+
+![Pong — a complete little game](docs/screenshots/91_pong_implicit.png)
+![Tetris 2D — a complete little game](docs/screenshots/94_tetris2d.png)
 
 The two UI examples are worth opening next: `104_ui_hello` is a value and three
 buttons — the smallest thing that is still an application — and `105_ui_counter`
