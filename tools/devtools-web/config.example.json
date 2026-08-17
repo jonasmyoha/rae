@@ -1,0 +1,48 @@
+{
+  "compilerPath": "../rae",
+  "port": 3000,
+  "testsPath": "compiler/tests",
+  "syntaxSummaryPath": "docs/rae_syntax.json",
+  "examplesPath": "examples",
+  "defaultTarget": "live",
+  "targets": [
+    {
+      "id": "live",
+      "label": "Live (bytecode VM)",
+      "testCommand": "cd compiler && TEST_TARGET=live make test",
+      "buildCommand": "cd compiler && make",
+      "cleanCommand": "cd compiler && make clean",
+      "rebuildCommand": "cd compiler && make clean && make",
+      "exampleRunCommand": "./compiler/bin/rae run {{ENTRY}}",
+      "exampleWatchCommand": "./compiler/bin/rae run --watch {{ENTRY}}",
+      "exampleBuildCommand": "./compiler/bin/rae build --target live --out {{OUTDIR}} {{ENTRY}}"
+    },
+    {
+      "id": "compiled",
+      "label": "Compiled (C backend)",
+      "testCommand": "cd compiler && TEST_TARGET=compiled make test",
+      "buildCommand": "cd compiler && make",
+      "cleanCommand": "cd compiler && make clean",
+      "rebuildCommand": "cd compiler && make clean && make",
+      "exampleRunCommand": "./compiler/bin/rae build --target compiled --out {{OUTDIR}} {{ENTRY}}",
+      "exampleBuildCommand": "./compiler/bin/rae build --target compiled --out {{OUTDIR}} {{ENTRY}}"
+    },
+    {
+      "id": "hybrid",
+      "label": "Hybrid Dev",
+      "testCommand": "cd compiler && TEST_TARGET=hybrid make test",
+      "buildCommand": "cd compiler && make",
+      "cleanCommand": "cd compiler && make clean",
+      "rebuildCommand": "cd compiler && make clean && make",
+      "exampleRunCommand": "./compiler/bin/rae build --target hybrid --out {{OUTDIR}} {{ENTRY}}",
+      "exampleBuildCommand": "./compiler/bin/rae build --target hybrid --out {{OUTDIR}} {{ENTRY}}"
+    },
+    {
+      "id": "wasm",
+      "label": "WASM (WebAssembly)",
+      "description": "Rae → C → wasm32-wasip1 (wasi-sdk), run headless via Node WASI. Headless examples only. Needs wasi-sdk (WASI_SDK, default ~/.local/wasi-sdk).",
+      "exampleRunCommand": "compiler/tools/wasm_build.sh {{ENTRY_DIR}} {{ENTRY}} {{OUTDIR}}/app.wasm && node compiler/tools/wasm_run.mjs --echo {{OUTDIR}}/app.wasm",
+      "exampleBuildCommand": "compiler/tools/wasm_build.sh {{ENTRY_DIR}} {{ENTRY}} {{OUTDIR}}/app.wasm"
+    }
+  ]
+}
