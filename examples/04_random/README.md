@@ -1,8 +1,6 @@
-# Random Advanced (Visual)
+# Deterministic Random Values
 
-A visual demonstration of the `math` random functions combined with `raylib`.
+A console demonstration of Rae's `math` random functions with a fixed seed.
 
-## Features:
-- Draws random colored circles at random positions.
-- Shows usage of `random()` for scaling and `randomInt()` for color components.
-- Press **Space** to clear the screen.
+It prints reproducible integer dice rolls and floating-point values, making the
+example useful in automated runs without introducing a graphics dependency.
