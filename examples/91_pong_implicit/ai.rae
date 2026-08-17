@@ -8,8 +8,8 @@ type AIState {
 
 func createAIState() ret AIState {
   ret AIState {
-    reactionTimer: 0.14
-    reactionDelay: 0.14
+    reactionTimer: 0.22
+    reactionDelay: 0.22
     targetY: 175.0
     velocityY: 0.0
     sampleCount: 0
@@ -56,7 +56,7 @@ func updateAiTarget(
       ballX: ballX, ballY: ballY
       ballDx: ballVelocity.dx, ballDy: ballVelocity.dy)
     let errorStep: Int = (ai.sampleCount * 17 + ballY.toInt()) % 31 - 15
-    let aimError: Float = errorStep.toFloat() * 1.6
+    let aimError: Float = errorStep.toFloat() * 3.0
     ai.targetY = interceptY - paddleHeight * 0.5 + aimError
   } else {
     # A human opponent prepares near centre instead of tracking an irrelevant
@@ -69,7 +69,7 @@ func updateAiTarget(
     ai.targetY = fieldH - paddleHeight
   }
   ai.sampleCount = ai.sampleCount + 1
-  ai.reactionDelay = 0.10 + (ai.sampleCount % 4).toFloat() * 0.015
+  ai.reactionDelay = 0.18 + (ai.sampleCount % 4).toFloat() * 0.025
 }
 
 func paddleAiSystem(
@@ -87,9 +87,9 @@ func paddleAiSystem(
       ballVelocity: ballVelocity)
   }
 
-  let speed: Float = 320.0
-  let acceleration: Float = 1400.0
-  let deadZone: Float = 6.0
+  let speed: Float = 285.0
+  let acceleration: Float = 950.0
+  let deadZone: Float = 8.0
   let distance: Float = ai.targetY - paddleY
   var desiredVelocity: Float = 0.0
   if distance > deadZone { desiredVelocity = speed }
