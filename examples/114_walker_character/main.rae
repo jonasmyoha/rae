@@ -191,6 +191,7 @@ const state114OwnFields: Int = 5
 # head is up at +1; orbiting THAT would swing the body out of frame at close
 # distances, which is the opposite of what re-centring is for.
 const orbitFocusZ: Float = 0.0
+const clipTransitionDuration: Float = 0.28
 
 func serialize114State(clipIndex: view Int, playing: view Bool, speed: view Float,
                        toon: view Bool, rig: view CameraRig, camera: view Camera3d) ret String {
@@ -334,6 +335,9 @@ func main() ret Int {
   let idleClip: Clip = loadClip(g: idleGlb, animIndex: 0, sk: sk)
   let walkClip: Clip = loadClip(g: walkGlb, animIndex: 0, sk: sk)
   let runClip: Clip = loadClip(g: runGlb, animIndex: 0, sk: sk)
+  let bindPose: SkeletonPose = captureSkeletonPose(sk: sk)
+  var transitionFrom: SkeletonPose = captureSkeletonPose(sk: sk)
+  var transitionElapsed: Float = clipTransitionDuration
   log("[anim] idle {clipChannelCount(c: idleClip)} ch / {idleClip.duration}s, walk {clipChannelCount(c: walkClip)} ch / {walkClip.duration}s, run {clipChannelCount(c: runClip)} ch / {runClip.duration}s")
 
   let planeData: MeshData = makePlane(size: 20.0, segments: 1)
@@ -613,11 +617,21 @@ func main() ret Int {
     }
     let clipHit: String = panelClickedId(panel: clipPanel, input: uiInput)
     if clipHit.length() > 0 {
-      if clipHit.equals(other: "idle") { clipIndex = 0 }
-      if clipHit.equals(other: "walk") { clipIndex = 1 }
-      if clipHit.equals(other: "walkFast") { clipIndex = 2 }
-      if clipHit.equals(other: "run") { clipIndex = 3 }
-      animTime = 0.0
+      var nextClipIndex: Int = clipIndex
+      if clipHit.equals(other: "idle") { nextClipIndex = 0 }
+      if clipHit.equals(other: "walk") { nextClipIndex = 1 }
+      if clipHit.equals(other: "walkFast") { nextClipIndex = 2 }
+      if clipHit.equals(other: "run") { nextClipIndex = 3 }
+      if nextClipIndex is not clipIndex {
+        # Capture the pose that is actually on screen. If another switch
+        # interrupts this transition, the new one therefore continues from
+        # the partially blended pose instead of snapping to either clip.
+        transitionFrom = captureSkeletonPose(sk: sk)
+        transitionElapsed = 0.0
+        clipIndex = nextClipIndex
+        animTime = 0.0
+        stateDirty = true
+      }
       setPanelSelection(panel: clipPanel, world: uiWorld, group: 1, id: clipHit)
     }
     let transportHit: String = panelClickedId(panel: transport, input: uiInput)
@@ -759,7 +773,8 @@ func main() ret Int {
     let hadUiEvents: Bool = uiInput.events.length > 0 or uiInput.pointer.down
       or uiInput.pointer.pressed or uiInput.pointer.released
     let logChanged: Bool = logView.revision is not lastLogRevision
-    var needsRender: Bool = playing or settingsChanged or cameraMoved
+    let transitionActive: Bool = transitionElapsed < clipTransitionDuration
+    var needsRender: Bool = playing or transitionActive or settingsChanged or cameraMoved
       or hadUiEvents or logChanged or resized or scrolled or renderedOnce is false
     if taaSettleFrames > 0 { needsRender = true }
     dbgDidWork = needsRender
@@ -788,6 +803,9 @@ func main() ret Int {
       if playing {
         animTime = animTime + dt * speed * clipRate
       }
+      # Reset before sampling because glTF clips may omit channels. Without
+      # this, an omitted channel inherits whichever clip happened to run last.
+      applySkeletonPose(sk: sk, pose: bindPose)
       if clipIndex is 0 {
         applyClip(sk: sk, c: idleClip, time: animTime)
       }
@@ -796,6 +814,15 @@ func main() ret Int {
       }
       if clipIndex is 3 {
         applyClip(sk: sk, c: runClip, time: animTime)
+      }
+      if transitionActive {
+        transitionElapsed = transitionElapsed + dt
+        var blendWeight: Float = transitionElapsed / clipTransitionDuration
+        if blendWeight > 1.0 { blendWeight = 1.0 }
+        # Smoothstep eases both ends, avoiding a visible velocity kick when
+        # the old pose gives way to the newly sampled clip.
+        blendWeight = blendWeight * blendWeight * (3.0 - 2.0 * blendWeight)
+        blendSkeletonPose(sk: sk, from: transitionFrom, weight: blendWeight)
       }
       let palette: List(Float) = buildPalette(sk: sk)
 

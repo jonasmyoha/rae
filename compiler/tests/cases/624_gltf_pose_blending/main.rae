@@ -1,0 +1,71 @@
+# Animation transition pose capture and blending.
+import core
+import gltf
+import gltf_skin
+open gltf
+open gltf_skin
+
+func paletteDelta(first: view List(Float), second: view List(Float)) ret Float {
+  var worst: Float = 0.0
+  var index: Int = 0
+  loop index < first.length and index < second.length {
+    var difference: Float = first.get(index: index) - second.get(index: index)
+    if difference < 0.0 { difference = 0.0 - difference }
+    if difference > worst { worst = difference }
+    index = index + 1
+  }
+  ret worst
+}
+
+func main() {
+  let characterGlb: Glb = loadGlb(path: "../examples/114_walker_character/assets/walker.glb")
+  let idleGlb: Glb = loadGlb(path: "../examples/114_walker_character/assets/idle.glb")
+  let walkGlb: Glb = loadGlb(path: "../examples/114_walker_character/assets/walk.glb")
+  if characterGlb.ok is false or idleGlb.ok is false or walkGlb.ok is false {
+    log("load failed")
+    ret
+  }
+
+  var skeleton: Skeleton = loadSkeleton(g: characterGlb, skinIndex: 0)
+  let bindPose: SkeletonPose = captureSkeletonPose(sk: skeleton)
+  let bindPalette: List(Float) = buildPalette(sk: skeleton)
+  let idleClip: Clip = loadClip(g: idleGlb, animIndex: 0, sk: skeleton)
+  let walkClip: Clip = loadClip(g: walkGlb, animIndex: 0, sk: skeleton)
+
+  applySkeletonPose(sk: skeleton, pose: bindPose)
+  applyClip(sk: skeleton, c: idleClip, time: idleClip.duration * 0.35)
+  let sourcePose: SkeletonPose = captureSkeletonPose(sk: skeleton)
+  let sourcePalette: List(Float) = buildPalette(sk: skeleton)
+
+  applySkeletonPose(sk: skeleton, pose: bindPose)
+  applyClip(sk: skeleton, c: walkClip, time: walkClip.duration * 0.35)
+  let targetPalette: List(Float) = buildPalette(sk: skeleton)
+  blendSkeletonPose(sk: skeleton, from: sourcePose, weight: 0.0)
+  let sourceEndpoint: List(Float) = buildPalette(sk: skeleton)
+  if paletteDelta(first: sourcePalette, second: sourceEndpoint) < 0.0001 {
+    log("source endpoint: yes")
+  } else { log("source endpoint: NO") }
+
+  applySkeletonPose(sk: skeleton, pose: bindPose)
+  applyClip(sk: skeleton, c: walkClip, time: walkClip.duration * 0.35)
+  blendSkeletonPose(sk: skeleton, from: sourcePose, weight: 1.0)
+  let targetEndpoint: List(Float) = buildPalette(sk: skeleton)
+  if paletteDelta(first: targetPalette, second: targetEndpoint) < 0.0001 {
+    log("target endpoint: yes")
+  } else { log("target endpoint: NO") }
+
+  applySkeletonPose(sk: skeleton, pose: bindPose)
+  applyClip(sk: skeleton, c: walkClip, time: walkClip.duration * 0.35)
+  blendSkeletonPose(sk: skeleton, from: sourcePose, weight: 0.5)
+  let midpoint: List(Float) = buildPalette(sk: skeleton)
+  if paletteDelta(first: sourcePalette, second: midpoint) > 0.001
+    and paletteDelta(first: targetPalette, second: midpoint) > 0.001 {
+    log("midpoint between poses: yes")
+  } else { log("midpoint between poses: NO") }
+
+  applySkeletonPose(sk: skeleton, pose: bindPose)
+  let restoredPalette: List(Float) = buildPalette(sk: skeleton)
+  if paletteDelta(first: bindPalette, second: restoredPalette) < 0.0001 {
+    log("bind pose restored: yes")
+  } else { log("bind pose restored: NO") }
+}
