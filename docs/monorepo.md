@@ -43,8 +43,8 @@ history/rae-lang-dev/*
 history/rae-devtools-web/*
 ```
 
-The old meta-repository tag is retained as
-`rae-lang-dev/VERY_GOOD_FOR_DEMO`. The old-to-new hashes produced by
+The old meta-repository tag is retained as `VERY_GOOD_FOR_DEMO`. The
+old-to-new hashes produced by
 `git filter-repo` are recorded in:
 
 - `docs/history/rae-lang-dev-commit-map.txt`
