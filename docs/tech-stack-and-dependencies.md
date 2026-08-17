@@ -258,21 +258,24 @@ is reversible (and you could later support both).
 
 ---
 
-## raylib: deprecation plan
+## Raylib: legacy-only compatibility
 
-**We probably want to remove raylib.** It is an OpenGL/GLFW convenience layer; it
-gave us fast 2D/3D + windowing + simple shaders + basic audio, and it compiles to
-web via Emscripten (WebGL) — but:
+Raylib is retired from Rae's active architecture. It was an effective early
+OpenGL/GLFW convenience layer for Pong, Tetris, and renderer experiments, but:
 
 - No GPU **compute** on macOS (OpenGL capped at 4.1) → blocks the GPU raytracer.
 - OpenGL is legacy / deprecated on Apple; the future is WebGPU/Metal/Vulkan.
 - It overlaps with the layers we now want to own (Platform, Render, 2D, Audio).
 
-Plan: build the Rae Platform/Render/2D/Audio layers, migrate the examples off
-raylib, then drop the dependency. We **may keep a single raylib example** in the
-tree as a historical/minimal reference **only if** it stays cheap to keep
-building (no special-casing the build, no divergent toolchain). If keeping it
-adds friction, remove it entirely — minimalism wins.
+Active 2D examples use GPU2D with SDL3 platform/input. Active 3D examples use
+the deferred WebGPU renderer; the forward renderer remains a reference path.
+UI is authored as ECS-backed `.raescene` data.
+
+Historical Raylib examples remain intact under `examples/legacy/raylib/` and
+are excluded from Devtools and default smoke tests. The compiler does not link
+Raylib by default. `make ENABLE_LEGACY_RAYLIB=1` in `compiler/` enables the
+deprecated VM bindings for explicit archaeology, and Compiled dependency
+discovery links Raylib only when a project deliberately imports `raylib`.
 
 ---
 

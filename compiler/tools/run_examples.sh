@@ -38,14 +38,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
     # C Backend Smoke Test (generate + compile + link)
     TMP_OUT=$(mktemp -d)
     if "$BIN" build --target compiled --emit-c --project "$PROJECT_DIR" --out "$TMP_OUT/out.c" "$EXAMPLE_FILE" > "$TMP_OUT/emit.log" 2>&1; then
-      # Attempt full compilation
-      # Note: we include Raylib flags since many examples use it.
-      # Link raylib statically so GLFW symbols bundled in libraylib.a
-      # (glfwWaitEventsTimeout, glfwPostEmptyEvent, ...) resolve. The
-      # shared libraylib.dylib does not export those.
-      # Define + link the desktop backends so every example links regardless of
-      # which it imports: raylib (statically, for the bundled GLFW symbols),
-      # SDL3 (lib/sdl3.rae), and native WebGPU (lib/webgpu.rae, via wgpu-native).
+      # Attempt full compilation. Define + link the active desktop backends so
+      # every supported example links regardless of which it imports: SDL3
+      # (lib/sdl3.rae) and native WebGPU (lib/webgpu.rae, via wgpu-native).
       # All use distinct symbol names, so the runtime blocks compile together.
       # WebGPU is only added when wgpu-native is present (WGPU_NATIVE, default
       # ~/.local/wgpu-native), so the suite still runs without it (example 50
@@ -56,8 +51,8 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
       if gcc -O2 -o "$TMP_OUT/app" "$TMP_OUT/out.c" "$TMP_OUT/rae_runtime.c" \
          $([ -f "$TMP_OUT/monocypher.c" ] && echo "$TMP_OUT/monocypher.c") \
          $(ls "$PROJECT_DIR"/*.c 2>/dev/null | grep -v "rae_runtime.c" | grep -v "main_compiled.c" || true) \
-         -I"$TMP_OUT" -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_RAYLIB -DRAE_HAS_SDL3 $WGPU_FLAGS \
-         /opt/homebrew/lib/libraylib.a -lSDL3 -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL -framework ImageIO -framework CoreGraphics > "$TMP_OUT/link.log" 2>&1; then
+         -I"$TMP_OUT" -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_SDL3 $WGPU_FLAGS \
+         -lSDL3 -framework Foundation -framework ImageIO -framework CoreGraphics > "$TMP_OUT/link.log" 2>&1; then
         if [ "$EXAMPLE_NAME" = "91_pong_implicit" ]; then
           SCREENSHOT="$TMP_OUT/pong.bmp"
           if RAE_PONG_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=800 \
@@ -108,7 +103,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
              perl -e 'alarm shift; exec @ARGV' 25 "$TMP_OUT/app" > "$TMP_OUT/render.log" 2>&1 \
              && grep -q '\[easing3d\] deterministic deferred frame rendered' "$TMP_OUT/render.log" \
-             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --gpu3d-ui \
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
                 > "$TMP_OUT/screenshot.log" 2>&1; then
             echo "PASS: $EXAMPLE_NAME (deferred easing + .raescene overlay)"
             ((PASSED++))
