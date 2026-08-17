@@ -830,6 +830,20 @@ int64_t rae_ext_gpu3d_meshCreate(const float* verts, int64_t vertCount,
     return (int64_t)(slot + 1);
 }
 
+/* Rewrite an existing mesh's VERTEX data in place (positions/normals/uvs;
+ * topology and index buffer stay). vertCount must equal the count the mesh
+ * was created with — the GPU buffer is fixed-size, so a larger write is
+ * clamped to nothing rather than overflowing. Exists for pooled geometry
+ * whose shape depends on world position (the walker's terrain tiles get
+ * their heights rewritten when a pool slot is recycled onto a new cell). */
+void rae_ext_gpu3d_meshUpdate(int64_t mesh, const float* verts, int64_t vertCount){
+    if (!g_wgpu_dev || !verts || vertCount <= 0) return;
+    int slot = (int)mesh - 1;
+    if (slot < 0 || slot >= g3d_mesh_n || !g3d_mesh_vbuf[slot]) return;
+    wgpuQueueWriteBuffer(g_wgpu_queue, g3d_mesh_vbuf[slot], 0, verts,
+                         (size_t)vertCount * 8 * sizeof(float));
+}
+
 /* Begin the 3D frame. `frame` packs the camera/light state as 36 Floats:
  *   [0..15] viewProj (column-major)
  *   [16..18] camPos            [19] time

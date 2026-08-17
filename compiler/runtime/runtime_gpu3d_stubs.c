@@ -5,6 +5,9 @@ int64_t rae_ext_gpu3d_meshCreate(const float* verts, int64_t vertCount,
                                  const int64_t* indices, int64_t indexCount){
     (void)verts; (void)vertCount; (void)indices; (void)indexCount; return 0;
 }
+void rae_ext_gpu3d_meshUpdate(int64_t mesh, const float* verts, int64_t vertCount){
+    (void)mesh; (void)verts; (void)vertCount;
+}
 void rae_ext_gpu3d_begin(const float* frame, int64_t count){ (void)frame; (void)count; }
 /* Mirror of the Rae-side `Mat4` layout, for the gpu3d extern boundary.
  *
