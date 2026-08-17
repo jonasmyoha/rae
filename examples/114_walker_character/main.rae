@@ -24,6 +24,11 @@
 # modes, and entering Character re-establishes the conventional behind-player
 # view before leaving the mouse free to orbit.
 #
+# THE MEADOW IS INFINITE BUT ITS STORAGE IS NOT. Forty-nine terrain cells and
+# their original Unity walker-project props are allocated once, then wrapped
+# around the player's absolute world cell. Placement is deterministic, so a
+# revisited cell contains the same trees, rocks, bushes, flowers and grass.
+#
 # THE UI IS A REAL .raescene, built on the shared app3d modules. The
 # scene (assets/ui.raescene) authors only the panel CHROME — a vertical
 # card with two auto-laid-out rows — and the buttons are declared in code
@@ -295,12 +300,8 @@ func main() ret Int {
   var transitionElapsed: Float = clipTransitionDuration
   log("[anim] idle {clipChannelCount(c: idleClip)} ch / {idleClip.duration}s, walk {clipChannelCount(c: walkClip)} ch / {walkClip.duration}s, run {clipChannelCount(c: runClip)} ch / {runClip.duration}s")
 
-  let planeData: MeshData = makePlane(size: 80.0, segments: 1)
-  let ground: MeshHandle = uploadMeshData(m: planeData)
-
   var scene: Scene3d = createScene3d()
   let noEmit: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
-  let noRot: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let groundZ: Float = 0.0 - 1.0
   var characterController: ThirdPersonController = createThirdPersonController()
 
@@ -377,16 +378,11 @@ func main() ret Int {
     ret 1
   }
 
-  # Grass green. Base colours here are LINEAR, so these are not the
-  # numbers a colour picker would show for the same green — an sRGB
-  # 0.42/0.62/0.28 lands near this once the transfer curve is undone, and
-  # entering the sRGB values directly would render a washed-out mint.
-  let groundMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.148, y: 0.336, z: 0.064), metallic: 0.0, roughness: 0.9, emission: noEmit)
-  let groundE: Int = addMeshInstance(
-    scene: scene, mesh: ground, material: groundMat,
-    position: vec3.create(x: 0.0, y: 0.0, z: groundZ), rotation: noRot,
-    scale: vec3.create(x: 1.0, y: 1.0, z: 1.0)
-  )
+  # A fixed pool of terrain tiles and original Unity walker-project props.
+  # It remaps around the character by absolute world cell, so travel is
+  # unbounded without allocating meshes or scene entities after startup.
+  var terrain: InfiniteTerrain = createInfiniteTerrain(
+    scene: scene, assets: assets, groundZ: groundZ)
 
   var camera: Camera3d = defaultCamera3d()
   var light: Light3d = defaultLight3d()
@@ -437,10 +433,8 @@ func main() ret Int {
   var playing: Bool = true
   var speed: Float = 1.0
   var animTime: Float = 0.0
-  # Toon ON by default (#396): this example is the one that shows the
-  # style off, and a feature that has to be switched on to be seen mostly
-  # goes unseen. The ground stays PBR either way, so the frame always
-  # shows both shading models side by side.
+  # Toon ON by default (#396): the walker and its entire meadow deliberately
+  # share one illustrative lighting style. The UI toggle switches both.
   var toonShading: Bool = true
 
   # The controls. Two panels because the scene authors two auto-laid-out
@@ -482,6 +476,8 @@ func main() ret Int {
   partModel = walkerWorldModel(
     baseModel: basePartModel, controller: characterController)
   previousPartModel = partModel
+  updateInfiniteTerrain(terrain: terrain, scene: scene,
+                        playerPosition: characterController.position)
   if rig.mode is CameraRigMode.character {
     camera.target = thirdPersonCameraTarget(
       controller: characterController, focusZ: orbitFocusZ)
@@ -689,6 +685,9 @@ func main() ret Int {
       applySettingsPanelOpen(world: uiWorld, open: settings.open)
       stateDirty = true
     }
+    if terrain.toon is not toonShading {
+      setInfiniteTerrainToon(terrain: terrain, scene: scene, toon: toonShading)
+    }
     # `settingsChanged` as well as the action count: a DRAG produces no action.
     # Click actions arrive on release, so gating the systems on actions alone
     # meant the slider knob's new rect was written every drag frame and only
@@ -755,6 +754,9 @@ func main() ret Int {
                           id: clipButtonId(index: clipIndex))
       }
     }
+    let terrainWrapped: Bool = updateInfiniteTerrain(
+      terrain: terrain, scene: scene,
+      playerPosition: characterController.position)
     # ONE read. gpu2d.windowResized() is one-shot — reading it clears it — so
     # two callers meant the second always saw false.
     let resized: Bool = gpu2d.windowResized()
@@ -786,7 +788,7 @@ func main() ret Int {
     let logChanged: Bool = logView.revision is not lastLogRevision
     let transitionActive: Bool = transitionElapsed < clipTransitionDuration
     var needsRender: Bool = playing or transitionActive or settingsChanged or cameraMoved
-      or characterMoved
+      or characterMoved or terrainWrapped
       or hadUiEvents or logChanged or resized or scrolled or renderedOnce is false
     if taaSettleFrames > 0 { needsRender = true }
     dbgDidWork = needsRender
@@ -906,10 +908,8 @@ func main() ret Int {
               metallic: 0.0,
               roughness: walkerFloatAt(values: partRough, index: p),
               emission: noEmit,
-              # The style applies to the CHARACTER only, deliberately: the
-              # ground stays PBR so the two shading models are visible in
-              # one frame under one sun, which is the thing per-material
-              # toon buys over a whole-frame switch.
+              # The terrain's Rae materials use the same toggle, so the
+              # character and environment remain one visual world.
               toon: toonShading
             }
             gbuffer.drawSkinnedInstance(mesh: handle, model: partModel,
