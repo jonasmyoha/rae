@@ -201,6 +201,23 @@ func walkerWorldModel(baseModel: view Mat4,
 # head is up at +1; orbiting THAT would swing the body out of frame at close
 # distances, which is the opposite of what re-centring is for.
 const orbitFocusZ: Float = 0.0
+
+# Where the CHARACTER camera looks, relative to the controller position: the
+# head. The model spans -1..+1 around the controller's z, so +0.9 is eye
+# level just under the crown — over-the-shoulder framing while walking, where
+# orbit keeps the whole body centred via `orbitFocusZ` above.
+const characterFocusZ: Float = 0.9
+
+# The character's walk ray: sample the terrain height field straight down at
+# the character's x/y and stand on the hit. The field is analytic
+# (walker_terrain.rae `terrainHeightAt`), so the raycast is one function call
+# rather than a geometry query. position.z is the DELTA above the flat
+# groundZ baked into the model's base transform.
+func groundWalker(controller: mod ThirdPersonController, groundZ: view Float) {
+  controller.position.z = terrainHeightAt(
+    x: controller.position.x, y: controller.position.y, groundZ: groundZ) - groundZ
+}
+
 const clipTransitionDuration: Float = 0.28
 
 func main() ret Int {
@@ -322,6 +339,7 @@ func main() ret Int {
   # movement and heading are prepended later, so turns happen around that
   # normalised pivot rather than the FBX exporter's arbitrary origin.
   let basePartModel: Mat4 = modelMatrix(t: partTransform)
+  groundWalker(controller: characterController, groundZ: groundZ)
   var partModel: Mat4 = walkerWorldModel(
     baseModel: basePartModel, controller: characterController)
   var previousPartModel: Mat4 = partModel
@@ -424,7 +442,7 @@ func main() ret Int {
   rig.maxDistance = 20.0
   rig.wheelSpeed = 0.4
   camera.target = thirdPersonCameraTarget(
-    controller: characterController, focusZ: orbitFocusZ)
+    controller: characterController, focusZ: characterFocusZ)
   snapCameraRigView(rig: rig)
 
   # Character mode starts idle and promotes itself to walk/run from input.
@@ -473,6 +491,8 @@ func main() ret Int {
 
   # The restored gameplay transform must be visible on frame one, without a
   # false full-screen motion vector from the origin to the saved position.
+  # Only x/y/heading persist; z is re-derived from the terrain height field.
+  groundWalker(controller: characterController, groundZ: groundZ)
   partModel = walkerWorldModel(
     baseModel: basePartModel, controller: characterController)
   previousPartModel = partModel
@@ -480,7 +500,7 @@ func main() ret Int {
                         playerPosition: characterController.position)
   if rig.mode is CameraRigMode.character {
     camera.target = thirdPersonCameraTarget(
-      controller: characterController, focusZ: orbitFocusZ)
+      controller: characterController, focusZ: characterFocusZ)
   }
 
   setPanelSelection(panel: clipPanel, world: uiWorld, group: 1, id: clipButtonId(index: clipIndex))
@@ -709,7 +729,7 @@ func main() ret Int {
       rig.yaw = characterController.heading
       rig.orbitPitch = 0.24
       camera.target = thirdPersonCameraTarget(
-        controller: characterController, focusZ: orbitFocusZ)
+        controller: characterController, focusZ: characterFocusZ)
       snapCameraRigView(rig: rig)
     }
     if previousMode is not CameraRigMode.orbit and rig.mode is CameraRigMode.orbit {
@@ -732,8 +752,11 @@ func main() ret Int {
         controller: characterController,
         allowInput: uiPointerCaptured(input: uiInput) is false and playing,
         cameraYaw: rig.viewYaw, dt: dt * speed)
+      # The walk ray: stand on the terrain height at the new x/y, every
+      # frame, before anything reads the position.
+      groundWalker(controller: characterController, groundZ: groundZ)
       camera.target = thirdPersonCameraTarget(
-        controller: characterController, focusZ: orbitFocusZ)
+        controller: characterController, focusZ: characterFocusZ)
       if characterMoved {
         partModel = walkerWorldModel(
           baseModel: basePartModel, controller: characterController)

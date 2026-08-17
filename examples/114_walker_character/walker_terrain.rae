@@ -23,11 +23,33 @@ const terrainHalfGrid: Int = 3
 const terrainCellCount: Int = 49
 const terrainTau: Float = 6.283185307179586
 
+# Ground tiles are subdivided so noise heights have vertices to move. 12
+# segments over an 18 m cell is a quad every 1.5 m — enough for the hill
+# wavelengths below, cheap enough that all 49 tiles total ~14k triangles.
+const terrainTileSegments: Int = 12
+const terrainTileVerts: Int = 169
+const terrainTileFloats: Int = 1352
+
+# The height field: two octaves of Perlin over world position. The broad
+# octave makes ~50 m hills a character walks over; the detail octave breaks
+# up the surface at ~13 m so slopes read in the cel shading. Amplitudes keep
+# the steepest rise around 0.5 m per metre — hills, never cliffs.
+func terrainHeightAt(x: view Float, y: view Float, groundZ: view Float) ret Float {
+  let broad: Float = noise.perlin2(x: x * 0.020, y: y * 0.020, seed: 977)
+  let detail: Float = noise.perlin2(x: x * 0.075, y: y * 0.075, seed: 431)
+  ret groundZ + broad * 2.8 + detail * 0.55
+}
+
 type InfiniteTerrain {
   centreCellX: Int
   centreCellY: Int
   groundZ: Float
   toon: Bool
+  # Each pool slot owns its own tile MESH, not just an entity: heights live
+  # in the vertices, so recycling a slot onto a new cell rewrites them via
+  # updateMeshVerts. scratchVerts is the reused staging buffer for that.
+  tileMeshIds: List(Int)
+  scratchVerts: List(Float)
   tileEntities: List(Int)
   broadTrunkEntities: List(Int)
   broadCrownEntities: List(Int)
@@ -75,18 +97,69 @@ func terrainTransform(cellX: view Int, cellY: view Int,
                       scaleSpread: view Float) ret Transform3d {
   let scale: Float = terrainScale(cellX: cellX, cellY: cellY, seed: seedScale,
                                   minimum: minimumScale, spread: scaleSpread)
+  let posX: Float = cellX.toFloat() * terrainCellSize
+    + terrainOffset(cellX: cellX, cellY: cellY, seed: seedX)
+  let posY: Float = cellY.toFloat() * terrainCellSize
+    + terrainOffset(cellX: cellX, cellY: cellY, seed: seedY)
+  # Every prop stands on the height field at its own scatter position. The
+  # small lifts callers add to groundZ (flowers +0.015) pass through, since
+  # the height is groundZ + noise.
   ret Transform3d {
     position: vec3.create(
-      x: cellX.toFloat() * terrainCellSize
-        + terrainOffset(cellX: cellX, cellY: cellY, seed: seedX),
-      y: cellY.toFloat() * terrainCellSize
-        + terrainOffset(cellX: cellX, cellY: cellY, seed: seedY),
-      z: groundZ),
+      x: posX,
+      y: posY,
+      z: terrainHeightAt(x: posX, y: posY, groundZ: groundZ)),
     rotation: vec3.create(
       x: 0.0, y: 0.0,
       z: terrainHash(cellX: cellX, cellY: cellY, seed: seedScale + 71) * terrainTau),
     scale: vec3.create(x: scale, y: scale, z: scale)
   }
+}
+
+# Rewrite one pool slot's tile mesh so its vertices carry the ABSOLUTE world
+# height of the cell it now covers (the tile entity itself sits at z 0).
+# Normals come from central differences of the same height function, so the
+# lighting matches the surface exactly.
+func reshapeTerrainTile(terrain: mod InfiniteTerrain, cellX: view Int, cellY: view Int,
+                        poolIndex: view Int) {
+  let meshId: Int = terrainEntityAt(entities: terrain.tileMeshIds, index: poolIndex)
+  if meshId < 1 { ret }
+  let tileSize: Float = terrainCellSize + 0.04
+  let centreX: Float = cellX.toFloat() * terrainCellSize
+  let centreY: Float = cellY.toFloat() * terrainCellSize
+  let eps: Float = 0.6
+  var yi: Int = 0
+  loop yi <= terrainTileSegments {
+    let fy: Float = yi.toFloat() / terrainTileSegments.toFloat()
+    let localY: Float = (fy - 0.5) * tileSize
+    let worldY: Float = centreY + localY
+    var xi: Int = 0
+    loop xi <= terrainTileSegments {
+      let fx: Float = xi.toFloat() / terrainTileSegments.toFloat()
+      let localX: Float = (fx - 0.5) * tileSize
+      let worldX: Float = centreX + localX
+      let height: Float = terrainHeightAt(x: worldX, y: worldY, groundZ: terrain.groundZ)
+      let slopeX: Float = (terrainHeightAt(x: worldX + eps, y: worldY, groundZ: terrain.groundZ)
+        - terrainHeightAt(x: worldX - eps, y: worldY, groundZ: terrain.groundZ)) / (eps * 2.0)
+      let slopeY: Float = (terrainHeightAt(x: worldX, y: worldY + eps, groundZ: terrain.groundZ)
+        - terrainHeightAt(x: worldX, y: worldY - eps, groundZ: terrain.groundZ)) / (eps * 2.0)
+      let inverseLength: Float = 1.0
+        / math.sqrt(x: slopeX * slopeX + slopeY * slopeY + 1.0)
+      let base: Int = (yi * (terrainTileSegments + 1) + xi) * 8
+      terrain.scratchVerts.set(index: base, value: localX)
+      terrain.scratchVerts.set(index: base + 1, value: localY)
+      terrain.scratchVerts.set(index: base + 2, value: height)
+      terrain.scratchVerts.set(index: base + 3, value: 0.0 - slopeX * inverseLength)
+      terrain.scratchVerts.set(index: base + 4, value: 0.0 - slopeY * inverseLength)
+      terrain.scratchVerts.set(index: base + 5, value: inverseLength)
+      terrain.scratchVerts.set(index: base + 6, value: fx)
+      terrain.scratchVerts.set(index: base + 7, value: fy)
+      xi = xi + 1
+    }
+    yi = yi + 1
+  }
+  updateMeshVerts(mesh: meshHandle(id: meshId, generation: 0),
+                  verts: terrain.scratchVerts, vertCount: terrainTileVerts)
 }
 
 func terrainTeleport(scene: mod Scene3d, entity: view Int,
@@ -100,13 +173,16 @@ func placeTerrainCell(terrain: mod InfiniteTerrain, scene: mod Scene3d,
                       poolIndex: view Int, cellX: view Int, cellY: view Int) {
   let zeroRotation: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let oneScale: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  # Heights are baked into the tile's vertices in world space, so the entity
+  # itself sits at z 0 — its x/y translate the reshaped patch into place.
+  reshapeTerrainTile(terrain: terrain, cellX: cellX, cellY: cellY, poolIndex: poolIndex)
   terrainTeleport(
     scene: scene,
     entity: terrainEntityAt(entities: terrain.tileEntities, index: poolIndex),
     transform: Transform3d {
       position: vec3.create(x: cellX.toFloat() * terrainCellSize,
                             y: cellY.toFloat() * terrainCellSize,
-                            z: terrain.groundZ),
+                            z: 0.0),
       rotation: zeroRotation, scale: oneScale
     })
 
@@ -213,8 +289,10 @@ func setInfiniteTerrainToon(terrain: mod InfiniteTerrain, scene: mod Scene3d,
 
 func createInfiniteTerrain(scene: mod Scene3d, assets: view String,
                            groundZ: view Float) ret InfiniteTerrain {
-  let groundMesh: MeshHandle = uploadMeshDataForTerrain(
-    mesh: makePlane(size: terrainCellSize + 0.04, segments: 1))
+  # One SUBDIVIDED plane per pool slot (not one shared mesh): each slot's
+  # vertices get rewritten with its cell's noise heights on placement.
+  let tilePlane: MeshData = makePlane(size: terrainCellSize + 0.04,
+                                      segments: terrainTileSegments)
   let broadTrunk: MeshHandle = terrainMesh(path: "{assets}environment/tree_broad_trunk.glb")
   let broadCrown: MeshHandle = terrainMesh(path: "{assets}environment/tree_broad_crown.glb")
   let tallTrunk: MeshHandle = terrainMesh(path: "{assets}environment/tree_tall_trunk.glb")
@@ -255,6 +333,13 @@ func createInfiniteTerrain(scene: mod Scene3d, assets: view String,
   materials.add(value: flowerMaterial)
   materials.add(value: grassMaterial)
 
+  let tileMeshes: List(Int) = createList(Int, cap: terrainCellCount)
+  let scratch: List(Float) = createList(Float, cap: terrainTileFloats)
+  var scratchIndex: Int = 0
+  loop scratchIndex < terrainTileFloats {
+    scratch.add(value: 0.0)
+    scratchIndex = scratchIndex + 1
+  }
   let tiles: List(Int) = createList(Int, cap: terrainCellCount)
   let broadTrunks: List(Int) = createList(Int, cap: terrainCellCount)
   let broadCrowns: List(Int) = createList(Int, cap: terrainCellCount)
@@ -270,7 +355,9 @@ func createInfiniteTerrain(scene: mod Scene3d, assets: view String,
   let oneScale: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
   var index: Int = 0
   loop index < terrainCellCount {
-    tiles.add(value: addMeshInstance(scene: scene, mesh: groundMesh,
+    let tileMesh: MeshHandle = uploadMeshDataForTerrain(mesh: tilePlane)
+    tileMeshes.add(value: tileMesh.id)
+    tiles.add(value: addMeshInstance(scene: scene, mesh: tileMesh,
       material: groundMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
     broadTrunks.add(value: addMeshInstance(scene: scene, mesh: broadTrunk,
       material: trunkMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
@@ -296,6 +383,8 @@ func createInfiniteTerrain(scene: mod Scene3d, assets: view String,
   var terrain: InfiniteTerrain = {
     centreCellX: 1000000000, centreCellY: 1000000000,
     groundZ: groundZ, toon: false,
+    tileMeshIds: own tileMeshes,
+    scratchVerts: own scratch,
     tileEntities: own tiles,
     broadTrunkEntities: own broadTrunks, broadCrownEntities: own broadCrowns,
     tallTrunkEntities: own tallTrunks, tallCrownEntities: own tallCrowns,
