@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rae DevTools Dashboard</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="app-header__top">
+        <h1 class="app-header__title">Rae compiler devtools</h1>
+
+        <div class="status-group">
+          <span
+            class="status-dot connection-indicator"
+            id="connection-status"
+            role="status"
+            aria-label="Connection status"
+            title="Connecting…"
+          ></span>
+          <button
+            class="status-dot error-indicator"
+            id="error-indicator"
+            type="button"
+            aria-label="Open error log"
+            title="No errors"
+          >
+            <span class="status-dot__count" id="error-count" aria-hidden="true"></span>
+          </button>
+        </div>
+      </div>
+
+      <nav class="app-nav" role="tablist" aria-label="Primary views">
+        <button class="app-nav__item" type="button" role="tab" aria-selected="false" data-view-target="why">
+          Why?
+        </button>
+        <button class="app-nav__item is-active" type="button" role="tab" aria-selected="true" data-view-target="compiler">
+          Compiler
+        </button>
+        <button class="app-nav__item" type="button" role="tab" aria-selected="false" data-view-target="statistics">
+          Statistics
+        </button>
+        <!-- Featured leads the example tabs and is styled apart from them: it is a
+             shortcut across categories rather than another category. -->
+        <button class="app-nav__item app-nav__item--featured" type="button" role="tab" aria-selected="false" data-view-target="featured">
+          Featured
+        </button>
+        <button class="app-nav__item" type="button" role="tab" aria-selected="false" data-view-target="examples">
+          Examples
+        </button>
+        <button class="app-nav__item" type="button" role="tab" aria-selected="false" data-view-target="ui">
+          UI
+        </button>
+        <button class="app-nav__item" type="button" role="tab" aria-selected="false" data-view-target="renderer2d">
+          2D renderer
+        </button>
+        <button class="app-nav__item" type="button" role="tab" aria-selected="false" data-view-target="renderer3d">
+          3D renderer
+        </button>
+        <button class="app-nav__item" type="button" role="tab" aria-selected="false" data-view-target="raytracer">
+          Raytracer
+        </button>
+      </nav>
+    </header>
+    <main class="app-main">
+      <div class="app-view" data-view="why">
+        <section class="panel panel--full why-view">
+          <div class="marketing-hero">
+            <h2 class="marketing-title">The <strong>Live</strong> Language for Creative Systems.</h2>
+            <p class="marketing-subtitle">Rae combines the safety of modern reference models with the raw performance of C, built from the ground up for hot-reloading and systems that never stop.</p>
+          </div>
+          
+          <div class="feature-grid">
+            <article class="feature-card feature-card--highlight">
+              <div class="feature-card__icon">⚡</div>
+              <h3>Instant Hot-Reload</h3>
+              <p>Patch logic, tweak UI values, and swap functions in a running process. The Rae VM preserves your application state so you can iterate at the speed of thought.</p>
+            </article>
+            <article class="feature-card">
+              <div class="feature-card__icon">🛡️</div>
+              <h3>Zero-Cost Safety</h3>
+              <p>Explicit <code>view</code> and <code>mod</code> references. No garbage collection, no hidden pointers. Compile-time lifetime checks ensure your aliases never escape their scope.</p>
+            </article>
+            <article class="feature-card">
+              <div class="feature-card__icon">⚙️</div>
+              <h3>Explicit Semantics</h3>
+              <p>No implicit moves or magic sharing. <code>=</code> always copies. <code>=></code> always binds. Predictable performance for systems where every microsecond counts.</p>
+            </article>
+            <article class="feature-card">
+              <div class="feature-card__icon">🏗️</div>
+              <h3>Native C Backend</h3>
+              <p>Rae compiles to clean, readable C11. Use existing C libraries effortlessly and deploy to any platform that has a C compiler.</p>
+            </article>
+          </div>
+
+          <div class="why-examples">
+            <div class="example-column">
+              <h3 class="marketing-label">Memory Control</h3>
+              <p class="example-desc">Fine-grained control over aliasing and copying without the boilerplate.</p>
+              <div class="code-box">
+                <pre class="source-code" id="why-example-references"><code></code></pre>
+              </div>
+            </div>
+            <div class="example-column">
+              <h3 class="marketing-label">Reactive Logic</h3>
+              <p class="example-desc">Perfect for ECS-based games and interactive simulations.</p>
+              <div class="code-box">
+                <pre class="source-code" id="why-example-logic"><code></code></pre>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+            <div class="app-view is-active" data-view="compiler">
+
+              <section class="panel panel--full" id="build-panel">
+
+              <header class="panel-header">
+
+                <div>
+
+                  <h2>Build controls</h2>
+
+                  <p class="panel-subtitle">Trigger compiler build/clean tasks</p>
+
+                </div>
+
+                <div class="panel-actions">
+
+                  <div class="test-status" id="build-status-chip">Idle</div>
+
+                </div>
+
+              </header>
+
+              <div class="build-controls">
+
+                <button id="build-test-btn" class="btn-build-test" type="button">
+
+                  Build & test
+
+                </button>
+
+                <span class="btn-separator"></span>
+
+                <button id="build-btn">Build (Ctrl+B)</button>
+
+                <button id="clean-btn" class="secondary">Clean</button>
+
+                <button id="rebuild-btn" class="secondary">Rebuild</button>
+
+              </div>
+
+              <div class="terminal-wrapper">
+
+                <div class="terminal" id="build-log" aria-live="polite">
+
+                  <div class="terminal-line">Waiting for first build command…</div>
+
+                </div>
+
+              </div>
+
+      
+
+              <div class="terminal-actions">
+
+                <button class="secondary" id="copy-build-log-btn" type="button">
+
+                  <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
+
+                    <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
+
+                    <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
+
+                  </svg>
+
+                  Copy full log
+
+                </button>
+
+                <button class="secondary" id="copy-build-errors-btn" type="button">
+
+                  <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
+
+                    <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
+
+                    <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
+
+                  </svg>
+
+                  Copy errors and warnings
+
+                </button>
+
+              </div>
+
+              </section>
+
+              <section class="panel panel--full" id="tests-panel">
+
+              <header class="panel-header">
+
+                <div>
+
+                  <h2>Test runner</h2>
+
+                  <p class="panel-subtitle">Run the Rae compiler test suite via this dashboard</p>
+
+                </div>
+
+                <div class="panel-actions">
+
+                  <div class="test-status" id="test-status-chip">Idle</div>
+
+                </div>
+
+              </header>
+
+              <div class="test-controls">
+
+                <button id="run-tests-btn">Run all tests (Ctrl+T)</button>
+
+                <button id="stop-tests-btn">Stop all tests</button>
+
+                <input
+
+                  type="text"
+
+                  id="disabled-tests-input"
+
+                  class="input-field"
+
+                  placeholder="Disable tests (e.g. 321, 325)"
+
+                  title="Comma separated list of test numbers or names to skip"
+
+                />
+
+              </div>
+
+              <div class="terminal-wrapper">
+
+                <div class="terminal" id="test-log" aria-live="polite">
+
+                  <div class="terminal-line">Waiting for first test run…</div>
+
+                </div>
+
+              </div>
+
+      
+
+              <div class="terminal-actions">
+
+                <button class="secondary" id="copy-test-log-btn" type="button">
+
+                  <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
+
+                    <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
+
+                    <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
+
+                  </svg>
+
+                  Copy full log
+
+                </button>
+
+                <button class="secondary" id="copy-test-errors-btn" type="button" hidden>
+
+                  <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
+
+                    <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
+
+                    <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
+
+                  </svg>
+
+                  Copy errors only
+
+                </button>
+
+              </div>
+
+      
+
+              <div class="test-errors-summary" id="test-errors-summary" hidden>
+
+                <header class="panel-header">
+
+                  <div>
+
+                    <h3>Errors & warnings</h3>
+
+                    <p class="panel-subtitle">Filtered view with surrounding context</p>
+
+                  </div>
+
+                </header>
+
+                <div class="terminal terminal--mini" id="test-errors-log" aria-live="polite">
+
+                  <div class="terminal-line">No failures detected.</div>
+
+                </div>
+
+              </div>
+
+      
+
+              <div class="test-panel">
+
+                <div class="test-summary-card">
+
+                  <div>
+
+                    <p class="summary-title">Suite summary</p>
+
+                    <p class="summary-stats" id="test-summary-text">Not run yet</p>
+
+                  </div>
+
+                  <div class="summary-counts">
+
+                    <span class="pill pill--pass" id="summary-pass-count">0</span>
+
+                    <span class="pill pill--fail" id="summary-fail-count">0</span>
+
+                  </div>
+
+                </div>
+
+                <div class="test-panel-body">
+
+                  <div class="test-list" id="test-list" aria-live="polite">
+
+                    <p class="test-list-empty">Run tests to see per-test status.</p>
+
+                  </div>
+
+                  <div class="test-inspector" id="test-inspector">
+
+                    <header class="inspector-header">
+
+                      <h3>Test details & actions</h3>
+
+                      <div class="test-inspector-tabs" role="tablist">
+
+                        <button type="button" class="is-active" data-inspector-tab="result">Result</button>
+
+                        <button type="button" data-inspector-tab="history">History</button>
+
+                        <button type="button" data-inspector-tab="source">Source</button>
+
+                      </div>
+
+                      <div class="inspector-actions">
+
+                        <button type="button" id="run-test-live-btn" class="btn-action-mini">Run live</button>
+
+                        <button type="button" id="run-test-compiled-btn" class="btn-action-mini">Run compiled</button>
+
+                      </div>
+
+                    </header>
+
+                    <section
+                class="inspect-panel test-detail"
+                id="test-detail"
+                data-inspector-panel="result"
+                aria-live="polite"
+              >
+                <p class="detail-placeholder">Select a test to see details.</p>
+              </section>
+              <section
+                class="inspect-panel test-history-view is-hidden"
+                id="test-history-detail"
+                data-inspector-panel="history"
+                aria-live="polite"
+              >
+                <p class="detail-placeholder">Select a test to see history.</p>
+              </section>
+              <section
+                class="inspect-panel test-source-view is-hidden"
+                data-inspector-panel="source"
+                aria-live="polite"
+              >
+                <div class="test-source-layout">
+                  <div class="test-files" id="test-files-list">
+                    <p class="test-list-empty">Select a test to see files.</p>
+                  </div>
+                  <div class="test-source-panel">
+                    <div class="source-header">
+                      <h3 id="test-source-title">Select a test</h3>
+                      <button
+                        class="copy-icon-btn"
+                        id="copy-test-source-btn"
+                        type="button"
+                        title="Copy test source"
+                        aria-label="Copy test source"
+                      >
+                        <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+                          <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
+                          <path
+                            d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"
+                          ></path>
+                        </svg>
+                      </button>
+                    </div>
+                    <pre class="source-code" id="test-source-code"><code>No file selected.</code></pre>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+        </section>
+        <section class="panel">
+        <header>
+          <h2>Status stream</h2>
+          <p class="panel-subtitle">Live events from the Bun server</p>
+        </header>
+        <div id="status-feed" class="status-feed" aria-live="polite"></div>
+        </section>
+        <section class="panel instructions" id="next-steps-panel">
+        <header>
+          <div class="panel-header">
+            <div>
+              <h2>Next steps</h2>
+            </div>
+          </div>
+        </header>
+        <ol>
+          <li>Parse Rae test hierarchy for per-test status + diff views.</li>
+          <li>Hook up dashboard build controls (build, clean, rebuild).</li>
+          <li>Persist dashboard stats into <code>data/devtools.db</code> via SQLite.</li>
+        </ol>
+        <p class="hint">
+          Keyboard shortcuts, diff viewer, and Codex integration will land after the core
+          build/test flows are operational.
+        </p>
+        <div class="copy-anchor">
+          <button
+            class="copy-icon-btn"
+            id="copy-next-steps-btn"
+            type="button"
+            title="Copy next steps"
+            aria-label="Copy next steps"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24" role="img">
+              <path
+                d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"
+              ></path>
+              <path
+                d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"
+              ></path>
+            </svg>
+          </button>
+        </div>
+        </section>
+      </div>
+      <div class="app-view app-view--stats" data-view="statistics">
+        <section class="panel panel--full stats-intro">
+          <div class="panel-header">
+            <div>
+              <h2>Statistics</h2>
+              <p class="panel-subtitle">Recent compiler health metrics collected from builds, tests, and tooling</p>
+            </div>
+            <button id="stats-view-refresh" type="button">Refresh</button>
+          </div>
+        </section>
+        <section class="panel stats-card" id="stats-tests-panel">
+          <header>
+            <h3>Test duration</h3>
+            <p class="panel-subtitle">Latest Rae compiler test suite runs</p>
+          </header>
+          <div class="line-chart-container">
+            <canvas id="test-duration-chart" aria-label="Test duration chart"></canvas>
+            <p class="line-chart-empty" id="test-duration-empty">No test runs recorded yet.</p>
+          </div>
+          <ul class="stats-list" id="stats-tests-list">
+            <li class="stats-empty">Open the Statistics view to load data.</li>
+          </ul>
+          <button class="stats-more-btn" id="stats-tests-more" hidden>More...</button>
+        </section>
+        <section class="panel stats-card" id="stats-builds-panel">
+          <header>
+            <h3>Build duration</h3>
+            <p class="panel-subtitle">Recent compiler build timings</p>
+          </header>
+          <div class="line-chart-container">
+            <canvas id="build-duration-chart" aria-label="Build duration chart"></canvas>
+            <p class="line-chart-empty" id="build-duration-empty">No build runs recorded yet.</p>
+          </div>
+          <ul class="stats-list" id="stats-builds-list">
+            <li class="stats-empty">Open the Statistics view to load data.</li>
+          </ul>
+          <button class="stats-more-btn" id="stats-builds-more" hidden>More...</button>
+        </section>
+        <section class="panel panel--full stats-card" id="stats-linecount-panel">
+          <header>
+            <h3>Compiler line count</h3>
+            <p class="panel-subtitle">Snapshots collected from <code>tools/stats/update_metrics.sh</code></p>
+          </header>
+          <div class="line-chart-container">
+            <canvas id="line-count-chart" aria-label="Compiler line count chart"></canvas>
+            <p class="line-chart-empty" id="line-count-empty">Run the metrics script to record compiler line counts.</p>
+          </div>
+          <p class="line-chart-summary" id="line-count-summary"></p>
+          <ul class="stats-list stats-list--compact" id="line-count-history">
+            <li class="stats-empty">No snapshots recorded yet.</li>
+          </ul>
+          <button class="stats-more-btn" id="line-count-more" hidden>More...</button>
+        </section>
+      </div>
+      <div class="app-view" data-view="examples">
+        <canvas id="examples-bg-canvas" class="examples-bg-canvas"></canvas>
+        <section class="panel panel--full examples-view">
+          <header class="examples-hero">
+            <div class="examples-hero__text">
+              <h2 class="marketing-title gradient-text" id="examples-hero-title">Examples</h2>
+              <p class="marketing-subtitle" id="examples-hero-subtitle">High-performance logic, interactive simulations, and system design patterns.</p>
+            </div>
+          </header>
+
+          <div class="global-actions">
+            <div class="run-all-group">
+              <label class="run-select">
+                <span class="run-select__label">Target</span>
+                <select id="example-target-select" class="run-select__input">
+                  <!-- Live (bytecode VM) is preserved but unsupported — hidden from the
+                       normal UI (docs/live-vm-status.md). Invoke explicitly via the CLI. -->
+                  <option value="compiled">Compiled</option>
+                  <option value="wasm">WASM</option>
+                </select>
+              </label>
+              <label class="run-select">
+                <span class="run-select__label">Profile</span>
+                <select id="example-profile-select" class="run-select__input">
+                  <option value="release">Release</option>
+                  <option value="debug">Debug</option>
+                </select>
+              </label>
+              <button id="run-all-examples-btn" class="btn-action-mini">Run all</button>
+            </div>
+            <div class="active-status-group">
+              <div class="test-status" id="example-status-chip">Idle</div>
+              <button id="restart-example-btn" type="button" class="btn-action-mini secondary" disabled>Restart</button>
+              <button id="stop-example-btn" type="button" class="btn-action-mini secondary" disabled>Stop</button>
+            </div>
+          </div>
+
+          <div class="examples-layout">
+            <aside class="example-sidebar">
+              <div class="example-list" id="example-list">
+                <p class="test-list-empty">Loading examples…</p>
+              </div>
+            </aside>
+            
+            <main class="example-main">
+              <div class="example-inspector">
+                <div class="example-header">
+                  <div class="example-header__info">
+                    <h3 id="example-title" class="edgy-title">Select example</h3>
+                    <p id="example-entry" class="example-entry"></p>
+                  </div>
+                  <div class="example-actions">
+                    <div class="example-target-actions" id="example-target-actions"></div>
+                  </div>
+                </div>
+
+                <div class="example-screenshots" id="example-screenshots" hidden></div>
+
+                <section class="example-viewer" id="example-viewer" hidden>
+                  <div class="example-viewer__stage">
+                    <!-- id MUST be "canvas": Emscripten special-cases that one selector, and an
+                         embedded WASM example presents to nothing under any other id.
+                         Styling hangs off the class so the id stays free to be this. -->
+                    <canvas id="canvas" class="example-viewer__canvas" width="480" height="270"></canvas>
+                  </div>
+                  <div class="example-viewer__status" id="example-viewer-status">Press Run to render in the browser.</div>
+                </section>
+                
+                <div class="example-actions example-actions--secondary" id="example-custom-actions" hidden></div>
+
+                <div class="terminal-wrapper">
+                  <div class="terminal example-terminal" id="example-output" aria-live="polite">
+                    <div class="terminal-line">Select logic to see it in action.</div>
+                  </div>
+                </div>
+                
+                <div class="terminal-actions">
+                  <button class="secondary" id="copy-example-output-btn" type="button">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
+                      <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
+                      <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
+                    </svg>
+                    Copy output
+                  </button>
+                  <button class="secondary" id="copy-example-errors-btn" type="button">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
+                      <path d="M16 1H4a3 3 0 0 0-3 3v12h2V4a1 1 0 0 1 1-1h12z"></path>
+                      <path d="M20 5H8a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V8a3 3 0 0 0-3-3zm1 15a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1z"></path>
+                    </svg>
+                    Copy errors
+                  </button>
+                  <button class="secondary" id="copy-example-path-btn" type="button">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" role="img" class="icon">
+                      <path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8z"></path>
+                    </svg>
+                    Copy folder path
+                  </button>
+                </div>
+
+                <div class="example-artifacts" id="example-artifacts">
+                  <h4 id="example-artifacts-title">Build artifacts</h4>
+                  <ul class="example-artifacts-list" id="example-artifacts-list"></ul>
+                </div>
+
+                <div class="example-downloads" id="example-downloads" hidden>
+                  <h4>Staged downloads</h4>
+                  <ul class="example-downloads-list" id="example-downloads-list"></ul>
+                </div>
+
+                <div class="example-content">
+                  <div class="example-files" id="example-files"></div>
+                  <div class="example-source-view">
+                    <header class="source-view-header">
+                      <h4 id="example-source-title">Source</h4>
+                      <div class="example-source-actions">
+                        <button id="toggle-edit-example-btn" type="button" class="secondary mini">Edit source</button>
+                        <button id="save-example-btn" type="button" class="secondary mini" disabled>Save changes</button>
+                      </div>
+                    </header>
+                    <pre class="source-code" id="example-source-code"><code></code></pre>
+                    <textarea id="example-editor" class="example-editor" hidden></textarea>
+                  </div>
+                </div>
+              </div>
+            </main>
+          </div>
+
+          <div class="batch-report" id="batch-report" hidden>
+            <header class="batch-report__header">
+              <div class="batch-report__info">
+                <h3>Batch run report</h3>
+                <p id="batch-report-summary" class="batch-report-summary">Summary loading…</p>
+              </div>
+              <div class="batch-report__actions">
+                <button id="copy-batch-errors-btn" class="secondary">Copy all errors</button>
+                <button id="close-batch-report-btn" class="secondary mini">Close</button>
+              </div>
+            </header>
+            <div class="batch-report__content" id="batch-report-content"></div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <div class="error-modal" id="error-log-modal" aria-hidden="true">
+      <div class="error-modal__backdrop" id="error-log-backdrop"></div>
+      <div class="error-modal__panel" role="dialog" aria-labelledby="error-log-title">
+        <header class="error-modal__header">
+          <div>
+            <h3 id="error-log-title">Error log</h3>
+            <p class="error-modal__subtitle">Recent dashboard, server, and runtime issues</p>
+          </div>
+          <button id="error-log-close" class="error-modal__close" type="button" aria-label="Close error log">
+            Close
+          </button>
+        </header>
+        <div class="error-modal__info">
+          <p>This log captures issues related to the dashboard connectivity, server communication, and unexpected runtime errors. It does <strong>not</strong> include compiler errors or test failures, which are shown in their respective terminal views.</p>
+        </div>
+        <ul class="error-log-list" id="error-log-list"></ul>
+        <p class="error-log-empty" id="error-log-empty">No errors recorded.</p>
+      </div>
+    </div>
+
+    <!-- Running-apps overlay. Fixed to the viewport so it stays visible from
+         every tab: several examples (and several watch sessions) can be live
+         at once, and this is the only place that shows all of them. -->
+    <aside class="running-dock" id="running-dock" hidden>
+      <button class="running-dock__toggle" id="running-dock-toggle" type="button" aria-expanded="true">
+        <span class="running-dock__pulse" aria-hidden="true"></span>
+        <span id="running-dock-count">0 running</span>
+        <span class="running-dock__chevron" id="running-dock-chevron" aria-hidden="true">▾</span>
+      </button>
+      <div class="running-dock__body" id="running-dock-body">
+        <ul class="running-dock__list" id="running-dock-list"></ul>
+        <div class="running-dock__footer">
+          <button id="running-dock-stop-all" class="secondary mini" type="button">Stop all</button>
+        </div>
+      </div>
+    </aside>
+
+    <script type="module" src="./app.js"></script>
+    <link rel="preload" href="/rae_syntax.json" as="fetch" type="application/json" crossorigin="anonymous" />
+  </body>
+</html>
