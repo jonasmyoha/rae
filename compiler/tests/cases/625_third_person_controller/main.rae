@@ -1,0 +1,58 @@
+import core
+import vec3
+import scene3d
+import app3d/camera_rig
+import app3d/character_controller
+open scene3d
+open app3d/camera_rig
+open app3d/character_controller
+
+const testPi: Float = 3.141592653589793
+
+func near(first: view Float, second: view Float, tolerance: view Float) ret Bool {
+  var difference: Float = first - second
+  if difference < 0.0 { difference = 0.0 - difference }
+  ret difference < tolerance
+}
+
+func main() {
+  var runner: ThirdPersonController = createThirdPersonController()
+  stepThirdPersonController(controller: runner, inputRight: 0.0, inputForward: 1.0,
+                            walking: false, cameraYaw: 0.0, dt: 1.0)
+  log("run is default: {near(first: runner.position.y, second: runner.runSpeed, tolerance: 0.001)}")
+
+  var walker: ThirdPersonController = createThirdPersonController()
+  stepThirdPersonController(controller: walker, inputRight: 0.0, inputForward: 1.0,
+                            walking: true, cameraYaw: 0.0, dt: 1.0)
+  log("shift walks: {near(first: walker.position.y, second: walker.walkSpeed, tolerance: 0.001)}")
+
+  var diagonal: ThirdPersonController = createThirdPersonController()
+  stepThirdPersonController(controller: diagonal, inputRight: 1.0, inputForward: 1.0,
+                            walking: false, cameraYaw: 0.0, dt: 1.0)
+  log("diagonal normalized: {near(first: vec3.vlen(a: diagonal.position), second: diagonal.runSpeed, tolerance: 0.001)}")
+
+  var turnedCamera: ThirdPersonController = createThirdPersonController()
+  stepThirdPersonController(controller: turnedCamera, inputRight: 0.0, inputForward: 1.0,
+                            walking: false, cameraYaw: testPi * 0.5, dt: 1.0)
+  log("movement follows camera: {turnedCamera.position.x < 0.0 - turnedCamera.runSpeed + 0.001 and near(first: turnedCamera.position.y, second: 0.0, tolerance: 0.001)}")
+
+  var shortest: ThirdPersonController = createThirdPersonController()
+  shortest.heading = testPi - 0.05
+  stepThirdPersonController(controller: shortest, inputRight: 0.05, inputForward: 0.0 - 1.0,
+                            walking: false, cameraYaw: 0.0, dt: 0.01)
+  log("turn takes shortest path: {shortest.heading > 3.0}")
+
+  stepThirdPersonController(controller: runner, inputRight: 0.0, inputForward: 0.0,
+                            walking: false, cameraYaw: 0.0, dt: 1.0)
+  log("idle stops: {runner.moving is false and runner.walking is false}")
+
+  var camera: Camera3d = defaultCamera3d()
+  var rig: CameraRig = createCameraRig(camera: camera)
+  toggleCameraRigMode(rig: rig, camera: camera)
+  toggleCameraRigMode(rig: rig, camera: camera)
+  log("two-mode apps stay two-mode: {rig.mode is CameraRigMode.orbit}")
+  rig.characterModeEnabled = true
+  toggleCameraRigMode(rig: rig, camera: camera)
+  toggleCameraRigMode(rig: rig, camera: camera)
+  log("character mode is opt-in: {rig.mode is CameraRigMode.character}")
+}

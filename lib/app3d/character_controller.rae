@@ -1,0 +1,134 @@
+# app3d/character_controller — camera-relative ground movement for third-person
+# examples. It owns intent and a world-space transform, not collision: a future
+# physics controller can replace the position integration while retaining the
+# same camera-relative direction, facing and animation state.
+import core
+import math
+import sdl3
+import vec3
+
+const characterKeyW: Int = 87
+const characterKeyA: Int = 65
+const characterKeyS: Int = 83
+const characterKeyD: Int = 68
+const characterKeyRight: Int = 262
+const characterKeyLeft: Int = 263
+const characterKeyDown: Int = 264
+const characterKeyUp: Int = 265
+const characterKeyLeftShift: Int = 340
+const characterPi: Float = 3.141592653589793
+
+type ThirdPersonController {
+  position: Vec3
+  heading: Float
+  moving: Bool
+  walking: Bool
+  walkSpeed: Float
+  runSpeed: Float
+  turnRate: Float
+}
+
+func createThirdPersonController() ret ThirdPersonController {
+  ret ThirdPersonController {
+    position: vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    heading: 0.0
+    moving: false
+    walking: false
+    walkSpeed: 1.7
+    runSpeed: 4.2
+    turnRate: 14.0
+  }
+}
+
+func wrapCharacterAngle(angle: view Float) ret Float {
+  var wrapped: Float = angle
+  loop wrapped > characterPi { wrapped = wrapped - characterPi * 2.0 }
+  loop wrapped < 0.0 - characterPi { wrapped = wrapped + characterPi * 2.0 }
+  ret wrapped
+}
+
+# Pure movement step, split from key polling so controller behavior is testable
+# without a window. `inputRight` and `inputForward` are each in [-1, 1].
+func stepThirdPersonController(controller: mod ThirdPersonController,
+                               inputRight: view Float, inputForward: view Float,
+                               walking: view Bool, cameraYaw: view Float,
+                               dt: view Float) ret Bool {
+  let oldPosition: Vec3 = controller.position
+  let oldHeading: Float = controller.heading
+  let oldMoving: Bool = controller.moving
+  let oldWalking: Bool = controller.walking
+
+  var localRight: Float = inputRight
+  var localForward: Float = inputForward
+  let inputLengthSq: Float = localRight * localRight + localForward * localForward
+  if inputLengthSq > 1.0 {
+    let inverseLength: Float = 1.0 / math.sqrt(x: inputLengthSq)
+    localRight = localRight * inverseLength
+    localForward = localForward * inverseLength
+  }
+  controller.moving = inputLengthSq > 0.0001 and dt > 0.0
+  controller.walking = controller.moving and walking
+
+  if controller.moving {
+    # Yaw zero looks from -Y toward +Y. These horizontal basis vectors match
+    # camera_rig exactly, so W always moves away from the camera center-line.
+    let forward: Vec3 = vec3.create(
+      x: 0.0 - math.sin(x: cameraYaw), y: math.cos(x: cameraYaw), z: 0.0)
+    let right: Vec3 = vec3.create(
+      x: math.cos(x: cameraYaw), y: math.sin(x: cameraYaw), z: 0.0)
+    let direction: Vec3 = vec3.vadd(
+      a: vec3.vscale(a: forward, s: localForward),
+      b: vec3.vscale(a: right, s: localRight))
+    var moveSpeed: Float = controller.runSpeed
+    if walking { moveSpeed = controller.walkSpeed }
+    controller.position = vec3.vadd(
+      a: controller.position, b: vec3.vscale(a: direction, s: moveSpeed * dt))
+
+    # A +Z rotation turns the model's +Y forward axis into `direction`.
+    let desiredHeading: Float = math.atan2(y: 0.0 - direction.x, x: direction.y)
+    let headingGap: Float = wrapCharacterAngle(angle: desiredHeading - controller.heading)
+    let turnAmount: Float = 1.0 - math.exp(x: 0.0 - controller.turnRate * dt)
+    controller.heading = wrapCharacterAngle(angle: controller.heading + headingGap * turnAmount)
+  }
+
+  ret controller.position.x is not oldPosition.x
+    or controller.position.y is not oldPosition.y
+    or controller.position.z is not oldPosition.z
+    or controller.heading is not oldHeading
+    or controller.moving is not oldMoving
+    or controller.walking is not oldWalking
+}
+
+# WASD and arrows are aliases. Running is the default; holding Shift selects
+# the slower walk gait, as requested for this game-mode experiment.
+func updateThirdPersonController(controller: mod ThirdPersonController,
+                                 allowInput: view Bool, cameraYaw: view Float,
+                                 dt: view Float) ret Bool {
+  var inputRight: Float = 0.0
+  var inputForward: Float = 0.0
+  var walking: Bool = false
+  if allowInput {
+    if sdl3.isKeyDown(key: characterKeyD) or sdl3.isKeyDown(key: characterKeyRight) {
+      inputRight = inputRight + 1.0
+    }
+    if sdl3.isKeyDown(key: characterKeyA) or sdl3.isKeyDown(key: characterKeyLeft) {
+      inputRight = inputRight - 1.0
+    }
+    if sdl3.isKeyDown(key: characterKeyW) or sdl3.isKeyDown(key: characterKeyUp) {
+      inputForward = inputForward + 1.0
+    }
+    if sdl3.isKeyDown(key: characterKeyS) or sdl3.isKeyDown(key: characterKeyDown) {
+      inputForward = inputForward - 1.0
+    }
+    walking = sdl3.isKeyDown(key: characterKeyLeftShift)
+  }
+  ret stepThirdPersonController(
+    controller: controller, inputRight: inputRight, inputForward: inputForward,
+    walking: walking, cameraYaw: cameraYaw, dt: dt)
+}
+
+func thirdPersonCameraTarget(controller: view ThirdPersonController,
+                             focusZ: view Float) ret Vec3 {
+  ret vec3.create(x: controller.position.x, y: controller.position.y,
+                  z: controller.position.z + focusZ)
+}
