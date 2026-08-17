@@ -102,6 +102,21 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
+        elif [ "$EXAMPLE_NAME" = "96_easing_3d" ]; then
+          SCREENSHOT="$TMP_OUT/easing3d.bmp"
+          if RAE_EASING3D_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=1200 \
+             RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 25 "$TMP_OUT/app" > "$TMP_OUT/render.log" 2>&1 \
+             && grep -q '\[easing3d\] deterministic deferred frame rendered' "$TMP_OUT/render.log" \
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --gpu3d-ui \
+                > "$TMP_OUT/screenshot.log" 2>&1; then
+            echo "PASS: $EXAMPLE_NAME (deferred easing + .raescene overlay)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (deferred easing render gate)"
+            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
+            ((FAILED++))
+          fi
         elif [ "$EXAMPLE_NAME" = "109_gpu3d_pbr" ]; then
           SCREENSHOT="$TMP_OUT/gpu3d.bmp"
           if RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
