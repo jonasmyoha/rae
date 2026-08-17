@@ -1,19 +1,18 @@
-# Advanced Pong (ECS Style)
+# Pong (Data-Oriented GPU2D)
 
-This example demonstrates an Entity-Component-System (ECS) style architecture in Rae.
+This example demonstrates a small data-oriented game using GPU2D rendering,
+SDL3 input, and an ECS-backed `.raescene` overlay.
 
 ## Components
-- **Transform**: Stores position (x, y, z).
+- **PaddleTransform**: Stores 2D positions.
 - **Velocity**: Stores movement vector (dx, dy).
-- **Paddle**: Marker component for paddles.
-- **Ball**: Marker component for the ball.
 
 ## Systems
-- **InputSystem**: Handles player input and updates paddle velocity.
-- **MovementSystem**: Updates positions based on velocity.
-- **CollisionSystem**: Handles ball bouncing and paddle collisions.
-- **RenderSystem**: Draws all entities based on their Transform.
+- **paddleInputSystem** reads SDL3 keyboard state.
+- **movementSystem** updates positions using delta time.
+- **bounceSystem** and **paddleCollisionSystem** implement gameplay.
+- GPU2D draws the play field while `.raescene` owns score/help text.
 
 ## Architecture
-Entities are currently handled implicitly via parallel lists of components.
-A more robust `Entity` manager can be built as the language matures.
+The game stays intentionally small: ordinary component structs and systems are
+enough for two paddles and one ball, while the UI uses Rae's real ECS.
