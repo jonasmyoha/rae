@@ -1,4 +1,4 @@
-# app3d/camera_rig — the orbit/free camera every 3D example was rewriting.
+# app3d/camera_rig — shared orbit, free and opt-in character-follow camera.
 #
 # Extracted from example 110, which had the only complete version: orbit
 # and WASD-fly modes, pointer drag, wheel zoom, keyboard nudges, a pitch
@@ -37,10 +37,15 @@ const keyE: Int = 69
 enum CameraRigMode {
   orbit
   free
+  character
 }
 
 type CameraRig {
   mode: CameraRigMode
+  # Apps with a controllable subject opt in. Other examples retain the
+  # original two-mode Orbit/WASD cycle and can never enter a mode they do
+  # not know how to supply a follow target for.
+  characterModeEnabled: Bool
   yaw: Float
   orbitPitch: Float
   freePitch: Float
@@ -92,6 +97,7 @@ type CameraRig {
 func createCameraRig(camera: view Camera3d) pub ret CameraRig {
   ret CameraRig {
     mode: CameraRigMode.orbit
+    characterModeEnabled: false
     yaw: 0.0
     orbitPitch: 0.38
     freePitch: 0.0 - 0.38
@@ -227,6 +233,9 @@ func cameraRigRight(rig: view CameraRig) pub ret Vec3 {
 }
 
 func cameraRigModeName(rig: view CameraRig) pub ret String {
+  if rig.mode is CameraRigMode.character {
+    ret "Character"
+  }
   if rig.mode is CameraRigMode.free {
     ret "WASD"
   }
@@ -244,10 +253,18 @@ func toggleCameraRigMode(rig: mod CameraRig, camera: mod Camera3d) pub {
     rig.mode = CameraRigMode.free
     rig.freePosition = camera.position
     rig.freePitch = 0.0 - rig.orbitPitch
-  } else {
+  } else if rig.mode is CameraRigMode.free {
     let forward: Vec3 = cameraRigForward(rig: rig)
     rig.orbitPitch = clampRigPitch(rig: rig, pitch: 0.0 - rig.freePitch)
     camera.target = vec3.vadd(a: rig.freePosition, b: vec3.vscale(a: forward, s: rig.distance))
+    if rig.characterModeEnabled {
+      rig.mode = CameraRigMode.character
+    } else {
+      rig.mode = CameraRigMode.orbit
+    }
+  } else {
+    # Character and orbit share the same orbit-camera representation; only
+    # the app's ownership of the pivot differs, so this switch cannot jump.
     rig.mode = CameraRigMode.orbit
   }
   # A mode switch is a deliberate re-anchor, so it must not be eased.
@@ -293,7 +310,7 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
     # no previous position to difference against, and using the stale one
     # snaps the view by the distance the pointer travelled while up.
     if rig.dragging {
-      if rig.mode is CameraRigMode.orbit {
+      if rig.mode is not CameraRigMode.free {
         mouseYaw = (px - rig.lastX) * rig.dragSpeed
         mouseOrbitPitch = 0.0 - (py - rig.lastY) * rig.dragSpeed
       } else {
@@ -320,7 +337,7 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
       if sdl3.isKeyDown(key: keyD) { keyYaw = keyYaw + dt * rig.keyTurnSpeed }
       if sdl3.isKeyDown(key: keyQ) { keyOrbitPitch = keyOrbitPitch - dt * rig.keyTurnSpeed }
       if sdl3.isKeyDown(key: keyE) { keyOrbitPitch = keyOrbitPitch + dt * rig.keyTurnSpeed }
-    } else {
+    } else if rig.mode is CameraRigMode.free {
       let step: Float = dt * rig.moveSpeed
       let forward: Vec3 = cameraRigForward(rig: rig)
       let right: Vec3 = cameraRigRight(rig: rig)
@@ -409,7 +426,7 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
 # no input between gives the same camera, which is what makes the
 # moved-flag above safe to gate rendering on.
 func applyCameraRig(rig: view CameraRig, camera: mod Camera3d) pub {
-  if rig.mode is CameraRigMode.orbit {
+  if rig.mode is not CameraRigMode.free {
     camera.position = orbitEye(
       targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z,
       yaw: rig.viewYaw, pitch: rig.viewOrbitPitch, dist: rig.viewDistance
@@ -434,7 +451,7 @@ func snapCameraRigView(rig: mod CameraRig) pub {
 }
 
 # ----- snapshot -------------------------------------------------------
-# Space-separated numbers rather than JSON: the payload is nine values, a
+# Space-separated numbers rather than JSON: the payload is twelve values, a
 # malformed or older line must degrade to "start fresh" rather than
 # half-apply, and the caller already owns a version tag for the rest of
 # its state. Restoring a partially-parsed camera is worse than not
@@ -456,6 +473,7 @@ func cameraRigPart(parts: view List(String), index: view Int) ret String {
 func cameraRigStateString(rig: view CameraRig, camera: view Camera3d) pub ret String {
   var modeNum: Int = 0
   if rig.mode is CameraRigMode.free { modeNum = 1 }
+  if rig.mode is CameraRigMode.character { modeNum = 2 }
   var smoothM: Int = 0
   if rig.smoothMouse { smoothM = 1 }
   var smoothK: Int = 0
@@ -472,7 +490,10 @@ func applyCameraRigState(parts: view List(String), offset: view Int,
   if parts.length < offset + cameraRigFields {
     ret false
   }
-  if cameraRigPart(parts: parts, index: offset).trim().toInt() is 1 {
+  let modeNum: Int = cameraRigPart(parts: parts, index: offset).trim().toInt()
+  if modeNum is 2 and rig.characterModeEnabled {
+    rig.mode = CameraRigMode.character
+  } else if modeNum is 1 {
     rig.mode = CameraRigMode.free
   } else {
     rig.mode = CameraRigMode.orbit
