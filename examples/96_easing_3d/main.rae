@@ -1,88 +1,128 @@
-open time
-open raylib
+# A minimal 3D easing example on Rae's production deferred renderer.
+import core
 import easing
-import time
+import gpu2d
+import gbuffer
+import math
+import sys
+import vec3
+import renderer_deferred
+import ui/ecs
+import ui/render_gpu2d
+import app3d/ui_shell
+open app3d/ui_shell
+open gbuffer
+open gpu3d
+open math3d
+open mesh3d
+open renderer_deferred
+open rendergraph
+open scene3d
+open ui/ecs
+open ui/render_gpu2d
 
-func main() {
-  initWindow(width: 800, height: 450, title: "Rae Easing 3D")
-  setTargetFPS(fps: 60)
-  
-  let cam: Camera3D = {
-    position: { x: 10.0, y: 10.0, z: 10.0 }
-    target: { x: 0.0, y: 0.0, z: 0.0 }
-    up: { x: 0.0, y: 1.0, z: 0.0 }
-    fovy: 45.0
-    projection: 0
+func uploadMeshData(meshData: view MeshData) ret MeshHandle {
+  ret uploadMesh(
+    verts: meshData.verts
+    vertCount: meshData.vertCount
+    indices: meshData.indices)
+}
+
+func buildScene(sphere: view MeshHandle, ground: view MeshHandle) ret Scene3d {
+  var scene: Scene3d = createScene3d()
+  let noEmission: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let noRotation: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let unitScale: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  let ballMaterial: Int = addMaterial(
+    scene: scene
+    baseColor: vec3.create(x: 0.12, y: 0.62, z: 0.95)
+    metallic: 0.15, roughness: 0.22, emission: noEmission)
+  let groundMaterial: Int = addMaterial(
+    scene: scene
+    baseColor: vec3.create(x: 0.16, y: 0.2, z: 0.27)
+    metallic: 0.0, roughness: 0.82, emission: noEmission)
+  let ballEntity: Int = addMeshInstance(
+    scene: scene, mesh: sphere, material: ballMaterial
+    position: vec3.create(x: 0.0, y: 0.0, z: 5.0)
+    rotation: noRotation, scale: unitScale)
+  let groundEntity: Int = addMeshInstance(
+    scene: scene, mesh: ground, material: groundMaterial
+    position: vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    rotation: noRotation, scale: unitScale)
+  ret scene
+}
+
+func main() ret Int {
+  gpu2d.initWindow(width: 960, height: 600, title: "Rae Easing 3D — Deferred")
+  gpu2d.setDesignResolution(width: 960.0, height: 600.0, fit: 0)
+
+  let sphereData: MeshData = makeSphere(rings: 32, segments: 48)
+  let planeData: MeshData = makePlane(size: 30.0, segments: 1)
+  let sphere: MeshHandle = uploadMeshData(meshData: sphereData)
+  let ground: MeshHandle = uploadMeshData(meshData: planeData)
+  var scene: Scene3d = buildScene(sphere: sphere, ground: ground)
+  var camera: Camera3d = defaultCamera3d()
+  camera.position = vec3.create(x: 10.0, y: 0.0 - 12.0, z: 8.0)
+  camera.target = vec3.create(x: 0.0, y: 0.0, z: 2.0)
+  let light: Light3d = defaultLight3d()
+
+  let uiResources: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: ""
+    themeFile: "theme.raescene")
+  var world: UiWorld = createUiWorld()
+  let uiRoot: EntityId = mountUiScene(
+    world: world
+    path: "examples/96_easing_3d/assets/ui.raescene"
+    res: uiResources)
+
+  var renderer: DeferredRenderer = createDeferredRendererWithUi()
+  let graphStatus: Int = compileDeferred(r: renderer)
+  if graphStatus is not 0 {
+    log("deferred graph invalid: {statusName(status: graphStatus)}")
+    ret 1
   }
-  
-  let timer: Timer = createTimer()
-  let animDuration: Float = 3.0
-  start(t: timer)
-  
-  loop not windowShouldClose() {
-    var elapsed: Float = elapsedSeconds(t: timer)
-    if elapsed > animDuration {
-      reset(t: timer)
-      start(t: timer)
-      elapsed = 0.0
+
+  let duration: Float = 3.0
+  let startTime: Float64 = gpu2d.nowSeconds()
+  let fixedTestFrame: Bool = sys.getEnv(name: "RAE_EASING3D_TEST_FRAME").length() > 0
+  loop not gpu2d.pollClose() {
+    let resized: Bool = resizeUiToWindow(world: world, res: uiResources)
+    var elapsed: Float = (gpu2d.nowSeconds() - startTime) as Float
+    loop elapsed > duration { elapsed = elapsed - duration }
+    if fixedTestFrame { elapsed = 1.8 }
+    let phase: Float = elapsed / duration
+    let bounce: Float = easing.easeOutBounce(t: phase)
+    let currentZ: Float = 5.0 - 4.0 * bounce
+    setTransform(
+      scene: scene, entity: 0
+      transform: Transform3d {
+        position: vec3.create(x: 0.0, y: 0.0, z: currentZ)
+        rotation: vec3.create(x: 0.0, y: phase * 3.14159, z: 0.0)
+        scale: vec3.create(x: 1.0, y: 1.0, z: 1.0)
+      })
+    runUiSystems(world: world, res: uiResources)
+
+    let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
+    var passIndex: Int = 0
+    loop passIndex < deferredOrderLength(r: renderer) {
+      let tag: Int = deferredTagAt(r: renderer, i: passIndex)
+      if tag is tagUiOverlayD {
+        gpu2d.beginFrameLoad()
+        renderSystemGpu2d(world: world, res: uiResources)
+      } else {
+        renderDeferredPass(
+          r: renderer, tag: tag, scene: scene
+          camera: camera, light: light, aspect: aspect)
+      }
+      passIndex = passIndex + 1
     }
-    
-    let t: Float = elapsed / animDuration
-    let bounceY: Float = easing.easeOutBounce(t: t)
-    let currentY: Float = 5.0 - 5.0 * bounceY
-    
-    # Modern Rainbowish Colors
-    let hue: Float = t * 360.0
-    let ballColor: Color = colorFromHSV(hue: hue, saturation: 0.7, value: 0.9)
-    
-    beginDrawing()
-    
-    # Nice dark background
-    clearBackground(color: { r: 15, g: 15, b: 25, a: 255 })
-    
-    beginMode3D(camera: cam)
-    
-    # Ground
-    drawGrid(slices: 20, spacing: 1.0)
-    
-    # Shadow on the ground (using a flattened cylinder as a shadow)
-    # Scale shadow based on height
-    let shadowSize: Float = 1.0 + (currentY * 0.1)
-    let shadowAlpha: Int = toInt(this: 150.0 / (1.0 + currentY))
-    drawCylinder(
-      position: { x: 0.0, y: 0.0, z: 0.0 }
-      radiusTop: shadowSize
-      radiusBottom: shadowSize
-      height: 0.01
-      slices: 20
-      color: { r: 0, g: 0, b: 0, a: shadowAlpha }
-    )
-    
-    # Main Ball
-    drawSphere(
-      centerPos: { x: 0.0, y: currentY, z: 0.0 }
-      radius: 1.0
-      color: ballColor
-    )
-    
-    # Add a small highlight sphere for "shading"
-    drawSphere(
-      centerPos: { x: 0.3, y: currentY + 0.5, z: 0.3 }
-      radius: 0.3
-      color: { r: 255, g: 255, b: 255, a: 100 }
-    )
-    
-    endMode3D()
-    
-    drawText(
-      text: "3D Easing: easeOutBounce"
-      x: 20.0
-      y: 20.0
-      fontSize: 20.0
-      color: { r: 120, g: 120, b: 140, a: 255 }
-    )
-    
-    endDrawing()
+    snapshotPrevTransforms(scene: scene)
   }
-  closeWindow()
+
+  if fixedTestFrame { log("[easing3d] deterministic deferred frame rendered") }
+  gbuffer.shutdownAll()
+  gpu2d.closeWindow()
+  ret 0
 }
