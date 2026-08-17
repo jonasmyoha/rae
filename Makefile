@@ -1,7 +1,7 @@
-.PHONY: all dev build test stop gemini llm up
+.PHONY: all dev build test stop setup devtools-install devtools-lint devtools-test gemini llm up
 
 SESSION_DIR ?= $(HOME)/.ws
-PROJECT_KEY := rae-lang-dev
+PROJECT_KEY := rae
 USER_KEY := $(shell id -un)
 SESSION_LATEST := $(SESSION_DIR)/$(PROJECT_KEY).$(USER_KEY).latest
 SESSION_HISTORY := $(SESSION_DIR)/$(PROJECT_KEY).$(USER_KEY).history.log
@@ -9,16 +9,28 @@ SESSION_HISTORY := $(SESSION_DIR)/$(PROJECT_KEY).$(USER_KEY).history.log
 all: dev
 
 dev:
-	@$(MAKE) -C rae-devtools-web dev
+	@$(MAKE) -C tools/devtools-web dev
 
 build:
-	@$(MAKE) -C rae/compiler build
+	@$(MAKE) -C compiler build
 
 test:
-	@$(MAKE) -C rae/compiler test
+	@$(MAKE) -C compiler test
 
 stop:
-	@$(MAKE) -C rae-devtools-web stop
+	@$(MAKE) -C tools/devtools-web stop
+
+setup:
+	@./setup.sh
+
+devtools-install:
+	@cd tools/devtools-web && bun install --frozen-lockfile
+
+devtools-lint:
+	@cd tools/devtools-web && bun run lint
+
+devtools-test:
+	@cd tools/devtools-web && bun run test:runner
 
 llm:
 	@mkdir -p "$(SESSION_DIR)"
