@@ -1,167 +1,65 @@
-# 97_tetris3d — Design
+# 97 Tetris 3D Design
 
-A 3D-rendered Tetris that doubles as a stress test for several Rae features
-in one place: multi-file projects with auto-imports, structured game state,
-and a Bevy-flavoured component/system layout that the language can express
-without macros or runtime reflection.
+This example is a playable Tetris and a compact integration test for Rae's
+production graphics stack: SDL3 input, the deferred WebGPU renderer, persistent
+`Scene3d` entities, and an ECS-backed `.raescene` HUD.
 
-## Goals
+## Boundaries
 
-1. **Playable Tetris in 3D.** Same rules as 2D Tetris, rendered with raylib's
-   3D primitives. Camera floats around the well; each block is a cube.
-2. **Multi-file project.** Each `.rae` file under `97_tetris3d/` carries one
-   responsibility. The compiler's auto-import already picks up siblings, so
-   files don't need explicit cross-imports.
-3. **ECS-flavoured architecture.** Bevy-style separation of *components*
-   (data), *systems* (functions over `World`), and a fixed-order *schedule*
-   per frame. We do **not** build a true type-erased entity-component
-   storage — that would need either macros or runtime reflection. Instead,
-   each component lives in a typed `List(T)` on the `World` and "entities"
-   are `Int` ids that index into those lists.
-4. **Particle effects + camera flair** for line clears, locks, and rotations.
-5. **Heads-up UI**: score, level, lines, next piece. Plain `drawText` for
-   now — the user has flagged a UI refactor as a separate task.
-6. **Reuse from `94_tetris2d`** wherever pieces lift cleanly: tetromino
-   shapes, rotation table, line-clear logic, scoring.
+- `world.rae`, `tetromino.rae`, and `physics.rae` own game state and rules.
+- `input.rae` maps SDL3 keyboard state into game actions.
+- `particles.rae` updates a fixed-capacity particle component list.
+- `render.rae` extracts game state into a persistent deferred `Scene3d`.
+- `hud.rae` synchronizes game resources into persistent `.raescene` entities.
+- `main.rae` owns the fixed-step simulation and deferred render-graph dispatch.
 
-## Non-goals (for this round)
+The game world remains deliberately simple: a typed `World` resource with a
+row-major `List(Int)` board and a fixed `List(Particle)`. The renderer is the
+actual renderer ECS. It allocates one mesh entity for each possible board cell,
+four for the active piece, and one for each particle. Empty slots are hidden by
+moving them outside the view, so gameplay never rebuilds meshes or grows render
+component tables.
 
-- True dynamic ECS storage (sparse sets, archetypes, query macros).
-- Audio. Raylib's audio bindings aren't there yet.
-- Networking, leaderboards persisted to disk. Runtime-only highscore for now.
-- Touch / gamepad input.
+## Frame Schedule
 
-## File layout
+The render loop is uncapped, while gameplay advances through a 60 Hz
+accumulator:
 
-```
-examples/97_tetris3d/
-  DESIGN.md          # this document
-  main.rae           # entry: schedule, frame loop
-  world.rae          # World type, init, GameState enum
-  tetromino.rae      # TetrominoKind enum, shapes, colours
-  input.rae          # input system (DAS, soft drop, hard drop)
-  physics.rae        # gravity, lock, line clears, scoring
-  render.rae         # 3D scene rendering
-  particles.rae      # particle component + spawn/update systems
-  hud.rae            # 2D overlay (score, level, next piece)
-  camera.rae         # Camera3D setup + motion system
+```text
+poll SDL3 events
+run zero or more fixed simulation ticks
+sync .raescene HUD components
+extract transforms/materials into Scene3d
+walk the deferred render graph
+render ECS UI at the graph's UI pass
+present once
 ```
 
-Auto-import means each file just needs `import raylib` (and `math` etc.) at
-the top — sibling files come along for free.
+This separation is required because the original gameplay timers count fixed
+ticks; driving them once per GPU frame would make gravity depend on render
+performance.
 
-## Architecture: components, systems, schedule
+## Rendering
 
-### Components (data)
+The world convention is right-handed Z-up. Board rows map from top to bottom on
+the Z axis. Blocks use a generated box mesh and seven PBR materials. A dark,
+shallow box behind the well provides visual depth and separation. Particles
+reuse the same mesh/material resources.
 
-Stored as fields on a single `World` struct. The "entity id" is just the
-index into a parallel array, plus an `active: Bool` flag for free-slot
-reuse. A real ECS would compress this, but for ~20 particles + ~200 grid
-cells the simple form is faster to read than a sparse-set library.
+The forward renderer is not used. It remains only a renderer reference path;
+new 3D examples target deferred rendering.
 
-```
-type Block {
-  active: Bool        # false slot = free; reuse before growing
-  x: Int              # grid coords (snapped to integers on lock)
-  y: Int
-  kind: Int           # 1..7 colour id
-  bornAt: Float       # for lock-flash effect
-}
+## UI
 
-type Particle {
-  active: Bool
-  pos: Vector3
-  vel: Vector3
-  life: Float         # seconds remaining
-  size: Float
-  color: Color
-}
-```
+`assets/ui.raescene` owns all visible text and panels. Rae code only updates
+score, lines, level, next-piece text, and pause/game-over active state. The
+shared MSDF font/theme fixture keeps this example small while still exercising
+the same scene loader, ECS systems, and GPU2D composition as larger apps.
 
-The active piece, score, and level live on `World` directly — they're
-"resources" in Bevy parlance, and there's only ever one of each.
+## Deliberate Limits
 
-### Systems (functions)
-
-```
-inputSystem(w: mod World)        # keyboard → piece movement / rotation
-physicsSystem(w: mod World)      # gravity, lock, line clear
-particleSystem(w: mod World)     # update active particles
-cameraSystem(w: mod World)       # smooth camera lerp
-renderSystem(w: view World)      # 3D draw pass
-hudSystem(w: view World)         # 2D overlay
-```
-
-Each system is a free function. A system that needs to mutate gets `mod
-World`; a read-only one gets `view World`. The "schedule" is the explicit
-call order in `main.rae`'s frame loop.
-
-### Frame schedule (in main.rae)
-
-```
-loop not windowShouldClose() {
-  inputSystem(w)
-  physicsSystem(w)
-  particleSystem(w)
-  cameraSystem(w)
-  beginDrawing()
-  clearBackground(...)
-  beginMode3D(w.camera)
-    renderSystem(w)
-  endMode3D()
-  hudSystem(w)
-  endDrawing()
-}
-```
-
-This explicit order is the closest pragmatic equivalent to Bevy's `App`
-schedule. If the example grows, the function list becomes a `List(System)`
-with each system tagged `Update` / `Render` / etc. — but that abstraction
-is overkill at this size.
-
-## Reuse from `94_tetris2d`
-
-Lifted verbatim or near-verbatim:
-- `TetrominoKind` enum
-- Rotation table (`getShapeCell`)
-- `getKindId` colour mapping
-- `canMove`, `lockPiece`, `checkLines`, scoring formula
-- DAS / soft-drop / lock-delay timers
-
-Adapted:
-- `getModernColor` → unchanged but exposed from `tetromino.rae`
-- 2D draw routine is replaced entirely; 3D version draws cubes per cell.
-- `Game` becomes `World`; the 2D-specific timer fields stay.
-
-New for 3D:
-- Camera3D and a smooth-orbit `cameraSystem`.
-- Particles (line clear → burst at each cleared row's centre).
-- Lock-flash: brief tint multiplier on freshly locked blocks.
-- 3D well frame: wireframe rectangle drawn around the playing field.
-
-## Particle system
-
-`World.particles: List(Particle)` with `MAX_PARTICLES = 64`. On
-construction the list is filled with `active: false` slots. Spawning finds
-the first inactive slot; if none, the spawn is dropped (simpler than
-growing the list mid-frame).
-
-Every frame, `particleSystem`:
-1. For each active particle: `pos += vel * dt`, `life -= dt`, fade alpha
-   from `life / lifeStart`. Mark inactive when `life <= 0`.
-2. Simple gravity: `vel.y -= 9.8 * dt`.
-
-`renderSystem` draws active particles as small `drawCube`s in 3D space.
-
-## Open questions / future work
-
-- **Audio**: needs raylib audio bindings (`InitAudioDevice`, `LoadSound`,
-  `PlaySound`). Out of scope for this round.
-- **Persistent highscore**: `formatTimestamp` and `writeFile` exist; just
-  needs a `highscore.json`. Easy follow-up.
-- **Real ECS**: macroless query syntax is awkward in Rae. Consider once
-  the language has a `for entity, &Position, &mut Velocity in world {...}`
-  shape that doesn't require codegen tricks.
-- **3D models**: `.glb` loading. Out of scope.
-- **Refactor UI** to use a layout primitive instead of hand-placed
-  `drawText` — flagged by user as a separate task.
+- No audio yet.
+- The next-piece HUD uses a compact text identifier rather than a second mesh
+  preview.
+- The game world is not a generic ECS; introducing reflection or macros for a
+  tiny fixed board would obscure the language example rather than improve it.
