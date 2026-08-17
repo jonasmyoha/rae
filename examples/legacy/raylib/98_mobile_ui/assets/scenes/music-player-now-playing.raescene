@@ -1,0 +1,120 @@
+{
+  "type": "Scene",
+  "version": 2,
+  "sceneId": "music-player-now-playing",
+  "root": "NowPlaying",
+  "nodes": {
+    "NowPlaying": {
+      "Layout": {"type": "Vertical", "gap": 18, "alignCross": "Center"},
+      "Padding": {"l": 20, "t": "spaceL", "r": 20, "b": "spaceL"},
+      "Shape": {"kind": "Rect", "fill": "surface"},
+      "Children": ["Hero", "TitleRow", "ProgressBar", "TimeLabels", "Controls"]
+    },
+
+    "Hero": {
+      "Rect": {"x": 0, "y": 0, "w": 320, "h": 320},
+      "Sprite": {"textureKey": "albumCover", "tint": "imageTint"},
+      "HeroWidget": {"key": "albumCover"}
+    },
+
+    "TitleRow": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 64},
+      "Size": {"w": {"mode": "Fill"}, "h": {"mode": "Fixed"}},
+      "Layout": {"type": "Horizontal", "gap": "spaceL", "alignCross": "Center"},
+      "Children": ["HeartBtn", "TitleBlock", "TitleMoreBtn"]
+    },
+    "HeartBtn": {
+      "Rect": {"x": 0, "y": 0, "w": 32, "h": 32},
+      "Sprite": {"textureKey": "mat:favorite_border", "tint": "textPrimary"},
+      "OnClick": {"actionId": "playback.like"}
+    },
+    "TitleBlock": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 64},
+      "Size": {"w": {"mode": "Fill"}, "h": {"mode": "Fixed"}},
+      "Layout": {"type": "Vertical", "gap": 2, "alignCross": "Center"},
+      "Children": ["TrackTitle", "TrackArtist"]
+    },
+    "TrackTitle": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 40},
+      "Size": {"w": {"mode": "Fill"}, "h": {"mode": "Fixed"}},
+      "Text": {"text": "Unsayable", "styleId": "h1"}
+    },
+    "TrackArtist": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 22},
+      "Size": {"w": {"mode": "Fill"}, "h": {"mode": "Fixed"}},
+      "Text": {"text": "Brambles", "styleId": "muted"}
+    },
+    "TitleMoreBtn": {
+      "Rect": {"x": 0, "y": 0, "w": 32, "h": 32},
+      "Sprite": {"textureKey": "mat:more_horiz", "tint": "textPrimary"},
+      "OnClick": {"actionId": "track.more"}
+    },
+
+    "ProgressBar": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 4},
+      "Size": {"w": {"mode": "Fill"}, "h": {"mode": "Fixed"}},
+      "Shape": {"kind": "RoundedRect", "radius": 2, "fill": "outline"},
+      "Layout": {"type": "Stack", "gap": 0, "alignCross": "Start"},
+      "Children": ["ProgressFill"]
+    },
+    "ProgressFill": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 4},
+      "Size": {"w": {"mode": "Fixed"}, "h": {"mode": "Fixed"}},
+      "Align": {"x": "Start", "y": "Center"},
+      "Shape": {"kind": "RoundedRect", "radius": 2, "fill": "accent"}
+    },
+
+    "TimeLabels": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 20},
+      "Size": {"w": {"mode": "Fill"}, "h": {"mode": "Fixed"}},
+      "Layout": {"type": "Horizontal", "gap": 0, "alignMain": "SpaceBetween", "alignCross": "Center"},
+      "Children": ["TimeNow", "TimeTotal"]
+    },
+    "TimeNow": {
+      "Rect": {"x": 0, "y": 0, "w": 60, "h": 18},
+      "Text": {"text": "1:04", "styleId": "caption"}
+    },
+    "TimeTotal": {
+      "Rect": {"x": 0, "y": 0, "w": 60, "h": 18},
+      "Text": {"text": "2:52", "styleId": "timeTotal"}
+    },
+
+    "Controls": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 80},
+      "Size": {"w": {"mode": "Fill"}, "h": {"mode": "Fixed"}},
+      "Layout": {"type": "Horizontal", "gap": "spaceXL", "alignMain": "Center", "alignCross": "Center"},
+      "Children": ["ShuffleBtn", "PrevBtn", "PlayCircle", "NextBtn", "RepeatBtn"]
+    },
+    "ShuffleBtn": {
+      "Rect": {"x": 0, "y": 0, "w": 28, "h": 28},
+      "Sprite": {"textureKey": "mat:shuffle", "tint": "textPrimary"},
+      "OnClick": {"actionId": "playback.shuffle"}
+    },
+    "PrevBtn": {
+      "Rect": {"x": 0, "y": 0, "w": 36, "h": 36},
+      "Sprite": {"textureKey": "mat:skip_previous", "tint": "textPrimary"},
+      "OnClick": {"actionId": "playback.prev"}
+    },
+    "PlayCircle": {
+      "Rect": {"x": 0, "y": 0, "w": 72, "h": 72},
+      "Shape": {"kind": "Circle", "fill": "accent", "radius": 36},
+      "Layout": {"type": "Stack", "gap": 0, "alignCross": "Center"},
+      "OnClick": {"actionId": "playback.toggle"},
+      "Children": ["PlayIcon"]
+    },
+    "PlayIcon": {
+      "Rect": {"x": 0, "y": 0, "w": 32, "h": 32},
+      "Sprite": {"textureKey": "mat:play_arrow", "tint": "accentText"}
+    },
+    "NextBtn": {
+      "Rect": {"x": 0, "y": 0, "w": 36, "h": 36},
+      "Sprite": {"textureKey": "mat:skip_next", "tint": "textPrimary"},
+      "OnClick": {"actionId": "playback.next"}
+    },
+    "RepeatBtn": {
+      "Rect": {"x": 0, "y": 0, "w": 28, "h": 28},
+      "Sprite": {"textureKey": "mat:repeat", "tint": "textPrimary"},
+      "OnClick": {"actionId": "playback.repeat"}
+    }
+  }
+}
