@@ -16,3 +16,5 @@ SDL3 input, and an ECS-backed `.raescene` overlay.
 ## Architecture
 The game stays intentionally small: ordinary component structs and systems are
 enough for two paddles and one ball, while the UI uses Rae's real ECS.
+
+Use W/S or the arrow keys to move and R to restart the match.
