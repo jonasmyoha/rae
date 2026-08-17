@@ -9,6 +9,7 @@ import app3d/ui_shell
 open app3d/ui_shell
 open math
 open ui/ecs
+open ui/debug_overlay
 open ui/render_gpu2d
 
 const canvasW: Float = 800.0
@@ -459,11 +460,11 @@ func drawCell(x: view Float, y: view Float, size: view Float, colorId: view Int)
   let color: Int = getModernColor(index: colorId)
   let outline: Int = getOutlineColor(index: colorId)
   gpu2d.drawRoundedRect(
-    x: x, y: y, w: size, h: size
-    radius: 4.0, color: outline)
+    x: x - 1.0, y: y - 1.0, w: size + 2.0, h: size + 2.0
+    radius: 5.0, color: outline)
   gpu2d.drawRoundedRect(
-    x: x + 2.0, y: y + 2.0, w: size - 4.0, h: size - 4.0
-    radius: 2.0, color: color)
+    x: x + 1.0, y: y + 1.0, w: size - 2.0, h: size - 2.0
+    radius: 3.0, color: color)
 }
 
 func shouldFillTestCell(row: view Int, column: view Int) ret Bool {
@@ -707,6 +708,8 @@ func main() ret Int {
     textFontName: "Roboto-Regular"
     iconFontName: ""
     themeFile: "theme.raescene")
+  var dbg: DebugOverlay = createDebugOverlay(
+    button: true, fps: true, memory: true, heartbeat: false)
   var world: UiWorld = createUiWorld()
   let uiRoot: EntityId = mountUiScene(
     world: world
@@ -743,6 +746,11 @@ func main() ret Int {
   var displayedLevel: Int = 0 - 1
 
   loop not gpu2d.pollClose() {
+    let now: Float64 = gpu2d.nowSeconds()
+    if updateDebugOverlay(
+      d: dbg, screenW: gpu2d.designWidth(), screenH: gpu2d.designHeight()
+      now: now, didRealWork: true) {
+    }
     let resized: Bool = resizeUiToWindow(world: world, res: uiResources)
     # Input: Global (Menu/GameOver)
     if g.state is GameState.gameOver {
@@ -781,6 +789,7 @@ func main() ret Int {
     gpu2d.beginFrame(r: 0.03, g: 0.05, b: 0.09, a: 1.0)
     drawGame(g: g)
     renderSystemGpu2d(world: world, res: uiResources)
+    drawDebugOverlay(d: dbg, font: uiResources.textFont, didRealWork: true)
     gpu2d.endFrame()
   }
   gpu2d.closeWindow()
