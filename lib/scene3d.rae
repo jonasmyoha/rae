@@ -215,6 +215,38 @@ func setTransform(scene: mod Scene3d, entity: view Int, transform: view Transfor
   scene.revision = scene.revision + 1
 }
 
+# Reposition an entity without synthesising motion between the old and new
+# locations. Streaming worlds use this when a pooled object wraps from behind
+# the camera to a newly visible cell; treating that reuse as physical motion
+# would create a full-screen velocity streak in TAA.
+func teleportTransform(scene: mod Scene3d, entity: view Int, transform: view Transform3d) {
+  scene.transforms.set(index: entity, value: transform)
+  scene.prevTransforms.set(index: entity, value: transform)
+  scene.revision = scene.revision + 1
+}
+
+# Visibility is renderer-component state rather than a transform trick. This
+# keeps pooled variants resident without submitting inactive meshes or hiding
+# them at extreme coordinates that enlarge culling and shadow bounds.
+func setMeshInstanceVisible(scene: mod Scene3d, entity: view Int, visible: view Bool) {
+  var index: Int = 0
+  loop index < scene.meshRenderers.length {
+    if let renderer: MeshRenderer = scene.meshRenderers.at(index: index) {
+      if renderer.entity is entity {
+        if renderer.visible is not visible {
+          scene.meshRenderers.set(index: index, value: MeshRenderer {
+            entity: renderer.entity, mesh: renderer.mesh,
+            material: renderer.material, visible: visible
+          })
+          scene.revision = scene.revision + 1
+        }
+        ret
+      }
+    }
+    index = index + 1
+  }
+}
+
 # Advance frame history: current transforms become the previous frame's.
 # Call exactly once per rendered frame, AFTER extraction/draw and before
 # the next frame's mutations. Forgetting this makes motion vectors read
