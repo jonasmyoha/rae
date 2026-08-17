@@ -25,12 +25,13 @@ Lightweight developer dashboard that keeps Rae compiler contributors aware of bu
 ### Prerequisites
 
 - [Bun](https://bun.sh/) ≥ 1.0 (preferred) or Node.js ≥ 18
-- Rae compiler repository available next to this project (default `../rae`)
+- Rae compiler built in this monorepo (`make build` from the repository root)
 
 ### Install Dependencies
 
 ```bash
-bun install
+# From the monorepo root:
+make devtools-install
 ```
 
 ### Configuration
@@ -39,7 +40,7 @@ bun install
 
 ```json
 {
-  "compilerPath": "../rae",
+  "compilerPath": "../..",
   "port": 3000,
   "examplesPath": "examples",
   "defaultTarget": "live",
@@ -82,14 +83,14 @@ bun install
 ### Run the Dashboard
 
 ```bash
-# Development server with auto-restart + client reload
-bun run dev
+# From the monorepo root; starts the development server with auto-reload
+make dev
 
 # Stop the dev server (kills the listener on the configured port)
 make stop
 
-# Production build (if/when a bundle step exists)
-bun run start
+# Direct component commands can also run from tools/devtools-web
+cd tools/devtools-web && bun run start
 ```
 
 `bun run dev` launches a small watcher that restarts the Bun server whenever files under `src/`, `config.json`, `config.local.json`, or `package.json` change. The browser auto-reloads after each restart, so you rarely need to refresh manually. The server exposes both HTTP and WebSocket endpoints; open `http://localhost:3000` in a browser.
@@ -111,7 +112,7 @@ bun run start
 
 ### Run the Examples
 
-- The **Examples** panel scans the configured `examplesPath` (defaults to `../rae/examples`) and lists every `.rae` demo project, including metadata from optional `.raepack` files (name, category, target restrictions, actions, etc.).
+- The **Examples** panel scans the configured `examplesPath` (the monorepo's `examples/` directory by default) and lists every `.rae` demo project, including metadata from optional `.raepack` files (name, category, target restrictions, actions, etc.).
 - Select an example and pick a target via the dropdown in the panel header. Examples can opt into specific targets (e.g., the new **Hybrid hot reload demo** only exposes the Hybrid profile).
 - Use **Run**, **Live watch**, or **Build artifacts**:
   - **Run** executes the configured per-target command (Live uses `rae run`, Hybrid/Compiled run `rae build` with a temp output dir).
@@ -133,7 +134,7 @@ bun run start
 
 - The **Test sources** panel lists files from `testsPath` (default `compiler/tests`) and renders them with a lightweight Rae syntax highlighter.
 - Select a file to see its contents; use the corner copy icon to grab the code for editor reproduction or bug reports.
-- The highlighter loads `syntaxSummaryPath` (default `../rae/docs/rae_syntax.json`) for authoritative tokens—keep that file up to date as the language evolves.
+- The highlighter loads `syntaxSummaryPath` (the monorepo's `docs/rae_syntax.json` by default) for authoritative tokens—keep that file up to date as the language evolves.
 
 ### Error Log
 

@@ -199,7 +199,7 @@ void rae_ext_setTargetFPS(int64_t fps) { SetTargetFPS((int)fps); }
  *     a Compiled-target program)
  *   - compiler/tools/run_examples.sh
  *   - examples/98_mobile_ui/snapshot.sh
- *   - rae-devtools-web/src/server/config.ts (the IDE-style runner)
+ *   - tools/devtools-web/src/server/config.ts (the IDE-style runner)
  *
  * If you're adding a new launcher: link `/opt/homebrew/lib/libraylib.a`
  * directly, NOT `-lraylib`. The dynamic library is missing the GLFW

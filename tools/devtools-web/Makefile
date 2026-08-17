@@ -15,4 +15,4 @@ stop:
 # view (served at /wasm/raytracer.wasm). Needs wasi-sdk (set WASI_SDK).
 wasm:
 	@echo "Building Rae raytracer -> WASM..."
-	@../rae/compiler/tools/wasm_build.sh examples/46_raytracer_wasm_web
+	@../../compiler/tools/wasm_build.sh examples/46_raytracer_wasm_web
