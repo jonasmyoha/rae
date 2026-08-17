@@ -122,7 +122,7 @@ const DEFAULT_TARGETS: TargetConfig[] = [
 const DEFAULT_COMPILER_TARGET_IDS = ["live", "compiled"];
 
 const DEFAULT_CONFIG: RaeDevtoolsConfig = {
-  compilerPath: "../rae",
+  compilerPath: "../..",
   port: 3000,
   testsPath: "compiler/tests",
   syntaxSummaryPath: "docs/rae_syntax.json",

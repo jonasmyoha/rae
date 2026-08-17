@@ -1,54 +1,58 @@
 # Clo memory
 
-## Active investigation: mobile UI regression triple (2026-05-15)
+## Durable Rae design principles (carry across tasks)
+- **Value/ref boundary:** `mod`/`view`/`own`/`=>` make refs; else by value.
+- **Two backends:** Compiled (C) is the target; Live VM deprecated/frozen.
+- **Ownership model IS a borrow checker** (view/mod/own/copy + cascade-drop,
+  no GC). `List(Struct)` doesn't reliably deep-copy inner heap fields → keep
+  components primitive/Vec3-only.
+- **COORDINATE MANDATE:** `docs/coordinate-system.md` — right-handed **Z-up**
+  Blender (+X right, +Y forward, +Z up), yaw about +Z. "New 3D code MUST use
+  Z-up." Only the projection touches clip space, so WebGPU's Y-up preference
+  never justifies Y-up world space. I got this WRONG in review; verify docs
+  before asserting conventions.
+- **Namespacing:** a lib calling another package needs `open pkg`, not
+  `import pkg` (bare calls otherwise error).
+- Paren-precedence codegen bug fixed (test 548). Parser still SEGFAULTS on
+  `view` as a let-binding name (#288, open).
 
-Three regressions reported simultaneously after rae commits
-`62e4c6b` (parser/runtime) and `b5b07e2` (mobile UI refactor):
+## 3D renderer unification — IMPLEMENTED as lead (2026-07-31)
+Scores: 107=6.6 (GPT-5.5 raymarch), 108=7.35 (GPT-5.6-Sol raymarch, best
+data model), 109=7.9 (mine, raster PBR — only shippable architecture).
+Both raymarchers are capped by a per-frame GPU→CPU→GPU pixel round-trip.
 
-1. **Pill bg missing** — `album_view.rae:170` `buildPill` is missing
-   the `setShapeRounded(... fill, radius: h/2)` call between
-   `setRectFixed` and `setLayout`. One-line restore. Trivial.
-2. **Live VM exits with "cannot assign to a read-only 'view'
-   reference"** — `<unknown>:0:0` source location. The string lives
-   at `compiler/src/vm.c:448` inside `OP_SET_LOCAL`. Runtime error,
-   not parse-time. Fires after texture loads → inside build-world
-   loop. Likely root cause: parser change in 62e4c6b
-   (`expr_to_type_ref` + nested generic-arg conversion + `pub` on
-   types) interacting with the `sizeof(StringMapEntry(V))()` fix in
-   `lib/core.rae` such that StringMap.set's `entry.value = value`
-   assignment now sees `entry` as a view-ref. Live VM emitter
-   wasn't re-tested after parser changes — that's the gap.
-3. **MGMT cover renders dark** — config.rae now defines
-   `imageTintColor: RgbaColor = {255,255,255,255}` and
-   album_view.rae's `buildAlbumHero` reads it across files. raylib
-   multiplies texture by tint; near-zero alpha → black. Suspect:
-   cross-file struct-global is hitting same view-ref / struct-copy
-   issue as Bug 3.
+**Landed** (rae 81caf33/doc, outer 107a3a8):
+- Z-up conversion of math3d (doc-exact lookAt basis + degenerate fallback,
+  `orbitEye`, `mat4ScaleXYZ`) and mesh3d (sphere poles ±Z, plane XY/+Z,
+  torus ring XY, CCW winding preserved).
+- `lib/scene3d.rae` — backend-agnostic scene: Vec3 components, entity
+  indirection (from 108), typed generation-carrying Mesh/MaterialHandle
+  (from Chattie), and the KEY insight: geometry is a **tagged split**
+  (MeshRenderer=raster vs SdfPrimitive=raymarch). Total unification is
+  impossible only at geometry; everything above it is shared.
+- `lib/gpu3d.rae` — typed seam: `beginScene(camera, light, aspect, time)` +
+  `renderScene(scene)`. The 36-float block and draw(9 floats) are now
+  internal encoding. C mesh handles are **1-based** (slot+1), so id 0 = none.
+- 109 ported + verified headless (659 colours, correct Z-up layout).
+- `rae/docs/unified-3d-renderer.md` — scores, architecture, disagreement
+  resolutions, keep-list, all limitations mapped to queue items.
+- QUEUE #306-#316 = every deferred review item (Mat4 value types to stop
+  per-frame heap churn, inverse-transpose normals, HDR+tonemap pass, shrink
+  C to raw WebGPU, raymarch off CPU round-trip, raymarch-on-scene3d, owned
+  device context, extraction/culling, hybrid SDF depth, draw cap).
 
-## Decisions made this round
+**Deliberately deferred:** Chattie's full `World3d`/ComponentTable +
+extraction/culling/frame-graph is the right destination but would gate the
+demo on one large refactor — parallel arrays give the same authoring shape
+and grow into it without app-code changes (#314). Gem contributed no 3D
+design in this run, so nothing of theirs was available to adopt.
 
-- Treat as one regression bundle, not three. Fix order: 2 → 3 → 1.
-- Bug 2 lands immediately (1 line). Bug 3 needs bisect from
-  `21c8802` (last known green Live state). Bug 1 diagnosis depends
-  on Live working.
-- Don't speculate further on Bug 1 until we can run Live and
-  log `imageTintColor.a` from inside `buildAlbumHero`.
+**Demo-quality gotcha:** with the camera on -Y, a sun circling in XY sends
+the GGX lobe away from the viewer and the material grid reads flat — bias
+the sun toward the camera side (-Y) for highlight sweep.
 
-## Action items I proposed
-
-- Add chunk-name + bytecode-offset to all
-  `diag_error(NULL, 0, 0, ...)` callsites in `compiler/src/vm.c`.
-  Cheap follow-up; would have made this report a one-step fix.
-- Wire `make test --target live` into the snapshot script so the
-  Live regression would have been caught at commit time, not by a
-  user.
-
-## Key context for next rounds
-
-- Recent rae commits worth knowing: `62e4c6b` (parser+runtime),
-  `b5b07e2` (mobile UI multi-file), `2f97850` (editor grammars,
-  no exec code), `aa07f39` (docs, no exec code), `4601a24` (stats).
-- Snapshot tool currently only exercises Compiled target.
-- `rae/docs/ui-viewport-and-safe-area-plan.md` and
-  `ui-rendering-tech-stack-comparison.md` exist — relevant if the
-  fix discussion drifts toward renderer choices.
+## Prior task (concurrency design) — archived
+spawn exists as a VM-only half-prototype (detached sub-VM, never joined, no
+C-backend codegen). Proposed: spawn→Task(T) joinable, unmarked await,
+scoped tasks borrow (join barrier) vs detached=own move, parallelFor for
+ECS, Channel/Shared/Atomic. raylib main-thread-only.
