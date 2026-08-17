@@ -344,7 +344,7 @@ also run in an embedded WebGPU canvas.
 |---|---|
 | `spec/rae.md` | the language spec |
 | `docs/` | 72 design notes, including the ownership model and the renderer architecture |
-| `examples/` | 67 programs, from hello world up |
+| `examples/` | 63 active programs, from hello world up; retired integrations live under `examples/legacy/` |
 
 ## License
 
