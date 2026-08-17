@@ -2,6 +2,7 @@
 # game state into persistent ECS text/active components.
 import ui/ecs
 import app3d/ui_shell
+import gpu2d
 open app3d/ui_shell
 open ui/ecs
 
@@ -17,6 +18,39 @@ func createTetrisHudState() ret TetrisHudState {
   ret TetrisHudState {
     score: 0 - 1, lines: 0 - 1, level: 0 - 1
     nextKind: 0 - 1, gameState: 0 - 1
+  }
+}
+
+func previewColor(kind: TetrominoKind) ret Int {
+  let colorId: Int = getKindId(kind: kind)
+  if colorId is 1 { ret 0xFF64E6FF }
+  if colorId is 2 { ret 0xFF78A0FF }
+  if colorId is 3 { ret 0xFFFFB478 }
+  if colorId is 4 { ret 0xFFFFE678 }
+  if colorId is 5 { ret 0xFF78FFA0 }
+  if colorId is 6 { ret 0xFFC8A0FF }
+  ret 0xFFFF788C
+}
+
+func drawNextPiecePreview(kind: TetrominoKind) {
+  let cellSize: Float = 20.0
+  let previewX: Float = 745.0
+  let previewY: Float = 158.0
+  let color: Int = previewColor(kind: kind)
+  var pieceY: Int = 0
+  loop pieceY < 4 {
+    var pieceX: Int = 0
+    loop pieceX < 4 {
+      if getShapeCell(kind: kind, rot: 0, px: pieceX, py: pieceY) is 1 {
+        gpu2d.drawRoundedRect(
+          x: previewX + pieceX.toFloat() * cellSize
+          y: previewY + pieceY.toFloat() * cellSize
+          w: cellSize - 1.0, h: cellSize - 1.0
+          radius: 3.0, color: color)
+      }
+      pieceX = pieceX + 1
+    }
+    pieceY = pieceY + 1
   }
 }
 
@@ -39,7 +73,6 @@ func syncTetrisHud(uiWorld: mod UiWorld, game: view World, state: mod TetrisHudS
     state.level = game.level
   }
   if nextKindId is not state.nextKind {
-    setNodeText(world: uiWorld, nodeId: "NextValue", value: "PIECE {nextKindId}")
     state.nextKind = nextKindId
   }
   if stateId is not state.gameState {
