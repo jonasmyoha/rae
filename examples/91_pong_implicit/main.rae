@@ -130,10 +130,7 @@ func main() ret Int {
   var cpuPosition: PaddleTransform = { x: 760.0, y: 175.0 }
   var ballPosition: PaddleTransform = { x: 400.0, y: 225.0 }
   var ballVelocity: Velocity = { dx: 240.0, dy: 240.0 }
-  var aiState: AIState = {
-    state: AIPhase.observing, timer: 0.0, targetY: 225.0
-    decision: AIDecision.none
-  }
+  var aiState: AIState = createAIState()
   var playerScore: Int = 0
   var cpuScore: Int = 0
   var winner: Int = 0
@@ -165,10 +162,7 @@ func main() ret Int {
       cpuPosition = { x: 760.0, y: 175.0 }
       ballPosition = { x: 400.0, y: 225.0 }
       ballVelocity = { dx: 240.0, dy: 240.0 }
-      aiState = {
-        state: AIPhase.observing, timer: 0.0, targetY: 225.0
-        decision: AIDecision.none
-      }
+      aiState = createAIState()
       playerScore = 0
       cpuScore = 0
       winner = 0
@@ -177,7 +171,8 @@ func main() ret Int {
     if testMode is false and winner is 0 {
       paddleInputSystem(position: playerPosition, dt: dt)
       cpuPosition.y = paddleAiSystem(
-        ai: aiState, ballY: ballPosition.y, paddleY: cpuPosition.y, dt: dt)
+        ai: aiState, ballPosition: ballPosition, ballVelocity: ballVelocity
+        paddleY: cpuPosition.y, dt: dt)
       movementSystem(position: ballPosition, velocity: ballVelocity, dt: dt)
       bounceSystem(position: ballPosition, velocity: ballVelocity)
       paddleCollisionSystem(
