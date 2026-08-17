@@ -1,0 +1,43 @@
+# Rae hub — Log
+
+- Started T001 (Format CLI options work under tests)
+- Completed T001 (Format CLI options work under tests) — `cd rae/compiler && make test`, `rae/compiler/bin/rae format --write ...`, `rae/compiler/bin/rae format --output ...`
+- Started T002 (Document Rae format output workflows)
+- Completed T002 (Document Rae format output workflows) — `cd rae/compiler && make test`
+- Started T003 (Document compiler test runner .cmd features)
+- Completed T003 (Document compiler test runner .cmd features) — `cd rae/compiler && make test`
+- Started T004 (Add regression test for `rae format --write`)
+- Completed T004 (Add regression test for `rae format --write`) — `cd rae/compiler && make test`
+- Started T005 (Document hub workflow in devtools README)
+- Completed T005 (Document hub workflow in devtools README)
+- Started T006 (Devtools: list all compiler tests)
+- Completed T006 (Devtools: list all compiler tests) — attempted `bun run lint` (tsc exited without diagnostics)
+- Started T007 (Devtools: unify test run + code viewer UI)
+- Completed T007 (Devtools: unify test run + code viewer UI) — attempted `bun run lint` (tsc exited without diagnostics)
+- Started T008 (Compiler: plan multifile build support)
+- Completed T008 (Compiler: plan multifile build support) — `cd rae/compiler && make test`
+- Started T009 (Compiler: research minimal C graphics library for game example)
+- Completed T009 (Compiler: research minimal C graphics library for game example) — `cd rae/compiler && make test`
+- Started T010 (Design interpreter + bytecode pipeline)
+- Completed T010 (Design interpreter + bytecode pipeline)
+- Started T011 (Implement minimal Rae bytecode VM)
+- Completed T011 (Implement minimal Rae bytecode VM) — `cd rae/compiler && make test`, `rae/compiler/bin/rae run examples/hello.rae`
+- Started T014 (Devtools example runner)
+- Completed T014 (Devtools example runner) — `bun run lint`, `cd rae/compiler && make test`
+- Started T012 (Hot-reload VM support)
+- Completed T012 (Hot-reload VM support) — `cd rae/compiler && make test`, `bin/rae run --watch examples/hello.rae`
+- Started T034 (VM research and fixing it with smaller steps)
+- Completed T034 (VM research and fixing it with smaller steps) — `cd rae/compiler && make test`, fixed stack leaks in def/match and made OP_ALLOC_LOCAL idempotent.
+- Started T047 (Update `AGENTS.md` and Rae Language Specification for Naming Conventions)
+- Completed T047 (Update `AGENTS.md` and Rae Language Specification for Naming Conventions) — added naming conventions to docs.
+- Started T048 (Lexer & Parser: Generic Type Syntax `List[T]`)
+- Completed T048 (Lexer & Parser: Generic Type Syntax `List[T]`) — implemented parsing and formatting for generic type references like `List[Int]`.
+- Started T049 (Parser: Generic Parameters on Type and Function Declarations)
+- Completed T049 (Parser: Generic Parameters on Type and Function Declarations) — implemented parsing and formatting for generic parameters on type and function declarations.
+- Started T050 (Parser: Collection Literal Parsing `List[T]{ ... }` and `{ ... }`)
+- Completed T050 (Parser: Collection Literal Parsing `List[T]{ ... }` and `{ ... }`) — implemented parsing and formatting for collection literals.
+- Started T051 (VM Compiler: Generate Code for Collection Literals)
+- Completed T051 (VM Compiler: Generate Code for Collection Literals) — implemented VM code generation for list literals.
+
+
+- Started T050 (Parser: Collection Literal Parsing `List[T]{ ... }` and `{ ... }`)
