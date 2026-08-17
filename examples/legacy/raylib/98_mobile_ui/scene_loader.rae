@@ -1,0 +1,39 @@
+open ui/ecs
+# Load the four `.raescene` files this app needs and bundle them into a
+# single struct so we avoid storing `Scene` values in a `List` — the C
+# backend treats `List(Scene)` element gets as a struct-copy through
+# `rae_ext_rae_buf_get`, which corrupts the nested JsonDoc list pointers
+# on subsequent accesses. Named fields side-step the whole issue.
+import core
+import ui/scene
+
+# Compiled-target shortcut: at the C level, `rae_ext_rae_sys_read_file`
+# returns `rae_String` directly. Declaring a non-opt extern with the
+# same C name skips the C backend's double-unbox bug for `opt String`
+# returns. Empty string on miss.
+func rae_ext_rae_sys_read_file(path: String) extern ret String
+
+func loadSceneFile(path: view String) pub ret Scene {
+  let content: String = rae_ext_rae_sys_read_file(path: path)
+  ret parseScene(source: content)
+}
+
+type AlbumScenes {
+  trackRow: Scene
+  navTabs: Scene
+  navTab: Scene
+  miniPlayer: Scene
+  nowPlaying: Scene
+  album: Scene
+}
+
+func loadAllScenes() pub ret AlbumScenes {
+  ret AlbumScenes {
+    trackRow: loadSceneFile(path: trackRowPath)
+    navTabs: loadSceneFile(path: navTabsPath)
+    navTab: loadSceneFile(path: navTabPath)
+    miniPlayer: loadSceneFile(path: miniPlayerPath)
+    nowPlaying: loadSceneFile(path: nowPlayingPath)
+    album: loadSceneFile(path: albumPath)
+  }
+}
