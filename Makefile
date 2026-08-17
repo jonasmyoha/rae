@@ -1,4 +1,4 @@
-.PHONY: all dev build test stop setup devtools-install devtools-lint devtools-test gemini llm up
+.PHONY: all dev build test stop setup devtools-install devtools-lint devtools-test gemini claude codex llm up
 
 SESSION_DIR ?= $(HOME)/.ws
 PROJECT_KEY := rae
@@ -35,10 +35,10 @@ devtools-test:
 llm:
 	@mkdir -p "$(SESSION_DIR)"
 	@cmd=""; \
-	if command -v gemini >/dev/null 2>&1; then cmd="gemini --yolo -m gemini-3-flash-preview --resume latest"; fi; \
-	if [ -z "$$cmd" ] && command -v claude >/dev/null 2>&1; then cmd="claude --continue"; fi; \
+	if command -v claude >/dev/null 2>&1; then cmd="claude --dangerously-skip-permissions --continue"; fi; \
 	if [ -z "$$cmd" ] && command -v codex >/dev/null 2>&1; then cmd="codex"; fi; \
-	if [ -z "$$cmd" ]; then echo "No supported LLM CLI found (gemini/claude/codex)."; exit 1; fi; \
+	if [ -z "$$cmd" ] && command -v gemini >/dev/null 2>&1; then cmd="gemini --yolo -m gemini-3-flash-preview --resume latest"; fi; \
+	if [ -z "$$cmd" ]; then echo "No supported LLM CLI found (claude/codex/gemini)."; exit 1; fi; \
 	printf "%s|%s|%s\n" "$$(date -Iseconds)" "$(PROJECT_KEY)" "$$cmd" >> "$(SESSION_HISTORY)"; \
 	echo "$$cmd" > "$(SESSION_LATEST)"; \
 	eval "$$cmd"
@@ -46,4 +46,28 @@ llm:
 up:
 	@echo "Run in two terminals for best UX: make dev + make llm"
 
-gemini: llm
+# Explicit per-agent launchers. Same commands + session recording as `llm`,
+# but each forces a specific CLI. `make llm` still auto-picks the first found.
+gemini:
+	@mkdir -p "$(SESSION_DIR)"
+	@cmd="gemini --yolo -m gemini-3-flash-preview --resume latest"; \
+	command -v gemini >/dev/null 2>&1 || { echo "gemini CLI not found."; exit 1; }; \
+	printf "%s|%s|%s\n" "$$(date -Iseconds)" "$(PROJECT_KEY)" "$$cmd" >> "$(SESSION_HISTORY)"; \
+	echo "$$cmd" > "$(SESSION_LATEST)"; \
+	eval "$$cmd"
+
+claude:
+	@mkdir -p "$(SESSION_DIR)"
+	@cmd="claude --dangerously-skip-permissions --continue"; \
+	command -v claude >/dev/null 2>&1 || { echo "claude CLI not found."; exit 1; }; \
+	printf "%s|%s|%s\n" "$$(date -Iseconds)" "$(PROJECT_KEY)" "$$cmd" >> "$(SESSION_HISTORY)"; \
+	echo "$$cmd" > "$(SESSION_LATEST)"; \
+	eval "$$cmd"
+
+codex:
+	@mkdir -p "$(SESSION_DIR)"
+	@cmd="codex"; \
+	command -v codex >/dev/null 2>&1 || { echo "codex CLI not found."; exit 1; }; \
+	printf "%s|%s|%s\n" "$$(date -Iseconds)" "$(PROJECT_KEY)" "$$cmd" >> "$(SESSION_HISTORY)"; \
+	echo "$$cmd" > "$(SESSION_LATEST)"; \
+	eval "$$cmd"
