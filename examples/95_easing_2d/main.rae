@@ -1,69 +1,77 @@
-open time
-open raylib
+# Focused 2D easing demo on Rae's GPU2D/SDL3 stack.
+import core
 import easing
-import time
+import gpu2d
+import sys
+import ui/ecs
+import ui/render_gpu2d
+import app3d/ui_shell
+open app3d/ui_shell
+open ui/ecs
+open ui/render_gpu2d
 
-func main() {
-  initWindow(width: 800, height: 450, title: "Rae Easing 2D")
-  setTargetFPS(fps: 60)
-  
-  let timer: Timer = createTimer()
-  let animDuration: Float = 2.0
-  start(t: timer)
-  
-  loop not windowShouldClose() {
-    var elapsed: Float = elapsedSeconds(t: timer)
-    if elapsed > animDuration {
-      reset(t: timer)
-      start(t: timer)
-      elapsed = 0.0
+const canvasW: Float = 800.0
+const canvasH: Float = 450.0
+
+func main() ret Int {
+  gpu2d.initWindow(width: canvasW.toInt(), height: canvasH.toInt(), title: "Rae Easing 2D — GPU2D")
+  gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
+
+  # The shared font/theme fixture keeps this example small; its authored UI is
+  # still local and exercises the same .raescene ECS path as larger apps.
+  let uiResources: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: ""
+    themeFile: "theme.raescene"
+  )
+  var world: UiWorld = createUiWorld()
+  let uiRoot: EntityId = mountUiScene(
+    world: world
+    path: "examples/95_easing_2d/assets/ui.raescene"
+    res: uiResources
+  )
+
+  let duration: Float = 2.0
+  var cycleStart: Float64 = gpu2d.nowSeconds()
+  let fixedTestFrame: Bool = getEnv(name: "RAE_EASING_TEST_FRAME").length() > 0
+
+  loop not gpu2d.pollClose() {
+    let resized: Bool = resizeUiToWindow(world: world, res: uiResources)
+    var elapsed: Float = (gpu2d.nowSeconds() - cycleStart) as Float
+    if fixedTestFrame {
+      elapsed = 1.0
+    } else {
+      if elapsed > duration {
+        cycleStart = gpu2d.nowSeconds()
+        elapsed = 0.0
+      }
     }
-    
-    let t: Float = elapsed / animDuration
-    let easedT: Float = easing.easeInOutQuad(t: t)
-    
-    let startX: Float = 150.0
-    let endX: Float = 650.0
-    let currentX: Float = startX + (endX - startX) * easedT
-    
-    # Modern Rainbowish Colors
-    let hue: Float = t * 360.0
-    let mainColor: Color = colorFromHSV(hue: hue, saturation: 0.6, value: 0.9)
-    let centerColor: Color = colorFromHSV(hue: hue, saturation: 0.3, value: 1.0)
-    
-    beginDrawing()
-    
-    # Darker, nicer background gradient
-    drawRectangleGradientV(
-      x: 0
-      y: 0
-      width: 800
-      height: 450
-      color1: { r: 20, g: 30, b: 48, a: 255 }
-      color2: { r: 36, g: 59, b: 85, a: 255 }
-    )
-    
-    drawText(
-      text: "Easing: easeInOutQuad"
-      x: 20.0
-      y: 20.0
-      fontSize: 20.0
-      color: { r: 150, g: 150, b: 180, a: 255 }
-    )
-    
-    # Shadow
-    drawCircle(x: currentX + 5.0, y: 230.0, radius: 45.0, color: { r: 0, g: 0, b: 0, a: 40 })
-    
-    # Shaded ball (gradient)
-    drawCircleGradient(
-      x: toInt(this: currentX)
-      y: 225
-      radius: 40.0
-      color1: centerColor
-      color2: mainColor
-    )
-    
-    endDrawing()
+
+    let phase: Float = elapsed / duration
+    let eased: Float = easing.easeInOutQuad(t: phase)
+    let currentX: Float = 150.0 + 500.0 * eased
+    let huePhase: Int = (phase * 5.0).toInt()
+    var ballColor: Int = 0xFF42A5F5
+    if huePhase is 1 { ballColor = 0xFF26C6DA }
+    if huePhase is 2 { ballColor = 0xFF66BB6A }
+    if huePhase is 3 { ballColor = 0xFFFFCA28 }
+    if huePhase >= 4 { ballColor = 0xFFEC407A }
+
+    gpu2d.beginFrame(r: 0.06, g: 0.09, b: 0.15, a: 1.0)
+    gpu2d.drawGradientRect(
+      x: 0.0, y: 0.0, w: canvasW, h: canvasH, radius: 0.0
+      from: 0xFF141E30, to: 0xFF243B55, angleDeg: 90.0)
+    gpu2d.drawRoundedRect(
+      x: currentX - 35.0, y: 195.0, w: 80.0, h: 80.0
+      radius: 40.0, color: 0x44000000)
+    gpu2d.drawGradientRect(
+      x: currentX - 40.0, y: 185.0, w: 80.0, h: 80.0
+      radius: 40.0, from: 0xFFFFFFFF, to: ballColor, angleDeg: 45.0)
+    renderSystemGpu2d(world: world, res: uiResources)
+    gpu2d.endFrame()
   }
-  closeWindow()
+
+  gpu2d.closeWindow()
+  ret 0
 }

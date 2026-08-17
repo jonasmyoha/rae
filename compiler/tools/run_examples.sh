@@ -58,7 +58,21 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
          $(ls "$PROJECT_DIR"/*.c 2>/dev/null | grep -v "rae_runtime.c" | grep -v "main_compiled.c" || true) \
          -I"$TMP_OUT" -I/opt/homebrew/include -L/opt/homebrew/lib -DRAE_HAS_RAYLIB -DRAE_HAS_SDL3 $WGPU_FLAGS \
          /opt/homebrew/lib/libraylib.a -lSDL3 -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL -framework ImageIO -framework CoreGraphics > "$TMP_OUT/link.log" 2>&1; then
-        if [ "$EXAMPLE_NAME" = "109_gpu3d_pbr" ]; then
+        if [ "$EXAMPLE_NAME" = "95_easing_2d" ]; then
+          SCREENSHOT="$TMP_OUT/easing2d.bmp"
+          if RAE_EASING_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=800 \
+             RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app" > "$TMP_OUT/render.log" 2>&1 \
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=20 \
+                > "$TMP_OUT/screenshot.log" 2>&1; then
+            echo "PASS: $EXAMPLE_NAME (fixed easing frame + .raescene overlay)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (easing screenshot)"
+            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
+            ((FAILED++))
+          fi
+        elif [ "$EXAMPLE_NAME" = "109_gpu3d_pbr" ]; then
           SCREENSHOT="$TMP_OUT/gpu3d.bmp"
           if RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
              perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app" > "$TMP_OUT/render.log" 2>&1 \
