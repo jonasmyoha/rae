@@ -117,6 +117,21 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
+        elif [ "$EXAMPLE_NAME" = "97_tetris3d" ]; then
+          SCREENSHOT="$TMP_OUT/tetris3d.bmp"
+          if RAE_TETRIS3D_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=1400 \
+             RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 25 "$TMP_OUT/app" > "$TMP_OUT/render.log" 2>&1 \
+             && grep -q '\[tetris3d\] deterministic deferred frame rendered' "$TMP_OUT/render.log" \
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
+                > "$TMP_OUT/screenshot.log" 2>&1; then
+            echo "PASS: $EXAMPLE_NAME (deferred ECS board + .raescene HUD)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (Tetris 3D render gate)"
+            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
+            ((FAILED++))
+          fi
         elif [ "$EXAMPLE_NAME" = "109_gpu3d_pbr" ]; then
           SCREENSHOT="$TMP_OUT/gpu3d.bmp"
           if RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \

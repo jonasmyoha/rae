@@ -1,6 +1,8 @@
 # Tetromino shape data and colours, lifted from 94_tetris2d so the 3D
 # port doesn't drift if the 2D shape table changes.
-open raylib
+import math
+import vec3
+open math
 
 enum TetrominoKind {
   i
@@ -36,30 +38,30 @@ func getKindId(kind: TetrominoKind) ret Int {
 }
 
 # Pastel-modern palette identical to 94_tetris2d.
-func kindColor(id: view Int) ret Color {
+func kindColor(id: view Int) ret Vec3 {
   if id is 1 {
-    ret Color { r: 100, g: 230, b: 255, a: 255 }
+    ret Vec3 { x: 0.39, y: 0.9, z: 1.0 }
   }
   if id is 2 {
-    ret Color { r: 120, g: 160, b: 255, a: 255 }
+    ret Vec3 { x: 0.47, y: 0.63, z: 1.0 }
   }
   if id is 3 {
-    ret Color { r: 255, g: 180, b: 120, a: 255 }
+    ret Vec3 { x: 1.0, y: 0.71, z: 0.47 }
   }
   if id is 4 {
-    ret Color { r: 255, g: 230, b: 120, a: 255 }
+    ret Vec3 { x: 1.0, y: 0.9, z: 0.47 }
   }
   if id is 5 {
-    ret Color { r: 120, g: 255, b: 160, a: 255 }
+    ret Vec3 { x: 0.47, y: 1.0, z: 0.63 }
   }
   if id is 6 {
-    ret Color { r: 200, g: 160, b: 255, a: 255 }
+    ret Vec3 { x: 0.78, y: 0.63, z: 1.0 }
   }
   if id is 7 {
-    ret Color { r: 255, g: 120, b: 140, a: 255 }
+    ret Vec3 { x: 1.0, y: 0.47, z: 0.55 }
   }
   # Empty / outline
-  ret Color { r: 60, g: 60, b: 80, a: 255 }
+  ret Vec3 { x: 0.24, y: 0.24, z: 0.31 }
 }
 
 # Returns 1 if the piece's local cell at (px, py) is filled for `kind`
