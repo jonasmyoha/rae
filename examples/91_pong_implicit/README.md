@@ -9,6 +9,8 @@ SDL3 input, and an ECS-backed `.raescene` overlay.
 
 ## Systems
 - **paddleInputSystem** reads SDL3 keyboard state.
+- **paddleAiSystem** predicts wall-bounce interception at human reaction
+  intervals, then moves with acceleration, a dead zone, and imperfect aim.
 - **movementSystem** updates positions using delta time.
 - **bounceSystem** and **paddleCollisionSystem** implement gameplay.
 - GPU2D draws the play field while `.raescene` owns score/help text.
