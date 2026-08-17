@@ -434,18 +434,26 @@ func drawFrame(x: view Float, y: view Float, w: view Float, h: view Float) {
 }
 
 func drawCell(x: view Float, y: view Float, size: view Float, color: view Int) {
-  gpu2d.drawRoundedRect(
-    x: x + 0.5, y: y + 0.5, w: size - 1.0, h: size - 1.0
-    radius: 2.5, color: 0xFF111827)
-  gpu2d.drawRoundedRect(
-    x: x + 1.5, y: y + 1.5, w: size - 3.0, h: size - 3.0
-    radius: 1.5, color: color)
+  # Strong pixel-art perimeter keeps neighboring blocks visually separate.
   gpu2d.drawRect(
-    x: x + 3.0, y: y + 3.0, w: size - 6.0, h: 2.0
+    x: x + 0.5, y: y + 0.5, w: size - 1.0, h: size - 1.0
+    color: 0xFF050914)
+  gpu2d.drawRect(
+    x: x + 2.5, y: y + 2.5, w: size - 5.0, h: size - 5.0
+    color: color)
+  # Hard beveled edges retain the crisp character of the Raylib version.
+  gpu2d.drawRect(
+    x: x + 2.5, y: y + 2.5, w: size - 5.0, h: 2.0
+    color: 0x99FFFFFF)
+  gpu2d.drawRect(
+    x: x + 2.5, y: y + 2.5, w: 2.0, h: size - 5.0
     color: 0x66FFFFFF)
   gpu2d.drawRect(
-    x: x + 3.0, y: y + size - 4.0, w: size - 6.0, h: 2.0
-    color: 0x33000000)
+    x: x + 2.5, y: y + size - 4.5, w: size - 5.0, h: 2.0
+    color: 0x66000000)
+  gpu2d.drawRect(
+    x: x + size - 4.5, y: y + 2.5, w: 2.0, h: size - 5.0
+    color: 0x44000000)
 }
 
 func shouldFillTestCell(row: view Int, column: view Int) ret Bool {
