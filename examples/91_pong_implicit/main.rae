@@ -160,6 +160,20 @@ func main() ret Int {
     previousTime = now
     if dt > 0.05 { dt = 0.05 }
 
+    if testMode is false and sdl3.isKeyPressed(key: 82) {
+      playerPosition = { x: 20.0, y: 175.0 }
+      cpuPosition = { x: 760.0, y: 175.0 }
+      ballPosition = { x: 400.0, y: 225.0 }
+      ballVelocity = { dx: 240.0, dy: 240.0 }
+      aiState = {
+        state: AIPhase.observing, timer: 0.0, targetY: 225.0
+        decision: AIDecision.none
+      }
+      playerScore = 0
+      cpuScore = 0
+      winner = 0
+    }
+
     if testMode is false and winner is 0 {
       paddleInputSystem(position: playerPosition, dt: dt)
       cpuPosition.y = paddleAiSystem(
