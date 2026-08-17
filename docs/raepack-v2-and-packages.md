@@ -443,7 +443,7 @@ App Store approval or general iOS compatibility — that is investigated separat
 
 ## 13. Migration — from `.raepack` v1 and `devtools.json`
 
-- **v1 → v2:** the three existing v1 packs (`92_pong_import`, `22_raepack_demo`,
+- **v1 → v2:** the active v1 packs (`22_raepack_demo`,
   `302_auto_app` test) are migrated by hand. v1's per-source `emit` splits map to
   module boundaries (§14). `format`/`version` already exist → bump `version: 2`;
   optionally keep a v1 parse path temporarily.
