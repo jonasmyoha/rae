@@ -17,6 +17,13 @@
 # A clip PLAYS FROM THE FIRST FRAME. An example that opens paused
 # demonstrates nothing until someone clicks it.
 #
+# CHARACTER MODE IS A SMALL GAME LOOP. WASD or arrows move relative to the
+# camera and run by default; holding Shift walks. The character owns a real
+# world-space transform and turns toward travel while the mouse-orbit camera
+# follows its centre. The camera bar still exposes Orbit and WASD inspection
+# modes, and entering Character re-establishes the conventional behind-player
+# view before leaving the mouse free to orbit.
+#
 # THE UI IS A REAL .raescene, built on the shared app3d modules. The
 # scene (assets/ui.raescene) authors only the panel CHROME — a vertical
 # card with two auto-laid-out rows — and the buttons are declared in code
@@ -86,6 +93,7 @@ import gltf_skin
 import png
 import sys
 import app3d/camera_rig
+import app3d/character_controller
 import app3d/ui_shell
 import app3d/control_panel
 import app3d/camera_bar
@@ -119,6 +127,7 @@ open gltf_skin
 open sdf_text
 open png
 open app3d/camera_rig
+open app3d/character_controller
 open app3d/settings_dialog
 open sky_hosek
 open app3d/ui_shell
@@ -152,23 +161,6 @@ func clipButtonId(index: view Int) ret String {
   ret "run"
 }
 
-# ----- state that survives a hot reload -------------------------------
-# A hot reload is a process exit and relaunch, so anything held only in
-# locals is gone. For this example that means the camera, the window, and
-# which clip was playing — re-choosing all three after every rebuild is
-# most of the friction in iterating on an animation.
-#
-# One space-separated line behind a version tag rather than JSON: a bad or
-# older line must degrade to "start fresh" rather than half-apply, and a
-# version mismatch is then a single comparison. The camera's fields are the
-# shared format from lib/app3d, so this example only owns the ones at the
-# front. The WINDOW is not here: the runtime persists window geometry for
-# every app, so an app that also saved it had two owners for one value.
-func statePart(parts: view List(String), index: view Int) ret String {
-  if let value: String = parts.at(index: index) { ret value }
-  ret ""
-}
-
 func walkerFloatAt(values: view List(Float), index: view Int) ret Float {
   if let value: Float = values.at(index: index) { ret value }
   ret 0.0
@@ -179,9 +171,14 @@ func walkerIntAt(values: view List(Int), index: view Int) ret Int {
   ret 0
 }
 
-const state114Version: Int = 5
-const state114AppId: String = "114_walker_character"
-const state114OwnFields: Int = 5
+func walkerWorldModel(baseModel: view Mat4,
+                      controller: view ThirdPersonController) ret Mat4 {
+  let worldTranslation: Mat4 = mat4Translate(
+    x: controller.position.x, y: controller.position.y, z: controller.position.z)
+  let worldHeading: Mat4 = mat4RotateZ(angle: controller.heading)
+  ret mat4Mul(a: worldTranslation,
+                 b: mat4Mul(a: worldHeading, b: baseModel))
+}
 
 # Where "Orbit" re-centres, on every switch back from the WASD camera.
 #
@@ -192,56 +189,6 @@ const state114OwnFields: Int = 5
 # distances, which is the opposite of what re-centring is for.
 const orbitFocusZ: Float = 0.0
 const clipTransitionDuration: Float = 0.28
-
-func serialize114State(clipIndex: view Int, playing: view Bool, speed: view Float,
-                       toon: view Bool, rig: view CameraRig, camera: view Camera3d) ret String {
-  var playingNum: Int = 0
-  if playing {
-    playingNum = 1
-  }
-  var toonNum: Int = 0
-  if toon {
-    toonNum = 1
-  }
-  ret "{state114Version} {clipIndex} {playingNum} {speed} {toonNum} {cameraRigStateString(rig: rig, camera: camera)}"
-}
-
-func restore114State(raw: view String, clipIndex: mod Int, playing: mod Bool, speed: mod Float,
-                     toon: mod Bool, rig: mod CameraRig, camera: mod Camera3d) ret Bool {
-  if raw.length() < 1 {
-    ret false
-  }
-  let parts: List(String) = raw.trim().split(sep: " ")
-  if parts.length < state114OwnFields {
-    ret false
-  }
-  if statePart(parts: parts, index: 0).trim().toInt() is not state114Version {
-    ret false
-  }
-  clipIndex = statePart(parts: parts, index: 1).trim().toInt()
-  if clipIndex < 0 {
-    clipIndex = 0
-  }
-  if clipIndex > 3 {
-    clipIndex = 3
-  }
-  playing = statePart(parts: parts, index: 2).trim().toInt() is 1
-  speed = statePart(parts: parts, index: 3).trim().toFloat()
-  if speed < speedMin {
-    speed = speedMin
-  }
-  if speed > speedMax {
-    speed = speedMax
-  }
-  toon = statePart(parts: parts, index: 4).trim().toInt() is 1
-  if applyCameraRigState(parts: parts, offset: state114OwnFields, rig: rig, camera: camera) is false {
-    ret false
-  }
-  # The WINDOW is deliberately absent. It used to ride along in this line, which
-  # meant two mechanisms owned it — this one, and the runtime's. The runtime's
-  # persists for every app and survives a kill, so this one is gone.
-  ret true
-}
 
 func main() ret Int {
   gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — walker character (animated) [{rendererPathName()}]")
@@ -340,13 +287,14 @@ func main() ret Int {
   var transitionElapsed: Float = clipTransitionDuration
   log("[anim] idle {clipChannelCount(c: idleClip)} ch / {idleClip.duration}s, walk {clipChannelCount(c: walkClip)} ch / {walkClip.duration}s, run {clipChannelCount(c: runClip)} ch / {runClip.duration}s")
 
-  let planeData: MeshData = makePlane(size: 20.0, segments: 1)
+  let planeData: MeshData = makePlane(size: 80.0, segments: 1)
   let ground: MeshHandle = uploadMeshData(m: planeData)
 
   var scene: Scene3d = createScene3d()
   let noEmit: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let noRot: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let groundZ: Float = 0.0 - 1.0
+  var characterController: ThirdPersonController = createThirdPersonController()
 
   # Y-up -> Z-up is +90 degrees about X. After that rotation the model's
   # own Y becomes world Z, so the Y-based offsets below are applied along
@@ -361,9 +309,13 @@ func main() ret Int {
     rotation: vec3.create(x: 1.5707963, y: 0.0, z: 0.0),
     scale: vec3.create(x: modelScale, y: modelScale, z: modelScale)
   }
-  # Constant for the life of the program: skinning moves the VERTICES, so
-  # the model matrix that places the character in the world never changes.
-  let partModel: Mat4 = modelMatrix(t: partTransform)
+  # The base normalises the imported asset around the gameplay pivot. World
+  # movement and heading are prepended later, so turns happen around that
+  # normalised pivot rather than the FBX exporter's arbitrary origin.
+  let basePartModel: Mat4 = modelMatrix(t: partTransform)
+  var partModel: Mat4 = walkerWorldModel(
+    baseModel: basePartModel, controller: characterController)
+  var previousPartModel: Mat4 = partModel
 
   # The palette atlas, decoded by lib/png — pure Rae, no C image library.
   # A failed decode is not fatal: `withAtlasColors` leaves the vertex
@@ -459,16 +411,21 @@ func main() ret Int {
   # numbers are per-example: this scene is a 2-metre character, not the
   # 36-metre one the rig's defaults are sized for.
   var rig: CameraRig = createCameraRig(camera: camera)
-  rig.yaw = 0.6
-  rig.orbitPitch = 0.18
+  rig.characterModeEnabled = true
+  rig.mode = CameraRigMode.character
+  rig.yaw = characterController.heading
+  rig.orbitPitch = 0.24
   rig.distance = 4.2
   rig.minDistance = 1.2
   rig.maxDistance = 20.0
   rig.wheelSpeed = 0.4
+  camera.target = thirdPersonCameraTarget(
+    controller: characterController, focusZ: orbitFocusZ)
+  snapCameraRigView(rig: rig)
 
-  # Animation state. Clip 1 (walk) plays from the first frame — see the
-  # note in the file header.
-  var clipIndex: Int = 1
+  # Character mode starts idle and promotes itself to walk/run from input.
+  # Orbit and WASD retain the clip buttons as an animation inspector.
+  var clipIndex: Int = 0
   var playing: Bool = true
   var speed: Float = 1.0
   var animTime: Float = 0.0
@@ -505,10 +462,21 @@ func main() ret Int {
   if not headless {
     let saved: String = readHotReloadStateFor(appId: state114AppId)
     if restore114State(raw: saved, clipIndex: clipIndex, playing: playing, speed: speed,
-                       toon: toonShading, rig: rig, camera: camera) {
+                       toon: toonShading, controller: characterController,
+                       rig: rig, camera: camera) {
       let pctR: Int = speedPercent(v: speed)
       logInfoLine(ov: logView, text: "state restored: clip {clipIndex}, speed {pctR}%, camera and window kept")
     }
+  }
+
+  # The restored gameplay transform must be visible on frame one, without a
+  # false full-screen motion vector from the origin to the saved position.
+  partModel = walkerWorldModel(
+    baseModel: basePartModel, controller: characterController)
+  previousPartModel = partModel
+  if rig.mode is CameraRigMode.character {
+    camera.target = thirdPersonCameraTarget(
+      controller: characterController, focusZ: orbitFocusZ)
   }
 
   setPanelSelection(panel: clipPanel, world: uiWorld, group: 1, id: clipButtonId(index: clipIndex))
@@ -616,7 +584,10 @@ func main() ret Int {
       suppressUiPress(input: uiInput)
     }
     let clipHit: String = panelClickedId(panel: clipPanel, input: uiInput)
-    if clipHit.length() > 0 {
+    # In Character mode locomotion owns the gait. The buttons remain useful
+    # in Orbit/WASD for inspecting clips, but cannot force a running player
+    # into an unrelated pose that slides across the ground.
+    if clipHit.length() > 0 and rig.mode is not CameraRigMode.character {
       var nextClipIndex: Int = clipIndex
       if clipHit.equals(other: "idle") { nextClipIndex = 0 }
       if clipHit.equals(other: "walk") { nextClipIndex = 1 }
@@ -719,31 +690,62 @@ func main() ret Int {
       runUiSystems(world: uiWorld, res: gpuUi)
     }
 
-    # RE-CENTRE ON SWITCHING TO ORBIT. The rig recovers the orbit target by
-    # walking `distance` along the free camera's view direction, so the view
-    # never jumps -- the right library default. But after flying around in WASD
-    # mode that lands the target wherever you happened to be looking, and
-    # "Orbit" then spins around a point in empty space with the scene off to
-    # one side. Here the switch should mean "put me back on the subject".
-    #
-    # AN APP CHOICE, not a rig behaviour: leaving these lines out gets the
-    # no-jump default back. Setting the target is the whole fix, because orbit
-    # derives the eye from target + yaw/pitch/distance and the look direction
-    # follows it.
-    #
-    # Before-and-after, because handleCameraBar also returns true for its two
-    # smoothing buttons -- the return value does not mean "the mode changed".
-    let wasOrbit: Bool = rig.mode is CameraRigMode.orbit
+    # Before-and-after, because handleCameraBar also handles smoothing. Entering
+    # Character deliberately starts behind the player; Orbit keeps inspecting
+    # the player from the current angle rather than returning to world origin.
+    let previousMode: CameraRigMode = rig.mode
     if handleCameraBar(input: uiInput, rig: rig, camera: camera) {
       stateDirty = true
     }
-    if wasOrbit is false and rig.mode is CameraRigMode.orbit {
-      camera.target = vec3.create(x: 0.0, y: 0.0, z: orbitFocusZ)
+    if previousMode is not CameraRigMode.character
+      and rig.mode is CameraRigMode.character {
+      rig.yaw = characterController.heading
+      rig.orbitPitch = 0.24
+      camera.target = thirdPersonCameraTarget(
+        controller: characterController, focusZ: orbitFocusZ)
+      snapCameraRigView(rig: rig)
+    }
+    if previousMode is not CameraRigMode.orbit and rig.mode is CameraRigMode.orbit {
+      camera.target = thirdPersonCameraTarget(
+        controller: characterController, focusZ: orbitFocusZ)
     }
     let cameraMoved: Bool = updateCameraRig(rig: rig, camera: camera,
                        allowInput: uiPointerCaptured(input: uiInput) is false, dt: dt)
     if cameraMoved {
       stateDirty = true
+    }
+
+    # Gameplay coordinates move; the world does not. This is the transform a
+    # future kinematic/physics controller will own. Rendering can later rebase
+    # far-away coordinates around the camera without changing that truth.
+    previousPartModel = partModel
+    var characterMoved: Bool = false
+    if rig.mode is CameraRigMode.character {
+      characterMoved = updateThirdPersonController(
+        controller: characterController,
+        allowInput: uiPointerCaptured(input: uiInput) is false and playing,
+        cameraYaw: rig.viewYaw, dt: dt * speed)
+      camera.target = thirdPersonCameraTarget(
+        controller: characterController, focusZ: orbitFocusZ)
+      if characterMoved {
+        partModel = walkerWorldModel(
+          baseModel: basePartModel, controller: characterController)
+        stateDirty = true
+      }
+
+      var locomotionClip: Int = 0
+      if characterController.moving {
+        locomotionClip = 3
+        if characterController.walking { locomotionClip = 1 }
+      }
+      if locomotionClip is not clipIndex {
+        transitionFrom = captureSkeletonPose(sk: sk)
+        transitionElapsed = 0.0
+        clipIndex = locomotionClip
+        animTime = 0.0
+        setPanelSelection(panel: clipPanel, world: uiWorld, group: 1,
+                          id: clipButtonId(index: clipIndex))
+      }
     }
     # ONE read. gpu2d.windowResized() is one-shot — reading it clears it — so
     # two callers meant the second always saw false.
@@ -760,6 +762,7 @@ func main() ret Int {
         writeHotReloadStateFor(appId: state114AppId,
                                state: serialize114State(clipIndex: clipIndex, playing: playing,
                                                         speed: speed, toon: toonShading,
+                                                        controller: characterController,
                                                         rig: rig, camera: camera))
         lastStateSave = now
         stateDirty = false
@@ -775,6 +778,7 @@ func main() ret Int {
     let logChanged: Bool = logView.revision is not lastLogRevision
     let transitionActive: Bool = transitionElapsed < clipTransitionDuration
     var needsRender: Bool = playing or transitionActive or settingsChanged or cameraMoved
+      or characterMoved
       or hadUiEvents or logChanged or resized or scrolled or renderedOnce is false
     if taaSettleFrames > 0 { needsRender = true }
     dbgDidWork = needsRender
@@ -901,7 +905,7 @@ func main() ret Int {
               toon: toonShading
             }
             gbuffer.drawSkinnedInstance(mesh: handle, model: partModel,
-                                        prevModel: partModel, material: mat)
+                                        prevModel: previousPartModel, material: mat)
             p = p + 1
           }
           gbuffer.endPass()
