@@ -1,4 +1,15 @@
-import "raylib"
+type Position {
+  x: Float
+  y: Float
+  z: Float
+}
+
+type JsonColor {
+  r: Int
+  g: Int
+  b: Int
+  a: Int
+}
 
 type Dimensions {
   width: Float
@@ -6,7 +17,7 @@ type Dimensions {
 }
 
 type Style {
-  color: Color
+  color: JsonColor
   visible: Bool
   opacity: Float
 }
@@ -14,7 +25,7 @@ type Style {
 type Entity {
   id: Int
   name: String
-  pos: Vector3
+  pos: Position
   size: Dimensions
   style: Style
 }
@@ -47,6 +58,6 @@ func main() {
   log("Decoded Style Visible: {e2.style.visible}")
   log("Decoded Style Opacity: {e2.style.opacity}")
   
-  # Check Raylib types specifically
+  # The nested color proves that user-defined structs round-trip too.
   log("Decoded Color R: {e2.style.color.r}")
 }

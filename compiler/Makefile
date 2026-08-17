@@ -5,11 +5,18 @@ MODE ?= DEV_FAST
 
 CC = gcc
 COMMON_CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -O0 -g
-# Link raylib statically so the GLFW symbols bundled inside libraylib.a
-# (glfwWaitEventsTimeout, glfwPostEmptyEvent, ...) are resolvable.
-# The shared library libraylib.dylib does not export them.
-LDFLAGS = /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL -framework ImageIO -framework CoreGraphics -L/opt/homebrew/lib
+LDFLAGS = -framework Foundation -framework ImageIO -framework CoreGraphics -L/opt/homebrew/lib
 COMMON_CFLAGS += -I/opt/homebrew/include -I../third_party/tinyexpr
+
+# Raylib is retained only for explicitly requested legacy archaeology. Normal
+# compiler builds use a registration stub and require no Raylib installation.
+ENABLE_LEGACY_RAYLIB ?= 0
+ifeq ($(ENABLE_LEGACY_RAYLIB),1)
+    VM_RAYLIB_SRC = $(SRC_DIR)/vm_raylib.c
+    LDFLAGS += /opt/homebrew/lib/libraylib.a -framework CoreVideo -framework IOKit -framework Cocoa -framework OpenGL
+else
+    VM_RAYLIB_SRC = $(SRC_DIR)/vm_raylib_stub.c
+endif
 
 ifeq ($(MODE), CI_STRICT)
     CFLAGS = $(COMMON_CFLAGS) -Werror
@@ -69,7 +76,7 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/vm_emit_stmt.c \
        $(SRC_DIR)/vm_natives_core.c \
        $(SRC_DIR)/vm_registry.c \
-       $(SRC_DIR)/vm_raylib.c \
+       $(VM_RAYLIB_SRC) \
        $(SRC_DIR)/vm_tinyexpr.c \
        $(SRC_DIR)/vm_monocypher.c \
        $(SRC_DIR)/mangler.c
@@ -114,7 +121,7 @@ uninstall:
 	@rm -f $(INSTALL_LINK)
 	@echo "removed $(INSTALL_LINK)"
 
-$(BIN_DIR)/rae: $(BUILD_DIR)/main.o $(BUILD_DIR)/arena.o $(BUILD_DIR)/str.o $(BUILD_DIR)/diag.o $(BUILD_DIR)/type.o $(BUILD_DIR)/sema.o $(BUILD_DIR)/lexer.o $(BUILD_DIR)/ast.o $(BUILD_DIR)/parser.o $(BUILD_DIR)/pretty.o $(BUILD_DIR)/c_backend.o $(BUILD_DIR)/c_call.o $(BUILD_DIR)/c_discovery.o $(BUILD_DIR)/c_expr.o $(BUILD_DIR)/c_stmt.o $(BUILD_DIR)/ownership.o $(BUILD_DIR)/vm_drop.o $(BUILD_DIR)/raepack.o $(BUILD_DIR)/vm_chunk.o $(BUILD_DIR)/vm_value.o $(BUILD_DIR)/vm.o $(BUILD_DIR)/vm_compiler.o $(BUILD_DIR)/vm_emit_expr.o $(BUILD_DIR)/vm_emit_stmt.o $(BUILD_DIR)/vm_natives_core.o $(BUILD_DIR)/vm_registry.o $(BUILD_DIR)/vm_raylib.o $(BUILD_DIR)/vm_tinyexpr.o $(BUILD_DIR)/mangler.o $(BUILD_DIR)/vm_monocypher.o $(BUILD_DIR)/rae_tinyexpr.o $(BUILD_DIR)/monocypher.o $(BUILD_DIR)/sys_thread.o $(BUILD_DIR)/vm_patch.o $(BUILD_DIR)/rae_runtime.o
+$(BIN_DIR)/rae: $(OBJS) $(BUILD_DIR)/sys_thread.o $(BUILD_DIR)/vm_patch.o $(BUILD_DIR)/rae_runtime.o
 	@mkdir -p $(BIN_DIR)
 	$(CC) -o $@ $^ $(LDFLAGS)
 
