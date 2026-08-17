@@ -295,12 +295,12 @@ Run the test suite with `make -C compiler test` — 318 cases.
 
 ## Devtools: the best way to see this
 
-[**rae-devtools-web**](https://github.com/jonaskivi/rae-devtools-web) is a local
+[**rae-devtools-web**](https://github.com/jonasmyoha/rae-devtools-web) is a local
 dashboard that browses every example, runs each one natively or in the browser
 with a click, and shows build health, the test tree and history.
 
 ```sh
-git clone git@github.com:jonaskivi/rae-devtools-web.git   # next to this repo
+git clone git@github.com:jonasmyoha/rae-devtools-web.git   # next to this repo
 cd rae-devtools-web && bun install && make dev            # http://localhost:3000
 ```
 
