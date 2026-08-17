@@ -458,26 +458,13 @@ func drawFrame(x: view Float, y: view Float, w: view Float, h: view Float) {
 func drawCell(x: view Float, y: view Float, size: view Float, colorId: view Int) {
   let color: Int = getModernColor(index: colorId)
   let outline: Int = getOutlineColor(index: colorId)
-  # Outlines occupy the full grid cell, so adjacent blocks have no gaps.
+  # The outline fills the grid cell, while the face keeps a clean rounded shape.
   gpu2d.drawRect(
     x: x, y: y, w: size, h: size
     color: outline)
-  gpu2d.drawRect(
+  gpu2d.drawRoundedRect(
     x: x + 2.0, y: y + 2.0, w: size - 4.0, h: size - 4.0
-    color: color)
-  # Hard beveled edges retain the crisp character of the Raylib version.
-  gpu2d.drawRect(
-    x: x + 2.0, y: y + 2.0, w: size - 4.0, h: 2.0
-    color: 0x99FFFFFF)
-  gpu2d.drawRect(
-    x: x + 2.0, y: y + 2.0, w: 2.0, h: size - 4.0
-    color: 0x66FFFFFF)
-  gpu2d.drawRect(
-    x: x + 2.0, y: y + size - 4.0, w: size - 4.0, h: 2.0
-    color: 0x66000000)
-  gpu2d.drawRect(
-    x: x + size - 4.0, y: y + 2.0, w: 2.0, h: size - 4.0
-    color: 0x44000000)
+    radius: 3.0, color: color)
 }
 
 func shouldFillTestCell(row: view Int, column: view Int) ret Bool {
