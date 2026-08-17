@@ -435,11 +435,65 @@ func drawFrame(x: view Float, y: view Float, w: view Float, h: view Float) {
 
 func drawCell(x: view Float, y: view Float, size: view Float, color: view Int) {
   gpu2d.drawRoundedRect(
-    x: x + 1.0, y: y + 1.0, w: size - 2.0, h: size - 2.0
-    radius: 4.0, color: color)
+    x: x + 0.5, y: y + 0.5, w: size - 1.0, h: size - 1.0
+    radius: 2.5, color: 0xFF111827)
+  gpu2d.drawRoundedRect(
+    x: x + 1.5, y: y + 1.5, w: size - 3.0, h: size - 3.0
+    radius: 1.5, color: color)
   gpu2d.drawRect(
-    x: x + 4.0, y: y + 4.0, w: size - 8.0, h: 3.0
-    color: 0x44FFFFFF)
+    x: x + 3.0, y: y + 3.0, w: size - 6.0, h: 2.0
+    color: 0x66FFFFFF)
+  gpu2d.drawRect(
+    x: x + 3.0, y: y + size - 4.0, w: size - 6.0, h: 2.0
+    color: 0x33000000)
+}
+
+func shouldFillTestCell(row: view Int, column: view Int) ret Bool {
+  if row is 19 {
+    ret column is not 6
+  }
+  if row is 18 {
+    ret column is not 2 and column is not 6
+  }
+  if row is 17 {
+    ret column is 0 or column is 1 or column is 3 or column is 4 or column >= 7
+  }
+  if row is 16 {
+    ret column is 0 or column is 2 or column is 3 or column is 6 or column is 7 or column is 9
+  }
+  if row is 15 {
+    ret column is 2 or column is 3 or column is 6 or column is 7
+  }
+  if row is 14 {
+    ret column is 3 or column is 6
+  }
+  ret false
+}
+
+func stageTestFrame(g: mod Game) {
+  g.score = 4500
+  g.lines = 9
+  g.level = 10
+
+  var row: Int = 14
+  loop row < g.height {
+    var column: Int = 0
+    loop column < g.width {
+      if shouldFillTestCell(row: row, column: column) {
+        let colorId: Int = (row * 3 + column * 2) % 7 + 1
+        g.grid.set(index: row * g.width + column, value: colorId)
+      }
+      column = column + 1
+    }
+    row = row + 1
+  }
+
+  let currentPiece: mod Piece => g.currentPiece
+  currentPiece.kind = TetrominoKind.j
+  currentPiece.rotation = 0
+  currentPiece.pos.x = 4
+  currentPiece.pos.y = 7
+  g.nextPieceKind = TetrominoKind.l
 }
 
 func drawGame(g: view Game) {
@@ -654,14 +708,7 @@ func main() ret Int {
   initGame(g)
   let testMode: Bool = getEnv(name: "RAE_TETRIS2D_TEST_FRAME").length() > 0
   if testMode {
-    g.score = 1200
-    g.lines = 4
-    g.level = 5
-    var testIndex: Int = 0
-    loop testIndex < g.width {
-      g.grid.set(index: 19 * g.width + testIndex, value: testIndex % 7 + 1)
-      testIndex = testIndex + 1
-    }
+    stageTestFrame(g: g)
     log("[tetris2d] deterministic frame ready")
   }
   var displayedScore: Int = 0 - 1
