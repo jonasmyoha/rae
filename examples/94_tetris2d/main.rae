@@ -458,13 +458,12 @@ func drawFrame(x: view Float, y: view Float, w: view Float, h: view Float) {
 func drawCell(x: view Float, y: view Float, size: view Float, colorId: view Int) {
   let color: Int = getModernColor(index: colorId)
   let outline: Int = getOutlineColor(index: colorId)
-  # The outline fills the grid cell, while the face keeps a clean rounded shape.
-  gpu2d.drawRect(
+  gpu2d.drawRoundedRect(
     x: x, y: y, w: size, h: size
-    color: outline)
+    radius: 4.0, color: outline)
   gpu2d.drawRoundedRect(
     x: x + 2.0, y: y + 2.0, w: size - 4.0, h: size - 4.0
-    radius: 3.0, color: color)
+    radius: 2.0, color: color)
 }
 
 func shouldFillTestCell(row: view Int, column: view Int) ret Bool {
