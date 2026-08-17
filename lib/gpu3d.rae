@@ -57,6 +57,7 @@ open math3d
 
 # ----- raw C ABI (implementation detail; prefer the typed API below) ---
 func meshCreate(verts: view Buffer(Float), vertCount: Int, indices: view Buffer(Int), indexCount: Int) extern ret Int
+func meshUpdate(mesh: Int, verts: view Buffer(Float), vertCount: Int) extern
 func begin(frame: view Buffer(Float), count: Int) extern
 func draw(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
 func drawMetaballs(packedBalls: view Buffer(Float), count: Int, packedColors: view Buffer(Float), smoothing: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
@@ -422,6 +423,14 @@ func taaPass() pub {
 func uploadMesh(verts: view List(Float), vertCount: view Int, indices: view List(Int)) pub ret MeshHandle {
   let raw: Int = meshCreate(verts: verts.data, vertCount: vertCount, indices: indices.data, indexCount: indices.length)
   ret meshHandle(id: raw, generation: 0)
+}
+
+# Rewrite an existing mesh's vertex data in place; the index buffer and vertex
+# count stay as created. For pooled geometry whose shape depends on where in
+# the world it currently sits (recycled terrain tiles).
+func updateMeshVerts(mesh: view MeshHandle, verts: view List(Float), vertCount: view Int) pub {
+  if not meshHandleIsValid(h: mesh) { ret }
+  meshUpdate(mesh: mesh.id, verts: verts.data, vertCount: vertCount)
 }
 
 # ----- shadows (#382) -------------------------------------------------
