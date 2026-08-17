@@ -48,7 +48,7 @@ These additions build on the current dashboard features described in `README.md`
 - Respect the existing **Watch** toggle by constraining it to Live targets (Compiled/Hybrid builds remain single-shot).
 
 ### 3. Minimal Hybrid Demo Workflow
-- Add a new example folder inside `../rae/examples` (e.g., `examples/hybrid_hot_reload/`) containing:
+- Add a new example folder inside the monorepo's `examples/` directory (e.g., `examples/hybrid_hot_reload/`) containing:
   - `host.rae`: minimal CLI or stub that simulates a Compiled host embedding the Live VM.
   - `scripts/downloaded/` with small Rae snippets that mimic remote updates.
   - README describing the flow (“host compiles hybrid bundle, loads VM chunk, then replaces code when a new `.vmchunk` appears”).
