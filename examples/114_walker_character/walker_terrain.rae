@@ -1,0 +1,312 @@
+# Fixed-size infinite meadow used by the walker example.
+#
+# The pool is allocated once. Crossing a cell boundary deterministically maps
+# those same entities onto the square of absolute world cells around the
+# character. Mesh handles, renderer components and list capacities therefore
+# remain stable however far the character walks.
+import core
+import math
+import noise
+import gltf
+import gpu3d
+import scene3d
+import mesh3d
+import vec3
+open gltf
+open gpu3d
+open scene3d
+open mesh3d
+
+const terrainGridSide: Int = 7
+const terrainCellSize: Float = 18.0
+const terrainHalfGrid: Int = 3
+const terrainCellCount: Int = 49
+const terrainTau: Float = 6.283185307179586
+
+type InfiniteTerrain {
+  centreCellX: Int
+  centreCellY: Int
+  groundZ: Float
+  toon: Bool
+  tileEntities: List(Int)
+  broadTrunkEntities: List(Int)
+  broadCrownEntities: List(Int)
+  tallTrunkEntities: List(Int)
+  tallCrownEntities: List(Int)
+  rockEntities: List(Int)
+  bushEntities: List(Int)
+  flowerEntities: List(Int)
+  grassAEntities: List(Int)
+  grassBEntities: List(Int)
+  materialIds: List(Int)
+}
+
+func terrainMesh(path: view String) ret MeshHandle {
+  let model: Glb = loadGlb(path: path)
+  let mesh: MeshData = loadAllPrimitives(g: model)
+  if mesh.vertCount < 1 {
+    log("[terrain] no mesh data in {path}")
+    ret meshHandleNone()
+  }
+  ret uploadMesh(verts: mesh.verts, vertCount: mesh.vertCount, indices: mesh.indices)
+}
+
+func terrainEntityAt(entities: view List(Int), index: view Int) ret Int {
+  if let entity: Int = entities.at(index: index) { ret entity }
+  ret -1
+}
+
+func terrainHash(cellX: view Int, cellY: view Int, seed: view Int) ret Float {
+  ret noise.hash2(x: cellX, y: cellY, seed: seed)
+}
+
+func terrainOffset(cellX: view Int, cellY: view Int, seed: view Int) ret Float {
+  ret (terrainHash(cellX: cellX, cellY: cellY, seed: seed) - 0.5) * 12.0
+}
+
+func terrainScale(cellX: view Int, cellY: view Int, seed: view Int,
+                  minimum: view Float, spread: view Float) ret Float {
+  ret minimum + terrainHash(cellX: cellX, cellY: cellY, seed: seed) * spread
+}
+
+func terrainTransform(cellX: view Int, cellY: view Int,
+                      seedX: view Int, seedY: view Int, seedScale: view Int,
+                      groundZ: view Float, minimumScale: view Float,
+                      scaleSpread: view Float) ret Transform3d {
+  let scale: Float = terrainScale(cellX: cellX, cellY: cellY, seed: seedScale,
+                                  minimum: minimumScale, spread: scaleSpread)
+  ret Transform3d {
+    position: vec3.create(
+      x: cellX.toFloat() * terrainCellSize
+        + terrainOffset(cellX: cellX, cellY: cellY, seed: seedX),
+      y: cellY.toFloat() * terrainCellSize
+        + terrainOffset(cellX: cellX, cellY: cellY, seed: seedY),
+      z: groundZ),
+    rotation: vec3.create(
+      x: 0.0, y: 0.0,
+      z: terrainHash(cellX: cellX, cellY: cellY, seed: seedScale + 71) * terrainTau),
+    scale: vec3.create(x: scale, y: scale, z: scale)
+  }
+}
+
+func terrainTeleport(scene: mod Scene3d, entity: view Int,
+                     transform: view Transform3d) {
+  if entity >= 0 {
+    teleportTransform(scene: scene, entity: entity, transform: transform)
+  }
+}
+
+func placeTerrainCell(terrain: mod InfiniteTerrain, scene: mod Scene3d,
+                      poolIndex: view Int, cellX: view Int, cellY: view Int) {
+  let zeroRotation: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let oneScale: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  terrainTeleport(
+    scene: scene,
+    entity: terrainEntityAt(entities: terrain.tileEntities, index: poolIndex),
+    transform: Transform3d {
+      position: vec3.create(x: cellX.toFloat() * terrainCellSize,
+                            y: cellY.toFloat() * terrainCellSize,
+                            z: terrain.groundZ),
+      rotation: zeroRotation, scale: oneScale
+    })
+
+  # Trunk and crown share exactly one transform so the split source mesh stays
+  # assembled while still receiving separate cel colours.
+  let broadTree: Transform3d = terrainTransform(
+    cellX: cellX, cellY: cellY, seedX: 11, seedY: 17, seedScale: 23,
+    groundZ: terrain.groundZ, minimumScale: 0.30, scaleSpread: 0.15)
+  let tallTree: Transform3d = terrainTransform(
+    cellX: cellX, cellY: cellY, seedX: 11, seedY: 17, seedScale: 109,
+    groundZ: terrain.groundZ, minimumScale: 0.25, scaleSpread: 0.14)
+  let treeSelector: Float = terrainHash(cellX: cellX, cellY: cellY, seed: 131)
+  let broadVisible: Bool = treeSelector < 0.54
+  let broadTrunkEntity: Int = terrainEntityAt(
+    entities: terrain.broadTrunkEntities, index: poolIndex)
+  let broadCrownEntity: Int = terrainEntityAt(
+    entities: terrain.broadCrownEntities, index: poolIndex)
+  let tallTrunkEntity: Int = terrainEntityAt(
+    entities: terrain.tallTrunkEntities, index: poolIndex)
+  let tallCrownEntity: Int = terrainEntityAt(
+    entities: terrain.tallCrownEntities, index: poolIndex)
+  setMeshInstanceVisible(scene: scene, entity: broadTrunkEntity, visible: broadVisible)
+  setMeshInstanceVisible(scene: scene, entity: broadCrownEntity, visible: broadVisible)
+  setMeshInstanceVisible(scene: scene, entity: tallTrunkEntity, visible: not broadVisible)
+  setMeshInstanceVisible(scene: scene, entity: tallCrownEntity, visible: not broadVisible)
+  terrainTeleport(scene: scene,
+    entity: broadTrunkEntity,
+    transform: broadTree)
+  terrainTeleport(scene: scene,
+    entity: broadCrownEntity,
+    transform: broadTree)
+  terrainTeleport(scene: scene,
+    entity: tallTrunkEntity,
+    transform: tallTree)
+  terrainTeleport(scene: scene,
+    entity: tallCrownEntity,
+    transform: tallTree)
+
+  terrainTeleport(scene: scene,
+    entity: terrainEntityAt(entities: terrain.rockEntities, index: poolIndex),
+    transform: terrainTransform(
+      cellX: cellX, cellY: cellY, seedX: 31, seedY: 37, seedScale: 41,
+      groundZ: terrain.groundZ, minimumScale: 0.28, scaleSpread: 0.34))
+  terrainTeleport(scene: scene,
+    entity: terrainEntityAt(entities: terrain.bushEntities, index: poolIndex),
+    transform: terrainTransform(
+      cellX: cellX, cellY: cellY, seedX: 47, seedY: 53, seedScale: 59,
+      groundZ: terrain.groundZ, minimumScale: 0.22, scaleSpread: 0.16))
+  terrainTeleport(scene: scene,
+    entity: terrainEntityAt(entities: terrain.flowerEntities, index: poolIndex),
+    transform: terrainTransform(
+      cellX: cellX, cellY: cellY, seedX: 61, seedY: 67, seedScale: 71,
+      groundZ: terrain.groundZ + 0.015, minimumScale: 6.0, scaleSpread: 5.0))
+  terrainTeleport(scene: scene,
+    entity: terrainEntityAt(entities: terrain.grassAEntities, index: poolIndex),
+    transform: terrainTransform(
+      cellX: cellX, cellY: cellY, seedX: 73, seedY: 79, seedScale: 83,
+      groundZ: terrain.groundZ, minimumScale: 0.52, scaleSpread: 0.30))
+  terrainTeleport(scene: scene,
+    entity: terrainEntityAt(entities: terrain.grassBEntities, index: poolIndex),
+    transform: terrainTransform(
+      cellX: cellX, cellY: cellY, seedX: 89, seedY: 97, seedScale: 101,
+      groundZ: terrain.groundZ, minimumScale: 0.38, scaleSpread: 0.27))
+}
+
+func updateInfiniteTerrain(terrain: mod InfiniteTerrain, scene: mod Scene3d,
+                           playerPosition: view Vec3) ret Bool {
+  let cellX: Int = math.floor(x: playerPosition.x / terrainCellSize).toInt()
+  let cellY: Int = math.floor(x: playerPosition.y / terrainCellSize).toInt()
+  if cellX is terrain.centreCellX and cellY is terrain.centreCellY {
+    ret false
+  }
+  terrain.centreCellX = cellX
+  terrain.centreCellY = cellY
+
+  var row: Int = 0
+  loop row < terrainGridSide {
+    var column: Int = 0
+    loop column < terrainGridSide {
+      let poolIndex: Int = row * terrainGridSide + column
+      placeTerrainCell(
+        terrain: terrain, scene: scene, poolIndex: poolIndex,
+        cellX: cellX + column - terrainHalfGrid,
+        cellY: cellY + row - terrainHalfGrid)
+      column = column + 1
+    }
+    row = row + 1
+  }
+  ret true
+}
+
+func setInfiniteTerrainToon(terrain: mod InfiniteTerrain, scene: mod Scene3d,
+                            toon: view Bool) {
+  if terrain.toon is toon { ret }
+  terrain.toon = toon
+  var index: Int = 0
+  loop index < terrain.materialIds.length {
+    if let materialId: Int = terrain.materialIds.at(index: index) {
+      setMaterialToon(scene: scene, index: materialId, toon: toon)
+    }
+    index = index + 1
+  }
+}
+
+func createInfiniteTerrain(scene: mod Scene3d, assets: view String,
+                           groundZ: view Float) ret InfiniteTerrain {
+  let groundMesh: MeshHandle = uploadMeshDataForTerrain(
+    mesh: makePlane(size: terrainCellSize + 0.04, segments: 1))
+  let broadTrunk: MeshHandle = terrainMesh(path: "{assets}environment/tree_broad_trunk.glb")
+  let broadCrown: MeshHandle = terrainMesh(path: "{assets}environment/tree_broad_crown.glb")
+  let tallTrunk: MeshHandle = terrainMesh(path: "{assets}environment/tree_tall_trunk.glb")
+  let tallCrown: MeshHandle = terrainMesh(path: "{assets}environment/tree_tall_crown.glb")
+  let rockMesh: MeshHandle = terrainMesh(path: "{assets}environment/rock.glb")
+  let bushMesh: MeshHandle = terrainMesh(path: "{assets}environment/bush.glb")
+  let flowerMesh: MeshHandle = terrainMesh(path: "{assets}environment/flower.glb")
+  let grassMesh: MeshHandle = terrainMesh(path: "{assets}environment/grass.glb")
+
+  let noEmission: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let materials: List(Int) = createList(Int, cap: 8)
+  let groundMaterial: Int = addMaterial(scene: scene,
+    baseColor: vec3.create(x: 0.105, y: 0.245, z: 0.055),
+    metallic: 0.0, roughness: 0.96, emission: noEmission)
+  let trunkMaterial: Int = addMaterial(scene: scene,
+    baseColor: vec3.create(x: 0.205, y: 0.090, z: 0.032),
+    metallic: 0.0, roughness: 0.92, emission: noEmission)
+  let crownMaterial: Int = addMaterial(scene: scene,
+    baseColor: vec3.create(x: 0.055, y: 0.255, z: 0.075),
+    metallic: 0.0, roughness: 0.88, emission: noEmission)
+  let rockMaterial: Int = addMaterial(scene: scene,
+    baseColor: vec3.create(x: 0.235, y: 0.265, z: 0.285),
+    metallic: 0.0, roughness: 0.82, emission: noEmission)
+  let bushMaterial: Int = addMaterial(scene: scene,
+    baseColor: vec3.create(x: 0.035, y: 0.185, z: 0.105),
+    metallic: 0.0, roughness: 0.90, emission: noEmission)
+  let flowerMaterial: Int = addMaterial(scene: scene,
+    baseColor: vec3.create(x: 0.92, y: 0.38, z: 0.045),
+    metallic: 0.0, roughness: 0.72, emission: noEmission)
+  let grassMaterial: Int = addMaterial(scene: scene,
+    baseColor: vec3.create(x: 0.18, y: 0.42, z: 0.055),
+    metallic: 0.0, roughness: 0.94, emission: noEmission)
+  materials.add(value: groundMaterial)
+  materials.add(value: trunkMaterial)
+  materials.add(value: crownMaterial)
+  materials.add(value: rockMaterial)
+  materials.add(value: bushMaterial)
+  materials.add(value: flowerMaterial)
+  materials.add(value: grassMaterial)
+
+  let tiles: List(Int) = createList(Int, cap: terrainCellCount)
+  let broadTrunks: List(Int) = createList(Int, cap: terrainCellCount)
+  let broadCrowns: List(Int) = createList(Int, cap: terrainCellCount)
+  let tallTrunks: List(Int) = createList(Int, cap: terrainCellCount)
+  let tallCrowns: List(Int) = createList(Int, cap: terrainCellCount)
+  let rocks: List(Int) = createList(Int, cap: terrainCellCount)
+  let bushes: List(Int) = createList(Int, cap: terrainCellCount)
+  let flowers: List(Int) = createList(Int, cap: terrainCellCount)
+  let grassA: List(Int) = createList(Int, cap: terrainCellCount)
+  let grassB: List(Int) = createList(Int, cap: terrainCellCount)
+  let origin: Vec3 = vec3.create(x: 0.0, y: 0.0, z: groundZ)
+  let zeroRotation: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let oneScale: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  var index: Int = 0
+  loop index < terrainCellCount {
+    tiles.add(value: addMeshInstance(scene: scene, mesh: groundMesh,
+      material: groundMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
+    broadTrunks.add(value: addMeshInstance(scene: scene, mesh: broadTrunk,
+      material: trunkMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
+    broadCrowns.add(value: addMeshInstance(scene: scene, mesh: broadCrown,
+      material: crownMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
+    tallTrunks.add(value: addMeshInstance(scene: scene, mesh: tallTrunk,
+      material: trunkMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
+    tallCrowns.add(value: addMeshInstance(scene: scene, mesh: tallCrown,
+      material: crownMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
+    rocks.add(value: addMeshInstance(scene: scene, mesh: rockMesh,
+      material: rockMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
+    bushes.add(value: addMeshInstance(scene: scene, mesh: bushMesh,
+      material: bushMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
+    flowers.add(value: addMeshInstance(scene: scene, mesh: flowerMesh,
+      material: flowerMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
+    grassA.add(value: addMeshInstance(scene: scene, mesh: grassMesh,
+      material: grassMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
+    grassB.add(value: addMeshInstance(scene: scene, mesh: grassMesh,
+      material: grassMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
+    index = index + 1
+  }
+
+  var terrain: InfiniteTerrain = {
+    centreCellX: 1000000000, centreCellY: 1000000000,
+    groundZ: groundZ, toon: false,
+    tileEntities: own tiles,
+    broadTrunkEntities: own broadTrunks, broadCrownEntities: own broadCrowns,
+    tallTrunkEntities: own tallTrunks, tallCrownEntities: own tallCrowns,
+    rockEntities: own rocks, bushEntities: own bushes, flowerEntities: own flowers,
+    grassAEntities: own grassA, grassBEntities: own grassB,
+    materialIds: own materials
+  }
+  setInfiniteTerrainToon(terrain: terrain, scene: scene, toon: true)
+  ret own terrain
+}
+
+func uploadMeshDataForTerrain(mesh: view MeshData) ret MeshHandle {
+  ret uploadMesh(verts: mesh.verts, vertCount: mesh.vertCount, indices: mesh.indices)
+}
