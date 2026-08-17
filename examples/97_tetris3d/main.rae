@@ -1,79 +1,137 @@
-# 97_tetris3d — entry point.
-#
-# Auto-import picks up the sibling .rae files (world, tetromino, camera,
-# input, physics, render, hud, particles), so we don't need explicit
-# `import` for them. raylib + math are stdlib so they're spelled out.
-open raylib
+# Tetris 3D on Rae's deferred renderer, SDL3 input, and ECS/.raescene UI.
+import core
+import gpu2d
+import gbuffer
+import math
+import sys
+import vec3
+import renderer_deferred
+import ui/ecs
+import ui/render_gpu2d
+import app3d/ui_shell
+open app3d/ui_shell
+open gbuffer
+open gpu3d
+open math
+open renderer_deferred
+open rendergraph
+open scene3d
+open ui/ecs
+open ui/render_gpu2d
 
-func runFrame(w: mod World) {
-  inputSystem(w)
-  physicsSystem(w)
-  particleSystem(w)
-  cameraSystem(w)
-
-  beginDrawing()
-  clearBackground(color: Color { r: 18, g: 20, b: 28, a: 255 })
-
-  let cam: Camera3D = cameraForWorld(w)
-  beginMode3D(camera: cam)
-  renderSystem(w)
-  endMode3D()
-
-  hudSystem(w)
-  endDrawing()
+func renderFrame(
+  renderer: view DeferredRenderer
+  renderState: mod TetrisRenderState
+  game: view World
+  camera: view Camera3d
+  light: view Light3d
+  uiWorld: mod UiWorld
+  uiResources: view Gpu2dUi
+) {
+  extractTetrisScene(renderState: renderState, world: game)
+  let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
+  var passIndex: Int = 0
+  loop passIndex < deferredOrderLength(r: renderer) {
+    let tag: Int = deferredTagAt(r: renderer, i: passIndex)
+    if tag is tagUiOverlayD {
+      gpu2d.beginFrameLoad()
+      renderSystemGpu2d(world: uiWorld, res: uiResources)
+    } else {
+      renderDeferredPass(
+        r: renderer, tag: tag, scene: renderState.scene
+        camera: camera, light: light, aspect: aspect)
+    }
+    passIndex = passIndex + 1
+  }
+  snapshotPrevTransforms(scene: renderState.scene)
 }
 
-func main() {
-  setConfigFlags(flags: 4)
-  # Open with a placeholder size; we resize to a portrait that's ~80%
-  # of the user's monitor height once raylib can tell us the dimensions.
-  initWindow(width: 600, height: 900, title: "Rae Tetris 3D")
-  setTargetFPS(fps: 60)
+func main() ret Int {
+  gpu2d.initWindow(width: 900, height: 900, title: "Rae Tetris 3D — Deferred")
+  gpu2d.setDesignResolution(width: 900.0, height: 900.0, fit: 0)
+  seed(n: 2026)
 
-  # Pick a portrait window: ~80% of monitor height, narrow aspect that
-  # mirrors the well + side HUD. Centre it on the current monitor.
-  let monitor: Int = getCurrentMonitor()
-  let monW: Int = getMonitorWidth(monitor: monitor)
-  let monH: Int = getMonitorHeight(monitor: monitor)
-  let winH: Int = (monH * 8) / 10
-  # 9:16 portrait; clamp width to 80% of monitor width so it fits on
-  # short-and-wide displays too.
-  var winW: Int = (winH * 9) / 16
-  let maxW: Int = (monW * 8) / 10
-  if winW > maxW {
-    winW = maxW
-  }
-  setWindowSize(width: winW, height: winH)
-  setWindowPosition(x: (monW - winW) / 2, y: (monH - winH) / 2)
-
-  # Load Roboto for the HUD. Must come AFTER initWindow because
-  # raylib's font loader needs the GL context to upload the atlas.
-  initHudFont()
-
-  let w: World = {
+  var game: World = {
     state: GameState.playing
     grid: createList(Int, cap: 0)
     currentPiece: { kind: TetrominoKind.i, x: 3, y: 0, rotation: 0 }
     nextKind: TetrominoKind.o
-    score: 0
-    lines: 0
-    level: 1
-    fallTimer: 0
-    fallDelay: 30
-    hMoveTimer: 0
-    hMoveDelay: 4
-    dasDelay: 12
-    lockTimer: 0
-    lockDelay: 30
+    score: 0, lines: 0, level: 1
+    fallTimer: 0, fallDelay: 30
+    hMoveTimer: 0, hMoveDelay: 4, dasDelay: 12
+    lockTimer: 0, lockDelay: 30
     camTime: 0.0
     particles: createList(Particle, cap: 0)
     lockFlash: 0.0
   }
-  initWorld(w)
+  initWorld(w: game)
 
-  loop not windowShouldClose() {
-    runFrame(w)
+  var renderState: TetrisRenderState = createTetrisRenderState()
+  let camera: Camera3d = cameraForWorld(world: game)
+  let light: Light3d = defaultLight3d()
+  var renderer: DeferredRenderer = createDeferredRendererWithUi()
+  let graphStatus: Int = compileDeferred(r: renderer)
+  if graphStatus is not 0 {
+    log("deferred graph invalid: {statusName(status: graphStatus)}")
+    ret 1
   }
-  unloadHudFont()
-  closeWindow()
+
+  let uiResources: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: ""
+    themeFile: "theme.raescene")
+  var uiWorld: UiWorld = createUiWorld()
+  let uiRoot: EntityId = mountUiScene(
+    world: uiWorld
+    path: "examples/97_tetris3d/assets/ui.raescene"
+    res: uiResources)
+  var hudState: TetrisHudState = createTetrisHudState()
+
+  let testMode: Bool = sys.getEnv(name: "RAE_TETRIS3D_TEST_FRAME").length() > 0
+  if testMode {
+    game.score = 4200
+    game.lines = 12
+    game.level = 2
+    var testX: Int = 0
+    loop testX < gridWidth {
+      gridSet(w: game, x: testX, y: gridHeight - 1, value: testX % 7 + 1)
+      if testX % 2 is 0 {
+        gridSet(w: game, x: testX, y: gridHeight - 2, value: testX % 7 + 1)
+      }
+      testX = testX + 1
+    }
+  }
+
+  let fixedStep: Float64 = 1.0 / 60.0
+  var previousTime: Float64 = gpu2d.nowSeconds()
+  var accumulator: Float64 = 0.0
+  loop not gpu2d.pollClose() {
+    let resized: Bool = resizeUiToWindow(world: uiWorld, res: uiResources)
+    let now: Float64 = gpu2d.nowSeconds()
+    var frameTime: Float64 = now - previousTime
+    previousTime = now
+    if frameTime > 0.1 { frameTime = 0.1 }
+    accumulator = accumulator + frameTime
+    if testMode is false {
+      loop accumulator >= fixedStep {
+        inputSystem(w: game)
+        physicsSystem(w: game)
+        particleSystem(w: game)
+        cameraSystem(w: game)
+        accumulator = accumulator - fixedStep
+      }
+    }
+    syncTetrisHud(uiWorld: uiWorld, game: game, state: hudState)
+    runUiSystems(world: uiWorld, res: uiResources)
+    renderFrame(
+      renderer: renderer, renderState: renderState, game: game
+      camera: camera, light: light
+      uiWorld: uiWorld, uiResources: uiResources)
+  }
+
+  if testMode { log("[tetris3d] deterministic deferred frame rendered") }
+  gbuffer.shutdownAll()
+  gpu2d.closeWindow()
+  ret 0
 }

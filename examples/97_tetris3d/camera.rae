@@ -1,29 +1,18 @@
 # Camera setup and motion. The camera floats around the well in a slow
 # orbit; line clears later get to nudge it for a satisfying screen-shake.
-open raylib
+import vec3
+open scene3d
 
 # Static head-on camera matching the 2D Tetris layout. Slight perspective
 # (low fovy + Z pulled back) gives the cubes a tiny bit of depth without
 # rotating away from a flat well view.
-func cameraForWorld(w: view World) ret Camera3D {
-  ret Camera3D {
-    # Centre of the well horizontally; halfway down vertically; pulled
-    # straight back along Z. Cells live at y in [-gridHeight, 0].
-    position: Vector3 {
-      x: 5.0
-      y: 0.0 - 10.0
-      z: 40.0
-    }
-    target: Vector3 {
-      x: 5.0
-      y: 0.0 - 10.0
-      z: 0.0
-    }
-    up: Vector3 { x: 0.0, y: 1.0, z: 0.0 }
-    # Narrow fovy + camera pulled back so the 20-row well leaves visible
-    # padding above and below the play area on a 720-tall window.
-    fovy: 32.0
-    projection: 0
+func cameraForWorld(world: view World) ret Camera3d {
+  ret Camera3d {
+    position: vec3.create(x: 0.0, y: 0.0 - 34.0, z: 11.0)
+    target: vec3.create(x: 0.0, y: 0.0, z: 10.0)
+    fovYDeg: 34.0
+    nearZ: 0.1
+    farZ: 100.0
   }
 }
 

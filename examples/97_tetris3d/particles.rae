@@ -2,7 +2,13 @@
 # fixed-cap List(Particle) on World, with `active: Bool` as the free-slot
 # flag. We never grow the list mid-game so spawning past the cap silently
 # drops the request — keeps frame timing predictable.
-open raylib
+import math
+import vec3
+open math
+
+func randomRange(minimum: view Float, maximum: view Float) ret Float {
+  ret minimum + (maximum - minimum) * math.random()
+}
 
 func findFreeParticle(w: mod World) ret Int {
   var i: Int = 0
@@ -26,7 +32,7 @@ func spawnParticle(
   vz: view Float
   life: view Float
   size: view Float
-  color: view Color
+  color: view Vec3
 ) {
   let idx: Int = findFreeParticle(w)
   if idx < 0 {
@@ -58,11 +64,11 @@ func spawnLineClearParticles(w: mod World, row: view Int) {
     # 4 small particles per cell of the cleared row.
     var burst: Int = 0
     loop burst < 4 {
-      let vx: Float = randomFloat(min: 0.0 - 4.0, max: 4.0)
-      let vy: Float = randomFloat(min: 2.0, max: 6.0)
-      let vz: Float = randomFloat(min: 0.0 - 4.0, max: 4.0)
-      let hue: Float = randomFloat(min: 0.0, max: 360.0)
-      let col: Color = colorFromHSV(hue: hue, saturation: 0.7, value: 1.0)
+      let vx: Float = randomRange(minimum: 0.0 - 4.0, maximum: 4.0)
+      let vy: Float = randomRange(minimum: 2.0, maximum: 6.0)
+      let vz: Float = randomRange(minimum: 0.0 - 4.0, maximum: 4.0)
+      let colorId: Int = i % 7 + 1
+      let color: Vec3 = kindColor(id: colorId)
       spawnParticle(
         w: w
         px: cellX
@@ -73,7 +79,7 @@ func spawnLineClearParticles(w: mod World, row: view Int) {
         vz: vz
         life: 0.7
         size: 0.18
-        color: col
+        color: color
       )
       burst = burst + 1
     }
@@ -81,8 +87,8 @@ func spawnLineClearParticles(w: mod World, row: view Int) {
   }
 }
 
-# Update + cull active particles. dt is fixed at 1/60 — raylib drives
-# the loop at setTargetFPS(60).
+# Update + cull active particles. Main's fixed-step accumulator drives this
+# exactly at 60 Hz, independently from the deferred render rate.
 func particleSystem(w: mod World) {
   let dt: Float = 0.016
   var i: Int = 0
@@ -100,13 +106,6 @@ func particleSystem(w: mod World) {
         let nz: Float = p.pz + p.vz * dt
         # Simple gravity.
         let nvy: Float = p.vy - 9.8 * dt
-        # Fade alpha by remaining-life ratio (life starts at 0.7).
-        let alpha: Float = newLife / 0.7
-        let baseA: Int = 255
-        var newA: Int = (alpha * baseA.toFloat()).toInt()
-        if newA < 0 {
-          newA = 0
-        }
         let updated: Particle = {
           active: true
           px: nx
@@ -117,23 +116,11 @@ func particleSystem(w: mod World) {
           vz: p.vz
           life: newLife
           size: p.size
-          color: { r: p.color.r, g: p.color.g, b: p.color.b, a: newA }
+          color: p.color
         }
         let particles: mod List(Particle) => w.particles
         particles.set(index: i, value: updated)
       }
-    }
-    i = i + 1
-  }
-}
-
-func renderParticles(w: view World) {
-  var i: Int = 0
-  loop i < maxParticles {
-    let p: Particle = rae_ext_rae_buf_get(buf: w.particles.data, index: i)
-    if p.active {
-      let pos: Vector3 = { x: p.px, y: p.py, z: p.pz }
-      drawCube(pos: pos, width: p.size, height: p.size, length: p.size, color: p.color)
     }
     i = i + 1
   }

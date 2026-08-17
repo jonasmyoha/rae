@@ -1,118 +1,50 @@
-# 2D HUD overlay drawn after `endMode3D()`.
-#
-# Uses raylib's TTF font support via the runtime helpers:
-#   loadFontInto(slot, path, fontSize)   — load once on startup
-#   drawTextWithFont(slot, text, ...)    — draw a glyph string
-#   unloadFontSlot(slot)                 — release on shutdown
-# Slot 0 is reserved for our HUD font (Roboto-Regular.ttf, Apache 2.0,
-# shipped next to this file). Falling back to the raylib default font
-# if the TTF is missing keeps text on screen — the codepoint table on
-# the runtime side covers ASCII plus the arrows / middle dot / em dash
-# the control hint uses.
-open raylib
+# The HUD is authored in assets/ui.raescene; this module only synchronizes
+# game state into persistent ECS text/active components.
+import ui/ecs
+import app3d/ui_shell
+open app3d/ui_shell
+open ui/ecs
 
-let hudFontSlot: Int = 0
-let hudFontSize: Int = 24
-let hudFontPath: String = "examples/97_tetris3d/Roboto-Regular.ttf"
-
-let hudWhite: Color = { r: 230, g: 230, b: 240, a: 255 }
-let hudMuted: Color = { r: 150, g: 160, b: 180, a: 255 }
-let hudAccent: Color = { r: 120, g: 230, b: 255, a: 255 }
-
-func initHudFont() {
-  loadFontInto(slot: hudFontSlot, path: hudFontPath, fontSize: hudFontSize)
+type TetrisHudState {
+  score: Int
+  lines: Int
+  level: Int
+  nextKind: Int
+  gameState: Int
 }
 
-func unloadHudFont() {
-  unloadFontSlot(slot: hudFontSlot)
-}
-
-func hudText(text: view String, x: view Float, y: view Float, fontSize: view Float, color: view Color) {
-  drawTextWithFont(
-    slot: hudFontSlot
-    text: text
-    x: x
-    y: y
-    fontSize: fontSize
-    spacing: 1.0
-    color: color
-  )
-}
-
-func drawNextPanel(w: view World) {
-  let panelX: Float = getScreenWidth().toFloat() - 220.0
-  let panelY: Float = 80.0
-  hudText(text: "NEXT", x: panelX, y: panelY, fontSize: 22.0, color: hudMuted)
-
-  # Render the next piece as small cubes in 2D space using rectangles
-  # — keeping HUD code free of camera dependency.
-  let cellSize: Float = 24.0
-  let kind: TetrominoKind = w.nextKind
-  let id: Int = getKindId(kind: kind)
-  let baseColor: Color = kindColor(id: id)
-  var py: Int = 0
-  loop py < 4 {
-    var px: Int = 0
-    loop px < 4 {
-      if getShapeCell(kind: kind, rot: 0, px: px, py: py) is 1 {
-        let rx: Float = panelX + 20.0 + px.toFloat() * cellSize
-        let ry: Float = panelY + 40.0 + py.toFloat() * cellSize
-        drawRectangle(
-          x: rx
-          y: ry
-          width: cellSize - 2.0
-          height: cellSize - 2.0
-          color: baseColor
-        )
-      }
-      px = px + 1
-    }
-    py = py + 1
+func createTetrisHudState() ret TetrisHudState {
+  ret TetrisHudState {
+    score: 0 - 1, lines: 0 - 1, level: 0 - 1
+    nextKind: 0 - 1, gameState: 0 - 1
   }
 }
 
-func hudSystem(w: view World) {
-  hudText(text: "Tetris 3D", x: 20.0, y: 20.0, fontSize: 28.0, color: hudAccent)
-
-  hudText(text: "SCORE", x: 20.0, y: 80.0, fontSize: 18.0, color: hudMuted)
-  hudText(text: "{w.score}", x: 20.0, y: 102.0, fontSize: 28.0, color: hudWhite)
-
-  hudText(text: "LINES", x: 20.0, y: 150.0, fontSize: 18.0, color: hudMuted)
-  hudText(text: "{w.lines}", x: 20.0, y: 172.0, fontSize: 28.0, color: hudWhite)
-
-  hudText(text: "LEVEL", x: 20.0, y: 220.0, fontSize: 18.0, color: hudMuted)
-  hudText(text: "{w.level}", x: 20.0, y: 242.0, fontSize: 28.0, color: hudWhite)
-
-  drawNextPanel(w: w)
-
-  let h: Int = getScreenHeight()
-  hudText(
-    text: "←→ move · ↑ rotate · ↓ soft drop · space hard drop · P pause"
-    x: 20.0
-    y: h.toFloat() - 28.0
-    fontSize: 14.0
-    color: hudMuted
-  )
-
-  if w.state is GameState.gameOver {
-    let sw: Float = getScreenWidth().toFloat()
-    let warn: Color = { r: 255, g: 120, b: 140, a: 255 }
-    hudText(
-      text: "GAME OVER — press R to restart"
-      x: sw / 2.0 - 200.0
-      y: 200.0
-      fontSize: 28.0
-      color: warn
-    )
+func syncTetrisHud(uiWorld: mod UiWorld, game: view World, state: mod TetrisHudState) {
+  let nextKindId: Int = getKindId(kind: game.nextKind)
+  var stateId: Int = 0
+  if game.state is GameState.playing { stateId = 1 }
+  if game.state is GameState.paused { stateId = 2 }
+  if game.state is GameState.gameOver { stateId = 3 }
+  if game.score is not state.score {
+    setNodeText(world: uiWorld, nodeId: "ScoreValue", value: "{game.score}")
+    state.score = game.score
   }
-  if w.state is GameState.paused {
-    let sw: Float = getScreenWidth().toFloat()
-    hudText(
-      text: "PAUSED"
-      x: sw / 2.0 - 60.0
-      y: 220.0
-      fontSize: 36.0
-      color: hudAccent
-    )
+  if game.lines is not state.lines {
+    setNodeText(world: uiWorld, nodeId: "LinesValue", value: "{game.lines}")
+    state.lines = game.lines
+  }
+  if game.level is not state.level {
+    setNodeText(world: uiWorld, nodeId: "LevelValue", value: "{game.level}")
+    state.level = game.level
+  }
+  if nextKindId is not state.nextKind {
+    setNodeText(world: uiWorld, nodeId: "NextValue", value: "PIECE {nextKindId}")
+    state.nextKind = nextKindId
+  }
+  if stateId is not state.gameState {
+    setNodeActive(world: uiWorld, nodeId: "PauseText", value: game.state is GameState.paused)
+    setNodeActive(world: uiWorld, nodeId: "GameOverPanel", value: game.state is GameState.gameOver)
+    state.gameState = stateId
   }
 }
