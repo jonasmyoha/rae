@@ -1,8 +1,8 @@
 # Keyboard input. DAS (Delayed Auto-Shift) for repeat-side moves so
 # the piece doesn't sprint at one frame per cell when you hold left/right.
-open raylib
+import sdl3
 
-# Raylib key codes (no enum because they're sparse and not 0..N).
+# SDL-compatible key codes (no enum because they're sparse and not 0..N).
 let keyLeft: Int = 263
 let keyRight: Int = 262
 let keyDown: Int = 264
@@ -40,7 +40,7 @@ func hardDrop(w: mod World) {
 
 func inputSystem(w: mod World) {
   if w.state is GameState.gameOver {
-    if isKeyPressed(key: keyR) {
+    if sdl3.isKeyPressed(key: keyR) {
       initWorld(w)
     }
     ret
@@ -48,7 +48,7 @@ func inputSystem(w: mod World) {
 
   # P toggles between Playing and Paused. Handled BEFORE the
   # "skip-input-if-not-Playing" gate so the player can unpause.
-  if isKeyPressed(key: keyP) {
+  if sdl3.isKeyPressed(key: keyP) {
     if w.state is GameState.playing {
       w.state = GameState.paused
     } else {
@@ -62,8 +62,8 @@ func inputSystem(w: mod World) {
     ret
   }
 
-  let moveLeft: Bool = isKeyDown(key: keyLeft) or isKeyDown(key: keyA)
-  let moveRight: Bool = isKeyDown(key: keyRight) or isKeyDown(key: keyD)
+  let moveLeft: Bool = sdl3.isKeyDown(key: keyLeft) or sdl3.isKeyDown(key: keyA)
+  let moveRight: Bool = sdl3.isKeyDown(key: keyRight) or sdl3.isKeyDown(key: keyD)
 
   if moveLeft or moveRight {
     if w.hMoveTimer is 0 {
@@ -90,7 +90,7 @@ func inputSystem(w: mod World) {
   }
 
   # Soft drop (down arrow / S) — falls one row each frame, +1 point per row.
-  if isKeyDown(key: keyDown) or isKeyDown(key: keyS) {
+  if sdl3.isKeyDown(key: keyDown) or sdl3.isKeyDown(key: keyS) {
     if canMove(w: w, dx: 0, dy: 1, dr: 0) is 1 {
       w.currentPiece.y = w.currentPiece.y + 1
       w.score = w.score + 1
@@ -99,12 +99,12 @@ func inputSystem(w: mod World) {
   }
 
   # Rotate CCW with up / W.
-  if isKeyPressed(key: keyUp) or isKeyPressed(key: keyW) {
+  if sdl3.isKeyPressed(key: keyUp) or sdl3.isKeyPressed(key: keyW) {
     tryMove(w: w, dx: 0, dr: 1)
   }
 
   # Hard drop with space.
-  if isKeyPressed(key: keySpace) {
+  if sdl3.isKeyPressed(key: keySpace) {
     hardDrop(w: w)
   }
 }

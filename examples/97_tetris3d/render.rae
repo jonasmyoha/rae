@@ -1,150 +1,180 @@
-# 3D scene rendering: the locked board, the falling piece, particles,
-# and a wireframe well frame so the play area is legible from any
-# camera angle. Coordinates: x is column 0..gridWidth, y goes DOWN
-# in grid space but is flipped to negative-Y in 3D so the well sits
-# above the floor grid.
-open raylib
+# Persistent ECS extraction for the deferred renderer. Every possible board,
+# active-piece, and particle slot owns one Scene3d entity; inactive slots move
+# outside the view instead of reallocating scene resources each frame.
+import vec3
+open gpu3d
+open math3d
+open mesh3d
+open scene3d
 
-# Convert (gridX, gridY) to world Vector3 centred on the cell.
-func cellPos(gx: view Int, gy: view Int) ret Vector3 {
-  let cx: Float = gx.toFloat() + 0.5
-  let cy: Float = (0.0 - gy.toFloat()) - 0.5
-  ret Vector3 { x: cx, y: cy, z: 0.0 }
+type TetrisRenderState {
+  scene: Scene3d
+  gridBase: Int
+  currentBase: Int
+  particleBase: Int
 }
 
-func drawBlock(gx: view Int, gy: view Int, kindId: view Int, flash: view Float) {
-  let pos: Vector3 = cellPos(gx: gx, gy: gy)
-  let col: Color = kindColor(id: kindId)
-  # Lock-flash: brighten colour briefly when a piece just locks.
-  let mix: Int = (flash * 80.0).toInt()
-  var r: Int = col.r + mix
-  var g: Int = col.g + mix
-  var b: Int = col.b + mix
-  if r > 255 {
-    r = 255
-  }
-  if g > 255 {
-    g = 255
-  }
-  if b > 255 {
-    b = 255
-  }
-  let lit: Color = { r: r, g: g, b: b, a: 255 }
-  # Full-cell cube — adjacent cells of the same piece tile seamlessly.
-  drawCube(pos: pos, width: 1.0, height: 1.0, length: 1.0, color: lit)
+func uploadTetrisMesh(meshData: view MeshData) ret MeshHandle {
+  ret uploadMesh(
+    verts: meshData.verts
+    vertCount: meshData.vertCount
+    indices: meshData.indices)
 }
 
-# Draw the grid lines of the play well, half a block behind the cubes
-# (z = -0.5) so they sit on the back face of every cell — visible
-# through empty cells, hidden behind locked / falling pieces.
-func drawWell() {
-  # Bind globals to locals so method-call dispatch picks the Int.toFloat()
-  # overload instead of String.toFloat() (overload resolution doesn't see
-  # global Ints as having a clear receiver type yet).
-  let gw: Int = gridWidth
-  let gh: Int = gridHeight
-  let gwF: Float = gw.toFloat()
-  let ghF: Float = gh.toFloat()
-  let backZ: Float = 0.0 - 0.5
-
-  var i: Int = 0
-  loop i <= gh {
-    let y: Float = 0.0 - i.toFloat()
-    drawCubeWires(
-      pos: Vector3 { x: gwF / 2.0, y: y, z: backZ }
-      width: gwF
-      height: 0.02
-      length: 0.02
-      color: { r: 80, g: 90, b: 110, a: 60 }
-    )
-    i = i + 1
-  }
-  var j: Int = 0
-  loop j <= gw {
-    let x: Float = j.toFloat()
-    drawCubeWires(
-      pos: Vector3 { x: x, y: 0.0 - ghF / 2.0, z: backZ }
-      width: 0.02
-      height: ghF
-      length: 0.02
-      color: { r: 80, g: 90, b: 110, a: 60 }
-    )
-    j = j + 1
+func hiddenTransform() ret Transform3d {
+  ret Transform3d {
+    position: vec3.create(x: 0.0, y: 1000.0, z: 0.0)
+    rotation: vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    scale: vec3.create(x: 0.01, y: 0.01, z: 0.01)
   }
 }
 
-func drawLockedGrid(w: view World) {
-  var y: Int = 0
-  loop y < gridHeight {
-    var x: Int = 0
-    loop x < gridWidth {
-      let v: Int = gridGet(w: w, x: x, y: y)
-      if v > 0 {
-        drawBlock(gx: x, gy: y, kindId: v, flash: w.lockFlash)
+func blockTransform(gridX: view Int, gridY: view Int, size: view Float) ret Transform3d {
+  ret Transform3d {
+    position: vec3.create(
+      x: gridX.toFloat() - 4.5
+      y: 0.0
+      z: 19.5 - gridY.toFloat())
+    rotation: vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    scale: vec3.create(x: size, y: size, z: size)
+  }
+}
+
+func setEntityMaterial(scene: mod Scene3d, entity: view Int, material: view Int) {
+  let renderer: MeshRenderer = sceneMeshRendererAt(values: scene.meshRenderers, index: entity)
+  scene.meshRenderers.set(index: entity, value: MeshRenderer {
+    entity: renderer.entity
+    mesh: renderer.mesh
+    material: material
+    visible: renderer.visible
+  })
+}
+
+func createTetrisRenderState() ret TetrisRenderState {
+  let cubeData: MeshData = makeBox(size: 1.0)
+  let cube: MeshHandle = uploadTetrisMesh(meshData: cubeData)
+  var scene: Scene3d = createScene3d()
+  let noEmission: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  var colorId: Int = 1
+  loop colorId <= 7 {
+    let color: Vec3 = kindColor(id: colorId)
+    let material: Int = addMaterial(
+      scene: scene, baseColor: color
+      metallic: 0.08, roughness: 0.3, emission: noEmission)
+    colorId = colorId + 1
+  }
+  let backingMaterial: Int = addMaterial(
+    scene: scene
+    baseColor: vec3.create(x: 0.035, y: 0.05, z: 0.08)
+    metallic: 0.0, roughness: 0.9, emission: noEmission)
+
+  let hidden: Transform3d = hiddenTransform()
+  let gridBase: Int = 0
+  var slot: Int = 0
+  loop slot < gridWidth * gridHeight {
+    let entity: Int = addMeshInstance(
+      scene: scene, mesh: cube, material: 0
+      position: hidden.position, rotation: hidden.rotation, scale: hidden.scale)
+    slot = slot + 1
+  }
+  let currentBase: Int = scene.transforms.length
+  slot = 0
+  loop slot < 4 {
+    let entity: Int = addMeshInstance(
+      scene: scene, mesh: cube, material: 0
+      position: hidden.position, rotation: hidden.rotation, scale: hidden.scale)
+    slot = slot + 1
+  }
+  let particleBase: Int = scene.transforms.length
+  slot = 0
+  loop slot < maxParticles {
+    let entity: Int = addMeshInstance(
+      scene: scene, mesh: cube, material: slot % 7
+      position: hidden.position, rotation: hidden.rotation, scale: hidden.scale)
+    slot = slot + 1
+  }
+  let backingEntity: Int = addMeshInstance(
+    scene: scene, mesh: cube, material: backingMaterial
+    position: vec3.create(x: 0.0, y: 0.65, z: 10.0)
+    rotation: vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    scale: vec3.create(x: 10.8, y: 0.2, z: 20.8))
+
+  ret TetrisRenderState {
+    scene: scene
+    gridBase: gridBase
+    currentBase: currentBase
+    particleBase: particleBase
+  }
+}
+
+func extractTetrisScene(renderState: mod TetrisRenderState, world: view World) {
+  let hidden: Transform3d = hiddenTransform()
+  var gridY: Int = 0
+  loop gridY < gridHeight {
+    var gridX: Int = 0
+    loop gridX < gridWidth {
+      let slot: Int = gridY * gridWidth + gridX
+      let entity: Int = renderState.gridBase + slot
+      let colorId: Int = gridGet(w: world, x: gridX, y: gridY)
+      if colorId > 0 {
+        setTransform(
+          scene: renderState.scene, entity: entity
+          transform: blockTransform(gridX: gridX, gridY: gridY, size: 0.94))
+        setEntityMaterial(scene: renderState.scene, entity: entity, material: colorId - 1)
+      } else {
+        setTransform(scene: renderState.scene, entity: entity, transform: hidden)
       }
-      x = x + 1
+      gridX = gridX + 1
     }
-    y = y + 1
+    gridY = gridY + 1
   }
-}
 
-func drawCurrentPiece(w: view World) {
-  if w.state is GameState.gameOver {
-    ret
-  }
-  let cp: view Piece => w.currentPiece
-  let kindId: Int = getKindId(kind: cp.kind)
-  var py: Int = 0
-  loop py < 4 {
-    var px: Int = 0
-    loop px < 4 {
-      if getShapeCell(kind: cp.kind, rot: cp.rotation, px: px, py: py) is 1 {
-        drawBlock(gx: cp.x + px, gy: cp.y + py, kindId: kindId, flash: 0.0)
+  var activeSlot: Int = 0
+  if world.state is not GameState.gameOver {
+    let piece: view Piece => world.currentPiece
+    let colorId: Int = getKindId(kind: piece.kind)
+    var pieceY: Int = 0
+    loop pieceY < 4 {
+      var pieceX: Int = 0
+      loop pieceX < 4 {
+        if getShapeCell(kind: piece.kind, rot: piece.rotation, px: pieceX, py: pieceY) is 1 {
+          let entity: Int = renderState.currentBase + activeSlot
+          setTransform(
+            scene: renderState.scene, entity: entity
+            transform: blockTransform(
+              gridX: piece.x + pieceX, gridY: piece.y + pieceY, size: 0.96))
+          setEntityMaterial(scene: renderState.scene, entity: entity, material: colorId - 1)
+          activeSlot = activeSlot + 1
+        }
+        pieceX = pieceX + 1
       }
-      px = px + 1
+      pieceY = pieceY + 1
     }
-    py = py + 1
   }
-}
+  loop activeSlot < 4 {
+    setTransform(
+      scene: renderState.scene, entity: renderState.currentBase + activeSlot
+      transform: hidden)
+    activeSlot = activeSlot + 1
+  }
 
-# Ghost piece: faint outline of where the current piece will land.
-func drawGhostPiece(w: view World) {
-  if w.state is GameState.gameOver {
-    ret
-  }
-  let cp: view Piece => w.currentPiece
-  # Find drop distance.
-  var drop: Int = 0
-  loop canMove(w: w, dx: 0, dy: drop + 1, dr: 0) is 1 {
-    drop = drop + 1
-  }
-  if drop is 0 {
-    ret
-  }
-  var py: Int = 0
-  loop py < 4 {
-    var px: Int = 0
-    loop px < 4 {
-      if getShapeCell(kind: cp.kind, rot: cp.rotation, px: px, py: py) is 1 {
-        let pos: Vector3 = cellPos(gx: cp.x + px, gy: cp.y + drop + py)
-        drawCubeWires(
-          pos: pos
-          width: 1.0
-          height: 1.0
-          length: 1.0
-          color: { r: 200, g: 200, b: 220, a: 60 }
-        )
-      }
-      px = px + 1
+  var particleIndex: Int = 0
+  loop particleIndex < maxParticles {
+    let particle: Particle = rae_ext_rae_buf_get(
+      buf: world.particles.data, index: particleIndex)
+    let entity: Int = renderState.particleBase + particleIndex
+    if particle.active {
+      setTransform(
+        scene: renderState.scene, entity: entity
+        transform: Transform3d {
+          position: vec3.create(
+            x: particle.px - 5.0, y: particle.pz, z: 20.0 + particle.py)
+          rotation: vec3.create(x: 0.0, y: 0.0, z: 0.0)
+          scale: vec3.create(x: particle.size, y: particle.size, z: particle.size)
+        })
+    } else {
+      setTransform(scene: renderState.scene, entity: entity, transform: hidden)
     }
-    py = py + 1
+    particleIndex = particleIndex + 1
   }
-}
-
-func renderSystem(w: view World) {
-  drawWell()
-  drawLockedGrid(w)
-  drawGhostPiece(w)
-  drawCurrentPiece(w)
-  renderParticles(w)
 }
