@@ -271,17 +271,11 @@ SUMU AI is a voice-first desktop AI assistant app for running project tools and 
 — so you are also expected to **add** new items when the user
 identifies follow-up work that doesn't fit the current turn.
 
-- **THE QUEUE IS THIS ONE FILE ONLY: the top-level
-  `rae-lang-dev/QUEUE.md`.** It is the single source of truth. Do NOT
-  create, read, or write a `QUEUE.md` anywhere else — in particular
-  never inside the `rae/` submodule. SUMU only shows the user this
-  top-level file, so any queue elsewhere is invisible to them and
-  will silently rot (this happened once: a stale `rae/QUEUE.md`
-  shadowed the real one for months). If you find a `QUEUE.md` outside
-  the top level, treat it as a bug: move any still-open tasks here and
-  delete it. Watch your working directory — if a `cd` leaves you
-  inside `rae/`, a bare `QUEUE.md` path resolves to the wrong place;
-  always use the absolute top-level path for the queue.
+- **THE QUEUE IS THIS ONE FILE ONLY: the monorepo-root `QUEUE.md`.** It is
+  the single source of truth. Do NOT create, read, or write a `QUEUE.md`
+  anywhere else. SUMU only shows the root file, so another queue would be
+  invisible and silently rot. If you find a second `QUEUE.md`, move any
+  still-open tasks into the root queue and delete the duplicate.
 
 - SUMU may create this file when queue features are used.
 - SUMU updates queue item status markers — `[>sumu]` (or
@@ -295,4 +289,3 @@ identifies follow-up work that doesn't fit the current turn.
 
 - Keep manual edits simple (single-line items, no multi-line
   formatting) to avoid merge conflicts with SUMU's status updates.
-
