@@ -280,6 +280,15 @@ type Skeleton {
   localS: List(Float)
 }
 
+# A reusable snapshot of a skeleton's local transforms. Animation transitions
+# capture the currently displayed pose once, then blend from it without
+# allocating during subsequent frames.
+type SkeletonPose {
+  localT: List(Float)
+  localR: List(Float)
+  localS: List(Float)
+}
+
 func emptySkeleton() ret Skeleton {
   ret Skeleton {
     ok: false, jointNodes: createList(Int, cap: 0), inverseBind: createList(Float, cap: 0),
@@ -386,6 +395,87 @@ func loadSkeleton(g: view Glb, skinIndex: view Int) pub ret Skeleton {
     ok: true, jointNodes: own jointNodes, inverseBind: own inverseBind,
     nodeCount: nodeCount, parent: own parent, nodeNames: own nodeNames,
     localT: own localT, localR: own localR, localS: own localS
+  }
+}
+
+func captureSkeletonPose(sk: view Skeleton) ret SkeletonPose {
+  let localT: List(Float) = createList(Float, cap: sk.localT.length)
+  let localR: List(Float) = createList(Float, cap: sk.localR.length)
+  let localS: List(Float) = createList(Float, cap: sk.localS.length)
+  var index: Int = 0
+  loop index < sk.localT.length {
+    localT.add(value: sk.localT.get(index: index))
+    index = index + 1
+  }
+  index = 0
+  loop index < sk.localR.length {
+    localR.add(value: sk.localR.get(index: index))
+    index = index + 1
+  }
+  index = 0
+  loop index < sk.localS.length {
+    localS.add(value: sk.localS.get(index: index))
+    index = index + 1
+  }
+  ret SkeletonPose { localT: own localT, localR: own localR, localS: own localS }
+}
+
+func applySkeletonPose(sk: mod Skeleton, pose: view SkeletonPose) {
+  var index: Int = 0
+  loop index < sk.localT.length and index < pose.localT.length {
+    sk.localT.set(index: index, value: pose.localT.get(index: index))
+    index = index + 1
+  }
+  index = 0
+  loop index < sk.localR.length and index < pose.localR.length {
+    sk.localR.set(index: index, value: pose.localR.get(index: index))
+    index = index + 1
+  }
+  index = 0
+  loop index < sk.localS.length and index < pose.localS.length {
+    sk.localS.set(index: index, value: pose.localS.get(index: index))
+    index = index + 1
+  }
+}
+
+# Blend from a captured pose into the target pose currently stored in `sk`.
+# Translation and scale lerp component-wise; rotations use shortest-path SLERP.
+func blendSkeletonPose(sk: mod Skeleton, from: view SkeletonPose, weight: view Float) {
+  var amount: Float = weight
+  if amount < 0.0 { amount = 0.0 }
+  if amount > 1.0 { amount = 1.0 }
+
+  var index: Int = 0
+  loop index < sk.localT.length and index < from.localT.length {
+    let source: Float = from.localT.get(index: index)
+    let target: Float = sk.localT.get(index: index)
+    sk.localT.set(index: index, value: source + (target - source) * amount)
+    index = index + 1
+  }
+  index = 0
+  loop index < sk.localS.length and index < from.localS.length {
+    let source: Float = from.localS.get(index: index)
+    let target: Float = sk.localS.get(index: index)
+    sk.localS.set(index: index, value: source + (target - source) * amount)
+    index = index + 1
+  }
+
+  var node: Int = 0
+  loop node * 4 + 3 < sk.localR.length and node * 4 + 3 < from.localR.length {
+    let source: Quat = quat.create(
+      x: from.localR.get(index: node * 4), y: from.localR.get(index: node * 4 + 1),
+      z: from.localR.get(index: node * 4 + 2), w: from.localR.get(index: node * 4 + 3)
+    )
+    let target: Quat = quat.create(
+      x: sk.localR.get(index: node * 4), y: sk.localR.get(index: node * 4 + 1),
+      z: sk.localR.get(index: node * 4 + 2), w: sk.localR.get(index: node * 4 + 3)
+    )
+    let blended: Quat = quat.slerp(a: source, b: target, t: amount)
+    sk.localR.set(index: node * 4, value: blended.x)
+    sk.localR.set(index: node * 4 + 1, value: blended.y)
+    sk.localR.set(index: node * 4 + 2, value: blended.z)
+    sk.localR.set(index: node * 4 + 3, value: blended.w)
+    node = node + 1
   }
 }
 
