@@ -1,0 +1,59 @@
+# Hot-reload state for example 114. Kept out of main because persistence is a
+# separate domain from loading, controlling and rendering the character.
+import core
+import scene3d
+import app3d/camera_rig
+import app3d/character_controller
+import app3d/playback
+open scene3d
+open app3d/camera_rig
+open app3d/character_controller
+open app3d/playback
+
+const state114Version: Int = 6
+const state114AppId: String = "114_walker_character"
+const state114OwnFields: Int = 8
+
+func state114Part(parts: view List(String), index: view Int) ret String {
+  if let value: String = parts.at(index: index) { ret value }
+  ret ""
+}
+
+func serialize114State(clipIndex: view Int, playing: view Bool, speed: view Float,
+                       toon: view Bool, controller: view ThirdPersonController,
+                       rig: view CameraRig, camera: view Camera3d) ret String {
+  var playingNum: Int = 0
+  if playing { playingNum = 1 }
+  var toonNum: Int = 0
+  if toon { toonNum = 1 }
+  ret "{state114Version} {clipIndex} {playingNum} {speed} {toonNum} {controller.position.x} {controller.position.y} {controller.heading} {cameraRigStateString(rig: rig, camera: camera)}"
+}
+
+func restore114State(raw: view String, clipIndex: mod Int, playing: mod Bool,
+                     speed: mod Float, toon: mod Bool,
+                     controller: mod ThirdPersonController,
+                     rig: mod CameraRig, camera: mod Camera3d) ret Bool {
+  if raw.length() < 1 { ret false }
+  let parts: List(String) = raw.trim().split(sep: " ")
+  if parts.length < state114OwnFields { ret false }
+  if state114Part(parts: parts, index: 0).trim().toInt() is not state114Version {
+    ret false
+  }
+  clipIndex = state114Part(parts: parts, index: 1).trim().toInt()
+  if clipIndex < 0 { clipIndex = 0 }
+  if clipIndex > 3 { clipIndex = 3 }
+  playing = state114Part(parts: parts, index: 2).trim().toInt() is 1
+  speed = state114Part(parts: parts, index: 3).trim().toFloat()
+  if speed < speedMin { speed = speedMin }
+  if speed > speedMax { speed = speedMax }
+  toon = state114Part(parts: parts, index: 4).trim().toInt() is 1
+  controller.position.x = state114Part(parts: parts, index: 5).trim().toFloat()
+  controller.position.y = state114Part(parts: parts, index: 6).trim().toFloat()
+  controller.heading = state114Part(parts: parts, index: 7).trim().toFloat()
+  if applyCameraRigState(parts: parts, offset: state114OwnFields,
+                         rig: rig, camera: camera) is false {
+    ret false
+  }
+  # Window geometry has a separate runtime-owned persistence channel.
+  ret true
+}
