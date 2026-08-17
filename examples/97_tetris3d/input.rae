@@ -15,6 +15,47 @@ let keySpace: Int = 32
 let keyP: Int = 80
 let keyR: Int = 82
 
+type InputEdges {
+  restart: Bool
+  pause: Bool
+  rotate: Bool
+  hardDrop: Bool
+}
+
+func createInputEdges() ret InputEdges {
+  ret InputEdges {
+    restart: false
+    pause: false
+    rotate: false
+    hardDrop: false
+  }
+}
+
+# SDL pressed edges last for one rendered frame, while gameplay advances on a
+# fixed tick that may run zero or several times during that frame. Latch each
+# edge until exactly one gameplay tick consumes it.
+func pollInputEdges(edges: mod InputEdges) {
+  if sdl3.isKeyPressed(key: keyR) {
+    edges.restart = true
+  }
+  if sdl3.isKeyPressed(key: keyP) {
+    edges.pause = true
+  }
+  if sdl3.isKeyPressed(key: keyUp) or sdl3.isKeyPressed(key: keyW) {
+    edges.rotate = true
+  }
+  if sdl3.isKeyPressed(key: keySpace) {
+    edges.hardDrop = true
+  }
+}
+
+func clearInputEdges(edges: mod InputEdges) {
+  edges.restart = false
+  edges.pause = false
+  edges.rotate = false
+  edges.hardDrop = false
+}
+
 func tryMove(w: mod World, dx: view Int, dr: view Int) {
   if canMove(w: w, dx: dx, dy: 0, dr: dr) is 1 {
     w.currentPiece.x = w.currentPiece.x + dx
@@ -24,6 +65,28 @@ func tryMove(w: mod World, dx: view Int, dr: view Int) {
     }
     w.currentPiece.rotation = newRot
     w.lockTimer = 0
+  }
+}
+
+func tryRotate(w: mod World) {
+  if canMove(w: w, dx: 0, dy: 0, dr: 1) is 1 {
+    tryMove(w: w, dx: 0, dr: 1)
+    ret
+  }
+  if canMove(w: w, dx: 1, dy: 0, dr: 1) is 1 {
+    tryMove(w: w, dx: 1, dr: 1)
+    ret
+  }
+  if canMove(w: w, dx: -1, dy: 0, dr: 1) is 1 {
+    tryMove(w: w, dx: -1, dr: 1)
+    ret
+  }
+  if canMove(w: w, dx: 2, dy: 0, dr: 1) is 1 {
+    tryMove(w: w, dx: 2, dr: 1)
+    ret
+  }
+  if canMove(w: w, dx: -2, dy: 0, dr: 1) is 1 {
+    tryMove(w: w, dx: -2, dr: 1)
   }
 }
 
@@ -38,9 +101,9 @@ func hardDrop(w: mod World) {
   spawnNextPiece(w: w)
 }
 
-func inputSystem(w: mod World) {
+func inputSystem(w: mod World, edges: view InputEdges) {
   if w.state is GameState.gameOver {
-    if sdl3.isKeyPressed(key: keyR) {
+    if edges.restart {
       initWorld(w)
     }
     ret
@@ -48,7 +111,7 @@ func inputSystem(w: mod World) {
 
   # P toggles between Playing and Paused. Handled BEFORE the
   # "skip-input-if-not-Playing" gate so the player can unpause.
-  if sdl3.isKeyPressed(key: keyP) {
+  if edges.pause {
     if w.state is GameState.playing {
       w.state = GameState.paused
     } else {
@@ -99,12 +162,12 @@ func inputSystem(w: mod World) {
   }
 
   # Rotate CCW with up / W.
-  if sdl3.isKeyPressed(key: keyUp) or sdl3.isKeyPressed(key: keyW) {
-    tryMove(w: w, dx: 0, dr: 1)
+  if edges.rotate {
+    tryRotate(w: w)
   }
 
   # Hard drop with space.
-  if sdl3.isKeyPressed(key: keySpace) {
+  if edges.hardDrop {
     hardDrop(w: w)
   }
 }
