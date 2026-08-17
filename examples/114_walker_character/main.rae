@@ -171,11 +171,19 @@ func walkerIntAt(values: view List(Int), index: view Int) ret Int {
   ret 0
 }
 
+# Blender is Z-up but does not mandate one object-facing axis. This asset's
+# authored front becomes -Y after the glTF Y-up -> Rae Z-up conversion, while
+# Rae gameplay forward is +Y. Correct that at the asset-placement boundary;
+# the importer must preserve authored transforms and the controller must keep
+# its project-wide +Y convention.
+const walkerFacingCorrection: Float = 3.141592653589793
+
 func walkerWorldModel(baseModel: view Mat4,
                       controller: view ThirdPersonController) ret Mat4 {
   let worldTranslation: Mat4 = mat4Translate(
     x: controller.position.x, y: controller.position.y, z: controller.position.z)
-  let worldHeading: Mat4 = mat4RotateZ(angle: controller.heading)
+  let worldHeading: Mat4 = mat4RotateZ(
+    angle: controller.heading + walkerFacingCorrection)
   ret mat4Mul(a: worldTranslation,
                  b: mat4Mul(a: worldHeading, b: baseModel))
 }
