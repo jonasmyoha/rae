@@ -1,6 +1,20 @@
-open raylib
+import core
+import gpu2d
+import sdl3
+import sys
+import ui/ecs
+import ui/render_gpu2d
+import app3d/ui_shell
+open app3d/ui_shell
+open ui/ecs
+open ui/render_gpu2d
 
-# -- Components (Plain Data Types) --
+const fieldW: Float = 800.0
+const fieldH: Float = 450.0
+const paddleW: Float = 20.0
+const paddleH: Float = 100.0
+const ballRadius: Float = 10.0
+
 type PaddleTransform {
   x: Float
   y: Float
@@ -11,197 +25,190 @@ type Velocity {
   dy: Float
 }
 
-# -- Systems (Functions acting on Components) --
-func movementSystem(pos: mod PaddleTransform, vel: view Velocity) {
-  pos.x = pos.x + vel.dx
-  pos.y = pos.y + vel.dy
+func movementSystem(position: mod PaddleTransform, velocity: view Velocity, dt: view Float) {
+  position.x = position.x + velocity.dx * dt
+  position.y = position.y + velocity.dy * dt
 }
 
-func bounceSystem(
-  pos: view PaddleTransform
-  vel: mod Velocity
-  radius: view Float
-  height: view Float
-) {
-  if pos.y < radius {
-    vel.dy = 4.0
+func bounceSystem(position: view PaddleTransform, velocity: mod Velocity) {
+  if position.y < ballRadius and velocity.dy < 0.0 {
+    velocity.dy = 0.0 - velocity.dy
   }
-  if pos.y > height - radius {
-    vel.dy = -4.0
+  if position.y > fieldH - ballRadius and velocity.dy > 0.0 {
+    velocity.dy = 0.0 - velocity.dy
   }
 }
 
 func paddleCollisionSystem(
-  bPos: view PaddleTransform
-  bVel: mod Velocity
-  pPos: view PaddleTransform
-  pWidth: view Float
-  pHeight: view Float
-  isLeft: view Int
+  ballPosition: view PaddleTransform
+  ballVelocity: mod Velocity
+  paddlePosition: view PaddleTransform
+  leftSide: view Bool
 ) {
-  if isLeft is 1 {
-    if bPos.x - 10.0 < pPos.x + pWidth {
-      if bPos.y > pPos.y {
-        if bPos.y < pPos.y + pHeight {
-          if bVel.dx < 0.0 {
-            # Bounce and speed up
-            bVel.dx = -bVel.dx + 1.2
-          }
-        }
-      }
+  let insideY: Bool = ballPosition.y > paddlePosition.y and
+    ballPosition.y < paddlePosition.y + paddleH
+  if insideY is false { ret }
+
+  if leftSide {
+    if ballPosition.x - ballRadius < paddlePosition.x + paddleW and ballVelocity.dx < 0.0 {
+      ballVelocity.dx = 0.0 - ballVelocity.dx + 18.0
     }
   } else {
-    if bPos.x + 10.0 > pPos.x {
-      if bPos.y > pPos.y {
-        if bPos.y < pPos.y + pHeight {
-          if bVel.dx > 0.0 {
-            # Bounce and speed up
-            bVel.dx = -bVel.dx - 1.2
-          }
-        }
-      }
+    if ballPosition.x + ballRadius > paddlePosition.x and ballVelocity.dx > 0.0 {
+      ballVelocity.dx = 0.0 - ballVelocity.dx - 18.0
     }
   }
 }
 
-func paddleInputSystem(
-  pos: mod PaddleTransform
-  speed: view Float
-  height: view Float
-  pHeight: view Float
+func paddleInputSystem(position: mod PaddleTransform, dt: view Float) {
+  let speed: Float = 300.0
+  if sdl3.isKeyDown(key: 87) or sdl3.isKeyDown(key: 265) {
+    position.y = position.y - speed * dt
+  }
+  if sdl3.isKeyDown(key: 83) or sdl3.isKeyDown(key: 264) {
+    position.y = position.y + speed * dt
+  }
+  if position.y < 0.0 { position.y = 0.0 }
+  if position.y > fieldH - paddleH { position.y = fieldH - paddleH }
+}
+
+func drawGame(
+  playerPosition: view PaddleTransform
+  cpuPosition: view PaddleTransform
+  ballPosition: view PaddleTransform
 ) {
-  # W (87) / Up (265)
-  if isKeyDown(key: 87) {
-    pos.y = pos.y - speed
-  }
-  if isKeyDown(key: 265) {
-    pos.y = pos.y - speed
-  }
-  # S (83) / Down (264)
-  if isKeyDown(key: 83) {
-    pos.y = pos.y + speed
-  }
-  if isKeyDown(key: 264) {
-    pos.y = pos.y + speed
-  }
-  # Bounds check
-  if pos.y < 0.0 {
-    pos.y = 0.0
-  }
-  if pos.y > height - pHeight {
-    pos.y = height - pHeight
-  }
+  gpu2d.drawGradientRect(
+    x: 0.0, y: 0.0, w: fieldW, h: fieldH, radius: 0.0
+    from: 0xFF101622, to: 0xFF071019, angleDeg: 90.0)
+  gpu2d.drawRoundedRect(
+    x: fieldW * 0.5 - 2.0, y: 78.0, w: 4.0, h: fieldH - 100.0
+    radius: 2.0, color: 0x4458E0D0)
+  gpu2d.drawRoundedRect(
+    x: playerPosition.x, y: playerPosition.y, w: paddleW, h: paddleH
+    radius: 10.0, color: 0xFFF4F8FF)
+  gpu2d.drawRoundedRect(
+    x: cpuPosition.x, y: cpuPosition.y, w: paddleW, h: paddleH
+    radius: 10.0, color: 0xFFF4F8FF)
+  gpu2d.drawRoundedRect(
+    x: ballPosition.x - ballRadius, y: ballPosition.y - ballRadius
+    w: ballRadius * 2.0, h: ballRadius * 2.0
+    radius: ballRadius, color: 0xFF19E6D0)
 }
 
-func drawUISystem(p1Score: view Int, p2Score: view Int, winner: view Int) {
-  let green: Color = { r: 25, g: 245, b: 220, a: 255 }
-  let orange: Color = { r: 255, g: 145, b: 0, a: 255 }
-  drawText(
-    text: "{p1Score} - {p2Score}"
-    x: 350.0
-    y: 20.0
-    fontSize: 40.0
-    color: green
-  )
-  if winner is 1 {
-    drawText(
-      text: "YOU WIN"
-      x: 350.0
-      y: 200.0
-      fontSize: 40.0
-      color: orange
-    )
-  }
-  if winner is 2 {
-    drawText(
-      text: "CPU WINS"
-      x: 350.0
-      y: 200.0
-      fontSize: 40.0
-      color: orange
-    )
-  }
+func runPhysicsSelfTest() ret Bool {
+  var position: PaddleTransform = { x: 400.0, y: 5.0 }
+  var velocity: Velocity = { dx: 240.0, dy: 0.0 - 240.0 }
+  movementSystem(position: position, velocity: velocity, dt: 0.02)
+  bounceSystem(position: position, velocity: velocity)
+  if velocity.dy <= 0.0 { ret false }
+
+  let paddle: PaddleTransform = { x: 20.0, y: 175.0 }
+  position = { x: 29.0, y: 225.0 }
+  velocity = { dx: 0.0 - 240.0, dy: 0.0 }
+  paddleCollisionSystem(
+    ballPosition: position, ballVelocity: velocity
+    paddlePosition: paddle, leftSide: true)
+  ret velocity.dx > 0.0
 }
 
-# -- Main Entry --
-func main() {
-  # FLAG_WINDOW_RESIZABLE = 4, FLAG_WINDOW_MAXIMIZED = 1024
-  setConfigFlags(flags: 1028)
-  initWindow(width: 800, height: 450, title: "Rae Pong (Implicit Project)")
-  setTargetFPS(fps: 60)
-  let white: Color = { r: 255, g: 255, b: 255, a: 255 }
-  let darkGray: Color = { r: 20, g: 20, b: 20, a: 255 }
-  let p1Pos: PaddleTransform = { x: 20.0, y: 175.0 }
-  let p2Pos: PaddleTransform = { x: 760.0, y: 175.0 }
-  let bPos: PaddleTransform = { x: 400.0, y: 225.0 }
-  let bVel: Velocity = { dx: 4.0, dy: 4.0 }
-  let aiState: AIState = {
-    state: AIPhase.observing
-    timer: 0
-    targetY: 225.0
+func main() ret Int {
+  gpu2d.initWindow(width: fieldW.toInt(), height: fieldH.toInt(), title: "Rae Pong — GPU2D")
+  gpu2d.setDesignResolution(width: fieldW, height: fieldH, fit: 0)
+
+  let uiResources: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: ""
+    themeFile: "theme.raescene")
+  var world: UiWorld = createUiWorld()
+  let uiRoot: EntityId = mountUiScene(
+    world: world
+    path: "examples/91_pong_implicit/assets/ui.raescene"
+    res: uiResources)
+
+  var playerPosition: PaddleTransform = { x: 20.0, y: 175.0 }
+  var cpuPosition: PaddleTransform = { x: 760.0, y: 175.0 }
+  var ballPosition: PaddleTransform = { x: 400.0, y: 225.0 }
+  var ballVelocity: Velocity = { dx: 240.0, dy: 240.0 }
+  var aiState: AIState = {
+    state: AIPhase.observing, timer: 0.0, targetY: 225.0
     decision: AIDecision.none
   }
-  var p1Score: Int = 0
-  var p2Score: Int = 0
+  var playerScore: Int = 0
+  var cpuScore: Int = 0
   var winner: Int = 0
-  loop not windowShouldClose() {
-    paddleInputSystem(pos: p1Pos, speed: 5.0, height: 450.0, pHeight: 100.0)
-    p2Pos.y = paddleAiSystem(ai: aiState, ballY: bPos.y, paddleY: p2Pos.y)
-    movementSystem(pos: bPos, vel: bVel)
-    bounceSystem(pos: bPos, vel: bVel, radius: 10.0, height: 450.0)
-    paddleCollisionSystem(
-      bPos: bPos
-      bVel: bVel
-      pPos: p1Pos
-      pWidth: 20.0
-      pHeight: 100.0
-      isLeft: 1
-    )
-    paddleCollisionSystem(
-      bPos: bPos
-      bVel: bVel
-      pPos: p2Pos
-      pWidth: 20.0
-      pHeight: 100.0
-      isLeft: 0
-    )
-    if bPos.x < 0.0 {
-      p2Score = p2Score + 1
-      bPos.x = 400.0
-      bPos.y = 225.0
-      bVel.dx = 4.0
+  var displayedPlayerScore: Int = 0 - 1
+  var displayedCpuScore: Int = 0 - 1
+  var displayedWinner: Int = 0 - 1
+  var previousTime: Float64 = gpu2d.nowSeconds()
+  let testMode: Bool = getEnv(name: "RAE_PONG_TEST_FRAME").length() > 0
+
+  if testMode {
+    if runPhysicsSelfTest() is false {
+      log("[pong] self-test failed")
+      ret 1
     }
-    if bPos.x > 800.0 {
-      p1Score = p1Score + 1
-      bPos.x = 400.0
-      bPos.y = 225.0
-      bVel.dx = -4.0
-    }
-    if p1Score is 3 {
-      winner = 1
-    }
-    if p2Score is 3 {
-      winner = 2
-    }
-    beginDrawing()
-    clearBackground(color: darkGray)
-    drawUISystem(p1Score: p1Score, p2Score: p2Score, winner: winner)
-    drawRectangle(
-      x: 20.0
-      y: p1Pos.y
-      width: 20.0
-      height: 100.0
-      color: white
-    )
-    drawRectangle(
-      x: 760.0
-      y: p2Pos.y
-      width: 20.0
-      height: 100.0
-      color: white
-    )
-    drawCircle(x: bPos.x, y: bPos.y, radius: 10.0, color: white)
-    endDrawing()
+    playerScore = 2
+    cpuScore = 1
+    log("[pong] self-test passed")
   }
-  closeWindow()
+
+  loop not gpu2d.pollClose() {
+    let resized: Bool = resizeUiToWindow(world: world, res: uiResources)
+    let now: Float64 = gpu2d.nowSeconds()
+    var dt: Float = (now - previousTime) as Float
+    previousTime = now
+    if dt > 0.05 { dt = 0.05 }
+
+    if testMode is false and winner is 0 {
+      paddleInputSystem(position: playerPosition, dt: dt)
+      cpuPosition.y = paddleAiSystem(
+        ai: aiState, ballY: ballPosition.y, paddleY: cpuPosition.y, dt: dt)
+      movementSystem(position: ballPosition, velocity: ballVelocity, dt: dt)
+      bounceSystem(position: ballPosition, velocity: ballVelocity)
+      paddleCollisionSystem(
+        ballPosition: ballPosition, ballVelocity: ballVelocity
+        paddlePosition: playerPosition, leftSide: true)
+      paddleCollisionSystem(
+        ballPosition: ballPosition, ballVelocity: ballVelocity
+        paddlePosition: cpuPosition, leftSide: false)
+
+      if ballPosition.x < 0.0 {
+        cpuScore = cpuScore + 1
+        ballPosition = { x: 400.0, y: 225.0 }
+        ballVelocity.dx = 240.0
+      }
+      if ballPosition.x > fieldW {
+        playerScore = playerScore + 1
+        ballPosition = { x: 400.0, y: 225.0 }
+        ballVelocity.dx = 0.0 - 240.0
+      }
+      if playerScore >= 3 { winner = 1 }
+      if cpuScore >= 3 { winner = 2 }
+    }
+
+    if playerScore is not displayedPlayerScore or cpuScore is not displayedCpuScore {
+      setNodeText(world: world, nodeId: "ScoreText", value: "{playerScore}  ·  {cpuScore}")
+      displayedPlayerScore = playerScore
+      displayedCpuScore = cpuScore
+    }
+    if winner is not displayedWinner {
+      if winner is 0 { setNodeText(world: world, nodeId: "WinnerText", value: "") }
+      if winner is 1 { setNodeText(world: world, nodeId: "WinnerText", value: "YOU WIN") }
+      if winner is 2 { setNodeText(world: world, nodeId: "WinnerText", value: "CPU WINS") }
+      displayedWinner = winner
+    }
+    runUiSystems(world: world, res: uiResources)
+
+    gpu2d.beginFrame(r: 0.03, g: 0.05, b: 0.08, a: 1.0)
+    drawGame(
+      playerPosition: playerPosition
+      cpuPosition: cpuPosition
+      ballPosition: ballPosition)
+    renderSystemGpu2d(world: world, res: uiResources)
+    gpu2d.endFrame()
+  }
+
+  gpu2d.closeWindow()
+  ret 0
 }
