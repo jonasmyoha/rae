@@ -1,4 +1,18 @@
-open raylib
+import core
+import gpu2d
+import math
+import sdl3
+import sys
+import ui/ecs
+import ui/render_gpu2d
+import app3d/ui_shell
+open app3d/ui_shell
+open math
+open ui/ecs
+open ui/render_gpu2d
+
+const canvasW: Float = 800.0
+const canvasH: Float = 600.0
 
 enum GameState { menu, playing, paused, gameOver }
 
@@ -44,37 +58,37 @@ type Game {
   maxLockTimer: Int
 }
 
-func getModernColor(index: view Int) ret Color {
+func getModernColor(index: view Int) ret Int {
   # I - Cyan
   if index is 1 {
-    ret Color { r: 100, g: 230, b: 255, a: 255 }
+    ret 0xFF64E6FF
   }
   # J - Blue
   if index is 2 {
-    ret Color { r: 120, g: 160, b: 255, a: 255 }
+    ret 0xFF78A0FF
   }
   # L - Orange
   if index is 3 {
-    ret Color { r: 255, g: 180, b: 120, a: 255 }
+    ret 0xFFFFB478
   }
   # O - Yellow
   if index is 4 {
-    ret Color { r: 255, g: 230, b: 120, a: 255 }
+    ret 0xFFFFE678
   }
   # S - Green
   if index is 5 {
-    ret Color { r: 120, g: 255, b: 160, a: 255 }
+    ret 0xFF78FFA0
   }
   # T - Purple
   if index is 6 {
-    ret Color { r: 200, g: 160, b: 255, a: 255 }
+    ret 0xFFC8A0FF
   }
   # Z - Red
   if index is 7 {
-    ret Color { r: 255, g: 120, b: 140, a: 255 }
+    ret 0xFFFF788C
   }
   # Empty
-  ret Color { r: 40, g: 40, b: 50, a: 255 }
+  ret 0xFF282832
 }
 
 func getKindId(kind: TetrominoKind) ret Int {
@@ -412,40 +426,48 @@ func initGame(g: mod Game) {
   spawnPiece(g)
 }
 
-func draw(g: view Game) {
-  beginDrawing()
-  clearBackground(color: Color { r: 30, g: 30, b: 40, a: 255 })
-  let sw: Float = getScreenWidth().toFloat()
-  let sh: Float = getScreenHeight().toFloat()
-  # Scale font size based on screen height
-  var fontSize: Float = sh / 25.0
-  if fontSize < 10.0 {
-    fontSize = 10.0
-  }
-  # Calculate scaling: target height is 20 rows, let's leave 10% margin top/bottom
-  let cellSize: Float = sh * 0.8 / 20.0
-  let offsetX: Float = (sw - g.width.toFloat() * cellSize) / 2.0
-  let offsetY: Float = (sh - g.height.toFloat() * cellSize) / 2.0
-  # Draw Grid Area Outline (Modern Pastel Lavender)
-  # Draw Grid
-  drawRectangleLines(
-    x: offsetX - 2.0
-    y: offsetY - 2.0
-    width: g.width.toFloat() * cellSize + 4.0
-    height: g.height.toFloat() * cellSize + 4.0
-    color: Color { r: 180, g: 180, b: 255, a: 255 }
-  )
+func drawFrame(x: view Float, y: view Float, w: view Float, h: view Float) {
+  gpu2d.drawRect(x: x, y: y, w: w, h: 2.0, color: 0xFFB4B4FF)
+  gpu2d.drawRect(x: x, y: y + h - 2.0, w: w, h: 2.0, color: 0xFFB4B4FF)
+  gpu2d.drawRect(x: x, y: y, w: 2.0, h: h, color: 0xFFB4B4FF)
+  gpu2d.drawRect(x: x + w - 2.0, y: y, w: 2.0, h: h, color: 0xFFB4B4FF)
+}
+
+func drawCell(x: view Float, y: view Float, size: view Float, color: view Int) {
+  gpu2d.drawRoundedRect(
+    x: x + 1.0, y: y + 1.0, w: size - 2.0, h: size - 2.0
+    radius: 4.0, color: color)
+  gpu2d.drawRect(
+    x: x + 4.0, y: y + 4.0, w: size - 8.0, h: 3.0
+    color: 0x44FFFFFF)
+}
+
+func drawGame(g: view Game) {
+  let cellSize: Float = 22.0
+  let offsetX: Float = 290.0
+  let offsetY: Float = 80.0
+  gpu2d.drawGradientRect(
+    x: 0.0, y: 0.0, w: canvasW, h: canvasH, radius: 0.0
+    from: 0xFF111827, to: 0xFF07101B, angleDeg: 90.0)
+  gpu2d.drawRoundedRect(
+    x: offsetX - 12.0, y: offsetY - 12.0
+    w: g.width.toFloat() * cellSize + 24.0
+    h: g.height.toFloat() * cellSize + 24.0
+    radius: 10.0, color: 0x661B2538)
+  drawFrame(
+    x: offsetX - 2.0, y: offsetY - 2.0
+    w: g.width.toFloat() * cellSize + 4.0
+    h: g.height.toFloat() * cellSize + 4.0)
   var y: Int = 0
   loop y < g.height {
     var x: Int = 0
     loop x < g.width {
       let val: Int = g.grid.get(index: y * g.width + x)
       if val > 0 {
-        drawRectangle(
+        drawCell(
           x: x.toFloat() * cellSize + offsetX
           y: y.toFloat() * cellSize + offsetY
-          width: cellSize - 1.0
-          height: cellSize - 1.0
+          size: cellSize
           color: getModernColor(id: val)
         )
       }
@@ -462,11 +484,10 @@ func draw(g: view Game) {
     var px: Int = 0
     loop px < 4 {
       if getShapeCell(kind: cp.kind, rot: cp.rotation, px: px, py: py) is 1 {
-        drawRectangle(
+        drawCell(
           x: (pos.x + px).toFloat() * cellSize + offsetX
           y: (pos.y + py).toFloat() * cellSize + offsetY
-          width: cellSize - 1.0
-          height: cellSize - 1.0
+          size: cellSize
           color: getModernColor(id: kindId)
         )
       }
@@ -475,26 +496,11 @@ func draw(g: view Game) {
     py = py + 1
   }
 
-  # Draw Next Piece Preview
   let previewOffsetX: Float = offsetX + g.width.toFloat() * cellSize + cellSize * 2.0
   let previewOffsetY: Float = offsetY + cellSize * 2.0
-  
-  # Next Box Outline
-  drawRectangleLines(
-    x: previewOffsetX - 5.0
-    y: previewOffsetY - 5.0
-    width: cellSize * 4.0 + 10.0
-    height: cellSize * 4.0 + 10.0
-    color: Color { r: 180, g: 180, b: 255, a: 255 }
-  )
-  
-  drawText(
-    text: "NEXT"
-    x: previewOffsetX
-    y: previewOffsetY - cellSize - 10.0
-    fontSize: fontSize
-    color: Color { r: 200, g: 200, b: 255, a: 255 }
-  )
+  drawFrame(
+    x: previewOffsetX - 5.0, y: previewOffsetY - 5.0
+    w: cellSize * 4.0 + 10.0, h: cellSize * 4.0 + 10.0)
 
   let nextKindId: Int = getKindId(kind: g.nextPieceKind)
   py = 0
@@ -502,11 +508,10 @@ func draw(g: view Game) {
     var px: Int = 0
     loop px < 4 {
       if getShapeCell(kind: g.nextPieceKind, rot: 0, px: px, py: py) is 1 {
-        drawRectangle(
+        drawCell(
           x: previewOffsetX + px.toFloat() * cellSize
           y: previewOffsetY + py.toFloat() * cellSize
-          width: cellSize - 1.0
-          height: cellSize - 1.0
+          size: cellSize
           color: getModernColor(id: nextKindId)
         )
       }
@@ -514,61 +519,6 @@ func draw(g: view Game) {
     }
     py = py + 1
   }
-  # UI Text (Modern Pastel Rainbow Palette)
-  # Scale font size based on screen height
-  # Soft Pink
-  # Soft Green
-  # Soft Blue
-  drawText(
-    text: "SCORE: {g.score}"
-    x: 10.0
-    y: 10.0
-    fontSize: fontSize
-    color: Color { r: 255, g: 200, b: 200, a: 255 }
-  )
-  drawText(
-    text: "LEVEL: {g.level}"
-    x: 10.0
-    y: 10.0 + fontSize * 1.2
-    fontSize: fontSize
-    color: Color { r: 200, g: 255, b: 200, a: 255 }
-  )
-  drawText(
-    text: "LINES: {g.lines}"
-    x: 10.0
-    y: 10.0 + fontSize * 2.4
-    fontSize: fontSize
-    color: Color { r: 200, g: 200, b: 255, a: 255 }
-  )
-  if g.state is GameState.paused {
-    # Soft Yellow
-    drawText(
-      text: "PAUSED"
-      x: sw / 2.0 - fontSize * 3.0
-      y: sh / 2.0
-      fontSize: fontSize * 2.0
-      color: Color { r: 255, g: 255, b: 180, a: 255 }
-    )
-  }
-  if g.state is GameState.gameOver {
-    # Soft Red
-    # Light Gray
-    drawText(
-      text: "GAME OVER"
-      x: sw / 2.0 - fontSize * 4.0
-      y: sh / 2.0
-      fontSize: fontSize * 2.0
-      color: Color { r: 255, g: 150, b: 150, a: 255 }
-    )
-    drawText(
-      text: "Press R to Restart"
-      x: sw / 2.0 - fontSize * 4.0
-      y: sh / 2.0 + fontSize * 2.2
-      fontSize: fontSize
-      color: Color { r: 220, g: 220, b: 220, a: 255 }
-    )
-  }
-  endDrawing()
 }
 
 func handleInput(g: mod Game) {
@@ -580,8 +530,8 @@ func handleInput(g: mod Game) {
   var moved: Int = 0
 
   # DAS (Delayed Auto Shift)
-  let moveLeft: Bool = isKeyDown(key: 263) or isKeyDown(key: 65)
-  let moveRight: Bool = isKeyDown(key: 262) or isKeyDown(key: 68)
+  let moveLeft: Bool = sdl3.isKeyDown(key: 263) or sdl3.isKeyDown(key: 65)
+  let moveRight: Bool = sdl3.isKeyDown(key: 262) or sdl3.isKeyDown(key: 68)
 
   if moveLeft or moveRight {
     if g.hMoveTimer is 0 {
@@ -621,7 +571,7 @@ func handleInput(g: mod Game) {
   }
 
   # Rotate (still single-press)
-  if isKeyPressed(key: 32) or isKeyPressed(key: 265) or isKeyPressed(key: 87) {
+  if sdl3.isKeyPressed(key: 32) or sdl3.isKeyPressed(key: 265) or sdl3.isKeyPressed(key: 87) {
     if canMove(g: g, dx: 0, dy: 0, dr: 1) is 1 {
       cp.rotation = (cp.rotation + 1) % 4
       moved = 1
@@ -637,7 +587,7 @@ func handleInput(g: mod Game) {
 
   # Soft Drop
   var effectiveDelay: Int = g.moveDelay
-  if isKeyDown(key: 264) or isKeyDown(key: 83) {
+  if sdl3.isKeyDown(key: 264) or sdl3.isKeyDown(key: 83) {
     effectiveDelay = 2
   }
 
@@ -668,12 +618,19 @@ func handleInput(g: mod Game) {
   }
 }
 
-func main() {
-  # FLAG_WINDOW_RESIZABLE = 4
-  # We can't easily use Bitwise OR yet, so just 4
-  setConfigFlags(flags: 4)
-  initWindow(width: 600, height: 500, title: "Rae Tetris 2D")
-  setTargetFPS(fps: 60)
+func main() ret Int {
+  gpu2d.initWindow(width: canvasW.toInt(), height: canvasH.toInt(), title: "Rae Tetris 2D — GPU2D")
+  gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
+  let uiResources: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: ""
+    themeFile: "theme.raescene")
+  var world: UiWorld = createUiWorld()
+  let uiRoot: EntityId = mountUiScene(
+    world: world
+    path: "examples/94_tetris2d/assets/ui.raescene"
+    res: uiResources)
   let g: Game = {
     state: GameState.menu
     grid: createList(cap: 200)
@@ -693,18 +650,36 @@ func main() {
     lockDelay: 0
     maxLockTimer: 0
   }
+  seed(n: 2026)
   initGame(g)
-  loop not windowShouldClose() {
+  let testMode: Bool = getEnv(name: "RAE_TETRIS2D_TEST_FRAME").length() > 0
+  if testMode {
+    g.score = 1200
+    g.lines = 4
+    g.level = 5
+    var testIndex: Int = 0
+    loop testIndex < g.width {
+      g.grid.set(index: 19 * g.width + testIndex, value: testIndex % 7 + 1)
+      testIndex = testIndex + 1
+    }
+    log("[tetris2d] deterministic frame ready")
+  }
+  var displayedScore: Int = 0 - 1
+  var displayedLines: Int = 0 - 1
+  var displayedLevel: Int = 0 - 1
+
+  loop not gpu2d.pollClose() {
+    let resized: Bool = resizeUiToWindow(world: world, res: uiResources)
     # Input: Global (Menu/GameOver)
     if g.state is GameState.gameOver {
       # R key
-      if isKeyPressed(key: 82) {
+      if sdl3.isKeyPressed(key: 82) {
         initGame(g)
       }
     }
     # Input: Pause
     # P key
-    if isKeyPressed(key: 80) {
+    if sdl3.isKeyPressed(key: 80) {
       if g.state is GameState.playing {
         g.state = GameState.paused
       } else {
@@ -714,10 +689,26 @@ func main() {
       }
     }
     # early returns don't work yet, so gate it here.
-    if g.state is GameState.playing {
+    if g.state is GameState.playing and testMode is false {
       handleInput(g)
     }
-    draw(g)
+    if g.score is not displayedScore or g.lines is not displayedLines or g.level is not displayedLevel {
+      setNodeText(world: world, nodeId: "ScoreText", value: "SCORE  {g.score}")
+      setNodeText(world: world, nodeId: "LevelText", value: "LEVEL  {g.level}")
+      setNodeText(world: world, nodeId: "LinesText", value: "LINES  {g.lines}")
+      displayedScore = g.score
+      displayedLines = g.lines
+      displayedLevel = g.level
+    }
+    setNodeActive(world: world, nodeId: "PauseText", value: g.state is GameState.paused)
+    setNodeActive(world: world, nodeId: "GameOverPanel", value: g.state is GameState.gameOver)
+    runUiSystems(world: world, res: uiResources)
+
+    gpu2d.beginFrame(r: 0.03, g: 0.05, b: 0.09, a: 1.0)
+    drawGame(g: g)
+    renderSystemGpu2d(world: world, res: uiResources)
+    gpu2d.endFrame()
   }
-  closeWindow()
+  gpu2d.closeWindow()
+  ret 0
 }

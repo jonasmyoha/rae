@@ -73,6 +73,21 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
+        elif [ "$EXAMPLE_NAME" = "94_tetris2d" ]; then
+          SCREENSHOT="$TMP_OUT/tetris2d.bmp"
+          if RAE_TETRIS2D_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=900 \
+             RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app" > "$TMP_OUT/render.log" 2>&1 \
+             && grep -q '\[tetris2d\] deterministic frame ready' "$TMP_OUT/render.log" \
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=20 \
+                > "$TMP_OUT/screenshot.log" 2>&1; then
+            echo "PASS: $EXAMPLE_NAME (GPU2D board + .raescene HUD screenshot)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (Tetris 2D render gate)"
+            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
+            ((FAILED++))
+          fi
         elif [ "$EXAMPLE_NAME" = "95_easing_2d" ]; then
           SCREENSHOT="$TMP_OUT/easing2d.bmp"
           if RAE_EASING_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=800 \
