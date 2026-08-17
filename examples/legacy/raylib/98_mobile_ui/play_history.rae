@@ -1,0 +1,119 @@
+# Play history — a session-scoped log of what the user (or Spotify)
+# has been listening to. Feeds the "Recently played" row on Home and
+# the full History sub-page.
+#
+# Recording happens at two sites:
+#   * `dispatchActions:song.open.N` — every time the user picks a
+#     track row from an album.
+#   * `pollSpotify` track-change — every time Spotify's current
+#     trackId changes (so background-only playback gets captured too).
+#
+# Entries are append-only with a soft cap (`history.cap`); the oldest
+# entry is dropped when a new one pushes past the cap. Cover art is
+# tracked via the local-catalog `albumStem` when the track matches a
+# local album; Spotify-only tracks store the artwork URL and the UI
+# falls back to a placeholder until a per-entry texture loader lands.
+import core
+
+type PlayHistoryEntry pub {
+  trackName: String
+  artistName: String
+  albumName: String
+  # Local-catalog stem match — empty when the track isn't in the
+  # user's albums (Spotify-only). Drives the local-vs-Spotify path
+  # in `history.replay.N`; rendering uses `textureKey` directly.
+  albumStem: String
+  artworkUrl: String
+  # Texture registry key the History row's thumb uses. For local
+  # entries this is the album stem (already loaded by
+  # `loadAllTextures` at boot). For Spotify entries the recorder
+  # calls `loadHistoryEntryArt` to fetch the artwork to a per-
+  # trackId file, registers it, and stores the key here. Empty
+  # when no art was loaded — `buildHistoryThumb` falls back to a
+  # placeholder Shape.
+  textureKey: String
+  durationSec: Float
+  # `getTime()` reading at record time. Empty / 0.0 marks "boot
+  # default"; main.rae stamps real wall times via the `now` floats
+  # it already threads through `pollSpotify` etc.
+  playedAt: Float
+}
+
+type PlayHistory pub {
+  entries: List(PlayHistoryEntry)
+  cap: Int
+}
+
+func createPlayHistory(cap: view Int) pub ret PlayHistory {
+  ret PlayHistory {
+    entries: createList(PlayHistoryEntry, cap: cap)
+    cap: cap
+  }
+}
+
+# Find a local album whose tracks include one matching `trackName`
+# and whose artist matches `artistName`. Returns the album stem on
+# match, empty string when no local album owns this track. Case-
+# insensitive comparison would catch more matches but the local
+# catalogue is small and titles are author-controlled, so the strict
+# `.equals` is fine for v1.
+func historyMatchLocalStem(albums: view List(Album), trackName: view String, artistName: view String) pub ret String {
+  var i: Int = 0
+  loop i < albums.length {
+    let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
+    if a.artist.equals(other: artistName) {
+      var j: Int = 0
+      loop j < a.tracks.length {
+        let t: Track = rae_ext_rae_buf_get(buf: a.tracks.data, index: j)
+        if t.title.equals(other: trackName) {
+          ret "{a.stem}"
+        }
+        j = j + 1
+      }
+    }
+    i = i + 1
+  }
+  ret ""
+}
+
+# Push an entry onto the history. De-duplicates only against the
+# most-recent entry where trackName + artistName + textureKey ALL
+# match — so a single track that pollSpotify picks up several
+# times in a row collapses, but a re-listen of the same-titled
+# song from a different album (different cover) still gets its
+# own row. The textureKey check is "same album cover" as far as
+# the UI is concerned: Spotify entries key by trackId (so a
+# single vs. a compilation appearance differs), and local entries
+# key by album stem.
+#
+# The caller's `entry` carries Strings registered in the caller's
+# string-pool scope; when the caller's function exits, pool_flush
+# would free them and leave the list pointing at freed memory.
+# We sidestep that by rebuilding the entry through
+# `rae_ext_rae_string_copy`, which mallocs independent allocations
+# the pool doesn't track. The list then owns Strings that survive
+# any number of caller-side pool flushes.
+func recordPlay(history: mod PlayHistory, entry: own PlayHistoryEntry) pub {
+  let n: Int = history.entries.length
+  if n > 0 {
+    let last: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: n - 1)
+    if last.trackName.equals(other: entry.trackName) {
+      if last.artistName.equals(other: entry.artistName) {
+        if last.textureKey.equals(other: entry.textureKey) {
+          ret
+        }
+      }
+    }
+  }
+  let owned: PlayHistoryEntry = {
+    trackName: rae_ext_rae_string_copy(s: entry.trackName)
+    artistName: rae_ext_rae_string_copy(s: entry.artistName)
+    albumName: rae_ext_rae_string_copy(s: entry.albumName)
+    albumStem: rae_ext_rae_string_copy(s: entry.albumStem)
+    artworkUrl: rae_ext_rae_string_copy(s: entry.artworkUrl)
+    textureKey: rae_ext_rae_string_copy(s: entry.textureKey)
+    durationSec: entry.durationSec
+    playedAt: entry.playedAt
+  }
+  history.entries.add(value: own owned)
+}

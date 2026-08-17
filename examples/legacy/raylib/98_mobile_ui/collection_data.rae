@@ -1,0 +1,159 @@
+# Unified "collection" view-model.
+#
+# The album sub-page renders one thing — a header (title / caption /
+# cover) plus a list of song rows — so both an Album (catalog) and a
+# Playlist (user-curated) resolve to this shared shape. Keeping the
+# resolution here lets `album_view.rae` stay a single DRY renderer:
+# it never branches on album-vs-playlist, it just draws a CollectionView.
+#
+# A row always carries the (albumStem, trackIndex) of the real song it
+# points at, so playback works identically whether the rows came from a
+# single album or a playlist that mixes songs from many albums.
+
+import core
+
+type CollectionRow pub {
+  number: Int        # 1-based display number
+  title: String
+  subtitle: String   # "Artist · 3:21"
+  albumStem: String  # album the song lives in (drives playback)
+  trackIndex: Int    # index within that album
+}
+
+type CollectionView pub {
+  title: String
+  caption: String    # "Album · 11 songs · 2016" | "Playlist · 5 songs"
+  artist: String     # header artist line ("" for playlists)
+  coverStem: String  # album stem backing the hero cover
+  rows: List(CollectionRow)
+}
+
+# Append the (stem, trackIndex) song to `rows` as a CollectionRow,
+# resolving its title/artist/duration from the catalog. No-op when the
+# stem isn't in the catalog or the index is out of range — a stale
+# playlist reference just drops out of the list rather than rendering a
+# blank row.
+func collectionAppendSong(rows: mod List(CollectionRow), albums: view List(Album), stem: view String, trackIndex: view Int) {
+  let ai: Int = findAlbumIndex(albums: albums, stem: stem)
+  if ai < 0 {
+    ret
+  }
+  let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: ai)
+  if trackIndex < 0 {
+    ret
+  }
+  if trackIndex >= a.tracks.length {
+    ret
+  }
+  let t: Track = rae_ext_rae_buf_get(buf: a.tracks.data, index: trackIndex)
+  let num: Int = rows.length + 1
+  let dur: String = formatDurationMs(ms: t.durationMs)
+  let subtitle: String = "{a.artist} · {dur}"
+  let title: String = "{t.title}"
+  let stemCopy: String = "{stem}"
+  let row: CollectionRow = {
+    number: num
+    title: own title
+    subtitle: own subtitle
+    albumStem: own stemCopy
+    trackIndex: trackIndex
+  }
+  rows.add(value: own row)
+}
+
+# One row per album track.
+func collectionFromAlbum(album: view Album) pub ret CollectionView {
+  let n: Int = album.tracks.length
+  var tracksPart: String = ""
+  if n > 0 {
+    tracksPart = " · {n} songs"
+  }
+  var yearPart: String = ""
+  if album.year > 0 {
+    yearPart = " · {album.year}"
+  }
+  let caption: String = "Album{tracksPart}{yearPart}"
+  let title: String = "{album.album}"
+  let artist: String = "{album.artist}"
+  let coverStem: String = "{album.stem}"
+
+  let rows: List(CollectionRow) = createList(CollectionRow, cap: n)
+  var i: Int = 0
+  loop i < n {
+    let t: Track = rae_ext_rae_buf_get(buf: album.tracks.data, index: i)
+    var num: Int = t.number
+    if num <= 0 {
+      num = i + 1
+    }
+    let dur: String = formatDurationMs(ms: t.durationMs)
+    let subtitle: String = "{album.artist} · {dur}"
+    let rowTitle: String = "{t.title}"
+    let stemCopy: String = "{album.stem}"
+    let row: CollectionRow = {
+      number: num
+      title: own rowTitle
+      subtitle: own subtitle
+      albumStem: own stemCopy
+      trackIndex: i
+    }
+    rows.add(value: own row)
+    i = i + 1
+  }
+  ret CollectionView {
+    title: own title
+    caption: own caption
+    artist: own artist
+    coverStem: own coverStem
+    rows: own rows
+  }
+}
+
+# Resolve a playlist's items to song rows. `track` items add their one
+# song; `album` items expand to all of that album's tracks; `playlist`
+# links are skipped (no recursion — avoids cycles).
+func collectionFromPlaylist(playlist: view Playlist, albums: view List(Album)) pub ret CollectionView {
+  let rows: List(CollectionRow) = createList(CollectionRow, cap: playlist.items.length)
+  let n: Int = playlist.items.length
+  var i: Int = 0
+  loop i < n {
+    let it: PlaylistItem = rae_ext_rae_buf_get(buf: playlist.items.data, index: i)
+    let isTrack: Bool = it.kind.equals(other: "track")
+    let isAlbum: Bool = it.kind.equals(other: "album")
+    if isTrack {
+      collectionAppendSong(rows: rows, albums: albums, stem: it.albumStem, trackIndex: it.trackIndex)
+    }
+    if isAlbum {
+      let ai: Int = findAlbumIndex(albums: albums, stem: it.albumStem)
+      if ai >= 0 {
+        let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: ai)
+        let tn: Int = a.tracks.length
+        var tj: Int = 0
+        loop tj < tn {
+          collectionAppendSong(rows: rows, albums: albums, stem: it.albumStem, trackIndex: tj)
+          tj = tj + 1
+        }
+      }
+    }
+    i = i + 1
+  }
+  let count: Int = rows.length
+  var tracksPart: String = ""
+  if count > 0 {
+    tracksPart = " · {count} songs"
+  }
+  let caption: String = "Playlist{tracksPart}"
+  let title: String = "{playlist.title}"
+  let artist: String = ""
+  var coverStem: String = ""
+  if rows.length > 0 {
+    let first: CollectionRow = rae_ext_rae_buf_get(buf: rows.data, index: 0)
+    coverStem = "{first.albumStem}"
+  }
+  ret CollectionView {
+    title: own title
+    caption: own caption
+    artist: own artist
+    coverStem: own coverStem
+    rows: own rows
+  }
+}
