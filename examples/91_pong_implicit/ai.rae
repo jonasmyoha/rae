@@ -4,17 +4,17 @@ enum AIDecision { none, up, down }
 
 type AIState {
   state: AIPhase
-  timer: Int
+  timer: Float
   targetY: Float
   decision: AIDecision
 }
 
-func paddleAiSystem(ai: mod AIState, ballY: view Float, paddleY: copy Float) ret Float {
-  let speed: Float = 4.0
+func paddleAiSystem(ai: mod AIState, ballY: view Float, paddleY: copy Float, dt: view Float) ret Float {
+  let speed: Float = 240.0
   let paddleHeight: Float = 100.0
   if ai.state is AIPhase.observing {
-    ai.timer = ai.timer + 1
-    if ai.timer > 20 {
+    ai.timer = ai.timer + dt
+    if ai.timer > 0.33 {
       ai.state = AIPhase.reacting
       ai.timer = 0
     }
@@ -25,10 +25,10 @@ func paddleAiSystem(ai: mod AIState, ballY: view Float, paddleY: copy Float) ret
     } else {
       if ai.state is AIPhase.moving {
         if paddleY < ai.targetY - 10.0 {
-          paddleY = paddleY + speed
+          paddleY = paddleY + speed * dt
         } else {
           if paddleY > ai.targetY + 10.0 {
-            paddleY = paddleY - speed
+            paddleY = paddleY - speed * dt
           } else {
             ai.state = AIPhase.observing
           }
