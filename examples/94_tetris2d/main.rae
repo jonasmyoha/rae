@@ -92,50 +92,6 @@ func getModernColor(index: view Int) ret Int {
   ret 0xFF282832
 }
 
-func getOutlineColor(index: view Int) ret Int {
-  if index is 1 {
-    ret 0xFF1D6975
-  }
-  if index is 2 {
-    ret 0xFF334A80
-  }
-  if index is 3 {
-    ret 0xFF7A4D2B
-  }
-  if index is 4 {
-    ret 0xFF776A27
-  }
-  if index is 5 {
-    ret 0xFF2B7742
-  }
-  if index is 6 {
-    ret 0xFF58407A
-  }
-  ret 0xFF7A3040
-}
-
-func getShadowColor(index: view Int) ret Int {
-  if index is 1 {
-    ret 0xFF41A8BA
-  }
-  if index is 2 {
-    ret 0xFF5675C0
-  }
-  if index is 3 {
-    ret 0xFFBC8052
-  }
-  if index is 4 {
-    ret 0xFFBBA850
-  }
-  if index is 5 {
-    ret 0xFF51BB71
-  }
-  if index is 6 {
-    ret 0xFF9070BC
-  }
-  ret 0xFFBC5466
-}
-
 func getKindId(kind: TetrominoKind) ret Int {
   if kind is TetrominoKind.i {
     ret 1
@@ -479,22 +435,9 @@ func drawFrame(x: view Float, y: view Float, w: view Float, h: view Float) {
 }
 
 func drawCell(x: view Float, y: view Float, size: view Float, colorId: view Int) {
-  let color: Int = getModernColor(index: colorId)
-  let outline: Int = getOutlineColor(index: colorId)
-  let shadow: Int = getShadowColor(index: colorId)
-  gpu2d.drawRoundedRect(
-    x: x - 1.0, y: y - 1.0, w: size + 2.0, h: size + 2.0
-    radius: 5.0, color: outline)
-  gpu2d.drawRoundedRect(
-    x: x + 1.0, y: y + 1.0, w: size - 2.0, h: size - 2.0
-    radius: 3.0, color: shadow)
-  # The smaller face exposes the shadow layer along its right and bottom edges.
-  gpu2d.drawRoundedRect(
-    x: x + 1.0, y: y + 1.0, w: size - 5.0, h: size - 5.0
-    radius: 3.0, color: color)
-  gpu2d.drawRoundedRect(
-    x: x + 4.0, y: y + 4.0, w: 6.0, h: 4.0
-    radius: 2.0, color: 0x66FFFFFF)
+  gpu2d.drawRect(
+    x: x, y: y, w: size - 1.0, h: size - 1.0
+    color: getModernColor(index: colorId))
 }
 
 func shouldFillTestCell(row: view Int, column: view Int) ret Bool {
