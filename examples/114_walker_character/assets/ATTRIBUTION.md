@@ -27,6 +27,19 @@ Mixamo clips exported for this same rig — animation only, no geometry.
 Same licence position as the skeleton above. "Walk fast" in the example
 is `walk.glb` played at 1.6x, not a fourth file.
 
+## `environment/*.glb`
+
+Converted from environment FBX files already used by the original Unity
+**walker** project. The two trees, rock and flower come from its
+`free_lowpoly_forest_nature_pack`; the bush and grass clump come from the
+FlatKit demo assets bundled with that project. They are committed as
+transform-baked geometry only: Rae supplies its own cel-shaded materials.
+
+The exact source-relative paths and reproducible Blender conversion are in
+`../tools/convert_environment.sh`. These remain third-party Unity Asset Store
+assets; this attribution records their provenance rather than claiming Rae
+authorship.
+
 ## `Roboto-Regular.mtsdf.*`
 
 Roboto, Apache 2.0, baked to an MSDF atlas. The same pair of files
