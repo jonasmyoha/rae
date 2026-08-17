@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "runId": 11,
+  "generatedAt": 1779102485064,
+  "leadModel": "chatgpt",
+  "summary": "Roundtable merged 3 rounds. No valid peer votes were cast (all replies were missing a VOTE line or were self-votes). Orchestrator selected Chattie based on technical contributions across the discussion. Tally: chatgpt 0, claude 0, gemini 0. Chattie, Clo, Gem cast no valid vote.",
+  "model": {
+    "mergedRecommendation": "LEAD: chatgpt\n\nChattie produced the strongest end-to-end design: independently identified the actual failure site (`main.rae:100`, `Screen` enum flowing through parameter lowering — not `render.rae` as Gem claimed), proposed the correct predicate change (`!is_primitive` → `!vm_is_value_type(ctx, base)` consulting the enum table), and structured a clear three-layer plan (value-type classification → value-copy for value-typed `let`s → init/assign opcode split) with explicit regression tests, stack-convention risks, and call-site arg-deref concerns. Clo's contributions (the four-file chain trace, the `OP_BIND_LOCAL` already-exists observation) sharpen Chattie's plan but came as reactions to it; Gem's round 1 diagnosis was wrong-bug and round 2 just consolidated Chattie's + Clo's design. Chattie is the right lead, with Clo's `OP_BIND_LOCAL` simplification folded into Layer C during implementation.",
+    "leadModel": "chatgpt",
+    "delegationPlan": {
+      "design": {
+        "owner": "chatgpt",
+        "support": "claude",
+        "splitPercent": 50,
+        "focus": "Shape architecture and delivery approach for Feature design."
+      },
+      "implementation": {
+        "owner": "claude",
+        "support": "chatgpt",
+        "splitPercent": 30,
+        "focus": "Convert merged recommendations into scoped implementation tasks."
+      },
+      "review": {
+        "owner": "gemini",
+        "support": "chatgpt",
+        "splitPercent": 20,
+        "focus": "Validate risks, trade-offs, and readiness before merge."
+      }
+    },
+    "delegation": [],
+    "implementationTasks": [],
+    "standupSummary": "Chattie selected by orchestrator for run 11. 3 participants completed 3 rounds.",
+    "artifactIds": []
+  }
+}
