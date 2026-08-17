@@ -1,35 +1,15 @@
-open raylib
+open math
 
 func main() {
-  # FLAG_WINDOW_RESIZABLE = 4
-  setConfigFlags(flags: 4)
-  initWindow(width: 800, height: 450, title: "Rae Random Demo")
-  setTargetFPS(fps: 60)
-  let bgColor: Color = { r: 20, g: 20, b: 25, a: 255 }
-  loop not windowShouldClose() {
-    let sw: Int = getScreenWidth()
-    let sh: Int = getScreenHeight()
-    beginDrawing()
-    clearBackground(color: bgColor)
-    var i: Int = 0
-    loop i < 10 {
-      let x: Float = random(min: 0, max: sw).toFloat()
-      let y: Float = random(min: 0, max: sh).toFloat()
-      let r: Float = random(min: 5, max: 20).toFloat()
-      drawCircle(
-        x: x
-        y: y
-        radius: r
-        color: Color {
-          r: random(min: 100, max: 255)
-          g: random(min: 100, max: 255)
-          b: random(min: 100, max: 255)
-          a: 255
-        }
-      )
-      i = i + 1
-    }
-    endDrawing()
+  # A fixed seed makes this example reproducible while still demonstrating
+  # both integer and floating-point random values.
+  seed(n: 2026)
+
+  var i: Int = 0
+  loop i < 8 {
+    let die: Int = randomInt(min: 1, max: 6)
+    let unit: Float = random()
+    log("sample {i}: die={die}, unit={unit}")
+    i = i + 1
   }
-  closeWindow()
 }

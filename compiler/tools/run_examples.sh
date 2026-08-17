@@ -11,13 +11,19 @@ FAILED=0
 echo "Running Rae example smoke tests..."
 echo
 
+# Legacy examples are retained as source archaeology, not supported build
+# targets. Guard the active tree before compiling so a new Raylib dependency
+# cannot slip in while the explicitly allowlisted ports are being migrated.
+./tools/check_active_example_raylib.sh
+
 if [ ! -f "$BIN" ]; then
   echo "Error: $BIN not found. Run 'make build' first."
   exit 1
 fi
 
-# Find all main.rae files in examples subdirectories
-EXAMPLE_FILES=$(find "$EXAMPLES_DIR" -name "main.rae" | sort)
+# Find supported examples only. Devtools already hides examples/legacy; the
+# compiler gate must use the same definition of the active example surface.
+EXAMPLE_FILES=$(find "$EXAMPLES_DIR" -path "$EXAMPLES_DIR/legacy" -prune -o -name "main.rae" -print | sort)
 
 for EXAMPLE_FILE in $EXAMPLE_FILES; do
   EXAMPLE_NAME=$(basename "$(dirname "$EXAMPLE_FILE")")
