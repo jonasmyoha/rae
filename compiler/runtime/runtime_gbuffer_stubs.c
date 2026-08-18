@@ -84,15 +84,16 @@ void* rae_gb_frame_ubuf(void)           { return (void*)0; }
 int64_t rae_gb_frame_bytes(void)        { return 0; }
 int64_t rae_gb_draws_size(void)         { return 0; }
 void rae_gb_set_static_bind(void* bind) { (void)bind; }
-void rae_ext_gbuffer_drawMetaballs(const float* packedBalls, int64_t count,
-                                   const float* packedColors, float smoothing,
-                                   float camX, float camY, float camZ,
-                                   float metallic, float roughness,
-                                   float emR, float emG, float emB){
+int64_t rae_gb_sdf_prepare(void* packedBalls, int64_t count, void* packedColors,
+                           float smoothing, float camX, float camY, float camZ,
+                           float metallic, float roughness,
+                           float emR, float emG, float emB){
     (void)packedBalls; (void)count; (void)packedColors; (void)smoothing;
     (void)camX; (void)camY; (void)camZ; (void)metallic; (void)roughness;
-    (void)emR; (void)emG; (void)emB;
+    (void)emR; (void)emG; (void)emB; return -1;
 }
+void* rae_gb_sdf_pipeline(void)   { return (void*)0; }
+void* rae_gb_sdf_bind(int64_t gi) { (void)gi; return (void*)0; }
 void rae_ext_gbuffer_sdfShutdown(void) {}
 int64_t rae_ext_gbuffer_drawCount(void) { return 0; }
 const char* rae_gb_view_wgsl(void)  { return ""; }
