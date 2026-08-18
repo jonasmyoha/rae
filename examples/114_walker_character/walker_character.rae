@@ -1,0 +1,84 @@
+# Walker character helpers — model upload, the clip-button table, the world
+# transform that composes gameplay position/heading onto the normalised model,
+# the camera focus heights, and the walk ray onto the terrain. Split out of
+# main.rae to keep each file under the 1000-line guide; siblings merge into one
+# module, so main calls these unqualified.
+import core
+import math
+import vec3
+import scene3d
+import gpu3d
+import mesh3d
+import app3d/character_controller
+open scene3d
+open gpu3d
+open mesh3d
+open math3d
+open app3d/character_controller
+
+func uploadMeshData(m: view MeshData) ret MeshHandle {
+  ret uploadMesh(verts: m.verts, vertCount: m.vertCount, indices: m.indices)
+}
+
+
+# The clip button ids, indexed the same way `clipIndex` is. One table
+# rather than two if-chains: a restored index and a click have to agree
+# on which button is selected, and two copies drift.
+func clipButtonId(index: view Int) ret String {
+  if index is 0 { ret "idle" }
+  if index is 1 { ret "walk" }
+  if index is 2 { ret "walkFast" }
+  ret "run"
+}
+
+func walkerFloatAt(values: view List(Float), index: view Int) ret Float {
+  if let value: Float = values.at(index: index) { ret value }
+  ret 0.0
+}
+
+func walkerIntAt(values: view List(Int), index: view Int) ret Int {
+  if let value: Int = values.at(index: index) { ret value }
+  ret 0
+}
+
+# Blender is Z-up but does not mandate one object-facing axis. This asset's
+# authored front becomes -Y after the glTF Y-up -> Rae Z-up conversion, while
+# Rae gameplay forward is +Y. Correct that at the asset-placement boundary;
+# the importer must preserve authored transforms and the controller must keep
+# its project-wide +Y convention.
+const walkerFacingCorrection: Float = 3.141592653589793
+
+func walkerWorldModel(baseModel: view Mat4,
+                      controller: view ThirdPersonController) ret Mat4 {
+  let worldTranslation: Mat4 = mat4Translate(
+    x: controller.position.x, y: controller.position.y, z: controller.position.z)
+  let worldHeading: Mat4 = mat4RotateZ(
+    angle: controller.heading + walkerFacingCorrection)
+  ret mat4Mul(a: worldTranslation,
+                 b: mat4Mul(a: worldHeading, b: baseModel))
+}
+
+# Where "Orbit" re-centres, on every switch back from the WASD camera.
+#
+# THE CHARACTER'S MIDDLE, not the world floor. The model is normalised to
+# `targetHeight` (2.0) tall standing on `groundZ` (-1.0), so it spans z -1..+1
+# and its centre is 0 -- the same point this example opens its camera on. The
+# head is up at +1; orbiting THAT would swing the body out of frame at close
+# distances, which is the opposite of what re-centring is for.
+const orbitFocusZ: Float = 0.0
+
+# Where the CHARACTER camera looks, relative to the controller position: the
+# head. The model spans -1..+1 around the controller's z, so +0.9 is eye
+# level just under the crown — over-the-shoulder framing while walking, where
+# orbit keeps the whole body centred via `orbitFocusZ` above.
+const characterFocusZ: Float = 0.9
+
+# The character's walk ray: sample the terrain height field straight down at
+# the character's x/y and stand on the hit. The field is analytic
+# (walker_terrain.rae `terrainHeightAt`), so the raycast is one function call
+# rather than a geometry query. position.z is the DELTA above the flat
+# groundZ baked into the model's base transform.
+func groundWalker(controller: mod ThirdPersonController, groundZ: view Float) {
+  controller.position.z = terrainHeightAt(
+    x: controller.position.x, y: controller.position.y, groundZ: groundZ) - groundZ
+}

@@ -1,0 +1,190 @@
+# A field of waving grass for the walker meadow, kept out of walker_terrain so
+# each file stays a single system under the 1000-line guide.
+#
+# It is a SYSTEM in the ECS sense the project uses for per-feature behaviour: it
+# owns a fixed pool of grass-clump mesh instances, wraps them around the player
+# by absolute world cell exactly as the terrain pool does (so mesh handles,
+# entities and capacities never change however far you walk), stands each clump
+# on the same noise height field (terrainHeightAt, from walker_terrain.rae —
+# siblings merge into one module), and every frame tilts each clump by a wind
+# function so the whole field sways.
+#
+# WHY TRANSFORM SWAY, NOT A VERTEX SHADER. The deferred gbuffer WGSL is shared
+# by every 3D example; adding per-vertex wind there would touch all of them.
+# A per-clump tilt is what "lots of simple grass" needs, reads as a breeze at a
+# distance, and leaves the renderer untouched. setTransform (not teleport) is
+# used per frame so the motion carries a real velocity into TAA rather than
+# being treated as a teleport.
+import core
+import math
+import noise
+import gltf
+import gpu3d
+import scene3d
+import mesh3d
+import vec3
+open gltf
+open gpu3d
+open scene3d
+open mesh3d
+
+# Clumps per terrain cell and the resulting pool size (terrainCellCount is 49,
+# from walker_terrain.rae). Kept moderate: every clump is an individual draw in
+# both the g-buffer and the shadow pass — this renderer has no instanced-draw
+# path — so this is the dial to turn if the field ever costs frame rate.
+const grassPerCell: Int = 10
+const grassBladeCount: Int = 490
+const grassWindTau: Float = 6.283185307179586
+
+# One clump: its entity, the planted base it sways around, a yaw for variety,
+# a per-clump phase so the field does not pulse in unison, and a scale.
+type GrassBlade {
+  entity: Int
+  baseX: Float
+  baseY: Float
+  baseZ: Float
+  yaw: Float
+  phase: Float
+  scale: Float
+}
+
+type GrassField {
+  centreCellX: Int
+  centreCellY: Int
+  groundZ: Float
+  toon: Bool
+  blades: List(GrassBlade)
+  materialId: Int
+}
+
+func grassBladeAt(blades: view List(GrassBlade), index: view Int) ret GrassBlade {
+  if let blade: GrassBlade = blades.get(index: index) { ret blade }
+  ret GrassBlade { entity: -1, baseX: 0.0, baseY: 0.0, baseZ: 0.0,
+                   yaw: 0.0, phase: 0.0, scale: 0.3 }
+}
+
+# Deterministic scatter for clump `slot` within cell (cellX, cellY): a hash per
+# axis places it inside the cell, another gives it a yaw, a phase and a scale.
+# Same cell -> same clumps, which is what makes the wrap invisible.
+func placeGrassCell(field: mod GrassField, scene: mod Scene3d,
+                    poolBase: view Int, cellX: view Int, cellY: view Int) {
+  var slot: Int = 0
+  loop slot < grassPerCell {
+    let poolIndex: Int = poolBase + slot
+    let blade: GrassBlade = grassBladeAt(blades: field.blades, index: poolIndex)
+    if blade.entity < 0 {
+      slot = slot + 1
+    } else {
+      let hx: Float = noise.hash2(x: cellX, y: cellY, seed: 200 + slot)
+      let hy: Float = noise.hash2(x: cellX, y: cellY, seed: 400 + slot)
+      let hyaw: Float = noise.hash2(x: cellX, y: cellY, seed: 600 + slot)
+      let hphase: Float = noise.hash2(x: cellX, y: cellY, seed: 800 + slot)
+      let hscale: Float = noise.hash2(x: cellX, y: cellY, seed: 1000 + slot)
+      let baseX: Float = (cellX.toFloat() + hx) * terrainCellSize - terrainCellSize * 0.5
+      let baseY: Float = (cellY.toFloat() + hy) * terrainCellSize - terrainCellSize * 0.5
+      let baseZ: Float = terrainHeightAt(x: baseX, y: baseY, groundZ: field.groundZ)
+      let next: GrassBlade = {
+        entity: blade.entity,
+        baseX: baseX, baseY: baseY, baseZ: baseZ,
+        yaw: hyaw * grassWindTau,
+        phase: hphase * grassWindTau,
+        scale: 0.28 + hscale * 0.34
+      }
+      field.blades.set(index: poolIndex, value: next)
+      # Teleport (not set): a wrap is not physical motion, so it must not leave
+      # a velocity streak in TAA — same reason the terrain pool teleports.
+      teleportTransform(scene: scene, entity: blade.entity, transform: Transform3d {
+        position: vec3.create(x: baseX, y: baseY, z: baseZ),
+        rotation: vec3.create(x: 0.0, y: 0.0, z: next.yaw),
+        scale: vec3.create(x: next.scale, y: next.scale, z: next.scale)
+      })
+      slot = slot + 1
+    }
+  }
+}
+
+# On a cell-boundary crossing, re-scatter every clump onto the square of cells
+# now around the player. Returns true when it actually re-placed (the caller
+# uses that as one of its "did anything change" render triggers).
+func updateGrassField(field: mod GrassField, scene: mod Scene3d,
+                      playerPosition: view Vec3) ret Bool {
+  let cellX: Int = math.floor(x: playerPosition.x / terrainCellSize).toInt()
+  let cellY: Int = math.floor(x: playerPosition.y / terrainCellSize).toInt()
+  if cellX is field.centreCellX and cellY is field.centreCellY {
+    ret false
+  }
+  field.centreCellX = cellX
+  field.centreCellY = cellY
+  var row: Int = 0
+  loop row < terrainGridSide {
+    var column: Int = 0
+    loop column < terrainGridSide {
+      let cellIndex: Int = row * terrainGridSide + column
+      placeGrassCell(field: field, scene: scene, poolBase: cellIndex * grassPerCell,
+                     cellX: cellX + column - terrainHalfGrid,
+                     cellY: cellY + row - terrainHalfGrid)
+      column = column + 1
+    }
+    row = row + 1
+  }
+  ret true
+}
+
+# Per-frame wind. Each clump leans by a small angle driven by two sines at
+# incommensurate rates plus its own phase, so the field ripples rather than
+# pulsing together, blown along a fixed diagonal. `time` is seconds since boot.
+func updateGrassWind(field: mod GrassField, scene: mod Scene3d, time: view Float) {
+  var index: Int = 0
+  loop index < grassBladeCount {
+    let blade: GrassBlade = grassBladeAt(blades: field.blades, index: index)
+    if blade.entity >= 0 {
+      let gust: Float = 0.16 * math.sin(x: time * 1.7 + blade.phase)
+        + 0.06 * math.sin(x: time * 3.9 + blade.phase * 1.7 + blade.baseX * 0.15)
+      setTransform(scene: scene, entity: blade.entity, transform: Transform3d {
+        position: vec3.create(x: blade.baseX, y: blade.baseY, z: blade.baseZ),
+        # Lean along +x/+y (the wind direction); yaw stays the clump's own.
+        rotation: vec3.create(x: gust * 0.6, y: gust, z: blade.yaw),
+        scale: vec3.create(x: blade.scale, y: blade.scale, z: blade.scale)
+      })
+    }
+    index = index + 1
+  }
+}
+
+func setGrassFieldToon(field: mod GrassField, scene: mod Scene3d, toon: view Bool) {
+  if field.toon is toon { ret }
+  field.toon = toon
+  setMaterialToon(scene: scene, index: field.materialId, toon: toon)
+}
+
+func createGrassField(scene: mod Scene3d, assets: view String,
+                      groundZ: view Float) ret GrassField {
+  let grassMesh: MeshHandle = terrainMesh(path: "{assets}environment/grass.glb")
+  let noEmission: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let grassMaterial: Int = addMaterial(scene: scene,
+    baseColor: vec3.create(x: 0.16, y: 0.40, z: 0.07),
+    metallic: 0.0, roughness: 0.95, emission: noEmission)
+
+  let origin: Vec3 = vec3.create(x: 0.0, y: 0.0, z: groundZ)
+  let zeroRotation: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let oneScale: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  let blades: List(GrassBlade) = createList(GrassBlade, cap: grassBladeCount)
+  var index: Int = 0
+  loop index < grassBladeCount {
+    let entity: Int = addMeshInstance(scene: scene, mesh: grassMesh,
+      material: grassMaterial, position: origin, rotation: zeroRotation, scale: oneScale)
+    blades.add(value: GrassBlade {
+      entity: entity, baseX: 0.0, baseY: 0.0, baseZ: groundZ,
+      yaw: 0.0, phase: 0.0, scale: 0.3
+    })
+    index = index + 1
+  }
+
+  var field: GrassField = {
+    centreCellX: 1000000000, centreCellY: 1000000000,
+    groundZ: groundZ, toon: false,
+    blades: own blades, materialId: grassMaterial
+  }
+  setGrassFieldToon(field: field, scene: scene, toon: true)
+  ret own field
+}

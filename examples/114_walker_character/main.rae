@@ -151,72 +151,6 @@ open ui/components
 open ui/input_gpu2d
 open ui/render_gpu2d
 
-func uploadMeshData(m: view MeshData) ret MeshHandle {
-  ret uploadMesh(verts: m.verts, vertCount: m.vertCount, indices: m.indices)
-}
-
-
-# The clip button ids, indexed the same way `clipIndex` is. One table
-# rather than two if-chains: a restored index and a click have to agree
-# on which button is selected, and two copies drift.
-func clipButtonId(index: view Int) ret String {
-  if index is 0 { ret "idle" }
-  if index is 1 { ret "walk" }
-  if index is 2 { ret "walkFast" }
-  ret "run"
-}
-
-func walkerFloatAt(values: view List(Float), index: view Int) ret Float {
-  if let value: Float = values.at(index: index) { ret value }
-  ret 0.0
-}
-
-func walkerIntAt(values: view List(Int), index: view Int) ret Int {
-  if let value: Int = values.at(index: index) { ret value }
-  ret 0
-}
-
-# Blender is Z-up but does not mandate one object-facing axis. This asset's
-# authored front becomes -Y after the glTF Y-up -> Rae Z-up conversion, while
-# Rae gameplay forward is +Y. Correct that at the asset-placement boundary;
-# the importer must preserve authored transforms and the controller must keep
-# its project-wide +Y convention.
-const walkerFacingCorrection: Float = 3.141592653589793
-
-func walkerWorldModel(baseModel: view Mat4,
-                      controller: view ThirdPersonController) ret Mat4 {
-  let worldTranslation: Mat4 = mat4Translate(
-    x: controller.position.x, y: controller.position.y, z: controller.position.z)
-  let worldHeading: Mat4 = mat4RotateZ(
-    angle: controller.heading + walkerFacingCorrection)
-  ret mat4Mul(a: worldTranslation,
-                 b: mat4Mul(a: worldHeading, b: baseModel))
-}
-
-# Where "Orbit" re-centres, on every switch back from the WASD camera.
-#
-# THE CHARACTER'S MIDDLE, not the world floor. The model is normalised to
-# `targetHeight` (2.0) tall standing on `groundZ` (-1.0), so it spans z -1..+1
-# and its centre is 0 -- the same point this example opens its camera on. The
-# head is up at +1; orbiting THAT would swing the body out of frame at close
-# distances, which is the opposite of what re-centring is for.
-const orbitFocusZ: Float = 0.0
-
-# Where the CHARACTER camera looks, relative to the controller position: the
-# head. The model spans -1..+1 around the controller's z, so +0.9 is eye
-# level just under the crown — over-the-shoulder framing while walking, where
-# orbit keeps the whole body centred via `orbitFocusZ` above.
-const characterFocusZ: Float = 0.9
-
-# The character's walk ray: sample the terrain height field straight down at
-# the character's x/y and stand on the hit. The field is analytic
-# (walker_terrain.rae `terrainHeightAt`), so the raycast is one function call
-# rather than a geometry query. position.z is the DELTA above the flat
-# groundZ baked into the model's base transform.
-func groundWalker(controller: mod ThirdPersonController, groundZ: view Float) {
-  controller.position.z = terrainHeightAt(
-    x: controller.position.x, y: controller.position.y, groundZ: groundZ) - groundZ
-}
 
 const clipTransitionDuration: Float = 0.28
 
@@ -401,6 +335,10 @@ func main() ret Int {
   # unbounded without allocating meshes or scene entities after startup.
   var terrain: InfiniteTerrain = createInfiniteTerrain(
     scene: scene, assets: assets, groundZ: groundZ)
+  # The waving grass field is its own system (walker_grass.rae): a pool of
+  # clumps wrapped around the player like the terrain, swaying each frame.
+  var grass: GrassField = createGrassField(
+    scene: scene, assets: assets, groundZ: groundZ)
 
   var camera: Camera3d = defaultCamera3d()
   var light: Light3d = defaultLight3d()
@@ -498,6 +436,8 @@ func main() ret Int {
   previousPartModel = partModel
   updateInfiniteTerrain(terrain: terrain, scene: scene,
                         playerPosition: characterController.position)
+  updateGrassField(field: grass, scene: scene,
+                   playerPosition: characterController.position)
   if rig.mode is CameraRigMode.character {
     camera.target = thirdPersonCameraTarget(
       controller: characterController, focusZ: characterFocusZ)
@@ -547,7 +487,7 @@ func main() ret Int {
   var settings: SettingsState = createSettingsState(scene: 1, sceneCount: 1,
                                                     speed: speed, toon: toonShading,
                                                     hour: 12.0,
-                                                    skyModel: SettingsSkyModel.hosek)
+                                                    skyModel: SettingsSkyModel.preetham)
   let settingsOk: Bool = mountSettingsDialog(world: uiWorld, res: gpuUi,
                                              hostNodeId: "SettingsDialogSlot")
   if settingsOk is false {
@@ -708,6 +648,9 @@ func main() ret Int {
     if terrain.toon is not toonShading {
       setInfiniteTerrainToon(terrain: terrain, scene: scene, toon: toonShading)
     }
+    if grass.toon is not toonShading {
+      setGrassFieldToon(field: grass, scene: scene, toon: toonShading)
+    }
     # `settingsChanged` as well as the action count: a DRAG produces no action.
     # Click actions arrive on release, so gating the systems on actions alone
     # meant the slider knob's new rect was written every drag frame and only
@@ -780,6 +723,9 @@ func main() ret Int {
     let terrainWrapped: Bool = updateInfiniteTerrain(
       terrain: terrain, scene: scene,
       playerPosition: characterController.position)
+    let grassWrapped: Bool = updateGrassField(
+      field: grass, scene: scene,
+      playerPosition: characterController.position)
     # ONE read. gpu2d.windowResized() is one-shot — reading it clears it — so
     # two callers meant the second always saw false.
     let resized: Bool = gpu2d.windowResized()
@@ -811,7 +757,7 @@ func main() ret Int {
     let logChanged: Bool = logView.revision is not lastLogRevision
     let transitionActive: Bool = transitionElapsed < clipTransitionDuration
     var needsRender: Bool = playing or transitionActive or settingsChanged or cameraMoved
-      or characterMoved or terrainWrapped
+      or characterMoved or terrainWrapped or grassWrapped
       or hadUiEvents or logChanged or resized or scrolled or renderedOnce is false
     if taaSettleFrames > 0 { needsRender = true }
     dbgDidWork = needsRender
@@ -867,6 +813,11 @@ func main() ret Int {
       syncCameraBar(world: uiWorld, rig: rig, camera: camera)
       let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
       let t: Float = (now - startT) as Float
+
+      # Grass sways as a passenger of frames already being drawn — while
+      # `playing` the clock keeps the loop rendering, so the field waves; a
+      # paused, idle app freezes it and parks at ~0% CPU as before.
+      updateGrassWind(field: grass, scene: scene, time: t)
 
       # Frame order is DERIVED by the render graph: the scene pass writes
       # hdrColor, tonemap resolves it to sceneColor, the overlay modifies
