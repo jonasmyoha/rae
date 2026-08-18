@@ -478,6 +478,14 @@ static void emit_function(FILE* out, const char* text) {
             const char* rr = rret; char clean[128];
             if (!strncmp(rret, "copy ", 5)) { snprintf(clean, sizeof(clean), "%s", rret + 5); rr = clean; }
             sp += snprintf(sig + sp, sizeof(sig) - sp, " ret %s", rr);
+        } else if (rd.ptr == 0 && !strncmp(rd.base, "WGPU", 4)) {
+            // Unmapped non-void return that names a WGPU type is a HANDLE — every
+            // enum/flag/struct is registered, so the only way a `WGPU*` return
+            // reaches here is a handle whose name the classifier missed (a few
+            // GetBindGroupLayout / BeginComputePass entry points hit a parse
+            // glitch in the full header). A handle is an opaque Ptr. Emit it
+            // rather than dropping the function.
+            sp += snprintf(sig + sp, sizeof(sig) - sp, " ret Ptr");
         } else {
             fprintf(out, "# skipped func %s (unmapped return type %s)\n", fname, rd.base);
             skipped(fname); return;
