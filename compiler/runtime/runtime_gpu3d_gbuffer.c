@@ -470,52 +470,22 @@ void rae_gb_set_static_bind(void* bind) { gb_bind = (WGPUBindGroup)bind; }
 void rae_gb_set_frame_ubuf(void* buf)   { gb_frame_ubuf = (WGPUBuffer)buf; }
 void rae_gb_set_draws_buffer(void* buf) { gb_draw_sbuf = (WGPUBuffer)buf; }
 
-static void gb_init_view_pipeline(void) {
-    if (gb_view_pipeline) return;
-    WGPUShaderSourceWGSL src; memset(&src, 0, sizeof(src));
-    src.chain.sType = WGPUSType_ShaderSourceWGSL;
-    src.code = rae_wgpu_sv(GB_VIEW_WGSL);
-    WGPUShaderModuleDescriptor smd; memset(&smd, 0, sizeof(smd));
-    smd.nextInChain = &src.chain;
-    WGPUShaderModule mod = wgpuDeviceCreateShaderModule(g_wgpu_dev, &smd);
-
-    WGPUColorTargetState cts; memset(&cts, 0, sizeof(cts));
-    cts.format = g_g2d_fmt; cts.writeMask = WGPUColorWriteMask_All;
-    WGPUFragmentState fs; memset(&fs, 0, sizeof(fs));
-    fs.module = mod; fs.entryPoint = rae_wgpu_sv("fs"); fs.targetCount = 1; fs.targets = &cts;
-    WGPURenderPipelineDescriptor pd; memset(&pd, 0, sizeof(pd));
-    pd.vertex.module = mod; pd.vertex.entryPoint = rae_wgpu_sv("vs");
-    pd.primitive.topology = WGPUPrimitiveTopology_TriangleList;
-    pd.primitive.frontFace = WGPUFrontFace_CCW;
-    pd.primitive.cullMode = WGPUCullMode_None;
-    pd.multisample.count = 1; pd.multisample.mask = 0xFFFFFFFFu;
-    pd.fragment = &fs;
-    gb_view_pipeline = wgpuDeviceCreateRenderPipeline(g_wgpu_dev, &pd);
-    wgpuShaderModuleRelease(mod);
-    if (!gb_view_pipeline) { fprintf(stderr, "[gbuffer] inspector pipeline creation FAILED\n"); return; }
-
-    WGPUBufferDescriptor ud; memset(&ud, 0, sizeof(ud));
-    ud.size = 16; ud.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
-    gb_view_ubuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &ud);
-}
-
-/* The inspector's bind group references the G-buffer views, so it is
- * rebuilt whenever gb_ensure_targets recreates them (it nulls this). */
-static void gb_ensure_view_bind(void) {
-    if (gb_view_bind || !gb_view_pipeline) return;
-    if (!gb_a_view || !gb_b_view || !gb_c_view || !gb_depth_view) return;
-    WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(gb_view_pipeline, 0);
-    WGPUBindGroupEntry e[5]; memset(e, 0, sizeof(e));
-    e[0].binding = 0; e[0].buffer = gb_view_ubuf; e[0].size = 16;
-    e[1].binding = 1; e[1].textureView = gb_a_view;
-    e[2].binding = 2; e[2].textureView = gb_b_view;
-    e[3].binding = 3; e[3].textureView = gb_c_view;
-    e[4].binding = 4; e[4].textureView = gb_depth_view;
-    WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
-    bgd.layout = bgl; bgd.entryCount = 5; bgd.entries = e;
-    gb_view_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
-    wgpuBindGroupLayoutRelease(bgl);
-}
+/* The G-buffer inspector (pipeline + uniform + bind group + the fullscreen
+ * pass) is now built in Rae (lib/gbuffer.rae: ensureViewPipeline / ensureViewBind
+ * / debugView, #503). C exposes the inspector WGSL, the presentable target's
+ * format + view, and the handles/setters. The inspector bind references the
+ * G-buffer views, so gb_release_targets nulls gb_view_bind on resize and Rae
+ * re-creates it (its ensureViewBind flag is reset when the targets rebuild). */
+const char* rae_gb_view_wgsl(void)  { return GB_VIEW_WGSL; }
+int64_t rae_g2d_format(void)        { return (int64_t)g_g2d_fmt; }
+void* rae_g2d_off_view(void)        { return (void*)g_g2d_off_view; }
+int64_t rae_g2d_off_view_ready(void){ return (g_wgpu_dev && g_g2d_off_view) ? 1 : 0; }
+void* rae_gb_view_pipeline(void)    { return (void*)gb_view_pipeline; }
+void* rae_gb_view_ubuf(void)        { return (void*)gb_view_ubuf; }
+void* rae_gb_view_bind(void)        { return (void*)gb_view_bind; }
+void rae_gb_set_view_pipeline(void* p) { gb_view_pipeline = (WGPURenderPipeline)p; }
+void rae_gb_set_view_ubuf(void* b)     { gb_view_ubuf = (WGPUBuffer)b; }
+void rae_gb_set_view_bind(void* b)     { gb_view_bind = (WGPUBindGroup)b; }
 
 /* Mirror of the Rae-side `Mat4` layout for the extern boundary; see the
  * long note in runtime_gpu3d.c. The include guard makes this a no-op when
@@ -571,6 +541,9 @@ void rae_gb_set_target(int64_t idx, void* tex, void* view) {
 void rae_gb_commit_targets(int64_t w, int64_t h) {
     gb_target_w = (int)w; gb_target_h = (int)h; gb_targets_gen++;
 }
+/* Bumped whenever the targets are recreated (resize). The inspector rebuilds
+ * its bind group when this changes, since it samples the G-buffer views. */
+int64_t rae_gb_targets_gen(void) { return (int64_t)gb_targets_gen; }
 
 /* Reset the per-frame counters and build+upload the TAA-jittered frame uniform
  * (stateful CPU math that stays C). Needs the Rae-created frame uniform buffer. */
@@ -743,34 +716,7 @@ void rae_gb_submit(void* cmd) {
 int64_t rae_ext_gbuffer_drawCount(void) { return (int64_t)gb_draw_count; }
 
 /* Write one G-buffer channel into the presentable target. */
-void rae_ext_gbuffer_debugView(int64_t mode, float zNear, float zFar) {
-    if (!g_wgpu_dev || !g_g2d_off_view) return;
-    gb_init_view_pipeline();
-    gb_ensure_view_bind();
-    if (!gb_view_pipeline || !gb_view_bind) return;
-
-    float p[4] = { (float)mode, zNear, zFar, 0.0f };
-    wgpuQueueWriteBuffer(g_wgpu_queue, gb_view_ubuf, 0, p, sizeof(p));
-
-    WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
-    WGPURenderPassColorAttachment ca; memset(&ca, 0, sizeof(ca));
-    ca.view = g_g2d_off_view;
-    ca.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
-    ca.loadOp = WGPULoadOp_Clear;
-    ca.storeOp = WGPUStoreOp_Store;
-    WGPURenderPassDescriptor rp; memset(&rp, 0, sizeof(rp));
-    rp.colorAttachmentCount = 1; rp.colorAttachments = &ca;
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(enc, &rp);
-    wgpuRenderPassEncoderSetPipeline(pass, gb_view_pipeline);
-    wgpuRenderPassEncoderSetBindGroup(pass, 0, gb_view_bind, 0, NULL);
-    wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
-    wgpuRenderPassEncoderEnd(pass);
-    WGPUCommandBuffer cb = wgpuCommandEncoderFinish(enc, NULL);
-    wgpuQueueSubmit(g_wgpu_queue, 1, &cb);
-    wgpuCommandBufferRelease(cb);
-    wgpuRenderPassEncoderRelease(pass);
-    wgpuCommandEncoderRelease(enc);
-}
+/* rae_ext_gbuffer_debugView moved to Rae (lib/gbuffer.rae:debugView, #503). */
 
 /* Present the composed frame. Shares the platform copy-to-drawable with
  * the forward frame — see rae_g3d_present_offscreen. */
