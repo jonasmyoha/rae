@@ -34,6 +34,12 @@ void rae_ext_gbuffer_draw(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
     (void)mesh; (void)model; (void)prevModel; (void)r; (void)g; (void)b;
     (void)metallic; (void)roughness; (void)emissive; (void)toon;
 }
+void rae_ext_gbuffer_drawInstanced(int64_t mesh, const float* inst, int64_t count,
+                                   float metallic, float roughness, float emissive,
+                                   int64_t toon){
+    (void)mesh; (void)inst; (void)count;
+    (void)metallic; (void)roughness; (void)emissive; (void)toon;
+}
 void rae_ext_gbuffer_drawSkinned(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
                                  float r, float g, float b,
                                  float metallic, float roughness, float emissive,

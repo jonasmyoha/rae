@@ -53,6 +53,12 @@ open math3d
 func begin(viewProj: view Mat4, clearR: Float, clearG: Float, clearB: Float) extern
 func draw(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emissive: Float, toon: Int) extern
 func drawSkinned(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emissive: Float, toon: Int) extern
+# Instanced G-buffer draw (grass epic #485): one draw for `count` copies of a
+# mesh. `instances` is `count` * 12 floats — x,y,z, yaw, tiltX, tiltY,
+# prevTiltX, prevTiltY, scale, r,g,b per instance — material props shared,
+# colour per instance. The reusable instancing primitive for vegetation,
+# rocks, crowds; grass uses it first.
+func drawInstanced(mesh: Int, instances: view Buffer(Float), count: Int, metallic: Float, roughness: Float, emissive: Float, toon: Int) extern
 func drawMetaballs(packedBalls: view Buffer(Float), count: Int, packedColors: view Buffer(Float), smoothing: Float, camX: Float, camY: Float, camZ: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
 func sdfShutdown() extern
 func end() extern
