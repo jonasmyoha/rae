@@ -37,6 +37,12 @@ int64_t rae_gb_targets_ready(void)      { return 0; }
 void rae_gb_release_targets_ext(void)   {}
 void rae_gb_set_target(int64_t idx, void* tex, void* view) { (void)idx; (void)tex; (void)view; }
 void rae_gb_commit_targets(int64_t w, int64_t h) { (void)w; (void)h; }
+const char* rae_gb_wgsl(void)      { return ""; }
+const char* rae_gb_skin_wgsl(void) { return ""; }
+const char* rae_gb_entry_vs(void)  { return "vs"; }
+const char* rae_gb_entry_fs(void)  { return "fs"; }
+void rae_gb_set_pipeline(void* p)      { (void)p; }
+void rae_gb_set_skin_pipeline(void* p) { (void)p; }
 void* rae_gb_view_a(void)     { return (void*)0; }
 void* rae_gb_view_b(void)     { return (void*)0; }
 void* rae_gb_view_c(void)     { return (void*)0; }
