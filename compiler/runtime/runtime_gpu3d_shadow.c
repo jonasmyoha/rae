@@ -546,55 +546,61 @@ void rae_ext_gpu3d_shadowDrawSkinned(int64_t mesh, rae_Mat4* model) {
  * layer. They share the model buffer and the pipelines, so the cost is
  * the geometry, which is why §6 of the design doc wants far cascades on
  * a reduced update cadence later. */
-void rae_ext_gpu3d_shadowEnd(void) {
-    if (!g3d_sm_enabled || !g3d_sm_tex) return;
-    if (g3d_sm_draw_count > 0) {
+/* The shadow cascade RENDER now runs in Rae (lib/gbuffer_shadow.rae, #504):
+ * Rae drives the encoder + per-cascade depth passes + the caster draw loop over
+ * the bindings. C keeps the pipelines/targets/binds/uniforms and the metaball
+ * raymarch (dense projection math), exposed via these accessors. */
+int64_t rae_sm_ready(void) { return (g3d_sm_enabled && g3d_sm_tex) ? 1 : 0; }
+void rae_sm_upload_models(void) {
+    if (g3d_sm_draw_count > 0)
         wgpuQueueWriteBuffer(g_wgpu_queue, g3d_sm_model_sbuf, 0, g3d_sm_model_cpu,
                              (size_t)g3d_sm_draw_count * 16 * sizeof(float));
-    }
     g3d_shadow_ensure_binds();
+}
+int64_t rae_sm_cascade_count(void) { return (int64_t)g3d_sm_cascade_count; }
+int64_t rae_sm_draw_count(void)    { return (int64_t)g3d_sm_draw_count; }
+void* rae_sm_layer_view(int64_t c) { return (c >= 0 && c < G3D_SHADOW_MAX_CASCADES) ? (void*)g3d_sm_layer_view[(int)c] : NULL; }
+int64_t rae_sm_caster_ready(int64_t i, int64_t c) {
+    if (i < 0 || i >= g3d_sm_draw_count || c < 0 || c >= g3d_sm_cascade_count) return 0;
+    int slot = g3d_sm_draw_mesh[i];
+    if (slot < 0) return 0;
+    if (g3d_sm_draw_skinned[i]) {
+        if (slot >= g3d_skin_mesh_n || !g3d_sm_pipeline_skin || !g3d_sm_bind_skin[c]) return 0;
+        return (g3d_skin_vbuf[slot] && g3d_skin_ibuf[slot] && g3d_skin_icount[slot]) ? 1 : 0;
+    }
+    if (slot >= g3d_mesh_n || !g3d_sm_bind[c]) return 0;
+    return (g3d_mesh_vbuf[slot] && g3d_mesh_ibuf[slot] && g3d_mesh_icount[slot]) ? 1 : 0;
+}
+void* rae_sm_caster_pipeline(int64_t i) {
+    if (i < 0 || i >= g3d_sm_draw_count) return NULL;
+    return g3d_sm_draw_skinned[i] ? (void*)g3d_sm_pipeline_skin : (void*)g3d_sm_pipeline;
+}
+void* rae_sm_caster_bind(int64_t i, int64_t c) {
+    if (i < 0 || i >= g3d_sm_draw_count || c < 0 || c >= G3D_SHADOW_MAX_CASCADES) return NULL;
+    return g3d_sm_draw_skinned[i] ? (void*)g3d_sm_bind_skin[(int)c] : (void*)g3d_sm_bind[(int)c];
+}
+void* rae_sm_caster_vbuf(int64_t i) {
+    if (i < 0 || i >= g3d_sm_draw_count) return NULL;
+    int slot = g3d_sm_draw_mesh[i];
+    return g3d_sm_draw_skinned[i] ? (void*)g3d_skin_vbuf[slot] : (void*)g3d_mesh_vbuf[slot];
+}
+void* rae_sm_caster_ibuf(int64_t i) {
+    if (i < 0 || i >= g3d_sm_draw_count) return NULL;
+    int slot = g3d_sm_draw_mesh[i];
+    return g3d_sm_draw_skinned[i] ? (void*)g3d_skin_ibuf[slot] : (void*)g3d_mesh_ibuf[slot];
+}
+int64_t rae_sm_caster_icount(int64_t i) {
+    if (i < 0 || i >= g3d_sm_draw_count) return 0;
+    int slot = g3d_sm_draw_mesh[i];
+    return g3d_sm_draw_skinned[i] ? (int64_t)g3d_skin_icount[slot] : (int64_t)g3d_mesh_icount[slot];
+}
 
-    WGPUCommandEncoderDescriptor ed; memset(&ed, 0, sizeof(ed));
-    WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, &ed);
-
-    for (int c = 0; c < g3d_sm_cascade_count; c++) {
-        WGPURenderPassDepthStencilAttachment dsa; memset(&dsa, 0, sizeof(dsa));
-        dsa.view = g3d_sm_layer_view[c];
-        dsa.depthLoadOp = WGPULoadOp_Clear;
-        dsa.depthStoreOp = WGPUStoreOp_Store;
-        dsa.depthClearValue = 1.0f;   /* NOT reverse-Z; see the file header */
-        dsa.stencilLoadOp = WGPULoadOp_Undefined;
-        dsa.stencilStoreOp = WGPUStoreOp_Undefined;
-
-        WGPURenderPassDescriptor rp; memset(&rp, 0, sizeof(rp));
-        rp.colorAttachmentCount = 0;
-        rp.depthStencilAttachment = &dsa;
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(enc, &rp);
-
-        for (int i = 0; i < g3d_sm_draw_count; i++) {
-            int slot = g3d_sm_draw_mesh[i];
-            WGPUBuffer vb = NULL, ib = NULL;
-            uint32_t icount = 0;
-            if (g3d_sm_draw_skinned[i]) {
-                if (slot >= g3d_skin_mesh_n || !g3d_sm_pipeline_skin || !g3d_sm_bind_skin[c]) continue;
-                vb = g3d_skin_vbuf[slot]; ib = g3d_skin_ibuf[slot]; icount = g3d_skin_icount[slot];
-                wgpuRenderPassEncoderSetPipeline(pass, g3d_sm_pipeline_skin);
-                wgpuRenderPassEncoderSetBindGroup(pass, 0, g3d_sm_bind_skin[c], 0, NULL);
-            } else {
-                if (slot >= g3d_mesh_n || !g3d_sm_bind[c]) continue;
-                vb = g3d_mesh_vbuf[slot]; ib = g3d_mesh_ibuf[slot]; icount = g3d_mesh_icount[slot];
-                wgpuRenderPassEncoderSetPipeline(pass, g3d_sm_pipeline);
-                wgpuRenderPassEncoderSetBindGroup(pass, 0, g3d_sm_bind[c], 0, NULL);
-            }
-            if (!vb || !ib || icount == 0) continue;
-            wgpuRenderPassEncoderSetVertexBuffer(pass, 0, vb, 0, WGPU_WHOLE_SIZE);
-            wgpuRenderPassEncoderSetIndexBuffer(pass, ib, WGPUIndexFormat_Uint32, 0, WGPU_WHOLE_SIZE);
-            /* The instance index selects this draw's model matrix, so one
-             * instance is drawn per queued caster. */
-            wgpuRenderPassEncoderDrawIndexed(pass, icount, 1, 0, 0, (uint32_t)i);
-        }
-        /* Metaball clusters, after the triangles: each is a fullscreen
-         * raymarch over this cascade that writes only depth. */
+/* The metaball casters for one cascade — a per-cluster raymarch whose AABB
+ * projection is dense CPU math, so it stays C. Drawn into the Rae-created pass. */
+void rae_sm_draw_metaballs(int64_t c_arg, void* passptr) {
+    int c = (int)c_arg;
+    WGPURenderPassEncoder pass = (WGPURenderPassEncoder)passptr;
+    if (!pass || !g3d_sm_sdf_pipeline) return;
         for (int ci = 0; ci < g3d_sm_sdf_clusters; ci++) {
             int ui = c * G3D_SM_SDF_MAX_CLUSTERS + ci;
             float u[G3D_SM_SDF_UBYTES / 4];
@@ -680,15 +686,6 @@ void rae_ext_gpu3d_shadowEnd(void) {
             wgpuRenderPassEncoderSetBindGroup(pass, 0, g3d_sm_sdf_bind[ui], 0, NULL);
             wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 0);
         }
-        wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
-    }
-
-    WGPUCommandBufferDescriptor cbd; memset(&cbd, 0, sizeof(cbd));
-    WGPUCommandBuffer cb = wgpuCommandEncoderFinish(enc, &cbd);
-    wgpuQueueSubmit(g_wgpu_queue, 1, &cb);
-    wgpuCommandBufferRelease(cb);
-    wgpuCommandEncoderRelease(enc);
 }
 
 int64_t rae_ext_gpu3d_shadowDrawCount(void) { return (int64_t)g3d_sm_draw_count; }

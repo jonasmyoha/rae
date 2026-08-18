@@ -1,0 +1,86 @@
+# gbuffer_shadow — the sun cascade shadow render, in Rae (#504).
+#
+# Unlike the deferred post-passes this is a GEOMETRY render: one depth-only pass
+# per cascade, drawing every queued caster (static + skinned) with an instanced
+# model-matrix buffer, then the metaball casters. C keeps the cascade targets /
+# pipelines / bind groups / uniforms and the metaball raymarch (dense projection
+# math); Rae drives the encoder, the per-cascade passes and the caster loop over
+# the generated bindings. Reuses gbuffer's one-command-buffer submit.
+import core
+import gbuffer
+open gbuffer
+open webgpu/webgpu
+import webgpu/context
+
+func smReady() extern("rae_sm_ready") ret Int
+func smUploadModels() extern("rae_sm_upload_models")
+func smCascadeCount() extern("rae_sm_cascade_count") ret Int
+func smDrawCount() extern("rae_sm_draw_count") ret Int
+func smLayerView(c: Int) extern("rae_sm_layer_view") ret Ptr
+func smCasterReady(i: Int, c: Int) extern("rae_sm_caster_ready") ret Int
+func smCasterPipeline(i: Int) extern("rae_sm_caster_pipeline") ret Ptr
+func smCasterBind(i: Int, c: Int) extern("rae_sm_caster_bind") ret Ptr
+func smCasterVbuf(i: Int) extern("rae_sm_caster_vbuf") ret Ptr
+func smCasterIbuf(i: Int) extern("rae_sm_caster_ibuf") ret Ptr
+func smCasterIcount(i: Int) extern("rae_sm_caster_icount") ret Int
+func smDrawMetaballs(c: Int, pass: Ptr) extern("rae_sm_draw_metaballs")
+
+# Reusable one-slot depth attachment (the view changes per cascade). Module-level
+# so the render allocates nothing per frame beyond the encoder/pass handles.
+var gShadowDepthAtt: List(WGPURenderPassDepthStencilAttachment) = createList(WGPURenderPassDepthStencilAttachment, cap: 1)
+
+func shadowEnd() pub {
+  if smReady() is 0 { ret }
+  smUploadModels()
+  loop gShadowDepthAtt.length < 1 { gShadowDepthAtt.add(value: { depthReadOnly: 0 as UInt32 }) }
+
+  let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
+  let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
+  let cascades: Int = smCascadeCount()
+  let draws: Int = smDrawCount()
+
+  var c: Int = 0
+  loop c < cascades {
+    # Depth-only pass into this cascade's array layer. NOT reverse-Z: clear to 1.
+    let depthAtt: WGPURenderPassDepthStencilAttachment = {
+      view_: smLayerView(c: c),
+      depthLoadOp: WGPULoadOp_Clear, depthStoreOp: WGPUStoreOp_Store,
+      depthClearValue: 1.0
+    }
+    gShadowDepthAtt.set(index: 0, value: depthAtt)
+    let rpDesc: WGPURenderPassDescriptor = {
+      colorAttachmentCount: 0 as UInt64, colorAttachments: webgpuNull(),
+      depthStencilAttachment: gShadowDepthAtt.data
+    }
+    let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
+
+    var i: Int = 0
+    loop i < draws {
+      if smCasterReady(i: i, c: c) is 1 {
+        wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: smCasterPipeline(i: i))
+        wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+          group: smCasterBind(i: i, c: c), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+        wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder: pass, slot: 0 as UInt32,
+          buffer: smCasterVbuf(i: i), offset: 0 as UInt64, size: WGPU_WHOLE_SIZE)
+        wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder: pass, buffer: smCasterIbuf(i: i),
+          format: WGPUIndexFormat_Uint32, offset: 0 as UInt64, size: WGPU_WHOLE_SIZE)
+        # The instance index selects this caster's model matrix in the buffer.
+        wgpuRenderPassEncoderDrawIndexed(renderPassEncoder: pass,
+          indexCount: smCasterIcount(i: i) as UInt32, instanceCount: 1 as UInt32,
+          firstIndex: 0 as UInt32, baseVertex: 0 as Int32, firstInstance: i as UInt32)
+      }
+      i = i + 1
+    }
+    # Metaball casters into the same pass (dense raymarch math stays C).
+    smDrawMetaballs(c: c, pass: pass)
+    wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
+    wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
+    c = c + 1
+  }
+
+  let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
+  let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
+  gbSubmit(cmd: cmd)
+  wgpuCommandBufferRelease(commandBuffer: cmd)
+  wgpuCommandEncoderRelease(commandEncoder: enc)
+}
