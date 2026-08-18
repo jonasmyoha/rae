@@ -426,7 +426,6 @@ func gbEncoder() extern("rae_gb_encoder") ret Ptr
 func gbClearFrame() extern("rae_gb_clear_frame")
 func gbFrameActive() extern("rae_gb_frame_active") ret Int
 func drawCount() extern ret Int
-func debugView(mode: Int, zNear: Float, zFar: Float) extern
 func present() extern
 func shutdown() extern
 func depthPyramid() extern
@@ -802,11 +801,6 @@ func endPass() pub {
 # test) distinguish "drew nothing" from "drew and the image is wrong".
 func passDrawCount() pub ret Int {
   ret drawCount()
-}
-
-# Paint one G-buffer channel into the presentable target.
-func inspect(mode: view Int, zNear: view Float, zFar: view Float) pub {
-  debugView(mode: mode, zNear: zNear, zFar: zFar)
 }
 
 func presentFrame() pub {
