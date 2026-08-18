@@ -51,6 +51,10 @@ void* rae_gb_mesh_ibuf(int64_t mesh)    { (void)mesh; return (void*)0; }
 int64_t rae_gb_mesh_icount(int64_t mesh){ (void)mesh; return 0; }
 void* rae_gb_skin_pipeline(void)        { return (void*)0; }
 void* rae_gb_skin_bind(void)            { return (void*)0; }
+void rae_gb_set_skin_bind(void* bind)   { (void)bind; }
+void* rae_gb_skin_palette(void)         { return (void*)0; }
+int64_t rae_gb_skin_palette_size(void)  { return 0; }
+int64_t rae_gb_skin_palette_ready(void) { return 0; }
 int64_t rae_gb_skin_ready(int64_t mesh) { (void)mesh; return 0; }
 void* rae_gb_skin_vbuf(int64_t mesh)    { (void)mesh; return (void*)0; }
 void* rae_gb_skin_ibuf(int64_t mesh)    { (void)mesh; return (void*)0; }
