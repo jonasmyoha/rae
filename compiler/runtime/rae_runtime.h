@@ -877,6 +877,16 @@ void* rae_gb_composite_bind(int64_t idx);
 void rae_gb_set_composite_pipeline(void* p);
 void rae_gb_set_composite_ubuf(void* b);
 void rae_gb_set_composite_bind(int64_t idx, void* b);
+/* SSAO pass in Rae (#504). */
+void rae_gb_ssao_upload(float camX, float camY, float camZ);
+const char* rae_gb_ao_wgsl(void);
+void* rae_gb_ao_view(void);
+void* rae_gb_ao_pipeline(void);
+void* rae_gb_ao_bind(void);
+void* rae_gb_light_ubuf(void);
+int64_t rae_gb_light_bytes(void);
+void rae_gb_set_ao_pipeline(void* p);
+void rae_gb_set_ao_bind(void* b);
 void* rae_gb_view_a(void);
 void* rae_gb_view_b(void);
 void* rae_gb_view_c(void);
