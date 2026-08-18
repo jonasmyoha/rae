@@ -24,9 +24,15 @@ _Static_assert(sizeof(rae_Mat4) == 16 * sizeof(float),
                "Rae Mat4 must stay 16 contiguous floats for the gpu3d extern boundary");
 #endif
 
-void rae_ext_gbuffer_begin(rae_Mat4* viewProj, float clearR, float clearG, float clearB){
-    (void)viewProj; (void)clearR; (void)clearG; (void)clearB;
+int64_t rae_gb_frame_prep(rae_Mat4* viewProj, float clearR, float clearG, float clearB){
+    (void)viewProj; (void)clearR; (void)clearG; (void)clearB; return 0;
 }
+void* rae_gb_view_a(void)     { return (void*)0; }
+void* rae_gb_view_b(void)     { return (void*)0; }
+void* rae_gb_view_c(void)     { return (void*)0; }
+void* rae_gb_view_depth(void) { return (void*)0; }
+float rae_gb_motion_zero(void){ return 128.0f / 255.0f; }
+void rae_gb_set_frame(void* enc, void* pass){ (void)enc; (void)pass; }
 /* The static AND skinned single draws, plus the instanced draw, now run in Rae
  * (lib/gbuffer.rae: draw / drawSkinned / drawRecords, #502/#503); they call
  * these context accessors, so builds without the real geometry pass need no-op
