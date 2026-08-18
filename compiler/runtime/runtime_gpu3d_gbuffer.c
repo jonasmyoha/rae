@@ -80,13 +80,11 @@ static WGPURenderPipeline gb_pipeline = NULL;
 static WGPUBuffer         gb_frame_ubuf = NULL;
 static WGPUBuffer         gb_draw_sbuf = NULL;
 static WGPUBindGroup      gb_bind = NULL;
-static float              gb_draw_cpu[GB_MAX_DRAWS * GB_DRAW_FLOATS];
 static int                gb_draw_count = 0;
 /* Metaball cluster slots are PER FRAME (#392). Declared here because the
  * reset belongs beside every other per-frame counter, while the buffers
  * live in runtime_gpu3d_gbuffer_sdf.c, which is included after this. */
 static int                gb_sdf_group;
-static bool               gb_overflow_reported = false;
 
 static WGPUCommandEncoder    gb_enc = NULL;
 static WGPURenderPassEncoder gb_pass = NULL;
@@ -743,16 +741,20 @@ void rae_ext_gbuffer_begin(rae_Mat4* viewProj, float clearR, float clearG, float
  * and the storage buffer with the static path — the layouts are identical
  * — and switches pipeline for the duration of the draw, then hands the
  * pass back so a following static draw is unaffected. */
-void rae_ext_gbuffer_drawSkinned(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
-                                 float r, float g, float b,
-                                 float metallic, float roughness, float emissive,
-                                 int64_t toon) {
-    if (!gb_pass || !model || !gb_skin_pipeline) return;
-    int slot = (int)mesh - 1;
-    if (slot < 0 || slot >= g3d_skin_mesh_n) return;
-    if (gb_draw_count >= GB_MAX_DRAWS) return;
-
-    if (!gb_skin_bind && g3d_skin_palette_sbuf) {
+/* ---- Skinned draw: context accessors for the Rae port (#503) ---------------
+ *
+ * The single static AND skinned draws now run in Rae (lib/gbuffer.rae: draw /
+ * drawSkinned), each building its one DrawU record with packInstanceRecord and
+ * going through the same Rae upload+draw path as the instanced drawRecords.
+ * These accessors hand Rae the skin pipeline / bind group / mesh buffers.
+ * The skin bind group is still created here (lazily): it needs the pipeline's
+ * layout plus the palette storage buffer, genuine resource creation that stays
+ * C for now (its Rae migration is later in #503/#504). */
+void* rae_gb_skin_pipeline(void) { return (void*)gb_skin_pipeline; }
+/* Lazily create and return the skin bind group (frame uniform + draws buffer +
+ * joint palette). NULL until the palette buffer exists. */
+void* rae_gb_skin_bind(void) {
+    if (!gb_skin_bind && gb_skin_pipeline && g3d_skin_palette_sbuf) {
         WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(gb_skin_pipeline, 0);
         WGPUBindGroupEntry e[3]; memset(e, 0, sizeof(e));
         e[0].binding = 0; e[0].buffer = gb_frame_ubuf; e[0].size = GB_FRAME_BYTES;
@@ -765,107 +767,21 @@ void rae_ext_gbuffer_drawSkinned(int64_t mesh, rae_Mat4* model, rae_Mat4* prevMo
         gb_skin_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
         wgpuBindGroupLayoutRelease(bgl);
     }
-    if (!gb_skin_bind) return;
-
-    float* d = gb_draw_cpu + gb_draw_count * GB_DRAW_FLOATS;
-    memcpy(d, model->m.v, 16 * sizeof(float));
-    memcpy(d + 16, prevModel ? prevModel->m.v : model->m.v, 16 * sizeof(float));
-    d[32] = r; d[33] = g; d[34] = b; d[35] = metallic;
-    d[36] = roughness;
-    if (toon) {
-        d[37] = 1.0f;
-        d[38] = GB_MODE_TOON;
-    } else if (emissive > 0.0f) {
-        float e = logf(1.0f + emissive) / GB_EMISSIVE_LOG_K;
-        d[37] = e > 1.0f ? 1.0f : e;
-        d[38] = GB_MODE_EMISSIVE;
-    } else {
-        d[37] = 1.0f;
-        d[38] = GB_MODE_LIT;
-    }
-    d[39] = 0.0f;
-
-    /* Per-draw upload of this slice (see the note in rae_ext_gbuffer_draw). */
-    wgpuQueueWriteBuffer(g_wgpu_queue, gb_draw_sbuf,
-                         (size_t)gb_draw_count * GB_DRAW_FLOATS * sizeof(float),
-                         d, GB_DRAW_FLOATS * sizeof(float));
-    wgpuRenderPassEncoderSetPipeline(gb_pass, gb_skin_pipeline);
-    wgpuRenderPassEncoderSetBindGroup(gb_pass, 0, gb_skin_bind, 0, NULL);
-    wgpuRenderPassEncoderSetVertexBuffer(gb_pass, 0, g3d_skin_vbuf[slot], 0,
-                                         wgpuBufferGetSize(g3d_skin_vbuf[slot]));
-    wgpuRenderPassEncoderSetIndexBuffer(gb_pass, g3d_skin_ibuf[slot],
-                                        WGPUIndexFormat_Uint32, 0,
-                                        wgpuBufferGetSize(g3d_skin_ibuf[slot]));
-    wgpuRenderPassEncoderDrawIndexed(gb_pass, g3d_skin_icount[slot], 1, 0, 0,
-                                     (uint32_t)gb_draw_count);
-    gb_draw_count++;
-    /* Hand the pass back to the static pipeline; anything drawn after
-     * this is static unless it asks otherwise. */
-    wgpuRenderPassEncoderSetPipeline(gb_pass, gb_pipeline);
-    wgpuRenderPassEncoderSetBindGroup(gb_pass, 0, gb_bind, 0, NULL);
+    return (void*)gb_skin_bind;
 }
-
-void rae_ext_gbuffer_draw(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
-                          float r, float g, float b,
-                          float metallic, float roughness, float emissive,
-                          int64_t toon) {
-    if (!gb_pass || !model) return;
+/* 1 if a skinned draw of `mesh` can proceed (pass open, skin pipeline+bind
+ * available, mesh slot valid) else 0. Also ensures the skin bind exists. */
+int64_t rae_gb_skin_ready(int64_t mesh) {
     int slot = (int)mesh - 1;
-    if (slot < 0 || slot >= g3d_mesh_n) return;
-    if (gb_draw_count >= GB_MAX_DRAWS) {
-        if (!gb_overflow_reported) {
-            fprintf(stderr, "[gbuffer] ERROR: draw limit exceeded (max=%d); discarding additional draws\n",
-                    GB_MAX_DRAWS);
-            gb_overflow_reported = true;
-        }
-        return;
-    }
-    float* d = gb_draw_cpu + gb_draw_count * GB_DRAW_FLOATS;
-    memcpy(d, model->m.v, 16 * sizeof(float));
-    /* No previous transform means "did not move": reusing the current
-     * model yields zero motion, where zeros would project the object to
-     * the origin and streak the whole screen toward it. */
-    memcpy(d + 16, prevModel ? prevModel->m.v : model->m.v, 16 * sizeof(float));
-    d[32] = r; d[33] = g; d[34] = b; d[35] = metallic;
-    d[36] = roughness;
-    /* Log-encode emissive into the 8-bit channel it shares with occlusion,
-     * and flip the shading mode so lighting knows which it is. A
-     * non-emitter stores 1.0 there, which reads as "unoccluded" — the
-     * correct default until an AO pass writes something better. */
-    if (toon) {
-        /* Toon claims C.w as occlusion, so it cannot also carry an
-         * emissive intensity — the two want the same channel. Style wins
-         * over glow rather than silently producing a half-decoded value;
-         * a stylised emitter would want its own band treatment anyway. */
-        d[37] = 1.0f;
-        d[38] = GB_MODE_TOON;
-    } else if (emissive > 0.0f) {
-        float e = logf(1.0f + emissive) / GB_EMISSIVE_LOG_K;
-        d[37] = e > 1.0f ? 1.0f : e;
-        d[38] = GB_MODE_EMISSIVE;
-    } else {
-        d[37] = 1.0f;
-        d[38] = GB_MODE_LIT;
-    }
-    d[39] = 0.0f;
-    /* Upload this instance's DrawU slice immediately, instead of the whole
-     * draws buffer once in end(). Per-draw uploads decouple the draws storage
-     * buffer so the instanced path (now in Rae, lib/gbuffer.rae:drawRecords)
-     * can upload its own slice without end() clobbering it (#502). The bytes
-     * land in queue order before the pass is submitted in end(), so the result
-     * is identical to the former single bulk upload. */
-    wgpuQueueWriteBuffer(g_wgpu_queue, gb_draw_sbuf,
-                         (size_t)gb_draw_count * GB_DRAW_FLOATS * sizeof(float),
-                         d, GB_DRAW_FLOATS * sizeof(float));
-    wgpuRenderPassEncoderSetVertexBuffer(gb_pass, 0, g3d_mesh_vbuf[slot], 0,
-                                         wgpuBufferGetSize(g3d_mesh_vbuf[slot]));
-    wgpuRenderPassEncoderSetIndexBuffer(gb_pass, g3d_mesh_ibuf[slot],
-                                        WGPUIndexFormat_Uint32, 0,
-                                        wgpuBufferGetSize(g3d_mesh_ibuf[slot]));
-    wgpuRenderPassEncoderDrawIndexed(gb_pass, g3d_mesh_icount[slot], 1, 0, 0,
-                                     (uint32_t)gb_draw_count);
-    gb_draw_count++;
+    if (!gb_pass || !gb_skin_pipeline) return 0;
+    if (slot < 0 || slot >= g3d_skin_mesh_n) return 0;
+    if (!g3d_skin_vbuf[slot] || !g3d_skin_ibuf[slot]) return 0;
+    if (!rae_gb_skin_bind()) return 0;
+    return 1;
 }
+void* rae_gb_skin_vbuf(int64_t mesh)  { int s=(int)mesh-1; return (s>=0 && s<g3d_skin_mesh_n)?(void*)g3d_skin_vbuf[s]:NULL; }
+void* rae_gb_skin_ibuf(int64_t mesh)  { int s=(int)mesh-1; return (s>=0 && s<g3d_skin_mesh_n)?(void*)g3d_skin_ibuf[s]:NULL; }
+int64_t rae_gb_skin_icount(int64_t mesh){ int s=(int)mesh-1; return (s>=0 && s<g3d_skin_mesh_n)?(int64_t)g3d_skin_icount[s]:0; }
 
 /* ---- Instanced draw: context accessors for the Rae port (#502) -------------
  *
