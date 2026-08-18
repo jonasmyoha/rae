@@ -69,6 +69,32 @@ func gbViewC() extern("rae_gb_view_c") ret Ptr
 func gbViewDepth() extern("rae_gb_view_depth") ret Ptr
 func gbMotionZero() extern("rae_gb_motion_zero") ret Float
 func gbSetFrame(enc: Ptr, pass: Ptr) extern("rae_gb_set_frame")
+# Static bind group creation (#503): built in Rae from the pipeline's auto
+# layout + the frame uniform and draws buffers (still C-created), stored back
+# into the C global via the setter so draws and begin() see it.
+func gbFrameUbuf() extern("rae_gb_frame_ubuf") ret Ptr
+func gbFrameBytes() extern("rae_gb_frame_bytes") ret Int
+func gbDrawsSize() extern("rae_gb_draws_size") ret Int
+func gbSetStaticBind(bind: Ptr) extern("rae_gb_set_static_bind")
+
+var gStaticBindMade: Bool = false
+
+# Create the static geometry bind group once, over the bindings. Safe to call
+# only after gbFramePrep returned 1 (the pipeline and buffers then exist).
+func ensureStaticBind() {
+  if gStaticBindMade { ret }
+  gStaticBindMade = true
+  let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbStaticPipeline(), groupIndex: 0 as UInt32)
+  var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 2)
+  entries.add(value: { binding: 0 as UInt32, buffer: gbFrameUbuf(), size: gbFrameBytes() as UInt64 })
+  entries.add(value: { binding: 1 as UInt32, buffer: gbDrawsBuffer(), size: gbDrawsSize() as UInt64 })
+  let desc: WGPUBindGroupDescriptor = {
+    layout: layout, entryCount: 2 as UInt64, entries: entries.data
+  }
+  let bind: Ptr = wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc)
+  wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+  gbSetStaticBind(bind: bind)
+}
 
 # Reusable attachment arrays (#503) — module-level so begin() never allocates
 # per frame; filled once to length, then rewritten in place each frame.
@@ -84,6 +110,7 @@ func ensureGbAttachments() {
 
 func begin(viewProj: view Mat4, clearR: copy Float, clearG: copy Float, clearB: copy Float) pub {
   if gbFramePrep(viewProj: viewProj, clearR: clearR, clearG: clearG, clearB: clearB) is 0 { ret }
+  ensureStaticBind()
   ensureGbAttachments()
 
   let undefinedSlice: UInt32 = WGPU_DEPTH_SLICE_UNDEFINED as UInt32

@@ -837,5 +837,10 @@ void* rae_gb_view_c(void);
 void* rae_gb_view_depth(void);
 float rae_gb_motion_zero(void);
 void rae_gb_set_frame(void* enc, void* pass);
+/* Static bind group creation moved to Rae (#503). */
+void* rae_gb_frame_ubuf(void);
+int64_t rae_gb_frame_bytes(void);
+int64_t rae_gb_draws_size(void);
+void rae_gb_set_static_bind(void* bind);
 
 #endif
