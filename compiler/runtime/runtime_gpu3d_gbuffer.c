@@ -732,32 +732,24 @@ void rae_gb_set_frame(void* enc, void* pass) {
  * layout plus the palette storage buffer, genuine resource creation that stays
  * C for now (its Rae migration is later in #503/#504). */
 void* rae_gb_skin_pipeline(void) { return (void*)gb_skin_pipeline; }
-/* Lazily create and return the skin bind group (frame uniform + draws buffer +
- * joint palette). NULL until the palette buffer exists. */
-void* rae_gb_skin_bind(void) {
-    if (!gb_skin_bind && gb_skin_pipeline && g3d_skin_palette_sbuf) {
-        WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(gb_skin_pipeline, 0);
-        WGPUBindGroupEntry e[3]; memset(e, 0, sizeof(e));
-        e[0].binding = 0; e[0].buffer = gb_frame_ubuf; e[0].size = GB_FRAME_BYTES;
-        e[1].binding = 1; e[1].buffer = gb_draw_sbuf;
-        e[1].size = (uint64_t)GB_MAX_DRAWS * GB_DRAW_FLOATS * sizeof(float);
-        e[2].binding = 2; e[2].buffer = g3d_skin_palette_sbuf;
-        e[2].size = (uint64_t)G3D_SKIN_MAX_JOINTS * 12 * sizeof(float);
-        WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
-        bgd.layout = bgl; bgd.entryCount = 3; bgd.entries = e;
-        gb_skin_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
-        wgpuBindGroupLayoutRelease(bgl);
-    }
-    return (void*)gb_skin_bind;
-}
-/* 1 if a skinned draw of `mesh` can proceed (pass open, skin pipeline+bind
- * available, mesh slot valid) else 0. Also ensures the skin bind exists. */
+/* The skin bind group (frame uniform + draws buffer + joint palette) is created
+ * in Rae now (lib/gbuffer.rae:ensureSkinBind, #503) and stored back here. */
+void* rae_gb_skin_bind(void) { return (void*)gb_skin_bind; }
+void rae_gb_set_skin_bind(void* bind) { gb_skin_bind = (WGPUBindGroup)bind; }
+/* The joint palette storage buffer + its byte size, for the Rae-built skin bind
+ * group. It comes up asynchronously with the first skinned upload, so a
+ * readiness check lets Rae defer creating the bind until it exists. */
+void* rae_gb_skin_palette(void)      { return (void*)g3d_skin_palette_sbuf; }
+int64_t rae_gb_skin_palette_size(void){ return (int64_t)((uint64_t)G3D_SKIN_MAX_JOINTS * 12 * sizeof(float)); }
+int64_t rae_gb_skin_palette_ready(void){ return g3d_skin_palette_sbuf ? 1 : 0; }
+/* 1 if a skinned draw of `mesh` can proceed (pass open, skin pipeline + bind
+ * available, mesh slot valid) else 0. The bind is created by Rae's
+ * ensureSkinBind before this is checked. */
 int64_t rae_gb_skin_ready(int64_t mesh) {
     int slot = (int)mesh - 1;
-    if (!gb_pass || !gb_skin_pipeline) return 0;
+    if (!gb_pass || !gb_skin_pipeline || !gb_skin_bind) return 0;
     if (slot < 0 || slot >= g3d_skin_mesh_n) return 0;
     if (!g3d_skin_vbuf[slot] || !g3d_skin_ibuf[slot]) return 0;
-    if (!rae_gb_skin_bind()) return 0;
     return 1;
 }
 void* rae_gb_skin_vbuf(int64_t mesh)  { int s=(int)mesh-1; return (s>=0 && s<g3d_skin_mesh_n)?(void*)g3d_skin_vbuf[s]:NULL; }
