@@ -1,0 +1,26 @@
+# WebGPU context bootstrap (#501) — hand-written, not generated.
+#
+# The instance/adapter/device REQUEST is async (callback-driven) and any
+# platform surface configuration is genuinely platform C, so that one-time
+# bootstrap stays in the runtime (compiler/runtime/runtime_webgpu.c). These
+# externs hand the resulting handles to Rae as opaque Ptr, so every downstream
+# resource call (createBuffer / queueWriteBuffer / beginRenderPass / …) is made
+# from Rae over the generated bindings in webgpu.rae — never a C shim.
+#
+# The symbols are declared in rae_runtime.h (guarded by RAE_HAS_WEBGPU), which
+# the generated C always includes, so no cheader is needed here.
+
+# Create the instance/adapter/device/queue once (idempotent). Returns 1 on
+# success, 0 if no GPU is available. Call before any accessor below.
+func webgpuBootstrap() extern("rae_wgpu_ctx_bootstrap") ret Int
+
+# Handles from the bootstrap, as opaque Ptr. Valid only after webgpuBootstrap()
+# returned 1. Feed these straight into the generated wgpu* bindings.
+func webgpuDevice() extern("rae_wgpu_ctx_device") ret Ptr
+func webgpuQueue() extern("rae_wgpu_ctx_queue") ret Ptr
+func webgpuAdapter() extern("rae_wgpu_ctx_adapter") ret Ptr
+func webgpuInstance() extern("rae_wgpu_ctx_instance") ret Ptr
+
+# Advance the device event queue (map/submit callbacks). wait != 0 blocks until
+# there is work; wait == 0 polls. Needed until Rae can pass callbacks to C.
+func webgpuPoll(wait: Int) extern("rae_wgpu_ctx_poll")

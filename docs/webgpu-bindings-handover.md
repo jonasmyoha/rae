@@ -81,15 +81,20 @@ for the pattern: `main.rae` + `config.cmd` (`run`) + `expected.txt`).
 
 ## Next tasks, in order
 
-- **#501 — build integration + device/queue bootstrap.** Make the build detect
-  that a program uses `webgpu` (a `cheader`, or importing `lib/webgpu`) and pass
-  the wgpu-native include/lib flags automatically (see how `uses_webgpu` is
-  currently detected from `gpu2d`/`gpu3d` module paths in `main.c` ~line 2340 —
-  generalise it, e.g. trigger on any `cheader` whose name matches a known
-  library, or on the webgpu import). Then expose the existing
-  `g_wgpu_device/queue/adapter/instance/surface` (runtime globals) to Rae so Rae
-  can call `createBuffer`/`beginRenderPass`/etc. Add a harness test that imports
-  `webgpu` and runs headless (needs the auto-linking to work first).
+- **#501 — build integration + device/queue bootstrap. ✅ LANDED.** The build's
+  `uses_webgpu` detection (`main.c`) now triggers on any module path containing
+  `webgpu` or any `cheader` mentioning `wgpu`/`webgpu`, so importing the bindings
+  auto-links wgpu-native (no manual flags). `lib/webgpu/context.rae` (hand-written)
+  exposes the bootstrap + `webgpuDevice/Queue/Adapter/Instance/Poll` as opaque
+  `Ptr` via `rae_wgpu_ctx_*` runtime accessors (declared in `rae_runtime.h` under
+  `RAE_HAS_WEBGPU`). The async device REQUEST stays C; everything downstream is
+  Rae. Headless test: `compiler/tests/cases/629_webgpu_bootstrap` (bootstrap →
+  Rae `WGPUBufferDescriptor` → `wgpuDeviceCreateBuffer` → zero-copy
+  `wgpuQueueWriteBuffer` from a `List`'s `.data`). See docs/webgpu-bindings.md
+  "Context bootstrap & auto-linking". Surface/swapchain-view exposure is deferred
+  to when #502/#503 need it (headless path needs no surface). NOTE: `List(Int32)`
+  monomorphization is currently broken (lowers to `rae_List_void`); use
+  `List(Int)` for now, or fix the Int32 list codegen when a binding needs it.
 - **#502 — proof port: delete `drawRecords`.** Reimplement the instanced GBuffer
   draw in Rae over the bindings (Rae owns the draws storage buffer, uploads via
   `wgpuQueueWriteBuffer` zero-copy from a List's `.data`, issues
