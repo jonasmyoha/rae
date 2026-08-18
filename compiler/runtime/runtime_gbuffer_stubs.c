@@ -132,7 +132,16 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
 }
 void rae_ext_gbuffer_ssao(float camX, float camY, float camZ){ (void)camX; (void)camY; (void)camZ; }
 void rae_ext_gbuffer_taa(void) {}
-void rae_ext_gbuffer_composite(float exposure) { (void)exposure; }
+int64_t rae_gb_deferred_prepare(void)        { return 0; }
+const char* rae_gb_composite_wgsl(void)      { return ""; }
+void* rae_gb_composite_source_view(void)     { return (void*)0; }
+int64_t rae_gb_composite_source_index(void)  { return 2; }
+void* rae_gb_composite_pipeline(void)        { return (void*)0; }
+void* rae_gb_composite_ubuf(void)            { return (void*)0; }
+void* rae_gb_composite_bind(int64_t idx)     { (void)idx; return (void*)0; }
+void rae_gb_set_composite_pipeline(void* p)  { (void)p; }
+void rae_gb_set_composite_ubuf(void* b)      { (void)b; }
+void rae_gb_set_composite_bind(int64_t idx, void* b) { (void)idx; (void)b; }
 int64_t rae_ext_gbuffer_pyramidMips(void) { return 0; }
 void rae_ext_gbuffer_deferredShutdown(void) {}
 
