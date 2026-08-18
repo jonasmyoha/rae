@@ -942,6 +942,15 @@ void* rae_sm_caster_vbuf(int64_t i);
 void* rae_sm_caster_ibuf(int64_t i);
 int64_t rae_sm_caster_icount(int64_t i);
 void rae_sm_draw_metaballs(int64_t c, void* passptr);
+/* gpu2d frame lifecycle in Rae (#504). */
+void rae_g2d_frame_reset(void);
+void rae_g2d_set_frame(void* enc, void* pass);
+void* rae_g2d_pass_get(void);
+void* rae_g2d_encoder_get(void);
+int64_t rae_g2d_frame_active(void);
+void rae_g2d_present_and_cleanup(void);
+void rae_g2d_tick(void);
+void rae_ext_gpu2d_flush(void);
 void* rae_gb_view_a(void);
 void* rae_gb_view_b(void);
 void* rae_gb_view_c(void);
