@@ -33,6 +33,7 @@
 #include "c_backend.h"
 #include "sema.h"
 #include "mangler.h"
+#include "bindgen.h"
 #include "raepack.h"
 #include "vm.h"
 #include "vm_compiler.h"
@@ -4086,6 +4087,9 @@ int main(int argc, char** argv) {
   }
   if (strcmp(cmd, "init") == 0) {
     return cmd_init(argc - 2, argv + 2);
+  }
+  if (strcmp(cmd, "bindgen") == 0) {
+    return bindgen_run(argc - 2, argv + 2);
   }
 
   fprintf(stderr, "error: unknown command '%s'\n", cmd);
