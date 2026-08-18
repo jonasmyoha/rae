@@ -225,16 +225,22 @@ static void gb_sdf_init(void) {
 /* One smooth-union cluster. Called between gbufferBegin and gbufferEnd,
  * so it lands in the same render pass as the triangles and depth-tests
  * against them. */
-void rae_ext_gbuffer_drawMetaballs(const float* packedBalls, int64_t count,
-                                   const float* packedColors, float smoothing,
-                                   float camX, float camY, float camZ,
-                                   float metallic, float roughness,
-                                   float emR, float emG, float emB) {
-    if (!gb_pass || !packedBalls || count < 1) return;
+/* The metaball G-buffer draw runs in Rae now (lib/gbuffer.rae:drawMetaballs,
+ * #504): Rae issues the draw into the open geometry pass. C keeps the dense
+ * per-cluster prep — the inverse-viewProj/motion frame uniform, the ball/colour
+ * storage uploads, the material params and the bind group — done here and
+ * returning the cluster's group index (or -1 when it cannot draw). */
+int64_t rae_gb_sdf_prepare(void* packedBalls_, int64_t count, void* packedColors_,
+                           float smoothing, float camX, float camY, float camZ,
+                           float metallic, float roughness,
+                           float emR, float emG, float emB) {
+    const float* packedBalls = (const float*)packedBalls_;
+    const float* packedColors = (const float*)packedColors_;
+    if (!gb_pass || !packedBalls || count < 1) return -1;
     if (count > GB_SDF_MAX_BALLS) count = GB_SDF_MAX_BALLS;
     gb_sdf_init();
-    if (!gb_sdf_pipeline) return;
-    if (gb_sdf_group >= GB_SDF_MAX_GROUPS) return;
+    if (!gb_sdf_pipeline) return -1;
+    if (gb_sdf_group >= GB_SDF_MAX_GROUPS) return -1;
     int gi = gb_sdf_group++;
 
     float fu[GB_SDF_FRAME_BYTES / 4];
@@ -278,7 +284,7 @@ void rae_ext_gbuffer_drawMetaballs(const float* packedBalls, int64_t count,
         gb_sdf_bind[gi] = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
         wgpuBindGroupLayoutRelease(bgl);
     }
-    if (!gb_sdf_bind[gi]) return;
+    if (!gb_sdf_bind[gi]) return -1;
 
     /* Same diagnostic line and same env gate as the forward path, so
      * 110's gate keeps asserting that metaballs actually reached the
@@ -290,13 +296,10 @@ void rae_ext_gbuffer_drawMetaballs(const float* packedBalls, int64_t count,
             gb_sdf_logged = 1;
         }
     }
-    wgpuRenderPassEncoderSetPipeline(gb_pass, gb_sdf_pipeline);
-    wgpuRenderPassEncoderSetBindGroup(gb_pass, 0, gb_sdf_bind[gi], 0, NULL);
-    wgpuRenderPassEncoderDraw(gb_pass, 3, 1, 0, 0);
-    /* Hand the pass back, as the skinned path does. */
-    wgpuRenderPassEncoderSetPipeline(gb_pass, gb_pipeline);
-    wgpuRenderPassEncoderSetBindGroup(gb_pass, 0, gb_bind, 0, NULL);
+    return gi;
 }
+void* rae_gb_sdf_pipeline(void)      { return (void*)gb_sdf_pipeline; }
+void* rae_gb_sdf_bind(int64_t gi)    { return (gi >= 0 && gi < GB_SDF_MAX_GROUPS) ? (void*)gb_sdf_bind[(int)gi] : NULL; }
 
 void rae_ext_gbuffer_sdfShutdown(void) {
     if (gb_sdf_pipeline) { wgpuRenderPipelineRelease(gb_sdf_pipeline); gb_sdf_pipeline = NULL; }
