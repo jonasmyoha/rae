@@ -111,7 +111,13 @@ void rae_ext_gbuffer_shutdown(void) {}
 /* The passes downstream of the G-buffer are pure GPU work — there is no
  * CPU-side path in them to exercise, unlike the per-object transform
  * build above — so these are no-ops with nothing to preserve. */
-void rae_ext_gbuffer_depthPyramid(void) {}
+int64_t rae_gb_pyramid_ready(void)         { return 0; }
+void* rae_gb_pyr_from_depth_pipeline(void) { return (void*)0; }
+void* rae_gb_pyr_reduce_pipeline(void)     { return (void*)0; }
+void* rae_gb_pyr_src_view(int64_t i)       { (void)i; return (void*)0; }
+void* rae_gb_pyr_rt_view(int64_t i)        { (void)i; return (void*)0; }
+void* rae_gb_pyr_bind(int64_t i)           { (void)i; return (void*)0; }
+void rae_gb_set_pyr_bind(int64_t i, void* b){ (void)i; (void)b; }
 void rae_gb_light_upload(float camX, float camY, float camZ, float exposure,
                               float sunX, float sunY, float sunZ,
                               float sunR, float sunG, float sunB,

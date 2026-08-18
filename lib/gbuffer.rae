@@ -434,7 +434,6 @@ func gbFrameActive() extern("rae_gb_frame_active") ret Int
 func drawCount() extern ret Int
 func present() extern
 func shutdown() extern
-func depthPyramid() extern
 func pyramidMips() extern ret Int
 func deferredShutdown() extern
 
@@ -816,9 +815,7 @@ func presentFrame() pub {
 # box", and that is the nearest depth. An averaged chain would cull
 # visible geometry. Hi-Z culling and a deferred SSAO are the intended
 # readers.
-func buildDepthPyramid() pub {
-  depthPyramid()
-}
+# buildDepthPyramid moved to gbuffer_passes.rae (#504).
 
 # One fullscreen evaluation of the BRDF over the whole G-buffer. This is
 # the payoff of the split: the cost is per pixel, not per object-pixel, so
