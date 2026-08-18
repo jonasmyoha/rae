@@ -2438,8 +2438,25 @@ static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
          parser_check(parser, TOK_KW_PRIV) || parser_check(parser, TOK_KW_PUB) || 
          parser_check(parser, TOK_KW_SPAWN)) {
     const Token* mod_token = parser_advance(parser);
-    if (mod_token->kind == TOK_KW_EXTERN) is_extern = true;
-    
+    if (mod_token->kind == TOK_KW_EXTERN) {
+      is_extern = true;
+      // `extern("wgpuDeviceCreateBuffer")` — bind to an exact C ABI symbol
+      // (general FFI, #497). The parenthesised string is the C symbol name;
+      // without it the mangler uses the default rae_ext_ scheme.
+      if (parser_match(parser, TOK_LPAREN)) {
+        const Token* sym_token = parser_consume(parser, TOK_STRING,
+            "expected a C symbol string in extern(\"...\")");
+        if (sym_token) {
+          Str sym = unescape_string(parser, sym_token->lexeme, true, true);
+          char* buffer = parser_alloc(parser, sym.len + 1);
+          memcpy(buffer, sym.data, sym.len);
+          buffer[sym.len] = '\0';
+          decl->as.func_decl.extern_symbol = buffer;
+        }
+        parser_consume(parser, TOK_RPAREN, "expected ')' after extern symbol name");
+      }
+    }
+
     AstProperty* prop = make_property(parser, mod_token->lexeme);
     props_head = append_property(props_head, prop);
   }
