@@ -72,7 +72,7 @@ static WGPURenderPipeline gb_composite_pipeline = NULL;
 /* One per history slot: the composite's source alternates with the TAA
  * ping-pong, and a single cached bind group would pin frame one's
  * choice forever. */
-static WGPUBindGroup      gb_composite_bind[2] = {NULL, NULL};
+static WGPUBindGroup      gb_composite_bind[3] = {NULL, NULL, NULL};
 static WGPUBuffer         gb_composite_ubuf = NULL;
 static WGPUBuffer         gb_taa_ubuf = NULL;
 
@@ -667,7 +667,10 @@ static void gb_deferred_release_targets(void) {
     }
     if (gb_pyramid_tex)    { wgpuTextureRelease(gb_pyramid_tex); gb_pyramid_tex = NULL; }
     if (gb_light_bind)     { wgpuBindGroupRelease(gb_light_bind); gb_light_bind = NULL; }
-    for (int i = 0; i < 2; i++) {
+    /* Slots 0/1 are the TAA-ping-pong source binds, slot 2 the no-TAA (lit)
+     * source bind. They are created in Rae now (#504) but released here so the
+     * lifetime stays with the targets they sample. */
+    for (int i = 0; i < 3; i++) {
         if (gb_composite_bind[i]) { wgpuBindGroupRelease(gb_composite_bind[i]); gb_composite_bind[i] = NULL; }
     }
     for (int i = 0; i < 2; i++) {
@@ -782,15 +785,15 @@ static void gb_deferred_init_pipelines(void) {
         ud.size = GB_LIGHT_BYTES;
         ud.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
         gb_light_ubuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &ud);
+        /* The TAA uniform is a 16-byte block like the composite's; it lives
+         * with the light family now that the composite pipeline moved to Rae
+         * (#504). */
+        WGPUBufferDescriptor td; memset(&td, 0, sizeof(td));
+        td.size = 16; td.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+        gb_taa_ubuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &td);
     }
-    if (!gb_composite_pipeline) {
-        gb_composite_pipeline = gb_make_fullscreen_pipeline(
-            GB_COMPOSITE_WGSL, g_g2d_fmt, "composite");
-        WGPUBufferDescriptor ud; memset(&ud, 0, sizeof(ud));
-        ud.size = 16; ud.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
-        gb_composite_ubuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &ud);
-        gb_taa_ubuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &ud);
-    }
+    /* The composite pipeline + uniform + bind group are created in Rae now
+     * (lib/gbuffer_passes.rae:composite, #504) over the bindings. */
 }
 
 /* One fullscreen pass: bind, draw three vertices, submit. */
@@ -1004,31 +1007,28 @@ void rae_ext_gbuffer_taa(void) {
     gb_taa_have_history = true;
 }
 
-void rae_ext_gbuffer_composite(float exposure) {
-    if (!g_wgpu_dev || !g_g2d_off_view) return;
+/* Composite (tonemap the lit result into the presentable target) runs in Rae
+ * now (lib/gbuffer_passes.rae, #504). C exposes the shared deferred prep, the
+ * composite WGSL, and the source view/index the composite samples — whatever
+ * the last radiometric pass wrote: the TAA resolve when it ran (ping-ponged by
+ * gb_taa_cur), else the raw lit radiance. */
+int64_t rae_gb_deferred_prepare(void) {
+    if (!g_wgpu_dev) return 0;
     gb_deferred_init_pipelines();
     gb_deferred_ensure();
-    if (!gb_composite_pipeline || !gb_lit_view) return;
-
-    float p[4] = { exposure, 0.0f, 0.0f, 0.0f };
-    wgpuQueueWriteBuffer(g_wgpu_queue, gb_composite_ubuf, 0, p, sizeof(p));
-    if (!gb_composite_bind[gb_taa_cur]) {
-        WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(gb_composite_pipeline, 0);
-        WGPUBindGroupEntry e[2]; memset(e, 0, sizeof(e));
-        e[0].binding = 0; e[0].buffer = gb_composite_ubuf; e[0].size = 16;
-        /* The composite reads whatever the last radiometric pass wrote:
-         * the TAA resolve when it ran, raw radiance when it did not. The
-         * resolve's first frame copies radiance through unchanged, so
-         * this is valid from frame one. */
-        e[1].binding = 1; e[1].textureView = (gb_taa_enabled && gb_taa_view[gb_taa_cur])
-                                              ? gb_taa_view[gb_taa_cur] : gb_lit_view;
-        WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
-        bgd.layout = bgl; bgd.entryCount = 2; bgd.entries = e;
-        gb_composite_bind[gb_taa_cur] = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
-        wgpuBindGroupLayoutRelease(bgl);
-    }
-    gb_run_fullscreen(gb_composite_pipeline, gb_composite_bind[gb_taa_cur], g_g2d_off_view);
+    return (gb_lit_view && g_g2d_off_view) ? 1 : 0;
 }
+const char* rae_gb_composite_wgsl(void)  { return GB_COMPOSITE_WGSL; }
+void* rae_gb_composite_source_view(void) {
+    return (void*)((gb_taa_enabled && gb_taa_view[gb_taa_cur]) ? gb_taa_view[gb_taa_cur] : gb_lit_view);
+}
+int64_t rae_gb_composite_source_index(void) { return gb_taa_enabled ? (int64_t)gb_taa_cur : 2; }
+void* rae_gb_composite_pipeline(void)    { return (void*)gb_composite_pipeline; }
+void* rae_gb_composite_ubuf(void)        { return (void*)gb_composite_ubuf; }
+void* rae_gb_composite_bind(int64_t idx) { return (idx >= 0 && idx < 3) ? (void*)gb_composite_bind[(int)idx] : NULL; }
+void rae_gb_set_composite_pipeline(void* p) { gb_composite_pipeline = (WGPURenderPipeline)p; }
+void rae_gb_set_composite_ubuf(void* b)     { gb_composite_ubuf = (WGPUBuffer)b; }
+void rae_gb_set_composite_bind(int64_t idx, void* b) { if (idx >= 0 && idx < 3) gb_composite_bind[(int)idx] = (WGPUBindGroup)b; }
 
 /* Number of mip levels in the pyramid — 0 before the first build. Lets a
  * caller or test confirm the chain was actually built rather than skipped. */
