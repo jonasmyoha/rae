@@ -638,11 +638,17 @@ _Static_assert(sizeof(rae_Mat4) == 16 * sizeof(float),
 /* Begin the geometry pass. Takes the view-projection BY VALUE as a Mat4
  * (#354) rather than a packed Float list: the caller builds it from value
  * types on the stack, so starting a frame allocates nothing either. */
-void rae_ext_gbuffer_begin(rae_Mat4* viewProj, float clearR, float clearG, float clearB) {
-    if (!g_wgpu_dev || !viewProj) return;
+/* Per-frame PREP for the geometry pass (#503): lazily create the pipeline and
+ * targets, reset the per-frame counters, and build+upload the frame uniform
+ * (TAA jitter + prev-viewProj — stateful CPU math that stays C for now).
+ * Returns 1 when the pass is ready to encode, 0 otherwise. The command encoder,
+ * render pass and attachment descriptors are built in Rae (lib/gbuffer.rae:
+ * begin) over the bindings once this returns 1. */
+int64_t rae_gb_frame_prep(rae_Mat4* viewProj, float clearR, float clearG, float clearB) {
+    if (!g_wgpu_dev || !viewProj) return 0;
     gb_init_pipeline();
     gb_ensure_targets();
-    if (!gb_pipeline || !gb_a_view || !gb_b_view || !gb_c_view || !gb_depth_view) return;
+    if (!gb_pipeline || !gb_a_view || !gb_b_view || !gb_c_view || !gb_depth_view) return 0;
 
     gb_draw_count = 0;
     /* Without this the counter climbs past GB_SDF_MAX_GROUPS after a few
@@ -687,51 +693,24 @@ void rae_ext_gbuffer_begin(rae_Mat4* viewProj, float clearR, float clearG, float
     wgpuQueueWriteBuffer(g_wgpu_queue, gb_frame_ubuf, 0, fu, GB_FRAME_BYTES);
     /* Remember for NEXT frame, after this frame's copy is on the GPU. */
     memcpy(gb_prev_viewproj, viewProj->m.v, 16 * sizeof(float));
+    return 1;
+}
 
-    gb_enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
-    WGPURenderPassColorAttachment ca[3]; memset(ca, 0, sizeof(ca));
-    ca[0].view = gb_a_view;
-    ca[0].depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
-    ca[0].loadOp = WGPULoadOp_Clear;
-    ca[0].storeOp = WGPUStoreOp_Store;
-    /* (0.5, 0.5) is the octahedral encoding of +Z, so an unwritten pixel
-     * decodes to a valid up-facing unit normal rather than to whatever
-     * oct(0,0) happens to produce — which is a real direction too, just an
-     * arbitrary one, and it showed up as a wrongly-coloured background in
-     * the normal inspector. Mode 0 = lit. */
-    ca[0].clearValue.r = 0.5; ca[0].clearValue.g = 0.5; ca[0].clearValue.b = 0.0; ca[0].clearValue.a = 0.0;
-    /* A is the oct-normal/mode target now, so the clear colour belongs on
-     * B (albedo) instead. Clearing albedo to the sky colour is not a
-     * shortcut for a sky pass — it is what the inspector shows where no
-     * geometry wrote, and it keeps a background-coloured frame
-     * distinguishable from a black failure. */
-    ca[1].view = gb_b_view;
-    ca[1].depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
-    ca[1].loadOp = WGPULoadOp_Clear;
-    ca[1].storeOp = WGPUStoreOp_Store;
-    ca[1].clearValue.r = clearR; ca[1].clearValue.g = clearG; ca[1].clearValue.b = clearB; ca[1].clearValue.a = 1.0;
-    ca[2].view = gb_c_view;
-    ca[2].depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
-    ca[2].loadOp = WGPULoadOp_Clear;
-    ca[2].storeOp = WGPUStoreOp_Store;
-    /* Background: no motion (the exactly-representable biased zero), not
-     * metallic, and unoccluded. Clearing this to zeros would tell a
-     * temporal pass the background is moving fast and an ambient pass that
-     * it is fully occluded. */
-    ca[2].clearValue.r = GB_MOTION_ZERO; ca[2].clearValue.g = GB_MOTION_ZERO;
-    ca[2].clearValue.b = 0.0; ca[2].clearValue.a = 1.0;
-    WGPURenderPassDepthStencilAttachment da; memset(&da, 0, sizeof(da));
-    da.view = gb_depth_view;
-    da.depthLoadOp = WGPULoadOp_Clear;
-    da.depthStoreOp = WGPUStoreOp_Store;   /* the pyramid and lighting both sample it */
-    da.depthClearValue = 0.0f;   /* reverse-Z: 0 is the far plane (#367) */
-    WGPURenderPassDescriptor rp; memset(&rp, 0, sizeof(rp));
-    rp.colorAttachmentCount = 3;
-    rp.colorAttachments = ca;
-    rp.depthStencilAttachment = &da;
-    gb_pass = wgpuCommandEncoderBeginRenderPass(gb_enc, &rp);
-    wgpuRenderPassEncoderSetPipeline(gb_pass, gb_pipeline);
-    wgpuRenderPassEncoderSetBindGroup(gb_pass, 0, gb_bind, 0, NULL);
+/* G-buffer target views for the Rae-built render pass (#503). Valid after a
+ * frame prep returned 1. The clear values / attachment layout live in Rae now;
+ * these just hand over the opaque view handles. */
+void* rae_gb_view_a(void)     { return (void*)gb_a_view; }
+void* rae_gb_view_b(void)     { return (void*)gb_b_view; }
+void* rae_gb_view_c(void)     { return (void*)gb_c_view; }
+void* rae_gb_view_depth(void) { return (void*)gb_depth_view; }
+/* The biased zero the motion channel clears to (128/255); Rae uses it for the
+ * C-target clear so a static background reads as "not moving". */
+float rae_gb_motion_zero(void) { return GB_MOTION_ZERO; }
+/* Store the Rae-created command encoder + render pass so the draws and the C
+ * metaball path see the live frame, and end() can finish it. */
+void rae_gb_set_frame(void* enc, void* pass) {
+    gb_enc = (WGPUCommandEncoder)enc;
+    gb_pass = (WGPURenderPassEncoder)pass;
 }
 
 /* Queue one mesh into the G-buffer. `model` arrives as a Mat4 by value —
