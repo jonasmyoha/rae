@@ -117,6 +117,9 @@ void* rae_wgpu_ctx_adapter(void)    { return (void*)g_wgpu_adapter; }
 void* rae_wgpu_ctx_instance(void)   { return (void*)g_wgpu_inst; }
 /* Advance the device's event queue (map/submit callbacks). wait!=0 blocks. */
 void  rae_wgpu_ctx_poll(int wait)   { rae_wgpu_poll(wait); }
+/* A null opaque pointer, for WebGPU params that take an optional pointer/array
+ * (e.g. dynamicOffsets when the count is 0). Rae has no null-Ptr literal yet. */
+void* rae_wgpu_null_ptr(void)       { return (void*)0; }
 
 /* scene: sceneLen f64 (camera 19 + spheres*10) -> narrowed to f32 for the GPU.
  * fb: width*height int64 written as packed 0xRRGGBB. wgsl: shader source. */

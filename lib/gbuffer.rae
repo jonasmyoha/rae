@@ -48,18 +48,76 @@ open vec3
 open scene3d
 open sky
 open math3d
+# The instanced draw path (#502) runs in Rae directly on the WebGPU bindings.
+# `open webgpu/webgpu` also makes the sibling enum/flag consts (e.g.
+# WGPUIndexFormat_Uint32) resolvable as bare cheader-backed references; do NOT
+# `open webgpu/webgpu_enums` — importing that module emits every enum value as a
+# C definition, colliding with the real enumerators from the cheader.
+open webgpu/webgpu
+import webgpu/context
 
 # ----- raw C ABI (implementation detail; prefer the typed API below) ---
 func begin(viewProj: view Mat4, clearR: Float, clearG: Float, clearB: Float) extern
 func draw(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emissive: Float, toon: Int) extern
 func drawSkinned(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emissive: Float, toon: Int) extern
-# Instanced G-buffer draw (grass epic #485): one draw for `count` copies of a
-# mesh. LOW-LEVEL — `records` is `count` * instanceRecordFloats fully built
-# DrawU entries (model, prevModel, colour, packed params), assembled in Rae by
-# swayModel + packInstanceRecord below. C only copies them and issues the draw;
-# it does no math. The reusable instancing primitive for vegetation, rocks,
-# crowds; grass uses it first.
-func drawRecords(mesh: Int, records: view Buffer(Float), count: Int) extern
+# Instanced G-buffer draw (grass epic #485, ported to Rae #502): one draw for
+# `count` copies of a mesh. `records` is `count` * instanceRecordFloats fully
+# built DrawU entries (model, prevModel, colour, packed params), assembled in
+# Rae by swayModel + packInstanceRecord below.
+#
+# This whole draw now happens IN RAE over the generated WebGPU bindings — no C
+# shim. Rae uploads the records straight into the draws storage buffer with
+# wgpuQueueWriteBuffer (zero-copy from the records pointer) and issues one
+# instanced wgpuRenderPassEncoderDrawIndexed. The draws buffer is the shared
+# per-frame instance array the single-draw path also fills (each draw uploads
+# its own slice now); Rae writes its slice at [base .. base+count) and advances
+# the cursor. The reusable instancing primitive for vegetation, rocks, crowds.
+func drawRecords(mesh: copy Int, records: copy Ptr, count: copy Int) pub {
+  if gbMeshReady(mesh: mesh) is 0 { ret }
+  let base: Int = gbDrawCount()
+  let remaining: Int = gbMaxDraws() - base
+  var n: Int = count
+  if n > remaining { n = remaining }
+  if n <= 0 { ret }
+
+  let pass: Ptr = gbPass()
+  let vbuf: Ptr = gbMeshVbuf(mesh: mesh)
+  let ibuf: Ptr = gbMeshIbuf(mesh: mesh)
+  let strideBytes: Int = instanceRecordFloats * 4
+
+  # Upload this field's records into the shared draws buffer at the base slot.
+  wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: gbDrawsBuffer(),
+    bufferOffset: (base * strideBytes) as UInt64, data: records,
+    size: (n * strideBytes) as UInt64)
+
+  # A skinned draw may have left its pipeline bound; restore the static one
+  # (which owns the draws storage buffer) before the instanced draw.
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: gbStaticPipeline())
+  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+    group: gbStaticBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder: pass, slot: 0 as UInt32,
+    buffer: vbuf, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: vbuf))
+  wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder: pass, buffer: ibuf,
+    format: WGPUIndexFormat_Uint32, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: ibuf))
+  wgpuRenderPassEncoderDrawIndexed(renderPassEncoder: pass,
+    indexCount: gbMeshIcount(mesh: mesh) as UInt32, instanceCount: n as UInt32,
+    firstIndex: 0 as UInt32, baseVertex: 0 as Int32, firstInstance: base as UInt32)
+  gbAdvanceDraws(count: n)
+}
+
+# Context accessors for the instanced draw (#502) — opaque frame handles + the
+# shared instance cursor, from the C geometry pass. See runtime_gpu3d_gbuffer.c.
+func gbPass() extern("rae_gb_pass") ret Ptr
+func gbStaticPipeline() extern("rae_gb_static_pipeline") ret Ptr
+func gbStaticBind() extern("rae_gb_static_bind") ret Ptr
+func gbDrawsBuffer() extern("rae_gb_draws_buffer") ret Ptr
+func gbMaxDraws() extern("rae_gb_max_draws") ret Int
+func gbDrawCount() extern("rae_gb_draw_count") ret Int
+func gbAdvanceDraws(count: Int) extern("rae_gb_advance_draws")
+func gbMeshReady(mesh: Int) extern("rae_gb_mesh_ready") ret Int
+func gbMeshVbuf(mesh: Int) extern("rae_gb_mesh_vbuf") ret Ptr
+func gbMeshIbuf(mesh: Int) extern("rae_gb_mesh_ibuf") ret Ptr
+func gbMeshIcount(mesh: Int) extern("rae_gb_mesh_icount") ret Int
 func drawMetaballs(packedBalls: view Buffer(Float), count: Int, packedColors: view Buffer(Float), smoothing: Float, camX: Float, camY: Float, camZ: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
 func sdfShutdown() extern
 func end() extern
