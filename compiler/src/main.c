@@ -2011,6 +2011,25 @@ static AstModule merge_module_graph(const ModuleGraph* graph) {
     tail = current;
   }
   merged.decls = head;
+  // Collect C header directives (`cheader "..."`) from every merged file so the
+  // backend emits their #includes once. Flattened like imports; deduped by path
+  // (general FFI, #497 — library-agnostic).
+  {
+    AstCHeader* hdr_head = NULL; AstCHeader* hdr_tail = NULL;
+    for (ModuleNode* node = graph->head; node; node = node->next) {
+      if (!node->module) continue;
+      for (AstCHeader* h = node->module->c_headers; h; h = h->next) {
+        bool dup = false;
+        for (AstCHeader* e = hdr_head; e; e = e->next) if (str_eq(e->path, h->path)) { dup = true; break; }
+        if (dup) continue;
+        AstCHeader* copy = arena_alloc(graph->arena, sizeof(AstCHeader));
+        copy->path = h->path; copy->next = NULL;
+        if (!hdr_head) hdr_head = copy; else hdr_tail->next = copy;
+        hdr_tail = copy;
+      }
+    }
+    merged.c_headers = hdr_head;
+  }
   return merged;
 }
 
