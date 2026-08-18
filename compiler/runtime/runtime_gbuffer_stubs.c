@@ -187,8 +187,20 @@ void rae_ext_gpu3d_shadowDrawSkinned(int64_t mesh, rae_Mat4* model){ (void)mesh;
 void rae_ext_gpu3d_shadowMetaballs(const float* packedBalls, int64_t count, float smoothing){
     (void)packedBalls; (void)count; (void)smoothing;
 }
-void rae_ext_gpu3d_shadowEnd(void) {}
 int64_t rae_ext_gpu3d_shadowDrawCount(void) { return 0; }
+/* Shadow cascade render moved to Rae (#504); accessors no-op without a GPU. */
+int64_t rae_sm_ready(void)               { return 0; }
+void rae_sm_upload_models(void)          {}
+int64_t rae_sm_cascade_count(void)       { return 0; }
+int64_t rae_sm_draw_count(void)          { return 0; }
+void* rae_sm_layer_view(int64_t c)       { (void)c; return (void*)0; }
+int64_t rae_sm_caster_ready(int64_t i, int64_t c) { (void)i; (void)c; return 0; }
+void* rae_sm_caster_pipeline(int64_t i)  { (void)i; return (void*)0; }
+void* rae_sm_caster_bind(int64_t i, int64_t c) { (void)i; (void)c; return (void*)0; }
+void* rae_sm_caster_vbuf(int64_t i)      { (void)i; return (void*)0; }
+void* rae_sm_caster_ibuf(int64_t i)      { (void)i; return (void*)0; }
+int64_t rae_sm_caster_icount(int64_t i)  { (void)i; return 0; }
+void rae_sm_draw_metaballs(int64_t c, void* passptr) { (void)c; (void)passptr; }
 void rae_ext_gpu3d_shadowShutdown(void) {}
 
 /* Skinning (#374). Stubbed for builds without the GPU backend. */
