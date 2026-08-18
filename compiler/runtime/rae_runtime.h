@@ -887,6 +887,24 @@ void* rae_gb_light_ubuf(void);
 int64_t rae_gb_light_bytes(void);
 void rae_gb_set_ao_pipeline(void* p);
 void rae_gb_set_ao_bind(void* b);
+/* Lighting pass in Rae (#504). */
+void rae_gb_light_upload(float camX, float camY, float camZ, float exposure,
+                         float sunX, float sunY, float sunZ,
+                         float sunR, float sunG, float sunB,
+                         float skyR, float skyG, float skyB,
+                         float gndR, float gndG, float gndB,
+                         float skyKind, float turbidity, float skyExposure,
+                         float sunSizeRad, float zenR, float zenG, float zenB,
+                         float bands, float horR, float horG, float horB, float discI);
+void* rae_gb_light_pipeline(void);
+void* rae_gb_lit_view(void);
+void* rae_gb_light_bind(void);
+void rae_gb_set_light_bind(void* b);
+void* rae_gb_shadow_frame_ubuf(void);
+int64_t rae_gb_shadow_frame_bytes(void);
+void* rae_gb_shadow_array_view(void);
+void* rae_gb_shadow_sampler(void);
+void rae_ext_gbuffer_skyHosekPush(int64_t index, float value);
 void* rae_gb_view_a(void);
 void* rae_gb_view_b(void);
 void* rae_gb_view_c(void);
