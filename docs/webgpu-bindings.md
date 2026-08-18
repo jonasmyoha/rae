@@ -104,6 +104,42 @@ bindings. A first-class `view [T]` span (pointer + length, resize-invalidated)
 is the recommended future language feature to make this fully type-safe; it is
 tracked, not built here.
 
+## Context bootstrap & auto-linking (#501)
+
+A program that imports the bindings now **auto-links** wgpu-native. The build's
+`uses_webgpu` detection (`compiler/src/main.c`) triggers on any module path
+containing `webgpu` (so the generated `webgpu/*` modules count) **or** any
+module declaring a `cheader` whose path mentions `wgpu`/`webgpu`. No manual
+`-I/-L/-lwgpu_native` flags are needed — `open webgpu/webgpu; wgpuGetVersion()`
+compiles, links, and runs on its own.
+
+The instance/adapter/device **request** is async (callback-driven) and any
+platform surface configuration is genuinely platform C, so that one-time
+bootstrap stays in the runtime. `lib/webgpu/context.rae` (hand-written, not
+generated) exposes it to Rae as opaque `Ptr`:
+
+| Rae | Returns | Notes |
+|---|---|---|
+| `webgpuBootstrap()` | `Int` | Creates instance/adapter/device/queue once (idempotent). `1` on success, `0` if no GPU. |
+| `webgpuDevice()` / `webgpuQueue()` | `Ptr` | Valid after a successful bootstrap. |
+| `webgpuAdapter()` / `webgpuInstance()` | `Ptr` | |
+| `webgpuPoll(wait: Int)` | | Advances the device event queue (map/submit callbacks). |
+
+The C symbols (`rae_wgpu_ctx_*`) are declared in `rae_runtime.h` under
+`RAE_HAS_WEBGPU`, so the generated C sees real prototypes (an implicit
+declaration would assume `int` and truncate the 64-bit handle). Everything
+downstream — `wgpuDeviceCreateBuffer`, `wgpuQueueWriteBuffer`, render passes —
+is a Rae call over the generated bindings; `context.rae` is the only
+non-generated glue and it holds **no** per-resource shim. Proven end-to-end by
+`compiler/tests/cases/629_webgpu_bootstrap` (bootstrap → Rae-constructed
+`WGPUBufferDescriptor` → `wgpuDeviceCreateBuffer` → zero-copy `wgpuQueueWriteBuffer`
+from a `List`'s `.data`).
+
+Descriptor construction note: a `c_struct` compound literal zero-inits omitted
+fields, so `WGPUBufferDescriptor { usage: …, size: … }` leaves `nextInChain`,
+`label`, and `mappedAtCreation` zeroed — a zeroed `WGPUStringView` label is
+"no label". That covers most descriptors without any null-`Ptr` helper.
+
 ## Known limitations (carried, not hidden)
 
 - **`UInt32` vs `Char32`** share `uint32_t`, so string interpolation formats a

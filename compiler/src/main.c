@@ -2354,7 +2354,10 @@ static bool build_c_backend_output(const char* entry_file,
   for (ModuleNode* node = graph.head; node; node = node->next) {
       // lib/webgpu.rae (raytracer-specific) OR lib/gpu.rae (generic compute) —
       // both need wgpu-native linked. strstr("gpu.rae") matches both filenames.
-      if (node->module_path && (strcmp(node->module_path, "webgpu") == 0 || strcmp(node->module_path, "gpu") == 0 ||
+      // The generated low-level bindings live under lib/webgpu/ (module paths
+      // "webgpu/webgpu", "webgpu/webgpu_types", …), so a plain substring match
+      // on "webgpu" catches every generated binding module (#501).
+      if (node->module_path && (strstr(node->module_path, "webgpu") || strcmp(node->module_path, "gpu") == 0 ||
                                 strstr(node->module_path, "gpu.rae") ||
                                 // gpu2d.rae presents through wgpu-native (its own render surface)
                                 strcmp(node->module_path, "gpu2d") == 0 || strstr(node->module_path, "gpu2d.rae") ||
@@ -2362,6 +2365,19 @@ static bool build_c_backend_output(const char* entry_file,
                                 strcmp(node->module_path, "gpu3d") == 0 || strstr(node->module_path, "gpu3d.rae"))) {
           uses_webgpu = true;
           break;
+      }
+  }
+  // General fallback: any module that declares a `cheader` for a wgpu-native
+  // header pulls in wgpu-native, even without going through a lib/webgpu module
+  // (e.g. a program that binds the C ABI directly). Keeps the detection
+  // library-driven rather than hard-coding module names.
+  if (!uses_webgpu) {
+      for (AstCHeader* hdr = merged.c_headers; hdr; hdr = hdr->next) {
+          if (!hdr->path.data) continue;
+          char* hpath = str_to_cstr(hdr->path);
+          bool is_wgpu = strstr(hpath, "wgpu") != NULL || strstr(hpath, "webgpu") != NULL;
+          free(hpath);
+          if (is_wgpu) { uses_webgpu = true; break; }
       }
   }
   if (out_uses_webgpu) *out_uses_webgpu = uses_webgpu;
