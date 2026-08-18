@@ -5,7 +5,14 @@
  * No behavior or ABI changes are intended here.
  */
 
-static void rae_g2d_begin_frame(WGPULoadOp load_op, double r, double g, double b, double a) {
+/* The gpu2d frame command lifecycle (begin/end) runs in Rae now (lib/gpu2d.rae,
+ * #504): Rae creates the encoder + the offscreen render pass and, on end,
+ * flushes + submits over the bindings. C keeps the per-frame batch-counter reset
+ * and the platform present/screenshot tail. rae_g2d_frame_reset zeroes the batch
+ * state at the top of a frame; the accessors hand Rae the offscreen view and let
+ * it store the encoder/pass so the draw batching (flush) and the present tail
+ * see the live frame. */
+void rae_g2d_frame_reset(void) {
     g_g2d_last_present_ok = 0;
     g_g2d_prim_count = 0;
     for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) g_g2d_text_count[i] = 0;
@@ -16,32 +23,14 @@ static void rae_g2d_begin_frame(WGPULoadOp load_op, double r, double g, double b
     g_g2d_frame_bind_n = 0;
     g_g2d_box_frame_buf_n = 0;
     for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) g_g2d_text_frame_buf_n[i] = 0;
-    if (!g_g2d_off_view) return;
-    /* Render into the persistent offscreen target (NOT the surface drawable),
-     * so a frame always renders regardless of window compositing. */
-    g_g2d_enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
-    WGPURenderPassColorAttachment ca; memset(&ca, 0, sizeof(ca));
-    ca.view = g_g2d_off_view;
-    ca.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
-    ca.loadOp = load_op;
-    ca.storeOp = WGPUStoreOp_Store;
-    ca.clearValue.r = r; ca.clearValue.g = g; ca.clearValue.b = b; ca.clearValue.a = a;
-    WGPURenderPassDescriptor rp; memset(&rp, 0, sizeof(rp));
-    rp.colorAttachmentCount = 1;
-    rp.colorAttachments = &ca;
-    g_g2d_pass = wgpuCommandEncoderBeginRenderPass(g_g2d_enc, &rp);
 }
-
-void rae_ext_gpu2d_beginFrame(float r, float g, float b, float a){
-    rae_g2d_begin_frame(WGPULoadOp_Clear, r, g, b, a);
+void rae_g2d_set_frame(void* enc, void* pass) {
+    g_g2d_enc = (WGPUCommandEncoder)enc;
+    g_g2d_pass = (WGPURenderPassEncoder)pass;
 }
-
-void rae_ext_gpu2d_beginFrameLoad(void) {
-    /* The previous pass must have initialized the persistent offscreen color
-     * target. This pass preserves it and composites 2D/UI before the one
-     * endFrame screenshot/present operation. */
-    rae_g2d_begin_frame(WGPULoadOp_Load, 0.0, 0.0, 0.0, 0.0);
-}
+void* rae_g2d_pass_get(void)    { return (void*)g_g2d_pass; }
+void* rae_g2d_encoder_get(void) { return (void*)g_g2d_enc; }
+int64_t rae_g2d_frame_active(void) { return g_g2d_pass ? 1 : 0; }
 
 /* Headless verification: copy the just-rendered surface texture back to a
  * mapped buffer and save it as a BMP. Called from endFrame after submit while
@@ -101,16 +90,14 @@ static void rae_g2d_save_screenshot(const char* path) {
     wgpuBufferRelease(staging);
 }
 
-void rae_ext_gpu2d_endFrame(void) {
-    /* One frame presented -> advance the deterministic clock (no-op unless
-     * RAE_FIXED_DT is set). Placed at frame end so all reads within a
-     * frame observe the same time. */
-    rae_g2d_tick_virtual_clock();
-    if (!g_g2d_pass) return;
-    rae_ext_gpu2d_flush();
-    wgpuRenderPassEncoderEnd(g_g2d_pass);
-    WGPUCommandBuffer cb = wgpuCommandEncoderFinish(g_g2d_enc, NULL);
-    wgpuQueueSubmit(g_wgpu_queue, 1, &cb);
+/* Called by Rae's endFrame AFTER it has flushed, ended the pass, finished the
+ * command buffer, submitted it and released the encoder/pass. Advances the
+ * deterministic clock, releases this frame's transient bind groups + buffers,
+ * clears the (already-released) encoder/pass globals, and does the platform
+ * present + optional headless screenshot. All of this is platform/lifetime
+ * bookkeeping that stays C. */
+void rae_g2d_tick(void) { rae_g2d_tick_virtual_clock(); }
+void rae_g2d_present_and_cleanup(void) {
     for (int i = 0; i < g_g2d_frame_bind_n; i++) wgpuBindGroupRelease(g_g2d_frame_binds[i]);
     g_g2d_frame_bind_n = 0;
     for (int i = 0; i < g_g2d_frame_buf_n; i++) wgpuBufferRelease(g_g2d_frame_bufs[i]);
@@ -118,9 +105,8 @@ void rae_ext_gpu2d_endFrame(void) {
     /* Per-image bind groups are cached by draw slot + texture handle.
      * They stay alive across frames and are released at gpu2d shutdown. */
     g_g2d_img_frame_bind_n = 0;
-    wgpuCommandBufferRelease(cb);
-    wgpuRenderPassEncoderRelease(g_g2d_pass); g_g2d_pass = NULL;
-    wgpuCommandEncoderRelease(g_g2d_enc); g_g2d_enc = NULL;
+    g_g2d_pass = NULL;
+    g_g2d_enc = NULL;
 
     /* Headless screenshot reads the offscreen target — works even when the
      * surface can't vend a drawable. */
