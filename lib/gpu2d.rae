@@ -14,6 +14,8 @@
 # Importing this module links both. Window globals are shared with lib/sdl3.rae,
 # so sdl3 input functions (getMouseX/isKeyDown/…) work against this window.
 import core
+open webgpu/webgpu
+import webgpu/context
 
 # --- Window + surface ----------------------------------------------------
 # Open a GPU-presenting window (Metal layer wrapped as a wgpu surface) and
@@ -93,17 +95,83 @@ func waitEvents(timeoutSec: Float) extern
 func closeWindow() extern
 
 # --- Frame ---------------------------------------------------------------
+# The frame command lifecycle runs here in Rae (#504): create the encoder +
+# offscreen render pass, and on end flush the batched primitives, submit, and
+# hand the platform present/screenshot tail back to C. C keeps the per-frame
+# batch-counter reset (g2dFrameReset), owns the persistent offscreen colour
+# target (g2dOffView), packs primitives (flush), and does the present tail.
+func g2dFrameReset() extern("rae_g2d_frame_reset")
+func g2dSetFrame(enc: Ptr, pass: Ptr) extern("rae_g2d_set_frame")
+func g2dPass() extern("rae_g2d_pass_get") ret Ptr
+func g2dEncoder() extern("rae_g2d_encoder_get") ret Ptr
+func g2dFrameActive() extern("rae_g2d_frame_active") ret Int
+func g2dPresentCleanup() extern("rae_g2d_present_and_cleanup")
+func g2dTick() extern("rae_g2d_tick")
+func g2dOffView() extern("rae_g2d_off_view") ret Ptr
+func g2dOffViewReady() extern("rae_g2d_off_view_ready") ret Int
+func g2dSubmit(cmd: Ptr) extern("rae_gb_submit")
+
+# Shared: create the command encoder and begin the offscreen colour pass with
+# the given load op + clear colour, then hand the encoder/pass to C so flush()
+# and the present tail see the live frame.
+func g2dOpenPass(loadOp: copy Int32, r: copy Float, g: copy Float, b: copy Float, a: copy Float) {
+  let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
+  let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
+  let att: WGPURenderPassColorAttachment = {
+    view_: g2dOffView(), depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32,
+    loadOp: loadOp, storeOp: WGPUStoreOp_Store,
+    clearValue: { r: r as Float64, g: g as Float64, b: b as Float64, a: a as Float64 }
+  }
+  # set() is a no-op past the list length, so grow to one slot first (as
+  # gbuffer.rae does) before writing the single colour attachment.
+  loop gG2dColorAtts.length < 1 { gG2dColorAtts.add(value: { depthSlice: 0 as UInt32 }) }
+  gG2dColorAtts.set(index: 0, value: att)
+  let rpDesc: WGPURenderPassDescriptor = {
+    colorAttachmentCount: 1 as UInt64,
+    colorAttachments: gG2dColorAtts.data
+  }
+  let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
+  g2dSetFrame(enc: enc, pass: pass)
+}
+
+# Reused one-element attachment list; its .data is the C array pointer the pass
+# descriptor references (must outlive the descriptor, so it is module-level).
+var gG2dColorAtts: List(WGPURenderPassColorAttachment) = createList(WGPURenderPassColorAttachment, cap: 1)
+
 # Acquire the next surface texture and begin a render pass that clears it to
 # the given linear RGBA colour (components 0..1). Must be paired with endFrame.
-func beginFrame(r: Float, g: Float, b: Float, a: Float) extern
+func beginFrame(r: copy Float, g: copy Float, b: copy Float, a: copy Float) {
+  g2dFrameReset()
+  if g2dOffViewReady() is 0 { ret }
+  g2dOpenPass(loadOp: WGPULoadOp_Clear, r: r, g: g, b: b, a: a)
+}
 
 # Begin a 2D/UI overlay pass that preserves the persistent offscreen color
 # target produced by a preceding renderer pass. Pair with endFrame; this is the
 # only pass that should screenshot/present the composed frame.
-func beginFrameLoad() extern
+func beginFrameLoad() {
+  g2dFrameReset()
+  if g2dOffViewReady() is 0 { ret }
+  g2dOpenPass(loadOp: WGPULoadOp_Load, r: 0.0, g: 0.0, b: 0.0, a: 0.0)
+}
 
 # Finish the render pass, submit the command buffer, and present the frame.
-func endFrame() extern
+func endFrame() {
+  # Advance the deterministic clock every frame, even one with no drawable yet.
+  g2dTick()
+  if g2dFrameActive() is 0 { ret }
+  flush()
+  let pass: Ptr = g2dPass()
+  let enc: Ptr = g2dEncoder()
+  wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
+  let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
+  let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
+  g2dSubmit(cmd: cmd)
+  wgpuCommandBufferRelease(commandBuffer: cmd)
+  wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
+  wgpuCommandEncoderRelease(commandEncoder: enc)
+  g2dPresentCleanup()
+}
 
 # True when the most recent endFrame copied to a surface drawable and presented.
 # Startup can render offscreen before the OS has a drawable; apps that skip idle

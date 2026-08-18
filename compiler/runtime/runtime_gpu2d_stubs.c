@@ -35,9 +35,14 @@ void rae_ext_gpu2d_setDesignResolution(float w, float h, int64_t fit){ (void)w; 
 float rae_ext_gpu2d_designWidth(void){ return 0.0; }
 float rae_ext_gpu2d_designHeight(void){ return 0.0; }
 float rae_ext_gpu2d_dpr(void){ return 1.0; }
-void rae_ext_gpu2d_beginFrame(float r, float g, float b, float a){ (void)r; (void)g; (void)b; (void)a; }
-void rae_ext_gpu2d_beginFrameLoad(void) {}
-void rae_ext_gpu2d_endFrame(void) {}
+/* Frame lifecycle moved to Rae (#504); these back it, no-op without a GPU. */
+void rae_g2d_frame_reset(void) {}
+void rae_g2d_set_frame(void* enc, void* pass){ (void)enc; (void)pass; }
+void* rae_g2d_pass_get(void)    { return (void*)0; }
+void* rae_g2d_encoder_get(void) { return (void*)0; }
+int64_t rae_g2d_frame_active(void) { return 0; }
+void rae_g2d_present_and_cleanup(void) {}
+void rae_g2d_tick(void) {}
 rae_Bool rae_ext_gpu2d_lastPresentOk(void) { return 0; }
 void rae_ext_gpu2d_flush(void) {}
 void rae_ext_gpu2d_closeWindow(void) {}
