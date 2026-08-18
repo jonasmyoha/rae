@@ -102,6 +102,22 @@ static int rae_wgpu_init(void) {
     return 1;
 }
 
+/* ---- Context bootstrap accessors (#501) -----------------------------------
+ * The async instance/adapter/device REQUEST (and any platform surface config)
+ * genuinely must stay in C — WebGPU's request calls are callback-driven and
+ * passing a Rae closure to C is a separate future feature. These functions run
+ * that bootstrap once and hand the resulting handles to Rae as opaque Ptr, so
+ * every downstream resource call (createBuffer/queueWriteBuffer/…) is made from
+ * Rae over the generated bindings, not from a C shim. Symbols are bound in Rae
+ * via extern("…") from lib/webgpu/context.rae. */
+int   rae_wgpu_ctx_bootstrap(void) { return rae_wgpu_init(); }
+void* rae_wgpu_ctx_device(void)     { return (void*)g_wgpu_dev; }
+void* rae_wgpu_ctx_queue(void)      { return (void*)g_wgpu_queue; }
+void* rae_wgpu_ctx_adapter(void)    { return (void*)g_wgpu_adapter; }
+void* rae_wgpu_ctx_instance(void)   { return (void*)g_wgpu_inst; }
+/* Advance the device's event queue (map/submit callbacks). wait!=0 blocks. */
+void  rae_wgpu_ctx_poll(int wait)   { rae_wgpu_poll(wait); }
+
 /* scene: sceneLen f64 (camera 19 + spheres*10) -> narrowed to f32 for the GPU.
  * fb: width*height int64 written as packed 0xRRGGBB. wgsl: shader source. */
 void rae_ext_webgpu_raytrace(const float* scene, int64_t sceneLen, int64_t* fb,

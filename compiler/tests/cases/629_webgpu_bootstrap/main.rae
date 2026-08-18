@@ -1,0 +1,33 @@
+# #501: WebGPU device/queue bootstrap over the generated low-level bindings.
+#
+# Proves the full Rae-over-bindings path with NO renderer-specific C shim:
+#   - webgpuBootstrap() runs the async instance/adapter/device REQUEST in C
+#     (the one part that must stay C) and hands back the handles as opaque Ptr.
+#   - wgpuDeviceCreateBuffer is called from Rae with a Rae-constructed
+#     WGPUBufferDescriptor c_struct (omitted fields zero-init: nextInChain,
+#     label, mappedAtCreation).
+#   - wgpuQueueWriteBuffer uploads zero-copy straight from a List's .data.
+#
+# Needs wgpu-native + a GPU adapter (Metal/Vulkan/D3D12), same as the
+# 106_mobile_ui headless screenshot runs. Compiled-target only.
+open webgpu/webgpu
+import webgpu/context
+
+func main() {
+  let ready: Int = webgpuBootstrap()
+  log("bootstrap {ready}")
+
+  let device: Ptr = webgpuDevice()
+  let queue: Ptr = webgpuQueue()
+
+  let desc: WGPUBufferDescriptor = {
+    usage: WGPUBufferUsage_CopyDst,
+    size: 32
+  }
+  let buf: Ptr = wgpuDeviceCreateBuffer(device: device, descriptor: desc)
+
+  let payload: List(Int) = [1, 2, 3, 4]
+  wgpuQueueWriteBuffer(queue: queue, buffer: buf, bufferOffset: 0, data: payload.data, size: 32)
+  webgpuPoll(wait: 1)
+  log("wrote 32 bytes")
+}
