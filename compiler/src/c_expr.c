@@ -14,6 +14,37 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "lexer.h"
+
+// A c_struct field whose real C name is a Rae reserved keyword is escaped by the
+// bindings generator with a single trailing '_' (WGPU*.view -> view_). safe_name
+// appends '_' ONLY for exact keyword matches, so stripping one trailing '_' when
+// the remainder is a keyword recovers the true C field name exactly, and can
+// never disturb a genuine field ending in '_' (its base is not a keyword).
+// `is_c_struct` gates this so ordinary Rae structs are untouched.
+static Str c_struct_field_c_name(Str name, bool is_c_struct) {
+    if (is_c_struct && name.len >= 2 && name.data[name.len - 1] == '_') {
+        Str base = { name.data, name.len - 1 };
+        if (lookup_keyword(base) != TOK_IDENT) return base;
+    }
+    return name;
+}
+
+// True when a type ref denotes a c_struct (its declaration carries `c_struct`).
+static bool type_ref_is_c_struct(CFuncContext* ctx, const AstTypeRef* tr) {
+    if (!tr || !ctx) return false;
+    if (tr->resolved_type && tr->resolved_type->kind == TYPE_STRUCT
+        && tr->resolved_type->as.structure.decl
+        && tr->resolved_type->as.structure.decl->kind == AST_DECL_TYPE)
+        return has_property(tr->resolved_type->as.structure.decl->as.type_decl.properties, "c_struct");
+    Str base = {0};
+    if (tr->parts) base = tr->parts->text;
+    else if (tr->resolved_type) base = tr->resolved_type->name;
+    if (base.len == 0 || !ctx->module) return false;
+    const AstDecl* decl = find_type_decl(ctx, ctx->module, base);
+    return decl && decl->kind == AST_DECL_TYPE
+        && has_property(decl->as.type_decl.properties, "c_struct");
+}
 
 // From c_stmt.c — counts identifier references to `name` in the
 // body of `fd`. Used by Phase 2 deep-copy to decide whether a
@@ -563,7 +594,8 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.member.object);
         bool use_arrow = (obj_tr && (obj_tr->is_view || obj_tr->is_mod));
         emit_expr(ctx, expr->as.member.object, out, PREC_CALL, true, false);
-        fprintf(out, "%s%.*s", use_arrow ? "->" : ".", (int)expr->as.member.member.len, expr->as.member.member.data);
+        Str fld = c_struct_field_c_name(expr->as.member.member, type_ref_is_c_struct(ctx, obj_tr));
+        fprintf(out, "%s%.*s", use_arrow ? "->" : ".", (int)fld.len, fld.data);
         break;
     }
     case AST_EXPR_INDEX: {
@@ -687,8 +719,11 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         fprintf(out, "{ ");
         bool saved_has_exp = ctx->has_expected_type;
         AstTypeRef saved_exp = ctx->expected_type;
+        bool lit_is_c_struct = struct_decl && struct_decl->kind == AST_DECL_TYPE
+            && has_property(struct_decl->as.type_decl.properties, "c_struct");
         for (const AstObjectField* f = expr->as.object_literal.fields; f; f = f->next) {
-            fprintf(out, ".%.*s = ", (int)f->name.len, f->name.data);
+            Str litfld = c_struct_field_c_name(f->name, lit_is_c_struct);
+            fprintf(out, ".%.*s = ", (int)litfld.len, litfld.data);
             // Look up the field's declared type and use it as expected_type.
             const AstTypeRef* field_tr = NULL;
             if (struct_decl && struct_decl->kind == AST_DECL_TYPE) {

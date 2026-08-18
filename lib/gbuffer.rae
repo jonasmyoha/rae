@@ -56,8 +56,82 @@ open math3d
 open webgpu/webgpu
 import webgpu/context
 
-# ----- raw C ABI (implementation detail; prefer the typed API below) ---
-func begin(viewProj: view Mat4, clearR: Float, clearG: Float, clearB: Float) extern
+# ----- geometry-pass begin: frame prep (C) + render pass (Rae) (#503) --------
+# C preps the frame — lazily creates pipeline/targets, resets counters, builds
+# and uploads the TAA-jittered frame uniform (stateful CPU math) — and returns 1
+# when ready. Everything after (the command encoder, the render pass with its 3
+# G-buffer colour attachments + depth, and binding the static pipeline) is built
+# in Rae over the generated bindings.
+func gbFramePrep(viewProj: view Mat4, clearR: Float, clearG: Float, clearB: Float) extern("rae_gb_frame_prep") ret Int
+func gbViewA() extern("rae_gb_view_a") ret Ptr
+func gbViewB() extern("rae_gb_view_b") ret Ptr
+func gbViewC() extern("rae_gb_view_c") ret Ptr
+func gbViewDepth() extern("rae_gb_view_depth") ret Ptr
+func gbMotionZero() extern("rae_gb_motion_zero") ret Float
+func gbSetFrame(enc: Ptr, pass: Ptr) extern("rae_gb_set_frame")
+
+# Reusable attachment arrays (#503) — module-level so begin() never allocates
+# per frame; filled once to length, then rewritten in place each frame.
+var gGbColorAtts: List(WGPURenderPassColorAttachment) = createList(WGPURenderPassColorAttachment, cap: 3)
+var gGbDepthAtt: List(WGPURenderPassDepthStencilAttachment) = createList(WGPURenderPassDepthStencilAttachment, cap: 1)
+
+# Placeholder entries carry one explicit (zeroed) field — an empty {} is not a
+# valid C initializer. They are rewritten in full by begin() every frame.
+func ensureGbAttachments() {
+  loop gGbColorAtts.length < 3 { gGbColorAtts.add(value: { depthSlice: 0 as UInt32 }) }
+  loop gGbDepthAtt.length < 1 { gGbDepthAtt.add(value: { depthReadOnly: 0 as UInt32 }) }
+}
+
+func begin(viewProj: view Mat4, clearR: copy Float, clearG: copy Float, clearB: copy Float) pub {
+  if gbFramePrep(viewProj: viewProj, clearR: clearR, clearG: clearG, clearB: clearB) is 0 { ret }
+  ensureGbAttachments()
+
+  let undefinedSlice: UInt32 = WGPU_DEPTH_SLICE_UNDEFINED as UInt32
+  let motionZero: Float64 = gbMotionZero() as Float64
+
+  # A: octahedral normal + shading mode. (0.5, 0.5) decodes to +Z, mode 0 = lit.
+  let attA: WGPURenderPassColorAttachment = {
+    view_: gbViewA(), depthSlice: undefinedSlice,
+    loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store,
+    clearValue: { r: 0.5, g: 0.5, b: 0.0, a: 0.0 }
+  }
+  # B: albedo, cleared to the sky/background colour.
+  let attB: WGPURenderPassColorAttachment = {
+    view_: gbViewB(), depthSlice: undefinedSlice,
+    loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store,
+    clearValue: { r: clearR as Float64, g: clearG as Float64, b: clearB as Float64, a: 1.0 }
+  }
+  # C: material/motion. Motion clears to the biased zero (no movement).
+  let attC: WGPURenderPassColorAttachment = {
+    view_: gbViewC(), depthSlice: undefinedSlice,
+    loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store,
+    clearValue: { r: motionZero, g: motionZero, b: 0.0, a: 1.0 }
+  }
+  gGbColorAtts.set(index: 0, value: attA)
+  gGbColorAtts.set(index: 1, value: attB)
+  gGbColorAtts.set(index: 2, value: attC)
+
+  # Depth: reverse-Z, so the far plane clears to 0 (#367).
+  let depthAtt: WGPURenderPassDepthStencilAttachment = {
+    view_: gbViewDepth(),
+    depthLoadOp: WGPULoadOp_Clear, depthStoreOp: WGPUStoreOp_Store,
+    depthClearValue: 0.0
+  }
+  gGbDepthAtt.set(index: 0, value: depthAtt)
+
+  let rpDesc: WGPURenderPassDescriptor = {
+    colorAttachmentCount: 3 as UInt64,
+    colorAttachments: gGbColorAtts.data,
+    depthStencilAttachment: gGbDepthAtt.data
+  }
+  let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
+  let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
+  let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: gbStaticPipeline())
+  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+    group: gbStaticBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  gbSetFrame(enc: enc, pass: pass)
+}
 
 # Shared tail of every G-buffer draw (#502/#503): upload `count` DrawU records
 # (already at `records`) into the draws storage buffer at slot `base`, bind the
@@ -491,7 +565,7 @@ func end() pub {
   let pass: Ptr = gbPass()
   let enc: Ptr = gbEncoder()
   wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
-  let cbDesc: WGPUCommandBufferDescriptor = { }
+  let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
   let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
   gbSubmit(cmd: cmd)
   wgpuCommandBufferRelease(commandBuffer: cmd)
