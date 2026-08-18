@@ -1,0 +1,10 @@
+# `extern("symbol")` binds a Rae extern directly to an exact C ABI symbol
+# (general FFI, #497) — here libc's `llabs` — with NO rae_ext_ prefix and NO
+# C shim. This is the foundation the generated WebGPU/SDL3 bindings stand on:
+# Rae code calls the real C entry point through a low-level binding.
+func absInt64(x: Int) extern("llabs") ret Int
+
+func main() {
+  log("{absInt64(x: 0 - 42)}")
+  log("{absInt64(x: 42)}")
+}

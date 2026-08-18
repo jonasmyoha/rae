@@ -1,0 +1,28 @@
+# UInt8/UInt16 (and signed Int8/Int16) are first-class Rae primitives with
+# exact C widths (general FFI, #497), so a generated C-ABI struct matches its
+# C definition byte-for-byte. Validated two ways that avoid the Char32/UInt32
+# formatting overlap: sizeof pins each width, and values round-trip through a
+# struct and widen back to Int (200 > i8 range, 40000 > i16, 3e9 > i32).
+type Widths {
+  small: UInt8
+  medium: UInt16
+  large: UInt32
+}
+
+func report(label: view String, actual: copy Int, want: copy Int) {
+  if actual is want {
+    log("{label}: ok")
+  } else {
+    log("{label}: FAIL got {actual} want {want}")
+  }
+}
+
+func main() {
+  report(label: "sizeof u8", actual: sizeof(UInt8), want: 1)
+  report(label: "sizeof u16", actual: sizeof(UInt16), want: 2)
+  report(label: "sizeof u32", actual: sizeof(UInt32), want: 4)
+  let w: Widths = { small: 200, medium: 40000, large: 3000000000 }
+  report(label: "val u8", actual: w.small, want: 200)
+  report(label: "val u16", actual: w.medium, want: 40000)
+  report(label: "val u32", actual: w.large, want: 3000000000)
+}

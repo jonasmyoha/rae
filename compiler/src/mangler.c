@@ -53,8 +53,12 @@ const char* map_rae_type_to_c(Str type_name) {
   if (str_eq_cstr(type_name, "Void")) return "void";
   if (str_eq_cstr(type_name, "Int64") || str_eq_cstr(type_name, "Int")) return "int64_t";
   if (str_eq_cstr(type_name, "Int32")) return "int32_t";
+  if (str_eq_cstr(type_name, "Int16")) return "int16_t";
+  if (str_eq_cstr(type_name, "Int8")) return "int8_t";
   if (str_eq_cstr(type_name, "UInt64")) return "uint64_t";
   if (str_eq_cstr(type_name, "UInt32")) return "uint32_t";
+  if (str_eq_cstr(type_name, "UInt16")) return "uint16_t";
+  if (str_eq_cstr(type_name, "UInt8")) return "uint8_t";
   if (str_eq_cstr(type_name, "Id")) return "int64_t";
   if (str_eq_cstr(type_name, "Key")) return "rae_String";
   /* Float IS Float32 (f32); Float64 is the distinct high-precision type.
@@ -78,10 +82,14 @@ bool is_primitive_type(Str type_name) {
            str_eq_cstr(type_name, "void") || 
            str_eq_cstr(type_name, "Int64") || 
            str_eq_cstr(type_name, "Int") || 
-           str_eq_cstr(type_name, "Int32") || 
-           str_eq_cstr(type_name, "UInt64") || 
-           str_eq_cstr(type_name, "UInt32") || 
-           str_eq_cstr(type_name, "Id") || 
+           str_eq_cstr(type_name, "Int32") ||
+           str_eq_cstr(type_name, "Int16") ||
+           str_eq_cstr(type_name, "Int8") ||
+           str_eq_cstr(type_name, "UInt64") ||
+           str_eq_cstr(type_name, "UInt32") ||
+           str_eq_cstr(type_name, "UInt16") ||
+           str_eq_cstr(type_name, "UInt8") ||
+           str_eq_cstr(type_name, "Id") ||
            str_eq_cstr(type_name, "Key") || 
            str_eq_cstr(type_name, "Float64") || 
            str_eq_cstr(type_name, "Float") || 
@@ -420,6 +428,16 @@ static size_t mangle_func_prefix(CompilerContext* ctx, const AstFuncDecl* func,
 const char* rae_mangle_function(CompilerContext* ctx, const AstFuncDecl* func) {
     if (!func) return "unknown";
     if (func->specialization_args) return rae_mangle_specialized_function(ctx, func, func->specialization_args);
+    // Explicit C ABI symbol via `extern("name")` (general FFI, #497) wins over
+    // every default scheme below: the binding names a real C entry point
+    // directly (wgpuDeviceCreateBuffer, SDL_CreateWindow, …) with no rae_ext_
+    // prefix and no shim. Only set on externs by the parser.
+    if (func->is_extern && func->extern_symbol) {
+        size_t n = strlen(func->extern_symbol);
+        char* res = arena_alloc(ctx->ast_arena, n + 1);
+        memcpy(res, func->extern_symbol, n + 1);
+        return res;
+    }
     // The raylib-name hijack (`drawText` -> `rae_ext_drawText`) is ONLY for
     // raylib EXTERN bindings. A *defined* Rae function (has a body) that merely
     // shares a name with a raylib builtin must NOT be mapped to the raylib C
