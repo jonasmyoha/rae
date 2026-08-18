@@ -27,17 +27,11 @@ _Static_assert(sizeof(rae_Mat4) == 16 * sizeof(float),
 void rae_ext_gbuffer_begin(rae_Mat4* viewProj, float clearR, float clearG, float clearB){
     (void)viewProj; (void)clearR; (void)clearG; (void)clearB;
 }
-void rae_ext_gbuffer_draw(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
-                          float r, float g, float b,
-                          float metallic, float roughness, float emissive,
-                          int64_t toon){
-    (void)mesh; (void)model; (void)prevModel; (void)r; (void)g; (void)b;
-    (void)metallic; (void)roughness; (void)emissive; (void)toon;
-}
-/* Instanced draw moved to Rae (lib/gbuffer.rae:drawRecords, #502); it calls
- * these context accessors, so builds without the real geometry pass need
- * no-op versions. mesh_ready returns 0, so the Rae drawRecords early-returns
- * and issues no GPU work. */
+/* The static AND skinned single draws, plus the instanced draw, now run in Rae
+ * (lib/gbuffer.rae: draw / drawSkinned / drawRecords, #502/#503); they call
+ * these context accessors, so builds without the real geometry pass need no-op
+ * versions. mesh_ready / skin_ready return 0, so the Rae draws early-return and
+ * issue no GPU work. */
 void* rae_gb_pass(void)                 { return (void*)0; }
 void* rae_gb_static_pipeline(void)      { return (void*)0; }
 void* rae_gb_static_bind(void)          { return (void*)0; }
@@ -49,13 +43,12 @@ int64_t rae_gb_mesh_ready(int64_t mesh) { (void)mesh; return 0; }
 void* rae_gb_mesh_vbuf(int64_t mesh)    { (void)mesh; return (void*)0; }
 void* rae_gb_mesh_ibuf(int64_t mesh)    { (void)mesh; return (void*)0; }
 int64_t rae_gb_mesh_icount(int64_t mesh){ (void)mesh; return 0; }
-void rae_ext_gbuffer_drawSkinned(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
-                                 float r, float g, float b,
-                                 float metallic, float roughness, float emissive,
-                                 int64_t toon){
-    (void)mesh; (void)model; (void)prevModel; (void)r; (void)g; (void)b;
-    (void)metallic; (void)roughness; (void)emissive; (void)toon;
-}
+void* rae_gb_skin_pipeline(void)        { return (void*)0; }
+void* rae_gb_skin_bind(void)            { return (void*)0; }
+int64_t rae_gb_skin_ready(int64_t mesh) { (void)mesh; return 0; }
+void* rae_gb_skin_vbuf(int64_t mesh)    { (void)mesh; return (void*)0; }
+void* rae_gb_skin_ibuf(int64_t mesh)    { (void)mesh; return (void*)0; }
+int64_t rae_gb_skin_icount(int64_t mesh){ (void)mesh; return 0; }
 void rae_ext_gbuffer_drawMetaballs(const float* packedBalls, int64_t count,
                                    const float* packedColors, float smoothing,
                                    float camX, float camY, float camZ,
