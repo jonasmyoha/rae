@@ -24,9 +24,12 @@ _Static_assert(sizeof(rae_Mat4) == 16 * sizeof(float),
                "Rae Mat4 must stay 16 contiguous floats for the gpu3d extern boundary");
 #endif
 
-int64_t rae_gb_frame_prep(rae_Mat4* viewProj, float clearR, float clearG, float clearB){
+int64_t rae_gb_prepare(void){ return 0; }
+int64_t rae_gb_frame_uniform(rae_Mat4* viewProj, float clearR, float clearG, float clearB){
     (void)viewProj; (void)clearR; (void)clearG; (void)clearB; return 0;
 }
+void rae_gb_set_frame_ubuf(void* buf)   { (void)buf; }
+void rae_gb_set_draws_buffer(void* buf) { (void)buf; }
 void* rae_gb_view_a(void)     { return (void*)0; }
 void* rae_gb_view_b(void)     { return (void*)0; }
 void* rae_gb_view_c(void)     { return (void*)0; }
