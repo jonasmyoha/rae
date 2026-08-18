@@ -176,8 +176,102 @@ func ensureGbAttachments() {
   loop gGbDepthAtt.length < 1 { gGbDepthAtt.add(value: { depthReadOnly: 0 as UInt32 }) }
 }
 
+# ----- render pipelines + WGSL shader modules (#503) -------------------------
+# The shaders stay as source: C exposes the WGSL text + entry-point names, Rae
+# builds the modules and pipelines over the bindings.
+func gbWgsl() extern("rae_gb_wgsl") ret Ptr
+func gbSkinWgsl() extern("rae_gb_skin_wgsl") ret Ptr
+func gbEntryVs() extern("rae_gb_entry_vs") ret Ptr
+func gbEntryFs() extern("rae_gb_entry_fs") ret Ptr
+func gbSetPipeline(pipeline: Ptr) extern("rae_gb_set_pipeline")
+func gbSetSkinPipeline(pipeline: Ptr) extern("rae_gb_set_skin_pipeline")
+
+var gPipelinesMade: Bool = false
+
+# WGSL text -> shader module. The chained WGPUShaderSourceWGSL lives in a
+# one-element List so .data gives its address for nextInChain (chain is the
+# struct's first field, so &struct == &chain). createShaderModule is
+# synchronous, so the List outlives the call.
+func makeShaderModule(wgsl: copy Ptr) ret Ptr {
+  var srcList: List(WGPUShaderSourceWGSL) = createList(WGPUShaderSourceWGSL, cap: 1)
+  srcList.add(value: {
+    chain: { sType: WGPUSType_ShaderSourceWGSL },
+    code: { data: wgsl, length: WGPU_STRLEN }
+  })
+  let desc: WGPUShaderModuleDescriptor = { nextInChain: srcList.data }
+  ret wgpuDeviceCreateShaderModule(device: webgpuDevice(), descriptor: desc)
+}
+
+# One G-buffer render pipeline: shared 3 colour targets + reverse-Z depth, with
+# the caller's shader module and vertex layout. Every array/pointer descriptor
+# member is a List; .data gives the pointer, and the Lists outlive the
+# synchronous createRenderPipeline.
+func makeGbPipeline(shaderMod: copy Ptr, attrs: mod List(WGPUVertexAttribute), stride: copy Int) ret Ptr {
+  var vbls: List(WGPUVertexBufferLayout) = createList(WGPUVertexBufferLayout, cap: 1)
+  vbls.add(value: {
+    stepMode: WGPUVertexStepMode_Vertex, arrayStride: stride as UInt64,
+    attributeCount: attrs.length as UInt64, attributes: attrs.data
+  })
+  var targets: List(WGPUColorTargetState) = createList(WGPUColorTargetState, cap: 3)
+  targets.add(value: { format: WGPUTextureFormat_RGB10A2Unorm, writeMask: WGPUColorWriteMask_All })
+  targets.add(value: { format: WGPUTextureFormat_RGBA8Unorm, writeMask: WGPUColorWriteMask_All })
+  targets.add(value: { format: WGPUTextureFormat_RGBA8Unorm, writeMask: WGPUColorWriteMask_All })
+  var frags: List(WGPUFragmentState) = createList(WGPUFragmentState, cap: 1)
+  frags.add(value: {
+    module: shaderMod, entryPoint: { data: gbEntryFs(), length: WGPU_STRLEN },
+    targetCount: 3 as UInt64, targets: targets.data
+  })
+  var depths: List(WGPUDepthStencilState) = createList(WGPUDepthStencilState, cap: 1)
+  depths.add(value: {
+    format: WGPUTextureFormat_Depth32Float,
+    depthWriteEnabled: WGPUOptionalBool_True,
+    depthCompare: WGPUCompareFunction_Greater,
+    stencilFront: { compare: WGPUCompareFunction_Always, failOp: WGPUStencilOperation_Keep, depthFailOp: WGPUStencilOperation_Keep, passOp: WGPUStencilOperation_Keep },
+    stencilBack: { compare: WGPUCompareFunction_Always, failOp: WGPUStencilOperation_Keep, depthFailOp: WGPUStencilOperation_Keep, passOp: WGPUStencilOperation_Keep },
+    stencilReadMask: 4294967295 as UInt32, stencilWriteMask: 4294967295 as UInt32
+  })
+  let desc: WGPURenderPipelineDescriptor = {
+    vertex: {
+      module: shaderMod, entryPoint: { data: gbEntryVs(), length: WGPU_STRLEN },
+      bufferCount: 1 as UInt64, buffers: vbls.data
+    },
+    primitive: {
+      topology: WGPUPrimitiveTopology_TriangleList,
+      frontFace: WGPUFrontFace_CCW, cullMode: WGPUCullMode_Back
+    },
+    depthStencil: depths.data,
+    multisample: { count: 1 as UInt32, mask: 4294967295 as UInt32 },
+    fragment: frags.data
+  }
+  ret wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: desc)
+}
+
+func ensurePipelines() {
+  if gPipelinesMade { ret }
+  gPipelinesMade = true
+  let staticMod: Ptr = makeShaderModule(wgsl: gbWgsl())
+  var staticAttrs: List(WGPUVertexAttribute) = createList(WGPUVertexAttribute, cap: 3)
+  staticAttrs.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0 as UInt64, shaderLocation: 0 as UInt32 })
+  staticAttrs.add(value: { format: WGPUVertexFormat_Float32x3, offset: 12 as UInt64, shaderLocation: 1 as UInt32 })
+  staticAttrs.add(value: { format: WGPUVertexFormat_Float32x2, offset: 24 as UInt64, shaderLocation: 2 as UInt32 })
+  gbSetPipeline(pipeline: makeGbPipeline(shaderMod: staticMod, attrs: staticAttrs, stride: 32))
+  wgpuShaderModuleRelease(shaderModule: staticMod)
+
+  let skinMod: Ptr = makeShaderModule(wgsl: gbSkinWgsl())
+  var skinAttrs: List(WGPUVertexAttribute) = createList(WGPUVertexAttribute, cap: 6)
+  skinAttrs.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0 as UInt64, shaderLocation: 0 as UInt32 })
+  skinAttrs.add(value: { format: WGPUVertexFormat_Float32x3, offset: 12 as UInt64, shaderLocation: 1 as UInt32 })
+  skinAttrs.add(value: { format: WGPUVertexFormat_Float32x2, offset: 24 as UInt64, shaderLocation: 2 as UInt32 })
+  skinAttrs.add(value: { format: WGPUVertexFormat_Float32x4, offset: 32 as UInt64, shaderLocation: 3 as UInt32 })
+  skinAttrs.add(value: { format: WGPUVertexFormat_Float32x4, offset: 48 as UInt64, shaderLocation: 4 as UInt32 })
+  skinAttrs.add(value: { format: WGPUVertexFormat_Float32x4, offset: 64 as UInt64, shaderLocation: 5 as UInt32 })
+  gbSetSkinPipeline(pipeline: makeGbPipeline(shaderMod: skinMod, attrs: skinAttrs, stride: 80))
+  wgpuShaderModuleRelease(shaderModule: skinMod)
+}
+
 func begin(viewProj: view Mat4, clearR: copy Float, clearG: copy Float, clearB: copy Float) pub {
   if gbPrepare() is 0 { ret }
+  ensurePipelines()
   ensureTargets()
   if gbTargetsReady() is 0 { ret }
   ensureGbBuffers()

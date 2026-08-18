@@ -724,6 +724,10 @@ const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
     // not the mangled rae_Buffer_<T> (which has no typedef). Mirrors the param
     // path in emit_type_ref_as_c_type.
     if (str_eq_cstr(base, "Buffer")) return "void*";
+    // Ptr is the opaque pointer primitive (Buffer(void)); a Ptr-returning Rae
+    // function lowers to void*, not the phantom rae_Ptr. Mirrors sema resolving
+    // Ptr to Buffer(void) and the param path.
+    if (str_eq_cstr(base, "Ptr")) return "void*";
     const char* m = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
     if (strcmp(m, "RaeAny") == 0) return "RaeAny";
     if (strcmp(m, "rae_Int64") == 0 || strcmp(m, "int64_t") == 0) return "int64_t";
