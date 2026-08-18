@@ -784,4 +784,17 @@ void rae_ext_drawTextWithFont(int64_t slot, rae_String text, float x, float y, f
     default: rae_ext_rae_str_string \
 )(X)
 
+#ifdef RAE_HAS_WEBGPU
+/* WebGPU context bootstrap accessors (#501). Bound from Rae via extern("…") in
+ * lib/webgpu/context.rae. Declared here (not by a WebGPU header) so the
+ * generated C sees real prototypes — otherwise an implicit declaration would
+ * assume `int` return and truncate the returned 64-bit handle pointers. */
+int   rae_wgpu_ctx_bootstrap(void);
+void* rae_wgpu_ctx_device(void);
+void* rae_wgpu_ctx_queue(void);
+void* rae_wgpu_ctx_adapter(void);
+void* rae_wgpu_ctx_instance(void);
+void  rae_wgpu_ctx_poll(int wait);
+#endif
+
 #endif
