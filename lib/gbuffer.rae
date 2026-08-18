@@ -436,7 +436,6 @@ func present() extern
 func shutdown() extern
 func depthPyramid() extern
 func pyramidMips() extern ret Int
-func taa() extern
 func deferredShutdown() extern
 
 # ----- G-buffer inspector modes ---------------------------------------
@@ -834,9 +833,7 @@ func buildDepthPyramid() pub {
 # frame's history, reprojected through the G-buffer's motion channel;
 # composite then reads the resolved image. Runs on HDR, before tonemap,
 # so accumulation stays linear.
-func taaPass() pub {
-  taa()
-}
+# taaPass moved to gbuffer_passes.rae (#504).
 
 # Light the frame from a bound SKY rather than from the light's authored
 # ambient (#399).
