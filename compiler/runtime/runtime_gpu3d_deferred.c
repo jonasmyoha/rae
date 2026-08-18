@@ -961,35 +961,30 @@ void rae_gb_light_upload(float camX, float camY, float camZ, float exposure,
 /* TAA resolve (#390). Reads the radiance the lighting pass wrote plus
  * last frame's history, writes this frame's. The composite then reads
  * the resolved image rather than raw radiance. */
-void rae_ext_gbuffer_taa(void) {
-    if (!g_wgpu_dev || !gb_lit_view) return;
+/* TAA runs in Rae now (lib/gbuffer_passes.rae:taa, #504). The double-buffer
+ * ping-pong and history flag are frame state, so they stay C: taa_begin flips
+ * the write slot (also read by the composite's source-index) and uploads the
+ * history flag; Rae builds the per-slot bind and runs the pass; taa_end marks
+ * that history now exists. The TAA pipeline stays C (shared init block). */
+int64_t rae_gb_taa_ready(void) {
+    if (!g_wgpu_dev) return 0;
     gb_deferred_init_pipelines();
     gb_deferred_ensure();
-    if (!gb_taa_pipeline || !gb_taa_view[0] || !gb_taa_view[1]) return;
-    if (!gb_taa_enabled) return;
-
-    /* Resolve INTO the slot not read this frame, so no pass reads and
-     * writes one texture. */
-    gb_taa_cur = 1 - gb_taa_cur;
-
-    float p[4] = { gb_taa_have_history ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f };
-    wgpuQueueWriteBuffer(g_wgpu_queue, gb_taa_ubuf, 0, p, sizeof(p));
-
-    if (!gb_taa_bind[gb_taa_cur]) {
-        WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(gb_taa_pipeline, 0);
-        WGPUBindGroupEntry e[4]; memset(e, 0, sizeof(e));
-        e[0].binding = 0; e[0].textureView = gb_lit_view;
-        e[1].binding = 1; e[1].textureView = gb_taa_view[1 - gb_taa_cur];
-        e[2].binding = 2; e[2].textureView = gb_c_view;
-        e[3].binding = 3; e[3].buffer = gb_taa_ubuf; e[3].size = 16;
-        WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
-        bgd.layout = bgl; bgd.entryCount = 4; bgd.entries = e;
-        gb_taa_bind[gb_taa_cur] = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
-        wgpuBindGroupLayoutRelease(bgl);
-    }
-    gb_run_fullscreen(gb_taa_pipeline, gb_taa_bind[gb_taa_cur], gb_taa_view[gb_taa_cur]);
-    gb_taa_have_history = true;
+    return (gb_taa_enabled && gb_taa_pipeline && gb_taa_view[0] && gb_taa_view[1] && gb_lit_view) ? 1 : 0;
 }
+int64_t rae_gb_taa_begin(void) {
+    gb_taa_cur = 1 - gb_taa_cur;   /* resolve into the slot not read this frame */
+    float p[4] = { gb_taa_have_history ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f };
+    if (gb_taa_ubuf) wgpuQueueWriteBuffer(g_wgpu_queue, gb_taa_ubuf, 0, p, sizeof(p));
+    return (int64_t)gb_taa_cur;
+}
+void rae_gb_taa_end(void) { gb_taa_have_history = true; }
+void* rae_gb_taa_pipeline(void)      { return (void*)gb_taa_pipeline; }
+void* rae_gb_taa_ubuf(void)          { return (void*)gb_taa_ubuf; }
+void* rae_gb_taa_target_view(void)   { return (void*)gb_taa_view[gb_taa_cur]; }
+void* rae_gb_taa_history_view(void)  { return (void*)gb_taa_view[1 - gb_taa_cur]; }
+void* rae_gb_taa_bind(int64_t idx)   { return (idx >= 0 && idx < 2) ? (void*)gb_taa_bind[(int)idx] : NULL; }
+void rae_gb_set_taa_bind(int64_t idx, void* b) { if (idx >= 0 && idx < 2) gb_taa_bind[(int)idx] = (WGPUBindGroup)b; }
 
 /* Composite (tonemap the lit result into the presentable target) runs in Rae
  * now (lib/gbuffer_passes.rae, #504). C exposes the shared deferred prep, the

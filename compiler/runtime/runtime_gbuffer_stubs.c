@@ -147,7 +147,15 @@ void* rae_gb_light_ubuf(void)      { return (void*)0; }
 int64_t rae_gb_light_bytes(void)   { return 0; }
 void rae_gb_set_ao_pipeline(void* p) { (void)p; }
 void rae_gb_set_ao_bind(void* b)     { (void)b; }
-void rae_ext_gbuffer_taa(void) {}
+int64_t rae_gb_taa_ready(void)       { return 0; }
+int64_t rae_gb_taa_begin(void)       { return 0; }
+void rae_gb_taa_end(void)            {}
+void* rae_gb_taa_pipeline(void)      { return (void*)0; }
+void* rae_gb_taa_ubuf(void)          { return (void*)0; }
+void* rae_gb_taa_target_view(void)   { return (void*)0; }
+void* rae_gb_taa_history_view(void)  { return (void*)0; }
+void* rae_gb_taa_bind(int64_t idx)   { (void)idx; return (void*)0; }
+void rae_gb_set_taa_bind(int64_t idx, void* b) { (void)idx; (void)b; }
 int64_t rae_gb_deferred_prepare(void)        { return 0; }
 const char* rae_gb_composite_wgsl(void)      { return ""; }
 void* rae_gb_composite_source_view(void)     { return (void*)0; }
