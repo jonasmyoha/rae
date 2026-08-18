@@ -92,9 +92,14 @@ for the pattern: `main.rae` + `config.cmd` (`run`) + `expected.txt`).
   Rae `WGPUBufferDescriptor` → `wgpuDeviceCreateBuffer` → zero-copy
   `wgpuQueueWriteBuffer` from a `List`'s `.data`). See docs/webgpu-bindings.md
   "Context bootstrap & auto-linking". Surface/swapchain-view exposure is deferred
-  to when #502/#503 need it (headless path needs no surface). NOTE: `List(Int32)`
-  monomorphization is currently broken (lowers to `rae_List_void`); use
-  `List(Int)` for now, or fix the Int32 list codegen when a binding needs it.
+  to when #502/#503 need it (headless path needs no surface).
+- **#507 — fixed-width integer lists. ✅ LANDED.** `Int8/16/32/64` and
+  `UInt8/16/32/64` are now first-class distinct types (`type_get_int_sized` in
+  type.c), so `List(Int32)` monomorphizes to a byte-accurate `int32_t[N]` — the
+  correct GPU layout. Use these for vertex/index/instance buffers. Test:
+  `compiler/tests/cases/630_fixed_width_int_lists`. Caveat: don't `log`-interpolate
+  a `UInt32` (prints as a char, shares `uint32_t` with `Char32`) or an `Int8`
+  (prints as a bool) — storage/ABI are fine, only display differs.
 - **#502 — proof port: delete `drawRecords`.** Reimplement the instanced GBuffer
   draw in Rae over the bindings (Rae owns the draws storage buffer, uploads via
   `wgpuQueueWriteBuffer` zero-copy from a List's `.data`, issues

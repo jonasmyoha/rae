@@ -97,6 +97,18 @@ struct TypeInfo {
              int64_t value;
         } const_int;
 
+        /* Fixed-width integer metadata for TYPE_INT. The canonical `Int`
+         * (and `Int64`) is bits=64, is_unsigned=false. Int8/16/32,
+         * UInt8/16/32/64 carry their real width/signedness so they intern
+         * distinctly, mangle to the right C type (int32_t, uint16_t, …) and
+         * give a byte-accurate layout for `List(Int32)` etc. (#507). Zero-
+         * initialised memory reads as {0,false} = a malformed 0-bit int, so
+         * always construct TYPE_INT through type_get_int/type_get_int_sized. */
+        struct {
+             int bits;         // 8, 16, 32, 64
+             bool is_unsigned; // false = signed
+        } integer;
+
         struct {
              TypeInfo* base;  // element type
              int64_t count;   // element count, >= 0, known at compile time
@@ -131,7 +143,12 @@ void type_registry_add_specialization(TypeRegistry* r, struct AstDecl* generic_d
 // Core Type Constructors (Interning included)
 TypeInfo* type_get_void(TypeRegistry* registry);
 TypeInfo* type_get_bool(TypeRegistry* registry);
-TypeInfo* type_get_int(TypeRegistry* registry);
+TypeInfo* type_get_int(TypeRegistry* registry);      // canonical Int (64-bit signed)
+/* Fixed-width integer (#507). bits in {8,16,32,64}. (64,false) is the canonical
+ * Int and returns the same interned TypeInfo as type_get_int. */
+TypeInfo* type_get_int_sized(TypeRegistry* registry, int bits, bool is_unsigned);
+/* C spelling for a fixed-width integer, e.g. (32,true) -> "uint32_t". */
+const char* rae_int_c_name(int bits, bool is_unsigned);
 TypeInfo* type_get_float(TypeRegistry* registry);   // Float == Float32 (f32)
 TypeInfo* type_get_float64(TypeRegistry* registry); // Float64 (f64)
 TypeInfo* type_get_string(TypeRegistry* registry);
