@@ -59,6 +59,10 @@ void* rae_gb_encoder(void)              { return (void*)0; }
 void rae_gb_clear_frame(void)           {}
 int64_t rae_gb_frame_active(void)       { return 0; }
 void rae_gb_submit(void* cmd)           { (void)cmd; }
+void* rae_gb_frame_ubuf(void)           { return (void*)0; }
+int64_t rae_gb_frame_bytes(void)        { return 0; }
+int64_t rae_gb_draws_size(void)         { return 0; }
+void rae_gb_set_static_bind(void* bind) { (void)bind; }
 void rae_ext_gbuffer_drawMetaballs(const float* packedBalls, int64_t count,
                                    const float* packedColors, float smoothing,
                                    float camX, float camY, float camZ,
