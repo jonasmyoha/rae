@@ -2136,6 +2136,13 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       const AstDecl* d = ctx->all_decls[i];
       if (d->kind == AST_DECL_FUNC && d->as.func_decl.is_extern && !d->as.func_decl.generic_params) {
           const char* mangled = rae_mangle_function(ctx, &d->as.func_decl);
+          // An explicit extern("symbol") binds a symbol DECLARED ELSEWHERE — by
+          // a cheader'd library header (webgpu.h) or a standard header the
+          // runtime already includes. Emitting our own prototype would clash
+          // with the real one (our ABI-compat void*/int32_t view of the types
+          // differs from WGPUInstance/WGPUStatus/const-qualified pointers), so
+          // let the header be the single source of truth (general FFI, #497).
+          if (d->as.func_decl.extern_symbol) continue;
           // Skip functions already declared in runtime header (rae_ext_rae_* and known builtins)
           if (str_starts_with_cstr(d->as.func_decl.name, "rae_ext_") ||
               str_starts_with_cstr(d->as.func_decl.name, "rae_") ||
