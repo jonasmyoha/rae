@@ -422,9 +422,19 @@ struct AstImport {
   AstImport* next;
 };
 
+// A C header a binding module needs (`cheader "webgpu/webgpu.h"`), so its
+// c_struct types and extern("symbol") functions resolve against real C
+// declarations. General FFI (#497): library-agnostic, emitted as an #include
+// in the C output. Not a WebGPU special-case.
+typedef struct AstCHeader {
+  Str path;
+  struct AstCHeader* next;
+} AstCHeader;
+
 struct AstModule {
   const char* file_path;
   AstImport* imports;
+  AstCHeader* c_headers;
   AstDecl* decls;
   Token* comments;
   size_t comment_count;

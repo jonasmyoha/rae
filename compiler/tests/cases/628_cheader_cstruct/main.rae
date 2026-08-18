@@ -1,0 +1,18 @@
+# `cheader "..."` (general FFI, #497) makes a binding module's C header emit as
+# an #include, so its c_struct types resolve against the REAL library struct —
+# not a rae_-prefixed redefinition. Here the standard-library div_t (from
+# stdlib.h) is referenced by its bare C name; the compiled output uses the
+# genuine C type, constructs one, and reads its fields back.
+cheader "stdlib.h"
+
+type div_t: c_struct {
+  quot: Int32
+  rem: Int32
+}
+
+func main() {
+  let result: div_t = { quot: 12, rem: 3 }
+  let q: Int = result.quot
+  let r: Int = result.rem
+  log("{q} {r}")
+}

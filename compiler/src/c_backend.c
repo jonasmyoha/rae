@@ -568,8 +568,13 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
       }
       if (t->kind == TYPE_STRUCT) {
           if (type->is_view) fprintf(out, "const ");
-          // Check if it's a raylib c_struct type — emit bare name
-          if (is_raylib_builtin_type(t->name)) {
+          // c_struct types (raylib's, and any binding's WGPU*/SDL_* etc.) emit
+          // their BARE C name — the real library struct from a cheader, never a
+          // rae_-prefixed redefinition. General FFI (#497), not raylib-only.
+          const AstDecl* sdecl = t->as.structure.decl;
+          bool is_c_struct = sdecl && sdecl->kind == AST_DECL_TYPE
+              && has_property(sdecl->as.type_decl.properties, "c_struct");
+          if (is_raylib_builtin_type(t->name) || is_c_struct) {
               fprintf(out, "%.*s", (int)t->name.len, t->name.data);
           } else {
               const char* name = type_mangle_name(ctx->compiler_ctx->ast_arena, t).data;
@@ -1333,7 +1338,36 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   collect_type_refs_module(ctx);
 
   FILE* out = fopen(out_path, "w"); if (!out) return false;
-  fprintf(out, "#include \"rae_runtime.h\"\n\n");
+  fprintf(out, "#include \"rae_runtime.h\"\n");
+  // C headers declared by binding modules (`cheader "..."`, general FFI #497),
+  // so their c_struct types and extern("symbol") functions resolve against the
+  // real library declarations. Walk the module + its imports, deduping both the
+  // modules visited and the header paths emitted.
+  {
+    const AstModule* seen_mods[256]; size_t seen_mod_n = 0;
+    Str seen_hdrs[256]; size_t seen_hdr_n = 0;
+    const AstModule* stack[256]; size_t sp = 0;
+    stack[sp++] = module;
+    while (sp > 0) {
+      const AstModule* m = stack[--sp];
+      if (!m) continue;
+      bool visited = false;
+      for (size_t i = 0; i < seen_mod_n; i++) if (seen_mods[i] == m) { visited = true; break; }
+      if (visited) continue;
+      if (seen_mod_n < 256) seen_mods[seen_mod_n++] = m;
+      for (const AstCHeader* h = m->c_headers; h; h = h->next) {
+        bool dup = false;
+        for (size_t i = 0; i < seen_hdr_n; i++)
+          if (str_eq(seen_hdrs[i], h->path)) { dup = true; break; }
+        if (dup) continue;
+        if (seen_hdr_n < 256) seen_hdrs[seen_hdr_n++] = h->path;
+        fprintf(out, "#include \"%.*s\"\n", (int)h->path.len, h->path.data);
+      }
+      for (const AstImport* imp = m->imports; imp; imp = imp->next)
+        if (imp->module && sp < 256) stack[sp++] = imp->module;
+    }
+  }
+  fprintf(out, "\n");
   EmittedTypeList emitted = { .items = malloc(sizeof(char*) * 1024), .capacity = 1024, .count = 0 };
   EmittedTypeList visiting = { .items = malloc(sizeof(char*) * 1024), .capacity = 1024, .count = 0 };
   for (size_t i = 0; i < ctx->generic_type_count; i++) emit_type_recursive(ctx, module, ctx->generic_types[i], out, &emitted, &visiting, false);
