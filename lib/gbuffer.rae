@@ -58,20 +58,39 @@ import webgpu/context
 
 # ----- raw C ABI (implementation detail; prefer the typed API below) ---
 func begin(viewProj: view Mat4, clearR: Float, clearG: Float, clearB: Float) extern
-func draw(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emissive: Float, toon: Int) extern
-func drawSkinned(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emissive: Float, toon: Int) extern
+
+# Shared tail of every G-buffer draw (#502/#503): upload `count` DrawU records
+# (already at `records`) into the draws storage buffer at slot `base`, bind the
+# given pipeline / bind group / mesh buffers, and issue one instanced
+# DrawIndexed. Every draw — static, skinned, instanced — funnels through here,
+# so the whole encoding lives in Rae over the generated bindings, no C shim.
+func gbIssueInstanced(pass: copy Ptr, pipeline: copy Ptr, bind: copy Ptr,
+                      vbuf: copy Ptr, ibuf: copy Ptr, icount: copy Int,
+                      base: copy Int, count: copy Int, records: copy Ptr) {
+  let strideBytes: Int = instanceRecordFloats * 4
+  wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: gbDrawsBuffer(),
+    bufferOffset: (base * strideBytes) as UInt64, data: records,
+    size: (count * strideBytes) as UInt64)
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: pipeline)
+  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+    group: bind, dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder: pass, slot: 0 as UInt32,
+    buffer: vbuf, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: vbuf))
+  wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder: pass, buffer: ibuf,
+    format: WGPUIndexFormat_Uint32, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: ibuf))
+  wgpuRenderPassEncoderDrawIndexed(renderPassEncoder: pass,
+    indexCount: icount as UInt32, instanceCount: count as UInt32,
+    firstIndex: 0 as UInt32, baseVertex: 0 as Int32, firstInstance: base as UInt32)
+  gbAdvanceDraws(count: count)
+}
+
 # Instanced G-buffer draw (grass epic #485, ported to Rae #502): one draw for
 # `count` copies of a mesh. `records` is `count` * instanceRecordFloats fully
 # built DrawU entries (model, prevModel, colour, packed params), assembled in
-# Rae by swayModel + packInstanceRecord below.
-#
-# This whole draw now happens IN RAE over the generated WebGPU bindings — no C
-# shim. Rae uploads the records straight into the draws storage buffer with
-# wgpuQueueWriteBuffer (zero-copy from the records pointer) and issues one
-# instanced wgpuRenderPassEncoderDrawIndexed. The draws buffer is the shared
-# per-frame instance array the single-draw path also fills (each draw uploads
-# its own slice now); Rae writes its slice at [base .. base+count) and advances
-# the cursor. The reusable instancing primitive for vegetation, rocks, crowds.
+# Rae by swayModel + packInstanceRecord below. Rae uploads the records straight
+# into the draws storage buffer and issues one instanced DrawIndexed on the
+# static pipeline — no C shim. A skinned draw may have left its pipeline bound,
+# so gbIssueInstanced re-binds the static one.
 func drawRecords(mesh: copy Int, records: copy Ptr, count: copy Int) pub {
   if gbMeshReady(mesh: mesh) is 0 { ret }
   let base: Int = gbDrawCount()
@@ -79,30 +98,9 @@ func drawRecords(mesh: copy Int, records: copy Ptr, count: copy Int) pub {
   var n: Int = count
   if n > remaining { n = remaining }
   if n <= 0 { ret }
-
-  let pass: Ptr = gbPass()
-  let vbuf: Ptr = gbMeshVbuf(mesh: mesh)
-  let ibuf: Ptr = gbMeshIbuf(mesh: mesh)
-  let strideBytes: Int = instanceRecordFloats * 4
-
-  # Upload this field's records into the shared draws buffer at the base slot.
-  wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: gbDrawsBuffer(),
-    bufferOffset: (base * strideBytes) as UInt64, data: records,
-    size: (n * strideBytes) as UInt64)
-
-  # A skinned draw may have left its pipeline bound; restore the static one
-  # (which owns the draws storage buffer) before the instanced draw.
-  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: gbStaticPipeline())
-  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
-    group: gbStaticBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
-  wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder: pass, slot: 0 as UInt32,
-    buffer: vbuf, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: vbuf))
-  wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder: pass, buffer: ibuf,
-    format: WGPUIndexFormat_Uint32, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: ibuf))
-  wgpuRenderPassEncoderDrawIndexed(renderPassEncoder: pass,
-    indexCount: gbMeshIcount(mesh: mesh) as UInt32, instanceCount: n as UInt32,
-    firstIndex: 0 as UInt32, baseVertex: 0 as Int32, firstInstance: base as UInt32)
-  gbAdvanceDraws(count: n)
+  gbIssueInstanced(pass: gbPass(), pipeline: gbStaticPipeline(), bind: gbStaticBind(),
+    vbuf: gbMeshVbuf(mesh: mesh), ibuf: gbMeshIbuf(mesh: mesh),
+    icount: gbMeshIcount(mesh: mesh), base: base, count: n, records: records)
 }
 
 # Context accessors for the instanced draw (#502) — opaque frame handles + the
@@ -118,6 +116,15 @@ func gbMeshReady(mesh: Int) extern("rae_gb_mesh_ready") ret Int
 func gbMeshVbuf(mesh: Int) extern("rae_gb_mesh_vbuf") ret Ptr
 func gbMeshIbuf(mesh: Int) extern("rae_gb_mesh_ibuf") ret Ptr
 func gbMeshIcount(mesh: Int) extern("rae_gb_mesh_icount") ret Int
+# Skinned-draw accessors (#503). The skin bind group (frame uniform + draws +
+# joint palette) is still created lazily in C — it needs the pipeline layout and
+# the palette storage buffer — but the draw itself is issued from Rae.
+func gbSkinPipeline() extern("rae_gb_skin_pipeline") ret Ptr
+func gbSkinBind() extern("rae_gb_skin_bind") ret Ptr
+func gbSkinReady(mesh: Int) extern("rae_gb_skin_ready") ret Int
+func gbSkinVbuf(mesh: Int) extern("rae_gb_skin_vbuf") ret Ptr
+func gbSkinIbuf(mesh: Int) extern("rae_gb_skin_ibuf") ret Ptr
+func gbSkinIcount(mesh: Int) extern("rae_gb_skin_icount") ret Int
 func drawMetaballs(packedBalls: view Buffer(Float), count: Int, packedColors: view Buffer(Float), smoothing: Float, camX: Float, camY: Float, camZ: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
 func sdfShutdown() extern
 func end() extern
@@ -277,6 +284,62 @@ func toonFlag(material: view Material3d) ret Int {
     ret 1
   }
   ret 0
+}
+
+# Reusable one-record scratch for the single-draw paths (#503), so a static or
+# skinned draw builds its DrawU entry without allocating per call — the grass
+# path reuses a caller-owned List the same way. Grown to instanceRecordFloats
+# once, on the first draw that actually runs (never in a headless/no-device
+# build, where the readiness checks below return first). Never resized after, so
+# .data stays stable.
+var gDrawScratch: List(Float) = createList(Float, cap: instanceRecordFloats)
+
+func ensureDrawScratch() {
+  loop gDrawScratch.length < instanceRecordFloats {
+    gDrawScratch.add(value: 0.0)
+  }
+}
+
+# One static mesh instance into the G-buffer (#503, was the C `draw`). Builds the
+# single DrawU record in Rae (packInstanceRecord) and issues it through the same
+# Rae upload+draw path as the instanced grass — the static pipeline reads
+# draws[instance_index], so one record at firstInstance=base is this draw.
+func draw(mesh: copy Int, model: view Mat4, prevModel: view Mat4,
+          r: copy Float, g: copy Float, b: copy Float,
+          metallic: copy Float, roughness: copy Float, emissive: copy Float,
+          toon: copy Int) pub {
+  if gbMeshReady(mesh: mesh) is 0 { ret }
+  let base: Int = gbDrawCount()
+  if base >= gbMaxDraws() { ret }
+  ensureDrawScratch()
+  packInstanceRecord(records: gDrawScratch, slot: 0, model: model, prevModel: prevModel,
+    r: r, g: g, b: b, metallic: metallic, roughness: roughness, emissive: emissive, toon: toon)
+  gbIssueInstanced(pass: gbPass(), pipeline: gbStaticPipeline(), bind: gbStaticBind(),
+    vbuf: gbMeshVbuf(mesh: mesh), ibuf: gbMeshIbuf(mesh: mesh),
+    icount: gbMeshIcount(mesh: mesh), base: base, count: 1, records: gDrawScratch.data)
+}
+
+# One skinned mesh instance (#503, was the C `drawSkinned`). Same DrawU record
+# and G-buffer layout as a static draw; only the pipeline differs (the skin
+# vertex stage poses the mesh by the joint palette). After issuing, the static
+# pipeline/bind are restored so a following static draw is unaffected.
+func drawSkinned(mesh: copy Int, model: view Mat4, prevModel: view Mat4,
+                 r: copy Float, g: copy Float, b: copy Float,
+                 metallic: copy Float, roughness: copy Float, emissive: copy Float,
+                 toon: copy Int) pub {
+  if gbSkinReady(mesh: mesh) is 0 { ret }
+  let base: Int = gbDrawCount()
+  if base >= gbMaxDraws() { ret }
+  ensureDrawScratch()
+  packInstanceRecord(records: gDrawScratch, slot: 0, model: model, prevModel: prevModel,
+    r: r, g: g, b: b, metallic: metallic, roughness: roughness, emissive: emissive, toon: toon)
+  gbIssueInstanced(pass: gbPass(), pipeline: gbSkinPipeline(), bind: gbSkinBind(),
+    vbuf: gbSkinVbuf(mesh: mesh), ibuf: gbSkinIbuf(mesh: mesh),
+    icount: gbSkinIcount(mesh: mesh), base: base, count: 1, records: gDrawScratch.data)
+  # Hand the pass back to the static pipeline for any following static draw.
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: gbPass(), pipeline: gbStaticPipeline())
+  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: gbPass(), groupIndex: 0 as UInt32,
+    group: gbStaticBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
 }
 
 func drawInstance(mesh: view MeshHandle, transform: view Transform3d, prevTransform: view Transform3d, material: view Material3d) pub {
