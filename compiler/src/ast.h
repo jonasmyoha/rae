@@ -382,6 +382,7 @@ typedef struct {
   AstProperty* properties;
   AstReturnItem* returns;
   bool is_extern;
+  const char* extern_symbol; // Explicit C ABI symbol from `extern("name")` (general FFI, #497). When set, the mangler binds this extern to exactly this C symbol — no rae_ext_ prefix, no shim. NULL = default mangling.
   const char* module_name; // Logical module (mirrors AstDecl.module_name); used by the mangler for namespace-qualified extern C symbols. NULL for entry/project.
   const char* origin_file; // Source file (mirrors AstDecl.origin_file); lets the mangler restrict namespace-qualified externs to stdlib (lib/) and not project FFI.
   AstBlock* body;

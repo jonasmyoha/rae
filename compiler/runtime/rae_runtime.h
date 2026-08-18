@@ -776,6 +776,10 @@ void rae_ext_drawTextWithFont(int64_t slot, rae_String text, float x, float y, f
     uint32_t: rae_ext_rae_str_char, \
     uint32_t*: rae_ext_rae_str_char_ptr, \
     unsigned char: rae_ext_rae_str_u8, \
+    int16_t: rae_ext_rae_str_i64, \
+    uint16_t: rae_ext_rae_str_i64, \
+    int32_t: rae_ext_rae_str_i64, \
+    uint64_t: rae_ext_rae_str_i64, \
     RaeAny: rae_ext_rae_str_any, \
     default: rae_ext_rae_str_string \
 )(X)
