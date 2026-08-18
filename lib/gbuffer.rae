@@ -79,6 +79,12 @@ func gbTargetsReady() extern("rae_gb_targets_ready") ret Int
 func gbReleaseTargets() extern("rae_gb_release_targets_ext")
 func gbSetTarget(idx: Int, tex: Ptr, texView: Ptr) extern("rae_gb_set_target")
 func gbCommitTargets(w: Int, h: Int) extern("rae_gb_commit_targets")
+# Shared by the inspector and the deferred post-passes (declared here so both
+# get them via `open gbuffer` without redeclaring): the presentable target's
+# format/view and the targets-resize generation counter.
+func g2dFormat() extern("rae_g2d_format") ret Int
+func g2dOffView() extern("rae_g2d_off_view") ret Ptr
+func gbTargetsGen() extern("rae_gb_targets_gen") ret Int
 
 # One G-buffer attachment: a 2D texture (render target + sampleable) and its
 # full view. mipLevelCount/sampleCount are 1, so an explicit single-mip 2D view
@@ -430,7 +436,6 @@ func present() extern
 func shutdown() extern
 func depthPyramid() extern
 func lighting(camX: Float, camY: Float, camZ: Float, exposure: Float, sunX: Float, sunY: Float, sunZ: Float, sunR: Float, sunG: Float, sunB: Float, skyR: Float, skyG: Float, skyB: Float, gndR: Float, gndG: Float, gndB: Float, skyKind: Float, turbidity: Float, skyExposure: Float, sunSizeRad: Float, zenR: Float, zenG: Float, zenB: Float, bands: Float, horR: Float, horG: Float, horB: Float, discI: Float) extern
-func composite(exposure: Float) extern
 func pyramidMips() extern ret Int
 func ssao(camX: Float, camY: Float, camZ: Float) extern
 func taa() extern
@@ -921,9 +926,7 @@ func lightingPass(camera: view Camera3d, light: view Light3d) pub {
 # curve is deliberately identical to the forward frame's: the two should
 # differ in how radiance is computed, not in how it is displayed, or
 # comparing them proves nothing.
-func compositePass(exposure: view Float) pub {
-  composite(exposure: exposure)
-}
+# compositePass moved to gbuffer_passes.rae (#504).
 
 # Mip levels in the pyramid; 0 before the first build. Lets a caller
 # confirm the chain was built rather than silently skipped.
