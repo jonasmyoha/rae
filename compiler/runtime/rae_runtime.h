@@ -839,6 +839,14 @@ int64_t rae_gb_prepare(void);
 int64_t rae_gb_frame_uniform(struct rae_Mat4* viewProj, float clearR, float clearG, float clearB);
 void rae_gb_set_frame_ubuf(void* buf);
 void rae_gb_set_draws_buffer(void* buf);
+/* Target textures/views created in Rae (#503). */
+int64_t rae_gb_offscreen_w(void);
+int64_t rae_gb_offscreen_h(void);
+int64_t rae_gb_targets_match(int64_t w, int64_t h);
+int64_t rae_gb_targets_ready(void);
+void rae_gb_release_targets_ext(void);
+void rae_gb_set_target(int64_t idx, void* tex, void* view);
+void rae_gb_commit_targets(int64_t w, int64_t h);
 void* rae_gb_view_a(void);
 void* rae_gb_view_b(void);
 void* rae_gb_view_c(void);
