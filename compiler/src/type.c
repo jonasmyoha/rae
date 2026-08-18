@@ -91,15 +91,40 @@ TypeInfo* type_get_bool(TypeRegistry* r) {
     return t;
 }
 
-TypeInfo* type_get_int(TypeRegistry* r) {
-    static TypeInfo* t = NULL;
-    if (!t) {
-        t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
-        t->kind = TYPE_INT;
-        t->name = (Str){"Int", 3};
-        add_interned(r, hash_type(TYPE_INT, NULL, 0), t);
+const char* rae_int_c_name(int bits, bool is_unsigned) {
+    switch (bits) {
+        case 8:  return is_unsigned ? "uint8_t"  : "int8_t";
+        case 16: return is_unsigned ? "uint16_t" : "int16_t";
+        case 32: return is_unsigned ? "uint32_t" : "int32_t";
+        default: return is_unsigned ? "uint64_t" : "int64_t"; /* 64 */
     }
+}
+
+/* Fixed-width integer, interned per (bits, signedness) so distinct widths get
+ * distinct type identity, mangling and layout (#507). The canonical Int is
+ * (64, signed); everything below routes through here so there is one interner. */
+TypeInfo* type_get_int_sized(TypeRegistry* r, int bits, bool is_unsigned) {
+    struct { int bits; bool u; } key = { bits, is_unsigned };
+    uint64_t h = hash_type(TYPE_INT, &key, sizeof(key));
+    size_t idx = h % r->capacity;
+    for (TypeInfo* curr = r->buckets[idx]; curr; curr = curr->next_interned) {
+        if (curr->kind == TYPE_INT && curr->as.integer.bits == bits && curr->as.integer.is_unsigned == is_unsigned)
+            return curr;
+    }
+    TypeInfo* t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
+    t->kind = TYPE_INT;
+    t->as.integer.bits = bits;
+    t->as.integer.is_unsigned = is_unsigned;
+    /* Canonical name — "Int" for the default so diagnostics/mangled names of
+     * existing code are unchanged; the C spelling otherwise. */
+    if (bits == 64 && !is_unsigned) t->name = (Str){"Int", 3};
+    else { const char* nm = rae_int_c_name(bits, is_unsigned); t->name = (Str){nm, strlen(nm)}; }
+    add_interned(r, h, t);
     return t;
+}
+
+TypeInfo* type_get_int(TypeRegistry* r) {
+    return type_get_int_sized(r, 64, false);
 }
 
 /* Rae's default floating-point type: f32 / IEEE-754 binary32.
@@ -373,7 +398,7 @@ static void type_mangle_recursive(Arena* arena, TypeInfo* t, char* buf, size_t* 
     }
     switch (t->kind) {
         case TYPE_VOID: *pos += snprintf(buf + *pos, cap - *pos, "void"); break;
-        case TYPE_INT: *pos += snprintf(buf + *pos, cap - *pos, "int64_t"); break;
+        case TYPE_INT: *pos += snprintf(buf + *pos, cap - *pos, "%s", rae_int_c_name(t->as.integer.bits, t->as.integer.is_unsigned)); break;
         case TYPE_FLOAT: *pos += snprintf(buf + *pos, cap - *pos, "float"); break;
         case TYPE_FLOAT64: *pos += snprintf(buf + *pos, cap - *pos, "double"); break;
         case TYPE_BOOL: *pos += snprintf(buf + *pos, cap - *pos, "rae_Bool"); break;
