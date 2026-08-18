@@ -437,7 +437,6 @@ func shutdown() extern
 func depthPyramid() extern
 func lighting(camX: Float, camY: Float, camZ: Float, exposure: Float, sunX: Float, sunY: Float, sunZ: Float, sunR: Float, sunG: Float, sunB: Float, skyR: Float, skyG: Float, skyB: Float, gndR: Float, gndG: Float, gndB: Float, skyKind: Float, turbidity: Float, skyExposure: Float, sunSizeRad: Float, zenR: Float, zenG: Float, zenB: Float, bands: Float, horR: Float, horG: Float, horB: Float, discI: Float) extern
 func pyramidMips() extern ret Int
-func ssao(camX: Float, camY: Float, camZ: Float) extern
 func taa() extern
 func deferredShutdown() extern
 
@@ -830,9 +829,7 @@ func buildDepthPyramid() pub {
 # Screen-space AO for the deferred frame (#387). Runs between the depth
 # pyramid and lighting; lighting samples the result and applies it to the
 # INDIRECT term only.
-func ssaoPass(camera: view Camera3d) pub {
-  ssao(camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z)
-}
+# ssaoPass moved to gbuffer_passes.rae (#504).
 
 # Temporal resolve (#390). Reads the radiance lighting wrote plus last
 # frame's history, reprojected through the G-buffer's motion channel;
