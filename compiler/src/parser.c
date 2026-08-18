@@ -2699,18 +2699,32 @@ AstModule* parse_module(Arena* arena, const char* file_path, TokenList tokens) {
   module->comments = comments;
   module->comment_count = comment_count;
   AstImport* imports = NULL;
-  // `open` is a CONTEXTUAL keyword: it is a module directive only here, in
-  // directive position, when followed by a module name/path (an identifier or
-  // string). Everywhere else `open` stays a normal identifier (e.g. a func named
-  // `open`). (docs/module-namespacing.md)
+  AstCHeader* c_headers = NULL;
+  // `open` and `cheader` are CONTEXTUAL keywords: module directives only here,
+  // in directive position, when followed by the expected token. Everywhere else
+  // they stay normal identifiers (e.g. a func named `open`).
+  // (docs/module-namespacing.md, docs/webgpu-bindings.md)
   while (parser_check(&parser, TOK_KW_IMPORT)
          || (parser_check(&parser, TOK_KW_EXPORT) && parser_peek_at(&parser, 1)->kind == TOK_STRING)
          || (parser_check(&parser, TOK_IDENT)
              && str_eq_cstr(parser_peek(&parser)->lexeme, "open")
-             && (parser_peek_at(&parser, 1)->kind == TOK_IDENT || parser_peek_at(&parser, 1)->kind == TOK_STRING))) {
+             && (parser_peek_at(&parser, 1)->kind == TOK_IDENT || parser_peek_at(&parser, 1)->kind == TOK_STRING))
+         || (parser_check(&parser, TOK_IDENT)
+             && str_eq_cstr(parser_peek(&parser)->lexeme, "cheader")
+             && parser_peek_at(&parser, 1)->kind == TOK_STRING)) {
     size_t prev_index = parser.index;
     if (parser_match(&parser, TOK_KW_IMPORT)) {
         imports = append_import(imports, parse_import_clause(&parser, false, false));
+    } else if (parser_check(&parser, TOK_IDENT) && str_eq_cstr(parser_peek(&parser)->lexeme, "cheader")) {
+        parser_advance(&parser); // consume `cheader`
+        const Token* hdr = parser_consume(&parser, TOK_STRING, "expected a C header path string after cheader");
+        if (hdr) {
+            AstCHeader* node = parser_alloc(&parser, sizeof(AstCHeader));
+            node->path = unescape_string(&parser, hdr->lexeme, true, true);
+            node->next = NULL;
+            if (!c_headers) c_headers = node;
+            else { AstCHeader* tail = c_headers; while (tail->next) tail = tail->next; tail->next = node; }
+        }
     } else if (parser_check(&parser, TOK_IDENT) && str_eq_cstr(parser_peek(&parser)->lexeme, "open")) {
         parser_advance(&parser); // consume `open`
         imports = append_import(imports, parse_import_clause(&parser, false, true));
@@ -2732,6 +2746,7 @@ AstModule* parse_module(Arena* arena, const char* file_path, TokenList tokens) {
     }
   }
   module->imports = imports;
+  module->c_headers = c_headers;
   module->decls = head;
   module->had_error = parser.had_error;
   return module;
