@@ -362,3 +362,49 @@ func taa() pub {
 func taaPass() pub {
   taa()
 }
+
+# ----- depth pyramid: a Hi-Z mip chain (#504) --------------------------------
+# A loop of single-entry fullscreen passes: mip 0 reduces the G-buffer depth,
+# each later mip reduces the one above. C keeps the per-mip targets + the two
+# pipelines; Rae drives the loop, building one bind per level (reading the
+# previous mip) and running each pass into that mip's target.
+func gbPyramidReady() extern("rae_gb_pyramid_ready") ret Int
+func gbPyrFromDepthPipeline() extern("rae_gb_pyr_from_depth_pipeline") ret Ptr
+func gbPyrReducePipeline() extern("rae_gb_pyr_reduce_pipeline") ret Ptr
+func gbPyrSrcView(i: Int) extern("rae_gb_pyr_src_view") ret Ptr
+func gbPyrRtView(i: Int) extern("rae_gb_pyr_rt_view") ret Ptr
+func gbPyrBind(i: Int) extern("rae_gb_pyr_bind") ret Ptr
+func gbSetPyrBind(i: Int, bind: Ptr) extern("rae_gb_set_pyr_bind")
+func gbPyramidMips() extern("rae_ext_gbuffer_pyramidMips") ret Int
+
+var gPyrBindGen: Int = -1
+
+func depthPyramid() pub {
+  if gbPyramidReady() is 0 { ret }
+  let gen: Int = gbTargetsGen()
+  let bindsStale: Bool = not (gen is gPyrBindGen)
+  if bindsStale { gPyrBindGen = gen }
+  let mips: Int = gbPyramidMips()
+  var i: Int = 0
+  loop i < mips {
+    # Level 0 reduces the G-buffer depth; every later level reduces the one above.
+    var pipeline: Ptr = gbPyrReducePipeline()
+    if i is 0 { pipeline = gbPyrFromDepthPipeline() }
+    # C nulls the per-mip binds on resize; also rebuild when the gen changed.
+    if bindsStale {
+      let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: pipeline, groupIndex: 0 as UInt32)
+      var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 1)
+      entries.add(value: { binding: 0 as UInt32, textureView: gbPyrSrcView(i: i) })
+      let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 1 as UInt64, entries: entries.data }
+      gbSetPyrBind(i: i, bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
+      wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+    }
+    runFullscreen(pipeline: pipeline, bind: gbPyrBind(i: i), target: gbPyrRtView(i: i))
+    i = i + 1
+  }
+}
+
+# Public wrapper: the render graph's depth-pyramid step (was gbuffer.buildDepthPyramid).
+func buildDepthPyramid() pub {
+  depthPyramid()
+}

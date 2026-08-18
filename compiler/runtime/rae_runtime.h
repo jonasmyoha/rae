@@ -915,6 +915,14 @@ void* rae_gb_taa_target_view(void);
 void* rae_gb_taa_history_view(void);
 void* rae_gb_taa_bind(int64_t idx);
 void rae_gb_set_taa_bind(int64_t idx, void* b);
+/* Depth-pyramid build in Rae (#504). */
+int64_t rae_gb_pyramid_ready(void);
+void* rae_gb_pyr_from_depth_pipeline(void);
+void* rae_gb_pyr_reduce_pipeline(void);
+void* rae_gb_pyr_src_view(int64_t i);
+void* rae_gb_pyr_rt_view(int64_t i);
+void* rae_gb_pyr_bind(int64_t i);
+void rae_gb_set_pyr_bind(int64_t i, void* b);
 void* rae_gb_view_a(void);
 void* rae_gb_view_b(void);
 void* rae_gb_view_c(void);
