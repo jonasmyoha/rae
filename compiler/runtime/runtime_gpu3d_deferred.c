@@ -846,35 +846,31 @@ static void gb_run_fullscreen(WGPURenderPipeline pipeline, WGPUBindGroup bind,
 /* Build the depth pyramid: mip 0 from the G-buffer's depth, then each
  * level from the one above. Each level is a separate pass because a level
  * cannot be read until the level that produces it has finished. */
-void rae_ext_gbuffer_depthPyramid(void) {
-    if (!g_wgpu_dev || !gb_depth_view) return;
+/* The depth-pyramid build runs in Rae now (lib/gbuffer_passes.rae:depthPyramid,
+ * #504): a loop of single-entry fullscreen passes, each reading the previous
+ * mip and writing the next. C keeps the pyramid targets + the two pipelines and
+ * exposes per-mip accessors; the source for level i is the G-buffer depth at
+ * mip 0, else the previous mip's source view. */
+int64_t rae_gb_pyramid_ready(void) {
+    if (!g_wgpu_dev || !gb_depth_view) return 0;
     gb_deferred_init_pipelines();
     gb_deferred_ensure();
-    if (!gb_pyramid_tex || !gb_pyr_from_depth_pipeline || !gb_pyr_reduce_pipeline) return;
-
-    for (int i = 0; i < gb_pyramid_mips; i++) {
-        if (!gb_pyr_bind[i]) {
-            WGPURenderPipeline p = (i == 0) ? gb_pyr_from_depth_pipeline : gb_pyr_reduce_pipeline;
-            WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(p, 0);
-            WGPUBindGroupEntry e; memset(&e, 0, sizeof(e));
-            e.binding = 0;
-            e.textureView = (i == 0) ? gb_depth_view : gb_pyramid_src[i - 1];
-            WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
-            bgd.layout = bgl; bgd.entryCount = 1; bgd.entries = &e;
-            gb_pyr_bind[i] = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
-            wgpuBindGroupLayoutRelease(bgl);
-        }
-        gb_run_fullscreen(i == 0 ? gb_pyr_from_depth_pipeline : gb_pyr_reduce_pipeline,
-                          gb_pyr_bind[i], gb_pyramid_rt[i]);
-    }
-    if (getenv("RAE_GBUFFER_DEBUG")) {
-        static int logged = 0;
-        if (!logged) {
-            fprintf(stderr, "[deferred] depth pyramid: %dx%d, %d mips\n",
-                    gb_pyramid_w, gb_pyramid_h, gb_pyramid_mips);
-            logged = 1;
-        }
-    }
+    return (gb_pyramid_tex && gb_pyr_from_depth_pipeline && gb_pyr_reduce_pipeline) ? 1 : 0;
+}
+void* rae_gb_pyr_from_depth_pipeline(void) { return (void*)gb_pyr_from_depth_pipeline; }
+void* rae_gb_pyr_reduce_pipeline(void)     { return (void*)gb_pyr_reduce_pipeline; }
+void* rae_gb_pyr_src_view(int64_t i) {
+    if (i <= 0) return (void*)gb_depth_view;
+    return (i - 1 < GB_PYRAMID_MAX_MIPS) ? (void*)gb_pyramid_src[i - 1] : NULL;
+}
+void* rae_gb_pyr_rt_view(int64_t i) {
+    return (i >= 0 && i < GB_PYRAMID_MAX_MIPS) ? (void*)gb_pyramid_rt[(int)i] : NULL;
+}
+void* rae_gb_pyr_bind(int64_t i) {
+    return (i >= 0 && i < GB_PYRAMID_MAX_MIPS) ? (void*)gb_pyr_bind[(int)i] : NULL;
+}
+void rae_gb_set_pyr_bind(int64_t i, void* b) {
+    if (i >= 0 && i < GB_PYRAMID_MAX_MIPS) gb_pyr_bind[(int)i] = (WGPUBindGroup)b;
 }
 
 /* Deferred lighting. Sun direction points TOWARD the scene, matching
