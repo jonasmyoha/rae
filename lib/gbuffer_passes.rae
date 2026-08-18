@@ -9,8 +9,12 @@
 import core
 import gbuffer
 import scene3d
+import vec3
+import sky
 open gbuffer
 open scene3d
+open vec3
+open sky
 open webgpu/webgpu
 import webgpu/context
 
@@ -186,4 +190,121 @@ func ssao(camX: copy Float, camY: copy Float, camZ: copy Float) pub {
 # Public wrapper: the render graph's SSAO step (was gbuffer.ssaoPass).
 func ssaoPass(camera: view Camera3d) pub {
   ssao(camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z)
+}
+
+# ----- lighting: the deferred shading pass (#504) ----------------------------
+# Reads the whole G-buffer + AO + the shadow cascades, writes linear HDR
+# radiance into the lit target. The large uniform (inverse viewProj + camera/
+# sun/sky params + the Rae-cooked Hosek state) is C frame-math, uploaded by
+# gbLightUpload; Rae builds the 9-entry bind and runs the pass. The lighting
+# pipeline stays C for now (its creation guards the shared init block).
+func gbLightUpload(camX: Float, camY: Float, camZ: Float, exposure: Float, sunX: Float, sunY: Float, sunZ: Float, sunR: Float, sunG: Float, sunB: Float, skyR: Float, skyG: Float, skyB: Float, gndR: Float, gndG: Float, gndB: Float, skyKind: Float, turbidity: Float, skyExposure: Float, sunSizeRad: Float, zenR: Float, zenG: Float, zenB: Float, bands: Float, horR: Float, horG: Float, horB: Float, discI: Float) extern("rae_gb_light_upload")
+func skyHosekPush(index: Int, value: Float) extern("rae_ext_gbuffer_skyHosekPush")
+func gbLightPipeline() extern("rae_gb_light_pipeline") ret Ptr
+func gbLitView() extern("rae_gb_lit_view") ret Ptr
+func gbLightBind() extern("rae_gb_light_bind") ret Ptr
+func gbSetLightBind(bind: Ptr) extern("rae_gb_set_light_bind")
+func gbShadowFrameUbuf() extern("rae_gb_shadow_frame_ubuf") ret Ptr
+func gbShadowFrameBytes() extern("rae_gb_shadow_frame_bytes") ret Int
+func gbShadowArrayView() extern("rae_gb_shadow_array_view") ret Ptr
+func gbShadowSampler() extern("rae_gb_shadow_sampler") ret Ptr
+
+var gLightBindGen: Int = -1
+var gLightBindMade: Bool = false
+
+# Cooked Hosek-Wilkie coefficients pushed before lighting; three vec4 per
+# channel, matching the WGSL `hosek` layout.
+func pushHosekChannel(c: view HosekChannel, base: view Int) {
+  skyHosekPush(index: base + 0, value: c.a)
+  skyHosekPush(index: base + 1, value: c.b)
+  skyHosekPush(index: base + 2, value: c.c)
+  skyHosekPush(index: base + 3, value: c.d)
+  skyHosekPush(index: base + 4, value: c.e)
+  skyHosekPush(index: base + 5, value: c.f)
+  skyHosekPush(index: base + 6, value: c.g)
+  skyHosekPush(index: base + 7, value: c.h)
+  skyHosekPush(index: base + 8, value: c.i)
+  skyHosekPush(index: base + 9, value: c.radiance)
+}
+
+# Low-level lighting: upload the uniform (C), build the bind (rebuilt on resize),
+# run the fullscreen pass into the lit target.
+func lighting(camX: copy Float, camY: copy Float, camZ: copy Float, exposure: copy Float,
+              sunX: copy Float, sunY: copy Float, sunZ: copy Float,
+              sunR: copy Float, sunG: copy Float, sunB: copy Float,
+              skyR: copy Float, skyG: copy Float, skyB: copy Float,
+              gndR: copy Float, gndG: copy Float, gndB: copy Float,
+              skyKind: copy Float, turbidity: copy Float, skyExposure: copy Float,
+              sunSizeRad: copy Float, zenR: copy Float, zenG: copy Float, zenB: copy Float,
+              bands: copy Float, horR: copy Float, horG: copy Float, horB: copy Float,
+              discI: copy Float) {
+  if gbDeferredPrepare() is 0 { ret }
+  gbLightUpload(camX: camX, camY: camY, camZ: camZ, exposure: exposure,
+    sunX: sunX, sunY: sunY, sunZ: sunZ, sunR: sunR, sunG: sunG, sunB: sunB,
+    skyR: skyR, skyG: skyG, skyB: skyB, gndR: gndR, gndG: gndG, gndB: gndB,
+    skyKind: skyKind, turbidity: turbidity, skyExposure: skyExposure, sunSizeRad: sunSizeRad,
+    zenR: zenR, zenG: zenG, zenB: zenB, bands: bands, horR: horR, horG: horG, horB: horB, discI: discI)
+  let gen: Int = gbTargetsGen()
+  if not (gen is gLightBindGen) {
+    gLightBindGen = gen
+    gLightBindMade = false
+  }
+  if not gLightBindMade {
+    gLightBindMade = true
+    let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbLightPipeline(), groupIndex: 0 as UInt32)
+    var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 9)
+    entries.add(value: { binding: 0 as UInt32, buffer: gbLightUbuf(), size: gbLightBytes() as UInt64 })
+    entries.add(value: { binding: 1 as UInt32, textureView: gbViewA() })
+    entries.add(value: { binding: 2 as UInt32, textureView: gbViewB() })
+    entries.add(value: { binding: 3 as UInt32, textureView: gbViewC() })
+    entries.add(value: { binding: 4 as UInt32, textureView: gbViewDepth() })
+    entries.add(value: { binding: 5 as UInt32, textureView: gbAoView() })
+    entries.add(value: { binding: 6 as UInt32, buffer: gbShadowFrameUbuf(), size: gbShadowFrameBytes() as UInt64 })
+    entries.add(value: { binding: 7 as UInt32, textureView: gbShadowArrayView() })
+    entries.add(value: { binding: 8 as UInt32, sampler: gbShadowSampler() })
+    let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 9 as UInt64, entries: entries.data }
+    gbSetLightBind(bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
+    wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+  }
+  runFullscreen(pipeline: gbLightPipeline(), bind: gbLightBind(), target: gbLitView())
+}
+
+# Public: lighting with a bound sky environment (Hosek ambient + background).
+func lightingPassSky(camera: view Camera3d, light: view Light3d, sky: view Sky) pub {
+  let up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  let down: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0)
+  let skyC: Vec3 = skyIrradiance(sky: sky, n: up)
+  let gndC: Vec3 = skyIrradiance(sky: sky, n: down)
+  pushHosekChannel(c: sky.hosek.r, base: 0)
+  pushHosekChannel(c: sky.hosek.g, base: 12)
+  pushHosekChannel(c: sky.hosek.b, base: 24)
+  lighting(
+    camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z,
+    exposure: light.exposure,
+    sunX: light.sunDir.x, sunY: light.sunDir.y, sunZ: light.sunDir.z,
+    sunR: light.sunColor.x, sunG: light.sunColor.y, sunB: light.sunColor.z,
+    skyR: skyC.x, skyG: skyC.y, skyB: skyC.z,
+    gndR: gndC.x, gndG: gndC.y, gndB: gndC.z,
+    skyKind: skyKindCode(sky: sky), turbidity: sky.turbidity,
+    skyExposure: sky.exposure, sunSizeRad: sky.sunAngularRadius,
+    zenR: sky.zenithColor.x, zenG: sky.zenithColor.y, zenB: sky.zenithColor.z,
+    bands: sky.bands,
+    horR: sky.horizonColor.x, horG: sky.horizonColor.y, horB: sky.horizonColor.z,
+    discI: sky.sunDiscIntensity
+  )
+}
+
+# Public: lighting with the authored ambient hemisphere, no sky.
+func lightingPass(camera: view Camera3d, light: view Light3d) pub {
+  lighting(
+    camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z,
+    exposure: light.exposure,
+    sunX: light.sunDir.x, sunY: light.sunDir.y, sunZ: light.sunDir.z,
+    sunR: light.sunColor.x, sunG: light.sunColor.y, sunB: light.sunColor.z,
+    skyR: light.ambSky.x, skyG: light.ambSky.y, skyB: light.ambSky.z,
+    gndR: light.ambGround.x, gndG: light.ambGround.y, gndB: light.ambGround.z,
+    skyKind: 0.0, turbidity: 3.0, skyExposure: 1.0, sunSizeRad: 0.0047,
+    zenR: 0.0, zenG: 0.0, zenB: 0.0, bands: 1.0,
+    horR: 0.0, horG: 0.0, horB: 0.0, discI: 0.0
+  )
 }
