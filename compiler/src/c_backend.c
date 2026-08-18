@@ -2038,6 +2038,18 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     bool elem_is_container = elem_is_list || elem_is_smap || elem_is_imap;
     bool elem_needs_deep = elem_is_string || elem_is_container ||
         type_needs_deep_copy(ctx, module, (AstTypeRef*)elem, 0);
+    // Element C TYPE spelling (for casts/sizeof/pointer decls). A c_struct
+    // element emits its BARE C name (WGPUColor, not rae_WGPUColor) — the same
+    // name the List struct's `data` field uses — so List(WGPUColor) etc. work
+    // for building descriptor arrays over the WebGPU bindings (#503). c_structs
+    // are POD, so the bulk-copy path below is the one that uses it.
+    const char* elem_c_type = elem_mangled;
+    {
+      const AstDecl* c_elem_decl = find_type_decl(NULL, module, ebase);
+      if (c_elem_decl && c_elem_decl->kind == AST_DECL_TYPE &&
+          has_property(c_elem_decl->as.type_decl.properties, "c_struct"))
+        elem_c_type = str_to_cstr(ebase);
+    }
 
     fprintf(out, "RAE_UNUSED static void rae_deep_copy_%s(%s* dst, const %s* src) {\n",
             e->mangled, e->mangled, e->mangled);
@@ -2048,11 +2060,11 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       fprintf(out, "  dst->cap = src->cap;\n");
       fprintf(out, "  if (src->cap > 0) {\n");
       fprintf(out, "    dst->data = (%s*)rae_ext_rae_buf_alloc(src->cap, sizeof(%s));\n",
-              elem_mangled, elem_mangled);
+              elem_c_type, elem_c_type);
       if (!elem_needs_deep) {
         // POD path — bulk copy.
         fprintf(out, "    if (src->length > 0) memcpy(dst->data, src->data, (size_t)src->length * sizeof(%s));\n",
-                elem_mangled);
+                elem_c_type);
       } else {
         fprintf(out, "    for (int64_t __i = 0; __i < src->length; __i++) {\n");
         if (elem_is_opt) {
