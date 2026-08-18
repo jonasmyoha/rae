@@ -896,7 +896,22 @@ void rae_ext_gbuffer_skyHosekPush(int64_t index, float value) {
     rae_sky_hosek_push(index, value);
 }
 
-void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure,
+/* Lighting runs in Rae now (lib/gbuffer_passes.rae:lighting, #504). C keeps the
+ * large frame-derived uniform build (inverse viewProj + camera/sun/sky params +
+ * the Rae-cooked Hosek state) and uploads it; Rae builds the 9-entry bind (the
+ * G-buffer, AO, shadow cascades + sampler) and runs the fullscreen pass. The
+ * lighting PIPELINE stays C for now — its creation guards the shared TAA /
+ * light-uniform / shadow init block. */
+void* rae_gb_light_pipeline(void)     { return (void*)gb_light_pipeline; }
+void* rae_gb_lit_view(void)           { return (void*)gb_lit_view; }
+void* rae_gb_light_bind(void)         { return (void*)gb_light_bind; }
+void rae_gb_set_light_bind(void* b)   { gb_light_bind = (WGPUBindGroup)b; }
+void* rae_gb_shadow_frame_ubuf(void)  { return (void*)g3d_sm_frame_ubuf; }
+int64_t rae_gb_shadow_frame_bytes(void){ return 320; }
+void* rae_gb_shadow_array_view(void)  { return (void*)g3d_sm_array_view; }
+void* rae_gb_shadow_sampler(void)     { return (void*)g3d_sm_sampler; }
+
+void rae_gb_light_upload(float camX, float camY, float camZ, float exposure,
                               float sunX, float sunY, float sunZ,
                               float sunR, float sunG, float sunB,
                               float skyR, float skyG, float skyB,
@@ -905,10 +920,7 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
                               float sunSizeRad, float zenR, float zenG, float zenB,
                               float bands, float horR, float horG, float horB,
                               float discI) {
-    if (!g_wgpu_dev || !gb_a_view) return;
-    gb_deferred_init_pipelines();
-    gb_deferred_ensure();
-    if (!gb_light_pipeline || !gb_lit_view) return;
+    if (!gb_light_ubuf) return;
 
     float u[GB_LIGHT_BYTES / 4];
     memset(u, 0, sizeof(u));
@@ -943,25 +955,6 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
      * what the earlier C version cost. */
     memcpy(u + 68, rae_sky_hosek, 36 * sizeof(float));
     wgpuQueueWriteBuffer(g_wgpu_queue, gb_light_ubuf, 0, u, GB_LIGHT_BYTES);
-
-    if (!gb_light_bind) {
-        WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(gb_light_pipeline, 0);
-        WGPUBindGroupEntry e[9]; memset(e, 0, sizeof(e));
-        e[0].binding = 0; e[0].buffer = gb_light_ubuf; e[0].size = GB_LIGHT_BYTES;
-        e[1].binding = 1; e[1].textureView = gb_a_view;
-        e[2].binding = 2; e[2].textureView = gb_b_view;
-        e[3].binding = 3; e[3].textureView = gb_c_view;
-        e[4].binding = 4; e[4].textureView = gb_depth_view;
-        e[5].binding = 5; e[5].textureView = gb_ao_view;
-        e[6].binding = 6; e[6].buffer = g3d_sm_frame_ubuf; e[6].size = 320;
-        e[7].binding = 7; e[7].textureView = g3d_sm_array_view;
-        e[8].binding = 8; e[8].sampler = g3d_sm_sampler;
-        WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
-        bgd.layout = bgl; bgd.entryCount = 9; bgd.entries = e;
-        gb_light_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
-        wgpuBindGroupLayoutRelease(bgl);
-    }
-    gb_run_fullscreen(gb_light_pipeline, gb_light_bind, gb_lit_view);
 }
 
 /* Composite radiance into the presentable offscreen. */
