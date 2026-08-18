@@ -1,0 +1,39 @@
+# A List of a c_struct element (#503). The container's generated deep-copy and
+# allocation helpers must spell the element with its BARE C name (div_t), not
+# the mangled rae_div_t — otherwise List(<c_struct>) fails to compile. This is
+# what lets descriptor arrays (WGPURenderPassColorAttachment[], bind-group
+# entries, …) be built in Rae for the WebGPU renderer migration.
+cheader "stdlib.h"
+
+type div_t: c_struct {
+  quot: Int32
+  rem: Int32
+}
+
+# `copy List` forces the generated deep-copy helper — the path that failed to
+# compile before the fix.
+func sumQuots(items: copy List(div_t)) ret Int {
+  var total: Int = 0
+  loop entry: div_t in items {
+    total = total + (entry.quot as Int)
+  }
+  ret total
+}
+
+func main() {
+  var items: List(div_t) = createList(div_t, cap: 3)
+  let a: div_t = { quot: 7, rem: 3 }
+  let b: div_t = { quot: 10, rem: 1 }
+  let c: div_t = { quot: 5, rem: 2 }
+  items.add(value: a)
+  items.add(value: b)
+  items.add(value: c)
+  log("len {items.length}")
+  if let first: div_t = items.get(index: 0) {
+    let q: Int = first.quot as Int
+    let r: Int = first.rem as Int
+    log("first {q} {r}")
+  }
+  let total: Int = sumQuots(items: items)
+  log("quot sum {total}")
+}
