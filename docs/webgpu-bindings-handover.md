@@ -115,9 +115,22 @@ for the pattern: `main.rae` + `config.cmd` (`run`) + `expected.txt`).
   values collide with the header's enumerators — reference them as bare consts
   via `open webgpu/webgpu` instead); a `view Buffer(T)`/`Buffer(T)` arg to a
   `Ptr` param gets deref'd, so type the param `Ptr` and pass a List's `.data`.
-- **#503–#504 — migrate the GBuffer geometry pass, then the rest** (lighting,
-  ssao, taa, shadow, sky, gpu2d) to Rae over the bindings. WGSL shader source
-  stays (as Rae string constants + `wgpuDeviceCreateShaderModule`).
+- **#503 — migrate the GBuffer geometry pass. ◑ IN PROGRESS.** Done: the
+  render-pass **encoding** for all three draw kinds is now in Rae
+  (lib/gbuffer.rae) — `draw` (static) and `drawSkinned` join `drawRecords`, each
+  building its one DrawU record with packInstanceRecord into a reusable
+  module-level scratch (no per-frame alloc; 573 zero-alloc verified) and issuing
+  through the shared `gbIssueInstanced`. The C `rae_ext_gbuffer_draw` /
+  `_drawSkinned` are deleted; C keeps only `rae_gb_*` context accessors (now incl.
+  skin pipeline/bind/mesh). **Remaining (the bulk of #503):** move resource
+  **creation** — targets (textures/views), the static + skin render pipelines,
+  bind groups, frame uniform + draws buffers, samplers — and `begin()`/`end()`
+  pass setup into Rae, constructing the WGPU*Descriptor c_structs there. That is
+  large and descriptor-heavy (vertex layouts, blend, depth-stencil, MSAA, the
+  rgba target formats) and wants careful visual checks. WGSL stays as Rae string
+  constants + `wgpuDeviceCreateShaderModule`.
+- **#504 — migrate the rest** (lighting, ssao, taa, shadow, sky, gpu2d) to Rae
+  over the bindings.
 - **#505 — audit + gate**: no bespoke high-level graphics C helper remains; add a
   gate rejecting new renderer-specific C functions.
 - **#506 — re-sequence grass** (#486+) onto the bindings.
