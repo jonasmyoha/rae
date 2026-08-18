@@ -905,6 +905,16 @@ int64_t rae_gb_shadow_frame_bytes(void);
 void* rae_gb_shadow_array_view(void);
 void* rae_gb_shadow_sampler(void);
 void rae_ext_gbuffer_skyHosekPush(int64_t index, float value);
+/* TAA pass in Rae (#504). */
+int64_t rae_gb_taa_ready(void);
+int64_t rae_gb_taa_begin(void);
+void rae_gb_taa_end(void);
+void* rae_gb_taa_pipeline(void);
+void* rae_gb_taa_ubuf(void);
+void* rae_gb_taa_target_view(void);
+void* rae_gb_taa_history_view(void);
+void* rae_gb_taa_bind(int64_t idx);
+void rae_gb_set_taa_bind(int64_t idx, void* b);
 void* rae_gb_view_a(void);
 void* rae_gb_view_b(void);
 void* rae_gb_view_c(void);
