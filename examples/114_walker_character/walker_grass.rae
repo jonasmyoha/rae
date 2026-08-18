@@ -15,12 +15,14 @@
 # is what those phases build on, and is reusable for rocks/crowds/particles.
 import core
 import math
+import math3d
 import noise
 import gltf
 import gpu3d
 import scene3d
 import mesh3d
 import vec3
+open math3d
 open gltf
 open gpu3d
 open scene3d
@@ -28,7 +30,7 @@ open mesh3d
 
 const grassPerCell: Int = 10
 const grassBladeCount: Int = 490
-const grassInstanceFloats: Int = 5880   # grassBladeCount * 12
+const grassRecordFloats: Int = 19600   # grassBladeCount * gbuffer.instanceRecordFloats (40)
 const grassWindTau: Float = 6.283185307179586
 
 # One clump descriptor: the planted base it sways around, a yaw for variety, a
@@ -48,9 +50,10 @@ type GrassField {
   groundZ: Float
   meshId: Int
   blades: List(GrassBlade)
-  # Reused staging buffer: grassBladeCount * 12 floats, refilled per frame and
-  # handed to gbuffer.drawInstanced. Never reallocated.
-  instances: List(Float)
+  # Reused DrawU staging buffer: grassBladeCount * gbuffer.instanceRecordFloats,
+  # refilled in Rae each frame and handed to gbuffer.drawRecords. Never
+  # reallocated.
+  records: List(Float)
 }
 
 func grassBladeAt(blades: view List(GrassBlade), index: view Int) ret GrassBlade {
@@ -115,35 +118,32 @@ func grassGust(phase: view Float, baseX: view Float, time: view Float) ret Float
     + 0.06 * math.sin(x: time * 3.9 + phase * 1.7 + baseX * 0.15)
 }
 
-# Pack every blade into the instance stream: base transform, this frame's tilt
-# and last frame's tilt (for correct TAA motion while swaying), scale and a
-# per-blade green. Then one instanced draw for the whole field.
+# Build one DrawU record per blade — this frame's sway and last frame's sway
+# (so TAA gets correct motion while the field waves), plus a per-blade green —
+# then one instanced draw for the whole field. The matrices and the record
+# layout are gbuffer's Rae helpers; nothing here touches raw float offsets.
 func drawGrassField(field: mod GrassField, time: view Float, dt: view Float, toon: view Int) {
   var index: Int = 0
   loop index < grassBladeCount {
     let blade: GrassBlade = grassBladeAt(blades: field.blades, index: index)
     let gust: Float = grassGust(phase: blade.phase, baseX: blade.baseX, time: time)
     let prevGust: Float = grassGust(phase: blade.phase, baseX: blade.baseX, time: time - dt)
+    let model: Mat4 = gbuffer.swayModel(
+      x: blade.baseX, y: blade.baseY, z: blade.baseZ, yaw: blade.yaw,
+      tiltX: gust * 0.6, tiltY: gust, scale: blade.scale)
+    let prevModel: Mat4 = gbuffer.swayModel(
+      x: blade.baseX, y: blade.baseY, z: blade.baseZ, yaw: blade.yaw,
+      tiltX: prevGust * 0.6, tiltY: prevGust, scale: blade.scale)
     # Per-blade green: a small deterministic spread off the base colour.
     let cvar: Float = blade.phase / grassWindTau
-    let base: Int = index * 12
-    field.instances.set(index: base, value: blade.baseX)
-    field.instances.set(index: base + 1, value: blade.baseY)
-    field.instances.set(index: base + 2, value: blade.baseZ)
-    field.instances.set(index: base + 3, value: blade.yaw)
-    field.instances.set(index: base + 4, value: gust * 0.6)
-    field.instances.set(index: base + 5, value: gust)
-    field.instances.set(index: base + 6, value: prevGust * 0.6)
-    field.instances.set(index: base + 7, value: prevGust)
-    field.instances.set(index: base + 8, value: blade.scale)
-    field.instances.set(index: base + 9, value: 0.13 + cvar * 0.09)
-    field.instances.set(index: base + 10, value: 0.33 + cvar * 0.16)
-    field.instances.set(index: base + 11, value: 0.05 + cvar * 0.05)
+    gbuffer.packInstanceRecord(records: field.records, slot: index,
+      model: model, prevModel: prevModel,
+      r: 0.13 + cvar * 0.09, g: 0.33 + cvar * 0.16, b: 0.05 + cvar * 0.05,
+      metallic: 0.0, roughness: 0.95, emissive: 0.0, toon: toon)
     index = index + 1
   }
-  gbuffer.drawInstanced(mesh: field.meshId, instances: field.instances.data,
-                        count: grassBladeCount, metallic: 0.0, roughness: 0.95,
-                        emissive: 0.0, toon: toon)
+  gbuffer.drawRecords(mesh: field.meshId, records: field.records.data,
+                      count: grassBladeCount)
 }
 
 func createGrassField(assets: view String, groundZ: view Float) ret GrassField {
@@ -156,15 +156,15 @@ func createGrassField(assets: view String, groundZ: view Float) ret GrassField {
     })
     index = index + 1
   }
-  let instances: List(Float) = createList(Float, cap: grassInstanceFloats)
+  let records: List(Float) = createList(Float, cap: grassRecordFloats)
   var floatIndex: Int = 0
-  loop floatIndex < grassInstanceFloats {
-    instances.add(value: 0.0)
+  loop floatIndex < grassRecordFloats {
+    records.add(value: 0.0)
     floatIndex = floatIndex + 1
   }
   ret GrassField {
     centreCellX: 1000000000, centreCellY: 1000000000,
     groundZ: groundZ, meshId: grassMesh.id,
-    blades: own blades, instances: own instances
+    blades: own blades, records: own records
   }
 }
