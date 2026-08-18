@@ -54,11 +54,12 @@ func begin(viewProj: view Mat4, clearR: Float, clearG: Float, clearB: Float) ext
 func draw(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emissive: Float, toon: Int) extern
 func drawSkinned(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emissive: Float, toon: Int) extern
 # Instanced G-buffer draw (grass epic #485): one draw for `count` copies of a
-# mesh. `instances` is `count` * 12 floats — x,y,z, yaw, tiltX, tiltY,
-# prevTiltX, prevTiltY, scale, r,g,b per instance — material props shared,
-# colour per instance. The reusable instancing primitive for vegetation,
-# rocks, crowds; grass uses it first.
-func drawInstanced(mesh: Int, instances: view Buffer(Float), count: Int, metallic: Float, roughness: Float, emissive: Float, toon: Int) extern
+# mesh. LOW-LEVEL — `records` is `count` * instanceRecordFloats fully built
+# DrawU entries (model, prevModel, colour, packed params), assembled in Rae by
+# swayModel + packInstanceRecord below. C only copies them and issues the draw;
+# it does no math. The reusable instancing primitive for vegetation, rocks,
+# crowds; grass uses it first.
+func drawRecords(mesh: Int, records: view Buffer(Float), count: Int) extern
 func drawMetaballs(packedBalls: view Buffer(Float), count: Int, packedColors: view Buffer(Float), smoothing: Float, camX: Float, camY: Float, camZ: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
 func sdfShutdown() extern
 func end() extern
@@ -120,6 +121,89 @@ func modelMatrixOf(t: view Transform3d) pub ret Mat4 {
   let ryrxs: Mat4 = mat4Mul(a: ry, b: rxs)
   let rot: Mat4 = mat4Mul(a: rz, b: ryrxs)
   ret mat4Mul(a: tr, b: rot)
+}
+
+# ----- instanced draw: DrawU records built in Rae (grass epic #485) --------
+#
+# The instanced path hands the GPU seam ready-made DrawU records, the same way
+# `drawInstance` hands it a ready-made Mat4. The matrix and the G-buffer's
+# packed wire format both live HERE, in Rae — C's `drawRecords` only copies and
+# draws. One DrawU record is `instanceRecordFloats` floats:
+#   [0..15]  model         [16..31] prevModel
+#   [32..34] albedo rgb    [35] metallic
+#   [36] roughness  [37] emissive-or-occlusion  [38] shading mode  [39] spare
+# mirroring the C staging layout (GB_DRAW_FLOATS). Kept in one Rae place so a
+# caller never touches raw offsets.
+const instanceRecordFloats: Int = 40
+
+# Shading-mode field values, mirroring GB_MODE_* in the runtime. The 2-bit
+# field is stored as a Float in 0..1 so it survives the rgb10a2 target.
+const gbModeLit: Float = 0.0
+const gbModeEmissive: Float = 0.3333333
+const gbModeToon: Float = 1.0
+# Emissive is log-encoded into the 8-bit channel it shares with occlusion;
+# lighting decodes with the matching constant (GB_EMISSIVE_LOG_K).
+const gbEmissiveLogK: Float = 6.91
+
+# Position + yaw + two wind-driven tilt angles + uniform scale -> a model
+# matrix, as T * Rz(yaw) * Rx(tiltX) * Ry(tiltY) * S(scale). This is what the C
+# `gb_sway_model` used to compute; it is plain Mat4 composition, so it belongs
+# in Rae like every other transform the renderer builds.
+func swayModel(x: view Float, y: view Float, z: view Float, yaw: view Float,
+               tiltX: view Float, tiltY: view Float, scale: view Float) pub ret Mat4 {
+  let scaleM: Mat4 = mat4Scale(s: scale)
+  let ry: Mat4 = mat4RotateY(angle: tiltY)
+  let rx: Mat4 = mat4RotateX(angle: tiltX)
+  let rz: Mat4 = mat4RotateZ(angle: yaw)
+  let tr: Mat4 = mat4Translate(x: x, y: y, z: z)
+  let rys: Mat4 = mat4Mul(a: ry, b: scaleM)
+  let rxrys: Mat4 = mat4Mul(a: rx, b: rys)
+  let rot: Mat4 = mat4Mul(a: rz, b: rxrys)
+  ret mat4Mul(a: tr, b: rot)
+}
+
+# The shared param encode both draw paths need: emissive log-encoded into the
+# channel it shares with occlusion, plus the shading-mode flag. A non-emitter
+# stores 1.0 there — "unoccluded", the right default until AO writes something.
+func encodeEmissive(emissive: view Float, toon: view Int) ret Float {
+  if toon is 1 { ret 1.0 }
+  if emissive > 0.0 {
+    let e: Float = math.math_log(x: 1.0 + emissive) / gbEmissiveLogK
+    if e > 1.0 { ret 1.0 }
+    ret e
+  }
+  ret 1.0
+}
+
+func encodeMode(emissive: view Float, toon: view Int) ret Float {
+  if toon is 1 { ret gbModeToon }
+  if emissive > 0.0 { ret gbModeEmissive }
+  ret gbModeLit
+}
+
+# Pack one fully-built DrawU record into `records` at instance `slot`. Writes
+# `instanceRecordFloats` floats; callers size the buffer by that constant and
+# never see the layout.
+func packInstanceRecord(records: mod List(Float), slot: view Int,
+                        model: view Mat4, prevModel: view Mat4,
+                        r: view Float, g: view Float, b: view Float,
+                        metallic: view Float, roughness: view Float,
+                        emissive: view Float, toon: view Int) pub {
+  let base: Int = slot * instanceRecordFloats
+  var i: Int = 0
+  loop i < 16 {
+    records.set(index: base + i, value: mat4Get(m: model, i: i))
+    records.set(index: base + 16 + i, value: mat4Get(m: prevModel, i: i))
+    i = i + 1
+  }
+  records.set(index: base + 32, value: r)
+  records.set(index: base + 33, value: g)
+  records.set(index: base + 34, value: b)
+  records.set(index: base + 35, value: metallic)
+  records.set(index: base + 36, value: roughness)
+  records.set(index: base + 37, value: encodeEmissive(emissive: emissive, toon: toon))
+  records.set(index: base + 38, value: encodeMode(emissive: emissive, toon: toon))
+  records.set(index: base + 39, value: 0.0)
 }
 
 # Write one mesh instance's surface attributes. Note what is NOT passed:
