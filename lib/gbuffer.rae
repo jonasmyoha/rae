@@ -424,7 +424,35 @@ func ensureSkinBind() {
   wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
   gbSetSkinBind(bind: bind)
 }
-func drawMetaballs(packedBalls: view Buffer(Float), count: Int, packedColors: view Buffer(Float), smoothing: Float, camX: Float, camY: Float, camZ: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
+# Metaball cluster into the G-buffer (#392, ported to Rae #504): a fullscreen
+# raymarch that writes packed G-buffer attributes + depth into the OPEN geometry
+# pass, so a metaball surface is shaded by the same lighting as every triangle.
+# C does the dense per-cluster prep (inverse-viewProj frame uniform, ball/colour
+# uploads, params, bind) and returns the group index; Rae issues the draw into
+# the pass and restores the static pipeline after, like drawSkinned does.
+func gbSdfPrepare(packedBalls: Ptr, count: Int, packedColors: Ptr, smoothing: Float, camX: Float, camY: Float, camZ: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern("rae_gb_sdf_prepare") ret Int
+func gbSdfPipeline() extern("rae_gb_sdf_pipeline") ret Ptr
+func gbSdfBind(gi: Int) extern("rae_gb_sdf_bind") ret Ptr
+
+func drawMetaballs(packedBalls: copy Ptr, count: copy Int, packedColors: copy Ptr,
+                   smoothing: copy Float, camX: copy Float, camY: copy Float, camZ: copy Float,
+                   metallic: copy Float, roughness: copy Float,
+                   emR: copy Float, emG: copy Float, emB: copy Float) pub {
+  let gi: Int = gbSdfPrepare(packedBalls: packedBalls, count: count, packedColors: packedColors,
+    smoothing: smoothing, camX: camX, camY: camY, camZ: camZ,
+    metallic: metallic, roughness: roughness, emR: emR, emG: emG, emB: emB)
+  if gi < 0 { ret }
+  let pass: Ptr = gbPass()
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: gbSdfPipeline())
+  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+    group: gbSdfBind(gi: gi), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: 3 as UInt32,
+    instanceCount: 1 as UInt32, firstVertex: 0 as UInt32, firstInstance: 0 as UInt32)
+  # Hand the pass back to the static pipeline for any following draw.
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: gbStaticPipeline())
+  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+    group: gbStaticBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+}
 func sdfShutdown() extern
 # Geometry-pass finish/submit accessors (#503). The pass encoding (end/finish/
 # submit) runs in Rae; C keeps the encoder handle and the frame-clear.

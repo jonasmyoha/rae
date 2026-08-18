@@ -814,6 +814,12 @@ int64_t rae_gb_mesh_ready(int64_t mesh);
 void* rae_gb_mesh_vbuf(int64_t mesh);
 void* rae_gb_mesh_ibuf(int64_t mesh);
 int64_t rae_gb_mesh_icount(int64_t mesh);
+/* G-buffer metaball draw in Rae (#504). */
+int64_t rae_gb_sdf_prepare(void* packedBalls, int64_t count, void* packedColors,
+                           float smoothing, float camX, float camY, float camZ,
+                           float metallic, float roughness, float emR, float emG, float emB);
+void* rae_gb_sdf_pipeline(void);
+void* rae_gb_sdf_bind(int64_t gi);
 /* Skinned single draw ported to Rae (#503). */
 void* rae_gb_skin_pipeline(void);
 void* rae_gb_skin_bind(void);
