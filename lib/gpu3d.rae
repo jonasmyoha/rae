@@ -46,6 +46,8 @@
 import core
 import shadow3d
 open shadow3d
+# The sun cascade shadow render moved to Rae (#504); endShadowPass calls it.
+import gbuffer_shadow
 # The sky the forward background draws (#418). sky.rae does not import this,
 # so the dependency runs one way only.
 import sky
@@ -443,7 +445,6 @@ func shadowBegin(cascades: view Buffer(Float), count: Int, resolution: Int,
 func shadowDraw(mesh: Int, model: view Mat4) extern
 func shadowDrawSkinned(mesh: Int, model: view Mat4) extern
 func shadowMetaballs(packedBalls: view Buffer(Float), count: Int, smoothing: Float) extern
-func shadowEnd() extern
 func shadowDrawCount() extern ret Int
 func shadowShutdown() extern
 
@@ -470,7 +471,7 @@ func drawShadowCasterSkinned(mesh: view MeshHandle, model: view Mat4) pub {
 }
 
 func endShadowPass() pub {
-  shadowEnd()
+  gbuffer_shadow.shadowEnd()
 }
 
 # How many casters the shadow pass rasterised. Exposed because a shadow
