@@ -444,34 +444,10 @@ static void gb_release_targets(void) {
  * gAlbedo/gNormal/gMaterial/gDepth as transient resources of this frame,
  * and aliasing them onto the forward frame's attachments would make that
  * declaration a lie the first time both frames ran. */
-static void gb_ensure_targets(void) {
-    int w = g_g2d_off_w, h = g_g2d_off_h;
-    if (w <= 0 || h <= 0) return;
-    if (gb_depth_view && w == gb_target_w && h == gb_target_h) return;
-    gb_release_targets();
-
-    WGPUTextureDescriptor td; memset(&td, 0, sizeof(td));
-    td.dimension = WGPUTextureDimension_2D;
-    td.size.width = (uint32_t)w; td.size.height = (uint32_t)h; td.size.depthOrArrayLayers = 1;
-    td.mipLevelCount = 1; td.sampleCount = 1;
-    td.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding;
-
-    td.format = WGPUTextureFormat_RGB10A2Unorm;
-    gb_a_tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
-    gb_a_view = wgpuTextureCreateView(gb_a_tex, NULL);
-    td.format = WGPUTextureFormat_RGBA8Unorm;
-    gb_b_tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
-    gb_b_view = wgpuTextureCreateView(gb_b_tex, NULL);
-    td.format = WGPUTextureFormat_RGBA8Unorm;
-    gb_c_tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
-    gb_c_view = wgpuTextureCreateView(gb_c_tex, NULL);
-    td.format = WGPUTextureFormat_Depth32Float;
-    gb_depth_tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
-    gb_depth_view = wgpuTextureCreateView(gb_depth_tex, NULL);
-
-    gb_target_w = w; gb_target_h = h;
-    gb_targets_gen++;
-}
+/* Target creation now lives in Rae (lib/gbuffer.rae:ensureTargets, #503): it
+ * builds each attachment's WGPUTextureDescriptor + view and stores the handles
+ * back via rae_gb_set_target, using the C accessors for size / resize check /
+ * release / commit above. */
 
 static void gb_init_pipeline(void) {
     if (gb_pipeline) return;
@@ -639,14 +615,39 @@ _Static_assert(sizeof(rae_Mat4) == 16 * sizeof(float),
  * Returns 1 when the pass is ready to encode, 0 otherwise. The command encoder,
  * render pass and attachment descriptors are built in Rae (lib/gbuffer.rae:
  * begin) over the bindings once this returns 1. */
-/* Ensure the pipelines and targets exist. Returns 1 when the pass can be built.
- * Buffers and bind groups are created in Rae (#503); the frame uniform is
- * uploaded by rae_gb_frame_uniform once Rae has created its buffer. */
+/* Ensure the pipelines exist. Returns 1 when a device + pipeline are ready.
+ * Targets, buffers and bind groups are created in Rae (#503); the frame uniform
+ * is uploaded by rae_gb_frame_uniform once Rae has created its buffer. */
 int64_t rae_gb_prepare(void) {
     if (!g_wgpu_dev) return 0;
     gb_init_pipeline();
-    gb_ensure_targets();
-    return (gb_pipeline && gb_a_view && gb_b_view && gb_c_view && gb_depth_view) ? 1 : 0;
+    return gb_pipeline ? 1 : 0;
+}
+
+/* G-buffer target creation moved to Rae (#503). C keeps the offscreen size
+ * source, the resize check, the release, and the commit of the size + gen
+ * counter; Rae builds the WGPUTextureDescriptor / view for each attachment and
+ * stores the handles back here so every downstream pass reads them unchanged. */
+int64_t rae_gb_offscreen_w(void)  { return (int64_t)g_g2d_off_w; }
+int64_t rae_gb_offscreen_h(void)  { return (int64_t)g_g2d_off_h; }
+int64_t rae_gb_targets_match(int64_t w, int64_t h) {
+    return (gb_depth_view && (int)w == gb_target_w && (int)h == gb_target_h) ? 1 : 0;
+}
+int64_t rae_gb_targets_ready(void) {
+    return (gb_a_view && gb_b_view && gb_c_view && gb_depth_view) ? 1 : 0;
+}
+void rae_gb_release_targets_ext(void) { gb_release_targets(); }
+void rae_gb_set_target(int64_t idx, void* tex, void* view) {
+    switch ((int)idx) {
+        case 0: gb_a_tex = (WGPUTexture)tex;     gb_a_view = (WGPUTextureView)view;     break;
+        case 1: gb_b_tex = (WGPUTexture)tex;     gb_b_view = (WGPUTextureView)view;     break;
+        case 2: gb_c_tex = (WGPUTexture)tex;     gb_c_view = (WGPUTextureView)view;     break;
+        case 3: gb_depth_tex = (WGPUTexture)tex; gb_depth_view = (WGPUTextureView)view; break;
+        default: break;
+    }
+}
+void rae_gb_commit_targets(int64_t w, int64_t h) {
+    gb_target_w = (int)w; gb_target_h = (int)h; gb_targets_gen++;
 }
 
 /* Reset the per-frame counters and build+upload the TAA-jittered frame uniform
