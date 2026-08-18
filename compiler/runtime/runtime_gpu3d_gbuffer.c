@@ -557,27 +557,20 @@ static void gb_init_pipeline(void) {
         if (!gb_skin_pipeline) fprintf(stderr, "[gbuffer] skinned pipeline creation FAILED\n");
     }
 
-    WGPUBufferDescriptor ud; memset(&ud, 0, sizeof(ud));
-    ud.size = GB_FRAME_BYTES;
-    ud.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
-    gb_frame_ubuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &ud);
-
-    WGPUBufferDescriptor sd; memset(&sd, 0, sizeof(sd));
-    sd.size = (uint64_t)GB_MAX_DRAWS * GB_DRAW_FLOATS * sizeof(float);
-    sd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
-    gb_draw_sbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &sd);
-
-    /* The static bind group (frame uniform + draws buffer) is now created in Rae
-     * (lib/gbuffer.rae:ensureStaticBind, #503) over the bindings, using the
-     * pipeline's auto layout. It is stored back into gb_bind via
-     * rae_gb_set_static_bind so the draws and this pass see it. */
+    /* The frame uniform + draws storage buffers and the static bind group are
+     * now created in Rae (lib/gbuffer.rae: ensureBuffers / ensureStaticBind,
+     * #503) over the bindings, and stored back into the globals below via the
+     * setters, so the frame-uniform upload, the draws and the skin bind all see
+     * them. This function now creates only the pipelines. */
 }
 
-/* Accessors for the Rae-side static bind group creation (#503). */
+/* Accessors + setters for the Rae-side buffer / bind-group creation (#503). */
 void* rae_gb_frame_ubuf(void)      { return (void*)gb_frame_ubuf; }
 int64_t rae_gb_frame_bytes(void)   { return (int64_t)GB_FRAME_BYTES; }
 int64_t rae_gb_draws_size(void)    { return (int64_t)((uint64_t)GB_MAX_DRAWS * GB_DRAW_FLOATS * sizeof(float)); }
 void rae_gb_set_static_bind(void* bind) { gb_bind = (WGPUBindGroup)bind; }
+void rae_gb_set_frame_ubuf(void* buf)   { gb_frame_ubuf = (WGPUBuffer)buf; }
+void rae_gb_set_draws_buffer(void* buf) { gb_draw_sbuf = (WGPUBuffer)buf; }
 
 static void gb_init_view_pipeline(void) {
     if (gb_view_pipeline) return;
@@ -646,12 +639,20 @@ _Static_assert(sizeof(rae_Mat4) == 16 * sizeof(float),
  * Returns 1 when the pass is ready to encode, 0 otherwise. The command encoder,
  * render pass and attachment descriptors are built in Rae (lib/gbuffer.rae:
  * begin) over the bindings once this returns 1. */
-int64_t rae_gb_frame_prep(rae_Mat4* viewProj, float clearR, float clearG, float clearB) {
-    if (!g_wgpu_dev || !viewProj) return 0;
+/* Ensure the pipelines and targets exist. Returns 1 when the pass can be built.
+ * Buffers and bind groups are created in Rae (#503); the frame uniform is
+ * uploaded by rae_gb_frame_uniform once Rae has created its buffer. */
+int64_t rae_gb_prepare(void) {
+    if (!g_wgpu_dev) return 0;
     gb_init_pipeline();
     gb_ensure_targets();
-    if (!gb_pipeline || !gb_a_view || !gb_b_view || !gb_c_view || !gb_depth_view) return 0;
+    return (gb_pipeline && gb_a_view && gb_b_view && gb_c_view && gb_depth_view) ? 1 : 0;
+}
 
+/* Reset the per-frame counters and build+upload the TAA-jittered frame uniform
+ * (stateful CPU math that stays C). Needs the Rae-created frame uniform buffer. */
+int64_t rae_gb_frame_uniform(rae_Mat4* viewProj, float clearR, float clearG, float clearB) {
+    if (!viewProj || !gb_frame_ubuf) return 0;
     gb_draw_count = 0;
     /* Without this the counter climbs past GB_SDF_MAX_GROUPS after a few
      * frames and every later cluster is silently dropped — metaballs that
