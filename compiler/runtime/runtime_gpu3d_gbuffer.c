@@ -785,6 +785,10 @@ void rae_ext_gbuffer_drawSkinned(int64_t mesh, rae_Mat4* model, rae_Mat4* prevMo
     }
     d[39] = 0.0f;
 
+    /* Per-draw upload of this slice (see the note in rae_ext_gbuffer_draw). */
+    wgpuQueueWriteBuffer(g_wgpu_queue, gb_draw_sbuf,
+                         (size_t)gb_draw_count * GB_DRAW_FLOATS * sizeof(float),
+                         d, GB_DRAW_FLOATS * sizeof(float));
     wgpuRenderPassEncoderSetPipeline(gb_pass, gb_skin_pipeline);
     wgpuRenderPassEncoderSetBindGroup(gb_pass, 0, gb_skin_bind, 0, NULL);
     wgpuRenderPassEncoderSetVertexBuffer(gb_pass, 0, g3d_skin_vbuf[slot], 0,
@@ -844,6 +848,15 @@ void rae_ext_gbuffer_draw(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
         d[38] = GB_MODE_LIT;
     }
     d[39] = 0.0f;
+    /* Upload this instance's DrawU slice immediately, instead of the whole
+     * draws buffer once in end(). Per-draw uploads decouple the draws storage
+     * buffer so the instanced path (now in Rae, lib/gbuffer.rae:drawRecords)
+     * can upload its own slice without end() clobbering it (#502). The bytes
+     * land in queue order before the pass is submitted in end(), so the result
+     * is identical to the former single bulk upload. */
+    wgpuQueueWriteBuffer(g_wgpu_queue, gb_draw_sbuf,
+                         (size_t)gb_draw_count * GB_DRAW_FLOATS * sizeof(float),
+                         d, GB_DRAW_FLOATS * sizeof(float));
     wgpuRenderPassEncoderSetVertexBuffer(gb_pass, 0, g3d_mesh_vbuf[slot], 0,
                                          wgpuBufferGetSize(g3d_mesh_vbuf[slot]));
     wgpuRenderPassEncoderSetIndexBuffer(gb_pass, g3d_mesh_ibuf[slot],
@@ -854,59 +867,50 @@ void rae_ext_gbuffer_draw(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
     gb_draw_count++;
 }
 
-/* Instanced G-buffer draw: ONE DrawIndexed for `count` copies of `mesh`.
+/* ---- Instanced draw: context accessors for the Rae port (#502) -------------
  *
- * LOW-LEVEL PRIMITIVE ONLY (grass epic #485). `records` is `count` fully
- * built DrawU entries — GB_DRAW_FLOATS floats each: model, prevModel, colour
- * and packed params, already assembled by Rae (lib/gbuffer.rae:swayModel /
- * packInstanceRecord). C does NO math here: it copies the records into the
- * draws staging buffer and issues one instanced draw. The matrix and material
- * encoding live in Rae, exactly as the non-instanced `draw` path already hands
- * a Rae-built Mat4 across this boundary.
- *
- * Why this can be one draw with no new pipeline: the static vertex shader
- * already indexes `draws[instance_index]`, so N records drawn with
- * instanceCount=N / firstInstance=base give each instance its own transform,
- * colour and motion. `end()` uploads the whole draws buffer, so these ride
- * along automatically.
- *
- * Intermediate step: the records are CPU-built (in Rae) for now. Grass epic
- * #486 replaces the builder with a compute pass writing the same DrawU entries
- * on the GPU, and #487 replaces the loaded clump mesh with procedural blades. */
-void rae_ext_gbuffer_drawRecords(int64_t mesh, const float* records, int64_t count) {
-    if (!gb_pass || !records || count <= 0) return;
-    int slot = (int)mesh - 1;
-    if (slot < 0 || slot >= g3d_mesh_n || !g3d_mesh_vbuf[slot]) return;
-    if (gb_draw_count + (int)count > GB_MAX_DRAWS) {
-        count = (int64_t)(GB_MAX_DRAWS - gb_draw_count);
-        if (count <= 0) return;
-    }
-    int base = gb_draw_count;
-    memcpy(gb_draw_cpu + (size_t)base * GB_DRAW_FLOATS, records,
-           (size_t)count * GB_DRAW_FLOATS * sizeof(float));
-    gb_draw_count += (int)count;
-
-    /* A skinned draw may have left its pipeline bound; restore the static
-     * one (which owns the draws storage buffer) before the instanced draw. */
-    wgpuRenderPassEncoderSetPipeline(gb_pass, gb_pipeline);
-    wgpuRenderPassEncoderSetBindGroup(gb_pass, 0, gb_bind, 0, NULL);
-    wgpuRenderPassEncoderSetVertexBuffer(gb_pass, 0, g3d_mesh_vbuf[slot], 0,
-                                         wgpuBufferGetSize(g3d_mesh_vbuf[slot]));
-    wgpuRenderPassEncoderSetIndexBuffer(gb_pass, g3d_mesh_ibuf[slot],
-                                        WGPUIndexFormat_Uint32, 0,
-                                        wgpuBufferGetSize(g3d_mesh_ibuf[slot]));
-    wgpuRenderPassEncoderDrawIndexed(gb_pass, g3d_mesh_icount[slot],
-                                     (uint32_t)count, 0, 0, (uint32_t)base);
+ * The instanced G-buffer draw itself now lives in Rae (lib/gbuffer.rae:
+ * drawRecords): Rae uploads its records straight into the draws storage buffer
+ * via wgpuQueueWriteBuffer and issues one instanced wgpuRenderPassEncoder
+ * DrawIndexed over the generated bindings — no C shim does the draw. These
+ * accessors hand Rae the per-frame handles it needs (the pass encoder, the
+ * static pipeline/bind group, the mesh's vertex/index buffers) and the shared
+ * instance cursor, all as opaque Ptr / plain ints. The draws buffer is the
+ * same shared per-frame instance array the single draw() path fills; Rae writes
+ * its slice at [base .. base+count) and advances the cursor, exactly as the old
+ * C drawRecords did. The static vertex shader indexes draws[instance_index], so
+ * instanceCount=N / firstInstance=base gives each instance its own record. */
+void* rae_gb_pass(void)          { return (void*)gb_pass; }
+void* rae_gb_static_pipeline(void){ return (void*)gb_pipeline; }
+void* rae_gb_static_bind(void)   { return (void*)gb_bind; }
+void* rae_gb_draws_buffer(void)  { return (void*)gb_draw_sbuf; }
+int64_t rae_gb_max_draws(void)   { return (int64_t)GB_MAX_DRAWS; }
+int64_t rae_gb_draw_count(void)  { return (int64_t)gb_draw_count; }
+void rae_gb_advance_draws(int64_t count) {
+    if (count <= 0) return;
+    if (gb_draw_count + (int)count > GB_MAX_DRAWS) gb_draw_count = GB_MAX_DRAWS;
+    else gb_draw_count += (int)count;
 }
+/* 1 if an instanced draw of `mesh` can proceed this frame (pass open, mesh slot
+ * valid and its buffers uploaded), else 0 — Rae checks this rather than testing
+ * opaque Ptr handles for null. */
+int64_t rae_gb_mesh_ready(int64_t mesh) {
+    int slot = (int)mesh - 1;
+    if (!gb_pass) return 0;
+    if (slot < 0 || slot >= g3d_mesh_n) return 0;
+    if (!g3d_mesh_vbuf[slot] || !g3d_mesh_ibuf[slot]) return 0;
+    return 1;
+}
+void* rae_gb_mesh_vbuf(int64_t mesh)  { int s=(int)mesh-1; return (s>=0 && s<g3d_mesh_n)?(void*)g3d_mesh_vbuf[s]:NULL; }
+void* rae_gb_mesh_ibuf(int64_t mesh)  { int s=(int)mesh-1; return (s>=0 && s<g3d_mesh_n)?(void*)g3d_mesh_ibuf[s]:NULL; }
+int64_t rae_gb_mesh_icount(int64_t mesh){ int s=(int)mesh-1; return (s>=0 && s<g3d_mesh_n)?(int64_t)g3d_mesh_icount[s]:0; }
 
 /* Finish and submit the geometry pass. Uniform data uploads once here, not
  * per draw. */
 void rae_ext_gbuffer_end(void) {
     if (!gb_pass) return;
-    if (gb_draw_count > 0) {
-        wgpuQueueWriteBuffer(g_wgpu_queue, gb_draw_sbuf, 0, gb_draw_cpu,
-                             (size_t)gb_draw_count * GB_DRAW_FLOATS * sizeof(float));
-    }
+    /* Draws are uploaded per-draw now (see rae_ext_gbuffer_draw), so the draws
+     * storage buffer is already fully populated here — no bulk upload (#502). */
     if (getenv("RAE_GBUFFER_DEBUG")) {
         static int logged = 0;
         if (!logged) {
