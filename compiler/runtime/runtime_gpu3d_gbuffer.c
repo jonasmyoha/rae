@@ -567,15 +567,17 @@ static void gb_init_pipeline(void) {
     sd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
     gb_draw_sbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &sd);
 
-    WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(gb_pipeline, 0);
-    WGPUBindGroupEntry e[2]; memset(e, 0, sizeof(e));
-    e[0].binding = 0; e[0].buffer = gb_frame_ubuf; e[0].size = GB_FRAME_BYTES;
-    e[1].binding = 1; e[1].buffer = gb_draw_sbuf;  e[1].size = sd.size;
-    WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
-    bgd.layout = bgl; bgd.entryCount = 2; bgd.entries = e;
-    gb_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
-    wgpuBindGroupLayoutRelease(bgl);
+    /* The static bind group (frame uniform + draws buffer) is now created in Rae
+     * (lib/gbuffer.rae:ensureStaticBind, #503) over the bindings, using the
+     * pipeline's auto layout. It is stored back into gb_bind via
+     * rae_gb_set_static_bind so the draws and this pass see it. */
 }
+
+/* Accessors for the Rae-side static bind group creation (#503). */
+void* rae_gb_frame_ubuf(void)      { return (void*)gb_frame_ubuf; }
+int64_t rae_gb_frame_bytes(void)   { return (int64_t)GB_FRAME_BYTES; }
+int64_t rae_gb_draws_size(void)    { return (int64_t)((uint64_t)GB_MAX_DRAWS * GB_DRAW_FLOATS * sizeof(float)); }
+void rae_gb_set_static_bind(void* bind) { gb_bind = (WGPUBindGroup)bind; }
 
 static void gb_init_view_pipeline(void) {
     if (gb_view_pipeline) return;
