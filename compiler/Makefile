@@ -60,6 +60,7 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/ast.c \
        $(SRC_DIR)/parser.c \
        $(SRC_DIR)/pretty.c \
+       $(SRC_DIR)/bindgen.c \
        $(SRC_DIR)/c_backend.c \
        $(SRC_DIR)/c_call.c \
        $(SRC_DIR)/c_discovery.c \
