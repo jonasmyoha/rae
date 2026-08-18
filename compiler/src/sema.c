@@ -2743,6 +2743,14 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
             if (type_ref->generic_args) arg = sema_resolve_type_internal(ctx, module, symbols, type_ref->generic_args);
             base = type_get_buffer(ctx->type_registry, arg);
         }
+        // `Ptr` is the low-level opaque pointer primitive (general FFI, #497):
+        // an untyped void*, modelled as Buffer(void) so it reuses the void*
+        // lowering (emits `void*`, zero value NULL) rather than resolving to a
+        // phantom `rae_Ptr` struct. It's what generated C-ABI bindings use for
+        // handles, callbacks and raw data pointers.
+        else if (str_eq_cstr(name, "Ptr")) {
+            base = type_get_buffer(ctx->type_registry, type_get_void(ctx->type_registry));
+        }
         else if (str_eq_cstr(name, "Array")) {
             base = sema_resolve_array_type(ctx, module, symbols, type_ref, sema_resolve_type_internal);
             if (!base) base = type_get_void(ctx->type_registry);
