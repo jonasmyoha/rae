@@ -2729,6 +2729,14 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
     if (type_ref->parts) {
         Str name = type_ref->parts->text;
         if (str_eq_cstr(name, "Int")) base = type_get_int(ctx->type_registry);
+        else if (str_eq_cstr(name, "Int64")) base = type_get_int_sized(ctx->type_registry, 64, false);
+        else if (str_eq_cstr(name, "Int32")) base = type_get_int_sized(ctx->type_registry, 32, false);
+        else if (str_eq_cstr(name, "Int16")) base = type_get_int_sized(ctx->type_registry, 16, false);
+        else if (str_eq_cstr(name, "Int8")) base = type_get_int_sized(ctx->type_registry, 8, false);
+        else if (str_eq_cstr(name, "UInt64")) base = type_get_int_sized(ctx->type_registry, 64, true);
+        else if (str_eq_cstr(name, "UInt32")) base = type_get_int_sized(ctx->type_registry, 32, true);
+        else if (str_eq_cstr(name, "UInt16")) base = type_get_int_sized(ctx->type_registry, 16, true);
+        else if (str_eq_cstr(name, "UInt8")) base = type_get_int_sized(ctx->type_registry, 8, true);
         /* `Float` and `Float32` deliberately resolve to the SAME TypeInfo:
          * Float is an alias of Float32, not a third float type. Float64 is a
          * distinct type. See docs/primitive-types.md. */

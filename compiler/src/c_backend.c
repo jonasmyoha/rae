@@ -535,7 +535,14 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
       // DEBUG:
       // fprintf(stderr, "emit_type_ref_as_c_type: kind=%d name=%.*s\n", t->kind, (int)t->name.len, t->name.data);
 
-      if (t->kind == TYPE_INT) { if (is_ptr) fprintf(out, "rae_%s_Int64", type->is_mod ? "Mod" : "View"); else fprintf(out, "int64_t"); return true; }
+      if (t->kind == TYPE_INT) {
+          const char* inm = rae_int_c_name(t->as.integer.bits, t->as.integer.is_unsigned);
+          bool is_canonical_int = (t->as.integer.bits == 64 && !t->as.integer.is_unsigned);
+          if (is_ptr && is_canonical_int) { fprintf(out, "rae_%s_Int64", type->is_mod ? "Mod" : "View"); }
+          else if (is_ptr) { if (type->is_view) fprintf(out, "const "); fprintf(out, "%s", inm); /* '*' added by caller */ }
+          else fprintf(out, "%s", inm);
+          return true;
+      }
       if (t->kind == TYPE_FLOAT) { if (is_ptr) fprintf(out, "rae_%s_Float", type->is_mod ? "Mod" : "View"); else fprintf(out, "float"); return true; }
       if (t->kind == TYPE_FLOAT64) { if (is_ptr) fprintf(out, "rae_%s_Float64", type->is_mod ? "Mod" : "View"); else fprintf(out, "double"); return true; }
       if (t->kind == TYPE_BOOL) { if (is_ptr) fprintf(out, "rae_%s_Bool", type->is_mod ? "Mod" : "View"); else fprintf(out, "rae_Bool"); return true; }
