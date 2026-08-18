@@ -821,6 +821,10 @@ int64_t rae_gb_skin_ready(int64_t mesh);
 void* rae_gb_skin_vbuf(int64_t mesh);
 void* rae_gb_skin_ibuf(int64_t mesh);
 int64_t rae_gb_skin_icount(int64_t mesh);
+void rae_gb_set_skin_bind(void* bind);
+void* rae_gb_skin_palette(void);
+int64_t rae_gb_skin_palette_size(void);
+int64_t rae_gb_skin_palette_ready(void);
 /* Geometry-pass finish/submit ported to Rae (#503). */
 void* rae_gb_encoder(void);
 void rae_gb_clear_frame(void);

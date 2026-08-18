@@ -226,6 +226,32 @@ func gbSkinReady(mesh: Int) extern("rae_gb_skin_ready") ret Int
 func gbSkinVbuf(mesh: Int) extern("rae_gb_skin_vbuf") ret Ptr
 func gbSkinIbuf(mesh: Int) extern("rae_gb_skin_ibuf") ret Ptr
 func gbSkinIcount(mesh: Int) extern("rae_gb_skin_icount") ret Int
+# Skin bind group creation (#503): built in Rae from the skin pipeline's layout
+# + the frame uniform, draws buffer and joint palette. The palette comes up
+# asynchronously, so a readiness check defers creation until it exists.
+func gbSetSkinBind(bind: Ptr) extern("rae_gb_set_skin_bind")
+func gbSkinPalette() extern("rae_gb_skin_palette") ret Ptr
+func gbSkinPaletteSize() extern("rae_gb_skin_palette_size") ret Int
+func gbSkinPaletteReady() extern("rae_gb_skin_palette_ready") ret Int
+
+var gSkinBindMade: Bool = false
+
+func ensureSkinBind() {
+  if gSkinBindMade { ret }
+  if gbSkinPaletteReady() is 0 { ret }
+  gSkinBindMade = true
+  let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbSkinPipeline(), groupIndex: 0 as UInt32)
+  var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 3)
+  entries.add(value: { binding: 0 as UInt32, buffer: gbFrameUbuf(), size: gbFrameBytes() as UInt64 })
+  entries.add(value: { binding: 1 as UInt32, buffer: gbDrawsBuffer(), size: gbDrawsSize() as UInt64 })
+  entries.add(value: { binding: 2 as UInt32, buffer: gbSkinPalette(), size: gbSkinPaletteSize() as UInt64 })
+  let desc: WGPUBindGroupDescriptor = {
+    layout: layout, entryCount: 3 as UInt64, entries: entries.data
+  }
+  let bind: Ptr = wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc)
+  wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+  gbSetSkinBind(bind: bind)
+}
 func drawMetaballs(packedBalls: view Buffer(Float), count: Int, packedColors: view Buffer(Float), smoothing: Float, camX: Float, camY: Float, camZ: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
 func sdfShutdown() extern
 # Geometry-pass finish/submit accessors (#503). The pass encoding (end/finish/
@@ -432,6 +458,7 @@ func drawSkinned(mesh: copy Int, model: view Mat4, prevModel: view Mat4,
                  r: copy Float, g: copy Float, b: copy Float,
                  metallic: copy Float, roughness: copy Float, emissive: copy Float,
                  toon: copy Int) pub {
+  ensureSkinBind()
   if gbSkinReady(mesh: mesh) is 0 { ret }
   let base: Int = gbDrawCount()
   if base >= gbMaxDraws() { ret }
