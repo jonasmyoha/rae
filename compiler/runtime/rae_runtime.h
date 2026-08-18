@@ -866,6 +866,17 @@ void* rae_gb_view_bind(void);
 void rae_gb_set_view_pipeline(void* p);
 void rae_gb_set_view_ubuf(void* b);
 void rae_gb_set_view_bind(void* b);
+/* Deferred passes migrated to Rae (#504): composite first. */
+int64_t rae_gb_deferred_prepare(void);
+const char* rae_gb_composite_wgsl(void);
+void* rae_gb_composite_source_view(void);
+int64_t rae_gb_composite_source_index(void);
+void* rae_gb_composite_pipeline(void);
+void* rae_gb_composite_ubuf(void);
+void* rae_gb_composite_bind(int64_t idx);
+void rae_gb_set_composite_pipeline(void* p);
+void rae_gb_set_composite_ubuf(void* b);
+void rae_gb_set_composite_bind(int64_t idx, void* b);
 void* rae_gb_view_a(void);
 void* rae_gb_view_b(void);
 void* rae_gb_view_c(void);

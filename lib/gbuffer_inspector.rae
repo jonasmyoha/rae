@@ -13,8 +13,6 @@ import webgpu/context
 
 # C exposes the inspector WGSL, the presentable format/view, and the handles.
 func gbViewWgsl() extern("rae_gb_view_wgsl") ret Ptr
-func g2dFormat() extern("rae_g2d_format") ret Int
-func g2dOffView() extern("rae_g2d_off_view") ret Ptr
 func g2dOffViewReady() extern("rae_g2d_off_view_ready") ret Int
 func gbViewPipeline() extern("rae_gb_view_pipeline") ret Ptr
 func gbViewUbuf() extern("rae_gb_view_ubuf") ret Ptr
@@ -24,7 +22,6 @@ func gbSetViewUbuf(buf: Ptr) extern("rae_gb_set_view_ubuf")
 func gbSetViewBind(bind: Ptr) extern("rae_gb_set_view_bind")
 # Bumped in C when the targets are recreated (resize); the inspector rebuilds its
 # bind group (which samples the G-buffer views) when it changes.
-func gbTargetsGen() extern("rae_gb_targets_gen") ret Int
 
 var gViewPipeMade: Bool = false
 var gViewBindMade: Bool = false
