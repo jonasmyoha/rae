@@ -336,9 +336,9 @@ func main() ret Int {
   var terrain: InfiniteTerrain = createInfiniteTerrain(
     scene: scene, assets: assets, groundZ: groundZ)
   # The waving grass field is its own system (walker_grass.rae): a pool of
-  # clumps wrapped around the player like the terrain, swaying each frame.
-  var grass: GrassField = createGrassField(
-    scene: scene, assets: assets, groundZ: groundZ)
+  # clump descriptors wrapped around the player like the terrain, packed into
+  # one instanced draw each frame (grass epic phase 1 — no per-blade entity).
+  var grass: GrassField = createGrassField(assets: assets, groundZ: groundZ)
 
   var camera: Camera3d = defaultCamera3d()
   var light: Light3d = defaultLight3d()
@@ -436,8 +436,7 @@ func main() ret Int {
   previousPartModel = partModel
   updateInfiniteTerrain(terrain: terrain, scene: scene,
                         playerPosition: characterController.position)
-  updateGrassField(field: grass, scene: scene,
-                   playerPosition: characterController.position)
+  updateGrassField(field: grass, playerPosition: characterController.position)
   if rig.mode is CameraRigMode.character {
     camera.target = thirdPersonCameraTarget(
       controller: characterController, focusZ: characterFocusZ)
@@ -648,9 +647,6 @@ func main() ret Int {
     if terrain.toon is not toonShading {
       setInfiniteTerrainToon(terrain: terrain, scene: scene, toon: toonShading)
     }
-    if grass.toon is not toonShading {
-      setGrassFieldToon(field: grass, scene: scene, toon: toonShading)
-    }
     # `settingsChanged` as well as the action count: a DRAG produces no action.
     # Click actions arrive on release, so gating the systems on actions alone
     # meant the slider knob's new rect was written every drag frame and only
@@ -724,8 +720,7 @@ func main() ret Int {
       terrain: terrain, scene: scene,
       playerPosition: characterController.position)
     let grassWrapped: Bool = updateGrassField(
-      field: grass, scene: scene,
-      playerPosition: characterController.position)
+      field: grass, playerPosition: characterController.position)
     # ONE read. gpu2d.windowResized() is one-shot — reading it clears it — so
     # two callers meant the second always saw false.
     let resized: Bool = gpu2d.windowResized()
@@ -814,11 +809,6 @@ func main() ret Int {
       let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
       let t: Float = (now - startT) as Float
 
-      # Grass sways as a passenger of frames already being drawn — while
-      # `playing` the clock keeps the loop rendering, so the field waves; a
-      # paused, idle app freezes it and parks at ~0% CPU as before.
-      updateGrassWind(field: grass, scene: scene, time: t)
-
       # Frame order is DERIVED by the render graph: the scene pass writes
       # hdrColor, tonemap resolves it to sceneColor, the overlay modifies
       # that, present reads it. This loop walks the derived order.
@@ -890,6 +880,14 @@ func main() ret Int {
                                         prevModel: previousPartModel, material: mat)
             p = p + 1
           }
+          # The grass field: one instanced draw for the whole meadow, inside
+          # the same G-buffer pass as the ground and character (grass epic
+          # phase 1). Swaying happens as a passenger of frames already being
+          # drawn — while `playing` the clock keeps the loop rendering — so an
+          # idle app freezes it and parks at ~0% CPU.
+          var grassToon: Int = 0
+          if toonShading { grassToon = 1 }
+          drawGrassField(field: grass, time: t, dt: dt, toon: grassToon)
           gbuffer.endPass()
         }
         if tag is tagSsaoD or tag is tagDepthPyramid or tag is tagLighting
