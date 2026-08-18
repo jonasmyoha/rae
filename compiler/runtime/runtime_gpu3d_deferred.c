@@ -777,8 +777,7 @@ static void gb_deferred_init_pipelines(void) {
         g3d_shadow_ensure_targets(G3D_SHADOW_DEFAULT_RES, G3D_SHADOW_DEFAULT_CASCADES);
         gb_taa_pipeline = gb_make_fullscreen_pipeline(
             GB_TAA_WGSL, gb_lit_format, "taa");
-        gb_ao_pipeline = gb_make_fullscreen_pipeline(
-            GB_AO_WGSL, WGPUTextureFormat_R8Unorm, "ssao");
+        /* The SSAO pipeline is created in Rae now (#504). */
         gb_light_pipeline = gb_make_fullscreen_pipeline(
             GB_LIGHT_WGSL, gb_lit_format, "lighting");
         WGPUBufferDescriptor ud; memset(&ud, 0, sizeof(ud));
@@ -796,19 +795,30 @@ static void gb_deferred_init_pipelines(void) {
      * (lib/gbuffer_passes.rae:composite, #504) over the bindings. */
 }
 
-/* One fullscreen pass: bind, draw three vertices, submit. */
-static void gb_ensure_ao_bind(void) {
-    if (gb_ao_bind || !gb_ao_pipeline || !gb_a_view || !gb_depth_view) return;
-    WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(gb_ao_pipeline, 0);
-    WGPUBindGroupEntry e[3]; memset(e, 0, sizeof(e));
-    e[0].binding = 0; e[0].buffer = gb_light_ubuf; e[0].size = GB_LIGHT_BYTES;
-    e[1].binding = 1; e[1].textureView = gb_a_view;
-    e[2].binding = 2; e[2].textureView = gb_depth_view;
-    WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
-    bgd.layout = bgl; bgd.entryCount = 3; bgd.entries = e;
-    gb_ao_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
-    wgpuBindGroupLayoutRelease(bgl);
+/* SSAO's pipeline, bind group and pass run in Rae now (#504,
+ * lib/gbuffer_passes.rae). The uniform it needs — inverse(jittered viewProj)
+ * plus camera position, derived from the geometry pass's matrix — stays C math
+ * and is uploaded here into the shared light uniform. */
+void rae_gb_ssao_upload(float camX, float camY, float camZ) {
+    if (!gb_light_ubuf) return;
+    float u[GB_LIGHT_BYTES / 4];
+    memset(u, 0, sizeof(u));
+    if (!g3d_invert_mat4(gb_viewproj_jittered, u)) {
+        memset(u, 0, 16 * sizeof(float));
+        u[0] = 1.0f; u[5] = 1.0f; u[10] = 1.0f; u[15] = 1.0f;
+    }
+    u[16] = camX; u[17] = camY; u[18] = camZ; u[19] = 0.0f;
+    memcpy(u + 40, gb_viewproj_jittered, 16 * sizeof(float));
+    wgpuQueueWriteBuffer(g_wgpu_queue, gb_light_ubuf, 0, u, GB_LIGHT_BYTES);
 }
+const char* rae_gb_ao_wgsl(void)   { return GB_AO_WGSL; }
+void* rae_gb_ao_view(void)         { return (void*)gb_ao_view; }
+void* rae_gb_ao_pipeline(void)     { return (void*)gb_ao_pipeline; }
+void* rae_gb_ao_bind(void)         { return (void*)gb_ao_bind; }
+void* rae_gb_light_ubuf(void)      { return (void*)gb_light_ubuf; }
+int64_t rae_gb_light_bytes(void)   { return (int64_t)GB_LIGHT_BYTES; }
+void rae_gb_set_ao_pipeline(void* p) { gb_ao_pipeline = (WGPURenderPipeline)p; }
+void rae_gb_set_ao_bind(void* b)     { gb_ao_bind = (WGPUBindGroup)b; }
 
 static void gb_run_fullscreen(WGPURenderPipeline pipeline, WGPUBindGroup bind,
                               WGPUTextureView target) {
@@ -873,26 +883,7 @@ void rae_ext_gbuffer_depthPyramid(void) {
  * uniform it needs itself — invViewProj and camPos, both derived from the
  * geometry pass's viewProj. Lighting rewrites the same values later; they
  * cannot disagree because both come from gb_viewproj. */
-void rae_ext_gbuffer_ssao(float camX, float camY, float camZ) {
-    if (!g_wgpu_dev || !gb_a_view) return;
-    gb_deferred_init_pipelines();
-    gb_deferred_ensure();
-    if (!gb_ao_pipeline || !gb_ao_view) return;
-
-    float u[GB_LIGHT_BYTES / 4];
-    memset(u, 0, sizeof(u));
-    if (!g3d_invert_mat4(gb_viewproj_jittered, u)) {
-        memset(u, 0, 16 * sizeof(float));
-        u[0] = 1.0f; u[5] = 1.0f; u[10] = 1.0f; u[15] = 1.0f;
-    }
-    u[16] = camX; u[17] = camY; u[18] = camZ; u[19] = 0.0f;
-    memcpy(u + 40, gb_viewproj_jittered, 16 * sizeof(float));
-    wgpuQueueWriteBuffer(g_wgpu_queue, gb_light_ubuf, 0, u, GB_LIGHT_BYTES);
-
-    gb_ensure_ao_bind();
-    if (!gb_ao_bind) return;
-    gb_run_fullscreen(gb_ao_pipeline, gb_ao_bind, gb_ao_view);
-}
+/* rae_ext_gbuffer_ssao moved to Rae (lib/gbuffer_passes.rae:ssao, #504). */
 
 /* Cooked Hosek-Wilkie coefficients, pushed from Rae before the lighting call.
  * One scalar per call keeps this off the lighting extern's already 28-long

@@ -8,7 +8,9 @@
 # are produced by passes not yet migrated); Rae reads them through accessors.
 import core
 import gbuffer
+import scene3d
 open gbuffer
+open scene3d
 open webgpu/webgpu
 import webgpu/context
 
@@ -135,4 +137,53 @@ func composite(exposure: copy Float) pub {
 # Public wrapper: the render graph's composite step (was gbuffer.compositePass).
 func compositePass(exposure: view Float) pub {
   composite(exposure: exposure)
+}
+
+# ----- SSAO: screen-space ambient occlusion (#504) ---------------------------
+# Reads the G-buffer normal (A) + depth, writes the R8 AO target. The uniform
+# (inverse jittered viewProj + camera pos) is C math, uploaded into the shared
+# light uniform by gbSsaoUpload.
+func gbSsaoUpload(camX: Float, camY: Float, camZ: Float) extern("rae_gb_ssao_upload")
+func gbAoWgsl() extern("rae_gb_ao_wgsl") ret Ptr
+func gbAoView() extern("rae_gb_ao_view") ret Ptr
+func gbAoPipeline() extern("rae_gb_ao_pipeline") ret Ptr
+func gbAoBind() extern("rae_gb_ao_bind") ret Ptr
+func gbLightUbuf() extern("rae_gb_light_ubuf") ret Ptr
+func gbLightBytes() extern("rae_gb_light_bytes") ret Int
+func gbSetAoPipeline(pipeline: Ptr) extern("rae_gb_set_ao_pipeline")
+func gbSetAoBind(bind: Ptr) extern("rae_gb_set_ao_bind")
+
+var gAoPipeMade: Bool = false
+var gAoBindGen: Int = -1
+var gAoBindMade: Bool = false
+
+func ssao(camX: copy Float, camY: copy Float, camZ: copy Float) pub {
+  if gbDeferredPrepare() is 0 { ret }
+  if not gAoPipeMade {
+    gAoPipeMade = true
+    gbSetAoPipeline(pipeline: makeFullscreenPipeline(wgsl: gbAoWgsl(), format: WGPUTextureFormat_R8Unorm))
+  }
+  gbSsaoUpload(camX: camX, camY: camY, camZ: camZ)
+  let gen: Int = gbTargetsGen()
+  if not (gen is gAoBindGen) {
+    gAoBindGen = gen
+    gAoBindMade = false
+  }
+  if not gAoBindMade {
+    gAoBindMade = true
+    let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbAoPipeline(), groupIndex: 0 as UInt32)
+    var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 3)
+    entries.add(value: { binding: 0 as UInt32, buffer: gbLightUbuf(), size: gbLightBytes() as UInt64 })
+    entries.add(value: { binding: 1 as UInt32, textureView: gbViewA() })
+    entries.add(value: { binding: 2 as UInt32, textureView: gbViewDepth() })
+    let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 3 as UInt64, entries: entries.data }
+    gbSetAoBind(bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
+    wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+  }
+  runFullscreen(pipeline: gbAoPipeline(), bind: gbAoBind(), target: gbAoView())
+}
+
+# Public wrapper: the render graph's SSAO step (was gbuffer.ssaoPass).
+func ssaoPass(camera: view Camera3d) pub {
+  ssao(camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z)
 }
