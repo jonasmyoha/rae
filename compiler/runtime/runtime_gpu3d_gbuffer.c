@@ -854,6 +854,90 @@ void rae_ext_gbuffer_draw(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
     gb_draw_count++;
 }
 
+/* Column-major T * Rz(yaw) * Rx(tiltX) * Ry(tiltY) * S(scale). The compact
+ * per-instance transform the grass field carries: position, a yaw for
+ * variety, two small tilt angles the wind drives, and a uniform scale. Built
+ * here rather than in Rae so the instance stream stays 12 floats instead of a
+ * pair of 16-float matrices, and so no allocator runs per blade. */
+static void gb_sway_model(float* m, float x, float y, float z,
+                          float yaw, float tx, float ty, float s) {
+    float cz = cosf(yaw), sz = sinf(yaw);
+    float cx = cosf(tx),  sx = sinf(tx);
+    float cy = cosf(ty),  sy = sinf(ty);
+    /* Rx*Ry (row-major 3x3). */
+    float a00 = cy,     a01 = 0.0f, a02 = sy;
+    float a10 = sx*sy,  a11 = cx,   a12 = -sx*cy;
+    float a20 = -cx*sy, a21 = sx,   a22 = cx*cy;
+    /* R = Rz * (Rx*Ry). */
+    float r00 = cz*a00 - sz*a10, r01 = cz*a01 - sz*a11, r02 = cz*a02 - sz*a12;
+    float r10 = sz*a00 + cz*a10, r11 = sz*a01 + cz*a11, r12 = sz*a02 + cz*a12;
+    float r20 = a20,             r21 = a21,             r22 = a22;
+    m[0]  = r00*s; m[1]  = r10*s; m[2]  = r20*s; m[3]  = 0.0f;
+    m[4]  = r01*s; m[5]  = r11*s; m[6]  = r21*s; m[7]  = 0.0f;
+    m[8]  = r02*s; m[9]  = r12*s; m[10] = r22*s; m[11] = 0.0f;
+    m[12] = x;     m[13] = y;     m[14] = z;     m[15] = 1.0f;
+}
+
+/* Instanced G-buffer draw: ONE DrawIndexed for `count` copies of `mesh`.
+ *
+ * This is the reusable instancing capability (grass epic #485). It needs no
+ * new pipeline: the static vertex shader already indexes `draws[instance_index]`,
+ * so N per-instance DrawU entries appended here and drawn with instanceCount=N
+ * / firstInstance=base give each instance its own transform, colour and motion
+ * from one draw call. `end()` uploads the whole draws buffer, so the appended
+ * entries ride along automatically.
+ *
+ * `inst` is `count` * 12 floats: x,y,z, yaw, tiltX, tiltY, prevTiltX, prevTiltY,
+ * scale, r,g,b. prevTilt gives correct TAA motion vectors while the field
+ * sways (only tilt animates; base and scale are stable). Material props
+ * (metallic/roughness/emissive/toon) are shared across the batch; colour is
+ * per instance.
+ *
+ * Intermediate step: the instance stream is CPU-built for now. Grass epic
+ * #486 replaces it with a compute pass writing the same DrawU entries on the
+ * GPU, and #487 replaces the loaded clump mesh with procedural blades. */
+void rae_ext_gbuffer_drawInstanced(int64_t mesh, const float* inst, int64_t count,
+                                   float metallic, float roughness, float emissive,
+                                   int64_t toon) {
+    if (!gb_pass || !inst || count <= 0) return;
+    int slot = (int)mesh - 1;
+    if (slot < 0 || slot >= g3d_mesh_n || !g3d_mesh_vbuf[slot]) return;
+    if (gb_draw_count + (int)count > GB_MAX_DRAWS) {
+        count = (int64_t)(GB_MAX_DRAWS - gb_draw_count);
+        if (count <= 0) return;
+    }
+    /* Shared material encode (mirrors the static draw's param packing). */
+    float pEmissive, pMode;
+    if (toon) { pEmissive = 1.0f; pMode = GB_MODE_TOON; }
+    else if (emissive > 0.0f) {
+        float e = logf(1.0f + emissive) / GB_EMISSIVE_LOG_K;
+        pEmissive = e > 1.0f ? 1.0f : e; pMode = GB_MODE_EMISSIVE;
+    } else { pEmissive = 1.0f; pMode = GB_MODE_LIT; }
+
+    int base = gb_draw_count;
+    for (int64_t i = 0; i < count; i++) {
+        const float* si = inst + i * 12;
+        float* d = gb_draw_cpu + (base + i) * GB_DRAW_FLOATS;
+        gb_sway_model(d,      si[0], si[1], si[2], si[3], si[4], si[5], si[8]);
+        gb_sway_model(d + 16, si[0], si[1], si[2], si[3], si[6], si[7], si[8]);
+        d[32] = si[9]; d[33] = si[10]; d[34] = si[11]; d[35] = metallic;
+        d[36] = roughness; d[37] = pEmissive; d[38] = pMode; d[39] = 0.0f;
+    }
+    gb_draw_count += (int)count;
+
+    /* A skinned draw may have left its pipeline bound; restore the static
+     * one (which owns the draws storage buffer) before the instanced draw. */
+    wgpuRenderPassEncoderSetPipeline(gb_pass, gb_pipeline);
+    wgpuRenderPassEncoderSetBindGroup(gb_pass, 0, gb_bind, 0, NULL);
+    wgpuRenderPassEncoderSetVertexBuffer(gb_pass, 0, g3d_mesh_vbuf[slot], 0,
+                                         wgpuBufferGetSize(g3d_mesh_vbuf[slot]));
+    wgpuRenderPassEncoderSetIndexBuffer(gb_pass, g3d_mesh_ibuf[slot],
+                                        WGPUIndexFormat_Uint32, 0,
+                                        wgpuBufferGetSize(g3d_mesh_ibuf[slot]));
+    wgpuRenderPassEncoderDrawIndexed(gb_pass, g3d_mesh_icount[slot],
+                                     (uint32_t)count, 0, 0, (uint32_t)base);
+}
+
 /* Finish and submit the geometry pass. Uniform data uploads once here, not
  * per draw. */
 void rae_ext_gbuffer_end(void) {
