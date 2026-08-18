@@ -13,10 +13,24 @@ This is the normative reference for Rae's primitive numeric model. It is a
 | `Int`     | signed integer (alias)    | `int64_t`  |   64 |
 | `Int64`   | signed integer            | `int64_t`  |   64 |
 | `Int32`   | signed integer            | `int32_t`  |   32 |
+| `Int16`   | signed integer            | `int16_t`  |   16 |
+| `Int8`    | signed integer            | `int8_t`   |    8 |
 | `UInt64`  | unsigned integer          | `uint64_t` |   64 |
 | `UInt32`  | unsigned integer          | `uint32_t` |   32 |
+| `UInt16`  | unsigned integer          | `uint16_t` |   16 |
+| `UInt8`   | unsigned integer          | `uint8_t`  |    8 |
 | `Bool`    | boolean                   | `rae_Bool` |    — |
 | `Char`    | Unicode scalar            | `uint32_t` |   32 |
+
+Each fixed-width integer is a **distinct first-class type**, not a display alias
+of `Int`: it interns separately, so `List(Int32)`, `List(Int16)` and `List(Int)`
+are three different monomorphizations with byte-accurate element layout
+(`int32_t[N]`, `int16_t[N]`, `int64_t[N]`) — essential for GPU vertex/index/
+instance buffers (#507). `Int` and `Int64` are the same type (both 64-bit
+signed), like `Float`/`Float32`. Two display caveats, harmless for storage and
+ABI (values pass to C, not `log`): interpolating a `UInt32`/`Char32` formats it
+as a character (shared `uint32_t`), and interpolating an `Int8` formats it as a
+bool. See `compiler/tests/cases/630_fixed_width_int_lists`.
 
 There is no `Double`, `Single`, `Real` or `Long`. They would be redundant
 spellings of types that already exist, and `Long` in particular means
