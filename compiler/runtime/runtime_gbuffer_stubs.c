@@ -37,6 +37,7 @@ int64_t rae_gb_targets_ready(void)      { return 0; }
 void rae_gb_release_targets_ext(void)   {}
 void rae_gb_set_target(int64_t idx, void* tex, void* view) { (void)idx; (void)tex; (void)view; }
 void rae_gb_commit_targets(int64_t w, int64_t h) { (void)w; (void)h; }
+int64_t rae_gb_targets_gen(void)        { return 0; }
 const char* rae_gb_wgsl(void)      { return ""; }
 const char* rae_gb_skin_wgsl(void) { return ""; }
 const char* rae_gb_entry_vs(void)  { return "vs"; }
@@ -94,9 +95,16 @@ void rae_ext_gbuffer_drawMetaballs(const float* packedBalls, int64_t count,
 }
 void rae_ext_gbuffer_sdfShutdown(void) {}
 int64_t rae_ext_gbuffer_drawCount(void) { return 0; }
-void rae_ext_gbuffer_debugView(int64_t mode, float zNear, float zFar){
-    (void)mode; (void)zNear; (void)zFar;
-}
+const char* rae_gb_view_wgsl(void)  { return ""; }
+int64_t rae_g2d_format(void)        { return 0; }
+void* rae_g2d_off_view(void)        { return (void*)0; }
+int64_t rae_g2d_off_view_ready(void){ return 0; }
+void* rae_gb_view_pipeline(void)    { return (void*)0; }
+void* rae_gb_view_ubuf(void)        { return (void*)0; }
+void* rae_gb_view_bind(void)        { return (void*)0; }
+void rae_gb_set_view_pipeline(void* p) { (void)p; }
+void rae_gb_set_view_ubuf(void* b)     { (void)b; }
+void rae_gb_set_view_bind(void* b)     { (void)b; }
 void rae_ext_gbuffer_present(void) {}
 void rae_ext_gbuffer_shutdown(void) {}
 
