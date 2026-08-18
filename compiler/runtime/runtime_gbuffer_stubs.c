@@ -30,6 +30,13 @@ int64_t rae_gb_frame_uniform(rae_Mat4* viewProj, float clearR, float clearG, flo
 }
 void rae_gb_set_frame_ubuf(void* buf)   { (void)buf; }
 void rae_gb_set_draws_buffer(void* buf) { (void)buf; }
+int64_t rae_gb_offscreen_w(void)        { return 0; }
+int64_t rae_gb_offscreen_h(void)        { return 0; }
+int64_t rae_gb_targets_match(int64_t w, int64_t h) { (void)w; (void)h; return 0; }
+int64_t rae_gb_targets_ready(void)      { return 0; }
+void rae_gb_release_targets_ext(void)   {}
+void rae_gb_set_target(int64_t idx, void* tex, void* view) { (void)idx; (void)tex; (void)view; }
+void rae_gb_commit_targets(int64_t w, int64_t h) { (void)w; (void)h; }
 void* rae_gb_view_a(void)     { return (void*)0; }
 void* rae_gb_view_b(void)     { return (void*)0; }
 void* rae_gb_view_c(void)     { return (void*)0; }

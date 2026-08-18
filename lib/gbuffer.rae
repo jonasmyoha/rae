@@ -70,6 +70,51 @@ func gbViewA() extern("rae_gb_view_a") ret Ptr
 func gbViewB() extern("rae_gb_view_b") ret Ptr
 func gbViewC() extern("rae_gb_view_c") ret Ptr
 func gbViewDepth() extern("rae_gb_view_depth") ret Ptr
+# Target creation (#503): C provides the offscreen size, the resize check, the
+# release and the size/gen commit; Rae builds each attachment texture + view.
+func gbOffscreenW() extern("rae_gb_offscreen_w") ret Int
+func gbOffscreenH() extern("rae_gb_offscreen_h") ret Int
+func gbTargetsMatch(w: Int, h: Int) extern("rae_gb_targets_match") ret Int
+func gbTargetsReady() extern("rae_gb_targets_ready") ret Int
+func gbReleaseTargets() extern("rae_gb_release_targets_ext")
+func gbSetTarget(idx: Int, tex: Ptr, texView: Ptr) extern("rae_gb_set_target")
+func gbCommitTargets(w: Int, h: Int) extern("rae_gb_commit_targets")
+
+# One G-buffer attachment: a 2D texture (render target + sampleable) and its
+# full view. mipLevelCount/sampleCount are 1, so an explicit single-mip 2D view
+# is the default view — equivalent to the null-descriptor the C path used.
+func makeTarget(idx: copy Int, w: copy Int, h: copy Int, format: copy Int32) {
+  let td: WGPUTextureDescriptor = {
+    usage: WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_TextureBinding,
+    dimension: WGPUTextureDimension_2D,
+    size: { width: w as UInt32, height: h as UInt32, depthOrArrayLayers: 1 as UInt32 },
+    format: format, mipLevelCount: 1 as UInt32, sampleCount: 1 as UInt32
+  }
+  let tex: Ptr = wgpuDeviceCreateTexture(device: webgpuDevice(), descriptor: td)
+  let vd: WGPUTextureViewDescriptor = {
+    format: format, dimension: WGPUTextureViewDimension_2D,
+    baseMipLevel: 0 as UInt32, mipLevelCount: 1 as UInt32,
+    baseArrayLayer: 0 as UInt32, arrayLayerCount: 1 as UInt32,
+    aspect: WGPUTextureAspect_All
+  }
+  let texView: Ptr = wgpuTextureCreateView(texture: tex, descriptor: vd)
+  gbSetTarget(idx: idx, tex: tex, texView: texView)
+}
+
+# (Re)create the three colour targets + depth when the offscreen size changes.
+func ensureTargets() {
+  let w: Int = gbOffscreenW()
+  let h: Int = gbOffscreenH()
+  if w <= 0 { ret }
+  if h <= 0 { ret }
+  if gbTargetsMatch(w: w, h: h) is 1 { ret }
+  gbReleaseTargets()
+  makeTarget(idx: 0, w: w, h: h, format: WGPUTextureFormat_RGB10A2Unorm)
+  makeTarget(idx: 1, w: w, h: h, format: WGPUTextureFormat_RGBA8Unorm)
+  makeTarget(idx: 2, w: w, h: h, format: WGPUTextureFormat_RGBA8Unorm)
+  makeTarget(idx: 3, w: w, h: h, format: WGPUTextureFormat_Depth32Float)
+  gbCommitTargets(w: w, h: h)
+}
 func gbMotionZero() extern("rae_gb_motion_zero") ret Float
 func gbSetFrame(enc: Ptr, pass: Ptr) extern("rae_gb_set_frame")
 # Static bind group creation (#503): built in Rae from the pipeline's auto
@@ -133,6 +178,8 @@ func ensureGbAttachments() {
 
 func begin(viewProj: view Mat4, clearR: copy Float, clearG: copy Float, clearB: copy Float) pub {
   if gbPrepare() is 0 { ret }
+  ensureTargets()
+  if gbTargetsReady() is 0 { ret }
   ensureGbBuffers()
   ensureStaticBind()
   if gbFrameUniform(viewProj: viewProj, clearR: clearR, clearG: clearG, clearB: clearB) is 0 { ret }
