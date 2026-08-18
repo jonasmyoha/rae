@@ -34,9 +34,21 @@ void rae_ext_gbuffer_draw(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
     (void)mesh; (void)model; (void)prevModel; (void)r; (void)g; (void)b;
     (void)metallic; (void)roughness; (void)emissive; (void)toon;
 }
-void rae_ext_gbuffer_drawRecords(int64_t mesh, const float* records, int64_t count){
-    (void)mesh; (void)records; (void)count;
-}
+/* Instanced draw moved to Rae (lib/gbuffer.rae:drawRecords, #502); it calls
+ * these context accessors, so builds without the real geometry pass need
+ * no-op versions. mesh_ready returns 0, so the Rae drawRecords early-returns
+ * and issues no GPU work. */
+void* rae_gb_pass(void)                 { return (void*)0; }
+void* rae_gb_static_pipeline(void)      { return (void*)0; }
+void* rae_gb_static_bind(void)          { return (void*)0; }
+void* rae_gb_draws_buffer(void)         { return (void*)0; }
+int64_t rae_gb_max_draws(void)          { return 0; }
+int64_t rae_gb_draw_count(void)         { return 0; }
+void rae_gb_advance_draws(int64_t count){ (void)count; }
+int64_t rae_gb_mesh_ready(int64_t mesh) { (void)mesh; return 0; }
+void* rae_gb_mesh_vbuf(int64_t mesh)    { (void)mesh; return (void*)0; }
+void* rae_gb_mesh_ibuf(int64_t mesh)    { (void)mesh; return (void*)0; }
+int64_t rae_gb_mesh_icount(int64_t mesh){ (void)mesh; return 0; }
 void rae_ext_gbuffer_drawSkinned(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
                                  float r, float g, float b,
                                  float metallic, float roughness, float emissive,

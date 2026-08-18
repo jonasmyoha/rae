@@ -795,6 +795,24 @@ void* rae_wgpu_ctx_queue(void);
 void* rae_wgpu_ctx_adapter(void);
 void* rae_wgpu_ctx_instance(void);
 void  rae_wgpu_ctx_poll(int wait);
+void* rae_wgpu_null_ptr(void);
 #endif
+
+/* G-buffer instanced-draw context accessors (#502). Bound from Rae via
+ * extern("…") in lib/gbuffer.rae (drawRecords now runs in Rae over the WebGPU
+ * bindings). Declared here — not by a WebGPU header — so the generated C sees
+ * real prototypes and does not truncate the 64-bit handle pointers. Unguarded:
+ * the stub build (no real geometry pass) provides no-op versions too. */
+void* rae_gb_pass(void);
+void* rae_gb_static_pipeline(void);
+void* rae_gb_static_bind(void);
+void* rae_gb_draws_buffer(void);
+int64_t rae_gb_max_draws(void);
+int64_t rae_gb_draw_count(void);
+void rae_gb_advance_draws(int64_t count);
+int64_t rae_gb_mesh_ready(int64_t mesh);
+void* rae_gb_mesh_vbuf(int64_t mesh);
+void* rae_gb_mesh_ibuf(int64_t mesh);
+int64_t rae_gb_mesh_icount(int64_t mesh);
 
 #endif

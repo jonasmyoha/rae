@@ -100,11 +100,21 @@ for the pattern: `main.rae` + `config.cmd` (`run`) + `expected.txt`).
   `compiler/tests/cases/630_fixed_width_int_lists`. Caveat: don't `log`-interpolate
   a `UInt32` (prints as a char, shares `uint32_t` with `Char32`) or an `Int8`
   (prints as a bool) — storage/ABI are fine, only display differs.
-- **#502 — proof port: delete `drawRecords`.** Reimplement the instanced GBuffer
-  draw in Rae over the bindings (Rae owns the draws storage buffer, uploads via
-  `wgpuQueueWriteBuffer` zero-copy from a List's `.data`, issues
-  `wgpuRenderPassEncoderDrawIndexed`). Remove `rae_ext_gbuffer_drawRecords` +
-  its stub. Behaviour on example 114 must be identical.
+- **#502 — proof port: delete `drawRecords`. ✅ LANDED.** The instanced GBuffer
+  draw now runs in Rae (lib/gbuffer.rae:drawRecords) over the bindings: Rae
+  uploads the records into the shared draws storage buffer with
+  `wgpuQueueWriteBuffer` (zero-copy from the records pointer) and issues one
+  `wgpuRenderPassEncoderDrawIndexed`. `rae_ext_gbuffer_drawRecords` (real + stub)
+  is gone. To decouple the buffer, the single-draw C path (`draw`/`drawSkinned`)
+  now uploads its own slice per draw and `end()` no longer bulk-uploads —
+  behaviour-preserving (same bytes before submit). C keeps only context
+  accessors (`rae_gb_*` in runtime_gpu3d_gbuffer.c, stubbed in
+  runtime_gbuffer_stubs.c, prototyped in rae_runtime.h). **Needs a visual check
+  on example 114** (grass) — builds+links verified; 573 zero-alloc unchanged.
+  Gotchas: don't `open webgpu/webgpu_enums` from a cheader'd module (its enum
+  values collide with the header's enumerators — reference them as bare consts
+  via `open webgpu/webgpu` instead); a `view Buffer(T)`/`Buffer(T)` arg to a
+  `Ptr` param gets deref'd, so type the param `Ptr` and pass a List's `.data`.
 - **#503–#504 — migrate the GBuffer geometry pass, then the rest** (lighting,
   ssao, taa, shadow, sky, gpu2d) to Rae over the bindings. WGSL shader source
   stays (as Rae string constants + `wgpuDeviceCreateShaderModule`).
