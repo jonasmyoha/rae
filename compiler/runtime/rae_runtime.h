@@ -826,5 +826,16 @@ void* rae_gb_encoder(void);
 void rae_gb_clear_frame(void);
 int64_t rae_gb_frame_active(void);
 void rae_gb_submit(void* cmd);
+/* Geometry-pass begin ported to Rae (#503): C preps the frame + targets, Rae
+ * builds the render pass. rae_Mat4 is forward-declared (it is defined later in
+ * the generated C, after this header is included) — only a pointer is needed. */
+struct rae_Mat4;
+int64_t rae_gb_frame_prep(struct rae_Mat4* viewProj, float clearR, float clearG, float clearB);
+void* rae_gb_view_a(void);
+void* rae_gb_view_b(void);
+void* rae_gb_view_c(void);
+void* rae_gb_view_depth(void);
+float rae_gb_motion_zero(void);
+void rae_gb_set_frame(void* enc, void* pass);
 
 #endif
