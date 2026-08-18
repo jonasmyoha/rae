@@ -449,96 +449,18 @@ static void gb_release_targets(void) {
  * back via rae_gb_set_target, using the C accessors for size / resize check /
  * release / commit above. */
 
-static void gb_init_pipeline(void) {
-    if (gb_pipeline) return;
-    WGPUShaderSourceWGSL src; memset(&src, 0, sizeof(src));
-    src.chain.sType = WGPUSType_ShaderSourceWGSL;
-    src.code = rae_wgpu_sv(GB_WGSL);
-    WGPUShaderModuleDescriptor smd; memset(&smd, 0, sizeof(smd));
-    smd.nextInChain = &src.chain;
-    WGPUShaderModule mod = wgpuDeviceCreateShaderModule(g_wgpu_dev, &smd);
-
-    /* Same interleaved pos3/nrm3/uv2 vertex layout as the forward pass:
-     * meshes are assets shared by both frames, not per-frame resources. */
-    WGPUVertexAttribute attrs[3]; memset(attrs, 0, sizeof(attrs));
-    attrs[0].format = WGPUVertexFormat_Float32x3; attrs[0].offset = 0;  attrs[0].shaderLocation = 0;
-    attrs[1].format = WGPUVertexFormat_Float32x3; attrs[1].offset = 12; attrs[1].shaderLocation = 1;
-    attrs[2].format = WGPUVertexFormat_Float32x2; attrs[2].offset = 24; attrs[2].shaderLocation = 2;
-    WGPUVertexBufferLayout vbl; memset(&vbl, 0, sizeof(vbl));
-    vbl.arrayStride = 32; vbl.stepMode = WGPUVertexStepMode_Vertex;
-    vbl.attributeCount = 3; vbl.attributes = attrs;
-
-    WGPUColorTargetState cts[3]; memset(cts, 0, sizeof(cts));
-    cts[0].format = WGPUTextureFormat_RGB10A2Unorm; cts[0].writeMask = WGPUColorWriteMask_All;
-    cts[1].format = WGPUTextureFormat_RGBA8Unorm;   cts[1].writeMask = WGPUColorWriteMask_All;
-    cts[2].format = WGPUTextureFormat_RGBA8Unorm;   cts[2].writeMask = WGPUColorWriteMask_All;
-    WGPUFragmentState fs; memset(&fs, 0, sizeof(fs));
-    fs.module = mod; fs.entryPoint = rae_wgpu_sv("fs"); fs.targetCount = 3; fs.targets = cts;
-
-    WGPUDepthStencilState ds; memset(&ds, 0, sizeof(ds));
-    ds.format = WGPUTextureFormat_Depth32Float;
-    ds.depthWriteEnabled = WGPUOptionalBool_True;
-    ds.depthCompare = WGPUCompareFunction_Greater;   /* reverse-Z (#367) */
-    ds.stencilFront.compare = WGPUCompareFunction_Always;
-    ds.stencilFront.failOp = WGPUStencilOperation_Keep;
-    ds.stencilFront.depthFailOp = WGPUStencilOperation_Keep;
-    ds.stencilFront.passOp = WGPUStencilOperation_Keep;
-    ds.stencilBack = ds.stencilFront;
-    ds.stencilReadMask = 0xFFFFFFFFu; ds.stencilWriteMask = 0xFFFFFFFFu;
-
-    WGPURenderPipelineDescriptor pd; memset(&pd, 0, sizeof(pd));
-    pd.layout = NULL;   /* auto layout from shader bindings */
-    pd.vertex.module = mod; pd.vertex.entryPoint = rae_wgpu_sv("vs");
-    pd.vertex.bufferCount = 1; pd.vertex.buffers = &vbl;
-    pd.primitive.topology = WGPUPrimitiveTopology_TriangleList;
-    pd.primitive.frontFace = WGPUFrontFace_CCW;
-    pd.primitive.cullMode = WGPUCullMode_Back;
-    pd.depthStencil = &ds;
-    pd.multisample.count = 1; pd.multisample.mask = 0xFFFFFFFFu;
-    pd.fragment = &fs;
-    gb_pipeline = wgpuDeviceCreateRenderPipeline(g_wgpu_dev, &pd);
-    wgpuShaderModuleRelease(mod);
-    if (!gb_pipeline) { fprintf(stderr, "[gbuffer] pipeline creation FAILED\n"); return; }
-
-    /* Skinned variant (#391): same targets, same depth state — both must
-     * be valid inside ONE render pass, since a frame switches pipeline
-     * between static and skinned draws. */
-    {
-        WGPUShaderSourceWGSL ssrc; memset(&ssrc, 0, sizeof(ssrc));
-        ssrc.chain.sType = WGPUSType_ShaderSourceWGSL;
-        ssrc.code = rae_wgpu_sv(GB_SKIN_WGSL);
-        WGPUShaderModuleDescriptor ssmd; memset(&ssmd, 0, sizeof(ssmd));
-        ssmd.nextInChain = &ssrc.chain;
-        WGPUShaderModule smod = wgpuDeviceCreateShaderModule(g_wgpu_dev, &ssmd);
-
-        WGPUVertexAttribute sattrs[6]; memset(sattrs, 0, sizeof(sattrs));
-        sattrs[0].format = WGPUVertexFormat_Float32x3; sattrs[0].offset = 0;  sattrs[0].shaderLocation = 0;
-        sattrs[1].format = WGPUVertexFormat_Float32x3; sattrs[1].offset = 12; sattrs[1].shaderLocation = 1;
-        sattrs[2].format = WGPUVertexFormat_Float32x2; sattrs[2].offset = 24; sattrs[2].shaderLocation = 2;
-        sattrs[3].format = WGPUVertexFormat_Float32x4; sattrs[3].offset = 32; sattrs[3].shaderLocation = 3;
-        sattrs[4].format = WGPUVertexFormat_Float32x4; sattrs[4].offset = 48; sattrs[4].shaderLocation = 4;
-        sattrs[5].format = WGPUVertexFormat_Float32x4; sattrs[5].offset = 64; sattrs[5].shaderLocation = 5;
-        WGPUVertexBufferLayout svbl; memset(&svbl, 0, sizeof(svbl));
-        svbl.arrayStride = 80; svbl.stepMode = WGPUVertexStepMode_Vertex;
-        svbl.attributeCount = 6; svbl.attributes = sattrs;
-
-        WGPUFragmentState sfs; memset(&sfs, 0, sizeof(sfs));
-        sfs.module = smod; sfs.entryPoint = rae_wgpu_sv("fs"); sfs.targetCount = 3; sfs.targets = cts;
-        WGPURenderPipelineDescriptor spd = pd;
-        spd.vertex.module = smod;
-        spd.vertex.buffers = &svbl;
-        spd.fragment = &sfs;
-        gb_skin_pipeline = wgpuDeviceCreateRenderPipeline(g_wgpu_dev, &spd);
-        wgpuShaderModuleRelease(smod);
-        if (!gb_skin_pipeline) fprintf(stderr, "[gbuffer] skinned pipeline creation FAILED\n");
-    }
-
-    /* The frame uniform + draws storage buffers and the static bind group are
-     * now created in Rae (lib/gbuffer.rae: ensureBuffers / ensureStaticBind,
-     * #503) over the bindings, and stored back into the globals below via the
-     * setters, so the frame-uniform upload, the draws and the skin bind all see
-     * them. This function now creates only the pipelines. */
-}
+/* The static + skinned geometry render pipelines and their WGSL shader modules
+ * are now created in Rae (lib/gbuffer.rae: ensurePipelines) over the bindings.
+ * C exposes the WGSL source and the entry-point names as string accessors (the
+ * shaders stay as source, per #503), plus setters that store the created
+ * pipelines back into the globals so the draws, the render pass and the bind
+ * groups read them unchanged. */
+const char* rae_gb_wgsl(void)      { return GB_WGSL; }
+const char* rae_gb_skin_wgsl(void) { return GB_SKIN_WGSL; }
+const char* rae_gb_entry_vs(void)  { return "vs"; }
+const char* rae_gb_entry_fs(void)  { return "fs"; }
+void rae_gb_set_pipeline(void* p)      { gb_pipeline = (WGPURenderPipeline)p; }
+void rae_gb_set_skin_pipeline(void* p) { gb_skin_pipeline = (WGPURenderPipeline)p; }
 
 /* Accessors + setters for the Rae-side buffer / bind-group creation (#503). */
 void* rae_gb_frame_ubuf(void)      { return (void*)gb_frame_ubuf; }
@@ -619,9 +541,9 @@ _Static_assert(sizeof(rae_Mat4) == 16 * sizeof(float),
  * Targets, buffers and bind groups are created in Rae (#503); the frame uniform
  * is uploaded by rae_gb_frame_uniform once Rae has created its buffer. */
 int64_t rae_gb_prepare(void) {
-    if (!g_wgpu_dev) return 0;
-    gb_init_pipeline();
-    return gb_pipeline ? 1 : 0;
+    /* Pipelines are created in Rae now (ensurePipelines); just report the
+     * device is up so begin() can proceed to build them. */
+    return g_wgpu_dev ? 1 : 0;
 }
 
 /* G-buffer target creation moved to Rae (#503). C keeps the offscreen size

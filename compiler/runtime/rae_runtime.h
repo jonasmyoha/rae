@@ -847,6 +847,13 @@ int64_t rae_gb_targets_ready(void);
 void rae_gb_release_targets_ext(void);
 void rae_gb_set_target(int64_t idx, void* tex, void* view);
 void rae_gb_commit_targets(int64_t w, int64_t h);
+/* Render pipelines + WGSL shader modules created in Rae (#503). */
+const char* rae_gb_wgsl(void);
+const char* rae_gb_skin_wgsl(void);
+const char* rae_gb_entry_vs(void);
+const char* rae_gb_entry_fs(void);
+void rae_gb_set_pipeline(void* p);
+void rae_gb_set_skin_pipeline(void* p);
 void* rae_gb_view_a(void);
 void* rae_gb_view_b(void);
 void* rae_gb_view_c(void);
