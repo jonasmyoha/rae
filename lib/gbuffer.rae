@@ -62,7 +62,10 @@ import webgpu/context
 # when ready. Everything after (the command encoder, the render pass with its 3
 # G-buffer colour attachments + depth, and binding the static pipeline) is built
 # in Rae over the generated bindings.
-func gbFramePrep(viewProj: view Mat4, clearR: Float, clearG: Float, clearB: Float) extern("rae_gb_frame_prep") ret Int
+func gbPrepare() extern("rae_gb_prepare") ret Int
+func gbFrameUniform(viewProj: view Mat4, clearR: Float, clearG: Float, clearB: Float) extern("rae_gb_frame_uniform") ret Int
+func gbSetFrameUbuf(buf: Ptr) extern("rae_gb_set_frame_ubuf")
+func gbSetDrawsBuffer(buf: Ptr) extern("rae_gb_set_draws_buffer")
 func gbViewA() extern("rae_gb_view_a") ret Ptr
 func gbViewB() extern("rae_gb_view_b") ret Ptr
 func gbViewC() extern("rae_gb_view_c") ret Ptr
@@ -77,10 +80,30 @@ func gbFrameBytes() extern("rae_gb_frame_bytes") ret Int
 func gbDrawsSize() extern("rae_gb_draws_size") ret Int
 func gbSetStaticBind(bind: Ptr) extern("rae_gb_set_static_bind")
 
+var gBuffersMade: Bool = false
+
+# Create the frame uniform + draws storage buffers once, over the bindings, and
+# store them back into C so the frame-uniform upload, draws and bind groups use
+# them. Distinct flag bits, so `+` is the flag union.
+func ensureGbBuffers() {
+  if gBuffersMade { ret }
+  gBuffersMade = true
+  let uDesc: WGPUBufferDescriptor = {
+    usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst,
+    size: gbFrameBytes() as UInt64
+  }
+  gbSetFrameUbuf(buf: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: uDesc))
+  let sDesc: WGPUBufferDescriptor = {
+    usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst,
+    size: gbDrawsSize() as UInt64
+  }
+  gbSetDrawsBuffer(buf: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: sDesc))
+}
+
 var gStaticBindMade: Bool = false
 
 # Create the static geometry bind group once, over the bindings. Safe to call
-# only after gbFramePrep returned 1 (the pipeline and buffers then exist).
+# only after gbPrepare returned 1 and the buffers exist.
 func ensureStaticBind() {
   if gStaticBindMade { ret }
   gStaticBindMade = true
@@ -109,8 +132,10 @@ func ensureGbAttachments() {
 }
 
 func begin(viewProj: view Mat4, clearR: copy Float, clearG: copy Float, clearB: copy Float) pub {
-  if gbFramePrep(viewProj: viewProj, clearR: clearR, clearG: clearG, clearB: clearB) is 0 { ret }
+  if gbPrepare() is 0 { ret }
+  ensureGbBuffers()
   ensureStaticBind()
+  if gbFrameUniform(viewProj: viewProj, clearR: clearR, clearG: clearG, clearB: clearB) is 0 { ret }
   ensureGbAttachments()
 
   let undefinedSlice: UInt32 = WGPU_DEPTH_SLICE_UNDEFINED as UInt32

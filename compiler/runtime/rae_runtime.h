@@ -830,11 +830,15 @@ void* rae_gb_encoder(void);
 void rae_gb_clear_frame(void);
 int64_t rae_gb_frame_active(void);
 void rae_gb_submit(void* cmd);
-/* Geometry-pass begin ported to Rae (#503): C preps the frame + targets, Rae
- * builds the render pass. rae_Mat4 is forward-declared (it is defined later in
- * the generated C, after this header is included) — only a pointer is needed. */
+/* Geometry-pass begin ported to Rae (#503): C preps pipelines+targets, Rae
+ * creates buffers/bind groups and builds the render pass, then C uploads the
+ * frame uniform. rae_Mat4 is forward-declared (defined later in the generated
+ * C, after this header) — only a pointer is needed. */
 struct rae_Mat4;
-int64_t rae_gb_frame_prep(struct rae_Mat4* viewProj, float clearR, float clearG, float clearB);
+int64_t rae_gb_prepare(void);
+int64_t rae_gb_frame_uniform(struct rae_Mat4* viewProj, float clearR, float clearG, float clearB);
+void rae_gb_set_frame_ubuf(void* buf);
+void rae_gb_set_draws_buffer(void* buf);
 void* rae_gb_view_a(void);
 void* rae_gb_view_b(void);
 void* rae_gb_view_c(void);
