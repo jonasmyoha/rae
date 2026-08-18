@@ -308,3 +308,57 @@ func lightingPass(camera: view Camera3d, light: view Light3d) pub {
     horR: 0.0, horG: 0.0, horB: 0.0, discI: 0.0
   )
 }
+
+# ----- TAA: temporal resolve (#504) ------------------------------------------
+# Reads this frame's radiance + last frame's history + motion, writes the
+# resolved image into the slot the composite then reads. The ping-pong slot and
+# history flag are C frame state (taaBegin flips + uploads, taaEnd marks
+# history); Rae builds the per-slot bind and runs the pass. Pipeline stays C.
+func gbTaaReady() extern("rae_gb_taa_ready") ret Int
+func gbTaaBegin() extern("rae_gb_taa_begin") ret Int
+func gbTaaEnd() extern("rae_gb_taa_end")
+func gbTaaPipeline() extern("rae_gb_taa_pipeline") ret Ptr
+func gbTaaUbuf() extern("rae_gb_taa_ubuf") ret Ptr
+func gbTaaTargetView() extern("rae_gb_taa_target_view") ret Ptr
+func gbTaaHistoryView() extern("rae_gb_taa_history_view") ret Ptr
+func gbTaaBind(idx: Int) extern("rae_gb_taa_bind") ret Ptr
+func gbSetTaaBind(idx: Int, bind: Ptr) extern("rae_gb_set_taa_bind")
+
+var gTaaBindGen: Int = -1
+var gTaaBindMade: List(Bool) = createList(Bool, cap: 2)
+
+func taaSlotMade(idx: copy Int) ret Bool {
+  if let made: Bool = gTaaBindMade.get(index: idx) { ret made }
+  ret false
+}
+
+func taa() pub {
+  if gbTaaReady() is 0 { ret }
+  let cur: Int = gbTaaBegin()
+  loop gTaaBindMade.length < 2 { gTaaBindMade.add(value: false) }
+  let gen: Int = gbTargetsGen()
+  if not (gen is gTaaBindGen) {
+    gTaaBindGen = gen
+    gTaaBindMade.set(index: 0, value: false)
+    gTaaBindMade.set(index: 1, value: false)
+  }
+  if not taaSlotMade(idx: cur) {
+    let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbTaaPipeline(), groupIndex: 0 as UInt32)
+    var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 4)
+    entries.add(value: { binding: 0 as UInt32, textureView: gbLitView() })
+    entries.add(value: { binding: 1 as UInt32, textureView: gbTaaHistoryView() })
+    entries.add(value: { binding: 2 as UInt32, textureView: gbViewC() })
+    entries.add(value: { binding: 3 as UInt32, buffer: gbTaaUbuf(), size: 16 as UInt64 })
+    let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 4 as UInt64, entries: entries.data }
+    gbSetTaaBind(idx: cur, bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
+    wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+    gTaaBindMade.set(index: cur, value: true)
+  }
+  runFullscreen(pipeline: gbTaaPipeline(), bind: gbTaaBind(idx: cur), target: gbTaaTargetView())
+  gbTaaEnd()
+}
+
+# Public wrapper: the render graph's TAA step (was gbuffer.taaPass).
+func taaPass() pub {
+  taa()
+}
