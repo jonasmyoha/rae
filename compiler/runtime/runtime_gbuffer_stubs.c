@@ -49,6 +49,10 @@ int64_t rae_gb_skin_ready(int64_t mesh) { (void)mesh; return 0; }
 void* rae_gb_skin_vbuf(int64_t mesh)    { (void)mesh; return (void*)0; }
 void* rae_gb_skin_ibuf(int64_t mesh)    { (void)mesh; return (void*)0; }
 int64_t rae_gb_skin_icount(int64_t mesh){ (void)mesh; return 0; }
+void* rae_gb_encoder(void)              { return (void*)0; }
+void rae_gb_clear_frame(void)           {}
+int64_t rae_gb_frame_active(void)       { return 0; }
+void rae_gb_submit(void* cmd)           { (void)cmd; }
 void rae_ext_gbuffer_drawMetaballs(const float* packedBalls, int64_t count,
                                    const float* packedColors, float smoothing,
                                    float camX, float camY, float camZ,
@@ -59,7 +63,6 @@ void rae_ext_gbuffer_drawMetaballs(const float* packedBalls, int64_t count,
     (void)emR; (void)emG; (void)emB;
 }
 void rae_ext_gbuffer_sdfShutdown(void) {}
-void rae_ext_gbuffer_end(void) {}
 int64_t rae_ext_gbuffer_drawCount(void) { return 0; }
 void rae_ext_gbuffer_debugView(int64_t mode, float zNear, float zFar){
     (void)mode; (void)zNear; (void)zFar;

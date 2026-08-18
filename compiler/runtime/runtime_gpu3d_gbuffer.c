@@ -823,24 +823,24 @@ int64_t rae_gb_mesh_icount(int64_t mesh){ int s=(int)mesh-1; return (s>=0 && s<g
 
 /* Finish and submit the geometry pass. Uniform data uploads once here, not
  * per draw. */
-void rae_ext_gbuffer_end(void) {
-    if (!gb_pass) return;
-    /* Draws are uploaded per-draw now (see rae_ext_gbuffer_draw), so the draws
-     * storage buffer is already fully populated here — no bulk upload (#502). */
-    if (getenv("RAE_GBUFFER_DEBUG")) {
-        static int logged = 0;
-        if (!logged) {
-            fprintf(stderr, "[gbuffer] geometry pass: draws=%d target=%dx%d\n",
-                    gb_draw_count, gb_target_w, gb_target_h);
-            logged = 1;
-        }
-    }
-    wgpuRenderPassEncoderEnd(gb_pass);
-    WGPUCommandBuffer cb = wgpuCommandEncoderFinish(gb_enc, NULL);
-    wgpuQueueSubmit(g_wgpu_queue, 1, &cb);
-    wgpuCommandBufferRelease(cb);
-    wgpuRenderPassEncoderRelease(gb_pass); gb_pass = NULL;
-    wgpuCommandEncoderRelease(gb_enc); gb_enc = NULL;
+/* The geometry pass's finish/submit (end()) now runs in Rae over the bindings
+ * (lib/gbuffer.rae:endPass, #503). These accessors hand Rae the frame's command
+ * encoder and let it clear the encoder/pass globals once the pass is submitted,
+ * so the C metaball path and the draws see a live pass during the frame and a
+ * cleared one after. */
+void* rae_gb_encoder(void) { return (void*)gb_enc; }
+void rae_gb_clear_frame(void) { gb_pass = NULL; gb_enc = NULL; }
+/* 1 while a geometry pass is open (between begin and end), so Rae can guard
+ * end() without null-testing an opaque Ptr. */
+int64_t rae_gb_frame_active(void) { return gb_pass ? 1 : 0; }
+/* Submit exactly one command buffer. wgpuQueueSubmit takes a POINTER to an
+ * array of command buffers; Rae has no way yet to take the address of a single
+ * handle (and List(Ptr) — Ptr being Buffer(void) — nests wrongly in the
+ * container codegen), so this thin call stays C. Not renderer logic; a general
+ * FFI gap to close later (array-of-handles across the boundary). */
+void rae_gb_submit(void* cmd) {
+    WGPUCommandBuffer c = (WGPUCommandBuffer)cmd;
+    wgpuQueueSubmit(g_wgpu_queue, 1, &c);
 }
 
 int64_t rae_ext_gbuffer_drawCount(void) { return (int64_t)gb_draw_count; }

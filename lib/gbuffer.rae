@@ -127,7 +127,11 @@ func gbSkinIbuf(mesh: Int) extern("rae_gb_skin_ibuf") ret Ptr
 func gbSkinIcount(mesh: Int) extern("rae_gb_skin_icount") ret Int
 func drawMetaballs(packedBalls: view Buffer(Float), count: Int, packedColors: view Buffer(Float), smoothing: Float, camX: Float, camY: Float, camZ: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
 func sdfShutdown() extern
-func end() extern
+# Geometry-pass finish/submit accessors (#503). The pass encoding (end/finish/
+# submit) runs in Rae; C keeps the encoder handle and the frame-clear.
+func gbEncoder() extern("rae_gb_encoder") ret Ptr
+func gbClearFrame() extern("rae_gb_clear_frame")
+func gbFrameActive() extern("rae_gb_frame_active") ret Int
 func drawCount() extern ret Int
 func debugView(mode: Int, zNear: Float, zFar: Float) extern
 func present() extern
@@ -473,6 +477,27 @@ func renderScene(scene: view Scene3d) pub {
     }
     i = i + 1
   }
+}
+
+# Finish and submit the geometry pass (#503, was the C `end`). Draws upload their
+# own slices now (#502), so nothing bulk-uploads here — just end the render pass,
+# finish the command buffer and submit it, all over the bindings. The single-
+# command-buffer submit goes through gbSubmit (a thin C call) only because Rae
+# cannot yet take the address of one handle; everything else is Rae.
+func gbSubmit(cmd: Ptr) extern("rae_gb_submit")
+
+func end() pub {
+  if gbFrameActive() is 0 { ret }
+  let pass: Ptr = gbPass()
+  let enc: Ptr = gbEncoder()
+  wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
+  let cbDesc: WGPUCommandBufferDescriptor = { }
+  let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
+  gbSubmit(cmd: cmd)
+  wgpuCommandBufferRelease(commandBuffer: cmd)
+  wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
+  wgpuCommandEncoderRelease(commandEncoder: enc)
+  gbClearFrame()
 }
 
 func endPass() pub {
