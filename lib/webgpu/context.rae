@@ -24,3 +24,7 @@ func webgpuInstance() extern("rae_wgpu_ctx_instance") ret Ptr
 # Advance the device event queue (map/submit callbacks). wait != 0 blocks until
 # there is work; wait == 0 polls. Needed until Rae can pass callbacks to C.
 func webgpuPoll(wait: Int) extern("rae_wgpu_ctx_poll")
+
+# A null opaque pointer, for WebGPU params that take an optional pointer/array
+# (e.g. dynamicOffsets when the count is 0). Rae has no null-Ptr literal yet.
+func webgpuNull() extern("rae_wgpu_null_ptr") ret Ptr
