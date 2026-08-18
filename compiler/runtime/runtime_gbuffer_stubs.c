@@ -112,7 +112,7 @@ void rae_ext_gbuffer_shutdown(void) {}
  * CPU-side path in them to exercise, unlike the per-object transform
  * build above — so these are no-ops with nothing to preserve. */
 void rae_ext_gbuffer_depthPyramid(void) {}
-void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure,
+void rae_gb_light_upload(float camX, float camY, float camZ, float exposure,
                               float sunX, float sunY, float sunZ,
                               float sunR, float sunG, float sunB,
                               float skyR, float skyG, float skyB,
@@ -130,6 +130,14 @@ void rae_ext_gbuffer_lighting(float camX, float camY, float camZ, float exposure
     (void)zenR; (void)zenG; (void)zenB; (void)bands;
     (void)horR; (void)horG; (void)horB; (void)discI;
 }
+void* rae_gb_light_pipeline(void)      { return (void*)0; }
+void* rae_gb_lit_view(void)            { return (void*)0; }
+void* rae_gb_light_bind(void)          { return (void*)0; }
+void rae_gb_set_light_bind(void* b)    { (void)b; }
+void* rae_gb_shadow_frame_ubuf(void)   { return (void*)0; }
+int64_t rae_gb_shadow_frame_bytes(void){ return 320; }
+void* rae_gb_shadow_array_view(void)   { return (void*)0; }
+void* rae_gb_shadow_sampler(void)      { return (void*)0; }
 void rae_gb_ssao_upload(float camX, float camY, float camZ){ (void)camX; (void)camY; (void)camZ; }
 const char* rae_gb_ao_wgsl(void)   { return ""; }
 void* rae_gb_ao_view(void)         { return (void*)0; }
