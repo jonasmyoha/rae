@@ -106,6 +106,7 @@ import renderer_deferred
 import sky
 import gbuffer
 import gbuffer_instanced
+open gbuffer_instanced
 import shadow3d
 import app3d/playback
 import app3d/slider
@@ -340,6 +341,31 @@ func main() ret Int {
   # clump descriptors wrapped around the player like the terrain, packed into
   # one instanced draw each frame (grass epic phase 1 — no per-blade entity).
   var grass: GrassField = createGrassField(assets: assets, groundZ: groundZ)
+
+  # A little idle CROWD, proving skinned-mesh instancing (grass epic #485). Each
+  # clone's root model is a fixed scatter around the origin (golden-angle spiral)
+  # standing on the terrain, built exactly like walkerWorldModel but with the
+  # clone's own position/heading instead of the controller's. All clones share
+  # the ONE joint palette, so they play the SAME pose as the hero — they idle in
+  # place wherever the hero's animation is. Per part this is ONE instanced
+  # DrawIndexed for all clones (drawSkinnedInstances), not 20 draws.
+  let cloneCount: Int = 20
+  let cloneModels: List(Mat4) = createList(Mat4, cap: cloneCount)
+  var cloneIndex: Int = 0
+  loop cloneIndex < cloneCount {
+    let spiralAngle: Float = cloneIndex.toFloat() * 2.3999632
+    let spiralRadius: Float = 3.5 + cloneIndex.toFloat() * 0.45
+    let cloneX: Float = math.cos(x: spiralAngle) * spiralRadius
+    let cloneY: Float = math.sin(x: spiralAngle) * spiralRadius
+    let cloneZ: Float = terrainHeightAt(x: cloneX, y: cloneY, groundZ: groundZ) - groundZ
+    let cloneTranslation: Mat4 = mat4Translate(x: cloneX, y: cloneY, z: cloneZ)
+    let cloneHeading: Mat4 = mat4RotateZ(angle: spiralAngle + walkerFacingCorrection)
+    cloneModels.add(value: mat4Mul(a: cloneTranslation,
+      b: mat4Mul(a: cloneHeading, b: basePartModel)))
+    cloneIndex = cloneIndex + 1
+  }
+  let firstPart: MeshHandle = meshHandle(id: walkerIntAt(values: partIds, index: 0), generation: 1)
+  var characterClones: InstanceBatch = createInstanceBatch(mesh: firstPart, capacity: cloneCount)
 
   var camera: Camera3d = defaultCamera3d()
   var light: Light3d = defaultLight3d()
@@ -844,6 +870,15 @@ func main() ret Int {
           loop sp < partIds.length {
             let sh: MeshHandle = meshHandle(id: walkerIntAt(values: partIds, index: sp), generation: 1)
             drawShadowCasterSkinned(mesh: sh, model: partModel)
+            # Idle-crowd clones cast shadows too (per-clone, shared palette pose);
+            # instanced skinned shadow casting is a later grass phase.
+            var shadowClone: Int = 0
+            loop shadowClone < cloneModels.length {
+              if let cloneModel: Mat4 = cloneModels.at(index: shadowClone) {
+                drawShadowCasterSkinned(mesh: sh, model: cloneModel)
+              }
+              shadowClone = shadowClone + 1
+            }
             sp = sp + 1
           }
           endShadowPass()
@@ -886,6 +921,20 @@ func main() ret Int {
             }
             gbuffer.drawSkinnedInstance(mesh: handle, model: partModel,
                                         prevModel: previousPartModel, material: mat)
+            # The idle crowd: 20 clones of THIS part in one instanced skinned
+            # draw, all posed by the shared palette (grass epic #485). Rebuild the
+            # batch per part (same 20 root models, this part's mesh + material).
+            setInstanceBatchMesh(batch: characterClones, mesh: handle)
+            resetInstanceBatch(batch: characterClones)
+            var cloneDraw: Int = 0
+            loop cloneDraw < cloneModels.length {
+              if let cloneModel: Mat4 = cloneModels.at(index: cloneDraw) {
+                addInstance(batch: characterClones, model: cloneModel,
+                            prevModel: cloneModel, material: mat)
+              }
+              cloneDraw = cloneDraw + 1
+            }
+            drawSkinnedInstances(batch: characterClones)
             p = p + 1
           }
           # The grass field: one instanced draw for the whole meadow, inside

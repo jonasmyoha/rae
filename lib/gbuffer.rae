@@ -668,6 +668,30 @@ func drawSkinned(mesh: copy Int, model: view Mat4, prevModel: view Mat4,
     group: gbStaticBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
 }
 
+# Instanced SKINNED draw (grass epic #485): `count` copies of one skinned mesh
+# in a single DrawIndexed. Every copy is posed by the ONE shared joint palette
+# (the skin path has no per-instance palette), so all copies share the same pose
+# — the per-instance `model` in each DrawU only places/orients the copy. Used for
+# crowds playing the same animation. `records` is `count` DrawU entries built by
+# packInstanceRecord, exactly like drawRecords. Restores the static pipeline after,
+# as drawSkinned does.
+func drawSkinnedRecords(mesh: copy Int, records: copy Ptr, count: copy Int) pub {
+  ensureSkinBind()
+  if gbSkinReady(mesh: mesh) is 0 { ret }
+  let base: Int = gbDrawCount()
+  let remaining: Int = gbMaxDraws() - base
+  var n: Int = count
+  if n > remaining { n = remaining }
+  if n <= 0 { ret }
+  gbIssueInstanced(pass: gbPass(), pipeline: gbSkinPipeline(), bind: gbSkinBind(),
+    vbuf: gbSkinVbuf(mesh: mesh), ibuf: gbSkinIbuf(mesh: mesh),
+    icount: gbSkinIcount(mesh: mesh), base: base, count: n, records: records)
+  # Hand the pass back to the static pipeline for any following static draw.
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: gbPass(), pipeline: gbStaticPipeline())
+  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: gbPass(), groupIndex: 0 as UInt32,
+    group: gbStaticBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+}
+
 func drawInstance(mesh: view MeshHandle, transform: view Transform3d, prevTransform: view Transform3d, material: view Material3d) pub {
   if not meshHandleIsValid(h: mesh) {
     ret
