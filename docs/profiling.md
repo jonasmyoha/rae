@@ -34,11 +34,23 @@ Walk around, let the sun set (the case where 114 drops from 60→~20 fps), and a
 
 ## Capturing on iPhone
 
-The app's working directory is its `Documents/` folder (the iOS bootstrap
-`chdir`s there), so a capture lands next to `rae.log` and is pulled the same way.
-Passing environment variables to a side-loaded app is not as simple as on
-desktop — wiring a launch-arg / on-device trigger is tracked as **#527**. Until
-then, capture on desktop, which reproduces the same sunset fps drop.
+Pick **iOS device (profiler)** in the devtools target dropdown, or run:
+
+```bash
+RAE_IOS_PROFILE=30 sh tools/ios/run-ios.sh examples/114_walker_character
+```
+
+It builds + installs + launches with the capture on, prints `PLAY NOW`, and you
+walk around / let the sun set for ~30 s. `run-ios.sh` then pulls the trace off
+the device to `/tmp/rae_profile.json` (override with `RAE_PROFILE_LOCAL`) — open
+it at ui.perfetto.dev exactly like a desktop capture.
+
+Mechanics: `run-ios.sh` launches via `devicectl … process launch -e '{"RAE_PROFILE":"1",…}'`;
+the iOS bootstrap points `RAE_PROFILE_OUT` at the app's **writable** `Documents/`
+dir (the cwd is the read-only bundle), so the trace lands next to `rae.log`; it
+is retrieved with `devicectl device copy from --domain-type appDataContainer`.
+
+The plain **iOS device** target (no profiler) launches normally with no capture.
 
 ## Viewing
 
