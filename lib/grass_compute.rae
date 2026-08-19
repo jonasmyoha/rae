@@ -19,6 +19,7 @@ import core
 open webgpu/webgpu
 import webgpu/context
 open webgpu/context
+import profile
 
 # C shader-source accessors (WGSL text + entry point names).
 func grassWgsl() extern("rae_gb_grass_wgsl") ret Ptr
@@ -133,10 +134,17 @@ func ensureGrassGpu() {
   # appends visible blades; the draw reads it via DrawIndirect. Needs Indirect
   # (drawn from) + Storage (compute writes) + CopyDst (per-frame reset).
   let indDesc: WGPUBufferDescriptor = {
-    usage: WGPUBufferUsage_Indirect + WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst,
+    # CopySrc (#488): the diagnostics read the atomically-bumped instanceCount back.
+    usage: WGPUBufferUsage_Indirect + WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst
+      + WGPUBufferUsage_CopySrc,
     size: grassIndirectBytes as UInt64
   }
   grassSet(index: 6, ptr: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: indDesc))
+  # Slot 7: tiny MapRead staging for reading the visible count back (#488).
+  let rbDesc: WGPUBufferDescriptor = {
+    usage: WGPUBufferUsage_CopyDst + WGPUBufferUsage_MapRead, size: grassIndirectBytes as UInt64
+  }
+  grassSet(index: 7, ptr: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: rbDesc))
 
   let shaderMod: Ptr = grassMakeShaderModule(wgsl: grassWgsl())
   let pipeDesc: WGPUComputePipelineDescriptor = {
@@ -267,4 +275,58 @@ func grassDraw() {
   wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: gbStaticPipeline())
   wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
     group: gbStaticBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+}
+
+# Total candidate blades the compute considers each frame (#488 diagnostics).
+func grassGeneratedCount() pub ret Int { ret grassGpuBladeCount }
+
+var gGrassRead: List(Int) = createList(Int, cap: 2)
+
+# Read the VISIBLE blade count back (#488): the culling compute atomically bumped
+# the indirect draw's instanceCount (u32 #1 of the 4-word args) to the number of
+# survivors. Copy the args into a MapRead staging buffer and read it. BLOCKING —
+# the map waits for the GPU, so call it throttled (every N frames), not per frame.
+# Returns -1 before the grass GPU exists. Also confirms the map readback works on
+# this backend (compute-written data, unlike the #528 timestamp path).
+func grassReadVisible() pub ret Int {
+  if grassGet(index: 7) is webgpuNull() { ret 0 - 1 }
+  let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
+  let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
+  wgpuCommandEncoderCopyBufferToBuffer(commandEncoder: enc, source: grassGet(index: 6),
+    sourceOffset: 0 as UInt64, destination: grassGet(index: 7), destinationOffset: 0 as UInt64,
+    size: grassIndirectBytes as UInt64)
+  let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
+  gbSubmit(cmd: wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc))
+  loop gGrassRead.length < 2 { gGrassRead.add(value: 0) }
+  let ok: Int = webgpuMapRead(buffer: grassGet(index: 7), size: grassIndirectBytes as UInt64,
+    dst: gGrassRead.data)
+  if ok is 0 { ret 0 - 1 }
+  # args = {vertexCount:u32, instanceCount:u32, ...}; little-endian word 0 packs
+  # vertexCount (low) + instanceCount (high), so instanceCount = word0 >> 32.
+  let word0: Int = rae_ext_rae_buf_get(V: Int, buf: gGrassRead.data, index: 0)
+  ret word0 / 4294967296
+}
+
+var gGrassDiagFrame: Int = 0
+var gGrassVisibleCache: Int = 0
+
+# Last read visible-blade count (#488). Cheap; refreshed by grassDiagTick.
+func grassVisibleCount() pub ret Int { ret gGrassVisibleCache }
+
+# Per-frame grass diagnostics (#488). Only active during a profile capture so the
+# blocking readback never stalls normal play, and throttled to every 10th frame
+# so even a capture takes at most one grass sync per ~6 wall-frames. Emits
+# generated / visible / culled candidate counts as counters — plot them in the
+# capture alongside fps and per-pass GPU ms. Call once per frame after
+# grassGenerate.
+func grassDiagTick() pub {
+  if profile.profileCapturing() is false { ret }
+  gGrassDiagFrame = gGrassDiagFrame + 1
+  if gGrassDiagFrame % 10 is 0 {
+    let visible: Int = grassReadVisible()
+    if visible >= 0 { gGrassVisibleCache = visible }
+  }
+  profile.profileCounter(name: "grass.generated", value: grassGpuBladeCount)
+  profile.profileCounter(name: "grass.visible", value: gGrassVisibleCache)
+  profile.profileCounter(name: "grass.culled", value: grassGpuBladeCount - gGrassVisibleCache)
 }
