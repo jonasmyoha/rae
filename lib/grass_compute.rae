@@ -52,7 +52,7 @@ func grassGet(index: Int) extern("rae_gb_grass_get") ret Ptr
 # culling keeps only the visible subset (indirect draw).
 const grassGpuBladeCount: Int = 65536
 const grassRecordBytes: Int = 160    # 40 floats per DrawU
-const grassUniformBytes: Int = 64    # four vec4 (GrassU: player/time, count/extent, cam, forward)
+const grassUniformBytes: Int = 80    # five vec4 (GrassU: player/time, count/extent, cam, forward, groundColour)
 const grassIndirectBytes: Int = 16   # 4 u32 DrawIndirect args (vertexCount, instanceCount, ...)
 # Vertices per procedural blade: a tapered quad = two triangles (see bladeLocal
 # in the render WGSL). No mesh, no vertex/index buffer.
@@ -205,11 +205,12 @@ const grassConeCos: Float = 0.36
 func grassGenerate(playerX: copy Float, playerY: copy Float, groundZ: copy Float,
                    time: copy Float, dt: copy Float, extent: copy Float, toon: copy Int,
                    camX: copy Float, camY: copy Float, camZ: copy Float,
-                   fwdX: copy Float, fwdY: copy Float, fwdZ: copy Float) {
+                   fwdX: copy Float, fwdY: copy Float, fwdZ: copy Float,
+                   groundR: copy Float, groundG: copy Float, groundB: copy Float) {
   ensureGrassGpu()
   var toonF: Float = 0.0
   if toon is 1 { toonF = 1.0 }
-  loop gGrassUni.length < 16 { gGrassUni.add(value: 0.0) }
+  loop gGrassUni.length < 20 { gGrassUni.add(value: 0.0) }
   gGrassUni.set(index: 0, value: playerX)
   gGrassUni.set(index: 1, value: playerY)
   gGrassUni.set(index: 2, value: groundZ)
@@ -226,6 +227,9 @@ func grassGenerate(playerX: copy Float, playerY: copy Float, groundZ: copy Float
   gGrassUni.set(index: 13, value: fwdY)
   gGrassUni.set(index: 14, value: fwdZ)
   gGrassUni.set(index: 15, value: grassConeCos)
+  gGrassUni.set(index: 16, value: groundR)   # gradient bottom = terrain ground colour
+  gGrassUni.set(index: 17, value: groundG)
+  gGrassUni.set(index: 18, value: groundB)
   wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: grassGet(index: 2), bufferOffset: 0 as UInt64,
     data: gGrassUni.data, size: grassUniformBytes as UInt64)
 

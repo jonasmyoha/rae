@@ -474,6 +474,7 @@ static const char* GB_GRASS_WGSL =
 "  b: vec4<f32>,\n"   /* count, extent, toon, dt */
 "  c: vec4<f32>,\n"   /* camX, camY, camZ, nearKeep */
 "  d: vec4<f32>,\n"   /* forwardX, forwardY, forwardZ, coneCos */
+"  e: vec4<f32>,\n"   /* groundColour.rgb (gradient bottom, = terrain ground) */
 "};\n"
 "struct Indirect {\n"
 "  vertexCount: u32,\n"
@@ -618,9 +619,9 @@ static const char* GB_GRASS_WGSL =
 "  outBuf[slot].model = m;\n"
 "  outBuf[slot].prevModel = m;\n"
 /* Colour: per-blade hue/brightness variation DISABLED while we test the
- * base->tip gradient (applied in the render shader). albedoMetallic is left as
- * the gradient's bottom (terrain ground) colour so anything sampling it agrees. */
-"  outBuf[slot].albedoMetallic = vec4<f32>(0.105, 0.245, 0.055, 0.0);\n"
+ * base->tip gradient (applied in the render shader). Bottom = the terrain ground
+ * colour, passed in via the uniform so grass and ground stay in sync. */
+"  outBuf[slot].albedoMetallic = vec4<f32>(G.e.rgb, 0.0);\n"
 "  let mode = select(0.0, 1.0, G.b.z > 0.5);\n"
 /* Per-blade TIP sharpness (grass epic #487): params.w carries the top width the
  * render shader tapers to. Squared hash biases MOST blades to a sharp point
@@ -738,10 +739,10 @@ GB_OCT_WGSL
 "  let motion = (now - prev) * vec2<f32>(0.5, -0.5);\n"
 "  let mEnc = clamp(motion, vec2<f32>(-0.5), vec2<f32>(0.5)) + vec2<f32>(" GB_MOTION_ZERO_WGSL ");\n"
 "  var o: FsOut;\n"
-     /* Vertical colour gradient (test): base matches the terrain ground colour
-        (walker_terrain groundMaterial 0.105,0.245,0.055), tip slightly lighter,
-        giving natural depth. Per-blade colour variation is off while we test. */
-"  let botCol = vec3<f32>(0.105, 0.245, 0.055);\n"
+     /* Vertical colour gradient (test): base = the terrain ground colour the
+        compute wrote into albedoMetallic (so grass roots match the ground and
+        track it automatically), tip 1.8x lighter, giving natural depth. */
+"  let botCol = d.albedoMetallic.rgb;\n"
 "  let topCol = botCol * 1.8;\n"
 "  let albedo = mix(botCol, topCol, clamp(in.height, 0.0, 1.0));\n"
 "  o.gba = vec4<f32>(oct.x, oct.y, 0.5, d.params.z);\n"
