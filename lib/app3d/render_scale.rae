@@ -1,0 +1,69 @@
+# Dynamic-resolution controller (#530): keeps the frame at the target rate by
+# lowering the deferred render scale when frames miss the budget and raising it
+# back after a sustained stretch of good frames. The scene renders at that
+# fraction and the composite pass upscales it (lib/gbuffer_passes.rae), so fewer
+# shaded pixels = less sustained GPU load = the phone throttles later / not at all.
+#
+# Signal: wall-clock frame time (dt). Under vsync this is coarse (≈16.7ms at 60,
+# ≈33ms at 30), so the loop reacts to DROPPED frames rather than fine headroom:
+# drop scale fast on consecutive over-budget frames, raise it one slow step after
+# a long good stretch, with a cooldown so it can't oscillate. When real per-pass
+# GPU timing (#528) lands, swap `dt` for measured GPU ms for a tighter loop.
+#
+#   var drs = createRenderScaleController(targetFps: 60.0)   # once
+#   updateRenderScale(drs: drs, dt: dt)                       # each frame
+import core
+
+# Push the render scale to the deferred renderer (#530). C clamps to [0.25, 1.0].
+func setRenderScale(s: Float64) extern("rae_gb_set_render_scale")
+
+type RenderScaleController {
+  scale: Float
+  minScale: Float
+  step: Float
+  overBudgetSec: Float   # a frame slower than this counts as "missed"
+  overFrames: Int        # consecutive missed frames
+  goodFrames: Int        # consecutive good frames
+  cooldown: Int          # frames to wait after a change (anti-oscillation)
+}
+
+func createRenderScaleController(targetFps: copy Float) pub ret RenderScaleController {
+  var fps: Float = targetFps
+  if fps < 1.0 { fps = 60.0 }
+  # Missed = 25% over the target period (e.g. >20.8ms for 60fps) — clearly not
+  # holding the rate, not just jitter.
+  ret RenderScaleController {
+    scale: 1.0, minScale: 0.5, step: 0.1,
+    overBudgetSec: 1.25 / fps,
+    overFrames: 0, goodFrames: 0, cooldown: 0
+  }
+}
+
+# Feed one frame's dt (seconds). Adjusts the render scale in place and pushes it
+# to the renderer. Drops fast (4 missed frames), raises slowly (after ~3s good).
+func updateRenderScale(drs: mod RenderScaleController, dt: copy Float) pub {
+  if dt > drs.overBudgetSec {
+    drs.overFrames = drs.overFrames + 1
+    drs.goodFrames = 0
+  } else {
+    drs.goodFrames = drs.goodFrames + 1
+    drs.overFrames = 0
+  }
+  if drs.cooldown > 0 {
+    drs.cooldown = drs.cooldown - 1
+    ret
+  }
+  if drs.overFrames >= 4 and drs.scale > drs.minScale {
+    drs.scale = drs.scale - drs.step
+    if drs.scale < drs.minScale { drs.scale = drs.minScale }
+    setRenderScale(s: drs.scale as Float64)
+    drs.cooldown = 30
+    drs.overFrames = 0
+  } else if drs.goodFrames >= 180 and drs.scale < 1.0 {
+    drs.scale = drs.scale + drs.step
+    if drs.scale > 1.0 { drs.scale = 1.0 }
+    setRenderScale(s: drs.scale as Float64)
+    drs.cooldown = 30
+    drs.goodFrames = 0
+  }
+}
