@@ -156,10 +156,11 @@ func ensureGrassDrawBind() {
   gGrassDrawBindMade = true
   let instBytes: Int = grassGpuBladeCount * grassRecordBytes
   let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: grassGet(index: 5), groupIndex: 0 as UInt32)
-  var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 2)
+  var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 3)
   entries.add(value: { binding: 0 as UInt32, buffer: gbFrameUbuf(), size: gbFrameBytes() as UInt64 })
   entries.add(value: { binding: 1 as UInt32, buffer: grassGet(index: 1), size: instBytes as UInt64 })
-  let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 2 as UInt64, entries: entries.data }
+  entries.add(value: { binding: 2 as UInt32, buffer: grassGet(index: 2), size: grassUniformBytes as UInt64 })
+  let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 3 as UInt64, entries: entries.data }
   grassSet(index: 4, ptr: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
   wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
 }
