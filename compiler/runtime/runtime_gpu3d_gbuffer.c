@@ -570,8 +570,16 @@ static const char* GB_GRASS_WGSL =
  * thickness. */
 "  let hHeight = hash2u(cellI, 61u);\n"
 "  let hWidth = hash2u(cellI, 71u);\n"
-"  let height = 0.30 + hHeight * 0.40;\n"
+"  let baseHeight = 0.30 + hHeight * 0.40;\n"
 "  let width = 0.055 + hWidth * 0.045;\n"
+/* Smooth circular edge fade (grass epic #487 — no hard field boundary or rings):
+ * blades shrink to nothing toward the edge of the radius, which also hides the
+ * square grid's far corners. A zero-height blade is invisible (real culling that
+ * skips its verts comes with the indirect-draw pass). */
+"  let distToPlayer = distance(vec2<f32>(bx, by), G.a.xy);\n"
+"  let radius = extent * 0.5;\n"
+"  let edgeFade = 1.0 - smoothstep(radius * 0.6, radius * 0.98, distToPlayer);\n"
+"  let height = baseHeight * edgeFade;\n"
 "  let scale = vec3<f32>(width, width, height);\n"
 /* Upright placement only. The wind bend is applied per-vertex in the render
  * shader (grass epic #487) so it can curve the blade progressively (base fixed,
