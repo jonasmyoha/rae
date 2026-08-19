@@ -41,15 +41,18 @@ func gbMeshIcount(mesh: Int) extern("rae_gb_mesh_icount") ret Int
 
 # Handle store (Rae has no module-level Ptr var; keep them in C like the rest of
 # the renderer). Slots: 0=compute pipeline, 1=instance buffer, 2=uniform buffer,
-# 3=compute bind group, 4=draw bind group, 5=grass render pipeline.
+# 3=compute bind group, 4=draw bind group, 5=grass render pipeline,
+# 6=indirect draw-args buffer.
 func grassSet(index: Int, ptr: Ptr) extern("rae_gb_grass_set")
 func grassGet(index: Int) extern("rae_gb_grass_get") ret Ptr
 
 # Blade count MUST be a perfect square: the compute grid is side x side, and the
-# shader derives side = sqrt(count). 576 = 24 x 24.
+# shader derives side = sqrt(count). 256 x 256 = 65536 candidate blades; GPU
+# culling keeps only the visible subset (indirect draw).
 const grassGpuBladeCount: Int = 65536
 const grassRecordBytes: Int = 160    # 40 floats per DrawU
-const grassUniformBytes: Int = 32    # two vec4 (see GrassU in the WGSL)
+const grassUniformBytes: Int = 64    # four vec4 (GrassU: player/time, count/extent, cam, forward)
+const grassIndirectBytes: Int = 16   # 4 u32 DrawIndirect args (vertexCount, instanceCount, ...)
 # Vertices per procedural blade: a tapered quad = two triangles (see bladeLocal
 # in the render WGSL). No mesh, no vertex/index buffer.
 const grassBladeVerts: Int = 6
@@ -126,6 +129,14 @@ func ensureGrassGpu() {
   }
   let uniform: Ptr = wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: uDesc)
   grassSet(index: 2, ptr: uniform)
+  # Indirect draw-args buffer: the compute atomically bumps instanceCount as it
+  # appends visible blades; the draw reads it via DrawIndirect. Needs Indirect
+  # (drawn from) + Storage (compute writes) + CopyDst (per-frame reset).
+  let indDesc: WGPUBufferDescriptor = {
+    usage: WGPUBufferUsage_Indirect + WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst,
+    size: grassIndirectBytes as UInt64
+  }
+  grassSet(index: 6, ptr: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: indDesc))
 
   let shaderMod: Ptr = grassMakeShaderModule(wgsl: grassWgsl())
   let pipeDesc: WGPUComputePipelineDescriptor = {
@@ -135,10 +146,11 @@ func ensureGrassGpu() {
   grassSet(index: 0, ptr: pipeline)
 
   let cLayout: Ptr = wgpuComputePipelineGetBindGroupLayout(computePipeline: pipeline, groupIndex: 0 as UInt32)
-  var cEntries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 2)
+  var cEntries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 3)
   cEntries.add(value: { binding: 0 as UInt32, buffer: uniform, size: grassUniformBytes as UInt64 })
   cEntries.add(value: { binding: 1 as UInt32, buffer: instances, size: instBytes as UInt64 })
-  let cbDesc: WGPUBindGroupDescriptor = { layout: cLayout, entryCount: 2 as UInt64, entries: cEntries.data }
+  cEntries.add(value: { binding: 2 as UInt32, buffer: grassGet(index: 6), size: grassIndirectBytes as UInt64 })
+  let cbDesc: WGPUBindGroupDescriptor = { layout: cLayout, entryCount: 3 as UInt64, entries: cEntries.data }
   grassSet(index: 3, ptr: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: cbDesc))
   wgpuBindGroupLayoutRelease(bindGroupLayout: cLayout)
 
@@ -165,19 +177,31 @@ func ensureGrassDrawBind() {
   wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
 }
 
-# Reused per-frame uniform staging (8 floats). Module-level so no per-frame alloc.
-var gGrassUni: List(Float) = createList(Float, cap: 8)
+# Reused per-frame staging, module-level so no per-frame alloc. gGrassUni is the
+# 16-float GrassU; gGrassIndReset is the {vertexCount=6, instanceCount=0, 0, 0}
+# DrawIndirect args written before each dispatch so the atomic counter starts at 0.
+var gGrassUni: List(Float) = createList(Float, cap: 16)
+var gGrassIndReset: List(Int32) = createList(Int32, cap: 4)
 
-# Dispatch the grass generation compute for this frame. Centres a grid of blades
-# on (playerX, playerY), extent units wide, on the terrain, swaying at `time`
-# (dt gives the previous-frame sway for TAA motion). Records into its own encoder
-# and submits — no readback, no blocking. Call BEFORE the geometry pass.
+# Cull tuning: blades within nearKeep of the camera are always kept (so the field
+# never holes out at the player's feet); beyond that, a blade survives only if it
+# is within the view cone (dot(dirToBlade, forward) >= coneCos). coneCos ~ cos(69)
+# is generous so nothing on-screen is clipped early.
+const grassNearKeep: Float = 5.0
+const grassConeCos: Float = 0.36
+
+# Dispatch the grass generation + CULLING compute for this frame. Centres the
+# candidate grid on (playerX, playerY); each survivor (on-terrain, unfaded, inside
+# the view cone from the camera) is appended to a compacted list and bumps the
+# indirect draw's instanceCount. No readback, no blocking. Call BEFORE the pass.
 func grassGenerate(playerX: copy Float, playerY: copy Float, groundZ: copy Float,
-                   time: copy Float, dt: copy Float, extent: copy Float, toon: copy Int) {
+                   time: copy Float, dt: copy Float, extent: copy Float, toon: copy Int,
+                   camX: copy Float, camY: copy Float, camZ: copy Float,
+                   fwdX: copy Float, fwdY: copy Float, fwdZ: copy Float) {
   ensureGrassGpu()
   var toonF: Float = 0.0
   if toon is 1 { toonF = 1.0 }
-  loop gGrassUni.length < 8 { gGrassUni.add(value: 0.0) }
+  loop gGrassUni.length < 16 { gGrassUni.add(value: 0.0) }
   gGrassUni.set(index: 0, value: playerX)
   gGrassUni.set(index: 1, value: playerY)
   gGrassUni.set(index: 2, value: groundZ)
@@ -186,8 +210,23 @@ func grassGenerate(playerX: copy Float, playerY: copy Float, groundZ: copy Float
   gGrassUni.set(index: 5, value: extent)
   gGrassUni.set(index: 6, value: toonF)
   gGrassUni.set(index: 7, value: dt)
+  gGrassUni.set(index: 8, value: camX)
+  gGrassUni.set(index: 9, value: camY)
+  gGrassUni.set(index: 10, value: camZ)
+  gGrassUni.set(index: 11, value: grassNearKeep)
+  gGrassUni.set(index: 12, value: fwdX)
+  gGrassUni.set(index: 13, value: fwdY)
+  gGrassUni.set(index: 14, value: fwdZ)
+  gGrassUni.set(index: 15, value: grassConeCos)
   wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: grassGet(index: 2), bufferOffset: 0 as UInt64,
     data: gGrassUni.data, size: grassUniformBytes as UInt64)
+
+  # Reset the indirect args so this frame's atomic append counts from 0.
+  loop gGrassIndReset.length < 4 { gGrassIndReset.add(value: 0 as Int32) }
+  gGrassIndReset.set(index: 0, value: grassBladeVerts as Int32)
+  gGrassIndReset.set(index: 1, value: 0 as Int32)
+  wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: grassGet(index: 6), bufferOffset: 0 as UInt64,
+    data: gGrassIndReset.data, size: grassIndirectBytes as UInt64)
 
   let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
   let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
@@ -221,9 +260,10 @@ func grassDraw() {
   wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: grassGet(index: 5))
   wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
     group: grassGet(index: 4), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
-  wgpuRenderPassEncoderDraw(renderPassEncoder: pass,
-    vertexCount: grassBladeVerts as UInt32, instanceCount: grassGpuBladeCount as UInt32,
-    firstVertex: 0 as UInt32, firstInstance: 0 as UInt32)
+  # One indirect draw: instanceCount was written by the culling compute, so only
+  # the surviving (visible) blades are drawn.
+  wgpuRenderPassEncoderDrawIndirect(renderPassEncoder: pass,
+    indirectBuffer: grassGet(index: 6), indirectOffset: 0 as UInt64)
   wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: gbStaticPipeline())
   wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
     group: gbStaticBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
