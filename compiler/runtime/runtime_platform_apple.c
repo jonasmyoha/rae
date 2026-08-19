@@ -79,6 +79,16 @@ void rae_ext_activateSelf(void) {
   SEL actSel = sel_registerName("activateIgnoringOtherApps:");
   ((void (*)(void*, SEL, signed char))objc_msgSend)(app, actSel, (signed char)1);
 }
+/* NSProcessInfoThermalState: 0 nominal, 1 fair, 2 serious, 3 critical. Lets the
+ * render loop shed load (dynamic resolution / frame cap) BEFORE the OS throttles
+ * the GPU, instead of only reacting to dropped frames (#530). macOS + iOS. */
+int64_t rae_ext_thermalState(void) {
+  Class npClass = objc_getClass("NSProcessInfo");
+  if (!npClass) return 0;
+  void* pi = ((void* (*)(void*, SEL))objc_msgSend)((void*)npClass, sel_registerName("processInfo"));
+  if (!pi) return 0;
+  return (int64_t)((long (*)(void*, SEL))objc_msgSend)(pi, sel_registerName("thermalState"));
+}
 #else
 void rae_ext_disableAppNap(void) {
   /* No-op outside macOS — App Nap is a macOS-specific power
@@ -87,4 +97,5 @@ void rae_ext_disableAppNap(void) {
 void rae_ext_activateSelf(void) {
   /* No-op outside macOS. */
 }
+int64_t rae_ext_thermalState(void) { return 0; }  /* no thermal API off Apple */
 #endif
