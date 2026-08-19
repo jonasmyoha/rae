@@ -56,6 +56,7 @@ static void rae_wgpu_on_adapter(WGPURequestAdapterStatus st, WGPUAdapter a, WGPU
  * Zero means the adapter did not offer the feature and the fallback path
  * must be used. */
 static int g_wgpu_have_rg11b10 = 0;
+static int g_wgpu_have_timestamp = 0;   /* #528: timestamp-query features present */
 static int g_wgpu_device_done;
 static void rae_wgpu_on_device(WGPURequestDeviceStatus st, WGPUDevice d, WGPUStringView m, void* u1, void* u2) {
     (void)st;(void)m;(void)u1;(void)u2; g_wgpu_dev = d; g_wgpu_device_done = 1;
@@ -84,11 +85,21 @@ static int rae_wgpu_init(void) {
      * rg11b10ufloat-renderable lets an HDR target be 4 bytes/pixel instead
      * of 8 (#370). Renderers that need it check g_wgpu_have_rg11b10 and
      * fall back to rgba16float. */
-    WGPUFeatureName want[1];
+    WGPUFeatureName want[4];
     size_t want_n = 0;
     if (wgpuAdapterHasFeature(g_wgpu_adapter, WGPUFeatureName_RG11B10UfloatRenderable)) {
         want[want_n++] = WGPUFeatureName_RG11B10UfloatRenderable;
         g_wgpu_have_rg11b10 = 1;
+    }
+    /* GPU timestamp queries (#528) drive per-pass GPU timing + dynamic
+     * resolution. We use pass-descriptor timestampWrites (begin/end of each
+     * render/compute pass), which Metal supports — unlike writing timestamps
+     * INSIDE an encoder, which Metal (hence iPhone) does not. So only the base
+     * TimestampQuery feature is needed; skip GPU timing when the adapter lacks
+     * it (a WASM adapter legitimately may). */
+    if (wgpuAdapterHasFeature(g_wgpu_adapter, (WGPUFeatureName)WGPUFeatureName_TimestampQuery)) {
+        want[want_n++] = (WGPUFeatureName)WGPUFeatureName_TimestampQuery;
+        g_wgpu_have_timestamp = 1;
     }
     WGPUDeviceDescriptor dd; memset(&dd, 0, sizeof(dd));
     dd.requiredFeatureCount = want_n;
@@ -120,6 +131,43 @@ void  rae_wgpu_ctx_poll(int wait)   { rae_wgpu_poll(wait); }
 /* A null opaque pointer, for WebGPU params that take an optional pointer/array
  * (e.g. dynamicOffsets when the count is 0). Rae has no null-Ptr literal yet. */
 void* rae_wgpu_null_ptr(void)       { return (void*)0; }
+
+/* #528: did the device get the timestamp-query features? Rae skips GPU timing
+ * when 0 (e.g. an adapter that doesn't offer them). */
+int rae_wgpu_have_timestamp(void)   { return g_wgpu_have_timestamp; }
+
+/* #528: a small handle store for lib/gpu_timing.rae (query set + 2 buffers).
+ * Rae cannot hold a WGPU handle in a module-level Ptr var (no null literal to
+ * seed it) nor in a List(Ptr) (the emitter has no rae_Ptr element type yet), so
+ * — exactly as the grass compute path stores its handles in C — a tiny indexed
+ * void* array is the seam. Generic (rae_gt_*), not a renderer helper. */
+static void* g_gt_handles[8];
+void  rae_gt_set(int64_t i, void* p) { if (i >= 0 && i < 8) g_gt_handles[i] = p; }
+void* rae_gt_get(int64_t i)          { return (i >= 0 && i < 8) ? g_gt_handles[i] : (void*)0; }
+
+/* #528: blocking read of a MapRead buffer's [0,size) into `dst`. This is the
+ * ONE piece that must stay in C: wgpuBufferMapAsync needs a C callback pointer,
+ * which Rae cannot yet synthesize (same reason rae_gb_submit exists for &cmd).
+ * Everything else — query set, timestamp writes, resolve, copy — is done from
+ * Rae over the bindings. Used on a buffer whose GPU work is already a frame old,
+ * so the poll returns without a real stall. Returns 1 on success. */
+int rae_wgpu_map_read(void* buffer, uint64_t size, void* dst) {
+    if (!buffer || !dst || size == 0) return 0;
+    WGPUBuffer buf = (WGPUBuffer)buffer;
+    g_wgpu_map_done = 0;
+    WGPUBufferMapCallbackInfo ci; memset(&ci, 0, sizeof(ci));
+    ci.mode = WGPUCallbackMode_AllowProcessEvents;
+    ci.callback = rae_wgpu_on_map;
+    wgpuBufferMapAsync(buf, WGPUMapMode_Read, 0, (size_t)size, ci);
+    int spins = 0;
+    while (!g_wgpu_map_done && spins++ < 100000) rae_wgpu_poll(1);
+    if (!g_wgpu_map_done) return 0;
+    const void* src = wgpuBufferGetConstMappedRange(buf, 0, (size_t)size);
+    if (!src) { wgpuBufferUnmap(buf); return 0; }
+    memcpy(dst, src, (size_t)size);
+    wgpuBufferUnmap(buf);
+    return 1;
+}
 
 /* scene: sceneLen f64 (camera 19 + spheres*10) -> narrowed to f32 for the GPU.
  * fb: width*height int64 written as packed 0xRRGGBB. wgsl: shader source. */

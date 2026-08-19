@@ -796,6 +796,11 @@ void* rae_wgpu_ctx_adapter(void);
 void* rae_wgpu_ctx_instance(void);
 void  rae_wgpu_ctx_poll(int wait);
 void* rae_wgpu_null_ptr(void);
+/* #528 GPU timestamp timing */
+int   rae_wgpu_have_timestamp(void);
+int   rae_wgpu_map_read(void* buffer, uint64_t size, void* dst);
+void  rae_gt_set(int64_t i, void* p);
+void* rae_gt_get(int64_t i);
 #endif
 
 /* G-buffer instanced-draw context accessors (#502). Bound from Rae via
