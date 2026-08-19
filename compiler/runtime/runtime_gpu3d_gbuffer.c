@@ -617,10 +617,10 @@ static const char* GB_GRASS_WGSL =
 "  let m = swayModel(pos, yaw, 0.0, 0.0, scale);\n"
 "  outBuf[slot].model = m;\n"
 "  outBuf[slot].prevModel = m;\n"
-/* Per-blade colour: hue/brightness spread so the field is not one flat green. */
-"  let cvar = hash2u(cellI, 83u);\n"
-"  let cbright = 0.75 + hash2u(cellI, 97u) * 0.5;\n"
-"  outBuf[slot].albedoMetallic = vec4<f32>((0.12 + cvar * 0.12) * cbright, (0.30 + cvar * 0.20) * cbright, (0.04 + cvar * 0.07) * cbright, 0.0);\n"
+/* Colour: per-blade hue/brightness variation DISABLED while we test the
+ * base->tip gradient (applied in the render shader). albedoMetallic is left as
+ * the gradient's bottom (terrain ground) colour so anything sampling it agrees. */
+"  outBuf[slot].albedoMetallic = vec4<f32>(0.105, 0.245, 0.055, 0.0);\n"
 "  let mode = select(0.0, 1.0, G.b.z > 0.5);\n"
 /* Per-blade TIP sharpness (grass epic #487): params.w carries the top width the
  * render shader tapers to. Squared hash biases MOST blades to a sharp point
@@ -667,6 +667,7 @@ GB_OCT_WGSL
 "  @location(1) @interpolate(flat) inst: u32,\n"
 "  @location(2) clipNow: vec4<f32>,\n"
 "  @location(3) clipPrev: vec4<f32>,\n"
+"  @location(4) height: f32,\n"   /* 0 at blade base, 1 at tip — colour gradient */
 "};\n"
 /* Coherent WORLD-SPACE wind (grass epic #487): a travelling wave keyed on the
  * blade's base world position, so neighbours bend together into gusts rather
@@ -697,6 +698,7 @@ GB_OCT_WGSL
 "  let d = draws[ii];\n"
 "  let lp = bladeLocal(vi, d.params.w);\n"
 "  var o: VsOut;\n"
+"  o.height = lp.z;\n"
 /* Base world position lives in the model's translation column; the wave is keyed
  * on it so the gust is coherent across the field. The bend is applied AFTER the
  * model transform, horizontally, scaled by z*z so the base stays planted and the
@@ -736,8 +738,14 @@ GB_OCT_WGSL
 "  let motion = (now - prev) * vec2<f32>(0.5, -0.5);\n"
 "  let mEnc = clamp(motion, vec2<f32>(-0.5), vec2<f32>(0.5)) + vec2<f32>(" GB_MOTION_ZERO_WGSL ");\n"
 "  var o: FsOut;\n"
+     /* Vertical colour gradient (test): base matches the terrain ground colour
+        (walker_terrain groundMaterial 0.105,0.245,0.055), tip slightly lighter,
+        giving natural depth. Per-blade colour variation is off while we test. */
+"  let botCol = vec3<f32>(0.105, 0.245, 0.055);\n"
+"  let topCol = botCol * 1.8;\n"
+"  let albedo = mix(botCol, topCol, clamp(in.height, 0.0, 1.0));\n"
 "  o.gba = vec4<f32>(oct.x, oct.y, 0.5, d.params.z);\n"
-"  o.gbb = vec4<f32>(d.albedoMetallic.rgb, rough);\n"
+"  o.gbb = vec4<f32>(albedo, rough);\n"
 "  o.gbc = vec4<f32>(mEnc.x, mEnc.y, clamp(d.albedoMetallic.a, 0.0, 1.0), d.params.y);\n"
 "  return o;\n"
 "}\n";
