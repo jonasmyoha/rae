@@ -24,13 +24,20 @@ open app3d/camera_rig
 # phone one finger drives the joystick while another rotates the camera (#526).
 func updateWalkerTouch(moveStick: mod VirtualJoystick) pub ret Bool {
   let active: Bool = updateVirtualJoystick(joy: moveStick)
-  setCameraTouchExclude(x: moveStick.baseX, y: moveStick.baseY, r: moveStick.baseRadius * 1.8)
+  setCameraTouch(excludeId: moveStick.grabbedId, joystickActive: active)
   ret active
 }
 
 # Fully show/hide the settings side panel. 114 hides the WHOLE panel when closed
 # (not just the body) and reopens it from the corner menu button, so the panel
 # header never sits under the debug "D" at the top-right.
+# Hide the camera bar's "Mouse"/"Keys" smoothing toggles — not needed, and they
+# crowd the top bar on a phone. (Their smoothing defaults still apply.)
+func walkerHideCameraChrome(world: mod UiWorld) pub {
+  setNodeActive(world: world, nodeId: "CameraSmoothMouseButton", value: false)
+  setNodeActive(world: world, nodeId: "CameraSmoothKeysButton", value: false)
+}
+
 func applyWalkerPanel(world: mod UiWorld, open: view Bool) pub {
   setNodeActive(world: world, nodeId: "SidePanel", value: open)
   # The in-panel "Settings" header button is redundant once the hamburger opens
@@ -47,8 +54,8 @@ func toggleWalkerPanel(settings: mod SettingsState, world: mod UiWorld) pub {
 # Corner menu (hamburger) button, top-left in gpu2d design units — clear of the
 # debug D (top-right), the joystick (bottom-left) and the log (bottom-right).
 func walkerMenuSize() ret Float { ret gpu2d.designWidth() * 0.085 }
-func walkerMenuX() ret Float { ret gpu2d.designWidth() * 0.045 }
-func walkerMenuY() ret Float { ret gpu2d.designHeight() * 0.045 }
+func walkerMenuX() ret Float { ret gpu2d.safeLeft() + gpu2d.designWidth() * 0.045 }
+func walkerMenuY() ret Float { ret gpu2d.safeTop() + gpu2d.designHeight() * 0.03 }
 
 func drawWalkerMenuButton() {
   let size: Float = walkerMenuSize()
