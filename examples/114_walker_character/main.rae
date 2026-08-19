@@ -107,6 +107,8 @@ import sky
 import gbuffer
 import gbuffer_instanced
 open gbuffer_instanced
+import grass_compute
+open grass_compute
 import shadow3d
 import app3d/playback
 import app3d/slider
@@ -901,6 +903,15 @@ func main() ret Int {
           # forward path's, which ends a pass that was never begun and
           # leaves the G-buffer unsubmitted. The symptom is a black 3D frame
           # with a working UI, which looks like a lighting bug.
+          # Grass generation runs on the GPU (grass epic #486): a compute pass in
+          # its own encoder, submitted before the geometry pass, writes every
+          # blade's instance transform from the terrain height + hash + wind — no
+          # CPU per-blade work, no readback. grassDraw (below) reads that buffer.
+          var grassToonGen: Int = 0
+          if toonShading { grassToonGen = 1 }
+          grassGenerate(playerX: characterController.position.x,
+                        playerY: characterController.position.y,
+                        groundZ: groundZ, time: t, dt: dt, extent: 16.0, toon: grassToonGen)
           gbuffer.beginPass(camera: camera, light: light, aspect: aspect)
           gbuffer.renderScene(scene: scene)
           # Every terrain prop (trees, rocks, bushes, flowers, grass) drawn
@@ -940,14 +951,12 @@ func main() ret Int {
             drawSkinnedInstances(batch: characterClones)
             p = p + 1
           }
-          # The grass field: one instanced draw for the whole meadow, inside
-          # the same G-buffer pass as the ground and character (grass epic
-          # phase 1). Swaying happens as a passenger of frames already being
-          # drawn — while `playing` the clock keeps the loop rendering — so an
-          # idle app freezes it and parks at ~0% CPU.
-          var grassToon: Int = 0
-          if toonShading { grassToon = 1 }
-          drawGrassField(field: grass, time: t, dt: dt, toon: grassToon)
+          # The grass field: one instanced draw for the whole meadow, reading the
+          # GPU-generated instance buffer (grass epic #486), inside the same
+          # G-buffer pass as the ground and character. Sway rides frames already
+          # being drawn — while `playing` the clock keeps rendering — so an idle
+          # app freezes it and parks at ~0% CPU.
+          grassDraw(meshId: grass.meshId)
           gbuffer.endPass()
         }
         if tag is tagSsaoD or tag is tagDepthPyramid or tag is tagLighting

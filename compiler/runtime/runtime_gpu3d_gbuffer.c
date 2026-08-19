@@ -455,10 +455,137 @@ static void gb_release_targets(void) {
  * shaders stay as source, per #503), plus setters that store the created
  * pipelines back into the globals so the draws, the render pass and the bind
  * groups read them unchanged. */
+/* Grass generation compute shader (grass epic #486). Writes one DrawU record
+ * per blade into a storage buffer, entirely on the GPU: a grid of blades around
+ * the player, jittered by a lattice hash, dropped onto the terrain via the SAME
+ * analytic height field as the CPU terrain mesh (perlin2 ported from lib/noise —
+ * so blades sit exactly on the ground), swayed by the wind model matching
+ * walker_grass's grassGust. No CPU per-blade work, no readback. The DrawU layout
+ * mirrors GB_WGSL's (model, prevModel, albedoMetallic, params). */
+static const char* GB_GRASS_WGSL =
+"struct DrawU {\n"
+"  model: mat4x4<f32>,\n"
+"  prevModel: mat4x4<f32>,\n"
+"  albedoMetallic: vec4<f32>,\n"
+"  params: vec4<f32>,\n"
+"};\n"
+"struct GrassU {\n"
+"  a: vec4<f32>,\n"   /* playerX, playerY, groundZ, time */
+"  b: vec4<f32>,\n"   /* count, extent, toon, dt */
+"};\n"
+"@group(0) @binding(0) var<uniform> G: GrassU;\n"
+"@group(0) @binding(1) var<storage, read_write> outBuf: array<DrawU>;\n"
+"fn hashWord(v0: u32) -> u32 {\n"
+"  var h = v0;\n"
+"  h = h ^ (h >> 16u);\n"
+"  h = h * 0x7feb352du;\n"
+"  h = h ^ (h >> 15u);\n"
+"  h = h * 0x846ca68bu;\n"
+"  h = h ^ (h >> 16u);\n"
+"  return h;\n"
+"}\n"
+"fn hashLattice2(p: vec2<i32>, seed: u32) -> u32 {\n"
+"  var h = seed ^ 0x9e3779b9u;\n"
+"  h = hashWord(h ^ (u32(p.x) * 0x85ebca6bu));\n"
+"  h = hashWord(h ^ (u32(p.y) * 0xc2b2ae35u));\n"
+"  return h;\n"
+"}\n"
+"fn hash2u(p: vec2<i32>, seed: u32) -> f32 { return f32(hashLattice2(p, seed)) / 4294967295.0; }\n"
+"fn fadeN(t: f32) -> f32 { return t*t*t*(t*(t*6.0-15.0)+10.0); }\n"
+"fn grad2(hash: u32, p: vec2<f32>) -> f32 {\n"
+"  let h = hash & 7u;\n"
+"  if (h == 0u) { return p.x; }\n"
+"  if (h == 1u) { return -p.x; }\n"
+"  if (h == 2u) { return p.y; }\n"
+"  if (h == 3u) { return -p.y; }\n"
+"  if (h == 4u) { return (p.x + p.y) * 0.70710678; }\n"
+"  if (h == 5u) { return (-p.x + p.y) * 0.70710678; }\n"
+"  if (h == 6u) { return (p.x - p.y) * 0.70710678; }\n"
+"  return (-p.x - p.y) * 0.70710678;\n"
+"}\n"
+"fn perlin2(p: vec2<f32>, seed: u32) -> f32 {\n"
+"  let cell = vec2<i32>(floor(p));\n"
+"  let f = fract(p);\n"
+"  let u = vec2<f32>(fadeN(f.x), fadeN(f.y));\n"
+"  let a = mix(grad2(hashLattice2(cell, seed), f), grad2(hashLattice2(cell + vec2<i32>(1,0), seed), f - vec2<f32>(1.0,0.0)), u.x);\n"
+"  let b = mix(grad2(hashLattice2(cell + vec2<i32>(0,1), seed), f - vec2<f32>(0.0,1.0)), grad2(hashLattice2(cell + vec2<i32>(1,1), seed), f - vec2<f32>(1.0,1.0)), u.x);\n"
+"  return mix(a, b, u.y) * 1.41421356;\n"
+"}\n"
+"fn terrainHeight(x: f32, y: f32, groundZ: f32) -> f32 {\n"
+"  return groundZ + perlin2(vec2<f32>(x*0.020, y*0.020), 977u) * 2.8 + perlin2(vec2<f32>(x*0.075, y*0.075), 431u) * 0.55;\n"
+"}\n"
+"fn mTranslate(t: vec3<f32>) -> mat4x4<f32> {\n"
+"  return mat4x4<f32>(vec4<f32>(1.0,0.0,0.0,0.0), vec4<f32>(0.0,1.0,0.0,0.0), vec4<f32>(0.0,0.0,1.0,0.0), vec4<f32>(t.x,t.y,t.z,1.0));\n"
+"}\n"
+"fn mScale(s: f32) -> mat4x4<f32> {\n"
+"  return mat4x4<f32>(vec4<f32>(s,0.0,0.0,0.0), vec4<f32>(0.0,s,0.0,0.0), vec4<f32>(0.0,0.0,s,0.0), vec4<f32>(0.0,0.0,0.0,1.0));\n"
+"}\n"
+"fn mRotX(a: f32) -> mat4x4<f32> {\n"
+"  let c = cos(a); let s = sin(a);\n"
+"  return mat4x4<f32>(vec4<f32>(1.0,0.0,0.0,0.0), vec4<f32>(0.0,c,s,0.0), vec4<f32>(0.0,-s,c,0.0), vec4<f32>(0.0,0.0,0.0,1.0));\n"
+"}\n"
+"fn mRotY(a: f32) -> mat4x4<f32> {\n"
+"  let c = cos(a); let s = sin(a);\n"
+"  return mat4x4<f32>(vec4<f32>(c,0.0,-s,0.0), vec4<f32>(0.0,1.0,0.0,0.0), vec4<f32>(s,0.0,c,0.0), vec4<f32>(0.0,0.0,0.0,1.0));\n"
+"}\n"
+"fn mRotZ(a: f32) -> mat4x4<f32> {\n"
+"  let c = cos(a); let s = sin(a);\n"
+"  return mat4x4<f32>(vec4<f32>(c,s,0.0,0.0), vec4<f32>(-s,c,0.0,0.0), vec4<f32>(0.0,0.0,1.0,0.0), vec4<f32>(0.0,0.0,0.0,1.0));\n"
+"}\n"
+"fn swayModel(pos: vec3<f32>, yaw: f32, tiltX: f32, tiltY: f32, scale: f32) -> mat4x4<f32> {\n"
+"  return mTranslate(pos) * (mRotZ(yaw) * (mRotX(tiltX) * (mRotY(tiltY) * mScale(scale))));\n"
+"}\n"
+"@compute @workgroup_size(64)\n"
+"fn main(@builtin(global_invocation_id) gid: vec3<u32>) {\n"
+"  let i = gid.x;\n"
+"  let count = u32(G.b.x);\n"
+"  if (i >= count) { return; }\n"
+"  let side = u32(sqrt(G.b.x));\n"
+"  let gx = i % side;\n"
+"  let gy = i / side;\n"
+"  let extent = G.b.y;\n"
+"  let spacing = extent / f32(side);\n"
+"  let cellX = G.a.x + (f32(gx) - f32(side) * 0.5) * spacing;\n"
+"  let cellY = G.a.y + (f32(gy) - f32(side) * 0.5) * spacing;\n"
+"  let cellI = vec2<i32>(i32(gx), i32(gy));\n"
+"  let jx = hash2u(cellI, 7u);\n"
+"  let jy = hash2u(cellI, 13u);\n"
+"  let hp = hash2u(cellI, 29u);\n"
+"  let hs = hash2u(cellI, 43u);\n"
+"  let bx = cellX + (jx - 0.5) * spacing * 0.9;\n"
+"  let by = cellY + (jy - 0.5) * spacing * 0.9;\n"
+"  let bz = terrainHeight(bx, by, G.a.z);\n"
+"  let phase = hp * 6.2831853;\n"
+"  let yaw = hp * 6.2831853;\n"
+"  let scale = 0.22 + hs * 0.18;\n"
+"  let time = G.a.w;\n"
+"  let dt = G.b.w;\n"
+"  let gust = 0.16 * sin(time * 1.7 + phase) + 0.06 * sin(time * 3.9 + phase * 1.7 + bx * 0.15);\n"
+"  let prevT = time - dt;\n"
+"  let prevGust = 0.16 * sin(prevT * 1.7 + phase) + 0.06 * sin(prevT * 3.9 + phase * 1.7 + bx * 0.15);\n"
+"  let pos = vec3<f32>(bx, by, bz);\n"
+"  outBuf[i].model = swayModel(pos, yaw, gust * 0.6, gust, scale);\n"
+"  outBuf[i].prevModel = swayModel(pos, yaw, prevGust * 0.6, prevGust, scale);\n"
+"  let cvar = phase / 6.2831853;\n"
+"  outBuf[i].albedoMetallic = vec4<f32>(0.13 + cvar * 0.09, 0.33 + cvar * 0.16, 0.05 + cvar * 0.05, 0.0);\n"
+"  let mode = select(0.0, 1.0, G.b.z > 0.5);\n"
+"  outBuf[i].params = vec4<f32>(0.95, 1.0, mode, 0.0);\n"
+"}\n";
+
 const char* rae_gb_wgsl(void)      { return GB_WGSL; }
 const char* rae_gb_skin_wgsl(void) { return GB_SKIN_WGSL; }
 const char* rae_gb_entry_vs(void)  { return "vs"; }
 const char* rae_gb_entry_fs(void)  { return "fs"; }
+const char* rae_gb_grass_wgsl(void)  { return GB_GRASS_WGSL; }
+const char* rae_gb_grass_entry(void) { return "main"; }
+
+/* Small opaque-pointer slot store for the Rae grass compute module (#486): it
+ * creates its pipeline/buffers/bind-groups in Rae over the bindings but needs a
+ * place to keep the handles across frames, and Rae has no module-level Ptr var.
+ * Mirrors how the rest of the renderer keeps its handles in C globals. */
+static void* g_grass_ptrs[8];
+void  rae_gb_grass_set(int64_t index, void* ptr) { if (index >= 0 && index < 8) g_grass_ptrs[index] = ptr; }
+void* rae_gb_grass_get(int64_t index) { return (index >= 0 && index < 8) ? g_grass_ptrs[index] : (void*)0; }
 void rae_gb_set_pipeline(void* p)      { gb_pipeline = (WGPURenderPipeline)p; }
 void rae_gb_set_skin_pipeline(void* p) { gb_skin_pipeline = (WGPURenderPipeline)p; }
 
