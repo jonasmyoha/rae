@@ -28,6 +28,7 @@ type VirtualJoystick {
   baseRadius: Float
   knobRadius: Float
   active: Bool
+  grabbedId: Int  # finger id currently owned (-1 = none); held until it lifts
   knobX: Float
   knobY: Float
   valueX: Float   # -1..1, right positive
@@ -39,7 +40,7 @@ func createVirtualJoystick(padFracX: copy Float, padFracY: copy Float,
   ret VirtualJoystick {
     padFracX: padFracX, padFracY: padFracY, radiusFrac: radiusFrac,
     baseX: 0.0, baseY: 0.0, baseRadius: 0.0, knobRadius: 0.0,
-    active: false, knobX: 0.0, knobY: 0.0, valueX: 0.0, valueY: 0.0
+    active: false, grabbedId: 0 - 1, knobX: 0.0, knobY: 0.0, valueX: 0.0, valueY: 0.0
   }
 }
 
@@ -51,8 +52,8 @@ func resolveVirtualJoystick(joy: mod VirtualJoystick) {
   if dh < shorter { shorter = dh }
   joy.baseRadius = shorter * joy.radiusFrac
   joy.knobRadius = joy.baseRadius * 0.42
-  joy.baseX = dw * joy.padFracX + joy.baseRadius
-  joy.baseY = dh - dh * joy.padFracY - joy.baseRadius
+  joy.baseX = gpu2d.safeLeft() + dw * joy.padFracX + joy.baseRadius
+  joy.baseY = dh - gpu2d.safeBottom() - dh * joy.padFracY - joy.baseRadius
 }
 
 # Poll the current pointer (gpu2d, design units). Returns true while the stick is
@@ -64,23 +65,32 @@ func updateVirtualJoystick(joy: mod VirtualJoystick) pub ret Bool {
   var py: Float = 0.0
   let touches: Int = gpu2d.touchCount()
   if touches > 0 {
-    # Multitouch: the joystick owns whichever finger is inside its zone (nearest),
-    # so another finger can rotate the camera at the same time.
-    var best: Float = zone * zone
+    # Multitouch GRAB: own a finger from the moment it presses inside the zone and
+    # keep it for the whole drag (even if it leaves the zone), so the gesture can
+    # never turn into a camera rotation mid-drag. Another finger stays free.
     var found: Bool = false
     var index: Int = 0
     loop index < touches {
+      let id: Int = gpu2d.touchId(index: index)
       let tx: Float = gpu2d.touchX(index: index)
       let ty: Float = gpu2d.touchY(index: index)
-      let d2: Float = (tx - joy.baseX) * (tx - joy.baseX) + (ty - joy.baseY) * (ty - joy.baseY)
-      if d2 <= best {
-        best = d2
+      if joy.grabbedId >= 0 and id is joy.grabbedId {
         px = tx
         py = ty
         found = true
       }
+      if joy.grabbedId < 0 and gpu2d.touchPressed(index: index) {
+        let d2: Float = (tx - joy.baseX) * (tx - joy.baseX) + (ty - joy.baseY) * (ty - joy.baseY)
+        if d2 <= zone * zone {
+          joy.grabbedId = id
+          px = tx
+          py = ty
+          found = true
+        }
+      }
       index = index + 1
     }
+    if found is false { joy.grabbedId = 0 - 1 }
     joy.active = found
   } else {
     # Desktop: the mouse pointer.
