@@ -48,17 +48,34 @@ echo "gen-ios: emitting C for $name..."
 # 2. Enumerate bundled assets (the example's assets/ tree). Each file is added to
 #    the bundle at the SAME relative path so the emitted relative reads resolve
 #    after the chdir shim.
-asset_lines=""
+# Rae examples read assets by two conventions: repo-root-relative (e.g. 114's
+# "examples/114_walker_character/assets/...", "lib/data/...") and {dir}/CWD-
+# relative ("assets/..."). The chdir shim makes the bundle root the CWD, so we
+# STAGE resources under both layouts and bundle them preserving those relative
+# paths (mirrors the emcc --preload-file @/path scheme). Shared lib data that
+# examples read by repo-root path is staged too.
+ex_rel=${ex_dir#"$root/"}                     # examples/114_walker_character
+stage="$gen/bundle"
+rm -rf "$stage"; mkdir -p "$stage"
 if [ -d "$ex_dir/assets" ]; then
-  while IFS= read -r f; do
-    rel=${f#"$ex_dir/"}                 # e.g. assets/Roboto-Regular.mtsdf.json
-    reldir=$(dirname "$rel")            # e.g. assets
-    asset_lines="${asset_lines}  \"$f\"\n"
-    pkg_lines="${pkg_lines:-}set_source_files_properties(\"$f\" PROPERTIES MACOSX_PACKAGE_LOCATION \"$reldir\")\n"
-  done <<EOF
-$(find "$ex_dir/assets" -type f)
-EOF
+  mkdir -p "$stage/$ex_rel"; cp -R "$ex_dir/assets" "$stage/$ex_rel/"   # examples/<name>/assets/...
+  mkdir -p "$stage/assets";  cp -R "$ex_dir/assets/." "$stage/assets/"  # assets/... (at root)
 fi
+for shared in lib/app3d/scenes lib/data lib/noise.wgsl; do
+  if [ -e "$root/$shared" ]; then
+    dst="$stage/$(dirname "$shared")"; mkdir -p "$dst"; cp -R "$root/$shared" "$dst/"
+  fi
+done
+
+asset_lines=""; pkg_lines=""
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  rel=${f#"$stage/"}; reldir=$(dirname "$rel")
+  asset_lines="${asset_lines}  \"$f\"\n"
+  pkg_lines="${pkg_lines}set_source_files_properties(\"$f\" PROPERTIES MACOSX_PACKAGE_LOCATION \"$reldir\")\n"
+done <<EOF
+$(find "$stage" -type f)
+EOF
 
 # 3. Emit CMakeLists.
 cat > "$gen/CMakeLists.txt" <<EOF
