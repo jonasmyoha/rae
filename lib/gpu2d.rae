@@ -74,6 +74,16 @@ func pointerY() extern ret Float
 func touchCount() extern ret Int
 func touchX(index: Int) extern ret Float
 func touchY(index: Int) extern ret Float
+# Stable finger id (grab a finger at press, hold it for the whole drag) + whether
+# it went down this frame (edge). id is -1 out of range.
+func touchId(index: Int) extern ret Int
+func touchPressed(index: Int) extern ret Bool
+# OS safe-area insets (notch / home indicator / rounded corners) in design units.
+# 0 on platforms without insets. Lay HUD + UI chrome inside these.
+func safeTop() extern ret Float
+func safeBottom() extern ret Float
+func safeLeft() extern ret Float
+func safeRight() extern ret Float
 # Left mouse button held this frame.
 func pointerDown() extern ret Bool
 func pointerPressed() extern ret Bool

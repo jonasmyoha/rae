@@ -95,25 +95,27 @@ type CameraRig {
 }
 
 # Camera drag pointer (#526). By default the rig drags with the mouse pointer.
-# On touch, an app can exclude a region (e.g. a virtual joystick) via
-# setCameraTouchExclude so the camera uses a DIFFERENT finger — enabling
-# simultaneous move + look. gCamExcludeR < 0 disables it (plain mouse), so other
-# examples are unaffected. resolveCameraPointer publishes the chosen down/x/y.
-var gCamExcludeX: Float = 0.0
-var gCamExcludeY: Float = 0.0
-var gCamExcludeR: Float = 0.0 - 1.0
+# For touch, setCameraTouch tells it which finger the joystick owns (excludeId)
+# and whether the joystick has the mouse (desktop) — so the camera GRABS a
+# different finger at press and holds it for the whole drag (never stealing the
+# joystick's, and vice versa). gCamTouchOn stays false until set, so other rigs
+# (110/113) keep the plain-mouse behaviour.
+var gCamTouchOn: Bool = false
+var gCamExcludeId: Int = 0 - 1     # finger owned by the joystick
+var gCamJoyActive: Bool = false    # desktop: joystick has the mouse
+var gCamGrabId: Int = 0 - 1        # finger this rig owns
 var gCamPointerX: Float = 0.0
 var gCamPointerY: Float = 0.0
 var gCamPointerDown: Bool = false
 
-func setCameraTouchExclude(x: copy Float, y: copy Float, r: copy Float) pub {
-  gCamExcludeX = x
-  gCamExcludeY = y
-  gCamExcludeR = r
+func setCameraTouch(excludeId: copy Int, joystickActive: copy Bool) pub {
+  gCamTouchOn = true
+  gCamExcludeId = excludeId
+  gCamJoyActive = joystickActive
 }
 
 func resolveCameraPointer() {
-  if gCamExcludeR < 0.0 {
+  if gCamTouchOn is false {
     gCamPointerX = gpu2d.pointerX()
     gCamPointerY = gpu2d.pointerY()
     gCamPointerDown = gpu2d.pointerDown()
@@ -121,31 +123,32 @@ func resolveCameraPointer() {
   }
   let touches: Int = gpu2d.touchCount()
   if touches > 0 {
-    # First finger outside the excluded (joystick) region rotates the camera.
-    gCamPointerDown = false
+    # Own a finger from press and hold it: reuse our grabbed finger if still down,
+    # else grab a newly-pressed finger that the joystick does not already own.
+    var found: Bool = false
     var index: Int = 0
     loop index < touches {
-      let tx: Float = gpu2d.touchX(index: index)
-      let ty: Float = gpu2d.touchY(index: index)
-      let d2: Float = (tx - gCamExcludeX) * (tx - gCamExcludeX) + (ty - gCamExcludeY) * (ty - gCamExcludeY)
-      if d2 > gCamExcludeR * gCamExcludeR {
-        gCamPointerX = tx
-        gCamPointerY = ty
-        gCamPointerDown = true
-        index = touches
-      } else {
-        index = index + 1
+      let id: Int = gpu2d.touchId(index: index)
+      if gCamGrabId >= 0 and id is gCamGrabId {
+        gCamPointerX = gpu2d.touchX(index: index)
+        gCamPointerY = gpu2d.touchY(index: index)
+        found = true
       }
+      if gCamGrabId < 0 and gpu2d.touchPressed(index: index) and id is not gCamExcludeId {
+        gCamGrabId = id
+        gCamPointerX = gpu2d.touchX(index: index)
+        gCamPointerY = gpu2d.touchY(index: index)
+        found = true
+      }
+      index = index + 1
     }
+    if found is false { gCamGrabId = 0 - 1 }
+    gCamPointerDown = found
   } else {
-    # Desktop mouse — but still respect the excluded region so a click on the
-    # joystick does not also rotate the camera.
-    let mx: Float = gpu2d.pointerX()
-    let my: Float = gpu2d.pointerY()
-    let d2: Float = (mx - gCamExcludeX) * (mx - gCamExcludeX) + (my - gCamExcludeY) * (my - gCamExcludeY)
-    gCamPointerX = mx
-    gCamPointerY = my
-    gCamPointerDown = gpu2d.pointerDown() and d2 > gCamExcludeR * gCamExcludeR
+    # Desktop mouse: skip while the joystick owns the mouse.
+    gCamPointerX = gpu2d.pointerX()
+    gCamPointerY = gpu2d.pointerY()
+    gCamPointerDown = gpu2d.pointerDown() and gCamJoyActive is false
   }
 }
 

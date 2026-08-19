@@ -20,6 +20,12 @@ float rae_ext_gpu2d_pointerY(void){ return 0.0; }
 int64_t rae_ext_gpu2d_touchCount(void) { return 0; }
 float rae_ext_gpu2d_touchX(int64_t i) { (void)i; return 0.0; }
 float rae_ext_gpu2d_touchY(int64_t i) { (void)i; return 0.0; }
+int64_t rae_ext_gpu2d_touchId(int64_t i) { (void)i; return -1; }
+rae_Bool rae_ext_gpu2d_touchPressed(int64_t i) { (void)i; return 0; }
+float rae_ext_gpu2d_safeTop(void){ return 0.0; }
+float rae_ext_gpu2d_safeBottom(void){ return 0.0; }
+float rae_ext_gpu2d_safeLeft(void){ return 0.0; }
+float rae_ext_gpu2d_safeRight(void){ return 0.0; }
 rae_Bool rae_ext_gpu2d_pointerDown(void) { return 0; }
 rae_Bool rae_ext_gpu2d_pointerPressed(void) { return 0; }
 rae_Bool rae_ext_gpu2d_pointerReleased(void) { return 0; }
