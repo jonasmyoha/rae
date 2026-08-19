@@ -10,6 +10,10 @@
 #                provisioning profile's TeamIdentifier).
 # device / RAE_IOS_DEVICE  a devicectl device identifier or name; default =
 #                the first "available" device.
+# RAE_IOS_PROFILE  seconds to capture a frame profile (#527). When set, the app
+#                launches with RAE_PROFILE on, you play for that long, and the
+#                Chrome-trace JSON is pulled off the device to RAE_PROFILE_LOCAL
+#                (default /tmp/rae_profile.json) — open it at ui.perfetto.dev.
 set -eu
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -52,6 +56,26 @@ xcodebuild -project "$RAE_IOS_PROJ" -scheme RaeApp -configuration Release \
 # 4. Install + launch.
 echo "run-ios: installing..."
 xcrun devicectl device install app --device "$device" "$RAE_IOS_APP" >/dev/null
-echo "run-ios: launching $RAE_IOS_BUNDLE_ID..."
-xcrun devicectl device process launch --device "$device" "$RAE_IOS_BUNDLE_ID"
-echo "run-ios: launched $name on device."
+
+# 5. Launch — optionally with a frame-profile capture (#527).
+prof_secs=${RAE_IOS_PROFILE:-}
+if [ -n "$prof_secs" ]; then
+  echo "run-ios: launching $RAE_IOS_BUNDLE_ID with a ${prof_secs}s profile capture..."
+  # devicectl takes env as a JSON dict; the bootstrap points RAE_PROFILE_OUT at
+  # the writable Documents dir (see ios_bootstrap.c).
+  xcrun devicectl device process launch --device "$device" \
+    -e "{\"RAE_PROFILE\":\"1\",\"RAE_PROFILE_SECONDS\":\"$prof_secs\"}" \
+    "$RAE_IOS_BUNDLE_ID"
+  echo "run-ios: PLAY NOW — walk around / let the sun set for ~${prof_secs}s..."
+  sleep $((prof_secs + 6))
+  local_out=${RAE_PROFILE_LOCAL:-/tmp/rae_profile.json}
+  echo "run-ios: pulling trace to $local_out..."
+  xcrun devicectl device copy from --device "$device" \
+    --domain-type appDataContainer --domain-identifier "$RAE_IOS_BUNDLE_ID" \
+    --source Documents/rae_profile.json --destination "$local_out"
+  echo "run-ios: profile written to $local_out — open at https://ui.perfetto.dev"
+else
+  echo "run-ios: launching $RAE_IOS_BUNDLE_ID..."
+  xcrun devicectl device process launch --device "$device" "$RAE_IOS_BUNDLE_ID"
+  echo "run-ios: launched $name on device."
+fi

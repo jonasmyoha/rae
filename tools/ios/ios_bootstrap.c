@@ -27,5 +27,15 @@ static void rae_ios_bootstrap(void) {
         snprintf(path, sizeof(path), "%s/Documents/rae.log", home);
         if (freopen(path, "w", stdout)) setvbuf(stdout, NULL, _IOLBF, 0);
         (void)freopen(path, "a", stderr);
+        /* Frame profiler (#527): the cwd is the read-only bundle, so a relative
+         * RAE_PROFILE_OUT would fail to write. When a capture is requested
+         * (RAE_PROFILE set, e.g. by run-ios.sh --profile) and no explicit output
+         * path was given, default it to the writable Documents dir so the trace
+         * lands next to rae.log and is pulled the same way. */
+        if (getenv("RAE_PROFILE") && !getenv("RAE_PROFILE_OUT")) {
+            char out[1024];
+            snprintf(out, sizeof(out), "%s/Documents/rae_profile.json", home);
+            setenv("RAE_PROFILE_OUT", out, 1);
+        }
     }
 }
