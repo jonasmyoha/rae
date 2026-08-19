@@ -1,0 +1,97 @@
+# Reusable GPU instancing (grass epic #485) — Rae over the WebGPU bindings.
+#
+# The deferred G-buffer pipeline already reads its per-object data from a storage
+# buffer indexed by @builtin(instance_index) (landed with #502), and drawRecords
+# already issues ONE DrawIndexed(instanceCount = N). This module wraps that into a
+# general, mesh-agnostic instancing API — an "instance buffer handle" reusable by
+# vegetation, rocks, particles, crowds — so callers never touch DrawU float
+# offsets or the draws buffer directly.
+#
+# Lifecycle (mirrors walker_grass's field, generalised):
+#   let batch = createInstanceBatch(mesh: rockMesh, capacity: 64)   # once
+#   resetInstanceBatch(batch: batch)                                # each frame
+#   addInstanceTransform(batch: batch, transform: t, prevTransform: pt, material: m)
+#   ...
+#   drawInstances(batch: batch)                                     # one draw
+#
+# Zero per-frame allocation: `records` is sized once and refilled with set()
+# (packInstanceRecord), never add() — so an instanced field stays inside the
+# walker's zero-alloc frame budget (test 573).
+import core
+import gbuffer
+open gbuffer
+open scene3d
+open math3d
+
+# A caller-owned batch of DrawU records for one mesh + a running fill count.
+# `records` holds capacity * instanceRecordFloats floats (pre-filled with 0.0).
+type InstanceBatch {
+  meshId: Int
+  capacity: Int
+  count: Int
+  records: List(Float)
+}
+
+# Build a batch for `mesh` that can hold up to `capacity` instances. Allocates
+# the record buffer ONCE; per-frame use never grows it.
+func createInstanceBatch(mesh: view MeshHandle, capacity: copy Int) pub ret InstanceBatch {
+  let floatCount: Int = capacity * instanceRecordFloats
+  let records: List(Float) = createList(Float, cap: floatCount)
+  var floatIndex: Int = 0
+  loop floatIndex < floatCount {
+    records.add(value: 0.0)
+    floatIndex = floatIndex + 1
+  }
+  ret InstanceBatch { meshId: mesh.id, capacity: capacity, count: 0, records: records }
+}
+
+# Point an existing batch at a different mesh (same record capacity). Handy when
+# a pool of batches is reused across meshes; does not touch the record buffer.
+func setInstanceBatchMesh(batch: mod InstanceBatch, mesh: view MeshHandle) pub {
+  batch.meshId = mesh.id
+}
+
+# Start a fresh frame: drop the running count. The record buffer keeps its
+# storage; addInstance overwrites slots in place.
+func resetInstanceBatch(batch: mod InstanceBatch) pub {
+  batch.count = 0
+}
+
+# An emitter stores ONE emissive scalar (see drawInstance): the brightest
+# emission component is the intensity, since a saturated single-channel emitter
+# would wash out under luminance.
+func instanceEmissive(material: view Material3d) ret Float {
+  var emissive: Float = material.emission.x
+  if material.emission.y > emissive { emissive = material.emission.y }
+  if material.emission.z > emissive { emissive = material.emission.z }
+  ret emissive
+}
+
+# Append one instance from ready-made model matrices. `prevModel` feeds TAA
+# motion vectors; pass the same matrix as `model` for a static instance. Silently
+# drops instances past `capacity` (a fixed-size field must not overrun its buffer).
+func addInstance(batch: mod InstanceBatch, model: view Mat4, prevModel: view Mat4,
+                 material: view Material3d) pub {
+  if batch.count >= batch.capacity { ret }
+  packInstanceRecord(records: batch.records, slot: batch.count,
+    model: model, prevModel: prevModel,
+    r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
+    metallic: material.metallic, roughness: material.roughness,
+    emissive: instanceEmissive(material: material), toon: toonFlag(material: material))
+  batch.count = batch.count + 1
+}
+
+# Append one instance from typed transforms — the common case for scene props.
+func addInstanceTransform(batch: mod InstanceBatch, transform: view Transform3d,
+                          prevTransform: view Transform3d, material: view Material3d) pub {
+  let model: Mat4 = modelMatrixOf(t: transform)
+  let prevModel: Mat4 = modelMatrixOf(t: prevTransform)
+  addInstance(batch: batch, model: model, prevModel: prevModel, material: material)
+}
+
+# Draw the whole batch in one instanced DrawIndexed. Must be called inside the
+# geometry pass (between gbuffer.begin and gbuffer.end), like any other draw.
+func drawInstances(batch: view InstanceBatch) pub {
+  if batch.count <= 0 { ret }
+  drawRecords(mesh: batch.meshId, records: batch.records.data, count: batch.count)
+}
