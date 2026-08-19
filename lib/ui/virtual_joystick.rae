@@ -1,0 +1,95 @@
+# Virtual joystick — reusable touch/mouse movement stick for the Rae UI stdlib.
+#
+# Renders a translucent base ring + a draggable knob in gpu2d DESIGN units and
+# outputs a normalized 2D vector (valueX right, valueY up/forward). It ACTIVATES
+# only when a press starts inside its activation zone, so the rest of the screen
+# stays free for camera drag; report `active` so the caller can suppress other
+# pointer uses (e.g. camera look) for the same touch. Single-pointer: on a device
+# without multitouch the stick and camera take turns, not simultaneously.
+#
+#   let stick = createVirtualJoystick(baseX, baseY, baseRadius)   # once
+#   let active = updateVirtualJoystick(joy: stick)                # each frame
+#   ... use stick.valueX / stick.valueY for movement ...
+#   drawVirtualJoystick(joy: stick)                               # in the 2D pass
+import core
+import gpu2d
+import math
+
+type VirtualJoystick {
+  baseX: Float
+  baseY: Float
+  baseRadius: Float
+  knobRadius: Float
+  active: Bool
+  knobX: Float
+  knobY: Float
+  valueX: Float   # -1..1, right positive
+  valueY: Float   # -1..1, up (forward) positive
+}
+
+func createVirtualJoystick(baseX: copy Float, baseY: copy Float,
+                           baseRadius: copy Float) pub ret VirtualJoystick {
+  ret VirtualJoystick {
+    baseX: baseX, baseY: baseY, baseRadius: baseRadius,
+    knobRadius: baseRadius * 0.42, active: false,
+    knobX: baseX, knobY: baseY, valueX: 0.0, valueY: 0.0
+  }
+}
+
+# Reposition (e.g. after an orientation / design-resolution change).
+func placeVirtualJoystick(joy: mod VirtualJoystick, baseX: copy Float,
+                          baseY: copy Float, baseRadius: copy Float) pub {
+  joy.baseX = baseX
+  joy.baseY = baseY
+  joy.baseRadius = baseRadius
+  joy.knobRadius = baseRadius * 0.42
+}
+
+# Poll the current pointer (gpu2d, design units). Returns true while the stick is
+# capturing the pointer this frame.
+func updateVirtualJoystick(joy: mod VirtualJoystick) pub ret Bool {
+  let px: Float = gpu2d.pointerX()
+  let py: Float = gpu2d.pointerY()
+  if gpu2d.pointerPressed() {
+    let ax: Float = px - joy.baseX
+    let ay: Float = py - joy.baseY
+    let zone: Float = joy.baseRadius * 1.7
+    if ax * ax + ay * ay <= zone * zone {
+      joy.active = true
+    }
+  }
+  if not gpu2d.pointerDown() {
+    joy.active = false
+  }
+  if joy.active {
+    var dx: Float = px - joy.baseX
+    var dy: Float = py - joy.baseY
+    let dist: Float = math.sqrt(x: dx * dx + dy * dy)
+    if dist > joy.baseRadius and dist > 0.0001 {
+      let scale: Float = joy.baseRadius / dist
+      dx = dx * scale
+      dy = dy * scale
+    }
+    joy.knobX = joy.baseX + dx
+    joy.knobY = joy.baseY + dy
+    joy.valueX = dx / joy.baseRadius
+    joy.valueY = 0.0 - dy / joy.baseRadius   # screen-down is +y; forward is up
+  } else {
+    joy.knobX = joy.baseX
+    joy.knobY = joy.baseY
+    joy.valueX = 0.0
+    joy.valueY = 0.0
+  }
+  ret joy.active
+}
+
+# Draw the base ring + knob (translucent white so it reads over any scene). A
+# rounded rect with radius = half its size is a circle. Call inside the 2D pass.
+func drawVirtualJoystick(joy: view VirtualJoystick) pub {
+  let baseDiam: Float = joy.baseRadius * 2.0
+  gpu2d.drawRoundedRect(x: joy.baseX - joy.baseRadius, y: joy.baseY - joy.baseRadius,
+    w: baseDiam, h: baseDiam, radius: joy.baseRadius, color: 0x38FFFFFF)
+  let knobDiam: Float = joy.knobRadius * 2.0
+  gpu2d.drawRoundedRect(x: joy.knobX - joy.knobRadius, y: joy.knobY - joy.knobRadius,
+    w: knobDiam, h: knobDiam, radius: joy.knobRadius, color: 0xB0FFFFFF)
+}
