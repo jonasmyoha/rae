@@ -43,6 +43,24 @@ func terrainHeightAt(x: view Float, y: view Float, groundZ: view Float) ret Floa
   ret groundZ + broad * 2.8 + detail * 0.55
 }
 
+# One terrain prop kind drawn by instancing (grass epic #485): its mesh, the
+# scene material index every copy shares, and a pre-sized instance batch refilled
+# each frame. Bundling the three keeps the terrain struct from sprouting a loose
+# mesh/material/batch triple per prop.
+type PropInstancer {
+  mesh: MeshHandle
+  materialIndex: Int
+  batch: InstanceBatch
+}
+
+func createPropInstancer(mesh: view MeshHandle, materialIndex: copy Int,
+                         capacity: copy Int) ret PropInstancer {
+  ret PropInstancer {
+    mesh: mesh, materialIndex: materialIndex,
+    batch: own createInstanceBatch(mesh: mesh, capacity: capacity)
+  }
+}
+
 type InfiniteTerrain {
   centreCellX: Int
   centreCellY: Int
@@ -64,12 +82,21 @@ type InfiniteTerrain {
   grassAEntities: List(Int)
   grassBEntities: List(Int)
   materialIds: List(Int)
-  # Grass epic #485 proof: the rocks are drawn as ONE instanced draw rather
-  # than 49 per-cell MeshRenderer draws. rockBatch is the reusable instance
-  # buffer; rockMaterialIndex resolves the shared rock material each frame.
-  rockMaterialIndex: Int
-  rockMesh: MeshHandle
-  rockBatch: InstanceBatch
+  # Grass epic #485: every terrain prop draws as ONE instanced DrawIndexed per
+  # mesh each frame instead of a per-cell MeshRenderer draw. Each PropInstancer
+  # bundles the mesh + shared material + pre-sized batch. Trees choose broad/tall
+  # per cell, so each variant has its own batch and broadVisible[slot] records
+  # which was chosen — the MeshRenderers are hidden, so the choice can no longer
+  # be read back from scene visibility.
+  broadVisible: List(Bool)
+  rockProp: PropInstancer
+  bushProp: PropInstancer
+  flowerProp: PropInstancer
+  grassProp: PropInstancer
+  broadTrunkProp: PropInstancer
+  broadCrownProp: PropInstancer
+  tallTrunkProp: PropInstancer
+  tallCrownProp: PropInstancer
 }
 
 func terrainMesh(path: view String) ret MeshHandle {
@@ -213,10 +240,10 @@ func placeTerrainCell(terrain: mod InfiniteTerrain, scene: mod Scene3d,
     entities: terrain.tallTrunkEntities, index: poolIndex)
   let tallCrownEntity: Int = terrainEntityAt(
     entities: terrain.tallCrownEntities, index: poolIndex)
-  setMeshInstanceVisible(scene: scene, entity: broadTrunkEntity, visible: broadVisible)
-  setMeshInstanceVisible(scene: scene, entity: broadCrownEntity, visible: broadVisible)
-  setMeshInstanceVisible(scene: scene, entity: tallTrunkEntity, visible: not broadVisible)
-  setMeshInstanceVisible(scene: scene, entity: tallCrownEntity, visible: not broadVisible)
+  # Trees are instanced (#485): the four tree MeshRenderers stay hidden and the
+  # broad/tall choice is recorded per slot, so drawTerrainProps gathers only the
+  # chosen variant into its batch. (Was four setMeshInstanceVisible calls.)
+  terrain.broadVisible.set(index: poolIndex, value: broadVisible)
   terrainTeleport(scene: scene,
     entity: broadTrunkEntity,
     transform: broadTree)
@@ -283,42 +310,131 @@ func updateInfiniteTerrain(terrain: mod InfiniteTerrain, scene: mod Scene3d,
   ret true
 }
 
-# Grass epic #485 proof: draw every rock in ONE instanced DrawIndexed instead
-# of 49 per-cell MeshRenderer draws. Reads each rock entity's current + previous
-# transform (same source renderScene used, so motion vectors and placement are
-# identical) and the shared rock material, packs them into the reusable
-# InstanceBatch, and issues one draw. Call inside the G-buffer geometry pass,
-# right after renderScene. The rock MeshRenderers are hidden at setup so they are
-# not also drawn by renderScene.
-func drawTerrainRocks(terrain: mod InfiniteTerrain, scene: view Scene3d) {
-  let material: Material3d = sceneMaterialAt(values: scene.materials,
-                                             index: terrain.rockMaterialIndex)
-  resetInstanceBatch(batch: terrain.rockBatch)
-  var index: Int = 0
-  loop index < terrain.rockEntities.length {
-    let entity: Int = terrainEntityAt(entities: terrain.rockEntities, index: index)
-    let transform: Transform3d = sceneTransformAt(values: scene.transforms, index: entity)
-    let prevTransform: Transform3d = sceneTransformAt(values: scene.prevTransforms, index: entity)
-    addInstanceTransform(batch: terrain.rockBatch, transform: transform,
-                         prevTransform: prevTransform, material: material)
-    index = index + 1
-  }
-  drawInstances(batch: terrain.rockBatch)
+# Gather one prop entity's current + previous transform (the same source
+# renderScene used, so placement and TAA motion are identical) into a batch.
+func gatherPropInstance(prop: mod PropInstancer, entity: copy Int, scene: view Scene3d,
+                        material: view Material3d) {
+  let transform: Transform3d = sceneTransformAt(values: scene.transforms, index: entity)
+  let prevTransform: Transform3d = sceneTransformAt(values: scene.prevTransforms, index: entity)
+  addInstanceTransform(batch: prop.batch, transform: transform,
+                       prevTransform: prevTransform, material: material)
 }
 
-# Rocks are hidden MeshRenderers (so renderScene/renderSceneShadow skip them),
-# so their shadow casters must be supplied here — one drawShadowCaster per rock,
-# same as renderSceneShadow would have done. (Instanced shadow casting is a later
-# grass phase; per-rock casters keep the shadows identical for now.) Call inside
-# the shadow pass, right after renderSceneShadow.
-func drawTerrainRocksShadow(terrain: view InfiniteTerrain, scene: view Scene3d) {
+# Draw an always-visible prop pool (rock/bush/flower) as ONE instanced draw.
+func drawPropPool(prop: mod PropInstancer, entities: view List(Int), scene: view Scene3d) {
+  let material: Material3d = sceneMaterialAt(values: scene.materials, index: prop.materialIndex)
+  resetInstanceBatch(batch: prop.batch)
   var index: Int = 0
-  loop index < terrain.rockEntities.length {
-    let entity: Int = terrainEntityAt(entities: terrain.rockEntities, index: index)
-    let transform: Transform3d = sceneTransformAt(values: scene.transforms, index: entity)
-    drawShadowCaster(mesh: terrain.rockMesh, model: modelMatrix(t: transform))
+  loop index < entities.length {
+    gatherPropInstance(prop: prop, entity: terrainEntityAt(entities: entities, index: index),
+                       scene: scene, material: material)
     index = index + 1
   }
+  drawInstances(batch: prop.batch)
+}
+
+# Grass has two pools per cell (grassA + grassB) sharing one mesh + material, so
+# both feed one batch and one instanced draw.
+func drawGrassProp(prop: mod PropInstancer, entitiesA: view List(Int),
+                   entitiesB: view List(Int), scene: view Scene3d) {
+  let material: Material3d = sceneMaterialAt(values: scene.materials, index: prop.materialIndex)
+  resetInstanceBatch(batch: prop.batch)
+  var index: Int = 0
+  loop index < entitiesA.length {
+    gatherPropInstance(prop: prop, entity: terrainEntityAt(entities: entitiesA, index: index),
+                       scene: scene, material: material)
+    index = index + 1
+  }
+  index = 0
+  loop index < entitiesB.length {
+    gatherPropInstance(prop: prop, entity: terrainEntityAt(entities: entitiesB, index: index),
+                       scene: scene, material: material)
+    index = index + 1
+  }
+  drawInstances(batch: prop.batch)
+}
+
+# Draw one tree variant: only the slots whose per-cell choice matches wantBroad
+# contribute (broadVisible[slot] records the broad-vs-tall pick from placeTerrainCell).
+func drawTreeProp(prop: mod PropInstancer, entities: view List(Int), scene: view Scene3d,
+                  broadVisible: view List(Bool), wantBroad: copy Bool) {
+  let material: Material3d = sceneMaterialAt(values: scene.materials, index: prop.materialIndex)
+  resetInstanceBatch(batch: prop.batch)
+  var index: Int = 0
+  loop index < entities.length {
+    var isBroad: Bool = false
+    if let flag: Bool = broadVisible.at(index: index) { isBroad = flag }
+    if isBroad is wantBroad {
+      gatherPropInstance(prop: prop, entity: terrainEntityAt(entities: entities, index: index),
+                         scene: scene, material: material)
+    }
+    index = index + 1
+  }
+  drawInstances(batch: prop.batch)
+}
+
+# Grass epic #485: draw EVERY terrain prop instanced — one DrawIndexed per mesh
+# instead of a per-cell MeshRenderer draw. The prop MeshRenderers are hidden at
+# setup so renderScene skips them; this reproduces the same picture with far
+# fewer draw calls. Call inside the G-buffer geometry pass, after renderScene.
+func drawTerrainProps(terrain: mod InfiniteTerrain, scene: view Scene3d) {
+  drawPropPool(prop: terrain.rockProp, entities: terrain.rockEntities, scene: scene)
+  drawPropPool(prop: terrain.bushProp, entities: terrain.bushEntities, scene: scene)
+  drawPropPool(prop: terrain.flowerProp, entities: terrain.flowerEntities, scene: scene)
+  drawGrassProp(prop: terrain.grassProp, entitiesA: terrain.grassAEntities,
+                entitiesB: terrain.grassBEntities, scene: scene)
+  drawTreeProp(prop: terrain.broadTrunkProp, entities: terrain.broadTrunkEntities,
+               scene: scene, broadVisible: terrain.broadVisible, wantBroad: true)
+  drawTreeProp(prop: terrain.broadCrownProp, entities: terrain.broadCrownEntities,
+               scene: scene, broadVisible: terrain.broadVisible, wantBroad: true)
+  drawTreeProp(prop: terrain.tallTrunkProp, entities: terrain.tallTrunkEntities,
+               scene: scene, broadVisible: terrain.broadVisible, wantBroad: false)
+  drawTreeProp(prop: terrain.tallCrownProp, entities: terrain.tallCrownEntities,
+               scene: scene, broadVisible: terrain.broadVisible, wantBroad: false)
+}
+
+# Shadow casters for every prop (they are hidden MeshRenderers, so
+# renderSceneShadow skips them). One drawShadowCaster per instance keeps the
+# shadows identical; instanced shadow casting is a later grass phase.
+func castPropPool(mesh: view MeshHandle, entities: view List(Int), scene: view Scene3d) {
+  var index: Int = 0
+  loop index < entities.length {
+    let entity: Int = terrainEntityAt(entities: entities, index: index)
+    let transform: Transform3d = sceneTransformAt(values: scene.transforms, index: entity)
+    drawShadowCaster(mesh: mesh, model: modelMatrix(t: transform))
+    index = index + 1
+  }
+}
+
+func castTreeProp(mesh: view MeshHandle, entities: view List(Int), scene: view Scene3d,
+                  broadVisible: view List(Bool), wantBroad: copy Bool) {
+  var index: Int = 0
+  loop index < entities.length {
+    var isBroad: Bool = false
+    if let flag: Bool = broadVisible.at(index: index) { isBroad = flag }
+    if isBroad is wantBroad {
+      let entity: Int = terrainEntityAt(entities: entities, index: index)
+      let transform: Transform3d = sceneTransformAt(values: scene.transforms, index: entity)
+      drawShadowCaster(mesh: mesh, model: modelMatrix(t: transform))
+    }
+    index = index + 1
+  }
+}
+
+func drawTerrainPropsShadow(terrain: view InfiniteTerrain, scene: view Scene3d) {
+  castPropPool(mesh: terrain.rockProp.mesh, entities: terrain.rockEntities, scene: scene)
+  castPropPool(mesh: terrain.bushProp.mesh, entities: terrain.bushEntities, scene: scene)
+  castPropPool(mesh: terrain.flowerProp.mesh, entities: terrain.flowerEntities, scene: scene)
+  castPropPool(mesh: terrain.grassProp.mesh, entities: terrain.grassAEntities, scene: scene)
+  castPropPool(mesh: terrain.grassProp.mesh, entities: terrain.grassBEntities, scene: scene)
+  castTreeProp(mesh: terrain.broadTrunkProp.mesh, entities: terrain.broadTrunkEntities,
+               scene: scene, broadVisible: terrain.broadVisible, wantBroad: true)
+  castTreeProp(mesh: terrain.broadCrownProp.mesh, entities: terrain.broadCrownEntities,
+               scene: scene, broadVisible: terrain.broadVisible, wantBroad: true)
+  castTreeProp(mesh: terrain.tallTrunkProp.mesh, entities: terrain.tallTrunkEntities,
+               scene: scene, broadVisible: terrain.broadVisible, wantBroad: false)
+  castTreeProp(mesh: terrain.tallCrownProp.mesh, entities: terrain.tallCrownEntities,
+               scene: scene, broadVisible: terrain.broadVisible, wantBroad: false)
 }
 
 func setInfiniteTerrainToon(terrain: mod InfiniteTerrain, scene: mod Scene3d,
@@ -332,6 +448,17 @@ func setInfiniteTerrainToon(terrain: mod InfiniteTerrain, scene: mod Scene3d,
     }
     index = index + 1
   }
+}
+
+# Add a prop MeshRenderer but hide it immediately: props are drawn instanced
+# (drawTerrainProps), so renderScene/renderSceneShadow must skip the per-cell
+# renderer. The entity is kept for its transform (teleported per cell).
+func addHiddenProp(scene: mod Scene3d, mesh: view MeshHandle, material: copy Int,
+                   position: view Vec3, rotation: view Vec3, scale: view Vec3) ret Int {
+  let entity: Int = addMeshInstance(scene: scene, mesh: mesh, material: material,
+    position: position, rotation: rotation, scale: scale)
+  setMeshInstanceVisible(scene: scene, entity: entity, visible: false)
+  ret entity
 }
 
 func createInfiniteTerrain(scene: mod Scene3d, assets: view String,
@@ -397,6 +524,9 @@ func createInfiniteTerrain(scene: mod Scene3d, assets: view String,
   let flowers: List(Int) = createList(Int, cap: terrainCellCount)
   let grassA: List(Int) = createList(Int, cap: terrainCellCount)
   let grassB: List(Int) = createList(Int, cap: terrainCellCount)
+  # Per-slot broad-vs-tall tree choice, filled below and updated per cell in
+  # placeTerrainCell. Pre-sized so no per-frame growth.
+  let broadVisibleFlags: List(Bool) = createList(Bool, cap: terrainCellCount)
   let origin: Vec3 = vec3.create(x: 0.0, y: 0.0, z: groundZ)
   let zeroRotation: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let oneScale: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
@@ -404,31 +534,29 @@ func createInfiniteTerrain(scene: mod Scene3d, assets: view String,
   loop index < terrainCellCount {
     let tileMesh: MeshHandle = uploadMeshDataForTerrain(mesh: tilePlane)
     tileMeshes.add(value: tileMesh.id)
+    # Tiles keep their MeshRenderer (unique per-cell heightfield mesh, not an
+    # instancing candidate); every other prop is hidden and drawn instanced.
     tiles.add(value: addMeshInstance(scene: scene, mesh: tileMesh,
       material: groundMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
-    broadTrunks.add(value: addMeshInstance(scene: scene, mesh: broadTrunk,
+    broadTrunks.add(value: addHiddenProp(scene: scene, mesh: broadTrunk,
       material: trunkMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
-    broadCrowns.add(value: addMeshInstance(scene: scene, mesh: broadCrown,
+    broadCrowns.add(value: addHiddenProp(scene: scene, mesh: broadCrown,
       material: crownMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
-    tallTrunks.add(value: addMeshInstance(scene: scene, mesh: tallTrunk,
+    tallTrunks.add(value: addHiddenProp(scene: scene, mesh: tallTrunk,
       material: trunkMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
-    tallCrowns.add(value: addMeshInstance(scene: scene, mesh: tallCrown,
+    tallCrowns.add(value: addHiddenProp(scene: scene, mesh: tallCrown,
       material: crownMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
-    # Rocks are instanced (#485), so hide the per-cell MeshRenderer — renderScene
-    # must skip it — while keeping the entity for its transform. drawTerrainRocks
-    # gathers all rock transforms into one instanced draw each frame.
-    let rockEntity: Int = addMeshInstance(scene: scene, mesh: rockMesh,
-      material: rockMaterial, position: origin, rotation: zeroRotation, scale: oneScale)
-    setMeshInstanceVisible(scene: scene, entity: rockEntity, visible: false)
-    rocks.add(value: rockEntity)
-    bushes.add(value: addMeshInstance(scene: scene, mesh: bushMesh,
+    rocks.add(value: addHiddenProp(scene: scene, mesh: rockMesh,
+      material: rockMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
+    bushes.add(value: addHiddenProp(scene: scene, mesh: bushMesh,
       material: bushMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
-    flowers.add(value: addMeshInstance(scene: scene, mesh: flowerMesh,
+    flowers.add(value: addHiddenProp(scene: scene, mesh: flowerMesh,
       material: flowerMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
-    grassA.add(value: addMeshInstance(scene: scene, mesh: grassMesh,
+    grassA.add(value: addHiddenProp(scene: scene, mesh: grassMesh,
       material: grassMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
-    grassB.add(value: addMeshInstance(scene: scene, mesh: grassMesh,
+    grassB.add(value: addHiddenProp(scene: scene, mesh: grassMesh,
       material: grassMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
+    broadVisibleFlags.add(value: false)
     index = index + 1
   }
 
@@ -443,9 +571,23 @@ func createInfiniteTerrain(scene: mod Scene3d, assets: view String,
     rockEntities: own rocks, bushEntities: own bushes, flowerEntities: own flowers,
     grassAEntities: own grassA, grassBEntities: own grassB,
     materialIds: own materials,
-    rockMaterialIndex: rockMaterial,
-    rockMesh: rockMesh,
-    rockBatch: own createInstanceBatch(mesh: rockMesh, capacity: terrainCellCount)
+    broadVisible: own broadVisibleFlags,
+    rockProp: own createPropInstancer(mesh: rockMesh, materialIndex: rockMaterial,
+                                      capacity: terrainCellCount),
+    bushProp: own createPropInstancer(mesh: bushMesh, materialIndex: bushMaterial,
+                                      capacity: terrainCellCount),
+    flowerProp: own createPropInstancer(mesh: flowerMesh, materialIndex: flowerMaterial,
+                                        capacity: terrainCellCount),
+    grassProp: own createPropInstancer(mesh: grassMesh, materialIndex: grassMaterial,
+                                       capacity: terrainCellCount * 2),
+    broadTrunkProp: own createPropInstancer(mesh: broadTrunk, materialIndex: trunkMaterial,
+                                            capacity: terrainCellCount),
+    broadCrownProp: own createPropInstancer(mesh: broadCrown, materialIndex: crownMaterial,
+                                            capacity: terrainCellCount),
+    tallTrunkProp: own createPropInstancer(mesh: tallTrunk, materialIndex: trunkMaterial,
+                                           capacity: terrainCellCount),
+    tallCrownProp: own createPropInstancer(mesh: tallCrown, materialIndex: crownMaterial,
+                                           capacity: terrainCellCount)
   }
   setInfiniteTerrainToon(terrain: terrain, scene: scene, toon: true)
   ret own terrain

@@ -837,9 +837,9 @@ func main() ret Int {
           if settings.shadows {
           beginShadowPass(c: cascades)
           renderSceneShadow(scene: scene)
-          # Rocks are hidden MeshRenderers (instanced in the colour pass), so
+          # Props are hidden MeshRenderers (instanced in the colour pass), so
           # their shadow casters are supplied explicitly (#485).
-          drawTerrainRocksShadow(terrain: terrain, scene: scene)
+          drawTerrainPropsShadow(terrain: terrain, scene: scene)
           var sp: Int = 0
           loop sp < partIds.length {
             let sh: MeshHandle = meshHandle(id: walkerIntAt(values: partIds, index: sp), generation: 1)
@@ -865,10 +865,10 @@ func main() ret Int {
           # with a working UI, which looks like a lighting bug.
           gbuffer.beginPass(camera: camera, light: light, aspect: aspect)
           gbuffer.renderScene(scene: scene)
-          # The rocks: one instanced draw for all 49 cells (grass epic #485
-          # proof), replacing 49 per-cell MeshRenderer draws. Same pass, same
-          # transforms — identical picture, one DrawIndexed.
-          drawTerrainRocks(terrain: terrain, scene: scene)
+          # Every terrain prop (trees, rocks, bushes, flowers, grass) drawn
+          # instanced — one DrawIndexed per mesh instead of ~8 per cell (grass
+          # epic #485). Same pass, same transforms — identical picture.
+          drawTerrainProps(terrain: terrain, scene: scene)
           uploadPalette(rows: palette, jointCount: jointCount(sk: sk))
           var p: Int = 0
           loop p < partIds.length {
