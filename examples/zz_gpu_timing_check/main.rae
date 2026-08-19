@@ -1,0 +1,71 @@
+# Standalone validation of the #528 GPU-timing path against real wgpu-native:
+# bootstrap headless, time a big buffer copy on the GPU, read the timestamps back,
+# print microseconds. No renderer involved.
+import core
+import webgpu/context
+import webgpu/webgpu
+import gpu_timing
+import profile
+open webgpu/context
+open webgpu/webgpu
+
+func main() ret Int {
+  if webgpuBootstrap() is 0 { log("no wgpu device") ret 1 }
+  log("have_timestamp={webgpuHaveTimestamp()}")
+  if gpu_timing.gpuTimingInit() is false { log("gpu timing DISABLED (adapter lacks feature)") ret 0 }
+  log("gpu timing enabled")
+  # A throwaway capture so profileCounter has somewhere to record.
+  profile.profileStartCapture(seconds: 3600.0, outPath: "/tmp/gt_selftest.json")
+
+  # A render pass that clears a texture — real GPU work, and the exact descriptor
+  # timestampWrites path the renderer uses.
+  # STATUS (#528): on this Mac's wgpu-native Metal backend the readback returns 0
+  # for both timestamps even though the feature is present, the descriptor is
+  # accepted (no validation error), and the map/copy pattern matches the runtime's
+  # proven rae_gpu_readback. The query set is not being written — a wgpu-native
+  # Metal timestampWrites limitation to run down (or needs MTLCounterSampleBuffer
+  # directly). Kept as the harness for that investigation.
+  let texDesc: WGPUTextureDescriptor = {
+    usage: WGPUTextureUsage_RenderAttachment, dimension: WGPUTextureDimension_2D,
+    size: { width: 1024 as UInt32, height: 1024 as UInt32, depthOrArrayLayers: 1 as UInt32 },
+    format: WGPUTextureFormat_RGBA8Unorm, mipLevelCount: 1 as UInt32, sampleCount: 1 as UInt32
+  }
+  let tex: Ptr = wgpuDeviceCreateTexture(device: webgpuDevice(), descriptor: texDesc)
+  let viewDesc: WGPUTextureViewDescriptor = {
+    format: WGPUTextureFormat_RGBA8Unorm, dimension: WGPUTextureViewDimension_2D,
+    baseMipLevel: 0 as UInt32, mipLevelCount: 1 as UInt32,
+    baseArrayLayer: 0 as UInt32, arrayLayerCount: 1 as UInt32, aspect: WGPUTextureAspect_All
+  }
+  let texView: Ptr = wgpuTextureCreateView(texture: tex, descriptor: viewDesc)
+  let atts: List(WGPURenderPassColorAttachment) = createList(WGPURenderPassColorAttachment, cap: 1)
+  atts.add(value: { depthSlice: 0 as UInt32 })
+
+  var frame: Int = 0
+  loop frame < 5 {
+    gpu_timing.gpuTimingFrameBegin()
+    let tsIdx: Int = gpu_timing.gpuTimingPassBegin(name: "clear")
+    let encDesc: WGPUCommandEncoderDescriptor = { }
+    let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
+    atts.set(index: 0, value: {
+      view_: texView, depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32,
+      loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store,
+      clearValue: { r: 0.1 as Float64, g: 0.2 as Float64, b: 0.3 as Float64, a: 1.0 as Float64 }
+    })
+    let rpDesc: WGPURenderPassDescriptor = {
+      colorAttachmentCount: 1 as UInt64, colorAttachments: atts.data,
+      timestampWrites: gpu_timing.gpuTimingWritesPtr()
+    }
+    let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
+    wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
+    gpu_timing.gpuTimingResolve(enc: enc, idx: tsIdx)
+    let cbDesc: WGPUCommandBufferDescriptor = { }
+    let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
+    gtSubmitTest(cmd: cmd)
+    gpu_timing.gpuTimingCollect()
+    log("frame {frame}: clear-pass GPU time = {gpu_timing.gpuTimingLastTotalUs()} us")
+    frame = frame + 1
+  }
+  ret 0
+}
+
+func gtSubmitTest(cmd: Ptr) extern("rae_gb_submit")
