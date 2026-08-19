@@ -563,7 +563,6 @@ static const char* GB_GRASS_WGSL =
 "  let bx = cellX + (jx - 0.5) * spacing * 0.9;\n"
 "  let by = cellY + (jy - 0.5) * spacing * 0.9;\n"
 "  let bz = terrainHeight(bx, by, G.a.z);\n"
-"  let phase = hp * 6.2831853;\n"
 "  let yaw = hp * 6.2831853;\n"
 /* Independent per-blade height + width variation (grass epic #487): the blade
  * geometry is a unit strip (x in [-0.5,0.5], z in [0,1]) generated in the render
@@ -574,14 +573,15 @@ static const char* GB_GRASS_WGSL =
 "  let height = 0.30 + hHeight * 0.40;\n"
 "  let width = 0.055 + hWidth * 0.045;\n"
 "  let scale = vec3<f32>(width, width, height);\n"
-"  let time = G.a.w;\n"
-"  let dt = G.b.w;\n"
-"  let gust = 0.16 * sin(time * 1.7 + phase) + 0.06 * sin(time * 3.9 + phase * 1.7 + bx * 0.15);\n"
-"  let prevT = time - dt;\n"
-"  let prevGust = 0.16 * sin(prevT * 1.7 + phase) + 0.06 * sin(prevT * 3.9 + phase * 1.7 + bx * 0.15);\n"
+/* Upright placement only. The wind bend is applied per-vertex in the render
+ * shader (grass epic #487) so it can curve the blade progressively (base fixed,
+ * tip leaning most) from a coherent world-space wave, which a single rigid model
+ * tilt cannot do. model == prevModel; the render shader derives motion from the
+ * bend at time and time-dt. */
 "  let pos = vec3<f32>(bx, by, bz);\n"
-"  outBuf[i].model = swayModel(pos, yaw, gust * 0.6, gust, scale);\n"
-"  outBuf[i].prevModel = swayModel(pos, yaw, prevGust * 0.6, prevGust, scale);\n"
+"  let m = swayModel(pos, yaw, 0.0, 0.0, scale);\n"
+"  outBuf[i].model = m;\n"
+"  outBuf[i].prevModel = m;\n"
 /* Per-blade colour: hue/brightness spread so the field is not one flat green. */
 "  let cvar = hash2u(cellI, 83u);\n"
 "  let cbright = 0.75 + hash2u(cellI, 97u) * 0.5;\n"
@@ -618,8 +618,13 @@ static const char* GB_GRASS_RENDER_WGSL =
 "  albedoMetallic: vec4<f32>,\n"
 "  params: vec4<f32>,\n"
 "};\n"
+"struct GrassU {\n"
+"  a: vec4<f32>,\n"   /* playerX, playerY, groundZ, time */
+"  b: vec4<f32>,\n"   /* count, extent, toon, dt */
+"};\n"
 "@group(0) @binding(0) var<uniform> F: Frame;\n"
 "@group(0) @binding(1) var<storage, read> draws: array<DrawU>;\n"
+"@group(0) @binding(2) var<uniform> GW: GrassU;\n"
 GB_OCT_WGSL
 "struct VsOut {\n"
 "  @builtin(position) pos: vec4<f32>,\n"
@@ -628,7 +633,14 @@ GB_OCT_WGSL
 "  @location(2) clipNow: vec4<f32>,\n"
 "  @location(3) clipPrev: vec4<f32>,\n"
 "};\n"
-/* Unit blade: x in [-halfWidth, +halfWidth] (tapering base 0.5 -> tip 0.12),
+/* Coherent WORLD-SPACE wind (grass epic #487): a travelling wave keyed on the
+ * blade's base world position, so neighbours bend together into gusts rather
+ * than each blade twitching on its own phase. Returns a signed lean magnitude. */
+"fn windBend(base: vec2<f32>, time: f32) -> f32 {\n"
+"  let phase = base.x * 0.5 + base.y * 0.35;\n"
+"  return 0.22 * sin(time * 1.5 + phase) + 0.06 * sin(time * 3.3 + phase * 1.9) + 0.10;\n"
+"}\n"
+/* Unit blade: x in [-halfWidth, +halfWidth] (tapering base 0.5 -> tip),
  * z in [0,1] up. Two triangles, six vertices. */
 "fn bladeLocal(vi: u32, tipW: f32) -> vec3<f32> {\n"
 "  var corner = 0u;\n"
@@ -650,13 +662,26 @@ GB_OCT_WGSL
 "  let d = draws[ii];\n"
 "  let lp = bladeLocal(vi, d.params.w);\n"
 "  var o: VsOut;\n"
-"  o.pos = F.viewProj * (d.model * vec4<f32>(lp, 1.0));\n"
+/* Base world position lives in the model's translation column; the wave is keyed
+ * on it so the gust is coherent across the field. The bend is applied AFTER the
+ * model transform, horizontally, scaled by z*z so the base stays planted and the
+ * tip leans most — a progressive curve, not a rigid tilt. */
+"  let base = vec2<f32>(d.model[3].x, d.model[3].y);\n"
+"  let windDir = normalize(vec2<f32>(0.82, 0.57));\n"
+"  let zc = lp.z * lp.z;\n"
+"  let wNow = d.model * vec4<f32>(lp, 1.0);\n"
+"  let bendN = windBend(base, GW.a.w);\n"
+"  let pNow = vec3<f32>(wNow.x + windDir.x * bendN * zc, wNow.y + windDir.y * bendN * zc, wNow.z);\n"
+"  o.pos = F.viewProj * vec4<f32>(pNow, 1.0);\n"
 /* Grass reads as an up-facing surface (lit like the ground it grows from),\n"
  * which avoids near-black blades side-on. */
 "  o.nrm = normalize((d.model * vec4<f32>(0.0, 0.0, 1.0, 0.0)).xyz);\n"
 "  o.inst = ii;\n"
 "  o.clipNow = o.pos;\n"
-"  o.clipPrev = F.prevViewProj * (d.prevModel * vec4<f32>(lp, 1.0));\n"
+"  let wPrev = d.prevModel * vec4<f32>(lp, 1.0);\n"
+"  let bendP = windBend(base, GW.a.w - GW.b.w);\n"
+"  let pPrev = vec3<f32>(wPrev.x + windDir.x * bendP * zc, wPrev.y + windDir.y * bendP * zc, wPrev.z);\n"
+"  o.clipPrev = F.prevViewProj * vec4<f32>(pPrev, 1.0);\n"
 "  o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);\n"
 "  return o;\n"
 "}\n"
