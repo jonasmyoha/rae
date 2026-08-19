@@ -15,8 +15,20 @@ set -eu
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 root=$(CDPATH= cd -- "$here/../.." && pwd)
 ex=${1:?usage: RAE_IOS_TEAM=<id> run-ios.sh <example> [device]}
-team=${RAE_IOS_TEAM:?set RAE_IOS_TEAM to your Apple Developer team id}
 name=$(basename "$ex")
+
+# Team: RAE_IOS_TEAM, else inferred from the first installed provisioning profile
+# (its TeamIdentifier) so the devtools "iOS device" button works with no env.
+team=${RAE_IOS_TEAM:-}
+if [ -z "$team" ]; then
+  prof=$(find "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" \
+              "$HOME/Library/MobileDevice/Provisioning Profiles" \
+              -name '*.mobileprovision' 2>/dev/null | head -1)
+  if [ -n "$prof" ]; then
+    team=$(security cms -D -i "$prof" 2>/dev/null | plutil -extract TeamIdentifier.0 raw - 2>/dev/null || true)
+  fi
+fi
+[ -n "$team" ] || { echo "error: set RAE_IOS_TEAM (Apple Developer team id) — none inferable from provisioning profiles" >&2; exit 1; }
 
 # 1. Generate/refresh the Xcode project (idempotent).
 sh "$here/gen-ios.sh" "$ex" >/dev/null
