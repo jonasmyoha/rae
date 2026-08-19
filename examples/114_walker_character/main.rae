@@ -120,6 +120,7 @@ import ui/window_geometry
 import ui/scroll_panel
 import ui/event_loop
 import ui/debug_overlay
+import ui/virtual_joystick
 import ui/ecs
 import ui/input_gpu2d
 import ui/render_gpu2d
@@ -150,6 +151,7 @@ open ui/window_geometry
 open ui/scroll_panel
 open ui/event_loop
 open ui/debug_overlay
+open ui/virtual_joystick
 open ui/ecs
 open ui/components
 open ui/input_gpu2d
@@ -172,6 +174,10 @@ func main() ret Int {
   var extentW: Float = windowExtentW()
   var extentH: Float = windowExtentH()
   gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
+
+  # Touch movement stick (lib/ui/virtual_joystick), lower-left (WASD still works).
+  var moveStick: VirtualJoystick = createVirtualJoystick(
+    baseX: extentW * 0.20, baseY: extentH * 0.80, baseRadius: extentW * 0.15)
 
   let assets: String = "examples/114_walker_character/assets/"
   # Fonts + theme + a UiWorld with assets/ui.raescene mounted. The empty
@@ -347,7 +353,7 @@ func main() ret Int {
   # The idle CROWD's instance buffer + storage (grass epic #485). The clone root
   # models are filled AFTER the saved position is restored (below), so the crowd
   # spawns around wherever the hero actually is — not stranded at world origin.
-  let cloneCount: Int = 20
+  let cloneCount: Int = 5
   let cloneModels: List(Mat4) = createList(Mat4, cap: cloneCount)
   let firstPart: MeshHandle = meshHandle(id: walkerIntAt(values: partIds, index: 0), generation: 1)
   var characterClones: InstanceBatch = createInstanceBatch(mesh: firstPart, capacity: cloneCount)
@@ -707,8 +713,10 @@ func main() ret Int {
       camera.target = thirdPersonCameraTarget(
         controller: characterController, focusZ: orbitFocusZ)
     }
+    # Touch stick first; while it captures the pointer the camera ignores it.
+    let joyActive: Bool = updateVirtualJoystick(joy: moveStick)
     let cameraMoved: Bool = updateCameraRig(rig: rig, camera: camera,
-                       allowInput: uiPointerCaptured(input: uiInput) is false, dt: dt)
+                       allowInput: uiPointerCaptured(input: uiInput) is false and joyActive is false, dt: dt)
     if cameraMoved {
       stateDirty = true
     }
@@ -719,9 +727,9 @@ func main() ret Int {
     previousPartModel = partModel
     var characterMoved: Bool = false
     if rig.mode is CameraRigMode.character {
-      characterMoved = updateThirdPersonController(
-        controller: characterController,
-        allowInput: uiPointerCaptured(input: uiInput) is false and playing,
+      characterMoved = updateWalkerMovement(controller: characterController,
+        moveStick: moveStick, joyActive: joyActive,
+        allowKeys: uiPointerCaptured(input: uiInput) is false and playing,
         cameraYaw: rig.viewYaw, dt: dt * speed)
       # The walk ray: stand on the terrain height at the new x/y, every
       # frame, before anything reads the position.
@@ -972,6 +980,7 @@ func main() ret Int {
           # Load-preserving: paints over the composited frame.
           gpu2d.beginFrameLoad()
           renderSystemGpu2d(world: uiWorld, res: gpuUi)
+          drawVirtualJoystick(joy: moveStick)
           drawLogOverlay(ov: logView, font: gpuUi.textFont, screenW: windowExtentW(), screenH: windowExtentH())
           # LAST, so it is above the scene, the UI world and the log.
           drawDebugOverlay(d: dbg, font: gpuUi.textFont, didRealWork: true)
