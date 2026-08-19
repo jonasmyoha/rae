@@ -1,0 +1,183 @@
+# GPU grass generation (grass epic #486) — Rae over the WebGPU bindings.
+#
+# A frame-integrated COMPUTE pass writes one DrawU record per blade into a
+# storage buffer entirely on the GPU: a grid of blades around the player,
+# hash-jittered, dropped onto the terrain via the SAME analytic height field as
+# the CPU terrain mesh, swayed by the wind model. No CPU per-blade work and no
+# readback (unlike lib/gpu.rae's blocking compute). The instanced grass draw then
+# binds that buffer and reads draws[instance_index] on the existing static
+# G-buffer pipeline — so no new pipeline or shader is needed for the draw.
+#
+# The compute pass runs in its OWN command encoder, submitted before the geometry
+# pass each frame (the geometry pass's render encoder is already mid-render-pass
+# when Rae sees it, so a compute pass cannot share it). The GPU orders the
+# compute submit before the later G-buffer submit, so the draw reads fresh data.
+#
+# The WGSL lives in C (rae_gb_grass_wgsl, like the other renderer shaders);
+# everything else — buffers, pipeline, bind groups, dispatch, draw — is Rae.
+import core
+open webgpu/webgpu
+import webgpu/context
+open webgpu/context
+
+# C shader-source accessors (WGSL text + compute entry point name).
+func grassWgsl() extern("rae_gb_grass_wgsl") ret Ptr
+func grassEntry() extern("rae_gb_grass_entry") ret Ptr
+
+# Reused gbuffer ABI-seam accessors (the same C symbols gbuffer.rae binds).
+func gbStaticPipeline() extern("rae_gb_static_pipeline") ret Ptr
+func gbStaticBind() extern("rae_gb_static_bind") ret Ptr
+func gbFrameUbuf() extern("rae_gb_frame_ubuf") ret Ptr
+func gbFrameBytes() extern("rae_gb_frame_bytes") ret Int
+func gbPass() extern("rae_gb_pass") ret Ptr
+func gbSubmit(cmd: Ptr) extern("rae_gb_submit")
+func gbMeshReady(mesh: Int) extern("rae_gb_mesh_ready") ret Int
+func gbMeshVbuf(mesh: Int) extern("rae_gb_mesh_vbuf") ret Ptr
+func gbMeshIbuf(mesh: Int) extern("rae_gb_mesh_ibuf") ret Ptr
+func gbMeshIcount(mesh: Int) extern("rae_gb_mesh_icount") ret Int
+
+# Handle store (Rae has no module-level Ptr var; keep them in C like the rest of
+# the renderer). Slots: 0=compute pipeline, 1=instance buffer, 2=uniform buffer,
+# 3=compute bind group, 4=draw bind group.
+func grassSet(index: Int, ptr: Ptr) extern("rae_gb_grass_set")
+func grassGet(index: Int) extern("rae_gb_grass_get") ret Ptr
+
+# Blade count MUST be a perfect square: the compute grid is side x side, and the
+# shader derives side = sqrt(count). 576 = 24 x 24.
+const grassGpuBladeCount: Int = 576
+const grassRecordBytes: Int = 160    # 40 floats per DrawU
+const grassUniformBytes: Int = 32    # two vec4 (see GrassU in the WGSL)
+
+var gGrassMade: Bool = false
+var gGrassDrawBindMade: Bool = false
+
+# WGSL text -> shader module (same construction as gbuffer.makeShaderModule; the
+# one-element List holds the chained WGPUShaderSourceWGSL for nextInChain).
+func grassMakeShaderModule(wgsl: copy Ptr) ret Ptr {
+  var srcList: List(WGPUShaderSourceWGSL) = createList(WGPUShaderSourceWGSL, cap: 1)
+  srcList.add(value: {
+    chain: { sType: WGPUSType_ShaderSourceWGSL },
+    code: { data: wgsl, length: WGPU_STRLEN }
+  })
+  let desc: WGPUShaderModuleDescriptor = { nextInChain: srcList.data }
+  ret wgpuDeviceCreateShaderModule(device: webgpuDevice(), descriptor: desc)
+}
+
+# Create the instance buffer, uniform, compute pipeline and compute bind group
+# once. Safe after the device + static pipeline exist.
+func ensureGrassGpu() {
+  if gGrassMade { ret }
+  gGrassMade = true
+  let instBytes: Int = grassGpuBladeCount * grassRecordBytes
+  let iDesc: WGPUBufferDescriptor = {
+    usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst,
+    size: instBytes as UInt64
+  }
+  let instances: Ptr = wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: iDesc)
+  grassSet(index: 1, ptr: instances)
+  let uDesc: WGPUBufferDescriptor = {
+    usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst,
+    size: grassUniformBytes as UInt64
+  }
+  let uniform: Ptr = wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: uDesc)
+  grassSet(index: 2, ptr: uniform)
+
+  let shaderMod: Ptr = grassMakeShaderModule(wgsl: grassWgsl())
+  let pipeDesc: WGPUComputePipelineDescriptor = {
+    compute: { module: shaderMod, entryPoint: { data: grassEntry(), length: WGPU_STRLEN } }
+  }
+  let pipeline: Ptr = wgpuDeviceCreateComputePipeline(device: webgpuDevice(), descriptor: pipeDesc)
+  grassSet(index: 0, ptr: pipeline)
+
+  let cLayout: Ptr = wgpuComputePipelineGetBindGroupLayout(computePipeline: pipeline, groupIndex: 0 as UInt32)
+  var cEntries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 2)
+  cEntries.add(value: { binding: 0 as UInt32, buffer: uniform, size: grassUniformBytes as UInt64 })
+  cEntries.add(value: { binding: 1 as UInt32, buffer: instances, size: instBytes as UInt64 })
+  let cbDesc: WGPUBindGroupDescriptor = { layout: cLayout, entryCount: 2 as UInt64, entries: cEntries.data }
+  grassSet(index: 3, ptr: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: cbDesc))
+  wgpuBindGroupLayoutRelease(bindGroupLayout: cLayout)
+}
+
+# The draw bind group needs the frame uniform, which only exists after the first
+# beginPass — so build it lazily on first draw, reusing the static pipeline's
+# group-0 layout (frame uniform @0, instance storage @1) but pointing binding 1
+# at the grass instance buffer instead of the shared draws buffer.
+func ensureGrassDrawBind() {
+  if gGrassDrawBindMade { ret }
+  gGrassDrawBindMade = true
+  let instBytes: Int = grassGpuBladeCount * grassRecordBytes
+  let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbStaticPipeline(), groupIndex: 0 as UInt32)
+  var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 2)
+  entries.add(value: { binding: 0 as UInt32, buffer: gbFrameUbuf(), size: gbFrameBytes() as UInt64 })
+  entries.add(value: { binding: 1 as UInt32, buffer: grassGet(index: 1), size: instBytes as UInt64 })
+  let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 2 as UInt64, entries: entries.data }
+  grassSet(index: 4, ptr: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
+  wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+}
+
+# Reused per-frame uniform staging (8 floats). Module-level so no per-frame alloc.
+var gGrassUni: List(Float) = createList(Float, cap: 8)
+
+# Dispatch the grass generation compute for this frame. Centres a grid of blades
+# on (playerX, playerY), extent units wide, on the terrain, swaying at `time`
+# (dt gives the previous-frame sway for TAA motion). Records into its own encoder
+# and submits — no readback, no blocking. Call BEFORE the geometry pass.
+func grassGenerate(playerX: copy Float, playerY: copy Float, groundZ: copy Float,
+                   time: copy Float, dt: copy Float, extent: copy Float, toon: copy Int) {
+  ensureGrassGpu()
+  var toonF: Float = 0.0
+  if toon is 1 { toonF = 1.0 }
+  loop gGrassUni.length < 8 { gGrassUni.add(value: 0.0) }
+  gGrassUni.set(index: 0, value: playerX)
+  gGrassUni.set(index: 1, value: playerY)
+  gGrassUni.set(index: 2, value: groundZ)
+  gGrassUni.set(index: 3, value: time)
+  gGrassUni.set(index: 4, value: grassGpuBladeCount.toFloat())
+  gGrassUni.set(index: 5, value: extent)
+  gGrassUni.set(index: 6, value: toonF)
+  gGrassUni.set(index: 7, value: dt)
+  wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: grassGet(index: 2), bufferOffset: 0 as UInt64,
+    data: gGrassUni.data, size: grassUniformBytes as UInt64)
+
+  let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
+  let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
+  let cpDesc: WGPUComputePassDescriptor = { nextInChain: webgpuNull() }
+  let pass: Ptr = wgpuCommandEncoderBeginComputePass(commandEncoder: enc, descriptor: cpDesc)
+  wgpuComputePassEncoderSetPipeline(computePassEncoder: pass, pipeline: grassGet(index: 0))
+  wgpuComputePassEncoderSetBindGroup(computePassEncoder: pass, groupIndex: 0 as UInt32,
+    group: grassGet(index: 3), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  let groups: Int = (grassGpuBladeCount + 63) / 64
+  wgpuComputePassEncoderDispatchWorkgroups(computePassEncoder: pass,
+    workgroupCountX: groups as UInt32, workgroupCountY: 1 as UInt32, workgroupCountZ: 1 as UInt32)
+  wgpuComputePassEncoderEnd(computePassEncoder: pass)
+  let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
+  let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
+  gbSubmit(cmd: cmd)
+  wgpuCommandBufferRelease(commandBuffer: cmd)
+  wgpuComputePassEncoderRelease(computePassEncoder: pass)
+  wgpuCommandEncoderRelease(commandEncoder: enc)
+}
+
+# Draw the whole GPU-generated grass field in one instanced DrawIndexed, inside
+# the G-buffer geometry pass (call between beginPass and endPass). Uses the static
+# pipeline with the grass instance buffer bound; restores the shared static bind
+# group after so any following static draw is unaffected.
+func grassDraw(meshId: copy Int) {
+  if gbMeshReady(mesh: meshId) is 0 { ret }
+  ensureGrassDrawBind()
+  let pass: Ptr = gbPass()
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: gbStaticPipeline())
+  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+    group: grassGet(index: 4), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  let vbuf: Ptr = gbMeshVbuf(mesh: meshId)
+  let ibuf: Ptr = gbMeshIbuf(mesh: meshId)
+  wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder: pass, slot: 0 as UInt32,
+    buffer: vbuf, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: vbuf))
+  wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder: pass, buffer: ibuf,
+    format: WGPUIndexFormat_Uint32, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: ibuf))
+  wgpuRenderPassEncoderDrawIndexed(renderPassEncoder: pass,
+    indexCount: gbMeshIcount(mesh: meshId) as UInt32, instanceCount: grassGpuBladeCount as UInt32,
+    firstIndex: 0 as UInt32, baseVertex: 0 as Int32, firstInstance: 0 as UInt32)
+  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+    group: gbStaticBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+}

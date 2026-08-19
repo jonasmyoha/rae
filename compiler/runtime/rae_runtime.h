@@ -859,6 +859,10 @@ const char* rae_gb_wgsl(void);
 const char* rae_gb_skin_wgsl(void);
 const char* rae_gb_entry_vs(void);
 const char* rae_gb_entry_fs(void);
+const char* rae_gb_grass_wgsl(void);
+const char* rae_gb_grass_entry(void);
+void  rae_gb_grass_set(int64_t index, void* ptr);
+void* rae_gb_grass_get(int64_t index);
 void rae_gb_set_pipeline(void* p);
 void rae_gb_set_skin_pipeline(void* p);
 /* G-buffer inspector built in Rae (#503). */
