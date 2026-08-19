@@ -18,6 +18,18 @@ import gpu2d
 # Push the render scale to the deferred renderer (#530). C clamps to [0.25, 1.0].
 func setRenderScale(s: Float64) extern("rae_gb_set_render_scale")
 
+# OS thermal pressure (Apple): 0 nominal, 1 fair, 2 serious, 3 critical; 0 else.
+func thermalState() extern("rae_ext_thermalState") ret Int
+
+# Scale ceiling for the current OS thermal state — proactively cap resolution
+# BEFORE frames drop, which is the whole point of reading thermalState: reacting
+# only to dropped frames means the device is already hot.
+func thermalCeiling(therm: view Int) ret Float {
+  if therm >= 3 { ret 0.5 }
+  if therm >= 2 { ret 0.7 }
+  ret 1.0
+}
+
 # A two-rung quality ladder against sustained GPU load: first lower the render
 # scale (1.0 -> 0.5), and only when that bottoms out and frames still miss, drop
 # the frame-rate cap to 30 (halving the GPU duty cycle so the SoC cools — a clean
@@ -49,6 +61,17 @@ func createRenderScaleController(targetFps: copy Float) pub ret RenderScaleContr
 # Feed one frame's dt (seconds). Walks the ladder in place: drop fast after 4
 # missed frames, restore one rung after ~3s good, 30-frame cooldown between moves.
 func updateRenderScale(drs: mod RenderScaleController, dt: copy Float) pub {
+  # Proactive OS-thermal ceiling: snap the scale down (and force the 30fps cap at
+  # critical) the moment the OS reports heat, without waiting for missed frames.
+  let therm: Int = thermalState()
+  let ceiling: Float = thermalCeiling(therm: therm)
+  if drs.scale > ceiling and drs.cooldown <= 0 {
+    drs.scale = ceiling
+    setRenderScale(s: drs.scale as Float64)
+    drs.cooldown = 30
+  }
+  if therm >= 3 { drs.capFps = 30.0 }
+
   if dt > drs.overBudgetSec {
     drs.overFrames = drs.overFrames + 1
     drs.goodFrames = 0
@@ -73,13 +96,13 @@ func updateRenderScale(drs: mod RenderScaleController, dt: copy Float) pub {
       drs.overFrames = 0
     }
   } else if drs.goodFrames >= 180 {
-    if drs.capFps < 60.0 {
+    if drs.capFps < 60.0 and therm < 3 {
       drs.capFps = 60.0            # restore the rate before the resolution
       drs.cooldown = 30
       drs.goodFrames = 0
-    } else if drs.scale < 1.0 {
+    } else if drs.scale < ceiling {
       drs.scale = drs.scale + drs.step
-      if drs.scale > 1.0 { drs.scale = 1.0 }
+      if drs.scale > ceiling { drs.scale = ceiling }
       setRenderScale(s: drs.scale as Float64)
       drs.cooldown = 30
       drs.goodFrames = 0
