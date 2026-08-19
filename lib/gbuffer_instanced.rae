@@ -95,3 +95,12 @@ func drawInstances(batch: view InstanceBatch) pub {
   if batch.count <= 0 { ret }
   drawRecords(mesh: batch.meshId, records: batch.records.data, count: batch.count)
 }
+
+# Draw the batch as one instanced SKINNED DrawIndexed. All copies share the one
+# joint palette (one pose) — see drawSkinnedRecords. Set the batch mesh to the
+# skinned part being drawn (setInstanceBatchMesh) before calling; a multi-part
+# character is one drawSkinnedInstances per part.
+func drawSkinnedInstances(batch: view InstanceBatch) pub {
+  if batch.count <= 0 { ret }
+  drawSkinnedRecords(mesh: batch.meshId, records: batch.records.data, count: batch.count)
+}
