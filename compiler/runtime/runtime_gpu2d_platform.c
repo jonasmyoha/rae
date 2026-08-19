@@ -34,6 +34,13 @@ static WGPUTextureFormat g_g2d_fmt = WGPUTextureFormat_BGRA8Unorm;
  * opts into a fixed virtual canvas fitted into the window (DPI-independent). */
 static double g_g2d_design_w = 0.0, g_g2d_design_h = 0.0;
 static int    g_g2d_fit_mode = 0;   /* 0=fit/contain, 1=fill/cover, 2=stretch */
+
+/* Multitouch (#526): active fingers tracked from SDL_EVENT_FINGER_*, so a UI can
+ * drive a virtual joystick with one thumb and rotate the camera with another.
+ * Positions are window-normalized (0..1); exposed to Rae in design units. */
+#define RAE_G2D_MAX_TOUCH 10
+static struct { SDL_FingerID id; float nx, ny; } g_g2d_touch[RAE_G2D_MAX_TOUCH];
+static int g_g2d_touch_n = 0;
 /* Per-frame mouse-wheel accumulator (reset + summed in pollClose, read by
  * gpu2d.wheelMove). Mirrors raylib's GetMouseWheelMove per-frame semantics. */
 static float  g_g2d_wheel = 0.0f;
@@ -402,6 +409,32 @@ rae_Bool rae_ext_gpu2d_pollClose(void) {
             case SDL_EVENT_KEY_UP:
                 if (e.key.scancode < SDL_SCANCODE_COUNT) g_sdl_keydown[e.key.scancode] = 0;
                 break;
+            case SDL_EVENT_FINGER_DOWN:
+                if (g_g2d_touch_n < RAE_G2D_MAX_TOUCH) {
+                    g_g2d_touch[g_g2d_touch_n].id = e.tfinger.fingerID;
+                    g_g2d_touch[g_g2d_touch_n].nx = e.tfinger.x;
+                    g_g2d_touch[g_g2d_touch_n].ny = e.tfinger.y;
+                    g_g2d_touch_n++;
+                }
+                break;
+            case SDL_EVENT_FINGER_MOTION:
+                for (int ti = 0; ti < g_g2d_touch_n; ti++) {
+                    if (g_g2d_touch[ti].id == e.tfinger.fingerID) {
+                        g_g2d_touch[ti].nx = e.tfinger.x;
+                        g_g2d_touch[ti].ny = e.tfinger.y;
+                        break;
+                    }
+                }
+                break;
+            case SDL_EVENT_FINGER_UP:
+                for (int ti = 0; ti < g_g2d_touch_n; ti++) {
+                    if (g_g2d_touch[ti].id == e.tfinger.fingerID) {
+                        g_g2d_touch[ti] = g_g2d_touch[g_g2d_touch_n - 1];
+                        g_g2d_touch_n--;
+                        break;
+                    }
+                }
+                break;
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
                 if (e.button.button < 8) {
                     g_sdl_mouse[e.button.button] = 1;
@@ -469,6 +502,24 @@ static void rae_g2d_pointer_design(double* dx, double* dy) {
 }
 float rae_ext_gpu2d_pointerX(void){ double x, y; rae_g2d_pointer_design(&x, &y); return x; }
 float rae_ext_gpu2d_pointerY(void){ double x, y; rae_g2d_pointer_design(&x, &y); return y; }
+
+/* Multitouch fingers in design units (#526). touchX/Y clamp to 0 out of range. */
+static void rae_g2d_touch_design(int i, double* dx, double* dy) {
+    float xf[8]; rae_g2d_compute_xform(xf);
+    double physX = (double)g_g2d_touch[i].nx * (double)g_sdl_w;
+    double physY = (double)g_g2d_touch[i].ny * (double)g_sdl_h;
+    *dx = (xf[2] != 0.0f) ? (physX - xf[4]) / xf[2] : physX;
+    *dy = (xf[3] != 0.0f) ? (physY - xf[5]) / xf[3] : physY;
+}
+int64_t rae_ext_gpu2d_touchCount(void) { return (int64_t)g_g2d_touch_n; }
+float rae_ext_gpu2d_touchX(int64_t i) {
+    if (i < 0 || i >= g_g2d_touch_n) return 0.0f;
+    double x, y; rae_g2d_touch_design((int)i, &x, &y); return (float)x;
+}
+float rae_ext_gpu2d_touchY(int64_t i) {
+    if (i < 0 || i >= g_g2d_touch_n) return 0.0f;
+    double x, y; rae_g2d_touch_design((int)i, &x, &y); return (float)y;
+}
 /* Left mouse button held this frame (button index 1 in SDL). */
 rae_Bool rae_ext_gpu2d_pointerDown(void) { return g_sdl_mouse[SDL_BUTTON_LEFT] != 0; }
 rae_Bool rae_ext_gpu2d_pointerPressed(void) { return g_sdl_mouse_pressed[SDL_BUTTON_LEFT] != 0; }

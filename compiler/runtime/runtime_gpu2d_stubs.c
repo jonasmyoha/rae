@@ -17,6 +17,9 @@ void rae_ext_gpu2d_drawImageKeyScaled(rae_String key, float x, float y, float w,
 void rae_ext_gpu2d_drawImage(float x, float y, float w, float h, float radius, int64_t handle, int64_t tint){ (void)x; (void)y; (void)w; (void)h; (void)radius; (void)handle; (void)tint; }
 float rae_ext_gpu2d_pointerX(void){ return 0.0; }
 float rae_ext_gpu2d_pointerY(void){ return 0.0; }
+int64_t rae_ext_gpu2d_touchCount(void) { return 0; }
+float rae_ext_gpu2d_touchX(int64_t i) { (void)i; return 0.0; }
+float rae_ext_gpu2d_touchY(int64_t i) { (void)i; return 0.0; }
 rae_Bool rae_ext_gpu2d_pointerDown(void) { return 0; }
 rae_Bool rae_ext_gpu2d_pointerPressed(void) { return 0; }
 rae_Bool rae_ext_gpu2d_pointerReleased(void) { return 0; }
