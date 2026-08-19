@@ -12,10 +12,13 @@ import gpu3d
 import scene3d
 import mesh3d
 import vec3
+import gbuffer
+import gbuffer_instanced
 open gltf
 open gpu3d
 open scene3d
 open mesh3d
+open gbuffer_instanced
 
 const terrainGridSide: Int = 7
 const terrainCellSize: Float = 18.0
@@ -61,6 +64,12 @@ type InfiniteTerrain {
   grassAEntities: List(Int)
   grassBEntities: List(Int)
   materialIds: List(Int)
+  # Grass epic #485 proof: the rocks are drawn as ONE instanced draw rather
+  # than 49 per-cell MeshRenderer draws. rockBatch is the reusable instance
+  # buffer; rockMaterialIndex resolves the shared rock material each frame.
+  rockMaterialIndex: Int
+  rockMesh: MeshHandle
+  rockBatch: InstanceBatch
 }
 
 func terrainMesh(path: view String) ret MeshHandle {
@@ -274,6 +283,44 @@ func updateInfiniteTerrain(terrain: mod InfiniteTerrain, scene: mod Scene3d,
   ret true
 }
 
+# Grass epic #485 proof: draw every rock in ONE instanced DrawIndexed instead
+# of 49 per-cell MeshRenderer draws. Reads each rock entity's current + previous
+# transform (same source renderScene used, so motion vectors and placement are
+# identical) and the shared rock material, packs them into the reusable
+# InstanceBatch, and issues one draw. Call inside the G-buffer geometry pass,
+# right after renderScene. The rock MeshRenderers are hidden at setup so they are
+# not also drawn by renderScene.
+func drawTerrainRocks(terrain: mod InfiniteTerrain, scene: view Scene3d) {
+  let material: Material3d = sceneMaterialAt(values: scene.materials,
+                                             index: terrain.rockMaterialIndex)
+  resetInstanceBatch(batch: terrain.rockBatch)
+  var index: Int = 0
+  loop index < terrain.rockEntities.length {
+    let entity: Int = terrainEntityAt(entities: terrain.rockEntities, index: index)
+    let transform: Transform3d = sceneTransformAt(values: scene.transforms, index: entity)
+    let prevTransform: Transform3d = sceneTransformAt(values: scene.prevTransforms, index: entity)
+    addInstanceTransform(batch: terrain.rockBatch, transform: transform,
+                         prevTransform: prevTransform, material: material)
+    index = index + 1
+  }
+  drawInstances(batch: terrain.rockBatch)
+}
+
+# Rocks are hidden MeshRenderers (so renderScene/renderSceneShadow skip them),
+# so their shadow casters must be supplied here — one drawShadowCaster per rock,
+# same as renderSceneShadow would have done. (Instanced shadow casting is a later
+# grass phase; per-rock casters keep the shadows identical for now.) Call inside
+# the shadow pass, right after renderSceneShadow.
+func drawTerrainRocksShadow(terrain: view InfiniteTerrain, scene: view Scene3d) {
+  var index: Int = 0
+  loop index < terrain.rockEntities.length {
+    let entity: Int = terrainEntityAt(entities: terrain.rockEntities, index: index)
+    let transform: Transform3d = sceneTransformAt(values: scene.transforms, index: entity)
+    drawShadowCaster(mesh: terrain.rockMesh, model: modelMatrix(t: transform))
+    index = index + 1
+  }
+}
+
 func setInfiniteTerrainToon(terrain: mod InfiniteTerrain, scene: mod Scene3d,
                             toon: view Bool) {
   if terrain.toon is toon { ret }
@@ -367,8 +414,13 @@ func createInfiniteTerrain(scene: mod Scene3d, assets: view String,
       material: trunkMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
     tallCrowns.add(value: addMeshInstance(scene: scene, mesh: tallCrown,
       material: crownMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
-    rocks.add(value: addMeshInstance(scene: scene, mesh: rockMesh,
-      material: rockMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
+    # Rocks are instanced (#485), so hide the per-cell MeshRenderer — renderScene
+    # must skip it — while keeping the entity for its transform. drawTerrainRocks
+    # gathers all rock transforms into one instanced draw each frame.
+    let rockEntity: Int = addMeshInstance(scene: scene, mesh: rockMesh,
+      material: rockMaterial, position: origin, rotation: zeroRotation, scale: oneScale)
+    setMeshInstanceVisible(scene: scene, entity: rockEntity, visible: false)
+    rocks.add(value: rockEntity)
     bushes.add(value: addMeshInstance(scene: scene, mesh: bushMesh,
       material: bushMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
     flowers.add(value: addMeshInstance(scene: scene, mesh: flowerMesh,
@@ -390,7 +442,10 @@ func createInfiniteTerrain(scene: mod Scene3d, assets: view String,
     tallTrunkEntities: own tallTrunks, tallCrownEntities: own tallCrowns,
     rockEntities: own rocks, bushEntities: own bushes, flowerEntities: own flowers,
     grassAEntities: own grassA, grassBEntities: own grassB,
-    materialIds: own materials
+    materialIds: own materials,
+    rockMaterialIndex: rockMaterial,
+    rockMesh: rockMesh,
+    rockBatch: own createInstanceBatch(mesh: rockMesh, capacity: terrainCellCount)
   }
   setInfiniteTerrainToon(terrain: terrain, scene: scene, toon: true)
   ret own terrain
