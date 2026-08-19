@@ -366,9 +366,11 @@ function makeMultiFileExample(
     && !liveOnly
     && (!wasmCapability.needsBrowser || metadata?.wasmWebApp === true);
   const supportedTargets = (() => {
-    if (!offersWasm) return declaredTargets;
     const base = declaredTargets ? [...declaredTargets] : ["compiled"];
-    if (!base.includes("wasm")) base.push("wasm");
+    if (offersWasm && !base.includes("wasm")) base.push("wasm");
+    // iOS is the native (Compiled) path retargeted to a connected device
+    // (#520) — available wherever a compiled build is.
+    if (base.includes("compiled") && !base.includes("ios")) base.push("ios");
     return base;
   })();
   const defaultTargetId =

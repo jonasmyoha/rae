@@ -112,6 +112,21 @@ const DEFAULT_TARGETS: TargetConfig[] = [
     // use the separate Emscripten path rather than this headless WASI target.
     exampleRunCommand: "compiler/tools/wasm_build.sh {{ENTRY_DIR}} {{ENTRY}} {{OUTDIR}}/app.wasm && node compiler/tools/wasm_run.mjs --echo {{OUTDIR}}/app.wasm",
     exampleBuildCommand: "compiler/tools/wasm_build.sh {{ENTRY_DIR}} {{ENTRY}} {{OUTDIR}}/app.wasm"
+  },
+  {
+    // Native (Compiled) build run on a connected iOS device — the perf-
+    // representative target. run-ios.sh does gen → xcodebuild build+sign
+    // (automatic provisioning) → devicectl install → devicectl launch, all
+    // headless. Needs Xcode + an Apple ID in Xcode Accounts; the team is
+    // auto-detected from a provisioning profile (or set RAE_IOS_TEAM). Build
+    // the iOS xcframeworks once: tools/ios/build-{wgpu,sdl3}-ios.sh.
+    id: "ios",
+    label: "iOS device (iPhone/iPad)",
+    shortLabel: "iOS device",
+    description: "Build + sign + install + launch on a connected iOS device (native, Metal).",
+    testCommand: "-",
+    exampleRunCommand: "sh tools/ios/run-ios.sh {{ENTRY_DIR}}",
+    exampleBuildCommand: "sh tools/ios/gen-ios.sh {{ENTRY_DIR}}"
   }
 ];
 
