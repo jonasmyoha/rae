@@ -14,6 +14,7 @@
 #   updateRenderScale(drs: drs, dt: dt)                       # each frame
 import core
 import gpu2d
+import profile
 
 # Push the render scale to the deferred renderer (#530). C clamps to [0.25, 1.0].
 func setRenderScale(s: Float64) extern("rae_gb_set_render_scale")
@@ -71,6 +72,12 @@ func updateRenderScale(drs: mod RenderScaleController, dt: copy Float) pub {
     drs.cooldown = 30
   }
   if therm >= 3 { drs.capFps = 30.0 }
+
+  # Surface the current tier in profile captures: render.scale (percent), the
+  # frame cap, and the OS thermal state, plotted alongside fps / per-pass GPU ms.
+  profile.profileCounter(name: "render.scale", value: rae_float_to_int(f: drs.scale * 100.0))
+  profile.profileCounter(name: "render.capFps", value: rae_float_to_int(f: drs.capFps))
+  profile.profileCounter(name: "thermal.state", value: therm)
 
   if dt > drs.overBudgetSec {
     drs.overFrames = drs.overFrames + 1
