@@ -6,6 +6,18 @@ iPhone, so we can profile performance on device — no Rae program has ever run 
 iOS. Perf is now the motivating concern, so the design centres a **native**
 device path, with a lighter WASM launcher for breadth and quick iteration.
 
+> **Scope — supported build targets.** Rae has exactly **two** real build
+> targets: **Compiled** (emit C → native binary) and **WASM** (emit C → emcc →
+> browser). The `live` and `hybrid` target modes that still appear in the
+> compiler's target enum are **deprecated legacy** and slated for removal — do
+> **not** design or build anything iOS around them. iOS therefore maps directly
+> onto the two real targets: the **native track = Compiled** (clang for
+> `arm64-apple-ios` instead of `gcc` for the host), and the **web track = WASM**
+> (the existing emcc pipeline, hosted in a web view). Everything below concerns
+> only Compiled and WASM. (The stray `live`/`hybrid` enum values and their build
+> paths are a separate cleanup — worth deleting so the target surface reads as
+> the two modes we actually ship.)
+
 ---
 
 ## 1. Why iOS is close (grounding in the current build)
