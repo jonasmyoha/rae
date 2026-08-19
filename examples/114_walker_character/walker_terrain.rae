@@ -20,6 +20,11 @@ open scene3d
 open mesh3d
 open gbuffer_instanced
 
+# Single source of truth for the ground colour: the terrain ground material AND
+# the GPU grass gradient's bottom both read this, so the grass roots always match
+# the ground (#487 follow-up — pass it into grassGenerate).
+func walkerGroundColor() pub ret Vec3 { ret vec3.create(x: 0.105, y: 0.245, z: 0.055) }
+
 const terrainGridSide: Int = 7
 const terrainCellSize: Float = 18.0
 const terrainHalfGrid: Int = 3
@@ -479,7 +484,7 @@ func createInfiniteTerrain(scene: mod Scene3d, assets: view String,
   let noEmission: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let materials: List(Int) = createList(Int, cap: 8)
   let groundMaterial: Int = addMaterial(scene: scene,
-    baseColor: vec3.create(x: 0.105, y: 0.245, z: 0.055),
+    baseColor: walkerGroundColor(),
     metallic: 0.0, roughness: 0.96, emission: noEmission)
   let trunkMaterial: Int = addMaterial(scene: scene,
     baseColor: vec3.create(x: 0.205, y: 0.090, z: 0.032),
