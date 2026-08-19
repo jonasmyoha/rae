@@ -68,6 +68,12 @@ func dpr() extern ret Float
 # space drawRect etc. take), so hit-testing lines up with what was drawn.
 func pointerX() extern ret Float
 func pointerY() extern ret Float
+# Multitouch (#526): active finger count + per-finger position in design units.
+# On desktop this is 0 (use the mouse pointer); on iOS every touch is reported so
+# a UI can drive a joystick with one finger and the camera with another.
+func touchCount() extern ret Int
+func touchX(index: Int) extern ret Float
+func touchY(index: Int) extern ret Float
 # Left mouse button held this frame.
 func pointerDown() extern ret Bool
 func pointerPressed() extern ret Bool
