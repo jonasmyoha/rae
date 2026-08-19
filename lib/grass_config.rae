@@ -1,0 +1,52 @@
+# Grass view/camera profiles (#492): reparameterise the ONE GPU grass system for
+# different camera setups instead of hard-coding third-person assumptions. The
+# same compute + indirect-draw pipeline is fed different numbers, so a top-down
+# mode is a config change, not a separate renderer.
+#
+# GrassViewSettings carries the knobs the compute/render shaders consume via the
+# grass uniform (see grassGenerate). Presets ship for THIRD-PERSON (tall, dense,
+# detailed close blades) and TOP-DOWN/ISOMETRIC (shorter + wider blades for
+# ground coverage from above, larger visible radius, lower density) — the two
+# ends of the range #515's top-down vegetation work spans.
+#
+# NOTE: this is the view/camera-profile half of #492. The biome-REGION half
+# (per-region params via ECS + a spatial biome map the compute samples) is a
+# separate sub-system, filed as follow-up.
+import core
+import vec3
+
+type GrassViewSettings {
+  enabled: Bool
+  extent: Float           # candidate-grid span / render distance (world units)
+  windDirX: Float         # coherent wind direction (unit-ish)
+  windDirY: Float
+  windStrength: Float     # 1.0 = the tuned baseline sway
+  windGust: Float         # extra gust amplitude multiplier
+  bladeHeightScale: Float # scales the per-blade height (top-down wants shorter)
+  bladeWidthScale: Float  # scales blade width (top-down wants wider for coverage)
+  densityScale: Float     # 0..1 fraction of candidate blades kept
+  groundColor: Vec3       # gradient bottom = terrain ground colour
+  tipLighten: Float       # gradient top multiplier (>1 lighter)
+}
+
+# Third-person: the tuned baseline — tall, dense, detailed blades close to camera.
+func grassThirdPersonSettings(groundColor: copy Vec3) pub ret GrassViewSettings {
+  ret GrassViewSettings {
+    enabled: true, extent: 40.0,
+    windDirX: 0.82, windDirY: 0.57, windStrength: 1.0, windGust: 1.0,
+    bladeHeightScale: 1.0, bladeWidthScale: 1.0, densityScale: 1.0,
+    groundColor: groundColor, tipLighten: 1.8
+  }
+}
+
+# Top-down / isometric: seen from above, vertical blades project to slivers and the
+# ground shows through, so shorten and WIDEN the blades (more top-facing area),
+# reach much further, and thin the density since near-camera detail is wasted.
+func grassTopDownSettings(groundColor: copy Vec3) pub ret GrassViewSettings {
+  ret GrassViewSettings {
+    enabled: true, extent: 80.0,
+    windDirX: 0.82, windDirY: 0.57, windStrength: 0.6, windGust: 0.8,
+    bladeHeightScale: 0.7, bladeWidthScale: 1.4, densityScale: 0.7,
+    groundColor: groundColor, tipLighten: 1.5
+  }
+}
