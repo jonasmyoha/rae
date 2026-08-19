@@ -42,6 +42,10 @@ const char* rae_gb_wgsl(void)      { return ""; }
 const char* rae_gb_skin_wgsl(void) { return ""; }
 const char* rae_gb_entry_vs(void)  { return "vs"; }
 const char* rae_gb_entry_fs(void)  { return "fs"; }
+const char* rae_gb_grass_wgsl(void)  { return ""; }
+const char* rae_gb_grass_entry(void) { return "main"; }
+void  rae_gb_grass_set(int64_t index, void* ptr) { (void)index; (void)ptr; }
+void* rae_gb_grass_get(int64_t index) { (void)index; return (void*)0; }
 void rae_gb_set_pipeline(void* p)      { (void)p; }
 void rae_gb_set_skin_pipeline(void* p) { (void)p; }
 void* rae_gb_view_a(void)     { return (void*)0; }
