@@ -94,6 +94,61 @@ type CameraRig {
   lastY: Float
 }
 
+# Camera drag pointer (#526). By default the rig drags with the mouse pointer.
+# On touch, an app can exclude a region (e.g. a virtual joystick) via
+# setCameraTouchExclude so the camera uses a DIFFERENT finger — enabling
+# simultaneous move + look. gCamExcludeR < 0 disables it (plain mouse), so other
+# examples are unaffected. resolveCameraPointer publishes the chosen down/x/y.
+var gCamExcludeX: Float = 0.0
+var gCamExcludeY: Float = 0.0
+var gCamExcludeR: Float = 0.0 - 1.0
+var gCamPointerX: Float = 0.0
+var gCamPointerY: Float = 0.0
+var gCamPointerDown: Bool = false
+
+func setCameraTouchExclude(x: copy Float, y: copy Float, r: copy Float) pub {
+  gCamExcludeX = x
+  gCamExcludeY = y
+  gCamExcludeR = r
+}
+
+func resolveCameraPointer() {
+  if gCamExcludeR < 0.0 {
+    gCamPointerX = gpu2d.pointerX()
+    gCamPointerY = gpu2d.pointerY()
+    gCamPointerDown = gpu2d.pointerDown()
+    ret
+  }
+  let touches: Int = gpu2d.touchCount()
+  if touches > 0 {
+    # First finger outside the excluded (joystick) region rotates the camera.
+    gCamPointerDown = false
+    var index: Int = 0
+    loop index < touches {
+      let tx: Float = gpu2d.touchX(index: index)
+      let ty: Float = gpu2d.touchY(index: index)
+      let d2: Float = (tx - gCamExcludeX) * (tx - gCamExcludeX) + (ty - gCamExcludeY) * (ty - gCamExcludeY)
+      if d2 > gCamExcludeR * gCamExcludeR {
+        gCamPointerX = tx
+        gCamPointerY = ty
+        gCamPointerDown = true
+        index = touches
+      } else {
+        index = index + 1
+      }
+    }
+  } else {
+    # Desktop mouse — but still respect the excluded region so a click on the
+    # joystick does not also rotate the camera.
+    let mx: Float = gpu2d.pointerX()
+    let my: Float = gpu2d.pointerY()
+    let d2: Float = (mx - gCamExcludeX) * (mx - gCamExcludeX) + (my - gCamExcludeY) * (my - gCamExcludeY)
+    gCamPointerX = mx
+    gCamPointerY = my
+    gCamPointerDown = gpu2d.pointerDown() and d2 > gCamExcludeR * gCamExcludeR
+  }
+}
+
 func createCameraRig(camera: view Camera3d) pub ret CameraRig {
   ret CameraRig {
     mode: CameraRigMode.orbit
@@ -303,9 +358,10 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
   var keyDist: Float = 0.0
   var keyMove: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
 
-  let px: Float = gpu2d.pointerX()
-  let py: Float = gpu2d.pointerY()
-  if allowInput and gpu2d.pointerDown() {
+  resolveCameraPointer()
+  let px: Float = gCamPointerX
+  let py: Float = gCamPointerY
+  if allowInput and gCamPointerDown {
     # Only orbit once a drag is ESTABLISHED. On the press frame there is
     # no previous position to difference against, and using the stale one
     # snaps the view by the distance the pointer travelled while up.

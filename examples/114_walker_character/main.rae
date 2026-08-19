@@ -715,10 +715,10 @@ func main() ret Int {
       camera.target = thirdPersonCameraTarget(
         controller: characterController, focusZ: orbitFocusZ)
     }
-    # Touch stick first; while it captures the pointer the camera ignores it.
-    let joyActive: Bool = updateVirtualJoystick(joy: moveStick)
+    # Touch stick + camera-exclude (multitouch): one finger moves, another looks.
+    let joyActive: Bool = updateWalkerTouch(moveStick: moveStick)
     let cameraMoved: Bool = updateCameraRig(rig: rig, camera: camera,
-                       allowInput: uiPointerCaptured(input: uiInput) is false and joyActive is false, dt: dt)
+                       allowInput: uiPointerCaptured(input: uiInput) is false, dt: dt)
     if cameraMoved {
       stateDirty = true
     }
