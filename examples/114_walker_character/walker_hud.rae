@@ -10,6 +10,7 @@ import ui/log_overlay
 import ui/debug_overlay
 import ui/render_gpu2d
 import ui/virtual_joystick
+import ui/safe_area
 import app3d/camera_rig
 open app3d/settings_dialog
 open app3d/ui_shell
@@ -22,7 +23,15 @@ open app3d/camera_rig
 
 # Update the touch stick AND tell the camera rig to exclude its region, so on a
 # phone one finger drives the joystick while another rotates the camera (#526).
-func updateWalkerTouch(moveStick: mod VirtualJoystick) pub ret Bool {
+func updateWalkerTouch(moveStick: mod VirtualJoystick, world: mod UiWorld) pub ret Bool {
+  # Feed the OS safe-area insets (notch / home indicator, design units) into the
+  # ECS so UiRoot's padding reserves them — the whole UI, top bar included, sits
+  # inside the safe area. Runs before layout (renderSystemGpu2d) this frame.
+  let safe: Insets = {
+    l: gpu2d.safeLeft(), t: gpu2d.safeTop(),
+    r: gpu2d.safeRight(), b: gpu2d.safeBottom()
+  }
+  safeAreaSystem(world: world, insets: safe)
   let active: Bool = updateVirtualJoystick(joy: moveStick)
   setCameraTouch(excludeId: moveStick.grabbedId, joystickActive: active)
   ret active
