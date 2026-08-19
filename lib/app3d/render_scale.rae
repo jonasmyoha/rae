@@ -87,6 +87,18 @@ func updateRenderScale(drs: mod RenderScaleController, dt: copy Float) pub {
   }
 }
 
+# Shadow-map resolution for the current tier. DRS scales the deferred targets but
+# NOT the shadow map (it's a separate fixed-size depth texture), yet shadows are
+# the dominant sustained cost in the walker scene — so shrink the shadow map with
+# the scale too (1024² is a quarter of 2048²'s rasterized pixels). Cascade COUNT
+# stays fixed so the lighting sampler is untouched; the shadow pass reallocates
+# only when this value changes.
+func drsShadowRes(drs: view RenderScaleController) pub ret Int {
+  if drs.scale >= 0.85 { ret 2048 }
+  if drs.scale >= 0.65 { ret 1536 }
+  ret 1024
+}
+
 # Pad the current frame to the cap period by sleeping any slack (only meaningful
 # at the 30fps rung; a no-op at 60 since vsync already paces there). Call at the
 # end of the render branch with the frame's start time.
