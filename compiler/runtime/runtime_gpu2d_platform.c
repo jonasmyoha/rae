@@ -39,7 +39,7 @@ static int    g_g2d_fit_mode = 0;   /* 0=fit/contain, 1=fill/cover, 2=stretch */
  * drive a virtual joystick with one thumb and rotate the camera with another.
  * Positions are window-normalized (0..1); exposed to Rae in design units. */
 #define RAE_G2D_MAX_TOUCH 10
-static struct { SDL_FingerID id; float nx, ny; } g_g2d_touch[RAE_G2D_MAX_TOUCH];
+static struct { SDL_FingerID id; float nx, ny; unsigned char pressed; } g_g2d_touch[RAE_G2D_MAX_TOUCH];
 static int g_g2d_touch_n = 0;
 /* Per-frame mouse-wheel accumulator (reset + summed in pollClose, read by
  * gpu2d.wheelMove). Mirrors raylib's GetMouseWheelMove per-frame semantics. */
@@ -382,6 +382,7 @@ rae_Bool rae_ext_gpu2d_pollClose(void) {
     memset(g_sdl_pressed, 0, sizeof(g_sdl_pressed));
     memset(g_sdl_mouse_pressed, 0, sizeof(g_sdl_mouse_pressed));
     memset(g_sdl_mouse_released, 0, sizeof(g_sdl_mouse_released));
+    for (int ti = 0; ti < g_g2d_touch_n; ti++) g_g2d_touch[ti].pressed = 0;   /* clear edge */
     g_g2d_wheel = 0.0f;
     SDL_Event e;
     rae_Bool quit = 0;
@@ -414,6 +415,7 @@ rae_Bool rae_ext_gpu2d_pollClose(void) {
                     g_g2d_touch[g_g2d_touch_n].id = e.tfinger.fingerID;
                     g_g2d_touch[g_g2d_touch_n].nx = e.tfinger.x;
                     g_g2d_touch[g_g2d_touch_n].ny = e.tfinger.y;
+                    g_g2d_touch[g_g2d_touch_n].pressed = 1;   /* edge, cleared next frame */
                     g_g2d_touch_n++;
                 }
                 break;
@@ -520,6 +522,44 @@ float rae_ext_gpu2d_touchY(int64_t i) {
     if (i < 0 || i >= g_g2d_touch_n) return 0.0f;
     double x, y; rae_g2d_touch_design((int)i, &x, &y); return (float)y;
 }
+/* A stable per-finger id (SDL_FingerID) so a widget can grab a finger at press
+ * and hold it for the whole drag, and whether it went down THIS frame. */
+int64_t rae_ext_gpu2d_touchId(int64_t i) {
+    if (i < 0 || i >= g_g2d_touch_n) return -1;
+    return (int64_t)g_g2d_touch[(int)i].id;
+}
+rae_Bool rae_ext_gpu2d_touchPressed(int64_t i) {
+    if (i < 0 || i >= g_g2d_touch_n) return 0;
+    return g_g2d_touch[(int)i].pressed ? 1 : 0;
+}
+
+/* OS safe-area insets (notch / home indicator / rounded corners) in DESIGN units
+ * (#525). SDL_GetWindowSafeArea reports the safe rect in window points; the inset
+ * distances scale to physical px then design units the same way the pointer does. */
+static void rae_g2d_safe_insets_design(double* it, double* ib, double* il, double* ir) {
+    *it = *ib = *il = *ir = 0.0;
+    if (!g_sdl_win) return;
+    SDL_Rect safe;
+    if (!SDL_GetWindowSafeArea(g_sdl_win, &safe)) return;
+    int lw = 0, lh = 0; SDL_GetWindowSize(g_sdl_win, &lw, &lh);
+    if (lw <= 0 || lh <= 0) return;
+    double topL = (double)safe.y;
+    double botL = (double)lh - (double)(safe.y + safe.h);
+    double leftL = (double)safe.x;
+    double rightL = (double)lw - (double)(safe.x + safe.w);
+    double sx = (double)g_sdl_w / (double)lw, sy = (double)g_sdl_h / (double)lh;
+    float xf[8]; rae_g2d_compute_xform(xf);
+    double scaleX = (xf[2] != 0.0f) ? (double)xf[2] : 1.0;
+    double scaleY = (xf[3] != 0.0f) ? (double)xf[3] : 1.0;
+    *it = topL * sy / scaleY;
+    *ib = botL * sy / scaleY;
+    *il = leftL * sx / scaleX;
+    *ir = rightL * sx / scaleX;
+}
+float rae_ext_gpu2d_safeTop(void){ double t,b,l,r; rae_g2d_safe_insets_design(&t,&b,&l,&r); return (float)t; }
+float rae_ext_gpu2d_safeBottom(void){ double t,b,l,r; rae_g2d_safe_insets_design(&t,&b,&l,&r); return (float)b; }
+float rae_ext_gpu2d_safeLeft(void){ double t,b,l,r; rae_g2d_safe_insets_design(&t,&b,&l,&r); return (float)l; }
+float rae_ext_gpu2d_safeRight(void){ double t,b,l,r; rae_g2d_safe_insets_design(&t,&b,&l,&r); return (float)r; }
 /* Left mouse button held this frame (button index 1 in SDL). */
 rae_Bool rae_ext_gpu2d_pointerDown(void) { return g_sdl_mouse[SDL_BUTTON_LEFT] != 0; }
 rae_Bool rae_ext_gpu2d_pointerPressed(void) { return g_sdl_mouse_pressed[SDL_BUTTON_LEFT] != 0; }
