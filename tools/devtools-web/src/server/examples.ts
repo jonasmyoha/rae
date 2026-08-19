@@ -371,6 +371,9 @@ function makeMultiFileExample(
     // iOS is the native (Compiled) path retargeted to a connected device
     // (#520) — available wherever a compiled build is.
     if (base.includes("compiled") && !base.includes("ios")) base.push("ios");
+    // Profiler variant of the iOS path (#527): same build, captures a frame
+    // trace and pulls it back.
+    if (base.includes("ios") && !base.includes("ios-profiler")) base.push("ios-profiler");
     return base;
   })();
   const defaultTargetId =

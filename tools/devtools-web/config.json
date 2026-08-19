@@ -82,6 +82,15 @@
       "testCommand": "-",
       "exampleRunCommand": "sh tools/ios/run-ios.sh {{ENTRY_DIR}}",
       "exampleBuildCommand": "sh tools/ios/gen-ios.sh {{ENTRY_DIR}}"
+    },
+    {
+      "id": "ios-profiler",
+      "label": "iOS device (profiler)",
+      "shortLabel": "iOS profiler",
+      "description": "Same as iOS device, but captures a 30s frame profile (#527): launch, play for ~30s (walk around / let the sun set), and the Chrome-trace JSON is pulled to /tmp/rae_profile.json — open it at https://ui.perfetto.dev. Override the length with RAE_IOS_PROFILE.",
+      "testCommand": "-",
+      "exampleRunCommand": "RAE_IOS_PROFILE=${RAE_IOS_PROFILE:-30} sh tools/ios/run-ios.sh {{ENTRY_DIR}}",
+      "exampleBuildCommand": "sh tools/ios/gen-ios.sh {{ENTRY_DIR}}"
     }
   ]
 }
