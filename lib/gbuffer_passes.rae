@@ -32,6 +32,10 @@ func gbCompositeBind(idx: Int) extern("rae_gb_composite_bind") ret Ptr
 func gbSetCompositePipeline(pipeline: Ptr) extern("rae_gb_set_composite_pipeline")
 func gbSetCompositeUbuf(buf: Ptr) extern("rae_gb_set_composite_ubuf")
 func gbSetCompositeBind(idx: Int, bind: Ptr) extern("rae_gb_set_composite_bind")
+# Dynamic resolution (#530): the upscale sampler + current render scale.
+func gbCompositeSampler() extern("rae_gb_composite_sampler") ret Ptr
+func gbSetCompositeSampler(samp: Ptr) extern("rae_gb_set_composite_sampler")
+func gbRenderScale() extern("rae_gb_render_scale") ret Float64
 
 # A fullscreen pipeline: no vertex buffers, no depth, one colour target. The
 # reusable primitive every deferred post-pass builds on.
@@ -106,6 +110,15 @@ func composite(exposure: copy Float) pub {
       usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst, size: 16 as UInt64
     }
     gbSetCompositeUbuf(buf: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: ud))
+    # Linear sampler for the dynamic-resolution upscale (#530).
+    let sd: WGPUSamplerDescriptor = {
+      addressModeU: WGPUAddressMode_ClampToEdge, addressModeV: WGPUAddressMode_ClampToEdge,
+      addressModeW: WGPUAddressMode_ClampToEdge,
+      magFilter: WGPUFilterMode_Linear, minFilter: WGPUFilterMode_Linear,
+      mipmapFilter: WGPUMipmapFilterMode_Nearest,
+      lodMinClamp: 0.0 as Float32, lodMaxClamp: 1.0 as Float32, maxAnisotropy: 1 as UInt16
+    }
+    gbSetCompositeSampler(samp: wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: sd))
   }
 
   # The source bind is per TAA slot (0/1) or the no-TAA lit slot (2), rebuilt
@@ -121,10 +134,11 @@ func composite(exposure: copy Float) pub {
   let idx: Int = gbCompositeSourceIndex()
   if not compositeSlotMade(idx: idx) {
     let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbCompositePipeline(), groupIndex: 0 as UInt32)
-    var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 2)
+    var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 3)
     entries.add(value: { binding: 0 as UInt32, buffer: gbCompositeUbuf(), size: 16 as UInt64 })
     entries.add(value: { binding: 1 as UInt32, textureView: gbCompositeSourceView() })
-    let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 2 as UInt64, entries: entries.data }
+    entries.add(value: { binding: 2 as UInt32, sampler: gbCompositeSampler() })
+    let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 3 as UInt64, entries: entries.data }
     gbSetCompositeBind(idx: idx, bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
     wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
     gCompositeBindMade.set(index: idx, value: true)
@@ -132,6 +146,7 @@ func composite(exposure: copy Float) pub {
 
   loop gCompositeUniform.length < 4 { gCompositeUniform.add(value: 0.0) }
   gCompositeUniform.set(index: 0, value: exposure)
+  gCompositeUniform.set(index: 1, value: gbRenderScale() as Float)   # #530: upscale ratio
   wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: gbCompositeUbuf(),
     bufferOffset: 0 as UInt64, data: gCompositeUniform.data, size: 16 as UInt64)
 
