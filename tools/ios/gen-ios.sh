@@ -14,8 +14,14 @@ set -eu
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 root=$(CDPATH= cd -- "$here/../.." && pwd)
-ex_dir=${1:?usage: gen-ios.sh <example-dir> [bundle-id] [name]}
-ex_dir=$(CDPATH= cd -- "$root/$ex_dir" 2>/dev/null && pwd || CDPATH= cd -- "$ex_dir" && pwd)
+ex_arg=${1:?usage: gen-ios.sh <example-dir> [bundle-id] [name]}
+if [ -d "$root/$ex_arg" ]; then
+  ex_dir=$(CDPATH= cd -- "$root/$ex_arg" && pwd)
+elif [ -d "$ex_arg" ]; then
+  ex_dir=$(CDPATH= cd -- "$ex_arg" && pwd)
+else
+  echo "error: example dir not found: $ex_arg" >&2; exit 1
+fi
 name=$(basename "$ex_dir")
 bundle_id=${2:-com.rae.$(printf '%s' "$name" | tr -cd 'a-zA-Z0-9')}
 disp=${3:-$name}
@@ -84,7 +90,9 @@ target_link_libraries(\${APP}
   "-framework Metal" "-framework QuartzCore" "-framework CoreGraphics"
   "-framework ImageIO" "-framework CoreMotion" "-framework GameController"
   "-framework AVFoundation" "-framework AudioToolbox" "-framework CoreHaptics"
-  "-framework CoreText" "-framework UniformTypeIdentifiers")
+  "-framework CoreText" "-framework UniformTypeIdentifiers"
+  "-framework CoreBluetooth" "-framework CoreMedia" "-framework CoreVideo"
+  "-framework OpenGLES" "-framework Security")
 
 set_target_properties(\${APP} PROPERTIES
   MACOSX_BUNDLE_GUI_IDENTIFIER "$bundle_id"
