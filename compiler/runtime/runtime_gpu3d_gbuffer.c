@@ -545,9 +545,17 @@ static const char* GB_GRASS_WGSL =
 "  let gy = i / side;\n"
 "  let extent = G.b.y;\n"
 "  let spacing = extent / f32(side);\n"
-"  let cellX = G.a.x + (f32(gx) - f32(side) * 0.5) * spacing;\n"
-"  let cellY = G.a.y + (f32(gy) - f32(side) * 0.5) * spacing;\n"
-"  let cellI = vec2<i32>(i32(gx), i32(gy));\n"
+/* WORLD-SPACE cells (grass epic #487): a window of world cells centred on the
+ * player's cell, hashed on the WORLD cell index — so each cell always holds the
+ * same blade and the field stays put in the world while the player walks through
+ * it (deterministic, no placement pop when the window slides). */
+"  let playerCellX = i32(floor(G.a.x / spacing));\n"
+"  let playerCellY = i32(floor(G.a.y / spacing));\n"
+"  let worldCellX = playerCellX + i32(gx) - i32(side) / 2;\n"
+"  let worldCellY = playerCellY + i32(gy) - i32(side) / 2;\n"
+"  let cellX = f32(worldCellX) * spacing;\n"
+"  let cellY = f32(worldCellY) * spacing;\n"
+"  let cellI = vec2<i32>(worldCellX, worldCellY);\n"
 "  let jx = hash2u(cellI, 7u);\n"
 "  let jy = hash2u(cellI, 13u);\n"
 "  let hp = hash2u(cellI, 29u);\n"
