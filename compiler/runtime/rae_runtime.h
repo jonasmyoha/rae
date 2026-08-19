@@ -853,6 +853,11 @@ void rae_gb_set_draws_buffer(void* buf);
 /* Target textures/views created in Rae (#503). */
 int64_t rae_gb_offscreen_w(void);
 int64_t rae_gb_offscreen_h(void);
+/* Dynamic resolution (#530). */
+void   rae_gb_set_render_scale(double s);
+double rae_gb_render_scale(void);
+void*  rae_gb_composite_sampler(void);
+void   rae_gb_set_composite_sampler(void* s);
 int64_t rae_gb_targets_match(int64_t w, int64_t h);
 int64_t rae_gb_targets_ready(void);
 void rae_gb_release_targets_ext(void);

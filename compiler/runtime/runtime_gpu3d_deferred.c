@@ -74,6 +74,7 @@ static WGPURenderPipeline gb_composite_pipeline = NULL;
  * choice forever. */
 static WGPUBindGroup      gb_composite_bind[3] = {NULL, NULL, NULL};
 static WGPUBuffer         gb_composite_ubuf = NULL;
+static WGPUSampler        gb_composite_samp = NULL;   /* #530: linear upscale sampler */
 static WGPUBuffer         gb_taa_ubuf = NULL;
 
 static int gb_deferred_gen = -1;   /* gb_targets_gen this file's binds were built for */
@@ -617,8 +618,9 @@ RAE_SKY_WGSL
 
 /* Composite: linear HDR radiance -> the presentable LDR offscreen. */
 static const char* GB_COMPOSITE_WGSL =
-"@group(0) @binding(0) var<uniform> P: vec4<f32>;\n"   /* x = exposure */
+"@group(0) @binding(0) var<uniform> P: vec4<f32>;\n"   /* x = exposure, y = renderScale */
 "@group(0) @binding(1) var litTex: texture_2d<f32>;\n"
+"@group(0) @binding(2) var litSamp: sampler;\n"
 GB_FULLSCREEN_VS
 "fn aces(x: vec3<f32>) -> vec3<f32> {\n"
 "  return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14),\n"
@@ -626,7 +628,12 @@ GB_FULLSCREEN_VS
 "}\n"
 "@fragment\n"
 "fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {\n"
-"  let hdr = textureLoad(litTex, vec2<i32>(pos.xy), 0).rgb;\n"
+     /* Dynamic resolution (#530): the source is rendered at P.y of native, so a
+        full-target fragment at pos.xy maps to source UV pos.xy*scale/sourceDims;
+        a linear sampler then bilinear-upscales. At scale 1.0 this equals a 1:1
+        fetch. */
+"  let uv = (pos.xy * P.y) / vec2<f32>(textureDimensions(litTex));\n"
+"  let hdr = textureSample(litTex, litSamp, uv).rgb;\n"
 "  var c = aces(hdr * P.x);\n"
 "  c = pow(c, vec3<f32>(1.0 / 2.2));\n"
 "  return vec4<f32>(c, 1.0);\n"
@@ -1000,6 +1007,8 @@ void* rae_gb_composite_source_view(void) {
 int64_t rae_gb_composite_source_index(void) { return gb_taa_enabled ? (int64_t)gb_taa_cur : 2; }
 void* rae_gb_composite_pipeline(void)    { return (void*)gb_composite_pipeline; }
 void* rae_gb_composite_ubuf(void)        { return (void*)gb_composite_ubuf; }
+void* rae_gb_composite_sampler(void)     { return (void*)gb_composite_samp; }
+void  rae_gb_set_composite_sampler(void* s) { gb_composite_samp = (WGPUSampler)s; }
 void* rae_gb_composite_bind(int64_t idx) { return (idx >= 0 && idx < 3) ? (void*)gb_composite_bind[(int)idx] : NULL; }
 void rae_gb_set_composite_pipeline(void* p) { gb_composite_pipeline = (WGPURenderPipeline)p; }
 void rae_gb_set_composite_ubuf(void* b)     { gb_composite_ubuf = (WGPUBuffer)b; }
@@ -1017,6 +1026,7 @@ void rae_ext_gbuffer_deferredShutdown(void) {
     if (gb_light_ubuf)              { wgpuBufferRelease(gb_light_ubuf); gb_light_ubuf = NULL; }
     if (gb_composite_pipeline)      { wgpuRenderPipelineRelease(gb_composite_pipeline); gb_composite_pipeline = NULL; }
     if (gb_composite_ubuf)          { wgpuBufferRelease(gb_composite_ubuf); gb_composite_ubuf = NULL; }
+    if (gb_composite_samp)          { wgpuSamplerRelease(gb_composite_samp); gb_composite_samp = NULL; }
     if (gb_taa_ubuf)                { wgpuBufferRelease(gb_taa_ubuf); gb_taa_ubuf = NULL; }
     if (gb_taa_pipeline)            { wgpuRenderPipelineRelease(gb_taa_pipeline); gb_taa_pipeline = NULL; }
     gb_deferred_gen = -1;
