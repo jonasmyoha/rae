@@ -20,9 +20,12 @@ open webgpu/webgpu
 import webgpu/context
 open webgpu/context
 
-# C shader-source accessors (WGSL text + compute entry point name).
+# C shader-source accessors (WGSL text + entry point names).
 func grassWgsl() extern("rae_gb_grass_wgsl") ret Ptr
+func grassRenderWgsl() extern("rae_gb_grass_render_wgsl") ret Ptr
 func grassEntry() extern("rae_gb_grass_entry") ret Ptr
+func gbEntryVs() extern("rae_gb_entry_vs") ret Ptr
+func gbEntryFs() extern("rae_gb_entry_fs") ret Ptr
 
 # Reused gbuffer ABI-seam accessors (the same C symbols gbuffer.rae binds).
 func gbStaticPipeline() extern("rae_gb_static_pipeline") ret Ptr
@@ -38,15 +41,18 @@ func gbMeshIcount(mesh: Int) extern("rae_gb_mesh_icount") ret Int
 
 # Handle store (Rae has no module-level Ptr var; keep them in C like the rest of
 # the renderer). Slots: 0=compute pipeline, 1=instance buffer, 2=uniform buffer,
-# 3=compute bind group, 4=draw bind group.
+# 3=compute bind group, 4=draw bind group, 5=grass render pipeline.
 func grassSet(index: Int, ptr: Ptr) extern("rae_gb_grass_set")
 func grassGet(index: Int) extern("rae_gb_grass_get") ret Ptr
 
 # Blade count MUST be a perfect square: the compute grid is side x side, and the
 # shader derives side = sqrt(count). 576 = 24 x 24.
-const grassGpuBladeCount: Int = 576
+const grassGpuBladeCount: Int = 1024
 const grassRecordBytes: Int = 160    # 40 floats per DrawU
 const grassUniformBytes: Int = 32    # two vec4 (see GrassU in the WGSL)
+# Vertices per procedural blade: a tapered quad = two triangles (see bladeLocal
+# in the render WGSL). No mesh, no vertex/index buffer.
+const grassBladeVerts: Int = 6
 
 var gGrassMade: Bool = false
 var gGrassDrawBindMade: Bool = false
@@ -63,8 +69,47 @@ func grassMakeShaderModule(wgsl: copy Ptr) ret Ptr {
   ret wgpuDeviceCreateShaderModule(device: webgpuDevice(), descriptor: desc)
 }
 
-# Create the instance buffer, uniform, compute pipeline and compute bind group
-# once. Safe after the device + static pipeline exist.
+# The grass RENDER pipeline: same 3 G-buffer colour targets + reverse-Z depth as
+# the static pipeline (makeGbPipeline), but with NO vertex buffers — the blade
+# geometry is generated in the vertex shader from vertex_index — and no back-face
+# cull, since a thin blade is seen from both sides.
+func makeGrassPipeline(shaderMod: copy Ptr) ret Ptr {
+  var targets: List(WGPUColorTargetState) = createList(WGPUColorTargetState, cap: 3)
+  targets.add(value: { format: WGPUTextureFormat_RGB10A2Unorm, writeMask: WGPUColorWriteMask_All })
+  targets.add(value: { format: WGPUTextureFormat_RGBA8Unorm, writeMask: WGPUColorWriteMask_All })
+  targets.add(value: { format: WGPUTextureFormat_RGBA8Unorm, writeMask: WGPUColorWriteMask_All })
+  var frags: List(WGPUFragmentState) = createList(WGPUFragmentState, cap: 1)
+  frags.add(value: {
+    module: shaderMod, entryPoint: { data: gbEntryFs(), length: WGPU_STRLEN },
+    targetCount: 3 as UInt64, targets: targets.data
+  })
+  var depths: List(WGPUDepthStencilState) = createList(WGPUDepthStencilState, cap: 1)
+  depths.add(value: {
+    format: WGPUTextureFormat_Depth32Float,
+    depthWriteEnabled: WGPUOptionalBool_True,
+    depthCompare: WGPUCompareFunction_Greater,
+    stencilFront: { compare: WGPUCompareFunction_Always, failOp: WGPUStencilOperation_Keep, depthFailOp: WGPUStencilOperation_Keep, passOp: WGPUStencilOperation_Keep },
+    stencilBack: { compare: WGPUCompareFunction_Always, failOp: WGPUStencilOperation_Keep, depthFailOp: WGPUStencilOperation_Keep, passOp: WGPUStencilOperation_Keep },
+    stencilReadMask: 4294967295 as UInt32, stencilWriteMask: 4294967295 as UInt32
+  })
+  let desc: WGPURenderPipelineDescriptor = {
+    vertex: {
+      module: shaderMod, entryPoint: { data: gbEntryVs(), length: WGPU_STRLEN },
+      bufferCount: 0 as UInt64
+    },
+    primitive: {
+      topology: WGPUPrimitiveTopology_TriangleList,
+      frontFace: WGPUFrontFace_CCW, cullMode: WGPUCullMode_None
+    },
+    depthStencil: depths.data,
+    multisample: { count: 1 as UInt32, mask: 4294967295 as UInt32 },
+    fragment: frags.data
+  }
+  ret wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: desc)
+}
+
+# Create the instance buffer, uniform, compute pipeline, compute bind group and
+# grass render pipeline once. Safe after the device + static pipeline exist.
 func ensureGrassGpu() {
   if gGrassMade { ret }
   gGrassMade = true
@@ -96,6 +141,10 @@ func ensureGrassGpu() {
   let cbDesc: WGPUBindGroupDescriptor = { layout: cLayout, entryCount: 2 as UInt64, entries: cEntries.data }
   grassSet(index: 3, ptr: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: cbDesc))
   wgpuBindGroupLayoutRelease(bindGroupLayout: cLayout)
+
+  let renderMod: Ptr = grassMakeShaderModule(wgsl: grassRenderWgsl())
+  grassSet(index: 5, ptr: makeGrassPipeline(shaderMod: renderMod))
+  wgpuShaderModuleRelease(shaderModule: renderMod)
 }
 
 # The draw bind group needs the frame uniform, which only exists after the first
@@ -106,7 +155,7 @@ func ensureGrassDrawBind() {
   if gGrassDrawBindMade { ret }
   gGrassDrawBindMade = true
   let instBytes: Int = grassGpuBladeCount * grassRecordBytes
-  let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbStaticPipeline(), groupIndex: 0 as UInt32)
+  let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: grassGet(index: 5), groupIndex: 0 as UInt32)
   var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 2)
   entries.add(value: { binding: 0 as UInt32, buffer: gbFrameUbuf(), size: gbFrameBytes() as UInt64 })
   entries.add(value: { binding: 1 as UInt32, buffer: grassGet(index: 1), size: instBytes as UInt64 })
@@ -158,26 +207,23 @@ func grassGenerate(playerX: copy Float, playerY: copy Float, groundZ: copy Float
   wgpuCommandEncoderRelease(commandEncoder: enc)
 }
 
-# Draw the whole GPU-generated grass field in one instanced DrawIndexed, inside
-# the G-buffer geometry pass (call between beginPass and endPass). Uses the static
-# pipeline with the grass instance buffer bound; restores the shared static bind
-# group after so any following static draw is unaffected.
-func grassDraw(meshId: copy Int) {
-  if gbMeshReady(mesh: meshId) is 0 { ret }
+# Draw the whole GPU-generated grass field in one instanced, non-indexed Draw
+# inside the G-buffer geometry pass (call between beginPass and endPass). The
+# grass render pipeline generates each blade's geometry in-shader from
+# vertex_index (no mesh), reading its per-blade transform from the instance
+# buffer. Restores the shared static pipeline + bind group after so any following
+# static draw is unaffected.
+func grassDraw() {
+  ensureGrassGpu()
   ensureGrassDrawBind()
   let pass: Ptr = gbPass()
-  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: gbStaticPipeline())
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: grassGet(index: 5))
   wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
     group: grassGet(index: 4), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
-  let vbuf: Ptr = gbMeshVbuf(mesh: meshId)
-  let ibuf: Ptr = gbMeshIbuf(mesh: meshId)
-  wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder: pass, slot: 0 as UInt32,
-    buffer: vbuf, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: vbuf))
-  wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder: pass, buffer: ibuf,
-    format: WGPUIndexFormat_Uint32, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: ibuf))
-  wgpuRenderPassEncoderDrawIndexed(renderPassEncoder: pass,
-    indexCount: gbMeshIcount(mesh: meshId) as UInt32, instanceCount: grassGpuBladeCount as UInt32,
-    firstIndex: 0 as UInt32, baseVertex: 0 as Int32, firstInstance: 0 as UInt32)
+  wgpuRenderPassEncoderDraw(renderPassEncoder: pass,
+    vertexCount: grassBladeVerts as UInt32, instanceCount: grassGpuBladeCount as UInt32,
+    firstVertex: 0 as UInt32, firstInstance: 0 as UInt32)
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: gbStaticPipeline())
   wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
     group: gbStaticBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
 }
