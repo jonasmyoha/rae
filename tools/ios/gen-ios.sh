@@ -111,18 +111,16 @@ target_link_libraries(\${APP}
   "-framework CoreBluetooth" "-framework CoreMedia" "-framework CoreVideo"
   "-framework OpenGLES" "-framework Security")
 
+# A real Info.plist (with UILaunchScreen for native resolution + portrait lock);
+# CMake's INFOPLIST_KEY_* build settings do not apply to a MACOSX_BUNDLE target.
 set_target_properties(\${APP} PROPERTIES
   MACOSX_BUNDLE_GUI_IDENTIFIER "$bundle_id"
   MACOSX_BUNDLE_BUNDLE_NAME "$disp"
+  MACOSX_BUNDLE_INFO_PLIST "$here/Info.plist.in"
   XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "$bundle_id"
   XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
   XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
-  XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "13.0"
-  # Portrait only (iPhone), and a generated launch screen so iOS renders at the
-  # device's native resolution rather than a scaled compatibility canvas.
-  XCODE_ATTRIBUTE_INFOPLIST_KEY_UISupportedInterfaceOrientations "UIInterfaceOrientationPortrait"
-  XCODE_ATTRIBUTE_INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown"
-  XCODE_ATTRIBUTE_INFOPLIST_KEY_UILaunchScreen_Generation "YES")
+  XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "13.0")
 EOF
 
 # 4. Configure the Xcode project.
