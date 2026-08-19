@@ -33,7 +33,12 @@ func updateWalkerTouch(moveStick: mod VirtualJoystick, world: mod UiWorld) pub r
   }
   safeAreaSystem(world: world, insets: safe)
   let active: Bool = updateVirtualJoystick(joy: moveStick)
-  setCameraTouch(excludeId: moveStick.grabbedId, joystickActive: active)
+  # Hand the camera the joystick's exclusion zone (same radius the stick grabs
+  # with) + the owned finger id: a press inside the zone is the stick's, outside
+  # is the camera's, and each holds its finger for the whole drag.
+  setCameraTouch(excludeId: moveStick.grabbedId, joystickActive: active,
+                 zoneX: moveStick.baseX, zoneY: moveStick.baseY,
+                 zoneR: virtualJoystickZoneRadius(joy: moveStick))
   ret active
 }
 
