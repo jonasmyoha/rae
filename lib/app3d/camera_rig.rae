@@ -95,23 +95,42 @@ type CameraRig {
 }
 
 # Camera drag pointer (#526). By default the rig drags with the mouse pointer.
-# For touch, setCameraTouch tells it which finger the joystick owns (excludeId)
-# and whether the joystick has the mouse (desktop) — so the camera GRABS a
-# different finger at press and holds it for the whole drag (never stealing the
-# joystick's, and vice versa). gCamTouchOn stays false until set, so other rigs
-# (110/113) keep the plain-mouse behaviour.
+# For touch, setCameraTouch tells it the joystick's exclusion zone (centre +
+# radius, design units) and which finger it owns (excludeId). The grab is decided
+# by REGION — a finger that goes down inside the joystick zone belongs to the
+# joystick, one outside belongs to the camera — and then HELD by id, so a drag
+# never transfers mid-gesture even if it wanders across the boundary. Region-at-
+# grab is what makes the two complementary; id-hold is what makes ownership
+# sticky. gCamTouchOn stays false until set, so other rigs (110/113) keep the
+# plain-mouse behaviour.
 var gCamTouchOn: Bool = false
-var gCamExcludeId: Int = 0 - 1     # finger owned by the joystick
+var gCamExcludeId: Int = 0 - 1     # finger currently owned by the joystick
 var gCamJoyActive: Bool = false    # desktop: joystick has the mouse
 var gCamGrabId: Int = 0 - 1        # finger this rig owns
+var gCamZoneX: Float = 0.0         # joystick zone centre (design units)
+var gCamZoneY: Float = 0.0
+var gCamZoneR: Float = 0.0 - 1.0   # joystick zone radius (<0 = no zone)
 var gCamPointerX: Float = 0.0
 var gCamPointerY: Float = 0.0
 var gCamPointerDown: Bool = false
 
-func setCameraTouch(excludeId: copy Int, joystickActive: copy Bool) pub {
+func setCameraTouch(excludeId: copy Int, joystickActive: copy Bool,
+                    zoneX: copy Float, zoneY: copy Float, zoneR: copy Float) pub {
   gCamTouchOn = true
   gCamExcludeId = excludeId
   gCamJoyActive = joystickActive
+  gCamZoneX = zoneX
+  gCamZoneY = zoneY
+  gCamZoneR = zoneR
+}
+
+# True when the point is outside the joystick zone (or no zone is set), i.e. the
+# camera is allowed to start a grab there.
+func pointerOutsideCamZone(x: view Float, y: view Float) ret Bool {
+  if gCamZoneR < 0.0 { ret true }
+  let dx: Float = x - gCamZoneX
+  let dy: Float = y - gCamZoneY
+  ret dx * dx + dy * dy > gCamZoneR * gCamZoneR
 }
 
 func resolveCameraPointer() {
@@ -123,21 +142,33 @@ func resolveCameraPointer() {
   }
   let touches: Int = gpu2d.touchCount()
   if touches > 0 {
-    # Own a finger from press and hold it: reuse our grabbed finger if still down,
-    # else grab a newly-pressed finger that the joystick does not already own.
+    # Own a finger from press and hold it: keep our grabbed finger while it stays
+    # down, else grab a newly-pressed finger that goes down OUTSIDE the joystick
+    # zone (the stick owns inside; each holds its finger for the whole drag).
     var found: Bool = false
     var index: Int = 0
     loop index < touches {
       let id: Int = gpu2d.touchId(index: index)
+      let tx: Float = gpu2d.touchX(index: index)
+      let ty: Float = gpu2d.touchY(index: index)
+      let pressed: Bool = gpu2d.touchPressed(index: index)
+      # Reused-id release: SDL recycles finger ids after a lift, so a FRESH press
+      # carrying the id we hold means our finger lifted and a new one took the id.
+      # A hold is never a fresh press — drop it here so the grab below re-decides
+      # by region. Without this the camera and stick fight over one finger and
+      # never release it (the "input goes to both" bug).
+      if gCamGrabId >= 0 and id is gCamGrabId and pressed { gCamGrabId = 0 - 1 }
       if gCamGrabId >= 0 and id is gCamGrabId {
-        gCamPointerX = gpu2d.touchX(index: index)
-        gCamPointerY = gpu2d.touchY(index: index)
+        # Hold: keep our finger wherever it goes, even into the joystick zone.
+        gCamPointerX = tx
+        gCamPointerY = ty
         found = true
       }
-      if gCamGrabId < 0 and gpu2d.touchPressed(index: index) and id is not gCamExcludeId {
+      if gCamGrabId < 0 and pressed
+        and id is not gCamExcludeId and pointerOutsideCamZone(x: tx, y: ty) {
         gCamGrabId = id
-        gCamPointerX = gpu2d.touchX(index: index)
-        gCamPointerY = gpu2d.touchY(index: index)
+        gCamPointerX = tx
+        gCamPointerY = ty
         found = true
       }
       index = index + 1
