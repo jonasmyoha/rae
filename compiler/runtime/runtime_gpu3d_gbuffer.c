@@ -472,9 +472,18 @@ static const char* GB_GRASS_WGSL =
 "struct GrassU {\n"
 "  a: vec4<f32>,\n"   /* playerX, playerY, groundZ, time */
 "  b: vec4<f32>,\n"   /* count, extent, toon, dt */
+"  c: vec4<f32>,\n"   /* camX, camY, camZ, nearKeep */
+"  d: vec4<f32>,\n"   /* forwardX, forwardY, forwardZ, coneCos */
+"};\n"
+"struct Indirect {\n"
+"  vertexCount: u32,\n"
+"  instanceCount: atomic<u32>,\n"
+"  firstVertex: u32,\n"
+"  firstInstance: u32,\n"
 "};\n"
 "@group(0) @binding(0) var<uniform> G: GrassU;\n"
 "@group(0) @binding(1) var<storage, read_write> outBuf: array<DrawU>;\n"
+"@group(0) @binding(2) var<storage, read_write> indirect: Indirect;\n"
 "fn hashWord(v0: u32) -> u32 {\n"
 "  var h = v0;\n"
 "  h = h ^ (h >> 16u);\n"
@@ -587,20 +596,32 @@ static const char* GB_GRASS_WGSL =
  * tilt cannot do. model == prevModel; the render shader derives motion from the
  * bend at time and time-dt. */
 "  let pos = vec3<f32>(bx, by, bz);\n"
+/* GPU CULLING (grass epic #487 indirect / #488): skip faded blades and anything
+ * outside the view cone, then append the survivors to a COMPACTED list via an
+ * atomic on the indirect draw's instanceCount. Blades within nearKeep (G.c.w) of
+ * the camera are always kept so the field never holes out around the player; the
+ * cone (dot vs forward > G.d.w) removes off-axis and behind-camera blades. Only
+ * the survivors are written + drawn. */
+"  if (height < 0.02) { return; }\n"
+"  let toBlade = pos - G.c.xyz;\n"
+"  let dist = length(toBlade);\n"
+"  let cosA = dot(toBlade / max(dist, 0.0001), normalize(G.d.xyz));\n"
+"  if (dist > G.c.w && cosA < G.d.w) { return; }\n"
+"  let slot = atomicAdd(&indirect.instanceCount, 1u);\n"
 "  let m = swayModel(pos, yaw, 0.0, 0.0, scale);\n"
-"  outBuf[i].model = m;\n"
-"  outBuf[i].prevModel = m;\n"
+"  outBuf[slot].model = m;\n"
+"  outBuf[slot].prevModel = m;\n"
 /* Per-blade colour: hue/brightness spread so the field is not one flat green. */
 "  let cvar = hash2u(cellI, 83u);\n"
 "  let cbright = 0.75 + hash2u(cellI, 97u) * 0.5;\n"
-"  outBuf[i].albedoMetallic = vec4<f32>((0.12 + cvar * 0.12) * cbright, (0.30 + cvar * 0.20) * cbright, (0.04 + cvar * 0.07) * cbright, 0.0);\n"
+"  outBuf[slot].albedoMetallic = vec4<f32>((0.12 + cvar * 0.12) * cbright, (0.30 + cvar * 0.20) * cbright, (0.04 + cvar * 0.07) * cbright, 0.0);\n"
 "  let mode = select(0.0, 1.0, G.b.z > 0.5);\n"
 /* Per-blade TIP sharpness (grass epic #487): params.w carries the top width the
  * render shader tapers to. Squared hash biases MOST blades to a sharp point
  * (near 0) while leaving some flat-topped for variety. */
 "  let hTip = hash2u(cellI, 113u);\n"
 "  let tipWidth = hTip * hTip * 0.34;\n"
-"  outBuf[i].params = vec4<f32>(0.95, 1.0, mode, tipWidth);\n"
+"  outBuf[slot].params = vec4<f32>(0.95, 1.0, mode, tipWidth);\n"
 "}\n";
 
 const char* rae_gb_wgsl(void)      { return GB_WGSL; }
