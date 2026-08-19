@@ -117,7 +117,12 @@ set_target_properties(\${APP} PROPERTIES
   XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "$bundle_id"
   XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
   XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
-  XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "13.0")
+  XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "13.0"
+  # Portrait only (iPhone), and a generated launch screen so iOS renders at the
+  # device's native resolution rather than a scaled compatibility canvas.
+  XCODE_ATTRIBUTE_INFOPLIST_KEY_UISupportedInterfaceOrientations "UIInterfaceOrientationPortrait"
+  XCODE_ATTRIBUTE_INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown"
+  XCODE_ATTRIBUTE_INFOPLIST_KEY_UILaunchScreen_Generation "YES")
 EOF
 
 # 4. Configure the Xcode project.
