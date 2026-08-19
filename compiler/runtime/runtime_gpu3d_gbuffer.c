@@ -517,8 +517,8 @@ static const char* GB_GRASS_WGSL =
 "fn mTranslate(t: vec3<f32>) -> mat4x4<f32> {\n"
 "  return mat4x4<f32>(vec4<f32>(1.0,0.0,0.0,0.0), vec4<f32>(0.0,1.0,0.0,0.0), vec4<f32>(0.0,0.0,1.0,0.0), vec4<f32>(t.x,t.y,t.z,1.0));\n"
 "}\n"
-"fn mScale(s: f32) -> mat4x4<f32> {\n"
-"  return mat4x4<f32>(vec4<f32>(s,0.0,0.0,0.0), vec4<f32>(0.0,s,0.0,0.0), vec4<f32>(0.0,0.0,s,0.0), vec4<f32>(0.0,0.0,0.0,1.0));\n"
+"fn mScale3(s: vec3<f32>) -> mat4x4<f32> {\n"
+"  return mat4x4<f32>(vec4<f32>(s.x,0.0,0.0,0.0), vec4<f32>(0.0,s.y,0.0,0.0), vec4<f32>(0.0,0.0,s.z,0.0), vec4<f32>(0.0,0.0,0.0,1.0));\n"
 "}\n"
 "fn mRotX(a: f32) -> mat4x4<f32> {\n"
 "  let c = cos(a); let s = sin(a);\n"
@@ -532,8 +532,8 @@ static const char* GB_GRASS_WGSL =
 "  let c = cos(a); let s = sin(a);\n"
 "  return mat4x4<f32>(vec4<f32>(c,s,0.0,0.0), vec4<f32>(-s,c,0.0,0.0), vec4<f32>(0.0,0.0,1.0,0.0), vec4<f32>(0.0,0.0,0.0,1.0));\n"
 "}\n"
-"fn swayModel(pos: vec3<f32>, yaw: f32, tiltX: f32, tiltY: f32, scale: f32) -> mat4x4<f32> {\n"
-"  return mTranslate(pos) * (mRotZ(yaw) * (mRotX(tiltX) * (mRotY(tiltY) * mScale(scale))));\n"
+"fn swayModel(pos: vec3<f32>, yaw: f32, tiltX: f32, tiltY: f32, scale: vec3<f32>) -> mat4x4<f32> {\n"
+"  return mTranslate(pos) * (mRotZ(yaw) * (mRotX(tiltX) * (mRotY(tiltY) * mScale3(scale))));\n"
 "}\n"
 "@compute @workgroup_size(64)\n"
 "fn main(@builtin(global_invocation_id) gid: vec3<u32>) {\n"
@@ -557,7 +557,15 @@ static const char* GB_GRASS_WGSL =
 "  let bz = terrainHeight(bx, by, G.a.z);\n"
 "  let phase = hp * 6.2831853;\n"
 "  let yaw = hp * 6.2831853;\n"
-"  let scale = 0.22 + hs * 0.18;\n"
+/* Independent per-blade height + width variation (grass epic #487): the blade
+ * geometry is a unit strip (x in [-0.5,0.5], z in [0,1]) generated in the render
+ * shader, so a non-uniform scale here gives each blade its own height and
+ * thickness. */
+"  let hHeight = hash2u(cellI, 61u);\n"
+"  let hWidth = hash2u(cellI, 71u);\n"
+"  let height = 0.30 + hHeight * 0.40;\n"
+"  let width = 0.055 + hWidth * 0.045;\n"
+"  let scale = vec3<f32>(width, width, height);\n"
 "  let time = G.a.w;\n"
 "  let dt = G.b.w;\n"
 "  let gust = 0.16 * sin(time * 1.7 + phase) + 0.06 * sin(time * 3.9 + phase * 1.7 + bx * 0.15);\n"
@@ -566,8 +574,10 @@ static const char* GB_GRASS_WGSL =
 "  let pos = vec3<f32>(bx, by, bz);\n"
 "  outBuf[i].model = swayModel(pos, yaw, gust * 0.6, gust, scale);\n"
 "  outBuf[i].prevModel = swayModel(pos, yaw, prevGust * 0.6, prevGust, scale);\n"
-"  let cvar = phase / 6.2831853;\n"
-"  outBuf[i].albedoMetallic = vec4<f32>(0.13 + cvar * 0.09, 0.33 + cvar * 0.16, 0.05 + cvar * 0.05, 0.0);\n"
+/* Per-blade colour: hue/brightness spread so the field is not one flat green. */
+"  let cvar = hash2u(cellI, 83u);\n"
+"  let cbright = 0.75 + hash2u(cellI, 97u) * 0.5;\n"
+"  outBuf[i].albedoMetallic = vec4<f32>((0.12 + cvar * 0.12) * cbright, (0.30 + cvar * 0.20) * cbright, (0.04 + cvar * 0.07) * cbright, 0.0);\n"
 "  let mode = select(0.0, 1.0, G.b.z > 0.5);\n"
 "  outBuf[i].params = vec4<f32>(0.95, 1.0, mode, 0.0);\n"
 "}\n";
@@ -576,8 +586,92 @@ const char* rae_gb_wgsl(void)      { return GB_WGSL; }
 const char* rae_gb_skin_wgsl(void) { return GB_SKIN_WGSL; }
 const char* rae_gb_entry_vs(void)  { return "vs"; }
 const char* rae_gb_entry_fs(void)  { return "fs"; }
-const char* rae_gb_grass_wgsl(void)  { return GB_GRASS_WGSL; }
-const char* rae_gb_grass_entry(void) { return "main"; }
+/* Grass RENDER shader (grass epic #487): procedural blade geometry generated
+ * in the vertex shader from @builtin(vertex_index) — NO mesh, no vertex buffer.
+ * Each blade is a tapered quad (6 verts, two triangles) in unit space that the
+ * compute-written model matrix scales to the blade's height/width, orients by
+ * yaw, and sways. Writes the SAME G-buffer channels as GB_WGSL (octEncode +
+ * motion), so the deferred lighting treats grass exactly like any other surface.
+ * Reuses the "vs"/"fs" entry-point names. */
+static const char* GB_GRASS_RENDER_WGSL =
+"struct Frame {\n"
+"  viewProj: mat4x4<f32>,\n"
+"  prevViewProj: mat4x4<f32>,\n"
+"  jitter: vec4<f32>,\n"
+"};\n"
+"struct DrawU {\n"
+"  model: mat4x4<f32>,\n"
+"  prevModel: mat4x4<f32>,\n"
+"  albedoMetallic: vec4<f32>,\n"
+"  params: vec4<f32>,\n"
+"};\n"
+"@group(0) @binding(0) var<uniform> F: Frame;\n"
+"@group(0) @binding(1) var<storage, read> draws: array<DrawU>;\n"
+GB_OCT_WGSL
+"struct VsOut {\n"
+"  @builtin(position) pos: vec4<f32>,\n"
+"  @location(0) nrm: vec3<f32>,\n"
+"  @location(1) @interpolate(flat) inst: u32,\n"
+"  @location(2) clipNow: vec4<f32>,\n"
+"  @location(3) clipPrev: vec4<f32>,\n"
+"};\n"
+/* Unit blade: x in [-halfWidth, +halfWidth] (tapering base 0.5 -> tip 0.12),
+ * z in [0,1] up. Two triangles, six vertices. */
+"fn bladeLocal(vi: u32) -> vec3<f32> {\n"
+"  var corner = 0u;\n"
+"  if (vi == 0u) { corner = 0u; }\n"
+"  else if (vi == 1u) { corner = 1u; }\n"
+"  else if (vi == 2u) { corner = 3u; }\n"
+"  else if (vi == 3u) { corner = 0u; }\n"
+"  else if (vi == 4u) { corner = 3u; }\n"
+"  else { corner = 2u; }\n"
+"  let top = (corner == 2u) || (corner == 3u);\n"
+"  let right = (corner == 1u) || (corner == 3u);\n"
+"  let z = select(0.0, 1.0, top);\n"
+"  let w = select(0.5, 0.12, top);\n"
+"  let x = select(-w, w, right);\n"
+"  return vec3<f32>(x, 0.0, z);\n"
+"}\n"
+"@vertex\n"
+"fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut {\n"
+"  let d = draws[ii];\n"
+"  let lp = bladeLocal(vi);\n"
+"  var o: VsOut;\n"
+"  o.pos = F.viewProj * (d.model * vec4<f32>(lp, 1.0));\n"
+/* Grass reads as an up-facing surface (lit like the ground it grows from),\n"
+ * which avoids near-black blades side-on. */
+"  o.nrm = normalize((d.model * vec4<f32>(0.0, 0.0, 1.0, 0.0)).xyz);\n"
+"  o.inst = ii;\n"
+"  o.clipNow = o.pos;\n"
+"  o.clipPrev = F.prevViewProj * (d.prevModel * vec4<f32>(lp, 1.0));\n"
+"  o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);\n"
+"  return o;\n"
+"}\n"
+"struct FsOut {\n"
+"  @location(0) gba: vec4<f32>,\n"
+"  @location(1) gbb: vec4<f32>,\n"
+"  @location(2) gbc: vec4<f32>,\n"
+"};\n"
+"@fragment\n"
+"fn fs(in: VsOut) -> FsOut {\n"
+"  let d = draws[in.inst];\n"
+"  let n = normalize(in.nrm);\n"
+"  let oct = octEncode(n);\n"
+"  let rough = clamp(d.params.x, 0.045, 1.0);\n"
+"  let now = in.clipNow.xy / in.clipNow.w;\n"
+"  let prev = in.clipPrev.xy / in.clipPrev.w;\n"
+"  let motion = (now - prev) * vec2<f32>(0.5, -0.5);\n"
+"  let mEnc = clamp(motion, vec2<f32>(-0.5), vec2<f32>(0.5)) + vec2<f32>(" GB_MOTION_ZERO_WGSL ");\n"
+"  var o: FsOut;\n"
+"  o.gba = vec4<f32>(oct.x, oct.y, 0.5, d.params.z);\n"
+"  o.gbb = vec4<f32>(d.albedoMetallic.rgb, rough);\n"
+"  o.gbc = vec4<f32>(mEnc.x, mEnc.y, clamp(d.albedoMetallic.a, 0.0, 1.0), d.params.y);\n"
+"  return o;\n"
+"}\n";
+
+const char* rae_gb_grass_wgsl(void)        { return GB_GRASS_WGSL; }
+const char* rae_gb_grass_render_wgsl(void) { return GB_GRASS_RENDER_WGSL; }
+const char* rae_gb_grass_entry(void)       { return "main"; }
 
 /* Small opaque-pointer slot store for the Rae grass compute module (#486): it
  * creates its pipeline/buffers/bind-groups in Rae over the bindings but needs a
