@@ -15,7 +15,14 @@ import core
 import gpu2d
 import math
 
+# The anchor is stored as FRACTIONS of the design canvas (left pad / bottom pad /
+# radius as a fraction of the shorter side), so the stick sits in the same
+# lower-left spot regardless of window size, aspect or orientation — resolved to
+# absolute design units each frame.
 type VirtualJoystick {
+  padFracX: Float    # left margin as a fraction of design width
+  padFracY: Float    # bottom margin as a fraction of design height
+  radiusFrac: Float  # base radius as a fraction of min(designW, designH)
   baseX: Float
   baseY: Float
   baseRadius: Float
@@ -27,27 +34,31 @@ type VirtualJoystick {
   valueY: Float   # -1..1, up (forward) positive
 }
 
-func createVirtualJoystick(baseX: copy Float, baseY: copy Float,
-                           baseRadius: copy Float) pub ret VirtualJoystick {
+func createVirtualJoystick(padFracX: copy Float, padFracY: copy Float,
+                           radiusFrac: copy Float) pub ret VirtualJoystick {
   ret VirtualJoystick {
-    baseX: baseX, baseY: baseY, baseRadius: baseRadius,
-    knobRadius: baseRadius * 0.42, active: false,
-    knobX: baseX, knobY: baseY, valueX: 0.0, valueY: 0.0
+    padFracX: padFracX, padFracY: padFracY, radiusFrac: radiusFrac,
+    baseX: 0.0, baseY: 0.0, baseRadius: 0.0, knobRadius: 0.0,
+    active: false, knobX: 0.0, knobY: 0.0, valueX: 0.0, valueY: 0.0
   }
 }
 
-# Reposition (e.g. after an orientation / design-resolution change).
-func placeVirtualJoystick(joy: mod VirtualJoystick, baseX: copy Float,
-                          baseY: copy Float, baseRadius: copy Float) pub {
-  joy.baseX = baseX
-  joy.baseY = baseY
-  joy.baseRadius = baseRadius
-  joy.knobRadius = baseRadius * 0.42
+# Resolve the absolute base position from the CURRENT design canvas (lower-left).
+func resolveVirtualJoystick(joy: mod VirtualJoystick) {
+  let dw: Float = gpu2d.designWidth()
+  let dh: Float = gpu2d.designHeight()
+  var shorter: Float = dw
+  if dh < shorter { shorter = dh }
+  joy.baseRadius = shorter * joy.radiusFrac
+  joy.knobRadius = joy.baseRadius * 0.42
+  joy.baseX = dw * joy.padFracX + joy.baseRadius
+  joy.baseY = dh - dh * joy.padFracY - joy.baseRadius
 }
 
 # Poll the current pointer (gpu2d, design units). Returns true while the stick is
 # capturing the pointer this frame.
 func updateVirtualJoystick(joy: mod VirtualJoystick) pub ret Bool {
+  resolveVirtualJoystick(joy: joy)
   let px: Float = gpu2d.pointerX()
   let py: Float = gpu2d.pointerY()
   if gpu2d.pointerPressed() {
