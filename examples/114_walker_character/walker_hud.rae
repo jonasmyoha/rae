@@ -12,6 +12,8 @@ import ui/render_gpu2d
 import ui/virtual_joystick
 import ui/safe_area
 import app3d/camera_rig
+import renderer_deferred
+open renderer_deferred
 open app3d/settings_dialog
 open app3d/ui_shell
 open ui/ecs
@@ -50,6 +52,21 @@ func updateWalkerTouch(moveStick: mod VirtualJoystick, world: mod UiWorld) pub r
 func walkerHideCameraChrome(world: mod UiWorld) pub {
   setNodeActive(world: world, nodeId: "CameraSmoothMouseButton", value: false)
   setNodeActive(world: world, nodeId: "CameraSmoothKeysButton", value: false)
+}
+
+# Human-readable name for a render-graph pass tag, used as the profiler zone
+# label (PassDesc drops the authored name, so we remap here).
+func walkerPassName(tag: copy Int) pub ret String {
+  if tag is tagShadowD { ret "shadow" }
+  if tag is tagGbuffer { ret "gbuffer" }
+  if tag is tagSsaoD { ret "ssao" }
+  if tag is tagDepthPyramid { ret "depthPyramid" }
+  if tag is tagLighting { ret "lighting" }
+  if tag is tagTaaD { ret "taa" }
+  if tag is tagComposite { ret "composite" }
+  if tag is tagUiOverlayD { ret "uiOverlay" }
+  if tag is tagPresentD { ret "present" }
+  ret "pass"
 }
 
 func applyWalkerPanel(world: mod UiWorld, open: view Bool) pub {

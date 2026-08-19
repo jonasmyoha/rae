@@ -1,0 +1,193 @@
+# Frame profiler — captures nested CPU timing zones + counters and dumps them as
+# a Chrome Trace Event JSON file, viewable at https://ui.perfetto.dev (or
+# chrome://tracing) with a full SQL query engine over the trace. There is NO
+# in-engine viewer: Perfetto is far better than anything we would build, and the
+# format is task/thread aware (each `tid` is its own lane, so concurrent CPU and
+# GPU work show side by side).
+#
+# Usage in an app:
+#   profileMaybeAutoStart()                 # once at startup (reads RAE_PROFILE*)
+#   ... each frame ...
+#   zoneBegin(name: "shadow") ... zoneEnd(name: "shadow")   # nest freely
+#   profileCounter(name: "fps", value: fps)
+#   profileTick()                           # once per frame; auto-stops + writes
+#
+# Environment (zero-UI capture, works on desktop AND iPhone):
+#   RAE_PROFILE=1                start a capture at launch
+#   RAE_PROFILE_SECONDS=20       capture length (default 20s)
+#   RAE_PROFILE_OUT=path.json    output path (default rae_profile.json; on iOS the
+#                                cwd is the app's Documents dir, pulled like rae.log)
+#
+# Overhead when NOT capturing is a single bool test per zone call; all string and
+# file work is deferred to stop time so it never skews the frames it measures.
+import core
+import sys
+import string
+
+# Cap the event buffer so a runaway capture can't exhaust memory. 300k events is
+# ~30s at 60fps with ~160 zones/frame; excess is dropped (flagged in the trace).
+let profMaxEvents: Int = 300000
+
+# Phase codes stored per event; mapped to Chrome Trace `ph` chars at write time.
+let profPhBegin: Int = 0    # "B"
+let profPhEnd: Int = 1      # "E"
+let profPhCounter: Int = 2  # "C"
+
+var gProfCapturing: Bool = false
+var gProfStartNs: Int = 0
+var gProfEndNs: Int = 0
+var gProfOutPath: String = "rae_profile.json"
+var gProfDropped: Bool = false
+
+# Parallel arrays, one slot per event. Kept small until a capture starts, then
+# reallocated to the full cap so no growth (which would allocate mid-frame and
+# skew timings) happens while recording.
+var gProfNames: List(String) = createList(String, cap: 1)
+var gProfPh: List(Int) = createList(Int, cap: 1)
+var gProfTs: List(Int) = createList(Int, cap: 1)
+var gProfTid: List(Int) = createList(Int, cap: 1)
+var gProfVal: List(Int) = createList(Int, cap: 1)
+
+func profileCapturing() pub ret Bool { ret gProfCapturing }
+
+# Begin a capture of `seconds`, writing to `outPath` when it ends. Reallocates the
+# event buffers up front so recording never allocates.
+func profileStartCapture(seconds: view Float, outPath: view String) pub {
+  gProfNames = createList(String, cap: profMaxEvents)
+  gProfPh = createList(Int, cap: profMaxEvents)
+  gProfTs = createList(Int, cap: profMaxEvents)
+  gProfTid = createList(Int, cap: profMaxEvents)
+  gProfVal = createList(Int, cap: profMaxEvents)
+  gProfStartNs = core.nowNs()
+  gProfEndNs = gProfStartNs + rae_float_to_int(f: seconds * 1000000000.0)
+  gProfOutPath = "{outPath}"
+  gProfDropped = false
+  gProfCapturing = true
+}
+
+# Start a capture from the environment if RAE_PROFILE is set. Call once at startup.
+func profileMaybeAutoStart() pub {
+  let flag: String = sys.getEnv(name: "RAE_PROFILE")
+  if flag.length() is 0 { ret }
+  var seconds: Float = 20.0
+  let secStr: String = sys.getEnv(name: "RAE_PROFILE_SECONDS")
+  if secStr.length() > 0 { seconds = secStr.toFloat() }
+  var out: String = "rae_profile.json"
+  let outEnv: String = sys.getEnv(name: "RAE_PROFILE_OUT")
+  if outEnv.length() > 0 { out = "{outEnv}" }
+  profileStartCapture(seconds: seconds, outPath: out)
+}
+
+func profRecord(name: view String, ph: view Int, tsNs: view Int, tid: view Int, value: view Int) {
+  if gProfNames.length >= profMaxEvents {
+    gProfDropped = true
+    ret
+  }
+  gProfNames.add(value: "{name}")
+  gProfPh.add(value: ph)
+  gProfTs.add(value: (tsNs - gProfStartNs) / 1000)   # ns -> microseconds
+  gProfTid.add(value: tid)
+  gProfVal.add(value: value)
+}
+
+# Open a timing zone on the CPU main-loop track (tid 0). Cheap no-op when not
+# capturing. Zones must be strictly nested (LIFO) — every zoneBegin needs a
+# matching zoneEnd, which the Chrome format relies on to build the flame graph.
+func zoneBegin(name: view String) pub {
+  if gProfCapturing is false { ret }
+  profRecord(name: name, ph: profPhBegin, tsNs: core.nowNs(), tid: 0, value: 0)
+}
+
+func zoneEnd(name: view String) pub {
+  if gProfCapturing is false { ret }
+  profRecord(name: name, ph: profPhEnd, tsNs: core.nowNs(), tid: 0, value: 0)
+}
+
+# A single-value time series (fps, draw count, RSS, caster count, …). Perfetto
+# plots these as a track you can overlay against the zones.
+func profileCounter(name: view String, value: view Int) pub {
+  if gProfCapturing is false { ret }
+  profRecord(name: name, ph: profPhCounter, tsNs: core.nowNs(), tid: 0, value: value)
+}
+
+# Call once per frame. Auto-stops and writes the trace when the capture window
+# elapses. Returns true on the frame it wrote the file.
+func profileTick() pub ret Bool {
+  if gProfCapturing is false { ret false }
+  if core.nowNs() < gProfEndNs { ret false }
+  ret profileStop()
+}
+
+# Stop early and write immediately. Returns true if the file was written.
+func profileStop() pub ret Bool {
+  if gProfCapturing is false { ret false }
+  gProfCapturing = false
+  ret profileWrite(path: gProfOutPath)
+}
+
+# One trace event object. Literal JSON braces are `\{` / `\}`; `{expr}` is Rae
+# interpolation. Zone names here are static identifiers, so no JSON escaping of
+# the name is needed.
+func profFragment(name: view String, ph: view Int, ts: view Int, tid: view Int, value: view Int) ret String {
+  if ph is profPhCounter {
+    ret "\{\"name\":\"{name}\",\"ph\":\"C\",\"ts\":{ts},\"pid\":1,\"tid\":{tid},\"args\":\{\"v\":{value}\}\}"
+  }
+  var phc: String = "B"
+  if ph is profPhEnd { phc = "E" }
+  ret "\{\"name\":\"{name}\",\"ph\":\"{phc}\",\"ts\":{ts},\"pid\":1,\"tid\":{tid}\}"
+}
+
+# Join with `sep` in sqrt(n)-sized blocks. A single left-fold join is O(n^2) in
+# total bytes copied (the accumulator is recopied every step); blocking makes it
+# O(n*sqrt(n)) — sub-second for tens of thousands of events instead of tens of
+# seconds. Deferred to stop time, so it never touches a measured frame.
+func joinBlocked(frags: view List(String), blockSize: view Int) ret String {
+  let n: Int = frags.length
+  if n is 0 { ret "" }
+  let blocks: List(String) = createList(String, cap: n / blockSize + 2)
+  var i: Int = 0
+  loop i < n {
+    var stop: Int = i + blockSize
+    if stop > n { stop = n }
+    var block: String = rae_ext_rae_buf_get(V: String, buf: frags.data, index: i)
+    var j: Int = i + 1
+    loop j < stop {
+      block = block.concat(other: ",").concat(
+        other: rae_ext_rae_buf_get(V: String, buf: frags.data, index: j))
+      j = j + 1
+    }
+    blocks.add(value: block)
+    i = stop
+  }
+  ret blocks.join(sep: ",")
+}
+
+func profileWrite(path: view String) ret Bool {
+  let n: Int = gProfNames.length
+  let frags: List(String) = createList(String, cap: n + 2)
+  # Label the CPU track; a second thread_name for tid 1 (GPU) lands here once GPU
+  # timestamp events exist (phase 2).
+  frags.add(value: "\{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":1,\"tid\":0,\"args\":\{\"name\":\"CPU main loop\"\}\}")
+  var i: Int = 0
+  loop i < n {
+    let nm: String = rae_ext_rae_buf_get(V: String, buf: gProfNames.data, index: i)
+    let ph: Int = rae_ext_rae_buf_get(V: Int, buf: gProfPh.data, index: i)
+    let ts: Int = rae_ext_rae_buf_get(V: Int, buf: gProfTs.data, index: i)
+    let tid: Int = rae_ext_rae_buf_get(V: Int, buf: gProfTid.data, index: i)
+    let value: Int = rae_ext_rae_buf_get(V: Int, buf: gProfVal.data, index: i)
+    frags.add(value: profFragment(name: nm, ph: ph, ts: ts, tid: tid, value: value))
+    i = i + 1
+  }
+  let body: String = joinBlocked(frags: frags, blockSize: 256)
+  let json: String = "\{\"traceEvents\":[".concat(other: body).concat(other: "]\}")
+  let ok: Bool = sys.writeFile(path: path, content: json)
+  if ok {
+    log("profile: wrote {n} events to {path}")
+  } else {
+    log("profile: FAILED to write {path}")
+  }
+  if gProfDropped {
+    log("profile: WARNING event cap {profMaxEvents} hit — trace truncated")
+  }
+  ret ok
+}
