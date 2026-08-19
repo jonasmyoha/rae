@@ -607,6 +607,12 @@ static const char* GB_GRASS_WGSL =
 "  let dist = length(toBlade);\n"
 "  let cosA = dot(toBlade / max(dist, 0.0001), normalize(G.d.xyz));\n"
 "  if (dist > G.c.w && cosA < G.d.w) { return; }\n"
+/* Distance LOD/density (grass epic #487): thin blades out with distance so the
+ * field can extend far without far-away overdraw — full density near the player,
+ * dropping to ~30% at the radius. Deterministic per world cell (no flicker). */
+"  let lodT = clamp((dist - 8.0) / max(radius - 8.0, 1.0), 0.0, 1.0);\n"
+"  let keepProb = 1.0 - lodT * 0.7;\n"
+"  if (hash2u(cellI, 151u) > keepProb) { return; }\n"
 "  let slot = atomicAdd(&indirect.instanceCount, 1u);\n"
 "  let m = swayModel(pos, yaw, 0.0, 0.0, scale);\n"
 "  outBuf[slot].model = m;\n"
