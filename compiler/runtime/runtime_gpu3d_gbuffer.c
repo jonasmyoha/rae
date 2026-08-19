@@ -587,7 +587,12 @@ static const char* GB_GRASS_WGSL =
 "  let cbright = 0.75 + hash2u(cellI, 97u) * 0.5;\n"
 "  outBuf[i].albedoMetallic = vec4<f32>((0.12 + cvar * 0.12) * cbright, (0.30 + cvar * 0.20) * cbright, (0.04 + cvar * 0.07) * cbright, 0.0);\n"
 "  let mode = select(0.0, 1.0, G.b.z > 0.5);\n"
-"  outBuf[i].params = vec4<f32>(0.95, 1.0, mode, 0.0);\n"
+/* Per-blade TIP sharpness (grass epic #487): params.w carries the top width the
+ * render shader tapers to. Squared hash biases MOST blades to a sharp point
+ * (near 0) while leaving some flat-topped for variety. */
+"  let hTip = hash2u(cellI, 113u);\n"
+"  let tipWidth = hTip * hTip * 0.34;\n"
+"  outBuf[i].params = vec4<f32>(0.95, 1.0, mode, tipWidth);\n"
 "}\n";
 
 const char* rae_gb_wgsl(void)      { return GB_WGSL; }
@@ -625,7 +630,7 @@ GB_OCT_WGSL
 "};\n"
 /* Unit blade: x in [-halfWidth, +halfWidth] (tapering base 0.5 -> tip 0.12),
  * z in [0,1] up. Two triangles, six vertices. */
-"fn bladeLocal(vi: u32) -> vec3<f32> {\n"
+"fn bladeLocal(vi: u32, tipW: f32) -> vec3<f32> {\n"
 "  var corner = 0u;\n"
 "  if (vi == 0u) { corner = 0u; }\n"
 "  else if (vi == 1u) { corner = 1u; }\n"
@@ -636,14 +641,14 @@ GB_OCT_WGSL
 "  let top = (corner == 2u) || (corner == 3u);\n"
 "  let right = (corner == 1u) || (corner == 3u);\n"
 "  let z = select(0.0, 1.0, top);\n"
-"  let w = select(0.5, 0.12, top);\n"
+"  let w = select(0.5, tipW, top);\n"
 "  let x = select(-w, w, right);\n"
 "  return vec3<f32>(x, 0.0, z);\n"
 "}\n"
 "@vertex\n"
 "fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut {\n"
 "  let d = draws[ii];\n"
-"  let lp = bladeLocal(vi);\n"
+"  let lp = bladeLocal(vi, d.params.w);\n"
 "  var o: VsOut;\n"
 "  o.pos = F.viewProj * (d.model * vec4<f32>(lp, 1.0));\n"
 /* Grass reads as an up-facing surface (lit like the ground it grows from),\n"
