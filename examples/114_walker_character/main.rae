@@ -90,6 +90,7 @@
 #     rae run --target compiled main.rae
 import core
 import math
+import profile
 import gpu2d
 import sdf_text
 import vec3
@@ -544,7 +545,9 @@ func main() ret Int {
 
   let startT: Float64 = gpu2d.nowSeconds()
   var prevT: Float64 = startT
+  profile.profileMaybeAutoStart()
   loop not gpu2d.pollClose() {
+    profile.profileTick()
     resizeUiToWindow(world: uiWorld, res: gpuUi)
 
     let now: Float64 = gpu2d.nowSeconds()
@@ -858,6 +861,7 @@ func main() ret Int {
       var oi: Int = 0
       loop oi < deferredOrderLength(r: renderer) {
         let tag: Int = deferredTagAt(r: renderer, i: oi)
+        profile.zoneBegin(name: walkerPassName(tag: tag))
         if tag is tagShadowD {
           # Cascades fitted to this frame, then every caster rasterised into
           # them (#382). The ground comes from the scene; the character's
@@ -905,19 +909,14 @@ func main() ret Int {
           }
         }
         if tag is tagGbuffer {
-          # The app owns this tag rather than letting renderDeferredPass
-          # handle it, because the character's twelve SKINNED parts have to
-          # land inside the same G-buffer pass as the ground. Same seam the
-          # UI overlay uses: the graph still decides when this runs.
-          # QUALIFIED. gpu3d and gbuffer both export beginPass/endPass, and
-          # this example opens both — an unqualified call silently picks the
-          # forward path's, which ends a pass that was never begun and
-          # leaves the G-buffer unsubmitted. The symptom is a black 3D frame
-          # with a working UI, which looks like a lighting bug.
-          # Grass generation runs on the GPU (grass epic #486): a compute pass in
-          # its own encoder, submitted before the geometry pass, writes every
-          # blade's instance transform from the terrain height + hash + wind — no
-          # CPU per-blade work, no readback. grassDraw (below) reads that buffer.
+          # The app owns this tag (not renderDeferredPass) so the character's
+          # twelve SKINNED parts land in the same G-buffer pass as the ground.
+          # beginPass/endPass MUST be gbuffer-QUALIFIED: gpu3d exports the same
+          # names, and an unqualified call ends a pass that was never begun —
+          # black 3D frame with a working UI, which reads as a lighting bug.
+          # Grass is generated on the GPU (grass epic #486): a compute pass in its
+          # own encoder, before the geometry pass, writes every blade's transform
+          # from terrain height + hash + wind. grassDraw (below) reads that buffer.
           var grassToonGen: Int = 0
           if toonShading { grassToonGen = 1 }
           grassGenerate(playerX: characterController.position.x,
@@ -988,6 +987,7 @@ func main() ret Int {
         if tag is tagPresentD {
           gpu2d.endFrame()
         }
+        profile.zoneEnd(name: walkerPassName(tag: tag))
         oi = oi + 1
       }
       snapshotPrevTransforms(scene: scene)
