@@ -1,0 +1,182 @@
+# GPU timestamp timing (#528) — real per-pass GPU milliseconds, over the WebGPU
+# bindings (no new renderer C surface). The CPU zones in lib/profile.rae bound
+# submit cost and reveal CPU-vs-GPU-bound; this measures what the GPU actually
+# spends inside each pass — the definitive signal for where a frame's time goes
+# and the input a dynamic-resolution controller needs.
+#
+# Model: one timestamp query set with 2 slots per pass. Each pass writes a begin
+# timestamp on its command encoder before its work and an end timestamp after,
+# then resolves that pair into a QueryResolve buffer. Once per frame, collect()
+# copies the resolves into a MapRead buffer, reads them back (blocking — fine, it
+# only runs during a capture and does not perturb the GPU timestamps), converts
+# ticks→microseconds via the queue's timestamp period, and emits one profiler
+# counter per pass (gpu.<name>) plus gpu.total. Perfetto then plots per-pass GPU
+# time across the capture — e.g. shadow GPU ms rising as the device throttles.
+#
+# Timestamps are taken at pass boundaries via the pass descriptor's
+# timestampWrites (NOT wgpuCommandEncoderWriteTimestamp — Metal, hence iPhone,
+# does not support timestamps inside an encoder, only at pass begin/end).
+#
+# Usage per render/compute pass:
+#   let tsIdx = gpuTimingPassBegin(name: "gbuffer")
+#   let rpDesc = { ...attachments..., timestampWrites: gpuTimingWritesPtr() }
+#   ... begin pass, draw, end pass ...
+#   gpuTimingResolve(enc: enc, idx: tsIdx)               # before finish
+# and once per frame: gpuTimingFrameBegin() early, gpuTimingCollect() at the end.
+import core
+import webgpu/context
+import webgpu/webgpu
+import profile
+# Match grass_compute's imports/opens exactly: importing webgpu_enums/_types would
+# bulk-emit every WGPU enum constant as a C static that clashes with webgpu.h.
+# Types are cross-file visible without import; the enum constants used here resolve
+# through `open webgpu/webgpu`.
+open webgpu/context
+open webgpu/webgpu
+
+let gtMaxPasses: Int = 16
+
+var gtEnabled: Bool = false
+var gtInited: Bool = false
+var gtNames: List(String) = createList(String, cap: gtMaxPasses)
+# One reusable timestampWrites struct: passes are encoded sequentially and wgpu
+# copies its contents at beginPass, so a single slot (overwritten per pass) is
+# enough. .data is handed to each pass descriptor's timestampWrites field.
+var gtTsw: List(WGPUPassTimestampWrites) = createList(WGPUPassTimestampWrites, cap: 1)
+var gtCount: Int = 0
+var gtPeriod: Float = 1.0           # nanoseconds per timestamp tick
+var gtDst: List(Int) = createList(Int, cap: gtMaxPasses * 2)
+var gtTotalUs: Int = 0
+
+func gpuTimingEnabled() pub ret Bool { ret gtEnabled }
+
+# WGPU handle store lives in C (index 0=querySet, 1=resolveBuf, 2=readBuf) — see
+# runtime_webgpu.c rae_gt_set/get, same seam grass uses for its handles.
+func gtSet(index: Int, ptr: Ptr) extern("rae_gt_set")
+func gtGet(index: Int) extern("rae_gt_get") ret Ptr
+func gtQset() ret Ptr { ret gtGet(index: 0) }
+func gtResolve() ret Ptr { ret gtGet(index: 1) }
+func gtRead() ret Ptr { ret gtGet(index: 2) }
+
+# Create the query set + resolve/readback buffers. Idempotent; safe no-op when the
+# adapter lacks the timestamp features (gpuTimingEnabled() then stays false and all
+# other calls are cheap no-ops). Must run after the WebGPU device exists.
+func gpuTimingInit() pub ret Bool {
+  if gtInited { ret gtEnabled }
+  gtInited = true
+  if webgpuHaveTimestamp() is 0 {
+    ret false
+  }
+  let qDesc: WGPUQuerySetDescriptor = {
+    type_: WGPUQueryType_Timestamp, count: (gtMaxPasses * 2) as UInt32
+  }
+  gtSet(index: 0, ptr: wgpuDeviceCreateQuerySet(device: webgpuDevice(), descriptor: qDesc))
+  let rDesc: WGPUBufferDescriptor = {
+    usage: WGPUBufferUsage_QueryResolve + WGPUBufferUsage_CopySrc,
+    size: (gtMaxPasses * 16) as UInt64
+  }
+  gtSet(index: 1, ptr: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: rDesc))
+  let mDesc: WGPUBufferDescriptor = {
+    usage: WGPUBufferUsage_CopyDst + WGPUBufferUsage_MapRead,
+    size: (gtMaxPasses * 16) as UInt64
+  }
+  gtSet(index: 2, ptr: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: mDesc))
+  gtPeriod = wgpuQueueGetTimestampPeriod(queue: webgpuQueue())
+  gtTsw.add(value: {
+    querySet: gtQset(), beginningOfPassWriteIndex: 0 as UInt32, endOfPassWriteIndex: 1 as UInt32
+  })
+  var k: Int = 0
+  loop k < gtMaxPasses * 2 {
+    gtDst.add(value: 0)
+    k = k + 1
+  }
+  gtEnabled = true
+  ret true
+}
+
+# Reset the per-frame pass list. Call once at the start of a frame.
+func gpuTimingFrameBegin() pub {
+  if gtEnabled is false { ret }
+  gtCount = 0
+  gtNames.length = 0
+}
+
+# Claim a pass slot and point the shared timestampWrites at its two query indices.
+# Returns the pass index for gpuTimingResolve, or -1 when disabled / budget full.
+# Call immediately before building the pass descriptor.
+func gpuTimingPassBegin(name: view String) pub ret Int {
+  if gtEnabled is false { ret 0 - 1 }
+  let idx: Int = gtCount
+  if idx >= gtMaxPasses { ret 0 - 1 }
+  gtNames.add(value: "{name}")
+  gtTsw.set(index: 0, value: {
+    querySet: gtQset(),
+    beginningOfPassWriteIndex: (idx * 2) as UInt32,
+    endOfPassWriteIndex: (idx * 2 + 1) as UInt32
+  })
+  gtCount = idx + 1
+  ret idx
+}
+
+# The Ptr to hand to a pass descriptor's `timestampWrites` field (null when timing
+# is disabled, which the descriptor treats as "no timestamps").
+func gpuTimingWritesPtr() pub ret Ptr {
+  if gtEnabled is false { ret webgpuNull() }
+  ret gtTsw.data
+}
+
+# Resolve a pass's timestamp pair into the resolve buffer. Recorded on that pass's
+# encoder after the pass ends, before finish. (Resolve is a normal encoder command
+# and needs no inside-encoder feature.)
+func gpuTimingResolve(enc: copy Ptr, idx: copy Int) pub {
+  if gtEnabled is false or idx < 0 { ret }
+  wgpuCommandEncoderResolveQuerySet(commandEncoder: enc, querySet: gtQset(),
+    firstQuery: (idx * 2) as UInt32, queryCount: 2 as UInt32,
+    destination: gtResolve(), destinationOffset: (idx * 16) as UInt64)
+}
+
+# Copy the frame's resolved timestamps to the readback buffer, read them (blocking
+# until GPU-complete), and emit per-pass GPU microseconds as profiler counters.
+func gpuTimingCollect() pub {
+  if gtEnabled is false or gtCount is 0 { ret }
+  let bytes: Int = gtCount * 16
+  # Fresh MapRead staging buffer each frame + release after: this mirrors the
+  # runtime's proven readback (rae_gpu_readback); reusing one buffer across
+  # map/unmap cycles did not read back correctly on Metal.
+  let stDesc: WGPUBufferDescriptor = {
+    usage: WGPUBufferUsage_CopyDst + WGPUBufferUsage_MapRead, size: bytes as UInt64
+  }
+  let staging: Ptr = wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: stDesc)
+  let encDesc: WGPUCommandEncoderDescriptor = { }
+  let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
+  wgpuCommandEncoderCopyBufferToBuffer(commandEncoder: enc, source: gtResolve(),
+    sourceOffset: 0 as UInt64, destination: staging, destinationOffset: 0 as UInt64,
+    size: bytes as UInt64)
+  let cbDesc: WGPUCommandBufferDescriptor = { }
+  let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
+  gtSubmit(cmd: cmd)
+  let ok: Int = webgpuMapRead(buffer: staging, size: bytes as UInt64, dst: gtDst.data)
+  wgpuBufferRelease(buffer: staging)
+  if ok is 0 { ret }
+  gtTotalUs = 0
+  var i: Int = 0
+  loop i < gtCount {
+    let begin: Int = rae_ext_rae_buf_get(V: Int, buf: gtDst.data, index: i * 2)
+    let endTick: Int = rae_ext_rae_buf_get(V: Int, buf: gtDst.data, index: i * 2 + 1)
+    let us: Int = rae_float_to_int(f: (endTick - begin) as Float * gtPeriod / 1000.0)
+    let nm: String = rae_ext_rae_buf_get(V: String, buf: gtNames.data, index: i)
+    profile.profileCounter(name: "gpu.{nm}", value: us)
+    gtTotalUs = gtTotalUs + us
+    i = i + 1
+  }
+  profile.profileCounter(name: "gpu.total", value: gtTotalUs)
+}
+
+# Total GPU microseconds across all passes from the last collect() — the signal a
+# dynamic-resolution controller reads.
+func gpuTimingLastTotalUs() pub ret Int { ret gtTotalUs }
+
+
+# Submit one command buffer to the global queue. Reuses the existing C shim (Rae
+# cannot yet take the address of a single handle for wgpuQueueSubmit).
+func gtSubmit(cmd: Ptr) extern("rae_gb_submit")
