@@ -110,7 +110,15 @@ cmake -S "$gen" -B "$gen/proj" -G Xcode \
   -DCMAKE_OSX_ARCHITECTURES=arm64 \
   -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 >/dev/null
 
+# 5. Metadata for run-ios.sh (bundle id, project, signed .app path).
+cat > "$gen/meta.env" <<EOF
+RAE_IOS_NAME="$name"
+RAE_IOS_BUNDLE_ID="$bundle_id"
+RAE_IOS_PROJ="$gen/proj/RaeApp.xcodeproj"
+RAE_IOS_APP="$gen/proj/Release-iphoneos/RaeApp.app"
+EOF
+
 echo ""
-echo "gen-ios: project at $gen/proj/RaeApp.xcodeproj"
-echo "  open '$gen/proj/RaeApp.xcodeproj'"
-echo "  → Signing & Capabilities: pick your Team (Automatic), select the device, Run."
+echo "gen-ios: project at $gen/proj/RaeApp.xcodeproj (meta: $gen/meta.env)"
+echo "  headless run: RAE_IOS_TEAM=<team> sh tools/ios/run-ios.sh $name"
+echo "  or GUI: open '$gen/proj/RaeApp.xcodeproj'"
