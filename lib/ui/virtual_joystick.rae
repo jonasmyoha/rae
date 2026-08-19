@@ -59,18 +59,39 @@ func resolveVirtualJoystick(joy: mod VirtualJoystick) {
 # capturing the pointer this frame.
 func updateVirtualJoystick(joy: mod VirtualJoystick) pub ret Bool {
   resolveVirtualJoystick(joy: joy)
-  let px: Float = gpu2d.pointerX()
-  let py: Float = gpu2d.pointerY()
-  if gpu2d.pointerPressed() {
-    let ax: Float = px - joy.baseX
-    let ay: Float = py - joy.baseY
-    let zone: Float = joy.baseRadius * 1.7
-    if ax * ax + ay * ay <= zone * zone {
-      joy.active = true
+  let zone: Float = joy.baseRadius * 1.7
+  var px: Float = 0.0
+  var py: Float = 0.0
+  let touches: Int = gpu2d.touchCount()
+  if touches > 0 {
+    # Multitouch: the joystick owns whichever finger is inside its zone (nearest),
+    # so another finger can rotate the camera at the same time.
+    var best: Float = zone * zone
+    var found: Bool = false
+    var index: Int = 0
+    loop index < touches {
+      let tx: Float = gpu2d.touchX(index: index)
+      let ty: Float = gpu2d.touchY(index: index)
+      let d2: Float = (tx - joy.baseX) * (tx - joy.baseX) + (ty - joy.baseY) * (ty - joy.baseY)
+      if d2 <= best {
+        best = d2
+        px = tx
+        py = ty
+        found = true
+      }
+      index = index + 1
     }
-  }
-  if not gpu2d.pointerDown() {
-    joy.active = false
+    joy.active = found
+  } else {
+    # Desktop: the mouse pointer.
+    px = gpu2d.pointerX()
+    py = gpu2d.pointerY()
+    if gpu2d.pointerPressed() {
+      let ax: Float = px - joy.baseX
+      let ay: Float = py - joy.baseY
+      if ax * ax + ay * ay <= zone * zone { joy.active = true }
+    }
+    if not gpu2d.pointerDown() { joy.active = false }
   }
   if joy.active {
     var dx: Float = px - joy.baseX
