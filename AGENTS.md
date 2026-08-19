@@ -155,6 +155,27 @@ Hard-won lesson (full postmortem: `rae/docs/ui-render-loop-performance.md`):
 
 ---
 
+## Renderer C-surface gate (#505 — WebGPU bindings)
+
+The renderer is **Rae over the generated low-level WebGPU bindings**
+(`lib/webgpu/*.rae`, `lib/gpu*.rae`, `lib/gbuffer*.rae`), NOT a growing set of
+renderer-specific C helpers. When you need new renderer functionality (compute
+pipelines, indirect draws, storage buffers, texture arrays, query sets,
+timestamps, a new pass), reach it **through the bindings** — do NOT add a new
+`rae_ext_gbuffer_*` / `rae_ext_gpu3d_*` C function.
+
+- New C is allowed only for genuine platform ABI (a new `rae_gb_*` / `rae_sm_*`
+  / `rae_g2d_*` handle accessor or frame-derived uniform upload) or unavoidable
+  platform glue / WGSL shader source.
+- If you legitimately add such a symbol, add it to
+  `tools/webgpu-c-surface-allowlist.txt` in the same commit with a one-line
+  justification. Adding a line is the reviewable event.
+- The gate `make c-surface-gate` (or `sh tools/webgpu-c-surface-gate.sh`) fails
+  if a renderer `rae_ext_(gbuffer|gpu3d)_*` symbol exists that is not on the
+  allowlist. Full rationale + classification: `docs/webgpu-c-surface-audit.md`.
+
+---
+
 ## SAY: spoken summaries (IMPORTANT)
 
 This project may be used with **voice-driven development**.  
