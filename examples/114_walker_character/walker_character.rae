@@ -10,11 +10,28 @@ import scene3d
 import gpu3d
 import mesh3d
 import app3d/character_controller
+import ui/virtual_joystick
 open scene3d
 open gpu3d
 open mesh3d
 open math3d
 open app3d/character_controller
+open ui/virtual_joystick
+
+# Character movement for the walker demo: analog from the virtual joystick when
+# it is active, else WASD. (Lives here to keep main.rae under the file cap.)
+func updateWalkerMovement(controller: mod ThirdPersonController,
+                          moveStick: view VirtualJoystick, joyActive: view Bool,
+                          allowKeys: view Bool, cameraYaw: view Float,
+                          dt: view Float) ret Bool {
+  if joyActive {
+    ret stepThirdPersonController(controller: controller,
+      inputRight: moveStick.valueX, inputForward: moveStick.valueY,
+      walking: false, cameraYaw: cameraYaw, dt: dt)
+  }
+  ret updateThirdPersonController(controller: controller,
+    allowInput: allowKeys, cameraYaw: cameraYaw, dt: dt)
+}
 
 func uploadMeshData(m: view MeshData) ret MeshHandle {
   ret uploadMesh(verts: m.verts, vertCount: m.vertCount, indices: m.indices)
