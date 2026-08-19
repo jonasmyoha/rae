@@ -99,6 +99,7 @@ import gltf_skin
 import png
 import sys
 import app3d/camera_rig
+import app3d/render_scale
 import app3d/character_controller
 import app3d/ui_shell
 import app3d/control_panel
@@ -545,6 +546,7 @@ func main() ret Int {
 
   let startT: Float64 = gpu2d.nowSeconds()
   var prevT: Float64 = startT
+  var drs: RenderScaleController = createRenderScaleController(targetFps: 60.0)
   profile.profileMaybeAutoStart()
   loop not gpu2d.pollClose() {
     profile.profileTick()
@@ -553,23 +555,16 @@ func main() ret Int {
     let now: Float64 = gpu2d.nowSeconds()
     var dt: Float = (now - prevT) as Float
     prevT = now
+    updateRenderScale(drs: drs, dt: dt)
     # NO CLAMP ON dt. A long frame is integrated in full, however long it was.
     #
-    # This used to cap at 0.1 s so a stall could not teleport anything, and that
-    # cap quietly ate real time: the clock is driven from dt, so every frame
-    # slower than 10 fps advanced it by less than the wall clock moved. At this
-    # app's day length one real second is 0.4 simulated hours, so a single
-    # 250 ms hitch cost the time-of-day readout 3.6 simulated minutes -- and the
-    # forward and deferred twins, which stall differently, drifted apart into
-    # different dates while sitting side by side.
-    #
-    # Obeying dt is the honest rule and the one that survives contact with a
-    # networked simulation, where "how much time passed" is not something a
-    # renderer gets to round down. What a stall may now do is jump: the pose,
-    # the sun and the clock all land where that much elapsed time puts them.
-    # Nothing downstream is unstable under a big step -- the camera easing is
-    # exponential decay, which cannot overshoot however long the frame is
-    # (test 581), and the clock rolls whole days in a loop.
+    # A former 0.1 s cap quietly ate real time: the clock is driven from dt, so
+    # every frame slower than 10 fps advanced it by less than the wall clock, and
+    # the forward and deferred twins drifted into different dates side by side.
+    # Obeying dt is the honest rule and the one that survives a networked
+    # simulation. A stall now JUMPS: pose, sun and clock land where the elapsed
+    # time puts them. Nothing downstream is unstable under a big step -- camera
+    # easing is exponential decay (cannot overshoot, test 581), the clock loops.
     #
     # Negative is still refused: that is a clock going backwards, not a long
     # frame, and no amount of honesty makes it meaningful.
