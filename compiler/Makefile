@@ -92,7 +92,7 @@ DEPS = $(OBJS:.o=.d)
 TARGET = $(BIN_DIR)/rae
 TEST_RUNNER = tools/run_tests.sh
 
-.PHONY: all build test clean smoke install uninstall
+.PHONY: all build test clean smoke install uninstall c-surface-gate
 
 all: build
 
@@ -157,6 +157,11 @@ test: build
 smoke: build
 	@chmod +x tools/smoke.sh
 	@./tools/smoke.sh
+
+# WebGPU C-surface gate (#505): reject new renderer-specific C helpers.
+# See docs/webgpu-c-surface-audit.md.
+c-surface-gate:
+	@sh ../tools/webgpu-c-surface-gate.sh
 
 clean:
 	rm -rf $(BUILD_DIR) $(BIN_DIR) ../build
