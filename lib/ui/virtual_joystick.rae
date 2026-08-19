@@ -56,11 +56,18 @@ func resolveVirtualJoystick(joy: mod VirtualJoystick) {
   joy.baseY = dh - gpu2d.safeBottom() - dh * joy.padFracY - joy.baseRadius
 }
 
+# Radius of the activation zone (design units). A finger going down inside this
+# radius of the base belongs to the stick; the camera rig excludes the SAME zone
+# so the two are exactly complementary. Valid after resolveVirtualJoystick.
+func virtualJoystickZoneRadius(joy: view VirtualJoystick) pub ret Float {
+  ret joy.baseRadius * 1.7
+}
+
 # Poll the current pointer (gpu2d, design units). Returns true while the stick is
 # capturing the pointer this frame.
 func updateVirtualJoystick(joy: mod VirtualJoystick) pub ret Bool {
   resolveVirtualJoystick(joy: joy)
-  let zone: Float = joy.baseRadius * 1.7
+  let zone: Float = virtualJoystickZoneRadius(joy: joy)
   var px: Float = 0.0
   var py: Float = 0.0
   let touches: Int = gpu2d.touchCount()
@@ -74,12 +81,18 @@ func updateVirtualJoystick(joy: mod VirtualJoystick) pub ret Bool {
       let id: Int = gpu2d.touchId(index: index)
       let tx: Float = gpu2d.touchX(index: index)
       let ty: Float = gpu2d.touchY(index: index)
+      let pressed: Bool = gpu2d.touchPressed(index: index)
+      # Reused-id release: a fresh press on the id we hold means SDL recycled the
+      # id after our finger lifted (see camera_rig). A hold is never a fresh press
+      # — drop it so the grab below re-decides by zone, else a reused id keeps the
+      # stick and the camera fighting over one finger.
+      if joy.grabbedId >= 0 and id is joy.grabbedId and pressed { joy.grabbedId = 0 - 1 }
       if joy.grabbedId >= 0 and id is joy.grabbedId {
         px = tx
         py = ty
         found = true
       }
-      if joy.grabbedId < 0 and gpu2d.touchPressed(index: index) {
+      if joy.grabbedId < 0 and pressed {
         let d2: Float = (tx - joy.baseX) * (tx - joy.baseX) + (ty - joy.baseY) * (ty - joy.baseY)
         if d2 <= zone * zone {
           joy.grabbedId = id
