@@ -111,6 +111,7 @@ import gbuffer_instanced
 open gbuffer_instanced
 import grass_compute
 open grass_compute
+import grass_config
 import shadow3d
 import app3d/playback
 import app3d/slider
@@ -914,15 +915,15 @@ func main() ret Int {
           # from terrain height + hash + wind. grassDraw (below) reads that buffer.
           var grassToonGen: Int = 0
           if toonShading { grassToonGen = 1 }
-          let groundCol: Vec3 = walkerGroundColor()
+          let grassView: GrassViewSettings = grass_config.grassThirdPersonSettings(groundColor: walkerGroundColor())
           grassGenerate(playerX: characterController.position.x,
                         playerY: characterController.position.y,
-                        groundZ: groundZ, time: t, dt: dt, extent: 40.0, toon: grassToonGen,
+                        groundZ: groundZ, time: t, dt: dt, toon: grassToonGen,
                         camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z,
                         fwdX: camera.target.x - camera.position.x,
                         fwdY: camera.target.y - camera.position.y,
                         fwdZ: camera.target.z - camera.position.z,
-                        groundR: groundCol.x, groundG: groundCol.y, groundB: groundCol.z)
+                        settings: grassView)
           grassDiagTick()
           gbuffer.beginPass(camera: camera, light: light, aspect: aspect)
           gbuffer.renderScene(scene: scene)
