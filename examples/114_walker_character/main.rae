@@ -911,7 +911,7 @@ func main() ret Int {
           if toonShading { grassToonGen = 1 }
           grassGenerate(playerX: characterController.position.x,
                         playerY: characterController.position.y,
-                        groundZ: groundZ, time: t, dt: dt, extent: 16.0, toon: grassToonGen)
+                        groundZ: groundZ, time: t, dt: dt, extent: 13.0, toon: grassToonGen)
           gbuffer.beginPass(camera: camera, light: light, aspect: aspect)
           gbuffer.renderScene(scene: scene)
           # Every terrain prop (trees, rocks, bushes, flowers, grass) drawn
@@ -956,7 +956,7 @@ func main() ret Int {
           # G-buffer pass as the ground and character. Sway rides frames already
           # being drawn — while `playing` the clock keeps rendering — so an idle
           # app freezes it and parks at ~0% CPU.
-          grassDraw(meshId: grass.meshId)
+          grassDraw()
           gbuffer.endPass()
         }
         if tag is tagSsaoD or tag is tagDepthPyramid or tag is tagLighting
