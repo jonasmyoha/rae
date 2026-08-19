@@ -13,18 +13,25 @@
 #   var drs = createRenderScaleController(targetFps: 60.0)   # once
 #   updateRenderScale(drs: drs, dt: dt)                       # each frame
 import core
+import gpu2d
 
 # Push the render scale to the deferred renderer (#530). C clamps to [0.25, 1.0].
 func setRenderScale(s: Float64) extern("rae_gb_set_render_scale")
 
+# A two-rung quality ladder against sustained GPU load: first lower the render
+# scale (1.0 -> 0.5), and only when that bottoms out and frames still miss, drop
+# the frame-rate cap to 30 (halving the GPU duty cycle so the SoC cools — a clean
+# divisor is smoother than a jittery throttled ~20 too). Recovery restores the
+# rate first, then the resolution.
 type RenderScaleController {
   scale: Float
   minScale: Float
   step: Float
-  overBudgetSec: Float   # a frame slower than this counts as "missed"
-  overFrames: Int        # consecutive missed frames
-  goodFrames: Int        # consecutive good frames
-  cooldown: Int          # frames to wait after a change (anti-oscillation)
+  capFps: Float          # 60 normally; 30 = bottom rung frame cap
+  overBudgetSec: Float    # a frame slower than this counts as "missed"
+  overFrames: Int         # consecutive missed frames
+  goodFrames: Int         # consecutive good frames
+  cooldown: Int           # frames to wait after a change (anti-oscillation)
 }
 
 func createRenderScaleController(targetFps: copy Float) pub ret RenderScaleController {
@@ -33,14 +40,14 @@ func createRenderScaleController(targetFps: copy Float) pub ret RenderScaleContr
   # Missed = 25% over the target period (e.g. >20.8ms for 60fps) — clearly not
   # holding the rate, not just jitter.
   ret RenderScaleController {
-    scale: 1.0, minScale: 0.5, step: 0.1,
+    scale: 1.0, minScale: 0.5, step: 0.1, capFps: 60.0,
     overBudgetSec: 1.25 / fps,
     overFrames: 0, goodFrames: 0, cooldown: 0
   }
 }
 
-# Feed one frame's dt (seconds). Adjusts the render scale in place and pushes it
-# to the renderer. Drops fast (4 missed frames), raises slowly (after ~3s good).
+# Feed one frame's dt (seconds). Walks the ladder in place: drop fast after 4
+# missed frames, restore one rung after ~3s good, 30-frame cooldown between moves.
 func updateRenderScale(drs: mod RenderScaleController, dt: copy Float) pub {
   if dt > drs.overBudgetSec {
     drs.overFrames = drs.overFrames + 1
@@ -53,17 +60,41 @@ func updateRenderScale(drs: mod RenderScaleController, dt: copy Float) pub {
     drs.cooldown = drs.cooldown - 1
     ret
   }
-  if drs.overFrames >= 4 and drs.scale > drs.minScale {
-    drs.scale = drs.scale - drs.step
-    if drs.scale < drs.minScale { drs.scale = drs.minScale }
-    setRenderScale(s: drs.scale as Float64)
-    drs.cooldown = 30
-    drs.overFrames = 0
-  } else if drs.goodFrames >= 180 and drs.scale < 1.0 {
-    drs.scale = drs.scale + drs.step
-    if drs.scale > 1.0 { drs.scale = 1.0 }
-    setRenderScale(s: drs.scale as Float64)
-    drs.cooldown = 30
-    drs.goodFrames = 0
+  if drs.overFrames >= 4 {
+    if drs.scale > drs.minScale {
+      drs.scale = drs.scale - drs.step
+      if drs.scale < drs.minScale { drs.scale = drs.minScale }
+      setRenderScale(s: drs.scale as Float64)
+      drs.cooldown = 30
+      drs.overFrames = 0
+    } else if drs.capFps > 30.0 {
+      drs.capFps = 30.0            # bottom rung: cap to 30
+      drs.cooldown = 30
+      drs.overFrames = 0
+    }
+  } else if drs.goodFrames >= 180 {
+    if drs.capFps < 60.0 {
+      drs.capFps = 60.0            # restore the rate before the resolution
+      drs.cooldown = 30
+      drs.goodFrames = 0
+    } else if drs.scale < 1.0 {
+      drs.scale = drs.scale + drs.step
+      if drs.scale > 1.0 { drs.scale = 1.0 }
+      setRenderScale(s: drs.scale as Float64)
+      drs.cooldown = 30
+      drs.goodFrames = 0
+    }
+  }
+}
+
+# Pad the current frame to the cap period by sleeping any slack (only meaningful
+# at the 30fps rung; a no-op at 60 since vsync already paces there). Call at the
+# end of the render branch with the frame's start time.
+func capFrameSleep(drs: view RenderScaleController, frameStartSec: copy Float64) pub {
+  if drs.capFps >= 60.0 { ret }
+  let period: Float = 1.0 / drs.capFps
+  let elapsed: Float = (gpu2d.nowSeconds() - frameStartSec) as Float
+  if elapsed < period {
+    sleep(ms: rae_float_to_int(f: (period - elapsed) * 1000.0))
   }
 }
