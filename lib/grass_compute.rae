@@ -20,6 +20,7 @@ open webgpu/webgpu
 import webgpu/context
 open webgpu/context
 import profile
+import grass_config
 
 # C shader-source accessors (WGSL text + entry point names).
 func grassWgsl() extern("rae_gb_grass_wgsl") ret Ptr
@@ -52,7 +53,7 @@ func grassGet(index: Int) extern("rae_gb_grass_get") ret Ptr
 # culling keeps only the visible subset (indirect draw).
 const grassGpuBladeCount: Int = 65536
 const grassRecordBytes: Int = 160    # 40 floats per DrawU
-const grassUniformBytes: Int = 80    # five vec4 (GrassU: player/time, count/extent, cam, forward, groundColour)
+const grassUniformBytes: Int = 112   # seven vec4 (GrassU: player/time, count/extent, cam, forward, ground, wind, blade)
 const grassIndirectBytes: Int = 16   # 4 u32 DrawIndirect args (vertexCount, instanceCount, ...)
 # Vertices per procedural blade: a tapered quad = two triangles (see bladeLocal
 # in the render WGSL). No mesh, no vertex/index buffer.
@@ -203,20 +204,20 @@ const grassConeCos: Float = 0.36
 # the view cone from the camera) is appended to a compacted list and bumps the
 # indirect draw's instanceCount. No readback, no blocking. Call BEFORE the pass.
 func grassGenerate(playerX: copy Float, playerY: copy Float, groundZ: copy Float,
-                   time: copy Float, dt: copy Float, extent: copy Float, toon: copy Int,
+                   time: copy Float, dt: copy Float, toon: copy Int,
                    camX: copy Float, camY: copy Float, camZ: copy Float,
                    fwdX: copy Float, fwdY: copy Float, fwdZ: copy Float,
-                   groundR: copy Float, groundG: copy Float, groundB: copy Float) {
+                   settings: view GrassViewSettings) {
   ensureGrassGpu()
   var toonF: Float = 0.0
   if toon is 1 { toonF = 1.0 }
-  loop gGrassUni.length < 20 { gGrassUni.add(value: 0.0) }
+  loop gGrassUni.length < 28 { gGrassUni.add(value: 0.0) }
   gGrassUni.set(index: 0, value: playerX)
   gGrassUni.set(index: 1, value: playerY)
   gGrassUni.set(index: 2, value: groundZ)
   gGrassUni.set(index: 3, value: time)
   gGrassUni.set(index: 4, value: grassGpuBladeCount.toFloat())
-  gGrassUni.set(index: 5, value: extent)
+  gGrassUni.set(index: 5, value: settings.extent)
   gGrassUni.set(index: 6, value: toonF)
   gGrassUni.set(index: 7, value: dt)
   gGrassUni.set(index: 8, value: camX)
@@ -227,9 +228,17 @@ func grassGenerate(playerX: copy Float, playerY: copy Float, groundZ: copy Float
   gGrassUni.set(index: 13, value: fwdY)
   gGrassUni.set(index: 14, value: fwdZ)
   gGrassUni.set(index: 15, value: grassConeCos)
-  gGrassUni.set(index: 16, value: groundR)   # gradient bottom = terrain ground colour
-  gGrassUni.set(index: 17, value: groundG)
-  gGrassUni.set(index: 18, value: groundB)
+  gGrassUni.set(index: 16, value: settings.groundColor.x)   # gradient bottom = ground
+  gGrassUni.set(index: 17, value: settings.groundColor.y)
+  gGrassUni.set(index: 18, value: settings.groundColor.z)
+  gGrassUni.set(index: 20, value: settings.windDirX)        # f: wind
+  gGrassUni.set(index: 21, value: settings.windDirY)
+  gGrassUni.set(index: 22, value: settings.windStrength)
+  gGrassUni.set(index: 23, value: settings.windGust)
+  gGrassUni.set(index: 24, value: settings.bladeHeightScale) # g: blade + gradient
+  gGrassUni.set(index: 25, value: settings.bladeWidthScale)
+  gGrassUni.set(index: 26, value: settings.densityScale)
+  gGrassUni.set(index: 27, value: settings.tipLighten)
   wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: grassGet(index: 2), bufferOffset: 0 as UInt64,
     data: gGrassUni.data, size: grassUniformBytes as UInt64)
 

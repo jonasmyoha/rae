@@ -475,6 +475,8 @@ static const char* GB_GRASS_WGSL =
 "  c: vec4<f32>,\n"   /* camX, camY, camZ, nearKeep */
 "  d: vec4<f32>,\n"   /* forwardX, forwardY, forwardZ, coneCos */
 "  e: vec4<f32>,\n"   /* groundColour.rgb (gradient bottom, = terrain ground) */
+"  f: vec4<f32>,\n"   /* windDirX, windDirY, windStrength, windGust (#492) */
+"  g: vec4<f32>,\n"   /* bladeHeightScale, bladeWidthScale, densityScale, tipLighten */
 "};\n"
 "struct Indirect {\n"
 "  vertexCount: u32,\n"
@@ -580,8 +582,8 @@ static const char* GB_GRASS_WGSL =
  * thickness. */
 "  let hHeight = hash2u(cellI, 61u);\n"
 "  let hWidth = hash2u(cellI, 71u);\n"
-"  let baseHeight = 0.30 + hHeight * 0.40;\n"
-"  let width = 0.055 + hWidth * 0.045;\n"
+"  let baseHeight = (0.30 + hHeight * 0.40) * G.g.x;\n"   /* view-profile height scale */
+"  let width = (0.055 + hWidth * 0.045) * G.g.y;\n"        /* view-profile width scale */
 /* Smooth circular edge fade (grass epic #487 — no hard field boundary or rings):
  * blades shrink to nothing toward the edge of the radius, which also hides the
  * square grid's far corners. A zero-height blade is invisible (real culling that
@@ -604,6 +606,8 @@ static const char* GB_GRASS_WGSL =
  * cone (dot vs forward > G.d.w) removes off-axis and behind-camera blades. Only
  * the survivors are written + drawn. */
 "  if (height < 0.02) { return; }\n"
+/* View-profile density (#492): keep only densityScale fraction of candidates. */
+"  if (G.g.z < 0.999 && hash2u(cellI, 131u) > G.g.z) { return; }\n"
 "  let toBlade = pos - G.c.xyz;\n"
 "  let dist = length(toBlade);\n"
 "  let cosA = dot(toBlade / max(dist, 0.0001), normalize(G.d.xyz));\n"
@@ -657,6 +661,11 @@ static const char* GB_GRASS_RENDER_WGSL =
 "struct GrassU {\n"
 "  a: vec4<f32>,\n"   /* playerX, playerY, groundZ, time */
 "  b: vec4<f32>,\n"   /* count, extent, toon, dt */
+"  c: vec4<f32>,\n"   /* cam (unused here) */
+"  d: vec4<f32>,\n"   /* forward (unused here) */
+"  e: vec4<f32>,\n"   /* groundColour (unused here; blade carries it) */
+"  f: vec4<f32>,\n"   /* windDirX, windDirY, windStrength, windGust (#492) */
+"  g: vec4<f32>,\n"   /* bladeHeightScale, bladeWidthScale, densityScale, tipLighten */
 "};\n"
 "@group(0) @binding(0) var<uniform> F: Frame;\n"
 "@group(0) @binding(1) var<storage, read> draws: array<DrawU>;\n"
@@ -673,9 +682,9 @@ GB_OCT_WGSL
 /* Coherent WORLD-SPACE wind (grass epic #487): a travelling wave keyed on the
  * blade's base world position, so neighbours bend together into gusts rather
  * than each blade twitching on its own phase. Returns a signed lean magnitude. */
-"fn windBend(base: vec2<f32>, time: f32) -> f32 {\n"
+"fn windBend(base: vec2<f32>, time: f32, strength: f32, gust: f32) -> f32 {\n"
 "  let phase = base.x * 0.5 + base.y * 0.35;\n"
-"  return 0.22 * sin(time * 1.5 + phase) + 0.06 * sin(time * 3.3 + phase * 1.9) + 0.10;\n"
+"  return strength * (0.22 * sin(time * 1.5 + phase) + 0.06 * gust * sin(time * 3.3 + phase * 1.9) + 0.10);\n"
 "}\n"
 /* Unit blade: x in [-halfWidth, +halfWidth] (tapering base 0.5 -> tip),
  * z in [0,1] up. Two triangles, six vertices. */
@@ -705,10 +714,10 @@ GB_OCT_WGSL
  * model transform, horizontally, scaled by z*z so the base stays planted and the
  * tip leans most — a progressive curve, not a rigid tilt. */
 "  let base = vec2<f32>(d.model[3].x, d.model[3].y);\n"
-"  let windDir = normalize(vec2<f32>(0.82, 0.57));\n"
+"  let windDir = normalize(GW.f.xy);\n"
 "  let zc = lp.z * lp.z;\n"
 "  let wNow = d.model * vec4<f32>(lp, 1.0);\n"
-"  let bendN = windBend(base, GW.a.w);\n"
+"  let bendN = windBend(base, GW.a.w, GW.f.z, GW.f.w);\n"
 "  let pNow = vec3<f32>(wNow.x + windDir.x * bendN * zc, wNow.y + windDir.y * bendN * zc, wNow.z);\n"
 "  o.pos = F.viewProj * vec4<f32>(pNow, 1.0);\n"
 /* Grass reads as an up-facing surface (lit like the ground it grows from),\n"
@@ -717,7 +726,7 @@ GB_OCT_WGSL
 "  o.inst = ii;\n"
 "  o.clipNow = o.pos;\n"
 "  let wPrev = d.prevModel * vec4<f32>(lp, 1.0);\n"
-"  let bendP = windBend(base, GW.a.w - GW.b.w);\n"
+"  let bendP = windBend(base, GW.a.w - GW.b.w, GW.f.z, GW.f.w);\n"
 "  let pPrev = vec3<f32>(wPrev.x + windDir.x * bendP * zc, wPrev.y + windDir.y * bendP * zc, wPrev.z);\n"
 "  o.clipPrev = F.prevViewProj * vec4<f32>(pPrev, 1.0);\n"
 "  o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);\n"
@@ -743,7 +752,7 @@ GB_OCT_WGSL
         compute wrote into albedoMetallic (so grass roots match the ground and
         track it automatically), tip 1.8x lighter, giving natural depth. */
 "  let botCol = d.albedoMetallic.rgb;\n"
-"  let topCol = botCol * 1.8;\n"
+"  let topCol = botCol * GW.g.w;\n"   /* tipLighten from the view profile (#492) */
 "  let albedo = mix(botCol, topCol, clamp(in.height, 0.0, 1.0));\n"
 "  o.gba = vec4<f32>(oct.x, oct.y, 0.5, d.params.z);\n"
 "  o.gbb = vec4<f32>(albedo, rough);\n"
