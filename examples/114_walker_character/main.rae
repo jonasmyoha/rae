@@ -926,10 +926,10 @@ func main() ret Int {
                         settings: grassView)
           grassDiagTick()
           gbuffer.beginPass(camera: camera, light: light, aspect: aspect)
+          drawTerrainGround(terrain: terrain, scene: scene)   # biome-splat ground (#533)
           gbuffer.renderScene(scene: scene)
-          # Every terrain prop (trees, rocks, bushes, flowers, grass) drawn
-          # instanced — one DrawIndexed per mesh instead of ~8 per cell (grass
-          # epic #485). Same pass, same transforms — identical picture.
+          # Every terrain prop (trees, rocks, bushes, flowers) drawn instanced —
+          # one DrawIndexed per mesh instead of ~8 per cell (grass epic #485).
           drawTerrainProps(terrain: terrain, scene: scene)
           uploadPalette(rows: palette, jointCount: jointCount(sk: sk))
           var p: Int = 0
