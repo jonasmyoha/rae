@@ -128,3 +128,41 @@ physics gating was an outright regression that we reverted.
   cost is constant-factor, not algorithmic or scheduling — `-O` can't fix
   O(n²) or a starved wake loop. Profile first (`Run compiled profiler` in
   devtools builds `-O2 -g` and samples to `/tmp/rae-profile.txt`).
+
+## Never render while the window is hidden / occluded (memory leak)
+
+A busy render loop that keeps drawing while its window is hidden, minimized,
+or fully occluded (app switched away, another window covering it) is not just
+wasted power — on macOS it **leaks GPU memory**. Once the window is
+backgrounded the `CAMetalLayer` stops recycling its drawable pool and hands out
+a fresh IOSurface-backed texture every frame (wgpu still reports
+`SuccessOptimal`, and submissions retire normally, so nothing looks wrong), and
+the deferred pipeline's per-frame driver allocations pile up. Measured on
+`114_walker_character`: **~170 MB → 1.4 GB across a handful of app switches**,
+`IOAccelerator (graphics)` allocations 614 → 35 076 after a single hide/show.
+Prior art: bevy #5856, wgpu-native #614, ImGui's Metal backend skips
+`nextDrawable` when occluded.
+
+The rule: **do not render or present while `gpu2d.windowVisible()` is false.**
+Two layers enforce it so it is not a per-app footgun:
+
+- **Engine hard backstop (automatic):** `rae_g2d_present_and_cleanup` refuses to
+  acquire/present a drawable while the window is dark. This makes the severe,
+  unbounded *drawable* leak impossible to reintroduce from app code, whatever
+  the loop does.
+- **Shared render decision (use this):** funnel the per-frame render/park choice
+  through `gpu2d.shouldRenderFrame(appNeedsRender: <your signal>)`. It returns
+  false while the window is dark, so the whole scene render is skipped and the
+  loop parks in `waitEvents` — which is what avoids the wasted GPU work. The app
+  still owns its loop and passes its own "something changed" signal (animation,
+  input, resize, TAA still converging, …); the visibility rule is folded in for
+  free. Pattern:
+
+      if gpu2d.shouldRenderFrame(appNeedsRender: needsRender) is false {
+        gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(animating: false, ...))
+      } else {
+        ... render + present ...
+      }
+
+New windowed apps (2D or 3D) should use `shouldRenderFrame` rather than
+re-deriving the visibility check.

@@ -255,6 +255,20 @@ static void rae_g2d_configure(int pw, int ph) {
     }
 }
 
+/* Is the window in a state where rendering + presenting is worthwhile? False
+ * when hidden / minimized / occluded (app switched away, another window fully
+ * covers it, or the dock icon is all that is left). Rendering while dark is pure
+ * waste and, on macOS specifically, leaks: the CAMetalLayer stops recycling its
+ * drawable pool while backgrounded (so every acquired drawable is a fresh
+ * IOSurface), and the deferred pipeline's per-frame GPU allocations pile up in
+ * the driver. Apps should skip their render + park in waitEvents when this is
+ * false; the present path also refuses to acquire a drawable while dark. */
+int rae_g2d_window_visible(void) {
+    if (!g_sdl_win) return 1;
+    SDL_WindowFlags flags = SDL_GetWindowFlags(g_sdl_win);
+    return (flags & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED | SDL_WINDOW_OCCLUDED)) ? 0 : 1;
+}
+
 /* ---- window MOVED, as an event flag ----------------------------------
  *
  * The mirror of the resize flag above, and that is all the C here does. An
