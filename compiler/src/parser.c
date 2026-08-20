@@ -2045,21 +2045,31 @@ static AstStmt* parse_binding_statement(Parser* parser, const Token* kw_token, b
 }
 static AstStmt* parse_return_statement(Parser* parser, const Token* ret_token) {
   AstStmt* stmt = new_stmt(parser, AST_STMT_RET, ret_token);
-  if (parser_check(parser, TOK_RBRACE) || parser_check(parser, TOK_KW_CASE) || parser_check(parser, TOK_EOF)) {
+  // Bare `ret` (no value). A return value always sits on the `ret`'s own line
+  // — even a multi-line value like `ret Color { … }` STARTS on it — so a token
+  // on a LATER line means this is value-less. Without this, `ret` followed by
+  // a statement/declaration on the next line (e.g. `let x = 5`) fed a keyword
+  // into parse_return_values, which produced an arg with a NULL value and then
+  // segfaulted below (#223).
+  if (parser_check(parser, TOK_RBRACE) || parser_check(parser, TOK_KW_CASE)
+      || parser_check(parser, TOK_EOF)
+      || parser_peek(parser)->line != ret_token->line) {
     stmt->as.ret_stmt.values = NULL;
     return stmt;
   }
   stmt->as.ret_stmt.values = parse_return_values(parser);
-  
+
   // Rule 3.1 Extension: Enforce type visibility for top-level structural literals in return
   AstReturnArg* arg = stmt->as.ret_stmt.values;
   while (arg) {
-      if (arg->value->kind == AST_EXPR_OBJECT && arg->value->as.object_literal.type == NULL) {
+      // arg->value is NULL when the return expression failed to parse; the
+      // error was already reported, so just skip it rather than deref it.
+      if (arg->value && arg->value->kind == AST_EXPR_OBJECT && arg->value->as.object_literal.type == NULL) {
           parser_error(parser, ret_token, "structural literals in 'ret' must be explicitly typed (e.g. 'ret Color { ... }').");
       }
       arg = arg->next;
   }
-  
+
   return stmt;
 }
 
