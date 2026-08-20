@@ -2788,7 +2788,17 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
             base = type_get_task(ctx->type_registry, arg);
         } else if (symbols) {
             Symbol* sym = symbol_table_lookup(symbols, name);
-            if (sym && sym->type) {
+            if (sym && sym->decl && sym->decl->kind == AST_DECL_ENUM) {
+                /* Enums are int-backed value types with no payloads. Resolve the
+                 * enum name to Int so both cast directions (`intVal as Enum` and
+                 * `enumVal as Int`) type-check through the numeric-cast path,
+                 * enum-typed values interoperate with Int params/storage, and
+                 * arithmetic on ordinals is legal. This does NOT weaken
+                 * `match` exhaustiveness: that keys off the case patterns
+                 * (`Enum.member`), not the subject's resolved type.
+                 * (docs/match-and-sum-types.md) */
+                base = type_get_int(ctx->type_registry);
+            } else if (sym && sym->type) {
                 if (type_ref->generic_args && sym->decl && sym->decl->kind == AST_DECL_TYPE) {
                     /* Value generic arguments are a builtin-only capability for
                      * now (Array is the sole consumer). User generics would need
