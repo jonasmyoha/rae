@@ -382,6 +382,23 @@ func drawTreeProp(prop: mod PropInstancer, entities: view List(Int), scene: view
 # instead of a per-cell MeshRenderer draw. The prop MeshRenderers are hidden at
 # setup so renderScene skips them; this reproduces the same picture with far
 # fewer draw calls. Call inside the G-buffer geometry pass, after renderScene.
+# Draw the ground tiles with the biome-splat pipeline (#533). Tiles are hidden
+# from renderScene (visible=false at creation); here each is drawn per-vertex
+# biome-classified, so the ground reads as grass/sand/mud/rock/water.
+func drawTerrainGround(terrain: view InfiniteTerrain, scene: view Scene3d) pub {
+  var poolIndex: Int = 0
+  loop poolIndex < terrainCellCount {
+    let meshId: Int = terrainEntityAt(entities: terrain.tileMeshIds, index: poolIndex)
+    let entity: Int = terrainEntityAt(entities: terrain.tileEntities, index: poolIndex)
+    if meshId >= 1 and entity >= 0 {
+      let t: Transform3d = sceneTransformAt(values: scene.transforms, index: entity)
+      let pt: Transform3d = sceneTransformAt(values: scene.prevTransforms, index: entity)
+      gbuffer.drawTerrainMesh(mesh: meshId, transform: t, prevTransform: pt, roughness: 0.96)
+    }
+    poolIndex = poolIndex + 1
+  }
+}
+
 func drawTerrainProps(terrain: mod InfiniteTerrain, scene: view Scene3d) {
   drawPropPool(prop: terrain.rockProp, entities: terrain.rockEntities, scene: scene)
   drawPropPool(prop: terrain.bushProp, entities: terrain.bushEntities, scene: scene)
@@ -540,9 +557,12 @@ func createInfiniteTerrain(scene: mod Scene3d, assets: view String,
     let tileMesh: MeshHandle = uploadMeshDataForTerrain(mesh: tilePlane)
     tileMeshes.add(value: tileMesh.id)
     # Tiles keep their MeshRenderer (unique per-cell heightfield mesh, not an
-    # instancing candidate); every other prop is hidden and drawn instanced.
-    tiles.add(value: addMeshInstance(scene: scene, mesh: tileMesh,
-      material: groundMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
+    # instancing candidate) but are HIDDEN from renderScene and drawn by
+    # drawTerrainGround with the biome-splat pipeline instead (#533).
+    let tileEntity: Int = addMeshInstance(scene: scene, mesh: tileMesh,
+      material: groundMaterial, position: origin, rotation: zeroRotation, scale: oneScale)
+    setMeshInstanceVisible(scene: scene, entity: tileEntity, visible: false)
+    tiles.add(value: tileEntity)
     broadTrunks.add(value: addHiddenProp(scene: scene, mesh: broadTrunk,
       material: trunkMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
     broadCrowns.add(value: addHiddenProp(scene: scene, mesh: broadCrown,
