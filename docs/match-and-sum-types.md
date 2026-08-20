@@ -21,10 +21,11 @@ without a concrete need here are recommended AGAINST.
   **including JSON, the textbook sum type**, which is arguably *cleaner* without
   them (Proposal C). These would add a large implementation and a second mental
   model for marginal gain, against Rae's simplicity goal.
-- **Recommend REMOVING the `default` match arm** so every `match` is unconditionally
-  exhaustive: a `default` silently swallows a newly-added enum variant, which is
-  exactly what `match` should force you to review. Used only **once** in the whole
-  tree (an optional match in `lib/core.rae`), so the cost is ~nil (see below).
+- **Make `default` depend on the subject's type**: **disallow it on enum matches**
+  (they must stay exhaustive, so a new variant forces every match to be reviewed) but
+  **allow/require it on Int/String matches** (open-ended value spaces — e.g. HTTP
+  codes, commands, file tags). `default` is used only **once** in the whole tree (an
+  optional match in `lib/core.rae`), so the cost is ~nil (see below).
 - **Worth adding** (both need little): make dispatch tags real `enum`s so their
   `if x is A / if x is B` chains become exhaustive `match` (no new syntax — the
   compiler then forces every site to handle a new variant); and `break`/`continue`.
@@ -46,53 +47,68 @@ match d {
 
 Properties that are already right (and match modern languages, not C):
 - **No fallthrough** — arms are independent; no `break` needed between cases.
-- **Exhaustive on enums** — miss a case, get an error. A `default` arm opts out
-  (recommended for REMOVAL — see "Reconsidering `default`" below).
+- **Exhaustive on enums** — miss a case, get an error. A `default` arm currently opts
+  out on enums too (recommended to DISALLOW on enums — see "`default`" below).
 - **Expression form** — `match` can produce a value.
 - `enum Foo { a b c }` — plain value enums, `Foo.a`, and `if x is Foo.a`.
 - Optional type `opt T`; `none`; `is not none` / `is none`; `if let v: T = expr {…}`.
 
 Not present: `switch`, `break`, `continue`, enum payloads, `Result`, tuples.
 
-## Reconsidering `default` — recommend REMOVING it
+## `default`: the subject's type decides (enum = no default; Int/String = default)
 
-`match` currently accepts a `default` arm (catch-all). **Recommendation: remove it, so
-every `match` must be exhaustive.** The reason is that `default` quietly defeats
-`match`'s main benefit: add a new enum variant and every match that has a `default`
-keeps compiling — the new variant is silently swallowed instead of forcing the
-programmer to review each site. A guarantee with an escape hatch is not a guarantee.
+The right rule is not "remove `default` everywhere" but a distinction driven by whether
+the value space is **closed** (finite, known set) or **open** (effectively infinite):
+
+- **Enum match → exhaustive; `default` is NOT allowed.** Every variant must be named
+  (or grouped with an or-pattern). A `default` on an enum is a compile error. This is
+  what keeps the guarantee intact: adding a variant forces every relevant `match` to be
+  reconsidered — a `default` would silently swallow it, which is the whole thing we're
+  avoiding.
+- **Int / String match → `default` allowed and REQUIRED**, because the space is
+  effectively infinite so no set of `case`s is exhaustive:
+
+  ```
+  match code {
+    case 200 { … }
+    case 404 { … }
+    default  { … }
+  }
+  ```
+
+  String matching is genuinely useful — HTTP-style codes, commands, file-format tags,
+  identifiers — so `match` should serve it, but with `default` mandatory (a String/Int
+  match with no `default` is a compile error: "add a default arm").
+
+Treat these as **two different match semantics selected by the subject's type**, not
+one uniform rule — that is what lets enums stay strict while open-ended values stay
+usable. (Bool is a closed set like an enum: `case true`/`case false`, no `default`.)
+
+**Compiler changes this implies:** (1) `default` on an enum subject → error; (2) an
+Int/String subject with no `default` → error. Today `default` is allowed on enums and
+is the single opt-out; this flips that for enums and requires it for open domains.
 
 **Migration cost is essentially nil.** Audited: `default` appears exactly **once** in
-the whole tree — `lib/core.rae`'s `StringMap.has`, and it is matching an **optional**,
-not an enum (`match get(...) { case none { ret false } default { ret true } }`). Every
-enum `match` already lists all its cases. The codebase already lives by this rule; the
-one site rewrites to plain optional handling:
+the whole tree — `lib/core.rae`'s `StringMap.has` — and it matches an **optional**, not
+an enum (`match get(...) { case none { ret false } default { ret true } }`). Optionals
+are a closed 2-state set best handled by `if let` / `is not none` anyway (and without
+payload-binding, rejected in Proposal C, a `match` on `opt T` can't bind the value), so
+that one site rewrites out of `match` entirely:
 
 ```
 func has(...) ret Bool { ret get(...) is not none }
 ```
 
-**Implications (all acceptable):**
-- **Enums** — adding a variant becomes a compile error at every `match`. This is the
-  whole point, now with no way to opt out.
-- **Optionals** — use `if let` / `is not none` / `is none`, not `match`. Without a
-  `default` and without payload-binding (rejected, Proposal C), a `match` on `opt T`
-  can't express the "has a value" arm anyway — and `if let` already does it clearly.
-  So `match` is for enums; optionals are an `if let` job. (Rewrites the one site.)
-- **Open domains** (`Int`, `String`) — cannot be exhaustive, so `match` does not apply
-  to them without a catch-all; use `if / else if`. That is correct: `match` is a
-  closed-set (enum) tool, and a raw-`Int` match only ever "worked" via `default`.
-- **"Handle several variants the same way"** — use **or-patterns** (`case A, B, C { }`,
-  Proposal B). This covers the *legitimate* grouping use of `default` while still
-  naming every variant, so a new one still forces review. Or-patterns become the
-  recommended companion to removing `default`.
-- **"Impossible" variants** (an invariant means only some occur here) — still list
-  them; group the impossible ones with an or-pattern into one arm that logs/handles.
-  A little more typing, but the exhaustiveness holds.
+Every enum `match` in the tree already lists all its cases, so nothing else changes.
 
-This is intentionally **stricter than Rust (`_` wildcard) and Swift (`default`)**: the
-wildcard is exactly the mechanism that erodes the guarantee. No new syntax is needed —
-or-patterns (Proposal B) and the existing `if let` cover every gap `default` filled.
+**"Handle several enum variants the same way"** — use **or-patterns** (`case A, B, C`,
+Proposal B), which name every variant so a new one still forces review; this replaces
+the *legitimate* grouping use a `default` would otherwise serve on an enum. For an
+"impossible here" variant, list it (or group into one explicit arm).
+
+For enums this is intentionally **stricter than Rust (`_` wildcard) / Swift (`default`)**
+— the wildcard is exactly what erodes the guarantee — while Int/String matching lands
+right where those languages already put it. No new syntax is needed.
 
 ## Where this helps the app architecture (example 114)
 
@@ -162,7 +178,8 @@ Odin/C — the least surprising).
 
 ## Proposal B — one small match enhancement that follows from Rae
 
-Keep the current `match … { case … { } … }` shape (exhaustive, no `default` — see
+Keep the current `match … { case … { } … }` shape (enum matches exhaustive with no
+`default`; Int/String matches take a `default` — see
 above). The one addition that
 follows naturally from Rae's existing syntax:
 
@@ -187,7 +204,8 @@ follows naturally from Rae's existing syntax:
 
 Rules to keep/state explicitly:
 - **Exhaustive on enums** (hard error) — already true, and recommended to make
-  unconditional by removing the `default` opt-out (see "Reconsidering `default`").
+  unconditional by disallowing `default` on enum subjects (Int/String matches keep it —
+  see "`default`: the subject's type decides").
 - **No implicit fallthrough** (already true) — an arm never falls into the next.
 - **Expression form is exhaustive too** — every arm yields the same type; no missing
   path. This is what lets `let x = match …` be safe without a runtime "unreachable".
@@ -267,9 +285,10 @@ Recommended, and none is a borrowed abstraction:
    `match`.** No language change at all — just use the enums + exhaustive `match` Rae
    already has, for immediate "can't-forget-a-pass" safety. Do this as part of the 114
    systems refactor.
-2. **Remove the `default` match arm** — make exhaustiveness unconditional. One-line
-   migration (the single optional-match site → `if let` / `is not none`). Pairs with
-   (1): the guarantee only holds without a catch-all.
+2. **Disallow `default` on enum matches** (keep/require it on Int/String matches) —
+   make enum exhaustiveness unconditional. One-line migration (the single optional-match
+   site → `is not none`). Pairs with (1): the guarantee only holds without a catch-all
+   on enums.
 3. **break / continue.** Small; reuses the existing early-`ret` ownership-drop
    machinery; removes the `var done` flag-guard patterns a loop-only language forces.
 
