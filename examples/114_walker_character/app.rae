@@ -386,7 +386,7 @@ func createApp() ret App {
     camera.target = thirdPersonCameraTarget(controller: characterController, focusZ: characterFocusZ)
   }
 
-  setPanelSelection(panel: clipPanel, world: uiWorld, group: 1, id: clipButtonId(index: clipIndex))
+  setPanelSelection(panel: clipPanel, world: uiWorld, group: 1, id: (clipIndex as ClipKind).toString())
   setPanelButtonOn(panel: transport, world: uiWorld, id: "play", on: playing)
   setPanelButtonOn(panel: transport, world: uiWorld, id: "toon", on: toonShading)
   var playLabel0: String = "Pause"
@@ -591,7 +591,7 @@ func updateApp(app: mod App) {
       app.character.transitionElapsed = 0.0
       app.character.clipIndex = locomotionClip
       app.character.animTime = 0.0
-      setPanelSelection(panel: app.io.clipPanel, world: app.io.world, group: 1, id: clipButtonId(index: app.character.clipIndex))
+      setPanelSelection(panel: app.io.clipPanel, world: app.io.world, group: 1, id: (app.character.clipIndex as ClipKind).toString())
     }
   }
   let terrainWrapped: Bool = updateInfiniteTerrain(terrain: app.terrain, scene: app.scene, playerPosition: app.character.controller.position)
@@ -754,7 +754,7 @@ func renderApp(app: mod App) {
   var oi: Int = 0
   loop oi < deferredOrderLength(r: app.render.renderer) {
     let tag: Int = deferredTagAt(r: app.render.renderer, i: oi)
-    profile.zoneBegin(name: walkerPassName(tag: tag))
+    profile.zoneBegin(name: (tag as RenderTag).toString())
     # Exhaustive over RenderTag: adding a pass is a compile error here until it is
     # handled (#624). Each pass is a helper/one-liner; the five generic passes
     # defer to renderDeferredPass (or-patterns, #622, will merge them into one arm).
@@ -788,7 +788,7 @@ func renderApp(app: mod App) {
       }
       case RenderTag.present { gpu2d.endFrame() }
     }
-    profile.zoneEnd(name: walkerPassName(tag: tag))
+    profile.zoneEnd(name: (tag as RenderTag).toString())
     oi = oi + 1
   }
   snapshotPrevTransforms(scene: app.scene)
