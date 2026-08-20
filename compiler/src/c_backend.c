@@ -1393,6 +1393,18 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
                   (int)d->as.enum_decl.name.len, d->as.enum_decl.name.data,
                   (int)m->name.len, m->name.data, (long long)idx++);
           }
+          // Auto enum -> member-name string, so `value.toString()` and string
+          // interpolation yield the member NAME (ClipKind.walk -> "walk") rather
+          // than the ordinal. One per enum; RAE_UNUSED silences unused ones.
+          fprintf(out, "RAE_UNUSED static rae_String rae_enum_toString_%.*s(int64_t v) {\n",
+              (int)d->as.enum_decl.name.len, d->as.enum_decl.name.data);
+          fprintf(out, "  switch (v) {\n");
+          idx = 0;
+          for (const AstEnumMember* m = d->as.enum_decl.members; m; m = m->next) {
+              fprintf(out, "  case %lldLL: return (rae_String){(uint8_t*)\"%.*s\", %d};\n",
+                  (long long)idx++, (int)m->name.len, m->name.data, (int)m->name.len);
+          }
+          fprintf(out, "  }\n  return (rae_String){(uint8_t*)\"\", 0};\n}\n");
           fprintf(out, "\n");
       }
   }
