@@ -137,10 +137,12 @@ func main() ret Int {
     }
     syncTetrisHud(uiWorld: uiWorld, game: game, state: hudState)
     runUiSystems(world: uiWorld, res: uiResources)
-    renderFrame(
-      renderer: renderer, renderState: renderState, game: game
-      camera: camera, light: light
-      uiWorld: uiWorld, uiResources: uiResources, debug: dbg)
+    if gpu2d.renderGate() {
+      renderFrame(
+        renderer: renderer, renderState: renderState, game: game
+        camera: camera, light: light
+        uiWorld: uiWorld, uiResources: uiResources, debug: dbg)
+    }
   }
 
   if testMode { log("[tetris3d] deterministic deferred frame rendered") }

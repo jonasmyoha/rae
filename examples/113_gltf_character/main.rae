@@ -144,8 +144,10 @@ func main() ret Int {
     let t: Float = (gpu2d.nowSeconds() - startT) as Float
     camera.position = orbitEye(targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z, yaw: yaw, pitch: pitch, dist: dist)
     let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
-    renderFrame(r: renderer, scene: scene, camera: camera, light: light, aspect: aspect, time: t)
-    snapshotPrevTransforms(scene: scene)
+    if gpu2d.renderGate() {
+      renderFrame(r: renderer, scene: scene, camera: camera, light: light, aspect: aspect, time: t)
+      snapshotPrevTransforms(scene: scene)
+    }
   }
   shutdown()
   gpu2d.closeWindow()
