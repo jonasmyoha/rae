@@ -58,6 +58,33 @@ void emit_opt_unbox_suffix(CFuncContext* ctx, const AstFuncDecl* fd, const AstTy
     // For other types (structs, Any), no unbox needed — RaeAny is the right type
 }
 
+// Is `e` a C lvalue whose address `&e` can be taken directly? Variables,
+// index accesses and struct-field accesses are; an enum member (`Enum.case`,
+// which lowers to a `#define` constant) and every other expression (literals,
+// calls, arithmetic, casts, object literals) are rvalues. Used to decide
+// whether a borrowed (`view`) argument needs a materialised temporary (#272).
+static bool arg_is_addressable_lvalue(CFuncContext* ctx, const AstExpr* e) {
+    if (!e) return false;
+    switch (e->kind) {
+        case AST_EXPR_IDENT: return true;
+        case AST_EXPR_INDEX: return true;
+        case AST_EXPR_MEMBER:
+            // `Enum.member` is a constant rvalue; a real field access is an lvalue.
+            if (e->as.member.object->kind == AST_EXPR_IDENT
+                && find_enum_decl(ctx, ctx->module, e->as.member.object->as.ident))
+                return false;
+            return true;
+        case AST_EXPR_UNARY:
+            // `view x` / `mod x` form a reference to their operand — they are
+            // reference-producing, never a value that needs a materialised temp;
+            // defer to whether the operand is addressable.
+            if (e->as.unary.op == AST_UNARY_VIEW || e->as.unary.op == AST_UNARY_MOD)
+                return arg_is_addressable_lvalue(ctx, e->as.unary.operand);
+            return false;
+        default: return false;
+    }
+}
+
 bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     // Hoist a type argument out of the value-arg list if present —
     // new generic-call syntax. See c_backend.c for the helper.
@@ -1132,6 +1159,23 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 // apply its move-mark here for the scope-exit
                 // implicit-drop suppression.
                 mark_expr_moved_if_local(ctx, (AstExpr*)move_src);
+            } else if (needs_addr && !needs_deref && p && p->type
+                       && p->type->is_view && !p->type->is_mod
+                       && !wrap_pool_take_arg && !wrap_deep_copy_arg
+                       && copy_arg_kind == 0 && !needs_box && !needs_prim_wrap
+                       && !arg_is_addressable_lvalue(ctx, a->value)) {
+                // #272: borrowing (`view`) an rvalue argument (an enum literal,
+                // arithmetic, a call result). `&expr` on an rvalue is invalid C
+                // ("cannot take the address of an rvalue"); materialise a C99
+                // compound-literal temporary so `&` has an lvalue to borrow. Safe
+                // for `view` (read-only); `mod` args are lvalue places by sema.
+                AstTypeRef base = *p->type;
+                base.is_view = false; base.is_mod = false; base.is_opt = false; base.next = NULL;
+                fprintf(out, "&(");
+                emit_type_ref_as_c_type(ctx, &base, out, false);
+                fprintf(out, "){");
+                emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
+                fprintf(out, "}");
             } else {
                 if (needs_addr) fprintf(out, "&");
                 if (needs_deref) fprintf(out, "(*");
