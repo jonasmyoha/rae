@@ -98,6 +98,15 @@ static void rae_g2d_save_screenshot(const char* path) {
  * bookkeeping that stays C. */
 void rae_g2d_tick(void) { rae_g2d_tick_virtual_clock(); }
 void rae_g2d_present_and_cleanup(void) {
+    /* Optional: periodic live wgpu object counts (RAE_WGPU_REPORT), for leak
+     * hunts. Off by default; harmless like RAE_MEM_STATS. */
+    { static int g_wgpu_report = -1; static long g_wgpu_report_frame = 0;
+      if (g_wgpu_report < 0) g_wgpu_report = getenv("RAE_WGPU_REPORT") ? 1 : 0;
+      if (g_wgpu_report && (g_wgpu_report_frame++ % 120) == 0) {
+          char tag[24]; snprintf(tag, sizeof(tag), "f%ld", g_wgpu_report_frame - 1);
+          rae_wgpu_report(tag);
+      }
+    }
     for (int i = 0; i < g_g2d_frame_bind_n; i++) wgpuBindGroupRelease(g_g2d_frame_binds[i]);
     g_g2d_frame_bind_n = 0;
     for (int i = 0; i < g_g2d_frame_buf_n; i++) wgpuBufferRelease(g_g2d_frame_bufs[i]);
@@ -119,30 +128,41 @@ void rae_g2d_present_and_cleanup(void) {
 
     /* Present best-effort: copy the offscreen image into the surface drawable
      * and present. If the OS won't vend a drawable (window occluded / display
-     * asleep / headless), skip — the frame already rendered + screenshotted. */
-    WGPUSurfaceTexture st; memset(&st, 0, sizeof(st));
-    wgpuSurfaceGetCurrentTexture(g_g2d_surface, &st);
+     * asleep / headless), skip — the frame already rendered + screenshotted.
+     *
+     * DO NOT acquire a drawable while the window is hidden / minimized /
+     * occluded. On macOS the CAMetalLayer stops recycling its drawable pool once
+     * the app is backgrounded and hands out a fresh IOSurface-backed texture per
+     * frame — which wgpu still reports as SuccessOptimal, and whose submissions
+     * retire normally — so nothing signals a problem while RSS balloons ~100
+     * textures/frame after each app switch. Skipping the acquire entirely while
+     * dark is the only thing that keeps the drawable count flat (matches ImGui's
+     * Metal backend and bevy's occlusion handling). */
     int presented = 0;
-    if (st.texture &&
-        (st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal ||
-         st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal)) {
-        WGPUCommandEncoder penc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
-        WGPUTexelCopyTextureInfo cs; memset(&cs, 0, sizeof(cs)); cs.texture = g_g2d_off_tex; cs.aspect = WGPUTextureAspect_All;
-        WGPUTexelCopyTextureInfo cd; memset(&cd, 0, sizeof(cd)); cd.texture = st.texture; cd.aspect = WGPUTextureAspect_All;
-        WGPUExtent3D ext; ext.width = (uint32_t)g_sdl_w; ext.height = (uint32_t)g_sdl_h; ext.depthOrArrayLayers = 1;
-        wgpuCommandEncoderCopyTextureToTexture(penc, &cs, &cd, &ext);
-        WGPUCommandBuffer pcb = wgpuCommandEncoderFinish(penc, NULL);
-        wgpuQueueSubmit(g_wgpu_queue, 1, &pcb);
-        wgpuCommandBufferRelease(pcb); wgpuCommandEncoderRelease(penc);
+    if (rae_g2d_window_visible()) {
+        WGPUSurfaceTexture st; memset(&st, 0, sizeof(st));
+        wgpuSurfaceGetCurrentTexture(g_g2d_surface, &st);
+        if (st.texture &&
+            (st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal ||
+             st.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal)) {
+            WGPUCommandEncoder penc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
+            WGPUTexelCopyTextureInfo cs; memset(&cs, 0, sizeof(cs)); cs.texture = g_g2d_off_tex; cs.aspect = WGPUTextureAspect_All;
+            WGPUTexelCopyTextureInfo cd; memset(&cd, 0, sizeof(cd)); cd.texture = st.texture; cd.aspect = WGPUTextureAspect_All;
+            WGPUExtent3D ext; ext.width = (uint32_t)g_sdl_w; ext.height = (uint32_t)g_sdl_h; ext.depthOrArrayLayers = 1;
+            wgpuCommandEncoderCopyTextureToTexture(penc, &cs, &cd, &ext);
+            WGPUCommandBuffer pcb = wgpuCommandEncoderFinish(penc, NULL);
+            wgpuQueueSubmit(g_wgpu_queue, 1, &pcb);
+            wgpuCommandBufferRelease(pcb); wgpuCommandEncoderRelease(penc);
 #ifndef __EMSCRIPTEN__
-        /* Browser WebGPU presents the canvas texture when control returns to
-         * the browser; Emdawn rejects explicit wgpuSurfacePresent calls. */
-        wgpuSurfacePresent(g_g2d_surface);
+            /* Browser WebGPU presents the canvas texture when control returns to
+             * the browser; Emdawn rejects explicit wgpuSurfacePresent calls. */
+            wgpuSurfacePresent(g_g2d_surface);
 #endif
-        g_g2d_last_present_ok = 1;
-        presented = 1;
+            g_g2d_last_present_ok = 1;
+            presented = 1;
+        }
+        if (st.texture) wgpuTextureRelease(st.texture);
     }
-    if (st.texture) wgpuTextureRelease(st.texture);
     /* wgpu-native retires deferred object destruction and presentation work
      * from device polling. A NON-blocking poll retires the per-frame instance
      * buffers and bind groups released above — that is why an occluded or

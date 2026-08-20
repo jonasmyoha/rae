@@ -136,6 +136,26 @@ void* rae_wgpu_null_ptr(void)       { return (void*)0; }
  * when 0 (e.g. an adapter that doesn't offer them). */
 int rae_wgpu_have_timestamp(void)   { return g_wgpu_have_timestamp; }
 
+/* Live wgpu-native object counts per type. numAllocated is what the backend
+ * currently holds; a per-frame climb pinpoints a leaked resource type that Rae's
+ * own alloc tracking can't see (it does not track wgpu objects). Env-gated
+ * (RAE_WGPU_REPORT) and dumped periodically from the present path, like
+ * RAE_MEM_STATS — off by default, a diagnostic for the next leak hunt. */
+void rae_wgpu_report(const char* tag) {
+    if (!g_wgpu_inst) return;
+    WGPUGlobalReport r; memset(&r, 0, sizeof(r));
+    wgpuGenerateReport(g_wgpu_inst, &r);
+    fprintf(stderr, "[wgpu-report %s] buf=%zu tex=%zu texView=%zu bind=%zu bindLayout=%zu "
+        "shader=%zu rpipe=%zu cpipe=%zu cmdbuf=%zu query=%zu sampler=%zu surface=%zu\n",
+        tag ? tag : "",
+        r.hub.buffers.numAllocated, r.hub.textures.numAllocated, r.hub.textureViews.numAllocated,
+        r.hub.bindGroups.numAllocated, r.hub.bindGroupLayouts.numAllocated,
+        r.hub.shaderModules.numAllocated, r.hub.renderPipelines.numAllocated,
+        r.hub.computePipelines.numAllocated, r.hub.commandBuffers.numAllocated,
+        r.hub.querySets.numAllocated, r.hub.samplers.numAllocated, r.surfaces.numAllocated);
+    fflush(stderr);
+}
+
 /* #528: a small handle store for lib/gpu_timing.rae (query set + 2 buffers).
  * Rae cannot hold a WGPU handle in a module-level Ptr var (no null literal to
  * seed it) nor in a List(Ptr) (the emitter has no rae_Ptr element type yet), so
