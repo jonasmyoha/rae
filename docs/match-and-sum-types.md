@@ -21,6 +21,10 @@ without a concrete need here are recommended AGAINST.
   **including JSON, the textbook sum type**, which is arguably *cleaner* without
   them (Proposal C). These would add a large implementation and a second mental
   model for marginal gain, against Rae's simplicity goal.
+- **Recommend REMOVING the `default` match arm** so every `match` is unconditionally
+  exhaustive: a `default` silently swallows a newly-added enum variant, which is
+  exactly what `match` should force you to review. Used only **once** in the whole
+  tree (an optional match in `lib/core.rae`), so the cost is ~nil (see below).
 - **Worth adding** (both need little): make dispatch tags real `enum`s so their
   `if x is A / if x is B` chains become exhaustive `match` (no new syntax — the
   compiler then forces every site to handle a new variant); and `break`/`continue`.
@@ -42,13 +46,53 @@ match d {
 
 Properties that are already right (and match modern languages, not C):
 - **No fallthrough** — arms are independent; no `break` needed between cases.
-- **Exhaustive on enums** — miss a case, get an error; `default` opts out.
+- **Exhaustive on enums** — miss a case, get an error. A `default` arm opts out
+  (recommended for REMOVAL — see "Reconsidering `default`" below).
 - **Expression form** — `match` can produce a value.
-- **Optionals matched** — `match get(...) { case none {…} default {…} }`.
 - `enum Foo { a b c }` — plain value enums, `Foo.a`, and `if x is Foo.a`.
 - Optional type `opt T`; `none`; `is not none` / `is none`; `if let v: T = expr {…}`.
 
 Not present: `switch`, `break`, `continue`, enum payloads, `Result`, tuples.
+
+## Reconsidering `default` — recommend REMOVING it
+
+`match` currently accepts a `default` arm (catch-all). **Recommendation: remove it, so
+every `match` must be exhaustive.** The reason is that `default` quietly defeats
+`match`'s main benefit: add a new enum variant and every match that has a `default`
+keeps compiling — the new variant is silently swallowed instead of forcing the
+programmer to review each site. A guarantee with an escape hatch is not a guarantee.
+
+**Migration cost is essentially nil.** Audited: `default` appears exactly **once** in
+the whole tree — `lib/core.rae`'s `StringMap.has`, and it is matching an **optional**,
+not an enum (`match get(...) { case none { ret false } default { ret true } }`). Every
+enum `match` already lists all its cases. The codebase already lives by this rule; the
+one site rewrites to plain optional handling:
+
+```
+func has(...) ret Bool { ret get(...) is not none }
+```
+
+**Implications (all acceptable):**
+- **Enums** — adding a variant becomes a compile error at every `match`. This is the
+  whole point, now with no way to opt out.
+- **Optionals** — use `if let` / `is not none` / `is none`, not `match`. Without a
+  `default` and without payload-binding (rejected, Proposal C), a `match` on `opt T`
+  can't express the "has a value" arm anyway — and `if let` already does it clearly.
+  So `match` is for enums; optionals are an `if let` job. (Rewrites the one site.)
+- **Open domains** (`Int`, `String`) — cannot be exhaustive, so `match` does not apply
+  to them without a catch-all; use `if / else if`. That is correct: `match` is a
+  closed-set (enum) tool, and a raw-`Int` match only ever "worked" via `default`.
+- **"Handle several variants the same way"** — use **or-patterns** (`case A, B, C { }`,
+  Proposal B). This covers the *legitimate* grouping use of `default` while still
+  naming every variant, so a new one still forces review. Or-patterns become the
+  recommended companion to removing `default`.
+- **"Impossible" variants** (an invariant means only some occur here) — still list
+  them; group the impossible ones with an or-pattern into one arm that logs/handles.
+  A little more typing, but the exhaustiveness holds.
+
+This is intentionally **stricter than Rust (`_` wildcard) and Swift (`default`)**: the
+wildcard is exactly the mechanism that erodes the guarantee. No new syntax is needed —
+or-patterns (Proposal B) and the existing `if let` cover every gap `default` filled.
 
 ## Where this helps the app architecture (example 114)
 
@@ -81,7 +125,7 @@ match tag {
 ```
 
 The payoff is not prettiness — it is that **adding a new pass becomes a compile
-error at every renderer** until each one handles (or `default`s) it. That is
+error at every renderer** until each one handles it. That is
 exactly the kind of "can't forget a case" guarantee an engine wants. Same shape
 applies to `CameraRigMode` dispatch and the clip/locomotion selection (today
 `if clipHit.equals("idle") …`), which want a `ClipKind` enum.
@@ -118,7 +162,8 @@ Odin/C — the least surprising).
 
 ## Proposal B — one small match enhancement that follows from Rae
 
-Keep the current `match … { case … { } default { } }` shape. The one addition that
+Keep the current `match … { case … { } … }` shape (exhaustive, no `default` — see
+above). The one addition that
 follows naturally from Rae's existing syntax:
 
 - **Or-patterns** — `case A, B, C { }`. Rae's commas are already optional and `is A
@@ -141,7 +186,8 @@ follows naturally from Rae's existing syntax:
   `grep RenderTag.north`. Cases stay fully qualified: `case RenderTag.shadow { }`.
 
 Rules to keep/state explicitly:
-- **Exhaustive on enums** (hard error) — already true. `default` is the single opt-out.
+- **Exhaustive on enums** (hard error) — already true, and recommended to make
+  unconditional by removing the `default` opt-out (see "Reconsidering `default`").
 - **No implicit fallthrough** (already true) — an arm never falls into the next.
 - **Expression form is exhaustive too** — every arm yields the same type; no missing
   path. This is what lets `let x = match …` be safe without a runtime "unreachable".
@@ -215,13 +261,16 @@ struct for any grouped/multi return.
 
 ## Recommended order
 
-Only two items are recommended, and neither is a borrowed abstraction:
+Recommended, and none is a borrowed abstraction:
 
 1. **`enum RenderTag` (+ the other dispatch enums) and convert the `if`-chains to
    `match`.** No language change at all — just use the enums + exhaustive `match` Rae
    already has, for immediate "can't-forget-a-pass" safety. Do this as part of the 114
    systems refactor.
-2. **break / continue.** Small; reuses the existing early-`ret` ownership-drop
+2. **Remove the `default` match arm** — make exhaustiveness unconditional. One-line
+   migration (the single optional-match site → `if let` / `is not none`). Pairs with
+   (1): the guarantee only holds without a catch-all.
+3. **break / continue.** Small; reuses the existing early-`ret` ownership-drop
    machinery; removes the `var done` flag-guard patterns a loop-only language forces.
 
 Optional, only if a concrete need appears later: match **or-patterns** (natural
