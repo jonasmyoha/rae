@@ -89,3 +89,18 @@ fn raeBiomeClassify(elev: f32, moist: f32, slope: f32) -> RaeBiome {
 fn raeBiomeSample(p: vec2<f32>) -> RaeBiome {
   return raeBiomeClassify(raeBiomeElevation(p), raeBiomeMoisture(p), raeBiomeSlope(p));
 }
+
+// Splat palette — MUST match world_biome.rae grassMatColor()/etc. Blends the
+// material weights into one ground colour (terrain splat + grass gradient bottom).
+fn raeBiomeSplatColor(b: RaeBiome) -> vec3<f32> {
+  let grass = vec3<f32>(0.105, 0.245, 0.055);
+  let sand  = vec3<f32>(0.74, 0.66, 0.44);
+  let mud   = vec3<f32>(0.24, 0.19, 0.11);
+  let rock  = vec3<f32>(0.34, 0.33, 0.32);
+  let water = vec3<f32>(0.06, 0.17, 0.26);
+  return grass * b.wGrass + sand * b.wSand + mud * b.wMud + rock * b.wRock + water * b.wWater;
+}
+
+fn raeBiomeGroundColor(p: vec2<f32>) -> vec3<f32> {
+  return raeBiomeSplatColor(raeBiomeSample(p));
+}
