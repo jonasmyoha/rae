@@ -1623,26 +1623,64 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     symbol_table_pop_scope(symbols);
                 }
             }
-            if (enum_decl && !has_default) {
-                for (AstEnumMember* em = enum_decl->as.enum_decl.members; em; em = em->next) {
-                    bool covered = false;
-                    for (AstMatchCase* mc = stmt->as.match_stmt.cases; mc && !covered; mc = mc->next) {
-                        if (!mc->pattern || mc->pattern->kind != AST_EXPR_MEMBER) continue;
-                        if (mc->pattern->as.member.object->kind != AST_EXPR_IDENT) continue;
-                        if (!str_eq(mc->pattern->as.member.object->as.ident, enum_name)) continue;
-                        if (str_eq(mc->pattern->as.member.member, em->name)) covered = true;
+            // The `default` rule is chosen by the subject's value space
+            // (docs/match-and-sum-types.md §"default: the subject's type
+            // decides"). A CLOSED set (enum / Bool) forbids `default` and must
+            // name every case; an OPEN set (Int / String) requires one, since
+            // no finite list of cases is exhaustive.
+            if (enum_decl) {
+                if (has_default) {
+                    // Flipping the old escape hatch: a `default` on an enum
+                    // would silently swallow a newly added variant, which is
+                    // exactly the review-forcing property we want to keep.
+                    char buffer[256];
+                    snprintf(buffer, sizeof(buffer),
+                        "match on enum '%.*s' must not use a 'default' arm; "
+                        "name every variant (remove 'default' and add the missing case%s)",
+                        (int)enum_name.len, enum_name.data,
+                        "s, or group them with an or-pattern");
+                    diag_error(module->file_path, (int)stmt->line, (int)stmt->column, buffer);
+                    module->had_error = true;
+                } else {
+                    for (AstEnumMember* em = enum_decl->as.enum_decl.members; em; em = em->next) {
+                        bool covered = false;
+                        for (AstMatchCase* mc = stmt->as.match_stmt.cases; mc && !covered; mc = mc->next) {
+                            if (!mc->pattern || mc->pattern->kind != AST_EXPR_MEMBER) continue;
+                            if (mc->pattern->as.member.object->kind != AST_EXPR_IDENT) continue;
+                            if (!str_eq(mc->pattern->as.member.object->as.ident, enum_name)) continue;
+                            if (str_eq(mc->pattern->as.member.member, em->name)) covered = true;
+                        }
+                        if (!covered) {
+                            char buffer[256];
+                            snprintf(buffer, sizeof(buffer),
+                                "non-exhaustive match on enum '%.*s': missing case '%.*s.%.*s' (add it)",
+                                (int)enum_name.len, enum_name.data,
+                                (int)enum_name.len, enum_name.data,
+                                (int)em->name.len, em->name.data);
+                            diag_error(module->file_path, (int)stmt->line, (int)stmt->column, buffer);
+                            module->had_error = true;
+                            break;
+                        }
                     }
-                    if (!covered) {
-                        char buffer[256];
-                        snprintf(buffer, sizeof(buffer),
-                            "non-exhaustive match on enum '%.*s': missing case '%.*s.%.*s' (add it or use a 'default' arm)",
-                            (int)enum_name.len, enum_name.data,
-                            (int)enum_name.len, enum_name.data,
-                            (int)em->name.len, em->name.data);
-                        diag_error(module->file_path, (int)stmt->line, (int)stmt->column, buffer);
-                        module->had_error = true;
-                        break;
-                    }
+                }
+            } else {
+                // Non-enum subject: an open value space (Int/String) requires a
+                // `default`; Bool is a closed 2-state set and forbids one.
+                TypeInfo* subj = stmt->as.match_stmt.subject
+                    ? stmt->as.match_stmt.subject->resolved_type : NULL;
+                if (subj && subj->kind == TYPE_REF) subj = subj->as.ref.base;
+                bool is_open = subj && (subj->kind == TYPE_INT || subj->kind == TYPE_STRING);
+                bool is_bool = subj && subj->kind == TYPE_BOOL;
+                if (is_open && !has_default) {
+                    diag_error(module->file_path, (int)stmt->line, (int)stmt->column,
+                        subj->kind == TYPE_STRING
+                            ? "match on String requires a 'default' arm (its value space is open-ended)"
+                            : "match on Int requires a 'default' arm (its value space is open-ended)");
+                    module->had_error = true;
+                } else if (is_bool && has_default) {
+                    diag_error(module->file_path, (int)stmt->line, (int)stmt->column,
+                        "match on Bool must not use a 'default' arm; handle 'case true' and 'case false'");
+                    module->had_error = true;
                 }
             }
             break;
