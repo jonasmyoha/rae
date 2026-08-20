@@ -69,6 +69,11 @@ EXPRESSION form (`match x { case … => … }`) is not yet sema-checked at all
 (no exhaustiveness/default analysis today); applying these rules there is
 follow-up.
 
+Int and String literal `case`s are supported in the statement form (#625):
+`case 200`/`case "get"`, including in or-patterns. Int compares with `==`;
+String compares by value via `rae_ext_rae_str_eq` (rae_String is a struct, so
+`==` is invalid). Test: `638_match_string_cases`.
+
 
 The right rule is not "remove `default` everywhere" but a distinction driven by whether
 the value space is **closed** (finite, known set) or **open** (effectively infinite):

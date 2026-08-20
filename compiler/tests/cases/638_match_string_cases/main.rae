@@ -1,0 +1,25 @@
+# String literal `case`s (compared by value via rae_str_eq), with or-patterns
+# and the required `default` for an open value space (#625, #621, #622).
+import core
+
+func method(cmd: view String) ret String {
+  match cmd {
+    case "get", "head" {
+      ret "read"
+    }
+    case "put", "post" {
+      ret "write"
+    }
+    default {
+      ret "other"
+    }
+  }
+  ret "x"
+}
+
+func main() {
+  log(method(cmd: "get"))
+  log(method(cmd: "head"))
+  log(method(cmd: "post"))
+  log(method(cmd: "delete"))
+}

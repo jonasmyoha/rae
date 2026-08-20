@@ -1057,10 +1057,13 @@ static bool bind_value_returns_owned_opt(CFuncContext* ctx, const AstExpr* val) 
 }
 
 // Emit one pattern test for a match case: `rae_any_is_none(subj)` for the
-// `none` pattern, else `subj == pattern`. Or-patterns chain several of these
-// with `||` (C's `==` binds tighter than `||`, so no extra parens needed).
+// `none` pattern, `rae_ext_rae_str_eq(subj, pattern)` for a String subject
+// (rae_String is a struct — `==` is invalid), else `subj == pattern`.
+// Or-patterns chain several of these with `||` (C's `==` and calls bind
+// tighter than `||`, so no extra parens needed).
 static void emit_match_case_test(CFuncContext* ctx, const AstExpr* subject,
-                                 const AstExpr* pattern, FILE* out) {
+                                 const AstExpr* pattern, bool subject_is_string,
+                                 FILE* out) {
     if (pattern->kind == AST_EXPR_NONE) {
         bool saved = ctx->suppress_opt_unbox;
         ctx->suppress_opt_unbox = true;
@@ -1068,6 +1071,12 @@ static void emit_match_case_test(CFuncContext* ctx, const AstExpr* subject,
         emit_expr(ctx, subject, out, PREC_LOWEST, false, false);
         fprintf(out, ")");
         ctx->suppress_opt_unbox = saved;
+    } else if (subject_is_string) {
+        fprintf(out, "rae_ext_rae_str_eq(");
+        emit_expr(ctx, subject, out, PREC_LOWEST, false, false);
+        fprintf(out, ", ");
+        emit_expr(ctx, pattern, out, PREC_LOWEST, false, false);
+        fprintf(out, ")");
     } else {
         emit_expr(ctx, subject, out, PREC_LOWEST, false, false);
         fprintf(out, " == ");
@@ -2052,6 +2061,11 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         case AST_STMT_LOOP: emit_loop(ctx, stmt, out); break;
         case AST_STMT_MATCH: {
             const AstExpr* subject = stmt->as.match_stmt.subject;
+            // A String subject compares by value (rae_ext_rae_str_eq), not `==`;
+            // the type is the same for every case, so resolve it once.
+            Str subj_base = get_base_type_name(infer_expr_type_ref(ctx, subject));
+            bool subject_is_string = str_eq_cstr(subj_base, "String")
+                || str_eq_cstr(subj_base, "rae_String");
             bool first = true;
             for (const AstMatchCase* c = stmt->as.match_stmt.cases; c; c = c->next) {
                 if (!c->pattern) {
@@ -2062,10 +2076,10 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     fprintf(out, first ? "  if (" : " else if (");
                     // First pattern, then each or-pattern (`case A, B, C`),
                     // joined by `||` so any of them enters the arm.
-                    emit_match_case_test(ctx, subject, c->pattern, out);
+                    emit_match_case_test(ctx, subject, c->pattern, subject_is_string, out);
                     for (const AstCasePattern* op = c->or_patterns; op; op = op->next) {
                         fprintf(out, " || ");
-                        emit_match_case_test(ctx, subject, op->expr, out);
+                        emit_match_case_test(ctx, subject, op->expr, subject_is_string, out);
                     }
                     fprintf(out, ") {\n");
                 }
