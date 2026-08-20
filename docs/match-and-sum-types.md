@@ -111,13 +111,18 @@ Keep the current `match … { case … { } default { } }` shape. Add, in rough p
 
 1. **Or-patterns** — `case A, B, C { }` (Rae commas are already optional). Replaces
    `if x is A or x is B …`. Cheap, high-value (the render walk needs it).
-2. **Leading-dot member shorthand** — `case .north { }` when the matched type is
-   known (Swift/Odin). Cuts the repeated `RenderTag.` noise.
-3. **Guards** — `case .north if windy { }` (Swift `where` / Rust `if`). Keeps a
-   secondary condition inside the arm instead of a nested `if`.
-4. **Int/range patterns** — `case 0 { }`, `case 1..10 { }` (Odin/Rust) for matching
+2. **Guards** — `case Direction.north if windy { }` (Swift `where` / Rust `if`).
+   Keeps a secondary condition inside the arm instead of a nested `if`.
+3. **Int/range patterns** — `case 0 { }`, `case 1..10 { }` (Odin/Rust) for matching
    plain integers with a `default`, so numeric dispatch also gets a single form.
-5. **Payload binding** — `case Result.err(msg) { log(msg) }` (needs sum types, C).
+4. **Payload binding** — `case Result.err(msg) { log(msg) }` (needs sum types, C).
+
+**Rejected: leading-dot member shorthand (`case .north`).** Swift/Odin allow it, but
+it does not fit Rae: (1) Rae has **no type inference**, and the shorthand only works
+when the compiler infers the enum type from context — the very mechanism Rae
+deliberately lacks; (2) it hurts **searchability** — `grep RenderTag.shadow` finds a
+full `RenderTag.shadow` case but not a bare `.shadow`, so the symbol becomes harder
+to trace. Cases stay fully qualified: `case RenderTag.shadow { }`.
 
 Rules to keep/state explicitly:
 - **Exhaustive on enums and sum types** (hard error) — already true for enums; extend
@@ -157,7 +162,7 @@ Design questions to settle (flagging, not deciding):
 
 This is the highest-leverage addition but the biggest implementation; it touches
 type layout, pattern binding, drop-by-tag, and the backend. Worth staging: (1)
-or-patterns + leading-dot on existing enums, (2) payloads, (3) Result on top.
+or-patterns on existing enums, (2) payloads, (3) Result on top.
 
 ## Proposal D — Result + error handling
 
@@ -191,7 +196,8 @@ added, keep them positional and immutable.
    `match`.** No language change; immediate "can't-forget-a-pass" safety. Do this as
    part of the 114 systems refactor.
 2. **break / continue.** Small, reuses the drop machinery; removes flag-guard hacks.
-3. **match or-patterns + leading-dot shorthand.** Small, makes (1) read well.
+3. **match or-patterns + guards.** Small, makes (1) read well. (No leading-dot
+   shorthand — rejected above: Rae has no type inference and it hurts searchability.)
 4. **Sum types (enum payloads)** + payload binding + exhaustiveness. The big one;
    unlocks intents/events/messages as first-class.
 5. **Result on sum types** (then optionally a `?` operator). Replaces `ok`-struct
