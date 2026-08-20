@@ -1736,7 +1736,13 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     } else {
                         snprintf(buffer, sizeof(buffer), "cannot assign to read-only view identifier '%.*s'", nl, nm);
                     }
-                    diag_error(module->file_path, (int)stmt->line, (int)stmt->column, buffer);
+                    // Report the ENCLOSING function's file, not module->file_path:
+                    // sibling files merge into one AstModule that remembers only
+                    // one path, so a statement in a non-recorded file would be
+                    // blamed on the wrong file (#221). s_current_decl_origin
+                    // tracks the file the current function was parsed from.
+                    diag_error(s_current_decl_origin ? s_current_decl_origin : module->file_path,
+                               (int)stmt->line, (int)stmt->column, buffer);
                     module->had_error = true;
                 }
             } else if (stmt->as.assign_stmt.target->kind == AST_EXPR_MEMBER
