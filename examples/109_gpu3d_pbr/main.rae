@@ -161,9 +161,11 @@ func main() ret Int {
     setTransform(scene: scene, entity: torusEntity, transform: torusT)
 
     let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
-    renderFrame(r: renderer, scene: scene, camera: camera, light: light, aspect: aspect, time: t)
-    # Frame history for motion vectors (#336): current becomes previous.
-    snapshotPrevTransforms(scene: scene)
+    if gpu2d.renderGate() {
+      renderFrame(r: renderer, scene: scene, camera: camera, light: light, aspect: aspect, time: t)
+      # Frame history for motion vectors (#336): current becomes previous.
+      snapshotPrevTransforms(scene: scene)
+    }
   }
   shutdown()
   gpu2d.closeWindow()

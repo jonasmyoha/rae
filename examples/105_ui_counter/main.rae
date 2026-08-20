@@ -292,7 +292,7 @@ func main() ret Int {
     let needsRender: Bool = hadEvents or changed or wokeUp or renderedOnce is false
     wokeUp = false
 
-    if needsRender {
+    if gpu2d.shouldRenderFrame(appNeedsRender: needsRender) {
       gpu2d.beginFrame(r: 0.03, g: 0.05, b: 0.08, a: 1.0)
       renderSystemGpu2d(world: world, res: gpuUi)
       gpu2d.endFrame()

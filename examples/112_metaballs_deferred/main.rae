@@ -652,7 +652,7 @@ func main() ret Int {
       or timeAnimating or scrolled or renderedOnce is false
     if taaSettleFrames > 0 { needsRender = true }
     dbgDidWork = needsRender
-    if needsRender is false {
+    if gpu2d.shouldRenderFrame(appNeedsRender: needsRender) is false {
       # Nothing to draw: park until the OS has something to say, or until
       # the readout heartbeat is due. Shared policy from
       # lib/ui/event_loop.rae rather than a hardcoded timeout.
