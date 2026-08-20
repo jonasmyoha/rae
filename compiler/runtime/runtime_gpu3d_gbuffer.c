@@ -1003,6 +1003,14 @@ int64_t rae_gb_skin_icount(int64_t mesh){ int s=(int)mesh-1; return (s>=0 && s<g
  * instanceCount=N / firstInstance=base gives each instance its own record. */
 void* rae_gb_pass(void)          { return (void*)gb_pass; }
 void* rae_gb_static_pipeline(void){ return (void*)gb_pipeline; }
+/* #533 terrain-splat pipeline (a static-layout pipeline whose shader samples the
+ * biome field). Created + owned from Rae; stored here for the draw. */
+static void* gb_terrain_pipeline = NULL;
+static void* gb_terrain_bind = NULL;
+void  rae_gb_set_terrain_pipeline(void* p) { gb_terrain_pipeline = p; }
+void* rae_gb_terrain_pipeline(void)        { return gb_terrain_pipeline; }
+void  rae_gb_set_terrain_bind(void* b)     { gb_terrain_bind = b; }
+void* rae_gb_terrain_bind(void)            { return gb_terrain_bind; }
 void* rae_gb_static_bind(void)   { return (void*)gb_bind; }
 void* rae_gb_draws_buffer(void)  { return (void*)gb_draw_sbuf; }
 int64_t rae_gb_max_draws(void)   { return (int64_t)GB_MAX_DRAWS; }

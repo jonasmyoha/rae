@@ -811,6 +811,10 @@ void* rae_gt_get(int64_t i);
  * the stub build (no real geometry pass) provides no-op versions too. */
 void* rae_gb_pass(void);
 void* rae_gb_static_pipeline(void);
+void  rae_gb_set_terrain_pipeline(void* p);  /* #533 */
+void* rae_gb_terrain_pipeline(void);
+void  rae_gb_set_terrain_bind(void* b);
+void* rae_gb_terrain_bind(void);
 void* rae_gb_static_bind(void);
 void* rae_gb_draws_buffer(void);
 int64_t rae_gb_max_draws(void);
