@@ -181,7 +181,9 @@ func main() ret Int {
     camera.position = orbitEye(targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z, yaw: yaw, pitch: pitch, dist: dist)
 
     let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
-    renderDeferredFrame(r: renderer, scene: scene, camera: camera, light: light, aspect: aspect)
+    if gpu2d.renderGate() {
+      renderDeferredFrame(r: renderer, scene: scene, camera: camera, light: light, aspect: aspect)
+    }
   }
   gbuffer.shutdownAll()
   gpu2d.closeWindow()

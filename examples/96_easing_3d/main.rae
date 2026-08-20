@@ -105,20 +105,22 @@ func main() ret Int {
     runUiSystems(world: world, res: uiResources)
 
     let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
-    var passIndex: Int = 0
-    loop passIndex < deferredOrderLength(r: renderer) {
-      let tag: Int = deferredTagAt(r: renderer, i: passIndex)
-      if tag is tagUiOverlayD {
-        gpu2d.beginFrameLoad()
-        renderSystemGpu2d(world: world, res: uiResources)
-      } else {
-        renderDeferredPass(
-          r: renderer, tag: tag, scene: scene
-          camera: camera, light: light, aspect: aspect)
+    if gpu2d.renderGate() {
+      var passIndex: Int = 0
+      loop passIndex < deferredOrderLength(r: renderer) {
+        let tag: Int = deferredTagAt(r: renderer, i: passIndex)
+        if tag is tagUiOverlayD {
+          gpu2d.beginFrameLoad()
+          renderSystemGpu2d(world: world, res: uiResources)
+        } else {
+          renderDeferredPass(
+            r: renderer, tag: tag, scene: scene
+            camera: camera, light: light, aspect: aspect)
+        }
+        passIndex = passIndex + 1
       }
-      passIndex = passIndex + 1
+      snapshotPrevTransforms(scene: scene)
     }
-    snapshotPrevTransforms(scene: scene)
   }
 
   if fixedTestFrame { log("[easing3d] deterministic deferred frame rendered") }
