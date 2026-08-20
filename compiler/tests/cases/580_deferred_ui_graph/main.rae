@@ -38,7 +38,7 @@ func main() {
   var plain: DeferredRenderer = createDeferredRenderer()
   let ps: Int = compileDeferred(r: plain)
   log("plain status={statusName(status: ps)} passes={deferredOrderLength(r: plain)}")
-  if indexOfTag(r: plain, tag: tagUiOverlayD) is 0 - 1 {
+  if indexOfTag(r: plain, tag: RenderTag.uiOverlay) is 0 - 1 {
     log("plain has no ui pass: yes")
   } else {
     log("plain has no ui pass: NO")
@@ -48,9 +48,9 @@ func main() {
   let us: Int = compileDeferred(r: withUi)
   log("ui status={statusName(status: us)} passes={deferredOrderLength(r: withUi)}")
 
-  let composite: Int = indexOfTag(r: withUi, tag: tagComposite)
-  let ui: Int = indexOfTag(r: withUi, tag: tagUiOverlayD)
-  let present: Int = indexOfTag(r: withUi, tag: tagPresentD)
+  let composite: Int = indexOfTag(r: withUi, tag: RenderTag.composite)
+  let ui: Int = indexOfTag(r: withUi, tag: RenderTag.uiOverlay)
+  let present: Int = indexOfTag(r: withUi, tag: RenderTag.present)
   if composite >= 0 and ui > composite and present > ui {
     log("derived composite -> ui -> present: yes")
   } else {
@@ -58,7 +58,7 @@ func main() {
   }
   # The overlay must sit AFTER everything radiometric. UI colours are
   # authored in display space and must never be tone-curved.
-  if ui > indexOfTag(r: withUi, tag: tagLighting) {
+  if ui > indexOfTag(r: withUi, tag: RenderTag.lighting) {
     log("ui after lighting: yes")
   } else {
     log("ui after lighting: NO")

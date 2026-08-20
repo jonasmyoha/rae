@@ -1,0 +1,25 @@
+# Enums are int-backed value types. Both cast directions and automatic
+# .toString() are exercised here (docs/match-and-sum-types.md).
+enum Weekday {
+  monday
+  tuesday
+  wednesday
+}
+
+func nextDay(day: view Weekday) ret Weekday {
+  let wrapped: Int = (day as Int) + 1
+  ret wrapped as Weekday
+}
+
+func main() {
+  let start: Weekday = Weekday.monday
+  # enum -> Int
+  log(start as Int)
+  # Int -> enum, then automatic toString
+  let two: Weekday = 2 as Weekday
+  log(two.toString())
+  # ordinal arithmetic through a helper, name via interpolation
+  log("{nextDay(day: start).toString()}")
+  # direct member interpolation uses the name
+  log("{Weekday.wednesday}")
+}
