@@ -7,6 +7,7 @@
 import core
 import noise
 import math
+import vec3
 
 # Material (splat) layers.
 const matWater: Int = 0
@@ -148,4 +149,37 @@ func sampleWorld(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Wo
   let moist: Float = worldMoisture(x: x, y: y, cfg: cfg)
   let slope: Float = worldSlope(x: x, y: y, cfg: cfg)
   ret classifyWeights(elev: elev, moist: moist, slope: slope, cfg: cfg)
+}
+
+# ---------------------------------------------------------------------------
+# Splat palette (#533): the ground colour per material, and the blended colour at
+# a point from the classifier weights. This is the terrain splat colour AND the
+# grass gradient bottom, so both track the same biome. WGSL will mirror these
+# constants when the terrain fragment splats per-pixel.
+func grassMatColor() ret Vec3 { ret vec3.create(x: 0.105, y: 0.245, z: 0.055) }  # meadow green
+func sandMatColor()  ret Vec3 { ret vec3.create(x: 0.74, y: 0.66, z: 0.44) }     # beach tan
+func mudMatColor()   ret Vec3 { ret vec3.create(x: 0.24, y: 0.19, z: 0.11) }     # swamp brown
+func rockMatColor()  ret Vec3 { ret vec3.create(x: 0.34, y: 0.33, z: 0.32) }     # grey stone
+func waterMatColor() ret Vec3 { ret vec3.create(x: 0.06, y: 0.17, z: 0.26) }     # deep water
+
+# Blend the material palette by the sample's weights into one ground colour.
+func splatColor(sample: view WorldSample) pub ret Vec3 {
+  let grass: Vec3 = grassMatColor()
+  let sand: Vec3 = sandMatColor()
+  let mud: Vec3 = mudMatColor()
+  let rock: Vec3 = rockMatColor()
+  let water: Vec3 = waterMatColor()
+  ret vec3.create(
+    x: grass.x * sample.wGrass + sand.x * sample.wSand + mud.x * sample.wMud
+       + rock.x * sample.wRock + water.x * sample.wWater,
+    y: grass.y * sample.wGrass + sand.y * sample.wSand + mud.y * sample.wMud
+       + rock.y * sample.wRock + water.y * sample.wWater,
+    z: grass.z * sample.wGrass + sand.z * sample.wSand + mud.z * sample.wMud
+       + rock.z * sample.wRock + water.z * sample.wWater)
+}
+
+# The blended ground colour at a world point — for terrain splat + the grass
+# gradient bottom so grass roots match the local ground.
+func biomeGroundColor(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Vec3 {
+  ret splatColor(sample: sampleWorld(x: x, y: y, cfg: cfg))
 }
