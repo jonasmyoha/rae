@@ -64,6 +64,18 @@ func shouldRenderFrame(appNeedsRender: view Bool) ret Bool {
   ret appNeedsRender
 }
 
+# Busy-loop convenience for apps that render every frame (games, always-on
+# animation): render this frame only if the window is visible. When hidden it
+# PARKS briefly and returns false, so `if gpu2d.renderGate() { ...render... }`
+# gets both the macOS backgrounded-render leak fix AND avoids a busy spin, with
+# no else branch. Event-driven loops that already compute a needsRender should
+# use shouldRenderFrame + their own waitEvents instead.
+func renderGate() ret Bool {
+  if windowVisible() { ret true }
+  waitEvents(timeoutSec: 0.25)
+  ret false
+}
+
 # --- Coordinate system (#112) --------------------------------------------
 # Draw coordinates are in DESIGN units. By default 1 unit = 1 physical pixel
 # (identity). Call setDesignResolution to author against a fixed virtual
