@@ -37,4 +37,16 @@ func main() {
   if d is Direction.east {
     log("d is East")
   }
+
+  # Enums are int-backed value types, so no hand-written name tables:
+  #   - `.toString()` yields the member name automatically
+  #   - string interpolation of an enum member uses that name too
+  #   - `enum as Int` and `Int as enum` cast both directions
+  log(d.toString())            # east
+  log("heading {Direction.north}")   # heading north
+
+  let ordinal: Int = d as Int  # east -> 2
+  log(ordinal)
+  let rotated: Direction = (ordinal + 1) as Direction  # west
+  log(rotated.toString())
 }
