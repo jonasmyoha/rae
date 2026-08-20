@@ -1717,6 +1717,15 @@ static bool sema_is_numeric_kind(TypeKind k) {
     return k == TYPE_INT || k == TYPE_FLOAT || k == TYPE_FLOAT64;
 }
 
+// True if the type ref names an enum declaration. Enums have no dedicated
+// TypeKind (they resolve to Void in sema), so they are recognised by the written
+// type name resolving to an AST_DECL_ENUM symbol.
+static bool sema_typeref_is_enum(SymbolTable* symbols, const AstTypeRef* tr) {
+    if (!tr || !tr->parts || tr->parts->text.len == 0) return false;
+    Symbol* sym = symbol_table_lookup(symbols, tr->parts->text);
+    return sym && sym->decl && sym->decl->kind == AST_DECL_ENUM;
+}
+
 /* An unsuffixed literal is not a typed runtime value being converted — the
  * compiler materialises it directly in the destination type, so
  * `let x: Float64 = 1.5` needs no cast. Only already-typed values do. */
@@ -1890,6 +1899,15 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                  * type-system escape hatch: anything else is rejected. */
                 bool ok = sema_is_numeric_kind(target->kind) && sema_is_numeric_kind(src->kind);
                 if (!ok && target->kind == src->kind) ok = true; /* Float as Float32: same type, no-op */
+                if (!ok) {
+                    /* Enums are int-backed, so `index as ClipKind` is valid — the
+                     * C cast is a no-op (both are int64_t); an out-of-range Int
+                     * simply matches no `case` and toString()s to "". Enums have
+                     * no dedicated TypeInfo (they resolve to Void in sema), so
+                     * detect the target enum from its syntactic type ref. */
+                    if (sema_typeref_is_enum(symbols, expr->as.cast.target)
+                        && sema_is_numeric_kind(src->kind)) ok = true;
+                }
                 if (!ok) {
                     const char* cf = s_current_decl_origin ? s_current_decl_origin : NULL;
                     diag_error(cf, (int)expr->line, (int)expr->column,
