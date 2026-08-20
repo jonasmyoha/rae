@@ -157,7 +157,20 @@ shared) or a small "fat struct" where a few fields belong to specific kinds
 kind"). Both read clearly and cost a few small unused fields. This is NOT a gap that
 needs sum types — see Proposal C, which finds even JSON does better without them.
 
-## Proposal A — break / continue (with ownership-drop semantics)
+## Proposal A — break / continue (with ownership-drop semantics) — IMPLEMENTED (#623)
+
+Shipped. `break` and `continue` are keywords, valid only inside a `loop`
+(sema rejects them elsewhere: "'break' is only valid inside a loop"). Both
+work in all three loop forms (`loop cond`, C-style `loop i: Int = 0, cond,
+++i`, and collection `loop x: T in xs`) and from inside `if`/`match` bodies
+nested in the loop — `match` lowers to `if/else` chains, not a C `switch`, so
+a C `break`/`continue` targets the enclosing loop, not the match. The C
+backend drops every owned local from the current point back to the loop
+body's start (reverse-construction order, via `emit_implicit_drops_for_body`)
+before emitting the C `break;`/`continue;`, so a non-local exit runs the same
+scope-exit drops as fallthrough — verified leak- and double-free-clean under
+`RAE_MEM_STATS`. Tests: `633_loop_break_continue`, `634_reject_break_outside_loop`.
+The Live/VM backend (frozen) reports these as unsupported.
 
 The concern ("they have memory drop effects") is real but already solved elsewhere
 in Rae: an early `ret` inside a function must drop the owned (`own`) locals in

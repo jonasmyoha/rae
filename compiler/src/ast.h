@@ -271,7 +271,9 @@ typedef enum {
   AST_STMT_LOOP,
   AST_STMT_MATCH,
   AST_STMT_ASSIGN,
-  AST_STMT_DEFER
+  AST_STMT_DEFER,
+  AST_STMT_BREAK,
+  AST_STMT_CONTINUE
 } AstStmtKind;
 
 typedef struct AstMatchCase {

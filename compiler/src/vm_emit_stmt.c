@@ -31,6 +31,8 @@ static const char* stmt_kind_name(AstStmtKind kind) {
     case AST_STMT_MATCH: return "match";
     case AST_STMT_ASSIGN: return "assignment";
     case AST_STMT_DEFER: return "defer";
+    case AST_STMT_BREAK: return "break";
+    case AST_STMT_CONTINUE: return "continue";
     default: break;
   }
   return "unknown";

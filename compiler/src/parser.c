@@ -2233,6 +2233,12 @@ static AstStmt* parse_statement(Parser* parser) {
     if (s && s->kind == AST_STMT_LOOP) s->as.loop_stmt.is_parallel = true;
     return s;
   }
+  if (parser_match(parser, TOK_KW_BREAK)) {
+    return new_stmt(parser, AST_STMT_BREAK, parser_previous(parser));
+  }
+  if (parser_match(parser, TOK_KW_CONTINUE)) {
+    return new_stmt(parser, AST_STMT_CONTINUE, parser_previous(parser));
+  }
   if (parser_match(parser, TOK_KW_MATCH)) {
     return parse_match_statement(parser, parser_previous(parser));
   }
