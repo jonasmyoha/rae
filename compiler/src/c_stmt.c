@@ -2042,10 +2042,19 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     fprintf(out, ") {\n");
                 }
                 first = false;
+                // Each case body is its own scope: save/restore local_count and
+                // emit its owned-local drops before the closing brace, so a `let`
+                // of an owned value inside a case drops where its C scope ends
+                // (mirrors emit_if's per-branch handling) instead of leaking to
+                // the enclosing scope's drop pass, which would emit the drop on an
+                // out-of-scope C identifier.
+                size_t saved_locals_case = ctx->local_count;
                 if (c->block) {
                     for (AstStmt* s = c->block->first; s; s = s->next)
                         emit_stmt(ctx, s, out);
                 }
+                emit_implicit_drops_for_body(ctx, out, saved_locals_case);
+                ctx->local_count = saved_locals_case;
                 fprintf(out, "  }");
             }
             fprintf(out, "\n");
