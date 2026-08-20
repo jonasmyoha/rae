@@ -1,0 +1,34 @@
+# Borrowing (`view`) an rvalue argument — an enum literal, arithmetic, an
+# object literal, a call result — used to fail C compilation ("cannot take the
+# address of an rvalue"). The backend now materialises a compound-literal
+# temporary for those, while lvalue args (variables, fields) still borrow in
+# place (#272).
+import core
+
+type Vec {
+  x: Int
+  y: Int
+}
+
+enum Cmd {
+  play
+  pause
+  stop
+}
+
+func sumVec(v: view Vec) ret Int { ret v.x + v.y }
+func makeVec(a: view Int, b: view Int) ret Vec {
+  ret Vec { x: a, y: b }
+}
+func handle(c: view Cmd) ret Int { ret c as Int }
+func readInt(n: view Int) ret Int { ret n }
+
+func main() {
+  let local: Vec = { x: 10, y: 20 }
+  log(sumVec(v: local))                 # lvalue variable
+  log(sumVec(v: makeVec(a: 3, b: 4)))   # call-result rvalue
+  log(sumVec(v: Vec { x: 1, y: 2 }))    # object-literal rvalue
+  log(handle(c: Cmd.stop))              # enum-literal rvalue
+  log(readInt(n: 2 + 3))                # arithmetic rvalue
+  log(readInt(n: local.x))              # field lvalue
+}
