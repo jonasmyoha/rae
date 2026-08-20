@@ -54,6 +54,7 @@ static const Keyword KEYWORDS[] = {
     {"own", TOK_KW_OWN},     {"copy", TOK_KW_COPY},
     {"defer", TOK_KW_DEFER}, {"taskScope", TOK_KW_TASKSCOPE},
     {"parallelLoop", TOK_KW_PARALLELLOOP},
+    {"break", TOK_KW_BREAK}, {"continue", TOK_KW_CONTINUE},
     {"as", TOK_KW_AS}};
 
 static const char* const TOKEN_KIND_NAMES[] = {
@@ -90,6 +91,8 @@ static const char* const TOKEN_KIND_NAMES[] = {
     [TOK_KW_ELSE] = "TOK_ELSE",
     [TOK_KW_ENUM] = "TOK_ENUM",
     [TOK_KW_LOOP] = "TOK_LOOP",
+    [TOK_KW_BREAK] = "TOK_BREAK",
+    [TOK_KW_CONTINUE] = "TOK_CONTINUE",
     [TOK_KW_IN] = "TOK_IN",
     [TOK_KW_MATCH] = "TOK_MATCH",
     [TOK_KW_CASE] = "TOK_CASE",

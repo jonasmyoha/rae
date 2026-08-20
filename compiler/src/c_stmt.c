@@ -575,6 +575,9 @@ static int count_ident_refs_stmt(const AstStmt* s, Str name) {
              count_ident_refs_expr(s->as.assign_stmt.value, name);
     case AST_STMT_DEFER:
       return count_ident_refs_block(s->as.defer_stmt.block, name);
+    case AST_STMT_BREAK:
+    case AST_STMT_CONTINUE:
+      return 0;  // no operands
   }
   return 0;
 }
@@ -942,12 +945,18 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             ctx->local_moved[local_index] = false;
             ctx->local_struct_owns_heap[local_index] = !binding_is_ref;
         }
+        // break/continue drop back to here (before the element binding), so a
+        // non-local exit drops the current element too, matching the per-
+        // iteration drop below.
+        if (ctx->loop_depth < 32) ctx->loop_body_local_start[ctx->loop_depth] = saved_locals;
+        ctx->loop_depth++;
         if (stmt->as.loop_stmt.body) {
             for (const AstStmt* body_stmt = stmt->as.loop_stmt.body->first;
                  body_stmt; body_stmt = body_stmt->next) {
                 emit_stmt(ctx, body_stmt, out);
             }
         }
+        ctx->loop_depth--;
         emit_implicit_drops_for_body(ctx, out, saved_locals);
         ctx->local_count = saved_locals;
         fprintf(out, "    }\n  }\n");
@@ -973,9 +982,14 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     fprintf(out, "; ");
     if (stmt->as.loop_stmt.increment) emit_expr(ctx, stmt->as.loop_stmt.increment, out, PREC_LOWEST, false, false);
     fprintf(out, ") {\n");
+    // break/continue drop owned locals back to the loop body start (the C for
+    // init-let, an Int counter, is not tracked here and needs no drop).
+    if (ctx->loop_depth < 32) ctx->loop_body_local_start[ctx->loop_depth] = saved_locals;
+    ctx->loop_depth++;
     if (stmt->as.loop_stmt.body) {
         for (const AstStmt* s = stmt->as.loop_stmt.body->first; s; s = s->next) emit_stmt(ctx, s, out);
     }
+    ctx->loop_depth--;
     emit_implicit_drops_for_body(ctx, out, saved_locals);
     ctx->local_count = saved_locals;
     fprintf(out, "  }\n");
@@ -2058,6 +2072,18 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 fprintf(out, "  }");
             }
             fprintf(out, "\n");
+            break;
+        }
+        case AST_STMT_BREAK:
+        case AST_STMT_CONTINUE: {
+            // Non-local loop exit: drop every owned local declared inside the
+            // loop body up to here (reverse-construction order), then jump.
+            // Sema has already rejected these outside a loop; guard anyway.
+            if (ctx->loop_depth > 0) {
+                emit_implicit_drops_for_body(
+                    ctx, out, ctx->loop_body_local_start[ctx->loop_depth - 1]);
+            }
+            fprintf(out, stmt->kind == AST_STMT_BREAK ? "  break;\n" : "  continue;\n");
             break;
         }
         case AST_STMT_DEFER: {

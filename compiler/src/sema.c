@@ -18,6 +18,12 @@ static const char* s_current_decl_origin = NULL;
  * hard error and actually fail the build rather than just printing. */
 static AstModule* s_current_module = NULL;
 
+/* Loop nesting depth during statement analysis, so `break`/`continue`
+ * can be rejected outside any loop. Balanced increment/decrement around
+ * each loop body; there are no nested function bodies, so it returns to
+ * 0 between top-level function analyses. */
+static int s_loop_depth = 0;
+
 // Per-file import/open directives (docs/module-namespacing.md). Registered from
 // the module graph before sema; consulted via s_current_decl_origin so a call
 // resolves names against ITS file's imports (aliases, open-vs-import). Auto-
@@ -1559,6 +1565,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                  if (stmt->as.loop_stmt.condition) sema_analyze_expr(ctx, module, symbols, stmt->as.loop_stmt.condition);
              }
              if (stmt->as.loop_stmt.increment) sema_analyze_expr(ctx, module, symbols, stmt->as.loop_stmt.increment);
+             s_loop_depth++;
              if (stmt->as.loop_stmt.body) {
                  AstStmt* s = stmt->as.loop_stmt.body->first;
                  while (s) {
@@ -1576,9 +1583,20 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                      s = s->next;
                  }
              }
+             s_loop_depth--;
              symbol_table_pop_scope(symbols);
              break;
         }
+        case AST_STMT_BREAK:
+        case AST_STMT_CONTINUE:
+             if (s_loop_depth == 0) {
+                 diag_error(module->file_path, (int)stmt->line, (int)stmt->column,
+                            stmt->kind == AST_STMT_BREAK
+                                ? "'break' is only valid inside a loop"
+                                : "'continue' is only valid inside a loop");
+                 module->had_error = true;
+             }
+             break;
         case AST_STMT_MATCH: {
             if (stmt->as.match_stmt.subject) sema_analyze_expr(ctx, module, symbols, stmt->as.match_stmt.subject);
             bool has_default = false;
