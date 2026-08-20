@@ -61,11 +61,16 @@ if [ -d "$ex_dir/assets" ]; then
   mkdir -p "$stage/$ex_rel"; cp -R "$ex_dir/assets" "$stage/$ex_rel/"   # examples/<name>/assets/...
   mkdir -p "$stage/assets";  cp -R "$ex_dir/assets/." "$stage/assets/"  # assets/... (at root)
 fi
-for shared in lib/app3d/scenes lib/data lib/noise.wgsl; do
+for shared in lib/app3d/scenes lib/data; do
   if [ -e "$root/$shared" ]; then
     dst="$stage/$(dirname "$shared")"; mkdir -p "$dst"; cp -R "$root/$shared" "$dst/"
   fi
 done
+# Shared WGSL that examples compose at RUNTIME (noise, world_biome, terrain_splat,
+# ...). Bundle the whole lib/*.wgsl set: a missing one does not fail gracefully —
+# the composed shader loses its entry point and wgpu-native ABORTS at pipeline
+# creation (this is what crashed 114 on device: only noise.wgsl was shipped).
+mkdir -p "$stage/lib"; cp "$root"/lib/*.wgsl "$stage/lib/" 2>/dev/null || true
 
 asset_lines=""; pkg_lines=""
 while IFS= read -r f; do
