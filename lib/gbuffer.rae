@@ -41,6 +41,7 @@
 import core
 import math
 import vec3
+import string
 import sky
 import sky_hosek
 open sky_hosek
@@ -187,6 +188,12 @@ func ensureGbAttachments() {
 # builds the modules and pipelines over the bindings.
 func gbWgsl() extern("rae_gb_wgsl") ret Ptr
 func gbSkinWgsl() extern("rae_gb_skin_wgsl") ret Ptr
+# #533 terrain-splat pipeline (static vertex layout; shader samples the biome).
+func gbSetTerrainPipeline(pipeline: Ptr) extern("rae_gb_set_terrain_pipeline")
+func gbTerrainPipeline() extern("rae_gb_terrain_pipeline") ret Ptr
+func gbSetTerrainBind(bind: Ptr) extern("rae_gb_set_terrain_bind")
+func gbTerrainBind() extern("rae_gb_terrain_bind") ret Ptr
+func gbReadWgsl(path: String) extern("rae_ext_rae_sys_read_file") ret String
 func gbEntryVs() extern("rae_gb_entry_vs") ret Ptr
 func gbEntryFs() extern("rae_gb_entry_fs") ret Ptr
 func gbSetPipeline(pipeline: Ptr) extern("rae_gb_set_pipeline")
@@ -642,6 +649,64 @@ func draw(mesh: copy Int, model: view Mat4, prevModel: view Mat4,
   gbIssueInstanced(pass: gbPass(), pipeline: gbStaticPipeline(), bind: gbStaticBind(),
     vbuf: gbMeshVbuf(mesh: mesh), ibuf: gbMeshIbuf(mesh: mesh),
     icount: gbMeshIcount(mesh: mesh), base: base, count: 1, records: gDrawScratch.data)
+}
+
+var gTerrainPipeMade: Bool = false
+
+# Compose the terrain-splat shader from the aligned WGSL files (noise + biome +
+# terrain), read once at pipeline build. See lib/terrain_splat.wgsl / #533.
+func terrainSplatWgsl() ret String {
+  let noiseSrc: String = gbReadWgsl(path: "lib/noise.wgsl")
+  let biomeSrc: String = gbReadWgsl(path: "lib/world_biome.wgsl")
+  let terrSrc: String = gbReadWgsl(path: "lib/terrain_splat.wgsl")
+  ret noiseSrc.concat(other: "\n").concat(other: biomeSrc).concat(other: "\n").concat(other: terrSrc)
+}
+
+func ensureTerrainPipeline() {
+  if gTerrainPipeMade { ret }
+  gTerrainPipeMade = true
+  let composed: String = terrainSplatWgsl()
+  let cbuf: Buffer(Any) = composed.toCStr()
+  let terrainMod: Ptr = makeShaderModule(wgsl: cbuf)
+  var attrs: List(WGPUVertexAttribute) = createList(WGPUVertexAttribute, cap: 3)
+  attrs.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0 as UInt64, shaderLocation: 0 as UInt32 })
+  attrs.add(value: { format: WGPUVertexFormat_Float32x3, offset: 12 as UInt64, shaderLocation: 1 as UInt32 })
+  attrs.add(value: { format: WGPUVertexFormat_Float32x2, offset: 24 as UInt64, shaderLocation: 2 as UInt32 })
+  gbSetTerrainPipeline(pipeline: makeGbPipeline(shaderMod: terrainMod, attrs: attrs, stride: 32))
+  wgpuShaderModuleRelease(shaderModule: terrainMod)
+  # A bind group from the TERRAIN pipeline's own layout (wgpu auto-layouts are
+  # pipeline-exclusive, so the static bind group can't be reused) — same frame
+  # uniform @0 + draws storage @1.
+  let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbTerrainPipeline(), groupIndex: 0 as UInt32)
+  var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 2)
+  entries.add(value: { binding: 0 as UInt32, buffer: gbFrameUbuf(), size: gbFrameBytes() as UInt64 })
+  entries.add(value: { binding: 1 as UInt32, buffer: gbDrawsBuffer(), size: gbDrawsSize() as UInt64 })
+  let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 2 as UInt64, entries: entries.data }
+  gbSetTerrainBind(bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
+  wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+}
+
+# Draw one ground-tile mesh with the biome-splat pipeline (#533): its shader
+# ignores the per-draw colour and samples the biome field per vertex, so the
+# ground shows grass/sand/mud/rock/water. Restores the static pipeline after so a
+# following static draw is unaffected. Same DrawU/vertex layout as the static path.
+func drawTerrainMesh(mesh: copy Int, transform: view Transform3d, prevTransform: view Transform3d,
+                     roughness: copy Float) pub {
+  ensureTerrainPipeline()
+  if gbMeshReady(mesh: mesh) is 0 { ret }
+  let base: Int = gbDrawCount()
+  if base >= gbMaxDraws() { ret }
+  ensureDrawScratch()
+  let model: Mat4 = modelMatrixOf(t: transform)
+  let prevModel: Mat4 = modelMatrixOf(t: prevTransform)
+  packInstanceRecord(records: gDrawScratch, slot: 0, model: model, prevModel: prevModel,
+    r: 1.0, g: 1.0, b: 1.0, metallic: 0.0, roughness: roughness, emissive: 0.0, toon: 0)
+  gbIssueInstanced(pass: gbPass(), pipeline: gbTerrainPipeline(), bind: gbTerrainBind(),
+    vbuf: gbMeshVbuf(mesh: mesh), ibuf: gbMeshIbuf(mesh: mesh),
+    icount: gbMeshIcount(mesh: mesh), base: base, count: 1, records: gDrawScratch.data)
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: gbPass(), pipeline: gbStaticPipeline())
+  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: gbPass(), groupIndex: 0 as UInt32,
+    group: gbStaticBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
 }
 
 # One skinned mesh instance (#503, was the C `drawSkinned`). Same DrawU record
