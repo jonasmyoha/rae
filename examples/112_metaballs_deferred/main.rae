@@ -719,7 +719,7 @@ func main() ret Int {
       var pi3: Int = 0
       loop pi3 < deferredOrderLength(r: renderer) {
         let tag: Int = deferredTagAt(r: renderer, i: pi3)
-        if tag is tagShadowD {
+        if tag is RenderTag.shadow {
           # Fit the cascades to THIS frame's camera and sun, then
           # rasterise every visible mesh into them (#382). The graph put
           # this before the scene pass because the scene pass declares a
@@ -753,7 +753,7 @@ func main() ret Int {
             shadowLogged = true
           }
         }
-        if tag is tagGbuffer {
+        if tag is RenderTag.gbuffer {
           # App-owned so the ACTIVE scene is the one submitted. Qualified
           # calls: gpu3d and gbuffer both export beginPass/endPass and this
           # example opens both, so an unqualified call silently picks the
@@ -774,12 +774,12 @@ func main() ret Int {
           }
           gbuffer.endPass()
         }
-        if tag is tagSsaoD or tag is tagDepthPyramid or tag is tagLighting
-          or tag is tagTaaD or tag is tagComposite {
+        if tag is RenderTag.ssao or tag is RenderTag.depthPyramid or tag is RenderTag.lighting
+          or tag is RenderTag.taa or tag is RenderTag.composite {
           renderDeferredPass(r: renderer, tag: tag, scene: scene1.scene,
                              camera: camera, light: light, aspect: aspect)
         }
-        if tag is tagUiOverlayD {
+        if tag is RenderTag.uiOverlay {
           gpu2d.beginFrameLoad()
           renderSystemGpu2d(world: uiWorld, res: gpuUi)
           # After the app UI, so the diagnostic is never what gets covered up.
@@ -788,7 +788,7 @@ func main() ret Int {
           drawDebugOverlay(d: dbg, font: gpuUi.textFont, didRealWork: dbgDidWork)
           lastLogRevision = logView.revision
         }
-        if tag is tagPresentD {
+        if tag is RenderTag.present {
           gpu2d.endFrame()
         }
         pi3 = pi3 + 1
