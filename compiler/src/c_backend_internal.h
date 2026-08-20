@@ -104,6 +104,13 @@ typedef struct {
   bool is_main;
   int scope_depth;
   CDeferStack defer_stack;
+  // break/continue support: for each open loop, the `locals[]` count at the
+  // start of its body. A `break`/`continue` drops every owned local from the
+  // current count down to this mark (reverse-construction order) before the
+  // C break/continue, so a non-local loop exit runs the same scope-exit drops
+  // as fallthrough. Index [loop_depth-1] is the innermost loop.
+  size_t loop_body_local_start[32];
+  int loop_depth;
 } CFuncContext;
 
 // -- Helpers (small, used widely) --

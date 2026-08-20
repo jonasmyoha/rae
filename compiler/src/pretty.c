@@ -965,6 +965,16 @@ static void pp_print_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
     case AST_STMT_MATCH: pp_print_match_stmt(pp, stmt); break;
     case AST_STMT_ASSIGN: pp_print_assign_stmt(pp, stmt); break;
     case AST_STMT_DEFER: pp_print_defer_stmt(pp, stmt); break;
+    case AST_STMT_BREAK:
+      pp_check_comments(pp, stmt->line);
+      pp_write(pp, "break");
+      pp_newline(pp);
+      break;
+    case AST_STMT_CONTINUE:
+      pp_check_comments(pp, stmt->line);
+      pp_write(pp, "continue");
+      pp_newline(pp);
+      break;
   }
 }
 

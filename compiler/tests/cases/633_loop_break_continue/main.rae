@@ -1,0 +1,53 @@
+# break / continue in loops, with owned-value drop on the non-local exit
+# (docs/match-and-sum-types.md Proposal A). The String locals below are
+# heap-owned; a leak or double-free on the break/continue paths would show
+# up under RAE_MEM_STATS, and the drop machinery is the whole point of #623.
+import core
+
+enum Cmd {
+  go
+  skip
+  stop
+}
+
+func cmdAt(i: view Int) ret Cmd {
+  if i is 2 { ret Cmd.skip }
+  if i is 4 { ret Cmd.stop }
+  ret Cmd.go
+}
+
+func main() {
+  # break out of a condition loop
+  var i: Int = 0
+  loop i < 10 {
+    if i is 3 { break }
+    log("count {i}")
+    i = i + 1
+  }
+
+  # continue in a C-style loop: skip evens
+  loop j: Int = 0, j < 6, ++j {
+    if j % 2 is 0 { continue }
+    log("odd {j}")
+  }
+
+  # break/continue from inside a match case, with an owned local live at exit
+  var k: Int = 0
+  loop k < 8 {
+    let tag: String = "row-" + k.toString()
+    let action: Cmd = cmdAt(i: k)
+    k = k + 1
+    match action {
+      case Cmd.go {
+        log(tag)
+      }
+      case Cmd.skip {
+        continue
+      }
+      case Cmd.stop {
+        break
+      }
+    }
+  }
+  log("done")
+}

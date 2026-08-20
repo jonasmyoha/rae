@@ -588,6 +588,14 @@ static void dump_block(const AstBlock* block, FILE* out, int indent) {
       case AST_STMT_DEFER:
         dump_defer_stmt(stmt, out, indent);
         break;
+      case AST_STMT_BREAK:
+        print_indent(out, indent);
+        fputs("Break\n", out);
+        break;
+      case AST_STMT_CONTINUE:
+        print_indent(out, indent);
+        fputs("Continue\n", out);
+        break;
     }
     stmt = stmt->next;
   }
