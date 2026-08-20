@@ -57,15 +57,17 @@ func walkerHideCameraChrome(world: mod UiWorld) pub {
 # Human-readable name for a render-graph pass tag, used as the profiler zone
 # label (PassDesc drops the authored name, so we remap here).
 func walkerPassName(tag: copy Int) pub ret String {
-  if tag is tagShadowD { ret "shadow" }
-  if tag is tagGbuffer { ret "gbuffer" }
-  if tag is tagSsaoD { ret "ssao" }
-  if tag is tagDepthPyramid { ret "depthPyramid" }
-  if tag is tagLighting { ret "lighting" }
-  if tag is tagTaaD { ret "taa" }
-  if tag is tagComposite { ret "composite" }
-  if tag is tagUiOverlayD { ret "uiOverlay" }
-  if tag is tagPresentD { ret "present" }
+  match tag {
+  case RenderTag.shadow { ret "shadow" }
+  case RenderTag.gbuffer { ret "gbuffer" }
+  case RenderTag.ssao { ret "ssao" }
+  case RenderTag.depthPyramid { ret "depthPyramid" }
+  case RenderTag.lighting { ret "lighting" }
+  case RenderTag.taa { ret "taa" }
+  case RenderTag.composite { ret "composite" }
+  case RenderTag.uiOverlay { ret "uiOverlay" }
+  case RenderTag.present { ret "present" }
+  }
   ret "pass"
 }
 
