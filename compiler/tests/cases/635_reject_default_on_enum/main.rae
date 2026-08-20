@@ -1,0 +1,23 @@
+# An enum match is a CLOSED set: `default` is disallowed so adding a variant
+# forces every match to be reviewed (docs/match-and-sum-types.md).
+enum Color {
+  red
+  green
+  blue
+}
+
+func name(c: view Int) ret String {
+  match c {
+    case Color.red {
+      ret "red"
+    }
+    default {
+      ret "other"
+    }
+  }
+  ret "x"
+}
+
+func main() {
+  log(name(c: Color.red))
+}

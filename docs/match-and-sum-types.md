@@ -55,7 +55,20 @@ Properties that are already right (and match modern languages, not C):
 
 Not present: `switch`, `break`, `continue`, enum payloads, `Result`, tuples.
 
-## `default`: the subject's type decides (enum = no default; Int/String = default)
+## `default`: the subject's type decides (enum = no default; Int/String = default) — IMPLEMENTED (#621)
+
+Shipped for the match STATEMENT form. Sema now: (1) rejects `default` on an
+enum subject ("must not use a 'default' arm"); (2) requires `default` on an
+Int/String subject ("requires a 'default' arm"); (3) rejects `default` on a
+Bool subject (closed set). Enum exhaustiveness is unchanged except the
+missing-case hint dropped its now-invalid "or use a 'default' arm" suffix.
+The one `default` site (`lib/core.rae` `StringMap.has`) was rewritten to
+`ret get(...) is not none`. Tests: `635_reject_default_on_enum`,
+`636_reject_int_match_no_default` (plus existing 386/387/404/310). The match
+EXPRESSION form (`match x { case … => … }`) is not yet sema-checked at all
+(no exhaustiveness/default analysis today); applying these rules there is
+follow-up.
+
 
 The right rule is not "remove `default` everywhere" but a distinction driven by whether
 the value space is **closed** (finite, known set) or **open** (effectively infinite):

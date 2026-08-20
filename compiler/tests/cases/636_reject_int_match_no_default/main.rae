@@ -1,0 +1,19 @@
+# An Int match is an OPEN value space: a `default` arm is REQUIRED because no
+# finite list of cases is exhaustive (docs/match-and-sum-types.md).
+import core
+
+func status(code: view Int) ret String {
+  match code {
+    case 200 {
+      ret "ok"
+    }
+    case 404 {
+      ret "not found"
+    }
+  }
+  ret "x"
+}
+
+func main() {
+  log(status(code: 200))
+}
