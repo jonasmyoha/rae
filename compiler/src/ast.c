@@ -537,6 +537,10 @@ static void dump_match_stmt(const AstStmt* stmt, FILE* out, int indent) {
     if (cases->pattern) {
       fputs("case ", out);
       dump_expr(cases->pattern, out);
+      for (AstCasePattern* op = cases->or_patterns; op; op = op->next) {
+        fputs(", ", out);
+        dump_expr(op->expr, out);
+      }
     } else {
       fputs("default", out);
     }

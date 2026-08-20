@@ -1805,8 +1805,21 @@ static AstStmt* parse_match_statement(Parser* parser, const Token* match_token) 
   while (!parser_check(parser, TOK_RBRACE) && !parser_check(parser, TOK_EOF)) {
     size_t prev_index = parser->index;
     AstMatchCase* match_case = parser_alloc(parser, sizeof(AstMatchCase));
+    match_case->or_patterns = NULL;
     if (parser_match(parser, TOK_KW_CASE)) {
       match_case->pattern = parse_expression(parser);
+      // Or-pattern: `case A, B, C { }` groups several patterns into one arm.
+      // Statement cases are block-delimited (no comma between cases), so a
+      // comma here unambiguously means another pattern for THIS arm.
+      AstCasePattern* or_tail = NULL;
+      while (parser_match(parser, TOK_COMMA)) {
+        AstCasePattern* extra = parser_alloc(parser, sizeof(AstCasePattern));
+        extra->expr = parse_expression(parser);
+        extra->next = NULL;
+        if (or_tail) or_tail->next = extra;
+        else match_case->or_patterns = extra;
+        or_tail = extra;
+      }
       match_case->block = parse_block(parser);
     } else if (parser_match(parser, TOK_KW_DEFAULT)) {
       if (saw_default) {
