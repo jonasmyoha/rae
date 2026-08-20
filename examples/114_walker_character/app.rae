@@ -631,6 +631,42 @@ func updateApp(app: mod App) {
   app.frame.needsRender = needsRender
 }
 
+# The shadow pass: fit cascades to this frame, then rasterise every caster
+# (ground, props, the character's skinned parts + crowd). Its own function so the
+# owned `cascades` value lives in a function scope — a `let` of an owned value
+# inside a `match case` currently mis-scopes its drop (compiler bug, queued).
+func renderShadowPass(app: mod App, aspect: copy Float, palette: view List(Float)) {
+  let cascades: ShadowCascades = fitShadowCascades(
+    camPos: app.cam.camera.position, camTarget: app.cam.camera.target,
+    fovYDeg: app.cam.camera.fovYDeg, aspect: aspect,
+    near: app.cam.camera.nearZ, far: 24.0, sunDir: app.cam.light.sunDir,
+    count: 3, resolution: drsShadowRes(drs: app.render.drs), lambda: 0.75, backExtent: 12.0)
+  uploadPalette(rows: palette, jointCount: jointCount(sk: app.character.skeleton))
+  if app.io.settings.shadows {
+    beginShadowPass(c: cascades)
+    renderSceneShadow(scene: app.scene)
+    drawTerrainPropsShadow(terrain: app.terrain, scene: app.scene)
+    var sp: Int = 0
+    loop sp < app.character.partIds.length {
+      let sh: MeshHandle = meshHandle(id: walkerIntAt(values: app.character.partIds, index: sp), generation: 1)
+      drawShadowCasterSkinned(mesh: sh, model: app.character.model)
+      var shadowClone: Int = 0
+      loop shadowClone < app.character.crowd.length {
+        if let cloneModel: Mat4 = app.character.crowd.at(index: shadowClone) {
+          drawShadowCasterSkinned(mesh: sh, model: cloneModel)
+        }
+        shadowClone = shadowClone + 1
+      }
+      sp = sp + 1
+    }
+    endShadowPass()
+  }
+  if app.render.shadowLogged is false {
+    log("[shadow] casters {shadowCasterCount()}, {cascades.count} cascades at {cascades.resolution}")
+    app.render.shadowLogged = true
+  }
+}
+
 # ----- render phase: animation sample + render-graph walk ------------------
 func renderApp(app: mod App) {
   app.frame.renderedOnce = true
@@ -666,38 +702,14 @@ func renderApp(app: mod App) {
   loop oi < deferredOrderLength(r: app.render.renderer) {
     let tag: Int = deferredTagAt(r: app.render.renderer, i: oi)
     profile.zoneBegin(name: walkerPassName(tag: tag))
-    if tag is tagShadowD {
-      let cascades: ShadowCascades = fitShadowCascades(
-        camPos: app.cam.camera.position, camTarget: app.cam.camera.target,
-        fovYDeg: app.cam.camera.fovYDeg, aspect: aspect,
-        near: app.cam.camera.nearZ, far: 24.0, sunDir: app.cam.light.sunDir,
-        count: 3, resolution: drsShadowRes(drs: app.render.drs), lambda: 0.75, backExtent: 12.0)
-      uploadPalette(rows: palette, jointCount: jointCount(sk: app.character.skeleton))
-      if app.io.settings.shadows {
-        beginShadowPass(c: cascades)
-        renderSceneShadow(scene: app.scene)
-        drawTerrainPropsShadow(terrain: app.terrain, scene: app.scene)
-        var sp: Int = 0
-        loop sp < app.character.partIds.length {
-          let sh: MeshHandle = meshHandle(id: walkerIntAt(values: app.character.partIds, index: sp), generation: 1)
-          drawShadowCasterSkinned(mesh: sh, model: app.character.model)
-          var shadowClone: Int = 0
-          loop shadowClone < app.character.crowd.length {
-            if let cloneModel: Mat4 = app.character.crowd.at(index: shadowClone) {
-              drawShadowCasterSkinned(mesh: sh, model: cloneModel)
-            }
-            shadowClone = shadowClone + 1
-          }
-          sp = sp + 1
-        }
-        endShadowPass()
-      }
-      if app.render.shadowLogged is false {
-        log("[shadow] casters {shadowCasterCount()}, {cascades.count} cascades at {cascades.resolution}")
-        app.render.shadowLogged = true
-      }
+    # Exhaustive over RenderTag: adding a pass is a compile error here until it
+    # is handled (#624). The five generic passes each defer to renderDeferredPass;
+    # once or-patterns land (#622) they collapse to one `case a, b, c` arm.
+    match tag {
+    case RenderTag.shadow {
+      renderShadowPass(app: app, aspect: aspect, palette: palette)
     }
-    if tag is tagGbuffer {
+    case RenderTag.gbuffer {
       var grassToonGen: Int = 0
       if app.character.toon { grassToonGen = 1 }
       let grassView: GrassViewSettings = grass_config.grassThirdPersonSettings(groundColor: walkerGroundColor())
@@ -742,18 +754,34 @@ func renderApp(app: mod App) {
       grassDraw()
       gbuffer.endPass()
     }
-    if tag is tagSsaoD or tag is tagDepthPyramid or tag is tagLighting
-      or tag is tagTaaD or tag is tagComposite {
+    case RenderTag.ssao {
       renderDeferredPass(r: app.render.renderer, tag: tag, scene: app.scene,
                          camera: app.cam.camera, light: app.cam.light, aspect: aspect)
     }
-    if tag is tagUiOverlayD {
+    case RenderTag.depthPyramid {
+      renderDeferredPass(r: app.render.renderer, tag: tag, scene: app.scene,
+                         camera: app.cam.camera, light: app.cam.light, aspect: aspect)
+    }
+    case RenderTag.lighting {
+      renderDeferredPass(r: app.render.renderer, tag: tag, scene: app.scene,
+                         camera: app.cam.camera, light: app.cam.light, aspect: aspect)
+    }
+    case RenderTag.taa {
+      renderDeferredPass(r: app.render.renderer, tag: tag, scene: app.scene,
+                         camera: app.cam.camera, light: app.cam.light, aspect: aspect)
+    }
+    case RenderTag.composite {
+      renderDeferredPass(r: app.render.renderer, tag: tag, scene: app.scene,
+                         camera: app.cam.camera, light: app.cam.light, aspect: aspect)
+    }
+    case RenderTag.uiOverlay {
       gpu2d.beginFrameLoad()
       renderSystemGpu2d(world: app.io.world, res: app.io.gpuUi)
       drawWalkerHud(logView: app.io.logView, gpuUi: app.io.gpuUi, dbg: app.io.dbg, moveStick: app.io.moveStick, panelOpen: app.io.settings.open)
     }
-    if tag is tagPresentD {
+    case RenderTag.present {
       gpu2d.endFrame()
+    }
     }
     profile.zoneEnd(name: walkerPassName(tag: tag))
     oi = oi + 1
