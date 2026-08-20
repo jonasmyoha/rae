@@ -209,10 +209,15 @@ Keep the current `match … { case … { } … }` shape (enum matches exhaustive
 above). The one addition that
 follows naturally from Rae's existing syntax:
 
-- **Or-patterns** — `case A, B, C { }`. Rae's commas are already optional and `is A
-  or is B` already exists, so grouping variants in one arm is a natural extension,
-  not a borrowed abstraction. It's what turns the render-tag `if x is A or x is B …`
-  into one `match` arm. Cheap, high-value.
+- **Or-patterns** — `case A, B, C { }`. IMPLEMENTED (#622). Rae's commas are already
+  optional and `is A or is B` already exists, so grouping variants in one arm is a
+  natural extension, not a borrowed abstraction. It's what turns the render-tag
+  `if x is A or x is B …` into one `match` arm. Cheap, high-value. Works for the
+  match STATEMENT form (enum and Int cases); exhaustiveness counts every listed
+  variant, so a grouped enum match still errors when a variant is added and
+  unhandled. The C backend lowers `case A, B { }` to `if (subj == A || subj == B)`.
+  Not added to the match-EXPRESSION form, where commas already separate arms.
+  Test: `637_match_or_patterns`.
 
 **Considered and NOT recommended** (borrowed, without a concrete need in Rae code):
 

@@ -1282,6 +1282,15 @@ static bool sema_stmt_mutates_collection(const AstStmt* stmt,
     }
 }
 
+// Does a match-case pattern expr name the enum member `enum_name.member`?
+// Used for exhaustiveness, checking each pattern in an or-pattern arm.
+static bool sema_pattern_names_member(const AstExpr* pat, Str enum_name, Str member) {
+    return pat && pat->kind == AST_EXPR_MEMBER
+        && pat->as.member.object->kind == AST_EXPR_IDENT
+        && str_eq(pat->as.member.object->as.ident, enum_name)
+        && str_eq(pat->as.member.member, member);
+}
+
 static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt, TypeInfo* current_return_type) {
     if (!stmt) return;
     switch (stmt->kind) {
@@ -1606,6 +1615,9 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 if (!mc->pattern) { has_default = true; }
                 else {
                     sema_analyze_expr(ctx, module, symbols, mc->pattern);
+                    // Analyze every or-pattern too (`case A, B, C`).
+                    for (AstCasePattern* op = mc->or_patterns; op; op = op->next)
+                        sema_analyze_expr(ctx, module, symbols, op->expr);
                     if (!enum_decl && mc->pattern->kind == AST_EXPR_MEMBER &&
                         mc->pattern->as.member.object->kind == AST_EXPR_IDENT) {
                         Str obj_name = mc->pattern->as.member.object->as.ident;
@@ -1645,10 +1657,9 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     for (AstEnumMember* em = enum_decl->as.enum_decl.members; em; em = em->next) {
                         bool covered = false;
                         for (AstMatchCase* mc = stmt->as.match_stmt.cases; mc && !covered; mc = mc->next) {
-                            if (!mc->pattern || mc->pattern->kind != AST_EXPR_MEMBER) continue;
-                            if (mc->pattern->as.member.object->kind != AST_EXPR_IDENT) continue;
-                            if (!str_eq(mc->pattern->as.member.object->as.ident, enum_name)) continue;
-                            if (str_eq(mc->pattern->as.member.member, em->name)) covered = true;
+                            if (sema_pattern_names_member(mc->pattern, enum_name, em->name)) { covered = true; break; }
+                            for (AstCasePattern* op = mc->or_patterns; op; op = op->next)
+                                if (sema_pattern_names_member(op->expr, enum_name, em->name)) { covered = true; break; }
                         }
                         if (!covered) {
                             char buffer[256];
