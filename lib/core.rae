@@ -498,14 +498,7 @@ func get(V: type, this: view StringMap(V), k: view String) ret opt V {
 }
 
 func has(V: type, this: view StringMap(V), k: view String) ret Bool {
-  match get(this, k: k) {
-    case none {
-      ret false
-    }
-    default {
-      ret true
-    }
-  }
+  ret get(this, k: k) is not none
 }
 
 func remove(V: type, this: mod StringMap(V), k: view String) {
