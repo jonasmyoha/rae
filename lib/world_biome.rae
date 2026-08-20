@@ -1,0 +1,151 @@
+# World biome & material field (#532) — the single source of truth for "what is
+# the ground at (x,y)". Elevation + moisture + slope from shared noise, classified
+# into soft material WEIGHTS (water/sand/mud/grass/rock) + a dominant id + a coarse
+# biome bucket. Deterministic and dual-ported: lib/world_biome.wgsl mirrors this so
+# the terrain/grass shaders and the CPU (gameplay/walkability) agree exactly.
+# Full design: docs/biome-terrain-system.md. No rendering here.
+import core
+import noise
+import math
+
+# Material (splat) layers.
+const matWater: Int = 0
+const matSand: Int = 1
+const matMud: Int = 2
+const matGrass: Int = 3
+const matRock: Int = 4
+
+# Coarse biome buckets (palette + vegetation species selection).
+const biomeOcean: Int = 0
+const biomeBeach: Int = 1
+const biomeSwamp: Int = 2
+const biomeGrassland: Int = 3
+const biomeHighland: Int = 4
+
+# Tunables. elevation/moisture are normalized fbm in ~[-1,1]; heights and the
+# water level share that space (terrain height = elevation * amplitude later).
+type BiomeConfig {
+  seed: Int
+  elevScale: Float    # world units per elevation-noise unit (bigger = broader land)
+  moistScale: Float
+  waterLevel: Float   # elevation below this is water
+  beachBand: Float    # sand band width above waterLevel
+  rockSlope: Float    # slope above this trends to rock
+  swampMoist: Float   # moisture above this (low+flat) trends to mud/swamp
+}
+
+func defaultBiomeConfig() pub ret BiomeConfig {
+  ret BiomeConfig {
+    seed: 1337, elevScale: 90.0, moistScale: 140.0,
+    waterLevel: 0.0 - 0.28, beachBand: 0.06, rockSlope: 0.30, swampMoist: 0.6
+  }
+}
+
+func clamp01(v: view Float) ret Float {
+  if v < 0.0 { ret 0.0 }
+  if v > 1.0 { ret 1.0 }
+  ret v
+}
+
+# Same shape as WGSL smoothstep. Guards a >= b to a step.
+func smooth01(edge0: view Float, edge1: view Float, x: view Float) ret Float {
+  if edge1 <= edge0 {
+    if x < edge0 { ret 0.0 }
+    ret 1.0
+  }
+  let t: Float = clamp01(v: (x - edge0) / (edge1 - edge0))
+  ret t * t * (3.0 - 2.0 * t)
+}
+
+# Elevation ~[-1,1]: broad landforms with a little detail.
+func worldElevation(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Float {
+  ret noise.fbm2(x: x / cfg.elevScale, y: y / cfg.elevScale,
+                 octaves: 4, lacunarity: 2.0, gain: 0.5, seed: cfg.seed)
+}
+
+# Moisture 0..1, decorrelated from elevation.
+func worldMoisture(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Float {
+  let m: Float = noise.fbm2(x: x / cfg.moistScale, y: y / cfg.moistScale,
+                            octaves: 3, lacunarity: 2.0, gain: 0.5, seed: cfg.seed + 7919)
+  ret clamp01(v: m * 0.5 + 0.5)
+}
+
+# Slope 0..1 from the elevation gradient (central differences, world units).
+func worldSlope(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Float {
+  let eps: Float = 1.5
+  let gx: Float = (worldElevation(x: x + eps, y: y, cfg: cfg)
+                 - worldElevation(x: x - eps, y: y, cfg: cfg)) / (2.0 * eps)
+  let gy: Float = (worldElevation(x: x, y: y + eps, cfg: cfg)
+                 - worldElevation(x: x, y: y - eps, cfg: cfg)) / (2.0 * eps)
+  ret clamp01(v: math.sqrt(x: gx * gx + gy * gy) * 8.0)
+}
+
+type WorldSample {
+  elevation: Float
+  moisture: Float
+  slope: Float
+  material: Int   # dominant of the weights below
+  biome: Int      # coarse bucket
+  wWater: Float
+  wSand: Float
+  wMud: Float
+  wGrass: Float
+  wRock: Float
+}
+
+# Classify soft, blended material weights from the field values. Weights sum to 1.
+func classifyWeights(elev: copy Float, moist: copy Float, slope: copy Float,
+                     cfg: view BiomeConfig) pub ret WorldSample {
+  let wl: Float = cfg.waterLevel
+  let sandHi: Float = wl + cfg.beachBand
+  # Water below the level (soft edge); land is the complement.
+  let wWater: Float = 1.0 - smooth01(edge0: wl, edge1: wl + 0.02, x: elev)
+  let land: Float = 1.0 - wWater
+  # Sand: a band just above water.
+  let wSand: Float = land * smooth01(edge0: wl, edge1: wl + 0.02, x: elev)
+    * (1.0 - smooth01(edge0: sandHi - 0.02, edge1: sandHi, x: elev))
+  # Rock: steep slope or high elevation.
+  let wRock: Float = land * clamp01(v: smooth01(edge0: cfg.rockSlope, edge1: cfg.rockSlope + 0.12, x: slope)
+    + smooth01(edge0: 0.35, edge1: 0.55, x: elev))
+  # Mud/swamp: low, flat, wet.
+  let aboveSand: Float = smooth01(edge0: sandHi, edge1: sandHi + 0.04, x: elev)
+  let flat: Float = 1.0 - smooth01(edge0: cfg.rockSlope * 0.5, edge1: cfg.rockSlope, x: slope)
+  let lowland: Float = 1.0 - smooth01(edge0: 0.15, edge1: 0.35, x: elev)
+  let wetness: Float = smooth01(edge0: cfg.swampMoist, edge1: cfg.swampMoist + 0.1, x: moist)
+  let wMud: Float = land * aboveSand * flat * lowland * wetness * (1.0 - wRock)
+  # Grass: the remaining vegetated land.
+  let wGrass: Float = land * aboveSand * (1.0 - wRock) * (1.0 - wMud)
+  # Normalize.
+  var sum: Float = wWater + wSand + wMud + wGrass + wRock
+  if sum < 0.0001 { sum = 1.0 }
+  let nWater: Float = wWater / sum
+  let nSand: Float = wSand / sum
+  let nMud: Float = wMud / sum
+  let nGrass: Float = wGrass / sum
+  let nRock: Float = wRock / sum
+  # Dominant material.
+  var mat: Int = matGrass
+  var best: Float = nGrass
+  if nWater > best { best = nWater  mat = matWater }
+  if nSand > best { best = nSand  mat = matSand }
+  if nMud > best { best = nMud  mat = matMud }
+  if nRock > best { best = nRock  mat = matRock }
+  # Coarse biome bucket from the dominant material + moisture.
+  var biome: Int = biomeGrassland
+  if mat is matWater { biome = biomeOcean }
+  else if mat is matSand { biome = biomeBeach }
+  else if mat is matMud { biome = biomeSwamp }
+  else if mat is matRock { biome = biomeHighland }
+  ret WorldSample {
+    elevation: elev, moisture: moist, slope: slope, material: mat, biome: biome,
+    wWater: nWater, wSand: nSand, wMud: nMud, wGrass: nGrass, wRock: nRock
+  }
+}
+
+# Full sample at a world point.
+func sampleWorld(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret WorldSample {
+  let elev: Float = worldElevation(x: x, y: y, cfg: cfg)
+  let moist: Float = worldMoisture(x: x, y: y, cfg: cfg)
+  let slope: Float = worldSlope(x: x, y: y, cfg: cfg)
+  ret classifyWeights(elev: elev, moist: moist, slope: slope, cfg: cfg)
+}
