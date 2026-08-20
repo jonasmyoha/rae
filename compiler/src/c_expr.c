@@ -58,6 +58,21 @@ extern int rae_func_count_param_refs(const AstFuncDecl* fd, Str name);
 static void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
     const AstTypeRef* tr = infer_expr_type_ref(ctx, operand);
     Str base = get_base_type_name(tr);
+    // A direct enum member access `Enum.member` may not infer to the enum type;
+    // recover the enum name from the object so it stringifies to the name too.
+    if (base.len == 0 && operand->kind == AST_EXPR_MEMBER
+        && operand->as.member.object->kind == AST_EXPR_IDENT
+        && find_enum_decl(ctx, ctx->module, operand->as.member.object->as.ident) != NULL) {
+        base = operand->as.member.object->as.ident;
+    }
+    // Enum value -> its member NAME (auto-generated rae_enum_toString_<Enum>),
+    // so ClipKind.walk.toString() is "walk", not the ordinal "1".
+    if (base.len > 0 && !(tr && tr->is_opt) && find_enum_decl(ctx, ctx->module, base) != NULL) {
+        fprintf(out, "rae_enum_toString_%.*s((int64_t)(", (int)base.len, base.data);
+        emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
+        fprintf(out, "))");
+        return;
+    }
     const AstDecl* d = (base.len > 0) ? find_type_decl(ctx, ctx->module, base) : NULL;
     bool is_user_struct = d && d->kind == AST_DECL_TYPE
         && !has_property(d->as.type_decl.properties, "c_struct")
