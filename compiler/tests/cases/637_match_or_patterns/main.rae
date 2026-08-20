@@ -1,0 +1,44 @@
+# Or-patterns: `case A, B, C { }` groups several patterns into one arm while
+# still naming every variant, so an enum match stays exhaustive and adding a
+# variant still forces review (docs/match-and-sum-types.md Proposal B).
+import core
+
+enum Dir {
+  north
+  south
+  east
+  west
+}
+
+func axis(d: view Int) ret String {
+  match d {
+    case Dir.north, Dir.south {
+      ret "vertical"
+    }
+    case Dir.east, Dir.west {
+      ret "horizontal"
+    }
+  }
+  ret "x"
+}
+
+func parity(n: view Int) ret String {
+  match n {
+    case 0, 2, 4 {
+      ret "even"
+    }
+    default {
+      ret "odd"
+    }
+  }
+  ret "x"
+}
+
+func main() {
+  log(axis(d: Dir.north))
+  log(axis(d: Dir.south))
+  log(axis(d: Dir.east))
+  log(axis(d: Dir.west))
+  log(parity(n: 2))
+  log(parity(n: 3))
+}
