@@ -1,0 +1,18 @@
+# A bare `ret` (no value) is terminated by its line end: code after it on the
+# next line is a normal (unreachable) statement, NOT a return value. This used
+# to SIGSEGV the parser (#223) because `ret` swallowed the following `let` as
+# an expression, producing a NULL return value that was then dereferenced.
+import core
+
+func early(flag: view Bool) {
+  if flag {
+    ret
+  }
+  log("did work")
+}
+
+func main() {
+  early(flag: true)
+  early(flag: false)
+  log("done")
+}
