@@ -566,6 +566,8 @@ static int count_ident_refs_stmt(const AstStmt* s, Str name) {
       int total = count_ident_refs_expr(s->as.match_stmt.subject, name);
       for (const AstMatchCase* c = s->as.match_stmt.cases; c; c = c->next) {
         total += count_ident_refs_expr(c->pattern, name);
+        for (const AstCasePattern* op = c->or_patterns; op; op = op->next)
+          total += count_ident_refs_expr(op->expr, name);
         total += count_ident_refs_block(c->block, name);
       }
       return total;
@@ -1052,6 +1054,25 @@ static bool bind_value_returns_owned_opt(CFuncContext* ctx, const AstExpr* val) 
         return rt && rt->is_opt && !rt->is_view && !rt->is_mod;
     }
     return false;
+}
+
+// Emit one pattern test for a match case: `rae_any_is_none(subj)` for the
+// `none` pattern, else `subj == pattern`. Or-patterns chain several of these
+// with `||` (C's `==` binds tighter than `||`, so no extra parens needed).
+static void emit_match_case_test(CFuncContext* ctx, const AstExpr* subject,
+                                 const AstExpr* pattern, FILE* out) {
+    if (pattern->kind == AST_EXPR_NONE) {
+        bool saved = ctx->suppress_opt_unbox;
+        ctx->suppress_opt_unbox = true;
+        fprintf(out, "rae_any_is_none(");
+        emit_expr(ctx, subject, out, PREC_LOWEST, false, false);
+        fprintf(out, ")");
+        ctx->suppress_opt_unbox = saved;
+    } else {
+        emit_expr(ctx, subject, out, PREC_LOWEST, false, false);
+        fprintf(out, " == ");
+        emit_expr(ctx, pattern, out, PREC_LOWEST, false, false);
+    }
 }
 
 bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
@@ -2039,19 +2060,12 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     else fprintf(out, "  {\n");
                 } else {
                     fprintf(out, first ? "  if (" : " else if (");
-                    // When the pattern is `none`, the subject is a RaeAny — use the
-                    // runtime tag check rather than `==` (RaeAny is a struct).
-                    if (c->pattern->kind == AST_EXPR_NONE) {
-                        bool saved = ctx->suppress_opt_unbox;
-                        ctx->suppress_opt_unbox = true;
-                        fprintf(out, "rae_any_is_none(");
-                        emit_expr(ctx, subject, out, PREC_LOWEST, false, false);
-                        fprintf(out, ")");
-                        ctx->suppress_opt_unbox = saved;
-                    } else {
-                        emit_expr(ctx, subject, out, PREC_LOWEST, false, false);
-                        fprintf(out, " == ");
-                        emit_expr(ctx, c->pattern, out, PREC_LOWEST, false, false);
+                    // First pattern, then each or-pattern (`case A, B, C`),
+                    // joined by `||` so any of them enters the arm.
+                    emit_match_case_test(ctx, subject, c->pattern, out);
+                    for (const AstCasePattern* op = c->or_patterns; op; op = op->next) {
+                        fprintf(out, " || ");
+                        emit_match_case_test(ctx, subject, op->expr, out);
                     }
                     fprintf(out, ") {\n");
                 }

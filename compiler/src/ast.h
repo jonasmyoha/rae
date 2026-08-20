@@ -276,8 +276,16 @@ typedef enum {
   AST_STMT_CONTINUE
 } AstStmtKind;
 
+// One extra pattern in an or-pattern arm (`case A, B, C { }`). The first
+// pattern lives in AstMatchCase.pattern; the 2nd..Nth chain here.
+typedef struct AstCasePattern {
+  AstExpr* expr;
+  struct AstCasePattern* next;
+} AstCasePattern;
+
 typedef struct AstMatchCase {
-  AstExpr* pattern;
+  AstExpr* pattern;             // first pattern; NULL marks a `default` arm
+  AstCasePattern* or_patterns;  // additional patterns for `case A, B, C`; NULL if single
   AstBlock* block;
   struct AstMatchCase* next;
 } AstMatchCase;
