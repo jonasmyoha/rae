@@ -41,10 +41,24 @@ func uploadMeshData(m: view MeshData) ret MeshHandle {
 # The clip button ids, indexed the same way `clipIndex` is. One table
 # rather than two if-chains: a restored index and a click have to agree
 # on which button is selected, and two copies drift.
+# The character's locomotion clips. Ordinals match the `clipIndex` convention
+# (idle=0 … run=3); clipIndex stays an Int for storage/serialisation, but this
+# enum drives the exhaustive `match`es that dispatch on it (animation sampling,
+# button id) so adding a clip is a compile error until every site handles it.
+enum ClipKind {
+  idle
+  walk
+  walkFast   # the walk clip at 1.6x, not a fourth asset
+  run
+}
+
 func clipButtonId(index: view Int) ret String {
-  if index is 0 { ret "idle" }
-  if index is 1 { ret "walk" }
-  if index is 2 { ret "walkFast" }
+  match index {
+  case ClipKind.idle { ret "idle" }
+  case ClipKind.walk { ret "walk" }
+  case ClipKind.walkFast { ret "walkFast" }
+  case ClipKind.run { ret "run" }
+  }
   ret "run"
 }
 
