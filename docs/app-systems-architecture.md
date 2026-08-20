@@ -170,21 +170,23 @@ physics (enables prediction/reconciliation).
 
 ## Files (`examples/114_walker_character/`)
 
-- `main.rae` — thin entry: `import app`; `func main() ret Int { ret runWalkerApp() }`.
+Plain, generic filenames (no `walker_`/`sys_` prefix) — matches the tetris3d house
+style, and these files are candidates to graduate to `lib` (#419). Several already
+exist from the initial split and the systems fold into them.
+
+- `main.rae` — thin entry: `func main() ret Int { ret runWalkerApp() }`.
 - `app.rae` — `App`, `Frame`, `createApp`, `runWalkerApp`, `updateApp`, `renderApp`, `frameBegin`.
-- `sys_input.rae` — `InputState`, `InputIntent`, `inputUpdate`.
-- `sys_players.rae` — `PlayerRoster`, player->character mapping, input source.
-- `sys_character.rae` — `Character`, `CharacterSystem`, `characterUpdate`, `characterAnimate`, `characterRenderGbuffer`, `characterRenderShadow`.
-- `sys_camera.rae` — `CameraState`, `cameraUpdate`, `cameraApply` (rig + follow + bar).
-- `sys_ui.rae` — `UiState`, `uiUpdate`, `uiRender` (panels, settings dialog, scroll, overlays, HUD).
-- `sys_terrain.rae` — `TerrainState`, `terrainUpdate`, `terrainRenderGround/Props/Shadow` (wraps InfiniteTerrain).
-- `sys_grass.rae` — `GrassState`, `grassUpdate`, `grassRender` (wraps GrassField + grass_compute).
-- `sys_render.rae` — `RenderState`, `renderScene` (owns the render-graph walk; calls the other systems' render hooks per pass), DRS.
-- `sys_physics.rae` — `PhysicsState`, `physicsStep`, `JobSystem` + `jobSubmit`/`jobAwaitAll`.
-- `sys_net.rae` — `NetState`, `netPublishIntent`, `netApplyRemote`.
-- `persistence.rae` — hot-reload state + window geometry (folds `walker_state.rae`).
-- Existing `walker_terrain.rae` / `walker_grass.rae` stay as the low-level impls the
-  `sys_*` wrappers call, or fold in — decided per file during extraction.
+- `input.rae` — `InputState`, `InputIntent`, `inputUpdate`.
+- `players.rae` — `PlayerRoster`, player->character mapping, input source.
+- `character.rae` (exists) — the character helpers plus `Character`, `CharacterSystem`, `characterUpdate`, `characterAnimate`, `characterRenderGbuffer`, `characterRenderShadow`.
+- `camera.rae` — `CameraState`, `cameraUpdate`, `cameraApply` (rig + follow + bar).
+- `ui.rae` / `hud.rae` (hud exists) — `UiState`, `uiUpdate`, `uiRender` (panels, settings dialog, scroll, overlays, HUD).
+- `terrain.rae` (exists) — `TerrainState`/`InfiniteTerrain`, `terrainUpdate`, `terrainRenderGround/Props/Shadow`.
+- `grass.rae` (exists) — `GrassState`/`GrassField`, `grassUpdate`, `grassRender` (over grass_compute).
+- `render.rae` — `RenderState`, `renderScene` (owns the render-graph walk; calls the other systems' render hooks per pass), DRS.
+- `physics.rae` — `PhysicsState`, `physicsStep`, `JobSystem` + `jobSubmit`/`jobAwaitAll`.
+- `net.rae` — `NetState`, `netPublishIntent`, `netApplyRemote`.
+- `state.rae` (exists) — hot-reload serialize/restore + window-geometry persistence.
 
 ## stdlib vs app
 
@@ -206,7 +208,7 @@ Headless parity is the guardrail:
    `runWalkerApp()`; `main.rae` still calls it. Verify screenshot.
 3. Extract systems one at a time, screenshot-verifying after each:
    input → players → character (roster) → camera → ui → terrain → grass → render.
-4. Add `sys_physics.rae` (fixed-step + JobSystem) and `sys_net.rae` stubs.
+4. Add `physics.rae` (fixed-step + JobSystem) and `net.rae` stubs.
 5. Thin `main.rae`; fold/retire `walker_*.rae`.
 6. Update this doc + `docs/ui-render-loop-performance.md` cross-links; note the
    template for other examples.
