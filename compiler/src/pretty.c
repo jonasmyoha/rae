@@ -875,6 +875,10 @@ static void pp_print_match_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
     if (current->pattern) {
       pp_write(pp, "case ");
       pp_expr(pp, current->pattern);
+      for (AstCasePattern* op = current->or_patterns; op; op = op->next) {
+        pp_write(pp, ", ");
+        pp_expr(pp, op->expr);
+      }
     } else {
       pp_write(pp, "default");
     }
