@@ -633,8 +633,7 @@ func updateApp(app: mod App) {
 
 # The shadow pass: fit cascades to this frame, then rasterise every caster
 # (ground, props, the character's skinned parts + crowd). Its own function so the
-# owned `cascades` value lives in a function scope — a `let` of an owned value
-# inside a `match case` currently mis-scopes its drop (compiler bug, queued).
+# match arm stays a one-liner (and the systems refactor #543 gives it a home).
 func renderShadowPass(app: mod App, aspect: copy Float, palette: view List(Float)) {
   let cascades: ShadowCascades = fitShadowCascades(
     camPos: app.cam.camera.position, camTarget: app.cam.camera.target,
@@ -675,14 +674,19 @@ func renderApp(app: mod App) {
   let now: Float64 = app.frame.now
 
   var clipRate: Float = 1.0
-  if app.character.clipIndex is 2 { clipRate = 1.6 }
+  if app.character.clipIndex is ClipKind.walkFast { clipRate = 1.6 }
   if app.character.playing {
     app.character.animTime = app.character.animTime + dt * app.character.speed * clipRate
   }
   applySkeletonPose(sk: app.character.skeleton, pose: app.character.bindPose)
-  if app.character.clipIndex is 0 { applyClip(sk: app.character.skeleton, c: app.character.idleClip, time: app.character.animTime) }
-  if app.character.clipIndex is 1 or app.character.clipIndex is 2 { applyClip(sk: app.character.skeleton, c: app.character.walkClip, time: app.character.animTime) }
-  if app.character.clipIndex is 3 { applyClip(sk: app.character.skeleton, c: app.character.runClip, time: app.character.animTime) }
+  # Which clip feeds the pose. walk and walkFast share the walk clip (walkFast is
+  # it at 1.6x via clipRate above); once or-patterns land (#622) they merge.
+  match app.character.clipIndex {
+  case ClipKind.idle { applyClip(sk: app.character.skeleton, c: app.character.idleClip, time: app.character.animTime) }
+  case ClipKind.walk { applyClip(sk: app.character.skeleton, c: app.character.walkClip, time: app.character.animTime) }
+  case ClipKind.walkFast { applyClip(sk: app.character.skeleton, c: app.character.walkClip, time: app.character.animTime) }
+  case ClipKind.run { applyClip(sk: app.character.skeleton, c: app.character.runClip, time: app.character.animTime) }
+  }
   let transitionActive: Bool = app.character.transitionElapsed < clipTransitionDuration
   if transitionActive {
     app.character.transitionElapsed = app.character.transitionElapsed + dt
