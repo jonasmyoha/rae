@@ -1,0 +1,786 @@
+# App composition + main loop for the walker example.
+#
+# Structure (see docs/app-systems-architecture.md): an `App` owns per-system
+# state structs; `createApp` builds them, `runWalkerApp` drives the loop, and
+# `updateApp` / `renderApp` sequence the systems. This scaffold (#544) groups the
+# former main.rae locals by system with behaviour unchanged; later tasks
+# (#545-#555) move each group + its logic into its own sys_*.rae file and turn
+# the single character into a roster.
+import core
+import math
+import profile
+import gpu2d
+import sdf_text
+import vec3
+import gltf
+import gltf_skin
+import png
+import sys
+import app3d/camera_rig
+import app3d/render_scale
+import app3d/character_controller
+import app3d/ui_shell
+import app3d/control_panel
+import app3d/camera_bar
+import renderer_deferred
+import sky
+import gbuffer
+import gbuffer_instanced
+open gbuffer_instanced
+import grass_compute
+open grass_compute
+import grass_config
+import shadow3d
+import app3d/playback
+import app3d/slider
+import app3d/settings_dialog
+import sky_hosek
+import hot_reload
+import ui/log_overlay
+import ui/window_geometry
+import ui/scroll_panel
+import ui/event_loop
+import ui/debug_overlay
+import ui/virtual_joystick
+import ui/ecs
+import ui/input_gpu2d
+import ui/render_gpu2d
+open scene3d
+open gpu3d
+open renderer_deferred
+open sky
+open gbuffer
+open rendergraph
+open math3d
+open mesh3d
+open gltf
+open gltf_skin
+open sdf_text
+open png
+open app3d/camera_rig
+open app3d/character_controller
+open app3d/settings_dialog
+open sky_hosek
+open app3d/ui_shell
+open app3d/control_panel
+open app3d/camera_bar
+open shadow3d
+open app3d/playback
+open hot_reload
+open ui/log_overlay
+open ui/window_geometry
+open ui/scroll_panel
+open ui/event_loop
+open ui/debug_overlay
+open ui/virtual_joystick
+open ui/ecs
+open ui/components
+open ui/input_gpu2d
+open ui/render_gpu2d
+
+const clipTransitionDuration: Float = 0.28
+
+# Per-frame scratch shared across systems: timing and the render/park decision.
+type Frame {
+  dt: Float
+  now: Float64
+  startT: Float64
+  prevT: Float64
+  time: Float
+  aspect: Float
+  needsRender: Bool
+  dbgDidWork: Bool
+  taaSettleFrames: Int
+  renderedOnce: Bool
+  headless: Bool
+}
+
+# Input devices + the UI world state (panels, dialog, overlays). Split further in
+# #545 (input intent) and #549 (UI system).
+type InputUi {
+  moveStick: VirtualJoystick
+  ui: UiInput
+  world: UiWorld
+  gpuUi: Gpu2dUi
+  clipPanel: ControlPanel
+  transport: ControlPanel
+  settings: SettingsState
+  panelScroll: ScrollPanel
+  dbg: DebugOverlay
+  logView: LogOverlay
+  lastLogRevision: Int
+}
+
+# Camera rig + camera + scene light. (#548)
+type CameraState {
+  camera: Camera3d
+  rig: CameraRig
+  light: Light3d
+  hosek: HosekDataset
+}
+
+# The animated character. A single instance today; #547 turns `list` into a
+# roster and adds the controlled/owner fields for multi-character + multiplayer.
+type CharacterState {
+  skeleton: Skeleton
+  idleClip: Clip
+  walkClip: Clip
+  runClip: Clip
+  bindPose: SkeletonPose
+  transitionFrom: SkeletonPose
+  transitionElapsed: Float
+  controller: ThirdPersonController
+  clipIndex: Int
+  playing: Bool
+  speed: Float
+  animTime: Float
+  toon: Bool
+  partIds: List(Int)
+  partRough: List(Float)
+  basePartModel: Mat4
+  model: Mat4
+  prevModel: Mat4
+  crowd: List(Mat4)
+  crowdBatch: InstanceBatch
+  groundZ: Float
+}
+
+# The deferred renderer + dynamic-resolution controller. (#552)
+type RenderState {
+  renderer: DeferredRenderer
+  drs: RenderScaleController
+  shadowLogged: Bool
+}
+
+# Window-geometry + hot-reload persistence. (#555)
+type PersistState {
+  windowGeom: WindowGeometry
+  lastStateSave: Float64
+  stateDirty: Bool
+}
+
+type App {
+  scene: Scene3d
+  frame: Frame
+  io: InputUi
+  cam: CameraState
+  character: CharacterState
+  terrain: InfiniteTerrain
+  grass: GrassField
+  render: RenderState
+  persist: PersistState
+  ok: Bool
+}
+
+# ----- setup ---------------------------------------------------------------
+func createApp() ret App {
+  gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — walker character (animated) [{rendererPathName()}]")
+  var windowGeom: WindowGeometry = createWindowGeometry(
+    dir: hotReloadDir(), name: "window.{state114AppId}.geometry")
+  restoreWindowGeometry(g: windowGeom)
+  let extentW: Float = windowExtentW()
+  let extentH: Float = windowExtentH()
+  gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
+
+  var moveStick: VirtualJoystick = createVirtualJoystick(
+    padFracX: 0.06, padFracY: 0.11, radiusFrac: 0.14)
+
+  let assets: String = "examples/114_walker_character/assets/"
+  let gpuUi: Gpu2dUi = loadUiAssets(dir: assets, textFontName: "Roboto-Regular",
+                                    iconFontName: "", themeFile: "theme.raescene")
+  var uiWorld: UiWorld = createUiWorld()
+  let uiRoot: EntityId = mountUiScene(world: uiWorld, path: "{assets}ui.raescene", res: gpuUi)
+  var uiInput: UiInput = createUiInput()
+  var logView: LogOverlay = createLogOverlay(capacity: 64, maxLines: 8, anchor: logAnchorBottomLeft, fontSize: 14.0)
+  var dbg: DebugOverlay = createDebugOverlay(button: true, fps: true,
+                                             memory: true, heartbeat: true)
+  let reloadGen: Int = nextReloadGeneration()
+  logInfoLine(ov: logView, text: "hot reload {reloadGen}")
+
+  let g: Glb = loadGlb(path: "{assets}walker.glb")
+  if g.ok is false {
+    log("[gltf] {g.errorMsg}")
+    log("[gltf] regenerate assets/walker.glb — see tools/README.md")
+    gpu2d.closeWindow()
+    sys.exit(code: 1)
+  }
+  let charData: MeshData = loadAllPrimitives(g: g)
+  if charData.vertCount is 0 {
+    log("[gltf] model contained no readable primitives")
+    gpu2d.closeWindow()
+    sys.exit(code: 1)
+  }
+  log("[gltf] walker: {charData.vertCount} verts, {charData.indices.length / 3} triangles")
+
+  let b: List(Float) = meshBounds(m: charData)
+  let height: Float = walkerFloatAt(values: b, index: 4) - walkerFloatAt(values: b, index: 1)
+  let targetHeight: Float = 2.0
+  var modelScale: Float = 1.0
+  if height > 0.0 {
+    modelScale = targetHeight / height
+  }
+  let midX: Float = (walkerFloatAt(values: b, index: 0) + walkerFloatAt(values: b, index: 3)) * 0.5
+  let midZ: Float = (walkerFloatAt(values: b, index: 2) + walkerFloatAt(values: b, index: 5)) * 0.5
+  let footY: Float = walkerFloatAt(values: b, index: 1)
+  log("[gltf] bounds height {height}, scale {modelScale}")
+
+  var sk: Skeleton = loadSkeleton(g: g, skinIndex: 0)
+  if sk.ok is false {
+    log("[gltf] walker.glb has no skin — cannot animate")
+    gpu2d.closeWindow()
+    sys.exit(code: 1)
+  }
+  log("[gltf] skeleton: {jointCount(sk: sk)} joints, {sk.nodeCount} nodes")
+
+  let idleGlb: Glb = loadGlb(path: "{assets}idle.glb")
+  let walkGlb: Glb = loadGlb(path: "{assets}walk.glb")
+  let runGlb: Glb = loadGlb(path: "{assets}run.glb")
+  let idleClip: Clip = loadClip(g: idleGlb, animIndex: 0, sk: sk)
+  let walkClip: Clip = loadClip(g: walkGlb, animIndex: 0, sk: sk)
+  let runClip: Clip = loadClip(g: runGlb, animIndex: 0, sk: sk)
+  let bindPose: SkeletonPose = captureSkeletonPose(sk: sk)
+  log("[anim] idle {clipChannelCount(c: idleClip)} ch / {idleClip.duration}s, walk {clipChannelCount(c: walkClip)} ch / {walkClip.duration}s, run {clipChannelCount(c: runClip)} ch / {runClip.duration}s")
+
+  var scene: Scene3d = createScene3d()
+  let groundZ: Float = 0.0 - 1.0
+  var characterController: ThirdPersonController = createThirdPersonController()
+
+  let partTransform: Transform3d = {
+    position: vec3.create(
+      x: 0.0 - midX * modelScale,
+      y: 0.0 - midZ * modelScale,
+      z: groundZ - footY * modelScale
+    ),
+    rotation: vec3.create(x: 1.5707963, y: 0.0, z: 0.0),
+    scale: vec3.create(x: modelScale, y: modelScale, z: modelScale)
+  }
+  let basePartModel: Mat4 = modelMatrix(t: partTransform)
+  groundWalker(controller: characterController, groundZ: groundZ)
+  var partModel: Mat4 = walkerWorldModel(baseModel: basePartModel, controller: characterController)
+
+  let pngBytes: List(Int) = sys.readFileBytes(path: "{assets}walker_palette.png")
+  var atlasW: Int = 0
+  var atlasH: Int = 0
+  let atlas: List(Int) = decodePng(png: pngBytes, len: pngBytes.length, width: atlasW, height: atlasH)
+  if atlasW is 0 {
+    log("[png] walker_palette.png did not decode — parts will render untinted")
+  } else {
+    log("[png] palette atlas {atlasW}x{atlasH}")
+  }
+
+  let partIds: List(Int) = createList(Int, cap: 16)
+  let partRough: List(Float) = createList(Float, cap: 16)
+  var mi: Int = 0
+  loop mi < meshCount(g: g) {
+    let name: String = meshName(g: g, meshIndex: mi)
+    var rough: Float = 0.68
+    if name.startsWith(prefix: "Cylinder") {
+      rough = 0.35
+    }
+    var pi: Int = 0
+    loop pi < primitiveCount(g: g, meshIndex: mi) {
+      let raw: SkinnedMeshData = loadSkinnedPrimitive(g: g, meshIndex: mi, primIndex: pi)
+      if raw.vertCount > 0 {
+        let part: SkinnedMeshData = withAtlasColors(m: raw, atlas: atlas, width: atlasW, height: atlasH)
+        let handle: MeshHandle = uploadSkinnedMesh(verts: part.verts, vertCount: part.vertCount, indices: part.indices)
+        if meshHandleIsValid(h: handle) {
+          partIds.add(value: handle.id)
+          partRough.add(value: rough)
+        }
+      }
+      pi = pi + 1
+    }
+    mi = mi + 1
+  }
+  log("[gltf] skinned parts: {partIds.length}")
+  if partIds.length is 0 {
+    log("[gltf] no skinned primitives uploaded")
+    gpu2d.closeWindow()
+    sys.exit(code: 1)
+  }
+
+  var terrain: InfiniteTerrain = createInfiniteTerrain(scene: scene, assets: assets, groundZ: groundZ)
+  var grass: GrassField = createGrassField(assets: assets, groundZ: groundZ)
+
+  let cloneCount: Int = 5
+  let cloneModels: List(Mat4) = createList(Mat4, cap: cloneCount)
+  let firstPart: MeshHandle = meshHandle(id: walkerIntAt(values: partIds, index: 0), generation: 1)
+  var characterClones: InstanceBatch = createInstanceBatch(mesh: firstPart, capacity: cloneCount)
+
+  var camera: Camera3d = defaultCamera3d()
+  var light: Light3d = defaultLight3d()
+  let hosekData: HosekDataset = loadDefaultHosekDataset()
+  camera.target = vec3.create(x: 0.0, y: 0.0, z: groundZ + targetHeight * 0.5)
+
+  var renderer: DeferredRenderer = createDeferredRendererWithUiSky(
+    sky: createSkyStylised(
+      sunDir: light.sunDir, sunColor: light.sunColor,
+      zenith: vec3.create(x: 0.16, y: 0.34, z: 0.62),
+      horizon: vec3.create(x: 0.74, y: 0.80, z: 0.72),
+      bands: 3.0))
+  let gs: Int = compileDeferred(r: renderer)
+  if gs is not 0 {
+    log("render graph invalid: {statusName(status: gs)}")
+    gpu2d.closeWindow()
+    sys.exit(code: 1)
+  }
+
+  var rig: CameraRig = createCameraRig(camera: camera)
+  rig.characterModeEnabled = true
+  rig.mode = CameraRigMode.character
+  rig.yaw = characterController.heading
+  rig.orbitPitch = 0.24
+  rig.distance = 4.2
+  rig.minDistance = 1.2
+  rig.maxDistance = 20.0
+  rig.wheelSpeed = 0.4
+  camera.target = thirdPersonCameraTarget(controller: characterController, focusZ: characterFocusZ)
+  snapCameraRigView(rig: rig)
+
+  var clipIndex: Int = 0
+  var playing: Bool = true
+  var speed: Float = 1.0
+  var toonShading: Bool = true
+
+  var clipPanel: ControlPanel = createControlPanel(hostNodeId: "ClipRow")
+  addPanelButton(panel: clipPanel, id: "idle", label: "Idle", actionId: "clip.idle", group: 1)
+  addPanelButton(panel: clipPanel, id: "walk", label: "Walk", actionId: "clip.walk", group: 1)
+  addPanelButton(panel: clipPanel, id: "walkFast", label: "Walk fast", actionId: "clip.walkFast", group: 1)
+  addPanelButton(panel: clipPanel, id: "run", label: "Run", actionId: "clip.run", group: 1)
+  buildControlPanel(panel: clipPanel, world: uiWorld, res: gpuUi)
+
+  var transport: ControlPanel = createControlPanel(hostNodeId: "TransportRow")
+  transport.buttonW = 84.0
+  buildControlPanel(panel: transport, world: uiWorld, res: gpuUi)
+
+  let headless: Bool = sys.getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0
+    or sys.getEnv(name: "RAE_HEADLESS_FRAMES").length() > 0
+  if not headless {
+    let saved: String = readHotReloadStateFor(appId: state114AppId)
+    if restore114State(raw: saved, clipIndex: clipIndex, playing: playing, speed: speed,
+                       toon: toonShading, controller: characterController,
+                       rig: rig, camera: camera) {
+      let pctR: Int = speedPercent(v: speed)
+      logInfoLine(ov: logView, text: "state restored: clip {clipIndex}, speed {pctR}%, camera and window kept")
+    }
+  }
+
+  groundWalker(controller: characterController, groundZ: groundZ)
+  partModel = walkerWorldModel(baseModel: basePartModel, controller: characterController)
+
+  var cloneIndex: Int = 0
+  loop cloneIndex < cloneCount {
+    let spiralAngle: Float = cloneIndex.toFloat() * 2.3999632
+    let spiralRadius: Float = 3.5 + cloneIndex.toFloat() * 0.45
+    let cloneX: Float = characterController.position.x + math.cos(x: spiralAngle) * spiralRadius
+    let cloneY: Float = characterController.position.y + math.sin(x: spiralAngle) * spiralRadius
+    let cloneZ: Float = terrainHeightAt(x: cloneX, y: cloneY, groundZ: groundZ) - groundZ
+    let cloneTranslation: Mat4 = mat4Translate(x: cloneX, y: cloneY, z: cloneZ)
+    let cloneHeading: Mat4 = mat4RotateZ(angle: spiralAngle + walkerFacingCorrection)
+    cloneModels.add(value: mat4Mul(a: cloneTranslation, b: mat4Mul(a: cloneHeading, b: basePartModel)))
+    cloneIndex = cloneIndex + 1
+  }
+  updateInfiniteTerrain(terrain: terrain, scene: scene, playerPosition: characterController.position)
+  updateGrassField(field: grass, playerPosition: characterController.position)
+  if rig.mode is CameraRigMode.character {
+    camera.target = thirdPersonCameraTarget(controller: characterController, focusZ: characterFocusZ)
+  }
+
+  setPanelSelection(panel: clipPanel, world: uiWorld, group: 1, id: clipButtonId(index: clipIndex))
+  setPanelButtonOn(panel: transport, world: uiWorld, id: "play", on: playing)
+  setPanelButtonOn(panel: transport, world: uiWorld, id: "toon", on: toonShading)
+  var playLabel0: String = "Pause"
+  if not playing {
+    playLabel0 = "Play"
+  }
+  setPanelButtonLabel(panel: transport, world: uiWorld, id: "play", label: playLabel0)
+  let pct0: Int = speedPercent(v: speed)
+  setNodeText(world: uiWorld, nodeId: "SpeedLabel", value: "Speed {pct0}%")
+  runUiSystems(world: uiWorld, res: gpuUi)
+
+  var panelScroll: ScrollPanel = createScrollPanel(viewportId: "SidePanelBody", contentId: "SidePanelContent")
+  let barOk: Bool = mountCameraBar(world: uiWorld, res: gpuUi, hostNodeId: "CameraBarSlot")
+  walkerHideCameraChrome(world: uiWorld)
+  var settings: SettingsState = createSettingsState(scene: 1, sceneCount: 1,
+                                                    speed: speed, toon: toonShading,
+                                                    hour: 12.0,
+                                                    skyModel: SettingsSkyModel.preetham)
+  let settingsOk: Bool = mountSettingsDialog(world: uiWorld, res: gpuUi, hostNodeId: "SettingsDialogSlot")
+  if settingsOk is false {
+    logWarnLine(ov: logView, text: "settings dialog failed to mount")
+  }
+  settingsApplyToWorld(s: settings, world: uiWorld)
+  settings.open = false
+  applyWalkerPanel(world: uiWorld, open: settings.open)
+  renderer.sky = settingsBuildSky(s: settings, data: hosekData, turbidity: 3.0, groundAlbedo: 0.30)
+  light.sunDir = settingsSunDir(s: settings)
+  light.sunColor = settingsSunColor(s: settings)
+  log("[ui] panel buttons: {clipPanel.buttonEntities.length} clip, {transport.buttonEntities.length} transport, camera bar {barOk}")
+
+  let startT: Float64 = gpu2d.nowSeconds()
+  var drs: RenderScaleController = createRenderScaleController(targetFps: 60.0)
+
+  ret App {
+    scene: own scene
+    frame: {
+      dt: 0.0, now: startT, startT: startT, prevT: startT, time: 0.0, aspect: 1.0,
+      needsRender: true, dbgDidWork: true, taaSettleFrames: 0, renderedOnce: false,
+      headless: headless
+    }
+    io: {
+      moveStick: own moveStick, ui: own uiInput, world: own uiWorld, gpuUi: gpuUi,
+      clipPanel: own clipPanel, transport: own transport, settings: own settings,
+      panelScroll: own panelScroll, dbg: own dbg, logView: own logView, lastLogRevision: 0 - 1
+    }
+    cam: { camera: camera, rig: own rig, light: light, hosek: hosekData }
+    character: {
+      skeleton: own sk, idleClip: idleClip, walkClip: walkClip, runClip: runClip,
+      bindPose: bindPose, transitionFrom: bindPose, transitionElapsed: clipTransitionDuration,
+      controller: own characterController, clipIndex: clipIndex, playing: playing,
+      speed: speed, animTime: 0.0, toon: toonShading,
+      partIds: own partIds, partRough: own partRough, basePartModel: basePartModel,
+      model: partModel, prevModel: partModel, crowd: own cloneModels,
+      crowdBatch: own characterClones, groundZ: groundZ
+    }
+    terrain: own terrain
+    grass: own grass
+    render: { renderer: own renderer, drs: own drs, shadowLogged: false }
+    persist: { windowGeom: own windowGeom, lastStateSave: startT, stateDirty: false }
+    ok: true
+  }
+}
+
+# ----- per-frame timing + resize -------------------------------------------
+func frameBegin(app: mod App) {
+  profile.profileTick()
+  resizeUiToWindow(world: app.io.world, res: app.io.gpuUi)
+  let now: Float64 = gpu2d.nowSeconds()
+  var dt: Float = (now - app.frame.prevT) as Float
+  app.frame.prevT = now
+  app.frame.now = now
+  # NO CLAMP before DRS: the scale controller reacts to the true frame time.
+  updateRenderScale(drs: app.render.drs, dt: dt)
+  # Negative dt is a clock going backwards, not a long frame; refuse it.
+  if dt < 0.0 { dt = 0.0 }
+  app.frame.dt = dt
+}
+
+# ----- update phase: input, UI, camera, character, terrain, grass, persist --
+func updateApp(app: mod App) {
+  let dt: Float = app.frame.dt
+  let now: Float64 = app.frame.now
+  updateUiInput(input: app.io.ui, world: app.io.world)
+  if walkerMenuTapped() { toggleWalkerPanel(settings: app.io.settings, world: app.io.world) suppressUiPress(input: app.io.ui) }
+  let scrolled: Bool = updateScrollPanel(s: app.io.panelScroll, world: app.io.world, input: app.io.ui)
+  if updateDebugOverlay(d: app.io.dbg, screenW: windowExtentW(), screenH: windowExtentH(),
+                        now: now, didRealWork: app.frame.dbgDidWork) {
+    suppressUiPress(input: app.io.ui)
+  }
+  let clipHit: String = panelClickedId(panel: app.io.clipPanel, input: app.io.ui)
+  if clipHit.length() > 0 and app.cam.rig.mode is not CameraRigMode.character {
+    var nextClipIndex: Int = app.character.clipIndex
+    if clipHit.equals(other: "idle") { nextClipIndex = 0 }
+    if clipHit.equals(other: "walk") { nextClipIndex = 1 }
+    if clipHit.equals(other: "walkFast") { nextClipIndex = 2 }
+    if clipHit.equals(other: "run") { nextClipIndex = 3 }
+    if nextClipIndex is not app.character.clipIndex {
+      app.character.transitionFrom = captureSkeletonPose(sk: app.character.skeleton)
+      app.character.transitionElapsed = 0.0
+      app.character.clipIndex = nextClipIndex
+      app.character.animTime = 0.0
+      app.persist.stateDirty = true
+    }
+    setPanelSelection(panel: app.io.clipPanel, world: app.io.world, group: 1, id: clipHit)
+  }
+  let transportHit: String = panelClickedId(panel: app.io.transport, input: app.io.ui)
+  if transportHit.equals(other: "play") {
+    app.character.playing = not app.character.playing
+    var playLabel: String = "Pause"
+    if not app.character.playing { playLabel = "Play" }
+    setPanelButtonLabel(panel: app.io.transport, world: app.io.world, id: "play", label: playLabel)
+    setPanelButtonOn(panel: app.io.transport, world: app.io.world, id: "play", on: app.character.playing)
+  }
+  if transportHit.equals(other: "toon") {
+    app.character.toon = not app.character.toon
+    setPanelButtonOn(panel: app.io.transport, world: app.io.world, id: "toon", on: app.character.toon)
+  }
+  if transportHit.equals(other: "slower") { app.character.speed = nextSpeed(current: app.character.speed, up: false) }
+  if transportHit.equals(other: "faster") { app.character.speed = nextSpeed(current: app.character.speed, up: true) }
+  if transportHit.length() > 0 {
+    let pct: Int = speedPercent(v: app.character.speed)
+    setNodeText(world: app.io.world, nodeId: "SpeedLabel", value: "Speed {pct}%")
+  }
+  var settingsChanged: Bool = false
+  var ai: Int = 0
+  loop ai < uiActionCount(input: app.io.ui) {
+    if settingsHandleAction(s: app.io.settings, actionId: uiActionAt(input: app.io.ui, index: ai)) {
+      settingsChanged = true
+    }
+    ai = ai + 1
+  }
+  if settingsUpdatePointer(s: app.io.settings, world: app.io.world, input: app.io.ui) { settingsChanged = true }
+  if settingsUpdateLatitudePointer(s: app.io.settings, world: app.io.world, input: app.io.ui) { settingsChanged = true }
+  if settingsUpdateDatePointer(s: app.io.settings, world: app.io.world, input: app.io.ui) { settingsChanged = true }
+  if settingsAdvanceTime(s: app.io.settings, dt: dt) { settingsChanged = true }
+  if settingsChanged {
+    app.render.renderer.sky = settingsBuildSky(s: app.io.settings, data: app.cam.hosek, turbidity: 3.0, groundAlbedo: 0.30)
+    app.cam.light.sunDir = settingsSunDir(s: app.io.settings)
+    app.cam.light.sunColor = settingsSunColor(s: app.io.settings)
+    app.character.speed = app.io.settings.speed
+    app.character.playing = app.io.settings.playing
+    if app.character.toon is not app.io.settings.toon {
+      app.character.toon = app.io.settings.toon
+      setPanelButtonOn(panel: app.io.transport, world: app.io.world, id: "toon", on: app.character.toon)
+    }
+    let pctS: Int = speedPercent(v: app.character.speed)
+    setNodeText(world: app.io.world, nodeId: "SpeedLabel", value: "Speed {pctS}%")
+    settingsApplyToWorld(s: app.io.settings, world: app.io.world)
+    applyWalkerPanel(world: app.io.world, open: app.io.settings.open)
+    app.persist.stateDirty = true
+  }
+  if clipHit.length() > 0 or transportHit.length() > 0 {
+    app.io.settings.speed = app.character.speed
+    app.io.settings.toon = app.character.toon
+    settingsApplyToWorld(s: app.io.settings, world: app.io.world)
+    applyWalkerPanel(world: app.io.world, open: app.io.settings.open)
+    app.persist.stateDirty = true
+  }
+  if app.terrain.toon is not app.character.toon {
+    setInfiniteTerrainToon(terrain: app.terrain, scene: app.scene, toon: app.character.toon)
+  }
+  if uiActionCount(input: app.io.ui) > 0 or settingsChanged {
+    runUiSystems(world: app.io.world, res: app.io.gpuUi)
+  }
+
+  let previousMode: CameraRigMode = app.cam.rig.mode
+  if handleCameraBar(input: app.io.ui, rig: app.cam.rig, camera: app.cam.camera) { app.persist.stateDirty = true }
+  if previousMode is not CameraRigMode.character and app.cam.rig.mode is CameraRigMode.character {
+    app.cam.rig.yaw = app.character.controller.heading
+    app.cam.rig.orbitPitch = 0.24
+    app.cam.camera.target = thirdPersonCameraTarget(controller: app.character.controller, focusZ: characterFocusZ)
+    snapCameraRigView(rig: app.cam.rig)
+  }
+  if previousMode is not CameraRigMode.orbit and app.cam.rig.mode is CameraRigMode.orbit {
+    app.cam.camera.target = thirdPersonCameraTarget(controller: app.character.controller, focusZ: orbitFocusZ)
+  }
+  let joyActive: Bool = updateWalkerTouch(moveStick: app.io.moveStick, world: app.io.world)
+  let cameraMoved: Bool = updateCameraRig(rig: app.cam.rig, camera: app.cam.camera,
+                     allowInput: uiPointerCaptured(input: app.io.ui) is false, dt: dt)
+  if cameraMoved { app.persist.stateDirty = true }
+
+  app.character.prevModel = app.character.model
+  var characterMoved: Bool = false
+  if app.cam.rig.mode is CameraRigMode.character {
+    characterMoved = updateWalkerMovement(controller: app.character.controller,
+      moveStick: app.io.moveStick, joyActive: joyActive,
+      allowKeys: uiPointerCaptured(input: app.io.ui) is false and app.character.playing,
+      cameraYaw: app.cam.rig.viewYaw, dt: dt * app.character.speed)
+    groundWalker(controller: app.character.controller, groundZ: app.character.groundZ)
+    app.cam.camera.target = thirdPersonCameraTarget(controller: app.character.controller, focusZ: characterFocusZ)
+    if characterMoved {
+      app.character.model = walkerWorldModel(baseModel: app.character.basePartModel, controller: app.character.controller)
+      app.persist.stateDirty = true
+    }
+    var locomotionClip: Int = 0
+    if app.character.controller.moving {
+      locomotionClip = 3
+      if app.character.controller.walking { locomotionClip = 1 }
+    }
+    if locomotionClip is not app.character.clipIndex {
+      app.character.transitionFrom = captureSkeletonPose(sk: app.character.skeleton)
+      app.character.transitionElapsed = 0.0
+      app.character.clipIndex = locomotionClip
+      app.character.animTime = 0.0
+      setPanelSelection(panel: app.io.clipPanel, world: app.io.world, group: 1, id: clipButtonId(index: app.character.clipIndex))
+    }
+  }
+  let terrainWrapped: Bool = updateInfiniteTerrain(terrain: app.terrain, scene: app.scene, playerPosition: app.character.controller.position)
+  let grassWrapped: Bool = updateGrassField(field: app.grass, playerPosition: app.character.controller.position)
+  let resized: Bool = gpu2d.windowResized()
+  if resized { app.persist.stateDirty = true }
+  updateWindowGeometry(g: app.persist.windowGeom, now: now, resized: resized)
+
+  if app.persist.stateDirty and not app.frame.headless {
+    if (now - app.persist.lastStateSave) as Float >= 0.25 {
+      writeHotReloadStateFor(appId: state114AppId,
+                             state: serialize114State(clipIndex: app.character.clipIndex, playing: app.character.playing,
+                                                      speed: app.character.speed, toon: app.character.toon,
+                                                      controller: app.character.controller,
+                                                      rig: app.cam.rig, camera: app.cam.camera))
+      app.persist.lastStateSave = now
+      app.persist.stateDirty = false
+    }
+  }
+
+  let hadUiEvents: Bool = app.io.ui.events.length > 0 or app.io.ui.pointer.down
+    or app.io.ui.pointer.pressed or app.io.ui.pointer.released
+  let logChanged: Bool = app.io.logView.revision is not app.io.lastLogRevision
+  let transitionActive: Bool = app.character.transitionElapsed < clipTransitionDuration
+  var needsRender: Bool = app.character.playing or transitionActive or settingsChanged or cameraMoved
+    or characterMoved or terrainWrapped or grassWrapped
+    or hadUiEvents or logChanged or resized or scrolled or app.frame.renderedOnce is false
+  if app.frame.taaSettleFrames > 0 { needsRender = true }
+  app.frame.dbgDidWork = needsRender
+  if needsRender {
+    if app.character.playing or settingsChanged or cameraMoved or hadUiEvents or resized {
+      app.frame.taaSettleFrames = 6
+    } else {
+      app.frame.taaSettleFrames = app.frame.taaSettleFrames - 1
+    }
+  }
+  app.frame.needsRender = needsRender
+}
+
+# ----- render phase: animation sample + render-graph walk ------------------
+func renderApp(app: mod App) {
+  app.frame.renderedOnce = true
+  app.io.lastLogRevision = app.io.logView.revision
+  let dt: Float = app.frame.dt
+  let now: Float64 = app.frame.now
+
+  var clipRate: Float = 1.0
+  if app.character.clipIndex is 2 { clipRate = 1.6 }
+  if app.character.playing {
+    app.character.animTime = app.character.animTime + dt * app.character.speed * clipRate
+  }
+  applySkeletonPose(sk: app.character.skeleton, pose: app.character.bindPose)
+  if app.character.clipIndex is 0 { applyClip(sk: app.character.skeleton, c: app.character.idleClip, time: app.character.animTime) }
+  if app.character.clipIndex is 1 or app.character.clipIndex is 2 { applyClip(sk: app.character.skeleton, c: app.character.walkClip, time: app.character.animTime) }
+  if app.character.clipIndex is 3 { applyClip(sk: app.character.skeleton, c: app.character.runClip, time: app.character.animTime) }
+  let transitionActive: Bool = app.character.transitionElapsed < clipTransitionDuration
+  if transitionActive {
+    app.character.transitionElapsed = app.character.transitionElapsed + dt
+    var blendWeight: Float = app.character.transitionElapsed / clipTransitionDuration
+    if blendWeight > 1.0 { blendWeight = 1.0 }
+    blendWeight = blendWeight * blendWeight * (3.0 - 2.0 * blendWeight)
+    blendSkeletonPose(sk: app.character.skeleton, from: app.character.transitionFrom, weight: blendWeight)
+  }
+  let palette: List(Float) = buildPalette(sk: app.character.skeleton)
+
+  applyCameraRig(rig: app.cam.rig, camera: app.cam.camera)
+  syncCameraBar(world: app.io.world, rig: app.cam.rig, camera: app.cam.camera)
+  let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
+  let t: Float = (now - app.frame.startT) as Float
+
+  var oi: Int = 0
+  loop oi < deferredOrderLength(r: app.render.renderer) {
+    let tag: Int = deferredTagAt(r: app.render.renderer, i: oi)
+    profile.zoneBegin(name: walkerPassName(tag: tag))
+    if tag is tagShadowD {
+      let cascades: ShadowCascades = fitShadowCascades(
+        camPos: app.cam.camera.position, camTarget: app.cam.camera.target,
+        fovYDeg: app.cam.camera.fovYDeg, aspect: aspect,
+        near: app.cam.camera.nearZ, far: 24.0, sunDir: app.cam.light.sunDir,
+        count: 3, resolution: drsShadowRes(drs: app.render.drs), lambda: 0.75, backExtent: 12.0)
+      uploadPalette(rows: palette, jointCount: jointCount(sk: app.character.skeleton))
+      if app.io.settings.shadows {
+        beginShadowPass(c: cascades)
+        renderSceneShadow(scene: app.scene)
+        drawTerrainPropsShadow(terrain: app.terrain, scene: app.scene)
+        var sp: Int = 0
+        loop sp < app.character.partIds.length {
+          let sh: MeshHandle = meshHandle(id: walkerIntAt(values: app.character.partIds, index: sp), generation: 1)
+          drawShadowCasterSkinned(mesh: sh, model: app.character.model)
+          var shadowClone: Int = 0
+          loop shadowClone < app.character.crowd.length {
+            if let cloneModel: Mat4 = app.character.crowd.at(index: shadowClone) {
+              drawShadowCasterSkinned(mesh: sh, model: cloneModel)
+            }
+            shadowClone = shadowClone + 1
+          }
+          sp = sp + 1
+        }
+        endShadowPass()
+      }
+      if app.render.shadowLogged is false {
+        log("[shadow] casters {shadowCasterCount()}, {cascades.count} cascades at {cascades.resolution}")
+        app.render.shadowLogged = true
+      }
+    }
+    if tag is tagGbuffer {
+      var grassToonGen: Int = 0
+      if app.character.toon { grassToonGen = 1 }
+      let grassView: GrassViewSettings = grass_config.grassThirdPersonSettings(groundColor: walkerGroundColor())
+      grassGenerate(playerX: app.character.controller.position.x,
+                    playerY: app.character.controller.position.y,
+                    groundZ: app.character.groundZ, time: t, dt: dt, toon: grassToonGen,
+                    camX: app.cam.camera.position.x, camY: app.cam.camera.position.y, camZ: app.cam.camera.position.z,
+                    fwdX: app.cam.camera.target.x - app.cam.camera.position.x,
+                    fwdY: app.cam.camera.target.y - app.cam.camera.position.y,
+                    fwdZ: app.cam.camera.target.z - app.cam.camera.position.z,
+                    settings: grassView)
+      grassDiagTick()
+      gbuffer.beginPass(camera: app.cam.camera, light: app.cam.light, aspect: aspect)
+      drawTerrainGround(terrain: app.terrain, scene: app.scene)
+      gbuffer.renderScene(scene: app.scene)
+      drawTerrainProps(terrain: app.terrain, scene: app.scene)
+      uploadPalette(rows: palette, jointCount: jointCount(sk: app.character.skeleton))
+      var p: Int = 0
+      loop p < app.character.partIds.length {
+        let handle: MeshHandle = meshHandle(id: walkerIntAt(values: app.character.partIds, index: p), generation: 1)
+        let mat: Material3d = {
+          baseColor: vec3.create(x: 1.0, y: 1.0, z: 1.0),
+          metallic: 0.0,
+          roughness: walkerFloatAt(values: app.character.partRough, index: p),
+          emission: vec3.create(x: 0.0, y: 0.0, z: 0.0),
+          toon: app.character.toon
+        }
+        gbuffer.drawSkinnedInstance(mesh: handle, model: app.character.model,
+                                    prevModel: app.character.prevModel, material: mat)
+        setInstanceBatchMesh(batch: app.character.crowdBatch, mesh: handle)
+        resetInstanceBatch(batch: app.character.crowdBatch)
+        var cloneDraw: Int = 0
+        loop cloneDraw < app.character.crowd.length {
+          if let cloneModel: Mat4 = app.character.crowd.at(index: cloneDraw) {
+            addInstance(batch: app.character.crowdBatch, model: cloneModel, prevModel: cloneModel, material: mat)
+          }
+          cloneDraw = cloneDraw + 1
+        }
+        drawSkinnedInstances(batch: app.character.crowdBatch)
+        p = p + 1
+      }
+      grassDraw()
+      gbuffer.endPass()
+    }
+    if tag is tagSsaoD or tag is tagDepthPyramid or tag is tagLighting
+      or tag is tagTaaD or tag is tagComposite {
+      renderDeferredPass(r: app.render.renderer, tag: tag, scene: app.scene,
+                         camera: app.cam.camera, light: app.cam.light, aspect: aspect)
+    }
+    if tag is tagUiOverlayD {
+      gpu2d.beginFrameLoad()
+      renderSystemGpu2d(world: app.io.world, res: app.io.gpuUi)
+      drawWalkerHud(logView: app.io.logView, gpuUi: app.io.gpuUi, dbg: app.io.dbg, moveStick: app.io.moveStick, panelOpen: app.io.settings.open)
+    }
+    if tag is tagPresentD {
+      gpu2d.endFrame()
+    }
+    profile.zoneEnd(name: walkerPassName(tag: tag))
+    oi = oi + 1
+  }
+  snapshotPrevTransforms(scene: app.scene)
+  capFrameSleep(drs: app.render.drs, frameStartSec: now)
+}
+
+# ----- the loop ------------------------------------------------------------
+func runWalkerApp() ret Int {
+  var app: App = createApp()
+  profile.profileMaybeAutoStart()
+  loop not gpu2d.pollClose() {
+    frameBegin(app: app)
+    updateApp(app: app)
+    if gpu2d.shouldRenderFrame(appNeedsRender: app.frame.needsRender) is false {
+      # Park until the OS has something to say (shared policy, lib/ui/event_loop).
+      gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
+        animating: false, mouseDown: false, pollWatcher: false,
+        frameSec: 0.016667, heartbeatSec: 1.0
+      ))
+    } else {
+      renderApp(app: app)
+    }
+  }
+  skinShutdown()
+  shutdown()
+  gpu2d.closeWindow()
+  ret 0
+}

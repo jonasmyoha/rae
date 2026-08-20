@@ -42,6 +42,27 @@ func windowResized() extern ret Bool
 # put the window is built ON these in Rae (lib/ui/window_geometry.rae), not down
 # in the runtime.
 func windowMoved() extern ret Bool
+# False while the window is hidden / minimized / occluded (app switched away or
+# fully covered). Apps should skip their render and park in waitEvents when this
+# is false: rendering while dark wastes power and, on macOS, leaks GPU memory
+# (the Metal layer stops recycling drawables while backgrounded). Not edge-
+# triggered — reflects the current state every call.
+func windowVisible() extern("rae_g2d_window_visible") ret Bool
+
+# The universal per-frame render decision, so no app has to hand-roll it. Render
+# this frame only if the app wants to AND the window is actually visible. NEVER
+# render while hidden/minimized/occluded: it wastes power and, on macOS, leaks
+# GPU memory — the Metal drawable pool stops recycling while backgrounded, so
+# every frame allocates a fresh drawable and the deferred pipeline's driver
+# allocations pile up (measured 170MB -> 1.4GB across a few app switches). The
+# app passes its own "something changed" signal and branches: render, else park
+# in waitEvents. Folding the visibility rule in here is what stops that rule from
+# being a per-app footgun — the engine present path refuses to present while dark
+# as a hard backstop, but skipping the whole render is what avoids the waste.
+func shouldRenderFrame(appNeedsRender: view Bool) ret Bool {
+  if windowVisible() is false { ret false }
+  ret appNeedsRender
+}
 
 # --- Coordinate system (#112) --------------------------------------------
 # Draw coordinates are in DESIGN units. By default 1 unit = 1 physical pixel
