@@ -799,6 +799,8 @@ void  rae_wgpu_ctx_poll(int wait);
 void* rae_wgpu_null_ptr(void);
 /* #528 GPU timestamp timing */
 int   rae_wgpu_have_timestamp(void);
+void  rae_wgpu_report(const char* tag);   /* env-gated live wgpu object counts */
+int   rae_g2d_window_visible(void);   /* 0 while window hidden/minimized/occluded (gpu2d.windowVisible) */
 int   rae_wgpu_map_read(void* buffer, uint64_t size, void* dst);
 void  rae_gt_set(int64_t i, void* p);
 void* rae_gt_get(int64_t i);
