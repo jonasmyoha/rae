@@ -954,7 +954,14 @@ void* rae_gb_pyr_src_view(int64_t i);
 void* rae_gb_pyr_rt_view(int64_t i);
 void* rae_gb_pyr_bind(int64_t i);
 void rae_gb_set_pyr_bind(int64_t i, void* b);
-/* Shadow cascade render in Rae (#504). */
+/* Shadow cascade render in Rae (#504). The feed (cascade uniforms + draw queue)
+ * is shadow-map bookkeeping, reclassified from rae_ext_gpu3d_shadow* (#514). */
+void rae_sm_begin(const float* cascades, int64_t count, int64_t resolution,
+                  const float* splits, const float* texelWorld, const float* depthRange);
+void rae_sm_queue_mesh(int64_t mesh, struct rae_Mat4* model);
+void rae_sm_queue_skinned(int64_t mesh, struct rae_Mat4* model);
+void rae_sm_record_metaballs(const float* packedBalls, int64_t count, float smoothing);
+void rae_sm_shutdown(void);
 int64_t rae_sm_ready(void);
 void rae_sm_upload_models(void);
 int64_t rae_sm_cascade_count(void);
