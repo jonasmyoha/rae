@@ -7,6 +7,10 @@ func rae_random() extern ret Float
 
 func rae_random_int(min: Int, max: Int) extern ret Int
 
+func rae_popcount(x: Int) extern ret Int
+func rae_leading_zeros(x: Int) extern ret Int
+func rae_trailing_zeros(x: Int) extern ret Int
+
 func sin(x: Float) extern ret Float
 
 func cos(x: Float) extern ret Float
@@ -50,6 +54,22 @@ func random() ret Float {
 
 func random(min: view Int, max: view Int) ret Int {
   ret rae_random_int(min: min, max: max)
+}
+
+# Bit intrinsics over the 64-bit two's-complement Int. popcount = number of set
+# bits; leadingZeros/trailingZeros count zero bits above the highest / below the
+# lowest set bit, and are 64 for an input of 0 (the CPU instructions are
+# undefined on 0, so this pins a defined answer).
+func popcount(x: view Int) ret Int {
+  ret rae_popcount(x: x)
+}
+
+func leadingZeros(x: view Int) ret Int {
+  ret rae_leading_zeros(x: x)
+}
+
+func trailingZeros(x: view Int) ret Int {
+  ret rae_trailing_zeros(x: x)
 }
 
 func abs(n: view Int) ret Int {
