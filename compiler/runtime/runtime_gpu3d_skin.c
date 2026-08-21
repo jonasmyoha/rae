@@ -381,34 +381,12 @@ void rae_ext_gpu3d_setPalette(const float* rows, int64_t jointCount) {
     }
 }
 
-/* Write one palette into slot `index` of the shared palette array (#547 GPU
- * animation instancing). Palettes pack tight by jointCount, so a DrawU whose
- * params.w = index * jointCount * 3 (vec4 rows) reads this slot. All slots use
- * the same skeleton, so jointCount is uniform. Uploads its own range eagerly,
- * like setPalette, so the shadow pass (which runs first) sees it this frame. */
-void rae_ext_gpu3d_setPaletteAt(int64_t index, const float* rows, int64_t jointCount) {
-    g3d_skin_ensure_palette_buffer();
-    if (!rows || jointCount <= 0) return;
-    if (index < 0 || index >= G3D_SKIN_MAX_PALETTES) {
-        static bool warned = false;
-        if (!warned) {
-            fprintf(stderr, "[skin] palette index %lld out of range [0,%d)\n",
-                    (long long)index, G3D_SKIN_MAX_PALETTES);
-            warned = true;
-        }
-        return;
-    }
-    if (jointCount > G3D_SKIN_MAX_JOINTS) jointCount = G3D_SKIN_MAX_JOINTS;
-    size_t floatsPer = (size_t)jointCount * 12;
-    size_t off = (size_t)index * floatsPer;
-    memcpy(g3d_skin_palette_cpu + off, rows, floatsPer * sizeof(float));
-    g3d_skin_joint_count = (int)jointCount;
-    if (g3d_skin_palette_sbuf) {
-        wgpuQueueWriteBuffer(g_wgpu_queue, g3d_skin_palette_sbuf,
-                             (uint64_t)off * sizeof(float),
-                             g3d_skin_palette_cpu + off, floatsPer * sizeof(float));
-    }
-}
+/* NOTE (#547): per-character palette uploads into slots > 0 are done in RAE,
+ * not here — the palette buffer is exposed via rae_gb_skin_palette() and Rae
+ * writes each slot with wgpuQueueWriteBuffer(bufferOffset: index * jointCount *
+ * 12 * 4), the same pattern the draws buffer already uses (#502/#503). Only the
+ * buffer's ALLOCATION stays C (it is C-owned); a dedicated C upload entry point
+ * would just duplicate that one Rae line, so there isn't one. */
 
 /* Queue a skinned draw into the scene pass that is already open. */
 void rae_ext_gpu3d_drawSkinned(int64_t mesh, rae_Mat4* model,
