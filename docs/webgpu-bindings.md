@@ -88,7 +88,7 @@ Investigated because idiomatic Rae code holds arrays in `List(T)`, not raw
 2. **length/cap** are the two `i64` fields.
 3. **Backing memory is exposable with no copy** — `.data` *is* the raw `T*` (`Buffer(T)`).
 4. **A pointer into a List** is `list.data`; length is `list.length`.
-5. **Lifetime** — the List owns the block; the pointer is valid while the List is alive and un-resized. There is no borrow tracker; it is programmer discipline (see the temporal rule below).
+5. **Lifetime** — the List owns the block; the pointer is valid while the List is alive and un-resized. Rae needs **no borrow checker** here because `view`/`mod` are **function-scoped non-owning references**: they cannot be stored in a struct, returned, or otherwise made to escape the call (the "non-owning expression" rule, `docs/value-aggregates-and-ownership.md`). So a `view List(T)` cannot outlive the function it is a parameter of, and cannot be held across a reallocation that happens in some *other* scope. The only way to dangle one is to resize the same List *within the same function* while the view is live — a local, visible pattern, not spooky action at a distance.
 6. **Can a List cross an extern?** Not by value — a C function wanting `const T*` cannot receive a `{data,length,cap}` struct. But its **`.data` + `.length` feed the C params zero-copy.**
 7. So passing `list.data` (Buffer) + `list.length` exposes the contiguous pointer + count **without copying**.
 8. This is a **general** capability, not a WebGPU hack — and the length-carrying span already exists: **`view List(T)` IS the span.** It lowers to `const rae_List_T*` (zero-copy — a pointer to `{data, length, cap}`), carries the pointer (`.data`) AND the length (`.length`), and `view`/`mod` give the read-only/mutable forms. It is already the idiomatic wrapper param: `uploadPalette(rows: view List(Float))`, `uploadMesh(verts: view List(Float), …)` take it and unpack `.data`/`.length` at the C boundary.
@@ -104,9 +104,12 @@ stays the idiomatic caller-side container with zero copy**. The ergonomic
 List(T)` and unpacking `.data`/`.length` at the boundary. **`view List(T)` is
 the span** the earlier draft proposed as `view [T]`: same zero-copy pointer +
 length, same `view`/`mod` read/write distinction, same "don't resize while
-borrowed" rule. A separate `view [T]` value-type would be cosmetic and could not
-enforce invalidation without a borrow checker Rae does not have. So #500's
-capability is present — no new language construct is needed.
+borrowed" rule. A separate `view [T]` value-type would be
+cosmetic. And no borrow checker is needed to keep it safe: `view`/`mod` are
+function-scoped and cannot be stored or escape (point 5), so a span cannot
+outlive its call or be held across a reallocation in another scope — the
+lifetime *is* the function. So #500's capability is present — no new language
+construct is needed.
 
 ## Context bootstrap & auto-linking (#501)
 
