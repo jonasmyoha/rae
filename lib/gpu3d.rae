@@ -753,14 +753,18 @@ func updateMeshVerts(mesh: view MeshHandle, verts: view List(Float), vertCount: 
 # Cascaded shadow maps for the sun. The cascade FIT is in lib/shadow3d.rae
 # (pure arithmetic, unit-tested); these only move it to the GPU and
 # rasterise the casters.
+# The shadow-map feed (cascade uniforms + draw queue) is bookkeeping, not a pass
+# encoder — the shadow render itself is in Rae (gbuffer_shadow.shadowEnd, #504).
+# So these bind the shadow-map C helpers under the rae_sm_* prefix (#514), the
+# same prefix the shadow accessors already use.
 func shadowBegin(cascades: view Buffer(Float), count: Int, resolution: Int,
                  splits: view Buffer(Float), texelWorld: view Buffer(Float),
-                 depthRange: view Buffer(Float)) extern
-func shadowDraw(mesh: Int, model: view Mat4) extern
-func shadowDrawSkinned(mesh: Int, model: view Mat4) extern
-func shadowMetaballs(packedBalls: view Buffer(Float), count: Int, smoothing: Float) extern
-func shadowDrawCount() extern ret Int
-func shadowShutdown() extern
+                 depthRange: view Buffer(Float)) extern("rae_sm_begin")
+func shadowDraw(mesh: Int, model: view Mat4) extern("rae_sm_queue_mesh")
+func shadowDrawSkinned(mesh: Int, model: view Mat4) extern("rae_sm_queue_skinned")
+func shadowMetaballs(packedBalls: view Buffer(Float), count: Int, smoothing: Float) extern("rae_sm_record_metaballs")
+func shadowDrawCount() extern("rae_sm_draw_count") ret Int
+func shadowShutdown() extern("rae_sm_shutdown")
 
 # Open the shadow pass for a fitted cascade set. Everything drawn between
 # this and `endShadowPass` casts.
