@@ -1104,39 +1104,27 @@ void rae_ext_gpu3d_taa(void) {
  * scene pass first if the caller has not, so the HDR image is complete.
  * Graph-driven frames dispatch this between the scene pass and whatever
  * composites in LDR (UI overlay, present). */
-void rae_ext_gpu3d_tonemap(void) {
-    rae_g3d_finish_pass();
-    /* Same safety net as tonemap-in-end: a caller whose frame does not
-     * dispatch TAA explicitly still gets it, so history keeps advancing
-     * and tonemap never samples a stale slot. */
-    if (g3d_ssao_enabled && g3d_ssao_pending) rae_ext_gpu3d_ssao();
-    if (g3d_taa_enabled && g3d_taa_pending) rae_ext_gpu3d_taa();
-    if (!g3d_tonemap_pending || !g3d_hdr_view || !g_g2d_off_view) return;
+/* Tonemap bookkeeping (#514): the scene-pass finish and the safety-net dispatch
+ * of ssao/taa move to the Rae wrapper (tonemapPass -> finishForward); the render
+ * graph always runs ssao/taa/tonemap in order, so the safety nets were only for
+ * legacy non-graph callers, of which the forward path has none. This ensures the
+ * tonemap pipeline/bind and returns the source slot (the TAA slot when TAA is on)
+ * for the Rae side to encode the fullscreen resolve, or -1 to skip. */
+int rae_g3d_tonemap_prepare(void) {
+    if (!g3d_tonemap_pending || !g3d_hdr_view || !g_g2d_off_view) return -1;
     g3d_init_tonemap_pipeline();
     g3d_ensure_tonemap_bind();
     const int tmSlot = g3d_taa_enabled ? g3d_taa_cur : 0;
-    if (!g3d_tonemap_pipeline || !g3d_tonemap_bind[tmSlot]) return;
+    if (!g3d_tonemap_pipeline || !g3d_tonemap_bind[tmSlot]) return -1;
     g3d_tonemap_pending = false;
-    WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
-    WGPURenderPassColorAttachment ca; memset(&ca, 0, sizeof(ca));
-    ca.view = g_g2d_off_view;
-    ca.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
-    ca.loadOp = WGPULoadOp_Clear;   /* fullscreen triangle overwrites every pixel */
-    ca.storeOp = WGPUStoreOp_Store;
-    WGPURenderPassDescriptor rp; memset(&rp, 0, sizeof(rp));
-    rp.colorAttachmentCount = 1;
-    rp.colorAttachments = &ca;
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(enc, &rp);
-    wgpuRenderPassEncoderSetPipeline(pass, g3d_tonemap_pipeline);
-    wgpuRenderPassEncoderSetBindGroup(pass, 0, g3d_tonemap_bind[tmSlot], 0, NULL);
-    wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
-    wgpuRenderPassEncoderEnd(pass);
-    WGPUCommandBuffer cb = wgpuCommandEncoderFinish(enc, NULL);
-    wgpuQueueSubmit(g_wgpu_queue, 1, &cb);
-    wgpuCommandBufferRelease(cb);
-    wgpuRenderPassEncoderRelease(pass);
-    wgpuCommandEncoderRelease(enc);
+    return tmSlot;
 }
+void* rae_g3d_tonemap_pipeline(void) { return (void*)g3d_tonemap_pipeline; }
+void* rae_g3d_tonemap_bind(int64_t slot){
+    if (slot < 0 || slot > 1) return (void*)0;
+    return (void*)g3d_tonemap_bind[slot];
+}
+int64_t rae_g3d_tonemap_pending(void) { return g3d_tonemap_pending ? 1 : 0; }
 
 /* End the standalone 3D frame and reuse the 2D path's screenshot +
  * present-from-offscreen behavior. UI composition uses endPass instead. */
@@ -1195,14 +1183,12 @@ static void rae_g3d_present_offscreen(void) {
     rae_wgpu_poll(presented ? 1 : 0);
 }
 
-void rae_ext_gpu3d_end(void) {
+/* Present the tonemapped offscreen (#514): advance the virtual clock and copy
+ * to the drawable. The scene-pass finish and the tonemap-if-pending fallback
+ * move to the Rae end() wrapper; rae_g3d_present_offscreen is genuine platform
+ * copy-to-drawable, so it stays C (same class as rae_ext_gbuffer_present). */
+void rae_g3d_present_frame(void) {
     rae_g2d_tick_virtual_clock();
-    rae_g3d_finish_pass();
-    /* Presenting reads the LDR offscreen, which only tonemap writes. A
-     * graph-driven frame has already dispatched it (no-op here); a legacy
-     * begin/draw/end caller has not, so run it now rather than presenting
-     * whatever the offscreen held last. */
-    if (g3d_tonemap_pending) rae_ext_gpu3d_tonemap();
     rae_g3d_present_offscreen();
 }
 
