@@ -993,6 +993,13 @@ void* rae_g3d_depth_view(void);
 void* rae_g3d_pipeline(void);
 void* rae_g3d_bind(void);
 void  rae_g3d_set_frame(void* enc, void* pass);
+void* rae_g3d_pass(void);
+int   rae_g3d_push_draw_record(int64_t mesh, struct rae_Mat4* model, struct rae_Mat4* prevModel,
+                               float r, float g, float b, float metallic,
+                               float emR, float emG, float emB, float roughness);
+void* rae_g3d_mesh_vbuf(int64_t mesh);
+void* rae_g3d_mesh_ibuf(int64_t mesh);
+int64_t rae_g3d_mesh_icount(int64_t mesh);
 /* Static bind group creation moved to Rae (#503). */
 void* rae_gb_frame_ubuf(void);
 int64_t rae_gb_frame_bytes(void);
