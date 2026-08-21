@@ -886,7 +886,7 @@ void rae_gb_set_pyr_bind(int64_t i, void* b) {
  * uniform it needs itself — invViewProj and camPos, both derived from the
  * geometry pass's viewProj. Lighting rewrites the same values later; they
  * cannot disagree because both come from gb_viewproj. */
-/* rae_ext_gbuffer_ssao moved to Rae (lib/gbuffer_passes.rae:ssao, #504). */
+/* The SSAO pass moved to Rae (lib/gbuffer_passes.rae ssaoPass, #504). */
 
 /* Cooked Hosek-Wilkie coefficients, pushed from Rae before the lighting call.
  * One scalar per call keeps this off the lighting extern's already 28-long
