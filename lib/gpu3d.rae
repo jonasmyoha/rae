@@ -382,12 +382,40 @@ func beginScene(camera: view Camera3d, light: view Light3d, aspect: view Float, 
 #
 # An app that does not write that line keeps the flat clear colour.
 func skyHosekPush(index: Int, value: Float) extern
-func skyDraw(skyKind: Float, turbidity: Float, skyExposure: Float, sunSizeRad: Float,
-             sunX: Float, sunY: Float, sunZ: Float,
-             sunR: Float, sunG: Float, sunB: Float,
-             zenR: Float, zenG: Float, zenB: Float, bands: Float,
-             horR: Float, horG: Float, horB: Float, discI: Float,
-             clearR: Float, clearG: Float, clearB: Float) extern
+# Sky (#514): C ensures the pipeline, packs+uploads the sky uniform (with the
+# Hosek table Rae pushed), returns 1 to proceed / 0 to skip; Rae encodes the
+# fullscreen sky draw into the scene pass and restores the geometry pipeline.
+func g3dSkyPrepare(skyKind: Float, turbidity: Float, skyExposure: Float, sunSizeRad: Float,
+                   sunX: Float, sunY: Float, sunZ: Float,
+                   sunR: Float, sunG: Float, sunB: Float,
+                   zenR: Float, zenG: Float, zenB: Float, bands: Float,
+                   horR: Float, horG: Float, horB: Float, discI: Float,
+                   clearR: Float, clearG: Float, clearB: Float) extern("rae_g3d_sky_prepare") ret Int
+func g3dSkyPipeline() extern("rae_g3d_sky_pipeline") ret Ptr
+func g3dSkyBind() extern("rae_g3d_sky_bind") ret Ptr
+func skyDraw(skyKind: copy Float, turbidity: copy Float, skyExposure: copy Float, sunSizeRad: copy Float,
+             sunX: copy Float, sunY: copy Float, sunZ: copy Float,
+             sunR: copy Float, sunG: copy Float, sunB: copy Float,
+             zenR: copy Float, zenG: copy Float, zenB: copy Float, bands: copy Float,
+             horR: copy Float, horG: copy Float, horB: copy Float, discI: copy Float,
+             clearR: copy Float, clearG: copy Float, clearB: copy Float) {
+  let ok: Int = g3dSkyPrepare(skyKind: skyKind, turbidity: turbidity, skyExposure: skyExposure, sunSizeRad: sunSizeRad,
+    sunX: sunX, sunY: sunY, sunZ: sunZ, sunR: sunR, sunG: sunG, sunB: sunB,
+    zenR: zenR, zenG: zenG, zenB: zenB, bands: bands,
+    horR: horR, horG: horG, horB: horB, discI: discI,
+    clearR: clearR, clearG: clearG, clearB: clearB)
+  if ok is 0 { ret }
+  let pass: Ptr = g3dPass()
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dSkyPipeline())
+  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+    group: g3dSkyBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: 3 as UInt32,
+    instanceCount: 1 as UInt32, firstVertex: 0 as UInt32, firstInstance: 0 as UInt32)
+  # Restore the geometry pipeline/bind so the scene draws after the sky are correct.
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dPipeline())
+  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+    group: g3dBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+}
 
 # Three vec4 per channel: [A B C D][E F G H][I radiance _ _], matching `hosek`
 # in the WGSL. The deferred path has the same walk in lib/gbuffer.rae, and the
