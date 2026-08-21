@@ -1,0 +1,116 @@
+# Camera system for the walker example (#548).
+#
+# CameraState (rig + camera + scene light + Hosek dataset) and cameraUpdate,
+# extracted from app.rae with behaviour unchanged. cameraUpdate runs the same
+# operations in the same order as before; it returns a small CameraTick because
+# the touch-stick state it computes (updateWalkerTouch) is consumed by character
+# movement AND the camera-moved flag drives the render decision. joyActive is
+# really input's business — it rides here until #545 splits input out. Example-
+# 114 files are siblings that merge into one module, so App/CharacterState/the
+# focus-Z consts (character.rae) and the stdlib helpers all resolve cross-file.
+
+import core
+import math
+import profile
+import gpu2d
+import sdf_text
+import vec3
+import gltf
+import gltf_skin
+import png
+import sys
+import app3d/camera_rig
+import app3d/render_scale
+import app3d/character_controller
+import app3d/ui_shell
+import app3d/control_panel
+import app3d/camera_bar
+import renderer_deferred
+import sky
+import gbuffer
+import gbuffer_instanced
+open gbuffer_instanced
+import grass_compute
+open grass_compute
+import grass_config
+import shadow3d
+import app3d/playback
+import app3d/slider
+import app3d/settings_dialog
+import sky_hosek
+import hot_reload
+import ui/log_overlay
+import ui/window_geometry
+import ui/scroll_panel
+import ui/event_loop
+import ui/debug_overlay
+import ui/virtual_joystick
+import ui/ecs
+import ui/input_gpu2d
+import ui/render_gpu2d
+open scene3d
+open gpu3d
+open renderer_deferred
+open sky
+open gbuffer
+open rendergraph
+open math3d
+open mesh3d
+open gltf
+open gltf_skin
+open sdf_text
+open png
+open app3d/camera_rig
+open app3d/character_controller
+open app3d/settings_dialog
+open sky_hosek
+open app3d/ui_shell
+open app3d/control_panel
+open app3d/camera_bar
+open shadow3d
+open app3d/playback
+open hot_reload
+open ui/log_overlay
+open ui/window_geometry
+open ui/scroll_panel
+open ui/event_loop
+open ui/debug_overlay
+open ui/virtual_joystick
+open ui/ecs
+open ui/components
+open ui/input_gpu2d
+open ui/render_gpu2d
+
+# Camera rig + camera + scene light. (#548)
+type CameraState {
+  camera: Camera3d
+  rig: CameraRig
+  light: Light3d
+  hosek: HosekDataset
+}
+
+# What a camera tick reports: the touch stick's active state (used by character
+# movement) and whether the camera moved this frame (feeds needsRender).
+type CameraTick {
+  joyActive: Bool
+  cameraMoved: Bool
+}
+
+func cameraUpdate(app: mod App, dt: copy Float) ret CameraTick {
+  let previousMode: CameraRigMode = app.cam.rig.mode
+  if handleCameraBar(input: app.io.ui, rig: app.cam.rig, camera: app.cam.camera) { app.persist.stateDirty = true }
+  if previousMode is not CameraRigMode.character and app.cam.rig.mode is CameraRigMode.character {
+    app.cam.rig.yaw = app.character.controller.heading
+    app.cam.rig.orbitPitch = 0.24
+    app.cam.camera.target = thirdPersonCameraTarget(controller: app.character.controller, focusZ: characterFocusZ)
+    snapCameraRigView(rig: app.cam.rig)
+  }
+  if previousMode is not CameraRigMode.orbit and app.cam.rig.mode is CameraRigMode.orbit {
+    app.cam.camera.target = thirdPersonCameraTarget(controller: app.character.controller, focusZ: orbitFocusZ)
+  }
+  let joyActive: Bool = updateWalkerTouch(moveStick: app.io.moveStick, world: app.io.world)
+  let cameraMoved: Bool = updateCameraRig(rig: app.cam.rig, camera: app.cam.camera,
+                     allowInput: uiPointerCaptured(input: app.io.ui) is false, dt: dt)
+  if cameraMoved { app.persist.stateDirty = true }
+  ret CameraTick { joyActive: joyActive, cameraMoved: cameraMoved }
+}
