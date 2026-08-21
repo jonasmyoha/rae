@@ -95,7 +95,6 @@ func g3dPass() extern("rae_g3d_pass") ret Ptr
 func g3dPushMetaballCluster(packedBalls: view Buffer(Float), count: Int, packedColors: view Buffer(Float), smoothing: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern("rae_g3d_push_metaball_cluster") ret Int
 func g3dSdfPipeline() extern("rae_g3d_sdf_pipeline") ret Ptr
 func g3dSdfBind(slot: Int) extern("rae_g3d_sdf_bind") ret Ptr
-func end() extern
 # Scene-pass finish primitives (#514): Rae ends the pass + finishes the command
 # buffer over the bindings; g3dSubmitCmd is the one thin C call (Rae cannot yet
 # take the address of a single handle for wgpuQueueSubmit).
@@ -103,7 +102,16 @@ func g3dEncoder() extern("rae_g3d_encoder") ret Ptr
 func g3dFrameActive() extern("rae_g3d_frame_active") ret Int
 func g3dClearFrame() extern("rae_g3d_clear_frame")
 func g3dSubmitCmd(cmd: Ptr) extern("rae_g3d_submit_cmd")
-func tonemap() extern
+# The LDR offscreen the window presents (shared with the deferred/2D path).
+func g2dOffView() extern("rae_g2d_off_view") ret Ptr
+# Tonemap (#514): C ensures the pipeline/bind and returns the source slot (the
+# TAA slot when TAA is on), or -1; Rae encodes the fullscreen resolve into the
+# offscreen. present-frame advances the virtual clock + copies to the drawable.
+func g3dTonemapPrepare() extern("rae_g3d_tonemap_prepare") ret Int
+func g3dTonemapPipeline() extern("rae_g3d_tonemap_pipeline") ret Ptr
+func g3dTonemapBind(slot: Int) extern("rae_g3d_tonemap_bind") ret Ptr
+func g3dTonemapPending() extern("rae_g3d_tonemap_pending") ret Int
+func g3dPresentFrame() extern("rae_g3d_present_frame")
 func taa() extern
 func ssao() extern
 func shutdown() extern
@@ -158,6 +166,44 @@ func setTime(frame: mod Frame3d, t: view Float) pub {
 # the descriptor's .data pointers stay valid for the BeginRenderPass call.
 var gFwdColorAtts: List(WGPURenderPassColorAttachment) = createList(WGPURenderPassColorAttachment, cap: 4)
 var gFwdDepthAtt: List(WGPURenderPassDepthStencilAttachment) = createList(WGPURenderPassDepthStencilAttachment, cap: 1)
+# One-attachment storage for the fullscreen post-process passes (tonemap, …),
+# kept persistent so the descriptor's .data pointer is valid for BeginRenderPass.
+var gFwdPostAtt: List(WGPURenderPassColorAttachment) = createList(WGPURenderPassColorAttachment, cap: 1)
+func ensureFwdPostAtt() {
+  loop gFwdPostAtt.length < 1 { gFwdPostAtt.add(value: { depthSlice: 0 as UInt32 }) }
+}
+
+# Encode a fullscreen post-process pass (#514): its own encoder + one-attachment
+# render pass writing `target`, a triangle draw with `pipeline`+`bind`, then
+# finish+submit — the shared shape of tonemap/taa/ssao, mirroring the deferred
+# fullscreen passes. Clears the target (the triangle overwrites every pixel).
+func fullscreenPostPass(target: copy Ptr, pipeline: copy Ptr, bind: copy Ptr) {
+  ensureFwdPostAtt()
+  let att: WGPURenderPassColorAttachment = {
+    view_: target, depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32,
+    loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store,
+    clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }
+  }
+  gFwdPostAtt.set(index: 0, value: att)
+  let rpDesc: WGPURenderPassDescriptor = {
+    colorAttachmentCount: 1 as UInt64, colorAttachments: gFwdPostAtt.data
+  }
+  let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
+  let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
+  let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: pipeline)
+  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+    group: bind, dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: 3 as UInt32,
+    instanceCount: 1 as UInt32, firstVertex: 0 as UInt32, firstInstance: 0 as UInt32)
+  wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
+  let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
+  let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
+  g3dSubmitCmd(cmd: cmd)
+  wgpuCommandBufferRelease(commandBuffer: cmd)
+  wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
+  wgpuCommandEncoderRelease(commandEncoder: enc)
+}
 func ensureFwdAttachments() {
   loop gFwdColorAtts.length < 4 { gFwdColorAtts.add(value: { depthSlice: 0 as UInt32 }) }
   loop gFwdDepthAtt.length < 1 { gFwdDepthAtt.add(value: { depthReadOnly: 0 as UInt32 }) }
@@ -548,6 +594,17 @@ func renderScene(scene: view Scene3d) pub {
   }
 }
 
+# Finish the frame (#514, was the C end): close the scene pass, run tonemap if
+# the graph did not, then present. Records upload per-draw and passes dispatch
+# in graph order, so this is the last thing a forward frame does.
+func end() pub {
+  finishForward()
+  if g3dTonemapPending() is not 0 {
+    tonemapPass()
+  }
+  g3dPresentFrame()
+}
+
 func endFrame() pub {
   end()
 }
@@ -592,7 +649,10 @@ func endPass() pub {
 # render graph dispatches this between the scene pass and any LDR
 # composition (UI overlay, present). Ends the scene pass if still open.
 func tonemapPass() pub {
-  tonemap()
+  finishForward()
+  let slot: Int = g3dTonemapPrepare()
+  if slot < 0 { ret }
+  fullscreenPostPass(target: g2dOffView(), pipeline: g3dTonemapPipeline(), bind: g3dTonemapBind(slot: slot))
 }
 
 # Ambient occlusion (#337): horizon-search AO with a visibility bitmask,
