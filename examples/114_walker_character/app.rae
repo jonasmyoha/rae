@@ -111,13 +111,7 @@ type InputUi {
   lastLogRevision: Int
 }
 
-# Camera rig + camera + scene light. (#548)
-type CameraState {
-  camera: Camera3d
-  rig: CameraRig
-  light: Light3d
-  hosek: HosekDataset
-}
+# CameraState + cameraUpdate live in camera.rae (#548).
 
 # The animated character. A single instance today; #547 turns `list` into a
 # roster and adds the controlled/owner fields for multi-character + multiplayer.
@@ -552,21 +546,9 @@ func updateApp(app: mod App) {
     runUiSystems(world: app.io.world, res: app.io.gpuUi)
   }
 
-  let previousMode: CameraRigMode = app.cam.rig.mode
-  if handleCameraBar(input: app.io.ui, rig: app.cam.rig, camera: app.cam.camera) { app.persist.stateDirty = true }
-  if previousMode is not CameraRigMode.character and app.cam.rig.mode is CameraRigMode.character {
-    app.cam.rig.yaw = app.character.controller.heading
-    app.cam.rig.orbitPitch = 0.24
-    app.cam.camera.target = thirdPersonCameraTarget(controller: app.character.controller, focusZ: characterFocusZ)
-    snapCameraRigView(rig: app.cam.rig)
-  }
-  if previousMode is not CameraRigMode.orbit and app.cam.rig.mode is CameraRigMode.orbit {
-    app.cam.camera.target = thirdPersonCameraTarget(controller: app.character.controller, focusZ: orbitFocusZ)
-  }
-  let joyActive: Bool = updateWalkerTouch(moveStick: app.io.moveStick, world: app.io.world)
-  let cameraMoved: Bool = updateCameraRig(rig: app.cam.rig, camera: app.cam.camera,
-                     allowInput: uiPointerCaptured(input: app.io.ui) is false, dt: dt)
-  if cameraMoved { app.persist.stateDirty = true }
+  let camTick: CameraTick = cameraUpdate(app: app, dt: dt)
+  let joyActive: Bool = camTick.joyActive
+  let cameraMoved: Bool = camTick.cameraMoved
 
   app.character.prevModel = app.character.model
   var characterMoved: Bool = false
