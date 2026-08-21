@@ -162,6 +162,8 @@ type App {
   terrain: InfiniteTerrain
   grass: GrassField
   render: RenderState
+  physics: PhysicsState   # fixed-step sim seam (physics.rae, #553)
+  net: NetState           # multiplayer seam (net.rae, #554)
   persist: PersistState
   ok: Bool
 }
@@ -439,6 +441,8 @@ func createApp() ret App {
     terrain: own terrain
     grass: own grass
     render: { renderer: own renderer, drs: own drs, shadowLogged: false }
+    physics: { accumulator: 0.0, worldHandle: 0 }
+    net: { role: 0, tick: 0 }
     persist: { windowGeom: own windowGeom, lastStateSave: startT, stateDirty: false }
     ok: true
   }
@@ -463,6 +467,9 @@ func frameBegin(app: mod App) {
 func updateApp(app: mod App) {
   let dt: Float = app.frame.dt
   let now: Float64 = app.frame.now
+  # Multiplayer seam (offline no-op today, #554): pull remote intents in before
+  # the local sim; the matching publish runs after it, below.
+  netApplyRemote(net: app.net)
   let uiTick: UiTick = uiUpdate(app: app, dt: dt, now: now)
   let settingsChanged: Bool = uiTick.settingsChanged
   let scrolled: Bool = uiTick.scrolled
@@ -499,6 +506,17 @@ func updateApp(app: mod App) {
   }
   let terrainWrapped: Bool = updateInfiniteTerrain(terrain: app.terrain, scene: app.scene, playerPosition: app.character.controller.position)
   let grassWrapped: Bool = updateGrassField(field: app.grass, playerPosition: app.character.controller.position)
+
+  # Fixed-timestep physics seam (#553): accumulate frame time and step at a fixed
+  # rate, decoupled from render. physicsStep is a no-op until a physics backend
+  # lands; the loop shape does not change then.
+  app.physics.accumulator = app.physics.accumulator + dt
+  loop app.physics.accumulator >= physicsFixedStep {
+    physicsStep(app: app, fixedDt: physicsFixedStep)
+    app.physics.accumulator = app.physics.accumulator - physicsFixedStep
+  }
+  netPublishIntent(net: app.net)
+
   let resized: Bool = gpu2d.windowResized()
   if resized { app.persist.stateDirty = true }
   updateWindowGeometry(g: app.persist.windowGeom, now: now, resized: resized)
