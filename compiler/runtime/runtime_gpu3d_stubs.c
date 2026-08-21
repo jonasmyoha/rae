@@ -66,12 +66,15 @@ int rae_g3d_push_metaball_cluster(const float* packedBalls, int64_t count,
 }
 void* rae_g3d_sdf_pipeline(void) { return (void*)0; }
 void* rae_g3d_sdf_bind(int64_t slot){ (void)slot; return (void*)0; }
-void rae_ext_gpu3d_end(void) {}
+void rae_g3d_present_frame(void) {}
 void* rae_g3d_encoder(void) { return (void*)0; }
 int64_t rae_g3d_frame_active(void) { return 0; }
 void rae_g3d_clear_frame(void) {}
 void rae_g3d_submit_cmd(void* cmd){ (void)cmd; }
-void rae_ext_gpu3d_tonemap(void) {}
+int rae_g3d_tonemap_prepare(void) { return -1; }
+void* rae_g3d_tonemap_pipeline(void) { return (void*)0; }
+void* rae_g3d_tonemap_bind(int64_t slot){ (void)slot; return (void*)0; }
+int64_t rae_g3d_tonemap_pending(void) { return 0; }
 void rae_ext_gpu3d_taa(void) {}
 void rae_ext_gpu3d_ssao(void) {}
 void rae_ext_gpu3d_shutdown(void) {}
