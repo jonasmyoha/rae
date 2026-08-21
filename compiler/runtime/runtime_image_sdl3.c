@@ -259,6 +259,8 @@ static SDL_Scancode rae_sdl_scancode(int64_t key) {
         case 263: return SDL_SCANCODE_LEFT;
         case 264: return SDL_SCANCODE_DOWN;
         case 265: return SDL_SCANCODE_UP;
+        case 266: return SDL_SCANCODE_PAGEUP;    /* GLFW GLFW_KEY_PAGE_UP */
+        case 267: return SDL_SCANCODE_PAGEDOWN;  /* GLFW GLFW_KEY_PAGE_DOWN */
         case 340: return SDL_SCANCODE_LSHIFT;
         default:  return SDL_SCANCODE_UNKNOWN;
     }
