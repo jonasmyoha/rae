@@ -1,0 +1,21 @@
+# Physics system for the walker example (#553).
+#
+# A fixed-timestep seam decoupled from render, following the tetris3d
+# accumulator: updateApp accumulates frame time and calls physicsStep at a fixed
+# rate. physicsStep is a NO-OP today; when Jolt/Box2D lands it fills in and the
+# accumulator loop in updateApp does not change. App resolves cross-file (114
+# files are siblings in one module).
+import core
+
+const physicsFixedStep: Float = 1.0 / 60.0
+
+# accumulator carries leftover frame time between fixed steps; worldHandle is the
+# future Jolt/Box2D world id (0 = none yet).
+type PhysicsState {
+  accumulator: Float
+  worldHandle: Int
+}
+
+# One fixed simulation step. No-op until a physics backend is wired in.
+func physicsStep(app: mod App, fixedDt: copy Float) {
+}
