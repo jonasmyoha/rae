@@ -71,6 +71,8 @@ import ui/log_overlay
 import ui/window_geometry
 import ui/scroll_panel
 import ui/debug_overlay
+import ui/corner_menu_button
+open ui/corner_menu_button
 import hot_reload
 import app3d/camera_rig
 import app3d/camera_bar
@@ -380,6 +382,10 @@ func main() ret Int {
   }
   settingsApplyToWorld(s: settings, world: uiWorld)
   applySettingsPanelOpen(world: uiWorld, open: settings.open)
+  # The legacy in-scene "Settings" button is superseded by the shared corner
+  # menu button (#546 UI unification), so hide it — one settings affordance, the
+  # same one example 114 uses.
+  setNodeActive(world: uiWorld, nodeId: "SettingsButton", value: false)
   var camera: Camera3d = scene1.camera
   var cameraRig: CameraRig = createCameraRig(camera: camera)
   # Restore before the test-state hook, so an explicit env override still
@@ -534,6 +540,11 @@ func main() ret Int {
                           now: now, didRealWork: dbgDidWork) {
       suppressUiPress(input: uiInput)
     }
+    # Shared corner menu button (top-left) — the same widget example 114 uses.
+    # Detected here (before dispatchUiActions) so its press is withdrawn from the
+    # UI world; the panel open/close applies below where settingsChanged is set.
+    let menuTapped: Bool = cornerMenuButtonTapped()
+    if menuTapped { suppressUiPress(input: uiInput) }
     # RE-CENTRE ON SWITCHING TO ORBIT. The rig recovers the orbit target by
     # walking `distance` along the free camera's view direction, so the view
     # never jumps -- the right library default. But after flying around in WASD
@@ -557,6 +568,10 @@ func main() ret Int {
     dispatchUiActions(input: uiInput, state: uiState, rig: cameraRig, camera: camera)
     # The shared dialog sees every action and ignores what it does not own.
     var settingsChanged: Bool = false
+    if menuTapped {
+      settings.open = settings.open is false
+      settingsChanged = true
+    }
     var sa: Int = 0
     loop sa < uiActionCount(input: uiInput) {
       if settingsHandleAction(s: settings, actionId: uiActionAt(input: uiInput, index: sa)) {
@@ -782,6 +797,9 @@ func main() ret Int {
         if tag is RenderTag.uiOverlay {
           gpu2d.beginFrameLoad()
           renderSystemGpu2d(world: uiWorld, res: gpuUi)
+          # Shared corner menu button (top-left), over the UI world — same widget
+          # as example 114 (drawn here, not an ECS node, so it stays put).
+          drawCornerMenuButton()
           # After the app UI, so the diagnostic is never what gets covered up.
           drawLogOverlay(ov: logView, font: gpuUi.textFont, screenW: extentW, screenH: extentH)
           # LAST, so it is above the scene, the UI world and the log.
