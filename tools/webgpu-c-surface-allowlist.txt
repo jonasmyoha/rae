@@ -3,10 +3,13 @@
 # Adding a line = reviewable event (justify in the commit); removing one = always fine.
 # Enforced by tools/webgpu-c-surface-gate.sh (make c-surface-gate). Lines starting with # are ignored.
 #
-# Known debt tracked separately: #513 removes the dead gbuffer_{debugView,ssao,present};
+# Known debt tracked separately: #513 removed the dead gbuffer_{debugView,ssao};
 # #514 migrates/retires the forward renderer (rae_ext_gpu3d_* pass encoders).
 rae_ext_gbuffer_deferredShutdown
 rae_ext_gbuffer_drawCount
+# present: no-UI final blit to the swapchain; reached from Rae as
+# gbuffer.present() -> presentFrame() -> renderDeferredPass. Platform copy-to-drawable.
+rae_ext_gbuffer_present
 rae_ext_gbuffer_pyramidMips
 rae_ext_gbuffer_sdfShutdown
 rae_ext_gbuffer_shutdown
