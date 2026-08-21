@@ -927,6 +927,7 @@ void  rae_g3d_set_frame(void* enc, void* pass){
     g3d_enc  = (WGPUCommandEncoder)enc;
     g3d_pass = (WGPURenderPassEncoder)pass;
 }
+void* rae_g3d_pass(void) { return (void*)g3d_pass; }
 
 /* Queue one mesh draw. model = 16 Floats column-major. Uniform data is
  * written CPU-side (uploaded once at end); the draw is encoded now with
@@ -938,7 +939,8 @@ void  rae_g3d_set_frame(void* enc, void* pass){
  * translation unit. Repeating them here is not duplication for its own sake:
  * C compatibility across translation units (C11 6.2.7) requires the same tag
  * and member names/types, so declaring the SAME shape makes the runtime's
- * definition of rae_ext_gpu3d_draw compatible with the prototype the
+ * Mat4-taking externs (rae_g3d_push_draw_record, the skinned/shadow draws)
+ * compatible with the prototype the
  * generated code calls through. A `const float*` parameter would have the
  * same ABI but an incompatible type, which is undefined behaviour rather
  * than merely untidy.
@@ -958,13 +960,19 @@ _Static_assert(sizeof(rae_Mat4) == 16 * sizeof(float),
                "Rae Mat4 must stay 16 contiguous floats for the gpu3d extern boundary");
 #endif
 
-void rae_ext_gpu3d_draw(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
-                        float r, float g, float b,
-                        float metallic, float roughness,
-                        float emR, float emG, float emB){
-    if (!g3d_pass || !model) return;
+/* CPU bookkeeping half of a forward mesh draw (#514): validate the mesh + the
+ * draw limit and pack the 40-float per-draw record into the shared draw buffer
+ * (uploaded once by end()). Returns the firstInstance slot for the Rae side to
+ * encode the instanced DrawIndexed, or -1 to skip. The record buffer + count
+ * are shared with drawMetaballs/drawSkinned, so this stays in C until those
+ * move too. Layout: [0..15] model, [16..31] prevModel, [32..35] baseColor+
+ * metallic, [36..39] emissive+roughness. */
+int rae_g3d_push_draw_record(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
+                             float r, float g, float b, float metallic,
+                             float emR, float emG, float emB, float roughness){
+    if (!model) return -1;
     int slot = (int)mesh - 1;
-    if (slot < 0 || slot >= g3d_mesh_n) return;
+    if (slot < 0 || slot >= g3d_mesh_n) return -1;
     if (g3d_draw_count >= g3d_draw_limit) {
         if (!g3d_draw_overflow_reported) {
             fprintf(stderr,
@@ -973,7 +981,7 @@ void rae_ext_gpu3d_draw(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
                     g3d_draw_limit, G3D_MAX_DRAWS);
             g3d_draw_overflow_reported = true;
         }
-        return;
+        return -1;
     }
     float* d = g3d_draw_cpu + g3d_draw_count * G3D_DRAW_FLOATS;
     for (int i = 0; i < 16; i++) d[i] = model->m.v[i];
@@ -983,16 +991,27 @@ void rae_ext_gpu3d_draw(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
      * and smear a full-screen streak. */
     if (prevModel) { for (int i = 0; i < 16; i++) d[16 + i] = prevModel->m.v[i]; }
     else           { for (int i = 0; i < 16; i++) d[16 + i] = model->m.v[i]; }
-    d[32] = (float)r; d[33] = (float)g; d[34] = (float)b; d[35] = (float)metallic;
-    d[36] = (float)emR; d[37] = (float)emG; d[38] = (float)emB; d[39] = (float)roughness;
-    wgpuRenderPassEncoderSetVertexBuffer(g3d_pass, 0, g3d_mesh_vbuf[slot], 0,
-                                         wgpuBufferGetSize(g3d_mesh_vbuf[slot]));
-    wgpuRenderPassEncoderSetIndexBuffer(g3d_pass, g3d_mesh_ibuf[slot],
-                                        WGPUIndexFormat_Uint32, 0,
-                                        wgpuBufferGetSize(g3d_mesh_ibuf[slot]));
-    wgpuRenderPassEncoderDrawIndexed(g3d_pass, g3d_mesh_icount[slot], 1, 0, 0,
-                                     (uint32_t)g3d_draw_count);
-    g3d_draw_count++;
+    d[32] = r; d[33] = g; d[34] = b; d[35] = metallic;
+    d[36] = emR; d[37] = emG; d[38] = emB; d[39] = roughness;
+    return g3d_draw_count++;
+}
+
+/* Forward mesh-buffer handle accessors (ungated), keyed by the 1-based mesh
+ * handle. Rae reads these to bind the vertex/index buffers for a draw. */
+void* rae_g3d_mesh_vbuf(int64_t mesh){
+    int slot = (int)mesh - 1;
+    if (slot < 0 || slot >= g3d_mesh_n) return (void*)0;
+    return (void*)g3d_mesh_vbuf[slot];
+}
+void* rae_g3d_mesh_ibuf(int64_t mesh){
+    int slot = (int)mesh - 1;
+    if (slot < 0 || slot >= g3d_mesh_n) return (void*)0;
+    return (void*)g3d_mesh_ibuf[slot];
+}
+int64_t rae_g3d_mesh_icount(int64_t mesh){
+    int slot = (int)mesh - 1;
+    if (slot < 0 || slot >= g3d_mesh_n) return 0;
+    return (int64_t)g3d_mesh_icount[slot];
 }
 
 /* Finish and submit the 3D pass. The caller decides whether to present now or

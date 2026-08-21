@@ -17,6 +17,7 @@ void* rae_g3d_depth_view(void)    { return (void*)0; }
 void* rae_g3d_pipeline(void)      { return (void*)0; }
 void* rae_g3d_bind(void)          { return (void*)0; }
 void  rae_g3d_set_frame(void* enc, void* pass){ (void)enc; (void)pass; }
+void* rae_g3d_pass(void) { return (void*)0; }
 /* Mirror of the Rae-side `Mat4` layout, for the gpu3d extern boundary.
  *
  * `lib/math3d.rae` declares `type Mat4 { m: Array(Float, cap: 16) }`, and the
@@ -24,7 +25,8 @@ void  rae_g3d_set_frame(void* enc, void* pass){ (void)enc; (void)pass; }
  * translation unit. Repeating them here is not duplication for its own sake:
  * C compatibility across translation units (C11 6.2.7) requires the same tag
  * and member names/types, so declaring the SAME shape makes the runtime's
- * definition of rae_ext_gpu3d_draw compatible with the prototype the
+ * Mat4-taking externs (rae_g3d_push_draw_record, the skinned/shadow draws)
+ * compatible with the prototype the
  * generated code calls through. A `const float*` parameter would have the
  * same ABI but an incompatible type, which is undefined behaviour rather
  * than merely untidy.
@@ -44,13 +46,16 @@ _Static_assert(sizeof(rae_Mat4) == 16 * sizeof(float),
                "Rae Mat4 must stay 16 contiguous floats for the gpu3d extern boundary");
 #endif
 
-void rae_ext_gpu3d_draw(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
-                        float r, float g, float b,
-                        float metallic, float roughness,
-                        float emR, float emG, float emB){
+int rae_g3d_push_draw_record(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
+                             float r, float g, float b, float metallic,
+                             float emR, float emG, float emB, float roughness){
     (void)mesh; (void)model; (void)prevModel; (void)r; (void)g; (void)b;
-    (void)metallic; (void)roughness; (void)emR; (void)emG; (void)emB;
+    (void)metallic; (void)emR; (void)emG; (void)emB; (void)roughness;
+    return -1;
 }
+void* rae_g3d_mesh_vbuf(int64_t mesh){ (void)mesh; return (void*)0; }
+void* rae_g3d_mesh_ibuf(int64_t mesh){ (void)mesh; return (void*)0; }
+int64_t rae_g3d_mesh_icount(int64_t mesh){ (void)mesh; return 0; }
 void rae_ext_gpu3d_drawMetaballs(const float* packedBalls, int64_t count,
                                  const float* packedColors, float smoothing,
                                  float metallic, float roughness,
