@@ -165,9 +165,9 @@
 - [ ] #547 114: extract character.rae — Character + CharacterSystem as a ROSTER of N characters (NOT a hardcoded hero): shared skeleton/clips/mesh parts once, per-character controller/anim/model/owner. characterUpdate applies the controlled character's intent; characterAnimate samples per-character pose/palette; characterRenderGbuffer/Shadow draw the roster. Fold the crowd/clones into the roster.
 - [ ] #548 114: extract camera.rae — CameraState (rig + camera + bar); cameraUpdate (rig + mode transitions + follow controlled character), cameraApply.
 - [ ] #549 114: extract ui.rae — UiState (uiWorld, clip/transport panels, settings dialog, scroll, debug + log overlays, hud); uiUpdate (clicks/settings/scroll) + uiRender (overlay + HUD). Fold walker_hud.rae.
-- [ ] #550 114: extract terrain.rae — TerrainState wrapping InfiniteTerrain; terrainUpdate + terrainRenderGround/Props/Shadow. walker_terrain.rae stays as the impl or folds in.
-- [ ] #551 114: extract grass.rae — GrassState wrapping GrassField + grass_compute; grassUpdate + grassRender. walker_grass.rae stays as impl or folds in.
-- [ ] #552 114: extract render.rae — RenderState (DeferredRenderer, sky, light, hosek, DRS, shadow); renderScene owns the render-graph walk and calls each system's render hook per tag.
+- [x] #550 114: extract terrain.rae — TerrainState wrapping InfiniteTerrain; terrainUpdate + terrainRenderGround/Props/Shadow. walker_terrain.rae stays as the impl or folds in.
+- [x] #551 114: extract grass.rae — GrassState wrapping GrassField + grass_compute; grassUpdate + grassRender. walker_grass.rae stays as impl or folds in.
+- [x] #552 114: extract render.rae — RenderState (DeferredRenderer, sky, light, hosek, DRS, shadow); renderScene owns the render-graph walk and calls each system's render hook per tag.
 - [ ] #553 114: add physics.rae — PhysicsState + fixed-step accumulator in updateApp (physicsFixedStep) + physicsStep() no-op stub (Jolt/Box2D seam) + JobSystem (jobSubmit/jobAwaitAll, inline now, runtime_threads seam later).
 - [ ] #554 114: add net.rae — NetState (offline/server/client) + netPublishIntent + netApplyRemote stubs; wire intent publish + remote apply into updateApp as no-ops. Multiplayer seam.
 - [ ] #555 114: thin main.rae to the entry point; fold/retire walker_*.rae; final screenshot parity; cross-link docs. Confirm no file near the 1000-line cap.
