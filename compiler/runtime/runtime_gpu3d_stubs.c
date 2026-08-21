@@ -56,13 +56,16 @@ int rae_g3d_push_draw_record(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
 void* rae_g3d_mesh_vbuf(int64_t mesh){ (void)mesh; return (void*)0; }
 void* rae_g3d_mesh_ibuf(int64_t mesh){ (void)mesh; return (void*)0; }
 int64_t rae_g3d_mesh_icount(int64_t mesh){ (void)mesh; return 0; }
-void rae_ext_gpu3d_drawMetaballs(const float* packedBalls, int64_t count,
-                                 const float* packedColors, float smoothing,
-                                 float metallic, float roughness,
-                                 float emR, float emG, float emB){
+int rae_g3d_push_metaball_cluster(const float* packedBalls, int64_t count,
+                                  const float* packedColors, float smoothing,
+                                  float metallic, float roughness,
+                                  float emR, float emG, float emB){
     (void)packedBalls; (void)count; (void)packedColors; (void)smoothing;
     (void)metallic; (void)roughness; (void)emR; (void)emG; (void)emB;
+    return -1;
 }
+void* rae_g3d_sdf_pipeline(void) { return (void*)0; }
+void* rae_g3d_sdf_bind(int64_t slot){ (void)slot; return (void*)0; }
 void rae_ext_gpu3d_end(void) {}
 void rae_ext_gpu3d_submit(void) {}
 void rae_ext_gpu3d_tonemap(void) {}
