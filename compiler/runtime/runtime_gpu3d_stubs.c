@@ -8,7 +8,15 @@ int64_t rae_ext_gpu3d_meshCreate(const float* verts, int64_t vertCount,
 void rae_ext_gpu3d_meshUpdate(int64_t mesh, const float* verts, int64_t vertCount){
     (void)mesh; (void)verts; (void)vertCount;
 }
-void rae_ext_gpu3d_begin(const float* frame, int64_t count){ (void)frame; (void)count; }
+int rae_g3d_frame_prepare(const float* frame, int64_t count){ (void)frame; (void)count; return 0; }
+void* rae_g3d_hdr_view(void)      { return (void*)0; }
+void* rae_g3d_normal_view(void)   { return (void*)0; }
+void* rae_g3d_velocity_view(void) { return (void*)0; }
+void* rae_g3d_ambient_view(void)  { return (void*)0; }
+void* rae_g3d_depth_view(void)    { return (void*)0; }
+void* rae_g3d_pipeline(void)      { return (void*)0; }
+void* rae_g3d_bind(void)          { return (void*)0; }
+void  rae_g3d_set_frame(void* enc, void* pass){ (void)enc; (void)pass; }
 /* Mirror of the Rae-side `Mat4` layout, for the gpu3d extern boundary.
  *
  * `lib/math3d.rae` declares `type Mat4 { m: Array(Float, cap: 16) }`, and the

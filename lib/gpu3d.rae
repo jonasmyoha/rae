@@ -56,11 +56,29 @@ import math
 open vec3
 open scene3d
 open math3d
+# The forward render pass is built in Rae over the WebGPU bindings (#514),
+# the same way gbuffer.rae builds the deferred geometry pass.
+open webgpu/webgpu
+import webgpu/context
 
 # ----- raw C ABI (implementation detail; prefer the typed API below) ---
 func meshCreate(verts: view Buffer(Float), vertCount: Int, indices: view Buffer(Int), indexCount: Int) extern ret Int
 func meshUpdate(mesh: Int, verts: view Buffer(Float), vertCount: Int) extern
-func begin(frame: view Buffer(Float), count: Int) extern
+# Frame prepare (#514): C packs+uploads the per-frame uniform and returns 1 when
+# the device/targets are ready; the render pass is then built in Rae below.
+func g3dFramePrepare(frame: view Buffer(Float), count: Int) extern("rae_g3d_frame_prepare") ret Int
+# Forward target-view + pipeline handle accessors (ungated platform ABI,
+# mirroring the deferred rae_gb_* accessors).
+func g3dHdrView() extern("rae_g3d_hdr_view") ret Ptr
+func g3dNormalView() extern("rae_g3d_normal_view") ret Ptr
+func g3dVelocityView() extern("rae_g3d_velocity_view") ret Ptr
+func g3dAmbientView() extern("rae_g3d_ambient_view") ret Ptr
+func g3dDepthView() extern("rae_g3d_depth_view") ret Ptr
+func g3dPipeline() extern("rae_g3d_pipeline") ret Ptr
+func g3dBind() extern("rae_g3d_bind") ret Ptr
+# Hand the Rae-built encoder + render pass back to C so the still-C draw/end
+# path encodes into them.
+func g3dSetFrame(enc: Ptr, pass: Ptr) extern("rae_g3d_set_frame")
 func draw(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
 func drawMetaballs(packedBalls: view Buffer(Float), count: Int, packedColors: view Buffer(Float), smoothing: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
 func end() extern
@@ -116,6 +134,80 @@ func setTime(frame: mod Frame3d, t: view Float) pub {
 # ----- typed renderer seam -------------------------------------------
 # Encode a typed camera + light into the flat frame block and start the
 # 3D pass. `aspect` is width/height of the target.
+# Persistent attachment storage for the forward pass (4 colour + 1 depth), so
+# the descriptor's .data pointers stay valid for the BeginRenderPass call.
+var gFwdColorAtts: List(WGPURenderPassColorAttachment) = createList(WGPURenderPassColorAttachment, cap: 4)
+var gFwdDepthAtt: List(WGPURenderPassDepthStencilAttachment) = createList(WGPURenderPassDepthStencilAttachment, cap: 1)
+func ensureFwdAttachments() {
+  loop gFwdColorAtts.length < 4 { gFwdColorAtts.add(value: { depthSlice: 0 as UInt32 }) }
+  loop gFwdDepthAtt.length < 1 { gFwdDepthAtt.add(value: { depthReadOnly: 0 as UInt32 }) }
+}
+
+# Build the forward scene pass in Rae over the WebGPU bindings (#514). C has
+# already packed+uploaded the frame uniform (g3dFramePrepare); here we open the
+# 4-target + depth render pass and hand the encoder/pass to the C draw path.
+# The four targets mirror the old C encoder exactly: HDR (clear = sky/bg colour),
+# world normal, velocity, ambient (all clear to zero), depth (standard Z, far =
+# 1.0). clearR/G/B are the frame's clearColor (frame[33..35]).
+func beginForward(frame: view Buffer(Float), count: copy Int,
+                  clearR: copy Float, clearG: copy Float, clearB: copy Float) {
+  if g3dFramePrepare(frame: frame, count: count) is 0 { ret }
+  ensureFwdAttachments()
+
+  let undefinedSlice: UInt32 = WGPU_DEPTH_SLICE_UNDEFINED as UInt32
+
+  # 0: linear HDR; tonemap writes the offscreen (#334). Clear to the bg colour.
+  let att0: WGPURenderPassColorAttachment = {
+    view_: g3dHdrView(), depthSlice: undefinedSlice,
+    loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store,
+    clearValue: { r: clearR as Float64, g: clearG as Float64, b: clearB as Float64, a: 1.0 }
+  }
+  # 1: world normal (sampled by SSAO/GI). Clear to zero.
+  let att1: WGPURenderPassColorAttachment = {
+    view_: g3dNormalView(), depthSlice: undefinedSlice,
+    loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store,
+    clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }
+  }
+  # 2: velocity (sampled by TAA). Clear to zero motion.
+  let att2: WGPURenderPassColorAttachment = {
+    view_: g3dVelocityView(), depthSlice: undefinedSlice,
+    loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store,
+    clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }
+  }
+  # 3: ambient (sampled by the SSAO composite). Clear to zero.
+  let att3: WGPURenderPassColorAttachment = {
+    view_: g3dAmbientView(), depthSlice: undefinedSlice,
+    loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store,
+    clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }
+  }
+  gFwdColorAtts.set(index: 0, value: att0)
+  gFwdColorAtts.set(index: 1, value: att1)
+  gFwdColorAtts.set(index: 2, value: att2)
+  gFwdColorAtts.set(index: 3, value: att3)
+
+  # Depth: standard Z here (forward), so the far plane clears to 1.0. (#333:
+  # stored so it is sampleable by SSAO/TAA.)
+  let depthAtt: WGPURenderPassDepthStencilAttachment = {
+    view_: g3dDepthView(),
+    depthLoadOp: WGPULoadOp_Clear, depthStoreOp: WGPUStoreOp_Store,
+    depthClearValue: 1.0
+  }
+  gFwdDepthAtt.set(index: 0, value: depthAtt)
+
+  let rpDesc: WGPURenderPassDescriptor = {
+    colorAttachmentCount: 4 as UInt64,
+    colorAttachments: gFwdColorAtts.data,
+    depthStencilAttachment: gFwdDepthAtt.data
+  }
+  let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
+  let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
+  let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dPipeline())
+  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+    group: g3dBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  g3dSetFrame(enc: enc, pass: pass)
+}
+
 func beginScene(camera: view Camera3d, light: view Light3d, aspect: view Float, time: view Float) pub {
   var frame: Frame3d = createFrame3d()
   let worldUp: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
@@ -135,7 +227,8 @@ func beginScene(camera: view Camera3d, light: view Light3d, aspect: view Float, 
   setVec3At(frame: frame, base: 27, v: light.ambSky)
   setVec3At(frame: frame, base: 30, v: light.ambGround)
   setVec3At(frame: frame, base: 33, v: light.clearColor)
-  begin(frame: frame.data.data, count: 36)
+  beginForward(frame: frame.data.data, count: 36,
+    clearR: light.clearColor.x, clearG: light.clearColor.y, clearB: light.clearColor.z)
 }
 
 # ----- the sky (#418) -------------------------------------------------
