@@ -1,0 +1,21 @@
+# A generic struct field must use the CONCRETE substituted type for ownership
+# decisions: `Wrapper(String).value` is a String, so moving an owned String
+# into it must copy/move (not shallow-alias then double-free). This used to
+# crash with a malloc "pointer freed not allocated" abort (#220).
+import core
+
+type Wrapper(T: type) {
+  value: T
+}
+
+func makeW(s: own String) ret Wrapper(String) {
+  ret Wrapper(String) { value: s }
+}
+
+func main() {
+  let a: Wrapper(String) = makeW(s: "hel" + "lo")
+  log(a.value)
+  # also exercise a generic Int field (no ownership) alongside
+  let b: Wrapper(Int) = { value: 7 }
+  log(b.value)
+}
