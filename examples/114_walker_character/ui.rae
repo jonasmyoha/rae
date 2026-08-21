@@ -132,6 +132,16 @@ func uiUpdate(app: mod App, dt: copy Float, now: copy Float64) ret UiTick {
     let pct: Int = speedPercent(v: app.character.speed)
     setNodeText(world: app.io.world, nodeId: "SpeedLabel", value: "Speed {pct}%")
   }
+  # Character-switch buttons (#546): same effect as Page Up/Down and keys 1/2.
+  let charHit: String = panelClickedId(panel: app.io.charPanel, input: app.io.ui)
+  if charHit.equals(other: "prev") {
+    rosterSwitchPrev(roster: app.players)
+    onCharacterSwitched(app: app)
+  }
+  if charHit.equals(other: "next") {
+    rosterSwitchNext(roster: app.players)
+    onCharacterSwitched(app: app)
+  }
   var settingsChanged: Bool = false
   var ai: Int = 0
   loop ai < uiActionCount(input: app.io.ui) {
