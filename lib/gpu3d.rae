@@ -87,9 +87,14 @@ func g3dMeshVbuf(mesh: Int) extern("rae_g3d_mesh_vbuf") ret Ptr
 func g3dMeshIbuf(mesh: Int) extern("rae_g3d_mesh_ibuf") ret Ptr
 func g3dMeshIcount(mesh: Int) extern("rae_g3d_mesh_icount") ret Int
 # The current scene pass (set by beginForward via g3dSetFrame). draw() reads it
-# to encode; the still-C end/submit/metaballs/skinned path reads the same global.
+# to encode; the still-C end/submit/skinned path reads the same global.
 func g3dPass() extern("rae_g3d_pass") ret Ptr
-func drawMetaballs(packedBalls: view Buffer(Float), count: Int, packedColors: view Buffer(Float), smoothing: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern
+# Metaball cluster (#514): C ensures the SDF pipeline, takes a per-frame group
+# slot, packs+uploads the balls/colors/params, and returns the slot (or -1);
+# Rae encodes the SDF fullscreen draw and restores the geometry pipeline/bind.
+func g3dPushMetaballCluster(packedBalls: view Buffer(Float), count: Int, packedColors: view Buffer(Float), smoothing: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern("rae_g3d_push_metaball_cluster") ret Int
+func g3dSdfPipeline() extern("rae_g3d_sdf_pipeline") ret Ptr
+func g3dSdfBind(slot: Int) extern("rae_g3d_sdf_bind") ret Ptr
 func end() extern
 func submit() extern
 func tonemap() extern
@@ -240,6 +245,29 @@ func draw(mesh: copy Int, model: view Mat4, prevModel: view Mat4,
   wgpuRenderPassEncoderDrawIndexed(renderPassEncoder: pass, indexCount: icount as UInt32,
     instanceCount: 1 as UInt32, firstIndex: 0 as UInt32, baseVertex: 0 as Int32,
     firstInstance: slot as UInt32)
+}
+
+# Forward metaball cluster draw (#514): encode the SDF raymarch fullscreen draw
+# into the scene pass. C packs+uploads the cluster and returns its group slot;
+# Rae binds the SDF pipeline + that slot's bind group, draws a fullscreen
+# triangle, then restores the geometry pipeline/bind so following mesh draws
+# use them.
+func drawMetaballs(packedBalls: view Buffer(Float), count: copy Int, packedColors: view Buffer(Float),
+                   smoothing: copy Float, metallic: copy Float, roughness: copy Float,
+                   emR: copy Float, emG: copy Float, emB: copy Float) {
+  let slot: Int = g3dPushMetaballCluster(packedBalls: packedBalls, count: count, packedColors: packedColors,
+    smoothing: smoothing, metallic: metallic, roughness: roughness, emR: emR, emG: emG, emB: emB)
+  if slot < 0 { ret }
+  let pass: Ptr = g3dPass()
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dSdfPipeline())
+  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+    group: g3dSdfBind(slot: slot), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: 3 as UInt32,
+    instanceCount: 1 as UInt32, firstVertex: 0 as UInt32, firstInstance: 0 as UInt32)
+  # Restore the geometry pipeline/bind for subsequent mesh draws.
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dPipeline())
+  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+    group: g3dBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
 }
 
 func beginScene(camera: view Camera3d, light: view Light3d, aspect: view Float, time: view Float) pub {
