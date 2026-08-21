@@ -109,6 +109,7 @@ type InputUi {
   gpuUi: Gpu2dUi
   clipPanel: ControlPanel
   transport: ControlPanel
+  charPanel: ControlPanel   # prev/next character-switch buttons (#546)
   settings: SettingsState
   panelScroll: ScrollPanel
   dbg: DebugOverlay
@@ -369,6 +370,15 @@ func createApp() ret App {
   transport.buttonW = 84.0
   buildControlPanel(panel: transport, world: uiWorld, res: gpuUi)
 
+  # Character-switch buttons (#546): Prev / Next cycle the controlled character,
+  # the same as Page Up/Down and keys 1/2. Momentary (group 0), not a selection.
+  var charPanel: ControlPanel = createControlPanel(hostNodeId: "CharacterRow")
+  charPanel.buttonW = 84.0
+  addPanelButton(panel: charPanel, id: "prev", label: "< Prev", actionId: "char.prev", group: 0)
+  addPanelButton(panel: charPanel, id: "next", label: "Next >", actionId: "char.next", group: 0)
+  buildControlPanel(panel: charPanel, world: uiWorld, res: gpuUi)
+  setNodeText(world: uiWorld, nodeId: "CharacterReadout", value: "Controlling 1 / {1 + cloneCount}")
+
   let headless: Bool = sys.getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0
     or sys.getEnv(name: "RAE_HEADLESS_FRAMES").length() > 0
   if not headless {
@@ -457,7 +467,7 @@ func createApp() ret App {
     }
     io: {
       moveStick: own moveStick, ui: own uiInput, world: own uiWorld, gpuUi: gpuUi,
-      clipPanel: own clipPanel, transport: own transport, settings: own settings,
+      clipPanel: own clipPanel, transport: own transport, charPanel: own charPanel, settings: own settings,
       panelScroll: own panelScroll, dbg: own dbg, logView: own logView, lastLogRevision: 0 - 1
     }
     cam: { camera: camera, rig: own rig, light: light, hosek: hosekData }
@@ -513,6 +523,17 @@ func controlledHeading(app: view App) ret Float {
   ret app.character.controller.heading
 }
 
+# Shared reaction to a character switch (#546), from Page Up/Down, keys 1/2, or
+# the settings-panel Prev/Next buttons: snap the orbit camera behind the new
+# character and update the panel readout.
+func onCharacterSwitched(app: mod App) {
+  app.cam.rig.yaw = controlledHeading(app: app)
+  snapCameraRigView(rig: app.cam.rig)
+  app.persist.stateDirty = true
+  setNodeText(world: app.io.world, nodeId: "CharacterReadout",
+    value: "Controlling {app.players.controlledIndex + 1} / {app.players.count}")
+}
+
 # ----- update phase: input, UI, camera, character, terrain, grass, persist --
 func updateApp(app: mod App) {
   let dt: Float = app.frame.dt
@@ -540,12 +561,7 @@ func updateApp(app: mod App) {
       rosterSwitchPrev(roster: app.players)
       switched = true
     }
-    if switched {
-      app.cam.rig.yaw = controlledHeading(app: app)
-      snapCameraRigView(rig: app.cam.rig)
-      app.persist.stateDirty = true
-      log("[players] now controlling character {app.players.controlledIndex} of {app.players.count}")
-    }
+    if switched { onCharacterSwitched(app: app) }
   }
 
   app.character.prevModel = app.character.model
