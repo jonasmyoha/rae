@@ -2083,6 +2083,11 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       if (c_elem_decl && c_elem_decl->kind == AST_DECL_TYPE &&
           has_property(c_elem_decl->as.type_decl.properties, "c_struct"))
         elem_c_type = str_to_cstr(ebase);
+      // A `Task(T)` element lowers to the opaque `RaeTask*` (the struct field
+      // uses `RaeTask** data`), not a `rae_Task_<T>` struct — mirror that here
+      // so List(Task(T))'s deep-copy allocates/copies pointers, not a
+      // nonexistent element struct (#238).
+      else if (str_eq_cstr(ebase, "Task")) elem_c_type = "RaeTask*";
     }
 
     fprintf(out, "RAE_UNUSED static void rae_deep_copy_%s(%s* dst, const %s* src) {\n",
