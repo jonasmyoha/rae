@@ -1,0 +1,29 @@
+# List mutators that drop the discarded elements via rae_ext_rae_buf_drop_at:
+# removeLast() (drop tail, no return), truncate(len) (drop from len to end),
+# removeAt(index) (ordered remove, alias of remove). Exercised on an Int list
+# and a String list so the owned-element drop path runs (#355 track C(b)).
+import core
+import string
+
+func main() {
+  var xs: List(Int) = {}
+  xs.add(item: 10)
+  xs.add(item: 20)
+  xs.add(item: 30)
+  xs.add(item: 40)
+  xs.removeLast()
+  log(xs.length())                              # 3
+  xs.truncate(len: 1)
+  log(xs.length())                              # 1
+  if let v: Int = xs.at(index: 0) { log(v) }    # 10
+
+  var ss: List(String) = createList(String, cap: 4)
+  ss.add(value: "a".concat(other: "1"))
+  ss.add(value: "b".concat(other: "2"))
+  ss.add(value: "c".concat(other: "3"))
+  ss.removeAt(index: 0)
+  log(ss.length())                              # 2
+  if let s: String = ss.at(index: 0) { log(s) } # b2
+  ss.truncate(len: 0)
+  log(ss.length())                              # 0
+}
