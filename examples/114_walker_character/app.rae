@@ -2,10 +2,15 @@
 #
 # Structure (see docs/app-systems-architecture.md): an `App` owns per-system
 # state structs; `createApp` builds them, `runWalkerApp` drives the loop, and
-# `updateApp` / `renderApp` sequence the systems. This scaffold (#544) groups the
-# former main.rae locals by system with behaviour unchanged; later tasks
-# (#545-#555) move each group + its logic into its own file (input.rae,
-# character.rae, terrain.rae, ...) and turn the single character into a roster.
+# `updateApp` / `renderApp` sequence the systems. Each system lives in its own
+# sibling file, all merging into one module:
+#   ui.rae (uiUpdate) · camera.rae (cameraUpdate) · character.rae + hud.rae ·
+#   terrain.rae · grass.rae · render.rae (the render-graph walk) ·
+#   physics.rae (fixed-step seam) · net.rae (multiplayer seam) · state.rae
+#   (hot-reload + window persistence).
+# app.rae keeps the App / state types, createApp, the loop, updateApp, frameBegin.
+# Still to come: the input-intent split (#545) and turning the single character
+# into a multiplayer-ready roster (#546/#547).
 import core
 import math
 import profile
