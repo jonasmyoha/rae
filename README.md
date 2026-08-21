@@ -253,6 +253,59 @@ line whose intent has to be restated. For a human that is a safety property.
 For an AI agent editing hundreds of files, it is the difference between a type
 migration and a bug-injection campaign.
 
+## Memory safety without a borrow checker
+
+Rae is close to memory-safe, and it gets there **without a borrow checker** — no
+lifetime annotations, no `'a`, no solver to fight. One rule does most of the
+work:
+
+**References don't escape functions.** `view` and `mod` are non-owning
+references, and they are *function-scoped*: you cannot store one in a struct,
+return one, or otherwise let it outlive the call it is a parameter of. The owner
+— a `List(T)`, a `Track`, whatever — lives in some enclosing scope; a reference
+borrows it for the duration of one call and no longer. The lifetime **is** the
+function.
+
+That single rule removes the largest family of memory bugs by construction:
+
+- **No dangling references.** A `view Track` cannot be kept somewhere the
+  `Track` isn't. Since it can't be stored or returned, it cannot outlive the
+  value it points into — there is no "reference that survived its owner."
+- **No use-after-free across scopes.** A borrow cannot be held across a
+  reallocation, a drop, or a container resize that happens in *another* scope,
+  because it never reaches another scope.
+- **No aliased-mutation surprises.** `=` copies — always, whatever the type
+  (see above); aliasing is spelled `=>`, and only where the signature already
+  admits `mod`. A read-only `view` can't be promoted to a writer, and writing
+  through a `view` is a compile error.
+
+Rust guarantees the same absence of dangling references, but pays for it with a
+borrow checker and lifetime annotations — a real, learnable, non-trivial cost.
+Rae buys most of that guarantee with a rule you can hold in your head: *a
+reference is a parameter, and it dies at the return.* Ownership itself is
+explicit — `own` moves a value, the compiler tracks the move and frees at scope
+exit, and using a moved-from value is a compile error — so there is no garbage
+collector either.
+
+**The honest "almost."** This is not a proof of memory safety, and Rae does not
+claim one:
+
+- Within a *single* function you can still mutate a container while a `view`
+  into it is live (resize a `List` you hold a `view` of). It is a local,
+  visible pattern — one function, in the diff — not action at a distance, but
+  the compiler does not stop it today.
+- `extern`/FFI and the raw `Ptr` type are unchecked, exactly as in any systems
+  language — that is the escape hatch to C and the GPU.
+- Cross-thread sharing is a separate story the concurrency model is still
+  growing into.
+
+So: minimalistic, and *almost* memory-safe. The common, program-wide failure
+modes — dangling references, use-after-free from escaped borrows, silent aliased
+mutation — are gone by construction, and what remains is local and legible. For
+a human that is a small rule instead of a large system. For an AI agent
+generating and refactoring code, it is a model simple enough to reason about
+correctly — which is the whole point of Rae.
+
 ## Targets
 
 **Compiled** is the default: the compiler emits C and links a native binary.
