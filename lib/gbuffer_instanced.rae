@@ -22,6 +22,9 @@ import gbuffer
 open gbuffer
 open scene3d
 open math3d
+# Per-character palette uploads go straight over the WebGPU bindings (#547).
+open webgpu/webgpu
+import webgpu/context
 
 # A caller-owned batch of DrawU records for one mesh + a running fill count.
 # `records` holds capacity * instanceRecordFloats floats (pre-filled with 0.0).
@@ -77,7 +80,49 @@ func addInstance(batch: mod InstanceBatch, model: view Mat4, prevModel: view Mat
     model: model, prevModel: prevModel,
     r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
     metallic: material.metallic, roughness: material.roughness,
-    emissive: instanceEmissive(material: material), toon: toonFlag(material: material))
+    emissive: instanceEmissive(material: material), toon: toonFlag(material: material),
+    paletteBase: 0)
+  batch.count = batch.count + 1
+}
+
+# The palette buffer is slot-major: character `slot` starts at vec4 index
+# `slot * jointCount * 3` (3 vec4 rows per joint). This is what the skinned
+# shader wants in `d.params.w`, and matches uploadPaletteSlot's byte offset.
+func characterPaletteBase(slot: view Int, jointCount: view Int) pub ret Int {
+  ret slot * jointCount * 3
+}
+
+# Upload one character's joint palette into the shared skin palette buffer at a
+# per-character SLOT (#547), directly over the WebGPU bindings — the #502 pattern
+# the draws buffer already uses. `rows` is jointCount * 12 Floats (three vec4 rows
+# per joint). Slot 0 is the base palette uploadPalette writes; slots 1..N-1 hold
+# the other characters so ONE instanced skinned draw can give each a distinct
+# pose (the instance's paletteBase = characterPaletteBase(slot, jointCount)). The
+# buffer is created lazily by the first uploadPalette, so call that (slot 0) once
+# before uploading higher slots.
+func uploadPaletteSlot(rows: view List(Float), jointCount: copy Int, slot: copy Int) pub {
+  if gbSkinPaletteReady() is 0 { ret }
+  let paletteFloats: Int = jointCount * 12
+  wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: gbSkinPalette(),
+    bufferOffset: (slot * paletteFloats * 4) as UInt64, data: rows.data,
+    size: (paletteFloats * 4) as UInt64)
+}
+
+# Append one SKINNED instance that samples its OWN joint palette (#547): the same
+# record as addInstance plus `paletteBase` — the instance's start offset into the
+# shared skin palette buffer, from characterPaletteBase(slot, jointCount). The
+# palette for that slot must already be uploaded (uploadPaletteSlot). Used to draw
+# a crowd of characters in ONE instanced skinned draw where each holds a
+# different pose.
+func addSkinnedInstance(batch: mod InstanceBatch, model: view Mat4, prevModel: view Mat4,
+                        material: view Material3d, paletteBase: copy Int) pub {
+  if batch.count >= batch.capacity { ret }
+  packInstanceRecord(records: batch.records, slot: batch.count,
+    model: model, prevModel: prevModel,
+    r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
+    metallic: material.metallic, roughness: material.roughness,
+    emissive: instanceEmissive(material: material), toon: toonFlag(material: material),
+    paletteBase: paletteBase)
   batch.count = batch.count + 1
 }
 
