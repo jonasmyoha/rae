@@ -473,27 +473,8 @@ static void g3d_ssao_ensure_binds(void) {
     }
 }
 
-static void g3d_run_fullscreen(WGPURenderPipeline pl, WGPUBindGroup bind,
-                               WGPUTextureView target, WGPULoadOp load) {
-    WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
-    WGPURenderPassColorAttachment ca; memset(&ca, 0, sizeof(ca));
-    ca.view = target;
-    ca.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
-    ca.loadOp = load;
-    ca.storeOp = WGPUStoreOp_Store;
-    WGPURenderPassDescriptor rp; memset(&rp, 0, sizeof(rp));
-    rp.colorAttachmentCount = 1; rp.colorAttachments = &ca;
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(enc, &rp);
-    wgpuRenderPassEncoderSetPipeline(pass, pl);
-    wgpuRenderPassEncoderSetBindGroup(pass, 0, bind, 0, NULL);
-    wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
-    wgpuRenderPassEncoderEnd(pass);
-    WGPUCommandBuffer cb = wgpuCommandEncoderFinish(enc, NULL);
-    wgpuQueueSubmit(g_wgpu_queue, 1, &cb);
-    wgpuCommandBufferRelease(cb);
-    wgpuRenderPassEncoderRelease(pass);
-    wgpuCommandEncoderRelease(enc);
-}
+/* The generation + composite fullscreen passes moved to Rae (#514,
+ * gpu3d.ssaoPass -> fullscreenPostPass over the bindings). */
 
 /* Clear the AO buffer to fully unoccluded. Used when AO generation is off,
  * so the composite still runs and ambient is added unattenuated. */
@@ -520,14 +501,22 @@ static void g3d_clear_ao_to_unoccluded(void) {
  * first so depth/normal/ambient are complete. Runs BEFORE TAA and tonemap:
  * AO belongs on linear radiance, and letting TAA see the result is what
  * makes the half-res noise resolve over a few frames. */
-void rae_ext_gpu3d_ssao(void) {
-    if (!g3d_ssao_pending) return;
-    rae_g3d_finish_pass();
+/* SSAO bookkeeping (#514): the scene-pass finish moves to the Rae wrapper
+ * (ssaoPass -> finishForward). This ensures the pipelines/binds/targets and
+ * uploads the SSAO params, then returns 1 to proceed / 0 to skip. The Rae side
+ * runs the two fullscreen passes (AO generation, then the ambient*AO composite)
+ * over the bindings, branching on the ssao_enabled / ao_debug flags exposed
+ * below. The composite is not optional — hdrColor holds direct+emissive only,
+ * so the indirect term must be added back every frame; only GENERATION is
+ * switchable (AO off => the buffer is cleared to unoccluded and the composite
+ * adds plain ambient). */
+int rae_g3d_ssao_prepare(void) {
+    if (!g3d_ssao_pending) return 0;
     g3d_ssao_init();
     g3d_ssao_ensure_targets();
     g3d_ssao_ensure_binds();
-    if (!g3d_ao_apply_pipeline || !g3d_ao_apply_bind) return;
-    if (g3d_ssao_enabled && (!g3d_ssao_pipeline || !g3d_ssao_bind)) return;
+    if (!g3d_ao_apply_pipeline || !g3d_ao_apply_bind) return 0;
+    if (g3d_ssao_enabled && (!g3d_ssao_pipeline || !g3d_ssao_bind)) return 0;
     g3d_ssao_pending = false;
 
     /* invViewProj and camPos are already computed for the frame uniform;
@@ -546,24 +535,21 @@ void rae_ext_gpu3d_ssao(void) {
     u[23] = (float)g3d_ssao_steps;
     u[24] = g3d_ssao_bias;
     wgpuQueueWriteBuffer(g_wgpu_queue, g3d_ssao_param_ubuf, 0, u, sizeof(u));
-
-    /* The COMPOSITE is not optional: hdrColor holds direct+emissive only, so
-     * the indirect term has to be added back every frame or every surface
-     * facing away from the sun goes black. Only GENERATION is switchable —
-     * with AO off the buffer is cleared to 1 and the composite adds plain
-     * ambient, which also makes RAE_NO_SSAO an honest A/B rather than a
-     * different lighting model. */
-    if (g3d_ssao_enabled) {
-        g3d_run_fullscreen(g3d_ssao_pipeline, g3d_ssao_bind, g3d_ao_view, WGPULoadOp_Clear);
-    } else {
-        g3d_clear_ao_to_unoccluded();
-    }
-    if (g3d_ao_debug && g3d_ao_debug_pipeline && g3d_ao_debug_bind) {
-        g3d_run_fullscreen(g3d_ao_debug_pipeline, g3d_ao_debug_bind, g3d_hdr_view, WGPULoadOp_Clear);
-    } else {
-        g3d_run_fullscreen(g3d_ao_apply_pipeline, g3d_ao_apply_bind, g3d_hdr_view, WGPULoadOp_Load);
-    }
+    return 1;
 }
+
+int64_t rae_g3d_ssao_enabled(void) { return g3d_ssao_enabled ? 1 : 0; }
+int64_t rae_g3d_ao_debug_on(void)  { return (g3d_ao_debug && g3d_ao_debug_pipeline && g3d_ao_debug_bind) ? 1 : 0; }
+void* rae_g3d_ssao_pipeline(void)     { return (void*)g3d_ssao_pipeline; }
+void* rae_g3d_ssao_bind(void)         { return (void*)g3d_ssao_bind; }
+void* rae_g3d_ao_view(void)           { return (void*)g3d_ao_view; }
+void* rae_g3d_ao_apply_pipeline(void) { return (void*)g3d_ao_apply_pipeline; }
+void* rae_g3d_ao_apply_bind(void)     { return (void*)g3d_ao_apply_bind; }
+void* rae_g3d_ao_debug_pipeline(void) { return (void*)g3d_ao_debug_pipeline; }
+void* rae_g3d_ao_debug_bind(void)     { return (void*)g3d_ao_debug_bind; }
+/* The clear-to-unoccluded fallback (RAE_NO_SSAO) is a pipeline-less clear pass,
+ * so it stays a C call rather than routing through the Rae fullscreen helper. */
+void rae_g3d_clear_ao(void) { g3d_clear_ao_to_unoccluded(); }
 
 static void g3d_ssao_shutdown(void) {
     if (g3d_ssao_bind) { wgpuBindGroupRelease(g3d_ssao_bind); g3d_ssao_bind = NULL; }
