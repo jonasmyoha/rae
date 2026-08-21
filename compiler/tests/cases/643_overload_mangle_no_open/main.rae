@@ -1,0 +1,11 @@
+# An overloaded core function must mangle to the SAME C symbol regardless of
+# whether `core` is opened — the mangled name is a property of the callee, not
+# of open-state (#137). Here core is imported (loaded) but NOT opened, and the
+# calls are qualified; under --no-implicit this used to risk a bare `rae_log`
+# C symbol. The overloads (String vs Any) each resolve to their own symbol.
+import core
+func main() {
+  core.log("text")
+  core.log(42)
+  core.log(true)
+}
