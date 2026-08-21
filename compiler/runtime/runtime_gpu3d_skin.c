@@ -38,6 +38,11 @@
 #define G3D_SKIN_MAX_DRAWS  256
 #define G3D_SKIN_DRAW_FLOATS 24   /* mat4 model + vec4 albedo/metallic + vec4 rough + palette base */
 #define G3D_SKIN_MAX_JOINTS 256
+/* The shared palette storage buffer holds up to this many palettes back to back
+ * (each G3D_SKIN_MAX_JOINTS * 12 floats). Per-instance animation (#547) uses one
+ * palette per distinct animation state; instances index theirs via the DrawU
+ * params.w base. Defined here (included before gbuffer.c) so both share it. */
+#define G3D_SKIN_MAX_PALETTES 64
 #define G3D_SKIN_VERT_FLOATS 20   /* pos3 nrm3 uv2 joints4 weights4 color4 */
 
 static WGPUBuffer g3d_skin_vbuf[G3D_SKIN_MAX_MESHES];
@@ -51,8 +56,8 @@ static WGPUBuffer    g3d_skin_palette_sbuf = NULL;
 static WGPUBindGroup g3d_skin_bind = NULL;
 static float g3d_skin_draw_cpu[G3D_SKIN_MAX_DRAWS * G3D_SKIN_DRAW_FLOATS];
 static int   g3d_skin_draw_count = 0;
-/* 3 vec4 rows per joint. */
-static float g3d_skin_palette_cpu[G3D_SKIN_MAX_JOINTS * 12];
+/* 3 vec4 rows per joint, times MAX_PALETTES palettes packed back to back. */
+static float g3d_skin_palette_cpu[G3D_SKIN_MAX_JOINTS * 12 * G3D_SKIN_MAX_PALETTES];
 static int   g3d_skin_joint_count = 0;
 static bool  g3d_skin_palette_dirty = false;
 
@@ -221,7 +226,7 @@ G3D_SHADOW_FN_WGSL
 static void g3d_skin_ensure_palette_buffer(void) {
     if (g3d_skin_palette_sbuf || !g_wgpu_dev) return;
     WGPUBufferDescriptor pl; memset(&pl, 0, sizeof(pl));
-    pl.size = (uint64_t)G3D_SKIN_MAX_JOINTS * 12 * sizeof(float);
+    pl.size = (uint64_t)G3D_SKIN_MAX_JOINTS * 12 * G3D_SKIN_MAX_PALETTES * sizeof(float);
     pl.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
     g3d_skin_palette_sbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &pl);
 }
@@ -291,6 +296,10 @@ static void g3d_skin_init_pipeline(void) {
     g3d_skin_draw_sbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &sd);
 
     g3d_skin_ensure_palette_buffer();
+    /* The forward path binds ONE palette's worth from offset 0 — it never uses
+     * per-instance palette bases (that's the deferred crowd path, which binds
+     * the full array via rae_gb_skin_palette_size). Binding a subrange of the
+     * now-larger buffer is valid and keeps the forward examples byte-identical. */
     WGPUBufferDescriptor pl; memset(&pl, 0, sizeof(pl));
     pl.size = (uint64_t)G3D_SKIN_MAX_JOINTS * 12 * sizeof(float);
 
@@ -369,6 +378,35 @@ void rae_ext_gpu3d_setPalette(const float* rows, int64_t jointCount) {
                              g3d_skin_palette_cpu,
                              (size_t)g3d_skin_joint_count * 12 * sizeof(float));
         g3d_skin_palette_dirty = false;
+    }
+}
+
+/* Write one palette into slot `index` of the shared palette array (#547 GPU
+ * animation instancing). Palettes pack tight by jointCount, so a DrawU whose
+ * params.w = index * jointCount * 3 (vec4 rows) reads this slot. All slots use
+ * the same skeleton, so jointCount is uniform. Uploads its own range eagerly,
+ * like setPalette, so the shadow pass (which runs first) sees it this frame. */
+void rae_ext_gpu3d_setPaletteAt(int64_t index, const float* rows, int64_t jointCount) {
+    g3d_skin_ensure_palette_buffer();
+    if (!rows || jointCount <= 0) return;
+    if (index < 0 || index >= G3D_SKIN_MAX_PALETTES) {
+        static bool warned = false;
+        if (!warned) {
+            fprintf(stderr, "[skin] palette index %lld out of range [0,%d)\n",
+                    (long long)index, G3D_SKIN_MAX_PALETTES);
+            warned = true;
+        }
+        return;
+    }
+    if (jointCount > G3D_SKIN_MAX_JOINTS) jointCount = G3D_SKIN_MAX_JOINTS;
+    size_t floatsPer = (size_t)jointCount * 12;
+    size_t off = (size_t)index * floatsPer;
+    memcpy(g3d_skin_palette_cpu + off, rows, floatsPer * sizeof(float));
+    g3d_skin_joint_count = (int)jointCount;
+    if (g3d_skin_palette_sbuf) {
+        wgpuQueueWriteBuffer(g_wgpu_queue, g3d_skin_palette_sbuf,
+                             (uint64_t)off * sizeof(float),
+                             g3d_skin_palette_cpu + off, floatsPer * sizeof(float));
     }
 }
 
