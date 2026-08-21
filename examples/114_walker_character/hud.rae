@@ -10,6 +10,8 @@ import ui/log_overlay
 import ui/debug_overlay
 import ui/render_gpu2d
 import ui/virtual_joystick
+import ui/corner_menu_button
+open ui/corner_menu_button
 import ui/safe_area
 import app3d/camera_rig
 import renderer_deferred
@@ -67,35 +69,10 @@ func toggleWalkerPanel(settings: mod SettingsState, world: mod UiWorld) pub {
   applyWalkerPanel(world: world, open: settings.open)
 }
 
-# Corner menu (hamburger) button, top-left in gpu2d design units — clear of the
-# debug D (top-right), the joystick (bottom-left) and the log (bottom-right).
-func walkerMenuSize() ret Float { ret gpu2d.designWidth() * 0.085 }
-func walkerMenuX() ret Float { ret gpu2d.safeLeft() + gpu2d.designWidth() * 0.045 }
-func walkerMenuY() ret Float { ret gpu2d.safeTop() + gpu2d.designHeight() * 0.03 }
-
-func drawWalkerMenuButton() {
-  let size: Float = walkerMenuSize()
-  let bx: Float = walkerMenuX()
-  let by: Float = walkerMenuY()
-  gpu2d.drawRoundedRect(x: bx, y: by, w: size, h: size, radius: size * 0.24, color: 0xC01A2028)
-  let barW: Float = size * 0.5
-  let barH: Float = size * 0.09
-  let barX: Float = bx + size * 0.25
-  gpu2d.drawRoundedRect(x: barX, y: by + size * 0.31, w: barW, h: barH, radius: barH * 0.5, color: 0xF0FFFFFF)
-  gpu2d.drawRoundedRect(x: barX, y: by + size * 0.455, w: barW, h: barH, radius: barH * 0.5, color: 0xF0FFFFFF)
-  gpu2d.drawRoundedRect(x: barX, y: by + size * 0.60, w: barW, h: barH, radius: barH * 0.5, color: 0xF0FFFFFF)
-}
-
-# True on the frame the menu button is pressed.
-func walkerMenuTapped() pub ret Bool {
-  if not gpu2d.pointerPressed() { ret false }
-  let size: Float = walkerMenuSize()
-  let bx: Float = walkerMenuX()
-  let by: Float = walkerMenuY()
-  let px: Float = gpu2d.pointerX()
-  let py: Float = gpu2d.pointerY()
-  ret px >= bx and px <= bx + size and py >= by and py <= by + size
-}
+# The corner menu (hamburger) button is now the shared lib/ui widget
+# (corner_menu_button.rae), so 114 and 112 draw the identical button. Kept as
+# thin aliases so the call sites below (and ui.rae) read the same.
+func walkerMenuTapped() pub ret Bool { ret cornerMenuButtonTapped() }
 
 # All HUD overlays, drawn inside the 2D overlay pass (after the ECS UI world).
 func drawWalkerHud(logView: view LogOverlay, gpuUi: view Gpu2dUi,
@@ -104,7 +81,7 @@ func drawWalkerHud(logView: view LogOverlay, gpuUi: view Gpu2dUi,
   # Joystick hides while the settings panel is open (it would otherwise draw over
   # the panel — the panel is the higher layer).
   if panelOpen is false { drawVirtualJoystick(joy: moveStick) }
-  drawWalkerMenuButton()
+  drawCornerMenuButton()
   drawLogOverlay(ov: logView, font: gpuUi.textFont,
                  screenW: windowExtentW(), screenH: windowExtentH())
   # Debug D last, so it is above everything else.
