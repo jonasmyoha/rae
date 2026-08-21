@@ -1,0 +1,22 @@
+# Multiplayer seam for the walker example (#554).
+#
+# Offline today; both hooks are no-ops. updateApp calls netApplyRemote before the
+# local sim and netPublishIntent after it, so wiring a transport in later needs
+# no changes to updateApp's shape. The fuller signatures — netPublishIntent
+# taking an InputIntent + characterId, netApplyRemote taking a CharacterSystem —
+# arrive with #545 (input intent) and #547 (character roster).
+import core
+
+# role: 0 = offline, 1 = server, 2 = client. tick counts published local frames.
+type NetState {
+  role: Int
+  tick: Int
+}
+
+# Pull remote players' intents in before the local sim. No-op offline.
+func netApplyRemote(net: mod NetState) {
+}
+
+# Publish the local player's intent after the sim. No-op offline.
+func netPublishIntent(net: mod NetState) {
+}
