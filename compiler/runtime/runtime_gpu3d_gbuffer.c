@@ -979,7 +979,7 @@ void rae_gb_set_skin_bind(void* bind) { gb_skin_bind = (WGPUBindGroup)bind; }
  * group. It comes up asynchronously with the first skinned upload, so a
  * readiness check lets Rae defer creating the bind until it exists. */
 void* rae_gb_skin_palette(void)      { return (void*)g3d_skin_palette_sbuf; }
-int64_t rae_gb_skin_palette_size(void){ return (int64_t)((uint64_t)G3D_SKIN_MAX_JOINTS * 12 * sizeof(float)); }
+int64_t rae_gb_skin_palette_size(void){ return (int64_t)((uint64_t)G3D_SKIN_MAX_JOINTS * 12 * G3D_SKIN_MAX_PALETTES * sizeof(float)); }
 int64_t rae_gb_skin_palette_ready(void){ return g3d_skin_palette_sbuf ? 1 : 0; }
 /* 1 if a skinned draw of `mesh` can proceed (pass open, skin pipeline + bind
  * available, mesh slot valid) else 0. The bind is created by Rae's
