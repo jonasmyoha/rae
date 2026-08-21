@@ -581,11 +581,16 @@ func encodeMode(emissive: view Float, toon: view Int) ret Float {
 # Pack one fully-built DrawU record into `records` at instance `slot`. Writes
 # `instanceRecordFloats` floats; callers size the buffer by that constant and
 # never see the layout.
+# `paletteBase` is the instance's start offset into the shared skin palette
+# buffer, in vec4 units (`characterPaletteBase(slot, jointCount)`), read by the
+# skinned shader as `d.params.w`. 0 for non-skinned instances and for skinned
+# instances that use palette slot 0 — every current caller, so behaviour is
+# unchanged until a caller passes a non-zero base (#547 per-character crowd).
 func packInstanceRecord(records: mod List(Float), slot: view Int,
                         model: view Mat4, prevModel: view Mat4,
                         r: view Float, g: view Float, b: view Float,
                         metallic: view Float, roughness: view Float,
-                        emissive: view Float, toon: view Int) pub {
+                        emissive: view Float, toon: view Int, paletteBase: view Int) pub {
   let base: Int = slot * instanceRecordFloats
   var i: Int = 0
   loop i < 16 {
@@ -600,7 +605,7 @@ func packInstanceRecord(records: mod List(Float), slot: view Int,
   records.set(index: base + 36, value: roughness)
   records.set(index: base + 37, value: encodeEmissive(emissive: emissive, toon: toon))
   records.set(index: base + 38, value: encodeMode(emissive: emissive, toon: toon))
-  records.set(index: base + 39, value: 0.0)
+  records.set(index: base + 39, value: paletteBase.toFloat())
 }
 
 # Write one mesh instance's surface attributes. Note what is NOT passed:
@@ -645,7 +650,7 @@ func draw(mesh: copy Int, model: view Mat4, prevModel: view Mat4,
   if base >= gbMaxDraws() { ret }
   ensureDrawScratch()
   packInstanceRecord(records: gDrawScratch, slot: 0, model: model, prevModel: prevModel,
-    r: r, g: g, b: b, metallic: metallic, roughness: roughness, emissive: emissive, toon: toon)
+    r: r, g: g, b: b, metallic: metallic, roughness: roughness, emissive: emissive, toon: toon, paletteBase: 0)
   gbIssueInstanced(pass: gbPass(), pipeline: gbStaticPipeline(), bind: gbStaticBind(),
     vbuf: gbMeshVbuf(mesh: mesh), ibuf: gbMeshIbuf(mesh: mesh),
     icount: gbMeshIcount(mesh: mesh), base: base, count: 1, records: gDrawScratch.data)
@@ -700,7 +705,7 @@ func drawTerrainMesh(mesh: copy Int, transform: view Transform3d, prevTransform:
   let model: Mat4 = modelMatrixOf(t: transform)
   let prevModel: Mat4 = modelMatrixOf(t: prevTransform)
   packInstanceRecord(records: gDrawScratch, slot: 0, model: model, prevModel: prevModel,
-    r: 1.0, g: 1.0, b: 1.0, metallic: 0.0, roughness: roughness, emissive: 0.0, toon: 0)
+    r: 1.0, g: 1.0, b: 1.0, metallic: 0.0, roughness: roughness, emissive: 0.0, toon: 0, paletteBase: 0)
   gbIssueInstanced(pass: gbPass(), pipeline: gbTerrainPipeline(), bind: gbTerrainBind(),
     vbuf: gbMeshVbuf(mesh: mesh), ibuf: gbMeshIbuf(mesh: mesh),
     icount: gbMeshIcount(mesh: mesh), base: base, count: 1, records: gDrawScratch.data)
@@ -723,7 +728,7 @@ func drawSkinned(mesh: copy Int, model: view Mat4, prevModel: view Mat4,
   if base >= gbMaxDraws() { ret }
   ensureDrawScratch()
   packInstanceRecord(records: gDrawScratch, slot: 0, model: model, prevModel: prevModel,
-    r: r, g: g, b: b, metallic: metallic, roughness: roughness, emissive: emissive, toon: toon)
+    r: r, g: g, b: b, metallic: metallic, roughness: roughness, emissive: emissive, toon: toon, paletteBase: 0)
   gbIssueInstanced(pass: gbPass(), pipeline: gbSkinPipeline(), bind: gbSkinBind(),
     vbuf: gbSkinVbuf(mesh: mesh), ibuf: gbSkinIbuf(mesh: mesh),
     icount: gbSkinIcount(mesh: mesh), base: base, count: 1, records: gDrawScratch.data)
