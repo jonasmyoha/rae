@@ -96,7 +96,13 @@ func g3dPushMetaballCluster(packedBalls: view Buffer(Float), count: Int, packedC
 func g3dSdfPipeline() extern("rae_g3d_sdf_pipeline") ret Ptr
 func g3dSdfBind(slot: Int) extern("rae_g3d_sdf_bind") ret Ptr
 func end() extern
-func submit() extern
+# Scene-pass finish primitives (#514): Rae ends the pass + finishes the command
+# buffer over the bindings; g3dSubmitCmd is the one thin C call (Rae cannot yet
+# take the address of a single handle for wgpuQueueSubmit).
+func g3dEncoder() extern("rae_g3d_encoder") ret Ptr
+func g3dFrameActive() extern("rae_g3d_frame_active") ret Int
+func g3dClearFrame() extern("rae_g3d_clear_frame")
+func g3dSubmitCmd(cmd: Ptr) extern("rae_g3d_submit_cmd")
 func tonemap() extern
 func taa() extern
 func ssao() extern
@@ -546,9 +552,37 @@ func endFrame() pub {
   end()
 }
 
-# Submit the 3D pass without screenshot or present. Follow with
-# gpu2d.beginFrameLoad(), the ECS UI render pass, and gpu2d.endFrame() so the
-# composed frame is presented exactly once.
+# Finish and submit the open scene pass over the WebGPU bindings (#514),
+# mirroring the deferred renderer's end(): end the render pass, finish the
+# command buffer, submit it, release, and clear the C-side frame handles.
+# Idempotent — a no-op (returns 0) if the scene pass is already closed, so it is
+# safe to call from more than one place (submit, and later the post-process
+# wrappers). Records already uploaded per-draw, so nothing bulk-uploads here.
+func finishForward() ret Int {
+  if g3dFrameActive() is 0 { ret 0 }
+  let pass: Ptr = g3dPass()
+  let enc: Ptr = g3dEncoder()
+  wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
+  let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
+  let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
+  g3dSubmitCmd(cmd: cmd)
+  wgpuCommandBufferRelease(commandBuffer: cmd)
+  wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
+  wgpuCommandEncoderRelease(commandEncoder: enc)
+  g3dClearFrame()
+  ret 1
+}
+
+# Submit the 3D pass without screenshot or present (#514, was the C submit).
+# Follow with gpu2d.beginFrameLoad(), the ECS UI render pass, and
+# gpu2d.endFrame() so the composed frame is presented exactly once. Poll only
+# when something was actually submitted.
+func submit() pub {
+  if finishForward() is not 0 {
+    webgpuPoll(wait: 0)
+  }
+}
+
 func endPass() pub {
   submit()
 }
