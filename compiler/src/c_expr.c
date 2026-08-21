@@ -746,21 +746,30 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     if (str_eq(td->name, f->name)) { field_tr = td->type; break; }
                 }
             }
-            if (field_tr) {
-                AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx,
+            // Substitute the field's declared type with the concrete generic
+            // arguments so ALL ownership/drop decisions below see the REAL
+            // field type: `Wrapper(String).value` is a `String`, not the
+            // generic `T`. Without this an owned-String generic field was
+            // treated as raw `T`, so the move-into-field went untracked and the
+            // owned source was freed twice -> double-free / malloc abort (#220).
+            const AstTypeRef* eff_field_tr = field_tr;
+            if (field_tr && struct_decl && struct_decl->kind == AST_DECL_TYPE) {
+                eff_field_tr = substitute_type_ref(ctx->compiler_ctx,
                     struct_decl->as.type_decl.generic_params,
                     obj_tr ? obj_tr->generic_args : NULL, field_tr);
+            }
+            if (eff_field_tr) {
                 // An `opt T` FIELD is a RaeAny and needs the same boxing an
                 // `opt T` return gets. Without this the raw payload was
                 // assigned straight into the box -- `.nowPlaying = (rae_Track){…}`
                 // into a RaeAny field, which does not compile.
-                if (sub->is_opt && !(sub->is_view || sub->is_mod)
+                if (eff_field_tr->is_opt && !(eff_field_tr->is_view || eff_field_tr->is_mod)
                     && f->value && f->value->kind != AST_EXPR_NONE) {
-                    emit_optional_boxed_expr(ctx, sub, f->value, out);
+                    emit_optional_boxed_expr(ctx, (AstTypeRef*)eff_field_tr, f->value, out);
                     if (f->next) fprintf(out, ", ");
                     continue;
                 }
-                ctx->expected_type = *sub;
+                ctx->expected_type = *eff_field_tr;
                 ctx->has_expected_type = true;
             } else {
                 ctx->has_expected_type = false;
@@ -836,11 +845,11 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             // private heap so the field's drop is always safe.
             bool field_is_owned_string = false;
             bool field_is_view_string  = false;
-            if (field_tr && !field_tr->is_mod && !field_tr->is_opt) {
-                Str fbase = get_base_type_name(field_tr);
+            if (eff_field_tr && !eff_field_tr->is_mod && !eff_field_tr->is_opt) {
+                Str fbase = get_base_type_name(eff_field_tr);
                 if (str_eq_cstr(fbase, "String")) {
-                    if (field_tr->is_view) field_is_view_string = true;
-                    else                   field_is_owned_string = true;
+                    if (eff_field_tr->is_view) field_is_view_string = true;
+                    else                       field_is_owned_string = true;
                 }
             }
             bool rhs_is_own = (f->value && f->value->kind == AST_EXPR_OWN);
@@ -899,13 +908,13 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 f->value->kind == AST_EXPR_MEMBER ||
                 f->value->kind == AST_EXPR_INDEX);
             bool field_needs_deep_copy_nonstring = false;
-            if (field_tr
-                && !field_tr->is_view && !field_tr->is_mod && !field_tr->is_opt
+            if (eff_field_tr
+                && !eff_field_tr->is_view && !eff_field_tr->is_mod && !eff_field_tr->is_opt
                 && !field_is_owned_string && !field_is_view_string
                 && rhs_is_aliasing && !rhs_is_own
                 && type_needs_deep_copy(ctx->compiler_ctx, ctx->module,
-                                        (AstTypeRef*)field_tr, 0)) {
-                Str fbase = get_base_type_name(field_tr);
+                                        (AstTypeRef*)eff_field_tr, 0)) {
+                Str fbase = get_base_type_name(eff_field_tr);
                 // Only emit deep-copy when a synthesised helper exists
                 // for the field's type. The helpers cover:
                 //   - non-generic user structs (rae_deep_copy_<T>)
@@ -952,7 +961,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 // the source.
                 const char* tn_dc = rae_mangle_type_specialized(
                     ctx->compiler_ctx, ctx->generic_params,
-                    ctx->generic_args, (AstTypeRef*)field_tr);
+                    ctx->generic_args, (AstTypeRef*)eff_field_tr);
                 int tmp_id = ctx->temp_counter++;
                 fprintf(out, "(__extension__ ({ %s __fdc%d; rae_deep_copy_%s(&__fdc%d, &(",
                         tn_dc, tmp_id, tn_dc, tmp_id);
@@ -988,7 +997,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 // forwarded into struct literals without callers
                 // having to drop the `view`.
                 bool needs_view_deref = false;
-                if (field_tr && !field_tr->is_view && !field_tr->is_mod
+                if (eff_field_tr && !eff_field_tr->is_view && !eff_field_tr->is_mod
                     && f->value && f->value->kind == AST_EXPR_IDENT) {
                     const AstTypeRef* rhs_tr = infer_expr_type_ref(ctx, f->value);
                     if (rhs_tr && (rhs_tr->is_view || rhs_tr->is_mod)
