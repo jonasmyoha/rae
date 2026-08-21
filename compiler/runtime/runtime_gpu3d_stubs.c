@@ -92,15 +92,18 @@ void* rae_g3d_ao_debug_bind(void)     { return (void*)0; }
 void rae_g3d_clear_ao(void) {}
 void rae_ext_gpu3d_shutdown(void) {}
 void rae_ext_gpu3d_skyHosekPush(int64_t index, float value){ (void)index; (void)value; }
-void rae_ext_gpu3d_skyDraw(float skyKind, float turbidity, float skyExposure, float sunSizeRad,
-                           float sunX, float sunY, float sunZ,
-                           float sunR, float sunG, float sunB,
-                           float zenR, float zenG, float zenB, float bands,
-                           float horR, float horG, float horB, float discI,
-                           float clearR, float clearG, float clearB){
+int rae_g3d_sky_prepare(float skyKind, float turbidity, float skyExposure, float sunSizeRad,
+                        float sunX, float sunY, float sunZ,
+                        float sunR, float sunG, float sunB,
+                        float zenR, float zenG, float zenB, float bands,
+                        float horR, float horG, float horB, float discI,
+                        float clearR, float clearG, float clearB){
     (void)skyKind; (void)turbidity; (void)skyExposure; (void)sunSizeRad;
     (void)sunX; (void)sunY; (void)sunZ; (void)sunR; (void)sunG; (void)sunB;
     (void)zenR; (void)zenG; (void)zenB; (void)bands;
     (void)horR; (void)horG; (void)horB; (void)discI;
     (void)clearR; (void)clearG; (void)clearB;
+    return 0;
 }
+void* rae_g3d_sky_pipeline(void) { return (void*)0; }
+void* rae_g3d_sky_bind(void)     { return (void*)0; }

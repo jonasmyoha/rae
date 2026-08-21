@@ -1018,6 +1018,14 @@ void* rae_g3d_ao_apply_bind(void);
 void* rae_g3d_ao_debug_pipeline(void);
 void* rae_g3d_ao_debug_bind(void);
 void  rae_g3d_clear_ao(void);
+int   rae_g3d_sky_prepare(float skyKind, float turbidity, float skyExposure, float sunSizeRad,
+                          float sunX, float sunY, float sunZ,
+                          float sunR, float sunG, float sunB,
+                          float zenR, float zenG, float zenB, float bands,
+                          float horR, float horG, float horB, float discI,
+                          float clearR, float clearG, float clearB);
+void* rae_g3d_sky_pipeline(void);
+void* rae_g3d_sky_bind(void);
 int   rae_g3d_push_draw_record(int64_t mesh, struct rae_Mat4* model, struct rae_Mat4* prevModel,
                                float r, float g, float b, float metallic,
                                float emR, float emG, float emB, float roughness);
