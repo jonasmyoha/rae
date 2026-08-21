@@ -1,0 +1,147 @@
+# Procedural props showcase (#539/#540/#541): five faceted rocks and five
+# low-poly trees, all generated in Rae code (lib/procgen/*), rendered on the
+# deferred path. No external mesh assets — everything is procedural.
+#
+# Controls: drag to orbit, wheel to zoom. Compiled-target only (wgpu + SDL3).
+#   rae run --target compiled main.rae
+# Headless screenshot:
+#   RAE_SDL_HEADLESS_MS=2000 RAE_GPU2D_SCREENSHOT=/tmp/procgen.bmp rae run ...
+import core
+import math
+import gpu2d
+import vec3
+import renderer_deferred
+import procgen/rock
+import procgen/tree
+open scene3d
+open gpu3d
+open renderer_deferred
+open math3d
+open mesh3d
+open procgen/rock
+open procgen/tree
+
+func uploadMeshData(m: view MeshData) ret MeshHandle {
+  ret uploadMesh(verts: m.verts, vertCount: m.vertCount, indices: m.indices)
+}
+
+func buildScene(rocks: view List(Int), treeTrunks: view List(Int), treeCanopies: view List(Int), ground: view MeshHandle) ret Scene3d {
+  var scene: Scene3d = createScene3d()
+  let noEmit: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let noRot: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let unit: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
+
+  # Ground plane just below the props.
+  let groundMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.30, y: 0.34, z: 0.24), metallic: 0.0, roughness: 0.95, emission: noEmit)
+  let groundE: Int = addMeshInstance(scene: scene, mesh: ground, material: groundMat, position: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.6), rotation: noRot, scale: unit)
+
+  let rockMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.44, y: 0.45, z: 0.47), metallic: 0.0, roughness: 0.9, emission: noEmit)
+  let barkMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.36, y: 0.23, z: 0.13), metallic: 0.0, roughness: 0.85, emission: noEmit)
+  let leafMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.20, y: 0.42, z: 0.16), metallic: 0.0, roughness: 0.8, emission: noEmit)
+
+  # Front row: five rocks.
+  var i: Int = 0
+  loop i < rocks.length {
+    if let rk: Int = rocks.at(index: i) {
+      let x: Float = (i.toFloat() - 2.0) * 3.2
+      let rockE: Int = addMeshInstance(scene: scene, mesh: meshHandle(id: rk, generation: 1), material: rockMat,
+        position: vec3.create(x: x, y: 0.0, z: 0.0), rotation: noRot, scale: unit)
+    }
+    i = i + 1
+  }
+  # Back row: five trees (trunk + canopy per tree).
+  var t: Int = 0
+  loop t < treeTrunks.length {
+    let x: Float = (t.toFloat() - 2.0) * 3.2
+    if let tr: Int = treeTrunks.at(index: t) {
+      let trunkE: Int = addMeshInstance(scene: scene, mesh: meshHandle(id: tr, generation: 1), material: barkMat,
+        position: vec3.create(x: x, y: 6.0, z: 0.0), rotation: noRot, scale: unit)
+    }
+    if let cp: Int = treeCanopies.at(index: t) {
+      let canopyE: Int = addMeshInstance(scene: scene, mesh: meshHandle(id: cp, generation: 1), material: leafMat,
+        position: vec3.create(x: x, y: 6.0, z: 0.0), rotation: noRot, scale: unit)
+    }
+    t = t + 1
+  }
+  ret scene
+}
+
+func main() ret Int {
+  gpu2d.initWindow(width: 1280, height: 800, title: "Rae — procedural rocks & trees")
+
+  # Five rock variants: vary seed, slice count, irregularity.
+  var rocks: List(Int) = createList(Int, cap: 5)
+  var ri: Int = 0
+  loop ri < 5 {
+    let rockMesh: MeshData = generateRock(subdivision: 5, sliceCount: 3 + ri, size: 1.0 + ri.toFloat() * 0.12,
+                                          seed: 1000 + ri * 37, irregularity: 0.28 + ri.toFloat() * 0.05)
+    rocks.add(value: uploadMeshData(m: rockMesh).id)
+    ri = ri + 1
+  }
+
+  # Five tree variants: vary seed, branch depth, canopy size.
+  var trunks: List(Int) = createList(Int, cap: 5)
+  var canopies: List(Int) = createList(Int, cap: 5)
+  var ti: Int = 0
+  loop ti < 5 {
+    let tree: TreeMesh = generateTree(branchDepth: 2 + ti % 2, trunkHeight: 3.0 + ti.toFloat() * 0.3, taper: 1.0,
+                                      canopySize: 1.1 + ti.toFloat() * 0.12, leafDensity: 1 + ti % 3, seed: 500 + ti * 53)
+    trunks.add(value: uploadMeshData(m: tree.trunk).id)
+    canopies.add(value: uploadMeshData(m: tree.canopy).id)
+    ti = ti + 1
+  }
+
+  let groundData: MeshData = makePlane(size: 40.0, segments: 1)
+  let ground: MeshHandle = uploadMeshData(m: groundData)
+
+  var scene: Scene3d = buildScene(rocks: rocks, treeTrunks: trunks, treeCanopies: canopies, ground: ground)
+
+  var camera: Camera3d = defaultCamera3d()
+  var light: Light3d = defaultLight3d()
+  camera.target = vec3.create(x: 0.0, y: 3.0, z: 1.0)
+
+  var yaw: Float = 0.35
+  var pitch: Float = 0.45
+  var dist: Float = 20.0
+  var lastX: Float = 0.0
+  var lastY: Float = 0.0
+  var dragging: Bool = false
+
+  var renderer: DeferredRenderer = createDeferredRenderer()
+  let gs: Int = compileDeferred(r: renderer)
+  if gs is not 0 {
+    log("render graph invalid: {gs}")
+    ret 1
+  }
+
+  loop not gpu2d.pollClose() {
+    let px: Float = gpu2d.pointerX()
+    let py: Float = gpu2d.pointerY()
+    if gpu2d.pointerDown() {
+      if dragging {
+        yaw = yaw + (px - lastX) * 0.008
+        pitch = pitch - (py - lastY) * 0.008
+        if pitch > 1.45 { pitch = 1.45 }
+        if pitch < 0.05 { pitch = 0.05 }
+      }
+      dragging = true
+    } else {
+      dragging = false
+    }
+    lastX = px
+    lastY = py
+    dist = dist - gpu2d.wheelMove() * 0.8
+    if dist < 6.0 { dist = 6.0 }
+    if dist > 40.0 { dist = 40.0 }
+
+    camera.position = orbitEye(targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z, yaw: yaw, pitch: pitch, dist: dist)
+    let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
+    if gpu2d.renderGate() {
+      renderDeferredFrame(r: renderer, scene: scene, camera: camera, light: light, aspect: aspect)
+      snapshotPrevTransforms(scene: scene)
+    }
+  }
+  shutdown()
+  gpu2d.closeWindow()
+  ret 0
+}
