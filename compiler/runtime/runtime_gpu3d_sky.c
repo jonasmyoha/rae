@@ -166,15 +166,19 @@ void rae_ext_gpu3d_skyHosekPush(int64_t index, float value) {
  * gpu3d.begin already computed for this frame, so the sky cannot be drawn from
  * a different viewpoint than the scene in front of it. That was worth three
  * fewer arguments on a list this long. */
-void rae_ext_gpu3d_skyDraw(float skyKind, float turbidity, float skyExposure, float sunSizeRad,
-                           float sunX, float sunY, float sunZ,
-                           float sunR, float sunG, float sunB,
-                           float zenR, float zenG, float zenB, float bands,
-                           float horR, float horG, float horB, float discI,
-                           float clearR, float clearG, float clearB) {
-    if (!g3d_pass) return;
+/* Sky bookkeeping (#514): ensure the sky pipeline, pack the sky uniform (frame
+ * inv-viewproj + campos + sun/colors/params + the Hosek table Rae pushed) and
+ * upload it. Returns 1 to proceed / 0 to skip; the Rae side (gpu3d.skyDraw)
+ * encodes the fullscreen sky draw into the scene pass and restores the geometry
+ * pipeline/bind, mirroring the metaball draw. */
+int rae_g3d_sky_prepare(float skyKind, float turbidity, float skyExposure, float sunSizeRad,
+                        float sunX, float sunY, float sunZ,
+                        float sunR, float sunG, float sunB,
+                        float zenR, float zenG, float zenB, float bands,
+                        float horR, float horG, float horB, float discI,
+                        float clearR, float clearG, float clearB) {
     g3d_sky_init_pipeline();
-    if (!g3d_sky_pipeline || !g3d_sky_bind) return;
+    if (!g3d_sky_pipeline || !g3d_sky_bind) return 0;
 
     float u[G3D_SKY_U_FLOATS]; memset(u, 0, sizeof(u));
     memcpy(u, g3d_frame_inv_viewproj, 16 * sizeof(float));
@@ -189,16 +193,10 @@ void rae_ext_gpu3d_skyDraw(float skyKind, float turbidity, float skyExposure, fl
      * copies. See runtime_sky_state.h. */
     memcpy(u + 44, rae_sky_hosek, 36 * sizeof(float));
     wgpuQueueWriteBuffer(g_wgpu_queue, g3d_sky_ubuf, 0, u, sizeof(u));
-
-    wgpuRenderPassEncoderSetPipeline(g3d_pass, g3d_sky_pipeline);
-    wgpuRenderPassEncoderSetBindGroup(g3d_pass, 0, g3d_sky_bind, 0, NULL);
-    wgpuRenderPassEncoderDraw(g3d_pass, 3, 1, 0, 0);
-    /* Put the scene's pipeline back: gpu3d.begin left it bound and every draw
-     * after this one assumes it, so leaving ours in place would render the
-     * whole scene as sky. */
-    wgpuRenderPassEncoderSetPipeline(g3d_pass, g3d_pipeline);
-    wgpuRenderPassEncoderSetBindGroup(g3d_pass, 0, g3d_bind, 0, NULL);
+    return 1;
 }
+void* rae_g3d_sky_pipeline(void) { return (void*)g3d_sky_pipeline; }
+void* rae_g3d_sky_bind(void)     { return (void*)g3d_sky_bind; }
 
 static void g3d_sky_shutdown(void) {
     if (g3d_sky_bind) { wgpuBindGroupRelease(g3d_sky_bind); g3d_sky_bind = NULL; }
