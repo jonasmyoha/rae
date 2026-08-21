@@ -1,1 +1,1 @@
-run --no-implicit
+run
