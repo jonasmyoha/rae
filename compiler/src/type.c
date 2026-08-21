@@ -411,7 +411,12 @@ static void type_mangle_recursive(Arena* arena, TypeInfo* t, char* buf, size_t* 
             type_mangle_recursive(arena, t->as.buffer.base, buf, pos, cap, depth + 1);
             break;
         case TYPE_TASK:
-            *pos += snprintf(buf + *pos, cap - *pos, "Task_");
+            // Match the AstTypeRef mangler (rae_mangle_type_specialized), which
+            // prefixes Task with `rae_` like any other named type. Without this
+            // a Task element inside a generic (e.g. List(Task(Int))) mangled to
+            // `..._Task_...` here but `..._rae_Task_...` there, so the local
+            // var-decl type didn't match the struct typedef name (#238).
+            *pos += snprintf(buf + *pos, cap - *pos, "rae_Task_");
             type_mangle_recursive(arena, t->as.task.base, buf, pos, cap, depth + 1);
             break;
         case TYPE_CONST_INT:
