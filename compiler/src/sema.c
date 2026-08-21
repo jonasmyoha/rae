@@ -1923,6 +1923,27 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
         if (s_current_module) s_current_module->had_error = true;
         return;
     }
+    /* Distinct user structs (including different generic specializations, which
+     * intern to different TypeInfo) are not assignable/convertible. Catch it
+     * here so the diagnostic names the .rae site instead of letting the C
+     * compiler flag the generated code with a .c line (#414). Types are
+     * interned, so pointer inequality after stripping refs IS a real struct
+     * mismatch. Names are required non-empty to skip unresolved placeholders. */
+    TypeInfo* want_s = sema_strip_ref(expected);
+    TypeInfo* got_s = sema_strip_ref(expr->resolved_type);
+    if (want_s && got_s && want_s != got_s
+        && want_s->kind == TYPE_STRUCT && got_s->kind == TYPE_STRUCT
+        && want_s->name.len > 0 && got_s->name.len > 0) {
+        char buf[240];
+        snprintf(buf, sizeof(buf),
+            "cannot convert %.*s to %.*s; they are different types",
+            (int)got_s->name.len, got_s->name.data,
+            (int)want_s->name.len, want_s->name.data);
+        const char* err_file = s_current_decl_origin ? s_current_decl_origin : NULL;
+        diag_error(err_file, (int)expr->line, (int)expr->column, buf);
+        if (s_current_module) s_current_module->had_error = true;
+        return;
+    }
     if (expected->kind == TYPE_ANY && expr->resolved_type->kind != TYPE_ANY) {
         AstExpr* box = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
         *box = (AstExpr){.kind = AST_EXPR_BOX, .resolved_type = expected, .line = expr->line, .column = expr->column};
