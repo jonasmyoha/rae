@@ -928,6 +928,17 @@ void  rae_g3d_set_frame(void* enc, void* pass){
     g3d_pass = (WGPURenderPassEncoder)pass;
 }
 void* rae_g3d_pass(void) { return (void*)g3d_pass; }
+/* Scene-pass finish primitives for the Rae-side finishForward (#514), mirroring
+ * the deferred rae_gb_* set. Rae ends the pass + finishes the command buffer
+ * over the bindings; rae_g3d_submit_cmd is the one thin C call (Rae cannot yet
+ * take the address of a single handle for wgpuQueueSubmit). */
+void* rae_g3d_encoder(void) { return (void*)g3d_enc; }
+int64_t rae_g3d_frame_active(void) { return g3d_pass ? 1 : 0; }
+void rae_g3d_clear_frame(void) { g3d_pass = NULL; g3d_enc = NULL; }
+void rae_g3d_submit_cmd(void* cmd){
+    WGPUCommandBuffer cb = (WGPUCommandBuffer)cmd;
+    wgpuQueueSubmit(g_wgpu_queue, 1, &cb);
+}
 
 /* Queue one mesh draw. model = 16 Floats column-major. Uniform data is
  * written CPU-side (uploaded once at end); the draw is encoded now with
@@ -993,6 +1004,12 @@ int rae_g3d_push_draw_record(int64_t mesh, rae_Mat4* model, rae_Mat4* prevModel,
     else           { for (int i = 0; i < 16; i++) d[16 + i] = model->m.v[i]; }
     d[32] = r; d[33] = g; d[34] = b; d[35] = metallic;
     d[36] = emR; d[37] = emG; d[38] = emB; d[39] = roughness;
+    /* Upload this record's slice immediately (#514), the same per-draw pattern
+     * the skinned and metaball paths use — so the scene-pass finish (now in
+     * Rae) has nothing left to bulk-upload. */
+    wgpuQueueWriteBuffer(g_wgpu_queue, g3d_draw_sbuf,
+                         (uint64_t)g3d_draw_count * G3D_DRAW_FLOATS * sizeof(float),
+                         d, G3D_DRAW_FLOATS * sizeof(float));
     return g3d_draw_count++;
 }
 
@@ -1031,10 +1048,8 @@ static int rae_g3d_finish_pass(void) {
         }
     }
     if (!g3d_pass) return 0;
-    if (g3d_draw_count > 0) {
-        wgpuQueueWriteBuffer(g_wgpu_queue, g3d_draw_sbuf, 0, g3d_draw_cpu,
-                             (size_t)g3d_draw_count * G3D_DRAW_FLOATS * sizeof(float));
-    }
+    /* Records now upload per-draw (#514, rae_g3d_push_draw_record), so there is
+     * no bulk upload here. */
     wgpuRenderPassEncoderEnd(g3d_pass);
     WGPUCommandBuffer cb = wgpuCommandEncoderFinish(g3d_enc, NULL);
     wgpuQueueSubmit(g_wgpu_queue, 1, &cb);
@@ -1044,9 +1059,9 @@ static int rae_g3d_finish_pass(void) {
     return 1;
 }
 
-void rae_ext_gpu3d_submit(void) {
-    if (rae_g3d_finish_pass()) rae_wgpu_poll(0);
-}
+/* submit moved to Rae (#514): gpu3d.submit() = finishForward() + webgpuPoll,
+ * over the WebGPU bindings. finishForward mirrors this rae_g3d_finish_pass
+ * (still used by the C post-process passes until they move too). */
 
 /* TAA resolve (#335). Ends the scene pass first so the HDR image and
  * velocity buffer are complete, then accumulates into history[cur].

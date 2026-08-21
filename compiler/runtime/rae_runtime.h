@@ -994,6 +994,10 @@ void* rae_g3d_pipeline(void);
 void* rae_g3d_bind(void);
 void  rae_g3d_set_frame(void* enc, void* pass);
 void* rae_g3d_pass(void);
+void* rae_g3d_encoder(void);
+int64_t rae_g3d_frame_active(void);
+void  rae_g3d_clear_frame(void);
+void  rae_g3d_submit_cmd(void* cmd);
 int   rae_g3d_push_draw_record(int64_t mesh, struct rae_Mat4* model, struct rae_Mat4* prevModel,
                                float r, float g, float b, float metallic,
                                float emR, float emG, float emB, float roughness);
