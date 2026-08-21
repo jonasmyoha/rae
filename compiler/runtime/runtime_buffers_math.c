@@ -35,6 +35,12 @@ int64_t rae_ext_rae_random_int(int64_t min, int64_t max) {
 
 float rae_ext_rae_int_to_float(int64_t v){ return (double)v; }
 int64_t rae_ext_rae_float_to_int(float v){ return (int64_t)v; }
+
+/* Bit intrinsics over the 64-bit two's-complement representation of an Int.
+ * leadingZeros/trailingZeros of 0 are defined as 64 (the builtins are UB on 0). */
+int64_t rae_ext_rae_popcount(int64_t x){ return (int64_t)__builtin_popcountll((unsigned long long)x); }
+int64_t rae_ext_rae_leading_zeros(int64_t x){ return x == 0 ? 64 : (int64_t)__builtin_clzll((unsigned long long)x); }
+int64_t rae_ext_rae_trailing_zeros(int64_t x){ return x == 0 ? 64 : (int64_t)__builtin_ctzll((unsigned long long)x); }
 /* Debug-only bounds checking for rae_buf_get/set. Compiled in when the
  * binary is built with `-DRAE_DEBUG_BOUNDS`. Tracks (ptr -> count, elem_size)
  * in a small open-addressed hash; on every get/set the entry is looked up
