@@ -47,6 +47,15 @@ enum ClipKind {
   run
 }
 
+# The locomotion clip a controller's movement implies: idle when stopped, walk
+# with the walk modifier, else run. Shared by the hero and any controlled crowd
+# member (#546) so switching control does not change how movement reads.
+func locomotionClipFor(controller: view ThirdPersonController) ret Int {
+  if not controller.moving { ret ClipKind.idle as Int }
+  if controller.walking { ret ClipKind.walk as Int }
+  ret ClipKind.run as Int
+}
+
 # A deterministic, lively clip mix for the crowd (#547): each member animates
 # independently of the player, so the roster reads as distinct characters. Cycles
 # walk / run / idle across members.
