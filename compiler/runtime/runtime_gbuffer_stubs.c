@@ -217,11 +217,17 @@ int64_t rae_ext_gpu3d_skinnedMeshCreate(const float* verts, int64_t vertCount,
 void rae_ext_gpu3d_setPalette(const float* rows, int64_t jointCount){
     (void)rows; (void)jointCount;
 }
-void rae_ext_gpu3d_drawSkinned(int64_t mesh, rae_Mat4* model,
-                               float r, float g, float b,
-                               float metallic, float roughness){
+int rae_g3d_push_skinned_draw(int64_t mesh, rae_Mat4* model,
+                              float r, float g, float b,
+                              float metallic, float roughness){
     (void)mesh; (void)model; (void)r; (void)g; (void)b; (void)metallic; (void)roughness;
+    return -1;
 }
+void* rae_g3d_skin_pipeline(void) { return (void*)0; }
+void* rae_g3d_skin_bind(void)     { return (void*)0; }
+void* rae_g3d_skin_vbuf(int64_t mesh){ (void)mesh; return (void*)0; }
+void* rae_g3d_skin_ibuf(int64_t mesh){ (void)mesh; return (void*)0; }
+int64_t rae_g3d_skin_icount(int64_t mesh){ (void)mesh; return 0; }
 void rae_ext_gpu3d_skinFrameBegin(void) {}
 int64_t rae_ext_gpu3d_skinDrawCount(void) { return 0; }
 void rae_ext_gpu3d_skinShutdown(void) {}
