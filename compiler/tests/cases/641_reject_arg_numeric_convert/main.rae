@@ -1,0 +1,12 @@
+# A function boundary is where caller and callee most often disagree about what
+# a number means. Passing a Float where a Float64 parameter is declared is an
+# implicit numeric conversion and must be rejected — write `value as Float64`
+# (#410). Numeric LITERALS are exempt (materialised in the destination type).
+import core
+
+func precise(d: view Float64) ret Float64 { ret d }
+
+func main() {
+  let approx: Float = 1.5
+  log(precise(d: approx))
+}
