@@ -290,6 +290,15 @@ func decodeImageProbe(path: String) extern ret Int
 # failure). Lets a renderer resolve a Sprite.textureKey to an image without a
 # Rae-side map. drawImageKey draws a registered key; hasImageKey tests one.
 func loadImageKey(key: String, path: String) extern ret Int
+# Register an image straight from RGBA pixels generated in Rae (#539) — no file.
+# `pixels` is one packed int per pixel: r | g<<8 | b<<16 | a<<24 (order R,G,B,A).
+func g2dRegisterImageRgba(pixels: view Buffer(Int), w: Int, h: Int) extern("rae_ext_gpu2d_registerImageRgba") ret Int
+func g2dRegisterImageKeyHandle(key: String, handle: Int) extern("rae_ext_gpu2d_registerImageKeyHandle")
+func registerImageRgba(key: copy String, pixels: view Buffer(Int), w: copy Int, h: copy Int) pub ret Int {
+  let handle: Int = g2dRegisterImageRgba(pixels: pixels, w: w, h: h)
+  if handle > 0 { g2dRegisterImageKeyHandle(key: key, handle: handle) }
+  ret handle
+}
 func hasImageKey(key: String) extern ret Bool
 func drawImageKey(key: String, x: Float, y: Float, w: Float, h: Float, radius: Float, tint: Int) extern
 # Draw a registered image with ScaleMode semantics:

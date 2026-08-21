@@ -13,13 +13,53 @@ import vec3
 import renderer_deferred
 import procgen/rock
 import procgen/tree
+import procgen/texture
 open scene3d
 open gpu3d
 open renderer_deferred
+open rendergraph
 open math3d
 open mesh3d
 open procgen/rock
 open procgen/tree
+open procgen/texture
+
+# The five biome-material albedo textures, generated in Rae and registered as
+# gpu2d images so they can be drawn as swatches over the 3D scene.
+func registerTextures() {
+  let names: List(String) = createList(String, cap: 5)
+  names.add(value: "grass")
+  names.add(value: "sand")
+  names.add(value: "rock")
+  names.add(value: "mud")
+  names.add(value: "water")
+  var k: Int = 0
+  loop k < 5 {
+    let pixels: List(Int) = generateAlbedo(kind: k, resolution: 128, tiling: 4.0, seed: 700 + k * 17)
+    if let name: String = names.at(index: k) {
+      let handle: Int = gpu2d.registerImageRgba(key: "tex.{name}", pixels: pixels.data, w: 128, h: 128)
+    }
+    k = k + 1
+  }
+}
+
+# Draw the five texture swatches in a row along the bottom.
+func drawTextureSwatches() {
+  let names: List(String) = createList(String, cap: 5)
+  names.add(value: "grass")
+  names.add(value: "sand")
+  names.add(value: "rock")
+  names.add(value: "mud")
+  names.add(value: "water")
+  var k: Int = 0
+  loop k < 5 {
+    if let name: String = names.at(index: k) {
+      let sx: Float = 40.0 + k.toFloat() * 168.0
+      gpu2d.drawImageKey(key: "tex.{name}", x: sx, y: 630.0, w: 150.0, h: 150.0, radius: 10.0, tint: 0xFFFFFFFF)
+    }
+    k = k + 1
+  }
+}
 
 func uploadMeshData(m: view MeshData) ret MeshHandle {
   ret uploadMesh(verts: m.verts, vertCount: m.vertCount, indices: m.indices)
@@ -94,6 +134,10 @@ func main() ret Int {
   let groundData: MeshData = makePlane(size: 40.0, segments: 1)
   let ground: MeshHandle = uploadMeshData(m: groundData)
 
+  # Five procedural material textures (grass/sand/rock/mud/water), generated in
+  # Rae and registered as gpu2d images (shown as swatches along the bottom).
+  registerTextures()
+
   var scene: Scene3d = buildScene(rocks: rocks, treeTrunks: trunks, treeCanopies: canopies, ground: ground)
 
   var camera: Camera3d = defaultCamera3d()
@@ -107,7 +151,7 @@ func main() ret Int {
   var lastY: Float = 0.0
   var dragging: Bool = false
 
-  var renderer: DeferredRenderer = createDeferredRenderer()
+  var renderer: DeferredRenderer = createDeferredRendererWithUi()
   let gs: Int = compileDeferred(r: renderer)
   if gs is not 0 {
     log("render graph invalid: {gs}")
@@ -137,7 +181,21 @@ func main() ret Int {
     camera.position = orbitEye(targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z, yaw: yaw, pitch: pitch, dist: dist)
     let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
     if gpu2d.renderGate() {
-      renderDeferredFrame(r: renderer, scene: scene, camera: camera, light: light, aspect: aspect)
+      var oi: Int = 0
+      loop oi < deferredOrderLength(r: renderer) {
+        let tag: Int = deferredTagAt(r: renderer, i: oi)
+        if tag is RenderTag.uiOverlay {
+          gpu2d.beginFrameLoad()
+          drawTextureSwatches()
+        } else {
+          if tag is RenderTag.present {
+            gpu2d.endFrame()
+          } else {
+            renderDeferredPass(r: renderer, tag: tag, scene: scene, camera: camera, light: light, aspect: aspect)
+          }
+        }
+        oi = oi + 1
+      }
       snapshotPrevTransforms(scene: scene)
     }
   }
