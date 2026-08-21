@@ -20,17 +20,15 @@ open ui/virtual_joystick
 
 # Character movement for the walker demo: analog from the virtual joystick when
 # it is active, else WASD. (Lives here to keep main.rae under the file cap.)
+# Apply a movement intent to the controller. The intent already resolved the
+# device (touch stick vs WASD) in inputUpdate, so this is one step call — the
+# same stepThirdPersonController both former branches ended in.
 func updateWalkerMovement(controller: mod ThirdPersonController,
-                          moveStick: view VirtualJoystick, joyActive: view Bool,
-                          allowKeys: view Bool, cameraYaw: view Float,
+                          intent: view InputIntent, cameraYaw: view Float,
                           dt: view Float) ret Bool {
-  if joyActive {
-    ret stepThirdPersonController(controller: controller,
-      inputRight: moveStick.valueX, inputForward: moveStick.valueY,
-      walking: false, cameraYaw: cameraYaw, dt: dt)
-  }
-  ret updateThirdPersonController(controller: controller,
-    allowInput: allowKeys, cameraYaw: cameraYaw, dt: dt)
+  ret stepThirdPersonController(controller: controller,
+    inputRight: intent.moveX, inputForward: intent.moveY,
+    walking: intent.walking, cameraYaw: cameraYaw, dt: dt)
 }
 
 func uploadMeshData(m: view MeshData) ret MeshHandle {
