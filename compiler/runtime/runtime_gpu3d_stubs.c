@@ -79,7 +79,17 @@ int rae_g3d_taa_prepare(void) { return -1; }
 void* rae_g3d_taa_pipeline(void) { return (void*)0; }
 void* rae_g3d_taa_bind(int64_t slot){ (void)slot; return (void*)0; }
 void* rae_g3d_taa_view(int64_t slot){ (void)slot; return (void*)0; }
-void rae_ext_gpu3d_ssao(void) {}
+int rae_g3d_ssao_prepare(void) { return 0; }
+int64_t rae_g3d_ssao_enabled(void) { return 0; }
+int64_t rae_g3d_ao_debug_on(void)  { return 0; }
+void* rae_g3d_ssao_pipeline(void)     { return (void*)0; }
+void* rae_g3d_ssao_bind(void)         { return (void*)0; }
+void* rae_g3d_ao_view(void)           { return (void*)0; }
+void* rae_g3d_ao_apply_pipeline(void) { return (void*)0; }
+void* rae_g3d_ao_apply_bind(void)     { return (void*)0; }
+void* rae_g3d_ao_debug_pipeline(void) { return (void*)0; }
+void* rae_g3d_ao_debug_bind(void)     { return (void*)0; }
+void rae_g3d_clear_ao(void) {}
 void rae_ext_gpu3d_shutdown(void) {}
 void rae_ext_gpu3d_skyHosekPush(int64_t index, float value){ (void)index; (void)value; }
 void rae_ext_gpu3d_skyDraw(float skyKind, float turbidity, float skyExposure, float sunSizeRad,

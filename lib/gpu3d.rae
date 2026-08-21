@@ -119,7 +119,20 @@ func g3dTaaPrepare() extern("rae_g3d_taa_prepare") ret Int
 func g3dTaaPipeline() extern("rae_g3d_taa_pipeline") ret Ptr
 func g3dTaaBind(slot: Int) extern("rae_g3d_taa_bind") ret Ptr
 func g3dTaaView(slot: Int) extern("rae_g3d_taa_view") ret Ptr
-func ssao() extern
+# SSAO (#514): C ensures the pipelines/binds/targets + uploads the params
+# (returns 1 to proceed, 0 to skip); Rae runs the two fullscreen passes — AO
+# generation into ao_view, then the ambient*AO composite into hdrColor (Load).
+func g3dSsaoPrepare() extern("rae_g3d_ssao_prepare") ret Int
+func g3dSsaoEnabled() extern("rae_g3d_ssao_enabled") ret Int
+func g3dAoDebugOn() extern("rae_g3d_ao_debug_on") ret Int
+func g3dSsaoPipeline() extern("rae_g3d_ssao_pipeline") ret Ptr
+func g3dSsaoBind() extern("rae_g3d_ssao_bind") ret Ptr
+func g3dAoView() extern("rae_g3d_ao_view") ret Ptr
+func g3dAoApplyPipeline() extern("rae_g3d_ao_apply_pipeline") ret Ptr
+func g3dAoApplyBind() extern("rae_g3d_ao_apply_bind") ret Ptr
+func g3dAoDebugPipeline() extern("rae_g3d_ao_debug_pipeline") ret Ptr
+func g3dAoDebugBind() extern("rae_g3d_ao_debug_bind") ret Ptr
+func g3dClearAo() extern("rae_g3d_clear_ao")
 func shutdown() extern
 
 # ----- frame parameter block (internal encoding) ----------------------
@@ -182,12 +195,13 @@ func ensureFwdPostAtt() {
 # Encode a fullscreen post-process pass (#514): its own encoder + one-attachment
 # render pass writing `target`, a triangle draw with `pipeline`+`bind`, then
 # finish+submit — the shared shape of tonemap/taa/ssao, mirroring the deferred
-# fullscreen passes. Clears the target (the triangle overwrites every pixel).
-func fullscreenPostPass(target: copy Ptr, pipeline: copy Ptr, bind: copy Ptr) {
+# fullscreen passes. `loadOp` is WGPULoadOp_Clear for passes that overwrite every
+# pixel, or WGPULoadOp_Load to blend into the existing target (the SSAO composite).
+func fullscreenPostPass(target: copy Ptr, pipeline: copy Ptr, bind: copy Ptr, loadOp: copy Int32) {
   ensureFwdPostAtt()
   let att: WGPURenderPassColorAttachment = {
     view_: target, depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32,
-    loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store,
+    loadOp: loadOp, storeOp: WGPUStoreOp_Store,
     clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }
   }
   gFwdPostAtt.set(index: 0, value: att)
@@ -658,7 +672,7 @@ func tonemapPass() pub {
   finishForward()
   let slot: Int = g3dTonemapPrepare()
   if slot < 0 { ret }
-  fullscreenPostPass(target: g2dOffView(), pipeline: g3dTonemapPipeline(), bind: g3dTonemapBind(slot: slot))
+  fullscreenPostPass(target: g2dOffView(), pipeline: g3dTonemapPipeline(), bind: g3dTonemapBind(slot: slot), loadOp: WGPULoadOp_Clear)
 }
 
 # Ambient occlusion (#337): horizon-search AO with a visibility bitmask,
@@ -666,7 +680,21 @@ func tonemapPass() pub {
 # Runs before TAA so the half-res noise resolves temporally, and before
 # tonemap so it modulates linear radiance.
 func ssaoPass() pub {
-  ssao()
+  finishForward()
+  if g3dSsaoPrepare() is 0 { ret }
+  # Generation: write AO into ao_view (or clear it to unoccluded when AO is off).
+  if g3dSsaoEnabled() is not 0 {
+    fullscreenPostPass(target: g3dAoView(), pipeline: g3dSsaoPipeline(), bind: g3dSsaoBind(), loadOp: WGPULoadOp_Clear)
+  } else {
+    g3dClearAo()
+  }
+  # Composite: add ambient*AO back into hdrColor (Load — it blends, not overwrites).
+  # A debug build paints the raw AO over hdrColor instead.
+  if g3dAoDebugOn() is not 0 {
+    fullscreenPostPass(target: g3dHdrView(), pipeline: g3dAoDebugPipeline(), bind: g3dAoDebugBind(), loadOp: WGPULoadOp_Clear)
+  } else {
+    fullscreenPostPass(target: g3dHdrView(), pipeline: g3dAoApplyPipeline(), bind: g3dAoApplyBind(), loadOp: WGPULoadOp_Load)
+  }
 }
 
 # Temporal antialiasing resolve (#335): reproject the previous frame
@@ -676,7 +704,7 @@ func taaPass() pub {
   finishForward()
   let slot: Int = g3dTaaPrepare()
   if slot < 0 { ret }
-  fullscreenPostPass(target: g3dTaaView(slot: slot), pipeline: g3dTaaPipeline(), bind: g3dTaaBind(slot: slot))
+  fullscreenPostPass(target: g3dTaaView(slot: slot), pipeline: g3dTaaPipeline(), bind: g3dTaaBind(slot: slot), loadOp: WGPULoadOp_Clear)
 }
 
 # Upload interleaved mesh data and get a typed handle back.
