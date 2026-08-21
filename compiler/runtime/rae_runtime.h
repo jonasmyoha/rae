@@ -512,6 +512,9 @@ int64_t rae_ext_rae_mem_alloc_total(void);
 void rae_ext_rae_seed(int64_t seed);
 float rae_ext_rae_random(void);
 int64_t rae_ext_rae_random_int(int64_t min, int64_t max);
+int64_t rae_ext_rae_popcount(int64_t x);
+int64_t rae_ext_rae_leading_zeros(int64_t x);
+int64_t rae_ext_rae_trailing_zeros(int64_t x);
 
 /* Channel(T) MPSC cross-thread channel (#271) — see lib/channel.rae. */
 int64_t rae_ext_rae_chan_new(void);
