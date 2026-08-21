@@ -111,7 +111,6 @@ void* rae_gb_view_bind(void)        { return (void*)0; }
 void rae_gb_set_view_pipeline(void* p) { (void)p; }
 void rae_gb_set_view_ubuf(void* b)     { (void)b; }
 void rae_gb_set_view_bind(void* b)     { (void)b; }
-void rae_ext_gbuffer_present(void) {}
 void rae_ext_gbuffer_shutdown(void) {}
 
 /* The passes downstream of the G-buffer are pure GPU work — there is no
