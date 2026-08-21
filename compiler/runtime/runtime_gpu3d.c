@@ -1066,38 +1066,32 @@ static int rae_g3d_finish_pass(void) {
 /* TAA resolve (#335). Ends the scene pass first so the HDR image and
  * velocity buffer are complete, then accumulates into history[cur].
  * Tonemap afterwards reads history[cur] rather than the raw HDR. */
-void rae_ext_gpu3d_taa(void) {
-    if (!g3d_taa_enabled || !g3d_taa_pending) return;
-    rae_g3d_finish_pass();
+/* TAA bookkeeping (#514): the scene-pass finish moves to the Rae wrapper
+ * (taaPass -> finishForward). This ensures the pipeline/bind, uploads the blend
+ * params (history-validity aware), flips history_valid, and returns the current
+ * history slot for the Rae side to encode the fullscreen resolve into
+ * taa_view[cur]; -1 to skip (TAA disabled/not pending, or targets not up). */
+int rae_g3d_taa_prepare(void) {
+    if (!g3d_taa_enabled || !g3d_taa_pending) return -1;
     g3d_init_taa_pipeline();
     g3d_ensure_taa_bind();
-    if (!g3d_taa_pipeline || !g3d_taa_bind[g3d_taa_cur]) return;
+    if (!g3d_taa_pipeline || !g3d_taa_bind[g3d_taa_cur]) return -1;
     g3d_taa_pending = false;
-
     /* 0.9 keeps ~10 frames of history: enough to converge the jitter
      * pattern, short enough that clamp failures wash out quickly. */
     float params[4] = { 0.9f, g3d_taa_history_valid ? 1.0f : 0.0f, 0.0f, 0.0f };
     wgpuQueueWriteBuffer(g_wgpu_queue, g3d_taa_param_ubuf, 0, params, sizeof(params));
-
-    WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
-    WGPURenderPassColorAttachment ca; memset(&ca, 0, sizeof(ca));
-    ca.view = g3d_taa_view[g3d_taa_cur];
-    ca.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
-    ca.loadOp = WGPULoadOp_Clear;
-    ca.storeOp = WGPUStoreOp_Store;
-    WGPURenderPassDescriptor rp; memset(&rp, 0, sizeof(rp));
-    rp.colorAttachmentCount = 1; rp.colorAttachments = &ca;
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(enc, &rp);
-    wgpuRenderPassEncoderSetPipeline(pass, g3d_taa_pipeline);
-    wgpuRenderPassEncoderSetBindGroup(pass, 0, g3d_taa_bind[g3d_taa_cur], 0, NULL);
-    wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);
-    wgpuRenderPassEncoderEnd(pass);
-    WGPUCommandBuffer cb = wgpuCommandEncoderFinish(enc, NULL);
-    wgpuQueueSubmit(g_wgpu_queue, 1, &cb);
-    wgpuCommandBufferRelease(cb);
-    wgpuRenderPassEncoderRelease(pass);
-    wgpuCommandEncoderRelease(enc);
     g3d_taa_history_valid = true;
+    return g3d_taa_cur;
+}
+void* rae_g3d_taa_pipeline(void) { return (void*)g3d_taa_pipeline; }
+void* rae_g3d_taa_bind(int64_t slot){
+    if (slot < 0 || slot > 1) return (void*)0;
+    return (void*)g3d_taa_bind[slot];
+}
+void* rae_g3d_taa_view(int64_t slot){
+    if (slot < 0 || slot > 1) return (void*)0;
+    return (void*)g3d_taa_view[slot];
 }
 
 /* Tonemap pass (#334): resolve linear HDR into the LDR offscreen. Ends the
