@@ -463,88 +463,9 @@ func frameBegin(app: mod App) {
 func updateApp(app: mod App) {
   let dt: Float = app.frame.dt
   let now: Float64 = app.frame.now
-  updateUiInput(input: app.io.ui, world: app.io.world)
-  if walkerMenuTapped() { toggleWalkerPanel(settings: app.io.settings, world: app.io.world) suppressUiPress(input: app.io.ui) }
-  let scrolled: Bool = updateScrollPanel(s: app.io.panelScroll, world: app.io.world, input: app.io.ui)
-  if updateDebugOverlay(d: app.io.dbg, screenW: windowExtentW(), screenH: windowExtentH(),
-                        now: now, didRealWork: app.frame.dbgDidWork) {
-    suppressUiPress(input: app.io.ui)
-  }
-  let clipHit: String = panelClickedId(panel: app.io.clipPanel, input: app.io.ui)
-  if clipHit.length() > 0 and app.cam.rig.mode is not CameraRigMode.character {
-    var nextClipIndex: Int = app.character.clipIndex
-    if clipHit.equals(other: "idle") { nextClipIndex = 0 }
-    if clipHit.equals(other: "walk") { nextClipIndex = 1 }
-    if clipHit.equals(other: "walkFast") { nextClipIndex = 2 }
-    if clipHit.equals(other: "run") { nextClipIndex = 3 }
-    if nextClipIndex is not app.character.clipIndex {
-      app.character.transitionFrom = captureSkeletonPose(sk: app.character.skeleton)
-      app.character.transitionElapsed = 0.0
-      app.character.clipIndex = nextClipIndex
-      app.character.animTime = 0.0
-      app.persist.stateDirty = true
-    }
-    setPanelSelection(panel: app.io.clipPanel, world: app.io.world, group: 1, id: clipHit)
-  }
-  let transportHit: String = panelClickedId(panel: app.io.transport, input: app.io.ui)
-  if transportHit.equals(other: "play") {
-    app.character.playing = not app.character.playing
-    var playLabel: String = "Pause"
-    if not app.character.playing { playLabel = "Play" }
-    setPanelButtonLabel(panel: app.io.transport, world: app.io.world, id: "play", label: playLabel)
-    setPanelButtonOn(panel: app.io.transport, world: app.io.world, id: "play", on: app.character.playing)
-  }
-  if transportHit.equals(other: "toon") {
-    app.character.toon = not app.character.toon
-    setPanelButtonOn(panel: app.io.transport, world: app.io.world, id: "toon", on: app.character.toon)
-  }
-  if transportHit.equals(other: "slower") { app.character.speed = nextSpeed(current: app.character.speed, up: false) }
-  if transportHit.equals(other: "faster") { app.character.speed = nextSpeed(current: app.character.speed, up: true) }
-  if transportHit.length() > 0 {
-    let pct: Int = speedPercent(v: app.character.speed)
-    setNodeText(world: app.io.world, nodeId: "SpeedLabel", value: "Speed {pct}%")
-  }
-  var settingsChanged: Bool = false
-  var ai: Int = 0
-  loop ai < uiActionCount(input: app.io.ui) {
-    if settingsHandleAction(s: app.io.settings, actionId: uiActionAt(input: app.io.ui, index: ai)) {
-      settingsChanged = true
-    }
-    ai = ai + 1
-  }
-  if settingsUpdatePointer(s: app.io.settings, world: app.io.world, input: app.io.ui) { settingsChanged = true }
-  if settingsUpdateLatitudePointer(s: app.io.settings, world: app.io.world, input: app.io.ui) { settingsChanged = true }
-  if settingsUpdateDatePointer(s: app.io.settings, world: app.io.world, input: app.io.ui) { settingsChanged = true }
-  if settingsAdvanceTime(s: app.io.settings, dt: dt) { settingsChanged = true }
-  if settingsChanged {
-    app.render.renderer.sky = settingsBuildSky(s: app.io.settings, data: app.cam.hosek, turbidity: 3.0, groundAlbedo: 0.30)
-    app.cam.light.sunDir = settingsSunDir(s: app.io.settings)
-    app.cam.light.sunColor = settingsSunColor(s: app.io.settings)
-    app.character.speed = app.io.settings.speed
-    app.character.playing = app.io.settings.playing
-    if app.character.toon is not app.io.settings.toon {
-      app.character.toon = app.io.settings.toon
-      setPanelButtonOn(panel: app.io.transport, world: app.io.world, id: "toon", on: app.character.toon)
-    }
-    let pctS: Int = speedPercent(v: app.character.speed)
-    setNodeText(world: app.io.world, nodeId: "SpeedLabel", value: "Speed {pctS}%")
-    settingsApplyToWorld(s: app.io.settings, world: app.io.world)
-    applyWalkerPanel(world: app.io.world, open: app.io.settings.open)
-    app.persist.stateDirty = true
-  }
-  if clipHit.length() > 0 or transportHit.length() > 0 {
-    app.io.settings.speed = app.character.speed
-    app.io.settings.toon = app.character.toon
-    settingsApplyToWorld(s: app.io.settings, world: app.io.world)
-    applyWalkerPanel(world: app.io.world, open: app.io.settings.open)
-    app.persist.stateDirty = true
-  }
-  if app.terrain.toon is not app.character.toon {
-    setInfiniteTerrainToon(terrain: app.terrain, scene: app.scene, toon: app.character.toon)
-  }
-  if uiActionCount(input: app.io.ui) > 0 or settingsChanged {
-    runUiSystems(world: app.io.world, res: app.io.gpuUi)
-  }
+  let uiTick: UiTick = uiUpdate(app: app, dt: dt, now: now)
+  let settingsChanged: Bool = uiTick.settingsChanged
+  let scrolled: Bool = uiTick.scrolled
 
   let camTick: CameraTick = cameraUpdate(app: app, dt: dt)
   let joyActive: Bool = camTick.joyActive
