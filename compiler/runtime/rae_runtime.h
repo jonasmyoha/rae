@@ -982,6 +982,17 @@ void* rae_gb_view_c(void);
 void* rae_gb_view_depth(void);
 float rae_gb_motion_zero(void);
 void rae_gb_set_frame(void* enc, void* pass);
+/* Forward renderer (#514): frame prepare + handle accessors for the Rae-side
+ * forward render pass (gpu3d.beginForward). Mirrors the rae_gb_* deferred set. */
+int   rae_g3d_frame_prepare(const float* frame, int64_t count);
+void* rae_g3d_hdr_view(void);
+void* rae_g3d_normal_view(void);
+void* rae_g3d_velocity_view(void);
+void* rae_g3d_ambient_view(void);
+void* rae_g3d_depth_view(void);
+void* rae_g3d_pipeline(void);
+void* rae_g3d_bind(void);
+void  rae_g3d_set_frame(void* enc, void* pass);
 /* Static bind group creation moved to Rae (#503). */
 void* rae_gb_frame_ubuf(void);
 int64_t rae_gb_frame_bytes(void);
