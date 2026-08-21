@@ -927,6 +927,24 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
         case AST_EXPR_FLOAT: return &kFloat_tr;
         case AST_EXPR_BOOL: return &kBool_tr;
         case AST_EXPR_STRING: return &kString_tr;
+        /* A binary op's result type is its (sema-)resolved type — String for
+         * `+` concat, Int/Float for arithmetic, Bool for comparisons. Surfacing
+         * it is what lets an owned-String destination wrap the concat result in
+         * rae_string_pool_take, exactly as the `.concat()` method-call path
+         * does. Without it a `String + String` passed to an `own String`
+         * parameter (e.g. `list.add(a + b)`) stayed pool-registered and was
+         * freed by the statement's pool flush AND by the container drop — a
+         * double-free / malloc abort. */
+        case AST_EXPR_BINARY: {
+            const TypeInfo* rt = expr->resolved_type;
+            if (rt && rt->kind == TYPE_REF) rt = rt->as.ref.base;
+            if (!rt) break;
+            if (rt->kind == TYPE_STRING) return &kString_tr;
+            if (rt->kind == TYPE_INT) return &kInt_tr;
+            if (rt->kind == TYPE_FLOAT) return &kFloat_tr;
+            if (rt->kind == TYPE_BOOL) return &kBool_tr;
+            break;
+        }
         /* Interpolation ALWAYS produces a freshly-allocated String, so its
          * type is never in doubt. Leaving this unhandled (returning NULL)
          * silently disabled every ownership decision that asks "is this
