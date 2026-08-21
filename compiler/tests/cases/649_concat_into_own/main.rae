@@ -1,0 +1,19 @@
+# A `String + String` result passed to an `own String` parameter must be
+# detached from the string pool (rae_string_pool_take), like the `.concat()`
+# path already is. Without it, `list.add(a + b)` left the concat pool-owned:
+# the statement's pool flush freed it AND the list drop freed it again — a
+# double-free / malloc abort. Here the concat results flow into a List(String)
+# `own` add and are then cleared, exercising the element drop.
+import core
+
+func main() {
+  var parts: List(String) = {}
+  parts.add(item: "he" + "llo")
+  parts.add(item: "wor" + "ld")
+  parts.add(item: "a" + "b" + "c")
+  log(parts.length())
+  if let a: String = parts.at(index: 0) { log(a) }
+  if let b: String = parts.at(index: 2) { log(b) }
+  parts.clear()
+  log(parts.length())
+}
