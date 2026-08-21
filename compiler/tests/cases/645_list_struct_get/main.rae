@@ -1,0 +1,23 @@
+# A List of a user struct: .get()/.at() return the element as an optional that
+# unboxes to the struct via `if let` — no low-level rae_ext_rae_buf_get needed
+# (#239). Verifies struct-list element access is monomorphized end to end.
+import core
+
+type Track {
+  title: String
+  seconds: Int
+}
+
+func main() {
+  var ts: List(Track) = {}
+  ts.add(item: Track { title: "Intro", seconds: 95 })
+  ts.add(item: Track { title: "Verse", seconds: 120 })
+  log(ts.length())
+  if let t: Track = ts.get(index: 1) {
+    log(t.title)
+    log(t.seconds)
+  }
+  if let t2: Track = ts.at(index: 0) {
+    log(t2.title)
+  }
+}
