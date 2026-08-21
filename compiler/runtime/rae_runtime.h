@@ -959,7 +959,7 @@ void rae_gb_set_pyr_bind(int64_t i, void* b);
 void rae_sm_begin(const float* cascades, int64_t count, int64_t resolution,
                   const float* splits, const float* texelWorld, const float* depthRange);
 void rae_sm_queue_mesh(int64_t mesh, struct rae_Mat4* model);
-void rae_sm_queue_skinned(int64_t mesh, struct rae_Mat4* model);
+void rae_sm_queue_skinned(int64_t mesh, struct rae_Mat4* model, int64_t paletteBase);
 void rae_sm_record_metaballs(const float* packedBalls, int64_t count, float smoothing);
 void rae_sm_shutdown(void);
 int64_t rae_sm_ready(void);

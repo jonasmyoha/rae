@@ -108,14 +108,18 @@ func renderShadowPass(app: mod App, aspect: copy Float, palette: view List(Float
     beginShadowPass(c: cascades)
     renderSceneShadow(scene: app.scene)
     drawTerrainPropsShadow(terrain: app.terrain, scene: app.scene)
+    # Each caster's shadow samples the SAME palette slot its G-buffer instance
+    # does (#547), so a crowd member casts its own pose. Hero = slot 0.
+    let jc: Int = jointCount(sk: app.character.skeleton)
     var sp: Int = 0
     loop sp < app.character.partIds.length {
       let sh: MeshHandle = meshHandle(id: walkerIntAt(values: app.character.partIds, index: sp), generation: 1)
-      drawShadowCasterSkinned(mesh: sh, model: app.character.model)
+      drawShadowCasterSkinned(mesh: sh, model: app.character.model, paletteBase: 0)
       var shadowClone: Int = 0
       loop shadowClone < app.character.crowd.length {
         if let member: CrowdMember = app.character.crowd.at(index: shadowClone) {
-          drawShadowCasterSkinned(mesh: sh, model: member.model)
+          drawShadowCasterSkinned(mesh: sh, model: member.model,
+                                  paletteBase: characterPaletteBase(slot: shadowClone + 1, jointCount: jc))
         }
         shadowClone = shadowClone + 1
       }
