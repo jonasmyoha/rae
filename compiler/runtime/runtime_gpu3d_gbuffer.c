@@ -1066,14 +1066,10 @@ void rae_gb_submit(void* cmd) {
 int64_t rae_ext_gbuffer_drawCount(void) { return (int64_t)gb_draw_count; }
 
 /* Write one G-buffer channel into the presentable target. */
-/* rae_ext_gbuffer_debugView moved to Rae (lib/gbuffer.rae:debugView, #503). */
+/* The debug-view pass moved to Rae (lib/gbuffer_inspector.rae debugView, #503). */
 
-/* Present the composed frame. Shares the platform copy-to-drawable with
- * the forward frame — see rae_g3d_present_offscreen. */
-void rae_ext_gbuffer_present(void) {
-    rae_g2d_tick_virtual_clock();
-    rae_g3d_present_offscreen();
-}
+/* The present/composite path moved to Rae (#503/#513);
+ * this C entry point had no live binding and was removed. */
 
 void rae_ext_gbuffer_shutdown(void) {
     gb_release_targets();
