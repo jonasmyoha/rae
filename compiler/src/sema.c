@@ -260,6 +260,7 @@ static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolT
 static bool expr_is_owning(SymbolTable* symbols, const AstExpr* e);
 static TypeInfo* sema_array_type_from_call(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr);
 static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr** expr_ptr);
+static bool sema_is_numeric_kind(TypeKind k);
 static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* generic_decl, TypeInfo** args, size_t arg_count, size_t line, size_t column);
 
 AstIdentifierPart* clone_parts(CompilerContext* ctx, const AstIdentifierPart* p) {
@@ -673,6 +674,14 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
     Symbol* best_sym = NULL;
     AstTypeRef* best_inferred = NULL;
     const AstDecl* ineligible = NULL;  // name matched but its package isn't open here
+    // A single name+arity candidate whose ONLY problem is a numeric-type
+    // mismatch (e.g. Float passed where Float64 is wanted) is still the callee
+    // the programmer meant — remember it so we can bind to it and let the
+    // caller's ensure_type_match report the precise conversion error, rather
+    // than returning NULL and letting the C backend re-resolve by name with the
+    // wrong numeric type (#410).
+    AstDecl* numeric_mismatch_only = NULL;
+    int nongeneric_arity_matches = 0;
 
     for (Symbol* curr = symbols->head; curr; curr = curr->next) {
         if (!str_eq(curr->name, name)) continue;
@@ -729,6 +738,7 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
         } else {
             // Non-generic: check parameter types if possible
             bool mismatch = false;
+            bool numeric_mismatch = false; // the mismatch is only a numeric-kind difference
             AstParam* p = fd->params;
             AstCallArg* a = args;
             while (p && a) {
@@ -738,18 +748,32 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
                     // Unwrap references for comparison
                     TypeInfo* pt_base = pt; while (pt_base->kind == TYPE_REF) pt_base = pt_base->as.ref.base;
                     TypeInfo* at_base = at; while (at_base->kind == TYPE_REF) at_base = at_base->as.ref.base;
-                    
+
                     // Very basic type check: allow Any to match anything, and matching kinds
                     if (pt_base->kind != TYPE_ANY && at_base->kind != TYPE_ANY) {
-                        if (pt_base->kind != at_base->kind) { mismatch = true; break; }
+                        if (pt_base->kind != at_base->kind) {
+                            mismatch = true;
+                            numeric_mismatch = sema_is_numeric_kind(pt_base->kind)
+                                            && sema_is_numeric_kind(at_base->kind);
+                            break;
+                        }
                         if (pt_base->kind == TYPE_STRUCT && !str_eq(pt_base->name, at_base->name)) { mismatch = true; break; }
                     }
                 }
                 p = p->next; a = a->next;
             }
             if (!mismatch) return curr->decl;
+            nongeneric_arity_matches++;
+            if (numeric_mismatch && !numeric_mismatch_only) numeric_mismatch_only = curr->decl;
         }
     }
+
+    // Only a numeric type stands between the call and its sole candidate: bind
+    // to it so the argument-conversion check (ensure_type_match) fires with the
+    // precise "cannot implicitly convert" diagnostic. Guarded to a SINGLE
+    // arity candidate so genuine overload sets still fail to resolve. (#410)
+    if (!best_sym && nongeneric_arity_matches == 1 && numeric_mismatch_only)
+        return numeric_mismatch_only;
 
     if (best_sym) {
         if (best_inferred) {
