@@ -1007,6 +1007,17 @@ int   rae_g3d_taa_prepare(void);
 void* rae_g3d_taa_pipeline(void);
 void* rae_g3d_taa_bind(int64_t slot);
 void* rae_g3d_taa_view(int64_t slot);
+int   rae_g3d_ssao_prepare(void);
+int64_t rae_g3d_ssao_enabled(void);
+int64_t rae_g3d_ao_debug_on(void);
+void* rae_g3d_ssao_pipeline(void);
+void* rae_g3d_ssao_bind(void);
+void* rae_g3d_ao_view(void);
+void* rae_g3d_ao_apply_pipeline(void);
+void* rae_g3d_ao_apply_bind(void);
+void* rae_g3d_ao_debug_pipeline(void);
+void* rae_g3d_ao_debug_bind(void);
+void  rae_g3d_clear_ao(void);
 int   rae_g3d_push_draw_record(int64_t mesh, struct rae_Mat4* model, struct rae_Mat4* prevModel,
                                float r, float g, float b, float metallic,
                                float emR, float emG, float emB, float roughness);
