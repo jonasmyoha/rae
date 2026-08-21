@@ -1,0 +1,91 @@
+# procgen/rock — faceted low-poly rock meshes (#540), generated in Rae.
+#
+# Technique: start from a sphere, displace its vertices radially by 3D value
+# noise, then apply a few seeded PLANAR CUTS — every vertex past a plane is
+# flattened onto it, approximating convex-hull clipping without changing
+# topology, which gives the silhouette angular faces. Finally FLAT-SHADE (one
+# face normal per triangle, vertices duplicated) for the low-poly faceted look.
+#
+# Deterministic from `seed`. `subdivision` is the LOD knob (vertex budget),
+# `sliceCount` the angularity, `irregularity` the lumpiness. Output is a MeshData
+# the gpu3d / deferred renderer draws + shadow-casts like any other mesh.
+import core
+import math
+import vec3
+import noise
+import mesh3d
+open vec3
+open mesh3d
+open noise
+
+func rockF(l: view List(Float), i: view Int) ret Float {
+  if let v: Float = l.at(index: i) { ret v }
+  ret 0.0
+}
+func rockI(l: view List(Int), i: view Int) ret Int {
+  if let v: Int = l.at(index: i) { ret v }
+  ret 0
+}
+func rockPosAt(pos: view List(Vec3), i: view Int) ret Vec3 {
+  if let v: Vec3 = pos.at(index: i) { ret v }
+  ret create(x: 0.0, y: 0.0, z: 0.0)
+}
+
+func generateRock(subdivision: copy Int, sliceCount: copy Int, size: copy Float,
+                  seed: copy Int, irregularity: copy Float) pub ret MeshData {
+  let base: MeshData = makeSphere(rings: subdivision, segments: subdivision * 2)
+
+  # 1. Displace each base vertex radially by 3D noise.
+  var pos: List(Vec3) = createList(Vec3, cap: base.vertCount)
+  var i: Int = 0
+  loop i < base.vertCount {
+    let b: Int = i * 8
+    let p: Vec3 = create(x: rockF(l: base.verts, i: b), y: rockF(l: base.verts, i: b + 1), z: rockF(l: base.verts, i: b + 2))
+    let n: Float = fbm3(x: p.x * 1.9 + 5.0, y: p.y * 1.9, z: p.z * 1.9, octaves: 3, lacunarity: 2.0, gain: 0.5, seed: seed)
+    let s: Float = 1.0 + (n - 0.5) * 2.0 * irregularity
+    pos.add(value: vscale(a: p, s: s))
+    i = i + 1
+  }
+
+  # 2. Seeded planar cuts: flatten every vertex past the plane onto it.
+  var c: Int = 0
+  loop c < sliceCount {
+    let nx: Float = hash2(x: c, y: 11, seed: seed) * 2.0 - 1.0
+    let ny: Float = hash2(x: c, y: 22, seed: seed) * 2.0 - 1.0
+    let nz: Float = hash2(x: c, y: 33, seed: seed) * 2.0 - 1.0
+    let pn: Vec3 = vnorm(a: create(x: nx, y: ny, z: nz))
+    let dist: Float = 0.55 + hash2(x: c, y: 44, seed: seed) * 0.35
+    var vi: Int = 0
+    loop vi < pos.length {
+      let p: Vec3 = rockPosAt(pos: pos, i: vi)
+      let d: Float = vdot(a: p, b: pn)
+      if d > dist {
+        pos.set(index: vi, value: vsub(a: p, b: vscale(a: pn, s: d - dist)))
+      }
+      vi = vi + 1
+    }
+    c = c + 1
+  }
+
+  # 3. Flat-shade: one face normal per triangle, verts duplicated.
+  var verts: List(Float) = createList(Float, cap: base.indices.length * 8)
+  var idx: List(Int) = createList(Int, cap: base.indices.length)
+  var t: Int = 0
+  loop t < base.indices.length - 2 {
+    let ia: Int = rockI(l: base.indices, i: t)
+    let ib: Int = rockI(l: base.indices, i: t + 1)
+    let ic: Int = rockI(l: base.indices, i: t + 2)
+    let pa: Vec3 = vscale(a: rockPosAt(pos: pos, i: ia), s: size)
+    let pb: Vec3 = vscale(a: rockPosAt(pos: pos, i: ib), s: size)
+    let pc: Vec3 = vscale(a: rockPosAt(pos: pos, i: ic), s: size)
+    let fn: Vec3 = vnorm(a: vcross(a: vsub(a: pb, b: pa), b: vsub(a: pc, b: pa)))
+    pushVert(verts: verts, px: pa.x, py: pa.y, pz: pa.z, nx: fn.x, ny: fn.y, nz: fn.z, u: 0.0, v: 0.0)
+    pushVert(verts: verts, px: pb.x, py: pb.y, pz: pb.z, nx: fn.x, ny: fn.y, nz: fn.z, u: 1.0, v: 0.0)
+    pushVert(verts: verts, px: pc.x, py: pc.y, pz: pc.z, nx: fn.x, ny: fn.y, nz: fn.z, u: 0.0, v: 1.0)
+    idx.add(value: t)
+    idx.add(value: t + 1)
+    idx.add(value: t + 2)
+    t = t + 3
+  }
+  ret MeshData { verts: own verts, indices: own idx, vertCount: base.indices.length }
+}
