@@ -91,18 +91,22 @@ Investigated because idiomatic Rae code holds arrays in `List(T)`, not raw
 5. **Lifetime** — the List owns the block; the pointer is valid while the List is alive and un-resized. There is no borrow tracker; it is programmer discipline (see the temporal rule below).
 6. **Can a List cross an extern?** Not by value — a C function wanting `const T*` cannot receive a `{data,length,cap}` struct. But its **`.data` + `.length` feed the C params zero-copy.**
 7. So passing `list.data` (Buffer) + `list.length` exposes the contiguous pointer + count **without copying**.
-8. This should stay a **general** capability, not a WebGPU hack: `.data`/`.length` already work today; a length-carrying span type (`view [T]`) would be the clean next step.
-9. `view T` today is a pointer to **one** `T`; for arrays, `.data` is the span-ish value (but drops the length, passed separately).
+8. This is a **general** capability, not a WebGPU hack — and the length-carrying span already exists: **`view List(T)` IS the span.** It lowers to `const rae_List_T*` (zero-copy — a pointer to `{data, length, cap}`), carries the pointer (`.data`) AND the length (`.length`), and `view`/`mod` give the read-only/mutable forms. It is already the idiomatic wrapper param: `uploadPalette(rows: view List(Float))`, `uploadMesh(verts: view List(Float), …)` take it and unpack `.data`/`.length` at the C boundary.
+9. `view T` today is a pointer to **one** `T`; for a whole array you pass `view List(T)` (which carries the length) — that is the span. A distinct `view [T]` value-type would only differ cosmetically (drop the `cap` field / pass by value); it can't add invalidation *enforcement* without a borrow checker, which Rae deliberately does not have (point 5).
 10. **Reallocation hazard** — `List.grow()`/`add()` may `realloc` and move the block, dangling any pointer C still holds. Safe for **synchronous** consumers (`wgpuQueueWriteBuffer` copies immediately); **unsafe** for asynchronous GPU use (mapped buffers) — do not resize a List whose storage is mapped/in flight. (Same class as QUEUE #467.)
 11. **Read-only vs mutable** is already distinguished at the boundary: `view` → `const T*`, `mod` → `T*`.
 
-**Conclusion.** The raw binding layer takes `Ptr` (the C ABI requires a raw
-pointer), and Rae callers pass `myList.data, myList.length` — so **`List` stays
-the idiomatic caller-side container with zero copy**. Ergonomic `List`-taking
-wrappers belong in a higher-level `gpu.rae`, layered on top of these raw
-bindings. A first-class `view [T]` span (pointer + length, resize-invalidated)
-is the recommended future language feature to make this fully type-safe; it is
-tracked, not built here.
+**Conclusion (#500).** The raw binding layer takes `Ptr` (the C ABI requires a
+raw pointer), and Rae callers pass `myList.data, myList.length` — so **`List`
+stays the idiomatic caller-side container with zero copy**. The ergonomic
+`List`-taking wrappers live in `gpu.rae`/`gpu3d.rae` (`uploadPalette`,
+`uploadMesh`, `uploadSkinnedMesh`, `updateMeshVerts`), each taking `view
+List(T)` and unpacking `.data`/`.length` at the boundary. **`view List(T)` is
+the span** the earlier draft proposed as `view [T]`: same zero-copy pointer +
+length, same `view`/`mod` read/write distinction, same "don't resize while
+borrowed" rule. A separate `view [T]` value-type would be cosmetic and could not
+enforce invalidation without a borrow checker Rae does not have. So #500's
+capability is present — no new language construct is needed.
 
 ## Context bootstrap & auto-linking (#501)
 
