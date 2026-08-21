@@ -532,11 +532,11 @@ func updateApp(app: mod App) {
   # controls. On a switch, snap the orbit camera behind the new character.
   if app.cam.rig.mode is CameraRigMode.character {
     var switched: Bool = false
-    if sdl3.isKeyPressed(key: keyPageDown) {
+    if sdl3.isKeyPressed(key: keyPageDown) or sdl3.isKeyPressed(key: keyNextChar) {
       rosterSwitchNext(roster: app.players)
       switched = true
     }
-    if sdl3.isKeyPressed(key: keyPageUp) {
+    if sdl3.isKeyPressed(key: keyPageUp) or sdl3.isKeyPressed(key: keyPrevChar) {
       rosterSwitchPrev(roster: app.players)
       switched = true
     }
@@ -544,6 +544,7 @@ func updateApp(app: mod App) {
       app.cam.rig.yaw = controlledHeading(app: app)
       snapCameraRigView(rig: app.cam.rig)
       app.persist.stateDirty = true
+      log("[players] now controlling character {app.players.controlledIndex} of {app.players.count}")
     }
   }
 
