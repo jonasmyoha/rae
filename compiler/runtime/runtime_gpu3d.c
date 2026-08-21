@@ -853,11 +853,15 @@ void rae_ext_gpu3d_meshUpdate(int64_t mesh, const float* verts, int64_t vertCoun
  *   [30..32] ambient ground rgb
  *   [33..35] clear color rgb
  */
-void rae_ext_gpu3d_begin(const float* frame, int64_t count){
-    if (!g_wgpu_dev || !g_g2d_off_view || !frame || count < 36) return;
+/* Frame prepare (#514): pack the per-frame uniform, advance the TAA
+ * jitter/history, and upload it. The render pass itself is now built in Rae
+ * (gpu3d.beginForward) over the WebGPU bindings; this returns 1 when the frame
+ * is ready to encode, 0 if the device/targets are not up yet. */
+int rae_g3d_frame_prepare(const float* frame, int64_t count){
+    if (!g_wgpu_dev || !g_g2d_off_view || !frame || count < 36) return 0;
     g3d_init_pipeline();
     g3d_ensure_targets();
-    if (!g3d_hdr_view || !g3d_depth_view || !g3d_normal_view || !g3d_velocity_view || !g3d_ambient_view) return;
+    if (!g3d_hdr_view || !g3d_depth_view || !g3d_normal_view || !g3d_velocity_view || !g3d_ambient_view) return 0;
     /* Halton offsets are in [0,1); recentre to [-0.5,0.5) pixels, then
      * convert to NDC (2/size) since the shader adds them in clip space. */
     if (g3d_taa_enabled && g3d_target_w > 0 && g3d_target_h > 0) {
@@ -902,37 +906,26 @@ void rae_ext_gpu3d_begin(const float* frame, int64_t count){
         }
     }
 
-    g3d_enc = wgpuDeviceCreateCommandEncoder(g_wgpu_dev, NULL);
-    WGPURenderPassColorAttachment ca[4]; memset(ca, 0, sizeof(ca));
-    ca[0].view = g3d_hdr_view;     /* linear HDR; tonemap writes the offscreen (#334) */
-    ca[0].depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
-    ca[0].loadOp = WGPULoadOp_Clear;
-    ca[0].storeOp = WGPUStoreOp_Store;
-    ca[0].clearValue.r = frame[33]; ca[0].clearValue.g = frame[34]; ca[0].clearValue.b = frame[35]; ca[0].clearValue.a = 1.0;
-    ca[1].view = g3d_normal_view;
-    ca[1].depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
-    ca[1].loadOp = WGPULoadOp_Clear;
-    ca[1].storeOp = WGPUStoreOp_Store;   /* sampled by SSAO/GI */
-    ca[2].view = g3d_velocity_view;
-    ca[2].depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
-    ca[2].loadOp = WGPULoadOp_Clear;     /* zero motion where nothing renders */
-    ca[2].storeOp = WGPUStoreOp_Store;   /* sampled by TAA */
-    ca[3].view = g3d_ambient_view;
-    ca[3].depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
-    ca[3].loadOp = WGPULoadOp_Clear;
-    ca[3].storeOp = WGPUStoreOp_Store;   /* sampled by the SSAO composite */
-    WGPURenderPassDepthStencilAttachment da; memset(&da, 0, sizeof(da));
-    da.view = g3d_depth_view;
-    da.depthLoadOp = WGPULoadOp_Clear;
-    da.depthStoreOp = WGPUStoreOp_Store; /* the point of #333: depth is sampleable */
-    da.depthClearValue = 1.0f;
-    WGPURenderPassDescriptor rp; memset(&rp, 0, sizeof(rp));
-    rp.colorAttachmentCount = 4;
-    rp.colorAttachments = ca;
-    rp.depthStencilAttachment = &da;
-    g3d_pass = wgpuCommandEncoderBeginRenderPass(g3d_enc, &rp);
-    wgpuRenderPassEncoderSetPipeline(g3d_pass, g3d_pipeline);
-    wgpuRenderPassEncoderSetBindGroup(g3d_pass, 0, g3d_bind, 0, NULL);
+    return 1;
+}
+
+/* Handle accessors + frame handoff for the Rae-side forward pass (#514).
+ * rae_g3d_* are platform-ABI accessors (ungated), mirroring rae_gb_* on the
+ * deferred path; the gated rae_ext_gpu3d_* set shrinks as passes move to Rae.
+ * The color-target views and the geometry pipeline/bind group are constructed
+ * in C (g3d_ensure_targets / g3d_init_pipeline); Rae reads them here to build
+ * the render pass over the WebGPU bindings, then hands the encoder + pass back
+ * with rae_g3d_set_frame so the still-C draw/end path encodes into them. */
+void* rae_g3d_hdr_view(void)      { return (void*)g3d_hdr_view; }
+void* rae_g3d_normal_view(void)   { return (void*)g3d_normal_view; }
+void* rae_g3d_velocity_view(void) { return (void*)g3d_velocity_view; }
+void* rae_g3d_ambient_view(void)  { return (void*)g3d_ambient_view; }
+void* rae_g3d_depth_view(void)    { return (void*)g3d_depth_view; }
+void* rae_g3d_pipeline(void)      { return (void*)g3d_pipeline; }
+void* rae_g3d_bind(void)          { return (void*)g3d_bind; }
+void  rae_g3d_set_frame(void* enc, void* pass){
+    g3d_enc  = (WGPUCommandEncoder)enc;
+    g3d_pass = (WGPURenderPassEncoder)pass;
 }
 
 /* Queue one mesh draw. model = 16 Floats column-major. Uniform data is
