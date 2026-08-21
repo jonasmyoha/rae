@@ -761,7 +761,7 @@ func shadowBegin(cascades: view Buffer(Float), count: Int, resolution: Int,
                  splits: view Buffer(Float), texelWorld: view Buffer(Float),
                  depthRange: view Buffer(Float)) extern("rae_sm_begin")
 func shadowDraw(mesh: Int, model: view Mat4) extern("rae_sm_queue_mesh")
-func shadowDrawSkinned(mesh: Int, model: view Mat4) extern("rae_sm_queue_skinned")
+func shadowDrawSkinned(mesh: Int, model: view Mat4, paletteBase: Int) extern("rae_sm_queue_skinned")
 func shadowMetaballs(packedBalls: view Buffer(Float), count: Int, smoothing: Float) extern("rae_sm_record_metaballs")
 func shadowDrawCount() extern("rae_sm_draw_count") ret Int
 func shadowShutdown() extern("rae_sm_shutdown")
@@ -781,11 +781,14 @@ func drawShadowCaster(mesh: view MeshHandle, model: view Mat4) pub {
   shadowDraw(mesh: mesh.id, model: model)
 }
 
-func drawShadowCasterSkinned(mesh: view MeshHandle, model: view Mat4) pub {
+# `paletteBase` is this caster's start offset into the shared skin palette buffer
+# (characterPaletteBase in gbuffer_instanced.rae) — the SAME base its G-buffer
+# instance uses — so its shadow shows its own pose (#547). 0 for a lone character.
+func drawShadowCasterSkinned(mesh: view MeshHandle, model: view Mat4, paletteBase: copy Int) pub {
   if not meshHandleIsValid(h: mesh) {
     ret
   }
-  shadowDrawSkinned(mesh: mesh.id, model: model)
+  shadowDrawSkinned(mesh: mesh.id, model: model, paletteBase: paletteBase)
 }
 
 func endShadowPass() pub {

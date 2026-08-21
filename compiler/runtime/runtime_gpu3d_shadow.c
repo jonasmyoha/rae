@@ -46,6 +46,12 @@ static WGPUBuffer    g3d_sm_cascade_ubuf[G3D_SHADOW_MAX_CASCADES];
 static WGPUBindGroup g3d_sm_bind[G3D_SHADOW_MAX_CASCADES];
 static WGPUBindGroup g3d_sm_bind_skin[G3D_SHADOW_MAX_CASCADES];
 static WGPUBuffer    g3d_sm_model_sbuf = NULL;
+/* Per-caster palette base (#547): the start offset into the shared skin palette
+ * buffer, in vec4 rows, so a crowd of characters casts each its OWN pose's
+ * shadow — matching the G-buffer's per-instance palette. Read as paletteBases[ii]
+ * by the skinned cascade shader; 0 for the hero and every non-skinned caster. */
+static uint32_t     g3d_sm_palette_base_cpu[G3D_SHADOW_MAX_DRAWS];
+static WGPUBuffer   g3d_sm_palette_base_sbuf = NULL;
 
 /* The shadow pass keeps its OWN draw list rather than sharing the scene
  * pass's: it runs first, so the scene list does not exist yet. */
@@ -78,10 +84,11 @@ static const char* G3D_SHADOW_SKIN_WGSL =
 "@group(0) @binding(0) var<uniform> S: SU;\n"
 "@group(0) @binding(1) var<storage, read> models: array<mat4x4<f32>>;\n"
 "@group(0) @binding(2) var<storage, read> palette: array<vec4<f32>>;\n"
-"fn jointMat(j: u32) -> mat4x4<f32> {\n"
-"  let r0 = palette[j * 3u + 0u];\n"
-"  let r1 = palette[j * 3u + 1u];\n"
-"  let r2 = palette[j * 3u + 2u];\n"
+"@group(0) @binding(3) var<storage, read> paletteBases: array<u32>;\n"
+"fn jointMat(j: u32, base: u32) -> mat4x4<f32> {\n"
+"  let r0 = palette[base + j * 3u + 0u];\n"
+"  let r1 = palette[base + j * 3u + 1u];\n"
+"  let r2 = palette[base + j * 3u + 2u];\n"
 "  return mat4x4<f32>(\n"
 "    vec4<f32>(r0.x, r1.x, r2.x, 0.0),\n"
 "    vec4<f32>(r0.y, r1.y, r2.y, 0.0),\n"
@@ -93,10 +100,11 @@ static const char* G3D_SHADOW_SKIN_WGSL =
 "      @location(0) p: vec3<f32>,\n"
 "      @location(3) jf: vec4<f32>, @location(4) w: vec4<f32>) -> @builtin(position) vec4<f32> {\n"
 "  let j = vec4<u32>(u32(jf.x), u32(jf.y), u32(jf.z), u32(jf.w));\n"
-"  var skin = jointMat(j.x) * w.x;\n"
-"  skin = skin + jointMat(j.y) * w.y;\n"
-"  skin = skin + jointMat(j.z) * w.z;\n"
-"  skin = skin + jointMat(j.w) * w.w;\n"
+"  let pbase = paletteBases[ii];\n"
+"  var skin = jointMat(j.x, pbase) * w.x;\n"
+"  skin = skin + jointMat(j.y, pbase) * w.y;\n"
+"  skin = skin + jointMat(j.z, pbase) * w.z;\n"
+"  skin = skin + jointMat(j.w, pbase) * w.w;\n"
 "  let sp = skin * vec4<f32>(p, 1.0);\n"
 "  return S.lightViewProj * (models[ii] * vec4<f32>(sp.xyz, 1.0));\n"
 "}\n";
@@ -415,6 +423,11 @@ static void g3d_shadow_init(void) {
     md.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
     g3d_sm_model_sbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &md);
 
+    WGPUBufferDescriptor pbd; memset(&pbd, 0, sizeof(pbd));
+    pbd.size = (uint64_t)G3D_SHADOW_MAX_DRAWS * sizeof(uint32_t);
+    pbd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
+    g3d_sm_palette_base_sbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &pbd);
+
     for (int i = 0; i < G3D_SHADOW_MAX_CASCADES; i++) {
         WGPUBufferDescriptor ud; memset(&ud, 0, sizeof(ud));
         ud.size = 64;   /* one mat4 */
@@ -449,16 +462,21 @@ static void g3d_shadow_ensure_binds(void) {
             g3d_sm_bind[i] = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bd);
             wgpuBindGroupLayoutRelease(bgl);
         }
-        if (!g3d_sm_bind_skin[i] && g3d_sm_pipeline_skin && g3d_skin_palette_sbuf) {
+        if (!g3d_sm_bind_skin[i] && g3d_sm_pipeline_skin && g3d_skin_palette_sbuf
+            && g3d_sm_palette_base_sbuf) {
             WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g3d_sm_pipeline_skin, 0);
-            WGPUBindGroupEntry e[3]; memset(e, 0, sizeof(e));
+            WGPUBindGroupEntry e[4]; memset(e, 0, sizeof(e));
             e[0].binding = 0; e[0].buffer = g3d_sm_cascade_ubuf[i]; e[0].size = 64;
             e[1].binding = 1; e[1].buffer = g3d_sm_model_sbuf;
             e[1].size = (uint64_t)G3D_SHADOW_MAX_DRAWS * 16 * sizeof(float);
+            /* Bind the FULL 64-palette buffer, not one palette, so per-caster
+             * paletteBases can index slots > 0 (#547). */
             e[2].binding = 2; e[2].buffer = g3d_skin_palette_sbuf;
-            e[2].size = (uint64_t)G3D_SKIN_MAX_JOINTS * 12 * sizeof(float);
+            e[2].size = (uint64_t)G3D_SKIN_MAX_JOINTS * 12 * G3D_SKIN_MAX_PALETTES * sizeof(float);
+            e[3].binding = 3; e[3].buffer = g3d_sm_palette_base_sbuf;
+            e[3].size = (uint64_t)G3D_SHADOW_MAX_DRAWS * sizeof(uint32_t);
             WGPUBindGroupDescriptor bd; memset(&bd, 0, sizeof(bd));
-            bd.layout = bgl; bd.entryCount = 3; bd.entries = e;
+            bd.layout = bgl; bd.entryCount = 4; bd.entries = e;
             g3d_sm_bind_skin[i] = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bd);
             wgpuBindGroupLayoutRelease(bgl);
         }
@@ -520,7 +538,7 @@ void rae_sm_begin(const float* cascades, int64_t count,
     g3d_sm_enabled = true;
 }
 
-static void g3d_shadow_queue(int64_t mesh, rae_Mat4* model, int skinned) {
+static void g3d_shadow_queue(int64_t mesh, rae_Mat4* model, int skinned, int64_t paletteBase) {
     if (!g3d_sm_enabled || !model) return;
     int slot = (int)mesh - 1;
     if (slot < 0) return;
@@ -529,15 +547,16 @@ static void g3d_shadow_queue(int64_t mesh, rae_Mat4* model, int skinned) {
     for (int i = 0; i < 16; i++) d[i] = model->m.v[i];
     g3d_sm_draw_mesh[g3d_sm_draw_count] = slot;
     g3d_sm_draw_skinned[g3d_sm_draw_count] = skinned;
+    g3d_sm_palette_base_cpu[g3d_sm_draw_count] = paletteBase < 0 ? 0u : (uint32_t)paletteBase;
     g3d_sm_draw_count++;
 }
 
 void rae_sm_queue_mesh(int64_t mesh, rae_Mat4* model) {
-    g3d_shadow_queue(mesh, model, 0);
+    g3d_shadow_queue(mesh, model, 0, 0);
 }
 
-void rae_sm_queue_skinned(int64_t mesh, rae_Mat4* model) {
-    g3d_shadow_queue(mesh, model, 1);
+void rae_sm_queue_skinned(int64_t mesh, rae_Mat4* model, int64_t paletteBase) {
+    g3d_shadow_queue(mesh, model, 1, paletteBase);
 }
 
 /* Rasterise every queued caster into every cascade.
@@ -552,9 +571,13 @@ void rae_sm_queue_skinned(int64_t mesh, rae_Mat4* model) {
  * raymarch (dense projection math), exposed via these accessors. */
 int64_t rae_sm_ready(void) { return (g3d_sm_enabled && g3d_sm_tex) ? 1 : 0; }
 void rae_sm_upload_models(void) {
-    if (g3d_sm_draw_count > 0)
+    if (g3d_sm_draw_count > 0) {
         wgpuQueueWriteBuffer(g_wgpu_queue, g3d_sm_model_sbuf, 0, g3d_sm_model_cpu,
                              (size_t)g3d_sm_draw_count * 16 * sizeof(float));
+        if (g3d_sm_palette_base_sbuf)
+            wgpuQueueWriteBuffer(g_wgpu_queue, g3d_sm_palette_base_sbuf, 0, g3d_sm_palette_base_cpu,
+                                 (size_t)g3d_sm_draw_count * sizeof(uint32_t));
+    }
     g3d_shadow_ensure_binds();
 }
 int64_t rae_sm_cascade_count(void) { return (int64_t)g3d_sm_cascade_count; }
@@ -696,6 +719,7 @@ void rae_sm_shutdown(void) {
     if (g3d_sm_pipeline) { wgpuRenderPipelineRelease(g3d_sm_pipeline); g3d_sm_pipeline = NULL; }
     if (g3d_sm_pipeline_skin) { wgpuRenderPipelineRelease(g3d_sm_pipeline_skin); g3d_sm_pipeline_skin = NULL; }
     if (g3d_sm_model_sbuf) { wgpuBufferRelease(g3d_sm_model_sbuf); g3d_sm_model_sbuf = NULL; }
+    if (g3d_sm_palette_base_sbuf) { wgpuBufferRelease(g3d_sm_palette_base_sbuf); g3d_sm_palette_base_sbuf = NULL; }
     for (int i = 0; i < G3D_SHADOW_MAX_CASCADES; i++) {
         if (g3d_sm_cascade_ubuf[i]) { wgpuBufferRelease(g3d_sm_cascade_ubuf[i]); g3d_sm_cascade_ubuf[i] = NULL; }
     }

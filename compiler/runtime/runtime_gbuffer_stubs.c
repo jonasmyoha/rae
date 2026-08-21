@@ -189,7 +189,7 @@ void rae_sm_begin(const float* cascades, int64_t count, int64_t resolution,
     (void)depthRange;
 }
 void rae_sm_queue_mesh(int64_t mesh, rae_Mat4* model){ (void)mesh; (void)model; }
-void rae_sm_queue_skinned(int64_t mesh, rae_Mat4* model){ (void)mesh; (void)model; }
+void rae_sm_queue_skinned(int64_t mesh, rae_Mat4* model, int64_t paletteBase){ (void)mesh; (void)model; (void)paletteBase; }
 void rae_sm_record_metaballs(const float* packedBalls, int64_t count, float smoothing){
     (void)packedBalls; (void)count; (void)smoothing;
 }
