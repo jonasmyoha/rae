@@ -243,23 +243,29 @@ static void g3d_sdf_init_pipeline(void) {
     wgpuBindGroupLayoutRelease(bgl);
 }
 
-void rae_ext_gpu3d_drawMetaballs(const float* packedBalls, int64_t count,
-                                 const float* packedColors, float smoothing,
-                                 float metallic, float roughness,
-                                 float emR, float emG, float emB){
-    if (!g3d_pass || !packedBalls || !packedColors || count <= 0) return;
+/* CPU bookkeeping + uploads for one metaball cluster (#514): ensure the SDF
+ * pipeline, take a per-frame group slot, pack the balls/colors/params and
+ * upload them to that slot's buffers. Returns the slot for the Rae side to
+ * encode the SDF fullscreen draw, or -1 to skip. The SDF pipeline and per-group
+ * bind groups stay in C (built from WGSL); Rae reads them via the accessors
+ * below and restores the geometry pipeline/bind after the SDF draw. */
+int rae_g3d_push_metaball_cluster(const float* packedBalls, int64_t count,
+                                  const float* packedColors, float smoothing,
+                                  float metallic, float roughness,
+                                  float emR, float emG, float emB){
+    if (!packedBalls || !packedColors || count <= 0) return -1;
     g3d_sdf_init_pipeline();
-    if (!g3d_sdf_pipeline) return;
+    if (!g3d_sdf_pipeline) return -1;
     if (g3d_sdf_group >= G3D_MAX_SDF_GROUPS) {
         if (!g3d_sdf_group_overflow) {
             fprintf(stderr, "[gpu3d] ERROR: more than %d metaball clusters in one frame; "
                             "discarding the rest\n", G3D_MAX_SDF_GROUPS);
             g3d_sdf_group_overflow = true;
         }
-        return;
+        return -1;
     }
     const int slot = g3d_sdf_group++;
-    if (!g3d_sdf_bind[slot]) return;
+    if (!g3d_sdf_bind[slot]) return -1;
     if (count > G3D_MAX_SDF_BALLS) count = G3D_MAX_SDF_BALLS;
     if (getenv("RAE_GPU3D_SDF_TEST_LOG")) {
         static int logged = 0;
@@ -293,11 +299,15 @@ void rae_ext_gpu3d_drawMetaballs(const float* packedBalls, int64_t count,
     wgpuQueueWriteBuffer(g_wgpu_queue, g3d_sdf_color_sbuf[slot], 0, colors,
                          (size_t)count * 4u * sizeof(float));
     wgpuQueueWriteBuffer(g_wgpu_queue, g3d_sdf_param_ubuf[slot], 0, &params, sizeof(params));
-    wgpuRenderPassEncoderSetPipeline(g3d_pass, g3d_sdf_pipeline);
-    wgpuRenderPassEncoderSetBindGroup(g3d_pass, 0, g3d_sdf_bind[slot], 0, NULL);
-    wgpuRenderPassEncoderDraw(g3d_pass, 3, 1, 0, 0);
-    wgpuRenderPassEncoderSetPipeline(g3d_pass, g3d_pipeline);
-    wgpuRenderPassEncoderSetBindGroup(g3d_pass, 0, g3d_bind, 0, NULL);
+    return slot;
+}
+
+/* SDF pipeline + per-group bind-group accessors (ungated), for the Rae-side
+ * metaball encode. */
+void* rae_g3d_sdf_pipeline(void) { return (void*)g3d_sdf_pipeline; }
+void* rae_g3d_sdf_bind(int64_t slot){
+    if (slot < 0 || slot >= G3D_MAX_SDF_GROUPS) return (void*)0;
+    return (void*)g3d_sdf_bind[slot];
 }
 
 static void g3d_sdf_shutdown(void) {
