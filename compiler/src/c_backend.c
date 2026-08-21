@@ -1339,6 +1339,21 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
   fprintf(out, "}\n\n"); return true;
 }
 
+// True if an earlier decl in all_decls already defines a non-generic type with
+// this name. Two same-named type decls (e.g. a prelude type that a user file
+// also defines) mangle to one C symbol, so their auto-derived toJson/fromJson/
+// to_str would emit twice -> C "redefinition". Emitting the derived methods
+// only for the first occurrence keeps the generated C valid instead of a hard
+// compile failure with a .c line. (#136)
+static bool earlier_same_named_type(CompilerContext* ctx, size_t idx, Str name) {
+    for (size_t j = 0; j < idx; j++) {
+        const AstDecl* e = ctx->all_decls[j];
+        if (e->kind == AST_DECL_TYPE && !e->as.type_decl.generic_params
+            && str_eq(e->as.type_decl.name, name)) return true;
+    }
+    return false;
+}
+
 bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const char* out_path, struct VmRegistry* registry, bool* out_uses_raylib) {
   (void)out_uses_raylib;
   if (!module) return false;
@@ -1427,6 +1442,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
       if (has_property(d->as.type_decl.properties, "c_struct")) continue;
       const AstTypeDecl* td = &d->as.type_decl;
+      if (earlier_same_named_type(ctx, i, td->name)) continue;
       const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
 
       // toJson: rae_String rae_toJson_TYPE_(TYPE* this)
@@ -1515,6 +1531,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
       if (has_property(d->as.type_decl.properties, "c_struct")) continue;
       const AstTypeDecl* td = &d->as.type_decl;
+      if (earlier_same_named_type(ctx, i, td->name)) continue;
       const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
       fprintf(out, "RAE_UNUSED static rae_String rae_to_str_%s_(const %s* this);\n", mangled, mangled);
   }
@@ -1524,6 +1541,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
       if (has_property(d->as.type_decl.properties, "c_struct")) continue;
       const AstTypeDecl* td = &d->as.type_decl;
+      if (earlier_same_named_type(ctx, i, td->name)) continue;
       const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
 
       fprintf(out, "RAE_UNUSED static rae_String rae_to_str_%s_(const %s* this) {\n", mangled, mangled);
