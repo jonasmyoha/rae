@@ -1,0 +1,20 @@
+# A List of Task handles: Task(T) lowers to the opaque RaeTask*, and the List
+# specialization must mangle Task consistently (rae_Task_) across the struct
+# typedef, the local var-decl and the deep-copy helper, and treat the element
+# as a pointer. This used to fail to compile (#238).
+import core
+
+func double(n: view Int) ret Int { ret n * 2 }
+
+func main() {
+  var tasks: List(Task(Int)) = {}
+  tasks.add(item: spawn double(n: 10))
+  tasks.add(item: spawn double(n: 21))
+  log(tasks.length())
+  if let a: Task(Int) = tasks.at(index: 0) {
+    log(a.get())
+  }
+  if let b: Task(Int) = tasks.at(index: 1) {
+    log(b.get())
+  }
+}
