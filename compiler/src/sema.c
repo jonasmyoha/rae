@@ -667,6 +667,22 @@ AstTypeRef* infer_generic_args(CompilerContext* ctx, const AstFuncDecl* func, co
     return inferred_list;
 }
 
+// Is this call argument a bare TYPE name (a primitive like `Float`, or a
+// user/enum type), i.e. a positional type argument filling a `T: type`
+// generic parameter rather than a value? Used to tell `createList(Float)`
+// (type arg only, value param `cap` missing) from `createList(Float, cap: 0)`.
+static bool sema_arg_is_type_name(SymbolTable* symbols, const AstExpr* v) {
+    if (!v || v->kind != AST_EXPR_IDENT) return false;
+    Str n = v->as.ident;
+    static const char* const prims[] = {
+        "Int","Int64","Int32","Int16","Int8","UInt64","UInt32","UInt16","UInt8",
+        "Float","Float32","Float64","Bool","String","Char","Char32","Any","Void","Ptr"};
+    for (size_t i = 0; i < sizeof(prims)/sizeof(prims[0]); i++)
+        if (str_eq_cstr(n, prims[i])) return true;
+    Symbol* s = symbol_table_lookup(symbols, n);
+    return s && s->decl && (s->decl->kind == AST_DECL_TYPE || s->decl->kind == AST_DECL_ENUM);
+}
+
 static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, Str name, AstCallArg* args, AstTypeRef* explicit_generic_args, size_t line, size_t column) {
     size_t arg_count = 0;
     for (AstCallArg* a = args; a; a = a->next) arg_count++;
@@ -682,6 +698,13 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
     // wrong numeric type (#410).
     AstDecl* numeric_mismatch_only = NULL;
     int nongeneric_arity_matches = 0;
+    // A generic call that fills a value-parameter slot with a positional TYPE
+    // argument and so leaves value parameters unprovided (e.g. `createList(Float)`
+    // — `Float` is the type arg, `cap` is missing). Remember it so we can report
+    // a clean "missing argument" error instead of letting the backend emit a
+    // bare, undeclared `rae_<name>()` that only fails in gcc (#415).
+    bool generic_value_arity_issue = false;
+    size_t generic_expected_values = 0, generic_got_values = 0;
 
     for (Symbol* curr = symbols->head; curr; curr = curr->next) {
         if (!str_eq(curr->name, name)) continue;
@@ -695,6 +718,20 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
         if (param_count != arg_count) continue;
 
         if (fd->generic_params) {
+            // This generic function has value parameters; make sure the call
+            // actually provides value arguments for them and didn't spend a
+            // slot on a positional type argument (#415).
+            size_t value_args = 0;
+            for (AstCallArg* va = args; va; va = va->next)
+                if (!sema_arg_is_type_name(symbols, va->value)) value_args++;
+            if (param_count > 0 && value_args < param_count) {
+                if (!generic_value_arity_issue) {
+                    generic_value_arity_issue = true;
+                    generic_expected_values = param_count;
+                    generic_got_values = value_args;
+                }
+                continue;
+            }
             AstTypeRef* inferred = explicit_generic_args;
             if (!inferred) {
                 // Try to infer generic args from param/arg pairs
@@ -794,6 +831,19 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
             "'%.*s' is in package '%s', which is not open here; use `open %s` for a bare call, or %s.%.*s(...)",
             (int)name.len, name.data, ineligible->module_name,
             ineligible->module_name, ineligible->module_name, (int)name.len, name.data);
+        const char* err_file = s_current_decl_origin ? s_current_decl_origin : module->file_path;
+        diag_error(err_file, (int)line, (int)column, buf);
+        if (module) module->had_error = true;
+    } else if (generic_value_arity_issue) {
+        // The only same-name candidate is a generic function whose value
+        // parameters weren't all supplied — a positional type argument filled a
+        // value slot (#415: `createList(Float)` gives the type but omits `cap`).
+        char buf[256];
+        snprintf(buf, sizeof(buf),
+            "call to '%.*s' is missing value arguments: it needs %zu after its type argument%s, but %zu %s given",
+            (int)name.len, name.data, generic_expected_values,
+            generic_expected_values == 1 ? "" : "s",
+            generic_got_values, generic_got_values == 1 ? "was" : "were");
         const char* err_file = s_current_decl_origin ? s_current_decl_origin : module->file_path;
         diag_error(err_file, (int)line, (int)column, buf);
         if (module) module->had_error = true;

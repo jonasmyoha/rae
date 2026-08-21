@@ -1,0 +1,11 @@
+# `createList(T: type, cap: view Int)` needs a capacity. `createList(Float)`
+# supplies only the type argument and omits `cap`, so it used to slip through
+# sema and emit a bare, undeclared `rae_createList()` that failed only in gcc.
+# Sema now reports the missing value argument at the .rae site (#415).
+import core
+
+func main() {
+  var xs: List(Float) = createList(Float)
+  xs.add(item: 1.0)
+  log(xs.length())
+}
