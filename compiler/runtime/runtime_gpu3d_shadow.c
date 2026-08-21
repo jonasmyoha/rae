@@ -262,7 +262,7 @@ static void g3d_sm_sdf_init(void) {
 
 /* Queue a metaball cluster as a caster. Called between shadowBegin and
  * shadowEnd, like the mesh casters. */
-void rae_ext_gpu3d_shadowMetaballs(const float* packedBalls, int64_t count, float smoothing) {
+void rae_sm_record_metaballs(const float* packedBalls, int64_t count, float smoothing) {
     if (!g3d_sm_enabled || !packedBalls || count < 1) return;
     if (g3d_sm_sdf_clusters >= G3D_SM_SDF_MAX_CLUSTERS) return;
     if (count > G3D_SM_SDF_MAX_BALLS) count = G3D_SM_SDF_MAX_BALLS;
@@ -470,7 +470,7 @@ static void g3d_shadow_ensure_binds(void) {
 /* Start collecting casters. `cascades` is count*16 floats of light
  * view-projection (fitted in Rae by lib/shadow3d.rae), followed by
  * `count` split distances and `count` texel world sizes. */
-void rae_ext_gpu3d_shadowBegin(const float* cascades, int64_t count,
+void rae_sm_begin(const float* cascades, int64_t count,
                                int64_t resolution, const float* splits,
                                const float* texelWorld, const float* depthRange) {
     g3d_sm_enabled = false;
@@ -532,11 +532,11 @@ static void g3d_shadow_queue(int64_t mesh, rae_Mat4* model, int skinned) {
     g3d_sm_draw_count++;
 }
 
-void rae_ext_gpu3d_shadowDraw(int64_t mesh, rae_Mat4* model) {
+void rae_sm_queue_mesh(int64_t mesh, rae_Mat4* model) {
     g3d_shadow_queue(mesh, model, 0);
 }
 
-void rae_ext_gpu3d_shadowDrawSkinned(int64_t mesh, rae_Mat4* model) {
+void rae_sm_queue_skinned(int64_t mesh, rae_Mat4* model) {
     g3d_shadow_queue(mesh, model, 1);
 }
 
@@ -688,9 +688,9 @@ void rae_sm_draw_metaballs(int64_t c_arg, void* passptr) {
         }
 }
 
-int64_t rae_ext_gpu3d_shadowDrawCount(void) { return (int64_t)g3d_sm_draw_count; }
+/* draw count is exposed via rae_sm_draw_count (#514) — no separate symbol. */
 
-void rae_ext_gpu3d_shadowShutdown(void) {
+void rae_sm_shutdown(void) {
     g3d_shadow_release_targets();
     if (g3d_sm_sampler) { wgpuSamplerRelease(g3d_sm_sampler); g3d_sm_sampler = NULL; }
     if (g3d_sm_pipeline) { wgpuRenderPipelineRelease(g3d_sm_pipeline); g3d_sm_pipeline = NULL; }

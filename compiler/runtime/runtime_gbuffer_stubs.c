@@ -182,18 +182,18 @@ int64_t rae_ext_gbuffer_pyramidMips(void) { return 0; }
 void rae_ext_gbuffer_deferredShutdown(void) {}
 
 /* Shadows (#382). Stubbed for builds without the GPU backend. */
-void rae_ext_gpu3d_shadowBegin(const float* cascades, int64_t count, int64_t resolution,
+void rae_sm_begin(const float* cascades, int64_t count, int64_t resolution,
                                const float* splits, const float* texelWorld,
                                const float* depthRange){
     (void)cascades; (void)count; (void)resolution; (void)splits; (void)texelWorld;
     (void)depthRange;
 }
-void rae_ext_gpu3d_shadowDraw(int64_t mesh, rae_Mat4* model){ (void)mesh; (void)model; }
-void rae_ext_gpu3d_shadowDrawSkinned(int64_t mesh, rae_Mat4* model){ (void)mesh; (void)model; }
-void rae_ext_gpu3d_shadowMetaballs(const float* packedBalls, int64_t count, float smoothing){
+void rae_sm_queue_mesh(int64_t mesh, rae_Mat4* model){ (void)mesh; (void)model; }
+void rae_sm_queue_skinned(int64_t mesh, rae_Mat4* model){ (void)mesh; (void)model; }
+void rae_sm_record_metaballs(const float* packedBalls, int64_t count, float smoothing){
     (void)packedBalls; (void)count; (void)smoothing;
 }
-int64_t rae_ext_gpu3d_shadowDrawCount(void) { return 0; }
+/* draw count exposed via rae_sm_draw_count (#514). */
 /* Shadow cascade render moved to Rae (#504); accessors no-op without a GPU. */
 int64_t rae_sm_ready(void)               { return 0; }
 void rae_sm_upload_models(void)          {}
@@ -207,7 +207,7 @@ void* rae_sm_caster_vbuf(int64_t i)      { (void)i; return (void*)0; }
 void* rae_sm_caster_ibuf(int64_t i)      { (void)i; return (void*)0; }
 int64_t rae_sm_caster_icount(int64_t i)  { (void)i; return 0; }
 void rae_sm_draw_metaballs(int64_t c, void* passptr) { (void)c; (void)passptr; }
-void rae_ext_gpu3d_shadowShutdown(void) {}
+void rae_sm_shutdown(void) {}
 
 /* Skinning (#374). Stubbed for builds without the GPU backend. */
 int64_t rae_ext_gpu3d_skinnedMeshCreate(const float* verts, int64_t vertCount,
