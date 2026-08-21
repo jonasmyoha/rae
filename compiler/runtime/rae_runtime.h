@@ -983,6 +983,9 @@ int64_t rae_g2d_frame_active(void);
 void rae_g2d_present_and_cleanup(void);
 void rae_g2d_tick(void);
 void rae_ext_gpu2d_flush(void);
+/* Procedural texture registration (#539): upload RGBA pixels generated in Rae. */
+int64_t rae_ext_gpu2d_registerImageRgba(const int64_t* pixels, int64_t w, int64_t h);
+void rae_ext_gpu2d_registerImageKeyHandle(rae_String key, int64_t handle);
 void* rae_gb_view_a(void);
 void* rae_gb_view_b(void);
 void* rae_gb_view_c(void);

@@ -11,6 +11,8 @@ void rae_ext_gpu2d_waitEvents(float timeoutSec){ (void)timeoutSec; }
 int64_t rae_ext_gpu2d_loadImage(rae_String path) { (void)path; return 0; }
 int64_t rae_ext_gpu2d_decodeImageProbe(rae_String path) { (void)path; return 0; }
 int64_t rae_ext_gpu2d_loadImageKey(rae_String key, rae_String path) { (void)key; (void)path; return 0; }
+int64_t rae_ext_gpu2d_registerImageRgba(const int64_t* pixels, int64_t w, int64_t h) { (void)pixels; (void)w; (void)h; return 0; }
+void rae_ext_gpu2d_registerImageKeyHandle(rae_String key, int64_t handle) { (void)key; (void)handle; }
 rae_Bool rae_ext_gpu2d_hasImageKey(rae_String key) { (void)key; return 0; }
 void rae_ext_gpu2d_drawImageKey(rae_String key, float x, float y, float w, float h, float radius, int64_t tint){ (void)key; (void)x; (void)y; (void)w; (void)h; (void)radius; (void)tint; }
 void rae_ext_gpu2d_drawImageKeyScaled(rae_String key, float x, float y, float w, float h, float radius, int64_t tint, int64_t scaleMode){ (void)key; (void)x; (void)y; (void)w; (void)h; (void)radius; (void)tint; (void)scaleMode; }

@@ -291,6 +291,43 @@ int64_t rae_ext_gpu2d_loadImage(rae_String path) {
     return (int64_t)(++g_g2d_img_n);   /* 1-based */
 }
 
+/* Register an image from RGBA pixels generated in Rae (#539 procedural textures)
+ * — the same texture upload as loadImage, but the pixels come straight from a
+ * Rae List(Int) instead of a decoded file, so no image files are involved. Each
+ * int is one packed pixel r | g<<8 | b<<16 | a<<24 (byte order R,G,B,A, matching
+ * RGBA8Unorm). Returns a 1-based handle, 0 on failure. */
+int64_t rae_ext_gpu2d_registerImageRgba(const int64_t* pixels, int64_t w, int64_t h) {
+    if (!pixels || !g_wgpu_dev || w <= 0 || h <= 0 || g_g2d_img_n >= RAE_G2D_MAX_IMG) return 0;
+    size_t n = (size_t)w * (size_t)h;
+    unsigned char* rgba = (unsigned char*)malloc(n * 4);
+    if (!rgba) return 0;
+    for (size_t i = 0; i < n; i++) {
+        uint32_t p = (uint32_t)pixels[i];
+        rgba[i * 4 + 0] = (unsigned char)(p & 0xff);
+        rgba[i * 4 + 1] = (unsigned char)((p >> 8) & 0xff);
+        rgba[i * 4 + 2] = (unsigned char)((p >> 16) & 0xff);
+        rgba[i * 4 + 3] = (unsigned char)((p >> 24) & 0xff);
+    }
+    WGPUTextureDescriptor td; memset(&td, 0, sizeof(td));
+    td.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
+    td.dimension = WGPUTextureDimension_2D;
+    td.size.width = (uint32_t)w; td.size.height = (uint32_t)h; td.size.depthOrArrayLayers = 1;
+    td.format = WGPUTextureFormat_RGBA8Unorm; td.mipLevelCount = 1; td.sampleCount = 1;
+    WGPUTexture tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
+    WGPUTexelCopyTextureInfo dst; memset(&dst, 0, sizeof(dst));
+    dst.texture = tex; dst.aspect = WGPUTextureAspect_All;
+    WGPUTexelCopyBufferLayout layout; memset(&layout, 0, sizeof(layout));
+    layout.bytesPerRow = (uint32_t)w * 4; layout.rowsPerImage = (uint32_t)h;
+    WGPUExtent3D ext; ext.width = (uint32_t)w; ext.height = (uint32_t)h; ext.depthOrArrayLayers = 1;
+    wgpuQueueWriteTexture(g_wgpu_queue, &dst, rgba, n * 4, &layout, &ext);
+    free(rgba);
+    int i = g_g2d_img_n;
+    g_g2d_img_tex[i] = tex;
+    g_g2d_img_view[i] = wgpuTextureCreateView(tex, NULL);
+    g_g2d_img_w[i] = (int)w; g_g2d_img_h[i] = (int)h;
+    return (int64_t)(++g_g2d_img_n);
+}
+
 /* Name->handle registry, so a renderer can resolve a Sprite.textureKey to an
  * uploaded image without a Rae-side map (module-level heap globals miscompile).
  * The gpu2d UI backend loads album covers / icons by key and draws by key. */
@@ -298,6 +335,21 @@ int64_t rae_ext_gpu2d_loadImage(rae_String path) {
 static char g_g2d_img_key[RAE_G2D_MAX_IMG_KEYS][96];
 static int  g_g2d_img_key_handle[RAE_G2D_MAX_IMG_KEYS];
 static int  g_g2d_img_key_n = 0;
+
+/* Register an existing handle under a key (for the RGBA path above, which does
+ * not know about the key registry defined below). */
+void rae_ext_gpu2d_registerImageKeyHandle(rae_String key, int64_t handle) {
+    if (!key.data || handle <= 0) return;
+    int slot = -1;
+    for (int i = 0; i < g_g2d_img_key_n; i++)
+        if (strcmp(g_g2d_img_key[i], (const char*)key.data) == 0) { slot = i; break; }
+    if (slot < 0 && g_g2d_img_key_n < RAE_G2D_MAX_IMG_KEYS) slot = g_g2d_img_key_n++;
+    if (slot >= 0) {
+        strncpy(g_g2d_img_key[slot], (const char*)key.data, 95);
+        g_g2d_img_key[slot][95] = '\0';
+        g_g2d_img_key_handle[slot] = (int)handle;
+    }
+}
 
 void rae_ext_gpu2d_drawImage(float x, float y, float w, float h, float radius, int64_t handle, int64_t tint);  /* defined below */
 
