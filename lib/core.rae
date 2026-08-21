@@ -227,6 +227,42 @@ func clear(T: type, this: mod List(T)) {
   this.length = 0
 }
 
+# Drop the last element (no return). Use pop() when you need the value; this is
+# for discarding it — one buffer drop, no shift. A no-op on an empty list.
+func removeLast(T: type, this: mod List(T)) {
+  if this.length is 0 {
+    ret
+  }
+  rae_ext_rae_buf_drop_at(buf: this.data, index: this.length - 1)
+  this.length = this.length - 1
+}
+
+# Drop every element from index `len` to the end, keeping the first `len`. A
+# `len` at or past the current length is a no-op; a negative `len` empties the
+# list. Cheaper than repeated removeLast() and drops each discarded element.
+func truncate(T: type, this: mod List(T), len: view Int) {
+  var target: Int = len
+  if target < 0 {
+    target = 0
+  }
+  if target >= this.length {
+    ret
+  }
+  var i: Int = target
+  loop i < this.length {
+    rae_ext_rae_buf_drop_at(buf: this.data, index: i)
+    i = i + 1
+  }
+  this.length = target
+}
+
+# Ordered remove at `index`: drop the element there and shift the tail left.
+# A named alias of remove(index:) for symmetry with removeLast(); out-of-range
+# is a no-op.
+func removeAt(T: type, this: mod List(T), index: view Int) {
+  this.remove(index: index)
+}
+
 func length(T: type, this: view List(T)) ret Int {
   ret this.length
 }
