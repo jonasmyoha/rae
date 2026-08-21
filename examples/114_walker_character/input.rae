@@ -1,0 +1,114 @@
+# Input system for the walker example (#545).
+#
+# inputUpdate turns devices into an INTENT rather than moving the character
+# directly: the touch stick when active, else WASD/arrows (+ shift = walk). This
+# is the same input the controller consumed inline before (updateWalkerMovement /
+# updateThirdPersonController), just centralised — which is what makes multiplayer
+# and input-switching cheap: a remote player's intent can arrive from net.rae
+# instead of a device, and characterUpdate applies whichever intent it is given.
+#
+# InputState (the moveStick + UI input + intent bundle in the plan) is a later
+# refinement; today the intent is a per-frame value threaded through updateApp,
+# and the input/UI devices still live in app.rae's InputUi. Example-114 files are
+# siblings that merge into one module. import block is app.rae's + sdl3.
+
+#   physics.rae (fixed-step seam) · net.rae (multiplayer seam) · state.rae
+#   (hot-reload + window persistence).
+# app.rae keeps the App / state types, createApp, the loop, updateApp, frameBegin.
+# Still to come: the input-intent split (#545) and turning the single character
+# into a multiplayer-ready roster (#546/#547).
+import core
+import math
+import profile
+import gpu2d
+import sdf_text
+import vec3
+import gltf
+import gltf_skin
+import png
+import sys
+import app3d/camera_rig
+import app3d/render_scale
+import app3d/character_controller
+import app3d/ui_shell
+import app3d/control_panel
+import app3d/camera_bar
+import renderer_deferred
+import sky
+import gbuffer
+import gbuffer_instanced
+open gbuffer_instanced
+import grass_compute
+open grass_compute
+import grass_config
+import shadow3d
+import app3d/playback
+import app3d/slider
+import app3d/settings_dialog
+import sky_hosek
+import hot_reload
+import ui/log_overlay
+import ui/window_geometry
+import ui/scroll_panel
+import ui/event_loop
+import ui/debug_overlay
+import ui/virtual_joystick
+import ui/ecs
+import ui/input_gpu2d
+import ui/render_gpu2d
+open scene3d
+open gpu3d
+open renderer_deferred
+open sky
+open gbuffer
+open rendergraph
+open math3d
+open mesh3d
+open gltf
+open gltf_skin
+open sdf_text
+open png
+open app3d/camera_rig
+open app3d/character_controller
+open app3d/settings_dialog
+open sky_hosek
+open app3d/ui_shell
+open app3d/control_panel
+open app3d/camera_bar
+open shadow3d
+open app3d/playback
+open hot_reload
+open ui/log_overlay
+open ui/window_geometry
+open ui/scroll_panel
+open ui/event_loop
+open ui/debug_overlay
+import sdl3
+
+# A frame's movement intent. moveX/moveY are analog in [-1, 1] (right+/forward+);
+# walking = the shift-to-walk modifier the controller expects (default is run);
+# actions is a reserved bitset for discrete button intents (unused today).
+type InputIntent {
+  moveX: Float
+  moveY: Float
+  walking: Bool
+  actions: Int
+}
+
+func inputUpdate(moveStick: view VirtualJoystick, joyActive: view Bool,
+                 allowKeys: view Bool) ret InputIntent {
+  if joyActive {
+    ret InputIntent { moveX: moveStick.valueX, moveY: moveStick.valueY, walking: false, actions: 0 }
+  }
+  var moveX: Float = 0.0
+  var moveY: Float = 0.0
+  var walking: Bool = false
+  if allowKeys {
+    if sdl3.isKeyDown(key: characterKeyD) or sdl3.isKeyDown(key: characterKeyRight) { moveX = moveX + 1.0 }
+    if sdl3.isKeyDown(key: characterKeyA) or sdl3.isKeyDown(key: characterKeyLeft) { moveX = moveX - 1.0 }
+    if sdl3.isKeyDown(key: characterKeyW) or sdl3.isKeyDown(key: characterKeyUp) { moveY = moveY + 1.0 }
+    if sdl3.isKeyDown(key: characterKeyS) or sdl3.isKeyDown(key: characterKeyDown) { moveY = moveY - 1.0 }
+    walking = sdl3.isKeyDown(key: characterKeyLeftShift)
+  }
+  ret InputIntent { moveX: moveX, moveY: moveY, walking: walking, actions: 0 }
+}
