@@ -1,0 +1,165 @@
+# procgen/tree — low-poly stylized tree meshes (#541), generated in Rae.
+#
+# A tapered trunk + recursive branches (bounded depth/count, seeded) + a low-poly
+# faceted canopy (a small cluster of displaced icosphere "blobs" at the branch
+# tips and the crown). Trunk and canopy are returned as SEPARATE meshes so each
+# takes its own material (bark vs foliage) — MeshData carries no per-vertex
+# colour. Deterministic from `seed`; branchDepth/trunk height/taper/canopy size
+# are the LOD + shape knobs. Z-up: the trunk grows along +Z.
+import core
+import math
+import vec3
+import noise
+import mesh3d
+open vec3
+open mesh3d
+open noise
+
+type TreeMesh {
+  trunk: MeshData
+  canopy: MeshData
+}
+
+# A stable basis perpendicular to `dir` (unit): returns u; w = dir x u.
+func perpBasis(dir: view Vec3) ret Vec3 {
+  var reference: Vec3 = create(x: 0.0, y: 0.0, z: 1.0)
+  if math.abs(x: dir.z) > 0.9 { reference = create(x: 1.0, y: 0.0, z: 0.0) }
+  ret vnorm(a: vcross(a: reference, b: dir))
+}
+
+# A flat-shaded tapered cylinder from `a` (radius ra) to `b` (radius rb), with
+# `sides` sides, appended to verts/idx. No caps (hidden inside branches/canopy).
+func addTaperedCylinder(verts: mod List(Float), idx: mod List(Int),
+                        a: view Vec3, b: view Vec3, ra: view Float, rb: view Float, sides: view Int) {
+  let axis: Vec3 = vnorm(a: vsub(a: b, b: a))
+  let u: Vec3 = perpBasis(dir: axis)
+  let w: Vec3 = vnorm(a: vcross(a: axis, b: u))
+  let twoPi: Float = 6.283185307179586
+  var s: Int = 0
+  loop s < sides {
+    let t0: Float = s.toFloat() / sides.toFloat() * twoPi
+    let t1: Float = (s + 1).toFloat() / sides.toFloat() * twoPi
+    let d0: Vec3 = vadd(a: vscale(a: u, s: math.cos(x: t0)), b: vscale(a: w, s: math.sin(x: t0)))
+    let d1: Vec3 = vadd(a: vscale(a: u, s: math.cos(x: t1)), b: vscale(a: w, s: math.sin(x: t1)))
+    let a0: Vec3 = vadd(a: a, b: vscale(a: d0, s: ra))
+    let a1: Vec3 = vadd(a: a, b: vscale(a: d1, s: ra))
+    let b0: Vec3 = vadd(a: b, b: vscale(a: d0, s: rb))
+    let b1: Vec3 = vadd(a: b, b: vscale(a: d1, s: rb))
+    # Two triangles (a0,b0,b1) and (a0,b1,a1), each flat-shaded.
+    treeTri(verts: verts, idx: idx, p0: a0, p1: b0, p2: b1)
+    treeTri(verts: verts, idx: idx, p0: a0, p1: b1, p2: a1)
+    s = s + 1
+  }
+}
+
+# Emit one flat-shaded triangle (its own face normal).
+func treeTri(verts: mod List(Float), idx: mod List(Int), p0: view Vec3, p1: view Vec3, p2: view Vec3) {
+  let fn: Vec3 = vnorm(a: vcross(a: vsub(a: p1, b: p0), b: vsub(a: p2, b: p0)))
+  let base: Int = verts.length / 8
+  pushVert(verts: verts, px: p0.x, py: p0.y, pz: p0.z, nx: fn.x, ny: fn.y, nz: fn.z, u: 0.0, v: 0.0)
+  pushVert(verts: verts, px: p1.x, py: p1.y, pz: p1.z, nx: fn.x, ny: fn.y, nz: fn.z, u: 1.0, v: 0.0)
+  pushVert(verts: verts, px: p2.x, py: p2.y, pz: p2.z, nx: fn.x, ny: fn.y, nz: fn.z, u: 0.0, v: 1.0)
+  idx.add(value: base)
+  idx.add(value: base + 1)
+  idx.add(value: base + 2)
+}
+
+# A faceted canopy blob (low-poly displaced octahedron-ish sphere) at `center`.
+func addCanopyBlob(verts: mod List(Float), idx: mod List(Int), center: view Vec3, radius: copy Float, seed: copy Int) {
+  let ico: MeshData = makeSphere(rings: 3, segments: 6)
+  var t: Int = 0
+  loop t < ico.indices.length - 2 {
+    let ia: Int = treeI(l: ico.indices, i: t)
+    let ib: Int = treeI(l: ico.indices, i: t + 1)
+    let ic: Int = treeI(l: ico.indices, i: t + 2)
+    let p0: Vec3 = blobVert(ico: ico, i: ia, center: center, radius: radius, seed: seed)
+    let p1: Vec3 = blobVert(ico: ico, i: ib, center: center, radius: radius, seed: seed)
+    let p2: Vec3 = blobVert(ico: ico, i: ic, center: center, radius: radius, seed: seed)
+    treeTri(verts: verts, idx: idx, p0: p0, p1: p1, p2: p2)
+    t = t + 3
+  }
+}
+
+func blobVert(ico: view MeshData, i: view Int, center: view Vec3, radius: view Float, seed: view Int) ret Vec3 {
+  let b: Int = i * 8
+  let dir: Vec3 = create(x: treeF(l: ico.verts, i: b), y: treeF(l: ico.verts, i: b + 1), z: treeF(l: ico.verts, i: b + 2))
+  let n: Float = fbm3(x: dir.x * 2.4 + center.x, y: dir.y * 2.4 + center.y, z: dir.z * 2.4 + center.z, octaves: 2, lacunarity: 2.0, gain: 0.5, seed: seed)
+  ret vadd(a: center, b: vscale(a: dir, s: radius * (0.78 + n * 0.5)))
+}
+
+func treeF(l: view List(Float), i: view Int) ret Float {
+  if let v: Float = l.at(index: i) { ret v }
+  ret 0.0
+}
+func treeI(l: view List(Int), i: view Int) ret Int {
+  if let v: Int = l.at(index: i) { ret v }
+  ret 0
+}
+
+# Recursively grow a branch from `base` along `dir` (unit), appending trunk
+# geometry and collecting canopy anchor points (tips) for the foliage.
+func growBranch(verts: mod List(Float), idx: mod List(Int), tips: mod List(Vec3),
+                base: copy Vec3, dir: copy Vec3, length: copy Float, radius: copy Float,
+                depth: copy Int, seed: copy Int, branchId: copy Int) {
+  let tip: Vec3 = vadd(a: base, b: vscale(a: dir, s: length))
+  addTaperedCylinder(verts: verts, idx: idx, a: base, b: tip, ra: radius, rb: radius * 0.62, sides: 5)
+  if depth <= 0 {
+    tips.add(value: tip)
+    ret
+  }
+  # Two or three child branches, splayed off the current direction.
+  let children: Int = 2 + (branchId % 2)
+  let up: Vec3 = create(x: 0.0, y: 0.0, z: 1.0)
+  let side: Vec3 = perpBasis(dir: dir)
+  var k: Int = 0
+  loop k < children {
+    let ang: Float = hash2(x: branchId * 7 + k, y: depth, seed: seed) * 6.283185307179586
+    let spread: Float = 0.5 + hash2(x: branchId * 7 + k, y: depth + 50, seed: seed) * 0.5
+    let sideDir: Vec3 = vadd(a: vscale(a: side, s: math.cos(x: ang)),
+                             b: vscale(a: vnorm(a: vcross(a: dir, b: side)), s: math.sin(x: ang)))
+    let childDir: Vec3 = vnorm(a: vadd(a: vadd(a: vscale(a: dir, s: 1.0), b: vscale(a: sideDir, s: spread)), b: vscale(a: up, s: 0.25)))
+    growBranch(verts: verts, idx: idx, tips: tips, base: tip, dir: childDir,
+               length: length * 0.66, radius: radius * 0.6, depth: depth - 1, seed: seed, branchId: branchId * 3 + k + 1)
+    k = k + 1
+  }
+}
+
+func generateTree(branchDepth: copy Int, trunkHeight: copy Float, taper: copy Float,
+                  canopySize: copy Float, leafDensity: copy Int, seed: copy Int) pub ret TreeMesh {
+  var trunkVerts: List(Float) = createList(Float, cap: 512)
+  var trunkIdx: List(Int) = createList(Int, cap: 512)
+  var tips: List(Vec3) = createList(Vec3, cap: 32)
+
+  let baseRadius: Float = trunkHeight * 0.09 * taper
+  growBranch(verts: trunkVerts, idx: trunkIdx, tips: tips,
+             base: create(x: 0.0, y: 0.0, z: 0.0), dir: create(x: 0.0, y: 0.0, z: 1.0),
+             length: trunkHeight, radius: baseRadius, depth: branchDepth, seed: seed, branchId: 1)
+
+  # Canopy: a faceted blob at every branch tip, sized by canopySize; more tips
+  # (deeper branching) => a fuller crown. leafDensity adds extra blobs around the
+  # crown for a denser look.
+  var canopyVerts: List(Float) = createList(Float, cap: 1024)
+  var canopyIdx: List(Int) = createList(Int, cap: 1024)
+  var ti: Int = 0
+  loop ti < tips.length {
+    if let tip: Vec3 = tips.at(index: ti) {
+      addCanopyBlob(verts: canopyVerts, idx: canopyIdx, center: tip, radius: canopySize, seed: seed + ti)
+      var extra: Int = 0
+      loop extra < leafDensity {
+        let ox: Float = (hash2(x: ti * 13 + extra, y: 1, seed: seed) - 0.5) * canopySize * 1.6
+        let oy: Float = (hash2(x: ti * 13 + extra, y: 2, seed: seed) - 0.5) * canopySize * 1.6
+        let oz: Float = (hash2(x: ti * 13 + extra, y: 3, seed: seed) - 0.3) * canopySize * 1.2
+        addCanopyBlob(verts: canopyVerts, idx: canopyIdx,
+                      center: vadd(a: tip, b: create(x: ox, y: oy, z: oz)),
+                      radius: canopySize * 0.7, seed: seed + ti * 31 + extra)
+        extra = extra + 1
+      }
+    }
+    ti = ti + 1
+  }
+
+  ret TreeMesh {
+    trunk: MeshData { verts: own trunkVerts, indices: own trunkIdx, vertCount: trunkVerts.length / 8 },
+    canopy: MeshData { verts: own canopyVerts, indices: own canopyIdx, vertCount: canopyVerts.length / 8 }
+  }
+}
