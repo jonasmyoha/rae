@@ -1,0 +1,53 @@
+# players.rae — the player roster (#546): who controls which character.
+#
+# Today there is one LOCAL player. The roster maps that player to a CONTROLLED
+# character index: 0 = the hero, 1..count-1 = crowd member (index - 1). Switching
+# (Page Up / Page Down, or the settings buttons) moves the local player between
+# characters; the non-controlled characters run their own AI animation. This is
+# the seam multiplayer builds on — a second player would take another index, and
+# a remote player's control would arrive via net.rae instead of a device.
+#
+# Example-114 files are siblings that merge into one module, so this resolves the
+# App/CharacterState types cross-file without importing them.
+import core
+
+const PLAYER_LOCAL: Int = 0
+
+# Page Up / Page Down cycle the controlled character. GLFW key codes, matching
+# the arrow-key scheme in app3d/character_controller.rae (LEFT=263 … UP=265).
+const keyPageUp: Int = 266
+const keyPageDown: Int = 267
+
+# The local player's control mapping. `count` is the total number of controllable
+# characters (hero + crowd); `controlledIndex` is which one the player drives.
+type PlayerRoster {
+  controlledIndex: Int
+  count: Int
+}
+
+func createPlayerRoster(count: copy Int) ret PlayerRoster {
+  ret PlayerRoster { controlledIndex: 0, count: count }
+}
+
+func rosterControlledIsHero(roster: view PlayerRoster) ret Bool {
+  ret roster.controlledIndex is 0
+}
+
+# The crowd-member index (into CharacterState.crowd) the local player controls,
+# or -1 when the hero is controlled.
+func rosterControlledCrowdIndex(roster: view PlayerRoster) ret Int {
+  if roster.controlledIndex is 0 { ret 0 - 1 }
+  ret roster.controlledIndex - 1
+}
+
+# Cycle to the next / previous controllable character (wraps). No-op with one
+# character, so a roster of just the hero behaves exactly as before.
+func rosterSwitchNext(roster: mod PlayerRoster) {
+  if roster.count <= 1 { ret }
+  roster.controlledIndex = (roster.controlledIndex + 1) % roster.count
+}
+
+func rosterSwitchPrev(roster: mod PlayerRoster) {
+  if roster.count <= 1 { ret }
+  roster.controlledIndex = (roster.controlledIndex + roster.count - 1) % roster.count
+}
