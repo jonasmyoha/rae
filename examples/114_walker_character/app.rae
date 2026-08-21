@@ -128,6 +128,7 @@ type CrowdMember {
   model: Mat4
   clipIndex: Int
   animTime: Float
+  controller: ThirdPersonController
 }
 
 # The animated character: the player-controlled hero plus a `crowd` of
@@ -182,6 +183,7 @@ type App {
   render: RenderState
   physics: PhysicsState   # fixed-step sim seam (physics.rae, #553)
   net: NetState           # multiplayer seam (net.rae, #554)
+  players: PlayerRoster   # who the local player controls (players.rae, #546)
   persist: PersistState
   ok: Bool
 }
@@ -389,16 +391,20 @@ func createApp() ret App {
     let cloneX: Float = characterController.position.x + math.cos(x: spiralAngle) * spiralRadius
     let cloneY: Float = characterController.position.y + math.sin(x: spiralAngle) * spiralRadius
     let cloneZ: Float = terrainHeightAt(x: cloneX, y: cloneY, groundZ: groundZ) - groundZ
-    let cloneTranslation: Mat4 = mat4Translate(x: cloneX, y: cloneY, z: cloneZ)
-    let cloneHeading: Mat4 = mat4RotateZ(angle: spiralAngle + walkerFacingCorrection)
-    let cloneModel: Mat4 = mat4Mul(a: cloneTranslation, b: mat4Mul(a: cloneHeading, b: basePartModel))
-    # Each crowd member gets its OWN clip + starting phase, so they are distinct
-    # characters rather than copies of the player (#547). A deterministic mix of
-    # walk/run/idle keeps the demo lively without loading extra assets.
+    # Each crowd member gets its OWN controller (so the player can switch to and
+    # drive it, #546) plus its OWN clip + starting phase (#547). A deterministic
+    # mix of walk/run/idle keeps the demo lively without loading extra assets.
+    var cloneController: ThirdPersonController = createThirdPersonController()
+    cloneController.position.x = cloneX
+    cloneController.position.y = cloneY
+    cloneController.position.z = cloneZ
+    cloneController.heading = spiralAngle
+    let cloneModel: Mat4 = walkerWorldModel(baseModel: basePartModel, controller: cloneController)
     cloneModels.add(value: {
       model: cloneModel,
       clipIndex: crowdClipFor(index: cloneIndex),
-      animTime: cloneIndex.toFloat() * 0.4
+      animTime: cloneIndex.toFloat() * 0.4,
+      controller: own cloneController
     })
     cloneIndex = cloneIndex + 1
   }
@@ -469,6 +475,7 @@ func createApp() ret App {
     render: { renderer: own renderer, drs: own drs, shadowLogged: false }
     physics: { accumulator: 0.0, worldHandle: 0 }
     net: { role: 0, tick: 0 }
+    players: createPlayerRoster(count: 1 + cloneCount)
     persist: { windowGeom: own windowGeom, lastStateSave: startT, stateDirty: false }
     ok: true
   }
@@ -489,6 +496,23 @@ func frameBegin(app: mod App) {
   app.frame.dt = dt
 }
 
+# The world position / heading of whichever character the local player controls
+# (#546) — the hero or a crowd member. Used to aim the camera and stream the
+# terrain/grass around the ACTIVE character rather than always the hero.
+func controlledPosition(app: view App) ret Vec3 {
+  if rosterControlledIsHero(roster: app.players) { ret app.character.controller.position }
+  let idx: Int = rosterControlledCrowdIndex(roster: app.players)
+  if let member: CrowdMember = app.character.crowd.at(index: idx) { ret member.controller.position }
+  ret app.character.controller.position
+}
+
+func controlledHeading(app: view App) ret Float {
+  if rosterControlledIsHero(roster: app.players) { ret app.character.controller.heading }
+  let idx: Int = rosterControlledCrowdIndex(roster: app.players)
+  if let member: CrowdMember = app.character.crowd.at(index: idx) { ret member.controller.heading }
+  ret app.character.controller.heading
+}
+
 # ----- update phase: input, UI, camera, character, terrain, grass, persist --
 func updateApp(app: mod App) {
   let dt: Float = app.frame.dt
@@ -504,36 +528,72 @@ func updateApp(app: mod App) {
   let joyActive: Bool = camTick.joyActive
   let cameraMoved: Bool = camTick.cameraMoved
 
+  # Character switching (#546): Page Up / Page Down cycle who the local player
+  # controls. On a switch, snap the orbit camera behind the new character.
+  if app.cam.rig.mode is CameraRigMode.character {
+    var switched: Bool = false
+    if sdl3.isKeyPressed(key: keyPageDown) {
+      rosterSwitchNext(roster: app.players)
+      switched = true
+    }
+    if sdl3.isKeyPressed(key: keyPageUp) {
+      rosterSwitchPrev(roster: app.players)
+      switched = true
+    }
+    if switched {
+      app.cam.rig.yaw = controlledHeading(app: app)
+      snapCameraRigView(rig: app.cam.rig)
+      app.persist.stateDirty = true
+    }
+  }
+
   app.character.prevModel = app.character.model
   var characterMoved: Bool = false
   if app.cam.rig.mode is CameraRigMode.character {
-    # Devices -> intent (input.rae), then apply it. A remote player's intent
-    # would arrive from net.rae instead; the apply is the same.
+    # Devices -> intent (input.rae), then apply it to the CONTROLLED character.
+    # A remote player's intent would arrive from net.rae instead; the apply is
+    # the same. Non-controlled characters run their own AI animation elsewhere.
     let intent: InputIntent = inputUpdate(moveStick: app.io.moveStick, joyActive: joyActive,
       allowKeys: uiPointerCaptured(input: app.io.ui) is false and app.character.playing)
-    characterMoved = updateWalkerMovement(controller: app.character.controller,
-      intent: intent, cameraYaw: app.cam.rig.viewYaw, dt: dt * app.character.speed)
-    groundWalker(controller: app.character.controller, groundZ: app.character.groundZ)
-    app.cam.camera.target = thirdPersonCameraTarget(controller: app.character.controller, focusZ: characterFocusZ)
-    if characterMoved {
-      app.character.model = walkerWorldModel(baseModel: app.character.basePartModel, controller: app.character.controller)
-      app.persist.stateDirty = true
+    if rosterControlledIsHero(roster: app.players) {
+      characterMoved = updateWalkerMovement(controller: app.character.controller,
+        intent: intent, cameraYaw: app.cam.rig.viewYaw, dt: dt * app.character.speed)
+      groundWalker(controller: app.character.controller, groundZ: app.character.groundZ)
+      if characterMoved {
+        app.character.model = walkerWorldModel(baseModel: app.character.basePartModel, controller: app.character.controller)
+        app.persist.stateDirty = true
+      }
+      let heroClip: Int = locomotionClipFor(controller: app.character.controller)
+      if heroClip is not app.character.clipIndex {
+        app.character.transitionFrom = captureSkeletonPose(sk: app.character.skeleton)
+        app.character.transitionElapsed = 0.0
+        app.character.clipIndex = heroClip
+        app.character.animTime = 0.0
+        setPanelSelection(panel: app.io.clipPanel, world: app.io.world, group: 1, id: (app.character.clipIndex as ClipKind).toString())
+      }
+    } else {
+      # The player drives a crowd member: copy it out, step its controller, and
+      # write it back (Rae lists hand back a value, not a reference).
+      let idx: Int = rosterControlledCrowdIndex(roster: app.players)
+      if let member: CrowdMember = app.character.crowd.at(index: idx) {
+        var driven: CrowdMember = member
+        characterMoved = updateWalkerMovement(controller: driven.controller,
+          intent: intent, cameraYaw: app.cam.rig.viewYaw, dt: dt * app.character.speed)
+        groundWalker(controller: driven.controller, groundZ: app.character.groundZ)
+        driven.model = walkerWorldModel(baseModel: app.character.basePartModel, controller: driven.controller)
+        driven.clipIndex = locomotionClipFor(controller: driven.controller)
+        app.character.crowd.set(index: idx, value: driven)
+        if characterMoved { app.persist.stateDirty = true }
+      }
+      # The hero, no longer player-driven, stands idle.
+      app.character.clipIndex = ClipKind.idle as Int
     }
-    var locomotionClip: Int = 0
-    if app.character.controller.moving {
-      locomotionClip = 3
-      if app.character.controller.walking { locomotionClip = 1 }
-    }
-    if locomotionClip is not app.character.clipIndex {
-      app.character.transitionFrom = captureSkeletonPose(sk: app.character.skeleton)
-      app.character.transitionElapsed = 0.0
-      app.character.clipIndex = locomotionClip
-      app.character.animTime = 0.0
-      setPanelSelection(panel: app.io.clipPanel, world: app.io.world, group: 1, id: (app.character.clipIndex as ClipKind).toString())
-    }
+    let focusPos: Vec3 = controlledPosition(app: app)
+    app.cam.camera.target = vec3.create(x: focusPos.x, y: focusPos.y, z: focusPos.z + characterFocusZ)
   }
-  let terrainWrapped: Bool = updateInfiniteTerrain(terrain: app.terrain, scene: app.scene, playerPosition: app.character.controller.position)
-  let grassWrapped: Bool = updateGrassField(field: app.grass, playerPosition: app.character.controller.position)
+  let followPos: Vec3 = controlledPosition(app: app)
+  let terrainWrapped: Bool = updateInfiniteTerrain(terrain: app.terrain, scene: app.scene, playerPosition: followPos)
+  let grassWrapped: Bool = updateGrassField(field: app.grass, playerPosition: followPos)
 
   # Fixed-timestep physics seam (#553): accumulate frame time and step at a fixed
   # rate, decoupled from render. physicsStep is a no-op until a physics backend
