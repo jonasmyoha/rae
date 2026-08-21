@@ -1006,6 +1006,13 @@ int   rae_g3d_push_metaball_cluster(const float* packedBalls, int64_t count,
                                     float emR, float emG, float emB);
 void* rae_g3d_sdf_pipeline(void);
 void* rae_g3d_sdf_bind(int64_t slot);
+int   rae_g3d_push_skinned_draw(int64_t mesh, struct rae_Mat4* model,
+                                float r, float g, float b, float metallic, float roughness);
+void* rae_g3d_skin_pipeline(void);
+void* rae_g3d_skin_bind(void);
+void* rae_g3d_skin_vbuf(int64_t mesh);
+void* rae_g3d_skin_ibuf(int64_t mesh);
+int64_t rae_g3d_skin_icount(int64_t mesh);
 /* Static bind group creation moved to Rae (#503). */
 void* rae_gb_frame_ubuf(void);
 int64_t rae_gb_frame_bytes(void);

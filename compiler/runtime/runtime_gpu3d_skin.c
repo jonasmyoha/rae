@@ -388,16 +388,21 @@ void rae_ext_gpu3d_setPalette(const float* rows, int64_t jointCount) {
  * buffer's ALLOCATION stays C (it is C-owned); a dedicated C upload entry point
  * would just duplicate that one Rae line, so there isn't one. */
 
-/* Queue a skinned draw into the scene pass that is already open. */
-void rae_ext_gpu3d_drawSkinned(int64_t mesh, rae_Mat4* model,
-                               float r, float g, float b,
-                               float metallic, float roughness) {
-    if (!g3d_pass || !model) return;
+/* CPU bookkeeping + uploads for one skinned draw (#514): validate the mesh +
+ * draw limit, ensure the pipeline, upload the per-frame palette once if dirty,
+ * and pack+upload the 24-float per-draw record. Returns the firstInstance slot
+ * for the Rae side to encode the instanced DrawIndexed, or -1 to skip. The skin
+ * pipeline/bind/buffers stay in C (built from WGSL); Rae reads them via the
+ * accessors below and restores the geometry pipeline/bind after the draw. */
+int rae_g3d_push_skinned_draw(int64_t mesh, rae_Mat4* model,
+                              float r, float g, float b,
+                              float metallic, float roughness) {
+    if (!model) return -1;
     int slot = (int)mesh - 1;
-    if (slot < 0 || slot >= g3d_skin_mesh_n) return;
-    if (g3d_skin_draw_count >= G3D_SKIN_MAX_DRAWS) return;
+    if (slot < 0 || slot >= g3d_skin_mesh_n) return -1;
+    if (g3d_skin_draw_count >= G3D_SKIN_MAX_DRAWS) return -1;
     g3d_skin_init_pipeline();
-    if (!g3d_skin_pipeline) return;
+    if (!g3d_skin_pipeline) return -1;
 
     /* The palette is per FRAME, not per draw, so it uploads once on the
      * first skinned draw rather than once per character part — twelve
@@ -416,22 +421,27 @@ void rae_ext_gpu3d_drawSkinned(int64_t mesh, rae_Mat4* model,
     wgpuQueueWriteBuffer(g_wgpu_queue, g3d_skin_draw_sbuf,
                          (uint64_t)g3d_skin_draw_count * G3D_SKIN_DRAW_FLOATS * sizeof(float),
                          d, G3D_SKIN_DRAW_FLOATS * sizeof(float));
+    return g3d_skin_draw_count++;
+}
 
-    wgpuRenderPassEncoderSetPipeline(g3d_pass, g3d_skin_pipeline);
-    wgpuRenderPassEncoderSetBindGroup(g3d_pass, 0, g3d_skin_bind, 0, NULL);
-    wgpuRenderPassEncoderSetVertexBuffer(g3d_pass, 0, g3d_skin_vbuf[slot], 0,
-                                         wgpuBufferGetSize(g3d_skin_vbuf[slot]));
-    wgpuRenderPassEncoderSetIndexBuffer(g3d_pass, g3d_skin_ibuf[slot],
-                                        WGPUIndexFormat_Uint32, 0,
-                                        wgpuBufferGetSize(g3d_skin_ibuf[slot]));
-    wgpuRenderPassEncoderDrawIndexed(g3d_pass, g3d_skin_icount[slot], 1, 0, 0,
-                                     (uint32_t)g3d_skin_draw_count);
-    g3d_skin_draw_count++;
-    /* Hand the pass back to the static pipeline: anything drawn after this
-     * uses the plain layout, and leaving the skinned pipeline bound would
-     * feed it vertices with no joint attributes. */
-    wgpuRenderPassEncoderSetPipeline(g3d_pass, g3d_pipeline);
-    wgpuRenderPassEncoderSetBindGroup(g3d_pass, 0, g3d_bind, 0, NULL);
+/* Skinned pipeline/bind + mesh-buffer accessors (ungated), for the Rae-side
+ * skinned encode. Buffers are keyed by the 1-based skinned-mesh handle. */
+void* rae_g3d_skin_pipeline(void) { return (void*)g3d_skin_pipeline; }
+void* rae_g3d_skin_bind(void)     { return (void*)g3d_skin_bind; }
+void* rae_g3d_skin_vbuf(int64_t mesh){
+    int slot = (int)mesh - 1;
+    if (slot < 0 || slot >= g3d_skin_mesh_n) return (void*)0;
+    return (void*)g3d_skin_vbuf[slot];
+}
+void* rae_g3d_skin_ibuf(int64_t mesh){
+    int slot = (int)mesh - 1;
+    if (slot < 0 || slot >= g3d_skin_mesh_n) return (void*)0;
+    return (void*)g3d_skin_ibuf[slot];
+}
+int64_t rae_g3d_skin_icount(int64_t mesh){
+    int slot = (int)mesh - 1;
+    if (slot < 0 || slot >= g3d_skin_mesh_n) return 0;
+    return (int64_t)g3d_skin_icount[slot];
 }
 
 void rae_ext_gpu3d_skinFrameBegin(void) { g3d_skin_draw_count = 0; }

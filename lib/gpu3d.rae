@@ -643,7 +643,15 @@ func shadowCasterCount() pub ret Int {
 # joint indices it can never read — see runtime_gpu3d_skin.c.
 func skinnedMeshCreate(verts: view Buffer(Float), vertCount: Int, indices: view Buffer(Int), indexCount: Int) extern ret Int
 func setPalette(rows: view Buffer(Float), jointCount: Int) extern
-func drawSkinned(mesh: Int, model: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float) extern
+# Skinned draw (#514): C validates the mesh + draw limit, uploads the per-frame
+# palette (if dirty) and the per-draw record, and returns the firstInstance slot
+# (or -1); Rae encodes the instanced DrawIndexed below.
+func g3dPushSkinnedDraw(mesh: Int, model: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float) extern("rae_g3d_push_skinned_draw") ret Int
+func g3dSkinPipeline() extern("rae_g3d_skin_pipeline") ret Ptr
+func g3dSkinBind() extern("rae_g3d_skin_bind") ret Ptr
+func g3dSkinVbuf(mesh: Int) extern("rae_g3d_skin_vbuf") ret Ptr
+func g3dSkinIbuf(mesh: Int) extern("rae_g3d_skin_ibuf") ret Ptr
+func g3dSkinIcount(mesh: Int) extern("rae_g3d_skin_icount") ret Int
 func skinFrameBegin() extern
 func skinDrawCount() extern ret Int
 func skinShutdown() extern
@@ -670,6 +678,37 @@ func uploadPalette(rows: view List(Float), jointCount: view Int) pub {
 # the WebGPU bindings (wgpuQueueWriteBuffer into gbSkinPalette at a per-slot
 # offset) — the same pattern the draws buffer uses (#502/#503), so no C entry
 # point is needed. See uploadPaletteSlot there.
+
+# Forward skinned mesh draw (#514): encode one instanced DrawIndexed into the
+# scene pass. C uploads the palette + per-draw record and returns the slot; Rae
+# binds the skinned pipeline/bind + mesh buffers, draws, then restores the
+# geometry pipeline/bind (leaving the skinned pipeline bound would feed plain
+# vertices to a shader expecting joint attributes).
+func drawSkinned(mesh: copy Int, model: view Mat4,
+                 r: copy Float, g: copy Float, b: copy Float,
+                 metallic: copy Float, roughness: copy Float) {
+  let slot: Int = g3dPushSkinnedDraw(mesh: mesh, model: model, r: r, g: g, b: b,
+    metallic: metallic, roughness: roughness)
+  if slot < 0 { ret }
+  let pass: Ptr = g3dPass()
+  let vbuf: Ptr = g3dSkinVbuf(mesh: mesh)
+  let ibuf: Ptr = g3dSkinIbuf(mesh: mesh)
+  let icount: Int = g3dSkinIcount(mesh: mesh)
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dSkinPipeline())
+  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+    group: g3dSkinBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder: pass, slot: 0 as UInt32,
+    buffer: vbuf, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: vbuf))
+  wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder: pass, buffer: ibuf,
+    format: WGPUIndexFormat_Uint32, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: ibuf))
+  wgpuRenderPassEncoderDrawIndexed(renderPassEncoder: pass, indexCount: icount as UInt32,
+    instanceCount: 1 as UInt32, firstIndex: 0 as UInt32, baseVertex: 0 as Int32,
+    firstInstance: slot as UInt32)
+  # Restore the geometry pipeline/bind for subsequent static draws.
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dPipeline())
+  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+    group: g3dBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+}
 
 func drawSkinnedInstance(mesh: view MeshHandle, model: view Mat4, material: view Material3d) pub {
   if not meshHandleIsValid(h: mesh) {
