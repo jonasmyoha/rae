@@ -47,6 +47,23 @@ enum ClipKind {
   run
 }
 
+# A deterministic, lively clip mix for the crowd (#547): each member animates
+# independently of the player, so the roster reads as distinct characters. Cycles
+# walk / run / idle across members.
+func crowdClipFor(index: view Int) ret Int {
+  let pick: Int = index % 3
+  if pick is 0 { ret ClipKind.walk as Int }
+  if pick is 1 { ret ClipKind.run as Int }
+  ret ClipKind.idle as Int
+}
+
+# Playback rate for a clip: walkFast is the walk clip at 1.6x, everything else
+# plays at authored speed. Mirrors the hero's clipRate in renderApp.
+func clipPlaybackRate(clipIndex: view Int) ret Float {
+  if clipIndex is ClipKind.walkFast { ret 1.6 }
+  ret 1.0
+}
+
 func walkerFloatAt(values: view List(Float), index: view Int) ret Float {
   if let value: Float = values.at(index: index) { ret value }
   ret 0.0

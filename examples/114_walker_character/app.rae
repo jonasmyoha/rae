@@ -118,8 +118,21 @@ type InputUi {
 
 # CameraState + cameraUpdate live in camera.rae (#548).
 
-# The animated character. A single instance today; #547 turns `list` into a
-# roster and adds the controlled/owner fields for multi-character + multiplayer.
+# One non-player crowd character: its own world transform AND its own animation
+# state (clip + time), independent of the hero (#547). This is what makes the
+# crowd a set of distinct characters — each holds its own pose in its own palette
+# slot — rather than phase-shifted copies of the player. The full roster (#547)
+# folds the hero in as member 0 with a controller + owner; this is the animation
+# half of that.
+type CrowdMember {
+  model: Mat4
+  clipIndex: Int
+  animTime: Float
+}
+
+# The animated character: the player-controlled hero plus a `crowd` of
+# independently-animated CrowdMembers. #547 will fold the hero into the roster as
+# member 0 and add per-character controllers/owners for multiplayer.
 type CharacterState {
   skeleton: Skeleton
   idleClip: Clip
@@ -139,7 +152,7 @@ type CharacterState {
   basePartModel: Mat4
   model: Mat4
   prevModel: Mat4
-  crowd: List(Mat4)
+  crowd: List(CrowdMember)
   crowdBatch: InstanceBatch
   groundZ: Float
 }
@@ -304,7 +317,7 @@ func createApp() ret App {
   var grass: GrassField = createGrassField(assets: assets, groundZ: groundZ)
 
   let cloneCount: Int = 5
-  let cloneModels: List(Mat4) = createList(Mat4, cap: cloneCount)
+  let cloneModels: List(CrowdMember) = createList(CrowdMember, cap: cloneCount)
   let firstPart: MeshHandle = meshHandle(id: walkerIntAt(values: partIds, index: 0), generation: 1)
   var characterClones: InstanceBatch = createInstanceBatch(mesh: firstPart, capacity: cloneCount)
 
@@ -378,7 +391,15 @@ func createApp() ret App {
     let cloneZ: Float = terrainHeightAt(x: cloneX, y: cloneY, groundZ: groundZ) - groundZ
     let cloneTranslation: Mat4 = mat4Translate(x: cloneX, y: cloneY, z: cloneZ)
     let cloneHeading: Mat4 = mat4RotateZ(angle: spiralAngle + walkerFacingCorrection)
-    cloneModels.add(value: mat4Mul(a: cloneTranslation, b: mat4Mul(a: cloneHeading, b: basePartModel)))
+    let cloneModel: Mat4 = mat4Mul(a: cloneTranslation, b: mat4Mul(a: cloneHeading, b: basePartModel))
+    # Each crowd member gets its OWN clip + starting phase, so they are distinct
+    # characters rather than copies of the player (#547). A deterministic mix of
+    # walk/run/idle keeps the demo lively without loading extra assets.
+    cloneModels.add(value: {
+      model: cloneModel,
+      clipIndex: crowdClipFor(index: cloneIndex),
+      animTime: cloneIndex.toFloat() * 0.4
+    })
     cloneIndex = cloneIndex + 1
   }
   updateInfiniteTerrain(terrain: terrain, scene: scene, playerPosition: characterController.position)
