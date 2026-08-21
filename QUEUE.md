@@ -163,7 +163,7 @@
 - [ ] #545 114: extract input.rae — InputState + InputIntent (moveX/moveY/run/actions); inputUpdate fills intent from WASD + virtual joystick. Movement becomes intent-driven (not device-direct).
 - [ ] #546 114: extract players.rae — PlayerRoster (player->character mapping + input source), PLAYER_LOCAL; prepares multiplayer + input switching. controlled-character selection lives here.
 - [ ] #547 114: extract character.rae — Character + CharacterSystem as a ROSTER of N characters (NOT a hardcoded hero): shared skeleton/clips/mesh parts once, per-character controller/anim/model/owner. characterUpdate applies the controlled character's intent; characterAnimate samples per-character pose/palette; characterRenderGbuffer/Shadow draw the roster. Fold the crowd/clones into the roster.
-- [ ] #548 114: extract camera.rae — CameraState (rig + camera + bar); cameraUpdate (rig + mode transitions + follow controlled character), cameraApply.
+- [x] #548 114: extract camera.rae — CameraState (rig + camera + bar); cameraUpdate (rig + mode transitions + follow controlled character), cameraApply.
 - [ ] #549 114: extract ui.rae — UiState (uiWorld, clip/transport panels, settings dialog, scroll, debug + log overlays, hud); uiUpdate (clicks/settings/scroll) + uiRender (overlay + HUD). Fold walker_hud.rae.
 - [x] #550 114: extract terrain.rae — TerrainState wrapping InfiniteTerrain; terrainUpdate + terrainRenderGround/Props/Shadow. walker_terrain.rae stays as the impl or folds in.
 - [x] #551 114: extract grass.rae — GrassState wrapping GrassField + grass_compute; grassUpdate + grassRender. walker_grass.rae stays as impl or folds in.
