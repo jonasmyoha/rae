@@ -307,10 +307,15 @@ static const char* GB_SKIN_WGSL =
 "@group(0) @binding(1) var<storage, read> draws: array<DrawU>;\n"
 "@group(0) @binding(2) var<storage, read> palette: array<vec4<f32>>;\n"
 GB_OCT_WGSL
-"fn jointMat(j: u32) -> mat4x4<f32> {\n"
-"  let r0 = palette[j * 3u + 0u];\n"
-"  let r1 = palette[j * 3u + 1u];\n"
-"  let r2 = palette[j * 3u + 2u];\n"
+/* `base` is this instance's palette offset in vec4 rows (paletteIndex *
+ * jointCount * 3). It comes from the per-instance DrawU (params.w) so instances
+ * of the same mesh can each read their own animation palette out of one shared
+ * palette array — GPU animation instancing (#547). Today every instance packs
+ * base = 0, so this reads palette[j*3+..] exactly as before. */
+"fn jointMat(j: u32, base: u32) -> mat4x4<f32> {\n"
+"  let r0 = palette[base + j * 3u + 0u];\n"
+"  let r1 = palette[base + j * 3u + 1u];\n"
+"  let r2 = palette[base + j * 3u + 2u];\n"
 "  return mat4x4<f32>(\n"
 "    vec4<f32>(r0.x, r1.x, r2.x, 0.0),\n"
 "    vec4<f32>(r0.y, r1.y, r2.y, 0.0),\n"
@@ -332,10 +337,12 @@ GB_OCT_WGSL
 "      @location(5) vc: vec4<f32>) -> VsOut {\n"
 "  let d = draws[ii];\n"
 "  let j = vec4<u32>(u32(jf.x), u32(jf.y), u32(jf.z), u32(jf.w));\n"
-"  var skin = jointMat(j.x) * w.x;\n"
-"  skin = skin + jointMat(j.y) * w.y;\n"
-"  skin = skin + jointMat(j.z) * w.z;\n"
-"  skin = skin + jointMat(j.w) * w.w;\n"
+/* Per-instance palette offset (0 for all instances today). */
+"  let pbase = u32(max(d.params.w, 0.0));\n"
+"  var skin = jointMat(j.x, pbase) * w.x;\n"
+"  skin = skin + jointMat(j.y, pbase) * w.y;\n"
+"  skin = skin + jointMat(j.z, pbase) * w.z;\n"
+"  skin = skin + jointMat(j.w, pbase) * w.w;\n"
 "  let sp = skin * vec4<f32>(p, 1.0);\n"
 "  var o: VsOut;\n"
 "  o.pos = F.viewProj * (d.model * vec4<f32>(sp.xyz, 1.0));\n"
