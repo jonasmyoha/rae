@@ -75,7 +75,10 @@ int rae_g3d_tonemap_prepare(void) { return -1; }
 void* rae_g3d_tonemap_pipeline(void) { return (void*)0; }
 void* rae_g3d_tonemap_bind(int64_t slot){ (void)slot; return (void*)0; }
 int64_t rae_g3d_tonemap_pending(void) { return 0; }
-void rae_ext_gpu3d_taa(void) {}
+int rae_g3d_taa_prepare(void) { return -1; }
+void* rae_g3d_taa_pipeline(void) { return (void*)0; }
+void* rae_g3d_taa_bind(int64_t slot){ (void)slot; return (void*)0; }
+void* rae_g3d_taa_view(int64_t slot){ (void)slot; return (void*)0; }
 void rae_ext_gpu3d_ssao(void) {}
 void rae_ext_gpu3d_shutdown(void) {}
 void rae_ext_gpu3d_skyHosekPush(int64_t index, float value){ (void)index; (void)value; }
