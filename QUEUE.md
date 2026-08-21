@@ -170,7 +170,7 @@
 - [x] #552 114: extract render.rae — RenderState (DeferredRenderer, sky, light, hosek, DRS, shadow); renderScene owns the render-graph walk and calls each system's render hook per tag.
 - [x] #553 114: add physics.rae — PhysicsState + fixed-step accumulator in updateApp (physicsFixedStep) + physicsStep() no-op stub (Jolt/Box2D seam) + JobSystem (jobSubmit/jobAwaitAll, inline now, runtime_threads seam later).
 - [x] #554 114: add net.rae — NetState (offline/server/client) + netPublishIntent + netApplyRemote stubs; wire intent publish + remote apply into updateApp as no-ops. Multiplayer seam.
-- [ ] #555 114: thin main.rae to the entry point; fold/retire walker_*.rae; final screenshot parity; cross-link docs. Confirm no file near the 1000-line cap.
+- [x] #555 114: thin main.rae to the entry point; fold/retire walker_*.rae; final screenshot parity; cross-link docs. Confirm no file near the 1000-line cap.
 - [~] Deprecate raylib: PARKED (2026-07-01) — decided NOT to remove raylib for now (wasted effort). raylib (98_mobile_ui + raylib examples) and the gpu2d/WebGPU stack (106_mobile_ui + lib/ui/render_gpu2d) coexist side by side; lib/ui keeps its raylib path and gains a gpu2d backend. Revisit only if raylib becomes a real maintenance/deploy burden. Build the Rae Platform/Render/2D/Audio layers as additive, not as replacements.
 - [~] Incremental raylib removal — PARKED (see the Deprecate-raylib note): raylib and gpu2d coexist; we're not retiring raylib examples now.
 
