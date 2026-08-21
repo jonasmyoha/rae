@@ -486,10 +486,12 @@ func updateApp(app: mod App) {
   app.character.prevModel = app.character.model
   var characterMoved: Bool = false
   if app.cam.rig.mode is CameraRigMode.character {
+    # Devices -> intent (input.rae), then apply it. A remote player's intent
+    # would arrive from net.rae instead; the apply is the same.
+    let intent: InputIntent = inputUpdate(moveStick: app.io.moveStick, joyActive: joyActive,
+      allowKeys: uiPointerCaptured(input: app.io.ui) is false and app.character.playing)
     characterMoved = updateWalkerMovement(controller: app.character.controller,
-      moveStick: app.io.moveStick, joyActive: joyActive,
-      allowKeys: uiPointerCaptured(input: app.io.ui) is false and app.character.playing,
-      cameraYaw: app.cam.rig.viewYaw, dt: dt * app.character.speed)
+      intent: intent, cameraYaw: app.cam.rig.viewYaw, dt: dt * app.character.speed)
     groundWalker(controller: app.character.controller, groundZ: app.character.groundZ)
     app.cam.camera.target = thirdPersonCameraTarget(controller: app.character.controller, focusZ: characterFocusZ)
     if characterMoved {
