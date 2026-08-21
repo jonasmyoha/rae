@@ -79,6 +79,25 @@ open ui/components
 open ui/input_gpu2d
 open ui/render_gpu2d
 
+# Crowd members walk the SAME clip as the hero but time-shifted, so they read as a
+# crowd rather than a rank of mirror images (#547). Each gets its own palette slot.
+const clonePhaseStep: Float = 0.37
+
+# Pose the shared skeleton at the character's current clip and a given time, then
+# extract the joint palette (#547). Used to build a DISTINCT pose per crowd member
+# — the skeleton is scratch here, re-posed each call; the hero's palette is built
+# separately, before this runs, so re-posing does not disturb it.
+func poseCharacterPalette(character: mod CharacterState, animTime: copy Float) ret List(Float) {
+  applySkeletonPose(sk: character.skeleton, pose: character.bindPose)
+  match character.clipIndex {
+    case ClipKind.idle { applyClip(sk: character.skeleton, c: character.idleClip, time: animTime) }
+    case ClipKind.walk { applyClip(sk: character.skeleton, c: character.walkClip, time: animTime) }
+    case ClipKind.walkFast { applyClip(sk: character.skeleton, c: character.walkClip, time: animTime) }
+    case ClipKind.run { applyClip(sk: character.skeleton, c: character.runClip, time: animTime) }
+  }
+  ret buildPalette(sk: character.skeleton)
+}
+
 # The shadow pass: fit cascades to this frame, then rasterise every caster
 # (ground, props, the character's skinned parts + crowd). Its own function so the
 # match arm stays a one-liner (and the systems refactor #543 gives it a home).
@@ -134,7 +153,9 @@ func renderGbufferPass(app: mod App, aspect: copy Float, palette: view List(Floa
   drawTerrainGround(terrain: app.terrain, scene: app.scene)
   gbuffer.renderScene(scene: app.scene)
   drawTerrainProps(terrain: app.terrain, scene: app.scene)
-  uploadPalette(rows: palette, jointCount: jointCount(sk: app.character.skeleton))
+  # Palettes (hero slot 0 + one per crowd member) were uploaded in renderApp.
+  let jc: Int = jointCount(sk: app.character.skeleton)
+  uploadPalette(rows: palette, jointCount: jc)
   var p: Int = 0
   loop p < app.character.partIds.length {
     let handle: MeshHandle = meshHandle(id: walkerIntAt(values: app.character.partIds, index: p), generation: 1)
@@ -152,7 +173,10 @@ func renderGbufferPass(app: mod App, aspect: copy Float, palette: view List(Floa
     var cloneDraw: Int = 0
     loop cloneDraw < app.character.crowd.length {
       if let cloneModel: Mat4 = app.character.crowd.at(index: cloneDraw) {
-        addInstance(batch: app.character.crowdBatch, model: cloneModel, prevModel: cloneModel, material: mat)
+        # Each crowd member samples its OWN palette slot (#547) so it holds a
+        # distinct pose in this single instanced skinned draw.
+        addSkinnedInstance(batch: app.character.crowdBatch, model: cloneModel, prevModel: cloneModel,
+                           material: mat, paletteBase: characterPaletteBase(slot: cloneDraw + 1, jointCount: jc))
       }
       cloneDraw = cloneDraw + 1
     }
@@ -193,6 +217,21 @@ func renderApp(app: mod App) {
     blendSkeletonPose(sk: app.character.skeleton, from: app.character.transitionFrom, weight: blendWeight)
   }
   let palette: List(Float) = buildPalette(sk: app.character.skeleton)
+
+  # Per-character crowd palettes (#547): upload the hero into slot 0 first (this
+  # also creates the shared palette buffer on frame 0), then give each crowd
+  # member a time-shifted pose in its own slot so ONE instanced skinned draw per
+  # part renders every character in a DISTINCT pose. The hero `palette` above is
+  # untouched — poseCharacterPalette only borrows the skeleton as scratch.
+  let jc: Int = jointCount(sk: app.character.skeleton)
+  uploadPalette(rows: palette, jointCount: jc)
+  var crowdSlot: Int = 0
+  loop crowdSlot < app.character.crowd.length {
+    let crowdTime: Float = app.character.animTime + (crowdSlot + 1).toFloat() * clonePhaseStep
+    let crowdPalette: List(Float) = poseCharacterPalette(character: app.character, animTime: crowdTime)
+    uploadPaletteSlot(rows: crowdPalette, jointCount: jc, slot: crowdSlot + 1)
+    crowdSlot = crowdSlot + 1
+  }
 
   applyCameraRig(rig: app.cam.rig, camera: app.cam.camera)
   syncCameraBar(world: app.io.world, rig: app.cam.rig, camera: app.cam.camera)
