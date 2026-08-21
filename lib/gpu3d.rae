@@ -488,7 +488,6 @@ func shadowCasterCount() pub ret Int {
 # joint indices it can never read — see runtime_gpu3d_skin.c.
 func skinnedMeshCreate(verts: view Buffer(Float), vertCount: Int, indices: view Buffer(Int), indexCount: Int) extern ret Int
 func setPalette(rows: view Buffer(Float), jointCount: Int) extern
-func setPaletteAt(index: Int, rows: view Buffer(Float), jointCount: Int) extern
 func drawSkinned(mesh: Int, model: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float) extern
 func skinFrameBegin() extern
 func skinDrawCount() extern ret Int
@@ -512,14 +511,10 @@ func uploadPalette(rows: view List(Float), jointCount: view Int) pub {
   setPalette(rows: rows.data, jointCount: jointCount)
 }
 
-# Upload one character's palette into slot `index` of the shared palette array,
-# so instances of the same mesh can animate independently (#547 GPU animation
-# instancing). An instance reads this slot by packing paletteBase (vec4 rows) =
-# index * jointCount * 3 into its draw record. All slots share one skeleton, so
-# jointCount is uniform.
-func uploadPaletteAt(index: view Int, rows: view List(Float), jointCount: view Int) pub {
-  setPaletteAt(index: index, rows: rows.data, jointCount: jointCount)
-}
+# Per-character palette uploads (#547) live in gbuffer.rae, done directly over
+# the WebGPU bindings (wgpuQueueWriteBuffer into gbSkinPalette at a per-slot
+# offset) — the same pattern the draws buffer uses (#502/#503), so no C entry
+# point is needed. See uploadPaletteSlot there.
 
 func drawSkinnedInstance(mesh: view MeshHandle, model: view Mat4, material: view Material3d) pub {
   if not meshHandleIsValid(h: mesh) {
