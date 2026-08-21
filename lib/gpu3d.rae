@@ -112,7 +112,13 @@ func g3dTonemapPipeline() extern("rae_g3d_tonemap_pipeline") ret Ptr
 func g3dTonemapBind(slot: Int) extern("rae_g3d_tonemap_bind") ret Ptr
 func g3dTonemapPending() extern("rae_g3d_tonemap_pending") ret Int
 func g3dPresentFrame() extern("rae_g3d_present_frame")
-func taa() extern
+# TAA (#514): C ensures the pipeline/bind, uploads the blend params, flips
+# history-valid and returns the current history slot (or -1); Rae encodes the
+# fullscreen resolve into taa_view[cur].
+func g3dTaaPrepare() extern("rae_g3d_taa_prepare") ret Int
+func g3dTaaPipeline() extern("rae_g3d_taa_pipeline") ret Ptr
+func g3dTaaBind(slot: Int) extern("rae_g3d_taa_bind") ret Ptr
+func g3dTaaView(slot: Int) extern("rae_g3d_taa_view") ret Ptr
 func ssao() extern
 func shutdown() extern
 
@@ -667,7 +673,10 @@ func ssaoPass() pub {
 # through the velocity buffer, clamp it to the current neighbourhood and
 # blend. Runs on HDR, BEFORE tonemap, so accumulation stays linear.
 func taaPass() pub {
-  taa()
+  finishForward()
+  let slot: Int = g3dTaaPrepare()
+  if slot < 0 { ret }
+  fullscreenPostPass(target: g3dTaaView(slot: slot), pipeline: g3dTaaPipeline(), bind: g3dTaaBind(slot: slot))
 }
 
 # Upload interleaved mesh data and get a typed handle back.
