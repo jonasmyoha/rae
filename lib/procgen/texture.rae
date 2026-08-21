@@ -1,0 +1,131 @@
+# procgen/texture — procedural material textures (#539), generated in Rae.
+#
+# Noise-driven albedo (and matching roughness) for the biome materials — grass,
+# sand, rock, mud, water — plus a normal map derived from a height field. No
+# external image files: every texel is computed from lib/noise (deterministic
+# per seed). `resolution` is the detail/quality knob (one generator, all LOD
+# tiers: small cheap textures on mobile up to large detailed ones), `tiling` the
+# world-space repeat. Output is a List(Int) of packed RGBA pixels
+# (r | g<<8 | b<<16 | a<<24, built with arithmetic), ready for
+# gpu2d.registerImageRgba or a future terrain-splat / prop texture bind.
+import core
+import math
+import noise
+open noise
+
+const matGrass: Int = 0
+const matSand: Int = 1
+const matRock: Int = 2
+const matMud: Int = 3
+const matWater: Int = 4
+
+func texClampByte(v: view Float) ret Int {
+  var x: Int = (v * 255.0) as Int
+  if x < 0 { x = 0 }
+  if x > 255 { x = 255 }
+  ret x
+}
+
+# Pack r,g,b (0..1 Floats) + opaque alpha into one RGBA pixel (byte order R,G,B,A).
+func texPackRgb(r: view Float, g: view Float, b: view Float) ret Int {
+  ret texClampByte(v: r) + texClampByte(v: g) * 256 + texClampByte(v: b) * 65536 + 255 * 16777216
+}
+
+# fbm is ~[-1,1]; remap to [0,1].
+func texNoise01(x: view Float, y: view Float, octaves: view Int, seed: view Int) ret Float {
+  ret fbm2(x: x, y: y, octaves: octaves, lacunarity: 2.0, gain: 0.5, seed: seed) * 0.5 + 0.5
+}
+
+# Per-material albedo from a low-freq value `n` and a high-freq detail `d`
+# (both in [0,1]).
+func texMaterialColor(kind: view Int, n: view Float, d: view Float) ret Int {
+  if kind is matGrass {
+    let base: Float = 0.30 + n * 0.28
+    ret texPackRgb(r: 0.10 + base * 0.22 + d * 0.06, g: 0.24 + base * 0.55, b: 0.08 + base * 0.16)
+  }
+  if kind is matSand {
+    let t: Float = 0.60 + n * 0.24 + d * 0.06
+    ret texPackRgb(r: t + 0.14, g: t + 0.03, b: t - 0.20)
+  }
+  if kind is matRock {
+    let g: Float = 0.32 + n * 0.36 - d * 0.14
+    ret texPackRgb(r: g, g: g * 0.98, b: g * 1.03)
+  }
+  if kind is matMud {
+    let t: Float = 0.16 + n * 0.22
+    ret texPackRgb(r: t + 0.18, g: t + 0.08, b: t + 0.01)
+  }
+  # water: deep blue with lighter ripple crests
+  let hi: Float = n * 0.28 + d * 0.28
+  ret texPackRgb(r: 0.05 + hi, g: 0.22 + hi * 1.1, b: 0.42 + hi * 0.9)
+}
+
+# Albedo texture for a material `kind` at `resolution` x `resolution`.
+func generateAlbedo(kind: copy Int, resolution: copy Int, tiling: copy Float, seed: copy Int) pub ret List(Int) {
+  var px: List(Int) = createList(Int, cap: resolution * resolution)
+  let inv: Float = 1.0 / resolution.toFloat()
+  var y: Int = 0
+  loop y < resolution {
+    var x: Int = 0
+    loop x < resolution {
+      let fx: Float = x.toFloat() * inv * tiling
+      let fy: Float = y.toFloat() * inv * tiling
+      let n: Float = texNoise01(x: fx, y: fy, octaves: 4, seed: seed)
+      let d: Float = texNoise01(x: fx * 5.0, y: fy * 5.0, octaves: 2, seed: seed + 99)
+      px.add(value: texMaterialColor(kind: kind, n: n, d: d))
+      x = x + 1
+    }
+    y = y + 1
+  }
+  ret px
+}
+
+# Grayscale roughness map for a material: rougher where the surface is broken up.
+func generateRoughness(kind: copy Int, resolution: copy Int, tiling: copy Float, seed: copy Int) pub ret List(Int) {
+  var px: List(Int) = createList(Int, cap: resolution * resolution)
+  let inv: Float = 1.0 / resolution.toFloat()
+  var y: Int = 0
+  loop y < resolution {
+    var x: Int = 0
+    loop x < resolution {
+      let fx: Float = x.toFloat() * inv * tiling
+      let fy: Float = y.toFloat() * inv * tiling
+      let n: Float = texNoise01(x: fx * 3.0, y: fy * 3.0, octaves: 3, seed: seed + 7)
+      var r: Float = 0.55 + n * 0.4
+      if kind is matWater { r = 0.05 + n * 0.15 }
+      if kind is matRock { r = 0.7 + n * 0.3 }
+      px.add(value: texPackRgb(r: r, g: r, b: r))
+      x = x + 1
+    }
+    y = y + 1
+  }
+  ret px
+}
+
+# Tangent-space normal map derived from the same height field (central
+# differences), packed so RGB = (n*0.5+0.5).
+func generateNormal(resolution: copy Int, tiling: copy Float, strength: copy Float, seed: copy Int) pub ret List(Int) {
+  var px: List(Int) = createList(Int, cap: resolution * resolution)
+  let inv: Float = 1.0 / resolution.toFloat()
+  let e: Float = inv * tiling
+  var y: Int = 0
+  loop y < resolution {
+    var x: Int = 0
+    loop x < resolution {
+      let fx: Float = x.toFloat() * inv * tiling
+      let fy: Float = y.toFloat() * inv * tiling
+      let hL: Float = texNoise01(x: fx - e, y: fy, octaves: 4, seed: seed)
+      let hR: Float = texNoise01(x: fx + e, y: fy, octaves: 4, seed: seed)
+      let hD: Float = texNoise01(x: fx, y: fy - e, octaves: 4, seed: seed)
+      let hU: Float = texNoise01(x: fx, y: fy + e, octaves: 4, seed: seed)
+      let nx: Float = (hL - hR) * strength
+      let ny: Float = (hD - hU) * strength
+      let nz: Float = 1.0
+      let invLen: Float = 1.0 / math.sqrt(x: nx * nx + ny * ny + nz * nz)
+      px.add(value: texPackRgb(r: nx * invLen * 0.5 + 0.5, g: ny * invLen * 0.5 + 0.5, b: nz * invLen * 0.5 + 0.5))
+      x = x + 1
+    }
+    y = y + 1
+  }
+  ret px
+}
