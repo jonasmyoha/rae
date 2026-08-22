@@ -817,3 +817,146 @@ func applyClip(sk: mod Skeleton, c: view Clip, time: view Float) pub {
     ci = ci + 1
   }
 }
+
+# --- clip retargeting -------------------------------------------------------
+#
+# A Clip stores channels as node indices into the skeleton it was loaded
+# against, so a clip authored for one rig is meaningless on another even when
+# the two are anatomically identical. Rigs from Mixamo-derived pipelines usually
+# ARE identical in naming, give or take a `mixamorig:` prefix and some casing, so
+# a clip can be moved across by matching joint NAMES and rewriting the indices.
+#
+# This is what lets one set of locomotion clips drive every humanoid character in
+# a scene, whatever tool produced each rig.
+
+# Normalise a joint name for matching: drop any `namespace:` prefix, lowercase,
+# and strip separators. `mixamorig:LeftForeArm` and `LeftForeArm` both become
+# `leftforearm`.
+func jointNameKey(name: view String) ret String {
+  var base: String = name
+  let colon: Int = base.lastIndexOf(sub: ":")
+  if colon >= 0 {
+    base = base.sub(start: colon + 1, len: base.length() - colon - 1)
+  }
+  var out: String = ""
+  var i: Int = 0
+  let lowered: String = base.toLower()
+  loop i < lowered.length() {
+    let ch: String = lowered.sub(start: i, len: 1)
+    if ch.equals(other: "_") is false and ch.equals(other: " ") is false
+       and ch.equals(other: ".") is false and ch.equals(other: "-") is false {
+      out = out.concat(other: ch)
+    }
+    i = i + 1
+  }
+  ret out
+}
+
+# Index of the joint in `sk` whose name matches `key`, or -1.
+func findJointByKey(sk: view Skeleton, key: view String) ret Int {
+  var n: Int = 0
+  loop n < sk.nodeNames.length {
+    if let nodeName: String = sk.nodeNames.at(index: n) {
+      if jointNameKey(name: nodeName).equals(other: key) {
+        ret n
+      }
+    }
+    n = n + 1
+  }
+  ret 0 - 1
+}
+
+# Rewrite `c`'s channels from the `from` skeleton onto `to`, matching by joint
+# name. Channels whose joint has no counterpart are DROPPED — those joints simply
+# hold their bind pose, which is the right failure mode: a rig missing a spine
+# segment should still walk.
+#
+# ROTATION CHANNELS ONLY. Translation and scale are authored in the SOURCE rig's
+# bone lengths and proportions; replaying them on a rig with different limb
+# lengths tears the mesh apart — limbs fly off, the body inflates. Rotations are
+# proportion-independent, which is exactly why they retarget and the others do
+# not. The destination keeps its own bind translations and scales, so it moves
+# like the source while staying its own shape.
+#
+# Root motion is not carried either: this engine drives world position from the
+# character controller, not from the clip, so hip translation would fight it.
+func retargetClip(c: view Clip, from: view Skeleton, to: view Skeleton,
+                  skipRoot: view Bool) pub ret Clip {
+  if c.ok is false or from.ok is false or to.ok is false {
+    ret emptyClip()
+  }
+  let targetNode: List(Int) = createList(Int, cap: c.targetNode.length)
+  let path: List(Int) = createList(Int, cap: c.path.length)
+  let interp: List(Int) = createList(Int, cap: c.interp.length)
+  let timeStart: List(Int) = createList(Int, cap: c.timeStart.length)
+  let timeCount: List(Int) = createList(Int, cap: c.timeCount.length)
+  let valueStart: List(Int) = createList(Int, cap: c.valueStart.length)
+  var kept: Int = 0
+  var ch: Int = 0
+  loop ch < c.targetNode.length {
+    let srcNode: Int = c.targetNode.get(index: ch)
+    if srcNode >= 0 and srcNode < from.nodeNames.length and c.path.get(index: ch) is pathRotation {
+      var dstNode: Int = 0 - 1
+      if let srcName: String = from.nodeNames.at(index: srcNode) {
+        let key: String = jointNameKey(name: srcName)
+        # The root carries the rig's whole rest orientation. Two rigs that stand
+        # the same way can still disagree about which axis is "up" at the hips,
+        # and replaying the source's hip rotation then lays the target flat on
+        # its back. Skipping it keeps the target upright and lets the character
+        # controller own facing, which it does anyway.
+        if skipRoot is false or key.equals(other: "hips") is false {
+          dstNode = findJointByKey(sk: to, key: key)
+        }
+      }
+      if dstNode >= 0 {
+        targetNode.add(value: dstNode)
+        path.add(value: c.path.get(index: ch))
+        interp.add(value: c.interp.get(index: ch))
+        timeStart.add(value: c.timeStart.get(index: ch))
+        timeCount.add(value: c.timeCount.get(index: ch))
+        valueStart.add(value: c.valueStart.get(index: ch))
+        kept = kept + 1
+      }
+    }
+    ch = ch + 1
+  }
+  # times/values are indexed by the per-channel starts above, so they carry over
+  # untouched.
+  let times: List(Float) = createList(Float, cap: c.times.length)
+  var t: Int = 0
+  loop t < c.times.length {
+    times.add(value: c.times.get(index: t))
+    t = t + 1
+  }
+  let values: List(Float) = createList(Float, cap: c.values.length)
+  var v: Int = 0
+  loop v < c.values.length {
+    values.add(value: c.values.get(index: v))
+    v = v + 1
+  }
+  ret Clip {
+    ok: kept > 0, name: c.name, duration: c.duration,
+    targetNode: own targetNode, path: own path, interp: own interp,
+    timeStart: own timeStart, timeCount: own timeCount, times: own times,
+    valueStart: own valueStart, values: own values
+  }
+}
+
+# How many channels of `c` would survive a retarget onto `to` — for logging and
+# for deciding whether a retarget is worth using at all.
+func retargetedChannelCount(c: view Clip, from: view Skeleton, to: view Skeleton) pub ret Int {
+  var kept: Int = 0
+  var ch: Int = 0
+  loop ch < c.targetNode.length {
+    let srcNode: Int = c.targetNode.get(index: ch)
+    if srcNode >= 0 and srcNode < from.nodeNames.length and c.path.get(index: ch) is pathRotation {
+      if let srcName: String = from.nodeNames.at(index: srcNode) {
+        if findJointByKey(sk: to, key: jointNameKey(name: srcName)) >= 0 {
+          kept = kept + 1
+        }
+      }
+    }
+    ch = ch + 1
+  }
+  ret kept
+}
