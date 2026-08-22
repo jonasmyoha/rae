@@ -561,6 +561,20 @@ static bool parse_target_block(RaePackParser* parser,
     char* slash = strrchr(dir_copy, '/');
     if (slash) {
       *slash = '\0';
+      /* "/pack.raepack" truncates to "", which is not a directory. */
+      if (dir_copy[0] == '\0') {
+        dir_copy[0] = '/';
+        dir_copy[1] = '\0';
+      }
+    } else {
+      /* No directory component at all, e.g. `rae pack the game.raepack`. The
+         pack file is in the current directory; without this, dir_copy stays as
+         the whole filename and realpath resolves it to the FILE, so every
+         entry and source is then joined onto "<file>/..." and fails with
+         "entry path could not be resolved". */
+      free(dir_copy);
+      dir_copy = strdup(".");
+      if (!dir_copy) return false;
     }
     char* resolved_dir = realpath(dir_copy, NULL);
     free(dir_copy);
