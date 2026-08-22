@@ -1,10 +1,16 @@
 // Terrain material splat (#533). Same G-buffer output as the static GB_WGSL, but
-// the ground albedo comes from the biome classifier: each vertex samples
-// raeBiomeGroundColor(worldXY) (per-vertex — cheap; the terrain is smooth so the
-// interpolation reads fine), so the ground shows grass/sand/mud/rock/water blended
-// by the field. Composed with lib/noise.wgsl + lib/world_biome.wgsl prepended (they
-// provide raeNoiseFbm2 + raeBiomeGroundColor). Vertex layout = pos(3)/nrm(3)/uv(2),
-// same as the static pipeline.
+// the ground albedo comes from the biome classifier.
+//
+// PER FRAGMENT, not per vertex. This used to evaluate raeBiomeGroundColor at each
+// vertex and interpolate. A ground tile is 18 world units across 12 segments —
+// one vertex every 1.5 units, on a character 2 units tall — so from a top-down
+// camera the ground was a smooth gradient with no surface detail and a smeared
+// shoreline. The world XY is now carried to the fragment stage and the material
+// evaluated there, which puts the biome boundary on the pixel and lets
+// raeTerrainDetailColor add grain (lib/terrain_detail.wgsl).
+//
+// Composed with lib/noise.wgsl + lib/world_biome.wgsl + lib/terrain_detail.wgsl
+// prepended. Vertex layout = pos(3)/nrm(3)/uv(2), same as the static pipeline.
 
 struct Frame {
   viewProj: mat4x4<f32>,
@@ -36,7 +42,8 @@ struct VsOut {
   @location(1) @interpolate(flat) inst: u32,
   @location(2) clipNow: vec4<f32>,
   @location(3) clipPrev: vec4<f32>,
-  @location(4) splat: vec3<f32>,   // biome ground colour, sampled per-vertex
+  @location(4) worldXY: vec2<f32>,  // world XY, for the per-pixel grain
+  @location(5) bio: vec3<f32>,      // elevation, moisture, slope — low-freq, safe to interpolate
 };
 
 @vertex
@@ -50,7 +57,12 @@ fn vs(@builtin(instance_index) ii: u32,
   o.inst = ii;
   o.clipNow = o.pos;
   o.clipPrev = F.prevViewProj * (d.prevModel * vec4<f32>(p, 1.0));
-  o.splat = raeBiomeGroundColor(world.xy);
+  o.worldXY = world.xy;
+  // The expensive part of the biome stays here: elevation/moisture/slope are
+  // ~23 octaves of noise between them, and they are smooth enough to interpolate.
+  // The fragment only classifies them, which is where the sharp shoreline is.
+  let elev = raeBiomeElevation(world.xy);
+  o.bio = vec3<f32>(elev, raeBiomeMoisture(world.xy), raeBiomeSlope(world.xy));
   o.pos = vec4<f32>(o.pos.xy + F.jitter.xy * o.pos.w, o.pos.zw);
   return o;
 }
@@ -73,7 +85,7 @@ fn fs(in: VsOut) -> FsOut {
   let mEnc = clamp(motion, vec2<f32>(-0.5), vec2<f32>(0.5)) + vec2<f32>(0.50196078);
   var o: FsOut;
   o.gba = vec4<f32>(oct.x, oct.y, 0.5, d.params.z);
-  o.gbb = vec4<f32>(in.splat, rough);
+  o.gbb = vec4<f32>(raeTerrainDetailColor(in.worldXY, in.bio), rough);
   o.gbc = vec4<f32>(mEnc.x, mEnc.y, 0.0, d.params.y);
   return o;
 }
