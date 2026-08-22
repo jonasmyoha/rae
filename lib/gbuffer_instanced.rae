@@ -92,6 +92,83 @@ func characterPaletteBase(slot: view Int, jointCount: view Int) pub ret Int {
   ret slot * jointCount * 3
 }
 
+# ---------------------------------------------------------------------------
+# Palette arena — ANY NUMBER OF SKELETONS, each with its own joint count.
+#
+# `characterPaletteBase(slot, jointCount)` above derives the base from a slot
+# index, which silently assumes every character in the world shares one
+# jointCount. That holds for a crowd of clones and breaks the moment a second
+# skeleton of a different size shows up.
+#
+# The arena instead hands out explicit vec4-row offsets. Reserve a block per
+# skeleton-instance, upload the pose at that base, and pass the same base as the
+# draw's `paletteBase`. Different joint counts pack end to end with no gaps and
+# no shared stride.
+#
+#   var arena: PaletteArena = createPaletteArena()   # once
+#   resetPaletteArena(arena: arena)                  # each frame
+#   let base: Int = paletteReserve(arena: arena, jointCount: jc)
+#   uploadPaletteAt(rows: pose, jointCount: jc, baseRow: base)
+#   ... drawSkinnedInstance(..., paletteBase: base)
+#
+# The old slot API stays; existing callers are untouched.
+type PaletteArena {
+  cursor: Int     # next free vec4 row
+  capacity: Int   # total vec4 rows in the shared palette buffer
+  overflow: Bool  # set once a reserve did not fit, so callers can report it
+}
+
+# One joint occupies three vec4 rows (an affine transform).
+const paletteRowsPerJoint: Int = 3
+
+func createPaletteArena() pub ret PaletteArena {
+  # gbSkinPaletteSize is the byte size of the whole shared buffer; a vec4 row is
+  # four floats. Read it rather than duplicating the C-side cap here.
+  var rows: Int = 0
+  if gbSkinPaletteReady() is not 0 {
+    rows = gbSkinPaletteSize() / 16
+  }
+  ret PaletteArena { cursor: 0, capacity: rows, overflow: false }
+}
+
+# Call once per frame, before reserving. Poses are rewritten every frame, so the
+# arena is a bump allocator that resets rather than a freelist.
+func resetPaletteArena(arena: mod PaletteArena) pub {
+  arena.cursor = 0
+  arena.overflow = false
+  # The buffer is created lazily by the first upload, so capacity may only
+  # become known after the first frame.
+  if arena.capacity is 0 and gbSkinPaletteReady() is not 0 {
+    arena.capacity = gbSkinPaletteSize() / 16
+  }
+}
+
+# Reserve room for one posed skeleton. Returns the vec4 row to upload at and to
+# pass as `paletteBase`, or -1 when the shared buffer is full.
+func paletteReserve(arena: mod PaletteArena, jointCount: copy Int) pub ret Int {
+  if jointCount <= 0 { ret 0 - 1 }
+  let need: Int = jointCount * paletteRowsPerJoint
+  if arena.cursor + need > arena.capacity {
+    arena.overflow = true
+    ret 0 - 1
+  }
+  let base: Int = arena.cursor
+  arena.cursor = arena.cursor + need
+  ret base
+}
+
+# Upload one posed skeleton at an explicit vec4 row offset (from paletteReserve).
+# `rows` is jointCount * 12 Floats — three vec4 rows per joint. A vec4 row is 16
+# bytes, which is what turns baseRow into the write offset.
+func uploadPaletteAt(rows: view List(Float), jointCount: copy Int, baseRow: copy Int) pub {
+  if gbSkinPaletteReady() is 0 { ret }
+  if baseRow < 0 { ret }
+  let paletteFloats: Int = jointCount * 12
+  wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: gbSkinPalette(),
+    bufferOffset: (baseRow * 16) as UInt64, data: rows.data,
+    size: (paletteFloats * 4) as UInt64)
+}
+
 # Upload one character's joint palette into the shared skin palette buffer at a
 # per-character SLOT (#547), directly over the WebGPU bindings — the #502 pattern
 # the draws buffer already uses. `rows` is jointCount * 12 Floats (three vec4 rows
