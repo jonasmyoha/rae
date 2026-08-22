@@ -33,12 +33,15 @@ type BiomeConfig {
   beachBand: Float    # sand band width above waterLevel
   rockSlope: Float    # slope above this trends to rock
   swampMoist: Float   # moisture above this (low+flat) trends to mud/swamp
+  islandRadius: Float # distance from origin where the land gives out
+  islandFalloff: Float # width of the shore ramp inside that radius
 }
 
 func defaultBiomeConfig() pub ret BiomeConfig {
   ret BiomeConfig {
     seed: 1337, elevScale: 90.0, moistScale: 140.0,
-    waterLevel: 0.0 - 0.28, beachBand: 0.06, rockSlope: 0.30, swampMoist: 0.6
+    waterLevel: 0.0 - 0.28, beachBand: 0.06, rockSlope: 0.30, swampMoist: 0.6,
+    islandRadius: 150.0, islandFalloff: 55.0
   }
 }
 
@@ -59,9 +62,22 @@ func smooth01(edge0: view Float, edge1: view Float, x: view Float) ret Float {
 }
 
 # Elevation ~[-1,1]: broad landforms with a little detail.
+# 1 well inside the island, 0 out at sea, with a smooth shore ramp between. This
+# is what makes the world a finite place instead of endless noise: an RTS level
+# needs an edge the player can read, and open water is the most legible one.
+func worldIslandMask(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Float {
+  let d: Float = math.sqrt(x: x * x + y * y)
+  ret 1.0 - smooth01(edge0: cfg.islandRadius - cfg.islandFalloff, edge1: cfg.islandRadius, x: d)
+}
+
+# Elevation, shaped into an island. Outside the radius it blends to open ocean
+# rather than clamping, so the shoreline follows the noise and stays ragged
+# instead of drawing a circle.
 func worldElevation(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Float {
-  ret noise.fbm2(x: x / cfg.elevScale, y: y / cfg.elevScale,
-                 octaves: 4, lacunarity: 2.0, gain: 0.5, seed: cfg.seed)
+  let e: Float = noise.fbm2(x: x / cfg.elevScale, y: y / cfg.elevScale,
+                            octaves: 4, lacunarity: 2.0, gain: 0.5, seed: cfg.seed)
+  let mask: Float = worldIslandMask(x: x, y: y, cfg: cfg)
+  ret e * mask - (1.0 - mask)
 }
 
 # Moisture 0..1, decorrelated from elevation.

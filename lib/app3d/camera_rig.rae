@@ -33,6 +33,21 @@ const keyS: Int = 83
 const keyD: Int = 68
 const keyQ: Int = 81
 const keyE: Int = 69
+# Either Shift. SDL reports them as distinct scancodes, and a camera that
+# speeds up on one shift key but not the other reads as a bug.
+const keyLShift: Int = 1073742049
+const keyRShift: Int = 1073742053
+
+# How much faster Shift makes the WASD camera. Applied to translation only —
+# boosting the turn rate as well makes the view hard to aim.
+const cameraRigBoost: Float = 4.0
+
+func cameraRigSpeedScale() ret Float {
+  if sdl3.isKeyDown(key: keyLShift) or sdl3.isKeyDown(key: keyRShift) {
+    ret cameraRigBoost
+  }
+  ret 1.0
+}
 
 enum CameraRigMode {
   orbit
@@ -420,15 +435,16 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
   if allowInput {
     # The wheel is a pointer device, so it rides the mouse toggle.
     mouseDist = 0.0 - gpu2d.wheelMove() * rig.wheelSpeed
+    let boost: Float = cameraRigSpeedScale()
     if rig.mode is CameraRigMode.orbit {
-      if sdl3.isKeyDown(key: keyW) { keyDist = keyDist - dt * rig.moveSpeed }
-      if sdl3.isKeyDown(key: keyS) { keyDist = keyDist + dt * rig.moveSpeed }
+      if sdl3.isKeyDown(key: keyW) { keyDist = keyDist - dt * rig.moveSpeed * boost }
+      if sdl3.isKeyDown(key: keyS) { keyDist = keyDist + dt * rig.moveSpeed * boost }
       if sdl3.isKeyDown(key: keyA) { keyYaw = keyYaw - dt * rig.keyTurnSpeed }
       if sdl3.isKeyDown(key: keyD) { keyYaw = keyYaw + dt * rig.keyTurnSpeed }
       if sdl3.isKeyDown(key: keyQ) { keyOrbitPitch = keyOrbitPitch - dt * rig.keyTurnSpeed }
       if sdl3.isKeyDown(key: keyE) { keyOrbitPitch = keyOrbitPitch + dt * rig.keyTurnSpeed }
     } else if rig.mode is CameraRigMode.free {
-      let step: Float = dt * rig.moveSpeed
+      let step: Float = dt * rig.moveSpeed * boost
       let forward: Vec3 = cameraRigForward(rig: rig)
       let right: Vec3 = cameraRigRight(rig: rig)
       let up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
