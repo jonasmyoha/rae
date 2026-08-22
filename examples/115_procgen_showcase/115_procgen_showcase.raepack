@@ -1,0 +1,30 @@
+pack ProcgenShowcase {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "Procedural Props — Rocks, Trees & Textures"
+  description: "Procedural content generated entirely in Rae code — no external assets. Five faceted low-poly rocks (noise-displaced spheres with seeded planar cuts, flat-shaded), five stylised trees (tapered trunks grown by recursive seeded branches with faceted canopies), and five noise-driven material textures (grass, sand, rock, mud, water) shown as swatches. Everything is deterministic from a seed with LOD/detail knobs, generated over lib/noise + lib/procgen. Rendered on the deferred path; drag to orbit, wheel to zoom."
+  featured: "true"
+  category: "3D Renderer"
+  wasmWebApp: "true"
+  display: {
+    width: 1280
+    height: 800
+  }
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "main.rae"
+      sources: {
+        source: { path: ".", emit: compiled }
+      }
+    }
+    target wasm: {
+      label: "WASM (WebGPU)"
+      entry: "main.rae"
+      sources: {
+        source: { path: ".", emit: compiled }
+      }
+    }
+  }
+}
