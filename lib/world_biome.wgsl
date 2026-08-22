@@ -12,6 +12,8 @@ const RAE_BIOME_WATER_LEVEL: f32 = -0.28;
 const RAE_BIOME_BEACH_BAND: f32 = 0.06;
 const RAE_BIOME_ROCK_SLOPE: f32 = 0.30;
 const RAE_BIOME_SWAMP_MOIST: f32 = 0.6;
+const RAE_BIOME_ISLAND_RADIUS: f32 = 150.0;
+const RAE_BIOME_ISLAND_FALLOFF: f32 = 55.0;
 
 struct RaeBiome {
   elevation: f32,
@@ -26,8 +28,21 @@ struct RaeBiome {
   wRock: f32,
 };
 
+// 1 well inside the island, 0 out at sea. Mirrors world_biome.rae
+// worldIslandMask — an RTS level needs a readable edge, and open water is the
+// most legible one.
+fn raeBiomeIslandMask(p: vec2<f32>) -> f32 {
+  let d = length(p);
+  return 1.0 - smoothstep(RAE_BIOME_ISLAND_RADIUS - RAE_BIOME_ISLAND_FALLOFF,
+                          RAE_BIOME_ISLAND_RADIUS, d);
+}
+
+// Blends to open ocean outside the radius rather than clamping, so the shoreline
+// follows the noise and stays ragged instead of drawing a circle.
 fn raeBiomeElevation(p: vec2<f32>) -> f32 {
-  return raeNoiseFbm2(p / RAE_BIOME_ELEV_SCALE, 4u, 2.0, 0.5, RAE_BIOME_SEED);
+  let e = raeNoiseFbm2(p / RAE_BIOME_ELEV_SCALE, 4u, 2.0, 0.5, RAE_BIOME_SEED);
+  let mask = raeBiomeIslandMask(p);
+  return e * mask - (1.0 - mask);
 }
 
 fn raeBiomeMoisture(p: vec2<f32>) -> f32 {
