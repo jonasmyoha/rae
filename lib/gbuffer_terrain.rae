@@ -19,8 +19,10 @@ var gTerrainPipeMade: Bool = false
 func terrainSplatWgsl() ret String {
   let noiseSrc: String = gbReadWgsl(path: "lib/noise.wgsl")
   let biomeSrc: String = gbReadWgsl(path: "lib/world_biome.wgsl")
+  let detailSrc: String = gbReadWgsl(path: "lib/terrain_detail.wgsl")
   let terrSrc: String = gbReadWgsl(path: "lib/terrain_splat.wgsl")
-  ret noiseSrc.concat(other: "\n").concat(other: biomeSrc).concat(other: "\n").concat(other: terrSrc)
+  ret noiseSrc.concat(other: "\n").concat(other: biomeSrc).concat(other: "\n")
+    .concat(other: detailSrc).concat(other: "\n").concat(other: terrSrc)
 }
 
 func ensureTerrainPipeline() {
