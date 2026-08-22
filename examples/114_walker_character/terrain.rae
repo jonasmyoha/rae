@@ -13,6 +13,8 @@ import scene3d
 import mesh3d
 import vec3
 import gbuffer
+import gbuffer_terrain
+open gbuffer_terrain
 import gbuffer_instanced
 open gltf
 open gpu3d
@@ -393,7 +395,7 @@ func drawTerrainGround(terrain: view InfiniteTerrain, scene: view Scene3d) pub {
     if meshId >= 1 and entity >= 0 {
       let t: Transform3d = sceneTransformAt(values: scene.transforms, index: entity)
       let pt: Transform3d = sceneTransformAt(values: scene.prevTransforms, index: entity)
-      gbuffer.drawTerrainMesh(mesh: meshId, transform: t, prevTransform: pt, roughness: 0.96)
+      drawTerrainMesh(mesh: meshId, transform: t, prevTransform: pt, roughness: 0.96)
     }
     poolIndex = poolIndex + 1
   }
