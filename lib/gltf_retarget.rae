@@ -1,0 +1,213 @@
+# Clip retargeting — moving an animation between rigs.
+#
+# Split out of gltf_skin.rae, which is at the compiler's hard 1000-line cap.
+# gltf_skin.rae owns loading and sampling; this owns the one operation that needs
+# two skeletons at once.
+import core
+import math
+import quat
+import gltf_skin
+open gltf_skin
+
+# --- clip retargeting -------------------------------------------------------
+#
+# A Clip stores channels as node indices into the skeleton it was loaded
+# against, so a clip authored for one rig is meaningless on another even when
+# the two are anatomically identical. Rigs from Mixamo-derived pipelines usually
+# ARE identical in naming, give or take a `mixamorig:` prefix and some casing, so
+# a clip can be moved across by matching joint NAMES and rewriting the indices.
+#
+# This is what lets one set of locomotion clips drive every humanoid character in
+# a scene, whatever tool produced each rig.
+
+# Normalise a joint name for matching: drop any `namespace:` prefix, lowercase,
+# and strip separators. `mixamorig:LeftForeArm` and `LeftForeArm` both become
+# `leftforearm`.
+func jointNameKey(name: view String) ret String {
+  var base: String = name
+  let colon: Int = base.lastIndexOf(sub: ":")
+  if colon >= 0 {
+    base = base.sub(start: colon + 1, len: base.length() - colon - 1)
+  }
+  var out: String = ""
+  var i: Int = 0
+  let lowered: String = base.toLower()
+  loop i < lowered.length() {
+    let ch: String = lowered.sub(start: i, len: 1)
+    if ch.equals(other: "_") is false and ch.equals(other: " ") is false
+       and ch.equals(other: ".") is false and ch.equals(other: "-") is false {
+      out = out.concat(other: ch)
+    }
+    i = i + 1
+  }
+  ret out
+}
+
+# Rigs agree on most joint names and disagree on a few. A source joint with no
+# direct match gets one alias attempt, so a spine or head segment lands on its
+# anatomical counterpart instead of being dropped.
+#
+# Dropping a mid-spine joint is not neutral: a rig usually bends forward at one
+# spine joint and straightens at the next, so losing the upper segment keeps the
+# bend and discards the correction, and the character walks hunched.
+func jointNameAliasKey(key: view String) ret String {
+  if key.equals(other: "spine1") { ret "spine02" }
+  if key.equals(other: "spine02") { ret "spine1" }
+  if key.equals(other: "spine2") { ret "spine03" }
+  if key.equals(other: "headtopend") { ret "head1" }
+  if key.equals(other: "head1") { ret "headtopend" }
+  if key.equals(other: "leftupleg") { ret "leftthigh" }
+  if key.equals(other: "rightupleg") { ret "rightthigh" }
+  ret ""
+}
+
+# Index of the joint in `sk` whose name matches `key`, or -1.
+func findJointByKey(sk: view Skeleton, key: view String) ret Int {
+  var n: Int = 0
+  loop n < sk.nodeNames.length {
+    if let nodeName: String = sk.nodeNames.at(index: n) {
+      if jointNameKey(name: nodeName).equals(other: key) {
+        ret n
+      }
+    }
+    n = n + 1
+  }
+  ret 0 - 1
+}
+
+# Rewrite `c`'s channels from the `from` skeleton onto `to`, matching by joint
+# name. Channels whose joint has no counterpart are DROPPED — those joints simply
+# hold their bind pose, which is the right failure mode: a rig missing a spine
+# segment should still walk.
+#
+# ROTATION CHANNELS ONLY. Translation and scale are authored in the SOURCE rig's
+# bone lengths; replaying them on different proportions tears the mesh apart.
+# Rotations are proportion-independent, which is why they retarget and the others
+# do not. Root motion is not carried either — the character controller owns world
+# position here, and hip translation would fight it.
+#
+# BIND-DELTA. A clip's local rotations are relative to the rig they were authored
+# on. Two rigs can stand the same way and still disagree about each joint's rest
+# orientation, and copying rotations across then lays the target flat on its back
+# or twists its limbs. So each key is converted to the source's rotation relative
+# to its OWN rest, and that delta is applied to the destination's rest:
+#
+#     delta = inverse(srcBind) * srcKey
+#     out   = dstBind * delta
+#
+# which is the identity when a rig is retargeted onto itself, and correct for any
+# pair whose joints correspond anatomically however their rests differ.
+#
+# `fromBind` / `toBind` are the rest poses captured at load (captureSkeletonPose),
+# NOT the live skeletons — those are mutated every frame by applyClip.
+# `skipRoot` drops the hip channel. Bind-delta fixes each joint's rest
+# orientation, but it cannot reconcile different HIERARCHIES above the hips — one
+# rig may carry an armature node the other lacks, and its contribution lands on
+# the root. Dropping it keeps the character upright and costs nothing here,
+# because the controller owns facing and world position anyway.
+func retargetClip(c: view Clip, from: view Skeleton, fromBind: view SkeletonPose,
+                  to: view Skeleton, toBind: view SkeletonPose,
+                  skipRoot: view Bool) pub ret Clip {
+  if c.ok is false or from.ok is false or to.ok is false {
+    ret emptyClip()
+  }
+  let targetNode: List(Int) = createList(Int, cap: c.targetNode.length)
+  let path: List(Int) = createList(Int, cap: c.path.length)
+  let interp: List(Int) = createList(Int, cap: c.interp.length)
+  let timeStart: List(Int) = createList(Int, cap: c.timeStart.length)
+  let timeCount: List(Int) = createList(Int, cap: c.timeCount.length)
+  let valueStart: List(Int) = createList(Int, cap: c.valueStart.length)
+  let times: List(Float) = createList(Float, cap: c.times.length)
+  let values: List(Float) = createList(Float, cap: c.values.length)
+
+  var ch: Int = 0
+  loop ch < c.targetNode.length {
+    let srcNode: Int = c.targetNode.get(index: ch)
+    if c.path.get(index: ch) is pathRotation
+       and srcNode >= 0 and srcNode < from.nodeNames.length {
+      var dstNode: Int = 0 - 1
+      if let srcName: String = from.nodeNames.at(index: srcNode) {
+        let key: String = jointNameKey(name: srcName)
+        if skipRoot is false or key.equals(other: "hips") is false {
+          dstNode = findJointByKey(sk: to, key: key)
+          if dstNode < 0 {
+            let alias: String = jointNameAliasKey(key: key)
+            if alias.length() > 0 {
+              dstNode = findJointByKey(sk: to, key: alias)
+            }
+          }
+        }
+      }
+      if dstNode >= 0 {
+        let srcBind: Quat = quat.qnorm(a: quat.create(
+          x: fromBind.localR.get(index: srcNode * 4),
+          y: fromBind.localR.get(index: srcNode * 4 + 1),
+          z: fromBind.localR.get(index: srcNode * 4 + 2),
+          w: fromBind.localR.get(index: srcNode * 4 + 3)))
+        let dstBind: Quat = quat.qnorm(a: quat.create(
+          x: toBind.localR.get(index: dstNode * 4),
+          y: toBind.localR.get(index: dstNode * 4 + 1),
+          z: toBind.localR.get(index: dstNode * 4 + 2),
+          w: toBind.localR.get(index: dstNode * 4 + 3)))
+        let srcBindInv: Quat = quat.conjugate(a: srcBind)
+
+        let ts: Int = c.timeStart.get(index: ch)
+        let tn: Int = c.timeCount.get(index: ch)
+        let vs: Int = c.valueStart.get(index: ch)
+
+        targetNode.add(value: dstNode)
+        path.add(value: pathRotation)
+        interp.add(value: c.interp.get(index: ch))
+        timeCount.add(value: tn)
+        timeStart.add(value: times.length)
+        valueStart.add(value: values.length)
+
+        var k: Int = 0
+        loop k < tn {
+          times.add(value: c.times.get(index: ts + k))
+          let key: Quat = quat.create(
+            x: c.values.get(index: vs + k * 4), y: c.values.get(index: vs + k * 4 + 1),
+            z: c.values.get(index: vs + k * 4 + 2), w: c.values.get(index: vs + k * 4 + 3))
+          let delta: Quat = quat.qmul(a: srcBindInv, b: quat.qnorm(a: key))
+          let out: Quat = quat.qnorm(a: quat.qmul(a: dstBind, b: delta))
+          values.add(value: out.x)
+          values.add(value: out.y)
+          values.add(value: out.z)
+          values.add(value: out.w)
+          k = k + 1
+        }
+      }
+    }
+    ch = ch + 1
+  }
+
+  ret Clip {
+    ok: targetNode.length > 0, name: c.name, duration: c.duration,
+    targetNode: own targetNode, path: own path, interp: own interp,
+    timeStart: own timeStart, timeCount: own timeCount, times: own times,
+    valueStart: own valueStart, values: own values
+  }
+}
+
+# How many channels of `c` would survive a retarget onto `to` — for logging and
+# for deciding whether a retarget is worth using at all.
+func retargetedChannelCount(c: view Clip, from: view Skeleton, to: view Skeleton) pub ret Int {
+  var kept: Int = 0
+  var ch: Int = 0
+  loop ch < c.targetNode.length {
+    let srcNode: Int = c.targetNode.get(index: ch)
+    if srcNode >= 0 and srcNode < from.nodeNames.length and c.path.get(index: ch) is pathRotation {
+      if let srcName: String = from.nodeNames.at(index: srcNode) {
+        let key: String = jointNameKey(name: srcName)
+        var hit: Int = findJointByKey(sk: to, key: key)
+        if hit < 0 {
+          let alias: String = jointNameAliasKey(key: key)
+          if alias.length() > 0 { hit = findJointByKey(sk: to, key: alias) }
+        }
+        if hit >= 0 { kept = kept + 1 }
+      }
+    }
+    ch = ch + 1
+  }
+  ret kept
+}
