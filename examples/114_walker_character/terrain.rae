@@ -7,6 +7,8 @@
 import core
 import math
 import noise
+import world_biome
+open world_biome
 import gltf
 import gpu3d
 import scene3d
@@ -40,14 +42,24 @@ const terrainTileSegments: Int = 12
 const terrainTileVerts: Int = 169
 const terrainTileFloats: Int = 1352
 
-# The height field: two octaves of Perlin over world position. The broad
-# octave makes ~50 m hills a character walks over; the detail octave breaks
-# up the surface at ~13 m so slopes read in the cel shading. Amplitudes keep
-# the steepest rise around 0.5 m per metre — hills, never cliffs.
+# The height field IS the biome elevation field (lib/world_biome), not a second
+# independent noise. It used to be its own two octaves of Perlin, unrelated to the
+# elevation the shader classifies and to the height the grass compute pass places
+# blades on, so the three disagreed about where the ground was.
+#
+# Water is one height: submerged elevation clamps to the water level, so the sea
+# is flat by construction with no water mesh.
 func terrainHeightAt(x: view Float, y: view Float, groundZ: view Float) ret Float {
-  let broad: Float = noise.perlin2(x: x * 0.020, y: y * 0.020, seed: 977)
-  let detail: Float = noise.perlin2(x: x * 0.075, y: y * 0.075, seed: 431)
-  ret groundZ + broad * 2.8 + detail * 0.55
+  ret worldTerrainHeight(x: x, y: y, groundZ: groundZ, cfg: defaultBiomeConfig())
+}
+
+# Vegetation needs a real meadow, not a damp patch of beach.
+const propGrassMin: Float = 0.45
+
+# Nothing stands in the sea, and vegetation wants grass under it. Without this
+# every prop kind scatters blind and trees, rocks and bushes stand on open water.
+func terrainPropAllowed(x: view Float, y: view Float, minGrass: view Float) ret Bool {
+  ret worldPropAllowed(x: x, y: y, minGrass: minGrass, cfg: defaultBiomeConfig())
 }
 
 # One terrain prop kind drawn by instancing (grass epic #485): its mesh, the
@@ -137,13 +149,18 @@ func terrainScale(cellX: view Int, cellY: view Int, seed: view Int,
 func terrainTransform(cellX: view Int, cellY: view Int,
                       seedX: view Int, seedY: view Int, seedScale: view Int,
                       groundZ: view Float, minimumScale: view Float,
-                      scaleSpread: view Float) ret Transform3d {
-  let scale: Float = terrainScale(cellX: cellX, cellY: cellY, seed: seedScale,
+                      scaleSpread: view Float, minGrass: view Float) ret Transform3d {
+  var scale: Float = terrainScale(cellX: cellX, cellY: cellY, seed: seedScale,
                                   minimum: minimumScale, spread: scaleSpread)
   let posX: Float = cellX.toFloat() * terrainCellSize
     + terrainOffset(cellX: cellX, cellY: cellY, seed: seedX)
   let posY: Float = cellY.toFloat() * terrainCellSize
     + terrainOffset(cellX: cellX, cellY: cellY, seed: seedY)
+  # Culled by collapsing the scale: props are gathered into instanced batches by
+  # slot, so removing one would mean reshuffling the pool.
+  if terrainPropAllowed(x: posX, y: posY, minGrass: minGrass) is false {
+    scale = 0.0
+  }
   # Every prop stands on the height field at its own scatter position. The
   # small lifts callers add to groundZ (flowers +0.015) pass through, since
   # the height is groundZ + noise.
@@ -233,10 +250,10 @@ func placeTerrainCell(terrain: mod InfiniteTerrain, scene: mod Scene3d,
   # assembled while still receiving separate cel colours.
   let broadTree: Transform3d = terrainTransform(
     cellX: cellX, cellY: cellY, seedX: 11, seedY: 17, seedScale: 23,
-    groundZ: terrain.groundZ, minimumScale: 0.30, scaleSpread: 0.15)
+    groundZ: terrain.groundZ, minimumScale: 0.30, scaleSpread: 0.15, minGrass: propGrassMin)
   let tallTree: Transform3d = terrainTransform(
     cellX: cellX, cellY: cellY, seedX: 11, seedY: 17, seedScale: 109,
-    groundZ: terrain.groundZ, minimumScale: 0.25, scaleSpread: 0.14)
+    groundZ: terrain.groundZ, minimumScale: 0.25, scaleSpread: 0.14, minGrass: propGrassMin)
   let treeSelector: Float = terrainHash(cellX: cellX, cellY: cellY, seed: 131)
   let broadVisible: Bool = treeSelector < 0.54
   let broadTrunkEntity: Int = terrainEntityAt(
@@ -268,27 +285,27 @@ func placeTerrainCell(terrain: mod InfiniteTerrain, scene: mod Scene3d,
     entity: terrainEntityAt(entities: terrain.rockEntities, index: poolIndex),
     transform: terrainTransform(
       cellX: cellX, cellY: cellY, seedX: 31, seedY: 37, seedScale: 41,
-      groundZ: terrain.groundZ, minimumScale: 0.28, scaleSpread: 0.34))
+      groundZ: terrain.groundZ, minimumScale: 0.28, scaleSpread: 0.34, minGrass: 0.0))
   terrainTeleport(scene: scene,
     entity: terrainEntityAt(entities: terrain.bushEntities, index: poolIndex),
     transform: terrainTransform(
       cellX: cellX, cellY: cellY, seedX: 47, seedY: 53, seedScale: 59,
-      groundZ: terrain.groundZ, minimumScale: 0.22, scaleSpread: 0.16))
+      groundZ: terrain.groundZ, minimumScale: 0.22, scaleSpread: 0.16, minGrass: propGrassMin))
   terrainTeleport(scene: scene,
     entity: terrainEntityAt(entities: terrain.flowerEntities, index: poolIndex),
     transform: terrainTransform(
       cellX: cellX, cellY: cellY, seedX: 61, seedY: 67, seedScale: 71,
-      groundZ: terrain.groundZ + 0.015, minimumScale: 0.35, scaleSpread: 0.25))
+      groundZ: terrain.groundZ + 0.015, minimumScale: 0.35, scaleSpread: 0.25, minGrass: propGrassMin))
   terrainTeleport(scene: scene,
     entity: terrainEntityAt(entities: terrain.grassAEntities, index: poolIndex),
     transform: terrainTransform(
       cellX: cellX, cellY: cellY, seedX: 73, seedY: 79, seedScale: 83,
-      groundZ: terrain.groundZ, minimumScale: 0.52, scaleSpread: 0.30))
+      groundZ: terrain.groundZ, minimumScale: 0.52, scaleSpread: 0.30, minGrass: propGrassMin))
   terrainTeleport(scene: scene,
     entity: terrainEntityAt(entities: terrain.grassBEntities, index: poolIndex),
     transform: terrainTransform(
       cellX: cellX, cellY: cellY, seedX: 89, seedY: 97, seedScale: 101,
-      groundZ: terrain.groundZ, minimumScale: 0.38, scaleSpread: 0.27))
+      groundZ: terrain.groundZ, minimumScale: 0.38, scaleSpread: 0.27, minGrass: propGrassMin))
 }
 
 func updateInfiniteTerrain(terrain: mod InfiniteTerrain, scene: mod Scene3d,
