@@ -386,6 +386,10 @@ EMSCRIPTEN_KEEPALIVE void rae_browser_request_stop(void) {
 }
 #endif
 
+/* Defined in runtime_gpu2d_frame.c / runtime_gpu3d.c: has any frame reached the
+ * surface yet? Used only to explain a headless run that drew nothing. */
+extern rae_Bool rae_frame_presented_any(void);
+
 rae_Bool rae_ext_gpu2d_pollClose(void) {
 #ifdef __EMSCRIPTEN__
     /* Browser WebGPU presents at requestAnimationFrame boundaries. Asyncify
@@ -487,7 +491,23 @@ rae_Bool rae_ext_gpu2d_pollClose(void) {
         g_sdl_frames_done++;
         return 0;   /* frame budget takes precedence over the ms budget */
     }
-    if (g_sdl_headless_ms > 0 && (rae_ext_nowMs() - g_sdl_start_ms) >= g_sdl_headless_ms) return 1;
+    if (g_sdl_headless_ms > 0 && (rae_ext_nowMs() - g_sdl_start_ms) >= g_sdl_headless_ms) {
+        /* The budget is wall clock from WINDOW CREATION, so it covers asset
+         * loading as well as the loop. An app that loads for longer than the
+         * budget exits having drawn nothing, writes no screenshot and returns 0
+         * -- which is indistinguishable from a broken renderer. Say what
+         * actually happened rather than leaving a silent black run. */
+        if (!rae_frame_presented_any()) {
+            fprintf(stderr,
+                "warning: RAE_SDL_HEADLESS_MS=%lld elapsed before the first frame. "
+                "Startup alone took longer than the budget, so nothing rendered and "
+                "no screenshot was written. The budget is wall clock from window "
+                "creation and includes asset loading -- raise it.\n",
+                (long long)g_sdl_headless_ms);
+            fflush(stderr);
+        }
+        return 1;
+    }
     return 0;
 }
 
