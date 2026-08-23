@@ -1132,6 +1132,10 @@ int64_t rae_g3d_tonemap_pending(void) { return g3d_tonemap_pending ? 1 : 0; }
  * does not have to call into renderer3d's frame logic to show anything.
  */
 static void rae_g3d_present_offscreen(void) {
+    /* A frame's pixels exist by this point whether or not there is a surface to
+     * show them on, so mark it here rather than at wgpuSurfacePresent -- headless
+     * returns before ever presenting. */
+    g_rae_presented_any = 1;
     if (g_sdl_headless_ms > 0 || g_sdl_headless_frames > 0) {
         const char* shot = getenv("RAE_GPU2D_SCREENSHOT");
         if (shot) rae_g2d_save_screenshot(shot);

@@ -1,3 +1,9 @@
+/* Set once any frame reaches the surface, from either the 2D or the 3D present
+ * path. Read by the headless close check so a run that drew nothing can say
+ * so instead of exiting silently with no screenshot. */
+rae_Bool g_rae_presented_any = 0;
+rae_Bool rae_frame_presented_any(void) { return g_rae_presented_any; }
+
 /* gpu2d frame begin/end, screenshot readback, flush, present, and shutdown. Raw GPU frame operations stay C; frame policy can migrate later.
  *
  * Split from rae_runtime.c by runtime migration task #288.
@@ -122,6 +128,7 @@ void rae_g2d_present_and_cleanup(void) {
     /* Either headless budget enables the capture: the ms budget (legacy)
      * or the deterministic frame budget. */
     if (g_sdl_headless_ms > 0 || g_sdl_headless_frames > 0) {
+        g_rae_presented_any = 1;
         const char* shot = getenv("RAE_GPU2D_SCREENSHOT");
         if (shot) rae_g2d_save_screenshot(shot);
     }
@@ -157,6 +164,7 @@ void rae_g2d_present_and_cleanup(void) {
             /* Browser WebGPU presents the canvas texture when control returns to
              * the browser; Emdawn rejects explicit wgpuSurfacePresent calls. */
             wgpuSurfacePresent(g_g2d_surface);
+            g_rae_presented_any = 1;
 #endif
             g_g2d_last_present_ok = 1;
             presented = 1;
