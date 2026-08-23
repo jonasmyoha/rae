@@ -23,8 +23,23 @@
 //
 // Requires lib/noise.wgsl and lib/world_biome.wgsl prepended.
 
-const RAE_TERRAIN_DETAIL_OCT_HI: u32 = 2u;       // fine grain — the only noise here
-const RAE_TERRAIN_DETAIL_HI_SCALE: f32 = 3.10;   // world units -> high freq
+// TWO SCALES, because one was not enough.
+//
+// Measured against the reference plate, the ground carried about 5x too little
+// variation, and what it had died on downsampling — fine grain, no patches. Clean
+// open meadow in the reference sits around std 0.026-0.07 in luminance and holds
+// that through a 4x downsample, i.e. the variation lives in PATCHES a hundred-odd
+// pixels across, with grain riding on top.
+//
+// (The 0.14-0.21 figures elsewhere in that image are trees and their shadows, not
+// ground. Matching those with flat colour would read as noise soup.)
+//
+// Cost is two fbm per fragment rather than one. The octave counts are the knob;
+// drop OCT_LO to 1 first on low-end parts, it is the cheaper loss.
+const RAE_TERRAIN_DETAIL_OCT_HI: u32 = 2u;       // grain
+const RAE_TERRAIN_DETAIL_OCT_LO: u32 = 2u;       // patches
+const RAE_TERRAIN_DETAIL_HI_SCALE: f32 = 3.10;   // ~0.3 world units per feature
+const RAE_TERRAIN_DETAIL_LO_SCALE: f32 = 0.75;   // ~1.3 world units per patch
 const RAE_TERRAIN_DETAIL_SEED: u32 = 1337u;
 
 // GROUND PALETTE, measured off the reference plate.
@@ -63,10 +78,10 @@ const RAE_TERRAIN_WATER: vec3<f32> = vec3<f32>(0.001, 0.164, 0.364);
 
 // How strongly the noise breaks each material up. Grass wants visible patchiness;
 // water wants almost none, or the sea looks like cling film.
-const RAE_TERRAIN_VAR_GRASS: f32 = 0.34;
-const RAE_TERRAIN_VAR_SAND:  f32 = 0.14;
-const RAE_TERRAIN_VAR_MUD:   f32 = 0.22;
-const RAE_TERRAIN_VAR_ROCK:  f32 = 0.26;
+const RAE_TERRAIN_VAR_GRASS: f32 = 1.15;
+const RAE_TERRAIN_VAR_SAND:  f32 = 0.40;
+const RAE_TERRAIN_VAR_MUD:   f32 = 0.30;
+const RAE_TERRAIN_VAR_ROCK:  f32 = 0.30;
 const RAE_TERRAIN_VAR_WATER: f32 = 0.06;
 
 fn raeTerrainVary(base: vec3<f32>, amount: f32, t: f32) -> vec3<f32> {
@@ -92,7 +107,9 @@ const RAE_WATER_FOAM: vec3<f32>    = vec3<f32>(0.900, 0.950, 0.960);
 // How far below the water line counts as "deep", in elevation units.
 const RAE_WATER_DEEP_AT: f32 = 0.16;
 // Width of the surf band, in water weight.
-const RAE_WATER_FOAM_BAND: f32 = 0.34;
+const RAE_WATER_FOAM_BAND: f32 = 0.42;
+// How opaque the surf gets at its strongest.
+const RAE_WATER_FOAM_STRENGTH: f32 = 0.80;
 const RAE_WATER_RIPPLE_SCALE: f32 = 5.5;
 const RAE_WATER_RIPPLE_SPEED: f32 = 0.55;
 
@@ -108,12 +125,26 @@ fn raeWaterColor(p: vec2<f32>, elev: f32, wWater: f32, t: f32) -> vec3<f32> {
                - t * RAE_WATER_RIPPLE_SPEED * 1.1);
   col = col * (1.0 + 0.06 * (w1 * 0.5 + w2 * 0.5));
 
-  // Surf: strongest where water is only just winning, faded out in deep water,
-  // and cut up by the ripple so the band is ragged.
+  return col;
+}
+
+// How much surf covers this spot, 0..1.
+//
+// SEPARATE FROM THE WATER COLOUR, and applied after the material blend. Foam
+// belongs exactly where water and sand are equally weighted, so folding it into
+// the water term meant multiplying it by wWater ~ 0.5 and then blending half of
+// that away against the sand — a surf line that was mathematically present and
+// visually absent. The reference's is a strong white band; this has to survive
+// the blend to look like one.
+fn raeWaterFoam(p: vec2<f32>, elev: f32, wWater: f32, t: f32) -> f32 {
+  if (wWater < 0.04) { return 0.0; }
+  let depth = clamp((RAE_BIOME_WATER_LEVEL - elev) / RAE_WATER_DEEP_AT, 0.0, 1.0);
   let edge = 1.0 - smoothstep(0.0, RAE_WATER_FOAM_BAND, abs(wWater - 0.5));
-  let ragged = clamp(0.55 + 0.45 * w2, 0.0, 1.0);
-  let foam = edge * ragged * (1.0 - depth);
-  return mix(col, RAE_WATER_FOAM, clamp(foam, 0.0, 1.0) * 0.85);
+  // Ragged, and crawling up the beach, so the line reads as surf and not a stroke.
+  let w = sin((p.x * 0.6 + p.y) * RAE_WATER_RIPPLE_SCALE * 0.8
+              - t * RAE_WATER_RIPPLE_SPEED * 1.1);
+  let ragged = clamp(0.45 + 0.55 * w, 0.0, 1.0);
+  return clamp(edge * ragged * (1.0 - depth * 0.8), 0.0, 1.0);
 }
 
 // Ground albedo, textured per pixel and blended by biome weight. `bio` is the
@@ -125,12 +156,17 @@ fn raeTerrainDetailColor(p: vec2<f32>, bio: vec3<f32>, t: f32) -> vec3<f32> {
   let d = clamp(raeNoiseFbm2(p * RAE_TERRAIN_DETAIL_HI_SCALE,
                              RAE_TERRAIN_DETAIL_OCT_HI, 2.0, 0.5,
                              RAE_TERRAIN_DETAIL_SEED) * 0.5 + 0.5, 0.0, 1.0);
-  // Broad patchiness comes free from the interpolated moisture; fine grain from
-  // the one fbm. Mixing them stops the ground reading as a single noise scale.
-  let v = clamp(0.45 * clamp(bio.y, 0.0, 1.0) + 0.55 * d, 0.0, 1.0);
-  return raeTerrainVary(RAE_TERRAIN_GRASS, RAE_TERRAIN_VAR_GRASS, v) * b.wGrass
+  let blotch = clamp(raeNoiseFbm2(p * RAE_TERRAIN_DETAIL_LO_SCALE,
+                                 RAE_TERRAIN_DETAIL_OCT_LO, 2.0, 0.5,
+                                 RAE_TERRAIN_DETAIL_SEED + 991u) * 0.5 + 0.5, 0.0, 1.0);
+  // Patches carry most of it, grain rides on top, and the interpolated moisture
+  // adds a very broad drift so two distant meadows are not the same green.
+  let v = clamp(0.20 * clamp(bio.y, 0.0, 1.0) + 0.55 * blotch + 0.25 * d, 0.0, 1.0);
+  let ground = raeTerrainVary(RAE_TERRAIN_GRASS, RAE_TERRAIN_VAR_GRASS, v) * b.wGrass
        + raeTerrainVary(RAE_TERRAIN_SAND,  RAE_TERRAIN_VAR_SAND,  v) * b.wSand
        + raeTerrainVary(RAE_TERRAIN_MUD,   RAE_TERRAIN_VAR_MUD,   v) * b.wMud
        + raeTerrainVary(RAE_TERRAIN_ROCK,  RAE_TERRAIN_VAR_ROCK,  v) * b.wRock
        + raeWaterColor(p, bio.x, b.wWater, t) * b.wWater;
+  let foam = raeWaterFoam(p, bio.x, b.wWater, t);
+  return mix(ground, RAE_WATER_FOAM, foam * RAE_WATER_FOAM_STRENGTH);
 }
