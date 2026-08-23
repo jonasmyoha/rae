@@ -92,22 +92,57 @@ func runFullscreen(pipeline: copy Ptr, bind: copy Ptr, target: copy Ptr) {
 var gCompositePipeMade: Bool = false
 var gCompositeBindGen: Int = -1
 var gCompositeBindMade: List(Bool) = createList(Bool, cap: 3)
-var gCompositeUniform: List(Float) = createList(Float, cap: 4)
+var gCompositeUniform: List(Float) = createList(Float, cap: 16)
 
 func compositeSlotMade(idx: copy Int) ret Bool {
   if let made: Bool = gCompositeBindMade.get(index: idx) { ret made }
   ret false
 }
 
+# ----- colour grade (#556) --------------------------------------------------
+#
+# What the composite pass does after tone mapping. Held as data rather than as
+# shader constants so a game can art-direct its look without a runtime rebuild,
+# and so two apps sharing this library can look different.
+#
+# `neutralGrade()` is EXACTLY identity: ACES as before, contrast 1, saturation 1,
+# no vibrance, no tint. Every existing caller gets it and sees no change.
+type ColorGrade {
+  # false = ACES (film emulation, the historical default)
+  # true  = Khronos PBR Neutral (preserves albedo hue and saturation)
+  pbrNeutral: Bool
+  # Multiplier around mid-grey. 1.0 is identity; 1.1 is a gentle punch.
+  contrast: Float
+  # Saturation push weighted toward ALREADY-DULL pixels, so vivid ones do not
+  # clip and lose hue. 0.0 is identity.
+  vibrance: Float
+  # Flat saturation multiply, applied after vibrance. 1.0 is identity.
+  saturation: Float
+  # Split tone. Added, not mixed, so keep these small (0.02-0.08 reads well).
+  shadowTint: Vec3
+  shadowTintStrength: Float
+  highlightTint: Vec3
+  highlightTintStrength: Float
+}
+
+# Identity. What every caller that does not ask for a grade gets.
+func neutralGrade() pub ret ColorGrade {
+  ret ColorGrade {
+    pbrNeutral: false, contrast: 1.0, vibrance: 0.0, saturation: 1.0,
+    shadowTint: vec3.create(x: 0.0, y: 0.0, z: 0.0), shadowTintStrength: 0.0,
+    highlightTint: vec3.create(x: 0.0, y: 0.0, z: 0.0), highlightTintStrength: 0.0
+  }
+}
+
 # Composite the lit/TAA result into the presentable target with exposure.
-func composite(exposure: copy Float) pub {
+func composite(exposure: copy Float, grade: view ColorGrade) pub {
   if gbDeferredPrepare() is 0 { ret }
 
   if not gCompositePipeMade {
     gCompositePipeMade = true
     gbSetCompositePipeline(pipeline: makeFullscreenPipeline(wgsl: gbCompositeWgsl(), format: g2dFormat() as Int32))
     let ud: WGPUBufferDescriptor = {
-      usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst, size: 16 as UInt64
+      usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst, size: 64 as UInt64
     }
     gbSetCompositeUbuf(buf: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: ud))
     # Linear sampler for the dynamic-resolution upscale (#530).
@@ -135,7 +170,7 @@ func composite(exposure: copy Float) pub {
   if not compositeSlotMade(idx: idx) {
     let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbCompositePipeline(), groupIndex: 0 as UInt32)
     var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 3)
-    entries.add(value: { binding: 0 as UInt32, buffer: gbCompositeUbuf(), size: 16 as UInt64 })
+    entries.add(value: { binding: 0 as UInt32, buffer: gbCompositeUbuf(), size: 64 as UInt64 })
     entries.add(value: { binding: 1 as UInt32, textureView: gbCompositeSourceView() })
     entries.add(value: { binding: 2 as UInt32, sampler: gbCompositeSampler() })
     let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 3 as UInt64, entries: entries.data }
@@ -144,18 +179,41 @@ func composite(exposure: copy Float) pub {
     gCompositeBindMade.set(index: idx, value: true)
   }
 
-  loop gCompositeUniform.length < 4 { gCompositeUniform.add(value: 0.0) }
+  # Four vec4s, matching CompositeU in the shader. Order is load-bearing.
+  loop gCompositeUniform.length < 16 { gCompositeUniform.add(value: 0.0) }
+  var opFlag: Float = 0.0
+  if grade.pbrNeutral { opFlag = 1.0 }
   gCompositeUniform.set(index: 0, value: exposure)
   gCompositeUniform.set(index: 1, value: gbRenderScale() as Float)   # #530: upscale ratio
+  gCompositeUniform.set(index: 2, value: opFlag)
+  gCompositeUniform.set(index: 3, value: grade.contrast)
+  gCompositeUniform.set(index: 4, value: grade.vibrance)
+  gCompositeUniform.set(index: 5, value: grade.saturation)
+  gCompositeUniform.set(index: 6, value: grade.shadowTintStrength)
+  gCompositeUniform.set(index: 7, value: grade.highlightTintStrength)
+  gCompositeUniform.set(index: 8, value: grade.shadowTint.x)
+  gCompositeUniform.set(index: 9, value: grade.shadowTint.y)
+  gCompositeUniform.set(index: 10, value: grade.shadowTint.z)
+  gCompositeUniform.set(index: 11, value: 0.0)
+  gCompositeUniform.set(index: 12, value: grade.highlightTint.x)
+  gCompositeUniform.set(index: 13, value: grade.highlightTint.y)
+  gCompositeUniform.set(index: 14, value: grade.highlightTint.z)
+  gCompositeUniform.set(index: 15, value: 0.0)
   wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: gbCompositeUbuf(),
-    bufferOffset: 0 as UInt64, data: gCompositeUniform.data, size: 16 as UInt64)
+    bufferOffset: 0 as UInt64, data: gCompositeUniform.data, size: 64 as UInt64)
 
   runFullscreen(pipeline: gbCompositePipeline(), bind: gbCompositeBind(idx: idx), target: g2dOffView())
 }
 
 # Public wrapper: the render graph's composite step (was gbuffer.compositePass).
+# Ungraded, so every existing caller keeps the look it was calibrated against.
 func compositePass(exposure: view Float) pub {
-  composite(exposure: exposure)
+  composite(exposure: exposure, grade: neutralGrade())
+}
+
+# Composite with a look. See ColorGrade.
+func compositePassGraded(exposure: view Float, grade: view ColorGrade) pub {
+  composite(exposure: exposure, grade: grade)
 }
 
 # ----- SSAO: screen-space ambient occlusion (#504) ---------------------------
