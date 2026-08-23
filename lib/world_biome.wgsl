@@ -37,12 +37,17 @@ fn raeBiomeIslandMask(p: vec2<f32>) -> f32 {
                           RAE_BIOME_ISLAND_RADIUS, d);
 }
 
-// Blends to open ocean outside the radius rather than clamping, so the shoreline
-// follows the noise and stays ragged instead of drawing a circle.
+// Shaped by SUBTRACTING at the rim, not by fading the noise toward ocean.
+// Scaling by the mask eats the island — near the rim only an unusually high
+// noise value stays above water, so the coastline lands far inside the nominal
+// radius. Subtracting leaves the interior untouched and carves only the edge.
+// Mirrors world_biome.rae worldElevation.
+const RAE_BIOME_ISLAND_SINK: f32 = 1.6;
+
 fn raeBiomeElevation(p: vec2<f32>) -> f32 {
   let e = raeNoiseFbm2(p / RAE_BIOME_ELEV_SCALE, 4u, 2.0, 0.5, RAE_BIOME_SEED);
   let mask = raeBiomeIslandMask(p);
-  return e * mask - (1.0 - mask);
+  return e - (1.0 - mask) * RAE_BIOME_ISLAND_SINK;
 }
 
 fn raeBiomeMoisture(p: vec2<f32>) -> f32 {
