@@ -70,11 +70,11 @@ const RAE_TERRAIN_DETAIL_SEED: u32 = 1337u;
 // Method: render, sample the same patches in both images, multiply each albedo
 // by target/measured, repeat. Recalibrate if the sun, the sky model or the
 // ambient ever change -- these numbers encode this lighting.
-const RAE_TERRAIN_GRASS: vec3<f32> = vec3<f32>(0.435, 0.451, 0.112);
+const RAE_TERRAIN_GRASS: vec3<f32> = vec3<f32>(0.835, 0.818, 0.218);
 const RAE_TERRAIN_SAND:  vec3<f32> = vec3<f32>(1.000, 0.723, 0.450);
 const RAE_TERRAIN_MUD:   vec3<f32> = vec3<f32>(0.760, 0.560, 0.230);
 const RAE_TERRAIN_ROCK:  vec3<f32> = vec3<f32>(0.520, 0.470, 0.350);
-const RAE_TERRAIN_WATER: vec3<f32> = vec3<f32>(0.001, 0.164, 0.364);
+const RAE_TERRAIN_WATER: vec3<f32> = vec3<f32>(0.001, 0.327, 0.599);
 
 // How strongly the noise breaks each material up. Grass wants visible patchiness;
 // water wants almost none, or the sea looks like cling film.
