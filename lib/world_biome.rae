@@ -254,29 +254,60 @@ func worldIsLand(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Bo
   ret sampleWorld(x: x, y: y, cfg: cfg).wWater <= worldWalkMaxWater
 }
 
-# Nearest land to (x, y), searched outward in a spiral. Returns the input
-# unchanged when it is already land, and gives up after `worldLandSearchRings`
-# rather than looping forever on a query with no land anywhere near it.
-const worldLandSearchRings: Int = 40
 const worldLandSearchStep: Float = 4.0
 const worldLandSearchSpokes: Int = 12
+# Enough rings to cross the island from its centre, so a search anchored at the
+# origin cannot miss land that exists.
+const worldLandSearchRings: Int = 48
 
-func worldFindLand(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Vec3 {
-  if worldIsLand(x: x, y: y, cfg: cfg) { ret vec3.create(x: x, y: y, z: 0.0) }
+type LandSpot {
+  x: Float
+  y: Float
+  found: Bool
+}
+
+# Spiral outward from (cx, cy) looking for land. `found` says whether the result
+# means anything — a search that quietly returns its own input is indistinguishable
+# from success, which is how a character ends up standing in the sea.
+func worldSpiralLand(cx: view Float, cy: view Float, cfg: view BiomeConfig) ret LandSpot {
+  if worldIsLand(x: cx, y: cy, cfg: cfg) {
+    ret LandSpot { x: cx, y: cy, found: true }
+  }
   var ring: Int = 1
   loop ring <= worldLandSearchRings {
     let radius: Float = ring.toFloat() * worldLandSearchStep
     var spoke: Int = 0
     loop spoke < worldLandSearchSpokes {
       let angle: Float = spoke.toFloat() / worldLandSearchSpokes.toFloat() * 6.2831853
-      let cx: Float = x + math.cos(x: angle) * radius
-      let cy: Float = y + math.sin(x: angle) * radius
-      if worldIsLand(x: cx, y: cy, cfg: cfg) { ret vec3.create(x: cx, y: cy, z: 0.0) }
+      let sx: Float = cx + math.cos(x: angle) * radius
+      let sy: Float = cy + math.sin(x: angle) * radius
+      if worldIsLand(x: sx, y: sy, cfg: cfg) {
+        ret LandSpot { x: sx, y: sy, found: true }
+      }
       spoke = spoke + 1
     }
     ring = ring + 1
   }
-  ret vec3.create(x: x, y: y, z: 0.0)
+  ret LandSpot { x: cx, y: cy, found: false }
+}
+
+# Nearest land to (x, y). ALWAYS returns land when the world has any.
+#
+# The local spiral only reaches `worldLandSearchRings * worldLandSearchStep`, so a
+# query far out at sea — a position restored from a session before walking into
+# the water was blocked, say — can fall outside it. Rather than hand back the
+# query and let the caller stand in the sea, it then re-searches from the island
+# CENTRE, where land is guaranteed to exist by construction.
+func worldFindLand(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Vec3 {
+  let near: LandSpot = worldSpiralLand(cx: x, cy: y, cfg: cfg)
+  if near.found { ret vec3.create(x: near.x, y: near.y, z: 0.0) }
+  let centre: LandSpot = worldSpiralLand(cx: 0.0, cy: 0.0, cfg: cfg)
+  if centre.found {
+    log("[world] no land within reach of ({x},{y}) — placed at the island centre instead")
+    ret vec3.create(x: centre.x, y: centre.y, z: 0.0)
+  }
+  log("[world] no land found anywhere; the biome config may have no island")
+  ret vec3.create(x: 0.0, y: 0.0, z: 0.0)
 }
 
 # Does a prop of this kind belong here? `minGrass` is how much grass material the
