@@ -85,7 +85,7 @@ fn fs(in: VsOut) -> FsOut {
   let mEnc = clamp(motion, vec2<f32>(-0.5), vec2<f32>(0.5)) + vec2<f32>(0.50196078);
   var o: FsOut;
   o.gba = vec4<f32>(oct.x, oct.y, 0.5, d.params.z);
-  o.gbb = vec4<f32>(raeTerrainDetailColor(in.worldXY, in.bio), rough);
+  o.gbb = vec4<f32>(raeTerrainDetailColor(in.worldXY, in.bio, d.params.w), rough);
   o.gbc = vec4<f32>(mEnc.x, mEnc.y, 0.0, d.params.y);
   return o;
 }
