@@ -73,21 +73,64 @@ fn raeTerrainVary(base: vec3<f32>, amount: f32, t: f32) -> vec3<f32> {
   return base * (1.0 - amount * 0.5 + amount * t);
 }
 
+// --- water -----------------------------------------------------------------
+//
+// The sea is part of the terrain mesh, clamped flat at the water level, so it
+// gets its look here rather than from a separate water pass. Three things carry
+// it, in order of how much they matter from a top-down camera:
+//
+//   1. DEPTH. Shallow water over the beach shelf reads lighter and greener,
+//      deep water darker and bluer. This is what makes a shoreline look like a
+//      shoreline rather than a blue shape with a hard edge.
+//   2. FOAM. A bright band where the land meets the sea, broken up by noise so
+//      it is a surf line and not a stroke.
+//   3. RIPPLE. Two crossing wave sets, cheap, mostly a brightness wobble. From
+//      above there is no silhouette to distort, so displacement would be wasted.
+
+const RAE_WATER_SHALLOW: vec3<f32> = vec3<f32>(0.075, 0.330, 0.430);
+const RAE_WATER_FOAM: vec3<f32>    = vec3<f32>(0.900, 0.950, 0.960);
+// How far below the water line counts as "deep", in elevation units.
+const RAE_WATER_DEEP_AT: f32 = 0.16;
+// Width of the surf band, in water weight.
+const RAE_WATER_FOAM_BAND: f32 = 0.34;
+const RAE_WATER_RIPPLE_SCALE: f32 = 5.5;
+const RAE_WATER_RIPPLE_SPEED: f32 = 0.55;
+
+fn raeWaterColor(p: vec2<f32>, elev: f32, wWater: f32, t: f32) -> vec3<f32> {
+  // Depth from how far the ground sank below the water line.
+  let depth = clamp((RAE_BIOME_WATER_LEVEL - elev) / RAE_WATER_DEEP_AT, 0.0, 1.0);
+  var col = mix(RAE_WATER_SHALLOW, RAE_TERRAIN_WATER, depth);
+
+  // Two crossing wave sets. Cheap sines rather than fbm: this rides on top of
+  // the one noise evaluation the ground already pays for.
+  let w1 = sin(p.x * RAE_WATER_RIPPLE_SCALE + t * RAE_WATER_RIPPLE_SPEED * 1.7);
+  let w2 = sin((p.x * 0.6 + p.y) * RAE_WATER_RIPPLE_SCALE * 0.8
+               - t * RAE_WATER_RIPPLE_SPEED * 1.1);
+  col = col * (1.0 + 0.06 * (w1 * 0.5 + w2 * 0.5));
+
+  // Surf: strongest where water is only just winning, faded out in deep water,
+  // and cut up by the ripple so the band is ragged.
+  let edge = 1.0 - smoothstep(0.0, RAE_WATER_FOAM_BAND, abs(wWater - 0.5));
+  let ragged = clamp(0.55 + 0.45 * w2, 0.0, 1.0);
+  let foam = edge * ragged * (1.0 - depth);
+  return mix(col, RAE_WATER_FOAM, clamp(foam, 0.0, 1.0) * 0.85);
+}
+
 // Ground albedo, textured per pixel and blended by biome weight. `bio` is the
 // interpolated (elevation, moisture, slope) from the vertex stage; `p` is world
 // XY for the grain. The weights already sum to 1 (raeBiomeClassify normalises
 // them), so this is a straight weighted sum with no renormalise.
-fn raeTerrainDetailColor(p: vec2<f32>, bio: vec3<f32>) -> vec3<f32> {
+fn raeTerrainDetailColor(p: vec2<f32>, bio: vec3<f32>, t: f32) -> vec3<f32> {
   let b = raeBiomeClassify(bio.x, bio.y, bio.z);
   let d = clamp(raeNoiseFbm2(p * RAE_TERRAIN_DETAIL_HI_SCALE,
                              RAE_TERRAIN_DETAIL_OCT_HI, 2.0, 0.5,
                              RAE_TERRAIN_DETAIL_SEED) * 0.5 + 0.5, 0.0, 1.0);
   // Broad patchiness comes free from the interpolated moisture; fine grain from
   // the one fbm. Mixing them stops the ground reading as a single noise scale.
-  let t = clamp(0.45 * clamp(bio.y, 0.0, 1.0) + 0.55 * d, 0.0, 1.0);
-  return raeTerrainVary(RAE_TERRAIN_GRASS, RAE_TERRAIN_VAR_GRASS, t) * b.wGrass
-       + raeTerrainVary(RAE_TERRAIN_SAND,  RAE_TERRAIN_VAR_SAND,  t) * b.wSand
-       + raeTerrainVary(RAE_TERRAIN_MUD,   RAE_TERRAIN_VAR_MUD,   t) * b.wMud
-       + raeTerrainVary(RAE_TERRAIN_ROCK,  RAE_TERRAIN_VAR_ROCK,  t) * b.wRock
-       + raeTerrainVary(RAE_TERRAIN_WATER, RAE_TERRAIN_VAR_WATER, t) * b.wWater;
+  let v = clamp(0.45 * clamp(bio.y, 0.0, 1.0) + 0.55 * d, 0.0, 1.0);
+  return raeTerrainVary(RAE_TERRAIN_GRASS, RAE_TERRAIN_VAR_GRASS, v) * b.wGrass
+       + raeTerrainVary(RAE_TERRAIN_SAND,  RAE_TERRAIN_VAR_SAND,  v) * b.wSand
+       + raeTerrainVary(RAE_TERRAIN_MUD,   RAE_TERRAIN_VAR_MUD,   v) * b.wMud
+       + raeTerrainVary(RAE_TERRAIN_ROCK,  RAE_TERRAIN_VAR_ROCK,  v) * b.wRock
+       + raeWaterColor(p, bio.x, b.wWater, t) * b.wWater;
 }

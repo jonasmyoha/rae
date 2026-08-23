@@ -53,8 +53,13 @@ func ensureTerrainPipeline() {
 # ignores the per-draw colour and samples the biome field per vertex, so the
 # ground shows grass/sand/mud/rock/water. Restores the static pipeline after so a
 # following static draw is unaffected. Same DrawU/vertex layout as the static path.
+# `time` rides in the DrawU record's LAST slot, the one the skinned path calls
+# paletteBase. Terrain is never skinned, so the slot is dead weight here, and the
+# alternative -- adding a field to the shared frame uniform -- would touch every
+# pipeline for the benefit of one. The water in terrain_splat.wgsl reads it as
+# d.params.w. Documented at both ends so nobody wires a joint palette to a clock.
 func drawTerrainMesh(mesh: copy Int, transform: view Transform3d, prevTransform: view Transform3d,
-                     roughness: copy Float) pub {
+                     roughness: copy Float, time: copy Float) pub {
   ensureTerrainPipeline()
   if gbMeshReady(mesh: mesh) is 0 { ret }
   let base: Int = gbDrawCount()
@@ -63,7 +68,11 @@ func drawTerrainMesh(mesh: copy Int, transform: view Transform3d, prevTransform:
   let model: Mat4 = modelMatrixOf(t: transform)
   let prevModel: Mat4 = modelMatrixOf(t: prevTransform)
   packInstanceRecord(records: gDrawScratch, slot: 0, model: model, prevModel: prevModel,
-    r: 1.0, g: 1.0, b: 1.0, metallic: 0.0, roughness: roughness, emissive: 0.0, toon: 0, paletteBase: 0)
+    r: 1.0, g: 1.0, b: 1.0, metallic: 0.0, roughness: roughness, emissive: 0.0, toon: 0,
+    paletteBase: 0)
+  # paletteBase is an Int in the record API; the clock needs sub-second
+  # resolution, so it is written straight into the float slot instead.
+  gDrawScratch.set(index: 39, value: time)
   gbIssueInstanced(pass: gbPass(), pipeline: gbTerrainPipeline(), bind: gbTerrainBind(),
     vbuf: gbMeshVbuf(mesh: mesh), ibuf: gbMeshIbuf(mesh: mesh),
     icount: gbMeshIcount(mesh: mesh), base: base, count: 1, records: gDrawScratch.data)
