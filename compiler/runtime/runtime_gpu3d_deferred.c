@@ -616,9 +616,41 @@ RAE_SKY_WGSL
 "  return vec4<f32>(radiance, 1.0);\n"
 "}\n";
 
-/* Composite: linear HDR radiance -> the presentable LDR offscreen. */
+/* Composite: linear HDR radiance -> the presentable LDR offscreen.
+ *
+ * TONE MAPPING IS SELECTABLE (#556), and that is the point of this pass.
+ *
+ * ACES (the Narkowicz fit) is a FILM emulation: it rolls saturated highlights
+ * toward white and shifts hue on the way -- blues drift purple, oranges drift
+ * yellow. Live action wants that. Stylised art does not: a Supercell/Pixar look
+ * wants a colour to stay ITS colour as it gets brighter, and under ACES every
+ * bright thing in a scene converges on the same washed pastel. That reads as
+ * "desaturated" no matter what the albedos say, because it is applied globally,
+ * after everything, to characters and ground alike.
+ *
+ * Khronos PBR Neutral is the alternative here. It exists specifically to
+ * preserve albedo hue and saturation with a gentle highlight rolloff, and it is
+ * the same arithmetic cost. AgX was considered and rejected: it desaturates by
+ * design, which is the wrong direction for this.
+ *
+ * ACES REMAINS THE DEFAULT. This library is shared -- every example composites
+ * through here -- so changing the operator underneath them would silently
+ * restyle work that was calibrated against the old one. An app opts in.
+ *
+ * The GRADE is display-referred: it runs after the tone map and after the gamma
+ * encode, on 0..1 sRGB values. That is not the physically pure placement (linear,
+ * pre-tonemap, would be), but it is the predictable one to art-direct: contrast
+ * pivots on visual mid-grey and a saturation push does what the eye expects.
+ * Neutral defaults are exactly identity, so an app that asks for no grade pays
+ * only a few ALU. */
 static const char* GB_COMPOSITE_WGSL =
-"@group(0) @binding(0) var<uniform> P: vec4<f32>;\n"   /* x = exposure, y = renderScale */
+"struct CompositeU {\n"
+"  p0: vec4<f32>,\n"   /* exposure, renderScale, operator, contrast */
+"  p1: vec4<f32>,\n"   /* vibrance, saturation, shadowTintStr, highlightTintStr */
+"  p2: vec4<f32>,\n"   /* shadowTint.rgb */
+"  p3: vec4<f32>,\n"   /* highlightTint.rgb */
+"};\n"
+"@group(0) @binding(0) var<uniform> P: CompositeU;\n"
 "@group(0) @binding(1) var litTex: texture_2d<f32>;\n"
 "@group(0) @binding(2) var litSamp: sampler;\n"
 GB_FULLSCREEN_VS
@@ -626,17 +658,62 @@ GB_FULLSCREEN_VS
 "  return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14),\n"
 "               vec3<f32>(0.0), vec3<f32>(1.0));\n"
 "}\n"
+/* Khronos PBR Neutral, as specified. The offset step pulls the darkest channel
+ * down so near-blacks keep their hue instead of grey-shifting; the compression
+ * step reins in the peak channel only, so a saturated colour brightens without
+ * its other channels catching up and washing it out. */
+"fn pbrNeutral(color: vec3<f32>) -> vec3<f32> {\n"
+"  let startCompression = 0.8 - 0.04;\n"
+"  let desaturation = 0.15;\n"
+"  var c = color;\n"
+"  let x = min(c.r, min(c.g, c.b));\n"
+"  var offset = 0.04;\n"
+"  if (x < 0.08) { offset = x - 6.25 * x * x; }\n"
+"  c = c - vec3<f32>(offset);\n"
+"  let peak = max(c.r, max(c.g, c.b));\n"
+"  if (peak < startCompression) { return clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)); }\n"
+"  let d = 1.0 - startCompression;\n"
+"  let newPeak = 1.0 - d * d / (peak + d - startCompression);\n"
+"  c = c * (newPeak / peak);\n"
+"  let g = 1.0 - 1.0 / (desaturation * (peak - newPeak) + 1.0);\n"
+"  return clamp(mix(c, vec3<f32>(newPeak), g), vec3<f32>(0.0), vec3<f32>(1.0));\n"
+"}\n"
+"fn luma(c: vec3<f32>) -> f32 { return dot(c, vec3<f32>(0.2126, 0.7152, 0.0722)); }\n"
+/* VIBRANCE, not saturation: weight the push by how unsaturated a pixel already
+ * is. A flat saturation multiply drives already-vivid pixels straight into
+ * clipping, where they lose their hue -- the exact failure this whole pass is
+ * meant to avoid. */
+"fn vibrance(c: vec3<f32>, amount: f32) -> vec3<f32> {\n"
+"  let mx = max(c.r, max(c.g, c.b));\n"
+"  let mn = min(c.r, min(c.g, c.b));\n"
+"  let w = 1.0 - (mx - mn);\n"
+"  return mix(vec3<f32>(luma(c)), c, 1.0 + amount * w);\n"
+"}\n"
 "@fragment\n"
 "fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {\n"
      /* Dynamic resolution (#530): the source is rendered at P.y of native, so a
         full-target fragment at pos.xy maps to source UV pos.xy*scale/sourceDims;
         a linear sampler then bilinear-upscales. At scale 1.0 this equals a 1:1
         fetch. */
-"  let uv = (pos.xy * P.y) / vec2<f32>(textureDimensions(litTex));\n"
+"  let uv = (pos.xy * P.p0.y) / vec2<f32>(textureDimensions(litTex));\n"
 "  let hdr = textureSample(litTex, litSamp, uv).rgb;\n"
-"  var c = aces(hdr * P.x);\n"
+"  let exposed = hdr * P.p0.x;\n"
+"  var c = aces(exposed);\n"
+"  if (P.p0.z > 0.5) { c = pbrNeutral(exposed); }\n"
 "  c = pow(c, vec3<f32>(1.0 / 2.2));\n"
-"  return vec4<f32>(c, 1.0);\n"
+     /* ---- display-referred grade ---- */
+"  c = clamp((c - vec3<f32>(0.5)) * P.p0.w + vec3<f32>(0.5), vec3<f32>(0.0), vec3<f32>(1.0));\n"
+"  c = vibrance(c, P.p1.x);\n"
+"  c = mix(vec3<f32>(luma(c)), c, P.p1.y);\n"
+     /* SPLIT TONE. Shadows toward one hue, highlights toward another -- the
+        cheapest trick that reads as art direction rather than as a filter,
+        because it is what gives painted work its cool-shadow/warm-light
+        separation. Weights are complementary smoothsteps, so mid-tones stay put. */
+"  let l = luma(c);\n"
+"  let sw = 1.0 - smoothstep(0.0, 0.5, l);\n"
+"  let hw = smoothstep(0.5, 1.0, l);\n"
+"  c = c + P.p2.rgb * (sw * P.p1.z) + P.p3.rgb * (hw * P.p1.w);\n"
+"  return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);\n"
 "}\n";
 
 /* Build a fullscreen pipeline: no vertex buffers, no depth, one target. */
