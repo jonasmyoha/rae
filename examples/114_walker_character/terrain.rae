@@ -404,7 +404,7 @@ func drawTreeProp(prop: mod PropInstancer, entities: view List(Int), scene: view
 # Draw the ground tiles with the biome-splat pipeline (#533). Tiles are hidden
 # from renderScene (visible=false at creation); here each is drawn per-vertex
 # biome-classified, so the ground reads as grass/sand/mud/rock/water.
-func drawTerrainGround(terrain: view InfiniteTerrain, scene: view Scene3d) pub {
+func drawTerrainGround(terrain: view InfiniteTerrain, scene: view Scene3d, time: copy Float) pub {
   var poolIndex: Int = 0
   loop poolIndex < terrainCellCount {
     let meshId: Int = terrainEntityAt(entities: terrain.tileMeshIds, index: poolIndex)
@@ -412,7 +412,9 @@ func drawTerrainGround(terrain: view InfiniteTerrain, scene: view Scene3d) pub {
     if meshId >= 1 and entity >= 0 {
       let t: Transform3d = sceneTransformAt(values: scene.transforms, index: entity)
       let pt: Transform3d = sceneTransformAt(values: scene.prevTransforms, index: entity)
-      drawTerrainMesh(mesh: meshId, transform: t, prevTransform: pt, roughness: 0.96)
+      # `time` drives the water ripple/surf in terrain_splat.wgsl via the spare
+      # DrawU slot (8e77d970); terrain is never skinned so that slot is free.
+      drawTerrainMesh(mesh: meshId, transform: t, prevTransform: pt, roughness: 0.96, time: time)
     }
     poolIndex = poolIndex + 1
   }
