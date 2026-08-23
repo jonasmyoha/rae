@@ -119,3 +119,28 @@ fn raeBiomeSplatColor(b: RaeBiome) -> vec3<f32> {
 fn raeBiomeGroundColor(p: vec2<f32>) -> vec3<f32> {
   return raeBiomeSplatColor(raeBiomeSample(p));
 }
+
+// How far one unit of elevation lifts the ground. MUST match terrainAmplitude in
+// the game's terrain.rae — the CPU builds the mesh from it and anything placed on
+// the GPU has to land on that same surface.
+const RAE_BIOME_TERRAIN_AMPLITUDE: f32 = 3.2;
+
+// THE ground height, for anything the GPU scatters onto the terrain.
+//
+// Every system that puts something on the ground needs this, and each copy is a
+// chance for them to disagree. The grass compute pass used to carry its own
+// two-octave Perlin, so once the terrain moved to the biome field the blades were
+// standing on a surface that no longer existed — hovering over water among other
+// things. One definition, shared.
+//
+// Water is one height: elevation below the water level clamps to exactly the
+// water level, matching terrainHeightAt on the CPU.
+fn raeTerrainHeight(p: vec2<f32>, groundZ: f32) -> f32 {
+  let e = max(raeBiomeElevation(p), RAE_BIOME_WATER_LEVEL);
+  return groundZ + e * RAE_BIOME_TERRAIN_AMPLITUDE;
+}
+
+// Grass-material weight at a spot — what vegetation placement should test.
+fn raeBiomeGrassWeight(p: vec2<f32>) -> f32 {
+  return raeBiomeSample(p).wGrass;
+}

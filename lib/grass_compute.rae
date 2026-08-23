@@ -21,6 +21,8 @@ import webgpu/context
 open webgpu/context
 import profile
 import grass_config
+import gbuffer
+import string
 
 # C shader-source accessors (WGSL text + entry point names).
 func grassWgsl() extern("rae_gb_grass_wgsl") ret Ptr
@@ -61,6 +63,16 @@ const grassBladeVerts: Int = 6
 
 var gGrassMade: Bool = false
 var gGrassDrawBindMade: Bool = false
+
+# Compute-pass source: the shared noise + biome field, then the grass pass
+# itself. Mirrors how the terrain splat pipeline composes its shader.
+func grassComputeWgsl() ret String {
+  let noiseSrc: String = gbuffer.gbReadWgsl(path: "lib/noise.wgsl")
+  let biomeSrc: String = gbuffer.gbReadWgsl(path: "lib/world_biome.wgsl")
+  let grassSrc: String = gbuffer.gbReadWgsl(path: "lib/grass_compute.wgsl")
+  ret noiseSrc.concat(other: "\n").concat(other: biomeSrc)
+    .concat(other: "\n").concat(other: grassSrc)
+}
 
 # WGSL text -> shader module (same construction as gbuffer.makeShaderModule; the
 # one-element List holds the chained WGPUShaderSourceWGSL for nextInChain).
@@ -147,7 +159,13 @@ func ensureGrassGpu() {
   }
   grassSet(index: 7, ptr: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: rbDesc))
 
-  let shaderMod: Ptr = grassMakeShaderModule(wgsl: grassWgsl())
+  # Composed from FILES, not the C string, so the pass shares the one biome and
+  # terrain-height definition with everything else that touches the ground.
+  # Carrying its own copy is what left blades standing on a height field the
+  # terrain had already moved off.
+  let grassSrc: String = grassComputeWgsl()
+  let grassCbuf: Buffer(Any) = grassSrc.toCStr()
+  let shaderMod: Ptr = grassMakeShaderModule(wgsl: grassCbuf)
   let pipeDesc: WGPUComputePipelineDescriptor = {
     compute: { module: shaderMod, entryPoint: { data: grassEntry(), length: WGPU_STRLEN } }
   }
