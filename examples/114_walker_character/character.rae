@@ -6,6 +6,8 @@
 import core
 import math
 import vec3
+import world_biome
+open world_biome
 import scene3d
 import gpu3d
 import mesh3d
@@ -23,12 +25,52 @@ open ui/virtual_joystick
 # Apply a movement intent to the controller. The intent already resolved the
 # device (touch stick vs WASD) in inputUpdate, so this is one step call — the
 # same stepThirdPersonController both former branches ended in.
+# Is this spot walkable ground? NOT a height test: terrainHeightAt clamps the sea
+# flat, which also makes it perfectly walkable, so a character standing on the
+# water looks like it because geometrically it is. Only the biome can tell.
+func terrainIsLand(x: view Float, y: view Float) ret Bool {
+  ret worldIsLand(x: x, y: y, cfg: defaultBiomeConfig())
+}
+
+func terrainFindLand(x: view Float, y: view Float) ret Vec3 {
+  ret worldFindLand(x: x, y: y, cfg: defaultBiomeConfig())
+}
+
+# Put a controller on the nearest land and ground it there.
+func spawnOnLand(controller: mod ThirdPersonController, groundZ: view Float) {
+  let spot: Vec3 = terrainFindLand(x: controller.position.x, y: controller.position.y)
+  controller.position.x = spot.x
+  controller.position.y = spot.y
+  groundWalker(controller: controller, groundZ: groundZ)
+}
+
+# The shoreline is a wall. The step is taken first and undone if it ended in the
+# sea, which keeps the turn — a character walking into the water still faces the
+# way you pushed, it just does not advance. Each axis is tested separately so
+# walking into the shore at an angle SLIDES along it instead of sticking.
 func updateWalkerMovement(controller: mod ThirdPersonController,
                           intent: view InputIntent, cameraYaw: view Float,
                           dt: view Float) ret Bool {
-  ret stepThirdPersonController(controller: controller,
+  let fromX: Float = controller.position.x
+  let fromY: Float = controller.position.y
+  let moved: Bool = stepThirdPersonController(controller: controller,
     inputRight: intent.moveX, inputForward: intent.moveY,
     walking: intent.walking, cameraYaw: cameraYaw, dt: dt)
+  if moved is false { ret moved }
+  let toX: Float = controller.position.x
+  let toY: Float = controller.position.y
+  if terrainIsLand(x: toX, y: toY) { ret moved }
+  if terrainIsLand(x: toX, y: fromY) {
+    controller.position.y = fromY
+    ret moved
+  }
+  if terrainIsLand(x: fromX, y: toY) {
+    controller.position.x = fromX
+    ret moved
+  }
+  controller.position.x = fromX
+  controller.position.y = fromY
+  ret moved
 }
 
 func uploadMeshData(m: view MeshData) ret MeshHandle {

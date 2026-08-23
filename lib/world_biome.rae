@@ -209,3 +209,82 @@ func splatColor(sample: view WorldSample) pub ret Vec3 {
 func biomeGroundColor(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Vec3 {
   ret splatColor(sample: sampleWorld(x: x, y: y, cfg: cfg))
 }
+
+# --- ground height and walkability -----------------------------------------
+#
+# The pieces every consumer of this field needs and would otherwise re-derive.
+# Both used to live in game code, which meant each game (and each example) had
+# its own copy and they drifted apart — the terrain mesh, the grass compute pass
+# and the character controller all disagreed about where the ground was.
+
+# How far one unit of elevation lifts the ground, in world units.
+# MUST match RAE_BIOME_TERRAIN_AMPLITUDE in world_biome.wgsl.
+const worldTerrainAmplitude: Float = 3.2
+
+# THE ground height at a world position — the surface the mesh is built from,
+# props stand on, grass is scattered over and characters walk across.
+#
+# Water is one height: elevation below the water level is clamped to exactly the
+# water level, so every submerged point lands on the same plane and the sea is
+# flat by construction, with no separate water mesh. The bumps in the field
+# decide where water IS; they never decide how high it sits.
+func worldTerrainHeight(x: view Float, y: view Float, groundZ: view Float,
+                        cfg: view BiomeConfig) pub ret Float {
+  var e: Float = worldElevation(x: x, y: y, cfg: cfg)
+  if e < cfg.waterLevel { e = cfg.waterLevel }
+  ret groundZ + e * worldTerrainAmplitude
+}
+
+# The flat water surface in world Z. Anything at this height is sea.
+func worldWaterZ(groundZ: view Float, cfg: view BiomeConfig) pub ret Float {
+  ret groundZ + cfg.waterLevel * worldTerrainAmplitude
+}
+
+# Above this much water weight a spot is sea. Just over the 0.5 dominance line so
+# the very edge of the surf still counts as beach — characters should be able to
+# walk right down to the water.
+const worldWalkMaxWater: Float = 0.55
+
+# Can something stand here?
+#
+# NOT a height test. worldTerrainHeight clamps the sea flat, which also makes it
+# perfectly walkable — a character standing on the water looks like it because
+# geometrically it is. Only the biome can tell land from sea.
+func worldIsLand(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Bool {
+  ret sampleWorld(x: x, y: y, cfg: cfg).wWater <= worldWalkMaxWater
+}
+
+# Nearest land to (x, y), searched outward in a spiral. Returns the input
+# unchanged when it is already land, and gives up after `worldLandSearchRings`
+# rather than looping forever on a query with no land anywhere near it.
+const worldLandSearchRings: Int = 40
+const worldLandSearchStep: Float = 4.0
+const worldLandSearchSpokes: Int = 12
+
+func worldFindLand(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Vec3 {
+  if worldIsLand(x: x, y: y, cfg: cfg) { ret vec3.create(x: x, y: y, z: 0.0) }
+  var ring: Int = 1
+  loop ring <= worldLandSearchRings {
+    let radius: Float = ring.toFloat() * worldLandSearchStep
+    var spoke: Int = 0
+    loop spoke < worldLandSearchSpokes {
+      let angle: Float = spoke.toFloat() / worldLandSearchSpokes.toFloat() * 6.2831853
+      let cx: Float = x + math.cos(x: angle) * radius
+      let cy: Float = y + math.sin(x: angle) * radius
+      if worldIsLand(x: cx, y: cy, cfg: cfg) { ret vec3.create(x: cx, y: cy, z: 0.0) }
+      spoke = spoke + 1
+    }
+    ring = ring + 1
+  }
+  ret vec3.create(x: x, y: y, z: 0.0)
+}
+
+# Does a prop of this kind belong here? `minGrass` is how much grass material the
+# kind needs: vegetation wants a real meadow, rock is happy on sand or stone and
+# passes 0. Nothing at all stands in the sea.
+func worldPropAllowed(x: view Float, y: view Float, minGrass: view Float,
+                      cfg: view BiomeConfig) pub ret Bool {
+  let s: WorldSample = sampleWorld(x: x, y: y, cfg: cfg)
+  if s.wWater > worldWalkMaxWater { ret false }
+  ret s.wGrass >= minGrass
+}

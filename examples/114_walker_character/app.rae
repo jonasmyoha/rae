@@ -391,7 +391,9 @@ func createApp() ret App {
     }
   }
 
-  groundWalker(controller: characterController, groundZ: groundZ)
+  # Nobody starts in the sea. The origin is not guaranteed land — the island mask
+  # only guarantees land is SOMEWHERE inside the radius.
+  spawnOnLand(controller: characterController, groundZ: groundZ)
   partModel = walkerWorldModel(baseModel: basePartModel, controller: characterController)
 
   var cloneIndex: Int = 0
@@ -400,13 +402,14 @@ func createApp() ret App {
     let spiralRadius: Float = 3.5 + cloneIndex.toFloat() * 0.45
     let cloneX: Float = characterController.position.x + math.cos(x: spiralAngle) * spiralRadius
     let cloneY: Float = characterController.position.y + math.sin(x: spiralAngle) * spiralRadius
-    let cloneZ: Float = terrainHeightAt(x: cloneX, y: cloneY, groundZ: groundZ) - groundZ
+    let cloneSpot: Vec3 = terrainFindLand(x: cloneX, y: cloneY)
+    let cloneZ: Float = terrainHeightAt(x: cloneSpot.x, y: cloneSpot.y, groundZ: groundZ) - groundZ
     # Each crowd member gets its OWN controller (so the player can switch to and
     # drive it, #546) plus its OWN clip + starting phase (#547). A deterministic
     # mix of walk/run/idle keeps the demo lively without loading extra assets.
     var cloneController: ThirdPersonController = createThirdPersonController()
-    cloneController.position.x = cloneX
-    cloneController.position.y = cloneY
+    cloneController.position.x = cloneSpot.x
+    cloneController.position.y = cloneSpot.y
     cloneController.position.z = cloneZ
     cloneController.heading = spiralAngle
     let cloneModel: Mat4 = walkerWorldModel(baseModel: basePartModel, controller: cloneController)
