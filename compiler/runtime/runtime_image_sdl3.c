@@ -238,6 +238,7 @@ static int64_t g_sdl_headless_frames = 0;
 static int64_t g_sdl_frames_done = 0;
 static int64_t g_sdl_target_fps = 0;           /* >0 => cap present rate */
 static int64_t g_sdl_last_present_ms = 0;
+static rae_Bool g_sdl_presented_any = 0;       /* has any frame reached the screen? */
 static unsigned char g_sdl_pressed[SDL_SCANCODE_COUNT]; /* went-down-this-frame edges */
 static unsigned char g_sdl_keydown[SDL_SCANCODE_COUNT]; /* held state, from key down/up events */
 static unsigned char g_sdl_mouse[8];                    /* held state, by SDL button index (1=L,2=M,3=R) */
@@ -333,7 +334,22 @@ rae_Bool rae_ext_sdl3_shouldClose(void) {
         }
     }
     if (quit) return true;
-    if (g_sdl_headless_ms > 0 && rae_ext_nowMs() - g_sdl_start_ms >= g_sdl_headless_ms) return true;
+    if (g_sdl_headless_ms > 0 && rae_ext_nowMs() - g_sdl_start_ms >= g_sdl_headless_ms) {
+        /* The headless budget is wall clock from WINDOW CREATION, so it covers
+         * asset loading too. An app that loads for longer than the budget exits
+         * having drawn nothing, writes no screenshot, and returns 0 — which reads
+         * exactly like a broken renderer. Say what actually happened. */
+        if (!g_sdl_presented_any) {
+            fprintf(stderr,
+                "warning: RAE_SDL_HEADLESS_MS=%lld elapsed before the first frame was "
+                "presented -- startup alone took longer than the budget, so nothing "
+                "was rendered and no screenshot was written. The budget is wall clock "
+                "from window creation and includes asset loading; raise it.\n",
+                (long long)g_sdl_headless_ms);
+            fflush(stderr);
+        }
+        return true;
+    }
     return false;
 }
 
@@ -421,6 +437,7 @@ void rae_ext_sdl3_present(void) {
         }
     }
     SDL_RenderPresent(g_sdl_ren);
+    g_sdl_presented_any = 1;
     if (g_sdl_target_fps > 0) {
         int64_t frame_ms = 1000 / g_sdl_target_fps;
         int64_t now = rae_ext_nowMs();
