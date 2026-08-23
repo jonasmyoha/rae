@@ -27,27 +27,50 @@ const RAE_TERRAIN_DETAIL_OCT_HI: u32 = 2u;       // fine grain — the only nois
 const RAE_TERRAIN_DETAIL_HI_SCALE: f32 = 3.10;   // world units -> high freq
 const RAE_TERRAIN_DETAIL_SEED: u32 = 1337u;
 
-// The per-material ramps from procgen/texture.rae texMaterialColor(), kept in the
-// same order and with the same constants so a baked texture and this agree.
-fn raeTerrainGrass(n: f32, d: f32) -> vec3<f32> {
-  let base = 0.30 + n * 0.28;
-  return vec3<f32>(0.10 + base * 0.22 + d * 0.06, 0.24 + base * 0.55, 0.08 + base * 0.16);
-}
-fn raeTerrainSand(n: f32, d: f32) -> vec3<f32> {
-  let t = 0.60 + n * 0.24 + d * 0.06;
-  return vec3<f32>(t + 0.14, t + 0.03, t - 0.20);
-}
-fn raeTerrainRock(n: f32, d: f32) -> vec3<f32> {
-  let g = 0.32 + n * 0.36 - d * 0.14;
-  return vec3<f32>(g, g * 0.98, g * 1.03);
-}
-fn raeTerrainMud(n: f32, d: f32) -> vec3<f32> {
-  let t = 0.16 + n * 0.22;
-  return vec3<f32>(t + 0.18, t + 0.08, t + 0.01);
-}
-fn raeTerrainWater(n: f32, d: f32) -> vec3<f32> {
-  let hi = n * 0.28 + d * 0.28;
-  return vec3<f32>(0.05 + hi, 0.22 + hi * 1.1, 0.42 + hi * 0.9);
+// GROUND PALETTE, measured off the reference plate.
+//
+// These replace the absolute colour ramps ported from procgen/texture.rae. Those
+// were authored to look right as standalone texture swatches on a neutral
+// background; run through this scene's sunlight they blew out — sand read as
+// snow and water as pale ice.
+//
+// Instead the palette is art-directed to a target and the noise only MODULATES
+// it. Medians sampled from ai_mockups/empty_plate/plate_a.png, divided down for
+// sunlight (see raeTerrainLightFudge):
+//
+//   grass (0.533, 0.600, 0.314)   sand  (0.925, 0.784, 0.698)
+//   water (0.024, 0.384, 0.635)   path  (0.698, 0.671, 0.400)
+//
+// Keeping colour identity in a constant and variation in a multiplier means the
+// ground can be re-graded toward the reference by editing five vectors, without
+// touching the noise.
+// CALIBRATED AGAINST THE RENDER, not chosen to look right in isolation.
+//
+// The scene's sky irradiance is markedly blue, and ground normals point up, so
+// the hemisphere term lands on the ground almost undiluted. Albedo picked to
+// match the reference directly came out with blue running about 2x the target on
+// every material. Sky exposure and turbidity scale all three channels together
+// and cannot correct a per-channel bias, so the correction lives here.
+//
+// Method: render, sample the same patches in both images, multiply each albedo
+// by target/measured, repeat. Recalibrate if the sun, the sky model or the
+// ambient ever change -- these numbers encode this lighting.
+const RAE_TERRAIN_GRASS: vec3<f32> = vec3<f32>(0.435, 0.451, 0.112);
+const RAE_TERRAIN_SAND:  vec3<f32> = vec3<f32>(1.000, 0.723, 0.450);
+const RAE_TERRAIN_MUD:   vec3<f32> = vec3<f32>(0.760, 0.560, 0.230);
+const RAE_TERRAIN_ROCK:  vec3<f32> = vec3<f32>(0.520, 0.470, 0.350);
+const RAE_TERRAIN_WATER: vec3<f32> = vec3<f32>(0.001, 0.164, 0.364);
+
+// How strongly the noise breaks each material up. Grass wants visible patchiness;
+// water wants almost none, or the sea looks like cling film.
+const RAE_TERRAIN_VAR_GRASS: f32 = 0.34;
+const RAE_TERRAIN_VAR_SAND:  f32 = 0.14;
+const RAE_TERRAIN_VAR_MUD:   f32 = 0.22;
+const RAE_TERRAIN_VAR_ROCK:  f32 = 0.26;
+const RAE_TERRAIN_VAR_WATER: f32 = 0.06;
+
+fn raeTerrainVary(base: vec3<f32>, amount: f32, t: f32) -> vec3<f32> {
+  return base * (1.0 - amount * 0.5 + amount * t);
 }
 
 // Ground albedo, textured per pixel and blended by biome weight. `bio` is the
@@ -56,13 +79,15 @@ fn raeTerrainWater(n: f32, d: f32) -> vec3<f32> {
 // them), so this is a straight weighted sum with no renormalise.
 fn raeTerrainDetailColor(p: vec2<f32>, bio: vec3<f32>) -> vec3<f32> {
   let b = raeBiomeClassify(bio.x, bio.y, bio.z);
-  let n = clamp(bio.y, 0.0, 1.0);
   let d = clamp(raeNoiseFbm2(p * RAE_TERRAIN_DETAIL_HI_SCALE,
                              RAE_TERRAIN_DETAIL_OCT_HI, 2.0, 0.5,
                              RAE_TERRAIN_DETAIL_SEED) * 0.5 + 0.5, 0.0, 1.0);
-  return raeTerrainGrass(n, d) * b.wGrass
-       + raeTerrainSand(n, d)  * b.wSand
-       + raeTerrainMud(n, d)   * b.wMud
-       + raeTerrainRock(n, d)  * b.wRock
-       + raeTerrainWater(n, d) * b.wWater;
+  // Broad patchiness comes free from the interpolated moisture; fine grain from
+  // the one fbm. Mixing them stops the ground reading as a single noise scale.
+  let t = clamp(0.45 * clamp(bio.y, 0.0, 1.0) + 0.55 * d, 0.0, 1.0);
+  return raeTerrainVary(RAE_TERRAIN_GRASS, RAE_TERRAIN_VAR_GRASS, t) * b.wGrass
+       + raeTerrainVary(RAE_TERRAIN_SAND,  RAE_TERRAIN_VAR_SAND,  t) * b.wSand
+       + raeTerrainVary(RAE_TERRAIN_MUD,   RAE_TERRAIN_VAR_MUD,   t) * b.wMud
+       + raeTerrainVary(RAE_TERRAIN_ROCK,  RAE_TERRAIN_VAR_ROCK,  t) * b.wRock
+       + raeTerrainVary(RAE_TERRAIN_WATER, RAE_TERRAIN_VAR_WATER, t) * b.wWater;
 }
