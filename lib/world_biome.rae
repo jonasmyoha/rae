@@ -70,14 +70,24 @@ func worldIslandMask(x: view Float, y: view Float, cfg: view BiomeConfig) pub re
   ret 1.0 - smooth01(edge0: cfg.islandRadius - cfg.islandFalloff, edge1: cfg.islandRadius, x: d)
 }
 
-# Elevation, shaped into an island. Outside the radius it blends to open ocean
-# rather than clamping, so the shoreline follows the noise and stays ragged
-# instead of drawing a circle.
+# How far the rim is pushed down out at sea. Big enough that no plausible noise
+# value keeps land past the radius.
+const islandSink: Float = 1.6
+
+# Elevation, shaped into an island by SUBTRACTING at the rim rather than fading
+# the noise toward ocean.
+#
+# Scaling the noise by the mask (e * mask - (1 - mask)) also works, but it eats
+# the island: near the rim only an unusually high noise value stays above water,
+# so the real coastline ends up far inside the nominal radius — measured ~113
+# units for a radius of 150. Subtracting leaves the interior untouched and only
+# carves the edge, so the radius means what it says. The shoreline still follows
+# the noise and stays ragged, because the noise is still there.
 func worldElevation(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Float {
   let e: Float = noise.fbm2(x: x / cfg.elevScale, y: y / cfg.elevScale,
                             octaves: 4, lacunarity: 2.0, gain: 0.5, seed: cfg.seed)
   let mask: Float = worldIslandMask(x: x, y: y, cfg: cfg)
-  ret e * mask - (1.0 - mask)
+  ret e - (1.0 - mask) * islandSink
 }
 
 # Moisture 0..1, decorrelated from elevation.
