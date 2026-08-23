@@ -79,6 +79,11 @@ type DeferredRenderer {
   # is opt-in rather than a silent change to every existing example.
   sky: Sky
   hasSky: Bool
+  # The look applied by the composite pass (#556). Defaults to neutralGrade(),
+  # which is exactly the historical ACES-plus-gamma result -- opting in is the
+  # app's call, so this library cannot silently restyle an example that was
+  # calibrated against the old operator.
+  grade: ColorGrade
 }
 
 # Declare the deferred frame. Pass declaration order here is deliberately
@@ -198,6 +203,7 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
     debugView: viewLit
     sky: createSkyNone(light: defaultLight3d(), clearColor: vec3.create(x: 0.02, y: 0.02, z: 0.03))
     hasSky: false
+    grade: neutralGrade()
   }
 }
 
@@ -324,7 +330,7 @@ func renderDeferredPass(r: view DeferredRenderer, tag: view Int, scene: view Sce
   }
   if tag is RenderTag.composite {
     if r.debugView is viewLit {
-      compositePass(exposure: light.exposure)
+      compositePassGraded(exposure: light.exposure, grade: r.grade)
     } else {
       inspect(mode: r.debugView, zNear: camera.nearZ, zFar: camera.farZ)
     }
