@@ -547,6 +547,13 @@ rae_Bool rae_ext_rae_sys_unlock_file(rae_String path);
 double rae_ext_rae_sys_file_mtime(rae_String path);
 int64_t rae_ext_rae_sys_rss_kb(void);
 
+/* Audio — SFX + looping ambient over the SDL3 backend (runtime_audio_sdl3.c, #46). */
+void    rae_ext_audio_init(void);
+int64_t rae_ext_audio_load_wav(rae_String path);
+void    rae_ext_audio_play(int64_t clip, float volume);
+int64_t rae_ext_audio_loop(int64_t clip, float volume);
+void    rae_ext_audio_tick(void);
+
 rae_String rae_ext_rae_str_i64(int64_t v);
 rae_String rae_ext_rae_str_i64_ptr(const int64_t* v);
 rae_String rae_ext_rae_str_f64(double v);
