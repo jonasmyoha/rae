@@ -16,8 +16,11 @@ const RAE_BIOME_BEACH_BAND: f32 = 0.24;
 const RAE_BIOME_SHORE_ROCK_FADE: f32 = 0.16;
 const RAE_BIOME_ROCK_SLOPE: f32 = 0.30;
 const RAE_BIOME_SWAMP_MOIST: f32 = 0.6;
-const RAE_BIOME_ISLAND_RADIUS: f32 = 60.0;
-const RAE_BIOME_ISLAND_FALLOFF: f32 = 22.0;
+// RAE_BIOME_ISLAND_RADIUS / RAE_BIOME_ISLAND_FALLOFF are INJECTED ahead of this
+// file by the shader composer (gbuffer_terrain.terrainSplatWgsl /
+// grass_compute.grassComputeWgsl, from world_biome.islandParamsWgsl) so the island
+// size is a RUNTIME value that can grow between levels (#41). Default 60/22 when the
+// app never resizes it, matching the old baked constants.
 
 struct RaeBiome {
   elevation: f32,

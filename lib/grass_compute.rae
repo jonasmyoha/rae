@@ -23,6 +23,7 @@ import profile
 import grass_config
 import gbuffer
 import string
+import world_biome
 
 # C shader-source accessors (WGSL text + entry point names).
 func grassWgsl() extern("rae_gb_grass_wgsl") ret Ptr
@@ -67,11 +68,21 @@ var gGrassDrawBindMade: Bool = false
 # Compute-pass source: the shared noise + biome field, then the grass pass
 # itself. Mirrors how the terrain splat pipeline composes its shader.
 func grassComputeWgsl() ret String {
+  let islandSrc: String = world_biome.islandParamsWgsl()
   let noiseSrc: String = gbuffer.gbReadWgsl(path: "lib/noise.wgsl")
   let biomeSrc: String = gbuffer.gbReadWgsl(path: "lib/world_biome.wgsl")
   let grassSrc: String = gbuffer.gbReadWgsl(path: "lib/grass_compute.wgsl")
-  ret noiseSrc.concat(other: "\n").concat(other: biomeSrc)
+  ret islandSrc.concat(other: noiseSrc).concat(other: "\n").concat(other: biomeSrc)
     .concat(other: "\n").concat(other: grassSrc)
+}
+
+# Force a grass-pipeline rebuild on the next frame — the island radius is baked into
+# the composed compute shader, so growing the island (#41) must recompose it.
+func resetGrassPipeline() pub {
+  gGrassMade = false
+  # The draw bind group is auto-layouted from the OLD render pipeline; invalidate it
+  # so it rebuilds against the recomposed pipeline (#41 grow).
+  gGrassDrawBindMade = false
 }
 
 # WGSL text -> shader module (same construction as gbuffer.makeShaderModule; the

@@ -11,9 +11,22 @@ open scene3d
 open math3d
 open webgpu/webgpu
 import webgpu/context
+import world_biome
+open world_biome
 
 var gTerrainPipeMade: Bool = false
 var gTerrainBindGen: Int = -1
+
+# Force a terrain-pipeline rebuild on the next draw. The island radius is baked
+# into the composed shader as a const (islandParamsWgsl), so growing the island
+# (#41) must recompose it. The old pipeline handle is replaced by gbSetTerrainPipeline;
+# a handful of grows leak a pipeline each, which is fine. The bind group is auto-
+# layouted from the OLD pipeline and is invalid against the new one (wgpu auto-layouts
+# are pipeline-exclusive), so force it to rebuild too — gen -1 never matches gbTerrainTexGen.
+func resetTerrainPipeline() pub {
+  gTerrainPipeMade = false
+  gTerrainBindGen = -1
+}
 
 # Textured terrain (#9 grass, extended to a material ARRAY in #14). The C side
 # holds the Ptr handles (2d-array view, sampler) and the blend + generation,
@@ -97,12 +110,13 @@ func terrainPaletteWgsl() ret String {
 # #533. The palette is composed BEFORE terrain_detail so its RAE_TERRAIN_*
 # constants are in scope for the material ramps.
 func terrainSplatWgsl() ret String {
+  let islandSrc: String = islandParamsWgsl()
   let noiseSrc: String = gbReadWgsl(path: "lib/noise.wgsl")
   let biomeSrc: String = gbReadWgsl(path: "lib/world_biome.wgsl")
   let paletteSrc: String = terrainPaletteWgsl()
   let detailSrc: String = gbReadWgsl(path: "lib/terrain_detail.wgsl")
   let terrSrc: String = gbReadWgsl(path: "lib/terrain_splat.wgsl")
-  ret noiseSrc.concat(other: "\n").concat(other: biomeSrc).concat(other: "\n")
+  ret islandSrc.concat(other: noiseSrc).concat(other: "\n").concat(other: biomeSrc).concat(other: "\n")
     .concat(other: paletteSrc).concat(other: "\n")
     .concat(other: detailSrc).concat(other: "\n").concat(other: terrSrc)
 }
