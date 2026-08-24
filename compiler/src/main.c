@@ -275,7 +275,12 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
   opts->input_path = NULL;
   opts->project_path = NULL;
   opts->timeout = 0;
-  opts->target = BUILD_TARGET_LIVE;
+  // The Live (bytecode VM) target is frozen/deprecated, so `rae run` / `rae
+  // watch` default to Compiled (C backend). Live only runs on an explicit
+  // `--target live` (which warns). Previously the default was Live and only the
+  // zero-config path below flipped it to Compiled, so passing an explicit file
+  // (`rae watch main.rae`) silently used the frozen VM.
+  opts->target = BUILD_TARGET_COMPILED;
   opts->profile = BUILD_PROFILE_RELEASE;
   opts->no_implicit = false;
   opts->zero_config = false;
@@ -372,8 +377,8 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
   if (!opts->input_path) {
     // Zero-config: infer the entry from the current directory so `rae run` /
     // `rae watch` work from inside a project/example folder (cargo-style). Use
-    // main.rae, else the devtools.json manifest's "entry". Default the target to
-    // compiled (the Live VM is frozen) unless --target was given explicitly.
+    // main.rae, else the devtools.json manifest's "entry". The target already
+    // defaults to Compiled above (Live is frozen); an explicit --target wins.
     const char* entry = NULL;
     if (file_exists("main.rae")) {
       entry = "main.rae";
@@ -394,11 +399,6 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
         static char proj_dir[PATH_MAX];
         if (realpath(".", proj_dir)) opts->project_path = proj_dir;
       }
-      bool target_explicit = false;
-      for (int k = 0; k < argc; k++) {
-        if (strcmp(argv[k], "--target") == 0) { target_explicit = true; break; }
-      }
-      if (!target_explicit) opts->target = BUILD_TARGET_COMPILED;
     }
   }
 
