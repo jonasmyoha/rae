@@ -69,14 +69,32 @@ func ensureTerrainTexDefaults() {
   }
 }
 
+func sysFileExists(path: String) extern("rae_ext_rae_sys_exists") ret Bool
+
+# The grade-calibrated RAE_TERRAIN_* palette, PER APP (#13). An app that ships its
+# own calibrated copy at assets/terrain_palette.wgsl (which the iOS bundle carries
+# too) overrides the shared lib default; anything else — example 114 on neutral
+# ACES — uses the default. This is what keeps the game's grade-specific numbers
+# out of the shared lib: the two apps are no longer bound to one calibration.
+func terrainPaletteWgsl() ret String {
+  if sysFileExists(path: "assets/terrain_palette.wgsl") {
+    ret gbReadWgsl(path: "assets/terrain_palette.wgsl")
+  }
+  ret gbReadWgsl(path: "lib/terrain_palette.wgsl")
+}
+
 # Compose the terrain-splat shader from the aligned WGSL files (noise + biome +
-# terrain), read once at pipeline build. See lib/terrain_splat.wgsl / #533.
+# palette + terrain), read once at pipeline build. See lib/terrain_splat.wgsl /
+# #533. The palette is composed BEFORE terrain_detail so its RAE_TERRAIN_*
+# constants are in scope for the material ramps.
 func terrainSplatWgsl() ret String {
   let noiseSrc: String = gbReadWgsl(path: "lib/noise.wgsl")
   let biomeSrc: String = gbReadWgsl(path: "lib/world_biome.wgsl")
+  let paletteSrc: String = terrainPaletteWgsl()
   let detailSrc: String = gbReadWgsl(path: "lib/terrain_detail.wgsl")
   let terrSrc: String = gbReadWgsl(path: "lib/terrain_splat.wgsl")
   ret noiseSrc.concat(other: "\n").concat(other: biomeSrc).concat(other: "\n")
+    .concat(other: paletteSrc).concat(other: "\n")
     .concat(other: detailSrc).concat(other: "\n").concat(other: terrSrc)
 }
 
