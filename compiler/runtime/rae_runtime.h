@@ -828,6 +828,8 @@ void  rae_gb_set_terrain_blend(double b);
 double rae_gb_terrain_blend(void);
 void  rae_gb_bump_terrain_tex_gen(void);
 int64_t rae_gb_terrain_tex_gen(void);
+void rae_gb_terrain_array_init(int64_t w, int64_t h, int64_t layers);
+void rae_gb_terrain_array_write(int64_t layer, const int64_t* pixels, int64_t w, int64_t h);
 void* rae_gb_static_bind(void);
 void* rae_gb_draws_buffer(void);
 int64_t rae_gb_max_draws(void);
