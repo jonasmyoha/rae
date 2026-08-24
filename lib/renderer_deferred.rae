@@ -229,6 +229,12 @@ func setDebugView(r: mod DeferredRenderer, mode: view Int) pub {
   r.debugView = mode
 }
 
+# TAA on/off (#20). Off routes the composite to the raw lit result, no-ops the
+# taa pass, suppresses the G-buffer jitter, and switches on FXAA in its place.
+func setTaaEnabled(on: copy Bool) pub {
+  if on { gbSetTaaEnabled(on: 1) } else { gbSetTaaEnabled(on: 0) }
+}
+
 func compileDeferred(r: mod DeferredRenderer) pub ret Int {
   ret compile(g: r.graph)
 }
