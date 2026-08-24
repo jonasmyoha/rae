@@ -37,11 +37,42 @@ type BiomeConfig {
   islandFalloff: Float # width of the shore ramp inside that radius
 }
 
+# RUNTIME island size (#41 grow-the-realm). The radius/falloff used to be baked
+# constants in BOTH this file (defaultBiomeConfig) and world_biome.wgsl. To let the
+# island GROW between levels they are now module globals with the old defaults, read
+# by defaultBiomeConfig (CPU) and injected into the composed terrain/grass shaders
+# (GPU, via islandParamsWgsl). Nothing calls the setter unless it wants a non-default
+# size, so example 114 and every other biome user stays at 60/22 unchanged. Both the
+# CPU field and the GPU const track one source, so mesh geometry and fragment
+# classification never disagree about where the coast is.
+var gIslandRadius: Float = 60.0
+var gIslandFalloff: Float = 22.0
+
+func worldIslandRadius() pub ret Float { ret gIslandRadius }
+func worldIslandFalloff() pub ret Float { ret gIslandFalloff }
+
+# Set the runtime island size. Callers must ALSO rebuild the terrain + grass
+# pipelines (they bake the radius as a shader const) and re-stream the terrain mesh
+# (its vertex heights were generated at the old radius). See src/grow.rae.
+func setWorldIsland(radius: copy Float, falloff: copy Float) pub {
+  gIslandRadius = radius
+  gIslandFalloff = falloff
+}
+
+# The two island-size consts, generated as WGSL text and PREPENDED to the composed
+# terrain/grass shaders (gbuffer_terrain.terrainSplatWgsl, grass_compute.grassComputeWgsl)
+# so the GPU field uses the same runtime radius as the CPU. world_biome.wgsl no longer
+# declares them. Regenerated on every pipeline build, so a rebuild after setWorldIsland
+# picks up the new size.
+func islandParamsWgsl() pub ret String {
+  ret "const RAE_BIOME_ISLAND_RADIUS: f32 = {gIslandRadius};\nconst RAE_BIOME_ISLAND_FALLOFF: f32 = {gIslandFalloff};\n"
+}
+
 func defaultBiomeConfig() pub ret BiomeConfig {
   ret BiomeConfig {
     seed: 1337, elevScale: 90.0, moistScale: 140.0,
     waterLevel: 0.0 - 0.28, beachBand: 0.24, rockSlope: 0.30, swampMoist: 0.6,
-    islandRadius: 60.0, islandFalloff: 22.0
+    islandRadius: gIslandRadius, islandFalloff: gIslandFalloff
   }
 }
 
