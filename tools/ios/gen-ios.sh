@@ -4,8 +4,12 @@
 # (build them first: build-wgpu-ios.sh, build-sdl3-ios.sh), bundles the example's
 # assets preserving relative paths, and produces build/ios/<name>/RaeApp.xcodeproj.
 #
-#   sh tools/ios/gen-ios.sh <example-dir> [bundle-id] [display-name]
+#   sh tools/ios/gen-ios.sh <project-dir> [bundle-id] [display-name]
 #   e.g. sh tools/ios/gen-ios.sh examples/102_gpu2d_animated
+#
+# <project-dir> is an in-repo example (entry main.rae, assets read by repo-root
+# path too) OR an out-of-tree game repo (entry src/main.rae, assets/ and lib/*
+# read CWD-relative). Both are handled; RAE_IOS_ENTRY overrides the entry file.
 #
 # Then: open build/ios/<name>/RaeApp.xcodeproj, pick your team (Signing &
 # Capabilities → Automatic), select the device, and Run. (Signing needs you —
@@ -23,17 +27,27 @@ else
   echo "error: example dir not found: $ex_arg" >&2; exit 1
 fi
 name=$(basename "$ex_dir")
-bundle_id=${2:-com.rae.$(printf '%s' "$name" | tr -cd 'a-zA-Z0-9')}
-disp=${3:-$name}
+# Bundle id / display name: positional args win, else RAE_IOS_BUNDLE_ID /
+# RAE_IOS_NAME (so run-ios.sh, which regenerates with no positionals, can still
+# carry a project's chosen id), else a default derived from the dir name.
+bundle_id=${2:-${RAE_IOS_BUNDLE_ID:-com.rae.$(printf '%s' "$name" | tr -cd 'a-zA-Z0-9')}}
+disp=${3:-${RAE_IOS_NAME:-$name}}
 
 rae="$root/compiler/bin/rae"
 runtime_dir="$root/compiler/runtime"
 frameworks="$here/frameworks"
 gen="$root/build/ios/$name"
-entry="$ex_dir/main.rae"
+# Entry: in-repo examples keep main.rae at the dir root; a game project that
+# lives in its own repo (e.g. the game) keeps it at src/main.rae. Accept either,
+# or an explicit RAE_IOS_ENTRY override.
+entry=${RAE_IOS_ENTRY:-}
+if [ -z "$entry" ]; then
+  if [ -f "$ex_dir/src/main.rae" ]; then entry="$ex_dir/src/main.rae"
+  else entry="$ex_dir/main.rae"; fi
+fi
 
 [ -x "$rae" ] || { echo "error: build the compiler first ($rae)" >&2; exit 1; }
-[ -f "$entry" ] || { echo "error: no main.rae in $ex_dir" >&2; exit 1; }
+[ -f "$entry" ] || { echo "error: no main.rae (looked at $ex_dir/src/main.rae and $ex_dir/main.rae)" >&2; exit 1; }
 [ -d "$frameworks/SDL3.xcframework" ] || { echo "error: SDL3.xcframework missing — run tools/ios/build-sdl3-ios.sh" >&2; exit 1; }
 [ -d "$frameworks/wgpu_native.xcframework" ] || { echo "error: wgpu_native.xcframework missing — run tools/ios/build-wgpu-ios.sh" >&2; exit 1; }
 
@@ -42,7 +56,7 @@ mkdir -p "$gen"
 # 1. Emit the app C, then prepend <SDL3/SDL_main.h> so the generated `int main`
 #    becomes SDL_main and SDL owns the iOS UIApplication entry.
 echo "gen-ios: emitting C for $name..."
-"$rae" build --entry "$entry" --out "$gen/app.c" --target compiled --emit-c
+"$rae" build --entry "$entry" --project "$ex_dir" --out "$gen/app.c" --target compiled --emit-c
 { printf '#include <SDL3/SDL_main.h>\n'; cat "$gen/app.c"; } > "$gen/app_ios.c"
 
 # 2. Enumerate bundled assets (the example's assets/ tree). Each file is added to
@@ -54,12 +68,20 @@ echo "gen-ios: emitting C for $name..."
 # STAGE resources under both layouts and bundle them preserving those relative
 # paths (mirrors the emcc --preload-file @/path scheme). Shared lib data that
 # examples read by repo-root path is staged too.
-ex_rel=${ex_dir#"$root/"}                     # examples/114_walker_character
 stage="$gen/bundle"
 rm -rf "$stage"; mkdir -p "$stage"
 if [ -d "$ex_dir/assets" ]; then
-  mkdir -p "$stage/$ex_rel"; cp -R "$ex_dir/assets" "$stage/$ex_rel/"   # examples/<name>/assets/...
-  mkdir -p "$stage/assets";  cp -R "$ex_dir/assets/." "$stage/assets/"  # assets/... (at root)
+  mkdir -p "$stage/assets";  cp -R "$ex_dir/assets/." "$stage/assets/"  # assets/... (CWD-relative)
+  # In-repo examples ALSO read their assets by repo-root path
+  # (examples/<name>/assets/...), so stage that layout too. An out-of-tree
+  # project (a game with its own repo, read root-relative "assets/..." and
+  # "lib/...") is not under $root, where `${ex_dir#"$root/"}` would leave an
+  # absolute path and bury the bundle under it — skip the repo-root layer there.
+  case "$ex_dir/" in
+    "$root"/*)
+      ex_rel=${ex_dir#"$root/"}                 # examples/114_walker_character
+      mkdir -p "$stage/$ex_rel"; cp -R "$ex_dir/assets" "$stage/$ex_rel/" ;;
+  esac
 fi
 for shared in lib/app3d/scenes lib/data; do
   if [ -e "$root/$shared" ]; then
