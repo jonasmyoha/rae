@@ -726,13 +726,10 @@ GB_FULLSCREEN_VS
 "  let w = 1.0 - (mx - mn);\n"
 "  return mix(vec3<f32>(luma(c)), c, 1.0 + amount * w);\n"
 "}\n"
-"@fragment\n"
-"fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {\n"
-     /* Dynamic resolution (#530): the source is rendered at P.y of native, so a
-        full-target fragment at pos.xy maps to source UV pos.xy*scale/sourceDims;
-        a linear sampler then bilinear-upscales. At scale 1.0 this equals a 1:1
-        fetch. */
-"  let uv = (pos.xy * P.p0.y) / vec2<f32>(textureDimensions(litTex));\n"
+/* The full composite of ONE source pixel: sample, expose, tone map, gamma,
+   then the display-referred grade. Factored out of the fragment so FXAA can
+   evaluate it at neighbouring taps (#20). */
+"fn shade(uv: vec2<f32>) -> vec3<f32> {\n"
 "  let hdr = textureSample(litTex, litSamp, uv).rgb;\n"
 "  let exposed = hdr * P.p0.x;\n"
 "  var c = aces(exposed);\n"
@@ -750,7 +747,46 @@ GB_FULLSCREEN_VS
 "  let sw = 1.0 - smoothstep(0.0, 0.5, l);\n"
 "  let hw = smoothstep(0.5, 1.0, l);\n"
 "  c = c + P.p2.rgb * (sw * P.p1.z) + P.p3.rgb * (hw * P.p1.w);\n"
-"  return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);\n"
+"  return clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));\n"
+"}\n"
+"@fragment\n"
+"fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {\n"
+     /* Dynamic resolution (#530): the source is rendered at P.y of native, so a
+        full-target fragment at pos.xy maps to source UV pos.xy*scale/sourceDims;
+        a linear sampler then bilinear-upscales. At scale 1.0 this equals a 1:1
+        fetch. */
+"  let dims = vec2<f32>(textureDimensions(litTex));\n"
+"  let uv = (pos.xy * P.p0.y) / dims;\n"
+"  let center = shade(uv);\n"
+     /* FXAA gate: P.p2.w carries the flag (shadowTint.w padding, #20). Off ->
+        this pass is exactly the old composite. On when TAA is disabled, so the
+        aliased edges TAA used to resolve get a spatial pass instead. */
+"  if (P.p2.w < 0.5) { return vec4<f32>(center, 1.0); }\n"
+     /* FXAA 3.11 console variant, run on the graded LDR result. One output pixel
+        step in UV is d(uv)/d(pos) = scale/dims = P.p0.y/dims -- so the taps land
+        at native-output spacing even when the source is rendered smaller. */
+"  let texel = P.p0.y / dims;\n"
+"  let lM  = luma(center);\n"
+"  let lNW = luma(shade(uv + vec2<f32>(-texel.x, -texel.y)));\n"
+"  let lNE = luma(shade(uv + vec2<f32>( texel.x, -texel.y)));\n"
+"  let lSW = luma(shade(uv + vec2<f32>(-texel.x,  texel.y)));\n"
+"  let lSE = luma(shade(uv + vec2<f32>( texel.x,  texel.y)));\n"
+"  let lMin = min(lM, min(min(lNW, lNE), min(lSW, lSE)));\n"
+"  let lMax = max(lM, max(max(lNW, lNE), max(lSW, lSE)));\n"
+"  let range = lMax - lMin;\n"
+     /* Skip flat areas: nothing to antialias, and it keeps texture detail crisp. */
+"  if (range < max(0.0312, lMax * 0.125)) { return vec4<f32>(center, 1.0); }\n"
+"  var dir = vec2<f32>(-((lNW + lNE) - (lSW + lSE)), ((lNW + lSW) - (lNE + lSE)));\n"
+"  let dirReduce = max((lNW + lNE + lSW + lSE) * 0.25 * 0.125, 0.0078125);\n"
+"  let rcpDirMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + dirReduce);\n"
+"  dir = clamp(dir * rcpDirMin, vec2<f32>(-8.0), vec2<f32>(8.0)) * texel;\n"
+"  let rgbA = 0.5 * (shade(uv + dir * (1.0 / 3.0 - 0.5)) + shade(uv + dir * (2.0 / 3.0 - 0.5)));\n"
+"  let rgbB = rgbA * 0.5 + 0.25 * (shade(uv + dir * -0.5) + shade(uv + dir * 0.5));\n"
+"  let lB = luma(rgbB);\n"
+     /* rgbB is the sharper 4-tap; fall back to the 2-tap rgbA if it overshot the
+        neighbourhood luma range (a classic FXAA edge-case guard). */
+"  if (lB < lMin || lB > lMax) { return vec4<f32>(rgbA, 1.0); }\n"
+"  return vec4<f32>(rgbB, 1.0);\n"
 "}\n";
 
 /* Build a fullscreen pipeline: no vertex buffers, no depth, one target. */
@@ -1102,6 +1138,15 @@ void* rae_gb_taa_target_view(void)   { return (void*)gb_taa_view[gb_taa_cur]; }
 void* rae_gb_taa_history_view(void)  { return (void*)gb_taa_view[1 - gb_taa_cur]; }
 void* rae_gb_taa_bind(int64_t idx)   { return (idx >= 0 && idx < 2) ? (void*)gb_taa_bind[(int)idx] : NULL; }
 void rae_gb_set_taa_bind(int64_t idx, void* b) { if (idx >= 0 && idx < 2) gb_taa_bind[(int)idx] = (WGPUBindGroup)b; }
+/* TAA on/off (#20, the game). Default is on so shared examples keep their look;
+ * an app disables it with rae_gb_set_taa_enabled(0). When off the composite
+ * routes to the raw lit slot (source-index 2), the taa graph pass no-ops via
+ * rae_gb_taa_ready==0, the G-buffer jitter is suppressed (gbuffer.c reads this
+ * getter), and the composite turns on FXAA instead — a spatial edge AA that
+ * does not ghost on animation the way TAA does, and is cheap enough for the
+ * mobile deferred target. */
+int64_t rae_gb_taa_is_enabled(void)     { return gb_taa_enabled ? 1 : 0; }
+void    rae_gb_set_taa_enabled(int64_t e) { gb_taa_enabled = (e != 0); }
 
 /* Composite (tonemap the lit result into the presentable target) runs in Rae
  * now (lib/gbuffer_passes.rae, #504). C exposes the shared deferred prep, the
