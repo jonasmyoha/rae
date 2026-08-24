@@ -404,6 +404,8 @@ GB_OCT_WGSL
 GB_FULLSCREEN_VS
 G3D_SHADOW_FN_WGSL
 "const PI: f32 = 3.14159265;\n"
+"const RAE_RIM_STRENGTH: f32 = 0.55;\n"
+"const RAE_RIM_POWER: f32 = 3.2;\n"
 RAE_SKY_WGSL
 /* Quantise [0,1] into `bands` steps with a SOFTENED edge (#396). A bare
  * floor() aliases along the terminator, and that edge moves whenever the
@@ -608,7 +610,21 @@ RAE_SKY_WGSL
  * positive, and one such pixel survives every subsequent blur and bloom.
  * The bound is the format's, applied even on the rgba16float fallback so
  * both paths produce the same image. */
-"  var lit = direct + ambient + emit;\n"
+/* RIM LIGHT (#557). A fresnel-weighted wash on grazing angles, tinted by
+ * the sky.
+ *
+ * Not physical, and deliberately so. Under a top-down camera a character is
+ * a small dark silhouette on ground of similar value, and the single thing
+ * that separates figure from ground in the Supercell/Pixar look is a bright
+ * edge. This is that edge, and it costs one pow.
+ *
+ * Gated on the surface FACING UP being low -- the rim belongs on the sides
+ * of a standing object, not on flat ground, where a fresnel term at a
+ * glancing camera angle would otherwise paint the whole horizon. */
+"  let rimF = pow(clamp(1.0 - NoV, 0.0, 1.0), RAE_RIM_POWER);\n"
+"  let rimUp = 1.0 - clamp(N.z, 0.0, 1.0);\n"
+"  let rim = L.ambSky.rgb * (rimF * rimUp * RAE_RIM_STRENGTH);\n"
+"  var lit = direct + ambient + emit + rim;\n"
 /* Occlusion still applies to the stylised result — a cel character with
  * no contact darkening floats. */
 "  if (isToon) { lit = toonShaded * mix(1.0, ao * ssao, 0.6); }\n"
