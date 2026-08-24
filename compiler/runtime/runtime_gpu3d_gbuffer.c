@@ -1089,6 +1089,62 @@ void rae_gb_terrain_array_write(int64_t layer, const int64_t* pixels, int64_t w,
     /* No gen bump: writing a layer updates the texture the existing view already
      * points at, so the bind group stays valid — only init (new view) rebinds. */
 }
+
+/* #15 BILLBOARD SPRITE pass. A textured, alpha-tested, cylindrical-quad pipeline
+ * that draws standing props (trees, ...) from the same DrawU instance records the
+ * mesh path uses, generalizing the grass render pass (procedural quad, no vertex
+ * buffer). Handles live in one opaque slot array like grass; the sprite images
+ * are a texture_2d_array (one layer per prop kind), created + written exactly
+ * like the terrain array above. */
+static void* g_sprite_ptrs[6];  /* 0=pipeline 1=bind 2=uniform buf 3=array view 4=sampler */
+void  rae_gb_sprite_set(int64_t i, void* p) { if (i >= 0 && i < 6) g_sprite_ptrs[i] = p; }
+void* rae_gb_sprite_get(int64_t i)          { return (i >= 0 && i < 6) ? g_sprite_ptrs[i] : NULL; }
+static WGPUTexture gb_sprite_array_tex = NULL;
+static int64_t gb_sprite_tex_gen = 0;
+int64_t rae_gb_sprite_tex_gen(void) { return gb_sprite_tex_gen; }
+void rae_gb_sprite_array_init(int64_t w, int64_t h, int64_t layers) {
+    WGPUDevice dev = (WGPUDevice)rae_wgpu_ctx_device();
+    if (!dev || w <= 0 || h <= 0 || layers <= 0) return;
+    if (gb_sprite_array_tex) { wgpuTextureRelease(gb_sprite_array_tex); gb_sprite_array_tex = NULL; }
+    WGPUTextureDescriptor td; memset(&td, 0, sizeof(td));
+    td.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
+    td.dimension = WGPUTextureDimension_2D;
+    td.size.width = (uint32_t)w; td.size.height = (uint32_t)h;
+    td.size.depthOrArrayLayers = (uint32_t)layers;
+    td.format = WGPUTextureFormat_RGBA8Unorm; td.mipLevelCount = 1; td.sampleCount = 1;
+    gb_sprite_array_tex = wgpuDeviceCreateTexture(dev, &td);
+    WGPUTextureViewDescriptor vd; memset(&vd, 0, sizeof(vd));
+    vd.format = WGPUTextureFormat_RGBA8Unorm;
+    vd.dimension = WGPUTextureViewDimension_2DArray;
+    vd.baseMipLevel = 0; vd.mipLevelCount = 1;
+    vd.baseArrayLayer = 0; vd.arrayLayerCount = (uint32_t)layers;
+    vd.aspect = WGPUTextureAspect_All;
+    g_sprite_ptrs[3] = (void*)wgpuTextureCreateView(gb_sprite_array_tex, &vd);
+    gb_sprite_tex_gen++;
+}
+void rae_gb_sprite_array_write(int64_t layer, const int64_t* pixels, int64_t w, int64_t h) {
+    WGPUQueue q = (WGPUQueue)rae_wgpu_ctx_queue();
+    if (!q || !gb_sprite_array_tex || !pixels || w <= 0 || h <= 0) return;
+    size_t n = (size_t)w * (size_t)h;
+    unsigned char* rgba = (unsigned char*)malloc(n * 4);
+    if (!rgba) return;
+    for (size_t i = 0; i < n; i++) {
+        uint32_t p = (uint32_t)pixels[i];
+        rgba[i * 4 + 0] = (unsigned char)(p & 0xff);
+        rgba[i * 4 + 1] = (unsigned char)((p >> 8) & 0xff);
+        rgba[i * 4 + 2] = (unsigned char)((p >> 16) & 0xff);
+        rgba[i * 4 + 3] = (unsigned char)((p >> 24) & 0xff);
+    }
+    WGPUTexelCopyTextureInfo dst; memset(&dst, 0, sizeof(dst));
+    dst.texture = gb_sprite_array_tex; dst.aspect = WGPUTextureAspect_All;
+    dst.origin.z = (uint32_t)layer;
+    WGPUTexelCopyBufferLayout layout; memset(&layout, 0, sizeof(layout));
+    layout.bytesPerRow = (uint32_t)w * 4; layout.rowsPerImage = (uint32_t)h;
+    WGPUExtent3D ext; ext.width = (uint32_t)w; ext.height = (uint32_t)h; ext.depthOrArrayLayers = 1;
+    wgpuQueueWriteTexture(q, &dst, rgba, n * 4, &layout, &ext);
+    free(rgba);
+}
+
 void* rae_gb_static_bind(void)   { return (void*)gb_bind; }
 void* rae_gb_draws_buffer(void)  { return (void*)gb_draw_sbuf; }
 int64_t rae_gb_max_draws(void)   { return (int64_t)GB_MAX_DRAWS; }
