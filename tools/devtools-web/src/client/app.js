@@ -86,55 +86,13 @@ const exampleDownloadsList = document.getElementById("example-downloads-list");
 const exampleDownloadsHint = document.getElementById("example-downloads-hint");
 
 // New View Elements
-const whyExampleReferences = document.getElementById("why-example-references");
-const whyExampleLogic = document.getElementById("why-example-logic");
+const whyReadmeEl = document.getElementById("why-readme");
 const showcaseFileList = document.getElementById("showcase-file-list");
 const showcaseSourceTitle = document.getElementById("showcase-source-title");
 const showcaseSourceCode = document.getElementById("showcase-source-code");
 const showcaseWatchBtn = document.getElementById("showcase-watch-btn");
 
-const WHY_EXAMPLES = {
-  references: `# Explicit references and binding
-type Player {
-  name: String
-  pos: { x: Float, y: Float }
-}
-
-func updatePosition(p: mod Player, dx: Float, dy: Float) {
-  # mod Player is a modifiable reference
-  p.pos.x = p.pos.x + dx
-  p.pos.y = p.pos.y + dy
-}
-
-func main() {
-  def p: Player = { name: "Rae", pos: { x: 0.0, y: 0.0 } }
-  
-  # Binding (=>) creates an alias, no copy
-  def p_ref: mod Player => p
-  updatePosition(p: p_ref, dx: 10.0, dy: 5.0)
-  
-  # Assignment (=) always deep copies
-  def p_copy: Player = p
-}`,
-  logic: `# Clean ECS-style systems
-type Velocity {
-  dx: Float
-  dy: Float
-}
-
-func movementSystem(pos: mod Transform, vel: view Velocity) {
-  # High-performance inline updates
-  pos.x = pos.x + vel.dx
-  pos.y = pos.y + vel.dy
-}
-
-func bounceSystem(pos: view Transform, vel: mod Velocity) {
-  # Declarative logic with explicit side effects
-  if pos.y < 0.0 or pos.y > 450.0 {
-    vel.dy = -vel.dy
-  }
-}`
-};
+// (WHY_EXAMPLES removed — the Why page now renders README.md, #640)
 
 let socket;
 let reconnectTimer;
@@ -3907,18 +3865,146 @@ function setActiveView(targetView) {
       scheduleLineChartRender();
     }
   } else if (resolvedView === "why") {
-    renderWhyExamples();
+    renderReadme();
   }
 }
 
+// The "Why?" page renders the repo-root README.md (#640): markdown -> HTML with
+// Rae code blocks syntax-highlighted (highlightRae) and the XKCD comic. Fetched
+// once, then cached.
+let readmeLoaded = false;
+async function renderReadme() {
+  if (!whyReadmeEl || readmeLoaded) return;
+  readmeLoaded = true;
+  try {
+    const res = await fetch("/api/readme");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const md = await res.text();
+    whyReadmeEl.innerHTML = renderMarkdown(md);
+  } catch (err) {
+    readmeLoaded = false; // let a later tab switch retry
+    whyReadmeEl.innerHTML =
+      `<p class="readme-loading">Could not load README.md (${escapeHtml(String(err))}).</p>`;
+  }
+}
 
-function renderWhyExamples() {
-  if (whyExampleReferences) {
-    whyExampleReferences.innerHTML = `<code>${highlightRae(WHY_EXAMPLES.references)}</code>`;
+// A compact markdown renderer for the README: headings, paragraphs, lists,
+// fenced code blocks (Rae blocks highlighted via highlightRae, others escaped),
+// images, links, and inline code/bold/italic. Deliberately small — the README
+// is a controlled document, not arbitrary user markdown.
+function renderMarkdown(md) {
+  const lines = md.replace(/\r\n/g, "\n").split("\n");
+  const out = [];
+  let i = 0;
+  let paragraph = [];
+  let listItems = null;
+
+  const flushParagraph = () => {
+    if (paragraph.length) {
+      out.push(`<p>${renderInline(paragraph.join(" "))}</p>`);
+      paragraph = [];
+    }
+  };
+  const flushList = () => {
+    if (listItems) {
+      out.push(`<ul>${listItems.map((it) => `<li>${renderInline(it)}</li>`).join("")}</ul>`);
+      listItems = null;
+    }
+  };
+  const flushAll = () => { flushParagraph(); flushList(); };
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Fenced code block: ```lang ... ```
+    const fence = line.match(/^```(\w*)\s*$/);
+    if (fence) {
+      flushAll();
+      const lang = fence[1];
+      const body = [];
+      i += 1;
+      while (i < lines.length && !/^```\s*$/.test(lines[i])) {
+        body.push(lines[i]);
+        i += 1;
+      }
+      i += 1; // skip closing fence
+      const code = body.join("\n");
+      const highlighted = lang === "rae" ? highlightRae(code) : escapeHtml(code);
+      const langClass = lang ? ` data-lang="${escapeHtml(lang)}"` : "";
+      out.push(`<pre class="source-code readme-code"${langClass}><code>${highlighted}</code></pre>`);
+      continue;
+    }
+
+    // Heading: #..######
+    const heading = line.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) {
+      flushAll();
+      const level = heading[1].length;
+      out.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);
+      i += 1;
+      continue;
+    }
+
+    // Unordered list item.
+    const li = line.match(/^[-*]\s+(.*)$/);
+    if (li) {
+      flushParagraph();
+      if (!listItems) listItems = [];
+      listItems.push(li[1]);
+      i += 1;
+      continue;
+    }
+
+    // Blank line ends the current block.
+    if (/^\s*$/.test(line)) {
+      flushAll();
+      i += 1;
+      continue;
+    }
+
+    // Otherwise: paragraph text (accumulate).
+    flushList();
+    paragraph.push(line);
+    i += 1;
   }
-  if (whyExampleLogic) {
-    whyExampleLogic.innerHTML = `<code>${highlightRae(WHY_EXAMPLES.logic)}</code>`;
-  }
+  flushAll();
+  return out.join("\n");
+}
+
+// Inline markdown: images, links, inline code, bold, italic. Code spans are
+// extracted first so their contents are not re-parsed, then re-inserted.
+function renderInline(text) {
+  const codeSpans = [];
+  let s = text.replace(/`([^`]+)`/g, (_m, code) => {
+    codeSpans.push(`<code>${escapeHtml(code)}</code>`);
+    return ` ${codeSpans.length - 1} `;
+  });
+  s = escapeHtml(s);
+  // Linked image: [![alt](img)](href)
+  s = s.replace(/\[!\[([^\]]*)\]\(([^)]+)\)\]\(([^)]+)\)/g,
+    (_m, alt, img, href) =>
+      `<a href="${resolveReadmeUrl(href)}" target="_blank" rel="noopener"><img class="readme-img" alt="${alt}" src="${resolveReadmeUrl(img)}" /></a>`);
+  // Image: ![alt](src)
+  s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g,
+    (_m, alt, src) => `<img class="readme-img" alt="${alt}" src="${resolveReadmeUrl(src)}" />`);
+  // Link: [text](href)
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
+    (_m, label, href) => `<a href="${resolveReadmeUrl(href)}" target="_blank" rel="noopener">${label}</a>`);
+  // Bold then italic.
+  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
+  // Restore code spans.
+  s = s.replace(/ (\d+) /g, (_m, n) => codeSpans[Number(n)]);
+  return s;
+}
+
+// README-relative asset paths (e.g. docs/screenshots/foo.png) load through the
+// devtools' screenshot route; absolute URLs (the XKCD comic) pass through.
+function resolveReadmeUrl(url) {
+  if (/^(https?:)?\/\//.test(url) || url.startsWith("#") || url.startsWith("mailto:")) return url;
+  const shot = url.match(/^docs\/screenshots\/(.+)$/);
+  if (shot) return `/example-screenshot/${shot[1]}`;
+  return url;
 }
 
 let showcaseLoaded = false;

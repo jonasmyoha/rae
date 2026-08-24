@@ -61,6 +61,9 @@ const compilerMetricsPath = path.resolve(
   "stats",
   "compiler_metrics.jsonl"
 );
+// The repo-root README.md — the "Why?" view renders it (markdown + Rae
+// highlighting + the XKCD comic) instead of hand-maintained marketing copy.
+const readmePath = path.resolve(process.cwd(), CONFIG.compilerPath, "README.md");
 let activeWebApp: {
   id: string;
   dir: string;
@@ -135,6 +138,16 @@ const server = Bun.serve<SocketData>({
     if (url.pathname === "/rae_syntax.json" && req.method === "GET") {
       return new Response(Bun.file(syntaxSummaryPath), {
         headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    if (url.pathname === "/api/readme" && req.method === "GET") {
+      const file = Bun.file(readmePath);
+      if (!(await file.exists())) {
+        return new Response("README.md not found", { status: 404 });
+      }
+      return new Response(file, {
+        headers: { "Content-Type": "text/markdown; charset=utf-8" }
       });
     }
 
