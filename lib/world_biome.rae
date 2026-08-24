@@ -40,7 +40,7 @@ type BiomeConfig {
 func defaultBiomeConfig() pub ret BiomeConfig {
   ret BiomeConfig {
     seed: 1337, elevScale: 90.0, moistScale: 140.0,
-    waterLevel: 0.0 - 0.28, beachBand: 0.15, rockSlope: 0.30, swampMoist: 0.6,
+    waterLevel: 0.0 - 0.28, beachBand: 0.24, rockSlope: 0.30, swampMoist: 0.6,
     islandRadius: 150.0, islandFalloff: 55.0
   }
 }
@@ -107,6 +107,10 @@ func worldSlope(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Flo
   ret clamp01(v: math.sqrt(x: gx * gx + gy * gy) * 8.0)
 }
 
+# How far above the sand band the slope-driven rock term stays suppressed.
+# MUST MATCH RAE_BIOME_SHORE_ROCK_FADE in world_biome.wgsl.
+const shoreRockFade: Float = 0.16
+
 type WorldSample {
   elevation: Float
   moisture: Float
@@ -131,8 +135,16 @@ func classifyWeights(elev: copy Float, moist: copy Float, slope: copy Float,
   # Sand: a band just above water.
   let wSand: Float = land * smooth01(edge0: wl, edge1: wl + 0.02, x: elev)
     * (1.0 - smooth01(edge0: sandHi - 0.02, edge1: sandHi, x: elev))
-  # Rock: steep slope or high elevation.
-  let wRock: Float = land * clamp01(v: smooth01(edge0: cfg.rockSlope, edge1: cfg.rockSlope + 0.12, x: slope)
+  # Rock: steep slope or high elevation -- but SLOPE ALONE MUST NOT MAKE A BEACH
+  # INTO ROCK. The shore is the steepest ground on the island by construction, so
+  # a purely slope-driven term claimed the whole coastal strip: rendering the
+  # materials as marker colours showed the "beach" was mostly ROCK with a thin
+  # sand band at the waterline, which is why it read grey rather than warm and why
+  # sand measured 4.4% of the ground against the reference's 40%.
+  #
+  # MUST MATCH world_biome.wgsl.
+  let notShore: Float = smooth01(edge0: sandHi, edge1: sandHi + shoreRockFade, x: elev)
+  let wRock: Float = land * clamp01(v: smooth01(edge0: cfg.rockSlope, edge1: cfg.rockSlope + 0.12, x: slope) * notShore
     + smooth01(edge0: 0.35, edge1: 0.55, x: elev))
   # Mud/swamp: low, flat, wet.
   let aboveSand: Float = smooth01(edge0: sandHi, edge1: sandHi + 0.04, x: elev)
