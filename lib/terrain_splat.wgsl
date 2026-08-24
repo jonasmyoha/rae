@@ -29,19 +29,34 @@ struct DrawU {
 // One tile harvested from the reference plate, bound with a repeat sampler by
 // lib/gbuffer_terrain.rae. Gated to identity when no tile is uploaded (see fs),
 // so example 114 and any other terrain user is unaffected.
-@group(0) @binding(2) var terrainTex: texture_2d<f32>;
+// A texture_2d_ARRAY now (#14): one layer per material, indexed to match
+// gbuffer_terrain.rae's terrainLayers — 0 grass, 1 sand, 2 road, 3 water. Gated
+// to identity when no tiles are uploaded (see fs), so example 114 is unaffected.
+@group(0) @binding(2) var terrainTex: texture_2d_array<f32>;
 @group(0) @binding(3) var terrainSamp: sampler;
+const RAE_TL_GRASS: i32 = 0;
+const RAE_TL_SAND:  i32 = 1;
+const RAE_TL_ROAD:  i32 = 2;
+const RAE_TL_WATER: i32 = 3;
 
 // World units per tile repeat. A ground cell is 18 units; ~6 units per tile puts
 // three repeats across a cell, matching the plate's patch scale without the
 // repeat reading as wallpaper under the top-down camera.
 const RAE_TERRAIN_TEX_SCALE: f32 = 0.16666667;
-// Measured mean of assets/terrain_grass.png. The tile is DIVIDED by this so it
-// carries only spatial variation (mean ~1), then multiplied by the calibrated
-// RAE_TERRAIN_GRASS albedo -- the plate pixels are already lit, so using them
-// raw as albedo would light them twice and blow out the frame. This keeps the
-// #13 calibration intact while stamping the plate's own texture onto the ground.
+// Measured means of the plate-harvested tiles (assets/terrain_{grass,sand,road,
+// water}.png). Each tile is DIVIDED by its mean so it carries only spatial
+// variation (mean ~1), then multiplied by the calibrated RAE_TERRAIN_* albedo --
+// the plate pixels are already lit, so using them raw as albedo would light them
+// twice and blow out the frame. This keeps the #13 calibration intact while
+// stamping the plate's own texture onto the ground.
 const RAE_TERRAIN_GRASS_TEX_MEAN: vec3<f32> = vec3<f32>(0.644, 0.665, 0.395);
+const RAE_TERRAIN_SAND_TEX_MEAN:  vec3<f32> = vec3<f32>(0.922, 0.798, 0.715);
+const RAE_TERRAIN_ROAD_TEX_MEAN:  vec3<f32> = vec3<f32>(0.761, 0.640, 0.511);
+const RAE_TERRAIN_WATER_TEX_MEAN: vec3<f32> = vec3<f32>(0.037, 0.378, 0.619);
+// Water scrolls (the task's "(scrolling) water"): world units per second the
+// water tile drifts, so the sea surface has moving detail over the procedural
+// ripples. Small — a fast scroll reads as a conveyor belt from the fixed camera.
+const RAE_TERRAIN_WATER_SCROLL: f32 = 0.06;
 
 fn octWrap(v: vec2<f32>) -> vec2<f32> {
   let s = vec2<f32>(select(-1.0, 1.0, v.x >= 0.0), select(-1.0, 1.0, v.y >= 0.0));
@@ -101,18 +116,39 @@ fn fs(in: VsOut) -> FsOut {
   let motion = (now - prev) * vec2<f32>(0.5, -0.5);
   let mEnc = clamp(motion, vec2<f32>(-0.5), vec2<f32>(0.5)) + vec2<f32>(0.50196078);
   var albedo = raeTerrainDetailColor(in.worldXY, in.bio, d.params.w);
-  // TEXTURED GRASS (#9). Stamp the plate tile over the procedural grass, weighted
-  // by the grass biome weight so only grass takes it (sand/rock/water/road stay
-  // procedural). `texBlend` = d.albedoMetallic.x, written per-frame by
+  // TEXTURED TERRAIN (#9 grass, #14 the rest). Stamp each plate-harvested tile
+  // over the procedural colour, weighted by that material's biome weight so only
+  // the dominant material takes its own texture. Each tile is DIVIDED by its own
+  // mean and multiplied by the calibrated RAE_TERRAIN_* albedo, so it adds the
+  // plate's spatial texture WITHOUT re-lighting already-lit pixels or moving the
+  // #13-calibrated mean. `texBlend` = d.albedoMetallic.x, written per-frame by
   // drawTerrainMesh from a module global that defaults to 0 -- so an app that
-  // never uploads a tile (example 114) blends nothing and this is exact identity.
-  // Sampled unconditionally so the binding is never dead-stripped from the
-  // pipeline's auto-derived layout.
+  // never uploads tiles (example 114) blends nothing and this is exact identity.
+  // Sampled unconditionally so the array binding is never dead-stripped from the
+  // pipeline's auto-derived layout. Rock keeps its procedural colour: the plate
+  // has no rocky-ground/stone tile to harvest (its low-saturation regions are
+  // shadowed greens), so there is no honest rock texture to stamp.
   let texBlend = d.albedoMetallic.x;
   let b = raeBiomeClassify(in.bio.x, in.bio.y, in.bio.z);
-  let texel = textureSample(terrainTex, terrainSamp, in.worldXY * RAE_TERRAIN_TEX_SCALE).rgb;
-  let grassTex = RAE_TERRAIN_GRASS * (texel / RAE_TERRAIN_GRASS_TEX_MEAN);
-  albedo = mix(albedo, grassTex, clamp(texBlend * b.wGrass, 0.0, 1.0));
+  let uv = in.worldXY * RAE_TERRAIN_TEX_SCALE;
+  let grassT = RAE_TERRAIN_GRASS * (textureSample(terrainTex, terrainSamp, uv, RAE_TL_GRASS).rgb / RAE_TERRAIN_GRASS_TEX_MEAN);
+  let sandT  = RAE_TERRAIN_SAND  * (textureSample(terrainTex, terrainSamp, uv, RAE_TL_SAND ).rgb / RAE_TERRAIN_SAND_TEX_MEAN);
+  // Water tile drifts with the clock (d.params.w carries time), for moving
+  // surface detail over the procedural ripples/foam.
+  let wuv = uv + vec2<f32>(d.params.w * RAE_TERRAIN_WATER_SCROLL, d.params.w * RAE_TERRAIN_WATER_SCROLL * 0.6);
+  let waterT = RAE_TERRAIN_WATER * (textureSample(terrainTex, terrainSamp, wuv, RAE_TL_WATER).rgb / RAE_TERRAIN_WATER_TEX_MEAN);
+  // Sequential blend by weight -- at any pixel one weight dominates, so this
+  // reads as "the dominant material's texture" while shore blends average.
+  albedo = mix(albedo, grassT, clamp(texBlend * b.wGrass, 0.0, 1.0));
+  albedo = mix(albedo, sandT,  clamp(texBlend * b.wSand,  0.0, 1.0));
+  // Water gets HALF weight: the sea already carries procedural foam/ripples, so
+  // the tile is subtle surface detail, not a replacement -- full strength reads
+  // as cracked ice under the top-down camera.
+  albedo = mix(albedo, waterT, clamp(texBlend * b.wWater * 0.5, 0.0, 1.0));
+  // Road is an overlay (raeBiomePath), not a biome weight; stamp it over land
+  // under the same gate, below water so a shore crossing still reads wet.
+  let roadT = RAE_TERRAIN_PATH * (textureSample(terrainTex, terrainSamp, uv, RAE_TL_ROAD).rgb / RAE_TERRAIN_ROAD_TEX_MEAN);
+  albedo = mix(albedo, roadT, clamp(texBlend * raeBiomePath(in.worldXY) * (1.0 - b.wWater), 0.0, 1.0));
   var o: FsOut;
   o.gba = vec4<f32>(oct.x, oct.y, 0.5, d.params.z);
   o.gbb = vec4<f32>(albedo, rough);

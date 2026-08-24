@@ -1036,6 +1036,59 @@ void  rae_gb_set_terrain_blend(double b)   { gb_terrain_blend = (float)b; }
 double rae_gb_terrain_blend(void)          { return (double)gb_terrain_blend; }
 void  rae_gb_bump_terrain_tex_gen(void)    { gb_terrain_tex_gen++; }
 int64_t rae_gb_terrain_tex_gen(void)       { return gb_terrain_tex_gen; }
+
+/* #14 textured-terrain material ARRAY. One texture_2d_array, one layer per
+ * material (grass/sand/road/water); the terrain fragment blends each layer over
+ * the procedural colour by its biome weight. Replaces #9's single texture_2d.
+ * Create once (init), then write each layer's RGBA — same 64->32 repack as
+ * registerImageRgba, since decodePng hands over one packed int per pixel. The
+ * 2D-array VIEW is stored in the same slot the bind group reads, and the gen
+ * bumps so Rae rebinds. */
+static WGPUTexture gb_terrain_array_tex = NULL;
+void rae_gb_terrain_array_init(int64_t w, int64_t h, int64_t layers) {
+    WGPUDevice dev = (WGPUDevice)rae_wgpu_ctx_device();
+    if (!dev || w <= 0 || h <= 0 || layers <= 0) return;
+    if (gb_terrain_array_tex) { wgpuTextureRelease(gb_terrain_array_tex); gb_terrain_array_tex = NULL; }
+    WGPUTextureDescriptor td; memset(&td, 0, sizeof(td));
+    td.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
+    td.dimension = WGPUTextureDimension_2D;
+    td.size.width = (uint32_t)w; td.size.height = (uint32_t)h;
+    td.size.depthOrArrayLayers = (uint32_t)layers;
+    td.format = WGPUTextureFormat_RGBA8Unorm; td.mipLevelCount = 1; td.sampleCount = 1;
+    gb_terrain_array_tex = wgpuDeviceCreateTexture(dev, &td);
+    WGPUTextureViewDescriptor vd; memset(&vd, 0, sizeof(vd));
+    vd.format = WGPUTextureFormat_RGBA8Unorm;
+    vd.dimension = WGPUTextureViewDimension_2DArray;
+    vd.baseMipLevel = 0; vd.mipLevelCount = 1;
+    vd.baseArrayLayer = 0; vd.arrayLayerCount = (uint32_t)layers;
+    vd.aspect = WGPUTextureAspect_All;
+    gb_terrain_tex_view = (void*)wgpuTextureCreateView(gb_terrain_array_tex, &vd);
+    gb_terrain_tex_gen++;
+}
+void rae_gb_terrain_array_write(int64_t layer, const int64_t* pixels, int64_t w, int64_t h) {
+    WGPUQueue q = (WGPUQueue)rae_wgpu_ctx_queue();
+    if (!q || !gb_terrain_array_tex || !pixels || w <= 0 || h <= 0) return;
+    size_t n = (size_t)w * (size_t)h;
+    unsigned char* rgba = (unsigned char*)malloc(n * 4);
+    if (!rgba) return;
+    for (size_t i = 0; i < n; i++) {
+        uint32_t p = (uint32_t)pixels[i];
+        rgba[i * 4 + 0] = (unsigned char)(p & 0xff);
+        rgba[i * 4 + 1] = (unsigned char)((p >> 8) & 0xff);
+        rgba[i * 4 + 2] = (unsigned char)((p >> 16) & 0xff);
+        rgba[i * 4 + 3] = (unsigned char)((p >> 24) & 0xff);
+    }
+    WGPUTexelCopyTextureInfo dst; memset(&dst, 0, sizeof(dst));
+    dst.texture = gb_terrain_array_tex; dst.aspect = WGPUTextureAspect_All;
+    dst.origin.z = (uint32_t)layer;
+    WGPUTexelCopyBufferLayout layout; memset(&layout, 0, sizeof(layout));
+    layout.bytesPerRow = (uint32_t)w * 4; layout.rowsPerImage = (uint32_t)h;
+    WGPUExtent3D ext; ext.width = (uint32_t)w; ext.height = (uint32_t)h; ext.depthOrArrayLayers = 1;
+    wgpuQueueWriteTexture(q, &dst, rgba, n * 4, &layout, &ext);
+    free(rgba);
+    /* No gen bump: writing a layer updates the texture the existing view already
+     * points at, so the bind group stays valid — only init (new view) rebinds. */
+}
 void* rae_gb_static_bind(void)   { return (void*)gb_bind; }
 void* rae_gb_draws_buffer(void)  { return (void*)gb_draw_sbuf; }
 int64_t rae_gb_max_draws(void)   { return (int64_t)GB_MAX_DRAWS; }
