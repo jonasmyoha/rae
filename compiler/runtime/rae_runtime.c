@@ -49,6 +49,7 @@
 #include "runtime_platform_apple.c"
 #include "runtime_raylib.c"
 #include "runtime_image_sdl3.c"
+#include "runtime_audio_sdl3.c"
 #ifdef RAE_HAS_WEBGPU
 #include "runtime_webgpu.c"
 #ifdef RAE_HAS_SDL3
