@@ -9,7 +9,11 @@ const RAE_BIOME_SEED: u32 = 1337u;
 const RAE_BIOME_ELEV_SCALE: f32 = 90.0;
 const RAE_BIOME_MOIST_SCALE: f32 = 140.0;
 const RAE_BIOME_WATER_LEVEL: f32 = -0.28;
-const RAE_BIOME_BEACH_BAND: f32 = 0.15;
+// Widened: the reference's beach is a broad band, and the old 0.15 put sand in a
+// strip only a few units across.
+const RAE_BIOME_BEACH_BAND: f32 = 0.24;
+// How far above the sand band the slope-driven rock term stays suppressed.
+const RAE_BIOME_SHORE_ROCK_FADE: f32 = 0.16;
 const RAE_BIOME_ROCK_SLOPE: f32 = 0.30;
 const RAE_BIOME_SWAMP_MOIST: f32 = 0.6;
 const RAE_BIOME_ISLAND_RADIUS: f32 = 150.0;
@@ -70,7 +74,19 @@ fn raeBiomeClassify(elev: f32, moist: f32, slope: f32) -> RaeBiome {
   let wWater = 1.0 - smoothstep(wl, wl + 0.02, elev);
   let land = 1.0 - wWater;
   let wSand = land * smoothstep(wl, wl + 0.02, elev) * (1.0 - smoothstep(sandHi - 0.02, sandHi, elev));
-  let wRock = land * clamp(smoothstep(RAE_BIOME_ROCK_SLOPE, RAE_BIOME_ROCK_SLOPE + 0.12, slope)
+  // SLOPE ALONE MUST NOT MAKE A BEACH INTO ROCK.
+  //
+  // The shore is the steepest ground on the island by construction -- it is
+  // where the land falls to the water -- so a purely slope-driven rock term
+  // claimed the entire coastal strip. Rendering the materials as marker colours
+  // showed the "beach" was mostly ROCK with a thin band of sand at the waterline,
+  // which is why it read grey instead of warm and why sand measured 4.4% of the
+  // ground against the reference's 40%.
+  //
+  // Rock now means cliff or highland: the slope term is suppressed just above the
+  // sand band, while genuinely high ground stays rocky regardless of slope.
+  let notShore = smoothstep(sandHi, sandHi + RAE_BIOME_SHORE_ROCK_FADE, elev);
+  let wRock = land * clamp(smoothstep(RAE_BIOME_ROCK_SLOPE, RAE_BIOME_ROCK_SLOPE + 0.12, slope) * notShore
     + smoothstep(0.35, 0.55, elev), 0.0, 1.0);
   let aboveSand = smoothstep(sandHi, sandHi + 0.04, elev);
   let flat = 1.0 - smoothstep(RAE_BIOME_ROCK_SLOPE * 0.5, RAE_BIOME_ROCK_SLOPE, slope);
