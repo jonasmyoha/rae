@@ -1,0 +1,136 @@
+# Billboard sprite pass driver (#15). A textured, alpha-tested, cylindrical-quad
+# pipeline that draws standing props (trees, ...) from the shared DrawU records —
+# the grass render technique (procedural quad, no vertex buffer) plus a sprite
+# texture array. Modeled on the terrain pipeline (gbuffer_terrain.rae) and reusing
+# makeGrassPipeline for the no-vertex-buffer, cull-none, reverse-Z setup.
+import core
+import gbuffer
+open gbuffer
+open scene3d
+open webgpu/webgpu
+import webgpu/context
+import grass_compute
+open grass_compute
+
+# C-side handles + sprite texture array (runtime_gpu3d_gbuffer.c). Slots:
+# 0 pipeline, 1 bind group, 2 SpriteU uniform buffer, 3 array view, 4 sampler.
+func gbSpriteSet(i: Int, p: Ptr) extern("rae_gb_sprite_set")
+func gbSpriteGet(i: Int) extern("rae_gb_sprite_get") ret Ptr
+func gbSpriteTexGen() extern("rae_gb_sprite_tex_gen") ret Int
+func gbSpriteArrayInit(w: Int, h: Int, layers: Int) extern("rae_gb_sprite_array_init")
+func gbSpriteArrayWrite(layer: Int, pixels: view Buffer(Int), w: Int, h: Int) extern("rae_gb_sprite_array_write")
+
+var gSpritePipeMade: Bool = false
+var gSpriteBindGen: Int = -1
+const spriteUniformBytes: Int = 32     # two vec4 (SpriteU)
+const spriteRecordFloats: Int = 40     # DrawU, same as the instanced path
+
+# Create the sprite image array (one layer per prop kind) + upload a layer. The
+# game calls these once with plate-cut RGBA sprites (straight alpha for the cutout).
+func spriteInitArray(w: copy Int, h: copy Int, layers: copy Int) pub { gbSpriteArrayInit(w: w, h: h, layers: layers) }
+func spriteUploadLayer(layer: copy Int, pixels: view Buffer(Int), w: copy Int, h: copy Int) pub {
+  gbSpriteArrayWrite(layer: layer, pixels: pixels, w: w, h: h)
+}
+
+# The SpriteU uniform buffer — created on demand so spriteSetParams can write it
+# at SETUP without touching the pipeline (which needs the frame/draws buffers that
+# only exist during the render).
+func ensureSpriteUniform() {
+  if gbSpriteGet(i: 2) is webgpuNull() {
+    let ud: WGPUBufferDescriptor = {
+      usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst, size: spriteUniformBytes as UInt64
+    }
+    gbSpriteSet(i: 2, p: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: ud))
+  }
+}
+
+# Sampler (clamp — a sprite is not tiled), the SpriteU uniform buffer, and a 1x1
+# transparent default array so the bind group is always valid before upload.
+func ensureSpriteDefaults() {
+  if gbSpriteGet(i: 4) is webgpuNull() {
+    let sd: WGPUSamplerDescriptor = {
+      addressModeU: WGPUAddressMode_ClampToEdge, addressModeV: WGPUAddressMode_ClampToEdge,
+      addressModeW: WGPUAddressMode_ClampToEdge,
+      magFilter: WGPUFilterMode_Linear, minFilter: WGPUFilterMode_Linear,
+      mipmapFilter: WGPUMipmapFilterMode_Nearest,
+      lodMinClamp: 0.0 as Float32, lodMaxClamp: 1.0 as Float32, maxAnisotropy: 1 as UInt16
+    }
+    gbSpriteSet(i: 4, p: wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: sd))
+  }
+  ensureSpriteUniform()
+  if gbSpriteGet(i: 3) is webgpuNull() {
+    gbSpriteArrayInit(w: 1, h: 1, layers: 1)
+    var one: List(Int) = createList(Int, cap: 1)
+    one.add(value: 0)   # transparent -> alpha-tested away; never visible
+    gbSpriteArrayWrite(layer: 0, pixels: one.data, w: 1, h: 1)
+  }
+}
+
+func ensureSpritePipeline() {
+  if not gSpritePipeMade {
+    gSpritePipeMade = true
+    let composed: String = gbReadWgsl(path: "lib/sprite_billboard.wgsl")
+    let cbuf: Buffer(Any) = composed.toCStr()
+    let shMod: Ptr = makeShaderModule(wgsl: cbuf)
+    gbSpriteSet(i: 0, p: makeGrassPipeline(shaderMod: shMod))
+    wgpuShaderModuleRelease(shaderModule: shMod)
+  }
+  ensureSpriteDefaults()
+  let gen: Int = gbSpriteTexGen()
+  if not (gen is gSpriteBindGen) {
+    gSpriteBindGen = gen
+    let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbSpriteGet(i: 0), groupIndex: 0 as UInt32)
+    var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 5)
+    entries.add(value: { binding: 0 as UInt32, buffer: gbFrameUbuf(), size: gbFrameBytes() as UInt64 })
+    entries.add(value: { binding: 1 as UInt32, buffer: gbDrawsBuffer(), size: gbDrawsSize() as UInt64 })
+    entries.add(value: { binding: 2 as UInt32, buffer: gbSpriteGet(i: 2), size: spriteUniformBytes as UInt64 })
+    entries.add(value: { binding: 3 as UInt32, textureView: gbSpriteGet(i: 3) })
+    entries.add(value: { binding: 4 as UInt32, sampler: gbSpriteGet(i: 4) })
+    let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 5 as UInt64, entries: entries.data }
+    gbSpriteSet(i: 1, p: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
+    wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+  }
+}
+
+# Sprite params (a.xyzw of SpriteU): world height per unit instance scale, sprite
+# aspect (w/h), alpha cutoff, time. Camera-right is derived in the shader from
+# viewProj, so no camera vector is needed here. Set once (or when tuning).
+func spriteSetParams(heightK: copy Float, aspect: copy Float, cutoff: copy Float, time: copy Float) pub {
+  ensureSpriteUniform()
+  var u: List(Float) = createList(Float, cap: 8)
+  u.add(value: heightK)
+  u.add(value: aspect)
+  u.add(value: cutoff)
+  u.add(value: time)
+  u.add(value: 0.0)
+  u.add(value: 0.0)
+  u.add(value: 0.0)
+  u.add(value: 0.0)
+  wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: gbSpriteGet(i: 2),
+    bufferOffset: 0 as UInt64, data: u.data, size: spriteUniformBytes as UInt64)
+}
+
+# Draw a batch of billboard instances from packed DrawU `records` (count of them):
+# upload to the shared draws buffer at the running base, draw 6 procedural verts x
+# count with the sprite pipeline, then restore the static pipeline (as grassDraw
+# does) so a following static draw is unaffected.
+func drawSpriteInstances(records: copy Ptr, count: copy Int) pub {
+  if count <= 0 { ret }
+  ensureSpritePipeline()
+  let base: Int = gbDrawCount()
+  if base + count > gbMaxDraws() { ret }
+  let strideBytes: Int = spriteRecordFloats * 4
+  wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: gbDrawsBuffer(),
+    bufferOffset: (base * strideBytes) as UInt64, data: records,
+    size: (count * strideBytes) as UInt64)
+  let pass: Ptr = gbPass()
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: gbSpriteGet(i: 0))
+  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+    group: gbSpriteGet(i: 1), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: 6 as UInt32,
+    instanceCount: count as UInt32, firstVertex: 0 as UInt32, firstInstance: base as UInt32)
+  gbAdvanceDraws(count: count)
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: gbStaticPipeline())
+  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+    group: gbStaticBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+}
