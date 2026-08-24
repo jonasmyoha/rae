@@ -346,8 +346,13 @@ func lighting(camX: copy Float, camY: copy Float, camZ: copy Float, exposure: co
 func lightingPassSky(camera: view Camera3d, light: view Light3d, sky: view Sky) pub {
   let up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
   let down: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0)
-  let skyC: Vec3 = skyIrradiance(sky: sky, n: up)
-  let gndC: Vec3 = skyIrradiance(sky: sky, n: down)
+  # DESATURATED BY THE SKY'S OWN SETTING. The sky's irradiance is THE ambient
+  # term here, so a physically blue daylight sky lights every surface blue --
+  # measured, a white ground albedo came out (0.59, 0.71, 0.96), which makes warm
+  # materials unreachable at any albedo. Default is 1.0, so this is a no-op for
+  # every existing caller; the visible sky is untouched either way.
+  let skyC: Vec3 = skyDesaturate(c: skyIrradiance(sky: sky, n: up), sat: sky.ambientSaturation)
+  let gndC: Vec3 = skyDesaturate(c: skyIrradiance(sky: sky, n: down), sat: sky.ambientSaturation)
   pushHosekChannel(c: sky.hosek.r, base: 0)
   pushHosekChannel(c: sky.hosek.g, base: 12)
   pushHosekChannel(c: sky.hosek.b, base: 24)

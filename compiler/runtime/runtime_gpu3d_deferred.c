@@ -664,7 +664,14 @@ GB_FULLSCREEN_VS
  * its other channels catching up and washing it out. */
 "fn pbrNeutral(color: vec3<f32>) -> vec3<f32> {\n"
 "  let startCompression = 0.8 - 0.04;\n"
-"  let desaturation = 0.15;\n"
+/* Khronos ships desaturation at 0.15. Lowered here because this renderer's job
+ * is stylised art, not neutral product viz: at 0.15 a bright saturated material
+ * is pulled toward grey exactly as it gets bright, so warm sand measured against
+ * the reference went the WRONG way when its albedo was raised -- brighter and
+ * less warm at the same time. The reference is a painting and keeps its
+ * saturation into the highlights. Keep the compression (it is what stops clipping
+ * and hue shift); drop the bleach. */
+"  let desaturation = 0.04;\n"
 "  var c = color;\n"
 "  let x = min(c.r, min(c.g, c.b));\n"
 "  var offset = 0.04;\n"
