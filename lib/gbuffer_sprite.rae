@@ -92,17 +92,18 @@ func ensureSpritePipeline() {
   }
 }
 
-# Sprite params (a.xyzw of SpriteU): world height per unit instance scale, sprite
-# aspect (w/h), alpha cutoff, time. Camera-right is derived in the shader from
-# viewProj, so no camera vector is needed here. Set once (or when tuning).
-func spriteSetParams(heightK: copy Float, aspect: copy Float, cutoff: copy Float, time: copy Float) pub {
+# Sprite params (SpriteU): a = (world height per unit instance scale, sprite
+# aspect w/h, alpha cutoff, time); b.x = camera TILT (0 = upright cylindrical,
+# 1 = lay flat to face the camera, #22). Camera-right/up are derived in the shader
+# from viewProj, so no camera vector is needed here. Set once (or when tuning).
+func spriteSetParams(heightK: copy Float, aspect: copy Float, cutoff: copy Float, time: copy Float, tilt: copy Float) pub {
   ensureSpriteUniform()
   var u: List(Float) = createList(Float, cap: 8)
   u.add(value: heightK)
   u.add(value: aspect)
   u.add(value: cutoff)
   u.add(value: time)
-  u.add(value: 0.0)
+  u.add(value: tilt)
   u.add(value: 0.0)
   u.add(value: 0.0)
   u.add(value: 0.0)
