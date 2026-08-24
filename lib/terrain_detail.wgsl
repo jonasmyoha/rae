@@ -85,6 +85,9 @@ const RAE_TERRAIN_GRASS: vec3<f32> = vec3<f32>(0.539, 0.632, 0.256);
 // lift -- it has the headroom, sand does not.
 const RAE_TERRAIN_SAND:  vec3<f32> = vec3<f32>(1.000, 0.977, 0.697);
 const RAE_TERRAIN_MUD:   vec3<f32> = vec3<f32>(0.760, 0.560, 0.230);
+// Dirt road: darker and browner than beach sand so both remain legible where
+// the route crosses the shore.
+const RAE_TERRAIN_PATH:  vec3<f32> = vec3<f32>(0.720, 0.520, 0.330);
 const RAE_TERRAIN_ROCK:  vec3<f32> = vec3<f32>(0.520, 0.470, 0.350);
 const RAE_TERRAIN_WATER: vec3<f32> = vec3<f32>(0.001, 0.327, 0.599);
 
@@ -100,6 +103,7 @@ const RAE_TERRAIN_VAR_GRASS: f32 = 1.15;
 // everything above the cap clipped and the beach rendered as flat white.
 const RAE_TERRAIN_VAR_SAND:  f32 = 0.38;
 const RAE_TERRAIN_VAR_MUD:   f32 = 0.30;
+const RAE_TERRAIN_VAR_PATH:  f32 = 0.42;
 const RAE_TERRAIN_VAR_ROCK:  f32 = 0.30;
 const RAE_TERRAIN_VAR_WATER: f32 = 0.06;
 
@@ -247,11 +251,17 @@ fn raeTerrainDetailColor(p: vec2<f32>, bio: vec3<f32>, t: f32) -> vec3<f32> {
   let aboveWater = bio.x - RAE_BIOME_WATER_LEVEL;
   let wet = 1.0 - smoothstep(0.0, RAE_WET_SAND_RISE, aboveWater);
   let sandWet = mix(1.0, RAE_WET_SAND_DARKEN, wet);
-  let ground = raeTerrainVary(RAE_TERRAIN_GRASS, RAE_TERRAIN_VAR_GRASS, v) * b.wGrass
+  let groundBase = raeTerrainVary(RAE_TERRAIN_GRASS, RAE_TERRAIN_VAR_GRASS, v) * b.wGrass
        + raeTerrainVary(RAE_TERRAIN_SAND,  RAE_TERRAIN_VAR_SAND,  v) * sandWet * b.wSand
        + raeTerrainVary(RAE_TERRAIN_MUD,   RAE_TERRAIN_VAR_MUD,   v) * b.wMud
        + raeTerrainVary(RAE_TERRAIN_ROCK,  RAE_TERRAIN_VAR_ROCK,  v) * b.wRock
        + raeWaterColor(p, bio.x, b.wWater, t) * b.wWater;
+  // A road lies over normalized biome materials; it is not a sixth biome that
+  // steals weight from grass and sand throughout the island.
+  let path = raeBiomePath(p);
+  let ground = mix(groundBase,
+                   raeTerrainVary(RAE_TERRAIN_PATH, RAE_TERRAIN_VAR_PATH, v),
+                   path * (1.0 - b.wWater));
   let foam = raeWaterFoam(p, bio.x, b.wWater, t);
   let swash = raeWaterSwash(p, bio.x, b.wSand, t);
   let surf = clamp(foam * RAE_WATER_FOAM_STRENGTH + swash * RAE_WATER_SWASH_STRENGTH, 0.0, 1.0);
