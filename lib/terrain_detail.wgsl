@@ -42,6 +42,15 @@ const RAE_TERRAIN_DETAIL_HI_SCALE: f32 = 3.10;   // ~0.3 world units per feature
 const RAE_TERRAIN_DETAIL_LO_SCALE: f32 = 0.75;   // ~1.3 world units per patch
 const RAE_TERRAIN_DETAIL_SEED: u32 = 1337u;
 
+// GRASS FRINGE at the grass/sand edge (#19). A beach does not meet grass at a
+// clean line — grass frays into it in irregular tufts. These control that fray:
+// REACH  = elevation depth the fringe reaches DOWN into the beach (bigger = wider,
+//          fluffier band). SCALE = tuft frequency in world units (bigger = finer
+//          strands). STRENGTH = how far the strands tint the sand toward grass.
+const RAE_GRASS_FRINGE_REACH: f32 = 0.14;
+const RAE_GRASS_FRINGE_SCALE: f32 = 3.8;
+const RAE_GRASS_FRINGE_STRENGTH: f32 = 0.82;
+
 // GROUND PALETTE (the calibrated RAE_TERRAIN_* colours + their variation)
 // lives in terrain_palette.wgsl now (#13), composed just before this file so
 // these constants are in scope. It is per-app overridable; see that file.
@@ -198,9 +207,29 @@ fn raeTerrainDetailColor(p: vec2<f32>, bio: vec3<f32>, t: f32) -> vec3<f32> {
   // A road lies over normalized biome materials; it is not a sixth biome that
   // steals weight from grass and sand throughout the island.
   let path = raeBiomePath(p);
-  let ground = mix(groundBase,
+  let roaded = mix(groundBase,
                    raeTerrainVary(RAE_TERRAIN_PATH, RAE_TERRAIN_VAR_PATH, v),
                    path * (1.0 - b.wWater));
+  // GRASS FRINGE (#19). Soft grass strands fraying into the sand at the grass/sand
+  // edge. `nearGrass` rises toward the grass elevation (sandHi); weighting by
+  // wSand restricts it to the beach and makes it PEAK at the boundary (sand still
+  // present, grass just above). A high-frequency fbm breaks the tint into discrete
+  // tufts — brush strokes of grass — rather than a smooth band, and its own soft
+  // threshold keeps the strand edges feathery. This both softens the hard line and
+  // bakes grass into the beach edge. Suppressed where the surf/road already own it.
+  let sandHiE = RAE_BIOME_WATER_LEVEL + RAE_BIOME_BEACH_BAND;
+  // `nearGrass` rises across the whole upper-beach REACH band up to the grass
+  // elevation (not just the thin wSand/wGrass crossfade), so the fringe is a wide
+  // fluffy band, strongest nearest the grass and fading down into the sand. On the
+  // grass side this is a no-op (grass mixed over grass); on the beach it greens.
+  let nearGrass = smoothstep(sandHiE - RAE_GRASS_FRINGE_REACH, sandHiE, bio.x);
+  let tuft = clamp(raeNoiseFbm2(p * RAE_GRASS_FRINGE_SCALE, 2u, 2.0, 0.5,
+                                RAE_TERRAIN_DETAIL_SEED + 733u) * 0.5 + 0.5, 0.0, 1.0);
+  // A soft base bleed (0.35) keeps the edge from reading as a line; the tuft term
+  // adds brush-stroke strands on top. Suppressed under water and road.
+  let strand = (0.35 + 0.65 * smoothstep(0.30, 0.70, tuft)) * nearGrass
+             * (1.0 - b.wWater) * (1.0 - path) * RAE_GRASS_FRINGE_STRENGTH;
+  let ground = mix(roaded, raeTerrainVary(RAE_TERRAIN_GRASS, RAE_TERRAIN_VAR_GRASS, v), strand);
   let foam = raeWaterFoam(p, bio.x, b.wWater, t);
   let swash = raeWaterSwash(p, bio.x, b.wSand, t);
   let surf = clamp(foam * RAE_WATER_FOAM_STRENGTH + swash * RAE_WATER_SWASH_STRENGTH, 0.0, 1.0);
