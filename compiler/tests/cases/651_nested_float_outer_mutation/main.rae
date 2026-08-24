@@ -1,0 +1,29 @@
+import core
+import math
+
+const pathSpokes: Int = 3
+const pathMeander: Float = 11.0
+const pathWave: Float = 46.0
+
+func radialPath(x: view Float, y: view Float) ret Float {
+  let radius: Float = math.sqrt(x: x * x + y * y)
+  let wander: Float = math.sin(x: radius / pathWave * 6.2831853) * pathMeander
+  var best: Float = 1000000.0
+  var i: Int = 0
+  loop i < pathSpokes {
+    let angle: Float = i.toFloat() * 2.0943951 + 0.6
+    let directionX: Float = math.cos(x: angle)
+    let directionY: Float = math.sin(x: angle)
+    if x * directionX + y * directionY > 0.0 {
+      let distance: Float = math.abs(n: x * directionY - y * directionX - wander)
+      if distance < best { best = distance }
+    }
+    i = i + 1
+  }
+  ret best
+}
+
+func main() {
+  let distance: Float = radialPath(x: 20.0, y: 5.0)
+  log("path found: {distance < 1000000.0}")
+}

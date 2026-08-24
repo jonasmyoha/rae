@@ -23,6 +23,11 @@
 #ifndef RAE_RUNTIME_SOURCE_DIR
 #define RAE_RUNTIME_SOURCE_DIR "runtime"
 #endif
+
+/* C emission retains parsed AST and generated specializations together. Large
+ * applications can legitimately exceed the old 64 MiB budget by adding a
+ * small helper, so keep enough headroom for production-sized module graphs. */
+#define RAE_C_BACKEND_ARENA_CAPACITY (128ULL * 1024ULL * 1024ULL)
 #include "arena.h"
 #include "str.h"
 #include "diag.h"
@@ -2298,7 +2303,7 @@ static bool build_c_backend_output(const char* entry_file,
                                    bool* out_uses_webgpu,
                                    WatchSources* out_sources) {
   diag_reset();
-  Arena* arena = arena_create(64 * 1024 * 1024);
+  Arena* arena = arena_create(RAE_C_BACKEND_ARENA_CAPACITY);
   if (!arena) {
     diag_fatal("could not allocate arena");
   }
@@ -2390,7 +2395,7 @@ static bool build_c_backend_output(const char* entry_file,
       arena_destroy(arena);
       return false;
   }
-  
+
   VmRegistry registry;
   vm_registry_init(&registry);
   TickCounter tick_counter = {.next = 0};
