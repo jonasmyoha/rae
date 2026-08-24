@@ -2,11 +2,12 @@
 // quad, no vertex buffer, instanced from the shared DrawU records — into a
 // TEXTURED, alpha-tested, CYLINDRICAL billboard for standing props (trees, ...).
 //
-// CYLINDRICAL, yaw-only: the quad stands on world +Z and rotates only about Z to
-// face the camera's horizontal bearing (SpriteU right vector). The sprite itself
-// is authored at the game's fixed camera PITCH, so the "seen from above" look is
-// baked in — see docs/textured-billboards-design.md §4. The camera never pitches
-// here, so nothing tips the quad flat.
+// CYLINDRICAL, yaw-only by default: the quad stands on world +Z and rotates only
+// about Z to face the camera's horizontal bearing (SpriteU right vector). The
+// sprite is authored at the game's fixed camera PITCH — see
+// docs/textured-billboards-design.md §4. A TILT knob (SpriteU b.x, #22) can lean
+// the quad's up-axis toward the camera so it lays flatter toward the ground; the
+// steep top-down camera would otherwise see an upright quad almost edge-on.
 //
 // ALPHA-TESTED, not blended: the deferred G-buffer has no transparency path, so a
 // cutout is a `discard` on low alpha (like the SDF/shadow miss shaders) — it
@@ -86,7 +87,15 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   // -- no camera uniform needed, and it tracks the camera if it ever orbits.
   let rc = vec3<f32>(F.viewProj[0].x, F.viewProj[1].x, F.viewProj[2].x);
   let rightH = normalize(vec3<f32>(rc.x, rc.y, 0.0));
-  let up = vec3<f32>(0.0, 0.0, 1.0);
+  // TILT toward the camera (S.b.x, 0..1). At 0 the quad stands on world +Z as a
+  // pure cylindrical billboard; at 1 its up-axis is the camera's up, so the card
+  // lies back to face the camera fully. Under the fixed steep top-down view an
+  // upright quad is seen almost edge-on -- tilting it lays the sprite flatter,
+  // toward the ground, so the top-down camera sees its face (#22). camUp is the
+  // world direction of screen-up, read from viewProj row 1 like rightH from row 0.
+  let uc = vec3<f32>(F.viewProj[0].y, F.viewProj[1].y, F.viewProj[2].y);
+  let camUp = normalize(uc);
+  let up = normalize(mix(vec3<f32>(0.0, 0.0, 1.0), camUp, clamp(S.b.x, 0.0, 1.0)));
 
   let c = quadCorner(vi);          // u01, v01
   let u = c.x - 0.5;               // -0.5..0.5 across width
