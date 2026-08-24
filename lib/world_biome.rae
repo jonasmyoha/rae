@@ -74,6 +74,39 @@ func worldIslandMask(x: view Float, y: view Float, cfg: view BiomeConfig) pub re
 # value keeps land past the radius.
 const islandSink: Float = 1.6
 
+# PATHS. Dirt roads radiate from the island centre so they compose routes
+# instead of disconnected noise scars. MUST match raeBiomePath in WGSL.
+const pathSpokes: Int = 3
+const pathHalf: Float = 3.4
+const pathFade: Float = 2.6
+const pathMeander: Float = 11.0
+const pathWave: Float = 46.0
+# How much path weight is enough to keep props off it.
+const pathPropClear: Float = 0.22
+
+func worldPath(x: view Float, y: view Float, cfg: view BiomeConfig) ret Float {
+  let radius: Float = math.sqrt(x: x * x + y * y)
+  if radius < 6.0 { ret 0.0 }
+  let wander: Float = math.sin(x: radius / pathWave * 6.2831853) * pathMeander
+  var best: Float = 1000000.0
+  var i: Int = 0
+  loop i < pathSpokes {
+    let angle: Float = i.toFloat() * 2.0943951 + 0.6
+    let directionX: Float = math.cos(x: angle)
+    let directionY: Float = math.sin(x: angle)
+    if x * directionX + y * directionY > 0.0 {
+      let distance: Float = math.abs(n: x * directionY - y * directionX - wander)
+      if distance < best { best = distance }
+    }
+    i = i + 1
+  }
+  let weight: Float = 1.0 - smooth01(edge0: pathHalf, edge1: pathHalf + pathFade, x: best)
+  let onLand: Float = smooth01(edge0: cfg.waterLevel + 0.02,
+                               edge1: cfg.waterLevel + 0.16,
+                               x: worldElevation(x: x, y: y, cfg: cfg))
+  ret clamp01(v: weight * onLand)
+}
+
 # Elevation, shaped into an island by SUBTRACTING at the rim rather than fading
 # the noise toward ocean.
 #
@@ -326,7 +359,9 @@ func worldFindLand(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret 
 # kind needs: vegetation wants a real meadow, rock is happy on sand or stone and
 # passes 0. Nothing at all stands in the sea.
 func worldPropAllowed(x: view Float, y: view Float, minGrass: view Float,
-                      cfg: view BiomeConfig) pub ret Bool {
+                      cfg: view BiomeConfig) ret Bool {
+  # The empty corridor is as important to a readable road as its colour.
+  if worldPath(x: x, y: y, cfg: cfg) > pathPropClear { ret false }
   let s: WorldSample = sampleWorld(x: x, y: y, cfg: cfg)
   if s.wWater > worldWalkMaxWater { ret false }
   ret s.wGrass >= minGrass

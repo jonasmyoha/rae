@@ -54,6 +54,36 @@ fn raeBiomeElevation(p: vec2<f32>) -> f32 {
   return e - (1.0 - mask) * RAE_BIOME_ISLAND_SINK;
 }
 
+// Radial dirt roads meander away from the island centre. A perpendicular
+// distance to each ray avoids atan2 and guarantees every road connects inward.
+// MUST match worldPath in world_biome.rae.
+const RAE_BIOME_PATH_SPOKES: i32 = 3;
+const RAE_BIOME_PATH_HALF: f32 = 3.4;
+const RAE_BIOME_PATH_FADE: f32 = 2.6;
+const RAE_BIOME_PATH_MEANDER: f32 = 11.0;
+const RAE_BIOME_PATH_WAVE: f32 = 46.0;
+
+fn raeBiomePath(p: vec2<f32>) -> f32 {
+  let radius = length(p);
+  if (radius < 6.0) { return 0.0; }
+  let wander = sin(radius / RAE_BIOME_PATH_WAVE * 6.2831853) * RAE_BIOME_PATH_MEANDER;
+  var best = 1e9;
+  for (var i = 0; i < RAE_BIOME_PATH_SPOKES; i = i + 1) {
+    let angle = f32(i) * 6.2831853 / f32(RAE_BIOME_PATH_SPOKES) + 0.6;
+    let direction = vec2<f32>(cos(angle), sin(angle));
+    if (dot(p, direction) <= 0.0) { continue; }
+    let perpendicular = p.x * direction.y - p.y * direction.x;
+    best = min(best, abs(perpendicular - wander));
+  }
+  let weight = 1.0 - smoothstep(RAE_BIOME_PATH_HALF,
+                                RAE_BIOME_PATH_HALF + RAE_BIOME_PATH_FADE,
+                                best);
+  let onLand = smoothstep(RAE_BIOME_WATER_LEVEL + 0.02,
+                          RAE_BIOME_WATER_LEVEL + 0.16,
+                          raeBiomeElevation(p));
+  return clamp(weight * onLand, 0.0, 1.0);
+}
+
 fn raeBiomeMoisture(p: vec2<f32>) -> f32 {
   let m = raeNoiseFbm2(p / RAE_BIOME_MOIST_SCALE, 3u, 2.0, 0.5, RAE_BIOME_SEED + 7919u);
   return clamp(m * 0.5 + 0.5, 0.0, 1.0);
