@@ -75,6 +75,93 @@ func findJointByKey(sk: view Skeleton, key: view String) ret Int {
   ret 0 - 1
 }
 
+# Read/write a quaternion packed at slot `i` of a flat `x,y,z,w` List(Float).
+func quatFromList(a: view List(Float), i: copy Int) ret Quat {
+  ret quat.create(
+    x: a.get(index: i * 4), y: a.get(index: i * 4 + 1),
+    z: a.get(index: i * 4 + 2), w: a.get(index: i * 4 + 3))
+}
+func quatIntoList(a: mod List(Float), i: copy Int, q: view Quat) {
+  a.set(index: i * 4, value: q.x)
+  a.set(index: i * 4 + 1, value: q.y)
+  a.set(index: i * 4 + 2, value: q.z)
+  a.set(index: i * 4 + 3, value: q.w)
+}
+
+# Model-space (world) ROTATION per node: the product of local rotations from the
+# root down, `M(n) = M(parent) * localR(n)` — the rotation half of
+# nodeWorldMatrix. Returned as a flat x,y,z,w List(Float), one quat per node.
+#
+# Parents are not guaranteed to precede children in node order, so this resolves
+# in passes: a node is computed once its parent is, and a node whose parent is
+# still pending waits for the next pass. It converges in at most `depth` passes;
+# the `pass <= nodeCount` guard is the cycle backstop nodeWorldMatrix also keeps.
+func accumModelRot(localR: view List(Float), parent: view List(Int), nodeCount: copy Int) ret List(Float) {
+  let out: List(Float) = createList(Float, cap: nodeCount * 4)
+  let done: List(Bool) = createList(Bool, cap: nodeCount)
+  var i: Int = 0
+  loop i < nodeCount {
+    out.add(value: 0.0)
+    out.add(value: 0.0)
+    out.add(value: 0.0)
+    out.add(value: 1.0)
+    done.add(value: false)
+    i = i + 1
+  }
+  var pass: Int = 0
+  var remaining: Bool = true
+  loop remaining and pass <= nodeCount {
+    remaining = false
+    var n: Int = 0
+    loop n < nodeCount {
+      if done.get(index: n) is false {
+        let p: Int = parent.get(index: n)
+        let lq: Quat = quatFromList(a: localR, i: n)
+        if p < 0 {
+          quatIntoList(a: out, i: n, q: lq)
+          done.set(index: n, value: true)
+        } else {
+          if done.get(index: p) is true {
+            let pq: Quat = quatFromList(a: out, i: p)
+            quatIntoList(a: out, i: n, q: quat.qnorm(a: quat.qmul(a: pq, b: lq)))
+            done.set(index: n, value: true)
+          } else {
+            remaining = true
+          }
+        }
+      }
+      n = n + 1
+    }
+    pass = pass + 1
+  }
+  ret own out
+}
+
+# A mutable copy of `from` initialised to its BIND pose, so applyClip can sample
+# the source clip into it without touching the live source skeleton (which the
+# other character is animating every frame). Only rotations are read downstream,
+# but localT/localS are copied so applyClip's translation/scale writes land
+# somewhere valid. nodeNames/jointNodes/inverseBind are unused by applyClip.
+func cloneSourceForSampling(from: view Skeleton, fromBind: view SkeletonPose) ret Skeleton {
+  let localR: List(Float) = createList(Float, cap: fromBind.localR.length)
+  var i: Int = 0
+  loop i < fromBind.localR.length { localR.add(value: fromBind.localR.get(index: i)) i = i + 1 }
+  let localT: List(Float) = createList(Float, cap: fromBind.localT.length)
+  i = 0
+  loop i < fromBind.localT.length { localT.add(value: fromBind.localT.get(index: i)) i = i + 1 }
+  let localS: List(Float) = createList(Float, cap: fromBind.localS.length)
+  i = 0
+  loop i < fromBind.localS.length { localS.add(value: fromBind.localS.get(index: i)) i = i + 1 }
+  let parent: List(Int) = createList(Int, cap: from.parent.length)
+  i = 0
+  loop i < from.parent.length { parent.add(value: from.parent.get(index: i)) i = i + 1 }
+  ret Skeleton {
+    ok: true, jointNodes: createList(Int, cap: 0), inverseBind: createList(Float, cap: 0),
+    nodeCount: from.nodeCount, parent: own parent, nodeNames: createList(String, cap: 0),
+    localT: own localT, localR: own localR, localS: own localS
+  }
+}
+
 # Rewrite `c`'s channels from the `from` skeleton onto `to`, matching by joint
 # name. Channels whose joint has no counterpart are DROPPED — those joints simply
 # hold their bind pose, which is the right failure mode: a rig missing a spine
@@ -82,107 +169,171 @@ func findJointByKey(sk: view Skeleton, key: view String) ret Int {
 #
 # ROTATION CHANNELS ONLY. Translation and scale are authored in the SOURCE rig's
 # bone lengths; replaying them on different proportions tears the mesh apart.
-# Rotations are proportion-independent, which is why they retarget and the others
-# do not. Root motion is not carried either — the character controller owns world
-# position here, and hip translation would fight it.
+# Root motion is not carried either — the character controller owns world
+# position, and hip translation would fight it. `skipRoot` additionally drops the
+# hip ROTATION so a differing armature above the hips cannot tip the character.
 #
-# BIND-DELTA. A clip's local rotations are relative to the rig they were authored
-# on. Two rigs can stand the same way and still disagree about each joint's rest
-# orientation, and copying rotations across then lays the target flat on its back
-# or twists its limbs. So each key is converted to the source's rotation relative
-# to its OWN rest, and that delta is applied to the destination's rest:
+# WORLD-SPACE (#10). The previous version worked one channel at a time in LOCAL
+# space: `out = dstBind * inverse(srcBind) * srcKey`. That reconciles each joint's
+# rest ORIENTATION but not its bone BASIS — the delta `inverse(srcBind)*srcKey`
+# lives in the SOURCE parent's frame, and applying it after `dstBind` assumes the
+# two parents' frames agree. When two rigs differ in roll or axis convention they
+# do not, and the error accumulates down the chain as a forward lean.
 #
-#     delta = inverse(srcBind) * srcKey
-#     out   = dstBind * delta
+# The fix carries the motion through MODEL space, where the real bone directions
+# live, so a basis difference cannot survive the round trip. Per joint, per frame:
 #
-# which is the identity when a rig is retargeted onto itself, and correct for any
-# pair whose joints correspond anatomically however their rests differ.
+#     A(d)        = Msrc_key(s) * inverse(Msrc_bind(s))   # source's world rotation vs its own rest
+#     Mdst_key(d) = A(d) * Mdst_bind(d)                   # apply that world rotation to dst's rest
+#     out_local(d)= inverse(Mdst_key(parent)) * Mdst_key(d)
 #
-# `fromBind` / `toBind` are the rest poses captured at load (captureSkeletonPose),
+# where `Msrc_*`/`Mdst_*` are model-space rotations (accumModelRot). This is the
+# identity when a rig is retargeted onto itself, and — unlike the local form —
+# correct for any pair whose joints correspond however their bone bases differ.
+# A joint with no source channel keeps its bind (`A = identity`), and its motion
+# still reaches its children because the model-space product carries it.
+#
+# Model space needs the WHOLE source pose at one time, so the sparse per-channel
+# keys are RESAMPLED onto a shared ~60 Hz grid: applyClip reconstructs the full
+# source pose at each sample, and every output joint is emitted on that grid.
+#
+# `fromBind`/`toBind` are the rest poses captured at load (captureSkeletonPose),
 # NOT the live skeletons — those are mutated every frame by applyClip.
-# `skipRoot` drops the hip channel. Bind-delta fixes each joint's rest
-# orientation, but it cannot reconcile different HIERARCHIES above the hips — one
-# rig may carry an armature node the other lacks, and its contribution lands on
-# the root. Dropping it keeps the character upright and costs nothing here,
-# because the controller owns facing and world position anyway.
 func retargetClip(c: view Clip, from: view Skeleton, fromBind: view SkeletonPose,
                   to: view Skeleton, toBind: view SkeletonPose,
                   skipRoot: view Bool) pub ret Clip {
-  if c.ok is false or from.ok is false or to.ok is false {
+  if c.ok is false or from.ok is false or to.ok is false or c.duration <= 0.0 {
     ret emptyClip()
   }
-  let targetNode: List(Int) = createList(Int, cap: c.targetNode.length)
-  let path: List(Int) = createList(Int, cap: c.path.length)
-  let interp: List(Int) = createList(Int, cap: c.interp.length)
-  let timeStart: List(Int) = createList(Int, cap: c.timeStart.length)
-  let timeCount: List(Int) = createList(Int, cap: c.timeCount.length)
-  let valueStart: List(Int) = createList(Int, cap: c.valueStart.length)
-  let times: List(Float) = createList(Float, cap: c.times.length)
-  let values: List(Float) = createList(Float, cap: c.values.length)
 
-  var ch: Int = 0
-  loop ch < c.targetNode.length {
-    let srcNode: Int = c.targetNode.get(index: ch)
-    if c.path.get(index: ch) is pathRotation
-       and srcNode >= 0 and srcNode < from.nodeNames.length {
-      var dstNode: Int = 0 - 1
-      if let srcName: String = from.nodeNames.at(index: srcNode) {
-        let key: String = jointNameKey(name: srcName)
-        if skipRoot is false or key.equals(other: "hips") is false {
-          dstNode = findJointByKey(sk: to, key: key)
-          if dstNode < 0 {
-            let alias: String = jointNameAliasKey(key: key)
-            if alias.length() > 0 {
-              dstNode = findJointByKey(sk: to, key: alias)
-            }
-          }
-        }
-      }
-      if dstNode >= 0 {
-        let srcBind: Quat = quat.qnorm(a: quat.create(
-          x: fromBind.localR.get(index: srcNode * 4),
-          y: fromBind.localR.get(index: srcNode * 4 + 1),
-          z: fromBind.localR.get(index: srcNode * 4 + 2),
-          w: fromBind.localR.get(index: srcNode * 4 + 3)))
-        let dstBind: Quat = quat.qnorm(a: quat.create(
-          x: toBind.localR.get(index: dstNode * 4),
-          y: toBind.localR.get(index: dstNode * 4 + 1),
-          z: toBind.localR.get(index: dstNode * 4 + 2),
-          w: toBind.localR.get(index: dstNode * 4 + 3)))
-        let srcBindInv: Quat = quat.conjugate(a: srcBind)
+  # Static model-space rest orientations for both rigs.
+  let msrcBind: List(Float) = accumModelRot(localR: fromBind.localR, parent: from.parent, nodeCount: from.nodeCount)
+  let mdstBind: List(Float) = accumModelRot(localR: toBind.localR, parent: to.parent, nodeCount: to.nodeCount)
 
-        let ts: Int = c.timeStart.get(index: ch)
-        let tn: Int = c.timeCount.get(index: ch)
-        let vs: Int = c.valueStart.get(index: ch)
-
-        targetNode.add(value: dstNode)
-        path.add(value: pathRotation)
-        interp.add(value: c.interp.get(index: ch))
-        timeCount.add(value: tn)
-        timeStart.add(value: times.length)
-        valueStart.add(value: values.length)
-
-        var k: Int = 0
-        loop k < tn {
-          times.add(value: c.times.get(index: ts + k))
-          let key: Quat = quat.create(
-            x: c.values.get(index: vs + k * 4), y: c.values.get(index: vs + k * 4 + 1),
-            z: c.values.get(index: vs + k * 4 + 2), w: c.values.get(index: vs + k * 4 + 3))
-          let delta: Quat = quat.qmul(a: srcBindInv, b: quat.qnorm(a: key))
-          let out: Quat = quat.qnorm(a: quat.qmul(a: dstBind, b: delta))
-          values.add(value: out.x)
-          values.add(value: out.y)
-          values.add(value: out.z)
-          values.add(value: out.w)
-          k = k + 1
+  # dst node -> matching source node (by name), or -1. `skipRoot` maps the hip to
+  # -1 so it holds bind. Built dst-first because Mdst_key is computed for EVERY
+  # dst node (an unmatched parent still frames its matched children).
+  let srcOfDst: List(Int) = createList(Int, cap: to.nodeCount)
+  var d: Int = 0
+  loop d < to.nodeCount {
+    var s: Int = 0 - 1
+    if let dstName: String = to.nodeNames.at(index: d) {
+      let key: String = jointNameKey(name: dstName)
+      var skip: Bool = false
+      if skipRoot and key.equals(other: "hips") { skip = true }
+      if skip is false {
+        s = findJointByKey(sk: from, key: key)
+        if s < 0 {
+          let alias: String = jointNameAliasKey(key: key)
+          if alias.length() > 0 { s = findJointByKey(sk: from, key: alias) }
         }
       }
     }
-    ch = ch + 1
+    srcOfDst.add(value: s)
+    d = d + 1
+  }
+
+  # The dst nodes that actually get a channel (those with a source match).
+  let chanDst: List(Int) = createList(Int, cap: to.nodeCount)
+  d = 0
+  loop d < to.nodeCount {
+    if srcOfDst.get(index: d) >= 0 { chanDst.add(value: d) }
+    d = d + 1
+  }
+  let matched: Int = chanDst.length
+  if matched is 0 { ret emptyClip() }
+
+  # Shared resample grid, ~60 Hz, endpoints included.
+  var nSamp: Int = (c.duration * 60.0).floor() as Int + 1
+  if nSamp < 2 { nSamp = 2 }
+  let scratch: Skeleton = cloneSourceForSampling(from: from, fromBind: fromBind)
+
+  # Output values, joint-major: (channel m, sample s) at (m * nSamp + s) * 4.
+  let valBuf: List(Float) = createList(Float, cap: matched * nSamp * 4)
+  var z: Int = 0
+  loop z < matched * nSamp * 4 { valBuf.add(value: 0.0) z = z + 1 }
+  let mdstKey: List(Float) = createList(Float, cap: to.nodeCount * 4)
+  z = 0
+  loop z < to.nodeCount * 4 { mdstKey.add(value: 0.0) z = z + 1 }
+
+  let lastT: Float = (nSamp - 1).toFloat()
+  var s: Int = 0
+  loop s < nSamp {
+    let t: Float = c.duration * s.toFloat() / lastT
+    applyClip(sk: scratch, c: c, time: t)
+    let msrcKey: List(Float) = accumModelRot(localR: scratch.localR, parent: scratch.parent, nodeCount: scratch.nodeCount)
+    # Mdst_key for every dst node.
+    var dd: Int = 0
+    loop dd < to.nodeCount {
+      let src: Int = srcOfDst.get(index: dd)
+      var a: Quat = quat.identity()
+      if src >= 0 {
+        let mk: Quat = quatFromList(a: msrcKey, i: src)
+        let mb: Quat = quatFromList(a: msrcBind, i: src)
+        a = quat.qmul(a: mk, b: quat.conjugate(a: mb))
+      }
+      let db: Quat = quatFromList(a: mdstBind, i: dd)
+      quatIntoList(a: mdstKey, i: dd, q: quat.qnorm(a: quat.qmul(a: a, b: db)))
+      dd = dd + 1
+    }
+    # Convert each matched joint's model-space key back to dst-local.
+    var m: Int = 0
+    loop m < matched {
+      let node: Int = chanDst.get(index: m)
+      let pnode: Int = to.parent.get(index: node)
+      let mkeyN: Quat = quatFromList(a: mdstKey, i: node)
+      var rlocal: Quat = mkeyN
+      if pnode >= 0 {
+        let mkeyP: Quat = quatFromList(a: mdstKey, i: pnode)
+        rlocal = quat.qmul(a: quat.conjugate(a: mkeyP), b: mkeyN)
+      }
+      rlocal = quat.qnorm(a: rlocal)
+      let baseIdx: Int = (m * nSamp + s) * 4
+      valBuf.set(index: baseIdx, value: rlocal.x)
+      valBuf.set(index: baseIdx + 1, value: rlocal.y)
+      valBuf.set(index: baseIdx + 2, value: rlocal.z)
+      valBuf.set(index: baseIdx + 3, value: rlocal.w)
+      m = m + 1
+    }
+    s = s + 1
+  }
+
+  # Assemble the clip: one shared time grid, one rotation channel per joint.
+  let targetNode: List(Int) = createList(Int, cap: matched)
+  let path: List(Int) = createList(Int, cap: matched)
+  let interp: List(Int) = createList(Int, cap: matched)
+  let timeStart: List(Int) = createList(Int, cap: matched)
+  let timeCount: List(Int) = createList(Int, cap: matched)
+  let valueStart: List(Int) = createList(Int, cap: matched)
+  let times: List(Float) = createList(Float, cap: nSamp)
+  let values: List(Float) = createList(Float, cap: matched * nSamp * 4)
+  s = 0
+  loop s < nSamp {
+    times.add(value: c.duration * s.toFloat() / lastT)
+    s = s + 1
+  }
+  var m: Int = 0
+  loop m < matched {
+    targetNode.add(value: chanDst.get(index: m))
+    path.add(value: pathRotation)
+    interp.add(value: interpLinear)
+    timeStart.add(value: 0)
+    timeCount.add(value: nSamp)
+    valueStart.add(value: values.length)
+    var k: Int = 0
+    loop k < nSamp {
+      let baseIdx: Int = (m * nSamp + k) * 4
+      values.add(value: valBuf.get(index: baseIdx))
+      values.add(value: valBuf.get(index: baseIdx + 1))
+      values.add(value: valBuf.get(index: baseIdx + 2))
+      values.add(value: valBuf.get(index: baseIdx + 3))
+      k = k + 1
+    }
+    m = m + 1
   }
 
   ret Clip {
-    ok: targetNode.length > 0, name: c.name, duration: c.duration,
+    ok: true, name: c.name, duration: c.duration,
     targetNode: own targetNode, path: own path, interp: own interp,
     timeStart: own timeStart, timeCount: own timeCount, times: own times,
     valueStart: own valueStart, values: own values
