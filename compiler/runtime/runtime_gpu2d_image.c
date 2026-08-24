@@ -328,6 +328,17 @@ int64_t rae_ext_gpu2d_registerImageRgba(const int64_t* pixels, int64_t w, int64_
     return (int64_t)(++g_g2d_img_n);
 }
 
+/* Hand an uploaded image's texture VIEW to a 3D pass (#9, textured terrain).
+ * registerImageRgba already builds an RGBA8 TextureBinding|CopyDst texture and
+ * view; the terrain G-buffer pass binds this view directly (with its own repeat
+ * sampler), so a plate-harvested tile reaches the ground without a second upload
+ * path. Returns NULL for an out-of-range handle. 1-based handle, as returned by
+ * rae_ext_gpu2d_registerImageRgba. */
+void* rae_ext_gpu2d_imageView(int64_t handle) {
+    if (handle < 1 || handle > g_g2d_img_n) return NULL;
+    return (void*)g_g2d_img_view[handle - 1];
+}
+
 /* Name->handle registry, so a renderer can resolve a Sprite.textureKey to an
  * uploaded image without a Rae-side map (module-level heap globals miscompile).
  * The gpu2d UI backend loads album covers / icons by key and draws by key. */

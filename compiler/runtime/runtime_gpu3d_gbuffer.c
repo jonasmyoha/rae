@@ -1018,6 +1018,24 @@ void  rae_gb_set_terrain_pipeline(void* p) { gb_terrain_pipeline = p; }
 void* rae_gb_terrain_pipeline(void)        { return gb_terrain_pipeline; }
 void  rae_gb_set_terrain_bind(void* b)     { gb_terrain_bind = b; }
 void* rae_gb_terrain_bind(void)            { return gb_terrain_bind; }
+/* #9 textured terrain: the sampled tile's view + a repeat sampler + the global
+ * blend amount. Handles are created + owned from Rae (the view is borrowed from
+ * the gpu2d image registry); stored here so Ptr state stays C-side like every
+ * other gb_* handle. gen bumps whenever the tile changes, so Rae rebuilds the
+ * bind group. blend defaults to 0 -> terrain draws untextured until an app sets
+ * a tile, which keeps example 114 and any other terrain user unchanged. */
+static void* gb_terrain_tex_view = NULL;
+static void* gb_terrain_sampler  = NULL;
+static float gb_terrain_blend    = 0.0f;
+static int64_t gb_terrain_tex_gen = 0;
+void  rae_gb_set_terrain_tex_view(void* v) { gb_terrain_tex_view = v; }
+void* rae_gb_terrain_tex_view(void)        { return gb_terrain_tex_view; }
+void  rae_gb_set_terrain_sampler(void* s)  { gb_terrain_sampler = s; }
+void* rae_gb_terrain_sampler(void)         { return gb_terrain_sampler; }
+void  rae_gb_set_terrain_blend(double b)   { gb_terrain_blend = (float)b; }
+double rae_gb_terrain_blend(void)          { return (double)gb_terrain_blend; }
+void  rae_gb_bump_terrain_tex_gen(void)    { gb_terrain_tex_gen++; }
+int64_t rae_gb_terrain_tex_gen(void)       { return gb_terrain_tex_gen; }
 void* rae_gb_static_bind(void)   { return (void*)gb_bind; }
 void* rae_gb_draws_buffer(void)  { return (void*)gb_draw_sbuf; }
 int64_t rae_gb_max_draws(void)   { return (int64_t)GB_MAX_DRAWS; }
