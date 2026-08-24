@@ -25,11 +25,11 @@ struct DrawU {
   model: mat4x4<f32>,
   prevModel: mat4x4<f32>,
   albedoMetallic: vec4<f32>,
-  params: vec4<f32>,   // x=roughness, y=emissive(enc), z=mode, w=sprite layer (slot 39)
+  params: vec4<f32>,   // sprite: x=per-instance world height, w=layer (slot 39)
 };
 struct SpriteU {
-  // a.x = world height per unit instance scale, a.y = sprite aspect (w/h),
-  // a.z = alpha cutoff, a.w = time.
+  // a.y = sprite aspect (w/h), a.z = alpha cutoff, a.w = time. (a.x unused —
+  // height is per-instance in DrawU params.x.)
   a: vec4<f32>,
   b: vec4<f32>,
 };
@@ -73,7 +73,10 @@ fn vs(@builtin(instance_index) ii: u32, @builtin(vertex_index) vi: u32) -> VsOut
   // Instance world scale from a model column length; the quad is sized in world
   // units so distant props shrink with perspective like the meshes they replace.
   let scale = length(vec3<f32>(d.model[0].x, d.model[0].y, d.model[0].z));
-  let height = scale * S.a.x;
+  // Per-instance world height rides in params.x (a sprite ignores roughness), so
+  // each prop KIND sizes independently — trees, bushes and flowers share one
+  // pipeline but not one size. Times the instance scale for the #4 per-prop jitter.
+  let height = scale * d.params.x;
   let width = height * S.a.y;
   // The instance position is the prop's BASE on the ground (model translation).
   let base = vec3<f32>(d.model[3].x, d.model[3].y, d.model[3].z);
