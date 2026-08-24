@@ -25,6 +25,23 @@ struct DrawU {
 };
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<storage, read> draws: array<DrawU>;
+// Textured terrain (#9). The FIRST texture sampled anywhere in this renderer.
+// One tile harvested from the reference plate, bound with a repeat sampler by
+// lib/gbuffer_terrain.rae. Gated to identity when no tile is uploaded (see fs),
+// so example 114 and any other terrain user is unaffected.
+@group(0) @binding(2) var terrainTex: texture_2d<f32>;
+@group(0) @binding(3) var terrainSamp: sampler;
+
+// World units per tile repeat. A ground cell is 18 units; ~6 units per tile puts
+// three repeats across a cell, matching the plate's patch scale without the
+// repeat reading as wallpaper under the top-down camera.
+const RAE_TERRAIN_TEX_SCALE: f32 = 0.16666667;
+// Measured mean of assets/terrain_grass.png. The tile is DIVIDED by this so it
+// carries only spatial variation (mean ~1), then multiplied by the calibrated
+// RAE_TERRAIN_GRASS albedo -- the plate pixels are already lit, so using them
+// raw as albedo would light them twice and blow out the frame. This keeps the
+// #13 calibration intact while stamping the plate's own texture onto the ground.
+const RAE_TERRAIN_GRASS_TEX_MEAN: vec3<f32> = vec3<f32>(0.644, 0.665, 0.395);
 
 fn octWrap(v: vec2<f32>) -> vec2<f32> {
   let s = vec2<f32>(select(-1.0, 1.0, v.x >= 0.0), select(-1.0, 1.0, v.y >= 0.0));
@@ -83,9 +100,22 @@ fn fs(in: VsOut) -> FsOut {
   let prev = in.clipPrev.xy / in.clipPrev.w;
   let motion = (now - prev) * vec2<f32>(0.5, -0.5);
   let mEnc = clamp(motion, vec2<f32>(-0.5), vec2<f32>(0.5)) + vec2<f32>(0.50196078);
+  var albedo = raeTerrainDetailColor(in.worldXY, in.bio, d.params.w);
+  // TEXTURED GRASS (#9). Stamp the plate tile over the procedural grass, weighted
+  // by the grass biome weight so only grass takes it (sand/rock/water/road stay
+  // procedural). `texBlend` = d.albedoMetallic.x, written per-frame by
+  // drawTerrainMesh from a module global that defaults to 0 -- so an app that
+  // never uploads a tile (example 114) blends nothing and this is exact identity.
+  // Sampled unconditionally so the binding is never dead-stripped from the
+  // pipeline's auto-derived layout.
+  let texBlend = d.albedoMetallic.x;
+  let b = raeBiomeClassify(in.bio.x, in.bio.y, in.bio.z);
+  let texel = textureSample(terrainTex, terrainSamp, in.worldXY * RAE_TERRAIN_TEX_SCALE).rgb;
+  let grassTex = RAE_TERRAIN_GRASS * (texel / RAE_TERRAIN_GRASS_TEX_MEAN);
+  albedo = mix(albedo, grassTex, clamp(texBlend * b.wGrass, 0.0, 1.0));
   var o: FsOut;
   o.gba = vec4<f32>(oct.x, oct.y, 0.5, d.params.z);
-  o.gbb = vec4<f32>(raeTerrainDetailColor(in.worldXY, in.bio, d.params.w), rough);
+  o.gbb = vec4<f32>(albedo, rough);
   o.gbc = vec4<f32>(mEnc.x, mEnc.y, 0.0, d.params.y);
   return o;
 }
