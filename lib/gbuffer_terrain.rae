@@ -15,38 +15,46 @@ import webgpu/context
 var gTerrainPipeMade: Bool = false
 var gTerrainBindGen: Int = -1
 
-# #9 textured terrain. The C side holds the Ptr handles (view, sampler) and the
-# blend + generation, matching how every other gb_* handle is stored; Rae keeps
-# only the int gen it last built the bind group at. The view is borrowed from
-# the gpu2d image registry (rae_ext_gpu2d_registerImageRgba uploads an RGBA8
-# TextureBinding texture; rae_ext_gpu2d_imageView returns its view).
+# Textured terrain (#9 grass, extended to a material ARRAY in #14). The C side
+# holds the Ptr handles (2d-array view, sampler) and the blend + generation,
+# matching how every other gb_* handle is stored; Rae keeps only the int gen it
+# last built the bind group at. One texture_2d_array, one layer per material —
+# see terrainLayers below and lib/terrain_splat.wgsl.
 func gbSetTerrainTexView(tv: Ptr) extern("rae_gb_set_terrain_tex_view")
 func gbTerrainTexView() extern("rae_gb_terrain_tex_view") ret Ptr
 func gbSetTerrainSampler(samp: Ptr) extern("rae_gb_set_terrain_sampler")
 func gbTerrainSampler() extern("rae_gb_terrain_sampler") ret Ptr
 func gbSetTerrainBlend(blend: Float) extern("rae_gb_set_terrain_blend")
 func gbTerrainBlend() extern("rae_gb_terrain_blend") ret Float
-func gbBumpTerrainTexGen() extern("rae_gb_bump_terrain_tex_gen")
 func gbTerrainTexGen() extern("rae_gb_terrain_tex_gen") ret Int
-func gbRegisterImageRgba(pixels: view Buffer(Int), w: Int, h: Int) extern("rae_ext_gpu2d_registerImageRgba") ret Int
-func gbImageView(handle: Int) extern("rae_ext_gpu2d_imageView") ret Ptr
+func gbTerrainArrayInit(w: Int, h: Int, layers: Int) extern("rae_gb_terrain_array_init")
+func gbTerrainArrayWrite(layer: Int, pixels: view Buffer(Int), w: Int, h: Int) extern("rae_gb_terrain_array_write")
 
-# Upload a terrain tile (packed RGBA, order R,G,B,A per pixel — the same format
-# gpu2d.registerImageRgba expects) and turn on textured grass at `blend`. The
-# game decodes a plate-harvested PNG and calls this once. Bumps the generation
-# so the terrain bind group rebinds the new view on the next draw.
-func terrainUploadTexture(pixels: view Buffer(Int), w: copy Int, h: copy Int, blend: copy Float) pub {
-  let handle: Int = gbRegisterImageRgba(pixels: pixels, w: w, h: h)
-  if handle <= 0 { ret }
-  let tv: Ptr = gbImageView(handle: handle)
-  gbSetTerrainTexView(tv: tv)
+# Layers of the material array, indexed to match lib/terrain_splat.wgsl:
+# 0 grass, 1 sand, 2 road, 3 water. (Rock has no plate-harvestable ground tile,
+# so it stays procedural — see the fragment shader.)
+func terrainLayers() pub ret Int { ret 4 }
+
+# Create the material array (all tiles are the same size). The game calls this
+# once, then uploads each layer with terrainUploadLayer and turns the blend on
+# with terrainSetBlend. Init installs the 2d-array view + bumps the generation so
+# the bind group rebinds it.
+func terrainInitArray(w: copy Int, h: copy Int) pub {
+  gbTerrainArrayInit(w: w, h: h, layers: terrainLayers())
+}
+# Upload one material layer (packed RGBA, order R,G,B,A per pixel — the format
+# decodePng+swap produces). Does not rebind: the view already points at this
+# texture, so the new layer content is visible immediately.
+func terrainUploadLayer(layer: copy Int, pixels: view Buffer(Int), w: copy Int, h: copy Int) pub {
+  gbTerrainArrayWrite(layer: layer, pixels: pixels, w: w, h: h)
+}
+func terrainSetBlend(blend: copy Float) pub {
   gbSetTerrainBlend(blend: blend)
-  gbBumpTerrainTexGen()
 }
 
-# Sampler + a 1x1 white fallback view, so the terrain bind group always has valid
-# resources at binding(2)/(3) even for an app that never uploads a tile (the
-# blend is 0 there, so the fallback is sampled but never visible).
+# Sampler + a 1x1 white fallback ARRAY, so the terrain bind group always has valid
+# resources at binding(2)/(3) even for an app that never uploads tiles (blend is 0
+# there, so the fallback is sampled but never visible). One white texel per layer.
 func ensureTerrainTexDefaults() {
   if gbTerrainSampler() is webgpuNull() {
     let sd: WGPUSamplerDescriptor = {
@@ -59,12 +67,13 @@ func ensureTerrainTexDefaults() {
     gbSetTerrainSampler(samp: wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: sd))
   }
   if gbTerrainTexView() is webgpuNull() {
+    gbTerrainArrayInit(w: 1, h: 1, layers: terrainLayers())
     var one: List(Int) = createList(Int, cap: 1)
     one.add(value: 4294967295)   # 0xFFFFFFFF, opaque white
-    let handle: Int = gbRegisterImageRgba(pixels: one.data, w: 1, h: 1)
-    if handle > 0 {
-      let tv: Ptr = gbImageView(handle: handle)
-      gbSetTerrainTexView(tv: tv)
+    var l: Int = 0
+    loop l < terrainLayers() {
+      gbTerrainArrayWrite(layer: l, pixels: one.data, w: 1, h: 1)
+      l = l + 1
     }
   }
 }
