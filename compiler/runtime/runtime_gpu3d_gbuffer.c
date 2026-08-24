@@ -909,8 +909,11 @@ int64_t rae_gb_frame_uniform(rae_Mat4* viewProj, float clearR, float clearG, flo
     /* Halton(2,3), the same low-discrepancy sequence the forward path
      * uses. Index 0 is skipped so no frame lands on a zero offset, which
      * would be a frame that contributes nothing new. */
+    /* Jitter only feeds TAA. With TAA off (#20) it would just shimmer the
+     * un-resolved image, so suppress it — matching the forward path, which also
+     * zeroes jitter when its TAA is disabled. */
     float jx = 0.0f, jy = 0.0f;
-    if (gb_target_w > 0 && gb_target_h > 0) {
+    if (gb_target_w > 0 && gb_target_h > 0 && rae_gb_taa_is_enabled()) {
         const int hi = (gb_jitter_frame % 16) + 1;
         jx = (g3d_halton(hi, 2) - 0.5f) * 2.0f / (float)gb_target_w;
         jy = (g3d_halton(hi, 3) - 0.5f) * 2.0f / (float)gb_target_h;
