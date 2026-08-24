@@ -70,16 +70,35 @@ const RAE_TERRAIN_DETAIL_SEED: u32 = 1337u;
 // Method: render, sample the same patches in both images, multiply each albedo
 // by target/measured, repeat. Recalibrate if the sun, the sky model or the
 // ambient ever change -- these numbers encode this lighting.
-const RAE_TERRAIN_GRASS: vec3<f32> = vec3<f32>(0.835, 0.818, 0.218);
-const RAE_TERRAIN_SAND:  vec3<f32> = vec3<f32>(1.000, 0.723, 0.450);
+const RAE_TERRAIN_GRASS: vec3<f32> = vec3<f32>(0.539, 0.632, 0.256);
+// ALBEDO SATURATES AT 1.0. MEASURED, not assumed -- and an earlier comment here
+// claiming otherwise was wrong and cost a calibration round.
+//
+// Driving sand's red from 1.24 to 3.0 moved the rendered red not at all: it sat
+// at 0.55 while green and blue kept climbing, which is why the beach went
+// PALER and LESS warm the harder it was pushed. Whatever the albedo is written
+// into, it does not carry values above one.
+//
+// So this holds the reference's sand RATIO (0.906 : 0.749 : 0.647 normalised to
+// red) and brightness comes from exposure, which is applied after the G-buffer
+// and is not capped. Grass is re-calibrated down to compensate for the exposure
+// lift -- it has the headroom, sand does not.
+const RAE_TERRAIN_SAND:  vec3<f32> = vec3<f32>(1.000, 0.977, 0.697);
 const RAE_TERRAIN_MUD:   vec3<f32> = vec3<f32>(0.760, 0.560, 0.230);
 const RAE_TERRAIN_ROCK:  vec3<f32> = vec3<f32>(0.520, 0.470, 0.350);
 const RAE_TERRAIN_WATER: vec3<f32> = vec3<f32>(0.001, 0.327, 0.599);
 
 // How strongly the noise breaks each material up. Grass wants visible patchiness;
 // water wants almost none, or the sea looks like cling film.
+// How far the patch/grain field is expanded about its midpoint before it drives
+// the per-material variation. See raeTerrainDetailColor.
+const RAE_TERRAIN_VAR_STRETCH: f32 = 2.30;
+
 const RAE_TERRAIN_VAR_GRASS: f32 = 1.15;
-const RAE_TERRAIN_VAR_SAND:  f32 = 0.40;
+// Sand's variation has to stay UNDER the albedo ceiling. raeTerrainVary scales by
+// up to (1 - a/2 + a), so 0.80 pushed sand to 1.4x an albedo already at 1.0 --
+// everything above the cap clipped and the beach rendered as flat white.
+const RAE_TERRAIN_VAR_SAND:  f32 = 0.38;
 const RAE_TERRAIN_VAR_MUD:   f32 = 0.30;
 const RAE_TERRAIN_VAR_ROCK:  f32 = 0.30;
 const RAE_TERRAIN_VAR_WATER: f32 = 0.06;
@@ -161,7 +180,13 @@ fn raeTerrainDetailColor(p: vec2<f32>, bio: vec3<f32>, t: f32) -> vec3<f32> {
                                  RAE_TERRAIN_DETAIL_SEED + 991u) * 0.5 + 0.5, 0.0, 1.0);
   // Patches carry most of it, grain rides on top, and the interpolated moisture
   // adds a very broad drift so two distant meadows are not the same green.
-  let v = clamp(0.20 * clamp(bio.y, 0.0, 1.0) + 0.55 * blotch + 0.25 * d, 0.0, 1.0);
+  // STRETCHED AROUND THE MIDPOINT. fbm output clusters near its mean, so a raw
+  // mix of two octaves lands in roughly 0.35-0.65 and raeTerrainVary's factor
+  // stays near 1.0 -- the variation was computed, then thrown away by its own
+  // distribution. Measured against the plate, grass p10..p90 spanned 0.12 where
+  // the reference spans 0.56. Expanding v about 0.5 is what puts the shades back.
+  let vRaw = 0.20 * clamp(bio.y, 0.0, 1.0) + 0.55 * blotch + 0.25 * d;
+  let v = clamp(0.5 + (vRaw - 0.5) * RAE_TERRAIN_VAR_STRETCH, 0.0, 1.0);
   let ground = raeTerrainVary(RAE_TERRAIN_GRASS, RAE_TERRAIN_VAR_GRASS, v) * b.wGrass
        + raeTerrainVary(RAE_TERRAIN_SAND,  RAE_TERRAIN_VAR_SAND,  v) * b.wSand
        + raeTerrainVary(RAE_TERRAIN_MUD,   RAE_TERRAIN_VAR_MUD,   v) * b.wMud
