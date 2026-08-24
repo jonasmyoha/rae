@@ -42,70 +42,9 @@ const RAE_TERRAIN_DETAIL_HI_SCALE: f32 = 3.10;   // ~0.3 world units per feature
 const RAE_TERRAIN_DETAIL_LO_SCALE: f32 = 0.75;   // ~1.3 world units per patch
 const RAE_TERRAIN_DETAIL_SEED: u32 = 1337u;
 
-// GROUND PALETTE, measured off the reference plate.
-//
-// These replace the absolute colour ramps ported from procgen/texture.rae. Those
-// were authored to look right as standalone texture swatches on a neutral
-// background; run through this scene's sunlight they blew out — sand read as
-// snow and water as pale ice.
-//
-// Instead the palette is art-directed to a target and the noise only MODULATES
-// it. Medians sampled from ai_mockups/empty_plate/plate_a.png, divided down for
-// sunlight (see raeTerrainLightFudge):
-//
-//   grass (0.533, 0.600, 0.314)   sand  (0.925, 0.784, 0.698)
-//   water (0.024, 0.384, 0.635)   path  (0.698, 0.671, 0.400)
-//
-// Keeping colour identity in a constant and variation in a multiplier means the
-// ground can be re-graded toward the reference by editing five vectors, without
-// touching the noise.
-// CALIBRATED AGAINST THE RENDER, not chosen to look right in isolation.
-//
-// The scene's sky irradiance is markedly blue, and ground normals point up, so
-// the hemisphere term lands on the ground almost undiluted. Albedo picked to
-// match the reference directly came out with blue running about 2x the target on
-// every material. Sky exposure and turbidity scale all three channels together
-// and cannot correct a per-channel bias, so the correction lives here.
-//
-// Method: render, sample the same patches in both images, multiply each albedo
-// by target/measured, repeat. Recalibrate if the sun, the sky model or the
-// ambient ever change -- these numbers encode this lighting.
-const RAE_TERRAIN_GRASS: vec3<f32> = vec3<f32>(0.539, 0.632, 0.256);
-// ALBEDO SATURATES AT 1.0. MEASURED, not assumed -- and an earlier comment here
-// claiming otherwise was wrong and cost a calibration round.
-//
-// Driving sand's red from 1.24 to 3.0 moved the rendered red not at all: it sat
-// at 0.55 while green and blue kept climbing, which is why the beach went
-// PALER and LESS warm the harder it was pushed. Whatever the albedo is written
-// into, it does not carry values above one.
-//
-// So this holds the reference's sand RATIO (0.906 : 0.749 : 0.647 normalised to
-// red) and brightness comes from exposure, which is applied after the G-buffer
-// and is not capped. Grass is re-calibrated down to compensate for the exposure
-// lift -- it has the headroom, sand does not.
-const RAE_TERRAIN_SAND:  vec3<f32> = vec3<f32>(1.000, 0.977, 0.697);
-const RAE_TERRAIN_MUD:   vec3<f32> = vec3<f32>(0.760, 0.560, 0.230);
-// Dirt road: darker and browner than beach sand so both remain legible where
-// the route crosses the shore.
-const RAE_TERRAIN_PATH:  vec3<f32> = vec3<f32>(0.720, 0.520, 0.330);
-const RAE_TERRAIN_ROCK:  vec3<f32> = vec3<f32>(0.520, 0.470, 0.350);
-const RAE_TERRAIN_WATER: vec3<f32> = vec3<f32>(0.001, 0.327, 0.599);
-
-// How strongly the noise breaks each material up. Grass wants visible patchiness;
-// water wants almost none, or the sea looks like cling film.
-// How far the patch/grain field is expanded about its midpoint before it drives
-// the per-material variation. See raeTerrainDetailColor.
-const RAE_TERRAIN_VAR_STRETCH: f32 = 2.30;
-
-const RAE_TERRAIN_VAR_GRASS: f32 = 1.15;
-// Sand's variation has to stay UNDER the albedo ceiling. raeTerrainVary scales by
-// up to (1 - a/2 + a), so 0.80 pushed sand to 1.4x an albedo already at 1.0 --
-// everything above the cap clipped and the beach rendered as flat white.
-const RAE_TERRAIN_VAR_SAND:  f32 = 0.38;
-const RAE_TERRAIN_VAR_MUD:   f32 = 0.30;
-const RAE_TERRAIN_VAR_PATH:  f32 = 0.42;
-const RAE_TERRAIN_VAR_ROCK:  f32 = 0.30;
-const RAE_TERRAIN_VAR_WATER: f32 = 0.06;
+// GROUND PALETTE (the calibrated RAE_TERRAIN_* colours + their variation)
+// lives in terrain_palette.wgsl now (#13), composed just before this file so
+// these constants are in scope. It is per-app overridable; see that file.
 
 fn raeTerrainVary(base: vec3<f32>, amount: f32, t: f32) -> vec3<f32> {
   return base * (1.0 - amount * 0.5 + amount * t);
