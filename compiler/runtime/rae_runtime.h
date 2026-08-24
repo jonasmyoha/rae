@@ -820,6 +820,14 @@ void  rae_gb_set_terrain_pipeline(void* p);  /* #533 */
 void* rae_gb_terrain_pipeline(void);
 void  rae_gb_set_terrain_bind(void* b);
 void* rae_gb_terrain_bind(void);
+void  rae_gb_set_terrain_tex_view(void* v);
+void* rae_gb_terrain_tex_view(void);
+void  rae_gb_set_terrain_sampler(void* s);
+void* rae_gb_terrain_sampler(void);
+void  rae_gb_set_terrain_blend(double b);
+double rae_gb_terrain_blend(void);
+void  rae_gb_bump_terrain_tex_gen(void);
+int64_t rae_gb_terrain_tex_gen(void);
 void* rae_gb_static_bind(void);
 void* rae_gb_draws_buffer(void);
 int64_t rae_gb_max_draws(void);
@@ -985,6 +993,7 @@ void rae_g2d_tick(void);
 void rae_ext_gpu2d_flush(void);
 /* Procedural texture registration (#539): upload RGBA pixels generated in Rae. */
 int64_t rae_ext_gpu2d_registerImageRgba(const int64_t* pixels, int64_t w, int64_t h);
+void* rae_ext_gpu2d_imageView(int64_t handle);
 void rae_ext_gpu2d_registerImageKeyHandle(rae_String key, int64_t handle);
 void* rae_gb_view_a(void);
 void* rae_gb_view_b(void);
