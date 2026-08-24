@@ -3475,6 +3475,12 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
   const long long HEALTH_MS = 2000;
   long long health_until = spawn_t + HEALTH_MS;
   bool current_promoted = false;  // becomes true once child survives window
+  // Crash-resilience: rather than shutting the supervisor down when the app
+  // crashes, wait RETRY_MS then rebuild + rerun, forever, until the user stops
+  // the watch (Ctrl-C). retry_at != 0 means "an app crashed; rebuild + respawn
+  // at this time". A source change during the wait retries immediately.
+  const long long RETRY_MS = 60000;
+  long long retry_at = 0;
 
   printf("rae watch: pid=%d running %s\n",
          (int)child, is_live ? entry : current_bin);
@@ -3523,15 +3529,28 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
           continue;
         }
 
-        // Post-window unsolicited death: the app ran for > HEALTH_MS
-        // and then exited (either the user closed the window or it
-        // crashed mid-session). Shut down the supervisor so we don't
-        // leave a host process orphaned after the user is clearly
-        // done with the run. Source-change rebuilds kill their own
-        // child via `watch_wait_for_exit` outside this branch, so we
-        // only land here on unsolicited death.
+        // A crash the fallback above could not handle (post-window, or no
+        // previous-good to revert to): do NOT shut the supervisor down.
+        // Schedule a rebuild-and-retry after RETRY_MS so a running dev loop
+        // survives a crash — edit a source to retry sooner, or press Ctrl-C
+        // to stop the watch. (Only reached on unsolicited death; source-change
+        // rebuilds reap their own child elsewhere.)
+        if (bad) {
+          retry_at = watch_now_ms() + RETRY_MS;
+          printf("rae watch: app crashed — will rebuild and retry in %llds "
+                 "(edit a source to retry sooner, Ctrl-C to stop)\n",
+                 (long long)(RETRY_MS / 1000));
+          fflush(stdout);
+          watch_write_build_status(dotrae, false, "app crashed; will retry");
+          continue;
+        }
+
+        // Clean exit (code 0). Past the health window it means the user closed
+        // the app window — we're done. Inside the window it is a short-lived
+        // CLI (e.g. 01_hello prints and returns 0): keep monitoring sources and
+        // re-run on edit rather than shutting down.
         if (!in_window) {
-          printf("rae watch: child gone, shutting down supervisor\n");
+          printf("rae watch: child exited cleanly, shutting down supervisor\n");
           fflush(stdout);
           g_watch_stop = 1;
           continue;
@@ -3549,10 +3568,16 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
       }
     }
 
+    // A scheduled crash-retry fires like a source change: rebuild + respawn.
+    bool force_retry = (child < 0 && retry_at != 0 && watch_now_ms() >= retry_at);
     const char* changed = watch_state_poll_change(&ws);
-    if (!changed) continue;
+    if (!changed && !force_retry) continue;
 
-    printf("rae watch: change in %s, rebuilding ...\n", changed);
+    if (changed) {
+      printf("rae watch: change in %s, rebuilding ...\n", changed);
+    } else {
+      printf("rae watch: retrying after crash — rebuilding ...\n");
+    }
     fflush(stdout);
 
     // Refresh the watched-source set every cycle: a new file might
@@ -3579,7 +3604,16 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
       if (!watch_build_into_dir(entry, project_root, build_dir, new_bin, run_opts->profile)) {
         char msg[128];
         snprintf(msg, sizeof(msg), "build %s failed", build_id);
-        fprintf(stderr, "rae watch: build failed; keeping running app\n");
+        if (child < 0) {
+          // No app running (it crashed): the build that would have relaunched
+          // it failed too, so wait another RETRY_MS and try again.
+          retry_at = watch_now_ms() + RETRY_MS;
+          fprintf(stderr, "rae watch: build failed — retrying in %llds "
+                  "(edit a source to retry sooner, Ctrl-C to stop)\n",
+                  (long long)(RETRY_MS / 1000));
+        } else {
+          fprintf(stderr, "rae watch: build failed; keeping running app\n");
+        }
         fflush(stderr);
         watch_write_build_status(dotrae, false, msg);
         continue;
@@ -3618,6 +3652,7 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
     spawn_t = watch_now_ms();
     health_until = spawn_t + HEALTH_MS;
     current_promoted = false;
+    retry_at = 0;   // running again — clear any pending crash-retry
     printf("rae watch: pid=%d running new build (%s)\n", (int)child, build_id);
     fflush(stdout);
   }
