@@ -126,11 +126,29 @@ const RAE_WATER_FOAM: vec3<f32>    = vec3<f32>(0.900, 0.950, 0.960);
 // How far below the water line counts as "deep", in elevation units.
 const RAE_WATER_DEEP_AT: f32 = 0.16;
 // Width of the surf band, in water weight.
-const RAE_WATER_FOAM_BAND: f32 = 0.42;
+// How deep the surf reaches, in the same units as RAE_WATER_DEEP_AT.
+const RAE_WATER_FOAM_DEPTH: f32 = 0.38;
 // How opaque the surf gets at its strongest.
 const RAE_WATER_FOAM_STRENGTH: f32 = 0.80;
 const RAE_WATER_RIPPLE_SCALE: f32 = 5.5;
 const RAE_WATER_RIPPLE_SPEED: f32 = 0.55;
+
+// WET SAND (QUEUE #3). A damp band just above the water line, darker and a
+// little more saturated than dry beach.
+//
+// The reference has it and it is doing more work than it looks: a beach that
+// meets the sea at one flat tone reads as two shapes touching, while a damp
+// strip reads as one surface the water has been over. Driven by elevation above
+// the water line, which is smooth and monotonic across the shore -- the biome
+// weights are nearly a step there and cannot express a gradient (see AGENTS.md).
+const RAE_WET_SAND_RISE: f32 = 0.150;
+const RAE_WET_SAND_DARKEN: f32 = 0.52;
+
+// How far the surf washes UP the beach, in the same elevation units. The foam
+// band alone sits at the water's edge; this is what lets it run onto the sand.
+const RAE_WATER_SWASH_RISE: f32 = 0.038;
+const RAE_WATER_SWASH_SPEED: f32 = 0.45;
+const RAE_WATER_SWASH_STRENGTH: f32 = 0.40;
 
 fn raeWaterColor(p: vec2<f32>, elev: f32, wWater: f32, t: f32) -> vec3<f32> {
   // Depth from how far the ground sank below the water line.
@@ -158,12 +176,49 @@ fn raeWaterColor(p: vec2<f32>, elev: f32, wWater: f32, t: f32) -> vec3<f32> {
 fn raeWaterFoam(p: vec2<f32>, elev: f32, wWater: f32, t: f32) -> f32 {
   if (wWater < 0.04) { return 0.0; }
   let depth = clamp((RAE_BIOME_WATER_LEVEL - elev) / RAE_WATER_DEEP_AT, 0.0, 1.0);
-  let edge = 1.0 - smoothstep(0.0, RAE_WATER_FOAM_BAND, abs(wWater - 0.5));
-  // Ragged, and crawling up the beach, so the line reads as surf and not a stroke.
-  let w = sin((p.x * 0.6 + p.y) * RAE_WATER_RIPPLE_SCALE * 0.8
-              - t * RAE_WATER_RIPPLE_SPEED * 1.1);
-  let ragged = clamp(0.45 + 0.55 * w, 0.0, 1.0);
-  return clamp(edge * ragged * (1.0 - depth * 0.8), 0.0, 1.0);
+  // SURF COVERS SHALLOW WATER, not just the line where the weights cross.
+  //
+  // This used to key off `abs(wWater - 0.5)`, which is a knife edge -- one thin
+  // stroke exactly where water and sand are evenly weighted. The reference's
+  // surf is nothing like that: it is a wide lacy field over the whole shallow
+  // shelf, breaking in bands that roll shoreward. Depth is the right driver
+  // because it is what actually decides where waves break.
+  let shallow = 1.0 - smoothstep(0.0, RAE_WATER_FOAM_DEPTH, depth);
+  // Bands rolling toward the beach.
+  let roll = sin((p.x * 0.55 + p.y * 0.85) * RAE_WATER_RIPPLE_SCALE * 0.45
+                 - t * RAE_WATER_RIPPLE_SPEED * 1.6);
+  let bands = clamp(0.28 + 0.90 * roll, 0.0, 1.0);
+  // A finer break-up across the bands so the edges are ragged rather than ruled.
+  let fine = 0.5 + 0.5 * sin((p.x * 1.7 - p.y * 1.1) * RAE_WATER_RIPPLE_SCALE * 1.25
+                             + t * RAE_WATER_RIPPLE_SPEED * 1.9);
+  // Crossing sines alone read as CORDUROY -- regular diagonal stripes, which is
+  // what they are. One fbm sample, drifting with the clock, turns the bands into
+  // lace. Paid only on water pixels, and only where the surf is already non-zero.
+  let lace = clamp(raeNoiseFbm2(p * 1.9 + vec2<f32>(t * 0.20, t * -0.13),
+                                2u, 2.0, 0.5, RAE_TERRAIN_DETAIL_SEED + 4441u)
+                   * 0.5 + 0.5, 0.0, 1.0);
+  return clamp(shallow * bands * (0.50 + 0.50 * fine) * (0.35 + 0.85 * lace), 0.0, 1.0);
+}
+
+// SWASH: the sheet of foam that runs up the wet sand and slides back.
+//
+// Separate from raeWaterFoam because that one lives where water and sand are
+// equally weighted -- the water's edge -- and by definition cannot reach onto
+// land. This is keyed off elevation above the water line instead, so it covers
+// the beach itself, and it BREATHES: the reach oscillates, which is what makes a
+// shoreline look alive from a static top-down camera where nothing else moves.
+fn raeWaterSwash(p: vec2<f32>, elev: f32, wSand: f32, t: f32) -> f32 {
+  if (wSand < 0.04) { return 0.0; }
+  let aboveWater = elev - RAE_BIOME_WATER_LEVEL;
+  if (aboveWater < 0.0) { return 0.0; }
+  // The tide line moves in and out; 0.55..1.0 of the nominal reach.
+  let breathe = 0.55 + 0.45 * (0.5 + 0.5 * sin(t * RAE_WATER_SWASH_SPEED));
+  let reach = RAE_WATER_SWASH_RISE * breathe;
+  let up = 1.0 - smoothstep(0.0, reach, aboveWater);
+  // Broken along the shore so it is a series of tongues, not a ruled line.
+  let lace = 0.5 + 0.5 * sin((p.x * 0.9 - p.y * 0.5) * RAE_WATER_RIPPLE_SCALE * 0.55
+                             + t * RAE_WATER_SWASH_SPEED * 2.1);
+  return clamp(up * (0.35 + 0.65 * lace), 0.0, 1.0);
 }
 
 // Ground albedo, textured per pixel and blended by biome weight. `bio` is the
@@ -187,11 +242,18 @@ fn raeTerrainDetailColor(p: vec2<f32>, bio: vec3<f32>, t: f32) -> vec3<f32> {
   // the reference spans 0.56. Expanding v about 0.5 is what puts the shades back.
   let vRaw = 0.20 * clamp(bio.y, 0.0, 1.0) + 0.55 * blotch + 0.25 * d;
   let v = clamp(0.5 + (vRaw - 0.5) * RAE_TERRAIN_VAR_STRETCH, 0.0, 1.0);
+  // Damp where the sea has recently been. Only the sand term: wet grass is not a
+  // thing the reference shows, and darkening the whole sum would dim the water.
+  let aboveWater = bio.x - RAE_BIOME_WATER_LEVEL;
+  let wet = 1.0 - smoothstep(0.0, RAE_WET_SAND_RISE, aboveWater);
+  let sandWet = mix(1.0, RAE_WET_SAND_DARKEN, wet);
   let ground = raeTerrainVary(RAE_TERRAIN_GRASS, RAE_TERRAIN_VAR_GRASS, v) * b.wGrass
-       + raeTerrainVary(RAE_TERRAIN_SAND,  RAE_TERRAIN_VAR_SAND,  v) * b.wSand
+       + raeTerrainVary(RAE_TERRAIN_SAND,  RAE_TERRAIN_VAR_SAND,  v) * sandWet * b.wSand
        + raeTerrainVary(RAE_TERRAIN_MUD,   RAE_TERRAIN_VAR_MUD,   v) * b.wMud
        + raeTerrainVary(RAE_TERRAIN_ROCK,  RAE_TERRAIN_VAR_ROCK,  v) * b.wRock
        + raeWaterColor(p, bio.x, b.wWater, t) * b.wWater;
   let foam = raeWaterFoam(p, bio.x, b.wWater, t);
-  return mix(ground, RAE_WATER_FOAM, foam * RAE_WATER_FOAM_STRENGTH);
+  let swash = raeWaterSwash(p, bio.x, b.wSand, t);
+  let surf = clamp(foam * RAE_WATER_FOAM_STRENGTH + swash * RAE_WATER_SWASH_STRENGTH, 0.0, 1.0);
+  return mix(ground, RAE_WATER_FOAM, surf);
 }
