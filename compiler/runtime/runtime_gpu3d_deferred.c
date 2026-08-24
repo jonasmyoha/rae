@@ -406,6 +406,16 @@ G3D_SHADOW_FN_WGSL
 "const PI: f32 = 3.14159265;\n"
 "const RAE_RIM_STRENGTH: f32 = 0.55;\n"
 "const RAE_RIM_POWER: f32 = 3.2;\n"
+/* CONTACT DARKENING on the STANDARD path (#5). AO physically attenuates the
+ * INDIRECT term only, and `ambient` above already carries `* ao * ssao`. But
+ * under a strong directional sun `direct` dominates the frame, so correct AO
+ * is invisible exactly where contact shadows should read — the base of a prop
+ * on lit ground. The toon path already cheats this (`mix(1.0, ao*ssao, 0.6)`
+ * on the whole result); this is the same controlled inaccuracy applied to the
+ * PBR path's direct term, behind a knob. 0.0 restores physical AO. Self-gating:
+ * a scene with no SSAO and no baked occlusion has ao*ssao == 1.0, so this is
+ * exactly identity and other deferred examples are untouched. */
+"const RAE_AO_CONTACT: f32 = 0.5;\n"
 RAE_SKY_WGSL
 /* Quantise [0,1] into `bands` steps with a SOFTENED edge (#396). A bare
  * floor() aliases along the terminator, and that edge moves whenever the
@@ -624,7 +634,11 @@ RAE_SKY_WGSL
 "  let rimF = pow(clamp(1.0 - NoV, 0.0, 1.0), RAE_RIM_POWER);\n"
 "  let rimUp = 1.0 - clamp(N.z, 0.0, 1.0);\n"
 "  let rim = L.ambSky.rgb * (rimF * rimUp * RAE_RIM_STRENGTH);\n"
-"  var lit = direct + ambient + emit + rim;\n"
+/* Contact darkening (#5): darken DIRECT toward the occluded value under props.
+ * `ambient` already has ao*ssao; emit and rim stay clean (an emitter is not
+ * occluded, and the rim is a silhouette cheat, not radiance). */
+"  let contactAO = mix(1.0, ao * ssao, RAE_AO_CONTACT);\n"
+"  var lit = direct * contactAO + ambient + emit + rim;\n"
 /* Occlusion still applies to the stylised result — a cel character with
  * no contact darkening floats. */
 "  if (isToon) { lit = toonShaded * mix(1.0, ao * ssao, 0.6); }\n"
