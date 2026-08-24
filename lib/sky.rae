@@ -73,6 +73,17 @@ type Sky {
   sunColor: Vec3
   # The `none` payload: the hemisphere anchors and the background.
   ambSky: Vec3
+  # HOW COLOURED THE AMBIENT IS, 0 = grey, 1 = the sky's own colour (default).
+  #
+  # A physical daylight sky is intensely blue, and lightingPassSky uses its
+  # irradiance as THE ambient term -- so every shaded surface is lit blue. That is
+  # correct for a photograph and wrong for stylised art: measured here, a pure
+  # white ground albedo rendered (0.59, 0.71, 0.96), so warm materials could not
+  # be made warm at any albedo, because red was starved before it started.
+  #
+  # This desaturates the ambient WITHOUT touching the visible sky, so the
+  # background stays blue while the ground stops being lit through a blue filter.
+  ambientSaturation: Float
   ambGround: Vec3
   clearColor: Vec3
   # The `procedural` payload (#400). Haze: 2 is an exceptionally clear
@@ -128,6 +139,8 @@ func createSkyStylised(sunDir: view Vec3, sunColor: view Vec3,
     sunDir: sunDir
     sunColor: sunColor
     ambSky: zenith
+
+    ambientSaturation: 1.0
     ambGround: horizon
     clearColor: horizon
     turbidity: 3.0
@@ -169,6 +182,8 @@ func createSkyHosek(data: view HosekDataset, sunDir: view Vec3, sunColor: view V
     # authored ambient as any other while its BACKGROUND is the fitted model.
     # Leaving them zero would light the scene from nothing.
     ambSky: vec3.create(x: 0.32, y: 0.45, z: 0.62)
+
+    ambientSaturation: 1.0
     ambGround: vec3.create(x: 0.18, y: 0.16, z: 0.13)
     clearColor: vec3.create(x: 0.32, y: 0.45, z: 0.62)
     turbidity: turbidity
@@ -188,6 +203,14 @@ func createSkyHosek(data: view HosekDataset, sunDir: view Vec3, sunColor: view V
   }
 }
 
+# Pull a colour toward its own luminance. sat 1 leaves it alone, 0 makes it grey.
+func skyDesaturate(c: view Vec3, sat: view Float) pub ret Vec3 {
+  let l: Float = c.x * 0.2126 + c.y * 0.7152 + c.z * 0.0722
+  ret vec3.create(x: l + (c.x - l) * sat,
+                  y: l + (c.y - l) * sat,
+                  z: l + (c.z - l) * sat)
+}
+
 func createSkyNone(light: view Light3d, clearColor: view Vec3) pub ret Sky {
   ret Sky {
     kind: SkyKind.none
@@ -196,6 +219,8 @@ func createSkyNone(light: view Light3d, clearColor: view Vec3) pub ret Sky {
     sunDir: light.sunDir
     sunColor: light.sunColor
     ambSky: light.ambSky
+
+    ambientSaturation: 1.0
     ambGround: light.ambGround
     clearColor: clearColor
     turbidity: 3.0
@@ -226,6 +251,8 @@ func createSkyProcedural(sunDir: view Vec3, sunColor: view Vec3,
     # would make a mis-dispatch render black rather than merely wrong,
     # and black is harder to trace than "the old ambient".
     ambSky: vec3.create(x: 0.25, y: 0.30, z: 0.40)
+
+    ambientSaturation: 1.0
     ambGround: vec3.create(x: 0.12, y: 0.10, z: 0.09)
     clearColor: vec3.create(x: 0.02, y: 0.02, z: 0.03)
     turbidity: turbidity
