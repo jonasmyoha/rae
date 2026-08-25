@@ -102,6 +102,19 @@ const RAE_WATER_SWASH_RISE: f32 = 0.038;
 const RAE_WATER_SWASH_SPEED: f32 = 0.45;
 const RAE_WATER_SWASH_STRENGTH: f32 = 0.40;
 
+// SHORE RIM (#60): a crisp, CEL-SHADED white outline right at the water line.
+// The foam/swash above are soft and lacy — a painterly field over the shallows.
+// This is the hard stroke the stylised look wants: a clean white rim exactly
+// where water meets land, hugging the coast on both the shallow-water and
+// wet-sand sides. Keyed on |elev - waterLevel|, which is 0 at the coast, so the
+// rim tracks the shoreline at every scale.
+//   RISE  — elevation half-width of the rim, either side of the water line
+//   EDGE  — fraction of that width that is the anti-alias feather; the rest is
+//           SOLID white, which is what makes it read as a cel outline not a haze
+const RAE_SHORE_RIM_RISE: f32 = 0.050;
+const RAE_SHORE_RIM_EDGE: f32 = 0.35;
+const RAE_SHORE_RIM_STRENGTH: f32 = 1.0;
+
 fn raeWaterColor(p: vec2<f32>, elev: f32, wWater: f32, t: f32) -> vec3<f32> {
   // Depth from how far the ground sank below the water line.
   let depth = clamp((RAE_BIOME_WATER_LEVEL - elev) / RAE_WATER_DEEP_AT, 0.0, 1.0);
@@ -173,6 +186,26 @@ fn raeWaterSwash(p: vec2<f32>, elev: f32, wSand: f32, t: f32) -> f32 {
   return clamp(up * (0.35 + 0.65 * lace), 0.0, 1.0);
 }
 
+// SHORE RIM (#60). The crisp white outline at the exact water line — the
+// cel-shaded stroke, distinct from the soft foam field above.
+fn raeShoreRim(p: vec2<f32>, elev: f32, wWater: f32, wSand: f32, t: f32) -> f32 {
+  // Only along the coast — where water or sand carries weight.
+  if (wWater + wSand < 0.04) { return 0.0; }
+  // Distance in elevation from the exact water line: 0 at the coast, rising
+  // both up onto the sand and down into the shallows.
+  let d = abs(elev - RAE_BIOME_WATER_LEVEL);
+  // HARD band: fully solid within the inner radius, then a thin feather to the
+  // outer edge for anti-aliasing only. That flat core is the cel look — no soft
+  // falloff, just a clean stroke.
+  let inner = RAE_SHORE_RIM_RISE * (1.0 - RAE_SHORE_RIM_EDGE);
+  let rim = 1.0 - smoothstep(inner, RAE_SHORE_RIM_RISE, d);
+  // Ragged along the shore so it breathes like surf rather than a ruled line,
+  // but with a high floor (0.75) so it stays a CONTINUOUS rim, not dashes.
+  let lace = 0.5 + 0.5 * sin((p.x * 0.8 - p.y * 0.6) * RAE_WATER_RIPPLE_SCALE * 0.5
+                             + t * RAE_WATER_RIPPLE_SPEED * 1.4);
+  return rim * (0.75 + 0.25 * lace);
+}
+
 // Ground albedo, textured per pixel and blended by biome weight. `bio` is the
 // interpolated (elevation, moisture, slope) from the vertex stage; `p` is world
 // XY for the grain. The weights already sum to 1 (raeBiomeClassify normalises
@@ -232,6 +265,8 @@ fn raeTerrainDetailColor(p: vec2<f32>, bio: vec3<f32>, t: f32) -> vec3<f32> {
   let ground = mix(roaded, raeTerrainVary(RAE_TERRAIN_GRASS, RAE_TERRAIN_VAR_GRASS, v), strand);
   let foam = raeWaterFoam(p, bio.x, b.wWater, t);
   let swash = raeWaterSwash(p, bio.x, b.wSand, t);
-  let surf = clamp(foam * RAE_WATER_FOAM_STRENGTH + swash * RAE_WATER_SWASH_STRENGTH, 0.0, 1.0);
+  let rim = raeShoreRim(p, bio.x, b.wWater, b.wSand, t);
+  let surf = clamp(foam * RAE_WATER_FOAM_STRENGTH + swash * RAE_WATER_SWASH_STRENGTH
+                   + rim * RAE_SHORE_RIM_STRENGTH, 0.0, 1.0);
   return mix(ground, RAE_WATER_FOAM, surf);
 }
