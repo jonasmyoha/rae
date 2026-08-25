@@ -246,10 +246,19 @@ static unsigned char g_sdl_mouse_pressed[8];            /* went-down-this-frame 
 static unsigned char g_sdl_mouse_released[8];           /* went-up-this-frame edges */
 static bool g_sdl_mouse_captured = false;
 
-/* Map the portable GLFW key-code numbering (letters = ASCII uppercase, arrows =
- * 262-265, plus a few common keys) to SDL scancodes. This is a stable convention
- * app code uses via isKeyDown; SDL3 is the backend (raylib is a separate, off-by-
- * default backend and is NOT what these codes tie us to). */
+/* isKeyDown's `key` ints are the GLFW key-code numbering (A=65, W=87, ESC=256,
+ * RIGHT=262, PAGE_UP=266, F1=290, LSHIFT=340, LCTRL=341). Verified: these match GLFW's
+ * values and match NEITHER SDL's scancodes (W=26, LSHIFT=225) NOR SDL's keycodes (W=119,
+ * LSHIFT=0x400000e1) — so they are unambiguously GLFW's, not SDL's.
+ *
+ * WHY GLFW in an SDL3 engine: it is purely LEGACY. Rae's first backend was raylib, whose
+ * IsKeyDown takes exactly these codes (raylib re-uses GLFW's numbering), so all early app
+ * code was written with them. When SDL3 became the shipping backend we did NOT renumber
+ * every app to SDL's scheme — this function TRANSLATES the GLFW ints to SDL scancodes so
+ * that code ports unchanged. It is a compat convention, not a GLFW dependency (we neither
+ * link nor use GLFW). Migrating apps to SDL-native scancodes is possible but touches every
+ * key constant across all examples + this map, so it's a deliberate cross-repo change, not
+ * done implicitly here. */
 static SDL_Scancode rae_sdl_scancode(int64_t key) {
     if (key >= 'A' && key <= 'Z') return SDL_GetScancodeFromKey((SDL_Keycode)(key + 32), NULL); /* lowercase */
     if (key >= '0' && key <= '9') return SDL_GetScancodeFromKey((SDL_Keycode)key, NULL);
