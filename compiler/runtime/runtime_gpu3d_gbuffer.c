@@ -145,6 +145,7 @@ static WGPUBuffer         gb_view_ubuf = NULL;
 "struct BrickOut { albedo: vec3<f32>, nrm: vec3<f32> };\n" \
 "fn gbBrick(wpos: vec3<f32>, n: vec3<f32>, base: vec3<f32>) -> BrickOut {\n" \
 "  let an = abs(n);\n" \
+"  if (n.z > 0.6) { var top: BrickOut; top.albedo = base * 0.9; top.nrm = n; return top; }\n" \
 "  var u: f32; var v: f32; var tU: vec3<f32>; var tV: vec3<f32>;\n" \
 "  if (an.z >= an.x && an.z >= an.y) { u = wpos.x; v = wpos.y; tU = vec3<f32>(1.0,0.0,0.0); tV = vec3<f32>(0.0,1.0,0.0); }\n" \
 "  else if (an.x >= an.y) { u = wpos.y; v = wpos.z; tU = vec3<f32>(0.0,1.0,0.0); tV = vec3<f32>(0.0,0.0,1.0); }\n" \
@@ -163,15 +164,15 @@ static WGPUBuffer         gb_view_ubuf = NULL;
 "  let mortar = 1.0 - smoothstep(mortarHalf, mortarHalf + bevel, dm);\n" \
 "  let bid = floor(uu / bw) * 3.0 + row * 7.0;\n" \
 "  let vary = fract(sin(bid * 12.9898) * 43758.5453);\n" \
-"  let brickCol = base * (0.80 + 0.36 * vary);\n" \
-"  let mortarCol = base * vec3<f32>(0.40, 0.38, 0.36);\n" \
+"  let brickCol = base * (0.92 + 0.14 * vary);\n" \
+"  let mortarCol = base * vec3<f32>(0.70, 0.68, 0.66);\n" \
 "  var o: BrickOut;\n" \
 "  o.albedo = mix(brickCol, mortarCol, mortar);\n" \
 "  let bevelAmt = mortar * (1.0 - mortar) * 4.0;\n" \
 "  var perturb = vec3<f32>(0.0);\n" \
 "  if (du <= dv) { let dir = select(1.0, -1.0, cu < 0.5); perturb = tU * dir; }\n" \
 "  else { let dir = select(1.0, -1.0, cv < 0.5); perturb = tV * dir; }\n" \
-"  o.nrm = normalize(n + perturb * (bevelAmt * 0.85));\n" \
+"  o.nrm = normalize(n + perturb * (bevelAmt * 0.55));\n" \
 "  return o;\n" \
 "}\n"
 
