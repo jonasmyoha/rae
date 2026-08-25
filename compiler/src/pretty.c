@@ -895,13 +895,16 @@ static void pp_print_match_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
 
 static void pp_print_loop_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   pp_check_comments(pp, stmt->line);
-  pp_write(pp, "loop ");
+  pp_write(pp, "loop");
   if (stmt->as.loop_stmt.init) {
     if (stmt->as.loop_stmt.init->kind == AST_STMT_LET) {
-      pp_write(pp, "let ");
+      pp_space(pp);
+      if (!stmt->as.loop_stmt.is_range) pp_write(pp, "var ");
       pp_write_str(pp, stmt->as.loop_stmt.init->as.let_stmt.name);
-      pp_write(pp, ": ");
-      pp_write_type(pp, stmt->as.loop_stmt.init->as.let_stmt.type);
+      if (stmt->as.loop_stmt.init->as.let_stmt.type) {
+        pp_write(pp, ": ");
+        pp_write_type(pp, stmt->as.loop_stmt.init->as.let_stmt.type);
+      }
       if (stmt->as.loop_stmt.is_range) {
         pp_write(pp, " in ");
       } else {
@@ -912,12 +915,13 @@ static void pp_print_loop_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
         pp_write(pp, ", ");
       }
     } else if (stmt->as.loop_stmt.init->kind == AST_STMT_EXPR) {
-         pp_expr(pp, stmt->as.loop_stmt.init->as.expr_stmt);
-         pp_write(pp, ", ");
+      pp_expr(pp, stmt->as.loop_stmt.init->as.expr_stmt);
+      pp_write(pp, ", ");
     }
   }
 
   if (stmt->as.loop_stmt.condition) {
+    if (!stmt->as.loop_stmt.init) pp_space(pp);
     pp_expr(pp, stmt->as.loop_stmt.condition);
   }
 
