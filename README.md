@@ -41,10 +41,8 @@ type Track {
 # `own` takes ownership — so a signature tells you what a call does to your data.
 func totalSeconds(tracks: view List(Track)) ret Int {
   var total: Int = 0
-  var i: Int = 0
-  loop i < tracks.length {
-    total = total + tracks.at(index: i).seconds
-    i = i + 1
+  loop track: view Track in tracks {
+    total = total + track.seconds
   }
   ret total
 }
@@ -68,14 +66,14 @@ func longest(tracks: view List(Track)) ret opt view Track {
   }
   # Find the winner by index, so no track is copied, then hand back a view of it.
   var bestIndex: Int = 0
-  var i: Int = 1
-  loop i < tracks.length {
-    if tracks.at(index: i).seconds > tracks.at(index: bestIndex).seconds {
-      bestIndex = i
+  loop var i: Int = 1, i < tracks.length, ++i {
+    if let candidate: view Track => tracks.viewAt(index: i) {
+      if let best: view Track => tracks.viewAt(index: bestIndex) {
+        if candidate.seconds > best.seconds { bestIndex = i }
+      }
     }
-    i = i + 1
   }
-  ret view tracks.viewAt(index: bestIndex)
+  ret tracks.viewAt(index: bestIndex)
 }
 
 func main() {
@@ -89,19 +87,18 @@ func main() {
   # Arguments are named at the call site, and "{}" is how a value becomes text.
   log("{tracks.length} tracks, {formatDuration(seconds: totalSeconds(tracks: tracks))}")
 
-  var i: Int = 0
-  loop i < tracks.length {
-    # `viewAt` hands back a read-only window into the list, not a copy.
-    let track: view Track => tracks.viewAt(index: i)
+  loop track: view Track in tracks {
     log("  {track.title} — {formatDuration(seconds: track.seconds)}")
-    i = i + 1
   }
 
   # `modAt` hands back a mutable window; `play` writes through it, into the list.
-  let first: mod Track => tracks.modAt(index: 0)
-  first.play()
-  first.play()
-  log("{tracks.at(index: 0).title} played {tracks.at(index: 0).plays} times")
+  if let first: mod Track => tracks.modAt(index: 0) {
+    first.play()
+    first.play()
+  }
+  if let first: view Track => tracks.viewAt(index: 0) {
+    log("{first.title} played {first.plays} times")
+  }
 
   # The optional view, handled with `if let` — `=>` binds it, no copy.
   if let top: view Track => longest(tracks: tracks) {

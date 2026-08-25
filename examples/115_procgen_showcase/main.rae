@@ -33,13 +33,11 @@ func registerTextures() {
   names.add(value: "rock")
   names.add(value: "mud")
   names.add(value: "water")
-  var k: Int = 0
-  loop k < 5 {
+  loop var k: Int = 0, k < 5, ++k {
     let pixels: List(Int) = generateAlbedo(kind: k, resolution: 128, tiling: 4.0, seed: 700 + k * 17)
     if let name: String = names.at(index: k) {
       let handle: Int = gpu2d.registerImageRgba(key: "tex.{name}", pixels: pixels.data, w: 128, h: 128)
     }
-    k = k + 1
   }
 }
 
@@ -51,13 +49,11 @@ func drawTextureSwatches() {
   names.add(value: "rock")
   names.add(value: "mud")
   names.add(value: "water")
-  var k: Int = 0
-  loop k < 5 {
+  loop var k: Int = 0, k < 5, ++k {
     if let name: String = names.at(index: k) {
       let sx: Float = 40.0 + k.toFloat() * 168.0
       gpu2d.drawImageKey(key: "tex.{name}", x: sx, y: 630.0, w: 150.0, h: 150.0, radius: 10.0, tint: 0xFFFFFFFF)
     }
-    k = k + 1
   }
 }
 
@@ -80,18 +76,15 @@ func buildScene(rocks: view List(Int), treeTrunks: view List(Int), treeCanopies:
   let leafMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.20, y: 0.42, z: 0.16), metallic: 0.0, roughness: 0.8, emission: noEmit)
 
   # Front row: five rocks.
-  var i: Int = 0
-  loop i < rocks.length {
+  loop var i: Int = 0, i < rocks.length, ++i {
     if let rk: Int = rocks.at(index: i) {
       let x: Float = (i.toFloat() - 2.0) * 3.2
       let rockE: Int = addMeshInstance(scene: scene, mesh: meshHandle(id: rk, generation: 1), material: rockMat,
         position: vec3.create(x: x, y: 0.0, z: 0.0), rotation: noRot, scale: unit)
     }
-    i = i + 1
   }
   # Back row: five trees (trunk + canopy per tree).
-  var t: Int = 0
-  loop t < treeTrunks.length {
+  loop var t: Int = 0, t < treeTrunks.length, ++t {
     let x: Float = (t.toFloat() - 2.0) * 3.2
     if let tr: Int = treeTrunks.at(index: t) {
       let trunkE: Int = addMeshInstance(scene: scene, mesh: meshHandle(id: tr, generation: 1), material: barkMat,
@@ -101,7 +94,6 @@ func buildScene(rocks: view List(Int), treeTrunks: view List(Int), treeCanopies:
       let canopyE: Int = addMeshInstance(scene: scene, mesh: meshHandle(id: cp, generation: 1), material: leafMat,
         position: vec3.create(x: x, y: 6.0, z: 0.0), rotation: noRot, scale: unit)
     }
-    t = t + 1
   }
   ret scene
 }
@@ -111,24 +103,20 @@ func main() ret Int {
 
   # Five rock variants: vary seed, slice count, irregularity.
   var rocks: List(Int) = createList(Int, cap: 5)
-  var ri: Int = 0
-  loop ri < 5 {
+  loop var ri: Int = 0, ri < 5, ++ri {
     let rockMesh: MeshData = generateRock(subdivision: 5, sliceCount: 3 + ri, size: 1.0 + ri.toFloat() * 0.12,
                                           seed: 1000 + ri * 37, irregularity: 0.28 + ri.toFloat() * 0.05)
     rocks.add(value: uploadMeshData(m: rockMesh).id)
-    ri = ri + 1
   }
 
   # Five tree variants: vary seed, branch depth, canopy size.
   var trunks: List(Int) = createList(Int, cap: 5)
   var canopies: List(Int) = createList(Int, cap: 5)
-  var ti: Int = 0
-  loop ti < 5 {
+  loop var ti: Int = 0, ti < 5, ++ti {
     let tree: TreeMesh = generateTree(branchDepth: 2 + ti % 2, trunkHeight: 3.0 + ti.toFloat() * 0.3, taper: 1.0,
                                       canopySize: 1.1 + ti.toFloat() * 0.12, leafDensity: 1 + ti % 3, seed: 500 + ti * 53)
     trunks.add(value: uploadMeshData(m: tree.trunk).id)
     canopies.add(value: uploadMeshData(m: tree.canopy).id)
-    ti = ti + 1
   }
 
   let groundData: MeshData = makePlane(size: 40.0, segments: 1)
@@ -181,8 +169,7 @@ func main() ret Int {
     camera.position = orbitEye(targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z, yaw: yaw, pitch: pitch, dist: dist)
     let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
     if gpu2d.renderGate() {
-      var oi: Int = 0
-      loop oi < deferredOrderLength(r: renderer) {
+      loop var oi: Int = 0, oi < deferredOrderLength(r: renderer), ++oi {
         let tag: Int = deferredTagAt(r: renderer, i: oi)
         if tag is RenderTag.uiOverlay {
           gpu2d.beginFrameLoad()
@@ -194,7 +181,6 @@ func main() ret Int {
             renderDeferredPass(r: renderer, tag: tag, scene: scene, camera: camera, light: light, aspect: aspect)
           }
         }
-        oi = oi + 1
       }
       snapshotPrevTransforms(scene: scene)
     }

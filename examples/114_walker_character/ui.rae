@@ -143,12 +143,10 @@ func uiUpdate(app: mod App, dt: copy Float, now: copy Float64) ret UiTick {
     onCharacterSwitched(app: app)
   }
   var settingsChanged: Bool = false
-  var ai: Int = 0
-  loop ai < uiActionCount(input: app.io.ui) {
+  loop var ai: Int = 0, ai < uiActionCount(input: app.io.ui), ++ai {
     if settingsHandleAction(s: app.io.settings, actionId: uiActionAt(input: app.io.ui, index: ai)) {
       settingsChanged = true
     }
-    ai = ai + 1
   }
   if settingsUpdatePointer(s: app.io.settings, world: app.io.world, input: app.io.ui) { settingsChanged = true }
   if settingsUpdateLatitudePointer(s: app.io.settings, world: app.io.world, input: app.io.ui) { settingsChanged = true }
