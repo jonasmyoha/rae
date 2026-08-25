@@ -2164,12 +2164,11 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
     return stmt;
   }
 
-  // `var` normally marks a three-clause loop, but it may also explicitly mark
-  // a mutable collection binding: `loop var item: view Thing in things`.
-  // Detect that form before handing the declaration to the ordinary binding
-  // parser, which quite correctly rejects uninitialised view/mod locals.
+  // `var` normally marks a three-clause loop, but it may also mark a mutable
+  // owned collection value: `loop var item: Thing in things`. Detect that form
+  // before handing the declaration to the ordinary binding parser.
   if (parser_check(parser, TOK_KW_VAR)) {
-    size_t lookahead = parser->current + 1;
+    size_t lookahead = parser->index + 1;
     bool collection_binding = false;
     while (lookahead < parser->count) {
       TokenKind kind = parser->tokens[lookahead].kind;
@@ -2191,6 +2190,13 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
       AstTypeRef* type = NULL;
       if (parser_match(parser, TOK_COLON)) type = parse_type_ref(parser);
       parser_consume(parser, TOK_KW_IN, "expected 'in' after collection binding");
+      if (!type) {
+        parser_error(parser, name,
+                     "collection loop bindings require an explicit type");
+      } else if (type->is_view || type->is_mod) {
+        parser_error(parser, var_token,
+                     "collection reference bindings are aliases; use 'let', not 'var'");
+      }
 
       AstStmt* init = new_stmt(parser, AST_STMT_LET, var_token);
       init->as.let_stmt.name = parser_copy_str(parser, name->lexeme);
@@ -2244,7 +2250,7 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
     return stmt;
   }
 
-  parser_match(parser, TOK_KW_LET); // Optional compatibility spelling for collection bindings.
+  bool has_let = parser_match(parser, TOK_KW_LET);
 
   if (looks_like_ident(parser) && parser_peek_at(parser, 1)->kind == TOK_COLON) {
     const Token* name = parser_advance(parser);
@@ -2252,6 +2258,10 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
     AstTypeRef* type = parse_type_ref(parser);
 
     if (parser_match(parser, TOK_KW_IN)) {
+      if (!has_let) {
+        parser_error(parser, name,
+                     "collection loop bindings must begin with 'let' or 'var'");
+      }
       stmt->as.loop_stmt.is_range = true;
       AstStmt* init = new_stmt(parser, AST_STMT_LET, name);
       init->as.let_stmt.name = parser_copy_str(parser, name->lexeme);
@@ -2265,8 +2275,9 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
       stmt->as.loop_stmt.condition = parse_expression(parser);
       stmt->as.loop_stmt.increment = NULL;
     } else {
-      parser_error(parser, parser_peek(parser),
-                   "three-clause loops must begin with 'var'");
+      parser_error(parser, parser_peek(parser), has_let
+                       ? "'let' loop bindings are only valid with collection iteration"
+                       : "three-clause loops must begin with 'var'");
       bool is_bind = false;
       if (parser_match(parser, TOK_ASSIGN)) {
         is_bind = false;
@@ -2285,12 +2296,17 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
       stmt->as.loop_stmt.increment = parse_expression(parser);
     }
   } else {
+    const Token* expression_token = parser_peek(parser);
     AstExpr* expr = parse_expression(parser);
 
     if (parser_match(parser, TOK_KW_IN)) {
       if (expr->kind != AST_EXPR_IDENT) {
         parser_error(parser, NULL, "range loop variable must be an identifier");
       }
+      parser_error(parser, expression_token,
+                   has_let
+                       ? "collection loop bindings require an explicit type"
+                       : "collection loop bindings must begin with 'let' or 'var' and include an explicit type");
       stmt->as.loop_stmt.is_range = true;
       AstStmt* init = new_stmt(parser, AST_STMT_LET, NULL);
       init->as.let_stmt.name = parser_copy_str(parser, expr->as.ident);

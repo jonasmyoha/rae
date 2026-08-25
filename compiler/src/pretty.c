@@ -899,8 +899,10 @@ static void pp_print_loop_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   if (stmt->as.loop_stmt.init) {
     if (stmt->as.loop_stmt.init->kind == AST_STMT_LET) {
       pp_space(pp);
-      if (!stmt->as.loop_stmt.is_range
-          || stmt->as.loop_stmt.init->as.let_stmt.is_var) {
+      if (stmt->as.loop_stmt.is_range) {
+        pp_write(pp, stmt->as.loop_stmt.init->as.let_stmt.is_var
+                         ? "var " : "let ");
+      } else {
         pp_write(pp, "var ");
       }
       pp_write_str(pp, stmt->as.loop_stmt.init->as.let_stmt.name);

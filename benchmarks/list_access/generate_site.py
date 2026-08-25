@@ -212,7 +212,7 @@ if particle is not None:
     checksum += particle[0] + particle[5] + particle[6]''',
 }
 collection_snippets = {
-    "Rae": '''loop particle: view Particle in particles {
+    "Rae": '''loop let particle: view Particle in particles {
     checksum = checksum + particle.px + particle.vz + particle.mass
 }''',
     "C": '''for (int64_t index = 0; index < length; index++) {
@@ -264,7 +264,7 @@ pre{{overflow:auto;max-height:680px;background:#17201b;color:#e9f1e9;padding:18p
 <div class="stamp">65,536 elements · 8,388,608 accesses · median of 7 runs after 2 warmups</div>
 <div class="recommendation"><strong>Final recommendations</strong><ol>
 <li>Keep all public List indexed access optional and bounds-checked; these measurements do not justify an unsafe accessor.</li>
-<li>Use <code>loop item in list</code> for sequential hot paths and <code>viewAt + if let</code> for random access to large structs.</li>
+<li>Use <code>loop let item: view Item in items</code> for sequential hot paths and <code>viewAt + if let</code> for random access to large structs.</li>
 <li>Optimize Rae's general owned <code>opt T</code> representation separately; do not make List indexing unsafe to avoid RaeAny.</li>
 </ol></div>
 <h2>How to read this</h2><p>Each card performs the same useful work and checksum in every listed language. The ratio is relative to the fastest result in that card, so <strong>1.00× means tied at this measurement precision</strong>, not missing data. JavaScript and Python are included for scale and API comparison; their JIT/interpreter and heap-object data models are not direct C-backend code-generation competitors.</p>
