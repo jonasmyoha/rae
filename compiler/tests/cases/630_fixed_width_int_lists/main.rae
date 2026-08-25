@@ -9,24 +9,24 @@ import core
 func main() {
   var i32: List(Int32) = { 10, 20, 30, 40 }
   var s32: Int32 = 0
-  loop v: Int32 in i32 { s32 = s32 + v }
+  loop let v: Int32 in i32 { s32 = s32 + v }
   log("i32 sum {s32}")
 
   var i16: List(Int16) = { 100, 200, 300 }
   var s16: Int16 = 0
-  loop v: Int16 in i16 { s16 = s16 + v }
+  loop let v: Int16 in i16 { s16 = s16 + v }
   log("i16 sum {s16}")
 
   var u64: List(UInt64) = { 5, 10, 15 }
   var su64: UInt64 = 0
-  loop v: UInt64 in u64 { su64 = su64 + v }
+  loop let v: UInt64 in u64 { su64 = su64 + v }
   log("u64 sum {su64}")
 
   # A distinct-width list is a distinct type: this must not collide with i32.
   var i8: List(Int8) = { 1, 2, 3, 4 }
   var s8: Int8 = 0
-  loop v: Int8 in i8 { s8 = s8 + v }
+  loop let v: Int8 in i8 { s8 = s8 + v }
   var widened: Int = 0
-  loop v: Int8 in i8 { widened = widened + 1 }
+  loop let v: Int8 in i8 { widened = widened + 1 }
   log("i8 count {widened}")
 }

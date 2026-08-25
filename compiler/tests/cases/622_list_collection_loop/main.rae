@@ -13,7 +13,7 @@ type NamedParticle {
 func main() {
   var values: List(Int) = { 1, 2, 3, 4 }
   var valueSum: Int = 0
-  loop value: Int in values {
+  loop let value: Int in values {
     valueSum = valueSum + value
   }
   log("value sum: {valueSum}")
@@ -22,7 +22,7 @@ func main() {
   particles.add(value: Particle { x: 3, y: 4 })
   particles.add(value: Particle { x: 1, y: 2 })
   var viewSum: Int = 0
-  loop particle: view Particle in particles {
+  loop let particle: view Particle in particles {
     viewSum = viewSum + particle.x + particle.y
   }
   log("view sum: {viewSum}")
@@ -34,26 +34,27 @@ func main() {
   log("explicit let sum: {explicitLetSum}")
 
   var explicitVarSum: Int = 0
-  loop var particle: view Particle in particles {
-    explicitVarSum = explicitVarSum + particle.x + particle.y
+  loop var value: Int in values {
+    value = value + 1
+    explicitVarSum = explicitVarSum + value
   }
   log("explicit var sum: {explicitVarSum}")
 
-  loop particle: mod Particle in particles {
+  loop let particle: mod Particle in particles {
     particle.x = particle.x + 1
   }
   var modSum: Int = 0
-  loop particle: view Particle in particles {
+  loop let particle: view Particle in particles {
     modSum = modSum + particle.x + particle.y
   }
   log("mod sum: {modSum}")
 
   var named: List(NamedParticle) = createList(NamedParticle, cap: 1)
   named.add(value: NamedParticle { name: "safe copy", value: 7 })
-  loop particle: NamedParticle in named {
+  loop let particle: NamedParticle in named {
     log("owned value: {particle.name} {particle.value}")
   }
-  loop particle: view NamedParticle in named {
+  loop let particle: view NamedParticle in named {
     log("source remains: {particle.name}")
   }
 }

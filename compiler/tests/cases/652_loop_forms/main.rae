@@ -10,10 +10,13 @@ func main() {
   log("while: {whileTotal}")
 
   var prefixTotal: Int = 0
+  var prefixFloatTotal: Float = 0.0
   loop var prefixIndex: Int = 0, prefixIndex < 4, ++prefixIndex {
     prefixTotal = prefixTotal + prefixIndex
+    prefixFloatTotal = prefixFloatTotal + prefixIndex.toFloat()
   }
   log("comma prefix: {prefixTotal}")
+  log("comma prefix method: {prefixFloatTotal}")
 
   var postfixTotal: Int = 0
   loop var postfixIndex: Int = 0, postfixIndex < 4, postfixIndex++ {
@@ -31,7 +34,7 @@ func main() {
 
   var values: List(Int) = { 2, 4, 6 }
   var collectionTotal: Int = 0
-  loop item in values {
+  loop let item: Int in values {
     collectionTotal = collectionTotal + item
   }
   log("collection: {collectionTotal}")

@@ -28,7 +28,7 @@ m.x = 20                        # Copy into aliased storage
 if x > 0 { ... }
 loop x < 10 { ... }
 loop var i: Int = 0, i < 10, ++i { ... }
-loop item in list { ... }
+loop let item: view Item in items { ... }
 loop { ... }
 match val {
   case 1 => "one"
