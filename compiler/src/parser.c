@@ -1588,14 +1588,21 @@ static AstExpr* parse_postfix(Parser* parser) {
 
       continue;
     }
-    if (parser_match(parser, TOK_INC)) {
+    // Postfix operators belong to the operand's source line. Without this,
+    // the multiline loop clauses `condition` then `++index` are tokenized as
+    // `condition++` followed by a stray identifier.
+    if (parser_check(parser, TOK_INC)
+        && parser_peek(parser)->line == parser_previous(parser)->line) {
+      parser_advance(parser);
       AstExpr* post = new_expr(parser, AST_EXPR_UNARY, parser_previous(parser));
       post->as.unary.op = AST_UNARY_POST_INC;
       post->as.unary.operand = expr;
       expr = post;
       continue;
     }
-    if (parser_match(parser, TOK_DEC)) {
+    if (parser_check(parser, TOK_DEC)
+        && parser_peek(parser)->line == parser_previous(parser)->line) {
+      parser_advance(parser);
       AstExpr* post = new_expr(parser, AST_EXPR_UNARY, parser_previous(parser));
       post->as.unary.op = AST_UNARY_POST_DEC;
       post->as.unary.operand = expr;
@@ -2149,7 +2156,50 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
   AstStmt* stmt = new_stmt(parser, AST_STMT_LOOP, loop_token);
   stmt->as.loop_stmt.is_range = false;
 
-  parser_match(parser, TOK_KW_LET); // Optional 'let'
+  // `loop { ... }` is the unconditional form. Checking before parsing an
+  // expression keeps the opening brace from being mistaken for a collection
+  // literal.
+  if (parser_check(parser, TOK_LBRACE)) {
+    stmt->as.loop_stmt.body = parse_block(parser);
+    return stmt;
+  }
+
+  // A mutable declaration is the unambiguous marker for a three-clause loop:
+  //   loop var i: Int = 0, i < count, ++i { ... }
+  // The same clauses may use source-line boundaries instead of commas. The
+  // lexer deliberately has no newline token, so compare adjacent token lines.
+  if (parser_match(parser, TOK_KW_VAR)) {
+    const Token* var_token = parser_previous(parser);
+    AstStmt* init = parse_binding_statement(parser, var_token, true, false);
+    if (!init->as.let_stmt.value) {
+      parser_error(parser, var_token, "three-clause loop 'var' requires an initializer");
+    }
+    stmt->as.loop_stmt.init = init;
+
+    if (!parser_match(parser, TOK_COMMA)) {
+      const Token* previous = parser_previous(parser);
+      const Token* current = parser_peek(parser);
+      if (current->line <= previous->line) {
+        parser_error(parser, current,
+                     "expected ',' or newline after loop initializer");
+      }
+    }
+    stmt->as.loop_stmt.condition = parse_expression(parser);
+
+    if (!parser_match(parser, TOK_COMMA)) {
+      const Token* previous = parser_previous(parser);
+      const Token* current = parser_peek(parser);
+      if (current->line <= previous->line) {
+        parser_error(parser, current,
+                     "expected ',' or newline after loop condition");
+      }
+    }
+    stmt->as.loop_stmt.increment = parse_expression(parser);
+    stmt->as.loop_stmt.body = parse_block(parser);
+    return stmt;
+  }
+
+  parser_match(parser, TOK_KW_LET); // Optional compatibility spelling for collection bindings.
 
   if (looks_like_ident(parser) && parser_peek_at(parser, 1)->kind == TOK_COLON) {
     const Token* name = parser_advance(parser);
@@ -2168,23 +2218,21 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
       stmt->as.loop_stmt.condition = parse_expression(parser);
       stmt->as.loop_stmt.increment = NULL;
     } else {
+      parser_error(parser, parser_peek(parser),
+                   "three-clause loops must begin with 'var'");
       bool is_bind = false;
       if (parser_match(parser, TOK_ASSIGN)) {
         is_bind = false;
       } else if (parser_match(parser, TOK_ARROW)) {
         is_bind = true;
-      } else {
-        parser_error(parser, parser_peek(parser), "expected '=' or 'in' in loop declaration");
       }
-
       AstStmt* init = new_stmt(parser, AST_STMT_LET, name);
       init->as.let_stmt.name = parser_copy_str(parser, name->lexeme);
       init->as.let_stmt.type = type;
       init->as.let_stmt.value = parse_expression(parser);
       init->as.let_stmt.is_bind = is_bind;
-
       stmt->as.loop_stmt.init = init;
-      parser_consume(parser, TOK_COMMA, "expected ',' after loop init");
+      parser_consume(parser, TOK_COMMA, "expected ',' after loop initializer");
       stmt->as.loop_stmt.condition = parse_expression(parser);
       parser_consume(parser, TOK_COMMA, "expected ',' after loop condition");
       stmt->as.loop_stmt.increment = parse_expression(parser);
@@ -2207,9 +2255,10 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
       stmt->as.loop_stmt.condition = parse_expression(parser);
       stmt->as.loop_stmt.increment = NULL;
     } else if (parser_match(parser, TOK_COMMA)) {
+      parser_error(parser, parser_previous(parser),
+                   "three-clause loops must begin with an inline 'var' declaration");
       AstStmt* init = new_stmt(parser, AST_STMT_EXPR, NULL);
       init->as.expr_stmt = expr;
-
       stmt->as.loop_stmt.init = init;
       stmt->as.loop_stmt.condition = parse_expression(parser);
       parser_consume(parser, TOK_COMMA, "expected ',' after loop condition");

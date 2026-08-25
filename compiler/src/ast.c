@@ -485,29 +485,34 @@ static void dump_if_stmt(const AstStmt* stmt, FILE* out, int indent) {
 
 static void dump_loop_stmt(const AstStmt* stmt, FILE* out, int indent) {
   print_indent(out, indent);
-  fputs("loop ", out);
+  fputs("loop", out);
   if (stmt->as.loop_stmt.init) {
     if (stmt->as.loop_stmt.init->kind == AST_STMT_LET) {
-        print_str(out, stmt->as.loop_stmt.init->as.let_stmt.name);
+      fputc(' ', out);
+      if (!stmt->as.loop_stmt.is_range) fputs("var ", out);
+      print_str(out, stmt->as.loop_stmt.init->as.let_stmt.name);
+      if (stmt->as.loop_stmt.init->as.let_stmt.type) {
         fputs(": ", out);
         dump_type_ref(stmt->as.loop_stmt.init->as.let_stmt.type, out);
-        if (stmt->as.loop_stmt.is_range) {
-            fputs(" in ", out);
-        } else {
-             fputs(" = ", out);
-             dump_expr(stmt->as.loop_stmt.init->as.let_stmt.value, out);
-             fputs(", ", out);
-        }
-    } else if (stmt->as.loop_stmt.init->kind == AST_STMT_EXPR) {
-        dump_expr(stmt->as.loop_stmt.init->as.expr_stmt, out);
+      }
+      if (stmt->as.loop_stmt.is_range) {
+        fputs(" in ", out);
+      } else {
+        fputs(" = ", out);
+        dump_expr(stmt->as.loop_stmt.init->as.let_stmt.value, out);
         fputs(", ", out);
+      }
+    } else if (stmt->as.loop_stmt.init->kind == AST_STMT_EXPR) {
+      dump_expr(stmt->as.loop_stmt.init->as.expr_stmt, out);
+      fputs(", ", out);
     }
   }
-  
+
   if (stmt->as.loop_stmt.condition) {
+    if (!stmt->as.loop_stmt.init) fputc(' ', out);
     dump_expr(stmt->as.loop_stmt.condition, out);
   }
-  
+
   if (stmt->as.loop_stmt.increment) {
     fputs(", ", out);
     dump_expr(stmt->as.loop_stmt.increment, out);
