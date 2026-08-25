@@ -65,10 +65,8 @@ func buildScene(sphere: view MeshHandle, ground: view MeshHandle, torus: view Me
   let noRot: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let unit: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
 
-  var row: Int = 0
-  loop row < 5 {
-    var col: Int = 0
-    loop col < 5 {
+  loop var row: Int = 0, row < 5, ++row {
+    loop var col: Int = 0, col < 5, ++col {
       let metallic: Float = row.toFloat() / 4.0
       var roughness: Float = col.toFloat() / 4.0
       if roughness < 0.05 {
@@ -83,9 +81,7 @@ func buildScene(sphere: view MeshHandle, ground: view MeshHandle, torus: view Me
       )
       let pos: Vec3 = vec3.create(x: (col.toFloat() - 2.0) * 2.4, y: (row.toFloat() - 2.0) * 2.4, z: 0.5)
       let e: Int = addMeshInstance(scene: scene, mesh: sphere, material: mat, position: pos, rotation: noRot, scale: unit)
-      col = col + 1
     }
-    row = row + 1
   }
 
   # An EMITTER, to exercise the G-buffer's shading-mode field and the

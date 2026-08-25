@@ -2164,6 +2164,51 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
     return stmt;
   }
 
+  // `var` normally marks a three-clause loop, but it may also explicitly mark
+  // a mutable collection binding: `loop var item: view Thing in things`.
+  // Detect that form before handing the declaration to the ordinary binding
+  // parser, which quite correctly rejects uninitialised view/mod locals.
+  if (parser_check(parser, TOK_KW_VAR)) {
+    size_t lookahead = parser->current + 1;
+    bool collection_binding = false;
+    while (lookahead < parser->count) {
+      TokenKind kind = parser->tokens[lookahead].kind;
+      if (kind == TOK_KW_IN) {
+        collection_binding = true;
+        break;
+      }
+      if (kind == TOK_ASSIGN || kind == TOK_ARROW || kind == TOK_COMMA
+          || kind == TOK_LBRACE || kind == TOK_EOF) {
+        break;
+      }
+      lookahead++;
+    }
+    if (collection_binding) {
+      const Token* var_token = parser_advance(parser);
+      const Token* name = parser_consume_ident(
+          parser, "expected collection binding name after 'var'");
+      check_camel_case(parser, name, "variable");
+      AstTypeRef* type = NULL;
+      if (parser_match(parser, TOK_COLON)) type = parse_type_ref(parser);
+      parser_consume(parser, TOK_KW_IN, "expected 'in' after collection binding");
+
+      AstStmt* init = new_stmt(parser, AST_STMT_LET, var_token);
+      init->as.let_stmt.name = parser_copy_str(parser, name->lexeme);
+      init->as.let_stmt.type = type;
+      init->as.let_stmt.is_var = true;
+      init->as.let_stmt.is_const = false;
+      init->as.let_stmt.is_bind = false;
+      init->as.let_stmt.value = NULL;
+
+      stmt->as.loop_stmt.is_range = true;
+      stmt->as.loop_stmt.init = init;
+      stmt->as.loop_stmt.condition = parse_expression(parser);
+      stmt->as.loop_stmt.increment = NULL;
+      stmt->as.loop_stmt.body = parse_block(parser);
+      return stmt;
+    }
+  }
+
   // A mutable declaration is the unambiguous marker for a three-clause loop:
   //   loop var i: Int = 0, i < count, ++i { ... }
   // The same clauses may use source-line boundaries instead of commas. The
@@ -2213,6 +2258,8 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
       init->as.let_stmt.type = type;
       init->as.let_stmt.value = NULL;
       init->as.let_stmt.is_bind = false;
+      init->as.let_stmt.is_var = false;
+      init->as.let_stmt.is_const = false;
 
       stmt->as.loop_stmt.init = init;
       stmt->as.loop_stmt.condition = parse_expression(parser);
@@ -2250,6 +2297,8 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
       init->as.let_stmt.type = NULL;
       init->as.let_stmt.value = NULL;
       init->as.let_stmt.is_bind = false;
+      init->as.let_stmt.is_var = false;
+      init->as.let_stmt.is_const = false;
 
       stmt->as.loop_stmt.init = init;
       stmt->as.loop_stmt.condition = parse_expression(parser);

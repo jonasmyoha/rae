@@ -65,8 +65,7 @@ func grassBladeAt(blades: view List(GrassBlade), index: view Int) ret GrassBlade
 # -> same clumps, which is what makes the wrap invisible.
 func placeGrassCell(field: mod GrassField, poolBase: view Int,
                     cellX: view Int, cellY: view Int) {
-  var slot: Int = 0
-  loop slot < grassPerCell {
+  loop var slot: Int = 0, slot < grassPerCell, ++slot {
     let poolIndex: Int = poolBase + slot
     let hx: Float = noise.hash2(x: cellX, y: cellY, seed: 200 + slot)
     let hy: Float = noise.hash2(x: cellX, y: cellY, seed: 400 + slot)
@@ -82,7 +81,6 @@ func placeGrassCell(field: mod GrassField, poolBase: view Int,
       phase: hphase * grassWindTau,
       scale: 0.28 + hscale * 0.34
     })
-    slot = slot + 1
   }
 }
 
@@ -96,17 +94,13 @@ func updateGrassField(field: mod GrassField, playerPosition: view Vec3) ret Bool
   }
   field.centreCellX = cellX
   field.centreCellY = cellY
-  var row: Int = 0
-  loop row < terrainGridSide {
-    var column: Int = 0
-    loop column < terrainGridSide {
+  loop var row: Int = 0, row < terrainGridSide, ++row {
+    loop var column: Int = 0, column < terrainGridSide, ++column {
       let cellIndex: Int = row * terrainGridSide + column
       placeGrassCell(field: field, poolBase: cellIndex * grassPerCell,
                      cellX: cellX + column - terrainHalfGrid,
                      cellY: cellY + row - terrainHalfGrid)
-      column = column + 1
     }
-    row = row + 1
   }
   ret true
 }
@@ -123,8 +117,7 @@ func grassGust(phase: view Float, baseX: view Float, time: view Float) ret Float
 # then one instanced draw for the whole field. The matrices and the record
 # layout are gbuffer's Rae helpers; nothing here touches raw float offsets.
 func drawGrassField(field: mod GrassField, time: view Float, dt: view Float, toon: view Int) {
-  var index: Int = 0
-  loop index < grassBladeCount {
+  loop var index: Int = 0, index < grassBladeCount, ++index {
     let blade: GrassBlade = grassBladeAt(blades: field.blades, index: index)
     let gust: Float = grassGust(phase: blade.phase, baseX: blade.baseX, time: time)
     let prevGust: Float = grassGust(phase: blade.phase, baseX: blade.baseX, time: time - dt)
@@ -140,7 +133,6 @@ func drawGrassField(field: mod GrassField, time: view Float, dt: view Float, too
       model: model, prevModel: prevModel,
       r: 0.13 + cvar * 0.09, g: 0.33 + cvar * 0.16, b: 0.05 + cvar * 0.05,
       metallic: 0.0, roughness: 0.95, emissive: 0.0, toon: toon, paletteBase: 0)
-    index = index + 1
   }
   gbuffer.drawRecords(mesh: field.meshId, records: field.records.data,
                       count: grassBladeCount)
@@ -149,18 +141,14 @@ func drawGrassField(field: mod GrassField, time: view Float, dt: view Float, too
 func createGrassField(assets: view String, groundZ: view Float) ret GrassField {
   let grassMesh: MeshHandle = terrainMesh(path: "{assets}environment/grass.glb")
   let blades: List(GrassBlade) = createList(GrassBlade, cap: grassBladeCount)
-  var index: Int = 0
-  loop index < grassBladeCount {
+  loop var index: Int = 0, index < grassBladeCount, ++index {
     blades.add(value: GrassBlade {
       baseX: 0.0, baseY: 0.0, baseZ: groundZ, yaw: 0.0, phase: 0.0, scale: 0.3
     })
-    index = index + 1
   }
   let records: List(Float) = createList(Float, cap: grassRecordFloats)
-  var floatIndex: Int = 0
-  loop floatIndex < grassRecordFloats {
+  loop var floatIndex: Int = 0, floatIndex < grassRecordFloats, ++floatIndex {
     records.add(value: 0.0)
-    floatIndex = floatIndex + 1
   }
   ret GrassField {
     centreCellX: 1000000000, centreCellY: 1000000000,

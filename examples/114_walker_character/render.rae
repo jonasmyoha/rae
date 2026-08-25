@@ -111,19 +111,15 @@ func renderShadowPass(app: mod App, aspect: copy Float, palette: view List(Float
     # Each caster's shadow samples the SAME palette slot its G-buffer instance
     # does (#547), so a crowd member casts its own pose. Hero = slot 0.
     let jc: Int = jointCount(sk: app.character.skeleton)
-    var sp: Int = 0
-    loop sp < app.character.partIds.length {
+    loop var sp: Int = 0, sp < app.character.partIds.length, ++sp {
       let sh: MeshHandle = meshHandle(id: walkerIntAt(values: app.character.partIds, index: sp), generation: 1)
       drawShadowCasterSkinned(mesh: sh, model: app.character.model, paletteBase: 0)
-      var shadowClone: Int = 0
-      loop shadowClone < app.character.crowd.length {
+      loop var shadowClone: Int = 0, shadowClone < app.character.crowd.length, ++shadowClone {
         if let member: CrowdMember = app.character.crowd.at(index: shadowClone) {
           drawShadowCasterSkinned(mesh: sh, model: member.model,
                                   paletteBase: characterPaletteBase(slot: shadowClone + 1, jointCount: jc))
         }
-        shadowClone = shadowClone + 1
       }
-      sp = sp + 1
     }
     endShadowPass()
   }
@@ -156,8 +152,7 @@ func renderGbufferPass(app: mod App, aspect: copy Float, palette: view List(Floa
   # Palettes (hero slot 0 + one per crowd member) were uploaded in renderApp.
   let jc: Int = jointCount(sk: app.character.skeleton)
   uploadPalette(rows: palette, jointCount: jc)
-  var p: Int = 0
-  loop p < app.character.partIds.length {
+  loop var p: Int = 0, p < app.character.partIds.length, ++p {
     let handle: MeshHandle = meshHandle(id: walkerIntAt(values: app.character.partIds, index: p), generation: 1)
     let mat: Material3d = {
       baseColor: vec3.create(x: 1.0, y: 1.0, z: 1.0),
@@ -170,18 +165,15 @@ func renderGbufferPass(app: mod App, aspect: copy Float, palette: view List(Floa
                                 prevModel: app.character.prevModel, material: mat)
     setInstanceBatchMesh(batch: app.character.crowdBatch, mesh: handle)
     resetInstanceBatch(batch: app.character.crowdBatch)
-    var cloneDraw: Int = 0
-    loop cloneDraw < app.character.crowd.length {
+    loop var cloneDraw: Int = 0, cloneDraw < app.character.crowd.length, ++cloneDraw {
       if let member: CrowdMember = app.character.crowd.at(index: cloneDraw) {
         # Each crowd member samples its OWN palette slot (#547) so it holds a
         # distinct pose in this single instanced skinned draw.
         addSkinnedInstance(batch: app.character.crowdBatch, model: member.model, prevModel: member.model,
                            material: mat, paletteBase: characterPaletteBase(slot: cloneDraw + 1, jointCount: jc))
       }
-      cloneDraw = cloneDraw + 1
     }
     drawSkinnedInstances(batch: app.character.crowdBatch)
-    p = p + 1
   }
   grassDraw()
   gbuffer.endPass()
@@ -228,8 +220,7 @@ func renderApp(app: mod App) {
   # walks. Slot 0 is the hero (uploaded first, which also creates the buffer).
   let jc: Int = jointCount(sk: app.character.skeleton)
   uploadPalette(rows: palette, jointCount: jc)
-  var crowdSlot: Int = 0
-  loop crowdSlot < app.character.crowd.length {
+  loop var crowdSlot: Int = 0, crowdSlot < app.character.crowd.length, ++crowdSlot {
     if let member: CrowdMember = app.character.crowd.at(index: crowdSlot) {
       var advanced: CrowdMember = member
       advanced.animTime = advanced.animTime + dt * clipPlaybackRate(clipIndex: advanced.clipIndex)
@@ -238,7 +229,6 @@ func renderApp(app: mod App) {
         clipIndex: advanced.clipIndex, animTime: advanced.animTime)
       uploadPaletteSlot(rows: crowdPalette, jointCount: jc, slot: crowdSlot + 1)
     }
-    crowdSlot = crowdSlot + 1
   }
 
   applyCameraRig(rig: app.cam.rig, camera: app.cam.camera)
@@ -246,8 +236,7 @@ func renderApp(app: mod App) {
   let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
   let t: Float = (now - app.frame.startT) as Float
 
-  var oi: Int = 0
-  loop oi < deferredOrderLength(r: app.render.renderer) {
+  loop var oi: Int = 0, oi < deferredOrderLength(r: app.render.renderer), ++oi {
     let tag: Int = deferredTagAt(r: app.render.renderer, i: oi)
     profile.zoneBegin(name: (tag as RenderTag).toString())
     # Exhaustive over RenderTag: adding a pass is a compile error here until it is
@@ -284,7 +273,6 @@ func renderApp(app: mod App) {
       case RenderTag.present { gpu2d.endFrame() }
     }
     profile.zoneEnd(name: (tag as RenderTag).toString())
-    oi = oi + 1
   }
   snapshotPrevTransforms(scene: app.scene)
   capFrameSleep(drs: app.render.drs, frameStartSec: now)

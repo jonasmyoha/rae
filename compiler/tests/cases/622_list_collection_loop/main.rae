@@ -27,6 +27,18 @@ func main() {
   }
   log("view sum: {viewSum}")
 
+  var explicitLetSum: Int = 0
+  loop let particle: view Particle in particles {
+    explicitLetSum = explicitLetSum + particle.x + particle.y
+  }
+  log("explicit let sum: {explicitLetSum}")
+
+  var explicitVarSum: Int = 0
+  loop var particle: view Particle in particles {
+    explicitVarSum = explicitVarSum + particle.x + particle.y
+  }
+  log("explicit var sum: {explicitVarSum}")
+
   loop particle: mod Particle in particles {
     particle.x = particle.x + 1
   }

@@ -31,10 +31,8 @@ func main() {
     # Pre-fill the framebuffer with black so the streaming texture has a full
     # width*height of pixels from the first frame.
     let fb: List(Int) = createList(cap: width * height)
-    var i: Int = 0
-    loop i < width * height {
+    loop var i: Int = 0, i < width * height, ++i {
         fb.add(value: 0)
-        i = i + 1
     }
 
     sdl3.initWindow(width: width, height: height, title: "Rae raytracer — step 1 (SDL3, single-threaded)")
