@@ -85,6 +85,14 @@ loop item in items {
   process(item: item)
 }
 
+# Explicit immutable and mutable collection bindings are also accepted.
+loop let item: view Thing in things {
+  inspect(thing: item)
+}
+loop var item: mod Thing in things {
+  update(thing: item)
+}
+
 # Unconditional loop
 loop {
   if finished {
@@ -95,7 +103,9 @@ loop {
 
 Both prefix (`++index`) and postfix (`index++`) increment are supported. A
 collection expression is evaluated once and its elements are visited in order.
-No numeric range syntax is defined by these forms.
+The keyword-free collection binding is immutable, like `let`; use `var` only
+when the binding itself must be reassigned. No numeric range syntax is defined
+by these forms.
 
 ---
 

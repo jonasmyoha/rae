@@ -19,22 +19,18 @@ type Score {
 # field we care about.
 func sortByPointsDesc(xs: mod List(Score)) {
   let n: Int = xs.length
-  var i: Int = 0
-  loop i < n - 1 {
+  loop var i: Int = 0, i < n - 1, ++i {
     var max: Int = i
-    var j: Int = i + 1
-    loop j < n {
+    loop var j: Int = i + 1, j < n, ++j {
       let a: Score = rae_ext_rae_buf_get(buf: xs.data, index: max)
       let b: Score = rae_ext_rae_buf_get(buf: xs.data, index: j)
       if b.points > a.points {
         max = j
       }
-      j = j + 1
     }
     if not (max is i) {
       swap(xs, i: i, j: max)
     }
-    i = i + 1
   }
 }
 
@@ -54,10 +50,8 @@ func main() {
   sortByPointsDesc(board)
 
   log("== HIGHSCORES ==")
-  var i: Int = 0
-  loop i < board.length {
+  loop var i: Int = 0, i < board.length, ++i {
     let s: Score = rae_ext_rae_buf_get(buf: board.data, index: i)
     log("{i + 1}. {s.name} - {s.points} pts ({time.formatDate(epochMs: s.whenMs)})")
-    i = i + 1
   }
 }

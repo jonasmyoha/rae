@@ -27,7 +27,7 @@ open gbuffer_instanced
 # Single source of truth for the ground colour: the terrain ground material AND
 # the GPU grass gradient's bottom both read this, so the grass roots always match
 # the ground (#487 follow-up — pass it into grassGenerate).
-func walkerGroundColor() pub ret Vec3 { ret vec3.create(x: 0.105, y: 0.245, z: 0.055) }
+func walkerGroundColor() ret Vec3 { ret vec3.create(x: 0.105, y: 0.245, z: 0.055) }
 
 const terrainGridSide: Int = 7
 const terrainCellSize: Float = 18.0
@@ -188,13 +188,11 @@ func reshapeTerrainTile(terrain: mod InfiniteTerrain, cellX: view Int, cellY: vi
   let centreX: Float = cellX.toFloat() * terrainCellSize
   let centreY: Float = cellY.toFloat() * terrainCellSize
   let eps: Float = 0.6
-  var yi: Int = 0
-  loop yi <= terrainTileSegments {
+  loop var yi: Int = 0, yi <= terrainTileSegments, ++yi {
     let fy: Float = yi.toFloat() / terrainTileSegments.toFloat()
     let localY: Float = (fy - 0.5) * tileSize
     let worldY: Float = centreY + localY
-    var xi: Int = 0
-    loop xi <= terrainTileSegments {
+    loop var xi: Int = 0, xi <= terrainTileSegments, ++xi {
       let fx: Float = xi.toFloat() / terrainTileSegments.toFloat()
       let localX: Float = (fx - 0.5) * tileSize
       let worldX: Float = centreX + localX
@@ -214,9 +212,7 @@ func reshapeTerrainTile(terrain: mod InfiniteTerrain, cellX: view Int, cellY: vi
       terrain.scratchVerts.set(index: base + 5, value: inverseLength)
       terrain.scratchVerts.set(index: base + 6, value: fx)
       terrain.scratchVerts.set(index: base + 7, value: fy)
-      xi = xi + 1
     }
-    yi = yi + 1
   }
   updateMeshVerts(mesh: meshHandle(id: meshId, generation: 0),
                   verts: terrain.scratchVerts, vertCount: terrainTileVerts)
@@ -318,18 +314,14 @@ func updateInfiniteTerrain(terrain: mod InfiniteTerrain, scene: mod Scene3d,
   terrain.centreCellX = cellX
   terrain.centreCellY = cellY
 
-  var row: Int = 0
-  loop row < terrainGridSide {
-    var column: Int = 0
-    loop column < terrainGridSide {
+  loop var row: Int = 0, row < terrainGridSide, ++row {
+    loop var column: Int = 0, column < terrainGridSide, ++column {
       let poolIndex: Int = row * terrainGridSide + column
       placeTerrainCell(
         terrain: terrain, scene: scene, poolIndex: poolIndex,
         cellX: cellX + column - terrainHalfGrid,
         cellY: cellY + row - terrainHalfGrid)
-      column = column + 1
     }
-    row = row + 1
   }
   ret true
 }
@@ -348,11 +340,9 @@ func gatherPropInstance(prop: mod PropInstancer, entity: copy Int, scene: view S
 func drawPropPool(prop: mod PropInstancer, entities: view List(Int), scene: view Scene3d) {
   let material: Material3d = sceneMaterialAt(values: scene.materials, index: prop.materialIndex)
   resetInstanceBatch(batch: prop.batch)
-  var index: Int = 0
-  loop index < entities.length {
+  loop var index: Int = 0, index < entities.length, ++index {
     gatherPropInstance(prop: prop, entity: terrainEntityAt(entities: entities, index: index),
                        scene: scene, material: material)
-    index = index + 1
   }
   drawInstances(batch: prop.batch)
 }
@@ -363,17 +353,13 @@ func drawGrassProp(prop: mod PropInstancer, entitiesA: view List(Int),
                    entitiesB: view List(Int), scene: view Scene3d) {
   let material: Material3d = sceneMaterialAt(values: scene.materials, index: prop.materialIndex)
   resetInstanceBatch(batch: prop.batch)
-  var index: Int = 0
-  loop index < entitiesA.length {
+  loop var index: Int = 0, index < entitiesA.length, ++index {
     gatherPropInstance(prop: prop, entity: terrainEntityAt(entities: entitiesA, index: index),
                        scene: scene, material: material)
-    index = index + 1
   }
-  index = 0
-  loop index < entitiesB.length {
+  loop var index: Int = 0, index < entitiesB.length, ++index {
     gatherPropInstance(prop: prop, entity: terrainEntityAt(entities: entitiesB, index: index),
                        scene: scene, material: material)
-    index = index + 1
   }
   drawInstances(batch: prop.batch)
 }
@@ -384,15 +370,13 @@ func drawTreeProp(prop: mod PropInstancer, entities: view List(Int), scene: view
                   broadVisible: view List(Bool), wantBroad: copy Bool) {
   let material: Material3d = sceneMaterialAt(values: scene.materials, index: prop.materialIndex)
   resetInstanceBatch(batch: prop.batch)
-  var index: Int = 0
-  loop index < entities.length {
+  loop var index: Int = 0, index < entities.length, ++index {
     var isBroad: Bool = false
     if let flag: Bool = broadVisible.at(index: index) { isBroad = flag }
     if isBroad is wantBroad {
       gatherPropInstance(prop: prop, entity: terrainEntityAt(entities: entities, index: index),
                          scene: scene, material: material)
     }
-    index = index + 1
   }
   drawInstances(batch: prop.batch)
 }
@@ -404,9 +388,8 @@ func drawTreeProp(prop: mod PropInstancer, entities: view List(Int), scene: view
 # Draw the ground tiles with the biome-splat pipeline (#533). Tiles are hidden
 # from renderScene (visible=false at creation); here each is drawn per-vertex
 # biome-classified, so the ground reads as grass/sand/mud/rock/water.
-func drawTerrainGround(terrain: view InfiniteTerrain, scene: view Scene3d, time: copy Float) pub {
-  var poolIndex: Int = 0
-  loop poolIndex < terrainCellCount {
+func drawTerrainGround(terrain: view InfiniteTerrain, scene: view Scene3d, time: copy Float) {
+  loop var poolIndex: Int = 0, poolIndex < terrainCellCount, ++poolIndex {
     let meshId: Int = terrainEntityAt(entities: terrain.tileMeshIds, index: poolIndex)
     let entity: Int = terrainEntityAt(entities: terrain.tileEntities, index: poolIndex)
     if meshId >= 1 and entity >= 0 {
@@ -416,7 +399,6 @@ func drawTerrainGround(terrain: view InfiniteTerrain, scene: view Scene3d, time:
       # DrawU slot (8e77d970); terrain is never skinned so that slot is free.
       drawTerrainMesh(mesh: meshId, transform: t, prevTransform: pt, roughness: 0.96, time: time)
     }
-    poolIndex = poolIndex + 1
   }
 }
 
@@ -440,19 +422,16 @@ func drawTerrainProps(terrain: mod InfiniteTerrain, scene: view Scene3d) {
 # renderSceneShadow skips them). One drawShadowCaster per instance keeps the
 # shadows identical; instanced shadow casting is a later grass phase.
 func castPropPool(mesh: view MeshHandle, entities: view List(Int), scene: view Scene3d) {
-  var index: Int = 0
-  loop index < entities.length {
+  loop var index: Int = 0, index < entities.length, ++index {
     let entity: Int = terrainEntityAt(entities: entities, index: index)
     let transform: Transform3d = sceneTransformAt(values: scene.transforms, index: entity)
     drawShadowCaster(mesh: mesh, model: modelMatrix(t: transform))
-    index = index + 1
   }
 }
 
 func castTreeProp(mesh: view MeshHandle, entities: view List(Int), scene: view Scene3d,
                   broadVisible: view List(Bool), wantBroad: copy Bool) {
-  var index: Int = 0
-  loop index < entities.length {
+  loop var index: Int = 0, index < entities.length, ++index {
     var isBroad: Bool = false
     if let flag: Bool = broadVisible.at(index: index) { isBroad = flag }
     if isBroad is wantBroad {
@@ -460,7 +439,6 @@ func castTreeProp(mesh: view MeshHandle, entities: view List(Int), scene: view S
       let transform: Transform3d = sceneTransformAt(values: scene.transforms, index: entity)
       drawShadowCaster(mesh: mesh, model: modelMatrix(t: transform))
     }
-    index = index + 1
   }
 }
 
@@ -484,12 +462,10 @@ func setInfiniteTerrainToon(terrain: mod InfiniteTerrain, scene: mod Scene3d,
                             toon: view Bool) {
   if terrain.toon is toon { ret }
   terrain.toon = toon
-  var index: Int = 0
-  loop index < terrain.materialIds.length {
+  loop var index: Int = 0, index < terrain.materialIds.length, ++index {
     if let materialId: Int = terrain.materialIds.at(index: index) {
       setMaterialToon(scene: scene, index: materialId, toon: toon)
     }
-    index = index + 1
   }
 }
 
@@ -552,10 +528,8 @@ func createInfiniteTerrain(scene: mod Scene3d, assets: view String,
 
   let tileMeshes: List(Int) = createList(Int, cap: terrainCellCount)
   let scratch: List(Float) = createList(Float, cap: terrainTileFloats)
-  var scratchIndex: Int = 0
-  loop scratchIndex < terrainTileFloats {
+  loop var scratchIndex: Int = 0, scratchIndex < terrainTileFloats, ++scratchIndex {
     scratch.add(value: 0.0)
-    scratchIndex = scratchIndex + 1
   }
   let tiles: List(Int) = createList(Int, cap: terrainCellCount)
   let broadTrunks: List(Int) = createList(Int, cap: terrainCellCount)
@@ -573,8 +547,7 @@ func createInfiniteTerrain(scene: mod Scene3d, assets: view String,
   let origin: Vec3 = vec3.create(x: 0.0, y: 0.0, z: groundZ)
   let zeroRotation: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let oneScale: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
-  var index: Int = 0
-  loop index < terrainCellCount {
+  loop var index: Int = 0, index < terrainCellCount, ++index {
     let tileMesh: MeshHandle = uploadMeshDataForTerrain(mesh: tilePlane)
     tileMeshes.add(value: tileMesh.id)
     # Tiles keep their MeshRenderer (unique per-cell heightfield mesh, not an
@@ -603,7 +576,6 @@ func createInfiniteTerrain(scene: mod Scene3d, assets: view String,
     grassB.add(value: addHiddenProp(scene: scene, mesh: grassMesh,
       material: grassMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
     broadVisibleFlags.add(value: false)
-    index = index + 1
   }
 
   var terrain: InfiniteTerrain = {
