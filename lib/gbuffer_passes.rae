@@ -29,6 +29,9 @@ func gbCompositeSourceIndex() extern("rae_gb_composite_source_index") ret Int
 # TAA on/off (#20). Off routes composite to raw lit and turns on FXAA instead.
 func gbTaaIsEnabled() extern("rae_gb_taa_is_enabled") ret Int
 func gbSetTaaEnabled(on: Int) extern("rae_gb_set_taa_enabled")
+# Distance fog (#57, per-app). on=1 fades geometry to (r,g,b) over [start,end]
+# world units and paints that colour as the background; on=0 keeps the sky.
+func gbSetFog(on: Int, r: Float, g: Float, b: Float, start: Float, end: Float) extern("rae_gb_set_fog")
 func gbCompositePipeline() extern("rae_gb_composite_pipeline") ret Ptr
 func gbCompositeUbuf() extern("rae_gb_composite_ubuf") ret Ptr
 func gbCompositeBind(idx: Int) extern("rae_gb_composite_bind") ret Ptr
