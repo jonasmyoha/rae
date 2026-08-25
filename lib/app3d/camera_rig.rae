@@ -33,12 +33,11 @@ const keyS: Int = 83
 const keyD: Int = 68
 const keyQ: Int = 81
 const keyE: Int = 69
-# Speed-modifier keys, in the GLFW key-code numbering the runtime's isKeyDown accepts and
-# maps to SDL scancodes (letters use uppercase ASCII the same way, e.g. keyW = 87). NOTE we
-# run on SDL3, not GLFW/raylib — this is just the portable code convention (lib/sdl3.rae).
-# The previous SDL *keycode* values (1073742049/53) weren't in that map, so they resolved to
-# SCANCODE_UNKNOWN and Shift silently never registered — the boost looked broken. Both Shift
-# + both Control keys.
+# Speed-modifier keys, in the engine's portable key-code ints the runtime's isKeyDown accepts
+# and resolves to SDL scancodes (letters are uppercase ASCII, e.g. keyW = 87; L/R Shift =
+# 340/344, L/R Ctrl = 341/345 — see lib/sdl3.rae). The previous SDL *keycode* values
+# (1073742049/53) aren't valid input ints, so they resolved to SCANCODE_UNKNOWN and Shift
+# silently never registered — the boost looked broken. Both Shift + both Control keys.
 const keyLShift: Int = 340
 const keyRShift: Int = 344
 const keyLCtrl: Int = 341
