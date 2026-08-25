@@ -33,18 +33,26 @@ const keyS: Int = 83
 const keyD: Int = 68
 const keyQ: Int = 81
 const keyE: Int = 69
-# Either Shift. SDL reports them as distinct scancodes, and a camera that
-# speeds up on one shift key but not the other reads as a bug.
-const keyLShift: Int = 1073742049
-const keyRShift: Int = 1073742053
+# Speed-modifier keys, as the RAYLIB key codes the runtime's isKeyDown maps (letters use
+# uppercase ASCII the same way, e.g. keyW = 87). The previous SDL *keycode* values
+# (1073742049/53) fell through the runtime's raylib->scancode table to SCANCODE_UNKNOWN, so
+# Shift silently never registered — the boost looked broken. Both Shift + both Control keys.
+const keyLShift: Int = 340
+const keyRShift: Int = 344
+const keyLCtrl: Int = 341
+const keyRCtrl: Int = 345
 
-# How much faster Shift makes the WASD camera. Applied to translation only —
-# boosting the turn rate as well makes the view hard to aim.
+# Shift makes the WASD camera 4x FASTER, Control makes it 4x SLOWER (for fine framing).
+# Applied to translation only — boosting the turn rate as well makes the view hard to aim.
 const cameraRigBoost: Float = 4.0
+const cameraRigSlow: Float = 0.25
 
 func cameraRigSpeedScale() ret Float {
   if sdl3.isKeyDown(key: keyLShift) or sdl3.isKeyDown(key: keyRShift) {
     ret cameraRigBoost
+  }
+  if sdl3.isKeyDown(key: keyLCtrl) or sdl3.isKeyDown(key: keyRCtrl) {
+    ret cameraRigSlow
   }
   ret 1.0
 }
