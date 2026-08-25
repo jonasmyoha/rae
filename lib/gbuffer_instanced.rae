@@ -236,6 +236,28 @@ func addInstanceTransformBrick(batch: mod InstanceBatch, transform: view Transfo
   addInstanceBrick(batch: batch, model: model, prevModel: prevModel, material: material)
 }
 
+# ROOF-TILE-tagged instance (#63): the brick sibling with flag 2 (params.w = 2),
+# which the fragment shader paints as rounded FISH-SCALE roof shingles — distinct
+# from the wall brick (flag 1). Same paletteBase-slot trick; non-tagged draws pass 0.
+func addInstanceTile(batch: mod InstanceBatch, model: view Mat4, prevModel: view Mat4,
+                     material: view Material3d) pub {
+  if batch.count >= batch.capacity { ret }
+  packInstanceRecord(records: batch.records, slot: batch.count,
+    model: model, prevModel: prevModel,
+    r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
+    metallic: material.metallic, roughness: material.roughness,
+    emissive: instanceEmissive(material: material), toon: toonFlag(material: material),
+    paletteBase: 2)
+  batch.count = batch.count + 1
+}
+
+func addInstanceTransformTile(batch: mod InstanceBatch, transform: view Transform3d,
+                              prevTransform: view Transform3d, material: view Material3d) pub {
+  let model: Mat4 = modelMatrixOf(t: transform)
+  let prevModel: Mat4 = modelMatrixOf(t: prevTransform)
+  addInstanceTile(batch: batch, model: model, prevModel: prevModel, material: material)
+}
+
 # Draw the whole batch in one instanced DrawIndexed. Must be called inside the
 # geometry pass (between gbuffer.begin and gbuffer.end), like any other draw.
 func drawInstances(batch: view InstanceBatch) pub {

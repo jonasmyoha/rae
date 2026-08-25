@@ -175,6 +175,42 @@ static WGPUBuffer         gb_view_ubuf = NULL;
 "  return o;\n" \
 "}\n"
 
+/* PROCEDURAL ROOF TILES (#63), deliberately DIFFERENT from the wall brick: rounded
+ * FISH-SCALE shingles in overlapping staggered courses, not a rectangular grid. The
+ * surface is parameterised along/around the slope (tangent frame from the normal), so
+ * courses stack up a cone and wrap around it. Each scale is a rounded dome — the albedo
+ * brightens on the dome and darkens in the gaps, and the ANALYTIC normal bulges radially
+ * so the scales catch light with real relief (the "bumps at the seams" for roofs). */
+#define GB_ROOFTILE_WGSL \
+"fn gbRoofTiles(wpos: vec3<f32>, n: vec3<f32>, base: vec3<f32>) -> BrickOut {\n" \
+"  let hl = max(length(vec2<f32>(n.x, n.y)), 1e-4);\n" \
+"  let horizN = vec2<f32>(n.x, n.y) / hl;\n" \
+"  let tU = vec3<f32>(-horizN.y, horizN.x, 0.0);\n" \
+"  let tV = normalize(cross(tU, n));\n" \
+"  let hu = dot(wpos, tU);\n" \
+"  let hv = dot(wpos, tV);\n" \
+"  let tw = 0.72; let th = 0.55;\n" \
+"  let row = floor(hv / th);\n" \
+"  let stag = (row - 2.0 * floor(row * 0.5)) * 0.5;\n" \
+"  let cu = fract(hu / tw + stag) - 0.5;\n" \
+"  let cv = fract(hv / th) - 0.32;\n" \
+"  let dxs = cu;\n" \
+"  let dys = cv * 0.92;\n" \
+"  let rr = sqrt(dxs * dxs + dys * dys);\n" \
+"  let edge = smoothstep(0.33, 0.47, rr);\n" \
+"  let dome = 1.0 - edge;\n" \
+"  let bid = floor(hu / tw + stag) * 5.0 + row * 11.0;\n" \
+"  let vary = fract(sin(bid * 34.11) * 4113.7);\n" \
+"  var o: BrickOut;\n" \
+"  o.albedo = base * (0.74 + 0.30 * dome + 0.14 * vary) * (1.0 - 0.34 * edge);\n" \
+"  let slope = smoothstep(0.04, 0.40, rr) * dome;\n" \
+"  var dir = vec2<f32>(dxs, dys);\n" \
+"  if (rr > 1e-4) { dir = dir / rr; }\n" \
+"  let perturb = tU * dir.x + tV * dir.y;\n" \
+"  o.nrm = normalize(n + perturb * (slope * 0.95));\n" \
+"  return o;\n" \
+"}\n"
+
 /* Shading models, in the 2 bits rgb10a2's alpha provides. Values are the
  * quantisation points of those 2 bits so a round-trip through the texture
  * lands exactly where it started. */
@@ -251,6 +287,7 @@ GB_OCT_WGSL
 "  @location(4) wpos: vec3<f32>,\n"   /* world position, for procedural brick (#62) */
 "};\n"
 GB_BRICK_WGSL
+GB_ROOFTILE_WGSL
 "@vertex\n"
 "fn vs(@builtin(instance_index) ii: u32,\n"
 "      @location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec2<f32>) -> VsOut {\n"
@@ -314,8 +351,12 @@ GB_BRICK_WGSL
  * default) leaves the write byte-identical, so no other instanced draw changes. */
 "  var albedoOut = d.albedoMetallic.rgb;\n"
 "  var nrmOut = n;\n"
-"  if (d.params.w > 0.5) {\n"
-"    let bk = gbBrick(in.wpos, n, albedoOut);\n"
+"  if (d.params.w > 1.5) {\n"
+"    let rt = gbRoofTiles(in.wpos, n, albedoOut);\n"    /* #63 roof shingles (flag 2) */
+"    albedoOut = rt.albedo;\n"
+"    nrmOut = rt.nrm;\n"
+"  } else if (d.params.w > 0.5) {\n"
+"    let bk = gbBrick(in.wpos, n, albedoOut);\n"        /* #62 wall brick (flag 1) */
 "    albedoOut = bk.albedo;\n"
 "    nrmOut = bk.nrm;\n"
 "  }\n"
