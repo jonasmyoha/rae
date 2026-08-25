@@ -40,10 +40,9 @@ func setTitle(title: String) extern
 func closeWindow() extern
 
 # --- Input ---------------------------------------------------------------
-# Key codes are the engine's own portable ints: letters + digits are their ASCII value
-# (W = 87, '1' = 49); the arrows / shift / ctrl / F-keys are fixed engine constants
-# (arrows 262-265, L/R Shift 340/344, L/R Ctrl 341/345). The SDL3 runtime resolves them to
-# real SDL scancodes (rae_sdl_scancode). SDL3 (+ WebGPU) is the backend.
+# isKeyDown / isKeyPressed take a RAW SDL_Scancode (named list in lib/keys.rae: keyW = 26,
+# keyLShift = 225, keyRight = 79, …). No translation — the value goes straight to SDL,
+# indexing SDL's keyboard-state array by scancode. SDL3 (+ WebGPU) is the backend.
 
 # Current window (renderer output) size in pixels. The window is resizable;
 # poll these to detect a resize and re-render at the new size.

@@ -246,34 +246,8 @@ static unsigned char g_sdl_mouse_pressed[8];            /* went-down-this-frame 
 static unsigned char g_sdl_mouse_released[8];           /* went-up-this-frame edges */
 static bool g_sdl_mouse_captured = false;
 
-/* Map the engine's own portable key-code ints (as used by app code via isKeyDown) to SDL
- * scancodes. For letters and digits the int is simply the ASCII value (W = 87, '1' = 49);
- * the arrows / shift / ctrl / F-keys use fixed engine constants (RIGHT=262, LSHIFT=340,
- * LCTRL=341, F1=290, …). These are the Rae input codes — SDL3 is the only backend; this
- * function is where they resolve to real SDL_Scancodes. */
-static SDL_Scancode rae_sdl_scancode(int64_t key) {
-    if (key >= 'A' && key <= 'Z') return SDL_GetScancodeFromKey((SDL_Keycode)(key + 32), NULL); /* lowercase */
-    if (key >= '0' && key <= '9') return SDL_GetScancodeFromKey((SDL_Keycode)key, NULL);
-    if (key >= 290 && key <= 301) return (SDL_Scancode)(SDL_SCANCODE_F1 + (int)(key - 290)); /* F1..F12 */
-    switch (key) {
-        case 32:  return SDL_SCANCODE_SPACE;
-        case 256: return SDL_SCANCODE_ESCAPE;
-        case 257: return SDL_SCANCODE_RETURN;
-        case 262: return SDL_SCANCODE_RIGHT;
-        case 263: return SDL_SCANCODE_LEFT;
-        case 264: return SDL_SCANCODE_DOWN;
-        case 265: return SDL_SCANCODE_UP;
-        case 266: return SDL_SCANCODE_PAGEUP;    /* page up */
-        case 267: return SDL_SCANCODE_PAGEDOWN;  /* page down */
-        /* Modifier keys: LEFT/RIGHT SHIFT + LEFT/RIGHT CONTROL. Without the
-         * RSHIFT/CTRL entries a fly camera's speed modifiers silently never fire. */
-        case 340: return SDL_SCANCODE_LSHIFT;
-        case 344: return SDL_SCANCODE_RSHIFT;
-        case 341: return SDL_SCANCODE_LCTRL;
-        case 345: return SDL_SCANCODE_RCTRL;
-        default:  return SDL_SCANCODE_UNKNOWN;
-    }
-}
+/* isKeyDown/isKeyPressed take a raw SDL_Scancode (see lib/keys.rae). No translation — the
+ * value indexes the SDL keyboard-state array directly. */
 
 void rae_ext_sdl3_initWindow(int64_t width, int64_t height, rae_String title) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -381,14 +355,12 @@ rae_Bool rae_ext_sdl3_isMouseButtonDown(int64_t button) {
     return sdlb < 8 && g_sdl_mouse[sdlb] != 0;
 }
 rae_Bool rae_ext_sdl3_isKeyDown(int64_t key) {
-    SDL_Scancode sc = rae_sdl_scancode(key);
-    if (sc == SDL_SCANCODE_UNKNOWN || sc >= SDL_SCANCODE_COUNT) return false;
-    return g_sdl_keydown[sc] != 0;
+    if (key <= 0 || key >= SDL_SCANCODE_COUNT) return false;
+    return g_sdl_keydown[key] != 0;
 }
 rae_Bool rae_ext_sdl3_isKeyPressed(int64_t key) {
-    SDL_Scancode sc = rae_sdl_scancode(key);
-    if (sc == SDL_SCANCODE_UNKNOWN || sc >= SDL_SCANCODE_COUNT) return false;
-    return g_sdl_pressed[sc] != 0;
+    if (key <= 0 || key >= SDL_SCANCODE_COUNT) return false;
+    return g_sdl_pressed[key] != 0;
 }
 
 void rae_ext_sdl3_updatePixels(const int64_t* pixels, int64_t w, int64_t h) {

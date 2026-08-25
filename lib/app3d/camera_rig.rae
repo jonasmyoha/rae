@@ -25,23 +25,19 @@ import vec3
 open scene3d
 open math3d
 
-# SDL scancodes for the fly/orbit keys. Named because `87` at a call site
-# is unreviewable — nobody can tell a typo from an intent.
-const keyW: Int = 87
-const keyA: Int = 65
-const keyS: Int = 83
-const keyD: Int = 68
-const keyQ: Int = 81
-const keyE: Int = 69
-# Speed-modifier keys, in the engine's portable key-code ints the runtime's isKeyDown accepts
-# and resolves to SDL scancodes (letters are uppercase ASCII, e.g. keyW = 87; L/R Shift =
-# 340/344, L/R Ctrl = 341/345 — see lib/sdl3.rae). The previous SDL *keycode* values
-# (1073742049/53) aren't valid input ints, so they resolved to SCANCODE_UNKNOWN and Shift
-# silently never registered — the boost looked broken. Both Shift + both Control keys.
-const keyLShift: Int = 340
-const keyRShift: Int = 344
-const keyLCtrl: Int = 341
-const keyRCtrl: Int = 345
+# The fly/orbit keys — SDL scancodes (values from the canonical list lib/keys.rae; mirrored
+# here because Rae const initializers can't reference another module's const, and `open`ing
+# it would collide with same-named consts in importing apps). Shift = faster, Ctrl = slower.
+const keyW: Int = 26           # SDL_SCANCODE_W
+const keyA: Int = 4            # SDL_SCANCODE_A
+const keyS: Int = 22           # SDL_SCANCODE_S
+const keyD: Int = 7            # SDL_SCANCODE_D
+const keyQ: Int = 20           # SDL_SCANCODE_Q
+const keyE: Int = 8            # SDL_SCANCODE_E
+const keyLShift: Int = 225     # SDL_SCANCODE_LSHIFT
+const keyRShift: Int = 229     # SDL_SCANCODE_RSHIFT
+const keyLCtrl: Int = 224      # SDL_SCANCODE_LCTRL
+const keyRCtrl: Int = 228      # SDL_SCANCODE_RCTRL
 
 # Shift makes the WASD camera 4x FASTER, Control makes it 4x SLOWER (for fine framing).
 # Applied to translation only — boosting the turn rate as well makes the view hard to aim.
