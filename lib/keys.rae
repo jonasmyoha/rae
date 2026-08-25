@@ -1,0 +1,102 @@
+# keys — the canonical keyboard key codes for isKeyDown / isKeyPressed (lib/sdl3.rae).
+#
+# These are REAL SDL_Scancode values (from SDL3's SDL_scancode.h) — the same integers
+# SDL_GetKeyboardState() is indexed by. The runtime hands them STRAIGHT to SDL with no
+# translation. Scancodes are PHYSICAL key positions (layout-independent), which is what a
+# game wants for WASD-style controls.
+#
+# This is the CANONICAL list. Ideally an app would `import keys` and write
+# `sdl3.isKeyDown(key: keys.keyW)`, but two current Rae/C-backend limitations block that:
+#   1. a `const x: Int = keys.keyW` initializer emits an unresolved `keys.keyW` in C, and
+#   2. module consts are flat C globals, so `open keys` collides with an app's own key consts.
+# Until those are fixed, the shared lib + apps MIRROR these values in their own named consts
+# with a `# SDL_SCANCODE_X` comment (e.g. character_controller.rae, camera_rig.rae). The
+# values here are the single source of truth to mirror from — they are still real SDL
+# scancodes handed straight to SDL, with no runtime translation.
+import core
+
+# Letters (SDL_SCANCODE_A .. _Z).
+const keyA: Int = 4
+const keyB: Int = 5
+const keyC: Int = 6
+const keyD: Int = 7
+const keyE: Int = 8
+const keyF: Int = 9
+const keyG: Int = 10
+const keyH: Int = 11
+const keyI: Int = 12
+const keyJ: Int = 13
+const keyK: Int = 14
+const keyL: Int = 15
+const keyM: Int = 16
+const keyN: Int = 17
+const keyO: Int = 18
+const keyP: Int = 19
+const keyQ: Int = 20
+const keyR: Int = 21
+const keyS: Int = 22
+const keyT: Int = 23
+const keyU: Int = 24
+const keyV: Int = 25
+const keyW: Int = 26
+const keyX: Int = 27
+const keyY: Int = 28
+const keyZ: Int = 29
+
+# Number row 1..9 then 0 (SDL groups them that way: _1 = 30 .. _9 = 38, _0 = 39).
+const key1: Int = 30
+const key2: Int = 31
+const key3: Int = 32
+const key4: Int = 33
+const key5: Int = 34
+const key6: Int = 35
+const key7: Int = 36
+const key8: Int = 37
+const key9: Int = 38
+const key0: Int = 39
+
+# Editing / whitespace.
+const keyEnter: Int = 40      # SDL_SCANCODE_RETURN
+const keyEscape: Int = 41
+const keyBackspace: Int = 42
+const keyTab: Int = 43
+const keySpace: Int = 44
+const keyMinus: Int = 45
+const keyEquals: Int = 46
+const keyGrave: Int = 53
+const keyComma: Int = 54
+const keyPeriod: Int = 55
+const keySlash: Int = 56
+
+# Function keys F1..F12 (58..69).
+const keyF1: Int = 58
+const keyF2: Int = 59
+const keyF3: Int = 60
+const keyF4: Int = 61
+const keyF5: Int = 62
+const keyF6: Int = 63
+const keyF7: Int = 64
+const keyF8: Int = 65
+const keyF9: Int = 66
+const keyF10: Int = 67
+const keyF11: Int = 68
+const keyF12: Int = 69
+
+# Navigation.
+const keyHome: Int = 74
+const keyPageUp: Int = 75
+const keyDelete: Int = 76
+const keyEnd: Int = 77
+const keyPageDown: Int = 78
+const keyRight: Int = 79
+const keyLeft: Int = 80
+const keyDown: Int = 81
+const keyUp: Int = 82
+
+# Modifiers (left/right).
+const keyLCtrl: Int = 224
+const keyLShift: Int = 225
+const keyLAlt: Int = 226
+const keyRCtrl: Int = 228
+const keyRShift: Int = 229
+const keyRAlt: Int = 230

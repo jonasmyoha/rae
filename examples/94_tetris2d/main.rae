@@ -585,8 +585,8 @@ func handleInput(g: mod Game) {
   var moved: Int = 0
 
   # DAS (Delayed Auto Shift)
-  let moveLeft: Bool = sdl3.isKeyDown(key: 263) or sdl3.isKeyDown(key: 65)
-  let moveRight: Bool = sdl3.isKeyDown(key: 262) or sdl3.isKeyDown(key: 68)
+  let moveLeft: Bool = sdl3.isKeyDown(key: 80) or sdl3.isKeyDown(key: 4)
+  let moveRight: Bool = sdl3.isKeyDown(key: 79) or sdl3.isKeyDown(key: 7)
 
   if moveLeft or moveRight {
     if g.hMoveTimer is 0 {
@@ -626,7 +626,7 @@ func handleInput(g: mod Game) {
   }
 
   # Rotate (still single-press)
-  if sdl3.isKeyPressed(key: 32) or sdl3.isKeyPressed(key: 265) or sdl3.isKeyPressed(key: 87) {
+  if sdl3.isKeyPressed(key: 44) or sdl3.isKeyPressed(key: 82) or sdl3.isKeyPressed(key: 26) {
     if canMove(g: g, dx: 0, dy: 0, dr: 1) is 1 {
       cp.rotation = (cp.rotation + 1) % 4
       moved = 1
@@ -642,7 +642,7 @@ func handleInput(g: mod Game) {
 
   # Soft Drop
   var effectiveDelay: Int = g.moveDelay
-  if sdl3.isKeyDown(key: 264) or sdl3.isKeyDown(key: 83) {
+  if sdl3.isKeyDown(key: 81) or sdl3.isKeyDown(key: 22) {
     effectiveDelay = 2
   }
 
@@ -728,13 +728,13 @@ func main() ret Int {
     # Input: Global (Menu/GameOver)
     if g.state is GameState.gameOver {
       # R key
-      if sdl3.isKeyPressed(key: 82) {
+      if sdl3.isKeyPressed(key: 21) {
         initGame(g)
       }
     }
     # Input: Pause
     # P key
-    if sdl3.isKeyPressed(key: 80) {
+    if sdl3.isKeyPressed(key: 19) {
       if g.state is GameState.playing {
         g.state = GameState.paused
       } else {
