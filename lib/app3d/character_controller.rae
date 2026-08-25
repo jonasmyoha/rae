@@ -6,18 +6,8 @@ import core
 import math
 import sdl3
 import vec3
+import keys
 
-# SDL scancodes (values from lib/keys.rae — the canonical list; mirrored here because Rae
-# const initializers can't reference another module's const). Passed straight to SDL.
-const characterKeyW: Int = 26          # SDL_SCANCODE_W
-const characterKeyA: Int = 4           # SDL_SCANCODE_A
-const characterKeyS: Int = 22          # SDL_SCANCODE_S
-const characterKeyD: Int = 7           # SDL_SCANCODE_D
-const characterKeyRight: Int = 79      # SDL_SCANCODE_RIGHT
-const characterKeyLeft: Int = 80       # SDL_SCANCODE_LEFT
-const characterKeyDown: Int = 81       # SDL_SCANCODE_DOWN
-const characterKeyUp: Int = 82         # SDL_SCANCODE_UP
-const characterKeyLeftShift: Int = 225 # SDL_SCANCODE_LSHIFT
 const characterPi: Float = 3.141592653589793
 
 type ThirdPersonController {
@@ -110,19 +100,19 @@ func updateThirdPersonController(controller: mod ThirdPersonController,
   var inputForward: Float = 0.0
   var walking: Bool = false
   if allowInput {
-    if sdl3.isKeyDown(key: characterKeyD) or sdl3.isKeyDown(key: characterKeyRight) {
+    if sdl3.isKeyDown(key: keys.keyD) or sdl3.isKeyDown(key: keys.keyRight) {
       inputRight = inputRight + 1.0
     }
-    if sdl3.isKeyDown(key: characterKeyA) or sdl3.isKeyDown(key: characterKeyLeft) {
+    if sdl3.isKeyDown(key: keys.keyA) or sdl3.isKeyDown(key: keys.keyLeft) {
       inputRight = inputRight - 1.0
     }
-    if sdl3.isKeyDown(key: characterKeyW) or sdl3.isKeyDown(key: characterKeyUp) {
+    if sdl3.isKeyDown(key: keys.keyW) or sdl3.isKeyDown(key: keys.keyUp) {
       inputForward = inputForward + 1.0
     }
-    if sdl3.isKeyDown(key: characterKeyS) or sdl3.isKeyDown(key: characterKeyDown) {
+    if sdl3.isKeyDown(key: keys.keyS) or sdl3.isKeyDown(key: keys.keyDown) {
       inputForward = inputForward - 1.0
     }
-    walking = sdl3.isKeyDown(key: characterKeyLeftShift)
+    walking = sdl3.isKeyDown(key: keys.keyLShift)
   }
   ret stepThirdPersonController(
     controller: controller, inputRight: inputRight, inputForward: inputForward,
