@@ -1,0 +1,19 @@
+# Module-qualified access to a module-level `const` (e.g. `keys.keyW`), the
+# const counterpart of the `module.func()` namespacing. Regression: the C
+# backend used to emit the member verbatim (`keys.keyW`, undeclared in C).
+# `keys` also names a stdlib function (StringMap/IntMap `.keys()`); a function
+# of that name must NOT shadow the module here.
+import core
+import keys
+
+# const initializer context — folds to the literal scancode.
+const myUp: Int = keys.keyUp
+
+func main() {
+  # direct call-argument context
+  log(value: keys.keyW)
+  # arithmetic / expression context
+  let right: Int = keys.keyRight + 1
+  log(value: right)
+  log(value: myUp)
+}

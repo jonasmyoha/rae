@@ -22,22 +22,9 @@ import math
 import gpu2d
 import sdl3
 import vec3
+import keys
 open scene3d
 open math3d
-
-# The fly/orbit keys — SDL scancodes (values from the canonical list lib/keys.rae; mirrored
-# here because Rae const initializers can't reference another module's const, and `open`ing
-# it would collide with same-named consts in importing apps). Shift = faster, Ctrl = slower.
-const keyW: Int = 26           # SDL_SCANCODE_W
-const keyA: Int = 4            # SDL_SCANCODE_A
-const keyS: Int = 22           # SDL_SCANCODE_S
-const keyD: Int = 7            # SDL_SCANCODE_D
-const keyQ: Int = 20           # SDL_SCANCODE_Q
-const keyE: Int = 8            # SDL_SCANCODE_E
-const keyLShift: Int = 225     # SDL_SCANCODE_LSHIFT
-const keyRShift: Int = 229     # SDL_SCANCODE_RSHIFT
-const keyLCtrl: Int = 224      # SDL_SCANCODE_LCTRL
-const keyRCtrl: Int = 228      # SDL_SCANCODE_RCTRL
 
 # Shift makes the WASD camera 4x FASTER, Control makes it 4x SLOWER (for fine framing).
 # Applied to translation only — boosting the turn rate as well makes the view hard to aim.
@@ -45,10 +32,10 @@ const cameraRigBoost: Float = 4.0
 const cameraRigSlow: Float = 0.25
 
 func cameraRigSpeedScale() ret Float {
-  if sdl3.isKeyDown(key: keyLShift) or sdl3.isKeyDown(key: keyRShift) {
+  if sdl3.isKeyDown(key: keys.keyLShift) or sdl3.isKeyDown(key: keys.keyRShift) {
     ret cameraRigBoost
   }
-  if sdl3.isKeyDown(key: keyLCtrl) or sdl3.isKeyDown(key: keyRCtrl) {
+  if sdl3.isKeyDown(key: keys.keyLCtrl) or sdl3.isKeyDown(key: keys.keyRCtrl) {
     ret cameraRigSlow
   }
   ret 1.0
@@ -442,23 +429,23 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
     mouseDist = 0.0 - gpu2d.wheelMove() * rig.wheelSpeed
     let boost: Float = cameraRigSpeedScale()
     if rig.mode is CameraRigMode.orbit {
-      if sdl3.isKeyDown(key: keyW) { keyDist = keyDist - dt * rig.moveSpeed * boost }
-      if sdl3.isKeyDown(key: keyS) { keyDist = keyDist + dt * rig.moveSpeed * boost }
-      if sdl3.isKeyDown(key: keyA) { keyYaw = keyYaw - dt * rig.keyTurnSpeed }
-      if sdl3.isKeyDown(key: keyD) { keyYaw = keyYaw + dt * rig.keyTurnSpeed }
-      if sdl3.isKeyDown(key: keyQ) { keyOrbitPitch = keyOrbitPitch - dt * rig.keyTurnSpeed }
-      if sdl3.isKeyDown(key: keyE) { keyOrbitPitch = keyOrbitPitch + dt * rig.keyTurnSpeed }
+      if sdl3.isKeyDown(key: keys.keyW) { keyDist = keyDist - dt * rig.moveSpeed * boost }
+      if sdl3.isKeyDown(key: keys.keyS) { keyDist = keyDist + dt * rig.moveSpeed * boost }
+      if sdl3.isKeyDown(key: keys.keyA) { keyYaw = keyYaw - dt * rig.keyTurnSpeed }
+      if sdl3.isKeyDown(key: keys.keyD) { keyYaw = keyYaw + dt * rig.keyTurnSpeed }
+      if sdl3.isKeyDown(key: keys.keyQ) { keyOrbitPitch = keyOrbitPitch - dt * rig.keyTurnSpeed }
+      if sdl3.isKeyDown(key: keys.keyE) { keyOrbitPitch = keyOrbitPitch + dt * rig.keyTurnSpeed }
     } else if rig.mode is CameraRigMode.free {
       let step: Float = dt * rig.moveSpeed * boost
       let forward: Vec3 = cameraRigForward(rig: rig)
       let right: Vec3 = cameraRigRight(rig: rig)
       let up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
-      if sdl3.isKeyDown(key: keyW) { keyMove = vec3.vadd(a: keyMove, b: vec3.vscale(a: forward, s: step)) }
-      if sdl3.isKeyDown(key: keyS) { keyMove = vec3.vsub(a: keyMove, b: vec3.vscale(a: forward, s: step)) }
-      if sdl3.isKeyDown(key: keyA) { keyMove = vec3.vsub(a: keyMove, b: vec3.vscale(a: right, s: step)) }
-      if sdl3.isKeyDown(key: keyD) { keyMove = vec3.vadd(a: keyMove, b: vec3.vscale(a: right, s: step)) }
-      if sdl3.isKeyDown(key: keyQ) { keyMove = vec3.vsub(a: keyMove, b: vec3.vscale(a: up, s: step)) }
-      if sdl3.isKeyDown(key: keyE) { keyMove = vec3.vadd(a: keyMove, b: vec3.vscale(a: up, s: step)) }
+      if sdl3.isKeyDown(key: keys.keyW) { keyMove = vec3.vadd(a: keyMove, b: vec3.vscale(a: forward, s: step)) }
+      if sdl3.isKeyDown(key: keys.keyS) { keyMove = vec3.vsub(a: keyMove, b: vec3.vscale(a: forward, s: step)) }
+      if sdl3.isKeyDown(key: keys.keyA) { keyMove = vec3.vsub(a: keyMove, b: vec3.vscale(a: right, s: step)) }
+      if sdl3.isKeyDown(key: keys.keyD) { keyMove = vec3.vadd(a: keyMove, b: vec3.vscale(a: right, s: step)) }
+      if sdl3.isKeyDown(key: keys.keyQ) { keyMove = vec3.vsub(a: keyMove, b: vec3.vscale(a: up, s: step)) }
+      if sdl3.isKeyDown(key: keys.keyE) { keyMove = vec3.vadd(a: keyMove, b: vec3.vscale(a: up, s: step)) }
     }
   }
 
