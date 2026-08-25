@@ -51,6 +51,15 @@ const RAE_GRASS_FRINGE_REACH: f32 = 0.14;
 const RAE_GRASS_FRINGE_SCALE: f32 = 3.8;
 const RAE_GRASS_FRINGE_STRENGTH: f32 = 0.82;
 
+// SAND/GRASS BOUNDARY BLUR (#83). The classify crossover between sand and grass is
+// only ~0.02-0.04 elevation wide — a near-line, so the beach met the meadow at a hard
+// edge even with the #19 tuft fringe on top. This is the half-width (in elevation) of a
+// WIDE, road-like smooth crossfade that raeTerrainDetailColor applies to the sand<->grass
+// COLOUR split, so the two dissolve into each other over a broad band like the soft-edged
+// roads. It only redistributes the COMBINED sand+grass weight, so the coastline's edge
+// against water/mud/rock is untouched. Bigger = blurrier.
+const RAE_SANDGRASS_BLUR: f32 = 0.10;
+
 // GROUND PALETTE (the calibrated RAE_TERRAIN_* colours + their variation)
 // lives in terrain_palette.wgsl now (#13), composed just before this file so
 // these constants are in scope. It is per-app overridable; see that file.
@@ -252,8 +261,17 @@ fn raeTerrainDetailColor(p: vec2<f32>, bio: vec3<f32>, t: f32) -> vec3<f32> {
   let aboveWater = bio.x - RAE_BIOME_WATER_LEVEL;
   let wet = 1.0 - smoothstep(0.0, RAE_WET_SAND_RISE, aboveWater);
   let sandWet = mix(1.0, RAE_WET_SAND_DARKEN, wet);
-  let groundBase = raeTerrainVary(RAE_TERRAIN_GRASS, RAE_TERRAIN_VAR_GRASS, v) * b.wGrass
-       + raeTerrainVary(RAE_TERRAIN_SAND,  RAE_TERRAIN_VAR_SAND,  v) * sandWet * b.wSand
+  // Blur the sand<->grass boundary (#83) like the soft-edged roads: keep their COMBINED
+  // weight (so the edge against water/mud/rock is preserved) but re-split it across a
+  // WIDE elevation band instead of the classify's ~0.02 near-line, so the beach dissolves
+  // into the meadow over a broad soft gradient.
+  let sandHiBlur = RAE_BIOME_WATER_LEVEL + RAE_BIOME_BEACH_BAND;
+  let sgSum = b.wSand + b.wGrass;
+  let sgMix = smoothstep(sandHiBlur - RAE_SANDGRASS_BLUR, sandHiBlur + RAE_SANDGRASS_BLUR, bio.x);
+  let wGrassC = sgSum * sgMix;
+  let wSandC = sgSum * (1.0 - sgMix);
+  let groundBase = raeTerrainVary(RAE_TERRAIN_GRASS, RAE_TERRAIN_VAR_GRASS, v) * wGrassC
+       + raeTerrainVary(RAE_TERRAIN_SAND,  RAE_TERRAIN_VAR_SAND,  v) * sandWet * wSandC
        + raeTerrainVary(RAE_TERRAIN_MUD,   RAE_TERRAIN_VAR_MUD,   v) * b.wMud
        + raeTerrainVary(RAE_TERRAIN_ROCK,  RAE_TERRAIN_VAR_ROCK,  v) * b.wRock
        + raeWaterColor(p, bio.x, b.wWater, t) * b.wWater;
