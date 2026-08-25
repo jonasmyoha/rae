@@ -14,7 +14,7 @@ type Track {
 # `own` takes ownership — so a signature tells you what a call does to your data.
 func totalSeconds(tracks: view List(Track)) ret Int {
   var total: Int = 0
-  loop track: view Track in tracks {
+  loop let track: view Track in tracks {
     total = total + track.seconds
   }
   ret total
@@ -60,7 +60,7 @@ func main() {
   # Arguments are named at the call site, and "{}" is how a value becomes text.
   log("{tracks.length} tracks, {formatDuration(seconds: totalSeconds(tracks: tracks))}")
 
-  loop track: view Track in tracks {
+  loop let track: view Track in tracks {
     log("  {track.title} — {formatDuration(seconds: track.seconds)}")
   }
 

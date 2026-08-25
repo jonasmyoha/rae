@@ -17,7 +17,7 @@ pre{overflow:auto;max-height:680px;background:#17201b;color:#e9f1e9;padding:18px
 <div class="stamp">65,536 elements · 8,388,608 accesses · median of 7 runs after 2 warmups</div>
 <div class="recommendation"><strong>Final recommendations</strong><ol>
 <li>Keep all public List indexed access optional and bounds-checked; these measurements do not justify an unsafe accessor.</li>
-<li>Use <code>loop item in list</code> for sequential hot paths and <code>viewAt + if let</code> for random access to large structs.</li>
+<li>Use <code>loop let item: view Item in items</code> for sequential hot paths and <code>viewAt + if let</code> for random access to large structs.</li>
 <li>Optimize Rae's general owned <code>opt T</code> representation separately; do not make List indexing unsafe to avoid RaeAny.</li>
 </ol></div>
 <h2>How to read this</h2><p>Each card performs the same useful work and checksum in every listed language. The ratio is relative to the fastest result in that card, so <strong>1.00× means tied at this measurement precision</strong>, not missing data. JavaScript and Python are included for scale and API comparison; their JIT/interpreter and heap-object data models are not direct C-backend code-generation competitors.</p>
@@ -46,7 +46,7 @@ if (particle !== undefined)
   checksum += particle.px + particle.vz + particle.mass;</pre></section><section><h3>Python</h3><pre>particle = PARTICLES[index] if 0 &lt;= index &lt; len(PARTICLES) else None
 if particle is not None:
     checksum += particle[0] + particle[5] + particle[6]</pre></section></div>
-<h2>Collection-loop comparison</h2><p>These forms visit every element directly. Rae's collection loop is the preferred sequential hot path because it does not construct an optional or repeat a List bounds check.</p><div class="codegrid"><section><h3>Rae</h3><pre>loop particle: view Particle in particles {
+<h2>Collection-loop comparison</h2><p>These forms visit every element directly. Rae's collection loop is the preferred sequential hot path because it does not construct an optional or repeat a List bounds check.</p><div class="codegrid"><section><h3>Rae</h3><pre>loop let particle: view Particle in particles {
     checksum = checksum + particle.px + particle.vz + particle.mass
 }</pre></section><section><h3>C</h3><pre>for (int64_t index = 0; index &lt; length; index++) {
     const Particle *particle = &amp;particles[index];
@@ -176,7 +176,7 @@ func intCollection(values: view List(Int), passes: view Int) {
   var checksum: Int = 0
   var pass: Int = 0
   loop pass &lt; passes {
-    loop value: Int in values {
+    loop let value: Int in values {
       checksum = checksum + value
     }
     pass = pass + 1
@@ -189,7 +189,7 @@ func intCollectionView(values: view List(Int), passes: view Int) {
   var checksum: Int = 0
   var pass: Int = 0
   loop pass &lt; passes {
-    loop value: view Int in values {
+    loop let value: view Int in values {
       checksum = checksum + value
     }
     pass = pass + 1
@@ -313,7 +313,7 @@ func structCollectionValue(particles: view List(Particle), passes: view Int) {
   var checksum: Int = 0
   var pass: Int = 0
   loop pass &lt; passes {
-    loop particle: Particle in particles {
+    loop let particle: Particle in particles {
       checksum = checksum + particle.px + particle.vz + particle.mass
     }
     pass = pass + 1
@@ -326,7 +326,7 @@ func structCollectionView(particles: view List(Particle), passes: view Int) {
   var checksum: Int = 0
   var pass: Int = 0
   loop pass &lt; passes {
-    loop particle: view Particle in particles {
+    loop let particle: view Particle in particles {
       checksum = checksum + particle.px + particle.vz + particle.mass
     }
     pass = pass + 1
