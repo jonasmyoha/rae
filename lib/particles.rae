@@ -1,0 +1,134 @@
+# particles.rae — a small CPU particle system (engine subsystem, #84).
+#
+# A general, reusable particle pool: emit particles with a position + velocity + life,
+# advance them under gravity each frame, and draw them as instanced CUBES that SHRINK to
+# nothing over their life (the deferred G-buffer has no alpha blend, so fade == shrink).
+# It reuses the instanced draw path (gbuffer_instanced) — one cube mesh, one batch
+# refilled per frame — the same shape the bodies / tombstones / castle draws use. Purely
+# visual: update it per-frame (not in a fixed sim step) so it never touches lockstep state.
+#
+# First user is the game's water splashes (#84), but nothing here is game-specific:
+# `particleEmit` / `particleBurst` take a colour + spread, so any effect (dust, sparks,
+# embers) is just a different emit call.
+import core
+import vec3
+import math
+import mesh3d
+open mesh3d
+import gpu3d
+open gpu3d
+import gbuffer_instanced
+open gbuffer_instanced
+import scene3d
+open scene3d
+
+type Particle {
+  x: Float
+  y: Float
+  z: Float
+  vx: Float
+  vy: Float
+  vz: Float
+  life: Float       # seconds remaining
+  maxLife: Float
+  size: Float       # world-unit cube edge at birth
+  r: Float
+  g: Float
+  b: Float
+}
+
+type ParticleSystem {
+  list: List(Particle)
+  mesh: MeshHandle
+  batch: InstanceBatch
+  gravity: Float    # downward accel (world units / s^2)
+  cap: Int
+}
+
+func createParticleSystem(cap: copy Int, gravity: copy Float) pub ret ParticleSystem {
+  let box: MeshData = makeBox(size: 1.0)
+  let mesh: MeshHandle = uploadMesh(verts: box.verts, vertCount: box.vertCount, indices: box.indices)
+  let batch: InstanceBatch = createInstanceBatch(mesh: mesh, capacity: cap)
+  ret ParticleSystem { list: createList(Particle, cap: cap), mesh: mesh, batch: own batch, gravity: gravity, cap: cap }
+}
+
+# Emit one particle. Drops the oldest if the pool is full, so emission never grows
+# unbounded and recent particles always win.
+func particleEmit(sys: mod ParticleSystem, x: copy Float, y: copy Float, z: copy Float,
+                  vx: copy Float, vy: copy Float, vz: copy Float,
+                  life: copy Float, size: copy Float,
+                  r: copy Float, g: copy Float, b: copy Float) pub {
+  if sys.list.length >= sys.cap {
+    sys.list.removeAt(index: 0)
+  }
+  sys.list.add(value: { x: x, y: y, z: z, vx: vx, vy: vy, vz: vz,
+    life: life, maxLife: life, size: size, r: r, g: g, b: b })
+}
+
+# Emit a BURST of `count` particles from (x,y,z): each thrown up + outward with a
+# spread, so it reads as a splash / puff. `hVel`/`upVel` set the outward/upward speed;
+# the fan angle spreads deterministically by index (no RNG, so callers stay
+# lockstep-safe if they emit from a fixed-step path).
+func particleBurst(sys: mod ParticleSystem, x: copy Float, y: copy Float, z: copy Float,
+                   count: copy Int, hVel: copy Float, upVel: copy Float,
+                   life: copy Float, size: copy Float,
+                   r: copy Float, g: copy Float, b: copy Float, phase: copy Float) pub {
+  var i: Int = 0
+  loop i < count {
+    let a: Float = phase + i.toFloat() * 2.399963
+    let spd: Float = hVel * (0.55 + 0.45 * math.sin(x: a * 1.7))
+    let up: Float = upVel * (0.7 + 0.5 * math.abs(n: math.cos(x: a * 0.9)))
+    particleEmit(sys: sys, x: x, y: y, z: z,
+      vx: math.cos(x: a) * spd, vy: math.sin(x: a) * spd, vz: up,
+      life: life, size: size, r: r, g: g, b: b)
+    i = i + 1
+  }
+}
+
+# Advance every particle: integrate velocity + gravity, age, and compact out the dead.
+# Call once per frame with the frame dt.
+func particleUpdate(sys: mod ParticleSystem, dt: copy Float) pub {
+  var live: List(Particle) = createList(Particle, cap: sys.list.length)
+  var i: Int = 0
+  loop i < sys.list.length {
+    if let p: Particle = sys.list.at(index: i) {
+      var pp: Particle = p
+      pp.life = pp.life - dt
+      if pp.life > 0.0 {
+        pp.vz = pp.vz - sys.gravity * dt
+        pp.x = pp.x + pp.vx * dt
+        pp.y = pp.y + pp.vy * dt
+        pp.z = pp.z + pp.vz * dt
+        live.add(value: pp)
+      }
+    }
+    i = i + 1
+  }
+  sys.list = own live
+}
+
+# Draw every particle as a small cube, scaled by its remaining-life fraction so it
+# shrinks away (the deferred pass has no alpha). Call in the G-buffer pass.
+func particleDraw(sys: mod ParticleSystem, toon: copy Bool) pub {
+  resetInstanceBatch(batch: sys.batch)
+  setInstanceBatchMesh(batch: sys.batch, mesh: sys.mesh)
+  var i: Int = 0
+  loop i < sys.list.length {
+    if let p: Particle = sys.list.at(index: i) {
+      var frac: Float = p.life / p.maxLife
+      if frac < 0.0 { frac = 0.0 }
+      if frac > 1.0 { frac = 1.0 }
+      let s: Float = p.size * frac
+      let mat: Material3d = { baseColor: vec3.create(x: p.r, y: p.g, z: p.b),
+        metallic: 0.0, roughness: 0.6, emission: vec3.create(x: 0.0, y: 0.0, z: 0.0), toon: toon }
+      let t: Transform3d = {
+        position: vec3.create(x: p.x, y: p.y, z: p.z),
+        rotation: vec3.create(x: 0.0, y: 0.0, z: 0.0),
+        scale: vec3.create(x: s, y: s, z: s)
+      }
+      addInstanceTransform(batch: sys.batch, transform: t, prevTransform: t, material: mat)
+    }
+    i = i + 1
+  }
+  drawInstances(batch: sys.batch)
+}
