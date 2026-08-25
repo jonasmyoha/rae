@@ -2039,6 +2039,28 @@ static bool sema_is_module_name(AstModule* module, Str name) {
     return false;
 }
 
+// Find a module-level `const`/`let` decl named `name` in module `modname`
+// (checking both this module's own decls and its imports). Backs
+// module-qualified value access `modname.name` (e.g. `keys.keyW`) — the const
+// counterpart of resolve_qualified_function. Returns NULL if there is no such
+// global, so the caller falls back to ordinary struct-field handling.
+static AstDecl* sema_find_module_global(AstModule* module, Str modname, Str name) {
+    for (AstDecl* d = module->decls; d; d = d->next) {
+        if (d->kind == AST_DECL_GLOBAL_LET && d->module_name
+            && str_eq_cstr(modname, d->module_name)
+            && str_eq(d->as.let_decl.name, name)) return d;
+    }
+    for (const AstImport* imp = module->imports; imp; imp = imp->next) {
+        if (!imp->module) continue;
+        for (AstDecl* d = imp->module->decls; d; d = d->next) {
+            if (d->kind == AST_DECL_GLOBAL_LET && d->module_name
+                && str_eq_cstr(modname, d->module_name)
+                && str_eq(d->as.let_decl.name, name)) return d;
+        }
+    }
+    return NULL;
+}
+
 static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr) {
     if (!expr) return;
     switch (expr->kind) {
@@ -2259,6 +2281,40 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             break;
         }
         case AST_EXPR_MEMBER:
+            // Module-qualified value access: `keys.keyW`, where `keys` is an
+            // imported module and `keyW` a module-level const. Mirrors the
+            // module.func() path above — rewrite to a plain IDENT bound to the
+            // const decl, so codegen emits the flat global and the type is
+            // known. A local binding that shadows the module name wins (it's a
+            // value), so only take this path when no symbol is in scope.
+            if (expr->as.member.object->kind == AST_EXPR_IDENT) {
+                Str lhs = expr->as.member.object->as.ident;
+                // A genuine VALUE binding named `lhs` (a local/param/global
+                // variable or const) shadows the module and wins. A FUNCTION
+                // of the same name (e.g. core's `keys()` on a map) does NOT —
+                // `keys.keyW` cannot mean a call — so it must not block the
+                // module-qualified reading. Symbol carries its origin decl.
+                Symbol* lsym = symbol_table_lookup(symbols, lhs);
+                bool value_shadow = lsym && !(lsym->decl && lsym->decl->kind == AST_DECL_FUNC);
+                Str modname = (Str){0};
+                if (!value_shadow && sema_is_module_name(module, lhs)) {
+                    modname = lhs;
+                } else if (!value_shadow) {
+                    Str aliased = sema_resolve_alias(s_current_decl_origin, lhs);
+                    if (aliased.data && sema_is_module_name(module, aliased)) modname = aliased;
+                }
+                if (modname.data) {
+                    AstDecl* gd = sema_find_module_global(module, modname, expr->as.member.member);
+                    if (gd) {
+                        Str cname = expr->as.member.member;  // read before the union write
+                        expr->kind = AST_EXPR_IDENT;
+                        expr->as.ident = cname;
+                        expr->decl_link = gd;
+                        expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, gd->as.let_decl.type);
+                        break;
+                    }
+                }
+            }
             sema_analyze_expr(ctx, module, symbols, expr->as.member.object);
             if (expr->as.member.object->resolved_type) {
                 TypeInfo* t = expr->as.member.object->resolved_type; if (t->kind == TYPE_REF) t = t->as.ref.base;

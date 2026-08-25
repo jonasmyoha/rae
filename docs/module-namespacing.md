@@ -25,6 +25,17 @@ becomes the first argument. Namespace qualification and UFCS are **orthogonal**:
   special-cased (not even `core`).
 - UFCS does **not** depend on functions being flattened into global scope.
 
+A module-level **`const`/`let`** is reachable the same qualified way:
+
+```rae
+keys.keyW            # the module's const, resolved to its value
+const restart: Int = keys.keyR   # also valid in a const initializer (folds to the literal)
+```
+
+`namespace.value` resolves to the named global; a same-named *function* (e.g.
+core's `keys()` on a map) does not shadow it, since `keys.keyW` cannot be a call.
+A genuine value binding of the same name in scope does win.
+
 ## Module directives: `import` and `open`
 
 ### `import module`
