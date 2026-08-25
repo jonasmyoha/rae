@@ -10,16 +10,15 @@
 # Example-114 files are siblings that merge into one module, so this resolves the
 # App/CharacterState types cross-file without importing them.
 import core
+import keys
 
 const PLAYER_LOCAL: Int = 0
 
-# Character-switch keys. Page Up/Down (GLFW codes, matching the arrow scheme in
-# character_controller.rae) and the number keys 1 / 2 as an easy alternative.
-# 1 / Page Up go to the previous character, 2 / Page Down to the next.
-const keyPageUp: Int = 75
-const keyPageDown: Int = 78
-const keyPrevChar: Int = 30   # ASCII '1'
-const keyNextChar: Int = 31   # ASCII '2'
+# Character-switch key bindings, named from the canonical SDL scancodes in
+# lib/keys.rae. 1 / Page Up go to the previous character, 2 / Page Down to the
+# next (Page Up/Down are used via keys.keyPageUp/keyPageDown at the call site).
+const keyPrevChar: Int = keys.key1
+const keyNextChar: Int = keys.key2
 
 # The local player's control mapping. `count` is the total number of controllable
 # characters (hero + crowd); `controlledIndex` is which one the player drives.

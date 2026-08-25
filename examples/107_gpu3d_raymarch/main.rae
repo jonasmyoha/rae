@@ -12,6 +12,7 @@
 import core
 import gpu
 import sdl3
+import keys
 import image
 import filesystem
 import math
@@ -221,14 +222,14 @@ func main() {
     var prevMouseY: Int = sdl3.getMouseY()
 
     loop not sdl3.shouldClose() {
-        if sdl3.isKeyPressed(key: 59) {
+        if sdl3.isKeyPressed(key: keys.keyF2) {
             let saved: Bool = image.savePng(path: filesystem.renderPath(stem: "rae_3d_minimal"), pixels: fb.data, width: width, height: height)
         }
 
         var newQuality: Int = quality
-        if sdl3.isKeyPressed(key: 30) { newQuality = 0 }
-        if sdl3.isKeyPressed(key: 31) { newQuality = 1 }
-        if sdl3.isKeyPressed(key: 32) { newQuality = 2 }
+        if sdl3.isKeyPressed(key: keys.key1) { newQuality = 0 }
+        if sdl3.isKeyPressed(key: keys.key2) { newQuality = 1 }
+        if sdl3.isKeyPressed(key: keys.key3) { newQuality = 2 }
         if newQuality > quality or newQuality < quality {
             quality = newQuality
             if quality is 0 { width = 960   height = 540 }
@@ -244,17 +245,17 @@ func main() {
         }
 
         var moved: Bool = false
-        if sdl3.isKeyDown(key: 26) { camPos = vec3.vadd(a: camPos, b: vec3.vscale(a: fwd, s: moveStep))  moved = true }
-        if sdl3.isKeyDown(key: 22) { camPos = vec3.vsub(a: camPos, b: vec3.vscale(a: fwd, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: keys.keyW) { camPos = vec3.vadd(a: camPos, b: vec3.vscale(a: fwd, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: keys.keyS) { camPos = vec3.vsub(a: camPos, b: vec3.vscale(a: fwd, s: moveStep))  moved = true }
         let right: Vec3 = vec3.vnorm(a: vec3.vcross(a: fwd, b: worldUp))
-        if sdl3.isKeyDown(key: 7) { camPos = vec3.vadd(a: camPos, b: vec3.vscale(a: right, s: moveStep))  moved = true }
-        if sdl3.isKeyDown(key: 4) { camPos = vec3.vsub(a: camPos, b: vec3.vscale(a: right, s: moveStep))  moved = true }
-        if sdl3.isKeyDown(key: 8) { camPos = vec3.vadd(a: camPos, b: vec3.vscale(a: worldUp, s: moveStep))  moved = true }
-        if sdl3.isKeyDown(key: 20) { camPos = vec3.vsub(a: camPos, b: vec3.vscale(a: worldUp, s: moveStep))  moved = true }
-        if sdl3.isKeyDown(key: 79) { yaw = yaw - rotStep  moved = true }
-        if sdl3.isKeyDown(key: 80) { yaw = yaw + rotStep  moved = true }
-        if sdl3.isKeyDown(key: 82) { pitch = pitch + rotStep  moved = true }
-        if sdl3.isKeyDown(key: 81) { pitch = pitch - rotStep  moved = true }
+        if sdl3.isKeyDown(key: keys.keyD) { camPos = vec3.vadd(a: camPos, b: vec3.vscale(a: right, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: keys.keyA) { camPos = vec3.vsub(a: camPos, b: vec3.vscale(a: right, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: keys.keyE) { camPos = vec3.vadd(a: camPos, b: vec3.vscale(a: worldUp, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: keys.keyQ) { camPos = vec3.vsub(a: camPos, b: vec3.vscale(a: worldUp, s: moveStep))  moved = true }
+        if sdl3.isKeyDown(key: keys.keyRight) { yaw = yaw - rotStep  moved = true }
+        if sdl3.isKeyDown(key: keys.keyLeft) { yaw = yaw + rotStep  moved = true }
+        if sdl3.isKeyDown(key: keys.keyUp) { pitch = pitch + rotStep  moved = true }
+        if sdl3.isKeyDown(key: keys.keyDown) { pitch = pitch - rotStep  moved = true }
 
         let mx: Int = sdl3.getMouseX()
         let my: Int = sdl3.getMouseY()
