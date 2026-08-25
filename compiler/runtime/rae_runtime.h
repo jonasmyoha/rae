@@ -553,6 +553,7 @@ int64_t rae_ext_audio_load_wav(rae_String path);
 void    rae_ext_audio_play(int64_t clip, float volume);
 int64_t rae_ext_audio_loop(int64_t clip, float volume);
 void    rae_ext_audio_tick(void);
+void    rae_ext_audio_set_muted(int64_t muted);
 
 rae_String rae_ext_rae_str_i64(int64_t v);
 rae_String rae_ext_rae_str_i64_ptr(const int64_t* v);
