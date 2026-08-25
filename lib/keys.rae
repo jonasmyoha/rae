@@ -5,14 +5,10 @@
 # translation. Scancodes are PHYSICAL key positions (layout-independent), which is what a
 # game wants for WASD-style controls.
 #
-# This is the CANONICAL list. Ideally an app would `import keys` and write
-# `sdl3.isKeyDown(key: keys.keyW)`, but two current Rae/C-backend limitations block that:
-#   1. a `const x: Int = keys.keyW` initializer emits an unresolved `keys.keyW` in C, and
-#   2. module consts are flat C globals, so `open keys` collides with an app's own key consts.
-# Until those are fixed, the shared lib + apps MIRROR these values in their own named consts
-# with a `# SDL_SCANCODE_X` comment (e.g. character_controller.rae, camera_rig.rae). The
-# values here are the single source of truth to mirror from — they are still real SDL
-# scancodes handed straight to SDL, with no runtime translation.
+# This is the CANONICAL list and the single source of truth: `import keys` and write
+# `sdl3.isKeyDown(key: keys.keyW)` directly, or bind a named game key to one
+# (`const keyRestart: Int = keys.keyR`) — module-qualified const access resolves to the
+# scancode either way (compiler support for `module.const`). No mirrored magic numbers.
 import core
 
 # Letters (SDL_SCANCODE_A .. _Z).

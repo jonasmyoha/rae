@@ -84,6 +84,7 @@ open ui/scroll_panel
 open ui/event_loop
 open ui/debug_overlay
 import sdl3
+import keys
 
 # A frame's movement intent. moveX/moveY are analog in [-1, 1] (right+/forward+);
 # walking = the shift-to-walk modifier the controller expects (default is run);
@@ -104,11 +105,11 @@ func inputUpdate(moveStick: view VirtualJoystick, joyActive: view Bool,
   var moveY: Float = 0.0
   var walking: Bool = false
   if allowKeys {
-    if sdl3.isKeyDown(key: characterKeyD) or sdl3.isKeyDown(key: characterKeyRight) { moveX = moveX + 1.0 }
-    if sdl3.isKeyDown(key: characterKeyA) or sdl3.isKeyDown(key: characterKeyLeft) { moveX = moveX - 1.0 }
-    if sdl3.isKeyDown(key: characterKeyW) or sdl3.isKeyDown(key: characterKeyUp) { moveY = moveY + 1.0 }
-    if sdl3.isKeyDown(key: characterKeyS) or sdl3.isKeyDown(key: characterKeyDown) { moveY = moveY - 1.0 }
-    walking = sdl3.isKeyDown(key: characterKeyLeftShift)
+    if sdl3.isKeyDown(key: keys.keyD) or sdl3.isKeyDown(key: keys.keyRight) { moveX = moveX + 1.0 }
+    if sdl3.isKeyDown(key: keys.keyA) or sdl3.isKeyDown(key: keys.keyLeft) { moveX = moveX - 1.0 }
+    if sdl3.isKeyDown(key: keys.keyW) or sdl3.isKeyDown(key: keys.keyUp) { moveY = moveY + 1.0 }
+    if sdl3.isKeyDown(key: keys.keyS) or sdl3.isKeyDown(key: keys.keyDown) { moveY = moveY - 1.0 }
+    walking = sdl3.isKeyDown(key: keys.keyLShift)
   }
   ret InputIntent { moveX: moveX, moveY: moveY, walking: walking, actions: 0 }
 }
