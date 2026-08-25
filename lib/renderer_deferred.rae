@@ -235,6 +235,19 @@ func setTaaEnabled(on: copy Bool) pub {
   if on { gbSetTaaEnabled(on: 1) } else { gbSetTaaEnabled(on: 0) }
 }
 
+# Distance fog (#57, per-app). Fades geometry to `color` (LINEAR HDR — the same
+# space the lit radiance and sky background live in) over [start,end] world
+# units from the camera, and paints that colour as the background so a far
+# ground/sea plane dissolves into the horizon with no far-clip seam. Off by
+# default; every deferred example that never calls this keeps its sky.
+func setFog(color: copy Vec3, start: copy Float, end: copy Float) pub {
+  gbSetFog(on: 1, r: color.x, g: color.y, b: color.z, start: start, end: end)
+}
+
+func setFogDisabled() pub {
+  gbSetFog(on: 0, r: 0.0, g: 0.0, b: 0.0, start: 0.0, end: 0.0)
+}
+
 func compileDeferred(r: mod DeferredRenderer) pub ret Int {
   ret compile(g: r.graph)
 }
