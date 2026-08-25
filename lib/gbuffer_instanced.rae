@@ -211,6 +211,31 @@ func addInstanceTransform(batch: mod InstanceBatch, transform: view Transform3d,
   addInstance(batch: batch, model: model, prevModel: prevModel, material: material)
 }
 
+# BRICK-tagged instance (#62): identical to addInstance, but flags the non-skinned
+# G-buffer fragment shader to paint PROCEDURAL MASONRY (big staggered bricks +
+# recessed mortar + analytic seam bumps) over the instance's base colour. The flag
+# rides in params.w — the paletteBase slot, which is unused on the non-skinned path
+# (it only matters to the skinned shader). Every non-brick draw passes 0, so bodies,
+# boats, props and all other instanced geometry are byte-identical.
+func addInstanceBrick(batch: mod InstanceBatch, model: view Mat4, prevModel: view Mat4,
+                      material: view Material3d) pub {
+  if batch.count >= batch.capacity { ret }
+  packInstanceRecord(records: batch.records, slot: batch.count,
+    model: model, prevModel: prevModel,
+    r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
+    metallic: material.metallic, roughness: material.roughness,
+    emissive: instanceEmissive(material: material), toon: toonFlag(material: material),
+    paletteBase: 1)
+  batch.count = batch.count + 1
+}
+
+func addInstanceTransformBrick(batch: mod InstanceBatch, transform: view Transform3d,
+                               prevTransform: view Transform3d, material: view Material3d) pub {
+  let model: Mat4 = modelMatrixOf(t: transform)
+  let prevModel: Mat4 = modelMatrixOf(t: prevTransform)
+  addInstanceBrick(batch: batch, model: model, prevModel: prevModel, material: material)
+}
+
 # Draw the whole batch in one instanced DrawIndexed. Must be called inside the
 # geometry pass (between gbuffer.begin and gbuffer.end), like any other draw.
 func drawInstances(batch: view InstanceBatch) pub {
