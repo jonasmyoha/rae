@@ -167,6 +167,22 @@ static float gb_jitter_x = 0.0f, gb_jitter_y = 0.0f;
 static int   gb_taa_frame = 0;
 static bool  gb_taa_enabled = true;
 
+/* DISTANCE FOG (#57, per-app). Off by default so every deferred example is
+ * byte-identical. An app opts in with rae_gb_set_fog(1, r,g,b, start, end):
+ * geometry within [start,end] world units of the camera fades to (r,g,b), and
+ * the sky BACKGROUND is replaced by that same colour, so the far edge of a
+ * ground/sea plane dissolves into the horizon with no hard far-clip seam. The
+ * colour is LINEAR HDR (pre-composite), the same space the lit radiance and the
+ * sky background live in — background and fog target share one value, so they
+ * tonemap to the identical display colour and the join is seamless by
+ * construction. Carried in the LightU uniform's otherwise-DEAD clearColor
+ * (never read by the lighting fs) plus two free .w padding slots, so
+ * GB_LIGHT_BYTES does not change and no other pass is touched. */
+static int   gb_fog_on = 0;
+static float gb_fog_col[3] = {0.0f, 0.0f, 0.0f};
+static float gb_fog_start = 0.0f;
+static float gb_fog_end   = 0.0f;
+
 static const char* GB_TAA_WGSL =
 "@group(0) @binding(0) var litTex: texture_2d<f32>;\n"
 "@group(0) @binding(1) var histTex: texture_2d<f32>;\n"
@@ -462,6 +478,11 @@ RAE_SKY_WGSL
  */
 "    let uvF = (vec2<f32>(px) + vec2<f32>(0.5)) / vec2<f32>(textureDimensions(gbbTex, 0));\n"
 "    let ndcF = vec4<f32>(uvF.x * 2.0 - 1.0, 1.0 - uvF.y * 2.0, 0.0, 1.0);\n"
+/* Distance fog (#57): the background IS the fog colour, so a ground/sea plane
+ * fogged to the same value at the far clip dissolves into the horizon with no
+ * seam. clearColor.w is the fog-enabled flag (0 for every non-fog app, which
+ * keeps the sky). */
+"    if (L.clearColor.w > 0.5) { return vec4<f32>(L.clearColor.rgb, 1.0); }\n"
 "    let farW = L.invViewProj * ndcF;\n"
 "    let dirF = normalize(farW.xyz / farW.w - L.camPos.xyz);\n"
 "    return vec4<f32>(skyColor(dirF), 1.0);\n"
@@ -643,6 +664,14 @@ RAE_SKY_WGSL
  * no contact darkening floats. */
 "  if (isToon) { lit = toonShaded * mix(1.0, ao * ssao, 0.6); }\n"
 "  let radiance = clamp(lit, vec3<f32>(0.0), vec3<f32>(64000.0));\n"
+/* Distance fog (#57), applied in LINEAR HDR to the same value the background
+ * uses, so the far edge of a plane fades into the identical horizon colour.
+ * sunColor.w = start, ambSky.w = end (both dead to the shader otherwise). */
+"  if (L.clearColor.w > 0.5) {\n"
+"    let fogDist = length(L.camPos.xyz - wpos);\n"
+"    let fogT = clamp((fogDist - L.sunColor.w) / max(L.ambSky.w - L.sunColor.w, 0.001), 0.0, 1.0);\n"
+"    return vec4<f32>(mix(radiance, L.clearColor.rgb, fogT), 1.0);\n"
+"  }\n"
 "  return vec4<f32>(radiance, 1.0);\n"
 "}\n";
 
@@ -1091,7 +1120,17 @@ void rae_gb_light_upload(float camX, float camY, float camZ, float exposure,
     u[24] = sunR; u[25] = sunG; u[26] = sunB; u[27] = 0.0f;
     u[28] = skyR; u[29] = skyG; u[30] = skyB; u[31] = 0.0f;
     u[32] = gndR; u[33] = gndG; u[34] = gndB; u[35] = 0.0f;
-    u[36] = gb_clear[0]; u[37] = gb_clear[1]; u[38] = gb_clear[2]; u[39] = 0.0f;
+    /* clearColor is dead in the lighting fs, so #57 repurposes it as the fog
+     * block: rgb = fog/background colour, w = fog enabled. Fog near/far ride in
+     * the free sunColor.w (u[27]) and ambSky.w (u[31]) padding — neither .w is
+     * read by the shader. Off (the default) leaves w = 0, and the fs fog branch
+     * is skipped, so examples are unchanged. */
+    if (gb_fog_on) {
+        u[36] = gb_fog_col[0]; u[37] = gb_fog_col[1]; u[38] = gb_fog_col[2]; u[39] = 1.0f;
+        u[27] = gb_fog_start; u[31] = gb_fog_end;
+    } else {
+        u[36] = gb_clear[0]; u[37] = gb_clear[1]; u[38] = gb_clear[2]; u[39] = 0.0f;
+    }
     memcpy(u + 40, gb_viewproj_jittered, 16 * sizeof(float));
     /* Sky (#400/#404), packed after viewProj to match LightU. The offsets
      * are not free-standing numbers: 56 is exactly where viewProj ends,
@@ -1147,6 +1186,14 @@ void rae_gb_set_taa_bind(int64_t idx, void* b) { if (idx >= 0 && idx < 2) gb_taa
  * mobile deferred target. */
 int64_t rae_gb_taa_is_enabled(void)     { return gb_taa_enabled ? 1 : 0; }
 void    rae_gb_set_taa_enabled(int64_t e) { gb_taa_enabled = (e != 0); }
+
+/* Distance fog (#57). See gb_fog_* above. Colour is LINEAR HDR; start/end are
+ * world-unit distances from the camera. on=0 restores the sky background. */
+void rae_gb_set_fog(int64_t on, float r, float g, float b, float start, float end) {
+    gb_fog_on = (on != 0);
+    gb_fog_col[0] = r; gb_fog_col[1] = g; gb_fog_col[2] = b;
+    gb_fog_start = start; gb_fog_end = end;
+}
 
 /* Composite (tonemap the lit result into the presentable target) runs in Rae
  * now (lib/gbuffer_passes.rae, #504). C exposes the shared deferred prep, the
