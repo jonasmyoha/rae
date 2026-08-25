@@ -330,6 +330,28 @@ func worldIsLand(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Bo
   ret sampleWorld(x: x, y: y, cfg: cfg).wWater <= worldWalkMaxWater
 }
 
+# How far the ground sinks below the water surface here, in ELEVATION units (0 on
+# land, positive in water). Multiply by worldTerrainAmplitude for world Z depth.
+func worldWaterDepth(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Float {
+  let e: Float = worldElevation(x: x, y: y, cfg: cfg)
+  let d: Float = cfg.waterLevel - e
+  if d < 0.0 { ret 0.0 }
+  ret d
+}
+
+# How deep (elevation units) a unit can WADE before it would have to swim (#84).
+# 0.30 * worldTerrainAmplitude (3.2) ~ 0.96 world units — about WAIST height on the
+# 2-unit-tall character, so the shallows ringing the island are walkable and only the
+# real drop-off blocks. Shared default; example 114 never gates movement on it.
+const worldWadeMaxDepth: Float = 0.30
+
+# Can a unit STAND/WADE here? Land (depth 0) always; shallow water up to the wade
+# depth; deeper water blocks (it would need swimming). Depth-based, unlike worldIsLand
+# — this is the MOVEMENT gate, while worldIsLand stays the SPAWN/land test.
+func worldWadable(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Bool {
+  ret worldWaterDepth(x: x, y: y, cfg: cfg) <= worldWadeMaxDepth
+}
+
 const worldLandSearchStep: Float = 4.0
 const worldLandSearchSpokes: Int = 12
 # Enough rings to cross the island from its centre, so a search anchored at the
