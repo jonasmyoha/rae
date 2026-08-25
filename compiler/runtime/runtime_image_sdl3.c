@@ -262,7 +262,12 @@ static SDL_Scancode rae_sdl_scancode(int64_t key) {
         case 265: return SDL_SCANCODE_UP;
         case 266: return SDL_SCANCODE_PAGEUP;    /* GLFW GLFW_KEY_PAGE_UP */
         case 267: return SDL_SCANCODE_PAGEDOWN;  /* GLFW GLFW_KEY_PAGE_DOWN */
+        /* Modifier keys, raylib codes: LEFT/RIGHT SHIFT + LEFT/RIGHT CONTROL. Without the
+         * RSHIFT/CTRL entries a fly camera's speed modifiers silently never fire. */
         case 340: return SDL_SCANCODE_LSHIFT;
+        case 344: return SDL_SCANCODE_RSHIFT;
+        case 341: return SDL_SCANCODE_LCTRL;
+        case 345: return SDL_SCANCODE_RCTRL;
         default:  return SDL_SCANCODE_UNKNOWN;
     }
 }
