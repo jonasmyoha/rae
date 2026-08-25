@@ -26,7 +26,10 @@ m.x = 20                        # Copy into aliased storage
 
 # Control Flow
 if x > 0 { ... }
-loop let i: Int in list { ... }
+loop x < 10 { ... }
+loop var i: Int = 0, i < 10, ++i { ... }
+loop item in list { ... }
+loop { ... }
 match val {
   case 1 => "one"
   default => "other"
