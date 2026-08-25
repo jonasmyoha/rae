@@ -287,15 +287,13 @@ func createApp() ret App {
 
   let partIds: List(Int) = createList(Int, cap: 16)
   let partRough: List(Float) = createList(Float, cap: 16)
-  var mi: Int = 0
-  loop mi < meshCount(g: g) {
+  loop var mi: Int = 0, mi < meshCount(g: g), ++mi {
     let name: String = meshName(g: g, meshIndex: mi)
     var rough: Float = 0.68
     if name.startsWith(prefix: "Cylinder") {
       rough = 0.35
     }
-    var pi: Int = 0
-    loop pi < primitiveCount(g: g, meshIndex: mi) {
+    loop var pi: Int = 0, pi < primitiveCount(g: g, meshIndex: mi), ++pi {
       let raw: SkinnedMeshData = loadSkinnedPrimitive(g: g, meshIndex: mi, primIndex: pi)
       if raw.vertCount > 0 {
         let part: SkinnedMeshData = withAtlasColors(m: raw, atlas: atlas, width: atlasW, height: atlasH)
@@ -305,9 +303,7 @@ func createApp() ret App {
           partRough.add(value: rough)
         }
       }
-      pi = pi + 1
     }
-    mi = mi + 1
   }
   log("[gltf] skinned parts: {partIds.length}")
   if partIds.length is 0 {
@@ -396,8 +392,7 @@ func createApp() ret App {
   spawnOnLand(controller: characterController, groundZ: groundZ)
   partModel = walkerWorldModel(baseModel: basePartModel, controller: characterController)
 
-  var cloneIndex: Int = 0
-  loop cloneIndex < cloneCount {
+  loop var cloneIndex: Int = 0, cloneIndex < cloneCount, ++cloneIndex {
     let spiralAngle: Float = cloneIndex.toFloat() * 2.3999632
     let spiralRadius: Float = 3.5 + cloneIndex.toFloat() * 0.45
     let cloneX: Float = characterController.position.x + math.cos(x: spiralAngle) * spiralRadius
@@ -419,7 +414,6 @@ func createApp() ret App {
       animTime: cloneIndex.toFloat() * 0.4,
       controller: own cloneController
     })
-    cloneIndex = cloneIndex + 1
   }
   updateInfiniteTerrain(terrain: terrain, scene: scene, playerPosition: characterController.position)
   updateGrassField(field: grass, playerPosition: characterController.position)

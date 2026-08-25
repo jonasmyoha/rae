@@ -2,16 +2,12 @@ import core
 
 func benchmarkNative(count: view Int) ret Int {
   let l: List(Int) = createList(cap: 10)
-  var i: Int = 0
-  loop i < count {
+  loop var i: Int = 0, i < count, ++i {
     l.add(value: i)
-    i = i + 1
   }
   var total: Int = 0
-  var j: Int = 0
-  loop j < l.length {
+  loop var j: Int = 0, j < l.length, ++j {
     total = total + l.get(index: j)
-    j = j + 1
   }
   ret total
 }

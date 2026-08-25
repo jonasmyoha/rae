@@ -64,11 +64,9 @@ func renderRow(fb: mod List(Int), world: view List(Sphere), width: view Int, hei
     let v: Float = (height - 1 - y).toFloat() / (height - 1).toFloat()
     let ro: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
     let rowOff: Int = y * width
-    var x: Int = 0
-    loop x < width {
+    loop var x: Int = 0, x < width, ++x {
         let u: Float = x.toFloat() / (width - 1).toFloat()
         let rd: Vec3 = { x: llx + u * vw, y: 1.0, z: -1.0 + v * 2.0 }
         fb.set(index: rowOff + x, value: rayColor(world: world, ro: ro, rd: rd))
-        x = x + 1
     }
 }

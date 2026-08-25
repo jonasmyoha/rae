@@ -39,14 +39,12 @@ func longest(tracks: view List(Track)) ret opt view Track {
   }
   # Find the winner by index, so no track is copied, then hand back a view of it.
   var bestIndex: Int = 0
-  var i: Int = 1
-  loop i < tracks.length {
+  loop var i: Int = 1, i < tracks.length, ++i {
     if let candidate: view Track => tracks.viewAt(index: i) {
       if let best: view Track => tracks.viewAt(index: bestIndex) {
         if candidate.seconds > best.seconds { bestIndex = i }
       }
     }
-    i = i + 1
   }
   ret tracks.viewAt(index: bestIndex)
 }
