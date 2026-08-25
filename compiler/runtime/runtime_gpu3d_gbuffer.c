@@ -136,6 +136,45 @@ static WGPUBuffer         gb_view_ubuf = NULL;
 "  return normalize(n);\n" \
 "}\n"
 
+/* PROCEDURAL BIG-BRICK MASONRY (#62). No textures in this renderer, so the castle's
+ * brick is computed from world position: big old-castle courses, staggered rows,
+ * recessed mortar, per-brick shade, ROUNDED faces and an ANALYTIC normal that dips
+ * into the seams (the "bumps at the seams" — no image normal map). Triplanar face
+ * pick so every box/tower face is bricked. Gated per instance by the caller. */
+#define GB_BRICK_WGSL \
+"struct BrickOut { albedo: vec3<f32>, nrm: vec3<f32> };\n" \
+"fn gbBrick(wpos: vec3<f32>, n: vec3<f32>, base: vec3<f32>) -> BrickOut {\n" \
+"  let an = abs(n);\n" \
+"  var u: f32; var v: f32; var tU: vec3<f32>; var tV: vec3<f32>;\n" \
+"  if (an.z >= an.x && an.z >= an.y) { u = wpos.x; v = wpos.y; tU = vec3<f32>(1.0,0.0,0.0); tV = vec3<f32>(0.0,1.0,0.0); }\n" \
+"  else if (an.x >= an.y) { u = wpos.y; v = wpos.z; tU = vec3<f32>(0.0,1.0,0.0); tV = vec3<f32>(0.0,0.0,1.0); }\n" \
+"  else { u = wpos.x; v = wpos.z; tU = vec3<f32>(1.0,0.0,0.0); tV = vec3<f32>(0.0,0.0,1.0); }\n" \
+"  let bw = 1.35; let bh = 0.58;\n" \
+"  let row = floor(v / bh);\n" \
+"  let stagger = (row - 2.0 * floor(row * 0.5)) * (bw * 0.5);\n" \
+"  let uu = u + stagger;\n" \
+"  let cu = fract(uu / bw);\n" \
+"  let cv = fract(v / bh);\n" \
+"  let du = min(cu, 1.0 - cu) * bw;\n" \
+"  let dv = min(cv, 1.0 - cv) * bh;\n" \
+"  let dm = min(du, dv);\n" \
+"  let mortarHalf = 0.05;\n" \
+"  let bevel = 0.14;\n" \
+"  let mortar = 1.0 - smoothstep(mortarHalf, mortarHalf + bevel, dm);\n" \
+"  let bid = floor(uu / bw) * 3.0 + row * 7.0;\n" \
+"  let vary = fract(sin(bid * 12.9898) * 43758.5453);\n" \
+"  let brickCol = base * (0.80 + 0.36 * vary);\n" \
+"  let mortarCol = base * vec3<f32>(0.40, 0.38, 0.36);\n" \
+"  var o: BrickOut;\n" \
+"  o.albedo = mix(brickCol, mortarCol, mortar);\n" \
+"  let bevelAmt = mortar * (1.0 - mortar) * 4.0;\n" \
+"  var perturb = vec3<f32>(0.0);\n" \
+"  if (du <= dv) { let dir = select(1.0, -1.0, cu < 0.5); perturb = tU * dir; }\n" \
+"  else { let dir = select(1.0, -1.0, cv < 0.5); perturb = tV * dir; }\n" \
+"  o.nrm = normalize(n + perturb * (bevelAmt * 0.85));\n" \
+"  return o;\n" \
+"}\n"
+
 /* Shading models, in the 2 bits rgb10a2's alpha provides. Values are the
  * quantisation points of those 2 bits so a round-trip through the texture
  * lands exactly where it started. */
@@ -209,13 +248,17 @@ GB_OCT_WGSL
 "  @location(1) @interpolate(flat) inst: u32,\n"
 "  @location(2) clipNow: vec4<f32>,\n"
 "  @location(3) clipPrev: vec4<f32>,\n"
+"  @location(4) wpos: vec3<f32>,\n"   /* world position, for procedural brick (#62) */
 "};\n"
+GB_BRICK_WGSL
 "@vertex\n"
 "fn vs(@builtin(instance_index) ii: u32,\n"
 "      @location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec2<f32>) -> VsOut {\n"
 "  let d = draws[ii];\n"
 "  var o: VsOut;\n"
-"  o.pos = F.viewProj * (d.model * vec4<f32>(p, 1.0));\n"
+"  let world = d.model * vec4<f32>(p, 1.0);\n"
+"  o.wpos = world.xyz;\n"
+"  o.pos = F.viewProj * world;\n"
 /* Uniform-scale normal transform, matching the forward pass's documented
  * constraint. Non-uniform scale needs transpose(inverse(model)); when that
  * arrives it must arrive in both pipelines at once or the two frames will
@@ -266,9 +309,20 @@ GB_OCT_WGSL
  * one frame, and wrapping would encode huge motion as tiny motion — the
  * worst possible failure for a temporal filter, since it looks valid. */
 "  let mEnc = clamp(motion, vec2<f32>(-0.5), vec2<f32>(0.5)) + vec2<f32>(" GB_MOTION_ZERO_WGSL ");\n"
+/* Procedural brick (#62): when the per-instance brick flag (params.w) is set,
+ * replace the flat albedo + geometric normal with the masonry surface. Off (the
+ * default) leaves the write byte-identical, so no other instanced draw changes. */
+"  var albedoOut = d.albedoMetallic.rgb;\n"
+"  var nrmOut = n;\n"
+"  if (d.params.w > 0.5) {\n"
+"    let bk = gbBrick(in.wpos, n, albedoOut);\n"
+"    albedoOut = bk.albedo;\n"
+"    nrmOut = bk.nrm;\n"
+"  }\n"
+"  let octB = octEncode(nrmOut);\n"
 "  var o: FsOut;\n"
-"  o.gba = vec4<f32>(oct.x, oct.y, 0.5, d.params.z);\n"
-"  o.gbb = vec4<f32>(d.albedoMetallic.rgb, rough);\n"
+"  o.gba = vec4<f32>(octB.x, octB.y, 0.5, d.params.z);\n"
+"  o.gbb = vec4<f32>(albedoOut, rough);\n"
 "  o.gbc = vec4<f32>(mEnc.x, mEnc.y,\n"
 "                     clamp(d.albedoMetallic.a, 0.0, 1.0), d.params.y);\n"
 "  return o;\n"
