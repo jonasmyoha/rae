@@ -104,6 +104,17 @@ int64_t rae_ext_audio_loop(int64_t clip, float volume) {
     return (int64_t)ch;
 }
 
+/* Global mute (#61): pause/resume the whole playback device, so the looping sea
+ * ambient falls silent too — a per-stream gain would only touch one-shots and
+ * leave the loop playing. While paused the device consumes nothing; audio_tick
+ * stops topping loops up once their queue is full, so nothing accumulates
+ * unboundedly, and resuming picks the ambient straight back up. */
+void rae_ext_audio_set_muted(int64_t muted) {
+    if (!g_ra_ready) return;
+    if (muted) SDL_PauseAudioDevice(g_ra_dev);
+    else       SDL_ResumeAudioDevice(g_ra_dev);
+}
+
 /* Keep every looping channel from draining. Call once per frame. */
 void rae_ext_audio_tick(void) {
     if (!g_ra_ready) return;
@@ -122,4 +133,5 @@ int64_t rae_ext_audio_load_wav(rae_String path) { (void)path; return -1; }
 void    rae_ext_audio_play(int64_t clip, float volume) { (void)clip; (void)volume; }
 int64_t rae_ext_audio_loop(int64_t clip, float volume) { (void)clip; (void)volume; return -1; }
 void    rae_ext_audio_tick(void) {}
+void    rae_ext_audio_set_muted(int64_t muted) { (void)muted; }
 #endif
