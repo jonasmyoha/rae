@@ -130,6 +130,17 @@ fn fs(in: VsOut) -> FsOut {
   // shadowed greens), so there is no honest rock texture to stamp.
   let texBlend = d.albedoMetallic.x;
   let b = raeBiomeClassify(in.bio.x, in.bio.y, in.bio.z);
+  // BLURRED sand/grass texture-stamp weights (#83). The procedural colour already
+  // crossfades sand<->grass over a wide band (raeTerrainDetailColor), but the tile
+  // TEXTURES below are stamped by the classify's near-line weights, which re-sharpens
+  // the edge. Re-split the combined sand+grass weight across the same wide elevation
+  // band so the textures dissolve into each other too — a soft, road-like border. The
+  // sum is preserved, so the coast's edge against water/mud/rock is untouched.
+  let sgSum83 = b.wSand + b.wGrass;
+  let sgMix83 = smoothstep(RAE_BIOME_WATER_LEVEL + RAE_BIOME_BEACH_BAND - RAE_SANDGRASS_BLUR,
+                           RAE_BIOME_WATER_LEVEL + RAE_BIOME_BEACH_BAND + RAE_SANDGRASS_BLUR, in.bio.x);
+  let wGrass83 = sgSum83 * sgMix83;
+  let wSand83 = sgSum83 * (1.0 - sgMix83);
   let uv = in.worldXY * RAE_TERRAIN_TEX_SCALE;
   let grassT = RAE_TERRAIN_GRASS * (textureSample(terrainTex, terrainSamp, uv, RAE_TL_GRASS).rgb / RAE_TERRAIN_GRASS_TEX_MEAN);
   let sandT  = RAE_TERRAIN_SAND  * (textureSample(terrainTex, terrainSamp, uv, RAE_TL_SAND ).rgb / RAE_TERRAIN_SAND_TEX_MEAN);
@@ -139,8 +150,8 @@ fn fs(in: VsOut) -> FsOut {
   let waterT = RAE_TERRAIN_WATER * (textureSample(terrainTex, terrainSamp, wuv, RAE_TL_WATER).rgb / RAE_TERRAIN_WATER_TEX_MEAN);
   // Sequential blend by weight -- at any pixel one weight dominates, so this
   // reads as "the dominant material's texture" while shore blends average.
-  albedo = mix(albedo, grassT, clamp(texBlend * b.wGrass, 0.0, 1.0));
-  albedo = mix(albedo, sandT,  clamp(texBlend * b.wSand,  0.0, 1.0));
+  albedo = mix(albedo, grassT, clamp(texBlend * wGrass83, 0.0, 1.0));
+  albedo = mix(albedo, sandT,  clamp(texBlend * wSand83,  0.0, 1.0));
   // Water gets HALF weight: the sea already carries procedural foam/ripples, so
   // the tile is subtle surface detail, not a replacement -- full strength reads
   // as cracked ice under the top-down camera.
