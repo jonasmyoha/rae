@@ -96,7 +96,7 @@ func buildScene3d() ret Scene3d {
 func packObjects(scene: view Scene3d) ret List(Float) {
     let out: List(Float) = createList(Float, cap: scene.renderables.length * 12)
     var i: Int = 0
-    loop renderable: view Renderable3d in scene.renderables {
+    loop let renderable: view Renderable3d in scene.renderables {
         if let transform: view Transform3d => scene.transforms.viewAt(index: i) {
             out.add(value: renderable.shape.toFloat())
             out.add(value: renderable.material.toFloat())
@@ -118,7 +118,7 @@ func packObjects(scene: view Scene3d) ret List(Float) {
 
 func packMaterials(scene: view Scene3d) ret List(Float) {
     let out: List(Float) = createList(Float, cap: scene.materials.length * 8)
-    loop material: view Material3d in scene.materials {
+    loop let material: view Material3d in scene.materials {
         out.add(value: material.r)
         out.add(value: material.g)
         out.add(value: material.b)

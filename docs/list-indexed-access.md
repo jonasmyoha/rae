@@ -39,11 +39,11 @@ The C backend lowers these exact `if let` accessor forms directly. It evaluates 
 `loop` remains Rae's only loop keyword. Collection iteration is:
 
 ```rae
-loop track: view Track in tracks {
+loop let track: view Track in tracks {
   log(track.title)
 }
 
-loop track: mod Track in tracks {
+loop let track: mod Track in tracks {
   track.plays = track.plays + 1
 }
 ```

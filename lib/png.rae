@@ -40,10 +40,10 @@ func writeChunk(out: mod List(Int), t0: view Int, t1: view Int, t2: view Int, t3
     let crcIn: List(Int) = createList(cap: data.length + 4)
     crcIn.add(value: t0) crcIn.add(value: t1) crcIn.add(value: t2) crcIn.add(value: t3)
     var i: Int = 0
-    loop value: Int in data { crcIn.add(value: value) }
+    loop let value: Int in data { crcIn.add(value: value) }
     out.add(value: t0) out.add(value: t1) out.add(value: t2) out.add(value: t3)
     i = 0
-    loop value: Int in data { out.add(value: value) }
+    loop let value: Int in data { out.add(value: value) }
     pushBE32(out: out, value: crc32(data: crcIn, len: crcIn.length))
 }
 
@@ -112,15 +112,15 @@ func encodePng(pixels: view List(Int), width: view Int, height: view Int, hasAlp
                 bestCost = cost
                 bestType = ft
                 best.clear()
-                loop value: Int in cand { best.add(value: value) }
+                loop let value: Int in cand { best.add(value: value) }
             }
             ft = ft + 1
         }
         raw.add(value: bestType)
-        loop value: Int in best { raw.add(value: value) }
+        loop let value: Int in best { raw.add(value: value) }
         # This row's RAW bytes become prevRow for the next iteration.
         prevRow.clear()
-        loop value: Int in cur { prevRow.add(value: value) }
+        loop let value: Int in cur { prevRow.add(value: value) }
         havePrev = true
         y = y + 1
     }
