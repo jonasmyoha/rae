@@ -40,11 +40,10 @@ func setTitle(title: String) extern
 func closeWindow() extern
 
 # --- Input ---------------------------------------------------------------
-# Key codes use the GLFW numbering (letters = ASCII uppercase, e.g. W = 87; arrows
-# = 262-265; L/R Shift = 340/344; L/R Ctrl = 341/345). The SDL3 runtime maps these
-# to SDL scancodes internally (rae_sdl_scancode), so this is just a stable, portable
-# key-code CONVENTION — SDL3 (+ WebGPU) is the actual backend; the game does not use
-# GLFW or raylib.
+# Key codes are the engine's own portable ints: letters + digits are their ASCII value
+# (W = 87, '1' = 49); the arrows / shift / ctrl / F-keys are fixed engine constants
+# (arrows 262-265, L/R Shift 340/344, L/R Ctrl 341/345). The SDL3 runtime resolves them to
+# real SDL scancodes (rae_sdl_scancode). SDL3 (+ WebGPU) is the backend.
 
 # Current window (renderer output) size in pixels. The window is resizable;
 # poll these to detect a resize and re-render at the new size.
