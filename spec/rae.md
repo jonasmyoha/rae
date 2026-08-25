@@ -81,16 +81,13 @@ loop var index: Int = 0
 }
 
 # Collection loop
-loop item in items {
+loop let item: view Thing in things {
   process(item: item)
 }
 
-# Explicit immutable and mutable collection bindings are also accepted.
-loop let item: view Thing in things {
-  inspect(thing: item)
-}
-loop var item: mod Thing in things {
-  update(thing: item)
+# A mutable owned value copy uses `var`.
+loop var item: Thing in things {
+  item = normalize(thing: item)
 }
 
 # Unconditional loop
@@ -103,9 +100,10 @@ loop {
 
 Both prefix (`++index`) and postfix (`index++`) increment are supported. A
 collection expression is evaluated once and its elements are visited in order.
-The keyword-free collection binding is immutable, like `let`; use `var` only
-when the binding itself must be reassigned. No numeric range syntax is defined
-by these forms.
+Collection bindings require `let` or `var` and an explicit type. Reference
+bindings (`view`/`mod`) are aliases and therefore require `let`; use `var` only
+for an owned value copy whose binding is reassigned. No numeric range syntax is
+defined by these forms.
 
 ---
 

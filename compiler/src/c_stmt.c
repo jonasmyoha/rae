@@ -965,36 +965,46 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         return true;
     }
 
-    fprintf(out, "  for (");
-    // Save outer local_count so the loop's init-let + body-lets all
-    // disappear from the locals view when the loop ends.
+    // A declaration initializer needs the normal let/var lowering so the
+    // backend can resolve method calls on the counter inside all three loop
+    // clauses and the body. Keep it in an enclosing C scope so owned values
+    // can also be dropped after the loop rather than leaking.
     size_t saved_locals = ctx->local_count;
-    if (stmt->as.loop_stmt.init) {
-        // Init stmt usually doesn't have a newline/indent in for loop
-        if (stmt->as.loop_stmt.init->kind == AST_STMT_LET) {
-            const char* tn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, stmt->as.loop_stmt.init->as.let_stmt.type);
-            fprintf(out, "%s %.*s = ", tn, (int)stmt->as.loop_stmt.init->as.let_stmt.name.len, stmt->as.loop_stmt.init->as.let_stmt.name.data);
-            emit_expr(ctx, stmt->as.loop_stmt.init->as.let_stmt.value, out, PREC_LOWEST, false, false);
-        } else {
-            emit_expr(ctx, stmt->as.loop_stmt.init->as.expr_stmt, out, PREC_LOWEST, false, false);
+    bool has_decl_init = stmt->as.loop_stmt.init
+        && stmt->as.loop_stmt.init->kind == AST_STMT_LET;
+    if (has_decl_init) {
+        fprintf(out, "  {\n");
+        emit_stmt(ctx, stmt->as.loop_stmt.init, out);
+        fprintf(out, "  for (; ");
+    } else {
+        fprintf(out, "  for (");
+        if (stmt->as.loop_stmt.init) {
+            emit_expr(ctx, stmt->as.loop_stmt.init->as.expr_stmt, out,
+                      PREC_LOWEST, false, false);
         }
+        fprintf(out, "; ");
     }
-    fprintf(out, "; ");
     if (stmt->as.loop_stmt.condition) emit_expr(ctx, stmt->as.loop_stmt.condition, out, PREC_LOWEST, false, false);
     fprintf(out, "; ");
     if (stmt->as.loop_stmt.increment) emit_expr(ctx, stmt->as.loop_stmt.increment, out, PREC_LOWEST, false, false);
     fprintf(out, ") {\n");
-    // break/continue drop owned locals back to the loop body start (the C for
-    // init-let, an Int counter, is not tracked here and needs no drop).
-    if (ctx->loop_depth < 32) ctx->loop_body_local_start[ctx->loop_depth] = saved_locals;
+    // The declaration initializer belongs to the enclosing loop scope.
+    // break/continue only drop locals introduced by the current body.
+    size_t body_locals = ctx->local_count;
+    if (ctx->loop_depth < 32) ctx->loop_body_local_start[ctx->loop_depth] = body_locals;
     ctx->loop_depth++;
     if (stmt->as.loop_stmt.body) {
         for (const AstStmt* s = stmt->as.loop_stmt.body->first; s; s = s->next) emit_stmt(ctx, s, out);
     }
     ctx->loop_depth--;
-    emit_implicit_drops_for_body(ctx, out, saved_locals);
-    ctx->local_count = saved_locals;
+    emit_implicit_drops_for_body(ctx, out, body_locals);
+    ctx->local_count = body_locals;
     fprintf(out, "  }\n");
+    if (has_decl_init) {
+        emit_implicit_drops_for_body(ctx, out, saved_locals);
+        fprintf(out, "  }\n");
+    }
+    ctx->local_count = saved_locals;
     return true;
 }
 

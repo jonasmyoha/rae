@@ -1617,31 +1617,35 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                      AstStmt* binding = stmt->as.loop_stmt.init;
                      TypeInfo* element_type = collection_type->as.structure.generic_args[0];
                      if (!binding->as.let_stmt.type) {
-                         AstTypeRef* inferred = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
-                         *inferred = (AstTypeRef){0};
-                         inferred->resolved_type = element_type;
-                         binding->as.let_stmt.type = inferred;
-                     }
-                     TypeInfo* binding_type = sema_resolve_type_internal(
-                         ctx, module, symbols, binding->as.let_stmt.type);
-                     TypeInfo* binding_value_type = binding_type;
-                     if (binding_value_type && binding_value_type->kind == TYPE_REF) {
-                         binding_value_type = binding_value_type->as.ref.base;
-                     }
-                     if (!type_is_same(binding_value_type, element_type)) {
-                         diag_error(module->file_path, (int)binding->line, (int)binding->column,
-                                    "collection loop binding type must match the List element type");
+                         diag_error(module->file_path, (int)binding->line,
+                                    (int)binding->column,
+                                    "collection loop bindings require an explicit type");
                          module->had_error = true;
+                     } else {
+                         TypeInfo* binding_type = sema_resolve_type_internal(
+                             ctx, module, symbols, binding->as.let_stmt.type);
+                         TypeInfo* binding_value_type = binding_type;
+                         if (binding_value_type && binding_value_type->kind == TYPE_REF) {
+                             binding_value_type = binding_value_type->as.ref.base;
+                         }
+                         if (!type_is_same(binding_value_type, element_type)) {
+                             diag_error(module->file_path, (int)binding->line,
+                                        (int)binding->column,
+                                        "collection loop binding type must match the List element type");
+                             module->had_error = true;
+                         }
+                         if (binding->as.let_stmt.type->is_mod
+                             && collection && collection->resolved_type
+                             && collection->resolved_type->kind == TYPE_REF
+                             && !collection->resolved_type->as.ref.is_mod) {
+                             diag_error(module->file_path, (int)binding->line,
+                                        (int)binding->column,
+                                        "a 'mod' collection loop requires mutable List storage");
+                             module->had_error = true;
+                         }
+                         sema_analyze_stmt(ctx, module, symbols, binding,
+                                           current_return_type);
                      }
-                     if (binding->as.let_stmt.type->is_mod
-                         && collection && collection->resolved_type
-                         && collection->resolved_type->kind == TYPE_REF
-                         && !collection->resolved_type->as.ref.is_mod) {
-                         diag_error(module->file_path, (int)binding->line, (int)binding->column,
-                                    "a 'mod' collection loop requires mutable List storage");
-                         module->had_error = true;
-                     }
-                     sema_analyze_stmt(ctx, module, symbols, binding, current_return_type);
                  }
              } else {
                  if (stmt->as.loop_stmt.init) sema_analyze_stmt(ctx, module, symbols, stmt->as.loop_stmt.init, current_return_type);
