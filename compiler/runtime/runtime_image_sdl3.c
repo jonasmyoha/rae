@@ -246,12 +246,14 @@ static unsigned char g_sdl_mouse_pressed[8];            /* went-down-this-frame 
 static unsigned char g_sdl_mouse_released[8];           /* went-up-this-frame edges */
 static bool g_sdl_mouse_captured = false;
 
-/* Map raylib/GLFW key codes (letters = ASCII uppercase, arrows = 262-265, plus
- * a few common keys) to SDL scancodes so ported examples keep their key ints. */
+/* Map the portable GLFW key-code numbering (letters = ASCII uppercase, arrows =
+ * 262-265, plus a few common keys) to SDL scancodes. This is a stable convention
+ * app code uses via isKeyDown; SDL3 is the backend (raylib is a separate, off-by-
+ * default backend and is NOT what these codes tie us to). */
 static SDL_Scancode rae_sdl_scancode(int64_t key) {
     if (key >= 'A' && key <= 'Z') return SDL_GetScancodeFromKey((SDL_Keycode)(key + 32), NULL); /* lowercase */
     if (key >= '0' && key <= '9') return SDL_GetScancodeFromKey((SDL_Keycode)key, NULL);
-    if (key >= 290 && key <= 301) return (SDL_Scancode)(SDL_SCANCODE_F1 + (int)(key - 290)); /* raylib F1..F12 */
+    if (key >= 290 && key <= 301) return (SDL_Scancode)(SDL_SCANCODE_F1 + (int)(key - 290)); /* GLFW F1..F12 */
     switch (key) {
         case 32:  return SDL_SCANCODE_SPACE;
         case 256: return SDL_SCANCODE_ESCAPE;
@@ -262,7 +264,7 @@ static SDL_Scancode rae_sdl_scancode(int64_t key) {
         case 265: return SDL_SCANCODE_UP;
         case 266: return SDL_SCANCODE_PAGEUP;    /* GLFW GLFW_KEY_PAGE_UP */
         case 267: return SDL_SCANCODE_PAGEDOWN;  /* GLFW GLFW_KEY_PAGE_DOWN */
-        /* Modifier keys, raylib codes: LEFT/RIGHT SHIFT + LEFT/RIGHT CONTROL. Without the
+        /* Modifier keys, GLFW codes: LEFT/RIGHT SHIFT + LEFT/RIGHT CONTROL. Without the
          * RSHIFT/CTRL entries a fly camera's speed modifiers silently never fire. */
         case 340: return SDL_SCANCODE_LSHIFT;
         case 344: return SDL_SCANCODE_RSHIFT;
@@ -373,7 +375,7 @@ int64_t rae_ext_sdl3_windowHeight(void) {
     int w = 0, h = g_sdl_h; if (g_sdl_ren) SDL_GetRenderOutputSize(g_sdl_ren, &w, &h); return (int64_t)h;
 }
 rae_Bool rae_ext_sdl3_isMouseButtonDown(int64_t button) {
-    /* raylib button (0=L,1=R,2=M) -> SDL button index (1=L,2=M,3=R). */
+    /* GLFW button (0=L,1=R,2=M) -> SDL button index (1=L,2=M,3=R). */
     int sdlb = button == 1 ? SDL_BUTTON_RIGHT : (button == 2 ? SDL_BUTTON_MIDDLE : SDL_BUTTON_LEFT);
     return sdlb < 8 && g_sdl_mouse[sdlb] != 0;
 }
