@@ -246,23 +246,15 @@ static unsigned char g_sdl_mouse_pressed[8];            /* went-down-this-frame 
 static unsigned char g_sdl_mouse_released[8];           /* went-up-this-frame edges */
 static bool g_sdl_mouse_captured = false;
 
-/* isKeyDown's `key` ints are the GLFW key-code numbering (A=65, W=87, ESC=256,
- * RIGHT=262, PAGE_UP=266, F1=290, LSHIFT=340, LCTRL=341). Verified: these match GLFW's
- * values and match NEITHER SDL's scancodes (W=26, LSHIFT=225) NOR SDL's keycodes (W=119,
- * LSHIFT=0x400000e1) — so they are unambiguously GLFW's, not SDL's.
- *
- * WHY GLFW in an SDL3 engine: it is purely LEGACY. Rae's first backend was raylib, whose
- * IsKeyDown takes exactly these codes (raylib re-uses GLFW's numbering), so all early app
- * code was written with them. When SDL3 became the shipping backend we did NOT renumber
- * every app to SDL's scheme — this function TRANSLATES the GLFW ints to SDL scancodes so
- * that code ports unchanged. It is a compat convention, not a GLFW dependency (we neither
- * link nor use GLFW). Migrating apps to SDL-native scancodes is possible but touches every
- * key constant across all examples + this map, so it's a deliberate cross-repo change, not
- * done implicitly here. */
+/* Map the engine's own portable key-code ints (as used by app code via isKeyDown) to SDL
+ * scancodes. For letters and digits the int is simply the ASCII value (W = 87, '1' = 49);
+ * the arrows / shift / ctrl / F-keys use fixed engine constants (RIGHT=262, LSHIFT=340,
+ * LCTRL=341, F1=290, …). These are the Rae input codes — SDL3 is the only backend; this
+ * function is where they resolve to real SDL_Scancodes. */
 static SDL_Scancode rae_sdl_scancode(int64_t key) {
     if (key >= 'A' && key <= 'Z') return SDL_GetScancodeFromKey((SDL_Keycode)(key + 32), NULL); /* lowercase */
     if (key >= '0' && key <= '9') return SDL_GetScancodeFromKey((SDL_Keycode)key, NULL);
-    if (key >= 290 && key <= 301) return (SDL_Scancode)(SDL_SCANCODE_F1 + (int)(key - 290)); /* GLFW F1..F12 */
+    if (key >= 290 && key <= 301) return (SDL_Scancode)(SDL_SCANCODE_F1 + (int)(key - 290)); /* F1..F12 */
     switch (key) {
         case 32:  return SDL_SCANCODE_SPACE;
         case 256: return SDL_SCANCODE_ESCAPE;
@@ -271,9 +263,9 @@ static SDL_Scancode rae_sdl_scancode(int64_t key) {
         case 263: return SDL_SCANCODE_LEFT;
         case 264: return SDL_SCANCODE_DOWN;
         case 265: return SDL_SCANCODE_UP;
-        case 266: return SDL_SCANCODE_PAGEUP;    /* GLFW GLFW_KEY_PAGE_UP */
-        case 267: return SDL_SCANCODE_PAGEDOWN;  /* GLFW GLFW_KEY_PAGE_DOWN */
-        /* Modifier keys, GLFW codes: LEFT/RIGHT SHIFT + LEFT/RIGHT CONTROL. Without the
+        case 266: return SDL_SCANCODE_PAGEUP;    /* page up */
+        case 267: return SDL_SCANCODE_PAGEDOWN;  /* page down */
+        /* Modifier keys: LEFT/RIGHT SHIFT + LEFT/RIGHT CONTROL. Without the
          * RSHIFT/CTRL entries a fly camera's speed modifiers silently never fire. */
         case 340: return SDL_SCANCODE_LSHIFT;
         case 344: return SDL_SCANCODE_RSHIFT;
@@ -384,7 +376,7 @@ int64_t rae_ext_sdl3_windowHeight(void) {
     int w = 0, h = g_sdl_h; if (g_sdl_ren) SDL_GetRenderOutputSize(g_sdl_ren, &w, &h); return (int64_t)h;
 }
 rae_Bool rae_ext_sdl3_isMouseButtonDown(int64_t button) {
-    /* GLFW button (0=L,1=R,2=M) -> SDL button index (1=L,2=M,3=R). */
+    /* button (0=L,1=R,2=M) -> SDL button index (1=L,2=M,3=R). */
     int sdlb = button == 1 ? SDL_BUTTON_RIGHT : (button == 2 ? SDL_BUTTON_MIDDLE : SDL_BUTTON_LEFT);
     return sdlb < 8 && g_sdl_mouse[sdlb] != 0;
 }
