@@ -30,7 +30,7 @@
 ### 1.3 Keywords
 
 ```
-type func let ret spawn
+type func let var ret spawn
 view mod val opt
 if else match case
 true false none
@@ -51,11 +51,51 @@ pub priv extern pack default enum loop in
 ### 1.5 Operators and Punctuation
 
 ```
-=  =>  +  -  *  /  %
+=  =>  +  -  *  /  %  ++  --
 <  >  <=  >=  is
 ( )  { }  [ ]
 ,  :  .
 ```
+
+### 1.6 Loops
+
+`loop` is Rae's only loop keyword. It supports condition, three-clause,
+collection, and unconditional forms:
+
+```rae
+# Condition loop
+loop index < count {
+  index = index + 1
+}
+
+# Three-clause loop. The initializer must be an inline `var` declaration.
+loop var index: Int = 0, index < count, ++index {
+  process(index: index)
+}
+
+# The same clauses may be separated by newlines instead of commas.
+loop var index: Int = 0
+  index < count
+  index++ {
+  process(index: index)
+}
+
+# Collection loop
+loop item in items {
+  process(item: item)
+}
+
+# Unconditional loop
+loop {
+  if finished {
+    break
+  }
+}
+```
+
+Both prefix (`++index`) and postfix (`index++`) increment are supported. A
+collection expression is evaluated once and its elements are visited in order.
+No numeric range syntax is defined by these forms.
 
 ---
 
@@ -462,4 +502,3 @@ Any function whose first parameter matches a type `T` can be called using member
 ---
 
 **End of Rae Specification v0.3**
-

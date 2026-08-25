@@ -1,0 +1,45 @@
+import core
+
+func main() {
+  var whileIndex: Int = 0
+  var whileTotal: Int = 0
+  loop whileIndex < 3 {
+    whileTotal = whileTotal + whileIndex
+    whileIndex = whileIndex + 1
+  }
+  log("while: {whileTotal}")
+
+  var prefixTotal: Int = 0
+  loop var prefixIndex: Int = 0, prefixIndex < 4, ++prefixIndex {
+    prefixTotal = prefixTotal + prefixIndex
+  }
+  log("comma prefix: {prefixTotal}")
+
+  var postfixTotal: Int = 0
+  loop var postfixIndex: Int = 0, postfixIndex < 4, postfixIndex++ {
+    postfixTotal = postfixTotal + postfixIndex
+  }
+  log("comma postfix: {postfixTotal}")
+
+  var multilineTotal: Int = 0
+  loop var multilineIndex: Int = 0
+    multilineIndex < 4
+    ++multilineIndex {
+    multilineTotal = multilineTotal + multilineIndex
+  }
+  log("multiline: {multilineTotal}")
+
+  var values: List(Int) = { 2, 4, 6 }
+  var collectionTotal: Int = 0
+  loop item in values {
+    collectionTotal = collectionTotal + item
+  }
+  log("collection: {collectionTotal}")
+
+  var infiniteCount: Int = 0
+  loop {
+    infiniteCount = infiniteCount + 1
+    if infiniteCount is 3 { break }
+  }
+  log("infinite: {infiniteCount}")
+}
