@@ -108,14 +108,14 @@ func extractScene(scene: view Scene3d, cameraPos: view Vec3, forward: view Vec3,
     packed.add(value: 0.0)
     packed.add(value: 0.0)
 
-    loop material: view Material3d in scene.materials {
+    loop let material: view Material3d in scene.materials {
         pushVec3(buf: packed, value: material.baseColor)
         packed.add(value: material.metallic)
         packed.add(value: material.roughness)
         pushVec3(buf: packed, value: material.emission)
     }
 
-    loop renderable: view Renderable3d in scene.renderables {
+    loop let renderable: view Renderable3d in scene.renderables {
         if let transform: view Transform3d => scene.transforms.viewAt(index: renderable.entity) {
             packed.add(value: renderable.shape.toFloat())
             pushVec3(buf: packed, value: transform.position)

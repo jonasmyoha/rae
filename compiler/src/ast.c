@@ -489,8 +489,9 @@ static void dump_loop_stmt(const AstStmt* stmt, FILE* out, int indent) {
   if (stmt->as.loop_stmt.init) {
     if (stmt->as.loop_stmt.init->kind == AST_STMT_LET) {
       fputc(' ', out);
-      if (!stmt->as.loop_stmt.is_range
-          || stmt->as.loop_stmt.init->as.let_stmt.is_var) {
+      if (stmt->as.loop_stmt.is_range) {
+        fputs(stmt->as.loop_stmt.init->as.let_stmt.is_var ? "var " : "let ", out);
+      } else {
         fputs("var ", out);
       }
       print_str(out, stmt->as.loop_stmt.init->as.let_stmt.name);
