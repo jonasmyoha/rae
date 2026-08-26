@@ -320,11 +320,12 @@ func tagPlaybackIconDependency(
   observedRevision: view Int
   playing: view Bool
 ) pub {
-  let entityOpt: opt Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId)
-  if entityOpt is none {
+  var raw: Int = -1
+  if let value: Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId) {
+    raw = value
+  } else {
     ret
   }
-  let raw: Int = entityOpt
   let entity: EntityId = entityId(v: raw)
   let playbackSource: DataResourceId = dataResourcePlayback()
   let playbackField: DataFieldId = dataFieldIsPlaying()

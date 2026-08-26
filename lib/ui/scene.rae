@@ -224,10 +224,11 @@ func parseScene(source: view String) ret Scene {
     let kn: Int = n.childrenIds.length
     var k: Int = 0
     loop k < kn {
-      let childId: String = n.childrenIds.get(index: k)
-      if sceneNodeIndex(this: scene, nodeId: childId) < 0 {
-        scene.errorMsg = childId.concat(other: " referenced by Children but not defined")
-        ret scene
+      if let childId: String = n.childrenIds.get(index: k) {
+        if sceneNodeIndex(this: scene, nodeId: childId) < 0 {
+          scene.errorMsg = childId.concat(other: " referenced by Children but not defined")
+          ret scene
+        }
       }
       k = k + 1
     }

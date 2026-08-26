@@ -162,9 +162,15 @@ func mergeBand(accum: mod List(Float), tile: view List(Float), off: view Int, ov
     var i: Int = 0
     loop i < tile.length {
         if overwrite {
-            accum.set(index: off + i, value: tile.get(index: i))
+            if let tileValue: Float = tile.get(index: i) {
+                accum.set(index: off + i, value: tileValue)
+            }
         } else {
-            accum.set(index: off + i, value: accum.get(index: off + i) + tile.get(index: i))
+            if let accValue: Float = accum.get(index: off + i) {
+                if let tileValue: Float = tile.get(index: i) {
+                    accum.set(index: off + i, value: accValue + tileValue)
+                }
+            }
         }
         i = i + 1
     }
@@ -187,9 +193,15 @@ func buildDisplay(fb: mod List(Int), accum: view List(Float), pixels: view Int, 
     var p: Int = 0
     loop p < pixels {
         let base: Int = p * 3
-        let r: Float = math.sqrt(x: clampf(x: accum.get(index: base) * inv))
-        let g: Float = math.sqrt(x: clampf(x: accum.get(index: base + 1) * inv))
-        let b: Float = math.sqrt(x: clampf(x: accum.get(index: base + 2) * inv))
+        var accR: Float = 0.0
+        var accG: Float = 0.0
+        var accB: Float = 0.0
+        if let value: Float = accum.get(index: base) { accR = value }
+        if let value: Float = accum.get(index: base + 1) { accG = value }
+        if let value: Float = accum.get(index: base + 2) { accB = value }
+        let r: Float = math.sqrt(x: clampf(x: accR * inv))
+        let g: Float = math.sqrt(x: clampf(x: accG * inv))
+        let b: Float = math.sqrt(x: clampf(x: accB * inv))
         let ir: Int = (255.99 * r).toInt()
         let ig: Int = (255.99 * g).toInt()
         let ib: Int = (255.99 * b).toInt()

@@ -48,6 +48,23 @@ func absF(v: view Float) ret Float {
   ret v
 }
 
+# Flat-buffer reads go through these so the `opt Float` from `.at` is
+# unwrapped explicitly; an out-of-range index yields 0.0.
+func viewProjAt(cascades: view ShadowCascades, index: copy Int) ret Float {
+  if let value: Float = cascades.viewProj.at(index: index) { ret value }
+  ret 0.0
+}
+
+func splitFarAt(cascades: view ShadowCascades, index: copy Int) ret Float {
+  if let value: Float = cascades.splitFar.at(index: index) { ret value }
+  ret 0.0
+}
+
+func texelWorldAt(cascades: view ShadowCascades, index: copy Int) ret Float {
+  if let value: Float = cascades.texelWorld.at(index: index) { ret value }
+  ret 0.0
+}
+
 # The LATERAL terms only: the x/y scales (0, 5) and offsets (12, 13).
 # Those four define where the sampling grid sits on the world, and they
 # are what must not move.
@@ -66,7 +83,7 @@ func maxGridDelta(a: view ShadowCascades, b: view ShadowCascades, index: view In
     if k is 1 { slot = 5 }
     if k is 2 { slot = 12 }
     if k is 3 { slot = 13 }
-    let d: Float = absF(v: a.viewProj.at(index: index * 16 + slot) - b.viewProj.at(index: index * 16 + slot))
+    let d: Float = absF(v: viewProjAt(cascades: a, index: index * 16 + slot) - viewProjAt(cascades: b, index: index * 16 + slot))
     if d > worst {
       worst = d
     }
@@ -83,7 +100,7 @@ func main() {
   var increasing: Bool = true
   var i: Int = 1
   loop i < base.count {
-    if base.splitFar.at(index: i) <= base.splitFar.at(index: i - 1) {
+    if splitFarAt(cascades: base, index: i) <= splitFarAt(cascades: base, index: i - 1) {
       increasing = false
     }
     i = i + 1
@@ -95,7 +112,7 @@ func main() {
   }
 
   # The near cascade must resolve finer detail than the far one.
-  if base.texelWorld.at(index: 0) < base.texelWorld.at(index: base.count - 1) {
+  if texelWorldAt(cascades: base, index: 0) < texelWorldAt(cascades: base, index: base.count - 1) {
     log("near cascade finer: yes")
   } else {
     log("near cascade finer: NO")
@@ -105,7 +122,7 @@ func main() {
   # A tenth of a texel is far below what any renderer would notice
   # geometrically, and is exactly the scale at which unsnapped shadows
   # crawl.
-  let texel0: Float = base.texelWorld.at(index: 0)
+  let texel0: Float = texelWorldAt(cascades: base, index: 0)
   let nudged: ShadowCascades = fitAt(camX: texel0 * 0.1, yaw: 0.0)
   if maxGridDelta(a: base, b: nudged, index: 0) is 0.0 {
     log("sub-texel move is snapped: yes")
@@ -127,8 +144,8 @@ func main() {
   var texelStable: Bool = true
   var k: Int = 0
   loop k < base.count {
-    let d: Float = absF(v: base.texelWorld.at(index: k) - turned.texelWorld.at(index: k))
-    if d > base.texelWorld.at(index: k) * 0.001 {
+    let d: Float = absF(v: texelWorldAt(cascades: base, index: k) - texelWorldAt(cascades: turned, index: k))
+    if d > texelWorldAt(cascades: base, index: k) * 0.001 {
       texelStable = false
     }
     k = k + 1

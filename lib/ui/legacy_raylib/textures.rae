@@ -92,9 +92,11 @@ func textureLoadBatch(
   }
   var i: Int = 0
   loop i < count {
-    let k: String = keys.get(index: i)
-    let p: String = paths.get(index: i)
-    let loaded: Texture = textureLoad(reg: reg, key: k, path: p)
+    if let key: String = keys.get(index: i) {
+      if let path: String = paths.get(index: i) {
+        let loaded: Texture = textureLoad(reg: reg, key: key, path: path)
+      }
+    }
     i = i + 1
   }
 }

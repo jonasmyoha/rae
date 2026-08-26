@@ -125,8 +125,10 @@ func isOccupied(g: view Game, x: view Int, y: view Int) ret Int {
     # Allow pieces above the board
     ret 0
   }
-  if g.grid.get(index: y * g.width + x) > 0 {
-    ret 1
+  if let cell: Int = g.grid.get(index: y * g.width + x) {
+    if cell > 0 {
+      ret 1
+    }
   }
   ret 0
 }
@@ -310,8 +312,10 @@ func checkLines(g: mod Game) {
     var full: Int = 1
     var x: Int = 0
     loop x < g.width {
-      if grid.get(index: y * g.width + x) is 0 {
-        full = 0
+      if let cell: Int = grid.get(index: y * g.width + x) {
+        if cell is 0 {
+          full = 0
+        }
       }
       x = x + 1
     }
@@ -322,7 +326,9 @@ func checkLines(g: mod Game) {
       loop ty > 0 {
         var tx: Int = 0
         loop tx < g.width {
-          grid.set(index: ty * g.width + tx, value: grid.get(index: (ty - 1) * g.width + tx))
+          if let above: Int = grid.get(index: (ty - 1) * g.width + tx) {
+            grid.set(index: ty * g.width + tx, value: above)
+          }
           tx = tx + 1
         }
         ty = ty - 1
@@ -518,14 +524,15 @@ func drawGame(g: view Game) {
   loop y < g.height {
     var x: Int = 0
     loop x < g.width {
-      let val: Int = g.grid.get(index: y * g.width + x)
-      if val > 0 {
-        drawCell(
-          x: x.toFloat() * cellSize + offsetX
-          y: y.toFloat() * cellSize + offsetY
-          size: cellSize
-          colorId: val
-        )
+      if let val: Int = g.grid.get(index: y * g.width + x) {
+        if val > 0 {
+          drawCell(
+            x: x.toFloat() * cellSize + offsetX
+            y: y.toFloat() * cellSize + offsetY
+            size: cellSize
+            colorId: val
+          )
+        }
       }
       x = x + 1
     }

@@ -146,13 +146,10 @@ func playlistCoverStems(playlist: view Playlist, max: view Int) pub ret List(Str
         # Dedup so a playlist of many songs from one album still
         # contributes a single cover to the grid.
         var already: Bool = false
-        var j: Int = 0
-        loop j < result.length {
-          let existing: String = result.get(index: j)
+        loop let existing: view String in result {
           if existing.equals(other: it.albumStem) {
             already = true
           }
-          j = j + 1
         }
         if already is false {
           let copied: String = "{it.albumStem}"
@@ -424,11 +421,12 @@ func tagLikedHeart(
   widgetId: view String
   observedRevision: view Int
 ) pub {
-  let entityOpt: opt Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId)
-  if entityOpt is none {
+  var raw: Int = -1
+  if let value: Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId) {
+    raw = value
+  } else {
     ret
   }
-  let raw: Int = entityOpt
   let entity: EntityId = entityId(v: raw)
   let heartKind: String = "likeButton"
   setWidgetIdentity(world: world, entity: entity, id: widgetId, kind: heartKind)

@@ -18,6 +18,13 @@ static const char* s_current_decl_origin = NULL;
  * hard error and actually fail the build rather than just printing. */
 static AstModule* s_current_module = NULL;
 
+/* True while analyzing an `if let` binding statement. There, an `opt T`
+ * initializer bound to a non-optional name is the NARROWING itself (the
+ * value is unwrapped inside the success branch), so ensure_type_match must
+ * keep the old unbox behavior instead of erroring "optional not unwrapped".
+ * Set/restored around the binding analysis in the AST_STMT_IF arm. */
+static bool s_in_if_let_binding = false;
+
 /* Loop nesting depth during statement analysis, so `break`/`continue`
  * can be rejected outside any loop. Balanced increment/decrement around
  * each loop body; there are no nested function bodies, so it returns to
@@ -1513,7 +1520,10 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             if (stmt->as.if_stmt.binding) {
                 // The binding is introduced before the condition, and its name
                 // is visible in the then-branch. Scope handling below.
+                bool saved_if_let = s_in_if_let_binding;
+                s_in_if_let_binding = true;
                 sema_analyze_stmt(ctx, module, symbols, stmt->as.if_stmt.binding, current_return_type);
+                s_in_if_let_binding = saved_if_let;
                 // Spec 4.2: `if let` is the 2.3.1 matrix with a presence test
                 // in front — which binding form is legal follows from what
                 // the optional holds and where it lives.
@@ -1917,14 +1927,19 @@ static const char* sema_numeric_name(TypeKind k) {
     }
 }
 
-static bool sema_is_list_index_optional(const AstExpr* expr) {
+// A List value-accessor call — `list.at(index:)` / `list.get(index:)` — that
+// yields `opt T`. Unlike the reference accessors (viewAt/modAt), these copy the
+// element out, so a non-optional binding would silently unwrap. Detected
+// STRUCTURALLY (method name + List receiver), because generic List method calls
+// are not resolved to `opt T` in sema — the C backend resolves them — so the
+// call node's own resolved_type is often null and never reaches the TYPE_OPT
+// branch in ensure_type_match.
+static bool sema_is_list_value_accessor(const AstExpr* expr) {
     if (!expr) return false;
     if (expr->kind == AST_EXPR_METHOD_CALL) {
         Str method = expr->as.method_call.method_name;
-        bool accessor = str_eq_cstr(method, "at") || str_eq_cstr(method, "get")
-            || str_eq_cstr(method, "viewAt") || str_eq_cstr(method, "viewGet")
-            || str_eq_cstr(method, "modAt") || str_eq_cstr(method, "modGet");
-        if (!accessor || !expr->as.method_call.object) return false;
+        if (!(str_eq_cstr(method, "at") || str_eq_cstr(method, "get"))) return false;
+        if (!expr->as.method_call.object) return false;
         TypeInfo* receiver = expr->as.method_call.object->resolved_type;
         while (receiver && (receiver->kind == TYPE_REF || receiver->kind == TYPE_OPT)) {
             receiver = receiver->kind == TYPE_REF ? receiver->as.ref.base
@@ -1935,14 +1950,15 @@ static bool sema_is_list_index_optional(const AstExpr* expr) {
     if (expr->kind == AST_EXPR_CALL && expr->decl_link
         && expr->decl_link->kind == AST_DECL_FUNC) {
         const AstFuncDecl* function = &expr->decl_link->as.func_decl;
-        bool accessor = str_eq_cstr(function->name, "at")
-            || str_eq_cstr(function->name, "get")
-            || str_eq_cstr(function->name, "viewAt")
-            || str_eq_cstr(function->name, "viewGet")
-            || str_eq_cstr(function->name, "modAt")
-            || str_eq_cstr(function->name, "modGet");
-        if (!accessor) return false;
+        if (!(str_eq_cstr(function->name, "at") || str_eq_cstr(function->name, "get")))
+            return false;
+        // The receiver is the first non-type param; core.rae accessors lead
+        // with `T: type`, so skip that to reach `this: view List(T)`.
         const AstParam* receiver = function->params;
+        if (receiver && receiver->type
+            && str_eq_cstr(get_base_type_name(receiver->type), "type")) {
+            receiver = receiver->next;
+        }
         return receiver && receiver->type
             && str_eq_cstr(get_base_type_name(receiver->type), "List");
     }
@@ -1952,6 +1968,20 @@ static bool sema_is_list_index_optional(const AstExpr* expr) {
 static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr** expr_ptr) {
     if (!expected || !expr_ptr || !*expr_ptr) return;
     AstExpr* expr = *expr_ptr;
+    /* A List value-accessor result (`opt T`) cannot land in a non-optional
+     * binding, argument, or return. These generic calls are not resolved to
+     * `opt T` in sema — their call node's resolved_type is often null — so
+     * they slip past both the early return below and the TYPE_OPT branch and
+     * would silently unwrap; catch them by shape here, BEFORE the
+     * resolved-type checks. Consume with `if let`. */
+    if (!s_in_if_let_binding && expected->kind != TYPE_OPT
+        && sema_is_list_value_accessor(expr)) {
+        const char* err_file = s_current_decl_origin ? s_current_decl_origin : NULL;
+        diag_error(err_file, (int)expr->line, (int)expr->column,
+                   "optional not unwrapped — use `if let`");
+        if (s_current_module) s_current_module->had_error = true;
+        return;
+    }
     if (!expr->resolved_type) return;
     /* HARD ERROR on implicit numeric conversion (both widening and
      * narrowing). Silently narrowing a Float64 epoch to f32 destroyed
@@ -2007,17 +2037,25 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
         *unbox = (AstExpr){.kind = AST_EXPR_UNBOX, .resolved_type = expected, .line = expr->line, .column = expr->column};
         unbox->as.unary.operand = expr; *expr_ptr = unbox;
     } else if (expected->kind != TYPE_OPT && expr->resolved_type->kind == TYPE_OPT) {
-        if (sema_is_list_index_optional(expr)) {
-            const char* err_file = s_current_decl_origin ? s_current_decl_origin : NULL;
-            diag_error(err_file, (int)expr->line, (int)expr->column,
-                       "List indexed access is optional; handle it with 'if let'");
-            if (s_current_module) s_current_module->had_error = true;
-        } else {
+        if (s_in_if_let_binding) {
+            /* An `if let <name>: T = <opt T>` binding: the optional is
+             * narrowed here — the name is the unwrapped value inside the
+             * success branch. Keep the historical unbox so narrowing works. */
             AstExpr* unbox = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
             *unbox = (AstExpr){.kind = AST_EXPR_UNBOX, .resolved_type = expected,
                                .line = expr->line, .column = expr->column};
             unbox->as.unary.operand = expr;
             *expr_ptr = unbox;
+        } else {
+            /* An optional value cannot be assigned to a non-optional binding.
+             * Consume it with `if let` (and write your own else value) — the
+             * compiler never invents a sentinel by silently unwrapping. Uniform
+             * hard error for every T: scalar accessors, struct accessors, and
+             * user functions that return `opt`. */
+            const char* err_file = s_current_decl_origin ? s_current_decl_origin : NULL;
+            diag_error(err_file, (int)expr->line, (int)expr->column,
+                       "optional not unwrapped — use `if let`");
+            if (s_current_module) s_current_module->had_error = true;
         }
     }
 }

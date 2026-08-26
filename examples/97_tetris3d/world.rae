@@ -127,8 +127,10 @@ func gridGet(w: view World, x: view Int, y: view Int) ret Int {
   if x < 0 or x >= gridWidth or y < 0 or y >= gridHeight {
     ret 1
   }
-  let v: Int = w.grid.get(index: y * gridWidth + x)
-  ret v
+  if let cell: Int = w.grid.get(index: y * gridWidth + x) {
+    ret cell
+  }
+  ret 1
 }
 
 func gridSet(w: mod World, x: view Int, y: view Int, value: view Int) {
