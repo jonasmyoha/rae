@@ -1,0 +1,11 @@
+# A List value accessor yields `opt T`; binding it to a non-optional
+# scalar must be a hard error. Consume it with `if let`, never a silent
+# unwrap.
+import core
+
+func main() {
+  let xs: List(Int) = createList(Int, cap: 4)
+  xs.add(value: 7)
+  let count: Int = xs.at(index: 0)
+  log("should not run {count}")
+}

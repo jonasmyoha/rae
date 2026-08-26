@@ -22,6 +22,26 @@ open mesh3d
 open math3d
 open quat
 
+# ----- checked flat-buffer reads (#642) --------------------------------
+#
+# List `.get(index:)` returns `opt T`; these consume the optional with an
+# explicit fallback so an out-of-range index yields a defined value rather
+# than an unwrap error. Callers keep their own bounds/clamping logic — the
+# fallback only covers indices this code already treats as unreachable.
+# Shared with gltf_retarget.rae via `open gltf_skin`.
+func floatAt(list: view List(Float), index: copy Int) ret Float {
+  if let value: Float = list.get(index: index) { ret value }
+  ret 0.0
+}
+func intAt(list: view List(Int), index: copy Int, fallback: copy Int) ret Int {
+  if let value: Int = list.get(index: index) { ret value }
+  ret fallback
+}
+func boolAt(list: view List(Bool), index: copy Int, fallback: copy Bool) ret Bool {
+  if let value: Bool = list.get(index: index) { ret value }
+  ret fallback
+}
+
 # ----- skinned primitives (#374) ---------------------------------------
 
 # A primitive with its skinning attributes, ready for the skinned GPU
@@ -115,13 +135,13 @@ func loadSkinnedPrimitiveSmoothed(g: view Glb, meshIndex: view Int, primIndex: v
   loop i < base.vertCount {
     var c: Int = 0
     loop c < 8 {
-      verts.add(value: base.verts.get(index: i * 8 + c))
+      verts.add(value: floatAt(list: base.verts, index: i * 8 + c))
       c = c + 1
     }
     if hasSkin {
       var k: Int = 0
       loop k < 4 {
-        verts.add(value: joints.get(index: i * 4 + k).toFloat())
+        verts.add(value: intAt(list: joints, index: i * 4 + k, fallback: 0).toFloat())
         k = k + 1
       }
       # Renormalise: glTF requires the four weights to sum to 1, but
@@ -130,7 +150,7 @@ func loadSkinnedPrimitiveSmoothed(g: view Glb, meshIndex: view Int, primIndex: v
       var sum: Float = 0.0
       var w: Int = 0
       loop w < 4 {
-        sum = sum + weights.get(index: i * 4 + w)
+        sum = sum + floatAt(list: weights, index: i * 4 + w)
         w = w + 1
       }
       if sum <= 0.0 {
@@ -138,7 +158,7 @@ func loadSkinnedPrimitiveSmoothed(g: view Glb, meshIndex: view Int, primIndex: v
       }
       w = 0
       loop w < 4 {
-        verts.add(value: weights.get(index: i * 4 + w) / sum)
+        verts.add(value: floatAt(list: weights, index: i * 4 + w) / sum)
         w = w + 1
       }
     } else {
@@ -164,7 +184,7 @@ func loadSkinnedPrimitiveSmoothed(g: view Glb, meshIndex: view Int, primIndex: v
   }
   var k2: Int = 0
   loop k2 < base.indices.length {
-    indices.add(value: base.indices.get(index: k2))
+    indices.add(value: intAt(list: base.indices, index: k2, fallback: 0))
     k2 = k2 + 1
   }
   ret SkinnedMeshData { verts: own verts, indices: own indices, vertCount: base.vertCount }
@@ -213,7 +233,7 @@ func withAtlasColors(m: view SkinnedMeshData, atlas: view List(Int),
   let out: List(Float) = createList(Float, cap: m.verts.length)
   var i: Int = 0
   loop i < m.verts.length {
-    out.add(value: m.verts.get(index: i))
+    out.add(value: floatAt(list: m.verts, index: i))
     i = i + 1
   }
   if width <= 0 or height <= 0 or atlas.length < width * height {
@@ -222,8 +242,8 @@ func withAtlasColors(m: view SkinnedMeshData, atlas: view List(Int),
   var v: Int = 0
   loop v < m.vertCount {
     let base: Int = v * 20
-    var x: Int = math.floor(x: out.get(index: base + 6) * width.toFloat()).toInt()
-    var y: Int = math.floor(x: out.get(index: base + 7) * height.toFloat()).toInt()
+    var x: Int = math.floor(x: floatAt(list: out, index: base + 6) * width.toFloat()).toInt()
+    var y: Int = math.floor(x: floatAt(list: out, index: base + 7) * height.toFloat()).toInt()
     # Clamp rather than wrap. A UV marginally outside [0,1] is exporter
     # rounding on a swatch edge, and wrapping would fetch the colour from
     # the opposite side of the atlas — a vivid wrong pixel instead of the
@@ -232,7 +252,7 @@ func withAtlasColors(m: view SkinnedMeshData, atlas: view List(Int),
     if y < 0 { y = 0 }
     if x >= width { x = width - 1 }
     if y >= height { y = height - 1 }
-    let px: Int = atlas.get(index: y * width + x)
+    let px: Int = intAt(list: atlas, index: y * width + x, fallback: 0)
     out.set(index: base + 16, value: srgbToLinear(c: ((px shr 16) bitand 255).toFloat() / 255.0))
     out.set(index: base + 17, value: srgbToLinear(c: ((px shr 8) bitand 255).toFloat() / 255.0))
     out.set(index: base + 18, value: srgbToLinear(c: (px bitand 255).toFloat() / 255.0))
@@ -246,7 +266,7 @@ func copyIndices(src: view List(Int)) ret List(Int) {
   let out: List(Int) = createList(Int, cap: src.length)
   var i: Int = 0
   loop i < src.length {
-    out.add(value: src.get(index: i))
+    out.add(value: intAt(list: src, index: i, fallback: 0))
     i = i + 1
   }
   ret own out
@@ -404,17 +424,17 @@ func captureSkeletonPose(sk: view Skeleton) ret SkeletonPose {
   let localS: List(Float) = createList(Float, cap: sk.localS.length)
   var index: Int = 0
   loop index < sk.localT.length {
-    localT.add(value: sk.localT.get(index: index))
+    localT.add(value: floatAt(list: sk.localT, index: index))
     index = index + 1
   }
   index = 0
   loop index < sk.localR.length {
-    localR.add(value: sk.localR.get(index: index))
+    localR.add(value: floatAt(list: sk.localR, index: index))
     index = index + 1
   }
   index = 0
   loop index < sk.localS.length {
-    localS.add(value: sk.localS.get(index: index))
+    localS.add(value: floatAt(list: sk.localS, index: index))
     index = index + 1
   }
   ret SkeletonPose { localT: own localT, localR: own localR, localS: own localS }
@@ -423,17 +443,17 @@ func captureSkeletonPose(sk: view Skeleton) ret SkeletonPose {
 func applySkeletonPose(sk: mod Skeleton, pose: view SkeletonPose) {
   var index: Int = 0
   loop index < sk.localT.length and index < pose.localT.length {
-    sk.localT.set(index: index, value: pose.localT.get(index: index))
+    sk.localT.set(index: index, value: floatAt(list: pose.localT, index: index))
     index = index + 1
   }
   index = 0
   loop index < sk.localR.length and index < pose.localR.length {
-    sk.localR.set(index: index, value: pose.localR.get(index: index))
+    sk.localR.set(index: index, value: floatAt(list: pose.localR, index: index))
     index = index + 1
   }
   index = 0
   loop index < sk.localS.length and index < pose.localS.length {
-    sk.localS.set(index: index, value: pose.localS.get(index: index))
+    sk.localS.set(index: index, value: floatAt(list: pose.localS, index: index))
     index = index + 1
   }
 }
@@ -447,15 +467,15 @@ func blendSkeletonPose(sk: mod Skeleton, from: view SkeletonPose, weight: view F
 
   var index: Int = 0
   loop index < sk.localT.length and index < from.localT.length {
-    let source: Float = from.localT.get(index: index)
-    let target: Float = sk.localT.get(index: index)
+    let source: Float = floatAt(list: from.localT, index: index)
+    let target: Float = floatAt(list: sk.localT, index: index)
     sk.localT.set(index: index, value: source + (target - source) * amount)
     index = index + 1
   }
   index = 0
   loop index < sk.localS.length and index < from.localS.length {
-    let source: Float = from.localS.get(index: index)
-    let target: Float = sk.localS.get(index: index)
+    let source: Float = floatAt(list: from.localS, index: index)
+    let target: Float = floatAt(list: sk.localS, index: index)
     sk.localS.set(index: index, value: source + (target - source) * amount)
     index = index + 1
   }
@@ -463,12 +483,12 @@ func blendSkeletonPose(sk: mod Skeleton, from: view SkeletonPose, weight: view F
   var node: Int = 0
   loop node * 4 + 3 < sk.localR.length and node * 4 + 3 < from.localR.length {
     let source: Quat = quat.create(
-      x: from.localR.get(index: node * 4), y: from.localR.get(index: node * 4 + 1),
-      z: from.localR.get(index: node * 4 + 2), w: from.localR.get(index: node * 4 + 3)
+      x: floatAt(list: from.localR, index: node * 4), y: floatAt(list: from.localR, index: node * 4 + 1),
+      z: floatAt(list: from.localR, index: node * 4 + 2), w: floatAt(list: from.localR, index: node * 4 + 3)
     )
     let target: Quat = quat.create(
-      x: sk.localR.get(index: node * 4), y: sk.localR.get(index: node * 4 + 1),
-      z: sk.localR.get(index: node * 4 + 2), w: sk.localR.get(index: node * 4 + 3)
+      x: floatAt(list: sk.localR, index: node * 4), y: floatAt(list: sk.localR, index: node * 4 + 1),
+      z: floatAt(list: sk.localR, index: node * 4 + 2), w: floatAt(list: sk.localR, index: node * 4 + 3)
     )
     let blended: Quat = quat.slerp(a: source, b: target, t: amount)
     sk.localR.set(index: node * 4, value: blended.x)
@@ -486,21 +506,21 @@ func blendSkeletonPose(sk: mod Skeleton, from: view SkeletonPose, weight: view F
 # node around the parent's origin instead of its own.
 func nodeLocalMatrix(sk: view Skeleton, node: view Int) ret Mat4 {
   let t: Mat4 = mat4Translate(
-    x: sk.localT.get(index: node * 3),
-    y: sk.localT.get(index: node * 3 + 1),
-    z: sk.localT.get(index: node * 3 + 2)
+    x: floatAt(list: sk.localT, index: node * 3),
+    y: floatAt(list: sk.localT, index: node * 3 + 1),
+    z: floatAt(list: sk.localT, index: node * 3 + 2)
   )
   let q: Quat = quat.create(
-    x: sk.localR.get(index: node * 4),
-    y: sk.localR.get(index: node * 4 + 1),
-    z: sk.localR.get(index: node * 4 + 2),
-    w: sk.localR.get(index: node * 4 + 3)
+    x: floatAt(list: sk.localR, index: node * 4),
+    y: floatAt(list: sk.localR, index: node * 4 + 1),
+    z: floatAt(list: sk.localR, index: node * 4 + 2),
+    w: floatAt(list: sk.localR, index: node * 4 + 3)
   )
   let r: Mat4 = quat.toMat4(q: q)
   let s: Mat4 = mat4ScaleXYZ(
-    x: sk.localS.get(index: node * 3),
-    y: sk.localS.get(index: node * 3 + 1),
-    z: sk.localS.get(index: node * 3 + 2)
+    x: floatAt(list: sk.localS, index: node * 3),
+    y: floatAt(list: sk.localS, index: node * 3 + 1),
+    z: floatAt(list: sk.localS, index: node * 3 + 2)
   )
   ret mat4Mul(a: t, b: mat4Mul(a: r, b: s))
 }
@@ -518,13 +538,13 @@ func nodeWorldMatrix(sk: view Skeleton, node: view Int) ret Mat4 {
   var guard: Int = 0
   loop cur >= 0 and guard < sk.nodeCount + 1 {
     chain.add(value: cur)
-    cur = sk.parent.get(index: cur)
+    cur = intAt(list: sk.parent, index: cur, fallback: 0 - 1)
     guard = guard + 1
   }
   var m: Mat4 = mat4Identity()
   var i: Int = chain.length - 1
   loop i >= 0 {
-    m = mat4Mul(a: m, b: nodeLocalMatrix(sk: sk, node: chain.get(index: i)))
+    m = mat4Mul(a: m, b: nodeLocalMatrix(sk: sk, node: intAt(list: chain, index: i, fallback: 0)))
     i = i - 1
   }
   ret m
@@ -545,12 +565,12 @@ func buildPalette(sk: view Skeleton) pub ret List(Float) {
   }
   var j: Int = 0
   loop j < sk.jointNodes.length {
-    let world: Mat4 = nodeWorldMatrix(sk: sk, node: sk.jointNodes.get(index: j))
+    let world: Mat4 = nodeWorldMatrix(sk: sk, node: intAt(list: sk.jointNodes, index: j, fallback: 0))
     var ib: Mat4 = mat4Identity()
     if sk.inverseBind.length >= (j + 1) * 16 {
       var c: Int = 0
       loop c < 16 {
-        ib.m[c] = sk.inverseBind.get(index: j * 16 + c)
+        ib.m[c] = floatAt(list: sk.inverseBind, index: j * 16 + c)
         c = c + 1
       }
     }
@@ -705,15 +725,15 @@ func loadClip(g: view Glb, animIndex: view Int, sk: view Skeleton) pub ret Clip 
           valueStart.add(value: values.length)
           var i: Int = 0
           loop i < t.length {
-            times.add(value: t.get(index: i))
+            times.add(value: floatAt(list: t, index: i))
             i = i + 1
           }
-          if t.get(index: t.length - 1) > duration {
-            duration = t.get(index: t.length - 1)
+          if floatAt(list: t, index: t.length - 1) > duration {
+            duration = floatAt(list: t, index: t.length - 1)
           }
           i = 0
           loop i < v.length {
-            values.add(value: v.get(index: i))
+            values.add(value: floatAt(list: v, index: i))
             i = i + 1
           }
         }
@@ -752,11 +772,11 @@ func applyClip(sk: mod Skeleton, c: view Clip, time: view Float) pub {
 
   var ci: Int = 0
   loop ci < c.targetNode.length {
-    let node: Int = c.targetNode.get(index: ci)
-    let p: Int = c.path.get(index: ci)
-    let ts: Int = c.timeStart.get(index: ci)
-    let tn: Int = c.timeCount.get(index: ci)
-    let vs: Int = c.valueStart.get(index: ci)
+    let node: Int = intAt(list: c.targetNode, index: ci, fallback: 0)
+    let p: Int = intAt(list: c.path, index: ci, fallback: pathTranslation)
+    let ts: Int = intAt(list: c.timeStart, index: ci, fallback: 0)
+    let tn: Int = intAt(list: c.timeCount, index: ci, fallback: 0)
+    let vs: Int = intAt(list: c.valueStart, index: ci, fallback: 0)
     var comps: Int = 3
     if p is pathRotation {
       comps = 4
@@ -766,17 +786,17 @@ func applyClip(sk: mod Skeleton, c: view Clip, time: view Float) pub {
     # tens of keys per channel, and a binary search would cost more in
     # branch overhead than it saves.
     var k: Int = 0
-    loop k + 1 < tn and c.times.get(index: ts + k + 1) < t {
+    loop k + 1 < tn and floatAt(list: c.times, index: ts + k + 1) < t {
       k = k + 1
     }
     var k1: Int = k + 1
     if k1 >= tn {
       k1 = tn - 1
     }
-    let t0: Float = c.times.get(index: ts + k)
-    let t1: Float = c.times.get(index: ts + k1)
+    let t0: Float = floatAt(list: c.times, index: ts + k)
+    let t1: Float = floatAt(list: c.times, index: ts + k1)
     var alpha: Float = 0.0
-    if c.interp.get(index: ci) is interpLinear and t1 > t0 {
+    if intAt(list: c.interp, index: ci, fallback: interpStep) is interpLinear and t1 > t0 {
       alpha = (t - t0) / (t1 - t0)
       if alpha < 0.0 { alpha = 0.0 }
       if alpha > 1.0 { alpha = 1.0 }
@@ -784,12 +804,12 @@ func applyClip(sk: mod Skeleton, c: view Clip, time: view Float) pub {
 
     if p is pathRotation {
       let qa: Quat = quat.create(
-        x: c.values.get(index: vs + k * 4), y: c.values.get(index: vs + k * 4 + 1),
-        z: c.values.get(index: vs + k * 4 + 2), w: c.values.get(index: vs + k * 4 + 3)
+        x: floatAt(list: c.values, index: vs + k * 4), y: floatAt(list: c.values, index: vs + k * 4 + 1),
+        z: floatAt(list: c.values, index: vs + k * 4 + 2), w: floatAt(list: c.values, index: vs + k * 4 + 3)
       )
       let qb: Quat = quat.create(
-        x: c.values.get(index: vs + k1 * 4), y: c.values.get(index: vs + k1 * 4 + 1),
-        z: c.values.get(index: vs + k1 * 4 + 2), w: c.values.get(index: vs + k1 * 4 + 3)
+        x: floatAt(list: c.values, index: vs + k1 * 4), y: floatAt(list: c.values, index: vs + k1 * 4 + 1),
+        z: floatAt(list: c.values, index: vs + k1 * 4 + 2), w: floatAt(list: c.values, index: vs + k1 * 4 + 3)
       )
       # SLERP, not a component-wise lerp. Lerping quaternions shortens the
       # result, which shows up as limbs subtly shrinking mid-swing, and it
@@ -803,8 +823,8 @@ func applyClip(sk: mod Skeleton, c: view Clip, time: view Float) pub {
     } else {
       var comp: Int = 0
       loop comp < comps {
-        let a: Float = c.values.get(index: vs + k * comps + comp)
-        let bv: Float = c.values.get(index: vs + k1 * comps + comp)
+        let a: Float = floatAt(list: c.values, index: vs + k * comps + comp)
+        let bv: Float = floatAt(list: c.values, index: vs + k1 * comps + comp)
         let v: Float = a + (bv - a) * alpha
         if p is pathTranslation {
           sk.localT.set(index: node * 3 + comp, value: v)

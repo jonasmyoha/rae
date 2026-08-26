@@ -216,21 +216,20 @@ func parseStates(scene: view Scene) ret StateSet {
 
 # True when `name` appears in the app's active-state list.
 func stateIsActive(activeStates: view List(String), name: view String) ret Bool {
-  let n: Int = activeStates.length
-  var i: Int = 0
-  loop i < n {
-    let candidate: String = activeStates.get(index: i)
+  loop let candidate: view String in activeStates {
     if candidate.equals(other: name) {
       ret true
     }
-    i = i + 1
   }
   ret false
 }
 
 # Pool index of `nodeId`'s override bag inside state `stateIdx`, or -1.
 func stateNodeBagIdx(scene: view Scene, states: view StateSet, stateIdx: view Int, nodeId: view String) ret Int {
-  let nodesIdx: Int = states.nodesValueIdxs.get(index: stateIdx)
+  var nodesIdx: Int = -1
+  if let value: Int = states.nodesValueIdxs.get(index: stateIdx) {
+    nodesIdx = value
+  }
   if nodesIdx < 0 {
     ret -1
   }
@@ -245,9 +244,10 @@ func stateNodeBagIdx(scene: view Scene, states: view StateSet, stateIdx: view In
 func frameIndexByName(frames: view FrameSet, name: view String) ret Int {
   var i: Int = 0
   loop i < frames.count {
-    let candidate: String = frames.names.get(index: i)
-    if candidate.equals(other: name) {
-      ret i
+    if let candidate: String = frames.names.get(index: i) {
+      if candidate.equals(other: name) {
+        ret i
+      }
     }
     i = i + 1
   }
@@ -274,12 +274,13 @@ func selectFrameIndex(frames: view FrameSet, windowPtW: view Float, forcedFrameI
   var bestMin: Float = -1.0
   var i: Int = 0
   loop i < frames.count {
-    let m: Float = frames.minPtWs.get(index: i)
-    if m >= 0.0 {
-      if windowPtW >= m {
-        if m > bestMin {
-          best = i
-          bestMin = m
+    if let minWidth: Float = frames.minPtWs.get(index: i) {
+      if minWidth >= 0.0 {
+        if windowPtW >= minWidth {
+          if minWidth > bestMin {
+            best = i
+            bestMin = minWidth
+          }
         }
       }
     }
@@ -305,7 +306,10 @@ func bagHasKey(doc: view JsonDoc, bag: view JsonValue, key: view String) ret Boo
 
 # Pool index of `nodeId`'s override bag inside frame `frameIdx`, or -1.
 func frameNodeBagIdx(scene: view Scene, frames: view FrameSet, frameIdx: view Int, nodeId: view String) ret Int {
-  let nodesIdx: Int = frames.nodesValueIdxs.get(index: frameIdx)
+  var nodesIdx: Int = -1
+  if let value: Int = frames.nodesValueIdxs.get(index: frameIdx) {
+    nodesIdx = value
+  }
   if nodesIdx < 0 {
     ret -1
   }
@@ -463,13 +467,10 @@ func accumulateNodeIds(scene: view Scene, nodesIdx: view Int, out: mod List(Stri
   loop i < n {
     let nodeId: String = json.jsonObjectKeyAt(doc: doc, this: nodesVal, idx: i)
     var already: Bool = false
-    var j: Int = 0
-    loop j < out.length {
-      let seen: String = out.get(index: j)
+    loop let seen: view String in out {
       if seen.equals(other: nodeId) {
         already = true
       }
-      j = j + 1
     }
     if already is false {
       out.add(value: nodeId)
@@ -485,14 +486,16 @@ func framesOverriddenNodeIds(scene: view Scene, frames: view FrameSet, states: v
   let out: List(String) = createList(String, cap: 8)
   var f: Int = 0
   loop f < frames.count {
-    let nodesIdx: Int = frames.nodesValueIdxs.get(index: f)
-    accumulateNodeIds(scene: scene, nodesIdx: nodesIdx, out: out)
+    if let nodesIdx: Int = frames.nodesValueIdxs.get(index: f) {
+      accumulateNodeIds(scene: scene, nodesIdx: nodesIdx, out: out)
+    }
     f = f + 1
   }
   var st: Int = 0
   loop st < states.count {
-    let nodesIdx: Int = states.nodesValueIdxs.get(index: st)
-    accumulateNodeIds(scene: scene, nodesIdx: nodesIdx, out: out)
+    if let nodesIdx: Int = states.nodesValueIdxs.get(index: st) {
+      accumulateNodeIds(scene: scene, nodesIdx: nodesIdx, out: out)
+    }
     st = st + 1
   }
   ret out
@@ -517,21 +520,22 @@ func framesHaveHierarchyDirectives(scene: view Scene, frames: view FrameSet) ret
   let doc: view JsonDoc => scene.doc
   var f: Int = 0
   loop f < frames.count {
-    let nodesIdx: Int = frames.nodesValueIdxs.get(index: f)
-    if nodesIdx >= 0 {
-      let nodesVal: JsonValue = json.jsonValueAt(doc: doc, idx: nodesIdx)
-      if nodesVal.kind is JsonKind.object {
-        let n: Int = json.jsonObjectLen(this: nodesVal)
-        var i: Int = 0
-        loop i < n {
-          let bag: JsonValue = json.jsonObjectValueAt(doc: doc, this: nodesVal, idx: i)
-          if bagHasKey(doc: doc, bag: bag, key: "Parent") {
-            ret true
+    if let nodesIdx: Int = frames.nodesValueIdxs.get(index: f) {
+      if nodesIdx >= 0 {
+        let nodesVal: JsonValue = json.jsonValueAt(doc: doc, idx: nodesIdx)
+        if nodesVal.kind is JsonKind.object {
+          let n: Int = json.jsonObjectLen(this: nodesVal)
+          var i: Int = 0
+          loop i < n {
+            let bag: JsonValue = json.jsonObjectValueAt(doc: doc, this: nodesVal, idx: i)
+            if bagHasKey(doc: doc, bag: bag, key: "Parent") {
+              ret true
+            }
+            if bagHasKey(doc: doc, bag: bag, key: "order") {
+              ret true
+            }
+            i = i + 1
           }
-          if bagHasKey(doc: doc, bag: bag, key: "order") {
-            ret true
-          }
-          i = i + 1
         }
       }
     }
@@ -554,7 +558,11 @@ func hierarchyWouldCycle(parentIdxs: view List(Int), nodeIdx: view Int, candidat
     if steps > nodeCount {
       ret true
     }
-    cur = parentIdxs.get(index: cur)
+    var next: Int = -1
+    if let parentValue: Int = parentIdxs.get(index: cur) {
+      next = parentValue
+    }
+    cur = next
     steps = steps + 1
   }
   ret false
@@ -589,9 +597,8 @@ func deriveActiveHierarchy(world: mod UiWorld, scene: view Scene, frames: view F
   loop e < nodeCount {
     let node: view SceneNode => sceneNodeAt(this: scene, idx: e)
     var raw: Int = -1
-    let entityOpt: opt Int = findNodeInPage(world: world, pageId: pageId, nodeId: node.nodeId)
-    if entityOpt is not none {
-      raw = entityOpt
+    if let entityRaw: Int = findNodeInPage(world: world, pageId: pageId, nodeId: node.nodeId) {
+      raw = entityRaw
     }
     entityVals.add(value: raw)
     e = e + 1
@@ -612,11 +619,12 @@ func deriveActiveHierarchy(world: mod UiWorld, scene: view Scene, frames: view F
     let kn: Int = node.childrenIds.length
     var q: Int = 0
     loop q < kn {
-      let childId: String = node.childrenIds.get(index: q)
-      let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
-      if childIdx >= 0 {
-        parentIdxs.set(index: childIdx, value: a)
-        sortKeys.set(index: childIdx, value: q.toFloat())
+      if let childId: String = node.childrenIds.get(index: q) {
+        let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
+        if childIdx >= 0 {
+          parentIdxs.set(index: childIdx, value: a)
+          sortKeys.set(index: childIdx, value: q.toFloat())
+        }
       }
       q = q + 1
     }
@@ -625,7 +633,10 @@ func deriveActiveHierarchy(world: mod UiWorld, scene: view Scene, frames: view F
 
   # Apply the active frame's directives in declared order.
   if frameIdx >= 0 {
-    let nodesIdx: Int = frames.nodesValueIdxs.get(index: frameIdx)
+    var nodesIdx: Int = -1
+    if let value: Int = frames.nodesValueIdxs.get(index: frameIdx) {
+      nodesIdx = value
+    }
     if nodesIdx >= 0 {
       let nodesVal: JsonValue = json.jsonValueAt(doc: doc, idx: nodesIdx)
       if nodesVal.kind is JsonKind.object {
@@ -659,7 +670,10 @@ func deriveActiveHierarchy(world: mod UiWorld, scene: view Scene, frames: view F
   # is never anyone's child (reparenting the root is rejected).
   var b: Int = 0
   loop b < nodeCount {
-    let parentRaw: Int = entityVals.get(index: b)
+    var parentRaw: Int = -1
+    if let value: Int = entityVals.get(index: b) {
+      parentRaw = value
+    }
     if parentRaw >= 0 {
       let parentEntity: EntityId = entityId(v: parentRaw)
       # Gather b's mounted children, selection-sorted by sort key.
@@ -689,29 +703,38 @@ func deriveActiveHierarchy(world: mod UiWorld, scene: view Scene, frames: view F
           var u: Int = 0
           loop u < childCount {
             if used.get(index: u) is 0 {
-              let candIdx: Int = unsorted.get(index: u)
-              let candKey: Float = sortKeys.get(index: candIdx)
-              var better: Bool = false
-              if bestSlot < 0 {
-                better = true
-              } else {
-                if candKey < bestKey {
-                  better = true
+              if let candIdx: Int = unsorted.get(index: u) {
+                if let candKey: Float = sortKeys.get(index: candIdx) {
+                  var better: Bool = false
+                  if bestSlot < 0 {
+                    better = true
+                  } else {
+                    if candKey < bestKey {
+                      better = true
+                    }
+                  }
+                  if better {
+                    bestSlot = u
+                    bestKey = candKey
+                  }
                 }
-              }
-              if better {
-                bestSlot = u
-                bestKey = candKey
               }
             }
             u = u + 1
           }
           used.set(index: bestSlot, value: 1)
-          let childNodeIdx: Int = unsorted.get(index: bestSlot)
-          let childEntity: EntityId = entityId(v: entityVals.get(index: childNodeIdx))
+          var childNodeIdx: Int = -1
+          if let value: Int = unsorted.get(index: bestSlot) {
+            childNodeIdx = value
+          }
+          var childEntityRaw: Int = -1
+          if let value: Int = entityVals.get(index: childNodeIdx) {
+            childEntityRaw = value
+          }
+          let childEntity: EntityId = entityId(v: childEntityRaw)
           appendEntityListFR(lst: kids, value: childEntity)
-          let pl: Parent = { parent: parentEntity }
-          componentSet(this: world.parents, entity: childEntity, data: pl)
+          let parentLink: Parent = { parent: parentEntity }
+          componentSet(this: world.parents, entity: childEntity, data: parentLink)
           t = t + 1
         }
         let ch: Children = { ids: own kids }
@@ -808,13 +831,8 @@ func applyFrameToPage(world: mod UiWorld, scene: view Scene, frames: view FrameS
     }
   }
   let overridden: List(String) = framesOverriddenNodeIds(scene: scene, frames: frames, states: states)
-  let n: Int = overridden.length
-  var i: Int = 0
-  loop i < n {
-    let nodeId: String = overridden.get(index: i)
-    let entityOpt: opt Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId)
-    if entityOpt is not none {
-      let raw: Int = entityOpt
+  loop let nodeId: view String in overridden {
+    if let raw: Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId) {
       let entity: EntityId = entityId(v: raw)
       resetNodeToBase(world: world, scene: scene, frames: frames, states: states, nodeId: nodeId, entity: entity)
       if frameIdx >= 0 {
@@ -822,14 +840,14 @@ func applyFrameToPage(world: mod UiWorld, scene: view Scene, frames: view FrameS
       }
       var st: Int = 0
       loop st < states.count {
-        let stateName: String = states.names.get(index: st)
-        if stateIsActive(activeStates: activeStates, name: stateName) {
-          overlayNodeFromState(world: world, scene: scene, states: states, stateIdx: st, nodeId: nodeId, entity: entity)
+        if let stateName: String = states.names.get(index: st) {
+          if stateIsActive(activeStates: activeStates, name: stateName) {
+            overlayNodeFromState(world: world, scene: scene, states: states, stateIdx: st, nodeId: nodeId, entity: entity)
+          }
         }
         st = st + 1
       }
     }
-    i = i + 1
   }
   # S4: re-derive the active hierarchy when any frame reparents or
   # reorders. Runs for frameIdx < 0 too — falling back to "no frame"

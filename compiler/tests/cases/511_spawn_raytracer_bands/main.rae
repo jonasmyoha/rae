@@ -26,8 +26,16 @@ func rayColor(scene: view List(Float), rdx: view Float, rdy: view Float, rdz: vi
     var k: Int = 0
     loop k < count {
         let b: Int = k * 4
-        let t: Float = hitSphere(cx: scene.get(index: b), cy: scene.get(index: b + 1),
-            cz: scene.get(index: b + 2), r: scene.get(index: b + 3),
+        var cx: Float = 0.0
+        if let value: Float = scene.get(index: b) { cx = value }
+        var cy: Float = 0.0
+        if let value: Float = scene.get(index: b + 1) { cy = value }
+        var cz: Float = 0.0
+        if let value: Float = scene.get(index: b + 2) { cz = value }
+        var radius: Float = 0.0
+        if let value: Float = scene.get(index: b + 3) { radius = value }
+        let t: Float = hitSphere(cx: cx, cy: cy,
+            cz: cz, r: radius,
             rdx: rdx, rdy: rdy, rdz: rdz)
         if t > 0.001 {
             if t < best {
@@ -42,7 +50,8 @@ func rayColor(scene: view List(Float), rdx: view Float, rdy: view Float, rdz: vi
     var cb: Float = 0.0
     if hitIdx >= 0 {
         let b: Int = hitIdx * 4
-        let sr: Float = scene.get(index: b + 3)
+        var sr: Float = 0.0
+        if let value: Float = scene.get(index: b + 3) { sr = value }
         cr = 0.5 * ((rdx * best - scene.get(index: b)) / sr + 1.0)
         cg = 0.5 * ((rdy * best - scene.get(index: b + 1)) / sr + 1.0)
         cb = 0.5 * ((rdz * best - scene.get(index: b + 2)) / sr + 1.0)

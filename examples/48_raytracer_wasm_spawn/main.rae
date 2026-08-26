@@ -60,11 +60,12 @@ func main() {
     # Emit the assembled frame: unpack each packed-RGB int into bytes.
     var p: Int = 0
     loop p < width * height {
-        let packed: Int = fb.get(index: p)
-        let rr: Int = packed / 65536
-        let gg: Int = (packed / 256) % 256
-        let bb: Int = packed % 256
-        fbPixel(r: rr, g: gg, b: bb)
+        if let packed: Int = fb.get(index: p) {
+            let rr: Int = packed / 65536
+            let gg: Int = (packed / 256) % 256
+            let bb: Int = packed % 256
+            fbPixel(r: rr, g: gg, b: bb)
+        }
         p = p + 1
     }
 }

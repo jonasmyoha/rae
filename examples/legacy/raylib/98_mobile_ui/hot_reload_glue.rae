@@ -124,9 +124,7 @@ func loadRestoredState(fallback: view RestoredState) pub ret RestoredState {
   }
   let trimmed: String = prior.trim()
   let parts: List(String) = trimmed.split(sep: ";")
-  var i: Int = 0
-  loop i < parts.length {
-    let kv: String = parts.get(index: i)
+  loop let kv: view String in parts {
     let eq: Int = kv.indexOf(sub: "=")
     if eq > 0 {
       let key: String = kv.sub(start: 0, len: eq)
@@ -138,7 +136,6 @@ func loadRestoredState(fallback: view RestoredState) pub ret RestoredState {
         result.scrollY = parseSignedInt(s: val).toFloat()
       }
     }
-    i = i + 1
   }
   clearHotReloadState()
   ret result

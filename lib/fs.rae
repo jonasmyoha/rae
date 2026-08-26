@@ -116,10 +116,11 @@ func listDir(folder: view String) pub ret List(File) {
   let result: List(File) = createList(File, cap: lines.length)
   var i: Int = 0
   loop i < lines.length {
-    let n: String = lines.get(index: i)
-    if n.length() > 0 {
-      let entry: File = { name: n, folder: folder }
-      result.add(value: entry)
+    if let n: String = lines.get(index: i) {
+      if n.length() > 0 {
+        let entry: File = { name: n, folder: folder }
+        result.add(value: entry)
+      }
     }
     i = i + 1
   }

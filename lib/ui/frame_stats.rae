@@ -55,12 +55,13 @@ func recordFrame(stats: mod FrameStats, now: view Float64, didRender: view Bool)
   var inWindow: Int = 0
   var i: Int = 0
   loop i < stats.filled {
-    let t: Float64 = stats.times.get(index: i)
-    let age64: Float64 = now - t
-    let age: Float = age64 as Float
-    if age >= 0.0 {
-      if age <= fpsWindowSec {
-        inWindow = inWindow + 1
+    if let sampleTime: Float64 = stats.times.get(index: i) {
+      let age64: Float64 = now - sampleTime
+      let age: Float = age64 as Float
+      if age >= 0.0 {
+        if age <= fpsWindowSec {
+          inWindow = inWindow + 1
+        }
       }
     }
     i = i + 1
