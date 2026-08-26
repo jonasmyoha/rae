@@ -74,12 +74,14 @@ func mountNowPlayingPage(
   addTextOverride(list: npOverrides, nodeId: artistId, value: artistText)
 
   let times: List(String) = nowPlayingTimes(playback: playback, track: track)
-  let nowStr: String = times.get(index: 0)
-  let totalStr: String = times.get(index: 1)
   let timeNowId: String = "TimeNow"
   let timeTotalId: String = "TimeTotal"
-  addTextOverride(list: npOverrides, nodeId: timeNowId, value: nowStr)
-  addTextOverride(list: npOverrides, nodeId: timeTotalId, value: totalStr)
+  if let nowStr: String = times.get(index: 0) {
+    addTextOverride(list: npOverrides, nodeId: timeNowId, value: nowStr)
+  }
+  if let totalStr: String = times.get(index: 1) {
+    addTextOverride(list: npOverrides, nodeId: timeTotalId, value: totalStr)
+  }
 
   # Scope-only mount: the PlayIcon / ProgressBar / ProgressFill
   # nodeIds get the "now-playing/..." prefix without re-tagging
@@ -115,9 +117,7 @@ func mountNowPlayingPage(
   # the radius automatically.
   if state.settings.roundedAlbumCovers {
     let heroNodeId: String = "Hero"
-    let heroOpt: opt Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: heroNodeId)
-    if heroOpt is not none {
-      let raw: Int = heroOpt
+    if let raw: Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: heroNodeId) {
       let heroEntity: EntityId = entityId(v: raw)
       let cr: CornerRadius = { radius: 52.04819277108433 }
       componentSet(this: world.cornerRadiuses, entity: heroEntity, data: cr)

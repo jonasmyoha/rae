@@ -43,10 +43,11 @@ func createFileWatcher(paths: view List(String), enabled: view Bool, intervalSec
   let entries: List(WatchEntry) = createList(WatchEntry, cap: paths.length)
   var i: Int = 0
   loop i < paths.length {
-    let p: String = paths.get(index: i)
-    let mt: Float64 = fileModTime(path: p)
-    let entry: WatchEntry = { path: p, lastMtime: mt }
-    entries.add(value: entry)
+    if let p: String = paths.get(index: i) {
+      let mt: Float64 = fileModTime(path: p)
+      let entry: WatchEntry = { path: p, lastMtime: mt }
+      entries.add(value: entry)
+    }
     i = i + 1
   }
   ret FileWatcher {

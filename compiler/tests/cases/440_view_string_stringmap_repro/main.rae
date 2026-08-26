@@ -78,17 +78,17 @@ func main() {
       let kidsAssembly: List(Int) = createList(Int, cap: kn)
       var q: Int = 0
       loop q < kn {
-        let childId: String = parent.childIds.get(index: q)
-        # Two view-String calls per iter, mirroring the multiple-wrap
-        # pattern (nodeIndex + map.get).
-        let idx: Int = nodeIndex(nodes: nodes, target: childId)
-        let entityOpt: opt Int = map.get(k: childId)
-        var entityVal: Int = -1
-        if entityOpt is not none {
-          entityVal = entityOpt
+        if let childId: String = parent.childIds.get(index: q) {
+          # Two view-String calls per iter, mirroring the multiple-wrap
+          # pattern (nodeIndex + map.get).
+          let idx: Int = nodeIndex(nodes: nodes, target: childId)
+          var entityVal: Int = -1
+          if let entityRaw: Int = map.get(k: childId) {
+            entityVal = entityRaw
+          }
+          log("parent={parent.nodeId} child=[{childId}] childLen={childId.length()} nodeIndex={idx} mapEntity={entityVal}")
+          kidsAssembly.add(value: idx)
         }
-        log("parent={parent.nodeId} child=[{childId}] childLen={childId.length()} nodeIndex={idx} mapEntity={entityVal}")
-        kidsAssembly.add(value: idx)
         q = q + 1
       }
     }

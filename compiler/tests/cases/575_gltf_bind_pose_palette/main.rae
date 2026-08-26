@@ -48,17 +48,18 @@ func main() {
     loop r < 3 {
       var c: Int = 0
       loop c < 4 {
-        let v: Float = palette.at(index: j * 12 + r * 4 + c)
-        var expected: Float = 0.0
-        if r is c {
-          expected = 1.0
-        }
-        var d: Float = v - expected
-        if d < 0.0 {
-          d = 0.0 - d
-        }
-        if d > worst {
-          worst = d
+        if let v: Float = palette.at(index: j * 12 + r * 4 + c) {
+          var expected: Float = 0.0
+          if r is c {
+            expected = 1.0
+          }
+          var d: Float = v - expected
+          if d < 0.0 {
+            d = 0.0 - d
+          }
+          if d > worst {
+            worst = d
+          }
         }
         c = c + 1
       }

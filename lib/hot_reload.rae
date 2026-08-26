@@ -321,19 +321,25 @@ func pollReloadSignal(w: mod ReloadSignalWatcher) pub ret ReloadSignal {
   if parts.length is 0 {
     ret emptySignal()
   }
-  let verbTok: String = parts.get(index: 0)
-  let verb: ReloadVerb = parseReloadVerb(token: verbTok)
-  var buildId: String = ""
-  if parts.length > 1 {
-    buildId = parts.get(index: 1)
+  if let verbTok: String = parts.get(index: 0) {
+    let verb: ReloadVerb = parseReloadVerb(token: verbTok)
+    var buildId: String = ""
+    if parts.length > 1 {
+      if let part1: String = parts.get(index: 1) {
+        buildId = "{part1}"
+      }
+    }
+    var timestamp: String = ""
+    if parts.length > 2 {
+      if let part2: String = parts.get(index: 2) {
+        timestamp = "{part2}"
+      }
+    }
+    ret ReloadSignal {
+      verb: verb
+      buildId: buildId
+      timestampMs: timestamp
+    }
   }
-  var timestamp: String = ""
-  if parts.length > 2 {
-    timestamp = parts.get(index: 2)
-  }
-  ret ReloadSignal {
-    verb: verb
-    buildId: buildId
-    timestampMs: timestamp
-  }
+  ret emptySignal()
 }

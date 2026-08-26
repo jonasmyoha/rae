@@ -6,6 +6,21 @@
 # (`mod BitReader`) as bits are consumed.
 import core
 
+# Bounds-safe flat-buffer read helpers, shared by the inflate/deflate codec.
+# List `.get(index:)` returns `opt Int`; the DEFLATE code indexes tables,
+# windows and hash chains where the caller already guarantees the index is in
+# range, so these unwrap with an explicit fallback rather than an `if let` at
+# every call site. `bufAt` falls back to 0 (byte/code/table values); `chainAt`
+# falls back to -1 (the "no candidate" sentinel used by the LZ77 hash chains).
+func bufAt(list: view List(Int), index: view Int) ret Int {
+    if let value: Int = list.get(index: index) { ret value }
+    ret 0
+}
+func chainAt(list: view List(Int), index: view Int) ret Int {
+    if let value: Int = list.get(index: index) { ret value }
+    ret -1
+}
+
 type BitReader {
     data: List(Int)   # source bytes (each 0..255)
     len: Int          # number of valid bytes
@@ -24,14 +39,16 @@ func getBit(this: mod BitReader) ret Int {
         this.overrun = true
         ret 0
     }
-    let b: Int = this.data.get(index: this.pos)
-    let v: Int = (b shr this.bit) bitand 1
-    this.bit = this.bit + 1
-    if this.bit is 8 {
-        this.bit = 0
-        this.pos = this.pos + 1
+    if let byte: Int = this.data.get(index: this.pos) {
+        let bitValue: Int = (byte shr this.bit) bitand 1
+        this.bit = this.bit + 1
+        if this.bit is 8 {
+            this.bit = 0
+            this.pos = this.pos + 1
+        }
+        ret bitValue
     }
-    ret v
+    ret 0
 }
 
 # Read n bits (LSB-first: the first bit read is the least significant).
@@ -60,9 +77,11 @@ func getByte(this: mod BitReader) ret Int {
         this.overrun = true
         ret 0
     }
-    let b: Int = this.data.get(index: this.pos)
-    this.pos = this.pos + 1
-    ret b
+    if let byte: Int = this.data.get(index: this.pos) {
+        this.pos = this.pos + 1
+        ret byte
+    }
+    ret 0
 }
 
 # LSB-first bit writer for DEFLATE deflate: accumulates bits into a partial

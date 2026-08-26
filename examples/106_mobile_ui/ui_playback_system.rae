@@ -99,11 +99,12 @@ func nowPlayingCoverSeed(playback: view PlaybackState, browsedStem: view String)
 }
 
 func tagPlaybackCoverDependency(world: mod UiWorld, pageId: view String, nodeId: view String, observedRevision: view Int, artKey: view String) pub {
-  let entityOpt: opt Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId)
-  if entityOpt is none {
+  var raw: Int = -1
+  if let value: Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId) {
+    raw = value
+  } else {
     ret
   }
-  let raw: Int = entityOpt
   let entity: EntityId = entityId(v: raw)
   if componentHas(this: world.sprites, entity: entity) {
     repointCoverSprite(world: world, entity: entity, artKey: artKey)

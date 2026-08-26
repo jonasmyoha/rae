@@ -39,22 +39,28 @@ func resolveTextSize(theme: view ResolvedTheme, styleId: view String) pub ret Fl
   if i < 0 {
     ret styleBodySize
   }
-  let sz: Float = theme.textSizes.get(index: i)
-  ret sz
+  if let sz: Float = theme.textSizes.get(index: i) {
+    ret sz
+  }
+  ret styleBodySize
 }
 
 func resolveTextWeight(theme: view ResolvedTheme, styleId: view String) pub ret Float {
   let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
   if i < 0 { ret 400.0 }
-  let weight: Float = theme.textWeights.get(index: i)
-  ret weight
+  if let weight: Float = theme.textWeights.get(index: i) {
+    ret weight
+  }
+  ret 400.0
 }
 
 func resolveTextLineHeight(theme: view ResolvedTheme, styleId: view String) pub ret Float {
   let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
   if i < 0 { ret 1.0 }
-  let lineHeight: Float = theme.textLineHeights.get(index: i)
-  ret lineHeight
+  if let lineHeight: Float = theme.textLineHeights.get(index: i) {
+    ret lineHeight
+  }
+  ret 1.0
 }
 
 func resolveTextColor(theme: view ResolvedTheme, styleId: view String) pub ret RgbaColor {
@@ -66,10 +72,14 @@ func resolveTextColor(theme: view ResolvedTheme, styleId: view String) pub ret R
   if slot.length() > 0 {
     ret themeColorByName(name: slot)
   }
-  let r: Int = theme.textColorR.get(index: i)
-  let g: Int = theme.textColorG.get(index: i)
-  let b: Int = theme.textColorB.get(index: i)
-  let a: Int = theme.textColorA.get(index: i)
+  var r: Int = 0
+  var g: Int = 0
+  var b: Int = 0
+  var a: Int = 255
+  if let colorRVal: Int = theme.textColorR.get(index: i) { r = colorRVal }
+  if let colorGVal: Int = theme.textColorG.get(index: i) { g = colorGVal }
+  if let colorBVal: Int = theme.textColorB.get(index: i) { b = colorBVal }
+  if let colorAVal: Int = theme.textColorA.get(index: i) { a = colorAVal }
   ret RgbaColor { r: r, g: g, b: b, a: a }
 }
 
@@ -78,8 +88,10 @@ func resolveTextIsCentered(theme: view ResolvedTheme, styleId: view String) pub 
   if i < 0 {
     ret false
   }
-  let al: Int = theme.textAligns.get(index: i)
-  ret al is themeAlignCenter
+  if let al: Int = theme.textAligns.get(index: i) {
+    ret al is themeAlignCenter
+  }
+  ret false
 }
 
 func resolveTextIsRightAligned(theme: view ResolvedTheme, styleId: view String) pub ret Bool {
@@ -87,8 +99,10 @@ func resolveTextIsRightAligned(theme: view ResolvedTheme, styleId: view String) 
   if i < 0 {
     ret false
   }
-  let al: Int = theme.textAligns.get(index: i)
-  ret al is themeAlignEnd
+  if let al: Int = theme.textAligns.get(index: i) {
+    ret al is themeAlignEnd
+  }
+  ret false
 }
 
 # The shadow-token name a style references, or "" for no shadow
