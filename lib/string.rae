@@ -271,10 +271,14 @@ func join(this: view List(String), sep: view String) ret String {
   # this through its no-match split ([whole string] -> join).
   # "".concat(elem) always allocates a private heap for the result.
   var result: String = ""
-  result = result.concat(other: get(this, index: 0))
+  if let head: String = copyAt(this, index: 0) {
+    result = result.concat(other: head)
+  }
   var i: Int = 1
   loop i < this.length {
-    result = result.concat(other: sep).concat(other: get(this, index: i))
+    if let element: String = copyAt(this, index: i) {
+      result = result.concat(other: sep).concat(other: element)
+    }
     i = i + 1
   }
   ret result

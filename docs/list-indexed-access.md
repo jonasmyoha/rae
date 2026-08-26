@@ -7,19 +7,19 @@ Status: implemented for the Compiled (C backend) target. Live is deprecated and 
 All public indexed reads and element borrows are checked against logical `List.length`:
 
 ```text
-at(index: Int)     -> opt T
+copyAt(index: Int) -> opt T
 viewAt(index: Int) -> opt view T
 modAt(index: Int)  -> opt mod T
 ```
 
 Negative indices and indices greater than or equal to `length` return `none`. Capacity is not part of the check. There is no public raw, unsafe, or unchecked accessor.
 
-`get`, `viewGet`, and `modGet` remain temporary compatibility aliases with the same optional semantics. New code should use the `At` names; the aliases can be removed after callers have migrated.
+The accessor triad is `copyAt` / `viewAt` / `modAt`: the leading verb states copy-vs-alias intent at the call site — `copyAt` hands back a COPY of the element (a whole-struct copy, including deep copies of any owned heap fields), `viewAt`/`modAt` alias the list's storage. The old `at` and the `get` / `viewGet` / `modGet` compatibility aliases were removed in #643; `at` and `get` no longer resolve on a `List`.
 
 Owned optionals narrow with `=`; reference optionals narrow with `=>`:
 
 ```rae
-if let value: Track = tracks.at(index: index) {
+if let value: Track = tracks.copyAt(index: index) {
   consume(track: value)
 }
 
@@ -56,8 +56,8 @@ Direct mutation of the iterated List through `add`, `set`, `insert`, `remove`, `
 
 The reproducible suite is in `benchmarks/list_access`. On the recorded Apple M1 Max run, optimized Rae was within measurement noise of the equivalent optimized C checked access and pointer loops:
 
-- sequential `at` + `if let`: 0.97x C checked;
-- pseudo-random `at` + `if let`: 1.00x C checked;
+- sequential `copyAt` + `if let`: 0.97x C checked;
+- pseudo-random `copyAt` + `if let`: 1.00x C checked;
 - collection `view` loop: 1.03x C pointer loop;
 - 64-byte struct `viewAt` + `if let`: 0.98x C pointer access.
 

@@ -39,7 +39,7 @@ func resolveTextSize(theme: view ResolvedTheme, styleId: view String) pub ret Fl
   if i < 0 {
     ret styleBodySize
   }
-  if let sz: Float = theme.textSizes.get(index: i) {
+  if let sz: Float = theme.textSizes.copyAt(index: i) {
     ret sz
   }
   ret styleBodySize
@@ -48,7 +48,7 @@ func resolveTextSize(theme: view ResolvedTheme, styleId: view String) pub ret Fl
 func resolveTextWeight(theme: view ResolvedTheme, styleId: view String) pub ret Float {
   let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
   if i < 0 { ret 400.0 }
-  if let weight: Float = theme.textWeights.get(index: i) {
+  if let weight: Float = theme.textWeights.copyAt(index: i) {
     ret weight
   }
   ret 400.0
@@ -57,7 +57,7 @@ func resolveTextWeight(theme: view ResolvedTheme, styleId: view String) pub ret 
 func resolveTextLineHeight(theme: view ResolvedTheme, styleId: view String) pub ret Float {
   let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
   if i < 0 { ret 1.0 }
-  if let lineHeight: Float = theme.textLineHeights.get(index: i) {
+  if let lineHeight: Float = theme.textLineHeights.copyAt(index: i) {
     ret lineHeight
   }
   ret 1.0
@@ -76,10 +76,10 @@ func resolveTextColor(theme: view ResolvedTheme, styleId: view String) pub ret R
   var g: Int = 0
   var b: Int = 0
   var a: Int = 255
-  if let colorRVal: Int = theme.textColorR.get(index: i) { r = colorRVal }
-  if let colorGVal: Int = theme.textColorG.get(index: i) { g = colorGVal }
-  if let colorBVal: Int = theme.textColorB.get(index: i) { b = colorBVal }
-  if let colorAVal: Int = theme.textColorA.get(index: i) { a = colorAVal }
+  if let colorRVal: Int = theme.textColorR.copyAt(index: i) { r = colorRVal }
+  if let colorGVal: Int = theme.textColorG.copyAt(index: i) { g = colorGVal }
+  if let colorBVal: Int = theme.textColorB.copyAt(index: i) { b = colorBVal }
+  if let colorAVal: Int = theme.textColorA.copyAt(index: i) { a = colorAVal }
   ret RgbaColor { r: r, g: g, b: b, a: a }
 }
 
@@ -88,7 +88,7 @@ func resolveTextIsCentered(theme: view ResolvedTheme, styleId: view String) pub 
   if i < 0 {
     ret false
   }
-  if let al: Int = theme.textAligns.get(index: i) {
+  if let al: Int = theme.textAligns.copyAt(index: i) {
     ret al is themeAlignCenter
   }
   ret false
@@ -99,7 +99,7 @@ func resolveTextIsRightAligned(theme: view ResolvedTheme, styleId: view String) 
   if i < 0 {
     ret false
   }
-  if let al: Int = theme.textAligns.get(index: i) {
+  if let al: Int = theme.textAligns.copyAt(index: i) {
     ret al is themeAlignEnd
   }
   ret false

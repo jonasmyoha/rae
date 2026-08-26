@@ -6,7 +6,7 @@ import scene
 import camera
 
 func sphereValueAt(world: view List(Sphere), index: view Int) ret Sphere {
-    if let sphere: Sphere = world.at(index: index) { ret sphere }
+    if let sphere: Sphere = world.copyAt(index: index) { ret sphere }
     ret Sphere {
         center: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, radius: 1.0,
         material: Material { kind: 0, albedo: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, fuzz: 0.0, ior: 1.0 }
@@ -156,7 +156,7 @@ func writeTile(fb: mod List(Int), tile: view List(Int), width: view Int,
         let src: Int = ry * tw
         var rx: Int = 0
         loop rx < tw {
-            fb.set(index: dst + rx, value: tile.get(index: src + rx))
+            fb.set(index: dst + rx, value: tile.copyAt(index: src + rx))
             rx = rx + 1
         }
         ry = ry + 1

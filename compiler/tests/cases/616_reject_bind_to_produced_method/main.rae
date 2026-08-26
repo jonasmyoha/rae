@@ -1,4 +1,4 @@
-# The method-call twin of 615: `l.at(index:)` returns an optional owned value;
+# The method-call twin of 615: `l.copyAt(index:)` returns an optional owned value;
 # it cannot bind directly to a reference. Test 610 covers `viewAt`, which
 # returns an optional reference and narrows through `if let`.
 import core
@@ -11,6 +11,6 @@ type Track {
 func main() {
   var l: List(Track) = createList(Track, cap: 1)
   l.add(value: Track { title: "first", seconds: 1 })
-  let e: view Track => l.at(index: 0)
+  let e: view Track => l.copyAt(index: 0)
   log("should not run")
 }

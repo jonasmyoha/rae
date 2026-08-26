@@ -36,9 +36,9 @@ static bool emit_list_if_let(CFuncContext* ctx, const AstStmt* stmt, FILE* out) 
       || !binding->as.let_stmt.type) return false;
   const AstExpr* call = binding->as.let_stmt.value;
   Str method = call->as.method_call.method_name;
-  bool owned = str_eq_cstr(method, "at") || str_eq_cstr(method, "get");
-  bool viewed = str_eq_cstr(method, "viewAt") || str_eq_cstr(method, "viewGet");
-  bool modified = str_eq_cstr(method, "modAt") || str_eq_cstr(method, "modGet");
+  bool owned = str_eq_cstr(method, "copyAt");
+  bool viewed = str_eq_cstr(method, "viewAt");
+  bool modified = str_eq_cstr(method, "modAt");
   if (!owned && !viewed && !modified) return false;
   const AstTypeRef* list_type = infer_expr_type_ref(ctx, call->as.method_call.object);
   if (!list_type || !str_eq_cstr(get_base_type_name(list_type), "List")) return false;
@@ -244,12 +244,9 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
     return;
   }
   if (value->kind == AST_EXPR_METHOD_CALL
-      && (str_eq_cstr(value->as.method_call.method_name, "get")
-          || str_eq_cstr(value->as.method_call.method_name, "at")
+      && (str_eq_cstr(value->as.method_call.method_name, "copyAt")
           || str_eq_cstr(value->as.method_call.method_name, "viewAt")
-          || str_eq_cstr(value->as.method_call.method_name, "viewGet")
-          || str_eq_cstr(value->as.method_call.method_name, "modAt")
-          || str_eq_cstr(value->as.method_call.method_name, "modGet"))) {
+          || str_eq_cstr(value->as.method_call.method_name, "modAt"))) {
     bool saved_unbox = ctx->suppress_opt_unbox;
     ctx->suppress_opt_unbox = true;
     emit_expr(ctx, value, out, PREC_LOWEST, false, false);
@@ -258,7 +255,7 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
   }
   if (value->kind == AST_EXPR_CALL && value->as.call.callee
       && value->as.call.callee->kind == AST_EXPR_IDENT
-      && str_eq_cstr(value->as.call.callee->as.ident, "get")) {
+      && str_eq_cstr(value->as.call.callee->as.ident, "copyAt")) {
     bool saved_unbox = ctx->suppress_opt_unbox;
     ctx->suppress_opt_unbox = true;
     emit_expr(ctx, value, out, PREC_LOWEST, false, false);

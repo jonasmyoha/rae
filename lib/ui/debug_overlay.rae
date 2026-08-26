@@ -120,7 +120,7 @@ func debugPointInRect(px: view Float, py: view Float, x: view Float, y: view Flo
 func debugPruneFrames(d: mod DebugOverlay, now: view Float64) {
   let times: mod List(Float64) => d.frameTimes
   loop times.length > 1 {
-    let cutoff: Float = (now - times.get(index: 0)) as Float
+    let cutoff: Float = (now - times.copyAt(index: 0)) as Float
     if cutoff <= d.fpsWindowSec {
       ret
     }
@@ -139,7 +139,7 @@ func debugRecordFrame(d: mod DebugOverlay, now: view Float64, didRealWork: view 
   let n: Int = d.frameTimes.length
   var fps: Float = 0.0
   if n > 1 {
-    let span: Float = (d.frameTimes.get(index: n - 1) - d.frameTimes.get(index: 0)) as Float
+    let span: Float = (d.frameTimes.copyAt(index: n - 1) - d.frameTimes.copyAt(index: 0)) as Float
     if span > 0.0 {
       fps = (n - 1).toFloat() / span
     }

@@ -23,11 +23,11 @@ func main() {
   # shadow + align inherited from miniTitle (center=1).
   let mi: Int = themeTextStyleIndex(theme: theme, styleId: "miniMuted")
   var align: Int = 0
-  if let alignVal: Int = theme.textAligns.get(index: mi) { align = alignVal }
-  let size: Int = theme.textSizes.get(index: mi).toInt()
-  if let font: String = theme.textFonts.get(index: mi) {
-    if let slot: String = theme.textColorSlots.get(index: mi) {
-      if let shadow: String = theme.textShadowNames.get(index: mi) {
+  if let alignVal: Int = theme.textAligns.copyAt(index: mi) { align = alignVal }
+  let size: Int = theme.textSizes.copyAt(index: mi).toInt()
+  if let font: String = theme.textFonts.copyAt(index: mi) {
+    if let slot: String = theme.textColorSlots.copyAt(index: mi) {
+      if let shadow: String = theme.textShadowNames.copyAt(index: mi) {
         log("miniMuted font={font} size={size} color={slot} shadow={shadow} align={align}")
       }
     }
@@ -36,16 +36,16 @@ func main() {
   # 'softer' inherits offset+softness from 'soft', overrides alpha.
   let si: Int = themeShadowIndex(theme: theme, name: "softer")
   var sa: Int = 0
-  if let shadowAVal: Int = theme.shadowA.get(index: si) { sa = shadowAVal }
-  let sox: Int = theme.shadowOffX.get(index: si).toInt()
-  let ssoft: Int = theme.shadowSoft.get(index: si).toInt()
+  if let shadowAVal: Int = theme.shadowA.copyAt(index: si) { sa = shadowAVal }
+  let sox: Int = theme.shadowOffX.copyAt(index: si).toInt()
+  let ssoft: Int = theme.shadowSoft.copyAt(index: si).toInt()
   log("softer a={sa} offX={sox} soft={ssoft}")
 
   # cycle + unknown-parent styles still resolve (truncated), not hang.
   let ca: Int = themeTextStyleIndex(theme: theme, styleId: "cycleA")
-  let caSize: Int = theme.textSizes.get(index: ca).toInt()
+  let caSize: Int = theme.textSizes.copyAt(index: ca).toInt()
   log("cycleA size={caSize}")
   let oi: Int = themeTextStyleIndex(theme: theme, styleId: "orphan")
-  let oSize: Int = theme.textSizes.get(index: oi).toInt()
+  let oSize: Int = theme.textSizes.copyAt(index: oi).toInt()
   log("orphan size={oSize}")
 }

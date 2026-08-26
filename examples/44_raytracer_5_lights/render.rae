@@ -11,7 +11,7 @@ import scene
 import camera
 
 func sphereValueAt(world: view List(Sphere), index: view Int) ret Sphere {
-    if let sphere: Sphere = world.at(index: index) { ret sphere }
+    if let sphere: Sphere = world.copyAt(index: index) { ret sphere }
     ret Sphere {
         center: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, radius: 1.0,
         material: Material { kind: 0, albedo: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, fuzz: 0.0, ior: 1.0 }
@@ -162,12 +162,12 @@ func mergeBand(accum: mod List(Float), tile: view List(Float), off: view Int, ov
     var i: Int = 0
     loop i < tile.length {
         if overwrite {
-            if let tileValue: Float = tile.get(index: i) {
+            if let tileValue: Float = tile.copyAt(index: i) {
                 accum.set(index: off + i, value: tileValue)
             }
         } else {
-            if let accValue: Float = accum.get(index: off + i) {
-                if let tileValue: Float = tile.get(index: i) {
+            if let accValue: Float = accum.copyAt(index: off + i) {
+                if let tileValue: Float = tile.copyAt(index: i) {
                     accum.set(index: off + i, value: accValue + tileValue)
                 }
             }
@@ -196,9 +196,9 @@ func buildDisplay(fb: mod List(Int), accum: view List(Float), pixels: view Int, 
         var accR: Float = 0.0
         var accG: Float = 0.0
         var accB: Float = 0.0
-        if let value: Float = accum.get(index: base) { accR = value }
-        if let value: Float = accum.get(index: base + 1) { accG = value }
-        if let value: Float = accum.get(index: base + 2) { accB = value }
+        if let value: Float = accum.copyAt(index: base) { accR = value }
+        if let value: Float = accum.copyAt(index: base + 1) { accG = value }
+        if let value: Float = accum.copyAt(index: base + 2) { accB = value }
         let r: Float = math.sqrt(x: clampf(x: accR * inv))
         let g: Float = math.sqrt(x: clampf(x: accG * inv))
         let b: Float = math.sqrt(x: clampf(x: accB * inv))

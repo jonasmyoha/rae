@@ -7,7 +7,7 @@
 #   let entries: List(File) = listDir(folder: "assets/album_art")
 #   let i: Int = 0
 #   loop i < entries.length {
-#     let f: File = entries.get(index: i)
+#     let f: File = entries.copyAt(index: i)
 #     if f.extension().equals(other: "jpg") {
 #       let bytes: opt String = readFile(path: f.path())
 #       ...
@@ -116,7 +116,7 @@ func listDir(folder: view String) pub ret List(File) {
   let result: List(File) = createList(File, cap: lines.length)
   var i: Int = 0
   loop i < lines.length {
-    if let n: String = lines.get(index: i) {
+    if let n: String = lines.copyAt(index: i) {
       if n.length() > 0 {
         let entry: File = { name: n, folder: folder }
         result.add(value: entry)

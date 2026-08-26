@@ -256,11 +256,11 @@ func parseBuildStatus(raw: view String) pub ret BuildStatus {
   if lines.length is 0 {
     ret emptyBuildStatus()
   }
-  let kind: String = lines.get(index: 0).trim()
+  let kind: String = lines.copyAt(index: 0).trim()
   let okFlag: Bool = kind.equals(other: "ok")
   var msg: String = ""
   if lines.length > 1 {
-    msg = lines.get(index: 1).trim()
+    msg = lines.copyAt(index: 1).trim()
   }
   ret BuildStatus {
     present: true
@@ -321,17 +321,17 @@ func pollReloadSignal(w: mod ReloadSignalWatcher) pub ret ReloadSignal {
   if parts.length is 0 {
     ret emptySignal()
   }
-  if let verbTok: String = parts.get(index: 0) {
+  if let verbTok: String = parts.copyAt(index: 0) {
     let verb: ReloadVerb = parseReloadVerb(token: verbTok)
     var buildId: String = ""
     if parts.length > 1 {
-      if let part1: String = parts.get(index: 1) {
+      if let part1: String = parts.copyAt(index: 1) {
         buildId = "{part1}"
       }
     }
     var timestamp: String = ""
     if parts.length > 2 {
-      if let part2: String = parts.get(index: 2) {
+      if let part2: String = parts.copyAt(index: 2) {
         timestamp = "{part2}"
       }
     }

@@ -224,7 +224,7 @@ bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
                   if (!entry) {
                       // Try common list methods
                       if (str_eq_cstr(method_name, "add")) entry = function_table_find(&compiler->compiler_ctx->functions, str_from_cstr("rae_list_add"));
-                      else if (str_eq_cstr(method_name, "get")) entry = function_table_find(&compiler->compiler_ctx->functions, str_from_cstr("rae_list_get"));
+                      else if (str_eq_cstr(method_name, "copyAt")) entry = function_table_find(&compiler->compiler_ctx->functions, str_from_cstr("rae_list_get"));
                   }
                   if (entry && entry->returns_ref) {
                       already_ref = true;

@@ -18,9 +18,9 @@ func main() {
   # `is not none` on opt T — uses the runtime tag check, not RaeAny ==
   let xs: List(Int) = createList(Int, cap: 2)
   add(xs, value: 42)
-  let g: opt Int = get(xs, index: 0)
+  let g: opt Int = copyAt(xs, index: 0)
   log("populated is not none: {g is not none}")
-  let m: opt Int = get(xs, index: 99)
+  let m: opt Int = copyAt(xs, index: 99)
   log("oob is not none: {m is not none}")
 
   # Selection-sort idiom that prompted this work
