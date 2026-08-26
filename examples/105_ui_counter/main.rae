@@ -105,7 +105,9 @@ func rememberValue(state: mod CounterState, value: view Int) {
   next.add(value: value)
   var i: Int = 0
   loop i < state.history.length and next.length < historyRows {
-    next.add(value: state.history.at(index: i))
+    if let entry: Int = state.history.at(index: i) {
+      next.add(value: entry)
+    }
     i = i + 1
   }
   state.history = own next
@@ -123,8 +125,7 @@ func syncUi(world: mod UiWorld, state: view CounterState) {
   var row: Int = 0
   loop row < historyRows {
     let nodeId: String = "Hist{row}"
-    if row < state.history.length {
-      let entry: Int = state.history.at(index: row)
+    if let entry: Int = state.history.at(index: row) {
       # Newest row gets an arrow, so the ordering is visible rather than implied.
       if row is 0 {
         setNodeText(world: world, nodeId: nodeId, value: "-> {entry}")
@@ -263,8 +264,14 @@ func main() ret Int {
       # A value change is what the history records. The step buttons report a
       # change too, so the check is on the value itself, not on "something
       # changed".
-      if state.history.length is 0 or state.history.at(index: 0) is not state.value {
+      if state.history.length is 0 {
         rememberValue(state: state, value: state.value)
+      } else {
+        if let head: Int = state.history.at(index: 0) {
+          if head is not state.value {
+            rememberValue(state: state, value: state.value)
+          }
+        }
       }
       syncUi(world: world, state: state)
       changed = true

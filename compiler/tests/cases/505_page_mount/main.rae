@@ -57,27 +57,25 @@ func main() {
   log("foundA={foundA.value} foundB={foundB.value} foundNone.isNone={isNone(this: foundNone)}")
 
   # Scoped lookups resolve to the per-page Body entity.
-  let bodyAOpt: opt Int = findNodeInPage(world: world, pageId: pageA, nodeId: "Body")
-  let bodyBOpt: opt Int = findNodeInPage(world: world, pageId: pageB, nodeId: "Body")
-  if bodyAOpt is none {
+  if let bodyA: Int = findNodeInPage(world: world, pageId: pageA, nodeId: "Body") {
+    log("bodyA={bodyA}")
+  } else {
     log("bodyA missing")
-  } else {
-    let v: Int = bodyAOpt
-    log("bodyA={v}")
   }
-  if bodyBOpt is none {
-    log("bodyB missing")
+  if let bodyB: Int = findNodeInPage(world: world, pageId: pageB, nodeId: "Body") {
+    log("bodyB={bodyB}")
   } else {
-    let v: Int = bodyBOpt
-    log("bodyB={v}")
+    log("bodyB missing")
   }
 
   # pageOf walks Parent up from the Body entity back to its PageRoot.
-  let bodyARawOpt: opt Int = findNodeInPage(world: world, pageId: pageA, nodeId: "Body")
-  let bodyARaw: Int = bodyARawOpt
-  let bodyAEntity: EntityId = entityId(v: bodyARaw)
-  let owningPage: String = pageOf(world: world, entity: bodyAEntity)
-  log("pageOf(bodyA)={owningPage}")
+  if let bodyARaw: Int = findNodeInPage(world: world, pageId: pageA, nodeId: "Body") {
+    let bodyAEntity: EntityId = entityId(v: bodyARaw)
+    let owningPage: String = pageOf(world: world, entity: bodyAEntity)
+    log("pageOf(bodyA)={owningPage}")
+  } else {
+    log("bodyA missing")
+  }
 
   # Active default + toggle
   log("isPageActive(A) initial={isPageActive(world: world, pageId: pageA)}")

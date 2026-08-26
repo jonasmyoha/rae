@@ -15,8 +15,9 @@ func describe(c: view Card) ret String {
   var out: String = ""
   out = out.concat(other: c.title)
   if c.note is not none {
-    let n: String = c.note
-    out = out.concat(other: "/").concat(other: n)
+    if let n: view String => c.note {
+      out = out.concat(other: "/").concat(other: n)
+    }
   }
   ret out
 }
@@ -37,9 +38,8 @@ func main() {
   var o: opt String = makeNote(flag: true)
   o = makeNote(flag: false)
   o = makeNote(flag: true)
-  if o is not none {
-    let s: String = o
-    log("o={s}")
+  if let noteText: view String => o {
+    log("o={noteText}")
   }
 
   # Struct with an opt String field: literal init with an own-moved
@@ -56,8 +56,7 @@ func main() {
   var plain: String = ""
   plain = plain.concat(other: "wrapped")
   var w: opt String = plain
-  if w is not none {
-    let ws: String = w
-    log("w={ws}")
+  if let wrapped: view String => w {
+    log("w={wrapped}")
   }
 }

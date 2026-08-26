@@ -36,11 +36,16 @@ func deg(a: view Float) ret Int {
 }
 
 # Angle between a vertex's resulting normal and a reference direction.
+func vertComp(m: view MeshData, index: copy Int) ret Float {
+  if let value: Float = m.verts.at(index: index) { ret value }
+  ret 0.0
+}
+
 func angleTo(m: view MeshData, i: view Int,
              rx: view Float, ry: view Float, rz: view Float) ret Int {
-  let nx: Float = m.verts.at(index: i * 8 + 3)
-  let ny: Float = m.verts.at(index: i * 8 + 4)
-  let nz: Float = m.verts.at(index: i * 8 + 5)
+  let nx: Float = vertComp(m: m, index: i * 8 + 3)
+  let ny: Float = vertComp(m: m, index: i * 8 + 4)
+  let nz: Float = vertComp(m: m, index: i * 8 + 5)
   var d: Float = nx * rx + ny * ry + nz * rz
   if d > 1.0 { d = 1.0 }
   if d < 0.0 - 1.0 { d = 0.0 - 1.0 }
@@ -79,5 +84,6 @@ func main() {
 
   # 4: counts and other attributes survive.
   log("vertCount {out.vertCount}, indices {out.indices.length}")
-  log("uv preserved: {out.verts.at(index: 2 * 8 + 6)}")
+  let uv: Float = vertComp(m: out, index: 2 * 8 + 6)
+  log("uv preserved: {uv}")
 }

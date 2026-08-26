@@ -190,9 +190,14 @@ exist.
 
 ## 8. Compiler follow-ups this surfaced
 
-1. **Bug:** `let x: Struct = list.get/at(index:)` (opt-struct → non-opt-struct direct
-   assign) emits non-compiling C. Make it a clear sema error or a valid unwrap.
-   Scalars already work.
+1. **Bug — RESOLVED (#642).** `let x: Struct = list.get/at(index:)` (opt-struct →
+   non-opt-struct direct assign) used to emit non-compiling C, while the scalar
+   form silently unwrapped (none → 0, no diagnostic). Assigning `opt T` to a
+   non-optional binding, argument, or return is now a **uniform hard sema error
+   for every `T`** — scalar accessors, struct accessors, and user functions
+   returning `opt` — with the message *"optional not unwrapped — use `if let`"*.
+   Every optional is consumed with `if let` (no `!`/default operator was added);
+   the silent-unwrap path is gone.
 2. **Enhancement:** add a real `alias` (type-alias) mechanism if the semantic-name
    direction is adopted — a small, well-contained change in type resolution.
 
