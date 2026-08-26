@@ -125,7 +125,7 @@ func isOccupied(g: view Game, x: view Int, y: view Int) ret Int {
     # Allow pieces above the board
     ret 0
   }
-  if let cell: Int = g.grid.get(index: y * g.width + x) {
+  if let cell: Int = g.grid.copyAt(index: y * g.width + x) {
     if cell > 0 {
       ret 1
     }
@@ -312,7 +312,7 @@ func checkLines(g: mod Game) {
     var full: Int = 1
     var x: Int = 0
     loop x < g.width {
-      if let cell: Int = grid.get(index: y * g.width + x) {
+      if let cell: Int = grid.copyAt(index: y * g.width + x) {
         if cell is 0 {
           full = 0
         }
@@ -326,7 +326,7 @@ func checkLines(g: mod Game) {
       loop ty > 0 {
         var tx: Int = 0
         loop tx < g.width {
-          if let above: Int = grid.get(index: (ty - 1) * g.width + tx) {
+          if let above: Int = grid.copyAt(index: (ty - 1) * g.width + tx) {
             grid.set(index: ty * g.width + tx, value: above)
           }
           tx = tx + 1
@@ -524,7 +524,7 @@ func drawGame(g: view Game) {
   loop y < g.height {
     var x: Int = 0
     loop x < g.width {
-      if let val: Int = g.grid.get(index: y * g.width + x) {
+      if let val: Int = g.grid.copyAt(index: y * g.width + x) {
         if val > 0 {
           drawCell(
             x: x.toFloat() * cellSize + offsetX

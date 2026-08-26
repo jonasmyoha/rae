@@ -166,7 +166,7 @@ func themeSpaceValue(theme: view ResolvedTheme, name: view String, fallback: vie
   loop i < theme.spaceNames.length {
     let n: String = rae_ext_rae_buf_get(buf: theme.spaceNames.data, index: i)
     if n.equals(other: name) {
-      if let value: Float = theme.spaceVals.get(index: i) {
+      if let value: Float = theme.spaceVals.copyAt(index: i) {
         ret value
       }
     }
@@ -180,7 +180,7 @@ func themeRadiusValue(theme: view ResolvedTheme, name: view String, fallback: vi
   loop i < theme.radiusNames.length {
     let n: String = rae_ext_rae_buf_get(buf: theme.radiusNames.data, index: i)
     if n.equals(other: name) {
-      if let value: Float = theme.radiusVals.get(index: i) {
+      if let value: Float = theme.radiusVals.copyAt(index: i) {
         ret value
       }
     }
@@ -391,7 +391,7 @@ func parseThemeShadows(out: mod ResolvedTheme, doc: view JsonDoc, root: view Jso
     var soft: Float = 1.0
     var c: Int = 0
     loop c < chain.length {
-      if let bagIdx: Int = chain.get(index: c) {
+      if let bagIdx: Int = chain.copyAt(index: c) {
         let bag: JsonValue = json.jsonValueAt(doc: doc, idx: bagIdx)
         let colIdx: Int = json.jsonField(doc: doc, this: bag, key: "color")
         if colIdx >= 0 {
@@ -450,7 +450,7 @@ func parseThemeText(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonVa
     var align: Int = themeAlignStart
     var c: Int = 0
     loop c < chain.length {
-      if let bagIdx: Int = chain.get(index: c) {
+      if let bagIdx: Int = chain.copyAt(index: c) {
       let bag: JsonValue = json.jsonValueAt(doc: doc, idx: bagIdx)
       # Strings
       let fontIdx: Int = json.jsonField(doc: doc, this: bag, key: "font")
@@ -570,7 +570,7 @@ func themeResolveChain(doc: view JsonDoc, section: view JsonValue, name: view St
 func themeSeenName(seen: view List(String), name: view String) ret Bool {
   var i: Int = 0
   loop i < seen.length {
-    if let entry: String = seen.get(index: i) {
+    if let entry: String = seen.copyAt(index: i) {
       if entry.equals(other: name) {
         ret true
       }
@@ -584,7 +584,7 @@ func themeReverseIntList(src: view List(Int)) ret List(Int) {
   let out: List(Int) = createList(Int, cap: src.length)
   var i: Int = src.length - 1
   loop i >= 0 {
-    if let value: Int = src.get(index: i) {
+    if let value: Int = src.copyAt(index: i) {
       out.add(value: value)
     }
     i = i - 1
@@ -646,10 +646,10 @@ func themeDumpResolved(theme: view ResolvedTheme) pub {
     var g: Int = 0
     var b: Int = 0
     var a: Int = 0
-    if let palRVal: Int = theme.palR.get(index: i) { r = palRVal }
-    if let palGVal: Int = theme.palG.get(index: i) { g = palGVal }
-    if let palBVal: Int = theme.palB.get(index: i) { b = palBVal }
-    if let palAVal: Int = theme.palA.get(index: i) { a = palAVal }
+    if let palRVal: Int = theme.palR.copyAt(index: i) { r = palRVal }
+    if let palGVal: Int = theme.palG.copyAt(index: i) { g = palGVal }
+    if let palBVal: Int = theme.palB.copyAt(index: i) { b = palBVal }
+    if let palAVal: Int = theme.palA.copyAt(index: i) { a = palAVal }
     log("[theme]   palette {n} = {r},{g},{b},{a}")
     i = i + 1
   }
@@ -657,7 +657,7 @@ func themeDumpResolved(theme: view ResolvedTheme) pub {
   loop i < theme.spaceNames.length {
     let n: String = rae_ext_rae_buf_get(buf: theme.spaceNames.data, index: i)
     var v: Float = 0.0
-    if let spaceVal: Float = theme.spaceVals.get(index: i) { v = spaceVal }
+    if let spaceVal: Float = theme.spaceVals.copyAt(index: i) { v = spaceVal }
     log("[theme]   space {n} = {v}")
     i = i + 1
   }
@@ -665,7 +665,7 @@ func themeDumpResolved(theme: view ResolvedTheme) pub {
   loop i < theme.radiusNames.length {
     let n: String = rae_ext_rae_buf_get(buf: theme.radiusNames.data, index: i)
     var v: Float = 0.0
-    if let radiusVal: Float = theme.radiusVals.get(index: i) { v = radiusVal }
+    if let radiusVal: Float = theme.radiusVals.copyAt(index: i) { v = radiusVal }
     log("[theme]   radius {n} = {v}")
     i = i + 1
   }
@@ -676,10 +676,10 @@ func themeDumpResolved(theme: view ResolvedTheme) pub {
     var t: Float = 0.0
     var r: Float = 0.0
     var b: Float = 0.0
-    if let padLVal: Float = theme.padL.get(index: i) { l = padLVal }
-    if let padTVal: Float = theme.padT.get(index: i) { t = padTVal }
-    if let padRVal: Float = theme.padR.get(index: i) { r = padRVal }
-    if let padBVal: Float = theme.padB.get(index: i) { b = padBVal }
+    if let padLVal: Float = theme.padL.copyAt(index: i) { l = padLVal }
+    if let padTVal: Float = theme.padT.copyAt(index: i) { t = padTVal }
+    if let padRVal: Float = theme.padR.copyAt(index: i) { r = padRVal }
+    if let padBVal: Float = theme.padB.copyAt(index: i) { b = padBVal }
     log("[theme]   padding {n} = {l},{t},{r},{b}")
     i = i + 1
   }
@@ -693,13 +693,13 @@ func themeDumpResolved(theme: view ResolvedTheme) pub {
     var ox: Float = 0.0
     var oy: Float = 0.0
     var sf: Float = 0.0
-    if let shadowRVal: Int = theme.shadowR.get(index: i) { r = shadowRVal }
-    if let shadowGVal: Int = theme.shadowG.get(index: i) { g = shadowGVal }
-    if let shadowBVal: Int = theme.shadowB.get(index: i) { b = shadowBVal }
-    if let shadowAVal: Int = theme.shadowA.get(index: i) { a = shadowAVal }
-    if let shadowOffXVal: Float = theme.shadowOffX.get(index: i) { ox = shadowOffXVal }
-    if let shadowOffYVal: Float = theme.shadowOffY.get(index: i) { oy = shadowOffYVal }
-    if let shadowSoftVal: Float = theme.shadowSoft.get(index: i) { sf = shadowSoftVal }
+    if let shadowRVal: Int = theme.shadowR.copyAt(index: i) { r = shadowRVal }
+    if let shadowGVal: Int = theme.shadowG.copyAt(index: i) { g = shadowGVal }
+    if let shadowBVal: Int = theme.shadowB.copyAt(index: i) { b = shadowBVal }
+    if let shadowAVal: Int = theme.shadowA.copyAt(index: i) { a = shadowAVal }
+    if let shadowOffXVal: Float = theme.shadowOffX.copyAt(index: i) { ox = shadowOffXVal }
+    if let shadowOffYVal: Float = theme.shadowOffY.copyAt(index: i) { oy = shadowOffYVal }
+    if let shadowSoftVal: Float = theme.shadowSoft.copyAt(index: i) { sf = shadowSoftVal }
     log("[theme]   shadow {n} = rgba {r},{g},{b},{a} off {ox},{oy} soft {sf}")
     i = i + 1
   }
@@ -711,8 +711,8 @@ func themeDumpResolved(theme: view ResolvedTheme) pub {
     let sh: String = rae_ext_rae_buf_get(buf: theme.textShadowNames.data, index: i)
     var sz: Float = 0.0
     var al: Int = 0
-    if let textSizeVal: Float = theme.textSizes.get(index: i) { sz = textSizeVal }
-    if let textAlignVal: Int = theme.textAligns.get(index: i) { al = textAlignVal }
+    if let textSizeVal: Float = theme.textSizes.copyAt(index: i) { sz = textSizeVal }
+    if let textAlignVal: Int = theme.textAligns.copyAt(index: i) { al = textAlignVal }
     if slot.length() > 0 {
       log("[theme]   text {n} = font {font} size {sz} color slot:{slot} shadow '{sh}' align {al}")
     } else {
@@ -720,10 +720,10 @@ func themeDumpResolved(theme: view ResolvedTheme) pub {
       var cg: Int = 0
       var cb: Int = 0
       var ca: Int = 0
-      if let textColorRVal: Int = theme.textColorR.get(index: i) { cr = textColorRVal }
-      if let textColorGVal: Int = theme.textColorG.get(index: i) { cg = textColorGVal }
-      if let textColorBVal: Int = theme.textColorB.get(index: i) { cb = textColorBVal }
-      if let textColorAVal: Int = theme.textColorA.get(index: i) { ca = textColorAVal }
+      if let textColorRVal: Int = theme.textColorR.copyAt(index: i) { cr = textColorRVal }
+      if let textColorGVal: Int = theme.textColorG.copyAt(index: i) { cg = textColorGVal }
+      if let textColorBVal: Int = theme.textColorB.copyAt(index: i) { cb = textColorBVal }
+      if let textColorAVal: Int = theme.textColorA.copyAt(index: i) { ca = textColorAVal }
       log("[theme]   text {n} = font {font} size {sz} color inline:{cr},{cg},{cb},{ca} shadow '{sh}' align {al}")
     }
     i = i + 1
@@ -769,7 +769,7 @@ func setActiveThemeTokens(theme: view ResolvedTheme) pub {
   var i: Int = 0
   loop i < theme.spaceNames.length {
     let n: String = rae_ext_rae_buf_get(buf: theme.spaceNames.data, index: i)
-    if let value: Float = theme.spaceVals.get(index: i) {
+    if let value: Float = theme.spaceVals.copyAt(index: i) {
       g_activeSpaceNames.add(value: n)
       g_activeSpaceVals.add(value: value)
     }
@@ -778,7 +778,7 @@ func setActiveThemeTokens(theme: view ResolvedTheme) pub {
   i = 0
   loop i < theme.radiusNames.length {
     let n: String = rae_ext_rae_buf_get(buf: theme.radiusNames.data, index: i)
-    if let value: Float = theme.radiusVals.get(index: i) {
+    if let value: Float = theme.radiusVals.copyAt(index: i) {
       g_activeRadiusNames.add(value: n)
       g_activeRadiusVals.add(value: value)
     }
@@ -791,10 +791,10 @@ func setActiveThemeTokens(theme: view ResolvedTheme) pub {
     var t: Float = 0.0
     var r: Float = 0.0
     var b: Float = 0.0
-    if let padLVal: Float = theme.padL.get(index: i) { l = padLVal }
-    if let padTVal: Float = theme.padT.get(index: i) { t = padTVal }
-    if let padRVal: Float = theme.padR.get(index: i) { r = padRVal }
-    if let padBVal: Float = theme.padB.get(index: i) { b = padBVal }
+    if let padLVal: Float = theme.padL.copyAt(index: i) { l = padLVal }
+    if let padTVal: Float = theme.padT.copyAt(index: i) { t = padTVal }
+    if let padRVal: Float = theme.padR.copyAt(index: i) { r = padRVal }
+    if let padBVal: Float = theme.padB.copyAt(index: i) { b = padBVal }
     g_activePadNames.add(value: n)
     g_activePadL.add(value: l)
     g_activePadT.add(value: t)
@@ -804,19 +804,19 @@ func setActiveThemeTokens(theme: view ResolvedTheme) pub {
   }
   i = 0
   loop i < theme.containerNames.length {
-    if let containerName: String = theme.containerNames.get(index: i) {
+    if let containerName: String = theme.containerNames.copyAt(index: i) {
       g_activeContainerNames.add(value: containerName)
     }
-    if let containerBgSlot: String = theme.containerBgSlots.get(index: i) {
+    if let containerBgSlot: String = theme.containerBgSlots.copyAt(index: i) {
       g_activeContainerBgSlots.add(value: containerBgSlot)
     }
-    if let containerRadiusToken: String = theme.containerRadiusTokens.get(index: i) {
+    if let containerRadiusToken: String = theme.containerRadiusTokens.copyAt(index: i) {
       g_activeContainerRadiusTokens.add(value: containerRadiusToken)
     }
-    if let containerPadToken: String = theme.containerPadTokens.get(index: i) {
+    if let containerPadToken: String = theme.containerPadTokens.copyAt(index: i) {
       g_activeContainerPadTokens.add(value: containerPadToken)
     }
-    if let containerTextStyle: String = theme.containerTextStyles.get(index: i) {
+    if let containerTextStyle: String = theme.containerTextStyles.copyAt(index: i) {
       g_activeContainerTextStyles.add(value: containerTextStyle)
     }
     i = i + 1
@@ -829,7 +829,7 @@ func setActiveThemeTokens(theme: view ResolvedTheme) pub {
 func activeContainerIndex(name: view String) pub ret Int {
   var i: Int = 0
   loop i < g_activeContainerNames.length {
-    if let n: String = g_activeContainerNames.get(index: i) {
+    if let n: String = g_activeContainerNames.copyAt(index: i) {
       if n.equals(other: name) {
         ret i
       }
@@ -840,28 +840,28 @@ func activeContainerIndex(name: view String) pub ret Int {
 }
 
 func activeContainerBgSlotAt(i: view Int) pub ret String {
-  if let slot: String = g_activeContainerBgSlots.get(index: i) {
+  if let slot: String = g_activeContainerBgSlots.copyAt(index: i) {
     ret "{slot}"
   }
   ret ""
 }
 
 func activeContainerRadiusTokenAt(i: view Int) pub ret String {
-  if let token: String = g_activeContainerRadiusTokens.get(index: i) {
+  if let token: String = g_activeContainerRadiusTokens.copyAt(index: i) {
     ret "{token}"
   }
   ret ""
 }
 
 func activeContainerPadTokenAt(i: view Int) pub ret String {
-  if let token: String = g_activeContainerPadTokens.get(index: i) {
+  if let token: String = g_activeContainerPadTokens.copyAt(index: i) {
     ret "{token}"
   }
   ret ""
 }
 
 func activeContainerTextStyleAt(i: view Int) pub ret String {
-  if let style: String = g_activeContainerTextStyles.get(index: i) {
+  if let style: String = g_activeContainerTextStyles.copyAt(index: i) {
     ret "{style}"
   }
   ret ""
@@ -873,9 +873,9 @@ func activeContainerTextStyleAt(i: view Int) pub ret String {
 func activeSpaceValue(name: view String, fallback: view Float) pub ret Float {
   var i: Int = 0
   loop i < g_activeSpaceNames.length {
-    let n: String = g_activeSpaceNames.get(index: i)
+    let n: String = g_activeSpaceNames.copyAt(index: i)
     if n.equals(other: name) {
-      if let value: Float = g_activeSpaceVals.get(index: i) {
+      if let value: Float = g_activeSpaceVals.copyAt(index: i) {
         ret value
       }
     }
@@ -889,9 +889,9 @@ func activeSpaceValue(name: view String, fallback: view Float) pub ret Float {
 func activeRadiusValue(name: view String, fallback: view Float) pub ret Float {
   var i: Int = 0
   loop i < g_activeRadiusNames.length {
-    let n: String = g_activeRadiusNames.get(index: i)
+    let n: String = g_activeRadiusNames.copyAt(index: i)
     if n.equals(other: name) {
-      if let value: Float = g_activeRadiusVals.get(index: i) {
+      if let value: Float = g_activeRadiusVals.copyAt(index: i) {
         ret value
       }
     }
@@ -907,16 +907,16 @@ func activeRadiusValue(name: view String, fallback: view Float) pub ret Float {
 func activePaddingInsets(name: view String) pub ret ThemeInsets {
   var i: Int = 0
   loop i < g_activePadNames.length {
-    let n: String = g_activePadNames.get(index: i)
+    let n: String = g_activePadNames.copyAt(index: i)
     if n.equals(other: name) {
       var l: Float = 0.0
       var t: Float = 0.0
       var r: Float = 0.0
       var b: Float = 0.0
-      if let padLVal: Float = g_activePadL.get(index: i) { l = padLVal }
-      if let padTVal: Float = g_activePadT.get(index: i) { t = padTVal }
-      if let padRVal: Float = g_activePadR.get(index: i) { r = padRVal }
-      if let padBVal: Float = g_activePadB.get(index: i) { b = padBVal }
+      if let padLVal: Float = g_activePadL.copyAt(index: i) { l = padLVal }
+      if let padTVal: Float = g_activePadT.copyAt(index: i) { t = padTVal }
+      if let padRVal: Float = g_activePadR.copyAt(index: i) { r = padRVal }
+      if let padBVal: Float = g_activePadB.copyAt(index: i) { b = padBVal }
       ret ThemeInsets { l: l, t: t, r: r, b: b }
     }
     i = i + 1

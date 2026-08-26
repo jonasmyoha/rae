@@ -62,14 +62,14 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
     let popAt: Int = stack.length - 1
     var cur: Int = 0
     var haveCur: Bool = false
-    if let curVal: Int = stack.get(index: popAt) {
+    if let curVal: Int = stack.copyAt(index: popAt) {
       cur = curVal
       haveCur = true
     }
     stack.remove(index: popAt)
     if haveCur {
       var alreadySeen: Bool = true
-      if let seen: Bool = reachable.get(index: cur) {
+      if let seen: Bool = reachable.copyAt(index: cur) {
         alreadySeen = seen
       }
       if alreadySeen is false {
@@ -78,7 +78,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
         let cn: Int = n.childrenIds.length
         var ci: Int = 0
         loop ci < cn {
-          if let childId: String = n.childrenIds.get(index: ci) {
+          if let childId: String = n.childrenIds.copyAt(index: ci) {
             let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
             if childIdx >= 0 {
               stack.add(value: childIdx)
@@ -99,7 +99,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
   var i: Int = 0
   loop i < nodeCount {
     var isReachable: Bool = false
-    if let reach: Bool = reachable.get(index: i) {
+    if let reach: Bool = reachable.copyAt(index: i) {
       isReachable = reach
     }
     if isReachable {
@@ -124,7 +124,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
   var j: Int = 0
   loop j < nodeCount {
     var jReach: Bool = false
-    if let reach: Bool = reachable.get(index: j) {
+    if let reach: Bool = reachable.copyAt(index: j) {
       jReach = reach
     }
     if jReach is false {
@@ -171,7 +171,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
   var p: Int = 0
   loop p < nodeCount {
     var pReach: Bool = false
-    if let reach: Bool = reachable.get(index: p) {
+    if let reach: Bool = reachable.copyAt(index: p) {
       pReach = reach
     }
     if pReach is false {
@@ -184,7 +184,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
       let kids: List(EntityId) = createList(EntityId, cap: kn)
       var q: Int = 0
       loop q < kn {
-        if let childId: String = node.childrenIds.get(index: q) {
+        if let childId: String = node.childrenIds.copyAt(index: q) {
           let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
           if childIdx >= 0 {
             let childEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: childIdx)
@@ -254,10 +254,10 @@ func resolveSceneInstances(
           let m: Int = inst.overrideNodeIds.length
           var j: Int = 0
           loop j < m {
-            if let nodeId: String = inst.overrideNodeIds.get(index: j) {
-              if let componentName: String = inst.overrideComponents.get(index: j) {
-                if let fieldName: String = inst.overrideFields.get(index: j) {
-                  if let valueString: String = inst.overrideValues.get(index: j) {
+            if let nodeId: String = inst.overrideNodeIds.copyAt(index: j) {
+              if let componentName: String = inst.overrideComponents.copyAt(index: j) {
+                if let fieldName: String = inst.overrideFields.copyAt(index: j) {
+                  if let valueString: String = inst.overrideValues.copyAt(index: j) {
                     let ov: SceneOverride = {
                       nodeId: nodeId
                       componentName: componentName
@@ -404,7 +404,7 @@ func componentNamesFor(world: view UiWorld, entity: view EntityId) ret String {
   var acc: String = ""
   var i: Int = 0
   loop i < parts.length {
-    if let s: String = parts.get(index: i) {
+    if let s: String = parts.copyAt(index: i) {
       if i is 0 {
         acc = "{s}"
       } else {

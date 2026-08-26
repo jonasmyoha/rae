@@ -114,16 +114,16 @@ func main() {
   var i: Int = 0
   loop i < gammas.length {
     var gamma: Float = 0.0
-    if let value: Float = gammas.at(index: i) { gamma = value }
+    if let value: Float = gammas.copyAt(index: i) { gamma = value }
     let r: Float = hosekChannelRadiance(c: sky.r, theta: theta, gamma: gamma) * sky.r.radiance
     let g: Float = hosekChannelRadiance(c: sky.g, theta: theta, gamma: gamma) * sky.g.radiance
     let b: Float = hosekChannelRadiance(c: sky.b, theta: theta, gamma: gamma) * sky.b.radiance
     var wantRValue: Float = 0.0
-    if let value: Float = wantR.at(index: i) { wantRValue = value }
+    if let value: Float = wantR.copyAt(index: i) { wantRValue = value }
     var wantGValue: Float = 0.0
-    if let value: Float = wantG.at(index: i) { wantGValue = value }
+    if let value: Float = wantG.copyAt(index: i) { wantGValue = value }
     var wantBValue: Float = 0.0
-    if let value: Float = wantB.at(index: i) { wantBValue = value }
+    if let value: Float = wantB.copyAt(index: i) { wantBValue = value }
     check(label: "radiance R at gamma {gamma}", got: r, want: wantRValue)
     check(label: "radiance G at gamma {gamma}", got: g, want: wantGValue)
     check(label: "radiance B at gamma {gamma}", got: b, want: wantBValue)

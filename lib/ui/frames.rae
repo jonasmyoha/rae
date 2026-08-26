@@ -227,7 +227,7 @@ func stateIsActive(activeStates: view List(String), name: view String) ret Bool 
 # Pool index of `nodeId`'s override bag inside state `stateIdx`, or -1.
 func stateNodeBagIdx(scene: view Scene, states: view StateSet, stateIdx: view Int, nodeId: view String) ret Int {
   var nodesIdx: Int = -1
-  if let value: Int = states.nodesValueIdxs.get(index: stateIdx) {
+  if let value: Int = states.nodesValueIdxs.copyAt(index: stateIdx) {
     nodesIdx = value
   }
   if nodesIdx < 0 {
@@ -244,7 +244,7 @@ func stateNodeBagIdx(scene: view Scene, states: view StateSet, stateIdx: view In
 func frameIndexByName(frames: view FrameSet, name: view String) ret Int {
   var i: Int = 0
   loop i < frames.count {
-    if let candidate: String = frames.names.get(index: i) {
+    if let candidate: String = frames.names.copyAt(index: i) {
       if candidate.equals(other: name) {
         ret i
       }
@@ -274,7 +274,7 @@ func selectFrameIndex(frames: view FrameSet, windowPtW: view Float, forcedFrameI
   var bestMin: Float = -1.0
   var i: Int = 0
   loop i < frames.count {
-    if let minWidth: Float = frames.minPtWs.get(index: i) {
+    if let minWidth: Float = frames.minPtWs.copyAt(index: i) {
       if minWidth >= 0.0 {
         if windowPtW >= minWidth {
           if minWidth > bestMin {
@@ -291,7 +291,7 @@ func selectFrameIndex(frames: view FrameSet, windowPtW: view Float, forcedFrameI
   }
   var j: Int = 0
   loop j < frames.count {
-    if frames.defaultFlags.get(index: j) is 1 {
+    if frames.defaultFlags.copyAt(index: j) is 1 {
       ret j
     }
     j = j + 1
@@ -307,7 +307,7 @@ func bagHasKey(doc: view JsonDoc, bag: view JsonValue, key: view String) ret Boo
 # Pool index of `nodeId`'s override bag inside frame `frameIdx`, or -1.
 func frameNodeBagIdx(scene: view Scene, frames: view FrameSet, frameIdx: view Int, nodeId: view String) ret Int {
   var nodesIdx: Int = -1
-  if let value: Int = frames.nodesValueIdxs.get(index: frameIdx) {
+  if let value: Int = frames.nodesValueIdxs.copyAt(index: frameIdx) {
     nodesIdx = value
   }
   if nodesIdx < 0 {
@@ -486,14 +486,14 @@ func framesOverriddenNodeIds(scene: view Scene, frames: view FrameSet, states: v
   let out: List(String) = createList(String, cap: 8)
   var f: Int = 0
   loop f < frames.count {
-    if let nodesIdx: Int = frames.nodesValueIdxs.get(index: f) {
+    if let nodesIdx: Int = frames.nodesValueIdxs.copyAt(index: f) {
       accumulateNodeIds(scene: scene, nodesIdx: nodesIdx, out: out)
     }
     f = f + 1
   }
   var st: Int = 0
   loop st < states.count {
-    if let nodesIdx: Int = states.nodesValueIdxs.get(index: st) {
+    if let nodesIdx: Int = states.nodesValueIdxs.copyAt(index: st) {
       accumulateNodeIds(scene: scene, nodesIdx: nodesIdx, out: out)
     }
     st = st + 1
@@ -520,7 +520,7 @@ func framesHaveHierarchyDirectives(scene: view Scene, frames: view FrameSet) ret
   let doc: view JsonDoc => scene.doc
   var f: Int = 0
   loop f < frames.count {
-    if let nodesIdx: Int = frames.nodesValueIdxs.get(index: f) {
+    if let nodesIdx: Int = frames.nodesValueIdxs.copyAt(index: f) {
       if nodesIdx >= 0 {
         let nodesVal: JsonValue = json.jsonValueAt(doc: doc, idx: nodesIdx)
         if nodesVal.kind is JsonKind.object {
@@ -559,7 +559,7 @@ func hierarchyWouldCycle(parentIdxs: view List(Int), nodeIdx: view Int, candidat
       ret true
     }
     var next: Int = -1
-    if let parentValue: Int = parentIdxs.get(index: cur) {
+    if let parentValue: Int = parentIdxs.copyAt(index: cur) {
       next = parentValue
     }
     cur = next
@@ -619,7 +619,7 @@ func deriveActiveHierarchy(world: mod UiWorld, scene: view Scene, frames: view F
     let kn: Int = node.childrenIds.length
     var q: Int = 0
     loop q < kn {
-      if let childId: String = node.childrenIds.get(index: q) {
+      if let childId: String = node.childrenIds.copyAt(index: q) {
         let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
         if childIdx >= 0 {
           parentIdxs.set(index: childIdx, value: a)
@@ -634,7 +634,7 @@ func deriveActiveHierarchy(world: mod UiWorld, scene: view Scene, frames: view F
   # Apply the active frame's directives in declared order.
   if frameIdx >= 0 {
     var nodesIdx: Int = -1
-    if let value: Int = frames.nodesValueIdxs.get(index: frameIdx) {
+    if let value: Int = frames.nodesValueIdxs.copyAt(index: frameIdx) {
       nodesIdx = value
     }
     if nodesIdx >= 0 {
@@ -671,7 +671,7 @@ func deriveActiveHierarchy(world: mod UiWorld, scene: view Scene, frames: view F
   var b: Int = 0
   loop b < nodeCount {
     var parentRaw: Int = -1
-    if let value: Int = entityVals.get(index: b) {
+    if let value: Int = entityVals.copyAt(index: b) {
       parentRaw = value
     }
     if parentRaw >= 0 {
@@ -680,8 +680,8 @@ func deriveActiveHierarchy(world: mod UiWorld, scene: view Scene, frames: view F
       let unsorted: List(Int) = createList(Int, cap: 8)
       var c: Int = 0
       loop c < nodeCount {
-        if parentIdxs.get(index: c) is b {
-          if entityVals.get(index: c) >= 0 {
+        if parentIdxs.copyAt(index: c) is b {
+          if entityVals.copyAt(index: c) >= 0 {
             unsorted.add(value: c)
           }
         }
@@ -702,9 +702,9 @@ func deriveActiveHierarchy(world: mod UiWorld, scene: view Scene, frames: view F
           var bestKey: Float = 0.0
           var u: Int = 0
           loop u < childCount {
-            if used.get(index: u) is 0 {
-              if let candIdx: Int = unsorted.get(index: u) {
-                if let candKey: Float = sortKeys.get(index: candIdx) {
+            if used.copyAt(index: u) is 0 {
+              if let candIdx: Int = unsorted.copyAt(index: u) {
+                if let candKey: Float = sortKeys.copyAt(index: candIdx) {
                   var better: Bool = false
                   if bestSlot < 0 {
                     better = true
@@ -724,11 +724,11 @@ func deriveActiveHierarchy(world: mod UiWorld, scene: view Scene, frames: view F
           }
           used.set(index: bestSlot, value: 1)
           var childNodeIdx: Int = -1
-          if let value: Int = unsorted.get(index: bestSlot) {
+          if let value: Int = unsorted.copyAt(index: bestSlot) {
             childNodeIdx = value
           }
           var childEntityRaw: Int = -1
-          if let value: Int = entityVals.get(index: childNodeIdx) {
+          if let value: Int = entityVals.copyAt(index: childNodeIdx) {
             childEntityRaw = value
           }
           let childEntity: EntityId = entityId(v: childEntityRaw)
@@ -840,7 +840,7 @@ func applyFrameToPage(world: mod UiWorld, scene: view Scene, frames: view FrameS
       }
       var st: Int = 0
       loop st < states.count {
-        if let stateName: String = states.names.get(index: st) {
+        if let stateName: String = states.names.copyAt(index: st) {
           if stateIsActive(activeStates: activeStates, name: stateName) {
             overlayNodeFromState(world: world, scene: scene, states: states, stateIdx: st, nodeId: nodeId, entity: entity)
           }

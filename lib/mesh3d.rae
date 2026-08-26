@@ -32,12 +32,12 @@ func pushVert(verts: mod List(Float), px: view Float, py: view Float, pz: view F
 # Flat-buffer reads below go through these helpers so the `opt Float` from
 # `.get` is unwrapped in one place; an out-of-range index yields 0.0.
 func sampleHeight(heights: view List(Float), index: copy Int) ret Float {
-  if let value: Float = heights.get(index: index) { ret value }
+  if let value: Float = heights.copyAt(index: index) { ret value }
   ret 0.0
 }
 
 func vertComponent(verts: view List(Float), index: copy Int) ret Float {
-  if let value: Float = verts.get(index: index) { ret value }
+  if let value: Float = verts.copyAt(index: index) { ret value }
   ret 0.0
 }
 
