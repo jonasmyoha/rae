@@ -96,12 +96,10 @@ func buildHomeGridRow(
 
   let kids: List(EntityId) = createList(EntityId, cap: homeGridColumns)
   let cols: Int = homeCols()
-  let total: Int = keys.length
   var col: Int = 0
   loop col < cols {
     let i: Int = startIndex + col
-    if i < total {
-      let key: String = keys.get(index: i)
+    if let key: String = keys.get(index: i) {
       let tile: EntityId = buildLibraryCoverTile(world: world, key: key, size: tileH, rounded: rounded)
       kids.add(value: tile)
     }
@@ -161,9 +159,7 @@ func mountHomePage(
 
   # Runtime scroll state on the Body container (not authorable —
   # scroll position survives rebuilds via the scrollY argument).
-  let bodyOpt: opt Int = findNodeInPage(world: world, pageId: homePageId, nodeId: "Body")
-  if bodyOpt is not none {
-    let bodyRaw: Int = bodyOpt
+  if let bodyRaw: Int = findNodeInPage(world: world, pageId: homePageId, nodeId: "Body") {
     let body: EntityId = entityId(v: bodyRaw)
     let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
     componentSet(this: world.offsets, entity: body, data: off)
@@ -175,16 +171,12 @@ func mountHomePage(
   # children, so an empty history collapses the section exactly like
   # the old builder that simply didn't create it).
   let hasRecent: Bool = state.playHistory.entries.length > 0
-  let headerOpt: opt Int = findNodeInPage(world: world, pageId: homePageId, nodeId: "RecentlyPlayedHeader")
-  if headerOpt is not none {
-    let headerRaw: Int = headerOpt
+  if let headerRaw: Int = findNodeInPage(world: world, pageId: homePageId, nodeId: "RecentlyPlayedHeader") {
     let header: EntityId = entityId(v: headerRaw)
     let headerActive: Active = { value: hasRecent }
     componentSet(this: world.actives, entity: header, data: headerActive)
   }
-  let stripOpt: opt Int = findNodeInPage(world: world, pageId: homePageId, nodeId: "RecentlyPlayedStrip")
-  if stripOpt is not none {
-    let stripRaw: Int = stripOpt
+  if let stripRaw: Int = findNodeInPage(world: world, pageId: homePageId, nodeId: "RecentlyPlayedStrip") {
     let strip: EntityId = entityId(v: stripRaw)
     let stripActive: Active = { value: hasRecent }
     componentSet(this: world.actives, entity: strip, data: stripActive)
@@ -198,9 +190,7 @@ func mountHomePage(
     }
   }
 
-  let gridOpt: opt Int = findNodeInPage(world: world, pageId: homePageId, nodeId: "CoverGrid")
-  if gridOpt is not none {
-    let gridRaw: Int = gridOpt
+  if let gridRaw: Int = findNodeInPage(world: world, pageId: homePageId, nodeId: "CoverGrid") {
     let grid: EntityId = entityId(v: gridRaw)
     fillHomeCoverGrid(
       world: world

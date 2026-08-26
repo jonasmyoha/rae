@@ -120,10 +120,7 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
   # Big play button on the now-playing screen — scoped lookup under
   # the now-playing page. Absent (returns none) on other screens.
   let playIconKey: String = "PlayIcon"
-  let playIconEntityOpt: opt Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: playIconKey)
-  if playIconEntityOpt is none {
-  } else {
-    let playIconRaw: Int = playIconEntityOpt
+  if let playIconRaw: Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: playIconKey) {
     let playIconEntity: EntityId = entityId(v: playIconRaw)
     if componentHas(this: world.sprites, entity: playIconEntity) {
       let sp: mod Sprite => componentMod(this: world.sprites, entity: playIconEntity)
@@ -135,10 +132,7 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
   # mini-player is mounted as part of the bottom dock on every screen,
   # so this should always resolve while the dock is on screen.
   let miniIconKey: String = "MiniPlayIcon"
-  let miniIconEntityOpt: opt Int = findNodeInPage(world: world, pageId: miniPlayerPageId, nodeId: miniIconKey)
-  if miniIconEntityOpt is none {
-  } else {
-    let miniIconRaw: Int = miniIconEntityOpt
+  if let miniIconRaw: Int = findNodeInPage(world: world, pageId: miniPlayerPageId, nodeId: miniIconKey) {
     let miniIconEntity: EntityId = entityId(v: miniIconRaw)
     if componentHas(this: world.sprites, entity: miniIconEntity) {
       let sp: mod Sprite => componentMod(this: world.sprites, entity: miniIconEntity)
@@ -154,15 +148,9 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
   # layout reflows would otherwise reset the fill width to whatever
   # was last authored).
   let trackKey: String = "ProgressBar"
-  let trackEntityOpt: opt Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: trackKey)
   let fillKey: String = "ProgressFill"
-  let fillEntityOpt: opt Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: fillKey)
-  if trackEntityOpt is none {
-  } else {
-    if fillEntityOpt is none {
-    } else {
-      let trackRaw: Int = trackEntityOpt
-      let fillRaw: Int = fillEntityOpt
+  if let trackRaw: Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: trackKey) {
+    if let fillRaw: Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: fillKey) {
       let trackEntity: EntityId = entityId(v: trackRaw)
       let fillEntity: EntityId = entityId(v: fillRaw)
       var trackW: Float = 0.0

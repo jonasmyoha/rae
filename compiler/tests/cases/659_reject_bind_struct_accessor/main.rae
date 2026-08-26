@@ -1,0 +1,15 @@
+# The struct twin of 658: a List value accessor returning `opt Point`
+# cannot bind to a non-optional struct binding either. Same hard error.
+import core
+
+type Point {
+  x: Int
+  y: Int
+}
+
+func main() {
+  let points: List(Point) = createList(Point, cap: 4)
+  points.add(value: Point { x: 1, y: 2 })
+  let first: Point = points.at(index: 0)
+  log("should not run {first.x}")
+}

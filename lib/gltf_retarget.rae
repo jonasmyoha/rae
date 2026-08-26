@@ -78,8 +78,8 @@ func findJointByKey(sk: view Skeleton, key: view String) ret Int {
 # Read/write a quaternion packed at slot `i` of a flat `x,y,z,w` List(Float).
 func quatFromList(a: view List(Float), i: copy Int) ret Quat {
   ret quat.create(
-    x: a.get(index: i * 4), y: a.get(index: i * 4 + 1),
-    z: a.get(index: i * 4 + 2), w: a.get(index: i * 4 + 3))
+    x: floatAt(list: a, index: i * 4), y: floatAt(list: a, index: i * 4 + 1),
+    z: floatAt(list: a, index: i * 4 + 2), w: floatAt(list: a, index: i * 4 + 3))
 }
 func quatIntoList(a: mod List(Float), i: copy Int, q: view Quat) {
   a.set(index: i * 4, value: q.x)
@@ -114,14 +114,14 @@ func accumModelRot(localR: view List(Float), parent: view List(Int), nodeCount: 
     remaining = false
     var n: Int = 0
     loop n < nodeCount {
-      if done.get(index: n) is false {
-        let p: Int = parent.get(index: n)
+      if boolAt(list: done, index: n, fallback: false) is false {
+        let p: Int = intAt(list: parent, index: n, fallback: 0 - 1)
         let lq: Quat = quatFromList(a: localR, i: n)
         if p < 0 {
           quatIntoList(a: out, i: n, q: lq)
           done.set(index: n, value: true)
         } else {
-          if done.get(index: p) is true {
+          if boolAt(list: done, index: p, fallback: false) is true {
             let pq: Quat = quatFromList(a: out, i: p)
             quatIntoList(a: out, i: n, q: quat.qnorm(a: quat.qmul(a: pq, b: lq)))
             done.set(index: n, value: true)
@@ -145,16 +145,16 @@ func accumModelRot(localR: view List(Float), parent: view List(Int), nodeCount: 
 func cloneSourceForSampling(from: view Skeleton, fromBind: view SkeletonPose) ret Skeleton {
   let localR: List(Float) = createList(Float, cap: fromBind.localR.length)
   var i: Int = 0
-  loop i < fromBind.localR.length { localR.add(value: fromBind.localR.get(index: i)) i = i + 1 }
+  loop i < fromBind.localR.length { localR.add(value: floatAt(list: fromBind.localR, index: i)) i = i + 1 }
   let localT: List(Float) = createList(Float, cap: fromBind.localT.length)
   i = 0
-  loop i < fromBind.localT.length { localT.add(value: fromBind.localT.get(index: i)) i = i + 1 }
+  loop i < fromBind.localT.length { localT.add(value: floatAt(list: fromBind.localT, index: i)) i = i + 1 }
   let localS: List(Float) = createList(Float, cap: fromBind.localS.length)
   i = 0
-  loop i < fromBind.localS.length { localS.add(value: fromBind.localS.get(index: i)) i = i + 1 }
+  loop i < fromBind.localS.length { localS.add(value: floatAt(list: fromBind.localS, index: i)) i = i + 1 }
   let parent: List(Int) = createList(Int, cap: from.parent.length)
   i = 0
-  loop i < from.parent.length { parent.add(value: from.parent.get(index: i)) i = i + 1 }
+  loop i < from.parent.length { parent.add(value: intAt(list: from.parent, index: i, fallback: 0 - 1)) i = i + 1 }
   ret Skeleton {
     ok: true, jointNodes: createList(Int, cap: 0), inverseBind: createList(Float, cap: 0),
     nodeCount: from.nodeCount, parent: own parent, nodeNames: createList(String, cap: 0),
@@ -237,7 +237,7 @@ func retargetClip(c: view Clip, from: view Skeleton, fromBind: view SkeletonPose
   let chanDst: List(Int) = createList(Int, cap: to.nodeCount)
   d = 0
   loop d < to.nodeCount {
-    if srcOfDst.get(index: d) >= 0 { chanDst.add(value: d) }
+    if intAt(list: srcOfDst, index: d, fallback: 0 - 1) >= 0 { chanDst.add(value: d) }
     d = d + 1
   }
   let matched: Int = chanDst.length
@@ -265,7 +265,7 @@ func retargetClip(c: view Clip, from: view Skeleton, fromBind: view SkeletonPose
     # Mdst_key for every dst node.
     var dd: Int = 0
     loop dd < to.nodeCount {
-      let src: Int = srcOfDst.get(index: dd)
+      let src: Int = intAt(list: srcOfDst, index: dd, fallback: 0 - 1)
       var a: Quat = quat.identity()
       if src >= 0 {
         let mk: Quat = quatFromList(a: msrcKey, i: src)
@@ -279,8 +279,8 @@ func retargetClip(c: view Clip, from: view Skeleton, fromBind: view SkeletonPose
     # Convert each matched joint's model-space key back to dst-local.
     var m: Int = 0
     loop m < matched {
-      let node: Int = chanDst.get(index: m)
-      let pnode: Int = to.parent.get(index: node)
+      let node: Int = intAt(list: chanDst, index: m, fallback: 0)
+      let pnode: Int = intAt(list: to.parent, index: node, fallback: 0 - 1)
       let mkeyN: Quat = quatFromList(a: mdstKey, i: node)
       var rlocal: Quat = mkeyN
       if pnode >= 0 {
@@ -314,7 +314,7 @@ func retargetClip(c: view Clip, from: view Skeleton, fromBind: view SkeletonPose
   }
   var m: Int = 0
   loop m < matched {
-    targetNode.add(value: chanDst.get(index: m))
+    targetNode.add(value: intAt(list: chanDst, index: m, fallback: 0))
     path.add(value: pathRotation)
     interp.add(value: interpLinear)
     timeStart.add(value: 0)
@@ -323,10 +323,10 @@ func retargetClip(c: view Clip, from: view Skeleton, fromBind: view SkeletonPose
     var k: Int = 0
     loop k < nSamp {
       let baseIdx: Int = (m * nSamp + k) * 4
-      values.add(value: valBuf.get(index: baseIdx))
-      values.add(value: valBuf.get(index: baseIdx + 1))
-      values.add(value: valBuf.get(index: baseIdx + 2))
-      values.add(value: valBuf.get(index: baseIdx + 3))
+      values.add(value: floatAt(list: valBuf, index: baseIdx))
+      values.add(value: floatAt(list: valBuf, index: baseIdx + 1))
+      values.add(value: floatAt(list: valBuf, index: baseIdx + 2))
+      values.add(value: floatAt(list: valBuf, index: baseIdx + 3))
       k = k + 1
     }
     m = m + 1
@@ -346,8 +346,8 @@ func retargetedChannelCount(c: view Clip, from: view Skeleton, to: view Skeleton
   var kept: Int = 0
   var ch: Int = 0
   loop ch < c.targetNode.length {
-    let srcNode: Int = c.targetNode.get(index: ch)
-    if srcNode >= 0 and srcNode < from.nodeNames.length and c.path.get(index: ch) is pathRotation {
+    let srcNode: Int = intAt(list: c.targetNode, index: ch, fallback: 0 - 1)
+    if srcNode >= 0 and srcNode < from.nodeNames.length and intAt(list: c.path, index: ch, fallback: pathTranslation) is pathRotation {
       if let srcName: String = from.nodeNames.at(index: srcNode) {
         let key: String = jointNameKey(name: srcName)
         var hit: Int = findJointByKey(sk: to, key: key)

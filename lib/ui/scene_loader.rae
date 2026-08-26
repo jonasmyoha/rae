@@ -60,21 +60,32 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
   stack.add(value: rootIdxR)
   loop stack.length > 0 {
     let popAt: Int = stack.length - 1
-    let cur: Int = stack.get(index: popAt)
+    var cur: Int = 0
+    var haveCur: Bool = false
+    if let curVal: Int = stack.get(index: popAt) {
+      cur = curVal
+      haveCur = true
+    }
     stack.remove(index: popAt)
-    let alreadySeen: Bool = reachable.get(index: cur)
-    if alreadySeen is false {
-      reachable.set(index: cur, value: true)
-      let n: view SceneNode => sceneNodeAt(this: scene, idx: cur)
-      let cn: Int = n.childrenIds.length
-      var ci: Int = 0
-      loop ci < cn {
-        let childId: String = n.childrenIds.get(index: ci)
-        let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
-        if childIdx >= 0 {
-          stack.add(value: childIdx)
+    if haveCur {
+      var alreadySeen: Bool = true
+      if let seen: Bool = reachable.get(index: cur) {
+        alreadySeen = seen
+      }
+      if alreadySeen is false {
+        reachable.set(index: cur, value: true)
+        let n: view SceneNode => sceneNodeAt(this: scene, idx: cur)
+        let cn: Int = n.childrenIds.length
+        var ci: Int = 0
+        loop ci < cn {
+          if let childId: String = n.childrenIds.get(index: ci) {
+            let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
+            if childIdx >= 0 {
+              stack.add(value: childIdx)
+            }
+          }
+          ci = ci + 1
         }
-        ci = ci + 1
       }
     }
   }
@@ -87,7 +98,10 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
   let nodeIdsMap: mod StringMap(Int) => world.nodeIds
   var i: Int = 0
   loop i < nodeCount {
-    let isReachable: Bool = reachable.get(index: i)
+    var isReachable: Bool = false
+    if let reach: Bool = reachable.get(index: i) {
+      isReachable = reach
+    }
     if isReachable {
       let node: view SceneNode => sceneNodeAt(this: scene, idx: i)
       let entity: EntityId = createEntity(world: world)
@@ -109,7 +123,10 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
   let docView: view JsonDoc => scene.doc
   var j: Int = 0
   loop j < nodeCount {
-    let jReach: Bool = reachable.get(index: j)
+    var jReach: Bool = false
+    if let reach: Bool = reachable.get(index: j) {
+      jReach = reach
+    }
     if jReach is false {
       j = j + 1
     } else {
@@ -153,7 +170,10 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
   # ---------- pass 3: hierarchy (Children + Parent) ----------
   var p: Int = 0
   loop p < nodeCount {
-    let pReach: Bool = reachable.get(index: p)
+    var pReach: Bool = false
+    if let reach: Bool = reachable.get(index: p) {
+      pReach = reach
+    }
     if pReach is false {
       p = p + 1
     } else {
@@ -164,13 +184,14 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
       let kids: List(EntityId) = createList(EntityId, cap: kn)
       var q: Int = 0
       loop q < kn {
-        let childId: String = node.childrenIds.get(index: q)
-        let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
-        if childIdx >= 0 {
-          let childEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: childIdx)
-          appendEntityListSL(lst: kids, value: childEntity)
-          let pl: Parent = { parent: parentEntity }
-          componentSet(this: world.parents, entity: childEntity, data: pl)
+        if let childId: String = node.childrenIds.get(index: q) {
+          let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
+          if childIdx >= 0 {
+            let childEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: childIdx)
+            appendEntityListSL(lst: kids, value: childEntity)
+            let pl: Parent = { parent: parentEntity }
+            componentSet(this: world.parents, entity: childEntity, data: pl)
+          }
         }
         q = q + 1
       }
@@ -233,13 +254,21 @@ func resolveSceneInstances(
           let m: Int = inst.overrideNodeIds.length
           var j: Int = 0
           loop j < m {
-            let ov: SceneOverride = {
-              nodeId: inst.overrideNodeIds.get(index: j)
-              componentName: inst.overrideComponents.get(index: j)
-              fieldName: inst.overrideFields.get(index: j)
-              valueString: inst.overrideValues.get(index: j)
+            if let nodeId: String = inst.overrideNodeIds.get(index: j) {
+              if let componentName: String = inst.overrideComponents.get(index: j) {
+                if let fieldName: String = inst.overrideFields.get(index: j) {
+                  if let valueString: String = inst.overrideValues.get(index: j) {
+                    let ov: SceneOverride = {
+                      nodeId: nodeId
+                      componentName: componentName
+                      fieldName: fieldName
+                      valueString: valueString
+                    }
+                    overrides.add(value: ov)
+                  }
+                }
+              }
             }
-            overrides.add(value: ov)
             j = j + 1
           }
           mountSceneInstanceIntoPage(
@@ -275,11 +304,7 @@ func dumpScene(world: view UiWorld, scene: view Scene) {
     let entityIdx: Int = sceneNodeIndex(this: scene, nodeId: node.nodeId)
     # Resolve via the world's nodeIds map (more authoritative than our
     # local list — covers later runtime additions too).
-    let entityOpt: opt Int = world.nodeIds.get(k: node.nodeId)
-    if entityOpt is none {
-      log("  [{node.nodeId}] (not in world.nodeIds — skipped)")
-    } else {
-      let entityRaw: Int = entityOpt
+    if let entityRaw: Int = world.nodeIds.get(k: node.nodeId) {
       let entity: EntityId = entityId(v: entityRaw)
       var parentStr: String = "(root)"
       if componentHas(this: world.parents, entity: entity) {
@@ -288,6 +313,8 @@ func dumpScene(world: view UiWorld, scene: view Scene) {
       }
       var comps: String = componentNamesFor(world: world, entity: entity)
       log("  [{node.nodeId}] ent={entity.value} {parentStr} comps=[{comps}]")
+    } else {
+      log("  [{node.nodeId}] (not in world.nodeIds — skipped)")
     }
     i = i + 1
   }
@@ -377,11 +404,12 @@ func componentNamesFor(world: view UiWorld, entity: view EntityId) ret String {
   var acc: String = ""
   var i: Int = 0
   loop i < parts.length {
-    let s: String = parts.get(index: i)
-    if i is 0 {
-      acc = s
-    } else {
-      acc = acc.concat(other: comma).concat(other: s)
+    if let s: String = parts.get(index: i) {
+      if i is 0 {
+        acc = "{s}"
+      } else {
+        acc = acc.concat(other: comma).concat(other: s)
+      }
     }
     i = i + 1
   }

@@ -52,12 +52,10 @@ func createScrollPanel(viewportId: view String, contentId: view String) ret Scro
 # Node lookup, replicated from lib/app3d/ui_shell for the same layering reason
 # as the hit test below: lib/ui sits UNDER lib/app3d and cannot import it.
 func scrollNodeEntity(world: view UiWorld, nodeId: view String) ret EntityId {
-  let found: opt Int = world.nodeIds.get(k: nodeId)
-  if found is none {
-    ret noEntity()
+  if let raw: Int = world.nodeIds.get(k: nodeId) {
+    ret entityId(v: raw)
   }
-  let raw: Int = found
-  ret entityId(v: raw)
+  ret noEntity()
 }
 
 # POSITION COMES FROM WorldTransform, SIZE FROM ComputedRect. ComputedRect.x/y

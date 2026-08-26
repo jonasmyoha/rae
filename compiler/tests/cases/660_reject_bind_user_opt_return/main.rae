@@ -1,0 +1,12 @@
+# A user function that returns `opt T` is subject to the same rule: its
+# result cannot land in a non-optional binding. `if let` or nothing.
+import core
+
+func maybe() ret opt Int {
+  ret 5
+}
+
+func main() {
+  let n: Int = maybe()
+  log("should not run {n}")
+}

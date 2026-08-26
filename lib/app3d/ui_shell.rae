@@ -216,10 +216,10 @@ func resizeUiToWindow(world: mod UiWorld, res: view Gpu2dUi) ret Bool {
 # one that refuses to start because a scene was edited.
 
 func nodeEntityFor(world: view UiWorld, nodeId: view String) ret EntityId {
-  let found: opt Int = world.nodeIds.get(k: nodeId)
-  if found is none { ret noEntity() }
-  let raw: Int = found
-  ret entityId(v: raw)
+  if let raw: Int = world.nodeIds.get(k: nodeId) {
+    ret entityId(v: raw)
+  }
+  ret noEntity()
 }
 
 func setNodeText(world: mod UiWorld, nodeId: view String, value: view String) {
