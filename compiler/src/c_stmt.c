@@ -217,7 +217,11 @@ static bool c_optional_payload_is_boxed_pointer(CFuncContext* ctx,
 void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
                                      const AstExpr* value, FILE* out) {
   if (!value || value->kind == AST_EXPR_NONE) {
-    fprintf(out, "rae_any_none()");
+    if (opt_type && !(opt_type->is_view || opt_type->is_mod)
+        && rae_opt_is_struct_rep(ctx, opt_type))
+      fprintf(out, "(%s){0}", rae_opt_type_name(ctx, opt_type));
+    else
+      fprintf(out, "rae_any_none()");
     return;
   }
   if (value->kind == AST_EXPR_OWN) {
@@ -240,7 +244,12 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
     return;
   }
   if (value->kind == AST_EXPR_METHOD_CALL
-      && str_eq_cstr(value->as.method_call.method_name, "get")) {
+      && (str_eq_cstr(value->as.method_call.method_name, "get")
+          || str_eq_cstr(value->as.method_call.method_name, "at")
+          || str_eq_cstr(value->as.method_call.method_name, "viewAt")
+          || str_eq_cstr(value->as.method_call.method_name, "viewGet")
+          || str_eq_cstr(value->as.method_call.method_name, "modAt")
+          || str_eq_cstr(value->as.method_call.method_name, "modGet"))) {
     bool saved_unbox = ctx->suppress_opt_unbox;
     ctx->suppress_opt_unbox = true;
     emit_expr(ctx, value, out, PREC_LOWEST, false, false);
@@ -255,6 +264,22 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
     emit_expr(ctx, value, out, PREC_LOWEST, false, false);
     ctx->suppress_opt_unbox = saved_unbox;
     return;
+  }
+  // Sema may wrap a struct-rep opt-returning call in an UNBOX even where the
+  // surrounding context wants the optional itself (e.g. `ret ps.at(i)` where
+  // `at` returns `opt Particle`). Unwrap so the underlying `rae_opt_<T>` value
+  // is passed through rather than re-wrapped as a payload into a new opt.
+  if (value->kind == AST_EXPR_UNBOX) {
+    const AstExpr* inner = value->as.unary.operand;
+    const AstTypeRef* inner_tr = infer_expr_type_ref(ctx, inner);
+    if (inner_tr && inner_tr->is_opt && !(inner_tr->is_view || inner_tr->is_mod)
+        && rae_opt_is_struct_rep(ctx, inner_tr)) {
+      bool saved_unbox = ctx->suppress_opt_unbox;
+      ctx->suppress_opt_unbox = true;
+      emit_expr(ctx, inner, out, PREC_LOWEST, false, false);
+      ctx->suppress_opt_unbox = saved_unbox;
+      return;
+    }
   }
   const AstTypeRef* val_tr = infer_expr_type_ref(ctx, value);
   if (val_tr && val_tr->is_opt && !c_expr_is_extern_opt_string_call(value)) {
@@ -297,6 +322,32 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
     fprintf(out, "rae_any((");
     emit_expr(ctx, value, out, PREC_LOWEST, false, false);
     fprintf(out, "))");
+    return;
+  }
+
+  // Aggregate payload: build the monomorphized `struct rae_opt_<T>` value in
+  // place — no malloc, no RaeAny box. `enum` payloads fall through to the
+  // legacy inline-box path below (they lower to Int and keep RaeAny).
+  AstTypeRef opt_for_name = payload; opt_for_name.is_opt = true;
+  if (rae_opt_is_struct_rep(ctx, &opt_for_name)) {
+    const char* optm = rae_opt_type_name(ctx, &opt_for_name);
+    int optn = (int)ctx->temp_counter++;
+    fprintf(out, "(__extension__ ({ %s __opt%d = {0}; __opt%d.has = 1; ",
+            optm, optn, optn);
+    bool needs_deep_agg = type_needs_deep_copy(ctx->compiler_ctx, ctx->module,
+                                               &payload, 0);
+    if (needs_deep_agg && !c_expr_can_move_owned_payload(value)) {
+      const char* copy_name = rae_mangle_type_specialized(
+          ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &payload);
+      fprintf(out, "rae_deep_copy_%s(&__opt%d.value, &(", copy_name, optn);
+      emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+      fprintf(out, ")); ");
+    } else {
+      fprintf(out, "__opt%d.value = ", optn);
+      emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+      fprintf(out, "; ");
+    }
+    fprintf(out, "__opt%d; }))", optn);
     return;
   }
 
@@ -649,8 +700,12 @@ bool emit_implicit_drops_for_own_params(CFuncContext* ctx, FILE* out,
     }
     Str name = ctx->locals[idx];
     if (type->is_opt) {
-      fprintf(out, "  rae_any_drop(&%.*s);\n",
-              (int)name.len, name.data);
+      if (!(type->is_view || type->is_mod) && rae_opt_is_struct_rep(ctx, type))
+        fprintf(out, "  rae_drop_%s(&%.*s);\n",
+                rae_opt_type_name(ctx, type), (int)name.len, name.data);
+      else
+        fprintf(out, "  rae_any_drop(&%.*s);\n",
+                (int)name.len, name.data);
       continue;
     }
     Str tbase = get_base_type_name(type);
@@ -708,8 +763,12 @@ bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
     }
     Str name = ctx->locals[idx];
     if (type->is_opt) {
-      fprintf(out, "  rae_any_drop(&%.*s);\n",
-              (int)name.len, name.data);
+      if (!(type->is_view || type->is_mod) && rae_opt_is_struct_rep(ctx, type))
+        fprintf(out, "  rae_drop_%s(&%.*s);\n",
+                rae_opt_type_name(ctx, type), (int)name.len, name.data);
+      else
+        fprintf(out, "  rae_any_drop(&%.*s);\n",
+                (int)name.len, name.data);
       continue;
     }
     Str tbase = get_base_type_name(type);
@@ -787,6 +846,22 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         const AstExpr* src = bind->as.let_stmt.value;
         if (src && src->kind == AST_EXPR_UNBOX) src = src->as.unary.operand;
         ifopt_id = ctx->temp_counter++;
+        const AstTypeRef* src_tr = infer_expr_type_ref(ctx, src);
+        bool src_opt_struct = src_tr && src_tr->is_opt
+            && !(src_tr->is_view || src_tr->is_mod)
+            && rae_opt_is_struct_rep(ctx, src_tr);
+        if (src_opt_struct) {
+            // Struct-rep optional: `rae_opt_<T> t = src; if (t.has) { T x = t.value; }`.
+            // No malloc, no free — the payload moves out of the temp by value.
+            const char* optm = rae_opt_type_name(ctx, src_tr);
+            fprintf(out, "  { %s __rae_ifopt%d = ", optm, ifopt_id);
+            emit_expr(ctx, src, out, PREC_LOWEST, false, false);
+            fprintf(out, ";\n  if (__rae_ifopt%d.has) {\n", ifopt_id);
+            fprintf(out, "    ");
+            emit_type_ref_as_c_type(ctx, bind->as.let_stmt.type, out, false);
+            fprintf(out, " %.*s = __rae_ifopt%d.value;\n",
+                    (int)bind->as.let_stmt.name.len, bind->as.let_stmt.name.data, ifopt_id);
+        } else {
         fprintf(out, "  { RaeAny __rae_ifopt%d = ", ifopt_id);
         emit_expr(ctx, src, out, PREC_LOWEST, false, false);
         fprintf(out, ";\n  if (!rae_any_is_none(__rae_ifopt%d)) {\n", ifopt_id);
@@ -810,6 +885,7 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             emit_type_ref_as_c_type(ctx, bind->as.let_stmt.type, out, false);
             fprintf(out, "*)__rae_ifopt%d.as.ptr;\n", ifopt_id);
             fprintf(out, "    free(__rae_ifopt%d.as.ptr);\n", ifopt_id);
+        }
         }
         // Register the payload as an owning local so the branch's drop pass
         // (and any early `ret` inside it) releases its heap. It uniquely
@@ -1077,9 +1153,17 @@ static void emit_match_case_test(CFuncContext* ctx, const AstExpr* subject,
     if (pattern->kind == AST_EXPR_NONE) {
         bool saved = ctx->suppress_opt_unbox;
         ctx->suppress_opt_unbox = true;
-        fprintf(out, "rae_any_is_none(");
-        emit_expr(ctx, subject, out, PREC_LOWEST, false, false);
-        fprintf(out, ")");
+        const AstTypeRef* subj_tr = infer_expr_type_ref(ctx, subject);
+        if (subj_tr && subj_tr->is_opt && !(subj_tr->is_view || subj_tr->is_mod)
+            && rae_opt_is_struct_rep(ctx, subj_tr)) {
+            fprintf(out, "(!(");
+            emit_expr(ctx, subject, out, PREC_LOWEST, false, false);
+            fprintf(out, ").has)");
+        } else {
+            fprintf(out, "rae_any_is_none(");
+            emit_expr(ctx, subject, out, PREC_LOWEST, false, false);
+            fprintf(out, ")");
+        }
         ctx->suppress_opt_unbox = saved;
     } else if (subject_is_string) {
         fprintf(out, "rae_ext_rae_str_eq(");
@@ -1260,10 +1344,25 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         //
                         // `rae_any_none()` leaves the payload null, so the
                         // emptiness test `if let` emits still holds.
-                        fprintf(out, "(");
-                        emit_type_ref_as_c_type(ctx, stmt->as.let_stmt.type, out, false);
-                        fprintf(out, ")");
-                        emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_UNARY, false, false);
+                        const AstExpr* unbox_inner = stmt->as.let_stmt.value->as.unary.operand;
+                        const AstTypeRef* inner_tr = infer_expr_type_ref(ctx, unbox_inner);
+                        if (inner_tr && inner_tr->is_opt && !(inner_tr->is_view || inner_tr->is_mod)
+                            && rae_opt_is_struct_rep(ctx, inner_tr)) {
+                            // A view/mod binding into a struct-rep opt: point at
+                            // the inline `.value` when present, else NULL so the
+                            // `if let` presence test fails.
+                            int oid = ctx->temp_counter++;
+                            fprintf(out, "(");
+                            emit_type_ref_as_c_type(ctx, stmt->as.let_stmt.type, out, false);
+                            fprintf(out, ")({ %s* __ov%d = &(", rae_opt_type_name(ctx, inner_tr), oid);
+                            emit_expr(ctx, unbox_inner, out, PREC_LOWEST, true, false);
+                            fprintf(out, "); __ov%d->has ? &__ov%d->value : NULL; })", oid, oid);
+                        } else {
+                            fprintf(out, "(");
+                            emit_type_ref_as_c_type(ctx, stmt->as.let_stmt.type, out, false);
+                            fprintf(out, ")");
+                            emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_UNARY, false, false);
+                        }
                     } else if (src_is_ref_local) {
                         // The source is already a T* (view/mod param or an
                         // earlier alias): alias the referent directly. Emit
@@ -1680,14 +1779,25 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                                             target_tr, 0);
                 if (target_is_opt) {
                     int tmpn = ctx->temp_counter++;
-                    fprintf(out, "{ RaeAny __asg%d = ", tmpn);
+                    bool opt_struct = target_tr && !(target_tr->is_view || target_tr->is_mod)
+                        && rae_opt_is_struct_rep(ctx, target_tr);
+                    const char* opt_c = opt_struct ? rae_opt_type_name(ctx, target_tr) : "RaeAny";
+                    fprintf(out, "{ %s __asg%d = ", opt_c, tmpn);
                     emit_optional_boxed_expr(ctx, target_tr,
                                              stmt->as.assign_stmt.value, out);
-                    fprintf(out, "; RaeAny* __asgp%d = &(", tmpn);
+                    fprintf(out, "; %s* __asgp%d = &(", opt_c, tmpn);
                     emit_expr(ctx, stmt->as.assign_stmt.target, out,
                               PREC_LOWEST, true, false);
-                    fprintf(out, "); rae_any_drop(__asgp%d); *__asgp%d = __asg%d; }",
-                            tmpn, tmpn, tmpn);
+                    bool opt_needs_drop = opt_struct
+                        && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, target_tr, 0);
+                    if (opt_needs_drop)
+                        fprintf(out, "); rae_drop_%s(__asgp%d); *__asgp%d = __asg%d; }",
+                                opt_c, tmpn, tmpn, tmpn);
+                    else if (opt_struct)
+                        fprintf(out, "); *__asgp%d = __asg%d; }", tmpn, tmpn);
+                    else
+                        fprintf(out, "); rae_any_drop(__asgp%d); *__asgp%d = __asg%d; }",
+                                tmpn, tmpn, tmpn);
                     ctx->has_expected_type = had_exp;
                     ctx->expected_type = saved_exp;
                 } else if (is_string_local_reassign) {
@@ -2058,8 +2168,8 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 fprintf(out, "    return 0;\n");
             } else if (ret_type) {
                 fprintf(out, "    return ");
-                if (ret_type->is_opt) fprintf(out, "rae_any_none()");
-                else emit_auto_init(ctx, ret_type, out);
+                // emit_auto_init handles opt (RaeAny none / struct-rep {0}).
+                emit_auto_init(ctx, ret_type, out);
                 fprintf(out, ";\n");
             } else {
                 fprintf(out, "    return;\n");

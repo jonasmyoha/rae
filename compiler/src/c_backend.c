@@ -35,6 +35,61 @@ void emitted_list_add(EmittedTypeList* list, const char* name) {
 
 // (forward declarations live in c_backend_internal.h)
 
+// --- Value-optional representation ---------------------------------------
+//
+// `opt T` (value optional, NOT `opt view/mod T`) has two C lowerings:
+//   * boxed-pointer / aggregate payloads (struct, List/Map instance, Task,
+//     Array) -> a monomorphized `struct rae_opt_<T> { rae_Bool has; T value; }`
+//     (malloc-free, mirrors List(T) monomorphization).
+//   * everything else (primitives, String, Any, Buffer, enums-as-Int) -> the
+//     inline `RaeAny` union (the pre-existing representation).
+// The struct-rep decision MUST agree with both name-manglers (type.c and
+// mangler.c) or a local var decl won't match the struct typedef (#238).
+bool rae_typeinfo_opt_is_struct_rep(const TypeInfo* base) {
+    if (!base) return false;
+    switch (base->kind) {
+        case TYPE_STRUCT:
+        case TYPE_GENERIC_INST:
+        case TYPE_TASK:
+        case TYPE_ARRAY:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool rae_opt_is_struct_rep(CFuncContext* ctx, const AstTypeRef* type) {
+    if (!type) return false;
+    const TypeInfo* base = type->resolved_type;
+    if (base && base->kind == TYPE_OPT) base = base->as.opt.base;
+    /* A generic param payload: resolve through the current specialization. */
+    if (base && base->kind == TYPE_GENERIC_PARAM && ctx
+        && ctx->generic_params && ctx->generic_args) {
+        const AstIdentifierPart* gp = ctx->generic_params;
+        const AstTypeRef* ga = ctx->generic_args;
+        while (gp && ga) {
+            if (str_eq(gp->text, base->as.generic_param.param_name))
+                return rae_opt_is_struct_rep(ctx, ga);
+            gp = gp->next; ga = ga->next;
+        }
+    }
+    if (base && base->kind != TYPE_OPT && base->kind != TYPE_GENERIC_PARAM)
+        return rae_typeinfo_opt_is_struct_rep(base);
+    /* Fallback (unresolved clone / no TypeInfo): name-based, excluding enums
+     * (which lower to Int and keep the RaeAny rep). */
+    Str nm = get_base_type_name(type);
+    if (nm.len == 0) return false;
+    if (is_primitive_type(nm)) return false;
+    if (ctx && find_enum_decl(ctx, ctx->module, nm)) return false;
+    return true;
+}
+
+// Mangled C name of the `rae_opt_<T>` struct for a value-optional type.
+const char* rae_opt_type_name(CFuncContext* ctx, const AstTypeRef* opt_type) {
+    return rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params,
+                                       ctx->generic_args, opt_type);
+}
+
 void emit_type_info_as_c_type(CFuncContext* ctx, TypeInfo* t, FILE* out) {
     if (!t) { fprintf(out, "RaeAny"); return; }
     AstTypeRef tmp = {0};
@@ -44,7 +99,31 @@ void emit_type_info_as_c_type(CFuncContext* ctx, TypeInfo* t, FILE* out) {
 
 bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstTypeRef* type, FILE* out, EmittedTypeList* emitted, EmittedTypeList* visiting, bool ray) {
     if (!type) return true;
-    
+
+    // Value optional over an aggregate payload: emit the payload struct first,
+    // then `struct rae_opt_<T> { rae_Bool has; T value; }`. Mirrors List(T).
+    if (type->is_opt && !type->is_view && !type->is_mod) {
+        CFuncContext octx = {0}; octx.compiler_ctx = ctx; octx.module = m; octx.uses_raylib = ray;
+        if (rae_opt_is_struct_rep(&octx, type)) {
+            const char* optm = rae_mangle_type_specialized(ctx, NULL, NULL, type);
+            if (emitted_list_contains(emitted, optm) || emitted_list_contains(visiting, optm)) return true;
+            emitted_list_add(visiting, optm);
+            AstTypeRef payload = *type;
+            payload.is_opt = false; payload.next = NULL;
+            payload.resolved_type = (type->resolved_type && type->resolved_type->kind == TYPE_OPT)
+                ? type->resolved_type->as.opt.base
+                : (payload.parts ? NULL : type->resolved_type);
+            emit_type_recursive(ctx, m, &payload, out, emitted, visiting, ray);
+            fprintf(out, "typedef struct %s %s;\n", optm, optm);
+            fprintf(out, "struct %s {\n  rae_Bool has;\n  ", optm);
+            emit_type_ref_as_c_type(&octx, &payload, out, false);
+            fprintf(out, " value;\n};\n\n");
+            emitted_list_add(emitted, optm);
+            if (visiting->count > 0) visiting->count--;
+            return true;
+        }
+    }
+
     if (type->resolved_type) {
         if (type->resolved_type->kind == TYPE_ARRAY) {
             /* Emit the element type first, then the wrapper struct. Handled
@@ -314,6 +393,22 @@ void register_generic_type(CompilerContext* ctx, const AstTypeRef* type) {
         Str ab = get_base_type_name(a);
         if (str_eq_cstr(ab, "void") || (a->resolved_type && a->resolved_type->kind == TYPE_VOID)) return;
     }
+    // Value optional over an aggregate payload: also register the bare payload
+    // so its own struct/drop/copy helpers are emitted (the opt struct's drop
+    // and deep-copy call into them).
+    if (type->is_opt && !type->is_view && !type->is_mod) {
+        CFuncContext octx = {0}; octx.compiler_ctx = ctx; octx.module = ctx->current_module;
+        if (rae_opt_is_struct_rep(&octx, type)) {
+            AstTypeRef* payload = (AstTypeRef*)malloc(sizeof(AstTypeRef));
+            *payload = *type;
+            payload->is_opt = false;
+            payload->next = NULL;
+            payload->resolved_type = (type->resolved_type && type->resolved_type->kind == TYPE_OPT)
+                ? type->resolved_type->as.opt.base
+                : (payload->parts ? NULL : type->resolved_type);
+            register_generic_type(ctx, payload);
+        }
+    }
     if (type->resolved_type && type->resolved_type->kind < TYPE_STRUCT) {
         if (type->resolved_type->kind == TYPE_BUFFER) { for (const AstTypeRef* arg = type->generic_args; arg; arg = arg->next) register_generic_type(ctx, arg); }
         return;
@@ -520,6 +615,20 @@ bool c_spawn_threadable(CFuncContext* ctx, const AstFuncDecl* f) {
 
 bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* out, bool skip_ptr) {
   if (!type) { fprintf(out, "int64_t"); return true; }
+  // A VALUE optional (`opt T`, not `opt view/mod T`) has a fixed C lowering
+  // independent of the payload's resolved-kind dispatch below: a struct-rep
+  // payload spells `rae_opt_<T>`, everything else spells `RaeAny`. Handled up
+  // front so a generic-param payload (`opt T` in a template) can't lose its
+  // opt-ness when the payload is substituted to a primitive.
+  {
+    bool res_opt = type->resolved_type && type->resolved_type->kind == TYPE_OPT;
+    if ((type->is_opt || res_opt) && !type->is_view && !type->is_mod) {
+      AstTypeRef ot = *type; ot.is_opt = true;
+      if (rae_opt_is_struct_rep(ctx, &ot)) fprintf(out, "%s", rae_opt_type_name(ctx, &ot));
+      else fprintf(out, "RaeAny");
+      return true;
+    }
+  }
     if (type->resolved_type) {
       TypeInfo* t = type->resolved_type; bool is_ptr = (type->is_view || type->is_mod) && !skip_ptr;
       if (t->kind == TYPE_GENERIC_PARAM && ctx && ctx->generic_params && ctx->generic_args) {
@@ -548,6 +657,11 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
       if (t->kind == TYPE_BOOL) { if (is_ptr) fprintf(out, "rae_%s_Bool", type->is_mod ? "Mod" : "View"); else fprintf(out, "rae_Bool"); return true; }
       if (t->kind == TYPE_CHAR) { if (is_ptr) fprintf(out, "rae_%s_Char", type->is_mod ? "Mod" : "View"); else fprintf(out, "uint32_t"); return true; }
       if (t->kind == TYPE_STRING) { if (is_ptr) fprintf(out, "rae_%s_String", type->is_mod ? "Mod" : "View"); else fprintf(out, "rae_String"); return true; }
+      if (t->kind == TYPE_OPT && rae_typeinfo_opt_is_struct_rep(t->as.opt.base)) {
+          fprintf(out, "%s", type_mangle_name(ctx->compiler_ctx->ast_arena, t).data);
+          if (is_ptr) fprintf(out, "*");
+          return true;
+      }
       if (t->kind == TYPE_ANY || t->kind == TYPE_OPT) { fprintf(out, "RaeAny"); if (is_ptr) fprintf(out, "*"); return true; }
       if (t->kind == TYPE_ARRAY) {
           /* Array(T, cap: N) lowers to a STRUCT wrapping T[N], never a bare
@@ -600,7 +714,11 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
   // into RaeAny would cost 48 and, for anything wider than the union, a malloc.
   //
   // Only a NON-reference optional needs the box.
-  if (type->is_opt && !(type->is_view || type->is_mod)) { fprintf(out, "RaeAny"); return true; }
+  if (type->is_opt && !(type->is_view || type->is_mod)) {
+    if (rae_opt_is_struct_rep(ctx, type)) fprintf(out, "%s", rae_opt_type_name(ctx, type));
+    else fprintf(out, "RaeAny");
+    return true;
+  }
   Str base = type->parts->text; bool is_mod = type->is_mod;
   if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int")) { if (is_ptr) fprintf(out, "rae_%s_Int64", is_mod ? "Mod" : "View"); else fprintf(out, "int64_t"); return true; }
   if (str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32")) { if (is_ptr) fprintf(out, "rae_%s_Float", is_mod ? "Mod" : "View"); else fprintf(out, "float"); return true; }
@@ -691,7 +809,10 @@ const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
       tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
                                ctx->generic_args, tr);
     }
-    if (tr->is_opt && !(tr->is_view || tr->is_mod)) return "RaeAny";
+    if (tr->is_opt && !(tr->is_view || tr->is_mod)) {
+      if (rae_opt_is_struct_rep(ctx, tr)) return rae_opt_type_name(ctx, tr);
+      return "RaeAny";
+    }
     bool is_view = tr->is_view, is_mod = tr->is_mod, is_ptr = is_view || is_mod;
     Str base = get_base_type_name(tr);
     // Check if return type is an enum — emit as int64_t
@@ -745,7 +866,12 @@ const AstTypeRef* get_local_type_ref(CFuncContext* ctx, Str name) { for (int i =
 
 bool emit_auto_init(CFuncContext* ctx, const AstTypeRef* type, FILE* out) {
     if (!type) { fprintf(out, "{0}"); return true; }
-    if (type->is_opt) { fprintf(out, "rae_any_none()"); return true; }
+    if (type->is_opt) {
+        if (!(type->is_view || type->is_mod) && rae_opt_is_struct_rep(ctx, type))
+            fprintf(out, "(%s){0}", rae_opt_type_name(ctx, type));
+        else fprintf(out, "rae_any_none()");
+        return true;
+    }
     Str base = get_base_type_name(type);
     if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int32") || str_eq_cstr(base, "UInt64") || str_eq_cstr(base, "UInt32") || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) fprintf(out, "0");
     else if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32")) fprintf(out, "0.0");
@@ -1260,7 +1386,8 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
       // are heap-owned by the map after a JSON parse).
       bool needs_loop = elem_needs_drop || is_smap;
       if (needs_loop) {
-        const char* elem_mangled = elem_is_opt
+        bool elem_opt_struct = elem_is_opt && rae_opt_is_struct_rep(&tctx, elem);
+        const char* elem_mangled = (elem_is_opt && !elem_opt_struct)
             ? "RaeAny"
             : rae_mangle_type_specialized(ctx, NULL, NULL, elem);
         bool elem_is_container = !elem_is_opt && (str_eq_cstr(ebase, "List") || str_eq_cstr(ebase, "StringMap") || str_eq_cstr(ebase, "IntMap"));
@@ -1283,7 +1410,8 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
           fprintf(out, "    %s* __elem = (%s*)((char*)this->data + __i * sizeof(%s));\n",
                   elem_mangled, elem_mangled, elem_mangled);
           if (elem_is_opt) {
-            fprintf(out, "    rae_any_drop(__elem);\n");
+            if (elem_opt_struct) fprintf(out, "    rae_drop_%s(__elem);\n", elem_mangled);
+            else fprintf(out, "    rae_any_drop(__elem);\n");
           } else if (elem_is_string) {
             // List(String) — call the string-free helper. is_owned
             // check inside makes borrowed entries safe.
@@ -1324,7 +1452,8 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
           }
           if (elem_needs_drop) {
             if (elem_is_opt) {
-              fprintf(out, "      rae_any_drop(&__entry->value);\n");
+              if (elem_opt_struct) fprintf(out, "      rae_drop_%s(&__entry->value);\n", elem_mangled);
+              else fprintf(out, "      rae_any_drop(&__entry->value);\n");
             } else if (elem_is_string) {
               fprintf(out, "      rae_ext_rae_str_free(__entry->value);\n");
             } else if (elem_is_container && nested_drop) {
@@ -1453,6 +1582,120 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           emit_type_recursive(ctx, module, &tr, out, &emitted, &visiting, false);
       }
   }
+
+  // Value-optional helper collection (opt T over an aggregate payload).
+  // Each distinct struct-rep opt type gets `rae_drop_<optT>` and
+  // `rae_deep_copy_<optT>` when its payload transitively owns heap. Forward
+  // declarations go here (all payload structs are now declared); bodies are
+  // emitted at the end of the deep-copy section, once the payload drop/copy
+  // helpers are also declared.
+  typedef struct {
+    const AstTypeRef* type;      // the opt AstTypeRef
+    AstTypeRef payload;          // payload with is_opt cleared
+    const char* optm;            // rae_opt_<payload> mangled name
+    bool needs_drop;
+    bool needs_copy;
+  } OptHelperEntry;
+  OptHelperEntry opt_entries[512];
+  size_t opt_entry_count = 0;
+  // Add one struct-rep opt type (the AstTypeRef `_gt`) to opt_entries.
+  #define TRY_ADD_OPT(_gt) do { \
+    const AstTypeRef* gt = (_gt); \
+    if (gt && gt->is_opt && !gt->is_view && !gt->is_mod && opt_entry_count < 512) { \
+      CFuncContext octx = {0}; octx.compiler_ctx = ctx; octx.module = module; \
+      if (rae_opt_is_struct_rep(&octx, gt)) { \
+        const char* optm = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)gt); \
+        bool dup = !optm; \
+        for (size_t k = 0; !dup && k < opt_entry_count; k++) \
+          if (strcmp(opt_entries[k].optm, optm) == 0) dup = true; \
+        if (!dup) { \
+          emit_type_recursive(ctx, module, gt, out, &emitted, &visiting, false); \
+          AstTypeRef payload = *gt; \
+          payload.is_opt = false; payload.next = NULL; \
+          payload.resolved_type = (gt->resolved_type && gt->resolved_type->kind == TYPE_OPT) \
+              ? gt->resolved_type->as.opt.base \
+              : (payload.parts ? NULL : gt->resolved_type); \
+          opt_entries[opt_entry_count].type = gt; \
+          opt_entries[opt_entry_count].payload = payload; \
+          opt_entries[opt_entry_count].optm = optm; \
+          opt_entries[opt_entry_count].needs_drop = type_needs_cascade_drop(ctx, module, &payload, 0); \
+          opt_entries[opt_entry_count].needs_copy = type_needs_deep_copy(ctx, module, &payload, 0); \
+          opt_entry_count++; \
+        } \
+      } \
+    } \
+  } while (0)
+  for (size_t i = 0; i < ctx->generic_type_count; i++) TRY_ADD_OPT(ctx->generic_types[i]);
+  // Struct FIELDS: a struct-rep opt field (e.g. `Player { nowPlaying: opt Track }`)
+  // reaches the field-drop/copy sites which call rae_drop_/rae_deep_copy_<optT>,
+  // but the field type isn't necessarily a standalone generic_types entry.
+  // Scan non-generic struct fields, and generic-instance struct fields (with
+  // their concrete args substituted).
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+    const AstDecl* d = ctx->all_decls[i];
+    if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
+    if (has_property(d->as.type_decl.properties, "c_struct")) continue;
+    for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next)
+      if (f->type && f->type->is_opt) TRY_ADD_OPT(f->type);
+  }
+  for (size_t i = 0; i < ctx->generic_type_count; i++) {
+    const AstTypeRef* gt = ctx->generic_types[i];
+    if (!gt || gt->is_opt || gt->is_view || gt->is_mod || !gt->generic_args) continue;
+    Str gb = get_base_type_name(gt);
+    const AstDecl* td = NULL;
+    for (size_t k = 0; k < ctx->all_decl_count; k++) {
+      const AstDecl* dd = ctx->all_decls[k];
+      if (dd->kind == AST_DECL_TYPE && !dd->as.type_decl.specialization_args
+          && str_eq(dd->as.type_decl.name, gb)) { td = dd; break; }
+    }
+    if (!td || !td->as.type_decl.generic_params) continue;
+    for (const AstTypeField* f = td->as.type_decl.fields; f; f = f->next) {
+      if (!f->type) continue;
+      AstTypeRef* sub = substitute_type_ref(ctx, td->as.type_decl.generic_params,
+                                            gt->generic_args, f->type);
+      if (sub && sub->is_opt) TRY_ADD_OPT(sub);
+    }
+  }
+  // Non-generic function signatures (concrete opt return/param types).
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+    const AstDecl* d = ctx->all_decls[i];
+    if (d->kind != AST_DECL_FUNC || d->as.func_decl.generic_params) continue;
+    const AstFuncDecl* fd = &d->as.func_decl;
+    if (fd->returns && fd->returns->type && fd->returns->type->is_opt)
+      TRY_ADD_OPT(fd->returns->type);
+    for (const AstParam* p = fd->params; p; p = p->next)
+      if (p->type && p->type->is_opt) TRY_ADD_OPT(p->type);
+  }
+  // Specialized generic-function signatures (substituted opt return/params) —
+  // e.g. `List(Track).get()` -> `opt Track`.
+  for (size_t i = 0; i < ctx->specialized_func_count; i++) {
+    const AstFuncDecl* fd = ctx->specialized_funcs[i].decl;
+    const AstTypeRef* cargs = ctx->specialized_funcs[i].concrete_args;
+    if (!fd) continue;
+    const AstIdentifierPart* gps = fd->generic_params;
+    if (!gps && fd->generic_template && fd->generic_template->kind == AST_DECL_FUNC)
+      gps = fd->generic_template->as.func_decl.generic_params;
+    if (fd->returns && fd->returns->type && fd->returns->type->is_opt) {
+      AstTypeRef* sub = substitute_type_ref(ctx, gps, cargs, fd->returns->type);
+      if (sub && sub->is_opt) TRY_ADD_OPT(sub);
+    }
+    for (const AstParam* p = fd->params; p; p = p->next) {
+      if (p->type && p->type->is_opt) {
+        AstTypeRef* sub = substitute_type_ref(ctx, gps, cargs, p->type);
+        if (sub && sub->is_opt) TRY_ADD_OPT(sub);
+      }
+    }
+  }
+  #undef TRY_ADD_OPT
+  for (size_t i = 0; i < opt_entry_count; i++) {
+    if (opt_entries[i].needs_drop)
+      fprintf(out, "RAE_UNUSED static void rae_drop_%s(%s* o);\n",
+              opt_entries[i].optm, opt_entries[i].optm);
+    if (opt_entries[i].needs_copy)
+      fprintf(out, "RAE_UNUSED static void rae_deep_copy_%s(%s* dst, const %s* src);\n",
+              opt_entries[i].optm, opt_entries[i].optm, opt_entries[i].optm);
+  }
+  if (opt_entry_count > 0) fprintf(out, "\n");
 
   // Generate toJson/fromJson for non-generic user struct types
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
@@ -1585,7 +1828,16 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           bool has_generic_args = f->type && f->type->generic_args;
           bool is_generic_template = fd && fd->kind == AST_DECL_TYPE && fd->as.type_decl.generic_params;
           bool is_opt_field = f->type && f->type->is_opt;
-          if (is_user_struct && !is_opt_field && !has_generic_args) {
+          CFuncContext _sctx = {0}; _sctx.compiler_ctx = ctx; _sctx.module = module;
+          bool is_opt_struct_field = is_opt_field && f->type && !f->type->is_view
+              && !f->type->is_mod && rae_opt_is_struct_rep(&_sctx, f->type);
+          if (is_opt_struct_field) {
+              // A struct-rep opt field is `struct rae_opt_<T>`, not RaeAny, so
+              // it has no _Generic rae_ext_rae_str overload. Emit a presence-
+              // aware placeholder (full formatting is future work).
+              fprintf(out, "  __out = rae_ext_rae_str_concat(__out, this->%.*s.has ? (rae_String){(uint8_t*)\"<opt>\", 5} : (rae_String){(uint8_t*)\"none\", 4});\n",
+                  (int)f->name.len, f->name.data);
+          } else if (is_user_struct && !is_opt_field && !has_generic_args) {
               const char* fmangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = fbase}});
               fprintf(out, "  __out = rae_ext_rae_str_concat(__out, rae_to_str_%s_(&this->%.*s));\n",
                   fmangled, (int)f->name.len, f->name.data);
@@ -1686,7 +1938,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
        gi < ctx->generic_type_count && drop_entry_count < 512;
        gi++) {
     const AstTypeRef* gt = ctx->generic_types[gi];
-    if (!gt || gt->is_view || gt->is_mod) continue;
+    if (!gt || gt->is_view || gt->is_mod || gt->is_opt) continue;
     if (!gt->generic_args) continue;
     Str gb = get_base_type_name(gt);
     if (str_eq_cstr(gb, "List")
@@ -1858,8 +2110,16 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
         if (!type_needs_cascade_drop(ctx, module, concrete, 0)) continue;
         if (concrete && concrete->is_opt) {
           if (is_alias) continue;
-          fprintf(out, "  rae_any_drop(&this->%.*s);\n",
-                  (int)f->name.len, f->name.data);
+          CFuncContext fctx = {0}; fctx.compiler_ctx = ctx; fctx.module = module;
+          if (!concrete->is_view && !concrete->is_mod
+              && rae_opt_is_struct_rep(&fctx, concrete)) {
+            fprintf(out, "  rae_drop_%s(&this->%.*s);\n",
+                    rae_opt_type_name(&fctx, concrete),
+                    (int)f->name.len, f->name.data);
+          } else {
+            fprintf(out, "  rae_any_drop(&this->%.*s);\n",
+                    (int)f->name.len, f->name.data);
+          }
           continue;
         }
         Str fbase = get_base_type_name(concrete);
@@ -1972,7 +2232,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   size_t container_entry_count = 0;
   for (size_t i = 0; i < ctx->generic_type_count && container_entry_count < 512; i++) {
     const AstTypeRef* gt = ctx->generic_types[i];
-    if (!gt || gt->is_view || gt->is_mod) continue;
+    if (!gt || gt->is_view || gt->is_mod || gt->is_opt) continue;
     Str gb = get_base_type_name(gt);
     bool is_list = str_eq_cstr(gb, "List");
     bool is_smap = str_eq_cstr(gb, "StringMap");
@@ -2021,7 +2281,15 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
        * REPRESENTATION before the base-type checks below, or an \
        * `opt String` field gets rae_string_copy(RaeAny) (#138). */ \
       if ((ft) && (ft)->is_opt) { \
-        fprintf(out, "  %s = rae_any_copy(%s);\n", (dst_expr), (src_expr)); \
+        CFuncContext _octx = {0}; _octx.compiler_ctx = ctx; _octx.module = module; \
+        if (!(ft)->is_view && !(ft)->is_mod && rae_opt_is_struct_rep(&_octx, (ft))) { \
+          if (type_needs_deep_copy(ctx, module, (AstTypeRef*)(ft), 0)) \
+            fprintf(out, "  rae_deep_copy_%s(&%s, &%s);\n", rae_opt_type_name(&_octx, (ft)), (dst_expr), (src_expr)); \
+          else \
+            fprintf(out, "  %s = %s;\n", (dst_expr), (src_expr)); \
+        } else { \
+          fprintf(out, "  %s = rae_any_copy(%s);\n", (dst_expr), (src_expr)); \
+        } \
         break; \
       } \
       if (str_eq_cstr((fbase), "String")) { \
@@ -2080,7 +2348,9 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     // opt T elements are RaeAny at the C level — classify by
     // representation first (#138), mirroring the drop synthesis.
     bool elem_is_opt = elem->is_opt;
-    const char* elem_mangled = elem_is_opt
+    CFuncContext ecctx = {0}; ecctx.compiler_ctx = ctx; ecctx.module = module;
+    bool elem_opt_struct = elem_is_opt && rae_opt_is_struct_rep(&ecctx, (AstTypeRef*)elem);
+    const char* elem_mangled = (elem_is_opt && !elem_opt_struct)
         ? "RaeAny"
         : rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)elem);
     bool elem_is_string = !elem_is_opt && str_eq_cstr(ebase, "String");
@@ -2088,7 +2358,14 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     bool elem_is_smap = !elem_is_opt && str_eq_cstr(ebase, "StringMap");
     bool elem_is_imap = !elem_is_opt && str_eq_cstr(ebase, "IntMap");
     bool elem_is_container = elem_is_list || elem_is_smap || elem_is_imap;
-    bool elem_needs_deep = elem_is_string || elem_is_container ||
+    AstTypeRef elem_opt_payload = *elem;
+    elem_opt_payload.is_opt = false; elem_opt_payload.next = NULL;
+    elem_opt_payload.resolved_type = (elem->resolved_type && elem->resolved_type->kind == TYPE_OPT)
+        ? elem->resolved_type->as.opt.base
+        : (elem_opt_payload.parts ? NULL : elem->resolved_type);
+    bool elem_opt_needs_copy = elem_opt_struct
+        && type_needs_deep_copy(ctx, module, &elem_opt_payload, 0);
+    bool elem_needs_deep = elem_is_string || elem_is_container || elem_opt_needs_copy ||
         type_needs_deep_copy(ctx, module, (AstTypeRef*)elem, 0);
     // Element C TYPE spelling (for casts/sizeof/pointer decls). A c_struct
     // element emits its BARE C name (WGPUColor, not rae_WGPUColor) — the same
@@ -2125,7 +2402,10 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       } else {
         fprintf(out, "    for (int64_t __i = 0; __i < src->length; __i++) {\n");
         if (elem_is_opt) {
-          fprintf(out, "      dst->data[__i] = rae_any_copy(src->data[__i]);\n");
+          if (elem_opt_struct)
+            fprintf(out, "      rae_deep_copy_%s(&dst->data[__i], &src->data[__i]);\n", elem_mangled);
+          else
+            fprintf(out, "      dst->data[__i] = rae_any_copy(src->data[__i]);\n");
         } else if (elem_is_string) {
           fprintf(out, "      dst->data[__i] = rae_string_copy(src->data[__i]);\n");
         } else if (elem_is_container) {
@@ -2165,7 +2445,10 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       }
       // Copy value per element type.
       if (elem_is_opt) {
-        fprintf(out, "      __de->value = rae_any_copy(__se->value);\n");
+        if (elem_opt_struct)
+          fprintf(out, "      rae_deep_copy_%s(&__de->value, &__se->value);\n", elem_mangled);
+        else
+          fprintf(out, "      __de->value = rae_any_copy(__se->value);\n");
       } else if (elem_is_string) {
         fprintf(out, "      __de->value = rae_string_copy(__se->value);\n");
       } else if (elem_is_container) {
@@ -2182,6 +2465,43 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     fprintf(out, "}\n\n");
   }
   #undef EMIT_FIELD_COPY
+
+  // Value-optional helper BODIES. Payload drop/copy helpers are all declared
+  // by now, so `rae_drop_<optT>` / `rae_deep_copy_<optT>` can call into them.
+  for (size_t i = 0; i < opt_entry_count; i++) {
+    OptHelperEntry* e = &opt_entries[i];
+    CFuncContext octx = {0}; octx.compiler_ctx = ctx; octx.module = module;
+    Str pbase = get_base_type_name(&e->payload);
+    if (e->needs_drop) {
+      fprintf(out, "RAE_UNUSED static void rae_drop_%s(%s* o) {\n", e->optm, e->optm);
+      fprintf(out, "  if (!o->has) return;\n");
+      if (str_eq_cstr(pbase, "Task")) {
+        fprintf(out, "  rae_task_drop(o->value);\n");
+      } else if (is_drop_target_type(&e->payload)) {
+        const AstFuncDecl* drop_fd = find_drop_overload_for(&octx, pbase);
+        const AstTypeRef* elem = e->payload.generic_args;
+        if (drop_fd && elem) {
+          register_function_specialization(ctx, drop_fd, elem);
+          const char* fn = rae_mangle_specialized_function(ctx, drop_fd, elem);
+          fprintf(out, "  %s(&o->value);\n", fn);
+        }
+      } else {
+        const char* pm = rae_mangle_type_specialized(ctx, NULL, NULL, &e->payload);
+        fprintf(out, "  rae_drop_struct_%s(&o->value);\n", pm);
+      }
+      fprintf(out, "}\n\n");
+    }
+    if (e->needs_copy) {
+      fprintf(out, "RAE_UNUSED static void rae_deep_copy_%s(%s* dst, const %s* src) {\n",
+              e->optm, e->optm, e->optm);
+      fprintf(out, "  dst->has = src->has;\n");
+      fprintf(out, "  if (!src->has) return;\n");
+      // Struct and container payloads both use rae_deep_copy_<payload>.
+      const char* pm = rae_mangle_type_specialized(ctx, NULL, NULL, &e->payload);
+      fprintf(out, "  rae_deep_copy_%s(&dst->value, &src->value);\n", pm);
+      fprintf(out, "}\n\n");
+    }
+  }
 
   // Emit top-level `let` globals as static C variables. We bundle every
   // imported module into one translation unit, so plain `static` works

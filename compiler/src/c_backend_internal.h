@@ -142,6 +142,11 @@ const AstFuncDecl* find_function_overload(const AstModule* module, CFuncContext*
 const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr);
 Str infer_expr_type(CFuncContext* ctx, const AstExpr* expr);
 
+// -- Value-optional representation (opt T over an aggregate payload) --
+bool rae_typeinfo_opt_is_struct_rep(const TypeInfo* base);
+bool rae_opt_is_struct_rep(CFuncContext* ctx, const AstTypeRef* type);
+const char* rae_opt_type_name(CFuncContext* ctx, const AstTypeRef* opt_type);
+
 // -- Type emission --
 bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* out, bool skip_ptr);
 void emit_type_info_as_c_type(CFuncContext* ctx, TypeInfo* t, FILE* out);
