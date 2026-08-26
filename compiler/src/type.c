@@ -404,8 +404,29 @@ static void type_mangle_recursive(Arena* arena, TypeInfo* t, char* buf, size_t* 
         case TYPE_BOOL: *pos += snprintf(buf + *pos, cap - *pos, "rae_Bool"); break;
         case TYPE_CHAR: *pos += snprintf(buf + *pos, cap - *pos, "uint32_t"); break;
         case TYPE_STRING: *pos += snprintf(buf + *pos, cap - *pos, "rae_String"); break;
-        case TYPE_ANY:
-        case TYPE_OPT: *pos += snprintf(buf + *pos, cap - *pos, "RaeAny"); break;
+        case TYPE_ANY: *pos += snprintf(buf + *pos, cap - *pos, "RaeAny"); break;
+        case TYPE_OPT: {
+            /* A value optional over an AGGREGATE payload (struct, List/Map
+             * instance, Task, Array) lowers to a monomorphized
+             * `struct rae_opt_<T> { rae_Bool has; T value; }`, so its mangled
+             * name is `rae_opt_<payload>`. Everything else (primitives, String,
+             * Any, Buffer, enums-as-Int) keeps the inline RaeAny union. Must
+             * stay byte-identical to the AstTypeRef mangler
+             * (mangle_type_recursive_specialized) or a local var decl won't
+             * match the struct typedef (#238). */
+            TypeInfo* opt_base = t->as.opt.base;
+            bool struct_rep = opt_base && (opt_base->kind == TYPE_STRUCT
+                || opt_base->kind == TYPE_GENERIC_INST
+                || opt_base->kind == TYPE_TASK
+                || opt_base->kind == TYPE_ARRAY);
+            if (struct_rep) {
+                *pos += snprintf(buf + *pos, cap - *pos, "rae_opt_");
+                type_mangle_recursive(arena, opt_base, buf, pos, cap, depth + 1);
+            } else {
+                *pos += snprintf(buf + *pos, cap - *pos, "RaeAny");
+            }
+            break;
+        }
         case TYPE_BUFFER:
             *pos += snprintf(buf + *pos, cap - *pos, "Buffer_");
             type_mangle_recursive(arena, t->as.buffer.base, buf, pos, cap, depth + 1);

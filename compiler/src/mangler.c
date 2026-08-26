@@ -167,12 +167,86 @@ static bool mangle_primitive_ref(const AstTypeRef* type, Str base, char* buf, si
 
 static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct AstIdentifierPart* generic_params, const AstTypeRef* concrete_args, const AstTypeRef* type, char* buf, size_t* pos, size_t cap);
 
+/* Decide struct-rep for a CONCRETE (non-opt) payload ref: prefer the resolved
+ * TypeInfo kind, else name (never true for a bare primitive/String/Any). */
+static bool mangler_payload_is_struct_rep(const AstTypeRef* payload) {
+    if (!payload) return false;
+    const TypeInfo* ti = payload->resolved_type;
+    if (ti && ti->kind != TYPE_GENERIC_PARAM) {
+        return ti->kind == TYPE_STRUCT || ti->kind == TYPE_GENERIC_INST
+            || ti->kind == TYPE_TASK || ti->kind == TYPE_ARRAY;
+    }
+    Str b = get_base_type_name(payload);
+    if (b.len == 0) return false;
+    if (is_primitive_type(b)) return false;
+    return true;
+}
+
+/* True iff `opt T` (value optional, not view/mod) uses the monomorphized
+ * `struct rae_opt_<T> { rae_Bool has; T value; }` representation. Prefers the
+ * resolved TypeInfo kind (set by sema) so this decision matches the TypeInfo
+ * mangler in type.c and the backend byte-for-byte (#238). A generic-param
+ * payload (`opt T` inside a template) resolves through the concrete args;
+ * absent concrete args (template-level) it is treated as non-struct-rep since
+ * such names are never emitted as real typedefs. */
+static bool mangler_opt_is_struct_rep(const struct AstIdentifierPart* generic_params,
+                                      const AstTypeRef* concrete_args,
+                                      const AstTypeRef* type) {
+    if (!type || !type->is_opt || type->is_view || type->is_mod) return false;
+    const TypeInfo* base = type->resolved_type;
+    if (base && base->kind == TYPE_OPT) base = base->as.opt.base;
+    Str pname = {0};
+    if (base && base->kind == TYPE_GENERIC_PARAM) pname = base->as.generic_param.param_name;
+    else if (!base && type->parts && !type->parts->next) pname = type->parts->text;
+    if (pname.len && generic_params) {
+        const struct AstIdentifierPart* gp = generic_params;
+        const AstTypeRef* ca = concrete_args;
+        while (gp) {
+            if (str_eq(gp->text, pname))
+                return ca ? mangler_payload_is_struct_rep(ca) : false;
+            gp = gp->next; if (ca) ca = ca->next;
+        }
+    }
+    if (base && base->kind != TYPE_OPT && base->kind != TYPE_GENERIC_PARAM) {
+        return base->kind == TYPE_STRUCT || base->kind == TYPE_GENERIC_INST
+            || base->kind == TYPE_TASK || base->kind == TYPE_ARRAY;
+    }
+    Str b = get_base_type_name(type);
+    if (b.len == 0) return false;
+    if (is_primitive_type(b)) return false;
+    return true;
+}
+
+/* Fill `out` with the opt payload AstTypeRef (is_opt cleared). */
+static AstTypeRef mangler_opt_payload(const AstTypeRef* type) {
+    AstTypeRef payload = *type;
+    payload.is_opt = false;
+    payload.next = NULL;
+    payload.resolved_type = (type->resolved_type && type->resolved_type->kind == TYPE_OPT)
+        ? type->resolved_type->as.opt.base
+        : (payload.parts ? NULL : type->resolved_type);
+    return payload;
+}
+
 static void mangle_type_recursive(CompilerContext* ctx, const struct AstIdentifierPart* generic_params, const AstTypeRef* type, char* buf, size_t* pos, size_t cap, bool force_erase) {
     (void)force_erase;
     if (!type) { *pos += snprintf(buf + *pos, cap - *pos, "int64_t"); return; }
-    
+
     Str base = get_base_type_name(type);
     if (mangle_primitive_ref(type, base, buf, pos, cap)) return;
+    if (type->is_opt && !type->is_view && !type->is_mod) {
+        // Value optional: struct-rep -> rae_opt_<T>; else the inline RaeAny
+        // box. Emit RaeAny (matching the C type) rather than the bare payload
+        // so mangled names agree with type.c and the emitted representation.
+        if (mangler_opt_is_struct_rep(generic_params, NULL, type)) {
+            *pos += snprintf(buf + *pos, cap - *pos, "rae_opt_");
+            AstTypeRef payload = mangler_opt_payload(type);
+            mangle_type_recursive(ctx, generic_params, &payload, buf, pos, cap, force_erase);
+        } else {
+            *pos += snprintf(buf + *pos, cap - *pos, "RaeAny");
+        }
+        return;
+    }
 
     /* Array(T, cap: N) carries its count in the type, so delegate to the
      * TypeInfo mangler rather than walking generic_args here — the `cap:`
@@ -250,6 +324,16 @@ static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct
 
     Str base = get_base_type_name(type);
     if (mangle_primitive_ref(type, base, buf, pos, cap)) return;
+    if (type->is_opt && !type->is_view && !type->is_mod) {
+        if (mangler_opt_is_struct_rep(generic_params, concrete_args, type)) {
+            *pos += snprintf(buf + *pos, cap - *pos, "rae_opt_");
+            AstTypeRef payload = mangler_opt_payload(type);
+            mangle_type_recursive_specialized(ctx, generic_params, concrete_args, &payload, buf, pos, cap);
+        } else {
+            *pos += snprintf(buf + *pos, cap - *pos, "RaeAny");
+        }
+        return;
+    }
 
     /* Array(T, cap: N) carries its count in the type, so delegate to the
      * TypeInfo mangler rather than walking generic_args here — the `cap:`

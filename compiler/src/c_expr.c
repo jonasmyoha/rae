@@ -255,6 +255,17 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
               ctx->suppress_opt_unbox = saved_unbox;
               break;
           }
+          // A struct-rep value optional is `struct rae_opt_<T>`: emptiness is
+          // the `.has` flag, not rae_any_is_none (which is for the RaeAny box).
+          if (otr && otr->is_opt && !(otr->is_view || otr->is_mod)
+              && rae_opt_is_struct_rep(ctx, otr)) {
+              fprintf(out, "((bool)((");
+              emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
+              fprintf(out, ").has%s))",
+                      expr->as.binary.op == AST_BIN_NEQ ? "" : " == 0");
+              ctx->suppress_opt_unbox = saved_unbox;
+              break;
+          }
           // Wrap the result in (bool) so the `_Generic` rae_ext_rae_str macro
           // matches the rae_Bool branch in interpolation contexts.
           if (expr->as.binary.op == AST_BIN_NEQ) fprintf(out, "((bool)(!rae_any_is_none(");
@@ -697,7 +708,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             } else {
                 TypeInfo* t = expr->resolved_type; if (t->kind == TYPE_REF) t = t->as.ref.base;
                 fprintf(out, "("); emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, false);
-                if (t->kind == TYPE_INT || t->kind == TYPE_CHAR) fprintf(out, ").as.i"); else if (t->kind == TYPE_FLOAT || t->kind == TYPE_FLOAT64) fprintf(out, ").as.f"); else if (t->kind == TYPE_BOOL) fprintf(out, ").as.b"); else if (t->kind == TYPE_STRING) fprintf(out, ").as.s"); else fprintf(out, ").as.ptr");
+                if (t->kind == TYPE_INT || t->kind == TYPE_CHAR) fprintf(out, ").as.i"); else if (t->kind == TYPE_FLOAT || t->kind == TYPE_FLOAT64) fprintf(out, ").as.f"); else if (t->kind == TYPE_BOOL) fprintf(out, ").as.b"); else if (t->kind == TYPE_STRING) fprintf(out, ").as.s"); else if (rae_typeinfo_opt_is_struct_rep(t)) fprintf(out, ").value"); else fprintf(out, ").as.ptr");
             }
         } else emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, false);
         break;
@@ -1126,6 +1137,9 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         if (ctx->has_expected_type && ctx->expected_type.is_opt
             && (ctx->expected_type.is_view || ctx->expected_type.is_mod)) {
             fprintf(out, "NULL");
+        } else if (ctx->has_expected_type && ctx->expected_type.is_opt
+                   && rae_opt_is_struct_rep(ctx, &ctx->expected_type)) {
+            fprintf(out, "(%s){0}", rae_opt_type_name(ctx, &ctx->expected_type));
         } else {
             fprintf(out, "rae_any_none()");
         }
