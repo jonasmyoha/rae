@@ -91,7 +91,7 @@ func particleUpdate(sys: mod ParticleSystem, dt: copy Float) pub {
   var live: List(Particle) = createList(Particle, cap: sys.list.length)
   var i: Int = 0
   loop i < sys.list.length {
-    if let p: Particle = sys.list.at(index: i) {
+    if let p: Particle = sys.list.copyAt(index: i) {
       var pp: Particle = p
       pp.life = pp.life - dt
       if pp.life > 0.0 {
@@ -114,7 +114,7 @@ func particleDraw(sys: mod ParticleSystem, toon: copy Bool) pub {
   setInstanceBatchMesh(batch: sys.batch, mesh: sys.mesh)
   var i: Int = 0
   loop i < sys.list.length {
-    if let p: Particle = sys.list.at(index: i) {
+    if let p: Particle = sys.list.copyAt(index: i) {
       var frac: Float = p.life / p.maxLife
       if frac < 0.0 { frac = 0.0 }
       if frac > 1.0 { frac = 1.0 }

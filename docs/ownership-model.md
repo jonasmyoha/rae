@@ -351,7 +351,7 @@ sema — no env flag, no opt-in.
 - **Method-call receivers must preserve ownership / view
   classification.** Method-call `let` initializers MUST NOT be
   classified as owning by default: `let x: String =
-  obj.list.get(index: i)` aliases the slot, so auto-dropping `x`
+  obj.list.copyAt(index: i)` aliases the slot, so auto-dropping `x`
   at scope end would free the slot's data. The compiler now
   body-inspects the resolved method via `rae_func_returns_alias`
   to decide owning vs aliasing, the same way it already handles

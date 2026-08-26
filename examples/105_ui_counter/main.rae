@@ -105,7 +105,7 @@ func rememberValue(state: mod CounterState, value: view Int) {
   next.add(value: value)
   var i: Int = 0
   loop i < state.history.length and next.length < historyRows {
-    if let entry: Int = state.history.at(index: i) {
+    if let entry: Int = state.history.copyAt(index: i) {
       next.add(value: entry)
     }
     i = i + 1
@@ -125,7 +125,7 @@ func syncUi(world: mod UiWorld, state: view CounterState) {
   var row: Int = 0
   loop row < historyRows {
     let nodeId: String = "Hist{row}"
-    if let entry: Int = state.history.at(index: row) {
+    if let entry: Int = state.history.copyAt(index: row) {
       # Newest row gets an arrow, so the ordering is visible rather than implied.
       if row is 0 {
         setNodeText(world: world, nodeId: nodeId, value: "-> {entry}")
@@ -267,7 +267,7 @@ func main() ret Int {
       if state.history.length is 0 {
         rememberValue(state: state, value: state.value)
       } else {
-        if let head: Int = state.history.at(index: 0) {
+        if let head: Int = state.history.copyAt(index: 0) {
           if head is not state.value {
             rememberValue(state: state, value: state.value)
           }

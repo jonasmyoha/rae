@@ -158,7 +158,7 @@ type Scene3d {
 # Renderer extraction reads component tables through scene invariants. Keep
 # failures defined if malformed scene data breaks those invariants.
 func sceneTransformAt(values: view List(Transform3d), index: view Int) ret Transform3d {
-  if let value: Transform3d = values.at(index: index) { ret value }
+  if let value: Transform3d = values.copyAt(index: index) { ret value }
   ret Transform3d {
     position: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
     rotation: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
@@ -167,7 +167,7 @@ func sceneTransformAt(values: view List(Transform3d), index: view Int) ret Trans
 }
 
 func sceneMaterialAt(values: view List(Material3d), index: view Int) ret Material3d {
-  if let value: Material3d = values.at(index: index) { ret value }
+  if let value: Material3d = values.copyAt(index: index) { ret value }
   ret Material3d {
     baseColor: Vec3 { x: 1.0, y: 0.0, z: 1.0 }, metallic: 0.0,
     roughness: 1.0, emission: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, toon: false
@@ -175,12 +175,12 @@ func sceneMaterialAt(values: view List(Material3d), index: view Int) ret Materia
 }
 
 func sceneMeshRendererAt(values: view List(MeshRenderer), index: view Int) ret MeshRenderer {
-  if let value: MeshRenderer = values.at(index: index) { ret value }
+  if let value: MeshRenderer = values.copyAt(index: index) { ret value }
   ret MeshRenderer { entity: -1, mesh: meshHandleNone(), material: -1, visible: false }
 }
 
 func sceneSdfAt(values: view List(SdfPrimitive), index: view Int) ret SdfPrimitive {
-  if let value: SdfPrimitive = values.at(index: index) { ret value }
+  if let value: SdfPrimitive = values.copyAt(index: index) { ret value }
   ret SdfPrimitive { entity: -1, shape: -1, material: -1, noise: 0.0, cluster: -1, smoothing: 0.0 }
 }
 
@@ -231,7 +231,7 @@ func teleportTransform(scene: mod Scene3d, entity: view Int, transform: view Tra
 func setMeshInstanceVisible(scene: mod Scene3d, entity: view Int, visible: view Bool) {
   var index: Int = 0
   loop index < scene.meshRenderers.length {
-    if let renderer: MeshRenderer = scene.meshRenderers.at(index: index) {
+    if let renderer: MeshRenderer = scene.meshRenderers.copyAt(index: index) {
       if renderer.entity is entity {
         if renderer.visible is not visible {
           scene.meshRenderers.set(index: index, value: MeshRenderer {
@@ -255,7 +255,7 @@ func setMeshInstanceVisible(scene: mod Scene3d, entity: view Int, visible: view 
 func snapshotPrevTransforms(scene: mod Scene3d) pub {
   var i: Int = 0
   loop i < scene.transforms.length {
-    if let transform: Transform3d = scene.transforms.at(index: i) {
+    if let transform: Transform3d = scene.transforms.copyAt(index: i) {
       scene.prevTransforms.set(index: i, value: transform)
     }
     i = i + 1
@@ -276,7 +276,7 @@ func setMaterialToon(scene: mod Scene3d, index: view Int, toon: view Bool) pub {
   if index < 0 or index >= scene.materials.length {
     ret
   }
-  if let material: Material3d = scene.materials.at(index: index) {
+  if let material: Material3d = scene.materials.copyAt(index: index) {
     scene.materials.set(index: index, value: Material3d {
       baseColor: material.baseColor, metallic: material.metallic, roughness: material.roughness,
       emission: material.emission, toon: toon

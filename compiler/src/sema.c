@@ -1938,7 +1938,7 @@ static bool sema_is_list_value_accessor(const AstExpr* expr) {
     if (!expr) return false;
     if (expr->kind == AST_EXPR_METHOD_CALL) {
         Str method = expr->as.method_call.method_name;
-        if (!(str_eq_cstr(method, "at") || str_eq_cstr(method, "get"))) return false;
+        if (!str_eq_cstr(method, "copyAt")) return false;
         if (!expr->as.method_call.object) return false;
         TypeInfo* receiver = expr->as.method_call.object->resolved_type;
         while (receiver && (receiver->kind == TYPE_REF || receiver->kind == TYPE_OPT)) {
@@ -1950,7 +1950,7 @@ static bool sema_is_list_value_accessor(const AstExpr* expr) {
     if (expr->kind == AST_EXPR_CALL && expr->decl_link
         && expr->decl_link->kind == AST_DECL_FUNC) {
         const AstFuncDecl* function = &expr->decl_link->as.func_decl;
-        if (!(str_eq_cstr(function->name, "at") || str_eq_cstr(function->name, "get")))
+        if (!str_eq_cstr(function->name, "copyAt"))
             return false;
         // The receiver is the first non-type param; core.rae accessors lead
         // with `T: type`, so skip that to reach `this: view List(T)`.
@@ -2653,7 +2653,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                      * No Rae code ever used it; it just parsed. */
                     diag_error(s_current_decl_origin ? s_current_decl_origin : (module ? module->file_path : NULL),
                                (int)expr->line, (int)expr->column,
-                               "a List is not indexed with '[]'; use '.at(index: i)', '.viewAt(index: i)', "
+                               "a List is not indexed with '[]'; use '.copyAt(index: i)', '.viewAt(index: i)', "
                                "or '.modAt(index: i)' and handle the optional result. '[]' is for "
                                "Array(T, cap: N), whose length is part of its type");
                     if (module) module->had_error = true;

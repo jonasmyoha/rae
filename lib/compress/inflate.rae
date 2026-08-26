@@ -67,7 +67,7 @@ func decodeSymbol(r: mod BitReader, h: view Huff) ret Int {
         code = code bitor getBit(this: r)
         let count: Int = bufAt(list: h.counts, index: len)
         if code - first < count {
-            if let symbol: Int = h.symbols.at(index: index + (code - first)) {
+            if let symbol: Int = h.symbols.copyAt(index: index + (code - first)) {
                 ret symbol
             }
             ret -1

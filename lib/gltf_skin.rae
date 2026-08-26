@@ -24,21 +24,21 @@ open quat
 
 # ----- checked flat-buffer reads (#642) --------------------------------
 #
-# List `.get(index:)` returns `opt T`; these consume the optional with an
+# List `.copyAt(index:)` returns `opt T`; these consume the optional with an
 # explicit fallback so an out-of-range index yields a defined value rather
 # than an unwrap error. Callers keep their own bounds/clamping logic — the
 # fallback only covers indices this code already treats as unreachable.
 # Shared with gltf_retarget.rae via `open gltf_skin`.
 func floatAt(list: view List(Float), index: copy Int) ret Float {
-  if let value: Float = list.get(index: index) { ret value }
+  if let value: Float = list.copyAt(index: index) { ret value }
   ret 0.0
 }
 func intAt(list: view List(Int), index: copy Int, fallback: copy Int) ret Int {
-  if let value: Int = list.get(index: index) { ret value }
+  if let value: Int = list.copyAt(index: index) { ret value }
   ret fallback
 }
 func boolAt(list: view List(Bool), index: copy Int, fallback: copy Bool) ret Bool {
-  if let value: Bool = list.get(index: index) { ret value }
+  if let value: Bool = list.copyAt(index: index) { ret value }
   ret fallback
 }
 
@@ -638,7 +638,7 @@ func emptyClip() ret Clip {
 func nodeByName(sk: view Skeleton, name: view String) ret Int {
   var i: Int = 0
   loop i < sk.nodeNames.length {
-    if let nodeName: String = sk.nodeNames.at(index: i) {
+    if let nodeName: String = sk.nodeNames.copyAt(index: i) {
       if nodeName.equals(other: name) { ret i }
     }
     i = i + 1

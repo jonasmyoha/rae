@@ -10,7 +10,7 @@ func main() {
   zero.add(value: 20)
   zero.add(value: 30)
   log("zero.add3 len={zero.length} cap={zero.cap}")
-  log("zero.get0={zero.get(index: 0)} zero.get2={zero.get(index: 2)}")
+  log("zero.get0={zero.copyAt(index: 0)} zero.get2={zero.copyAt(index: 2)}")
 
   # cap: 8 — pre-allocated; the first 8 adds must not regrow.
   let pre: List(Int) = createList(Int, cap: 8)
@@ -24,5 +24,5 @@ func main() {
   # 9th element forces a regrow — doubling policy → cap should be 16.
   pre.add(value: 999)
   log("pre.grow len={pre.length} cap={pre.cap}")
-  log("pre.last={pre.get(index: 8)}")
+  log("pre.last={pre.copyAt(index: 8)}")
 }

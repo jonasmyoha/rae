@@ -9,8 +9,8 @@ func paletteDelta(first: view List(Float), second: view List(Float)) ret Float {
   var worst: Float = 0.0
   var index: Int = 0
   loop index < first.length and index < second.length {
-    if let firstValue: Float = first.get(index: index) {
-      if let secondValue: Float = second.get(index: index) {
+    if let firstValue: Float = first.copyAt(index: index) {
+      if let secondValue: Float = second.copyAt(index: index) {
         var difference: Float = firstValue - secondValue
         if difference < 0.0 { difference = 0.0 - difference }
         if difference > worst { worst = difference }
