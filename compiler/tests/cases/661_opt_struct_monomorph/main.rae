@@ -1,0 +1,54 @@
+# Value optional over an AGGREGATE payload (#641): `opt Particle` / `opt Vec3`
+# lower to a monomorphized `struct rae_opt_<T> { has; value; }`, NOT a heap-
+# boxed RaeAny. Exercises construction (List.at), an optional crossing a
+# function boundary as a return value (`pickVec`), unwrapping via `if let`, a
+# user function returning `opt Vec3`, the none path, and cascade drop of a
+# String-owning payload (Particle.tag) via the direct-access peephole.
+import core
+
+type Vec3 { x: Int, y: Int, z: Int }
+type Particle { pos: Vec3, mass: Int, tag: String }
+
+# A struct-rep optional (opt Vec3) crossing a function boundary as a return.
+func pickVec(vs: view List(Vec3), index: view Int) ret opt Vec3 {
+  ret vs.at(index: index)
+}
+
+func firstVec() ret opt Vec3 {
+  ret Vec3 { x: 1, y: 2, z: 3 }
+}
+
+func sumVec(v: view Vec3) ret Int {
+  ret v.x + v.y + v.z
+}
+
+func main() {
+  var particles: List(Particle) = createList(Particle, cap: 4)
+  particles.add(item: Particle { pos: Vec3 { x: 0, y: 0, z: 0 }, mass: 10, tag: "alpha" })
+  particles.add(item: Particle { pos: Vec3 { x: 1, y: 1, z: 1 }, mass: 20, tag: "beta" })
+
+  # opt Particle (String-owning payload) built and unwrapped in place.
+  if let particle: Particle = particles.at(index: 1) {
+    log(particle.mass)
+    log(particle.tag)
+  }
+
+  var vecs: List(Vec3) = createList(Vec3, cap: 4)
+  vecs.add(item: Vec3 { x: 4, y: 5, z: 6 })
+
+  # opt Vec3 crossing a function boundary, unwrapped by the caller.
+  if let v: Vec3 = pickVec(vs: vecs, index: 0) {
+    log(sumVec(v: v))
+  }
+
+  if let fv: Vec3 = firstVec() {
+    log(fv.y)
+  }
+
+  # none path: out-of-range index yields an empty optional.
+  if let missing: Vec3 = pickVec(vs: vecs, index: 9) {
+    log(missing.x)
+  } else {
+    log("absent")
+  }
+}
