@@ -118,32 +118,32 @@ type RenderGraph {
 # range; malformed state still produces defined defaults rather than an
 # unchecked memory access.
 func graphEdgeAt(edges: view List(Edge), index: view Int) ret Edge {
-  if let edge: Edge = edges.at(index: index) { ret edge }
+  if let edge: Edge = edges.copyAt(index: index) { ret edge }
   ret Edge { pass: -1, resource: -1, access: 0, isWrite: false, isModify: false }
 }
 
 func graphIntAt(values: view List(Int), index: view Int) ret Int {
-  if let value: Int = values.at(index: index) { ret value }
+  if let value: Int = values.copyAt(index: index) { ret value }
   ret -1
 }
 
 func graphBoolAt(values: view List(Bool), index: view Int) ret Bool {
-  if let value: Bool = values.at(index: index) { ret value }
+  if let value: Bool = values.copyAt(index: index) { ret value }
   ret false
 }
 
 func graphResourceAt(values: view List(ResourceDesc), index: view Int) ret ResourceDesc {
-  if let value: ResourceDesc = values.at(index: index) { ret value }
+  if let value: ResourceDesc = values.copyAt(index: index) { ret value }
   ret ResourceDesc { kind: 0, format: 0, sizing: 0, lifetime: lifeTransient }
 }
 
 func graphPassAt(values: view List(PassDesc), index: view Int) ret PassDesc {
-  if let value: PassDesc = values.at(index: index) { ret value }
+  if let value: PassDesc = values.copyAt(index: index) { ret value }
   ret PassDesc { kind: passRaster, tag: -1 }
 }
 
 func graphStringAt(values: view List(String), index: view Int) ret String {
-  if let value: String = values.at(index: index) { ret value }
+  if let value: String = values.copyAt(index: index) { ret value }
   ret ""
 }
 

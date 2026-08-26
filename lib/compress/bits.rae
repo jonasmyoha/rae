@@ -7,17 +7,17 @@
 import core
 
 # Bounds-safe flat-buffer read helpers, shared by the inflate/deflate codec.
-# List `.get(index:)` returns `opt Int`; the DEFLATE code indexes tables,
+# List `.copyAt(index:)` returns `opt Int`; the DEFLATE code indexes tables,
 # windows and hash chains where the caller already guarantees the index is in
 # range, so these unwrap with an explicit fallback rather than an `if let` at
 # every call site. `bufAt` falls back to 0 (byte/code/table values); `chainAt`
 # falls back to -1 (the "no candidate" sentinel used by the LZ77 hash chains).
 func bufAt(list: view List(Int), index: view Int) ret Int {
-    if let value: Int = list.get(index: index) { ret value }
+    if let value: Int = list.copyAt(index: index) { ret value }
     ret 0
 }
 func chainAt(list: view List(Int), index: view Int) ret Int {
-    if let value: Int = list.get(index: index) { ret value }
+    if let value: Int = list.copyAt(index: index) { ret value }
     ret -1
 }
 
@@ -39,7 +39,7 @@ func getBit(this: mod BitReader) ret Int {
         this.overrun = true
         ret 0
     }
-    if let byte: Int = this.data.get(index: this.pos) {
+    if let byte: Int = this.data.copyAt(index: this.pos) {
         let bitValue: Int = (byte shr this.bit) bitand 1
         this.bit = this.bit + 1
         if this.bit is 8 {
@@ -77,7 +77,7 @@ func getByte(this: mod BitReader) ret Int {
         this.overrun = true
         ret 0
     }
-    if let byte: Int = this.data.get(index: this.pos) {
+    if let byte: Int = this.data.copyAt(index: this.pos) {
         this.pos = this.pos + 1
         ret byte
     }

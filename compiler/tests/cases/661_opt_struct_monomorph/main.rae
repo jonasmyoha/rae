@@ -11,7 +11,7 @@ type Particle { pos: Vec3, mass: Int, tag: String }
 
 # A struct-rep optional (opt Vec3) crossing a function boundary as a return.
 func pickVec(vs: view List(Vec3), index: view Int) ret opt Vec3 {
-  ret vs.at(index: index)
+  ret vs.copyAt(index: index)
 }
 
 func firstVec() ret opt Vec3 {
@@ -28,7 +28,7 @@ func main() {
   particles.add(item: Particle { pos: Vec3 { x: 1, y: 1, z: 1 }, mass: 20, tag: "beta" })
 
   # opt Particle (String-owning payload) built and unwrapped in place.
-  if let particle: Particle = particles.at(index: 1) {
+  if let particle: Particle = particles.copyAt(index: 1) {
     log(particle.mass)
     log(particle.tag)
   }

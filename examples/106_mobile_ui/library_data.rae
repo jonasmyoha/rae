@@ -47,7 +47,7 @@ func isInLibrary(library: view List(String), stem: view String) pub ret Bool {
 func removeFromLibrary(library: mod List(String), stem: view String) pub {
   var i: Int = 0
   loop i < library.length {
-    if let entry: String = library.get(index: i) {
+    if let entry: String = library.copyAt(index: i) {
       if entry.equals(other: stem) {
         library.remove(index: i)
         ret
@@ -86,7 +86,7 @@ func saveLibraryToJson(library: view List(String), path: view String) pub {
   let n: Int = library.length
   var i: Int = 0
   loop i < n {
-    if let entry: String = library.get(index: i) {
+    if let entry: String = library.copyAt(index: i) {
       let escaped: String = json.jsonEscape(s: entry)
       content = content.concat(other: "    ").concat(other: q).concat(other: escaped).concat(other: q)
       if i < n - 1 {

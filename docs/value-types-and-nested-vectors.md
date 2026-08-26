@@ -78,7 +78,7 @@ Measured behaviour of a 1000-element `List(Particle)`:
 - **`add(value: p)`** copies `p` into `data[length]`. The only allocation in the
   whole program is `createList`/`grow`'s single contiguous backing block (the
   expected one).
-- **Read via `if let particle: Particle = particles.at(index: j)`** is peephole-
+- **Read via `if let particle: Particle = particles.copyAt(index: j)`** is peephole-
   lowered to a direct, bounds-checked array index:
   ```c
   if ((uint64_t)i < (uint64_t)list->length) { rae_Particle particle = list->data[i]; … }
@@ -100,14 +100,15 @@ names — and it unlocks `vec3.*` math on the fields. Recommended.
 
 ## 5. Access modes — value copy vs `view`/`mod` (this is the part that matters)
 
-`List` has three read accessors, and the choice of binding (`=` value, `=> view`,
-`=> mod`) decides whether you copy the element or alias it in place. **`get` and
-`at` are the same function** — `get` is a documented *compatibility alias for older
-code*; `at` is preferred. Both return `opt T` **by value**.
+`List` has three read accessors — `copyAt` / `viewAt` / `modAt` — and the choice of
+binding (`=` value, `=> view`, `=> mod`) decides whether you copy the element or
+alias it in place. (Historical note: this report predates #643, which renamed the
+value accessor `at` → `copyAt` and removed the `get`/`viewGet`/`modGet` aliases;
+snippets below say `copyAt`.) `copyAt` returns `opt T` **by value**.
 
 | pattern | returns | generated C | cost |
 |---|---|---|---|
-| `if let particle: Particle = particles.at(index:)` | `opt T` | `rae_Particle particle = data[i];` | **full-struct copy** |
+| `if let particle: Particle = particles.copyAt(index:)` | `opt T` | `rae_Particle particle = data[i];` | **full-struct copy** |
 | `if let particle: view Particle => particles.viewAt(index:)` | `opt view T` | `rae_Particle* particle = &data[i];` … `particle->…` | **pointer, zero copy** |
 | `if let particle: mod Particle => particles.modAt(index:)` | `opt mod T` | `rae_Particle* particle = &data[i]; particle->position.x = …;` | **pointer, in-place write** |
 
@@ -124,7 +125,7 @@ All three are peephole-lowered to a direct bounds-checked index into the contigu
   element's owned fields.
 
 The `=>` peephole also fires when a `view`/`mod` alias is bound to `at`/`get`
-directly (`if let particle: view Particle => particles.at(index:)`), aliasing live
+directly (`if let particle: view Particle => particles.copyAt(index:)`), aliasing live
 storage the same way — but `viewAt`/`modAt` are the accessors that actually *return*
 `opt view T` / `opt mod T`, so they are the clearer spelling. Verified at runtime: a
 `modAt` write persists and is seen by a subsequent value/`view` read.
@@ -133,9 +134,9 @@ storage the same way — but `viewAt`/`modAt` are the accessors that actually *r
 realises `opt T` for a value struct by **heap-boxing**
 (`malloc(sizeof(T))` + copy + `rae_any_owned_ptr`). The `if let` peephole above
 bypasses that entirely (direct index; no box, no malloc); scalar
-`let n: Int = list.get(index:)` auto-unwraps trivially.
+`let n: Int = list.copyAt(index:)` auto-unwraps trivially.
 
-**Compiler rough edge found:** `let particle: Particle = particles.get(index: j)` —
+**Compiler rough edge found:** `let particle: Particle = particles.copyAt(index: j)` —
 assigning `opt Struct` **directly** to a non-optional struct binding — is *not*
 peephole-optimised and currently emits **non-compiling C**
 (`rae_Particle particle = <RaeAny>`; a type mismatch). The scalar form compiles; the

@@ -209,8 +209,8 @@ func drawLogOverlay(ov: view LogOverlay, font: view SdfFont, screenW: view Float
   var i: Int = 0
   loop i < n {
     let slot: Int = (ov.head - ov.filled + start + i + ov.capacity + ov.capacity) % ov.capacity
-    if let text: String = ov.texts.get(index: slot) {
-      if let level: Int = ov.levels.get(index: slot) {
+    if let text: String = ov.texts.copyAt(index: slot) {
+      if let level: Int = ov.levels.copyAt(index: slot) {
         # +fontSize because drawText takes a baseline, not a top edge.
         let baseline: Float = top + pad + ov.fontSize + i.toFloat() * lineH
         gpu2d_text.drawText(

@@ -73,7 +73,7 @@ func sceneRegistryIndex(reg: view SceneRegistry, key: view String) ret Int {
   let n: Int = reg.ids.length
   var i: Int = 0
   loop i < n {
-    if let k: String = reg.ids.get(index: i) {
+    if let k: String = reg.ids.copyAt(index: i) {
       if k.equals(other: key) {
         ret i
       }
@@ -366,7 +366,7 @@ func mountSceneInstanceIntoPage(
       let kids: List(EntityId) = createList(EntityId, cap: kn)
       var q: Int = 0
       loop q < kn {
-        if let childId: String = node.childrenIds.get(index: q) {
+        if let childId: String = node.childrenIds.copyAt(index: q) {
           let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
           if childIdx >= 0 {
             let childEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: childIdx)
@@ -425,24 +425,24 @@ func parseRgbaString(s: view String) ret RgbaColor {
   var b: Int = 0
   var a: Int = 255
   if parts.length > 0 {
-    if let rs: String = parts.get(index: 0) {
+    if let rs: String = parts.copyAt(index: 0) {
       r = rae_str_to_i64(s: rs)
     }
   }
   if parts.length > 1 {
-    if let gs: String = parts.get(index: 1) {
+    if let gs: String = parts.copyAt(index: 1) {
       g = rae_str_to_i64(s: gs)
     }
   }
   if parts.length > 2 {
-    if let bs: String = parts.get(index: 2) {
+    if let bs: String = parts.copyAt(index: 2) {
       b = rae_str_to_i64(s: bs)
     }
   }
   if parts.length > 3 {
     # `as` is now a keyword (explicit conversion), so this alpha component
     # string follows the rs/gs/bs naming instead.
-    if let alphaStr: String = parts.get(index: 3) {
+    if let alphaStr: String = parts.copyAt(index: 3) {
       a = rae_str_to_i64(s: alphaStr)
     }
   }

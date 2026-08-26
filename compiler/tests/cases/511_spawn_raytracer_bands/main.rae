@@ -27,13 +27,13 @@ func rayColor(scene: view List(Float), rdx: view Float, rdy: view Float, rdz: vi
     loop k < count {
         let b: Int = k * 4
         var cx: Float = 0.0
-        if let value: Float = scene.get(index: b) { cx = value }
+        if let value: Float = scene.copyAt(index: b) { cx = value }
         var cy: Float = 0.0
-        if let value: Float = scene.get(index: b + 1) { cy = value }
+        if let value: Float = scene.copyAt(index: b + 1) { cy = value }
         var cz: Float = 0.0
-        if let value: Float = scene.get(index: b + 2) { cz = value }
+        if let value: Float = scene.copyAt(index: b + 2) { cz = value }
         var radius: Float = 0.0
-        if let value: Float = scene.get(index: b + 3) { radius = value }
+        if let value: Float = scene.copyAt(index: b + 3) { radius = value }
         let t: Float = hitSphere(cx: cx, cy: cy,
             cz: cz, r: radius,
             rdx: rdx, rdy: rdy, rdz: rdz)
@@ -51,10 +51,10 @@ func rayColor(scene: view List(Float), rdx: view Float, rdy: view Float, rdz: vi
     if hitIdx >= 0 {
         let b: Int = hitIdx * 4
         var sr: Float = 0.0
-        if let value: Float = scene.get(index: b + 3) { sr = value }
-        cr = 0.5 * ((rdx * best - scene.get(index: b)) / sr + 1.0)
-        cg = 0.5 * ((rdy * best - scene.get(index: b + 1)) / sr + 1.0)
-        cb = 0.5 * ((rdz * best - scene.get(index: b + 2)) / sr + 1.0)
+        if let value: Float = scene.copyAt(index: b + 3) { sr = value }
+        cr = 0.5 * ((rdx * best - scene.copyAt(index: b)) / sr + 1.0)
+        cg = 0.5 * ((rdy * best - scene.copyAt(index: b + 1)) / sr + 1.0)
+        cb = 0.5 * ((rdz * best - scene.copyAt(index: b + 2)) / sr + 1.0)
     } else {
         let len: Float = sqrt(x: rdx * rdx + rdy * rdy + rdz * rdz)
         let tt: Float = 0.5 * (rdy / len + 1.0)
@@ -92,7 +92,7 @@ func checksum(buf: view List(Int)) ret Int {
     var s: Int = 0
     var i: Int = 0
     loop i < buf.length {
-        s = (s + buf.get(index: i) % 1000003) % 1000003
+        s = (s + buf.copyAt(index: i) % 1000003) % 1000003
         i = i + 1
     }
     ret s
@@ -114,7 +114,7 @@ func buildScene() ret List(Float) {
 func appendBand(full: mod List(Int), part: view List(Int)) {
     var j: Int = 0
     loop j < part.length {
-        full.add(value: part.get(index: j))
+        full.add(value: part.copyAt(index: j))
         j = j + 1
     }
 }

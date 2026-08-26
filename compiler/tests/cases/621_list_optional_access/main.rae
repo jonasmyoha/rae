@@ -5,22 +5,22 @@ type FloatPalette {
 }
 
 func paletteValueAt(palette: view FloatPalette, index: view Int) ret Float {
-  if let value: Float = palette.values.at(index: index) { ret value }
+  if let value: Float = palette.values.copyAt(index: index) { ret value }
   ret -1.0
 }
 
 func main() {
   var values: List(Int) = { 10, 20, 30 }
 
-  if let value: Int = values.at(index: 1) {
+  if let value: Int = values.copyAt(index: 1) {
     log("at valid: {value}")
   }
-  if let value: Int = values.at(index: 0 - 1) {
+  if let value: Int = values.copyAt(index: 0 - 1) {
     log("unexpected negative: {value}")
   } else {
     log("at negative: none")
   }
-  if let value: Int = values.at(index: values.length) {
+  if let value: Int = values.copyAt(index: values.length) {
     log("unexpected length: {value}")
   } else {
     log("at length: none")
@@ -31,7 +31,7 @@ func main() {
   if let value: mod Int => values.modAt(index: 1) {
     value = value + 5
   }
-  if let value: Int = values.at(index: 1) {
+  if let value: Int = values.copyAt(index: 1) {
     log("modAt valid: {value}")
   }
   if let value: mod Int => values.modAt(index: 99) {
