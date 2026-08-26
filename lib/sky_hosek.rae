@@ -210,12 +210,12 @@ func hosekBezierWeights(solarElevationRad: view Float) ret HosekBezier {
 }
 
 func bezierAt(table: view List(Float), base: view Int, stride: view Int, w: view HosekBezier) ret Float {
-  ret w.w0 * table.get(index: base)
-   + w.w1 * table.get(index: base + stride)
-   + w.w2 * table.get(index: base + stride * 2)
-   + w.w3 * table.get(index: base + stride * 3)
-   + w.w4 * table.get(index: base + stride * 4)
-   + w.w5 * table.get(index: base + stride * 5)
+  ret w.w0 * table.copyAt(index: base)
+   + w.w1 * table.copyAt(index: base + stride)
+   + w.w2 * table.copyAt(index: base + stride * 2)
+   + w.w3 * table.copyAt(index: base + stride * 3)
+   + w.w4 * table.copyAt(index: base + stride * 4)
+   + w.w5 * table.copyAt(index: base + stride * 5)
 }
 
 # The four corners of the (albedo, turbidity) bilinear blend, as weights.
@@ -286,15 +286,15 @@ func hosekCookChannel(coeffs: view List(Float), rads: view List(Float),
     + wHiHi * bezierAt(table: rads, base: rHiHi, stride: 1, w: w)
 
   ret HosekChannel {
-    a: out.get(index: 0)
-    b: out.get(index: 1)
-    c: out.get(index: 2)
-    d: out.get(index: 3)
-    e: out.get(index: 4)
-    f: out.get(index: 5)
-    g: out.get(index: 6)
-    h: out.get(index: 7)
-    i: out.get(index: 8)
+    a: out.copyAt(index: 0)
+    b: out.copyAt(index: 1)
+    c: out.copyAt(index: 2)
+    d: out.copyAt(index: 3)
+    e: out.copyAt(index: 4)
+    f: out.copyAt(index: 5)
+    g: out.copyAt(index: 6)
+    h: out.copyAt(index: 7)
+    i: out.copyAt(index: 8)
     radiance: radiance
   }
 }

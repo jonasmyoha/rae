@@ -28,7 +28,7 @@ func List.add(this: mod List(T), item: T) {
   this._length = this._length + 1
 }
 
-func List.get(this: view List(T), index: Int): ret opt view T {
+func List.copyAt(this: view List(T), index: Int): ret opt view T {
   if index < 0 or index >= this._length {
     ret none
   }

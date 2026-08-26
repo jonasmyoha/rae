@@ -90,16 +90,11 @@ func add(T: type, this: mod List(T), value: own T) {
   this.length = this.length + 1
 }
 
-# Compatibility alias for older Rae code. New code should use `at`; indexed
-# List access is always optional.
-func get(T: type, this: view List(T), index: view Int) ret opt T {
-  if index < 0 or index >= this.length {
-    ret none
-  }
-  ret rae_ext_rae_buf_get(buf: this.data, index: index)
-}
-
-func at(T: type, this: view List(T), index: view Int) ret opt T {
+# Copy the element out of the list. Indexed List access is always optional
+# (out-of-range yields none). The `copy` in the name is the point: this returns
+# a COPY of the element (a whole-struct copy, including deep copies of any heap
+# fields) — reach for `viewAt`/`modAt` to alias the list's storage instead.
+func copyAt(T: type, this: view List(T), index: view Int) ret opt T {
   if index < 0 or index >= this.length {
     ret none
   }
@@ -117,26 +112,10 @@ func viewAt(T: type, this: view List(T), index: view Int) ret opt view T {
   ret view rae_ext_rae_buf_get(buf: this.data, index: index)
 }
 
-# Compatibility alias for older Rae code. New code should use `viewAt`.
-func viewGet(T: type, this: view List(T), index: view Int) ret opt view T {
-  if index < 0 or index >= this.length {
-    ret none
-  }
-  ret view rae_ext_rae_buf_get(buf: this.data, index: index)
-}
-
 # Mutable window into the list's storage. Writing through the returned
 # reference writes the element in place — no read-modify-`set` round trip,
 # and no drop/re-add of the element's owned fields.
 func modAt(T: type, this: mod List(T), index: view Int) ret opt mod T {
-  if index < 0 or index >= this.length {
-    ret none
-  }
-  ret mod rae_ext_rae_buf_get(buf: this.data, index: index)
-}
-
-# Compatibility alias for older Rae code. New code should use `modAt`.
-func modGet(T: type, this: mod List(T), index: view Int) ret opt mod T {
   if index < 0 or index >= this.length {
     ret none
   }

@@ -129,7 +129,7 @@ func terrainMesh(path: view String) ret MeshHandle {
 }
 
 func terrainEntityAt(entities: view List(Int), index: view Int) ret Int {
-  if let entity: Int = entities.at(index: index) { ret entity }
+  if let entity: Int = entities.copyAt(index: index) { ret entity }
   ret -1
 }
 
@@ -372,7 +372,7 @@ func drawTreeProp(prop: mod PropInstancer, entities: view List(Int), scene: view
   resetInstanceBatch(batch: prop.batch)
   loop var index: Int = 0, index < entities.length, ++index {
     var isBroad: Bool = false
-    if let flag: Bool = broadVisible.at(index: index) { isBroad = flag }
+    if let flag: Bool = broadVisible.copyAt(index: index) { isBroad = flag }
     if isBroad is wantBroad {
       gatherPropInstance(prop: prop, entity: terrainEntityAt(entities: entities, index: index),
                          scene: scene, material: material)
@@ -433,7 +433,7 @@ func castTreeProp(mesh: view MeshHandle, entities: view List(Int), scene: view S
                   broadVisible: view List(Bool), wantBroad: copy Bool) {
   loop var index: Int = 0, index < entities.length, ++index {
     var isBroad: Bool = false
-    if let flag: Bool = broadVisible.at(index: index) { isBroad = flag }
+    if let flag: Bool = broadVisible.copyAt(index: index) { isBroad = flag }
     if isBroad is wantBroad {
       let entity: Int = terrainEntityAt(entities: entities, index: index)
       let transform: Transform3d = sceneTransformAt(values: scene.transforms, index: entity)
@@ -463,7 +463,7 @@ func setInfiniteTerrainToon(terrain: mod InfiniteTerrain, scene: mod Scene3d,
   if terrain.toon is toon { ret }
   terrain.toon = toon
   loop var index: Int = 0, index < terrain.materialIds.length, ++index {
-    if let materialId: Int = terrain.materialIds.at(index: index) {
+    if let materialId: Int = terrain.materialIds.copyAt(index: index) {
       setMaterialToon(scene: scene, index: materialId, toon: toon)
     }
   }

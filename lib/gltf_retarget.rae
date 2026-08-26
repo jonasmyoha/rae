@@ -65,7 +65,7 @@ func jointNameAliasKey(key: view String) ret String {
 func findJointByKey(sk: view Skeleton, key: view String) ret Int {
   var n: Int = 0
   loop n < sk.nodeNames.length {
-    if let nodeName: String = sk.nodeNames.at(index: n) {
+    if let nodeName: String = sk.nodeNames.copyAt(index: n) {
       if jointNameKey(name: nodeName).equals(other: key) {
         ret n
       }
@@ -217,7 +217,7 @@ func retargetClip(c: view Clip, from: view Skeleton, fromBind: view SkeletonPose
   var d: Int = 0
   loop d < to.nodeCount {
     var s: Int = 0 - 1
-    if let dstName: String = to.nodeNames.at(index: d) {
+    if let dstName: String = to.nodeNames.copyAt(index: d) {
       let key: String = jointNameKey(name: dstName)
       var skip: Bool = false
       if skipRoot and key.equals(other: "hips") { skip = true }
@@ -348,7 +348,7 @@ func retargetedChannelCount(c: view Clip, from: view Skeleton, to: view Skeleton
   loop ch < c.targetNode.length {
     let srcNode: Int = intAt(list: c.targetNode, index: ch, fallback: 0 - 1)
     if srcNode >= 0 and srcNode < from.nodeNames.length and intAt(list: c.path, index: ch, fallback: pathTranslation) is pathRotation {
-      if let srcName: String = from.nodeNames.at(index: srcNode) {
+      if let srcName: String = from.nodeNames.copyAt(index: srcNode) {
         let key: String = jointNameKey(name: srcName)
         var hit: Int = findJointByKey(sk: to, key: key)
         if hit < 0 {

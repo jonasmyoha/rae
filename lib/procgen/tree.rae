@@ -88,11 +88,11 @@ func blobVert(ico: view MeshData, i: view Int, center: view Vec3, radius: view F
 }
 
 func treeF(l: view List(Float), i: view Int) ret Float {
-  if let v: Float = l.at(index: i) { ret v }
+  if let v: Float = l.copyAt(index: i) { ret v }
   ret 0.0
 }
 func treeI(l: view List(Int), i: view Int) ret Int {
-  if let v: Int = l.at(index: i) { ret v }
+  if let v: Int = l.copyAt(index: i) { ret v }
   ret 0
 }
 
@@ -142,7 +142,7 @@ func generateTree(branchDepth: copy Int, trunkHeight: copy Float, taper: copy Fl
   var canopyIdx: List(Int) = createList(Int, cap: 1024)
   var ti: Int = 0
   loop ti < tips.length {
-    if let tip: Vec3 = tips.at(index: ti) {
+    if let tip: Vec3 = tips.copyAt(index: ti) {
       addCanopyBlob(verts: canopyVerts, idx: canopyIdx, center: tip, radius: canopySize, seed: seed + ti)
       var extra: Int = 0
       loop extra < leafDensity {

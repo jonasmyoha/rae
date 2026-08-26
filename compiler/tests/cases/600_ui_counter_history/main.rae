@@ -28,7 +28,7 @@ func rememberValue(s: mod CounterState, value: view Int) {
   next.add(value: value)
   var i: Int = 0
   loop i < s.history.length and next.length < historyRows {
-    next.add(value: s.history.at(index: i))
+    next.add(value: s.history.copyAt(index: i))
     i = i + 1
   }
   s.history = own next
@@ -38,7 +38,7 @@ func render(s: view CounterState) ret String {
   var out: String = ""
   var i: Int = 0
   loop i < s.history.length {
-    out = "{out} {s.history.at(index: i)}"
+    out = "{out} {s.history.copyAt(index: i)}"
     i = i + 1
   }
   ret out
@@ -52,7 +52,7 @@ func main() {
   rememberValue(s: s, value: 2)
   rememberValue(s: s, value: 3)
   log("three:{render(s: s)}")
-  log("newest is first: {s.history.at(index: 0) is 3}")
+  log("newest is first: {s.history.copyAt(index: 0) is 3}")
 
   # Push past the row count: the oldest must fall off, not accumulate.
   var n: Int = 4
@@ -62,5 +62,5 @@ func main() {
   }
   log("after nine:{render(s: s)}")
   log("bounded at {historyRows}: {s.history.length is historyRows}")
-  log("oldest dropped: {s.history.at(index: historyRows - 1) is 4}")
+  log("oldest dropped: {s.history.copyAt(index: historyRows - 1) is 4}")
 }

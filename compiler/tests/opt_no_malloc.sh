@@ -30,7 +30,7 @@ type Particle { pos: Vec3, mass: Int }
 
 # A user function returning `opt Vec3` — must produce no heap traffic.
 func firstVec(vs: view List(Vec3)) ret opt Vec3 {
-  ret vs.at(index: 0)
+  ret vs.copyAt(index: 0)
 }
 
 func main() {
@@ -38,7 +38,7 @@ func main() {
   vecs.add(item: Vec3 { x: 1, y: 2, z: 3 })
 
   # at -> opt Vec3 (owned), viewAt -> opt view Vec3, modAt -> opt mod Vec3.
-  if let value: Vec3 = vecs.at(index: 0) {
+  if let value: Vec3 = vecs.copyAt(index: 0) {
     log(value.x)
   }
   if let seen: view Vec3 => vecs.viewAt(index: 0) {
@@ -53,7 +53,7 @@ func main() {
 
   var ps: List(Particle) = createList(Particle, cap: 2)
   ps.add(item: Particle { pos: Vec3 { x: 0, y: 0, z: 0 }, mass: 5 })
-  if let particle: Particle = ps.at(index: 0) {
+  if let particle: Particle = ps.copyAt(index: 0) {
     log(particle.mass)
   }
 }

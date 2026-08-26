@@ -30,16 +30,16 @@ func main() {
 
   let terrain: MeshData = makeFbmTerrain(size: 8.0, segments: 4, heightScale: 1.5, frequency: 0.22, octaves: 4, seed: 29)
   var nx: Float = 0.0
-  if let value: Float = terrain.verts.at(index: 3) { nx = value }
+  if let value: Float = terrain.verts.copyAt(index: 3) { nx = value }
   var ny: Float = 0.0
-  if let value: Float = terrain.verts.at(index: 4) { ny = value }
+  if let value: Float = terrain.verts.copyAt(index: 4) { ny = value }
   var nz: Float = 0.0
-  if let value: Float = terrain.verts.at(index: 5) { nz = value }
+  if let value: Float = terrain.verts.copyAt(index: 5) { nz = value }
   let normalLength: Float = math.sqrt(x: nx * nx + ny * ny + nz * nz)
   var firstHeight: Float = 0.0
-  if let value: Float = terrain.verts.at(index: 2) { firstHeight = value }
+  if let value: Float = terrain.verts.copyAt(index: 2) { firstHeight = value }
   var centerHeight: Float = 0.0
-  if let value: Float = terrain.verts.at(index: (2 * 5 + 2) * 8 + 2) { centerHeight = value }
+  if let value: Float = terrain.verts.copyAt(index: (2 * 5 + 2) * 8 + 2) { centerHeight = value }
   log("terrainCounts={terrain.vertCount is 25 and terrain.verts.length is 200 and terrain.indices.length is 96}")
   log("terrainVaries={firstHeight is not centerHeight} normalUnit={near(a: normalLength, b: 1.0, epsilon: 0.000001)}")
 }

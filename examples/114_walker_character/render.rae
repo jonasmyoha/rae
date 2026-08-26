@@ -115,7 +115,7 @@ func renderShadowPass(app: mod App, aspect: copy Float, palette: view List(Float
       let sh: MeshHandle = meshHandle(id: walkerIntAt(values: app.character.partIds, index: sp), generation: 1)
       drawShadowCasterSkinned(mesh: sh, model: app.character.model, paletteBase: 0)
       loop var shadowClone: Int = 0, shadowClone < app.character.crowd.length, ++shadowClone {
-        if let member: CrowdMember = app.character.crowd.at(index: shadowClone) {
+        if let member: CrowdMember = app.character.crowd.copyAt(index: shadowClone) {
           drawShadowCasterSkinned(mesh: sh, model: member.model,
                                   paletteBase: characterPaletteBase(slot: shadowClone + 1, jointCount: jc))
         }
@@ -166,7 +166,7 @@ func renderGbufferPass(app: mod App, aspect: copy Float, palette: view List(Floa
     setInstanceBatchMesh(batch: app.character.crowdBatch, mesh: handle)
     resetInstanceBatch(batch: app.character.crowdBatch)
     loop var cloneDraw: Int = 0, cloneDraw < app.character.crowd.length, ++cloneDraw {
-      if let member: CrowdMember = app.character.crowd.at(index: cloneDraw) {
+      if let member: CrowdMember = app.character.crowd.copyAt(index: cloneDraw) {
         # Each crowd member samples its OWN palette slot (#547) so it holds a
         # distinct pose in this single instanced skinned draw.
         addSkinnedInstance(batch: app.character.crowdBatch, model: member.model, prevModel: member.model,
@@ -221,7 +221,7 @@ func renderApp(app: mod App) {
   let jc: Int = jointCount(sk: app.character.skeleton)
   uploadPalette(rows: palette, jointCount: jc)
   loop var crowdSlot: Int = 0, crowdSlot < app.character.crowd.length, ++crowdSlot {
-    if let member: CrowdMember = app.character.crowd.at(index: crowdSlot) {
+    if let member: CrowdMember = app.character.crowd.copyAt(index: crowdSlot) {
       var advanced: CrowdMember = member
       advanced.animTime = advanced.animTime + dt * clipPlaybackRate(clipIndex: advanced.clipIndex)
       app.character.crowd.set(index: crowdSlot, value: advanced)
