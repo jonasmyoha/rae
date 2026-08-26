@@ -78,13 +78,14 @@ Measured behaviour of a 1000-element `List(Particle)`:
 - **`add(value: p)`** copies `p` into `data[length]`. The only allocation in the
   whole program is `createList`/`grow`'s single contiguous backing block (the
   expected one).
-- **Read via `if let q: Particle = ps.at(index: j)`** is peephole-lowered to a
-  direct, bounds-checked array index:
+- **Read via `if let particle: Particle = particles.at(index: j)`** is peephole-
+  lowered to a direct, bounds-checked array index:
   ```c
-  if ((uint64_t)i < (uint64_t)list->length) { rae_Particle q = list->data[i]; … }
+  if ((uint64_t)i < (uint64_t)list->length) { rae_Particle particle = list->data[i]; … }
   ```
-  a stack copy from contiguous storage — **no malloc, no boxing**. `q.position.x`
-  is a direct nested field read, no indirection.
+  a stack copy from contiguous storage — **no malloc, no boxing**.
+  `particle.position.x` is a direct nested field read, no indirection. (This copies
+  the *whole* element; §5 covers the zero-copy `view`/`mod` alternatives.)
 - **Write via `set(index:, value:)`** is a direct store
   `*(rae_Particle*)((char*)data + i*sizeof) = value;` — no heap.
 - **No hidden retain/release/free** per element: the element type owns no heap, so
@@ -97,48 +98,66 @@ Measured behaviour of a 1000-element `List(Particle)`:
 `position/velocity/color: Vec3` changes nothing in the generated C except field
 names — and it unlocks `vec3.*` math on the fields. Recommended.
 
-## 5. The one real hazard — `opt T`, and how the idiom avoids it
+## 5. Access modes — value copy vs `view`/`mod` (this is the part that matters)
 
-`List.get`/`List.at` return **`opt T`**. For a value-struct `T`, the *out-of-line*
-generic function realises that optional by **heap-boxing**:
-```c
-rae_Particle* p = malloc(sizeof(rae_Particle));   // per-call heap alloc + copy
-*p = list->data[index];
-return rae_any_owned_ptr(p, NULL);
-```
-So a *non-optimised* `get`/`at` on a struct list mallocs a boxed copy per call.
+`List` has three read accessors, and the choice of binding (`=` value, `=> view`,
+`=> mod`) decides whether you copy the element or alias it in place. **`get` and
+`at` are the same function** — `get` is a documented *compatibility alias for older
+code*; `at` is preferred. Both return `opt T` **by value**.
 
-In practice this is **avoided**:
-- `if let x: T = list.at(index:)` — the idiomatic pattern — is peephole-optimised
-  to the direct `data[index]` copy shown in §3 (measured at 87 inlined sites in a
-  real downstream build). **No box, no malloc.**
-- Scalar `let a: Int = list.get(index:)` auto-unwraps trivially.
+| pattern | returns | generated C | cost |
+|---|---|---|---|
+| `if let particle: Particle = particles.at(index:)` | `opt T` | `rae_Particle particle = data[i];` | **full-struct copy** |
+| `if let particle: view Particle => particles.viewAt(index:)` | `opt view T` | `rae_Particle* particle = &data[i];` … `particle->…` | **pointer, zero copy** |
+| `if let particle: mod Particle => particles.modAt(index:)` | `opt mod T` | `rae_Particle* particle = &data[i]; particle->position.x = …;` | **pointer, in-place write** |
 
-**Compiler rough edge found:** `let q: Struct = list.get(index: j)` — assigning
-`opt Struct` **directly** to a non-optional struct binding — is *not* peephole-
-optimised and currently emits **non-compiling C** (`rae_Particle q = <RaeAny>`; a
-type mismatch). The scalar form compiles; the struct form does not. This should
-either be a clean sema error ("unwrap the optional — use `if let`") or a valid
-unwrap. See §8.
+All three are peephole-lowered to a direct bounds-checked index into the contiguous
+`data` block — **none allocate**. The difference is copy-vs-reference:
 
-Note this hazard is **orthogonal to Vec3**: it is identical for `ParticleFlat`. It
-is a property of the list-read pattern, not of nested vectors.
+- **value (`= at`)** copies the *whole* element onto the stack. Cheap for a 48-byte
+  particle; not free for a large component, and you cannot write back without a
+  `set(index:, value:)` round trip.
+- **`view` (`=> viewAt`)** binds a `rae_Particle*` into the list's own storage — no
+  copy, reads are `particle->field`. Best for read-only access to large elements.
+- **`mod` (`=> modAt`)** binds a mutable pointer; writing `particle.position.x = …`
+  stores **in place** — no read-modify-`set` round trip and no drop/re-add of the
+  element's owned fields.
 
-## 6. Downstream usage
+The `=>` peephole also fires when a `view`/`mod` alias is bound to `at`/`get`
+directly (`if let particle: view Particle => particles.at(index:)`), aliasing live
+storage the same way — but `viewAt`/`modAt` are the accessors that actually *return*
+`opt view T` / `opt mod T`, so they are the clearer spelling. Verified at runtime: a
+`modAt` write persists and is seen by a subsequent value/`view` read.
 
-A real app driving this compiler has value-struct lists read via
-`if let x = list.at(index:)` and written via `set(index:, value:)` — i.e. already
-on the allocation-free path throughout.
+**The boxing hazard, and how it is avoided.** The *out-of-line* generic `get`/`at`
+realises `opt T` for a value struct by **heap-boxing**
+(`malloc(sizeof(T))` + copy + `rae_any_owned_ptr`). The `if let` peephole above
+bypasses that entirely (direct index; no box, no malloc); scalar
+`let n: Int = list.get(index:)` auto-unwraps trivially.
 
-**Recommendation for particle/ECS code:**
+**Compiler rough edge found:** `let particle: Particle = particles.get(index: j)` —
+assigning `opt Struct` **directly** to a non-optional struct binding — is *not*
+peephole-optimised and currently emits **non-compiling C**
+(`rae_Particle particle = <RaeAny>`; a type mismatch). The scalar form compiles; the
+struct form does not. This should be a clean sema error ("unwrap the optional — use
+`if let`") or a valid unwrap. See §8.
+
+All of this is **orthogonal to `Vec3`**: value-vs-reference access is identical for
+`ParticleFlat`. It is a property of the list-read pattern, not of nested vectors.
+
+## 6. Guidance for particle/ECS code
+
 - Adopt `Vec3`/`Vec4` for `position` / `velocity` / `scale` / `color` freely — free
   in generated C, clearer, and enables `vec3.*` ops.
-- Keep the read-modify-write idiom (`if let` copy → mutate → `set`); it is already
-  optimal (two struct-sized stack copies, no heap).
-- If a system needs absolute max throughput and in-place mutation,
-  `Array(T, cap: N)` supports direct inline `arr[i]` (no `opt T`, no bounds branch
-  beyond the peephole). `List` requires `get`/`at`; direct `list[i]` is rejected by
-  sema.
+- **Pick the access mode by intent, not habit:** `view`/`modAt` for read-only or
+  in-place mutation of a struct element (zero copy, no `set` round trip); the value
+  `= at` form only when you genuinely want a detached copy. Defaulting everything to
+  the value copy leaves the whole element being copied per access and forces a
+  read-modify-`set` round trip on every mutation — measurable for large components in
+  hot per-frame loops.
+- If a system needs absolute max throughput, `Array(T, cap: N)` supports direct
+  inline `arr[i]` (no `opt T`, no bounds branch beyond the peephole). `List` requires
+  `at`/`viewAt`/`modAt`; direct `list[i]` is rejected by sema.
 
 ## 7. Semantic aliases for vector types
 
