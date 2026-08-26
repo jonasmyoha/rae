@@ -78,11 +78,12 @@ func createSpotifyState() pub ret SpotifyState {
 # lookup; no-op when the node isn't in the world (e.g. NowPlaying not
 # currently mounted).
 func updateNodeText(world: mod UiWorld, pageId: view String, nodeId: view String, value: view String) {
-  let entityOpt: opt Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId)
-  if entityOpt is none {
+  var raw: Int = -1
+  if let value: Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId) {
+    raw = value
+  } else {
     ret
   }
-  let raw: Int = entityOpt
   let entity: EntityId = entityId(v: raw)
   if componentHas(this: world.texts, entity: entity) is false {
     ret

@@ -69,11 +69,7 @@ func main() {
 
   # Confirm a couple of components actually got the right values.
   log("--- component spot-checks ---")
-  let albumRootIdOpt: opt Int = world.nodeIds.get(k: "AlbumRoot")
-  if albumRootIdOpt is none {
-    log("AlbumRoot missing")
-  } else {
-    let albumRootRaw: Int = albumRootIdOpt
+  if let albumRootRaw: Int = world.nodeIds.get(k: "AlbumRoot") {
     let albumRootId: EntityId = entityId(v: albumRootRaw)
     if componentHas(this: world.rects, entity: albumRootId) {
       let r: Rect = componentGet(this: world.rects, entity: albumRootId)
@@ -87,29 +83,27 @@ func main() {
       let ch: view Children => componentView(this: world.childrens, entity: albumRootId)
       log("AlbumRoot has {ch.ids.length} children")
     }
+  } else {
+    log("AlbumRoot missing")
   }
 
-  let backBtnIdOpt: opt Int = world.nodeIds.get(k: "BackBtn")
-  if backBtnIdOpt is none {
-    log("BackBtn missing")
-  } else {
-    let backBtnRaw: Int = backBtnIdOpt
+  if let backBtnRaw: Int = world.nodeIds.get(k: "BackBtn") {
     let backBtnId: EntityId = entityId(v: backBtnRaw)
     let oc: view OnClick => componentView(this: world.onClicks, entity: backBtnId)
     log("BackBtn OnClick.actionId = {oc.actionId}")
     let sp: view Sprite => componentView(this: world.sprites, entity: backBtnId)
     log("BackBtn Sprite.textureKey = {sp.textureKey}")
+  } else {
+    log("BackBtn missing")
   }
 
-  let playBtnIdOpt: opt Int = world.nodeIds.get(k: "PlayBtn")
-  if playBtnIdOpt is none {
-    log("PlayBtn missing")
-  } else {
-    let playBtnRaw: Int = playBtnIdOpt
+  if let playBtnRaw: Int = world.nodeIds.get(k: "PlayBtn") {
     let playBtnId: EntityId = entityId(v: playBtnRaw)
     let sh: Shape = componentGet(this: world.shapes, entity: playBtnId)
     log("PlayBtn Shape.kind={sh.kind} radius={sh.radius}")
     log("PlayBtn Shape.fill.r={sh.fill.r} a={sh.fill.a}")
+  } else {
+    log("PlayBtn missing")
   }
 
   # --- malformed input ---

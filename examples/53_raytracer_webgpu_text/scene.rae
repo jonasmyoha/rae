@@ -57,6 +57,18 @@ func faceNormalIndex(token: view String) ret Int {
     ret s.toInt() - 1
 }
 
+# Read a Vec3 out of three parallel component lists at one index, optional-checked.
+# A missing component falls back to 0.0 (indices come from a parsed .obj face).
+func vecFromLists(xs: view List(Float), ys: view List(Float), zs: view List(Float), index: view Int) ret Vec3 {
+    var vxv: Float = 0.0
+    var vyv: Float = 0.0
+    var vzv: Float = 0.0
+    if let value: Float = xs.at(index: index) { vxv = value }
+    if let value: Float = ys.at(index: index) { vyv = value }
+    if let value: Float = zs.at(index: index) { vzv = value }
+    ret Vec3 { x: vxv, y: vyv, z: vzv }
+}
+
 # Load a Wavefront .obj as a triangle list (v + triangular f only). Converts the
 # mesh's Y-up to Rae Z-up via (x,y,z)->(x,z,y), then scales + offsets. Every
 # triangle gets the given material.
@@ -123,9 +135,9 @@ func loadObjTriangles(path: view String, scale: view Float, ox: view Float, oy: 
                 let i0: Int = faceIndex(token: tk1)
                 let i1: Int = faceIndex(token: tk2)
                 let i2: Int = faceIndex(token: tk3)
-                let p0: Vec3 = { x: vx.at(index: i0), y: vy.at(index: i0), z: vz.at(index: i0) }
-                let p1: Vec3 = { x: vx.at(index: i1), y: vy.at(index: i1), z: vz.at(index: i1) }
-                let p2: Vec3 = { x: vx.at(index: i2), y: vy.at(index: i2), z: vz.at(index: i2) }
+                let p0: Vec3 = vecFromLists(xs: vx, ys: vy, zs: vz, index: i0)
+                let p1: Vec3 = vecFromLists(xs: vx, ys: vy, zs: vz, index: i1)
+                let p2: Vec3 = vecFromLists(xs: vx, ys: vy, zs: vz, index: i2)
                 var nn0: Vec3 = { x: 0.0, y: 0.0, z: 1.0 }
                 var nn1: Vec3 = { x: 0.0, y: 0.0, z: 1.0 }
                 var nn2: Vec3 = { x: 0.0, y: 0.0, z: 1.0 }
@@ -133,9 +145,9 @@ func loadObjTriangles(path: view String, scale: view Float, ox: view Float, oy: 
                 let ni1: Int = faceNormalIndex(token: tk2)
                 let ni2: Int = faceNormalIndex(token: tk3)
                 if haveNormals and ni0 >= 0 and ni1 >= 0 and ni2 >= 0 {
-                    nn0 = { x: nx.at(index: ni0), y: ny.at(index: ni0), z: nz.at(index: ni0) }
-                    nn1 = { x: nx.at(index: ni1), y: ny.at(index: ni1), z: nz.at(index: ni1) }
-                    nn2 = { x: nx.at(index: ni2), y: ny.at(index: ni2), z: nz.at(index: ni2) }
+                    nn0 = vecFromLists(xs: nx, ys: ny, zs: nz, index: ni0)
+                    nn1 = vecFromLists(xs: nx, ys: ny, zs: nz, index: ni1)
+                    nn2 = vecFromLists(xs: nx, ys: ny, zs: nz, index: ni2)
                 } else {
                     # geometric normal: normalize(cross(p1-p0, p2-p0))
                     let ex: Float = p1.x - p0.x   let ey: Float = p1.y - p0.y   let ez: Float = p1.z - p0.z

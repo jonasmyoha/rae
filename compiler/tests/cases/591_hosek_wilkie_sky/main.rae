@@ -113,13 +113,20 @@ func main() {
   let wantB: List(Float) = { 21.49176759, 11.99369776, 8.366706396, 9.823256883 }
   var i: Int = 0
   loop i < gammas.length {
-    let gamma: Float = gammas.at(index: i)
+    var gamma: Float = 0.0
+    if let value: Float = gammas.at(index: i) { gamma = value }
     let r: Float = hosekChannelRadiance(c: sky.r, theta: theta, gamma: gamma) * sky.r.radiance
     let g: Float = hosekChannelRadiance(c: sky.g, theta: theta, gamma: gamma) * sky.g.radiance
     let b: Float = hosekChannelRadiance(c: sky.b, theta: theta, gamma: gamma) * sky.b.radiance
-    check(label: "radiance R at gamma {gamma}", got: r, want: wantR.at(index: i))
-    check(label: "radiance G at gamma {gamma}", got: g, want: wantG.at(index: i))
-    check(label: "radiance B at gamma {gamma}", got: b, want: wantB.at(index: i))
+    var wantRValue: Float = 0.0
+    if let value: Float = wantR.at(index: i) { wantRValue = value }
+    var wantGValue: Float = 0.0
+    if let value: Float = wantG.at(index: i) { wantGValue = value }
+    var wantBValue: Float = 0.0
+    if let value: Float = wantB.at(index: i) { wantBValue = value }
+    check(label: "radiance R at gamma {gamma}", got: r, want: wantRValue)
+    check(label: "radiance G at gamma {gamma}", got: g, want: wantGValue)
+    check(label: "radiance B at gamma {gamma}", got: b, want: wantBValue)
     i = i + 1
   }
 

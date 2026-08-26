@@ -29,12 +29,17 @@ func main() {
   log("warpMoved={warp.x is not 0.37 or warp.y is not -1.19} warpRange={warp.value >= -1.1 and warp.value <= 1.1}")
 
   let terrain: MeshData = makeFbmTerrain(size: 8.0, segments: 4, heightScale: 1.5, frequency: 0.22, octaves: 4, seed: 29)
-  let nx: Float = terrain.verts.at(index: 3)
-  let ny: Float = terrain.verts.at(index: 4)
-  let nz: Float = terrain.verts.at(index: 5)
+  var nx: Float = 0.0
+  if let value: Float = terrain.verts.at(index: 3) { nx = value }
+  var ny: Float = 0.0
+  if let value: Float = terrain.verts.at(index: 4) { ny = value }
+  var nz: Float = 0.0
+  if let value: Float = terrain.verts.at(index: 5) { nz = value }
   let normalLength: Float = math.sqrt(x: nx * nx + ny * ny + nz * nz)
-  let firstHeight: Float = terrain.verts.at(index: 2)
-  let centerHeight: Float = terrain.verts.at(index: (2 * 5 + 2) * 8 + 2)
+  var firstHeight: Float = 0.0
+  if let value: Float = terrain.verts.at(index: 2) { firstHeight = value }
+  var centerHeight: Float = 0.0
+  if let value: Float = terrain.verts.at(index: (2 * 5 + 2) * 8 + 2) { centerHeight = value }
   log("terrainCounts={terrain.vertCount is 25 and terrain.verts.length is 200 and terrain.indices.length is 96}")
   log("terrainVaries={firstHeight is not centerHeight} normalUnit={near(a: normalLength, b: 1.0, epsilon: 0.000001)}")
 }

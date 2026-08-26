@@ -151,8 +151,7 @@ func buildPlaylistCoverTile(world: mod UiWorld, coverStems: view List(String), s
       let idx: Int = r * 2 + c
       let cellEntity: EntityId = createEntity(world: world)
       setRectFixed(world: world, entity: cellEntity, w: cell, h: cell)
-      if idx < coverStems.length {
-        let key: String = coverStems.get(index: idx)
+      if let key: String = coverStems.get(index: idx) {
         setSpriteFill(world: world, entity: cellEntity, key: key, tint: imageTintColor)
       } else {
         setShapeRect(world: world, entity: cellEntity, fill: placeholderFill)
@@ -220,12 +219,9 @@ func buildLibraryCoverGrid(world: mod UiWorld, albums: view List(Album), library
   let keys: List(String) = collectLibraryCoverKeys(albums: albums, library: library)
   let tiles: List(EntityId) = createList(EntityId, cap: keys.length + 1)
   tiles.add(value: playlistTile)
-  var k: Int = 0
-  loop k < keys.length {
-    let key: String = keys.get(index: k)
+  loop let key: view String in keys {
     let tile: EntityId = buildLibraryCoverTile(world: world, key: key, size: tileH, rounded: rounded)
     tiles.add(value: tile)
-    k = k + 1
   }
 
   let total: Int = tiles.length

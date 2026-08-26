@@ -73,9 +73,10 @@ func sceneRegistryIndex(reg: view SceneRegistry, key: view String) ret Int {
   let n: Int = reg.ids.length
   var i: Int = 0
   loop i < n {
-    let k: String = reg.ids.get(index: i)
-    if k.equals(other: key) {
-      ret i
+    if let k: String = reg.ids.get(index: i) {
+      if k.equals(other: key) {
+        ret i
+      }
     }
     i = i + 1
   }
@@ -365,13 +366,14 @@ func mountSceneInstanceIntoPage(
       let kids: List(EntityId) = createList(EntityId, cap: kn)
       var q: Int = 0
       loop q < kn {
-        let childId: String = node.childrenIds.get(index: q)
-        let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
-        if childIdx >= 0 {
-          let childEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: childIdx)
-          appendEntityListSI(lst: kids, value: childEntity)
-          let pl: Parent = { parent: parentEntity }
-          componentSet(this: world.parents, entity: childEntity, data: pl)
+        if let childId: String = node.childrenIds.get(index: q) {
+          let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
+          if childIdx >= 0 {
+            let childEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: childIdx)
+            appendEntityListSI(lst: kids, value: childEntity)
+            let pl: Parent = { parent: parentEntity }
+            componentSet(this: world.parents, entity: childEntity, data: pl)
+          }
         }
         q = q + 1
       }
@@ -423,22 +425,26 @@ func parseRgbaString(s: view String) ret RgbaColor {
   var b: Int = 0
   var a: Int = 255
   if parts.length > 0 {
-    let rs: String = parts.get(index: 0)
-    r = rae_str_to_i64(s: rs)
+    if let rs: String = parts.get(index: 0) {
+      r = rae_str_to_i64(s: rs)
+    }
   }
   if parts.length > 1 {
-    let gs: String = parts.get(index: 1)
-    g = rae_str_to_i64(s: gs)
+    if let gs: String = parts.get(index: 1) {
+      g = rae_str_to_i64(s: gs)
+    }
   }
   if parts.length > 2 {
-    let bs: String = parts.get(index: 2)
-    b = rae_str_to_i64(s: bs)
+    if let bs: String = parts.get(index: 2) {
+      b = rae_str_to_i64(s: bs)
+    }
   }
   if parts.length > 3 {
     # `as` is now a keyword (explicit conversion), so this alpha component
     # string follows the rs/gs/bs naming instead.
-    let alphaStr: String = parts.get(index: 3)
-    a = rae_str_to_i64(s: alphaStr)
+    if let alphaStr: String = parts.get(index: 3) {
+      a = rae_str_to_i64(s: alphaStr)
+    }
   }
   ret RgbaColor { r: r, g: g, b: b, a: a }
 }

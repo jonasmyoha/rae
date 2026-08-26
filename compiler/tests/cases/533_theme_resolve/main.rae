@@ -22,16 +22,21 @@ func main() {
   # miniMuted flattens: font inherited from body, own size, own color,
   # shadow + align inherited from miniTitle (center=1).
   let mi: Int = themeTextStyleIndex(theme: theme, styleId: "miniMuted")
-  let font: String = theme.textFonts.get(index: mi)
+  var align: Int = 0
+  if let alignVal: Int = theme.textAligns.get(index: mi) { align = alignVal }
   let size: Int = theme.textSizes.get(index: mi).toInt()
-  let slot: String = theme.textColorSlots.get(index: mi)
-  let shadow: String = theme.textShadowNames.get(index: mi)
-  let align: Int = theme.textAligns.get(index: mi)
-  log("miniMuted font={font} size={size} color={slot} shadow={shadow} align={align}")
+  if let font: String = theme.textFonts.get(index: mi) {
+    if let slot: String = theme.textColorSlots.get(index: mi) {
+      if let shadow: String = theme.textShadowNames.get(index: mi) {
+        log("miniMuted font={font} size={size} color={slot} shadow={shadow} align={align}")
+      }
+    }
+  }
 
   # 'softer' inherits offset+softness from 'soft', overrides alpha.
   let si: Int = themeShadowIndex(theme: theme, name: "softer")
-  let sa: Int = theme.shadowA.get(index: si)
+  var sa: Int = 0
+  if let shadowAVal: Int = theme.shadowA.get(index: si) { sa = shadowAVal }
   let sox: Int = theme.shadowOffX.get(index: si).toInt()
   let ssoft: Int = theme.shadowSoft.get(index: si).toInt()
   log("softer a={sa} offX={sox} soft={ssoft}")

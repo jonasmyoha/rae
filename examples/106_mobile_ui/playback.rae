@@ -222,15 +222,9 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
   # layout reflows would otherwise reset the fill width to whatever
   # was last authored).
   let trackKey: String = "ProgressBar"
-  let trackEntityOpt: opt Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: trackKey)
   let fillKey: String = "ProgressFill"
-  let fillEntityOpt: opt Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: fillKey)
-  if trackEntityOpt is none {
-  } else {
-    if fillEntityOpt is none {
-    } else {
-      let trackRaw: Int = trackEntityOpt
-      let fillRaw: Int = fillEntityOpt
+  if let trackRaw: Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: trackKey) {
+    if let fillRaw: Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: fillKey) {
       let trackEntity: EntityId = entityId(v: trackRaw)
       let fillEntity: EntityId = entityId(v: fillRaw)
       var trackW: Float = 0.0
