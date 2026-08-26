@@ -32,12 +32,6 @@ void emit_opt_unbox_suffix(CFuncContext* ctx, const AstFuncDecl* fd, const AstTy
     // runtime can format / pass it through.
     if (!ctx->has_expected_type) return;
     if (ctx->expected_type.is_opt) return;
-    Str expected_base = get_base_type_name(&ctx->expected_type);
-    bool expected_concrete = str_eq_cstr(expected_base, "Int") || str_eq_cstr(expected_base, "Int64") ||
-        str_eq_cstr(expected_base, "Float") || str_eq_cstr(expected_base, "Float64") ||
-        str_eq_cstr(expected_base, "Bool") || str_eq_cstr(expected_base, "String") ||
-        str_eq_cstr(expected_base, "Char") || str_eq_cstr(expected_base, "Char32");
-    if (!expected_concrete) return;
 
     AstTypeRef* ret_tr = fd->returns->type;
     // Pick the substitution context: prefer the call site's concrete args (when fd is
@@ -50,12 +44,25 @@ void emit_opt_unbox_suffix(CFuncContext* ctx, const AstFuncDecl* fd, const AstTy
         ga = fd->specialization_args;
     } else { gp = ctx->generic_params; ga = ctx->generic_args; }
     AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, gp, ga, ret_tr);
+
+    // Struct-rep opt returns are `struct rae_opt_<T>`; consuming the result as
+    // the concrete payload reads `.value` (this is the site whose missing
+    // suffix produced non-compiling C for `let p: Particle = list.at(...)`).
+    if (rae_opt_is_struct_rep(ctx, sub)) { fprintf(out, ".value"); return; }
+
+    Str expected_base = get_base_type_name(&ctx->expected_type);
+    bool expected_concrete = str_eq_cstr(expected_base, "Int") || str_eq_cstr(expected_base, "Int64") ||
+        str_eq_cstr(expected_base, "Float") || str_eq_cstr(expected_base, "Float64") ||
+        str_eq_cstr(expected_base, "Bool") || str_eq_cstr(expected_base, "String") ||
+        str_eq_cstr(expected_base, "Char") || str_eq_cstr(expected_base, "Char32");
+    if (!expected_concrete) return;
+
     Str base = get_base_type_name(sub);
     if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int") || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) fprintf(out, ".as.i");
     else if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float")) fprintf(out, ".as.f");
     else if (str_eq_cstr(base, "Bool")) fprintf(out, ".as.b");
     else if (str_eq_cstr(base, "String")) fprintf(out, ".as.s");
-    // For other types (structs, Any), no unbox needed — RaeAny is the right type
+    // For other types (Any), no unbox needed — RaeAny is the right type
 }
 
 // Is `e` a C lvalue whose address `&e` can be taken directly? Variables,
@@ -343,7 +350,8 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 return true;
             }
         }
-        const char* elem_mangled = elem_is_opt
+        bool elem_opt_struct = elem_is_opt && rae_opt_is_struct_rep(ctx, elem_tr);
+        const char* elem_mangled = (elem_is_opt && !elem_opt_struct)
             ? "RaeAny"
             : elem_is_string
             ? "rae_String"
@@ -354,7 +362,9 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         fprintf(out, ") + (");
         emit_expr(ctx, arg->next->value, out, PREC_LOWEST, false, false);
         fprintf(out, ") * sizeof(%s) ); ", elem_mangled);
-        if (elem_is_opt) {
+        if (elem_opt_struct) {
+            fprintf(out, "rae_drop_%s(__bd); })", elem_mangled);
+        } else if (elem_is_opt) {
             fprintf(out, "rae_any_drop(__bd); })");
         } else if (elem_is_string) {
             fprintf(out, "rae_string_drop(__bd); })");
@@ -1002,7 +1012,8 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             // can call (e.g. generic-instance struct, c_struct), this
             // is a compile-time error — silently shallow-aliasing is
             // exactly what `copy T` exists to prevent.
-            int copy_arg_kind = 0; // 0=none, 1=rae_string_copy, 2=rae_deep_copy_<T>, 3=rae_any_copy (opt)
+            int copy_arg_kind = 0; // 0=none, 1=rae_string_copy, 2=rae_deep_copy_<T>, 3=rae_any_copy (opt), 4=rae_deep_copy_<optT>
+            const char* opt_copy_type = NULL;
             if (!wrap_pool_take_arg && !wrap_deep_copy_arg && !use_hoisted_temp
                 && p && p->type && p->type->is_copy
                 && !(p->type->is_view || p->type->is_mod || p->type->is_own)
@@ -1028,7 +1039,13 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     && type_needs_deep_copy(ctx->compiler_ctx, ctx->module,
                                             p_target, 0)) {
                     Str pbase_copy = get_base_type_name(p_target);
-                    if (p_target->is_opt) {
+                    if (p_target->is_opt
+                        && !(p_target->is_view || p_target->is_mod)
+                        && rae_opt_is_struct_rep(ctx, p_target)) {
+                        // Struct-rep opt: deep-copy via rae_deep_copy_<optT>.
+                        copy_arg_kind = 4;
+                        opt_copy_type = rae_opt_type_name(ctx, p_target);
+                    } else if (p_target->is_opt) {
                         // opt T is RaeAny at the C level — the String
                         // branch below would emit rae_string_copy on a
                         // RaeAny (#138). rae_any_copy is representation-
@@ -1176,6 +1193,13 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 fprintf(out, "){");
                 emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
                 fprintf(out, "}");
+            } else if (copy_arg_kind == 4) {
+                // Struct-rep opt argument, deep-copied for a copy/own param.
+                int oc = ctx->temp_counter++;
+                fprintf(out, "({ %s __ocs%d = ", opt_copy_type, oc);
+                emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
+                fprintf(out, "; %s __ocd%d; rae_deep_copy_%s(&__ocd%d, &__ocs%d); __ocd%d; })",
+                        opt_copy_type, oc, opt_copy_type, oc, oc, oc);
             } else {
                 if (needs_addr) fprintf(out, "&");
                 if (needs_deref) fprintf(out, "(*");
