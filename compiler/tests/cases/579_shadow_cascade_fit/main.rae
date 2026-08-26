@@ -51,17 +51,17 @@ func absF(v: view Float) ret Float {
 # Flat-buffer reads go through these so the `opt Float` from `.at` is
 # unwrapped explicitly; an out-of-range index yields 0.0.
 func viewProjAt(cascades: view ShadowCascades, index: copy Int) ret Float {
-  if let value: Float = cascades.viewProj.at(index: index) { ret value }
+  if let value: Float = cascades.viewProj.copyAt(index: index) { ret value }
   ret 0.0
 }
 
 func splitFarAt(cascades: view ShadowCascades, index: copy Int) ret Float {
-  if let value: Float = cascades.splitFar.at(index: index) { ret value }
+  if let value: Float = cascades.splitFar.copyAt(index: index) { ret value }
   ret 0.0
 }
 
 func texelWorldAt(cascades: view ShadowCascades, index: copy Int) ret Float {
-  if let value: Float = cascades.texelWorld.at(index: index) { ret value }
+  if let value: Float = cascades.texelWorld.copyAt(index: index) { ret value }
   ret 0.0
 }
 

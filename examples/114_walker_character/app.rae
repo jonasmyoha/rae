@@ -509,14 +509,14 @@ func frameBegin(app: mod App) {
 func controlledPosition(app: view App) ret Vec3 {
   if rosterControlledIsHero(roster: app.players) { ret app.character.controller.position }
   let idx: Int = rosterControlledCrowdIndex(roster: app.players)
-  if let member: CrowdMember = app.character.crowd.at(index: idx) { ret member.controller.position }
+  if let member: CrowdMember = app.character.crowd.copyAt(index: idx) { ret member.controller.position }
   ret app.character.controller.position
 }
 
 func controlledHeading(app: view App) ret Float {
   if rosterControlledIsHero(roster: app.players) { ret app.character.controller.heading }
   let idx: Int = rosterControlledCrowdIndex(roster: app.players)
-  if let member: CrowdMember = app.character.crowd.at(index: idx) { ret member.controller.heading }
+  if let member: CrowdMember = app.character.crowd.copyAt(index: idx) { ret member.controller.heading }
   ret app.character.controller.heading
 }
 
@@ -589,7 +589,7 @@ func updateApp(app: mod App) {
       # The player drives a crowd member: copy it out, step its controller, and
       # write it back (Rae lists hand back a value, not a reference).
       let idx: Int = rosterControlledCrowdIndex(roster: app.players)
-      if let member: CrowdMember = app.character.crowd.at(index: idx) {
+      if let member: CrowdMember = app.character.crowd.copyAt(index: idx) {
         var driven: CrowdMember = member
         characterMoved = updateWalkerMovement(controller: driven.controller,
           intent: intent, cameraYaw: app.cam.rig.viewYaw, dt: dt * app.character.speed)

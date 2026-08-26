@@ -17,7 +17,7 @@ func pop(T: type, this: mod Stack(T)) ret opt T {
   if this.data.length is 0 {
     ret none
   }
-  let last: opt T = get(this.data, index: this.data.length - 1)
+  let last: opt T = copyAt(this.data, index: this.data.length - 1)
   this.data.length = this.data.length - 1
   ret last
 }
@@ -26,7 +26,7 @@ func peek(T: type, this: view Stack(T)) ret opt T {
   if this.data.length is 0 {
     ret none
   }
-  ret get(this.data, index: this.data.length - 1)
+  ret copyAt(this.data, index: this.data.length - 1)
 }
 
 func size(T: type, this: view Stack(T)) ret Int {
