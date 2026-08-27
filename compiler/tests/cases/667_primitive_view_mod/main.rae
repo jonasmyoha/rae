@@ -1,0 +1,25 @@
+# #653: `view`/`mod` on primitives (Int/Float/Bool) are legal reference types.
+# `viewAt`/`modAt` on a List(<primitive>) bind a plain pointer into list->data
+# (rae_View_*/rae_Mod_*), NOT a boxed copy — a `modAt` write persists in place
+# and is visible to a later `viewAt` read (proving it aliases the element).
+import core
+func main() {
+  var ints: List(Int) = createList(Int, cap: 2)
+  ints.add(value: 5)
+  var floats: List(Float) = createList(Float, cap: 2)
+  floats.add(value: 1.5)
+  var bools: List(Bool) = createList(Bool, cap: 2)
+  bools.add(value: false)
+
+  if let vi: view Int => ints.viewAt(index: 0) { log("vi={vi}") }
+  if let vf: view Float => floats.viewAt(index: 0) { log("vf={vf}") }
+  if let vb: view Bool => bools.viewAt(index: 0) { log("vb={vb}") }
+
+  if let mi: mod Int => ints.modAt(index: 0) { mi = 99 }
+  if let mf: mod Float => floats.modAt(index: 0) { mf = 9.5 }
+  if let mb: mod Bool => bools.modAt(index: 0) { mb = true }
+
+  if let vi: view Int => ints.viewAt(index: 0) { log("after-mi={vi}") }
+  if let vf: view Float => floats.viewAt(index: 0) { log("after-mf={vf}") }
+  if let vb: view Bool => bools.viewAt(index: 0) { log("after-mb={vb}") }
+}
