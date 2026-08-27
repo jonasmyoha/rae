@@ -1477,6 +1477,28 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     }
                 }
             }
+            // #661: an anonymous `{ }`/`{ ... }` list literal on an
+            // Array/Buffer-typed binding was lowered as a List (createList),
+            // misgenerating C (a `rae_List_<T>` initialising a
+            // `rae_Array_<T>_<N>`, or an undeclared list-of-struct helper).
+            // These containers carry their capacity in their type, so they are
+            // constructed with `Array(T, cap: N)` / `Buffer(T, cap: N)` — which
+            // zero-initializes — not with a list literal. Reject with a message
+            // that names the right form.
+            if (!stmt->as.let_stmt.is_bind && stmt->as.let_stmt.type
+                && stmt->as.let_stmt.value
+                && stmt->as.let_stmt.value->kind == AST_EXPR_COLLECTION_LITERAL) {
+                Str dbase = get_base_type_name(stmt->as.let_stmt.type);
+                if (str_eq_cstr(dbase, "Array") || str_eq_cstr(dbase, "Buffer")) {
+                    char buf[256];
+                    snprintf(buf, sizeof(buf),
+                        "a '{ }' list literal cannot initialize an %.*s: its capacity is part of its type — "
+                        "construct it with '%.*s(T, cap: N)' (which zero-initializes), then assign elements by index",
+                        (int)dbase.len, dbase.data, (int)dbase.len, dbase.data);
+                    diag_error(module->file_path, (int)stmt->line, (int)stmt->column, buf);
+                    module->had_error = true;
+                }
+            }
             // `let` and `const` are immutable bindings; only `var` may be
             // reassigned. (Mutating the value a `let` points at — container
             // methods, field/index writes — is unaffected; this only governs
