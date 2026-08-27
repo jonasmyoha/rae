@@ -101,6 +101,33 @@ func copyAt(T: type, this: view List(T), index: view Int) ret opt T {
   ret rae_ext_rae_buf_get(buf: this.data, index: index)
 }
 
+# TOTAL (non-optional) reads for the structure-of-arrays pattern: several
+# same-length parallel lists indexed together, where wrapping every element
+# read in `if let` is noise. Both return T directly, not `opt T`.
+#
+# `copyAtFallback` returns the caller's own value out of range — the #642
+# rule (the else branch is a value the PROGRAMMER wrote). Prefer it when a
+# meaningful sentinel exists.
+func copyAtFallback(T: type, this: view List(T), index: view Int, fallback: T) ret T {
+  if index < 0 or index >= this.length {
+    ret fallback
+  }
+  ret rae_ext_rae_buf_get(buf: this.data, index: index)
+}
+
+# `copyAtDefault` returns the type's zero value out of range (0, 0.0, false,
+# "", a zero-initialized struct) — the convenience form when any-old-default
+# is fine and spelling a sentinel every call would be noise. Use
+# `copyAt` + `if let` when absence must be handled distinctly from a real
+# zero, or `copyAtFallback` when the sentinel matters.
+func copyAtDefault(T: type, this: view List(T), index: view Int) ret T {
+  if index < 0 or index >= this.length {
+    var defaultValue: T
+    ret defaultValue
+  }
+  ret rae_ext_rae_buf_get(buf: this.data, index: index)
+}
+
 # A read-only window INTO the list's own storage, rather than a copy of the
 # element. `at` hands back an optional value, so reading one field of a
 # big struct copies the whole struct — including a deep copy of every heap
