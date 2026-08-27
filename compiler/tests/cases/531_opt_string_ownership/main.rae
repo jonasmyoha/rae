@@ -14,10 +14,11 @@ type Card {
 func describe(c: view Card) ret String {
   var out: String = ""
   out = out.concat(other: c.title)
-  if c.note is not none {
-    if let n: view String => c.note {
-      out = out.concat(other: "/").concat(other: n)
-    }
+  # #656: `if let ... view String => <opt String field>` alone now agrees
+  # with `is not none` even after the field is reassigned to none, so the
+  # earlier `is not none` guard around this narrowing is no longer needed.
+  if let n: view String => c.note {
+    out = out.concat(other: "/").concat(other: n)
   }
   ret out
 }
