@@ -224,8 +224,8 @@ func retargetClip(c: view Clip, from: view Skeleton, fromBind: view SkeletonPose
       if skip is false {
         s = findJointByKey(sk: from, key: key)
         if s < 0 {
-          let alias: String = jointNameAliasKey(key: key)
-          if alias.length() > 0 { s = findJointByKey(sk: from, key: alias) }
+          let aliasKey: String = jointNameAliasKey(key: key)
+          if aliasKey.length() > 0 { s = findJointByKey(sk: from, key: aliasKey) }
         }
       }
     }
@@ -352,8 +352,8 @@ func retargetedChannelCount(c: view Clip, from: view Skeleton, to: view Skeleton
         let key: String = jointNameKey(name: srcName)
         var hit: Int = findJointByKey(sk: to, key: key)
         if hit < 0 {
-          let alias: String = jointNameAliasKey(key: key)
-          if alias.length() > 0 { hit = findJointByKey(sk: to, key: alias) }
+          let aliasKey: String = jointNameAliasKey(key: key)
+          if aliasKey.length() > 0 { hit = findJointByKey(sk: to, key: aliasKey) }
         }
         if hit >= 0 { kept = kept + 1 }
       }
