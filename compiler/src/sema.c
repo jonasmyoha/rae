@@ -259,6 +259,7 @@ typedef struct InstantiationStack {
 } InstantiationStack;
 
 // Forward declarations
+static bool sema_is_list_value_accessor(const AstExpr* expr);
 static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl);
 static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr);
 static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt, TypeInfo* current_return_type);
@@ -1549,6 +1550,23 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 if (bsrc && bsrc->kind == AST_EXPR_UNBOX) bsrc = bsrc->as.unary.operand;
                 bool is_call_src = bsrc && (bsrc->kind == AST_EXPR_CALL
                                             || bsrc->kind == AST_EXPR_METHOD_CALL);
+                /* `if let x: view/mod T => list.copyAt(...)` (#644): `copyAt`
+                 * returns a COPY (opt T by value); a reference binding cannot
+                 * alias it. This is the cross-form the old peephole silently
+                 * aliased. `viewAt`/`modAt` return `opt view/mod T` and are
+                 * unaffected (they are not List value accessors). */
+                /* Plain-call form `copyAt(list, index:)` may not have its
+                 * decl_link resolved here, so also match the callee name — after
+                 * #643 `copyAt` is defined only on `List`, so it is unambiguous. */
+                bool bsrc_is_copy_accessor = sema_is_list_value_accessor(bsrc)
+                    || (bsrc && bsrc->kind == AST_EXPR_CALL && bsrc->as.call.callee
+                        && bsrc->as.call.callee->kind == AST_EXPR_IDENT
+                        && str_eq_cstr(bsrc->as.call.callee->as.ident, "copyAt"));
+                if (btr && (btr->is_view || btr->is_mod) && bsrc_is_copy_accessor) {
+                    diag_error(module->file_path, (int)b->line, (int)b->column,
+                               "`copyAt` returns a copy; use `viewAt` or `modAt` to alias storage");
+                    module->had_error = true;
+                }
                 if (btr && !(btr->is_view || btr->is_mod)) {
                     // Owned narrowing takes ownership, so its source must be
                     // a PRODUCED optional. From a place it would be a hidden
@@ -1977,8 +1995,16 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
     if (!s_in_if_let_binding && expected->kind != TYPE_OPT
         && sema_is_list_value_accessor(expr)) {
         const char* err_file = s_current_decl_origin ? s_current_decl_origin : NULL;
-        diag_error(err_file, (int)expr->line, (int)expr->column,
-                   "optional not unwrapped — use `if let`");
+        if (expected->kind == TYPE_REF) {
+            /* `let x: view/mod T => list.copyAt(...)` (#644): `copyAt` returns a
+             * COPY of the element (opt T by value), so a reference binding can't
+             * alias it — the accessor's name and return type must agree. */
+            diag_error(err_file, (int)expr->line, (int)expr->column,
+                       "`copyAt` returns a copy; use `viewAt` or `modAt` to alias storage");
+        } else {
+            diag_error(err_file, (int)expr->line, (int)expr->column,
+                       "optional not unwrapped — use `if let`");
+        }
         if (s_current_module) s_current_module->had_error = true;
         return;
     }
