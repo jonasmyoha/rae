@@ -1,0 +1,49 @@
+# #652 regression: the generic `copyAt` (NON-peephole path) on
+# `opt <struct-with-an-owned-heap-field>`. `copyAt` returns a buf_get ALIAS into
+# the list's storage; building `let x: opt Thing = list.copyAt(index:)` used to
+# MOVE that alias, so dropping both `x` and the list double-freed the String.
+# The fix deep-copies an aliasing source, so each holds an independent heap.
+import core
+import string
+
+func rae_ext_rae_mem_stats_outstanding() extern ret Int
+
+type Thing {
+  tag: String
+}
+
+func scenario(seed: view Int) {
+  var xs: List(Thing) = createList(Thing, cap: 2)
+  xs.add(value: Thing { tag: "payload-{seed}-with-enough-bytes-to-show-a-leak" })
+  # General (non-peephole) path: store the accessor result in an opt binding.
+  let x: opt Thing = xs.copyAt(index: 0)
+  if let t: view Thing => x {
+    if t.tag.length() > 9000 { log("unreachable {t.tag}") }
+  }
+  # both `x` and `xs` drop at scope exit — must NOT double-free the String.
+}
+
+func main() {
+  var warm: Int = 0
+  loop warm < 50 {
+    scenario(seed: warm)
+    warm = warm + 1
+  }
+  let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+
+  let iterations: Int = 3000
+  var i: Int = 0
+  loop i < iterations {
+    scenario(seed: i)
+    i = i + 1
+  }
+
+  let final: Int = rae_ext_rae_mem_stats_outstanding()
+  let leaked: Int = final - baseline
+  log("iterations: {iterations}")
+  if leaked < 100 {
+    log("verdict: OK")
+  } else {
+    log("verdict: LEAK outstanding={leaked}")
+  }
+}
