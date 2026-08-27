@@ -1,0 +1,22 @@
+# #654: `view`/`mod` binding to an Array element must ALIAS the storage
+# (`&grid.v[i]`), not a copy. Before the fix, `let r: mod Cell => grid[i]`
+# materialized `__auto_type t = grid.v[i]; &t`, so writes through `r` hit the
+# copy and silently never reached the array (unlike List.modAt). A `mod` write
+# must round-trip: a later `view` (or index) read sees it.
+import core
+type Cell {
+  hp: Int
+  tag: Int
+}
+func main() {
+  var grid: Array(Cell, cap: 3) = Array(Cell, cap: 3)
+  grid[1].hp = 5
+
+  let refm: mod Cell => grid[1]
+  refm.hp = 99
+  refm.tag = 7
+  log("after mod-bind hp={grid[1].hp} tag={grid[1].tag}")   # 99, 7 if aliasing
+
+  let refv: view Cell => grid[1]
+  log("view reads hp={refv.hp}")                            # 99
+}
