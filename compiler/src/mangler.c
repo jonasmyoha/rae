@@ -174,11 +174,17 @@ static bool mangler_payload_is_struct_rep(const AstTypeRef* payload) {
     const TypeInfo* ti = payload->resolved_type;
     if (ti && ti->kind != TYPE_GENERIC_PARAM) {
         return ti->kind == TYPE_STRUCT || ti->kind == TYPE_GENERIC_INST
-            || ti->kind == TYPE_TASK || ti->kind == TYPE_ARRAY;
+            || ti->kind == TYPE_TASK || ti->kind == TYPE_ARRAY
+            || ti->kind == TYPE_INT || ti->kind == TYPE_FLOAT
+            || ti->kind == TYPE_FLOAT64 || ti->kind == TYPE_BOOL
+            || ti->kind == TYPE_CHAR || ti->kind == TYPE_STRING;
     }
     Str b = get_base_type_name(payload);
     if (b.len == 0) return false;
-    if (is_primitive_type(b)) return false;
+    /* #651: every non-`Any` payload is struct-rep. */
+    if (str_eq_cstr(b, "Any") || str_eq_cstr(b, "RaeAny")
+        || str_eq_cstr(b, "Buffer") || str_eq_cstr(b, "Void")
+        || str_eq_cstr(b, "void")) return false;
     return true;
 }
 
@@ -209,11 +215,17 @@ static bool mangler_opt_is_struct_rep(const struct AstIdentifierPart* generic_pa
     }
     if (base && base->kind != TYPE_OPT && base->kind != TYPE_GENERIC_PARAM) {
         return base->kind == TYPE_STRUCT || base->kind == TYPE_GENERIC_INST
-            || base->kind == TYPE_TASK || base->kind == TYPE_ARRAY;
+            || base->kind == TYPE_TASK || base->kind == TYPE_ARRAY
+            || base->kind == TYPE_INT || base->kind == TYPE_FLOAT
+            || base->kind == TYPE_FLOAT64 || base->kind == TYPE_BOOL
+            || base->kind == TYPE_CHAR || base->kind == TYPE_STRING;
     }
     Str b = get_base_type_name(type);
     if (b.len == 0) return false;
-    if (is_primitive_type(b)) return false;
+    /* #651: every non-`Any` payload is struct-rep. */
+    if (str_eq_cstr(b, "Any") || str_eq_cstr(b, "RaeAny")
+        || str_eq_cstr(b, "Buffer") || str_eq_cstr(b, "Void")
+        || str_eq_cstr(b, "void")) return false;
     return true;
 }
 

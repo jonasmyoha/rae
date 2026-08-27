@@ -305,10 +305,44 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
   payload.is_mod = false;
   payload.resolved_type = NULL;
 
+  // #651: every non-`Any` payload — scalars, String, enums (as Int) and
+  // aggregates — builds the monomorphized `struct rae_opt_<T>` value in place
+  // (no malloc, no RaeAny box). String copies its payload; aggregates deep-copy
+  // when needed; scalars assign directly.
+  AstTypeRef opt_for_name = payload; opt_for_name.is_opt = true;
+  if (rae_opt_is_struct_rep(ctx, &opt_for_name)) {
+    const char* optm = rae_opt_type_name(ctx, &opt_for_name);
+    int optn = (int)ctx->temp_counter++;
+    fprintf(out, "(__extension__ ({ %s __opt%d = {0}; __opt%d.has = 1; ",
+            optm, optn, optn);
+    if (c_type_is_plain_string(&payload)) {
+      /* opt String owns its boxed payload independently — always copy the
+       * source String so list/map aliases and string-pool temporaries cannot
+       * outlive or double-own it. */
+      fprintf(out, "__opt%d.value = rae_string_copy(", optn);
+      emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+      fprintf(out, "); ");
+    } else {
+      bool needs_deep_agg = type_needs_deep_copy(ctx->compiler_ctx, ctx->module,
+                                                 &payload, 0);
+      if (needs_deep_agg && !c_expr_can_move_owned_payload(value)) {
+        const char* copy_name = rae_mangle_type_specialized(
+            ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &payload);
+        fprintf(out, "rae_deep_copy_%s(&__opt%d.value, &(", copy_name, optn);
+        emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+        fprintf(out, ")); ");
+      } else {
+        fprintf(out, "__opt%d.value = ", optn);
+        emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+        fprintf(out, "; ");
+      }
+    }
+    fprintf(out, "__opt%d; }))", optn);
+    return;
+  }
+
+  // Non-struct-rep payload (`Any`): keep the inline RaeAny box.
   if (c_type_is_plain_string(&payload)) {
-    /* opt String owns its boxed payload independently. Always copy the
-     * source String so list/map aliases and string-pool temporaries cannot
-     * outlive or double-own the RaeAny. */
     fprintf(out, "rae_any((rae_string_copy(");
     emit_expr(ctx, value, out, PREC_LOWEST, false, false);
     fprintf(out, ")))");
@@ -319,32 +353,6 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
     fprintf(out, "rae_any((");
     emit_expr(ctx, value, out, PREC_LOWEST, false, false);
     fprintf(out, "))");
-    return;
-  }
-
-  // Aggregate payload: build the monomorphized `struct rae_opt_<T>` value in
-  // place — no malloc, no RaeAny box. `enum` payloads fall through to the
-  // legacy inline-box path below (they lower to Int and keep RaeAny).
-  AstTypeRef opt_for_name = payload; opt_for_name.is_opt = true;
-  if (rae_opt_is_struct_rep(ctx, &opt_for_name)) {
-    const char* optm = rae_opt_type_name(ctx, &opt_for_name);
-    int optn = (int)ctx->temp_counter++;
-    fprintf(out, "(__extension__ ({ %s __opt%d = {0}; __opt%d.has = 1; ",
-            optm, optn, optn);
-    bool needs_deep_agg = type_needs_deep_copy(ctx->compiler_ctx, ctx->module,
-                                               &payload, 0);
-    if (needs_deep_agg && !c_expr_can_move_owned_payload(value)) {
-      const char* copy_name = rae_mangle_type_specialized(
-          ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &payload);
-      fprintf(out, "rae_deep_copy_%s(&__opt%d.value, &(", copy_name, optn);
-      emit_expr(ctx, value, out, PREC_LOWEST, false, false);
-      fprintf(out, ")); ");
-    } else {
-      fprintf(out, "__opt%d.value = ", optn);
-      emit_expr(ctx, value, out, PREC_LOWEST, false, false);
-      fprintf(out, "; ");
-    }
-    fprintf(out, "__opt%d; }))", optn);
     return;
   }
 
@@ -844,13 +852,32 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         if (src && src->kind == AST_EXPR_UNBOX) src = src->as.unary.operand;
         ifopt_id = ctx->temp_counter++;
         const AstTypeRef* src_tr = infer_expr_type_ref(ctx, src);
-        bool src_opt_struct = src_tr && src_tr->is_opt
+        // #651: name the `rae_opt_<T>` temp from the BINDING's declared payload
+        // type — that is the concrete `T` the user narrows to. The source
+        // expression's inferred type can be an unresolved generic template
+        // return (`opt T` for `copyAt` inside `join`) that would mangle to
+        // `rae_opt_rae_T`. Fall back to the inferred type only if the binding
+        // type is somehow not struct-rep.
+        bool src_opt_struct = false;
+        AstTypeRef synth_opt_tr = {0};
+        const AstTypeRef* opt_name_tr = NULL;
+        if (bind->as.let_stmt.type) {
+            synth_opt_tr = *bind->as.let_stmt.type;
+            synth_opt_tr.is_opt = true; synth_opt_tr.is_view = false;
+            synth_opt_tr.is_mod = false; synth_opt_tr.next = NULL;
+            if (rae_opt_is_struct_rep(ctx, &synth_opt_tr)) {
+                src_opt_struct = true; opt_name_tr = &synth_opt_tr;
+            }
+        }
+        if (!src_opt_struct && src_tr && src_tr->is_opt
             && !(src_tr->is_view || src_tr->is_mod)
-            && rae_opt_is_struct_rep(ctx, src_tr);
+            && rae_opt_is_struct_rep(ctx, src_tr)) {
+            src_opt_struct = true; opt_name_tr = src_tr;
+        }
         if (src_opt_struct) {
             // Struct-rep optional: `rae_opt_<T> t = src; if (t.has) { T x = t.value; }`.
             // No malloc, no free — the payload moves out of the temp by value.
-            const char* optm = rae_opt_type_name(ctx, src_tr);
+            const char* optm = rae_opt_type_name(ctx, opt_name_tr);
             fprintf(out, "  { %s __rae_ifopt%d = ", optm, ifopt_id);
             emit_expr(ctx, src, out, PREC_LOWEST, false, false);
             fprintf(out, ";\n  if (__rae_ifopt%d.has) {\n", ifopt_id);
