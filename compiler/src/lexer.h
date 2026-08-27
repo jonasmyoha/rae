@@ -25,6 +25,7 @@ typedef enum {
 
   /* Keywords */
   TOK_KW_TYPE,
+  TOK_KW_ALIAS,   /* `alias Name = Type` — transparent type alias (#647/#660) */
   TOK_KW_FUNC,
   TOK_KW_LET,
   TOK_KW_VAR,
