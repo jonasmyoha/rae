@@ -31,7 +31,6 @@ import sdf_text
 
 # 0xAARRGGBB.
 const debugAmber: Int = 0xFFFFBF00
-const debugYellow: Int = 0xFFFFFF00   # brighter than amber — for the opt-in custom line
 const debugPanelFill: Int = 0xF0181820
 const debugPanelBorder: Int = 0x60FFBF00
 const debugBackdrop: Int = 0xA0000000
@@ -378,11 +377,11 @@ func drawDebugReadouts(d: view DebugOverlay, font: view SdfFont) {
                         y: y, sizePx: fontSize, color: debugAmber)
     y = y + lineH
   }
-  # Opt-in custom line (yellow), under the fps/mem readouts.
+  # Opt-in custom line under the fps/mem readouts — same amber as the rest.
   if d.customLine.length() > 0 {
     gpu2d_text.drawText(font: font, text: d.customLine,
                         x: rightEdge - debugTextWidth(text: d.customLine, sizePx: fontSize),
-                        y: y, sizePx: fontSize, color: debugYellow)
+                        y: y, sizePx: fontSize, color: debugAmber)
   }
 }
 
