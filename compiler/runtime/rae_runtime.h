@@ -32,6 +32,31 @@ void rae_task_drop(RaeTask* t);     /* join (if not joined) + free; scope-exit d
 #define RAE_UNUSED
 #endif
 
+/* Array(T, cap: N) dynamic bounds policy (docs/value-aggregates-and-ownership.md
+ * §1.7): a dynamic (non-constant) index is checked in debug builds and
+ * unchecked in release. Constant indices are rejected at compile time by sema,
+ * so only dynamic subscripts reach this. `NDEBUG` is defined by the release
+ * profile (-O2 -DNDEBUG) and absent from dev (-O0 -g), so the check compiles to
+ * a bare index in release — zero cost in the skinning/matrix inner loops the
+ * policy is written to protect. The macro evaluates `idx` exactly once. */
+#ifndef NDEBUG
+static inline int64_t rae_array_bounds_check(int64_t idx, int64_t cap,
+                                             const char* file, int line) {
+    if (idx < 0 || idx >= cap) {
+        fprintf(stderr,
+                "%s:%d: runtime error: index %lld is out of bounds for "
+                "Array(cap: %lld); valid indices are 0..%lld\n",
+                file, line, (long long)idx, (long long)cap, (long long)(cap - 1));
+        abort();
+    }
+    return idx;
+}
+#define RAE_ARRAY_IDX(idx, cap, file, line) \
+    rae_array_bounds_check((int64_t)(idx), (int64_t)(cap), (file), (line))
+#else
+#define RAE_ARRAY_IDX(idx, cap, file, line) (idx)
+#endif
+
 typedef uint32_t rae_Char32;
 typedef uint32_t rae_Char;
 

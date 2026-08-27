@@ -16,6 +16,23 @@
 #include <string.h>
 #include "lexer.h"
 
+// Emit `"file", line` for a runtime diagnostic that points back at Rae source
+// (e.g. the Array bounds check). The file path is written as an escaped C string
+// literal so a path containing a quote or backslash cannot break the generated
+// C. The line is the indexing expression's own line.
+static void emit_c_source_location(CFuncContext* ctx, const AstExpr* expr,
+                                   FILE* out) {
+    const char* file = (ctx && ctx->module && ctx->module->file_path)
+                           ? ctx->module->file_path
+                           : "<unknown>";
+    fputc('"', out);
+    for (const char* p = file; *p; p++) {
+        if (*p == '"' || *p == '\\') fputc('\\', out);
+        fputc(*p, out);
+    }
+    fprintf(out, "\", %d", (int)expr->line);
+}
+
 // A c_struct field whose real C name is a Rae reserved keyword is escaped by the
 // bindings generator with a single trailing '_' (WGPU*.view -> view_). safe_name
 // appends '_' ONLY for exact keyword matches, so stripping one trailing '_' when
@@ -694,7 +711,24 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                  * parameter, so the target is a value here, never a pointer. */
                 emit_expr(ctx, expr->as.index.target, out, PREC_CALL, false, false);
                 fprintf(out, ".v[");
-                emit_expr(ctx, expr->as.index.index, out, PREC_LOWEST, false, false);
+                /* Bounds policy (§1.7): a CONSTANT index is already rejected at
+                 * compile time by sema, so emit it raw. A DYNAMIC index is
+                 * wrapped in RAE_ARRAY_IDX, which aborts on an out-of-range
+                 * subscript in debug builds and compiles to the bare index in
+                 * release. Only wrap when the array capacity is known (a
+                 * concrete TYPE_ARRAY), which it always is for `[]`. */
+                bool idx_is_const_lit =
+                    expr->as.index.index->kind == AST_EXPR_INTEGER;
+                if (!idx_is_const_lit && ti && ti->kind == TYPE_ARRAY
+                    && ti->as.array.count > 0) {
+                    fprintf(out, "RAE_ARRAY_IDX(");
+                    emit_expr(ctx, expr->as.index.index, out, PREC_LOWEST, false, false);
+                    fprintf(out, ", %lldLL, ", (long long)ti->as.array.count);
+                    emit_c_source_location(ctx, expr, out);
+                    fprintf(out, ")");
+                } else {
+                    emit_expr(ctx, expr->as.index.index, out, PREC_LOWEST, false, false);
+                }
                 fprintf(out, "]");
                 break;
             }
