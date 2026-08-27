@@ -617,6 +617,17 @@ int64_t rae_sm_caster_icount(int64_t i) {
     int slot = g3d_sm_draw_mesh[i];
     return g3d_sm_draw_skinned[i] ? (int64_t)g3d_skin_icount[slot] : (int64_t)g3d_mesh_icount[slot];
 }
+/* A batching KEY identifying this caster's pipeline+geometry: (skinned, mesh slot).
+ * Consecutive casters with the same key share pipeline / vbuf / ibuf / bind, and the
+ * model + paletteBase buffers are indexed by instance_index (the queue position), so
+ * a run of equal keys can be drawn as ONE instanced DrawIndexed (firstInstance = run
+ * start, instanceCount = run length) instead of one draw each. -1 for out of range. */
+int64_t rae_sm_caster_key(int64_t i) {
+    if (i < 0 || i >= g3d_sm_draw_count) return -1;
+    int slot = g3d_sm_draw_mesh[i];
+    int skinned = g3d_sm_draw_skinned[i] ? 1 : 0;
+    return ((int64_t)skinned << 40) | (int64_t)(uint32_t)slot;
+}
 
 /* The metaball casters for one cascade — a per-cluster raymarch whose AABB
  * projection is dense CPU math, so it stays C. Drawn into the Rae-created pass. */
