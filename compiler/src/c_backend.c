@@ -38,11 +38,13 @@ void emitted_list_add(EmittedTypeList* list, const char* name) {
 // --- Value-optional representation ---------------------------------------
 //
 // `opt T` (value optional, NOT `opt view/mod T`) has two C lowerings:
-//   * boxed-pointer / aggregate payloads (struct, List/Map instance, Task,
-//     Array) -> a monomorphized `struct rae_opt_<T> { rae_Bool has; T value; }`
+//   * every non-`Any` payload — structs, List/Map instances, Task, Array,
+//     scalars (Int/Float/Float64/Bool/Char), String and enums-as-Int -> a
+//     monomorphized `struct rae_opt_<T> { rae_Bool has; T value; }`
 //     (malloc-free, mirrors List(T) monomorphization).
-//   * everything else (primitives, String, Any, Buffer, enums-as-Int) -> the
-//     inline `RaeAny` union (the pre-existing representation).
+//   * `Any` alone keeps the inline `RaeAny` union — RaeAny is reserved for
+//     type-erased `Any` (#651). `Buffer`/`Void` also stay RaeAny (they are
+//     not value-opt payloads in practice).
 // The struct-rep decision MUST agree with both name-manglers (type.c and
 // mangler.c) or a local var decl won't match the struct typedef (#238).
 bool rae_typeinfo_opt_is_struct_rep(const TypeInfo* base) {
@@ -52,6 +54,14 @@ bool rae_typeinfo_opt_is_struct_rep(const TypeInfo* base) {
         case TYPE_GENERIC_INST:
         case TYPE_TASK:
         case TYPE_ARRAY:
+        // #651: scalars, String and enums (enums resolve to TYPE_INT) all move
+        // off RaeAny onto the monomorphized struct rep.
+        case TYPE_INT:
+        case TYPE_FLOAT:
+        case TYPE_FLOAT64:
+        case TYPE_BOOL:
+        case TYPE_CHAR:
+        case TYPE_STRING:
             return true;
         default:
             return false;
@@ -75,12 +85,14 @@ bool rae_opt_is_struct_rep(CFuncContext* ctx, const AstTypeRef* type) {
     }
     if (base && base->kind != TYPE_OPT && base->kind != TYPE_GENERIC_PARAM)
         return rae_typeinfo_opt_is_struct_rep(base);
-    /* Fallback (unresolved clone / no TypeInfo): name-based, excluding enums
-     * (which lower to Int and keep the RaeAny rep). */
+    /* Fallback (unresolved clone / no TypeInfo): name-based. Every non-`Any`
+     * payload is struct-rep (#651) — scalars, String, enums and user structs.
+     * Only `Any`/`RaeAny` (and the non-payload `Buffer`/`Void`) keep RaeAny. */
     Str nm = get_base_type_name(type);
     if (nm.len == 0) return false;
-    if (is_primitive_type(nm)) return false;
-    if (ctx && find_enum_decl(ctx, ctx->module, nm)) return false;
+    if (str_eq_cstr(nm, "Any") || str_eq_cstr(nm, "RaeAny")
+        || str_eq_cstr(nm, "Buffer") || str_eq_cstr(nm, "Void")
+        || str_eq_cstr(nm, "void")) return false;
     return true;
 }
 
@@ -1016,6 +1028,28 @@ AstExpr* hoist_type_arg_if_present(CFuncContext* ctx, const AstExpr* expr) {
     return new_expr;
 }
 
+// #651: synthesize an AstTypeRef carrying a sema-resolved TypeInfo, preserving
+// the `opt` / `view` / `mod` qualifier. Used as a fallback for generic
+// opt-returning calls (`map.get(k)`, `list.copyAt(i)`) whose template return
+// type param inference otherwise drops the `opt` — leaving none-checks,
+// interpolation and `if let` to mis-treat a `rae_opt_<T>` as a RaeAny box.
+static const AstTypeRef* infer_tr_from_resolved(CFuncContext* ctx, const TypeInfo* ti) {
+    if (!ti) return NULL;
+    AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+    memset(tr, 0, sizeof(*tr));
+    if (ti->kind == TYPE_REF) {
+        tr->is_view = !ti->as.ref.is_mod;
+        tr->is_mod = ti->as.ref.is_mod;
+        ti = ti->as.ref.base;
+        if (ti && ti->kind == TYPE_OPT) { tr->is_opt = true; }
+        tr->resolved_type = (TypeInfo*)ti;
+        return tr;
+    }
+    if (ti->kind == TYPE_OPT) tr->is_opt = true;
+    tr->resolved_type = (TypeInfo*)ti;
+    return tr;
+}
+
 const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
     if (!expr) return NULL;
     // Cache primitive literal type-refs in static storage so callers can hold a
@@ -1107,9 +1141,98 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
             }
             break;
         }
-        case AST_EXPR_CALL:
-            if (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC) return expr->decl_link->as.func_decl.returns ? expr->decl_link->as.func_decl.returns->type : NULL;
+        case AST_EXPR_CALL: {
+            if (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC) {
+                const AstTypeRef* crt = expr->decl_link->as.func_decl.returns
+                    ? expr->decl_link->as.func_decl.returns->type : NULL;
+                // A generic `ret opt T` template return carries the payload as a
+                // type param; if sema pinned the concrete result, prefer it so
+                // the `opt` survives with a real payload TypeInfo (#651).
+                if (crt && crt->is_opt && expr->resolved_type
+                    && expr->resolved_type->kind == TYPE_OPT)
+                    return infer_tr_from_resolved(ctx, expr->resolved_type);
+                if (crt) return crt;
+            }
+            // Unresolved generic free-function call (no decl_link): fall back to
+            // the sema-resolved type so opt-returning calls keep their `opt`.
+            if (expr->resolved_type)
+                return infer_tr_from_resolved(ctx, expr->resolved_type);
+            // Still nothing (a generic free function called inside another
+            // template, e.g. `get(this, k) is not none` in `has`): recover the
+            // callee by name + first-argument base type, exactly as the
+            // METHOD_CALL fallback does, and hand back its (possibly `opt`)
+            // return type so none-checks/`if let` see the optional (#651).
+            if (expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT) {
+                Str fname = expr->as.call.callee->as.ident;
+                const AstTypeRef* a0 = expr->as.call.args
+                    ? infer_expr_type_ref(ctx, expr->as.call.args->value) : NULL;
+                Str a0base = get_base_type_name(a0);
+                const AstFuncDecl* best = NULL;
+                for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+                    const AstDecl* d = ctx->compiler_ctx->all_decls[i];
+                    if (d->kind != AST_DECL_FUNC) continue;
+                    const AstFuncDecl* cfd = &d->as.func_decl;
+                    if (!str_eq(cfd->name, fname) || !cfd->returns) continue;
+                    // Require the first value parameter's base type to match the
+                    // first argument's — a bare name match would pick the wrong
+                    // overload (e.g. a String-returning `get` for an Int call),
+                    // mis-typing the result and corrupting downstream ownership
+                    // decisions (string-pool-take on an Int, #651).
+                    if (a0base.len > 0 && cfd->params
+                        && str_eq(get_base_type_name(cfd->params->type), a0base)) {
+                        best = cfd; break;
+                    }
+                }
+                if (best && best->returns) {
+                    const AstTypeRef* rt2 = best->returns->type;
+                    // If the return is a generic type param (or `opt <param>`),
+                    // substitute it from the arguments so the result is the
+                    // CONCRETE `opt Int` / `opt String`, not the unresolvable
+                    // template `opt T` (which mangles to `rae_opt_rae_T`).
+                    Str rname = get_base_type_name(rt2);
+                    const AstIdentifierPart* gps = best->generic_params;
+                    if (!gps && best->generic_template
+                        && best->generic_template->kind == AST_DECL_FUNC)
+                        gps = best->generic_template->as.func_decl.generic_params;
+                    bool is_tp = false;
+                    for (const AstIdentifierPart* gp = gps; gp; gp = gp->next)
+                        if (str_eq(gp->text, rname)) { is_tp = true; break; }
+                    if (is_tp) {
+                        const AstParam* p = best->params;
+                        const AstCallArg* a = expr->as.call.args;
+                        const AstTypeRef* concrete = NULL;
+                        for (; p && a; p = p->next, a = a->next) {
+                            if (!p->type) continue;
+                            if (str_eq(get_base_type_name(p->type), rname)) {
+                                concrete = infer_expr_type_ref(ctx, a->value); break;
+                            }
+                            size_t slot = 0; bool found = false;
+                            for (const AstTypeRef* pa = p->type->generic_args; pa; pa = pa->next, slot++)
+                                if (str_eq(get_base_type_name(pa), rname)) { found = true; break; }
+                            if (found) {
+                                const AstTypeRef* at = infer_expr_type_ref(ctx, a->value);
+                                const AstTypeRef* ga = at ? at->generic_args : NULL;
+                                for (size_t k = 0; k < slot && ga; k++) ga = ga->next;
+                                if (ga) { concrete = ga; break; }
+                            }
+                        }
+                        if (concrete) {
+                            if (rt2->is_opt || rt2->is_view || rt2->is_mod) {
+                                AstTypeRef* w = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+                                *w = *concrete; w->next = NULL;
+                                w->is_opt = rt2->is_opt;
+                                w->is_view = rt2->is_view;
+                                w->is_mod = rt2->is_mod;
+                                return w;
+                            }
+                            return concrete;
+                        }
+                    }
+                    return rt2;
+                }
+            }
             break;
+        }
         case AST_EXPR_METHOD_CALL: {
             const AstDecl* mdecl = (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC)
                                  ? expr->decl_link : NULL;
@@ -1179,11 +1302,29 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
                         if (str_eq(get_base_type_name(pa), rname)) { found_slot = true; break; }
                     }
                     if (found_slot) {
+                        // Prefer sema's concrete result: it keeps the `opt`
+                        // (and a real payload TypeInfo) that the bare type-param
+                        // substitution below would drop (#651).
+                        if ((rt->is_opt || rt->is_view || rt->is_mod)
+                            && expr->resolved_type)
+                            return infer_tr_from_resolved(ctx, expr->resolved_type);
                         const AstTypeRef* recv = infer_expr_type_ref(ctx, expr->as.method_call.object);
                         if (recv) {
                             const AstTypeRef* ga = recv->generic_args;
                             for (size_t k = 0; k < slot && ga; k++) ga = ga->next;
-                            if (ga) return ga;
+                            if (ga) {
+                                // Re-apply the return's qualifier: `ret opt T`
+                                // over T=Int is `opt Int`, not bare Int.
+                                if (rt->is_opt || rt->is_view || rt->is_mod) {
+                                    AstTypeRef* w = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+                                    *w = *ga; w->next = NULL;
+                                    w->is_opt = rt->is_opt;
+                                    w->is_view = rt->is_view;
+                                    w->is_mod = rt->is_mod;
+                                    return w;
+                                }
+                                return ga;
+                            }
                         }
                     }
                 }
@@ -1716,19 +1857,30 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           first = false;
           Str base = get_base_type_name(f->type);
           if (f->type && f->type->is_opt) {
-              // opt T fields are RaeAny at the C level — the plain
-              // String/Int branches below would read .len/.data off a
-              // RaeAny and fail to compile (#138). Emit a
-              // representation-aware string-or-null for opt String;
-              // other opt payloads serialise as null.
-              if (str_eq_cstr(base, "String")) {
-                  fprintf(out, "  if (this->%.*s.type == RAE_TYPE_STRING) __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": \\\"%%.*s\\\"\", (int)this->%.*s.as.s.len, (char*)this->%.*s.as.s.data);\n",
-                      (int)f->name.len, f->name.data, (int)f->name.len, f->name.data, (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
-                  fprintf(out, "  else __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": null\");\n",
-                      (int)f->name.len, f->name.data);
+              // #651: a value-opt field is `struct rae_opt_<T> { has; value; }`
+              // (except `opt Any`, still RaeAny). Serialize `value` per concrete
+              // type when `has`, else JSON null. `opt Any` / aggregate payloads
+              // that have no scalar spelling stay null (as before).
+              CFuncContext _jctx = {0}; _jctx.compiler_ctx = ctx; _jctx.module = module;
+              bool opt_struct = !f->type->is_view && !f->type->is_mod
+                  && rae_opt_is_struct_rep(&_jctx, f->type);
+              int nl = (int)f->name.len; const char* nd = f->name.data;
+              if (opt_struct && str_eq_cstr(base, "String")) {
+                  fprintf(out, "  if (this->%.*s.has) __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": \\\"%%.*s\\\"\", (int)this->%.*s.value.len, (char*)this->%.*s.value.data);\n",
+                      nl, nd, nl, nd, nl, nd, nl, nd);
+                  fprintf(out, "  else __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": null\");\n", nl, nd);
+              } else if (opt_struct && (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int32"))) {
+                  fprintf(out, "  if (this->%.*s.has) __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": %%lld\", (long long)this->%.*s.value);\n", nl, nd, nl, nd, nl, nd);
+                  fprintf(out, "  else __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": null\");\n", nl, nd);
+              } else if (opt_struct && (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32"))) {
+                  fprintf(out, "  if (this->%.*s.has) __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": %%g\", (double)this->%.*s.value);\n", nl, nd, nl, nd, nl, nd);
+                  fprintf(out, "  else __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": null\");\n", nl, nd);
+              } else if (opt_struct && str_eq_cstr(base, "Bool")) {
+                  fprintf(out, "  if (this->%.*s.has) __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": %%s\", this->%.*s.value ? \"true\" : \"false\");\n", nl, nd, nl, nd, nl, nd);
+                  fprintf(out, "  else __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": null\");\n", nl, nd);
               } else {
-                  fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": null\");\n",
-                      (int)f->name.len, f->name.data);
+                  // opt Any / opt <aggregate/enum/char> — no scalar JSON form.
+                  fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": null\");\n", nl, nd);
               }
           } else if (str_eq_cstr(base, "String")) {
               fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": \\\"%%.*s\\\"\", (int)this->%.*s.len, (char*)this->%.*s.data);\n",
@@ -1756,12 +1908,24 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       for (const AstTypeField* f = td->fields; f; f = f->next) {
           Str base = get_base_type_name(f->type);
           if (f->type && f->type->is_opt) {
-              // opt T fields are RaeAny (#138). opt String round-trips
-              // through the string extractor wrapped as a some; other
-              // opt payloads stay {0} == RAE_TYPE_NONE (none).
-              if (str_eq_cstr(base, "String")) {
-                  fprintf(out, "  __r.%.*s = rae_any_string(rae_json_extract_string(json, \"%.*s\"));\n",
-                      (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+              // #651: parse into `struct rae_opt_<T>{ has, value }`. A present,
+              // non-null key -> has=1 + decoded value; absent/null -> stays {0}
+              // (none). `opt Any` / aggregate payloads have no scalar decoder so
+              // stay none.
+              CFuncContext _jctx = {0}; _jctx.compiler_ctx = ctx; _jctx.module = module;
+              bool opt_struct = !f->type->is_view && !f->type->is_mod
+                  && rae_opt_is_struct_rep(&_jctx, f->type);
+              int nl = (int)f->name.len; const char* nd = f->name.data;
+              const char* extractor = NULL;
+              if (opt_struct) {
+                  if (str_eq_cstr(base, "String")) extractor = "rae_json_extract_string";
+                  else if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int32")) extractor = "rae_json_extract_int";
+                  else if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32")) extractor = "rae_json_extract_float";
+                  else if (str_eq_cstr(base, "Bool")) extractor = "rae_json_extract_bool";
+              }
+              if (extractor) {
+                  fprintf(out, "  { rae_Bool __h = rae_json_key_present(json, \"%.*s\"); __r.%.*s.has = __h; if (__h) __r.%.*s.value = %s(json, \"%.*s\"); }\n",
+                      nl, nd, nl, nd, nl, nd, extractor, nl, nd);
               }
           } else if (str_eq_cstr(base, "String")) {
               fprintf(out, "  __r.%.*s = rae_json_extract_string(json, \"%.*s\");\n",
@@ -1832,11 +1996,25 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           bool is_opt_struct_field = is_opt_field && f->type && !f->type->is_view
               && !f->type->is_mod && rae_opt_is_struct_rep(&_sctx, f->type);
           if (is_opt_struct_field) {
-              // A struct-rep opt field is `struct rae_opt_<T>`, not RaeAny, so
-              // it has no _Generic rae_ext_rae_str overload. Emit a presence-
-              // aware placeholder (full formatting is future work).
-              fprintf(out, "  __out = rae_ext_rae_str_concat(__out, this->%.*s.has ? (rae_String){(uint8_t*)\"<opt>\", 5} : (rae_String){(uint8_t*)\"none\", 4});\n",
-                  (int)f->name.len, f->name.data);
+              // A struct-rep opt field is `struct rae_opt_<T>` (#651). Format
+              // `.value` per representation when present, else "none" (matching
+              // the Live VM). Scalars/String/Char/Bool/enum route through the
+              // _Generic rae_ext_rae_str on the concrete `.value`; a nested user
+              // struct payload uses its own rae_to_str_. Aggregates without a
+              // formatter fall back to a "<opt>" placeholder.
+              int nl = (int)f->name.len; const char* nd = f->name.data;
+              if (is_user_struct) {
+                  const char* fmangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = fbase}});
+                  fprintf(out, "  __out = rae_ext_rae_str_concat(__out, this->%.*s.has ? rae_to_str_%s_(&this->%.*s.value) : (rae_String){(uint8_t*)\"none\", 4});\n",
+                      nl, nd, fmangled, nl, nd);
+              } else if (!has_generic_args && !is_generic_template && !is_c_struct) {
+                  // scalar / String / Char / Bool / enum -> _Generic on value.
+                  fprintf(out, "  __out = rae_ext_rae_str_concat(__out, this->%.*s.has ? rae_ext_rae_str(this->%.*s.value) : (rae_String){(uint8_t*)\"none\", 4});\n",
+                      nl, nd, nl, nd);
+              } else {
+                  fprintf(out, "  __out = rae_ext_rae_str_concat(__out, this->%.*s.has ? (rae_String){(uint8_t*)\"<opt>\", 5} : (rae_String){(uint8_t*)\"none\", 4});\n",
+                      nl, nd);
+              }
           } else if (is_user_struct && !is_opt_field && !has_generic_args) {
               const char* fmangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = fbase}});
               fprintf(out, "  __out = rae_ext_rae_str_concat(__out, rae_to_str_%s_(&this->%.*s));\n",
@@ -2477,6 +2655,10 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       fprintf(out, "  if (!o->has) return;\n");
       if (str_eq_cstr(pbase, "Task")) {
         fprintf(out, "  rae_task_drop(o->value);\n");
+      } else if (str_eq_cstr(pbase, "String")) {
+        // #651: `opt String` is now struct-rep; its String payload drops
+        // through the runtime string helper, not a struct cascade.
+        fprintf(out, "  rae_string_drop(&o->value);\n");
       } else if (is_drop_target_type(&e->payload)) {
         const AstFuncDecl* drop_fd = find_drop_overload_for(&octx, pbase);
         const AstTypeRef* elem = e->payload.generic_args;
@@ -2496,9 +2678,14 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               e->optm, e->optm, e->optm);
       fprintf(out, "  dst->has = src->has;\n");
       fprintf(out, "  if (!src->has) return;\n");
-      // Struct and container payloads both use rae_deep_copy_<payload>.
-      const char* pm = rae_mangle_type_specialized(ctx, NULL, NULL, &e->payload);
-      fprintf(out, "  rae_deep_copy_%s(&dst->value, &src->value);\n", pm);
+      if (str_eq_cstr(pbase, "String")) {
+        // #651: `opt String` deep-copies its String payload via rae_string_copy.
+        fprintf(out, "  dst->value = rae_string_copy(src->value);\n");
+      } else {
+        // Struct and container payloads both use rae_deep_copy_<payload>.
+        const char* pm = rae_mangle_type_specialized(ctx, NULL, NULL, &e->payload);
+        fprintf(out, "  rae_deep_copy_%s(&dst->value, &src->value);\n", pm);
+      }
       fprintf(out, "}\n\n");
     }
   }
