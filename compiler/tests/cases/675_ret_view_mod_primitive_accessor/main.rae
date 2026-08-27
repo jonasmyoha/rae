@@ -1,0 +1,21 @@
+import core
+
+# #663: returning a primitive `viewAt`/`modAt` result from a function whose
+# return type is a plain `view/mod <prim>` must install the accessor's raw
+# nullable pointer into the primitive-ref wrapper directly — not take its
+# address (`&<rvalue>` was an address-of-rvalue C error). The return forwards
+# a real alias: a `mod` write through the returned reference reaches storage.
+func firstView(xs: view List(Int)) ret view Int {
+  ret xs.viewAt(index: 0)
+}
+func firstMod(xs: mod List(Int)) ret mod Int {
+  ret xs.modAt(index: 2)
+}
+func main() {
+  var xs: List(Int) = { 10, 20, 30 }
+  let v: view Int => firstView(xs: xs)
+  log("v={v}")
+  let m: mod Int => firstMod(xs: xs)
+  m = 77
+  log("xs2={xs.copyAt(index: 2)}")
+}
