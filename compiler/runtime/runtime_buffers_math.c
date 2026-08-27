@@ -272,6 +272,14 @@ rae_Bool rae_json_extract_bool(rae_String json, const char* key) {
     return (v[0] == 't') ? 1 : 0;
 }
 
+rae_Bool rae_json_key_present(rae_String json, const char* key) {
+    const char* v = rae_json_find_key((const char*)json.data, json.len, key);
+    if (!v) return 0;
+    /* Treat an explicit JSON `null` value as absent (none). */
+    if (v[0] == 'n' && v[1] == 'u' && v[2] == 'l' && v[3] == 'l') return 0;
+    return 1;
+}
+
 rae_String rae_json_extract_string(rae_String json, const char* key) {
     const char* v = rae_json_find_key((const char*)json.data, json.len, key);
     if (!v || *v != '"') return (rae_String){NULL, 0, 0, 0};
