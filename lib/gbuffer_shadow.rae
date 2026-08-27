@@ -23,6 +23,7 @@ func smCasterBind(i: Int, c: Int) extern("rae_sm_caster_bind") ret Ptr
 func smCasterVbuf(i: Int) extern("rae_sm_caster_vbuf") ret Ptr
 func smCasterIbuf(i: Int) extern("rae_sm_caster_ibuf") ret Ptr
 func smCasterIcount(i: Int) extern("rae_sm_caster_icount") ret Int
+func smCasterKey(i: Int) extern("rae_sm_caster_key") ret Int
 func smDrawMetaballs(c: Int, pass: Ptr) extern("rae_sm_draw_metaballs")
 
 # Reusable one-slot depth attachment (the view changes per cascade). Module-level
@@ -54,9 +55,22 @@ func shadowEnd() pub {
     }
     let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
 
+    # INSTANCED caster batching (#118). Casters sharing a mesh (same pipeline / vbuf /
+    # ibuf / bind) sit CONSECUTIVELY in the queue — e.g. every alive walker for one body
+    # part — and the model + paletteBase buffers are indexed by instance_index (the queue
+    # position). So a RUN of equal-key casters is drawn as ONE instanced DrawIndexed
+    # (firstInstance = run start, instanceCount = run length) instead of one draw each,
+    # collapsing the crowd's ~N skinned-shadow draws per cascade to O(distinct parts).
     var i: Int = 0
     loop i < draws {
       if smCasterReady(i: i, c: c) is 1 {
+        # Extend the run over consecutive ready casters with the same batch key.
+        let key: Int = smCasterKey(i: i)
+        var runEnd: Int = i + 1
+        loop runEnd < draws and smCasterReady(i: runEnd, c: c) is 1 and smCasterKey(i: runEnd) is key {
+          runEnd = runEnd + 1
+        }
+        let instanceCount: Int = runEnd - i
         wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: smCasterPipeline(i: i))
         wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
           group: smCasterBind(i: i, c: c), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
@@ -64,12 +78,15 @@ func shadowEnd() pub {
           buffer: smCasterVbuf(i: i), offset: 0 as UInt64, size: WGPU_WHOLE_SIZE)
         wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder: pass, buffer: smCasterIbuf(i: i),
           format: WGPUIndexFormat_Uint32, offset: 0 as UInt64, size: WGPU_WHOLE_SIZE)
-        # The instance index selects this caster's model matrix in the buffer.
+        # instance_index runs [firstInstance, firstInstance+instanceCount) → each instance
+        # reads its OWN model + paletteBase row, exactly as the per-caster draws did.
         wgpuRenderPassEncoderDrawIndexed(renderPassEncoder: pass,
-          indexCount: smCasterIcount(i: i) as UInt32, instanceCount: 1 as UInt32,
+          indexCount: smCasterIcount(i: i) as UInt32, instanceCount: instanceCount as UInt32,
           firstIndex: 0 as UInt32, baseVertex: 0 as Int32, firstInstance: i as UInt32)
+        i = runEnd
+      } else {
+        i = i + 1
       }
-      i = i + 1
     }
     # Metaball casters into the same pass (dense raymarch math stays C).
     smDrawMetaballs(c: c, pass: pass)
