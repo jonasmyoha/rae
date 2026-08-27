@@ -1,0 +1,12 @@
+import core
+
+# A DYNAMIC (non-constant) Array index out of range aborts with a source
+# location in a debug build (the default `run` profile). Constant OOB is a
+# compile error instead; release builds compile the check out. See
+# docs/value-aggregates-and-ownership.md §1.7.
+func main() {
+  var grid: Array(Int, cap: 3) = Array(Int, cap: 3)
+  var index: Int = 5
+  grid[index] = 9
+  log("unreachable {grid[index]}")
+}
