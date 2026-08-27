@@ -34,6 +34,17 @@ if let value: mod Track => tracks.modAt(index: index) {
 
 The C backend lowers these exact `if let` accessor forms directly. It evaluates the List and index once, performs an unsigned logical-length comparison, and creates the binding only on success. No `RaeAny` box or generic accessor call remains in the generated hot path.
 
+## Total (non-optional) reads (#664)
+
+For the structure-of-arrays pattern — several same-length parallel lists indexed together — wrapping every element read in `if let` is noise. Two generic reads return `T` directly instead of `opt T`:
+
+```text
+copyAtFallback(index: Int, fallback: T) -> T   # out of range -> the caller's own value
+copyAtDefault(index: Int)               -> T   # out of range -> the type's zero value (0, 0.0, false, "", zeroed struct)
+```
+
+Both are ordinary generic library functions (`lib/core.rae`), built on the same bounds check as `copyAt`. Prefer `copyAtFallback` when a meaningful sentinel exists — it keeps the #642 rule that the out-of-range value is one the *programmer* wrote. `copyAtDefault` is the convenience form when any zero default is fine; use `copyAt` + `if let` instead when absence must be handled distinctly from a real zero. These are copy reads (like `copyAt`); there is no total `view`/`mod` form, because a reference has no valid value to hand back out of range.
+
 ## Collection loops
 
 `loop` remains Rae's only loop keyword. Collection iteration is:
