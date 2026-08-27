@@ -2153,6 +2153,63 @@ static AstDecl* sema_find_module_global(AstModule* module, Str modname, Str name
     return NULL;
 }
 
+static char sema_lower(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c; }
+
+// A near-miss name for the "did you mean" suggestion: `typed` is a case-
+// insensitive PREFIX or SUFFIX of `candidate`. This matches the camelCase
+// accessor rename (`at` -> `copyAt`/`viewAt`/`modAt`, all suffix `at`) and
+// prefix typos (`ad` -> `add`) without flagging unrelated names that merely
+// contain the letters (`at` inside `truncate`).
+static bool sema_name_near(Str candidate, Str typed) {
+    if (typed.len == 0 || typed.len > candidate.len) return false;
+    bool is_prefix = true, is_suffix = true;
+    for (size_t i = 0; i < typed.len; i++) {
+        if (sema_lower(candidate.data[i]) != sema_lower(typed.data[i])) is_prefix = false;
+        if (sema_lower(candidate.data[candidate.len - typed.len + i]) != sema_lower(typed.data[i])) is_suffix = false;
+    }
+    return is_prefix || is_suffix;
+}
+
+// The template base name of a type: "List" for a specialized `List_int64_t`,
+// the plain name otherwise. Method receivers are declared against the template
+// (`this: mod List(T)`), so receiver matching must compare template to template.
+static Str sema_struct_template_name(const TypeInfo* type) {
+    if (!type) return (Str){0};
+    if (type->kind == TYPE_STRUCT && type->as.structure.decl
+        && type->as.structure.decl->kind == AST_DECL_TYPE) {
+        AstDecl* tmpl = type->as.structure.decl->as.type_decl.generic_template;
+        return (tmpl && tmpl->kind == AST_DECL_TYPE)
+                   ? tmpl->as.type_decl.name
+                   : type->as.structure.decl->as.type_decl.name;
+    }
+    return type->name;
+}
+
+// Render a receiver type for a diagnostic, e.g. "List(Int)". Uses the template
+// base name (not the mangled `List_int64_t`) and appends resolved generic
+// arguments when the base does not already carry them.
+static void sema_receiver_display(const TypeInfo* type, char* buf, size_t cap) {
+    if (!type || type->name.len == 0) { snprintf(buf, cap, "the receiver"); return; }
+    Str base = sema_struct_template_name(type);
+    bool already_generic = memchr(base.data, '(', base.len) != NULL;
+    if (!already_generic && type->kind == TYPE_STRUCT
+        && type->as.structure.generic_count > 0) {
+        size_t pos = 0;
+        int n = snprintf(buf, cap, "%.*s(", (int)base.len, base.data);
+        pos += n > 0 ? (size_t)n : 0;
+        for (size_t i = 0; i < type->as.structure.generic_count && pos < cap; i++) {
+            const TypeInfo* arg = type->as.structure.generic_args[i];
+            const char* an = (arg && arg->name.len) ? arg->name.data : "?";
+            int al = (arg && arg->name.len) ? (int)arg->name.len : 1;
+            int m = snprintf(buf + pos, cap - pos, "%s%.*s", i ? ", " : "", al, an);
+            pos += m > 0 ? (size_t)m : 0;
+        }
+        if (pos < cap) snprintf(buf + pos, cap - pos, ")");
+    } else {
+        snprintf(buf, cap, "%.*s", (int)type->name.len, type->name.data);
+    }
+}
+
 static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr) {
     if (!expr) return;
     switch (expr->kind) {
@@ -2669,6 +2726,76 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                         expr->decl_link = ufcs_match;
                         if (ufcs_match->as.func_decl.returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, ufcs_match->as.func_decl.returns->type);
                         found = true;
+                    }
+                }
+                if (!found && !expr->decl_link) {
+                    // #657: no method resolved for this receiver. sema's method
+                    // matching intentionally leaves many valid calls unresolved
+                    // (a SPECIALIZED receiver like `List_int64_t` doesn't match a
+                    // method's generic template `this: mod List(T)`), so the C
+                    // backend is the real resolver. Only report an error when a
+                    // same-named `this`-method exists but NONE targets this
+                    // receiver's template — the wrong-receiver misresolution the
+                    // backend would otherwise bind to a different type, emitting a
+                    // confusing downstream C error (e.g. `list.at(index:)` after
+                    // `at` was removed from List binds `String.at`). Compiler
+                    // intrinsics with no user decl (toString/toJson/fromJson/
+                    // Task.get) have no same-named method and reach the backend.
+                    TypeInfo* erec = expr->as.method_call.object->resolved_type;
+                    if (erec && erec->kind == TYPE_REF) erec = erec->as.ref.base;
+                    Str mname = expr->as.method_call.method_name;
+                    Str erec_base = sema_struct_template_name(erec);
+                    // Only judge a CONCRETELY typed receiver. When the receiver is
+                    // itself a call sema left unresolved (backend-resolved), its
+                    // type is Void/Unknown — `text.at(index:i).toInt()` types the
+                    // inner `.at` as Void — and we cannot know the method is
+                    // absent, so defer to the backend rather than false-positive.
+                    bool erec_concrete = erec && erec->kind != TYPE_VOID
+                        && erec->kind != TYPE_UNKNOWN && erec->kind != TYPE_ANY;
+                    if (erec_concrete && erec_base.len > 0) {
+                        bool same_name_other_receiver = false; // method mname on a DIFFERENT template
+                        bool same_name_this_receiver = false;  // method mname on THIS template
+                        Str suggestion = {0};                  // near-miss name on THIS template
+                        AstModule* scan_mods[64]; size_t scan_n = 0;
+                        scan_mods[scan_n++] = module;
+                        for (const AstImport* imp = module->imports; imp && scan_n < 64; imp = imp->next)
+                            if (imp->module) scan_mods[scan_n++] = imp->module;
+                        for (size_t si = 0; si < scan_n; si++) {
+                            for (AstDecl* dd = scan_mods[si]->decls; dd; dd = dd->next) {
+                                if (dd->kind != AST_DECL_FUNC) continue;
+                                AstFuncDecl* fd = &dd->as.func_decl;
+                                if (fd->specialization_args || !fd->params) continue;
+                                if (!str_eq_cstr(fd->params->name, "this")) continue;
+                                Str recv_base = get_base_type_name(fd->params->type);
+                                bool this_receiver = str_eq(recv_base, erec_base);
+                                if (str_eq(fd->name, mname)) {
+                                    if (this_receiver) same_name_this_receiver = true;
+                                    else same_name_other_receiver = true;
+                                } else if (this_receiver && !suggestion.len) {
+                                    // A near-miss name on the SAME receiver
+                                    // (case-insensitive prefix/suffix, e.g.
+                                    // at -> copyAt).
+                                    if (sema_name_near(fd->name, mname))
+                                        suggestion = fd->name;
+                                }
+                            }
+                        }
+                        if (same_name_other_receiver && !same_name_this_receiver) {
+                            char tbuf[128];
+                            sema_receiver_display(erec, tbuf, sizeof tbuf);
+                            char buf[256];
+                            if (suggestion.len)
+                                snprintf(buf, sizeof buf,
+                                         "no method `%.*s` on `%s`; did you mean `%.*s`?",
+                                         (int)mname.len, mname.data, tbuf,
+                                         (int)suggestion.len, suggestion.data);
+                            else
+                                snprintf(buf, sizeof buf, "no method `%.*s` on `%s`",
+                                         (int)mname.len, mname.data, tbuf);
+                            diag_error(s_current_decl_origin ? s_current_decl_origin : module->file_path,
+                                       (int)expr->line, (int)expr->column, buf);
+                            module->had_error = true;
+                        }
                     }
                 }
                 if (found && expr->decl_link) {
