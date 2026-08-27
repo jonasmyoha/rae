@@ -68,3 +68,5 @@ The measurements do not justify an unchecked public API.
 ## Remaining lifetime work
 
 An element `view` or `mod` points into List backing storage. The collection-loop body rule closes that form's immediate invalidation hazard. General lexical borrow tracking for standalone `viewAt`/`modAt` results is still required: structural mutation of the source List must be rejected while such a binding remains live. This should remain a conservative local analysis, not grow into non-lexical lifetime inference.
+
+This hazard is confirmed and currently unguarded (a `modAt`/`viewAt` `if let` binding whose body mutates the same List is a silent use-after-free). The design note and recommendation are in `docs/viewat-modat-aliasing.md` (#645); implementation — extending the existing loop-body borrow check to these bindings — is tracked as #658.
