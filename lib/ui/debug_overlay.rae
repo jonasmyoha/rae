@@ -31,6 +31,7 @@ import sdf_text
 
 # 0xAARRGGBB.
 const debugAmber: Int = 0xFFFFBF00
+const debugYellow: Int = 0xFFFFFF00   # brighter than amber — for the opt-in custom line
 const debugPanelFill: Int = 0xF0181820
 const debugPanelBorder: Int = 0x60FFBF00
 const debugBackdrop: Int = 0xA0000000
@@ -73,6 +74,11 @@ type DebugOverlay {
   rssSampledAt: Float64
 
   heartbeatX: Float
+
+  # Opt-in custom readout: an app sets this each frame (setDebugOverlayLine) and it is
+  # drawn in yellow under the fps/mem lines. Empty = nothing drawn. Generic — any app can
+  # surface a live debug string (a countdown, a state name, a value) here.
+  customLine: String
 }
 
 func createDebugOverlay(button: view Bool, fps: view Bool, memory: view Bool,
@@ -87,6 +93,7 @@ func createDebugOverlay(button: view Bool, fps: view Bool, memory: view Bool,
     screenH: 0.0
     buttonSize: 20.0
     margin: 12.0
+    customLine: ""
     frameTimes: createList(Float64, cap: 256)
     fpsWindowSec: 2.0
     lastFps: 0.0
@@ -157,6 +164,12 @@ func debugOverlayFps(d: view DebugOverlay) ret Float {
 
 func debugOverlayMemKb(d: view DebugOverlay) ret Int {
   ret d.lastRssKb
+}
+
+# Set the yellow custom readout drawn under fps/mem (empty String clears it). An app calls
+# this each frame to surface a live debug value (a countdown, a mode name, a number).
+func setDebugOverlayLine(d: mod DebugOverlay, text: own String) {
+  d.customLine = text
 }
 
 # ----- input ----------------------------------------------------------
@@ -363,6 +376,13 @@ func drawDebugReadouts(d: view DebugOverlay, font: view SdfFont) {
     gpu2d_text.drawText(font: font, text: text,
                         x: rightEdge - debugTextWidth(text: text, sizePx: fontSize),
                         y: y, sizePx: fontSize, color: debugAmber)
+    y = y + lineH
+  }
+  # Opt-in custom line (yellow), under the fps/mem readouts.
+  if d.customLine.length() > 0 {
+    gpu2d_text.drawText(font: font, text: d.customLine,
+                        x: rightEdge - debugTextWidth(text: d.customLine, sizePx: fontSize),
+                        y: y, sizePx: fontSize, color: debugYellow)
   }
 }
 
