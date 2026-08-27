@@ -1,0 +1,9 @@
+import core
+
+# An anonymous `{ }` list literal cannot initialize an Array: its capacity is
+# part of its type. Sema must reject this and point at `Array(T, cap: N)`.
+func main() {
+  var grid: Array(Int, cap: 3) = { }
+  grid[0] = 5
+  log("{grid[0]}")
+}
