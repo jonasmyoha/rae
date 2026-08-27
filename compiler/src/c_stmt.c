@@ -1294,8 +1294,31 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                                "and nothing else would own the value — take it with "
                                "'if let <name>: T = ...' (spec 4.2)");
                 } else
+                if (vk == AST_EXPR_INDEX) {
+                    // #654: an Array/Buffer element `grid[i]` is an ADDRESSABLE
+                    // lvalue (`grid.v[i]`), so alias its storage DIRECTLY. The
+                    // materialise-temp path below (`__auto_type t = grid.v[i];
+                    // &t`) aliased a COPY, so a write through a `mod` binding
+                    // never reached the array (unlike List.modAt). Emit
+                    // `<T*> name = &(grid.v[i]);`.
+                    fprintf(out, "  ");
+                    emit_type_ref_as_c_type(ctx, stmt->as.let_stmt.type, out, false);
+                    fprintf(out, " %.*s = &(", (int)stmt->as.let_stmt.name.len,
+                            stmt->as.let_stmt.name.data);
+                    emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_UNARY, false, false);
+                    fprintf(out, ");\n");
+                    if (ctx->local_count < 256) {
+                        size_t li = ctx->local_count;
+                        ctx->locals[li] = stmt->as.let_stmt.name;
+                        ctx->local_type_refs[li] = stmt->as.let_stmt.type;
+                        ctx->local_is_ptr[li] = false;
+                        ctx->local_is_mod[li] = false;
+                        ctx->local_count++;
+                    }
+                    break;
+                } else
                 if (vk == AST_EXPR_CALL || vk == AST_EXPR_METHOD_CALL
-                    || vk == AST_EXPR_OBJECT || vk == AST_EXPR_INDEX) {
+                    || vk == AST_EXPR_OBJECT) {
                     materialised_id = ctx->temp_counter++;
                     fprintf(out, "  __auto_type __rae_bind%d = ", materialised_id);
                     emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false);
