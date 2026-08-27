@@ -1,0 +1,68 @@
+# #651: value optionals over SCALARS and String (`opt Int`, `opt Float`,
+# `opt Bool`, `opt String`) lower to the monomorphized
+# `struct rae_opt_<T> { has; value; }`, NOT the inline RaeAny union (which is
+# now reserved for `Any`). Exercises: construction, an optional crossing a
+# function boundary, `if let` unwrap on the present AND none paths, `log`/
+# interpolation of an UNWRAPPED value and of the OPTIONAL itself, and JSON
+# toJson + fromJson of a struct with opt Int/Float/Bool/String fields (present
+# and none).
+import core
+
+type Config {
+  count: opt Int
+  ratio: opt Float
+  flag: opt Bool
+  label: opt String
+}
+
+func maybeInt(present: view Bool) ret opt Int {
+  if present { ret 42 }
+  ret none
+}
+
+func maybeText(present: view Bool) ret opt String {
+  if present {
+    var text: String = ""
+    text = text.concat(other: "hello")
+    ret text
+  }
+  ret none
+}
+
+func main() {
+  # Present unwrap + use of the unwrapped value.
+  if let value: Int = maybeInt(present: true) {
+    log("int={value}")
+  }
+  # None branch.
+  if let missing: Int = maybeInt(present: false) {
+    log("unexpected {missing}")
+  } else {
+    log("int-none")
+  }
+  # opt String unwrap.
+  if let text: String = maybeText(present: true) {
+    log("str={text}")
+  }
+
+  # Interpolation of the OPTIONAL itself (present -> value, none -> "none").
+  var someInt: opt Int = maybeInt(present: true)
+  var noneInt: opt Int = maybeInt(present: false)
+  log("some={someInt}")
+  log("none={noneInt}")
+
+  # JSON round-trip: present fields.
+  var full: Config = { count: 7, ratio: 1.5, flag: true, label: "world" }
+  var jsonFull: String = full.toJson()
+  log(jsonFull)
+  var backFull: Config = Config.fromJson(json: jsonFull)
+  log("json-count={backFull.count}")
+  log("json-label={backFull.label}")
+
+  # JSON round-trip: none fields serialise to null, decode to none.
+  var empty: Config = { count: none, ratio: none, flag: none, label: none }
+  var jsonEmpty: String = empty.toJson()
+  log(jsonEmpty)
+  var backEmpty: Config = Config.fromJson(json: jsonEmpty)
+  log("json-count-back={backEmpty.count}")
+}

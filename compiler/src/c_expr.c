@@ -73,6 +73,34 @@ static void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE*
         fprintf(out, "))");
         return;
     }
+    // #651: a value-opt (`opt <scalar/String/struct>`) is now a `struct
+    // rae_opt_<T>`, which the _Generic `rae_ext_rae_str` cannot dispatch on.
+    // Format `.value` when present (via its concrete formatter), else "none"
+    // — matching the Live VM's rendering of a none optional.
+    if (tr && tr->is_opt && !(tr->is_view || tr->is_mod)
+        && rae_opt_is_struct_rep(ctx, tr)) {
+        const AstDecl* pd = (base.len > 0) ? find_type_decl(ctx, ctx->module, base) : NULL;
+        bool payload_is_user_struct = pd && pd->kind == AST_DECL_TYPE
+            && !has_property(pd->as.type_decl.properties, "c_struct")
+            && !pd->as.type_decl.generic_params;
+        int oid = ctx->temp_counter++;
+        fprintf(out, "(__extension__ ({ %s __ostr%d = (", rae_opt_type_name(ctx, tr), oid);
+        // Capture the whole `rae_opt_<T>` — suppress the call emitter's auto
+        // `.value` unbox, which would hand back the payload and mistype the temp.
+        bool saved_unbox = ctx->suppress_opt_unbox;
+        ctx->suppress_opt_unbox = true;
+        emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
+        ctx->suppress_opt_unbox = saved_unbox;
+        fprintf(out, "); __ostr%d.has ? ", oid);
+        if (payload_is_user_struct) {
+            const char* pmangled = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = base}});
+            fprintf(out, "rae_to_str_%s_(&__ostr%d.value)", pmangled, oid);
+        } else {
+            fprintf(out, "rae_ext_rae_str(__ostr%d.value)", oid);
+        }
+        fprintf(out, " : (rae_String){(uint8_t*)\"none\", 4}; }))");
+        return;
+    }
     const AstDecl* d = (base.len > 0) ? find_type_decl(ctx, ctx->module, base) : NULL;
     bool is_user_struct = d && d->kind == AST_DECL_TYPE
         && !has_property(d->as.type_decl.properties, "c_struct")
@@ -362,6 +390,23 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
           if (!picked && rhs_ti && !rhs_ti->is_opt) {
               Str b = get_base_type_name(rhs_ti);
               if (is_primitive_type(b) && !str_eq_cstr(b, "Any")) picked = rhs_ti;
+          }
+          // #651: value (in)equality between TWO optionals of the same scalar
+          // payload — `back.copyAt(i) is not data.copyAt(i)`. Neither side is a
+          // bare primitive, so drive both to unbox to `.value` by expecting the
+          // payload type. (A none-vs-value compare took the none_compare branch
+          // above and never reaches here.)
+          if (!picked && (expr->as.binary.op == AST_BIN_IS || expr->as.binary.op == AST_BIN_NEQ)) {
+              const AstTypeRef* opt_side = (lhs_ti && lhs_ti->is_opt) ? lhs_ti
+                                         : ((rhs_ti && rhs_ti->is_opt) ? rhs_ti : NULL);
+              if (opt_side && !(opt_side->is_view || opt_side->is_mod)) {
+                  AstTypeRef payload = *opt_side;
+                  payload.is_opt = false; payload.is_view = false; payload.is_mod = false; payload.next = NULL;
+                  Str b = get_base_type_name(&payload);
+                  if (is_primitive_type(b) && !str_eq_cstr(b, "Any")) {
+                      ctx->expected_type = payload; ctx->has_expected_type = true;
+                  }
+              }
           }
           if (picked) { ctx->expected_type = *picked; ctx->has_expected_type = true; }
       }
@@ -707,8 +752,15 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, false);
             } else {
                 TypeInfo* t = expr->resolved_type; if (t->kind == TYPE_REF) t = t->as.ref.base;
+                // The unbox result may be typed as the payload directly, or (in
+                // ref/`if let` narrowing) still as the `opt` itself — unwrap so
+                // the representation decision looks at the payload either way.
+                const TypeInfo* pay = (t->kind == TYPE_OPT) ? t->as.opt.base : t;
                 fprintf(out, "("); emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, false);
-                if (t->kind == TYPE_INT || t->kind == TYPE_CHAR) fprintf(out, ").as.i"); else if (t->kind == TYPE_FLOAT || t->kind == TYPE_FLOAT64) fprintf(out, ").as.f"); else if (t->kind == TYPE_BOOL) fprintf(out, ").as.b"); else if (t->kind == TYPE_STRING) fprintf(out, ").as.s"); else if (rae_typeinfo_opt_is_struct_rep(t)) fprintf(out, ").value"); else fprintf(out, ").as.ptr");
+                // #651: every non-`Any` opt payload is struct-rep -> unbox is
+                // `.value`. Check struct-rep FIRST so scalars/String (now
+                // struct-rep) read `.value`, not the removed RaeAny `.as.*`.
+                if (rae_typeinfo_opt_is_struct_rep(pay)) fprintf(out, ").value"); else if (pay->kind == TYPE_INT || pay->kind == TYPE_CHAR) fprintf(out, ").as.i"); else if (pay->kind == TYPE_FLOAT || pay->kind == TYPE_FLOAT64) fprintf(out, ").as.f"); else if (pay->kind == TYPE_BOOL) fprintf(out, ").as.b"); else if (pay->kind == TYPE_STRING) fprintf(out, ").as.s"); else fprintf(out, ").as.ptr");
             }
         } else emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, false);
         break;
