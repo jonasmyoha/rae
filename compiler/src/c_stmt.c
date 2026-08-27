@@ -1167,6 +1167,40 @@ static bool ref_bind_value_returns_ref(CFuncContext* ctx, const AstExpr* val) {
     return false;
 }
 
+/* Does this call return `opt view/mod T`? For a PRIMITIVE T that lowers to a
+ * RAW nullable pointer (`const int64_t*`), not the `{ .ptr }` wrapper: `viewAt`/
+ * `modAt` and any user `ret opt view/mod prim` are this shape, while a plain
+ * `ret view/mod prim` returns the wrapper. A primitive view/mod binding whose
+ * source is this shape must install the raw pointer into its `.ptr` field
+ * (`#662`); binding it bare assigns `const int64_t*` into a wrapper (C error). */
+static bool ref_bind_value_returns_opt_ref(CFuncContext* ctx, const AstExpr* val) {
+    if (!val) return false;
+    if (val->kind != AST_EXPR_CALL && val->kind != AST_EXPR_METHOD_CALL) return false;
+    const AstFuncDecl* vfd = val->decl_link ? &val->decl_link->as.func_decl : NULL;
+    if (vfd && vfd->returns && vfd->returns->type) {
+        const AstTypeRef* rt = vfd->returns->type;
+        if (rt->is_opt && (rt->is_view || rt->is_mod)) return true;
+    }
+    Str callee = (Str){0};
+    if (val->kind == AST_EXPR_CALL && val->as.call.callee
+        && val->as.call.callee->kind == AST_EXPR_IDENT) {
+        callee = val->as.call.callee->as.ident;
+    } else if (val->kind == AST_EXPR_METHOD_CALL) {
+        callee = val->as.method_call.method_name;
+    }
+    if (callee.len > 0 && ctx && ctx->compiler_ctx) {
+        for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+            const AstDecl* d = ctx->compiler_ctx->all_decls[i];
+            if (d->kind != AST_DECL_FUNC) continue;
+            if (!str_eq(d->as.func_decl.name, callee)) continue;
+            const AstFuncDecl* cfd = &d->as.func_decl;
+            const AstTypeRef* rt = cfd->returns ? cfd->returns->type : NULL;
+            if (rt && rt->is_opt && (rt->is_view || rt->is_mod)) return true;
+        }
+    }
+    return false;
+}
+
 /* The backend twin of sema's spec-4.2 check, for the UFCS calls sema cannot
  * resolve: does this call (by name) return an OWNED optional? A view/mod
  * narrowing of one is rejected — before this, `if let t: view Track =>
@@ -1368,13 +1402,22 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     bool value_returns_ref = ref_bind_value_returns_ref(
                         ctx, stmt->as.let_stmt.value);
                     if (value_returns_ref) {
-                        // Optional primitive references cross a function
-                        // boundary as nullable raw pointers; locals keep the
-                        // normal primitive-ref wrapper used by expression
-                        // lowering, so install the returned pointer in it.
-                        if (stmt->as.let_stmt.type->is_opt) fprintf(out, "{ .ptr = ");
+                        // A call returning `opt view/mod prim` (viewAt/modAt, or
+                        // a user `ret opt view/mod prim`) hands back a RAW
+                        // nullable pointer; the local is always a `{ .ptr }`
+                        // wrapper, so install the pointer into `.ptr`. #662: the
+                        // wrap must key on the CALLEE's return shape, not the
+                        // binding's `is_opt` — the plain-`let` narrowed form
+                        // (`let p: view Int => xs.viewAt(...)`) has a non-opt
+                        // binding but an opt-ref source, and assigning the raw
+                        // pointer bare into the wrapper is a C error. A plain
+                        // `ret view/mod prim` returns the wrapper already and is
+                        // assigned directly.
+                        bool wrap_raw_ptr = ref_bind_value_returns_opt_ref(
+                            ctx, stmt->as.let_stmt.value);
+                        if (wrap_raw_ptr) fprintf(out, "{ .ptr = ");
                         emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, false, false);
-                        if (stmt->as.let_stmt.type->is_opt) fprintf(out, " }");
+                        if (wrap_raw_ptr) fprintf(out, " }");
                     } else if (src_is_ref_local) {
                         // The source is itself a .ptr handle: alias the same
                         // referent, not the handle's own stack slot.

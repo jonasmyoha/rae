@@ -1,0 +1,21 @@
+import core
+
+# #662: the PLAIN `let x: view/mod <prim> => list.viewAt/modAt(index:)` form
+# (auto-unwrapping the returned `opt view/mod T`) must lower like the `if let`
+# form. viewAt/modAt return a RAW nullable pointer for primitives; binding it
+# bare into the primitive `{ .ptr }` wrapper was a C error — it must be
+# installed into `.ptr`. Only `if let` was covered before (#653).
+func main() {
+  var xs: List(Int) = { 10, 20, 30 }
+  var fs: List(Float) = { 1.5, 2.5 }
+  var bs: List(Bool) = { true, false }
+
+  let vi: view Int => xs.viewAt(index: 1)
+  let vf: view Float => fs.viewAt(index: 1)
+  let vb: view Bool => bs.viewAt(index: 0)
+  log("vi={vi} vf={vf} vb={vb}")
+
+  let mi: mod Int => xs.modAt(index: 2)
+  mi = 99
+  log("xs2={xs.copyAt(index: 2)}")
+}
