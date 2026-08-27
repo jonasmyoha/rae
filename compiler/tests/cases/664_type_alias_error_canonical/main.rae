@@ -1,0 +1,11 @@
+# #647 error-message decision: an alias resolves to its target's TypeInfo, so
+# diagnostics print the CANONICAL type name (`Vec2`), not the alias (`Size`).
+import core
+import vec2
+import vec3
+alias Size = Vec2
+func main() {
+  let s: Size = vec2.create(x: 1.0, y: 2.0)
+  let v: Vec3 = s
+  log(v.x)
+}

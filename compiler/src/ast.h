@@ -361,7 +361,8 @@ typedef enum {
   AST_DECL_TYPE,
   AST_DECL_FUNC,
   AST_DECL_ENUM,
-  AST_DECL_GLOBAL_LET
+  AST_DECL_GLOBAL_LET,
+  AST_DECL_ALIAS   // `alias Name = Type` — a transparent type alias (#647).
 } AstDeclKind;
 
 typedef struct AstEnumMember {
@@ -418,6 +419,10 @@ struct AstDecl {
       bool is_const;  // module-level `const` (compile-time constant)
       AstExpr* value;
     } let_decl;
+    struct {
+      Str name;            // the alias name, e.g. `Size`
+      AstTypeRef* target;  // the aliased type, e.g. `Vec2`
+    } alias_decl;
   } as;
 };
 

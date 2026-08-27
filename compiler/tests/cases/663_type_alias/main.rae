@@ -1,0 +1,18 @@
+# #647: `alias Name = Type` is a transparent type alias — same TypeInfo, so a
+# `Size` field is an inline `Vec2` (Rect is 16 bytes, four floats) and `vec2.*`
+# dot-syntax works on it. A naming convenience, not a distinct type.
+import core
+import vec2
+alias Size = Vec2
+type Rect {
+  position: Vec2
+  size: Size
+}
+func area(size: view Size) ret Float { ret size.x * size.y }
+func main() {
+  let r: Rect = { position: { x: 1.0, y: 2.0 }, size: { x: 3.0, y: 4.0 } }
+  log(r.size.x)
+  log(area(size: r.size))
+  let s: Size = vec2.create(x: 5.0, y: 6.0)
+  log(s.y)
+}
