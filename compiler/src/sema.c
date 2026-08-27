@@ -1079,6 +1079,12 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
             }
             break;
         }
+        case AST_DECL_ALIAS:
+            // Resolve the aliased target once so a bad target (`alias X = Nope`)
+            // is diagnosed at the alias site and the TypeInfo is cached.
+            if (decl->as.alias_decl.target)
+                sema_resolve_type_internal(ctx, module, symbols, decl->as.alias_decl.target);
+            break;
         default: break;
     }
 }
@@ -3032,11 +3038,44 @@ static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolT
     }
 }
 
+// `alias Name = Type` (#647): find the aliased target AstTypeRef for `name` in
+// this module or any it imports. Aliases are transparent — `name` resolves to
+// the target's TypeInfo, so it is the same type (identical layout, dot-syntax
+// methods, no conversions). Returns NULL when `name` is not an alias.
+static const AstTypeRef* find_alias_target(const AstModule* module, Str name, int depth) {
+    if (!module || depth > 16) return NULL;
+    for (const AstDecl* d = module->decls; d; d = d->next) {
+        if (d->kind == AST_DECL_ALIAS && str_eq(d->as.alias_decl.name, name))
+            return d->as.alias_decl.target;
+    }
+    for (const AstImport* imp = module->imports; imp; imp = imp->next) {
+        if (imp->module) {
+            const AstTypeRef* t = find_alias_target(imp->module, name, depth + 1);
+            if (t) return t;
+        }
+    }
+    return NULL;
+}
+
 static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstTypeRef* type_ref) {
     if (!type_ref) return type_get_void(ctx->type_registry);
     if (type_ref->resolved_type) return type_ref->resolved_type;
     TypeInfo* base = NULL;
     if (type_ref->parts) {
+        // Type alias (#647): rewrite a bare alias name to its canonical target
+        // IN PLACE, before any name-based resolution — so not only sema but also
+        // the mangler and C-type emission (which read `parts->text`, not
+        // `resolved_type`) see the canonical type. The use's own
+        // is_view/is_mod/is_opt flags on this ref are preserved. The loop
+        // resolves a short alias-of-alias chain; the counter guards `alias A = A`.
+        for (int alias_hops = 0; alias_hops < 16
+                 && !type_ref->parts->next && !type_ref->generic_args; alias_hops++) {
+            const AstTypeRef* alias_target = find_alias_target(module, type_ref->parts->text, 0);
+            if (!alias_target || !alias_target->parts) break;
+            type_ref->parts = clone_parts(ctx, alias_target->parts);
+            type_ref->generic_args = alias_target->generic_args
+                ? clone_type_ref(ctx->ast_arena, alias_target->generic_args) : NULL;
+        }
         Str name = type_ref->parts->text;
         if (str_eq_cstr(name, "Int")) base = type_get_int(ctx->type_registry);
         else if (str_eq_cstr(name, "Int64")) base = type_get_int_sized(ctx->type_registry, 64, false);

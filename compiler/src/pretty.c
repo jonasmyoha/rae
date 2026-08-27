@@ -1216,6 +1216,15 @@ static void pp_print_global_let_decl(PrettyPrinter* pp, const AstDecl* decl) {
   pp_newline(pp);
 }
 
+static void pp_print_alias_decl(PrettyPrinter* pp, const AstDecl* decl) {
+  pp_check_comments(pp, decl->line);
+  pp_write(pp, "alias ");
+  pp_write_str(pp, decl->as.alias_decl.name);
+  pp_write(pp, " = ");
+  pp_write_type(pp, decl->as.alias_decl.target);
+  pp_newline(pp);
+}
+
 static void pp_print_decl(PrettyPrinter* pp, const AstDecl* decl) {
   if (decl->kind == AST_DECL_TYPE) {
     pp_print_type_decl(pp, decl);
@@ -1223,6 +1232,8 @@ static void pp_print_decl(PrettyPrinter* pp, const AstDecl* decl) {
     pp_print_enum_decl(pp, decl);
   } else if (decl->kind == AST_DECL_GLOBAL_LET) {
     pp_print_global_let_decl(pp, decl);
+  } else if (decl->kind == AST_DECL_ALIAS) {
+    pp_print_alias_decl(pp, decl);
   } else {
     pp_print_func_decl(pp, decl);
   }
