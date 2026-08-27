@@ -2160,8 +2160,19 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 }
 
                 if (is_prim_ref_return && !ret_type->is_opt) {
+                    // #663: a call returning `opt view/mod prim` (viewAt/modAt,
+                    // or a user `ret opt view/mod prim`) already hands back a
+                    // RAW nullable pointer; install it into `.ptr` directly.
+                    // Taking its address (`&<call>`) is an address-of-rvalue C
+                    // error. A place source (a primitive local / element) still
+                    // needs `&` to form the pointer. Mirrors the plain-`let`
+                    // narrowing (#662): the pointer may be null (none) — no
+                    // trap, as Rae has none.
+                    bool src_raw_ptr = ref_bind_value_returns_opt_ref(ctx, ret_val);
                     fprintf(out, "("); emit_type_ref_as_c_type(ctx, ret_type, out, false);
-                    fprintf(out, "){ .ptr = &"); emit_expr(ctx, ret_val, out, PREC_LOWEST, true, true);
+                    fprintf(out, "){ .ptr = ");
+                    if (!src_raw_ptr) fprintf(out, "&");
+                    emit_expr(ctx, ret_val, out, PREC_LOWEST, true, true);
                     fprintf(out, " }");
                 } else if (is_ref_return) {
                     /* Taking the address of a Rae function's result is
