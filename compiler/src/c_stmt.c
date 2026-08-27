@@ -22,6 +22,11 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
                               const AstExpr* value, FILE* out);
+// True if `value` is an ALIAS-returning call — `copyAt`/`buf_get` and any user
+// function that passes such an alias through. When building an `opt T` whose
+// payload owns heap, an aliasing source must be DEEP-COPIED, not moved: the list
+// still owns the element, so moving its heap would double-free at drop (#652).
+static bool c_opt_source_aliases(CFuncContext* ctx, const AstExpr* value);
 
 /* `if let element ... list.at/viewAt/modAt(index:)` is the hot-path spelling
  * of checked indexing. Lower it directly instead of calling the generic Rae
@@ -325,7 +330,8 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
     } else {
       bool needs_deep_agg = type_needs_deep_copy(ctx->compiler_ctx, ctx->module,
                                                  &payload, 0);
-      if (needs_deep_agg && !c_expr_can_move_owned_payload(value)) {
+      if (needs_deep_agg && (!c_expr_can_move_owned_payload(value)
+                             || c_opt_source_aliases(ctx, value))) {
         const char* copy_name = rae_mangle_type_specialized(
             ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &payload);
         fprintf(out, "rae_deep_copy_%s(&__opt%d.value, &(", copy_name, optn);
@@ -369,7 +375,8 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
 
   bool needs_deep = type_needs_deep_copy(ctx->compiler_ctx, ctx->module,
                                          &payload, 0);
-  if (needs_deep && !c_expr_can_move_owned_payload(value)) {
+  if (needs_deep && (!c_expr_can_move_owned_payload(value)
+                     || c_opt_source_aliases(ctx, value))) {
     const char* copy_name = rae_mangle_type_specialized(
         ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &payload);
     fprintf(out, "rae_deep_copy_%s(__optp%d, &(", copy_name, tmpn);
@@ -457,6 +464,24 @@ static bool call_is_aliasing(CompilerContext* cctx, const AstExpr* call, AliasVi
     if (d->kind != AST_DECL_FUNC) continue;
     if (!str_eq(d->as.func_decl.name, cn)) continue;
     return func_returns_alias_v(cctx, &d->as.func_decl, v);
+  }
+  return false;
+}
+// #652: does `value` produce a shallow alias into some container's storage?
+// Covers the plain-call form (`copyAt(list, i)` / `buf_get`) and the method
+// form (`list.copyAt(i)` — the receiver's element aliased by the accessor body).
+static bool c_opt_source_aliases(CFuncContext* ctx, const AstExpr* value) {
+  if (!value || !ctx || !ctx->compiler_ctx) return false;
+  CompilerContext* cctx = ctx->compiler_ctx;
+  AliasVisit av = {0};
+  if (value->kind == AST_EXPR_CALL) return call_is_aliasing(cctx, value, &av);
+  if (value->kind == AST_EXPR_METHOD_CALL) {
+    Str mn = value->as.method_call.method_name;
+    for (size_t k = 0; k < cctx->all_decl_count; k++) {
+      const AstDecl* d = cctx->all_decls[k];
+      if (d->kind == AST_DECL_FUNC && str_eq(d->as.func_decl.name, mn))
+        return func_returns_alias_v(cctx, &d->as.func_decl, &av);
+    }
   }
   return false;
 }
