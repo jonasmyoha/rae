@@ -580,6 +580,9 @@ int64_t rae_json_extract_int(rae_String json, const char* key);
 double rae_json_extract_float(rae_String json, const char* key);
 rae_String rae_json_extract_string(rae_String json, const char* key);
 rae_Bool rae_json_extract_bool(rae_String json, const char* key);
+// #651: presence test for value-opt fromJson — 1 iff key exists and its value
+// is not JSON `null`. Lets `opt <T>` decode has=0 for absent/null keys.
+rae_Bool rae_json_key_present(rae_String json, const char* key);
 rae_String rae_ext_rae_str_cstr_ptr(const char** s); // Legacy/helper
 
 int64_t rae_ext_nextTick(void);
