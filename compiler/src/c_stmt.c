@@ -1382,10 +1382,36 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                                 (int)stmt->as.let_stmt.value->as.ident.len,
                                 stmt->as.let_stmt.value->as.ident.data);
                     } else {
-                        // Primitive ref: rae_Mod_Int64 r = { .ptr = &x };
-                        fprintf(out, "{ .ptr = &");
-                        emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, true, true);
-                        fprintf(out, " }");
+                        // #656: narrowing `if let n: view/mod String => <opt>`
+                        // where the source is a STRUCT-REP optional (e.g.
+                        // `opt String`, a `rae_opt_<T>{ has, value }`). The
+                        // plain `{ .ptr = &(src).value }` below takes the
+                        // address of the inline `.value` field, which is NEVER
+                        // NULL, so the `if let` presence test (`n.ptr != NULL`)
+                        // enters even when the optional is none — disagreeing
+                        // with `is not none`. Gate `.ptr` on `.has`, mirroring
+                        // the struct/UNBOX narrowing (`has ? &value : NULL`), so
+                        // a reassigned-to-none source correctly reads as absent.
+                        const AstExpr* opt_src = stmt->as.let_stmt.value;
+                        if (opt_src && opt_src->kind == AST_EXPR_UNBOX)
+                            opt_src = opt_src->as.unary.operand;
+                        const AstTypeRef* opt_src_tr =
+                            opt_src ? infer_expr_type_ref(ctx, opt_src) : NULL;
+                        if (opt_src_tr && opt_src_tr->is_opt
+                            && !(opt_src_tr->is_view || opt_src_tr->is_mod)
+                            && rae_opt_is_struct_rep(ctx, opt_src_tr)) {
+                            int oid = ctx->temp_counter++;
+                            fprintf(out, "{ .ptr = ({ %s* __ov%d = &(",
+                                    rae_opt_type_name(ctx, opt_src_tr), oid);
+                            emit_expr(ctx, opt_src, out, PREC_LOWEST, true, false);
+                            fprintf(out, "); __ov%d->has ? &__ov%d->value : NULL; }) }",
+                                    oid, oid);
+                        } else {
+                            // Primitive ref: rae_Mod_Int64 r = { .ptr = &x };
+                            fprintf(out, "{ .ptr = &");
+                            emit_expr(ctx, stmt->as.let_stmt.value, out, PREC_LOWEST, true, true);
+                            fprintf(out, " }");
+                        }
                     }
                 } else {
                     /* One implementation of "does this call already hand

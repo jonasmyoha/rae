@@ -1,0 +1,37 @@
+# #656: `if let x: view String => <opt String>` narrowing must agree with
+# `is not none` after the optional is REASSIGNED to none. The struct-rep
+# `opt String` (rae_opt_rae_String{has,value}) narrowing used to bind
+# `.ptr = &(src).value` unconditionally — an address that is never NULL —
+# so the presence test entered its branch even for none. It now gates on
+# `.has`, matching `is not none` and the owned/struct narrowing paths.
+
+type Card {
+  note: opt String
+}
+
+func mk(flag: view Bool) ret opt String {
+  if flag {
+    var s: String = ""
+    s = s.concat(other: "hi")
+    ret s
+  }
+  ret none
+}
+
+func main() {
+  # Field reassigned some -> none.
+  var card: Card = { note: mk(flag: true) }
+  card.note = none
+  if card.note is not none { log("field is-check: SOME") } else { log("field is-check: NONE") }
+  if let n: view String => card.note { log("field view=>: SOME") } else { log("field view=>: NONE") }
+
+  # Local reassigned some -> none.
+  var maybe: opt String = mk(flag: true)
+  maybe = none
+  if let m: view String => maybe { log("local view=>: SOME") } else { log("local view=>: NONE") }
+
+  # Present value still binds and reads through view and mod.
+  card.note = mk(flag: true)
+  if let present: view String => card.note { log("present view=>: {present}") } else { log("present view=>: NONE") }
+  if let editable: mod String => card.note { log("present mod=>: {editable}") } else { log("present mod=>: NONE") }
+}
