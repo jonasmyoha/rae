@@ -31,9 +31,9 @@ compiler to reject mixing two concepts.
 
 ## Spelling
 
-- Contextual keyword: `alias` is recognized only at the top-level declaration
-  position, spelled `alias <PascalName> = <type>`. It is **not** a reserved word
-  — `let alias: String = ...` and other identifier uses are unaffected.
+- `alias` is a **reserved keyword**. A declaration is spelled
+  `alias <PascalName> = <type>` at the top level; `alias` may not be used as an
+  identifier (variable/field/parameter name).
 - The alias name must be `PascalCase` (it names a type).
 - The target may be any type, including a generic instance (`alias Ints =
   List(Int)`). A short alias-of-alias chain resolves through.

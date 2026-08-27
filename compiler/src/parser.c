@@ -2752,12 +2752,10 @@ static AstDecl* parse_global_let_declaration(Parser* parser, bool is_var, bool i
   return decl;
 }
 
-// `alias Name = Type` — a transparent type alias (#647). `alias` is NOT a
-// reserved word (it is a valid identifier elsewhere, e.g. `let alias: String`),
-// so it is a CONTEXTUAL keyword: recognized only at the top-level declaration
-// position, spelled `alias <Ident> = <type>`.
+// `alias Name = Type` — a transparent type alias (#647/#660). `alias` is a
+// reserved keyword; this is called after `TOK_KW_ALIAS` has been consumed.
 static AstDecl* parse_alias_declaration(Parser* parser) {
-  const Token* alias_tok = parser_advance(parser);  // consume the `alias` ident
+  const Token* alias_tok = parser_previous(parser);  // the consumed `alias` keyword
   const Token* name = parser_consume_ident(parser, "expected alias name after 'alias'");
   check_pascal_case(parser, name, "type");
   parser_consume(parser, TOK_ASSIGN, "expected '=' after alias name (alias Name = Type)");
@@ -2772,15 +2770,6 @@ static AstDecl* parse_alias_declaration(Parser* parser) {
 }
 
 static AstDecl* parse_declaration(Parser* parser) {
-  // Contextual type-alias declaration: `alias <Ident> = <type>` at top level.
-  {
-    const Token* t0 = parser_peek(parser);
-    if (t0->kind == TOK_IDENT && str_eq_cstr(t0->lexeme, "alias")
-        && is_ident_like(parser_peek_at(parser, 1)->kind)
-        && parser_peek_at(parser, 2)->kind == TOK_ASSIGN) {
-      return parse_alias_declaration(parser);
-    }
-  }
   if (parser_check(parser, TOK_KW_PUB) || parser_check(parser, TOK_KW_PRIV)) {
     const Token* token = parser_advance(parser);
     Str text = token->lexeme;
@@ -2800,6 +2789,9 @@ static AstDecl* parse_declaration(Parser* parser) {
 
   bool is_extern = parser_match(parser, TOK_KW_EXTERN);
   
+  if (parser_match(parser, TOK_KW_ALIAS)) {
+    return parse_alias_declaration(parser);
+  }
   if (parser_match(parser, TOK_KW_TYPE)) {
     return parse_type_declaration(parser);
   }
