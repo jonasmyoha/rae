@@ -13,9 +13,12 @@ is not a missing-sugar inconsistency to paper over.
 - Returns `T` directly — **not** optional.
 - **Constant** index out of range is a **compile error**
   (`index 7 is out of bounds for Array(cap: 3); valid indices are 0..2`).
-- (A **dynamic** index is currently unchecked — Array's own gap, tracked as
-  #655; the docs claim a debug-mode check that isn't implemented. That is an
-  Array-internal consistency bug, not a List-vs-Array question.)
+- A **dynamic** (non-constant) index is **checked in debug builds** and
+  unchecked in release, per `value-aggregates-and-ownership.md` §1.7 (#655): an
+  out-of-range dynamic subscript aborts with a source location in a dev build
+  (`-O0 -g`) and compiles to a bare index in release (`-O2 -DNDEBUG`). This is a
+  memory-safety guard emitted in the generated C, not a user-facing language
+  construct, so it is compatible with #642's "no trap/unwrap operator" rule.
 
 `List(T)` — dynamic runtime length:
 - `list[i]` is **rejected** by sema with:
