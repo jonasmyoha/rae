@@ -558,10 +558,15 @@ func nodeWorldMatrix(sk: view Skeleton, node: view Int) ret Mat4 {
 # space; the world matrix puts it back wherever that joint now is. Only
 # three rows are stored because a joint transform is affine and its fourth
 # row is always (0,0,0,1) — this is the Mat3x4 saving #354 exists for.
-func buildPalette(sk: view Skeleton) pub ret List(Float) {
-  let out: List(Float) = createList(Float, cap: sk.jointNodes.length * 12)
+# Fill `out` (a REUSED scratch buffer) with the joint palette, instead of
+# allocating a fresh List each call. `out` is cleared first — clear() keeps the
+# backing capacity, so a caller that hands the SAME buffer every frame does no
+# per-frame allocation at all (for a hot per-frame skinning loop in a downstream
+# app). Same math as buildPalette below, now a thin allocating wrapper over this.
+func buildPaletteInto(sk: view Skeleton, out: mod List(Float)) pub {
+  out.clear()
   if sk.ok is false {
-    ret own out
+    ret
   }
   var j: Int = 0
   loop j < sk.jointNodes.length {
@@ -586,6 +591,11 @@ func buildPalette(sk: view Skeleton) pub ret List(Float) {
     }
     j = j + 1
   }
+}
+
+func buildPalette(sk: view Skeleton) pub ret List(Float) {
+  var out: List(Float) = createList(Float, cap: sk.jointNodes.length * 12)
+  buildPaletteInto(sk: sk, out: out)
   ret own out
 }
 
