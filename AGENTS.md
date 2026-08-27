@@ -175,61 +175,6 @@ timestamps, a new pass), reach it **through the bindings** — do NOT add a new
   allowlist. Full rationale + classification: `docs/webgpu-c-surface-audit.md`.
 
 ---
-
-## SAY: spoken summaries (IMPORTANT)
-
-This project may be used with **voice-driven development**.  
-Codex must emit **spoken summaries** using a strict format.
-
-### How to use SAY:
-
-- Use `SAY:` to emit **short, human-friendly summaries**
-- Each `SAY:` line must be **one sentence**
-- Maximum length: ~15 words
-- Do **not** include code, filenames, or symbols unless essential
-- Do **not** overuse — only speak meaningful milestones
-
-### When to use SAY:
-
-Use `SAY:` when:
-- A task or subtask finishes
-- Tests pass or fail
-- A blocking error is encountered
-- Human input or decision is required
-- Codex is about to stop and wait
-
-### When NOT to use SAY:
-
-Do NOT use `SAY:` for:
-- Routine logging
-- Code listings
-- Internal reasoning
-- Step-by-step narration
-- Debug spam
-
-### Examples (GOOD):
-
-```
-
-SAY: Parser changes complete and all tests pass.
-SAY: Build failed due to a missing enum case.
-SAY: I need clarification on match expression semantics.
-SAY: Task finished. Ready for the next item in the queue.
-
-```
-
-### Examples (BAD):
-
-```
-
-SAY: I am now editing compiler/src/parser.c and adding a new function...
-SAY: Here is the diff:
-SAY: fn parse_expression(...)
-
-```
-
----
-
 ## Interaction rules
 
 - Assume the human may not be at the keyboard
@@ -259,8 +204,7 @@ Codex MUST NOT:
 - **Completion behavior**:
   When a task is complete:
   1. Ensure code builds/tests
-  2. Emit exactly one final `SAY:` summary
-  3. Stop and wait
+  2. Stop and wait
 
 ## Testing
 
@@ -269,13 +213,6 @@ To run the full test suite, use the following command from the `rae/compiler` di
 ```bash
 # Using perl if 'timeout' command is not available (common on macOS)
 perl -e 'alarm shift; exec @ARGV' 60 make test
-```
-
-Example:
-```
-
-SAY: Lexer refactor complete and all tests pass.
-
 ```
 
 ---
