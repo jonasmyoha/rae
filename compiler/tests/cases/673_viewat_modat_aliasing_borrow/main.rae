@@ -1,0 +1,17 @@
+import core
+
+# #658: `viewAt`/`modAt` return `opt view/mod T` — a pointer into the List's
+# backing storage captured once. A structural mutation of the SAME List while
+# the binding is live can realloc that storage (add -> grow -> realloc),
+# dangling the reference (a silent use-after-free). This must be a sema error,
+# like the collection-loop borrow check. `copyAt` (a detached value) and
+# mutating a DIFFERENT List stay legal.
+func main() {
+  var xs: List(Int) = createList(Int, cap: 1)
+  xs.add(value: 5)
+  if let p: mod Int => xs.modAt(index: 0) {
+    xs.add(value: 6)
+    p = 99
+  }
+  log("done")
+}
