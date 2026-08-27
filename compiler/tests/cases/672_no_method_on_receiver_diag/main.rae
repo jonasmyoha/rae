@@ -1,0 +1,11 @@
+import core
+
+# #657: a method that does not exist on the receiver must error at the .rae
+# call site, not misresolve to a same-named method on a DIFFERENT type (which
+# emitted a confusing downstream C error). `at` was removed from List (#643,
+# now copyAt/viewAt/modAt); calling it here used to bind `String.at`.
+func main() {
+  var xs: List(Int) = { 1, 2, 3 }
+  var v: Int = xs.at(index: 0)
+  log("{v}")
+}
