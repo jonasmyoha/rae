@@ -1638,6 +1638,45 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                         module->had_error = true;
                     }
                 }
+                // #658: aliasing borrow check for `viewAt`/`modAt` bindings.
+                // Both return `opt view/mod T` — a raw pointer into the List's
+                // backing storage, captured ONCE when the binding is
+                // established. A structural mutation of the SAME List inside the
+                // live then-branch can reallocate that storage (`add` past
+                // capacity -> grow -> realloc), leaving the reference dangling:
+                // a silent use-after-free. Reuse the collection-loop borrow
+                // check to reject the structural mutators on the aliased List in
+                // the then-branch. `copyAt` returns a detached value (no alias)
+                // and is exempt; a DIFFERENT List is unaffected.
+                const AstExpr* aliased = NULL;
+                if (bsrc && bsrc->kind == AST_EXPR_METHOD_CALL
+                    && (str_eq_cstr(bsrc->as.method_call.method_name, "viewAt")
+                        || str_eq_cstr(bsrc->as.method_call.method_name, "modAt"))) {
+                    aliased = bsrc->as.method_call.object;
+                } else if (bsrc && bsrc->kind == AST_EXPR_CALL && bsrc->as.call.callee
+                           && bsrc->as.call.callee->kind == AST_EXPR_IDENT
+                           && (str_eq_cstr(bsrc->as.call.callee->as.ident, "viewAt")
+                               || str_eq_cstr(bsrc->as.call.callee->as.ident, "modAt"))
+                           && bsrc->as.call.args) {
+                    // Plain-call form `viewAt(list, index:)`: the List is the
+                    // first positional argument.
+                    aliased = bsrc->as.call.args->value;
+                }
+                if (aliased) {
+                    for (const AstStmt* s = stmt->as.if_stmt.then_block
+                             ? stmt->as.if_stmt.then_block->first : NULL;
+                         s; s = s->next) {
+                        if (sema_stmt_mutates_collection(s, aliased)) {
+                            const AstExpr* err_expr = s->kind == AST_STMT_EXPR
+                                ? s->as.expr_stmt : NULL;
+                            int err_line = (int)(err_expr ? err_expr->line : s->line);
+                            int err_col = (int)(err_expr ? err_expr->column : s->column);
+                            diag_error(module->file_path, err_line, err_col,
+                                       "cannot mutate a List while a `viewAt`/`modAt` binding aliases one of its elements");
+                            module->had_error = true;
+                        }
+                    }
+                }
             }
             if (stmt->as.if_stmt.condition) sema_analyze_expr(ctx, module, symbols, stmt->as.if_stmt.condition);
             if (stmt->as.if_stmt.then_block) {
