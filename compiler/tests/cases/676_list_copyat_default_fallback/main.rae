@@ -1,0 +1,18 @@
+import core
+
+# #664: generic TOTAL (non-optional) List reads for the structure-of-arrays
+# pattern. copyAtFallback returns the caller's value out of range (#642: a
+# value the programmer wrote); copyAtDefault returns the type's zero value.
+func main() {
+  var xs: List(Int) = { 10, 20, 30 }
+  var fs: List(Float) = { 1.5, 2.5 }
+  var names: List(String) = { "a", "b" }
+
+  # copyAtDefault: in-bounds element, else the zero value (0, 0.0, "")
+  log("i_in={xs.copyAtDefault(index: 1)} i_oob={xs.copyAtDefault(index: 9)}")
+  log("s_in={names.copyAtDefault(index: 0)} s_oob=[{names.copyAtDefault(index: 9)}]")
+
+  # copyAtFallback: in-bounds element, else the caller's fallback
+  log("f_in={fs.copyAtFallback(index: 0, fallback: -9.0)} f_oob={fs.copyAtFallback(index: 9, fallback: -9.0)}")
+  log("s_fb={names.copyAtFallback(index: 9, fallback: "NONE")}")
+}
