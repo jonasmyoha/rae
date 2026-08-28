@@ -1170,6 +1170,12 @@ static void rae_g3d_present_offscreen(void) {
 #endif
         g_g2d_last_present_ok = 1;
         presented = 1;
+        rae_present_note_ok();
+    } else {
+        /* No usable drawable — the intermittent black-screen suspect. Nothing on
+         * this path reconfigures the surface, so a bad status can persist for the
+         * whole run while the sim keeps stepping. Log it (rate-limited). */
+        rae_present_note_skip("gpu3d", rae_present_status_name(st.status));
     }
     if (st.texture) wgpuTextureRelease(st.texture);
     /* Blocking poll on a presented frame retires the surface-present
