@@ -432,6 +432,19 @@ G3D_SHADOW_FN_WGSL
  * a scene with no SSAO and no baked occlusion has ao*ssao == 1.0, so this is
  * exactly identity and other deferred examples are untouched. */
 "const RAE_AO_CONTACT: f32 = 0.5;\n"
+/* CAST-SHADOW AMBIENT DARKENING (companion to RAE_AO_CONTACT). The sun
+ * shadow multiplies DIRECT only (§5), which is physically right — a
+ * shadowed surface still receives the sky. But under a bright midday sky
+ * seen from a top-down camera the ambient floor fills the shadow back in,
+ * so a cast shadow barely reads even where sunVisibility is near zero. This
+ * lets the cast shadow ALSO pull the INDIRECT term down, the same
+ * controlled inaccuracy the AO-contact knob applies to direct, so shadows
+ * become legible on flat bright ground. 0.0 restores the pure §5 behaviour.
+ * Self-gating: an app with no shadow pass has sunVisibility == 1.0
+ * everywhere, so mix(1.0, 1.0, k) == 1.0 and this is exactly identity. It
+ * also never touches LIT ground (sunVis == 1 there), so an albedo
+ * calibration measured on sunlit ground is unaffected. */
+"const RAE_SHADOW_AMBIENT: f32 = 0.85;\n"
 RAE_SKY_WGSL
 /* Quantise [0,1] into `bands` steps with a SOFTENED edge (#396). A bare
  * floor() aliases along the terminator, and that edge moves whenever the
@@ -659,7 +672,10 @@ RAE_SKY_WGSL
  * `ambient` already has ao*ssao; emit and rim stay clean (an emitter is not
  * occluded, and the rim is a silhouette cheat, not radiance). */
 "  let contactAO = mix(1.0, ao * ssao, RAE_AO_CONTACT);\n"
-"  var lit = direct * contactAO + ambient + emit + rim;\n"
+/* Pull the ambient down inside the cast shadow so it reads (see the
+ * RAE_SHADOW_AMBIENT note). Identity where sunVis == 1 (lit ground). */
+"  let castShadowAmb = mix(1.0, sunVis, RAE_SHADOW_AMBIENT);\n"
+"  var lit = direct * contactAO + ambient * castShadowAmb + emit + rim;\n"
 /* Occlusion still applies to the stylised result — a cel character with
  * no contact darkening floats. */
 "  if (isToon) { lit = toonShaded * mix(1.0, ao * ssao, 0.6); }\n"
