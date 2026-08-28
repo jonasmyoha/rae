@@ -212,6 +212,41 @@ static WGPUBuffer         gb_view_ubuf = NULL;
 "  return o;\n" \
 "}\n"
 
+/* PROCEDURAL FLAG EMBLEM (#131). No textures in this renderer, so a unit badge is
+ * computed from the mesh UV: a WHITE roundel near the TOP of the banner (with padding),
+ * carrying a white symbol per unit type — archer = bow + arrow, infantry = crossed
+ * swords, cavalry = horseshoe. The banner is ~4:1 tall so the u-radius is ~4x the
+ * v-radius to keep the roundel circular in world space. `codeF` (from params.w) selects
+ * the symbol. Returns the flag's base colour outside the badge, so it composites over
+ * the team-tinted cloth. Deforms WITH the fabric since it lives in UV. */
+#define GB_EMBLEM_WGSL \
+"fn gbEmblem(uv: vec2<f32>, base: vec3<f32>, codeF: f32) -> vec3<f32> {\n" \
+"  let vc = 0.17; let ru = 0.34; let rv = 0.085;\n" \
+"  let a = (uv.x - 0.5) / ru;\n" \
+"  let b = (uv.y - vc) / rv;\n" \
+"  let r = length(vec2<f32>(a, b));\n" \
+"  if (r > 1.18) { return base; }\n" \
+"  let white = vec3<f32>(0.95, 0.95, 0.92);\n" \
+"  if (abs(r - 0.92) < 0.13) { return white; }\n" \
+"  if (r >= 0.80) { return base; }\n" \
+"  var em = false;\n" \
+"  let code = i32(round(codeF));\n" \
+"  if (code >= 12) {\n" \
+"    em = (abs(r - 0.58) < 0.15) && !(b > 0.28 && abs(a) < 0.44);\n" \
+"  } else if (code == 11) {\n" \
+"    em = (abs(a - b) < 0.16 || abs(a + b) < 0.16) && r < 0.70;\n" \
+"  } else {\n" \
+"    let bd = length(vec2<f32>(a + 0.70, b * 0.9));\n" \
+"    let bow = (abs(bd - 0.55) < 0.12) && a < 0.05;\n" \
+"    let shaft = (abs(b) < 0.11) && a > -0.55 && a < 0.55;\n" \
+"    let hu = (abs(b - (0.55 - a)) < 0.13) && a > 0.12 && a < 0.55;\n" \
+"    let hd = (abs(b + (0.55 - a)) < 0.13) && a > 0.12 && a < 0.55;\n" \
+"    em = bow || shaft || hu || hd;\n" \
+"  }\n" \
+"  if (em) { return white; }\n" \
+"  return base;\n" \
+"}\n"
+
 /* Shading models, in the 2 bits rgb10a2's alpha provides. Values are the
  * quantisation points of those 2 bits so a round-trip through the texture
  * lands exactly where it started. */
@@ -286,9 +321,11 @@ GB_OCT_WGSL
 "  @location(2) clipNow: vec4<f32>,\n"
 "  @location(3) clipPrev: vec4<f32>,\n"
 "  @location(4) wpos: vec3<f32>,\n"   /* world position, for procedural brick (#62) */
+"  @location(5) uv: vec2<f32>,\n"     /* mesh UV, for the procedural flag emblem (#131) */
 "};\n"
 GB_BRICK_WGSL
 GB_ROOFTILE_WGSL
+GB_EMBLEM_WGSL
 "@vertex\n"
 "fn vs(@builtin(instance_index) ii: u32,\n"
 "      @location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec2<f32>) -> VsOut {\n"
@@ -302,6 +339,7 @@ GB_ROOFTILE_WGSL
  * arrives it must arrive in both pipelines at once or the two frames will
  * disagree about which way a surface faces. */
 "  o.nrm = normalize((d.model * vec4<f32>(n, 0.0)).xyz);\n"
+"  o.uv = uv;\n"
 "  o.inst = ii;\n"
 /* Motion (#390): where this vertex is now, and where the SAME vertex was
  * last frame — its previous model through the previous view-projection.
@@ -352,7 +390,9 @@ GB_ROOFTILE_WGSL
  * default) leaves the write byte-identical, so no other instanced draw changes. */
 "  var albedoOut = d.albedoMetallic.rgb;\n"
 "  var nrmOut = n;\n"
-"  if (d.params.w > 1.5) {\n"
+"  if (d.params.w > 9.5) {\n"
+"    albedoOut = gbEmblem(in.uv, albedoOut, d.params.w);\n" /* #131 flag unit emblem (>=10) */
+"  } else if (d.params.w > 1.5) {\n"
 "    let rt = gbRoofTiles(in.wpos, n, albedoOut);\n"    /* #63 roof shingles (flag 2) */
 "    albedoOut = rt.albedo;\n"
 "    nrmOut = rt.nrm;\n"
