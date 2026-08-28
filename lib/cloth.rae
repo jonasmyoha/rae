@@ -1,0 +1,324 @@
+# cloth.rae — a small Verlet mass-spring cloth solver (generic fabric dynamics).
+#
+# A rectangular grid of particles integrated with Verlet + a few passes of distance
+# constraint relaxation (Position-Based Dynamics). No physics engine and no per-frame
+# allocation in the hot path: the particle + constraint arrays live on the Cloth, and
+# writeMesh fills a caller-owned vertex buffer that pairs with updateMeshVerts.
+#
+# Coordinate model: the cloth hangs from an ANCHOR (a top crossbar centre) in WORLD
+# space. `right` is the crossbar's horizontal unit axis (the sheet's width runs along
+# it); the sheet drops in world -Z and billows along its normal under `wind`. The TOP
+# row is pinned to the crossbar each frame (pinRow); everything else swings free.
+#
+# Presentation-only — drive it from the render/per-frame path with wall-clock dt, off
+# any fixed-step sim, so it never perturbs a deterministic world. Reusable for banners,
+# sails, capes, etc.
+import core
+import math
+import vec3
+
+type Cloth {
+  cols: Int              # particles across (along `right`)
+  rows: Int              # particles down (world -Z)
+  restH: Float           # rest length between horizontally-adjacent particles
+  restV: Float           # rest length between vertically-adjacent particles
+  px: List(Float)        # particle world positions, flat row-major (row*cols + col)
+  py: List(Float)
+  pz: List(Float)
+  ox: List(Float)        # previous positions (Verlet)
+  oy: List(Float)
+  oz: List(Float)
+  pinned: List(Bool)     # a pinned particle is held at its set position (top row)
+  indices: List(Int)     # static double-sided index buffer over 2*cols*rows verts
+  gravity: Float         # world -Z acceleration
+  damping: Float         # velocity damping per step (0 = none)
+  iterations: Int        # constraint relaxation passes per step
+  anchorX: Float         # last frame's anchor, to detect a teleport (-> re-lay flat)
+  anchorY: Float
+  anchorZ: Float
+  seeded: Bool           # false until first laid out at a real anchor
+}
+
+func clothParticleCount(c: view Cloth) ret Int { ret c.cols * c.rows }
+# Vertices are DOUBLE-SIDED (front + back with opposite normals) so the sheet is lit
+# from either face — a flag is seen from both sides as it turns.
+func clothVertCount(c: view Cloth) ret Int { ret 2 * c.cols * c.rows }
+
+# Build the static double-sided index buffer: front faces over verts [0, N), back faces
+# over the duplicate block [N, 2N) with reversed winding.
+func clothBuildIndices(cols: copy Int, rows: copy Int) ret List(Int) {
+  let n: Int = cols * rows
+  var idx: List(Int) = createList(Int, cap: (cols - 1) * (rows - 1) * 12)
+  var r: Int = 0
+  loop r < rows - 1 {
+    var cc: Int = 0
+    loop cc < cols - 1 {
+      let a: Int = r * cols + cc
+      let b: Int = a + cols
+      # front (CCW seen from +normal)
+      idx.add(value: a)      idx.add(value: a + 1)  idx.add(value: b)
+      idx.add(value: b)      idx.add(value: a + 1)  idx.add(value: b + 1)
+      # back (reversed winding, +N block)
+      idx.add(value: a + n)      idx.add(value: b + n)      idx.add(value: a + 1 + n)
+      idx.add(value: b + n)      idx.add(value: b + 1 + n)  idx.add(value: a + 1 + n)
+      cc = cc + 1
+    }
+    r = r + 1
+  }
+  ret own idx
+}
+
+# A cols x rows cloth of the given world width/height. Particles start collapsed at the
+# origin; the first frame lays them flat at the real anchor (clothLayFlat via seeded).
+func createCloth(cols: copy Int, rows: copy Int, width: copy Float, height: copy Float,
+                 gravity: copy Float, damping: copy Float, iterations: copy Int) ret Cloth {
+  let n: Int = cols * rows
+  var px: List(Float) = createList(Float, cap: n)
+  var py: List(Float) = createList(Float, cap: n)
+  var pz: List(Float) = createList(Float, cap: n)
+  var ox: List(Float) = createList(Float, cap: n)
+  var oy: List(Float) = createList(Float, cap: n)
+  var oz: List(Float) = createList(Float, cap: n)
+  var pinned: List(Bool) = createList(Bool, cap: n)
+  var i: Int = 0
+  loop i < n {
+    px.add(value: 0.0)  py.add(value: 0.0)  pz.add(value: 0.0)
+    ox.add(value: 0.0)  oy.add(value: 0.0)  oz.add(value: 0.0)
+    pinned.add(value: (i / cols) is 0)   # top row (row 0) is pinned to the crossbar
+    i = i + 1
+  }
+  var rh: Float = 0.0
+  if cols > 1 { rh = width / (cols - 1).toFloat() }
+  var rv: Float = 0.0
+  if rows > 1 { rv = height / (rows - 1).toFloat() }
+  ret Cloth {
+    cols: cols, rows: rows, restH: rh, restV: rv,
+    px: own px, py: own py, pz: own pz, ox: own ox, oy: own oy, oz: own oz,
+    pinned: own pinned, indices: clothBuildIndices(cols: cols, rows: rows),
+    gravity: gravity, damping: damping, iterations: iterations,
+    anchorX: 0.0, anchorY: 0.0, anchorZ: 0.0, seeded: false
+  }
+}
+
+# World position of particle (col,row) for a FLAT sheet hanging from `anchor` along
+# `right` (crossbar axis, unit) — width centred on the anchor, dropping in -Z.
+func clothFlatPos(c: view Cloth, col: copy Int, row: copy Int,
+                  ax: copy Float, ay: copy Float, az: copy Float,
+                  rightX: copy Float, rightY: copy Float) ret Vec3 {
+  let lat: Float = (col.toFloat() - (c.cols.toFloat() - 1.0) * 0.5) * c.restH
+  let down: Float = row.toFloat() * c.restV
+  ret vec3.create(x: ax + rightX * lat, y: ay + rightY * lat, z: az - down)
+}
+
+# Lay the whole cloth flat at the anchor and ZERO its velocity (prev = pos). Used on the
+# first frame and whenever the anchor teleports (restart / a carried flag jumping to the King).
+func clothLayFlat(c: mod Cloth, ax: copy Float, ay: copy Float, az: copy Float,
+                  rightX: copy Float, rightY: copy Float) {
+  var r: Int = 0
+  loop r < c.rows {
+    var cc: Int = 0
+    loop cc < c.cols {
+      let i: Int = r * c.cols + cc
+      let p: Vec3 = clothFlatPos(c: c, col: cc, row: r, ax: ax, ay: ay, az: az, rightX: rightX, rightY: rightY)
+      c.px.set(index: i, value: p.x)  c.py.set(index: i, value: p.y)  c.pz.set(index: i, value: p.z)
+      c.ox.set(index: i, value: p.x)  c.oy.set(index: i, value: p.y)  c.oz.set(index: i, value: p.z)
+      cc = cc + 1
+    }
+    r = r + 1
+  }
+  c.anchorX = ax  c.anchorY = ay  c.anchorZ = az  c.seeded = true
+}
+
+# Pin the TOP row to the current crossbar line (called every frame so the sheet follows
+# a moving flag; the free rows lag + flutter behind it).
+func clothPinTop(c: mod Cloth, ax: copy Float, ay: copy Float, az: copy Float,
+                 rightX: copy Float, rightY: copy Float) {
+  var cc: Int = 0
+  loop cc < c.cols {
+    let p: Vec3 = clothFlatPos(c: c, col: cc, row: 0, ax: ax, ay: ay, az: az, rightX: rightX, rightY: rightY)
+    c.px.set(index: cc, value: p.x)  c.py.set(index: cc, value: p.y)  c.pz.set(index: cc, value: p.z)
+    cc = cc + 1
+  }
+}
+
+# Position the cloth for this frame: re-lay flat on a teleport, else just move the pins.
+func clothAnchor(c: mod Cloth, ax: copy Float, ay: copy Float, az: copy Float,
+                 rightX: copy Float, rightY: copy Float) {
+  let dx: Float = ax - c.anchorX
+  let dy: Float = ay - c.anchorY
+  let dz: Float = az - c.anchorZ
+  let jump2: Float = dx * dx + dy * dy + dz * dz
+  let reset: Float = (c.restV * c.rows.toFloat()) * (c.restV * c.rows.toFloat())
+  if (not c.seeded) or jump2 > reset {
+    clothLayFlat(c: c, ax: ax, ay: ay, az: az, rightX: rightX, rightY: rightY)
+  } else {
+    clothPinTop(c: c, ax: ax, ay: ay, az: az, rightX: rightX, rightY: rightY)
+    c.anchorX = ax  c.anchorY = ay  c.anchorZ = az
+  }
+}
+
+# Satisfy one distance constraint between particles i and j at rest length `rest`, moving
+# each free endpoint half the error (a pinned endpoint stays put and the other moves full).
+func clothConstrain(c: mod Cloth, i: copy Int, j: copy Int, rest: copy Float) {
+  let dx: Float = c.px.copyAtDefault(index: j) - c.px.copyAtDefault(index: i)
+  let dy: Float = c.py.copyAtDefault(index: j) - c.py.copyAtDefault(index: i)
+  let dz: Float = c.pz.copyAtDefault(index: j) - c.pz.copyAtDefault(index: i)
+  let d2: Float = dx * dx + dy * dy + dz * dz
+  if d2 <= 0.000001 { ret }
+  let d: Float = math.sqrt(x: d2)
+  let diff: Float = (d - rest) / d
+  let pi: Bool = c.pinned.copyAtDefault(index: i)
+  let pj: Bool = c.pinned.copyAtDefault(index: j)
+  var wi: Float = 0.5
+  var wj: Float = 0.5
+  if pi and pj { ret }
+  if pi { wi = 0.0  wj = 1.0 }
+  if pj { wi = 1.0  wj = 0.0 }
+  let mx: Float = dx * diff
+  let my: Float = dy * diff
+  let mz: Float = dz * diff
+  if wi > 0.0 {
+    c.px.set(index: i, value: c.px.copyAtDefault(index: i) + mx * wi)
+    c.py.set(index: i, value: c.py.copyAtDefault(index: i) + my * wi)
+    c.pz.set(index: i, value: c.pz.copyAtDefault(index: i) + mz * wi)
+  }
+  if wj > 0.0 {
+    c.px.set(index: j, value: c.px.copyAtDefault(index: j) - mx * wj)
+    c.py.set(index: j, value: c.py.copyAtDefault(index: j) - my * wj)
+    c.pz.set(index: j, value: c.pz.copyAtDefault(index: j) - mz * wj)
+  }
+}
+
+# Advance one step: Verlet integrate the free particles under gravity + `wind`, then relax
+# the structural + shear constraints. dt is clamped so a frame hitch can't explode it.
+func clothStep(c: mod Cloth, dt: copy Float, windX: copy Float, windY: copy Float, windZ: copy Float) {
+  var h: Float = dt
+  if h > 0.02 { h = 0.02 }
+  if h <= 0.0 { ret }
+  let h2: Float = h * h
+  let keep: Float = 1.0 - c.damping
+  let ax: Float = windX
+  let ay: Float = windY
+  let az: Float = windZ - c.gravity
+  let n: Int = c.cols * c.rows
+  var i: Int = 0
+  loop i < n {
+    if not c.pinned.copyAtDefault(index: i) {
+      let cx: Float = c.px.copyAtDefault(index: i)
+      let cy: Float = c.py.copyAtDefault(index: i)
+      let cz: Float = c.pz.copyAtDefault(index: i)
+      let nx: Float = cx + (cx - c.ox.copyAtDefault(index: i)) * keep + ax * h2
+      let ny: Float = cy + (cy - c.oy.copyAtDefault(index: i)) * keep + ay * h2
+      let nz: Float = cz + (cz - c.oz.copyAtDefault(index: i)) * keep + az * h2
+      c.ox.set(index: i, value: cx)  c.oy.set(index: i, value: cy)  c.oz.set(index: i, value: cz)
+      c.px.set(index: i, value: nx)  c.py.set(index: i, value: ny)  c.pz.set(index: i, value: nz)
+    }
+    i = i + 1
+  }
+  # Constraint relaxation.
+  var it: Int = 0
+  loop it < c.iterations {
+    var r: Int = 0
+    loop r < c.rows {
+      var cc: Int = 0
+      loop cc < c.cols {
+        let a: Int = r * c.cols + cc
+        # structural: right + down neighbour
+        if cc + 1 < c.cols { clothConstrain(c: c, i: a, j: a + 1, rest: c.restH) }
+        if r + 1 < c.rows { clothConstrain(c: c, i: a, j: a + c.cols, rest: c.restV) }
+        # shear: the two diagonals of the cell to its lower-right
+        if cc + 1 < c.cols and r + 1 < c.rows {
+          let diag: Float = math.sqrt(x: c.restH * c.restH + c.restV * c.restV)
+          clothConstrain(c: c, i: a, j: a + c.cols + 1, rest: diag)
+          clothConstrain(c: c, i: a + 1, j: a + c.cols, rest: diag)
+        }
+        cc = cc + 1
+      }
+      r = r + 1
+    }
+    it = it + 1
+  }
+}
+
+# Write the double-sided vertex buffer (8 floats/vertex: pos3, nrm3, uv2). `out` is cleared
+# and refilled — hand the SAME buffer every frame (it keeps capacity), pairing with
+# updateMeshVerts. Front block first (computed smooth normals), then the back block (negated).
+func clothWriteMesh(c: view Cloth, out: mod List(Float)) {
+  out.clear()
+  let cols: Int = c.cols
+  let rows: Int = c.rows
+  # front
+  var r: Int = 0
+  loop r < rows {
+    var cc: Int = 0
+    loop cc < cols {
+      let i: Int = r * cols + cc
+      # tangents from neighbours (one-sided at edges)
+      var ac: Int = cc + 1
+      if ac >= cols { ac = cc }
+      var bc: Int = cc - 1
+      if bc < 0 { bc = cc }
+      var ar: Int = r + 1
+      if ar >= rows { ar = r }
+      var br: Int = r - 1
+      if br < 0 { br = r }
+      let ia: Int = r * cols + ac
+      let ib: Int = r * cols + bc
+      let ja: Int = ar * cols + cc
+      let jb: Int = br * cols + cc
+      let ux: Float = c.px.copyAtDefault(index: ia) - c.px.copyAtDefault(index: ib)
+      let uy: Float = c.py.copyAtDefault(index: ia) - c.py.copyAtDefault(index: ib)
+      let uz: Float = c.pz.copyAtDefault(index: ia) - c.pz.copyAtDefault(index: ib)
+      let vx: Float = c.px.copyAtDefault(index: ja) - c.px.copyAtDefault(index: jb)
+      let vy: Float = c.py.copyAtDefault(index: ja) - c.py.copyAtDefault(index: jb)
+      let vz: Float = c.pz.copyAtDefault(index: ja) - c.pz.copyAtDefault(index: jb)
+      # normal = u x v, normalised (fallback +Y)
+      var nx: Float = uy * vz - uz * vy
+      var ny: Float = uz * vx - ux * vz
+      var nz: Float = ux * vy - uy * vx
+      let nl: Float = math.sqrt(x: nx * nx + ny * ny + nz * nz)
+      if nl > 0.00001 { nx = nx / nl  ny = ny / nl  nz = nz / nl } else { nx = 0.0  ny = 1.0  nz = 0.0 }
+      out.add(value: c.px.copyAtDefault(index: i))  out.add(value: c.py.copyAtDefault(index: i))  out.add(value: c.pz.copyAtDefault(index: i))
+      out.add(value: nx)  out.add(value: ny)  out.add(value: nz)
+      out.add(value: cc.toFloat() / (cols - 1).toFloat())  out.add(value: r.toFloat() / (rows - 1).toFloat())
+      cc = cc + 1
+    }
+    r = r + 1
+  }
+  # back: same positions, negated normals (reversed-winding faces reference this block)
+  r = 0
+  loop r < rows {
+    var cc: Int = 0
+    loop cc < cols {
+      let i: Int = r * cols + cc
+      var ac: Int = cc + 1
+      if ac >= cols { ac = cc }
+      var bc: Int = cc - 1
+      if bc < 0 { bc = cc }
+      var ar: Int = r + 1
+      if ar >= rows { ar = r }
+      var br: Int = r - 1
+      if br < 0 { br = r }
+      let ia: Int = r * cols + ac
+      let ib: Int = r * cols + bc
+      let ja: Int = ar * cols + cc
+      let jb: Int = br * cols + cc
+      let ux: Float = c.px.copyAtDefault(index: ia) - c.px.copyAtDefault(index: ib)
+      let uy: Float = c.py.copyAtDefault(index: ia) - c.py.copyAtDefault(index: ib)
+      let uz: Float = c.pz.copyAtDefault(index: ia) - c.pz.copyAtDefault(index: ib)
+      let vx: Float = c.px.copyAtDefault(index: ja) - c.px.copyAtDefault(index: jb)
+      let vy: Float = c.py.copyAtDefault(index: ja) - c.py.copyAtDefault(index: jb)
+      let vz: Float = c.pz.copyAtDefault(index: ja) - c.pz.copyAtDefault(index: jb)
+      var nx: Float = uy * vz - uz * vy
+      var ny: Float = uz * vx - ux * vz
+      var nz: Float = ux * vy - uy * vx
+      let nl: Float = math.sqrt(x: nx * nx + ny * ny + nz * nz)
+      if nl > 0.00001 { nx = nx / nl  ny = ny / nl  nz = nz / nl } else { nx = 0.0  ny = 1.0  nz = 0.0 }
+      out.add(value: c.px.copyAtDefault(index: i))  out.add(value: c.py.copyAtDefault(index: i))  out.add(value: c.pz.copyAtDefault(index: i))
+      out.add(value: 0.0 - nx)  out.add(value: 0.0 - ny)  out.add(value: 0.0 - nz)
+      out.add(value: cc.toFloat() / (cols - 1).toFloat())  out.add(value: r.toFloat() / (rows - 1).toFloat())
+      cc = cc + 1
+    }
+    r = r + 1
+  }
+}
