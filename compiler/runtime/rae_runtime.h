@@ -1018,6 +1018,7 @@ void rae_sm_record_metaballs(const float* packedBalls, int64_t count, float smoo
 void rae_sm_shutdown(void);
 int64_t rae_sm_ready(void);
 void rae_sm_upload_models(void);
+void rae_sm_set_shadow_ambient(double v);
 int64_t rae_sm_cascade_count(void);
 int64_t rae_sm_draw_count(void);
 void* rae_sm_layer_view(int64_t c);
