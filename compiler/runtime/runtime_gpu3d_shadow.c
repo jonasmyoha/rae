@@ -65,6 +65,19 @@ static float g3d_sm_split_far[G3D_SHADOW_MAX_CASCADES];
 static float g3d_sm_texel_world[G3D_SHADOW_MAX_CASCADES];
 static float g3d_sm_depth_range[G3D_SHADOW_MAX_CASCADES];
 static bool  g3d_sm_enabled = false;
+/* Per-app cast-shadow ambient darkening [0..1], published to the lighting pass as
+ * shadowCfg.z. The sun shadow multiplies DIRECT only (shadow-system-design §5),
+ * which is physically right but under a bright top-down scene the ambient floor
+ * fills a cast shadow back in so it barely reads. An app that wants legible
+ * shadows on flat bright ground opts in with rae_sm_set_shadow_ambient(k): the
+ * shader then also pulls the ambient down inside the shadow by mix(1,sunVis,k).
+ * Default 0 = pure §5, so every existing client (and any app that never calls
+ * the setter) is byte-identical. Not tied to a specific app — just a knob. */
+static float g3d_sm_shadow_ambient = 0.0f;
+void rae_sm_set_shadow_ambient(double v) {
+    if (v < 0.0) v = 0.0; if (v > 1.0) v = 1.0;
+    g3d_sm_shadow_ambient = (float)v;
+}
 
 static const char* G3D_SHADOW_WGSL =
 "struct SU { lightViewProj: mat4x4<f32> };\n"
@@ -533,6 +546,8 @@ void rae_sm_begin(const float* cascades, int64_t count,
         /* Resolution rides along so the shader can turn a UV radius into
          * texels without a second uniform. */
         u[77] = (float)resolution;
+        /* shadowCfg.z: per-app cast-shadow ambient darkening (0 = off, pure §5). */
+        u[78] = g3d_sm_shadow_ambient;
         wgpuQueueWriteBuffer(g_wgpu_queue, g3d_sm_frame_ubuf, 0, u, sizeof(u));
     }
     g3d_sm_enabled = true;
