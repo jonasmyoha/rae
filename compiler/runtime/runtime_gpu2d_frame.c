@@ -4,6 +4,60 @@
 rae_Bool g_rae_presented_any = 0;
 rae_Bool rae_frame_presented_any(void) { return g_rae_presented_any; }
 
+/* ---- present-skip diagnostics (intermittent black-screen investigation) ----
+ *
+ * Both present paths (2D endFrame and 3D present) copy the offscreen image into
+ * the surface drawable and present ONLY when wgpuSurfaceGetCurrentTexture returns
+ * SuccessOptimal/SuccessSuboptimal. Any other status (Timeout / Outdated / Lost /
+ * Error) is silently dropped, and NOTHING on the per-frame path reconfigures the
+ * surface — so a single non-success status (e.g. a startup race before the
+ * drawable size settles, or a display/Space change) can leave the window BLACK
+ * for the rest of the run while the sim keeps stepping. That reads exactly as the
+ * reported "battle running, black screen" and is shared by every windowed Rae app.
+ *
+ * This logs such a skip (rate-limited so a persistent failure is a handful of
+ * lines, not per-frame spam) so the condition is visible in the log instead of
+ * silent. Diagnostics only — no behaviour change, no reconfigure added here. */
+static const char* rae_present_status_name(int s) {
+    switch (s) {
+        case 0:                                                    return "none(0)";
+        case WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal:    return "SuccessOptimal";
+        case WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal: return "SuccessSuboptimal";
+        case WGPUSurfaceGetCurrentTextureStatus_Timeout:           return "Timeout";
+        case WGPUSurfaceGetCurrentTextureStatus_Outdated:          return "Outdated";
+        case WGPUSurfaceGetCurrentTextureStatus_Lost:              return "Lost";
+        case WGPUSurfaceGetCurrentTextureStatus_Error:             return "Error";
+        default: return "unknown";
+    }
+}
+/* A skip of 1-2 frames at startup is a normal transient (the drawable size
+ * settles a frame after the window appears) and self-heals, so stay quiet until
+ * a run of skips looks STUCK — that is the black-screen signature. */
+#define RAE_PRESENT_SKIP_ALARM 3
+static long g_rae_present_skip_streak = 0;
+/* Call when a frame WAS presented — reports recovery only if we had been stuck. */
+void rae_present_note_ok(void) {
+    if (g_rae_present_skip_streak >= RAE_PRESENT_SKIP_ALARM) {
+        fprintf(stderr, "[present] surface recovered after %ld skipped frame(s)\n",
+                g_rae_present_skip_streak);
+    }
+    g_rae_present_skip_streak = 0;
+}
+/* Call when a frame was NOT presented while a surface exists. `reason` is a
+ * status name or "window-not-visible". Silent for the first couple of frames
+ * (benign startup transient); once stuck, logs at streak 3..12 then every 120. */
+void rae_present_note_skip(const char* which, const char* reason) {
+    g_rae_present_skip_streak++;
+    long n = g_rae_present_skip_streak;
+    if (n < RAE_PRESENT_SKIP_ALARM) return;
+    if (n <= 12 || (n % 120) == 0) {
+        fprintf(stderr, "[present] %s: nothing presented for %ld frame(s) — surface status=%s. "
+                        "The window stays BLACK while the sim keeps running; nothing on this path "
+                        "reconfigures the surface, so it will not recover on its own.\n",
+                which, n, reason);
+    }
+}
+
 /* gpu2d frame begin/end, screenshot readback, flush, present, and shutdown. Raw GPU frame operations stay C; frame policy can migrate later.
  *
  * Split from rae_runtime.c by runtime migration task #288.
@@ -168,8 +222,15 @@ void rae_g2d_present_and_cleanup(void) {
 #endif
             g_g2d_last_present_ok = 1;
             presented = 1;
+            rae_present_note_ok();
+        } else {
+            /* Visible but the surface would not vend a usable drawable — the
+             * black-screen suspect. Nothing reconfigures, so this can persist. */
+            rae_present_note_skip("gpu2d", rae_present_status_name(st.status));
         }
         if (st.texture) wgpuTextureRelease(st.texture);
+    } else {
+        rae_present_note_skip("gpu2d", "window-not-visible");
     }
     /* wgpu-native retires deferred object destruction and presentation work
      * from device polling. A NON-blocking poll retires the per-frame instance
