@@ -258,6 +258,30 @@ func addInstanceTransformTile(batch: mod InstanceBatch, transform: view Transfor
   addInstanceTile(batch: batch, model: model, prevModel: prevModel, material: material)
 }
 
+# EMBLEM-tagged instance (#131): the non-skinned fragment shader paints a procedural unit
+# BADGE (a white roundel + symbol) from the mesh UV, over the instance's base colour. `code`
+# rides in params.w (the paletteBase slot, unused on the non-skinned path) and selects the
+# symbol (>=10 triggers the emblem; 10 archer, 11 infantry, 12 cavalry). Non-emblem draws
+# pass 0, so all other geometry is byte-identical.
+func addInstanceEmblem(batch: mod InstanceBatch, model: view Mat4, prevModel: view Mat4,
+                       material: view Material3d, code: copy Int) pub {
+  if batch.count >= batch.capacity { ret }
+  packInstanceRecord(records: batch.records, slot: batch.count,
+    model: model, prevModel: prevModel,
+    r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
+    metallic: material.metallic, roughness: material.roughness,
+    emissive: instanceEmissive(material: material), toon: toonFlag(material: material),
+    paletteBase: code)
+  batch.count = batch.count + 1
+}
+
+func addInstanceTransformEmblem(batch: mod InstanceBatch, transform: view Transform3d,
+                                prevTransform: view Transform3d, material: view Material3d, code: copy Int) pub {
+  let model: Mat4 = modelMatrixOf(t: transform)
+  let prevModel: Mat4 = modelMatrixOf(t: prevTransform)
+  addInstanceEmblem(batch: batch, model: model, prevModel: prevModel, material: material, code: code)
+}
+
 # Draw the whole batch in one instanced DrawIndexed. Must be called inside the
 # geometry pass (between gbuffer.begin and gbuffer.end), like any other draw.
 func drawInstances(batch: view InstanceBatch) pub {
