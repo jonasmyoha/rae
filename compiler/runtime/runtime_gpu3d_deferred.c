@@ -659,7 +659,13 @@ RAE_SKY_WGSL
  * `ambient` already has ao*ssao; emit and rim stay clean (an emitter is not
  * occluded, and the rim is a silhouette cheat, not radiance). */
 "  let contactAO = mix(1.0, ao * ssao, RAE_AO_CONTACT);\n"
-"  var lit = direct * contactAO + ambient + emit + rim;\n"
+/* Per-app cast-shadow ambient darkening (shadowCfg.z, opt-in, default 0). The sun
+ * shadow multiplies DIRECT only (§5); on a bright top-down scene the ambient floor
+ * fills the shadow back in, so an app can also pull the ambient down INSIDE the
+ * shadow to make it legible. Identity where sunVis == 1 (lit ground) and where the
+ * app leaves shadowCfg.z at 0 — so other clients are untouched. */
+"  let castShadowAmb = mix(1.0, sunVis, SH.shadowCfg.z);\n"
+"  var lit = direct * contactAO + ambient * castShadowAmb + emit + rim;\n"
 /* Occlusion still applies to the stylised result — a cel character with
  * no contact darkening floats. */
 "  if (isToon) { lit = toonShaded * mix(1.0, ao * ssao, 0.6); }\n"

@@ -30,6 +30,13 @@ import math
 import vec3
 open math3d
 
+# Per-app cast-shadow ambient darkening (0 = off / pure §5, 1 = full). Opt-in: a
+# bright top-down app whose cast shadows wash out against the ambient floor sets a
+# small value so the shadow ALSO dims the indirect term and reads. Default 0 leaves
+# every other client's lighting byte-identical. Published to the lighting pass as
+# shadowCfg.z; see runtime_gpu3d_shadow.c / the deferred shader.
+func setShadowAmbient(strength: Float) extern("rae_sm_set_shadow_ambient")
+
 # A fitted cascade set. `viewProj` is `count` matrices flattened, because
 # a List of Mat4 would copy 64 bytes per element access on every lookup.
 # `splitFar` holds each cascade's far distance in view space, which the
