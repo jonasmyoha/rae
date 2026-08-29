@@ -50,6 +50,9 @@ func gbMeshIcount(mesh: Int) extern("rae_gb_mesh_icount") ret Int
 # 6=indirect draw-args buffer.
 func grassSet(index: Int, ptr: Ptr) extern("rae_gb_grass_set")
 func grassGet(index: Int) extern("rae_gb_grass_get") ret Ptr
+# Release the old grass GPU handles (pipelines/buffers/bind-groups) before recreating
+# them, so recomposing the shader on an island grow doesn't leak (#leak). Null-safe.
+func grassRelease() extern("rae_gb_grass_release")
 
 # Blade count MUST be a perfect square: the compute grid is side x side, and the
 # shader derives side = sqrt(count). 256 x 256 = 65536 candidate blades; GPU
@@ -141,6 +144,10 @@ func makeGrassPipeline(shaderMod: copy Ptr) ret Ptr {
 func ensureGrassGpu() {
   if gGrassMade { ret }
   gGrassMade = true
+  # #leak: on a REBUILD (island grow reset gGrassMade), release the previous pipelines,
+  # buffers and bind groups before recreating them — this block overwrites all their slots,
+  # so without the release they'd leak. Null-safe, so the first build is a no-op.
+  grassRelease()
   let instBytes: Int = grassGpuBladeCount * grassRecordBytes
   let iDesc: WGPUBufferDescriptor = {
     usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst,
@@ -182,6 +189,7 @@ func ensureGrassGpu() {
   }
   let pipeline: Ptr = wgpuDeviceCreateComputePipeline(device: webgpuDevice(), descriptor: pipeDesc)
   grassSet(index: 0, ptr: pipeline)
+  wgpuShaderModuleRelease(shaderModule: shaderMod)   # #leak: the compute pipeline keeps its own ref
 
   let cLayout: Ptr = wgpuComputePipelineGetBindGroupLayout(computePipeline: pipeline, groupIndex: 0 as UInt32)
   var cEntries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 3)
