@@ -914,6 +914,21 @@ const char* rae_gb_grass_entry(void)       { return "main"; }
 static void* g_grass_ptrs[8];
 void  rae_gb_grass_set(int64_t index, void* ptr) { if (index >= 0 && index < 8) g_grass_ptrs[index] = ptr; }
 void* rae_gb_grass_get(int64_t index) { return (index >= 0 && index < 8) ? g_grass_ptrs[index] : (void*)0; }
+/* Release every grass GPU handle by its KNOWN slot type (the layout is grass-specific,
+ * so it lives here rather than in the generic setter) before the Rae side recreates
+ * them. Without this, an app that recomposes the grass compute shader at runtime (a
+ * resizing island bakes its radius into the shader) leaks two pipelines, four buffers
+ * and two bind groups per rebuild. Null-safe; NULLs the slots so a double call is fine. */
+void rae_gb_grass_release(void) {
+    if (g_grass_ptrs[0]) { wgpuComputePipelineRelease((WGPUComputePipeline)g_grass_ptrs[0]); g_grass_ptrs[0] = 0; } /* compute pipeline */
+    if (g_grass_ptrs[5]) { wgpuRenderPipelineRelease((WGPURenderPipeline)g_grass_ptrs[5]);   g_grass_ptrs[5] = 0; } /* render pipeline  */
+    if (g_grass_ptrs[3]) { wgpuBindGroupRelease((WGPUBindGroup)g_grass_ptrs[3]);             g_grass_ptrs[3] = 0; } /* compute bind     */
+    if (g_grass_ptrs[4]) { wgpuBindGroupRelease((WGPUBindGroup)g_grass_ptrs[4]);             g_grass_ptrs[4] = 0; } /* draw bind        */
+    if (g_grass_ptrs[1]) { wgpuBufferRelease((WGPUBuffer)g_grass_ptrs[1]);                   g_grass_ptrs[1] = 0; } /* instances buffer */
+    if (g_grass_ptrs[2]) { wgpuBufferRelease((WGPUBuffer)g_grass_ptrs[2]);                   g_grass_ptrs[2] = 0; } /* uniform buffer   */
+    if (g_grass_ptrs[6]) { wgpuBufferRelease((WGPUBuffer)g_grass_ptrs[6]);                   g_grass_ptrs[6] = 0; } /* indirect buffer  */
+    if (g_grass_ptrs[7]) { wgpuBufferRelease((WGPUBuffer)g_grass_ptrs[7]);                   g_grass_ptrs[7] = 0; } /* readback buffer  */
+}
 void rae_gb_set_pipeline(void* p)      { gb_pipeline = (WGPURenderPipeline)p; }
 void rae_gb_set_skin_pipeline(void* p) { gb_skin_pipeline = (WGPURenderPipeline)p; }
 
@@ -1153,9 +1168,19 @@ void* rae_gb_static_pipeline(void){ return (void*)gb_pipeline; }
  * biome field). Created + owned from Rae; stored here for the draw. */
 static void* gb_terrain_pipeline = NULL;
 static void* gb_terrain_bind = NULL;
-void  rae_gb_set_terrain_pipeline(void* p) { gb_terrain_pipeline = p; }
+/* RELEASE the previous handle before storing the new one. An app that RECOMPOSES the
+ * terrain shader at runtime (e.g. a resizing island bakes its radius into the shader as
+ * a const, so it rebuilds the pipeline + bind group on each change) would otherwise leak
+ * one render pipeline AND one bind group per rebuild — unbounded over a long session. */
+void  rae_gb_set_terrain_pipeline(void* p) {
+    if (gb_terrain_pipeline && gb_terrain_pipeline != p) wgpuRenderPipelineRelease((WGPURenderPipeline)gb_terrain_pipeline);
+    gb_terrain_pipeline = p;
+}
 void* rae_gb_terrain_pipeline(void)        { return gb_terrain_pipeline; }
-void  rae_gb_set_terrain_bind(void* b)     { gb_terrain_bind = b; }
+void  rae_gb_set_terrain_bind(void* b)     {
+    if (gb_terrain_bind && gb_terrain_bind != b) wgpuBindGroupRelease((WGPUBindGroup)gb_terrain_bind);
+    gb_terrain_bind = b;
+}
 void* rae_gb_terrain_bind(void)            { return gb_terrain_bind; }
 /* #9 textured terrain: the sampled tile's view + a repeat sampler + the global
  * blend amount. Handles are created + owned from Rae (the view is borrowed from
