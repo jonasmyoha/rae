@@ -1,0 +1,10 @@
+import core
+
+# #665: project subfolders form namespaces. `tick` is defined in both
+# enemies/ and particles/, so a BARE `tick()` would be ambiguous — qualify it
+# by folder (no import/open needed). A name unique to one folder (`spawnWave`)
+# is still callable bare, even across folders (the whole project is auto-open).
+func main() {
+  log("enemies={enemies.tick()} particles={particles.tick()}")
+  log("unique bare={spawnWave()}")
+}

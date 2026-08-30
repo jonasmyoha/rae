@@ -109,6 +109,12 @@ typedef struct {
   ModuleNode* head;
   ModuleNode* tail;
   char* root_path;
+  // True when root_path came from an EXPLICIT `--project` (so it is the real
+  // project source root and safe to scan wholesale). False when root_path was
+  // discovered by ascending to a `lib/core.rae` marker, which may sit far above
+  // the project — in that case the implicit scan uses the entry file's own
+  // directory instead. (docs/module-namespacing.md)
+  bool explicit_root;
   Arena* arena;
 } ModuleGraph;
 
@@ -1371,9 +1377,16 @@ static char* derive_module_path(const char* root, const char* file_path) {
 }
 
 
+// Set by the CLI dispatch when the project root came from an explicit
+// `--project` (as opposed to an ascended lib/core.rae marker). Process-wide:
+// one invocation is either --project'd or not. Read into graph->explicit_root
+// so the implicit scan knows whether root_path is safe to scan wholesale.
+static bool s_explicit_project_root = false;
+
 static bool module_graph_init(ModuleGraph* graph, Arena* arena, const char* project_root) {
   memset(graph, 0, sizeof(*graph));
   graph->arena = arena;
+  graph->explicit_root = s_explicit_project_root;
   char* resolved = NULL;
   bool root_from_cwd = (project_root == NULL || project_root[0] == '\0');
   if (!root_from_cwd) {
@@ -1934,9 +1947,18 @@ static bool module_graph_build(ModuleGraph* graph, const char* entry_file, uint6
   }
 
   ModuleNode* entry_node = module_graph_find(graph, module_path);
-  // Implicitly import all .rae files in the project directory
+  // Implicitly import the project's .rae files (recursively). Scan from the
+  // PROJECT ROOT when it was set EXPLICITLY (`--project`), so an entry deep in
+  // the tree (game/ui/hud.rae) still sees every project file (game/**). Without
+  // an explicit --project, `root_path` is a lib-marker root discovered by
+  // ascending to a `lib/core.rae` (often a repo root far above the project), so
+  // scanning it would pull in unrelated files — fall back to the entry file's
+  // own directory, exactly as before. (docs/module-namespacing.md)
   if (entry_node && !no_implicit) {
-    if (!auto_import_directory(graph, entry_node->file_path, hash_out, no_implicit)) {
+    bool scanned = (graph->explicit_root && graph->root_path)
+      ? scan_directory_for_modules(graph, graph->root_path, entry_node->file_path, hash_out, no_implicit)
+      : auto_import_directory(graph, entry_node->file_path, hash_out, no_implicit);
+    if (!scanned) {
       free(module_path);
       free(resolved_entry);
       return false;
@@ -3748,9 +3770,10 @@ static int run_command(const char* cmd, int argc, char** argv) {
                         return 1;
                       }
                       
+                      s_explicit_project_root = (run_opts.project_path != NULL);
                       const char* final_root = run_opts.project_path ? run_opts.project_path : project_root;
                       if (!final_root) final_root = ".";
-          
+
                       RunOptions adjusted_opts = run_opts;
                       if (run_opts.target == BUILD_TARGET_COMPILED) {
                         return run_compiled_file(&adjusted_opts, final_root);
@@ -3763,6 +3786,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
                         print_usage(cmd);
                         return 1;
                       }
+                      s_explicit_project_root = (run_opts.project_path != NULL);
                       const char* final_root = run_opts.project_path ? run_opts.project_path : project_root;
                       if (!final_root) final_root = ".";
                       return run_watch_supervisor(&run_opts, final_root);
@@ -3783,6 +3807,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
       return 1;
     }
     
+    s_explicit_project_root = (build_opts.project_path != NULL);
     const char* final_root = build_opts.project_path ? build_opts.project_path : project_root;
     if (final_root && !directory_exists(final_root)) {
       fprintf(stderr, "error: project path '%s' not found or not a directory\n", final_root);
