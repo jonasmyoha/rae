@@ -1857,6 +1857,17 @@ static bool scan_directory_for_modules(ModuleGraph* graph,
       continue;
     }
     if (S_ISDIR(st.st_mode)) {
+      // #665: never auto-scan a `lib/` directory. `lib` is the external/stdlib
+      // PACKAGE space (sema keys visibility on `/lib/` anywhere in the path),
+      // reached only through `import`/prelude, which resolve + de-duplicate each
+      // module once. A downstream project that symlinks this repo's `lib/` under
+      // its own `--project` root would otherwise have the project scan (a) compile
+      // un-imported sibling packages (e.g. ui/legacy_raylib) and (b) re-include a
+      // module already loaded by import under a second module path -> `redefinition`
+      // C errors. Skipping `lib` keeps the scan to the project's OWN source.
+      if (strcmp(entry->d_name, "lib") == 0) {
+        continue;
+      }
       if (!scan_directory_for_modules(graph, child_path, skip_file, hash_out, no_implicit)) {
         closedir(dir);
         return false;
