@@ -36,6 +36,56 @@ const restart: Int = keys.keyR   # also valid in a const initializer (folds to t
 core's `keys()` on a map) does not shadow it, since `keys.keyW` cannot be a call.
 A genuine value binding of the same name in scope does win.
 
+## Project folders (one auto-visible tree; folders are namespaces, not boundaries)
+
+A Rae **project is one automatically visible module tree**. Every `.rae` file
+under the project root is compiled and mutually visible to every other project
+file, with **no `import`/`open`** — across any subfolder depth. Moving a file
+into a subfolder never creates an import boundary or changes its visibility.
+`import`/`open` are for **`lib/` / external** packages only. The prelude
+(`core`, `string`, `math`, `io`, `sys`, `list2`, `list2_int`) stays
+auto-loaded and bare-callable, unchanged.
+
+**Project root.** The tree is scanned from the project root. `--project <dir>`
+sets that root explicitly, so an entry deep in the tree still sees the whole
+project:
+
+```text
+rae run --project game game/ui/hud.rae   # hud.rae sees every file under game/
+```
+
+Without `--project`, the scan roots at the entry file's own directory. (The
+separate lib-marker root — the nearest ancestor containing `lib/core.rae`, used
+to resolve `lib/` imports — is *not* the scan root, so it never drags unrelated
+files in.)
+
+**Folders are namespaces, only for disambiguation.** Each project file belongs
+to the namespace of the folder that directly contains it. This is **not** a
+visibility boundary — the whole project stays auto-open — it only gives a name
+to qualify with. So two folders may define the same function:
+
+```text
+game/
+  enemies/tick.rae     # func tick() { ... }
+  particles/tick.rae   # func tick() { ... }
+```
+
+- A name that is **unique** across the project is called bare, even from a
+  subfolder: `spawnWave()`.
+- A name defined in **two** folders is a **compile error** when called bare —
+  `'tick' is defined in multiple project folders (enemies, particles); qualify
+  the call with the folder name` — instead of a silent "one wins".
+- Qualify by folder to disambiguate, with **no `import`/`open`**:
+
+```rae
+enemies.tick()
+particles.tick()
+```
+
+The folder qualifier is ordinary namespace qualification (same machinery as
+`filesystem.exists(...)`); it just resolves against a project folder name rather
+than a `lib/` package.
+
 ## Module directives: `import` and `open`
 
 ### `import module`

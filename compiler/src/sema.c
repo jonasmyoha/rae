@@ -88,6 +88,31 @@ static bool sema_same_package(const char* a, const char* b) {
     return strcmp(pa, pb) == 0;
 }
 
+// A project decl's FOLDER NAMESPACE: the name of the directory that directly
+// contains its source file — `.../game/enemies/tick.rae` -> "enemies",
+// `.../game/ui/hud.rae` -> "ui". Derived from the file path (not the root-
+// relative module name), so it is correct no matter where the lib-marker
+// project root sits. This is a DISAMBIGUATION name only; it is NOT a visibility
+// boundary — every project file stays mutually visible (auto-open, see
+// sema_decl_opened). Lib decls have no project namespace (they use
+// import/open), so this returns "" for them. (docs/module-namespacing.md)
+static void sema_project_namespace(const AstDecl* d, char* out, size_t cap) {
+    if (cap) out[0] = '\0';
+    if (!d || !d->origin_file || !cap) return;
+    char pkg[256]; sema_package_token(d->origin_file, pkg, sizeof pkg);
+    if (pkg[0] != '\0') return;  // a lib decl — not a project folder namespace
+    const char* path = d->origin_file;
+    const char* last = strrchr(path, '/');       // slash before the filename
+    if (!last || last == path) return;           // no containing directory
+    const char* start = last - 1;                // scan back to the parent dir name
+    while (start > path && *(start - 1) != '/') start--;
+    size_t n = (size_t)(last - start);
+    if (n == 0) return;
+    if (n >= cap) n = cap - 1;
+    memcpy(out, start, n);
+    out[n] = '\0';
+}
+
 // First component of an import-directive path (the package it refers to), with
 // any .rae stripped: "ui/ecs" -> "ui", "raylib" -> "raylib", "sys/spotify" -> "sys".
 static void sema_import_package(Str path, char* out, size_t cap) {
@@ -695,6 +720,56 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
     size_t arg_count = 0;
     for (AstCallArg* a = args; a; a = a->next) arg_count++;
 
+    // Project folder-namespace ambiguity. Every project file is auto-open (one
+    // visible tree), so a bare name that is defined in TWO different project
+    // folders would otherwise resolve silently to whichever the symbol table
+    // lists first. Reject it and tell the programmer to qualify the call with
+    // the folder name (e.g. `enemies.tick()`). A name unique across the project
+    // resolves normally, even from a subfolder. (docs/module-namespacing.md)
+    {
+        char spaces[8][256]; size_t space_count = 0;
+        for (Symbol* curr = symbols->head; curr; curr = curr->next) {
+            if (!str_eq(curr->name, name)) continue;
+            if (!curr->decl || curr->decl->kind != AST_DECL_FUNC) continue;
+            if (curr->decl->as.func_decl.specialization_args) continue;
+            if (!sema_decl_opened(s_current_decl_origin, curr->decl)) continue;
+            size_t pc = 0;
+            for (AstParam* p = curr->decl->as.func_decl.params; p; p = p->next) pc++;
+            if (pc != arg_count) continue;
+            if (!curr->decl->origin_file) continue;  // synthesized/prelude — not a project folder
+            char pkg[256]; sema_package_token(curr->decl->origin_file, pkg, sizeof pkg);
+            if (pkg[0] != '\0') continue;            // a lib decl — governed by import/open, not this rule
+            char ns[256]; sema_project_namespace(curr->decl, ns, sizeof ns);
+            bool seen = false;
+            for (size_t i = 0; i < space_count; i++) if (strcmp(spaces[i], ns) == 0) { seen = true; break; }
+            if (!seen && space_count < 8) { snprintf(spaces[space_count], 256, "%s", ns); space_count++; }
+        }
+        if (space_count >= 2) {
+            char list[400]; size_t pos = 0;
+            for (size_t i = 0; i < space_count; i++) {
+                const char* label = spaces[i][0] ? spaces[i] : "the project root";
+                int written = snprintf(list + pos, pos < sizeof list ? sizeof list - pos : 0,
+                                       "%s%s", i ? ", " : "", label);
+                if (written > 0) pos += (size_t)written;
+            }
+            const char* qual = NULL;
+            for (size_t i = 0; i < space_count; i++) if (spaces[i][0]) { qual = spaces[i]; break; }
+            char buf[600];
+            if (qual)
+                snprintf(buf, sizeof buf,
+                    "'%.*s' is defined in multiple project folders (%s); qualify the call with the folder name — e.g. `%s.%.*s(...)`",
+                    (int)name.len, name.data, list, qual, (int)name.len, name.data);
+            else
+                snprintf(buf, sizeof buf,
+                    "'%.*s' is defined in multiple project folders (%s); qualify the call with the folder name",
+                    (int)name.len, name.data, list);
+            diag_error(s_current_decl_origin ? s_current_decl_origin : module->file_path,
+                       (int)line, (int)column, buf);
+            if (module) module->had_error = true;
+            return NULL;
+        }
+    }
+
     Symbol* best_sym = NULL;
     AstTypeRef* best_inferred = NULL;
     const AstDecl* ineligible = NULL;  // name matched but its package isn't open here
@@ -873,7 +948,16 @@ static AstDecl* resolve_qualified_function(CompilerContext* ctx, AstModule* modu
     AstDecl* arity_match = NULL;
     for (AstDecl* d = module->decls; d; d = d->next) {
         if (d->kind != AST_DECL_FUNC) continue;
-        if (!d->module_name || !str_eq_cstr(qualifier, d->module_name)) continue;
+        // Match either the full module path (`ui/ecs` — the lib/qualified form)
+        // or a project folder namespace (`enemies` for `enemies/tick`). The
+        // latter lets project code qualify a colliding name by its folder
+        // without any `import`/`open`. (docs/module-namespacing.md)
+        bool qual_match = d->module_name && str_eq_cstr(qualifier, d->module_name);
+        if (!qual_match) {
+            char ns[256]; sema_project_namespace(d, ns, sizeof ns);
+            qual_match = ns[0] != '\0' && str_eq_cstr(qualifier, ns);
+        }
+        if (!qual_match) continue;
         if (!str_eq(d->as.func_decl.name, name)) continue;
         if (d->as.func_decl.specialization_args) continue;
         if (!sema_decl_visible(s_current_decl_origin, d)) continue;  // module must be imported/opened/same-pkg here
@@ -2160,6 +2244,10 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
 static bool sema_is_module_name(AstModule* module, Str name) {
     for (AstDecl* d = module->decls; d; d = d->next) {
         if (d->module_name && str_eq_cstr(name, d->module_name)) return true;
+        // A project folder name (`enemies`) also qualifies, so `enemies.tick()`
+        // resolves with no import/open. (docs/module-namespacing.md)
+        char ns[256]; sema_project_namespace(d, ns, sizeof ns);
+        if (ns[0] != '\0' && str_eq_cstr(name, ns)) return true;
     }
     for (const AstImport* imp = module->imports; imp; imp = imp->next) {
         if (!imp->module) continue;
