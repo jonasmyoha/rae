@@ -1,0 +1,11 @@
+import core
+
+# #665: the project source scan must NOT descend into a `lib/` directory (lib is
+# the package/dependency space, reached only via import/prelude). A downstream
+# app that symlinks this repo's lib under its --project root otherwise compiles
+# un-imported sibling packages and double-includes modules. Here `lib/poison.rae`
+# is syntactically broken: if the scan descended into lib/ the build would fail.
+# Meanwhile the ordinary project subfolder `weapons/` stays auto-visible.
+func main() {
+  log("weapon={swordName()}")
+}
