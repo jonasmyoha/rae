@@ -1,28 +1,8 @@
 # ECS storage layer. `componentIndexOf` is an O(1) sparse-set lookup.
 import core
+open ecs/entity
 # Only raylib-free MSDF data types; paint code stays out of UiWorld.
 import ui/msdf_state
-
-# Value-type entity id wrapper; compare with `eq`, not struct `is`.
-type EntityId {
-  value: Int
-}
-
-func noEntity() pub ret EntityId {
-  ret EntityId { value: 0 - 1 }
-}
-
-func entityId(v: view Int) pub ret EntityId {
-  ret EntityId { value: v }
-}
-
-func eq(this: view EntityId, other: view EntityId) pub ret Bool {
-  ret this.value is other.value
-}
-
-func isNone(this: view EntityId) pub ret Bool {
-  ret this.value < 0
-}
 
 # Non-generic helpers avoid inner List specialisation drift inside
 # ComponentTable(T)'s generic functions.
