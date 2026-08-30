@@ -1,0 +1,27 @@
+# lib/ecs — the general ECS core (docs/ecs-general-architecture.md).
+#
+# EntityId: the value-type handle for an entity. Compare with `eq`, not struct
+# `is`. Today it is a bare counter; #703 gives it a generation for stale-handle
+# safety. Extracted from lib/ui/ecs.rae (#700) with no behaviour change so the
+# UI, the 3D examples, and every application share one ECS.
+import core
+
+type EntityId {
+  value: Int
+}
+
+func noEntity() ret EntityId {
+  ret EntityId { value: 0 - 1 }
+}
+
+func entityId(v: view Int) ret EntityId {
+  ret EntityId { value: v }
+}
+
+func eq(this: view EntityId, other: view EntityId) ret Bool {
+  ret this.value is other.value
+}
+
+func isNone(this: view EntityId) ret Bool {
+  ret this.value < 0
+}
