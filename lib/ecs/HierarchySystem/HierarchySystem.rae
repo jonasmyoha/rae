@@ -96,3 +96,68 @@ func rebuildFromParent(parents: view ComponentTable(Parent), childrens: mod Comp
     addChildTo(childrens: childrens, parent: link.parent, child: child)
   }
 }
+
+# ----- depth-sorted iteration order (#713) -----------------------------------
+#
+# A cached topological order of the hierarchy — every parent BEFORE its children
+# — so systems iterate a flat List once (transform propagation, visibility,
+# painter's order) instead of pointer-chasing the tree each frame. The cache is
+# dirty-tracked by the Parent table's `generation`: setParent (the only edge
+# mutator) bumps it, so `depthOrder` rebuilds only when the shape actually
+# changed and otherwise returns the cached list untouched.
+
+type HierarchyOrder {
+  order: List(EntityId)
+  # The Parent table generation the cached order was built at; -1 = never built,
+  # so the first depthOrder call always builds.
+  builtGeneration: Int
+}
+
+func createHierarchyOrder() ret HierarchyOrder {
+  ret HierarchyOrder { order: createList(EntityId, cap: 16), builtGeneration: 0 - 1 }
+}
+
+# Append `node` then recurse into its Children, depth-first — pre-order, so a
+# parent always lands before its descendants. Reads the Children cache only (no
+# mutation), and is only ever entered from a ROOT, so a (malformed) parent cycle
+# can never be walked into an infinite loop.
+func emitSubtree(state: mod HierarchyOrder, childrens: view ComponentTable(Children), node: view EntityId) {
+  state.order.add(value: node)
+  if componentHas(this: childrens, entity: node) {
+    let cache: view Children => componentView(this: childrens, entity: node)
+    loop var i: Int = 0, i < cache.ids.length, ++i {
+      if let childEntity: EntityId = cache.ids.copyAt(index: i) {
+        emitSubtree(state: state, childrens: childrens, node: childEntity)
+      }
+    }
+  }
+}
+
+# Rebuild the depth order from scratch: find every ROOT (an entity that HAS
+# children but no Parent of its own) and pre-order DFS each subtree. Roots are
+# taken in the Children table's dense order and each node's children in their
+# authoritative order, so the result is deterministic. Entities in no hierarchy
+# (no Parent and no Children) are correctly absent.
+func rebuildDepthOrder(state: mod HierarchyOrder, parents: view ComponentTable(Parent),
+                       childrens: view ComponentTable(Children)) {
+  state.order.clear()
+  loop var i: Int = 0, i < componentCount(this: childrens), ++i {
+    let candidate: EntityId = componentEntityAt(this: childrens, i: i)
+    if componentHas(this: parents, entity: candidate) is false {
+      emitSubtree(state: state, childrens: childrens, node: candidate)
+    }
+  }
+}
+
+# The cached parent-before-child order. Rebuilds only when the Parent table's
+# generation moved since the last build (dirty tracking); otherwise hands back
+# the cached list. Returned as a `view` so a system iterates it with no copy.
+func depthOrder(state: mod HierarchyOrder, parents: view ComponentTable(Parent),
+                childrens: view ComponentTable(Children)) ret view List(EntityId) {
+  let gen: Int = componentTableGeneration(this: parents)
+  if state.builtGeneration is not gen {
+    rebuildDepthOrder(state: state, parents: parents, childrens: childrens)
+    state.builtGeneration = gen
+  }
+  ret view state.order
+}
