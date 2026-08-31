@@ -124,3 +124,63 @@ func query3(A: type, B: type, C: type,
   }
   ret matches
 }
+
+# ----- single-table dense forEach (#709) -------------------------------------
+
+# One (entity, dense-index) pair for a SINGLE table. Same shape the join matches
+# use, so a single-table walk reads through the same view/mod accessors.
+type QueryMatch {
+  entity: EntityId
+  index: Int
+}
+
+# Walk EVERY entity in one table, in dense order — no join, no probe. This is the
+# single-table base case of a query: for a system that touches one component
+# kind (e.g. advance every AnimState), forEach hands back the whole dense set so
+# the body reads/writes each via queryViewAt / queryModAt by `index`. The dense
+# index equals the loop position, so it addresses `table` directly with no
+# lookup.
+func forEach(T: type, table: view ComponentTable(T)) ret List(QueryMatch) {
+  let count: Int = componentCount(this: table)
+  let matches: List(QueryMatch) = createList(QueryMatch, cap: 16)
+  loop var i: Int = 0, i < count, ++i {
+    matches.add(value: QueryMatch { entity: componentEntityAt(this: table, i: i), index: i })
+  }
+  ret matches
+}
+
+# ----- read-only view query variants (#709) ----------------------------------
+#
+# The mod accessor (queryModAt) EAGERLY bumps the table generation + entity stamp
+# because it can't see whether the caller writes — correct for a mutating system,
+# but a READ-ONLY system that used it would dirty change-detection every frame
+# and defeat the `*IfDirty` skip. These variants read a matched component through
+# a `view` ref and never touch the generation, so a read-only pass leaves every
+# queried table's generation exactly as it found it. One per query slot, so a
+# system reads `query2ViewA(tableA, hit)` without threading which index field
+# maps to which table.
+
+func query2ViewA(A: type, tableA: view ComponentTable(A), hit: view Query2Match) ret view A {
+  ret view rae_ext_rae_buf_get(buf: tableA.denseData.data, index: hit.indexA)
+}
+
+func query2ViewB(B: type, tableB: view ComponentTable(B), hit: view Query2Match) ret view B {
+  ret view rae_ext_rae_buf_get(buf: tableB.denseData.data, index: hit.indexB)
+}
+
+func query3ViewA(A: type, tableA: view ComponentTable(A), hit: view Query3Match) ret view A {
+  ret view rae_ext_rae_buf_get(buf: tableA.denseData.data, index: hit.indexA)
+}
+
+func query3ViewB(B: type, tableB: view ComponentTable(B), hit: view Query3Match) ret view B {
+  ret view rae_ext_rae_buf_get(buf: tableB.denseData.data, index: hit.indexB)
+}
+
+func query3ViewC(C: type, tableC: view ComponentTable(C), hit: view Query3Match) ret view C {
+  ret view rae_ext_rae_buf_get(buf: tableC.denseData.data, index: hit.indexC)
+}
+
+# Read the component for a single-table forEach match through a `view` ref.
+func forEachView(T: type, table: view ComponentTable(T), hit: view QueryMatch) ret view T {
+  ret view rae_ext_rae_buf_get(buf: table.denseData.data, index: hit.index)
+}
