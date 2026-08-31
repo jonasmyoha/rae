@@ -325,8 +325,12 @@ const server = Bun.serve<SocketData>({
           headers: { "Content-Type": "application/json" }
         });
       }
-      const content = await f.text();
-      const done = /\bResults:\s+\d+ passed/.test(content);
+      const raw = await f.text();
+      // RUN_END means the run has finished even if it crashed before printing
+      // a "Results:" summary. Strip the run-boundary sentinels from the tail
+      // the user sees — they are a wire detail, not test output.
+      const done = /^@@RAE_RUN_END\b/m.test(raw) || /\bResults:\s+\d+ passed/.test(raw);
+      const content = raw.replace(/^@@RAE_RUN_(START|END)\b[^\n]*@@\n?/gm, "");
       return new Response(JSON.stringify({ size: content.length, content, path: logPath, exists: true, done }), {
         headers: { "Content-Type": "application/json" }
       });
