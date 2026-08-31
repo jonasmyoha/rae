@@ -641,7 +641,13 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             Str type_name = {0};
             if (expr->as.method_call.object->kind == AST_EXPR_IDENT) type_name = expr->as.method_call.object->as.ident;
             if (type_name.len > 0) {
-                fprintf(out, "rae_fromJson_rae_%.*s_(", (int)type_name.len, type_name.data);
+                // Substitute the type name through the enclosing generic context
+                // (like toJson above), so `T.fromJson` inside a function generic
+                // over T mangles to the concrete instantiation instead of the
+                // literal `rae_T`. A non-generic `Pos.fromJson` is unchanged.
+                AstTypeRef tmp = {0}; AstIdentifierPart part = {0}; part.text = type_name; tmp.parts = &part;
+                const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &tmp);
+                fprintf(out, "rae_fromJson_%s_(", mangled);
                 if (expr->as.method_call.args) emit_expr(ctx, expr->as.method_call.args->value, out, PREC_LOWEST, false, false);
                 fprintf(out, ")");
                 break;
