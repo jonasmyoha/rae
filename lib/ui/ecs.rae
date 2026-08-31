@@ -112,7 +112,8 @@ type UiWorld {
   # ----- derived / runtime-only -----
   measuredSizes: ComponentTable(MeasuredSize)
   computedRects: ComponentTable(ComputedRect)
-  worldTransforms: ComponentTable(WorldTransform)
+  worldTransforms: ComponentTable(WorldTransform2D)
+  worldVisuals: ComponentTable(WorldVisual)
   runtimeOffsets: ComponentTable(RuntimeOffset)
   layoutScales: ComponentTable(LayoutScale)
   safeInsets: ComponentTable(SafeInsets)
@@ -220,7 +221,8 @@ func createUiWorld() ret UiWorld {
 
     measuredSizes: createComponentTable(MeasuredSize)
     computedRects: createComponentTable(ComputedRect)
-    worldTransforms: createComponentTable(WorldTransform)
+    worldTransforms: createComponentTable(WorldTransform2D)
+    worldVisuals: createComponentTable(WorldVisual)
     runtimeOffsets: createComponentTable(RuntimeOffset)
     layoutScales: createComponentTable(LayoutScale)
     safeInsets: createComponentTable(SafeInsets)
@@ -497,6 +499,7 @@ func destroyEntity(world: mod UiWorld, entity: view EntityId) pub {
   componentRemove(this: world.measuredSizes, entity: entity)
   componentRemove(this: world.computedRects, entity: entity)
   componentRemove(this: world.worldTransforms, entity: entity)
+  componentRemove(this: world.worldVisuals, entity: entity)
   componentRemove(this: world.runtimeOffsets, entity: entity)
   componentRemove(this: world.layoutScales, entity: entity)
   componentRemove(this: world.safeInsets, entity: entity)

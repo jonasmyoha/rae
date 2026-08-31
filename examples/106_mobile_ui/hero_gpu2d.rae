@@ -98,10 +98,10 @@ func captureHeroSourceFromEntity(anim: mod HeroAnim, world: view UiWorld, e: vie
   if isNone(this: e) { ret false }
   if componentHas(this: world.worldTransforms, entity: e) is false { ret false }
   if componentHas(this: world.computedRects, entity: e) is false { ret false }
-  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
+  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: e)
   let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
-  anim.srcX = wt.x
-  anim.srcY = wt.y
+  anim.srcX = wt.position.x
+  anim.srcY = wt.position.y
   anim.srcW = cr.size.x
   anim.srcH = cr.size.y
   anim.srcRadius = 0.0
@@ -142,10 +142,10 @@ func captureHeroTargetFromEntity(anim: mod HeroAnim, world: view UiWorld, e: vie
       }
     }
   }
-  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
+  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: e)
   let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
-  anim.dstX = wt.x
-  anim.dstY = wt.y
+  anim.dstX = wt.position.x
+  anim.dstY = wt.position.y
   anim.dstW = cr.size.x
   anim.dstH = cr.size.y
   anim.dstRadius = 0.0
