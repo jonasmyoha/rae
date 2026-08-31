@@ -1,0 +1,81 @@
+# lib/ecs — non-generic List(EntityId)/List(Int) helpers used by the sparse-set
+# storage. They exist because inner-List specialisation drifts inside the
+# generic ComponentTable(T) functions, so ComponentTable pokes its dense/sparse
+# arrays through these concrete helpers instead. Same `ecs` package as
+# component_table.rae, so it calls them with no `open`. Extracted from
+# component_table.rae in #702 to keep the storage type focused.
+import core
+
+func appendEntityList(lst: mod List(EntityId), value: view EntityId) {
+  lst.add(value: value)
+}
+
+func entityListAt(lst: view List(EntityId), index: view Int) ret EntityId {
+  ret rae_ext_rae_buf_get(buf: lst.data, index: index)
+}
+
+func swapRemoveEntityList(lst: mod List(EntityId), index: view Int) {
+  if index < 0 or index >= lst.length {
+    ret
+  }
+  let last: Int = lst.length - 1
+  if index is not last {
+    let e: EntityId = entityListAt(lst: lst, index: last)
+    rae_ext_rae_buf_set(buf: lst.data, index: index, value: e)
+  }
+  lst.length = last
+}
+
+func popLastEntity(lst: mod List(EntityId)) {
+  if lst.length is 0 {
+    ret
+  }
+  lst.remove(index: lst.length - 1)
+}
+
+func dropEntityList(lst: mod List(EntityId)) {
+  drop(lst)
+}
+
+func appendIntList(lst: mod List(Int), value: view Int) {
+  lst.add(value: value)
+}
+
+func intListAt(lst: view List(Int), index: view Int) ret Int {
+  ret rae_ext_rae_buf_get(buf: lst.data, index: index)
+}
+
+func setIntListAt(lst: mod List(Int), index: view Int, value: view Int) {
+  rae_ext_rae_buf_set(buf: lst.data, index: index, value: value)
+}
+
+func swapRemoveIntList(lst: mod List(Int), index: view Int) {
+  if index < 0 or index >= lst.length {
+    ret
+  }
+  let last: Int = lst.length - 1
+  if index is not last {
+    setIntListAt(lst: lst, index: index, value: intListAt(lst: lst, index: last))
+  }
+  lst.length = last
+}
+
+func popLastInt(lst: mod List(Int)) {
+  if lst.length is 0 {
+    ret
+  }
+  lst.remove(index: lst.length - 1)
+}
+
+func dropIntList(lst: mod List(Int)) {
+  drop(lst)
+}
+
+# Grow `lst` (padding new slots with -1 = "absent") until `index` is a
+# valid, settable position. Used to size the sparse map up to a new
+# entity id before recording its dense index.
+func ensureIntSlots(lst: mod List(Int), index: view Int) {
+  loop lst.length <= index {
+    appendIntList(lst: lst, value: 0 - 1)
+  }
+}
