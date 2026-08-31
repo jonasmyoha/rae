@@ -1,0 +1,68 @@
+# lib/ecs — EventQueue(T): the double-buffered per-frame event channel (#754).
+#
+# The ECS EVENT primitive, evolved from Queue(T) (the #264 single-buffer inbox in
+# ecs/queue.rae). An EventQueue is held as a RESOURCE on the World (a plain field,
+# #753) — one per event type. Within a frame one system PRODUCES events
+# (eventSend) and later systems in schedule order DRAIN them
+# (eventCount/eventAt). eventFrameAdvance, called ONCE per frame after every
+# consumer, recycles the channel via a DOUBLE BUFFER: the drained events buffer
+# is swapped out for the spare (already-empty) buffer, so the next frame starts
+# clean with no per-event teardown on the hot path. Events are TRANSIENT — a
+# runtime resource, registered RESOURCE without SERIALIZE (#753), so they are
+# NEVER persisted; each frame's events die at the frame boundary.
+#
+# (Queue(T) in ecs/queue.rae stays for its existing command-inbox users; this is
+# the formalized event channel new ECS code should reach for.)
+import core
+
+type EventQueue(T: type) {
+  # This frame's events: producers append, consumers read.
+  events: List(T)
+  # The double buffer's spare, swapped in (empty) on advance.
+  reserve: List(T)
+}
+
+func createEventQueue(T: type) pub ret EventQueue(T) {
+  ret EventQueue(T) {
+    events: createList(T, cap: 16),
+    reserve: createList(T, cap: 16)
+  }
+}
+
+func drop(T: type, this: mod EventQueue(T)) {
+  drop(this.events)
+  drop(this.reserve)
+}
+
+# PRODUCE: append an event to this frame's channel.
+func eventSend(T: type, this: mod EventQueue(T), value: own T) pub {
+  this.events.add(value: value)
+}
+
+# How many events are available this frame.
+func eventCount(T: type, this: view EventQueue(T)) pub ret Int {
+  ret this.events.length
+}
+
+func eventIsEmpty(T: type, this: view EventQueue(T)) pub ret Bool {
+  ret this.events.length is 0
+}
+
+# Read the i-th event this frame (0 = first sent). Drain in order:
+#   loop i < eventCount { handle(eventAt(events, i)); i++ }
+func eventAt(T: type, this: view EventQueue(T), i: view Int) pub ret T {
+  let value: T = rae_ext_rae_buf_get(buf: this.events.data, index: i)
+  ret value
+}
+
+# Advance the frame: recycle the channel so the next frame starts empty. Call
+# ONCE per frame, AFTER every consumer has drained. Double-buffered: clear the
+# spare, then swap it in as the fresh (empty) events buffer — the just-drained
+# events become the spare, cleared on the NEXT advance. No per-event teardown on
+# the hot path, and a consumer's indices stay valid for the whole frame.
+func eventFrameAdvance(T: type, this: mod EventQueue(T)) pub {
+  this.reserve.clear()
+  var tmp: List(T) = own this.events
+  this.events = own this.reserve
+  this.reserve = own tmp
+}
