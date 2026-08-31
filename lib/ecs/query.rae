@@ -184,3 +184,18 @@ func query3ViewC(C: type, tableC: view ComponentTable(C), hit: view Query3Match)
 func forEachView(T: type, table: view ComponentTable(T), hit: view QueryMatch) ret view T {
   ret view rae_ext_rae_buf_get(buf: table.denseData.data, index: hit.index)
 }
+
+# ----- query-by-tag (#752) --------------------------------------------------
+#
+# A tag table (a ComponentTable of a zero-field marker, #751/#752) is an ordinary
+# component table, so query2/query3 already join on it. queryTagged names the
+# common case — iterate a DATA table filtered to entities that ALSO carry a tag.
+# The data table is passed FIRST, so each match's indexA addresses the data slot
+# (read/write via queryViewAt / queryModAt) while the tag has no payload to read.
+# It reuses the smallest-table probe, so a small tag set is walked rather than the
+# whole data table. This is how a tag replaces a `kind`-field if-ladder: instead
+# of scanning all units and branching on kind, query only the tagged ones.
+func queryTagged(D: type, T: type, dataTable: view ComponentTable(D),
+                 tagTable: view ComponentTable(T)) ret List(Query2Match) {
+  ret query2(tableA: dataTable, tableB: tagTable)
+}

@@ -1,0 +1,42 @@
+# lib/ecs — tag / marker components (#752).
+#
+# A TAG is a zero-field struct (#751) stored in a ComponentTable: an entity either
+# HAS the tag (present) or does not (absent) — no payload. Tags replace an integer
+# "kind" field branched on with an if-ladder: instead of one Unit with a `kind`
+# enum and `if kind is Archer ... else if kind is Giant ...`, give each entity an
+# ArcherTag / GiantTag component and QUERY by it (query2/query3 with the tag
+# table, or queryTagged in query.rae). The tag table — usually the smallest —
+# drives the smallest-table probe, so only the tagged entities are visited.
+import core
+open ecs/entity
+open ecs/component_table
+
+# Mark `entity` with tag T. Idempotent: re-adding overwrites the (empty) value.
+func addTag(T: type, table: mod ComponentTable(T), entity: view EntityId) {
+  var value: T
+  componentSet(this: table, entity: entity, data: value)
+}
+
+# Remove tag T from `entity` (no-op if absent).
+func removeTag(T: type, table: mod ComponentTable(T), entity: view EntityId) {
+  componentRemove(this: table, entity: entity)
+}
+
+# Whether `entity` carries tag T.
+func hasTag(T: type, table: view ComponentTable(T), entity: view EntityId) ret Bool {
+  ret componentHas(this: table, entity: entity)
+}
+
+# How many entities carry tag T.
+func tagCount(T: type, table: view ComponentTable(T)) ret Int {
+  ret componentCount(this: table)
+}
+
+# Every entity carrying tag T, in the tag table's dense order.
+func taggedEntities(T: type, table: view ComponentTable(T)) ret List(EntityId) {
+  let out: List(EntityId) = createList(EntityId, cap: 16)
+  loop var i: Int = 0, i < componentCount(this: table), ++i {
+    out.add(value: componentEntityAt(this: table, i: i))
+  }
+  ret out
+}
