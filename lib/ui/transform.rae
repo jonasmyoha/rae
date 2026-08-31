@@ -141,7 +141,7 @@ func composeTransform(
 # Walk every alive root (no Parent, has ComputedRect) and compose
 # WorldTransforms for the whole subtree.
 func transformSystem(world: mod UiWorld) {
-  let alive: view List(EntityId) => world.alive
+  let alive: view List(EntityId) => world.allocator.alive
   let n: Int = alive.length
   var i: Int = 0
   loop i < n {
@@ -215,7 +215,7 @@ func transformSystemIfDirty(world: mod UiWorld, cache: mod TransformCache) pub r
   let chGen: Int = componentTableGeneration(Children, this: world.childrens)
   let plGen: Int = componentTableGeneration(Parent, this: world.parents)
   let roGen: Int = componentTableGeneration(RuntimeOffset, this: world.runtimeOffsets)
-  let entityCount: Int = world.alive.length
+  let entityCount: Int = world.allocator.alive.length
 
   var dirty: Bool = false
   if crGen is not cache.computedRectsGen {
