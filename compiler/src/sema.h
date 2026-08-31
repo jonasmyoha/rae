@@ -22,6 +22,7 @@ TypeInfo* sema_resolve_type(CompilerContext* ctx, AstTypeRef* type_ref);
 // Specialization helpers used by backends
 AstTypeRef* substitute_type_ref(CompilerContext* ctx, const AstIdentifierPart* generic_params, const AstTypeRef* concrete_args, const AstTypeRef* type);
 AstTypeRef* infer_generic_args(CompilerContext* ctx, const AstFuncDecl* func, const AstTypeRef* pattern, const AstTypeRef* concrete_type);
+AstTypeRef* infer_generic_args_multi(CompilerContext* ctx, const AstFuncDecl* func, const AstTypeRef** patterns, const AstTypeRef** concretes, size_t pair_count);
 Str get_base_type_name(const AstTypeRef* type);
 Str get_decl_name(const AstDecl* d);
 

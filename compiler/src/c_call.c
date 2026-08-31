@@ -527,30 +527,42 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             // already resolved above
         } else if (expr->as.call.generic_args) {
             concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, expr->as.call.generic_args);
-        } else if (fd->generic_params && ctx->generic_params && ctx->generic_args) {
-            AstTypeRef* head = NULL; AstTypeRef* tail = NULL;
-            for (const AstIdentifierPart* gp = fd->generic_params; gp; gp = gp->next) {
-                AstTypeRef tmp = {0}; AstIdentifierPart part = {0}; part.text = gp->text; tmp.parts = &part;
-                AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &tmp);
-                AstTypeRef* node = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef)); *node = *sub; node->next = NULL;
-                if (!head) head = node; else tail->next = node; tail = node;
-            }
-            concrete = head;
         } else if (fd->generic_params) {
-            // Try inference from each param/arg pair (not just `this`) — this handles
-            // top-level calls like `setValue(b, val: 100)` where the first param is
-            // not named "this" but its type still binds the generic arg.
+            // 1. Argument-based inference FIRST, accumulating across ALL
+            //    param/arg pairs. This handles top-level calls like
+            //    `setValue(b, val: 100)` (first param not named "this") AND
+            //    multi-type-param generics like query2(A,B,a:T(A),b:T(B)) where
+            //    each type param is bound by a different argument. Crucially it
+            //    is also correct when the callee's type-param NAMES differ from
+            //    the enclosing generic context's (query2's A/B calling
+            //    componentEntityAt's T) — the arg TYPES carry the binding.
+            const AstTypeRef* patterns[32]; const AstTypeRef* concretes[32]; size_t np = 0;
             const AstParam* p = fd->params;
             const AstCallArg* a = expr->as.call.args;
-            while (!concrete && p && a) {
+            while (p && a && np < 32) {
                 const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
-                if (arg_tr && p->type) {
-                    if (ctx->generic_params && ctx->generic_args)
-                        arg_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, arg_tr);
-                    concrete = infer_generic_args(ctx->compiler_ctx, fd, p->type, arg_tr);
-                }
+                if (arg_tr && ctx->generic_params && ctx->generic_args)
+                    arg_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, arg_tr);
+                patterns[np] = p->type; concretes[np] = arg_tr; np++;
                 p = p->next; a = a->next;
             }
+            concrete = infer_generic_args_multi(ctx->compiler_ctx, fd, patterns, concretes, np);
+            // 2. Fallback: map the callee's own generic-param NAMES through the
+            //    enclosing generic context. Only correct when the names coincide
+            //    (the common "everyone calls it T" case) or for type-arg-only
+            //    calls with no value arg to infer from; hence a fallback, not the
+            //    primary path (it silently mis-binds when names differ).
+            if (!concrete && ctx->generic_params && ctx->generic_args) {
+                AstTypeRef* head = NULL; AstTypeRef* tail = NULL;
+                for (const AstIdentifierPart* gp = fd->generic_params; gp; gp = gp->next) {
+                    AstTypeRef tmp = {0}; AstIdentifierPart part = {0}; part.text = gp->text; tmp.parts = &part;
+                    AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &tmp);
+                    AstTypeRef* node = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef)); *node = *sub; node->next = NULL;
+                    if (!head) head = node; else tail->next = node; tail = node;
+                }
+                concrete = head;
+            }
+            // 3. Fallback: infer from the expected return type.
             if (!concrete && ctx->has_expected_type && fd->returns && fd->returns->type) {
                 concrete = infer_generic_args(ctx->compiler_ctx, fd, fd->returns->type, &ctx->expected_type);
             }

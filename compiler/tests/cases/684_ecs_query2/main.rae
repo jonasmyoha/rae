@@ -1,0 +1,46 @@
+import core
+open ecs/entity
+open ecs/component_table
+open ecs/query
+
+# #707: query2 joins two component tables — iterate the SMALLER table, probe the
+# other by index, and yield each match with storage-aliasing mod access. Here
+# pos has 3 entities and vel has 2, so query2 walks vel (the smaller) and probes
+# pos. The loop reads vel.v through a view ref and adds it to pos.x through a mod
+# ref; the write must alias table storage and be visible on read-back.
+
+type Pos { x: Int }
+type Vel { v: Int }
+
+func posOf(table: view ComponentTable(Pos), entity: view EntityId) ret Int {
+  if componentHas(this: table, entity: entity) {
+    let p: Pos = componentGet(this: table, entity: entity)
+    ret p.x
+  }
+  ret 0 - 1
+}
+
+func main() {
+  var pos: ComponentTable(Pos) = createComponentTable(Pos)
+  var vel: ComponentTable(Vel) = createComponentTable(Vel)
+  let e1: EntityId = { index: 1, generation: 0 }
+  let e2: EntityId = { index: 2, generation: 0 }
+  let e3: EntityId = { index: 3, generation: 0 }
+  componentSet(this: pos, entity: e1, data: Pos { x: 10 })
+  componentSet(this: pos, entity: e2, data: Pos { x: 20 })
+  componentSet(this: pos, entity: e3, data: Pos { x: 30 })
+  componentSet(this: vel, entity: e2, data: Vel { v: 2 })
+  componentSet(this: vel, entity: e3, data: Vel { v: 3 })
+
+  let hits: List(Query2Match) = query2(tableA: pos, tableB: vel)
+  log("q2 count: {hits.length}")
+  loop let row: view Query2Match in hits {
+    let velv: view Vel => queryViewAt(table: vel, denseIndex: row.indexB)
+    let posx: mod Pos => queryModAt(table: pos, denseIndex: row.indexA)
+    posx.x = posx.x + velv.v
+  }
+  # e1 has no Vel so it is not in the join and stays 10; e2 -> 22, e3 -> 33.
+  log("e1.x: {posOf(table: pos, entity: e1)}")
+  log("e2.x: {posOf(table: pos, entity: e2)}")
+  log("e3.x: {posOf(table: pos, entity: e3)}")
+}
