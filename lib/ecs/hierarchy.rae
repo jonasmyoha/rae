@@ -1,0 +1,21 @@
+# lib/ecs — hierarchy components (docs/ecs-general-architecture.md §2.4).
+#
+# The parent/child relationship expressed as ECS components, defined ONCE here so
+# ANY World (UI or game) can parameterise ComponentTable over them instead of
+# each app redeclaring its own. `Children` on a parent is the AUTHORITATIVE,
+# ordered child list; `Parent` is the cached upward pointer for traversal. The
+# HierarchySystem (#711/#712) owns keeping them in sync and repairing them on
+# destroy. Both are plain data — no methods.
+import core
+open ecs/entity
+
+# The authoritative, ordered list of an entity's children (stored on the parent).
+type Children {
+  ids: List(EntityId)
+}
+
+# The cached upward pointer to an entity's parent — the reverse of Children,
+# kept in sync by the HierarchySystem.
+type Parent {
+  parent: EntityId
+}
