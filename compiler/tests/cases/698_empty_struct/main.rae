@@ -1,0 +1,33 @@
+import core
+open ecs/entity
+open ecs/component_table
+
+# #751: a zero-field struct is a legal type — the tag/marker component pattern.
+# It must compile, work as a struct field, round-trip through toJson/fromJson,
+# and be a usable ComponentTable component type.
+
+type Tag {}
+type Named { tag: Tag, id: Int }
+
+func main() {
+  # Empty struct value, and as a field of another struct.
+  let t: Tag = {}
+  let n: Named = { tag: t, id: 42 }
+  log("id: {n.id}")
+
+  # toJson / fromJson round-trip of the empty struct itself.
+  let encoded: String = t.toJson()
+  log("tag json: {encoded}")
+  let decoded: Tag = Tag.fromJson(json: encoded)
+  let n2: Named = { tag: decoded, id: 7 }
+  log("decoded id: {n2.id}")
+
+  # The motivating use: a tag component in a ComponentTable.
+  var tags: ComponentTable(Tag) = createComponentTable(Tag)
+  let e1: EntityId = { index: 1, generation: 0 }
+  let e2: EntityId = { index: 2, generation: 0 }
+  componentSet(this: tags, entity: e1, data: Tag {})
+  log("e1 tagged: {componentHas(this: tags, entity: e1)}")
+  log("e2 tagged: {componentHas(this: tags, entity: e2)}")
+  log("tag count: {componentCount(this: tags)}")
+}
