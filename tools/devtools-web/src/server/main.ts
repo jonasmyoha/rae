@@ -14,6 +14,7 @@ import {
 import type { RaeDevtoolsConfig } from "./config";
 import type { ClientEvent, ExampleRunMode, ServerEvent } from "../shared/types";
 import { TestRunner } from "./tests";
+import { TestLogTailer } from "./testLogTailer";
 import { BuildRunner } from "./build";
 import { StatsStore } from "./stats";
 import { readTestTree, readTestFile } from "./testFiles";
@@ -50,6 +51,11 @@ const statsStore = new StatsStore();
 const testRunner = new TestRunner(CONFIG, broadcastEvent, statsStore);
 const buildRunner = new BuildRunner(CONFIG, broadcastEvent, statsStore);
 const exampleRunner = new ExampleRunner(CONFIG, broadcastEvent);
+// Bridge agent-driven `make test > /tmp/rae-test-live.log` runs into the live
+// WebSocket test pipeline so the Test Runner UI auto-connects to them.
+const TEST_LIVE_LOG = process.env.RAE_TEST_LOG ?? "/tmp/rae-test-live.log";
+const testLogTailer = new TestLogTailer(TEST_LIVE_LOG, broadcastEvent);
+testLogTailer.start();
 const testsRoot = getTestsRoot(CONFIG);
 const syntaxSummaryPath = getSyntaxSummaryPath(CONFIG);
 const examplesRoot = getExamplesRoot(CONFIG);
@@ -109,7 +115,7 @@ function launchManagedWebGpuBrowser(url: string, profileDir: string, width: numb
 }
 
 const server = Bun.serve<SocketData>({
-  port: CONFIG.port,
+  port: process.env.PORT ? Number(process.env.PORT) : CONFIG.port,
   async fetch(req, serverInstance) {
     const url = new URL(req.url);
     if (url.pathname === "/ws") {
@@ -305,6 +311,24 @@ const server = Bun.serve<SocketData>({
       if (!(await file.exists())) return new Response("Not found", { status: 404 });
       return new Response(file, {
         headers: { "Content-Type": file.type || getContentType(relative), ...COI_HEADERS }
+      });
+    }
+
+    // Live tail of the CLI test-runner log (the stable path `make test` /
+    // tools/watch-tests.sh writes to). Returns the whole file (small) plus its
+    // size so the client can skip re-rendering when nothing changed.
+    if (url.pathname === "/api/tests/live-log" && req.method === "GET") {
+      const logPath = process.env.RAE_TEST_LOG ?? "/tmp/rae-test-live.log";
+      const f = Bun.file(logPath);
+      if (!(await f.exists())) {
+        return new Response(JSON.stringify({ size: 0, content: "", path: logPath, exists: false }), {
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      const content = await f.text();
+      const done = /\bResults:\s+\d+ passed/.test(content);
+      return new Response(JSON.stringify({ size: content.length, content, path: logPath, exists: true, done }), {
+        headers: { "Content-Type": "application/json" }
       });
     }
 
