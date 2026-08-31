@@ -521,39 +521,39 @@ func dispatchActions(
     # bottom-nav tabs. Album + Player are sub-pages — Album reached by
     # tapping any cover tile on Home or Library, Player by tapping a
     # track row or the mini-player.
-    if actionId.equals(other: homeKey) {
+    if actionId is homeKey {
       let s: Screen = Screen.home
       setTab(state: state, tab: s)
     }
-    if actionId.equals(other: libraryKey) {
+    if actionId is libraryKey {
       let s: Screen = Screen.library
       setTab(state: state, tab: s)
     }
-    if actionId.equals(other: searchKey) {
+    if actionId is searchKey {
       let s: Screen = Screen.search
       setTab(state: state, tab: s)
     }
-    if actionId.equals(other: profileKey) {
+    if actionId is profileKey {
       let s: Screen = Screen.profile
       setTab(state: state, tab: s)
     }
-    if actionId.equals(other: nowPlayingKey) {
+    if actionId is nowPlayingKey {
       # Mini-player tap. Open the full NowPlaying view as a sub-page
       # over whatever tab the user is currently on.
       let s: Screen = Screen.player
       pushSubPage(state: state, screen: s)
     }
-    if actionId.equals(other: navHistoryKey) {
+    if actionId is navHistoryKey {
       # "Recently played" header tap on Home. Open the full History
       # sub-page over the current tab — same push semantics as
       # `album.open` / `nav.nowPlaying`.
       let s: Screen = Screen.history
       pushSubPage(state: state, screen: s)
     }
-    if actionId.equals(other: backKey) {
+    if actionId is backKey {
       popSubPage(state: state)
     }
-    if actionId.equals(other: playbackToggleKey) {
+    if actionId is playbackToggleKey {
       if spotifyEnabled {
         # Spotify owns the play-state. Use the cached state to flip
         # to the opposite; the 1Hz pollSpotify then mirrors the new
@@ -565,7 +565,7 @@ func dispatchActions(
         let curState: String = spotify.state()
         let playingKey: String = "playing"
         log("[spotify] toggle: state={curState}")
-        if curState.equals(other: playingKey) {
+        if curState is playingKey {
           spotify.pause()
         } else {
           spotify.play()
@@ -574,7 +574,7 @@ func dispatchActions(
         togglePlayback(state: playback)
       }
     }
-    if actionId.equals(other: playbackNextKey) {
+    if actionId is playbackNextKey {
       if spotifyEnabled {
         log("[spotify] next")
         spotify.next()
@@ -582,13 +582,13 @@ func dispatchActions(
       # Local mock has no per-screen "next track" concept yet —
       # the Spotify mode is the only consumer for now.
     }
-    if actionId.equals(other: playbackPrevKey) {
+    if actionId is playbackPrevKey {
       if spotifyEnabled {
         log("[spotify] previous")
         spotify.previous()
       }
     }
-    if actionId.equals(other: albumOpenKey) {
+    if actionId is albumOpenKey {
       # Tile click — open the album's track list as a sub-page.
       # NOT a play action: in a real music player tapping a cover
       # navigates to the album's contents; the user picks which song
@@ -708,7 +708,7 @@ func dispatchActions(
             var tj: Int = 0
             loop tj < tn {
               let t: Track = rae_ext_rae_buf_get(buf: a.tracks.data, index: tj)
-              if t.title.equals(other: e.trackName) {
+              if t.title is e.trackName {
                 state.currentTrackIndex = tj
                 tj = tn
               } else {
@@ -730,7 +730,7 @@ func dispatchActions(
         }
       }
     }
-    if actionId.equals(other: trackMoreKey) {
+    if actionId is trackMoreKey {
       # Three-dots affordance on track rows / album header. Opens
       # the bottom-sheet with the actions available for whatever
       # album the user is currently in.
@@ -739,13 +739,13 @@ func dispatchActions(
       acts.add(value: own mkSheetAction(label: "Cancel", actionId: sheetCancelKey))
       openBottomSheet(sheet: state.bottomSheet, actions: own acts)
     }
-    if actionId.equals(other: sheetDismissKey) {
+    if actionId is sheetDismissKey {
       closeBottomSheet(sheet: state.bottomSheet)
     }
-    if actionId.equals(other: sheetCancelKey) {
+    if actionId is sheetCancelKey {
       closeBottomSheet(sheet: state.bottomSheet)
     }
-    if actionId.equals(other: playbackLikeKey) {
+    if actionId is playbackLikeKey {
       # Heart button on mini-player + now-playing screen. Toggle the
       # browsed track (state.currentAlbumStem + currentTrackIndex —
       # what the user is staring at, not necessarily what's audibly
@@ -764,7 +764,7 @@ func dispatchActions(
         savePlaylist(playlist: state.liked)
       }
     }
-    if actionId.equals(other: libraryRemoveKey) {
+    if actionId is libraryRemoveKey {
       # Remove the active album from the curated library + persist.
       # Catalog is untouched so the cover + metadata are still there
       # for history rows etc. Close the sheet and pop the Album

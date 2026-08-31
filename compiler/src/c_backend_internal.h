@@ -144,6 +144,9 @@ Str infer_expr_type(CFuncContext* ctx, const AstExpr* expr);
 
 // -- Value-optional representation (opt T over an aggregate payload) --
 bool rae_typeinfo_opt_is_struct_rep(const TypeInfo* base);
+// #703: struct value-equality (`is`) support.
+bool rae_struct_value_comparable(const AstModule* module, const AstTypeDecl* td);
+bool rae_named_type_value_comparable(const AstModule* module, Str base);
 bool rae_opt_is_struct_rep(CFuncContext* ctx, const AstTypeRef* type);
 const char* rae_opt_type_name(CFuncContext* ctx, const AstTypeRef* opt_type);
 

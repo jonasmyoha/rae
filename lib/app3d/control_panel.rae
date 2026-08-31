@@ -126,7 +126,7 @@ func addPanelButton(panel: mod ControlPanel, id: view String, label: view String
 func panelIndexOf(panel: view ControlPanel, id: view String) pub ret Int {
   var i: Int = 0
   loop i < panel.ids.length {
-    if panelStringAt(values: panel.ids, index: i).equals(other: id) {
+    if panelStringAt(values: panel.ids, index: i) is id {
       ret i
     }
     i = i + 1
@@ -272,7 +272,7 @@ func setPanelSelection(panel: mod ControlPanel, world: mod UiWorld,
       let entity: EntityId = panelEntityAt(values: panel.buttonEntities, index: i)
       if componentHas(this: world.shapes, entity: entity) {
         let shape: mod Shape => componentMod(this: world.shapes, entity: entity)
-        if panelStringAt(values: panel.ids, index: i).equals(other: id) {
+        if panelStringAt(values: panel.ids, index: i) is id {
           shape.fillSlot = panelSlotSelected
         } else {
           shape.fillSlot = panelSlotIdle

@@ -53,7 +53,7 @@ func imageRegistryIndex(reg: view ImageRegistry, key: view String) pub ret Int {
   var i: Int = 0
   loop i < reg.items.length {
     let item: ImageResource = rae_ext_rae_buf_get(buf: reg.items.data, index: i)
-    if item.key.equals(other: key) {
+    if item.key is key {
       ret i
     }
     i = i + 1
@@ -80,7 +80,7 @@ func imageRegistryIsFailedPath(reg: view ImageRegistry, path: view String) pub r
 
 func imageRegistryMarkFailedPath(reg: mod ImageRegistry, path: view String) pub {
   let next: String = imageRegistryAppendPath(haystack: reg.failedPaths, path: path)
-  if next.equals(other: reg.failedPaths) is false {
+  if next is reg.failedPaths is false {
     reg.failedPaths = next
     reg.revision = reg.revision + 1
   }
@@ -92,7 +92,7 @@ func imageRegistryWasFired(reg: view ImageRegistry, path: view String) pub ret B
 
 func imageRegistryMarkFired(reg: mod ImageRegistry, path: view String) pub {
   let next: String = imageRegistryAppendPath(haystack: reg.firedPaths, path: path)
-  if next.equals(other: reg.firedPaths) is false {
+  if next is reg.firedPaths is false {
     reg.firedPaths = next
     reg.revision = reg.revision + 1
   }

@@ -223,7 +223,7 @@ func createUiWorld() ret UiWorld {
 func createEntity(world: mod UiWorld) ret EntityId {
   let id: Int = world.nextEntityId
   world.nextEntityId = id + 1
-  let e: EntityId = { value: id }
+  let e: EntityId = entityId(v: id)
   let alive: mod List(EntityId) => world.alive
   alive.add(value: e)
   ret e
@@ -234,7 +234,7 @@ func isAlive(world: view UiWorld, entity: view EntityId) ret Bool {
   var i: Int = 0
   loop i < n {
     let e: EntityId = rae_ext_rae_buf_get(buf: world.alive.data, index: i)
-    if e.value is entity.value {
+    if e is entity {
       ret true
     }
     i = i + 1
@@ -288,7 +288,7 @@ func pageOf(world: view UiWorld, entity: view EntityId) pub ret String {
   # Explicit construction (not `let cur: EntityId = entity`) — the
   # Live VM treats the latter as a view-ref bind and then refuses
   # the reassignment inside the loop.
-  var cur: EntityId = { value: entity.value }
+  var cur: EntityId = { index: entity.index, generation: entity.generation }
   loop true {
     if componentHas(this: world.pageRoots, entity: cur) {
       let r: PageRoot = componentGet(this: world.pageRoots, entity: cur)
@@ -298,7 +298,7 @@ func pageOf(world: view UiWorld, entity: view EntityId) pub ret String {
       ret ""
     }
     let pl: Parent = componentGet(this: world.parents, entity: cur)
-    cur = { value: pl.parent.value }
+    cur = { index: pl.parent.index, generation: pl.parent.generation }
   }
   ret ""
 }
@@ -313,7 +313,7 @@ func findPageRootEntity(world: view UiWorld, pageId: view String) pub ret Entity
   loop i < n {
     let e: EntityId = componentEntityAt(this: world.pageRoots, i: i)
     let r: PageRoot = componentDataAt(this: world.pageRoots, i: i)
-    if r.id.equals(other: pageId) {
+    if r.id is pageId {
       ret e
     }
     i = i + 1
@@ -494,7 +494,7 @@ func destroyEntity(world: mod UiWorld, entity: view EntityId) pub {
   var i: Int = 0
   loop i < n {
     let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
-    if e.value is entity.value {
+    if e is entity {
       alive.remove(index: i)
       ret
     }

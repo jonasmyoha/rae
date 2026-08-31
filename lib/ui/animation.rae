@@ -97,7 +97,7 @@ func subtreeHoverPaintRank(world: view UiWorld, entity: view EntityId) pub ret I
 # ever reports the single OnClick entity, never its decorative children.
 # Depth-guarded against malformed cycles.
 func hoverScaleContains(world: view UiWorld, entity: view EntityId, ancestor: view EntityId) ret Bool {
-  if entity.value is ancestor.value {
+  if entity is ancestor {
     ret true
   }
   var cur: EntityId = entity
@@ -107,7 +107,7 @@ func hoverScaleContains(world: view UiWorld, entity: view EntityId, ancestor: vi
       ret false
     }
     let p: Parent = componentGet(this: world.parents, entity: cur)
-    if p.parent.value is ancestor.value {
+    if p.parent is ancestor {
       ret true
     }
     cur = p.parent

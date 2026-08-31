@@ -702,17 +702,17 @@ func dispatchDebugAction(input: view InputSystem, debug: mod DebugSystem) pub re
     let ev: ActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
     let actionId: String = ev.actionId
 
-    if actionId.equals(other: debugActionToggleMenu) {
+    if actionId is debugActionToggleMenu {
       debug.menuOpen = debug.menuOpen is false
       changed = true
     }
-    if actionId.equals(other: debugActionDismiss) {
+    if actionId is debugActionDismiss {
       if debug.menuOpen {
         debug.menuOpen = false
         changed = true
       }
     }
-    if actionId.equals(other: debugActionToggleTheme) {
+    if actionId is debugActionToggleTheme {
       let cur: Theme = currentTheme()
       if cur.mode is ThemeMode.dark {
         setActiveTheme(theme: lightTheme())
@@ -721,11 +721,11 @@ func dispatchDebugAction(input: view InputSystem, debug: mod DebugSystem) pub re
       }
       changed = true
     }
-    if actionId.equals(other: debugActionToggleLabels) {
+    if actionId is debugActionToggleLabels {
       debug.showLabels = debug.showLabels is false
       changed = true
     }
-    if actionId.equals(other: debugActionToggleInputOutlines) {
+    if actionId is debugActionToggleInputOutlines {
       debug.showInputOutlines = debug.showInputOutlines is false
       changed = true
     }
@@ -739,19 +739,19 @@ func dispatchDebugAction(input: view InputSystem, debug: mod DebugSystem) pub re
 # Host dispatchers can use this to skip their own routing for events
 # that already went through `dispatchDebugAction`.
 func isDebugAction(actionId: view String) pub ret Bool {
-  if actionId.equals(other: debugActionToggleMenu) {
+  if actionId is debugActionToggleMenu {
     ret true
   }
-  if actionId.equals(other: debugActionDismiss) {
+  if actionId is debugActionDismiss {
     ret true
   }
-  if actionId.equals(other: debugActionToggleTheme) {
+  if actionId is debugActionToggleTheme {
     ret true
   }
-  if actionId.equals(other: debugActionToggleLabels) {
+  if actionId is debugActionToggleLabels {
     ret true
   }
-  if actionId.equals(other: debugActionToggleInputOutlines) {
+  if actionId is debugActionToggleInputOutlines {
     ret true
   }
   ret false
