@@ -76,3 +76,38 @@ func finishWorldJson(writer: view WorldJson) ret String {
   out = out.concat(other: "\}")
   ret out
 }
+
+# ----- serialize-IN (#720) --------------------------------------------------
+#
+# The inverse of the serialize-out above, driven the SAME way — by the registry,
+# NOT a hand-written per-name switch. loadComponentTable is generic over the
+# component type T (inferred from the table) and reconstructs each stored
+# component through the compiler-generated `T.fromJson`. It loads a table only if
+# `name` is registered with SERIALIZE, so unregistered / non-serialized keys are
+# ignored. An app's `worldFromJson` is a per-table composition (one
+# loadComponentTable per table); the dispatch to the concrete fromJson is the
+# generic T (compiler-monomorphized), never a switch — so adding a component is
+# one registration + one call, not a new case in a giant applyComponentByName.
+
+func loadComponentTable(T: type, table: mod ComponentTable(T), name: view String,
+                        registry: view ComponentRegistry, doc: view JsonDoc) {
+  if registeredHasFlag(reg: registry, name: name, flag: SERIALIZE) is false {
+    ret
+  }
+  let root: JsonValue = jsonRoot(doc: doc)
+  let componentIdx: Int = jsonField(doc: doc, this: root, key: name)
+  if componentIdx < 0 {
+    ret
+  }
+  # The component's entry is an object mapping entity index -> the component's
+  # own JSON. Re-stringify each value (stringify, #718) and hand it to fromJson.
+  let componentObj: JsonValue = jsonValueAt(doc: doc, idx: componentIdx)
+  loop var i: Int = 0, i < jsonObjectLen(this: componentObj), ++i {
+    let key: String = jsonObjectKeyAt(doc: doc, this: componentObj, idx: i)
+    let valueJson: JsonValue = jsonObjectValueAt(doc: doc, this: componentObj, idx: i)
+    let entity: EntityId = { index: key.toInt(), generation: 0 }
+    let valueStr: String = stringify(doc: doc, value: valueJson)
+    let component: T = T.fromJson(json: valueStr)
+    componentSet(this: table, entity: entity, data: component)
+  }
+}
