@@ -442,6 +442,17 @@ func destroyEntity(world: mod UiWorld, entity: view EntityId) pub {
   componentRemove(this: world.editorVisibles, entity: entity)
   componentRemove(this: world.editorLockeds, entity: entity)
   componentRemove(this: world.heroWidgets, entity: entity)
+  # Styling / art-direction visuals (these had drifted out of this list — each
+  # is a declared UiWorld ComponentTable field, so omitting it leaked the
+  # entity's row on destroy; #756 restores them and motivates synthesizing this
+  # sweep from the field list. See docs/ecs-world-helper-synthesis.md).
+  componentRemove(this: world.cornerRadiuses, entity: entity)
+  componentRemove(this: world.hoverScales, entity: entity)
+  componentRemove(this: world.gradientFills, entity: entity)
+  componentRemove(this: world.backdropImages, entity: entity)
+  componentRemove(this: world.opticalAligns, entity: entity)
+  componentRemove(this: world.layerRoots, entity: entity)
+  componentRemove(this: world.layerRefs, entity: entity)
   componentRemove(this: world.debugAnchors, entity: entity)
   componentRemove(this: world.pageRoots, entity: entity)
   componentRemove(this: world.scrollStates, entity: entity)
