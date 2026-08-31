@@ -111,7 +111,7 @@ func isKnownComponent(name: view String) ret Bool {
   var i: Int = 0
   loop i < n {
     if let k: String = known.copyAt(index: i) {
-      if k.equals(other: name) {
+      if k is name {
         ret true
       }
     }
@@ -136,10 +136,10 @@ func registeredComponentCount() ret Int {
 func parseSizeMode(s: view String) ret SizeMode {
   let hugStr: String = "Hug"
   let fillStr: String = "Fill"
-  if s.equals(other: hugStr) {
+  if s is hugStr {
     ret SizeMode.hug
   }
-  if s.equals(other: fillStr) {
+  if s is fillStr {
     ret SizeMode.fill
   }
   ret SizeMode.fixed
@@ -150,16 +150,16 @@ func parseLayoutType(s: view String) ret LayoutType {
   let v: String = "Vertical"
   let g: String = "Grid"
   let st: String = "Stack"
-  if s.equals(other: h) {
+  if s is h {
     ret LayoutType.horizontal
   }
-  if s.equals(other: v) {
+  if s is v {
     ret LayoutType.vertical
   }
-  if s.equals(other: g) {
+  if s is g {
     ret LayoutType.grid
   }
-  if s.equals(other: st) {
+  if s is st {
     ret LayoutType.stack
   }
   ret LayoutType.none
@@ -170,16 +170,16 @@ func parseAlignKind(s: view String) ret AlignKind {
   let e: String = "End"
   let sb: String = "SpaceBetween"
   let str: String = "Stretch"
-  if s.equals(other: c) {
+  if s is c {
     ret AlignKind.center
   }
-  if s.equals(other: e) {
+  if s is e {
     ret AlignKind.end
   }
-  if s.equals(other: sb) {
+  if s is sb {
     ret AlignKind.spaceBetween
   }
-  if s.equals(other: str) {
+  if s is str {
     ret AlignKind.stretch
   }
   ret AlignKind.start
@@ -188,10 +188,10 @@ func parseAlignKind(s: view String) ret AlignKind {
 func parseShapeKind(s: view String) ret ShapeKind {
   let rr: String = "RoundedRect"
   let c: String = "Circle"
-  if s.equals(other: rr) {
+  if s is rr {
     ret ShapeKind.roundedRect
   }
-  if s.equals(other: c) {
+  if s is c {
     ret ShapeKind.circle
   }
   ret ShapeKind.rect
@@ -205,13 +205,13 @@ func parseScaleMode(s: view String) ret ScaleMode {
   # the Fit default). Both spellings are accepted so scenes can use
   # whichever reads better.
   let cover: String = "Cover"
-  if s.equals(other: fi) {
+  if s is fi {
     ret ScaleMode.fill
   }
-  if s.equals(other: cover) {
+  if s is cover {
     ret ScaleMode.fill
   }
-  if s.equals(other: st) {
+  if s is st {
     ret ScaleMode.stretch
   }
   ret ScaleMode.fit
@@ -219,7 +219,7 @@ func parseScaleMode(s: view String) ret ScaleMode {
 
 func parseWrapWidthMode(s: view String) ret WrapWidthMode {
   let nw: String = "NodeWidth"
-  if s.equals(other: nw) {
+  if s is nw {
     ret WrapWidthMode.nodeWidth
   }
   ret WrapWidthMode.none
@@ -227,7 +227,7 @@ func parseWrapWidthMode(s: view String) ret WrapWidthMode {
 
 func parseHitAreaKind(s: view String) ret HitAreaKind {
   let rr: String = "RoundedRect"
-  if s.equals(other: rr) {
+  if s is rr {
     ret HitAreaKind.roundedRect
   }
   ret HitAreaKind.rect
@@ -235,7 +235,7 @@ func parseHitAreaKind(s: view String) ret HitAreaKind {
 
 func parseMaskKind(s: view String) ret MaskKind {
   let rr: String = "RoundedRect"
-  if s.equals(other: rr) {
+  if s is rr {
     ret MaskKind.roundedRect
   }
   ret MaskKind.circle
@@ -245,13 +245,13 @@ func parseResolverMode(s: view String) ret ResolverMode {
   let r: String = "Random"
   let h: String = "Hash"
   let d: String = "Direct"
-  if s.equals(other: r) {
+  if s is r {
     ret ResolverMode.random
   }
-  if s.equals(other: h) {
+  if s is h {
     ret ResolverMode.hash
   }
-  if s.equals(other: d) {
+  if s is d {
     ret ResolverMode.direct
   }
   ret ResolverMode.fixed
@@ -262,16 +262,16 @@ func parseTextFormat(s: view String) ret TextFormat {
   let p: String = "Percent1"
   let c: String = "Coins"
   let h: String = "HandRank"
-  if s.equals(other: n) {
+  if s is n {
     ret TextFormat.number
   }
-  if s.equals(other: p) {
+  if s is p {
     ret TextFormat.percent1
   }
-  if s.equals(other: c) {
+  if s is c {
     ret TextFormat.coins
   }
-  if s.equals(other: h) {
+  if s is h {
     ret TextFormat.handRank
   }
   ret TextFormat.plain
@@ -639,23 +639,23 @@ func deserWidgetState(doc: view JsonDoc, val: view JsonValue) ret WidgetState {
 }
 
 func dataResourceIdFromString(name: view String) ret DataResourceId {
-  if name.equals(other: "albums") { ret DataResourceId.albums }
-  if name.equals(other: "history") { ret DataResourceId.history }
-  if name.equals(other: "library") { ret DataResourceId.library }
-  if name.equals(other: "playback") { ret DataResourceId.playback }
-  if name.equals(other: "playlists") { ret DataResourceId.playlists }
-  if name.equals(other: "spotify") { ret DataResourceId.spotify }
-  if name.equals(other: "settings") { ret DataResourceId.settings }
-  if name.equals(other: "debug") { ret DataResourceId.debug }
+  if name is "albums" { ret DataResourceId.albums }
+  if name is "history" { ret DataResourceId.history }
+  if name is "library" { ret DataResourceId.library }
+  if name is "playback" { ret DataResourceId.playback }
+  if name is "playlists" { ret DataResourceId.playlists }
+  if name is "spotify" { ret DataResourceId.spotify }
+  if name is "settings" { ret DataResourceId.settings }
+  if name is "debug" { ret DataResourceId.debug }
   ret DataResourceId.none
 }
 
 func dataFieldIdFromString(name: view String) ret DataFieldId {
-  if name.equals(other: "all") { ret DataFieldId.all }
-  if name.equals(other: "isPlaying") { ret DataFieldId.isPlaying }
-  if name.equals(other: "likedTrack") { ret DataFieldId.likedTrack }
-  if name.equals(other: "playingTrack") { ret DataFieldId.playingTrack }
-  if name.equals(other: "debugToggle") { ret DataFieldId.debugToggle }
+  if name is "all" { ret DataFieldId.all }
+  if name is "isPlaying" { ret DataFieldId.isPlaying }
+  if name is "likedTrack" { ret DataFieldId.likedTrack }
+  if name is "playingTrack" { ret DataFieldId.playingTrack }
+  if name is "debugToggle" { ret DataFieldId.debugToggle }
   ret DataFieldId.none
 }
 
@@ -780,39 +780,39 @@ func applyComponentByName(
   doc: view JsonDoc
   val: view JsonValue
 ) {
-  if name.equals(other: "Rect") {
+  if name is "Rect" {
     componentSet(this: world.rects, entity: entity, data: deserRect(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "Size") {
+  if name is "Size" {
     componentSet(this: world.sizes, entity: entity, data: deserSize(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "Layout") {
+  if name is "Layout" {
     componentSet(this: world.layouts, entity: entity, data: deserLayout(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "Padding") {
+  if name is "Padding" {
     componentSet(this: world.paddings, entity: entity, data: deserPadding(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "Margin") {
+  if name is "Margin" {
     componentSet(this: world.margins, entity: entity, data: deserMargin(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "Align") {
+  if name is "Align" {
     componentSet(this: world.aligns, entity: entity, data: deserAlign(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "Offset") {
+  if name is "Offset" {
     componentSet(this: world.offsets, entity: entity, data: deserOffset(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "Sprite") {
+  if name is "Sprite" {
     componentSet(this: world.sprites, entity: entity, data: deserSprite(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "Text") {
+  if name is "Text" {
     componentSet(this: world.texts, entity: entity, data: deserText(doc: doc, val: val))
     # Tier-2 partial style override (#236): namespaced inside the Text
     # bag, stored as a sparse component only when authored. Base styleId
@@ -825,21 +825,21 @@ func applyComponentByName(
     }
     ret
   }
-  if name.equals(other: "TextShadow") {
+  if name is "TextShadow" {
     # Lint (#232, theme §7): a raw per-entity TextShadow is the
     # last-resort override, not the authoring path. A shadow that any
     # two nodes share belongs in a theme `shadow` token referenced by
     # a text style (the miniTitle/miniMuted -> textOnAccent pattern).
     # Nudge, don't block — one line per authored occurrence.
-    log("[scene] raw TextShadow authored on entity {entity.value} - prefer a theme shadow token on the text style (see docs/ui-theme-system.md sec 7)")
+    log("[scene] raw TextShadow authored on entity {entity.index} - prefer a theme shadow token on the text style (see docs/ui-theme-system.md sec 7)")
     componentSet(this: world.textShadows, entity: entity, data: deserTextShadow(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "Shape") {
+  if name is "Shape" {
     componentSet(this: world.shapes, entity: entity, data: deserShape(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "ContainerStyle") {
+  if name is "ContainerStyle" {
     # Composite style reference (#237, M6): a bare string naming a
     # theme container style. Expands into the concrete Shape + Padding
     # the bundle references (see ui/container_style).
@@ -848,117 +848,117 @@ func applyComponentByName(
     applyContainerStyle(world: world, entity: entity, name: styleName)
     ret
   }
-  if name.equals(other: "Active") {
+  if name is "Active" {
     componentSet(this: world.actives, entity: entity, data: deserActive(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "Opacity") {
+  if name is "Opacity" {
     componentSet(this: world.opacities, entity: entity, data: deserOpacity(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "OnClick") {
+  if name is "OnClick" {
     componentSet(this: world.onClicks, entity: entity, data: deserOnClick(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "Button") {
+  if name is "Button" {
     componentSet(this: world.buttons, entity: entity, data: deserButton(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "Name") {
+  if name is "Name" {
     componentSet(this: world.names, entity: entity, data: deserName(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "PrimaryType") {
+  if name is "PrimaryType" {
     componentSet(this: world.primaryTypes, entity: entity, data: deserPrimaryType(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "NodeId") {
+  if name is "NodeId" {
     componentSet(this: world.nodeIdComponents, entity: entity, data: deserNodeId(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "SceneInstance") {
+  if name is "SceneInstance" {
     componentSet(this: world.sceneInstances, entity: entity, data: deserSceneInstance(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "TextBinding") {
+  if name is "TextBinding" {
     componentSet(this: world.textBindings, entity: entity, data: deserTextBinding(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "MaskShape") {
+  if name is "MaskShape" {
     componentSet(this: world.maskShapes, entity: entity, data: deserMaskShape(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "HeroWidget") {
+  if name is "HeroWidget" {
     componentSet(this: world.heroWidgets, entity: entity, data: deserHeroWidget(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "CornerRadius") {
+  if name is "CornerRadius" {
     componentSet(this: world.cornerRadiuses, entity: entity, data: deserCornerRadius(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "GradientFill") {
+  if name is "GradientFill" {
     componentSet(this: world.gradientFills, entity: entity, data: deserGradientFill(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "BackdropImage") {
+  if name is "BackdropImage" {
     componentSet(this: world.backdropImages, entity: entity, data: deserBackdropImage(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "OpticalAlign") {
+  if name is "OpticalAlign" {
     componentSet(this: world.opticalAligns, entity: entity, data: deserOpticalAlign(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "SafeArea") {
+  if name is "SafeArea" {
     componentSet(this: world.safeAreas, entity: entity, data: deserSafeArea(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "LayerRoot") {
+  if name is "LayerRoot" {
     componentSet(this: world.layerRoots, entity: entity, data: deserLayerRoot(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "DebugAnchor") {
+  if name is "DebugAnchor" {
     componentSet(this: world.debugAnchors, entity: entity, data: deserDebugAnchor(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "PageRoot") {
+  if name is "PageRoot" {
     componentSet(this: world.pageRoots, entity: entity, data: deserPageRoot(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "ScrollState") {
+  if name is "ScrollState" {
     componentSet(this: world.scrollStates, entity: entity, data: deserScrollState(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "WidgetId") {
+  if name is "WidgetId" {
     componentSet(this: world.widgetIds, entity: entity, data: deserWidgetId(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "WidgetState") {
+  if name is "WidgetState" {
     componentSet(this: world.widgetStates, entity: entity, data: deserWidgetState(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "DataDependency") {
+  if name is "DataDependency" {
     componentSet(this: world.dataDependencies, entity: entity, data: deserDataDependency(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "ActionBinding") {
+  if name is "ActionBinding" {
     componentSet(this: world.actionBindings, entity: entity, data: deserActionBinding(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "RefreshRegion") {
+  if name is "RefreshRegion" {
     componentSet(this: world.refreshRegions, entity: entity, data: deserRefreshRegion(doc: doc, val: val))
     ret
   }
-  if name.equals(other: "Aspect") {
+  if name is "Aspect" {
     let ratio: Float = optFloat(doc: doc, container: val, key: "ratio", fallback: 1.0)
     let asp: Aspect = { ratio: ratio }
     componentSet(this: world.aspects, entity: entity, data: asp)
     ret
   }
-  if name.equals(other: "ScaleToFit") {
+  if name is "ScaleToFit" {
     let modeStr: String = optString(doc: doc, container: val, key: "mode", fallback: "Contain")
     var fitMode: FitMode = FitMode.contain
     let coverStr: String = "Cover"
-    if modeStr.equals(other: coverStr) {
+    if modeStr is coverStr {
       fitMode = FitMode.cover
     }
     let stf: ScaleToFit = { mode: fitMode }

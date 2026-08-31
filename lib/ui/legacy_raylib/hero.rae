@@ -95,7 +95,7 @@ func findHeroEntity(world: view UiWorld, key: view String) pub ret EntityId {
   loop i < n {
     let e: EntityId = componentEntityAt(this: world.heroWidgets, i: i)
     let hw: HeroWidget = componentDataAt(this: world.heroWidgets, i: i)
-    if hw.key.equals(other: key) {
+    if hw.key is key {
       ret e
     }
     i = i + 1
@@ -117,9 +117,9 @@ func findHeroEntityOnPage(world: view UiWorld, pageId: view String, key: view St
   loop i < n {
     let e: EntityId = componentEntityAt(this: world.heroWidgets, i: i)
     let hw: HeroWidget = componentDataAt(this: world.heroWidgets, i: i)
-    if hw.key.equals(other: key) {
+    if hw.key is key {
       let p: String = pageOf(world: world, entity: e)
-      if p.equals(other: pageId) {
+      if p is pageId {
         ret e
       }
     }
@@ -208,7 +208,7 @@ func captureHeroTargetFromEntity(anim: mod HeroAnim, world: view UiWorld, e: vie
   if anim.textureKey.length() > 0 {
     if componentHas(this: world.sprites, entity: e) {
       let sp: view Sprite => componentView(this: world.sprites, entity: e)
-      if sp.textureKey.equals(other: anim.textureKey) is false {
+      if sp.textureKey is anim.textureKey is false {
         ret false
       }
     }
@@ -300,7 +300,7 @@ func rebindHero(world: mod UiWorld, fromKey: view String, toKey: view String) pu
   loop i < nh {
     let e: EntityId = componentEntityAt(this: world.heroWidgets, i: i)
     let hw: HeroWidget = componentDataAt(this: world.heroWidgets, i: i)
-    if hw.key.equals(other: fromKey) {
+    if hw.key is fromKey {
       # Force a fresh String allocation via interpolation. A direct
       # `let copied: String = toKey` (toKey is `view String`) can
       # alias the caller's String storage instead of deep-copying;
@@ -323,7 +323,7 @@ func rebindHero(world: mod UiWorld, fromKey: view String, toKey: view String) pu
   loop j < ns {
     let se: EntityId = componentEntityAt(this: world.sprites, i: j)
     let sp: Sprite = componentDataAt(this: world.sprites, i: j)
-    if sp.textureKey.equals(other: fromKey) {
+    if sp.textureKey is fromKey {
       # Same defensive fresh-allocation pattern as the HeroWidget
       # loop above. See that comment for the rationale.
       let copiedTex: String = "{toKey}"

@@ -21,7 +21,7 @@ open ecs/entity
 
 # Internal: left mouse button.
 let mouseButtonLeft: Int = 0
-let inputNoEntity: EntityId = { value: 0 - 1 }
+let inputNoEntity: EntityId = { index: 0 - 1, generation: 0 }
 
 type PointerState {
   x: Float
@@ -221,24 +221,24 @@ func updateInputSystem(input: mod InputSystem, world: view UiWorld) {
 
   if pressed {
     input.pressedEntity = hitTest(world: world, x: mx, y: my)
-    log("[input] press at ({mx},{my}) -> pressedEntity={input.pressedEntity.value}")
+    log("[input] press at ({mx},{my}) -> pressedEntity={input.pressedEntity.index}")
   }
 
   if released {
     var hit: EntityId = hitTest(world: world, x: mx, y: my)
-    log("[input] release at ({mx},{my}) -> hit={hit.value} pressed={input.pressedEntity.value}")
+    log("[input] release at ({mx},{my}) -> hit={hit.index} pressed={input.pressedEntity.index}")
     if isNone(this: hit) is false {
-      if hit.value is input.pressedEntity.value {
+      if hit is input.pressedEntity {
         if componentHas(this: world.onClicks, entity: hit) {
           let oc: view OnClick => componentView(this: world.onClicks, entity: hit)
           let aid: String = oc.actionId
-          log("[input] fire {aid} on entity {hit.value}")
+          log("[input] fire {aid} on entity {hit.index}")
           appendActionEvent(input: input, entity: hit, actionId: oc.actionId)
         } else {
           log("[input] release matched press but entity has no OnClick (impossible?)")
         }
       } else {
-        log("[input] release hit {hit.value} != pressed {input.pressedEntity.value} - drop")
+        log("[input] release hit {hit.index} != pressed {input.pressedEntity.index} - drop")
       }
     } else {
       log("[input] release hit nothing - drop")

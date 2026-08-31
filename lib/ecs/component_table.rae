@@ -24,7 +24,7 @@ type ComponentTable(T: type) {
   denseEntities: List(EntityId)
   denseData: List(T)
 
-  # Sparse map: sparse[entity.value] = dense index (or -1 if absent),
+  # Sparse map: sparse[entity.index] = dense index (or -1 if absent),
   # making componentIndexOf an O(1) lookup instead of an O(n) scan (the
   # per-frame layout/transform/render walks do ~a dozen lookups/entity).
   # Maintained on set/remove; grown lazily (padded with -1).
@@ -80,10 +80,10 @@ func drop(T: type, this: mod ComponentTable(T)) {
 # Bypass via `rae_ext_rae_buf_get` which doesn't go through the
 # generic dispatch.
 func componentIndexOf(T: type, this: view ComponentTable(T), entity: view EntityId) ret Int {
-  # O(1) sparse lookup. `sparse[entity.value]` is the candidate dense
+  # O(1) sparse lookup. `sparse[entity.index]` is the candidate dense
   # index; we still validate the dense back-reference so a stale slot
   # (left by a swap-remove of a *different* entity) can't false-hit.
-  let key: Int = entity.value
+  let key: Int = entity.index
   if key < 0 {
     ret -1
   }
@@ -98,7 +98,7 @@ func componentIndexOf(T: type, this: view ComponentTable(T), entity: view Entity
     ret -1
   }
   let e: EntityId = rae_ext_rae_buf_get(buf: this.denseEntities.data, index: idx)
-  if e.value is key {
+  if e.index is key {
     ret idx
   }
   ret -1
@@ -189,7 +189,7 @@ func componentSet(T: type, this: mod ComponentTable(T), entity: view EntityId, d
   appendEntityList(lst: this.denseEntities, value: entity)
   this.denseData.add(value: data)
   appendIntList(lst: this.denseStamps, value: 0)
-  let key: Int = entity.value
+  let key: Int = entity.index
   ensureIntSlots(lst: this.sparse, index: key)
   rae_ext_rae_buf_set(buf: this.sparse.data, index: key, value: newIdx)
   this.generation = this.generation + 1
@@ -205,13 +205,13 @@ func componentRemove(T: type, this: mod ComponentTable(T), entity: view EntityId
     # aren't woken by spurious removes.
     ret
   }
-  let removedKey: Int = entity.value
+  let removedKey: Int = entity.index
   let last: Int = this.denseEntities.length - 1
   let lastEntity: EntityId = entityListAt(lst: this.denseEntities, index: last)
   if idx is not last {
     # The entity that was at `last` now lives at `idx`: repoint its
     # sparse slot so future lookups find it.
-    setIntListAt(lst: this.sparse, index: lastEntity.value, value: idx)
+    setIntListAt(lst: this.sparse, index: lastEntity.index, value: idx)
   }
   swapRemoveEntityList(lst: this.denseEntities, index: idx)
   this.denseData.swapRemove(index: idx)
