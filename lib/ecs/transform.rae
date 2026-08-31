@@ -1,18 +1,67 @@
 # lib/ecs — transform components (docs/ecs-general-architecture.md §2.5).
 #
-# The LOCAL transforms (Transform2D / Transform3D) are added here by #714. This
-# file also holds the DERIVED world-transform caches (#715):
+# LOCAL (authored) transforms — Transform2D / Transform3D (#714): where an entity
+# sits relative to its parent. 3D orientation is a QUATERNION (lib/quat), NOT
+# Euler angles — no gimbal lock and clean interpolation via quat.slerp.
 #
-#   WorldTransform2D / WorldTransform3D hold an entity's COMPOSED world-space
-#   transform — its own local transform folded onto its parent's world transform
-#   by the TransformSystem walking the hierarchy depth order (#713). They are a
-#   DERIVED CACHE: recomputed each frame from the local transforms + hierarchy,
-#   NEVER authored and NEVER serialized. The component registry (#717/#719) will
-#   register them WITHOUT a SERIALIZE flag, so save/load skips them and every
-#   system rebuilds them from scratch.
+# DERIVED world-transform caches — WorldTransform2D / WorldTransform3D (#715):
+# an entity's COMPOSED world-space transform, its local transform folded onto its
+# parent's world transform by the TransformSystem walking the hierarchy depth
+# order (#713). A DERIVED CACHE: recomputed each frame, NEVER authored and NEVER
+# serialized — the component registry (#717/#719) registers them WITHOUT a
+# SERIALIZE flag, so save/load skips them and every system rebuilds them.
 import core
 open vec2
+open vec3
+open quat
 open math3d
+
+# ----- local (authored) transforms (#714) ------------------------------------
+
+# The authored 2D transform: an entity's position / rotation / scale relative to
+# its parent. rotation is in radians.
+type Transform2D {
+  position: Vec2
+  rotation: Float
+  scale: Vec2
+}
+
+# Identity 2D transform: origin, no rotation, unit scale.
+func createTransform2D() ret Transform2D {
+  ret Transform2D {
+    position: Vec2 { x: 0.0, y: 0.0 },
+    rotation: 0.0,
+    scale: Vec2 { x: 1.0, y: 1.0 }
+  }
+}
+
+# The authored 3D transform: position + orientation as a QUATERNION (lib/quat —
+# NOT Euler angles, so no gimbal lock and clean slerp) + scale.
+type Transform3D {
+  position: Vec3
+  rotation: Quat
+  scale: Vec3
+}
+
+# Identity 3D transform: origin, identity rotation, unit scale.
+func createTransform3D() ret Transform3D {
+  ret Transform3D {
+    position: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+    rotation: quat.identity(),
+    scale: Vec3 { x: 1.0, y: 1.0, z: 1.0 }
+  }
+}
+
+# Compose a Transform3D into its local model matrix: translate * rotate * scale
+# (a column vector is scaled, then rotated by the quaternion, then translated).
+# This is the per-entity local matrix the TransformSystem folds onto the parent's
+# world matrix.
+func transform3dToMatrix(t: view Transform3D) ret Mat4 {
+  let translate: Mat4 = mat4Translate(x: t.position.x, y: t.position.y, z: t.position.z)
+  let rotate: Mat4 = quat.toMat4(q: t.rotation)
+  let scale: Mat4 = mat4ScaleXYZ(x: t.scale.x, y: t.scale.y, z: t.scale.z)
+  ret mat4Mul(a: translate, b: mat4Mul(a: rotate, b: scale))
+}
 
 # The composed 2D world transform, kept decomposed as position / rotation /
 # scale. (Rae has no Mat3 type yet; pos/rot/scale carries the same information
