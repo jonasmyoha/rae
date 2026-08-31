@@ -302,7 +302,7 @@ func setOffset(world: mod UiWorld, entity: view EntityId, x: view Float, y: view
 }
 
 func setFixedRect(world: mod UiWorld, entity: view EntityId, w: view Float, h: view Float) {
-  let r: Rect = { x: 0.0, y: 0.0, w: w, h: h }
+  let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: w, y: h } }
   componentSet(this: world.rects, entity: entity, data: r)
   let s: Size = {
     w: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
@@ -648,13 +648,13 @@ func applyDebugAnchor(world: view UiWorld, debug: mod DebugSystem) ret Bool {
     let e: EntityId = componentEntityAt(this: anchors, i: i)
     if componentHas(this: world.rects, entity: e) {
       let r: Rect = componentGet(this: world.rects, entity: e)
-      debug.buttonX = r.x
-      debug.buttonY = r.y
+      debug.buttonX = r.position.x
+      debug.buttonY = r.position.y
       # Width and height should match; the button is a circle, so use
       # `w` as the canonical edge. If `w` is zero (anchor authored with
       # only x/y), fall back to whatever was on the DebugSystem already.
-      if r.w > 0.0 {
-        debug.buttonSize = r.w
+      if r.size.x > 0.0 {
+        debug.buttonSize = r.size.x
       }
       ret true
     }

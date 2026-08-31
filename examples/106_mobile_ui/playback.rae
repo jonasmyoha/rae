@@ -231,7 +231,7 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
       var trackW: Float = 0.0
       if componentHas(this: world.computedRects, entity: trackEntity) {
         let tcr: ComputedRect = componentGet(this: world.computedRects, entity: trackEntity)
-        trackW = tcr.w
+        trackW = tcr.size.x
       }
       let p: Float = playbackProgress(state: state)
       let fillW: Float = trackW * p
@@ -245,24 +245,20 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
       # progress, so the equality check settles it.
       if componentHas(this: world.computedRects, entity: fillEntity) {
         let fcr: ComputedRect = componentGet(this: world.computedRects, entity: fillEntity)
-        if fillWidthChanged(current: fcr.w, next: fillW) {
+        if fillWidthChanged(current: fcr.size.x, next: fillW) {
           let nextCr: ComputedRect = {
-            x: fcr.x
-            y: fcr.y
-            w: fillW
-            h: fcr.h
+            position: { x: fcr.position.x, y: fcr.position.y }
+            size: { x: fillW, y: fcr.size.y }
           }
           componentSet(this: world.computedRects, entity: fillEntity, data: nextCr)
         }
       }
       if componentHas(this: world.rects, entity: fillEntity) {
         let fr: Rect = componentGet(this: world.rects, entity: fillEntity)
-        if fillWidthChanged(current: fr.w, next: fillW) {
+        if fillWidthChanged(current: fr.size.x, next: fillW) {
           let nextRect: Rect = {
-            x: fr.x
-            y: fr.y
-            w: fillW
-            h: fr.h
+            position: { x: fr.position.x, y: fr.position.y }
+            size: { x: fillW, y: fr.size.y }
           }
           componentSet(this: world.rects, entity: fillEntity, data: nextRect)
         }

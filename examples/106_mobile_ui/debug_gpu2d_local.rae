@@ -205,7 +205,7 @@ func setAlign(world: mod UiWorld, entity: view EntityId, x: AlignKind, y: AlignK
 }
 
 func setFixedRect(world: mod UiWorld, entity: view EntityId, w: view Float, h: view Float) {
-  let r: Rect = { x: 0.0, y: 0.0, w: w, h: h }
+  let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: w, y: h } }
   componentSet(this: world.rects, entity: entity, data: r)
   let s: Size = {
     w: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
@@ -637,9 +637,9 @@ func applyDebugAnchor(world: view UiWorld, debug: mod DebugSystem) ret Bool {
     let e: EntityId = componentEntityAt(this: anchors, i: i)
     if componentHas(this: world.rects, entity: e) {
       let r: Rect = componentGet(this: world.rects, entity: e)
-      debug.buttonX = r.x
-      debug.buttonY = r.y
-      if r.w > 0.0 { debug.buttonSize = r.w }
+      debug.buttonX = r.position.x
+      debug.buttonY = r.position.y
+      if r.size.x > 0.0 { debug.buttonSize = r.size.x }
       ret true
     }
     i = i + 1
