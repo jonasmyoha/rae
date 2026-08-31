@@ -3,6 +3,7 @@ import core
 open ecs/entity
 open ecs/component_table
 open ecs/queue
+open ecs/world
 # Only raylib-free MSDF data types; paint code stays out of UiWorld.
 import ui/msdf_state
 
@@ -21,7 +22,7 @@ type UiWorld {
   # Monotonic counter for entity-id allocation. Stays bare `Int`
   # because it's a counter, not a handle — `createEntity` wraps the
   # current value into an EntityId on the way out.
-  nextEntityId: Int
+  allocator: EntityAllocator
   alive: List(EntityId)
 
   # NodeId.id -> entity (stored as `Int` since Rae's `opt T` for struct
@@ -131,7 +132,7 @@ type UiWorld {
 
 func createUiWorld() ret UiWorld {
   ret UiWorld {
-    nextEntityId: 1
+    allocator: createEntityAllocator()
     alive: createList(EntityId, cap: 256)
     nodeIds: createStringMap(Int, cap: 128)
 
@@ -221,9 +222,7 @@ func createUiWorld() ret UiWorld {
 
 # Allocate a new entity id and mark it alive.
 func createEntity(world: mod UiWorld) ret EntityId {
-  let id: Int = world.nextEntityId
-  world.nextEntityId = id + 1
-  let e: EntityId = entityId(v: id)
+  let e: EntityId = allocEntity(this: world.allocator)
   let alive: mod List(EntityId) => world.alive
   alive.add(value: e)
   ret e
@@ -487,6 +486,9 @@ func destroyEntity(world: mod UiWorld, entity: view EntityId) pub {
   componentRemove(this: world.layoutScales, entity: entity)
   componentRemove(this: world.safeInsets, entity: entity)
   componentRemove(this: world.animStates, entity: entity)
+  # Recycle the index and bump its generation so a stale handle to it
+  # compares unequal to any future entity reusing the slot.
+  freeEntity(this: world.allocator, entity: entity)
   # Finally: drop the alive-list entry. Linear scan over
   # world.alive (typically a few hundred entries).
   let alive: mod List(EntityId) => world.alive

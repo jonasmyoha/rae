@@ -6,7 +6,8 @@ open ui/ecs
 # #703: EntityId is a generational handle { index, generation }. Recycling that
 # bumps the generation is #704 — here we prove the FIELD exists and that `is`
 # includes it, so a stale handle (same index, different generation) is not equal
-# to the live one. create/destroy/recreate yields distinct handles.
+# to the live one. With #704 recycling, destroy+recreate REUSES e1's index with a
+# bumped generation, so e3.index == e1.index but e1 is not e3 (generations differ).
 func main() {
   var world: UiWorld = createUiWorld()
   let e1: EntityId = createEntity(world: world)
