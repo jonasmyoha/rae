@@ -700,3 +700,123 @@ func parseJson(source: view String) ret JsonDoc {
   doc.ok = true
   ret doc
 }
+
+# ==========================================================================
+# Serialize-OUT (#718): write JSON, not just read it.
+#
+# `stringify` walks a parsed JsonValue back to a compact JSON String (the
+# inverse of parseJson, so parseJson(stringifyDoc(parseJson(s))) round-trips).
+# The `JsonBuilder` (jb* below) constructs JSON programmatically from scalars /
+# arrays / objects without a parsed doc. Both reuse jsonQuote/jsonEscape for
+# string escaping. Compact output (no spaces) — parseJson ignores whitespace, so
+# the round-trip is on the VALUES, not byte-identical text.
+# ==========================================================================
+
+# Serialize one JsonValue (resolved within its JsonDoc, since arrays/objects
+# reference child indices) to a compact JSON String.
+func stringify(doc: view JsonDoc, value: view JsonValue) ret String {
+  match value.kind {
+    case JsonKind.null { ret "null" }
+    case JsonKind.bool {
+      if value.asBool { ret "true" }
+      ret "false"
+    }
+    case JsonKind.number { ret "{value.asNumber}" }
+    case JsonKind.string { ret jsonQuote(s: value.asString) }
+    case JsonKind.array {
+      var out: String = "["
+      let count: Int = jsonArrayLen(this: value)
+      loop var i: Int = 0, i < count, ++i {
+        if i > 0 {
+          out = out.concat(other: ",")
+        }
+        let child: JsonValue = jsonArrayAt(doc: doc, this: value, idx: i)
+        out = out.concat(other: stringify(doc: doc, value: child))
+      }
+      out = out.concat(other: "]")
+      ret out
+    }
+    case JsonKind.object {
+      var out: String = "\{"
+      let count: Int = jsonObjectLen(this: value)
+      loop var i: Int = 0, i < count, ++i {
+        if i > 0 {
+          out = out.concat(other: ",")
+        }
+        let key: String = jsonObjectKeyAt(doc: doc, this: value, idx: i)
+        out = out.concat(other: jsonQuote(s: key))
+        out = out.concat(other: ":")
+        let childValue: JsonValue = jsonObjectValueAt(doc: doc, this: value, idx: i)
+        out = out.concat(other: stringify(doc: doc, value: childValue))
+      }
+      out = out.concat(other: "\}")
+      ret out
+    }
+  }
+  ret "null"
+}
+
+# Serialize a whole document (from its root).
+func stringifyDoc(doc: view JsonDoc) ret String {
+  ret stringify(doc: doc, value: jsonRoot(doc: doc))
+}
+
+# ----- JsonBuilder: build JSON programmatically -----------------------------
+#
+# A builder accumulates one object or array level; nest by feeding a finished
+# inner builder's string as a field/item value. Scalars come from jbNull / jbBool
+# / jbNumber / jbString.
+
+type JsonBuilder {
+  out: String
+  count: Int
+}
+
+func jbNull() ret String { ret "null" }
+
+func jbBool(value: view Bool) ret String {
+  if value { ret "true" }
+  ret "false"
+}
+
+func jbNumber(value: view Float) ret String { ret "{value}" }
+
+func jbString(value: view String) ret String { ret jsonQuote(s: value) }
+
+# Start an object; add fields with jbField; finish with jbEndObject.
+func jbObject() ret JsonBuilder { ret JsonBuilder { out: "\{", count: 0 } }
+
+func jbField(builder: mod JsonBuilder, key: view String, valueJson: view String) {
+  if builder.count > 0 {
+    builder.out = builder.out.concat(other: ",")
+  }
+  builder.out = builder.out.concat(other: jsonQuote(s: key))
+  builder.out = builder.out.concat(other: ":")
+  builder.out = builder.out.concat(other: valueJson)
+  builder.count = builder.count + 1
+}
+
+func jbEndObject(builder: view JsonBuilder) ret String {
+  var result: String = ""
+  result = result.concat(other: builder.out)
+  result = result.concat(other: "\}")
+  ret result
+}
+
+# Start an array; add items with jbItem; finish with jbEndArray.
+func jbArray() ret JsonBuilder { ret JsonBuilder { out: "[", count: 0 } }
+
+func jbItem(builder: mod JsonBuilder, valueJson: view String) {
+  if builder.count > 0 {
+    builder.out = builder.out.concat(other: ",")
+  }
+  builder.out = builder.out.concat(other: valueJson)
+  builder.count = builder.count + 1
+}
+
+func jbEndArray(builder: view JsonBuilder) ret String {
+  var result: String = ""
+  result = result.concat(other: builder.out)
+  result = result.concat(other: "]")
+  ret result
+}
