@@ -28,6 +28,8 @@ import sky
 import gbuffer
 import gbuffer_instanced
 open gbuffer_instanced
+import particles
+open particles
 import grass_compute
 open grass_compute
 import grass_config
@@ -176,6 +178,10 @@ func renderGbufferPass(app: mod App, aspect: copy Float, palette: view List(Floa
     drawSkinnedInstances(batch: app.character.crowdBatch)
   }
   grassDraw()
+  # Water splashes for anything wading this frame (#84): advance + emit, then draw
+  # the droplets as instanced cubes into this same G-buffer pass (particles.rae).
+  splashStep(app: app, dt: dt)
+  particleDraw(sys: app.splashes, toon: app.character.toon)
   gbuffer.endPass()
 }
 
