@@ -61,6 +61,9 @@
         <button class="app-nav__item" type="button" role="tab" aria-selected="false" data-view-target="raytracer">
           Raytracer
         </button>
+        <button class="app-nav__item" type="button" role="tab" aria-selected="false" data-view-target="testlog">
+          Test Log
+        </button>
       </nav>
     </header>
     <main class="app-main">
@@ -622,6 +625,21 @@
           </div>
         </section>
       </div>
+      <div class="app-view" data-view="testlog">
+        <section class="panel panel--full testlog-view">
+          <header class="panel-header">
+            <div>
+              <h2>Test Log</h2>
+              <p class="panel-subtitle">Live tail of <code id="testlog-path">/tmp/rae-test-live.log</code> (the CLI test runner). Run <code>make test &gt; /tmp/rae-test-live.log</code> or <code>tools/watch-tests.sh</code>.</p>
+            </div>
+            <div class="panel-actions">
+              <div class="test-status" id="testlog-status">Idle</div>
+              <label class="testlog-autoscroll"><input type="checkbox" id="testlog-autoscroll" checked /> Auto-scroll</label>
+            </div>
+          </header>
+          <pre id="testlog-output" class="testlog-output" aria-live="polite">(waiting for /tmp/rae-test-live.log — start a test run)</pre>
+        </section>
+      </div>
     </main>
 
     <div class="error-modal" id="error-log-modal" aria-hidden="true">
@@ -662,6 +680,49 @@
     </aside>
 
     <script type="module" src="./app.js"></script>
+    <script type="module">
+      // Live test-log viewer (#devtools): polls /api/tests/live-log and renders
+      // it colorized, appending only new lines and auto-scrolling. Self-contained
+      // so it never interferes with app.js.
+      const out = document.getElementById("testlog-output");
+      const statusEl = document.getElementById("testlog-status");
+      const autoEl = document.getElementById("testlog-autoscroll");
+      const pathEl = document.getElementById("testlog-path");
+      let lastSize = -1;
+      function lineClass(line) {
+        if (line.startsWith("PASS:") || /\bResults:\s+\d+ passed, 0 failed/.test(line)) return "log-pass";
+        if (line.startsWith("FAIL:") || /error:/i.test(line) || /\bfailed\b/.test(line)) return "log-fail";
+        if (line.startsWith("Results:")) return "log-summary";
+        return "";
+      }
+      function render(content) {
+        const frag = document.createDocumentFragment();
+        for (const line of content.split("\n")) {
+          const div = document.createElement("div");
+          div.className = "log-line " + lineClass(line);
+          div.textContent = line || "\u00a0";
+          frag.appendChild(div);
+        }
+        out.textContent = "";
+        out.appendChild(frag);
+        if (autoEl.checked) out.scrollTop = out.scrollHeight;
+      }
+      async function poll() {
+        try {
+          const res = await fetch("/api/tests/live-log", { cache: "no-store" });
+          const data = await res.json();
+          if (pathEl && data.path) pathEl.textContent = data.path;
+          if (!data.exists) { statusEl.textContent = "no log"; statusEl.className = "test-status"; }
+          else {
+            statusEl.textContent = data.done ? "done" : "running…";
+            statusEl.className = "test-status" + (data.done ? " is-done" : " is-running");
+            if (data.size !== lastSize) { lastSize = data.size; render(data.content); }
+          }
+        } catch (_) { statusEl.textContent = "server?"; }
+      }
+      poll();
+      setInterval(poll, 800);
+    </script>
     <link rel="preload" href="/rae_syntax.json" as="fetch" type="application/json" crossorigin="anonymous" />
   </body>
 </html>
