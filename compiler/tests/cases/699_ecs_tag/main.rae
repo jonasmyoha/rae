@@ -1,0 +1,48 @@
+import core
+open ecs/entity
+open ecs/component_table
+open ecs/tag
+open ecs/query
+
+# #752: a tag is a zero-field marker component. addTag/hasTag/removeTag manage
+# presence; query-by-tag (queryTagged) iterates a data table filtered to tagged
+# entities — replacing a `kind`-field if-ladder with a component + query.
+
+type Enemy {}
+type Position { x: Int, y: Int }
+
+func main() {
+  var enemies: ComponentTable(Enemy) = createComponentTable(Enemy)
+  var positions: ComponentTable(Position) = createComponentTable(Position)
+  let e1: EntityId = { index: 1, generation: 0 }
+  let e2: EntityId = { index: 2, generation: 0 }
+  let e3: EntityId = { index: 3, generation: 0 }
+  componentSet(this: positions, entity: e1, data: Position { x: 10, y: 0 })
+  componentSet(this: positions, entity: e2, data: Position { x: 20, y: 0 })
+  componentSet(this: positions, entity: e3, data: Position { x: 30, y: 0 })
+
+  # Tag e1 and e3 as enemies (e2 stays untagged).
+  addTag(table: enemies, entity: e1)
+  addTag(table: enemies, entity: e3)
+
+  log("e1 enemy: {hasTag(table: enemies, entity: e1)}")
+  log("e2 enemy: {hasTag(table: enemies, entity: e2)}")
+  log("enemy count: {tagCount(table: enemies)}")
+
+  # Query positions filtered to enemies: iterate the small tag table, probe
+  # positions, sum only enemy x. No if-ladder over a kind field.
+  let matches: List(Query2Match) = queryTagged(dataTable: positions, tagTable: enemies)
+  var enemySum: Int = 0
+  loop let hit: view Query2Match in matches {
+    let p: view Position => queryViewAt(table: positions, denseIndex: hit.indexA)
+    enemySum = enemySum + p.x
+  }
+  log("enemy x sum: {enemySum}")
+
+  # removeTag
+  removeTag(table: enemies, entity: e1)
+  log("e1 enemy after remove: {hasTag(table: enemies, entity: e1)}")
+  log("enemy count after remove: {tagCount(table: enemies)}")
+  let matches2: List(Query2Match) = queryTagged(dataTable: positions, tagTable: enemies)
+  log("enemy matches after remove: {matches2.length}")
+}
