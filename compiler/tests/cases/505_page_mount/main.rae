@@ -49,13 +49,13 @@ func main() {
   let pageB: String = "page-b"
   var rootA: EntityId = mountPage(world: world, pageId: pageA, scene: sceneA, overrides: noOverrides, w: 300.0, h: 400.0)
   var rootB: EntityId = mountPage(world: world, pageId: pageB, scene: sceneB, overrides: noOverrides, w: 300.0, h: 400.0)
-  log("rootA={rootA.value} rootB={rootB.value}")
+  log("rootA={rootA.index} rootB={rootB.index}")
 
   # Page-root discovery
   var foundA: EntityId = findPageRootEntity(world: world, pageId: pageA)
   var foundB: EntityId = findPageRootEntity(world: world, pageId: pageB)
   let foundNone: EntityId = findPageRootEntity(world: world, pageId: "missing")
-  log("foundA={foundA.value} foundB={foundB.value} foundNone.isNone={isNone(this: foundNone)}")
+  log("foundA={foundA.index} foundB={foundB.index} foundNone.isNone={isNone(this: foundNone)}")
 
   # Scoped lookups resolve to the per-page Body entity.
   if let bodyA: Int = findNodeInPage(world: world, pageId: pageA, nodeId: "Body") {

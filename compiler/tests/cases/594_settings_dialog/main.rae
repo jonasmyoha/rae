@@ -75,10 +75,10 @@ func main() {
   check(label: "single-scene app keeps its other settings", ok: settingsHandleAction(s: one, actionId: "settings.toon") and one.toon is false)
 
   # The time readout is hours and minutes; 6.5 on screen reads as a number.
-  check(label: "noon formats", ok: formatHour(hour: 12.0).equals(other: "12:00"))
-  check(label: "half past six formats", ok: formatHour(hour: 6.5).equals(other: "06:30"))
-  check(label: "midnight formats", ok: formatHour(hour: 0.0).equals(other: "00:00"))
-  check(label: "end of day clamps inside the day", ok: formatHour(hour: 24.0).equals(other: "23:59"))
+  check(label: "noon formats", ok: formatHour(hour: 12.0) is "12:00")
+  check(label: "half past six formats", ok: formatHour(hour: 6.5) is "06:30")
+  check(label: "midnight formats", ok: formatHour(hour: 0.0) is "00:00")
+  check(label: "end of day clamps inside the day", ok: formatHour(hour: 24.0) is "23:59")
 
   # The hour is held flat, not inside a nested Slider: a nested struct passed as
   # `mod` does not reliably write back here, and the slider silently never moved

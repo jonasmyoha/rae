@@ -33,6 +33,21 @@ static void emit_c_source_location(CFuncContext* ctx, const AstExpr* expr,
     fprintf(out, "\", %d", (int)expr->line);
 }
 
+// The base type name of an expression AFTER applying the function's active
+// generic substitution. In a specialized generic body `a: view T` infers as
+// `T`; substituting `T -> String` lets the String / struct `is` lowering fire
+// (otherwise `a is b` with T=String falls through to `rae_String == ...`, a C
+// error — the reason a String `equals` helper existed).
+static Str eff_base_name(CFuncContext* ctx, const AstExpr* e) {
+    const AstTypeRef* tr = infer_expr_type_ref(ctx, e);
+    if (tr && ctx && ctx->generic_params && ctx->generic_args) {
+        AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
+                                              ctx->generic_args, tr);
+        if (sub) tr = sub;
+    }
+    return get_base_type_name(tr);
+}
+
 // A c_struct field whose real C name is a Rae reserved keyword is escaped by the
 // bindings generator with a single trailing '_' (WGPU*.view -> view_). safe_name
 // appends '_' ONLY for exact keyword matches, so stripping one trailing '_' when
@@ -339,6 +354,28 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
               emit_expr(ctx, expr->as.binary.rhs, out, PREC_LOWEST, false, false);
               if (expr->as.binary.op == AST_BIN_NEQ) fprintf(out, "))");
               else fprintf(out, ")");
+              break;
+          }
+      }
+      // Struct value equality (#703): `a is b` / `a is not b` on a user value
+      // struct is field-wise equality — C forbids `struct == struct`, so emit
+      // the synthesized rae_eq_<T>. Only value-comparable structs (scalar/enum/
+      // String/nested-value-struct fields) qualify; others fall through to `==`.
+      if (expr->as.binary.op == AST_BIN_IS || expr->as.binary.op == AST_BIN_NEQ) {
+          const AstTypeRef* ltr = infer_expr_type_ref(ctx, expr->as.binary.lhs);
+          Str lbase = eff_base_name(ctx, expr->as.binary.lhs);
+          // A `view`/`mod` struct operand is a pointer here; emit_expr
+          // dereferences it to the value, which rae_eq_<T> takes by value.
+          // `opt` is excluded (its emptiness is the none path above).
+          if (ltr && !ltr->is_opt
+              && ctx->module && rae_named_type_value_comparable(ctx->module, lbase)) {
+              const char* m = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
+                  &(AstTypeRef){.parts = &(AstIdentifierPart){.text = lbase}});
+              fprintf(out, expr->as.binary.op == AST_BIN_NEQ ? "((bool)(!rae_eq_%s(" : "((bool)(rae_eq_%s(", m);
+              emit_expr(ctx, expr->as.binary.lhs, out, PREC_LOWEST, false, false);
+              fprintf(out, ", ");
+              emit_expr(ctx, expr->as.binary.rhs, out, PREC_LOWEST, false, false);
+              fprintf(out, ")))");
               break;
           }
       }

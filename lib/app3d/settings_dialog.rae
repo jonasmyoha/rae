@@ -287,55 +287,55 @@ func formatHour(hour: view Float) ret String {
 func settingsHandleAction(s: mod SettingsState, actionId: view String) ret Bool {
   # One action, and it TOGGLES: the button shows and hides the panel rather
   # than opening a second surface.
-  if actionId.equals(other: "settings.open") {
+  if actionId is "settings.open" {
     s.open = s.open is false
     ret true
   }
-  if actionId.equals(other: "settings.playback") {
+  if actionId is "settings.playback" {
     s.playing = s.playing is false
     ret true
   }
-  if actionId.equals(other: "settings.time.animate") {
+  if actionId is "settings.time.animate" {
     s.animateTime = s.animateTime is false
     ret true
   }
-  if actionId.equals(other: "settings.toon") {
+  if actionId is "settings.toon" {
     s.toon = s.toon is false
     ret true
   }
-  if actionId.equals(other: "settings.anim.slower") {
+  if actionId is "settings.anim.slower" {
     s.speed = nextSpeed(current: s.speed, up: false)
     ret true
   }
-  if actionId.equals(other: "settings.anim.faster") {
+  if actionId is "settings.anim.faster" {
     s.speed = nextSpeed(current: s.speed, up: true)
     ret true
   }
-  if actionId.equals(other: "settings.sky.hosek") {
+  if actionId is "settings.sky.hosek" {
     s.skyModel = SettingsSkyModel.hosek
     ret true
   }
-  if actionId.equals(other: "settings.sky.preetham") {
+  if actionId is "settings.sky.preetham" {
     s.skyModel = SettingsSkyModel.preetham
     ret true
   }
-  if actionId.equals(other: "settings.sky.solid") {
+  if actionId is "settings.sky.solid" {
     s.skyModel = SettingsSkyModel.solid
     ret true
   }
-  if actionId.equals(other: "settings.render.shadows") {
+  if actionId is "settings.render.shadows" {
     s.shadows = s.shadows is false
     ret true
   }
   # Scene selection is clamped to what the app actually has, so the buttons can
   # exist in an app with one scene without being able to select a second.
-  if actionId.equals(other: "settings.scene.1") {
+  if actionId is "settings.scene.1" {
     ret settingsSelectScene(s: s, scene: 1)
   }
-  if actionId.equals(other: "settings.scene.2") {
+  if actionId is "settings.scene.2" {
     ret settingsSelectScene(s: s, scene: 2)
   }
-  if actionId.equals(other: "settings.scene.3") {
+  if actionId is "settings.scene.3" {
     ret settingsSelectScene(s: s, scene: 3)
   }
   ret false

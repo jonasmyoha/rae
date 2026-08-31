@@ -38,13 +38,13 @@ func main() ret Int {
 
   # Memory is one decimal of MB: enough to watch a leak, not so much that the
   # last digit twitches every frame.
-  check(label: "one megabyte formats", ok: formatDebugMem(kb: 1024).equals(other: "mem: 1.0 MB"))
-  check(label: "half a megabyte formats", ok: formatDebugMem(kb: 512).equals(other: "mem: 0.5 MB"))
-  check(label: "a big heap formats", ok: formatDebugMem(kb: 20480).equals(other: "mem: 20.0 MB"))
-  check(label: "zero formats", ok: formatDebugMem(kb: 0).equals(other: "mem: 0.0 MB"))
+  check(label: "one megabyte formats", ok: formatDebugMem(kb: 1024) is "mem: 1.0 MB")
+  check(label: "half a megabyte formats", ok: formatDebugMem(kb: 512) is "mem: 0.5 MB")
+  check(label: "a big heap formats", ok: formatDebugMem(kb: 20480) is "mem: 20.0 MB")
+  check(label: "zero formats", ok: formatDebugMem(kb: 0) is "mem: 0.0 MB")
 
-  check(label: "fps rounds to whole frames", ok: formatDebugFps(fps: 59.6).equals(other: "fps: 60"))
+  check(label: "fps rounds to whole frames", ok: formatDebugFps(fps: 59.6) is "fps: 60")
   # Never negative: the window can be degenerate before the second frame lands.
-  check(label: "fps never reads negative", ok: formatDebugFps(fps: 0.0 - 3.0).equals(other: "fps: 0"))
+  check(label: "fps never reads negative", ok: formatDebugFps(fps: 0.0 - 3.0) is "fps: 0")
   ret 0
 }

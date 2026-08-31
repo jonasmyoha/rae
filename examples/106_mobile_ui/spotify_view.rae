@@ -94,7 +94,7 @@ func updateNodeText(world: mod UiWorld, pageId: view String, nodeId: view String
   # unconditional "update" to an unchanged string marks the render cache
   # dirty and costs a full repaint. This runs on every poll by design.
   let cur: view Text => componentView(this: world.texts, entity: entity)
-  if cur.text.equals(other: value) {
+  if cur.text is value {
     ret
   }
   let slot: mod Text => componentMod(this: world.texts, entity: entity)
@@ -249,7 +249,7 @@ func pollSpotify(
   # match the real player. Includes "user paused in Spotify directly"
   # and "user skipped tracks in Spotify" — both flip within 1Hz here.
   let playingKey: String = "playing"
-  let nowPlaying: Bool = track.state.equals(other: playingKey)
+  let nowPlaying: Bool = track.state is playingKey
   setPlaybackPlaying(state: playback, value: nowPlaying)
   playback.elapsedSec = pos
   if dur > 0.0 {
@@ -275,7 +275,7 @@ func pollSpotify(
   # Track-change → re-fetch artwork. Compare trackId, not artworkUrl
   # (Spotify sometimes reports a slightly different art URL between
   # polls for the same track during playback).
-  let changed: Bool = track.trackId.equals(other: state.lastTrackId) is false
+  let changed: Bool = track.trackId is state.lastTrackId is false
   if changed {
     state.lastTrackId = "{track.trackId}"
     refreshSpotifyArt(state: state, track: track, reg: reg)
