@@ -1,0 +1,36 @@
+import core
+open ecs/registry
+
+# #717: register components with serialize/replicate/editor flags (a bitmask, no
+# language annotations), then look them up and flag-test.
+
+func main() {
+  let nT: String = "Transform3D"
+  let nW: String = "WorldTransform3D"
+  let nE: String = "EditorGizmo"
+  let nX: String = "Nope"
+
+  var reg: ComponentRegistry = createComponentRegistry()
+  registerComponent(reg: reg, name: nT, flags: SERIALIZE bitor REPLICATE)
+  registerComponent(reg: reg, name: nW, flags: 0)   # derived cache: registered, not serialized
+  registerComponent(reg: reg, name: nE, flags: EDITOR_ONLY)
+
+  log("count: {registeredCount(reg: reg)}")
+  log("Transform3D flags: {componentFlags(reg: reg, name: nT)}")
+
+  log("Transform3D serialize: {registeredHasFlag(reg: reg, name: nT, flag: SERIALIZE)}")
+  log("Transform3D replicate: {registeredHasFlag(reg: reg, name: nT, flag: REPLICATE)}")
+  log("Transform3D editor: {registeredHasFlag(reg: reg, name: nT, flag: EDITOR_ONLY)}")
+
+  log("WorldTransform3D registered: {isRegistered(reg: reg, name: nW)}")
+  log("WorldTransform3D serialize: {registeredHasFlag(reg: reg, name: nW, flag: SERIALIZE)}")
+
+  log("EditorGizmo editor: {registeredHasFlag(reg: reg, name: nE, flag: EDITOR_ONLY)}")
+  log("Unknown registered: {isRegistered(reg: reg, name: nX)}")
+
+  # Re-registering overwrites the flags (SERIALIZE only) without adding a row.
+  registerComponent(reg: reg, name: nT, flags: SERIALIZE)
+  log("count after re-register: {registeredCount(reg: reg)}")
+  log("Transform3D flags after: {componentFlags(reg: reg, name: nT)}")
+  log("Transform3D replicate after: {registeredHasFlag(reg: reg, name: nT, flag: REPLICATE)}")
+}
