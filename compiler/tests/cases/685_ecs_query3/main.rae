@@ -1,0 +1,44 @@
+import core
+open ecs/entity
+open ecs/component_table
+open ecs/query
+
+# #708: query3 joins THREE component tables on the same smallest-table probe —
+# it iterates whichever of the three is smallest and probes the other two. Here
+# pos has 3, vel has 2, tag has 1, so query3 walks tag (smallest) and probes pos
+# and vel. Only e2 is present in all three, so the join yields exactly e2. The
+# loop mutates pos.x and tag.t through storage-aliasing mod refs; both writes
+# must be visible on read-back.
+
+type Pos { x: Int }
+type Vel { v: Int }
+type Tag { t: Int }
+
+func main() {
+  var pos: ComponentTable(Pos) = createComponentTable(Pos)
+  var vel: ComponentTable(Vel) = createComponentTable(Vel)
+  var tag: ComponentTable(Tag) = createComponentTable(Tag)
+  let e1: EntityId = { index: 1, generation: 0 }
+  let e2: EntityId = { index: 2, generation: 0 }
+  let e3: EntityId = { index: 3, generation: 0 }
+  componentSet(this: pos, entity: e1, data: Pos { x: 10 })
+  componentSet(this: pos, entity: e2, data: Pos { x: 20 })
+  componentSet(this: pos, entity: e3, data: Pos { x: 30 })
+  componentSet(this: vel, entity: e2, data: Vel { v: 2 })
+  componentSet(this: vel, entity: e3, data: Vel { v: 3 })
+  componentSet(this: tag, entity: e2, data: Tag { t: 1 })
+
+  let hits: List(Query3Match) = query3(tableA: pos, tableB: vel, tableC: tag)
+  log("q3 count: {hits.length}")
+  loop let row: view Query3Match in hits {
+    log("q3 entity: {row.entity.index}")
+    let posx: mod Pos => queryModAt(table: pos, denseIndex: row.indexA)
+    posx.x = posx.x + 100
+    let tg: mod Tag => queryModAt(table: tag, denseIndex: row.indexC)
+    tg.t = 7
+  }
+  let gotPos: Pos = componentGet(this: pos, entity: e2)
+  let gotTag: Tag = componentGet(this: tag, entity: e2)
+  log("e2.x after q3: {gotPos.x}")
+  log("e2.tag after q3: {gotTag.t}")
+}
