@@ -20,7 +20,7 @@ func makeFixed() pub ret Size {
 # Set a fixed-size rectangle on `entity` (the common case for
 # code-built UI nodes).
 func setRectFixed(world: mod UiWorld, entity: view EntityId, w: view Float, h: view Float) pub {
-  let r: Rect = { x: 0.0, y: 0.0, w: w, h: h }
+  let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: w, y: h } }
   componentSet(this: world.rects, entity: entity, data: r)
   componentSet(this: world.sizes, entity: entity, data: makeFixed())
 }
@@ -36,7 +36,7 @@ func makeFillH() pub ret Size {
 
 func buildVerticalSpacer(world: mod UiWorld) pub ret EntityId {
   let s: EntityId = createEntity(world: world)
-  let r: Rect = { x: 0.0, y: 0.0, w: 1.0, h: 1.0 }
+  let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: 1.0, y: 1.0 } }
   componentSet(this: world.rects, entity: s, data: r)
   componentSet(this: world.sizes, entity: s, data: makeFillH())
   ret s

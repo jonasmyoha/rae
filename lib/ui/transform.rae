@@ -45,7 +45,7 @@ func transformFxOf(world: view UiWorld, entity: view EntityId) ret TransformFx {
 
 func computedRectOf(world: view UiWorld, entity: view EntityId) ret ComputedRect {
   if componentHas(this: world.computedRects, entity: entity) is false {
-    ret ComputedRect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }
+    ret ComputedRect { position: { x: 0.0, y: 0.0 }, size: { x: 0.0, y: 0.0 } }
   }
   let r: ComputedRect = componentGet(this: world.computedRects, entity: entity)
   ret r
@@ -100,8 +100,8 @@ func composeTransform(
   # Add the runtime-only offset (scroll) here, in transform, so it
   # never dirties layout. Shifts this entity and its whole subtree.
   let ro: Vec2 = runtimeOffsetOf(world: world, entity: entity)
-  let absX: Float = parentX + cr.x + ro.x
-  let absY: Float = parentY + cr.y + ro.y
+  let absX: Float = parentX + cr.position.x + ro.x
+  let absY: Float = parentY + cr.position.y + ro.y
 
   let wt: WorldTransform = {
     x: absX
