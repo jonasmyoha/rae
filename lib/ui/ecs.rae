@@ -4,6 +4,7 @@ open ecs/entity
 open ecs/component_table
 open ecs/queue
 open ecs/world
+open ecs/list_helpers
 # Only raylib-free MSDF data types; paint code stays out of UiWorld.
 import ui/msdf_state
 
@@ -23,7 +24,12 @@ type UiWorld {
   # because it's a counter, not a handle — `createEntity` wraps the
   # current value into an EntityId on the way out.
   allocator: EntityAllocator
+  # Dense list of live entities, iterated by the layout/transform/layer/
+  # safe-area/render systems that must visit every entity once per frame.
   alive: List(EntityId)
+  # Sparse map entity.index -> its position in `alive` (-1 = not alive), so a
+  # destroy is an O(1) swap-remove instead of an O(n) scan+splice (#705).
+  aliveSlot: List(Int)
 
   # NodeId.id -> entity (stored as `Int` since Rae's `opt T` for struct
   # T currently miscompiles on unwrap; callers wrap with `entityId()`).
@@ -134,6 +140,7 @@ func createUiWorld() ret UiWorld {
   ret UiWorld {
     allocator: createEntityAllocator()
     alive: createList(EntityId, cap: 256)
+    aliveSlot: createList(Int, cap: 256)
     nodeIds: createStringMap(Int, cap: 128)
 
     rects: createComponentTable(Rect)
@@ -220,25 +227,25 @@ func createUiWorld() ret UiWorld {
   }
 }
 
-# Allocate a new entity id and mark it alive.
+# Allocate a new entity id and mark it alive. Its position in the dense `alive`
+# list is recorded in the sparse `aliveSlot` map so destroy can swap-remove it
+# in O(1).
 func createEntity(world: mod UiWorld) ret EntityId {
   let e: EntityId = allocEntity(this: world.allocator)
+  let pos: Int = world.alive.length
   let alive: mod List(EntityId) => world.alive
   alive.add(value: e)
+  ensureIntSlots(lst: world.aliveSlot, index: e.index)
+  setIntListAt(lst: world.aliveSlot, index: e.index, value: pos)
   ret e
 }
 
+# O(1): a handle is alive iff its slot's current generation still matches the
+# handle's (#705). A freed slot has a bumped generation, a never-allocated or
+# out-of-range index reads generation -1 — both compare unequal, so noEntity()
+# (index -1) and stale handles read false without touching the alive list.
 func isAlive(world: view UiWorld, entity: view EntityId) ret Bool {
-  let n: Int = world.alive.length
-  var i: Int = 0
-  loop i < n {
-    let e: EntityId = rae_ext_rae_buf_get(buf: world.alive.data, index: i)
-    if e is entity {
-      ret true
-    }
-    i = i + 1
-  }
-  ret false
+  ret allocatorGeneration(this: world.allocator, index: entity.index) is entity.generation
 }
 
 func aliveCount(world: view UiWorld) ret Int {
@@ -489,19 +496,27 @@ func destroyEntity(world: mod UiWorld, entity: view EntityId) pub {
   # Recycle the index and bump its generation so a stale handle to it
   # compares unequal to any future entity reusing the slot.
   freeEntity(this: world.allocator, entity: entity)
-  # Finally: drop the alive-list entry. Linear scan over
-  # world.alive (typically a few hundred entries).
-  let alive: mod List(EntityId) => world.alive
-  let n: Int = alive.length
-  var i: Int = 0
-  loop i < n {
-    let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
-    if e is entity {
-      alive.remove(index: i)
-      ret
-    }
-    i = i + 1
+  # Finally: drop the alive-list entry in O(1) (#705). The sparse `aliveSlot`
+  # map gives this entity's position in the dense `alive` list directly, so we
+  # swap the last entry into that hole, fix the moved entity's recorded slot,
+  # pop, and clear this slot — no scan. (Order in `alive` is not significant:
+  # every system that iterates it either processes each entity independently or
+  # sorts the roots it collects.)
+  let idx: Int = entity.index
+  if idx < 0 or idx >= world.aliveSlot.length {
+    ret
   }
+  let pos: Int = intListAt(lst: world.aliveSlot, index: idx)
+  if pos < 0 {
+    ret
+  }
+  let alive: mod List(EntityId) => world.alive
+  let last: Int = alive.length - 1
+  let lastE: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: last)
+  rae_ext_rae_buf_set(buf: alive.data, index: pos, value: lastE)
+  setIntListAt(lst: world.aliveSlot, index: lastE.index, value: pos)
+  alive.length = last
+  setIntListAt(lst: world.aliveSlot, index: idx, value: 0 - 1)
 }
 
 # Recursively destroy `root` and every descendant via the Children
