@@ -144,8 +144,19 @@ func componentView(T: type, this: view ComponentTable(T), entity: view EntityId)
   ret view rae_ext_rae_buf_get(buf: this.denseData.data, index: safeIdx)
 }
 
-# Borrow a mutable reference into the table's storage. Mutating
-# through the returned ref writes directly to the component slot.
+# Borrow a MUTABLE reference that ALIASES the table's storage: writes through it
+# land directly in the component slot — no copy, no componentSet write-back
+# (#721). This is how gameplay code mutates a component in place:
+#
+#   let velocity: mod Velocity => componentMod(this: world.velocities, entity: e)
+#   velocity.dx = velocity.dx + gravity * dt   # persists; NO componentSet needed
+#
+# Contrast componentGet, which hands back a COPY: mutating that copy does NOT
+# touch the table. The `mod T` return is a real write-through reference thanks to
+# the primitive/struct ref-binding fixes (#654/#656/#662/#663) that make
+# `let x: mod T => call()` alias the callee's returned storage rather than a
+# temporary. Returns a ref to dense slot 0 for a MISSING entity (check
+# componentHas first), matching componentGet's documented compromise.
 func componentMod(T: type, this: mod ComponentTable(T), entity: view EntityId) ret mod T {
   let idx: Int = componentIndexOf(this, entity: entity)
   var safeIdx: Int = idx
