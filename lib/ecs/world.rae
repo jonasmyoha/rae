@@ -1,9 +1,15 @@
-# lib/ecs — the entity allocator: index recycling + generational handles (#704).
+# lib/ecs — the reusable entity core: index recycling, generational handles, and
+# the live-entity set (#704 allocator, #705 O(1) alive, #706 packaged for reuse).
 #
-# On destroy a slot's `generation` is bumped and its `index` returns to a free
-# list; the next allocation reuses that index with the higher generation, so an
-# old handle to the recycled slot compares unequal (its generation is stale).
-# Reusable by any World — UiWorld embeds it, and GameWorlds will too (#706).
+# EntityAllocator is the whole entity-lifecycle core, NOT just an index pool: it
+# owns the generation table, the free list, AND the dense live-entity set with
+# its sparse position map. Any World embeds ONE of these and gets create /
+# destroy / isAlive / alive-iteration for free — its own component tables stay
+# app-specific fields alongside it (UiWorld does exactly this; a GameWorld can
+# too, see compiler/tests/cases/683_ecs_world_core). On destroy a slot's
+# `generation` is bumped and its `index` returns to the free list; the next
+# allocation reuses that index with the higher generation, so an old handle to
+# the recycled slot compares unequal (its generation is stale).
 import core
 open ecs/entity
 import ecs/list_helpers
@@ -12,6 +18,11 @@ type EntityAllocator {
   generations: List(Int)   # generations[index] = the slot's current generation
   freeList: List(Int)      # indices freed by destroy, available for reuse
   nextIndex: Int           # next never-used index (when the free list is empty)
+  # The live-entity set (#705): `alive` is the dense list every system iterates
+  # once per frame; `aliveSlot[index]` is that entity's position in `alive`
+  # (-1 = not alive), which makes destroy an O(1) swap-remove instead of a scan.
+  alive: List(EntityId)
+  aliveSlot: List(Int)
 }
 
 func createEntityAllocator() ret EntityAllocator {
@@ -19,29 +30,43 @@ func createEntityAllocator() ret EntityAllocator {
     generations: createList(Int, cap: 256)
     freeList: createList(Int, cap: 64)
     nextIndex: 1
+    alive: createList(EntityId, cap: 256)
+    aliveSlot: createList(Int, cap: 256)
   }
 }
 
 # Allocate an entity: reuse the most-recently-freed index (with its bumped
-# generation) if any, else hand out a fresh index at generation 0.
+# generation) if any, else hand out a fresh index at generation 0. Records the
+# new handle in the live set (its position in `alive` kept in `aliveSlot` so
+# freeEntity can swap-remove it in O(1)).
 func allocEntity(this: mod EntityAllocator) ret EntityId {
+  var idx: Int = 0
+  var gen: Int = 0
   let freeCount: Int = this.freeList.length
   if freeCount > 0 {
     let last: Int = freeCount - 1
-    let idx: Int = intListAt(lst: this.freeList, index: last)
+    idx = intListAt(lst: this.freeList, index: last)
     popLastInt(lst: this.freeList)
-    let gen: Int = intListAt(lst: this.generations, index: idx)
-    ret EntityId { index: idx, generation: gen }
+    gen = intListAt(lst: this.generations, index: idx)
+  } else {
+    idx = this.nextIndex
+    this.nextIndex = idx + 1
+    ensureIntSlots(lst: this.generations, index: idx)
+    setIntListAt(lst: this.generations, index: idx, value: 0)
+    gen = 0
   }
-  let idx: Int = this.nextIndex
-  this.nextIndex = idx + 1
-  ensureIntSlots(lst: this.generations, index: idx)
-  setIntListAt(lst: this.generations, index: idx, value: 0)
-  ret EntityId { index: idx, generation: 0 }
+  let entity: EntityId = { index: idx, generation: gen }
+  let pos: Int = this.alive.length
+  appendEntityList(lst: this.alive, value: entity)
+  ensureIntSlots(lst: this.aliveSlot, index: idx)
+  setIntListAt(lst: this.aliveSlot, index: idx, value: pos)
+  ret entity
 }
 
-# Free an entity: bump its slot's generation (so stale handles compare unequal)
-# and return the index to the free list for reuse.
+# Free an entity: bump its slot's generation (so stale handles compare unequal),
+# return the index to the free list, and drop it from the live set in O(1) via
+# the sparse slot map (swap the last entry into the hole, fix the moved entity's
+# recorded slot, pop, clear this slot).
 func freeEntity(this: mod EntityAllocator, entity: view EntityId) {
   let idx: Int = entity.index
   if idx < 0 {
@@ -51,10 +76,22 @@ func freeEntity(this: mod EntityAllocator, entity: view EntityId) {
   let cur: Int = intListAt(lst: this.generations, index: idx)
   setIntListAt(lst: this.generations, index: idx, value: cur + 1)
   appendIntList(lst: this.freeList, value: idx)
+  # O(1) removal from the dense `alive` list.
+  if idx >= this.aliveSlot.length {
+    ret
+  }
+  let pos: Int = intListAt(lst: this.aliveSlot, index: idx)
+  if pos < 0 {
+    ret
+  }
+  let last: Int = this.alive.length - 1
+  let lastEntity: EntityId = entityListAt(lst: this.alive, index: last)
+  swapRemoveEntityList(lst: this.alive, index: pos)
+  setIntListAt(lst: this.aliveSlot, index: lastEntity.index, value: pos)
+  setIntListAt(lst: this.aliveSlot, index: idx, value: 0 - 1)
 }
 
 # The current generation of a slot, or -1 if the index was never allocated.
-# #705 uses this for O(1) isAlive.
 func allocatorGeneration(this: view EntityAllocator, index: view Int) ret Int {
   if index < 0 {
     ret -1
@@ -63,4 +100,17 @@ func allocatorGeneration(this: view EntityAllocator, index: view Int) ret Int {
     ret -1
   }
   ret intListAt(lst: this.generations, index: index)
+}
+
+# O(1) liveness: a handle is alive iff its slot's current generation still
+# matches the handle's. A freed slot has a bumped generation and a never-
+# allocated/out-of-range index reads -1, so both compare unequal — noEntity()
+# (index -1) and stale handles read false without touching the alive list.
+func allocatorIsAlive(this: view EntityAllocator, entity: view EntityId) ret Bool {
+  ret allocatorGeneration(this: this, index: entity.index) is entity.generation
+}
+
+# How many entities are currently alive (the dense set's length).
+func allocatorAliveCount(this: view EntityAllocator) ret Int {
+  ret this.alive.length
 }
