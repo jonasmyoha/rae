@@ -1,5 +1,5 @@
 # Layer / paint-order helpers. Pure ECS queries against `LayerRoot`,
-# `LayerRef`, `Parent`, and `WorldTransform` — no raylib calls — so
+# `LayerRef`, `Parent`, and `WorldTransform2D` — no raylib calls — so
 # `ui/input` can use `collectPaintableRoots` for hit-testing without
 # pulling in `ui/render`'s raylib externs (which would break tests
 # that import only `ui/input` under a non-raylib live VM).
@@ -91,7 +91,7 @@ func entityLayerOrder(world: view UiWorld, entity: view EntityId) pub ret Int {
   ret 0
 }
 
-# Collect every parentless root with a WorldTransform, in ascending
+# Collect every parentless root with a WorldTransform2D, in ascending
 # Layer order. Used by both `renderSystem` (painter's algorithm) and
 # the input hit-test (which walks the result in reverse).
 func collectPaintableRoots(world: view UiWorld) pub ret List(EntityId) {

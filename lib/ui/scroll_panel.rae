@@ -59,7 +59,7 @@ func scrollNodeEntity(world: view UiWorld, nodeId: view String) ret EntityId {
   ret noEntity()
 }
 
-# POSITION COMES FROM WorldTransform, SIZE FROM ComputedRect. ComputedRect.x/y
+# POSITION COMES FROM WorldTransform2D, SIZE FROM ComputedRect. ComputedRect.x/y
 # is PARENT-LOCAL — a panel nested three deep reports x=12 while sitting at
 # x=952 on screen — so testing a pointer against it compares screen coordinates
 # to local ones and the panel is silently inert. app3d/slider carries the same
@@ -78,11 +78,11 @@ func scrollPointInNode(world: view UiWorld, nodeId: view String,
     ret false
   }
   let r: ComputedRect = componentGet(this: world.computedRects, entity: e)
-  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
-  if x < wt.x or x > wt.x + r.size.x {
+  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: e)
+  if x < wt.position.x or x > wt.position.x + r.size.x {
     ret false
   }
-  if y < wt.y or y > wt.y + r.size.y {
+  if y < wt.position.y or y > wt.position.y + r.size.y {
     ret false
   }
   ret true

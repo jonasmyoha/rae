@@ -52,13 +52,13 @@ func uiPointInEntity(world: view UiWorld, entity: view EntityId, x: view Float, 
   if uiEntityActive(world: world, entity: entity) is false { ret false }
   if componentHas(this: world.worldTransforms, entity: entity) is false { ret false }
   if componentHas(this: world.computedRects, entity: entity) is false { ret false }
-  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: entity)
-  if wt.visible is false { ret false }
+  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
+  if worldVisualOf(world: world, entity: entity).visible is false { ret false }
   let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
-  if x < wt.x { ret false }
-  if y < wt.y { ret false }
-  if x > wt.x + cr.size.x { ret false }
-  if y > wt.y + cr.size.y { ret false }
+  if x < wt.position.x { ret false }
+  if y < wt.position.y { ret false }
+  if x > wt.position.x + cr.size.x { ret false }
+  if y > wt.position.y + cr.size.y { ret false }
   ret true
 }
 
