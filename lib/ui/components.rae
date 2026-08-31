@@ -16,6 +16,10 @@
 # defines its own). Import pulls vec2 into the build graph so its struct is
 # emitted; the type name itself is globally visible to every UI file.
 import vec2
+# #725: the UI's derived world-transform cache is the general Transform2D /
+# WorldTransform2D from lib/ecs (position/rotation/scale Vec2 pair), not a
+# bespoke scalar struct. Import pulls the module into the build graph.
+import ecs/transform
 
 enum SizeMode {
   fixed
@@ -758,12 +762,13 @@ type ComputedRect {
   size: Vec2
 }
 
-type WorldTransform {
-  x: Float
-  y: Float
-  scaleX: Float
-  scaleY: Float
-  rotation: Float
+# #725: alpha/visible are NOT part of a transform — they are their own derived
+# cache. The transform pass accumulates them down the tree (parent alpha ×
+# child, ancestor-inactive hides the subtree) and writes them here, beside the
+# entity's WorldTransform2D. Split out of the old scalar WorldTransform so the
+# geometry cache can be the general WorldTransform2D. Derived / runtime-only:
+# registered WITHOUT SERIALIZE, rebuilt every transform pass.
+type WorldVisual {
   alpha: Float
   visible: Bool
 }

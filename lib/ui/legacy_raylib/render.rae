@@ -49,8 +49,10 @@ func renderAlpha255(world: view UiWorld, entity: view EntityId) ret Int {
   if componentHas(this: world.worldTransforms, entity: entity) is false {
     ret 255
   }
-  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: entity)
-  var a: Float = wt.alpha
+  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
+  var wv: WorldVisual = { alpha: 1.0, visible: true }
+  if componentHas(this: world.worldVisuals, entity: entity) { wv = componentGet(this: world.worldVisuals, entity: entity) }
+  var a: Float = wv.alpha
   if a < 0.0 {
     a = 0.0
   }
@@ -76,18 +78,18 @@ func chainRgba(c: view RgbaColor, chain255: view Int) ret RgbaColor {
 # Paint Shape variants on `entity` using the world transform / size
 # already on it. Caller has already verified visibility + alpha > 0.
 # Drawing goes through the backend-agnostic sink (lib/ui/draw.rae).
-func paintShape(world: view UiWorld, entity: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
+func paintShape(world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
   let sh: Shape = componentGet(this: world.shapes, entity: entity)
   let fill: RgbaColor = chainRgba(c: sh.fill, chain255: chain255)
 
   if sh.kind is ShapeKind.rect {
-    sinkRect(x: wt.x, y: wt.y, w: cr.size.x, h: cr.size.y, c: fill)
+    sinkRect(x: wt.position.x, y: wt.position.y, w: cr.size.x, h: cr.size.y, c: fill)
     ret
   }
   if sh.kind is ShapeKind.roundedRect {
     # `Shape.radius` is in pixels; the sink clamps it and converts to
     # raylib's fraction-of-smaller-side roundness.
-    sinkRoundedRect(x: wt.x, y: wt.y, w: cr.size.x, h: cr.size.y, radius: sh.radius, c: fill)
+    sinkRoundedRect(x: wt.position.x, y: wt.position.y, w: cr.size.x, h: cr.size.y, radius: sh.radius, c: fill)
     ret
   }
   if sh.kind is ShapeKind.circle {
@@ -101,14 +103,14 @@ func paintShape(world: view UiWorld, entity: view EntityId, wt: view WorldTransf
     if r <= 0.0 {
       r = smaller / 2.0
     }
-    let cx: Float = wt.x + (cr.size.x / 2.0)
-    let cy: Float = wt.y + (cr.size.y / 2.0)
+    let cx: Float = wt.position.x + (cr.size.x / 2.0)
+    let cy: Float = wt.position.y + (cr.size.y / 2.0)
     sinkCircle(cx: cx, cy: cy, r: r, c: fill)
     ret
   }
 }
 
-func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
+func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
   let sp: view Sprite => componentView(this: world.sprites, entity: entity)
   let key: String = sp.textureKey
   let tint: Color = toRaylibColor(c: sp.tint, chain255: chain255)
@@ -146,8 +148,8 @@ func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view En
     drawTextWithFont(
       slot: iconFontSlot
       text: glyph
-      x: wt.x + centerOffsetX
-      y: wt.y + centerOffsetY
+      x: wt.position.x + centerOffsetX
+      y: wt.position.y + centerOffsetY
       fontSize: fontSize
       spacing: 0.0
       color: tint
@@ -205,7 +207,7 @@ func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view En
   }
   drawTextureEx(
     texture: tex
-    pos: Vector2 { x: wt.x + offX, y: wt.y + offY }
+    pos: Vector2 { x: wt.position.x + offX, y: wt.position.y + offY }
     rotation: 0.0
     scale: drawScale
     tint: tint
@@ -439,7 +441,7 @@ func textStyleIsRightAligned(styleId: view String) ret Bool {
   ret false
 }
 
-func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
+func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
   let tx: view Text => componentView(this: world.texts, entity: entity)
   let txt: String = tx.text
   if txt.length() is 0 {
@@ -447,8 +449,8 @@ func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransfo
   }
   let size: Float = textStyleSize(styleId: tx.styleId)
   let col: Color = textStyleColor(styleId: tx.styleId, chain255: chain255)
-  var drawX: Float = wt.x
-  var drawY: Float = wt.y
+  var drawX: Float = wt.position.x
+  var drawY: Float = wt.position.y
   # Alignment: styleId (legacy) or Align component (Center / End).
   var centerX: Bool = textStyleIsCentered(styleId: tx.styleId)
   var centerY: Bool = textStyleIsCentered(styleId: tx.styleId)
@@ -471,13 +473,13 @@ func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransfo
       spacing: 1.0
     )
     if centerX {
-      drawX = wt.x + (cr.size.x - measured.toFloat()) / 2.0
+      drawX = wt.position.x + (cr.size.x - measured.toFloat()) / 2.0
     }
     if rightAlignX {
-      drawX = wt.x + cr.size.x - measured.toFloat()
+      drawX = wt.position.x + cr.size.x - measured.toFloat()
     }
     if centerY {
-      drawY = wt.y + (cr.size.y - size) / 2.0
+      drawY = wt.position.y + (cr.size.y - size) / 2.0
     }
   }
   if isUiMsdfEnabled(world: world) {
@@ -530,7 +532,7 @@ func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransfo
 # texture and points the BackdropImage at the key. Silently no-ops
 # when the texture key isn't registered (first-frame race before the
 # host's first capture lands).
-func paintBackdropImage(reg: view TextureRegistry, world: view UiWorld, entity: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
+func paintBackdropImage(reg: view TextureRegistry, world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
   let bi: BackdropImage = componentGet(this: world.backdropImages, entity: entity)
   let key: String = bi.textureKey
   if textureHas(reg: reg, key: key) is false {
@@ -559,7 +561,7 @@ func paintBackdropImage(reg: view TextureRegistry, world: view UiWorld, entity: 
   let white: Color = { r: 255, g: 255, b: 255, a: chain255 }
   drawTextureEx(
     texture: tex
-    pos: Vector2 { x: wt.x + offX, y: wt.y + offY }
+    pos: Vector2 { x: wt.position.x + offX, y: wt.position.y + offY }
     rotation: 0.0
     scale: scale
     tint: white
@@ -571,7 +573,7 @@ func paintBackdropImage(reg: view TextureRegistry, world: view UiWorld, entity: 
 # the entity's CornerRadius if present (defaults to 0 = sharp). Same
 # inherited-alpha multiplication as `paintShape` so opacity chains
 # work the same way.
-func paintGradientFill(world: view UiWorld, entity: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
+func paintGradientFill(world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
   let gf: view GradientFill => componentView(this: world.gradientFills, entity: entity)
   var radius: Float = 0.0
   if componentHas(this: world.cornerRadiuses, entity: entity) {
@@ -581,8 +583,8 @@ func paintGradientFill(world: view UiWorld, entity: view EntityId, wt: view Worl
   let fa: Int = (gf.from.a.toFloat() * chain255.toFloat() / 255.0).toInt()
   let ta: Int = (gf.to.a.toFloat() * chain255.toFloat() / 255.0).toInt()
   drawGradientRect(
-    x: wt.x
-    y: wt.y
+    x: wt.position.x
+    y: wt.position.y
     w: cr.size.x
     h: cr.size.y
     radius: radius
@@ -606,11 +608,13 @@ func paintEntity(world: view UiWorld, reg: view TextureRegistry, entity: view En
   if componentHas(this: world.worldTransforms, entity: entity) is false {
     ret
   }
-  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: entity)
-  if wt.visible is false {
+  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
+  var wv: WorldVisual = { alpha: 1.0, visible: true }
+  if componentHas(this: world.worldVisuals, entity: entity) { wv = componentGet(this: world.worldVisuals, entity: entity) }
+  if wv.visible is false {
     ret
   }
-  if wt.alpha <= 0.0 {
+  if wv.alpha <= 0.0 {
     ret
   }
   if componentHas(this: world.computedRects, entity: entity) is false {
@@ -618,7 +622,7 @@ func paintEntity(world: view UiWorld, reg: view TextureRegistry, entity: view En
   }
   let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
   # Viewport cull: skip the paint (esp. text shaping) for entities fully off-screen — the big win for long scrolled lists (200+ rows). world.layoutW/H is the screen; 80px margin keeps edge shadows/partial rows.
-  if (wt.y + cr.size.y + 80.0 < 0.0) or (wt.y - 80.0 > world.layoutH) or (wt.x + cr.size.x + 80.0 < 0.0) or (wt.x - 80.0 > world.layoutW) { ret }
+  if (wt.position.y + cr.size.y + 80.0 < 0.0) or (wt.position.y - 80.0 > world.layoutH) or (wt.position.x + cr.size.x + 80.0 < 0.0) or (wt.position.x - 80.0 > world.layoutW) { ret }
   let chain255: Int = renderAlpha255(world: world, entity: entity)
 
   # GradientFill takes precedence over a solid Shape.fill (the gradient
@@ -757,20 +761,22 @@ func renderDebugClickRects(
     let e: EntityId = componentEntityAt(this: world.onClicks, i: i)
     if componentHas(this: world.worldTransforms, entity: e) {
       if componentHas(this: world.computedRects, entity: e) {
-        let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
-        if wt.visible {
+        let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: e)
+        var wv: WorldVisual = { alpha: 1.0, visible: true }
+        if componentHas(this: world.worldVisuals, entity: e) { wv = componentGet(this: world.worldVisuals, entity: e) }
+        if wv.visible {
           let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
           var inside: Bool = true
-          if mouseX < wt.x {
+          if mouseX < wt.position.x {
             inside = false
           }
-          if mouseY < wt.y {
+          if mouseY < wt.position.y {
             inside = false
           }
-          if mouseX > wt.x + cr.size.x {
+          if mouseX > wt.position.x + cr.size.x {
             inside = false
           }
-          if mouseY > wt.y + cr.size.y {
+          if mouseY > wt.position.y + cr.size.y {
             inside = false
           }
           var col: Color = idleColor
@@ -785,8 +791,8 @@ func renderDebugClickRects(
             }
           }
           drawRectangleLines(
-            x: wt.x
-            y: wt.y
+            x: wt.position.x
+            y: wt.position.y
             width: cr.size.x
             height: cr.size.y
             color: col
@@ -802,8 +808,8 @@ func renderDebugClickRects(
           # slot 0; falls back to raylib's default when the slot
           # isn't loaded (see `drawTextWithFont`).
           if inside {
-            let ix: Int = wt.x.toInt()
-            let iy: Int = wt.y.toInt()
+            let ix: Int = wt.position.x.toInt()
+            let iy: Int = wt.position.y.toInt()
             let iw: Int = cr.size.x.toInt()
             let ih: Int = cr.size.y.toInt()
             let dimText: String = "#{e} {ix},{iy} {iw}x{ih}"
@@ -811,8 +817,8 @@ func renderDebugClickRects(
             let dimSpacing: Float = 0.5
             # Anchor inside the top-left corner with a small inset so
             # the glyphs don't kiss the outline stroke.
-            let labelX: Float = wt.x + 4.0
-            let labelY: Float = wt.y + 2.0
+            let labelX: Float = wt.position.x + 4.0
+            let labelY: Float = wt.position.y + 2.0
             drawTextWithFont(
               slot: 0
               text: dimText
@@ -918,7 +924,7 @@ func createRenderCache() pub ret RenderCache {
 # valid — caller should skip beginDrawing/endDrawing for this frame.
 func renderCacheDirty(world: view UiWorld, cache: mod RenderCache) pub ret Bool {
   let crGen: Int = componentTableGeneration(ComputedRect, this: world.computedRects)
-  let wtGen: Int = componentTableGeneration(WorldTransform, this: world.worldTransforms)
+  let wtGen: Int = componentTableGeneration(WorldTransform2D, this: world.worldTransforms)
   let shGen: Int = componentTableGeneration(Shape, this: world.shapes)
   let spGen: Int = componentTableGeneration(Sprite, this: world.sprites)
   let txGen: Int = componentTableGeneration(Text, this: world.texts)

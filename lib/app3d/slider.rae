@@ -208,27 +208,27 @@ func debugNodeRect(world: view UiWorld, nodeId: view String) pub {
   log("[slider] {nodeId}: x={r.position.x} y={r.position.y} w={r.size.x} h={r.size.y}")
 }
 
-# POSITION COMES FROM WorldTransform, SIZE FROM ComputedRect.
+# POSITION COMES FROM WorldTransform2D, SIZE FROM ComputedRect.
 #
 # ComputedRect.x/y is PARENT-LOCAL — a control nested three deep in a panel
 # reports x=12 while sitting at x=952 on screen. Testing a pointer against it
 # compares screen coordinates to local ones, so a press is never inside and the
-# control is silently inert. uiHitTest gets this right (wt.x + cr.size.x) and is the
+# control is silently inert. uiHitTest gets this right (wt.position.x + cr.size.x) and is the
 # reference; these helpers now match it.
 func nodeScreenX(world: view UiWorld, e: view EntityId) ret Float {
   if componentHas(this: world.worldTransforms, entity: e) is false {
     ret 0.0
   }
-  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
-  ret wt.x
+  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: e)
+  ret wt.position.x
 }
 
 func nodeScreenY(world: view UiWorld, e: view EntityId) ret Float {
   if componentHas(this: world.worldTransforms, entity: e) is false {
     ret 0.0
   }
-  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
-  ret wt.y
+  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: e)
+  ret wt.position.y
 }
 
 func pointInNode(world: view UiWorld, nodeId: view String,
