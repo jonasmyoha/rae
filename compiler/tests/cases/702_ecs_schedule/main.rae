@@ -1,0 +1,54 @@
+import core
+open ecs/entity
+open ecs/component_table
+open ecs/schedule
+
+# #755: a Schedule runs system entries in explicit order and skips an entry when
+# none of the tables its system READS changed generation since the last run.
+# Here: `move` reads velocities, `render` reads positions.
+
+type Pos { x: Int }
+type Vel { v: Int }
+
+# One frame of the schedule: walk entries in order, run each only when its read
+# tables' generation moved. Returns the space-joined names that ran (proves order
+# + dirty-skip). Entry 0 = move (reads velocities), entry 1 = render (reads
+# positions) — matching addSystem order.
+func runFrame(sched: mod Schedule, positions: view ComponentTable(Pos),
+              velocities: view ComponentTable(Vel)) ret String {
+  var order: String = ""
+  if scheduleShouldRun(schedule: sched, index: 0, readGeneration: componentTableGeneration(this: velocities)) {
+    order = order.concat(other: "move ")
+  }
+  if scheduleShouldRun(schedule: sched, index: 1, readGeneration: componentTableGeneration(this: positions)) {
+    order = order.concat(other: "render ")
+  }
+  ret order
+}
+
+func main() {
+  var positions: ComponentTable(Pos) = createComponentTable(Pos)
+  var velocities: ComponentTable(Vel) = createComponentTable(Vel)
+  var sched: Schedule = createSchedule()
+  let moveIdx: Int = addSystem(schedule: sched, name: "move")
+  let renderIdx: Int = addSystem(schedule: sched, name: "render")
+  log("size: {scheduleSize(schedule: sched)}")
+  log("order: {scheduleName(schedule: sched, index: moveIdx)} {scheduleName(schedule: sched, index: renderIdx)}")
+
+  let e1: EntityId = { index: 1, generation: 0 }
+  componentSet(this: positions, entity: e1, data: Pos { x: 10 })
+  componentSet(this: velocities, entity: e1, data: Vel { v: 2 })
+
+  # Frame 1: first run — both systems run, in order.
+  log("frame1: {runFrame(sched: sched, positions: positions, velocities: velocities)}")
+  # Frame 2: nothing mutated — both skip.
+  log("frame2: {runFrame(sched: sched, positions: positions, velocities: velocities)}")
+  # Frame 3: mutate velocities — only move (reads velocities) runs.
+  let vm: mod Vel => componentMod(this: velocities, entity: e1)
+  vm.v = 9
+  log("frame3: {runFrame(sched: sched, positions: positions, velocities: velocities)}")
+  # Frame 4: mutate positions — only render (reads positions) runs.
+  let pm: mod Pos => componentMod(this: positions, entity: e1)
+  pm.x = 99
+  log("frame4: {runFrame(sched: sched, positions: positions, velocities: velocities)}")
+}
