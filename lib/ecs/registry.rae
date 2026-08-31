@@ -1,0 +1,96 @@
+# lib/ecs — component registry (docs/ecs-general-architecture.md §2.7).
+#
+# ONE registration table drives serialization, networking replication, and
+# editor-only handling — with NO language annotations. A component is not
+# serializable because of a keyword; it is serializable because it was
+# registered here with the SERIALIZE flag. Derived / cache components
+# (WorldTransform*, ComputedRect, MeasuredSize, ...) are simply registered
+# WITHOUT SERIALIZE (or not registered at all), so "don't persist runtime state"
+# falls out of the registry rather than a type annotation.
+#
+# On `save` / `load`: Rae has no first-class function references (see the same
+# note in lib/ui/registry.rae), so the registry does NOT store per-component
+# callbacks. save/load are dispatched by NAME in a switch — the serialize-out /
+# load pass (#719) builds that dispatch and keys it on the registered name. So an
+# entry is a name + flags; the name IS the save/load key.
+import core
+
+# Flag bitmask. Combine with `bitor` (e.g. SERIALIZE bitor REPLICATE) and test
+# with hasFlag / registeredHasFlag.
+const SERIALIZE: Int = 1     # persist to save files
+const REPLICATE: Int = 2     # send over the network
+const EDITOR_ONLY: Int = 4   # exists only in the editor; never in a shipped save
+
+type ComponentEntry {
+  name: String
+  flags: Int
+}
+
+type ComponentRegistry {
+  # The component set is dozens of kinds, populated once at setup, so a linear
+  # scan is fine — and a StringMap inside a struct hits a Live-VM corner (see
+  # lib/ui/registry.rae), which this deliberately avoids.
+  entries: List(ComponentEntry)
+}
+
+func createComponentRegistry() ret ComponentRegistry {
+  ret ComponentRegistry { entries: createList(ComponentEntry, cap: 32) }
+}
+
+# Register `name` with its flag bitmask, or overwrite the flags if `name` is
+# already registered. save/load are keyed by this name in the serialize dispatch
+# (#719); registration is name + flags.
+func registerComponent(reg: mod ComponentRegistry, name: view String, flags: view Int) {
+  loop var i: Int = 0, i < reg.entries.length, ++i {
+    if let existing: view ComponentEntry => reg.entries.viewAt(index: i) {
+      if existing.name is name {
+        let slot: mod ComponentEntry => reg.entries.modAt(index: i)
+        slot.flags = flags
+        ret
+      }
+    }
+  }
+  var nameCopy: String = ""
+  nameCopy = nameCopy.concat(other: name)
+  reg.entries.add(value: ComponentEntry { name: own nameCopy, flags: flags })
+}
+
+# The flags registered for `name`, or 0 (no flags) if it isn't registered.
+func componentFlags(reg: view ComponentRegistry, name: view String) ret Int {
+  loop var i: Int = 0, i < reg.entries.length, ++i {
+    if let existing: view ComponentEntry => reg.entries.viewAt(index: i) {
+      if existing.name is name {
+        ret existing.flags
+      }
+    }
+  }
+  ret 0
+}
+
+# Whether `name` is registered at all (independent of its flags).
+func isRegistered(reg: view ComponentRegistry, name: view String) ret Bool {
+  loop var i: Int = 0, i < reg.entries.length, ++i {
+    if let existing: view ComponentEntry => reg.entries.viewAt(index: i) {
+      if existing.name is name {
+        ret true
+      }
+    }
+  }
+  ret false
+}
+
+# Bitmask test on a raw flags value: is `flag` set in `flags`?
+func hasFlag(flags: view Int, flag: view Int) ret Bool {
+  ret (flags bitand flag) is not 0
+}
+
+# Whether the registered component `name` has `flag` set. Unregistered names
+# have no flags, so this is false for them.
+func registeredHasFlag(reg: view ComponentRegistry, name: view String, flag: view Int) ret Bool {
+  ret hasFlag(flags: componentFlags(reg: reg, name: name), flag: flag)
+}
+
+# How many components are registered.
+func registeredCount(reg: view ComponentRegistry) ret Int {
+  ret reg.entries.length
+}
