@@ -77,19 +77,29 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                         }
                         inferred_args = concrete_args;
                     } else if (d->params) {
-                        // Try inference from each param/arg pair (not just `this`).
+                        // Accumulate inference across ALL param/arg pairs so a
+                        // multi-type-param generic (query2(A,B,a:T(A),b:T(B)))
+                        // binds every param — the old loop stopped at the first
+                        // param, which can only bind one type param.
+                        const AstTypeRef* patterns[32]; const AstTypeRef* concretes[32]; size_t np = 0;
                         const AstParam* p = d->params;
                         const AstCallArg* a = expr->as.call.args;
-                        while (!inferred_args && p && a) {
+                        while (p && a && np < 32) {
                             const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
-                            if (arg_tr) {
-                                if (ctx->generic_params && ctx->generic_args)
-                                    arg_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, arg_tr);
-                                AstTypeRef* inferred = infer_generic_args(ctx->compiler_ctx, d, p->type, arg_tr);
-                                if (inferred) inferred_args = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, inferred);
-                            }
+                            if (arg_tr && ctx->generic_params && ctx->generic_args)
+                                arg_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, arg_tr);
+                            patterns[np] = p->type; concretes[np] = arg_tr; np++;
                             p = p->next; a = a->next;
                         }
+                        // `concretes` were already substituted through the
+                        // enclosing generic context before inference, so the
+                        // result is fully concrete. Use it directly — do NOT
+                        // pass the whole list through substitute_type_ref, which
+                        // only processes the FIRST element (it clones one type
+                        // and nulls ->next), truncating a multi-type-param arg
+                        // list to its first arg.
+                        AstTypeRef* inferred = infer_generic_args_multi(ctx->compiler_ctx, d, patterns, concretes, np);
+                        if (inferred) inferred_args = inferred;
                     }
                     // Try return-type inference from expected type (let x: Type = genericFunc(...))
                     if (!inferred_args && ctx->has_expected_type && d->returns && d->returns->type) {
