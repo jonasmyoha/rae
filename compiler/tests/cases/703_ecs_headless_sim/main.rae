@@ -1,0 +1,274 @@
+import core
+open json
+open ecs/entity
+open ecs/world
+open ecs/component_table
+open ecs/query
+open ecs/tag
+open ecs/registry
+open ecs/serialize
+open ecs/event
+open ecs/schedule
+
+# #757: a COMPLETE ECS program with NO graphics — proving the lib/ecs core is a
+# general program structure, not a UI-only device. One headless combat tick loop
+# exercises every primitive: a World (entity allocator + component tables),
+# components, a tag (zero-field marker), resources (a plain World field), an
+# EventQueue (produced then drained within a frame), a Schedule (ordered systems
+# with generation dirty-skip), and a registry-driven worldToJson/worldFromJson
+# round-trip. Deterministic output; runs in the standard suite.
+#
+# The scenario: a moving hero attacks enemies. Each frame the hero deals 3 damage
+# to the lowest-index living enemy; dead enemies are culled. The `stats` system
+# recomputes total enemy HP but is SKIPPED on frames where no health changed —
+# the honest Schedule dirty-skip. Mirror of examples/116_ecs_headless_sim.
+
+type Position { x: Int }
+type Velocity { dx: Int }
+type Health { hp: Int }
+type Enemy {}                       # zero-field tag / marker component (#752)
+
+type DamageEvent { target: EntityId, amount: Int }
+type Clock { frame: Int }           # a RESOURCE (world-global singleton)
+
+# The World: the reusable entity core + one ComponentTable per component, plus
+# two resources held as plain fields (an EventQueue and the Clock) and one
+# derived resource (totalEnemyHp, the stats output).
+type GameWorld {
+  allocator: EntityAllocator
+  positions: ComponentTable(Position)
+  velocities: ComponentTable(Velocity)
+  healths: ComponentTable(Health)
+  enemies: ComponentTable(Enemy)
+  damage: EventQueue(DamageEvent)
+  clock: Clock
+  totalEnemyHp: Int
+}
+
+func createGameWorld() ret GameWorld {
+  ret GameWorld {
+    allocator: createEntityAllocator(),
+    positions: createComponentTable(Position),
+    velocities: createComponentTable(Velocity),
+    healths: createComponentTable(Health),
+    enemies: createComponentTable(Enemy),
+    damage: createEventQueue(DamageEvent),
+    clock: Clock { frame: 0 },
+    totalEnemyHp: 0
+  }
+}
+
+# Destroy an entity: clear it from every table then recycle its id. (This is the
+# per-World boilerplate #756/#760 will synthesize; a GameWorld has few tables so
+# it stays short here.)
+func destroyGameEntity(world: mod GameWorld, entity: view EntityId) {
+  componentRemove(this: world.positions, entity: entity)
+  componentRemove(this: world.velocities, entity: entity)
+  componentRemove(this: world.healths, entity: entity)
+  componentRemove(this: world.enemies, entity: entity)
+  freeEntity(this: world.allocator, entity: entity)
+}
+
+# ----- systems -----
+
+# Integrate position by velocity for every entity that has both (query2 join).
+func movementSystem(world: mod GameWorld) {
+  let hits: List(Query2Match) = query2(tableA: world.positions, tableB: world.velocities)
+  loop let row: view Query2Match in hits {
+    let vel: view Velocity => queryViewAt(table: world.velocities, denseIndex: row.indexB)
+    let pos: mod Position => queryModAt(table: world.positions, denseIndex: row.indexA)
+    pos.x = pos.x + vel.dx
+  }
+}
+
+# Lowest-index living enemy, or index 0 (none). Iterates the tag set.
+func firstEnemy(world: view GameWorld) ret EntityId {
+  var best: EntityId = { index: 0, generation: 0 }
+  let tagged: List(EntityId) = taggedEntities(table: world.enemies)
+  loop var i: Int = 0, i < tagged.length, ++i {
+    let e: EntityId = rae_ext_rae_buf_get(buf: tagged.data, index: i)
+    if componentHas(this: world.healths, entity: e) {
+      let h: Health = componentGet(this: world.healths, entity: e)
+      if h.hp > 0 {
+        if best.index <= 0 or e.index < best.index {
+          best = e
+        }
+      }
+    }
+  }
+  ret best
+}
+
+# Hero deals 3 damage to the first living enemy — PRODUCE one event.
+func combatSystem(world: mod GameWorld) {
+  let target: EntityId = firstEnemy(world: world)
+  if target.index <= 0 {
+    ret
+  }
+  eventSend(this: world.damage, value: DamageEvent { target: target, amount: 3 })
+}
+
+# DRAIN this frame's damage events into Health, then advance the channel.
+func applyDamageSystem(world: mod GameWorld) {
+  loop var i: Int = 0, i < eventCount(this: world.damage), ++i {
+    let ev: DamageEvent = eventAt(this: world.damage, i: i)
+    if componentHas(this: world.healths, entity: ev.target) {
+      let h: mod Health => componentMod(this: world.healths, entity: ev.target)
+      h.hp = h.hp - ev.amount
+    }
+  }
+  eventFrameAdvance(this: world.damage)
+}
+
+# Remove enemies whose HP hit zero.
+func cullSystem(world: mod GameWorld) {
+  let tagged: List(EntityId) = taggedEntities(table: world.enemies)
+  let dead: List(EntityId) = createList(EntityId, cap: 8)
+  loop var i: Int = 0, i < tagged.length, ++i {
+    let e: EntityId = rae_ext_rae_buf_get(buf: tagged.data, index: i)
+    if componentHas(this: world.healths, entity: e) {
+      let h: Health = componentGet(this: world.healths, entity: e)
+      if h.hp <= 0 {
+        dead.add(value: e)
+      }
+    }
+  }
+  loop var i: Int = 0, i < dead.length, ++i {
+    let e: EntityId = rae_ext_rae_buf_get(buf: dead.data, index: i)
+    destroyGameEntity(world: world, entity: e)
+  }
+}
+
+# Recompute the total enemy HP resource — a tag-filtered read. This is the
+# dirty-skippable system: it depends only on Health, so the Schedule skips it on
+# frames where no health changed.
+func statsSystem(world: mod GameWorld) {
+  var total: Int = 0
+  let matches: List(Query2Match) = queryTagged(dataTable: world.healths, tagTable: world.enemies)
+  loop let hit: view Query2Match in matches {
+    let h: view Health => queryViewAt(table: world.healths, denseIndex: hit.indexA)
+    total = total + h.hp
+  }
+  world.totalEnemyHp = total
+}
+
+func heroX(world: view GameWorld, hero: view EntityId) ret Int {
+  if componentHas(this: world.positions, entity: hero) {
+    let p: Position = componentGet(this: world.positions, entity: hero)
+    ret p.x
+  }
+  ret 0 - 1
+}
+
+# One frame: run each system in Schedule order, gated by scheduleShouldRun on the
+# generation of the table(s) it reads. movement/combat/applyDamage/cull are gated
+# on `positions` (which movement bumps every frame, so they always run); stats is
+# gated on `healths`, so it skips when no damage landed.
+func runFrame(world: mod GameWorld, sched: mod Schedule, hero: view EntityId, frameNo: view Int) {
+  world.clock.frame = frameNo
+
+  if scheduleShouldRun(schedule: sched, index: 0, readGeneration: componentTableGeneration(this: world.positions)) {
+    movementSystem(world: world)
+  }
+  if scheduleShouldRun(schedule: sched, index: 1, readGeneration: componentTableGeneration(this: world.positions)) {
+    combatSystem(world: world)
+  }
+  if scheduleShouldRun(schedule: sched, index: 2, readGeneration: componentTableGeneration(this: world.positions)) {
+    applyDamageSystem(world: world)
+  }
+  if scheduleShouldRun(schedule: sched, index: 3, readGeneration: componentTableGeneration(this: world.positions)) {
+    cullSystem(world: world)
+  }
+  var statsRan: Bool = false
+  if scheduleShouldRun(schedule: sched, index: 4, readGeneration: componentTableGeneration(this: world.healths)) {
+    statsSystem(world: world)
+    statsRan = true
+  }
+
+  let alive: Int = tagCount(table: world.enemies)
+  log("F{frameNo} heroX={heroX(world: world, hero: hero)} enemiesAlive={alive} totalEnemyHp={world.totalEnemyHp} statsRan={statsRan}")
+}
+
+# ----- serialization (registry-driven round-trip) -----
+
+func worldToJson(world: view GameWorld, registry: view ComponentRegistry) ret String {
+  var writer: WorldJson = createWorldJson()
+  addComponentTable(writer: writer, table: world.positions, name: "Position", registry: registry)
+  addComponentTable(writer: writer, table: world.velocities, name: "Velocity", registry: registry)
+  addComponentTable(writer: writer, table: world.healths, name: "Health", registry: registry)
+  addComponentTable(writer: writer, table: world.enemies, name: "Enemy", registry: registry)
+  # Pass the resource's toJson() directly (do NOT bind it to a `let s: String`
+  # first and pass `s` by view — that currently double-frees the owned string;
+  # see QUEUE #761).
+  addResource(writer: writer, name: "Clock", valueJson: world.clock.toJson(), registry: registry)
+  ret finishWorldJson(writer: writer)
+}
+
+func worldFromJson(world: mod GameWorld, registry: view ComponentRegistry, doc: view JsonDoc) {
+  loadComponentTable(table: world.positions, name: "Position", registry: registry, doc: doc)
+  loadComponentTable(table: world.velocities, name: "Velocity", registry: registry, doc: doc)
+  loadComponentTable(table: world.healths, name: "Health", registry: registry, doc: doc)
+  loadComponentTable(table: world.enemies, name: "Enemy", registry: registry, doc: doc)
+  let clockStr: String = resourceJson(name: "Clock", registry: registry, doc: doc)
+  if clockStr.length() > 0 {
+    world.clock = Clock.fromJson(json: clockStr)
+  }
+}
+
+func main() {
+  # Registry: which names persist. Position/Velocity/Health serialize; the Enemy
+  # tag is runtime-only (registered without SERIALIZE); Clock is a serialized
+  # resource.
+  var reg: ComponentRegistry = createComponentRegistry()
+  registerComponent(reg: reg, name: "Position", flags: SERIALIZE)
+  registerComponent(reg: reg, name: "Velocity", flags: SERIALIZE)
+  registerComponent(reg: reg, name: "Health", flags: SERIALIZE)
+  registerComponent(reg: reg, name: "Enemy", flags: 0)
+  registerResource(reg: reg, name: "Clock", flags: SERIALIZE)
+
+  # Spawn a hero (index 1) and two enemies (index 2, 3) through the allocator.
+  var world: GameWorld = createGameWorld()
+  let hero: EntityId = allocEntity(this: world.allocator)
+  let orc: EntityId = allocEntity(this: world.allocator)
+  let goblin: EntityId = allocEntity(this: world.allocator)
+
+  componentSet(this: world.positions, entity: hero, data: Position { x: 0 })
+  componentSet(this: world.velocities, entity: hero, data: Velocity { dx: 1 })
+  componentSet(this: world.healths, entity: hero, data: Health { hp: 100 })
+
+  componentSet(this: world.positions, entity: orc, data: Position { x: 10 })
+  componentSet(this: world.healths, entity: orc, data: Health { hp: 6 })
+  addTag(table: world.enemies, entity: orc)
+
+  componentSet(this: world.positions, entity: goblin, data: Position { x: 20 })
+  componentSet(this: world.healths, entity: goblin, data: Health { hp: 3 })
+  addTag(table: world.enemies, entity: goblin)
+
+  # Build the schedule ONCE, run it every frame.
+  var sched: Schedule = createSchedule()
+  addSystem(schedule: sched, name: "movement")
+  addSystem(schedule: sched, name: "combat")
+  addSystem(schedule: sched, name: "applyDamage")
+  addSystem(schedule: sched, name: "cull")
+  addSystem(schedule: sched, name: "stats")
+
+  log("systems: {scheduleSize(schedule: sched)}")
+  loop var frame: Int = 1, frame <= 4, ++frame {
+    runFrame(world: world, sched: sched, hero: hero, frameNo: frame)
+  }
+
+  # ----- serialize -> parse -> reload into a fresh world -----
+  let jsonStr: String = worldToJson(world: world, registry: reg)
+  log("json: {jsonStr}")
+
+  let doc: JsonDoc = parseJson(source: jsonStr)
+  var restored: GameWorld = createGameWorld()
+  worldFromJson(world: restored, registry: reg, doc: doc)
+
+  log("restored pos count: {componentCount(this: restored.positions)}")
+  log("restored vel count: {componentCount(this: restored.velocities)}")
+  log("restored health count: {componentCount(this: restored.healths)}")
+  log("restored enemy count: {componentCount(this: restored.enemies)}")
+  log("restored heroX: {heroX(world: restored, hero: hero)}")
+  log("restored clock.frame: {restored.clock.frame}")
+}
