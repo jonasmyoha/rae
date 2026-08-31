@@ -118,9 +118,18 @@ type UiWorld {
   parents: ComponentTable(Parent)
   animStates: ComponentTable(AnimState)
 
+  # ----- RESOURCES (world-global singletons, #753) -----
+  # These are RESOURCES, not components: one per world, so they are plain fields
+  # read as `world.msdfState` / `world.layoutW`, never per-entity tables and never
+  # faked as entities (docs/ecs-resources.md). msdfState is a RUNTIME resource
+  # (GPU/font state, rebuilt at load, never serialized); layoutW/layoutH are
+  # authored-ish extents (serializable if a save wants them). This is a naming +
+  # doc change only — no behaviour change.
+
   # MSDF / MTSDF text default-font slot. Off until the host calls
   # lib/ui/msdf::enableUiMsdf. When enabled, paintText routes every
   # Text node through the MSDF shader instead of the bitmap path.
+  # RESOURCE (runtime): rebuilt on load, not serialized.
   msdfState: MsdfState
   # Layout root extent in design units — the content box the root
   # node(s) measure against. Defaults to the legacy 600x1300 so
@@ -128,6 +137,7 @@ type UiWorld {
   # these from the live window size (see the frames coordinate plan,
   # rae/docs/ui-coordinate-and-responsive-layout.md). Replaces the
   # old disconnected module globals in layout.rae.
+  # RESOURCE: a world-global singleton, not a per-entity component.
   layoutW: Float
   layoutH: Float
 }
