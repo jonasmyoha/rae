@@ -26,7 +26,7 @@ func makeFixedSize() ret Size {
 }
 
 func setRectFixed(world: mod UiWorld, entity: view EntityId, w: view Float, h: view Float) {
-  let r: Rect = { x: 0.0, y: 0.0, w: w, h: h }
+  let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: w, y: h } }
   componentSet(this: world.rects, entity: entity, data: r)
   componentSet(this: world.sizes, entity: entity, data: makeFixedSize())
 }
@@ -64,7 +64,7 @@ func attachChildren(world: mod UiWorld, parent: view EntityId, kids: view List(E
 func dumpEntity(world: view UiWorld, entity: view EntityId, label: view String) {
   var cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
   var wt: WorldTransform = componentGet(this: world.worldTransforms, entity: entity)
-  log("{label} cr=({cr.x},{cr.y},{cr.w},{cr.h}) wt=({wt.x},{wt.y}) alpha={wt.alpha} visible={wt.visible}")
+  log("{label} cr=({cr.position.x},{cr.position.y},{cr.size.x},{cr.size.y}) wt=({wt.x},{wt.y}) alpha={wt.alpha} visible={wt.visible}")
 }
 
 func main() {

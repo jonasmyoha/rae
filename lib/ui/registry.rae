@@ -331,11 +331,16 @@ func deserSizeAxis(doc: view JsonDoc, val: view JsonValue) ret SizeAxis {
 # -----------------------------------------------------------------
 
 func deserRect(doc: view JsonDoc, val: view JsonValue) ret Rect {
+  # Wire format stays flat {x,y,w,h}; bridge into the Vec2 position/size pair.
   ret Rect {
-    x: optFloat(doc: doc, container: val, key: "x", fallback: 0.0)
-    y: optFloat(doc: doc, container: val, key: "y", fallback: 0.0)
-    w: optFloat(doc: doc, container: val, key: "w", fallback: 0.0)
-    h: optFloat(doc: doc, container: val, key: "h", fallback: 0.0)
+    position: {
+      x: optFloat(doc: doc, container: val, key: "x", fallback: 0.0)
+      y: optFloat(doc: doc, container: val, key: "y", fallback: 0.0)
+    }
+    size: {
+      x: optFloat(doc: doc, container: val, key: "w", fallback: 0.0)
+      y: optFloat(doc: doc, container: val, key: "h", fallback: 0.0)
+    }
   }
 }
 

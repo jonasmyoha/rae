@@ -146,11 +146,13 @@ type RgbaColor {
 
 # Geometry / layout
 
+# Authored absolute placement. #724: geometry is carried as two Vec2 (top-left
+# `position` and `size` extent) instead of loose x/y/w/h floats, so the same
+# vector helpers apply to a rect's corner and its extent. The .raescene wire
+# format stays flat {x,y,w,h} — deserRect bridges it to these fields.
 type Rect {
-  x: Float
-  y: Float
-  w: Float
-  h: Float
+  position: Vec2
+  size: Vec2
 }
 
 type Size {
@@ -749,11 +751,11 @@ type MeasuredSize {
   h: Float
 }
 
+# Layout output: the resolved on-screen box. #724: `position`/`size` Vec2 pair,
+# mirroring the authored Rect.
 type ComputedRect {
-  x: Float
-  y: Float
-  w: Float
-  h: Float
+  position: Vec2
+  size: Vec2
 }
 
 type WorldTransform {

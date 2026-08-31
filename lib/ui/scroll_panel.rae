@@ -79,10 +79,10 @@ func scrollPointInNode(world: view UiWorld, nodeId: view String,
   }
   let r: ComputedRect = componentGet(this: world.computedRects, entity: e)
   let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
-  if x < wt.x or x > wt.x + r.w {
+  if x < wt.x or x > wt.x + r.size.x {
     ret false
   }
-  if y < wt.y or y > wt.y + r.h {
+  if y < wt.y or y > wt.y + r.size.y {
     ret false
   }
   ret true
@@ -105,7 +105,7 @@ func scrollRange(s: view ScrollPanel, world: view UiWorld) ret Float {
   }
   let vr: ComputedRect = componentGet(this: world.computedRects, entity: viewport)
   let cr: ComputedRect = componentGet(this: world.computedRects, entity: content)
-  let over: Float = cr.h - vr.h
+  let over: Float = cr.size.y - vr.size.y
   if over <= 0.0 {
     ret 0.0
   }

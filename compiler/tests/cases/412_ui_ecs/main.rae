@@ -23,8 +23,8 @@ func main() {
   log("99 alive: {isAlive(world: world, entity: probe99)}")
 
   # Add a Rect to e1 and e3, but not e2.
-  let r1: Rect = { x: 0.0, y: 0.0, w: 100.0, h: 200.0 }
-  let r3: Rect = { x: 50.0, y: 50.0, w: 320.0, h: 240.0 }
+  let r1: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: 100.0, y: 200.0 } }
+  let r3: Rect = { position: { x: 50.0, y: 50.0 }, size: { x: 320.0, y: 240.0 } }
   componentSet(this: world.rects, entity: e1, data: r1)
   componentSet(this: world.rects, entity: e3, data: r3)
 
@@ -34,16 +34,16 @@ func main() {
   log("e3 hasRect: {componentHas(this: world.rects, entity: e3)}")
 
   let got1: Rect = componentGet(this: world.rects, entity: e1)
-  log("e1 rect: {got1.x},{got1.y} {got1.w}x{got1.h}")
+  log("e1 rect: {got1.position.x},{got1.position.y} {got1.size.x}x{got1.size.y}")
   let got3: Rect = componentGet(this: world.rects, entity: e3)
-  log("e3 rect: {got3.x},{got3.y} {got3.w}x{got3.h}")
+  log("e3 rect: {got3.position.x},{got3.position.y} {got3.size.x}x{got3.size.y}")
 
   # Replace e1's rect.
-  let r1b: Rect = { x: 10.0, y: 20.0, w: 30.0, h: 40.0 }
+  let r1b: Rect = { position: { x: 10.0, y: 20.0 }, size: { x: 30.0, y: 40.0 } }
   componentSet(this: world.rects, entity: e1, data: r1b)
   log("rects.count after replace: {componentCount(this: world.rects)}")
   let got1b: Rect = componentGet(this: world.rects, entity: e1)
-  log("e1 rect after replace: {got1b.x},{got1b.y} {got1b.w}x{got1b.h}")
+  log("e1 rect after replace: {got1b.position.x},{got1b.position.y} {got1b.size.x}x{got1b.size.y}")
 
   # Add a Text component to e2.
   let t2: Text = { text: "hello", styleId: "h1", wrapWidthMode: WrapWidthMode.nodeWidth }
@@ -65,7 +65,7 @@ func main() {
   loop i < rectN {
     let ent: EntityId = componentEntityAt(this: world.rects, i: i)
     let r: Rect = componentDataAt(this: world.rects, i: i)
-    log("  rect[{i}] entity={ent.index} {r.w}x{r.h}")
+    log("  rect[{i}] entity={ent.index} {r.size.x}x{r.size.y}")
     i = i + 1
   }
 
