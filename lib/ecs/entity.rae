@@ -1,27 +1,29 @@
 # lib/ecs — the general ECS core (docs/ecs-general-architecture.md).
 #
-# EntityId: the value-type handle for an entity. Compare with `eq`, not struct
-# `is`. Today it is a bare counter; #703 gives it a generation for stale-handle
-# safety. Extracted from lib/ui/ecs.rae (#700) with no behaviour change so the
-# UI, the 3D examples, and every application share one ECS.
+# EntityId: the value-type handle for an entity. A generational handle
+# (#703): `index` addresses the slot; `generation` distinguishes a live
+# entity from a stale handle to a since-destroyed/recycled slot. Sparse
+# tables key on `index`. EntityId is a value struct, so `a is b` is
+# field-wise value equality (both fields) — compare handles with `is` /
+# `is not` directly; there is no `equals` helper. Recycling that bumps
+# `generation` lands in #704 — until then every live handle has
+# generation 0, so reconstructing a handle from a bare index (entityId)
+# is still exact.
 import core
 
 type EntityId {
-  value: Int
+  index: Int
+  generation: Int
 }
 
 func noEntity() ret EntityId {
-  ret EntityId { value: 0 - 1 }
+  ret EntityId { index: 0 - 1, generation: 0 }
 }
 
 func entityId(v: view Int) ret EntityId {
-  ret EntityId { value: v }
-}
-
-func eq(this: view EntityId, other: view EntityId) ret Bool {
-  ret this.value is other.value
+  ret EntityId { index: v, generation: 0 }
 }
 
 func isNone(this: view EntityId) ret Bool {
-  ret this.value < 0
+  ret this.index < 0
 }

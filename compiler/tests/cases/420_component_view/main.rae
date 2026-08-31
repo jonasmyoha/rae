@@ -34,9 +34,9 @@ func main() {
   let chv0: EntityId = rae_ext_rae_buf_get(buf: chv.ids.data, index: 0)
   let chv1: EntityId = rae_ext_rae_buf_get(buf: chv.ids.data, index: 1)
   let chv2: EntityId = rae_ext_rae_buf_get(buf: chv.ids.data, index: 2)
-  log("  [0]={chv0.value}")
-  log("  [1]={chv1.value}")
-  log("  [2]={chv2.value}")
+  log("  [0]={chv0.index}")
+  log("  [1]={chv1.index}")
+  log("  [2]={chv2.index}")
 
   # Second read pretending we lost the first ref — value should still
   # be intact (no corruption from the first borrow going out of scope).
@@ -45,7 +45,7 @@ func main() {
   let r0: EntityId = rae_ext_rae_buf_get(buf: chv2v.ids.data, index: 0)
   let r1: EntityId = rae_ext_rae_buf_get(buf: chv2v.ids.data, index: 1)
   let r2: EntityId = rae_ext_rae_buf_get(buf: chv2v.ids.data, index: 2)
-  log("  [0]={r0.value}")
-  log("  [1]={r1.value}")
-  log("  [2]={r2.value}")
+  log("  [0]={r0.index}")
+  log("  [1]={r1.index}")
+  log("  [2]={r2.index}")
 }

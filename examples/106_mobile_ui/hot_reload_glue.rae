@@ -62,7 +62,7 @@ func parseSignedInt(s: view String) ret Int {
     ret 0
   }
   let first: String = s.sub(start: 0, len: 1)
-  if first.equals(other: "-") {
+  if first is "-" {
     let body: String = s.sub(start: 1, len: s.length() - 1)
     ret 0 - parseUInt(s: body)
   }
@@ -125,14 +125,14 @@ func loadRestoredState(fallback: view RestoredState) pub ret RestoredState {
   let trimmed: String = prior.trim()
   let parts: List(String) = trimmed.split(sep: ";")
   loop let kv: view String in parts {
-    let eq: Int = kv.indexOf(sub: "=")
-    if eq > 0 {
-      let key: String = kv.sub(start: 0, len: eq)
-      let val: String = kv.sub(start: eq + 1, len: kv.length() - eq - 1)
-      if key.equals(other: "screen") {
+    let sepIndex: Int = kv.indexOf(sub: "=")
+    if sepIndex > 0 {
+      let key: String = kv.sub(start: 0, len: sepIndex)
+      let val: String = kv.sub(start: sepIndex + 1, len: kv.length() - sepIndex - 1)
+      if key is "screen" {
         result.screen = intToScreen(n: parseSignedInt(s: val))
       }
-      if key.equals(other: "scroll") {
+      if key is "scroll" {
         result.scrollY = parseSignedInt(s: val).toFloat()
       }
     }

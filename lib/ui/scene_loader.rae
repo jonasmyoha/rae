@@ -108,10 +108,10 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
       let entity: EntityId = createEntity(world: world)
       appendEntityListSL(lst: entitiesByNodeIndex, value: entity)
       if pageId.length() is 0 {
-        nodeIdsMap.set(k: node.nodeId, value: entity.value)
+        nodeIdsMap.set(k: node.nodeId, value: entity.index)
       } else {
         let key: String = pageScopedKey(pageId: pageId, nodeId: node.nodeId)
-        nodeIdsMap.set(k: key, value: entity.value)
+        nodeIdsMap.set(k: key, value: entity.index)
       }
     } else {
       let placeholder: EntityId = noEntity()
@@ -150,7 +150,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
       let key: String = json.jsonObjectKeyAt(doc: docView, this: bag, idx: k)
       # Children is hierarchy, not a component — handled in pass 3.
       let childrenKey: String = "Children"
-      if key.equals(other: childrenKey) {
+      if key is childrenKey {
         k = k + 1
       } else {
         let valueAtKey: JsonValue = json.jsonObjectValueAt(doc: docView, this: bag, idx: k)
@@ -310,10 +310,10 @@ func dumpScene(world: view UiWorld, scene: view Scene) {
       var parentStr: String = "(root)"
       if componentHas(this: world.parents, entity: entity) {
         let pl: Parent = componentGet(this: world.parents, entity: entity)
-        parentStr = "parent=ent{pl.parent.value}"
+        parentStr = "parent=ent{pl.parent.index}"
       }
       var comps: String = componentNamesFor(world: world, entity: entity)
-      log("  [{node.nodeId}] ent={entity.value} {parentStr} comps=[{comps}]")
+      log("  [{node.nodeId}] ent={entity.index} {parentStr} comps=[{comps}]")
     } else {
       log("  [{node.nodeId}] (not in world.nodeIds — skipped)")
     }

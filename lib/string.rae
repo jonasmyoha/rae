@@ -59,10 +59,6 @@ func compare(this: view String, other: view String) ret Int {
   ret rae_str_compare(a: this, b: other)
 }
 
-func equals(this: view String, other: view String) ret Bool {
-  ret rae_str_eq(a: this, b: other)
-}
-
 func hash(this: view String) ret Int {
   ret rae_str_hash(s: this)
 }
@@ -88,7 +84,7 @@ func startsWith(this: view String, prefix: view String) ret Bool {
     ret false
   }
   let head: String = this.sub(start: 0, len: prefixLen)
-  ret head.equals(other: prefix)
+  ret head is prefix
 }
 
 func endsWith(this: view String, suffix: view String) ret Bool {
@@ -101,7 +97,7 @@ func endsWith(this: view String, suffix: view String) ret Bool {
     ret false
   }
   let tail: String = this.sub(start: n - suffixLen, len: suffixLen)
-  ret tail.equals(other: suffix)
+  ret tail is suffix
 }
 
 func indexOf(this: view String, sub: view String) ret Int {
@@ -116,7 +112,7 @@ func indexOf(this: view String, sub: view String) ret Int {
   var i: Int = 0
   loop i <= n - needleLen {
     let part: String = this.sub(start: i, len: needleLen)
-    if part.equals(other: sub) {
+    if part is sub {
       ret i
     }
     i = i + 1

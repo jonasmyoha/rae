@@ -649,7 +649,7 @@ func nodeByName(sk: view Skeleton, name: view String) ret Int {
   var i: Int = 0
   loop i < sk.nodeNames.length {
     if let nodeName: String = sk.nodeNames.copyAt(index: i) {
-      if nodeName.equals(other: name) { ret i }
+      if nodeName is name { ret i }
     }
     i = i + 1
   }
@@ -701,9 +701,9 @@ func loadClip(g: view Glb, animIndex: view Int, sk: view Skeleton) pub ret Clip 
     let clipNode: Int = intField(g: g, obj: target, key: "node", fallback: 0 - 1)
     let pathName: String = jsonString(this: objField(g: g, obj: target, key: "path"), fallback: "")
     var p: Int = 0 - 1
-    if pathName.equals(other: "translation") { p = pathTranslation }
-    if pathName.equals(other: "rotation") { p = pathRotation }
-    if pathName.equals(other: "scale") { p = pathScale }
+    if pathName is "translation" { p = pathTranslation }
+    if pathName is "rotation" { p = pathRotation }
+    if pathName is "scale" { p = pathScale }
     # "weights" targets morph targets, which this loader does not do. Skip
     # rather than misinterpret it as a transform channel.
     if p >= 0 and clipNode >= 0 {
@@ -715,12 +715,12 @@ func loadClip(g: view Glb, animIndex: view Int, sk: view Skeleton) pub ret Clip 
         let sampler: JsonValue = jsonArrayAt(doc: g.doc, this: samplers, idx: samplerIdx)
         let interpName: String = jsonString(this: objField(g: g, obj: sampler, key: "interpolation"), fallback: "LINEAR")
         var ip: Int = interpLinear
-        if interpName.equals(other: "STEP") { ip = interpStep }
+        if interpName is "STEP" { ip = interpStep }
         # CUBICSPLINE stores tangents either side of each value, so a
         # LINEAR read of it would treat tangents as keyframes. Falling
         # back to STEP is visibly wrong rather than subtly wrong, which is
         # the right failure for a format this loader does not implement.
-        if interpName.equals(other: "CUBICSPLINE") { ip = interpStep }
+        if interpName is "CUBICSPLINE" { ip = interpStep }
 
         let inAcc: Int = intField(g: g, obj: sampler, key: "input", fallback: 0 - 1)
         let outAcc: Int = intField(g: g, obj: sampler, key: "output", fallback: 0 - 1)

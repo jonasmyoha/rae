@@ -117,8 +117,8 @@ func collectionFromPlaylist(playlist: view Playlist, albums: view List(Album)) p
   var i: Int = 0
   loop i < n {
     let it: PlaylistItem = rae_ext_rae_buf_get(buf: playlist.items.data, index: i)
-    let isTrack: Bool = it.kind.equals(other: "track")
-    let isAlbum: Bool = it.kind.equals(other: "album")
+    let isTrack: Bool = it.kind is "track"
+    let isAlbum: Bool = it.kind is "album"
     if isTrack {
       collectionAppendSong(rows: rows, albums: albums, stem: it.albumStem, trackIndex: it.trackIndex)
     }

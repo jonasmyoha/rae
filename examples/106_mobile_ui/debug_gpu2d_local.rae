@@ -664,17 +664,17 @@ func dispatchDebugAction(input: view InputSystem, debug: mod DebugSystem) pub re
   loop i < n {
     let ev: ActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
     let actionId: String = ev.actionId
-    if actionId.equals(other: debugActionToggleMenu) {
+    if actionId is debugActionToggleMenu {
       debug.menuOpen = debug.menuOpen is false
       needsRemount = true
     }
-    if actionId.equals(other: debugActionDismiss) {
+    if actionId is debugActionDismiss {
       if debug.menuOpen {
         debug.menuOpen = false
         needsRemount = true
       }
     }
-    if actionId.equals(other: debugActionToggleTheme) {
+    if actionId is debugActionToggleTheme {
       let cur: Theme = currentTheme()
       if cur.mode is ThemeMode.dark {
         setActiveTheme(theme: lightTheme())
@@ -683,11 +683,11 @@ func dispatchDebugAction(input: view InputSystem, debug: mod DebugSystem) pub re
       }
       needsRemount = true
     }
-    if actionId.equals(other: debugActionToggleLabels) {
+    if actionId is debugActionToggleLabels {
       debug.showLabels = debug.showLabels is false
       saveDebugFlags(debug: debug, path: debugFlagsFilePath)
     }
-    if actionId.equals(other: debugActionToggleInputOutlines) {
+    if actionId is debugActionToggleInputOutlines {
       debug.showInputOutlines = debug.showInputOutlines is false
       saveDebugFlags(debug: debug, path: debugFlagsFilePath)
     }
@@ -697,13 +697,13 @@ func dispatchDebugAction(input: view InputSystem, debug: mod DebugSystem) pub re
 }
 
 func selectedForDebugAction(actionId: view String, debug: view DebugSystem) ret Bool {
-  if actionId.equals(other: debugActionToggleTheme) {
+  if actionId is debugActionToggleTheme {
     ret currentTheme().mode is ThemeMode.dark
   }
-  if actionId.equals(other: debugActionToggleLabels) {
+  if actionId is debugActionToggleLabels {
     ret debug.showLabels
   }
-  if actionId.equals(other: debugActionToggleInputOutlines) {
+  if actionId is debugActionToggleInputOutlines {
     ret debug.showInputOutlines
   }
   ret false
@@ -719,12 +719,12 @@ func syncDebugWidgetStates(world: mod UiWorld, debug: view DebugSystem) pub {
       let debugKind: String = "debugToggle"
       let pillKind: String = "debugSwitchPill"
       let knobKind: String = "debugSwitchKnob"
-      var isDebugToggle: Bool = wid.kind.equals(other: debugKind)
+      var isDebugToggle: Bool = wid.kind is debugKind
       if isDebugToggle is false {
-        if wid.kind.equals(other: pillKind) { isDebugToggle = true }
+        if wid.kind is pillKind { isDebugToggle = true }
       }
       if isDebugToggle is false {
-        if wid.kind.equals(other: knobKind) { isDebugToggle = true }
+        if wid.kind is knobKind { isDebugToggle = true }
       }
       if isDebugToggle {
         let bind: view ActionBinding => componentView(this: world.actionBindings, entity: entity)

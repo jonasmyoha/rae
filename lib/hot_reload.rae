@@ -257,7 +257,7 @@ func parseBuildStatus(raw: view String) pub ret BuildStatus {
     ret emptyBuildStatus()
   }
   let kind: String = lines.copyAt(index: 0).trim()
-  let okFlag: Bool = kind.equals(other: "ok")
+  let okFlag: Bool = kind is "ok"
   var msg: String = ""
   if lines.length > 1 {
     msg = lines.copyAt(index: 1).trim()
@@ -282,13 +282,13 @@ func readBuildStatus() pub ret BuildStatus {
 }
 
 func parseReloadVerb(token: view String) ret ReloadVerb {
-  if token.equals(other: "data") {
+  if token is "data" {
     ret ReloadVerb.data
   }
-  if token.equals(other: "reload") {
+  if token is "reload" {
     ret ReloadVerb.reload
   }
-  if token.equals(other: "restart") {
+  if token is "restart" {
     ret ReloadVerb.restart
   }
   ret ReloadVerb.none

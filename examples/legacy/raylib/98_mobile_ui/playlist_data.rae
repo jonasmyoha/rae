@@ -97,9 +97,9 @@ func playlistFindTrack(playlist: view Playlist, stem: view String, trackIndex: v
   var i: Int = 0
   loop i < n {
     let it: PlaylistItem = rae_ext_rae_buf_get(buf: playlist.items.data, index: i)
-    if it.kind.equals(other: playlistKindTrack) {
+    if it.kind is playlistKindTrack {
       if it.trackIndex is trackIndex {
-        if it.albumStem.equals(other: stem) {
+        if it.albumStem is stem {
           ret i
         }
       }
@@ -140,15 +140,15 @@ func playlistCoverStems(playlist: view Playlist, max: view Int) pub ret List(Str
       ret result
     }
     let it: PlaylistItem = rae_ext_rae_buf_get(buf: playlist.items.data, index: i)
-    let isTrack: Bool = it.kind.equals(other: playlistKindTrack)
-    let isAlbum: Bool = it.kind.equals(other: playlistKindAlbum)
+    let isTrack: Bool = it.kind is playlistKindTrack
+    let isAlbum: Bool = it.kind is playlistKindAlbum
     if isTrack or isAlbum {
       if it.albumStem.length() > 0 {
         # Dedup so a playlist of many songs from one album still
         # contributes a single cover to the grid.
         var already: Bool = false
         loop let existing: view String in result {
-          if existing.equals(other: it.albumStem) {
+          if existing is it.albumStem {
             already = true
           }
         }
@@ -219,7 +219,7 @@ func parsePlaylistItem(doc: view JsonDoc, entry: view JsonValue) ret PlaylistIte
 
 # True when `item` carries enough to be a usable reference of its kind.
 func playlistItemValid(item: view PlaylistItem) ret Bool {
-  if item.kind.equals(other: playlistKindPlaylist) {
+  if item.kind is playlistKindPlaylist {
     ret item.playlistId.length() > 0
   }
   ret item.albumStem.length() > 0
@@ -331,7 +331,7 @@ func savePlaylist(playlist: view Playlist) pub {
     content = content.concat(other: "    ").concat(other: openBrace).concat(other: " ")
     content = content.concat(other: q).concat(other: "kind").concat(other: q).concat(other: colon).concat(other: " ")
     content = content.concat(other: q).concat(other: it.kind).concat(other: q).concat(other: comma).concat(other: " ")
-    if it.kind.equals(other: playlistKindPlaylist) {
+    if it.kind is playlistKindPlaylist {
       content = content.concat(other: q).concat(other: "playlistId").concat(other: q).concat(other: colon).concat(other: " ")
       content = content.concat(other: q).concat(other: it.playlistId).concat(other: q).concat(other: " ")
     } else {

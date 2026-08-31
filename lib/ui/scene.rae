@@ -72,7 +72,7 @@ func sceneNodeIndex(this: view Scene, nodeId: view String) ret Int {
   var i: Int = 0
   loop i < n {
     let node: view SceneNode => sceneNodeAt(this: this, idx: i)
-    if node.nodeId.equals(other: nodeId) {
+    if node.nodeId is nodeId {
       ret i
     }
     i = i + 1
@@ -135,7 +135,7 @@ func parseScene(source: view String) ret Scene {
   let empty: String = ""
   let typeStr: String = json.jsonString(this: typeVal, fallback: empty)
   let expectedType: String = "Scene"
-  if typeStr.equals(other: expectedType) is false {
+  if typeStr is expectedType is false {
     scene.errorMsg = "type must be \"Scene\""
     ret scene
   }
