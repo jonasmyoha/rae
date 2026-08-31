@@ -1,0 +1,38 @@
+import core
+open ecs/entity
+open ecs/component_table
+open ecs/world
+open ui/ecs
+
+# #704: the EntityAllocator recycles freed indices and bumps the slot's
+# generation on destroy, so a reused index carries a higher generation and an
+# old handle to it is not equal to the new entity. The sparse tables' back-ref
+# now checks full (index+generation) equality, so a stale handle can't read a
+# recycled entity's component.
+func main() {
+  var world: UiWorld = createUiWorld()
+  let a: EntityId = createEntity(world: world)
+  log("a index={a.index} gen={a.generation}")
+
+  # give `a` an Active component, then destroy it
+  componentSet(this: world.actives, entity: a, data: Active { value: true })
+  destroyEntity(world: world, entity: a)
+
+  # recreate: reuses a's index with a bumped generation
+  let c: EntityId = createEntity(world: world)
+  log("c index={c.index} gen={c.generation}")
+  log("recycled index: {c.index is a.index}")
+  log("new generation: {c.generation > a.generation}")
+  log("old handle != new: {a is not c}")
+  log("stale equals live: {a is c}")
+
+  # component stale-handle safety: set Active on the new entity `c`, then a
+  # stale read through `a` (same index, old generation) must MISS.
+  componentSet(this: world.actives, entity: c, data: Active { value: true })
+  log("live c has Active: {componentHas(this: world.actives, entity: c)}")
+  log("stale a has Active: {componentHas(this: world.actives, entity: a)}")
+
+  # free list empties, next alloc is a fresh index
+  let d: EntityId = createEntity(world: world)
+  log("d index={d.index}")
+}
