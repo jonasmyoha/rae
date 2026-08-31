@@ -1,0 +1,44 @@
+import core
+open ecs/event
+
+# #754: EventQueue(T) is a double-buffered per-frame event channel. One system
+# produces, later systems drain the SAME frame, and the channel clears at the
+# frame boundary (eventFrameAdvance).
+
+type Damage { amount: Int }
+
+# System A: produces events this frame.
+func systemA(events: mod EventQueue(Damage)) {
+  eventSend(this: events, value: Damage { amount: 10 })
+  eventSend(this: events, value: Damage { amount: 5 })
+}
+
+# System B (later in schedule): drains the events, summing damage.
+func systemB(events: view EventQueue(Damage)) ret Int {
+  var total: Int = 0
+  loop var i: Int = 0, i < eventCount(this: events), ++i {
+    let d: Damage = eventAt(this: events, i: i)
+    total = total + d.amount
+  }
+  ret total
+}
+
+func main() {
+  var events: EventQueue(Damage) = createEventQueue(Damage)
+  log("empty at start: {eventIsEmpty(this: events)}")
+
+  # ---- frame 1: produce in A, consume in B (same frame) ----
+  systemA(events: events)
+  log("count after A: {eventCount(this: events)}")
+  log("B total: {systemB(events: events)}")
+  eventFrameAdvance(this: events)
+
+  # ---- frame 2: channel cleared ----
+  log("count after advance: {eventCount(this: events)}")
+  log("B total frame 2 (pre-produce): {systemB(events: events)}")
+
+  # Produce again in frame 2 — the channel is reusable.
+  systemA(events: events)
+  log("count frame 2 after A: {eventCount(this: events)}")
+  log("B total frame 2: {systemB(events: events)}")
+}

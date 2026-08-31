@@ -3,8 +3,9 @@
 # A minimal FIFO: a system receives commands by having them enqueued, and in
 # its command phase drains in order then clears. Lives in the `ecs` package so
 # its `drop` overload sits alongside ComponentTable's (same package) — a
-# separate package split the bare `drop(lst)` resolution (see #701). #754 will
-# evolve this into a double-buffered EventQueue resource.
+# separate package split the bare `drop(lst)` resolution (see #701). #754 added
+# the formalized double-buffered event channel as EventQueue(T) in ecs/event.rae;
+# Queue(T) stays here for its existing command-inbox users (mobile_ui playback).
 import core
 open ecs/entity
 
