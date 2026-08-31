@@ -1,0 +1,64 @@
+import core
+open ecs/entity
+open ecs/component_table
+open ecs/query
+
+# #709: single-table dense forEach + read-only view query variants.
+# forEach walks one table's whole dense set; the View accessors read a matched
+# component through a `view` ref WITHOUT bumping the table generation (unlike the
+# mutating queryModAt), so a read-only pass leaves change-detection untouched.
+
+type Pos { x: Int }
+type Vel { v: Int }
+type Tag { t: Int }
+
+func main() {
+  var pos: ComponentTable(Pos) = createComponentTable(Pos)
+  var vel: ComponentTable(Vel) = createComponentTable(Vel)
+  var tag: ComponentTable(Tag) = createComponentTable(Tag)
+  let e1: EntityId = { index: 1, generation: 0 }
+  let e2: EntityId = { index: 2, generation: 0 }
+  let e3: EntityId = { index: 3, generation: 0 }
+  componentSet(this: pos, entity: e1, data: Pos { x: 10 })
+  componentSet(this: pos, entity: e2, data: Pos { x: 20 })
+  componentSet(this: pos, entity: e3, data: Pos { x: 30 })
+  componentSet(this: vel, entity: e2, data: Vel { v: 5 })
+  componentSet(this: vel, entity: e3, data: Vel { v: 7 })
+  componentSet(this: tag, entity: e2, data: Tag { t: 9 })
+
+  # Dense single-table forEach over pos: sum every x through a view ref.
+  let all: List(QueryMatch) = forEach(table: pos)
+  log("forEach count: {all.length}")
+  var sum: Int = 0
+  loop let row: view QueryMatch in all {
+    let p: view Pos => forEachView(table: pos, hit: row)
+    sum = sum + p.x
+  }
+  log("pos sum: {sum}")
+
+  # Read-only view query2 (pos joined vel): read both sides through view refs and
+  # assert neither table's generation changed — the read must not dirty anything.
+  let posGen: Int = componentTableGeneration(this: pos)
+  let velGen: Int = componentTableGeneration(this: vel)
+  let hits: List(Query2Match) = query2(tableA: pos, tableB: vel)
+  log("q2 count: {hits.length}")
+  var dot: Int = 0
+  loop let row: view Query2Match in hits {
+    let p: view Pos => query2ViewA(tableA: pos, hit: row)
+    let vv: view Vel => query2ViewB(tableB: vel, hit: row)
+    dot = dot + p.x * vv.v
+  }
+  log("dot: {dot}")
+  log("pos gen unchanged: {componentTableGeneration(this: pos) is posGen}")
+  log("vel gen unchanged: {componentTableGeneration(this: vel) is velGen}")
+
+  # Read-only view query3: only e2 is in all three; read each side through view.
+  let hits3: List(Query3Match) = query3(tableA: pos, tableB: vel, tableC: tag)
+  log("q3 count: {hits3.length}")
+  loop let row: view Query3Match in hits3 {
+    let p: view Pos => query3ViewA(tableA: pos, hit: row)
+    let vv: view Vel => query3ViewB(tableB: vel, hit: row)
+    let tg: view Tag => query3ViewC(tableC: tag, hit: row)
+    log("q3 read: {p.x} {vv.v} {tg.t}")
+  }
+}
