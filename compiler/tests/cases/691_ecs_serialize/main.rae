@@ -1,0 +1,64 @@
+import core
+open json
+open ecs/entity
+open ecs/component_table
+open ecs/registry
+open ecs/serialize
+
+# #719: worldToJson writes entities x registered-SERIALIZE components via each
+# component's compiler-generated toJson(). Derived/cache components (no SERIALIZE
+# flag) must be omitted. This round-trips the output through parseJson and asserts
+# the cache component is absent.
+
+type Pos { x: Int, y: Int }
+type Vel { dx: Int, dy: Int }
+type WorldCache { w: Int }   # derived cache — registered WITHOUT SERIALIZE
+
+type MiniWorld {
+  positions: ComponentTable(Pos)
+  velocities: ComponentTable(Vel)
+  caches: ComponentTable(WorldCache)
+}
+
+# A concrete world's worldToJson is a few-line composition of the reusable
+# per-table serializer — one addComponentTable per table, then finishWorldJson.
+func worldToJson(world: view MiniWorld, registry: view ComponentRegistry) ret String {
+  var writer: WorldJson = createWorldJson()
+  addComponentTable(writer: writer, table: world.positions, name: "Pos", registry: registry)
+  addComponentTable(writer: writer, table: world.velocities, name: "Vel", registry: registry)
+  addComponentTable(writer: writer, table: world.caches, name: "WorldCache", registry: registry)
+  ret finishWorldJson(writer: writer)
+}
+
+func main() {
+  let kPos: String = "Pos"
+  let kVel: String = "Vel"
+  let kCache: String = "WorldCache"
+
+  var reg: ComponentRegistry = createComponentRegistry()
+  registerComponent(reg: reg, name: kPos, flags: SERIALIZE)
+  registerComponent(reg: reg, name: kVel, flags: SERIALIZE)
+  registerComponent(reg: reg, name: kCache, flags: 0)   # derived cache: not serialized
+
+  var world: MiniWorld = {
+    positions: createComponentTable(Pos),
+    velocities: createComponentTable(Vel),
+    caches: createComponentTable(WorldCache)
+  }
+  let e1: EntityId = { index: 1, generation: 0 }
+  let e2: EntityId = { index: 2, generation: 0 }
+  componentSet(this: world.positions, entity: e1, data: Pos { x: 10, y: 20 })
+  componentSet(this: world.positions, entity: e2, data: Pos { x: 30, y: 40 })
+  componentSet(this: world.velocities, entity: e2, data: Vel { dx: 1, dy: 2 })
+  componentSet(this: world.caches, entity: e2, data: WorldCache { w: 999 })
+
+  let jsonStr: String = worldToJson(world: world, registry: reg)
+  log("json: {jsonStr}")
+
+  # Round-trip: parse it back and check which top-level component keys exist.
+  let doc: JsonDoc = parseJson(source: jsonStr)
+  let root: JsonValue = json.jsonRoot(doc: doc)
+  log("has Pos: {json.jsonField(doc: doc, this: root, key: kPos) >= 0}")
+  log("has Vel: {json.jsonField(doc: doc, this: root, key: kVel) >= 0}")
+  log("has WorldCache: {json.jsonField(doc: doc, this: root, key: kCache) >= 0}")
+}
