@@ -1,0 +1,66 @@
+# lib/ecs — the entity allocator: index recycling + generational handles (#704).
+#
+# On destroy a slot's `generation` is bumped and its `index` returns to a free
+# list; the next allocation reuses that index with the higher generation, so an
+# old handle to the recycled slot compares unequal (its generation is stale).
+# Reusable by any World — UiWorld embeds it, and GameWorlds will too (#706).
+import core
+open ecs/entity
+import ecs/list_helpers
+
+type EntityAllocator {
+  generations: List(Int)   # generations[index] = the slot's current generation
+  freeList: List(Int)      # indices freed by destroy, available for reuse
+  nextIndex: Int           # next never-used index (when the free list is empty)
+}
+
+func createEntityAllocator() ret EntityAllocator {
+  ret EntityAllocator {
+    generations: createList(Int, cap: 256)
+    freeList: createList(Int, cap: 64)
+    nextIndex: 1
+  }
+}
+
+# Allocate an entity: reuse the most-recently-freed index (with its bumped
+# generation) if any, else hand out a fresh index at generation 0.
+func allocEntity(this: mod EntityAllocator) ret EntityId {
+  let freeCount: Int = this.freeList.length
+  if freeCount > 0 {
+    let last: Int = freeCount - 1
+    let idx: Int = intListAt(lst: this.freeList, index: last)
+    popLastInt(lst: this.freeList)
+    let gen: Int = intListAt(lst: this.generations, index: idx)
+    ret EntityId { index: idx, generation: gen }
+  }
+  let idx: Int = this.nextIndex
+  this.nextIndex = idx + 1
+  ensureIntSlots(lst: this.generations, index: idx)
+  setIntListAt(lst: this.generations, index: idx, value: 0)
+  ret EntityId { index: idx, generation: 0 }
+}
+
+# Free an entity: bump its slot's generation (so stale handles compare unequal)
+# and return the index to the free list for reuse.
+func freeEntity(this: mod EntityAllocator, entity: view EntityId) {
+  let idx: Int = entity.index
+  if idx < 0 {
+    ret
+  }
+  ensureIntSlots(lst: this.generations, index: idx)
+  let cur: Int = intListAt(lst: this.generations, index: idx)
+  setIntListAt(lst: this.generations, index: idx, value: cur + 1)
+  appendIntList(lst: this.freeList, value: idx)
+}
+
+# The current generation of a slot, or -1 if the index was never allocated.
+# #705 uses this for O(1) isAlive.
+func allocatorGeneration(this: view EntityAllocator, index: view Int) ret Int {
+  if index < 0 {
+    ret -1
+  }
+  if index >= this.generations.length {
+    ret -1
+  }
+  ret intListAt(lst: this.generations, index: index)
+}
