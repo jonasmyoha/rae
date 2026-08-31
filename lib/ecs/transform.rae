@@ -1,0 +1,46 @@
+# lib/ecs — transform components (docs/ecs-general-architecture.md §2.5).
+#
+# The LOCAL transforms (Transform2D / Transform3D) are added here by #714. This
+# file also holds the DERIVED world-transform caches (#715):
+#
+#   WorldTransform2D / WorldTransform3D hold an entity's COMPOSED world-space
+#   transform — its own local transform folded onto its parent's world transform
+#   by the TransformSystem walking the hierarchy depth order (#713). They are a
+#   DERIVED CACHE: recomputed each frame from the local transforms + hierarchy,
+#   NEVER authored and NEVER serialized. The component registry (#717/#719) will
+#   register them WITHOUT a SERIALIZE flag, so save/load skips them and every
+#   system rebuilds them from scratch.
+import core
+open vec2
+open math3d
+
+# The composed 2D world transform, kept decomposed as position / rotation /
+# scale. (Rae has no Mat3 type yet; pos/rot/scale carries the same information
+# and composes directly onto a child's local transform.) Derived cache — never
+# serialized.
+type WorldTransform2D {
+  position: Vec2
+  rotation: Float
+  scale: Vec2
+}
+
+# Identity 2D world transform: origin, no rotation, unit scale. A root entity's
+# world transform starts here before its local transform is folded in.
+func createWorldTransform2D() ret WorldTransform2D {
+  ret WorldTransform2D {
+    position: Vec2 { x: 0.0, y: 0.0 },
+    rotation: 0.0,
+    scale: Vec2 { x: 1.0, y: 1.0 }
+  }
+}
+
+# The composed 3D world transform as a full model matrix (the product up the
+# parent chain). Derived cache — never serialized.
+type WorldTransform3D {
+  matrix: Mat4
+}
+
+# Identity 3D world transform.
+func createWorldTransform3D() ret WorldTransform3D {
+  ret WorldTransform3D { matrix: mat4Identity() }
+}
