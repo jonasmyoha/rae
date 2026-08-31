@@ -81,28 +81,28 @@ func paintShape(world: view UiWorld, entity: view EntityId, wt: view WorldTransf
   let fill: RgbaColor = chainRgba(c: sh.fill, chain255: chain255)
 
   if sh.kind is ShapeKind.rect {
-    sinkRect(x: wt.x, y: wt.y, w: cr.w, h: cr.h, c: fill)
+    sinkRect(x: wt.x, y: wt.y, w: cr.size.x, h: cr.size.y, c: fill)
     ret
   }
   if sh.kind is ShapeKind.roundedRect {
     # `Shape.radius` is in pixels; the sink clamps it and converts to
     # raylib's fraction-of-smaller-side roundness.
-    sinkRoundedRect(x: wt.x, y: wt.y, w: cr.w, h: cr.h, radius: sh.radius, c: fill)
+    sinkRoundedRect(x: wt.x, y: wt.y, w: cr.size.x, h: cr.size.y, radius: sh.radius, c: fill)
     ret
   }
   if sh.kind is ShapeKind.circle {
     # Centred inside the entity's box. Use radius from Shape, falling
     # back to half the smaller side if not set.
-    var smaller: Float = cr.w
-    if cr.h < smaller {
-      smaller = cr.h
+    var smaller: Float = cr.size.x
+    if cr.size.y < smaller {
+      smaller = cr.size.y
     }
     var r: Float = sh.radius
     if r <= 0.0 {
       r = smaller / 2.0
     }
-    let cx: Float = wt.x + (cr.w / 2.0)
-    let cy: Float = wt.y + (cr.h / 2.0)
+    let cx: Float = wt.x + (cr.size.x / 2.0)
+    let cy: Float = wt.y + (cr.size.y / 2.0)
     sinkCircle(cx: cx, cy: cy, r: r, c: fill)
     ret
   }
@@ -125,9 +125,9 @@ func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view En
     if glyph.length() is 0 {
       ret
     }
-    var smaller: Float = cr.w
-    if cr.h < smaller {
-      smaller = cr.h
+    var smaller: Float = cr.size.x
+    if cr.size.y < smaller {
+      smaller = cr.size.y
     }
     # Material glyphs sit on a roughly em-square; rendering at the box
     # size lines up with their baked padding. We must measure with the
@@ -141,8 +141,8 @@ func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view En
       fontSize: fontSize
       spacing: 0.0
     )
-    let centerOffsetX: Float = (cr.w - glyphW.toFloat()) / 2.0
-    let centerOffsetY: Float = (cr.h - fontSize) / 2.0
+    let centerOffsetX: Float = (cr.size.x - glyphW.toFloat()) / 2.0
+    let centerOffsetY: Float = (cr.size.y - fontSize) / 2.0
     drawTextWithFont(
       slot: iconFontSlot
       text: glyph
@@ -164,10 +164,10 @@ func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view En
   var scaleX: Float = 1.0
   var scaleY: Float = 1.0
   if tex.width > 0 {
-    scaleX = cr.w / tex.width.toFloat()
+    scaleX = cr.size.x / tex.width.toFloat()
   }
   if tex.height > 0 {
-    scaleY = cr.h / tex.height.toFloat()
+    scaleY = cr.size.y / tex.height.toFloat()
   }
   var scale: Float = scaleX
   if scaleY < scale {
@@ -187,8 +187,8 @@ func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view En
   let drawScale: Float = scale * hoverMul
   let drawW: Float = tex.width.toFloat() * drawScale
   let drawH: Float = tex.height.toFloat() * drawScale
-  let offX: Float = (cr.w - drawW) / 2.0
-  let offY: Float = (cr.h - drawH) / 2.0
+  let offX: Float = (cr.size.x - drawW) / 2.0
+  let offY: Float = (cr.size.y - drawH) / 2.0
 
   # Rounded-corner clip via fragment shader (SDF; live per call).
   var useRounded: Bool = componentHas(this: world.cornerRadiuses, entity: entity)
@@ -471,13 +471,13 @@ func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransfo
       spacing: 1.0
     )
     if centerX {
-      drawX = wt.x + (cr.w - measured.toFloat()) / 2.0
+      drawX = wt.x + (cr.size.x - measured.toFloat()) / 2.0
     }
     if rightAlignX {
-      drawX = wt.x + cr.w - measured.toFloat()
+      drawX = wt.x + cr.size.x - measured.toFloat()
     }
     if centerY {
-      drawY = wt.y + (cr.h - size) / 2.0
+      drawY = wt.y + (cr.size.y - size) / 2.0
     }
   }
   if isUiMsdfEnabled(world: world) {
@@ -540,10 +540,10 @@ func paintBackdropImage(reg: view TextureRegistry, world: view UiWorld, entity: 
   var scaleX: Float = 1.0
   var scaleY: Float = 1.0
   if tex.width > 0 {
-    scaleX = cr.w / tex.width.toFloat()
+    scaleX = cr.size.x / tex.width.toFloat()
   }
   if tex.height > 0 {
-    scaleY = cr.h / tex.height.toFloat()
+    scaleY = cr.size.y / tex.height.toFloat()
   }
   var scale: Float = scaleX
   if scaleY > scale {
@@ -554,8 +554,8 @@ func paintBackdropImage(reg: view TextureRegistry, world: view UiWorld, entity: 
   }
   let drawW: Float = tex.width.toFloat() * scale
   let drawH: Float = tex.height.toFloat() * scale
-  let offX: Float = (cr.w - drawW) / 2.0
-  let offY: Float = (cr.h - drawH) / 2.0
+  let offX: Float = (cr.size.x - drawW) / 2.0
+  let offY: Float = (cr.size.y - drawH) / 2.0
   let white: Color = { r: 255, g: 255, b: 255, a: chain255 }
   drawTextureEx(
     texture: tex
@@ -583,8 +583,8 @@ func paintGradientFill(world: view UiWorld, entity: view EntityId, wt: view Worl
   drawGradientRect(
     x: wt.x
     y: wt.y
-    w: cr.w
-    h: cr.h
+    w: cr.size.x
+    h: cr.size.y
     radius: radius
     fromR: gf.from.r
     fromG: gf.from.g
@@ -618,7 +618,7 @@ func paintEntity(world: view UiWorld, reg: view TextureRegistry, entity: view En
   }
   let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
   # Viewport cull: skip the paint (esp. text shaping) for entities fully off-screen — the big win for long scrolled lists (200+ rows). world.layoutW/H is the screen; 80px margin keeps edge shadows/partial rows.
-  if (wt.y + cr.h + 80.0 < 0.0) or (wt.y - 80.0 > world.layoutH) or (wt.x + cr.w + 80.0 < 0.0) or (wt.x - 80.0 > world.layoutW) { ret }
+  if (wt.y + cr.size.y + 80.0 < 0.0) or (wt.y - 80.0 > world.layoutH) or (wt.x + cr.size.x + 80.0 < 0.0) or (wt.x - 80.0 > world.layoutW) { ret }
   let chain255: Int = renderAlpha255(world: world, entity: entity)
 
   # GradientFill takes precedence over a solid Shape.fill (the gradient
@@ -767,10 +767,10 @@ func renderDebugClickRects(
           if mouseY < wt.y {
             inside = false
           }
-          if mouseX > wt.x + cr.w {
+          if mouseX > wt.x + cr.size.x {
             inside = false
           }
-          if mouseY > wt.y + cr.h {
+          if mouseY > wt.y + cr.size.y {
             inside = false
           }
           var col: Color = idleColor
@@ -787,8 +787,8 @@ func renderDebugClickRects(
           drawRectangleLines(
             x: wt.x
             y: wt.y
-            width: cr.w
-            height: cr.h
+            width: cr.size.x
+            height: cr.size.y
             color: col
           )
           # Hovered rect: tiny label at the top-LEFT corner showing
@@ -804,8 +804,8 @@ func renderDebugClickRects(
           if inside {
             let ix: Int = wt.x.toInt()
             let iy: Int = wt.y.toInt()
-            let iw: Int = cr.w.toInt()
-            let ih: Int = cr.h.toInt()
+            let iw: Int = cr.size.x.toInt()
+            let ih: Int = cr.size.y.toInt()
             let dimText: String = "#{e} {ix},{iy} {iw}x{ih}"
             let dimSize: Float = 11.0
             let dimSpacing: Float = 0.5

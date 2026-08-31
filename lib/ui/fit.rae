@@ -49,26 +49,26 @@ func fitWriteRect(world: mod UiWorld, entity: view EntityId, x: view Float, y: v
   }
   let cur: ComputedRect = componentGet(this: world.computedRects, entity: entity)
   var dirty: Bool = false
-  if fitDiffers(a: cur.x, b: x) {
+  if fitDiffers(a: cur.position.x, b: x) {
     dirty = true
   }
-  if fitDiffers(a: cur.y, b: y) {
+  if fitDiffers(a: cur.position.y, b: y) {
     dirty = true
   }
-  if fitDiffers(a: cur.w, b: w) {
+  if fitDiffers(a: cur.size.x, b: w) {
     dirty = true
   }
-  if fitDiffers(a: cur.h, b: h) {
+  if fitDiffers(a: cur.size.y, b: h) {
     dirty = true
   }
   if dirty is false {
     ret
   }
   let cr: mod ComputedRect => componentMod(this: world.computedRects, entity: entity)
-  cr.x = x
-  cr.y = y
-  cr.w = w
-  cr.h = h
+  cr.position.x = x
+  cr.position.y = y
+  cr.size.x = w
+  cr.size.y = h
 }
 
 # Rewrite every descendant's ComputedRect as `authored Rect * s`.
@@ -85,7 +85,7 @@ func fitScaleSubtree(world: mod UiWorld, entity: view EntityId, s: view Float) {
     let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
     if componentHas(this: world.rects, entity: cid) {
       let r: Rect = componentGet(this: world.rects, entity: cid)
-      fitWriteRect(world: world, entity: cid, x: r.x * s, y: r.y * s, w: r.w * s, h: r.h * s)
+      fitWriteRect(world: world, entity: cid, x: r.position.x * s, y: r.position.y * s, w: r.size.x * s, h: r.size.y * s)
     }
     fitScaleSubtree(world: world, entity: cid, s: s)
     i = i + 1
@@ -107,16 +107,16 @@ func fitApplyOne(world: mod UiWorld, entity: view EntityId, mode: view FitMode) 
   }
   let pcr: ComputedRect = componentGet(this: world.computedRects, entity: pl.parent)
   let design: Rect = componentGet(this: world.rects, entity: entity)
-  if design.w <= 0.0 {
+  if design.size.x <= 0.0 {
     ret
   }
-  if design.h <= 0.0 {
+  if design.size.y <= 0.0 {
     ret
   }
   var padL: Float = 0.0
   var padT: Float = 0.0
-  var availW: Float = pcr.w
-  var availH: Float = pcr.h
+  var availW: Float = pcr.size.x
+  var availH: Float = pcr.size.y
   if componentHas(this: world.paddings, entity: pl.parent) {
     let pad: Padding = componentGet(this: world.paddings, entity: pl.parent)
     padL = pad.insets.l
@@ -130,8 +130,8 @@ func fitApplyOne(world: mod UiWorld, entity: view EntityId, mode: view FitMode) 
   if availH <= 0.0 {
     ret
   }
-  let sw: Float = availW / design.w
-  let sh: Float = availH / design.h
+  let sw: Float = availW / design.size.x
+  let sh: Float = availH / design.size.y
   var s: Float = sw
   if mode is FitMode.contain {
     if sh < sw {
@@ -143,8 +143,8 @@ func fitApplyOne(world: mod UiWorld, entity: view EntityId, mode: view FitMode) 
       s = sh
     }
   }
-  let w: Float = design.w * s
-  let h: Float = design.h * s
+  let w: Float = design.size.x * s
+  let h: Float = design.size.y * s
   let x: Float = padL + (availW - w) / 2.0
   let y: Float = padT + (availH - h) / 2.0
   fitWriteRect(world: world, entity: entity, x: x, y: y, w: w, h: h)
@@ -163,10 +163,10 @@ func fitSystem(world: mod UiWorld) pub {
     if a.ratio > 0.0 {
       if componentHas(this: world.computedRects, entity: e) {
         let cur: ComputedRect = componentGet(this: world.computedRects, entity: e)
-        let targetH: Float = cur.w / a.ratio
-        if fitDiffers(a: cur.h, b: targetH) {
+        let targetH: Float = cur.size.x / a.ratio
+        if fitDiffers(a: cur.size.y, b: targetH) {
           let cr: mod ComputedRect => componentMod(this: world.computedRects, entity: e)
-          cr.h = targetH
+          cr.size.y = targetH
         }
       }
     }
