@@ -315,6 +315,10 @@ export type ClientRunTestsMessage = {
   targetId?: string;
   disabledTests?: string;
   testName?: string;
+  // Run the graphical example smoke tests too (slow: builds + renders every 3D
+  // example). Defaults to false — the "Run all tests" button stays fast unless
+  // the user opts in via the toggle. Ignored for single-test (testName) runs.
+  includeExamples?: boolean;
 };
 
 export type ClientRunBuildMessage = {

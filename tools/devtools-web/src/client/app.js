@@ -5,6 +5,7 @@ const connectionStatus = document.getElementById("connection-status");
 const runTestsBtn = document.getElementById("run-tests-btn");
 const stopTestsBtn = document.getElementById("stop-tests-btn");
 const disabledTestsInput = document.getElementById("disabled-tests-input");
+const includeExamplesToggle = document.getElementById("include-examples-toggle");
 const testStatusChip = document.getElementById("test-status-chip");
 const testLog = document.getElementById("test-log");
 const buildStatusChip = document.getElementById("build-status-chip");
@@ -453,6 +454,15 @@ if (disabledTestsInput) {
   });
 }
 
+// Graphical example smoke tests default OFF (the button runs fast unit cases
+// only). Persist the toggle so a deliberate opt-in survives reloads.
+if (includeExamplesToggle) {
+  includeExamplesToggle.checked = localStorage.getItem("rae_include_examples") === "1";
+  includeExamplesToggle.addEventListener("change", () => {
+    localStorage.setItem("rae_include_examples", includeExamplesToggle.checked ? "1" : "0");
+  });
+}
+
 buildBtn?.addEventListener("click", () => requestBuildCommand("build"));
 cleanBtn?.addEventListener("click", () => requestBuildCommand("clean"));
 rebuildBtn?.addEventListener("click", () => requestBuildCommand("rebuild"));
@@ -518,12 +528,14 @@ function requestTestRun(mode = "all") {
   }
 
   const disabledTests = disabledTestsInput ? disabledTestsInput.value : "";
+  const includeExamples = includeExamplesToggle ? includeExamplesToggle.checked : false;
 
   socket.send(
     JSON.stringify({
       type: "run-tests",
       mode,
-      disabledTests
+      disabledTests,
+      includeExamples
     })
   );
 }
