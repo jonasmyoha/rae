@@ -1,0 +1,85 @@
+import core
+open ecs/entity
+open ecs/component_table
+open ecs/hierarchy
+open ecs/transform
+open ecs/HierarchySystem/HierarchySystem
+open ecs/TransformSystem/TransformSystem
+open vec2
+open vec3
+open math3d
+
+# #716: the TransformSystem composes local Transform* into WorldTransform* over
+# the hierarchy depth order (parent before child). Checks 3D (matrix compose,
+# incl. a lone entity) and 2D (decomposed TRS compose + rotation propagation).
+
+func t3at(x: view Float, y: view Float, z: view Float) ret Transform3D {
+  var tr: Transform3D = createTransform3D()
+  tr.position = Vec3 { x: x, y: y, z: z }
+  ret tr
+}
+
+func t2at(x: view Float, y: view Float, rot: view Float, sx: view Float, sy: view Float) ret Transform2D {
+  ret Transform2D { position: Vec2 { x: x, y: y }, rotation: rot, scale: Vec2 { x: sx, y: sy } }
+}
+
+func printWorld3D(worlds: view ComponentTable(WorldTransform3D), entity: view EntityId, label: view String) {
+  let w: WorldTransform3D = componentGet(this: worlds, entity: entity)
+  log("{label}: {w.matrix.m[12]} {w.matrix.m[13]} {w.matrix.m[14]}")
+}
+
+func printWorld2D(worlds: view ComponentTable(WorldTransform2D), entity: view EntityId, label: view String) {
+  let w: WorldTransform2D = componentGet(this: worlds, entity: entity)
+  log("{label}: pos {w.position.x},{w.position.y} rot {w.rotation} scale {w.scale.x},{w.scale.y}")
+}
+
+func main() {
+  # ----- 3D: r -> a -> a1, plus lone L -----
+  var parents3: ComponentTable(Parent) = createComponentTable(Parent)
+  var childrens3: ComponentTable(Children) = createComponentTable(Children)
+  var order3: HierarchyOrder = createHierarchyOrder()
+  var t3: ComponentTable(Transform3D) = createComponentTable(Transform3D)
+  var w3: ComponentTable(WorldTransform3D) = createComponentTable(WorldTransform3D)
+  let r: EntityId = { index: 1, generation: 0 }
+  let a: EntityId = { index: 2, generation: 0 }
+  let a1: EntityId = { index: 3, generation: 0 }
+  let lone: EntityId = { index: 9, generation: 0 }
+  componentSet(this: t3, entity: r, data: t3at(x: 10.0, y: 20.0, z: 30.0))
+  componentSet(this: t3, entity: a, data: t3at(x: 1.0, y: 2.0, z: 3.0))
+  componentSet(this: t3, entity: a1, data: t3at(x: 100.0, y: 200.0, z: 300.0))
+  componentSet(this: t3, entity: lone, data: t3at(x: 7.0, y: 8.0, z: 9.0))
+  setParent(parents: parents3, childrens: childrens3, child: a, parent: r)
+  setParent(parents: parents3, childrens: childrens3, child: a1, parent: a)
+
+  transformSystem3D(orderState: order3, transforms: t3, worldTransforms: w3, parents: parents3, childrens: childrens3)
+  printWorld3D(worlds: w3, entity: r, label: "3D r")
+  printWorld3D(worlds: w3, entity: a, label: "3D a")
+  printWorld3D(worlds: w3, entity: a1, label: "3D a1")
+  printWorld3D(worlds: w3, entity: lone, label: "3D lone")
+
+  # ----- 2D: r2 -> b -> b1 (translate+scale), and rr -> cc (rotation sum) -----
+  var parents2: ComponentTable(Parent) = createComponentTable(Parent)
+  var childrens2: ComponentTable(Children) = createComponentTable(Children)
+  var order2: HierarchyOrder = createHierarchyOrder()
+  var t2: ComponentTable(Transform2D) = createComponentTable(Transform2D)
+  var w2: ComponentTable(WorldTransform2D) = createComponentTable(WorldTransform2D)
+  let r2: EntityId = { index: 1, generation: 0 }
+  let b: EntityId = { index: 2, generation: 0 }
+  let b1: EntityId = { index: 3, generation: 0 }
+  let rr: EntityId = { index: 4, generation: 0 }
+  let cc: EntityId = { index: 5, generation: 0 }
+  componentSet(this: t2, entity: r2, data: t2at(x: 10.0, y: 20.0, rot: 0.0, sx: 2.0, sy: 2.0))
+  componentSet(this: t2, entity: b, data: t2at(x: 5.0, y: 5.0, rot: 0.0, sx: 1.0, sy: 1.0))
+  componentSet(this: t2, entity: b1, data: t2at(x: 1.0, y: 1.0, rot: 0.0, sx: 1.0, sy: 1.0))
+  componentSet(this: t2, entity: rr, data: t2at(x: 0.0, y: 0.0, rot: 1.0, sx: 1.0, sy: 1.0))
+  componentSet(this: t2, entity: cc, data: t2at(x: 0.0, y: 0.0, rot: 2.0, sx: 1.0, sy: 1.0))
+  setParent(parents: parents2, childrens: childrens2, child: b, parent: r2)
+  setParent(parents: parents2, childrens: childrens2, child: b1, parent: b)
+  setParent(parents: parents2, childrens: childrens2, child: cc, parent: rr)
+
+  transformSystem2D(orderState: order2, transforms: t2, worldTransforms: w2, parents: parents2, childrens: childrens2)
+  printWorld2D(worlds: w2, entity: r2, label: "2D r2")
+  printWorld2D(worlds: w2, entity: b, label: "2D b")
+  printWorld2D(worlds: w2, entity: b1, label: "2D b1")
+  printWorld2D(worlds: w2, entity: cc, label: "2D cc")
+}
