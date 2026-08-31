@@ -14,6 +14,7 @@ import core
 open ecs/entity
 open ecs/component_table
 open ecs/hierarchy
+open ecs/world
 
 # Append `child` to `parent`'s Children cache, creating the Children list if this
 # is the parent's first child. Internal — the Children cache is only ever grown
@@ -160,4 +161,77 @@ func depthOrder(state: mod HierarchyOrder, parents: view ComponentTable(Parent),
     state.builtGeneration = gen
   }
   ret view state.order
+}
+
+# ----- destroy-time referential integrity (#712) -----------------------------
+#
+# Destroying an entity must not leave dangling hierarchy edges: no Parent may
+# point at a dead entity, and no Children list may still list one. componentRemove
+# alone does NOT do this — it drops the entity's OWN Parent/Children but leaves
+# its parent's Children and its children's Parent pointing at it (the gap
+# documented at lib/ui/ecs.rae destroyEntity). detachForDestroy / destroySubtree
+# close that gap.
+
+# Append `node` then every descendant (pre-order) into `out`. Reads the Children
+# cache only. Used to gather a whole subtree before tearing it down.
+func collectSubtree(childrens: view ComponentTable(Children), node: view EntityId,
+                    out: mod List(EntityId)) {
+  out.add(value: node)
+  if componentHas(this: childrens, entity: node) {
+    let cache: view Children => componentView(this: childrens, entity: node)
+    loop var i: Int = 0, i < cache.ids.length, ++i {
+      if let childEntity: EntityId = cache.ids.copyAt(index: i) {
+        collectSubtree(childrens: childrens, node: childEntity, out: out)
+      }
+    }
+  }
+}
+
+# Prepare a SINGLE entity for destruction, keeping the hierarchy consistent:
+# unlink it from its parent's Children, drop its own Parent, ORPHAN its children
+# (clear each child's Parent so it no longer dangles to the dying entity — they
+# become roots), and drop its own Children. After this call no Parent/Children
+# anywhere references `entity`, and `entity` references nothing. The caller then
+# removes the entity's other components and frees it. Use destroySubtree instead
+# when the children should die with the entity.
+func detachForDestroy(parents: mod ComponentTable(Parent), childrens: mod ComponentTable(Children),
+                      entity: view EntityId) {
+  if componentHas(this: parents, entity: entity) {
+    let link: Parent = componentGet(this: parents, entity: entity)
+    removeChildFrom(childrens: childrens, parent: link.parent, child: entity)
+    componentRemove(this: parents, entity: entity)
+  }
+  if componentHas(this: childrens, entity: entity) {
+    let kids: List(EntityId) = getChildren(childrens: childrens, parent: entity)
+    loop var i: Int = 0, i < kids.length, ++i {
+      if let child: EntityId = kids.copyAt(index: i) {
+        componentRemove(this: parents, entity: child)
+      }
+    }
+    componentRemove(this: childrens, entity: entity)
+  }
+}
+
+# Destroy `root` and its whole subtree: free every entity in the allocator and
+# drop all their Parent/Children, and unlink `root` from its parent's Children.
+# After this no subtree entity is alive and no surviving Parent/Children edge
+# references any of them — no dangling refs. (The entities' OTHER components are
+# the owning World's concern; this is the hierarchy + entity-lifetime teardown.)
+func destroySubtree(allocator: mod EntityAllocator, parents: mod ComponentTable(Parent),
+                    childrens: mod ComponentTable(Children), root: view EntityId) {
+  let subtree: List(EntityId) = createList(EntityId, cap: 16)
+  collectSubtree(childrens: childrens, node: root, out: subtree)
+  # Unlink the root from its parent's Children so the (surviving) parent doesn't
+  # dangle to the destroyed root.
+  if componentHas(this: parents, entity: root) {
+    let link: Parent = componentGet(this: parents, entity: root)
+    removeChildFrom(childrens: childrens, parent: link.parent, child: root)
+  }
+  loop var i: Int = 0, i < subtree.length, ++i {
+    if let entity: EntityId = subtree.copyAt(index: i) {
+      componentRemove(this: parents, entity: entity)
+      componentRemove(this: childrens, entity: entity)
+      freeEntity(this: allocator, entity: entity)
+    }
+  }
 }
