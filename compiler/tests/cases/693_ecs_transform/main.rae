@@ -1,0 +1,37 @@
+import core
+open ecs/transform
+open vec3
+open math3d
+open quat
+
+# #714: local Vec/Quat transform components + a compose unit test. Composing a
+# Transform3D (translate * rotate(quat) * scale) into its model matrix exercises
+# every field; a quaternion rotation proves the orientation is quat-based.
+
+func main() {
+  # Transform2D identity.
+  let t2: Transform2D = createTransform2D()
+  log("t2: pos {t2.position.x},{t2.position.y} rot {t2.rotation} scale {t2.scale.x},{t2.scale.y}")
+
+  # Transform3D identity composes to the identity matrix.
+  let id3: Transform3D = createTransform3D()
+  let idM: Mat4 = transform3dToMatrix(t: id3)
+  log("id m0 {idM.m[0]} m5 {idM.m[5]} m10 {idM.m[10]} m12 {idM.m[12]}")
+
+  # Translate (5,6,7) + non-uniform scale, identity rotation: translation column
+  # is the position, the diagonal is the scale.
+  var t3: Transform3D = createTransform3D()
+  t3.position = Vec3 { x: 5.0, y: 6.0, z: 7.0 }
+  t3.scale = Vec3 { x: 2.0, y: 3.0, z: 4.0 }
+  let m: Mat4 = transform3dToMatrix(t: t3)
+  log("m tx {m.m[12]} ty {m.m[13]} tz {m.m[14]}")
+  log("m sx {m.m[0]} sy {m.m[5]} sz {m.m[10]}")
+
+  # A ~180 deg rotation about Z through the quaternion flips the X/Y axes but
+  # leaves Z — FP-robust sign checks (no exact float compare).
+  var rot3: Transform3D = createTransform3D()
+  rot3.rotation = quat.fromAxisAngle(axis: Vec3 { x: 0.0, y: 0.0, z: 1.0 }, angle: 3.14159265)
+  let rm: Mat4 = transform3dToMatrix(t: rot3)
+  log("rot m0 negative: {rm.m[0] < 0.0}")
+  log("rot m10 positive: {rm.m[10] > 0.0}")
+}
