@@ -1,0 +1,57 @@
+import core
+open ecs/entity
+open ecs/world
+open ecs/list_helpers
+
+# #706: the entity core (lib/ecs/world.rae) is reusable by ANY world, not just
+# UiWorld. This GameWorld is a non-UI struct that embeds the shared
+# EntityAllocator and gets entity create / destroy / isAlive / alive-iteration
+# for free — its own state (here just `frame`) lives alongside the core, exactly
+# as UiWorld keeps its component tables alongside it.
+type GameWorld {
+  allocator: EntityAllocator
+  frame: Int
+}
+
+func createGameWorld() ret GameWorld {
+  ret GameWorld { allocator: createEntityAllocator(), frame: 0 }
+}
+
+# Iterate the live set the core exposes and print the entity indices in order,
+# so a swap-remove is observable.
+func dumpAlive(world: view GameWorld) {
+  var line: String = ""
+  loop var i: Int = 0, i < world.allocator.alive.length, ++i {
+    let entity: EntityId = entityListAt(lst: world.allocator.alive, index: i)
+    if i > 0 {
+      line = "{line},"
+    }
+    line = "{line}{entity.index}"
+  }
+  log("alive: {line}")
+}
+
+func main() {
+  var world: GameWorld = createGameWorld()
+  let e1: EntityId = allocEntity(this: world.allocator)
+  let e2: EntityId = allocEntity(this: world.allocator)
+  let e3: EntityId = allocEntity(this: world.allocator)
+  log("alive count: {allocatorAliveCount(this: world.allocator)}")
+  log("e2 alive: {allocatorIsAlive(this: world.allocator, entity: e2)}")
+  dumpAlive(world: world)
+
+  # Destroy the MIDDLE entity: the core swap-removes it in O(1), so the last
+  # live entity (e3) takes its slot in `alive`.
+  freeEntity(this: world.allocator, entity: e2)
+  log("alive count after free: {allocatorAliveCount(this: world.allocator)}")
+  log("e2 alive after free: {allocatorIsAlive(this: world.allocator, entity: e2)}")
+  dumpAlive(world: world)
+
+  # Next alloc recycles e2's index with a bumped generation; the stale e2 handle
+  # (same index, old generation) is not alive, the fresh handle is.
+  let e4: EntityId = allocEntity(this: world.allocator)
+  log("e4 index={e4.index} gen={e4.generation}")
+  log("stale e2 alive: {allocatorIsAlive(this: world.allocator, entity: e2)}")
+  log("live e4 alive: {allocatorIsAlive(this: world.allocator, entity: e4)}")
+  dumpAlive(world: world)
+}
