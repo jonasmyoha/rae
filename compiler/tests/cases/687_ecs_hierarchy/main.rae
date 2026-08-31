@@ -1,0 +1,70 @@
+import core
+open ecs/entity
+open ecs/component_table
+open ecs/hierarchy
+open ecs/HierarchySystem/HierarchySystem
+
+# #711: Parent is authoritative, Children is a DERIVED cache. Callers only ever
+# call setParent — never touch a Children list. This checks that add / reparent /
+# detach and rebuildFromParent keep Children consistent with Parent.
+
+func printKids(childrens: view ComponentTable(Children), entity: view EntityId, label: view String) {
+  let kids: List(EntityId) = getChildren(childrens: childrens, parent: entity)
+  var line: String = ""
+  loop var i: Int = 0, i < kids.length, ++i {
+    if let existing: EntityId = kids.copyAt(index: i) {
+      if i > 0 {
+        line = "{line} "
+      }
+      line = "{line}{existing.index}"
+    }
+  }
+  log("{label}: {line}")
+}
+
+func printParent(parents: view ComponentTable(Parent), child: view EntityId, label: view String) {
+  if componentHas(this: parents, entity: child) {
+    let link: Parent = componentGet(this: parents, entity: child)
+    log("{label}: {link.parent.index}")
+  } else {
+    log("{label}: none")
+  }
+}
+
+func main() {
+  var parents: ComponentTable(Parent) = createComponentTable(Parent)
+  var childrens: ComponentTable(Children) = createComponentTable(Children)
+  let pA: EntityId = { index: 10, generation: 0 }
+  let pB: EntityId = { index: 11, generation: 0 }
+  let c1: EntityId = { index: 1, generation: 0 }
+  let c2: EntityId = { index: 2, generation: 0 }
+  let c3: EntityId = { index: 3, generation: 0 }
+
+  # add three children under pA
+  setParent(parents: parents, childrens: childrens, child: c1, parent: pA)
+  setParent(parents: parents, childrens: childrens, child: c2, parent: pA)
+  setParent(parents: parents, childrens: childrens, child: c3, parent: pA)
+  printKids(childrens: childrens, entity: pA, label: "pA kids")
+
+  # reparent c2 from pA to pB
+  setParent(parents: parents, childrens: childrens, child: c2, parent: pB)
+  printKids(childrens: childrens, entity: pA, label: "pA kids after reparent")
+  printKids(childrens: childrens, entity: pB, label: "pB kids after reparent")
+  printParent(parents: parents, child: c2, label: "c2 parent")
+
+  # detach c1 (noEntity parent)
+  setParent(parents: parents, childrens: childrens, child: c1, parent: noEntity())
+  printKids(childrens: childrens, entity: pA, label: "pA kids after detach")
+  printParent(parents: parents, child: c1, label: "c1 parent")
+
+  # rebuildFromParent: Children cleared and rebuilt from the Parent table alone.
+  # Live Parents now: c3->pA, c2->pB.
+  rebuildFromParent(parents: parents, childrens: childrens)
+  printKids(childrens: childrens, entity: pA, label: "pA kids after rebuild")
+  printKids(childrens: childrens, entity: pB, label: "pB kids after rebuild")
+
+  # getChildren returns a copy: mutating it must not touch the cache.
+  let snapshot: List(EntityId) = getChildren(childrens: childrens, parent: pA)
+  snapshot.clear()
+  printKids(childrens: childrens, entity: pA, label: "pA kids after copy cleared")
+}
