@@ -12,6 +12,11 @@
 # Sub-types and enums shared across components
 # -----------------------------------------------------------------
 
+# #723: UI geometry uses the canonical `Vec2` from lib/vec2.rae (the UI no longer
+# defines its own). Import pulls vec2 into the build graph so its struct is
+# emitted; the type name itself is globally visible to every UI file.
+import vec2
+
 enum SizeMode {
   fixed
   hug
@@ -120,12 +125,6 @@ type Insets {
   t: Float
   r: Float
   b: Float
-}
-
-# 2D point used for offsets, pivots, anchors.
-type Vec2 {
-  x: Float
-  y: Float
 }
 
 # RGBA in 0..255 ints. Backend renderers convert this into their native
