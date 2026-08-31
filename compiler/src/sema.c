@@ -700,6 +700,53 @@ AstTypeRef* infer_generic_args(CompilerContext* ctx, const AstFuncDecl* func, co
     return inferred_list;
 }
 
+// Multi-type-param inference: bind EVERY generic param of `func` by matching all
+// its param patterns against the corresponding call-argument types, accumulating
+// across params. `patterns[k]`/`concretes[k]` are the k-th param's declared type
+// and its call argument's inferred type (parallel arrays of length `pair_count`).
+// Unlike infer_generic_args — which requires a SINGLE pattern to bind every param
+// and so only ever works for one type param — this binds each param from
+// whichever argument mentions it, so query2(A, B, a: T(A), b: T(B)) binds A from
+// `a` and B from `b`. Returns the full ordered concrete-args list iff every
+// generic param got bound, else NULL. For a one-type-param function it yields the
+// same result as the single-pattern path.
+AstTypeRef* infer_generic_args_multi(CompilerContext* ctx, const AstFuncDecl* func,
+                                     const AstTypeRef** patterns, const AstTypeRef** concretes,
+                                     size_t pair_count) {
+    if (!func || !func->generic_params) return NULL;
+    size_t gcount = 0;
+    for (const AstIdentifierPart* gp = func->generic_params; gp; gp = gp->next) gcount++;
+    if (gcount == 0 || gcount > 32) return NULL;
+    const AstTypeRef* binding[32];
+    for (size_t i = 0; i < gcount; i++) binding[i] = NULL;
+    size_t gi = 0;
+    for (const AstIdentifierPart* gp = func->generic_params; gp; gp = gp->next, gi++) {
+        for (size_t k = 0; k < pair_count && !binding[gi]; k++) {
+            const AstTypeRef* pat = patterns[k];
+            const AstTypeRef* conc = concretes[k];
+            if (!pat || !conc) continue;
+            // Base names must align so the generic_args match positionally
+            // (e.g. pattern ComponentTable(A) vs concrete ComponentTable(Pos)).
+            if (!str_eq(get_base_type_name(pat), get_base_type_name(conc))) continue;
+            const AstTypeRef* p_arg = pat->generic_args;
+            const AstTypeRef* r_arg = conc->generic_args;
+            while (p_arg && r_arg) {
+                if (str_eq(get_base_type_name(p_arg), gp->text)) { binding[gi] = r_arg; break; }
+                p_arg = p_arg->next; r_arg = r_arg->next;
+            }
+        }
+        if (!binding[gi]) return NULL;  // an unbound param -> inference fails
+    }
+    AstTypeRef* head = NULL; AstTypeRef* tail = NULL;
+    for (size_t i = 0; i < gcount; i++) {
+        AstTypeRef* copy = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+        *copy = *binding[i]; copy->next = NULL;
+        if (!head) head = copy; else tail->next = copy;
+        tail = copy;
+    }
+    return head;
+}
+
 // Is this call argument a bare TYPE name (a primitive like `Float`, or a
 // user/enum type), i.e. a positional type argument filling a `T: type`
 // generic parameter rather than a value? Used to tell `createList(Float)`
