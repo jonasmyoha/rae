@@ -41,7 +41,7 @@ import ui/legacy_raylib/window
 open ecs/entity
 func main() {
   var backendEnv: String = "gpu2d" #getEnv(name: "RAE_UI_BACKEND")
-  if backendEnv.equals(other: "gpu2d") {
+  if backendEnv is "gpu2d" {
     setUiBackend(b: UiBackend.gpu2d)
   } else {
     backendEnv = "raylib"
@@ -90,7 +90,7 @@ func main() {
   # parse time, so the theme has to be in place first.
   let themeEnv: String = getEnv(name: "RAE_UI_THEME")
   let lightKey: String = "light"
-  if themeEnv.equals(other: lightKey) {
+  if themeEnv is lightKey {
     setActiveTheme(theme: lightTheme())
   } else {
     setActiveTheme(theme: darkTheme())
@@ -208,11 +208,11 @@ func main() {
     # screen, at which point the outer loop re-builds the world.
     let startScreenEnv: String = getEnv(name: "RAE_UI_SCREEN")
     var startScreen: Screen = Screen.home
-    if startScreenEnv.equals(other: "library") { startScreen = Screen.library }
-    if startScreenEnv.equals(other: "album")   { startScreen = Screen.album }
-    if startScreenEnv.equals(other: "player")  { startScreen = Screen.player }
-    if startScreenEnv.equals(other: "search")  { startScreen = Screen.search }
-    if startScreenEnv.equals(other: "profile") { startScreen = Screen.profile }
+    if startScreenEnv is "library" { startScreen = Screen.library }
+    if startScreenEnv is "album"   { startScreen = Screen.album }
+    if startScreenEnv is "player"  { startScreen = Screen.player }
+    if startScreenEnv is "search"  { startScreen = Screen.search }
+    if startScreenEnv is "profile" { startScreen = Screen.profile }
 
     # Phase 3-6 hot-reload restore. If `.rae/state.json` exists from a
     # previous run (the supervisor signalled `reload`, the app saved
@@ -325,10 +325,10 @@ func main() {
     # needing to script a click. `=labels` pre-enables the FPS / mem
     # read-out for the same reason.
     let debugMenuEnv: String = getEnv(name: "RAE_UI_DEBUG_MENU")
-    if debugMenuEnv.equals(other: "open") {
+    if debugMenuEnv is "open" {
       debug.menuOpen = true
     }
-    if debugMenuEnv.equals(other: "labels") {
+    if debugMenuEnv is "labels" {
       debug.showLabels = true
     }
 
@@ -407,7 +407,7 @@ func main() {
       # ~2 fps. Recompute only when stem or track index actually
       # changes — at that point the user has navigated, so one
       # extra deep copy is fine.
-      let stemChanged: Bool = appState.currentAlbumStem.equals(other: cachedAlbumStem) is false
+      let stemChanged: Bool = appState.currentAlbumStem is cachedAlbumStem is false
       let trackChanged: Bool = appState.currentTrackIndex is not cachedTrackIndex
       if stemChanged or trackChanged {
         let activeAlbumNow: Album = activeAlbum(state: appState)
@@ -844,7 +844,7 @@ func main() {
           # `active=true` but the UI is frozen, the bug is downstream
           # in renderSystem / endDrawing.
           if loopDebugEnabled {
-            log("[loop {loopDebugFrame}] input.events={input.events.length} pressed={input.pressedEntity.value} animating={animating} active={active}")
+            log("[loop {loopDebugFrame}] input.events={input.events.length} pressed={input.pressedEntity.index} animating={animating} active={active}")
           }
 
           # Event-driven render gate. With wait-events, the loop only

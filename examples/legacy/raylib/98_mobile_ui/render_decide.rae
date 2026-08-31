@@ -1,5 +1,6 @@
 open ui/ecs
 import ui/legacy_raylib/window
+open ecs/entity
 # Per-frame "did anything change?" gate. With the wait-events loop,
 # the inner loop iterates only when an OS event arrived or our timeout
 # fired — so this decision controls whether we run
@@ -48,7 +49,7 @@ func decideActive(
     }
   }
   if active is false {
-    if input.pressedEntity.value is not prevPressed.value {
+    if input.pressedEntity is not prevPressed {
       active = true
     }
   }
@@ -92,7 +93,7 @@ func decideActive(
     }
   }
   if active is false {
-    if currentHovered.value is not prevHovered.value {
+    if currentHovered is not prevHovered {
       active = true
     }
   }
