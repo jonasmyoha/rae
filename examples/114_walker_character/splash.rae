@@ -1,0 +1,71 @@
+# splash.rae — water splashes when the character wades through the shallows (#84).
+#
+# The walker example can now walk into shallow water (character.rae's terrainWadable
+# gate); this adds the visual feedback. Each frame it advances the splash pool, then
+# for the hero plus every moving crowd member that is standing in water
+# (terrainWaterDepth > 0) throws a small burst of pale droplets up from its feet.
+#
+# Purely visual: run in the RENDER path (render.rae), NOT the fixed sim, so it never
+# touches persisted/hot-reload state. Crowd emissions are STRIDED (a member splashes
+# every few frames) so the whole crowd wading does not swamp the pool; the pool caps
+# and drops the oldest, so it is bounded regardless. Siblings merge into one module,
+# so App / terrainWaterDepth resolve cross-file.
+import core
+import vec3
+import math
+import world_biome
+open world_biome
+import particles
+open particles
+
+var gSplashTick: Int = 0
+
+const splashMinDepth: Float = 0.03    # world units of water under a unit before it splashes
+const splashPerBurst: Int = 3         # droplets per splash
+const splashCrowdStride: Int = 3      # a crowd member splashes every Nth frame it wades
+
+# Pale blue-white water droplet colour (splash spray).
+func splashColorR() ret Float { ret 0.82 }
+func splashColorG() ret Float { ret 0.90 }
+func splashColorB() ret Float { ret 0.99 }
+
+# One splash burst at the WATER SURFACE under a unit. `waterZ` is the flat water
+# plane in WORLD space (worldWaterZ) — NOT the controller's ground-relative z,
+# which stands ~1 unit high and would spray droplets from the chest. Droplets rise
+# UP from just above the surface so they read.
+func emitSplashAt(sys: mod ParticleSystem, x: copy Float, y: copy Float, waterZ: copy Float) {
+  particleBurst(sys: sys, x: x, y: y, z: waterZ + 0.05,
+    count: splashPerBurst, hVel: 1.7, upVel: 3.6, life: 0.5, size: 0.22,
+    r: splashColorR(), g: splashColorG(), b: splashColorB(), phase: x * 0.7 + y * 0.31)
+}
+
+# Advance + emit splashes for everything wading this frame. Call once per frame.
+func splashStep(app: mod App, dt: copy Float) {
+  particleUpdate(sys: app.splashes, dt: dt)
+  gSplashTick = gSplashTick + 1
+  # The flat water plane in WORLD space — every splash sprays up from HERE, not
+  # from the unit's (ground-relative, chest-high) position z.
+  let waterZ: Float = worldWaterZ(groundZ: app.character.groundZ, cfg: defaultBiomeConfig())
+  # The hero (always evaluated — the character the player is watching).
+  if app.character.controller.moving {
+    let heroDepth: Float = terrainWaterDepth(
+      x: app.character.controller.position.x, y: app.character.controller.position.y)
+    if heroDepth > splashMinDepth {
+      emitSplashAt(sys: app.splashes, x: app.character.controller.position.x,
+        y: app.character.controller.position.y, waterZ: waterZ)
+    }
+  }
+  # Every moving crowd member in water, strided so the pool is not swamped.
+  loop var i: Int = 0, i < app.character.crowd.length, ++i {
+    if let member: view CrowdMember => app.character.crowd.viewAt(index: i) {
+      if member.controller.moving and (gSplashTick + i) % splashCrowdStride is 0 {
+        let depth: Float = terrainWaterDepth(
+          x: member.controller.position.x, y: member.controller.position.y)
+        if depth > splashMinDepth {
+          emitSplashAt(sys: app.splashes, x: member.controller.position.x,
+            y: member.controller.position.y, waterZ: waterZ)
+        }
+      }
+    }
+  }
+}

@@ -32,6 +32,19 @@ func terrainIsLand(x: view Float, y: view Float) ret Bool {
   ret worldIsLand(x: x, y: y, cfg: defaultBiomeConfig())
 }
 
+# Can a character WALK/WADE here (#84): land, or shallow water up to waist depth.
+# This is the MOVEMENT gate — deeper water still blocks (it would need swimming),
+# while terrainIsLand stays the SPAWN test (nobody starts standing in the sea).
+func terrainWadable(x: view Float, y: view Float) ret Bool {
+  ret worldWadable(x: x, y: y, cfg: defaultBiomeConfig())
+}
+
+# How deep the water is here in WORLD units (0 on land), so splash intensity can
+# scale with it. worldWaterDepth is in elevation units; scale to world Z (#84).
+func terrainWaterDepth(x: view Float, y: view Float) ret Float {
+  ret worldWaterDepth(x: x, y: y, cfg: defaultBiomeConfig()) * worldTerrainAmplitude
+}
+
 func terrainFindLand(x: view Float, y: view Float) ret Vec3 {
   ret worldFindLand(x: x, y: y, cfg: defaultBiomeConfig())
 }
@@ -44,10 +57,12 @@ func spawnOnLand(controller: mod ThirdPersonController, groundZ: view Float) {
   groundWalker(controller: controller, groundZ: groundZ)
 }
 
-# The shoreline is a wall. The step is taken first and undone if it ended in the
-# sea, which keeps the turn — a character walking into the water still faces the
-# way you pushed, it just does not advance. Each axis is tested separately so
-# walking into the shore at an angle SLIDES along it instead of sticking.
+# The DEEP water is a wall, not the shoreline — a character wades into the
+# shallows (#84) and is only stopped where the sea drops off past waist depth
+# (terrainWadable). The step is taken first and undone if it ended in deep water,
+# which keeps the turn — a character walking into the drop-off still faces the way
+# you pushed, it just does not advance. Each axis is tested separately so wading
+# along the drop-off at an angle SLIDES along it instead of sticking.
 func updateWalkerMovement(controller: mod ThirdPersonController,
                           intent: view InputIntent, cameraYaw: view Float,
                           dt: view Float) ret Bool {
@@ -59,12 +74,12 @@ func updateWalkerMovement(controller: mod ThirdPersonController,
   if moved is false { ret moved }
   let toX: Float = controller.position.x
   let toY: Float = controller.position.y
-  if terrainIsLand(x: toX, y: toY) { ret moved }
-  if terrainIsLand(x: toX, y: fromY) {
+  if terrainWadable(x: toX, y: toY) { ret moved }
+  if terrainWadable(x: toX, y: fromY) {
     controller.position.y = fromY
     ret moved
   }
-  if terrainIsLand(x: fromX, y: toY) {
+  if terrainWadable(x: fromX, y: toY) {
     controller.position.x = fromX
     ret moved
   }
