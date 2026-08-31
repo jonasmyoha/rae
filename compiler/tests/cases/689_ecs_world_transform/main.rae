@@ -1,0 +1,27 @@
+import core
+open ecs/entity
+open ecs/component_table
+open ecs/transform
+
+# #715: the derived world-transform cache components. This checks they exist,
+# construct to identity, and work as ComponentTable component types (the derived
+# caches a TransformSystem writes each frame).
+
+func main() {
+  var wt2: ComponentTable(WorldTransform2D) = createComponentTable(WorldTransform2D)
+  var wt3: ComponentTable(WorldTransform3D) = createComponentTable(WorldTransform3D)
+  let e1: EntityId = { index: 1, generation: 0 }
+  componentSet(this: wt2, entity: e1, data: createWorldTransform2D())
+  componentSet(this: wt3, entity: e1, data: createWorldTransform3D())
+
+  let w2: WorldTransform2D = componentGet(this: wt2, entity: e1)
+  log("wt2 pos: {w2.position.x},{w2.position.y} rot: {w2.rotation} scale: {w2.scale.x},{w2.scale.y}")
+
+  let w3: WorldTransform3D = componentGet(this: wt3, entity: e1)
+  let m0: Float = w3.matrix.m[0]
+  let m5: Float = w3.matrix.m[5]
+  let m1: Float = w3.matrix.m[1]
+  log("wt3 identity m0: {m0} m5: {m5} m1: {m1}")
+  log("wt2 present: {componentHas(this: wt2, entity: e1)}")
+  log("wt3 present: {componentHas(this: wt3, entity: e1)}")
+}
