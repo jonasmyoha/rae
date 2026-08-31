@@ -1,0 +1,45 @@
+import core
+open json
+open ecs/registry
+open ecs/serialize
+
+# #753: resources are world-global singletons registered like components but
+# serialized as a single top-level value. An AUTHORED resource (SERIALIZE) round-
+# trips through worldToJson; a RUNTIME resource (RESOURCE without SERIALIZE) is
+# omitted.
+
+type Frame { count: Int, dt: Int }   # authored resource
+type Input { mouseX: Int }           # runtime resource
+
+func main() {
+  let nFrame: String = "Frame"
+  let nInput: String = "Input"
+
+  var reg: ComponentRegistry = createComponentRegistry()
+  registerResource(reg: reg, name: nFrame, flags: SERIALIZE)   # authored -> saved
+  registerResource(reg: reg, name: nInput, flags: 0)           # runtime  -> omitted
+
+  log("Frame is resource: {isResource(reg: reg, name: nFrame)}")
+  log("Frame serialize: {registeredHasFlag(reg: reg, name: nFrame, flag: SERIALIZE)}")
+  log("Input serialize: {registeredHasFlag(reg: reg, name: nInput, flag: SERIALIZE)}")
+
+  let frame: Frame = { count: 7, dt: 16 }
+  let input: Input = { mouseX: 42 }
+
+  # Serialize both resources; only the SERIALIZE-registered Frame is written.
+  var writer: WorldJson = createWorldJson()
+  addResource(writer: writer, name: nFrame, valueJson: frame.toJson(), registry: reg)
+  addResource(writer: writer, name: nInput, valueJson: input.toJson(), registry: reg)
+  let jsonStr: String = finishWorldJson(writer: writer)
+  log("json: {jsonStr}")
+
+  # Round-trip the authored resource.
+  let doc: JsonDoc = parseJson(source: jsonStr)
+  let frameStr: String = resourceJson(name: nFrame, registry: reg, doc: doc)
+  let loaded: Frame = Frame.fromJson(json: frameStr)
+  log("loaded frame: {loaded.count},{loaded.dt}")
+
+  # The runtime resource is absent from the document.
+  let root: JsonValue = jsonRoot(doc: doc)
+  log("input present: {jsonField(doc: doc, this: root, key: nInput) >= 0}")
+}
