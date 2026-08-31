@@ -237,6 +237,15 @@ bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstType
                     bool p = f->type && (f->type->is_view || f->type->is_mod);
                     fprintf(out, "%s %.*s;\n", p ? "*" : "", (int)f->name.len, f->name.data);
                 }
+                // #751: a zero-field struct (a tag/marker component, e.g.
+                // `type Tag {}`) would emit an EMPTY C struct — invalid in ISO C
+                // (and `{0}`-initializing it errors). Lower it to a one-byte
+                // struct so it is legal and value-copies/zero-inits cleanly. The
+                // synthesized toJson/fromJson/copy/drop iterate the Rae fields
+                // (none), so they never touch this placeholder.
+                if (!td->fields) {
+                    fprintf(out, "  int8_t _rae_empty;\n");
+                }
                 fprintf(out, "};\n\n");
             }
         }
