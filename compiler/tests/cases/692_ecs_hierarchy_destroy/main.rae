@@ -1,0 +1,54 @@
+import core
+open ecs/entity
+open ecs/component_table
+open ecs/hierarchy
+open ecs/world
+open ecs/HierarchySystem/HierarchySystem
+
+# #712: destroy-time referential integrity. Destroying entities must never leave
+# a dangling hierarchy edge (a Parent pointing at a dead entity, or a Children
+# list still listing one). Phase A exercises destroySubtree (whole subtree dies);
+# Phase B exercises detachForDestroy (one node dies, children are orphaned).
+
+func main() {
+  var alloc: EntityAllocator = createEntityAllocator()
+  var parents: ComponentTable(Parent) = createComponentTable(Parent)
+  var childrens: ComponentTable(Children) = createComponentTable(Children)
+
+  # ----- Phase A: destroySubtree of r -> { a -> {a1, a2}, b } -----
+  let r: EntityId = allocEntity(this: alloc)
+  let a: EntityId = allocEntity(this: alloc)
+  let b: EntityId = allocEntity(this: alloc)
+  let a1: EntityId = allocEntity(this: alloc)
+  let a2: EntityId = allocEntity(this: alloc)
+  setParent(parents: parents, childrens: childrens, child: a, parent: r)
+  setParent(parents: parents, childrens: childrens, child: b, parent: r)
+  setParent(parents: parents, childrens: childrens, child: a1, parent: a)
+  setParent(parents: parents, childrens: childrens, child: a2, parent: a)
+  log("A alive before: {allocatorAliveCount(this: alloc)}")
+
+  destroySubtree(allocator: alloc, parents: parents, childrens: childrens, root: r)
+  log("A alive after: {allocatorAliveCount(this: alloc)}")
+  log("A r alive: {allocatorIsAlive(this: alloc, entity: r)}")
+  log("A a1 alive: {allocatorIsAlive(this: alloc, entity: a1)}")
+  log("A parents table count: {componentCount(this: parents)}")
+  log("A childrens table count: {componentCount(this: childrens)}")
+
+  # ----- Phase B: detachForDestroy of the middle node m in p -> m -> {c1, c2} ---
+  let p: EntityId = allocEntity(this: alloc)
+  let m: EntityId = allocEntity(this: alloc)
+  let c1: EntityId = allocEntity(this: alloc)
+  let c2: EntityId = allocEntity(this: alloc)
+  setParent(parents: parents, childrens: childrens, child: m, parent: p)
+  setParent(parents: parents, childrens: childrens, child: c1, parent: m)
+  setParent(parents: parents, childrens: childrens, child: c2, parent: m)
+
+  detachForDestroy(parents: parents, childrens: childrens, entity: m)
+  # m is gone from the hierarchy; p no longer lists it; c1/c2 are orphaned roots.
+  log("B p children count: {getChildren(childrens: childrens, parent: p).length}")
+  log("B m has parent: {componentHas(this: parents, entity: m)}")
+  log("B m has children: {componentHas(this: childrens, entity: m)}")
+  log("B c1 has parent: {componentHas(this: parents, entity: c1)}")
+  log("B c2 has parent: {componentHas(this: parents, entity: c2)}")
+  log("B p has parent: {componentHas(this: parents, entity: p)}")
+}
