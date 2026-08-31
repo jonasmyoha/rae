@@ -1,8 +1,9 @@
 # TransformSystem — RUICS § 8 in Rae form.
 #
-# Walks the entity tree top-down and composes each entity's
-# parent-local `ComputedRect` with its parent's `WorldTransform` to
-# produce an absolute `WorldTransform` in screen space.
+# Walks the entity tree top-down and composes each entity's parent-local
+# `ComputedRect` (as a local `Transform2D`) with its parent's `WorldTransform2D`
+# to produce an absolute `WorldTransform2D` in screen space (#725 — the general
+# lib/ecs transform types, not a bespoke scalar struct).
 #
 # Inputs (all populated by layoutSystem):
 #   ComputedRect  — local position+size in parent content space
@@ -11,12 +12,15 @@
 #   Active        — false hides this entity AND its subtree
 #   TransformFx   — scale/rotation/extra alpha (multiplicative)
 #
-# Output: WorldTransform per entity.
+# Output per entity: WorldTransform2D (position/rotation/scale) plus a
+# WorldVisual (accumulated alpha/visible) — alpha/visible are their own derived
+# cache, no longer baked into the transform.
 #
 # Coordinate convention: x grows right, y grows down (raylib-friendly).
 # rotation is in radians. scale defaults to 1.0. alpha defaults to 1.0.
 import core
 open ecs/component_table
+import ecs/transform
 
 # Returns the active flag for entity; defaults to true if no Active.
 func transformActive(world: view UiWorld, entity: view EntityId) ret Bool {
@@ -33,6 +37,18 @@ func transformOpacity(world: view UiWorld, entity: view EntityId) ret Float {
   }
   let o: Opacity = componentGet(this: world.opacities, entity: entity)
   ret o.value
+}
+
+# The entity's derived alpha/visible cache (#725), defaulting to fully visible
+# when the transform pass hasn't written one (e.g. an entity with no
+# ComputedRect). Consumers read this instead of the old WorldTransform.alpha /
+# .visible fields.
+func worldVisualOf(world: view UiWorld, entity: view EntityId) ret WorldVisual {
+  if componentHas(this: world.worldVisuals, entity: entity) is false {
+    ret WorldVisual { alpha: 1.0, visible: true }
+  }
+  let wv: WorldVisual = componentGet(this: world.worldVisuals, entity: entity)
+  ret wv
 }
 
 func transformFxOf(world: view UiWorld, entity: view EntityId) ret TransformFx {
@@ -97,22 +113,34 @@ func composeTransform(
     alpha = 1.0
   }
 
-  # Add the runtime-only offset (scroll) here, in transform, so it
-  # never dirties layout. Shifts this entity and its whole subtree.
+  # The entity's LOCAL transform (#725): parent-content-local position from
+  # layout, plus the runtime-only scroll offset (applied here in transform so it
+  # never dirties layout), plus authored rotation/scale from TransformFx.
   let ro: Vec2 = runtimeOffsetOf(world: world, entity: entity)
-  let absX: Float = parentX + cr.position.x + ro.x
-  let absY: Float = parentY + cr.position.y + ro.y
-
-  let wt: WorldTransform = {
-    x: absX
-    y: absY
-    scaleX: fx.scaleX
-    scaleY: fx.scaleY
+  let localXform: Transform2D = {
+    position: { x: cr.position.x + ro.x, y: cr.position.y + ro.y }
     rotation: fx.rotation
-    alpha: alpha
-    visible: visible
+    scale: { x: fx.scaleX, y: fx.scaleY }
+  }
+
+  # Fold the local transform into the parent's world origin to get this entity's
+  # WorldTransform2D. UI composition is translation-only (children are placed by
+  # translating the parent's absolute origin; scale/rotation are per-entity and
+  # are NOT propagated into child positions), so world position = parent origin +
+  # local position. absX/absY double as the child recursion's parent origin.
+  let absX: Float = parentX + localXform.position.x
+  let absY: Float = parentY + localXform.position.y
+  let wt: WorldTransform2D = {
+    position: { x: absX, y: absY }
+    rotation: localXform.rotation
+    scale: localXform.scale
   }
   componentSet(this: world.worldTransforms, entity: entity, data: wt)
+
+  # alpha/visible are their own derived cache now (#725), written beside the
+  # geometry transform.
+  let wv: WorldVisual = { alpha: alpha, visible: visible }
+  componentSet(this: world.worldVisuals, entity: entity, data: wv)
 
   # Recurse into active children. The child's parent-content origin is
   # this entity's own (absX, absY); ComputedRect on the child is already

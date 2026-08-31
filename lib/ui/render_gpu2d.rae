@@ -76,7 +76,7 @@ func g2dHoverMul(world: view UiWorld, e: view EntityId) ret Float {
   ret 1.0
 }
 
-func paintShapeG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
+func paintShapeG(world: view UiWorld, e: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
   let sh: Shape = componentGet(this: world.shapes, entity: e)
   # Resolve a palette slot from the ACTIVE theme at paint (#235) so a
   # dark/light toggle re-colours without a scene re-parse; empty slot
@@ -87,14 +87,14 @@ func paintShapeG(world: view UiWorld, e: view EntityId, wt: view WorldTransform,
   let hoverMul: Float = g2dHoverMul(world: world, e: e)
   let drawW: Float = cr.size.x * hoverMul
   let drawH: Float = cr.size.y * hoverMul
-  let drawX: Float = wt.x + (cr.size.x - drawW) / 2.0
-  let drawY: Float = wt.y + (cr.size.y - drawH) / 2.0
+  let drawX: Float = wt.position.x + (cr.size.x - drawW) / 2.0
+  let drawY: Float = wt.position.y + (cr.size.y - drawH) / 2.0
   if sh.kind is ShapeKind.circle {
     var smaller: Float = cr.size.x
     if cr.size.y < smaller { smaller = cr.size.y }
     var r: Float = sh.radius
     if r <= 0.0 { r = smaller / 2.0 }
-    gpu2d.drawRoundedRect(x: wt.x + cr.size.x / 2.0 - r * hoverMul, y: wt.y + cr.size.y / 2.0 - r * hoverMul, w: r * 2.0 * hoverMul, h: r * 2.0 * hoverMul, radius: r * hoverMul, color: g2dColor(c: fill))
+    gpu2d.drawRoundedRect(x: wt.position.x + cr.size.x / 2.0 - r * hoverMul, y: wt.position.y + cr.size.y / 2.0 - r * hoverMul, w: r * 2.0 * hoverMul, h: r * 2.0 * hoverMul, radius: r * hoverMul, color: g2dColor(c: fill))
     ret
   }
   var radius: Float = sh.radius
@@ -111,27 +111,27 @@ func paintShapeG(world: view UiWorld, e: view EntityId, wt: view WorldTransform,
 
 # GradientFill uses the gpu2d box shader's gradient mode so dock shadows and
 # dialog scrims stay in the same painter-order pipeline as normal shapes.
-func paintGradientG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
+func paintGradientG(world: view UiWorld, e: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
   let gf: GradientFill = componentGet(this: world.gradientFills, entity: e)
   let radius: Float = g2dRadius(world: world, e: e, fallback: 0.0)
   let hoverMul: Float = g2dHoverMul(world: world, e: e)
   let drawW: Float = cr.size.x * hoverMul
   let drawH: Float = cr.size.y * hoverMul
-  let drawX: Float = wt.x + (cr.size.x - drawW) / 2.0
-  let drawY: Float = wt.y + (cr.size.y - drawH) / 2.0
+  let drawX: Float = wt.position.x + (cr.size.x - drawW) / 2.0
+  let drawY: Float = wt.position.y + (cr.size.y - drawH) / 2.0
   let from: RgbaColor = g2dChain(c: gf.from, chain255: chain255)
   let to: RgbaColor = g2dChain(c: gf.to, chain255: chain255)
   gpu2d.drawGradientRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, from: g2dColor(c: from), to: g2dColor(c: to), angleDeg: gf.angle)
 }
 
-func paintBackdropG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int) {
+func paintBackdropG(world: view UiWorld, e: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
   let bi: BackdropImage = componentGet(this: world.backdropImages, entity: e)
   let radius: Float = g2dRadius(world: world, e: e, fallback: 0.0)
   let hoverMul: Float = g2dHoverMul(world: world, e: e)
   let drawW: Float = cr.size.x * hoverMul
   let drawH: Float = cr.size.y * hoverMul
-  let drawX: Float = wt.x + (cr.size.x - drawW) / 2.0
-  let drawY: Float = wt.y + (cr.size.y - drawH) / 2.0
+  let drawX: Float = wt.position.x + (cr.size.x - drawW) / 2.0
+  let drawY: Float = wt.position.y + (cr.size.y - drawH) / 2.0
   if gpu2d.hasImageKey(key: bi.textureKey) {
     let white: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
     let tint: RgbaColor = g2dChain(c: white, chain255: chain255)
@@ -292,7 +292,7 @@ func visualBoundsAt(world: view UiWorld, e: view EntityId, text: view String, is
 # Sprites: `mat:<name>` icons draw as a Material-atlas glyph; other keys
 # (album covers etc.) draw via the gpu2d image-key registry. Unregistered keys
 # fall back to a tinted chip so layout still reads.
-func paintSpriteG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int, res: view Gpu2dUi) {
+func paintSpriteG(world: view UiWorld, e: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int, res: view Gpu2dUi) {
   let sp: view Sprite => componentView(this: world.sprites, entity: e)
   var tintBase: RgbaColor = sp.tint
   if sp.tintSlot.length() > 0 { tintBase = themeColorByName(name: sp.tintSlot) }
@@ -300,8 +300,8 @@ func paintSpriteG(world: view UiWorld, e: view EntityId, wt: view WorldTransform
   let hoverMul: Float = g2dHoverMul(world: world, e: e)
   let drawW: Float = cr.size.x * hoverMul
   let drawH: Float = cr.size.y * hoverMul
-  let drawX: Float = wt.x + (cr.size.x - drawW) / 2.0
-  let drawY: Float = wt.y + (cr.size.y - drawH) / 2.0
+  let drawX: Float = wt.position.x + (cr.size.x - drawW) / 2.0
+  let drawY: Float = wt.position.y + (cr.size.y - drawH) / 2.0
   let matPrefix: String = "mat:"
   if sp.textureKey.startsWith(prefix: matPrefix) {
     let nameLen: Int = sp.textureKey.length() - matPrefix.length()
@@ -338,7 +338,7 @@ func paintSpriteG(world: view UiWorld, e: view EntityId, wt: view WorldTransform
   gpu2d.drawRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: fallbackRadius * hoverMul, color: g2dColor(c: fallback))
 }
 
-func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, cr: view ComputedRect, chain255: view Int, res: view Gpu2dUi) {
+func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int, res: view Gpu2dUi) {
   let t: view Text => componentView(this: world.texts, entity: e)
   if t.text.length() is 0 { ret }
   var size: Float = resolveTextSize(theme: res.theme, styleId: t.styleId)
@@ -375,17 +375,17 @@ func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform, 
       if optical.centerX { rightX = false }
     }
   }
-  var drawX: Float = wt.x
-  var drawY: Float = wt.y + size
+  var drawX: Float = wt.position.x
+  var drawY: Float = wt.position.y + size
   if centerX or rightX {
     let bounds: SdfTextBounds = visualBoundsAt(world: world, e: e, text: t.text, isIcon: false, sizePx: size, res: res)
-    if centerX { drawX = wt.x + cr.size.x / 2.0 - (bounds.left + bounds.right) / 2.0 }
-    if rightX { drawX = wt.x + cr.size.x - bounds.right }
+    if centerX { drawX = wt.position.x + cr.size.x / 2.0 - (bounds.left + bounds.right) / 2.0 }
+    if rightX { drawX = wt.position.x + cr.size.x - bounds.right }
   }
   if optical.enabled {
     let bounds: SdfTextBounds = visualBoundsAt(world: world, e: e, text: t.text, isIcon: false, sizePx: size, res: res)
-    if optical.centerX { drawX = wt.x + cr.size.x / 2.0 - (bounds.left + bounds.right) / 2.0 + optical.bias.x }
-    if optical.centerY { drawY = wt.y + cr.size.y / 2.0 - (bounds.top + bounds.bottom) / 2.0 + optical.bias.y }
+    if optical.centerX { drawX = wt.position.x + cr.size.x / 2.0 - (bounds.left + bounds.right) / 2.0 + optical.bias.x }
+    if optical.centerY { drawY = wt.position.y + cr.size.y / 2.0 - (bounds.top + bounds.bottom) / 2.0 + optical.bias.y }
   }
   if t.wrapWidthMode is WrapWidthMode.nodeWidth {
     let lineHeight: Float = size * resolveTextLineHeight(theme: res.theme, styleId: t.styleId)
@@ -475,10 +475,11 @@ func paintEntityG(world: view UiWorld, e: view EntityId, res: view Gpu2dUi) {
   if componentHas(this: world.computedRects, entity: e) is false { ret }
   if componentHas(this: world.worldTransforms, entity: e) is false { ret }
   let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
-  let wt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
-  if wt.visible is false { ret }
-  if wt.alpha <= 0.0 { ret }
-  var chain255: Int = (wt.alpha * 255.0).toInt()
+  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: e)
+  let wv: WorldVisual = worldVisualOf(world: world, entity: e)
+  if wv.visible is false { ret }
+  if wv.alpha <= 0.0 { ret }
+  var chain255: Int = (wv.alpha * 255.0).toInt()
   if chain255 > 255 { chain255 = 255 }
   if chain255 < 0 { chain255 = 0 }
   if componentHas(this: world.gradientFills, entity: e) {
@@ -526,12 +527,12 @@ func paintSubtreeG(world: view UiWorld, e: view EntityId, res: view Gpu2dUi) {
     if componentHas(this: world.computedRects, entity: e) {
       if componentHas(this: world.worldTransforms, entity: e) {
         let ccr: ComputedRect = componentGet(this: world.computedRects, entity: e)
-        let cwt: WorldTransform = componentGet(this: world.worldTransforms, entity: e)
+        let cwt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: e)
         let crad: Float = g2dRadius(world: world, e: e, fallback: 0.0)
         if crad > 0.0 {
-          gpu2d.pushClipRoundedRect(x: cwt.x, y: cwt.y, w: ccr.size.x, h: ccr.size.y, radius: crad)
+          gpu2d.pushClipRoundedRect(x: cwt.position.x, y: cwt.position.y, w: ccr.size.x, h: ccr.size.y, radius: crad)
         } else {
-          gpu2d.pushClipRect(x: cwt.x, y: cwt.y, w: ccr.size.x, h: ccr.size.y)
+          gpu2d.pushClipRect(x: cwt.position.x, y: cwt.position.y, w: ccr.size.x, h: ccr.size.y)
         }
         clipped = true
       }

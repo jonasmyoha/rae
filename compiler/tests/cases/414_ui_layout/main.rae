@@ -63,8 +63,9 @@ func attachChildren(world: mod UiWorld, parent: view EntityId, kids: view List(E
 
 func dumpEntity(world: view UiWorld, entity: view EntityId, label: view String) {
   var cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
-  var wt: WorldTransform = componentGet(this: world.worldTransforms, entity: entity)
-  log("{label} cr=({cr.position.x},{cr.position.y},{cr.size.x},{cr.size.y}) wt=({wt.x},{wt.y}) alpha={wt.alpha} visible={wt.visible}")
+  var wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
+  let wv: WorldVisual = worldVisualOf(world: world, entity: entity)
+  log("{label} cr=({cr.position.x},{cr.position.y},{cr.size.x},{cr.size.y}) wt=({wt.position.x},{wt.position.y}) alpha={wv.alpha} visible={wv.visible}")
 }
 
 func main() {
