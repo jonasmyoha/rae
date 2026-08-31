@@ -32,6 +32,8 @@ import sky
 import gbuffer
 import gbuffer_instanced
 open gbuffer_instanced
+import particles
+open particles
 import grass_compute
 open grass_compute
 import grass_config
@@ -186,6 +188,7 @@ type App {
   net: NetState           # multiplayer seam (net.rae, #554)
   players: PlayerRoster   # who the local player controls (players.rae, #546)
   persist: PersistState
+  splashes: ParticleSystem   # water-splash droplets when the character wades (splash.rae, #84)
   ok: Bool
 }
 
@@ -484,6 +487,7 @@ func createApp() ret App {
     net: { role: 0, tick: 0 }
     players: createPlayerRoster(count: 1 + cloneCount)
     persist: { windowGeom: own windowGeom, lastStateSave: startT, stateDirty: false }
+    splashes: own createParticleSystem(cap: 256, gravity: 24.0)
     ok: true
   }
 }
@@ -639,8 +643,12 @@ func updateApp(app: mod App) {
     or app.io.ui.pointer.pressed or app.io.ui.pointer.released
   let logChanged: Bool = app.io.logView.revision is not app.io.lastLogRevision
   let transitionActive: Bool = app.character.transitionElapsed < clipTransitionDuration
+  # Live splash droplets are an animation source: keep rendering until the last one
+  # dies out, or the wait-loop would freeze them mid-air when you stop wading (#84,
+  # the "feed animation sources into the loop" lesson in AGENTS.md).
+  let splashesAlive: Bool = app.splashes.list.length > 0
   var needsRender: Bool = app.character.playing or transitionActive or settingsChanged or cameraMoved
-    or characterMoved or terrainWrapped or grassWrapped
+    or characterMoved or terrainWrapped or grassWrapped or splashesAlive
     or hadUiEvents or logChanged or resized or scrolled or app.frame.renderedOnce is false
   if app.frame.taaSettleFrames > 0 { needsRender = true }
   app.frame.dbgDidWork = needsRender
