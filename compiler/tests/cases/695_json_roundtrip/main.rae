@@ -1,0 +1,59 @@
+import core
+open json
+
+# #718: lib/json can now WRITE JSON. Build a doc with the JsonBuilder, then
+# round-trip parse -> stringify -> parse and confirm the values survive.
+
+func main() {
+  let dash: String = "?"
+
+  # Build {"name":"rae","count":3,"flag":true,"nested":{"x":1.5},"list":[10,20,30]}
+  var nested: JsonBuilder = jbObject()
+  jbField(builder: nested, key: "x", valueJson: jbNumber(value: 1.5))
+  let nestedJson: String = jbEndObject(builder: nested)
+
+  var arr: JsonBuilder = jbArray()
+  jbItem(builder: arr, valueJson: jbNumber(value: 10.0))
+  jbItem(builder: arr, valueJson: jbNumber(value: 20.0))
+  jbItem(builder: arr, valueJson: jbNumber(value: 30.0))
+  let arrJson: String = jbEndArray(builder: arr)
+
+  var root: JsonBuilder = jbObject()
+  jbField(builder: root, key: "name", valueJson: jbString(value: "rae"))
+  jbField(builder: root, key: "count", valueJson: jbNumber(value: 3.0))
+  jbField(builder: root, key: "flag", valueJson: jbBool(value: true))
+  jbField(builder: root, key: "nested", valueJson: nestedJson)
+  jbField(builder: root, key: "list", valueJson: arrJson)
+  let built: String = jbEndObject(builder: root)
+  log("built: {built}")
+
+  # parse -> stringify -> parse
+  let doc1: JsonDoc = parseJson(source: built)
+  let restr: String = stringifyDoc(doc: doc1)
+  log("restr: {restr}")
+  log("stable: {restr is built}")
+
+  let doc2: JsonDoc = parseJson(source: restr)
+  let root2: JsonValue = jsonRoot(doc: doc2)
+
+  let nameVal: JsonValue = jsonValueAt(doc: doc2, idx: jsonField(doc: doc2, this: root2, key: "name"))
+  let countVal: JsonValue = jsonValueAt(doc: doc2, idx: jsonField(doc: doc2, this: root2, key: "count"))
+  let flagVal: JsonValue = jsonValueAt(doc: doc2, idx: jsonField(doc: doc2, this: root2, key: "flag"))
+  let nestedVal: JsonValue = jsonValueAt(doc: doc2, idx: jsonField(doc: doc2, this: root2, key: "nested"))
+  let listVal: JsonValue = jsonValueAt(doc: doc2, idx: jsonField(doc: doc2, this: root2, key: "list"))
+
+  let xVal: JsonValue = jsonValueAt(doc: doc2, idx: jsonField(doc: doc2, this: nestedVal, key: "x"))
+  let list1Val: JsonValue = jsonArrayAt(doc: doc2, this: listVal, idx: 1)
+
+  let name: String = jsonString(this: nameVal, fallback: dash)
+  let count: Int = jsonInt(this: countVal, fallback: 0)
+  let flag: Bool = jsonBool(this: flagVal, fallback: false)
+  let nestedX: Float = jsonFloat(this: xVal, fallback: 0.0)
+  let list1: Int = jsonInt(this: list1Val, fallback: 0)
+
+  log("name: {name}")
+  log("count: {count}")
+  log("flag: {flag}")
+  log("nestedX: {nestedX}")
+  log("list1: {list1}")
+}
