@@ -371,9 +371,14 @@ if [ $FAILED -gt 0 ]; then
   exit 1
 fi
 
-# Also run example smoke tests if we are in 'live' or default mode
-# AND we are not filtering for a specific test
-if ([ -z "$TARGET_FILTER" ] || [ "$TARGET_FILTER" = "live" ]) && [ -z "$TEST_NAME_FILTER" ]; then
+# The example smoke tests (run_examples.sh) ALWAYS build compiled binaries, so
+# they are part of THE one suite — not a per-target extra. Run them whenever we
+# are not filtering to a single named test, regardless of TEST_TARGET. Before,
+# the condition skipped examples for TARGET_FILTER=compiled, so the devtools
+# "Test" button (which runs `TEST_TARGET=compiled make test`) silently ran only
+# the unit cases and showed green while `make test` was red on example gates.
+# One suite, one result.
+if [ -z "$TEST_NAME_FILTER" ]; then
   echo
   ./tools/run_examples.sh
 fi
