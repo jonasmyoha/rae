@@ -1,0 +1,73 @@
+# lib/ecs — Schedule: the ordered, dirty-skipping system runner (#755).
+#
+# A Schedule is an ordered list of system ENTRIES the app builds ONCE and runs
+# every frame. Order is EXPLICIT (insertion order) — no dependency solving. Each
+# entry tracks the COMBINED generation of the tables its system READS; the
+# schedule SKIPS the entry when that combined generation hasn't moved since its
+# last run, and RUNS it (recording the new value) when a read table mutated. This
+# generalizes the per-system layoutSystemIfDirty / transformSystemIfDirty
+# wrappers — the "did my inputs change?" boilerplate — into ONE mechanism (UI
+# switches to it in #728).
+#
+# Rae has no first-class function references, so the schedule does NOT store or
+# call the system functions; it owns the ORDER + the dirty state. The app's
+# per-frame runner walks the entries in order and, for each, computes its read
+# tables' combined generation (the SUM of componentTableGeneration over them — a
+# table generation is monotonic, so the sum changes iff some read table mutated)
+# and calls the system only when scheduleShouldRun returns true:
+#
+#   if scheduleShouldRun(schedule, layoutIdx, layoutReadGen)       { layoutSystem(world) }
+#   if scheduleShouldRun(schedule, transformIdx, transformReadGen) { transformSystem(world) }
+import core
+
+type ScheduleEntry {
+  name: String
+  # Combined read-table generation at the last run; -1 = never run, so the entry
+  # always runs the first frame.
+  lastGeneration: Int
+}
+
+type Schedule {
+  entries: List(ScheduleEntry)
+}
+
+func createSchedule() ret Schedule {
+  ret Schedule { entries: createList(ScheduleEntry, cap: 16) }
+}
+
+# Append a system entry in run order. Returns its index (its position in the
+# explicit order) — the per-frame runner keys scheduleShouldRun on it.
+func addSystem(schedule: mod Schedule, name: view String) ret Int {
+  let index: Int = schedule.entries.length
+  var nameCopy: String = ""
+  nameCopy = nameCopy.concat(other: name)
+  schedule.entries.add(value: ScheduleEntry { name: own nameCopy, lastGeneration: 0 - 1 })
+  ret index
+}
+
+# How many system entries the schedule holds.
+func scheduleSize(schedule: view Schedule) ret Int {
+  ret schedule.entries.length
+}
+
+# The name of entry `index` (for debugging / an ordered readout).
+func scheduleName(schedule: view Schedule, index: view Int) ret String {
+  var out: String = ""
+  if let entry: view ScheduleEntry => schedule.entries.viewAt(index: index) {
+    out = out.concat(other: entry.name)
+  }
+  ret out
+}
+
+# Should entry `index`'s system run this frame? `readGeneration` is the combined
+# generation of the tables that system READS. Returns true — and records the new
+# value — when it differs from the last run (a read table mutated, or the first
+# run); false to skip when nothing it reads has changed.
+func scheduleShouldRun(schedule: mod Schedule, index: view Int, readGeneration: view Int) ret Bool {
+  let slot: mod ScheduleEntry => schedule.entries.modAt(index: index)
+  if slot.lastGeneration is readGeneration {
+    ret false
+  }
+  slot.lastGeneration = readGeneration
+  ret true
+}
