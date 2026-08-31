@@ -75,3 +75,52 @@ func query2(A: type, B: type,
   }
   ret matches
 }
+
+# ----- query3 ----------------------------------------------------------------
+
+type Query3Match {
+  entity: EntityId
+  indexA: Int
+  indexB: Int
+  indexC: Int
+}
+
+# Entities present in ALL THREE tables. Iterates whichever table is smallest and
+# probes the other two by index, so the join stays O(min of the three).
+func query3(A: type, B: type, C: type,
+            tableA: view ComponentTable(A), tableB: view ComponentTable(B),
+            tableC: view ComponentTable(C)) ret List(Query3Match) {
+  let countA: Int = componentCount(this: tableA)
+  let countB: Int = componentCount(this: tableB)
+  let countC: Int = componentCount(this: tableC)
+  let matches: List(Query3Match) = createList(Query3Match, cap: 16)
+  if countA <= countB and countA <= countC {
+    loop var i: Int = 0, i < countA, ++i {
+      let entity: EntityId = componentEntityAt(this: tableA, i: i)
+      let idxB: Int = componentIndexOf(this: tableB, entity: entity)
+      let idxC: Int = componentIndexOf(this: tableC, entity: entity)
+      if idxB >= 0 and idxC >= 0 {
+        matches.add(value: Query3Match { entity: entity, indexA: i, indexB: idxB, indexC: idxC })
+      }
+    }
+  } else if countB <= countA and countB <= countC {
+    loop var i: Int = 0, i < countB, ++i {
+      let entity: EntityId = componentEntityAt(this: tableB, i: i)
+      let idxA: Int = componentIndexOf(this: tableA, entity: entity)
+      let idxC: Int = componentIndexOf(this: tableC, entity: entity)
+      if idxA >= 0 and idxC >= 0 {
+        matches.add(value: Query3Match { entity: entity, indexA: idxA, indexB: i, indexC: idxC })
+      }
+    }
+  } else {
+    loop var i: Int = 0, i < countC, ++i {
+      let entity: EntityId = componentEntityAt(this: tableC, i: i)
+      let idxA: Int = componentIndexOf(this: tableA, entity: entity)
+      let idxB: Int = componentIndexOf(this: tableB, entity: entity)
+      if idxA >= 0 and idxB >= 0 {
+        matches.add(value: Query3Match { entity: entity, indexA: idxA, indexB: idxB, indexC: i })
+      }
+    }
+  }
+  ret matches
+}
