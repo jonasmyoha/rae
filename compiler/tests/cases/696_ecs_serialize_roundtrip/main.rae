@@ -1,0 +1,79 @@
+import core
+open json
+open ecs/entity
+open ecs/component_table
+open ecs/registry
+open ecs/serialize
+
+# #720: registry-driven serialize-IN. worldToJson -> parse -> worldFromJson must
+# reconstruct the original world, using each component's compiler fromJson via a
+# GENERIC loader (no hand-written per-name switch). Cache components (no
+# SERIALIZE flag) are neither written nor loaded.
+
+type Pos { x: Int, y: Int }
+type Vel { dx: Int, dy: Int }
+type WorldCache { w: Int }
+
+type MiniWorld {
+  positions: ComponentTable(Pos)
+  velocities: ComponentTable(Vel)
+  caches: ComponentTable(WorldCache)
+}
+
+func emptyWorld() ret MiniWorld {
+  ret MiniWorld {
+    positions: createComponentTable(Pos),
+    velocities: createComponentTable(Vel),
+    caches: createComponentTable(WorldCache)
+  }
+}
+
+func worldToJson(world: view MiniWorld, registry: view ComponentRegistry) ret String {
+  var writer: WorldJson = createWorldJson()
+  addComponentTable(writer: writer, table: world.positions, name: "Pos", registry: registry)
+  addComponentTable(writer: writer, table: world.velocities, name: "Vel", registry: registry)
+  addComponentTable(writer: writer, table: world.caches, name: "WorldCache", registry: registry)
+  ret finishWorldJson(writer: writer)
+}
+
+# Registry-driven load: one uniform call per table, no per-name parse switch.
+func worldFromJson(world: mod MiniWorld, registry: view ComponentRegistry, doc: view JsonDoc) {
+  loadComponentTable(table: world.positions, name: "Pos", registry: registry, doc: doc)
+  loadComponentTable(table: world.velocities, name: "Vel", registry: registry, doc: doc)
+  loadComponentTable(table: world.caches, name: "WorldCache", registry: registry, doc: doc)
+}
+
+func main() {
+  var reg: ComponentRegistry = createComponentRegistry()
+  registerComponent(reg: reg, name: "Pos", flags: SERIALIZE)
+  registerComponent(reg: reg, name: "Vel", flags: SERIALIZE)
+  registerComponent(reg: reg, name: "WorldCache", flags: 0)
+
+  let e1: EntityId = { index: 1, generation: 0 }
+  let e2: EntityId = { index: 2, generation: 0 }
+
+  var src: MiniWorld = emptyWorld()
+  componentSet(this: src.positions, entity: e1, data: Pos { x: 10, y: 20 })
+  componentSet(this: src.positions, entity: e2, data: Pos { x: 30, y: 40 })
+  componentSet(this: src.velocities, entity: e2, data: Vel { dx: 1, dy: 2 })
+  componentSet(this: src.caches, entity: e2, data: WorldCache { w: 999 })
+
+  let jsonStr: String = worldToJson(world: src, registry: reg)
+  log("json: {jsonStr}")
+
+  # parse -> load into a fresh world
+  let doc: JsonDoc = parseJson(source: jsonStr)
+  var dst: MiniWorld = emptyWorld()
+  worldFromJson(world: dst, registry: reg, doc: doc)
+
+  log("pos count: {componentCount(this: dst.positions)}")
+  log("vel count: {componentCount(this: dst.velocities)}")
+  log("cache count: {componentCount(this: dst.caches)}")
+
+  let p1: Pos = componentGet(this: dst.positions, entity: e1)
+  let p2: Pos = componentGet(this: dst.positions, entity: e2)
+  let v2: Vel = componentGet(this: dst.velocities, entity: e2)
+  log("e1 pos: {p1.x},{p1.y}")
+  log("e2 pos: {p2.x},{p2.y}")
+  log("e2 vel: {v2.dx},{v2.dy}")
+}
