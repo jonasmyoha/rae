@@ -1,0 +1,43 @@
+import core
+open ecs/entity
+open ecs/component_table
+
+# #721: componentMod returns a write-through `mod T` that ALIASES the table's
+# storage — gameplay code mutates a component in place, no copy-mutate-set. This
+# proves the write persists without componentSet, that a componentGet COPY does
+# NOT, and that in-place integration over a loop accumulates.
+
+type Velocity { dx: Int, dy: Int }
+
+func main() {
+  var vels: ComponentTable(Velocity) = createComponentTable(Velocity)
+  let e1: EntityId = { index: 1, generation: 0 }
+  componentSet(this: vels, entity: e1, data: Velocity { dx: 3, dy: 4 })
+
+  # Mutate two fields through the mod ref — no componentSet.
+  let v: mod Velocity => componentMod(this: vels, entity: e1)
+  v.dx = v.dx + 10
+  v.dy = 100
+  let got: Velocity = componentGet(this: vels, entity: e1)
+  log("write-through: {got.dx},{got.dy}")
+
+  # Mutating a componentGet COPY must NOT touch storage.
+  var snapshot: Velocity = componentGet(this: vels, entity: e1)
+  snapshot.dx = 999
+  let after: Velocity = componentGet(this: vels, entity: e1)
+  log("copy leaked: {after.dx is 999}")
+
+  # Gameplay loop: integrate in place over 3 frames.
+  loop var step: Int = 0, step < 3, ++step {
+    let vm: mod Velocity => componentMod(this: vels, entity: e1)
+    vm.dx = vm.dx + 1
+  }
+  let done: Velocity = componentGet(this: vels, entity: e1)
+  log("after loop: {done.dx}")
+
+  # componentMod eagerly bumps the table generation (change-detection).
+  let g0: Int = componentTableGeneration(this: vels)
+  let vm2: mod Velocity => componentMod(this: vels, entity: e1)
+  vm2.dy = vm2.dy + 1
+  log("generation advanced: {componentTableGeneration(this: vels) > g0}")
+}
