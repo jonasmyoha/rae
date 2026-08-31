@@ -165,7 +165,7 @@ func themeSpaceValue(theme: view ResolvedTheme, name: view String, fallback: vie
   var i: Int = 0
   loop i < theme.spaceNames.length {
     let n: String = rae_ext_rae_buf_get(buf: theme.spaceNames.data, index: i)
-    if n.equals(other: name) {
+    if n is name {
       if let value: Float = theme.spaceVals.copyAt(index: i) {
         ret value
       }
@@ -179,7 +179,7 @@ func themeRadiusValue(theme: view ResolvedTheme, name: view String, fallback: vi
   var i: Int = 0
   loop i < theme.radiusNames.length {
     let n: String = rae_ext_rae_buf_get(buf: theme.radiusNames.data, index: i)
-    if n.equals(other: name) {
+    if n is name {
       if let value: Float = theme.radiusVals.copyAt(index: i) {
         ret value
       }
@@ -193,7 +193,7 @@ func themePaletteIndex(theme: view ResolvedTheme, slot: view String) pub ret Int
   var i: Int = 0
   loop i < theme.palNames.length {
     let n: String = rae_ext_rae_buf_get(buf: theme.palNames.data, index: i)
-    if n.equals(other: slot) {
+    if n is slot {
       ret i
     }
     i = i + 1
@@ -205,7 +205,7 @@ func themeTextStyleIndex(theme: view ResolvedTheme, styleId: view String) pub re
   var i: Int = 0
   loop i < theme.textNames.length {
     let n: String = rae_ext_rae_buf_get(buf: theme.textNames.data, index: i)
-    if n.equals(other: styleId) {
+    if n is styleId {
       ret i
     }
     i = i + 1
@@ -217,7 +217,7 @@ func themeShadowIndex(theme: view ResolvedTheme, name: view String) pub ret Int 
   var i: Int = 0
   loop i < theme.shadowNames.length {
     let n: String = rae_ext_rae_buf_get(buf: theme.shadowNames.data, index: i)
-    if n.equals(other: name) {
+    if n is name {
       ret i
     }
     i = i + 1
@@ -571,7 +571,7 @@ func themeSeenName(seen: view List(String), name: view String) ret Bool {
   var i: Int = 0
   loop i < seen.length {
     if let entry: String = seen.copyAt(index: i) {
-      if entry.equals(other: name) {
+      if entry is name {
         ret true
       }
     }
@@ -593,13 +593,13 @@ func themeReverseIntList(src: view List(Int)) ret List(Int) {
 }
 
 func themeParseAlign(s: view String, fallback: view Int) ret Int {
-  if s.equals(other: "start") {
+  if s is "start" {
     ret themeAlignStart
   }
-  if s.equals(other: "center") {
+  if s is "center" {
     ret themeAlignCenter
   }
-  if s.equals(other: "end") {
+  if s is "end" {
     ret themeAlignEnd
   }
   ret fallback
@@ -830,7 +830,7 @@ func activeContainerIndex(name: view String) pub ret Int {
   var i: Int = 0
   loop i < g_activeContainerNames.length {
     if let n: String = g_activeContainerNames.copyAt(index: i) {
-      if n.equals(other: name) {
+      if n is name {
         ret i
       }
     }
@@ -874,7 +874,7 @@ func activeSpaceValue(name: view String, fallback: view Float) pub ret Float {
   var i: Int = 0
   loop i < g_activeSpaceNames.length {
     let n: String = g_activeSpaceNames.copyAt(index: i)
-    if n.equals(other: name) {
+    if n is name {
       if let value: Float = g_activeSpaceVals.copyAt(index: i) {
         ret value
       }
@@ -890,7 +890,7 @@ func activeRadiusValue(name: view String, fallback: view Float) pub ret Float {
   var i: Int = 0
   loop i < g_activeRadiusNames.length {
     let n: String = g_activeRadiusNames.copyAt(index: i)
-    if n.equals(other: name) {
+    if n is name {
       if let value: Float = g_activeRadiusVals.copyAt(index: i) {
         ret value
       }
@@ -908,7 +908,7 @@ func activePaddingInsets(name: view String) pub ret ThemeInsets {
   var i: Int = 0
   loop i < g_activePadNames.length {
     let n: String = g_activePadNames.copyAt(index: i)
-    if n.equals(other: name) {
+    if n is name {
       var l: Float = 0.0
       var t: Float = 0.0
       var r: Float = 0.0

@@ -102,11 +102,11 @@ func rebindCoverOnPages(world: mod UiWorld, fromKey: view String, toKey: view St
   loop i < n {
     let e: EntityId = componentEntityAt(this: world.sprites, i: i)
     let sp: Sprite = componentDataAt(this: world.sprites, i: i)
-    if sp.textureKey.equals(other: fromKey) {
+    if sp.textureKey is fromKey {
       let p: String = pageOf(world: world, entity: e)
       var allowed: Bool = false
       loop let want: view String in pageIds {
-        if p.equals(other: want) {
+        if p is want {
           allowed = true
         }
       }
@@ -279,7 +279,7 @@ func pollSpotify(
   # match the real player. Includes "user paused in Spotify directly"
   # and "user skipped tracks in Spotify" — both flip within 1Hz here.
   let playingKey: String = "playing"
-  let nowPlaying: Bool = track.state.equals(other: playingKey)
+  let nowPlaying: Bool = track.state is playingKey
   if playback.isPlaying is not nowPlaying {
     playback.isPlaying = nowPlaying
   }
@@ -307,7 +307,7 @@ func pollSpotify(
   # Track-change → re-fetch artwork. Compare trackId, not artworkUrl
   # (Spotify sometimes reports a slightly different art URL between
   # polls for the same track during playback).
-  let changed: Bool = track.trackId.equals(other: state.lastTrackId) is false
+  let changed: Bool = track.trackId is state.lastTrackId is false
   if changed {
     state.lastTrackId = "{track.trackId}"
     refreshSpotifyArt(state: state, track: track, reg: reg)

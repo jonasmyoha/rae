@@ -120,7 +120,7 @@ func spriteKeyDiffers(world: view UiWorld, entity: view EntityId, wantKey: view 
   if wantKey.length() is 0 { ret false }
   if componentHas(this: world.sprites, entity: entity) is false { ret false }
   let cur: view Sprite => componentView(this: world.sprites, entity: entity)
-  ret cur.textureKey.equals(other: wantKey) is false
+  ret cur.textureKey is wantKey is false
 }
 
 func spriteTintDiffers(world: view UiWorld, entity: view EntityId, wantTint: view RgbaColor) ret Bool {
@@ -133,7 +133,7 @@ func textStyleDiffers(world: view UiWorld, entity: view EntityId, wantStyle: vie
   if wantStyle.length() is 0 { ret false }
   if componentHas(this: world.texts, entity: entity) is false { ret false }
   let cur: view Text => componentView(this: world.texts, entity: entity)
-  ret cur.styleId.equals(other: wantStyle) is false
+  ret cur.styleId is wantStyle is false
 }
 
 func shapeFillDiffers(world: view UiWorld, entity: view EntityId, wantFill: view RgbaColor) ret Bool {

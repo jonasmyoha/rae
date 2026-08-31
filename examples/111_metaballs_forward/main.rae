@@ -214,23 +214,23 @@ func dispatchUiActions(input: view UiInput, state: mod DemoUiResource, rig: mod 
   var i: Int = 0
   loop i < input.events.length {
     let event: UiActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
-    if event.actionId.equals(other: "ui.debug") {
+    if event.actionId is "ui.debug" {
       state.debugOpen = not state.debugOpen
       state.revision = state.revision + 1
     }
-    if event.actionId.equals(other: "animation.speed") {
+    if event.actionId is "animation.speed" {
       state.fullSpeed = not state.fullSpeed
       state.revision = state.revision + 1
     }
-    if event.actionId.equals(other: "scene.select.1") {
+    if event.actionId is "scene.select.1" {
       state.activeScene = 1
       state.revision = state.revision + 1
     }
-    if event.actionId.equals(other: "scene.select.2") {
+    if event.actionId is "scene.select.2" {
       state.activeScene = 2
       state.revision = state.revision + 1
     }
-    if event.actionId.equals(other: "scene.select.3") {
+    if event.actionId is "scene.select.3" {
       state.activeScene = 3
       state.revision = state.revision + 1
     }
@@ -426,11 +426,11 @@ func main() ret Int {
   }
 
   let testState: String = getEnv(name: "RAE_GPU3D_UI_TEST_STATE")
-  if testState.equals(other: "pause") { uiState.paused = true }
-  if testState.equals(other: "debug") { uiState.debugOpen = true }
-  if testState.equals(other: "scene2") { uiState.activeScene = 2 }
-  if testState.equals(other: "scene3") { uiState.activeScene = 3 }
-  if testState.equals(other: "free") {
+  if testState is "pause" { uiState.paused = true }
+  if testState is "debug" { uiState.debugOpen = true }
+  if testState is "scene2" { uiState.activeScene = 2 }
+  if testState is "scene3" { uiState.activeScene = 3 }
+  if testState is "free" {
     toggleCameraRigMode(rig: cameraRig, camera: camera)
   }
   let initialUiLayoutDirty: Bool = syncDemoUi(world: uiWorld, state: uiState)

@@ -186,12 +186,12 @@ func buildSpotifyStatusCard(world: mod UiWorld) ret EntityId {
     let st: String = spotify.state()
     let playingKey: String = "playing"
     let pausedKey: String = "paused"
-    if st.equals(other: playingKey) {
+    if st is playingKey {
       let trk: String = spotify.trackName()
       let art: String = spotify.artistName()
       line1 = "Playing '{trk}' — {art}"
     } else {
-      if st.equals(other: pausedKey) {
+      if st is pausedKey {
         line1 = "Paused"
       } else {
         line1 = "Not running"

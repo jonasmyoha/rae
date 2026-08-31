@@ -1642,6 +1642,44 @@ static bool earlier_same_named_type(CompilerContext* ctx, size_t idx, Str name) 
     return false;
 }
 
+/* Value equality for `is` on a user struct (#703). C forbids `struct == struct`,
+ * so `a is b` on a value struct is lowered to a synthesized field-wise
+ * `rae_eq_<T>`. That is only sound when every field is itself value-comparable:
+ * a scalar, an enum (lowered to int), a String (content equality), or a nested
+ * value-comparable struct. A struct with a List/Map/opt/reference field is NOT
+ * value-comparable — comparing those by value is ambiguous — so `is` stays
+ * unsupported there (compare the specific fields instead). This is why
+ * `EntityId is EntityId` works with no helper function. */
+bool rae_struct_value_comparable(const AstModule* module, const AstTypeDecl* td);
+static bool rae_typeref_value_comparable(const AstModule* module, const AstTypeRef* ft) {
+    if (!ft || ft->is_opt || ft->is_view || ft->is_mod) return false;
+    Str base = get_base_type_name(ft);
+    if (is_primitive_type(base)) return true;
+    if (str_eq_cstr(base, "String")) return true;
+    if (str_eq_cstr(base, "Bool") || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) return true;
+    if (find_enum_decl(NULL, module, base)) return true;
+    const AstDecl* d = find_type_decl(NULL, module, base);
+    if (d && d->kind == AST_DECL_TYPE && !d->as.type_decl.generic_params
+        && !has_property(d->as.type_decl.properties, "c_struct"))
+        return rae_struct_value_comparable(module, &d->as.type_decl);
+    return false;
+}
+bool rae_struct_value_comparable(const AstModule* module, const AstTypeDecl* td) {
+    if (!td) return false;
+    for (const AstTypeField* f = td->fields; f; f = f->next)
+        if (!rae_typeref_value_comparable(module, f->type)) return false;
+    return true;
+}
+// Convenience for the expression emitter: is the named type a synthesizable
+// value-comparable struct (so `a is b` can call rae_eq_<name>)?
+bool rae_named_type_value_comparable(const AstModule* module, Str base) {
+    if (is_primitive_type(base) || str_eq_cstr(base, "String")) return false;
+    const AstDecl* d = find_type_decl(NULL, module, base);
+    if (!d || d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params
+        || has_property(d->as.type_decl.properties, "c_struct")) return false;
+    return rae_struct_value_comparable(module, &d->as.type_decl);
+}
+
 bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const char* out_path, struct VmRegistry* registry, bool* out_uses_raylib) {
   (void)out_uses_raylib;
   if (!module) return false;
@@ -1837,6 +1875,51 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               opt_entries[i].optm, opt_entries[i].optm, opt_entries[i].optm);
   }
   if (opt_entry_count > 0) fprintf(out, "\n");
+
+  // #703: value-equality (`is`) for value-comparable structs. Forward-declare
+  // all of them first (a nested field may reference a struct defined later),
+  // then define. `a is b` / `a is not b` lower to rae_eq_<T> in c_expr.c.
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
+      if (has_property(d->as.type_decl.properties, "c_struct")) continue;
+      const AstTypeDecl* td = &d->as.type_decl;
+      if (earlier_same_named_type(ctx, i, td->name)) continue;
+      if (!rae_struct_value_comparable(module, td)) continue;
+      const char* m = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
+      fprintf(out, "RAE_UNUSED static rae_Bool rae_eq_%s(%s a, %s b);\n", m, m, m);
+  }
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
+      if (has_property(d->as.type_decl.properties, "c_struct")) continue;
+      const AstTypeDecl* td = &d->as.type_decl;
+      if (earlier_same_named_type(ctx, i, td->name)) continue;
+      if (!rae_struct_value_comparable(module, td)) continue;
+      const char* m = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
+      fprintf(out, "RAE_UNUSED static rae_Bool rae_eq_%s(%s a, %s b) {\n  return (rae_Bool)(", m, m, m);
+      bool efirst = true;
+      for (const AstTypeField* f = td->fields; f; f = f->next) {
+          Str fbase = get_base_type_name(f->type);
+          int nl = (int)f->name.len; const char* nd = f->name.data;
+          if (!efirst) fprintf(out, " && ");
+          efirst = false;
+          if (str_eq_cstr(fbase, "String")) {
+              fprintf(out, "rae_ext_rae_str_eq(a.%.*s, b.%.*s)", nl, nd, nl, nd);
+          } else if (!is_primitive_type(fbase) && !str_eq_cstr(fbase, "Bool")
+                     && !str_eq_cstr(fbase, "Char") && !str_eq_cstr(fbase, "Char32")
+                     && !find_enum_decl(NULL, module, fbase)) {
+              // nested value-comparable struct
+              const char* fm = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = fbase}});
+              fprintf(out, "rae_eq_%s(a.%.*s, b.%.*s)", fm, nl, nd, nl, nd);
+          } else {
+              // scalar / bool / char / enum -> plain ==
+              fprintf(out, "a.%.*s == b.%.*s", nl, nd, nl, nd);
+          }
+      }
+      if (efirst) fprintf(out, "1");   // empty struct: always equal
+      fprintf(out, ");\n}\n\n");
+  }
 
   // Generate toJson/fromJson for non-generic user struct types
   for (size_t i = 0; i < ctx->all_decl_count; i++) {

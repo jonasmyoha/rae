@@ -218,7 +218,7 @@ func parseStates(scene: view Scene) ret StateSet {
 # True when `name` appears in the app's active-state list.
 func stateIsActive(activeStates: view List(String), name: view String) ret Bool {
   loop let candidate: view String in activeStates {
-    if candidate.equals(other: name) {
+    if candidate is name {
       ret true
     }
   }
@@ -246,7 +246,7 @@ func frameIndexByName(frames: view FrameSet, name: view String) ret Int {
   var i: Int = 0
   loop i < frames.count {
     if let candidate: String = frames.names.copyAt(index: i) {
-      if candidate.equals(other: name) {
+      if candidate is name {
         ret i
       }
     }
@@ -352,13 +352,13 @@ func resetNodeToBase(world: mod UiWorld, scene: view Scene, frames: view FrameSe
     st = st + 1
   }
 
-  let isRoot: Bool = nodeId.equals(other: scene.rootNodeId)
+  let isRoot: Bool = nodeId is scene.rootNodeId
   let keyCount: Int = json.jsonObjectLen(this: baseBag)
   var k: Int = 0
   loop k < keyCount {
     let key: String = json.jsonObjectKeyAt(doc: doc, this: baseBag, idx: k)
     var skip: Bool = false
-    if key.equals(other: "Children") {
+    if key is "Children" {
       skip = true
     }
     if isRoot {
@@ -387,7 +387,7 @@ func stripBagAddedComponents(world: mod UiWorld, scene: view Scene, bagIdx: view
   loop k < keyCount {
     let key: String = json.jsonObjectKeyAt(doc: doc, this: bag, idx: k)
     var skip: Bool = false
-    if key.equals(other: "remove") {
+    if key is "remove" {
       skip = true
     }
     if isHierarchyDirectiveKey(key: key) {
@@ -430,7 +430,7 @@ func overlayNodeFromBag(world: mod UiWorld, scene: view Scene, bagIdx: view Int,
       # Parent/order are loader directives consumed by
       # deriveActiveHierarchy — never component names.
     } else {
-      if key.equals(other: "remove") {
+      if key is "remove" {
         let arr: JsonValue = json.jsonObjectValueAt(doc: doc, this: bag, idx: k)
         let n: Int = json.jsonArrayLen(this: arr)
         var r: Int = 0
@@ -469,7 +469,7 @@ func accumulateNodeIds(scene: view Scene, nodesIdx: view Int, out: mod List(Stri
     let nodeId: String = json.jsonObjectKeyAt(doc: doc, this: nodesVal, idx: i)
     var already: Bool = false
     loop let seen: view String in out {
-      if seen.equals(other: nodeId) {
+      if seen is nodeId {
         already = true
       }
     }
@@ -508,10 +508,10 @@ func framesOverriddenNodeIds(scene: view Scene, frames: view FrameSet, states: v
 
 # The two loader-directive keys a frame's node bag may carry.
 func isHierarchyDirectiveKey(key: view String) ret Bool {
-  if key.equals(other: "Parent") {
+  if key is "Parent" {
     ret true
   }
-  ret key.equals(other: "order")
+  ret key is "order"
 }
 
 # True when ANY frame's node bag carries a Parent/order directive —

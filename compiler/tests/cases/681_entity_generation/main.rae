@@ -1,0 +1,24 @@
+import core
+open ecs/entity
+open ecs/component_table
+open ui/ecs
+
+# #703: EntityId is a generational handle { index, generation }. Recycling that
+# bumps the generation is #704 — here we prove the FIELD exists and that `is`
+# includes it, so a stale handle (same index, different generation) is not equal
+# to the live one. create/destroy/recreate yields distinct handles.
+func main() {
+  var world: UiWorld = createUiWorld()
+  let e1: EntityId = createEntity(world: world)
+  let e2: EntityId = createEntity(world: world)
+  log("e1 index={e1.index} gen={e1.generation}")
+  log("e1==e1: {e1 is e1}")
+  log("e1==e2: {e1 is e2}")
+  let stale: EntityId = { index: e1.index, generation: e1.generation + 1 }
+  log("e1==stale: {e1 is stale}")
+  log("noEntity isNone: {isNone(this: noEntity())}")
+  log("e1 isNone: {isNone(this: e1)}")
+  destroyEntity(world: world, entity: e1)
+  let e3: EntityId = createEntity(world: world)
+  log("e3 index={e3.index} e1==e3: {e1 is e3}")
+}

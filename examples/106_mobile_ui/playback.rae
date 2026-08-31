@@ -126,7 +126,7 @@ func setPlaybackPlaying(state: mod PlaybackState, value: view Bool) pub {
 # (#268). Idempotent: re-setting the same key is a no-op, so callers can
 # call it every frame / poll without spurious re-paints.
 func setNowPlayingArt(state: mod PlaybackState, artKey: view String) pub {
-  if state.nowPlayingArtKey.equals(other: artKey) {
+  if state.nowPlayingArtKey is artKey {
     ret
   }
   state.nowPlayingArtKey = "{artKey}"

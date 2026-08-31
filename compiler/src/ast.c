@@ -743,6 +743,10 @@ void ast_dump_module(const AstModule* module, FILE* out) {
         break;
       case AST_DECL_GLOBAL_LET:
         break;
+      case AST_DECL_ALIAS:
+        fprintf(out, "  ALIAS %.*s\n",
+                (int)decl->as.alias_decl.name.len, decl->as.alias_decl.name.data);
+        break;
     }
     decl = decl->next;
   }

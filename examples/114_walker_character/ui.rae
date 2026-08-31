@@ -101,10 +101,10 @@ func uiUpdate(app: mod App, dt: copy Float, now: copy Float64) ret UiTick {
   let clipHit: String = panelClickedId(panel: app.io.clipPanel, input: app.io.ui)
   if clipHit.length() > 0 and app.cam.rig.mode is not CameraRigMode.character {
     var nextClipIndex: Int = app.character.clipIndex
-    if clipHit.equals(other: "idle") { nextClipIndex = 0 }
-    if clipHit.equals(other: "walk") { nextClipIndex = 1 }
-    if clipHit.equals(other: "walkFast") { nextClipIndex = 2 }
-    if clipHit.equals(other: "run") { nextClipIndex = 3 }
+    if clipHit is "idle" { nextClipIndex = 0 }
+    if clipHit is "walk" { nextClipIndex = 1 }
+    if clipHit is "walkFast" { nextClipIndex = 2 }
+    if clipHit is "run" { nextClipIndex = 3 }
     if nextClipIndex is not app.character.clipIndex {
       app.character.transitionFrom = captureSkeletonPose(sk: app.character.skeleton)
       app.character.transitionElapsed = 0.0
@@ -115,30 +115,30 @@ func uiUpdate(app: mod App, dt: copy Float, now: copy Float64) ret UiTick {
     setPanelSelection(panel: app.io.clipPanel, world: app.io.world, group: 1, id: clipHit)
   }
   let transportHit: String = panelClickedId(panel: app.io.transport, input: app.io.ui)
-  if transportHit.equals(other: "play") {
+  if transportHit is "play" {
     app.character.playing = not app.character.playing
     var playLabel: String = "Pause"
     if not app.character.playing { playLabel = "Play" }
     setPanelButtonLabel(panel: app.io.transport, world: app.io.world, id: "play", label: playLabel)
     setPanelButtonOn(panel: app.io.transport, world: app.io.world, id: "play", on: app.character.playing)
   }
-  if transportHit.equals(other: "toon") {
+  if transportHit is "toon" {
     app.character.toon = not app.character.toon
     setPanelButtonOn(panel: app.io.transport, world: app.io.world, id: "toon", on: app.character.toon)
   }
-  if transportHit.equals(other: "slower") { app.character.speed = nextSpeed(current: app.character.speed, up: false) }
-  if transportHit.equals(other: "faster") { app.character.speed = nextSpeed(current: app.character.speed, up: true) }
+  if transportHit is "slower" { app.character.speed = nextSpeed(current: app.character.speed, up: false) }
+  if transportHit is "faster" { app.character.speed = nextSpeed(current: app.character.speed, up: true) }
   if transportHit.length() > 0 {
     let pct: Int = speedPercent(v: app.character.speed)
     setNodeText(world: app.io.world, nodeId: "SpeedLabel", value: "Speed {pct}%")
   }
   # Character-switch buttons (#546): same effect as Page Up/Down and keys 1/2.
   let charHit: String = panelClickedId(panel: app.io.charPanel, input: app.io.ui)
-  if charHit.equals(other: "prev") {
+  if charHit is "prev" {
     rosterSwitchPrev(roster: app.players)
     onCharacterSwitched(app: app)
   }
-  if charHit.equals(other: "next") {
+  if charHit is "next" {
     rosterSwitchNext(roster: app.players)
     onCharacterSwitched(app: app)
   }

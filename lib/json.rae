@@ -180,19 +180,19 @@ func jsonEscape(s: view String) ret String {
   let cr: String = "\r"
   loop i < n {
     let ch: String = s.sub(start: i, len: 1)
-    if ch.equals(other: bs) {
+    if ch is bs {
       out = out.concat(other: bsbs)
     } else {
-      if ch.equals(other: q) {
+      if ch is q {
         out = out.concat(other: bsq)
       } else {
-        if ch.equals(other: nl) {
+        if ch is nl {
           out = out.concat(other: bsn)
         } else {
-          if ch.equals(other: tab) {
+          if ch is tab {
             out = out.concat(other: bst)
           } else {
-            if ch.equals(other: cr) {
+            if ch is cr {
               out = out.concat(other: bsr)
             } else {
               out = out.concat(other: ch)
@@ -268,7 +268,7 @@ func jsonField(doc: view JsonDoc, this: view JsonValue, key: view String) ret In
   var i: Int = 0
   loop i < this.rangeLen {
     let f: JsonField = json.fieldAt(doc: doc, idx: this.rangeStart + i)
-    if f.key.equals(other: key) {
+    if f.key is key {
       ret f.valueIdx
     }
     i = i + 1
@@ -321,7 +321,7 @@ func consumeKeyword(p: mod JsonParser, kw: view String) ret Bool {
     ret false
   }
   let slice: String = p.source.sub(start: p.pos, len: len)
-  if slice.equals(other: kw) {
+  if slice is kw {
     p.pos = p.pos + len
     ret true
   }

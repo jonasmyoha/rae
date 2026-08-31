@@ -34,8 +34,8 @@ func jointNameKey(name: view String) ret String {
   let lowered: String = base.toLower()
   loop i < lowered.length() {
     let ch: String = lowered.sub(start: i, len: 1)
-    if ch.equals(other: "_") is false and ch.equals(other: " ") is false
-       and ch.equals(other: ".") is false and ch.equals(other: "-") is false {
+    if ch is "_" is false and ch is " " is false
+       and ch is "." is false and ch is "-" is false {
       out = out.concat(other: ch)
     }
     i = i + 1
@@ -51,13 +51,13 @@ func jointNameKey(name: view String) ret String {
 # spine joint and straightens at the next, so losing the upper segment keeps the
 # bend and discards the correction, and the character walks hunched.
 func jointNameAliasKey(key: view String) ret String {
-  if key.equals(other: "spine1") { ret "spine02" }
-  if key.equals(other: "spine02") { ret "spine1" }
-  if key.equals(other: "spine2") { ret "spine03" }
-  if key.equals(other: "headtopend") { ret "head1" }
-  if key.equals(other: "head1") { ret "headtopend" }
-  if key.equals(other: "leftupleg") { ret "leftthigh" }
-  if key.equals(other: "rightupleg") { ret "rightthigh" }
+  if key is "spine1" { ret "spine02" }
+  if key is "spine02" { ret "spine1" }
+  if key is "spine2" { ret "spine03" }
+  if key is "headtopend" { ret "head1" }
+  if key is "head1" { ret "headtopend" }
+  if key is "leftupleg" { ret "leftthigh" }
+  if key is "rightupleg" { ret "rightthigh" }
   ret ""
 }
 
@@ -66,7 +66,7 @@ func findJointByKey(sk: view Skeleton, key: view String) ret Int {
   var n: Int = 0
   loop n < sk.nodeNames.length {
     if let nodeName: String = sk.nodeNames.copyAt(index: n) {
-      if jointNameKey(name: nodeName).equals(other: key) {
+      if jointNameKey(name: nodeName) is key {
         ret n
       }
     }
@@ -220,7 +220,7 @@ func retargetClip(c: view Clip, from: view Skeleton, fromBind: view SkeletonPose
     if let dstName: String = to.nodeNames.copyAt(index: d) {
       let key: String = jointNameKey(name: dstName)
       var skip: Bool = false
-      if skipRoot and key.equals(other: "hips") { skip = true }
+      if skipRoot and key is "hips" { skip = true }
       if skip is false {
         s = findJointByKey(sk: from, key: key)
         if s < 0 {

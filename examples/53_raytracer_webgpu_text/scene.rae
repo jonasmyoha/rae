@@ -53,7 +53,7 @@ func faceNormalIndex(token: view String) ret Int {
     let parts: List(String) = token.split(sep: "/")
     if parts.length < 3 { ret -1 }
     let s: String = rae_ext_rae_buf_get(buf: parts.data, index: 2)
-    if s.equals(other: "") { ret -1 }
+    if s is "" { ret -1 }
     ret s.toInt() - 1
 }
 
@@ -86,7 +86,7 @@ func loadObjTriangles(path: view String, scale: view Float, ox: view Float, oy: 
         let tok: List(String) = line.split(sep: " ")
         if tok.length >= 4 {
             let t0: String = rae_ext_rae_buf_get(buf: tok.data, index: 0)
-            if t0.equals(other: "v") {
+            if t0 is "v" {
                 let px: Float = rae_ext_rae_buf_get(buf: tok.data, index: 1).toFloat() * flip
                 let py: Float = rae_ext_rae_buf_get(buf: tok.data, index: 2).toFloat()
                 let pz: Float = rae_ext_rae_buf_get(buf: tok.data, index: 3).toFloat() * flip
@@ -107,7 +107,7 @@ func loadObjTriangles(path: view String, scale: view Float, ox: view Float, oy: 
         let tok: List(String) = line.split(sep: " ")
         if tok.length >= 4 {
             let t0: String = rae_ext_rae_buf_get(buf: tok.data, index: 0)
-            if t0.equals(other: "vn") {
+            if t0 is "vn" {
                 let mnx: Float = rae_ext_rae_buf_get(buf: tok.data, index: 1).toFloat() * flip
                 let mny: Float = rae_ext_rae_buf_get(buf: tok.data, index: 2).toFloat()
                 let mnz: Float = rae_ext_rae_buf_get(buf: tok.data, index: 3).toFloat() * flip
@@ -128,7 +128,7 @@ func loadObjTriangles(path: view String, scale: view Float, ox: view Float, oy: 
         let tok: List(String) = line.split(sep: " ")
         if tok.length >= 4 {
             let t0: String = rae_ext_rae_buf_get(buf: tok.data, index: 0)
-            if t0.equals(other: "f") {
+            if t0 is "f" {
                 let tk1: String = rae_ext_rae_buf_get(buf: tok.data, index: 1)
                 let tk2: String = rae_ext_rae_buf_get(buf: tok.data, index: 2)
                 let tk3: String = rae_ext_rae_buf_get(buf: tok.data, index: 3)

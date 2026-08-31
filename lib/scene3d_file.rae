@@ -42,7 +42,7 @@ func materialRegistry3dGet(reg: view MaterialRegistry3d, key: view String) ret I
   var i: Int = 0
   loop i < reg.keys.length {
     if let candidate: String = reg.keys.copyAt(index: i) {
-      if candidate.equals(other: key) {
+      if candidate is key {
         if let index: Int = reg.indices.copyAt(index: i) { ret index }
       }
     }
@@ -62,7 +62,7 @@ func meshRegistry3dIndex(reg: view MeshRegistry3d, key: view String) pub ret Int
   var i: Int = 0
   loop i < reg.keys.length {
     if let candidate: String = reg.keys.copyAt(index: i) {
-      if candidate.equals(other: key) { ret i }
+      if candidate is key { ret i }
     }
     i = i + 1
   }
@@ -112,7 +112,7 @@ func scene3dAssetEntity(asset: view Scene3dAsset, nodeId: view String) pub ret I
   var i: Int = 0
   loop i < asset.nodeIds.length {
     if let candidate: String = asset.nodeIds.copyAt(index: i) {
-      if candidate.equals(other: nodeId) {
+      if candidate is nodeId {
         if let entity: Int = asset.entityIds.copyAt(index: i) { ret entity }
       }
     }
@@ -350,9 +350,9 @@ func parseScene3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
         }
         let shapeName: String = readStringField(doc: doc, object: sdf, key: "shape")
         var shape: Int = -1
-        if shapeName.equals(other: "sphere") { shape = 0 }
-        if shapeName.equals(other: "box") { shape = 1 }
-        if shapeName.equals(other: "torus") { shape = 2 }
+        if shapeName is "sphere" { shape = 0 }
+        if shapeName is "box" { shape = 1 }
+        if shapeName is "torus" { shape = 2 }
         if shape < 0 {
           failScene3dAsset(asset: asset, message: "SdfPrimitive shape must be sphere, box or torus")
           ret asset

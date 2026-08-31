@@ -22,7 +22,7 @@ func startsWith(s: view String, prefix: view String) ret Bool {
   if prefix.length() > s.length() {
     ret false
   }
-  ret s.sub(start: 0, len: prefix.length()).equals(other: prefix)
+  ret s.sub(start: 0, len: prefix.length()) is prefix
 }
 
 func check(label: view String, ok: view Bool) {
@@ -45,9 +45,9 @@ func main() {
   # so printing a different line depending on whether the variable happens to be
   # set makes the expectation depend on how the test was launched.
   let override: String = getEnv(name: "RAE_HOT_RELOAD_DIR")
-  var dirOk: Bool = dir.equals(other: ".rae")
+  var dirOk: Bool = dir is ".rae"
   if override.length() > 0 {
-    dirOk = dir.equals(other: override)
+    dirOk = dir is override
   }
   check(label: "dir is the override when set, else .rae", ok: dirOk)
 
@@ -63,12 +63,12 @@ func main() {
   # The file names themselves are the wire contract with the supervisor,
   # which writes them from C. A rename on either side silently stops the
   # app from ever noticing a rebuild.
-  check(label: "signal file name", ok: hotReloadSignalPath().equals(other: "{dir}/reload.signal"))
-  check(label: "status file name", ok: hotReloadBuildStatusPath().equals(other: "{dir}/build.status"))
-  check(label: "app state file name", ok: hotReloadStatePathFor(appId: "demo").equals(other: "{dir}/state.demo.json"))
+  check(label: "signal file name", ok: hotReloadSignalPath() is "{dir}/reload.signal")
+  check(label: "status file name", ok: hotReloadBuildStatusPath() is "{dir}/build.status")
+  check(label: "app state file name", ok: hotReloadStatePathFor(appId: "demo") is "{dir}/state.demo.json")
 
   # Two apps must never land on one state slot even inside a shared dir.
   let a: String = hotReloadStatePathFor(appId: "106_mobile_ui")
   let b: String = hotReloadStatePathFor(appId: "114_walker_character")
-  check(label: "per-app state slots differ", ok: a.equals(other: b) is false)
+  check(label: "per-app state slots differ", ok: a is b is false)
 }

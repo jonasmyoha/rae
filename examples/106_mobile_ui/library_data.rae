@@ -36,7 +36,7 @@ func librarySeedFromCatalog(albums: view List(Album)) pub ret List(String) {
 # music catalogue) so a hash map would be premature.
 func isInLibrary(library: view List(String), stem: view String) pub ret Bool {
   loop let entry: view String in library {
-    if entry.equals(other: stem) {
+    if entry is stem {
       ret true
     }
   }
@@ -48,7 +48,7 @@ func removeFromLibrary(library: mod List(String), stem: view String) pub {
   var i: Int = 0
   loop i < library.length {
     if let entry: String = library.copyAt(index: i) {
-      if entry.equals(other: stem) {
+      if entry is stem {
         library.remove(index: i)
         ret
       }

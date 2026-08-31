@@ -8,7 +8,7 @@
 #   let i: Int = 0
 #   loop i < entries.length {
 #     let f: File = entries.copyAt(index: i)
-#     if f.extension().equals(other: "jpg") {
+#     if f.extension() is "jpg" {
 #       let bytes: opt String = readFile(path: f.path())
 #       ...
 #     }
@@ -90,7 +90,7 @@ func isHidden(this: view File) ret Bool {
 # True if this file's extension matches `ext` case-insensitively.
 # Pass `ext` without the leading dot.
 func hasExtension(this: view File, ext: view String) ret Bool {
-  ret this.extension().equals(other: ext.toLower())
+  ret this.extension() is ext.toLower()
 }
 
 # ----- listDir --------------------------------------------------------

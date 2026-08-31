@@ -75,7 +75,7 @@ func sceneRegistryIndex(reg: view SceneRegistry, key: view String) ret Int {
   var i: Int = 0
   loop i < n {
     if let k: String = reg.ids.copyAt(index: i) {
-      if k.equals(other: key) {
+      if k is key {
         ret i
       }
     }
@@ -212,25 +212,25 @@ func addOnClickActionOverride(list: mod List(SceneOverride), nodeId: own String,
 # scene; the scene contributes its inner layout, padding, visuals, and
 # behaviour). RUICS § 6.4.
 func isPlacementComponent(name: view String) ret Bool {
-  if name.equals(other: "Rect") {
+  if name is "Rect" {
     ret true
   }
-  if name.equals(other: "Size") {
+  if name is "Size" {
     ret true
   }
-  if name.equals(other: "Align") {
+  if name is "Align" {
     ret true
   }
-  if name.equals(other: "Offset") {
+  if name is "Offset" {
     ret true
   }
-  if name.equals(other: "Constraints") {
+  if name is "Constraints" {
     ret true
   }
-  if name.equals(other: "OverflowPolicy") {
+  if name is "OverflowPolicy" {
     ret true
   }
-  if name.equals(other: "TransformFx") {
+  if name is "TransformFx" {
     ret true
   }
   ret false
@@ -300,16 +300,16 @@ func mountSceneInstanceIntoPage(
     # Explicit struct construction (not `let entity: EntityId =
     # mountEntity`) — the Live VM treats the latter as a view-ref
     # bind and then refuses the reassignment on the next branch.
-    var entity: EntityId = { value: mountEntity.value }
+    var entity: EntityId = { index: mountEntity.index, generation: mountEntity.generation }
     if i is not rootIdx {
       entity = createEntity(world: world)
     }
     appendEntityListSI(lst: entitiesByNodeIndex, value: entity)
     if pageId.length() is 0 {
-      nodeIdsMap.set(k: node.nodeId, value: entity.value)
+      nodeIdsMap.set(k: node.nodeId, value: entity.index)
     } else {
       let key: String = pageScopedKey(pageId: pageId, nodeId: node.nodeId)
-      nodeIdsMap.set(k: key, value: entity.value)
+      nodeIdsMap.set(k: key, value: entity.index)
     }
     i = i + 1
   }
@@ -334,7 +334,7 @@ func mountSceneInstanceIntoPage(
       let key: String = json.jsonObjectKeyAt(doc: docView, this: bag, idx: k)
       let childrenKey: String = "Children"
       var skip: Bool = false
-      if key.equals(other: childrenKey) {
+      if key is childrenKey {
         skip = true
       }
       if isRoot {
@@ -462,9 +462,9 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
   # override updates exactly the named field without leaking the
   # rest of the component's String state.
 
-  if override.componentName.equals(other: textKey) {
+  if override.componentName is textKey {
     let textField: String = "text"
-    if override.fieldName.equals(other: textField) {
+    if override.fieldName is textField {
       if componentHas(this: world.texts, entity: entity) {
         let cur: mod Text => componentMod(this: world.texts, entity: entity)
         cur.text = override.valueString
@@ -472,7 +472,7 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
       ret
     }
     let styleField: String = "styleId"
-    if override.fieldName.equals(other: styleField) {
+    if override.fieldName is styleField {
       if componentHas(this: world.texts, entity: entity) {
         let cur: mod Text => componentMod(this: world.texts, entity: entity)
         cur.styleId = override.valueString
@@ -481,9 +481,9 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
     ret
   }
 
-  if override.componentName.equals(other: spriteKey) {
+  if override.componentName is spriteKey {
     let textureField: String = "textureKey"
-    if override.fieldName.equals(other: textureField) {
+    if override.fieldName is textureField {
       if componentHas(this: world.sprites, entity: entity) {
         let cur: mod Sprite => componentMod(this: world.sprites, entity: entity)
         cur.textureKey = override.valueString
@@ -491,7 +491,7 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
       ret
     }
     let tintField: String = "tint"
-    if override.fieldName.equals(other: tintField) {
+    if override.fieldName is tintField {
       if componentHas(this: world.sprites, entity: entity) {
         let cur: mod Sprite => componentMod(this: world.sprites, entity: entity)
         cur.tint = parseRgbaString(s: override.valueString)
@@ -502,9 +502,9 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
     ret
   }
 
-  if override.componentName.equals(other: onClickKey) {
+  if override.componentName is onClickKey {
     let actionField: String = "actionId"
-    if override.fieldName.equals(other: actionField) {
+    if override.fieldName is actionField {
       if componentHas(this: world.onClicks, entity: entity) {
         let cur: mod OnClick => componentMod(this: world.onClicks, entity: entity)
         cur.actionId = override.valueString
@@ -513,11 +513,11 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
     ret
   }
 
-  if override.componentName.equals(other: activeKey) {
+  if override.componentName is activeKey {
     let valueField: String = "value"
-    if override.fieldName.equals(other: valueField) {
+    if override.fieldName is valueField {
       let trueStr: String = "true"
-      let v: Bool = override.valueString.equals(other: trueStr)
+      let v: Bool = override.valueString is trueStr
       let active: Active = { value: v }
       componentSet(this: world.actives, entity: entity, data: active)
     }

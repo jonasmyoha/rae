@@ -116,7 +116,7 @@ func updateUiInput(input: mod UiInput, world: view UiWorld) pub {
   if pressed { input.pressedEntity = input.hoveredEntity }
   if released {
     if isNone(this: input.hoveredEntity) is false {
-      if input.hoveredEntity.value is input.pressedEntity.value {
+      if input.hoveredEntity is input.pressedEntity {
         let click: OnClick = componentGet(this: world.onClicks, entity: input.hoveredEntity)
         let event: UiActionEvent = { entity: input.hoveredEntity, actionId: click.actionId }
         let events: mod List(UiActionEvent) => input.events
