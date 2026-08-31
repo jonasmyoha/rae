@@ -737,14 +737,9 @@ type WobbleFx {
   secondFreq: Float
 }
 
-# Hierarchy
-
-# Stored on the parent. Parent-link going the other way lives in the
-# derived Parent table below — `Children` is the authoritative
-# ordering, Parent is the cached upward pointer for traversal.
-type Children {
-  ids: List(EntityId)
-}
+# Hierarchy: `Children` and `Parent` are now defined ONCE in lib/ecs/hierarchy.rae
+# (#710) so any World can share them; the UI sees them via `open ecs/hierarchy`
+# in ecs.rae.
 
 # -----------------------------------------------------------------
 # Derived / runtime-only components
@@ -782,10 +777,6 @@ type LayoutScale {
 
 type SafeInsets {
   insets: Insets
-}
-
-type Parent {
-  parent: EntityId
 }
 
 type AnimState {
