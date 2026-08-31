@@ -5,6 +5,7 @@ open ecs/component_table
 open ecs/queue
 open ecs/world
 open ecs/hierarchy
+open ecs/HierarchySystem/HierarchySystem
 # Only raylib-free MSDF data types; paint code stays out of UiWorld.
 import ui/msdf_state
 
@@ -511,10 +512,13 @@ func destroyEntity(world: mod UiWorld, entity: view EntityId) pub {
 # Children list (cleared as part of its own destroyEntity) doesn't
 # alias entities that have already been removed from `alive`. The
 # tree is read once into a list before any destruction starts, so
-# mutating the world during the walk is safe.
+# mutating the world during the walk is safe. The subtree gather is
+# the shared lib/ecs HierarchySystem `collectSubtree` (#722) — UiWorld
+# stores the standard ecs `Children` cache, so there is no UI-local
+# tree walk to duplicate it.
 func destroyEntitySubtree(world: mod UiWorld, root: view EntityId) pub {
   let collected: List(EntityId) = createList(EntityId, cap: 32)
-  collectSubtreeEntities(world: world, root: root, out: collected)
+  collectSubtree(childrens: world.childrens, node: root, out: collected)
   # Destroy in reverse (children before parents).
   let n: Int = collected.length
   var i: Int = n - 1
@@ -522,25 +526,6 @@ func destroyEntitySubtree(world: mod UiWorld, root: view EntityId) pub {
     let e: EntityId = rae_ext_rae_buf_get(buf: collected.data, index: i)
     destroyEntity(world: world, entity: e)
     i = i - 1
-  }
-}
-
-# Helper: append `root` then recurse into its children, depth-first.
-# The output list ends up in pre-order (parent before its children
-# in the list), which is why `destroyEntitySubtree` walks it in
-# reverse.
-func collectSubtreeEntities(world: view UiWorld, root: view EntityId, out: mod List(EntityId)) {
-  out.add(value: root)
-  if componentHas(this: world.childrens, entity: root) is false {
-    ret
-  }
-  let ch: view Children => componentView(this: world.childrens, entity: root)
-  let n: Int = ch.ids.length
-  var i: Int = 0
-  loop i < n {
-    let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
-    collectSubtreeEntities(world: world, root: cid, out: out)
-    i = i + 1
   }
 }
 
