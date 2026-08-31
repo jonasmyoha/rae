@@ -378,7 +378,17 @@ fi
 # "Test" button (which runs `TEST_TARGET=compiled make test`) silently ran only
 # the unit cases and showed green while `make test` was red on example gates.
 # One suite, one result.
+#
+# Opt-out: RAE_SKIP_EXAMPLES=1 runs the unit cases only. The graphical example
+# smoke tests build + render every 3D example and take minutes, so the devtools
+# "Test" button leaves them OFF by default (a toggle turns them back on); the
+# CLI `make test` runs the full suite unless you export RAE_SKIP_EXAMPLES=1.
 if [ -z "$TEST_NAME_FILTER" ]; then
-  echo
-  ./tools/run_examples.sh
+  if [ "${RAE_SKIP_EXAMPLES:-0}" = "1" ]; then
+    echo
+    echo "Skipping example smoke tests (RAE_SKIP_EXAMPLES=1)."
+  else
+    echo
+    ./tools/run_examples.sh
+  fi
 fi

@@ -33,6 +33,7 @@ type ActiveRun = {
   summaryTotals: { passed: number; failed: number };
   disabledTests?: string;
   testName?: string;
+  includeExamples?: boolean;
 };
 
 export class TestRunner {
@@ -44,7 +45,7 @@ export class TestRunner {
     private stats?: StatsStore
   ) {}
 
-  runTests(mode: TestRunMode = "all", targetId?: string, disabledTests?: string, testName?: string) {
+  runTests(mode: TestRunMode = "all", targetId?: string, disabledTests?: string, testName?: string, includeExamples?: boolean) {
     if (this.activeRun) {
       this.broadcast({
         type: "server-status",
@@ -97,7 +98,8 @@ export class TestRunner {
       batchLabel,
       summaryTotals: { passed: 0, failed: 0 },
       disabledTests,
-      testName
+      testName,
+      includeExamples
     };
 
     this.broadcast(createRunStartedMessage(runId, mode, batchLabel, cwd));
@@ -130,6 +132,12 @@ export class TestRunner {
     const env = { ...process.env };
     if (this.activeRun.disabledTests) {
       env.RAE_SKIP_TESTS = this.activeRun.disabledTests;
+    }
+    // Graphical example smoke tests are OFF unless the client opted in — they
+    // build + render every 3D example and take minutes. run_tests.sh honours
+    // RAE_SKIP_EXAMPLES=1 by running the unit cases only.
+    if (!this.activeRun.includeExamples) {
+      env.RAE_SKIP_EXAMPLES = "1";
     }
 
     let command = target.testCommand;
