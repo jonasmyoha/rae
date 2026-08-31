@@ -283,10 +283,10 @@ func setNodeRect(world: mod UiWorld, nodeId: view String, x: view Float, y: view
   if isNone(this: entity) { ret }
   if componentHas(this: world.rects, entity: entity) is false { ret }
   let r: mod Rect => componentMod(this: world.rects, entity: entity)
-  r.x = x
-  r.y = y
-  r.w = w
-  r.h = h
+  r.position.x = x
+  r.position.y = y
+  r.size.x = w
+  r.size.y = h
 }
 
 func nodeRectW(world: view UiWorld, nodeId: view String) ret Float {
@@ -294,7 +294,7 @@ func nodeRectW(world: view UiWorld, nodeId: view String) ret Float {
   if isNone(this: entity) { ret 0.0 }
   if componentHas(this: world.rects, entity: entity) is false { ret 0.0 }
   let r: Rect = componentGet(this: world.rects, entity: entity)
-  ret r.w
+  ret r.size.x
 }
 
 func nodeRectH(world: view UiWorld, nodeId: view String) ret Float {
@@ -302,7 +302,7 @@ func nodeRectH(world: view UiWorld, nodeId: view String) ret Float {
   if isNone(this: entity) { ret 0.0 }
   if componentHas(this: world.rects, entity: entity) is false { ret 0.0 }
   let r: Rect = componentGet(this: world.rects, entity: entity)
-  ret r.h
+  ret r.size.y
 }
 
 # ----- action events --------------------------------------------------

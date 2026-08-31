@@ -165,7 +165,7 @@ func buildControlPanel(panel: mod ControlPanel, world: mod UiWorld, res: view Gp
     let buttonE: EntityId = createEntity(world: world)
     let labelE: EntityId = createEntity(world: world)
 
-    let rect: Rect = { x: 0.0, y: 0.0, w: panel.buttonW, h: panel.buttonH }
+    let rect: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: panel.buttonW, y: panel.buttonH } }
     componentSet(this: world.rects, entity: buttonE, data: rect)
     let shape: Shape = {
       kind: ShapeKind.roundedRect
@@ -185,7 +185,7 @@ func buildControlPanel(panel: mod ControlPanel, world: mod UiWorld, res: view Gp
     }
     componentSet(this: world.onClicks, entity: buttonE, data: click)
 
-    let labelRect: Rect = { x: 0.0, y: 0.0, w: panel.buttonW, h: panel.buttonH }
+    let labelRect: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: panel.buttonW, y: panel.buttonH } }
     componentSet(this: world.rects, entity: labelE, data: labelRect)
     let text: Text = {
       text: "{panelStringAt(values: panel.selectedIds, index: i)}"

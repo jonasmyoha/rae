@@ -174,7 +174,7 @@ func entityPadding(world: view UiWorld, entity: view EntityId) ret Insets {
 
 func entityRect(world: view UiWorld, entity: view EntityId) ret Rect {
   if componentHas(this: world.rects, entity: entity) is false {
-    ret Rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }
+    ret Rect { position: { x: 0.0, y: 0.0 }, size: { x: 0.0, y: 0.0 } }
   }
   let r: Rect = componentGet(this: world.rects, entity: entity)
   ret r
@@ -249,8 +249,8 @@ func measureSubtree(world: mod UiWorld, entity: view EntityId) {
   let pad: Insets = entityPadding(world: world, entity: entity)
   let rect: Rect = entityRect(world: world, entity: entity)
 
-  var measuredW: Float = rect.w
-  var measuredH: Float = rect.h
+  var measuredW: Float = rect.size.x
+  var measuredH: Float = rect.size.y
 
   if n > 0 {
     var sumMain: Float = 0.0
@@ -310,8 +310,8 @@ func measureSubtree(world: mod UiWorld, entity: view EntityId) {
     }
   } else {
     # Leaf nodes: their authored rect IS their measure.
-    measuredW = rect.w
-    measuredH = rect.h
+    measuredW = rect.size.x
+    measuredH = rect.size.y
   }
 
   measuredW = applyConstraintsW(world: world, entity: entity, w: measuredW)
@@ -327,14 +327,14 @@ func measureSubtree(world: mod UiWorld, entity: view EntityId) {
 func childMeasuredW(world: view UiWorld, entity: view EntityId) ret Float {
   let size: Size = entitySize(world: world, entity: entity)
   let rect: Rect = entityRect(world: world, entity: entity)
-  var measuredW: Float = rect.w
+  var measuredW: Float = rect.size.x
   if componentHas(this: world.measuredSizes, entity: entity) {
     let ms: MeasuredSize = componentGet(this: world.measuredSizes, entity: entity)
     measuredW = ms.w
   }
   ret resolveAxisFromSize(
     axis: size.w
-    rectVal: rect.w
+    rectVal: rect.size.x
     measuredVal: measuredW
     parentAvail: 0.0
     hasMeasured: true
@@ -345,14 +345,14 @@ func childMeasuredW(world: view UiWorld, entity: view EntityId) ret Float {
 func childMeasuredH(world: view UiWorld, entity: view EntityId) ret Float {
   let size: Size = entitySize(world: world, entity: entity)
   let rect: Rect = entityRect(world: world, entity: entity)
-  var measuredH: Float = rect.h
+  var measuredH: Float = rect.size.y
   if componentHas(this: world.measuredSizes, entity: entity) {
     let ms: MeasuredSize = componentGet(this: world.measuredSizes, entity: entity)
     measuredH = ms.h
   }
   ret resolveAxisFromSize(
     axis: size.h
-    rectVal: rect.h
+    rectVal: rect.size.y
     measuredVal: measuredH
     parentAvail: 0.0
     hasMeasured: true
@@ -379,8 +379,8 @@ func resolveOwnSize(
 ) ret Vec2 {
   let size: Size = entitySize(world: world, entity: entity)
   let rect: Rect = entityRect(world: world, entity: entity)
-  var measuredW: Float = rect.w
-  var measuredH: Float = rect.h
+  var measuredW: Float = rect.size.x
+  var measuredH: Float = rect.size.y
   if componentHas(this: world.measuredSizes, entity: entity) {
     let ms: MeasuredSize = componentGet(this: world.measuredSizes, entity: entity)
     measuredW = ms.w
@@ -388,7 +388,7 @@ func resolveOwnSize(
   }
   let w: Float = resolveAxisFromSize(
     axis: size.w
-    rectVal: rect.w
+    rectVal: rect.size.x
     measuredVal: measuredW
     parentAvail: parentAvailW
     hasMeasured: true
@@ -396,7 +396,7 @@ func resolveOwnSize(
   )
   let h: Float = resolveAxisFromSize(
     axis: size.h
-    rectVal: rect.h
+    rectVal: rect.size.y
     measuredVal: measuredH
     parentAvail: parentAvailH
     hasMeasured: true
@@ -421,10 +421,8 @@ func computeSubtree(
   # Apply Offset (post-layout shift).
   let off: Vec2 = entityOffset(world: world, entity: entity)
   let cr: ComputedRect = {
-    x: localX + off.x
-    y: localY + off.y
-    w: ownW
-    h: ownH
+    position: { x: localX + off.x, y: localY + off.y }
+    size: { x: ownW, y: ownH }
   }
   componentSet(this: world.computedRects, entity: entity, data: cr)
 
@@ -502,8 +500,8 @@ func computeSubtree(
     computeSubtree(
       world: world
       entity: cid
-      localX: contentX + crect.x
-      localY: contentY + crect.y
+      localX: contentX + crect.position.x
+      localY: contentY + crect.position.y
       ownW: resolved.x
       ownH: resolved.y
     )
