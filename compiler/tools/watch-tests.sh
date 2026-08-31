@@ -8,7 +8,11 @@
 set -uo pipefail
 LOG="${RAE_TEST_LOG:-/tmp/rae-test-live.log}"
 cd "$(dirname "$0")/.." || exit 1        # -> compiler/
+# Bracket the run with explicit sentinels so the devtools tailer knows exactly
+# when the run starts/ends and its real exit code — no idle-timeout guessing.
+RUN_ID="$(date +%s)-$$"
 : > "$LOG"
+printf '@@RAE_RUN_START %s@@\n' "$RUN_ID" >> "$LOG"
 pass=0; fail=0
 make test 2>&1 | while IFS= read -r line; do
   printf '%s\n' "$line" >> "$LOG"
@@ -21,4 +25,7 @@ make test 2>&1 | while IFS= read -r line; do
   esac
   printf '\r\033[K▸ %d pass · %d fail · %s' "$pass" "$fail" "${last:-starting}" >&2
 done
+code=${PIPESTATUS[0]}                     # make's exit, not the while loop's
+printf '@@RAE_RUN_END exit=%s@@\n' "$code" >> "$LOG"
 printf '\n' >&2
+exit "$code"
