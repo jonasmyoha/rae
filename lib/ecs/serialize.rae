@@ -1,0 +1,78 @@
+# lib/ecs — serialize-OUT (docs/ecs-general-architecture.md §2.7, #719).
+#
+# Turns a World into JSON, driven entirely by the component registry (#717): a
+# component is written ONLY if it was registered with the SERIALIZE flag. Derived
+# / cache / runtime components (WorldTransform*, ComputedRect, MeasuredSize, ...)
+# are registered WITHOUT SERIALIZE — so they are simply skipped and never reach
+# the save file, with no type annotation anywhere.
+#
+# The output is columnar (natural for a sparse-set ECS): one object per
+# component, keyed by component name, whose entries map an entity's index to that
+# component's `toJson()` (the compiler-generated per-struct serializer). E.g.
+#   { "Pos": { "1": {"x":10,"y":20}, "2": {...} }, "Vel": { "2": {...} } }
+#
+# Because Rae has no reflection and no first-class function references, a World
+# can't enumerate its own heterogeneous tables generically. So the reusable piece
+# is the per-table serializer `addComponentTable` (generic over the component
+# type, inferred from the table); an app's `worldToJson` is a few-line
+# composition that calls it once per table then `finishWorldJson` (see the test).
+# lib/json's JsonBuilder (#718) isn't required — the fragments are assembled from
+# `toJson()` + `jsonQuote`, and parse straight back with `parseJson`.
+import core
+open json
+open ecs/entity
+open ecs/component_table
+open ecs/registry
+
+# Accumulates one `"Name": { ... }` fragment per serialized component table, then
+# joins them into a single JSON object.
+type WorldJson {
+  parts: List(String)
+}
+
+func createWorldJson() ret WorldJson {
+  ret WorldJson { parts: createList(String, cap: 16) }
+}
+
+# Serialize ONE component table into the world JSON — but ONLY if `name` is
+# registered with the SERIALIZE flag. A table whose component is a derived cache
+# (registered without SERIALIZE, or not registered) is silently skipped, so it is
+# never written. Generic over the component type T (inferred from the table);
+# each stored component is written through its compiler-generated `toJson()`.
+func addComponentTable(T: type, writer: mod WorldJson, table: view ComponentTable(T),
+                       name: view String, registry: view ComponentRegistry) {
+  if registeredHasFlag(reg: registry, name: name, flag: SERIALIZE) is false {
+    ret
+  }
+  var frag: String = jsonQuote(s: name)
+  frag = frag.concat(other: ": \{")
+  loop var i: Int = 0, i < componentCount(this: table), ++i {
+    if i > 0 {
+      frag = frag.concat(other: ", ")
+    }
+    let entity: EntityId = componentEntityAt(this: table, i: i)
+    let value: T = componentDataAt(this: table, i: i)
+    let key: String = "{entity.index}"
+    frag = frag.concat(other: jsonQuote(s: key))
+    frag = frag.concat(other: ": ")
+    frag = frag.concat(other: value.toJson())
+  }
+  frag = frag.concat(other: "\}")
+  writer.parts.add(value: own frag)
+}
+
+# Close the world object: join every serialized-component fragment into one JSON
+# object. An empty world (nothing serialized) yields "{}".
+func finishWorldJson(writer: view WorldJson) ret String {
+  var out: String = "\{"
+  loop var i: Int = 0, i < writer.parts.length, ++i {
+    if i > 0 {
+      out = out.concat(other: ", ")
+    }
+    if let part: String = writer.parts.copyAt(index: i) {
+      out = out.concat(other: part)
+    }
+  }
+  out = out.concat(other: "\}")
+  ret out
+}
