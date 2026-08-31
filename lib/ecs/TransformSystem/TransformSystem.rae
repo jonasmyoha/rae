@@ -1,0 +1,118 @@
+# lib/ecs/TransformSystem — compose local Transform* into WorldTransform* (#716).
+#
+# ONE system, in 2D and 3D flavours, turns each entity's LOCAL transform
+# (Transform2D/Transform3D, #714) into its COMPOSED world transform
+# (WorldTransform2D/WorldTransform3D, #715) by folding it onto its parent's world
+# transform. It walks the hierarchy DEPTH ORDER (#713) so a parent's world
+# transform is always computed before its children's.
+#
+# Two passes, recomputed every frame (always overwrite — no stale cache):
+#   1. Roots (any entity with a local transform but no Parent) get world = local.
+#   2. Every parented entity, in depth order, gets world = parentWorld o local.
+# A parented entity whose parent has no world transform falls back to world =
+# local. Lone entities (no hierarchy) are handled by pass 1.
+import core
+import math
+open ecs/entity
+open ecs/component_table
+open ecs/hierarchy
+open ecs/transform
+open ecs/HierarchySystem/HierarchySystem
+open vec2
+open math3d
+
+# ----- 3D -------------------------------------------------------------------
+
+# A root's world transform is just its local model matrix.
+func rootWorld3D(local: view Transform3D) ret WorldTransform3D {
+  ret WorldTransform3D { matrix: transform3dToMatrix(t: local) }
+}
+
+# A child's world matrix is parentWorld * localModel (parent outer).
+func composeWorld3D(parentWorld: view WorldTransform3D, local: view Transform3D) ret WorldTransform3D {
+  ret WorldTransform3D { matrix: mat4Mul(a: parentWorld.matrix, b: transform3dToMatrix(t: local)) }
+}
+
+func transformSystem3D(orderState: mod HierarchyOrder,
+                       transforms: view ComponentTable(Transform3D),
+                       worldTransforms: mod ComponentTable(WorldTransform3D),
+                       parents: view ComponentTable(Parent),
+                       childrens: view ComponentTable(Children)) {
+  # Pass 1: every root (local transform, no Parent) -> world = local.
+  loop var i: Int = 0, i < componentCount(this: transforms), ++i {
+    let entity: EntityId = componentEntityAt(this: transforms, i: i)
+    if componentHas(this: parents, entity: entity) is false {
+      let local: Transform3D = componentGet(this: transforms, entity: entity)
+      componentSet(this: worldTransforms, entity: entity, data: rootWorld3D(local: local))
+    }
+  }
+  # Pass 2: every parented entity in depth order -> world = parentWorld o local.
+  let order: view List(EntityId) => depthOrder(state: orderState, parents: parents, childrens: childrens)
+  loop var i: Int = 0, i < order.length, ++i {
+    if let entity: EntityId = order.copyAt(index: i) {
+      if componentHas(this: transforms, entity: entity) and componentHas(this: parents, entity: entity) {
+        let local: Transform3D = componentGet(this: transforms, entity: entity)
+        let link: Parent = componentGet(this: parents, entity: entity)
+        if componentHas(this: worldTransforms, entity: link.parent) {
+          let parentWorld: WorldTransform3D = componentGet(this: worldTransforms, entity: link.parent)
+          componentSet(this: worldTransforms, entity: entity, data: composeWorld3D(parentWorld: parentWorld, local: local))
+        } else {
+          componentSet(this: worldTransforms, entity: entity, data: rootWorld3D(local: local))
+        }
+      }
+    }
+  }
+}
+
+# ----- 2D -------------------------------------------------------------------
+
+func rootWorld2D(local: view Transform2D) ret WorldTransform2D {
+  ret WorldTransform2D { position: local.position, rotation: local.rotation, scale: local.scale }
+}
+
+# Compose a child's local 2D transform onto its parent's world transform:
+#   scale    = parentScale (per-axis) * childScale
+#   rotation = parentRotation + childRotation
+#   position = parentPos + R(parentRotation) * (parentScale * childPos)
+func composeWorld2D(parentWorld: view WorldTransform2D, local: view Transform2D) ret WorldTransform2D {
+  let scaledX: Float = parentWorld.scale.x * local.position.x
+  let scaledY: Float = parentWorld.scale.y * local.position.y
+  let cosR: Float = math.cos(x: parentWorld.rotation)
+  let sinR: Float = math.sin(x: parentWorld.rotation)
+  let worldX: Float = parentWorld.position.x + (cosR * scaledX - sinR * scaledY)
+  let worldY: Float = parentWorld.position.y + (sinR * scaledX + cosR * scaledY)
+  ret WorldTransform2D {
+    position: Vec2 { x: worldX, y: worldY },
+    rotation: parentWorld.rotation + local.rotation,
+    scale: Vec2 { x: parentWorld.scale.x * local.scale.x, y: parentWorld.scale.y * local.scale.y }
+  }
+}
+
+func transformSystem2D(orderState: mod HierarchyOrder,
+                       transforms: view ComponentTable(Transform2D),
+                       worldTransforms: mod ComponentTable(WorldTransform2D),
+                       parents: view ComponentTable(Parent),
+                       childrens: view ComponentTable(Children)) {
+  loop var i: Int = 0, i < componentCount(this: transforms), ++i {
+    let entity: EntityId = componentEntityAt(this: transforms, i: i)
+    if componentHas(this: parents, entity: entity) is false {
+      let local: Transform2D = componentGet(this: transforms, entity: entity)
+      componentSet(this: worldTransforms, entity: entity, data: rootWorld2D(local: local))
+    }
+  }
+  let order: view List(EntityId) => depthOrder(state: orderState, parents: parents, childrens: childrens)
+  loop var i: Int = 0, i < order.length, ++i {
+    if let entity: EntityId = order.copyAt(index: i) {
+      if componentHas(this: transforms, entity: entity) and componentHas(this: parents, entity: entity) {
+        let local: Transform2D = componentGet(this: transforms, entity: entity)
+        let link: Parent = componentGet(this: parents, entity: entity)
+        if componentHas(this: worldTransforms, entity: link.parent) {
+          let parentWorld: WorldTransform2D = componentGet(this: worldTransforms, entity: link.parent)
+          componentSet(this: worldTransforms, entity: entity, data: composeWorld2D(parentWorld: parentWorld, local: local))
+        } else {
+          componentSet(this: worldTransforms, entity: entity, data: rootWorld2D(local: local))
+        }
+      }
+    }
+  }
+}
