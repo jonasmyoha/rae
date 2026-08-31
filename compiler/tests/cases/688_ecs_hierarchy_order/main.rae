@@ -1,0 +1,77 @@
+import core
+open ecs/entity
+open ecs/component_table
+open ecs/hierarchy
+open ecs/HierarchySystem/HierarchySystem
+
+# #713: depthOrder gives a cached parent-before-child (topological) order so
+# systems iterate one flat List instead of chasing the tree. This checks the
+# order is valid (every parent precedes its children) and that it rebuilds when
+# the hierarchy changes (dirty-tracked by the Parent table generation).
+
+func printOrder(order: view List(EntityId), label: view String) {
+  var line: String = ""
+  loop var i: Int = 0, i < order.length, ++i {
+    if let entity: EntityId = order.copyAt(index: i) {
+      if i > 0 {
+        line = "{line} "
+      }
+      line = "{line}{entity.index}"
+    }
+  }
+  log("{label}: {line}")
+}
+
+# True iff every entity with a Parent appears AFTER that parent in the order.
+func parentsBeforeChildren(order: view List(EntityId), parents: view ComponentTable(Parent)) ret Bool {
+  loop var i: Int = 0, i < order.length, ++i {
+    if let child: EntityId = order.copyAt(index: i) {
+      if componentHas(this: parents, entity: child) {
+        let link: Parent = componentGet(this: parents, entity: child)
+        var parentPos: Int = 0 - 1
+        loop var j: Int = 0, j < order.length, ++j {
+          if let other: EntityId = order.copyAt(index: j) {
+            if other is link.parent {
+              parentPos = j
+            }
+          }
+        }
+        if parentPos < 0 {
+          ret false
+        }
+        if parentPos > i {
+          ret false
+        }
+      }
+    }
+  }
+  ret true
+}
+
+func main() {
+  var parents: ComponentTable(Parent) = createComponentTable(Parent)
+  var childrens: ComponentTable(Children) = createComponentTable(Children)
+  var ord: HierarchyOrder = createHierarchyOrder()
+  let r1: EntityId = { index: 100, generation: 0 }
+  let a: EntityId = { index: 1, generation: 0 }
+  let b: EntityId = { index: 2, generation: 0 }
+  let a1: EntityId = { index: 11, generation: 0 }
+  let r2: EntityId = { index: 200, generation: 0 }
+  let c: EntityId = { index: 3, generation: 0 }
+
+  # r1 -> {a -> {a1}, b}, r2 -> {c}
+  setParent(parents: parents, childrens: childrens, child: a, parent: r1)
+  setParent(parents: parents, childrens: childrens, child: b, parent: r1)
+  setParent(parents: parents, childrens: childrens, child: a1, parent: a)
+  setParent(parents: parents, childrens: childrens, child: c, parent: r2)
+
+  let order: view List(EntityId) => depthOrder(state: ord, parents: parents, childrens: childrens)
+  printOrder(order: order, label: "order")
+  log("valid: {parentsBeforeChildren(order: order, parents: parents)}")
+
+  # Reparent a1 from a to r2: the cached order must rebuild and stay valid.
+  setParent(parents: parents, childrens: childrens, child: a1, parent: r2)
+  let order2: view List(EntityId) => depthOrder(state: ord, parents: parents, childrens: childrens)
+  printOrder(order: order2, label: "order after reparent")
+  log("valid after reparent: {parentsBeforeChildren(order: order2, parents: parents)}")
+}
