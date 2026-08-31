@@ -1,0 +1,98 @@
+# lib/ecs/HierarchySystem — the parent/child relationship as a system (#711).
+#
+# `Parent` (lib/ecs/hierarchy.rae) is AUTHORITATIVE; `Children` is a DERIVED
+# CACHE. Callers — game or UI — set ONLY the parent link, always through
+# `setParent`; they never touch a `Children` list by hand. setParent keeps the
+# reverse `Children` index consistent on every add / reparent / detach, and
+# `rebuildFromParent` reconstructs every `Children` list from the `Parent` table
+# alone (e.g. after a bulk load that wrote Parents directly, or to self-heal).
+#
+# The two component tables are passed in rather than owned, so any World that has
+# a ComponentTable(Parent) + ComponentTable(Children) (UiWorld today, a GameWorld
+# tomorrow) drives the same system.
+import core
+open ecs/entity
+open ecs/component_table
+open ecs/hierarchy
+
+# Append `child` to `parent`'s Children cache, creating the Children list if this
+# is the parent's first child. Internal — the Children cache is only ever grown
+# through here, never by callers.
+func addChildTo(childrens: mod ComponentTable(Children), parent: view EntityId, child: view EntityId) {
+  if componentHas(this: childrens, entity: parent) is false {
+    componentSet(this: childrens, entity: parent, data: Children { ids: createList(EntityId, cap: 4) })
+  }
+  let cache: mod Children => componentMod(this: childrens, entity: parent)
+  cache.ids.add(value: child)
+}
+
+# Remove `child` from `parent`'s Children cache (ordered remove, so surviving
+# siblings keep their relative order). No-op if the parent has no cache or the
+# child isn't in it. Internal.
+func removeChildFrom(childrens: mod ComponentTable(Children), parent: view EntityId, child: view EntityId) {
+  if componentHas(this: childrens, entity: parent) is false {
+    ret
+  }
+  let cache: mod Children => componentMod(this: childrens, entity: parent)
+  loop var i: Int = 0, i < cache.ids.length, ++i {
+    if let existing: EntityId = cache.ids.copyAt(index: i) {
+      if existing is child {
+        cache.ids.remove(index: i)
+        ret
+      }
+    }
+  }
+}
+
+# Set (or clear) `child`'s parent. This is the ONLY way callers change the
+# hierarchy: it writes the authoritative `Parent` and keeps the `Children` cache
+# in lock-step. Passing `noEntity()` as `parent` DETACHES the child (drops its
+# Parent and unlinks it from its old parent). Re-parenting first unlinks from the
+# old parent, so `Children` never double-lists a child.
+func setParent(parents: mod ComponentTable(Parent), childrens: mod ComponentTable(Children),
+               child: view EntityId, parent: view EntityId) {
+  # Unlink from the current parent first, so add/reparent/detach all converge here.
+  if componentHas(this: parents, entity: child) {
+    let current: Parent = componentGet(this: parents, entity: child)
+    removeChildFrom(childrens: childrens, parent: current.parent, child: child)
+  }
+  if isNone(this: parent) {
+    # Detach: drop the authoritative link; the cache was already cleaned above.
+    componentRemove(this: parents, entity: child)
+    ret
+  }
+  componentSet(this: parents, entity: child, data: Parent { parent: parent })
+  addChildTo(childrens: childrens, parent: parent, child: child)
+}
+
+# The children of `parent`, in order — a COPY, so a caller can iterate freely
+# without being able to corrupt the derived cache. Empty when `parent` has none.
+func getChildren(childrens: view ComponentTable(Children), parent: view EntityId) ret List(EntityId) {
+  let out: List(EntityId) = createList(EntityId, cap: 4)
+  if componentHas(this: childrens, entity: parent) {
+    let cache: view Children => componentView(this: childrens, entity: parent)
+    loop var i: Int = 0, i < cache.ids.length, ++i {
+      if let existing: EntityId = cache.ids.copyAt(index: i) {
+        out.add(value: existing)
+      }
+    }
+  }
+  ret out
+}
+
+# Rebuild EVERY Children list from the Parent table alone. Clears the existing
+# caches, then re-links each parented entity under its parent. Use after writing
+# Parents in bulk (deserialisation) or to self-heal a cache. Preserves the
+# Parent-table's dense order as the child order.
+func rebuildFromParent(parents: view ComponentTable(Parent), childrens: mod ComponentTable(Children)) {
+  loop var i: Int = 0, i < componentCount(this: childrens), ++i {
+    let owner: EntityId = componentEntityAt(this: childrens, i: i)
+    let cache: mod Children => componentMod(this: childrens, entity: owner)
+    cache.ids.clear()
+  }
+  loop var i: Int = 0, i < componentCount(this: parents), ++i {
+    let child: EntityId = componentEntityAt(this: parents, i: i)
+    let link: Parent = componentDataAt(this: parents, i: i)
+    addChildTo(childrens: childrens, parent: link.parent, child: child)
+  }
+}
