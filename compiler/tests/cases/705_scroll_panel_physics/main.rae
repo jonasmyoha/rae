@@ -1,0 +1,109 @@
+import core
+open ui/ecs
+open ui/components
+open ui/scroll_panel
+open ui/InputSystem/InputSystem
+open ui/transform
+open ecs/entity
+open ecs/component_table
+
+# #729: ScrollPanel state is now an ECS component (ScrollPanelState) keyed by the
+# viewport entity, with iOS-style scroll physics (drag -> release momentum ->
+# friction decay; rubber-band + spring-back past a bound). This drives
+# updateScrollPanel deterministically and checks the feel: a drag moves the
+# offset 1:1 in-bounds, releasing hands the lift velocity to a momentum fling that
+# keeps moving and decays to rest, and a fling that overshoots the bottom springs
+# back to the bound.
+
+func setupNode(world: mod UiWorld, nodeId: view String, w: view Float, h: view Float) ret EntityId {
+  let e: EntityId = createEntity(world: world)
+  componentSet(this: world.computedRects, entity: e,
+               data: ComputedRect { position: { x: 0.0, y: 0.0 }, size: { x: w, y: h } })
+  world.nodeIds.set(k: nodeId, value: e.index)
+  ret e
+}
+
+func step(world: mod UiWorld, panel: view EntityId, input: mod UiInput,
+          x: view Float, y: view Float, down: view Bool, pressed: view Bool, released: view Bool) ret Bool {
+  input.pointer = UiPointerState { x: x, y: y, down: down, pressed: pressed, released: released }
+  ret updateScrollPanel(world: world, viewport: panel, input: input)
+}
+
+func offsetOf(world: view UiWorld, panel: view EntityId) ret Float {
+  ret componentGet(this: world.scrollPanels, entity: panel).offset
+}
+
+# Round a Float to the nearest Int so momentum trace lines are stable/readable.
+func roundI(v: view Float) ret Int {
+  if v < 0.0 {
+    ret (v - 0.5).toInt()
+  }
+  ret (v + 0.5).toInt()
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  # Viewport 100 tall at screen origin; content 3000 tall -> range 2900 (plenty of
+  # room so momentum settles well inside the bounds).
+  let vp: EntityId = setupNode(world: world, nodeId: "vp", w: 100.0, h: 100.0)
+  componentSet(this: world.worldTransforms, entity: vp,
+               data: WorldTransform2D { position: Vec2 { x: 0.0, y: 0.0 }, rotation: 0.0, scale: Vec2 { x: 1.0, y: 1.0 } })
+  let content: EntityId = setupNode(world: world, nodeId: "content", w: 100.0, h: 3000.0)
+
+  let panel: EntityId = createScrollPanel(world: world, viewportId: "vp", contentId: "content")
+  log("panel is viewport: {panel.index is vp.index}")
+
+  var input: UiInput = createUiInput()
+
+  # Press inside, then drag the finger UP by 20 twice (content scrolls up, so the
+  # offset grows 1:1 while in bounds).
+  step(world: world, panel: panel, input: input, x: 50.0, y: 50.0, down: true, pressed: true, released: false)
+  log("press   offset={roundI(v: offsetOf(world: world, panel: panel))}")
+  step(world: world, panel: panel, input: input, x: 50.0, y: 30.0, down: true, pressed: false, released: false)
+  log("drag1   offset={roundI(v: offsetOf(world: world, panel: panel))}")
+  step(world: world, panel: panel, input: input, x: 50.0, y: 10.0, down: true, pressed: false, released: false)
+  log("drag2   offset={roundI(v: offsetOf(world: world, panel: panel))}")
+
+  # Release: the lift velocity (~20/frame) becomes a momentum fling.
+  step(world: world, panel: panel, input: input, x: 50.0, y: 10.0, down: false, pressed: false, released: true)
+  log("release offset={roundI(v: offsetOf(world: world, panel: panel))}")
+
+  # Momentum: keep stepping with no input. The offset keeps moving and the steps
+  # shrink (friction), then it settles. Loop to rest, counting frames.
+  var frames: Int = 0
+  var moving: Bool = true
+  loop moving {
+    moving = step(world: world, panel: panel, input: input, x: 50.0, y: 10.0, down: false, pressed: false, released: false)
+    frames = frames + 1
+    if frames > 500 {
+      moving = false
+    }
+  }
+  let settled: Float = offsetOf(world: world, panel: panel)
+  log("momentum settled offset={roundI(v: settled)} inBounds={settled >= 0.0 and settled <= 2900.0}")
+
+  # ----- rubber-band + spring-back past the BOTTOM bound -----
+  # Press INSIDE the 100-tall viewport, then drag the finger up 800/frame for
+  # several frames. As the offset creeps past the bottom bound (2900) each further
+  # delta is rubber-band-damped, so it overshoots only a little; releasing lets the
+  # spring pull it back to exactly the bound.
+  step(world: world, panel: panel, input: input, x: 50.0, y: 50.0, down: true, pressed: true, released: false)
+  var y: Float = 50.0
+  loop var k: Int = 0, k < 6, ++k {
+    y = y - 800.0
+    step(world: world, panel: panel, input: input, x: 50.0, y: y, down: true, pressed: false, released: false)
+  }
+  let overshoot: Float = offsetOf(world: world, panel: panel)
+  log("overshoot past bottom > range: {overshoot > 2900.0}")
+  step(world: world, panel: panel, input: input, x: 50.0, y: y, down: false, pressed: false, released: true)
+  var f2: Int = 0
+  var m2: Bool = true
+  loop m2 {
+    m2 = step(world: world, panel: panel, input: input, x: 50.0, y: y, down: false, pressed: false, released: false)
+    f2 = f2 + 1
+    if f2 > 500 {
+      m2 = false
+    }
+  }
+  log("spring settled at bound: {roundI(v: offsetOf(world: world, panel: panel))}")
+}

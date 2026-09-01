@@ -93,7 +93,7 @@ type UiTick {
 func uiUpdate(app: mod App, dt: copy Float, now: copy Float64) ret UiTick {
   updateUiInput(input: app.io.ui, world: app.io.world)
   if walkerMenuTapped() { toggleWalkerPanel(settings: app.io.settings, world: app.io.world) suppressUiPress(input: app.io.ui) }
-  let scrolled: Bool = updateScrollPanel(s: app.io.panelScroll, world: app.io.world, input: app.io.ui)
+  let scrolled: Bool = updateScrollPanel(world: app.io.world, viewport: app.io.panelScroll, input: app.io.ui)
   if updateDebugOverlay(d: app.io.dbg, screenW: windowExtentW(), screenH: windowExtentH(),
                         now: now, didRealWork: app.frame.dbgDidWork) {
     suppressUiPress(input: app.io.ui)
