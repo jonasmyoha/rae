@@ -1,0 +1,22 @@
+import core
+import string
+
+# #763 no-globals WARNING phase. `const` and POD-literal / string-literal `let`
+# are FINE (no warning). A module-level `var` (mutable global) and a `let` that
+# ALLOCATES heap each get one warning pointing at the App-ownership doc.
+
+const okConst: Int = 5                          # fine
+let okPodLet: Float = 3.14                       # fine (POD literal)
+let okStrLiteral: String = "static"              # fine (string literal = constant)
+
+var warnVarInt: Int = 0                           # WARN: mutable global
+var warnVarList: List(Int) = createList(Int, cap: 2)   # WARN: mutable global
+let warnHeapStr: String = "a".concat(other: "b")       # WARN: let allocates heap
+let warnHeapList: List(Int) = createList(Int, cap: 2)  # WARN: let owns heap
+
+func main() {
+  warnVarInt = warnVarInt + okConst
+  warnVarList.add(value: 1)
+  log("ok: {okConst} {okPodLet} {okStrLiteral}")
+  log("warn: {warnVarInt} {warnVarList.length} {warnHeapStr} {warnHeapList.length}")
+}
