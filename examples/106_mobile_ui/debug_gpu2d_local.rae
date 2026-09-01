@@ -15,6 +15,7 @@ import ui/ecs
 import ui/layer
 import ui/theme
 open ecs/component_table
+open ecs/HierarchySystem/HierarchySystem
 
 let debugActionToggleMenu: String = "debug.toggleMenu"
 let debugActionToggleTheme: String = "debug.toggleTheme"
@@ -426,17 +427,13 @@ func dbgSetPaddingAll(world: mod UiWorld, entity: view EntityId, n: view Float) 
 }
 
 func attachKids(world: mod UiWorld, parent: view EntityId, kids: view List(EntityId)) {
-  let kidsCopy: List(EntityId) = createList(EntityId, cap: kids.length)
+  # #726: set only Parent; HierarchySystem.setParent maintains Children.
   var i: Int = 0
   loop i < kids.length {
     let k: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
-    kidsCopy.add(value: k)
-    let pl: Parent = { parent: parent }
-    componentSet(this: world.parents, entity: k, data: pl)
+    setParent(parents: world.parents, childrens: world.childrens, child: k, parent: parent)
     i = i + 1
   }
-  let ch: Children = { ids: own kidsCopy }
-  componentSet(this: world.childrens, entity: parent, data: own ch)
 }
 
 func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret EntityId {
