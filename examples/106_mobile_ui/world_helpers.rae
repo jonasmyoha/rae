@@ -8,6 +8,7 @@ import core
 import ui/components
 import ui/ecs
 open ecs/component_table
+open ecs/HierarchySystem/HierarchySystem
 
 # Default Size — both axes Fixed. Most rows use Fixed sizes.
 func makeFixed() pub ret Size {
@@ -309,21 +310,12 @@ func setPaddingAll(world: mod UiWorld, entity: view EntityId, n: view Float) pub
 }
 
 func attachChildren(world: mod UiWorld, parent: view EntityId, kids: view List(EntityId)) pub {
-  let kidsCopy: List(EntityId) = createList(EntityId, cap: kids.length)
+  # #726: set only the authoritative Parent link; HierarchySystem.setParent keeps
+  # the derived Children cache in lock-step, appending in call (= input) order.
   var i: Int = 0
   loop i < kids.length {
     let kid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
-    kidsCopy.add(value: kid)
-    let pl: Parent = { parent: parent }
-    componentSet(this: world.parents, entity: kid, data: pl)
+    setParent(parents: world.parents, childrens: world.childrens, child: kid, parent: parent)
     i = i + 1
   }
-  # `own kidsCopy` transfers ownership of the freshly-built list into
-  # the new Children struct. Without this, Stage 3 auto-drop at
-  # scope exit would free the buffer that the world is now holding
-  # through `Children.ids`. Same on `own ch` to componentSet, which
-  # stores the struct into the world's component table.
-  # See `docs/ownership-model.md`.
-  let ch: Children = { ids: own kidsCopy }
-  componentSet(this: world.childrens, entity: parent, data: own ch)
 }

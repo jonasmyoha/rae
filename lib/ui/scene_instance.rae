@@ -28,6 +28,7 @@
 import core
 import json
 open ecs/entity
+open ecs/HierarchySystem/HierarchySystem
 
 # -----------------------------------------------------------------
 # Types
@@ -363,26 +364,19 @@ func mountSceneInstanceIntoPage(
     let node: view SceneNode => sceneNodeAt(this: scene, idx: p)
     let parentEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
     let kn: Int = node.childrenIds.length
-    if kn > 0 {
-      let kids: List(EntityId) = createList(EntityId, cap: kn)
-      var q: Int = 0
-      loop q < kn {
-        if let childId: String = node.childrenIds.copyAt(index: q) {
-          let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
-          if childIdx >= 0 {
-            let childEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: childIdx)
-            appendEntityListSI(lst: kids, value: childEntity)
-            let pl: Parent = { parent: parentEntity }
-            componentSet(this: world.parents, entity: childEntity, data: pl)
-          }
+    var q: Int = 0
+    loop q < kn {
+      if let childId: String = node.childrenIds.copyAt(index: q) {
+        let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
+        if childIdx >= 0 {
+          let childEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: childIdx)
+          # #726: set only Parent; HierarchySystem.setParent keeps the derived
+          # Children cache in lock-step (authored order via call order).
+          setParent(parents: world.parents, childrens: world.childrens,
+                    child: childEntity, parent: parentEntity)
         }
-        q = q + 1
       }
-      # Ownership transfer: the freshly-built `kids` list is wrapped
-      # in a Children struct and handed to the world's component
-      # table. Both transitions are `own` — see docs/ownership-model.md.
-      let ch: Children = { ids: own kids }
-      componentSet(this: world.childrens, entity: parentEntity, data: own ch)
+      q = q + 1
     }
     p = p + 1
   }
