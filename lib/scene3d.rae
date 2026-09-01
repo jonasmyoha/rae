@@ -27,6 +27,9 @@
 # aliasing bug.
 import core
 open vec3
+open ecs/entity
+open ecs/world
+open ecs/component_table
 
 # ----- typed resource handles ----------------------------------------
 # Raw `Int` handles let a material id be passed where a mesh id belongs
@@ -69,6 +72,17 @@ type Transform3d {
   position: Vec3
   rotation: Vec3
   scale: Vec3
+}
+
+# The previous frame's Transform3d, as a DISTINCT component so an entity's
+# current and previous transforms live in separate ComponentTables (#732).
+# Motion vectors (TAA #335) need where each entity WAS; the old Scene3d kept
+# this as a parallel `prevTransforms` List indexed by `entity: Int` — World3d
+# keeps it as `ComponentTable(PrevTransform3d)` keyed by EntityId instead.
+# A wrapper (not a bare `Transform3d`) because a table is keyed by its element
+# TYPE: current and previous must be different types to be different tables.
+type PrevTransform3d {
+  value: Transform3d
 }
 
 type Material3d {
@@ -321,4 +335,94 @@ func defaultLight3d() pub ret Light3d {
     exposure: 1.0,
     clearColor: vec3.create(x: 0.02, y: 0.02, z: 0.03)
   }
+}
+
+# ===== World3d — the ECS 3D world (#732) =============================
+# The 3D counterpart to lib/ui's UiWorld: the reusable entity core
+# (EntityAllocator, lib/ecs/world.rae) plus one ComponentTable per 3D
+# component, keyed by EntityId. This is the ECS replacement for the
+# parallel-List `Scene3d` storage above, where `entity` was a bare index
+# shared across every List. #733 migrates 112's storage onto it (entities
+# via world3dAddEntity, no index-parallel Lists) and #736 points the
+# renderer at its queries.
+#
+# Named `World3d`, NOT `GameWorld` (a 3D example scene is Blender-like
+# content, not a game) and NOT the user's first choice `Scene` (that name is
+# already taken by lib/ui/scene.rae's 2D UI scene-graph root — a second bare
+# `Scene` would be a confusing cross-domain clash). `World3d` mirrors the
+# established `UiWorld` (2D) convention, so `UiWorld` / `World3d` read as the
+# two-per-domain ECS worlds. See queue #733 for the naming rationale.
+#
+# The component types are the existing Euler `Transform3d` / `Material3d` /
+# `MeshRenderer` / `SdfPrimitive` — NOT lib/ecs's quaternion `Transform3D`
+# (#714), which is a distinct type — so rotation behaviour is unchanged.
+type World3d {
+  allocator: EntityAllocator
+  transforms: ComponentTable(Transform3d)
+  prevTransforms: ComponentTable(PrevTransform3d)
+  materials: ComponentTable(Material3d)
+  meshRenderers: ComponentTable(MeshRenderer)
+  sdfs: ComponentTable(SdfPrimitive)
+}
+
+func createWorld3d() ret World3d {
+  ret World3d {
+    allocator: createEntityAllocator()
+    transforms: createComponentTable(Transform3d)
+    prevTransforms: createComponentTable(PrevTransform3d)
+    materials: createComponentTable(Material3d)
+    meshRenderers: createComponentTable(MeshRenderer)
+    sdfs: createComponentTable(SdfPrimitive)
+  }
+}
+
+# Allocate a fresh world entity — the ECS analogue of the old `add*` calls
+# that pushed onto the parallel Lists and returned an index.
+func world3dAddEntity(world: mod World3d) ret EntityId {
+  ret allocEntity(this: world.allocator)
+}
+
+# Component setters — thin wrappers so call sites read as intent rather
+# than ComponentTable plumbing (mirrors lib/ui's world_helpers). Setting a
+# Transform3d seeds the PrevTransform3d to match, so the first frame's
+# motion vectors are zero rather than a jump from an unset previous.
+func world3dSetTransform(world: mod World3d, entity: view EntityId, transform: view Transform3d) {
+  componentSet(this: world.transforms, entity: entity, data: transform)
+  let prev: PrevTransform3d = { value: transform }
+  componentSet(this: world.prevTransforms, entity: entity, data: prev)
+}
+
+func world3dSetMaterial(world: mod World3d, entity: view EntityId, material: view Material3d) {
+  componentSet(this: world.materials, entity: entity, data: material)
+}
+
+func world3dSetMeshRenderer(world: mod World3d, entity: view EntityId, renderer: view MeshRenderer) {
+  componentSet(this: world.meshRenderers, entity: entity, data: renderer)
+}
+
+func world3dSetSdf(world: mod World3d, entity: view EntityId, sdf: view SdfPrimitive) {
+  componentSet(this: world.sdfs, entity: entity, data: sdf)
+}
+
+# Live entity count — the ECS analogue of `scene.transforms.length`.
+func world3dEntityCount(world: view World3d) ret Int {
+  ret allocatorAliveCount(this: world.allocator)
+}
+
+# Transitional bridge (#732): build a populated World3d from the legacy
+# parallel-List Scene3d — one entity per transform index, which is exactly the
+# identity the old `entity: Int` denoted. #733 deletes Scene3d entirely (the
+# loader will construct a World3d directly, and geometry/material components
+# will be attached to these same entities) and this bridge with it. For now it
+# lets a caller stand up a real, populated World3d alongside its existing
+# storage without touching the renderer.
+func buildWorld3dFromScene3d(old: view Scene3d) ret World3d {
+  var world: World3d = createWorld3d()
+  loop var i: Int = 0, i < old.transforms.length, ++i {
+    let entity: EntityId = world3dAddEntity(world: world)
+    if let transform: Transform3d = old.transforms.copyAt(index: i) {
+      world3dSetTransform(world: world, entity: entity, transform: transform)
+    }
+  }
+  ret world
 }
