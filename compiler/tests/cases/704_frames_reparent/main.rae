@@ -1,0 +1,102 @@
+import json
+import string
+import core
+import ui/components
+open ui/ecs
+import ui/registry
+open ui/scene
+open ui/scene_loader
+open ui/frames
+open ecs/HierarchySystem/HierarchySystem
+open ecs/entity
+
+# #726: the UI hierarchy is the general lib/ecs Parent/Children maintained by
+# HierarchySystem — the UI sets only Parent (via setParent), never a Children
+# list by hand. This exercises the hardest path: frames.rae deriveActiveHierarchy,
+# which REPARENTS a node for a responsive frame. The authored tree puts `Mover`
+# under `SlotA`; the `Desktop` frame reparents it to `SlotB`. Applying frames
+# back and forth must move it cleanly each time — the detach-then-relink rebuild
+# must never leave `Mover` lingering in its old parent's derived Children list.
+
+func buildScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{")
+  s = s.concat(other: "\"type\":\"Scene\",\"version\":2,\"sceneId\":\"reparent-test\",\"root\":\"Root\",")
+  s = s.concat(other: "\"nodes\":\{")
+  s = s.concat(other: "\"Root\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":600,\"h\":1300\},\"Layout\":\{\"type\":\"Vertical\"\},\"Children\":[\"SlotA\",\"SlotB\"]\},")
+  s = s.concat(other: "\"SlotA\":\{\"Layout\":\{\"type\":\"Vertical\"\},\"Children\":[\"Mover\"]\},")
+  s = s.concat(other: "\"SlotB\":\{\"Layout\":\{\"type\":\"Vertical\"\},\"Children\":[]\},")
+  s = s.concat(other: "\"Mover\":\{\"Shape\":\{\"kind\":\"RoundedRect\",\"radius\":8,\"fill\":\{\"r\":0,\"g\":0,\"b\":0,\"a\":255\}\}\}")
+  s = s.concat(other: "\},")
+  s = s.concat(other: "\"frames\":\{")
+  s = s.concat(other: "\"Phone\":\{\"default\":true,\"nodes\":\{\}\},")
+  s = s.concat(other: "\"Desktop\":\{\"when\":\{\"minPtW\":700\},\"nodes\":\{\"Mover\":\{\"Parent\":\"SlotB\"\}\}\}")
+  s = s.concat(other: "\}")
+  s = s.concat(other: "\}")
+  ret s
+}
+
+func nodeEnt(world: view UiWorld, pageId: view String, name: view String) ret EntityId {
+  if let raw: Int = findNodeInPage(world: world, pageId: pageId, nodeId: name) {
+    ret entityId(v: raw)
+  }
+  ret noEntity()
+}
+
+# Read the derived Children cache directly (a view, no allocating copy) so the
+# test stays leak-clean.
+func kidsCount(world: view UiWorld, pageId: view String, parentName: view String) ret Int {
+  let parent: EntityId = nodeEnt(world: world, pageId: pageId, name: parentName)
+  if componentHas(this: world.childrens, entity: parent) is false {
+    ret 0
+  }
+  let ch: view Children => componentView(this: world.childrens, entity: parent)
+  ret ch.ids.length
+}
+
+func moverUnder(world: view UiWorld, pageId: view String, parentName: view String) ret Bool {
+  let parent: EntityId = nodeEnt(world: world, pageId: pageId, name: parentName)
+  let mover: EntityId = nodeEnt(world: world, pageId: pageId, name: "Mover")
+  if componentHas(this: world.childrens, entity: parent) is false {
+    ret false
+  }
+  let ch: view Children => componentView(this: world.childrens, entity: parent)
+  loop var i: Int = 0, i < ch.ids.length, ++i {
+    let k: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+    if k is mover {
+      ret true
+    }
+  }
+  ret false
+}
+
+func dump(world: view UiWorld, pageId: view String, label: view String) {
+  let sa: Int = kidsCount(world: world, pageId: pageId, parentName: "SlotA")
+  let sb: Int = kidsCount(world: world, pageId: pageId, parentName: "SlotB")
+  let moverA: Bool = moverUnder(world: world, pageId: pageId, parentName: "SlotA")
+  let moverB: Bool = moverUnder(world: world, pageId: pageId, parentName: "SlotB")
+  log("{label}: SlotA={sa} SlotB={sb} moverA={moverA} moverB={moverB}")
+}
+
+func main() {
+  let scene: Scene = parseScene(source: buildScene())
+  var world: UiWorld = createUiWorld()
+  let pageId: String = "p"
+  let root: EntityId = loadSceneIntoPage(world: world, scene: scene, pageId: pageId)
+  log("root: {root.index}")
+
+  # Authored tree (before any frame is applied): Mover under SlotA.
+  dump(world: world, pageId: pageId, label: "load")
+
+  # Phone (default, no reparent) — Mover stays under SlotA.
+  let phoneIdx: Int = applySceneFramesToPage(world: world, scene: scene, pageId: pageId, windowPtW: 400.0, forcedFrameId: "")
+  dump(world: world, pageId: pageId, label: "phone")
+
+  # Desktop (minPtW 700) reparents Mover -> SlotB.
+  let deskIdx: Int = applySceneFramesToPage(world: world, scene: scene, pageId: pageId, windowPtW: 800.0, forcedFrameId: "")
+  dump(world: world, pageId: pageId, label: "desktop")
+
+  # Back to Phone — Mover must return to SlotA and NOT linger under SlotB.
+  let phone2Idx: Int = applySceneFramesToPage(world: world, scene: scene, pageId: pageId, windowPtW: 400.0, forcedFrameId: "")
+  dump(world: world, pageId: pageId, label: "phone2")
+}
