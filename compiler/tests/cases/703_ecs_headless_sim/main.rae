@@ -29,7 +29,7 @@ type Health { hp: Int }
 type Enemy {}                       # zero-field tag / marker component (#752)
 
 type DamageEvent { target: EntityId, amount: Int }
-type Clock { frame: Int }           # a RESOURCE (world-global singleton)
+type Clock { frame: Int }           # a resource (world-global singleton)
 
 # The World: the reusable entity core + one ComponentTable per component, plus
 # two resources held as plain fields (an EventQueue and the Clock) and one
@@ -217,14 +217,14 @@ func worldFromJson(world: mod GameWorld, registry: view ComponentRegistry, doc: 
 
 func main() {
   # Registry: which names persist. Position/Velocity/Health serialize; the Enemy
-  # tag is runtime-only (registered without SERIALIZE); Clock is a serialized
+  # tag is runtime-only (registered without serialize); Clock is a serialized
   # resource.
   var reg: ComponentRegistry = createComponentRegistry()
-  registerComponent(reg: reg, name: "Position", flags: SERIALIZE)
-  registerComponent(reg: reg, name: "Velocity", flags: SERIALIZE)
-  registerComponent(reg: reg, name: "Health", flags: SERIALIZE)
+  registerComponent(reg: reg, name: "Position", flags: serialize)
+  registerComponent(reg: reg, name: "Velocity", flags: serialize)
+  registerComponent(reg: reg, name: "Health", flags: serialize)
   registerComponent(reg: reg, name: "Enemy", flags: 0)
-  registerResource(reg: reg, name: "Clock", flags: SERIALIZE)
+  registerResource(reg: reg, name: "Clock", flags: serialize)
 
   # Spawn a hero (index 1) and two enemies (index 2, 3) through the allocator.
   var world: GameWorld = createGameWorld()

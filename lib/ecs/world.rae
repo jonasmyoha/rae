@@ -12,7 +12,7 @@
 # the recycled slot compares unequal (its generation is stale).
 #
 # RESOURCES (#753). A World holds two KINDS of state. COMPONENTS are per-entity —
-# a ComponentTable(T) field, one row per entity. A RESOURCE is a world-global
+# a ComponentTable(T) field, one row per entity. A resource is a world-global
 # SINGLETON — there is exactly one, so it is just a PLAIN FIELD on the World
 # struct, read as `world.frame` / `world.input` / `world.layoutW`. A resource is
 # NOT an entity and must never be modelled as one (no camera/input/clock faked as
@@ -23,9 +23,9 @@
 # #717), just at different granularity: a component table serializes to an
 # entity->value map, a resource to a single top-level value (serialize.rae
 # addResource / resourceJson, #720/#753). An AUTHORED resource that belongs in a
-# save file is registered `registerResource(reg, name, SERIALIZE)`; a RUNTIME
+# save file is registered `registerResource(reg, name, serialize)`; a RUNTIME
 # resource (frame timing, input snapshot, GPU handles) is registered
-# `registerResource(reg, name, 0)` — RESOURCE without SERIALIZE — so save/load
+# `registerResource(reg, name, 0)` — resource without serialize — so save/load
 # skips it and it is rebuilt at runtime. Full write-up: docs/ecs-resources.md.
 import core
 open ecs/entity

@@ -5,14 +5,14 @@ open ecs/component_table
 open ecs/registry
 open ecs/serialize
 
-# #719: worldToJson writes entities x registered-SERIALIZE components via each
-# component's compiler-generated toJson(). Derived/cache components (no SERIALIZE
+# #719: worldToJson writes entities x registered-serialize components via each
+# component's compiler-generated toJson(). Derived/cache components (no serialize
 # flag) must be omitted. This round-trips the output through parseJson and asserts
 # the cache component is absent.
 
 type Pos { x: Int, y: Int }
 type Vel { dx: Int, dy: Int }
-type WorldCache { w: Int }   # derived cache — registered WITHOUT SERIALIZE
+type WorldCache { w: Int }   # derived cache — registered WITHOUT serialize
 
 type MiniWorld {
   positions: ComponentTable(Pos)
@@ -36,8 +36,8 @@ func main() {
   let kCache: String = "WorldCache"
 
   var reg: ComponentRegistry = createComponentRegistry()
-  registerComponent(reg: reg, name: kPos, flags: SERIALIZE)
-  registerComponent(reg: reg, name: kVel, flags: SERIALIZE)
+  registerComponent(reg: reg, name: kPos, flags: serialize)
+  registerComponent(reg: reg, name: kVel, flags: serialize)
   registerComponent(reg: reg, name: kCache, flags: 0)   # derived cache: not serialized
 
   var world: MiniWorld = {
