@@ -31,6 +31,7 @@ import sdf_text
 import scene3d
 import scene3d_file
 import scene_animation
+import render_system
 import sdl3
 import vec3
 open gpu3d
@@ -346,6 +347,9 @@ func main() ret Int {
   # `if sdf.cluster is N` ladder. Clusters never change, so build once here.
   let clusters1: ClusterTags = buildClusterTags(world: world1)
   let clusters2: ClusterTags = buildClusterTags(world: world2)
+  # #736: the RenderSystem's SDF pass queries per-cluster tags, so every scene
+  # that draws metaballs needs them (scene 3 is one cluster of 40 spheres).
+  let clusters3: ClusterTags = buildClusterTags(world: world3)
 
   # Fonts + theme through the shared loader, which also bridges the
   # theme's PALETTE into the active theme — the step that was missing
@@ -747,14 +751,11 @@ func main() ret Int {
 
 
       let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
-      # #733 bridge: derive the flat Scene3d the shared renderer consumes from the
-      # active world, once per frame (transforms already animated, prevTransforms
-      # still hold last frame's — PrevTransformSystem below advances them). #736
-      # removes this by having the renderer read World3d queries directly.
-      var renderScene: Scene3d = createScene3d()
-      if uiState.activeScene is 1 { renderScene = world3dToScene3d(world: world1) }
-      if uiState.activeScene is 2 { renderScene = world3dToScene3d(world: world2) }
-      if uiState.activeScene is 3 { renderScene = world3dToScene3d(world: world3) }
+      # #736: rendering reads the active World3d directly through the
+      # RenderSystem's ECS queries (mesh + per-cluster sdf) — no Scene3d is
+      # derived. renderDeferredPass still takes a Scene3d arg it ignores (ssao/
+      # lighting/taa/composite read no scene), so hand it an empty one.
+      let emptyScene: Scene3d = createScene3d()
       # Frame order is DERIVED by the render graph (#331/#332): scene3d
       # writes the colour target, the UI overlay MODIFIES it (load-preserving),
       # present reads it. The passes are declared backwards in
@@ -779,8 +780,18 @@ func main() ret Int {
           # frame with no shadow pass should look like — so the toggle is simply
           # not doing the work, with no renderer flag to thread through.
           if settings.shadows {
-            renderSceneShadow(scene: renderScene)
-            renderSceneShadowSdf(scene: renderScene)
+            if uiState.activeScene is 1 {
+              renderMeshShadow(world: world1)
+              renderSdfShadow(world: world1, tags: clusters1)
+            }
+            if uiState.activeScene is 2 {
+              renderMeshShadow(world: world2)
+              renderSdfShadow(world: world2, tags: clusters2)
+            }
+            if uiState.activeScene is 3 {
+              renderMeshShadow(world: world3)
+              renderSdfShadow(world: world3, tags: clusters3)
+            }
           }
           endShadowPass()
           if shadowLogged is false {
@@ -795,13 +806,23 @@ func main() ret Int {
           # forward path's — which leaves the G-buffer unsubmitted and
           # renders a black frame with a working UI (found in 113).
           gbuffer.beginPass(camera: camera, light: light, aspect: aspect)
-          gbuffer.renderScene(scene: renderScene)
-          renderSceneSdf(scene: renderScene, camera: camera)
+          if uiState.activeScene is 1 {
+            renderMeshGbuffer(world: world1)
+            renderSdfGbuffer(world: world1, tags: clusters1, camera: camera)
+          }
+          if uiState.activeScene is 2 {
+            renderMeshGbuffer(world: world2)
+            renderSdfGbuffer(world: world2, tags: clusters2, camera: camera)
+          }
+          if uiState.activeScene is 3 {
+            renderMeshGbuffer(world: world3)
+            renderSdfGbuffer(world: world3, tags: clusters3, camera: camera)
+          }
           gbuffer.endPass()
         }
         if tag is RenderTag.ssao or tag is RenderTag.depthPyramid or tag is RenderTag.lighting
           or tag is RenderTag.taa or tag is RenderTag.composite {
-          renderDeferredPass(r: renderer, tag: tag, scene: renderScene,
+          renderDeferredPass(r: renderer, tag: tag, scene: emptyScene,
                              camera: camera, light: light, aspect: aspect)
         }
         if tag is RenderTag.uiOverlay {
