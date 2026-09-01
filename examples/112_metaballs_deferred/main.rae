@@ -28,6 +28,7 @@ import core
 import gpu2d
 import math
 import sdf_text
+import scene3d
 import scene3d_file
 import scene_animation
 import sdl3
@@ -327,6 +328,16 @@ func main() ret Int {
     gpu2d.closeWindow()
     ret 1
   }
+
+  # #732: stand up the ECS `World3d` — the entity core (EntityAllocator) plus a
+  # ComponentTable per 3D component (Transform3d/PrevTransform3d/Material3d/
+  # MeshRenderer/SdfPrimitive), keyed by EntityId — replacing the `entity: Int`
+  # index-into-parallel-Lists `Scene3d` model. Populated here from the loaded
+  # scene so 112 holds a real, non-empty ECS world; #733 migrates the storage
+  # wholesale (loader builds a World3d directly, renderer reads its queries) and
+  # retires the parallel Lists.
+  let world3d: World3d = buildWorld3dFromScene3d(old: scene1.scene)
+  log("[ecs] World3d: {world3dEntityCount(world: world3d)} entities carrying Transform3d/PrevTransform3d components (#732)")
 
   # Fonts + theme through the shared loader, which also bridges the
   # theme's PALETTE into the active theme — the step that was missing
