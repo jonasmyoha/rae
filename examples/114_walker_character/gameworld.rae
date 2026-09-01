@@ -14,10 +14,20 @@ import core
 import vec3
 import quat
 import ecs/transform
+import app3d/character_controller
 open ecs/entity
 open ecs/world
 open ecs/component_table
 open ecs/transform
+open app3d/character_controller
+
+# Per-entity animation clip + phase (#739). Replaces the CrowdMember.clipIndex /
+# animTime pair; each crowd (and hero) entity holds its own so members animate
+# independently.
+type AnimationState {
+  clipIndex: Int
+  animTime: Float
+}
 
 # A gameplay surface material. Capital-D `Material3D` to match the capital-D
 # lib/ecs Transform3D/WorldTransform3D components; distinct from scene3d's Euler
@@ -34,6 +44,12 @@ type GameWorld {
   transforms: ComponentTable(Transform3D)
   worldTransforms: ComponentTable(WorldTransform3D)
   materials: ComponentTable(Material3D)
+  # #739: gameplay controllers + per-entity animation. The hero and every crowd
+  # member is an entity carrying a ThirdPersonController (movement) and an
+  # AnimationState (clip + phase); driven in place via componentMod (#721), no
+  # copy-out/mutate/set-back.
+  controllers: ComponentTable(ThirdPersonController)
+  animStates: ComponentTable(AnimationState)
 }
 
 func createGameWorld() ret GameWorld {
@@ -42,6 +58,8 @@ func createGameWorld() ret GameWorld {
     transforms: createComponentTable(Transform3D)
     worldTransforms: createComponentTable(WorldTransform3D)
     materials: createComponentTable(Material3D)
+    controllers: createComponentTable(ThirdPersonController)
+    animStates: createComponentTable(AnimationState)
   }
 }
 
@@ -64,19 +82,26 @@ func gameWorldSetMaterial(world: mod GameWorld, entity: view EntityId, material:
   componentSet(this: world.materials, entity: entity, data: material)
 }
 
-func gameWorldEntityCount(world: view GameWorld) ret Int {
-  ret allocatorAliveCount(this: world.allocator)
+func gameWorldSetController(world: mod GameWorld, entity: view EntityId, controller: view ThirdPersonController) {
+  componentSet(this: world.controllers, entity: entity, data: controller)
 }
 
-# #738 proof: stand up one entity carrying all three components, so the GameWorld
-# is real and non-empty at boot. #739 replaces this with the hero/crowd
-# migration (CharacterState.controller -> an entity, etc.).
-func seedGameWorld(world: mod GameWorld) {
-  let hero: EntityId = gameWorldAddEntity(world: world)
-  gameWorldSetTransform(world: world, entity: hero, transform: createTransform3D())
-  gameWorldSetWorldTransform(world: world, entity: hero, worldTransform: createWorldTransform3D())
-  gameWorldSetMaterial(world: world, entity: hero, material: Material3D {
-    baseColor: Vec3 { x: 0.8, y: 0.8, z: 0.8 }, metallic: 0.0, roughness: 0.6,
-    emission: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
-  })
+func gameWorldSetAnim(world: mod GameWorld, entity: view EntityId, anim: view AnimationState) {
+  componentSet(this: world.animStates, entity: entity, data: anim)
+}
+
+# Derive a Transform3D from a controller (its position + heading about +Z). Kept
+# in sync at creation and whenever the controller moves, so the ECS transform
+# tracks the gameplay controller (later systems — camera rig #744, quat #745 —
+# read this rather than the controller directly).
+func controllerTransform3D(controller: view ThirdPersonController) ret Transform3D {
+  ret Transform3D {
+    position: controller.position
+    rotation: quat.fromAxisAngle(axis: Vec3 { x: 0.0, y: 0.0, z: 1.0 }, angle: controller.heading)
+    scale: Vec3 { x: 1.0, y: 1.0, z: 1.0 }
+  }
+}
+
+func gameWorldEntityCount(world: view GameWorld) ret Int {
+  ret allocatorAliveCount(this: world.allocator)
 }

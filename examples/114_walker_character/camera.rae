@@ -100,13 +100,13 @@ func cameraUpdate(app: mod App, dt: copy Float) ret CameraTick {
   let previousMode: CameraRigMode = app.cam.rig.mode
   if handleCameraBar(input: app.io.ui, rig: app.cam.rig, camera: app.cam.camera) { app.persist.stateDirty = true }
   if previousMode is not CameraRigMode.character and app.cam.rig.mode is CameraRigMode.character {
-    app.cam.rig.yaw = app.character.controller.heading
+    app.cam.rig.yaw = heroController(app: app).heading
     app.cam.rig.orbitPitch = 0.24
-    app.cam.camera.target = thirdPersonCameraTarget(controller: app.character.controller, focusZ: characterFocusZ)
+    app.cam.camera.target = thirdPersonCameraTarget(controller: heroController(app: app), focusZ: characterFocusZ)
     snapCameraRigView(rig: app.cam.rig)
   }
   if previousMode is not CameraRigMode.orbit and app.cam.rig.mode is CameraRigMode.orbit {
-    app.cam.camera.target = thirdPersonCameraTarget(controller: app.character.controller, focusZ: orbitFocusZ)
+    app.cam.camera.target = thirdPersonCameraTarget(controller: heroController(app: app), focusZ: orbitFocusZ)
   }
   let joyActive: Bool = updateWalkerTouch(moveStick: app.io.moveStick, world: app.io.world)
   let cameraMoved: Bool = updateCameraRig(rig: app.cam.rig, camera: app.cam.camera,
