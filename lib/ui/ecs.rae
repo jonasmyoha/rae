@@ -112,6 +112,10 @@ type UiWorld {
   # ----- derived / runtime-only -----
   measuredSizes: ComponentTable(MeasuredSize)
   computedRects: ComponentTable(ComputedRect)
+  # #727: the local Transform2D per entity (ComputedRect position + scroll +
+  # authored rotation/scale), the input the general lib/ecs TransformSystem folds
+  # into worldTransforms over the depth order. Rebuilt each transform pass.
+  localTransforms: ComponentTable(Transform2D)
   worldTransforms: ComponentTable(WorldTransform2D)
   worldVisuals: ComponentTable(WorldVisual)
   runtimeOffsets: ComponentTable(RuntimeOffset)
@@ -142,6 +146,12 @@ type UiWorld {
   # RESOURCE: a world-global singleton, not a per-entity component.
   layoutW: Float
   layoutH: Float
+
+  # #727: cached parent-before-child depth order (HierarchySystem, #713), the
+  # iteration order the general TransformSystem folds transforms along. A RUNTIME
+  # resource (a derived cache, dirty-tracked by the Parent table generation), not
+  # a per-entity component and never serialized.
+  hierarchyOrder: HierarchyOrder
 }
 
 func createUiWorld() ret UiWorld {
@@ -221,6 +231,7 @@ func createUiWorld() ret UiWorld {
 
     measuredSizes: createComponentTable(MeasuredSize)
     computedRects: createComponentTable(ComputedRect)
+    localTransforms: createComponentTable(Transform2D)
     worldTransforms: createComponentTable(WorldTransform2D)
     worldVisuals: createComponentTable(WorldVisual)
     runtimeOffsets: createComponentTable(RuntimeOffset)
@@ -231,6 +242,7 @@ func createUiWorld() ret UiWorld {
     msdfState: createMsdfState()
     layoutW: 600.0
     layoutH: 1300.0
+    hierarchyOrder: createHierarchyOrder()
   }
 }
 
@@ -498,6 +510,7 @@ func destroyEntity(world: mod UiWorld, entity: view EntityId) pub {
   # Derived / runtime-only
   componentRemove(this: world.measuredSizes, entity: entity)
   componentRemove(this: world.computedRects, entity: entity)
+  componentRemove(this: world.localTransforms, entity: entity)
   componentRemove(this: world.worldTransforms, entity: entity)
   componentRemove(this: world.worldVisuals, entity: entity)
   componentRemove(this: world.runtimeOffsets, entity: entity)
