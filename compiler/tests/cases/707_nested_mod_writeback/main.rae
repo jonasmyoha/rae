@@ -1,0 +1,51 @@
+import core
+
+# #762: nested-field `mod` write-back MUST be reliable — it is THE state-access
+# pattern under the no-globals rule (docs/globals-and-app-ownership.md): main owns
+# one App tree and every mutation threads `mod app`/`mod world` down to the field.
+# This locks that guarantee: a 3-deep field through a mod param, a write-through
+# ref binding, whole-struct reassignment to a mod param, and multi-hop mod
+# threading, all writing back to the caller's App.
+
+type Slider { value: Float, dragging: Bool }
+type Settings { slider: Slider, speed: Float }
+type Io { settings: Settings, count: Int }
+type App { io: Io }
+
+# Mutate fields of a nested-struct mod param (the updateSlider shape).
+func updateSlider(s: mod Slider, v: view Float) {
+  s.value = v
+  s.dragging = true
+}
+
+# Whole-value reassignment to a mod struct param (the nodeComputedRect shape).
+func resetSlider(s: mod Slider) {
+  s = { value: 0.0, dragging: false }
+}
+
+# Multi-hop: mod threaded through two function boundaries down to a scalar.
+func bumpCount(n: mod Int) { n = n + 1 }
+func viaIo(io: mod Io) { bumpCount(n: io.count) }
+func viaApp(app: mod App) { viaIo(io: app.io) }
+
+func main() {
+  var app: App = { io: { settings: { slider: { value: 0.0, dragging: false }, speed: 1.0 }, count: 0 } }
+
+  # 1) 3-deep nested field (app.io.settings.slider) passed as mod, fields mutated
+  updateSlider(s: app.io.settings.slider, v: 0.5)
+  log("field mutate:  value={app.io.settings.slider.value} drag={app.io.settings.slider.dragging}")
+
+  # 2) write-through ref binding to a 3-deep nested field
+  let r: mod Slider => app.io.settings.slider
+  r.value = 0.9
+  log("ref binding:   value={app.io.settings.slider.value}")
+
+  # 3) whole-struct reassignment to a mod param through the chain
+  resetSlider(s: app.io.settings.slider)
+  log("whole reset:   value={app.io.settings.slider.value} drag={app.io.settings.slider.dragging}")
+
+  # 4) multi-hop mod threading writes back to the App
+  viaApp(app: app)
+  viaApp(app: app)
+  log("multi-hop:     count={app.io.count}")
+}
