@@ -383,12 +383,10 @@ func setRendererSky(r: mod DeferredRenderer, sky: view Sky) pub {
 
 # Build a UI-composited deferred frame with an environment already bound.
 #
-# A CONSTRUCTOR RATHER THAN A SETTER, deliberately. Assigning a nested
-# struct field through a `mod` parameter does not reliably write back in
-# this compiler yet, and the failure is silent: the caller keeps its old
-# value and the sky simply never reaches the shader, which looks exactly
-# like a uniform-packing bug and costs an afternoon to tell apart. Taking
-# the sky at construction sidesteps the whole class.
+# A convenience constructor that binds the sky up front. `setRendererSky`
+# (the setter, above) writes back fine through a `mod` renderer — including a
+# nested renderer field — now that nested-field `mod` write-back is guaranteed
+# (#762, test 707_nested_mod_writeback); this just saves the two-line build+set.
 func createDeferredRendererWithUiSky(sky: view Sky) pub ret DeferredRenderer {
   var r: DeferredRenderer = buildDeferredGraph(withUi: true)
   r.sky = sky
