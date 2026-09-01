@@ -409,13 +409,16 @@ func world3dEntityCount(world: view World3d) ret Int {
   ret allocatorAliveCount(this: world.allocator)
 }
 
-# Transitional bridge (#732): build a populated World3d from the legacy
-# parallel-List Scene3d — one entity per transform index, which is exactly the
-# identity the old `entity: Int` denoted. #733 deletes Scene3d entirely (the
-# loader will construct a World3d directly, and geometry/material components
-# will be attached to these same entities) and this bridge with it. For now it
-# lets a caller stand up a real, populated World3d alongside its existing
-# storage without touching the renderer.
+# Build a fully-populated World3d from the legacy parallel-List Scene3d (#733).
+# One entity per transform, created in the loader's transform order so the
+# entity's DENSE POSITION in the transforms table equals the old `entity: Int`
+# index — the invariant world3dToScene3d relies on to hand the renderer an
+# identical scene. Mesh/SDF renderers attach to their transform's entity; the
+# shared `material: Int` becomes a per-entity Material3d COMPONENT (a copy on
+# each referencing entity — same values, so rendering is unchanged).
+#
+# Transitional: #736 has the loader build a World3d directly and the renderer
+# read World3d queries, retiring both Scene3d and this bridge.
 func buildWorld3dFromScene3d(old: view Scene3d) ret World3d {
   var world: World3d = createWorld3d()
   loop var i: Int = 0, i < old.transforms.length, ++i {
@@ -424,5 +427,109 @@ func buildWorld3dFromScene3d(old: view Scene3d) ret World3d {
       world3dSetTransform(world: world, entity: entity, transform: transform)
     }
   }
+  loop var j: Int = 0, j < old.meshRenderers.length, ++j {
+    if let renderer: MeshRenderer = old.meshRenderers.copyAt(index: j) {
+      let entity: EntityId = componentEntityAt(this: world.transforms, i: renderer.entity)
+      world3dSetMeshRenderer(world: world, entity: entity, renderer: renderer)
+      if let material: Material3d = old.materials.copyAt(index: renderer.material) {
+        world3dSetMaterial(world: world, entity: entity, material: material)
+      }
+    }
+  }
+  loop var j: Int = 0, j < old.sdfPrimitives.length, ++j {
+    if let sdf: SdfPrimitive = old.sdfPrimitives.copyAt(index: j) {
+      let entity: EntityId = componentEntityAt(this: world.transforms, i: sdf.entity)
+      world3dSetSdf(world: world, entity: entity, sdf: sdf)
+      if let material: Material3d = old.materials.copyAt(index: sdf.material) {
+        world3dSetMaterial(world: world, entity: entity, material: material)
+      }
+    }
+  }
   ret world
+}
+
+# Extract the flat Scene3d the shared renderer still consumes (#736 removes this
+# once the renderer reads World3d queries directly). Rebuilds the parallel lists
+# from the component tables in their DENSE order — which equals the loader order,
+# since 112 never destroys a 3D entity — so the renderer sees an identical scene.
+# Per-entity Material3d re-expands to a shared materials list indexed like
+# transforms; each renderable's material index is its transform's dense position,
+# so `materials[entity]` is its own material (identical values to the old shared
+# source, so per-ball colour and cluster-head shading are unchanged).
+func world3dToScene3d(world: view World3d) ret Scene3d {
+  var scene: Scene3d = createScene3d()
+  let count: Int = componentCount(this: world.transforms)
+  loop var k: Int = 0, k < count, ++k {
+    let entity: EntityId = componentEntityAt(this: world.transforms, i: k)
+    scene.transforms.add(value: componentGet(this: world.transforms, entity: entity))
+    let prev: PrevTransform3d = componentGet(this: world.prevTransforms, entity: entity)
+    scene.prevTransforms.add(value: prev.value)
+    scene.materials.add(value: componentGet(this: world.materials, entity: entity))
+  }
+  loop var j: Int = 0, j < componentCount(this: world.meshRenderers), ++j {
+    let entity: EntityId = componentEntityAt(this: world.meshRenderers, i: j)
+    let renderer: MeshRenderer = componentGet(this: world.meshRenderers, entity: entity)
+    let pos: Int = componentIndexOf(this: world.transforms, entity: entity)
+    scene.meshRenderers.add(value: MeshRenderer { entity: pos, mesh: renderer.mesh, material: pos, visible: renderer.visible })
+  }
+  loop var j: Int = 0, j < componentCount(this: world.sdfs), ++j {
+    let entity: EntityId = componentEntityAt(this: world.sdfs, i: j)
+    let sdf: SdfPrimitive = componentGet(this: world.sdfs, entity: entity)
+    let pos: Int = componentIndexOf(this: world.transforms, entity: entity)
+    scene.sdfPrimitives.add(value: SdfPrimitive { entity: pos, shape: sdf.shape, material: pos, noise: sdf.noise, cluster: sdf.cluster, smoothing: sdf.smoothing })
+  }
+  ret scene
+}
+
+# ----- World3d runtime access (animation + frame history) ------------
+# Read an entity's current Transform3d.
+func world3dGetTransform(world: view World3d, entity: view EntityId) ret Transform3d {
+  ret componentGet(this: world.transforms, entity: entity)
+}
+
+# Write an entity's Transform3d WITHOUT touching its PrevTransform3d — the
+# per-frame animation write. Previous transforms advance once per frame via
+# snapshotWorld3dPrevTransforms (the old setTransform / snapshot split, so
+# multiple writes in one frame still yield one clean motion-vector delta).
+func world3dWriteTransform(world: mod World3d, entity: view EntityId, transform: view Transform3d) {
+  componentSet(this: world.transforms, entity: entity, data: transform)
+}
+
+# The entity at loader transform-index `i` (its dense position in the transforms
+# table). Bridges the asset's nodeId->Int map (scene3dAssetEntity) to an EntityId.
+func world3dEntityAt(world: view World3d, i: view Int) ret EntityId {
+  ret componentEntityAt(this: world.transforms, i: i)
+}
+
+# Iteration over the geometry tables, in dense (= loader) order, for animators
+# and systems that walk every renderable.
+func world3dMeshRendererCount(world: view World3d) ret Int {
+  ret componentCount(this: world.meshRenderers)
+}
+
+func world3dMeshRendererEntityAt(world: view World3d, i: view Int) ret EntityId {
+  ret componentEntityAt(this: world.meshRenderers, i: i)
+}
+
+func world3dSdfCount(world: view World3d) ret Int {
+  ret componentCount(this: world.sdfs)
+}
+
+func world3dSdfEntityAt(world: view World3d, i: view Int) ret EntityId {
+  ret componentEntityAt(this: world.sdfs, i: i)
+}
+
+func world3dSdfDataAt(world: view World3d, i: view Int) ret SdfPrimitive {
+  ret componentDataAt(this: world.sdfs, i: i)
+}
+
+# Advance motion-vector history: every entity's PrevTransform3d becomes its
+# current Transform3d. Call once per rendered frame, after extraction/draw.
+func snapshotWorld3dPrevTransforms(world: mod World3d) {
+  loop var k: Int = 0, k < componentCount(this: world.transforms), ++k {
+    let entity: EntityId = componentEntityAt(this: world.transforms, i: k)
+    let transform: Transform3d = componentGet(this: world.transforms, entity: entity)
+    let prev: PrevTransform3d = { value: transform }
+    componentSet(this: world.prevTransforms, entity: entity, data: prev)
+  }
 }
