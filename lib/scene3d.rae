@@ -30,6 +30,7 @@ open vec3
 open ecs/entity
 open ecs/world
 open ecs/component_table
+import ecs/PrevTransformSystem/PrevTransformSystem
 
 # ----- typed resource handles ----------------------------------------
 # Raw `Int` handles let a material id be passed where a mesh id belongs
@@ -72,17 +73,6 @@ type Transform3d {
   position: Vec3
   rotation: Vec3
   scale: Vec3
-}
-
-# The previous frame's Transform3d, as a DISTINCT component so an entity's
-# current and previous transforms live in separate ComponentTables (#732).
-# Motion vectors (TAA #335) need where each entity WAS; the old Scene3d kept
-# this as a parallel `prevTransforms` List indexed by `entity: Int` — World3d
-# keeps it as `ComponentTable(PrevTransform3d)` keyed by EntityId instead.
-# A wrapper (not a bare `Transform3d`) because a table is keyed by its element
-# TYPE: current and previous must be different types to be different tables.
-type PrevTransform3d {
-  value: Transform3d
 }
 
 type Material3d {
@@ -359,7 +349,10 @@ func defaultLight3d() pub ret Light3d {
 type World3d {
   allocator: EntityAllocator
   transforms: ComponentTable(Transform3d)
-  prevTransforms: ComponentTable(PrevTransform3d)
+  # Previous-frame transforms, same element type as `transforms`, in a separate
+  # table. Motion vectors (TAA #335) need where each entity WAS; PrevTransformSystem
+  # (#735) derives this from `transforms` once per frame — no manual lockstep.
+  prevTransforms: ComponentTable(Transform3d)
   materials: ComponentTable(Material3d)
   meshRenderers: ComponentTable(MeshRenderer)
   sdfs: ComponentTable(SdfPrimitive)
@@ -369,7 +362,7 @@ func createWorld3d() ret World3d {
   ret World3d {
     allocator: createEntityAllocator()
     transforms: createComponentTable(Transform3d)
-    prevTransforms: createComponentTable(PrevTransform3d)
+    prevTransforms: createComponentTable(Transform3d)
     materials: createComponentTable(Material3d)
     meshRenderers: createComponentTable(MeshRenderer)
     sdfs: createComponentTable(SdfPrimitive)
@@ -384,12 +377,11 @@ func world3dAddEntity(world: mod World3d) ret EntityId {
 
 # Component setters — thin wrappers so call sites read as intent rather
 # than ComponentTable plumbing (mirrors lib/ui's world_helpers). Setting a
-# Transform3d seeds the PrevTransform3d to match, so the first frame's
+# Transform3d seeds the previous transform to match, so the first frame's
 # motion vectors are zero rather than a jump from an unset previous.
 func world3dSetTransform(world: mod World3d, entity: view EntityId, transform: view Transform3d) {
   componentSet(this: world.transforms, entity: entity, data: transform)
-  let prev: PrevTransform3d = { value: transform }
-  componentSet(this: world.prevTransforms, entity: entity, data: prev)
+  componentSet(this: world.prevTransforms, entity: entity, data: transform)
 }
 
 func world3dSetMaterial(world: mod World3d, entity: view EntityId, material: view Material3d) {
@@ -462,8 +454,7 @@ func world3dToScene3d(world: view World3d) ret Scene3d {
   loop var k: Int = 0, k < count, ++k {
     let entity: EntityId = componentEntityAt(this: world.transforms, i: k)
     scene.transforms.add(value: componentGet(this: world.transforms, entity: entity))
-    let prev: PrevTransform3d = componentGet(this: world.prevTransforms, entity: entity)
-    scene.prevTransforms.add(value: prev.value)
+    scene.prevTransforms.add(value: componentGet(this: world.prevTransforms, entity: entity))
     scene.materials.add(value: componentGet(this: world.materials, entity: entity))
   }
   loop var j: Int = 0, j < componentCount(this: world.meshRenderers), ++j {
@@ -487,10 +478,10 @@ func world3dGetTransform(world: view World3d, entity: view EntityId) ret Transfo
   ret componentGet(this: world.transforms, entity: entity)
 }
 
-# Write an entity's Transform3d WITHOUT touching its PrevTransform3d — the
+# Write an entity's Transform3d WITHOUT touching its previous transform — the
 # per-frame animation write. Previous transforms advance once per frame via
-# snapshotWorld3dPrevTransforms (the old setTransform / snapshot split, so
-# multiple writes in one frame still yield one clean motion-vector delta).
+# world3dPrevTransformSystem (the setTransform / snapshot split, so multiple
+# writes in one frame still yield one clean motion-vector delta).
 func world3dWriteTransform(world: mod World3d, entity: view EntityId, transform: view Transform3d) {
   componentSet(this: world.transforms, entity: entity, data: transform)
 }
@@ -523,13 +514,11 @@ func world3dSdfDataAt(world: view World3d, i: view Int) ret SdfPrimitive {
   ret componentDataAt(this: world.sdfs, i: i)
 }
 
-# Advance motion-vector history: every entity's PrevTransform3d becomes its
-# current Transform3d. Call once per rendered frame, after extraction/draw.
-func snapshotWorld3dPrevTransforms(world: mod World3d) {
-  loop var k: Int = 0, k < componentCount(this: world.transforms), ++k {
-    let entity: EntityId = componentEntityAt(this: world.transforms, i: k)
-    let transform: Transform3d = componentGet(this: world.transforms, entity: entity)
-    let prev: PrevTransform3d = { value: transform }
-    componentSet(this: world.prevTransforms, entity: entity, data: prev)
-  }
+# Advance motion-vector history by running the general PrevTransformSystem
+# (#735) over this world's transform tables: every entity's previous transform
+# becomes its current one. Call once per rendered frame, after extraction/draw.
+# This is World3d's binding to the generic system (the way lib/ui/transform.rae's
+# transformSystem binds transformSystem2D) — not a hand-rolled snapshot loop.
+func world3dPrevTransformSystem(world: mod World3d) {
+  prevTransformSystem(current: world.transforms, prev: world.prevTransforms)
 }
