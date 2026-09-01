@@ -487,8 +487,8 @@ func main() ret Int {
   var lastSettingsScene: Int = settings.scene
   # The panel outgrew its space once the rendering toggles landed, so it
   # scrolls: wheel when the pointer is over it, drag anywhere inside it.
-  var panelScroll: ScrollPanel = createScrollPanel(viewportId: "SidePanelBody",
-                                                   contentId: "SidePanelContent")
+  var panelScroll: EntityId = createScrollPanel(world: uiWorld, viewportId: "SidePanelBody",
+                                                contentId: "SidePanelContent")
   var renderedOnce: Bool = false
   var lastLogRevision: Int = 0 - 1
   # Once, not per frame: this is a gate assertion, not a readout.
@@ -553,7 +553,7 @@ func main() ret Int {
     # Refresh the readout about once a second. This is deliberately the
 
     updateUiInput(input: uiInput, world: uiWorld)
-    let scrolled: Bool = updateScrollPanel(s: panelScroll, world: uiWorld, input: uiInput)
+    let scrolled: Bool = updateScrollPanel(world: uiWorld, viewport: panelScroll, input: uiInput)
     # The debug button sits over the side panel, so a press it takes has to be
     # withdrawn from the UI world or the same click works the control beneath.
     if updateDebugOverlay(d: dbg, screenW: windowExtentW(), screenH: windowExtentH(),
