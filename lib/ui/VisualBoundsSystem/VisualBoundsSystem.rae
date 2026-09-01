@@ -1,0 +1,109 @@
+# lib/ui/VisualBoundsSystem — cached glyph-plane text/icon measurement (#219).
+#
+# Split out of RenderSystem into its own PascalCase system folder (#728). It
+# measures each Text node's string and each `mat:` icon Sprite ONCE per change
+# into a `VisualBounds` component; the paint path reads that cache through
+# RenderSystem's `visualBoundsAt`. Runs with `mod world` between the transform
+# and render passes (see the callers: app3d/ui_shell, the example frame loops).
+import core
+import sdf_text
+import ui/components
+import ui/ecs
+import ui/RenderSystem/RenderSystem
+import ui/text_style
+import ui/icon_codepoints
+import ui/theme_resolved
+open ui/ecs
+open ecs/component_table
+
+
+# Recompute + cache `e`'s bounds when the (text, size, icon-font) key
+# changed; no-op when the cache is already fresh.
+func refreshVisualBounds(world: mod UiWorld, e: view EntityId, text: view String, sizePx: view Float, isIcon: view Bool, res: view Gpu2dUi) {
+  if componentHas(this: world.visualBounds, entity: e) {
+    let cur: VisualBounds = componentGet(this: world.visualBounds, entity: e)
+    if cur.measuredIcon is isIcon {
+      if cur.measuredSize is sizePx {
+        if cur.measuredText is text {
+          ret
+        }
+      }
+    }
+  }
+  var b: SdfTextBounds = { hasBounds: false, left: 0.0, top: 0.0, right: 0.0, bottom: 0.0, advance: 0.0 }
+  if isIcon {
+    b = sdf_text.sdfMeasureTextBounds(font: res.iconFont, text: text, sizePx: sizePx)
+  } else {
+    b = sdf_text.sdfMeasureTextBounds(font: res.textFont, text: text, sizePx: sizePx)
+  }
+  let keyText: String = "{text}"
+  let vb: VisualBounds = {
+    hasBounds: b.hasBounds
+    left: b.left
+    top: b.top
+    right: b.right
+    bottom: b.bottom
+    advance: b.advance
+    measuredText: own keyText
+    measuredSize: sizePx
+    measuredIcon: isIcon
+  }
+  componentSet(this: world.visualBounds, entity: e, data: own vb)
+}
+
+# Measure every Text node's string and every `mat:` icon Sprite once
+# per change. A text node is measured at its style size; an icon at
+# its current on-screen size (min of the drawn width/height, matching
+# the paint path). Extra strings that never need centering cost one
+# measure on change and nothing per frame.
+func visualBoundsSystem(world: mod UiWorld, res: view Gpu2dUi) pub {
+  let matPrefix: String = "mat:"
+  var n: Int = componentCount(this: world.texts)
+  var i: Int = 0
+  loop i < n {
+    let e: EntityId = componentEntityAt(this: world.texts, i: i)
+    let t: Text = componentDataAt(this: world.texts, i: i)
+    if t.text.length() > 0 {
+      var size: Float = resolveTextSize(theme: res.theme, styleId: t.styleId)
+      # Measure at the OVERRIDDEN size (#236) so centering bounds match paint.
+      if componentHas(this: world.styleOverrides, entity: e) {
+        let so: view StyleOverride => componentView(this: world.styleOverrides, entity: e)
+        size = styleOverrideSize(base: size, so: so)
+      }
+      refreshVisualBounds(world: world, e: e, text: t.text, sizePx: size, isIcon: false, res: res)
+    }
+    i = i + 1
+  }
+  n = componentCount(this: world.sprites)
+  i = 0
+  loop i < n {
+    let e: EntityId = componentEntityAt(this: world.sprites, i: i)
+    let sp: Sprite = componentDataAt(this: world.sprites, i: i)
+    if sp.textureKey.startsWith(prefix: matPrefix) {
+      let nameLen: Int = sp.textureKey.length() - matPrefix.length()
+      let name: String = sp.textureKey.sub(start: matPrefix.length(), len: nameLen)
+      let glyph: String = iconText(name: name)
+      if glyph.length() > 0 {
+        let sz: Float = iconGlyphSize(world: world, e: e)
+        refreshVisualBounds(world: world, e: e, text: glyph, sizePx: sz, isIcon: true, res: res)
+      }
+    }
+    i = i + 1
+  }
+}
+
+# The on-screen glyph size the icon paint path uses: min of the
+# hover-scaled draw width/height. Kept in one place so the system
+# measures at exactly the size paint asks for (cache stays fresh).
+func iconGlyphSize(world: view UiWorld, e: view EntityId) ret Float {
+  if componentHas(this: world.computedRects, entity: e) is false {
+    ret 0.0
+  }
+  let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
+  let hoverMul: Float = g2dHoverMul(world: world, e: e)
+  let drawW: Float = cr.size.x * hoverMul
+  let drawH: Float = cr.size.y * hoverMul
+  var sz: Float = drawW
+  if drawH < sz { sz = drawH }
+  ret sz
+}
