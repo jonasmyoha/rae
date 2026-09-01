@@ -341,6 +341,11 @@ func main() ret Int {
   var world2: World3d = buildWorld3dFromScene3d(old: scene2.scene)
   var world3: World3d = buildWorld3dFromScene3d(old: scene3.scene)
   log("[ecs] World3d: scene1 {world3dEntityCount(world: world1)}, scene2 {world3dEntityCount(world: world2)}, scene3 {world3dEntityCount(world: world3)} entities (#733)")
+  # #734: per-cluster marker tags, classified once from the (renderer-owned)
+  # cluster field. The animators query these tag tables instead of an
+  # `if sdf.cluster is N` ladder. Clusters never change, so build once here.
+  let clusters1: ClusterTags = buildClusterTags(world: world1)
+  let clusters2: ClusterTags = buildClusterTags(world: world2)
 
   # Fonts + theme through the shared loader, which also bridges the
   # theme's PALETTE into the active theme — the step that was missing
@@ -733,10 +738,10 @@ func main() ret Int {
       # solid, which is how the bug was noticed.
       light.sunDir = settingsSunDir(s: settings)
       light.sunColor = settingsSunColor(s: settings)
-      if uiState.activeScene is 1 { animateScene1(world: world1, asset: scene1, time: simTime) }
+      if uiState.activeScene is 1 { animateScene1(world: world1, asset: scene1, tags: clusters1, time: simTime) }
       if uiState.activeScene is 2 {
         animateScene(world: world2, sceneId: 2, time: simTime)
-        animateMetaballLab(world: world2, time: simTime)
+        animateMetaballLab(world: world2, tags: clusters2, time: simTime)
       }
       if uiState.activeScene is 3 { animateScene3(world: world3, time: simTime) }
 

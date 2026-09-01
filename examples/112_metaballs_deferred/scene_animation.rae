@@ -15,6 +15,78 @@ open scene3d
 open scene3d_file
 open vec3
 open ecs/entity
+open ecs/component_table
+open ecs/tag
+open ecs/query
+
+# #734: per-cluster MARKER TAGS replace the `sdf.cluster is N` if-ladder. Each
+# metaball carries a zero-field ClusterNTag component; the animators QUERY each
+# tag table (queryTagged over the sdfs table) and apply that cluster's motion,
+# so per-cluster behaviour is a query, not a branch. `SdfPrimitive.cluster` still
+# exists — the shared renderer groups fused surfaces by it — but the animation
+# never reads it: buildClusterTags does the one-time cluster:Int -> tag
+# classification (the migration bridge; a native-ECS scene would author the tag).
+type Cluster0Tag {}
+type Cluster1Tag {}
+type Cluster2Tag {}
+type Cluster3Tag {}
+type Cluster4Tag {}
+type Cluster5Tag {}
+type Cluster6Tag {}
+
+type ClusterTags {
+  c0: ComponentTable(Cluster0Tag)
+  c1: ComponentTable(Cluster1Tag)
+  c2: ComponentTable(Cluster2Tag)
+  c3: ComponentTable(Cluster3Tag)
+  c4: ComponentTable(Cluster4Tag)
+  c5: ComponentTable(Cluster5Tag)
+  c6: ComponentTable(Cluster6Tag)
+}
+
+# One-time cluster:Int -> tag classification, run once per scene at setup. This
+# is the sole place the cluster field is read for animation; the animators are
+# pure tag queries. Scenes use a subset (scene 1 clusters 0-2, scene 2 clusters
+# 0-6); unused tables stay empty and their query loops simply don't fire.
+func buildClusterTags(world: view World3d) ret ClusterTags {
+  var tags: ClusterTags = {
+    c0: createComponentTable(Cluster0Tag)
+    c1: createComponentTable(Cluster1Tag)
+    c2: createComponentTable(Cluster2Tag)
+    c3: createComponentTable(Cluster3Tag)
+    c4: createComponentTable(Cluster4Tag)
+    c5: createComponentTable(Cluster5Tag)
+    c6: createComponentTable(Cluster6Tag)
+  }
+  loop var i: Int = 0, i < world3dSdfCount(world: world), ++i {
+    let entity: EntityId = world3dSdfEntityAt(world: world, i: i)
+    let sdf: SdfPrimitive = world3dSdfDataAt(world: world, i: i)
+    if sdf.cluster is 0 { addTag(table: tags.c0, entity: entity) }
+    if sdf.cluster is 1 { addTag(table: tags.c1, entity: entity) }
+    if sdf.cluster is 2 { addTag(table: tags.c2, entity: entity) }
+    if sdf.cluster is 3 { addTag(table: tags.c3, entity: entity) }
+    if sdf.cluster is 4 { addTag(table: tags.c4, entity: entity) }
+    if sdf.cluster is 5 { addTag(table: tags.c5, entity: entity) }
+    if sdf.cluster is 6 { addTag(table: tags.c6, entity: entity) }
+  }
+  ret tags
+}
+
+# Shared per-ball pulse for the metaball-lab clusters: a cubed half-wave
+# "escape" keyed off the ball's global index (hit.indexA), plus the shrink
+# factor while away. Keyed off the index so it is identical to the old
+# per-ball computation regardless of which cluster loop reaches the ball.
+type LabPulse { phase: Float, escape: Float, away: Float }
+func labPulse(time: view Float, i: view Int) ret LabPulse {
+  let phase: Float = i.toFloat() * 0.7853981
+  let idx: Float = i.toFloat()
+  var pulse: Float = math.sin(x: time * 0.31 + phase * 2.7 + idx * 0.21)
+  if pulse < 0.0 {
+    pulse = 0.0
+  }
+  let escape: Float = pulse * pulse * pulse
+  ret LabPulse { phase: phase, escape: escape, away: 1.0 - 0.42 * escape }
+}
 
 func animateScene(world: mod World3d, sceneId: view Int, time: view Float) {
   var i: Int = 1
@@ -56,119 +128,118 @@ func animateScene(world: mod World3d, sceneId: view Int, time: view Float) {
 # churns inside one mass, and radius decides whether that reads as a swarm or as
 # a single body. Colour is PER BALL — lib/gbuffer packs each primitive's own
 # material — so a cluster carries a gradient rather than a flat tint.
-func animateMetaballLab(world: mod World3d, time: view Float) {
-  var i: Int = 0
-  loop i < world3dSdfCount(world: world) {
-    let entity: EntityId = world3dSdfEntityAt(world: world, i: i)
-    let sdf: SdfPrimitive = world3dSdfDataAt(world: world, i: i)
-    var transform: Transform3d = world3dGetTransform(world: world, entity: entity)
-    let phase: Float = i.toFloat() * 0.7853981
-    let idx: Float = i.toFloat()
-
-    # ESCAPE. Most balls leave the mass periodically rather than orbiting inside
-    # it: a half-wave pulse, cubed, so a ball spends most of its cycle home and
-    # the departure is an event. Shrinking while away makes the smooth-union
-    # pinch off decisively instead of stretching a rubber neck.
-    var pulse: Float = math.sin(x: time * 0.31 + phase * 2.7 + idx * 0.21)
-    if pulse < 0.0 {
-      pulse = 0.0
-    }
-    let escape: Float = pulse * pulse * pulse
-    let away: Float = 1.0 - 0.42 * escape
-
-    if sdf.cluster is 0 {
-      # Swarm: the largest share of the budget, low stickiness (k=0.40) and a
-      # wide slow churn, so it separates into a shoal rather than one blob.
-      let t: Float = time * 0.46
-      transform.position = vec3.create(
-        x: 0.0 - 6.0 + math.cos(x: t + phase) * (1.9 + escape * 4.4),
-        y: 2.4 + math.sin(x: t * 0.73 + phase * 1.4) * (1.7 + escape * 2.1),
-        z: 1.5 + math.sin(x: t * 1.05 + phase * 0.6) * 0.9 + escape * 2.6
-      )
-      let r: Float = (0.30 + math.sin(x: time * 0.9 + phase) * 0.09) * away
-      transform.scale = vec3.create(x: r, y: r, z: r)
-      world3dWriteTransform(world: world, entity: entity, transform: transform)
-    }
-    if sdf.cluster is 1 {
-      # Titan: very large, very sticky balls. Big radius plus k=1.35 means
-      # it never separates — it wallows, which is the opposite end of the range
-      # from the swarm.
-      let t: Float = time * 0.21
-      transform.position = vec3.create(
-        x: math.cos(x: t + phase) * 1.35,
-        y: 6.6 + math.sin(x: t * 0.8 + phase * 1.2) * 0.75,
-        z: 2.4 + math.sin(x: t * 1.3 + phase) * 0.55
-      )
-      let r: Float = 1.85 + math.sin(x: time * 0.37 + phase * 1.9) * 0.42
-      transform.scale = vec3.create(x: r, y: r, z: r)
-      world3dWriteTransform(world: world, entity: entity, transform: transform)
-    }
-    if sdf.cluster is 2 {
-      # Mist: small radii and k=0.18 — barely fusing, so it stays a cloud of
-      # separate droplets and shows what almost no smooth-union looks like.
-      let t: Float = time * 0.63
-      transform.position = vec3.create(
-        x: 6.4 + math.cos(x: t * 0.9 + phase * 1.7) * (2.6 + escape * 3.2),
-        y: 2.2 + math.sin(x: t + phase) * (2.4 + escape * 2.6),
-        z: 1.2 + math.sin(x: t * 1.4 + phase * 2.2) * 1.1 + escape * 3.1
-      )
-      let r: Float = (0.27 + math.sin(x: time * 1.5 + phase * 2.6) * 0.09) * away
-      transform.scale = vec3.create(x: r, y: r, z: r)
-      world3dWriteTransform(world: world, entity: entity, transform: transform)
-    }
-    if sdf.cluster is 3 {
-      # Ember: fast, hot, medium size, sticky enough to boil internally.
-      let t: Float = time * 1.45
-      transform.position = vec3.create(
-        x: 0.0 - 2.6 + math.cos(x: t + phase * 1.3) * (1.3 + escape * 3.0),
-        y: 0.0 - 1.8 + math.sin(x: t * 0.62 + phase) * (1.1 + escape * 1.9),
-        z: 1.1 + math.sin(x: t * 0.9 + phase * 1.8) * 0.6 + escape * 2.2
-      )
-      let r: Float = (0.62 + math.sin(x: t * 0.7 + phase * 2.1) * 0.26) * away
-      transform.scale = vec3.create(x: r, y: r, z: r)
-      world3dWriteTransform(world: world, entity: entity, transform: transform)
-    }
-    if sdf.cluster is 4 {
-      # Orchid: slow, large-ish, long escapes — the clearest place to watch a
-      # droplet pinch off and rejoin.
-      let t: Float = time * 0.38
-      transform.position = vec3.create(
-        x: 3.2 + math.cos(x: t + phase) * (1.2 + escape * 4.8),
-        y: 0.0 - 2.2 + math.sin(x: t * 1.1 + phase * 1.6) * (1.0 + escape * 1.4),
-        z: 1.6 + math.sin(x: t * 0.8 + phase) * 0.7 + escape * 3.4
-      )
-      let r: Float = (0.78 + math.sin(x: time * 0.5 + phase) * 0.20) * away
-      transform.scale = vec3.create(x: r, y: r, z: r)
-      world3dWriteTransform(world: world, entity: entity, transform: transform)
-    }
-    if sdf.cluster is 5 {
-      # Verdigris: the middle case — medium count, medium stickiness, a ring
-      # that breathes in and out through the centre of the frame.
-      let t: Float = time * 0.55
-      let ring: Float = 2.2 + math.sin(x: time * 0.33) * 0.9
-      transform.position = vec3.create(
-        x: 0.2 + math.cos(x: phase * 2.0 + t * 0.4) * (ring + escape * 3.6),
-        y: 1.2 + math.sin(x: phase * 2.0 + t * 0.4) * (ring * 0.7 + escape * 2.0),
-        z: 0.9 + math.sin(x: t * 1.2 + phase) * 0.5 + escape * 2.4
-      )
-      let r: Float = (0.44 + math.sin(x: t + phase * 1.5) * 0.14) * away
-      transform.scale = vec3.create(x: r, y: r, z: r)
-      world3dWriteTransform(world: world, entity: entity, transform: transform)
-    }
-    if sdf.cluster is 6 {
-      # Pearl: few, big, pale and nearly still — a rest for the eye, and the
-      # control case showing what the same smoothing looks like without motion.
-      let t: Float = time * 0.16
-      transform.position = vec3.create(
-        x: 0.0 - 4.4 + math.cos(x: t + phase) * 0.85,
-        y: 0.0 - 3.0 + math.sin(x: t * 0.9 + phase * 1.1) * 0.6,
-        z: 2.2 + math.sin(x: t * 1.4 + phase) * 0.45
-      )
-      let r: Float = 1.05 + math.sin(x: time * 0.24 + phase * 1.3) * 0.18
-      transform.scale = vec3.create(x: r, y: r, z: r)
-      world3dWriteTransform(world: world, entity: entity, transform: transform)
-    }
-    i = i + 1
+func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view Float) {
+  # Swarm (cluster 0): the largest share of the budget, low stickiness (k=0.40)
+  # and a wide slow churn, so it separates into a shoal rather than one blob.
+  let m0: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: tags.c0)
+  loop let hit: view Query2Match in m0 {
+    let p: LabPulse = labPulse(time: time, i: hit.indexA)
+    var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
+    let t: Float = time * 0.46
+    transform.position = vec3.create(
+      x: 0.0 - 6.0 + math.cos(x: t + p.phase) * (1.9 + p.escape * 4.4),
+      y: 2.4 + math.sin(x: t * 0.73 + p.phase * 1.4) * (1.7 + p.escape * 2.1),
+      z: 1.5 + math.sin(x: t * 1.05 + p.phase * 0.6) * 0.9 + p.escape * 2.6
+    )
+    let r: Float = (0.30 + math.sin(x: time * 0.9 + p.phase) * 0.09) * p.away
+    transform.scale = vec3.create(x: r, y: r, z: r)
+    world3dWriteTransform(world: world, entity: hit.entity, transform: transform)
+  }
+  # Titan (cluster 1): very large, very sticky (k=1.35) — never separates, it
+  # wallows, the opposite end of the range from the swarm.
+  let m1: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: tags.c1)
+  loop let hit: view Query2Match in m1 {
+    let p: LabPulse = labPulse(time: time, i: hit.indexA)
+    var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
+    let t: Float = time * 0.21
+    transform.position = vec3.create(
+      x: math.cos(x: t + p.phase) * 1.35,
+      y: 6.6 + math.sin(x: t * 0.8 + p.phase * 1.2) * 0.75,
+      z: 2.4 + math.sin(x: t * 1.3 + p.phase) * 0.55
+    )
+    let r: Float = 1.85 + math.sin(x: time * 0.37 + p.phase * 1.9) * 0.42
+    transform.scale = vec3.create(x: r, y: r, z: r)
+    world3dWriteTransform(world: world, entity: hit.entity, transform: transform)
+  }
+  # Mist (cluster 2): small radii and k=0.18 — barely fusing, a cloud of
+  # separate droplets, almost no smooth-union.
+  let m2: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: tags.c2)
+  loop let hit: view Query2Match in m2 {
+    let p: LabPulse = labPulse(time: time, i: hit.indexA)
+    var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
+    let t: Float = time * 0.63
+    transform.position = vec3.create(
+      x: 6.4 + math.cos(x: t * 0.9 + p.phase * 1.7) * (2.6 + p.escape * 3.2),
+      y: 2.2 + math.sin(x: t + p.phase) * (2.4 + p.escape * 2.6),
+      z: 1.2 + math.sin(x: t * 1.4 + p.phase * 2.2) * 1.1 + p.escape * 3.1
+    )
+    let r: Float = (0.27 + math.sin(x: time * 1.5 + p.phase * 2.6) * 0.09) * p.away
+    transform.scale = vec3.create(x: r, y: r, z: r)
+    world3dWriteTransform(world: world, entity: hit.entity, transform: transform)
+  }
+  # Ember (cluster 3): fast, hot, medium size, sticky enough to boil internally.
+  let m3: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: tags.c3)
+  loop let hit: view Query2Match in m3 {
+    let p: LabPulse = labPulse(time: time, i: hit.indexA)
+    var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
+    let t: Float = time * 1.45
+    transform.position = vec3.create(
+      x: 0.0 - 2.6 + math.cos(x: t + p.phase * 1.3) * (1.3 + p.escape * 3.0),
+      y: 0.0 - 1.8 + math.sin(x: t * 0.62 + p.phase) * (1.1 + p.escape * 1.9),
+      z: 1.1 + math.sin(x: t * 0.9 + p.phase * 1.8) * 0.6 + p.escape * 2.2
+    )
+    let r: Float = (0.62 + math.sin(x: t * 0.7 + p.phase * 2.1) * 0.26) * p.away
+    transform.scale = vec3.create(x: r, y: r, z: r)
+    world3dWriteTransform(world: world, entity: hit.entity, transform: transform)
+  }
+  # Orchid (cluster 4): slow, large-ish, long escapes — the clearest place to
+  # watch a droplet pinch off and rejoin.
+  let m4: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: tags.c4)
+  loop let hit: view Query2Match in m4 {
+    let p: LabPulse = labPulse(time: time, i: hit.indexA)
+    var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
+    let t: Float = time * 0.38
+    transform.position = vec3.create(
+      x: 3.2 + math.cos(x: t + p.phase) * (1.2 + p.escape * 4.8),
+      y: 0.0 - 2.2 + math.sin(x: t * 1.1 + p.phase * 1.6) * (1.0 + p.escape * 1.4),
+      z: 1.6 + math.sin(x: t * 0.8 + p.phase) * 0.7 + p.escape * 3.4
+    )
+    let r: Float = (0.78 + math.sin(x: time * 0.5 + p.phase) * 0.20) * p.away
+    transform.scale = vec3.create(x: r, y: r, z: r)
+    world3dWriteTransform(world: world, entity: hit.entity, transform: transform)
+  }
+  # Verdigris (cluster 5): the middle case — medium count, medium stickiness, a
+  # ring that breathes in and out through the centre of the frame.
+  let m5: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: tags.c5)
+  loop let hit: view Query2Match in m5 {
+    let p: LabPulse = labPulse(time: time, i: hit.indexA)
+    var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
+    let t: Float = time * 0.55
+    let ring: Float = 2.2 + math.sin(x: time * 0.33) * 0.9
+    transform.position = vec3.create(
+      x: 0.2 + math.cos(x: p.phase * 2.0 + t * 0.4) * (ring + p.escape * 3.6),
+      y: 1.2 + math.sin(x: p.phase * 2.0 + t * 0.4) * (ring * 0.7 + p.escape * 2.0),
+      z: 0.9 + math.sin(x: t * 1.2 + p.phase) * 0.5 + p.escape * 2.4
+    )
+    let r: Float = (0.44 + math.sin(x: t + p.phase * 1.5) * 0.14) * p.away
+    transform.scale = vec3.create(x: r, y: r, z: r)
+    world3dWriteTransform(world: world, entity: hit.entity, transform: transform)
+  }
+  # Pearl (cluster 6): few, big, pale and nearly still — a rest for the eye, the
+  # control case showing the same smoothing without motion.
+  let m6: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: tags.c6)
+  loop let hit: view Query2Match in m6 {
+    let p: LabPulse = labPulse(time: time, i: hit.indexA)
+    var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
+    let t: Float = time * 0.16
+    transform.position = vec3.create(
+      x: 0.0 - 4.4 + math.cos(x: t + p.phase) * 0.85,
+      y: 0.0 - 3.0 + math.sin(x: t * 0.9 + p.phase * 1.1) * 0.6,
+      z: 2.2 + math.sin(x: t * 1.4 + p.phase) * 0.45
+    )
+    let r: Float = 1.05 + math.sin(x: time * 0.24 + p.phase * 1.3) * 0.18
+    transform.scale = vec3.create(x: r, y: r, z: r)
+    world3dWriteTransform(world: world, entity: hit.entity, transform: transform)
   }
 }
 
@@ -223,7 +294,7 @@ func animateScene3(world: mod World3d, time: view Float) {
   }
 }
 
-func animateScene1(world: mod World3d, asset: view Scene3dAsset, time: view Float) {
+func animateScene1(world: mod World3d, asset: view Scene3dAsset, tags: view ClusterTags, time: view Float) {
   # Two free cubes tumbling on different axes at different rates. Boxes are
   # the useful shape to watch here: a sphere looks identical under any
   # rotation, so it cannot show a wrong rotation order or a skewed normal
@@ -259,70 +330,65 @@ func animateScene1(world: mod World3d, asset: view Scene3dAsset, time: view Floa
   # have been the wrong fix — #337 keeps it at contact scale deliberately,
   # because a wide-radius SSAO double-darkens once real GI lands.
   #
-  # Three metaball clusters, each with its own motion character. Speed and
-  # amplitude are per-cluster so the blobs never read as one animation
-  # applied three times: the obsidian cluster is slow and tight, the ember
-  # cluster is fast and loose, the blue cluster sits between them.
-  var i: Int = 0
-  loop i < world3dSdfCount(world: world) {
-    let entity: EntityId = world3dSdfEntityAt(world: world, i: i)
-    let sdf: SdfPrimitive = world3dSdfDataAt(world: world, i: i)
-    var transform: Transform3d = world3dGetTransform(world: world, entity: entity)
+  # Three metaball clusters, each with its own motion character; per-cluster
+  # behaviour is a tag query, not a branch (#734). Speed and amplitude are
+  # per-cluster so the blobs never read as one animation applied three times.
+  # Obsidian (cluster 1): slow, small orbits, gentle breathing; low stickiness
+  # (k 0.30) so even modest motion visibly separates the lobes.
+  let m1: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: tags.c1)
+  loop let hit: view Query2Match in m1 {
+    let phase: Float = hit.indexA.toFloat() * 1.2566371
+    var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
+    let slow: Float = time * 0.34
+    transform.position = vec3.create(
+      x: 0.0 - 5.25 + math.cos(x: slow + phase) * 0.62,
+      y: 2.15 + math.sin(x: slow * 0.7 + phase * 1.3) * 0.30,
+      z: 0.46 + math.sin(x: slow * 1.1 + phase) * 0.20
+    )
+    let obsidianR: Float = 0.82 + math.sin(x: time * 0.29 + phase * 1.7) * 0.14
+    transform.scale = vec3.create(x: obsidianR, y: obsidianR, z: obsidianR)
+    world3dWriteTransform(world: world, entity: hit.entity, transform: transform)
+  }
+  # Ember (cluster 2): fast and churning, big size swings; very sticky (k 1.15)
+  # so it stays one mass and boils internally, making the colour gradient visible.
+  let m2: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: tags.c2)
+  loop let hit: view Query2Match in m2 {
+    let phase: Float = hit.indexA.toFloat() * 1.2566371
+    var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
+    let fast: Float = time * 1.35
+    transform.position = vec3.create(
+      x: 0.0 - 0.35 + math.cos(x: fast + phase * 1.4) * 1.18,
+      y: 5.25 + math.sin(x: fast * 0.55 + phase) * 0.40,
+      z: 0.75 + math.sin(x: fast * 0.85 + phase * 1.9) * 0.25
+    )
+    let emberR: Float = 0.78 + math.sin(x: fast * 0.62 + phase * 2.3) * 0.42
+    transform.scale = vec3.create(x: emberR, y: emberR, z: emberR)
+    world3dWriteTransform(world: world, entity: hit.entity, transform: transform)
+  }
+  # Excursion (cluster 0): every third ball periodically breaks away toward the
+  # camera far enough that the smooth-union (k 0.62) pinches off into a droplet,
+  # then drifts back and merges. Cubed half-wave pulse so the departure is an
+  # event, not constant drift; it shrinks while away so the pinch-off reads.
+  let m0: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: tags.c0)
+  loop let hit: view Query2Match in m0 {
+    let i: Int = hit.indexA
     let phase: Float = i.toFloat() * 1.2566371
-    if sdf.cluster is 1 {
-      # Obsidian: slow, small orbits, gentle breathing. Its low stickiness
-      # (k 0.30) means even modest motion visibly separates the lobes.
-      let slow: Float = time * 0.34
-      transform.position = vec3.create(
-        x: 0.0 - 5.25 + math.cos(x: slow + phase) * 0.62,
-        y: 2.15 + math.sin(x: slow * 0.7 + phase * 1.3) * 0.30,
-        z: 0.46 + math.sin(x: slow * 1.1 + phase) * 0.20
-      )
-      let obsidianR: Float = 0.82 + math.sin(x: time * 0.29 + phase * 1.7) * 0.14
-      transform.scale = vec3.create(x: obsidianR, y: obsidianR, z: obsidianR)
-      world3dWriteTransform(world: world, entity: entity, transform: transform)
+    var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
+    var excursion: Float = 0.0
+    if i % 3 is 0 {
+    var pulse: Float = math.sin(x: time * 0.26 + phase * 3.1)
+    if pulse < 0.0 {
+      pulse = 0.0
     }
-    if sdf.cluster is 2 {
-      # Ember: fast and churning, with big size swings. Very sticky
-      # (k 1.15) so it stays one mass and instead boils internally, which
-      # is what makes the hot-to-deep colour gradient visible.
-      let fast: Float = time * 1.35
-      transform.position = vec3.create(
-        x: 0.0 - 0.35 + math.cos(x: fast + phase * 1.4) * 1.18,
-        y: 5.25 + math.sin(x: fast * 0.55 + phase) * 0.40,
-        z: 0.75 + math.sin(x: fast * 0.85 + phase * 1.9) * 0.25
-      )
-      let emberR: Float = 0.78 + math.sin(x: fast * 0.62 + phase * 2.3) * 0.42
-      transform.scale = vec3.create(x: emberR, y: emberR, z: emberR)
-      world3dWriteTransform(world: world, entity: entity, transform: transform)
+    excursion = pulse * pulse * pulse * 6.0
     }
-    if sdf.cluster is 0 {
-      # Excursion: every third ball periodically breaks away TOWARD THE
-      # CAMERA (-y, into the empty foreground; straight up would leave the
-      # frame) far enough that the smooth-union (k 0.62) pinches off and it
-      # reads as a DISCONNECTED droplet, then drifts back and merges. The
-      # half-wave pulse is cubed so a ball spends most of its cycle in the
-      # cluster and the departure is a distinct event rather than constant
-      # drift; it also shrinks while away, which makes the pinch-off
-      # decisive and reads naturally (a droplet is smaller than the mass it
-      # left).
-      var excursion: Float = 0.0
-      if i % 3 is 0 {
-      var pulse: Float = math.sin(x: time * 0.26 + phase * 3.1)
-      if pulse < 0.0 {
-        pulse = 0.0
-      }
-      excursion = pulse * pulse * pulse * 6.0
-      }
-      transform.position = vec3.create(
-      x: 4.55 + math.cos(x: time * 0.72 + phase) * (1.05 + (i % 2).toFloat() * 0.24) - 0.8 * math.cos(x: phase) * excursion,
-      y: 2.25 + math.sin(x: time * 0.41 + phase * 1.7) * 0.45 - excursion,
-      z: 1.21 + math.sin(x: time * 0.83 + phase) * 0.30 + 0.25 * excursion
-      )
-      let radius: Float = 1.45 + math.sin(x: time * 0.67 + phase * 2.0) * 0.16 - 0.08 * excursion
-      transform.scale = vec3.create(x: radius, y: radius, z: radius)
-      world3dWriteTransform(world: world, entity: entity, transform: transform)
-      }
-    i = i + 1
+    transform.position = vec3.create(
+    x: 4.55 + math.cos(x: time * 0.72 + phase) * (1.05 + (i % 2).toFloat() * 0.24) - 0.8 * math.cos(x: phase) * excursion,
+    y: 2.25 + math.sin(x: time * 0.41 + phase * 1.7) * 0.45 - excursion,
+    z: 1.21 + math.sin(x: time * 0.83 + phase) * 0.30 + 0.25 * excursion
+    )
+    let radius: Float = 1.45 + math.sin(x: time * 0.67 + phase * 2.0) * 0.16 - 0.08 * excursion
+    transform.scale = vec3.create(x: radius, y: radius, z: radius)
+    world3dWriteTransform(world: world, entity: hit.entity, transform: transform)
   }
 }
