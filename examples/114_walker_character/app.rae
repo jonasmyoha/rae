@@ -15,6 +15,10 @@ import core
 import math
 import profile
 import gpu2d
+import ecs/entity
+import ecs/component_table
+open ecs/entity
+open ecs/component_table
 import sdf_text
 import vec3
 import gltf
@@ -121,22 +125,13 @@ type InputUi {
 
 # CameraState + cameraUpdate live in camera.rae (#548).
 
-# One non-player crowd character: its own world transform AND its own animation
-# state (clip + time), independent of the hero (#547). This is what makes the
-# crowd a set of distinct characters — each holds its own pose in its own palette
-# slot — rather than phase-shifted copies of the player. The full roster (#547)
-# folds the hero in as member 0 with a controller + owner; this is the animation
-# half of that.
-type CrowdMember {
-  model: Mat4
-  clipIndex: Int
-  animTime: Float
-  controller: ThirdPersonController
-}
-
 # The animated character: the player-controlled hero plus a `crowd` of
-# independently-animated CrowdMembers. #547 will fold the hero into the roster as
-# member 0 and add per-character controllers/owners for multiplayer.
+# independently-animated members. #739: the hero's controller and each crowd
+# member are now ENTITIES in the GameWorld — `heroEntity` carries the hero's
+# ThirdPersonController; `crowdEntities` are the crowd members, each an entity
+# with a ThirdPersonController + AnimationState{clipIndex,animTime} + Transform3D.
+# They're driven in place via componentMod (no copy-out/mutate/set-back), and
+# each member's render model is derived from its controller (walkerWorldModel).
 type CharacterState {
   skeleton: Skeleton
   idleClip: Clip
@@ -145,7 +140,7 @@ type CharacterState {
   bindPose: SkeletonPose
   transitionFrom: SkeletonPose
   transitionElapsed: Float
-  controller: ThirdPersonController
+  heroEntity: EntityId
   clipIndex: Int
   playing: Bool
   speed: Float
@@ -156,9 +151,24 @@ type CharacterState {
   basePartModel: Mat4
   model: Mat4
   prevModel: Mat4
-  crowd: List(CrowdMember)
+  crowdEntities: List(EntityId)
   crowdBatch: InstanceBatch
   groundZ: Float
+}
+
+# Hero controller accessors — read a copy, or drive it in place through the
+# GameWorld's controllers table (write-through componentMod, #721). Replaces the
+# old `app.character.controller` struct field.
+func heroController(app: view App) ret ThirdPersonController {
+  ret componentGet(this: app.world.controllers, entity: app.character.heroEntity)
+}
+
+# The controller of crowd member `slot` (a copy), for reads.
+func crowdController(app: view App, slot: view Int) ret ThirdPersonController {
+  if let entity: EntityId = app.character.crowdEntities.copyAt(index: slot) {
+    ret componentGet(this: app.world.controllers, entity: entity)
+  }
+  ret createThirdPersonController()
 }
 
 # The deferred renderer + dynamic-resolution controller. (#552)
@@ -269,6 +279,9 @@ func createApp() ret App {
   var scene: Scene3d = createScene3d()
   let groundZ: Float = 0.0 - 1.0
   var characterController: ThirdPersonController = createThirdPersonController()
+  # #739: the GameWorld holds the hero + crowd as entities; built here so
+  # createApp can populate it, then moved into the App below.
+  var gameWorld: GameWorld = createGameWorld()
 
   let partTransform: Transform3d = {
     position: vec3.create(
@@ -324,7 +337,7 @@ func createApp() ret App {
   var grass: GrassField = createGrassField(assets: assets, groundZ: groundZ)
 
   let cloneCount: Int = 5
-  let cloneModels: List(CrowdMember) = createList(CrowdMember, cap: cloneCount)
+  var crowdEntities: List(EntityId) = createList(EntityId, cap: cloneCount)
   let firstPart: MeshHandle = meshHandle(id: walkerIntAt(values: partIds, index: 0), generation: 1)
   var characterClones: InstanceBatch = createInstanceBatch(mesh: firstPart, capacity: cloneCount)
 
@@ -400,6 +413,13 @@ func createApp() ret App {
   spawnOnLand(controller: characterController, groundZ: groundZ)
   partModel = walkerWorldModel(baseModel: basePartModel, controller: characterController)
 
+  # #739: the hero is an entity carrying its ThirdPersonController + Transform3D.
+  # Its clip/animTime + motion-vector model stay on CharacterState (hero-specific
+  # transitions); only the controller moves into the world.
+  let heroEntity: EntityId = gameWorldAddEntity(world: gameWorld)
+  gameWorldSetController(world: gameWorld, entity: heroEntity, controller: characterController)
+  gameWorldSetTransform(world: gameWorld, entity: heroEntity, transform: controllerTransform3D(controller: characterController))
+
   loop var cloneIndex: Int = 0, cloneIndex < cloneCount, ++cloneIndex {
     let spiralAngle: Float = cloneIndex.toFloat() * 2.3999632
     let spiralRadius: Float = 3.5 + cloneIndex.toFloat() * 0.45
@@ -415,13 +435,16 @@ func createApp() ret App {
     cloneController.position.y = cloneSpot.y
     cloneController.position.z = cloneZ
     cloneController.heading = spiralAngle
-    let cloneModel: Mat4 = walkerWorldModel(baseModel: basePartModel, controller: cloneController)
-    cloneModels.add(value: {
-      model: cloneModel,
-      clipIndex: crowdClipFor(index: cloneIndex),
-      animTime: cloneIndex.toFloat() * 0.4,
-      controller: own cloneController
+    # #739: each crowd member is an entity — controller + AnimationState + a
+    # Transform3D synced from the controller. Its render model is derived from
+    # the controller (walkerWorldModel) at draw time, so no stored model.
+    let cloneEntity: EntityId = gameWorldAddEntity(world: gameWorld)
+    gameWorldSetController(world: gameWorld, entity: cloneEntity, controller: cloneController)
+    gameWorldSetAnim(world: gameWorld, entity: cloneEntity, anim: AnimationState {
+      clipIndex: crowdClipFor(index: cloneIndex), animTime: cloneIndex.toFloat() * 0.4
     })
+    gameWorldSetTransform(world: gameWorld, entity: cloneEntity, transform: controllerTransform3D(controller: cloneController))
+    crowdEntities.add(value: cloneEntity)
   }
   updateInfiniteTerrain(terrain: terrain, scene: scene, playerPosition: characterController.position)
   updateGrassField(field: grass, playerPosition: characterController.position)
@@ -465,7 +488,7 @@ func createApp() ret App {
 
   ret App {
     scene: own scene
-    world: createGameWorld()
+    world: own gameWorld
     frame: {
       dt: 0.0, now: startT, startT: startT, prevT: startT, time: 0.0, aspect: 1.0,
       needsRender: true, dbgDidWork: true, taaSettleFrames: 0, renderedOnce: false,
@@ -480,10 +503,10 @@ func createApp() ret App {
     character: {
       skeleton: own sk, idleClip: idleClip, walkClip: walkClip, runClip: runClip,
       bindPose: bindPose, transitionFrom: bindPose, transitionElapsed: clipTransitionDuration,
-      controller: own characterController, clipIndex: clipIndex, playing: playing,
+      heroEntity: heroEntity, clipIndex: clipIndex, playing: playing,
       speed: speed, animTime: 0.0, toon: toonShading,
       partIds: own partIds, partRough: own partRough, basePartModel: basePartModel,
-      model: partModel, prevModel: partModel, crowd: own cloneModels,
+      model: partModel, prevModel: partModel, crowdEntities: own crowdEntities,
       crowdBatch: own characterClones, groundZ: groundZ
     }
     terrain: own terrain
@@ -517,17 +540,15 @@ func frameBegin(app: mod App) {
 # (#546) — the hero or a crowd member. Used to aim the camera and stream the
 # terrain/grass around the ACTIVE character rather than always the hero.
 func controlledPosition(app: view App) ret Vec3 {
-  if rosterControlledIsHero(roster: app.players) { ret app.character.controller.position }
+  if rosterControlledIsHero(roster: app.players) { ret heroController(app: app).position }
   let idx: Int = rosterControlledCrowdIndex(roster: app.players)
-  if let member: CrowdMember = app.character.crowd.copyAt(index: idx) { ret member.controller.position }
-  ret app.character.controller.position
+  ret crowdController(app: app, slot: idx).position
 }
 
 func controlledHeading(app: view App) ret Float {
-  if rosterControlledIsHero(roster: app.players) { ret app.character.controller.heading }
+  if rosterControlledIsHero(roster: app.players) { ret heroController(app: app).heading }
   let idx: Int = rosterControlledCrowdIndex(roster: app.players)
-  if let member: CrowdMember = app.character.crowd.copyAt(index: idx) { ret member.controller.heading }
-  ret app.character.controller.heading
+  ret crowdController(app: app, slot: idx).heading
 }
 
 # Shared reaction to a character switch (#546), from Page Up/Down, keys 1/2, or
@@ -580,14 +601,18 @@ func updateApp(app: mod App) {
     let intent: InputIntent = inputUpdate(moveStick: app.io.moveStick, joyActive: joyActive,
       allowKeys: uiPointerCaptured(input: app.io.ui) is false and app.character.playing)
     if rosterControlledIsHero(roster: app.players) {
-      characterMoved = updateWalkerMovement(controller: app.character.controller,
+      # Drive the hero's controller IN PLACE through the world's controllers table
+      # (write-through componentMod, #721) — no copy-out/set-back.
+      let heroE: EntityId = app.character.heroEntity
+      let heroCtrl: mod ThirdPersonController => componentMod(this: app.world.controllers, entity: heroE)
+      characterMoved = updateWalkerMovement(controller: heroCtrl,
         intent: intent, cameraYaw: app.cam.rig.viewYaw, dt: dt * app.character.speed)
-      groundWalker(controller: app.character.controller, groundZ: app.character.groundZ)
+      groundWalker(controller: heroCtrl, groundZ: app.character.groundZ)
       if characterMoved {
-        app.character.model = walkerWorldModel(baseModel: app.character.basePartModel, controller: app.character.controller)
+        app.character.model = walkerWorldModel(baseModel: app.character.basePartModel, controller: heroCtrl)
         app.persist.stateDirty = true
       }
-      let heroClip: Int = locomotionClipFor(controller: app.character.controller)
+      let heroClip: Int = locomotionClipFor(controller: heroCtrl)
       if heroClip is not app.character.clipIndex {
         app.character.transitionFrom = captureSkeletonPose(sk: app.character.skeleton)
         app.character.transitionElapsed = 0.0
@@ -596,17 +621,17 @@ func updateApp(app: mod App) {
         setPanelSelection(panel: app.io.clipPanel, world: app.io.world, group: 1, id: (app.character.clipIndex as ClipKind).toString())
       }
     } else {
-      # The player drives a crowd member: copy it out, step its controller, and
-      # write it back (Rae lists hand back a value, not a reference).
+      # The player drives a crowd member: step its controller entity IN PLACE and
+      # set its animation clip — both write-through componentMod, no copy/set-back.
       let idx: Int = rosterControlledCrowdIndex(roster: app.players)
-      if let member: CrowdMember = app.character.crowd.copyAt(index: idx) {
-        var driven: CrowdMember = member
-        characterMoved = updateWalkerMovement(controller: driven.controller,
+      if let crowdE: EntityId = app.character.crowdEntities.copyAt(index: idx) {
+        let drivenCtrl: mod ThirdPersonController => componentMod(this: app.world.controllers, entity: crowdE)
+        characterMoved = updateWalkerMovement(controller: drivenCtrl,
           intent: intent, cameraYaw: app.cam.rig.viewYaw, dt: dt * app.character.speed)
-        groundWalker(controller: driven.controller, groundZ: app.character.groundZ)
-        driven.model = walkerWorldModel(baseModel: app.character.basePartModel, controller: driven.controller)
-        driven.clipIndex = locomotionClipFor(controller: driven.controller)
-        app.character.crowd.set(index: idx, value: driven)
+        groundWalker(controller: drivenCtrl, groundZ: app.character.groundZ)
+        let drivenClip: Int = locomotionClipFor(controller: drivenCtrl)
+        let drivenAnim: mod AnimationState => componentMod(this: app.world.animStates, entity: crowdE)
+        drivenAnim.clipIndex = drivenClip
         if characterMoved { app.persist.stateDirty = true }
       }
       # The hero, no longer player-driven, stands idle.
@@ -638,7 +663,7 @@ func updateApp(app: mod App) {
       writeHotReloadStateFor(appId: state114AppId,
                              state: serialize114State(clipIndex: app.character.clipIndex, playing: app.character.playing,
                                                       speed: app.character.speed, toon: app.character.toon,
-                                                      controller: app.character.controller,
+                                                      controller: heroController(app: app),
                                                       rig: app.cam.rig, camera: app.cam.camera))
       app.persist.lastStateSave = now
       app.persist.stateDirty = false
@@ -671,9 +696,9 @@ func updateApp(app: mod App) {
 # ----- the loop ------------------------------------------------------------
 func runWalkerApp() ret Int {
   var app: App = createApp()
-  # #738: prove the GameWorld holds real ECS component types at boot.
-  seedGameWorld(world: app.world)
-  log("[ecs] GameWorld: {gameWorldEntityCount(world: app.world)} entities with Transform3D/WorldTransform3D/Material3D components (#738)")
+  # #739: the GameWorld now holds the hero + crowd as entities (built in
+  # createApp): 1 hero + cloneCount crowd, each a ThirdPersonController entity.
+  log("[ecs] GameWorld: {gameWorldEntityCount(world: app.world)} entities (hero + crowd, #739)")
   profile.profileMaybeAutoStart()
   loop not gpu2d.pollClose() {
     frameBegin(app: app)
