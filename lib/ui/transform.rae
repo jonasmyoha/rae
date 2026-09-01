@@ -1,9 +1,12 @@
-# TransformSystem — RUICS § 8 in Rae form.
+# UI transform driver — RUICS § 8 in Rae form.
 #
-# Walks the entity tree top-down and composes each entity's parent-local
-# `ComputedRect` (as a local `Transform2D`) with its parent's `WorldTransform2D`
-# to produce an absolute `WorldTransform2D` in screen space (#725 — the general
-# lib/ecs transform types, not a bespoke scalar struct).
+# #727: the UI no longer recurses the tree itself. Each entity's parent-local
+# `ComputedRect` (+ scroll offset + TransformFx) becomes a local `Transform2D`,
+# and the GENERAL lib/ecs `transformSystem2D` folds those into `WorldTransform2D`
+# by walking the cached parent-before-child DEPTH ORDER (#713/#716) — the same
+# system a GameWorld uses. This file now only: builds the local transforms,
+# invokes that system, and accumulates the UI-specific `WorldVisual`
+# (alpha/visible), which the general geometry system does not carry.
 #
 # Inputs (all populated by layoutSystem):
 #   ComputedRect  — local position+size in parent content space
@@ -21,6 +24,8 @@
 import core
 open ecs/component_table
 import ecs/transform
+open ecs/HierarchySystem/HierarchySystem
+open ecs/TransformSystem/TransformSystem
 
 # Returns the active flag for entity; defaults to true if no Active.
 func transformActive(world: view UiWorld, entity: view EntityId) ret Bool {
@@ -79,32 +84,20 @@ func runtimeOffsetOf(world: view UiWorld, entity: view EntityId) ret Vec2 {
   ret ro.delta
 }
 
-# Compose `entity`'s WorldTransform from its parent's transform plus
-# its own ComputedRect / Opacity / TransformFx, then recurse into
-# children. `parentX`/`parentY` are absolute coordinates of the parent's
-# content origin; `parentAlpha` is the parent's resolved alpha;
-# `parentVisible` tracks whether any ancestor was inactive (and thus
-# hides the whole subtree even if a descendant has Active=true).
-func composeTransform(
-  world: mod UiWorld
-  entity: view EntityId
-  parentX: view Float
-  parentY: view Float
-  parentAlpha: view Float
-  parentVisible: view Bool
-) {
-  let cr: ComputedRect = computedRectOf(world: world, entity: entity)
+# Fold the parent's accumulated alpha/visible with this entity's own Opacity /
+# Active / TransformFx into a WorldVisual. Clamped to [0,1]. Roots start from
+# parentAlpha=1 / parentVisible=true. (Alpha/visible are the UI-specific concern
+# the general geometry TransformSystem does not track — see accumulateVisibility.)
+func composeVisual(world: view UiWorld, entity: view EntityId,
+                   parentAlpha: view Float, parentVisible: view Bool) ret WorldVisual {
   let fx: TransformFx = transformFxOf(world: world, entity: entity)
-
-  let active: Bool = transformActive(world: world, entity: entity)
   var visible: Bool = parentVisible
-  if active is false {
+  if transformActive(world: world, entity: entity) is false {
     visible = false
   }
   if fx.visible is false {
     visible = false
   }
-
   var alpha: Float = parentAlpha * transformOpacity(world: world, entity: entity) * fx.alpha
   if alpha < 0.0 {
     alpha = 0.0
@@ -112,82 +105,73 @@ func composeTransform(
   if alpha > 1.0 {
     alpha = 1.0
   }
+  ret WorldVisual { alpha: alpha, visible: visible }
+}
 
-  # The entity's LOCAL transform (#725): parent-content-local position from
-  # layout, plus the runtime-only scroll offset (applied here in transform so it
-  # never dirties layout), plus authored rotation/scale from TransformFx.
-  let ro: Vec2 = runtimeOffsetOf(world: world, entity: entity)
-  let localXform: Transform2D = {
-    position: { x: cr.position.x + ro.x, y: cr.position.y + ro.y }
-    rotation: fx.rotation
-    scale: { x: fx.scaleX, y: fx.scaleY }
-  }
-
-  # Fold the local transform into the parent's world origin to get this entity's
-  # WorldTransform2D. UI composition is translation-only (children are placed by
-  # translating the parent's absolute origin; scale/rotation are per-entity and
-  # are NOT propagated into child positions), so world position = parent origin +
-  # local position. absX/absY double as the child recursion's parent origin.
-  let absX: Float = parentX + localXform.position.x
-  let absY: Float = parentY + localXform.position.y
-  let wt: WorldTransform2D = {
-    position: { x: absX, y: absY }
-    rotation: localXform.rotation
-    scale: localXform.scale
-  }
-  componentSet(this: world.worldTransforms, entity: entity, data: wt)
-
-  # alpha/visible are their own derived cache now (#725), written beside the
-  # geometry transform.
-  let wv: WorldVisual = { alpha: alpha, visible: visible }
-  componentSet(this: world.worldVisuals, entity: entity, data: wv)
-
-  # Recurse into active children. The child's parent-content origin is
-  # this entity's own (absX, absY); ComputedRect on the child is already
-  # in parent-content-local space (layout.rae wrote it that way), so
-  # composing is a simple translation.
-  if componentHas(this: world.childrens, entity: entity) is false {
-    ret
-  }
-  let ch: view Children => componentView(this: world.childrens, entity: entity)
-  let n: Int = ch.ids.length
-  var i: Int = 0
-  loop i < n {
-    let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
-    composeTransform(
-      world: world
-      entity: cid
-      parentX: absX
-      parentY: absY
-      parentAlpha: alpha
-      parentVisible: visible
-    )
-    i = i + 1
+# Populate each laid-out entity's LOCAL Transform2D (#727): parent-content-local
+# position from layout (ComputedRect), plus the runtime-only scroll offset
+# (applied here so it never dirties layout), plus authored TransformFx
+# rotation/scale. This is the input the general TransformSystem folds into
+# worldTransforms. Iterates the ComputedRect table — one local per laid-out node.
+func buildLocalTransforms(world: mod UiWorld) {
+  loop var i: Int = 0, i < componentCount(this: world.computedRects), ++i {
+    let entity: EntityId = componentEntityAt(this: world.computedRects, i: i)
+    let cr: ComputedRect = componentDataAt(this: world.computedRects, i: i)
+    let ro: Vec2 = runtimeOffsetOf(world: world, entity: entity)
+    let fx: TransformFx = transformFxOf(world: world, entity: entity)
+    let local: Transform2D = {
+      position: { x: cr.position.x + ro.x, y: cr.position.y + ro.y }
+      rotation: fx.rotation
+      scale: { x: fx.scaleX, y: fx.scaleY }
+    }
+    componentSet(this: world.localTransforms, entity: entity, data: local)
   }
 }
 
-# Walk every alive root (no Parent, has ComputedRect) and compose
-# WorldTransforms for the whole subtree.
-func transformSystem(world: mod UiWorld) {
-  let alive: view List(EntityId) => world.allocator.alive
-  let n: Int = alive.length
-  var i: Int = 0
-  loop i < n {
-    let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
-    if componentHas(this: world.parents, entity: e) is false {
-      if componentHas(this: world.computedRects, entity: e) {
-        composeTransform(
-          world: world
-          entity: e
-          parentX: 0.0
-          parentY: 0.0
-          parentAlpha: 1.0
-          parentVisible: true
-        )
+# Accumulate alpha/visible down the hierarchy into WorldVisual, in the SAME
+# parent-before-child depth order the geometry pass uses. Roots (no Parent) fold
+# onto a fully-visible parent; every other entity folds onto its parent's
+# already-written WorldVisual (depthOrder guarantees the parent came first).
+func accumulateVisibility(world: mod UiWorld) {
+  # Roots: a local transform but no Parent.
+  loop var i: Int = 0, i < componentCount(this: world.localTransforms), ++i {
+    let entity: EntityId = componentEntityAt(this: world.localTransforms, i: i)
+    if componentHas(this: world.parents, entity: entity) is false {
+      let wv: WorldVisual = composeVisual(world: world, entity: entity, parentAlpha: 1.0, parentVisible: true)
+      componentSet(this: world.worldVisuals, entity: entity, data: wv)
+    }
+  }
+  # Parented entities, parent before child.
+  let order: view List(EntityId) => depthOrder(state: world.hierarchyOrder, parents: world.parents, childrens: world.childrens)
+  loop var i: Int = 0, i < order.length, ++i {
+    if let entity: EntityId = order.copyAt(index: i) {
+      if componentHas(this: world.parents, entity: entity) {
+        let link: Parent = componentGet(this: world.parents, entity: entity)
+        let parentWv: WorldVisual = worldVisualOf(world: world, entity: link.parent)
+        let wv: WorldVisual = composeVisual(world: world, entity: entity, parentAlpha: parentWv.alpha, parentVisible: parentWv.visible)
+        componentSet(this: world.worldVisuals, entity: entity, data: wv)
       }
     }
-    i = i + 1
   }
+}
+
+# The UI transform pass (#727): every entity's WorldTransform2D now comes from the
+# GENERAL lib/ecs TransformSystem folded over the depth-sorted hierarchy order —
+# NOT a bespoke recursive walk. Three steps: build the per-entity local
+# Transform2D, run transformSystem2D to fold locals into world transforms, and
+# accumulate the alpha/visible WorldVisual cache the geometry system doesn't
+# carry. Because every UI TransformFx is identity scale/rotation, the general
+# per-axis compose reduces to the old translation-only composition — same output.
+func transformSystem(world: mod UiWorld) {
+  buildLocalTransforms(world: world)
+  transformSystem2D(
+    orderState: world.hierarchyOrder
+    transforms: world.localTransforms
+    worldTransforms: world.worldTransforms
+    parents: world.parents
+    childrens: world.childrens
+  )
+  accumulateVisibility(world: world)
 }
 
 # Per-call cache for `transformSystemIfDirty`. Stores the generation
@@ -230,9 +214,10 @@ func createTransformCache() pub ret TransformCache {
 # changed). Returns true when the system actually ran, false when the
 # cached worldTransforms output is still valid.
 #
-# Conservative-but-correct: never skips when in doubt. The 6 component
-# tables here cover every read inside `composeTransform`; we don't
-# track `world.worldTransforms` itself because we're the only writer
+# Conservative-but-correct: never skips when in doubt. The component tables here
+# cover every read inside buildLocalTransforms / transformSystem2D /
+# accumulateVisibility; we don't track `world.worldTransforms` itself (nor the
+# derived localTransforms / worldVisuals) because we're the only writer
 # and any external mutation would still be observable through one of
 # the other tables (e.g. setHeroVisible reads computedRects first).
 func transformSystemIfDirty(world: mod UiWorld, cache: mod TransformCache) pub ret Bool {
