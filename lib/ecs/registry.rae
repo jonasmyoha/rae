@@ -3,9 +3,9 @@
 # ONE registration table drives serialization, networking replication, and
 # editor-only handling — with NO language annotations. A component is not
 # serializable because of a keyword; it is serializable because it was
-# registered here with the SERIALIZE flag. Derived / cache components
+# registered here with the serialize flag. Derived / cache components
 # (WorldTransform*, ComputedRect, MeasuredSize, ...) are simply registered
-# WITHOUT SERIALIZE (or not registered at all), so "don't persist runtime state"
+# WITHOUT serialize (or not registered at all), so "don't persist runtime state"
 # falls out of the registry rather than a type annotation.
 #
 # On `save` / `load`: Rae has no first-class function references (see the same
@@ -15,18 +15,18 @@
 # entry is a name + flags; the name IS the save/load key.
 import core
 
-# Flag bitmask. Combine with `bitor` (e.g. SERIALIZE bitor REPLICATE) and test
+# Flag bitmask. Combine with `bitor` (e.g. serialize bitor replicate) and test
 # with hasFlag / registeredHasFlag.
-const SERIALIZE: Int = 1     # persist to save files
-const REPLICATE: Int = 2     # send over the network
-const EDITOR_ONLY: Int = 4   # exists only in the editor; never in a shipped save
-# RESOURCE marks the name as a world-global-singleton RESOURCE (a plain field on
+const serialize: Int = 1     # persist to save files
+const replicate: Int = 2     # send over the network
+const editorOnly: Int = 4   # exists only in the editor; never in a shipped save
+# resource marks the name as a world-global-singleton resource (a plain field on
 # the World — world.frame / world.input — see lib/ecs/world.rae + docs/ecs-
 # resources.md), NOT a per-entity component. Serialization treats a resource as a
 # single top-level value, not an entity->value map. An AUTHORED resource is
-# registered `RESOURCE bitor SERIALIZE`; a RUNTIME resource is `RESOURCE` alone
-# (no SERIALIZE) so save/load skips it — the same flag-driven rule as components.
-const RESOURCE: Int = 8
+# registered `resource bitor serialize`; a RUNTIME resource is `resource` alone
+# (no serialize) so save/load skips it — the same flag-driven rule as components.
+const resource: Int = 8
 
 type ComponentEntry {
   name: String
@@ -102,16 +102,16 @@ func registeredCount(reg: view ComponentRegistry) ret Int {
   ret reg.entries.length
 }
 
-# Register a world-global-singleton RESOURCE by name. Sets the RESOURCE flag on
+# Register a world-global-singleton resource by name. Sets the resource flag on
 # top of `flags`, so an AUTHORED resource is `registerResource(reg, "Frame",
-# SERIALIZE)` (persisted) while a RUNTIME resource is `registerResource(reg,
-# "Input", 0)` (RESOURCE only -> save/load skips it). Same registry, same flag
+# serialize)` (persisted) while a RUNTIME resource is `registerResource(reg,
+# "Input", 0)` (resource only -> save/load skips it). Same registry, same flag
 # rules as a component — a resource just isn't a per-entity table.
 func registerResource(reg: mod ComponentRegistry, name: view String, flags: view Int) {
-  registerComponent(reg: reg, name: name, flags: flags bitor RESOURCE)
+  registerComponent(reg: reg, name: name, flags: flags bitor resource)
 }
 
-# Whether `name` is registered as a resource (has the RESOURCE flag).
+# Whether `name` is registered as a resource (has the resource flag).
 func isResource(reg: view ComponentRegistry, name: view String) ret Bool {
-  ret registeredHasFlag(reg: reg, name: name, flag: RESOURCE)
+  ret registeredHasFlag(reg: reg, name: name, flag: resource)
 }

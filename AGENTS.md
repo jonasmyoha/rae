@@ -15,6 +15,14 @@ These instructions define **how Codex should work**, communicate progress, and i
 ### Naming conventions (language-wide, normative):
 - Function names MUST be `camelCase` (e.g. `add`, `removeLast`, `ensureCapacity`)
 - Type names MUST be `PascalCase` (e.g. `List`, `Map`, `HashMap`, `Ptr`)
+- EVERYTHING that is NOT a type is `camelCase` — functions, parameters, locals,
+  struct fields, enum cases, AND constants. A `const` is a value binding, not a
+  special category: write `const serialize: Int = 1`, `const maxRetries: Int = 5`.
+- `snake_case` and `SHOUTING_SNAKE_CASE` are BANNED, everywhere, no exceptions.
+  They are C / other-language habits, not Rae. In particular constants are NOT
+  `SCREAMING_SNAKE_CASE` (that is the single most common way this slips in) — a
+  const named `SERIALIZE` or `MAX_RETRIES` is wrong; use `serialize` /
+  `maxRetries`. Enum cases are `camelCase` too (`roundedRect`, not `ROUNDED_RECT`).
 - Violations MUST produce a compiler diagnostic
 
 ### No single-letter names for parameters or meaningful locals:
