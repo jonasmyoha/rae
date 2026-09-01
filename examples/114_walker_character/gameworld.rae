@@ -29,6 +29,14 @@ type AnimationState {
   animTime: Float
 }
 
+# One skinned body-mesh part (#740): its uploaded mesh-handle id + surface
+# roughness. Replaces the parallel `partIds`/`partRough` Lists — each part is an
+# entity carrying this component, and the renderer iterates the table.
+type PartRoughness {
+  meshId: Int
+  roughness: Float
+}
+
 # A gameplay surface material. Capital-D `Material3D` to match the capital-D
 # lib/ecs Transform3D/WorldTransform3D components; distinct from scene3d's Euler
 # `Material3d` that 114's current renderer still consumes (migrated later).
@@ -50,6 +58,8 @@ type GameWorld {
   # copy-out/mutate/set-back.
   controllers: ComponentTable(ThirdPersonController)
   animStates: ComponentTable(AnimationState)
+  # #740: skinned body-mesh parts, one entity each.
+  partRoughness: ComponentTable(PartRoughness)
 }
 
 func createGameWorld() ret GameWorld {
@@ -60,6 +70,7 @@ func createGameWorld() ret GameWorld {
     materials: createComponentTable(Material3D)
     controllers: createComponentTable(ThirdPersonController)
     animStates: createComponentTable(AnimationState)
+    partRoughness: createComponentTable(PartRoughness)
   }
 }
 
@@ -88,6 +99,19 @@ func gameWorldSetController(world: mod GameWorld, entity: view EntityId, control
 
 func gameWorldSetAnim(world: mod GameWorld, entity: view EntityId, anim: view AnimationState) {
   componentSet(this: world.animStates, entity: entity, data: anim)
+}
+
+func gameWorldSetPartRoughness(world: mod GameWorld, entity: view EntityId, part: view PartRoughness) {
+  componentSet(this: world.partRoughness, entity: entity, data: part)
+}
+
+# The skinned parts, in creation (= upload) order — a query over the part table.
+func gameWorldPartCount(world: view GameWorld) ret Int {
+  ret componentCount(this: world.partRoughness)
+}
+
+func gameWorldPartAt(world: view GameWorld, i: view Int) ret PartRoughness {
+  ret componentDataAt(this: world.partRoughness, i: i)
 }
 
 # Derive a Transform3D from a controller (its position + heading about +Z). Kept

@@ -146,8 +146,6 @@ type CharacterState {
   speed: Float
   animTime: Float
   toon: Bool
-  partIds: List(Int)
-  partRough: List(Float)
   basePartModel: Mat4
   model: Mat4
   prevModel: Mat4
@@ -306,8 +304,12 @@ func createApp() ret App {
     log("[png] palette atlas {atlasW}x{atlasH}")
   }
 
-  let partIds: List(Int) = createList(Int, cap: 16)
-  let partRough: List(Float) = createList(Float, cap: 16)
+  # #740: each skinned body-mesh part is an ENTITY carrying a PartRoughness
+  # {meshId, roughness} component — no parallel partIds/partRough Lists. The
+  # renderer iterates the part table (query). firstPartId seeds the crowd
+  # instance batch's capacity mesh.
+  var firstPartId: Int = 0
+  var haveFirstPart: Bool = false
   loop var mi: Int = 0, mi < meshCount(g: g), ++mi {
     let name: String = meshName(g: g, meshIndex: mi)
     var rough: Float = 0.68
@@ -320,14 +322,21 @@ func createApp() ret App {
         let part: SkinnedMeshData = withAtlasColors(m: raw, atlas: atlas, width: atlasW, height: atlasH)
         let handle: MeshHandle = uploadSkinnedMesh(verts: part.verts, vertCount: part.vertCount, indices: part.indices)
         if meshHandleIsValid(h: handle) {
-          partIds.add(value: handle.id)
-          partRough.add(value: rough)
+          let partEntity: EntityId = gameWorldAddEntity(world: gameWorld)
+          gameWorldSetPartRoughness(world: gameWorld, entity: partEntity, part: PartRoughness {
+            meshId: handle.id, roughness: rough
+          })
+          if haveFirstPart is false {
+            firstPartId = handle.id
+            haveFirstPart = true
+          }
         }
       }
     }
   }
-  log("[gltf] skinned parts: {partIds.length}")
-  if partIds.length is 0 {
+  let partCount: Int = gameWorldPartCount(world: gameWorld)
+  log("[gltf] skinned parts: {partCount}")
+  if partCount is 0 {
     log("[gltf] no skinned primitives uploaded")
     gpu2d.closeWindow()
     sys.exit(code: 1)
@@ -338,7 +347,7 @@ func createApp() ret App {
 
   let cloneCount: Int = 5
   var crowdEntities: List(EntityId) = createList(EntityId, cap: cloneCount)
-  let firstPart: MeshHandle = meshHandle(id: walkerIntAt(values: partIds, index: 0), generation: 1)
+  let firstPart: MeshHandle = meshHandle(id: firstPartId, generation: 1)
   var characterClones: InstanceBatch = createInstanceBatch(mesh: firstPart, capacity: cloneCount)
 
   var camera: Camera3d = defaultCamera3d()
@@ -505,7 +514,7 @@ func createApp() ret App {
       bindPose: bindPose, transitionFrom: bindPose, transitionElapsed: clipTransitionDuration,
       heroEntity: heroEntity, clipIndex: clipIndex, playing: playing,
       speed: speed, animTime: 0.0, toon: toonShading,
-      partIds: own partIds, partRough: own partRough, basePartModel: basePartModel,
+      basePartModel: basePartModel,
       model: partModel, prevModel: partModel, crowdEntities: own crowdEntities,
       crowdBatch: own characterClones, groundZ: groundZ
     }
@@ -696,9 +705,9 @@ func updateApp(app: mod App) {
 # ----- the loop ------------------------------------------------------------
 func runWalkerApp() ret Int {
   var app: App = createApp()
-  # #739: the GameWorld now holds the hero + crowd as entities (built in
-  # createApp): 1 hero + cloneCount crowd, each a ThirdPersonController entity.
-  log("[ecs] GameWorld: {gameWorldEntityCount(world: app.world)} entities (hero + crowd, #739)")
+  # #739/#740: the GameWorld holds the hero + crowd (ThirdPersonController
+  # entities) plus the skinned body parts (PartRoughness entities).
+  log("[ecs] GameWorld: {gameWorldEntityCount(world: app.world)} entities ({gameWorldPartCount(world: app.world)} parts + hero + crowd)")
   profile.profileMaybeAutoStart()
   loop not gpu2d.pollClose() {
     frameBegin(app: app)
