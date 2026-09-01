@@ -317,6 +317,17 @@ for TARGET in "${TARGETS[@]}"; do
           fi
           rm -f "$TMP_INPUT_FILE"
         fi
+
+        # #763 no-globals WARNING phase: these transitional warnings are emitted
+        # to stderr for every module-level `var`/heap-`let` in the imported libs,
+        # so a `run` test that pulls in a global-holding lib module would otherwise
+        # see them merged into its captured output. Filter them from the
+        # comparison (same idea as the mem-stats filter) — EXCEPT the test that
+        # asserts them. Removed by #766 when the warning becomes a hard error.
+        case "$TEST_NAME" in
+            708_no_globals_warning) ;;
+            *) ACTUAL_OUTPUT=$(printf '%s' "$ACTUAL_OUTPUT" | grep -Ev 'warning: module-level `(var|let)`' || true) ;;
+        esac
     fi
 
     if [ -n "$TMP_OUTPUT_DIR" ]; then
