@@ -88,6 +88,7 @@ import core
 import json
 import ui/registry_remove
 open ecs/entity
+open ecs/HierarchySystem/HierarchySystem
 
 type FrameSet {
   names: List(String)
@@ -569,10 +570,6 @@ func hierarchyWouldCycle(parentIdxs: view List(Int), nodeIdx: view Int, candidat
   ret false
 }
 
-func appendEntityListFR(lst: mod List(EntityId), value: view EntityId) {
-  lst.add(value: value)
-}
-
 # Re-derive the ACTIVE hierarchy of the page-scoped instance from the
 # authored scene plus frame `frameIdx`'s Parent/order directives, then
 # rewrite the instance's Children/Parent components. `frameIdx < 0`
@@ -663,12 +660,32 @@ func deriveActiveHierarchy(world: mod UiWorld, scene: view Scene, frames: view F
     }
   }
 
-  # Rewrite Children/Parent for every mounted node from the active
-  # maps. A node whose children all moved away gets its Children
-  # removed (componentRemove is a no-op when absent). The scene
-  # root's own Parent belongs to the OUTER hierarchy — children-loop
-  # only ever writes Parent on non-root scene nodes, since rootIdx
-  # is never anyone's child (reparenting the root is rejected).
+  # #726: rebuild the active hierarchy through HierarchySystem — the UI sets only
+  # Parent, and setParent maintains the derived Children cache. Since this is a
+  # full rebuild, first DETACH every mounted non-root node (clears its Parent and
+  # unlinks it from its parent's Children); then the loop below re-links each node
+  # under its active parent. Detach-first guarantees a clean rebuild: a node that
+  # got reordered, orphaned, or unmounted this frame never lingers in a stale
+  # Children list. The scene root keeps its OUTER-hierarchy Parent (rootIdx is
+  # never a scene child, so it is skipped here and never re-linked below).
+  var detachIdx: Int = 0
+  loop detachIdx < nodeCount {
+    if detachIdx is not rootIdx {
+      var detachRaw: Int = -1
+      if let value: Int = entityVals.copyAt(index: detachIdx) {
+        detachRaw = value
+      }
+      if detachRaw >= 0 {
+        let detachEntity: EntityId = entityId(v: detachRaw)
+        if componentHas(this: world.parents, entity: detachEntity) {
+          setParent(parents: world.parents, childrens: world.childrens,
+                    child: detachEntity, parent: noEntity())
+        }
+      }
+    }
+    detachIdx = detachIdx + 1
+  }
+
   var b: Int = 0
   loop b < nodeCount {
     var parentRaw: Int = -1
@@ -696,7 +713,6 @@ func deriveActiveHierarchy(world: mod UiWorld, scene: view Scene, frames: view F
           used.add(value: 0)
           w = w + 1
         }
-        let kids: List(EntityId) = createList(EntityId, cap: childCount)
         var t: Int = 0
         loop t < childCount {
           var bestSlot: Int = -1
@@ -733,15 +749,13 @@ func deriveActiveHierarchy(world: mod UiWorld, scene: view Scene, frames: view F
             childEntityRaw = value
           }
           let childEntity: EntityId = entityId(v: childEntityRaw)
-          appendEntityListFR(lst: kids, value: childEntity)
-          let parentLink: Parent = { parent: parentEntity }
-          componentSet(this: world.parents, entity: childEntity, data: parentLink)
+          # #726: link via setParent. The children are visited in sort-key order,
+          # so setParent's append rebuilds the derived Children cache in exactly
+          # that order — matching the old hand-built, hand-sorted list.
+          setParent(parents: world.parents, childrens: world.childrens,
+                    child: childEntity, parent: parentEntity)
           t = t + 1
         }
-        let ch: Children = { ids: own kids }
-        componentSet(this: world.childrens, entity: parentEntity, data: own ch)
-      } else {
-        componentRemove(this: world.childrens, entity: parentEntity)
       }
     }
     b = b + 1
