@@ -329,15 +329,18 @@ func main() ret Int {
     ret 1
   }
 
-  # #732: stand up the ECS `World3d` — the entity core (EntityAllocator) plus a
-  # ComponentTable per 3D component (Transform3d/PrevTransform3d/Material3d/
-  # MeshRenderer/SdfPrimitive), keyed by EntityId — replacing the `entity: Int`
-  # index-into-parallel-Lists `Scene3d` model. Populated here from the loaded
-  # scene so 112 holds a real, non-empty ECS world; #733 migrates the storage
-  # wholesale (loader builds a World3d directly, renderer reads its queries) and
-  # retires the parallel Lists.
-  let world3d: World3d = buildWorld3dFromScene3d(old: scene1.scene)
-  log("[ecs] World3d: {world3dEntityCount(world: world3d)} entities carrying Transform3d/PrevTransform3d components (#732)")
+  # #733: World3d is the authoritative 3D state — one ECS world per scene, its
+  # ComponentTables (Transform3d/PrevTransform3d/Material3d/MeshRenderer/
+  # SdfPrimitive keyed by EntityId) replacing Scene3d's parallel Lists and the
+  # `entity: Int` index model. The loaded Scene3dAsset survives only as the parse
+  # result we seed from (and for camera/light + nodeId lookups). Animation mutates
+  # these worlds by EntityId; the renderer is fed a Scene3d derived from the
+  # active world each frame (world3dToScene3d) until #736 has it read World3d
+  # queries directly.
+  var world1: World3d = buildWorld3dFromScene3d(old: scene1.scene)
+  var world2: World3d = buildWorld3dFromScene3d(old: scene2.scene)
+  var world3: World3d = buildWorld3dFromScene3d(old: scene3.scene)
+  log("[ecs] World3d: scene1 {world3dEntityCount(world: world1)}, scene2 {world3dEntityCount(world: world2)}, scene3 {world3dEntityCount(world: world3)} entities (#733)")
 
   # Fonts + theme through the shared loader, which also bridges the
   # theme's PALETTE into the active theme — the step that was missing
@@ -730,15 +733,23 @@ func main() ret Int {
       # solid, which is how the bug was noticed.
       light.sunDir = settingsSunDir(s: settings)
       light.sunColor = settingsSunColor(s: settings)
-      if uiState.activeScene is 1 { animateScene1(asset: scene1, time: simTime) }
+      if uiState.activeScene is 1 { animateScene1(world: world1, asset: scene1, time: simTime) }
       if uiState.activeScene is 2 {
-        animateScene(scene: scene2.scene, sceneId: 2, time: simTime)
-        animateMetaballLab(asset: scene2, time: simTime)
+        animateScene(world: world2, sceneId: 2, time: simTime)
+        animateMetaballLab(world: world2, time: simTime)
       }
-      if uiState.activeScene is 3 { animateScene3(asset: scene3, time: simTime) }
+      if uiState.activeScene is 3 { animateScene3(world: world3, time: simTime) }
 
 
       let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
+      # #733 bridge: derive the flat Scene3d the shared renderer consumes from the
+      # active world, once per frame (transforms already animated, prevTransforms
+      # still hold last frame's — the snapshot below advances them). #736 removes
+      # this by having the renderer read World3d queries directly.
+      var renderScene: Scene3d = createScene3d()
+      if uiState.activeScene is 1 { renderScene = world3dToScene3d(world: world1) }
+      if uiState.activeScene is 2 { renderScene = world3dToScene3d(world: world2) }
+      if uiState.activeScene is 3 { renderScene = world3dToScene3d(world: world3) }
       # Frame order is DERIVED by the render graph (#331/#332): scene3d
       # writes the colour target, the UI overlay MODIFIES it (load-preserving),
       # present reads it. The passes are declared backwards in
@@ -762,17 +773,9 @@ func main() ret Int {
           # an app that skips the shadow pass renders unshadowed, which is what a
           # frame with no shadow pass should look like — so the toggle is simply
           # not doing the work, with no renderer flag to thread through.
-          if settings.shadows and uiState.activeScene is 1 {
-            renderSceneShadow(scene: scene1.scene)
-            renderSceneShadowSdf(scene: scene1.scene)
-          }
-          if settings.shadows and uiState.activeScene is 2 {
-            renderSceneShadow(scene: scene2.scene)
-            renderSceneShadowSdf(scene: scene2.scene)
-          }
-          if settings.shadows and uiState.activeScene is 3 {
-            renderSceneShadow(scene: scene3.scene)
-            renderSceneShadowSdf(scene: scene3.scene)
+          if settings.shadows {
+            renderSceneShadow(scene: renderScene)
+            renderSceneShadowSdf(scene: renderScene)
           }
           endShadowPass()
           if shadowLogged is false {
@@ -787,23 +790,13 @@ func main() ret Int {
           # forward path's — which leaves the G-buffer unsubmitted and
           # renders a black frame with a working UI (found in 113).
           gbuffer.beginPass(camera: camera, light: light, aspect: aspect)
-          if uiState.activeScene is 1 {
-            gbuffer.renderScene(scene: scene1.scene)
-            renderSceneSdf(scene: scene1.scene, camera: camera)
-          }
-          if uiState.activeScene is 2 {
-            gbuffer.renderScene(scene: scene2.scene)
-            renderSceneSdf(scene: scene2.scene, camera: camera)
-          }
-          if uiState.activeScene is 3 {
-            gbuffer.renderScene(scene: scene3.scene)
-            renderSceneSdf(scene: scene3.scene, camera: camera)
-          }
+          gbuffer.renderScene(scene: renderScene)
+          renderSceneSdf(scene: renderScene, camera: camera)
           gbuffer.endPass()
         }
         if tag is RenderTag.ssao or tag is RenderTag.depthPyramid or tag is RenderTag.lighting
           or tag is RenderTag.taa or tag is RenderTag.composite {
-          renderDeferredPass(r: renderer, tag: tag, scene: scene1.scene,
+          renderDeferredPass(r: renderer, tag: tag, scene: renderScene,
                              camera: camera, light: light, aspect: aspect)
         }
         if tag is RenderTag.uiOverlay {
@@ -827,9 +820,9 @@ func main() ret Int {
       # transforms become its previous-frame set. Inactive scenes are not
       # snapshotted — they aren't rendered, so they have no frame history to
       # advance, and their first frame back re-syncs on the next snapshot.
-      if uiState.activeScene is 1 { snapshotPrevTransforms(scene: scene1.scene) }
-      if uiState.activeScene is 2 { snapshotPrevTransforms(scene: scene2.scene) }
-      if uiState.activeScene is 3 { snapshotPrevTransforms(scene: scene3.scene) }
+      if uiState.activeScene is 1 { snapshotWorld3dPrevTransforms(world: world1) }
+      if uiState.activeScene is 2 { snapshotWorld3dPrevTransforms(world: world2) }
+      if uiState.activeScene is 3 { snapshotWorld3dPrevTransforms(world: world3) }
     }
   }
   # Final flush: the throttle may have a pending change when the loop ends.
