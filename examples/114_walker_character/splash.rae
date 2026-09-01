@@ -17,6 +17,12 @@ import world_biome
 open world_biome
 import particles
 open particles
+import ecs/entity
+import ecs/component_table
+import app3d/character_controller
+open ecs/entity
+open ecs/component_table
+open app3d/character_controller
 
 var gSplashTick: Int = 0
 
@@ -47,23 +53,25 @@ func splashStep(app: mod App, dt: copy Float) {
   # from the unit's (ground-relative, chest-high) position z.
   let waterZ: Float = worldWaterZ(groundZ: app.character.groundZ, cfg: defaultBiomeConfig())
   # The hero (always evaluated — the character the player is watching).
-  if app.character.controller.moving {
+  let heroCtrl: ThirdPersonController = heroController(app: app)
+  if heroCtrl.moving {
     let heroDepth: Float = terrainWaterDepth(
-      x: app.character.controller.position.x, y: app.character.controller.position.y)
+      x: heroCtrl.position.x, y: heroCtrl.position.y)
     if heroDepth > splashMinDepth {
-      emitSplashAt(sys: app.splashes, x: app.character.controller.position.x,
-        y: app.character.controller.position.y, waterZ: waterZ)
+      emitSplashAt(sys: app.splashes, x: heroCtrl.position.x,
+        y: heroCtrl.position.y, waterZ: waterZ)
     }
   }
   # Every moving crowd member in water, strided so the pool is not swamped.
-  loop var i: Int = 0, i < app.character.crowd.length, ++i {
-    if let member: view CrowdMember => app.character.crowd.viewAt(index: i) {
-      if member.controller.moving and (gSplashTick + i) % splashCrowdStride is 0 {
+  loop var i: Int = 0, i < app.character.crowdEntities.length, ++i {
+    if let member: EntityId = app.character.crowdEntities.copyAt(index: i) {
+      let ctrl: ThirdPersonController = componentGet(this: app.world.controllers, entity: member)
+      if ctrl.moving and (gSplashTick + i) % splashCrowdStride is 0 {
         let depth: Float = terrainWaterDepth(
-          x: member.controller.position.x, y: member.controller.position.y)
+          x: ctrl.position.x, y: ctrl.position.y)
         if depth > splashMinDepth {
-          emitSplashAt(sys: app.splashes, x: member.controller.position.x,
-            y: member.controller.position.y, waterZ: waterZ)
+          emitSplashAt(sys: app.splashes, x: ctrl.position.x,
+            y: ctrl.position.y, waterZ: waterZ)
         }
       }
     }

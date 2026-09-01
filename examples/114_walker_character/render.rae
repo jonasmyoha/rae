@@ -13,6 +13,10 @@ import profile
 import gpu2d
 import sdf_text
 import vec3
+import ecs/entity
+import ecs/component_table
+open ecs/entity
+open ecs/component_table
 import gltf
 import gltf_skin
 import png
@@ -116,9 +120,11 @@ func renderShadowPass(app: mod App, aspect: copy Float, palette: view List(Float
     loop var sp: Int = 0, sp < app.character.partIds.length, ++sp {
       let sh: MeshHandle = meshHandle(id: walkerIntAt(values: app.character.partIds, index: sp), generation: 1)
       drawShadowCasterSkinned(mesh: sh, model: app.character.model, paletteBase: 0)
-      loop var shadowClone: Int = 0, shadowClone < app.character.crowd.length, ++shadowClone {
-        if let member: CrowdMember = app.character.crowd.copyAt(index: shadowClone) {
-          drawShadowCasterSkinned(mesh: sh, model: member.model,
+      loop var shadowClone: Int = 0, shadowClone < app.character.crowdEntities.length, ++shadowClone {
+        if let member: EntityId = app.character.crowdEntities.copyAt(index: shadowClone) {
+          let ctrl: ThirdPersonController = componentGet(this: app.world.controllers, entity: member)
+          let cloneModel: Mat4 = walkerWorldModel(baseModel: app.character.basePartModel, controller: ctrl)
+          drawShadowCasterSkinned(mesh: sh, model: cloneModel,
                                   paletteBase: characterPaletteBase(slot: shadowClone + 1, jointCount: jc))
         }
       }
@@ -138,8 +144,9 @@ func renderGbufferPass(app: mod App, aspect: copy Float, palette: view List(Floa
   var grassToonGen: Int = 0
   if app.character.toon { grassToonGen = 1 }
   let grassView: GrassViewSettings = grass_config.grassThirdPersonSettings(groundColor: walkerGroundColor())
-  grassGenerate(playerX: app.character.controller.position.x,
-                playerY: app.character.controller.position.y,
+  let heroPos: Vec3 = heroController(app: app).position
+  grassGenerate(playerX: heroPos.x,
+                playerY: heroPos.y,
                 groundZ: app.character.groundZ, time: t, dt: dt, toon: grassToonGen,
                 camX: app.cam.camera.position.x, camY: app.cam.camera.position.y, camZ: app.cam.camera.position.z,
                 fwdX: app.cam.camera.target.x - app.cam.camera.position.x,
@@ -167,11 +174,14 @@ func renderGbufferPass(app: mod App, aspect: copy Float, palette: view List(Floa
                                 prevModel: app.character.prevModel, material: mat)
     setInstanceBatchMesh(batch: app.character.crowdBatch, mesh: handle)
     resetInstanceBatch(batch: app.character.crowdBatch)
-    loop var cloneDraw: Int = 0, cloneDraw < app.character.crowd.length, ++cloneDraw {
-      if let member: CrowdMember = app.character.crowd.copyAt(index: cloneDraw) {
+    loop var cloneDraw: Int = 0, cloneDraw < app.character.crowdEntities.length, ++cloneDraw {
+      if let member: EntityId = app.character.crowdEntities.copyAt(index: cloneDraw) {
         # Each crowd member samples its OWN palette slot (#547) so it holds a
-        # distinct pose in this single instanced skinned draw.
-        addSkinnedInstance(batch: app.character.crowdBatch, model: member.model, prevModel: member.model,
+        # distinct pose in this single instanced skinned draw. Its model is
+        # derived from the entity's controller (#739) — no stored model.
+        let ctrl: ThirdPersonController = componentGet(this: app.world.controllers, entity: member)
+        let cloneModel: Mat4 = walkerWorldModel(baseModel: app.character.basePartModel, controller: ctrl)
+        addSkinnedInstance(batch: app.character.crowdBatch, model: cloneModel, prevModel: cloneModel,
                            material: mat, paletteBase: characterPaletteBase(slot: cloneDraw + 1, jointCount: jc))
       }
     }
@@ -226,13 +236,15 @@ func renderApp(app: mod App) {
   # walks. Slot 0 is the hero (uploaded first, which also creates the buffer).
   let jc: Int = jointCount(sk: app.character.skeleton)
   uploadPalette(rows: palette, jointCount: jc)
-  loop var crowdSlot: Int = 0, crowdSlot < app.character.crowd.length, ++crowdSlot {
-    if let member: CrowdMember = app.character.crowd.copyAt(index: crowdSlot) {
-      var advanced: CrowdMember = member
-      advanced.animTime = advanced.animTime + dt * clipPlaybackRate(clipIndex: advanced.clipIndex)
-      app.character.crowd.set(index: crowdSlot, value: advanced)
+  loop var crowdSlot: Int = 0, crowdSlot < app.character.crowdEntities.length, ++crowdSlot {
+    if let member: EntityId = app.character.crowdEntities.copyAt(index: crowdSlot) {
+      # Advance this member's AnimationState IN PLACE (#739) — no copy/set-back.
+      let anim: mod AnimationState => componentMod(this: app.world.animStates, entity: member)
+      anim.animTime = anim.animTime + dt * clipPlaybackRate(clipIndex: anim.clipIndex)
+      let memberClip: Int = anim.clipIndex
+      let memberTime: Float = anim.animTime
       let crowdPalette: List(Float) = poseCharacterPalette(character: app.character,
-        clipIndex: advanced.clipIndex, animTime: advanced.animTime)
+        clipIndex: memberClip, animTime: memberTime)
       uploadPaletteSlot(rows: crowdPalette, jointCount: jc, slot: crowdSlot + 1)
     }
   }
