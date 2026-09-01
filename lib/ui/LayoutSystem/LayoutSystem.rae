@@ -1,16 +1,22 @@
 # Two-phase layout — RUICS § 7 in Rae form.
 #
-# Phase 1 (`measureSubtree`)  : bottom-up walk that writes
-#                                MeasuredSize for Hug nodes, taking
-#                                gaps and padding into account.
-# Phase 2 (`computeSubtree`)  : top-down walk that resolves each
-#                                node's final size and position into
-#                                ComputedRect, distributing remaining
-#                                main-axis space across `Fill`
-#                                children, clamping by Constraints,
-#                                and respecting `Align` on the cross
-#                                axis (and inside Stack containers on
-#                                both axes).
+# Both phases are LINEAR walks over the cached parent-before-child depth
+# order (#713), not tree recursion (#731):
+# Phase 1 (`measureLinear`)   : bottom-up — the depth order walked in
+#                                REVERSE, so `measureNode` writes each
+#                                child's MeasuredSize (Hug sum of active
+#                                children + gaps + padding) before its
+#                                parent reads it.
+# Phase 2 (`computeLinear`)   : top-down — the depth order walked
+#                                forward. Each root seeds its own
+#                                ComputedRect; `placeChildren` then
+#                                resolves each active child's final size
+#                                and position into ComputedRect,
+#                                distributing remaining main-axis space
+#                                across `Fill` children, clamping by
+#                                Constraints, and respecting `Align` on
+#                                the cross axis (and inside Stack
+#                                containers on both axes).
 #
 # Coordinate space is **local to parent**: ComputedRect.x and .y are
 # offsets relative to the parent's content origin. The TransformSystem
@@ -21,12 +27,14 @@
 # Grid is reserved in the type but not implemented (RUICS hasn't
 # implemented it either; the music player doesn't need it).
 import core
+import ui/LayoutSystem/LayoutPlace
 open ecs/component_table
+open ecs/HierarchySystem/HierarchySystem
 
 # The layout root measures against `world.layoutW` / `world.layoutH`
 # (the live layout extent, set by the app from the window size) — the
 # old module-level screen-size globals + `setLayoutScreenSize` marker
-# are gone; roots read the extent directly in `layoutSystem`.
+# are gone; roots read the extent directly in `seedRoot`.
 
 # -----------------------------------------------------------------
 # Helpers
@@ -234,15 +242,9 @@ func activeChildren(world: view UiWorld, entity: view EntityId) ret List(EntityI
 # can still fall back to a real number).
 # -----------------------------------------------------------------
 
-func measureSubtree(world: mod UiWorld, entity: view EntityId) {
+func measureNode(world: mod UiWorld, entity: view EntityId) {
   let kids: List(EntityId) = activeChildren(world: world, entity: entity)
   let n: Int = kids.length
-  var i: Int = 0
-  loop i < n {
-    let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
-    measureSubtree(world: world, entity: cid)
-    i = i + 1
-  }
 
   # Compute the container's measured size from its children.
   let layout: Layout = entityLayout(world: world, entity: entity)
@@ -319,6 +321,31 @@ func measureSubtree(world: mod UiWorld, entity: view EntityId) {
 
   let ms: MeasuredSize = { w: measuredW, h: measuredH }
   componentSet(this: world.measuredSizes, entity: entity, data: ms)
+}
+
+# Bottom-up measure over the cached parent-before-child depth order (#713),
+# walked in REVERSE so every child is measured before its parent reads it —
+# the linear equivalent of the old post-order recursion (#731). Entities in
+# no hierarchy (no Parent AND no Children) are absent from the depth order;
+# measure them directly so a lone root still gets a MeasuredSize for compute.
+func measureLinear(world: mod UiWorld) {
+  let order: view List(EntityId) => depthOrder(state: world.hierarchyOrder, parents: world.parents, childrens: world.childrens)
+  var i: Int = order.length - 1
+  loop i >= 0 {
+    if let entity: EntityId = order.copyAt(index: i) {
+      measureNode(world: world, entity: entity)
+    }
+    i = i - 1
+  }
+  let alive: view List(EntityId) => world.allocator.alive
+  loop var k: Int = 0, k < alive.length, ++k {
+    let entity: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: k)
+    if componentHas(this: world.parents, entity: entity) is false {
+      if componentHas(this: world.childrens, entity: entity) is false {
+        measureNode(world: world, entity: entity)
+      }
+    }
+  }
 }
 
 # Helper — return the resolved measured width for `entity`. Hug
@@ -407,473 +434,15 @@ func resolveOwnSize(
   ret Vec2 { x: cw, y: ch }
 }
 
-# Compute and place `entity` and its children. localX/localY are the
-# entity's position relative to its parent's content origin. ownW/ownH
-# are the entity's already-resolved own size.
-func computeSubtree(
-  world: mod UiWorld
-  entity: view EntityId
-  localX: view Float
-  localY: view Float
-  ownW: view Float
-  ownH: view Float
-) {
-  # Apply Offset (post-layout shift).
-  let off: Vec2 = entityOffset(world: world, entity: entity)
-  let cr: ComputedRect = {
-    position: { x: localX + off.x, y: localY + off.y }
-    size: { x: ownW, y: ownH }
-  }
-  componentSet(this: world.computedRects, entity: entity, data: cr)
-
-  let layout: Layout = entityLayout(world: world, entity: entity)
-  let pad: Insets = entityPadding(world: world, entity: entity)
-  let contentX: Float = pad.l
-  let contentY: Float = pad.t
-  var contentW: Float = ownW - pad.l - pad.r
-  var contentH: Float = ownH - pad.t - pad.b
-  if contentW < 0.0 {
-    contentW = 0.0
-  }
-  if contentH < 0.0 {
-    contentH = 0.0
-  }
-
-  let kids: List(EntityId) = activeChildren(world: world, entity: entity)
-  let n: Int = kids.length
-  if n is 0 {
-    ret
-  }
-
-  if layout.kind is LayoutType.horizontal {
-    placeHorizontal(
-      world: world
-      kids: kids
-      contentX: contentX
-      contentY: contentY
-      contentW: contentW
-      contentH: contentH
-      gap: layout.gap
-      alignMain: layout.alignMain
-      alignCross: layout.alignCross
-    )
-    ret
-  }
-  if layout.kind is LayoutType.vertical {
-    placeVertical(
-      world: world
-      kids: kids
-      contentX: contentX
-      contentY: contentY
-      contentW: contentW
-      contentH: contentH
-      gap: layout.gap
-      alignMain: layout.alignMain
-      alignCross: layout.alignCross
-    )
-    ret
-  }
-  if layout.kind is LayoutType.stack {
-    placeStack(
-      world: world
-      kids: kids
-      contentX: contentX
-      contentY: contentY
-      contentW: contentW
-      contentH: contentH
-    )
-    ret
-  }
-  # None: each child uses its authored Rect.x/y as relative position
-  # inside the parent's padded content box.
-  var i: Int = 0
-  loop i < n {
-    let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
-    let crect: Rect = entityRect(world: world, entity: cid)
-    let resolved: Vec2 = resolveOwnSize(
-      world: world
-      entity: cid
-      parentAvailW: contentW
-      parentAvailH: contentH
-      hasParentAvail: true
-    )
-    computeSubtree(
-      world: world
-      entity: cid
-      localX: contentX + crect.position.x
-      localY: contentY + crect.position.y
-      ownW: resolved.x
-      ownH: resolved.y
-    )
-    i = i + 1
-  }
-}
-
 # -----------------------------------------------------------------
-# Container-specific placement
-# -----------------------------------------------------------------
-
-func placeHorizontal(
-  world: mod UiWorld
-  kids: view List(EntityId)
-  contentX: view Float
-  contentY: view Float
-  contentW: view Float
-  contentH: view Float
-  gap: view Float
-  alignMain: AlignKind
-  alignCross: AlignKind
-) {
-  let n: Int = kids.length
-  # Pass 1: sum widths of fixed/hug children, count Fill children.
-  var fixedSum: Float = 0.0
-  var fillCount: Int = 0
-  var i: Int = 0
-  loop i < n {
-    let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
-    let size: Size = entitySize(world: world, entity: cid)
-    if size.w.mode is SizeMode.fill {
-      fillCount = fillCount + 1
-    } else {
-      let r: Vec2 = resolveOwnSize(
-        world: world
-        entity: cid
-        parentAvailW: contentW
-        parentAvailH: contentH
-        hasParentAvail: true
-      )
-      fixedSum = fixedSum + r.x
-    }
-    i = i + 1
-  }
-  var gapTotal: Float = gap * (n - 1).toFloat()
-  if gapTotal < 0.0 {
-    gapTotal = 0.0
-  }
-  var remaining: Float = contentW - fixedSum - gapTotal
-  if remaining < 0.0 {
-    remaining = 0.0
-  }
-  var fillSize: Float = 0.0
-  if fillCount > 0 {
-    fillSize = remaining / fillCount.toFloat()
-  }
-
-  # alignMain distributes the leftover main-axis slack when no child is
-  # `Fill` (Fills already consume slack, so alignment is a no-op then).
-  #   Start         — slack on the right (default)
-  #   Center        — half slack on each side
-  #   End           — slack on the left
-  #   SpaceBetween  — slack split evenly between children, on top of
-  #                   the configured `gap` (no slack at the ends)
-  var startOffset: Float = 0.0
-  var extraGap: Float = 0.0
-  if fillCount is 0 {
-    if alignMain is AlignKind.center {
-      startOffset = remaining / 2.0
-    }
-    if alignMain is AlignKind.end {
-      startOffset = remaining
-    }
-    if alignMain is AlignKind.spaceBetween {
-      if n > 1 {
-        extraGap = remaining / (n - 1).toFloat()
-      }
-    }
-  }
-
-  # Pass 2: place children in order with gaps between.
-  var cursorX: Float = contentX + startOffset
-  var j: Int = 0
-  loop j < n {
-    let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: j)
-    let size: Size = entitySize(world: world, entity: cid)
-    var childW: Float = 0.0
-    if size.w.mode is SizeMode.fill {
-      childW = fillSize
-    } else {
-      let r: Vec2 = resolveOwnSize(
-        world: world
-        entity: cid
-        parentAvailW: contentW
-        parentAvailH: contentH
-        hasParentAvail: true
-      )
-      childW = r.x
-    }
-    childW = applyConstraintsW(world: world, entity: cid, w: childW)
-    var childH: Float = 0.0
-    if size.h.mode is SizeMode.fill {
-      childH = contentH
-    } else {
-      let r: Vec2 = resolveOwnSize(
-        world: world
-        entity: cid
-        parentAvailW: contentW
-        parentAvailH: contentH
-        hasParentAvail: true
-      )
-      childH = r.y
-    }
-    childH = applyConstraintsH(world: world, entity: cid, h: childH)
-
-    var crossY: Float = contentY
-    if alignCross is AlignKind.center {
-      crossY = contentY + (contentH - childH) / 2.0
-    }
-    if alignCross is AlignKind.end {
-      crossY = contentY + contentH - childH
-    }
-
-    computeSubtree(
-      world: world
-      entity: cid
-      localX: cursorX
-      localY: crossY
-      ownW: childW
-      ownH: childH
-    )
-    cursorX = cursorX + childW + gap + extraGap
-    j = j + 1
-  }
-}
-
-func placeVertical(
-  world: mod UiWorld
-  kids: view List(EntityId)
-  contentX: view Float
-  contentY: view Float
-  contentW: view Float
-  contentH: view Float
-  gap: view Float
-  alignMain: AlignKind
-  alignCross: AlignKind
-) {
-  let n: Int = kids.length
-  var fixedSum: Float = 0.0
-  var fillCount: Int = 0
-  var i: Int = 0
-  loop i < n {
-    let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
-    let size: Size = entitySize(world: world, entity: cid)
-    if size.h.mode is SizeMode.fill {
-      fillCount = fillCount + 1
-    } else {
-      let r: Vec2 = resolveOwnSize(
-        world: world
-        entity: cid
-        parentAvailW: contentW
-        parentAvailH: contentH
-        hasParentAvail: true
-      )
-      fixedSum = fixedSum + r.y
-    }
-    i = i + 1
-  }
-  var gapTotal: Float = gap * (n - 1).toFloat()
-  if gapTotal < 0.0 {
-    gapTotal = 0.0
-  }
-  var remaining: Float = contentH - fixedSum - gapTotal
-  if remaining < 0.0 {
-    remaining = 0.0
-  }
-  var fillSize: Float = 0.0
-  if fillCount > 0 {
-    fillSize = remaining / fillCount.toFloat()
-  }
-
-  # See `placeHorizontal` — same `alignMain` distribution, vertical axis.
-  var startOffset: Float = 0.0
-  var extraGap: Float = 0.0
-  if fillCount is 0 {
-    if alignMain is AlignKind.center {
-      startOffset = remaining / 2.0
-    }
-    if alignMain is AlignKind.end {
-      startOffset = remaining
-    }
-    if alignMain is AlignKind.spaceBetween {
-      if n > 1 {
-        extraGap = remaining / (n - 1).toFloat()
-      }
-    }
-  }
-
-  var cursorY: Float = contentY + startOffset
-  var j: Int = 0
-  loop j < n {
-    let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: j)
-    let size: Size = entitySize(world: world, entity: cid)
-    var childH: Float = 0.0
-    if size.h.mode is SizeMode.fill {
-      childH = fillSize
-    } else {
-      let r: Vec2 = resolveOwnSize(
-        world: world
-        entity: cid
-        parentAvailW: contentW
-        parentAvailH: contentH
-        hasParentAvail: true
-      )
-      childH = r.y
-    }
-    childH = applyConstraintsH(world: world, entity: cid, h: childH)
-    var childW: Float = 0.0
-    if size.w.mode is SizeMode.fill {
-      childW = contentW
-    } else {
-      let r: Vec2 = resolveOwnSize(
-        world: world
-        entity: cid
-        parentAvailW: contentW
-        parentAvailH: contentH
-        hasParentAvail: true
-      )
-      childW = r.x
-    }
-    childW = applyConstraintsW(world: world, entity: cid, w: childW)
-
-    var crossX: Float = contentX
-    if alignCross is AlignKind.center {
-      crossX = contentX + (contentW - childW) / 2.0
-    }
-    if alignCross is AlignKind.end {
-      crossX = contentX + contentW - childW
-    }
-
-    computeSubtree(
-      world: world
-      entity: cid
-      localX: crossX
-      localY: cursorY
-      ownW: childW
-      ownH: childH
-    )
-    cursorY = cursorY + childH + gap + extraGap
-    j = j + 1
-  }
-}
-
-func placeStack(
-  world: mod UiWorld
-  kids: view List(EntityId)
-  contentX: view Float
-  contentY: view Float
-  contentW: view Float
-  contentH: view Float
-) {
-  let n: Int = kids.length
-  var i: Int = 0
-  loop i < n {
-    let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
-    let resolved: Vec2 = resolveOwnSize(
-      world: world
-      entity: cid
-      parentAvailW: contentW
-      parentAvailH: contentH
-      hasParentAvail: true
-    )
-    let childW: Float = applyConstraintsW(world: world, entity: cid, w: resolved.x)
-    let childH: Float = applyConstraintsH(world: world, entity: cid, h: resolved.y)
-
-    # Default Stack alignment is centre on both axes; the per-child
-    # `Align` overrides it.
-    var alignX: AlignKind = AlignKind.center
-    var alignY: AlignKind = AlignKind.center
-    if componentHas(this: world.aligns, entity: cid) {
-      let a: Align = componentGet(this: world.aligns, entity: cid)
-      if a.hasX {
-        alignX = a.x
-      }
-      if a.hasY {
-        alignY = a.y
-      }
-    }
-
-    var cx: Float = contentX
-    if alignX is AlignKind.center {
-      cx = contentX + (contentW - childW) / 2.0
-    }
-    if alignX is AlignKind.end {
-      cx = contentX + contentW - childW
-    }
-    var cy: Float = contentY
-    if alignY is AlignKind.center {
-      cy = contentY + (contentH - childH) / 2.0
-    }
-    if alignY is AlignKind.end {
-      cy = contentY + contentH - childH
-    }
-
-    computeSubtree(
-      world: world
-      entity: cid
-      localX: cx
-      localY: cy
-      ownW: childW
-      ownH: childH
-    )
-    i = i + 1
-  }
-}
-
-# -----------------------------------------------------------------
-# Entry point — run the two phases over every layout root. Roots are
-# entities that are alive, have a Rect, and have no Parent.
+# Entry point — run the two phases. Both are linear walks over the
+# cached depth order (#713): measure bottom-up (reverse), compute
+# top-down (forward). No per-frame tree recursion.
 # -----------------------------------------------------------------
 
 func layoutSystem(world: mod UiWorld) {
-  let alive: view List(EntityId) => world.allocator.alive
-  let n: Int = alive.length
-  var i: Int = 0
-  loop i < n {
-    let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
-    if componentHas(this: world.parents, entity: e) is false {
-      if componentHas(this: world.rects, entity: e) {
-        # Phase 1: measure the subtree.
-        measureSubtree(world: world, entity: e)
-        # Phase 2: compute placement starting at (0, 0) with the
-        # screen as the parent content box. The root content box is
-        # the world's layout extent (set by the app from the live
-        # window size), not the legacy module globals — see
-        # rae/docs/ui-coordinate-and-responsive-layout.md. The globals
-        # survive only as the createUiWorld defaults (600x1300).
-        let resolved: Vec2 = resolveOwnSize(
-          world: world
-          entity: e
-          parentAvailW: world.layoutW
-          parentAvailH: world.layoutH
-          hasParentAvail: true
-        )
-        # Horizontal placement within the layout extent (ExtentAnchor):
-        # `center` centers a phone-width column on desktop, `fill` spans
-        # edge-to-edge, `left`/none keeps x=0. On a phone the extent == the
-        # content width, so all collapse to today's x=0 / width-unchanged.
-        var rootW: Float = resolved.x
-        var rootX: Float = 0.0
-        let anchor: HExtent = rootExtentAnchor(world: world, entity: e)
-        if anchor is HExtent.fill {
-          rootW = world.layoutW
-        }
-        if anchor is HExtent.center {
-          let slack: Float = world.layoutW - rootW
-          if slack > 0.0 {
-            rootX = slack / 2.0
-          }
-        }
-        computeSubtree(
-          world: world
-          entity: e
-          localX: rootX
-          localY: 0.0
-          ownW: rootW
-          ownH: resolved.y
-        )
-      }
-    }
-    i = i + 1
-  }
+  measureLinear(world: world)
+  computeLinear(world: world)
 }
 
 # -----------------------------------------------------------------
