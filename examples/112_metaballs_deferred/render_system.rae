@@ -1,0 +1,155 @@
+# ECS RenderSystem for 112 (#736): rendering reads entities via QUERIES and
+# issues draws directly, replacing the world3dToScene3d -> shared-renderer path.
+#
+# - Mesh pass queries the meshRenderers table and reads each entity's
+#   Transform3d / PrevTransform / Material3d.
+# - SDF pass queries each per-cluster tag (#734) with queryTagged over the sdfs
+#   table, packs that cluster's spheres, and issues one metaball draw.
+#
+# The low-level draw primitives (gbuffer.drawInstance / gbuffer.drawMetaballs for
+# the deferred G-buffer, gpu3d.drawShadowCaster / gpu3d.shadowMetaballs for the
+# shadow map) stay in lib and are called QUALIFIED — gpu3d and gbuffer both
+# export drawInstance/drawMetaballs (forward vs deferred), so an unqualified call
+# would silently pick the forward path.
+#
+# Parity with the old path is by construction: it reads the same World3d data
+# (#733 proved the derived Scene3d matched it) grouped by the same tags (#734
+# proved the tags partition the balls), packs each cluster's balls in query =
+# list order with the same head material/smoothing, so the draw calls are
+# identical. Cluster draw order (c0..c6) differs from the old first-appearance
+# order but the deferred G-buffer / shadow map are depth-resolved, so the result
+# is order-independent.
+import core
+import scene3d
+import scene_animation
+import gpu3d
+import gbuffer
+open ecs/entity
+open ecs/component_table
+open ecs/query
+
+# ----- mesh -----------------------------------------------------------
+func renderMeshGbuffer(world: view World3d) {
+  loop var j: Int = 0, j < componentCount(this: world.meshRenderers), ++j {
+    let entity: EntityId = componentEntityAt(this: world.meshRenderers, i: j)
+    let renderer: MeshRenderer = componentGet(this: world.meshRenderers, entity: entity)
+    if renderer.visible {
+      let t: Transform3d = componentGet(this: world.transforms, entity: entity)
+      let pt: Transform3d = componentGet(this: world.prevTransforms, entity: entity)
+      let m: Material3d = componentGet(this: world.materials, entity: entity)
+      gbuffer.drawInstance(mesh: renderer.mesh, transform: t, prevTransform: pt, material: m)
+    }
+  }
+}
+
+func renderMeshShadow(world: view World3d) {
+  loop var j: Int = 0, j < componentCount(this: world.meshRenderers), ++j {
+    let entity: EntityId = componentEntityAt(this: world.meshRenderers, i: j)
+    let renderer: MeshRenderer = componentGet(this: world.meshRenderers, entity: entity)
+    if renderer.visible {
+      let t: Transform3d = componentGet(this: world.transforms, entity: entity)
+      gpu3d.drawShadowCaster(mesh: renderer.mesh, model: gpu3d.modelMatrix(t: t))
+    }
+  }
+}
+
+# ----- sdf (metaballs), one cluster tag at a time ---------------------
+# The G-buffer metaball draw for a single cluster: pack its spheres (position +
+# scale.x) and per-ball baseColor, take metallic/roughness/emission/smoothing
+# from the cluster HEAD (its first sphere in query = list order), and raymarch.
+func renderSdfClusterGbuffer(T: type, world: view World3d, clusterTable: view ComponentTable(T), camera: view Camera3d) {
+  let matches: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: clusterTable)
+  if matches.length is 0 {
+    ret
+  }
+  let packed: List(Float) = createList(Float, cap: matches.length * 4)
+  let colors: List(Float) = createList(Float, cap: matches.length * 4)
+  var ballCount: Int = 0
+  var haveHead: Bool = false
+  var headSmoothing: Float = 0.0
+  var headMaterial: Material3d = {
+    baseColor: { x: 0.0, y: 0.0, z: 0.0 }, metallic: 0.0, roughness: 1.0,
+    emission: { x: 0.0, y: 0.0, z: 0.0 }, toon: false
+  }
+  loop let hit: view Query2Match in matches {
+    let sdf: SdfPrimitive = componentGet(this: world.sdfs, entity: hit.entity)
+    if sdf.shape is 0 {
+      let t: Transform3d = componentGet(this: world.transforms, entity: hit.entity)
+      packed.add(value: t.position.x)
+      packed.add(value: t.position.y)
+      packed.add(value: t.position.z)
+      packed.add(value: t.scale.x)
+      let mat: Material3d = componentGet(this: world.materials, entity: hit.entity)
+      colors.add(value: mat.baseColor.x)
+      colors.add(value: mat.baseColor.y)
+      colors.add(value: mat.baseColor.z)
+      colors.add(value: 0.0)
+      if haveHead is false {
+        headMaterial = mat
+        headSmoothing = sdf.smoothing
+        haveHead = true
+      }
+      ballCount = ballCount + 1
+    }
+  }
+  if ballCount > 0 {
+    gbuffer.drawMetaballs(
+      packedBalls: packed.data, count: ballCount,
+      packedColors: colors.data, smoothing: headSmoothing,
+      camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z,
+      metallic: headMaterial.metallic, roughness: headMaterial.roughness,
+      emR: headMaterial.emission.x, emG: headMaterial.emission.y, emB: headMaterial.emission.z
+    )
+  }
+}
+
+func renderSdfClusterShadow(T: type, world: view World3d, clusterTable: view ComponentTable(T)) {
+  let matches: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: clusterTable)
+  if matches.length is 0 {
+    ret
+  }
+  let packed: List(Float) = createList(Float, cap: matches.length * 4)
+  var ballCount: Int = 0
+  var haveHead: Bool = false
+  var headSmoothing: Float = 0.0
+  loop let hit: view Query2Match in matches {
+    let sdf: SdfPrimitive = componentGet(this: world.sdfs, entity: hit.entity)
+    if sdf.shape is 0 {
+      let t: Transform3d = componentGet(this: world.transforms, entity: hit.entity)
+      packed.add(value: t.position.x)
+      packed.add(value: t.position.y)
+      packed.add(value: t.position.z)
+      packed.add(value: t.scale.x)
+      if haveHead is false {
+        headSmoothing = sdf.smoothing
+        haveHead = true
+      }
+      ballCount = ballCount + 1
+    }
+  }
+  if ballCount > 0 {
+    gpu3d.shadowMetaballs(packedBalls: packed.data, count: ballCount, smoothing: headSmoothing)
+  }
+}
+
+# Draw every cluster of a scene. Empty tag tables (cluster ids a scene doesn't
+# use) query to zero matches and are skipped.
+func renderSdfGbuffer(world: view World3d, tags: view ClusterTags, camera: view Camera3d) {
+  renderSdfClusterGbuffer(world: world, clusterTable: tags.c0, camera: camera)
+  renderSdfClusterGbuffer(world: world, clusterTable: tags.c1, camera: camera)
+  renderSdfClusterGbuffer(world: world, clusterTable: tags.c2, camera: camera)
+  renderSdfClusterGbuffer(world: world, clusterTable: tags.c3, camera: camera)
+  renderSdfClusterGbuffer(world: world, clusterTable: tags.c4, camera: camera)
+  renderSdfClusterGbuffer(world: world, clusterTable: tags.c5, camera: camera)
+  renderSdfClusterGbuffer(world: world, clusterTable: tags.c6, camera: camera)
+}
+
+func renderSdfShadow(world: view World3d, tags: view ClusterTags) {
+  renderSdfClusterShadow(world: world, clusterTable: tags.c0)
+  renderSdfClusterShadow(world: world, clusterTable: tags.c1)
+  renderSdfClusterShadow(world: world, clusterTable: tags.c2)
+  renderSdfClusterShadow(world: world, clusterTable: tags.c3)
+  renderSdfClusterShadow(world: world, clusterTable: tags.c4)
+  renderSdfClusterShadow(world: world, clusterTable: tags.c5)
+  renderSdfClusterShadow(world: world, clusterTable: tags.c6)
+}
