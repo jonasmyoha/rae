@@ -177,10 +177,10 @@ func applySliderFill(s: view Slider, world: mod UiWorld) pub {
 # ----- node-based slider ----------------------------------------------
 #
 # The functions above keep a Slider value; these take the track and handle node
-# ids directly, so a caller can hold nothing but the value it cares about. That
-# matters because a Slider stored INSIDE another struct cannot be updated: a
-# nested field passed as `mod` does not reliably write back in this compiler,
-# and the failure is silent.
+# ids directly, so a caller can hold nothing but the value it cares about — a
+# convenience when the caller already has the node ids. (A Slider stored inside
+# another struct also updates fine now: nested-field `mod` write-back is
+# guaranteed, locked by compiler test 707_nested_mod_writeback, #762.)
 
 func nodeComputedRect(world: view UiWorld, nodeId: view String, out: mod ComputedRect) ret Bool {
   let e: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
