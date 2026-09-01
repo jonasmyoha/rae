@@ -1,9 +1,9 @@
 # lib/ecs — serialize-OUT (docs/ecs-general-architecture.md §2.7, #719).
 #
 # Turns a World into JSON, driven entirely by the component registry (#717): a
-# component is written ONLY if it was registered with the SERIALIZE flag. Derived
+# component is written ONLY if it was registered with the serialize flag. Derived
 # / cache / runtime components (WorldTransform*, ComputedRect, MeasuredSize, ...)
-# are registered WITHOUT SERIALIZE — so they are simply skipped and never reach
+# are registered WITHOUT serialize — so they are simply skipped and never reach
 # the save file, with no type annotation anywhere.
 #
 # The output is columnar (natural for a sparse-set ECS): one object per
@@ -35,13 +35,13 @@ func createWorldJson() ret WorldJson {
 }
 
 # Serialize ONE component table into the world JSON — but ONLY if `name` is
-# registered with the SERIALIZE flag. A table whose component is a derived cache
-# (registered without SERIALIZE, or not registered) is silently skipped, so it is
+# registered with the serialize flag. A table whose component is a derived cache
+# (registered without serialize, or not registered) is silently skipped, so it is
 # never written. Generic over the component type T (inferred from the table);
 # each stored component is written through its compiler-generated `toJson()`.
 func addComponentTable(T: type, writer: mod WorldJson, table: view ComponentTable(T),
                        name: view String, registry: view ComponentRegistry) {
-  if registeredHasFlag(reg: registry, name: name, flag: SERIALIZE) is false {
+  if registeredHasFlag(reg: registry, name: name, flag: serialize) is false {
     ret
   }
   var frag: String = jsonQuote(s: name)
@@ -83,7 +83,7 @@ func finishWorldJson(writer: view WorldJson) ret String {
 # NOT a hand-written per-name switch. loadComponentTable is generic over the
 # component type T (inferred from the table) and reconstructs each stored
 # component through the compiler-generated `T.fromJson`. It loads a table only if
-# `name` is registered with SERIALIZE, so unregistered / non-serialized keys are
+# `name` is registered with serialize, so unregistered / non-serialized keys are
 # ignored. An app's `worldFromJson` is a per-table composition (one
 # loadComponentTable per table); the dispatch to the concrete fromJson is the
 # generic T (compiler-monomorphized), never a switch — so adding a component is
@@ -91,7 +91,7 @@ func finishWorldJson(writer: view WorldJson) ret String {
 
 func loadComponentTable(T: type, table: mod ComponentTable(T), name: view String,
                         registry: view ComponentRegistry, doc: view JsonDoc) {
-  if registeredHasFlag(reg: registry, name: name, flag: SERIALIZE) is false {
+  if registeredHasFlag(reg: registry, name: name, flag: serialize) is false {
     ret
   }
   let root: JsonValue = jsonRoot(doc: doc)
@@ -114,21 +114,21 @@ func loadComponentTable(T: type, table: mod ComponentTable(T), name: view String
 
 # ----- resources (#753) ------------------------------------------------------
 #
-# A RESOURCE is a world-global singleton (a plain field on the World, e.g.
+# A resource is a world-global singleton (a plain field on the World, e.g.
 # world.frame / world.layoutW), NOT a per-entity component — so it serializes as
 # a SINGLE top-level value, keyed by name, rather than an entity->value map:
 #   { "Frame": {"count":7,"dt":16}, "Pos": { "1": {...} } }
 # addResource / resourceJson stay non-generic: the caller passes value.toJson()
 # in and calls Type.fromJson on the way out (both concrete, so they monomorphize
 # cleanly). Registry-gated exactly like components — written only when the name
-# is registered SERIALIZE, so runtime resources (registered RESOURCE without
-# SERIALIZE) are omitted.
+# is registered serialize, so runtime resources (registered resource without
+# serialize) are omitted.
 
 # Write a resource's value into the world JSON, but ONLY if `name` is registered
-# with SERIALIZE. `valueJson` is the resource's own JSON (its `toJson()`).
+# with serialize. `valueJson` is the resource's own JSON (its `toJson()`).
 func addResource(writer: mod WorldJson, name: view String, valueJson: view String,
                  registry: view ComponentRegistry) {
-  if registeredHasFlag(reg: registry, name: name, flag: SERIALIZE) is false {
+  if registeredHasFlag(reg: registry, name: name, flag: serialize) is false {
     ret
   }
   var frag: String = jsonQuote(s: name)
@@ -138,9 +138,9 @@ func addResource(writer: mod WorldJson, name: view String, valueJson: view Strin
 }
 
 # The JSON string for resource `name` in `doc` (feed to Type.fromJson), or ""
-# when it isn't registered SERIALIZE or isn't present in the document.
+# when it isn't registered serialize or isn't present in the document.
 func resourceJson(name: view String, registry: view ComponentRegistry, doc: view JsonDoc) ret String {
-  if registeredHasFlag(reg: registry, name: name, flag: SERIALIZE) is false {
+  if registeredHasFlag(reg: registry, name: name, flag: serialize) is false {
     ret ""
   }
   let root: JsonValue = jsonRoot(doc: doc)

@@ -8,7 +8,7 @@ open ecs/serialize
 # #720: registry-driven serialize-IN. worldToJson -> parse -> worldFromJson must
 # reconstruct the original world, using each component's compiler fromJson via a
 # GENERIC loader (no hand-written per-name switch). Cache components (no
-# SERIALIZE flag) are neither written nor loaded.
+# serialize flag) are neither written nor loaded.
 
 type Pos { x: Int, y: Int }
 type Vel { dx: Int, dy: Int }
@@ -45,8 +45,8 @@ func worldFromJson(world: mod MiniWorld, registry: view ComponentRegistry, doc: 
 
 func main() {
   var reg: ComponentRegistry = createComponentRegistry()
-  registerComponent(reg: reg, name: "Pos", flags: SERIALIZE)
-  registerComponent(reg: reg, name: "Vel", flags: SERIALIZE)
+  registerComponent(reg: reg, name: "Pos", flags: serialize)
+  registerComponent(reg: reg, name: "Vel", flags: serialize)
   registerComponent(reg: reg, name: "WorldCache", flags: 0)
 
   let e1: EntityId = { index: 1, generation: 0 }
