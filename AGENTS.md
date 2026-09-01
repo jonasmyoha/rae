@@ -216,12 +216,33 @@ Codex MUST NOT:
 
 ## Testing
 
-To run the full test suite, use the following command from the `rae/compiler` directory. It is recommended to use a timeout to prevent hanging:
+**Always run the suite through the official script `compiler/tools/watch-tests.sh`,
+NOT a bare `make test`.** The script streams `make test` into the ONE shared log
+file the devtools web UI tails (`/tmp/rae-test-live.log`, override `RAE_TEST_LOG`)
+and wraps it in `@@RAE_RUN_START@@` / `@@RAE_RUN_END exit=N@@` sentinels, so the
+"Test log" tab AND the Compiler tab's Test Runner both show the run live — with
+exact start/end boundaries and the real exit code. This matters for subagents
+too: a subagent that runs tests MUST use the script so the human can see the run.
+A bare `make test > /tmp/some-other-file.log` is invisible to the UI (wrong file)
+— that is the single most common reason a run "doesn't show up".
 
 ```bash
-# Using perl if 'timeout' command is not available (common on macOS)
-perl -e 'alarm shift; exec @ARGV' 60 make test
+# From the repo root (the script cd's into rae/compiler itself). Use a timeout
+# so a hung test can't block forever (perl form works when `timeout` is absent,
+# common on macOS):
+perl -e 'alarm shift; exec @ARGV' 600 bash compiler/tools/watch-tests.sh
 ```
+
+**Only ONE test run at a time.** Concurrent `make test` / `watch-tests.sh`
+processes corrupt each other's build cache and interleave the shared log, which
+shows up as spurious failures. Before starting a run, KILL any earlier one:
+
+```bash
+pkill -9 -f 'watch-tests.sh'; pkill -9 -f 'make test'; pkill -9 -f 'run_tests.sh'; pkill -9 -f 'bin/rae run'
+```
+
+Then start the single run. If you need to re-run, kill first, then re-launch —
+never launch a second run on top of a live one.
 
 ---
 
