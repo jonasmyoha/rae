@@ -68,6 +68,14 @@ void diag_ctx_report(DiagState* state, const char* file, int line, int col, cons
   fflush(stderr);
 }
 
+// A non-fatal WARNING: prints but does NOT increment error_count, so the build
+// still succeeds (used by the no-globals warning, #763).
+void diag_ctx_warn(DiagState* state, const char* file, int line, int col, const char* message) {
+  (void)state;
+  fprintf(stderr, "%s:%d:%d: warning: %s\n", simplify_path(file), line, col, message);
+  fflush(stderr);
+}
+
 int diag_ctx_error_count(DiagState* state) {
   return state->error_count;
 }
@@ -92,6 +100,10 @@ void (diag_error)(const char* file, int line, int col, const char* message) {
 
 void (diag_report)(const char* file, int line, int col, const char* message) {
     diag_ctx_report(&g_diag_legacy, file, line, col, message);
+}
+
+void (diag_warn)(const char* file, int line, int col, const char* message) {
+    diag_ctx_warn(&g_diag_legacy, file, line, col, message);
 }
 
 void (diag_fatal)(const char* message) {
