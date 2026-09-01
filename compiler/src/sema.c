@@ -1208,6 +1208,42 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
                     gs->bind_kind = immut ? BIND_LET : BIND_MUTABLE;
                 }
             }
+            /* #763 no-globals rule (docs/globals-and-app-ownership.md), WARNING
+             * phase: a module-level `var` is mutable global state; a module-level
+             * `let` that owns heap (String/List/Map/struct-with-heap) is global
+             * heap with no owner. Both warn (not error — the #731-#750 ECS
+             * refactor lands under the rule). `const` and POD-literal `let` (Int/
+             * Float/Bool/plain struct, no heap) are fine. */
+            if (!decl->as.let_decl.is_const) {
+                const char* why = NULL;
+                /* A `let` initialised from a STRING LITERAL is a compile-time
+                 * constant with a STATIC buffer (is_owned=false) — it owns no
+                 * runtime heap and has no lifetime, so it is fine (it should just
+                 * be spelled `const`; #765). Only a `let` whose initialiser
+                 * ALLOCATES (createList/a heap-returning call) is a real global. */
+                bool literal_init = decl->as.let_decl.value
+                                    && decl->as.let_decl.value->kind == AST_EXPR_STRING;
+                const AstTypeRef* gt = decl->as.let_decl.type;
+                bool owns_heap = gt
+                    && (type_owns_heap_storage(ctx, module, gt, 0)
+                        /* String owns a heap buffer too, but ownership.c leaves it
+                         * out; count it here (a literal init is exempted above). */
+                        || (!gt->is_view && !gt->is_mod
+                            && str_eq_cstr(get_base_type_name(gt), "String")));
+                if (decl->as.let_decl.is_var) {
+                    why = "module-level `var` is mutable global state";
+                } else if (owns_heap && !literal_init) {
+                    why = "module-level `let` owns heap (a global with no owner)";
+                }
+                if (why) {
+                    char nog[320];
+                    snprintf(nog, sizeof(nog),
+                        "%s: '%.*s' — no globals: make it a component, a resource on the "
+                        "App/World, or a `const`. See docs/globals-and-app-ownership.md",
+                        why, (int)decl->as.let_decl.name.len, decl->as.let_decl.name.data);
+                    diag_warn(module->file_path, (int)decl->line, (int)decl->column, nog);
+                }
+            }
             break;
         }
         case AST_DECL_ALIAS:
