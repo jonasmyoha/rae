@@ -1,0 +1,82 @@
+# ECS GameWorld for example 114 (#738): the gameplay 3D world — the reusable
+# entity core (EntityAllocator, #706) plus a ComponentTable per core gameplay
+# component, keyed by EntityId.
+#
+# Named `GameWorld`, NOT `World3d`: 114 is a game (walker character, crowd,
+# physics/net seams), and it already imports scene3d whose `World3d` (112's
+# Blender-like scene world, #732) is a DISTINCT type — a second `World3d` would
+# collide. The transform components are lib/ecs's QUATERNION Transform3D /
+# WorldTransform3D (#714/#715) folded by the general TransformSystem (#716), the
+# proper 3D transforms — unlike 112's Euler `Transform3d`. #739-#746 migrate
+# 114's character, crowd, terrain and grass onto this world; the final naming
+# across World2d/World3d/GameWorld is reconciled by #770.
+import core
+import vec3
+import quat
+import ecs/transform
+open ecs/entity
+open ecs/world
+open ecs/component_table
+open ecs/transform
+
+# A gameplay surface material. Capital-D `Material3D` to match the capital-D
+# lib/ecs Transform3D/WorldTransform3D components; distinct from scene3d's Euler
+# `Material3d` that 114's current renderer still consumes (migrated later).
+type Material3D {
+  baseColor: Vec3
+  metallic: Float
+  roughness: Float
+  emission: Vec3
+}
+
+type GameWorld {
+  allocator: EntityAllocator
+  transforms: ComponentTable(Transform3D)
+  worldTransforms: ComponentTable(WorldTransform3D)
+  materials: ComponentTable(Material3D)
+}
+
+func createGameWorld() ret GameWorld {
+  ret GameWorld {
+    allocator: createEntityAllocator()
+    transforms: createComponentTable(Transform3D)
+    worldTransforms: createComponentTable(WorldTransform3D)
+    materials: createComponentTable(Material3D)
+  }
+}
+
+# Allocate a fresh gameplay entity.
+func gameWorldAddEntity(world: mod GameWorld) ret EntityId {
+  ret allocEntity(this: world.allocator)
+}
+
+# Component setters — thin wrappers so call sites read as intent rather than
+# ComponentTable plumbing (mirrors 112's World3d helpers).
+func gameWorldSetTransform(world: mod GameWorld, entity: view EntityId, transform: view Transform3D) {
+  componentSet(this: world.transforms, entity: entity, data: transform)
+}
+
+func gameWorldSetWorldTransform(world: mod GameWorld, entity: view EntityId, worldTransform: view WorldTransform3D) {
+  componentSet(this: world.worldTransforms, entity: entity, data: worldTransform)
+}
+
+func gameWorldSetMaterial(world: mod GameWorld, entity: view EntityId, material: view Material3D) {
+  componentSet(this: world.materials, entity: entity, data: material)
+}
+
+func gameWorldEntityCount(world: view GameWorld) ret Int {
+  ret allocatorAliveCount(this: world.allocator)
+}
+
+# #738 proof: stand up one entity carrying all three components, so the GameWorld
+# is real and non-empty at boot. #739 replaces this with the hero/crowd
+# migration (CharacterState.controller -> an entity, etc.).
+func seedGameWorld(world: mod GameWorld) {
+  let hero: EntityId = gameWorldAddEntity(world: world)
+  gameWorldSetTransform(world: world, entity: hero, transform: createTransform3D())
+  gameWorldSetWorldTransform(world: world, entity: hero, worldTransform: createWorldTransform3D())
+  gameWorldSetMaterial(world: world, entity: hero, material: Material3D {
+    baseColor: Vec3 { x: 0.8, y: 0.8, z: 0.8 }, metallic: 0.0, roughness: 0.6,
+    emission: Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+  })
+}

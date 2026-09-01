@@ -177,6 +177,11 @@ type PersistState {
 
 type App {
   scene: Scene3d
+  # #738: the ECS GameWorld — the authoritative gameplay world (EntityAllocator +
+  # Transform3D/WorldTransform3D/Material3D tables). #739-#746 migrate the
+  # character, crowd, terrain and grass onto it; for now `scene` still drives the
+  # renderer.
+  world: GameWorld
   frame: Frame
   io: InputUi
   cam: CameraState
@@ -460,6 +465,7 @@ func createApp() ret App {
 
   ret App {
     scene: own scene
+    world: createGameWorld()
     frame: {
       dt: 0.0, now: startT, startT: startT, prevT: startT, time: 0.0, aspect: 1.0,
       needsRender: true, dbgDidWork: true, taaSettleFrames: 0, renderedOnce: false,
@@ -665,6 +671,9 @@ func updateApp(app: mod App) {
 # ----- the loop ------------------------------------------------------------
 func runWalkerApp() ret Int {
   var app: App = createApp()
+  # #738: prove the GameWorld holds real ECS component types at boot.
+  seedGameWorld(world: app.world)
+  log("[ecs] GameWorld: {gameWorldEntityCount(world: app.world)} entities with Transform3D/WorldTransform3D/Material3D components (#738)")
   profile.profileMaybeAutoStart()
   loop not gpu2d.pollClose() {
     frameBegin(app: app)
