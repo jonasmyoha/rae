@@ -113,7 +113,7 @@ type InputUi {
   transport: ControlPanel
   charPanel: ControlPanel   # prev/next character-switch buttons (#546)
   settings: SettingsState
-  panelScroll: ScrollPanel
+  panelScroll: EntityId
   dbg: DebugOverlay
   logView: LogOverlay
   lastLogRevision: Int
@@ -436,7 +436,7 @@ func createApp() ret App {
   setNodeText(world: uiWorld, nodeId: "SpeedLabel", value: "Speed {pct0}%")
   runUiSystems(world: uiWorld, res: gpuUi)
 
-  var panelScroll: ScrollPanel = createScrollPanel(viewportId: "SidePanelBody", contentId: "SidePanelContent")
+  var panelScroll: EntityId = createScrollPanel(world: uiWorld, viewportId: "SidePanelBody", contentId: "SidePanelContent")
   let barOk: Bool = mountCameraBar(world: uiWorld, res: gpuUi, hostNodeId: "CameraBarSlot")
   walkerHideCameraChrome(world: uiWorld)
   var settings: SettingsState = createSettingsState(scene: 1, sceneCount: 1,
@@ -468,7 +468,7 @@ func createApp() ret App {
     io: {
       moveStick: own moveStick, ui: own uiInput, world: own uiWorld, gpuUi: gpuUi,
       clipPanel: own clipPanel, transport: own transport, charPanel: own charPanel, settings: own settings,
-      panelScroll: own panelScroll, dbg: own dbg, logView: own logView, lastLogRevision: 0 - 1
+      panelScroll: panelScroll, dbg: own dbg, logView: own logView, lastLogRevision: 0 - 1
     }
     cam: { camera: camera, rig: own rig, light: light, hosek: hosekData }
     character: {
