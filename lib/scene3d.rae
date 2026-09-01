@@ -440,37 +440,9 @@ func buildWorld3dFromScene3d(old: view Scene3d) ret World3d {
   ret world
 }
 
-# Extract the flat Scene3d the shared renderer still consumes (#736 removes this
-# once the renderer reads World3d queries directly). Rebuilds the parallel lists
-# from the component tables in their DENSE order — which equals the loader order,
-# since 112 never destroys a 3D entity — so the renderer sees an identical scene.
-# Per-entity Material3d re-expands to a shared materials list indexed like
-# transforms; each renderable's material index is its transform's dense position,
-# so `materials[entity]` is its own material (identical values to the old shared
-# source, so per-ball colour and cluster-head shading are unchanged).
-func world3dToScene3d(world: view World3d) ret Scene3d {
-  var scene: Scene3d = createScene3d()
-  let count: Int = componentCount(this: world.transforms)
-  loop var k: Int = 0, k < count, ++k {
-    let entity: EntityId = componentEntityAt(this: world.transforms, i: k)
-    scene.transforms.add(value: componentGet(this: world.transforms, entity: entity))
-    scene.prevTransforms.add(value: componentGet(this: world.prevTransforms, entity: entity))
-    scene.materials.add(value: componentGet(this: world.materials, entity: entity))
-  }
-  loop var j: Int = 0, j < componentCount(this: world.meshRenderers), ++j {
-    let entity: EntityId = componentEntityAt(this: world.meshRenderers, i: j)
-    let renderer: MeshRenderer = componentGet(this: world.meshRenderers, entity: entity)
-    let pos: Int = componentIndexOf(this: world.transforms, entity: entity)
-    scene.meshRenderers.add(value: MeshRenderer { entity: pos, mesh: renderer.mesh, material: pos, visible: renderer.visible })
-  }
-  loop var j: Int = 0, j < componentCount(this: world.sdfs), ++j {
-    let entity: EntityId = componentEntityAt(this: world.sdfs, i: j)
-    let sdf: SdfPrimitive = componentGet(this: world.sdfs, entity: entity)
-    let pos: Int = componentIndexOf(this: world.transforms, entity: entity)
-    scene.sdfPrimitives.add(value: SdfPrimitive { entity: pos, shape: sdf.shape, material: pos, noise: sdf.noise, cluster: sdf.cluster, smoothing: sdf.smoothing })
-  }
-  ret scene
-}
+# (#737: world3dToScene3d — the per-frame Scene3d extraction — was removed once
+# #736 had the RenderSystem read World3d queries directly. buildWorld3dFromScene3d
+# above stays as the LOAD-time bridge, used by loadWorld3dFile in scene3d_file.)
 
 # ----- World3d runtime access (animation + frame history) ------------
 # Read an entity's current Transform3d.
