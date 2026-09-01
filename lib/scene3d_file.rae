@@ -13,6 +13,7 @@ import ui/scene
 open scene3d
 open vec3
 open ui/scene
+open ecs/entity
 
 type MeshRegistry3d {
   keys: List(String)
@@ -119,6 +120,53 @@ func scene3dAssetEntity(asset: view Scene3dAsset, nodeId: view String) pub ret I
     i = i + 1
   }
   ret -1
+}
+
+# ----- World3d asset (#737) -------------------------------------------
+# The World3d-native load result: an ECS World3d plus the scene's camera, light
+# and node-id map, so an app loads straight into component tables and never
+# touches the hand-rolled Scene3d SoA. loadWorld3dFile wraps the Scene3d parser
+# and converts the result with buildWorld3dFromScene3d — the Scene3d intermediate
+# lives and dies inside this function. (#748 retires Scene3d once every example
+# is migrated, at which point the parser can build a World3d directly.)
+type World3dAsset {
+  world: World3d
+  camera: Camera3d
+  light: Light3d
+  nodeIds: List(String)
+  entityIds: List(Int)
+  ok: Bool
+  errorMsg: String
+}
+
+func loadWorld3dFile(path: view String, meshes: view MeshRegistry3d) pub ret World3dAsset {
+  let asset: Scene3dAsset = loadScene3dFile(path: path, meshes: meshes)
+  ret World3dAsset {
+    world: buildWorld3dFromScene3d(old: asset.scene)
+    camera: asset.camera
+    light: asset.light
+    nodeIds: asset.nodeIds
+    entityIds: asset.entityIds
+    ok: asset.ok
+    errorMsg: asset.errorMsg
+  }
+}
+
+# The entity for a node id (its dense transform position mapped to an EntityId),
+# or noEntity() if the id is absent. The World3d analogue of scene3dAssetEntity.
+func world3dAssetEntity(asset: view World3dAsset, nodeId: view String) pub ret EntityId {
+  var i: Int = 0
+  loop i < asset.nodeIds.length {
+    if let candidate: String = asset.nodeIds.copyAt(index: i) {
+      if candidate is nodeId {
+        if let idx: Int = asset.entityIds.copyAt(index: i) {
+          ret world3dEntityAt(world: asset.world, i: idx)
+        }
+      }
+    }
+    i = i + 1
+  }
+  ret noEntity()
 }
 
 func failScene3dAsset(asset: mod Scene3dAsset, message: view String) {

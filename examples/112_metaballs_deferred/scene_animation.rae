@@ -8,11 +8,9 @@ import core
 import math
 import vec3
 import scene3d
-import scene3d_file
 open math3d
 open mesh3d
 open scene3d
-open scene3d_file
 open vec3
 open ecs/entity
 open ecs/component_table
@@ -294,24 +292,23 @@ func animateScene3(world: mod World3d, time: view Float) {
   }
 }
 
-func animateScene1(world: mod World3d, asset: view Scene3dAsset, tags: view ClusterTags, time: view Float) {
+# The cube/torus entities are resolved once at load (nodeId -> EntityId) and
+# passed in, so this animator is pure World3d — no Scene3dAsset / nodeId lookup.
+func animateScene1(world: mod World3d, cubeA: view EntityId, cubeB: view EntityId, torus: view EntityId, tags: view ClusterTags, time: view Float) {
   # Two free cubes tumbling on different axes at different rates. Boxes are
   # the useful shape to watch here: a sphere looks identical under any
   # rotation, so it cannot show a wrong rotation order or a skewed normal
   # transform, and a flat-shaded cube shows both immediately.
-  let cubeAEntity: EntityId = world3dEntityAt(world: world, i: scene3dAssetEntity(asset: asset, nodeId: "spinCubeA"))
-  var cubeA: Transform3d = world3dGetTransform(world: world, entity: cubeAEntity)
-  cubeA.rotation = vec3.create(x: time * 0.7, y: time * 0.31, z: 0.0)
-  world3dWriteTransform(world: world, entity: cubeAEntity, transform: cubeA)
-  let cubeBEntity: EntityId = world3dEntityAt(world: world, i: scene3dAssetEntity(asset: asset, nodeId: "spinCubeB"))
-  var cubeB: Transform3d = world3dGetTransform(world: world, entity: cubeBEntity)
-  cubeB.rotation = vec3.create(x: 0.0, y: time * 0.55, z: time * 0.9)
-  world3dWriteTransform(world: world, entity: cubeBEntity, transform: cubeB)
+  var cubeATransform: Transform3d = world3dGetTransform(world: world, entity: cubeA)
+  cubeATransform.rotation = vec3.create(x: time * 0.7, y: time * 0.31, z: 0.0)
+  world3dWriteTransform(world: world, entity: cubeA, transform: cubeATransform)
+  var cubeBTransform: Transform3d = world3dGetTransform(world: world, entity: cubeB)
+  cubeBTransform.rotation = vec3.create(x: 0.0, y: time * 0.55, z: time * 0.9)
+  world3dWriteTransform(world: world, entity: cubeB, transform: cubeBTransform)
 
-  let torusEntity: EntityId = world3dEntityAt(world: world, i: scene3dAssetEntity(asset: asset, nodeId: "heroTorus"))
-  var torusTransform: Transform3d = world3dGetTransform(world: world, entity: torusEntity)
+  var torusTransform: Transform3d = world3dGetTransform(world: world, entity: torus)
   torusTransform.rotation = vec3.create(x: time * 0.35, y: 0.0, z: time * 0.62)
-  world3dWriteTransform(world: world, entity: torusEntity, transform: torusTransform)
+  world3dWriteTransform(world: world, entity: torus, transform: torusTransform)
   # Heights are chosen against the ground plane at z=-0.75 so every ball
   # stays INSIDE the SSAO contact radius (~1.2 world units) for its whole
   # cycle, not merely at the bottom of its swing.
