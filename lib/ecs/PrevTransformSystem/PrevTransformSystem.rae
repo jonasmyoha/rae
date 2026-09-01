@@ -1,0 +1,26 @@
+# lib/ecs — previous-transform system (#735).
+#
+# Derives each entity's PREVIOUS-frame transform from its current one: a system
+# that snapshots a `current` transform ComponentTable into a `prev` table of the
+# SAME element type, replacing the hand-rolled per-frame "prev = current"
+# lockstep an app used to maintain by itself. Motion vectors / TAA read `prev`
+# to know where an entity WAS between frames.
+#
+# Run it once per frame AFTER the frame's draw, so next frame's `prev` holds this
+# frame's pose — the same point the manual snapshot occupied. (Equivalently, run
+# it at frame start before animation overwrites `current`; either is consistent
+# as long as it is the same point every frame.)
+#
+# Generic over the transform type T (Transform2D, Transform3d, ...). T is copied
+# by value into `prev`, so it must be a value/POD transform — which every
+# transform component is.
+import core
+open ecs/entity
+open ecs/component_table
+
+func prevTransformSystem(T: type, current: view ComponentTable(T), prev: mod ComponentTable(T)) {
+  loop var i: Int = 0, i < componentCount(this: current), ++i {
+    let entity: EntityId = componentEntityAt(this: current, i: i)
+    componentSet(this: prev, entity: entity, data: componentDataAt(this: current, i: i))
+  }
+}

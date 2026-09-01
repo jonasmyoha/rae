@@ -330,7 +330,7 @@ func main() ret Int {
   }
 
   # #733: World3d is the authoritative 3D state — one ECS world per scene, its
-  # ComponentTables (Transform3d/PrevTransform3d/Material3d/MeshRenderer/
+  # ComponentTables (Transform3d/prev-Transform3d/Material3d/MeshRenderer/
   # SdfPrimitive keyed by EntityId) replacing Scene3d's parallel Lists and the
   # `entity: Int` index model. The loaded Scene3dAsset survives only as the parse
   # result we seed from (and for camera/light + nodeId lookups). Animation mutates
@@ -749,8 +749,8 @@ func main() ret Int {
       let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
       # #733 bridge: derive the flat Scene3d the shared renderer consumes from the
       # active world, once per frame (transforms already animated, prevTransforms
-      # still hold last frame's — the snapshot below advances them). #736 removes
-      # this by having the renderer read World3d queries directly.
+      # still hold last frame's — PrevTransformSystem below advances them). #736
+      # removes this by having the renderer read World3d queries directly.
       var renderScene: Scene3d = createScene3d()
       if uiState.activeScene is 1 { renderScene = world3dToScene3d(world: world1) }
       if uiState.activeScene is 2 { renderScene = world3dToScene3d(world: world2) }
@@ -821,13 +821,13 @@ func main() ret Int {
         }
         pi3 = pi3 + 1
       }
-      # Frame history for motion vectors (#336): the ACTIVE scene's current
-      # transforms become its previous-frame set. Inactive scenes are not
-      # snapshotted — they aren't rendered, so they have no frame history to
-      # advance, and their first frame back re-syncs on the next snapshot.
-      if uiState.activeScene is 1 { snapshotWorld3dPrevTransforms(world: world1) }
-      if uiState.activeScene is 2 { snapshotWorld3dPrevTransforms(world: world2) }
-      if uiState.activeScene is 3 { snapshotWorld3dPrevTransforms(world: world3) }
+      # Frame history for motion vectors (#336): PrevTransformSystem (#735) makes
+      # the ACTIVE scene's current transforms its previous-frame set. Inactive
+      # scenes are not advanced — they aren't rendered, so they have no frame
+      # history to keep, and their first frame back re-syncs on the next run.
+      if uiState.activeScene is 1 { world3dPrevTransformSystem(world: world1) }
+      if uiState.activeScene is 2 { world3dPrevTransformSystem(world: world2) }
+      if uiState.activeScene is 3 { world3dPrevTransformSystem(world: world3) }
     }
   }
   # Final flush: the throttle may have a pending change when the loop ends.
