@@ -117,8 +117,8 @@ func renderShadowPass(app: mod App, aspect: copy Float, palette: view List(Float
     # Each caster's shadow samples the SAME palette slot its G-buffer instance
     # does (#547), so a crowd member casts its own pose. Hero = slot 0.
     let jc: Int = jointCount(sk: app.character.skeleton)
-    loop var sp: Int = 0, sp < app.character.partIds.length, ++sp {
-      let sh: MeshHandle = meshHandle(id: walkerIntAt(values: app.character.partIds, index: sp), generation: 1)
+    loop var sp: Int = 0, sp < gameWorldPartCount(world: app.world), ++sp {
+      let sh: MeshHandle = meshHandle(id: gameWorldPartAt(world: app.world, i: sp).meshId, generation: 1)
       drawShadowCasterSkinned(mesh: sh, model: app.character.model, paletteBase: 0)
       loop var shadowClone: Int = 0, shadowClone < app.character.crowdEntities.length, ++shadowClone {
         if let member: EntityId = app.character.crowdEntities.copyAt(index: shadowClone) {
@@ -161,12 +161,13 @@ func renderGbufferPass(app: mod App, aspect: copy Float, palette: view List(Floa
   # Palettes (hero slot 0 + one per crowd member) were uploaded in renderApp.
   let jc: Int = jointCount(sk: app.character.skeleton)
   uploadPalette(rows: palette, jointCount: jc)
-  loop var p: Int = 0, p < app.character.partIds.length, ++p {
-    let handle: MeshHandle = meshHandle(id: walkerIntAt(values: app.character.partIds, index: p), generation: 1)
+  loop var p: Int = 0, p < gameWorldPartCount(world: app.world), ++p {
+    let part: PartRoughness = gameWorldPartAt(world: app.world, i: p)
+    let handle: MeshHandle = meshHandle(id: part.meshId, generation: 1)
     let mat: Material3d = {
       baseColor: vec3.create(x: 1.0, y: 1.0, z: 1.0),
       metallic: 0.0,
-      roughness: walkerFloatAt(values: app.character.partRough, index: p),
+      roughness: part.roughness,
       emission: vec3.create(x: 0.0, y: 0.0, z: 0.0),
       toon: app.character.toon
     }
