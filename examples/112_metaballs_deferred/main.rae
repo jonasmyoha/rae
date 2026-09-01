@@ -308,48 +308,52 @@ func main() ret Int {
   registerMesh3d(reg: meshRegistry, key: "torus", handle: torus)
   registerMesh3d(reg: meshRegistry, key: "ground", handle: ground)
   registerMesh3d(reg: meshRegistry, key: "box", handle: boxMesh)
-  var scene1: Scene3dAsset = loadScene3dFile(path: "{base}scene1.raescene", meshes: meshRegistry)
-  var scene2: Scene3dAsset = loadScene3dFile(path: "{base}scene2.raescene", meshes: meshRegistry)
-  var scene3: Scene3dAsset = loadScene3dFile(path: "{base}scene3.raescene", meshes: meshRegistry)
-  if scene1.ok is false {
-    log("[scene3d] scene 1 failed: {scene1.errorMsg}")
+  # #737: load straight into ECS World3ds. loadWorld3dFile parses the .raescene
+  # and converts it to a World3d (component tables) + camera/light/node-id map;
+  # the hand-rolled Scene3d SoA lives and dies inside that loader, so 112 never
+  # touches it — its 3D state, animation and rendering are all ECS.
+  var asset1: World3dAsset = loadWorld3dFile(path: "{base}scene1.raescene", meshes: meshRegistry)
+  var asset2: World3dAsset = loadWorld3dFile(path: "{base}scene2.raescene", meshes: meshRegistry)
+  var asset3: World3dAsset = loadWorld3dFile(path: "{base}scene3.raescene", meshes: meshRegistry)
+  if asset1.ok is false {
+    log("[scene3d] scene 1 failed: {asset1.errorMsg}")
     shutdown()
     gpu2d.closeWindow()
     ret 1
   }
-  if scene2.ok is false {
-    log("[scene3d] scene 2 failed: {scene2.errorMsg}")
+  if asset2.ok is false {
+    log("[scene3d] scene 2 failed: {asset2.errorMsg}")
     shutdown()
     gpu2d.closeWindow()
     ret 1
   }
-  if scene3.ok is false {
-    log("[scene3d] scene 3 failed: {scene3.errorMsg}")
+  if asset3.ok is false {
+    log("[scene3d] scene 3 failed: {asset3.errorMsg}")
     shutdown()
     gpu2d.closeWindow()
     ret 1
   }
 
-  # #733: World3d is the authoritative 3D state — one ECS world per scene, its
-  # ComponentTables (Transform3d/prev-Transform3d/Material3d/MeshRenderer/
-  # SdfPrimitive keyed by EntityId) replacing Scene3d's parallel Lists and the
-  # `entity: Int` index model. The loaded Scene3dAsset survives only as the parse
-  # result we seed from (and for camera/light + nodeId lookups). Animation mutates
-  # these worlds by EntityId; the renderer is fed a Scene3d derived from the
-  # active world each frame (world3dToScene3d) until #736 has it read World3d
-  # queries directly.
-  var world1: World3d = buildWorld3dFromScene3d(old: scene1.scene)
-  var world2: World3d = buildWorld3dFromScene3d(old: scene2.scene)
-  var world3: World3d = buildWorld3dFromScene3d(old: scene3.scene)
-  log("[ecs] World3d: scene1 {world3dEntityCount(world: world1)}, scene2 {world3dEntityCount(world: world2)}, scene3 {world3dEntityCount(world: world3)} entities (#733)")
+  # Capture per-scene metadata (node anchors, initial camera, per-scene lights)
+  # before moving the worlds out of their assets.
+  let cubeAEntity: EntityId = world3dAssetEntity(asset: asset1, nodeId: "spinCubeA")
+  let cubeBEntity: EntityId = world3dAssetEntity(asset: asset1, nodeId: "spinCubeB")
+  let torusEntity: EntityId = world3dAssetEntity(asset: asset1, nodeId: "heroTorus")
+  let initialCamera: Camera3d = asset1.camera
+  let light1: Light3d = asset1.light
+  let light2: Light3d = asset2.light
+  let light3: Light3d = asset3.light
+  # The World3d stays owned by its asset (asset1.world) — copying it out would
+  # double-free the component tables; every call passes asset1.world by ref.
+  log("[ecs] World3d: scene1 {world3dEntityCount(world: asset1.world)}, scene2 {world3dEntityCount(world: asset2.world)}, scene3 {world3dEntityCount(world: asset3.world)} entities (#737)")
   # #734: per-cluster marker tags, classified once from the (renderer-owned)
   # cluster field. The animators query these tag tables instead of an
   # `if sdf.cluster is N` ladder. Clusters never change, so build once here.
-  let clusters1: ClusterTags = buildClusterTags(world: world1)
-  let clusters2: ClusterTags = buildClusterTags(world: world2)
+  let clusters1: ClusterTags = buildClusterTags(world: asset1.world)
+  let clusters2: ClusterTags = buildClusterTags(world: asset2.world)
   # #736: the RenderSystem's SDF pass queries per-cluster tags, so every scene
   # that draws metaballs needs them (scene 3 is one cluster of 40 spheres).
-  let clusters3: ClusterTags = buildClusterTags(world: world3)
+  let clusters3: ClusterTags = buildClusterTags(world: asset3.world)
 
   # Fonts + theme through the shared loader, which also bridges the
   # theme's PALETTE into the active theme — the step that was missing
@@ -410,7 +414,7 @@ func main() ret Int {
   # menu button (#546 UI unification), so hide it — one settings affordance, the
   # same one example 114 uses.
   setNodeActive(world: uiWorld, nodeId: "SettingsButton", value: false)
-  var camera: Camera3d = scene1.camera
+  var camera: Camera3d = initialCamera
   var cameraRig: CameraRig = createCameraRig(camera: camera)
   # Restore before the test-state hook, so an explicit env override still
   # wins over whatever the previous run left behind.
@@ -450,7 +454,7 @@ func main() ret Int {
   }
   syncCameraBar(world: uiWorld, rig: cameraRig, camera: camera)
 
-  var light: Light3d = scene1.light
+  var light: Light3d = light1
   var simTime: Float = 0.0
   # Epoch seconds must stay Float64 (see docs/primitive-types.md); only the
   # small per-frame delta is narrowed to Float.
@@ -728,9 +732,9 @@ func main() ret Int {
       }
       applyCameraRig(rig: cameraRig, camera: camera)
       syncCameraBar(world: uiWorld, rig: cameraRig, camera: camera)
-      if uiState.activeScene is 1 { light = scene1.light }
-      if uiState.activeScene is 2 { light = scene2.light }
-      if uiState.activeScene is 3 { light = scene3.light }
+      if uiState.activeScene is 1 { light = light1 }
+      if uiState.activeScene is 2 { light = light2 }
+      if uiState.activeScene is 3 { light = light3 }
       # AFTER the scene's own light is restored, not before: this runs every
       # frame, so setting the sun anywhere earlier is silently undone here and
       # the time-of-day slider appears to do nothing.
@@ -742,19 +746,20 @@ func main() ret Int {
       # solid, which is how the bug was noticed.
       light.sunDir = settingsSunDir(s: settings)
       light.sunColor = settingsSunColor(s: settings)
-      if uiState.activeScene is 1 { animateScene1(world: world1, asset: scene1, tags: clusters1, time: simTime) }
+      if uiState.activeScene is 1 { animateScene1(world: asset1.world, cubeA: cubeAEntity, cubeB: cubeBEntity, torus: torusEntity, tags: clusters1, time: simTime) }
       if uiState.activeScene is 2 {
-        animateScene(world: world2, sceneId: 2, time: simTime)
-        animateMetaballLab(world: world2, tags: clusters2, time: simTime)
+        animateScene(world: asset2.world, sceneId: 2, time: simTime)
+        animateMetaballLab(world: asset2.world, tags: clusters2, time: simTime)
       }
-      if uiState.activeScene is 3 { animateScene3(world: world3, time: simTime) }
+      if uiState.activeScene is 3 { animateScene3(world: asset3.world, time: simTime) }
 
 
       let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
-      # #736: rendering reads the active World3d directly through the
-      # RenderSystem's ECS queries (mesh + per-cluster sdf) — no Scene3d is
-      # derived. renderDeferredPass still takes a Scene3d arg it ignores (ssao/
-      # lighting/taa/composite read no scene), so hand it an empty one.
+      # Rendering reads the active World3d directly through the RenderSystem's
+      # ECS queries (mesh + per-cluster sdf). The ONLY remaining Scene3d in 112
+      # is this empty placeholder: renderDeferredPass (shared lib) takes a Scene3d
+      # arg its ssao/lighting/taa/composite tags never read, and its signature
+      # can't change here — #748 drops the param when the SoA retires.
       let emptyScene: Scene3d = createScene3d()
       # Frame order is DERIVED by the render graph (#331/#332): scene3d
       # writes the colour target, the UI overlay MODIFIES it (load-preserving),
@@ -781,16 +786,16 @@ func main() ret Int {
           # not doing the work, with no renderer flag to thread through.
           if settings.shadows {
             if uiState.activeScene is 1 {
-              renderMeshShadow(world: world1)
-              renderSdfShadow(world: world1, tags: clusters1)
+              renderMeshShadow(world: asset1.world)
+              renderSdfShadow(world: asset1.world, tags: clusters1)
             }
             if uiState.activeScene is 2 {
-              renderMeshShadow(world: world2)
-              renderSdfShadow(world: world2, tags: clusters2)
+              renderMeshShadow(world: asset2.world)
+              renderSdfShadow(world: asset2.world, tags: clusters2)
             }
             if uiState.activeScene is 3 {
-              renderMeshShadow(world: world3)
-              renderSdfShadow(world: world3, tags: clusters3)
+              renderMeshShadow(world: asset3.world)
+              renderSdfShadow(world: asset3.world, tags: clusters3)
             }
           }
           endShadowPass()
@@ -807,16 +812,16 @@ func main() ret Int {
           # renders a black frame with a working UI (found in 113).
           gbuffer.beginPass(camera: camera, light: light, aspect: aspect)
           if uiState.activeScene is 1 {
-            renderMeshGbuffer(world: world1)
-            renderSdfGbuffer(world: world1, tags: clusters1, camera: camera)
+            renderMeshGbuffer(world: asset1.world)
+            renderSdfGbuffer(world: asset1.world, tags: clusters1, camera: camera)
           }
           if uiState.activeScene is 2 {
-            renderMeshGbuffer(world: world2)
-            renderSdfGbuffer(world: world2, tags: clusters2, camera: camera)
+            renderMeshGbuffer(world: asset2.world)
+            renderSdfGbuffer(world: asset2.world, tags: clusters2, camera: camera)
           }
           if uiState.activeScene is 3 {
-            renderMeshGbuffer(world: world3)
-            renderSdfGbuffer(world: world3, tags: clusters3, camera: camera)
+            renderMeshGbuffer(world: asset3.world)
+            renderSdfGbuffer(world: asset3.world, tags: clusters3, camera: camera)
           }
           gbuffer.endPass()
         }
@@ -846,9 +851,9 @@ func main() ret Int {
       # the ACTIVE scene's current transforms its previous-frame set. Inactive
       # scenes are not advanced — they aren't rendered, so they have no frame
       # history to keep, and their first frame back re-syncs on the next run.
-      if uiState.activeScene is 1 { world3dPrevTransformSystem(world: world1) }
-      if uiState.activeScene is 2 { world3dPrevTransformSystem(world: world2) }
-      if uiState.activeScene is 3 { world3dPrevTransformSystem(world: world3) }
+      if uiState.activeScene is 1 { world3dPrevTransformSystem(world: asset1.world) }
+      if uiState.activeScene is 2 { world3dPrevTransformSystem(world: asset2.world) }
+      if uiState.activeScene is 3 { world3dPrevTransformSystem(world: asset3.world) }
     }
   }
   # Final flush: the throttle may have a pending change when the loop ends.
