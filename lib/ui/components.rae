@@ -498,6 +498,37 @@ type ScrollState {
   velocity: Float
 }
 
+# #729: per-panel scroll state, keyed by the panel's VIEWPORT entity. Replaces the
+# out-of-world, string-keyed `ScrollPanel` struct — the content node is resolved
+# to an entity ONCE (at attach) and stored here, so the per-frame update reads
+# this component instead of re-resolving node-id strings. Carries iOS-style scroll
+# physics (see lib/ui/scroll_physics.rae): `offset` is how far the content has
+# slid UP and may overshoot the [0, range] bounds during a rubber-band; `velocity`
+# is the momentum after a fling; `d0..d2` are the last three damped drag deltas,
+# from which release velocity is picked ("velocity at lift").
+type ScrollPanelState {
+  content: EntityId
+  offset: Float
+  velocity: Float
+  dragging: Bool
+  lastPointerY: Float
+  d0: Float
+  d1: Float
+  d2: Float
+}
+
+# #729: per-entity pointer interaction state, maintained by the input system
+# (InputSystem/updateUiInput). `hovered` = the pointer is over this entity;
+# `pressed` = the press that is currently down started on this entity. The pointer
+# POSITION and the action-event queue stay singleton on `UiInput` (a pointer is one
+# device — that is not per-entity state), but WHICH entity is hovered/pressed is,
+# so it lives here as a component render/style systems can read directly instead of
+# threading a single hovered/pressed EntityId through every call.
+type Interaction {
+  hovered: Bool
+  pressed: Bool
+}
+
 # Stable widget metadata for data-oriented UI updates. These components
 # intentionally carry app/backend-neutral data only: renderers do not
 # read them directly, and app systems can query them to rebuild or patch

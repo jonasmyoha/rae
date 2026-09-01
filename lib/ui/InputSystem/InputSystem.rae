@@ -99,8 +99,48 @@ func clearUiActions(input: mod UiInput) {
   loop events.length > 0 { events.remove(index: events.length - 1) }
 }
 
-func updateUiInput(input: mod UiInput, world: view UiWorld) pub {
+# #729: per-entity pointer state lives in `Interaction` components. At most two
+# entities carry one at a time (the hovered one and the pressed one), so the whole
+# table is kept in step by clearing the two from LAST frame and marking the two for
+# THIS frame — no per-entity scan. Merge the flags so an entity that is both
+# hovered and pressed gets a single {hovered:true, pressed:true}.
+func clearInteraction(world: mod UiWorld, entity: view EntityId) {
+  if isNone(this: entity) { ret }
+  if componentHas(this: world.interactions, entity: entity) {
+    componentRemove(this: world.interactions, entity: entity)
+  }
+}
+
+func markInteraction(world: mod UiWorld, entity: view EntityId, hovered: view Bool, pressed: view Bool) {
+  if isNone(this: entity) { ret }
+  var state: Interaction = { hovered: false, pressed: false }
+  if componentHas(this: world.interactions, entity: entity) {
+    state = componentGet(this: world.interactions, entity: entity)
+  }
+  if hovered { state.hovered = true }
+  if pressed { state.pressed = true }
+  componentSet(this: world.interactions, entity: entity, data: state)
+}
+
+# Read a per-entity interaction flag (default false when the entity carries no
+# Interaction), for render/style systems that want to react to hover/press.
+func entityHovered(world: view UiWorld, entity: view EntityId) pub ret Bool {
+  if componentHas(this: world.interactions, entity: entity) is false { ret false }
+  ret componentGet(this: world.interactions, entity: entity).hovered
+}
+
+func entityPressed(world: view UiWorld, entity: view EntityId) pub ret Bool {
+  if componentHas(this: world.interactions, entity: entity) is false { ret false }
+  ret componentGet(this: world.interactions, entity: entity).pressed
+}
+
+func updateUiInput(input: mod UiInput, world: mod UiWorld) pub {
   clearUiActions(input: input)
+  # Clear last frame's per-entity marks before recomputing (previous hovered +
+  # pressed are the only two that can carry an Interaction).
+  clearInteraction(world: world, entity: input.hoveredEntity)
+  clearInteraction(world: world, entity: input.pressedEntity)
+
   let x: Float = gpu2d.pointerX()
   let y: Float = gpu2d.pointerY()
   let pressed: Bool = gpu2d.pointerPressed()
@@ -125,6 +165,10 @@ func updateUiInput(input: mod UiInput, world: view UiWorld) pub {
     }
     input.pressedEntity = noEntity()
   }
+
+  # Project this frame's hovered/pressed refs onto the entities as components.
+  markInteraction(world: world, entity: input.hoveredEntity, hovered: true, pressed: false)
+  markInteraction(world: world, entity: input.pressedEntity, hovered: false, pressed: true)
 }
 
 # Drop the in-progress press and anything already queued, so a release cannot
