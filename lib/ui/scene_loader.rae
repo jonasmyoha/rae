@@ -14,6 +14,7 @@ import json
 import ui/registry
 import ui/scene_instance
 open ecs/entity
+open ecs/HierarchySystem/HierarchySystem
 
 # Minimal helper: append an EntityId to a List(EntityId) via a non-generic
 # function. Same workaround as the ones in ecs.rae — needed when the
@@ -181,23 +182,20 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
     let node: view SceneNode => sceneNodeAt(this: scene, idx: p)
     let parentEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
     let kn: Int = node.childrenIds.length
-    if kn > 0 {
-      let kids: List(EntityId) = createList(EntityId, cap: kn)
-      var q: Int = 0
-      loop q < kn {
-        if let childId: String = node.childrenIds.copyAt(index: q) {
-          let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
-          if childIdx >= 0 {
-            let childEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: childIdx)
-            appendEntityListSL(lst: kids, value: childEntity)
-            let pl: Parent = { parent: parentEntity }
-            componentSet(this: world.parents, entity: childEntity, data: pl)
-          }
+    var q: Int = 0
+    loop q < kn {
+      if let childId: String = node.childrenIds.copyAt(index: q) {
+        let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
+        if childIdx >= 0 {
+          let childEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: childIdx)
+          # #726: set ONLY the authoritative Parent link; HierarchySystem.setParent
+          # maintains the derived Children cache, appending in call (= authored)
+          # order so the child order matches the old hand-built Children list.
+          setParent(parents: world.parents, childrens: world.childrens,
+                    child: childEntity, parent: parentEntity)
         }
-        q = q + 1
       }
-      let ch: Children = { ids: kids }
-      componentSet(this: world.childrens, entity: parentEntity, data: ch)
+      q = q + 1
     }
     p = p + 1
     }
