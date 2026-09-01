@@ -1,0 +1,33 @@
+import core
+open ecs/registry
+open ui/registry_flags
+
+# #730: the UI's serialized-vs-derived split is REGISTRY-DRIVEN. Authored
+# components are registered `serialize`; the derived caches the systems rebuild
+# (Children, ComputedRect, MeasuredSize, WorldTransform2D, RuntimeOffset, ...) are
+# registered without it, so the generic serializer skips them by flag.
+
+func check(reg: view ComponentRegistry, name: view String) {
+  log("{name}: registered={isRegistered(reg: reg, name: name)} serialize={registeredHasFlag(reg: reg, name: name, flag: serialize)}")
+}
+
+func main() {
+  let reg: ComponentRegistry = createUiComponentRegistry()
+  log("count: {registeredCount(reg: reg)}")
+  # authored -> persisted
+  check(reg: reg, name: "Rect")
+  check(reg: reg, name: "Layout")
+  check(reg: reg, name: "Text")
+  check(reg: reg, name: "Parent")
+  # editor-only still serializes, but is flagged
+  let evEditorOnly: Bool = registeredHasFlag(reg: reg, name: "EditorVisible", flag: editorOnly)
+  log("EditorVisible editorOnly={evEditorOnly}")
+  # derived caches -> NOT persisted
+  check(reg: reg, name: "Children")
+  check(reg: reg, name: "ComputedRect")
+  check(reg: reg, name: "MeasuredSize")
+  check(reg: reg, name: "WorldTransform2D")
+  check(reg: reg, name: "RuntimeOffset")
+  # unknown -> nothing
+  check(reg: reg, name: "Wibble")
+}
