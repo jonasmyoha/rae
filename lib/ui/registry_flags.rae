@@ -1,0 +1,110 @@
+# lib/ui — the UI component registry FLAGS (#730): which components persist.
+#
+# ONE place declares, for every UI component, whether it is AUTHORED (persisted:
+# registered `serialize`) or DERIVED (a cache some system rebuilds every pass:
+# registered WITHOUT `serialize`). The generic serializer in lib/ecs/serialize.rae
+# reads this — a derived table is skipped by the registry, not by a type
+# annotation and not by a per-component switch.
+#
+# Scope note (#730 decision): this registry drives the MACHINE snapshot
+# (worldToJson/worldFromJson, #768). The human-authored .raescene format (enum
+# strings, theme tokens like "gap":"spaceM", flat {x,y,w,h}) is a different,
+# hand-friendly grammar and keeps its loader in registry.rae
+# (applyComponentByName); that loader is not a serializer and is not replaced.
+# The full machine round-trip additionally waits on the compiler parsing enums in
+# `fromJson` (#767) — until then a snapshot of a component with an enum field
+# reloads that field as 0.
+import core
+open ecs/registry
+
+# Every authored UI component name is registered `serialize`; the derived caches
+# are registered with no flags. Sibling of registeredComponentNames() in
+# registry.rae — keep the authored list in step with it.
+func createUiComponentRegistry() ret ComponentRegistry {
+  var reg: ComponentRegistry = createComponentRegistry()
+  # ----- authored: geometry / layout -----
+  registerComponent(reg: reg, name: "Rect", flags: serialize)
+  registerComponent(reg: reg, name: "Size", flags: serialize)
+  registerComponent(reg: reg, name: "Layout", flags: serialize)
+  registerComponent(reg: reg, name: "Padding", flags: serialize)
+  registerComponent(reg: reg, name: "Margin", flags: serialize)
+  registerComponent(reg: reg, name: "SafeArea", flags: serialize)
+  registerComponent(reg: reg, name: "Align", flags: serialize)
+  registerComponent(reg: reg, name: "Offset", flags: serialize)
+  registerComponent(reg: reg, name: "Constraints", flags: serialize)
+  registerComponent(reg: reg, name: "OverflowPolicy", flags: serialize)
+  registerComponent(reg: reg, name: "ExtentAnchor", flags: serialize)
+  # ----- authored: visual / interaction -----
+  registerComponent(reg: reg, name: "TransformFx", flags: serialize)
+  registerComponent(reg: reg, name: "Sprite", flags: serialize)
+  registerComponent(reg: reg, name: "Text", flags: serialize)
+  registerComponent(reg: reg, name: "TextShadow", flags: serialize)
+  registerComponent(reg: reg, name: "StyleOverride", flags: serialize)
+  registerComponent(reg: reg, name: "Shape", flags: serialize)
+  registerComponent(reg: reg, name: "Shadow", flags: serialize)
+  registerComponent(reg: reg, name: "Opacity", flags: serialize)
+  registerComponent(reg: reg, name: "PointerEvents", flags: serialize)
+  registerComponent(reg: reg, name: "HitArea", flags: serialize)
+  registerComponent(reg: reg, name: "OnClick", flags: serialize)
+  registerComponent(reg: reg, name: "Button", flags: serialize)
+  registerComponent(reg: reg, name: "Active", flags: serialize)
+  registerComponent(reg: reg, name: "EditorVisible", flags: serialize bitor editorOnly)
+  registerComponent(reg: reg, name: "EditorLocked", flags: serialize bitor editorOnly)
+  registerComponent(reg: reg, name: "HeroWidget", flags: serialize)
+  registerComponent(reg: reg, name: "CornerRadius", flags: serialize)
+  registerComponent(reg: reg, name: "HoverScale", flags: serialize)
+  registerComponent(reg: reg, name: "GradientFill", flags: serialize)
+  registerComponent(reg: reg, name: "BackdropImage", flags: serialize)
+  registerComponent(reg: reg, name: "OpticalAlign", flags: serialize)
+  registerComponent(reg: reg, name: "LayerRoot", flags: serialize)
+  registerComponent(reg: reg, name: "LayerRef", flags: serialize)
+  registerComponent(reg: reg, name: "DebugAnchor", flags: serialize)
+  registerComponent(reg: reg, name: "PageRoot", flags: serialize)
+  registerComponent(reg: reg, name: "ScrollState", flags: serialize)
+  registerComponent(reg: reg, name: "WidgetId", flags: serialize)
+  registerComponent(reg: reg, name: "WidgetState", flags: serialize)
+  registerComponent(reg: reg, name: "DataDependency", flags: serialize)
+  registerComponent(reg: reg, name: "ActionBinding", flags: serialize)
+  registerComponent(reg: reg, name: "RefreshRegion", flags: serialize)
+  registerComponent(reg: reg, name: "StateStyle", flags: serialize)
+  registerComponent(reg: reg, name: "Aspect", flags: serialize)
+  registerComponent(reg: reg, name: "ScaleToFit", flags: serialize)
+  # ----- authored: identity / metadata -----
+  registerComponent(reg: reg, name: "Name", flags: serialize)
+  registerComponent(reg: reg, name: "PrimaryType", flags: serialize)
+  registerComponent(reg: reg, name: "NodeId", flags: serialize)
+  registerComponent(reg: reg, name: "SceneScope", flags: serialize)
+  registerComponent(reg: reg, name: "RuntimeOnly", flags: serialize)
+  # ----- authored: dynamic / data binding -----
+  registerComponent(reg: reg, name: "SceneInstance", flags: serialize)
+  registerComponent(reg: reg, name: "ImageSourceResolver", flags: serialize)
+  registerComponent(reg: reg, name: "TextBinding", flags: serialize)
+  registerComponent(reg: reg, name: "MaskShape", flags: serialize)
+  registerComponent(reg: reg, name: "DataRequest", flags: serialize)
+  registerComponent(reg: reg, name: "ListView", flags: serialize)
+  # ----- authored: effects -----
+  registerComponent(reg: reg, name: "BackgroundPan", flags: serialize)
+  registerComponent(reg: reg, name: "Carousel", flags: serialize)
+  registerComponent(reg: reg, name: "SmokeFx", flags: serialize)
+  registerComponent(reg: reg, name: "AnimFrames", flags: serialize)
+  registerComponent(reg: reg, name: "AnimTrigger", flags: serialize)
+  registerComponent(reg: reg, name: "WobbleFx", flags: serialize)
+  # ----- hierarchy: Parent is AUTHORITATIVE (#711) and persists; Children is a
+  # derived cache rebuilt by HierarchySystem and is NOT persisted. -----
+  registerComponent(reg: reg, name: "Parent", flags: serialize)
+  registerComponent(reg: reg, name: "Children", flags: 0)
+  # ----- DERIVED caches: rebuilt every pass by a system, never persisted -----
+  registerComponent(reg: reg, name: "MeasuredSize", flags: 0)
+  registerComponent(reg: reg, name: "ComputedRect", flags: 0)
+  registerComponent(reg: reg, name: "Transform2D", flags: 0)
+  registerComponent(reg: reg, name: "WorldTransform2D", flags: 0)
+  registerComponent(reg: reg, name: "WorldVisual", flags: 0)
+  registerComponent(reg: reg, name: "RuntimeOffset", flags: 0)
+  registerComponent(reg: reg, name: "LayoutScale", flags: 0)
+  registerComponent(reg: reg, name: "SafeInsets", flags: 0)
+  registerComponent(reg: reg, name: "AnimState", flags: 0)
+  registerComponent(reg: reg, name: "VisualBounds", flags: 0)
+  registerComponent(reg: reg, name: "Interaction", flags: 0)
+  registerComponent(reg: reg, name: "ScrollPanelState", flags: 0)
+  ret reg
+}
