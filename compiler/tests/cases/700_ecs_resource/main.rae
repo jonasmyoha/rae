@@ -4,8 +4,8 @@ open ecs/registry
 open ecs/serialize
 
 # #753: resources are world-global singletons registered like components but
-# serialized as a single top-level value. An AUTHORED resource (SERIALIZE) round-
-# trips through worldToJson; a RUNTIME resource (RESOURCE without SERIALIZE) is
+# serialized as a single top-level value. An AUTHORED resource (serialize) round-
+# trips through worldToJson; a RUNTIME resource (resource without serialize) is
 # omitted.
 
 type Frame { count: Int, dt: Int }   # authored resource
@@ -16,17 +16,17 @@ func main() {
   let nInput: String = "Input"
 
   var reg: ComponentRegistry = createComponentRegistry()
-  registerResource(reg: reg, name: nFrame, flags: SERIALIZE)   # authored -> saved
+  registerResource(reg: reg, name: nFrame, flags: serialize)   # authored -> saved
   registerResource(reg: reg, name: nInput, flags: 0)           # runtime  -> omitted
 
   log("Frame is resource: {isResource(reg: reg, name: nFrame)}")
-  log("Frame serialize: {registeredHasFlag(reg: reg, name: nFrame, flag: SERIALIZE)}")
-  log("Input serialize: {registeredHasFlag(reg: reg, name: nInput, flag: SERIALIZE)}")
+  log("Frame serialize: {registeredHasFlag(reg: reg, name: nFrame, flag: serialize)}")
+  log("Input serialize: {registeredHasFlag(reg: reg, name: nInput, flag: serialize)}")
 
   let frame: Frame = { count: 7, dt: 16 }
   let input: Input = { mouseX: 42 }
 
-  # Serialize both resources; only the SERIALIZE-registered Frame is written.
+  # Serialize both resources; only the serialize-registered Frame is written.
   var writer: WorldJson = createWorldJson()
   addResource(writer: writer, name: nFrame, valueJson: frame.toJson(), registry: reg)
   addResource(writer: writer, name: nInput, valueJson: input.toJson(), registry: reg)

@@ -1,14 +1,14 @@
 # lib/ecs — EventQueue(T): the double-buffered per-frame event channel (#754).
 #
 # The ECS EVENT primitive, evolved from Queue(T) (the #264 single-buffer inbox in
-# ecs/queue.rae). An EventQueue is held as a RESOURCE on the World (a plain field,
+# ecs/queue.rae). An EventQueue is held as a resource on the World (a plain field,
 # #753) — one per event type. Within a frame one system PRODUCES events
 # (eventSend) and later systems in schedule order DRAIN them
 # (eventCount/eventAt). eventFrameAdvance, called ONCE per frame after every
 # consumer, recycles the channel via a DOUBLE BUFFER: the drained events buffer
 # is swapped out for the spare (already-empty) buffer, so the next frame starts
 # clean with no per-event teardown on the hot path. Events are TRANSIENT — a
-# runtime resource, registered RESOURCE without SERIALIZE (#753), so they are
+# runtime resource, registered resource without serialize (#753), so they are
 # NEVER persisted; each frame's events die at the frame boundary.
 #
 # (Queue(T) in ecs/queue.rae stays for its existing command-inbox users; this is
