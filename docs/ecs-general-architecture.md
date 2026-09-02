@@ -5,6 +5,12 @@ UI, the 3D examples and the headless sim build on it. Verified against the curre
 code (citations inline). This document is the design rationale; the practical API
 surface is `ecs-api-reference.md`.
 
+**Final integration sign-off (#750):** full `make test` green — 380 cases + 66
+examples, 0 failures; screenshot parity for 105/106/109/110/112/114 (109/110/112/114
+by the run_examples content gates, 105/106 verified non-blank headless); and the
+leak-gated tests report `RAE_MEM_STATS` outstanding=0. The ECS migration is
+complete and verified.
+
 **What shipped (vs. this design):** generational entities + O(1) live set
 (`lib/ecs/world.rae`), sparse-set `ComponentTable(T)` with write-through
 `componentMod` (`lib/ecs/component_table.rae`), `query2`/`query3` + tags
