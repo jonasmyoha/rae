@@ -11,8 +11,12 @@
 # App/CharacterState types cross-file without importing them.
 import core
 import keys
+import ecs/entity
+open ecs/entity
 
-const PLAYER_LOCAL: Int = 0
+# The local player's id. (Naming: constants are camelCase — #746 fixed the old
+# SHOUTING_SNAKE_CASE `PLAYER_LOCAL`, which the language bans.)
+const playerLocal: Int = 0
 
 # Character-switch key bindings, named from the canonical SDL scancodes in
 # lib/keys.rae. 1 / Page Up go to the previous character, 2 / Page Down to the
@@ -40,6 +44,17 @@ func rosterControlledIsHero(roster: view PlayerRoster) ret Bool {
 func rosterControlledCrowdIndex(roster: view PlayerRoster) ret Int {
   if roster.controlledIndex is 0 { ret 0 - 1 }
   ret roster.controlledIndex - 1
+}
+
+# The GameWorld ENTITY the local player currently controls (#746): the hero
+# entity, or the crowd member entity for the controlled index. This is the
+# roster's ECS view — the same kind of character-entity handle a NetPlayer
+# points at via `controlled`, so local and remote control resolve identically.
+func rosterControlledEntity(app: view App) ret EntityId {
+  if rosterControlledIsHero(roster: app.players) { ret app.character.heroEntity }
+  let idx: Int = rosterControlledCrowdIndex(roster: app.players)
+  if let entity: EntityId = app.character.crowdEntities.copyAt(index: idx) { ret entity }
+  ret app.character.heroEntity
 }
 
 # Cycle to the next / previous controllable character (wraps). No-op with one

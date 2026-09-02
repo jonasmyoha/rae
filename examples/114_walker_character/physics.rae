@@ -1,13 +1,30 @@
-# Physics system for the walker example (#553).
+# Physics system for the walker example (#553, ECS seam #746).
 #
 # A fixed-timestep seam decoupled from render, following the tetris3d
 # accumulator: updateApp accumulates frame time and calls physicsStep at a fixed
-# rate. physicsStep is a NO-OP today; when Jolt/Box2D lands it fills in and the
-# accumulator loop in updateApp does not change. App resolves cross-file (114
-# files are siblings in one module).
+# rate. #746 gives it a real ECS HOME — a physics body is an ENTITY carrying a
+# PhysicsBody component, spawned/despawned through the generational allocator
+# (#704). physicsStep is now a real system that ITERATES the PhysicsBody table
+# and integrates each body's Transform3D; over an empty table it is a no-op, so
+# the persistent walker render is unchanged until bodies are spawned. When a
+# Jolt/Box2D backend lands, this is where per-body integration is replaced —
+# the accumulator loop in updateApp does not change. App / GameWorld resolve
+# cross-file (114 files are siblings in one module).
 import core
+import vec3
+import quat
+import ecs/entity
+import ecs/component_table
+import ecs/transform
+import ecs/world
+open ecs/entity
+open ecs/component_table
+open ecs/transform
+open ecs/world
 
 const physicsFixedStep: Float = 1.0 / 60.0
+# Rae world is Z-up; gravity pulls down Z. Scaled per body by gravityScale.
+const physicsGravity: Float = 0.0 - 9.81
 
 # accumulator carries leftover frame time between fixed steps; worldHandle is the
 # future Jolt/Box2D world id (0 = none yet).
@@ -16,6 +33,52 @@ type PhysicsState {
   worldHandle: Int
 }
 
-# One fixed simulation step. No-op until a physics backend is wired in.
+# A dynamic physics body: linear velocity + how strongly gravity acts on it
+# (0 = kinematic/floating, 1 = full gravity). The body's POSITION lives in the
+# entity's Transform3D, so physics and rendering share one source of truth.
+type PhysicsBody {
+  velocity: Vec3
+  gravityScale: Float
+}
+
+# Spawn a physics body entity: a Transform3D at `position` + a PhysicsBody.
+# Uses the generational allocator, so a freed slot is recycled with a bumped
+# generation and stale handles to it are detectably dead (#704).
+func spawnPhysicsBody(world: mod GameWorld, position: view Vec3, velocity: view Vec3,
+                      gravityScale: view Float) ret EntityId {
+  let entity: EntityId = gameWorldAddEntity(world: world)
+  componentSet(this: world.transforms, entity: entity, data: Transform3D {
+    position: position, rotation: quat.identity(), scale: vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  })
+  componentSet(this: world.physicsBodies, entity: entity, data: PhysicsBody {
+    velocity: velocity, gravityScale: gravityScale
+  })
+  ret entity
+}
+
+# Despawn a physics body: drop its components first (so a recycled index can
+# never read stale body/transform data), then free the entity slot.
+func despawnPhysicsBody(world: mod GameWorld, entity: view EntityId) {
+  componentRemove(this: world.physicsBodies, entity: entity)
+  componentRemove(this: world.transforms, entity: entity)
+  freeEntity(this: world.allocator, entity: entity)
+}
+
+# One fixed step over every physics body: semi-implicit Euler (gravity into
+# velocity, velocity into position). Iterates the ECS table — a real system.
+func physicsStepWorld(world: mod GameWorld, fixedDt: view Float) {
+  loop var i: Int = 0, i < componentCount(this: world.physicsBodies), ++i {
+    let entity: EntityId = componentEntityAt(this: world.physicsBodies, i: i)
+    let body: mod PhysicsBody => componentMod(this: world.physicsBodies, entity: entity)
+    body.velocity.z = body.velocity.z + physicsGravity * body.gravityScale * fixedDt
+    let tf: mod Transform3D => componentMod(this: world.transforms, entity: entity)
+    tf.position.x = tf.position.x + body.velocity.x * fixedDt
+    tf.position.y = tf.position.y + body.velocity.y * fixedDt
+    tf.position.z = tf.position.z + body.velocity.z * fixedDt
+  }
+}
+
+# One fixed simulation step, driven by updateApp's accumulator.
 func physicsStep(app: mod App, fixedDt: copy Float) {
+  physicsStepWorld(world: app.world, fixedDt: fixedDt)
 }

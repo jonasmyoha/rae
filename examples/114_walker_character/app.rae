@@ -466,6 +466,9 @@ func createApp() ret App {
   }
   updateInfiniteTerrain(terrain: terrain, world: gameWorld, playerPosition: characterController.position)
   updateGrassField(field: grass, world: gameWorld, playerPosition: characterController.position)
+  # #746: exercise the physics/net ECS seams once at startup — spawn/despawn via
+  # generational entities, iterate a physics body. Leaves the world untouched.
+  seamSelfTest(world: gameWorld)
   if rig.mode is CameraRigMode.character {
     camera.target = thirdPersonCameraTarget(controller: characterController, focusZ: characterFocusZ)
   }
@@ -559,15 +562,11 @@ func frameBegin(app: mod App) {
 # (#546) — the hero or a crowd member. Used to aim the camera and stream the
 # terrain/grass around the ACTIVE character rather than always the hero.
 func controlledPosition(app: view App) ret Vec3 {
-  if rosterControlledIsHero(roster: app.players) { ret heroController(app: app).position }
-  let idx: Int = rosterControlledCrowdIndex(roster: app.players)
-  ret crowdController(app: app, slot: idx).position
+  ret componentGet(this: app.world.controllers, entity: rosterControlledEntity(app: app)).position
 }
 
 func controlledHeading(app: view App) ret Float {
-  if rosterControlledIsHero(roster: app.players) { ret heroController(app: app).heading }
-  let idx: Int = rosterControlledCrowdIndex(roster: app.players)
-  ret crowdController(app: app, slot: idx).heading
+  ret componentGet(this: app.world.controllers, entity: rosterControlledEntity(app: app)).heading
 }
 
 # Shared reaction to a character switch (#546), from Page Up/Down, keys 1/2, or
@@ -587,7 +586,7 @@ func updateApp(app: mod App) {
   let now: Float64 = app.frame.now
   # Multiplayer seam (offline no-op today, #554): pull remote intents in before
   # the local sim; the matching publish runs after it, below.
-  netApplyRemote(net: app.net)
+  netApplyRemote(net: app.net, world: app.world)
   let uiTick: UiTick = uiUpdate(app: app, dt: dt, now: now)
   let settingsChanged: Bool = uiTick.settingsChanged
   let scrolled: Bool = uiTick.scrolled
@@ -671,7 +670,7 @@ func updateApp(app: mod App) {
     physicsStep(app: app, fixedDt: physicsFixedStep)
     app.physics.accumulator = app.physics.accumulator - physicsFixedStep
   }
-  netPublishIntent(net: app.net)
+  netPublishIntent(net: app.net, world: app.world)
 
   let resized: Bool = gpu2d.windowResized()
   if resized { app.persist.stateDirty = true }
