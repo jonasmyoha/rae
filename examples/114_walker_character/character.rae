@@ -6,6 +6,7 @@
 import core
 import math
 import vec3
+import quat
 import world_biome
 open world_biome
 import scene3d
@@ -151,8 +152,9 @@ func walkerWorldModel(baseModel: view Mat4,
                       controller: view ThirdPersonController) ret Mat4 {
   let worldTranslation: Mat4 = mat4Translate(
     x: controller.position.x, y: controller.position.y, z: controller.position.z)
-  let worldHeading: Mat4 = mat4RotateZ(
-    angle: controller.heading + walkerFacingCorrection)
+  # #745: heading -> quat rotation about Z (not a Euler axis matrix).
+  let worldHeading: Mat4 = quat.toMat4(q: quat.fromAxisAngle(
+    axis: vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: controller.heading + walkerFacingCorrection))
   ret mat4Mul(a: worldTranslation,
                  b: mat4Mul(a: worldHeading, b: baseModel))
 }
