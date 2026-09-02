@@ -21,6 +21,16 @@ TypeInfo* sema_resolve_type(CompilerContext* ctx, AstTypeRef* type_ref);
 
 // Specialization helpers used by backends
 AstTypeRef* substitute_type_ref(CompilerContext* ctx, const AstIdentifierPart* generic_params, const AstTypeRef* concrete_args, const AstTypeRef* type);
+
+// #773 compile-time field reflection through a generic world parameter. When a
+// generic function's body contains a `loop ... in fields(world)`, the field set
+// depends on the concrete instantiation, so a backend emitting one concrete
+// specialization must expand the loop AFTER substitution. Returns a CLONE of
+// `template_body` with every fields() loop unrolled for the given concrete
+// generic args, or NULL if the body has no fields() loop (emit the body as-is).
+AstBlock* reflect_instantiate_body(CompilerContext* ctx, const AstModule* module,
+        const AstBlock* template_body, const AstParam* params,
+        const AstIdentifierPart* gparams, const AstTypeRef* concrete_args);
 AstTypeRef* infer_generic_args(CompilerContext* ctx, const AstFuncDecl* func, const AstTypeRef* pattern, const AstTypeRef* concrete_type);
 AstTypeRef* infer_generic_args_multi(CompilerContext* ctx, const AstFuncDecl* func, const AstTypeRef** patterns, const AstTypeRef** concretes, size_t pair_count);
 Str get_base_type_name(const AstTypeRef* type);

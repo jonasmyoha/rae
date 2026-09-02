@@ -1,6 +1,6 @@
 # Compile-time reflection: iterating a struct's fields
 
-**Status:** v1 LANDED (#772: non-generic `fields(value)`, `any` wildcard, `fieldName()`); #773 (generic W) and #760 (first consumer) still open. Supersedes the rejected `clearEntityComponents`
+**Status:** LANDED for values (#772: non-generic `fields(value)`, `any` wildcard, `fieldName()`) and through a generic world parameter (#773: `func f(W: type, world: mod W) { loop ... in fields(world) }`, expanded per instantiation, W inferred from the argument). #760 (first consumer) still open; `fields(Type)` construction is #774. Supersedes the rejected `clearEntityComponents`
 compiler builtin (queue #760) and the vague "derive/reflection" bullet in
 `docs/ecs-language-wishlist.md`. See that file for the rules this design obeys.
 
