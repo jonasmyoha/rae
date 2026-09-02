@@ -342,7 +342,7 @@ func createApp() ret App {
     sys.exit(code: 1)
   }
 
-  var terrain: InfiniteTerrain = createInfiniteTerrain(scene: scene, assets: assets, groundZ: groundZ)
+  var terrain: InfiniteTerrain = createInfiniteTerrain(world: gameWorld, assets: assets, groundZ: groundZ)
   var grass: GrassField = createGrassField(assets: assets, groundZ: groundZ)
 
   let cloneCount: Int = 5
@@ -455,7 +455,7 @@ func createApp() ret App {
     gameWorldSetTransform(world: gameWorld, entity: cloneEntity, transform: controllerTransform3D(controller: cloneController))
     crowdEntities.add(value: cloneEntity)
   }
-  updateInfiniteTerrain(terrain: terrain, scene: scene, playerPosition: characterController.position)
+  updateInfiniteTerrain(terrain: terrain, world: gameWorld, playerPosition: characterController.position)
   updateGrassField(field: grass, playerPosition: characterController.position)
   if rig.mode is CameraRigMode.character {
     camera.target = thirdPersonCameraTarget(controller: characterController, focusZ: characterFocusZ)
@@ -650,7 +650,7 @@ func updateApp(app: mod App) {
     app.cam.camera.target = vec3.create(x: focusPos.x, y: focusPos.y, z: focusPos.z + characterFocusZ)
   }
   let followPos: Vec3 = controlledPosition(app: app)
-  let terrainWrapped: Bool = updateInfiniteTerrain(terrain: app.terrain, scene: app.scene, playerPosition: followPos)
+  let terrainWrapped: Bool = updateInfiniteTerrain(terrain: app.terrain, world: app.world, playerPosition: followPos)
   let grassWrapped: Bool = updateGrassField(field: app.grass, playerPosition: followPos)
 
   # Fixed-timestep physics seam (#553): accumulate frame time and step at a fixed
@@ -705,9 +705,10 @@ func updateApp(app: mod App) {
 # ----- the loop ------------------------------------------------------------
 func runWalkerApp() ret Int {
   var app: App = createApp()
-  # #739/#740: the GameWorld holds the hero + crowd (ThirdPersonController
-  # entities) plus the skinned body parts (PartRoughness entities).
-  log("[ecs] GameWorld: {gameWorldEntityCount(world: app.world)} entities ({gameWorldPartCount(world: app.world)} parts + hero + crowd)")
+  # #739/#740/#741: the GameWorld holds the hero + crowd (controllers), the
+  # skinned body parts (PartRoughness), and the terrain props + heightfield tiles
+  # (PropKind) — all recycled ECS entities.
+  log("[ecs] GameWorld: {gameWorldEntityCount(world: app.world)} entities ({gameWorldPartCount(world: app.world)} parts + hero + crowd + terrain)")
   profile.profileMaybeAutoStart()
   loop not gpu2d.pollClose() {
     frameBegin(app: app)
