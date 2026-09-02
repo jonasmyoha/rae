@@ -1,0 +1,44 @@
+# #761: `let s: String = obj.toJson(); useView(s)` (useView takes `view String`)
+# must not over-free s. The owned toJson result bound to a local was freed as an
+# UNTRACKED heap because rae_json_build didn't tag/pool-register its result: each
+# iteration produced one "unknown free" (RAE_MEM_STATS TOTAL outstanding=-1),
+# while the inlined form leaked it. Fixed by tagging + pool-registering the
+# toJson result like every other owned-String producer.
+#
+# _outstanding() deliberately skips the UNKNOWN site, so the over-free is only
+# visible via _unknown_frees(). A clean program frees only what it tagged, so
+# that count stays flat. Meaningful only under RAE_MEM_STATS=1 (compiled target).
+import core
+import string
+import sys
+
+func rae_ext_rae_mem_stats_unknown_frees() extern ret Int
+
+type Box { n: Int, tag: String }
+
+func useView(valueJson: view String) {
+  if valueJson.length() < 0 { log("never") }
+}
+
+func roundOnce() {
+  let b: Box = { n: 7, tag: "x" }
+  let s: String = b.toJson()
+  useView(valueJson: s)
+}
+
+func main() {
+  let warmups: Int = 50
+  var i: Int = 0
+  loop i < warmups { roundOnce()  i = i + 1 }
+  let baseUnknown: Int = rae_ext_rae_mem_stats_unknown_frees()
+
+  let iterations: Int = 5000
+  i = 0
+  loop i < iterations { roundOnce()  i = i + 1 }
+  let overFrees: Int = rae_ext_rae_mem_stats_unknown_frees() - baseUnknown
+
+  log("iterations: {iterations}")
+  # The double-free logged ~1 untracked free per iteration (~5000). A clean
+  # idiom logs none.
+  if overFrees < 100 { log("verdict: OK") } else { log("verdict: OVERFREE frees={overFrees}") }
+}

@@ -527,6 +527,7 @@ rae_Char rae_ext_rae_io_read_char(void);
  * is leaking when residual RSS growth is small but linear. */
 void rae_ext_rae_mem_stats_dump(void);
 int64_t rae_ext_rae_mem_stats_outstanding(void);
+int64_t rae_ext_rae_mem_stats_unknown_frees(void); /* #761: untracked-free count */
 int64_t rae_ext_rae_mem_stats_buf_outstanding(void);
 int64_t rae_ext_rae_mem_stats_buf_outstanding_bytes(void);
 /* Cumulative allocation count (strings + buffers), ALWAYS live — no env
@@ -596,11 +597,12 @@ RAE_UNUSED static rae_String rae_ext_rae_str_u8(unsigned char v) { return rae_ex
 rae_String rae_ext_rae_str_any(RaeAny v); // String-format any boxed value (incl. `none`)
 
 /* JSON helpers */
-RAE_UNUSED static rae_String rae_json_build(const char* s, int64_t len) {
-    uint8_t* copy = (uint8_t*)malloc((size_t)len + 1);
-    if (copy) { memcpy(copy, s, (size_t)len); copy[len] = 0; }
-    return (rae_String){copy, len, len + 1, 1};
-}
+// #761: defined in runtime_buffers_math.c (next to rae_json_extract_string) so
+// it can mem-tag + pool-register its result like every other owned-String
+// producer (rae_ext_rae_str_interp etc.). Without that, a toJson result bound to
+// a local (`let s = obj.toJson()`) was freed as an UNTRACKED heap (mem-stats
+// outstanding=-1), while inlined use silently LEAKED it (untagged, invisible).
+rae_String rae_json_build(const char* s, int64_t len);
 int64_t rae_json_extract_int(rae_String json, const char* key);
 double rae_json_extract_float(rae_String json, const char* key);
 rae_String rae_json_extract_string(rae_String json, const char* key);
