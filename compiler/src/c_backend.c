@@ -258,9 +258,20 @@ bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstType
 
 /* Forward declarations for these now live in c_backend_internal.h. */
 bool is_primitive_ref(CFuncContext* ctx, const AstTypeRef* tr) {
-    (void)ctx;
     if (!tr || !(tr->is_view || tr->is_mod)) return false;
     Str base = get_base_type_name(tr);
+    // #758: resolve a generic param (`view T`) to its concrete type before the
+    // primitive/String tests, so a specialised `view T`(=String) is recognised
+    // as a wrapper ref (rae_View_String, read `(*x.ptr)`), not misclassified as
+    // a raw struct pointer — mirroring the concrete `view String` lowering.
+    if (ctx && ctx->generic_params && ctx->generic_args) {
+        const AstIdentifierPart* gp = ctx->generic_params;
+        const AstTypeRef* ga = ctx->generic_args;
+        while (gp && ga) {
+            if (str_eq(gp->text, base)) { base = get_base_type_name(ga); break; }
+            gp = gp->next; ga = ga->next;
+        }
+    }
     // Buffer and List are already pointers — no wrapper struct
     if (str_eq_cstr(base, "Buffer") || str_eq_cstr(base, "List") || str_eq_cstr(base, "Any")) return false;
     // Stage 6: for plain numeric/bool/char primitives, `view T` lowers
@@ -756,7 +767,23 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
   if (str_eq_cstr(base, "Task")) { fprintf(out, "RaeTask*"); return true; }
   if (ctx && ctx->generic_params && ctx->generic_args) {
       const AstIdentifierPart* gp = ctx->generic_params; const AstTypeRef* arg = ctx->generic_args;
-      while (gp && arg) { if (str_eq(gp->text, base)) { emit_type_ref_as_c_type(ctx, arg, out, false); return true; } gp = gp->next; arg = arg->next; }
+      while (gp && arg) {
+          if (str_eq(gp->text, base)) {
+              // #758: carry the ORIGINAL view/mod (+ skip_ptr) onto the concrete
+              // type, so `view T`(=String/struct) lowers to its reference form
+              // (rae_View_String / const Struct*) instead of the by-value type.
+              AstTypeRef tmp = *arg; tmp.is_view = type->is_view; tmp.is_mod = type->is_mod;
+              // Stage 6: `view`(not `mod`) on a NUMERIC primitive still passes by
+              // value — don't re-introduce the ref wrapper when T resolves to one.
+              Str cb = get_base_type_name(arg);
+              bool num = str_eq_cstr(cb, "Int") || str_eq_cstr(cb, "Int64") ||
+                  str_eq_cstr(cb, "Float") || str_eq_cstr(cb, "Float32") || str_eq_cstr(cb, "Float64") ||
+                  str_eq_cstr(cb, "Bool") || str_eq_cstr(cb, "Char") || str_eq_cstr(cb, "Char32");
+              if (num && tmp.is_view && !tmp.is_mod) tmp.is_view = false;
+              return emit_type_ref_as_c_type(ctx, &tmp, out, skip_ptr);
+          }
+          gp = gp->next; arg = arg->next;
+      }
   }
   // Check if this is an enum type — emit as int64_t
   if (ctx) {
