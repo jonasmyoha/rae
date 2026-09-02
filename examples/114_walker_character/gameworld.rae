@@ -81,6 +81,11 @@ type GameWorld {
   parents: ComponentTable(Parent)
   childrens: ComponentTable(Children)
   hierarchyOrder: HierarchyOrder
+  # #746: the physics + multiplayer seams now have a real ECS home. A physics
+  # body and a joined remote player are each an ENTITY carrying a component,
+  # spawned/despawned through the generational allocator (#704) — not List stubs.
+  physicsBodies: ComponentTable(PhysicsBody)
+  netPlayers: ComponentTable(NetPlayer)
 }
 
 func createGameWorld() ret GameWorld {
@@ -99,6 +104,8 @@ func createGameWorld() ret GameWorld {
     parents: createComponentTable(Parent)
     childrens: createComponentTable(Children)
     hierarchyOrder: createHierarchyOrder()
+    physicsBodies: createComponentTable(PhysicsBody)
+    netPlayers: createComponentTable(NetPlayer)
   }
 }
 

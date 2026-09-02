@@ -86,6 +86,14 @@ a feature that is not already listed here.
 - **Generational entity recycling `(landed #703/#704)`.** `EntityAllocator` recycling
   freed index slots + bumping generation is what lets pools recycle entities instead of
   scale-to-0 culling (terrain #741). Keep; it is the backbone of entity pooling.
+- **Generic `world.despawn(entity)` that clears every component table.** Despawn today
+  is manual: `componentRemove` from each specific table (physicsBody, transform, …) then
+  `freeEntity`, per site (net/physics seams #746). Forget one table and a recycled index
+  reads stale data. A structural op that, given the world's registered component set,
+  removes an entity from *all* its tables in one call (and ideally detaches hierarchy
+  links) would make despawn safe by default. Needs the component registry (#717) to
+  enumerate tables — the same reflection that "synthesize a world from its component set"
+  wants.
 
 ## Systems & scheduling
 
