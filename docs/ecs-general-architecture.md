@@ -1,8 +1,23 @@
 # ECS as Rae's general architecture — design recommendation
 
-Status: **adopted design**; implementation is tracked as QUEUE tasks #700–#757.
-Verified against the current code (citations inline). This challenges the current
-architecture; it does not rationalize it.
+Status: **implemented** (QUEUE #700–#769). The ECS core lives in `lib/ecs/`; the
+UI, the 3D examples and the headless sim build on it. Verified against the current
+code (citations inline). This document is the design rationale; the practical API
+surface is `ecs-api-reference.md`.
+
+**What shipped (vs. this design):** generational entities + O(1) live set
+(`lib/ecs/world.rae`), sparse-set `ComponentTable(T)` with write-through
+`componentMod` (`lib/ecs/component_table.rae`), `query2`/`query3` + tags
+(`lib/ecs/query.rae`, `tag.rae`), `HierarchySystem`/`TransformSystem` with
+`Children` authoritative + `Parent` derived (#769), the registry-driven
+serialize-out/in (`lib/ecs/serialize.rae`), resources, `EventQueue`, and a
+`Schedule`. The whole-world helpers this design anticipated (`clearEntity`,
+`worldToJson`) are written ONCE, generically, in Rae via the compile-time field
+loop `loop let table: mod ComponentTable(any) in fields(world)`
+(`clearEntityComponents`, #760/#772/#773; see `compile-time-reflection.md`) —
+there is **no** compiler-synthesised per-World builtin. `Scene3d`'s
+struct-of-arrays is being retired onto `World3d` by the renderer→ECS epic
+(#771, in progress).
 
 ## 0. Verdict
 
@@ -25,8 +40,8 @@ tracking are then **subsumed by the ECS**, not reimplemented.
 The language needs **no** new features for this. In particular: no `persistent` /
 `runtime` / `serialized` / `replicated` type annotations — serialization,
 networking and editor-only state are all **framework registration**, built on the
-per-struct `toJson`/`fromJson` the compiler already generates
-(`compiler/src/c_backend.c:1841`).
+per-struct `toJson`/`fromJson` the compiler generates (`compiler/src/c_backend.c`,
+now recursing into nested structs + List fields, #768).
 
 
 ### 0.1 Why ECS is Rae's architecture
@@ -76,7 +91,13 @@ stream *derived* from blade components). The moment items need identity,
 lifetime, or per-item behavior, they are entities. "Structure-of-arrays kept in
 sync by index" is always an entity table in disguise.
 
-## 1. Current state (verified)
+## 1. Starting state (the pre-migration baseline that motivated this)
+
+> This section is the BEFORE picture — the UI-located, bare-`EntityId` ECS as it
+> stood when this design was written. Its citations point at the pre-#700 code and
+> are intentionally historical; the shipped state is in the status block above and
+> in `ecs-api-reference.md`.
+
 
 ### The ECS core — good, but UI-located and UI-shaped
 - `EntityId { value: Int }` — a **bare counter, no generation/version**
