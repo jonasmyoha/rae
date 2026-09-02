@@ -17,8 +17,11 @@ import profile
 import gpu2d
 import ecs/entity
 import ecs/component_table
+import ecs/transform
+import quat
 open ecs/entity
 open ecs/component_table
+open ecs/transform
 import sdf_text
 import vec3
 import gltf
@@ -281,16 +284,19 @@ func createApp() ret App {
   # createApp can populate it, then moved into the App below.
   var gameWorld: GameWorld = createGameWorld()
 
-  let partTransform: Transform3d = {
+  # #745: quat rotation, not Euler Vec3. The model is authored Z-up-rotated by
+  # +pi/2 about X; as a quat that is fromAxisAngle(X, pi/2). transform3dToMatrix
+  # (T*R*S) matches the old modelMatrix for this single-axis case exactly.
+  let partTransform: Transform3D = {
     position: vec3.create(
       x: 0.0 - midX * modelScale,
       y: 0.0 - midZ * modelScale,
       z: groundZ - footY * modelScale
     ),
-    rotation: vec3.create(x: 1.5707963, y: 0.0, z: 0.0),
+    rotation: quat.fromAxisAngle(axis: vec3.create(x: 1.0, y: 0.0, z: 0.0), angle: 1.5707963),
     scale: vec3.create(x: modelScale, y: modelScale, z: modelScale)
   }
-  let basePartModel: Mat4 = modelMatrix(t: partTransform)
+  let basePartModel: Mat4 = transform3dToMatrix(t: partTransform)
   groundWalker(controller: characterController, groundZ: groundZ)
   var partModel: Mat4 = walkerWorldModel(baseModel: basePartModel, controller: characterController)
 

@@ -350,15 +350,11 @@ func drawTerrainGround(terrain: view InfiniteTerrain, world: view GameWorld, tim
     let entity: EntityId = componentEntityAt(this: world.tileMeshes, i: i)
     let tile: TileMesh = componentDataAt(this: world.tileMeshes, i: i)
     if tile.meshId >= 1 {
+      # #745: Quat all the way — the tile's authoritative transform is already a
+      # Quat Transform3D; compose it straight to a Mat4 (no Euler Vec3 detour).
       let q: Transform3D = componentGet(this: world.transforms, entity: entity)
-      # Tiles never rotate/scale, so an Euler Transform3d for the ground pipeline
-      # is just the position.
-      let euler: Transform3d = {
-        position: q.position,
-        rotation: vec3.create(x: 0.0, y: 0.0, z: 0.0),
-        scale: vec3.create(x: 1.0, y: 1.0, z: 1.0)
-      }
-      drawTerrainMesh(mesh: tile.meshId, transform: euler, prevTransform: euler,
+      let model: Mat4 = transform3dToMatrix(t: q)
+      drawTerrainMesh(mesh: tile.meshId, model: model, prevModel: model,
                       roughness: 0.96, time: time)
     }
   }
