@@ -1656,7 +1656,18 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
   tctx.func_first_let_idx = first_let_idx;
   // Stage 4: per-function string-temp-pool guard. See emit_function.
   fprintf(out, "  int __rae_spm_func = rae_string_pool_mark();\n");
-  if (f->body) { for (AstStmt* s = f->body->first; s; s = s->next) emit_stmt(&tctx, s, out); }
+  // #773: compile-time field reflection through a generic world parameter. If
+  // this specialization's body contains a `loop ... in fields(world)`, the field
+  // set depends on the concrete generic args, so expand it AFTER substitution —
+  // once per instantiation — into ordinary alias-bindings the emitter already
+  // handles. reflect_instantiate_body returns NULL for every other function, so
+  // this is inert for all non-reflection generics.
+  const AstBlock* body_to_emit = f->body;
+  {
+      AstBlock* instantiated = reflect_instantiate_body(ctx, m, f->body, f->params, gp_src, args);
+      if (instantiated) body_to_emit = instantiated;
+  }
+  if (body_to_emit) { for (AstStmt* s = body_to_emit->first; s; s = s->next) emit_stmt(&tctx, s, out); }
   emit_implicit_drops_for_body(&tctx, out, first_let_idx);
   emit_implicit_drops_for_own_params(&tctx, out, first_let_idx);
   fprintf(out, "  rae_string_pool_flush(__rae_spm_func);\n");

@@ -1,0 +1,55 @@
+import core
+open ecs/entity
+open ecs/component_table
+
+# #773: field reflection through a GENERIC world parameter. ONE generic function
+# is instantiated per concrete world; the field set (and so the unrolled body)
+# differs per instantiation. W is inferred from the argument — no explicit W:.
+
+type WorldA {
+  rects: ComponentTable(Int)
+  flags: ComponentTable(Bool)
+  tag: Int
+}
+type WorldB {
+  names: ComponentTable(Int)
+}
+
+func createA() ret WorldA {
+  ret WorldA { rects: createComponentTable(Int), flags: createComponentTable(Bool), tag: 0 }
+}
+func createB() ret WorldB { ret WorldB { names: createComponentTable(Int) } }
+
+# mod variant: clear one entity from every ComponentTable field.
+func clearEntityComponents(W: type, world: mod W, entity: view EntityId) {
+  loop let table: mod ComponentTable(any) in fields(world) {
+    componentRemove(this: table, entity: entity)
+  }
+}
+
+# view variant + fieldName() inside a generic body.
+func describeTables(W: type, world: view W) ret String {
+  var s: String = ""
+  loop let table: view ComponentTable(any) in fields(world) {
+    s = "{s}{fieldName(table)}={componentCount(this: table)} "
+  }
+  ret s
+}
+
+func main() {
+  var a: WorldA = createA()
+  var b: WorldB = createB()
+  componentSet(this: a.rects, entity: entityId(v: 1), data: 5)
+  componentSet(this: a.flags, entity: entityId(v: 1), data: true)
+  componentSet(this: a.rects, entity: entityId(v: 2), data: 6)
+  componentSet(this: b.names, entity: entityId(v: 1), data: 9)
+
+  log("A: {describeTables(world: a)}")
+  log("B: {describeTables(world: b)}")
+
+  clearEntityComponents(world: a, entity: entityId(v: 1))
+  clearEntityComponents(world: b, entity: entityId(v: 1))
+
+  log("A after clear e1: {describeTables(world: a)}")
+  log("B after clear e1: {describeTables(world: b)}")
+}

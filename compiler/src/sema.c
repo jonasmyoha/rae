@@ -681,14 +681,29 @@ AstTypeRef* infer_generic_args(CompilerContext* ctx, const AstFuncDecl* func, co
     if (!func || !func->generic_params || !pattern || !concrete_type) return NULL;
     Str pattern_base = get_base_type_name(pattern);
     Str receiver_base = get_base_type_name(concrete_type);
-    if (!str_eq(pattern_base, receiver_base)) return NULL;
+    // Bases need only align when the type params are NESTED (ComponentTable(A) vs
+    // ComponentTable(Pos)); a BARE generic-param pattern (`world: W`) binds W to
+    // the whole concrete type and deliberately does NOT require the bases equal.
+    bool bases_align = str_eq(pattern_base, receiver_base);
     AstTypeRef* inferred_list = NULL; AstTypeRef* last_inferred = NULL;
     for (const AstIdentifierPart* gp = func->generic_params; gp; gp = gp->next) {
-        AstTypeRef* match = NULL; const AstTypeRef* p_arg = pattern->generic_args; const AstTypeRef* r_arg = concrete_type->generic_args;
+        AstTypeRef* match = NULL;
+        if (str_eq(pattern_base, gp->text)) {
+            // Bare generic-param pattern: bind the param to the whole concrete
+            // type. view/mod/own on the pattern are PARAMETER modes, not part of
+            // the type argument, so strip them.
+            AstTypeRef* bare = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+            *bare = *concrete_type; bare->next = NULL;
+            bare->is_view = false; bare->is_mod = false; bare->is_own = false;
+            bare->is_copy = false; bare->is_val = false; bare->is_opt = false;
+            match = bare;
+        } else if (bases_align) {
+        const AstTypeRef* p_arg = pattern->generic_args; const AstTypeRef* r_arg = concrete_type->generic_args;
         while (p_arg && r_arg) {
             Str p_name = get_base_type_name(p_arg);
             if (str_eq(p_name, gp->text)) { match = (AstTypeRef*)r_arg; break; }
             p_arg = p_arg->next; r_arg = r_arg->next;
+        }
         }
         if (match) {
             AstTypeRef* copy = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
@@ -725,6 +740,16 @@ AstTypeRef* infer_generic_args_multi(CompilerContext* ctx, const AstFuncDecl* fu
             const AstTypeRef* pat = patterns[k];
             const AstTypeRef* conc = concretes[k];
             if (!pat || !conc) continue;
+            // Bare generic-param pattern (`world: W`): the whole parameter type
+            // IS the type param, so bind it to the concrete argument type. Modes
+            // (view/mod) are parameter modes, not part of the type argument.
+            if (str_eq(get_base_type_name(pat), gp->text)) {
+                AstTypeRef* bare = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+                *bare = *conc; bare->next = NULL;
+                bare->is_view = false; bare->is_mod = false; bare->is_own = false;
+                bare->is_copy = false; bare->is_val = false; bare->is_opt = false;
+                binding[gi] = bare; break;
+            }
             // Base names must align so the generic_args match positionally
             // (e.g. pattern ComponentTable(A) vs concrete ComponentTable(Pos)).
             if (!str_eq(get_base_type_name(pat), get_base_type_name(conc))) continue;
@@ -1743,6 +1768,54 @@ static bool reflect_loop_is_fields(const AstStmt* stmt) {
         && str_eq_cstr(it->as.call.callee->as.ident, "fields");
 }
 
+// Fill `out` with one scoped `if true { let x => value.field; body }` per struct
+// field matching `pattern`. This is the shared unrolling core used by BOTH the
+// non-generic sema path (#772) and the generic-instantiation C-backend path
+// (#773), so every field loop lowers to identical ordinary AST regardless of how
+// its concrete struct became known.
+static AstExpr* reflect_make_true(CompilerContext* ctx, size_t line, size_t column);
+static void reflect_fold_field_name_block(AstBlock* block, Str binding, Str field_name);
+static void reflect_fill_unrolled(CompilerContext* ctx, AstBlock* out,
+                                  AstTypeField* fields, const AstTypeRef* pattern,
+                                  bool want_view, bool want_mod, Str bind_name,
+                                  const AstExpr* value, const AstBlock* body,
+                                  size_t line, size_t column) {
+    AstStmt* out_tail = NULL;
+    for (AstTypeField* f = fields; f; f = f->next) {
+        if (!f->type || !reflect_type_matches(pattern, f->type)) continue;
+        AstTypeRef* ftype = clone_type_ref(ctx->ast_arena, f->type);
+        ftype->is_view = want_view; ftype->is_mod = want_mod;
+        ftype->is_val = false; ftype->is_own = false; ftype->is_copy = false; ftype->is_opt = false;
+        AstExpr* member = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
+        memset(member, 0, sizeof *member);
+        member->kind = AST_EXPR_MEMBER;
+        member->line = value->line; member->column = value->column;
+        member->as.member.object = clone_expr(ctx->ast_arena, value);
+        member->as.member.member = f->name;
+        AstStmt* alias = arena_alloc(ctx->ast_arena, sizeof(AstStmt));
+        memset(alias, 0, sizeof *alias);
+        alias->kind = AST_STMT_LET;
+        alias->line = line; alias->column = column;
+        alias->as.let_stmt.name = bind_name;
+        alias->as.let_stmt.type = ftype;
+        alias->as.let_stmt.is_bind = true;
+        alias->as.let_stmt.value = member;
+        AstBlock* iter_block = arena_alloc(ctx->ast_arena, sizeof(AstBlock));
+        iter_block->first = alias;
+        AstBlock* iter_body = clone_block(ctx->ast_arena, body);
+        reflect_fold_field_name_block(iter_body, bind_name, f->name);
+        alias->next = iter_body ? iter_body->first : NULL;
+        AstStmt* wrapper = arena_alloc(ctx->ast_arena, sizeof(AstStmt));
+        memset(wrapper, 0, sizeof *wrapper);
+        wrapper->kind = AST_STMT_IF;
+        wrapper->line = line; wrapper->column = column;
+        wrapper->as.if_stmt.condition = reflect_make_true(ctx, line, column);
+        wrapper->as.if_stmt.then_block = iter_block;
+        if (!out_tail) out->first = wrapper; else out_tail->next = wrapper;
+        out_tail = wrapper;
+    }
+}
+
 static AstExpr* reflect_make_true(CompilerContext* ctx, size_t line, size_t column) {
     AstExpr* e = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
     e->kind = AST_EXPR_BOOL;
@@ -1818,47 +1891,138 @@ static void reflect_expand_field_loop(CompilerContext* ctx, AstModule* module,
             "a 'mod' field loop requires a 'mod' struct value");
     Str bind_name = binding->as.let_stmt.name;
 
-    // Unroll: one scoped `if true { let x => value.f; body }` per matching field.
-    AstStmt* out_tail = NULL;
-    for (AstTypeField* f = decl->as.type_decl.fields; f; f = f->next) {
-        if (!f->type || !reflect_type_matches(pattern, f->type)) continue;
-
-        AstTypeRef* ftype = clone_type_ref(ctx->ast_arena, f->type);
-        ftype->is_view = want_view; ftype->is_mod = want_mod;
-        ftype->is_val = false; ftype->is_own = false; ftype->is_copy = false; ftype->is_opt = false;
-
-        AstExpr* member = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
-        member->kind = AST_EXPR_MEMBER;
-        member->line = value->line; member->column = value->column;
-        member->as.member.object = clone_expr(ctx->ast_arena, value);
-        member->as.member.member = f->name;
-
-        AstStmt* alias = arena_alloc(ctx->ast_arena, sizeof(AstStmt));
-        alias->kind = AST_STMT_LET;
-        alias->line = binding->line; alias->column = binding->column;
-        alias->as.let_stmt.name = bind_name;
-        alias->as.let_stmt.type = ftype;
-        alias->as.let_stmt.is_bind = true;
-        alias->as.let_stmt.value = member;
-
-        AstBlock* iter_block = arena_alloc(ctx->ast_arena, sizeof(AstBlock));
-        iter_block->first = alias;
-        AstBlock* iter_body = clone_block(ctx->ast_arena, body);
-        reflect_fold_field_name_block(iter_body, bind_name, f->name);
-        alias->next = iter_body ? iter_body->first : NULL;
-
-        AstStmt* wrapper = arena_alloc(ctx->ast_arena, sizeof(AstStmt));
-        wrapper->kind = AST_STMT_IF;
-        wrapper->line = line; wrapper->column = column;
-        wrapper->as.if_stmt.condition = reflect_make_true(ctx, line, column);
-        wrapper->as.if_stmt.then_block = iter_block;
-        wrapper->as.if_stmt.else_block = NULL;
-        wrapper->as.if_stmt.binding = NULL;
-
-        if (!out_tail) out->first = wrapper; else out_tail->next = wrapper;
-        out_tail = wrapper;
-    }
+    // Unroll via the shared core.
+    reflect_fill_unrolled(ctx, out, decl->as.type_decl.fields, pattern,
+                          want_view, want_mod, bind_name, value, body, line, column);
     #undef REFLECT_FAIL
+}
+
+/* ---- #773: field reflection through a GENERIC world parameter --------------
+ *
+ * A generic `func f(W: type, world: mod W, ...) { loop ... in fields(world) }`
+ * cannot be expanded on the template — the field set depends on the concrete W.
+ * The C backend emits a generic body once per concrete instantiation, walking
+ * the template with a (generic_params -> concrete_args) substitution context, so
+ * THAT is where the per-instantiation expansion must hook in. These helpers take
+ * a cloned template body plus the substitution and rewrite each fields() loop
+ * using the same core as #772, so the emitted, concrete body is identical to a
+ * hand-written per-world clear/serialize. */
+
+// A top-level struct type decl by name in the merged module.
+static AstDecl* reflect_find_struct_decl(const AstModule* module, Str name) {
+    for (AstDecl* d = module ? module->decls : NULL; d; d = d->next)
+        if (d->kind == AST_DECL_TYPE && str_eq(d->as.type_decl.name, name)) return d;
+    return NULL;
+}
+
+// The concrete type ref of a fields() value expression, resolved from the
+// enclosing function's params and the active generic substitution. v1 supports
+// the value being a bare parameter identifier (`fields(world)`) — the whole
+// point of the generic helper.
+static const AstTypeRef* reflect_value_concrete_type(CompilerContext* ctx,
+        const AstExpr* value, const AstParam* params,
+        const AstIdentifierPart* gparams, const AstTypeRef* cargs) {
+    if (!value || value->kind != AST_EXPR_IDENT) return NULL;
+    for (const AstParam* p = params; p; p = p->next)
+        if (str_eq(p->name, value->as.ident))
+            return substitute_type_ref(ctx, gparams, cargs, p->type);
+    return NULL;
+}
+
+static bool reflect_block_has_fields_loop(const AstBlock* block);
+static bool reflect_stmt_has_fields_loop(const AstStmt* s) {
+    if (!s) return false;
+    if (s->kind == AST_STMT_LOOP && s->as.loop_stmt.is_range && reflect_loop_is_fields(s)) return true;
+    switch (s->kind) {
+        case AST_STMT_IF:
+            return reflect_block_has_fields_loop(s->as.if_stmt.then_block)
+                || reflect_block_has_fields_loop(s->as.if_stmt.else_block);
+        case AST_STMT_LOOP: return reflect_block_has_fields_loop(s->as.loop_stmt.body);
+        case AST_STMT_MATCH:
+            for (AstMatchCase* c = s->as.match_stmt.cases; c; c = c->next)
+                if (reflect_block_has_fields_loop(c->block)) return true;
+            return false;
+        case AST_STMT_DEFER: return reflect_block_has_fields_loop(s->as.defer_stmt.block);
+        default: return false;
+    }
+}
+static bool reflect_block_has_fields_loop(const AstBlock* block) {
+    for (AstStmt* s = block ? block->first : NULL; s; s = s->next)
+        if (reflect_stmt_has_fields_loop(s)) return true;
+    return false;
+}
+
+static void reflect_expand_block_concrete(CompilerContext* ctx, const AstModule* module,
+        AstBlock* block, const AstParam* params,
+        const AstIdentifierPart* gparams, const AstTypeRef* cargs);
+static void reflect_expand_stmt_concrete(CompilerContext* ctx, const AstModule* module,
+        AstStmt* stmt, const AstParam* params,
+        const AstIdentifierPart* gparams, const AstTypeRef* cargs) {
+    if (!stmt) return;
+    if (stmt->kind == AST_STMT_LOOP && stmt->as.loop_stmt.is_range && reflect_loop_is_fields(stmt)) {
+        AstExpr* collection = stmt->as.loop_stmt.condition;
+        AstCallArg* call_args = collection->as.call.args;
+        AstStmt* binding = stmt->as.loop_stmt.init;
+        if (call_args && !call_args->next && call_args->value && binding
+            && binding->kind == AST_STMT_LET && binding->as.let_stmt.type) {
+            const AstTypeRef* wt = reflect_value_concrete_type(ctx, call_args->value, params, gparams, cargs);
+            AstDecl* decl = wt ? reflect_find_struct_decl(module, reflect_base_name(wt)) : NULL;
+            AstTypeRef* pattern = binding->as.let_stmt.type;
+            bool want_mod = pattern->is_mod, want_view = pattern->is_view;
+            if (decl && decl->kind == AST_DECL_TYPE && decl->as.type_decl.fields
+                && (want_mod || want_view)) {
+                size_t line = stmt->line, column = stmt->column;
+                AstStmt* saved_next = stmt->next;
+                AstBlock* out = arena_alloc(ctx->ast_arena, sizeof(AstBlock)); out->first = NULL;
+                reflect_fill_unrolled(ctx, out, decl->as.type_decl.fields, pattern,
+                                      want_view, want_mod, binding->as.let_stmt.name,
+                                      call_args->value, stmt->as.loop_stmt.body, line, column);
+                memset(&stmt->as, 0, sizeof stmt->as);
+                stmt->kind = AST_STMT_IF;
+                stmt->as.if_stmt.condition = reflect_make_true(ctx, line, column);
+                stmt->as.if_stmt.then_block = out;
+                stmt->next = saved_next;
+                // Nested field loops inside the freshly emitted bodies, too.
+                reflect_expand_block_concrete(ctx, module, out, params, gparams, cargs);
+                return;
+            }
+        }
+        return; // leave unexpanded — the backend emits its usual fallback
+    }
+    switch (stmt->kind) {
+        case AST_STMT_IF:
+            reflect_expand_block_concrete(ctx, module, stmt->as.if_stmt.then_block, params, gparams, cargs);
+            reflect_expand_block_concrete(ctx, module, stmt->as.if_stmt.else_block, params, gparams, cargs);
+            break;
+        case AST_STMT_LOOP:
+            reflect_expand_block_concrete(ctx, module, stmt->as.loop_stmt.body, params, gparams, cargs);
+            break;
+        case AST_STMT_MATCH:
+            for (AstMatchCase* c = stmt->as.match_stmt.cases; c; c = c->next)
+                reflect_expand_block_concrete(ctx, module, c->block, params, gparams, cargs);
+            break;
+        case AST_STMT_DEFER:
+            reflect_expand_block_concrete(ctx, module, stmt->as.defer_stmt.block, params, gparams, cargs);
+            break;
+        default: break;
+    }
+}
+static void reflect_expand_block_concrete(CompilerContext* ctx, const AstModule* module,
+        AstBlock* block, const AstParam* params,
+        const AstIdentifierPart* gparams, const AstTypeRef* cargs) {
+    for (AstStmt* s = block ? block->first : NULL; s; s = s->next)
+        reflect_expand_stmt_concrete(ctx, module, s, params, gparams, cargs);
+}
+
+// Public (#773): if `template_body` contains a fields() loop, return a CLONE with
+// every loop expanded for the concrete generic args; else NULL (emit as-is).
+AstBlock* reflect_instantiate_body(CompilerContext* ctx, const AstModule* module,
+        const AstBlock* template_body, const AstParam* params,
+        const AstIdentifierPart* gparams, const AstTypeRef* cargs) {
+    if (!template_body || !reflect_block_has_fields_loop(template_body)) return NULL;
+    AstBlock* cloned = clone_block(ctx->ast_arena, template_body);
+    reflect_expand_block_concrete(ctx, module, cloned, params, gparams, cargs);
+    return cloned;
 }
 
 static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt, TypeInfo* current_return_type) {
