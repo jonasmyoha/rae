@@ -153,6 +153,13 @@ func gameWorldPartAt(world: view GameWorld, i: view Int) ret PartRoughness {
 # in sync at creation and whenever the controller moves, so the ECS transform
 # tracks the gameplay controller (later systems — camera rig #744, quat #745 —
 # read this rather than the controller directly).
+# The ThirdPersonController of an entity (hero or crowd member). A narrow
+# GameWorld accessor so systems read a controlled character straight from the
+# world without depending on the App aggregate (#743).
+func controllerOf(world: view GameWorld, entity: view EntityId) ret ThirdPersonController {
+  ret componentGet(this: world.controllers, entity: entity)
+}
+
 func controllerTransform3D(controller: view ThirdPersonController) ret Transform3D {
   ret Transform3D {
     position: controller.position
