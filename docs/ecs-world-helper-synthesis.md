@@ -1,8 +1,16 @@
 # Compiler-synthesized per-World ECS helpers — decision note (#756)
 
-**Status:** investigation complete; leak fixed; a recommended prototype design
-is specified below and queued for approval (#757). This note is the "documented
-decision" the task's DoD allows.
+**Status:** RESOLVED (#760/#772/#773). The "four places to add a component"
+tax is gone for the two whole-world ops that were the pain: `destroyEntity`'s
+per-table sweep and `worldToJson`'s per-table serialize are now written ONCE,
+generically, via the compile-time field loop `loop let table: mod
+ComponentTable(any) in fields(world)` (`clearEntityComponents` in
+`lib/ecs/world.rae`; see `compile-time-reflection.md` and `ecs-api-reference.md`).
+Crucially this is NOT the compiler-synthesised per-World builtin this note
+originally floated — the capability is a GENERAL Rae reflection primitive, not a
+one-off codegen path. The remaining two places (the struct field + the
+`createX` construct) are the `fields(Type)` construction case, tracked as #774.
+The investigation below is kept for the record.
 
 ## The problem
 

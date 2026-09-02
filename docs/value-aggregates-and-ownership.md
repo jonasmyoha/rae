@@ -4,6 +4,11 @@ Status: **design. Revision 2 — Part 1 spelling changed, awaiting approval;
 Part 2 unchanged from revision 1.** No compiler code is written under this
 document (#351 is design only).
 
+> These value aggregates (`Array(T, cap: N)`, struct-rep `opt T`, `view`/`mod`
+> element bindings) are the storage primitives the ECS is built on — components are
+> value types, `ComponentTable(T)` stores them densely, and `componentMod` hands
+> back a `mod T` alias. See `ecs-api-reference.md` and `ecs-general-architecture.md`.
+
 Revision 2 replaces the proposed `[N]T` syntax with `Array(T, cap: N)`
 after review pushed back on it. §1.2 records why the original rejection of
 `Array(T, N)` was wrong on the facts, not merely a matter of taste.
