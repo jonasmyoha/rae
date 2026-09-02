@@ -1,11 +1,22 @@
-# Multiplayer seam for the walker example (#554).
+# Multiplayer seam for the walker example (#554, ECS seam #746).
 #
-# Offline today; both hooks are no-ops. updateApp calls netApplyRemote before the
-# local sim and netPublishIntent after it, so wiring a transport in later needs
-# no changes to updateApp's shape. The fuller signatures — netPublishIntent
-# taking an InputIntent + characterId, netApplyRemote taking a CharacterSystem —
-# arrive with #545 (input intent) and #547 (character roster).
+# Offline today; both hooks still no-op the wire, but they now operate over the
+# ECS: a JOINED remote player is an ENTITY carrying a NetPlayer component, and
+# join/leave spawn/despawn it through the generational allocator (#704) — a real
+# ECS home for multiplayer, not a List stub. updateApp calls netApplyRemote
+# before the local sim and netPublishIntent after it, so wiring a transport in
+# later needs no changes to updateApp's shape: it fills in the loop bodies that
+# already iterate the NetPlayer table.
 import core
+import vec3
+import ecs/entity
+import ecs/component_table
+import ecs/transform
+import ecs/world
+open ecs/entity
+open ecs/component_table
+open ecs/transform
+open ecs/world
 
 # role: 0 = offline, 1 = server, 2 = client. tick counts published local frames.
 type NetState {
@@ -13,10 +24,83 @@ type NetState {
   tick: Int
 }
 
-# Pull remote players' intents in before the local sim. No-op offline.
-func netApplyRemote(net: mod NetState) {
+# A joined remote player. `remoteId` is the transport-assigned peer id; `role`
+# mirrors NetState.role for that peer; `controlled` is the character ENTITY this
+# remote player drives (noEntity until it is assigned one). A remote player's
+# input will arrive here instead of from a local device.
+type NetPlayer {
+  remoteId: Int
+  role: Int
+  controlled: EntityId
 }
 
-# Publish the local player's intent after the sim. No-op offline.
-func netPublishIntent(net: mod NetState) {
+# A player joins: spawn a NetPlayer entity. Generational — a slot freed by an
+# earlier leave is recycled with a bumped generation.
+func netJoin(world: mod GameWorld, remoteId: view Int, role: view Int) ret EntityId {
+  let entity: EntityId = gameWorldAddEntity(world: world)
+  componentSet(this: world.netPlayers, entity: entity, data: NetPlayer {
+    remoteId: remoteId, role: role, controlled: noEntity()
+  })
+  ret entity
+}
+
+# A player leaves: drop the NetPlayer component, then free the entity slot so a
+# later join recycles it (and stale handles to the departed player read dead).
+func netLeave(world: mod GameWorld, entity: view EntityId) {
+  componentRemove(this: world.netPlayers, entity: entity)
+  freeEntity(this: world.allocator, entity: entity)
+}
+
+# Count of joined remote players (live NetPlayer entities).
+func netPlayerCount(world: view GameWorld) ret Int {
+  ret componentCount(this: world.netPlayers)
+}
+
+# Pull remote players' intents in before the local sim. Iterates the NetPlayer
+# table — a real system. Offline there are no joined players, so it is a no-op;
+# a transport fills the loop body (apply each peer's intent to its `controlled`).
+func netApplyRemote(net: mod NetState, world: mod GameWorld) {
+  loop var i: Int = 0, i < componentCount(this: world.netPlayers), ++i {
+    # Offline: no wire, so nothing to apply. A transport reads the i-th
+    # NetPlayer's latest intent here and drives its `controlled` character
+    # entity — same seam the local device drives via InputIntent.
+  }
+}
+
+# Publish the local player's intent after the sim. Offline: just advance the
+# tick so the seam is observably live.
+func netPublishIntent(net: mod NetState, world: mod GameWorld) {
+  net.tick = net.tick + 1
+}
+
+# Spawn/despawn smoke test for the ECS seams (#746 Verify). Proves generational
+# recycling: spawn three remote players, drop the middle, spawn a fourth — the
+# fourth REUSES the freed slot's index with generation+1, and the departed
+# handle reads dead. Then spawns a physics body, steps it, and checks it moved.
+# Everything it creates is despawned again, so the persistent world is untouched.
+func seamSelfTest(world: mod GameWorld) {
+  let a: EntityId = netJoin(world: world, remoteId: 101, role: 2)
+  let b: EntityId = netJoin(world: world, remoteId: 102, role: 2)
+  let c: EntityId = netJoin(world: world, remoteId: 103, role: 2)
+  netLeave(world: world, entity: b)
+  let d: EntityId = netJoin(world: world, remoteId: 104, role: 2)
+  let recycledIndex: Bool = d.index is b.index
+  let bumpedGeneration: Bool = d.generation is b.generation + 1
+  let departedDead: Bool = allocatorIsAlive(this: world.allocator, entity: b) is false
+  let netOk: Bool = recycledIndex and bumpedGeneration and departedDead
+
+  let body: EntityId = spawnPhysicsBody(world: world,
+    position: vec3.create(x: 0.0, y: 0.0, z: 10.0),
+    velocity: vec3.create(x: 1.0, y: 0.0, z: 0.0), gravityScale: 1.0)
+  let before: Transform3D = componentGet(this: world.transforms, entity: body)
+  physicsStepWorld(world: world, fixedDt: 0.1)
+  let after: Transform3D = componentGet(this: world.transforms, entity: body)
+  # x advances by velocity*dt, z falls under gravity — both must have moved.
+  let physicsOk: Bool = after.position.x > before.position.x and after.position.z < before.position.z
+
+  netLeave(world: world, entity: a)
+  netLeave(world: world, entity: c)
+  netLeave(world: world, entity: d)
+  despawnPhysicsBody(world: world, entity: body)
+  log("[seamtest] net recycle idx={b.index} gen {b.generation}->{d.generation} netOk={netOk} physicsOk={physicsOk}")
 }
