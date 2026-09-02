@@ -1,10 +1,12 @@
 # Walker character — a multi-primitive rigged glTF model, ANIMATED, walking an
 # infinite procedural meadow under a deferred+toon renderer.
 #
-# Structure: this file is only the entry point. The app is composed of systems
-# (App owns them; each has update/render) — see app.rae and the sibling system
-# files, and docs/app-systems-architecture.md for the architecture. Siblings in
-# this directory merge into one module, so main() calls runWalkerApp() directly.
+# Structure: this file is only the entry point. The app is composed of systems,
+# each in its own PascalCase folder (#743) — InputSystem/ MovementSystem/
+# AnimationSystem/ TerrainSystem/ GrassSystem/ CameraSystem/ RenderSystem/
+# PhysicsSystem/ NetSystem/ UiSystem/ — sequenced by app.rae's updateApp /
+# renderApp. Rae auto-scans every project file into one compile unit, so main()
+# calls runWalkerApp() (app.rae) directly.
 #
 # Compiled-target only; needs wgpu-native + SDL3.
 #   rae run --target compiled main.rae
