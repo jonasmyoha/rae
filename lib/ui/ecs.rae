@@ -252,6 +252,12 @@ func createUiWorld() ret UiWorld {
 
 # Allocate a new entity id and mark it alive. Delegates to the shared entity
 # core (#706), which records the live-set bookkeeping for an O(1) destroy.
+# The UiWorld-facing entity API — thin one-line adapters over the shared entity
+# core (lib/ecs/world.rae) so UI call sites don't reach into `world.allocator`.
+# These are NOT a second ECS: each delegates straight to the lib/ecs allocator
+# (allocEntity / allocatorIsAlive / allocatorAliveCount). Confirmed in #747 that
+# lib/ecs is the single ECS implementation — nothing here re-implements the
+# sparse set, free list, or generational handles.
 func createEntity(world: mod UiWorld) ret EntityId {
   ret allocEntity(this: world.allocator)
 }
