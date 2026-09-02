@@ -66,6 +66,10 @@ type GameWorld {
   propKinds: ComponentTable(PropKind)
   treeVariants: ComponentTable(TreeVariant)
   tileMeshes: ComponentTable(TileMesh)
+  # #742: waving-grass blades are entities carrying a GrassBlade descriptor
+  # (base position + yaw/phase/scale + pool slot). The flat instance-stream
+  # buffer is no longer a source of truth — it is derived from these each frame.
+  grassBlades: ComponentTable(GrassBlade)
 }
 
 func createGameWorld() ret GameWorld {
@@ -80,6 +84,7 @@ func createGameWorld() ret GameWorld {
     propKinds: createComponentTable(PropKind)
     treeVariants: createComponentTable(TreeVariant)
     tileMeshes: createComponentTable(TileMesh)
+    grassBlades: createComponentTable(GrassBlade)
   }
 }
 
