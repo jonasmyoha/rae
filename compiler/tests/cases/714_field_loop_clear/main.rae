@@ -1,0 +1,35 @@
+import core
+open ecs/entity
+open ecs/component_table
+
+# #772: `loop let t: mod ComponentTable(any) in fields(world)` unrolls to one
+# aliased componentRemove per ComponentTable field — the hand-written clear,
+# generated. The non-table `count` field is skipped by the filter.
+type Rect { x: Int, y: Int }
+type Size { w: Int, h: Int }
+
+type Mini {
+  rects: ComponentTable(Rect)
+  sizes: ComponentTable(Size)
+  count: Int
+}
+
+func clearAll(world: mod Mini, entity: view EntityId) {
+  loop let table: mod ComponentTable(any) in fields(world) {
+    componentRemove(this: table, entity: entity)
+  }
+}
+
+func main() {
+  var world: Mini = {
+    rects: createComponentTable(Rect)
+    sizes: createComponentTable(Size)
+    count: 7
+  }
+  let e: EntityId = { index: 1, generation: 0 }
+  componentSet(this: world.rects, entity: e, data: Rect { x: 3, y: 4 })
+  componentSet(this: world.sizes, entity: e, data: Size { w: 5, h: 6 })
+  log("before: rects={componentCount(this: world.rects)} sizes={componentCount(this: world.sizes)}")
+  clearAll(world: world, entity: e)
+  log("after: rects={componentCount(this: world.rects)} sizes={componentCount(this: world.sizes)} count={world.count}")
+}
