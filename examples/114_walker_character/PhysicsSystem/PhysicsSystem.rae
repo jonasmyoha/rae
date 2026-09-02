@@ -1,10 +1,10 @@
 # Physics system for the walker example (#553, ECS seam #746).
 #
 # A fixed-timestep seam decoupled from render, following the tetris3d
-# accumulator: updateApp accumulates frame time and calls physicsStep at a fixed
+# accumulator: updateApp accumulates frame time and calls physicsStepWorld at a fixed
 # rate. #746 gives it a real ECS HOME — a physics body is an ENTITY carrying a
 # PhysicsBody component, spawned/despawned through the generational allocator
-# (#704). physicsStep is now a real system that ITERATES the PhysicsBody table
+# (#704). physicsStepWorld is now a real system that ITERATES the PhysicsBody table
 # and integrates each body's Transform3D; over an empty table it is a no-op, so
 # the persistent walker render is unchanged until bodies are spawned. When a
 # Jolt/Box2D backend lands, this is where per-body integration is replaced —
@@ -78,7 +78,3 @@ func physicsStepWorld(world: mod GameWorld, fixedDt: view Float) {
   }
 }
 
-# One fixed simulation step, driven by updateApp's accumulator.
-func physicsStep(app: mod App, fixedDt: copy Float) {
-  physicsStepWorld(world: app.world, fixedDt: fixedDt)
-}

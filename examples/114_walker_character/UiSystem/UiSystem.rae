@@ -1,0 +1,185 @@
+# UI system for the walker example (#549).
+#
+# uiUpdate runs the per-frame UI/settings/panel handling — device input into the
+# ECS UI world, the clip + transport panels, the settings dialog, and the UI
+# layout systems — extracted verbatim from updateApp with behaviour unchanged.
+# It returns a UiTick because two of its outcomes (settingsChanged and scrolled)
+# feed the render decision back in updateApp. It mutates character / cam
+# / render as the inline code did.
+#
+# The UI STATE still lives in rae's InputUi type (input + ui combined); the
+# InputUi -> InputState/UiState split rides with #545 (input intent), which owns
+# that decomposition. Example-114 files are siblings in one module, so App and
+# the sibling/stdlib helpers resolve cross-file.
+
+import core
+import math
+import profile
+import gpu2d
+import sdf_text
+import vec3
+import gltf
+import gltf_skin
+import png
+import sys
+import app3d/camera_rig
+import app3d/render_scale
+import app3d/character_controller
+import app3d/ui_shell
+import app3d/control_panel
+import app3d/camera_bar
+import renderer_deferred
+import sky
+import gbuffer
+import gbuffer_instanced
+open gbuffer_instanced
+import grass_compute
+open grass_compute
+import grass_config
+import shadow3d
+import app3d/playback
+import app3d/slider
+import app3d/settings_dialog
+import sky_hosek
+import hot_reload
+import ui/log_overlay
+import ui/window_geometry
+import ui/scroll_panel
+import ui/event_loop
+import ui/debug_overlay
+import ui/virtual_joystick
+import ui/ecs
+import ui/InputSystem/InputSystem
+import ui/RenderSystem/RenderSystem
+open scene3d
+open gpu3d
+open renderer_deferred
+open sky
+open gbuffer
+open rendergraph
+open math3d
+open mesh3d
+open gltf
+open gltf_skin
+open sdf_text
+open png
+open app3d/camera_rig
+open app3d/character_controller
+open app3d/settings_dialog
+open sky_hosek
+open app3d/ui_shell
+open app3d/control_panel
+open app3d/camera_bar
+open shadow3d
+open app3d/playback
+open hot_reload
+open ui/log_overlay
+open ui/window_geometry
+open ui/scroll_panel
+open ui/event_loop
+open ui/debug_overlay
+open ui/virtual_joystick
+open ui/ecs
+open ui/components
+open ui/InputSystem/InputSystem
+open ui/RenderSystem/RenderSystem
+
+# What a UI tick reports back to updateApp for the render decision.
+type UiTick {
+  settingsChanged: Bool
+  scrolled: Bool
+}
+
+func uiUpdate(cam: mod CameraState, character: mod CharacterState, frame: mod Frame, io: mod InputUi, persist: mod PersistState, players: mod PlayerRoster, render: mod RenderState, terrain: mod InfiniteTerrain, world: view GameWorld, dt: copy Float, now: copy Float64) ret UiTick {
+  updateUiInput(input: io.ui, world: io.world)
+  if walkerMenuTapped() { toggleWalkerPanel(settings: io.settings, world: io.world) suppressUiPress(input: io.ui) }
+  let scrolled: Bool = updateScrollPanel(world: io.world, viewport: io.panelScroll, input: io.ui)
+  if updateDebugOverlay(d: io.dbg, screenW: windowExtentW(), screenH: windowExtentH(),
+                        now: now, didRealWork: frame.dbgDidWork) {
+    suppressUiPress(input: io.ui)
+  }
+  let clipHit: String = panelClickedId(panel: io.clipPanel, input: io.ui)
+  if clipHit.length() > 0 and cam.rig.mode is not CameraRigMode.character {
+    var nextClipIndex: Int = character.clipIndex
+    if clipHit is "idle" { nextClipIndex = 0 }
+    if clipHit is "walk" { nextClipIndex = 1 }
+    if clipHit is "walkFast" { nextClipIndex = 2 }
+    if clipHit is "run" { nextClipIndex = 3 }
+    if nextClipIndex is not character.clipIndex {
+      character.transitionFrom = captureSkeletonPose(sk: character.skeleton)
+      character.transitionElapsed = 0.0
+      character.clipIndex = nextClipIndex
+      character.animTime = 0.0
+      persist.stateDirty = true
+    }
+    setPanelSelection(panel: io.clipPanel, world: io.world, group: 1, id: clipHit)
+  }
+  let transportHit: String = panelClickedId(panel: io.transport, input: io.ui)
+  if transportHit is "play" {
+    character.playing = not character.playing
+    var playLabel: String = "Pause"
+    if not character.playing { playLabel = "Play" }
+    setPanelButtonLabel(panel: io.transport, world: io.world, id: "play", label: playLabel)
+    setPanelButtonOn(panel: io.transport, world: io.world, id: "play", on: character.playing)
+  }
+  if transportHit is "toon" {
+    character.toon = not character.toon
+    setPanelButtonOn(panel: io.transport, world: io.world, id: "toon", on: character.toon)
+  }
+  if transportHit is "slower" { character.speed = nextSpeed(current: character.speed, up: false) }
+  if transportHit is "faster" { character.speed = nextSpeed(current: character.speed, up: true) }
+  if transportHit.length() > 0 {
+    let pct: Int = speedPercent(v: character.speed)
+    setNodeText(world: io.world, nodeId: "SpeedLabel", value: "Speed {pct}%")
+  }
+  # Character-switch buttons (#546): same effect as Page Up/Down and keys 1/2.
+  let charHit: String = panelClickedId(panel: io.charPanel, input: io.ui)
+  if charHit is "prev" {
+    rosterSwitchPrev(roster: players)
+    onCharacterSwitched(cam: cam, io: io, persist: persist, players: players, world: world, character: character)
+  }
+  if charHit is "next" {
+    rosterSwitchNext(roster: players)
+    onCharacterSwitched(cam: cam, io: io, persist: persist, players: players, world: world, character: character)
+  }
+  var settingsChanged: Bool = false
+  loop var ai: Int = 0, ai < uiActionCount(input: io.ui), ++ai {
+    if settingsHandleAction(s: io.settings, actionId: uiActionAt(input: io.ui, index: ai)) {
+      settingsChanged = true
+    }
+  }
+  if settingsUpdatePointer(s: io.settings, world: io.world, input: io.ui) { settingsChanged = true }
+  if settingsUpdateLatitudePointer(s: io.settings, world: io.world, input: io.ui) { settingsChanged = true }
+  if settingsUpdateDatePointer(s: io.settings, world: io.world, input: io.ui) { settingsChanged = true }
+  if settingsAdvanceTime(s: io.settings, dt: dt) { settingsChanged = true }
+  if settingsChanged {
+    render.renderer.sky = settingsBuildSky(s: io.settings, data: cam.hosek, turbidity: 3.0, groundAlbedo: 0.30)
+    cam.light.sunDir = settingsSunDir(s: io.settings)
+    cam.light.sunColor = settingsSunColor(s: io.settings)
+    character.speed = io.settings.speed
+    character.playing = io.settings.playing
+    if character.toon is not io.settings.toon {
+      character.toon = io.settings.toon
+      setPanelButtonOn(panel: io.transport, world: io.world, id: "toon", on: character.toon)
+    }
+    let pctS: Int = speedPercent(v: character.speed)
+    setNodeText(world: io.world, nodeId: "SpeedLabel", value: "Speed {pctS}%")
+    settingsApplyToWorld(s: io.settings, world: io.world)
+    applyWalkerPanel(world: io.world, open: io.settings.open)
+    persist.stateDirty = true
+  }
+  if clipHit.length() > 0 or transportHit.length() > 0 {
+    io.settings.speed = character.speed
+    io.settings.toon = character.toon
+    settingsApplyToWorld(s: io.settings, world: io.world)
+    applyWalkerPanel(world: io.world, open: io.settings.open)
+    persist.stateDirty = true
+  }
+  if terrain.toon is not character.toon {
+    setInfiniteTerrainToon(terrain: terrain, toon: character.toon)
+  }
+  if uiActionCount(input: io.ui) > 0 or settingsChanged {
+    runUiSystems(world: io.world, res: io.gpuUi)
+  }
+  ret UiTick { settingsChanged: settingsChanged, scrolled: scrolled }
+}
