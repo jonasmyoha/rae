@@ -1,12 +1,16 @@
 # Waving grass for the walker meadow (grass epic, phase 1 — #485).
 #
-# It is a SYSTEM in the ECS sense the project uses for per-feature behaviour,
-# but it owns NO per-blade ECS entity and NO per-blade scene instance. Instead
-# it keeps a fixed pool of blade DESCRIPTORS (base position on the noise height
-# field, yaw, phase, scale — wrapped around the player by absolute world cell
-# like the terrain), and each frame packs them into one compact instance stream
-# that gbuffer.drawInstanced turns into a SINGLE instanced draw. So the whole
-# field is one draw call, not one per clump.
+# Each blade is an ECS entity (#742) carrying a GrassBlade component — its base
+# on the noise height field, yaw, phase, scale, and pool slot — recycled around
+# the player by absolute world cell like the terrain. Each frame the blade
+# components are packed into ONE compact instance stream (a DERIVED buffer, not
+# a source of truth) that gbuffer.drawInstanced turns into a SINGLE instanced
+# draw. So the whole field is one draw call, not one per clump.
+#
+# NOTE (#742): the mesh-clump draw (drawGrassField) is currently unwired — the
+# live grass is the GPU-compute field (grass_compute: grassGenerate/grassDraw,
+# #486/#487). The blade components are still streamed here; the derived-buffer
+# draw path is kept correct so it can be re-wired or removed deliberately.
 #
 # INTERMEDIATE, by design. The instance stream is still CPU-built here and the
 # blade geometry is still the clump mesh; grass epic #486 moves generation onto
@@ -22,6 +26,9 @@ import gpu3d
 import scene3d
 import mesh3d
 import vec3
+import ecs/entity
+import ecs/component_table
+open ecs/component_table
 open math3d
 open gltf
 open gpu3d
@@ -33,8 +40,10 @@ const grassBladeCount: Int = 490
 const grassRecordFloats: Int = 19600   # grassBladeCount * gbuffer.instanceRecordFloats (40)
 const grassWindTau: Float = 6.283185307179586
 
-# One clump descriptor: the planted base it sways around, a yaw for variety, a
-# per-clump phase so the field does not pulse in unison, and a scale.
+# One clump descriptor, stored as a per-blade COMPONENT: the planted base it
+# sways around, a yaw for variety, a per-clump phase so the field does not pulse
+# in unison, a scale, and the fixed pool `slot` (0..grassBladeCount-1) that pins
+# which cell + clump it is so streaming can re-place it on a wrap.
 type GrassBlade {
   baseX: Float
   baseY: Float
@@ -42,6 +51,7 @@ type GrassBlade {
   yaw: Float
   phase: Float
   scale: Float
+  slot: Int
 }
 
 type GrassField {
@@ -49,44 +59,40 @@ type GrassField {
   centreCellY: Int
   groundZ: Float
   meshId: Int
-  blades: List(GrassBlade)
-  # Reused DrawU staging buffer: grassBladeCount * gbuffer.instanceRecordFloats,
-  # refilled in Rae each frame and handed to gbuffer.drawRecords. Never
-  # reallocated.
+  # DERIVED DrawU staging buffer: grassBladeCount * gbuffer.instanceRecordFloats,
+  # rebuilt from the GrassBlade components each frame and handed to
+  # gbuffer.drawRecords. Never reallocated, never a source of truth.
   records: List(Float)
 }
 
-func grassBladeAt(blades: view List(GrassBlade), index: view Int) ret GrassBlade {
-  if let blade: GrassBlade = blades.copyAt(index: index) { ret blade }
-  ret GrassBlade { baseX: 0.0, baseY: 0.0, baseZ: 0.0, yaw: 0.0, phase: 0.0, scale: 0.3 }
-}
-
-# Deterministic scatter for clump `slot` within cell (cellX, cellY). Same cell
-# -> same clumps, which is what makes the wrap invisible.
-func placeGrassCell(field: mod GrassField, poolBase: view Int,
-                    cellX: view Int, cellY: view Int) {
-  loop var slot: Int = 0, slot < grassPerCell, ++slot {
-    let poolIndex: Int = poolBase + slot
-    let hx: Float = noise.hash2(x: cellX, y: cellY, seed: 200 + slot)
-    let hy: Float = noise.hash2(x: cellX, y: cellY, seed: 400 + slot)
-    let hyaw: Float = noise.hash2(x: cellX, y: cellY, seed: 600 + slot)
-    let hphase: Float = noise.hash2(x: cellX, y: cellY, seed: 800 + slot)
-    let hscale: Float = noise.hash2(x: cellX, y: cellY, seed: 1000 + slot)
-    let baseX: Float = (cellX.toFloat() + hx) * terrainCellSize - terrainCellSize * 0.5
-    let baseY: Float = (cellY.toFloat() + hy) * terrainCellSize - terrainCellSize * 0.5
-    let baseZ: Float = terrainHeightAt(x: baseX, y: baseY, groundZ: field.groundZ)
-    field.blades.set(index: poolIndex, value: GrassBlade {
-      baseX: baseX, baseY: baseY, baseZ: baseZ,
-      yaw: hyaw * grassWindTau,
-      phase: hphase * grassWindTau,
-      scale: 0.28 + hscale * 0.34
-    })
+# Deterministic scatter for clump `slotInCell` within absolute cell (cellX,
+# cellY). Same cell -> same clumps, which is what makes the wrap invisible.
+# `slot` is the blade's global pool slot, carried through into the component.
+func placeGrassBlade(cellX: view Int, cellY: view Int, slotInCell: view Int,
+                     groundZ: view Float, slot: view Int) ret GrassBlade {
+  let hx: Float = noise.hash2(x: cellX, y: cellY, seed: 200 + slotInCell)
+  let hy: Float = noise.hash2(x: cellX, y: cellY, seed: 400 + slotInCell)
+  let hyaw: Float = noise.hash2(x: cellX, y: cellY, seed: 600 + slotInCell)
+  let hphase: Float = noise.hash2(x: cellX, y: cellY, seed: 800 + slotInCell)
+  let hscale: Float = noise.hash2(x: cellX, y: cellY, seed: 1000 + slotInCell)
+  let baseX: Float = (cellX.toFloat() + hx) * terrainCellSize - terrainCellSize * 0.5
+  let baseY: Float = (cellY.toFloat() + hy) * terrainCellSize - terrainCellSize * 0.5
+  let baseZ: Float = terrainHeightAt(x: baseX, y: baseY, groundZ: groundZ)
+  ret GrassBlade {
+    baseX: baseX, baseY: baseY, baseZ: baseZ,
+    yaw: hyaw * grassWindTau,
+    phase: hphase * grassWindTau,
+    scale: 0.28 + hscale * 0.34,
+    slot: slot
   }
 }
 
-# On a cell-boundary crossing, re-scatter every clump onto the square of cells
-# now around the player. Returns true when it re-placed.
-func updateGrassField(field: mod GrassField, playerPosition: view Vec3) ret Bool {
+# On a cell-boundary crossing, re-scatter every blade component onto the square
+# of cells now around the player. Returns true when it re-placed. Each blade's
+# own `slot` fixes its cell + clump, so iterating the component table in any
+# order re-places the whole field correctly.
+func updateGrassField(field: mod GrassField, world: mod GameWorld,
+                      playerPosition: view Vec3) ret Bool {
   let cellX: Int = math.floor(x: playerPosition.x / terrainCellSize).toInt()
   let cellY: Int = math.floor(x: playerPosition.y / terrainCellSize).toInt()
   if cellX is field.centreCellX and cellY is field.centreCellY {
@@ -94,13 +100,18 @@ func updateGrassField(field: mod GrassField, playerPosition: view Vec3) ret Bool
   }
   field.centreCellX = cellX
   field.centreCellY = cellY
-  loop var row: Int = 0, row < terrainGridSide, ++row {
-    loop var column: Int = 0, column < terrainGridSide, ++column {
-      let cellIndex: Int = row * terrainGridSide + column
-      placeGrassCell(field: field, poolBase: cellIndex * grassPerCell,
-                     cellX: cellX + column - terrainHalfGrid,
-                     cellY: cellY + row - terrainHalfGrid)
-    }
+  loop var i: Int = 0, i < componentCount(this: world.grassBlades), ++i {
+    let entity: EntityId = componentEntityAt(this: world.grassBlades, i: i)
+    let blade: GrassBlade = componentDataAt(this: world.grassBlades, i: i)
+    let cellIndex: Int = blade.slot / grassPerCell
+    let slotInCell: Int = blade.slot % grassPerCell
+    let column: Int = cellIndex % terrainGridSide
+    let row: Int = cellIndex / terrainGridSide
+    componentSet(this: world.grassBlades, entity: entity,
+      data: placeGrassBlade(
+        cellX: cellX + column - terrainHalfGrid,
+        cellY: cellY + row - terrainHalfGrid,
+        slotInCell: slotInCell, groundZ: field.groundZ, slot: blade.slot))
   }
   ret true
 }
@@ -116,9 +127,10 @@ func grassGust(phase: view Float, baseX: view Float, time: view Float) ret Float
 # (so TAA gets correct motion while the field waves), plus a per-blade green —
 # then one instanced draw for the whole field. The matrices and the record
 # layout are gbuffer's Rae helpers; nothing here touches raw float offsets.
-func drawGrassField(field: mod GrassField, time: view Float, dt: view Float, toon: view Int) {
-  loop var index: Int = 0, index < grassBladeCount, ++index {
-    let blade: GrassBlade = grassBladeAt(blades: field.blades, index: index)
+func drawGrassField(field: mod GrassField, world: view GameWorld,
+                    time: view Float, dt: view Float, toon: view Int) {
+  loop var index: Int = 0, index < componentCount(this: world.grassBlades), ++index {
+    let blade: GrassBlade = componentDataAt(this: world.grassBlades, i: index)
     let gust: Float = grassGust(phase: blade.phase, baseX: blade.baseX, time: time)
     let prevGust: Float = grassGust(phase: blade.phase, baseX: blade.baseX, time: time - dt)
     let model: Mat4 = gbuffer.swayModel(
@@ -138,12 +150,15 @@ func drawGrassField(field: mod GrassField, time: view Float, dt: view Float, too
                       count: grassBladeCount)
 }
 
-func createGrassField(assets: view String, groundZ: view Float) ret GrassField {
+func createGrassField(world: mod GameWorld, assets: view String,
+                      groundZ: view Float) ret GrassField {
   let grassMesh: MeshHandle = terrainMesh(path: "{assets}environment/grass.glb")
-  let blades: List(GrassBlade) = createList(GrassBlade, cap: grassBladeCount)
-  loop var index: Int = 0, index < grassBladeCount, ++index {
-    blades.add(value: GrassBlade {
-      baseX: 0.0, baseY: 0.0, baseZ: groundZ, yaw: 0.0, phase: 0.0, scale: 0.3
+  # One blade entity per pool slot; the first updateGrassField wrap re-places
+  # them onto the cells around the player.
+  loop var slot: Int = 0, slot < grassBladeCount, ++slot {
+    let entity: EntityId = gameWorldAddEntity(world: world)
+    componentSet(this: world.grassBlades, entity: entity, data: GrassBlade {
+      baseX: 0.0, baseY: 0.0, baseZ: groundZ, yaw: 0.0, phase: 0.0, scale: 0.3, slot: slot
     })
   }
   let records: List(Float) = createList(Float, cap: grassRecordFloats)
@@ -153,6 +168,6 @@ func createGrassField(assets: view String, groundZ: view Float) ret GrassField {
   ret GrassField {
     centreCellX: 1000000000, centreCellY: 1000000000,
     groundZ: groundZ, meshId: grassMesh.id,
-    blades: own blades, records: own records
+    records: own records
   }
 }
