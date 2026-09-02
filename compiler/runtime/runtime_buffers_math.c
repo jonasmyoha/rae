@@ -280,6 +280,23 @@ rae_Bool rae_json_key_present(rae_String json, const char* key) {
     return 1;
 }
 
+// #761: build an owned JSON String and manage it like any other owned-String
+// producer — mem-tag it AND pool-register it. The C backend emits owned method
+// results (obj.toJson()) as pool temps: a surrounding `pool_flush` frees an
+// inlined result, and `pool_take` hands ownership to a local binding. Skipping
+// the register left the result untracked, so the let-then-view idiom
+// (`let s = obj.toJson(); useView(s)`) over-freed (outstanding=-1) and the
+// inlined form leaked. Reuses the JSON_EXTRACT site for stats.
+rae_String rae_json_build(const char* s, int64_t len) {
+    uint8_t* copy = (uint8_t*)malloc((size_t)len + 1);
+    if (copy) {
+        memcpy(copy, s, (size_t)len); copy[len] = 0;
+        rae_mem_str_tag(copy, len + 1, RAE_SITE_JSON_EXTRACT);
+        rae_string_pool_register(copy);
+    }
+    return (rae_String){copy, len, len + 1, 1};
+}
+
 rae_String rae_json_extract_string(rae_String json, const char* key) {
     const char* v = rae_json_find_key((const char*)json.data, json.len, key);
     if (!v || *v != '"') return (rae_String){NULL, 0, 0, 0};
