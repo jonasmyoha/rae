@@ -10,6 +10,13 @@
 # realistic frame rates. This test asserts that 5000 iterations grow
 # RSS by under 3 MB — well under what a typical compositor-style
 # leak would produce.
+# Harness note (#775): this is an RSS-based leak test — it measures
+# processRssKb() growth, it does NOT call the mem_stats native. It must run
+# WITHOUT RAE_MEM_STATS=1: the mem-stats side-hash is per-allocation
+# bookkeeping that itself grows RSS (~0 KB clean vs up to ~2.9 MB against the
+# 3 MB bound under the tracker), which made this flake under the full suite.
+# tools/run_tests.sh excludes 431/432/433 from the RAE_MEM_STATS gate for
+# exactly this reason; keep them out of it.
 import core
 import string
 import sys
