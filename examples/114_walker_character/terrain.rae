@@ -1,9 +1,15 @@
 # Fixed-size infinite meadow used by the walker example.
 #
-# The pool is allocated once. Crossing a cell boundary deterministically maps
-# those same entities onto the square of absolute world cells around the
-# character. Mesh handles, renderer components and list capacities therefore
-# remain stable however far the character walks.
+# #741 rewrite: the terrain props and heightfield tiles are ECS entities in the
+# shared GameWorld (recycled, generational ids) — NOT parallel pool Lists synced
+# by poolIndex, and NOT scale-to-0 culling. Each entity carries a `PropKind`
+# {kind, slot, active}; trees carry a `TreeVariant` {broad}; tiles carry a
+# `TileMesh` {meshId}. Placement, draw and shadow-cast are all QUERIES over these
+# tables. Transforms are quaternion `Transform3D` (lib/ecs), consistent with the
+# rest of the GameWorld — Euler is only ever an editor-authoring concern.
+#
+# The pool is allocated once; crossing a cell boundary re-places those same
+# entities onto the square of world cells around the character.
 import core
 import math
 import noise
@@ -14,19 +20,25 @@ import gpu3d
 import scene3d
 import mesh3d
 import vec3
+import quat
 import gbuffer
 import gbuffer_terrain
 open gbuffer_terrain
 import gbuffer_instanced
+import ecs/entity
+import ecs/component_table
+import ecs/transform
 open gltf
 open gpu3d
 open scene3d
 open mesh3d
 open gbuffer_instanced
+open ecs/entity
+open ecs/component_table
+open ecs/transform
 
 # Single source of truth for the ground colour: the terrain ground material AND
-# the GPU grass gradient's bottom both read this, so the grass roots always match
-# the ground (#487 follow-up — pass it into grassGenerate).
+# the GPU grass gradient's bottom both read this, so the grass roots match ground.
 func walkerGroundColor() ret Vec3 { ret vec3.create(x: 0.105, y: 0.245, z: 0.055) }
 
 const terrainGridSide: Int = 7
@@ -35,47 +47,65 @@ const terrainHalfGrid: Int = 3
 const terrainCellCount: Int = 49
 const terrainTau: Float = 6.283185307179586
 
-# Ground tiles are subdivided so noise heights have vertices to move. 12
-# segments over an 18 m cell is a quad every 1.5 m — enough for the hill
-# wavelengths below, cheap enough that all 49 tiles total ~14k triangles.
 const terrainTileSegments: Int = 12
 const terrainTileVerts: Int = 169
 const terrainTileFloats: Int = 1352
 
-# The height field IS the biome elevation field (lib/world_biome), not a second
-# independent noise. It used to be its own two octaves of Perlin, unrelated to the
-# elevation the shader classifies and to the height the grass compute pass places
-# blades on, so the three disagreed about where the ground was.
-#
-# Water is one height: submerged elevation clamps to the water level, so the sea
-# is flat by construction with no water mesh.
+# Prop kinds (the PropKind.kind discriminator).
+const kindTile: Int = 0
+const kindTree: Int = 1
+const kindRock: Int = 2
+const kindBush: Int = 3
+const kindFlower: Int = 4
+const kindGrassA: Int = 5
+const kindGrassB: Int = 6
+
+# The height field IS the biome elevation field (lib/world_biome).
 func terrainHeightAt(x: view Float, y: view Float, groundZ: view Float) ret Float {
   ret worldTerrainHeight(x: x, y: y, groundZ: groundZ, cfg: defaultBiomeConfig())
 }
 
-# Vegetation needs a real meadow, not a damp patch of beach.
 const propGrassMin: Float = 0.45
 
-# Nothing stands in the sea, and vegetation wants grass under it. Without this
-# every prop kind scatters blind and trees, rocks and bushes stand on open water.
+# Nothing stands in the sea, and vegetation wants grass under it.
 func terrainPropAllowed(x: view Float, y: view Float, minGrass: view Float) ret Bool {
   ret worldPropAllowed(x: x, y: y, minGrass: minGrass, cfg: defaultBiomeConfig())
 }
 
-# One terrain prop kind drawn by instancing (grass epic #485): its mesh, the
-# scene material index every copy shares, and a pre-sized instance batch refilled
-# each frame. Bundling the three keeps the terrain struct from sprouting a loose
-# mesh/material/batch triple per prop.
+# ----- ECS components (#741) -----------------------------------------
+# A terrain prop / tile entity: which kind it is, which pool slot it occupies,
+# and whether it is currently placed on valid ground (props over water are
+# inactive and simply not gathered — no scale-to-0).
+type PropKind {
+  kind: Int
+  slot: Int
+  active: Bool
+}
+
+# A tree's broad-vs-tall choice, replacing the old broadVisible side-table.
+type TreeVariant {
+  broad: Bool
+}
+
+# A tile entity's unique heightfield mesh (rewritten in place on recycle).
+type TileMesh {
+  meshId: Int
+}
+
+# ----- instanced prop rendering --------------------------------------
+# One instanced prop draw: its mesh, its material, and a pre-sized batch refilled
+# each frame. The material is a value (not a scene index) so terrain owns no
+# Scene3d state.
 type PropInstancer {
   mesh: MeshHandle
-  materialIndex: Int
+  material: Material3d
   batch: InstanceBatch
 }
 
-func createPropInstancer(mesh: view MeshHandle, materialIndex: copy Int,
+func createPropInstancer(mesh: view MeshHandle, material: view Material3d,
                          capacity: copy Int) ret PropInstancer {
   ret PropInstancer {
-    mesh: mesh, materialIndex: materialIndex,
+    mesh: mesh, material: material,
     batch: own createInstanceBatch(mesh: mesh, capacity: capacity)
   }
 }
@@ -85,29 +115,8 @@ type InfiniteTerrain {
   centreCellY: Int
   groundZ: Float
   toon: Bool
-  # Each pool slot owns its own tile MESH, not just an entity: heights live
-  # in the vertices, so recycling a slot onto a new cell rewrites them via
-  # updateMeshVerts. scratchVerts is the reused staging buffer for that.
-  tileMeshIds: List(Int)
+  # Reused staging buffer for a tile's per-cell heightfield rewrite.
   scratchVerts: List(Float)
-  tileEntities: List(Int)
-  broadTrunkEntities: List(Int)
-  broadCrownEntities: List(Int)
-  tallTrunkEntities: List(Int)
-  tallCrownEntities: List(Int)
-  rockEntities: List(Int)
-  bushEntities: List(Int)
-  flowerEntities: List(Int)
-  grassAEntities: List(Int)
-  grassBEntities: List(Int)
-  materialIds: List(Int)
-  # Grass epic #485: every terrain prop draws as ONE instanced DrawIndexed per
-  # mesh each frame instead of a per-cell MeshRenderer draw. Each PropInstancer
-  # bundles the mesh + shared material + pre-sized batch. Trees choose broad/tall
-  # per cell, so each variant has its own batch and broadVisible[slot] records
-  # which was chosen — the MeshRenderers are hidden, so the choice can no longer
-  # be read back from scene visibility.
-  broadVisible: List(Bool)
   rockProp: PropInstancer
   bushProp: PropInstancer
   flowerProp: PropInstancer
@@ -128,11 +137,6 @@ func terrainMesh(path: view String) ret MeshHandle {
   ret uploadMesh(verts: mesh.verts, vertCount: mesh.vertCount, indices: mesh.indices)
 }
 
-func terrainEntityAt(entities: view List(Int), index: view Int) ret Int {
-  if let entity: Int = entities.copyAt(index: index) { ret entity }
-  ret -1
-}
-
 func terrainHash(cellX: view Int, cellY: view Int, seed: view Int) ret Float {
   ret noise.hash2(x: cellX, y: cellY, seed: seed)
 }
@@ -146,43 +150,76 @@ func terrainScale(cellX: view Int, cellY: view Int, seed: view Int,
   ret minimum + terrainHash(cellX: cellX, cellY: cellY, seed: seed) * spread
 }
 
-func terrainTransform(cellX: view Int, cellY: view Int,
-                      seedX: view Int, seedY: view Int, seedScale: view Int,
-                      groundZ: view Float, minimumScale: view Float,
-                      scaleSpread: view Float, minGrass: view Float) ret Transform3d {
-  var scale: Float = terrainScale(cellX: cellX, cellY: cellY, seed: seedScale,
-                                  minimum: minimumScale, spread: scaleSpread)
+# A prop's placement transform for its cell: scattered x/y, height-sampled z, a
+# yaw quaternion about +Z, uniform scale. (Editor-Euler is never involved.)
+func propTransform3D(cellX: view Int, cellY: view Int, seedX: view Int, seedY: view Int,
+                     seedScale: view Int, groundZ: view Float,
+                     minScale: view Float, scaleSpread: view Float) ret Transform3D {
+  let scale: Float = terrainScale(cellX: cellX, cellY: cellY, seed: seedScale,
+                                  minimum: minScale, spread: scaleSpread)
   let posX: Float = cellX.toFloat() * terrainCellSize
     + terrainOffset(cellX: cellX, cellY: cellY, seed: seedX)
   let posY: Float = cellY.toFloat() * terrainCellSize
     + terrainOffset(cellX: cellX, cellY: cellY, seed: seedY)
-  # Culled by collapsing the scale: props are gathered into instanced batches by
-  # slot, so removing one would mean reshuffling the pool.
-  if terrainPropAllowed(x: posX, y: posY, minGrass: minGrass) is false {
-    scale = 0.0
-  }
-  # Every prop stands on the height field at its own scatter position. The
-  # small lifts callers add to groundZ (flowers +0.015) pass through, since
-  # the height is groundZ + noise.
-  ret Transform3d {
-    position: vec3.create(
-      x: posX,
-      y: posY,
-      z: terrainHeightAt(x: posX, y: posY, groundZ: groundZ)),
-    rotation: vec3.create(
-      x: 0.0, y: 0.0,
-      z: terrainHash(cellX: cellX, cellY: cellY, seed: seedScale + 71) * terrainTau),
+  let yaw: Float = terrainHash(cellX: cellX, cellY: cellY, seed: seedScale + 71) * terrainTau
+  ret Transform3D {
+    position: vec3.create(x: posX, y: posY,
+                          z: terrainHeightAt(x: posX, y: posY, groundZ: groundZ)),
+    rotation: quat.fromAxisAngle(axis: vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: yaw),
     scale: vec3.create(x: scale, y: scale, z: scale)
   }
 }
 
-# Rewrite one pool slot's tile mesh so its vertices carry the ABSOLUTE world
-# height of the cell it now covers (the tile entity itself sits at z 0).
-# Normals come from central differences of the same height function, so the
-# lighting matches the surface exactly.
-func reshapeTerrainTile(terrain: mod InfiniteTerrain, cellX: view Int, cellY: view Int,
-                        poolIndex: view Int) {
-  let meshId: Int = terrainEntityAt(entities: terrain.tileMeshIds, index: poolIndex)
+# The prop transform for a given kind (per-kind scatter seeds + scale range).
+func kindTransform(kind: view Int, broad: view Bool, cellX: view Int, cellY: view Int,
+                   groundZ: view Float) ret Transform3D {
+  if kind is kindTree {
+    if broad {
+      ret propTransform3D(cellX: cellX, cellY: cellY, seedX: 11, seedY: 17, seedScale: 23,
+        groundZ: groundZ, minScale: 0.30, scaleSpread: 0.15)
+    }
+    ret propTransform3D(cellX: cellX, cellY: cellY, seedX: 11, seedY: 17, seedScale: 109,
+      groundZ: groundZ, minScale: 0.25, scaleSpread: 0.14)
+  }
+  if kind is kindRock {
+    ret propTransform3D(cellX: cellX, cellY: cellY, seedX: 31, seedY: 37, seedScale: 41,
+      groundZ: groundZ, minScale: 0.28, scaleSpread: 0.34)
+  }
+  if kind is kindBush {
+    ret propTransform3D(cellX: cellX, cellY: cellY, seedX: 47, seedY: 53, seedScale: 59,
+      groundZ: groundZ, minScale: 0.22, scaleSpread: 0.16)
+  }
+  if kind is kindFlower {
+    ret propTransform3D(cellX: cellX, cellY: cellY, seedX: 61, seedY: 67, seedScale: 71,
+      groundZ: groundZ + 0.015, minScale: 0.35, scaleSpread: 0.25)
+  }
+  if kind is kindGrassA {
+    ret propTransform3D(cellX: cellX, cellY: cellY, seedX: 73, seedY: 79, seedScale: 83,
+      groundZ: groundZ, minScale: 0.52, scaleSpread: 0.30)
+  }
+  # kindGrassB
+  ret propTransform3D(cellX: cellX, cellY: cellY, seedX: 89, seedY: 97, seedScale: 101,
+    groundZ: groundZ, minScale: 0.38, scaleSpread: 0.27)
+}
+
+# Rocks may stand on bare ground; everything else wants grass under it.
+func kindMinGrass(kind: view Int) ret Float {
+  if kind is kindRock { ret 0.0 }
+  ret propGrassMin
+}
+
+func slotCellX(centreCellX: view Int, slot: view Int) ret Int {
+  ret centreCellX + (slot % terrainGridSide) - terrainHalfGrid
+}
+
+func slotCellY(centreCellY: view Int, slot: view Int) ret Int {
+  ret centreCellY + (slot / terrainGridSide) - terrainHalfGrid
+}
+
+# Rewrite a tile's mesh so its vertices carry the ABSOLUTE world height of the
+# cell it now covers. Normals from central differences of the height function.
+func reshapeTerrainTile(terrain: mod InfiniteTerrain, meshId: view Int,
+                        cellX: view Int, cellY: view Int) {
   if meshId < 1 { ret }
   let tileSize: Float = terrainCellSize + 0.04
   let centreX: Float = cellX.toFloat() * terrainCellSize
@@ -218,93 +255,11 @@ func reshapeTerrainTile(terrain: mod InfiniteTerrain, cellX: view Int, cellY: vi
                   verts: terrain.scratchVerts, vertCount: terrainTileVerts)
 }
 
-func terrainTeleport(scene: mod Scene3d, entity: view Int,
-                     transform: view Transform3d) {
-  if entity >= 0 {
-    teleportTransform(scene: scene, entity: entity, transform: transform)
-  }
-}
-
-func placeTerrainCell(terrain: mod InfiniteTerrain, scene: mod Scene3d,
-                      poolIndex: view Int, cellX: view Int, cellY: view Int) {
-  let zeroRotation: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
-  let oneScale: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
-  # Heights are baked into the tile's vertices in world space, so the entity
-  # itself sits at z 0 — its x/y translate the reshaped patch into place.
-  reshapeTerrainTile(terrain: terrain, cellX: cellX, cellY: cellY, poolIndex: poolIndex)
-  terrainTeleport(
-    scene: scene,
-    entity: terrainEntityAt(entities: terrain.tileEntities, index: poolIndex),
-    transform: Transform3d {
-      position: vec3.create(x: cellX.toFloat() * terrainCellSize,
-                            y: cellY.toFloat() * terrainCellSize,
-                            z: 0.0),
-      rotation: zeroRotation, scale: oneScale
-    })
-
-  # Trunk and crown share exactly one transform so the split source mesh stays
-  # assembled while still receiving separate cel colours.
-  let broadTree: Transform3d = terrainTransform(
-    cellX: cellX, cellY: cellY, seedX: 11, seedY: 17, seedScale: 23,
-    groundZ: terrain.groundZ, minimumScale: 0.30, scaleSpread: 0.15, minGrass: propGrassMin)
-  let tallTree: Transform3d = terrainTransform(
-    cellX: cellX, cellY: cellY, seedX: 11, seedY: 17, seedScale: 109,
-    groundZ: terrain.groundZ, minimumScale: 0.25, scaleSpread: 0.14, minGrass: propGrassMin)
-  let treeSelector: Float = terrainHash(cellX: cellX, cellY: cellY, seed: 131)
-  let broadVisible: Bool = treeSelector < 0.54
-  let broadTrunkEntity: Int = terrainEntityAt(
-    entities: terrain.broadTrunkEntities, index: poolIndex)
-  let broadCrownEntity: Int = terrainEntityAt(
-    entities: terrain.broadCrownEntities, index: poolIndex)
-  let tallTrunkEntity: Int = terrainEntityAt(
-    entities: terrain.tallTrunkEntities, index: poolIndex)
-  let tallCrownEntity: Int = terrainEntityAt(
-    entities: terrain.tallCrownEntities, index: poolIndex)
-  # Trees are instanced (#485): the four tree MeshRenderers stay hidden and the
-  # broad/tall choice is recorded per slot, so drawTerrainProps gathers only the
-  # chosen variant into its batch. (Was four setMeshInstanceVisible calls.)
-  terrain.broadVisible.set(index: poolIndex, value: broadVisible)
-  terrainTeleport(scene: scene,
-    entity: broadTrunkEntity,
-    transform: broadTree)
-  terrainTeleport(scene: scene,
-    entity: broadCrownEntity,
-    transform: broadTree)
-  terrainTeleport(scene: scene,
-    entity: tallTrunkEntity,
-    transform: tallTree)
-  terrainTeleport(scene: scene,
-    entity: tallCrownEntity,
-    transform: tallTree)
-
-  terrainTeleport(scene: scene,
-    entity: terrainEntityAt(entities: terrain.rockEntities, index: poolIndex),
-    transform: terrainTransform(
-      cellX: cellX, cellY: cellY, seedX: 31, seedY: 37, seedScale: 41,
-      groundZ: terrain.groundZ, minimumScale: 0.28, scaleSpread: 0.34, minGrass: 0.0))
-  terrainTeleport(scene: scene,
-    entity: terrainEntityAt(entities: terrain.bushEntities, index: poolIndex),
-    transform: terrainTransform(
-      cellX: cellX, cellY: cellY, seedX: 47, seedY: 53, seedScale: 59,
-      groundZ: terrain.groundZ, minimumScale: 0.22, scaleSpread: 0.16, minGrass: propGrassMin))
-  terrainTeleport(scene: scene,
-    entity: terrainEntityAt(entities: terrain.flowerEntities, index: poolIndex),
-    transform: terrainTransform(
-      cellX: cellX, cellY: cellY, seedX: 61, seedY: 67, seedScale: 71,
-      groundZ: terrain.groundZ + 0.015, minimumScale: 0.35, scaleSpread: 0.25, minGrass: propGrassMin))
-  terrainTeleport(scene: scene,
-    entity: terrainEntityAt(entities: terrain.grassAEntities, index: poolIndex),
-    transform: terrainTransform(
-      cellX: cellX, cellY: cellY, seedX: 73, seedY: 79, seedScale: 83,
-      groundZ: terrain.groundZ, minimumScale: 0.52, scaleSpread: 0.30, minGrass: propGrassMin))
-  terrainTeleport(scene: scene,
-    entity: terrainEntityAt(entities: terrain.grassBEntities, index: poolIndex),
-    transform: terrainTransform(
-      cellX: cellX, cellY: cellY, seedX: 89, seedY: 97, seedScale: 101,
-      groundZ: terrain.groundZ, minimumScale: 0.38, scaleSpread: 0.27, minGrass: propGrassMin))
-}
-
-func updateInfiniteTerrain(terrain: mod InfiniteTerrain, scene: mod Scene3d,
+# ----- streaming -----------------------------------------------------
+# Re-place every prop/tile entity onto the world cell its pool slot now maps to.
+# A single query over the PropKind table drives placement; no per-slot,
+# per-kind list bookkeeping.
+func updateInfiniteTerrain(terrain: mod InfiniteTerrain, world: mod GameWorld,
                            playerPosition: view Vec3) ret Bool {
   let cellX: Int = math.floor(x: playerPosition.x / terrainCellSize).toInt()
   let cellY: Int = math.floor(x: playerPosition.y / terrainCellSize).toInt()
@@ -314,176 +269,165 @@ func updateInfiniteTerrain(terrain: mod InfiniteTerrain, scene: mod Scene3d,
   terrain.centreCellX = cellX
   terrain.centreCellY = cellY
 
-  loop var row: Int = 0, row < terrainGridSide, ++row {
-    loop var column: Int = 0, column < terrainGridSide, ++column {
-      let poolIndex: Int = row * terrainGridSide + column
-      placeTerrainCell(
-        terrain: terrain, scene: scene, poolIndex: poolIndex,
-        cellX: cellX + column - terrainHalfGrid,
-        cellY: cellY + row - terrainHalfGrid)
+  loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
+    let entity: EntityId = componentEntityAt(this: world.propKinds, i: i)
+    var pk: PropKind = componentDataAt(this: world.propKinds, i: i)
+    let ccx: Int = slotCellX(centreCellX: cellX, slot: pk.slot)
+    let ccy: Int = slotCellY(centreCellY: cellY, slot: pk.slot)
+    if pk.kind is kindTile {
+      let tile: TileMesh = componentGet(this: world.tileMeshes, entity: entity)
+      reshapeTerrainTile(terrain: terrain, meshId: tile.meshId, cellX: ccx, cellY: ccy)
+      componentSet(this: world.transforms, entity: entity, data: Transform3D {
+        position: vec3.create(x: ccx.toFloat() * terrainCellSize,
+                              y: ccy.toFloat() * terrainCellSize, z: 0.0),
+        rotation: quat.identity(),
+        scale: vec3.create(x: 1.0, y: 1.0, z: 1.0)
+      })
+    } else {
+      var broad: Bool = false
+      if pk.kind is kindTree {
+        broad = terrainHash(cellX: ccx, cellY: ccy, seed: 131) < 0.54
+        componentSet(this: world.treeVariants, entity: entity, data: TreeVariant { broad: broad })
+      }
+      let t: Transform3D = kindTransform(kind: pk.kind, broad: broad,
+        cellX: ccx, cellY: ccy, groundZ: terrain.groundZ)
+      componentSet(this: world.transforms, entity: entity, data: t)
+      pk.active = terrainPropAllowed(x: t.position.x, y: t.position.y,
+        minGrass: kindMinGrass(kind: pk.kind))
+      componentSet(this: world.propKinds, entity: entity, data: pk)
     }
   }
   ret true
 }
 
-# Gather one prop entity's current + previous transform (the same source
-# renderScene used, so placement and TAA motion are identical) into a batch.
-func gatherPropInstance(prop: mod PropInstancer, entity: copy Int, scene: view Scene3d,
-                        material: view Material3d) {
-  let transform: Transform3d = sceneTransformAt(values: scene.transforms, index: entity)
-  let prevTransform: Transform3d = sceneTransformAt(values: scene.prevTransforms, index: entity)
-  addInstanceTransform(batch: prop.batch, transform: transform,
-                       prevTransform: prevTransform, material: material)
+# ----- draw (queries) ------------------------------------------------
+func gatherKind(prop: mod PropInstancer, model: view Mat4) {
+  addInstance(batch: prop.batch, model: model, prevModel: model, material: prop.material)
 }
 
-# Draw an always-visible prop pool (rock/bush/flower) as ONE instanced draw.
-func drawPropPool(prop: mod PropInstancer, entities: view List(Int), scene: view Scene3d) {
-  let material: Material3d = sceneMaterialAt(values: scene.materials, index: prop.materialIndex)
-  resetInstanceBatch(batch: prop.batch)
-  loop var index: Int = 0, index < entities.length, ++index {
-    gatherPropInstance(prop: prop, entity: terrainEntityAt(entities: entities, index: index),
-                       scene: scene, material: material)
-  }
-  drawInstances(batch: prop.batch)
-}
-
-# Grass has two pools per cell (grassA + grassB) sharing one mesh + material, so
-# both feed one batch and one instanced draw.
-func drawGrassProp(prop: mod PropInstancer, entitiesA: view List(Int),
-                   entitiesB: view List(Int), scene: view Scene3d) {
-  let material: Material3d = sceneMaterialAt(values: scene.materials, index: prop.materialIndex)
-  resetInstanceBatch(batch: prop.batch)
-  loop var index: Int = 0, index < entitiesA.length, ++index {
-    gatherPropInstance(prop: prop, entity: terrainEntityAt(entities: entitiesA, index: index),
-                       scene: scene, material: material)
-  }
-  loop var index: Int = 0, index < entitiesB.length, ++index {
-    gatherPropInstance(prop: prop, entity: terrainEntityAt(entities: entitiesB, index: index),
-                       scene: scene, material: material)
-  }
-  drawInstances(batch: prop.batch)
-}
-
-# Draw one tree variant: only the slots whose per-cell choice matches wantBroad
-# contribute (broadVisible[slot] records the broad-vs-tall pick from placeTerrainCell).
-func drawTreeProp(prop: mod PropInstancer, entities: view List(Int), scene: view Scene3d,
-                  broadVisible: view List(Bool), wantBroad: copy Bool) {
-  let material: Material3d = sceneMaterialAt(values: scene.materials, index: prop.materialIndex)
-  resetInstanceBatch(batch: prop.batch)
-  loop var index: Int = 0, index < entities.length, ++index {
-    var isBroad: Bool = false
-    if let flag: Bool = broadVisible.copyAt(index: index) { isBroad = flag }
-    if isBroad is wantBroad {
-      gatherPropInstance(prop: prop, entity: terrainEntityAt(entities: entities, index: index),
-                         scene: scene, material: material)
+func drawTerrainProps(terrain: mod InfiniteTerrain, world: view GameWorld) {
+  resetInstanceBatch(batch: terrain.rockProp.batch)
+  resetInstanceBatch(batch: terrain.bushProp.batch)
+  resetInstanceBatch(batch: terrain.flowerProp.batch)
+  resetInstanceBatch(batch: terrain.grassProp.batch)
+  resetInstanceBatch(batch: terrain.broadTrunkProp.batch)
+  resetInstanceBatch(batch: terrain.broadCrownProp.batch)
+  resetInstanceBatch(batch: terrain.tallTrunkProp.batch)
+  resetInstanceBatch(batch: terrain.tallCrownProp.batch)
+  loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
+    let entity: EntityId = componentEntityAt(this: world.propKinds, i: i)
+    let pk: PropKind = componentDataAt(this: world.propKinds, i: i)
+    if pk.active and pk.kind is not kindTile {
+      let model: Mat4 = transform3dToMatrix(t: componentGet(this: world.transforms, entity: entity))
+      if pk.kind is kindRock { gatherKind(prop: terrain.rockProp, model: model) }
+      if pk.kind is kindBush { gatherKind(prop: terrain.bushProp, model: model) }
+      if pk.kind is kindFlower { gatherKind(prop: terrain.flowerProp, model: model) }
+      if pk.kind is kindGrassA { gatherKind(prop: terrain.grassProp, model: model) }
+      if pk.kind is kindGrassB { gatherKind(prop: terrain.grassProp, model: model) }
+      if pk.kind is kindTree {
+        if componentGet(this: world.treeVariants, entity: entity).broad {
+          gatherKind(prop: terrain.broadTrunkProp, model: model)
+          gatherKind(prop: terrain.broadCrownProp, model: model)
+        } else {
+          gatherKind(prop: terrain.tallTrunkProp, model: model)
+          gatherKind(prop: terrain.tallCrownProp, model: model)
+        }
+      }
     }
   }
-  drawInstances(batch: prop.batch)
+  drawInstances(batch: terrain.rockProp.batch)
+  drawInstances(batch: terrain.bushProp.batch)
+  drawInstances(batch: terrain.flowerProp.batch)
+  drawInstances(batch: terrain.grassProp.batch)
+  drawInstances(batch: terrain.broadTrunkProp.batch)
+  drawInstances(batch: terrain.broadCrownProp.batch)
+  drawInstances(batch: terrain.tallTrunkProp.batch)
+  drawInstances(batch: terrain.tallCrownProp.batch)
 }
 
-# Grass epic #485: draw EVERY terrain prop instanced — one DrawIndexed per mesh
-# instead of a per-cell MeshRenderer draw. The prop MeshRenderers are hidden at
-# setup so renderScene skips them; this reproduces the same picture with far
-# fewer draw calls. Call inside the G-buffer geometry pass, after renderScene.
-# Draw the ground tiles with the biome-splat pipeline (#533). Tiles are hidden
-# from renderScene (visible=false at creation); here each is drawn per-vertex
-# biome-classified, so the ground reads as grass/sand/mud/rock/water.
-func drawTerrainGround(terrain: view InfiniteTerrain, scene: view Scene3d, time: copy Float) {
-  loop var poolIndex: Int = 0, poolIndex < terrainCellCount, ++poolIndex {
-    let meshId: Int = terrainEntityAt(entities: terrain.tileMeshIds, index: poolIndex)
-    let entity: Int = terrainEntityAt(entities: terrain.tileEntities, index: poolIndex)
-    if meshId >= 1 and entity >= 0 {
-      let t: Transform3d = sceneTransformAt(values: scene.transforms, index: entity)
-      let pt: Transform3d = sceneTransformAt(values: scene.prevTransforms, index: entity)
-      # `time` drives the water ripple/surf in terrain_splat.wgsl via the spare
-      # DrawU slot (8e77d970); terrain is never skinned so that slot is free.
-      drawTerrainMesh(mesh: meshId, transform: t, prevTransform: pt, roughness: 0.96, time: time)
+func drawTerrainGround(terrain: view InfiniteTerrain, world: view GameWorld, time: copy Float) {
+  loop var i: Int = 0, i < componentCount(this: world.tileMeshes), ++i {
+    let entity: EntityId = componentEntityAt(this: world.tileMeshes, i: i)
+    let tile: TileMesh = componentDataAt(this: world.tileMeshes, i: i)
+    if tile.meshId >= 1 {
+      let q: Transform3D = componentGet(this: world.transforms, entity: entity)
+      # Tiles never rotate/scale, so an Euler Transform3d for the ground pipeline
+      # is just the position.
+      let euler: Transform3d = {
+        position: q.position,
+        rotation: vec3.create(x: 0.0, y: 0.0, z: 0.0),
+        scale: vec3.create(x: 1.0, y: 1.0, z: 1.0)
+      }
+      drawTerrainMesh(mesh: tile.meshId, transform: euler, prevTransform: euler,
+                      roughness: 0.96, time: time)
     }
   }
 }
 
-func drawTerrainProps(terrain: mod InfiniteTerrain, scene: view Scene3d) {
-  drawPropPool(prop: terrain.rockProp, entities: terrain.rockEntities, scene: scene)
-  drawPropPool(prop: terrain.bushProp, entities: terrain.bushEntities, scene: scene)
-  drawPropPool(prop: terrain.flowerProp, entities: terrain.flowerEntities, scene: scene)
-  drawGrassProp(prop: terrain.grassProp, entitiesA: terrain.grassAEntities,
-                entitiesB: terrain.grassBEntities, scene: scene)
-  drawTreeProp(prop: terrain.broadTrunkProp, entities: terrain.broadTrunkEntities,
-               scene: scene, broadVisible: terrain.broadVisible, wantBroad: true)
-  drawTreeProp(prop: terrain.broadCrownProp, entities: terrain.broadCrownEntities,
-               scene: scene, broadVisible: terrain.broadVisible, wantBroad: true)
-  drawTreeProp(prop: terrain.tallTrunkProp, entities: terrain.tallTrunkEntities,
-               scene: scene, broadVisible: terrain.broadVisible, wantBroad: false)
-  drawTreeProp(prop: terrain.tallCrownProp, entities: terrain.tallCrownEntities,
-               scene: scene, broadVisible: terrain.broadVisible, wantBroad: false)
+func castKind(mesh: view MeshHandle, model: view Mat4) {
+  drawShadowCaster(mesh: mesh, model: model)
 }
 
-# Shadow casters for every prop (they are hidden MeshRenderers, so
-# renderSceneShadow skips them). One drawShadowCaster per instance keeps the
-# shadows identical; instanced shadow casting is a later grass phase.
-func castPropPool(mesh: view MeshHandle, entities: view List(Int), scene: view Scene3d) {
-  loop var index: Int = 0, index < entities.length, ++index {
-    let entity: Int = terrainEntityAt(entities: entities, index: index)
-    let transform: Transform3d = sceneTransformAt(values: scene.transforms, index: entity)
-    drawShadowCaster(mesh: mesh, model: modelMatrix(t: transform))
-  }
-}
-
-func castTreeProp(mesh: view MeshHandle, entities: view List(Int), scene: view Scene3d,
-                  broadVisible: view List(Bool), wantBroad: copy Bool) {
-  loop var index: Int = 0, index < entities.length, ++index {
-    var isBroad: Bool = false
-    if let flag: Bool = broadVisible.copyAt(index: index) { isBroad = flag }
-    if isBroad is wantBroad {
-      let entity: Int = terrainEntityAt(entities: entities, index: index)
-      let transform: Transform3d = sceneTransformAt(values: scene.transforms, index: entity)
-      drawShadowCaster(mesh: mesh, model: modelMatrix(t: transform))
+func drawTerrainPropsShadow(terrain: view InfiniteTerrain, world: view GameWorld) {
+  loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
+    let entity: EntityId = componentEntityAt(this: world.propKinds, i: i)
+    let pk: PropKind = componentDataAt(this: world.propKinds, i: i)
+    if pk.active and pk.kind is not kindTile {
+      let model: Mat4 = transform3dToMatrix(t: componentGet(this: world.transforms, entity: entity))
+      if pk.kind is kindRock { castKind(mesh: terrain.rockProp.mesh, model: model) }
+      if pk.kind is kindBush { castKind(mesh: terrain.bushProp.mesh, model: model) }
+      if pk.kind is kindFlower { castKind(mesh: terrain.flowerProp.mesh, model: model) }
+      if pk.kind is kindGrassA { castKind(mesh: terrain.grassProp.mesh, model: model) }
+      if pk.kind is kindGrassB { castKind(mesh: terrain.grassProp.mesh, model: model) }
+      if pk.kind is kindTree {
+        if componentGet(this: world.treeVariants, entity: entity).broad {
+          castKind(mesh: terrain.broadTrunkProp.mesh, model: model)
+          castKind(mesh: terrain.broadCrownProp.mesh, model: model)
+        } else {
+          castKind(mesh: terrain.tallTrunkProp.mesh, model: model)
+          castKind(mesh: terrain.tallCrownProp.mesh, model: model)
+        }
+      }
     }
   }
 }
 
-func drawTerrainPropsShadow(terrain: view InfiniteTerrain, scene: view Scene3d) {
-  castPropPool(mesh: terrain.rockProp.mesh, entities: terrain.rockEntities, scene: scene)
-  castPropPool(mesh: terrain.bushProp.mesh, entities: terrain.bushEntities, scene: scene)
-  castPropPool(mesh: terrain.flowerProp.mesh, entities: terrain.flowerEntities, scene: scene)
-  castPropPool(mesh: terrain.grassProp.mesh, entities: terrain.grassAEntities, scene: scene)
-  castPropPool(mesh: terrain.grassProp.mesh, entities: terrain.grassBEntities, scene: scene)
-  castTreeProp(mesh: terrain.broadTrunkProp.mesh, entities: terrain.broadTrunkEntities,
-               scene: scene, broadVisible: terrain.broadVisible, wantBroad: true)
-  castTreeProp(mesh: terrain.broadCrownProp.mesh, entities: terrain.broadCrownEntities,
-               scene: scene, broadVisible: terrain.broadVisible, wantBroad: true)
-  castTreeProp(mesh: terrain.tallTrunkProp.mesh, entities: terrain.tallTrunkEntities,
-               scene: scene, broadVisible: terrain.broadVisible, wantBroad: false)
-  castTreeProp(mesh: terrain.tallCrownProp.mesh, entities: terrain.tallCrownEntities,
-               scene: scene, broadVisible: terrain.broadVisible, wantBroad: false)
+func setPropInstancerToon(prop: mod PropInstancer, toon: view Bool) {
+  prop.material.toon = toon
 }
 
-func setInfiniteTerrainToon(terrain: mod InfiniteTerrain, scene: mod Scene3d,
-                            toon: view Bool) {
+func setInfiniteTerrainToon(terrain: mod InfiniteTerrain, toon: view Bool) {
   if terrain.toon is toon { ret }
   terrain.toon = toon
-  loop var index: Int = 0, index < terrain.materialIds.length, ++index {
-    if let materialId: Int = terrain.materialIds.copyAt(index: index) {
-      setMaterialToon(scene: scene, index: materialId, toon: toon)
-    }
+  setPropInstancerToon(prop: terrain.rockProp, toon: toon)
+  setPropInstancerToon(prop: terrain.bushProp, toon: toon)
+  setPropInstancerToon(prop: terrain.flowerProp, toon: toon)
+  setPropInstancerToon(prop: terrain.grassProp, toon: toon)
+  setPropInstancerToon(prop: terrain.broadTrunkProp, toon: toon)
+  setPropInstancerToon(prop: terrain.broadCrownProp, toon: toon)
+  setPropInstancerToon(prop: terrain.tallTrunkProp, toon: toon)
+  setPropInstancerToon(prop: terrain.tallCrownProp, toon: toon)
+}
+
+func terrainMaterial(color: view Vec3, roughness: view Float) ret Material3d {
+  ret Material3d {
+    baseColor: color, metallic: 0.0, roughness: roughness,
+    emission: vec3.create(x: 0.0, y: 0.0, z: 0.0), toon: true
   }
 }
 
-# Add a prop MeshRenderer but hide it immediately: props are drawn instanced
-# (drawTerrainProps), so renderScene/renderSceneShadow must skip the per-cell
-# renderer. The entity is kept for its transform (teleported per cell).
-func addHiddenProp(scene: mod Scene3d, mesh: view MeshHandle, material: copy Int,
-                   position: view Vec3, rotation: view Vec3, scale: view Vec3) ret Int {
-  let entity: Int = addMeshInstance(scene: scene, mesh: mesh, material: material,
-    position: position, rotation: rotation, scale: scale)
-  setMeshInstanceVisible(scene: scene, entity: entity, visible: false)
+# Spawn one prop entity of `kind` for pool slot `slot`.
+func spawnProp(world: mod GameWorld, kind: view Int, slot: view Int) ret EntityId {
+  let entity: EntityId = gameWorldAddEntity(world: world)
+  componentSet(this: world.transforms, entity: entity, data: createTransform3D())
+  componentSet(this: world.propKinds, entity: entity, data: PropKind {
+    kind: kind, slot: slot, active: false
+  })
   ret entity
 }
 
-func createInfiniteTerrain(scene: mod Scene3d, assets: view String,
+func createInfiniteTerrain(world: mod GameWorld, assets: view String,
                            groundZ: view Float) ret InfiniteTerrain {
-  # One SUBDIVIDED plane per pool slot (not one shared mesh): each slot's
-  # vertices get rewritten with its cell's noise heights on placement.
   let tilePlane: MeshData = makePlane(size: terrainCellSize + 0.04,
                                       segments: terrainTileSegments)
   let broadTrunk: MeshHandle = terrainMesh(path: "{assets}environment/tree_broad_trunk.glb")
@@ -495,119 +439,51 @@ func createInfiniteTerrain(scene: mod Scene3d, assets: view String,
   let flowerMesh: MeshHandle = terrainMesh(path: "{assets}environment/flower.glb")
   let grassMesh: MeshHandle = terrainMesh(path: "{assets}environment/grass.glb")
 
-  let noEmission: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
-  let materials: List(Int) = createList(Int, cap: 8)
-  let groundMaterial: Int = addMaterial(scene: scene,
-    baseColor: walkerGroundColor(),
-    metallic: 0.0, roughness: 0.96, emission: noEmission)
-  let trunkMaterial: Int = addMaterial(scene: scene,
-    baseColor: vec3.create(x: 0.205, y: 0.090, z: 0.032),
-    metallic: 0.0, roughness: 0.92, emission: noEmission)
-  let crownMaterial: Int = addMaterial(scene: scene,
-    baseColor: vec3.create(x: 0.055, y: 0.255, z: 0.075),
-    metallic: 0.0, roughness: 0.88, emission: noEmission)
-  let rockMaterial: Int = addMaterial(scene: scene,
-    baseColor: vec3.create(x: 0.235, y: 0.265, z: 0.285),
-    metallic: 0.0, roughness: 0.82, emission: noEmission)
-  let bushMaterial: Int = addMaterial(scene: scene,
-    baseColor: vec3.create(x: 0.035, y: 0.185, z: 0.105),
-    metallic: 0.0, roughness: 0.90, emission: noEmission)
-  let flowerMaterial: Int = addMaterial(scene: scene,
-    baseColor: vec3.create(x: 0.92, y: 0.38, z: 0.045),
-    metallic: 0.0, roughness: 0.72, emission: noEmission)
-  let grassMaterial: Int = addMaterial(scene: scene,
-    baseColor: vec3.create(x: 0.18, y: 0.42, z: 0.055),
-    metallic: 0.0, roughness: 0.94, emission: noEmission)
-  materials.add(value: groundMaterial)
-  materials.add(value: trunkMaterial)
-  materials.add(value: crownMaterial)
-  materials.add(value: rockMaterial)
-  materials.add(value: bushMaterial)
-  materials.add(value: flowerMaterial)
-  materials.add(value: grassMaterial)
+  let trunkMat: Material3d = terrainMaterial(color: vec3.create(x: 0.205, y: 0.090, z: 0.032), roughness: 0.92)
+  let crownMat: Material3d = terrainMaterial(color: vec3.create(x: 0.055, y: 0.255, z: 0.075), roughness: 0.88)
+  let rockMat: Material3d = terrainMaterial(color: vec3.create(x: 0.235, y: 0.265, z: 0.285), roughness: 0.82)
+  let bushMat: Material3d = terrainMaterial(color: vec3.create(x: 0.035, y: 0.185, z: 0.105), roughness: 0.90)
+  let flowerMat: Material3d = terrainMaterial(color: vec3.create(x: 0.92, y: 0.38, z: 0.045), roughness: 0.72)
+  let grassMat: Material3d = terrainMaterial(color: vec3.create(x: 0.18, y: 0.42, z: 0.055), roughness: 0.94)
 
-  let tileMeshes: List(Int) = createList(Int, cap: terrainCellCount)
   let scratch: List(Float) = createList(Float, cap: terrainTileFloats)
   loop var scratchIndex: Int = 0, scratchIndex < terrainTileFloats, ++scratchIndex {
     scratch.add(value: 0.0)
   }
-  let tiles: List(Int) = createList(Int, cap: terrainCellCount)
-  let broadTrunks: List(Int) = createList(Int, cap: terrainCellCount)
-  let broadCrowns: List(Int) = createList(Int, cap: terrainCellCount)
-  let tallTrunks: List(Int) = createList(Int, cap: terrainCellCount)
-  let tallCrowns: List(Int) = createList(Int, cap: terrainCellCount)
-  let rocks: List(Int) = createList(Int, cap: terrainCellCount)
-  let bushes: List(Int) = createList(Int, cap: terrainCellCount)
-  let flowers: List(Int) = createList(Int, cap: terrainCellCount)
-  let grassA: List(Int) = createList(Int, cap: terrainCellCount)
-  let grassB: List(Int) = createList(Int, cap: terrainCellCount)
-  # Per-slot broad-vs-tall tree choice, filled below and updated per cell in
-  # placeTerrainCell. Pre-sized so no per-frame growth.
-  let broadVisibleFlags: List(Bool) = createList(Bool, cap: terrainCellCount)
-  let origin: Vec3 = vec3.create(x: 0.0, y: 0.0, z: groundZ)
-  let zeroRotation: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
-  let oneScale: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
-  loop var index: Int = 0, index < terrainCellCount, ++index {
+
+  # One entity per pool slot per kind: a tile (with its own heightfield mesh) plus
+  # tree/rock/bush/flower/grassA/grassB. Recycled every stream, placed by query.
+  loop var slot: Int = 0, slot < terrainCellCount, ++slot {
     let tileMesh: MeshHandle = uploadMeshDataForTerrain(mesh: tilePlane)
-    tileMeshes.add(value: tileMesh.id)
-    # Tiles keep their MeshRenderer (unique per-cell heightfield mesh, not an
-    # instancing candidate) but are HIDDEN from renderScene and drawn by
-    # drawTerrainGround with the biome-splat pipeline instead (#533).
-    let tileEntity: Int = addMeshInstance(scene: scene, mesh: tileMesh,
-      material: groundMaterial, position: origin, rotation: zeroRotation, scale: oneScale)
-    setMeshInstanceVisible(scene: scene, entity: tileEntity, visible: false)
-    tiles.add(value: tileEntity)
-    broadTrunks.add(value: addHiddenProp(scene: scene, mesh: broadTrunk,
-      material: trunkMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
-    broadCrowns.add(value: addHiddenProp(scene: scene, mesh: broadCrown,
-      material: crownMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
-    tallTrunks.add(value: addHiddenProp(scene: scene, mesh: tallTrunk,
-      material: trunkMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
-    tallCrowns.add(value: addHiddenProp(scene: scene, mesh: tallCrown,
-      material: crownMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
-    rocks.add(value: addHiddenProp(scene: scene, mesh: rockMesh,
-      material: rockMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
-    bushes.add(value: addHiddenProp(scene: scene, mesh: bushMesh,
-      material: bushMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
-    flowers.add(value: addHiddenProp(scene: scene, mesh: flowerMesh,
-      material: flowerMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
-    grassA.add(value: addHiddenProp(scene: scene, mesh: grassMesh,
-      material: grassMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
-    grassB.add(value: addHiddenProp(scene: scene, mesh: grassMesh,
-      material: grassMaterial, position: origin, rotation: zeroRotation, scale: oneScale))
-    broadVisibleFlags.add(value: false)
+    let tileEntity: EntityId = gameWorldAddEntity(world: world)
+    componentSet(this: world.transforms, entity: tileEntity, data: createTransform3D())
+    componentSet(this: world.propKinds, entity: tileEntity, data: PropKind {
+      kind: kindTile, slot: slot, active: true
+    })
+    componentSet(this: world.tileMeshes, entity: tileEntity, data: TileMesh { meshId: tileMesh.id })
+
+    let treeEntity: EntityId = spawnProp(world: world, kind: kindTree, slot: slot)
+    componentSet(this: world.treeVariants, entity: treeEntity, data: TreeVariant { broad: false })
+    let unusedRock: EntityId = spawnProp(world: world, kind: kindRock, slot: slot)
+    let unusedBush: EntityId = spawnProp(world: world, kind: kindBush, slot: slot)
+    let unusedFlower: EntityId = spawnProp(world: world, kind: kindFlower, slot: slot)
+    let unusedGrassA: EntityId = spawnProp(world: world, kind: kindGrassA, slot: slot)
+    let unusedGrassB: EntityId = spawnProp(world: world, kind: kindGrassB, slot: slot)
   }
 
   var terrain: InfiniteTerrain = {
     centreCellX: 1000000000, centreCellY: 1000000000,
-    groundZ: groundZ, toon: false,
-    tileMeshIds: own tileMeshes,
+    groundZ: groundZ, toon: true,
     scratchVerts: own scratch,
-    tileEntities: own tiles,
-    broadTrunkEntities: own broadTrunks, broadCrownEntities: own broadCrowns,
-    tallTrunkEntities: own tallTrunks, tallCrownEntities: own tallCrowns,
-    rockEntities: own rocks, bushEntities: own bushes, flowerEntities: own flowers,
-    grassAEntities: own grassA, grassBEntities: own grassB,
-    materialIds: own materials,
-    broadVisible: own broadVisibleFlags,
-    rockProp: own createPropInstancer(mesh: rockMesh, materialIndex: rockMaterial,
-                                      capacity: terrainCellCount),
-    bushProp: own createPropInstancer(mesh: bushMesh, materialIndex: bushMaterial,
-                                      capacity: terrainCellCount),
-    flowerProp: own createPropInstancer(mesh: flowerMesh, materialIndex: flowerMaterial,
-                                        capacity: terrainCellCount),
-    grassProp: own createPropInstancer(mesh: grassMesh, materialIndex: grassMaterial,
-                                       capacity: terrainCellCount * 2),
-    broadTrunkProp: own createPropInstancer(mesh: broadTrunk, materialIndex: trunkMaterial,
-                                            capacity: terrainCellCount),
-    broadCrownProp: own createPropInstancer(mesh: broadCrown, materialIndex: crownMaterial,
-                                            capacity: terrainCellCount),
-    tallTrunkProp: own createPropInstancer(mesh: tallTrunk, materialIndex: trunkMaterial,
-                                           capacity: terrainCellCount),
-    tallCrownProp: own createPropInstancer(mesh: tallCrown, materialIndex: crownMaterial,
-                                           capacity: terrainCellCount)
+    rockProp: own createPropInstancer(mesh: rockMesh, material: rockMat, capacity: terrainCellCount),
+    bushProp: own createPropInstancer(mesh: bushMesh, material: bushMat, capacity: terrainCellCount),
+    flowerProp: own createPropInstancer(mesh: flowerMesh, material: flowerMat, capacity: terrainCellCount),
+    grassProp: own createPropInstancer(mesh: grassMesh, material: grassMat, capacity: terrainCellCount * 2),
+    broadTrunkProp: own createPropInstancer(mesh: broadTrunk, material: trunkMat, capacity: terrainCellCount),
+    broadCrownProp: own createPropInstancer(mesh: broadCrown, material: crownMat, capacity: terrainCellCount),
+    tallTrunkProp: own createPropInstancer(mesh: tallTrunk, material: trunkMat, capacity: terrainCellCount),
+    tallCrownProp: own createPropInstancer(mesh: tallCrown, material: crownMat, capacity: terrainCellCount)
   }
-  setInfiniteTerrainToon(terrain: terrain, scene: scene, toon: true)
   ret own terrain
 }
 
