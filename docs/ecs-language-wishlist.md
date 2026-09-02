@@ -55,14 +55,24 @@ a feature that is not already listed here.
   generically) would remove the single largest chunk of ECS boilerplate — and it is the
   ONLY thing that makes "add a component, edit nothing else" possible. `UiWorld`,
   `World3d`, and `GameWorld` are all this same pattern typed out by hand.
-  - **Spelling constraint (maintainer):** propose this as a REAL keyword or a plain
-    function/compile-time-loop, NEVER an `@`-sigil attribute (`@derive`/`@component`/
-    `@world`). `@` keywords are a second, parallel vocabulary the programmer must carry
-    alongside the real one, with no principled line (why `@derive` but not `@if`?). One
-    keyword namespace, always. Do NOT spec a language feature here with `@` syntax.
-    A one-use compiler/C-backend builtin (a bespoke `clearEntityComponents` special-case
-    in sema/c_backend) is also off the table — it's the forbidden hand-added C feature;
-    the capability must be expressible IN Rae via a general reflection/derive mechanism.
+  - **Spelling constraint (maintainer):** spec this as a REAL keyword, a plain
+    function, or a compile-time construct — NEVER an `@`-sigil attribute
+    (`@derive`/`@component`/`@world`) or the `#[...]` variant. The reasoning (fuller
+    version in AGENTS.md → "NO `@`-sigil keywords"): there is no real "metadata vs
+    logic" line to justify the sigil — the same concept is `@Override` in one language
+    and bare `override` in another, and `const`/`public` could just as well be
+    `@const`/`@public`, so the category is fake. The split is arbitrary even within one
+    language (Java sigils `@Override` but not `public`; Rust `#[derive]` but not `pub`),
+    making the programmer memorise a second, parallel vocabulary for no rule. The ONE
+    place a sigil is earned is an OPEN, user-extensible set (Python decorators, Rust
+    macros) as a namespace escape hatch — and Rae deliberately does NOT want that
+    open-macro extensibility (it fights determinism/analyzability), so it never reaches
+    the one justified case. One bare-keyword vocabulary, always.
+  - **Not a compiler builtin either.** A bespoke one-use `clearEntityComponents`
+    special-case synthesised in sema/c_backend is off the table too — that is the
+    forbidden hand-added C-backend feature for a single purpose. The capability must be
+    expressible IN Rae via a GENERAL reflection/derive mechanism (used to write
+    `createX`/`clearEntity`/`worldToJson` once, generically), not a one-off codegen path.
 - **Component registration / reflection `(partly landed #717)`.** The registry maps
   component name ↔ table + flags. Extend toward auto-registration so a component
   declares its own serialize/replicate/editor flags at definition, not in a separate
