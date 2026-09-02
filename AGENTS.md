@@ -52,6 +52,22 @@ These instructions define **how Codex should work**, communicate progress, and i
   existing occurrences are legal and do not need a sweep. Do not add new ones,
   and drop them from code you are already editing.
 
+### NO `@`-sigil keywords / attributes (strong maintainer preference):
+- Do NOT propose or add language constructs spelled with a leading `@` —
+  `@derive`, `@component`, `@world`, `@inline`, `@test`, etc. The maintainer
+  strongly dislikes them, and the objection is principled, not aesthetic:
+- An `@` keyword is a SECOND, parallel set of keywords. Where is the line? If
+  `@derive` is a keyword, why not `@if`, `@return`, `@switch`? Nothing about the
+  language forces the split — so the programmer is made to carry TWO vocabularies
+  (real keywords and `@`-keywords) and remember which words live in which set,
+  for no gain. It reads as an "additional layer" bolted onto the language.
+- If a capability genuinely needs a new keyword, add a REAL keyword — one that
+  sits in the same namespace as `func`/`type`/`if`/`loop`, chosen so it reads as
+  part of the language, not an annotation stapled on top. One vocabulary.
+- This applies to design discussion too: when suggesting a language feature
+  (e.g. compile-time field reflection / derive for ECS world helpers), describe
+  it with a real-keyword or plain-function spelling, never an `@attribute`.
+
 ---
 
 ## Project overview
