@@ -1,0 +1,94 @@
+# AnimationSystem — the locomotion clip set, the speed->clip mapping, per-clip
+# playback rate, and posing the shared skeleton into a joint palette. Split out
+# of the old character.rae + poseCharacterPalette from render.rae (#743). Also
+# holds the small character-load helpers and the camera focus heights (where the
+# camera looks on the character). Takes narrow state — a controller, or the
+# CharacterState skeleton — not the App.
+import core
+import math
+import vec3
+import scene3d
+import gpu3d
+import mesh3d
+import gltf
+import gltf_skin
+open scene3d
+open gpu3d
+open mesh3d
+open gltf
+open gltf_skin
+import app3d/character_controller
+open app3d/character_controller
+import app
+
+func uploadMeshData(m: view MeshData) ret MeshHandle {
+  ret uploadMesh(verts: m.verts, vertCount: m.vertCount, indices: m.indices)
+}
+
+# The character's locomotion clips (idle=0 … run=3). clipIndex stays an Int for
+# storage/serialisation; this enum drives the exhaustive `match`es that dispatch
+# on it, and the panel button id is just `.toString()` so no index->name table.
+enum ClipKind {
+  idle
+  walk
+  walkFast   # the walk clip at 1.6x, not a fourth asset
+  run
+}
+
+# The locomotion clip a controller's movement implies: idle when stopped, walk
+# with the walk modifier, else run. Shared by the hero and any controlled crowd
+# member (#546) so switching control does not change how movement reads.
+func locomotionClipFor(controller: view ThirdPersonController) ret Int {
+  if not controller.moving { ret ClipKind.idle as Int }
+  if controller.walking { ret ClipKind.walk as Int }
+  ret ClipKind.run as Int
+}
+
+# A deterministic, lively clip mix for the crowd (#547): each member animates
+# independently of the player, so the roster reads as distinct characters.
+func crowdClipFor(index: view Int) ret Int {
+  let pick: Int = index % 3
+  if pick is 0 { ret ClipKind.walk as Int }
+  if pick is 1 { ret ClipKind.run as Int }
+  ret ClipKind.idle as Int
+}
+
+# Playback rate for a clip: walkFast is the walk clip at 1.6x, everything else
+# plays at authored speed.
+func clipPlaybackRate(clipIndex: view Int) ret Float {
+  if clipIndex is ClipKind.walkFast { ret 1.6 }
+  ret 1.0
+}
+
+func walkerFloatAt(values: view List(Float), index: view Int) ret Float {
+  if let value: Float = values.copyAt(index: index) { ret value }
+  ret 0.0
+}
+
+func walkerIntAt(values: view List(Int), index: view Int) ret Int {
+  if let value: Int = values.copyAt(index: index) { ret value }
+  ret 0
+}
+
+# Pose the shared skeleton at a given clip + time, then extract the joint palette
+# (#547). Used to build a DISTINCT pose per crowd member — the skeleton is scratch
+# here, re-posed each call; the hero's palette is built separately, before this
+# runs, so re-posing does not disturb it.
+func poseCharacterPalette(character: mod CharacterState, clipIndex: copy Int, animTime: copy Float) ret List(Float) {
+  applySkeletonPose(sk: character.skeleton, pose: character.bindPose)
+  match clipIndex {
+    case ClipKind.idle { applyClip(sk: character.skeleton, c: character.idleClip, time: animTime) }
+    case ClipKind.walk { applyClip(sk: character.skeleton, c: character.walkClip, time: animTime) }
+    case ClipKind.walkFast { applyClip(sk: character.skeleton, c: character.walkClip, time: animTime) }
+    case ClipKind.run { applyClip(sk: character.skeleton, c: character.runClip, time: animTime) }
+  }
+  ret buildPalette(sk: character.skeleton)
+}
+
+# Where "Orbit" re-centres: THE CHARACTER'S MIDDLE, not the world floor. The
+# model is normalised to 2.0 tall on groundZ (-1.0), spanning z -1..+1, centre 0.
+const orbitFocusZ: Float = 0.0
+
+# Where the CHARACTER camera looks, relative to the controller position: the
+# head. +0.9 is eye level just under the crown — over-the-shoulder framing.
+const characterFocusZ: Float = 0.9

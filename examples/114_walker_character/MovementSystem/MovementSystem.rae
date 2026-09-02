@@ -1,0 +1,105 @@
+# MovementSystem — apply a movement intent to a controller, gate it against the
+# terrain (walk/wade), snap it to the ground, and compose its world model matrix.
+# Split out of the old character.rae (#743). Takes narrow state: a controller +
+# an InputIntent, not the App.
+import core
+import math
+import vec3
+import quat
+import world_biome
+open world_biome
+import mesh3d
+open math3d
+open mesh3d
+import app3d/character_controller
+open app3d/character_controller
+import InputSystem/InputSystem
+import TerrainSystem/TerrainSystem
+
+# Is this spot walkable ground? NOT a height test: terrainHeightAt clamps the sea
+# flat, which also makes it perfectly walkable, so a character standing on the
+# water looks like it because geometrically it is. Only the biome can tell.
+func terrainIsLand(x: view Float, y: view Float) ret Bool {
+  ret worldIsLand(x: x, y: y, cfg: defaultBiomeConfig())
+}
+
+# Can a character WALK/WADE here (#84): land, or shallow water up to waist depth.
+# This is the MOVEMENT gate — deeper water still blocks (it would need swimming),
+# while terrainIsLand stays the SPAWN test (nobody starts standing in the sea).
+func terrainWadable(x: view Float, y: view Float) ret Bool {
+  ret worldWadable(x: x, y: y, cfg: defaultBiomeConfig())
+}
+
+# How deep the water is here in WORLD units (0 on land), so splash intensity can
+# scale with it. worldWaterDepth is in elevation units; scale to world Z (#84).
+func terrainWaterDepth(x: view Float, y: view Float) ret Float {
+  ret worldWaterDepth(x: x, y: y, cfg: defaultBiomeConfig()) * worldTerrainAmplitude
+}
+
+func terrainFindLand(x: view Float, y: view Float) ret Vec3 {
+  ret worldFindLand(x: x, y: y, cfg: defaultBiomeConfig())
+}
+
+# Put a controller on the nearest land and ground it there.
+func spawnOnLand(controller: mod ThirdPersonController, groundZ: view Float) {
+  let spot: Vec3 = terrainFindLand(x: controller.position.x, y: controller.position.y)
+  controller.position.x = spot.x
+  controller.position.y = spot.y
+  groundWalker(controller: controller, groundZ: groundZ)
+}
+
+# The DEEP water is a wall, not the shoreline — a character wades into the
+# shallows (#84) and is only stopped where the sea drops off past waist depth
+# (terrainWadable). The step is taken first and undone if it ended in deep water,
+# which keeps the turn — a character walking into the drop-off still faces the way
+# you pushed, it just does not advance. Each axis is tested separately so wading
+# along the drop-off at an angle SLIDES along it instead of sticking.
+func updateWalkerMovement(controller: mod ThirdPersonController,
+                          intent: view InputIntent, cameraYaw: view Float,
+                          dt: view Float) ret Bool {
+  let fromX: Float = controller.position.x
+  let fromY: Float = controller.position.y
+  let moved: Bool = stepThirdPersonController(controller: controller,
+    inputRight: intent.moveX, inputForward: intent.moveY,
+    walking: intent.walking, cameraYaw: cameraYaw, dt: dt)
+  if moved is false { ret moved }
+  let toX: Float = controller.position.x
+  let toY: Float = controller.position.y
+  if terrainWadable(x: toX, y: toY) { ret moved }
+  if terrainWadable(x: toX, y: fromY) {
+    controller.position.y = fromY
+    ret moved
+  }
+  if terrainWadable(x: fromX, y: toY) {
+    controller.position.x = fromX
+    ret moved
+  }
+  controller.position.x = fromX
+  controller.position.y = fromY
+  ret moved
+}
+
+# Blender is Z-up but does not mandate one object-facing axis. This asset's
+# authored front becomes -Y after the glTF Y-up -> Rae Z-up conversion, while
+# Rae gameplay forward is +Y. Correct that at the asset-placement boundary.
+const walkerFacingCorrection: Float = 3.141592653589793
+
+func walkerWorldModel(baseModel: view Mat4,
+                      controller: view ThirdPersonController) ret Mat4 {
+  let worldTranslation: Mat4 = mat4Translate(
+    x: controller.position.x, y: controller.position.y, z: controller.position.z)
+  # #745: heading -> quat rotation about Z (not a Euler axis matrix).
+  let worldHeading: Mat4 = quat.toMat4(q: quat.fromAxisAngle(
+    axis: vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: controller.heading + walkerFacingCorrection))
+  ret mat4Mul(a: worldTranslation,
+                 b: mat4Mul(a: worldHeading, b: baseModel))
+}
+
+# The character's walk ray: sample the terrain height field straight down at the
+# character's x/y and stand on the hit. The field is analytic (TerrainSystem's
+# terrainHeightAt), so the raycast is one function call. position.z is the DELTA
+# above the flat groundZ baked into the model's base transform.
+func groundWalker(controller: mod ThirdPersonController, groundZ: view Float) {
+  controller.position.z = terrainHeightAt(
+    x: controller.position.x, y: controller.position.y, groundZ: groundZ) - groundZ
+}

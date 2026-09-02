@@ -75,6 +75,20 @@ a feature that is not already listed here.
   named `World3d` would collide with `lib/scene3d` for any file importing both. Being
   able to say `scene3d.World3d` vs `ui.Scene` (types, not just functions) would let two
   domains keep the natural name.
+- **Cyclic imports across modules `(landed #743)`.** The loader rejected any import
+  cycle, which would have forced a shared "types" dumping ground or dependency inversion
+  to fold mutually-referential ECS systems. Since Rae merges every module into one unit
+  before sema, cycles are safe; the loader now allows them.
+- **Real module encapsulation for project files.** The deeper #743 finding: Rae
+  auto-scans *every* `.rae` file under the project root into ONE compile + visibility
+  unit, so moving a system into a `FooSystem/` folder does NOT create an import wall —
+  every project file still sees every other, no `import` needed. Folders are namespaces
+  for *organisation*, not encapsulation. That is why the App/system coupling was a
+  PARAMETER-level problem (systems taking the God-object `App`), fixable by passing narrow
+  state — the module system neither caused nor cured it. To make a system's dependencies
+  *enforced* (it can name only what it imports), Rae would need opt-in module
+  encapsulation (e.g. a package that is NOT auto-opened to siblings). Without it, "clean
+  module boundaries" for an in-project ECS live only in discipline, not the compiler.
 
 ## Iteration-order & lifecycle guarantees
 
