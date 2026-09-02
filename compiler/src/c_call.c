@@ -645,9 +645,13 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                             && !str_eq_cstr(pbase, "Any")) || concrete_is_num_prim;
                         bool view_is_value = is_num_prim
                             && sp->type->is_view && !sp->type->is_mod;
-                        if (is_primitive_type(pbase)
-                            && !str_eq_cstr(pbase, "Buffer")
-                            && !str_eq_cstr(pbase, "Any")
+                        // #758: use the CONCRETE base (T resolved) so a generic
+                        // `view T`(=String) arg is scheduled for the ref-wrapper
+                        // path (rae_View_String), not the raw &(T){...} address-of
+                        // that only fits a struct pointer.
+                        if (is_primitive_type(pbase_concrete)
+                            && !str_eq_cstr(pbase_concrete, "Buffer")
+                            && !str_eq_cstr(pbase_concrete, "Any")
                             && !view_is_value) {
                             int slot = wrap_count++;
                             wrap_idx[ai] = slot;
@@ -679,7 +683,12 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             int ai = 0;
             while (sa) {
                 if (ai < RAE_MAX_PRIM_WRAP && wrap_idx[ai] >= 0) {
-                    emit_type_ref_as_c_type(ctx, sp->type, out, true);
+                    // #758: emit the CONCRETE element type (T resolved), so a
+                    // generic `view T`(=String) temp is `rae_String`, not `rae_T`.
+                    const AstTypeRef* spt = sp->type;
+                    if (fd->generic_params && concrete)
+                        spt = substitute_type_ref(ctx->compiler_ctx, fd->generic_params, concrete, sp->type);
+                    emit_type_ref_as_c_type(ctx, spt, out, true);
                     fprintf(out, " __rae_pw_%d = ", wrap_base + wrap_idx[ai]);
                     emit_expr(ctx, sa->value, out, PREC_LOWEST, false, false);
                     fprintf(out, "; ");
@@ -887,9 +896,15 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             bool use_hoisted_temp = use_se_wrap
                 && arg_index < RAE_MAX_PRIM_WRAP
                 && wrap_idx[arg_index] >= 0;
+            // #758: the ref-wrapper cast is the param type spelled at the CALL
+            // site with the caller's ctx, which cannot resolve the CALLEE's
+            // generic T — substitute it to the concrete element type first.
+            const AstTypeRef* wrap_pt = p ? p->type : NULL;
+            if (wrap_pt && fd->generic_params && concrete)
+                wrap_pt = substitute_type_ref(ctx->compiler_ctx, fd->generic_params, concrete, p->type);
             if (use_hoisted_temp) {
                 fprintf(out, "(");
-                emit_type_ref_as_c_type(ctx, p->type, out, false);
+                emit_type_ref_as_c_type(ctx, wrap_pt, out, false);
                 fprintf(out, "){ .ptr = &__rae_pw_%d }",
                         wrap_base + wrap_idx[arg_index]);
                 // Fall through to the suffix bookkeeping at the end
@@ -897,8 +912,8 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 // prim_wrap / pool_take / box / emit_expr path.
                 needs_prim_wrap = false;
             } else if (needs_prim_wrap) {
-                fprintf(out, "("); emit_type_ref_as_c_type(ctx, p->type, out, false);
-                fprintf(out, "){ .ptr = ("); emit_type_ref_as_c_type(ctx, p->type, out, true); fprintf(out, "[]){");
+                fprintf(out, "("); emit_type_ref_as_c_type(ctx, wrap_pt, out, false);
+                fprintf(out, "){ .ptr = ("); emit_type_ref_as_c_type(ctx, wrap_pt, out, true); fprintf(out, "[]){");
             }
             bool had_exp = ctx->has_expected_type; AstTypeRef saved_exp = ctx->expected_type;
             if (p && p->type) {
@@ -1200,8 +1215,15 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 // for `view` (read-only); `mod` args are lvalue places by sema.
                 AstTypeRef base = *p->type;
                 base.is_view = false; base.is_mod = false; base.is_opt = false; base.next = NULL;
+                // #758: specialise a generic param (`&(T){...}` -> `&(Struct){...}`)
+                // so the compound-literal type is the concrete element type, not
+                // the undeclared template placeholder `rae_T`.
+                const AstTypeRef* base_emit = &base;
+                if (fd->generic_params && concrete) {
+                    base_emit = substitute_type_ref(ctx->compiler_ctx, fd->generic_params, concrete, &base);
+                }
                 fprintf(out, "&(");
-                emit_type_ref_as_c_type(ctx, &base, out, false);
+                emit_type_ref_as_c_type(ctx, base_emit, out, false);
                 fprintf(out, "){");
                 emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
                 fprintf(out, "}");
