@@ -1,0 +1,35 @@
+# #767: a synthesized fromJson must round-trip enum fields. toJson writes the
+# enum member NAME; fromJson maps the name back to the ordinal.
+enum Dir { up down left right }
+enum Kind { alpha beta gamma }
+type Cell { d: Dir, n: Int }
+type Multi { first: Dir, mid: Int, last: Kind, name: String }
+
+func check(label: view String, ok: copy Bool) {
+  if ok { log("{label}: ok") } else { log("{label}: FAIL") }
+}
+
+# round a Dir through a struct's toJson/fromJson and hand back the decoded enum
+func roundDir(d: copy Dir) ret Dir {
+  let c: Cell = { d: d, n: 1 }
+  let back: Cell = Cell.fromJson(json: c.toJson())
+  ret back.d
+}
+
+func main() {
+  let sample: Cell = { d: Dir.left, n: 42 }
+  log("cell json: {sample.toJson()}")
+  check(label: "up", ok: roundDir(d: Dir.up) is Dir.up)
+  check(label: "down", ok: roundDir(d: Dir.down) is Dir.down)
+  check(label: "left", ok: roundDir(d: Dir.left) is Dir.left)
+  check(label: "right", ok: roundDir(d: Dir.right) is Dir.right)
+
+  # a richer struct: enum first AND last, with int + string between
+  let m: Multi = { first: Dir.right, mid: 9, last: Kind.gamma, name: "hi" }
+  log("multi json: {m.toJson()}")
+  let mb: Multi = Multi.fromJson(json: m.toJson())
+  check(label: "multi.first", ok: mb.first is Dir.right)
+  check(label: "multi.mid", ok: mb.mid is 9)
+  check(label: "multi.last", ok: mb.last is Kind.gamma)
+  check(label: "multi.name", ok: mb.name is "hi")
+}
