@@ -4,9 +4,10 @@ open ecs/component_table
 open ecs/hierarchy
 open ecs/HierarchySystem/HierarchySystem
 
-# #711: Parent is authoritative, Children is a DERIVED cache. Callers only ever
-# call setParent — never touch a Children list. This checks that add / reparent /
-# detach and rebuildFromParent keep Children consistent with Parent.
+# #711/#769: Children (ordered) is authoritative, Parent is the DERIVED reverse
+# index. Callers only ever call setParent/insertChild — never touch a Children
+# list. This checks that add / reparent / detach keep the two in lock-step and
+# that rebuildParentsFromChildren restores Parent from Children alone.
 
 func printKids(childrens: view ComponentTable(Children), entity: view EntityId, label: view String) {
   let kids: List(EntityId) = getChildren(childrens: childrens, parent: entity)
@@ -57,11 +58,17 @@ func main() {
   printKids(childrens: childrens, entity: pA, label: "pA kids after detach")
   printParent(parents: parents, child: c1, label: "c1 parent")
 
-  # rebuildFromParent: Children cleared and rebuilt from the Parent table alone.
-  # Live Parents now: c3->pA, c2->pB.
-  rebuildFromParent(parents: parents, childrens: childrens)
+  # rebuildParentsFromChildren: wipe the derived Parent index by hand (as a
+  # snapshot reload would leave it), then rebuild it from Children alone.
+  # Live Children now: pA -> [c3], pB -> [c2].
+  componentRemove(this: parents, entity: c3)
+  componentRemove(this: parents, entity: c2)
+  printParent(parents: parents, child: c3, label: "c3 parent before rebuild")
+  rebuildParentsFromChildren(parents: parents, childrens: childrens)
   printKids(childrens: childrens, entity: pA, label: "pA kids after rebuild")
   printKids(childrens: childrens, entity: pB, label: "pB kids after rebuild")
+  printParent(parents: parents, child: c3, label: "c3 parent after rebuild")
+  printParent(parents: parents, child: c2, label: "c2 parent after rebuild")
 
   # getChildren returns a copy: mutating it must not touch the cache.
   let snapshot: List(EntityId) = getChildren(childrens: childrens, parent: pA)
