@@ -1,6 +1,6 @@
 # Compile-time reflection: iterating a struct's fields
 
-**Status:** design, not implemented. Supersedes the rejected `clearEntityComponents`
+**Status:** design, queued as #772 (v1) / #773 (generic W) / #760 (first consumer). Supersedes the rejected `clearEntityComponents`
 compiler builtin (queue #760) and the vague "derive/reflection" bullet in
 `docs/ecs-language-wishlist.md`. See that file for the rules this design obeys.
 
@@ -90,11 +90,15 @@ loop let field: view any in fields(world) { ... }
 ```
 
 `any` is the **one new keyword**: the compile-time type wildcard, legal only inside
-a type pattern. It is distinct from the existing type `Any` (the runtime
-dynamic-value box). The case-only difference is a known footgun; it is accepted
-because the two never occur in the same position (`any` appears only inside a type
-pattern) and it is short with no special characters. A different short word is the
-fallback if this proves confusing.
+a type pattern. It is deliberately NOT the existing type `Any`, and the two cannot be
+merged: `Any` is the *runtime* dynamic-value box (`RaeAny` — `log(value: Any)`,
+`Buffer(Any)`, `List2` elements), so `ComponentTable(Any)` is *already* a legal
+concrete type today meaning "a table of dynamic boxes". Reusing it in a pattern would
+make `loop let t: ComponentTable(Any) in fields(world)` ambiguous between "only fields
+of that exact concrete type" and "tables of any element type". Hence: `Any` = runtime
+box (a value exists), `any` = compile-time wildcard (no value, only a pattern).
+Lowercase `any` is reserved as a keyword outright; no project code uses it as an
+identifier. (Decided 2026-09-02.)
 
 For dispatch over several field kinds, `match` keeps its existing shape:
 
@@ -223,7 +227,6 @@ single helper.
 
 ## Open questions
 
-- `any` vs `Any` case collision — accept, or pick a different short wildcard word?
 - Does a field binding need `match` over its type, or is the binding-type filter
   enough in practice? (Start with the filter only; add `match` if a real need appears.)
 - Construction via `fields(Type)`: how the loop body assembles the struct literal
