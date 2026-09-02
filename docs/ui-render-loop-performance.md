@@ -4,6 +4,10 @@ A postmortem of the work that took `examples/98_mobile_ui` from a janky
 8–34 fps to fluid, near-perfect rendering. Two independent root causes,
 several red herrings, and one durable architectural lesson.
 
+> The UI runs on the ECS core described in `ecs-api-reference.md` (systems over
+> `lib/ecs` component tables, `depthOrder` for linear hierarchy iteration). The
+> per-frame O(n) discipline below is exactly what keeps those systems cheap.
+
 ## The headline lesson
 
 > **A wait-based (event-driven) loop cannot reliably drive smooth
