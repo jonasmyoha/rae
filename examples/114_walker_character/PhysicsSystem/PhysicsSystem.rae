@@ -59,8 +59,10 @@ func spawnPhysicsBody(world: mod GameWorld, position: view Vec3, velocity: view 
 # Despawn a physics body: drop its components first (so a recycled index can
 # never read stale body/transform data), then free the entity slot.
 func despawnPhysicsBody(world: mod GameWorld, entity: view EntityId) {
-  componentRemove(this: world.physicsBodies, entity: entity)
-  componentRemove(this: world.transforms, entity: entity)
+  # #760: one generic reflection sweep clears the body's row from every table
+  # (physicsBodies, transforms, and any future one) so a recycled index reads no
+  # stale data; then free the slot. Replaces the hand-listed per-table removes.
+  clearEntityComponents(world: world, entity: entity)
   freeEntity(this: world.allocator, entity: entity)
 }
 

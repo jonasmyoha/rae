@@ -29,6 +29,7 @@
 # skips it and it is rebuilt at runtime. Full write-up: docs/ecs-resources.md.
 import core
 open ecs/entity
+open ecs/component_table
 import ecs/list_helpers
 
 type EntityAllocator {
@@ -130,4 +131,20 @@ func allocatorIsAlive(this: view EntityAllocator, entity: view EntityId) ret Boo
 # How many entities are currently alive (the dense set's length).
 func allocatorAliveCount(this: view EntityAllocator) ret Int {
   ret this.alive.length
+}
+
+# Remove `entity` from EVERY component table of `world` in one call — the
+# generic, reflection-driven replacement for a hand-listed per-table
+# `componentRemove` sweep (#760). `fields(world)` unrolls at compile time to one
+# `componentRemove` per `ComponentTable` field (docs/compile-time-reflection.md);
+# non-table fields (the allocator, hierarchy-order caches, resources) are skipped
+# by the `ComponentTable(any)` filter. Generic over the World type, so ONE
+# definition serves every world (UiWorld, World3d, GameWorld). It does NOT free
+# the entity or detach hierarchy links — the caller keeps that explicit
+# (destroyEntity, per-system despawn helpers), because those are lifecycle /
+# referential-integrity concerns, not "drop this entity's rows".
+func clearEntityComponents(W: type, world: mod W, entity: view EntityId) {
+  loop let table: mod ComponentTable(any) in fields(world) {
+    componentRemove(this: table, entity: entity)
+  }
 }
