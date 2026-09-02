@@ -183,14 +183,19 @@ ignore generations; games rely on them.
 - Delete the duplicate `Vec2` (`components.rae:126`); use `lib/vec2.rae`.
 - No artificial `x`/`y`/`z` members where a `Vec2`/`Vec3` says it.
 
-### 2.4 Transform & hierarchy — `Parent` authoritative, `Children` derived
+### 2.4 Transform & hierarchy — `Children` authoritative (ordered), `Parent` derived
 - Components: `Transform2D`, `Transform3D`, `Parent { parent: EntityId }`,
   `Children { ids: List(EntityId) }`. No separate `Hierarchy` component (nothing
   in the investigation justifies one).
-- **`HierarchySystem/` owns parent/child.** `Parent` is authoritative and
-  author-set; `Children` is a **derived cache the system rebuilds/maintains** from
-  the `Parent` edges. Game code sets `Parent` only; it never hand-maintains both
-  sides (today the UI stores both and warns they can desync — `ecs.rae:798-804`).
+- **`HierarchySystem/` owns parent/child.** `Children` (the ordered child list)
+  is authoritative and is what persists; `Parent` is a **derived reverse index the
+  system maintains** and rebuilds (`rebuildParentsFromChildren`). Flipped from the
+  original Parent-authoritative plan in #769: sibling ORDER is real layout/paint
+  information that lives only in `Children`, and component tables are swap-remove,
+  so a Parent-driven rebuild would scramble siblings after any destroy. Game code
+  never edits either table by hand: `setParent` (append) and `insertChild`
+  (explicit index) are the only mutation entries (the pre-ECS UI stored both and
+  warned they could desync — `ecs.rae:798-804`).
   `HierarchySystem` also enforces referential integrity: on destroy it repairs
   dangling `Parent`/`Children` edges (the gap at `ecs.rae:798-804`).
 - **`TransformSystem/` owns transform processing.** It composes local
@@ -367,7 +372,7 @@ Ordered by leverage; each is a library/ECS change, **no language change**:
    (`ecs.rae:7`, `:615`, `:624`).
 3. **Multi-component query** (`query2`/`query3`, smallest-table probe) in
    `lib/ecs` — removes the `componentHas` ladders and the parallel-array joins.
-4. **`HierarchySystem`** owning `Parent`(authoritative)/`Children`(derived) with
+4. **`HierarchySystem`** owning `Children`(authoritative, ordered)/`Parent`(derived) with
    referential-integrity on destroy — fixes the desync + dangling-ref gap
    (`ecs.rae:798-804`).
 5. **`TransformSystem`** producing derived world transforms over a depth-sorted
