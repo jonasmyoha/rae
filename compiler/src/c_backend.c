@@ -1755,6 +1755,17 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
                   (long long)idx++, (int)m->name.len, m->name.data, (int)m->name.len);
           }
           fprintf(out, "  }\n  return (rae_String){(uint8_t*)\"\", 0};\n}\n");
+          // Reverse map (member NAME -> ordinal) so a synthesized fromJson can
+          // round-trip an enum field the toJson wrote by name (#767). Unknown
+          // names fall back to 0 (the first member).
+          fprintf(out, "RAE_UNUSED static int64_t rae_enum_fromString_%.*s(rae_String s) {\n",
+              (int)d->as.enum_decl.name.len, d->as.enum_decl.name.data);
+          idx = 0;
+          for (const AstEnumMember* m = d->as.enum_decl.members; m; m = m->next) {
+              fprintf(out, "  if (s.len == %d && memcmp(s.data, \"%.*s\", %d) == 0) return %lldLL;\n",
+                  (int)m->name.len, (int)m->name.len, m->name.data, (int)m->name.len, (long long)idx++);
+          }
+          fprintf(out, "  return 0;\n}\n");
           fprintf(out, "\n");
       }
   }
@@ -1986,6 +1997,11 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           } else if (str_eq_cstr(base, "Bool")) {
               fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": %%s\", this->%.*s ? \"true\" : \"false\");\n",
                   (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+          } else if (find_enum_decl(NULL, module, base)) {
+              // #767: an enum field serializes as its member NAME string, so
+              // fromJson can round-trip it (was the "...": placeholder below).
+              fprintf(out, "  { rae_String __e = rae_enum_toString_%.*s((int64_t)this->%.*s); __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": \\\"%%.*s\\\"\", (int)__e.len, (char*)__e.data); }\n",
+                  (int)base.len, base.data, (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
           } else {
               fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": ...\");\n",
                   (int)f->name.len, f->name.data);
@@ -2031,6 +2047,12 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           } else if (str_eq_cstr(base, "Bool")) {
               fprintf(out, "  __r.%.*s = rae_json_extract_bool(json, \"%.*s\");\n",
                   (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+          } else if (find_enum_decl(NULL, module, base)) {
+              // #767: parse the member name string toJson wrote back to its
+              // ordinal. Free the extracted temp (it is malloc'd + mem-tagged) so
+              // the leak-gated tests stay at outstanding=0.
+              fprintf(out, "  { rae_String __s = rae_json_extract_string(json, \"%.*s\"); __r.%.*s = rae_enum_fromString_%.*s(__s); rae_ext_rae_str_free(__s); }\n",
+                  (int)f->name.len, f->name.data, (int)f->name.len, f->name.data, (int)base.len, base.data);
           }
       }
       fprintf(out, "  return __r;\n}\n\n");
