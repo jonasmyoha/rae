@@ -55,6 +55,16 @@ a feature that is not already listed here.
   generically) would remove the single largest chunk of ECS boilerplate — and it is the
   ONLY thing that makes "add a component, edit nothing else" possible. `UiWorld`,
   `World3d`, and `GameWorld` are all this same pattern typed out by hand.
+  - **Design chosen → `docs/compile-time-reflection.md`.** Reuse the existing
+    collection loop with a compile-time sequence after `in`, unrolled by the compiler;
+    the binding's explicit type is the field filter, `any` the type wildcard, and slot
+    metadata is a compile-time plain function: `loop let table: mod ComponentTable(any)
+    in fields(world) { componentRemove(this: table, entity: entity) }`,
+    `fieldName(table)`, `fields(UiWorld)` for the type. Rule: all reflection data is a
+    compile-time plain function called with parens (UFCS `world.fields()` is fine) —
+    never a phantom member like `world.fields` / `table.fieldName`. Parser unchanged;
+    sema dispatches on the iterable; codegen unrolls. Not `#run`, not runtime type
+    info, not attributes. Status: design only, not implemented.
   - **Spelling constraint (maintainer):** spec this as a REAL keyword, a plain
     function, or a compile-time construct — NEVER an `@`-sigil attribute
     (`@derive`/`@component`/`@world`) or the `#[...]` variant. The reasoning (fuller
@@ -127,9 +137,10 @@ a feature that is not already listed here.
   `freeEntity`, per site (net/physics seams #746). Forget one table and a recycled index
   reads stale data. A structural op that, given the world's registered component set,
   removes an entity from *all* its tables in one call (and ideally detaches hierarchy
-  links) would make despawn safe by default. Needs the component registry (#717) to
-  enumerate tables — the same reflection that "synthesize a world from its component set"
-  wants.
+  links) would make despawn safe by default. This is exactly the first worked example in
+  `docs/compile-time-reflection.md` (`clearEntityComponents` as a
+  `loop let table: mod ComponentTable(any) in fields(world)`); it does NOT need the
+  registry to enumerate tables — the compiler does, from the world's fields.
 
 ## Systems & scheduling
 
