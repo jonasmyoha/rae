@@ -287,16 +287,23 @@ for TARGET in "${TARGETS[@]}"; do
     fi
 
     if [ $SKIP_EXEC -eq 0 ]; then
-        # Leak-class tests (43[1-9]_*) opt into RAE_MEM_STATS=1 so the
-        # mem_stats_outstanding native returns real counts. Without
-        # this the native is a 0-stub in Live mode (and reads zero in
-        # Compiled mode too since RAE_MEM_STATS gates the side-hash),
-        # so leak regressions silently pass. The atexit dump lines
-        # are filtered out before stdout comparison so the expected.txt
-        # stays simple.
+        # Leak-class tests that CALL the mem_stats native opt into
+        # RAE_MEM_STATS=1 so `rae_ext_rae_mem_stats_outstanding()` returns real
+        # counts. Without this the native is a 0-stub in Live mode (and reads
+        # zero in Compiled mode too since RAE_MEM_STATS gates the side-hash), so
+        # those leak regressions silently pass. The atexit dump lines are
+        # filtered out before stdout comparison so the expected.txt stays simple.
+        #
+        # #775: the mem-stats side-hash is per-allocation bookkeeping that itself
+        # grows RSS. The RSS-based leak tests (431/432/433 measure processRssKb,
+        # they do NOT call the native) must therefore run WITHOUT it — with
+        # RAE_MEM_STATS=1 their RSS reading is dominated by the tracker's own
+        # growth (432 flaked: ~0 KB growth clean vs up to ~2.9 MB against its
+        # 3 MB bound under the tracker). Excluding them measures the real program
+        # and is deterministic; they keep their own RSS-threshold leak check.
         ENABLE_MEM_STATS=0
         case "$TEST_NAME" in
-            43[1-9]_*|449_*|542_*|543_*|545_*|666_*|712_*) ENABLE_MEM_STATS=1 ;;
+            43[4-9]_*|449_*|542_*|543_*|545_*|666_*|712_*) ENABLE_MEM_STATS=1 ;;
         esac
         # For parse/lex/format, we want to capture both stdout and stderr to see errors + any partial results
         if [[ "${CMD_ARGS[0]}" =~ ^(parse|lex|format)$ ]]; then
