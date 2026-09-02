@@ -344,7 +344,18 @@ void discover_specializations_module(CompilerContext* ctx, const AstModule* modu
                     fctx.local_count++;
                 }
             }
-            if (f->body) discover_specializations_stmt_impl(&fctx, f->body->first);
+            // #773: if this specialization is a generic field-reflection helper
+            // (`loop ... in fields(world)`), the concrete per-field calls
+            // (componentRemove(ComponentTable(Int)), ...) only appear AFTER the
+            // loop is expanded for this concrete W. Discover against the
+            // instantiated body so those inner specializations get registered
+            // (and thus forward-declared) — otherwise the emitted body calls
+            // functions that were never prototyped. Inert for every other
+            // function (reflect_instantiate_body returns NULL).
+            const AstBlock* disc_body = f->body;
+            AstBlock* inst = reflect_instantiate_body(ctx, module, f->body, f->params, disc_gp, args);
+            if (inst) disc_body = inst;
+            if (disc_body) discover_specializations_stmt_impl(&fctx, disc_body->first);
         }
         discovered = limit;
     }
