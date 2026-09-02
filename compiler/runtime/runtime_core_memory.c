@@ -362,6 +362,16 @@ int64_t rae_ext_rae_mem_stats_outstanding(void) {
   return total;
 }
 
+/* #761: count frees of pointers that were NOT tracked at alloc time — the
+ * signature of freeing a String produced by an untagged allocator (the toJson
+ * over-free was such: an untagged heap freed once via a local drop shows here,
+ * NOT in _outstanding, which deliberately skips UNKNOWN). A clean program frees
+ * only what it tagged, so this stays flat. */
+int64_t rae_ext_rae_mem_stats_unknown_frees(void) {
+  if (!g_mem_stats_enabled) return 0;
+  return g_mem_site_free_n[RAE_SITE_UNKNOWN];
+}
+
 /* Total heap allocations made through Rae semantics since process start:
  * String bodies plus List/Buffer storage (allocs and resizes both count —
  * a growing list reallocates, and that is an allocation).
