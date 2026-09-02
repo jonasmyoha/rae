@@ -15,6 +15,19 @@ import profile
 import gpu2d
 import sdf_text
 import vec3
+import quat
+import ecs/entity
+import ecs/component_table
+import ecs/transform
+import ecs/hierarchy
+import ecs/HierarchySystem/HierarchySystem
+import ecs/TransformSystem/TransformSystem
+open ecs/entity
+open ecs/component_table
+open ecs/transform
+open ecs/hierarchy
+open ecs/HierarchySystem/HierarchySystem
+open ecs/TransformSystem/TransformSystem
 import gltf
 import gltf_skin
 import png
@@ -82,11 +95,71 @@ open ui/InputSystem/InputSystem
 open ui/RenderSystem/RenderSystem
 
 # Camera rig + camera + scene light. (#548)
+# #744: `rigEntity` and `camEntity` are the two GameWorld entities that express
+# the rig as an ECS PARENT relation — camEntity is a child of rigEntity. The rig
+# sits at the focus target oriented by yaw/pitch; the camera hangs a fixed
+# distance behind it. TransformSystem composes the child's world position, which
+# IS the camera eye — replacing the hand-rolled orbitEye trig in applyCameraRig.
 type CameraState {
   camera: Camera3d
   rig: CameraRig
   light: Light3d
   hosek: HosekDataset
+  rigEntity: EntityId
+  camEntity: EntityId
+}
+
+# The two entity ids of the rig->camera relation. Rae has no lightweight tuple
+# (see docs/ecs-language-wishlist.md), so a named 2-field carrier hands both ids
+# back from setup to the CameraState literal.
+type CameraRigLink {
+  rigEntity: EntityId
+  camEntity: EntityId
+}
+
+# Create the rig->camera parent relation in the world (call once, at setup).
+# Both entities carry an identity local Transform3D to start; applyCameraRig-
+# Hierarchy rewrites them each frame from the CameraRig's view state.
+func createCameraRigLink(world: mod GameWorld) ret CameraRigLink {
+  let rigEntity: EntityId = gameWorldAddEntity(world: world)
+  let camEntity: EntityId = gameWorldAddEntity(world: world)
+  componentSet(this: world.transforms, entity: rigEntity, data: createTransform3D())
+  componentSet(this: world.transforms, entity: camEntity, data: createTransform3D())
+  setParent(parents: world.parents, childrens: world.childrens, child: camEntity, parent: rigEntity)
+  ret CameraRigLink { rigEntity: rigEntity, camEntity: camEntity }
+}
+
+# Resolve the camera eye from the rig->camera hierarchy, replacing applyCameraRig.
+# Non-free modes: place rigEntity at the focus target, rotated by yaw then -pitch
+# (matching orbitEye: eye = target + Rz(yaw)*Rx(-pitch)*(0,-distance,0)); the
+# camEntity's local offset is (0, -distance, 0). TransformSystem folds child onto
+# parent, and the composed world translation IS the eye. Free mode has no orbit
+# rig, so it keeps the direct fly-camera placement.
+func applyCameraRigHierarchy(app: mod App) {
+  if app.cam.rig.mode is not CameraRigMode.free {
+    let qz: Quat = quat.fromAxisAngle(axis: vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: app.cam.rig.viewYaw)
+    let qx: Quat = quat.fromAxisAngle(axis: vec3.create(x: 1.0, y: 0.0, z: 0.0), angle: 0.0 - app.cam.rig.viewOrbitPitch)
+    componentSet(this: app.world.transforms, entity: app.cam.rigEntity, data: Transform3D {
+      position: app.cam.camera.target,
+      rotation: quat.qmul(a: qz, b: qx),
+      scale: vec3.create(x: 1.0, y: 1.0, z: 1.0)
+    })
+    componentSet(this: app.world.transforms, entity: app.cam.camEntity, data: Transform3D {
+      position: vec3.create(x: 0.0, y: 0.0 - app.cam.rig.viewDistance, z: 0.0),
+      rotation: quat.identity(),
+      scale: vec3.create(x: 1.0, y: 1.0, z: 1.0)
+    })
+    transformSystem3D(orderState: app.world.hierarchyOrder,
+      transforms: app.world.transforms, worldTransforms: app.world.worldTransforms,
+      parents: app.world.parents, childrens: app.world.childrens)
+    let camWorld: WorldTransform3D = componentGet(this: app.world.worldTransforms, entity: app.cam.camEntity)
+    app.cam.camera.position = vec3.create(
+      x: camWorld.matrix.m[12], y: camWorld.matrix.m[13], z: camWorld.matrix.m[14])
+  } else {
+    let forward: Vec3 = cameraRigForward(rig: app.cam.rig)
+    app.cam.camera.position = app.cam.rig.viewPosition
+    app.cam.camera.target = vec3.vadd(a: app.cam.camera.position, b: forward)
+  }
 }
 
 # What a camera tick reports: the touch stick's active state (used by character
