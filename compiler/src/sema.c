@@ -1546,7 +1546,329 @@ static bool sema_pattern_names_member(const AstExpr* pat, Str enum_name, Str mem
         && str_eq(pat->as.member.member, member);
 }
 
+/* ===== Compile-time field reflection (#772) =================================
+ *
+ * `loop let x: <mode> T in fields(value) { body }` iterates the FIELDS of a
+ * struct value at compile time. It is not a runtime loop: sema unrolls it into
+ * one scoped copy of `body` per matching field, with `x` bound as an alias to
+ * `value.<field>`, and folds `fieldName(x)` to that field's name as a String
+ * literal. The unrolled form is ordinary AST, so BOTH backends emit it with no
+ * special case (docs/compile-time-reflection.md).
+ *
+ * The binding's explicit type is the FILTER: `ComponentTable(any)` matches every
+ * ComponentTable field regardless of element type; a concrete `ComponentTable(T)`
+ * matches only that one; `any` alone matches every field. `any` is the wildcard.
+ */
+
+// Last identifier part's text — the base type name ("ComponentTable", "any").
+static Str reflect_base_name(const AstTypeRef* tr) {
+    Str empty = { .data = NULL, .len = 0 };
+    if (!tr || !tr->parts) return empty;
+    const AstIdentifierPart* p = tr->parts;
+    while (p->next) p = p->next;
+    return p->text;
+}
+
+// The wildcard is exactly `any` with no generic arguments.
+static bool reflect_is_wildcard(const AstTypeRef* tr) {
+    return tr && !tr->generic_args && str_eq_cstr(reflect_base_name(tr), "any");
+}
+
+// Structural match of a binding-type PATTERN against a concrete FIELD type,
+// ignoring reference modes (view/mod/opt) on both. `any` in the pattern (at any
+// depth) is a wildcard. Names must otherwise be equal and generic arguments
+// must match pairwise.
+static bool reflect_type_matches(const AstTypeRef* pattern, const AstTypeRef* field) {
+    if (!pattern || !field) return false;
+    if (reflect_is_wildcard(pattern)) return true;
+    if (!str_eq(reflect_base_name(pattern), reflect_base_name(field))) return false;
+    const AstTypeRef* pa = pattern->generic_args;
+    const AstTypeRef* fa = field->generic_args;
+    while (pa && fa) {
+        if (pa->is_value_arg || fa->is_value_arg) {
+            // Value generic args (`cap: N`) don't occur in ComponentTable
+            // patterns; be conservative and require both to be value args of
+            // the same name. Numeric equality is out of scope for v1.
+            if (!(pa->is_value_arg && fa->is_value_arg && str_eq(pa->value_name, fa->value_name)))
+                return false;
+        } else if (!reflect_type_matches(pa, fa)) {
+            return false;
+        }
+        pa = pa->next; fa = fa->next;
+    }
+    return pa == NULL && fa == NULL;
+}
+
+// Is `e` the reflection call `fieldName(binding)` or `binding.fieldName()`?
+static bool reflect_is_field_name_call(const AstExpr* e, Str binding) {
+    if (!e) return false;
+    if (e->kind == AST_EXPR_CALL && e->as.call.callee
+        && e->as.call.callee->kind == AST_EXPR_IDENT
+        && str_eq_cstr(e->as.call.callee->as.ident, "fieldName")
+        && e->as.call.args && !e->as.call.args->next
+        && e->as.call.args->name.len == 0
+        && e->as.call.args->value
+        && e->as.call.args->value->kind == AST_EXPR_IDENT
+        && str_eq(e->as.call.args->value->as.ident, binding)) {
+        return true;
+    }
+    if (e->kind == AST_EXPR_METHOD_CALL
+        && str_eq_cstr(e->as.method_call.method_name, "fieldName")
+        && !e->as.method_call.args
+        && e->as.method_call.object
+        && e->as.method_call.object->kind == AST_EXPR_IDENT
+        && str_eq(e->as.method_call.object->as.ident, binding)) {
+        return true;
+    }
+    return false;
+}
+
+static void reflect_fold_field_name_block(AstBlock* block, Str binding, Str field_name);
+
+// Rewrite every `fieldName(binding)` inside `e` (in place) to the String literal
+// `field_name`, recursing through the whole expression tree.
+static void reflect_fold_field_name_expr(AstExpr* e, Str binding, Str field_name) {
+    if (!e) return;
+    if (reflect_is_field_name_call(e, binding)) {
+        e->kind = AST_EXPR_STRING;
+        e->as.string_lit = field_name;
+        e->resolved_type = NULL;
+        e->decl_link = NULL;
+        return;
+    }
+    switch (e->kind) {
+        case AST_EXPR_BINARY:
+            reflect_fold_field_name_expr(e->as.binary.lhs, binding, field_name);
+            reflect_fold_field_name_expr(e->as.binary.rhs, binding, field_name);
+            break;
+        case AST_EXPR_UNARY:
+            reflect_fold_field_name_expr(e->as.unary.operand, binding, field_name);
+            break;
+        case AST_EXPR_CAST:
+            reflect_fold_field_name_expr(e->as.cast.operand, binding, field_name);
+            break;
+        case AST_EXPR_CALL:
+            reflect_fold_field_name_expr(e->as.call.callee, binding, field_name);
+            for (AstCallArg* a = e->as.call.args; a; a = a->next)
+                reflect_fold_field_name_expr(a->value, binding, field_name);
+            break;
+        case AST_EXPR_METHOD_CALL:
+            reflect_fold_field_name_expr(e->as.method_call.object, binding, field_name);
+            for (AstCallArg* a = e->as.method_call.args; a; a = a->next)
+                reflect_fold_field_name_expr(a->value, binding, field_name);
+            break;
+        case AST_EXPR_MEMBER:
+            reflect_fold_field_name_expr(e->as.member.object, binding, field_name);
+            break;
+        case AST_EXPR_INDEX:
+            reflect_fold_field_name_expr(e->as.index.target, binding, field_name);
+            reflect_fold_field_name_expr(e->as.index.index, binding, field_name);
+            break;
+        case AST_EXPR_OBJECT:
+            for (AstObjectField* f = e->as.object_literal.fields; f; f = f->next)
+                reflect_fold_field_name_expr(f->value, binding, field_name);
+            break;
+        case AST_EXPR_INTERP:
+            for (AstInterpPart* p = e->as.interp.parts; p; p = p->next)
+                reflect_fold_field_name_expr(p->value, binding, field_name);
+            break;
+        case AST_EXPR_LIST:
+            for (AstExprList* l = e->as.list; l; l = l->next)
+                reflect_fold_field_name_expr(l->value, binding, field_name);
+            break;
+        case AST_EXPR_MATCH:
+            reflect_fold_field_name_expr(e->as.match_expr.subject, binding, field_name);
+            for (AstMatchArm* arm = e->as.match_expr.arms; arm; arm = arm->next) {
+                reflect_fold_field_name_expr(arm->pattern, binding, field_name);
+                reflect_fold_field_name_expr(arm->value, binding, field_name);
+            }
+            break;
+        default: break;
+    }
+}
+
+static void reflect_fold_field_name_stmt(AstStmt* s, Str binding, Str field_name) {
+    if (!s) return;
+    switch (s->kind) {
+        case AST_STMT_EXPR: reflect_fold_field_name_expr(s->as.expr_stmt, binding, field_name); break;
+        case AST_STMT_LET: reflect_fold_field_name_expr(s->as.let_stmt.value, binding, field_name); break;
+        case AST_STMT_DESTRUCT: reflect_fold_field_name_expr(s->as.destruct_stmt.call, binding, field_name); break;
+        case AST_STMT_RET:
+            for (AstReturnArg* a = s->as.ret_stmt.values; a; a = a->next)
+                reflect_fold_field_name_expr(a->value, binding, field_name);
+            break;
+        case AST_STMT_IF:
+            reflect_fold_field_name_stmt(s->as.if_stmt.binding, binding, field_name);
+            reflect_fold_field_name_expr(s->as.if_stmt.condition, binding, field_name);
+            reflect_fold_field_name_block(s->as.if_stmt.then_block, binding, field_name);
+            reflect_fold_field_name_block(s->as.if_stmt.else_block, binding, field_name);
+            break;
+        case AST_STMT_LOOP:
+            reflect_fold_field_name_stmt(s->as.loop_stmt.init, binding, field_name);
+            reflect_fold_field_name_expr(s->as.loop_stmt.condition, binding, field_name);
+            reflect_fold_field_name_expr(s->as.loop_stmt.increment, binding, field_name);
+            reflect_fold_field_name_block(s->as.loop_stmt.body, binding, field_name);
+            break;
+        case AST_STMT_MATCH:
+            reflect_fold_field_name_expr(s->as.match_stmt.subject, binding, field_name);
+            for (AstMatchCase* c = s->as.match_stmt.cases; c; c = c->next) {
+                reflect_fold_field_name_expr(c->pattern, binding, field_name);
+                for (AstCasePattern* op = c->or_patterns; op; op = op->next)
+                    reflect_fold_field_name_expr(op->expr, binding, field_name);
+                reflect_fold_field_name_block(c->block, binding, field_name);
+            }
+            break;
+        case AST_STMT_ASSIGN:
+            reflect_fold_field_name_expr(s->as.assign_stmt.target, binding, field_name);
+            reflect_fold_field_name_expr(s->as.assign_stmt.value, binding, field_name);
+            break;
+        case AST_STMT_DEFER:
+            reflect_fold_field_name_block(s->as.defer_stmt.block, binding, field_name);
+            break;
+        default: break;
+    }
+}
+
+static void reflect_fold_field_name_block(AstBlock* block, Str binding, Str field_name) {
+    if (!block) return;
+    for (AstStmt* s = block->first; s; s = s->next)
+        reflect_fold_field_name_stmt(s, binding, field_name);
+}
+
+// Does this range-loop iterate `fields(...)` — i.e. is it a field loop at all?
+static bool reflect_loop_is_fields(const AstStmt* stmt) {
+    const AstExpr* it = stmt->as.loop_stmt.condition;
+    return it && it->kind == AST_EXPR_CALL && it->as.call.callee
+        && it->as.call.callee->kind == AST_EXPR_IDENT
+        && str_eq_cstr(it->as.call.callee->as.ident, "fields");
+}
+
+static AstExpr* reflect_make_true(CompilerContext* ctx, size_t line, size_t column) {
+    AstExpr* e = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
+    e->kind = AST_EXPR_BOOL;
+    e->as.boolean = true;
+    e->line = line; e->column = column;
+    return e;
+}
+
+// Rewrite a `fields(value)` range loop IN PLACE into `if true { <unrolled> }`,
+// where each matching field contributes one scoped `if true { let x => value.f;
+// body }`. On any error it becomes an empty `if true {}` and sets had_error, so
+// downstream passes see well-formed AST. Returns nothing — the caller then
+// analyses the rewritten (now AST_STMT_IF) statement normally.
+static void reflect_expand_field_loop(CompilerContext* ctx, AstModule* module,
+                                      SymbolTable* symbols, AstStmt* stmt) {
+    AstExpr* collection = stmt->as.loop_stmt.condition;
+    AstStmt* binding = stmt->as.loop_stmt.init;
+    AstBlock* body = stmt->as.loop_stmt.body;
+    size_t line = stmt->line, column = stmt->column;
+
+    // Rewrite to an empty `if true {}` up front; fill its block on success.
+    AstBlock* out = arena_alloc(ctx->ast_arena, sizeof(AstBlock));
+    out->first = NULL;
+    stmt->kind = AST_STMT_IF;
+    stmt->as.if_stmt.condition = reflect_make_true(ctx, line, column);
+    stmt->as.if_stmt.then_block = out;
+    stmt->as.if_stmt.else_block = NULL;
+    stmt->as.if_stmt.binding = NULL;
+
+    #define REFLECT_FAIL(ln, col, msg) do { \
+        diag_error(module->file_path, (int)(ln), (int)(col), (msg)); \
+        module->had_error = true; return; } while (0)
+
+    // `fields(value)` must have exactly one positional argument.
+    AstCallArg* args = collection->as.call.args;
+    if (!args || args->next || args->name.len != 0 || !args->value)
+        REFLECT_FAIL(line, column, "fields(...) takes exactly one struct value argument");
+    // v2 (#774) will accept a type here; v1 is values only.
+    if (sema_arg_is_type_name(symbols, args->value)) {
+        REFLECT_FAIL(line, column,
+            "fields(Type) over a type is not supported yet (#774); pass a struct VALUE");
+    }
+    AstExpr* value = args->value;
+    sema_analyze_expr(ctx, module, symbols, value);
+    TypeInfo* vt = value->resolved_type;
+    bool value_is_mod = true; // a bare place/param with no ref wrapper is mutable
+    if (vt && vt->kind == TYPE_REF) { value_is_mod = vt->as.ref.is_mod; vt = vt->as.ref.base; }
+    if (!vt || (vt->kind != TYPE_STRUCT && vt->kind != TYPE_GENERIC_INST))
+        REFLECT_FAIL(value->line, value->column,
+            "fields(...) requires a concrete struct value (a generic 'W' type is #773)");
+    AstDecl* decl = vt->as.structure.decl;
+    if (!decl || decl->kind != AST_DECL_TYPE || !decl->as.type_decl.fields)
+        REFLECT_FAIL(value->line, value->column, "fields(...) value has no struct fields");
+
+    // The binding: `let x: <mode> Pattern`. `var` is a copy of a heap struct and
+    // is rejected by the same rule the runtime collection loop uses.
+    if (!binding || binding->kind != AST_STMT_LET)
+        REFLECT_FAIL(line, column, "field loop requires a 'let' binding");
+    if (binding->as.let_stmt.is_var)
+        REFLECT_FAIL(binding->line, binding->column,
+            "collection reference bindings are aliases; use 'let', not 'var'");
+    AstTypeRef* pattern = binding->as.let_stmt.type;
+    if (!pattern)
+        REFLECT_FAIL(binding->line, binding->column,
+            "collection loop bindings require an explicit type");
+    bool want_mod = pattern->is_mod;
+    bool want_view = pattern->is_view;
+    if (!want_mod && !want_view)
+        REFLECT_FAIL(binding->line, binding->column,
+            "a field loop binding must be 'view' or 'mod' (it aliases the field)");
+    if (want_mod && !value_is_mod)
+        REFLECT_FAIL(binding->line, binding->column,
+            "a 'mod' field loop requires a 'mod' struct value");
+    Str bind_name = binding->as.let_stmt.name;
+
+    // Unroll: one scoped `if true { let x => value.f; body }` per matching field.
+    AstStmt* out_tail = NULL;
+    for (AstTypeField* f = decl->as.type_decl.fields; f; f = f->next) {
+        if (!f->type || !reflect_type_matches(pattern, f->type)) continue;
+
+        AstTypeRef* ftype = clone_type_ref(ctx->ast_arena, f->type);
+        ftype->is_view = want_view; ftype->is_mod = want_mod;
+        ftype->is_val = false; ftype->is_own = false; ftype->is_copy = false; ftype->is_opt = false;
+
+        AstExpr* member = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
+        member->kind = AST_EXPR_MEMBER;
+        member->line = value->line; member->column = value->column;
+        member->as.member.object = clone_expr(ctx->ast_arena, value);
+        member->as.member.member = f->name;
+
+        AstStmt* alias = arena_alloc(ctx->ast_arena, sizeof(AstStmt));
+        alias->kind = AST_STMT_LET;
+        alias->line = binding->line; alias->column = binding->column;
+        alias->as.let_stmt.name = bind_name;
+        alias->as.let_stmt.type = ftype;
+        alias->as.let_stmt.is_bind = true;
+        alias->as.let_stmt.value = member;
+
+        AstBlock* iter_block = arena_alloc(ctx->ast_arena, sizeof(AstBlock));
+        iter_block->first = alias;
+        AstBlock* iter_body = clone_block(ctx->ast_arena, body);
+        reflect_fold_field_name_block(iter_body, bind_name, f->name);
+        alias->next = iter_body ? iter_body->first : NULL;
+
+        AstStmt* wrapper = arena_alloc(ctx->ast_arena, sizeof(AstStmt));
+        wrapper->kind = AST_STMT_IF;
+        wrapper->line = line; wrapper->column = column;
+        wrapper->as.if_stmt.condition = reflect_make_true(ctx, line, column);
+        wrapper->as.if_stmt.then_block = iter_block;
+        wrapper->as.if_stmt.else_block = NULL;
+        wrapper->as.if_stmt.binding = NULL;
+
+        if (!out_tail) out->first = wrapper; else out_tail->next = wrapper;
+        out_tail = wrapper;
+    }
+    #undef REFLECT_FAIL
+}
+
 static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt, TypeInfo* current_return_type) {
+    // #772: a `loop ... in fields(value)` is compile-time field reflection, not
+    // a runtime loop. Unroll it into `if true { ... }` here — BEFORE the switch
+    // — so the switch (and both backends) see ordinary statements.
+    if (stmt && stmt->kind == AST_STMT_LOOP && stmt->as.loop_stmt.is_range
+        && reflect_loop_is_fields(stmt)) {
+        reflect_expand_field_loop(ctx, module, symbols, stmt);
+    }
     if (!stmt) return;
     switch (stmt->kind) {
         case AST_STMT_EXPR: if (stmt->as.expr_stmt) sema_analyze_expr(ctx, module, symbols, stmt->as.expr_stmt); break;
@@ -3436,6 +3758,20 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
                 ? clone_type_ref(ctx->ast_arena, alias_target->generic_args) : NULL;
         }
         Str name = type_ref->parts->text;
+        // `any` (#772) is the compile-time type wildcard. It is meaningful ONLY
+        // as a field-loop binding pattern (`loop let x: mod ComponentTable(any)
+        // in fields(world)`), where sema matches it structurally and never
+        // resolves it as a type. Reaching real type resolution means it was
+        // written somewhere it has no meaning — a parameter type, a field type,
+        // a `createList(any)` — so reject it with a pointed message. Note the
+        // capital-`Any` runtime box resolves normally just below.
+        if (str_eq_cstr(name, "any")) {
+            diag_error(module->file_path, (int)type_ref->line, (int)type_ref->column,
+                       "'any' is the compile-time type wildcard; it is only valid as a "
+                       "binding pattern inside a fields() loop (did you mean the runtime box 'Any'?)");
+            module->had_error = true;
+            return type_get_any(ctx->type_registry);
+        }
         if (str_eq_cstr(name, "Int")) base = type_get_int(ctx->type_registry);
         else if (str_eq_cstr(name, "Int64")) base = type_get_int_sized(ctx->type_registry, 64, false);
         else if (str_eq_cstr(name, "Int32")) base = type_get_int_sized(ctx->type_registry, 32, false);

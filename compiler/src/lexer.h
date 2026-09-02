@@ -71,6 +71,9 @@ typedef enum {
   TOK_KW_TASKSCOPE,
   TOK_KW_PARALLELLOOP,
   TOK_KW_AS,   /* explicit numeric conversion: `value as Type` */
+  TOK_KW_ANY,  /* compile-time type wildcard, legal only inside a type pattern
+                * (a `fields()` loop binding). NOT the runtime `Any` box — see
+                * docs/compile-time-reflection.md. */
 
   /* Operators */
   TOK_ASSIGN,
