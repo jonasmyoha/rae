@@ -1,0 +1,43 @@
+# lib/ui — the UiWorld MACHINE snapshot (#768): worldToJson / worldFromJson.
+#
+# Registry-driven and reflection-driven: NOT a hand-listed per-table switch. The
+# body is the compile-time field loop from docs/compile-time-reflection.md —
+# `loop let table: ... ComponentTable(any) in fields(world)` unrolls to one
+# addComponentTable / loadComponentTable per ComponentTable field of UiWorld, so
+# adding a component table needs NO edit here. The registry (createUiComponentRegistry,
+# #730) still decides WHICH tables persist: a derived cache (registered without
+# `serialize`) is skipped inside addComponentTable/loadComponentTable by flag —
+# the loop visits every table, the registry gates it. Keyed by the FIELD name
+# (what fieldName(table) yields), which is how createUiComponentRegistry registers.
+#
+# SEPARATE from the human-authored .raescene loader (ui/registry applyComponentByName):
+# that parses a hand-friendly grammar (enum strings, theme tokens like "gap":"spaceM",
+# flat {x,y,w,h}) and stays as-is. This is the round-trippable MACHINE format —
+# each component through its compiler-generated toJson()/fromJson().
+import core
+open json
+open ecs/entity
+open ecs/component_table
+open ecs/registry
+open ecs/serialize
+open ui/ecs
+
+# Snapshot a UiWorld to registry-gated JSON. One fragment per serialized table,
+# keyed by field name; derived caches are skipped by the registry flag.
+func worldToJson(world: view UiWorld, registry: view ComponentRegistry) ret String {
+  var writer: WorldJson = createWorldJson()
+  loop let table: view ComponentTable(any) in fields(world) {
+    addComponentTable(writer: writer, table: table, name: fieldName(table), registry: registry)
+  }
+  ret finishWorldJson(writer: writer)
+}
+
+# Load a UiWorld snapshot back, table by table, registry-gated. Derived caches
+# (Parent, transforms, computed rects, ...) are not in the file; the systems
+# rebuild them. Children IS authoritative + serialized (#769), so the tree
+# structure is restored; rebuildParentsFromChildren re-derives Parent.
+func worldFromJson(world: mod UiWorld, registry: view ComponentRegistry, doc: view JsonDoc) {
+  loop let table: mod ComponentTable(any) in fields(world) {
+    loadComponentTable(table: table, name: fieldName(table), registry: registry, doc: doc)
+  }
+}

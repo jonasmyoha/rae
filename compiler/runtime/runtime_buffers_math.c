@@ -312,6 +312,85 @@ rae_String rae_json_extract_string(rae_String json, const char* key) {
     return (rae_String){copy, len, len + 1, 1};
 }
 
+// Extract the balanced `{...}` object value for `key` as an owned JSON string
+// (empty when absent). Sibling of the scalar extractors above; used by the
+// C backend's generated fromJson to round-trip a NESTED STRUCT field. Respects
+// quoted strings so braces inside string values do not fool the brace matcher.
+rae_String rae_json_extract_object(rae_String json, const char* key) {
+    const char* v = rae_json_find_key((const char*)json.data, json.len, key);
+    if (!v || *v != '{') return (rae_String){NULL, 0, 0, 0};
+    int64_t remaining = json.len - (v - (const char*)json.data);
+    int depth = 0, in_str = 0, esc = 0; int64_t i = 0;
+    for (; i < remaining; i++) {
+        char c = v[i];
+        if (in_str) { if (esc) esc = 0; else if (c == '\\') esc = 1; else if (c == '"') in_str = 0; continue; }
+        if (c == '"') { in_str = 1; continue; }
+        if (c == '{') depth++;
+        else if (c == '}') { depth--; if (depth == 0) { i++; break; } }
+    }
+    return rae_json_build(v, i);
+}
+
+// Extract the balanced `[...]` array value for `key` as an owned JSON string
+// (empty when absent). Used by generated fromJson to round-trip a List field.
+rae_String rae_json_extract_array(rae_String json, const char* key) {
+    const char* v = rae_json_find_key((const char*)json.data, json.len, key);
+    if (!v || *v != '[') return (rae_String){NULL, 0, 0, 0};
+    int64_t remaining = json.len - (v - (const char*)json.data);
+    int depth = 0, in_str = 0, esc = 0; int64_t i = 0;
+    for (; i < remaining; i++) {
+        char c = v[i];
+        if (in_str) { if (esc) esc = 0; else if (c == '\\') esc = 1; else if (c == '"') in_str = 0; continue; }
+        if (c == '"') { in_str = 1; continue; }
+        if (c == '[') depth++;
+        else if (c == ']') { depth--; if (depth == 0) { i++; break; } }
+    }
+    return rae_json_build(v, i);
+}
+
+// Split a top-level `[...]` JSON array into elements (depth- and string-aware).
+// With want<0 only counts; otherwise reports the want-th element's span.
+static void rae_json_array_span(const char* s, int64_t len, int64_t want,
+                                const char** ep, int64_t* elen, int64_t* count) {
+    if (ep) { *ep = NULL; } if (elen) { *elen = 0; }
+    int64_t i = 0; while (i < len && s[i] != '[') i++; i++;
+    int depth = 0, in_str = 0, esc = 0; int64_t idx = 0, start = -1;
+    for (; i <= len; i++) {
+        char c = (i < len) ? s[i] : ']';
+        if (in_str) { if (esc) esc = 0; else if (c == '\\') esc = 1; else if (c == '"') in_str = 0; continue; }
+        if (c == '"') { if (start < 0) start = i; in_str = 1; continue; }
+        if (c == '{' || c == '[') { if (start < 0) start = i; depth++; continue; }
+        if (c == '}') { depth--; continue; }
+        if (c == ']') {
+            if (depth > 0) { depth--; continue; }
+            if (start >= 0) { if (idx == want && ep) { *ep = s + start; *elen = i - start; } idx++; }
+            break;
+        }
+        if (c == ',' && depth == 0) {
+            if (start >= 0) { if (idx == want && ep) { *ep = s + start; *elen = i - start; } idx++; start = -1; }
+            continue;
+        }
+        if (c != ' ' && c != '\t' && c != '\n' && c != '\r') { if (start < 0) start = i; }
+    }
+    if (count) *count = idx;
+}
+
+// Number of top-level elements in the array string `arr` (the `[...]`).
+int64_t rae_json_array_count(rae_String arr) {
+    int64_t c = 0; rae_json_array_span((const char*)arr.data, arr.len, -1, NULL, NULL, &c); return c;
+}
+
+// The idx-th top-level element of `arr` as an owned JSON string (trailing
+// whitespace trimmed), or empty when out of range. A struct element is `{...}`
+// for the child fromJson; a scalar element is its literal text.
+rae_String rae_json_array_item(rae_String arr, int64_t idx) {
+    const char* ep = NULL; int64_t el = 0, c = 0;
+    rae_json_array_span((const char*)arr.data, arr.len, idx, &ep, &el, &c);
+    if (!ep || el <= 0) return (rae_String){NULL, 0, 0, 0};
+    while (el > 0 && (ep[el-1] == ' ' || ep[el-1] == '\n' || ep[el-1] == '\t' || ep[el-1] == '\r')) el--;
+    return rae_json_build(ep, el);
+}
+
 /* Crypto stub wrappers for C backend — actual crypto requires monocypher linkage */
 void rae_ext_rae_crypto_lock(RaeAny key, RaeAny nonce, RaeAny plain, int64_t plain_len, RaeAny mac, RaeAny cipher) {
     (void)key; (void)nonce; (void)plain; (void)plain_len; (void)mac; (void)cipher;
