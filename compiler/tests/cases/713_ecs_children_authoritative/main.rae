@@ -1,0 +1,105 @@
+import core
+open ecs/entity
+open ecs/component_table
+open ecs/hierarchy
+open ecs/HierarchySystem/HierarchySystem
+
+# #769: Children (ordered) is AUTHORITATIVE; Parent is the derived reverse index.
+# The regression this guards: component tables are swap-remove, so a rebuild that
+# walked the PARENT table scrambled sibling order after any destroy. With Children
+# authoritative, sibling order must survive a destroy + Parent rebuild.
+# Also covers insertChild (explicit ordering), the single-parent invariant on
+# reparent and on rebuild (duplicate healing), and depthOrder dirty-tracking on
+# the Children table.
+
+func printKids(childrens: view ComponentTable(Children), entity: view EntityId, label: view String) {
+  let kids: List(EntityId) = getChildren(childrens: childrens, parent: entity)
+  var line: String = "{label}:"
+  loop var i: Int = 0, i < kids.length, ++i {
+    if let kid: EntityId = kids.copyAt(index: i) {
+      line = "{line} {kid.index}"
+    }
+  }
+  log(line)
+}
+
+func printOrder(order: view List(EntityId), label: view String) {
+  var line: String = "{label}:"
+  loop var i: Int = 0, i < order.length, ++i {
+    if let node: EntityId = order.copyAt(index: i) {
+      line = "{line} {node.index}"
+    }
+  }
+  log(line)
+}
+
+func parentIndex(parents: view ComponentTable(Parent), child: view EntityId) ret Int {
+  if componentHas(this: parents, entity: child) {
+    let link: Parent = componentGet(this: parents, entity: child)
+    ret link.parent.index
+  }
+  ret 0 - 1
+}
+
+func main() {
+  var parents: ComponentTable(Parent) = createComponentTable(Parent)
+  var childrens: ComponentTable(Children) = createComponentTable(Children)
+  let root: EntityId = { index: 100, generation: 0 }
+  let s1: EntityId = { index: 1, generation: 0 }
+  let s2: EntityId = { index: 2, generation: 0 }
+  let s3: EntityId = { index: 3, generation: 0 }
+  let s4: EntityId = { index: 4, generation: 0 }
+  let s5: EntityId = { index: 5, generation: 0 }
+
+  # ----- 5 siblings, destroy sibling 2, rebuild Parent from Children -----
+  setParent(parents: parents, childrens: childrens, child: s1, parent: root)
+  setParent(parents: parents, childrens: childrens, child: s2, parent: root)
+  setParent(parents: parents, childrens: childrens, child: s3, parent: root)
+  setParent(parents: parents, childrens: childrens, child: s4, parent: root)
+  setParent(parents: parents, childrens: childrens, child: s5, parent: root)
+  printKids(childrens: childrens, entity: root, label: "siblings")
+
+  detachForDestroy(parents: parents, childrens: childrens, entity: s2)
+  printKids(childrens: childrens, entity: root, label: "after destroy s2")
+
+  # Wipe the derived index the way a snapshot reload would leave it, rebuild.
+  loop componentCount(this: parents) > 0 {
+    let stale: EntityId = componentEntityAt(this: parents, i: 0)
+    componentRemove(this: parents, entity: stale)
+  }
+  rebuildParentsFromChildren(parents: parents, childrens: childrens)
+  printKids(childrens: childrens, entity: root, label: "after rebuild")
+  log("s3 parent after rebuild: {parentIndex(parents: parents, child: s3)}")
+  log("s2 parent after rebuild: {parentIndex(parents: parents, child: s2)}")
+
+  # ----- insertChild: explicit index, clamped -----
+  let s6: EntityId = { index: 6, generation: 0 }
+  let s7: EntityId = { index: 7, generation: 0 }
+  insertChild(parents: parents, childrens: childrens, parent: root, child: s6, index: 1)
+  insertChild(parents: parents, childrens: childrens, parent: root, child: s7, index: 99)
+  printKids(childrens: childrens, entity: root, label: "after inserts")
+  log("s6 parent: {parentIndex(parents: parents, child: s6)}")
+
+  # ----- single parent on reparent via insertChild -----
+  let other: EntityId = { index: 200, generation: 0 }
+  insertChild(parents: parents, childrens: childrens, parent: other, child: s3, index: 0)
+  printKids(childrens: childrens, entity: root, label: "root after s3 moved")
+  printKids(childrens: childrens, entity: other, label: "other after s3 moved")
+
+  # ----- single parent healed on rebuild: hand-corrupt a second list -----
+  let dup: mod Children => componentMod(this: childrens, entity: other)
+  dup.ids.add(value: s4)
+  printKids(childrens: childrens, entity: other, label: "other corrupted")
+  rebuildParentsFromChildren(parents: parents, childrens: childrens)
+  printKids(childrens: childrens, entity: root, label: "root after heal")
+  printKids(childrens: childrens, entity: other, label: "other after heal")
+  log("s4 parent after heal: {parentIndex(parents: parents, child: s4)}")
+
+  # ----- depthOrder dirty-tracks on the Children table -----
+  var ord: HierarchyOrder = createHierarchyOrder()
+  let order1: view List(EntityId) => depthOrder(state: ord, parents: parents, childrens: childrens)
+  printOrder(order: order1, label: "order")
+  insertChild(parents: parents, childrens: childrens, parent: root, child: s5, index: 0)
+  let order2: view List(EntityId) => depthOrder(state: ord, parents: parents, childrens: childrens)
+  printOrder(order: order2, label: "order after move s5 first")
+}

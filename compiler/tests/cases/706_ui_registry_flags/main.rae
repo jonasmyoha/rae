@@ -4,7 +4,8 @@ open ui/registry_flags
 
 # #730: the UI's serialized-vs-derived split is REGISTRY-DRIVEN. Authored
 # components are registered `serialize`; the derived caches the systems rebuild
-# (Children, ComputedRect, MeasuredSize, WorldTransform2D, RuntimeOffset, ...) are
+# (Parent — the reverse index of the authoritative, ordered Children (#769) —,
+# ComputedRect, MeasuredSize, WorldTransform2D, RuntimeOffset, ...) are
 # registered without it, so the generic serializer skips them by flag.
 
 func check(reg: view ComponentRegistry, name: view String) {

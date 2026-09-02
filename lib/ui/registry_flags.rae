@@ -89,10 +89,11 @@ func createUiComponentRegistry() ret ComponentRegistry {
   registerComponent(reg: reg, name: "AnimFrames", flags: serialize)
   registerComponent(reg: reg, name: "AnimTrigger", flags: serialize)
   registerComponent(reg: reg, name: "WobbleFx", flags: serialize)
-  # ----- hierarchy: Parent is AUTHORITATIVE (#711) and persists; Children is a
-  # derived cache rebuilt by HierarchySystem and is NOT persisted. -----
-  registerComponent(reg: reg, name: "Parent", flags: serialize)
-  registerComponent(reg: reg, name: "Children", flags: 0)
+  # ----- hierarchy (#769): Children (ORDERED) is AUTHORITATIVE and persists —
+  # sibling order is real layout/paint information; Parent is the derived
+  # reverse index rebuilt by rebuildParentsFromChildren after a load. -----
+  registerComponent(reg: reg, name: "Children", flags: serialize)
+  registerComponent(reg: reg, name: "Parent", flags: 0)
   # ----- DERIVED caches: rebuilt every pass by a system, never persisted -----
   registerComponent(reg: reg, name: "MeasuredSize", flags: 0)
   registerComponent(reg: reg, name: "ComputedRect", flags: 0)
