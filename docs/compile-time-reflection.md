@@ -1,6 +1,6 @@
 # Compile-time reflection: iterating a struct's fields
 
-**Status:** design, queued as #772 (v1) / #773 (generic W) / #760 (first consumer). Supersedes the rejected `clearEntityComponents`
+**Status:** v1 LANDED (#772: non-generic `fields(value)`, `any` wildcard, `fieldName()`); #773 (generic W) and #760 (first consumer) still open. Supersedes the rejected `clearEntityComponents`
 compiler builtin (queue #760) and the vague "derive/reflection" bullet in
 `docs/ecs-language-wishlist.md`. See that file for the rules this design obeys.
 
