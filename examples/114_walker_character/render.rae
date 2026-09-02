@@ -113,7 +113,7 @@ func renderShadowPass(app: mod App, aspect: copy Float, palette: view List(Float
   if app.io.settings.shadows {
     beginShadowPass(c: cascades)
     renderSceneShadow(scene: app.scene)
-    drawTerrainPropsShadow(terrain: app.terrain, scene: app.scene)
+    drawTerrainPropsShadow(terrain: app.terrain, world: app.world)
     # Each caster's shadow samples the SAME palette slot its G-buffer instance
     # does (#547), so a crowd member casts its own pose. Hero = slot 0.
     let jc: Int = jointCount(sk: app.character.skeleton)
@@ -155,9 +155,9 @@ func renderGbufferPass(app: mod App, aspect: copy Float, palette: view List(Floa
                 settings: grassView)
   grassDiagTick()
   gbuffer.beginPass(camera: app.cam.camera, light: app.cam.light, aspect: aspect)
-  drawTerrainGround(terrain: app.terrain, scene: app.scene, time: t)
+  drawTerrainGround(terrain: app.terrain, world: app.world, time: t)
   gbuffer.renderScene(scene: app.scene)
-  drawTerrainProps(terrain: app.terrain, scene: app.scene)
+  drawTerrainProps(terrain: app.terrain, world: app.world)
   # Palettes (hero slot 0 + one per crowd member) were uploaded in renderApp.
   let jc: Int = jointCount(sk: app.character.skeleton)
   uploadPalette(rows: palette, jointCount: jc)

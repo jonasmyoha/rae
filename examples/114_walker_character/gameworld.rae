@@ -60,6 +60,12 @@ type GameWorld {
   animStates: ComponentTable(AnimationState)
   # #740: skinned body-mesh parts, one entity each.
   partRoughness: ComponentTable(PartRoughness)
+  # #741: infinite-terrain props + heightfield tiles are recycled entities.
+  # PropKind identifies the prop (kind + pool slot + placement-active); TreeVariant
+  # records a tree's broad/tall choice; TileMesh holds a tile's heightfield mesh.
+  propKinds: ComponentTable(PropKind)
+  treeVariants: ComponentTable(TreeVariant)
+  tileMeshes: ComponentTable(TileMesh)
 }
 
 func createGameWorld() ret GameWorld {
@@ -71,6 +77,9 @@ func createGameWorld() ret GameWorld {
     controllers: createComponentTable(ThirdPersonController)
     animStates: createComponentTable(AnimationState)
     partRoughness: createComponentTable(PartRoughness)
+    propKinds: createComponentTable(PropKind)
+    treeVariants: createComponentTable(TreeVariant)
+    tileMeshes: createComponentTable(TileMesh)
   }
 }
 
