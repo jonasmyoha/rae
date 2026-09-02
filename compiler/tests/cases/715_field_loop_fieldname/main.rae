@@ -1,0 +1,54 @@
+import core
+open ecs/entity
+open ecs/component_table
+
+# #772: fieldName(binding) folds to the slot name String literal; a concrete
+# binding type filters to exactly that field; a filter matching no field
+# unrolls to nothing.
+type Rect { x: Int, y: Int }
+type Size { w: Int, h: Int }
+type Tag { on: Bool }
+
+type World {
+  rects: ComponentTable(Rect)
+  sizes: ComponentTable(Size)
+}
+
+# every table: names in declaration order, via fieldName + UFCS
+func names(world: view World) ret String {
+  var line: String = ""
+  loop let table: view ComponentTable(any) in fields(world) {
+    line = "{line}{fieldName(table)}:{componentCount(this: table)} "
+  }
+  ret line
+}
+
+# concrete filter: only the ComponentTable(Size) field is bound
+func sizeNames(world: view World) ret String {
+  var line: String = ""
+  loop let table: view ComponentTable(Size) in fields(world) {
+    line = "{line}{table.fieldName()} "
+  }
+  ret line
+}
+
+# a filter that matches no field of World -> empty unroll, loop body never runs
+func tagNames(world: view World) ret String {
+  var line: String = "start "
+  loop let table: view ComponentTable(Tag) in fields(world) {
+    line = "{line}{fieldName(table)} "
+  }
+  ret line
+}
+
+func main() {
+  var world: World = {
+    rects: createComponentTable(Rect)
+    sizes: createComponentTable(Size)
+  }
+  let e: EntityId = { index: 2, generation: 0 }
+  componentSet(this: world.rects, entity: e, data: Rect { x: 1, y: 1 })
+  log("all: {names(world: world)}")
+  log("size: {sizeNames(world: world)}")
+  log("tag: {tagNames(world: world)}")
+}

@@ -1,0 +1,20 @@
+import core
+open ecs/entity
+open ecs/component_table
+
+# #772: field-loop bindings are aliases; `var` (a copy of a heap table) is
+# rejected by the same rule the runtime collection loop uses.
+type Rect { x: Int, y: Int }
+type World { rects: ComponentTable(Rect) }
+
+func clearAll(world: mod World, entity: view EntityId) {
+  loop var table: mod ComponentTable(any) in fields(world) {
+    componentRemove(this: table, entity: entity)
+  }
+}
+
+func main() {
+  var world: World = World { rects: createComponentTable(Rect) }
+  let e: EntityId = { index: 1, generation: 0 }
+  clearAll(world: world, entity: e)
+}

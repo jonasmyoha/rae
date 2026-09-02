@@ -280,7 +280,12 @@ static AstTypeRef* parse_type_ref(Parser* parser) {
   
   while (true) {
     TokenKind kind = parser_peek(parser)->kind;
-    if (is_ident_like(kind)) {
+    // `any` (TOK_KW_ANY, #772) is the compile-time type WILDCARD. It is a
+    // keyword, not an identifier, so it is accepted ONLY here — in type-name
+    // position — never as a general identifier. Its part text is "any"; sema
+    // treats a type whose base part is "any" as the wildcard inside a fields()
+    // loop pattern and rejects it as a type anywhere else.
+    if (is_ident_like(kind) || kind == TOK_KW_ANY) {
       const Token* tok = parser_advance(parser);
       AstIdentifierPart* part = make_identifier_part(parser, tok->lexeme);
       if (!parts_head) {
