@@ -1,0 +1,81 @@
+import core
+open json
+open ecs/entity
+open ecs/world
+open ecs/component_table
+open ecs/registry
+open ecs/serialize
+
+# #760 DoD: whole-world serialize is registry-gated and reflection-driven, so
+# adding a ComponentTable field needs NO edit to snapshot/restore. `tags` here is
+# "the newly added table": snapshot/restore never name any table, so it is picked
+# up by the loop with zero edits; `notes` proves the registry flag still gates.
+
+type Pos { x: Int }
+type Vel { dx: Int }
+type Tag { on: Int }
+type Note { n: Int }
+
+type Mini {
+  allocator: EntityAllocator
+  poss: ComponentTable(Pos)
+  vels: ComponentTable(Vel)
+  tags: ComponentTable(Tag)
+  notes: ComponentTable(Note)
+}
+
+func createMini() ret Mini {
+  ret Mini {
+    allocator: createEntityAllocator(),
+    poss: createComponentTable(Pos),
+    vels: createComponentTable(Vel),
+    tags: createComponentTable(Tag),
+    notes: createComponentTable(Note)
+  }
+}
+
+# NEVER names a table — a new ComponentTable field is handled with no edit here.
+func snapshot(world: view Mini, reg: view ComponentRegistry) ret String {
+  var writer: WorldJson = createWorldJson()
+  loop let table: view ComponentTable(any) in fields(world) {
+    addComponentTable(writer: writer, table: table, name: fieldName(table), registry: reg)
+  }
+  ret finishWorldJson(writer: writer)
+}
+func restore(world: mod Mini, reg: view ComponentRegistry, doc: view JsonDoc) {
+  loop let table: mod ComponentTable(any) in fields(world) {
+    loadComponentTable(table: table, name: fieldName(table), registry: reg, doc: doc)
+  }
+}
+
+func makeReg() ret ComponentRegistry {
+  var reg: ComponentRegistry = createComponentRegistry()
+  registerComponent(reg: reg, name: "poss", flags: serialize)
+  registerComponent(reg: reg, name: "vels", flags: serialize)
+  registerComponent(reg: reg, name: "tags", flags: serialize)
+  registerComponent(reg: reg, name: "notes", flags: 0)
+  ret reg
+}
+
+func main() {
+  var world: Mini = createMini()
+  let e1: EntityId = entityId(v: 1)
+  let e2: EntityId = entityId(v: 2)
+  componentSet(this: world.poss, entity: e1, data: Pos { x: 7 })
+  componentSet(this: world.vels, entity: e1, data: Vel { dx: 3 })
+  componentSet(this: world.tags, entity: e1, data: Tag { on: 1 })
+  componentSet(this: world.tags, entity: e2, data: Tag { on: 0 })
+  componentSet(this: world.notes, entity: e1, data: Note { n: 99 })
+
+  var reg: ComponentRegistry = makeReg()
+  let s1: String = snapshot(world: world, reg: reg)
+  log("snap: {s1}")
+
+  let doc: JsonDoc = parseJson(source: s1)
+  var restored: Mini = createMini()
+  restore(world: restored, reg: reg, doc: doc)
+  log("counts pos={componentCount(this: restored.poss)} vel={componentCount(this: restored.vels)} tag={componentCount(this: restored.tags)} note={componentCount(this: restored.notes)}")
+
+  let s2: String = snapshot(world: restored, reg: reg)
+  log("roundtrip identical: {s1 is s2}")
+}
