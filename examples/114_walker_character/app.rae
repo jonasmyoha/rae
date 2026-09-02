@@ -379,6 +379,9 @@ func createApp() ret App {
   rig.wheelSpeed = 0.4
   camera.target = thirdPersonCameraTarget(controller: characterController, focusZ: characterFocusZ)
   snapCameraRigView(rig: rig)
+  # #744: express the camera rig as an ECS parent relation (rig entity -> camera
+  # entity) in the GameWorld; applyCameraRigHierarchy resolves the eye each frame.
+  let rigLink: CameraRigLink = createCameraRigLink(world: gameWorld)
 
   var clipIndex: Int = 0
   var playing: Bool = true
@@ -508,7 +511,8 @@ func createApp() ret App {
       clipPanel: own clipPanel, transport: own transport, charPanel: own charPanel, settings: own settings,
       panelScroll: panelScroll, dbg: own dbg, logView: own logView, lastLogRevision: 0 - 1
     }
-    cam: { camera: camera, rig: own rig, light: light, hosek: hosekData }
+    cam: { camera: camera, rig: own rig, light: light, hosek: hosekData,
+           rigEntity: rigLink.rigEntity, camEntity: rigLink.camEntity }
     character: {
       skeleton: own sk, idleClip: idleClip, walkClip: walkClip, runClip: runClip,
       bindPose: bindPose, transitionFrom: bindPose, transitionElapsed: clipTransitionDuration,

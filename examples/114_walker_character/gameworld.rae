@@ -14,11 +14,15 @@ import core
 import vec3
 import quat
 import ecs/transform
+import ecs/hierarchy
+import ecs/HierarchySystem/HierarchySystem
 import app3d/character_controller
 open ecs/entity
 open ecs/world
 open ecs/component_table
 open ecs/transform
+open ecs/hierarchy
+open ecs/HierarchySystem/HierarchySystem
 open app3d/character_controller
 
 # Per-entity animation clip + phase (#739). Replaces the CrowdMember.clipIndex /
@@ -70,6 +74,13 @@ type GameWorld {
   # (base position + yaw/phase/scale + pool slot). The flat instance-stream
   # buffer is no longer a source of truth — it is derived from these each frame.
   grassBlades: ComponentTable(GrassBlade)
+  # #744: ECS parent/child hierarchy — Parent (cached upward link) + Children
+  # (authoritative ordered list) folded into WorldTransform3D by the general
+  # TransformSystem, walked in HierarchyOrder. First 3D user is the camera rig
+  # (rig entity -> camera entity as a Parent relation), replacing applyCameraRig.
+  parents: ComponentTable(Parent)
+  childrens: ComponentTable(Children)
+  hierarchyOrder: HierarchyOrder
 }
 
 func createGameWorld() ret GameWorld {
@@ -85,6 +96,9 @@ func createGameWorld() ret GameWorld {
     treeVariants: createComponentTable(TreeVariant)
     tileMeshes: createComponentTable(TileMesh)
     grassBlades: createComponentTable(GrassBlade)
+    parents: createComponentTable(Parent)
+    childrens: createComponentTable(Children)
+    hierarchyOrder: createHierarchyOrder()
   }
 }
 
