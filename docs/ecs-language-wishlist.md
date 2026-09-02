@@ -64,7 +64,18 @@ a feature that is not already listed here.
     compile-time plain function called with parens (UFCS `world.fields()` is fine) —
     never a phantom member like `world.fields` / `table.fieldName`. Parser unchanged;
     sema dispatches on the iterable; codegen unrolls. Not `#run`, not runtime type
-    info, not attributes. Status: design only, not implemented.
+    info, not attributes. Status: values + generic-W landed (#772/#773); first
+    consumer wired in #760.
+  - **Element type-name reflection `typeName(T)` (new, surfaced by #760).** `fieldName`
+    gives a table's FIELD name (`positions`), but the serializer's registry is keyed by
+    the COMPONENT type name (`Position`). With only `fieldName`, the registry-gated
+    `loop ... in fields(world) { addComponentTable(name: fieldName(table)) }` forces the
+    registry to be re-keyed by field name (done for example 116). A compile-time
+    `typeName(table)` / element-type-name primitive (the name of the `T` in
+    `ComponentTable(T)`, folded to a String literal like `fieldName` is) would let the
+    loop key by the canonical component name and keep ONE registry vocabulary shared
+    with the human-authored `.raescene` loader (#768) — instead of two (`Rect` vs
+    `rects`). Same rules as `fieldName`: a plain compile-time function, parens, no sigil.
   - **Spelling constraint (maintainer):** spec this as a REAL keyword, a plain
     function, or a compile-time construct — NEVER an `@`-sigil attribute
     (`@derive`/`@component`/`@world`) or the `#[...]` variant. The reasoning (fuller
