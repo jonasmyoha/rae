@@ -1,0 +1,84 @@
+open json
+import string
+import core
+import ui/components
+open ui/ecs
+import ui/registry
+open ui/registry_flags
+open ui/serialize
+open ui/scene
+open ui/scene_loader
+open ecs/entity
+open ecs/registry
+
+# #768: the UiWorld MACHINE snapshot round-trips through the registry with NO
+# per-component switch — worldToJson/worldFromJson are the reflection loop over
+# fields(world). DoD: load a .raescene, snapshot, reload into a FRESH world,
+# snapshot again -> byte-identical JSON. Separate from the .raescene loader.
+
+func sampleScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{")
+  s = s.concat(other: "\"type\":\"Scene\",")
+  s = s.concat(other: "\"version\":2,")
+  s = s.concat(other: "\"sceneId\":\"music-player-album\",")
+  s = s.concat(other: "\"root\":\"AlbumRoot\",")
+  s = s.concat(other: "\"nodes\":\{")
+  s = s.concat(other: "\"AlbumRoot\":\{")
+  s = s.concat(other: "\"Rect\":\{\"x\":0,\"y\":0,\"w\":600,\"h\":1300\},")
+  s = s.concat(other: "\"Layout\":\{\"type\":\"Vertical\",\"gap\":16,\"alignCross\":\"Start\"\},")
+  s = s.concat(other: "\"Padding\":\{\"l\":24,\"t\":24,\"r\":24,\"b\":12\},")
+  s = s.concat(other: "\"Children\":[\"TopBar\",\"AlbumHero\",\"PlayBtn\"]")
+  s = s.concat(other: "\},")
+  s = s.concat(other: "\"TopBar\":\{")
+  s = s.concat(other: "\"Layout\":\{\"type\":\"Horizontal\",\"gap\":12,\"alignCross\":\"Center\"\},")
+  s = s.concat(other: "\"Children\":[\"BackBtn\"]")
+  s = s.concat(other: "\},")
+  s = s.concat(other: "\"BackBtn\":\{")
+  s = s.concat(other: "\"Sprite\":\{\"textureKey\":\"icon-back\"\},")
+  s = s.concat(other: "\"OnClick\":\{\"actionId\":\"nav.back\"\}")
+  s = s.concat(other: "\},")
+  s = s.concat(other: "\"AlbumHero\":\{")
+  s = s.concat(other: "\"Text\":\{\"text\":\"Charcoal\",\"styleId\":\"h1\"\},")
+  s = s.concat(other: "\"Active\":\{\"value\":true\}")
+  s = s.concat(other: "\},")
+  s = s.concat(other: "\"PlayBtn\":\{")
+  s = s.concat(other: "\"Shape\":\{\"kind\":\"RoundedRect\",\"radius\":24,\"fill\":\{\"r\":0,\"g\":0,\"b\":0,\"a\":255\}\},")
+  s = s.concat(other: "\"Button\":\{\"role\":\"primary\"\},")
+  s = s.concat(other: "\"OnClick\":\{\"actionId\":\"music.play\"\}")
+  s = s.concat(other: "\}")
+  s = s.concat(other: "\}")
+  s = s.concat(other: "\}")
+  ret s
+}
+
+func main() {
+  let scene: Scene = parseScene(source: sampleScene())
+  if scene.ok is false {
+    log("scene parse failed: {scene.errorMsg}")
+    ret
+  }
+  var world: UiWorld = createUiWorld()
+  let root: EntityId = loadScene(world: world, scene: scene)
+  log("loaded root={root.index} alive={aliveCount(world: world)}")
+
+  var reg: ComponentRegistry = createUiComponentRegistry()
+  let s1: String = worldToJson(world: world, registry: reg)
+
+  # Reload the snapshot into a fresh world, with NOTHING from the scene loader.
+  let doc: JsonDoc = parseJson(source: s1)
+  var fresh: UiWorld = createUiWorld()
+  worldFromJson(world: fresh, registry: reg, doc: doc)
+  let s2: String = worldToJson(world: fresh, registry: reg)
+
+  log("byte-identical: {s1 is s2}")
+  log("s1 nonempty: {s1.length() > 2}")
+
+  # Spot-check a value survived the machine round-trip (authored Rect on root).
+  if componentHas(this: fresh.rects, entity: root) {
+    let r: Rect = componentGet(this: fresh.rects, entity: root)
+    log("root rect w={r.size.x} h={r.size.y}")
+  } else {
+    log("root rect MISSING after reload")
+  }
+}
