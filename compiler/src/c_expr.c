@@ -340,7 +340,10 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
       // (and its negation for `is not`).
       if (expr->as.binary.op == AST_BIN_IS || expr->as.binary.op == AST_BIN_NEQ) {
           const AstTypeRef* lhs_tr = infer_expr_type_ref(ctx, expr->as.binary.lhs);
-          Str lhs_base = get_base_type_name(lhs_tr);
+          // #758: resolve a generic param (`T` in a `List(T)`/`view T` template)
+          // to its concrete type, so `cur is value` with T=String takes the
+          // rae_str_eq path instead of falling through to C `==` on two structs.
+          Str lhs_base = eff_base_name(ctx, expr->as.binary.lhs);
           bool lhs_is_string = str_eq_cstr(lhs_base, "String") || str_eq_cstr(lhs_base, "rae_String");
           bool rhs_is_string_lit = expr->as.binary.rhs->kind == AST_EXPR_STRING;
           // Also detect toString() calls — they always return String
