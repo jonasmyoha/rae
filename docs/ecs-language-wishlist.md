@@ -45,12 +45,24 @@ a feature that is not already listed here.
 
 ## World / archetype boilerplate
 
-- **Synthesize a world from its component set.** Every world today hand-declares each
-  `ComponentTable(T)` field, repeats it in `createX()`, and adds per-component setters.
-  A derive/attribute (`@component`, `@world { A, B, C }`) that generates the table
-  fields, the constructor, and the registry entries would remove the single largest
-  chunk of ECS boilerplate. `UiWorld`, `World3d`, and `GameWorld` are all this same
-  pattern typed out by hand.
+- **Synthesize a world from its component set + reflect over its fields.** Every world
+  today hand-declares each `ComponentTable(T)` field, repeats it in `createX()`, adds
+  per-component setters, AND re-lists every table in each whole-world op (destroyEntity's
+  per-table `componentRemove`, worldToJson's per-table `addComponentTable`) — because Rae
+  has no field reflection and no function values, so nothing can hold a world's
+  heterogeneous tables as data. A compile-time "for each `ComponentTable(_)` field of this
+  struct" reflection (feeding a `createX` / `clearEntity` / `worldToJson` generated once,
+  generically) would remove the single largest chunk of ECS boilerplate — and it is the
+  ONLY thing that makes "add a component, edit nothing else" possible. `UiWorld`,
+  `World3d`, and `GameWorld` are all this same pattern typed out by hand.
+  - **Spelling constraint (maintainer):** propose this as a REAL keyword or a plain
+    function/compile-time-loop, NEVER an `@`-sigil attribute (`@derive`/`@component`/
+    `@world`). `@` keywords are a second, parallel vocabulary the programmer must carry
+    alongside the real one, with no principled line (why `@derive` but not `@if`?). One
+    keyword namespace, always. Do NOT spec a language feature here with `@` syntax.
+    A one-use compiler/C-backend builtin (a bespoke `clearEntityComponents` special-case
+    in sema/c_backend) is also off the table — it's the forbidden hand-added C feature;
+    the capability must be expressible IN Rae via a general reflection/derive mechanism.
 - **Component registration / reflection `(partly landed #717)`.** The registry maps
   component name ↔ table + flags. Extend toward auto-registration so a component
   declares its own serialize/replicate/editor flags at definition, not in a separate
