@@ -163,15 +163,16 @@ func ensureTerrainPipeline() {
 # alternative -- adding a field to the shared frame uniform -- would touch every
 # pipeline for the benefit of one. The water in terrain_splat.wgsl reads it as
 # d.params.w. Documented at both ends so nobody wires a joint palette to a clock.
-func drawTerrainMesh(mesh: copy Int, transform: view Transform3d, prevTransform: view Transform3d,
+# #745: takes composed model matrices directly (Quat-friendly), not a Euler
+# Transform3d — the caller builds them with transform3dToMatrix from the entity's
+# Quat Transform3D, so no Euler Vec3 rotation survives on the terrain path.
+func drawTerrainMesh(mesh: copy Int, model: view Mat4, prevModel: view Mat4,
                      roughness: copy Float, time: copy Float) pub {
   ensureTerrainPipeline()
   if gbMeshReady(mesh: mesh) is 0 { ret }
   let base: Int = gbDrawCount()
   if base >= gbMaxDraws() { ret }
   ensureDrawScratch()
-  let model: Mat4 = modelMatrixOf(t: transform)
-  let prevModel: Mat4 = modelMatrixOf(t: prevTransform)
   packInstanceRecord(records: gDrawScratch, slot: 0, model: model, prevModel: prevModel,
     r: 1.0, g: 1.0, b: 1.0, metallic: 0.0, roughness: roughness, emissive: 0.0, toon: 0,
     paletteBase: 0)
