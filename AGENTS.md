@@ -53,20 +53,43 @@ These instructions define **how Codex should work**, communicate progress, and i
   and drop them from code you are already editing.
 
 ### NO `@`-sigil keywords / attributes (strong maintainer preference):
-- Do NOT propose or add language constructs spelled with a leading `@` —
-  `@derive`, `@component`, `@world`, `@inline`, `@test`, etc. The maintainer
-  strongly dislikes them, and the objection is principled, not aesthetic:
-- An `@` keyword is a SECOND, parallel set of keywords. Where is the line? If
-  `@derive` is a keyword, why not `@if`, `@return`, `@switch`? Nothing about the
-  language forces the split — so the programmer is made to carry TWO vocabularies
-  (real keywords and `@`-keywords) and remember which words live in which set,
-  for no gain. It reads as an "additional layer" bolted onto the language.
-- If a capability genuinely needs a new keyword, add a REAL keyword — one that
-  sits in the same namespace as `func`/`type`/`if`/`loop`, chosen so it reads as
-  part of the language, not an annotation stapled on top. One vocabulary.
-- This applies to design discussion too: when suggesting a language feature
-  (e.g. compile-time field reflection / derive for ECS world helpers), describe
-  it with a real-keyword or plain-function spelling, never an `@attribute`.
+- Do NOT propose or add language constructs spelled with a leading `@` (or the
+  `#[...]` variant) — `@derive`, `@component`, `@world`, `@inline`, `@test`,
+  `#[derive]`, etc. The maintainer strongly dislikes them, and the reasoning is
+  worth carrying, not just the rule:
+- **There is no real "logic vs metadata" line that justifies the sigil.** The
+  tempting defence — "`@` is for metadata/annotations, real keywords are for
+  code that executes" — does not survive contact with actual languages. The SAME
+  concept is a sigil in one language and a bare keyword in another: Java
+  `@Override` vs Kotlin/Swift `override`. Whether something "is metadata" is not
+  a property of the concept; it is a spelling each language picks. `const`,
+  `public`, `override`, `derive` are all just declaration MODIFIERS — nothing
+  stops any of them being `@const`/`@public`, which is proof the category is
+  fake.
+- **The split is arbitrary even WITHIN one language.** Java sigils `@Override`
+  but not `public`/`static`/`final`; Rust sigils `#[derive]`/`#[inline]` but not
+  `pub`/`const`/`mut`. Same syntactic role (a modifier on a declaration), split
+  across two spellings by history and taste, not principle. So the programmer
+  carries TWO vocabularies and must memorise which modifier lives in which set,
+  for no rule and no gain — an "additional layer" bolted on.
+- **The ONE case where a sigil is actually earned is an OPEN, user-extensible
+  set** — Python decorators apply any callable; Rust attributes/macros are
+  library-definable. There the sigil is a NAMESPACE ESCAPE HATCH: it lets an
+  open set of declaration-transformers exist without reserving new keywords and
+  without stealing identifiers (you can still name a value `derive`). A CLOSED,
+  compiler-defined set (Java `@Override`, Swift `@escaping`) has no such excuse —
+  it could just be the keyword — and is pure convention.
+- **Rae does not want that open extensibility.** An open macro/decorator system
+  is exactly the "clever, hard-to-analyse" mechanism Rae's goals (few special
+  cases, determinism, machine-analyzability) refuse. So Rae never reaches the one
+  case where `@` is justified, and every case it WOULD reach is the arbitrary
+  one. Hence: one bare-keyword vocabulary, full stop. If a modifier is worth
+  having, it is a REAL keyword in the same namespace as `func`/`type`/`if`/`loop`,
+  chosen to read as part of the language — never an annotation stapled on top.
+- This applies to design DISCUSSION too: when suggesting a language feature
+  (e.g. compile-time field reflection / derive for ECS world helpers), spell it
+  as a real keyword, a plain function, or a compile-time construct — never an
+  `@attribute` / `#[...]`.
 
 ---
 
