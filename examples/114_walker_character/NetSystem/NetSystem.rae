@@ -47,7 +47,10 @@ func netJoin(world: mod GameWorld, remoteId: view Int, role: view Int) ret Entit
 # A player leaves: drop the NetPlayer component, then free the entity slot so a
 # later join recycles it (and stale handles to the departed player read dead).
 func netLeave(world: mod GameWorld, entity: view EntityId) {
-  componentRemove(this: world.netPlayers, entity: entity)
+  # #760: clear every component row for the leaving entity (generic reflection
+  # sweep) so a recycled index can never read stale data from ANY table, then
+  # free the slot. Replaces the single hand-listed netPlayers remove.
+  clearEntityComponents(world: world, entity: entity)
   freeEntity(this: world.allocator, entity: entity)
 }
 

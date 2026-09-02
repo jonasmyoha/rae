@@ -438,97 +438,11 @@ func updateScrollOffset(world: mod UiWorld, target: view EntityId, scrollY: view
 # unmount path destroys children before parents so this isn't an
 # issue in the supported usage pattern.
 func destroyEntity(world: mod UiWorld, entity: view EntityId) pub {
-  # Geometry / layout
-  componentRemove(this: world.rects, entity: entity)
-  componentRemove(this: world.sizes, entity: entity)
-  componentRemove(this: world.layouts, entity: entity)
-  componentRemove(this: world.paddings, entity: entity)
-  componentRemove(this: world.margins, entity: entity)
-  componentRemove(this: world.safeAreas, entity: entity)
-  componentRemove(this: world.aligns, entity: entity)
-  componentRemove(this: world.offsets, entity: entity)
-  componentRemove(this: world.constraints, entity: entity)
-  componentRemove(this: world.overflows, entity: entity)
-  componentRemove(this: world.extentAnchors, entity: entity)
-  componentRemove(this: world.transforms, entity: entity)
-  # Visual
-  componentRemove(this: world.sprites, entity: entity)
-  componentRemove(this: world.texts, entity: entity)
-  componentRemove(this: world.textShadows, entity: entity)
-  componentRemove(this: world.styleOverrides, entity: entity)
-  componentRemove(this: world.shapes, entity: entity)
-  componentRemove(this: world.shadows, entity: entity)
-  componentRemove(this: world.opacities, entity: entity)
-  componentRemove(this: world.pointerEvents, entity: entity)
-  componentRemove(this: world.hitAreas, entity: entity)
-  componentRemove(this: world.onClicks, entity: entity)
-  componentRemove(this: world.buttons, entity: entity)
-  componentRemove(this: world.actives, entity: entity)
-  componentRemove(this: world.editorVisibles, entity: entity)
-  componentRemove(this: world.editorLockeds, entity: entity)
-  componentRemove(this: world.heroWidgets, entity: entity)
-  # Styling / art-direction visuals (these had drifted out of this list — each
-  # is a declared UiWorld ComponentTable field, so omitting it leaked the
-  # entity's row on destroy; #756 restores them and motivates synthesizing this
-  # sweep from the field list. See docs/ecs-world-helper-synthesis.md).
-  componentRemove(this: world.cornerRadiuses, entity: entity)
-  componentRemove(this: world.hoverScales, entity: entity)
-  componentRemove(this: world.gradientFills, entity: entity)
-  componentRemove(this: world.backdropImages, entity: entity)
-  componentRemove(this: world.opticalAligns, entity: entity)
-  componentRemove(this: world.layerRoots, entity: entity)
-  componentRemove(this: world.layerRefs, entity: entity)
-  componentRemove(this: world.debugAnchors, entity: entity)
-  componentRemove(this: world.pageRoots, entity: entity)
-  componentRemove(this: world.scrollStates, entity: entity)
-  componentRemove(this: world.scrollPanels, entity: entity)
-  componentRemove(this: world.interactions, entity: entity)
-  # Widget model (identity / state / bindings / styling)
-  componentRemove(this: world.widgetIds, entity: entity)
-  componentRemove(this: world.widgetStates, entity: entity)
-  componentRemove(this: world.dataDependencies, entity: entity)
-  componentRemove(this: world.actionBindings, entity: entity)
-  componentRemove(this: world.refreshRegions, entity: entity)
-  componentRemove(this: world.stateStyles, entity: entity)
-  componentRemove(this: world.visualBounds, entity: entity)
-  componentRemove(this: world.aspects, entity: entity)
-  componentRemove(this: world.scaleToFits, entity: entity)
-  # Identity / metadata
-  componentRemove(this: world.names, entity: entity)
-  componentRemove(this: world.primaryTypes, entity: entity)
-  componentRemove(this: world.nodeIdComponents, entity: entity)
-  componentRemove(this: world.sceneScopes, entity: entity)
-  componentRemove(this: world.runtimeOnlys, entity: entity)
-  # Dynamic / data binding
-  componentRemove(this: world.sceneInstances, entity: entity)
-  componentRemove(this: world.imageSourceResolvers, entity: entity)
-  componentRemove(this: world.textBindings, entity: entity)
-  componentRemove(this: world.maskShapes, entity: entity)
-  componentRemove(this: world.dataRequests, entity: entity)
-  componentRemove(this: world.listViews, entity: entity)
-  # Effects / motion
-  componentRemove(this: world.backgroundPans, entity: entity)
-  componentRemove(this: world.carousels, entity: entity)
-  componentRemove(this: world.smokeFxs, entity: entity)
-  componentRemove(this: world.animFrames, entity: entity)
-  componentRemove(this: world.animTriggers, entity: entity)
-  componentRemove(this: world.wobbleFxs, entity: entity)
-  # Hierarchy (Children must come AFTER all other tables — its
-  # cascade-drop frees the List(EntityId) buffer, and we want to
-  # release that buffer last in case anything earlier introspected
-  # the child set).
-  componentRemove(this: world.childrens, entity: entity)
-  componentRemove(this: world.parents, entity: entity)
-  # Derived / runtime-only
-  componentRemove(this: world.measuredSizes, entity: entity)
-  componentRemove(this: world.computedRects, entity: entity)
-  componentRemove(this: world.localTransforms, entity: entity)
-  componentRemove(this: world.worldTransforms, entity: entity)
-  componentRemove(this: world.worldVisuals, entity: entity)
-  componentRemove(this: world.runtimeOffsets, entity: entity)
-  componentRemove(this: world.layoutScales, entity: entity)
-  componentRemove(this: world.safeInsets, entity: entity)
-  componentRemove(this: world.animStates, entity: entity)
+  # Drop the entity's row from every component table (#760): one generic,
+  # reflection-driven sweep instead of ~75 hand-listed componentRemove calls that
+  # silently rotted whenever a table was added (see #756). clearEntityComponents
+  # unrolls `fields(world)` to one componentRemove per ComponentTable field.
+  clearEntityComponents(world: world, entity: entity)
   # Finally: recycle the index, bump its generation (so a stale handle compares
   # unequal to any future entity reusing the slot), and drop it from the live
   # set in O(1). All of that now lives in the shared entity core (#706).
