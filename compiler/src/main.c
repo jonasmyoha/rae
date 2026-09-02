@@ -1686,9 +1686,17 @@ static bool module_graph_load_module(ModuleGraph* graph,
     }
   
   if (module_stack_contains(stack, module_path)) {
-    fprintf(stderr, "error: cyclic import detected involving '%s'\n", module_path);
-    module_stack_print_trace(stack, module_path);
-    return false;
+    // Cyclic import: this module is already being loaded higher up the stack and
+    // WILL be appended to the graph once that frame finishes its imports. Rae
+    // compiles by MERGING every loaded module into one AstModule and running one
+    // global sema/codegen pass over it (see merge_module_graph), so load order is
+    // irrelevant to name/type resolution and mutual references across modules are
+    // safe. The recursive loader must only avoid re-entering an in-progress module
+    // (which would infinitely recurse); returning true here breaks the recursion
+    // and lets the outer frame complete the append. This is what lets two ECS
+    // systems reference each other's types without an artificial shared "types"
+    // module or dependency inversion (#743).
+    return true;
   }
   size_t file_size = 0;
   char* source = read_file(file_path, &file_size);
