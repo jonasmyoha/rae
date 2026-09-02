@@ -1727,6 +1727,28 @@ bool rae_named_type_value_comparable(const AstModule* module, Str base) {
     return rae_struct_value_comparable(module, &d->as.type_decl);
 }
 
+// #768: the mangled C name of a user struct we generate toJson/fromJson for, or
+// NULL when `base` is a primitive, enum, generic, or c_struct — i.e. not a
+// nested-struct field the JSON codegen can recurse into. Lets a struct field
+// serialize through its child rae_toJson_/rae_fromJson_ instead of the old `...`.
+static const char* rae_json_struct_mangled(CompilerContext* ctx, const AstModule* module, Str base) {
+  (void)module;
+  // Scan the merged decl set directly — the JSON generators run over
+  // ctx->all_decls, and a nested field type (Vec2, EntityId, ...) usually lives
+  // in a different lib module that find_type_decl(NULL, ...) would not reach.
+  const AstDecl* d = NULL;
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* dd = ctx->all_decls[i];
+      if (dd->kind == AST_DECL_TYPE && !dd->as.type_decl.specialization_args
+          && str_eq(dd->as.type_decl.name, base)) { d = dd; break; }
+  }
+  if (!d) return NULL;
+  if (d->as.type_decl.generic_params) return NULL;
+  if (has_property(d->as.type_decl.properties, "c_struct")) return NULL;
+  return rae_mangle_type_specialized(ctx, NULL, NULL,
+      &(AstTypeRef){.parts = &(AstIdentifierPart){.text = base}});
+}
+
 bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const char* out_path, struct VmRegistry* registry, bool* out_uses_raylib) {
   (void)out_uses_raylib;
   if (!module) return false;
@@ -1979,6 +2001,21 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       fprintf(out, ");\n}\n\n");
   }
 
+  // #768: forward-declare every toJson/fromJson first, so a nested-struct or
+  // List(struct) field can call a child serializer defined later in the file
+  // (e.g. Rect.toJson -> Vec2.toJson, Children.toJson -> EntityId.toJson).
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+      const AstDecl* d = ctx->all_decls[i];
+      if (d->kind != AST_DECL_TYPE || d->as.type_decl.generic_params) continue;
+      if (has_property(d->as.type_decl.properties, "c_struct")) continue;
+      const AstTypeDecl* td = &d->as.type_decl;
+      if (earlier_same_named_type(ctx, i, td->name)) continue;
+      const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
+      fprintf(out, "RAE_UNUSED static rae_String rae_toJson_%s_(%s* this);\n", mangled, mangled);
+      fprintf(out, "RAE_UNUSED static %s rae_fromJson_%s_(rae_String json);\n", mangled, mangled);
+  }
+  fprintf(out, "\n");
+
   // Generate toJson/fromJson for non-generic user struct types
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
       const AstDecl* d = ctx->all_decls[i];
@@ -1988,9 +2025,11 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       if (earlier_same_named_type(ctx, i, td->name)) continue;
       const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = td->name}});
 
-      // toJson: rae_String rae_toJson_TYPE_(TYPE* this)
+      // toJson: rae_String rae_toJson_TYPE_(TYPE* this). A generous fixed buffer:
+      // #768 nested-struct recursion embeds child JSON, so flat 4K was too small
+      // for aggregate UI components (Sprite, StyleOverride, ...).
       fprintf(out, "RAE_UNUSED static rae_String rae_toJson_%s_(%s* this) {\n", mangled, mangled);
-      fprintf(out, "  char __buf[4096]; int __p = 0;\n");
+      fprintf(out, "  char __buf[16384]; int __p = 0;\n");
       fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"{\");\n");
       bool first = true;
       for (const AstTypeField* f = td->fields; f; f = f->next) {
@@ -2040,6 +2079,42 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               // fromJson can round-trip it (was the "...": placeholder below).
               fprintf(out, "  { rae_String __e = rae_enum_toString_%.*s((int64_t)this->%.*s); __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": \\\"%%.*s\\\"\", (int)__e.len, (char*)__e.data); }\n",
                   (int)base.len, base.data, (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+          } else if (rae_json_struct_mangled(ctx, module, base)) {
+              // #768: a NESTED user-struct field recurses through its own
+              // generated toJson, embedding the child object. Makes aggregate
+              // components (Rect{Vec2}, Shape{Color}, ...) valid, round-trippable
+              // JSON instead of the old `...` placeholder.
+              const char* fm = rae_json_struct_mangled(ctx, module, base);
+              fprintf(out, "  { rae_String __j = rae_toJson_%s_(&this->%.*s); __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": %%.*s\", (int)__j.len, (char*)__j.data); }\n",
+                  fm, (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+          } else if (str_eq_cstr(base, "List") && f->type->generic_args) {
+              // #768: a List(T) field serializes as a JSON array. Element T may be
+              // a user struct (Children.ids: List(EntityId)) or a scalar; each is
+              // written per-element, so the hierarchy and other list components
+              // round-trip instead of the old `...`.
+              const AstTypeRef* elem = f->type->generic_args;
+              Str eb = get_base_type_name(elem);
+              const char* em = rae_mangle_type_specialized(ctx, NULL, NULL, elem);
+              int nl = (int)f->name.len; const char* nd = f->name.data;
+              const char* esm = rae_json_struct_mangled(ctx, module, eb);
+              fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": [\");\n", nl, nd);
+              fprintf(out, "  for (int64_t __k = 0; __k < this->%.*s.length; __k++) {\n", nl, nd);
+              fprintf(out, "    if (__k) __p += snprintf(__buf + __p, sizeof(__buf) - __p, \", \");\n");
+              fprintf(out, "    %s __e; rae_ext_rae_buf_get(this->%.*s.data, __k, sizeof(%s), &__e);\n", em, nl, nd, em);
+              if (esm) {
+                  fprintf(out, "    { rae_String __ej = rae_toJson_%s_(&__e); __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"%%.*s\", (int)__ej.len, (char*)__ej.data); }\n", esm);
+              } else if (str_eq_cstr(eb, "String")) {
+                  fprintf(out, "    __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%%.*s\\\"\", (int)__e.len, (char*)__e.data);\n");
+              } else if (str_eq_cstr(eb, "Float64") || str_eq_cstr(eb, "Float") || str_eq_cstr(eb, "Float32")) {
+                  fprintf(out, "    __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"%%g\", (double)__e);\n");
+              } else if (str_eq_cstr(eb, "Bool")) {
+                  fprintf(out, "    __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"%%s\", __e ? \"true\" : \"false\");\n");
+              } else {
+                  // Int and enum ordinals both write as a number.
+                  fprintf(out, "    __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"%%lld\", (long long)__e);\n");
+              }
+              fprintf(out, "  }\n");
+              fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"]\");\n");
           } else {
               fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": ...\");\n",
                   (int)f->name.len, f->name.data);
@@ -2091,6 +2166,41 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               // the leak-gated tests stay at outstanding=0.
               fprintf(out, "  { rae_String __s = rae_json_extract_string(json, \"%.*s\"); __r.%.*s = rae_enum_fromString_%.*s(__s); rae_ext_rae_str_free(__s); }\n",
                   (int)f->name.len, f->name.data, (int)f->name.len, f->name.data, (int)base.len, base.data);
+          } else if (rae_json_struct_mangled(ctx, module, base)) {
+              // #768: recurse into a nested user-struct field — extract its
+              // `{...}` sub-object and parse it through the child fromJson. Frees
+              // the extracted temp (mem-tagged) so leak-gated tests stay at 0.
+              const char* fm = rae_json_struct_mangled(ctx, module, base);
+              fprintf(out, "  { rae_String __sub = rae_json_extract_object(json, \"%.*s\"); if (__sub.len > 0) __r.%.*s = rae_fromJson_%s_(__sub); rae_ext_rae_str_free(__sub); }\n",
+                  (int)f->name.len, f->name.data, (int)f->name.len, f->name.data, fm);
+          } else if (str_eq_cstr(base, "List") && f->type->generic_args) {
+              // #768: rebuild a List(T) field from its JSON array — allocate the
+              // backing buffer, then parse each element (struct via child
+              // fromJson, else scalar). Mirrors the toJson array above so the
+              // hierarchy (Children.ids) and other list components round-trip.
+              const AstTypeRef* elem = f->type->generic_args;
+              Str eb = get_base_type_name(elem);
+              const char* em = rae_mangle_type_specialized(ctx, NULL, NULL, elem);
+              int nl = (int)f->name.len; const char* nd = f->name.data;
+              const char* esm = rae_json_struct_mangled(ctx, module, eb);
+              fprintf(out, "  { rae_String __arr = rae_json_extract_array(json, \"%.*s\"); int64_t __n = rae_json_array_count(__arr);\n", nl, nd);
+              fprintf(out, "    int64_t __cap = __n > 0 ? __n : 1;\n");
+              fprintf(out, "    __r.%.*s.data = rae_ext_rae_buf_alloc(__cap, sizeof(%s)); __r.%.*s.cap = __cap; __r.%.*s.length = __n;\n", nl, nd, em, nl, nd, nl, nd);
+              fprintf(out, "    for (int64_t __k = 0; __k < __n; __k++) {\n");
+              fprintf(out, "      rae_String __it = rae_json_array_item(__arr, __k); %s __ev;\n", em);
+              if (esm) {
+                  fprintf(out, "      __ev = rae_fromJson_%s_(__it);\n", esm);
+              } else if (str_eq_cstr(eb, "Float64") || str_eq_cstr(eb, "Float") || str_eq_cstr(eb, "Float32")) {
+                  fprintf(out, "      __ev = (%s)(__it.data ? strtod((char*)__it.data, 0) : 0);\n", em);
+              } else if (str_eq_cstr(eb, "Bool")) {
+                  fprintf(out, "      __ev = (__it.data && __it.data[0] == 't');\n");
+              } else if (str_eq_cstr(eb, "String")) {
+                  fprintf(out, "      __ev = (rae_String){0}; (void)__it;\n"); // list-of-String reload unsupported; leave empty
+              } else {
+                  fprintf(out, "      __ev = (%s)(__it.data ? strtoll((char*)__it.data, 0, 10) : 0);\n", em);
+              }
+              fprintf(out, "      rae_ext_rae_buf_set(__r.%.*s.data, __k, sizeof(%s), &__ev); rae_ext_rae_str_free(__it);\n", nl, nd, em);
+              fprintf(out, "    }\n    rae_ext_rae_str_free(__arr);\n  }\n");
           }
       }
       fprintf(out, "  return __r;\n}\n\n");
