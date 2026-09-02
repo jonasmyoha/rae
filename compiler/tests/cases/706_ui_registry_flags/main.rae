@@ -4,9 +4,9 @@ open ui/registry_flags
 
 # #730: the UI's serialized-vs-derived split is REGISTRY-DRIVEN. Authored
 # components are registered `serialize`; the derived caches the systems rebuild
-# (Parent — the reverse index of the authoritative, ordered Children (#769) —,
-# ComputedRect, MeasuredSize, WorldTransform2D, RuntimeOffset, ...) are
-# registered without it, so the generic serializer skips them by flag.
+# are registered without it, so the generic serializer skips them by flag. Keyed
+# by UiWorld FIELD name (#768): the machine snapshot looks up by fieldName(table),
+# so the registry registers each table under its field name (`rects`, not `Rect`).
 
 func check(reg: view ComponentRegistry, name: view String) {
   log("{name}: registered={isRegistered(reg: reg, name: name)} serialize={registeredHasFlag(reg: reg, name: name, flag: serialize)}")
@@ -16,19 +16,19 @@ func main() {
   let reg: ComponentRegistry = createUiComponentRegistry()
   log("count: {registeredCount(reg: reg)}")
   # authored -> persisted
-  check(reg: reg, name: "Rect")
-  check(reg: reg, name: "Layout")
-  check(reg: reg, name: "Text")
-  check(reg: reg, name: "Parent")
+  check(reg: reg, name: "rects")
+  check(reg: reg, name: "layouts")
+  check(reg: reg, name: "texts")
+  check(reg: reg, name: "parents")
   # editor-only still serializes, but is flagged
-  let evEditorOnly: Bool = registeredHasFlag(reg: reg, name: "EditorVisible", flag: editorOnly)
-  log("EditorVisible editorOnly={evEditorOnly}")
+  let evEditorOnly: Bool = registeredHasFlag(reg: reg, name: "editorVisibles", flag: editorOnly)
+  log("editorVisibles editorOnly={evEditorOnly}")
   # derived caches -> NOT persisted
-  check(reg: reg, name: "Children")
-  check(reg: reg, name: "ComputedRect")
-  check(reg: reg, name: "MeasuredSize")
-  check(reg: reg, name: "WorldTransform2D")
-  check(reg: reg, name: "RuntimeOffset")
+  check(reg: reg, name: "childrens")
+  check(reg: reg, name: "computedRects")
+  check(reg: reg, name: "measuredSizes")
+  check(reg: reg, name: "worldTransforms")
+  check(reg: reg, name: "runtimeOffsets")
   # unknown -> nothing
-  check(reg: reg, name: "Wibble")
+  check(reg: reg, name: "wibble")
 }
