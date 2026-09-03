@@ -171,21 +171,20 @@ func g2dOpenPass(loadOp: copy Int32, r: copy Float, g: copy Float, b: copy Float
     loadOp: loadOp, storeOp: WGPUStoreOp_Store,
     clearValue: { r: r as Float64, g: g as Float64, b: b as Float64, a: a as Float64 }
   }
-  # set() is a no-op past the list length, so grow to one slot first (as
-  # gbuffer.rae does) before writing the single colour attachment.
-  loop gG2dColorAtts.length < 1 { gG2dColorAtts.add(value: { depthSlice: 0 as UInt32 }) }
-  gG2dColorAtts.set(index: 0, value: att)
+  # Pure per-call scratch (#764: was a module-level global). Its .data is the C
+  # array the pass descriptor points at; WebGPU copies the attachments during
+  # BeginRenderPass below, so the local only needs to outlive that call. set() is
+  # a no-op past the length, so grow to one slot first (as gbuffer.rae does).
+  var g2dColorAtts: List(WGPURenderPassColorAttachment) = createList(WGPURenderPassColorAttachment, cap: 1)
+  loop g2dColorAtts.length < 1 { g2dColorAtts.add(value: { depthSlice: 0 as UInt32 }) }
+  g2dColorAtts.set(index: 0, value: att)
   let rpDesc: WGPURenderPassDescriptor = {
     colorAttachmentCount: 1 as UInt64,
-    colorAttachments: gG2dColorAtts.data
+    colorAttachments: g2dColorAtts.data
   }
   let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
   g2dSetFrame(enc: enc, pass: pass)
 }
-
-# Reused one-element attachment list; its .data is the C array pointer the pass
-# descriptor references (must outlive the descriptor, so it is module-level).
-var gG2dColorAtts: List(WGPURenderPassColorAttachment) = createList(WGPURenderPassColorAttachment, cap: 1)
 
 # Acquire the next surface texture and begin a render pass that clears it to
 # the given linear RGBA colour (components 0..1). Must be paired with endFrame.
