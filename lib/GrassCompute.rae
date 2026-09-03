@@ -81,7 +81,7 @@ type GrassCompute {
   visibleCache: Int
 }
 
-func createGrassCompute() pub ret GrassCompute {
+func createGrassCompute() ret GrassCompute {
   ret GrassCompute {
     made: false, drawBindMade: false,
     uni: createList(Float, cap: 28),
@@ -104,7 +104,7 @@ func grassComputeWgsl() ret String {
 
 # Force a grass-pipeline rebuild on the next frame — the island radius is baked into
 # the composed compute shader, so growing the island (#41) must recompose it.
-func resetGrassPipeline(grass: mod GrassCompute) pub {
+func resetGrassPipeline(grass: mod GrassCompute) {
   grass.made = false
   # The draw bind group is auto-layouted from the OLD render pipeline; invalidate it
   # so it rebuilds against the recomposed pipeline (#41 grow).
@@ -346,7 +346,7 @@ func grassDraw(grass: mod GrassCompute) {
 }
 
 # Total candidate blades the compute considers each frame (#488 diagnostics).
-func grassGeneratedCount() pub ret Int { ret grassGpuBladeCount }
+func grassGeneratedCount() ret Int { ret grassGpuBladeCount }
 
 
 # Read the VISIBLE blade count back (#488): the culling compute atomically bumped
@@ -355,7 +355,7 @@ func grassGeneratedCount() pub ret Int { ret grassGpuBladeCount }
 # the map waits for the GPU, so call it throttled (every N frames), not per frame.
 # Returns -1 before the grass GPU exists. Also confirms the map readback works on
 # this backend (compute-written data, unlike the #528 timestamp path).
-func grassReadVisible(grass: mod GrassCompute) pub ret Int {
+func grassReadVisible(grass: mod GrassCompute) ret Int {
   if grassGet(index: 7) is webgpuNull() { ret 0 - 1 }
   let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
   let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
@@ -376,7 +376,7 @@ func grassReadVisible(grass: mod GrassCompute) pub ret Int {
 
 
 # Last read visible-blade count (#488). Cheap; refreshed by grassDiagTick.
-func grassVisibleCount(grass: view GrassCompute) pub ret Int { ret grass.visibleCache }
+func grassVisibleCount(grass: view GrassCompute) ret Int { ret grass.visibleCache }
 
 # Per-frame grass diagnostics (#488). Only active during a profile capture so the
 # blocking readback never stalls normal play, and throttled to every 10th frame
@@ -384,7 +384,7 @@ func grassVisibleCount(grass: view GrassCompute) pub ret Int { ret grass.visible
 # generated / visible / culled candidate counts as counters — plot them in the
 # capture alongside fps and per-pass GPU ms. Call once per frame after
 # grassGenerate.
-func grassDiagTick(grass: mod GrassCompute, profiler: mod Profiler) pub {
+func grassDiagTick(grass: mod GrassCompute, profiler: mod Profiler) {
   if profile.profileCapturing(profiler: profiler) is false { ret }
   grass.diagFrame = grass.diagFrame + 1
   if grass.diagFrame % 10 is 0 {
