@@ -47,7 +47,7 @@ import core
 import shadow3d
 open shadow3d
 # The sun cascade shadow render moved to Rae (#504); endShadowPass calls it.
-import gbuffer_shadow
+import gbufferShadow
 # The sky the forward background draws (#418). sky.rae does not import this,
 # so the dependency runs one way only.
 import sky
@@ -746,7 +746,7 @@ func updateMeshVerts(mesh: view MeshHandle, verts: view List(Float), vertCount: 
 # (pure arithmetic, unit-tested); these only move it to the GPU and
 # rasterise the casters.
 # The shadow-map feed (cascade uniforms + draw queue) is bookkeeping, not a pass
-# encoder — the shadow render itself is in Rae (gbuffer_shadow.shadowEnd, #504).
+# encoder — the shadow render itself is in Rae (gbufferShadow.shadowEnd, #504).
 # So these bind the shadow-map C helpers under the rae_sm_* prefix (#514), the
 # same prefix the shadow accessors already use.
 func shadowBegin(cascades: view Buffer(Float), count: Int, resolution: Int,
@@ -774,7 +774,7 @@ func drawShadowCaster(mesh: view MeshHandle, model: view Mat4) pub {
 }
 
 # `paletteBase` is this caster's start offset into the shared skin palette buffer
-# (characterPaletteBase in gbuffer_instanced.rae) — the SAME base its G-buffer
+# (characterPaletteBase in gbufferInstanced.rae) — the SAME base its G-buffer
 # instance uses — so its shadow shows its own pose (#547). 0 for a lone character.
 func drawShadowCasterSkinned(mesh: view MeshHandle, model: view Mat4, paletteBase: copy Int) pub {
   if not meshHandleIsValid(h: mesh) {
@@ -784,7 +784,7 @@ func drawShadowCasterSkinned(mesh: view MeshHandle, model: view Mat4, paletteBas
 }
 
 func endShadowPass() pub {
-  gbuffer_shadow.shadowEnd()
+  gbufferShadow.shadowEnd()
 }
 
 # How many casters the shadow pass rasterised. Exposed because a shadow

@@ -459,7 +459,7 @@ static int g_sdf_atlas_w[RAE_SDF_MAX_ATLAS];
 static int g_sdf_atlas_h[RAE_SDF_MAX_ATLAS];
 static int g_sdf_atlas_n = 0;
 
-int64_t rae_ext_sdf_text_loadAtlas(rae_String path, int64_t w, int64_t h) {
+int64_t rae_ext_sdfText_loadAtlas(rae_String path, int64_t w, int64_t h) {
     if (!path.data || w <= 0 || h <= 0 || g_sdf_atlas_n >= RAE_SDF_MAX_ATLAS) return 0;
     FILE* f = fopen((const char*)path.data, "rb");
     if (!f) { fprintf(stderr, "[sdf] cannot open %s\n", (const char*)path.data); return 0; }

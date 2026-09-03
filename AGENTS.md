@@ -25,6 +25,25 @@ These instructions define **how Codex should work**, communicate progress, and i
   `maxRetries`. Enum cases are `camelCase` too (`roundedRect`, not `ROUNDED_RECT`).
 - Violations MUST produce a compiler diagnostic
 
+### File and folder names follow the same rule — no `snake_case` on disk either:
+- A `.rae` file is a MODULE, and its name is spelled in code at every `import`/
+  `open` and every qualified call (`GpuTiming.createGpuTiming()`). `snake_case`
+  there is the same C habit as a `snake_case` identifier, so it is banned too.
+- **A module whose main export is a type is named after that type, in
+  `PascalCase`:** the file defining `type GpuTiming` is `GpuTiming.rae`, the file
+  defining `type CameraRig` is `CameraRig.rae`. Folders that group such a module
+  match (`ui/RenderSystem/RenderSystem.rae`). Most modules are of this kind, so
+  most file/folder names start with a capital.
+- **A module that is a bag of functions with no single owning type is
+  `camelCase`:** `worldBiome.rae`, `gpu2dText.rae`, `noiseWgsl.rae`.
+- This applies to FOLDERS as well (`legacyRaylib/`, not `legacy_raylib/`). It does
+  NOT apply to non-module data on disk — shader assets (`*.wgsl`), `.raescene`
+  files, images, and the number-prefixed example/test directories (`106_*`,
+  `414_*`) are a separate naming scheme and keep their names.
+- When you rename a module, update every `import`/`open` path and every
+  `oldName.` qualifier that referenced it (they live in code, never in strings —
+  a `"lib/foo_bar.wgsl"` asset path is a string and stays).
+
 ### No single-letter names for parameters or meaningful locals:
 - Write `state`, `settings`, `world` — not `s`, `c`, `w`. A single letter says
   nothing about what it holds, and the reader has to scroll back to the

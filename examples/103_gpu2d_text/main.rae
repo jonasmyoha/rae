@@ -12,8 +12,8 @@
 #   rae run --target compiled examples/103_gpu2d_text/main.rae
 import core
 import gpu2d
-import gpu2d_text
-import sdf_text
+import gpu2dText
+import sdfText
 
 # Design canvas — author in logical units; gpu2d scales it to the window.
 const canvasW: Float = 1040.0
@@ -21,18 +21,18 @@ const canvasH: Float = 1040.0
 
 # --- draw helpers ---------------------------------------------------------
 func mtext(font: view SdfFont, s: view String, x: view Float, y: view Float, size: view Float, c: view Int) {
-  gpu2d_text.drawText(font: font, text: s, x: x, y: y, sizePx: size, color: c)
+  gpu2dText.drawText(font: font, text: s, x: x, y: y, sizePx: size, color: c)
 }
 
 func mshadow(font: view SdfFont, s: view String, x: view Float, y: view Float, size: view Float, c: view Int, sh: view Int, sy: view Float, soft: view Float) {
   # Diagonal (down-right) drop-shadow — offset both axes, not just vertical.
-  gpu2d_text.drawTextEx(font: font, text: s, x: x, y: y, sizePx: size, color: c,
+  gpu2dText.drawTextEx(font: font, text: s, x: x, y: y, sizePx: size, color: c,
                         outlineColor: 0, outlineWidth: 0.0,
                         shadowColor: sh, shadowOffX: sy, shadowOffY: sy, shadowSoftness: soft)
 }
 
 func moutline(font: view SdfFont, s: view String, x: view Float, y: view Float, size: view Float, c: view Int, ol: view Int, olw: view Float) {
-  gpu2d_text.drawTextEx(font: font, text: s, x: x, y: y, sizePx: size, color: c,
+  gpu2dText.drawTextEx(font: font, text: s, x: x, y: y, sizePx: size, color: c,
                         outlineColor: ol, outlineWidth: olw,
                         shadowColor: 0, shadowOffX: 0.0, shadowOffY: 0.0, shadowSoftness: 1.0)
 }
@@ -42,7 +42,7 @@ func panel(x: view Float, y: view Float, w: view Float, h: view Float, c: view I
 }
 
 func header(font: view SdfFont, s: view String, x: view Float, y: view Float) {
-  gpu2d_text.drawText(font: font, text: s, x: x, y: y, sizePx: 17.0, color: 0xFF78C8FF)
+  gpu2dText.drawText(font: font, text: s, x: x, y: y, sizePx: 17.0, color: 0xFF78C8FF)
 }
 
 func drawFrame(font: view SdfFont) {
@@ -129,7 +129,7 @@ func drawFrame(font: view SdfFont) {
 # White small text with a subtle same-colour outline (to fatten thin glyphs)
 # plus a soft diagonal dark shadow, so small text + shadow reads cleanly.
 func smallShadow(font: view SdfFont, s: view String, x: view Float, y: view Float, size: view Float) {
-  gpu2d_text.drawTextEx(font: font, text: s, x: x, y: y, sizePx: size, color: 0xFFFFFFFF,
+  gpu2dText.drawTextEx(font: font, text: s, x: x, y: y, sizePx: size, color: 0xFFFFFFFF,
                         outlineColor: 0xFFFFFFFF, outlineWidth: 1.2,
                         shadowColor: 0xB4000000, shadowOffX: 1.5, shadowOffY: 1.5, shadowSoftness: 3.0)
 }
@@ -138,7 +138,7 @@ func main() ret Int {
   gpu2d.initWindow(width: 1040, height: 1040, title: "Rae 2D — GPU MSDF Text")
   gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
   let dir: String = "examples/103_gpu2d_text/"
-  let font: SdfFont = sdf_text.loadSdfFont(
+  let font: SdfFont = sdfText.loadSdfFont(
     jsonPath: "{dir}assets/Roboto-Regular.mtsdf.json",
     rawAtlasPath: "{dir}assets/Roboto-Regular.mtsdf.raw")
 
