@@ -2094,20 +2094,32 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               // round-trip instead of the old `...`.
               const AstTypeRef* elem = f->type->generic_args;
               Str eb = get_base_type_name(elem);
-              const char* em = rae_mangle_type_specialized(ctx, NULL, NULL, elem);
               int nl = (int)f->name.len; const char* nd = f->name.data;
               const char* esm = rae_json_struct_mangled(ctx, module, eb);
+              bool eInt = str_eq_cstr(eb, "Int") || str_eq_cstr(eb, "Int64") || str_eq_cstr(eb, "Int32")
+                  || find_enum_decl(NULL, module, eb);
+              bool eFloat = str_eq_cstr(eb, "Float64") || str_eq_cstr(eb, "Float") || str_eq_cstr(eb, "Float32");
+              bool eBool = str_eq_cstr(eb, "Bool");
+              bool eString = str_eq_cstr(eb, "String");
+              if (!esm && !eInt && !eFloat && !eBool && !eString) {
+                  // A List of a c_struct / opaque element (e.g. a WGPU* binding
+                  // struct) is runtime state with no JSON form. Emit null rather
+                  // than mis-mangle the element type — #764 surfaced this on a
+                  // List(WGPUPassTimestampWrites) field getting an auto toJson.
+                  fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": null\");\n", nl, nd);
+              } else {
+              const char* em = rae_mangle_type_specialized(ctx, NULL, NULL, elem);
               fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": [\");\n", nl, nd);
               fprintf(out, "  for (int64_t __k = 0; __k < this->%.*s.length; __k++) {\n", nl, nd);
               fprintf(out, "    if (__k) __p += snprintf(__buf + __p, sizeof(__buf) - __p, \", \");\n");
               fprintf(out, "    %s __e; rae_ext_rae_buf_get(this->%.*s.data, __k, sizeof(%s), &__e);\n", em, nl, nd, em);
               if (esm) {
                   fprintf(out, "    { rae_String __ej = rae_toJson_%s_(&__e); __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"%%.*s\", (int)__ej.len, (char*)__ej.data); }\n", esm);
-              } else if (str_eq_cstr(eb, "String")) {
+              } else if (eString) {
                   fprintf(out, "    __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%%.*s\\\"\", (int)__e.len, (char*)__e.data);\n");
-              } else if (str_eq_cstr(eb, "Float64") || str_eq_cstr(eb, "Float") || str_eq_cstr(eb, "Float32")) {
+              } else if (eFloat) {
                   fprintf(out, "    __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"%%g\", (double)__e);\n");
-              } else if (str_eq_cstr(eb, "Bool")) {
+              } else if (eBool) {
                   fprintf(out, "    __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"%%s\", __e ? \"true\" : \"false\");\n");
               } else {
                   // Int and enum ordinals both write as a number.
@@ -2115,6 +2127,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               }
               fprintf(out, "  }\n");
               fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"]\");\n");
+              }
           } else {
               fprintf(out, "  __p += snprintf(__buf + __p, sizeof(__buf) - __p, \"\\\"%.*s\\\": ...\");\n",
                   (int)f->name.len, f->name.data);
@@ -2180,9 +2193,18 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               // hierarchy (Children.ids) and other list components round-trip.
               const AstTypeRef* elem = f->type->generic_args;
               Str eb = get_base_type_name(elem);
-              const char* em = rae_mangle_type_specialized(ctx, NULL, NULL, elem);
               int nl = (int)f->name.len; const char* nd = f->name.data;
               const char* esm = rae_json_struct_mangled(ctx, module, eb);
+              bool eInt = str_eq_cstr(eb, "Int") || str_eq_cstr(eb, "Int64") || str_eq_cstr(eb, "Int32")
+                  || find_enum_decl(NULL, module, eb);
+              bool eFloat = str_eq_cstr(eb, "Float64") || str_eq_cstr(eb, "Float") || str_eq_cstr(eb, "Float32");
+              bool eBool = str_eq_cstr(eb, "Bool");
+              bool eString = str_eq_cstr(eb, "String");
+              if (!esm && !eInt && !eFloat && !eBool && !eString) {
+                  // List of a c_struct / opaque element — no JSON form; skip (the
+                  // toJson side wrote null). See the toJson branch note (#764).
+              } else {
+              const char* em = rae_mangle_type_specialized(ctx, NULL, NULL, elem);
               fprintf(out, "  { rae_String __arr = rae_json_extract_array(json, \"%.*s\"); int64_t __n = rae_json_array_count(__arr);\n", nl, nd);
               fprintf(out, "    int64_t __cap = __n > 0 ? __n : 1;\n");
               fprintf(out, "    __r.%.*s.data = rae_ext_rae_buf_alloc(__cap, sizeof(%s)); __r.%.*s.cap = __cap; __r.%.*s.length = __n;\n", nl, nd, em, nl, nd, nl, nd);
@@ -2201,6 +2223,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               }
               fprintf(out, "      rae_ext_rae_buf_set(__r.%.*s.data, __k, sizeof(%s), &__ev); rae_ext_rae_str_free(__it);\n", nl, nd, em);
               fprintf(out, "    }\n    rae_ext_rae_str_free(__arr);\n  }\n");
+              }
           }
       }
       fprintf(out, "  return __r;\n}\n\n");
