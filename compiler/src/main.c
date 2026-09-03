@@ -1250,6 +1250,14 @@ static char* normalize_import_path(const char* current_module_path, const char* 
     return NULL;
   }
 
+  // #779: strip a trailing `.rae` up front so the `.`->`/` separator conversion
+  // below never mangles the extension (derive_module_path passes real file paths
+  // like `lib/ui/Theme.rae`). The per-segment strip further down then no-ops.
+  {
+    size_t szn = strlen(sanitized);
+    if (szn > 4 && strcmp(sanitized + szn - 4, ".rae") == 0) sanitized[szn - 4] = '\0';
+  }
+
   SegmentBuffer segments = {0};
   const char* cursor = sanitized;
   bool treat_as_relative = false;
@@ -1257,6 +1265,14 @@ static char* normalize_import_path(const char* current_module_path, const char* 
     while (*cursor == '/') cursor++;
   } else {
     treat_as_relative = is_relative_spec(cursor);
+  }
+
+  // #779: absolute imports accept `.` OR `/` as the package/module separator, so
+  // `import ui.Theme` == `import ui/Theme`. Relative specs (leading `.`/`..`) keep
+  // `/` so `../bb` still means the parent package. The internal module_path stays
+  // `/`-separated, so sema/mangler are unchanged.
+  if (!treat_as_relative) {
+    for (char* p = (char*)cursor; *p; ++p) { if (*p == '.') *p = '/'; }
   }
 
   if (treat_as_relative) {
