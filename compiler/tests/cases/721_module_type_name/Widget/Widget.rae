@@ -1,0 +1,15 @@
+# A module in a folder named after its headline type: folder namespace `Widget`
+# == `type Widget`. Qualified calls `Widget.makeWidget(...)` must resolve to the
+# module's functions, not be hijacked by the same-named type. Regression for the
+# #777 module==type-name collision (sema.c AST_EXPR_METHOD_CALL qualifier path).
+type Widget {
+  n: Int
+}
+
+func makeWidget(n: copy Int) ret Widget {
+  ret Widget { n: n }
+}
+
+func widgetValue(w: view Widget) ret Int {
+  ret w.n
+}
