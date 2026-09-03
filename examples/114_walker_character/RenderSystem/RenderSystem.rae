@@ -133,7 +133,7 @@ func renderShadowPass(cam: mod CameraState, character: mod CharacterState, io: m
 # The G-buffer pass: grass compute first, then the geometry — biome-splat ground,
 # scene, instanced props, and the character's skinned parts + idle crowd — then
 # the grass draw, all into one G-buffer pass.
-func renderGbufferPass(cam: mod CameraState, character: mod CharacterState, scene: mod Scene3d, splashes: mod ParticleSystem, terrain: mod InfiniteTerrain, world: mod GameWorld, aspect: copy Float, palette: view List(Float), t: copy Float, dt: copy Float) {
+func renderGbufferPass(cam: mod CameraState, character: mod CharacterState, scene: mod Scene3d, splashes: mod ParticleSystem, terrain: mod InfiniteTerrain, world: mod GameWorld, aspect: copy Float, palette: view List(Float), t: copy Float, dt: copy Float, profiler: mod Profiler) {
   var grassToonGen: Int = 0
   if character.toon { grassToonGen = 1 }
   let grassView: GrassViewSettings = grass_config.grassThirdPersonSettings(groundColor: walkerGroundColor())
@@ -146,7 +146,7 @@ func renderGbufferPass(cam: mod CameraState, character: mod CharacterState, scen
                 fwdY: cam.camera.target.y - cam.camera.position.y,
                 fwdZ: cam.camera.target.z - cam.camera.position.z,
                 settings: grassView)
-  grassDiagTick()
+  grassDiagTick(profiler: profiler)
   gbuffer.beginPass(camera: cam.camera, light: cam.light, aspect: aspect)
   drawTerrainGround(terrain: terrain, world: world, time: t)
   gbuffer.renderScene(scene: scene)
@@ -190,7 +190,7 @@ func renderGbufferPass(cam: mod CameraState, character: mod CharacterState, scen
 }
 
 # ----- render phase: animation sample + render-graph walk ------------------
-func renderApp(cam: mod CameraState, character: mod CharacterState, frame: mod Frame, io: mod InputUi, render: mod RenderState, scene: mod Scene3d, world: mod GameWorld, terrain: mod InfiniteTerrain, splashes: mod ParticleSystem) {
+func renderApp(cam: mod CameraState, character: mod CharacterState, frame: mod Frame, io: mod InputUi, render: mod RenderState, scene: mod Scene3d, world: mod GameWorld, terrain: mod InfiniteTerrain, splashes: mod ParticleSystem, profiler: mod Profiler) {
   frame.renderedOnce = true
   io.lastLogRevision = io.logView.revision
   let dt: Float = frame.dt
@@ -250,13 +250,13 @@ func renderApp(cam: mod CameraState, character: mod CharacterState, frame: mod F
 
   loop var oi: Int = 0, oi < deferredOrderLength(r: render.renderer), ++oi {
     let tag: Int = deferredTagAt(r: render.renderer, i: oi)
-    profile.zoneBegin(name: (tag as RenderTag).toString())
+    profile.zoneBegin(profiler: profiler, name: (tag as RenderTag).toString())
     # Exhaustive over RenderTag: adding a pass is a compile error here until it is
     # handled (#624). Each pass is a helper/one-liner; the five generic passes
     # defer to renderDeferredPass (or-patterns, #622, will merge them into one arm).
     match tag {
       case RenderTag.shadow { renderShadowPass(cam: cam, character: character, io: io, render: render, scene: scene, terrain: terrain, world: world, aspect: aspect, palette: palette) }
-      case RenderTag.gbuffer { renderGbufferPass(cam: cam, character: character, scene: scene, splashes: splashes, terrain: terrain, world: world, aspect: aspect, palette: palette, t: t, dt: dt) }
+      case RenderTag.gbuffer { renderGbufferPass(cam: cam, character: character, scene: scene, splashes: splashes, terrain: terrain, world: world, aspect: aspect, palette: palette, t: t, dt: dt, profiler: profiler) }
       case RenderTag.ssao {
         renderDeferredPass(r: render.renderer, tag: tag, scene: scene,
                            camera: cam.camera, light: cam.light, aspect: aspect)
@@ -284,7 +284,7 @@ func renderApp(cam: mod CameraState, character: mod CharacterState, frame: mod F
       }
       case RenderTag.present { gpu2d.endFrame() }
     }
-    profile.zoneEnd(name: (tag as RenderTag).toString())
+    profile.zoneEnd(profiler: profiler, name: (tag as RenderTag).toString())
   }
   snapshotPrevTransforms(scene: scene)
   capFrameSleep(drs: render.drs, frameStartSec: now)
