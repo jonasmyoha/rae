@@ -37,42 +37,33 @@ type BiomeConfig {
   islandFalloff: Float # width of the shore ramp inside that radius
 }
 
-# RUNTIME island size (#41 grow-the-realm). The radius/falloff used to be baked
-# constants in BOTH this file (defaultBiomeConfig) and world_biome.wgsl. To let the
-# island GROW between levels they are now module globals with the old defaults, read
-# by defaultBiomeConfig (CPU) and injected into the composed terrain/grass shaders
-# (GPU, via islandParamsWgsl). Nothing calls the setter unless it wants a non-default
-# size, so example 114 and every other biome user stays at 60/22 unchanged. Both the
-# CPU field and the GPU const track one source, so mesh geometry and fragment
-# classification never disagree about where the coast is.
-var gIslandRadius: Float = 60.0
-var gIslandFalloff: Float = 22.0
-
-func worldIslandRadius() pub ret Float { ret gIslandRadius }
-func worldIslandFalloff() pub ret Float { ret gIslandFalloff }
-
-# Set the runtime island size. Callers must ALSO rebuild the terrain + grass
-# pipelines (they bake the radius as a shader const) and re-stream the terrain mesh
-# (its vertex heights were generated at the old radius). See src/grow.rae.
-func setWorldIsland(radius: copy Float, falloff: copy Float) pub {
-  gIslandRadius = radius
-  gIslandFalloff = falloff
-}
+# Island size (#41 grow-the-realm). #764: these were module-level `var` globals with
+# a setWorldIsland() mutator, so the realm could grow at runtime. But nothing in the
+# tree ever called the setter (the grow path, src/grow.rae, was never built), so the
+# values were only ever the defaults below — de-facto constants. The no-globals rule
+# (docs/globals-and-app-ownership.md) bans the mutable global, so they are `const`
+# now. The proper home for a genuinely runtime-variable island IS the already-threaded
+# BiomeConfig (it carries islandRadius/islandFalloff per call): a future #41 grow sets
+# those fields on the config an app owns and rebuilds the pipelines, rather than
+# mutating a global. defaultBiomeConfig() seeds from these; islandParamsWgsl() bakes
+# the same values into the composed terrain/grass shaders, so the CPU field and the
+# GPU const still track one source and never disagree about where the coast is.
+const defaultIslandRadius: Float = 60.0
+const defaultIslandFalloff: Float = 22.0
 
 # The two island-size consts, generated as WGSL text and PREPENDED to the composed
 # terrain/grass shaders (gbuffer_terrain.terrainSplatWgsl, grass_compute.grassComputeWgsl)
-# so the GPU field uses the same runtime radius as the CPU. world_biome.wgsl no longer
-# declares them. Regenerated on every pipeline build, so a rebuild after setWorldIsland
-# picks up the new size.
+# so the GPU field uses the same radius as the CPU. world_biome.wgsl no longer declares
+# them. Regenerated on every pipeline build.
 func islandParamsWgsl() pub ret String {
-  ret "const RAE_BIOME_ISLAND_RADIUS: f32 = {gIslandRadius};\nconst RAE_BIOME_ISLAND_FALLOFF: f32 = {gIslandFalloff};\n"
+  ret "const RAE_BIOME_ISLAND_RADIUS: f32 = {defaultIslandRadius};\nconst RAE_BIOME_ISLAND_FALLOFF: f32 = {defaultIslandFalloff};\n"
 }
 
 func defaultBiomeConfig() pub ret BiomeConfig {
   ret BiomeConfig {
     seed: 1337, elevScale: 90.0, moistScale: 140.0,
     waterLevel: 0.0 - 0.28, beachBand: 0.24, rockSlope: 0.30, swampMoist: 0.6,
-    islandRadius: gIslandRadius, islandFalloff: gIslandFalloff
+    islandRadius: defaultIslandRadius, islandFalloff: defaultIslandFalloff
   }
 }
 
