@@ -163,21 +163,17 @@ a feature that is not already listed here.
 
 ## Ownership & the no-globals rule
 
-- **Threading a cross-cutting resource to leaf call sites has no ergonomic story
-  (surfaced by #764).** The no-globals rule (`docs/globals-and-app-ownership.md`) says
-  every singleton is a resource on the App, passed down. That is clean when an
-  already-threaded owner exists — `camera_rig`'s input state moved onto the `CameraRig`
-  struct in a 2-level cascade with no friction. It is brutal for a *cross-cutting*
-  singleton read from LEAF helpers: `theme.activeTheme` is read inside `themeColorByName`
-  (text/style/registry/legacy-render leaves, ~37 sites); the profiler's `zoneBegin`/
-  `profileCounter` are called deep in the render graph (~14 sites). Making those a
-  resource means adding a `theme: view Theme` / `prof: mod Profiler` parameter to every
-  leaf AND every function on the path from an App-holder down to it — dozens of signature
-  changes per singleton, with no owner to hang the field on until the whole chain is
-  threaded. Rae has no mechanism to pass such ambient state without spelling it at every
-  hop (no implicit/context parameters, no capability passing, no `using`-style injection).
-  Without one, "no globals" for a genuinely cross-cutting concern is a mechanical mega-diff
-  that must be done and screenshot-verified per singleton — which is why #764 split into
-  per-module tasks. A deliberate, analyzable form of scoped ambient state (NOT a global,
-  NOT a hidden channel — something a tool can still read as a dependency) would turn each
-  of those migrations from an epic into an edit. Design space, not a concrete proposal.
+- **Implicit context parameter (Odin/Jai `context`)** — would let a profiler or theme
+  reach leaf functions without threading. #764 finished the no-globals migration by
+  hand: every cross-cutting singleton (Profiler, GrassCompute, the DeferredRenderer pass
+  caches, the UI `UiTheme`) became a field on an owner (App / world / renderer resource)
+  and was spelled at every hop from the owner down to the leaf — the theme alone touched
+  the whole paint + scene-deserialiser chain across lib/ui and three example apps. A
+  language-level ambient context (a `context`-style scoped binding threaded implicitly by
+  the compiler, one keyword, no `@`-sigil) would collapse that mechanical mega-diff into
+  an edit. **Against:** Rae's promise is that what a function needs is in its signature;
+  Zig rejected implicit context for exactly that reason (readability / no hidden inputs a
+  tool can't see); Bevy threads `&Theme`/`Res<T>` through helpers rather than hiding it.
+  Whatever is decided, decide it deliberately as a language question — not as fallout from
+  #764. Design space, not a concrete proposal; if pursued, spell it as a real keyword in
+  the `func`/`type` namespace, never an attribute.
