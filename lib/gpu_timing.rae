@@ -137,7 +137,7 @@ func gpuTimingResolve(enc: copy Ptr, idx: copy Int) pub {
 
 # Copy the frame's resolved timestamps to the readback buffer, read them (blocking
 # until GPU-complete), and emit per-pass GPU microseconds as profiler counters.
-func gpuTimingCollect() pub {
+func gpuTimingCollect(profiler: mod Profiler) pub {
   if gtEnabled is false or gtCount is 0 { ret }
   let bytes: Int = gtCount * 16
   # Fresh MapRead staging buffer each frame + release after: this mirrors the
@@ -165,11 +165,11 @@ func gpuTimingCollect() pub {
     let endTick: Int = rae_ext_rae_buf_get(V: Int, buf: gtDst.data, index: i * 2 + 1)
     let us: Int = rae_float_to_int(f: (endTick - begin) as Float * gtPeriod / 1000.0)
     let nm: String = rae_ext_rae_buf_get(V: String, buf: gtNames.data, index: i)
-    profile.profileCounter(name: "gpu.{nm}", value: us)
+    profile.profileCounter(profiler: profiler, name: "gpu.{nm}", value: us)
     gtTotalUs = gtTotalUs + us
     i = i + 1
   }
-  profile.profileCounter(name: "gpu.total", value: gtTotalUs)
+  profile.profileCounter(profiler: profiler, name: "gpu.total", value: gtTotalUs)
 }
 
 # Total GPU microseconds across all passes from the last collect() — the signal a

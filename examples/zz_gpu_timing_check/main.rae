@@ -10,12 +10,13 @@ open webgpu/context
 open webgpu/webgpu
 
 func main() ret Int {
+  var profiler: Profiler = profile.createProfiler()
   if webgpuBootstrap() is 0 { log("no wgpu device") ret 1 }
   log("have_timestamp={webgpuHaveTimestamp()}")
   if gpu_timing.gpuTimingInit() is false { log("gpu timing DISABLED (adapter lacks feature)") ret 0 }
   log("gpu timing enabled")
   # A throwaway capture so profileCounter has somewhere to record.
-  profile.profileStartCapture(seconds: 3600.0, outPath: "/tmp/gt_selftest.json")
+  profile.profileStartCapture(profiler: profiler, seconds: 3600.0, outPath: "/tmp/gt_selftest.json")
 
   # A render pass that clears a texture — real GPU work, and the exact descriptor
   # timestampWrites path the renderer uses.
@@ -61,7 +62,7 @@ func main() ret Int {
     let cbDesc: WGPUCommandBufferDescriptor = { }
     let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
     gtSubmitTest(cmd: cmd)
-    gpu_timing.gpuTimingCollect()
+    gpu_timing.gpuTimingCollect(profiler: profiler)
     log("frame {frame}: clear-pass GPU time = {gpu_timing.gpuTimingLastTotalUs()} us")
     frame = frame + 1
   }
