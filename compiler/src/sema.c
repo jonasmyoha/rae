@@ -3199,18 +3199,28 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             // A local binding that shadows a module name wins (it's a value), so
             // we only take this path when the lookup finds no symbol.
             // (docs/module-namespacing.md)
-            if (expr->as.method_call.object->kind == AST_EXPR_IDENT
-                && !symbol_table_lookup(symbols, expr->as.method_call.object->as.ident)) {
+            if (expr->as.method_call.object->kind == AST_EXPR_IDENT) {
                 Str lhs = expr->as.method_call.object->as.ident;
+                // A local/param/global VALUE binding shadows a module name and wins
+                // (it is a value → UFCS / field access). But a same-named TYPE or ENUM
+                // is a NAMESPACE here, not a value, so it must NOT block the module
+                // qualifier: `GpuTiming.gpuTimingCollect(...)` where a `type GpuTiming`
+                // also exists resolves to the module function. (#777 module==type name)
+                Symbol* nsShadow = symbol_table_lookup(symbols, lhs);
+                bool valueShadows = nsShadow && nsShadow->decl
+                    && nsShadow->decl->kind != AST_DECL_TYPE
+                    && nsShadow->decl->kind != AST_DECL_ENUM;
                 // The LHS is a namespace qualifier if it is a module name, or an
                 // `import/open X as lhs` alias resolving to module X. (Aliases are
                 // per-file; auto-loaded modules need no directive.)
                 Str modname = (Str){0};
-                if (sema_is_module_name(module, lhs)) {
-                    modname = lhs;
-                } else {
-                    Str aliased = sema_resolve_alias(s_current_decl_origin, lhs);
-                    if (aliased.data && sema_is_module_name(module, aliased)) modname = aliased;
+                if (!valueShadows) {
+                    if (sema_is_module_name(module, lhs)) {
+                        modname = lhs;
+                    } else {
+                        Str aliased = sema_resolve_alias(s_current_decl_origin, lhs);
+                        if (aliased.data && sema_is_module_name(module, aliased)) modname = aliased;
+                    }
                 }
                 if (modname.data) {
                 Str fname = expr->as.method_call.method_name;
@@ -3219,6 +3229,11 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 // Analyze args first so the resolver can use their types.
                 for (AstCallArg* a = qargs; a; a = a->next) sema_analyze_expr(ctx, module, symbols, a->value);
                 AstDecl* resolved = resolve_qualified_function(ctx, module, symbols, modname, fname, qargs);
+                // #777: only commit to the module-qualified rewrite when a module
+                // function actually resolved. If not (e.g. the qualifier is a type
+                // with no such member), fall through to the value/UFCS/member path
+                // below instead of binding a NULL decl.
+                if (resolved) {
                 // Rewrite to a plain call (no receiver) bound directly to the
                 // resolved in-module decl — codegen emits from decl_link, so this
                 // survives non-core stdlib losing its flat symbols (step 3).
@@ -3247,6 +3262,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                     sema_check_own_args(ctx, module, symbols, &resolved->as.func_decl, qargs, false);
                 }
                 break;
+                } // if (resolved)
                 } // if (modname.data)
             }
             sema_analyze_expr(ctx, module, symbols, expr->as.method_call.object);
