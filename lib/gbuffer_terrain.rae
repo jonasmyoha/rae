@@ -14,8 +14,6 @@ import webgpu/context
 import world_biome
 open world_biome
 
-var gTerrainPipeMade: Bool = false
-var gTerrainBindGen: Int = -1
 
 # Force a terrain-pipeline rebuild on the next draw. The island radius is baked
 # into the composed shader as a const (islandParamsWgsl), so growing the island
@@ -23,9 +21,9 @@ var gTerrainBindGen: Int = -1
 # a handful of grows leak a pipeline each, which is fine. The bind group is auto-
 # layouted from the OLD pipeline and is invalid against the new one (wgpu auto-layouts
 # are pipeline-exclusive), so force it to rebuild too — gen -1 never matches gbTerrainTexGen.
-func resetTerrainPipeline() pub {
-  gTerrainPipeMade = false
-  gTerrainBindGen = -1
+func resetTerrainPipeline(cache: mod GbufferCache) pub {
+  cache.terrainPipeMade = false
+  cache.terrainBindGen = 0 - 1
 }
 
 # Textured terrain (#9 grass, extended to a material ARRAY in #14). The C side
@@ -121,9 +119,9 @@ func terrainSplatWgsl() ret String {
     .concat(other: detailSrc).concat(other: "\n").concat(other: terrSrc)
 }
 
-func ensureTerrainPipeline() {
-  if not gTerrainPipeMade {
-    gTerrainPipeMade = true
+func ensureTerrainPipeline(cache: mod GbufferCache) {
+  if not cache.terrainPipeMade {
+    cache.terrainPipeMade = true
     let composed: String = terrainSplatWgsl()
     let cbuf: Buffer(Any) = composed.toCStr()
     let terrainMod: Ptr = makeShaderModule(wgsl: cbuf)
@@ -140,8 +138,8 @@ func ensureTerrainPipeline() {
   # only when the tile generation changes, so the steady state pays nothing.
   ensureTerrainTexDefaults()
   let gen: Int = gbTerrainTexGen()
-  if not (gen is gTerrainBindGen) {
-    gTerrainBindGen = gen
+  if not (gen is cache.terrainBindGen) {
+    cache.terrainBindGen = gen
     let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbTerrainPipeline(), groupIndex: 0 as UInt32)
     var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 4)
     entries.add(value: { binding: 0 as UInt32, buffer: gbFrameUbuf(), size: gbFrameBytes() as UInt64 })
@@ -168,7 +166,7 @@ func ensureTerrainPipeline() {
 # Quat Transform3D, so no Euler Vec3 rotation survives on the terrain path.
 func drawTerrainMesh(cache: mod GbufferCache, mesh: copy Int, model: view Mat4, prevModel: view Mat4,
                      roughness: copy Float, time: copy Float) pub {
-  ensureTerrainPipeline()
+  ensureTerrainPipeline(cache: cache)
   if gbMeshReady(mesh: mesh) is 0 { ret }
   let base: Int = gbDrawCount()
   if base >= gbMaxDraws() { ret }
