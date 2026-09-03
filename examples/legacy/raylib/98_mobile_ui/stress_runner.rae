@@ -17,6 +17,7 @@ open ui/ecs
 # (so main knows to skip the rest of its branches).
 
 func runStressMode(
+  backend: view UiBackend
   scenes: view AlbumScenes
   appState: mod AppState
 ) ret Bool {
@@ -39,7 +40,7 @@ func runStressMode(
   let stressPlayback: PlaybackState = createPlaybackState()
   let stressScroll: Float = 0.0
   let stressTexReg: TextureRegistry = createTextureRegistry()
-  let warm: UiWorld = buildScreenWorld(screen: Screen.album, scenes: scenes, playback: stressPlayback, state: appState, texReg: stressTexReg, scrollY: stressScroll)
+  let warm: UiWorld = buildScreenWorld(backend: backend, screen: Screen.album, scenes: scenes, playback: stressPlayback, state: appState, texReg: stressTexReg, scrollY: stressScroll)
   applyViewportExtent(world: warm)
   layoutSystem(world: warm)
   transformSystem(world: warm)
@@ -50,7 +51,7 @@ func runStressMode(
     if (stressI - (stressI / 2) * 2) is 1 {
       stressScreen = Screen.player
     }
-    let sworld: UiWorld = buildScreenWorld(screen: stressScreen, scenes: scenes, playback: stressPlayback, state: appState, texReg: stressTexReg, scrollY: stressScroll)
+    let sworld: UiWorld = buildScreenWorld(backend: backend, screen: stressScreen, scenes: scenes, playback: stressPlayback, state: appState, texReg: stressTexReg, scrollY: stressScroll)
     applyViewportExtent(world: sworld)
     layoutSystem(world: sworld)
     transformSystem(world: sworld)

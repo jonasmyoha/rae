@@ -22,7 +22,7 @@ import ui/components
 import ui/ecs
 open ecs/entity
 
-type PlaybackState pub {
+type PlaybackState {
   isPlaying: Bool
   elapsedSec: Float
   durationSec: Float
@@ -157,17 +157,17 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
       var trackW: Float = 0.0
       if componentHas(this: world.computedRects, entity: trackEntity) {
         let tcr: ComputedRect = componentGet(this: world.computedRects, entity: trackEntity)
-        trackW = tcr.w
+        trackW = tcr.size.x
       }
       let p: Float = playbackProgress(state: state)
       let fillW: Float = trackW * p
       if componentHas(this: world.computedRects, entity: fillEntity) {
         let fcr: mod ComputedRect => componentMod(this: world.computedRects, entity: fillEntity)
-        fcr.w = fillW
+        fcr.size.x = fillW
       }
       if componentHas(this: world.rects, entity: fillEntity) {
         let fr: mod Rect => componentMod(this: world.rects, entity: fillEntity)
-        fr.w = fillW
+        fr.size.x = fillW
       }
     }
   }
