@@ -185,7 +185,7 @@ func cameraUpdate(cam: mod CameraState, io: mod InputUi, persist: mod PersistSta
   if previousMode is not CameraRigMode.orbit and cam.rig.mode is CameraRigMode.orbit {
     cam.camera.target = thirdPersonCameraTarget(controller: controllerOf(world: world, entity: heroEntity), focusZ: orbitFocusZ)
   }
-  let joyActive: Bool = updateWalkerTouch(moveStick: io.moveStick, world: io.world)
+  let joyActive: Bool = updateWalkerTouch(rig: cam.rig, moveStick: io.moveStick, world: io.world)
   let cameraMoved: Bool = updateCameraRig(rig: cam.rig, camera: cam.camera,
                      allowInput: uiPointerCaptured(input: io.ui) is false, dt: dt)
   if cameraMoved { persist.stateDirty = true }
