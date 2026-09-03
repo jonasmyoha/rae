@@ -36,19 +36,36 @@ open webgpu/webgpu
 
 const gtMaxPasses: Int = 16
 
-var gtEnabled: Bool = false
-var gtInited: Bool = false
-var gtNames: List(String) = createList(String, cap: gtMaxPasses)
-# One reusable timestampWrites struct: passes are encoded sequentially and wgpu
-# copies its contents at beginPass, so a single slot (overwritten per pass) is
-# enough. .data is handed to each pass descriptor's timestampWrites field.
-var gtTsw: List(WGPUPassTimestampWrites) = createList(WGPUPassTimestampWrites, cap: 1)
-var gtCount: Int = 0
-var gtPeriod: Float = 1.0           # nanoseconds per timestamp tick
-var gtDst: List(Int) = createList(Int, cap: gtMaxPasses * 2)
-var gtTotalUs: Int = 0
+# #764: the GPU-timing ring (query set indices, per-frame pass names, the readback
+# buffer, the timestamp period) was a set of module-level gt* globals. It is a
+# resource an app owns (only zz_gpu_timing_check drives it today); every entry
+# point takes it. The WGPU handles stay in C behind rae_gt_set/get.
+type GpuTiming {
+  enabled: Bool
+  inited: Bool
+  names: List(String)
+  # One reusable timestampWrites struct: passes are encoded sequentially and wgpu
+  # copies its contents at beginPass, so a single slot (overwritten per pass) is
+  # enough. .data is handed to each pass descriptor's timestampWrites field.
+  tsw: List(WGPUPassTimestampWrites)
+  count: Int
+  period: Float           # nanoseconds per timestamp tick
+  dst: List(Int)
+  totalUs: Int
+}
 
-func gpuTimingEnabled() pub ret Bool { ret gtEnabled }
+func createGpuTiming() pub ret GpuTiming {
+  ret GpuTiming {
+    enabled: false, inited: false,
+    names: createList(String, cap: gtMaxPasses),
+    tsw: createList(WGPUPassTimestampWrites, cap: 1),
+    count: 0, period: 1.0,
+    dst: createList(Int, cap: gtMaxPasses * 2),
+    totalUs: 0
+  }
+}
+
+func gpuTimingEnabled(timing: view GpuTiming) pub ret Bool { ret timing.enabled }
 
 # WGPU handle store lives in C (index 0=querySet, 1=resolveBuf, 2=readBuf) — see
 # runtime_webgpu.c rae_gt_set/get, same seam grass uses for its handles.
@@ -61,9 +78,9 @@ func gtRead() ret Ptr { ret gtGet(index: 2) }
 # Create the query set + resolve/readback buffers. Idempotent; safe no-op when the
 # adapter lacks the timestamp features (gpuTimingEnabled() then stays false and all
 # other calls are cheap no-ops). Must run after the WebGPU device exists.
-func gpuTimingInit() pub ret Bool {
-  if gtInited { ret gtEnabled }
-  gtInited = true
+func gpuTimingInit(timing: mod GpuTiming) pub ret Bool {
+  if timing.inited { ret timing.enabled }
+  timing.inited = true
   if webgpuHaveTimestamp() is 0 {
     ret false
   }
@@ -81,55 +98,55 @@ func gpuTimingInit() pub ret Bool {
     size: (gtMaxPasses * 16) as UInt64
   }
   gtSet(index: 2, ptr: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: mDesc))
-  gtPeriod = wgpuQueueGetTimestampPeriod(queue: webgpuQueue())
-  gtTsw.add(value: {
+  timing.period = wgpuQueueGetTimestampPeriod(queue: webgpuQueue())
+  timing.tsw.add(value: {
     querySet: gtQset(), beginningOfPassWriteIndex: 0 as UInt32, endOfPassWriteIndex: 1 as UInt32
   })
   var k: Int = 0
   loop k < gtMaxPasses * 2 {
-    gtDst.add(value: 0)
+    timing.dst.add(value: 0)
     k = k + 1
   }
-  gtEnabled = true
+  timing.enabled = true
   ret true
 }
 
 # Reset the per-frame pass list. Call once at the start of a frame.
-func gpuTimingFrameBegin() pub {
-  if gtEnabled is false { ret }
-  gtCount = 0
-  gtNames.length = 0
+func gpuTimingFrameBegin(timing: mod GpuTiming) pub {
+  if timing.enabled is false { ret }
+  timing.count = 0
+  timing.names.length = 0
 }
 
 # Claim a pass slot and point the shared timestampWrites at its two query indices.
 # Returns the pass index for gpuTimingResolve, or -1 when disabled / budget full.
 # Call immediately before building the pass descriptor.
-func gpuTimingPassBegin(name: view String) pub ret Int {
-  if gtEnabled is false { ret 0 - 1 }
-  let idx: Int = gtCount
+func gpuTimingPassBegin(timing: mod GpuTiming, name: view String) pub ret Int {
+  if timing.enabled is false { ret 0 - 1 }
+  let idx: Int = timing.count
   if idx >= gtMaxPasses { ret 0 - 1 }
-  gtNames.add(value: "{name}")
-  gtTsw.set(index: 0, value: {
+  timing.names.add(value: "{name}")
+  timing.tsw.set(index: 0, value: {
     querySet: gtQset(),
     beginningOfPassWriteIndex: (idx * 2) as UInt32,
     endOfPassWriteIndex: (idx * 2 + 1) as UInt32
   })
-  gtCount = idx + 1
+  timing.count = idx + 1
   ret idx
 }
 
 # The Ptr to hand to a pass descriptor's `timestampWrites` field (null when timing
 # is disabled, which the descriptor treats as "no timestamps").
-func gpuTimingWritesPtr() pub ret Ptr {
-  if gtEnabled is false { ret webgpuNull() }
-  ret gtTsw.data
+func gpuTimingWritesPtr(timing: view GpuTiming) pub ret Ptr {
+  if timing.enabled is false { ret webgpuNull() }
+  ret timing.tsw.data
 }
 
 # Resolve a pass's timestamp pair into the resolve buffer. Recorded on that pass's
 # encoder after the pass ends, before finish. (Resolve is a normal encoder command
 # and needs no inside-encoder feature.)
-func gpuTimingResolve(enc: copy Ptr, idx: copy Int) pub {
-  if gtEnabled is false or idx < 0 { ret }
+func gpuTimingResolve(timing: view GpuTiming, enc: copy Ptr, idx: copy Int) pub {
+  if timing.enabled is false or idx < 0 { ret }
   wgpuCommandEncoderResolveQuerySet(commandEncoder: enc, querySet: gtQset(),
     firstQuery: (idx * 2) as UInt32, queryCount: 2 as UInt32,
     destination: gtResolve(), destinationOffset: (idx * 16) as UInt64)
@@ -137,9 +154,9 @@ func gpuTimingResolve(enc: copy Ptr, idx: copy Int) pub {
 
 # Copy the frame's resolved timestamps to the readback buffer, read them (blocking
 # until GPU-complete), and emit per-pass GPU microseconds as profiler counters.
-func gpuTimingCollect(profiler: mod Profiler) pub {
-  if gtEnabled is false or gtCount is 0 { ret }
-  let bytes: Int = gtCount * 16
+func gpuTimingCollect(timing: mod GpuTiming, profiler: mod Profiler) pub {
+  if timing.enabled is false or timing.count is 0 { ret }
+  let bytes: Int = timing.count * 16
   # Fresh MapRead staging buffer each frame + release after: this mirrors the
   # runtime's proven readback (rae_gpu_readback); reusing one buffer across
   # map/unmap cycles did not read back correctly on Metal.
@@ -155,26 +172,26 @@ func gpuTimingCollect(profiler: mod Profiler) pub {
   let cbDesc: WGPUCommandBufferDescriptor = { }
   let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
   gtSubmit(cmd: cmd)
-  let ok: Int = webgpuMapRead(buffer: staging, size: bytes as UInt64, dst: gtDst.data)
+  let ok: Int = webgpuMapRead(buffer: staging, size: bytes as UInt64, dst: timing.dst.data)
   wgpuBufferRelease(buffer: staging)
   if ok is 0 { ret }
-  gtTotalUs = 0
+  timing.totalUs = 0
   var i: Int = 0
-  loop i < gtCount {
-    let begin: Int = rae_ext_rae_buf_get(V: Int, buf: gtDst.data, index: i * 2)
-    let endTick: Int = rae_ext_rae_buf_get(V: Int, buf: gtDst.data, index: i * 2 + 1)
-    let us: Int = rae_float_to_int(f: (endTick - begin) as Float * gtPeriod / 1000.0)
-    let nm: String = rae_ext_rae_buf_get(V: String, buf: gtNames.data, index: i)
+  loop i < timing.count {
+    let begin: Int = rae_ext_rae_buf_get(V: Int, buf: timing.dst.data, index: i * 2)
+    let endTick: Int = rae_ext_rae_buf_get(V: Int, buf: timing.dst.data, index: i * 2 + 1)
+    let us: Int = rae_float_to_int(f: (endTick - begin) as Float * timing.period / 1000.0)
+    let nm: String = rae_ext_rae_buf_get(V: String, buf: timing.names.data, index: i)
     profile.profileCounter(profiler: profiler, name: "gpu.{nm}", value: us)
-    gtTotalUs = gtTotalUs + us
+    timing.totalUs = timing.totalUs + us
     i = i + 1
   }
-  profile.profileCounter(profiler: profiler, name: "gpu.total", value: gtTotalUs)
+  profile.profileCounter(profiler: profiler, name: "gpu.total", value: timing.totalUs)
 }
 
 # Total GPU microseconds across all passes from the last collect() — the signal a
 # dynamic-resolution controller reads.
-func gpuTimingLastTotalUs() pub ret Int { ret gtTotalUs }
+func gpuTimingLastTotalUs(timing: view GpuTiming) pub ret Int { ret timing.totalUs }
 
 
 # Submit one command buffer to the global queue. Reuses the existing C shim (Rae
