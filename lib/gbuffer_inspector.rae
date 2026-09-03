@@ -23,16 +23,16 @@ func gbSetViewBind(bind: Ptr) extern("rae_gb_set_view_bind")
 # Bumped in C when the targets are recreated (resize); the inspector rebuilds its
 # bind group (which samples the G-buffer views) when it changes.
 
-var gViewPipeMade: Bool = false
-var gViewBindMade: Bool = false
-var gLastTargetsGen: Int = -1
-var gViewUniform: List(Float) = createList(Float, cap: 4)
+# #764: the inspector's pipeline/bind "made" flags + last-targets generation
+# were module-level globals; they are per-frame state a deferred renderer owns,
+# so they live in ViewPassCache on RenderPasses.
+type ViewPassCache { pipeMade: Bool, bindMade: Bool, lastTargetsGen: Int, uniform: List(Float) }
 
 # Inspector pipeline: a fullscreen triangle (no vertex buffers, no cull) writing
 # to the presentable format, plus its 16-byte uniform (mode, zNear, zFar).
-func ensureViewPipeline() {
-  if gViewPipeMade { ret }
-  gViewPipeMade = true
+func ensureViewPipeline(cache: mod ViewPassCache) {
+  if cache.pipeMade { ret }
+  cache.pipeMade = true
   let shaderMod: Ptr = makeShaderModule(wgsl: gbViewWgsl())
   var targets: List(WGPUColorTargetState) = createList(WGPUColorTargetState, cap: 1)
   targets.add(value: { format: g2dFormat() as Int32, writeMask: WGPUColorWriteMask_All })
@@ -60,12 +60,12 @@ func ensureViewPipeline() {
 
 # Inspector bind group: the uniform + the four G-buffer views. Rebuilt after a
 # resize — the targets-generation counter changing forces a fresh bind.
-func ensureViewBind() {
+func ensureViewBind(cache: mod ViewPassCache) {
   let gen: Int = gbTargetsGen()
-  if gViewBindMade and gen is gLastTargetsGen { ret }
+  if cache.bindMade and gen is cache.lastTargetsGen { ret }
   if gbTargetsReady() is 0 { ret }
-  gViewBindMade = true
-  gLastTargetsGen = gen
+  cache.bindMade = true
+  cache.lastTargetsGen = gen
   let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbViewPipeline(), groupIndex: 0 as UInt32)
   var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 5)
   entries.add(value: { binding: 0 as UInt32, buffer: gbViewUbuf(), size: 16 as UInt64 })
@@ -79,19 +79,20 @@ func ensureViewBind() {
 }
 
 # Write one G-buffer channel into the presentable target with a fullscreen pass.
-func debugView(mode: copy Int, zNear: copy Float, zFar: copy Float) pub {
+func debugView(cache: mod ViewPassCache, mode: copy Int, zNear: copy Float, zFar: copy Float) pub {
   if g2dOffViewReady() is 0 { ret }
-  ensureViewPipeline()
-  ensureViewBind()
-  if gViewBindMade is 0 { ret }
+  ensureViewPipeline(cache: cache)
+  ensureViewBind(cache: cache)
+  if cache.bindMade is 0 { ret }
 
-  loop gViewUniform.length < 4 { gViewUniform.add(value: 0.0) }
-  gViewUniform.set(index: 0, value: mode.toFloat())
-  gViewUniform.set(index: 1, value: zNear)
-  gViewUniform.set(index: 2, value: zFar)
-  gViewUniform.set(index: 3, value: 0.0)
+  # Uniform held on the cache (created once) to keep the path zero-alloc.
+  loop cache.uniform.length < 4 { cache.uniform.add(value: 0.0) }
+  cache.uniform.set(index: 0, value: mode.toFloat())
+  cache.uniform.set(index: 1, value: zNear)
+  cache.uniform.set(index: 2, value: zFar)
+  cache.uniform.set(index: 3, value: 0.0)
   wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: gbViewUbuf(),
-    bufferOffset: 0 as UInt64, data: gViewUniform.data, size: 16 as UInt64)
+    bufferOffset: 0 as UInt64, data: cache.uniform.data, size: 16 as UInt64)
 
   let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
   let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
@@ -119,6 +120,6 @@ func debugView(mode: copy Int, zNear: copy Float, zFar: copy Float) pub {
 }
 
 # Paint the chosen channel into the frame (see gbuffer.view*).
-func inspect(mode: view Int, zNear: view Float, zFar: view Float) pub {
-  debugView(mode: mode, zNear: zNear, zFar: zFar)
+func inspect(cache: mod ViewPassCache, mode: view Int, zNear: view Float, zFar: view Float) pub {
+  debugView(cache: cache, mode: mode, zNear: zNear, zFar: zFar)
 }
