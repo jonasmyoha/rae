@@ -100,6 +100,7 @@ type RenderPasses {
   taa: TaaPassCache
   pyr: PyrPassCache
   inspect: ViewPassCache
+  gbuffer: GbufferCache
 }
 
 func createRenderPasses() ret RenderPasses {
@@ -109,7 +110,8 @@ func createRenderPasses() ret RenderPasses {
     light: { bindGen: 0 - 1, bindMade: false },
     taa: { bindGen: 0 - 1, bindMade: createList(Bool, cap: 2) },
     pyr: { bindGen: 0 - 1 },
-    inspect: { pipeMade: false, bindMade: false, lastTargetsGen: 0 - 1, uniform: createList(Float, cap: 4) }
+    inspect: { pipeMade: false, bindMade: false, lastTargetsGen: 0 - 1, uniform: createList(Float, cap: 4) },
+    gbuffer: createGbufferCache()
   }
 }
 
@@ -337,8 +339,8 @@ func deferredTagAt(r: view DeferredRenderer, i: view Int) pub ret Int {
 func renderDeferredPass(r: mod DeferredRenderer, tag: view Int, scene: view Scene3d,
                         camera: view Camera3d, light: view Light3d, aspect: view Float) pub {
   if tag is RenderTag.gbuffer {
-    beginPass(camera: camera, light: light, aspect: aspect)
-    gbuffer.renderScene(scene: scene)
+    beginPass(cache: r.passes.gbuffer, camera: camera, light: light, aspect: aspect)
+    gbuffer.renderScene(cache: r.passes.gbuffer, scene: scene)
     # Metaballs go into the SAME pass as the triangles, so the two kinds
     # depth-test against each other rather than compositing (#392).
     renderSceneSdf(scene: scene, camera: camera)
