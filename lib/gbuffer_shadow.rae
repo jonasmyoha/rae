@@ -26,14 +26,14 @@ func smCasterIcount(i: Int) extern("rae_sm_caster_icount") ret Int
 func smCasterKey(i: Int) extern("rae_sm_caster_key") ret Int
 func smDrawMetaballs(c: Int, pass: Ptr) extern("rae_sm_draw_metaballs")
 
-# Reusable one-slot depth attachment (the view changes per cascade). Module-level
-# so the render allocates nothing per frame beyond the encoder/pass handles.
-var gShadowDepthAtt: List(WGPURenderPassDepthStencilAttachment) = createList(WGPURenderPassDepthStencilAttachment, cap: 1)
 
 func shadowEnd() pub {
   if smReady() is 0 { ret }
   smUploadModels()
-  loop gShadowDepthAtt.length < 1 { gShadowDepthAtt.add(value: { depthReadOnly: 0 as UInt32 }) }
+  # Per-call scratch (#764: was a module-level global). WebGPU copies the
+  # attachment during BeginRenderPass, so the local only needs to outlive that.
+  var shadowDepthAtt: List(WGPURenderPassDepthStencilAttachment) = createList(WGPURenderPassDepthStencilAttachment, cap: 1)
+  loop shadowDepthAtt.length < 1 { shadowDepthAtt.add(value: { depthReadOnly: 0 as UInt32 }) }
 
   let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
   let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
@@ -48,10 +48,10 @@ func shadowEnd() pub {
       depthLoadOp: WGPULoadOp_Clear, depthStoreOp: WGPUStoreOp_Store,
       depthClearValue: 1.0
     }
-    gShadowDepthAtt.set(index: 0, value: depthAtt)
+    shadowDepthAtt.set(index: 0, value: depthAtt)
     let rpDesc: WGPURenderPassDescriptor = {
       colorAttachmentCount: 0 as UInt64, colorAttachments: webgpuNull(),
-      depthStencilAttachment: gShadowDepthAtt.data
+      depthStencilAttachment: shadowDepthAtt.data
     }
     let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
 
