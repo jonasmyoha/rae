@@ -81,21 +81,21 @@ func syncDesignResolution() {
 # The vocabulary is closed (see themeColorByName): a theme may re-colour
 # these ten slots, not add an eleventh. Any slot the file omits keeps the
 # built-in value rather than going transparent.
-func applyThemePalette(theme: view ResolvedTheme) {
-  var t: Theme = currentTheme()
+func overlayPalette(base: view Theme, tokens: view ResolvedTheme) ret Theme {
+  var t: Theme = base
   t.palette = ThemePalette {
-    background: themeSlotOr(theme: theme, slot: "background", fallback: t.palette.background)
-    surface: themeSlotOr(theme: theme, slot: "surface", fallback: t.palette.surface)
-    surfaceAlt: themeSlotOr(theme: theme, slot: "surfaceAlt", fallback: t.palette.surfaceAlt)
-    textPrimary: themeSlotOr(theme: theme, slot: "textPrimary", fallback: t.palette.textPrimary)
-    textMuted: themeSlotOr(theme: theme, slot: "textMuted", fallback: t.palette.textMuted)
-    outline: themeSlotOr(theme: theme, slot: "outline", fallback: t.palette.outline)
-    accent: themeSlotOr(theme: theme, slot: "accent", fallback: t.palette.accent)
-    accentText: themeSlotOr(theme: theme, slot: "accentText", fallback: t.palette.accentText)
-    accentTextMuted: themeSlotOr(theme: theme, slot: "accentTextMuted", fallback: t.palette.accentTextMuted)
-    imageTint: themeSlotOr(theme: theme, slot: "imageTint", fallback: t.palette.imageTint)
+    background: themeSlotOr(theme: tokens, slot: "background", fallback: t.palette.background)
+    surface: themeSlotOr(theme: tokens, slot: "surface", fallback: t.palette.surface)
+    surfaceAlt: themeSlotOr(theme: tokens, slot: "surfaceAlt", fallback: t.palette.surfaceAlt)
+    textPrimary: themeSlotOr(theme: tokens, slot: "textPrimary", fallback: t.palette.textPrimary)
+    textMuted: themeSlotOr(theme: tokens, slot: "textMuted", fallback: t.palette.textMuted)
+    outline: themeSlotOr(theme: tokens, slot: "outline", fallback: t.palette.outline)
+    accent: themeSlotOr(theme: tokens, slot: "accent", fallback: t.palette.accent)
+    accentText: themeSlotOr(theme: tokens, slot: "accentText", fallback: t.palette.accentText)
+    accentTextMuted: themeSlotOr(theme: tokens, slot: "accentTextMuted", fallback: t.palette.accentTextMuted)
+    imageTint: themeSlotOr(theme: tokens, slot: "imageTint", fallback: t.palette.imageTint)
   }
-  setActiveTheme(theme: own t)
+  ret t
 }
 
 func themeSlotOr(theme: view ResolvedTheme, slot: view String, fallback: view RgbaColor) ret RgbaColor {
@@ -136,15 +136,17 @@ func loadUiAssets(dir: view String, textFontName: view String,
   }
   let themeScene: Scene = loadSceneFile(path: "{dir}{themeFile}")
   let theme: ResolvedTheme = parseTheme(scene: themeScene)
-  setActiveThemeTokens(theme: theme)
-  applyThemePalette(theme: theme)
-  # `own` on every field: this struct crosses a function boundary, and
-  # ResolvedTheme and SdfFont both carry heap state. Returning them by
-  # plain value drops the locals at return and hands the caller freed
-  # lists — which surfaces as a theme whose tokens all miss, not as a
-  # crash. Example 110 never hit this because it built its Gpu2dUi in
-  # the same scope as the loads.
-  ret Gpu2dUi { textFont: own textFont, iconFont: own iconFont, theme: own theme }
+  # #764: the active palette is the built-in light theme overlaid with the
+  # .raescene's palette section (the old applyThemePalette, now pure). It is
+  # carried in the returned Gpu2dUi; the app installs it — and the token tables —
+  # onto each UiWorld via seedWorldTheme, instead of the old module globals.
+  let active: Theme = overlayPalette(base: lightTheme(), tokens: theme)
+  # `own` on the heap-carrying fields: this struct crosses a function boundary,
+  # and ResolvedTheme and SdfFont both carry heap state. Returning them by plain
+  # value drops the locals at return and hands the caller freed lists — which
+  # surfaces as a theme whose tokens all miss, not as a crash. `activeTheme` is a
+  # plain value struct (no heap) so it copies by value.
+  ret Gpu2dUi { textFont: own textFont, iconFont: own iconFont, theme: own theme, activeTheme: active }
 }
 
 # Create a world sized to the current window and mount `path` into it.

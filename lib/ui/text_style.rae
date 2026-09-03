@@ -63,14 +63,14 @@ func resolveTextLineHeight(theme: view ResolvedTheme, styleId: view String) pub 
   ret 1.0
 }
 
-func resolveTextColor(theme: view ResolvedTheme, styleId: view String) pub ret RgbaColor {
+func resolveTextColor(theme: view ResolvedTheme, styleId: view String, active: view Theme) pub ret RgbaColor {
   let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
   if i < 0 {
-    ret themeColorByName(name: "textPrimary")
+    ret themeColorByName(theme: active, name: "textPrimary")
   }
   let slot: String = rae_ext_rae_buf_get(buf: theme.textColorSlots.data, index: i)
   if slot.length() > 0 {
-    ret themeColorByName(name: slot)
+    ret themeColorByName(theme: active, name: slot)
   }
   var r: Int = 0
   var g: Int = 0
@@ -134,10 +134,10 @@ func styleOverrideSize(base: view Float, so: view StyleOverride) pub ret Float {
   ret base
 }
 
-func styleOverrideColor(base: view RgbaColor, so: view StyleOverride) pub ret RgbaColor {
+func styleOverrideColor(base: view RgbaColor, so: view StyleOverride, active: view Theme) pub ret RgbaColor {
   if so.hasColor {
     if so.colorSlot.length() > 0 {
-      ret themeColorByName(name: so.colorSlot)
+      ret themeColorByName(theme: active, name: so.colorSlot)
     }
     ret so.color
   }
@@ -172,21 +172,21 @@ func textStyleSize(styleId: view String) pub ret Float {
 
 # Theme-palette color for a style id. Mirrors render.rae's textStyleColor —
 # light/dark themes flip for free because every branch reads a semantic slot.
-func textStyleColorRgba(styleId: view String) pub ret RgbaColor {
-  if styleId is "muted" { ret themeColorByName(name: "textMuted") }
-  if styleId is "caption" { ret themeColorByName(name: "textMuted") }
-  if styleId is "albumCaption" { ret themeColorByName(name: "textMuted") }
-  if styleId is "trackMuted" { ret themeColorByName(name: "textMuted") }
-  if styleId is "historyArtist" { ret themeColorByName(name: "textMuted") }
-  if styleId is "tabInactive" { ret themeColorByName(name: "textMuted") }
-  if styleId is "timeTotal" { ret themeColorByName(name: "textMuted") }
+func textStyleColorRgba(styleId: view String, active: view Theme) pub ret RgbaColor {
+  if styleId is "muted" { ret themeColorByName(theme: active, name: "textMuted") }
+  if styleId is "caption" { ret themeColorByName(theme: active, name: "textMuted") }
+  if styleId is "albumCaption" { ret themeColorByName(theme: active, name: "textMuted") }
+  if styleId is "trackMuted" { ret themeColorByName(theme: active, name: "textMuted") }
+  if styleId is "historyArtist" { ret themeColorByName(theme: active, name: "textMuted") }
+  if styleId is "tabInactive" { ret themeColorByName(theme: active, name: "textMuted") }
+  if styleId is "timeTotal" { ret themeColorByName(theme: active, name: "textMuted") }
   # "On surfaceAlt"/accent-panel styles.
-  if styleId is "miniTitle" { ret themeColorByName(name: "accentText") }
-  if styleId is "miniMuted" { ret themeColorByName(name: "accentTextMuted") }
-  if styleId is "pillLabel" { ret themeColorByName(name: "accentText") }
+  if styleId is "miniTitle" { ret themeColorByName(theme: active, name: "accentText") }
+  if styleId is "miniMuted" { ret themeColorByName(theme: active, name: "accentTextMuted") }
+  if styleId is "pillLabel" { ret themeColorByName(theme: active, name: "accentText") }
   # primary / h1 / h2 / pageTitle / topBarTitle / trackTitle / tabActive / body
   # and unknowns fall back to primary text.
-  ret themeColorByName(name: "textPrimary")
+  ret themeColorByName(theme: active, name: "textPrimary")
 }
 
 # Whether a style id is horizontally centered within its rect. Mirrors
