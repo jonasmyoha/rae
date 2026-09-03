@@ -43,12 +43,12 @@ func styleWantTint(world: view UiWorld, entity: view EntityId, selected: view Bo
   # A non-empty slot references the active theme (#237); else the literal.
   if selected {
     if style.tintSelectedSlot.length() > 0 {
-      ret themeColorByName(name: style.tintSelectedSlot)
+      ret themeColorByName(theme: world.theme.active, name: style.tintSelectedSlot)
     }
     ret style.tintSelected
   }
   if style.tintSlot.length() > 0 {
-    ret themeColorByName(name: style.tintSlot)
+    ret themeColorByName(theme: world.theme.active, name: style.tintSlot)
   }
   ret style.tint
 }
@@ -86,12 +86,12 @@ func styleWantShapeFill(world: view UiWorld, entity: view EntityId, selected: vi
   # A non-empty slot references the active theme (#237); else the literal.
   if selected {
     if style.shapeFillSelectedSlot.length() > 0 {
-      ret themeColorByName(name: style.shapeFillSelectedSlot)
+      ret themeColorByName(theme: world.theme.active, name: style.shapeFillSelectedSlot)
     }
     ret style.shapeFillSelected
   }
   if style.shapeFillSlot.length() > 0 {
-    ret themeColorByName(name: style.shapeFillSlot)
+    ret themeColorByName(theme: world.theme.active, name: style.shapeFillSlot)
   }
   ret style.shapeFill
 }

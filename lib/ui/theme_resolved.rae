@@ -731,196 +731,145 @@ func themeDumpResolved(theme: view ResolvedTheme) pub {
 }
 
 # ================================================================
-# Active theme tokens for the SCENE DESERIALISER (#233, Theme M3).
+# Scene-deserialiser token lookups (#233, Theme M3 / #764).
 #
-# Radius/padding tokens live in the theme (theme.raescene), but scene
-# deserialisation needs them at parse time. Mirroring how color tokens
-# resolve against theme.rae's module-global `activeTheme`, the app
-# calls `setActiveThemeTokens(theme)` once at boot (after loading the
-# theme, before loadAllScenes); the deserialiser's radius/padding
-# token helpers then resolve against these module globals. Single
-# source: the values come from the loaded ResolvedTheme, not a second
-# hardcoded table.
+# Radius/padding/container tokens live in the theme (theme.raescene) and scene
+# deserialisation needs them at parse time. These used to be a set of flattened
+# module-global lists (`g_active*`) populated once at boot by setActiveThemeTokens
+# — a redundant SECOND copy of the ResolvedTheme they were filled from. #764
+# removes that copy: the deserialiser now resolves directly against the world's
+# `theme.resolved` (a ResolvedTheme), threaded from the dispatcher that already
+# holds the UiWorld. Space and radius tokens reuse themeSpaceValue/themeRadiusValue
+# above; container + padding get the ResolvedTheme-parameterised lookups below.
 # ================================================================
 
-var g_activeSpaceNames: List(String) = createList(String, cap: 8)
-var g_activeSpaceVals: List(Float) = createList(Float, cap: 8)
-var g_activeRadiusNames: List(String) = createList(String, cap: 8)
-var g_activeRadiusVals: List(Float) = createList(Float, cap: 8)
-var g_activePadNames: List(String) = createList(String, cap: 8)
-var g_activePadL: List(Float) = createList(Float, cap: 8)
-var g_activePadT: List(Float) = createList(Float, cap: 8)
-var g_activePadR: List(Float) = createList(Float, cap: 8)
-var g_activePadB: List(Float) = createList(Float, cap: 8)
-var g_activeContainerNames: List(String) = createList(String, cap: 8)
-var g_activeContainerBgSlots: List(String) = createList(String, cap: 8)
-var g_activeContainerRadiusTokens: List(String) = createList(String, cap: 8)
-var g_activeContainerPadTokens: List(String) = createList(String, cap: 8)
-var g_activeContainerTextStyles: List(String) = createList(String, cap: 8)
-var g_activeTokensReady: Bool = false
-
-# Populate the active radius/padding token tables from a loaded theme.
-# Idempotent: only the first call populates (guards against hot-reload
-# re-entry leaking the global lists).
-func setActiveThemeTokens(theme: view ResolvedTheme) pub {
-  if g_activeTokensReady {
-    ret
-  }
+# Index of a container style in the ResolvedTheme's container table, or -1. The
+# field getters below read the parallel lists at that index (#237, M6).
+func themeContainerIndex(theme: view ResolvedTheme, name: view String) pub ret Int {
   var i: Int = 0
-  loop i < theme.spaceNames.length {
-    let n: String = rae_ext_rae_buf_get(buf: theme.spaceNames.data, index: i)
-    if let value: Float = theme.spaceVals.copyAt(index: i) {
-      g_activeSpaceNames.add(value: n)
-      g_activeSpaceVals.add(value: value)
-    }
-    i = i + 1
-  }
-  i = 0
-  loop i < theme.radiusNames.length {
-    let n: String = rae_ext_rae_buf_get(buf: theme.radiusNames.data, index: i)
-    if let value: Float = theme.radiusVals.copyAt(index: i) {
-      g_activeRadiusNames.add(value: n)
-      g_activeRadiusVals.add(value: value)
-    }
-    i = i + 1
-  }
-  i = 0
-  loop i < theme.padNames.length {
-    let n: String = rae_ext_rae_buf_get(buf: theme.padNames.data, index: i)
-    var l: Float = 0.0
-    var t: Float = 0.0
-    var r: Float = 0.0
-    var b: Float = 0.0
-    if let padLVal: Float = theme.padL.copyAt(index: i) { l = padLVal }
-    if let padTVal: Float = theme.padT.copyAt(index: i) { t = padTVal }
-    if let padRVal: Float = theme.padR.copyAt(index: i) { r = padRVal }
-    if let padBVal: Float = theme.padB.copyAt(index: i) { b = padBVal }
-    g_activePadNames.add(value: n)
-    g_activePadL.add(value: l)
-    g_activePadT.add(value: t)
-    g_activePadR.add(value: r)
-    g_activePadB.add(value: b)
-    i = i + 1
-  }
-  i = 0
   loop i < theme.containerNames.length {
-    if let containerName: String = theme.containerNames.copyAt(index: i) {
-      g_activeContainerNames.add(value: containerName)
-    }
-    if let containerBgSlot: String = theme.containerBgSlots.copyAt(index: i) {
-      g_activeContainerBgSlots.add(value: containerBgSlot)
-    }
-    if let containerRadiusToken: String = theme.containerRadiusTokens.copyAt(index: i) {
-      g_activeContainerRadiusTokens.add(value: containerRadiusToken)
-    }
-    if let containerPadToken: String = theme.containerPadTokens.copyAt(index: i) {
-      g_activeContainerPadTokens.add(value: containerPadToken)
-    }
-    if let containerTextStyle: String = theme.containerTextStyles.copyAt(index: i) {
-      g_activeContainerTextStyles.add(value: containerTextStyle)
-    }
-    i = i + 1
-  }
-  g_activeTokensReady = true
-}
-
-# Index of a container style in the active tables, or -1. The field
-# getters below read parallel lists at that index (#237, M6).
-func activeContainerIndex(name: view String) pub ret Int {
-  var i: Int = 0
-  loop i < g_activeContainerNames.length {
-    if let n: String = g_activeContainerNames.copyAt(index: i) {
+    if let n: String = theme.containerNames.copyAt(index: i) {
       if n is name {
         ret i
       }
     }
     i = i + 1
   }
-  ret -1
+  ret 0 - 1
 }
 
-func activeContainerBgSlotAt(i: view Int) pub ret String {
-  if let slot: String = g_activeContainerBgSlots.copyAt(index: i) {
+func themeContainerBgSlotAt(theme: view ResolvedTheme, index: view Int) pub ret String {
+  if let slot: String = theme.containerBgSlots.copyAt(index: index) {
     ret "{slot}"
   }
   ret ""
 }
 
-func activeContainerRadiusTokenAt(i: view Int) pub ret String {
-  if let token: String = g_activeContainerRadiusTokens.copyAt(index: i) {
+func themeContainerRadiusTokenAt(theme: view ResolvedTheme, index: view Int) pub ret String {
+  if let token: String = theme.containerRadiusTokens.copyAt(index: index) {
     ret "{token}"
   }
   ret ""
 }
 
-func activeContainerPadTokenAt(i: view Int) pub ret String {
-  if let token: String = g_activeContainerPadTokens.copyAt(index: i) {
+func themeContainerPadTokenAt(theme: view ResolvedTheme, index: view Int) pub ret String {
+  if let token: String = theme.containerPadTokens.copyAt(index: index) {
     ret "{token}"
   }
   ret ""
 }
 
-func activeContainerTextStyleAt(i: view Int) pub ret String {
-  if let style: String = g_activeContainerTextStyles.copyAt(index: i) {
-    ret "{style}"
-  }
-  ret ""
-}
-
-# Resolve a SPACE token name to its du value, or `fallback` when the
-# token isn't defined (the caller passes the legacy spacing.rae value
-# so token resolution still works before the theme is loaded).
-func activeSpaceValue(name: view String, fallback: view Float) pub ret Float {
+# Resolve a padding token name to its insets against `theme`, or a zero fallback
+# (logged) when undefined. Returns ThemeInsets (not the ECS Insets) to keep this
+# module free of the ui/components dependency.
+func themePaddingInsets(theme: view ResolvedTheme, name: view String) pub ret ThemeInsets {
   var i: Int = 0
-  loop i < g_activeSpaceNames.length {
-    let n: String = g_activeSpaceNames.copyAt(index: i)
-    if n is name {
-      if let value: Float = g_activeSpaceVals.copyAt(index: i) {
-        ret value
-      }
-    }
-    i = i + 1
-  }
-  ret fallback
-}
-
-# Resolve a radius token name to its du value, or `fallback` if the
-# token isn't defined (logged once so a typo is visible).
-func activeRadiusValue(name: view String, fallback: view Float) pub ret Float {
-  var i: Int = 0
-  loop i < g_activeRadiusNames.length {
-    let n: String = g_activeRadiusNames.copyAt(index: i)
-    if n is name {
-      if let value: Float = g_activeRadiusVals.copyAt(index: i) {
-        ret value
-      }
-    }
-    i = i + 1
-  }
-  log("[scene] unknown radius token '{name}' - using fallback")
-  ret fallback
-}
-
-# Resolve a padding token name to its insets, or a zero fallback
-# (logged) when undefined. Returns ThemeInsets (not the ECS Insets)
-# to keep this module free of the ui/components dependency.
-func activePaddingInsets(name: view String) pub ret ThemeInsets {
-  var i: Int = 0
-  loop i < g_activePadNames.length {
-    let n: String = g_activePadNames.copyAt(index: i)
+  loop i < theme.padNames.length {
+    let n: String = rae_ext_rae_buf_get(buf: theme.padNames.data, index: i)
     if n is name {
       var l: Float = 0.0
       var t: Float = 0.0
       var r: Float = 0.0
       var b: Float = 0.0
-      if let padLVal: Float = g_activePadL.copyAt(index: i) { l = padLVal }
-      if let padTVal: Float = g_activePadT.copyAt(index: i) { t = padTVal }
-      if let padRVal: Float = g_activePadR.copyAt(index: i) { r = padRVal }
-      if let padBVal: Float = g_activePadB.copyAt(index: i) { b = padBVal }
+      if let padLVal: Float = theme.padL.copyAt(index: i) { l = padLVal }
+      if let padTVal: Float = theme.padT.copyAt(index: i) { t = padTVal }
+      if let padRVal: Float = theme.padR.copyAt(index: i) { r = padRVal }
+      if let padBVal: Float = theme.padB.copyAt(index: i) { b = padBVal }
       ret ThemeInsets { l: l, t: t, r: r, b: b }
     }
     i = i + 1
   }
   log("[scene] unknown padding token '{name}' - using zero insets")
   ret ThemeInsets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+}
+
+# #764: element-wise copy the SCENE-DESERIALISER token subsets (space / radius /
+# padding / container) from a source ResolvedTheme into `dst`. Used by
+# seedWorldTheme to populate a fresh UiWorld's `theme.resolved` from the app's
+# owned ResolvedTheme — a deep copy (fresh list elements), never a shallow
+# heap-pointer aliasing. Only these four subsets are copied because they are the
+# only parts the deserialiser reads off the world; palette colours resolve against
+# `theme.active` and text styles against the Gpu2dUi's own ResolvedTheme. Mirrors
+# the old setActiveThemeTokens, retargeted from module globals to `dst`. Idempotent
+# via `dst.ok`: a world seeded once is not re-copied.
+func applyResolvedTokens(dst: mod ResolvedTheme, src: view ResolvedTheme) pub {
+  if dst.ok {
+    ret
+  }
+  var i: Int = 0
+  loop i < src.spaceNames.length {
+    let n: String = rae_ext_rae_buf_get(buf: src.spaceNames.data, index: i)
+    if let value: Float = src.spaceVals.copyAt(index: i) {
+      dst.spaceNames.add(value: n)
+      dst.spaceVals.add(value: value)
+    }
+    i = i + 1
+  }
+  i = 0
+  loop i < src.radiusNames.length {
+    let n: String = rae_ext_rae_buf_get(buf: src.radiusNames.data, index: i)
+    if let value: Float = src.radiusVals.copyAt(index: i) {
+      dst.radiusNames.add(value: n)
+      dst.radiusVals.add(value: value)
+    }
+    i = i + 1
+  }
+  i = 0
+  loop i < src.padNames.length {
+    let n: String = rae_ext_rae_buf_get(buf: src.padNames.data, index: i)
+    var l: Float = 0.0
+    var t: Float = 0.0
+    var r: Float = 0.0
+    var b: Float = 0.0
+    if let padLVal: Float = src.padL.copyAt(index: i) { l = padLVal }
+    if let padTVal: Float = src.padT.copyAt(index: i) { t = padTVal }
+    if let padRVal: Float = src.padR.copyAt(index: i) { r = padRVal }
+    if let padBVal: Float = src.padB.copyAt(index: i) { b = padBVal }
+    dst.padNames.add(value: n)
+    dst.padL.add(value: l)
+    dst.padT.add(value: t)
+    dst.padR.add(value: r)
+    dst.padB.add(value: b)
+    i = i + 1
+  }
+  i = 0
+  loop i < src.containerNames.length {
+    if let containerName: String = src.containerNames.copyAt(index: i) {
+      dst.containerNames.add(value: containerName)
+    }
+    if let containerBgSlot: String = src.containerBgSlots.copyAt(index: i) {
+      dst.containerBgSlots.add(value: containerBgSlot)
+    }
+    if let containerRadiusToken: String = src.containerRadiusTokens.copyAt(index: i) {
+      dst.containerRadiusTokens.add(value: containerRadiusToken)
+    }
+    if let containerPadToken: String = src.containerPadTokens.copyAt(index: i) {
+      dst.containerPadTokens.add(value: containerPadToken)
+    }
+    if let containerTextStyle: String = src.containerTextStyles.copyAt(index: i) {
+      dst.containerTextStyles.add(value: containerTextStyle)
+    }
+    i = i + 1
+  }
+  dst.ok = true
 }
