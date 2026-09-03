@@ -132,14 +132,39 @@ func gbFrameBytes() extern("rae_gb_frame_bytes") ret Int
 func gbDrawsSize() extern("rae_gb_draws_size") ret Int
 func gbSetStaticBind(bind: Ptr) extern("rae_gb_set_static_bind")
 
-var gBuffersMade: Bool = false
 
 # Create the frame uniform + draws storage buffers once, over the bindings, and
 # store them back into C so the frame-uniform upload, draws and bind groups use
 # them. Distinct flag bits, so `+` is the flag union.
-func ensureGbBuffers() {
-  if gBuffersMade { ret }
-  gBuffersMade = true
+# #764: the G-buffer geometry pass caches — the "have I made the pipelines /
+# buffers / static+skin binds" flags, plus the reused attachment arrays and the
+# per-draw instance-record scratch (all zero-alloc, #573) — were module-level
+# globals. They are per-frame state a deferred renderer owns, so they live in a
+# GbufferCache on RenderPasses, threaded from DeferredRenderer through beginPass /
+# renderScene and the draw entry points.
+type GbufferCache {
+  buffersMade: Bool
+  staticBindMade: Bool
+  colorAtts: List(WGPURenderPassColorAttachment)
+  depthAtt: List(WGPURenderPassDepthStencilAttachment)
+  pipelinesMade: Bool
+  skinBindMade: Bool
+  drawScratch: List(Float)
+}
+
+func createGbufferCache() pub ret GbufferCache {
+  ret GbufferCache {
+    buffersMade: false, staticBindMade: false,
+    colorAtts: createList(WGPURenderPassColorAttachment, cap: 3),
+    depthAtt: createList(WGPURenderPassDepthStencilAttachment, cap: 1),
+    pipelinesMade: false, skinBindMade: false,
+    drawScratch: createList(Float, cap: instanceRecordFloats)
+  }
+}
+
+func ensureGbBuffers(cache: mod GbufferCache) {
+  if cache.buffersMade { ret }
+  cache.buffersMade = true
   let uDesc: WGPUBufferDescriptor = {
     usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst,
     size: gbFrameBytes() as UInt64
@@ -152,13 +177,12 @@ func ensureGbBuffers() {
   gbSetDrawsBuffer(buf: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: sDesc))
 }
 
-var gStaticBindMade: Bool = false
 
 # Create the static geometry bind group once, over the bindings. Safe to call
 # only after gbPrepare returned 1 and the buffers exist.
-func ensureStaticBind() {
-  if gStaticBindMade { ret }
-  gStaticBindMade = true
+func ensureStaticBind(cache: mod GbufferCache) {
+  if cache.staticBindMade { ret }
+  cache.staticBindMade = true
   let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbStaticPipeline(), groupIndex: 0 as UInt32)
   var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 2)
   entries.add(value: { binding: 0 as UInt32, buffer: gbFrameUbuf(), size: gbFrameBytes() as UInt64 })
@@ -171,16 +195,12 @@ func ensureStaticBind() {
   gbSetStaticBind(bind: bind)
 }
 
-# Reusable attachment arrays (#503) — module-level so begin() never allocates
-# per frame; filled once to length, then rewritten in place each frame.
-var gGbColorAtts: List(WGPURenderPassColorAttachment) = createList(WGPURenderPassColorAttachment, cap: 3)
-var gGbDepthAtt: List(WGPURenderPassDepthStencilAttachment) = createList(WGPURenderPassDepthStencilAttachment, cap: 1)
 
 # Placeholder entries carry one explicit (zeroed) field — an empty {} is not a
 # valid C initializer. They are rewritten in full by begin() every frame.
-func ensureGbAttachments() {
-  loop gGbColorAtts.length < 3 { gGbColorAtts.add(value: { depthSlice: 0 as UInt32 }) }
-  loop gGbDepthAtt.length < 1 { gGbDepthAtt.add(value: { depthReadOnly: 0 as UInt32 }) }
+func ensureGbAttachments(cache: mod GbufferCache) {
+  loop cache.colorAtts.length < 3 { cache.colorAtts.add(value: { depthSlice: 0 as UInt32 }) }
+  loop cache.depthAtt.length < 1 { cache.depthAtt.add(value: { depthReadOnly: 0 as UInt32 }) }
 }
 
 # ----- render pipelines + WGSL shader modules (#503) -------------------------
@@ -199,7 +219,6 @@ func gbEntryFs() extern("rae_gb_entry_fs") ret Ptr
 func gbSetPipeline(pipeline: Ptr) extern("rae_gb_set_pipeline")
 func gbSetSkinPipeline(pipeline: Ptr) extern("rae_gb_set_skin_pipeline")
 
-var gPipelinesMade: Bool = false
 
 # WGSL text -> shader module. The chained WGPUShaderSourceWGSL lives in a
 # one-element List so .data gives its address for nextInChain (chain is the
@@ -259,9 +278,9 @@ func makeGbPipeline(shaderMod: copy Ptr, attrs: mod List(WGPUVertexAttribute), s
   ret wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: desc)
 }
 
-func ensurePipelines() {
-  if gPipelinesMade { ret }
-  gPipelinesMade = true
+func ensurePipelines(cache: mod GbufferCache) {
+  if cache.pipelinesMade { ret }
+  cache.pipelinesMade = true
   let staticMod: Ptr = makeShaderModule(wgsl: gbWgsl())
   var staticAttrs: List(WGPUVertexAttribute) = createList(WGPUVertexAttribute, cap: 3)
   staticAttrs.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0 as UInt64, shaderLocation: 0 as UInt32 })
@@ -282,15 +301,15 @@ func ensurePipelines() {
   wgpuShaderModuleRelease(shaderModule: skinMod)
 }
 
-func begin(viewProj: view Mat4, clearR: copy Float, clearG: copy Float, clearB: copy Float) pub {
+func begin(cache: mod GbufferCache, viewProj: view Mat4, clearR: copy Float, clearG: copy Float, clearB: copy Float) pub {
   if gbPrepare() is 0 { ret }
-  ensurePipelines()
+  ensurePipelines(cache: cache)
   ensureTargets()
   if gbTargetsReady() is 0 { ret }
-  ensureGbBuffers()
-  ensureStaticBind()
+  ensureGbBuffers(cache: cache)
+  ensureStaticBind(cache: cache)
   if gbFrameUniform(viewProj: viewProj, clearR: clearR, clearG: clearG, clearB: clearB) is 0 { ret }
-  ensureGbAttachments()
+  ensureGbAttachments(cache: cache)
 
   let undefinedSlice: UInt32 = WGPU_DEPTH_SLICE_UNDEFINED as UInt32
   let motionZero: Float64 = gbMotionZero() as Float64
@@ -313,9 +332,9 @@ func begin(viewProj: view Mat4, clearR: copy Float, clearG: copy Float, clearB: 
     loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store,
     clearValue: { r: motionZero, g: motionZero, b: 0.0, a: 1.0 }
   }
-  gGbColorAtts.set(index: 0, value: attA)
-  gGbColorAtts.set(index: 1, value: attB)
-  gGbColorAtts.set(index: 2, value: attC)
+  cache.colorAtts.set(index: 0, value: attA)
+  cache.colorAtts.set(index: 1, value: attB)
+  cache.colorAtts.set(index: 2, value: attC)
 
   # Depth: reverse-Z, so the far plane clears to 0 (#367).
   let depthAtt: WGPURenderPassDepthStencilAttachment = {
@@ -323,12 +342,12 @@ func begin(viewProj: view Mat4, clearR: copy Float, clearG: copy Float, clearB: 
     depthLoadOp: WGPULoadOp_Clear, depthStoreOp: WGPUStoreOp_Store,
     depthClearValue: 0.0
   }
-  gGbDepthAtt.set(index: 0, value: depthAtt)
+  cache.depthAtt.set(index: 0, value: depthAtt)
 
   let rpDesc: WGPURenderPassDescriptor = {
     colorAttachmentCount: 3 as UInt64,
-    colorAttachments: gGbColorAtts.data,
-    depthStencilAttachment: gGbDepthAtt.data
+    colorAttachments: cache.colorAtts.data,
+    depthStencilAttachment: cache.depthAtt.data
   }
   let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
   let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
@@ -413,12 +432,11 @@ func gbSkinPalette() extern("rae_gb_skin_palette") ret Ptr
 func gbSkinPaletteSize() extern("rae_gb_skin_palette_size") ret Int
 func gbSkinPaletteReady() extern("rae_gb_skin_palette_ready") ret Int
 
-var gSkinBindMade: Bool = false
 
-func ensureSkinBind() {
-  if gSkinBindMade { ret }
+func ensureSkinBind(cache: mod GbufferCache) {
+  if cache.skinBindMade { ret }
   if gbSkinPaletteReady() is 0 { ret }
-  gSkinBindMade = true
+  cache.skinBindMade = true
   let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbSkinPipeline(), groupIndex: 0 as UInt32)
   var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 3)
   entries.add(value: { binding: 0 as UInt32, buffer: gbFrameUbuf(), size: gbFrameBytes() as UInt64 })
@@ -489,7 +507,7 @@ const viewDepth: Int = 4     # linearised for display
 # the whole chain is stack traffic. The forward path packs an equivalent
 # block into a List(Float) — one allocation per frame — which this
 # deliberately does not inherit.
-func beginPass(camera: view Camera3d, light: view Light3d, aspect: view Float) pub {
+func beginPass(cache: mod GbufferCache, camera: view Camera3d, light: view Light3d, aspect: view Float) pub {
   let worldUp: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
   let viewM: Mat4 = mat4LookAt(
     eyeX: camera.position.x, eyeY: camera.position.y, eyeZ: camera.position.z,
@@ -501,7 +519,7 @@ func beginPass(camera: view Camera3d, light: view Light3d, aspect: view Float) p
   # mat4Perspective — the two conventions must not be mixed.
   let proj: Mat4 = mat4PerspectiveReverseZ(fovYDeg: camera.fovYDeg, aspect: aspect, near: camera.nearZ, far: camera.farZ)
   let viewProj: Mat4 = mat4Mul(a: proj, b: viewM)
-  begin(viewProj: viewProj, clearR: light.clearColor.x, clearG: light.clearColor.y, clearB: light.clearColor.z)
+  begin(cache: cache, viewProj: viewProj, clearR: light.clearColor.x, clearG: light.clearColor.y, clearB: light.clearColor.z)
 }
 
 # Model matrix for a typed transform: M = T * Rz * Ry * Rx * S, Euler XYZ
@@ -629,11 +647,10 @@ func toonFlag(material: view Material3d) ret Int {
 # once, on the first draw that actually runs (never in a headless/no-device
 # build, where the readiness checks below return first). Never resized after, so
 # .data stays stable.
-var gDrawScratch: List(Float) = createList(Float, cap: instanceRecordFloats)
 
-func ensureDrawScratch() {
-  loop gDrawScratch.length < instanceRecordFloats {
-    gDrawScratch.add(value: 0.0)
+func ensureDrawScratch(cache: mod GbufferCache) {
+  loop cache.drawScratch.length < instanceRecordFloats {
+    cache.drawScratch.add(value: 0.0)
   }
 }
 
@@ -641,39 +658,39 @@ func ensureDrawScratch() {
 # single DrawU record in Rae (packInstanceRecord) and issues it through the same
 # Rae upload+draw path as the instanced grass — the static pipeline reads
 # draws[instance_index], so one record at firstInstance=base is this draw.
-func draw(mesh: copy Int, model: view Mat4, prevModel: view Mat4,
+func draw(cache: mod GbufferCache, mesh: copy Int, model: view Mat4, prevModel: view Mat4,
           r: copy Float, g: copy Float, b: copy Float,
           metallic: copy Float, roughness: copy Float, emissive: copy Float,
           toon: copy Int) pub {
   if gbMeshReady(mesh: mesh) is 0 { ret }
   let base: Int = gbDrawCount()
   if base >= gbMaxDraws() { ret }
-  ensureDrawScratch()
-  packInstanceRecord(records: gDrawScratch, slot: 0, model: model, prevModel: prevModel,
+  ensureDrawScratch(cache: cache)
+  packInstanceRecord(records: cache.drawScratch, slot: 0, model: model, prevModel: prevModel,
     r: r, g: g, b: b, metallic: metallic, roughness: roughness, emissive: emissive, toon: toon, paletteBase: 0)
   gbIssueInstanced(pass: gbPass(), pipeline: gbStaticPipeline(), bind: gbStaticBind(),
     vbuf: gbMeshVbuf(mesh: mesh), ibuf: gbMeshIbuf(mesh: mesh),
-    icount: gbMeshIcount(mesh: mesh), base: base, count: 1, records: gDrawScratch.data)
+    icount: gbMeshIcount(mesh: mesh), base: base, count: 1, records: cache.drawScratch.data)
 }
 
 # One skinned mesh instance (#503, was the C `drawSkinned`). Same DrawU record
 # and G-buffer layout as a static draw; only the pipeline differs (the skin
 # vertex stage poses the mesh by the joint palette). After issuing, the static
 # pipeline/bind are restored so a following static draw is unaffected.
-func drawSkinned(mesh: copy Int, model: view Mat4, prevModel: view Mat4,
+func drawSkinned(cache: mod GbufferCache, mesh: copy Int, model: view Mat4, prevModel: view Mat4,
                  r: copy Float, g: copy Float, b: copy Float,
                  metallic: copy Float, roughness: copy Float, emissive: copy Float,
                  toon: copy Int) pub {
-  ensureSkinBind()
+  ensureSkinBind(cache: cache)
   if gbSkinReady(mesh: mesh) is 0 { ret }
   let base: Int = gbDrawCount()
   if base >= gbMaxDraws() { ret }
-  ensureDrawScratch()
-  packInstanceRecord(records: gDrawScratch, slot: 0, model: model, prevModel: prevModel,
+  ensureDrawScratch(cache: cache)
+  packInstanceRecord(records: cache.drawScratch, slot: 0, model: model, prevModel: prevModel,
     r: r, g: g, b: b, metallic: metallic, roughness: roughness, emissive: emissive, toon: toon, paletteBase: 0)
   gbIssueInstanced(pass: gbPass(), pipeline: gbSkinPipeline(), bind: gbSkinBind(),
     vbuf: gbSkinVbuf(mesh: mesh), ibuf: gbSkinIbuf(mesh: mesh),
-    icount: gbSkinIcount(mesh: mesh), base: base, count: 1, records: gDrawScratch.data)
+    icount: gbSkinIcount(mesh: mesh), base: base, count: 1, records: cache.drawScratch.data)
   # Hand the pass back to the static pipeline for any following static draw.
   wgpuRenderPassEncoderSetPipeline(renderPassEncoder: gbPass(), pipeline: gbStaticPipeline())
   wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: gbPass(), groupIndex: 0 as UInt32,
@@ -687,8 +704,8 @@ func drawSkinned(mesh: copy Int, model: view Mat4, prevModel: view Mat4,
 # crowds playing the same animation. `records` is `count` DrawU entries built by
 # packInstanceRecord, exactly like drawRecords. Restores the static pipeline after,
 # as drawSkinned does.
-func drawSkinnedRecords(mesh: copy Int, records: copy Ptr, count: copy Int) pub {
-  ensureSkinBind()
+func drawSkinnedRecords(cache: mod GbufferCache, mesh: copy Int, records: copy Ptr, count: copy Int) pub {
+  ensureSkinBind(cache: cache)
   if gbSkinReady(mesh: mesh) is 0 { ret }
   let base: Int = gbDrawCount()
   let remaining: Int = gbMaxDraws() - base
@@ -704,7 +721,7 @@ func drawSkinnedRecords(mesh: copy Int, records: copy Ptr, count: copy Int) pub 
     group: gbStaticBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
 }
 
-func drawInstance(mesh: view MeshHandle, transform: view Transform3d, prevTransform: view Transform3d, material: view Material3d) pub {
+func drawInstance(cache: mod GbufferCache, mesh: view MeshHandle, transform: view Transform3d, prevTransform: view Transform3d, material: view Material3d) pub {
   if not meshHandleIsValid(h: mesh) {
     ret
   }
@@ -722,7 +739,7 @@ func drawInstance(mesh: view MeshHandle, transform: view Transform3d, prevTransf
     emissive = material.emission.z
   }
   draw(
-    mesh: mesh.id, model: model, prevModel: prevModel,
+    cache: cache, mesh: mesh.id, model: model, prevModel: prevModel,
     r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
     metallic: material.metallic, roughness: material.roughness, emissive: emissive,
     toon: toonFlag(material: material)
@@ -734,7 +751,7 @@ func drawInstance(mesh: view MeshHandle, transform: view Transform3d, prevTransf
 # poses the mesh by the joint palette first. The palette is uploaded once
 # per frame by gpu3d.uploadPalette and shared by every pipeline that
 # reads it.
-func drawSkinnedInstance(mesh: view MeshHandle, model: view Mat4, prevModel: view Mat4,
+func drawSkinnedInstance(cache: mod GbufferCache, mesh: view MeshHandle, model: view Mat4, prevModel: view Mat4,
                          material: view Material3d) pub {
   if not meshHandleIsValid(h: mesh) {
     ret
@@ -747,7 +764,7 @@ func drawSkinnedInstance(mesh: view MeshHandle, model: view Mat4, prevModel: vie
     emissive = material.emission.z
   }
   drawSkinned(
-    mesh: mesh.id, model: model, prevModel: prevModel,
+    cache: cache, mesh: mesh.id, model: model, prevModel: prevModel,
     r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
     metallic: material.metallic, roughness: material.roughness, emissive: emissive,
     toon: toonFlag(material: material)
@@ -821,7 +838,7 @@ func renderSceneSdf(scene: view Scene3d, camera: view Camera3d) pub {
   }
 }
 
-func renderScene(scene: view Scene3d) pub {
+func renderScene(cache: mod GbufferCache, scene: view Scene3d) pub {
   var i: Int = 0
   loop i < scene.meshRenderers.length {
     let r: MeshRenderer = sceneMeshRendererAt(values: scene.meshRenderers, index: i)
@@ -831,7 +848,7 @@ func renderScene(scene: view Scene3d) pub {
       # (#336), so this index is always valid.
       let pt: Transform3d = sceneTransformAt(values: scene.prevTransforms, index: r.entity)
       let m: Material3d = sceneMaterialAt(values: scene.materials, index: r.material)
-      drawInstance(mesh: r.mesh, transform: t, prevTransform: pt, material: m)
+      drawInstance(cache: cache, mesh: r.mesh, transform: t, prevTransform: pt, material: m)
     }
     i = i + 1
   }
