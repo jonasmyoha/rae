@@ -23,17 +23,17 @@
 open ui/ecs
 import core
 import gpu2d
-import gpu2d_text
-import sdf_text
+import gpu2dText
+import sdfText
 import ui/AnimationSystem/AnimationSystem
 import ui/components
 import ui/ecs
-import ui/icon_codepoints
+import ui/iconCodepoints
 import ui/layer
 import ui/theme
-import ui/theme_resolved
-import ui/text_style
-open ecs/component_table
+import ui/themeResolved
+import ui/textStyle
+open ecs/ComponentTable
 
 # Per-app gpu2d render resources, passed to renderSystemGpu2d each frame.
 type Gpu2dUi {
@@ -201,9 +201,9 @@ func visualBoundsAt(world: view UiWorld, e: view EntityId, text: view String, is
     }
   }
   if isIcon {
-    ret sdf_text.sdfMeasureTextBounds(font: res.iconFont, text: text, sizePx: sizePx)
+    ret sdfText.sdfMeasureTextBounds(font: res.iconFont, text: text, sizePx: sizePx)
   }
-  ret sdf_text.sdfMeasureTextBounds(font: res.textFont, text: text, sizePx: sizePx)
+  ret sdfText.sdfMeasureTextBounds(font: res.textFont, text: text, sizePx: sizePx)
 }
 
 # Sprites: `mat:<name>` icons draw as a Material-atlas glyph; other keys
@@ -242,7 +242,7 @@ func paintSpriteG(world: view UiWorld, e: view EntityId, wt: view WorldTransform
         }
       }
     }
-    gpu2d_text.drawText(font: res.iconFont, text: glyph, x: gx, y: gy, sizePx: sz, color: g2dColor(c: tint))
+    gpu2dText.drawText(font: res.iconFont, text: glyph, x: gx, y: gy, sizePx: sz, color: g2dColor(c: tint))
     ret
   }
   let radius: Float = g2dRadius(world: world, e: e, fallback: 0.0)
@@ -306,7 +306,7 @@ func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform2D
   }
   if t.wrapWidthMode is WrapWidthMode.nodeWidth {
     let lineHeight: Float = size * resolveTextLineHeight(theme: res.theme, styleId: t.styleId)
-    gpu2d_text.drawTextWrappedEx(
+    gpu2dText.drawTextWrappedEx(
       font: res.textFont
       text: t.text
       x: drawX
@@ -362,7 +362,7 @@ func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform2D
   }
   if hasShadow {
     let shChained: RgbaColor = g2dChain(c: shCol, chain255: chain255)
-    gpu2d_text.drawTextEx(
+    gpu2dText.drawTextEx(
       font: res.textFont
       text: t.text
       x: drawX
@@ -379,12 +379,12 @@ func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform2D
     ret
   }
   if boldWidth > 0.0 {
-    gpu2d_text.drawTextEx(font: res.textFont, text: t.text, x: drawX, y: drawY, sizePx: size,
+    gpu2dText.drawTextEx(font: res.textFont, text: t.text, x: drawX, y: drawY, sizePx: size,
                           color: g2dColor(c: col), outlineColor: g2dColor(c: col),
                           outlineWidth: boldWidth, shadowColor: 0, shadowOffX: 0.0,
                           shadowOffY: 0.0, shadowSoftness: 1.0)
   } else {
-    gpu2d_text.drawText(font: res.textFont, text: t.text, x: drawX, y: drawY, sizePx: size, color: g2dColor(c: col))
+    gpu2dText.drawText(font: res.textFont, text: t.text, x: drawX, y: drawY, sizePx: size, color: g2dColor(c: col))
   }
 }
 

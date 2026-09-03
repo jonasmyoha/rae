@@ -4,13 +4,13 @@ import core
 # createUiWorld), so every module that imports ui/ecs must also emit ui/theme.
 import ui/theme
 open ecs/entity
-open ecs/component_table
+open ecs/ComponentTable
 open ecs/queue
 open ecs/world
 open ecs/hierarchy
 open ecs/HierarchySystem/HierarchySystem
 # Only raylib-free MSDF data types; paint code stays out of UiWorld.
-import ui/msdf_state
+import ui/MsdfState
 
 
 
@@ -160,7 +160,7 @@ type UiWorld {
 
   # #764: the active palette + scene-parsed token tables + repaint generation.
   # Was the module-level `activeTheme`/`g_themeGeneration`/`g_active*` globals in
-  # theme.rae/theme_resolved.rae; now a per-world resource the app seeds from its
+  # theme.rae/themeResolved.rae; now a per-world resource the app seeds from its
   # owned theme (loadUiAssets' Gpu2dUi, or an AppState field) as it builds a world.
   # A RUNTIME resource, not a per-entity component and never serialized.
   theme: UiTheme

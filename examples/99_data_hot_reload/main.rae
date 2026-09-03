@@ -1,6 +1,6 @@
 # Data Hot Reload example.
 #
-# `lib/file_watch.rae` is a generic primitive — it detects on-disk
+# `lib/fileWatch.rae` is a generic primitive — it detects on-disk
 # mtime changes and signals the app. What to do about that signal
 # (re-parse JSON, recompile, reload a shader, ...) is the caller's
 # job. This example demonstrates the "data hot reload" use case on
@@ -12,11 +12,11 @@
 # supplied manually so the example is deterministic — in a real app
 # you'd pass `getTime()` from raylib (or any other monotonic clock).
 import core
-import file_watch
+import fileWatch
 
 # Sidestep a known C-backend bug where comparing `opt String` against
 # `none` lowers to a type-mismatched `rae_ext_rae_str_eq` call. Same
-# pattern as the archived `examples/legacy/raylib/98_mobile_ui/scene_loader.rae`:
+# pattern as the archived `examples/legacy/raylib/98_mobile_ui/sceneLoader.rae`:
 # declare the
 # extern with a non-opt return so we get a plain `rae_String` (empty
 # on miss).
@@ -42,7 +42,7 @@ func main() {
 
   let paths: List(String) = createList(String, cap: 1)
   paths.add(value: configPath)
-  let watcher: FileWatcher = file_watch.createFileWatcher(
+  let watcher: FileWatcher = fileWatch.createFileWatcher(
     paths: paths
     enabled: true
     intervalSec: 0.0
@@ -58,7 +58,7 @@ func main() {
   # and timestamps do not fit in an f32 once they carry a real epoch.
   var now: Float64 = 0.0
   loop tick < 6 {
-    if file_watch.checkForChanges(watcher: watcher, now: now) {
+    if fileWatch.checkForChanges(watcher: watcher, now: now) {
       log("tick {tick}: reloaded -> {loadConfig(path: configPath)}")
     } else {
       log("tick {tick}: idle")

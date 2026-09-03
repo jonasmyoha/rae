@@ -23,7 +23,7 @@ import ui/components
 # #764: UiTheme bundles a ResolvedTheme (createResolvedTheme) and the world-typed
 # accessors take a UiWorld. Import both so any graph that pulls ui/theme emits
 # them; the ui/ecs <-> ui/theme cycle is fine (Rae allows import cycles, #743).
-import ui/theme_resolved
+import ui/themeResolved
 import ui/ecs
 
 enum ThemeMode {
@@ -127,7 +127,7 @@ func darkTheme() pub ret Theme {
 
 # #764: the active theme + its token cache were module-level globals
 # (`activeTheme`, `g_themeGeneration` here, plus the 15 flattened `g_active*`
-# lists in theme_resolved.rae). They are now ONE resource, `UiTheme`, owned as a
+# lists in themeResolved.rae). They are now ONE resource, `UiTheme`, owned as a
 # field on `UiWorld` and threaded to the paint/deser sites that read it (both of
 # which already carry the world). The palette `active` is the closed 10-slot
 # `Theme` that `themeColorByName` resolves against; `resolved` is the scene-parsed

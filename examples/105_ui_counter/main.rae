@@ -35,24 +35,24 @@ import ui/InputSystem/InputSystem
 import ui/LayoutSystem/LayoutSystem
 import ui/RenderSystem/RenderSystem
 import ui/scene
-import ui/scene_file
-import ui/scene_loader
-import ui/event_loop
-open ui/event_loop
+import ui/sceneFile
+import ui/sceneLoader
+import ui/eventLoop
+open ui/eventLoop
 # The node helpers (setNodeText / setNodeActive / setNodeFillSlot) and the
 # loadUiAssets + runUiSystems bootstrap live here. The `app3d/` in the path is
 # historical -- the module imports core, gpu2d, sdf_text and lib/ui and nothing
 # 3D, and its own header calls it "the lib/ui bootstrap every example was
 # copying". A 2D UI app is exactly its audience.
-import app3d/ui_shell
-open app3d/ui_shell
+import app3d/uiShell
+open app3d/uiShell
 open ui/ecs
 open ui/InputSystem/InputSystem
 open ui/LayoutSystem/LayoutSystem
 open ui/RenderSystem/RenderSystem
-open ui/scene_file
-open ui/scene_loader
-open ui/theme_resolved
+open ui/sceneFile
+open ui/sceneLoader
+open ui/themeResolved
 open ui/transform
 open ecs/entity
 
@@ -311,7 +311,7 @@ func main() ret Int {
       # IDLE AT ~0% CPU. Nothing here animates, so there is nothing to wake for
       # except the OS: the loop blocks rather than redrawing an identical frame
       # sixty times a second. The timeout is the shared policy from
-      # lib/ui/event_loop.rae, not a number invented here; an app WITH animation
+      # lib/ui/eventLoop.rae, not a number invented here; an app WITH animation
       # passes animating: true and gets a frame-length wait instead. See
       # docs/ui-render-loop-performance.md.
       gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(

@@ -1,9 +1,9 @@
-open hot_reload
-open ui/window_geometry
+open hotReload
+open ui/WindowGeometry
 open ui/ecs
-open ui/event_loop
-open ui/log_overlay
-open hot_reload
+open ui/eventLoop
+open ui/LogOverlay
+open hotReload
 # Mobile-UI demo entrypoint. The actual work — scene loading, world
 # building, screen routing — lives in sibling `.rae` files in this same
 # directory, which Rae auto-imports because they share the project
@@ -13,7 +13,7 @@ open hot_reload
 # Architecture (all files in this folder are auto-imported):
 #   * config.rae           — layout, palette, asset paths
 #   * world_helpers.rae    — ECS component-setter shorthands
-#   * scene_loader.rae     — parse the four .raescene files into an AlbumScenes
+#   * sceneLoader.rae     — parse the four .raescene files into an AlbumScenes
 #   * scene_mount.rae      — mountOrError + visible error sentinel
 #   * album_view.rae       — album-screen builders, including buildAlbumWorld
 #   * now_playing_view.rae — buildNowPlayingWorld
@@ -21,22 +21,22 @@ open hot_reload
 #   * album_loader.rae     — Album / Track structs + loadAllAlbums (album.json)
 #   * asset_loader.rae     — GPU2D image-key loading (per-album cover + avatar)
 import core
-import file_watch
-import hot_reload
-import ui/window_geometry
-import sdf_text
+import fileWatch
+import hotReload
+import ui/WindowGeometry
+import sdfText
 import sys/spotify
 import ui/ecs
-import ui/event_loop
-import ui/log_overlay
-import hot_reload
+import ui/eventLoop
+import ui/LogOverlay
+import hotReload
 import ui/FitSystem/FitSystem
 import ui/LayoutSystem/LayoutSystem
 import ui/theme
 import ui/transform
 import ui/RenderSystem/RenderSystem
 import ui/AnimationSystem/AnimationSystem
-import ui/theme_resolved
+import ui/themeResolved
 import ui/scene
 open ecs/entity
 func main() {
@@ -60,10 +60,10 @@ func main() {
   uiDisableAppNap()
   uiSetMouseScale(scaleX: 1.0, scaleY: 1.0)
 
-  let gpuTextFont: SdfFont = sdf_text.loadSdfFont(
+  let gpuTextFont: SdfFont = sdfText.loadSdfFont(
     jsonPath: "examples/106_mobile_ui/assets/Roboto-Regular.mtsdf.json",
     rawAtlasPath: "examples/106_mobile_ui/assets/Roboto-Regular.mtsdf.raw")
-  let gpuIconFont: SdfFont = sdf_text.loadSdfFont(
+  let gpuIconFont: SdfFont = sdfText.loadSdfFont(
     jsonPath: "examples/106_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.json",
     rawAtlasPath: "examples/106_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.raw")
   # Load the theme (#231): styleId sizes/colors/align now resolve from
@@ -246,7 +246,7 @@ func main() {
     watchedPaths.add(value: nowPlayingPath)
     watchedPaths.add(value: albumPath)
     watchedPaths.add(value: homePath)
-    let watcher: FileWatcher = file_watch.createFileWatcher(
+    let watcher: FileWatcher = fileWatch.createFileWatcher(
       paths: watchedPaths
       enabled: dataHotReloadEnabled
       intervalSec: 0.25

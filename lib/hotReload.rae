@@ -1,0 +1,345 @@
+# Phase 2 of the hot-reload design (docs/hot-reload-plan.md).
+#
+# State preservation + signal protocol for the supervisor-driven hot
+# reload flow. Apps call these primitives directly — there are no
+# registration hooks because Rae has no function-typed values.
+#
+# Two surfaces:
+#
+#   1. State round-trip
+#      - At startup: `readHotReloadState()` returns whatever bytes the
+#        previous run saved, or `""` if there's nothing to restore.
+#      - Before exit-for-reload: `writeHotReloadState(s)` saves bytes.
+#      - After a successful restore: `clearHotReloadState()` removes
+#        the file so the next clean launch doesn't re-restore stale
+#        state.
+#
+#   2. Signal poll
+#      - `createReloadSignalWatcher()` snapshots the signal file's
+#        mtime so the first poll is quiet.
+#      - `pollReloadSignal(w)` returns a `ReloadSignal` whose `verb`
+#        is `None` when the file is missing or unchanged since the
+#        last poll (cheap mtime check), or `Data` / `Reload` /
+#        `Restart` when the supervisor wrote a fresh signal.
+#
+# Signal file format is one line:
+#
+#     "<verb> <build-id> <epoch-ms>"
+#
+# where `<verb>` is `data`, `reload`, or `restart`. The build-id and
+# timestamp are recorded but not consumed by the runtime — they're
+# for log forensics and supervisor-side dedup.
+
+import core
+
+# ----- paths ----------------------------------------------------------
+#
+# Location convention: `.rae/` under the current working directory,
+# UNLESS the supervisor handed us a private channel via
+# `RAE_HOT_RELOAD_DIR` (an absolute path). Same root the supervisor
+# writes to. Centralized here so apps and the `rae watch` driver stay
+# in lockstep.
+#
+# WHY THE ENV VAR: the signal + status files are a broadcast channel.
+# One fixed path per working tree meant that with several apps running
+# at once — which the devtools now allows — every supervisor's rebuild
+# told EVERY running app to save state and exit, so apps reloaded
+# endlessly for changes that had nothing to do with them. Each `rae
+# watch` supervisor now owns `.rae/apps/<id>/` and points its own
+# children at it; an app started without a supervisor keeps the plain
+# `.rae` default, where nothing writes a signal.
+
+func hotReloadDir() pub ret String {
+  let override: String = getEnv(name: "RAE_HOT_RELOAD_DIR")
+  if override.length() > 0 {
+    ret override
+  }
+  ret ".rae"
+}
+
+func hotReloadStatePath() pub ret String {
+  ret "{hotReloadDir()}/state.json"
+}
+
+func hotReloadSignalPath() pub ret String {
+  ret "{hotReloadDir()}/reload.signal"
+}
+
+func hotReloadBuildStatusPath() pub ret String {
+  ret "{hotReloadDir()}/build.status"
+}
+
+# Deliberately NOT state.json: that file belongs to the app's own schema
+# (examples/106_mobile_ui stores playback state there), and a shared
+# counter writing into it would clobber whatever the app saved.
+func hotReloadGenerationPath() pub ret String {
+  ret "{hotReloadDir()}/reload.generation"
+}
+
+# ----- state file -----------------------------------------------------
+
+# Native shortcut: `lib/sys.readFile` returns `opt String`, but the
+# C backend has a known bug comparing those against `none` via the
+# wrong runtime helper (see lib/fileWatch.rae and tests/415). Going
+# through the raw extern gives us a plain `String` and lets us use
+# the empty-string-means-missing convention.
+func rae_ext_rae_sys_read_file(path: String) extern ret String
+
+# Read whatever bytes the previous run saved. Returns `""` when
+# there's nothing to restore; apps check `.length() > 0` before
+# deserializing. The app owns the schema (typically JSON).
+func readHotReloadState() pub ret String {
+  ret rae_ext_rae_sys_read_file(path: hotReloadStatePath())
+}
+
+# Save state for the next run. Apps should call this just before
+# `exit(0)` on a `Reload` signal. Returns false if the write
+# failed (most often because `.rae/` doesn't exist; the supervisor
+# normally pre-creates it, but apps can call `ensureHotReloadDir()`
+# defensively).
+func writeHotReloadState(state: view String) pub ret Bool {
+  ret writeFile(path: hotReloadStatePath(), content: state)
+}
+
+# ----- app-scoped state -----------------------------------------------
+#
+# `state.json` is a single well-known path, so two apps run from the same
+# working tree would overwrite each other's snapshot and then try to parse
+# the other's schema. Apps that want their own slot pass an id; the plain
+# `readHotReloadState`/`writeHotReloadState` pair keeps the legacy path so
+# existing callers are untouched.
+func hotReloadStatePathFor(appId: view String) pub ret String {
+  ret "{hotReloadDir()}/state.{appId}.json"
+}
+
+func readHotReloadStateFor(appId: view String) pub ret String {
+  ret rae_ext_rae_sys_read_file(path: hotReloadStatePathFor(appId: appId))
+}
+
+func writeHotReloadStateFor(appId: view String, state: view String) pub ret Bool {
+  makeDir(path: hotReloadDir())
+  ret writeFile(path: hotReloadStatePathFor(appId: appId), content: state)
+}
+
+# ----- launch generation ----------------------------------------------
+
+# A monotonic counter of how many times this app has started in this
+# working tree, incremented and persisted on each call. Since a hot reload
+# is a process exit + relaunch, "did my change actually get picked up?" is
+# otherwise surprisingly hard to answer by eye — a rebuilt binary that
+# silently failed to relaunch looks identical to one that reloaded and
+# changed nothing. Logging this number makes the reload visible: 5 becomes
+# 6 in front of you.
+#
+# Call ONCE at startup. Returns 1 on the first ever launch. A corrupt or
+# missing file restarts at 1 rather than failing: this is a diagnostic,
+# and it should never be the reason an app does not boot.
+func nextReloadGeneration() pub ret Int {
+  let raw: String = rae_ext_rae_sys_read_file(path: hotReloadGenerationPath())
+  var n: Int = 0
+  if raw.length() > 0 {
+    n = raw.trim().toInt()
+  }
+  if n < 0 {
+    n = 0
+  }
+  let next: Int = n + 1
+  makeDir(path: hotReloadDir())
+  writeFile(path: hotReloadGenerationPath(), content: "{next}")
+  ret next
+}
+
+# Remove `state.json`. Call once after a successful restore so the
+# next clean launch starts fresh. Idempotent: returns true if there
+# was nothing to delete.
+func clearHotReloadState() pub ret Bool {
+  if exists(path: hotReloadStatePath()) is false {
+    ret true
+  }
+  ret delete(path: hotReloadStatePath())
+}
+
+# ----- signal file ----------------------------------------------------
+
+enum ReloadVerb {
+  none
+  data
+  reload
+  restart
+}
+
+type ReloadSignal {
+  verb: ReloadVerb
+  buildId: String
+  timestampMs: String
+}
+
+type ReloadSignalWatcher {
+  path: String
+  # Epoch seconds — Float64 so a ~1.7e9 timestamp keeps sub-second
+  # resolution (f32 would quantise it to ~128s and never detect a change).
+  lastMtime: Float64
+}
+
+func emptySignal() ret ReloadSignal {
+  ret ReloadSignal {
+    verb: ReloadVerb.none
+    buildId: ""
+    timestampMs: ""
+  }
+}
+
+# Snapshot the signal file's current mtime so the first
+# `pollReloadSignal` after construction reports `None` even if the
+# file already exists. Supervisors can pre-create the file at any
+# version; we only react to *new* writes after the app started.
+func createReloadSignalWatcher() pub ret ReloadSignalWatcher {
+  let p: String = hotReloadSignalPath()
+  let mt: Float64 = fileModTime(path: p)
+  ret ReloadSignalWatcher {
+    path: p
+    lastMtime: mt
+  }
+}
+
+# ----- build status ---------------------------------------------------
+#
+# Phase 6: the supervisor (`rae watch`) writes `.rae/build.status`
+# atomically after every build attempt. Apps can poll this file to
+# render a "compile error" / "reloading" overlay, surface the last
+# failure to the developer, or block a re-render until the next
+# successful build.
+#
+# File format (one line per field, supervisor side):
+#
+#     line 1: "ok" or "error"
+#     line 2: short message (e.g. "b3", "build b4 failed", "live")
+#
+# Both lines may be missing if no supervisor is running — in that
+# case `readBuildStatus()` returns a `BuildStatus` with
+# `present=false` so the app can distinguish "no supervisor" from
+# "supervisor + last build ok".
+
+type BuildStatus {
+  # True iff `.rae/build.status` exists. False means no supervisor
+  # has reported anything yet (e.g. app launched standalone, or
+  # supervisor hasn't completed its first build).
+  present: Bool
+
+  # True iff the last reported build succeeded. Meaningless when
+  # `present` is false.
+  ok: Bool
+
+  # Free-form one-line message the supervisor attached to the last
+  # outcome — typically a build id ("b4"), an error summary
+  # ("build b3 failed"), or "live" for the Live target.
+  message: String
+}
+
+func emptyBuildStatus() ret BuildStatus {
+  ret BuildStatus {
+    present: false
+    ok: false
+    message: ""
+  }
+}
+
+# Parse the two-line build-status format the supervisor writes.
+# Empty input → `present=false`. Exposed for tests; production
+# code calls `readBuildStatus()` to also handle the file-missing
+# case.
+func parseBuildStatus(raw: view String) pub ret BuildStatus {
+  if raw.length() is 0 {
+    ret emptyBuildStatus()
+  }
+  let lines: List(String) = raw.split(sep: "\n")
+  if lines.length is 0 {
+    ret emptyBuildStatus()
+  }
+  let kind: String = lines.copyAt(index: 0).trim()
+  let okFlag: Bool = kind is "ok"
+  var msg: String = ""
+  if lines.length > 1 {
+    msg = lines.copyAt(index: 1).trim()
+  }
+  ret BuildStatus {
+    present: true
+    ok: okFlag
+    message: msg
+  }
+}
+
+# Read the current build status from `.rae/build.status`. Cheap
+# (single file read); callers can poll this every frame or every
+# few frames as they prefer.
+func readBuildStatus() pub ret BuildStatus {
+  let path: String = hotReloadBuildStatusPath()
+  if exists(path: path) is false {
+    ret emptyBuildStatus()
+  }
+  let raw: String = rae_ext_rae_sys_read_file(path: path)
+  ret parseBuildStatus(raw: raw)
+}
+
+func parseReloadVerb(token: view String) ret ReloadVerb {
+  if token is "data" {
+    ret ReloadVerb.data
+  }
+  if token is "reload" {
+    ret ReloadVerb.reload
+  }
+  if token is "restart" {
+    ret ReloadVerb.restart
+  }
+  ret ReloadVerb.none
+}
+
+# Cheap mtime check on the signal file. Returns a signal whose
+# `verb` is `None` when the file is missing or unchanged since the
+# last poll. When the mtime advanced, reads the file and parses
+# "<verb> <build-id> <epoch-ms>".
+#
+# An unrecognized verb still bumps the stored mtime but yields
+# `ReloadVerb.none` — we don't want one bad write to wedge the
+# watcher forever, and the supervisor will write a fresh signal
+# next time around.
+func pollReloadSignal(w: mod ReloadSignalWatcher) pub ret ReloadSignal {
+  let mt: Float64 = fileModTime(path: w.path)
+  if mt is w.lastMtime {
+    ret emptySignal()
+  }
+  w.lastMtime = mt
+  let raw: String = rae_ext_rae_sys_read_file(path: w.path)
+  if raw.length() is 0 {
+    ret emptySignal()
+  }
+  let line: String = raw.trim()
+  if line.length() is 0 {
+    ret emptySignal()
+  }
+  let parts: List(String) = line.split(sep: " ")
+  if parts.length is 0 {
+    ret emptySignal()
+  }
+  if let verbTok: String = parts.copyAt(index: 0) {
+    let verb: ReloadVerb = parseReloadVerb(token: verbTok)
+    var buildId: String = ""
+    if parts.length > 1 {
+      if let part1: String = parts.copyAt(index: 1) {
+        buildId = "{part1}"
+      }
+    }
+    var timestamp: String = ""
+    if parts.length > 2 {
+      if let part2: String = parts.copyAt(index: 2) {
+        timestamp = "{part2}"
+      }
+    }
+    ret ReloadSignal {
+      verb: verb
+      buildId: buildId
+      timestampMs: timestamp
+    }
+  }
+  ret emptySignal()
+}

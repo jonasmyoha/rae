@@ -30,7 +30,7 @@
 #
 # STATE SURVIVES HOT RELOAD: selected scene, pause/speed/debug toggles and
 # the full camera (orbit-vs-WASD mode, yaw/pitch, distance, free position,
-# target) round-trip through lib/hot_reload.rae's state file, so a rebuild
+# target) round-trip through lib/hotReload.rae's state file, so a rebuild
 # drops you back where you were instead of re-aiming the camera every
 # time. Saved on change (throttled), not only at exit, because nothing
 # guarantees this process gets a chance to shut down cleanly.
@@ -43,9 +43,9 @@
 import core
 import gpu2d
 import math
-import sdf_text
-import scene3d_file
-import scene_animation
+import sdfText
+import scene3dFile
+import sceneAnimation
 import sdl3
 import vec3
 open gpu3d
@@ -53,55 +53,55 @@ open renderer3d
 open math3d
 open mesh3d
 open scene3d
-open scene3d_file
-open scene_animation
+open scene3dFile
+open sceneAnimation
 open ui/ecs
 open ui/InputSystem/InputSystem
 open ui/LayoutSystem/LayoutSystem
 open ui/RenderSystem/RenderSystem
 open ui/VisualBoundsSystem/VisualBoundsSystem
-open ui/scene_file
-open ui/scene_loader
-open ui/theme_resolved
+open ui/sceneFile
+open ui/sceneLoader
+open ui/themeResolved
 open ui/transform
-open ui/event_loop
-open ui/log_overlay
-open ui/window_geometry
-open ui/scroll_panel
-open ui/debug_overlay
-open hot_reload
+open ui/eventLoop
+open ui/LogOverlay
+open ui/WindowGeometry
+open ui/scrollPanel
+open ui/DebugOverlay
+open hotReload
 import string
 import ui/ecs
 import ui/InputSystem/InputSystem
 import ui/LayoutSystem/LayoutSystem
 import ui/RenderSystem/RenderSystem
 import ui/scene
-import ui/scene_file
-import ui/scene_loader
-import ui/theme_resolved
+import ui/sceneFile
+import ui/sceneLoader
+import ui/themeResolved
 import ui/transform
-import ui/event_loop
-import ui/log_overlay
-import ui/window_geometry
-import ui/scroll_panel
-import ui/debug_overlay
-import hot_reload
-import app3d/camera_rig
-import app3d/camera_bar
+import ui/eventLoop
+import ui/LogOverlay
+import ui/WindowGeometry
+import ui/scrollPanel
+import ui/DebugOverlay
+import hotReload
+import app3d/CameraRig
+import app3d/cameraBar
 import app3d/slider
-import app3d/settings_dialog
+import app3d/settingsDialog
 import shadow3d
 import renderer3d
-import app3d/ui_shell
+import app3d/uiShell
 import sky
-import sky_hosek
-open app3d/camera_rig
-open app3d/camera_bar
-open app3d/settings_dialog
+import skyHosek
+open app3d/CameraRig
+open app3d/cameraBar
+open app3d/settingsDialog
 open shadow3d
-open app3d/ui_shell
+open app3d/uiShell
 open sky
-open sky_hosek
+open skyHosek
 
 type DemoUiResource {
   paused: Bool
@@ -129,7 +129,7 @@ func createDemoUiResource() ret DemoUiResource {
 # disruptive part of iterating on a 3D scene: you stop editing and start
 # re-aiming the camera.
 #
-# Stored through lib/hot_reload.rae's state file, under an APP-SCOPED path
+# Stored through lib/hotReload.rae's state file, under an APP-SCOPED path
 # so it cannot collide with another example's snapshot in the same tree.
 #
 # Format is one space-separated line behind a version tag rather than
@@ -370,7 +370,7 @@ func main() ret Int {
   transformSystem(world: uiWorld)
   visualBoundsSystem(world: uiWorld, res: gpuUi)
 
-  # Diagnostic log overlay (lib/ui/log_overlay.rae), bottom-left here and
+  # Diagnostic log overlay (lib/ui/LogOverlay.rae), bottom-left here and
   # top-left in the mobile UI example — same widget, different corner.
   var logView: LogOverlay = createLogOverlay(capacity: 64, maxLines: 10, anchor: logAnchorBottomLeft, fontSize: 14.0)
   # Shared debug instrumentation: amber button top right, fps/memory readouts
@@ -477,7 +477,7 @@ func main() ret Int {
   }
 
   var lastFrame: Float64 = gpu2d.nowSeconds()
-  # Shared sliding-window sampler (lib/ui/frame_stats.rae): it records only
+  # Shared sliding-window sampler (lib/ui/FrameStats.rae): it records only
   # frames that actually rendered, so an idle app's reading decays to ~1
   # instead of freezing at the last busy value.
   # Idle policy (see docs/ui-render-loop-performance.md): busy-render while
@@ -681,7 +681,7 @@ func main() ret Int {
     if gpu2d.shouldRenderFrame(appNeedsRender: needsRender) is false {
       # Nothing to draw: park until the OS has something to say, or until
       # the readout heartbeat is due. Shared policy from
-      # lib/ui/event_loop.rae rather than a hardcoded timeout.
+      # lib/ui/eventLoop.rae rather than a hardcoded timeout.
       let idleTimeout: Float = nextWaitTimeoutSec(
         animating: false, mouseDown: false, pollWatcher: false,
         frameSec: 0.016667, heartbeatSec: 1.0

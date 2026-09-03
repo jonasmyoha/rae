@@ -1,5 +1,5 @@
 open raylib
-open hot_reload
+open hotReload
 open ui/ecs
 # Mobile-UI demo entrypoint. The actual work — scene loading, world
 # building, screen routing — lives in sibling `.rae` files in this same
@@ -11,25 +11,25 @@ open ui/ecs
 # asset_loader, ...) are auto-imported and do the real work.
 import raylib
 import core
-import file_watch
-import hot_reload
-import sdf_text
+import fileWatch
+import hotReload
+import sdfText
 import ui/ecs
-import ui/legacy_raylib/hero
-import ui/legacy_raylib/msdf
+import ui/legacyRaylib/hero
+import ui/legacyRaylib/msdf
 import ui/LayoutSystem/LayoutSystem
 import ui/theme
 import ui/transform
-import ui/legacy_raylib/render
+import ui/legacyRaylib/render
 import ui/RenderSystem/RenderSystem
-import ui/legacy_raylib/textures
-import ui/legacy_raylib/input
-import ui/legacy_raylib/debug
-import ui/legacy_raylib/debug_gpu2d
-import ui/legacy_raylib/event_loop
+import ui/legacyRaylib/textures
+import ui/legacyRaylib/input
+import ui/legacyRaylib/debug
+import ui/legacyRaylib/debugGpu2d
+import ui/legacyRaylib/eventLoop
 import ui/AnimationSystem/AnimationSystem
-import ui/legacy_raylib/draw
-import ui/legacy_raylib/window
+import ui/legacyRaylib/draw
+import ui/legacyRaylib/window
 open ecs/entity
 func main() {
   var backendEnv: String = "gpu2d" #getEnv(name: "RAE_UI_BACKEND")
@@ -59,7 +59,7 @@ func main() {
   # `disableAppNap` decl in lib/raylib.rae.
   uiDisableAppNap(backend: backend)
   # No setTargetFPS: the inner loop blocks in glfwWaitEventsTimeout
-  # (see lib/ui/legacy_raylib/event_loop.rae) and naturally caps animation at
+  # (see lib/ui/legacy_raylib/eventLoop.rae) and naturally caps animation at
   # ~60 Hz via `frameTimeoutSec`. raylib's frame-pacing is bypassed.
   # Reset raylib's implicit `Mouse.scale` so getMouseX/Y return
   # cursor positions in the same coordinate space the renderer uses.
@@ -70,10 +70,10 @@ func main() {
     loadFontInto(slot: robotoFontSlot, path: robotoFontPath, fontSize: 36)
     loadFontInto(slot: materialIconFontSlot, path: materialIconFontPath, fontSize: 64)
   }
-  let gpuTextFont: SdfFont = sdf_text.loadSdfFont(
+  let gpuTextFont: SdfFont = sdfText.loadSdfFont(
     jsonPath: "examples/104_gpu2d_coords/assets/Roboto-Regular.mtsdf.json",
     rawAtlasPath: "examples/104_gpu2d_coords/assets/Roboto-Regular.mtsdf.raw")
-  let gpuIconFont: SdfFont = sdf_text.loadSdfFont(
+  let gpuIconFont: SdfFont = sdfText.loadSdfFont(
     jsonPath: "examples/legacy/raylib/98_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.json",
     rawAtlasPath: "examples/legacy/raylib/98_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.raw")
   # #764: theme is app-owned (was a global) — seed a UiTheme onto AppState;
@@ -236,7 +236,7 @@ func main() {
     watchedPaths.add(value: miniPlayerPath)
     watchedPaths.add(value: nowPlayingPath)
     watchedPaths.add(value: albumPath)
-    let watcher: FileWatcher = file_watch.createFileWatcher(
+    let watcher: FileWatcher = fileWatch.createFileWatcher(
       paths: watchedPaths
       enabled: dataHotReloadEnabled
       intervalSec: 0.25
@@ -497,7 +497,7 @@ func main() {
       loop running and switching is false {
         # Event-driven wait. Block the thread until an OS event (mouse,
         # key, window) arrives or our policy-chosen timeout elapses.
-        # `nextWaitTimeoutSec` (lib/ui/legacy_raylib/event_loop.rae) picks the
+        # `nextWaitTimeoutSec` (lib/ui/legacy_raylib/eventLoop.rae) picks the
         # smallest of: one frame when animating, one frame while the
         # mouse button is held, the watcher poll cadence otherwise, or
         # the safety cap when truly idle. Idle CPU goes to ~0 because
