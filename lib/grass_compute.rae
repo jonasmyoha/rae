@@ -65,8 +65,31 @@ const grassIndirectBytes: Int = 16   # 4 u32 DrawIndirect args (vertexCount, ins
 # in the render WGSL). No mesh, no vertex/index buffer.
 const grassBladeVerts: Int = 6
 
-var gGrassMade: Bool = false
-var gGrassDrawBindMade: Bool = false
+# #764: the grass field's cross-frame GPU state — pipeline/bind "made" flags, the
+# reused per-frame uniform + indirect-reset scratch (kept once-allocated so the hot
+# path stays zero-alloc), the readback staging, and the throttled-diagnostics frame
+# counter + last visible count — was a set of module-level globals. It is a resource
+# the app owns (example 114 drives the only grass field today); every entry point
+# threads it. The WGPU handles stay in C behind rae_gb_grass_set/get.
+type GrassCompute {
+  made: Bool
+  drawBindMade: Bool
+  uni: List(Float)
+  indReset: List(Int32)
+  read: List(Int)
+  diagFrame: Int
+  visibleCache: Int
+}
+
+func createGrassCompute() pub ret GrassCompute {
+  ret GrassCompute {
+    made: false, drawBindMade: false,
+    uni: createList(Float, cap: 28),
+    indReset: createList(Int32, cap: 4),
+    read: createList(Int, cap: 2),
+    diagFrame: 0, visibleCache: 0
+  }
+}
 
 # Compute-pass source: the shared noise + biome field, then the grass pass
 # itself. Mirrors how the terrain splat pipeline composes its shader.
@@ -81,11 +104,11 @@ func grassComputeWgsl() ret String {
 
 # Force a grass-pipeline rebuild on the next frame — the island radius is baked into
 # the composed compute shader, so growing the island (#41) must recompose it.
-func resetGrassPipeline() pub {
-  gGrassMade = false
+func resetGrassPipeline(grass: mod GrassCompute) pub {
+  grass.made = false
   # The draw bind group is auto-layouted from the OLD render pipeline; invalidate it
   # so it rebuilds against the recomposed pipeline (#41 grow).
-  gGrassDrawBindMade = false
+  grass.drawBindMade = false
 }
 
 # WGSL text -> shader module (same construction as gbuffer.makeShaderModule; the
@@ -141,10 +164,10 @@ func makeGrassPipeline(shaderMod: copy Ptr) ret Ptr {
 
 # Create the instance buffer, uniform, compute pipeline, compute bind group and
 # grass render pipeline once. Safe after the device + static pipeline exist.
-func ensureGrassGpu() {
-  if gGrassMade { ret }
-  gGrassMade = true
-  # #leak: on a REBUILD (island grow reset gGrassMade), release the previous pipelines,
+func ensureGrassGpu(grass: mod GrassCompute) {
+  if grass.made { ret }
+  grass.made = true
+  # #leak: on a REBUILD (island grow reset grass.made), release the previous pipelines,
   # buffers and bind groups before recreating them — this block overwrites all their slots,
   # so without the release they'd leak. Null-safe, so the first build is a no-op.
   grassRelease()
@@ -209,9 +232,9 @@ func ensureGrassGpu() {
 # beginPass — so build it lazily on first draw, reusing the static pipeline's
 # group-0 layout (frame uniform @0, instance storage @1) but pointing binding 1
 # at the grass instance buffer instead of the shared draws buffer.
-func ensureGrassDrawBind() {
-  if gGrassDrawBindMade { ret }
-  gGrassDrawBindMade = true
+func ensureGrassDrawBind(grass: mod GrassCompute) {
+  if grass.drawBindMade { ret }
+  grass.drawBindMade = true
   let instBytes: Int = grassGpuBladeCount * grassRecordBytes
   let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: grassGet(index: 5), groupIndex: 0 as UInt32)
   var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 3)
@@ -223,11 +246,6 @@ func ensureGrassDrawBind() {
   wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
 }
 
-# Reused per-frame staging, module-level so no per-frame alloc. gGrassUni is the
-# 16-float GrassU; gGrassIndReset is the {vertexCount=6, instanceCount=0, 0, 0}
-# DrawIndirect args written before each dispatch so the atomic counter starts at 0.
-var gGrassUni: List(Float) = createList(Float, cap: 16)
-var gGrassIndReset: List(Int32) = createList(Int32, cap: 4)
 
 # Cull tuning: blades within nearKeep of the camera are always kept (so the field
 # never holes out at the player's feet); beyond that, a blade survives only if it
@@ -240,51 +258,51 @@ const grassConeCos: Float = 0.36
 # candidate grid on (playerX, playerY); each survivor (on-terrain, unfaded, inside
 # the view cone from the camera) is appended to a compacted list and bumps the
 # indirect draw's instanceCount. No readback, no blocking. Call BEFORE the pass.
-func grassGenerate(playerX: copy Float, playerY: copy Float, groundZ: copy Float,
+func grassGenerate(grass: mod GrassCompute, playerX: copy Float, playerY: copy Float, groundZ: copy Float,
                    time: copy Float, dt: copy Float, toon: copy Int,
                    camX: copy Float, camY: copy Float, camZ: copy Float,
                    fwdX: copy Float, fwdY: copy Float, fwdZ: copy Float,
                    settings: view GrassViewSettings) {
-  ensureGrassGpu()
+  ensureGrassGpu(grass: grass)
   var toonF: Float = 0.0
   if toon is 1 { toonF = 1.0 }
-  loop gGrassUni.length < 28 { gGrassUni.add(value: 0.0) }
-  gGrassUni.set(index: 0, value: playerX)
-  gGrassUni.set(index: 1, value: playerY)
-  gGrassUni.set(index: 2, value: groundZ)
-  gGrassUni.set(index: 3, value: time)
-  gGrassUni.set(index: 4, value: grassGpuBladeCount.toFloat())
-  gGrassUni.set(index: 5, value: settings.extent)
-  gGrassUni.set(index: 6, value: toonF)
-  gGrassUni.set(index: 7, value: dt)
-  gGrassUni.set(index: 8, value: camX)
-  gGrassUni.set(index: 9, value: camY)
-  gGrassUni.set(index: 10, value: camZ)
-  gGrassUni.set(index: 11, value: grassNearKeep)
-  gGrassUni.set(index: 12, value: fwdX)
-  gGrassUni.set(index: 13, value: fwdY)
-  gGrassUni.set(index: 14, value: fwdZ)
-  gGrassUni.set(index: 15, value: grassConeCos)
-  gGrassUni.set(index: 16, value: settings.groundColor.x)   # gradient bottom = ground
-  gGrassUni.set(index: 17, value: settings.groundColor.y)
-  gGrassUni.set(index: 18, value: settings.groundColor.z)
-  gGrassUni.set(index: 20, value: settings.windDirX)        # f: wind
-  gGrassUni.set(index: 21, value: settings.windDirY)
-  gGrassUni.set(index: 22, value: settings.windStrength)
-  gGrassUni.set(index: 23, value: settings.windGust)
-  gGrassUni.set(index: 24, value: settings.bladeHeightScale) # g: blade + gradient
-  gGrassUni.set(index: 25, value: settings.bladeWidthScale)
-  gGrassUni.set(index: 26, value: settings.densityScale)
-  gGrassUni.set(index: 27, value: settings.tipLighten)
+  loop grass.uni.length < 28 { grass.uni.add(value: 0.0) }
+  grass.uni.set(index: 0, value: playerX)
+  grass.uni.set(index: 1, value: playerY)
+  grass.uni.set(index: 2, value: groundZ)
+  grass.uni.set(index: 3, value: time)
+  grass.uni.set(index: 4, value: grassGpuBladeCount.toFloat())
+  grass.uni.set(index: 5, value: settings.extent)
+  grass.uni.set(index: 6, value: toonF)
+  grass.uni.set(index: 7, value: dt)
+  grass.uni.set(index: 8, value: camX)
+  grass.uni.set(index: 9, value: camY)
+  grass.uni.set(index: 10, value: camZ)
+  grass.uni.set(index: 11, value: grassNearKeep)
+  grass.uni.set(index: 12, value: fwdX)
+  grass.uni.set(index: 13, value: fwdY)
+  grass.uni.set(index: 14, value: fwdZ)
+  grass.uni.set(index: 15, value: grassConeCos)
+  grass.uni.set(index: 16, value: settings.groundColor.x)   # gradient bottom = ground
+  grass.uni.set(index: 17, value: settings.groundColor.y)
+  grass.uni.set(index: 18, value: settings.groundColor.z)
+  grass.uni.set(index: 20, value: settings.windDirX)        # f: wind
+  grass.uni.set(index: 21, value: settings.windDirY)
+  grass.uni.set(index: 22, value: settings.windStrength)
+  grass.uni.set(index: 23, value: settings.windGust)
+  grass.uni.set(index: 24, value: settings.bladeHeightScale) # g: blade + gradient
+  grass.uni.set(index: 25, value: settings.bladeWidthScale)
+  grass.uni.set(index: 26, value: settings.densityScale)
+  grass.uni.set(index: 27, value: settings.tipLighten)
   wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: grassGet(index: 2), bufferOffset: 0 as UInt64,
-    data: gGrassUni.data, size: grassUniformBytes as UInt64)
+    data: grass.uni.data, size: grassUniformBytes as UInt64)
 
   # Reset the indirect args so this frame's atomic append counts from 0.
-  loop gGrassIndReset.length < 4 { gGrassIndReset.add(value: 0 as Int32) }
-  gGrassIndReset.set(index: 0, value: grassBladeVerts as Int32)
-  gGrassIndReset.set(index: 1, value: 0 as Int32)
+  loop grass.indReset.length < 4 { grass.indReset.add(value: 0 as Int32) }
+  grass.indReset.set(index: 0, value: grassBladeVerts as Int32)
+  grass.indReset.set(index: 1, value: 0 as Int32)
   wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: grassGet(index: 6), bufferOffset: 0 as UInt64,
-    data: gGrassIndReset.data, size: grassIndirectBytes as UInt64)
+    data: grass.indReset.data, size: grassIndirectBytes as UInt64)
 
   let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
   let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
@@ -311,9 +329,9 @@ func grassGenerate(playerX: copy Float, playerY: copy Float, groundZ: copy Float
 # vertex_index (no mesh), reading its per-blade transform from the instance
 # buffer. Restores the shared static pipeline + bind group after so any following
 # static draw is unaffected.
-func grassDraw() {
-  ensureGrassGpu()
-  ensureGrassDrawBind()
+func grassDraw(grass: mod GrassCompute) {
+  ensureGrassGpu(grass: grass)
+  ensureGrassDrawBind(grass: grass)
   let pass: Ptr = gbPass()
   wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: grassGet(index: 5))
   wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
@@ -330,7 +348,6 @@ func grassDraw() {
 # Total candidate blades the compute considers each frame (#488 diagnostics).
 func grassGeneratedCount() pub ret Int { ret grassGpuBladeCount }
 
-var gGrassRead: List(Int) = createList(Int, cap: 2)
 
 # Read the VISIBLE blade count back (#488): the culling compute atomically bumped
 # the indirect draw's instanceCount (u32 #1 of the 4-word args) to the number of
@@ -338,7 +355,7 @@ var gGrassRead: List(Int) = createList(Int, cap: 2)
 # the map waits for the GPU, so call it throttled (every N frames), not per frame.
 # Returns -1 before the grass GPU exists. Also confirms the map readback works on
 # this backend (compute-written data, unlike the #528 timestamp path).
-func grassReadVisible() pub ret Int {
+func grassReadVisible(grass: mod GrassCompute) pub ret Int {
   if grassGet(index: 7) is webgpuNull() { ret 0 - 1 }
   let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
   let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
@@ -347,21 +364,19 @@ func grassReadVisible() pub ret Int {
     size: grassIndirectBytes as UInt64)
   let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
   gbSubmit(cmd: wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc))
-  loop gGrassRead.length < 2 { gGrassRead.add(value: 0) }
+  loop grass.read.length < 2 { grass.read.add(value: 0) }
   let ok: Int = webgpuMapRead(buffer: grassGet(index: 7), size: grassIndirectBytes as UInt64,
-    dst: gGrassRead.data)
+    dst: grass.read.data)
   if ok is 0 { ret 0 - 1 }
   # args = {vertexCount:u32, instanceCount:u32, ...}; little-endian word 0 packs
   # vertexCount (low) + instanceCount (high), so instanceCount = word0 >> 32.
-  let word0: Int = rae_ext_rae_buf_get(V: Int, buf: gGrassRead.data, index: 0)
+  let word0: Int = rae_ext_rae_buf_get(V: Int, buf: grass.read.data, index: 0)
   ret word0 / 4294967296
 }
 
-var gGrassDiagFrame: Int = 0
-var gGrassVisibleCache: Int = 0
 
 # Last read visible-blade count (#488). Cheap; refreshed by grassDiagTick.
-func grassVisibleCount() pub ret Int { ret gGrassVisibleCache }
+func grassVisibleCount(grass: view GrassCompute) pub ret Int { ret grass.visibleCache }
 
 # Per-frame grass diagnostics (#488). Only active during a profile capture so the
 # blocking readback never stalls normal play, and throttled to every 10th frame
@@ -369,14 +384,14 @@ func grassVisibleCount() pub ret Int { ret gGrassVisibleCache }
 # generated / visible / culled candidate counts as counters — plot them in the
 # capture alongside fps and per-pass GPU ms. Call once per frame after
 # grassGenerate.
-func grassDiagTick(profiler: mod Profiler) pub {
+func grassDiagTick(grass: mod GrassCompute, profiler: mod Profiler) pub {
   if profile.profileCapturing(profiler: profiler) is false { ret }
-  gGrassDiagFrame = gGrassDiagFrame + 1
-  if gGrassDiagFrame % 10 is 0 {
-    let visible: Int = grassReadVisible()
-    if visible >= 0 { gGrassVisibleCache = visible }
+  grass.diagFrame = grass.diagFrame + 1
+  if grass.diagFrame % 10 is 0 {
+    let visible: Int = grassReadVisible(grass: grass)
+    if visible >= 0 { grass.visibleCache = visible }
   }
   profile.profileCounter(profiler: profiler, name: "grass.generated", value: grassGpuBladeCount)
-  profile.profileCounter(profiler: profiler, name: "grass.visible", value: gGrassVisibleCache)
-  profile.profileCounter(profiler: profiler, name: "grass.culled", value: grassGpuBladeCount - gGrassVisibleCache)
+  profile.profileCounter(profiler: profiler, name: "grass.visible", value: grass.visibleCache)
+  profile.profileCounter(profiler: profiler, name: "grass.culled", value: grassGpuBladeCount - grass.visibleCache)
 }

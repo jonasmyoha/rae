@@ -183,6 +183,7 @@ type App {
   grass: GrassField
   render: RenderState
   profiler: Profiler   # #764: was lib/profile.rae gProf* globals
+  grassCompute: GrassCompute   # #764: was lib/grass_compute.rae gGrass* globals
   physics: PhysicsState   # fixed-step sim seam (physics.rae, #553)
   net: NetState           # multiplayer seam (net.rae, #554)
   players: PlayerRoster   # who the local player controls (players.rae, #546)
@@ -517,7 +518,8 @@ func createApp() ret App {
     terrain: own terrain
     grass: own grass
     render: { renderer: own renderer, drs: own drs, shadowLogged: false }
-    profiler: profile.createProfiler()
+    profiler: profile.createProfiler(),
+    grassCompute: createGrassCompute()
     physics: { accumulator: 0.0, worldHandle: 0 }
     net: { role: 0, tick: 0 }
     players: createPlayerRoster(count: 1 + cloneCount)
@@ -714,7 +716,7 @@ func runWalkerApp() ret Int {
         frameSec: 0.016667, heartbeatSec: 1.0
       ))
     } else {
-      renderApp(cam: app.cam, character: app.character, frame: app.frame, io: app.io, render: app.render, scene: app.scene, world: app.world, terrain: app.terrain, splashes: app.splashes, profiler: app.profiler)
+      renderApp(cam: app.cam, character: app.character, frame: app.frame, io: app.io, render: app.render, scene: app.scene, world: app.world, terrain: app.terrain, splashes: app.splashes, profiler: app.profiler, grassCompute: app.grassCompute)
     }
   }
   skinShutdown()
