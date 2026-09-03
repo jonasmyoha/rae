@@ -790,7 +790,7 @@ func formatFps(fps: view Float) ret String {
 # the right half right-aligns them so they hang off the button's
 # right edge instead of running off-screen. Right-alignment needs a
 # per-line text measurement because each line has a different width.
-func drawDebugLabels(debug: view DebugSystem) {
+func drawDebugLabels(backend: view UiBackend, debug: view DebugSystem) {
   let fpsText: String = formatFps(fps: debug.lastFps)
   let memText: String = "mem: {formatMemMB(kb: debug.lastRssKb)}"
 
@@ -861,15 +861,15 @@ func drawDebugLabels(debug: view DebugSystem) {
   # state the input layer is actually polling.
   if debug.showInputOutlines {
     var lb: Int = 0
-    if uiPointerButtonDown(button: 0) {
+    if uiPointerButtonDown(backend: backend, button: 0) {
       lb = 1
     }
     var rb: Int = 0
-    if uiPointerButtonDown(button: 1) {
+    if uiPointerButtonDown(backend: backend, button: 1) {
       rb = 2
     }
     var mb: Int = 0
-    if uiPointerButtonDown(button: 2) {
+    if uiPointerButtonDown(backend: backend, button: 2) {
       mb = 4
     }
     let buttons: Int = lb + rb + mb
@@ -903,10 +903,10 @@ func drawDebugLabels(debug: view DebugSystem) {
 # (and after any hero overlay) so the labels paint on top of the host
 # UI. The button itself is drawn by renderSystem because it lives in
 # the ECS world.
-func updateAndRenderDebugOverlay(debug: mod DebugSystem, now: view Float64, didRealWork: view Bool) pub {
+func updateAndRenderDebugOverlay(backend: view UiBackend, debug: mod DebugSystem, now: view Float64, didRealWork: view Bool) pub {
   recordDebugFrame(debug: debug, now: now, didRealWork: didRealWork)
   if debug.showLabels {
-    drawDebugLabels(debug: debug)
+    drawDebugLabels(backend: backend, debug: debug)
     drawDebugHeartbeat(debug: debug, didRealWork: didRealWork)
   }
 }

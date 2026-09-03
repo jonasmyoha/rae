@@ -27,12 +27,12 @@ open ecs/component_table
 let bottomSheetPageId: String = "bottom-sheet"
 let sheetDismissAction: String = "sheet.dismiss"
 
-type BottomSheetAction pub {
+type BottomSheetAction {
   label: String
   actionId: String
 }
 
-type BottomSheetState pub {
+type BottomSheetState {
   visible: Bool
   actions: List(BottomSheetAction)
   # Bumped on every mutation. main.rae caches the last-seen value
@@ -124,7 +124,7 @@ func addBottomSheetLayer(world: mod UiWorld, sheet: view BottomSheetState) pub {
   let panelH: Float = 24.0 + 56.0 * n.toFloat() + 24.0
   let panel: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: panel, w: panelW, h: panelH)
-  let panelFill: RgbaColor = themeColorByName(name: "surface")
+  let panelFill: RgbaColor = themeColorByName(theme: world.theme.active, name: "surface")
   let panelShape: Shape = {
     kind: ShapeKind.roundedRect
     fill: panelFill

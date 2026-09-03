@@ -123,6 +123,7 @@ func mountNowPlayingPage(
 
 func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState, state: view AppState, reg: view TextureRegistry) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
+  seedWorldThemeFrom(world: world, src: state.theme)  # #764: theme from AppState
   let page: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: state)
   let dock: EntityId = mountBottomDockOverlay(
     world: world

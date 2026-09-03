@@ -5,18 +5,10 @@ open ui/ecs
 # building, screen routing — lives in sibling `.rae` files in this same
 # directory, which Rae auto-imports because they share the project
 # root. This file owns only the program's lifecycle: window setup, font
-# loading, the main render/dispatch loop, and teardown.
-#
-# Architecture (all files in this folder are auto-imported):
-#   * config.rae           — layout, palette, asset paths
-#   * world_helpers.rae    — ECS component-setter shorthands
-#   * scene_loader.rae     — parse the four .raescene files into an AlbumScenes
-#   * scene_mount.rae      — mountOrError + visible error sentinel
-#   * album_view.rae       — album-screen builders, including buildAlbumWorld
-#   * now_playing_view.rae — buildNowPlayingWorld
-#   * screen_router.rae    — Screen enum, buildScreenWorld, dispatchActions
-#   * album_loader.rae     — Album / Track structs + loadAllAlbums (album.json)
-#   * asset_loader.rae     — loadAllTextures (per-album cover.jpg + avatar)
+# loading, the main render/dispatch loop, and teardown. The sibling
+# `.rae` files in this folder (config, world_helpers, scene_loader,
+# scene_mount, album_view, now_playing_view, screen_router, album_loader,
+# asset_loader, ...) are auto-imported and do the real work.
 import raylib
 import core
 import file_watch
@@ -41,38 +33,40 @@ import ui/legacy_raylib/window
 open ecs/entity
 func main() {
   var backendEnv: String = "gpu2d" #getEnv(name: "RAE_UI_BACKEND")
+  # #764: backend owned here (was a module global), threaded as `backend:` below.
+  var backend: UiBackend = UiBackend.gpu2d
   if backendEnv is "gpu2d" {
-    setUiBackend(b: UiBackend.gpu2d)
+    backend = UiBackend.gpu2d
   } else {
     backendEnv = "raylib"
-    setUiBackend(b: UiBackend.raylib)
+    backend = UiBackend.raylib
   }
   # `RAE_UI_HEADLESS=1`: see headless.rae (HIDDEN+UNFOCUSED flags).
   let isHeadless: Bool = headlessIsActive()
-  uiSetConfigFlags(flags: headlessConfigFlags(headless: isHeadless))
-  uiSetRaylibLogLevel(level: 4)  # LOG_WARNING — silence per-frame TEXTURE/SHADER INFO spam
+  uiSetConfigFlags(backend: backend, flags: headlessConfigFlags(headless: isHeadless))
+  uiSetRaylibLogLevel(backend: backend, level: 4)  # LOG_WARNING — silence per-frame TEXTURE/SHADER INFO spam
   let winW: Float = screenW
   let winH: Float = screenH
-  uiInitWindow(width: winW.toInt(), height: winH.toInt(), title: "Rae Mobile UI — {backendEnv}")
-  uiSetWindowPosition(x: 50, y: 50)
+  uiInitWindow(backend: backend, width: winW.toInt(), height: winH.toInt(), title: "Rae Mobile UI — {backendEnv}")
+  uiSetWindowPosition(backend: backend, x: 50, y: 50)
   # GLFW callbacks: close-waker wakes the loop on red-X; the mouse hook
   # is the authoritative per-event click-edge source (input.rae takes
   # press/release from it and skips raylib's poll edges when active).
-  uiInstallWindowCloseWaker()
-  uiInstallMouseButtonHook()
+  uiInstallWindowCloseWaker(backend: backend)
+  uiInstallMouseButtonHook(backend: backend)
   # macOS App Nap throttles the wait-events loop because it sits at
   # ~0% idle CPU; opt out so the app doesn't appear hung. See
   # `disableAppNap` decl in lib/raylib.rae.
-  uiDisableAppNap()
+  uiDisableAppNap(backend: backend)
   # No setTargetFPS: the inner loop blocks in glfwWaitEventsTimeout
   # (see lib/ui/legacy_raylib/event_loop.rae) and naturally caps animation at
   # ~60 Hz via `frameTimeoutSec`. raylib's frame-pacing is bypassed.
   # Reset raylib's implicit `Mouse.scale` so getMouseX/Y return
   # cursor positions in the same coordinate space the renderer uses.
-  uiSetMouseScale(scaleX: 1.0, scaleY: 1.0)
-  uiSetDesignResolution(width: winW, height: winH, fit: 0)
+  uiSetMouseScale(backend: backend, scaleX: 1.0, scaleY: 1.0)
+  uiSetDesignResolution(backend: backend, width: winW, height: winH, fit: 0)
 
-  if uiBackend() is UiBackend.raylib {
+  if backend is UiBackend.raylib {
     loadFontInto(slot: robotoFontSlot, path: robotoFontPath, fontSize: 36)
     loadFontInto(slot: materialIconFontSlot, path: materialIconFontPath, fontSize: 64)
   }
@@ -80,22 +74,21 @@ func main() {
     jsonPath: "examples/104_gpu2d_coords/assets/Roboto-Regular.mtsdf.json",
     rawAtlasPath: "examples/104_gpu2d_coords/assets/Roboto-Regular.mtsdf.raw")
   let gpuIconFont: SdfFont = sdf_text.loadSdfFont(
-    jsonPath: "examples/98_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.json",
-    rawAtlasPath: "examples/98_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.raw")
-  let gpuUi: Gpu2dUi = { textFont: gpuTextFont, iconFont: gpuIconFont }
-
-  # Theme is picked from `RAE_UI_THEME` ("dark" / "light"); default is
-  # dark. Setting the theme BEFORE `loadAllScenes` matters — scenes
-  # resolve their `"tokenName"` colors against `currentTheme()` at
-  # parse time, so the theme has to be in place first.
+    jsonPath: "examples/legacy/raylib/98_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.json",
+    rawAtlasPath: "examples/legacy/raylib/98_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.raw")
+  # #764: theme is app-owned (was a global) — seed a UiTheme onto AppState;
+  # each rebuilt world is seeded from it. Chosen before loadAllScenes / gpuUi.
   let themeEnv: String = getEnv(name: "RAE_UI_THEME")
   let lightKey: String = "light"
+  var chosenTheme: Theme = darkTheme()
   if themeEnv is lightKey {
-    setActiveTheme(theme: lightTheme())
-  } else {
-    setActiveTheme(theme: darkTheme())
+    chosenTheme = lightTheme()
   }
-  syncColorsFromTheme()
+  var bootTheme: UiTheme = createUiTheme()
+  bootTheme.active = chosenTheme
+  bootTheme.generation = 1
+  let gpuUi: Gpu2dUi = { textFont: gpuTextFont, iconFont: gpuIconFont, theme: bootTheme.resolved, activeTheme: chosenTheme }
+  syncColorsFromTheme(active: chosenTheme)
 
   var scenes: AlbumScenes = loadAllScenes()
   let texReg: TextureRegistry = createTextureRegistry()
@@ -104,7 +97,7 @@ func main() {
   # `cascadeAssets` after first paint so the window appears instantly.
   # `appState` is built here so state-dependent blocks below see it.
   let albums: List(Album) = loadAllAlbums(folder: albumsFolder)
-  let appState: AppState = createAppState(albums: albums)
+  let appState: AppState = createAppState(albums: albums, theme: own bootTheme)
   # Mock playback state — survives world rebuilds; both the album
   # mini-player and the now-playing screen mutate it through
   # `dispatchActions`. Created here so `restoreAppState` below can
@@ -114,7 +107,7 @@ func main() {
   # Hydrate album/track/position from `state.json` if present.
   # Missing file or stale fields fall back silently to the
   # defaults `createAppState` / `createPlaybackState` set above.
-  restoreAppState(state: appState, playback: playback, path: stateFilePath)
+  restoreAppState(backend: backend, state: appState, playback: playback, path: stateFilePath)
   # Persisted recently-played. CDN artwork is re-downloaded lazily in
   # the loop (refetchHistoryArtChunk, a few/frame) so it never blocks.
   restoreHistory(history: appState.playHistory, path: historyFilePath)
@@ -125,17 +118,13 @@ func main() {
   appState.library = loadLibraryFromJson(albums: appState.albums, path: libraryFilePath)
   appState.liked = loadDefaultLiked()
 
-  # Clamp window height now that restoreAppState has moved the
-  # window to its persisted position. macOS silently clamps any
-  # window that doesn't fit in the available content area; raylib
-  # keeps the requested framebuffer size, so cursor coords (in
-  # the clamped space) drift from the rendering. Has to run after
-  # the restore — otherwise getCurrentMonitor reports the monitor
-  # the window was at boot, not where the user left it (the
-  # internal MacBook monitor when there's an external attached).
+  # Clamp window height now that restoreAppState has moved the window to
+  # its persisted position. macOS silently clamps a too-tall window but
+  # raylib keeps the requested framebuffer size, so cursor coords drift.
+  # Runs after restore so getCurrentMonitor sees the window's real spot.
   let chromeBudget: Int = 100
-  let monitor: Int = uiCurrentMonitor()
-  var monitorH: Int = uiMonitorHeight(monitor: monitor)
+  let monitor: Int = uiCurrentMonitor(backend: backend)
+  var monitorH: Int = uiMonitorHeight(backend: backend, monitor: monitor)
   var safeMaxH: Int = monitorH - chromeBudget
   let reqW: Int = winW.toInt()
   let reqH: Int = winH.toInt()
@@ -146,7 +135,7 @@ func main() {
     screenW = winW * scale
     let newH: Float = screenH
     let newW: Float = screenW
-    uiSetWindowSize(width: newW.toInt(), height: newH.toInt())
+    uiSetWindowSize(backend: backend, width: newW.toInt(), height: newH.toInt())
     log("[boot] clamped to {newW.toInt()}x{newH.toInt()} to fit monitor chrome")
   }
 
@@ -179,7 +168,7 @@ func main() {
   var autoExitSec: Float = 0.0
   if autoExitEnv.length() > 0 { autoExitSec = autoExitEnv.toFloat() }
   autoExitSec = headlessApplyAutoExitDefault(headless: isHeadless, current: autoExitSec)
-  let bootTime: Float = uiNowSeconds()
+  let bootTime: Float = uiNowSeconds(backend: backend) as Float
 
   # `RAE_UI_WAIT_TRACE=1` logs every `waitEventsTimeout` whose actual
   # sleep exceeded 5 ms vs the requested timeout — diagnoses GLFW not
@@ -198,10 +187,10 @@ func main() {
   # (closeWindow / falls through to teardown). Implementations live in
   # `stress_runner.rae` and `screenshot_runner.rae` so this file only
   # owns the interactive lifecycle.
-  if runStressMode(scenes: scenes, appState: appState) {
+  if runStressMode(backend: backend, scenes: scenes, appState: appState) {
     ret
   }
-  if runScreenshotMode(scenes: scenes, appState: appState, texReg: texReg, bg: bg) is false {
+  if runScreenshotMode(backend: backend, scenes: scenes, appState: appState, texReg: texReg, bg: bg) is false {
     # Interactive mode: outer loop owns the world for the *current*
     # screen; the inner loop runs frames until either the user closes
     # the window or a `dispatchActions` call returns a different
@@ -385,7 +374,7 @@ func main() {
     var assetsLoading: Bool = true
     # One display frame from the monitor refresh rate (60/120 Hz); paces
     # the animation wait + render cap. lastRenderTime drives that cap.
-    let targetFrameSec: Float = displayFrameSec()
+    let targetFrameSec: Float = displayFrameSec(backend: backend)
     var lastRenderTime: Float = 0.0
     # Active-render window: any activity keeps the loop rendering at
     # display cadence for 0.5s (then idle), so animation tails don't
@@ -394,7 +383,7 @@ func main() {
 
     loop running {
       let profileKeyAtBuild: String = profileAvatarKey()
-      profileLoaded = profileAvatarLoaded(reg: texReg, key: profileKeyAtBuild)
+      profileLoaded = profileAvatarLoaded(backend: backend, reg: texReg, key: profileKeyAtBuild)
 
       # Cache the active-album bounds + active-track duration so
       # the hot inner-loop heartbeat doesn't deep-copy a 15-25
@@ -428,8 +417,8 @@ func main() {
 
       # Persistent-world build: mounts every screen page + dock /
       # back overlays once; setPageActive flips visibility per nav.
-      let world: UiWorld = buildAppWorld(scenes: scenes, playback: playback, state: appState, texReg: texReg, scrollY: scrollFsm.scrollY)
-      if uiBackend() is UiBackend.raylib {
+      let world: UiWorld = buildAppWorld(backend: backend, scenes: scenes, playback: playback, state: appState, texReg: texReg, scrollY: scrollFsm.scrollY)
+      if backend is UiBackend.raylib {
         let robotoMsdf: MsdfFont = loadMsdfFont(jsonPath: robotoMsdfJsonPath, atlasPath: robotoMsdfAtlasPath)
         let msdfNoTint: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
         let msdfShadow: RgbaColor = { r: 0, g: 0, b: 0, a: 140 }
@@ -529,13 +518,13 @@ func main() {
           velAbs = 0.0 - velAbs
         }
         # Recent-wheel (0.25s) counts as animating: wheel scroll drives scrollY per-event with velocity==0, so without it the loop idles at the ~20Hz watcher poll between wheel events (still-mouse scroll caps ~20-34fps; mouse-move wakes masked it).
-        if velAbs > 0.05 or scrollOOB or ((uiNowSeconds() - scrollFsm.lastWheelTime) < 0.25) {
+        if velAbs > 0.05 or scrollOOB or ((uiNowSeconds(backend: backend) - scrollFsm.lastWheelTime) < 0.25) {
           scrollAnimating = true
         }
         # Suppress the playback-driven 60Hz animation gate while the
         # user is wheel-scrolling (the per-frame playback tick competed
         # with scroll). Progress resumes ~250ms after the last wheel tick.
-        let scrollActiveTimeSec: Float = uiNowSeconds() - scrollFsm.lastWheelTime
+        let scrollActiveTimeSec: Float = (uiNowSeconds(backend: backend) - scrollFsm.lastWheelTime) as Float
         let recentlyScrolling: Bool = scrollActiveTimeSec < 0.25
         var playbackAnimating: Bool = false
         if playback.isPlaying {
@@ -544,10 +533,10 @@ func main() {
           }
         }
         # Interaction/transition motion → busy-render: poll (timeout 0), paint every frame as fast as the machine allows (no FPS cap). Playback alone stays on the throttled 60Hz path so a playing song doesn't peg a core. Idle → blocking event-wait (~0% CPU).
-        let busyAnimating: Bool = anim.active or scrollAnimating or lastHoverAnimDirty or assetsLoading or uiPointerButtonDown(button: mouseButtonLeft)
+        let busyAnimating: Bool = anim.active or scrollAnimating or lastHoverAnimDirty or assetsLoading or uiPointerButtonDown(backend: backend, button: mouseButtonLeft)
         var timeout: Float = 0.0
         if busyAnimating is false {
-          timeout = nextWaitTimeoutSec(animating: playbackAnimating or uiNowSeconds() < renderUntil, mouseDown: false, pollWatcher: true, frameSec: targetFrameSec)
+          timeout = nextWaitTimeoutSec(animating: playbackAnimating or uiNowSeconds(backend: backend) < renderUntil, mouseDown: false, pollWatcher: true, frameSec: targetFrameSec)
         }
         # Heartbeat: prints once per frame BEFORE the wait. If this
         # line stops appearing in the log, the loop has stalled
@@ -556,14 +545,14 @@ func main() {
         # branch below is being skipped — check the post-wait line.
         if loopDebugEnabled {
           loopDebugFrame = loopDebugFrame + 1
-          let mouseDown: Bool = uiPointerButtonDown(button: mouseButtonLeft)
+          let mouseDown: Bool = uiPointerButtonDown(backend: backend, button: mouseButtonLeft)
           log("[loop {loopDebugFrame}] screen={screenToInt(s: currentScreen)} scrollY={scrollFsm.scrollY} vel={scrollFsm.velocity} animA={anim.active} animP={playback.isPlaying} animS={scrollAnimating} mouse={mouseDown} timeout={timeout}")
         }
         # When RAE_AUTO_EXIT_SEC is set, clamp the wait so the deadline
         # actually fires on time — otherwise an idle iteration could
         # sleep for `idleCapSec` (30 s) past the requested exit time.
         if autoExitSec > 0.0 {
-          let elapsed: Float = uiNowSeconds() - bootTime
+          let elapsed: Float = (uiNowSeconds(backend: backend) - bootTime) as Float
           let remaining: Float = autoExitSec - elapsed
           if remaining < timeout {
             timeout = remaining
@@ -572,9 +561,9 @@ func main() {
             timeout = 0.001
           }
         }
-        let preWait: Float = uiNowSeconds()
-        uiWaitEvents(timeoutSec: timeout)
-        let waitDt: Float = uiNowSeconds() - preWait
+        let preWait: Float = uiNowSeconds(backend: backend) as Float
+        uiWaitEvents(backend: backend, timeoutSec: timeout)
+        let waitDt: Float = (uiNowSeconds(backend: backend) - preWait) as Float
         if waitTraceEnabled {
           if waitDt > 0.005 {
             log("[wait] dt={waitDt} timeout={timeout}")
@@ -587,9 +576,9 @@ func main() {
         if loopDebugEnabled {
           log("[loop {loopDebugFrame}] wait dt={waitDt}")
         }
-        if uiWindowShouldClose() {
+        if uiWindowShouldClose(backend: backend) {
           running = false
-        } else if autoExitSec > 0.0 and uiNowSeconds() - bootTime > autoExitSec {
+        } else if autoExitSec > 0.0 and uiNowSeconds(backend: backend) - bootTime > autoExitSec {
           # RAE_AUTO_EXIT_SEC fired — clean self-shutdown so test
           # harnesses don't leave orphaned binaries owning the GPU
           # context. Falls through to the texture/font/window
@@ -607,14 +596,14 @@ func main() {
             saveStateAndExit(screen: currentScreen, scrollY: scrollFsm.scrollY)
           }
 
-          updateInputSystem(input: input, world: world)
+          updateInputSystem(backend: backend, input: input, world: world)
           # Live-window resize: sync screenW/H to the real window and
           # rebuild so the layout extent, responsive grid columns, and
           # nav reflow. The old-world drop on rebuild relies on the
           # rae_ext_rae_buf_copy memmove fix (was a memcpy double-free).
-          if uiIsWindowResized() {
-            screenW = uiWindowWidth()
-            screenH = uiWindowHeight()
+          if uiIsWindowResized(backend: backend) {
+            screenW = uiWindowWidth(backend: backend)
+            screenH = uiWindowHeight(backend: backend)
             switching = true
           }
 
@@ -623,6 +612,7 @@ func main() {
           # true on the frame a drag just ended so the dispatch below
           # skips the release-click on whatever's under the cursor.
           var dragJustReleased: Bool = applyDragPhysics(
+            backend: backend
             fsm: scrollFsm
             world: world
             scrollTarget: scrollTarget
@@ -638,7 +628,7 @@ func main() {
           # so this only fires after an actual drag gesture.
           var nextScreen: Screen = currentScreen
           if dragJustReleased is false {
-            nextScreen = dispatchActions(input: input, current: currentScreen, playback: playback, state: appState, world: world, spotifyEnabled: spotifyState.enabled)
+            nextScreen = dispatchActions(backend: backend, input: input, current: currentScreen, playback: playback, state: appState, world: world, spotifyEnabled: spotifyState.enabled)
           } else {
             # Diagnostic: drag-release path skipped dispatch. If you
             # see this while doing what feels like a click, the
@@ -658,7 +648,7 @@ func main() {
           # cadence is already accurate enough for resume-from-pause.
           if input.events.length > 0 {
             if dragJustReleased is false {
-              if uiBackend() is UiBackend.raylib {
+              if backend is UiBackend.raylib {
                 saveAppState(path: stateFilePath, state: appState, playback: playback)
               }
             }
@@ -680,10 +670,12 @@ func main() {
           # and avoids special-casing.
           var debugChanged: Bool = false
           if dragJustReleased is false {
-            debugChanged = dispatchDebugAction(input: input, debug: debug)
+            debugChanged = dispatchDebugAction(world: world, input: input, debug: debug)
           }
           if debugChanged {
-            syncColorsFromTheme()
+            # #764: persist the world-level debug theme toggle back to AppState.
+            appState.theme.active = world.theme.active
+            syncColorsFromTheme(active: appState.theme.active)
             scenes = loadAllScenes()
             switching = true
           }
@@ -693,16 +685,19 @@ func main() {
           # bind against the new theme, then force a world rebuild via
           # `switching = true` — same code path as data hot reload.
           let keyT: Int = 84
-          if uiIsKeyPressed(key: keyT) {
-            let cur: Theme = currentTheme()
+          if uiIsKeyPressed(backend: backend, key: keyT) {
+            # #764: theme lives on AppState; `switching` forces the reseeding rebuild.
+            let cur: Theme = appState.theme.active
             if cur.mode is ThemeMode.light {
-              setActiveTheme(theme: darkTheme())
-              log("[theme] -> dark")
+              appState.theme.active = darkTheme()
+              appState.theme.generation = appState.theme.generation + 1
+              log("[theme] -> dark (gen {appState.theme.generation})")
             } else {
-              setActiveTheme(theme: lightTheme())
-              log("[theme] -> light")
+              appState.theme.active = lightTheme()
+              appState.theme.generation = appState.theme.generation + 1
+              log("[theme] -> light (gen {appState.theme.generation})")
             }
-            syncColorsFromTheme()
+            syncColorsFromTheme(active: appState.theme.active)
             scenes = loadAllScenes()
             switching = true
           }
@@ -720,7 +715,7 @@ func main() {
           # AFTER the affected page has been re-mounted (so the
           # target hero exists with the right rect).
 
-          let now: Float = uiNowSeconds()
+          let now: Float = uiNowSeconds(backend: backend) as Float
           # Advance playback elapsed-time. `advancePlayback` is a no-op
           # for `elapsedSec` when paused but always updates `prevTime`,
           # so a long idle-paused stretch followed by a resume doesn't
@@ -749,10 +744,10 @@ func main() {
           # the first frame that will draw it — start the clock here
           # so `t = 0` at the moment the first overlay actually paints.
           if transitionArmed {
-            startHeroTransition(anim: anim, key: appState.currentAlbumStem, durationSec: heroDuration, now: now)
+            startHeroTransition(anim: anim, key: appState.currentAlbumStem, durationSec: heroDuration, now: now as Float64)
             transitionArmed = false
           }
-          var animating: Bool = updateHeroAnim(anim: anim, now: now)
+          var animating: Bool = updateHeroAnim(anim: anim, now: now as Float64)
           # End-of-animation fix: if the anim just turned off this
           # frame, unhide the destination hero entity BEFORE
           # `renderSystem` runs. Doing it after the render (the
@@ -779,14 +774,14 @@ func main() {
           }
           # Spotify-mode poll (no-op when RAE_UI_SPOTIFY unset; 1Hz
           # internal rate-limit). Syncs playback state, text fields,
-          # and album art. See examples/98_mobile_ui/spotify_view.rae.
-          pollSpotify(state: spotifyState, world: world, reg: texReg, playback: playback, appState: appState, currentAlbumStem: appState.currentAlbumStem, now: now)
+          # and album art. See examples/legacy/raylib/98_mobile_ui/spotify_view.rae.
+          pollSpotify(backend: backend, state: spotifyState, world: world, reg: texReg, playback: playback, appState: appState, currentAlbumStem: appState.currentAlbumStem, now: now)
           # Stream covers + history art after first paint (non-blocking, a few/frame).
           # Covers stream from disk. (History-art network refetch was
           # removed from here — each fetch blocked ~140ms, pinning the
           # whole app to ~7fps; needs a background thread instead.)
           var loadingAssets: Bool = false
-          if uiBackend() is UiBackend.raylib {
+          if backend is UiBackend.raylib {
             loadingAssets = cascadeAssets(reg: texReg, albums: appState.albums, budget: 2)
           } else {
             loadingAssets = cascadeGpu2dAssets(albums: appState.albums, budget: 2)
@@ -794,7 +789,7 @@ func main() {
           assetsLoading = loadingAssets
           if currentScreen is Screen.profile {
             let profileKeyNow: String = profileAvatarKey()
-            let profileReadyNow: Bool = profileAvatarLoaded(reg: texReg, key: profileKeyNow)
+            let profileReadyNow: Bool = profileAvatarLoaded(backend: backend, reg: texReg, key: profileKeyNow)
             if profileReadyNow and profileLoaded is false { switching = true }
           }
 
@@ -816,6 +811,7 @@ func main() {
           transformSystemIfDirty(world: world, cache: transformCache)
 
           let activeDecision: RenderActiveDecision = decideActive(
+            backend: backend
             world: world
             renderCache: renderCache
             input: input
@@ -858,20 +854,20 @@ func main() {
           let frameDue: Bool = busyAnimating or forceRender or (now - lastRenderTime) >= targetFrameSec * 0.85
           if (busyAnimating or active or now < renderUntil) and frameDue {
             lastRenderTime = now
-            uiBeginFrame(clear: bgSurface)
-            if uiBackend() is UiBackend.gpu2d {
+            uiBeginFrame(backend: backend, clear: bgSurface)
+            if backend is UiBackend.gpu2d {
               renderSystemGpu2d(world: world, res: gpuUi)
-              updateAndRenderDebugOverlayGpu2d(debug: debug, now: now, didRealWork: active, font: gpuUi.textFont)
+              updateAndRenderDebugOverlayGpu2d(debug: debug, now: now as Float64, didRealWork: active, font: gpuUi.textFont)
             } else {
-              renderSystemLayerRange(world: world, reg: texReg, minOrder: 0 - 1000000, maxOrder: 100)
-              renderSystemLayerRange(world: world, reg: texReg, minOrder: 100, maxOrder: 1000000)
+              renderSystemLayerRange(backend: backend, world: world, reg: texReg, minOrder: 0 - 1000000, maxOrder: 100)
+              renderSystemLayerRange(backend: backend, world: world, reg: texReg, minOrder: 100, maxOrder: 1000000)
               if animating {
-                renderHeroOverlay(anim: anim, reg: texReg, now: now)
+                renderHeroOverlay(anim: anim, reg: texReg, now: now as Float64)
               }
               if debug.showInputOutlines {
-                let mx: Float = uiPointerX()
-                let my: Float = uiPointerY()
-                let pressedNow: Bool = uiPointerButtonDown(button: mouseButtonLeft)
+                let mx: Float = uiPointerX(backend: backend)
+                let my: Float = uiPointerY(backend: backend)
+                let pressedNow: Bool = uiPointerButtonDown(backend: backend, button: mouseButtonLeft)
                 renderDebugClickRects(
                   world: world
                   idleColor: debugRectColor
@@ -883,7 +879,7 @@ func main() {
                 )
                 renderDebugMouseCursor(mouseX: mx, mouseY: my, color: debugCursorColor)
               }
-              updateAndRenderDebugOverlay(debug: debug, now: now, didRealWork: active)
+              updateAndRenderDebugOverlay(backend: backend, debug: debug, now: now as Float64, didRealWork: active)
               let versionText: String = "{appVersion}"
               let versionFontSize: Float = 12.0
               let versionW: Int = measureTextWithFont(
@@ -916,7 +912,7 @@ func main() {
               }
             }
 
-            uiEndFrame()
+            uiEndFrame(backend: backend)
             forceRender = false
             renderCacheDirty(world: world, cache: renderCache)
           }
@@ -925,6 +921,7 @@ func main() {
           # arming + Active flip. On willSwitch=false: hot-reload watcher poll
           # that may set switching=true to force an outer rebuild.
           let switchResult: ScreenSwitchResult = handleScreenSwitch(
+            backend: backend
             world: world
             scenes: scenes
             playback: playback
@@ -964,6 +961,7 @@ func main() {
           # overshoot to 120 px. The drag-block's spring path takes
           # over once `scrollFsm.lastWheelTime` is 50 ms stale.
           applyWheelScroll(
+            backend: backend
             fsm: scrollFsm
             world: world
             scrollTarget: scrollTarget
@@ -991,11 +989,11 @@ func main() {
 
   # Final snapshot — captures window-drag-only sessions where no
   # dispatched action fired (and thus no in-loop save ran).
-  if uiBackend() is UiBackend.raylib {
+  if backend is UiBackend.raylib {
     saveAppState(path: stateFilePath, state: appState, playback: playback)
   }
   textureUnloadAll(reg: texReg)
   unloadFontSlot(slot: robotoFontSlot)
   unloadFontSlot(slot: materialIconFontSlot)
-  uiCloseWindow()
+  uiCloseWindow(backend: backend)
 }
