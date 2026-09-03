@@ -11,9 +11,10 @@ open webgpu/webgpu
 
 func main() ret Int {
   var profiler: Profiler = profile.createProfiler()
+  var timing: GpuTiming = gpu_timing.createGpuTiming()
   if webgpuBootstrap() is 0 { log("no wgpu device") ret 1 }
   log("have_timestamp={webgpuHaveTimestamp()}")
-  if gpu_timing.gpuTimingInit() is false { log("gpu timing DISABLED (adapter lacks feature)") ret 0 }
+  if gpu_timing.gpuTimingInit(timing: timing) is false { log("gpu timing DISABLED (adapter lacks feature)") ret 0 }
   log("gpu timing enabled")
   # A throwaway capture so profileCounter has somewhere to record.
   profile.profileStartCapture(profiler: profiler, seconds: 3600.0, outPath: "/tmp/gt_selftest.json")
@@ -43,8 +44,8 @@ func main() ret Int {
 
   var frame: Int = 0
   loop frame < 5 {
-    gpu_timing.gpuTimingFrameBegin()
-    let tsIdx: Int = gpu_timing.gpuTimingPassBegin(name: "clear")
+    gpu_timing.gpuTimingFrameBegin(timing: timing)
+    let tsIdx: Int = gpu_timing.gpuTimingPassBegin(timing: timing, name: "clear")
     let encDesc: WGPUCommandEncoderDescriptor = { }
     let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
     atts.set(index: 0, value: {
@@ -54,16 +55,16 @@ func main() ret Int {
     })
     let rpDesc: WGPURenderPassDescriptor = {
       colorAttachmentCount: 1 as UInt64, colorAttachments: atts.data,
-      timestampWrites: gpu_timing.gpuTimingWritesPtr()
+      timestampWrites: gpu_timing.gpuTimingWritesPtr(timing: timing)
     }
     let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
     wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
-    gpu_timing.gpuTimingResolve(enc: enc, idx: tsIdx)
+    gpu_timing.gpuTimingResolve(timing: timing, enc: enc, idx: tsIdx)
     let cbDesc: WGPUCommandBufferDescriptor = { }
     let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
     gtSubmitTest(cmd: cmd)
-    gpu_timing.gpuTimingCollect(profiler: profiler)
-    log("frame {frame}: clear-pass GPU time = {gpu_timing.gpuTimingLastTotalUs()} us")
+    gpu_timing.gpuTimingCollect(timing: timing, profiler: profiler)
+    log("frame {frame}: clear-pass GPU time = {gpu_timing.gpuTimingLastTotalUs(timing: timing)} us")
     frame = frame + 1
   }
   ret 0
