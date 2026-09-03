@@ -99,6 +99,19 @@ type CameraRig {
   dragging: Bool
   lastX: Float
   lastY: Float
+  # Touch/pointer input tracking (#764: was module-level gCam* globals). A
+  # rig that never calls setCameraTouch keeps camTouchOn=false and the desktop
+  # mouse path, so 110/113 behave as before.
+  camTouchOn: Bool
+  camExcludeId: Int
+  camJoyActive: Bool
+  camGrabId: Int
+  camZoneX: Float
+  camZoneY: Float
+  camZoneR: Float
+  camPointerX: Float
+  camPointerY: Float
+  camPointerDown: Bool
 }
 
 # Camera drag pointer (#526). By default the rig drags with the mouse pointer.
@@ -108,43 +121,33 @@ type CameraRig {
 # joystick, one outside belongs to the camera — and then HELD by id, so a drag
 # never transfers mid-gesture even if it wanders across the boundary. Region-at-
 # grab is what makes the two complementary; id-hold is what makes ownership
-# sticky. gCamTouchOn stays false until set, so other rigs (110/113) keep the
+# sticky. rig.camTouchOn stays false until set, so other rigs (110/113) keep the
 # plain-mouse behaviour.
-var gCamTouchOn: Bool = false
-var gCamExcludeId: Int = 0 - 1     # finger currently owned by the joystick
-var gCamJoyActive: Bool = false    # desktop: joystick has the mouse
-var gCamGrabId: Int = 0 - 1        # finger this rig owns
-var gCamZoneX: Float = 0.0         # joystick zone centre (design units)
-var gCamZoneY: Float = 0.0
-var gCamZoneR: Float = 0.0 - 1.0   # joystick zone radius (<0 = no zone)
-var gCamPointerX: Float = 0.0
-var gCamPointerY: Float = 0.0
-var gCamPointerDown: Bool = false
 
-func setCameraTouch(excludeId: copy Int, joystickActive: copy Bool,
+func setCameraTouch(rig: mod CameraRig, excludeId: copy Int, joystickActive: copy Bool,
                     zoneX: copy Float, zoneY: copy Float, zoneR: copy Float) pub {
-  gCamTouchOn = true
-  gCamExcludeId = excludeId
-  gCamJoyActive = joystickActive
-  gCamZoneX = zoneX
-  gCamZoneY = zoneY
-  gCamZoneR = zoneR
+  rig.camTouchOn = true
+  rig.camExcludeId = excludeId
+  rig.camJoyActive = joystickActive
+  rig.camZoneX = zoneX
+  rig.camZoneY = zoneY
+  rig.camZoneR = zoneR
 }
 
 # True when the point is outside the joystick zone (or no zone is set), i.e. the
 # camera is allowed to start a grab there.
-func pointerOutsideCamZone(x: view Float, y: view Float) ret Bool {
-  if gCamZoneR < 0.0 { ret true }
-  let dx: Float = x - gCamZoneX
-  let dy: Float = y - gCamZoneY
-  ret dx * dx + dy * dy > gCamZoneR * gCamZoneR
+func pointerOutsideCamZone(rig: view CameraRig, x: view Float, y: view Float) ret Bool {
+  if rig.camZoneR < 0.0 { ret true }
+  let dx: Float = x - rig.camZoneX
+  let dy: Float = y - rig.camZoneY
+  ret dx * dx + dy * dy > rig.camZoneR * rig.camZoneR
 }
 
-func resolveCameraPointer() {
-  if gCamTouchOn is false {
-    gCamPointerX = gpu2d.pointerX()
-    gCamPointerY = gpu2d.pointerY()
-    gCamPointerDown = gpu2d.pointerDown()
+func resolveCameraPointer(rig: mod CameraRig) {
+  if rig.camTouchOn is false {
+    rig.camPointerX = gpu2d.pointerX()
+    rig.camPointerY = gpu2d.pointerY()
+    rig.camPointerDown = gpu2d.pointerDown()
     ret
   }
   let touches: Int = gpu2d.touchCount()
@@ -164,29 +167,29 @@ func resolveCameraPointer() {
       # A hold is never a fresh press — drop it here so the grab below re-decides
       # by region. Without this the camera and stick fight over one finger and
       # never release it (the "input goes to both" bug).
-      if gCamGrabId >= 0 and id is gCamGrabId and pressed { gCamGrabId = 0 - 1 }
-      if gCamGrabId >= 0 and id is gCamGrabId {
+      if rig.camGrabId >= 0 and id is rig.camGrabId and pressed { rig.camGrabId = 0 - 1 }
+      if rig.camGrabId >= 0 and id is rig.camGrabId {
         # Hold: keep our finger wherever it goes, even into the joystick zone.
-        gCamPointerX = tx
-        gCamPointerY = ty
+        rig.camPointerX = tx
+        rig.camPointerY = ty
         found = true
       }
-      if gCamGrabId < 0 and pressed
-        and id is not gCamExcludeId and pointerOutsideCamZone(x: tx, y: ty) {
-        gCamGrabId = id
-        gCamPointerX = tx
-        gCamPointerY = ty
+      if rig.camGrabId < 0 and pressed
+        and id is not rig.camExcludeId and pointerOutsideCamZone(rig: rig, x: tx, y: ty) {
+        rig.camGrabId = id
+        rig.camPointerX = tx
+        rig.camPointerY = ty
         found = true
       }
       index = index + 1
     }
-    if found is false { gCamGrabId = 0 - 1 }
-    gCamPointerDown = found
+    if found is false { rig.camGrabId = 0 - 1 }
+    rig.camPointerDown = found
   } else {
     # Desktop mouse: skip while the joystick owns the mouse.
-    gCamPointerX = gpu2d.pointerX()
-    gCamPointerY = gpu2d.pointerY()
-    gCamPointerDown = gpu2d.pointerDown() and gCamJoyActive is false
+    rig.camPointerX = gpu2d.pointerX()
+    rig.camPointerY = gpu2d.pointerY()
+    rig.camPointerDown = gpu2d.pointerDown() and rig.camJoyActive is false
   }
 }
 
@@ -222,6 +225,16 @@ func createCameraRig(camera: view Camera3d) pub ret CameraRig {
     dragging: false
     lastX: 0.0
     lastY: 0.0
+    camTouchOn: false
+    camExcludeId: 0 - 1
+    camJoyActive: false
+    camGrabId: 0 - 1
+    camZoneX: 0.0
+    camZoneY: 0.0
+    camZoneR: 0.0 - 1.0
+    camPointerX: 0.0
+    camPointerY: 0.0
+    camPointerDown: false
   }
 }
 
@@ -399,10 +412,10 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
   var keyDist: Float = 0.0
   var keyMove: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
 
-  resolveCameraPointer()
-  let px: Float = gCamPointerX
-  let py: Float = gCamPointerY
-  if allowInput and gCamPointerDown {
+  resolveCameraPointer(rig: rig)
+  let px: Float = rig.camPointerX
+  let py: Float = rig.camPointerY
+  if allowInput and rig.camPointerDown {
     # Only orbit once a drag is ESTABLISHED. On the press frame there is
     # no previous position to difference against, and using the stale one
     # snaps the view by the distance the pointer travelled while up.

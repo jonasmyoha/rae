@@ -27,7 +27,7 @@ open app3d/camera_rig
 
 # Update the touch stick AND tell the camera rig to exclude its region, so on a
 # phone one finger drives the joystick while another rotates the camera (#526).
-func updateWalkerTouch(moveStick: mod VirtualJoystick, world: mod UiWorld) pub ret Bool {
+func updateWalkerTouch(rig: mod CameraRig, moveStick: mod VirtualJoystick, world: mod UiWorld) pub ret Bool {
   # Feed the OS safe-area insets (notch / home indicator, design units) into the
   # ECS so UiRoot's padding reserves them — the whole UI, top bar included, sits
   # inside the safe area. Runs before layout (renderSystemGpu2d) this frame.
@@ -40,7 +40,7 @@ func updateWalkerTouch(moveStick: mod VirtualJoystick, world: mod UiWorld) pub r
   # Hand the camera the joystick's exclusion zone (same radius the stick grabs
   # with) + the owned finger id: a press inside the zone is the stick's, outside
   # is the camera's, and each holds its finger for the whole drag.
-  setCameraTouch(excludeId: moveStick.grabbedId, joystickActive: active,
+  setCameraTouch(rig: rig, excludeId: moveStick.grabbedId, joystickActive: active,
                  zoneX: moveStick.baseX, zoneY: moveStick.baseY,
                  zoneR: virtualJoystickZoneRadius(joy: moveStick))
   ret active
