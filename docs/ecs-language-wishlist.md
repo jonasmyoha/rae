@@ -160,3 +160,24 @@ a feature that is not already listed here.
   checked for conflicts, and parallelised — turning "a function I remember to call in
   the right phase" into a language-level concept. The manual per-frame call order in
   the examples is the seam a scheduler would own.
+
+## Ownership & the no-globals rule
+
+- **Threading a cross-cutting resource to leaf call sites has no ergonomic story
+  (surfaced by #764).** The no-globals rule (`docs/globals-and-app-ownership.md`) says
+  every singleton is a resource on the App, passed down. That is clean when an
+  already-threaded owner exists — `camera_rig`'s input state moved onto the `CameraRig`
+  struct in a 2-level cascade with no friction. It is brutal for a *cross-cutting*
+  singleton read from LEAF helpers: `theme.activeTheme` is read inside `themeColorByName`
+  (text/style/registry/legacy-render leaves, ~37 sites); the profiler's `zoneBegin`/
+  `profileCounter` are called deep in the render graph (~14 sites). Making those a
+  resource means adding a `theme: view Theme` / `prof: mod Profiler` parameter to every
+  leaf AND every function on the path from an App-holder down to it — dozens of signature
+  changes per singleton, with no owner to hang the field on until the whole chain is
+  threaded. Rae has no mechanism to pass such ambient state without spelling it at every
+  hop (no implicit/context parameters, no capability passing, no `using`-style injection).
+  Without one, "no globals" for a genuinely cross-cutting concern is a mechanical mega-diff
+  that must be done and screenshot-verified per singleton — which is why #764 split into
+  per-module tasks. A deliberate, analyzable form of scoped ambient state (NOT a global,
+  NOT a hidden channel — something a tool can still read as a dependency) would turn each
+  of those migrations from an epic into an edit. Design space, not a concrete proposal.
