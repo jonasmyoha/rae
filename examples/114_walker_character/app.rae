@@ -209,6 +209,8 @@ func createApp() ret App {
   let gpuUi: Gpu2dUi = loadUiAssets(dir: assets, textFontName: "Roboto-Regular",
                                     iconFontName: "", themeFile: "theme.raescene")
   var uiWorld: UiWorld = createUiWorld()
+  # #764: install the app's theme (palette + scene tokens) onto this world.
+  seedWorldTheme(world: uiWorld, res: gpuUi)
   let uiRoot: EntityId = mountUiScene(world: uiWorld, path: "{assets}ui.raescene", res: gpuUi)
   var uiInput: UiInput = createUiInput()
   var logView: LogOverlay = createLogOverlay(capacity: 64, maxLines: 8, anchor: logAnchorBottomLeft, fontSize: 14.0)
