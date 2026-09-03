@@ -92,7 +92,7 @@ func buildLibraryCoverTile(world: mod UiWorld, key: view String, size: view Floa
   setHeroWidget(world: world, entity: tile, key: copiedForHero)
   let albumOpen: String = "album.open"
   setOnClick(world: world, entity: tile, actionId: albumOpen)
-  setSprite(world: world, entity: tile, key: key, tint: imageTintColor)
+  setSprite(world: world, entity: tile, key: "{key}", tint: imageTintColor)
   if rounded {
     let cr: CornerRadius = { radius: 12.0 }
     componentSet(this: world.cornerRadiuses, entity: tile, data: cr)
@@ -305,6 +305,7 @@ func buildLibraryWorld(
   scrollY: view Float
 ) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
+  seedWorldThemeFrom(world: world, src: state.theme)  # #764: theme from AppState
   let page: EntityId = mountLibraryPage(world: world, state: state, scrollY: scrollY)
   let dock: EntityId = mountBottomDockOverlay(
     world: world
