@@ -325,6 +325,7 @@ func buildLibraryWorld(
   viewport: view Viewport
 ) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
+  seedWorldThemeFrom(world: world, src: state.theme)  # #764: theme from AppState
   applyViewportExtent(world: world, viewport: viewport)
   let page: EntityId = mountLibraryPage(world: world, state: state, scrollY: scrollY, viewport: viewport)
   let dock: EntityId = mountBottomDockOverlay(

@@ -65,15 +65,15 @@ var imageTintColor: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
 # Call this once after `setActiveTheme(...)` and again whenever the
 # user toggles the theme at runtime; the next `buildScreenWorld`
 # then reads the refreshed colors.
-func syncColorsFromTheme() {
-  pageBgColor = themeColorByName(name: "background")
-  surfaceColor = themeColorByName(name: "surface")
-  heroColor = themeColorByName(name: "textMuted")
-  iconTint = themeColorByName(name: "textPrimary")
-  darkPillColor = themeColorByName(name: "accent")
-  outlineColor = themeColorByName(name: "outline")
-  lightTextColor = themeColorByName(name: "accentText")
-  imageTintColor = themeColorByName(name: "imageTint")
+func syncColorsFromTheme(active: view Theme) {
+  pageBgColor = themeColorByName(theme: active, name: "background")
+  surfaceColor = themeColorByName(theme: active, name: "surface")
+  heroColor = themeColorByName(theme: active, name: "textMuted")
+  iconTint = themeColorByName(theme: active, name: "textPrimary")
+  darkPillColor = themeColorByName(theme: active, name: "accent")
+  outlineColor = themeColorByName(theme: active, name: "outline")
+  lightTextColor = themeColorByName(theme: active, name: "accentText")
+  imageTintColor = themeColorByName(theme: active, name: "imageTint")
 }
 
 # ----- asset paths --------------------------------------------------

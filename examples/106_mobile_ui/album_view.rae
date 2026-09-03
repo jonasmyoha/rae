@@ -274,6 +274,7 @@ func mountAlbumPage(
 
 func buildAlbumWorld(scenes: view AlbumScenes, playback: view PlaybackState, state: view AppState, reg: view TextureRegistry, scrollY: view Float, viewport: view Viewport) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
+  seedWorldThemeFrom(world: world, src: state.theme)  # #764: theme from AppState
   applyViewportExtent(world: world, viewport: viewport)
   let page: EntityId = mountAlbumPage(world: world, scenes: scenes, state: state, playback: playback, scrollY: scrollY, viewport: viewport)
   let dock: EntityId = mountBottomDockOverlay(

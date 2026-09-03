@@ -43,6 +43,33 @@ type Gpu2dUi {
   # theme (#230/#231). The single source of styleId resolution for
   # this render path — see ui/text_style resolveText*.
   theme: ResolvedTheme
+  # #764: the active palette theme (built-in light/dark, optionally overlaid with
+  # the .raescene palette by loadUiAssets). Was the module-global `activeTheme`;
+  # now carried here so an app can seed each UiWorld's `theme.active` from its
+  # owned Gpu2dUi (see seedWorldTheme) instead of a process global.
+  activeTheme: Theme
+}
+
+# #764: seed a freshly-created UiWorld's theme resource from the app's owned
+# Gpu2dUi. `active` is a plain value struct (RgbaColor slots, no heap) so the
+# assignment is a safe copy; the scene-deserialiser token subsets are deep-copied
+# into `theme.resolved` via applyResolvedTokens (idempotent on `.ok`). Call once,
+# right after createUiWorld and BEFORE loadScene/mountUiScene, so token/colour
+# resolution during deserialisation sees the app's theme rather than the default.
+func seedWorldTheme(world: mod UiWorld, res: view Gpu2dUi) pub {
+  world.theme.active = res.activeTheme
+  world.theme.generation = world.theme.generation + 1
+  applyResolvedTokens(dst: world.theme.resolved, src: res.theme)
+}
+
+# #764: seed a freshly-created UiWorld's theme from an app-owned UiTheme (e.g. an
+# AppState field). Used by apps that rebuild their world per screen/frame and keep
+# the source-of-truth theme on their persistent state — the copy carries the chosen
+# active palette + generation + scene token tables onto each new world.
+func seedWorldThemeFrom(world: mod UiWorld, src: view UiTheme) pub {
+  world.theme.active = src.active
+  world.theme.generation = src.generation
+  applyResolvedTokens(dst: world.theme.resolved, src: src.resolved)
 }
 
 func g2dColor(c: view RgbaColor) ret Int {
@@ -82,7 +109,7 @@ func paintShapeG(world: view UiWorld, e: view EntityId, wt: view WorldTransform2
   # dark/light toggle re-colours without a scene re-parse; empty slot
   # keeps the literal fill.
   var fillBase: RgbaColor = sh.fill
-  if sh.fillSlot.length() > 0 { fillBase = themeColorByName(name: sh.fillSlot) }
+  if sh.fillSlot.length() > 0 { fillBase = themeColorByName(theme: world.theme.active, name: sh.fillSlot) }
   let fill: RgbaColor = g2dChain(c: fillBase, chain255: chain255)
   let hoverMul: Float = g2dHoverMul(world: world, e: e)
   let drawW: Float = cr.size.x * hoverMul
@@ -101,7 +128,7 @@ func paintShapeG(world: view UiWorld, e: view EntityId, wt: view WorldTransform2
   if radius <= 0.0 { radius = g2dRadius(world: world, e: e, fallback: 0.0) }
   if sh.strokeWidth > 0.0 {
     var strokeBase: RgbaColor = sh.stroke
-    if sh.strokeSlot.length() > 0 { strokeBase = themeColorByName(name: sh.strokeSlot) }
+    if sh.strokeSlot.length() > 0 { strokeBase = themeColorByName(theme: world.theme.active, name: sh.strokeSlot) }
     let stroke: RgbaColor = g2dChain(c: strokeBase, chain255: chain255)
     gpu2d.drawBox(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, fill: g2dColor(c: fill), borderWidth: sh.strokeWidth, border: g2dColor(c: stroke))
     ret
@@ -185,7 +212,7 @@ func visualBoundsAt(world: view UiWorld, e: view EntityId, text: view String, is
 func paintSpriteG(world: view UiWorld, e: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int, res: view Gpu2dUi) {
   let sp: view Sprite => componentView(this: world.sprites, entity: e)
   var tintBase: RgbaColor = sp.tint
-  if sp.tintSlot.length() > 0 { tintBase = themeColorByName(name: sp.tintSlot) }
+  if sp.tintSlot.length() > 0 { tintBase = themeColorByName(theme: world.theme.active, name: sp.tintSlot) }
   let tint: RgbaColor = g2dChain(c: tintBase, chain255: chain255)
   let hoverMul: Float = g2dHoverMul(world: world, e: e)
   let drawW: Float = cr.size.x * hoverMul
@@ -223,7 +250,7 @@ func paintSpriteG(world: view UiWorld, e: view EntityId, wt: view WorldTransform
     gpu2d.drawImageKeyScaled(key: sp.textureKey, x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, tint: g2dColor(c: tint), scaleMode: g2dScaleMode(m: sp.scaleMode))
     ret
   }
-  let fallback: RgbaColor = g2dChain(c: themeColorByName(name: "textMuted"), chain255: chain255)
+  let fallback: RgbaColor = g2dChain(c: themeColorByName(theme: world.theme.active, name: "textMuted"), chain255: chain255)
   let fallbackRadius: Float = g2dRadius(world: world, e: e, fallback: 8.0)
   gpu2d.drawRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: fallbackRadius * hoverMul, color: g2dColor(c: fallback))
 }
@@ -233,14 +260,14 @@ func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform2D
   if t.text.length() is 0 { ret }
   var size: Float = resolveTextSize(theme: res.theme, styleId: t.styleId)
   let weight: Float = resolveTextWeight(theme: res.theme, styleId: t.styleId)
-  var baseCol: RgbaColor = resolveTextColor(theme: res.theme, styleId: t.styleId)
+  var baseCol: RgbaColor = resolveTextColor(theme: res.theme, styleId: t.styleId, active: world.theme.active)
   # Tier-2 style override (#236): size/color patch over the resolved
   # style for the sparse set of entities that carry one; base styleId
   # still drives everything else (alignment, shadow, unset fields).
   if componentHas(this: world.styleOverrides, entity: e) {
     let so: view StyleOverride => componentView(this: world.styleOverrides, entity: e)
     size = styleOverrideSize(base: size, so: so)
-    baseCol = styleOverrideColor(base: baseCol, so: so)
+    baseCol = styleOverrideColor(base: baseCol, so: so, active: world.theme.active)
   }
   let col: RgbaColor = g2dChain(c: baseCol, chain255: chain255)
   var boldWidth: Float = 0.0
