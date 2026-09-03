@@ -20,13 +20,14 @@ open ecs/entity
 #   - debug input-outline toggle on and the hovered OnClick entity
 #     or held-button mask changed since last frame.
 
-type RenderActiveDecision pub {
+type RenderActiveDecision {
   active: Bool
   currentHovered: EntityId
   currentMouseBtns: Int
 }
 
 func decideActive(
+  backend: view UiBackend
   world: view UiWorld
   renderCache: mod RenderCache
   input: view InputSystem
@@ -59,7 +60,7 @@ func decideActive(
     }
   }
   if active is false {
-    if uiPointerButtonDown(button: mouseButtonLeft) {
+    if uiPointerButtonDown(backend: backend, button: mouseButtonLeft) {
       active = true
     }
   }
@@ -75,20 +76,20 @@ func decideActive(
   # marks dirty on entity TRANSITIONS, so an idle cursor parked over
   # the same rect stays at 0 fps. Mouse-button bitfield is only
   # mirrored when the debug overlay needs it.
-  let mx: Float = uiPointerX()
-  let my: Float = uiPointerY()
+  let mx: Float = uiPointerX(backend: backend)
+  let my: Float = uiPointerY(backend: backend)
   let currentHovered: EntityId = hitTest(world: world, x: mx, y: my)
   var currentMouseBtns: Int = 0
   if debug.showInputOutlines {
     # Same bitfield layout as drawDebugLabels' "btn:" read-out:
     # bit 0 left, bit 1 right, bit 2 middle.
-    if uiPointerButtonDown(button: 0) {
+    if uiPointerButtonDown(backend: backend, button: 0) {
       currentMouseBtns = currentMouseBtns + 1
     }
-    if uiPointerButtonDown(button: 1) {
+    if uiPointerButtonDown(backend: backend, button: 1) {
       currentMouseBtns = currentMouseBtns + 2
     }
-    if uiPointerButtonDown(button: 2) {
+    if uiPointerButtonDown(backend: backend, button: 2) {
       currentMouseBtns = currentMouseBtns + 4
     }
   }

@@ -2,10 +2,10 @@
 #
 # lib/ui's render system emits drawing through these `sink*` calls instead of
 # calling raylib directly, so the same paint walk can target different
-# backends. The active backend is a module-level switch; the raylib backend
-# preserves today's exact behavior. A gpu2d backend (lib/gpu2d, SDL3/WebGPU)
-# is added in a later milestone — at which point each sink function gains a
-# `g_uiBackend is gpu2d` branch.
+# backends. The active backend is passed in as a `backend` argument (owned by
+# the app and threaded down); the raylib backend preserves today's exact
+# behavior. The gpu2d backend (lib/gpu2d, SDL3/WebGPU) is selected by passing
+# `UiBackend.gpu2d`.
 #
 # Params are backend-neutral (RgbaColor + Floats), never raylib `Color`, so
 # nothing above the sink depends on a specific backend's types.
@@ -25,26 +25,14 @@ func packColor(c: view RgbaColor) ret Int {
   ret (c.a shl 24) bitor (c.r shl 16) bitor (c.g shl 8) bitor c.b
 }
 
-# Module-level current backend. Default raylib (unchanged behavior). Apps that
-# want the GPU path call `setUiBackend(UiBackend.gpu2d)` once at startup.
-var g_uiBackend: UiBackend = UiBackend.raylib
-
-func setUiBackend(b: UiBackend) pub {
-  g_uiBackend = b
-}
-
-func uiBackend() pub ret UiBackend {
-  ret g_uiBackend
-}
-
 # RgbaColor -> raylib Color (straight, no premultiply).
 func raylibColor(c: view RgbaColor) ret Color {
   ret Color { r: c.r, g: c.g, b: c.b, a: c.a }
 }
 
 # Filled axis-aligned rectangle.
-func sinkRect(x: view Float, y: view Float, w: view Float, h: view Float, c: view RgbaColor) pub {
-  if g_uiBackend is UiBackend.gpu2d {
+func sinkRect(backend: view UiBackend, x: view Float, y: view Float, w: view Float, h: view Float, c: view RgbaColor) pub {
+  if backend is UiBackend.gpu2d {
     gpu2d.drawRect(x: x, y: y, w: w, h: h, color: packColor(c: c))
     ret
   }
@@ -52,8 +40,8 @@ func sinkRect(x: view Float, y: view Float, w: view Float, h: view Float, c: vie
 }
 
 # Rectangle outline (debug overlays).
-func sinkRectLines(x: view Float, y: view Float, w: view Float, h: view Float, c: view RgbaColor) pub {
-  if g_uiBackend is UiBackend.gpu2d {
+func sinkRectLines(backend: view UiBackend, x: view Float, y: view Float, w: view Float, h: view Float, c: view RgbaColor) pub {
+  if backend is UiBackend.gpu2d {
     let clear: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
     gpu2d.drawBox(x: x, y: y, w: w, h: h, radius: 0.0, fill: packColor(c: clear), borderWidth: 1.0, border: packColor(c: c))
     ret
@@ -64,13 +52,13 @@ func sinkRectLines(x: view Float, y: view Float, w: view Float, h: view Float, c
 # Filled rounded rectangle. `radius` is the corner radius in PIXELS (clamped to
 # half the smaller side). gpu2d takes the pixel radius directly; the raylib
 # backend converts it to raylib's fraction-of-smaller-side `roundness`.
-func sinkRoundedRect(x: view Float, y: view Float, w: view Float, h: view Float, radius: view Float, c: view RgbaColor) pub {
+func sinkRoundedRect(backend: view UiBackend, x: view Float, y: view Float, w: view Float, h: view Float, radius: view Float, c: view RgbaColor) pub {
   var smaller: Float = w
   if h < smaller { smaller = h }
   let half: Float = smaller / 2.0
   var r: Float = radius
   if r > half { r = half }
-  if g_uiBackend is UiBackend.gpu2d {
+  if backend is UiBackend.gpu2d {
     gpu2d.drawRoundedRect(x: x, y: y, w: w, h: h, radius: r, color: packColor(c: c))
     ret
   }
@@ -80,8 +68,8 @@ func sinkRoundedRect(x: view Float, y: view Float, w: view Float, h: view Float,
 }
 
 # Filled circle centered at (cx, cy).
-func sinkCircle(cx: view Float, cy: view Float, r: view Float, c: view RgbaColor) pub {
-  if g_uiBackend is UiBackend.gpu2d {
+func sinkCircle(backend: view UiBackend, cx: view Float, cy: view Float, r: view Float, c: view RgbaColor) pub {
+  if backend is UiBackend.gpu2d {
     # gpu2d has no circle primitive; a rounded rect with radius = r is a circle.
     gpu2d.drawRoundedRect(x: cx - r, y: cy - r, w: r * 2.0, h: r * 2.0, radius: r, color: packColor(c: c))
     ret

@@ -14,7 +14,7 @@ open ecs/entity
 # locals — `currentScreen`, cached album/track values, scrollTarget,
 # hero pending flags, and the outer-rebuild `switching` signal.
 
-type ScreenSwitchResult pub {
+type ScreenSwitchResult {
   newScreen: Screen
   newScrollTarget: EntityId
   cachedTrackDurMs: Int
@@ -27,6 +27,7 @@ type ScreenSwitchResult pub {
 }
 
 func handleScreenSwitch(
+  backend: view UiBackend
   world: mod UiWorld
   scenes: mod AlbumScenes
   playback: mod PlaybackState
@@ -124,7 +125,7 @@ func handleScreenSwitch(
       # keeps working on the new album entity.
       result.newScrollTarget = findScrollTarget(world: world)
     }
-    if file_watch.checkForChanges(watcher: watcher, now: uiNowSeconds()) {
+    if file_watch.checkForChanges(watcher: watcher, now: uiNowSeconds(backend: backend)) {
       scenes = loadAllScenes()
       result.switching = true
       log("[data-hot-reload] scene file changed, rebuilding world")
@@ -182,7 +183,7 @@ func handleScreenSwitch(
     let gotDst: Bool = captureHeroTargetOnPage(anim: anim, world: world, pageId: incomingPageId, key: heroKey)
     if gotDst {
       setHeroVisibleOnPage(world: world, pageId: incomingPageId, key: heroKey, visible: false)
-      startHeroTransition(anim: anim, key: heroKey, durationSec: heroDuration, now: uiNowSeconds())
+      startHeroTransition(anim: anim, key: heroKey, durationSec: heroDuration, now: uiNowSeconds(backend: backend))
       result.pendingSrc = true
       result.pendingHeroTargetPageId = "{incomingPageId}"
     }
