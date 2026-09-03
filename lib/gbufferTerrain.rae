@@ -1,0 +1,191 @@
+# Terrain splat pipeline (#533) — split out of gbuffer.rae.
+#
+# The ground tiles use their own pipeline and bind group: the shader ignores the
+# per-draw colour and samples a biome field per vertex, so one mesh shows
+# grass / sand / mud / rock / water. That is a terrain concern, not a G-buffer
+# primitive, and gbuffer.rae is at the compiler's hard 1000-line cap.
+import core
+import gbuffer
+open gbuffer
+open scene3d
+open math3d
+open webgpu/webgpu
+import webgpu/context
+import worldBiome
+open worldBiome
+
+
+# Force a terrain-pipeline rebuild on the next draw. The island radius is baked
+# into the composed shader as a const (islandParamsWgsl), so growing the island
+# (#41) must recompose it. The old pipeline handle is replaced by gbSetTerrainPipeline;
+# a handful of grows leak a pipeline each, which is fine. The bind group is auto-
+# layouted from the OLD pipeline and is invalid against the new one (wgpu auto-layouts
+# are pipeline-exclusive), so force it to rebuild too — gen -1 never matches gbTerrainTexGen.
+func resetTerrainPipeline(cache: mod GbufferCache) pub {
+  cache.terrainPipeMade = false
+  cache.terrainBindGen = 0 - 1
+}
+
+# Textured terrain (#9 grass, extended to a material ARRAY in #14). The C side
+# holds the Ptr handles (2d-array view, sampler) and the blend + generation,
+# matching how every other gb_* handle is stored; Rae keeps only the int gen it
+# last built the bind group at. One texture_2d_array, one layer per material —
+# see terrainLayers below and lib/terrain_splat.wgsl.
+func gbSetTerrainTexView(tv: Ptr) extern("rae_gb_set_terrain_tex_view")
+func gbTerrainTexView() extern("rae_gb_terrain_tex_view") ret Ptr
+func gbSetTerrainSampler(samp: Ptr) extern("rae_gb_set_terrain_sampler")
+func gbTerrainSampler() extern("rae_gb_terrain_sampler") ret Ptr
+func gbSetTerrainBlend(blend: Float) extern("rae_gb_set_terrain_blend")
+func gbTerrainBlend() extern("rae_gb_terrain_blend") ret Float
+func gbTerrainTexGen() extern("rae_gb_terrain_tex_gen") ret Int
+func gbTerrainArrayInit(w: Int, h: Int, layers: Int) extern("rae_gb_terrain_array_init")
+func gbTerrainArrayWrite(layer: Int, pixels: view Buffer(Int), w: Int, h: Int) extern("rae_gb_terrain_array_write")
+
+# Layers of the material array, indexed to match lib/terrain_splat.wgsl:
+# 0 grass, 1 sand, 2 road, 3 water. (Rock has no plate-harvestable ground tile,
+# so it stays procedural — see the fragment shader.)
+func terrainLayers() pub ret Int { ret 4 }
+
+# Create the material array (all tiles are the same size). The game calls this
+# once, then uploads each layer with terrainUploadLayer and turns the blend on
+# with terrainSetBlend. Init installs the 2d-array view + bumps the generation so
+# the bind group rebinds it.
+func terrainInitArray(w: copy Int, h: copy Int) pub {
+  gbTerrainArrayInit(w: w, h: h, layers: terrainLayers())
+}
+# Upload one material layer (packed RGBA, order R,G,B,A per pixel — the format
+# decodePng+swap produces). Does not rebind: the view already points at this
+# texture, so the new layer content is visible immediately.
+func terrainUploadLayer(layer: copy Int, pixels: view Buffer(Int), w: copy Int, h: copy Int) pub {
+  gbTerrainArrayWrite(layer: layer, pixels: pixels, w: w, h: h)
+}
+func terrainSetBlend(blend: copy Float) pub {
+  gbSetTerrainBlend(blend: blend)
+}
+
+# Sampler + a 1x1 white fallback ARRAY, so the terrain bind group always has valid
+# resources at binding(2)/(3) even for an app that never uploads tiles (blend is 0
+# there, so the fallback is sampled but never visible). One white texel per layer.
+func ensureTerrainTexDefaults() {
+  if gbTerrainSampler() is webgpuNull() {
+    let sd: WGPUSamplerDescriptor = {
+      addressModeU: WGPUAddressMode_Repeat, addressModeV: WGPUAddressMode_Repeat,
+      addressModeW: WGPUAddressMode_Repeat,
+      magFilter: WGPUFilterMode_Linear, minFilter: WGPUFilterMode_Linear,
+      mipmapFilter: WGPUMipmapFilterMode_Nearest,
+      lodMinClamp: 0.0 as Float32, lodMaxClamp: 1.0 as Float32, maxAnisotropy: 1 as UInt16
+    }
+    gbSetTerrainSampler(samp: wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: sd))
+  }
+  if gbTerrainTexView() is webgpuNull() {
+    gbTerrainArrayInit(w: 1, h: 1, layers: terrainLayers())
+    var one: List(Int) = createList(Int, cap: 1)
+    one.add(value: 4294967295)   # 0xFFFFFFFF, opaque white
+    var l: Int = 0
+    loop l < terrainLayers() {
+      gbTerrainArrayWrite(layer: l, pixels: one.data, w: 1, h: 1)
+      l = l + 1
+    }
+  }
+}
+
+func sysFileExists(path: String) extern("rae_ext_rae_sys_exists") ret Bool
+
+# The grade-calibrated RAE_TERRAIN_* palette, PER APP (#13). An app that ships its
+# own calibrated copy at assets/terrain_palette.wgsl (which the iOS bundle carries
+# too) overrides the shared lib default; anything else — example 114 on neutral
+# ACES — uses the default. This is what keeps the game's grade-specific numbers
+# out of the shared lib: the two apps are no longer bound to one calibration.
+func terrainPaletteWgsl() ret String {
+  if sysFileExists(path: "assets/terrain_palette.wgsl") {
+    ret gbReadWgsl(path: "assets/terrain_palette.wgsl")
+  }
+  ret gbReadWgsl(path: "lib/terrain_palette.wgsl")
+}
+
+# Compose the terrain-splat shader from the aligned WGSL files (noise + biome +
+# palette + terrain), read once at pipeline build. See lib/terrain_splat.wgsl /
+# #533. The palette is composed BEFORE terrain_detail so its RAE_TERRAIN_*
+# constants are in scope for the material ramps.
+func terrainSplatWgsl() ret String {
+  let islandSrc: String = islandParamsWgsl()
+  let noiseSrc: String = gbReadWgsl(path: "lib/noise.wgsl")
+  let biomeSrc: String = gbReadWgsl(path: "lib/world_biome.wgsl")
+  let paletteSrc: String = terrainPaletteWgsl()
+  let detailSrc: String = gbReadWgsl(path: "lib/terrain_detail.wgsl")
+  let terrSrc: String = gbReadWgsl(path: "lib/terrain_splat.wgsl")
+  ret islandSrc.concat(other: noiseSrc).concat(other: "\n").concat(other: biomeSrc).concat(other: "\n")
+    .concat(other: paletteSrc).concat(other: "\n")
+    .concat(other: detailSrc).concat(other: "\n").concat(other: terrSrc)
+}
+
+func ensureTerrainPipeline(cache: mod GbufferCache) {
+  if not cache.terrainPipeMade {
+    cache.terrainPipeMade = true
+    let composed: String = terrainSplatWgsl()
+    let cbuf: Buffer(Any) = composed.toCStr()
+    let terrainMod: Ptr = makeShaderModule(wgsl: cbuf)
+    var attrs: List(WGPUVertexAttribute) = createList(WGPUVertexAttribute, cap: 3)
+    attrs.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0 as UInt64, shaderLocation: 0 as UInt32 })
+    attrs.add(value: { format: WGPUVertexFormat_Float32x3, offset: 12 as UInt64, shaderLocation: 1 as UInt32 })
+    attrs.add(value: { format: WGPUVertexFormat_Float32x2, offset: 24 as UInt64, shaderLocation: 2 as UInt32 })
+    gbSetTerrainPipeline(pipeline: makeGbPipeline(shaderMod: terrainMod, attrs: attrs, stride: 32))
+    wgpuShaderModuleRelease(shaderModule: terrainMod)
+  }
+  # A bind group from the TERRAIN pipeline's own layout (wgpu auto-layouts are
+  # pipeline-exclusive, so the static bind group can't be reused) — frame uniform
+  # @0, draws storage @1, and (#9) the terrain tile @2 + its sampler @3. Rebuilt
+  # only when the tile generation changes, so the steady state pays nothing.
+  ensureTerrainTexDefaults()
+  let gen: Int = gbTerrainTexGen()
+  if not (gen is cache.terrainBindGen) {
+    cache.terrainBindGen = gen
+    let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbTerrainPipeline(), groupIndex: 0 as UInt32)
+    var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 4)
+    entries.add(value: { binding: 0 as UInt32, buffer: gbFrameUbuf(), size: gbFrameBytes() as UInt64 })
+    entries.add(value: { binding: 1 as UInt32, buffer: gbDrawsBuffer(), size: gbDrawsSize() as UInt64 })
+    entries.add(value: { binding: 2 as UInt32, textureView: gbTerrainTexView() })
+    entries.add(value: { binding: 3 as UInt32, sampler: gbTerrainSampler() })
+    let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 4 as UInt64, entries: entries.data }
+    gbSetTerrainBind(bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
+    wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+  }
+}
+
+# Draw one ground-tile mesh with the biome-splat pipeline (#533): its shader
+# ignores the per-draw colour and samples the biome field per vertex, so the
+# ground shows grass/sand/mud/rock/water. Restores the static pipeline after so a
+# following static draw is unaffected. Same DrawU/vertex layout as the static path.
+# `time` rides in the DrawU record's LAST slot, the one the skinned path calls
+# paletteBase. Terrain is never skinned, so the slot is dead weight here, and the
+# alternative -- adding a field to the shared frame uniform -- would touch every
+# pipeline for the benefit of one. The water in terrain_splat.wgsl reads it as
+# d.params.w. Documented at both ends so nobody wires a joint palette to a clock.
+# #745: takes composed model matrices directly (Quat-friendly), not a Euler
+# Transform3d — the caller builds them with transform3dToMatrix from the entity's
+# Quat Transform3D, so no Euler Vec3 rotation survives on the terrain path.
+func drawTerrainMesh(cache: mod GbufferCache, mesh: copy Int, model: view Mat4, prevModel: view Mat4,
+                     roughness: copy Float, time: copy Float) pub {
+  ensureTerrainPipeline(cache: cache)
+  if gbMeshReady(mesh: mesh) is 0 { ret }
+  let base: Int = gbDrawCount()
+  if base >= gbMaxDraws() { ret }
+  ensureDrawScratch(cache: cache)
+  packInstanceRecord(records: cache.drawScratch, slot: 0, model: model, prevModel: prevModel,
+    r: 1.0, g: 1.0, b: 1.0, metallic: 0.0, roughness: roughness, emissive: 0.0, toon: 0,
+    paletteBase: 0)
+  # paletteBase is an Int in the record API; the clock needs sub-second
+  # resolution, so it is written straight into the float slot instead.
+  cache.drawScratch.set(index: 39, value: time)
+  # #9: slot 32 (albedoMetallic.x, which the terrain shader ignores for colour)
+  # carries the global texture-blend amount. 0 until an app uploads a tile, so
+  # the shader's textured-grass term is identity for every other terrain user.
+  cache.drawScratch.set(index: 32, value: gbTerrainBlend())
+  gbIssueInstanced(pass: gbPass(), pipeline: gbTerrainPipeline(), bind: gbTerrainBind(),
+    vbuf: gbMeshVbuf(mesh: mesh), ibuf: gbMeshIbuf(mesh: mesh),
+    icount: gbMeshIcount(mesh: mesh), base: base, count: 1, records: cache.drawScratch.data)
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: gbPass(), pipeline: gbStaticPipeline())
+  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: gbPass(), groupIndex: 0 as UInt32,
+    group: gbStaticBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+}
+

@@ -1,0 +1,58 @@
+# Composite container / button styles (#237, theme §5 tier 6, M6).
+#
+# A container style is a NAMED BUNDLE in the theme file that references
+# other tokens — a background palette slot, a radius token, a padding
+# token, and a text style. `"ContainerStyle": "primaryButton"` on a
+# scene node is the authoring-friendly replacement for that node
+# carrying a Shape + CornerRadius + Padding by hand (the "five visual
+# components on a node" the theme design collapses, §5 tier 6).
+#
+# This expands the reference at scene-deserialise time into the
+# concrete components the bundle names:
+#   - background slot + radius token -> a rounded `Shape`. The bg is
+#     stored as a slot on the Shape (`fillSlot`), so it still tracks
+#     live theme switching (M5); the radius resolves to a float here
+#     (geometry doesn't change on a dark/light toggle).
+#   - padding token -> a `Padding` inset preset.
+#
+# A container's `text` style names a text style for the node's LABEL.
+# Applying it to a child Text entity needs a child-propagation pass
+# that doesn't exist yet, and icon styles (tier 5) were never built —
+# both are deferred (queue #258). The text style is still parsed and
+# carried in the theme so `primaryButton` can declare it today.
+import core
+import ui/components
+import ui/ecs
+import ui/theme
+import ui/themeResolved
+open ecs/ComponentTable
+
+func applyContainerStyle(world: mod UiWorld, entity: view EntityId, name: view String) pub {
+  let i: Int = themeContainerIndex(theme: world.theme.resolved, name: name)
+  if i < 0 {
+    log("[scene] unknown container style '{name}' - ignored (see docs/ui-theme-system.md sec 5)")
+    ret
+  }
+  let bgSlot: String = themeContainerBgSlotAt(theme: world.theme.resolved, index: i)
+  let radTok: String = themeContainerRadiusTokenAt(theme: world.theme.resolved, index: i)
+  let padTok: String = themeContainerPadTokenAt(theme: world.theme.resolved, index: i)
+
+  # Background + radius -> rounded Shape (fillSlot keeps the theme link).
+  var sh: Shape = defaultShape()
+  sh.kind = ShapeKind.roundedRect
+  if bgSlot.length() > 0 {
+    sh.fill = themeColorByName(theme: world.theme.active, name: bgSlot)
+    sh.fillSlot = "{bgSlot}"
+  }
+  if radTok.length() > 0 {
+    sh.radius = themeRadiusValue(theme: world.theme.resolved, name: radTok, fallback: 0.0)
+  }
+  componentSet(this: world.shapes, entity: entity, data: sh)
+
+  # Padding token -> Insets preset.
+  if padTok.length() > 0 {
+    let ti: ThemeInsets = themePaddingInsets(theme: world.theme.resolved, name: padTok)
+    let pad: Padding = { insets: Insets { l: ti.l, t: ti.t, r: ti.r, b: ti.b } }
+    componentSet(this: world.paddings, entity: entity, data: pad)
+  }
+}

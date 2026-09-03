@@ -1,0 +1,250 @@
+# Pointer input — RUICS Phase 1g.
+#
+# Each frame:
+#   1. `updateInputSystem` polls the raylib mouse, runs a hit-test
+#      against the world's `WorldTransform` + `ComputedRect` bounds,
+#      and tracks the entity that received the press.
+#   2. On release, if the released entity matches the pressed entity
+#      and carries an `OnClick.actionId`, an `ActionEvent` is appended
+#      to `input.events`.
+#   3. The host code reads `input.events` after `updateInputSystem`
+#      returns and dispatches each event by `actionId` — Rae has no
+#      first-class function pointers (yet), so a callback registry
+#      doesn't fit. The event-queue approach keeps the API stupid and
+#      the user dispatches via a small `if/else` on `actionId`.
+#
+# Coordinates are in logical (point) units, matching `WorldTransform`.
+import core
+import ui/layer
+import ui/legacyRaylib/window
+open ecs/entity
+
+# Internal: left mouse button.
+let mouseButtonLeft: Int = 0
+let inputNoEntity: EntityId = { index: 0 - 1, generation: 0 }
+
+type PointerState {
+  x: Float
+  y: Float
+  down: Bool
+  pressed: Bool
+  released: Bool
+}
+
+type ActionEvent {
+  entity: EntityId
+  actionId: String
+}
+
+type InputSystem {
+  pointer: PointerState
+  pressedEntity: EntityId
+  events: List(ActionEvent)
+}
+
+func createInputSystem() ret InputSystem {
+  ret InputSystem {
+    pointer: PointerState {
+      x: 0.0
+      y: 0.0
+      down: false
+      pressed: false
+      released: false
+    }
+    pressedEntity: noEntity()
+    events: createList(ActionEvent, cap: 8)
+  }
+}
+
+# Returns true if the point (x, y) is inside the entity's
+# `WorldTransform`+`ComputedRect` bounds. Skips entities without one
+# of those, or with `WorldTransform.visible == false`.
+func pointInEntity(world: view UiWorld, entity: view EntityId, x: view Float, y: view Float) ret Bool {
+  if componentHas(this: world.worldTransforms, entity: entity) is false {
+    ret false
+  }
+  if componentHas(this: world.computedRects, entity: entity) is false {
+    ret false
+  }
+  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
+  var wv: WorldVisual = { alpha: 1.0, visible: true }
+  if componentHas(this: world.worldVisuals, entity: entity) { wv = componentGet(this: world.worldVisuals, entity: entity) }
+  if wv.visible is false {
+    ret false
+  }
+  let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  if x < wt.position.x {
+    ret false
+  }
+  if y < wt.position.y {
+    ret false
+  }
+  if x > wt.position.x + cr.size.x {
+    ret false
+  }
+  if y > wt.position.y + cr.size.y {
+    ret false
+  }
+  ret true
+}
+
+# Hit-test recursion. Visits children in reverse declaration order so
+# the visually-topmost child (last painted) wins. Returns the deepest
+# hit entity that has an `OnClick` component, or -1 if nothing under
+# (x, y) handles clicks.
+#
+# We do NOT bail when the click is outside the visited entity's own
+# `WorldTransform`+`ComputedRect` bounds. That would be a useful
+# optimisation if children were always contained within their parent
+# — but they aren't: scroll containers (and any layout that overflows
+# its declared box) routinely place children outside the parent's
+# bounding rect. Pruning on the parent there would silently drop
+# clicks on perfectly-visible children. The bounds check belongs to
+# `pointInEntity` below at the OnClick leaf, where the entity's own
+# rect is the actual click target, never an ancestor's.
+#
+# Performance: with the bail removed we walk every entity in the
+# subtree on every click. For UI worlds of a few hundred entities
+# that's well under a millisecond; not measurable in any human-
+# perceivable way. If a future world genuinely needs the pruning,
+# the right answer is to track per-entity "subtree bounds" during
+# layout (union of own bounds + every descendant's bounds) and check
+# those — not the entity's own visual bounds.
+func hitTestEntity(world: view UiWorld, entity: view EntityId, x: view Float, y: view Float) ret EntityId {
+  # Children first, in reverse declaration order — visually-topmost
+  # child wins. Recurse regardless of own bounds (see comment above).
+  if componentHas(this: world.childrens, entity: entity) {
+    let ch: view Children => componentView(this: world.childrens, entity: entity)
+    let n: Int = ch.ids.length
+    var i: Int = n - 1
+    loop i >= 0 {
+      let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+      let hit: EntityId = hitTestEntity(world: world, entity: cid, x: x, y: y)
+      if isNone(this: hit) is false {
+        ret hit
+      }
+      i = i - 1
+    }
+  }
+
+  # Self: only register a hit if this entity actually carries an
+  # `OnClick` AND its own rect contains the cursor. `pointInEntity`
+  # also checks `wt.visible`, so subtrees that the TransformSystem
+  # marked invisible (inactive ancestor, hidden hero target during
+  # a transition, etc.) won't fire.
+  if componentHas(this: world.onClicks, entity: entity) {
+    if pointInEntity(world: world, entity: entity, x: x, y: y) {
+      ret entity
+    }
+  }
+  ret inputNoEntity
+}
+
+# Walk every alive root and return the topmost entity at (x, y) that
+# carries `OnClick`. Reverse-iterates the alive list so roots created
+# later (typically: overlays added on top of the main UI) get first
+# crack at consuming the click. `hitTestEntity` then walks each root's
+# subtree without pruning on intermediate ancestor bounds — see its
+# comment.
+func hitTest(world: view UiWorld, x: view Float, y: view Float) ret EntityId {
+  # Walk roots top-down by Layer order — overlays (higher-order
+  # layers) get first crack at the click. `collectPaintableRoots`
+  # gives the same ordering the renderer uses; we iterate it in
+  # reverse so the last-painted (= top-most) root is hit-tested
+  # first. Without this the dock (a high-layer overlay) would lose
+  # all taps to the album page underneath it, even though the dock
+  # is what's visible.
+  let roots: List(EntityId) = collectPaintableRoots(world: world)
+  let n: Int = roots.length
+  var i: Int = n - 1
+  loop i >= 0 {
+    let e: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
+    if componentHas(this: world.layerRoots, entity: e) is false {
+      let hit: EntityId = hitTestEntity(world: world, entity: e, x: x, y: y)
+      if isNone(this: hit) is false {
+        ret hit
+      }
+    }
+    i = i - 1
+  }
+  ret inputNoEntity
+}
+
+# Append an `ActionEvent` to the input system's queue.
+func appendActionEvent(input: mod InputSystem, entity: view EntityId, actionId: own String) {
+  let events: mod List(ActionEvent) => input.events
+  let ev: ActionEvent = { entity: entity, actionId: actionId }
+  events.add(value: ev)
+}
+
+# Clear the per-frame action queue. Call before `updateInputSystem`
+# if the host hasn't drained the queue itself.
+func clearActionEvents(input: mod InputSystem) {
+  let events: mod List(ActionEvent) => input.events
+  loop events.length > 0 {
+    events.remove(index: events.length - 1)
+  }
+}
+
+# Poll the raylib mouse, hit-test, and fire `OnClick` events. Old
+# events from the previous frame are cleared first. Coordinates come
+# back in logical points.
+func updateInputSystem(backend: view UiBackend, input: mod InputSystem, world: view UiWorld) {
+  clearActionEvents(input: input)
+
+  let mx: Float = uiPointerX(backend: backend)
+  let my: Float = uiPointerY(backend: backend)
+  # `down` is level state — raylib's per-event callback keeps it current
+  # regardless of poll cadence, so polling it is reliable.
+  let down: Bool = uiPointerButtonDown(backend: backend, button: mouseButtonLeft)
+  var pressed: Bool = false
+  var released: Bool = false
+  if uiMouseHookActive(backend: backend) {
+    # Hook installed → authoritative per-event edges. raylib's
+    # poll-to-poll edges only refresh inside EndDrawing's PollInputEvents,
+    # so under a render-capped wait-events loop they miss or mistime
+    # edges; the hook never does. Take edges solely from the drains.
+    pressed = uiMouseHookDrainPressed(backend: backend)
+    released = uiMouseHookDrainReleased(backend: backend)
+  } else {
+    # No hook (other hosts): fall back to raylib's poll-to-poll edges.
+    pressed = uiPointerButtonPressed(backend: backend, button: mouseButtonLeft)
+    released = uiPointerButtonReleased(backend: backend, button: mouseButtonLeft)
+  }
+
+  let nextPointer: PointerState = {
+    x: mx
+    y: my
+    down: down
+    pressed: pressed
+    released: released
+  }
+  input.pointer = nextPointer
+
+  if pressed {
+    input.pressedEntity = hitTest(world: world, x: mx, y: my)
+    log("[input] press at ({mx},{my}) -> pressedEntity={input.pressedEntity.index}")
+  }
+
+  if released {
+    var hit: EntityId = hitTest(world: world, x: mx, y: my)
+    log("[input] release at ({mx},{my}) -> hit={hit.index} pressed={input.pressedEntity.index}")
+    if isNone(this: hit) is false {
+      if hit is input.pressedEntity {
+        if componentHas(this: world.onClicks, entity: hit) {
+          let oc: view OnClick => componentView(this: world.onClicks, entity: hit)
+          let aid: String = oc.actionId
+          log("[input] fire {aid} on entity {hit.index}")
+          appendActionEvent(input: input, entity: hit, actionId: oc.actionId)
+        } else {
+          log("[input] release matched press but entity has no OnClick (impossible?)")
+        }
+      } else {
+        log("[input] release hit {hit.index} != pressed {input.pressedEntity.index} - drop")
+      }
+    } else {
+      log("[input] release hit nothing - drop")
+    }
+    input.pressedEntity = inputNoEntity
+  }
+}
