@@ -181,16 +181,12 @@ func setTime(frame: mod Frame3d, t: view Float) pub {
 # ----- typed renderer seam -------------------------------------------
 # Encode a typed camera + light into the flat frame block and start the
 # 3D pass. `aspect` is width/height of the target.
-# Persistent attachment storage for the forward pass (4 colour + 1 depth), so
-# the descriptor's .data pointers stay valid for the BeginRenderPass call.
-var gFwdColorAtts: List(WGPURenderPassColorAttachment) = createList(WGPURenderPassColorAttachment, cap: 4)
-var gFwdDepthAtt: List(WGPURenderPassDepthStencilAttachment) = createList(WGPURenderPassDepthStencilAttachment, cap: 1)
-# One-attachment storage for the fullscreen post-process passes (tonemap, …),
-# kept persistent so the descriptor's .data pointer is valid for BeginRenderPass.
-var gFwdPostAtt: List(WGPURenderPassColorAttachment) = createList(WGPURenderPassColorAttachment, cap: 1)
-func ensureFwdPostAtt() {
-  loop gFwdPostAtt.length < 1 { gFwdPostAtt.add(value: { depthSlice: 0 as UInt32 }) }
-}
+# #764: the forward-pass attachment lists (4 colour + 1 depth) and the one-slot
+# post-process attachment list were module-level globals. They are pure per-call
+# scratch — rebuilt in full every call, holding no state across frames; wgpu
+# copies attachment contents at BeginRenderPass, so a local list whose .data stays
+# valid for that one call is all the descriptor needs. So they are locals now, not
+# a renderer resource (a value that can be a local is not a resource field).
 
 # Encode a fullscreen post-process pass (#514): its own encoder + one-attachment
 # render pass writing `target`, a triangle draw with `pipeline`+`bind`, then
@@ -198,15 +194,15 @@ func ensureFwdPostAtt() {
 # fullscreen passes. `loadOp` is WGPULoadOp_Clear for passes that overwrite every
 # pixel, or WGPULoadOp_Load to blend into the existing target (the SSAO composite).
 func fullscreenPostPass(target: copy Ptr, pipeline: copy Ptr, bind: copy Ptr, loadOp: copy Int32) {
-  ensureFwdPostAtt()
   let att: WGPURenderPassColorAttachment = {
     view_: target, depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32,
     loadOp: loadOp, storeOp: WGPUStoreOp_Store,
     clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }
   }
-  gFwdPostAtt.set(index: 0, value: att)
+  var postAtt: List(WGPURenderPassColorAttachment) = createList(WGPURenderPassColorAttachment, cap: 1)
+  postAtt.add(value: att)
   let rpDesc: WGPURenderPassDescriptor = {
-    colorAttachmentCount: 1 as UInt64, colorAttachments: gFwdPostAtt.data
+    colorAttachmentCount: 1 as UInt64, colorAttachments: postAtt.data
   }
   let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
   let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
@@ -224,11 +220,6 @@ func fullscreenPostPass(target: copy Ptr, pipeline: copy Ptr, bind: copy Ptr, lo
   wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
   wgpuCommandEncoderRelease(commandEncoder: enc)
 }
-func ensureFwdAttachments() {
-  loop gFwdColorAtts.length < 4 { gFwdColorAtts.add(value: { depthSlice: 0 as UInt32 }) }
-  loop gFwdDepthAtt.length < 1 { gFwdDepthAtt.add(value: { depthReadOnly: 0 as UInt32 }) }
-}
-
 # Build the forward scene pass in Rae over the WebGPU bindings (#514). C has
 # already packed+uploaded the frame uniform (g3dFramePrepare); here we open the
 # 4-target + depth render pass and hand the encoder/pass to the C draw path.
@@ -238,7 +229,6 @@ func ensureFwdAttachments() {
 func beginForward(frame: view Buffer(Float), count: copy Int,
                   clearR: copy Float, clearG: copy Float, clearB: copy Float) {
   if g3dFramePrepare(frame: frame, count: count) is 0 { ret }
-  ensureFwdAttachments()
 
   let undefinedSlice: UInt32 = WGPU_DEPTH_SLICE_UNDEFINED as UInt32
 
@@ -266,10 +256,11 @@ func beginForward(frame: view Buffer(Float), count: copy Int,
     loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store,
     clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }
   }
-  gFwdColorAtts.set(index: 0, value: att0)
-  gFwdColorAtts.set(index: 1, value: att1)
-  gFwdColorAtts.set(index: 2, value: att2)
-  gFwdColorAtts.set(index: 3, value: att3)
+  var colorAtts: List(WGPURenderPassColorAttachment) = createList(WGPURenderPassColorAttachment, cap: 4)
+  colorAtts.add(value: att0)
+  colorAtts.add(value: att1)
+  colorAtts.add(value: att2)
+  colorAtts.add(value: att3)
 
   # Depth: standard Z here (forward), so the far plane clears to 1.0. (#333:
   # stored so it is sampleable by SSAO/TAA.)
@@ -278,12 +269,13 @@ func beginForward(frame: view Buffer(Float), count: copy Int,
     depthLoadOp: WGPULoadOp_Clear, depthStoreOp: WGPUStoreOp_Store,
     depthClearValue: 1.0
   }
-  gFwdDepthAtt.set(index: 0, value: depthAtt)
+  var depthAtts: List(WGPURenderPassDepthStencilAttachment) = createList(WGPURenderPassDepthStencilAttachment, cap: 1)
+  depthAtts.add(value: depthAtt)
 
   let rpDesc: WGPURenderPassDescriptor = {
     colorAttachmentCount: 4 as UInt64,
-    colorAttachments: gFwdColorAtts.data,
-    depthStencilAttachment: gFwdDepthAtt.data
+    colorAttachments: colorAtts.data,
+    depthStencilAttachment: depthAtts.data
   }
   let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
   let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
