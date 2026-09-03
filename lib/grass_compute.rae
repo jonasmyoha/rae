@@ -369,14 +369,14 @@ func grassVisibleCount() pub ret Int { ret gGrassVisibleCache }
 # generated / visible / culled candidate counts as counters — plot them in the
 # capture alongside fps and per-pass GPU ms. Call once per frame after
 # grassGenerate.
-func grassDiagTick() pub {
-  if profile.profileCapturing() is false { ret }
+func grassDiagTick(profiler: mod Profiler) pub {
+  if profile.profileCapturing(profiler: profiler) is false { ret }
   gGrassDiagFrame = gGrassDiagFrame + 1
   if gGrassDiagFrame % 10 is 0 {
     let visible: Int = grassReadVisible()
     if visible >= 0 { gGrassVisibleCache = visible }
   }
-  profile.profileCounter(name: "grass.generated", value: grassGpuBladeCount)
-  profile.profileCounter(name: "grass.visible", value: gGrassVisibleCache)
-  profile.profileCounter(name: "grass.culled", value: grassGpuBladeCount - gGrassVisibleCache)
+  profile.profileCounter(profiler: profiler, name: "grass.generated", value: grassGpuBladeCount)
+  profile.profileCounter(profiler: profiler, name: "grass.visible", value: gGrassVisibleCache)
+  profile.profileCounter(profiler: profiler, name: "grass.culled", value: grassGpuBladeCount - gGrassVisibleCache)
 }

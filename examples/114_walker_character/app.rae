@@ -182,6 +182,7 @@ type App {
   terrain: InfiniteTerrain
   grass: GrassField
   render: RenderState
+  profiler: Profiler   # #764: was lib/profile.rae gProf* globals
   physics: PhysicsState   # fixed-step sim seam (physics.rae, #553)
   net: NetState           # multiplayer seam (net.rae, #554)
   players: PlayerRoster   # who the local player controls (players.rae, #546)
@@ -516,6 +517,7 @@ func createApp() ret App {
     terrain: own terrain
     grass: own grass
     render: { renderer: own renderer, drs: own drs, shadowLogged: false }
+    profiler: profile.createProfiler()
     physics: { accumulator: 0.0, worldHandle: 0 }
     net: { role: 0, tick: 0 }
     players: createPlayerRoster(count: 1 + cloneCount)
@@ -527,14 +529,14 @@ func createApp() ret App {
 
 # ----- per-frame timing + resize -------------------------------------------
 func frameBegin(app: mod App) {
-  profile.profileTick()
+  profile.profileTick(profiler: app.profiler)
   resizeUiToWindow(world: app.io.world, res: app.io.gpuUi)
   let now: Float64 = gpu2d.nowSeconds()
   var dt: Float = (now - app.frame.prevT) as Float
   app.frame.prevT = now
   app.frame.now = now
   # NO CLAMP before DRS: the scale controller reacts to the true frame time.
-  updateRenderScale(drs: app.render.drs, dt: dt)
+  updateRenderScale(drs: app.render.drs, dt: dt, profiler: app.profiler)
   # Negative dt is a clock going backwards, not a long frame; refuse it.
   if dt < 0.0 { dt = 0.0 }
   app.frame.dt = dt
@@ -701,7 +703,7 @@ func runWalkerApp() ret Int {
   # skinned body parts (PartRoughness), and the terrain props + heightfield tiles
   # (PropKind) — all recycled ECS entities.
   log("[ecs] GameWorld: {gameWorldEntityCount(world: app.world)} entities ({gameWorldPartCount(world: app.world)} parts + hero + crowd + terrain + grass)")
-  profile.profileMaybeAutoStart()
+  profile.profileMaybeAutoStart(profiler: app.profiler)
   loop not gpu2d.pollClose() {
     frameBegin(app: app)
     updateApp(app: app)
@@ -712,7 +714,7 @@ func runWalkerApp() ret Int {
         frameSec: 0.016667, heartbeatSec: 1.0
       ))
     } else {
-      renderApp(cam: app.cam, character: app.character, frame: app.frame, io: app.io, render: app.render, scene: app.scene, world: app.world, terrain: app.terrain, splashes: app.splashes)
+      renderApp(cam: app.cam, character: app.character, frame: app.frame, io: app.io, render: app.render, scene: app.scene, world: app.world, terrain: app.terrain, splashes: app.splashes, profiler: app.profiler)
     }
   }
   skinShutdown()
