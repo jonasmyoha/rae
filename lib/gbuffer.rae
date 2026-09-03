@@ -43,8 +43,8 @@ import math
 import vec3
 import string
 import sky
-import sky_hosek
-open sky_hosek
+import skyHosek
+open skyHosek
 open vec3
 open scene3d
 open sky
@@ -900,7 +900,7 @@ func presentFrame() pub {
 # box", and that is the nearest depth. An averaged chain would cull
 # visible geometry. Hi-Z culling and a deferred SSAO are the intended
 # readers.
-# buildDepthPyramid moved to gbuffer_passes.rae (#504).
+# buildDepthPyramid moved to gbufferPasses.rae (#504).
 
 # One fullscreen evaluation of the BRDF over the whole G-buffer. This is
 # the payoff of the split: the cost is per pixel, not per object-pixel, so
@@ -909,13 +909,13 @@ func presentFrame() pub {
 # Screen-space AO for the deferred frame (#387). Runs between the depth
 # pyramid and lighting; lighting samples the result and applies it to the
 # INDIRECT term only.
-# ssaoPass moved to gbuffer_passes.rae (#504).
+# ssaoPass moved to gbufferPasses.rae (#504).
 
 # Temporal resolve (#390). Reads the radiance lighting wrote plus last
 # frame's history, reprojected through the G-buffer's motion channel;
 # composite then reads the resolved image. Runs on HDR, before tonemap,
 # so accumulation stays linear.
-# taaPass moved to gbuffer_passes.rae (#504).
+# taaPass moved to gbufferPasses.rae (#504).
 
 # Light the frame from a bound SKY rather than from the light's authored
 # ambient (#399).
@@ -934,7 +934,7 @@ func presentFrame() pub {
 # curve is deliberately identical to the forward frame's: the two should
 # differ in how radiance is computed, not in how it is displayed, or
 # comparing them proves nothing.
-# compositePass moved to gbuffer_passes.rae (#504).
+# compositePass moved to gbufferPasses.rae (#504).
 
 # Mip levels in the pyramid; 0 before the first build. Lets a caller
 # confirm the chain was built rather than silently skipped.

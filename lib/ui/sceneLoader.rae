@@ -1,0 +1,416 @@
+# Materialise a parsed `Scene` into ECS state on a `UiWorld`.
+#
+# Three passes:
+# 1. allocate one entity per SceneNode and register `nodeId → entity`
+#    in `world.nodeIds` so children can resolve.
+# 2. apply each node's component bag via `applyComponentByName`. The
+#    "Children" key is special-cased and skipped here.
+# 3. build `Children` and `Parent` components — done last so all
+#    entities are guaranteed allocated when we resolve childIds.
+#
+# Returns the root entity id, or -1 if the scene wasn't ok.
+import core
+import json
+import ui/registry
+import ui/sceneInstance
+open ecs/entity
+open ecs/HierarchySystem/HierarchySystem
+
+# Minimal helper: append an EntityId to a List(EntityId) via a non-generic
+# function. Same workaround as the ones in ecs.rae — needed when the
+# caller is itself inside a generic body, but kept available here
+# anyway for symmetry.
+func appendEntityListSL(lst: mod List(EntityId), value: view EntityId) {
+  lst.add(value: value)
+}
+
+func loadScene(world: mod UiWorld, scene: view Scene) ret EntityId {
+  ret loadSceneIntoPage(world: world, scene: scene, pageId: "")
+}
+
+# Same as `loadScene` but writes nodeIds under a `pageId/`-prefixed key
+# in `world.nodeIds`. Use `pageId: ""` for the unscoped path (the
+# default rebuild-only flow). The scene's root entity is returned and
+# also tagged with `PageRoot { id: pageId }` when `pageId` is non-empty,
+# so `pageOf(world, entity)` can walk back up to find the owning page.
+func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view String) pub ret EntityId {
+  if scene.ok is false {
+    ret noEntity()
+  }
+
+  # ---------- pass 0: reachability from root ----------
+  # Compute the set of nodes reachable from `scene.rootNodeId` via
+  # `Children` references. Orphan nodes (authored in the file but
+  # never referenced) get skipped in subsequent passes — otherwise
+  # they'd allocate parentless entities that render at their absolute
+  # canvas coords. The pixi editor sometimes serialises a flattened
+  # copy of a SceneInstance's children alongside the SceneInstance
+  # itself; without this filter we mount both copies (once via the
+  # SceneInstance resolver, once as orphans here).
+  let nodeCount: Int = scene.nodes.length
+  let reachable: List(Bool) = createList(Bool, cap: nodeCount)
+  var ri: Int = 0
+  loop ri < nodeCount {
+    reachable.add(value: false)
+    ri = ri + 1
+  }
+  let rootIdxR: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId)
+  if rootIdxR < 0 {
+    ret noEntity()
+  }
+  let stack: List(Int) = createList(Int, cap: 32)
+  stack.add(value: rootIdxR)
+  loop stack.length > 0 {
+    let popAt: Int = stack.length - 1
+    var cur: Int = 0
+    var haveCur: Bool = false
+    if let curVal: Int = stack.copyAt(index: popAt) {
+      cur = curVal
+      haveCur = true
+    }
+    stack.remove(index: popAt)
+    if haveCur {
+      var alreadySeen: Bool = true
+      if let seen: Bool = reachable.copyAt(index: cur) {
+        alreadySeen = seen
+      }
+      if alreadySeen is false {
+        reachable.set(index: cur, value: true)
+        let n: view SceneNode => sceneNodeAt(this: scene, idx: cur)
+        let cn: Int = n.childrenIds.length
+        var ci: Int = 0
+        loop ci < cn {
+          if let childId: String = n.childrenIds.copyAt(index: ci) {
+            let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
+            if childIdx >= 0 {
+              stack.add(value: childIdx)
+            }
+          }
+          ci = ci + 1
+        }
+      }
+    }
+  }
+
+  # ---------- pass 1: allocate entities, populate nodeIds map ----------
+  # Non-reachable slots keep a noEntity() sentinel so later passes
+  # can detect + skip them while keeping the index-by-nodeIndex map
+  # intact for sceneNodeIndex lookups.
+  let entitiesByNodeIndex: List(EntityId) = createList(EntityId, cap: nodeCount)
+  let nodeIdsMap: mod StringMap(Int) => world.nodeIds
+  var i: Int = 0
+  loop i < nodeCount {
+    var isReachable: Bool = false
+    if let reach: Bool = reachable.copyAt(index: i) {
+      isReachable = reach
+    }
+    if isReachable {
+      let node: view SceneNode => sceneNodeAt(this: scene, idx: i)
+      let entity: EntityId = createEntity(world: world)
+      appendEntityListSL(lst: entitiesByNodeIndex, value: entity)
+      if pageId.length() is 0 {
+        nodeIdsMap.set(k: node.nodeId, value: entity.index)
+      } else {
+        let key: String = pageScopedKey(pageId: pageId, nodeId: node.nodeId)
+        nodeIdsMap.set(k: key, value: entity.index)
+      }
+    } else {
+      let placeholder: EntityId = noEntity()
+      appendEntityListSL(lst: entitiesByNodeIndex, value: placeholder)
+    }
+    i = i + 1
+  }
+
+  # ---------- pass 2: apply components ----------
+  let docView: view JsonDoc => scene.doc
+  var j: Int = 0
+  loop j < nodeCount {
+    var jReach: Bool = false
+    if let reach: Bool = reachable.copyAt(index: j) {
+      jReach = reach
+    }
+    if jReach is false {
+      j = j + 1
+    } else {
+    let node: view SceneNode => sceneNodeAt(this: scene, idx: j)
+    let entity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: j)
+
+    # Always tag the entity with NodeId + Name (label = nodeId by default)
+    # so the dump and overrides can identify it without reading the
+    # component bag. NodeId from the bag (if present) wins.
+    let defaultNodeId: NodeId = { id: node.nodeId }
+    componentSet(this: world.nodeIdComponents, entity: entity, data: defaultNodeId)
+    let defaultName: Name = { label: node.nodeId }
+    componentSet(this: world.names, entity: entity, data: defaultName)
+
+    # Walk the node's component bag in declaration order.
+    let bag: JsonValue = json.jsonValueAt(doc: docView, idx: node.componentsValueIdx)
+    let keyCount: Int = json.jsonObjectLen(this: bag)
+    var k: Int = 0
+    loop k < keyCount {
+      let key: String = json.jsonObjectKeyAt(doc: docView, this: bag, idx: k)
+      # Children is hierarchy, not a component — handled in pass 3.
+      let childrenKey: String = "Children"
+      if key is childrenKey {
+        k = k + 1
+      } else {
+        let valueAtKey: JsonValue = json.jsonObjectValueAt(doc: docView, this: bag, idx: k)
+        applyComponentByName(
+          world: world
+          entity: entity
+          name: key
+          doc: docView
+          val: valueAtKey
+        )
+        k = k + 1
+      }
+    }
+    j = j + 1
+    }
+  }
+
+  # ---------- pass 3: hierarchy (Children + Parent) ----------
+  var p: Int = 0
+  loop p < nodeCount {
+    var pReach: Bool = false
+    if let reach: Bool = reachable.copyAt(index: p) {
+      pReach = reach
+    }
+    if pReach is false {
+      p = p + 1
+    } else {
+    let node: view SceneNode => sceneNodeAt(this: scene, idx: p)
+    let parentEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
+    let kn: Int = node.childrenIds.length
+    var q: Int = 0
+    loop q < kn {
+      if let childId: String = node.childrenIds.copyAt(index: q) {
+        let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
+        if childIdx >= 0 {
+          let childEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: childIdx)
+          # #726: set ONLY the authoritative Parent link; HierarchySystem.setParent
+          # maintains the derived Children cache, appending in call (= authored)
+          # order so the child order matches the old hand-built Children list.
+          setParent(parents: world.parents, childrens: world.childrens,
+                    child: childEntity, parent: parentEntity)
+        }
+      }
+      q = q + 1
+    }
+    p = p + 1
+    }
+  }
+
+  # Root entity = the entity allocated for `scene.rootNodeId`.
+  let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId)
+  if rootIdx < 0 {
+    ret noEntity()
+  }
+  let rootEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: rootIdx)
+  if pageId.length() > 0 {
+    var copiedId: String = ""
+    copiedId = copiedId.concat(other: pageId)
+    let pr: PageRoot = { id: own copiedId }
+    componentSet(this: world.pageRoots, entity: rootEntity, data: own pr)
+  }
+  ret rootEntity
+}
+
+# Phase 1f scene-instance resolver.
+#
+# After `loadScene` materialises the top-level scene, any node that
+# carried a `SceneInstance` component now sits in the world with the
+# referenced child scene NOT yet mounted. This pass walks the
+# `sceneInstances` component table, looks each sceneId up in the
+# supplied `SceneRegistry`, and mounts the child via the existing
+# `mountSceneInstanceIntoPage` machinery — replaying the captured
+# `params.overrides[]` quadruples as `SceneOverride` entries.
+#
+# Recursive: a mounted child scene can itself carry `SceneInstance`
+# components on its descendants. We loop until a full pass mounts
+# nothing new, so nested instances resolve in O(depth) passes.
+#
+# `pageId` is forwarded to the inner mount so per-page nodeId scoping
+# stays consistent end-to-end.
+func resolveSceneInstances(
+  world: mod UiWorld
+  registry: view SceneRegistry
+  pageId: view String
+) pub {
+  var safety: Int = 0
+  loop safety < 32 {
+    var progressed: Bool = false
+    let n: Int = componentCount(this: world.sceneInstances)
+    var i: Int = 0
+    loop i < n {
+      let entity: EntityId = componentEntityAt(this: world.sceneInstances, i: i)
+      let inst: SceneInstance = componentGet(this: world.sceneInstances, entity: entity)
+      if inst.sceneId.length() > 0 {
+        let idx: Int = sceneRegistryIndex(reg: registry, key: inst.sceneId)
+        if idx >= 0 {
+          let scene: view Scene => sceneRegistryGet(reg: registry, idx: idx)
+          let overrides: List(SceneOverride) = createList(SceneOverride, cap: inst.overrideNodeIds.length)
+          let m: Int = inst.overrideNodeIds.length
+          var j: Int = 0
+          loop j < m {
+            if let nodeId: String = inst.overrideNodeIds.copyAt(index: j) {
+              if let componentName: String = inst.overrideComponents.copyAt(index: j) {
+                if let fieldName: String = inst.overrideFields.copyAt(index: j) {
+                  if let valueString: String = inst.overrideValues.copyAt(index: j) {
+                    let ov: SceneOverride = {
+                      nodeId: nodeId
+                      componentName: componentName
+                      fieldName: fieldName
+                      valueString: valueString
+                    }
+                    overrides.add(value: ov)
+                  }
+                }
+              }
+            }
+            j = j + 1
+          }
+          mountSceneInstanceIntoPage(
+            world: world
+            mountEntity: entity
+            scene: scene
+            overrides: overrides
+            pageId: pageId
+          )
+          # Clear the marker so the next loop pass doesn't re-mount this entity.
+          componentRemove(this: world.sceneInstances, entity: entity)
+          progressed = true
+        }
+      }
+      i = i + 1
+    }
+    if progressed is false {
+      ret
+    }
+    safety = safety + 1
+  }
+}
+
+# Diagnostic helper used by tests and the eventual editor: dump the
+# entity list with its NodeId, parent, and the names of components
+# attached to it. Doesn't pretty-print component data — just the
+# inventory. Stable order: by NodeId in scene.nodes.
+func dumpScene(world: view UiWorld, scene: view Scene) {
+  let n: Int = scene.nodes.length
+  var i: Int = 0
+  loop i < n {
+    let node: view SceneNode => sceneNodeAt(this: scene, idx: i)
+    let entityIdx: Int = sceneNodeIndex(this: scene, nodeId: node.nodeId)
+    # Resolve via the world's nodeIds map (more authoritative than our
+    # local list — covers later runtime additions too).
+    if let entityRaw: Int = world.nodeIds.get(k: node.nodeId) {
+      let entity: EntityId = entityId(v: entityRaw)
+      var parentStr: String = "(root)"
+      if componentHas(this: world.parents, entity: entity) {
+        let pl: Parent = componentGet(this: world.parents, entity: entity)
+        parentStr = "parent=ent{pl.parent.index}"
+      }
+      var comps: String = componentNamesFor(world: world, entity: entity)
+      log("  [{node.nodeId}] ent={entity.index} {parentStr} comps=[{comps}]")
+    } else {
+      log("  [{node.nodeId}] (not in world.nodeIds — skipped)")
+    }
+    i = i + 1
+  }
+}
+
+# Returns a comma-separated list of authored component names attached
+# to `entity`. Order matches `registeredComponentNames()` for stable
+# diagnostic output.
+func componentNamesFor(world: view UiWorld, entity: view EntityId) ret String {
+  let parts: List(String) = createList(String, cap: 8)
+  if componentHas(this: world.rects, entity: entity) {
+    parts.add(value: "Rect")
+  }
+  if componentHas(this: world.sizes, entity: entity) {
+    parts.add(value: "Size")
+  }
+  if componentHas(this: world.layouts, entity: entity) {
+    parts.add(value: "Layout")
+  }
+  if componentHas(this: world.paddings, entity: entity) {
+    parts.add(value: "Padding")
+  }
+  if componentHas(this: world.aligns, entity: entity) {
+    parts.add(value: "Align")
+  }
+  if componentHas(this: world.offsets, entity: entity) {
+    parts.add(value: "Offset")
+  }
+  if componentHas(this: world.sprites, entity: entity) {
+    parts.add(value: "Sprite")
+  }
+  if componentHas(this: world.texts, entity: entity) {
+    parts.add(value: "Text")
+  }
+  if componentHas(this: world.textShadows, entity: entity) {
+    parts.add(value: "TextShadow")
+  }
+  if componentHas(this: world.shapes, entity: entity) {
+    parts.add(value: "Shape")
+  }
+  if componentHas(this: world.actives, entity: entity) {
+    parts.add(value: "Active")
+  }
+  if componentHas(this: world.opacities, entity: entity) {
+    parts.add(value: "Opacity")
+  }
+  if componentHas(this: world.onClicks, entity: entity) {
+    parts.add(value: "OnClick")
+  }
+  if componentHas(this: world.buttons, entity: entity) {
+    parts.add(value: "Button")
+  }
+  if componentHas(this: world.widgetIds, entity: entity) {
+    parts.add(value: "WidgetId")
+  }
+  if componentHas(this: world.widgetStates, entity: entity) {
+    parts.add(value: "WidgetState")
+  }
+  if componentHas(this: world.dataDependencies, entity: entity) {
+    parts.add(value: "DataDependency")
+  }
+  if componentHas(this: world.actionBindings, entity: entity) {
+    parts.add(value: "ActionBinding")
+  }
+  if componentHas(this: world.refreshRegions, entity: entity) {
+    parts.add(value: "RefreshRegion")
+  }
+  if componentHas(this: world.names, entity: entity) {
+    parts.add(value: "Name")
+  }
+  if componentHas(this: world.nodeIdComponents, entity: entity) {
+    parts.add(value: "NodeId")
+  }
+  if componentHas(this: world.sceneInstances, entity: entity) {
+    parts.add(value: "SceneInstance")
+  }
+  if componentHas(this: world.textBindings, entity: entity) {
+    parts.add(value: "TextBinding")
+  }
+  if componentHas(this: world.maskShapes, entity: entity) {
+    parts.add(value: "MaskShape")
+  }
+  if componentHas(this: world.childrens, entity: entity) {
+    parts.add(value: "Children")
+  }
+  let comma: String = ","
+  var acc: String = ""
+  var i: Int = 0
+  loop i < parts.length {
+    if let s: String = parts.copyAt(index: i) {
+      if i is 0 {
+        acc = "{s}"
+      } else {
+        acc = acc.concat(other: comma).concat(other: s)
+      }
+    }
+    i = i + 1
+  }
+  ret acc
+}

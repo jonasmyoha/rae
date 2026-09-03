@@ -1,0 +1,142 @@
+# Dynamic-resolution controller (#530): keeps the frame at the target rate by
+# lowering the deferred render scale when frames miss the budget and raising it
+# back after a sustained stretch of good frames. The scene renders at that
+# fraction and the composite pass upscales it (lib/gbufferPasses.rae), so fewer
+# shaded pixels = less sustained GPU load = the phone throttles later / not at all.
+#
+# Signal: wall-clock frame time (dt). Under vsync this is coarse (≈16.7ms at 60,
+# ≈33ms at 30), so the loop reacts to DROPPED frames rather than fine headroom:
+# drop scale fast on consecutive over-budget frames, raise it one slow step after
+# a long good stretch, with a cooldown so it can't oscillate. When real per-pass
+# GPU timing (#528) lands, swap `dt` for measured GPU ms for a tighter loop.
+#
+#   var drs = createRenderScaleController(targetFps: 60.0)   # once
+#   updateRenderScale(drs: drs, dt: dt)                       # each frame
+import core
+import gpu2d
+import profile
+
+# Push the render scale to the deferred renderer (#530). C clamps to [0.25, 1.0].
+func setRenderScale(s: Float64) extern("rae_gb_set_render_scale")
+
+# OS thermal pressure (Apple): 0 nominal, 1 fair, 2 serious, 3 critical; 0 else.
+func thermalState() extern("rae_ext_thermalState") ret Int
+
+# Scale ceiling for the current OS thermal state — proactively cap resolution
+# BEFORE frames drop, which is the whole point of reading thermalState: reacting
+# only to dropped frames means the device is already hot.
+func thermalCeiling(therm: view Int) ret Float {
+  if therm >= 3 { ret 0.5 }
+  if therm >= 2 { ret 0.7 }
+  ret 1.0
+}
+
+# A two-rung quality ladder against sustained GPU load: first lower the render
+# scale (1.0 -> 0.5), and only when that bottoms out and frames still miss, drop
+# the frame-rate cap to 30 (halving the GPU duty cycle so the SoC cools — a clean
+# divisor is smoother than a jittery throttled ~20 too). Recovery restores the
+# rate first, then the resolution.
+type RenderScaleController {
+  scale: Float
+  minScale: Float
+  step: Float
+  capFps: Float          # 60 normally; 30 = bottom rung frame cap
+  overBudgetSec: Float    # a frame slower than this counts as "missed"
+  overFrames: Int         # consecutive missed frames
+  goodFrames: Int         # consecutive good frames
+  cooldown: Int           # frames to wait after a change (anti-oscillation)
+}
+
+func createRenderScaleController(targetFps: copy Float) pub ret RenderScaleController {
+  var fps: Float = targetFps
+  if fps < 1.0 { fps = 60.0 }
+  # Missed = 25% over the target period (e.g. >20.8ms for 60fps) — clearly not
+  # holding the rate, not just jitter.
+  ret RenderScaleController {
+    scale: 1.0, minScale: 0.5, step: 0.1, capFps: 60.0,
+    overBudgetSec: 1.25 / fps,
+    overFrames: 0, goodFrames: 0, cooldown: 0
+  }
+}
+
+# Feed one frame's dt (seconds). Walks the ladder in place: drop fast after 4
+# missed frames, restore one rung after ~3s good, 30-frame cooldown between moves.
+func updateRenderScale(drs: mod RenderScaleController, dt: copy Float, profiler: mod Profiler) pub {
+  # Proactive OS-thermal ceiling: snap the scale down (and force the 30fps cap at
+  # critical) the moment the OS reports heat, without waiting for missed frames.
+  let therm: Int = thermalState()
+  let ceiling: Float = thermalCeiling(therm: therm)
+  if drs.scale > ceiling and drs.cooldown <= 0 {
+    drs.scale = ceiling
+    setRenderScale(s: drs.scale as Float64)
+    drs.cooldown = 30
+  }
+  if therm >= 3 { drs.capFps = 30.0 }
+
+  # Surface the current tier in profile captures: render.scale (percent), the
+  # frame cap, and the OS thermal state, plotted alongside fps / per-pass GPU ms.
+  profile.profileCounter(profiler: profiler, name: "render.scale", value: rae_float_to_int(f: drs.scale * 100.0))
+  profile.profileCounter(profiler: profiler, name: "render.capFps", value: rae_float_to_int(f: drs.capFps))
+  profile.profileCounter(profiler: profiler, name: "thermal.state", value: therm)
+
+  if dt > drs.overBudgetSec {
+    drs.overFrames = drs.overFrames + 1
+    drs.goodFrames = 0
+  } else {
+    drs.goodFrames = drs.goodFrames + 1
+    drs.overFrames = 0
+  }
+  if drs.cooldown > 0 {
+    drs.cooldown = drs.cooldown - 1
+    ret
+  }
+  if drs.overFrames >= 4 {
+    if drs.scale > drs.minScale {
+      drs.scale = drs.scale - drs.step
+      if drs.scale < drs.minScale { drs.scale = drs.minScale }
+      setRenderScale(s: drs.scale as Float64)
+      drs.cooldown = 30
+      drs.overFrames = 0
+    } else if drs.capFps > 30.0 {
+      drs.capFps = 30.0            # bottom rung: cap to 30
+      drs.cooldown = 30
+      drs.overFrames = 0
+    }
+  } else if drs.goodFrames >= 180 {
+    if drs.capFps < 60.0 and therm < 3 {
+      drs.capFps = 60.0            # restore the rate before the resolution
+      drs.cooldown = 30
+      drs.goodFrames = 0
+    } else if drs.scale < ceiling {
+      drs.scale = drs.scale + drs.step
+      if drs.scale > ceiling { drs.scale = ceiling }
+      setRenderScale(s: drs.scale as Float64)
+      drs.cooldown = 30
+      drs.goodFrames = 0
+    }
+  }
+}
+
+# Shadow-map resolution for the current tier. DRS scales the deferred targets but
+# NOT the shadow map (it's a separate fixed-size depth texture), yet shadows are
+# the dominant sustained cost in the walker scene — so shrink the shadow map with
+# the scale too (1024² is a quarter of 2048²'s rasterized pixels). Cascade COUNT
+# stays fixed so the lighting sampler is untouched; the shadow pass reallocates
+# only when this value changes.
+func drsShadowRes(drs: view RenderScaleController) pub ret Int {
+  if drs.scale >= 0.85 { ret 2048 }
+  if drs.scale >= 0.65 { ret 1536 }
+  ret 1024
+}
+
+# Pad the current frame to the cap period by sleeping any slack (only meaningful
+# at the 30fps rung; a no-op at 60 since vsync already paces there). Call at the
+# end of the render branch with the frame's start time.
+func capFrameSleep(drs: view RenderScaleController, frameStartSec: copy Float64) pub {
+  if drs.capFps >= 60.0 { ret }
+  let period: Float = 1.0 / drs.capFps
+  let elapsed: Float = (gpu2d.nowSeconds() - frameStartSec) as Float
+  if elapsed < period {
+    sleep(ms: rae_float_to_int(f: (period - elapsed) * 1000.0))
+  }
+}
