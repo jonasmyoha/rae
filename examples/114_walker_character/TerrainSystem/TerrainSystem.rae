@@ -345,7 +345,7 @@ func drawTerrainProps(terrain: mod InfiniteTerrain, world: view GameWorld) {
   drawInstances(batch: terrain.tallCrownProp.batch)
 }
 
-func drawTerrainGround(terrain: view InfiniteTerrain, world: view GameWorld, time: copy Float) {
+func drawTerrainGround(cache: mod GbufferCache, terrain: view InfiniteTerrain, world: view GameWorld, time: copy Float) {
   loop var i: Int = 0, i < componentCount(this: world.tileMeshes), ++i {
     let entity: EntityId = componentEntityAt(this: world.tileMeshes, i: i)
     let tile: TileMesh = componentDataAt(this: world.tileMeshes, i: i)
@@ -354,7 +354,7 @@ func drawTerrainGround(terrain: view InfiniteTerrain, world: view GameWorld, tim
       # Quat Transform3D; compose it straight to a Mat4 (no Euler Vec3 detour).
       let q: Transform3D = componentGet(this: world.transforms, entity: entity)
       let model: Mat4 = transform3dToMatrix(t: q)
-      drawTerrainMesh(mesh: tile.meshId, model: model, prevModel: model,
+      drawTerrainMesh(cache: cache, mesh: tile.meshId, model: model, prevModel: model,
                       roughness: 0.96, time: time)
     }
   }

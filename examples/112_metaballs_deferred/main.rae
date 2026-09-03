@@ -810,17 +810,17 @@ func main() ret Int {
           # example opens both, so an unqualified call silently picks the
           # forward path's — which leaves the G-buffer unsubmitted and
           # renders a black frame with a working UI (found in 113).
-          gbuffer.beginPass(camera: camera, light: light, aspect: aspect)
+          gbuffer.beginPass(cache: renderer.passes.gbuffer, camera: camera, light: light, aspect: aspect)
           if uiState.activeScene is 1 {
-            renderMeshGbuffer(world: asset1.world)
+            renderMeshGbuffer(cache: renderer.passes.gbuffer, world: asset1.world)
             renderSdfGbuffer(world: asset1.world, tags: clusters1, camera: camera)
           }
           if uiState.activeScene is 2 {
-            renderMeshGbuffer(world: asset2.world)
+            renderMeshGbuffer(cache: renderer.passes.gbuffer, world: asset2.world)
             renderSdfGbuffer(world: asset2.world, tags: clusters2, camera: camera)
           }
           if uiState.activeScene is 3 {
-            renderMeshGbuffer(world: asset3.world)
+            renderMeshGbuffer(cache: renderer.passes.gbuffer, world: asset3.world)
             renderSdfGbuffer(world: asset3.world, tags: clusters3, camera: camera)
           }
           gbuffer.endPass()

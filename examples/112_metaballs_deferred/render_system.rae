@@ -29,7 +29,7 @@ open ecs/component_table
 open ecs/query
 
 # ----- mesh -----------------------------------------------------------
-func renderMeshGbuffer(world: view World3d) {
+func renderMeshGbuffer(cache: mod GbufferCache, world: view World3d) {
   loop var j: Int = 0, j < componentCount(this: world.meshRenderers), ++j {
     let entity: EntityId = componentEntityAt(this: world.meshRenderers, i: j)
     let renderer: MeshRenderer = componentGet(this: world.meshRenderers, entity: entity)
@@ -37,7 +37,7 @@ func renderMeshGbuffer(world: view World3d) {
       let t: Transform3d = componentGet(this: world.transforms, entity: entity)
       let pt: Transform3d = componentGet(this: world.prevTransforms, entity: entity)
       let m: Material3d = componentGet(this: world.materials, entity: entity)
-      gbuffer.drawInstance(mesh: renderer.mesh, transform: t, prevTransform: pt, material: m)
+      gbuffer.drawInstance(cache: cache, mesh: renderer.mesh, transform: t, prevTransform: pt, material: m)
     }
   }
 }
