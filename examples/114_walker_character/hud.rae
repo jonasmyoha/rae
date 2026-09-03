@@ -3,27 +3,27 @@
 # respect the 1000-line file cap.
 import core
 import gpu2d
-import app3d/settings_dialog
-import app3d/ui_shell
+import app3d/settingsDialog
+import app3d/uiShell
 import ui/ecs
-import ui/log_overlay
-import ui/debug_overlay
+import ui/LogOverlay
+import ui/DebugOverlay
 import ui/RenderSystem/RenderSystem
-import ui/virtual_joystick
-import ui/corner_menu_button
-open ui/corner_menu_button
+import ui/VirtualJoystick
+import ui/cornerMenuButton
+open ui/cornerMenuButton
 import ui/SafeAreaSystem/SafeAreaSystem
-import app3d/camera_rig
-import renderer_deferred
-open renderer_deferred
-open app3d/settings_dialog
-open app3d/ui_shell
+import app3d/CameraRig
+import rendererDeferred
+open rendererDeferred
+open app3d/settingsDialog
+open app3d/uiShell
 open ui/ecs
-open ui/log_overlay
-open ui/debug_overlay
+open ui/LogOverlay
+open ui/DebugOverlay
 open ui/RenderSystem/RenderSystem
-open ui/virtual_joystick
-open app3d/camera_rig
+open ui/VirtualJoystick
+open app3d/CameraRig
 
 # Update the touch stick AND tell the camera rig to exclude its region, so on a
 # phone one finger drives the joystick while another rotates the camera (#526).
@@ -70,7 +70,7 @@ func toggleWalkerPanel(settings: mod SettingsState, world: mod UiWorld) pub {
 }
 
 # The corner menu (hamburger) button is now the shared lib/ui widget
-# (corner_menu_button.rae), so 114 and 112 draw the identical button. Kept as
+# (cornerMenuButton.rae), so 114 and 112 draw the identical button. Kept as
 # thin aliases so the call sites below (and ui.rae) read the same.
 func walkerMenuTapped() pub ret Bool { ret cornerMenuButtonTapped() }
 
