@@ -150,6 +150,9 @@ type GbufferCache {
   pipelinesMade: Bool
   skinBindMade: Bool
   drawScratch: List(Float)
+  # terrain-splat pass pipeline/bind cache (#764: was gbuffer_terrain gTerrain* globals)
+  terrainPipeMade: Bool
+  terrainBindGen: Int
 }
 
 func createGbufferCache() pub ret GbufferCache {
@@ -158,7 +161,8 @@ func createGbufferCache() pub ret GbufferCache {
     colorAtts: createList(WGPURenderPassColorAttachment, cap: 3),
     depthAtt: createList(WGPURenderPassDepthStencilAttachment, cap: 1),
     pipelinesMade: false, skinBindMade: false,
-    drawScratch: createList(Float, cap: instanceRecordFloats)
+    drawScratch: createList(Float, cap: instanceRecordFloats),
+    terrainPipeMade: false, terrainBindGen: 0 - 1
   }
 }
 
