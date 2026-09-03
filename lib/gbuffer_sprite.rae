@@ -20,8 +20,13 @@ func gbSpriteTexGen() extern("rae_gb_sprite_tex_gen") ret Int
 func gbSpriteArrayInit(w: Int, h: Int, layers: Int) extern("rae_gb_sprite_array_init")
 func gbSpriteArrayWrite(layer: Int, pixels: view Buffer(Int), w: Int, h: Int) extern("rae_gb_sprite_array_write")
 
-var gSpritePipeMade: Bool = false
-var gSpriteBindGen: Int = -1
+# #764: the sprite-billboard pass pipeline/bind "made" flags were module-level
+# globals. They are per-frame pass state a renderer owns; a SpriteCache holds them.
+# (drawSpriteInstances has no active-example caller today, but keeps the resource
+# shape so a future sprite pass threads a cache like every other pass.)
+type SpriteCache { pipeMade: Bool, bindGen: Int }
+
+func createSpriteCache() pub ret SpriteCache { ret SpriteCache { pipeMade: false, bindGen: 0 - 1 } }
 const spriteUniformBytes: Int = 32     # two vec4 (SpriteU)
 const spriteRecordFloats: Int = 40     # DrawU, same as the instanced path
 
@@ -66,9 +71,9 @@ func ensureSpriteDefaults() {
   }
 }
 
-func ensureSpritePipeline() {
-  if not gSpritePipeMade {
-    gSpritePipeMade = true
+func ensureSpritePipeline(cache: mod SpriteCache) {
+  if not cache.pipeMade {
+    cache.pipeMade = true
     let composed: String = gbReadWgsl(path: "lib/sprite_billboard.wgsl")
     let cbuf: Buffer(Any) = composed.toCStr()
     let shMod: Ptr = makeShaderModule(wgsl: cbuf)
@@ -77,8 +82,8 @@ func ensureSpritePipeline() {
   }
   ensureSpriteDefaults()
   let gen: Int = gbSpriteTexGen()
-  if not (gen is gSpriteBindGen) {
-    gSpriteBindGen = gen
+  if not (gen is cache.bindGen) {
+    cache.bindGen = gen
     let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbSpriteGet(i: 0), groupIndex: 0 as UInt32)
     var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 5)
     entries.add(value: { binding: 0 as UInt32, buffer: gbFrameUbuf(), size: gbFrameBytes() as UInt64 })
@@ -115,9 +120,9 @@ func spriteSetParams(heightK: copy Float, aspect: copy Float, cutoff: copy Float
 # upload to the shared draws buffer at the running base, draw 6 procedural verts x
 # count with the sprite pipeline, then restore the static pipeline (as grassDraw
 # does) so a following static draw is unaffected.
-func drawSpriteInstances(records: copy Ptr, count: copy Int) pub {
+func drawSpriteInstances(cache: mod SpriteCache, records: copy Ptr, count: copy Int) pub {
   if count <= 0 { ret }
-  ensureSpritePipeline()
+  ensureSpritePipeline(cache: cache)
   let base: Int = gbDrawCount()
   if base + count > gbMaxDraws() { ret }
   let strideBytes: Int = spriteRecordFloats * 4
