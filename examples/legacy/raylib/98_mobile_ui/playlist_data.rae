@@ -40,8 +40,8 @@ import ui/components
 import ui/ecs
 open ecs/entity
 
-let playlistsTempDir: String = "examples/98_mobile_ui/temp/playlists"
-let playlistsAssetDir: String = "examples/98_mobile_ui/assets/playlists"
+let playlistsTempDir: String = "examples/legacy/raylib/98_mobile_ui/temp/playlists"
+let playlistsAssetDir: String = "examples/legacy/raylib/98_mobile_ui/assets/playlists"
 
 # Item "kind" tags. Kept as strings so they round-trip to JSON / SQL
 # verbatim and an unknown future kind degrades to "skip" rather than
@@ -55,14 +55,14 @@ let playlistKindPlaylist: String = "playlist"
 #   kind "track"    → albumStem + trackIndex
 #   kind "album"    → albumStem  (trackIndex = -1)
 #   kind "playlist" → playlistId
-type PlaylistItem pub {
+type PlaylistItem {
   kind: String
   albumStem: String
   trackIndex: Int
   playlistId: String
 }
 
-type Playlist pub {
+type Playlist {
   id: String
   title: String
   items: List(PlaylistItem)

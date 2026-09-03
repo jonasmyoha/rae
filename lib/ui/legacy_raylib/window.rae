@@ -1,7 +1,7 @@
 # Backend-agnostic UI window/input/frame seam (QUEUE #142 M4).
 #
-# Apps select the backend through ui/draw.setUiBackend once at startup, then
-# use these calls for window lifecycle, input, frame begin/end, and idle waits.
+# Apps own a `backend: UiBackend` (see ui/draw) and pass it into each of these
+# calls for window lifecycle, input, frame begin/end, and idle waits.
 # The gpu2d backend owns an SDL3/WebGPU window; the raylib backend preserves
 # the current GLFW/raylib behavior.
 open raylib
@@ -19,49 +19,49 @@ func colorChannel(v: view Int) ret Float {
   ret v.toFloat() / 255.0
 }
 
-func uiInitWindow(width: view Int, height: view Int, title: view String) pub {
-  if uiBackend() is UiBackend.gpu2d {
+func uiInitWindow(backend: view UiBackend, width: view Int, height: view Int, title: view String) pub {
+  if backend is UiBackend.gpu2d {
     gpu2d.initWindow(width: width, height: height, title: title)
     ret
   }
   initWindow(width: width, height: height, title: title)
 }
 
-func uiSetConfigFlags(flags: view Int) pub {
-  if uiBackend() is UiBackend.raylib {
+func uiSetConfigFlags(backend: view UiBackend, flags: view Int) pub {
+  if backend is UiBackend.raylib {
     setConfigFlags(flags: flags)
   }
 }
 
-func uiSetRaylibLogLevel(level: view Int) pub {
+func uiSetRaylibLogLevel(backend: view UiBackend, level: view Int) pub {
   # gpu2d can still use raylib's image decoder as a fallback for legacy JPG
   # assets, so keep raylib's own INFO spam suppressed on both backends.
   raylibSetLogLevel(level: level)
 }
 
-func uiSetDesignResolution(width: view Float, height: view Float, fit: view Int) pub {
-  if uiBackend() is UiBackend.gpu2d {
+func uiSetDesignResolution(backend: view UiBackend, width: view Float, height: view Float, fit: view Int) pub {
+  if backend is UiBackend.gpu2d {
     gpu2d.setDesignResolution(width: width, height: height, fit: fit)
   }
 }
 
-func uiWindowShouldClose() pub ret Bool {
-  if uiBackend() is UiBackend.gpu2d {
+func uiWindowShouldClose(backend: view UiBackend) pub ret Bool {
+  if backend is UiBackend.gpu2d {
     ret gpu2d.pollClose()
   }
   ret windowShouldClose()
 }
 
-func uiCloseWindow() pub {
-  if uiBackend() is UiBackend.gpu2d {
+func uiCloseWindow(backend: view UiBackend) pub {
+  if backend is UiBackend.gpu2d {
     gpu2d.closeWindow()
     ret
   }
   closeWindow()
 }
 
-func uiBeginFrame(clear: view RgbaColor) pub {
-  if uiBackend() is UiBackend.gpu2d {
+func uiBeginFrame(backend: view UiBackend, clear: view RgbaColor) pub {
+  if backend is UiBackend.gpu2d {
     gpu2d.beginFrame(
       r: colorChannel(v: clear.r),
       g: colorChannel(v: clear.g),
@@ -73,16 +73,16 @@ func uiBeginFrame(clear: view RgbaColor) pub {
   clearBackground(color: uiRaylibColor(c: clear))
 }
 
-func uiEndFrame() pub {
-  if uiBackend() is UiBackend.gpu2d {
+func uiEndFrame(backend: view UiBackend) pub {
+  if backend is UiBackend.gpu2d {
     gpu2d.endFrame()
     ret
   }
   endDrawing()
 }
 
-func uiWaitEvents(timeoutSec: view Float) pub {
-  if uiBackend() is UiBackend.gpu2d {
+func uiWaitEvents(backend: view UiBackend, timeoutSec: view Float) pub {
+  if backend is UiBackend.gpu2d {
     gpu2d.waitEvents(timeoutSec: timeoutSec)
     ret
   }
@@ -91,43 +91,43 @@ func uiWaitEvents(timeoutSec: view Float) pub {
 
 # Epoch seconds — Float64: an f32 epoch (~1.7e9) quantises to ~128s, so
 # two calls in one frame return the SAME value and every delta is 0.0.
-func uiNowSeconds() pub ret Float64 {
-  if uiBackend() is UiBackend.gpu2d {
+func uiNowSeconds(backend: view UiBackend) pub ret Float64 {
+  if backend is UiBackend.gpu2d {
     ret gpu2d.nowSeconds()
   }
   ret getTime()
 }
 
-func uiWindowWidth() pub ret Float {
-  if uiBackend() is UiBackend.gpu2d {
+func uiWindowWidth(backend: view UiBackend) pub ret Float {
+  if backend is UiBackend.gpu2d {
     ret gpu2d.designWidth()
   }
   ret getScreenWidth().toFloat()
 }
 
-func uiWindowHeight() pub ret Float {
-  if uiBackend() is UiBackend.gpu2d {
+func uiWindowHeight(backend: view UiBackend) pub ret Float {
+  if backend is UiBackend.gpu2d {
     ret gpu2d.designHeight()
   }
   ret getScreenHeight().toFloat()
 }
 
-func uiFramebufferWidth() pub ret Int {
-  if uiBackend() is UiBackend.gpu2d {
+func uiFramebufferWidth(backend: view UiBackend) pub ret Int {
+  if backend is UiBackend.gpu2d {
     ret gpu2d.windowWidth()
   }
   ret getRenderWidth()
 }
 
-func uiFramebufferHeight() pub ret Int {
-  if uiBackend() is UiBackend.gpu2d {
+func uiFramebufferHeight(backend: view UiBackend) pub ret Int {
+  if backend is UiBackend.gpu2d {
     ret gpu2d.windowHeight()
   }
   ret getRenderHeight()
 }
 
-func uiDpr() pub ret Float {
-  if uiBackend() is UiBackend.gpu2d {
+func uiDpr(backend: view UiBackend) pub ret Float {
+  if backend is UiBackend.gpu2d {
     ret gpu2d.dpr()
   }
   let logical: Int = getScreenWidth()
@@ -137,86 +137,86 @@ func uiDpr() pub ret Float {
   ret getRenderWidth().toFloat() / logical.toFloat()
 }
 
-func uiPointerX() pub ret Float {
-  if uiBackend() is UiBackend.gpu2d {
+func uiPointerX(backend: view UiBackend) pub ret Float {
+  if backend is UiBackend.gpu2d {
     ret gpu2d.pointerX()
   }
   ret getMouseX().toFloat()
 }
 
-func uiPointerY() pub ret Float {
-  if uiBackend() is UiBackend.gpu2d {
+func uiPointerY(backend: view UiBackend) pub ret Float {
+  if backend is UiBackend.gpu2d {
     ret gpu2d.pointerY()
   }
   ret getMouseY().toFloat()
 }
 
-func uiPointerDown() pub ret Bool {
-  if uiBackend() is UiBackend.gpu2d {
+func uiPointerDown(backend: view UiBackend) pub ret Bool {
+  if backend is UiBackend.gpu2d {
     ret gpu2d.pointerDown()
   }
   ret isMouseButtonDown(button: 0)
 }
 
-func uiWheelMove() pub ret Float {
-  if uiBackend() is UiBackend.gpu2d {
+func uiWheelMove(backend: view UiBackend) pub ret Float {
+  if backend is UiBackend.gpu2d {
     ret gpu2d.wheelMove()
   }
   ret getMouseWheelMove()
 }
 
-func uiIsWindowResized() pub ret Bool {
-  if uiBackend() is UiBackend.gpu2d {
+func uiIsWindowResized(backend: view UiBackend) pub ret Bool {
+  if backend is UiBackend.gpu2d {
     ret false
   }
   ret isWindowResized()
 }
 
-func uiSetWindowPosition(x: view Int, y: view Int) pub {
-  if uiBackend() is UiBackend.raylib {
+func uiSetWindowPosition(backend: view UiBackend, x: view Int, y: view Int) pub {
+  if backend is UiBackend.raylib {
     setWindowPosition(x: x, y: y)
   }
 }
 
-func uiSetWindowSize(width: view Int, height: view Int) pub {
-  if uiBackend() is UiBackend.raylib {
+func uiSetWindowSize(backend: view UiBackend, width: view Int, height: view Int) pub {
+  if backend is UiBackend.raylib {
     setWindowSize(width: width, height: height)
   }
 }
 
-func uiSetMouseScale(scaleX: view Float, scaleY: view Float) pub {
-  if uiBackend() is UiBackend.raylib {
+func uiSetMouseScale(backend: view UiBackend, scaleX: view Float, scaleY: view Float) pub {
+  if backend is UiBackend.raylib {
     setMouseScale(scaleX: scaleX, scaleY: scaleY)
   }
 }
 
-func uiInstallWindowCloseWaker() pub {
-  if uiBackend() is UiBackend.raylib {
+func uiInstallWindowCloseWaker(backend: view UiBackend) pub {
+  if backend is UiBackend.raylib {
     installWindowCloseWaker()
   }
 }
 
-func uiInstallMouseButtonHook() pub {
-  if uiBackend() is UiBackend.raylib {
+func uiInstallMouseButtonHook(backend: view UiBackend) pub {
+  if backend is UiBackend.raylib {
     installMouseButtonHook()
   }
 }
 
-func uiDisableAppNap() pub {
-  if uiBackend() is UiBackend.raylib {
+func uiDisableAppNap(backend: view UiBackend) pub {
+  if backend is UiBackend.raylib {
     disableAppNap()
   }
 }
 
-func uiIsKeyPressed(key: view Int) pub ret Bool {
-  if uiBackend() is UiBackend.gpu2d {
+func uiIsKeyPressed(backend: view UiBackend, key: view Int) pub ret Bool {
+  if backend is UiBackend.gpu2d {
     ret false
   }
   ret isKeyPressed(key: key)
 }
 
-func uiPointerButtonDown(button: view Int) pub ret Bool {
-  if uiBackend() is UiBackend.gpu2d {
+func uiPointerButtonDown(backend: view UiBackend, button: view Int) pub ret Bool {
+  if backend is UiBackend.gpu2d {
     if button is 0 {
       ret gpu2d.pointerDown()
     }
@@ -225,8 +225,8 @@ func uiPointerButtonDown(button: view Int) pub ret Bool {
   ret isMouseButtonDown(button: button)
 }
 
-func uiPointerButtonPressed(button: view Int) pub ret Bool {
-  if uiBackend() is UiBackend.gpu2d {
+func uiPointerButtonPressed(backend: view UiBackend, button: view Int) pub ret Bool {
+  if backend is UiBackend.gpu2d {
     if button is 0 {
       ret gpu2d.pointerPressed()
     }
@@ -235,8 +235,8 @@ func uiPointerButtonPressed(button: view Int) pub ret Bool {
   ret isMouseButtonPressed(button: button)
 }
 
-func uiPointerButtonReleased(button: view Int) pub ret Bool {
-  if uiBackend() is UiBackend.gpu2d {
+func uiPointerButtonReleased(backend: view UiBackend, button: view Int) pub ret Bool {
+  if backend is UiBackend.gpu2d {
     if button is 0 {
       ret gpu2d.pointerReleased()
     }
@@ -245,43 +245,43 @@ func uiPointerButtonReleased(button: view Int) pub ret Bool {
   ret isMouseButtonReleased(button: button)
 }
 
-func uiMouseHookActive() pub ret Bool {
-  if uiBackend() is UiBackend.gpu2d {
+func uiMouseHookActive(backend: view UiBackend) pub ret Bool {
+  if backend is UiBackend.gpu2d {
     ret false
   }
   ret mouseHookActive()
 }
 
-func uiMouseHookDrainPressed() pub ret Bool {
-  if uiBackend() is UiBackend.gpu2d {
+func uiMouseHookDrainPressed(backend: view UiBackend) pub ret Bool {
+  if backend is UiBackend.gpu2d {
     ret false
   }
   ret mouseHookDrainPressed()
 }
 
-func uiMouseHookDrainReleased() pub ret Bool {
-  if uiBackend() is UiBackend.gpu2d {
+func uiMouseHookDrainReleased(backend: view UiBackend) pub ret Bool {
+  if backend is UiBackend.gpu2d {
     ret false
   }
   ret mouseHookDrainReleased()
 }
 
-func uiCurrentMonitor() pub ret Int {
-  if uiBackend() is UiBackend.gpu2d {
+func uiCurrentMonitor(backend: view UiBackend) pub ret Int {
+  if backend is UiBackend.gpu2d {
     ret 0
   }
   ret getCurrentMonitor()
 }
 
-func uiMonitorHeight(monitor: view Int) pub ret Int {
-  if uiBackend() is UiBackend.gpu2d {
-    ret uiFramebufferHeight()
+func uiMonitorHeight(backend: view UiBackend, monitor: view Int) pub ret Int {
+  if backend is UiBackend.gpu2d {
+    ret uiFramebufferHeight(backend: backend)
   }
   ret getMonitorHeight(monitor: monitor)
 }
 
-func uiMonitorRefreshRate(monitor: view Int) pub ret Int {
-  if uiBackend() is UiBackend.gpu2d {
+func uiMonitorRefreshRate(backend: view UiBackend, monitor: view Int) pub ret Int {
+  if backend is UiBackend.gpu2d {
     ret 60
   }
   ret getMonitorRefreshRate(monitor: monitor)

@@ -41,19 +41,19 @@ func setProfileCircleShape(world: mod UiWorld, entity: view EntityId, fill: view
 let profileAvatarSize: Float = 120.0
 let profileAvatarIconSize: Float = 80.0
 
-func profileAvatarLoaded(reg: view TextureRegistry, key: view String) ret Bool {
-  if uiBackend() is UiBackend.gpu2d {
+func profileAvatarLoaded(backend: view UiBackend, reg: view TextureRegistry, key: view String) ret Bool {
+  if backend is UiBackend.gpu2d {
     ret gpu2d.hasImageKey(key: key)
   }
   ret textureHas(reg: reg, key: key)
 }
 
-func buildProfileAvatar(world: mod UiWorld, reg: view TextureRegistry) ret EntityId {
+func buildProfileAvatar(backend: view UiBackend, world: mod UiWorld, reg: view TextureRegistry) ret EntityId {
   let avatar: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: avatar, w: profileAvatarSize, h: profileAvatarSize)
 
   let avatarKey: String = profileAvatarKey()
-  if profileAvatarLoaded(reg: reg, key: avatarKey) {
+  if profileAvatarLoaded(backend: backend, reg: reg, key: avatarKey) {
     # Real profile picture — circle-cropped at load time
     # (`loadCircleCroppedTexture`). The alpha mask on the underlying
     # texture handles the round shape; no background Shape needed.
@@ -225,7 +225,7 @@ func buildSettingsRow(world: mod UiWorld, iconKey: view String, label: view Stri
   let iconSize: Float = 28.0
   let icon: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: icon, w: iconSize, h: iconSize)
-  setSprite(world: world, entity: icon, key: iconKey, tint: iconTint)
+  setSprite(world: world, entity: icon, key: "{iconKey}", tint: iconTint)
 
   let labelW: Float = rowW - iconSize - 14.0 - 24.0 - 14.0 - 16.0
   let labelEnt: EntityId = createEntity(world: world)
@@ -274,6 +274,7 @@ func buildSettingsList(world: mod UiWorld) ret EntityId {
 }
 
 func buildProfileBody(
+  backend: view UiBackend
   world: mod UiWorld
   reg: view TextureRegistry
   state: view AppState
@@ -292,7 +293,7 @@ func buildProfileBody(
   let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
   componentSet(this: world.scrollStates, entity: body, data: scroll)
 
-  let avatar: EntityId = buildProfileAvatar(world: world, reg: reg)
+  let avatar: EntityId = buildProfileAvatar(backend: backend, world: world, reg: reg)
 
   let handle: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: handle, w: bodyW, h: 28.0)
@@ -324,6 +325,7 @@ func buildProfileBody(
 # Persistent-world entrypoint. Mounts the profile page into `world`
 # and returns the page-root entity. Tagged with `PageRoot{profilePageId}`.
 func mountProfilePage(
+  backend: view UiBackend
   world: mod UiWorld
   reg: view TextureRegistry
   state: view AppState
@@ -342,7 +344,7 @@ func mountProfilePage(
   componentSet(this: world.pageRoots, entity: root, data: own pr)
 
   let topBar: EntityId = buildPageTopBar(world: world, title: "Profile")
-  let body: EntityId = buildProfileBody(world: world, reg: reg, state: state, scrollY: scrollY)
+  let body: EntityId = buildProfileBody(backend: backend, world: world, reg: reg, state: state, scrollY: scrollY)
 
   let kids: List(EntityId) = createList(EntityId, cap: 2)
   kids.add(value: topBar)
@@ -356,6 +358,7 @@ func mountProfilePage(
 # `runScreenshotMode`. Mounts the profile page + shared dock + back
 # overlays into a fresh world.
 func buildProfileWorld(
+  backend: view UiBackend
   scenes: view AlbumScenes
   reg: view TextureRegistry
   state: view AppState
@@ -363,7 +366,8 @@ func buildProfileWorld(
   scrollY: view Float
 ) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
-  let page: EntityId = mountProfilePage(world: world, reg: reg, state: state, scrollY: scrollY)
+  seedWorldThemeFrom(world: world, src: state.theme)  # #764: theme from AppState
+  let page: EntityId = mountProfilePage(backend: backend, world: world, reg: reg, state: state, scrollY: scrollY)
   let dock: EntityId = mountBottomDockOverlay(
     world: world
     activeTab: state.tab

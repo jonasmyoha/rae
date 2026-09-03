@@ -154,7 +154,7 @@ func screenName(s: view Screen) ret String {
 # from before an album rename / deletion shouldn't leave the user
 # staring at an empty stub. Same for `currentTrackIndex` against
 # the matching album's track count.
-func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: view String) pub {
+func restoreAppState(backend: view UiBackend, state: mod AppState, playback: mod PlaybackState, path: view String) pub {
   let source: String = rae_ext_rae_sys_read_file(path: path)
   if source.length() is 0 {
     log("[state] no state file at {path} — using defaults")
@@ -251,7 +251,7 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
       let savedY: Int = json.jsonInt(this: json.jsonValueAt(doc: doc, idx: winYIdx), fallback: 50)
       # macOS will silently clamp positions that put the window
       # off-screen, so we don't bother validating the bounds here.
-      uiSetWindowPosition(x: savedX, y: savedY)
+      uiSetWindowPosition(backend: backend, x: savedX, y: savedY)
     }
   }
 

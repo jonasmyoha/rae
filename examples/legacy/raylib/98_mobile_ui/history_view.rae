@@ -78,7 +78,7 @@ func buildHistoryThumb(world: mod UiWorld, entry: view PlayHistoryEntry, size: v
     setHoverScale(world: world, entity: thumb, hoverScale: 1.12)
   } else {
     let mutedName: String = "textMuted"
-    let fill: RgbaColor = themeColorByName(name: mutedName)
+    let fill: RgbaColor = themeColorByName(theme: world.theme.active, name: mutedName)
     let transparent: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
     var radius: Float = 0.0
     if rounded {
@@ -224,6 +224,7 @@ func buildHistoryWorld(
   scrollY: view Float
 ) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
+  seedWorldThemeFrom(world: world, src: state.theme)  # #764: theme from AppState
   let page: EntityId = mountHistoryPage(world: world, state: state, scrollY: scrollY)
   let dock: EntityId = mountBottomDockOverlay(
     world: world
