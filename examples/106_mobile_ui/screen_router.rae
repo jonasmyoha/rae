@@ -142,6 +142,7 @@ func buildAppWorld(
   viewport: view Viewport
 ) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
+  seedWorldThemeFrom(world: world, src: state.theme)  # #764: theme from AppState
   # Publish the active Viewport extent before mounting anything. Builders
   # that need edge-to-edge geometry read `world.layoutW/H`; fixed phone
   # content still uses the `phoneFrameW/phoneFrameH` design constants and is centered
@@ -398,6 +399,11 @@ func playbackIconKey(playback: view PlaybackState) pub ret String {
 # main.rae calls `rebindHero(world, "albumCover", state.currentAlbumStem)`
 # after building Album / NowPlaying worlds.
 type AppState {
+  # #764: the app-owned theme (active palette + scene token tables + repaint gen).
+  # Was the module-global activeTheme/g_active* — 106 rebuilds its UiWorld per
+  # frame, so the theme lives on this persistent state and each new world is seeded
+  # from it (seedWorldThemeFrom); the T-key + debug toggles write back here.
+  theme: UiTheme
   # The album catalog, owned by its own ECS system (#266). Read
   # through `state.mediaLibrary.albums`; see `MediaLibrarySystem`
   # in `album_loader.rae`.
@@ -462,7 +468,7 @@ type AppState {
   canvasOpen: Bool
 }
 
-func createAppState(albums: own List(Album)) pub ret AppState {
+func createAppState(albums: own List(Album), theme: own UiTheme) pub ret AppState {
   # Default the active stem to the first album in the list — the
   # static Album / NowPlaying scenes hero-animate against whatever
   # cover the Profile grid has at that index, and the user's first
@@ -480,6 +486,7 @@ func createAppState(albums: own List(Album)) pub ret AppState {
   let likedTitle: String = "Liked Songs"
   let liked: Playlist = createPlaylist(id: own likedId, title: own likedTitle)
   ret AppState {
+    theme: own theme
     mediaLibrary: createMediaLibrary(albums: albums)
     currentAlbumStem: firstStem
     currentTrackIndex: 0

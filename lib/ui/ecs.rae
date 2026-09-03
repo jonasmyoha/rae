@@ -1,5 +1,8 @@
 # ECS storage layer. `componentIndexOf` is an O(1) sparse-set lookup.
 import core
+# #764: the UiWorld carries a `theme: UiTheme` resource (createUiTheme in
+# createUiWorld), so every module that imports ui/ecs must also emit ui/theme.
+import ui/theme
 open ecs/entity
 open ecs/component_table
 open ecs/queue
@@ -154,6 +157,13 @@ type UiWorld {
   # resource (a derived cache, dirty-tracked by the Parent table generation), not
   # a per-entity component and never serialized.
   hierarchyOrder: HierarchyOrder
+
+  # #764: the active palette + scene-parsed token tables + repaint generation.
+  # Was the module-level `activeTheme`/`g_themeGeneration`/`g_active*` globals in
+  # theme.rae/theme_resolved.rae; now a per-world resource the app seeds from its
+  # owned theme (loadUiAssets' Gpu2dUi, or an AppState field) as it builds a world.
+  # A RUNTIME resource, not a per-entity component and never serialized.
+  theme: UiTheme
 }
 
 func createUiWorld() ret UiWorld {
@@ -247,6 +257,7 @@ func createUiWorld() ret UiWorld {
     layoutW: 600.0
     layoutH: 1300.0
     hierarchyOrder: createHierarchyOrder()
+    theme: createUiTheme()
   }
 }
 

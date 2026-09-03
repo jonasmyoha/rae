@@ -361,6 +361,7 @@ func buildProfileWorld(
   viewport: view Viewport
 ) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
+  seedWorldThemeFrom(world: world, src: state.theme)  # #764: theme from AppState
   applyViewportExtent(world: world, viewport: viewport)
   let page: EntityId = mountProfilePage(world: world, reg: reg, state: state, scrollY: scrollY, viewport: viewport)
   let dock: EntityId = mountBottomDockOverlay(

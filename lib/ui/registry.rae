@@ -281,11 +281,11 @@ func parseTextFormat(s: view String) ret TextFormat {
 # Sub-type deserialisers
 # -----------------------------------------------------------------
 
-func deserInsets(doc: view JsonDoc, val: view JsonValue) ret Insets {
-  let l: Float = optFloatOrToken(doc: doc, container: val, key: "l", fallback: 0.0)
-  let t: Float = optFloatOrToken(doc: doc, container: val, key: "t", fallback: 0.0)
-  let r: Float = optFloatOrToken(doc: doc, container: val, key: "r", fallback: 0.0)
-  let b: Float = optFloatOrToken(doc: doc, container: val, key: "b", fallback: 0.0)
+func deserInsets(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret Insets {
+  let l: Float = optFloatOrToken(doc: doc, theme: theme, container: val, key: "l", fallback: 0.0)
+  let t: Float = optFloatOrToken(doc: doc, theme: theme, container: val, key: "t", fallback: 0.0)
+  let r: Float = optFloatOrToken(doc: doc, theme: theme, container: val, key: "r", fallback: 0.0)
+  let b: Float = optFloatOrToken(doc: doc, theme: theme, container: val, key: "b", fallback: 0.0)
   ret Insets { l: l, t: t, r: r, b: b }
 }
 
@@ -295,7 +295,7 @@ func deserVec2(doc: view JsonDoc, val: view JsonValue) ret Vec2 {
   ret Vec2 { x: x, y: y }
 }
 
-func deserRgba(doc: view JsonDoc, val: view JsonValue) ret RgbaColor {
+func deserRgba(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret RgbaColor {
   # Theme token form: scene authors can write `"fill": "surface"`
   # instead of `"fill": {r:..,g:..,b:..,a:..}` to pick a color from
   # the current `activeTheme` in `lib/ui/theme.rae`. The JSON shape
@@ -306,7 +306,7 @@ func deserRgba(doc: view JsonDoc, val: view JsonValue) ret RgbaColor {
   let empty: String = ""
   let asStr: String = json.jsonString(this: val, fallback: empty)
   if asStr.length() > 0 {
-    ret themeColorByName(name: asStr)
+    ret themeColorByName(theme: theme.active, name: asStr)
   }
   let r: Int = optInt(doc: doc, container: val, key: "r", fallback: 0)
   let g: Int = optInt(doc: doc, container: val, key: "g", fallback: 0)
@@ -360,36 +360,36 @@ func deserSize(doc: view JsonDoc, val: view JsonValue) ret Size {
   ret Size { w: wAxis, h: hAxis }
 }
 
-func deserLayout(doc: view JsonDoc, val: view JsonValue) ret Layout {
+func deserLayout(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret Layout {
   let typeStr: String = optString(doc: doc, container: val, key: "type", fallback: "None")
   let alignMainStr: String = optString(doc: doc, container: val, key: "alignMain", fallback: "Start")
   let alignCrossStr: String = optString(doc: doc, container: val, key: "alignCross", fallback: "Start")
   ret Layout {
     kind: parseLayoutType(s: typeStr)
-    gap: optFloatOrToken(doc: doc, container: val, key: "gap", fallback: 0.0)
+    gap: optFloatOrToken(doc: doc, theme: theme, container: val, key: "gap", fallback: 0.0)
     alignMain: parseAlignKind(s: alignMainStr)
     alignCross: parseAlignKind(s: alignCrossStr)
     columns: optInt(doc: doc, container: val, key: "columns", fallback: 0)
-    rowGap: optFloatOrToken(doc: doc, container: val, key: "rowGap", fallback: 0.0)
-    columnGap: optFloatOrToken(doc: doc, container: val, key: "columnGap", fallback: 0.0)
+    rowGap: optFloatOrToken(doc: doc, theme: theme, container: val, key: "rowGap", fallback: 0.0)
+    columnGap: optFloatOrToken(doc: doc, theme: theme, container: val, key: "columnGap", fallback: 0.0)
   }
 }
 
-func deserPadding(doc: view JsonDoc, val: view JsonValue) ret Padding {
+func deserPadding(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret Padding {
   # A padding token names a whole Insets preset (#233):
   # `"Padding": "screenEdgePadding"`. A JSON object still gives
   # explicit per-side insets (each side may itself be a space token).
   let empty: String = ""
   let asStr: String = json.jsonString(this: val, fallback: empty)
   if asStr.length() > 0 {
-    let ti: ThemeInsets = activePaddingInsets(name: asStr)
+    let ti: ThemeInsets = themePaddingInsets(theme: theme.resolved, name: asStr)
     ret Padding { insets: Insets { l: ti.l, t: ti.t, r: ti.r, b: ti.b } }
   }
-  ret Padding { insets: deserInsets(doc: doc, val: val) }
+  ret Padding { insets: deserInsets(doc: doc, theme: theme, val: val) }
 }
 
-func deserMargin(doc: view JsonDoc, val: view JsonValue) ret Margin {
-  ret Margin { insets: deserInsets(doc: doc, val: val) }
+func deserMargin(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret Margin {
+  ret Margin { insets: deserInsets(doc: doc, theme: theme, val: val) }
 }
 
 func deserAlign(doc: view JsonDoc, val: view JsonValue) ret Align {
@@ -421,7 +421,7 @@ func deserOffset(doc: view JsonDoc, val: view JsonValue) ret Offset {
   }
 }
 
-func deserSprite(doc: view JsonDoc, val: view JsonValue) ret Sprite {
+func deserSprite(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret Sprite {
   let s: Sprite = defaultSprite()
   s.textureKey = optString(doc: doc, container: val, key: "textureKey", fallback: "")
   let scaleModeStr: String = optString(doc: doc, container: val, key: "scaleMode", fallback: "Fit")
@@ -429,7 +429,7 @@ func deserSprite(doc: view JsonDoc, val: view JsonValue) ret Sprite {
   let tintIdx: Int = json.jsonField(doc: doc, this: val, key: "tint")
   if tintIdx >= 0 {
     let tv: JsonValue = json.jsonValueAt(doc: doc, idx: tintIdx)
-    s.tint = deserRgba(doc: doc, val: tv)
+    s.tint = deserRgba(doc: doc, theme: theme, val: tv)
     # Record the palette slot (empty for a literal object) so the
     # renderer can re-resolve on a live theme switch (#235).
     let emptySlot: String = ""
@@ -457,7 +457,7 @@ func deserText(doc: view JsonDoc, val: view JsonValue) ret Text {
 # the resolved style — `size` (Float du) and `color` (literal RGBA
 # object OR a palette slot string, mirroring deserRgba). Absent keys
 # leave their `has*` flag false so the base style value shows through.
-func deserStyleOverride(doc: view JsonDoc, val: view JsonValue) ret StyleOverride {
+func deserStyleOverride(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret StyleOverride {
   var so: StyleOverride = defaultStyleOverride()
   let sizeIdx: Int = json.jsonField(doc: doc, this: val, key: "size")
   if sizeIdx >= 0 {
@@ -468,14 +468,14 @@ func deserStyleOverride(doc: view JsonDoc, val: view JsonValue) ret StyleOverrid
   if colorIdx >= 0 {
     so.hasColor = true
     let cv: JsonValue = json.jsonValueAt(doc: doc, idx: colorIdx)
-    so.color = deserRgba(doc: doc, val: cv)
+    so.color = deserRgba(doc: doc, theme: theme, val: cv)
     let emptySlot: String = ""
     so.colorSlot = json.jsonString(this: cv, fallback: emptySlot)
   }
   ret so
 }
 
-func deserTextShadow(doc: view JsonDoc, val: view JsonValue) ret TextShadow {
+func deserTextShadow(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret TextShadow {
   var shadow: TextShadow = defaultTextShadow()
   shadow.offset.x = optFloat(doc: doc, container: val, key: "offsetX", fallback: 0.0)
   shadow.offset.y = optFloat(doc: doc, container: val, key: "offsetY", fallback: 0.0)
@@ -483,28 +483,28 @@ func deserTextShadow(doc: view JsonDoc, val: view JsonValue) ret TextShadow {
   let colorIdx: Int = json.jsonField(doc: doc, this: val, key: "color")
   if colorIdx >= 0 {
     let cv: JsonValue = json.jsonValueAt(doc: doc, idx: colorIdx)
-    shadow.color = deserRgba(doc: doc, val: cv)
+    shadow.color = deserRgba(doc: doc, theme: theme, val: cv)
   }
   ret shadow
 }
 
-func deserShape(doc: view JsonDoc, val: view JsonValue) ret Shape {
+func deserShape(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret Shape {
   let kindStr: String = optString(doc: doc, container: val, key: "kind", fallback: "Rect")
   let s: Shape = defaultShape()
   s.kind = parseShapeKind(s: kindStr)
   s.strokeWidth = optFloat(doc: doc, container: val, key: "strokeWidth", fallback: 0.0)
-  s.radius = optRadiusOrToken(doc: doc, container: val, key: "radius", fallback: 0.0)
+  s.radius = optRadiusOrToken(doc: doc, theme: theme, container: val, key: "radius", fallback: 0.0)
   let fillIdx: Int = json.jsonField(doc: doc, this: val, key: "fill")
   if fillIdx >= 0 {
     let fv: JsonValue = json.jsonValueAt(doc: doc, idx: fillIdx)
-    s.fill = deserRgba(doc: doc, val: fv)
+    s.fill = deserRgba(doc: doc, theme: theme, val: fv)
     let emptyFill: String = ""
     s.fillSlot = json.jsonString(this: fv, fallback: emptyFill)
   }
   let strokeIdx: Int = json.jsonField(doc: doc, this: val, key: "stroke")
   if strokeIdx >= 0 {
     let sv: JsonValue = json.jsonValueAt(doc: doc, idx: strokeIdx)
-    s.stroke = deserRgba(doc: doc, val: sv)
+    s.stroke = deserRgba(doc: doc, theme: theme, val: sv)
     let emptyStroke: String = ""
     s.strokeSlot = json.jsonString(this: sv, fallback: emptyStroke)
   }
@@ -548,8 +548,8 @@ func deserHeroWidget(doc: view JsonDoc, val: view JsonValue) ret HeroWidget {
   ret r
 }
 
-func deserCornerRadius(doc: view JsonDoc, val: view JsonValue) ret CornerRadius {
-  let r: Float = optRadiusOrToken(doc: doc, container: val, key: "radius", fallback: 0.0)
+func deserCornerRadius(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret CornerRadius {
+  let r: Float = optRadiusOrToken(doc: doc, theme: theme, container: val, key: "radius", fallback: 0.0)
   ret CornerRadius { radius: r }
 }
 
@@ -558,17 +558,17 @@ func deserBackdropImage(doc: view JsonDoc, val: view JsonValue) ret BackdropImag
   ret BackdropImage { textureKey: own k }
 }
 
-func deserGradientFill(doc: view JsonDoc, val: view JsonValue) ret GradientFill {
+func deserGradientFill(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret GradientFill {
   let fromIdx: Int = json.jsonField(doc: doc, this: val, key: "from")
   let toIdx: Int = json.jsonField(doc: doc, this: val, key: "to")
   let zero: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
   var fromCol: RgbaColor = zero
   var toCol: RgbaColor = zero
   if fromIdx >= 0 {
-    fromCol = deserRgba(doc: doc, val: json.jsonValueAt(doc: doc, idx: fromIdx))
+    fromCol = deserRgba(doc: doc, theme: theme, val: json.jsonValueAt(doc: doc, idx: fromIdx))
   }
   if toIdx >= 0 {
-    toCol = deserRgba(doc: doc, val: json.jsonValueAt(doc: doc, idx: toIdx))
+    toCol = deserRgba(doc: doc, theme: theme, val: json.jsonValueAt(doc: doc, idx: toIdx))
   }
   let angle: Float = optFloat(doc: doc, container: val, key: "angle", fallback: 90.0)
   ret GradientFill { from: fromCol, to: toCol, angle: angle }
@@ -583,7 +583,7 @@ func deserOpticalAlign(doc: view JsonDoc, val: view JsonValue) ret OpticalAlign 
   ret OpticalAlign { enabled: enabled, centerX: centerX, centerY: centerY, bias: Vec2 { x: biasX, y: biasY } }
 }
 
-func deserSafeArea(doc: view JsonDoc, val: view JsonValue) ret SafeArea {
+func deserSafeArea(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret SafeArea {
   # `apply` is a per-edge multiplier (default 1.0 = fully honour the
   # device inset on that edge; 0.0 = ignore it). `extra` is an
   # additive per-edge gutter in design units. Both reuse the standard
@@ -592,12 +592,12 @@ func deserSafeArea(doc: view JsonDoc, val: view JsonValue) ret SafeArea {
   var apply: Insets = { l: 1.0, t: 1.0, r: 1.0, b: 1.0 }
   let applyIdx: Int = json.jsonField(doc: doc, this: val, key: "apply")
   if applyIdx >= 0 {
-    apply = deserInsets(doc: doc, val: json.jsonValueAt(doc: doc, idx: applyIdx))
+    apply = deserInsets(doc: doc, theme: theme, val: json.jsonValueAt(doc: doc, idx: applyIdx))
   }
   var extra: Insets = { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
   let extraIdx: Int = json.jsonField(doc: doc, this: val, key: "extra")
   if extraIdx >= 0 {
-    extra = deserInsets(doc: doc, val: json.jsonValueAt(doc: doc, idx: extraIdx))
+    extra = deserInsets(doc: doc, theme: theme, val: json.jsonValueAt(doc: doc, idx: extraIdx))
   }
   ret SafeArea { enabled: enabled, apply: apply, extra: extra }
 }
@@ -794,15 +794,15 @@ func applyComponentByName(
     ret
   }
   if name is "Layout" {
-    componentSet(this: world.layouts, entity: entity, data: deserLayout(doc: doc, val: val))
+    componentSet(this: world.layouts, entity: entity, data: deserLayout(doc: doc, theme: world.theme, val: val))
     ret
   }
   if name is "Padding" {
-    componentSet(this: world.paddings, entity: entity, data: deserPadding(doc: doc, val: val))
+    componentSet(this: world.paddings, entity: entity, data: deserPadding(doc: doc, theme: world.theme, val: val))
     ret
   }
   if name is "Margin" {
-    componentSet(this: world.margins, entity: entity, data: deserMargin(doc: doc, val: val))
+    componentSet(this: world.margins, entity: entity, data: deserMargin(doc: doc, theme: world.theme, val: val))
     ret
   }
   if name is "Align" {
@@ -814,7 +814,7 @@ func applyComponentByName(
     ret
   }
   if name is "Sprite" {
-    componentSet(this: world.sprites, entity: entity, data: deserSprite(doc: doc, val: val))
+    componentSet(this: world.sprites, entity: entity, data: deserSprite(doc: doc, theme: world.theme, val: val))
     ret
   }
   if name is "Text" {
@@ -826,7 +826,7 @@ func applyComponentByName(
     let soIdx: Int = json.jsonField(doc: doc, this: val, key: "styleOverride")
     if soIdx >= 0 {
       let sov: JsonValue = json.jsonValueAt(doc: doc, idx: soIdx)
-      componentSet(this: world.styleOverrides, entity: entity, data: deserStyleOverride(doc: doc, val: sov))
+      componentSet(this: world.styleOverrides, entity: entity, data: deserStyleOverride(doc: doc, theme: world.theme, val: sov))
     }
     ret
   }
@@ -837,11 +837,11 @@ func applyComponentByName(
     # a text style (the miniTitle/miniMuted -> textOnAccent pattern).
     # Nudge, don't block — one line per authored occurrence.
     log("[scene] raw TextShadow authored on entity {entity.index} - prefer a theme shadow token on the text style (see docs/ui-theme-system.md sec 7)")
-    componentSet(this: world.textShadows, entity: entity, data: deserTextShadow(doc: doc, val: val))
+    componentSet(this: world.textShadows, entity: entity, data: deserTextShadow(doc: doc, theme: world.theme, val: val))
     ret
   }
   if name is "Shape" {
-    componentSet(this: world.shapes, entity: entity, data: deserShape(doc: doc, val: val))
+    componentSet(this: world.shapes, entity: entity, data: deserShape(doc: doc, theme: world.theme, val: val))
     ret
   }
   if name is "ContainerStyle" {
@@ -898,11 +898,11 @@ func applyComponentByName(
     ret
   }
   if name is "CornerRadius" {
-    componentSet(this: world.cornerRadiuses, entity: entity, data: deserCornerRadius(doc: doc, val: val))
+    componentSet(this: world.cornerRadiuses, entity: entity, data: deserCornerRadius(doc: doc, theme: world.theme, val: val))
     ret
   }
   if name is "GradientFill" {
-    componentSet(this: world.gradientFills, entity: entity, data: deserGradientFill(doc: doc, val: val))
+    componentSet(this: world.gradientFills, entity: entity, data: deserGradientFill(doc: doc, theme: world.theme, val: val))
     ret
   }
   if name is "BackdropImage" {
@@ -914,7 +914,7 @@ func applyComponentByName(
     ret
   }
   if name is "SafeArea" {
-    componentSet(this: world.safeAreas, entity: entity, data: deserSafeArea(doc: doc, val: val))
+    componentSet(this: world.safeAreas, entity: entity, data: deserSafeArea(doc: doc, theme: world.theme, val: val))
     ret
   }
   if name is "LayerRoot" {

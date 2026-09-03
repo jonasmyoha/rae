@@ -583,7 +583,7 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Enti
 
   let themeLabel: String = "Dark theme"
   let themeAction: String = debugActionToggleTheme
-  let themeOn: Bool = currentTheme().mode is ThemeMode.dark
+  let themeOn: Bool = currentTheme(world: world).mode is ThemeMode.dark
   let themeRow: EntityId = buildSwitchRow(
     world: world
     labelText: themeLabel
@@ -694,7 +694,7 @@ func addDebugLayer(world: mod UiWorld, debug: mod DebugSystem) pub {
 # Walk `input.events` looking for the `debug.*` action ids. Mutates
 # `debug` in place. Returns true if any debug-state change happened
 # (callers should treat the return value as "force a world rebuild").
-func dispatchDebugAction(input: view InputSystem, debug: mod DebugSystem) pub ret Bool {
+func dispatchDebugAction(world: mod UiWorld, input: view InputSystem, debug: mod DebugSystem) pub ret Bool {
   var changed: Bool = false
   let n: Int = input.events.length
   var i: Int = 0
@@ -713,11 +713,11 @@ func dispatchDebugAction(input: view InputSystem, debug: mod DebugSystem) pub re
       }
     }
     if actionId is debugActionToggleTheme {
-      let cur: Theme = currentTheme()
+      let cur: Theme = currentTheme(world: world)
       if cur.mode is ThemeMode.dark {
-        setActiveTheme(theme: lightTheme())
+        setActiveTheme(world: world, theme: lightTheme())
       } else {
-        setActiveTheme(theme: darkTheme())
+        setActiveTheme(world: world, theme: darkTheme())
       }
       changed = true
     }
