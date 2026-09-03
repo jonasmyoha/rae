@@ -27,14 +27,14 @@ import ui/ecs
 import ui/legacy_raylib/textures
 import ui/legacy_raylib/window
 open ecs/entity
-# PlaybackState lives in examples/98_mobile_ui/playback.rae — auto-imported
+# PlaybackState lives in examples/legacy/raylib/98_mobile_ui/playback.rae — auto-imported
 # from the same project directory. We mutate it here to sync the local
 # mock's `isPlaying` from Spotify's reported state so the play-button
 # icon (driven by `applyPlaybackToWorld(world, playback)`) matches reality.
 
 # Per-app-instance state for the Spotify display layer. One instance
 # lives in main.rae for the whole app lifetime.
-type SpotifyState pub {
+type SpotifyState {
   # Toggle read once at boot from RAE_UI_SPOTIFY. False → all the
   # update calls early-out so the local mock continues unchanged.
   enabled: Bool
@@ -146,7 +146,7 @@ func rebindCoverOnPages(world: mod UiWorld, fromKey: view String, toKey: view St
 # play-history dedup keep them as separate entries.
 #
 # Skips the network round-trip when the key is already registered.
-func loadHistoryEntryArt(track: view SpotifyTrack, reg: mod TextureRegistry) pub ret String {
+func loadHistoryEntryArt(backend: view UiBackend, track: view SpotifyTrack, reg: mod TextureRegistry) pub ret String {
   if track.artworkUrl.length() is 0 {
     ret ""
   }
@@ -155,7 +155,7 @@ func loadHistoryEntryArt(track: view SpotifyTrack, reg: mod TextureRegistry) pub
     ret ""
   }
   let key: String = "spotify-art:{imageHash}"
-  if uiBackend() is UiBackend.gpu2d {
+  if backend is UiBackend.gpu2d {
     if gpu2d.hasImageKey(key: key) {
       ret key
     }
@@ -167,7 +167,7 @@ func loadHistoryEntryArt(track: view SpotifyTrack, reg: mod TextureRegistry) pub
   if ok is false {
     ret ""
   }
-  if uiBackend() is UiBackend.gpu2d {
+  if backend is UiBackend.gpu2d {
     let gpuKey: String = "{key}"
     let gpuPath: String = "{outPath}"
     let h: Int = gpu2d.loadImageKey(key: gpuKey, path: gpuPath)
@@ -196,7 +196,7 @@ func artworkUrlImageHash(url: view String) ret String {
   ret url.sub(start: i + 1, len: n - i - 1)
 }
 
-func refreshSpotifyArt(state: view SpotifyState, track: view SpotifyTrack, reg: mod TextureRegistry) ret Bool {
+func refreshSpotifyArt(backend: view UiBackend, state: view SpotifyState, track: view SpotifyTrack, reg: mod TextureRegistry) ret Bool {
   let outPath: String = "/tmp/rae_spotify_art.jpg"
   var primaryOk: Bool = false
   if track.artworkUrl.length() > 0 {
@@ -216,17 +216,17 @@ func refreshSpotifyArt(state: view SpotifyState, track: view SpotifyTrack, reg: 
     }
   }
   # Drop any prior registration so the new file lands cleanly.
-  if uiBackend() is UiBackend.raylib {
+  if backend is UiBackend.raylib {
     textureRemove(reg: reg, key: state.artKey)
   }
-  if uiBackend() is UiBackend.gpu2d {
+  if backend is UiBackend.gpu2d {
     let copiedKey: String = "{state.artKey}"
     let copiedPath: String = "{outPath}"
     let h: Int = gpu2d.loadImageKey(key: copiedKey, path: copiedPath)
     ret h > 0
   }
   let tex: Texture = loadTexture(fileName: outPath)
-  textureRegisterDirect(reg: reg, key: state.artKey, tex: tex)
+  textureRegisterDirect(reg: reg, key: "{state.artKey}", tex: tex)
   ret true
 }
 
@@ -254,6 +254,7 @@ func rebindAlbumCoversToSpotify(world: mod UiWorld, currentStem: view String, ar
 # used as the source key for the FIRST rebind (since the cover Sprites
 # initially carry that stem as their textureKey).
 func pollSpotify(
+  backend: view UiBackend
   state: mod SpotifyState
   world: mod UiWorld
   reg: mod TextureRegistry
@@ -310,7 +311,7 @@ func pollSpotify(
   let changed: Bool = track.trackId is state.lastTrackId is false
   if changed {
     state.lastTrackId = "{track.trackId}"
-    refreshSpotifyArt(state: state, track: track, reg: reg)
+    refreshSpotifyArt(backend: backend, state: state, track: track, reg: reg)
     # Append to play history. Skip empty / stopped frames where
     # trackName is blank; the local-stem match lets the history
     # row reuse local cover textures when the user happens to be
@@ -328,7 +329,7 @@ func pollSpotify(
       # same textureKey and the history dedup drops one of them.
       # Falls back to the local stem only when Spotify provides no
       # artwork URL (rare; podcasts, local files).
-      var texKey: String = loadHistoryEntryArt(track: track, reg: reg)
+      var texKey: String = loadHistoryEntryArt(backend: backend, track: track, reg: reg)
       if texKey.length() is 0 {
         if stem.length() > 0 {
           texKey = "{stem}"

@@ -78,18 +78,18 @@ func chainRgba(c: view RgbaColor, chain255: view Int) ret RgbaColor {
 # Paint Shape variants on `entity` using the world transform / size
 # already on it. Caller has already verified visibility + alpha > 0.
 # Drawing goes through the backend-agnostic sink (lib/ui/draw.rae).
-func paintShape(world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
+func paintShape(backend: view UiBackend, world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
   let sh: Shape = componentGet(this: world.shapes, entity: entity)
   let fill: RgbaColor = chainRgba(c: sh.fill, chain255: chain255)
 
   if sh.kind is ShapeKind.rect {
-    sinkRect(x: wt.position.x, y: wt.position.y, w: cr.size.x, h: cr.size.y, c: fill)
+    sinkRect(backend: backend, x: wt.position.x, y: wt.position.y, w: cr.size.x, h: cr.size.y, c: fill)
     ret
   }
   if sh.kind is ShapeKind.roundedRect {
     # `Shape.radius` is in pixels; the sink clamps it and converts to
     # raylib's fraction-of-smaller-side roundness.
-    sinkRoundedRect(x: wt.position.x, y: wt.position.y, w: cr.size.x, h: cr.size.y, radius: sh.radius, c: fill)
+    sinkRoundedRect(backend: backend, x: wt.position.x, y: wt.position.y, w: cr.size.x, h: cr.size.y, radius: sh.radius, c: fill)
     ret
   }
   if sh.kind is ShapeKind.circle {
@@ -105,7 +105,7 @@ func paintShape(world: view UiWorld, entity: view EntityId, wt: view WorldTransf
     }
     let cx: Float = wt.position.x + (cr.size.x / 2.0)
     let cy: Float = wt.position.y + (cr.size.y / 2.0)
-    sinkCircle(cx: cx, cy: cy, r: r, c: fill)
+    sinkCircle(backend: backend, cx: cx, cy: cy, r: r, c: fill)
     ret
   }
 }
@@ -604,7 +604,7 @@ func paintGradientFill(world: view UiWorld, entity: view EntityId, wt: view Worl
 # text/sprites layer on top of Shape backgrounds correctly when an
 # entity carries multiple visual components (e.g. a button background
 # + label).
-func paintEntity(world: view UiWorld, reg: view TextureRegistry, entity: view EntityId) {
+func paintEntity(backend: view UiBackend, world: view UiWorld, reg: view TextureRegistry, entity: view EntityId) {
   if componentHas(this: world.worldTransforms, entity: entity) is false {
     ret
   }
@@ -631,7 +631,7 @@ func paintEntity(world: view UiWorld, reg: view TextureRegistry, entity: view En
     paintGradientFill(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
   } else {
     if componentHas(this: world.shapes, entity: entity) {
-      paintShape(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
+      paintShape(backend: backend, world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
     }
   }
   if componentHas(this: world.backdropImages, entity: entity) {
@@ -651,8 +651,8 @@ func paintEntity(world: view UiWorld, reg: view TextureRegistry, entity: view En
 # Using the subtree max (not the child's own rank) lets a row that
 # contains the hovered tile float above sibling rows whose tiles
 # would otherwise overdraw the popped tile's vertical overflow.
-func paintSubtree(world: view UiWorld, reg: view TextureRegistry, entity: view EntityId) {
-  paintEntity(world: world, reg: reg, entity: entity)
+func paintSubtree(backend: view UiBackend, world: view UiWorld, reg: view TextureRegistry, entity: view EntityId) {
+  paintEntity(backend: backend, world: world, reg: reg, entity: entity)
   if componentHas(this: world.childrens, entity: entity) is false {
     ret
   }
@@ -664,7 +664,7 @@ func paintSubtree(world: view UiWorld, reg: view TextureRegistry, entity: view E
     loop i < n {
       let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
       if subtreeHoverPaintRank(world: world, entity: cid) is pass {
-        paintSubtree(world: world, reg: reg, entity: cid)
+        paintSubtree(backend: backend, world: world, reg: reg, entity: cid)
       }
       i = i + 1
     }
@@ -704,13 +704,13 @@ func initRaeUi() pub {
   }
 }
 
-func renderSystem(world: view UiWorld, reg: view TextureRegistry) {
+func renderSystem(backend: view UiBackend, world: view UiWorld, reg: view TextureRegistry) {
   # Painter's algorithm with LayerRef-aware sorting. Roots paint in
   # ascending layer order so overlays (higher-order layers) sit on
   # top of page content.
   let allRangeLow: Int = 0 - 1000000
   let allRangeHi: Int = 1000000
-  renderSystemLayerRange(world: world, reg: reg, minOrder: allRangeLow, maxOrder: allRangeHi)
+  renderSystemLayerRange(backend: backend, world: world, reg: reg, minOrder: allRangeLow, maxOrder: allRangeHi)
 }
 
 # Same painter walk as `renderSystem` but only paints roots whose
@@ -719,7 +719,7 @@ func renderSystem(world: view UiWorld, reg: view TextureRegistry) {
 # after content paints (layer 0..99) but before the dock paints
 # (layer 100+) so a `captureAndBlurRegion` doesn't include the very
 # overlay it's meant to sit behind.
-func renderSystemLayerRange(world: view UiWorld, reg: view TextureRegistry, minOrder: view Int, maxOrder: view Int) pub {
+func renderSystemLayerRange(backend: view UiBackend, world: view UiWorld, reg: view TextureRegistry, minOrder: view Int, maxOrder: view Int) pub {
   let roots: List(EntityId) = collectPaintableRoots(world: world)
   let m: Int = roots.length
   var p: Int = 0
@@ -729,7 +729,7 @@ func renderSystemLayerRange(world: view UiWorld, reg: view TextureRegistry, minO
       let ord: Int = entityLayerOrder(world: world, entity: root)
       if ord >= minOrder {
         if ord < maxOrder {
-          paintSubtree(world: world, reg: reg, entity: root)
+          paintSubtree(backend: backend, world: world, reg: reg, entity: root)
         }
       }
     }

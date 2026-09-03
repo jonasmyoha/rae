@@ -15,6 +15,7 @@ open ui/ecs
 # interactive branch).
 
 func runScreenshotMode(
+  backend: view UiBackend
   scenes: view AlbumScenes
   appState: mod AppState
   texReg: mod TextureRegistry
@@ -70,7 +71,7 @@ func runScreenshotMode(
     }
   }
   let shotScroll: Float = 0.0
-  let world: UiWorld = buildScreenWorld(screen: screen, scenes: scenes, playback: shotPlayback, state: appState, texReg: texReg, scrollY: shotScroll)
+  let world: UiWorld = buildScreenWorld(backend: backend, screen: screen, scenes: scenes, playback: shotPlayback, state: appState, texReg: texReg, scrollY: shotScroll)
   applyViewportExtent(world: world)
   layoutSystem(world: world)
   transformSystem(world: world)
@@ -80,7 +81,7 @@ func runScreenshotMode(
   loop f < warmupFrames {
     beginDrawing()
     clearBackground(color: bg)
-    renderSystem(world: world, reg: texReg)
+    renderSystem(backend: backend, world: world, reg: texReg)
     if f is (warmupFrames / 2) {
       takeScreenshot(fileName: screenshotEnv)
     }

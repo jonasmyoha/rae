@@ -47,7 +47,7 @@ enum Screen {
 # is dropped on that screen. `floor` is the most-negative scrollY
 # the page allows. main.rae's per-frame scroll bounds block is a
 # thin wrapper around this.
-type ScrollBounds pub {
+type ScrollBounds {
   scrollable: Bool
   floor: Float
 }
@@ -73,6 +73,7 @@ func scrollBoundsForScreen(
 }
 
 func buildScreenWorld(
+  backend: view UiBackend
   screen: Screen
   scenes: view AlbumScenes
   playback: view PlaybackState
@@ -93,7 +94,7 @@ func buildScreenWorld(
     ret buildLibraryWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY)
   }
   if screen is Screen.profile {
-    ret buildProfileWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY)
+    ret buildProfileWorld(backend: backend, scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY)
   }
   if screen is Screen.history {
     ret buildHistoryWorld(scenes: scenes, reg: texReg, state: state, playback: playback, scrollY: scrollY)
@@ -143,6 +144,7 @@ func pageIdForScreen(screen: Screen) pub ret String {
 # down. Data changes (album / track) still trigger a full rebuild
 # until slice 4b.3 introduces per-page invalidation.
 func buildAppWorld(
+  backend: view UiBackend
   scenes: view AlbumScenes
   playback: view PlaybackState
   state: view AppState
@@ -150,6 +152,7 @@ func buildAppWorld(
   scrollY: view Float
 ) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
+  seedWorldThemeFrom(world: world, src: state.theme)  # #764: theme from AppState
   # Layer stack first — overlay-mount sites below assume the named
   # layer entities ("content" / "dock" / "back-button" / "dialog" /
   # "debug") already exist and look them up by id.
@@ -158,7 +161,7 @@ func buildAppWorld(
   let libraryPage: EntityId = mountLibraryPage(world: world, state: state, scrollY: scrollY)
   let albumPage: EntityId = mountAlbumPage(world: world, scenes: scenes, state: state, playback: playback, scrollY: scrollY)
   let nowPlayingPage: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: state)
-  let profilePage: EntityId = mountProfilePage(world: world, reg: texReg, state: state, scrollY: scrollY)
+  let profilePage: EntityId = mountProfilePage(backend: backend, world: world, reg: texReg, state: state, scrollY: scrollY)
   let searchPage: EntityId = mountSearchPage(world: world)
   let historyPage: EntityId = mountHistoryPage(world: world, state: state, scrollY: scrollY)
 
@@ -272,7 +275,7 @@ func playbackIconKey(playback: view PlaybackState) pub ret String {
 # target: scenes author the placeholder `"albumCover"` key and
 # main.rae calls `rebindHero(world, "albumCover", state.currentAlbumStem)`
 # after building Album / NowPlaying worlds.
-type AppState pub {
+type AppState {
   albums: List(Album)
   # Stem of the album the user is currently viewing. Matches one
   # entry's `Album.stem`. Empty string before the first
@@ -327,9 +330,14 @@ type AppState pub {
   # UI preferences (code-only flags — no settings UI yet). See
   # `app_settings.rae`.
   settings: AppSettings
+  # #764: the app-owned UI theme (active palette + scene token tables +
+  # repaint generation). The world is rebuilt every outer iteration and each
+  # new world is seeded from this via `seedWorldThemeFrom`; the T-key and
+  # debug-menu theme toggles write back here.
+  theme: UiTheme
 }
 
-func createAppState(albums: own List(Album)) pub ret AppState {
+func createAppState(albums: own List(Album), theme: own UiTheme) pub ret AppState {
   # Default the active stem to the first album in the list — the
   # static Album / NowPlaying scenes hero-animate against whatever
   # cover the Profile grid has at that index, and the user's first
@@ -359,6 +367,7 @@ func createAppState(albums: own List(Album)) pub ret AppState {
     currentPlaylistId: ""
     bottomSheet: createBottomSheetState()
     settings: createAppSettings()
+    theme: own theme
   }
 }
 
@@ -480,6 +489,7 @@ func spotifySearchQuery(artist: view String, title: view String, album: view Str
 }
 
 func dispatchActions(
+  backend: view UiBackend
   input: view InputSystem
   current: Screen
   playback: mod PlaybackState
@@ -677,7 +687,7 @@ func dispatchActions(
         # Local entries reuse the boot-loaded album-stem texture.
         textureKey: "{state.currentAlbumStem}"
         durationSec: histTrack.durationMs.toFloat() / 1000.0
-        playedAt: uiNowSeconds()
+        playedAt: uiNowSeconds(backend: backend)
       }
       recordPlay(history: state.playHistory, entry: own histEntry)
       saveHistoryToJson(history: state.playHistory, path: historyFilePath)

@@ -35,8 +35,8 @@ let frameTimeoutSec: Float = 0.016
 # is missing or implausible (<30 or >360 Hz). Call once after initWindow;
 # drives both the animation wait cadence and the render FPS cap so the
 # UI paces to the real display instead of a hard-coded 60.
-func displayFrameSec() pub ret Float {
-  let hz: Int = uiMonitorRefreshRate(monitor: uiCurrentMonitor())
+func displayFrameSec(backend: view UiBackend) pub ret Float {
+  let hz: Int = uiMonitorRefreshRate(backend: backend, monitor: uiCurrentMonitor(backend: backend))
   if hz < 30 or hz > 360 {
     ret 0.016667
   }

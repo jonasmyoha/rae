@@ -21,7 +21,7 @@ import ui/legacy_raylib/window
 #                           drag ended (otherwise the lift would fire
 #                           an OnClick on whatever's under the cursor).
 
-type ScrollFsm pub {
+type ScrollFsm {
   # Logical scroll Y (more-negative = content shifted up). The
   # ECS `Offset` and `ScrollState` components on `scrollTarget`
   # follow this via `updateScrollOffset`.
@@ -69,6 +69,7 @@ func createScrollFsm(initialScrollY: view Float) ret ScrollFsm {
 # Drag + spring + momentum physics. Returns true on the frame the
 # user lifted after an active drag (so the caller skips dispatch).
 func applyDragPhysics(
+  backend: view UiBackend
   fsm: mod ScrollFsm
   world: mod UiWorld
   scrollTarget: view EntityId
@@ -84,9 +85,9 @@ func applyDragPhysics(
   }
 
   var dragJustReleased: Bool = false
-  let curMouseX: Float = uiPointerX()
-  let curMouseY: Float = uiPointerY()
-  let curMouseDown: Bool = uiPointerButtonDown(button: mouseButtonLeft)
+  let curMouseX: Float = uiPointerX(backend: backend)
+  let curMouseY: Float = uiPointerY(backend: backend)
+  let curMouseDown: Bool = uiPointerButtonDown(backend: backend, button: mouseButtonLeft)
   # 10pt activation distance — matches iOS UIPanGestureRecognizer.
   # Lower values cross natural hand-tremor on click and silently drop
   # release-clicks.
@@ -144,7 +145,7 @@ func applyDragPhysics(
     # Physics step: OOB → spring; in-bounds with momentum → decay.
     # Both gated on `wheelQuiet` so live trackpad momentum isn't
     # fought by the spring (caused the "5 bounces" symptom).
-    let nowSec: Float = uiNowSeconds()
+    let nowSec: Float = uiNowSeconds(backend: backend) as Float
     let wheelIdleSec: Float = nowSec - fsm.lastWheelTime
     let wheelQuiet: Bool = wheelIdleSec > 0.05
     let isOOB: Bool = fsm.scrollY > scrollMax or fsm.scrollY < scrollMin
@@ -212,6 +213,7 @@ func applyDragPhysics(
 # 1.5s after finger-lift; if those land mid-click the release hit-
 # test misses).
 func applyWheelScroll(
+  backend: view UiBackend
   fsm: mod ScrollFsm
   world: mod UiWorld
   scrollTarget: view EntityId
@@ -222,10 +224,10 @@ func applyWheelScroll(
   if scrollOnThisScreen is false {
     ret
   }
-  let wheelMouseDown: Bool = uiPointerButtonDown(button: mouseButtonLeft)
+  let wheelMouseDown: Bool = uiPointerButtonDown(backend: backend, button: mouseButtonLeft)
   var wheel: Float = 0.0
   if wheelMouseDown is false {
-    wheel = uiWheelMove()
+    wheel = uiWheelMove(backend: backend)
   }
   if wheel < 0.001 and wheel > -0.001 {
     ret
@@ -262,6 +264,6 @@ func applyWheelScroll(
   # drives `scrollY` each event, and the spring/momentum paths
   # are gated on `wheelQuiet` so they don't fight us.
   fsm.velocity = 0.0
-  fsm.lastWheelTime = uiNowSeconds()
+  fsm.lastWheelTime = uiNowSeconds(backend: backend) as Float
   updateScrollOffset(world: world, target: scrollTarget, scrollY: fsm.scrollY)
 }
