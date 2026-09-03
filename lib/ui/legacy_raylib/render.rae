@@ -318,7 +318,7 @@ func textStyleSize(styleId: view String) ret Float {
   ret 43.373493975903614
 }
 
-func textStyleColor(styleId: view String, chain255: view Int) ret Color {
+func textStyleColor(styleId: view String, chain255: view Int, active: view Theme) ret Color {
   # Style id → theme palette mapping (light/dark flips for free).
   let mute: String = "muted"
   let caption: String = "caption"
@@ -334,39 +334,39 @@ func textStyleColor(styleId: view String, chain255: view Int) ret Color {
   let tabInactive: String = "tabInactive"
 
   if styleId is mute {
-    ret toRaylibColor(c: themeColorByName(name: "textMuted"), chain255: chain255)
+    ret toRaylibColor(c: themeColorByName(theme: active, name: "textMuted"), chain255: chain255)
   }
   if styleId is caption {
-    ret toRaylibColor(c: themeColorByName(name: "textMuted"), chain255: chain255)
+    ret toRaylibColor(c: themeColorByName(theme: active, name: "textMuted"), chain255: chain255)
   }
   if styleId is primary {
-    ret toRaylibColor(c: themeColorByName(name: "textPrimary"), chain255: chain255)
+    ret toRaylibColor(c: themeColorByName(theme: active, name: "textPrimary"), chain255: chain255)
   }
   if styleId is topBarTitle {
-    ret toRaylibColor(c: themeColorByName(name: "textPrimary"), chain255: chain255)
+    ret toRaylibColor(c: themeColorByName(theme: active, name: "textPrimary"), chain255: chain255)
   }
   let pageTitle: String = "pageTitle"
   if styleId is pageTitle {
-    ret toRaylibColor(c: themeColorByName(name: "textPrimary"), chain255: chain255)
+    ret toRaylibColor(c: themeColorByName(theme: active, name: "textPrimary"), chain255: chain255)
   }
   if styleId is albumCaption {
-    ret toRaylibColor(c: themeColorByName(name: "textMuted"), chain255: chain255)
+    ret toRaylibColor(c: themeColorByName(theme: active, name: "textMuted"), chain255: chain255)
   }
   if styleId is trackTitle {
-    ret toRaylibColor(c: themeColorByName(name: "textPrimary"), chain255: chain255)
+    ret toRaylibColor(c: themeColorByName(theme: active, name: "textPrimary"), chain255: chain255)
   }
   if styleId is trackMuted {
-    ret toRaylibColor(c: themeColorByName(name: "textMuted"), chain255: chain255)
+    ret toRaylibColor(c: themeColorByName(theme: active, name: "textMuted"), chain255: chain255)
   }
   if styleId is tabActive {
-    ret toRaylibColor(c: themeColorByName(name: "textPrimary"), chain255: chain255)
+    ret toRaylibColor(c: themeColorByName(theme: active, name: "textPrimary"), chain255: chain255)
   }
   if styleId is tabInactive {
-    ret toRaylibColor(c: themeColorByName(name: "textMuted"), chain255: chain255)
+    ret toRaylibColor(c: themeColorByName(theme: active, name: "textMuted"), chain255: chain255)
   }
   # "On surfaceAlt" styles read accentText for theme-correct contrast.
   if styleId is miniTitle {
-    ret toRaylibColor(c: themeColorByName(name: "accentText"), chain255: chain255)
+    ret toRaylibColor(c: themeColorByName(theme: active, name: "accentText"), chain255: chain255)
   }
   if styleId is miniMuted {
     # Theme-aware muted color for text on the mini-player pill
@@ -374,12 +374,12 @@ func textStyleColor(styleId: view String, chain255: view Int) ret Color {
     # pale cyan needing dark muted text; in dark theme it's a
     # darker green needing light muted text. The
     # `accentTextMuted` token carries the right value for each.
-    ret toRaylibColor(c: themeColorByName(name: "accentTextMuted"), chain255: chain255)
+    ret toRaylibColor(c: themeColorByName(theme: active, name: "accentTextMuted"), chain255: chain255)
   }
   # Pill labels sit on top of the `$accent` shape — `$accentText`
   # is the dual.
   if styleId is pillLabelLight {
-    ret toRaylibColor(c: themeColorByName(name: "accentText"), chain255: chain255)
+    ret toRaylibColor(c: themeColorByName(theme: active, name: "accentText"), chain255: chain255)
   }
   # Debug-UI styles (theme-independent — see lib/ui/debug.rae).
   let debugButton: String = "debugButton"
@@ -394,10 +394,10 @@ func textStyleColor(styleId: view String, chain255: view Int) ret Color {
   }
   # Caption-class right-aligned time label — matches `caption` colour.
   if styleId is "timeTotal" {
-    ret toRaylibColor(c: themeColorByName(name: "textMuted"), chain255: chain255)
+    ret toRaylibColor(c: themeColorByName(theme: active, name: "textMuted"), chain255: chain255)
   }
   # Fallback: treat unknown style ids as primary text.
-  ret toRaylibColor(c: themeColorByName(name: "textPrimary"), chain255: chain255)
+  ret toRaylibColor(c: themeColorByName(theme: active, name: "textPrimary"), chain255: chain255)
 }
 
 # Horizontally-centered styles: the renderer measures the glyph run
@@ -448,7 +448,7 @@ func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransfo
     ret
   }
   let size: Float = textStyleSize(styleId: tx.styleId)
-  let col: Color = textStyleColor(styleId: tx.styleId, chain255: chain255)
+  let col: Color = textStyleColor(styleId: tx.styleId, chain255: chain255, active: world.theme.active)
   var drawX: Float = wt.position.x
   var drawY: Float = wt.position.y
   # Alignment: styleId (legacy) or Align component (Center / End).

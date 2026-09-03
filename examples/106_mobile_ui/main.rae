@@ -70,23 +70,21 @@ func main() {
   # the .raescene theme instead of hardcoded render_gpu2d tables.
   let themeScene: Scene = loadSceneFile(path: themePath)
   let uiTheme: ResolvedTheme = parseTheme(scene: themeScene)
-  # Publish radius/padding tokens for the scene deserialiser (#233),
-  # BEFORE loadAllScenes so `"radius": "radiusCard"` etc. resolve.
-  setActiveThemeTokens(theme: uiTheme)
-  let gpuUi: Gpu2dUi = { textFont: gpuTextFont, iconFont: gpuIconFont, theme: uiTheme }
-
-  # Theme is picked from `RAE_UI_THEME` ("dark" / "light"); default is
-  # dark. Setting the theme BEFORE `loadAllScenes` matters — scenes
-  # resolve their `"tokenName"` colors against `currentTheme()` at
-  # parse time, so the theme has to be in place first.
+  # #764: theme is no longer a global — it lives on AppState (built from the
+  # RAE_UI_THEME palette + the parsed token tables) and each rebuilt world is
+  # seeded from it via seedWorldThemeFrom.
   let themeEnv: String = getEnv(name: "RAE_UI_THEME")
   let lightKey: String = "light"
+  var chosenTheme: Theme = darkTheme()
   if themeEnv is lightKey {
-    setActiveTheme(theme: lightTheme())
-  } else {
-    setActiveTheme(theme: darkTheme())
+    chosenTheme = lightTheme()
   }
-  syncColorsFromTheme()
+  var bootTheme: UiTheme = createUiTheme()
+  bootTheme.active = chosenTheme
+  bootTheme.generation = 1
+  applyResolvedTokens(dst: bootTheme.resolved, src: uiTheme)
+  let gpuUi: Gpu2dUi = { textFont: gpuTextFont, iconFont: gpuIconFont, theme: uiTheme, activeTheme: chosenTheme }
+  syncColorsFromTheme(active: chosenTheme)
 
   var scenes: AlbumScenes = loadAllScenes()
   let texReg: TextureRegistry = createTextureRegistry()
@@ -96,7 +94,7 @@ func main() {
   # `cascadeAssets` after first paint so the window appears instantly.
   # `appState` is built here so state-dependent blocks below see it.
   let albums: List(Album) = loadAllAlbums(folder: albumsFolder)
-  let appState: AppState = createAppState(albums: albums)
+  var appState: AppState = createAppState(albums: albums, theme: own bootTheme)
   # Mock playback state — survives world rebuilds; both the album
   # mini-player and the now-playing screen mutate it through
   # `dispatchActions`. Created here so `restoreAppState` below can
@@ -744,7 +742,7 @@ func main() {
           # code-driven colors and the world rebuild repaints them.
           var debugChanged: Bool = inputDispatch.debugChanged
           if debugChanged {
-            syncColorsFromTheme()
+            syncColorsFromTheme(active: appState.theme.active)
             switching = true
           }
 
@@ -759,15 +757,18 @@ func main() {
           # rebuild entirely.
           let keyT: Int = 84
           if uiIsKeyPressed(key: keyT) {
-            let cur: Theme = currentTheme()
+            # #764: theme lives on AppState; `switching` forces the reseeding rebuild.
+            let cur: Theme = appState.theme.active
             if cur.mode is ThemeMode.light {
-              setActiveTheme(theme: darkTheme())
-              log("[theme] -> dark (gen {themeGeneration()})")
+              appState.theme.active = darkTheme()
+              appState.theme.generation = appState.theme.generation + 1
+              log("[theme] -> dark (gen {appState.theme.generation})")
             } else {
-              setActiveTheme(theme: lightTheme())
-              log("[theme] -> light (gen {themeGeneration()})")
+              appState.theme.active = lightTheme()
+              appState.theme.generation = appState.theme.generation + 1
+              log("[theme] -> light (gen {appState.theme.generation})")
             }
-            syncColorsFromTheme()
+            syncColorsFromTheme(active: appState.theme.active)
             switching = true
           }
 

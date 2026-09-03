@@ -214,6 +214,7 @@ func buildHomeWorld(
   viewport: view Viewport
 ) pub ret UiWorld {
   let world: UiWorld = createUiWorld()
+  seedWorldThemeFrom(world: world, src: state.theme)  # #764: theme from AppState
   applyViewportExtent(world: world, viewport: viewport)
   let page: EntityId = mountHomePage(world: world, scenes: scenes, state: state, scrollY: scrollY, viewport: viewport)
   let dock: EntityId = mountBottomDockOverlay(

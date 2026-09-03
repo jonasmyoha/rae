@@ -457,14 +457,14 @@ func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret EntityId 
 func buildDebugIconButton(world: mod UiWorld) ret EntityId {
   let btn: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: btn, w: debugCloseIconSize, h: debugCloseIconSize)
-  setRoundedShape(world: world, entity: btn, fill: themeColorByName(name: "outline"), radius: debugCloseIconSize / 2.0)
+  setRoundedShape(world: world, entity: btn, fill: themeColorByName(theme: world.theme.active, name: "outline"), radius: debugCloseIconSize / 2.0)
   setStackLayout(world: world, entity: btn)
   setOnClickAction(world: world, entity: btn, actionId: debugActionDismiss)
 
   let icon: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: icon, w: debugCloseIconGlyph, h: debugCloseIconGlyph)
   setOpticalAlign(world: world, entity: icon, centerX: true, centerY: true, biasX: 0.0, biasY: 0.0)
-  setDebugSprite(world: world, entity: icon, key: "mat:close", tint: themeColorByName(name: "textPrimary"))
+  setDebugSprite(world: world, entity: icon, key: "mat:close", tint: themeColorByName(theme: world.theme.active, name: "textPrimary"))
   let kids: List(EntityId) = createList(EntityId, cap: 1)
   kids.add(value: icon)
   attachKids(world: world, parent: btn, kids: kids)
@@ -474,7 +474,7 @@ func buildDebugIconButton(world: mod UiWorld) ret EntityId {
 func buildDebugCloseButton(world: mod UiWorld) ret EntityId {
   let btn: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: btn, w: debugCloseButtonW, h: debugCloseButtonH)
-  setRoundedShape(world: world, entity: btn, fill: themeColorByName(name: "accent"), radius: debugCloseButtonRadius)
+  setRoundedShape(world: world, entity: btn, fill: themeColorByName(theme: world.theme.active, name: "accent"), radius: debugCloseButtonRadius)
   setStackLayout(world: world, entity: btn)
   setOnClickAction(world: world, entity: btn, actionId: debugActionDismiss)
 
@@ -593,7 +593,7 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Enti
   setOffset(world: world, entity: content, x: debugPanelPadding, y: debugContentTop)
   setVerticalLayout(world: world, entity: content, gap: debugRowGap)
 
-  let themeRow: EntityId = buildSwitchRow(world: world, labelText: "Dark theme", actionId: debugActionToggleTheme, on: currentTheme().mode is ThemeMode.dark, width: contentW)
+  let themeRow: EntityId = buildSwitchRow(world: world, labelText: "Dark theme", actionId: debugActionToggleTheme, on: world.theme.active.mode is ThemeMode.dark, width: contentW)
   let labelsRow: EntityId = buildSwitchRow(world: world, labelText: "FPS / mem labels", actionId: debugActionToggleLabels, on: debug.showLabels, width: contentW)
   let outlinesRow: EntityId = buildSwitchRow(world: world, labelText: "Input outlines", actionId: debugActionToggleInputOutlines, on: debug.showInputOutlines, width: contentW)
 
@@ -654,7 +654,7 @@ func addDebugLayer(world: mod UiWorld, debug: mod DebugSystem) pub {
   }
 }
 
-func dispatchDebugAction(input: view InputSystem, debug: mod DebugSystem) pub ret Bool {
+func dispatchDebugAction(state: mod AppState, input: view InputSystem, debug: mod DebugSystem) pub ret Bool {
   var needsRemount: Bool = false
   let n: Int = input.events.length
   var i: Int = 0
@@ -672,12 +672,15 @@ func dispatchDebugAction(input: view InputSystem, debug: mod DebugSystem) pub re
       }
     }
     if actionId is debugActionToggleTheme {
-      let cur: Theme = currentTheme()
+      # #764: the theme lives on AppState (106 rebuilds its world per frame); the
+      # remount below reseeds the new world from it.
+      let cur: Theme = state.theme.active
       if cur.mode is ThemeMode.dark {
-        setActiveTheme(theme: lightTheme())
+        state.theme.active = lightTheme()
       } else {
-        setActiveTheme(theme: darkTheme())
+        state.theme.active = darkTheme()
       }
+      state.theme.generation = state.theme.generation + 1
       needsRemount = true
     }
     if actionId is debugActionToggleLabels {
@@ -693,9 +696,9 @@ func dispatchDebugAction(input: view InputSystem, debug: mod DebugSystem) pub re
   ret needsRemount
 }
 
-func selectedForDebugAction(actionId: view String, debug: view DebugSystem) ret Bool {
+func selectedForDebugAction(world: view UiWorld, actionId: view String, debug: view DebugSystem) ret Bool {
   if actionId is debugActionToggleTheme {
-    ret currentTheme().mode is ThemeMode.dark
+    ret world.theme.active.mode is ThemeMode.dark
   }
   if actionId is debugActionToggleLabels {
     ret debug.showLabels
@@ -725,7 +728,7 @@ func syncDebugWidgetStates(world: mod UiWorld, debug: view DebugSystem) pub {
       }
       if isDebugToggle {
         let bind: view ActionBinding => componentView(this: world.actionBindings, entity: entity)
-        let selected: Bool = selectedForDebugAction(actionId: bind.actionId, debug: debug)
+        let selected: Bool = selectedForDebugAction(world: world, actionId: bind.actionId, debug: debug)
         setWidgetSelected(world: world, entity: entity, selected: selected)
       }
     }
