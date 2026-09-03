@@ -166,26 +166,26 @@ func ensureTerrainPipeline() {
 # #745: takes composed model matrices directly (Quat-friendly), not a Euler
 # Transform3d — the caller builds them with transform3dToMatrix from the entity's
 # Quat Transform3D, so no Euler Vec3 rotation survives on the terrain path.
-func drawTerrainMesh(mesh: copy Int, model: view Mat4, prevModel: view Mat4,
+func drawTerrainMesh(cache: mod GbufferCache, mesh: copy Int, model: view Mat4, prevModel: view Mat4,
                      roughness: copy Float, time: copy Float) pub {
   ensureTerrainPipeline()
   if gbMeshReady(mesh: mesh) is 0 { ret }
   let base: Int = gbDrawCount()
   if base >= gbMaxDraws() { ret }
-  ensureDrawScratch()
-  packInstanceRecord(records: gDrawScratch, slot: 0, model: model, prevModel: prevModel,
+  ensureDrawScratch(cache: cache)
+  packInstanceRecord(records: cache.drawScratch, slot: 0, model: model, prevModel: prevModel,
     r: 1.0, g: 1.0, b: 1.0, metallic: 0.0, roughness: roughness, emissive: 0.0, toon: 0,
     paletteBase: 0)
   # paletteBase is an Int in the record API; the clock needs sub-second
   # resolution, so it is written straight into the float slot instead.
-  gDrawScratch.set(index: 39, value: time)
+  cache.drawScratch.set(index: 39, value: time)
   # #9: slot 32 (albedoMetallic.x, which the terrain shader ignores for colour)
   # carries the global texture-blend amount. 0 until an app uploads a tile, so
   # the shader's textured-grass term is identity for every other terrain user.
-  gDrawScratch.set(index: 32, value: gbTerrainBlend())
+  cache.drawScratch.set(index: 32, value: gbTerrainBlend())
   gbIssueInstanced(pass: gbPass(), pipeline: gbTerrainPipeline(), bind: gbTerrainBind(),
     vbuf: gbMeshVbuf(mesh: mesh), ibuf: gbMeshIbuf(mesh: mesh),
-    icount: gbMeshIcount(mesh: mesh), base: base, count: 1, records: gDrawScratch.data)
+    icount: gbMeshIcount(mesh: mesh), base: base, count: 1, records: cache.drawScratch.data)
   wgpuRenderPassEncoderSetPipeline(renderPassEncoder: gbPass(), pipeline: gbStaticPipeline())
   wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: gbPass(), groupIndex: 0 as UInt32,
     group: gbStaticBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
