@@ -6,15 +6,15 @@
 # RenderSystem's `visualBoundsAt`. Runs with `mod world` between the transform
 # and render passes (see the callers: app3d/ui_shell, the example frame loops).
 import core
-import sdf_text
+import sdfText
 import ui/components
 import ui/ecs
 import ui/RenderSystem/RenderSystem
-import ui/text_style
-import ui/icon_codepoints
-import ui/theme_resolved
+import ui/textStyle
+import ui/iconCodepoints
+import ui/themeResolved
 open ui/ecs
-open ecs/component_table
+open ecs/ComponentTable
 
 
 # Recompute + cache `e`'s bounds when the (text, size, icon-font) key
@@ -32,9 +32,9 @@ func refreshVisualBounds(world: mod UiWorld, e: view EntityId, text: view String
   }
   var b: SdfTextBounds = { hasBounds: false, left: 0.0, top: 0.0, right: 0.0, bottom: 0.0, advance: 0.0 }
   if isIcon {
-    b = sdf_text.sdfMeasureTextBounds(font: res.iconFont, text: text, sizePx: sizePx)
+    b = sdfText.sdfMeasureTextBounds(font: res.iconFont, text: text, sizePx: sizePx)
   } else {
-    b = sdf_text.sdfMeasureTextBounds(font: res.textFont, text: text, sizePx: sizePx)
+    b = sdfText.sdfMeasureTextBounds(font: res.textFont, text: text, sizePx: sizePx)
   }
   let keyText: String = "{text}"
   let vb: VisualBounds = {

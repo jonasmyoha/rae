@@ -17,13 +17,13 @@
 #   rae run --target compiled examples/104_gpu2d_coords/main.rae
 import core
 import gpu2d
-import gpu2d_text
-import sdf_text
+import gpu2dText
+import sdfText
 
 func main() ret Int {
     gpu2d.initWindow(width: 1000, height: 640, title: "Rae 2D — coordinate system")
     let dir: String = "examples/104_gpu2d_coords/"
-    let font: SdfFont = sdf_text.loadSdfFont(
+    let font: SdfFont = sdfText.loadSdfFont(
         jsonPath: "{dir}assets/Roboto-Regular.mtsdf.json",
         rawAtlasPath: "{dir}assets/Roboto-Regular.mtsdf.raw")
 
@@ -77,14 +77,14 @@ func main() ret Int {
         gpu2d.drawRect(x: 1056.0, y: 696.0, w: 24.0, h: 24.0, color: 0xFF42A5F5)
 
         # Labels.
-        gpu2d_text.drawText(font: font, text: "0,0", x: 30.0, y: 44.0, sizePx: 22.0, color: 0xFFEF5350)
-        gpu2d_text.drawText(font: font, text: "Design canvas 1080 x 720 du (fit)",
+        gpu2dText.drawText(font: font, text: "0,0", x: 30.0, y: 44.0, sizePx: 22.0, color: 0xFFEF5350)
+        gpu2dText.drawText(font: font, text: "Design canvas 1080 x 720 du (fit)",
                             x: 70.0, y: 96.0, sizePx: 30.0, color: 0xFFFFFFFF)
-        gpu2d_text.drawText(font: font, text: "Window {gpu2d.windowWidth()} x {gpu2d.windowHeight()} px   DPR {gpu2d.dpr().toInt()}x",
+        gpu2dText.drawText(font: font, text: "Window {gpu2d.windowWidth()} x {gpu2d.windowHeight()} px   DPR {gpu2d.dpr().toInt()}x",
                             x: 70.0, y: 136.0, sizePx: 24.0, color: 0xFFAEB8CC)
-        gpu2d_text.drawText(font: font, text: "amber = 48 du safe-area inset",
+        gpu2dText.drawText(font: font, text: "amber = 48 du safe-area inset",
                             x: 70.0, y: 168.0, sizePx: 20.0, color: 0xFFFFB300)
-        gpu2d_text.drawText(font: font, text: "centred card stays centred at any size",
+        gpu2dText.drawText(font: font, text: "centred card stays centred at any size",
                             x: 388.0, y: 370.0, sizePx: 20.0, color: 0xFF9FC0FF)
 
         gpu2d.endFrame()

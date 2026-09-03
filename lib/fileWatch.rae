@@ -1,0 +1,90 @@
+# Polling file watcher. A primitive that detects on-disk mtime changes;
+# what to do about a change (re-parse scene JSON, recompile bytecode,
+# swap a function table, reload a shader, ...) is the caller's job.
+#
+# The classic use case is *data hot reload* — see `examples/98_mobile_ui`
+# (live `.raescene` editing) and `examples/99_data_hot_reload` (any
+# config file) — but the same primitive could equally back a *code
+# hot reload* trigger by pointing it at `.rae` sources.
+#
+# How callers wire it in:
+#   1. Build a `List(String)` of paths to watch.
+#   2. Call `fileWatch.createFileWatcher(paths, enabled, intervalSec)` once after
+#      the paths are known. The snapshot records each file's mtime so
+#      the first check is quiet.
+#   3. Once per frame, call `fileWatch.checkForChanges(watcher, getTime())`. It is
+#      throttled by `intervalSec`, so calling every frame is cheap —
+#      most calls early-return.
+#   4. When it returns `true`, the caller does whatever reload makes
+#      sense: re-parse a JSON file, recompile, etc.
+#
+# Both Compiled (C backend) and Live (bytecode VM) targets call into
+# the same `fileModTime` native, so the watcher behaves identically.
+import core
+
+type WatchEntry {
+  path: String
+  # Epoch seconds — Float64 so a ~1.7e9 timestamp keeps sub-second
+  # resolution (f32 would quantise it to ~128s and never detect a change).
+  lastMtime: Float64
+}
+
+type FileWatcher {
+  enabled: Bool
+  entries: List(WatchEntry)
+  intervalSec: Float
+  lastCheck: Float64
+}
+
+# Take a snapshot of the current mtimes for every path. Subsequent
+# `checkForChanges` calls compare against this baseline, so the first
+# poll after construction does not spuriously fire.
+func createFileWatcher(paths: view List(String), enabled: view Bool, intervalSec: view Float) ret FileWatcher {
+  let entries: List(WatchEntry) = createList(WatchEntry, cap: paths.length)
+  var i: Int = 0
+  loop i < paths.length {
+    if let p: String = paths.copyAt(index: i) {
+      let mt: Float64 = fileModTime(path: p)
+      let entry: WatchEntry = { path: p, lastMtime: mt }
+      entries.add(value: entry)
+    }
+    i = i + 1
+  }
+  ret FileWatcher {
+    enabled: enabled
+    entries: entries
+    intervalSec: intervalSec
+    lastCheck: 0.0 - intervalSec
+  }
+}
+
+# Returns true if any watched file's mtime changed since the previous
+# poll. Throttled — calls within `intervalSec` of the last check are
+# free (return false). On `true`, the stored mtimes are refreshed so
+# the next call is quiet until the next on-disk edit.
+func checkForChanges(watcher: mod FileWatcher, now: view Float64) ret Bool {
+  if watcher.enabled is false {
+    ret false
+  }
+  if now - watcher.lastCheck < watcher.intervalSec {
+    ret false
+  }
+  watcher.lastCheck = now
+  var changed: Bool = false
+  var i: Int = 0
+  loop i < watcher.entries.length {
+    # Read via the raw buffer accessor: `List(T).get` returns `opt T`,
+    # which the C backend lowers to `RaeAny` and can't be re-typed back
+    # to a struct without a runtime tag check. The pattern matches
+    # `lib/ui/scene.rae:sceneNodeIndex`.
+    let entry: WatchEntry = rae_ext_rae_buf_get(buf: watcher.entries.data, index: i)
+    let mt: Float64 = fileModTime(path: entry.path)
+    if mt is not entry.lastMtime {
+      let updated: WatchEntry = { path: entry.path, lastMtime: mt }
+      rae_ext_rae_buf_set(buf: watcher.entries.data, index: i, value: updated)
+      changed = true
+    }
+    i = i + 1
+  }
+  ret changed
+}
