@@ -49,6 +49,8 @@ open vec3
 open scene3d
 open sky
 open math3d
+open ecs/entity          # #793: World3d render path reads entities/components
+open ecs/ComponentTable
 # The instanced draw path (#502) runs in Rae directly on the WebGPU bindings.
 # `open webgpu/webgpu` also makes the sibling enum/flag consts (e.g.
 # WGPUIndexFormat_Uint32) resolvable as bare cheader-backed references; do NOT
@@ -855,6 +857,25 @@ func renderScene(cache: mod GbufferCache, scene: view Scene3d) pub {
       drawInstance(cache: cache, mesh: r.mesh, transform: t, prevTransform: pt, material: m)
     }
     i = i + 1
+  }
+}
+
+# #793: the World3d twin of renderScene — the deferred G-buffer mesh pass reading
+# each entity's MeshRenderer/Transform3d/PrevTransform/Material3d through ECS
+# queries instead of the Scene3d parallel lists. This is the World3d render path
+# (#736) that 112/114 open-coded in their RenderSystems, lifted into lib so every
+# 3D example shares one renderer. Order-independent for the deferred G-buffer
+# (depth-resolved), so query order vs the old list order does not change the image.
+func renderSceneWorld(cache: mod GbufferCache, world: view World3d) pub {
+  loop var j: Int = 0, j < componentCount(this: world.meshRenderers), ++j {
+    let entity: EntityId = componentEntityAt(this: world.meshRenderers, i: j)
+    let renderer: MeshRenderer = componentGet(this: world.meshRenderers, entity: entity)
+    if renderer.visible {
+      let t: Transform3d = componentGet(this: world.transforms, entity: entity)
+      let pt: Transform3d = componentGet(this: world.prevTransforms, entity: entity)
+      let m: Material3d = componentGet(this: world.materials, entity: entity)
+      drawInstance(cache: cache, mesh: renderer.mesh, transform: t, prevTransform: pt, material: m)
+    }
   }
 }
 

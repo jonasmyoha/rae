@@ -28,31 +28,6 @@ open ecs/entity
 open ecs/ComponentTable
 open ecs/query
 
-# ----- mesh -----------------------------------------------------------
-func renderMeshGbuffer(cache: mod GbufferCache, world: view World3d) {
-  loop var j: Int = 0, j < componentCount(this: world.meshRenderers), ++j {
-    let entity: EntityId = componentEntityAt(this: world.meshRenderers, i: j)
-    let renderer: MeshRenderer = componentGet(this: world.meshRenderers, entity: entity)
-    if renderer.visible {
-      let t: Transform3d = componentGet(this: world.transforms, entity: entity)
-      let pt: Transform3d = componentGet(this: world.prevTransforms, entity: entity)
-      let m: Material3d = componentGet(this: world.materials, entity: entity)
-      gbuffer.drawInstance(cache: cache, mesh: renderer.mesh, transform: t, prevTransform: pt, material: m)
-    }
-  }
-}
-
-func renderMeshShadow(world: view World3d) {
-  loop var j: Int = 0, j < componentCount(this: world.meshRenderers), ++j {
-    let entity: EntityId = componentEntityAt(this: world.meshRenderers, i: j)
-    let renderer: MeshRenderer = componentGet(this: world.meshRenderers, entity: entity)
-    if renderer.visible {
-      let t: Transform3d = componentGet(this: world.transforms, entity: entity)
-      gpu3d.drawShadowCaster(mesh: renderer.mesh, model: gpu3d.modelMatrix(t: t))
-    }
-  }
-}
-
 # ----- sdf (metaballs), one cluster tag at a time ---------------------
 # The G-buffer metaball draw for a single cluster: pack its spheres (position +
 # scale.x) and per-ball baseColor, take metallic/roughness/emission/smoothing
