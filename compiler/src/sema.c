@@ -3244,6 +3244,44 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                     }
                 }
             }
+            /* #788 (c3) value-shadows-package message. A local value named like a
+             * module WINS silently — that is the finalized rule
+             * (docs/module-namespacing.md), NOT an error. But when a FIELD read
+             * off that value did not resolve AND the shadowed module DOES have a
+             * member of that name, the value-wins rule is hiding what the reader
+             * most likely meant; say so, instead of leaving a bare unresolved
+             * `.field`. Resolution is unchanged: this only fires on the failure
+             * path, so it cannot regress code where the field (or the value) is
+             * valid. */
+            if (!expr->resolved_type && expr->as.member.object->kind == AST_EXPR_IDENT) {
+                Str lhs = expr->as.member.object->as.ident;
+                Symbol* lsym = symbol_table_lookup(symbols, lhs);
+                bool value_shadow = lsym && !(lsym->decl && lsym->decl->kind == AST_DECL_FUNC);
+                // Does a MODULE named `lhs` (matched by its file component, so it
+                // is robust to how deep the project root sits) hold a const/let
+                // `member`? That is the member the shadow is hiding.
+                bool module_has_member = false;
+                for (AstDecl* md = module->decls; md && !module_has_member; md = md->next) {
+                    if (md->kind != AST_DECL_GLOBAL_LET || !md->module_name) continue;
+                    const char* slash = strrchr(md->module_name, '/');
+                    const char* comp = slash ? slash + 1 : md->module_name;
+                    if (strlen(comp) == lhs.len && memcmp(comp, lhs.data, lhs.len) == 0
+                        && str_eq(md->as.let_decl.name, expr->as.member.member))
+                        module_has_member = true;
+                }
+                if (value_shadow && module_has_member) {
+                    char buf[360];
+                    snprintf(buf, sizeof buf,
+                        "'%.*s' is not a field of the local '%.*s'; that local shadows module '%.*s', whose member '%.*s' is hidden here — rename the local, or read the module member where '%.*s' is not shadowed",
+                        (int)expr->as.member.member.len, expr->as.member.member.data,
+                        (int)lhs.len, lhs.data, (int)lhs.len, lhs.data,
+                        (int)expr->as.member.member.len, expr->as.member.member.data,
+                        (int)lhs.len, lhs.data);
+                    diag_error(s_current_decl_origin ? s_current_decl_origin : module->file_path,
+                               (int)expr->line, (int)expr->column, buf);
+                    if (module) module->had_error = true;
+                }
+            }
             break;
         case AST_EXPR_METHOD_CALL:
             // #786: 3-level folder-package qualifier `pkg.Module.func(args)`. The
@@ -4198,8 +4236,51 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
     type_ref->resolved_type = base; return base;
 }
 
+// Does module_name `mn` live under a FOLDER named `folder`? A folder-package is
+// any '/'-separated component of the path EXCEPT the last (which is the module
+// file). `a/b/Color/Green` -> folders {a, b, Color}; `Green` (flat) -> none.
+static bool module_name_has_folder(const char* mn, Str folder) {
+    if (!mn) return false;
+    const char* last = strrchr(mn, '/');
+    if (!last) return false;                 // no folder component, just a file
+    const char* seg = mn;
+    for (const char* c = mn; c <= last; c++) {
+        if (*c == '/') {
+            size_t len = (size_t)(c - seg);
+            if (len == folder.len && folder.len && memcmp(seg, folder.data, len) == 0) return true;
+            seg = c + 1;
+        }
+    }
+    return false;
+}
+
+// #788 (c2) definition-site enum-case / package-symbol clash. When an `enum
+// Color` and a folder-PACKAGE `Color/` (holding modules) both exist, `Color.x`
+// is ambiguous — enum case `x` vs module/symbol `x` in package `Color`. Per the
+// #779 spec this is caught at the DEFINITION site (once, at the enum), not
+// deferred to every `Color.x` use. Enum names are PascalCase, so this only bites
+// a PascalCase type-grouping folder that collides with an enum type name.
+static void sema_check_enum_package_clash(AstModule* module) {
+    for (AstDecl* e = module->decls; e; e = e->next) {
+        if (e->kind != AST_DECL_ENUM) continue;
+        Str ename = e->as.enum_decl.name;
+        for (AstDecl* d = module->decls; d; d = d->next) {
+            if (!module_name_has_folder(d->module_name, ename)) continue;
+            char buf[320];
+            snprintf(buf, sizeof buf,
+                "'%.*s' names both an enum and a folder-package — `%.*s.member` would be ambiguous (an enum case vs a module in package '%.*s'). Rename the enum or the folder so a qualifier resolves to one thing.",
+                (int)ename.len, ename.data, (int)ename.len, ename.data, (int)ename.len, ename.data);
+            diag_error(e->origin_file ? e->origin_file : module->file_path,
+                       (int)e->line, (int)e->column, buf);
+            module->had_error = true;
+            break;  // one diagnostic per colliding enum
+        }
+    }
+}
+
 bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
     s_current_module = module;
+    sema_check_enum_package_clash(module);  // #788 (c2)
     if (!ctx->type_registry) {
         ctx->type_registry = arena_alloc(ctx->ast_arena, sizeof(TypeRegistry));
         type_registry_init(ctx->type_registry, ctx->ast_arena);
