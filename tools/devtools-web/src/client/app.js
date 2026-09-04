@@ -3889,7 +3889,10 @@ async function renderReadme() {
   if (!whyReadmeEl || readmeLoaded) return;
   readmeLoaded = true;
   try {
-    const res = await fetch("/api/readme");
+    // no-store: the README changes during development, and a heuristically
+    // cached copy would keep showing stale content (e.g. an old image URL) even
+    // after a reload. Always fetch the current file.
+    const res = await fetch("/api/readme", { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const md = await res.text();
     whyReadmeEl.innerHTML = renderMarkdown(md);
