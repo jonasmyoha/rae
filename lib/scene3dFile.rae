@@ -125,10 +125,13 @@ func scene3dAssetEntity(asset: view Scene3dAsset, nodeId: view String) pub ret I
 # ----- World3d asset (#737) -------------------------------------------
 # The World3d-native load result: an ECS World3d plus the scene's camera, light
 # and node-id map, so an app loads straight into component tables and never
-# touches the hand-rolled Scene3d SoA. loadWorld3dFile wraps the Scene3d parser
-# and converts the result with buildWorld3dFromScene3d — the Scene3d intermediate
-# lives and dies inside this function. (#748 retires Scene3d once every example
-# is migrated, at which point the parser can build a World3d directly.)
+# touches the hand-rolled Scene3d SoA. parseWorld3dAsset (#796) builds the World3d
+# DIRECTLY as it walks the .raescene — no Scene3d intermediate and no
+# buildWorld3dFromScene3d conversion: each renderable node becomes an entity with
+# its Transform3d + a per-entity Material3d COMPONENT (the material node's values
+# copied onto every referencing entity) + MeshRenderer/SdfPrimitive. It shares
+# every JSON validation helper with the Scene3d parser, which stays only for the
+# not-yet-migrated Scene3d loader path (test 550) until #797 retires it.
 type World3dAsset {
   world: World3d
   camera: Camera3d
@@ -139,17 +142,264 @@ type World3dAsset {
   errorMsg: String
 }
 
-func loadWorld3dFile(path: view String, meshes: view MeshRegistry3d) pub ret World3dAsset {
-  let asset: Scene3dAsset = loadScene3dFile(path: path, meshes: meshes)
+func emptyWorld3dAsset() ret World3dAsset {
   ret World3dAsset {
-    world: buildWorld3dFromScene3d(old: asset.scene)
-    camera: asset.camera
-    light: asset.light
-    nodeIds: asset.nodeIds
-    entityIds: asset.entityIds
-    ok: asset.ok
-    errorMsg: asset.errorMsg
+    world: createWorld3d()
+    camera: defaultCamera3d()
+    light: defaultLight3d()
+    nodeIds: createList(String, cap: 16)
+    entityIds: createList(Int, cap: 16)
+    ok: false
+    errorMsg: ""
   }
+}
+
+func failWorld3dAsset(asset: mod World3dAsset, message: view String) {
+  asset.ok = false
+  asset.errorMsg = rae_ext_rae_string_copy(s: message)
+}
+
+# nodeId -> the renderable's DENSE transform index. Because entities are created
+# in renderable order and each is given a transform immediately, that index is the
+# entity's dense position, which world3dAssetEntity resolves back with
+# world3dEntityAt — the same mapping the Scene3d asset used.
+func addWorldAssetEntity(asset: mod World3dAsset, nodeId: view String, entity: view Int) {
+  asset.nodeIds.add(value: rae_ext_rae_string_copy(s: nodeId))
+  asset.entityIds.add(value: entity)
+}
+
+# Parse a .raescene straight into a World3d (#796). Structurally identical to
+# parseScene3dAsset — same node walk, same validation via the shared helpers, same
+# error messages — but each material becomes a Material3d VALUE and each renderable
+# node becomes an ECS entity carrying that value as a per-entity component, so no
+# Scene3d SoA is built and no buildWorld3dFromScene3d conversion runs.
+func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret World3dAsset {
+  let parsed: Scene = parseScene(source: source)
+  var asset: World3dAsset = emptyWorld3dAsset()
+  if parsed.ok is false {
+    failWorld3dAsset(asset: asset, message: parsed.errorMsg)
+    ret asset
+  }
+
+  let doc: view JsonDoc => parsed.doc
+  # Materials are node-addressable values; the registry maps a material node's id
+  # to its index in this list so a MeshRenderer/SdfPrimitive can copy the value
+  # onto its own entity.
+  let materials: MaterialRegistry3d = createMaterialRegistry3d()
+  let materialValues: List(Material3d) = createList(Material3d, cap: 8)
+
+  # Pass 1: materials, independent of node order.
+  var i: Int = 0
+  loop i < parsed.nodes.length {
+    let node: view SceneNode => nodeAt(this: parsed, idx: i)
+    if nodeHasComponent(doc: doc, node: node, name: "Material3d") {
+      let value: JsonValue = nodeComponent(doc: doc, node: node, name: "Material3d")
+      if material3dValid(doc: doc, value: value) is false {
+        failWorld3dAsset(asset: asset, message: "Material3d must define baseColor, metallic, roughness and emission")
+        ret asset
+      }
+      let metallic: Float = readNumberField(doc: doc, object: value, key: "metallic", fallback: 0.0)
+      let roughness: Float = readNumberField(doc: doc, object: value, key: "roughness", fallback: 0.5)
+      if metallic < 0.0 or metallic > 1.0 or roughness < 0.0 or roughness > 1.0 {
+        failWorld3dAsset(asset: asset, message: "Material3d metallic and roughness must be between 0 and 1")
+        ret asset
+      }
+      registerMaterial3d(reg: materials, key: node.nodeId, index: materialValues.length)
+      materialValues.add(value: Material3d {
+        baseColor: readVec3Field(doc: doc, object: value, key: "baseColor")
+        metallic: metallic
+        roughness: roughness
+        emission: readVec3Field(doc: doc, object: value, key: "emission")
+        toon: false
+      })
+    }
+    i = i + 1
+  }
+
+  # Pass 2: renderables (each becomes an entity), then camera/light. `entityIndex`
+  # is the running renderable count == each new entity's dense transform position.
+  var entityIndex: Int = 0
+  var cameraCount: Int = 0
+  var lightCount: Int = 0
+  i = 0
+  loop i < parsed.nodes.length {
+    let node: view SceneNode => nodeAt(this: parsed, idx: i)
+    let hasMesh: Bool = nodeHasComponent(doc: doc, node: node, name: "MeshRenderer")
+    let hasSdf: Bool = nodeHasComponent(doc: doc, node: node, name: "SdfPrimitive")
+    if hasMesh and hasSdf {
+      failWorld3dAsset(asset: asset, message: "a 3D node cannot contain both MeshRenderer and SdfPrimitive")
+      ret asset
+    }
+    if hasMesh or hasSdf {
+      if nodeHasComponent(doc: doc, node: node, name: "Transform3d") is false {
+        failWorld3dAsset(asset: asset, message: "renderable 3D nodes require Transform3d")
+        ret asset
+      }
+      let transformValue: JsonValue = nodeComponent(doc: doc, node: node, name: "Transform3d")
+      if transform3dValid(doc: doc, value: transformValue) is false {
+        failWorld3dAsset(asset: asset, message: "Transform3d must define numeric position, rotation and scale vectors")
+        ret asset
+      }
+      let transform: Transform3d = readTransform3d(doc: doc, value: transformValue)
+      if hasMesh {
+        let renderer: JsonValue = nodeComponent(doc: doc, node: node, name: "MeshRenderer")
+        if renderer.kind is not JsonKind.object {
+          failWorld3dAsset(asset: asset, message: "MeshRenderer requires string mesh and material keys")
+          ret asset
+        }
+        if stringFieldValid(doc: doc, object: renderer, key: "mesh") is false {
+          failWorld3dAsset(asset: asset, message: "MeshRenderer requires string mesh and material keys")
+          ret asset
+        }
+        if stringFieldValid(doc: doc, object: renderer, key: "material") is false {
+          failWorld3dAsset(asset: asset, message: "MeshRenderer requires string mesh and material keys")
+          ret asset
+        }
+        let meshKey: String = readStringField(doc: doc, object: renderer, key: "mesh")
+        let materialKey: String = readStringField(doc: doc, object: renderer, key: "material")
+        let mesh: MeshHandle = meshRegistry3dGet(reg: meshes, key: meshKey)
+        if meshHandleIsValid(h: mesh) is false {
+          failWorld3dAsset(asset: asset, message: "MeshRenderer references an unknown mesh key")
+          ret asset
+        }
+        let materialIdx: Int = materialRegistry3dGet(reg: materials, key: materialKey)
+        if materialIdx < 0 {
+          failWorld3dAsset(asset: asset, message: "MeshRenderer references an unknown material node")
+          ret asset
+        }
+        var visible: Bool = true
+        let visibleValue: JsonValue = objectField(doc: doc, object: renderer, key: "visible")
+        if visibleValue.kind is JsonKind.bool and visibleValue.asBool is false {
+          visible = false
+        }
+        let entity: EntityId = world3dAddEntity(world: asset.world)
+        world3dSetTransform(world: asset.world, entity: entity, transform: transform)
+        # The MeshRenderer's legacy entity/material Int fields are ignored by the
+        # World3d renderer (it reads the entity + the Material3d component); they
+        # carry the dense index / material index for parity with the old bridge.
+        world3dSetMeshRenderer(world: asset.world, entity: entity, renderer: MeshRenderer {
+          entity: entityIndex, mesh: mesh, material: materialIdx, visible: visible
+        })
+        if let material: Material3d = materialValues.copyAt(index: materialIdx) {
+          world3dSetMaterial(world: asset.world, entity: entity, material: material)
+        }
+        addWorldAssetEntity(asset: asset, nodeId: node.nodeId, entity: entityIndex)
+        entityIndex = entityIndex + 1
+      } else {
+        let sdf: JsonValue = nodeComponent(doc: doc, node: node, name: "SdfPrimitive")
+        if sdf.kind is not JsonKind.object {
+          failWorld3dAsset(asset: asset, message: "SdfPrimitive requires string shape and material keys")
+          ret asset
+        }
+        if stringFieldValid(doc: doc, object: sdf, key: "shape") is false {
+          failWorld3dAsset(asset: asset, message: "SdfPrimitive requires string shape and material keys")
+          ret asset
+        }
+        if stringFieldValid(doc: doc, object: sdf, key: "material") is false {
+          failWorld3dAsset(asset: asset, message: "SdfPrimitive requires string shape and material keys")
+          ret asset
+        }
+        let shapeName: String = readStringField(doc: doc, object: sdf, key: "shape")
+        var shape: Int = -1
+        if shapeName is "sphere" { shape = 0 }
+        if shapeName is "box" { shape = 1 }
+        if shapeName is "torus" { shape = 2 }
+        if shape < 0 {
+          failWorld3dAsset(asset: asset, message: "SdfPrimitive shape must be sphere, box or torus")
+          ret asset
+        }
+        let materialKey: String = readStringField(doc: doc, object: sdf, key: "material")
+        let materialIdx: Int = materialRegistry3dGet(reg: materials, key: materialKey)
+        if materialIdx < 0 {
+          failWorld3dAsset(asset: asset, message: "SdfPrimitive references an unknown material node")
+          ret asset
+        }
+        var noise: Float = 0.0
+        let noiseValue: JsonValue = objectField(doc: doc, object: sdf, key: "noise")
+        if noiseValue.kind is JsonKind.number { noise = noiseValue.asNumber }
+        # Optional: which blob this primitive belongs to, and how sticky that blob
+        # is. Defaults keep single-cluster scenes rendering exactly as before.
+        var cluster: Int = 0
+        let clusterValue: JsonValue = objectField(doc: doc, object: sdf, key: "cluster")
+        if clusterValue.kind is JsonKind.number { cluster = clusterValue.asNumber.toInt() }
+        var smoothing: Float = 0.62
+        let smoothingValue: JsonValue = objectField(doc: doc, object: sdf, key: "smoothing")
+        if smoothingValue.kind is JsonKind.number { smoothing = smoothingValue.asNumber }
+        let entity: EntityId = world3dAddEntity(world: asset.world)
+        world3dSetTransform(world: asset.world, entity: entity, transform: transform)
+        world3dSetSdf(world: asset.world, entity: entity, sdf: SdfPrimitive {
+          entity: entityIndex, shape: shape, material: materialIdx,
+          noise: noise, cluster: cluster, smoothing: smoothing
+        })
+        if let material: Material3d = materialValues.copyAt(index: materialIdx) {
+          world3dSetMaterial(world: asset.world, entity: entity, material: material)
+        }
+        addWorldAssetEntity(asset: asset, nodeId: node.nodeId, entity: entityIndex)
+        entityIndex = entityIndex + 1
+      }
+    }
+
+    if nodeHasComponent(doc: doc, node: node, name: "Camera3d") {
+      cameraCount = cameraCount + 1
+      let value: JsonValue = nodeComponent(doc: doc, node: node, name: "Camera3d")
+      if cameraCount > 1 or camera3dValid(doc: doc, value: value) is false {
+        failWorld3dAsset(asset: asset, message: "scene requires exactly one valid Camera3d")
+        ret asset
+      }
+      let fovYDeg: Float = readNumberField(doc: doc, object: value, key: "fovYDeg", fallback: 50.0)
+      let nearZ: Float = readNumberField(doc: doc, object: value, key: "nearZ", fallback: 0.1)
+      let farZ: Float = readNumberField(doc: doc, object: value, key: "farZ", fallback: 200.0)
+      if fovYDeg <= 0.0 or fovYDeg >= 180.0 or nearZ <= 0.0 or farZ <= nearZ {
+        failWorld3dAsset(asset: asset, message: "Camera3d requires 0 < fovYDeg < 180 and 0 < nearZ < farZ")
+        ret asset
+      }
+      asset.camera = Camera3d {
+        position: readVec3Field(doc: doc, object: value, key: "position")
+        target: readVec3Field(doc: doc, object: value, key: "target")
+        fovYDeg: fovYDeg
+        nearZ: nearZ
+        farZ: farZ
+      }
+    }
+    if nodeHasComponent(doc: doc, node: node, name: "Light3d") {
+      lightCount = lightCount + 1
+      let value: JsonValue = nodeComponent(doc: doc, node: node, name: "Light3d")
+      if lightCount > 1 or light3dValid(doc: doc, value: value) is false {
+        failWorld3dAsset(asset: asset, message: "scene requires exactly one valid Light3d")
+        ret asset
+      }
+      let exposure: Float = readNumberField(doc: doc, object: value, key: "exposure", fallback: 1.0)
+      if exposure < 0.0 {
+        failWorld3dAsset(asset: asset, message: "Light3d exposure cannot be negative")
+        ret asset
+      }
+      asset.light = Light3d {
+        sunDir: readVec3Field(doc: doc, object: value, key: "sunDir")
+        sunColor: readVec3Field(doc: doc, object: value, key: "sunColor")
+        ambSky: readVec3Field(doc: doc, object: value, key: "ambSky")
+        ambGround: readVec3Field(doc: doc, object: value, key: "ambGround")
+        exposure: exposure
+        clearColor: readVec3Field(doc: doc, object: value, key: "clearColor")
+      }
+    }
+    i = i + 1
+  }
+
+  if cameraCount is not 1 {
+    failWorld3dAsset(asset: asset, message: "scene requires exactly one Camera3d")
+    ret asset
+  }
+  if lightCount is not 1 {
+    failWorld3dAsset(asset: asset, message: "scene requires exactly one Light3d")
+    ret asset
+  }
+  asset.ok = true
+  ret asset
+}
+
+func loadWorld3dFile(path: view String, meshes: view MeshRegistry3d) pub ret World3dAsset {
+  let source: String = rae_ext_rae_sys_read_file(path: path)
+  ret parseWorld3dAsset(source: source, meshes: meshes)
 }
 
 # The entity for a node id (its dense transform position mapped to an EntityId),
