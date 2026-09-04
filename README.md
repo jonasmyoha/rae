@@ -11,17 +11,6 @@ your data is in its signature; what a call means is at the call site. That suits
 a person skimming at midnight and a model editing at scale for the same reason:
 neither has to hold the missing half in their head.
 
-This repository is the complete Rae monorepo:
-
-- `compiler/` contains the compiler and C runtime.
-- `lib/`, `spec/`, and `docs/` define the language and standard library.
-- `examples/` and `benchmarks/` exercise Rae end to end.
-- `tools/devtools-web/` contains the Bun/TypeScript development dashboard.
-- `QUEUE.md` is the single development queue.
-
-The former `rae-lang-dev` and `rae-devtools-web` repositories were merged with
-their complete histories. See [`docs/monorepo.md`](docs/monorepo.md).
-
 ## A taste
 
 This is `examples/09_playlist`, verbatim — a type, a list of it, functions
@@ -386,7 +375,7 @@ Run the test suite with `make -C compiler test` — 318 cases.
 
 ## Devtools Web: the best way to see this
 
-`tools/devtools-web` is the monorepo's local dashboard. It browses every
+`tools/devtools-web` is a local dashboard. It browses every
 example, runs each one natively or in the browser with a click, and shows build
 health, the test tree and history.
 
