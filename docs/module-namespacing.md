@@ -148,6 +148,25 @@ function names as bare calls.
    `import` do **not** appear in bare lookup. Ambiguity → diagnosed, never
    resolved by arbitrary priority.
 
+### Qualifier clash diagnostics
+
+Two clashes are diagnosed so a `Qualifier.member` reference always resolves to
+exactly one thing:
+
+- **Enum-vs-package clash (definition-site).** If an `enum Color` and a
+  folder-**package** `Color/` (a folder holding modules) both exist, `Color.x`
+  would be ambiguous — an enum case `x` vs a module `x` in package `Color`. This
+  is a hard error at the **enum's definition site** (caught once, not at every
+  use). Enum names are PascalCase, so it only bites a PascalCase type-grouping
+  folder named like an enum. Rename the enum or the folder.
+- **Value-shadows-module note.** A local value named like a module **wins
+  silently** (see the `keys.keyW` note above) — that is intended and never an
+  error. But if reading a *field* off that local fails **and** the shadowed
+  module has a member of that name, the compiler says so ("the local shadows
+  module `x`, whose member `y` is hidden here") instead of leaving a bare
+  unknown-field error. Resolution is unchanged; this only adds context on the
+  failure path.
+
 ## Contextual keywords
 
 `import` and `open` are **contextual** top-level keywords — special only in
