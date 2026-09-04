@@ -49,7 +49,7 @@ import core
 # children at it; an app started without a supervisor keeps the plain
 # `.rae` default, where nothing writes a signal.
 
-func hotReloadDir() pub ret String {
+func dir() pub ret String {
   let override: String = getEnv(name: "RAE_HOT_RELOAD_DIR")
   if override.length() > 0 {
     ret override
@@ -57,23 +57,23 @@ func hotReloadDir() pub ret String {
   ret ".rae"
 }
 
-func hotReloadStatePath() pub ret String {
-  ret "{hotReloadDir()}/state.json"
+func statePath() pub ret String {
+  ret "{dir()}/state.json"
 }
 
-func hotReloadSignalPath() pub ret String {
-  ret "{hotReloadDir()}/reload.signal"
+func signalPath() pub ret String {
+  ret "{dir()}/reload.signal"
 }
 
-func hotReloadBuildStatusPath() pub ret String {
-  ret "{hotReloadDir()}/build.status"
+func buildStatusPath() pub ret String {
+  ret "{dir()}/build.status"
 }
 
 # Deliberately NOT state.json: that file belongs to the app's own schema
 # (examples/106_mobile_ui stores playback state there), and a shared
 # counter writing into it would clobber whatever the app saved.
-func hotReloadGenerationPath() pub ret String {
-  ret "{hotReloadDir()}/reload.generation"
+func generationPath() pub ret String {
+  ret "{dir()}/reload.generation"
 }
 
 # ----- state file -----------------------------------------------------
@@ -89,7 +89,7 @@ func rae_ext_rae_sys_read_file(path: String) extern ret String
 # there's nothing to restore; apps check `.length() > 0` before
 # deserializing. The app owns the schema (typically JSON).
 func readHotReloadState() pub ret String {
-  ret rae_ext_rae_sys_read_file(path: hotReloadStatePath())
+  ret rae_ext_rae_sys_read_file(path: statePath())
 }
 
 # Save state for the next run. Apps should call this just before
@@ -98,7 +98,7 @@ func readHotReloadState() pub ret String {
 # normally pre-creates it, but apps can call `ensureHotReloadDir()`
 # defensively).
 func writeHotReloadState(state: view String) pub ret Bool {
-  ret writeFile(path: hotReloadStatePath(), content: state)
+  ret writeFile(path: statePath(), content: state)
 }
 
 # ----- app-scoped state -----------------------------------------------
@@ -108,17 +108,17 @@ func writeHotReloadState(state: view String) pub ret Bool {
 # the other's schema. Apps that want their own slot pass an id; the plain
 # `readHotReloadState`/`writeHotReloadState` pair keeps the legacy path so
 # existing callers are untouched.
-func hotReloadStatePathFor(appId: view String) pub ret String {
-  ret "{hotReloadDir()}/state.{appId}.json"
+func statePathFor(appId: view String) pub ret String {
+  ret "{dir()}/state.{appId}.json"
 }
 
 func readHotReloadStateFor(appId: view String) pub ret String {
-  ret rae_ext_rae_sys_read_file(path: hotReloadStatePathFor(appId: appId))
+  ret rae_ext_rae_sys_read_file(path: statePathFor(appId: appId))
 }
 
 func writeHotReloadStateFor(appId: view String, state: view String) pub ret Bool {
-  makeDir(path: hotReloadDir())
-  ret writeFile(path: hotReloadStatePathFor(appId: appId), content: state)
+  makeDir(path: dir())
+  ret writeFile(path: statePathFor(appId: appId), content: state)
 }
 
 # ----- launch generation ----------------------------------------------
@@ -135,7 +135,7 @@ func writeHotReloadStateFor(appId: view String, state: view String) pub ret Bool
 # missing file restarts at 1 rather than failing: this is a diagnostic,
 # and it should never be the reason an app does not boot.
 func nextReloadGeneration() pub ret Int {
-  let raw: String = rae_ext_rae_sys_read_file(path: hotReloadGenerationPath())
+  let raw: String = rae_ext_rae_sys_read_file(path: generationPath())
   var n: Int = 0
   if raw.length() > 0 {
     n = raw.trim().toInt()
@@ -144,8 +144,8 @@ func nextReloadGeneration() pub ret Int {
     n = 0
   }
   let next: Int = n + 1
-  makeDir(path: hotReloadDir())
-  writeFile(path: hotReloadGenerationPath(), content: "{next}")
+  makeDir(path: dir())
+  writeFile(path: generationPath(), content: "{next}")
   ret next
 }
 
@@ -153,10 +153,10 @@ func nextReloadGeneration() pub ret Int {
 # next clean launch starts fresh. Idempotent: returns true if there
 # was nothing to delete.
 func clearHotReloadState() pub ret Bool {
-  if exists(path: hotReloadStatePath()) is false {
+  if exists(path: statePath()) is false {
     ret true
   }
-  ret delete(path: hotReloadStatePath())
+  ret delete(path: statePath())
 }
 
 # ----- signal file ----------------------------------------------------
@@ -194,7 +194,7 @@ func emptySignal() ret ReloadSignal {
 # file already exists. Supervisors can pre-create the file at any
 # version; we only react to *new* writes after the app started.
 func createReloadSignalWatcher() pub ret ReloadSignalWatcher {
-  let p: String = hotReloadSignalPath()
+  let p: String = signalPath()
   let mt: Float64 = fileModTime(path: p)
   ret ReloadSignalWatcher {
     path: p
@@ -273,7 +273,7 @@ func parseBuildStatus(raw: view String) pub ret BuildStatus {
 # (single file read); callers can poll this every frame or every
 # few frames as they prefer.
 func readBuildStatus() pub ret BuildStatus {
-  let path: String = hotReloadBuildStatusPath()
+  let path: String = buildStatusPath()
   if exists(path: path) is false {
     ret emptyBuildStatus()
   }

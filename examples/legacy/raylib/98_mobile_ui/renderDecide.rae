@@ -8,7 +8,7 @@ open ecs/entity
 #
 # Active when ANY of:
 #   - first frame after world rebuild (forceRender)
-#   - tracked visual ComponentTable bumped (renderCacheDirty)
+#   - tracked visual ComponentTable bumped (cacheDirty)
 #   - input produced an ActionEvent
 #   - pressed-entity transition (catches the release edge)
 #   - hero transition is mid-flight
@@ -40,7 +40,7 @@ func decideActive(
 ) ret RenderActiveDecision {
   var active: Bool = forceRender
   if active is false {
-    if renderCacheDirty(world: world, cache: renderCache) {
+    if cacheDirty(world: world, cache: renderCache) {
       active = true
     }
   }

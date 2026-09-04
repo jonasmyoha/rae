@@ -158,17 +158,17 @@ func formatDurationMs(ms: view Int) pub ret String {
 
 # ----- parsing ------------------------------------------------------
 
-# Per-field helpers — small wrappers around lib/json's `jsonField` +
+# Per-field helpers — small wrappers around lib/json's `field` +
 # `jsonValueAt` so the call sites read top-to-bottom.
 func fieldString(doc: view JsonDoc, obj: view JsonValue, key: view String) ret String {
-  let idx: Int = json.jsonField(doc: doc, this: obj, key: key)
+  let idx: Int = json.field(doc: doc, this: obj, key: key)
   let v: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
   let fallback: String = ""
   ret json.jsonString(this: v, fallback: fallback)
 }
 
 func fieldInt(doc: view JsonDoc, obj: view JsonValue, key: view String) ret Int {
-  let idx: Int = json.jsonField(doc: doc, this: obj, key: key)
+  let idx: Int = json.field(doc: doc, this: obj, key: key)
   let v: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
   ret json.jsonInt(this: v, fallback: 0)
 }
@@ -178,12 +178,12 @@ func fieldInt(doc: view JsonDoc, obj: view JsonValue, key: view String) ret Int 
 # / partial list rather than a hard failure.
 func parseTracks(doc: view JsonDoc, root: view JsonValue) ret List(Track) {
   let result: List(Track) = createList(Track, cap: 12)
-  let arrIdx: Int = json.jsonField(doc: doc, this: root, key: "tracks")
+  let arrIdx: Int = json.field(doc: doc, this: root, key: "tracks")
   let arr: JsonValue = json.jsonValueAt(doc: doc, idx: arrIdx)
-  let n: Int = json.jsonArrayLen(this: arr)
+  let n: Int = json.arrayLen(this: arr)
   var i: Int = 0
   loop i < n {
-    let entry: JsonValue = json.jsonArrayAt(doc: doc, this: arr, idx: i)
+    let entry: JsonValue = json.arrayAt(doc: doc, this: arr, idx: i)
     let numberKey: String = "number"
     let titleKey: String = "title"
     let durKey: String = "durationMs"
@@ -223,7 +223,7 @@ func parseAlbum(source: view String, stem: view String, coverPath: view String) 
     log("[album-loader] parse error in {stem}/album.json at byte {doc.errorPos}")
     ret stubAlbum(stem: stem, coverPath: coverPath)
   }
-  let root: JsonValue = json.jsonRoot(doc: doc)
+  let root: JsonValue = json.root(doc: doc)
   let artistKey: String = "artist"
   let albumKey: String = "album"
   let yearKey: String = "year"

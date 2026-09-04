@@ -5,7 +5,7 @@ open ecs/tag
 open ecs/query
 
 # #752: a tag is a zero-field marker component. addTag/hasTag/removeTag manage
-# presence; query-by-tag (queryTagged) iterates a data table filtered to tagged
+# presence; query-by-tag (tagged) iterates a data table filtered to tagged
 # entities — replacing a `kind`-field if-ladder with a component + query.
 
 type Enemy {}
@@ -31,7 +31,7 @@ func main() {
 
   # Query positions filtered to enemies: iterate the small tag table, probe
   # positions, sum only enemy x. No if-ladder over a kind field.
-  let matches: List(Query2Match) = queryTagged(dataTable: positions, tagTable: enemies)
+  let matches: List(Query2Match) = tagged(dataTable: positions, tagTable: enemies)
   var enemySum: Int = 0
   loop let hit: view Query2Match in matches {
     let p: view Position => queryViewAt(table: positions, denseIndex: hit.indexA)
@@ -43,6 +43,6 @@ func main() {
   removeTag(table: enemies, entity: e1)
   log("e1 enemy after remove: {hasTag(table: enemies, entity: e1)}")
   log("enemy count after remove: {tagCount(table: enemies)}")
-  let matches2: List(Query2Match) = queryTagged(dataTable: positions, tagTable: enemies)
+  let matches2: List(Query2Match) = tagged(dataTable: positions, tagTable: enemies)
   log("enemy matches after remove: {matches2.length}")
 }

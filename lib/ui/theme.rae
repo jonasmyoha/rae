@@ -8,7 +8,7 @@
 #   * Call `setActiveTheme(darkTheme())` (or `lightTheme()`) BEFORE
 #     `loadAllScenes()`. Scenes resolve `"$tokenName"` colors against
 #     the current `activeTheme` at parse time.
-#   * `themeColorByName(name)` exposes the lookup directly for
+#   * `colorByName(name)` exposes the lookup directly for
 #     code-driven UI that wants the same semantic slots.
 #   * To switch themes at runtime, set the active theme and re-parse
 #     the scene files (the data hot-reload path already does the
@@ -130,7 +130,7 @@ func darkTheme() pub ret Theme {
 # lists in themeResolved.rae). They are now ONE resource, `UiTheme`, owned as a
 # field on `UiWorld` and threaded to the paint/deser sites that read it (both of
 # which already carry the world). The palette `active` is the closed 10-slot
-# `Theme` that `themeColorByName` resolves against; `resolved` is the scene-parsed
+# `Theme` that `colorByName` resolves against; `resolved` is the scene-parsed
 # `ResolvedTheme` that space/radius/padding/container tokens resolve against
 # (previously the `g_active*` copy); `generation` is the repaint counter render
 # loops watch (#235). See docs/globals-and-app-ownership.md.
@@ -151,8 +151,8 @@ func createUiTheme() pub ret UiTheme {
 
 # Set the active palette theme and bump the repaint generation. Scene colors store
 # palette slot NAMES (see `Shape.fillSlot` / `Sprite.tintSlot`) and resolve through
-# `themeColorByName` at paint time, so a theme swap is a repaint — no scene
-# re-parse. Render loops watch `themeGeneration()` and repaint when it advances.
+# `colorByName` at paint time, so a theme swap is a repaint — no scene
+# re-parse. Render loops watch `generation()` and repaint when it advances.
 func setActiveTheme(world: mod UiWorld, theme: own Theme) pub {
   world.theme.active = theme
   world.theme.generation = world.theme.generation + 1
@@ -163,14 +163,14 @@ func currentTheme(world: view UiWorld) pub ret Theme {
 }
 
 # Current theme generation. Advances on every `setActiveTheme`.
-func themeGeneration(world: view UiWorld) pub ret Int {
+func generation(world: view UiWorld) pub ret Int {
   ret world.theme.generation
 }
 
 # Resolve a token name (no leading `$`) to a palette color against a given palette
 # `theme`. Unknown names fall back to a vivid magenta sentinel so missing tokens are
 # obvious in the rendered output rather than silently transparent.
-func themeColorByName(theme: view Theme, name: view String) pub ret RgbaColor {
+func colorByName(theme: view Theme, name: view String) pub ret RgbaColor {
   let p: ThemePalette = theme.palette
   if name is "background" {
     ret p.background

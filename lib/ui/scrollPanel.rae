@@ -58,7 +58,7 @@ func scrollAbs(v: view Float) ret Float {
 # One-time node-id -> entity resolution (the ONLY string lookup; done at attach).
 func scrollNodeEntity(world: view UiWorld, nodeId: view String) ret EntityId {
   if let raw: Int = world.nodeIds.get(k: nodeId) {
-    ret entityId(v: raw)
+    ret id(v: raw)
   }
   ret noEntity()
 }
@@ -90,7 +90,7 @@ func createScrollPanel(world: mod UiWorld, viewportId: view String, contentId: v
 # How far the content can slide before its bottom edge reaches the viewport's.
 # Zero when the content fits, which is what makes the panel inert until it
 # actually outgrows its space.
-func scrollPanelRange(world: view UiWorld, viewport: view EntityId, content: view EntityId) ret Float {
+func range(world: view UiWorld, viewport: view EntityId, content: view EntityId) ret Float {
   if componentHas(this: world.computedRects, entity: viewport) is false {
     ret 0.0
   }
@@ -107,7 +107,7 @@ func scrollPanelRange(world: view UiWorld, viewport: view EntityId, content: vie
 }
 
 # The viewport's height — the reference dimension for the rubber-band curve.
-func scrollPanelDim(world: view UiWorld, viewport: view EntityId) ret Float {
+func dim(world: view UiWorld, viewport: view EntityId) ret Float {
   if componentHas(this: world.computedRects, entity: viewport) {
     let vr: ComputedRect = componentGet(this: world.computedRects, entity: viewport)
     ret vr.size.y
@@ -119,7 +119,7 @@ func scrollPanelDim(world: view UiWorld, viewport: view EntityId) ret Float {
 # from ComputedRect — ComputedRect is PARENT-LOCAL, so a panel nested three deep
 # reports x=12 while sitting at x=952 on screen; testing against the local rect
 # would silently make it inert (app3d/slider carries the same note).
-func scrollPanelPointInViewport(world: view UiWorld, viewport: view EntityId,
+func pointInViewport(world: view UiWorld, viewport: view EntityId,
                                 x: view Float, y: view Float) ret Bool {
   if componentHas(this: world.computedRects, entity: viewport) is false {
     ret false
@@ -176,7 +176,7 @@ func updateScrollPanel(world: mod UiWorld, viewport: view EntityId, input: view 
   var state: ScrollPanelState = componentGet(this: world.scrollPanels, entity: viewport)
   let content: EntityId = state.content
   let before: Float = state.offset
-  let range: Float = scrollPanelRange(world: world, viewport: viewport, content: content)
+  let range: Float = range(world: world, viewport: viewport, content: content)
 
   if range <= 0.0 {
     # Content fits. Reset rather than leaving a stale offset behind: a panel that
@@ -189,8 +189,8 @@ func updateScrollPanel(world: mod UiWorld, viewport: view EntityId, input: view 
     ret before is not 0.0
   }
 
-  let dim: Float = scrollPanelDim(world: world, viewport: viewport)
-  let inside: Bool = scrollPanelPointInViewport(world: world, viewport: viewport,
+  let dim: Float = dim(world: world, viewport: viewport)
+  let inside: Bool = pointInViewport(world: world, viewport: viewport,
                                                 x: input.pointer.x, y: input.pointer.y)
 
   # ----- press / release -----
@@ -267,7 +267,7 @@ func updateScrollPanel(world: mod UiWorld, viewport: view EntityId, input: view 
 # Whether the panel identified by its viewport entity is mid-drag, so a caller can
 # suppress its own pointer handling — a drag that started on the panel should not
 # also orbit the camera.
-func scrollPanelDragging(world: view UiWorld, viewport: view EntityId) pub ret Bool {
+func dragging(world: view UiWorld, viewport: view EntityId) pub ret Bool {
   if isNone(this: viewport) {
     ret false
   }
