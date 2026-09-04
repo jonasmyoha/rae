@@ -1,0 +1,11 @@
+import core
+
+# #788 (c3): a local value named `pal` shadows the module `pal` and WINS
+# silently (the finalized rule). Reading `pal.shade` off the local Int fails
+# (Int has no fields), and the shadowed module `pal` DOES have `shade` — so the
+# diagnostic points at the shadow instead of a bare "unknown field".
+func main() {
+  let pal: Int = 3
+  let x: Int = pal.shade
+  log("{x}")
+}

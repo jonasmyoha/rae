@@ -1,0 +1,12 @@
+import core
+
+# #788 (c2): `Color` is BOTH an enum type (with case `green`) AND a folder-
+# package (the `color/` dir holds a module) — wait, names differ by case, so use
+# a matching PascalCase folder below. `Color.green` would be ambiguous, so the
+# clash is a hard error at the enum's definition site.
+enum Color { red, green, blue }
+
+func main() {
+  let c: Int = Color.green
+  log("{c}")
+}
