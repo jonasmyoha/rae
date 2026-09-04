@@ -49,6 +49,7 @@ import sceneAnimation
 import sdl3
 import vec3
 open gpu3d
+open gpu3dWorld
 open renderer3d
 open math3d
 open mesh3d
@@ -92,6 +93,7 @@ import app3d/slider
 import app3d/settingsDialog
 import shadow3d
 import renderer3d
+import gpu3dWorld
 import app3d/uiShell
 import sky
 import skyHosek
@@ -325,9 +327,12 @@ func main() ret Int {
   registerMesh3d(reg: meshRegistry, key: "torus", handle: torus)
   registerMesh3d(reg: meshRegistry, key: "ground", handle: ground)
   registerMesh3d(reg: meshRegistry, key: "box", handle: boxMesh)
-  var scene1: Scene3dAsset = loadScene3dFile(path: "{base}scene1.raescene", meshes: meshRegistry)
-  var scene2: Scene3dAsset = loadScene3dFile(path: "{base}scene2.raescene", meshes: meshRegistry)
-  var scene3: Scene3dAsset = loadScene3dFile(path: "{base}scene3.raescene", meshes: meshRegistry)
+  # #795: load straight into ECS World3ds. loadWorld3dFile parses the .raescene
+  # and converts to a World3d, so this forward example authors nothing through
+  # the legacy Scene3d SoA — mirroring the deferred twin 112.
+  var scene1: World3dAsset = loadWorld3dFile(path: "{base}scene1.raescene", meshes: meshRegistry)
+  var scene2: World3dAsset = loadWorld3dFile(path: "{base}scene2.raescene", meshes: meshRegistry)
+  var scene3: World3dAsset = loadWorld3dFile(path: "{base}scene3.raescene", meshes: meshRegistry)
   if scene1.ok is false {
     log("[scene3d] scene 1 failed: {scene1.errorMsg}")
     shutdown()
@@ -346,6 +351,13 @@ func main() ret Int {
     gpu2d.closeWindow()
     ret 1
   }
+
+  # Scene 1's named props, resolved once to their World3d entities so the
+  # animator can spin them in place each frame (the World3d analogue of the
+  # nodeId->Int lookup the Scene3d asset used).
+  let cubeAEntity: EntityId = world3dAssetEntity(asset: scene1, nodeId: "spinCubeA")
+  let cubeBEntity: EntityId = world3dAssetEntity(asset: scene1, nodeId: "spinCubeB")
+  let torusEntity: EntityId = world3dAssetEntity(asset: scene1, nodeId: "heroTorus")
 
   # Fonts + theme through the shared loader, which also bridges the
   # theme's PALETTE into the active theme — the step that was missing
@@ -729,12 +741,12 @@ func main() ret Int {
       # solid, which is how the bug was noticed.
       light.sunDir = settingsSunDir(s: settings)
       light.sunColor = settingsSunColor(s: settings)
-      if uiState.activeScene is 1 { animateScene1(asset: scene1, time: simTime) }
+      if uiState.activeScene is 1 { animateScene1(world: scene1.world, cubeA: cubeAEntity, cubeB: cubeBEntity, torus: torusEntity, time: simTime) }
       if uiState.activeScene is 2 {
-        animateScene(scene: scene2.scene, sceneId: 2, time: simTime)
-        animateMetaballLab(asset: scene2, time: simTime)
+        animateScene(world: scene2.world, sceneId: 2, time: simTime)
+        animateMetaballLab(world: scene2.world, time: simTime)
       }
-      if uiState.activeScene is 3 { animateScene3(asset: scene3, time: simTime) }
+      if uiState.activeScene is 3 { animateScene3(world: scene3.world, time: simTime) }
 
 
       let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
@@ -761,16 +773,16 @@ func main() ret Int {
           # unshadowed, which is what a frame with no shadow pass should look
           # like, and needs no renderer flag.
           if settings.shadows and uiState.activeScene is 1 {
-            renderSceneShadow(scene: scene1.scene)
-            renderSceneShadowSdf(scene: scene1.scene)
+            renderSceneShadowWorld(world: scene1.world)
+            renderSceneShadowSdfWorld(world: scene1.world)
           }
           if settings.shadows and uiState.activeScene is 2 {
-            renderSceneShadow(scene: scene2.scene)
-            renderSceneShadowSdf(scene: scene2.scene)
+            renderSceneShadowWorld(world: scene2.world)
+            renderSceneShadowSdfWorld(world: scene2.world)
           }
           if settings.shadows and uiState.activeScene is 3 {
-            renderSceneShadow(scene: scene3.scene)
-            renderSceneShadowSdf(scene: scene3.scene)
+            renderSceneShadowWorld(world: scene3.world)
+            renderSceneShadowSdfWorld(world: scene3.world)
           }
           endShadowPass()
           if shadowLogged is false {
@@ -784,22 +796,27 @@ func main() ret Int {
           # opens gpu3d and not gbuffer, which is exactly the ambiguity 112's
           # comment warns about.
           #
-          # No separate SDF submit either: the forward renderScene raymarches
-          # the metaball clusters itself, where the deferred path needs
-          # renderSceneSdf as its own G-buffer write.
+          # Two submits over the World3d now: renderSceneWorld draws the meshes
+          # and renderSceneSdfWorld (gpu3dWorld) raymarches the metaball clusters
+          # into the same forward pass — the World3d split of what the Scene3d
+          # renderScene did in one call. The deferred twin instead writes SDFs to
+          # its G-buffer via renderSceneSdfWorld in gbufferWorld.
           beginScene(camera: camera, light: light, aspect: aspect, time: simTime)
           # BEFORE the geometry, and writing no depth, so everything drawn
           # after it covers it normally. It is the background, not a backdrop
           # object at the far plane.
           drawSky(sky: sky, light: light)
           if uiState.activeScene is 1 {
-            renderScene(scene: scene1.scene)
+            renderSceneWorld(world: scene1.world)
+            renderSceneSdfWorld(world: scene1.world)
           }
           if uiState.activeScene is 2 {
-            renderScene(scene: scene2.scene)
+            renderSceneWorld(world: scene2.world)
+            renderSceneSdfWorld(world: scene2.world)
           }
           if uiState.activeScene is 3 {
-            renderScene(scene: scene3.scene)
+            renderSceneWorld(world: scene3.world)
+            renderSceneSdfWorld(world: scene3.world)
           }
         }
         if tag is tagSsao {
@@ -829,9 +846,9 @@ func main() ret Int {
       # transforms become its previous-frame set. Inactive scenes are not
       # snapshotted — they aren't rendered, so they have no frame history to
       # advance, and their first frame back re-syncs on the next snapshot.
-      if uiState.activeScene is 1 { snapshotPrevTransforms(scene: scene1.scene) }
-      if uiState.activeScene is 2 { snapshotPrevTransforms(scene: scene2.scene) }
-      if uiState.activeScene is 3 { snapshotPrevTransforms(scene: scene3.scene) }
+      if uiState.activeScene is 1 { world3dPrevTransformSystem(world: scene1.world) }
+      if uiState.activeScene is 2 { world3dPrevTransformSystem(world: scene2.world) }
+      if uiState.activeScene is 3 { world3dPrevTransformSystem(world: scene3.world) }
     }
   }
   # Final flush: the throttle may have a pending change when the loop ends.
