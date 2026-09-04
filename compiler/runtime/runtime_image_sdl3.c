@@ -479,7 +479,7 @@ static float rae_sdf_median(float a, float b, float c) {
 
 /* sx0..sy1: dest rect in framebuffer pixels (sy0 top, sy1 bottom). au0..av1:
  * source rect in atlas pixels, top-left origin. */
-void rae_ext_sdf_text_blitGlyph(int64_t* fb, int64_t fbW, int64_t fbH, int64_t atlas,
+void rae_ext_sdfText_blitGlyph(int64_t* fb, int64_t fbW, int64_t fbH, int64_t atlas,
                           float sx0, float sy0, float sx1, float sy1,
                           float au0, float av0, float au1, float av1,
                           float screenPxRange, int64_t rgb){
