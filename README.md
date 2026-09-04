@@ -1,6 +1,6 @@
 # Rae Programming Language
 
-[![XKCD 927: Standards](https://imgs.xkcd.com/comics/standards.png)](https://xkcd.com/927/)
+[![XKCD 927: Standards](docs/screenshots/xkcd_927_standards.png)](https://xkcd.com/927/)
 
 ![Metaballs, deferred rendering — SDF metaballs under a physical sky](docs/screenshots/112_metaballs_deferred.2.png)
 
@@ -202,22 +202,20 @@ the type of a binding.)
 
 ## No globals: shared state has an owner
 
-There is no hidden, program-wide, mutable channel between functions. A
-module-level **`var`** (mutable global state) and a module-level **`let` that
-owns heap** (a `String`, `List`, `Map`, or any struct holding heap) are a
-compile error — a value with no owner and an invisible lifetime is exactly the
-thing that makes a program hard to reason about, for a person and for a tool.
+There is no hidden, program-wide, mutable channel between functions. Mutable
+state that lives at the top level — outliving every function, owned by no one,
+reachable and writable from anywhere — is a compile error. A value with no owner
+and an invisible lifetime is exactly the thing that makes a program hard to
+reason about, for a person and for a tool.
 
-Constants are fine, because a constant is not state: a module-level `const`
-(`const maxRetries: Int = 5`) is a compile-time value, and a `let` bound to a
-literal (`let title: String = "Rae"`) is a static constant, not a global. What
-is banned is *mutable* state and *heap ownership* at the top level, not names for
-fixed values.
+Constants are fine, because a constant is not state: `const maxRetries: Int = 5`
+is a fixed compile-time value, not a global. What is banned is shared *mutable*
+state, not names for fixed values.
 
 Instead, shared state has an owner. It lives as a **resource on a World or App**
 and is passed to the systems that use it through the same `mod`/`view` parameter
-that already says who may read or change it — a former `var activeTheme` becomes
-`app.theme`, threaded to the code that touches it. This is the ECS architecture
+that already says who may read or change it — a former global `activeTheme`
+becomes `app.theme`, threaded to the code that touches it. This is the ECS architecture
 doing the work the language points you toward: every piece of state is somewhere
 specific, and a call's signature tells you whether it can move.
 
