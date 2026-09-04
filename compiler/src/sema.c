@@ -3151,6 +3151,13 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 if (modname.data) {
                     AstDecl* gd = sema_find_module_global(module, modname, expr->as.member.member);
                     if (gd) {
+                        // #785 tooling: RAE_DUMP_QUALSITES lists every RESOLVED module
+                        // qualifier site (file, line, col of the module name), so a
+                        // rename can uppercase exactly those first letters — the only
+                        // safe way to distinguish `keys.keyW` (module) from `x.field`.
+                        if (getenv("RAE_DUMP_QUALSITES")) fprintf(stderr, "QUALSITE\t%s\t%zu\t%zu\n",
+                            s_current_decl_origin ? s_current_decl_origin : "?",
+                            expr->as.member.object->line, expr->as.member.object->column);
                         Str cname = expr->as.member.member;  // read before the union write
                         expr->kind = AST_EXPR_IDENT;
                         expr->as.ident = cname;
@@ -3234,6 +3241,12 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 // with no such member), fall through to the value/UFCS/member path
                 // below instead of binding a NULL decl.
                 if (resolved) {
+                // #785 tooling: dump the resolved module-qualifier site (see the
+                // AST_EXPR_MEMBER path above) so a rename can uppercase exactly the
+                // module name's first letter at each real qualifier.
+                if (getenv("RAE_DUMP_QUALSITES")) fprintf(stderr, "QUALSITE\t%s\t%zu\t%zu\n",
+                    s_current_decl_origin ? s_current_decl_origin : "?",
+                    expr->as.method_call.object->line, expr->as.method_call.object->column);
                 // Rewrite to a plain call (no receiver) bound directly to the
                 // resolved in-module decl — codegen emits from decl_link, so this
                 // survives non-core stdlib losing its flat symbols (step 3).
