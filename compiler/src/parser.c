@@ -2866,6 +2866,7 @@ AstModule* parse_module(Arena* arena, const char* file_path, TokenList tokens) {
   AstModule* module = parser_alloc(&parser, sizeof(AstModule));
   module->comments = comments;
   module->comment_count = comment_count;
+  module->export_to_main = false;
   AstImport* imports = NULL;
   AstCHeader* c_headers = NULL;
   // `open` and `cheader` are CONTEXTUAL keywords: module directives only here,
@@ -2873,7 +2874,7 @@ AstModule* parse_module(Arena* arena, const char* file_path, TokenList tokens) {
   // they stay normal identifiers (e.g. a func named `open`).
   // (docs/module-namespacing.md, docs/webgpu-bindings.md)
   while (parser_check(&parser, TOK_KW_IMPORT)
-         || (parser_check(&parser, TOK_KW_EXPORT) && parser_peek_at(&parser, 1)->kind == TOK_STRING)
+         || parser_check(&parser, TOK_KW_EXPORT)
          || (parser_check(&parser, TOK_IDENT)
              && str_eq_cstr(parser_peek(&parser)->lexeme, "open")
              && (parser_peek_at(&parser, 1)->kind == TOK_IDENT || parser_peek_at(&parser, 1)->kind == TOK_STRING))
@@ -2896,9 +2897,14 @@ AstModule* parse_module(Arena* arena, const char* file_path, TokenList tokens) {
     } else if (parser_check(&parser, TOK_IDENT) && str_eq_cstr(parser_peek(&parser)->lexeme, "open")) {
         parser_advance(&parser); // consume `open`
         imports = append_import(imports, parse_import_clause(&parser, false, true));
-    } else {
+    } else if (parser_check(&parser, TOK_KW_EXPORT) && parser_peek_at(&parser, 1)->kind == TOK_STRING) {
         parser_advance(&parser); // consume export
         imports = append_import(imports, parse_import_clause(&parser, true, false));
+    } else {
+        // #787: bare `export` at file top — this file's decls belong to the
+        // folder-package's same-named main module (merge retargets module_name).
+        parser_advance(&parser); // consume export
+        module->export_to_main = true;
     }
     if (parser.index == prev_index) {
         parser_advance(&parser);
