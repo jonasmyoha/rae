@@ -3199,6 +3199,72 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             }
             break;
         case AST_EXPR_METHOD_CALL:
+            // #786: 3-level folder-package qualifier `pkg.Module.func(args)`. The
+            // object is `pkg.Module` (a MEMBER whose object is a bare package ident).
+            // If `pkg` is not a value binding and `pkg/Module` names a real, visible
+            // module, resolve `func` there. Guards against chained value access
+            // (`world.theme.active`, where `world` is a value binding).
+            if (expr->as.method_call.object->kind == AST_EXPR_MEMBER
+                && expr->as.method_call.object->as.member.object->kind == AST_EXPR_IDENT) {
+                AstExpr* mem = expr->as.method_call.object;
+                Str pkg = mem->as.member.object->as.ident;
+                Str mod = mem->as.member.member;
+                Symbol* pkgSym = symbol_table_lookup(symbols, pkg);
+                bool pkgIsValue = pkgSym && pkgSym->decl
+                    && pkgSym->decl->kind != AST_DECL_TYPE && pkgSym->decl->kind != AST_DECL_ENUM;
+                char qbuf[512];
+                int qn = snprintf(qbuf, sizeof qbuf, "%.*s/%.*s",
+                    (int)pkg.len, pkg.data, (int)mod.len, mod.data);
+                if (!pkgIsValue && qn > 0 && qn < (int)sizeof qbuf) {
+                    Str fname = expr->as.method_call.method_name;
+                    AstCallArg* qargs = expr->as.method_call.args;
+                    AstTypeRef* qgen = expr->as.method_call.generic_args;
+                    for (AstCallArg* a = qargs; a; a = a->next) sema_analyze_expr(ctx, module, symbols, a->value);
+                    size_t argN = 0; for (AstCallArg* a = qargs; a; a = a->next) argN++;
+                    // Match a function `fname` in a module whose path is (or ends with)
+                    // `pkg/mod` — suffix-tolerant so it works regardless of how deep the
+                    // project root is (module_name may be a long path).
+                    size_t slen = (size_t)qn;  // strlen(qbuf) == "pkg/mod"
+                    AstDecl* resolved = NULL;
+                    for (AstDecl* d = module->decls; d && !resolved; d = d->next) {
+                        if (d->kind != AST_DECL_FUNC) continue;
+                        if (!str_eq(d->as.func_decl.name, fname)) continue;
+                        if (d->as.func_decl.specialization_args) continue;
+                        const char* mn = d->module_name; if (!mn) continue;
+                        size_t mlen = strlen(mn);
+                        bool pathMatch = (mlen == slen && memcmp(mn, qbuf, slen) == 0)
+                            || (mlen > slen && mn[mlen - slen - 1] == '/' && memcmp(mn + mlen - slen, qbuf, slen) == 0);
+                        if (!pathMatch) continue;
+                        if (!sema_decl_visible(s_current_decl_origin, d)) continue;
+                        size_t pc = 0; for (AstParam* p = d->as.func_decl.params; p; p = p->next) pc++;
+                        if (pc != argN) continue;
+                        resolved = d;
+                    }
+                    if (resolved) {
+                        if (getenv("RAE_DUMP_QUALSITES")) fprintf(stderr, "QUALSITE\t%s\t%zu\t%zu\n",
+                            s_current_decl_origin ? s_current_decl_origin : "?", mem->as.member.object->line, mem->as.member.object->column);
+                        AstExpr* callee = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
+                        memset(callee, 0, sizeof(*callee));
+                        callee->kind = AST_EXPR_IDENT;
+                        callee->as.ident = fname;
+                        callee->line = expr->line; callee->column = expr->column;
+                        callee->decl_link = resolved;
+                        expr->kind = AST_EXPR_CALL;
+                        expr->as.call.callee = callee;
+                        expr->as.call.args = qargs;
+                        expr->as.call.generic_args = qgen;
+                        expr->decl_link = resolved;
+                        if (resolved->as.func_decl.returns) {
+                            expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, resolved->as.func_decl.returns->type);
+                            AstParam* p = resolved->as.func_decl.params;
+                            AstCallArg* a = qargs;
+                            while (p && a) { TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, p->type); ensure_type_match(ctx, pt, &a->value); p = p->next; a = a->next; }
+                            sema_check_own_args(ctx, module, symbols, &resolved->as.func_decl, qargs, false);
+                        }
+                        break;
+                    }
+                }
+            }
             // Namespace-qualified stdlib call: `module.func(args)`. If the LHS is
             // a bare identifier that is NOT a value in scope but IS an imported
             // module name, this is a qualified call, not UFCS — rewrite it to a
