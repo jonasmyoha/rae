@@ -11,6 +11,15 @@ your data is in its signature; what a call means is at the call site. That suits
 a person skimming at midnight and a model editing at scale for the same reason:
 neither has to hold the missing half in their head.
 
+Rae is built around the **Entity Component System (ECS)** as its general
+architecture — not just for games, but as the default shape for programs of any
+kind. Data lives in components on entities, behavior lives in systems that run
+over them, and shared state is a resource owned by a World or App rather than a
+global. One small, explicit, data-oriented model — the same for a UI, a
+renderer, a simulation, or a plain CLI — is easier to reason about and to
+refactor than a pile of ad-hoc patterns, and the language is shaped to make that
+model clean rather than to bolt a framework on top.
+
 ## A taste
 
 This is `examples/09_playlist`, verbatim — a type, a list of it, functions
@@ -190,6 +199,27 @@ same for a human and for a tool, which is the whole point of the language.
 narrows an optional, `=>` binds a `view`/`mod` alias whose type you still write,
 and a struct is built as `let p: Point = { ... }`. What is *never* inferred is
 the type of a binding.)
+
+## No globals: shared state has an owner
+
+There is no hidden, program-wide, mutable channel between functions. A
+module-level **`var`** (mutable global state) and a module-level **`let` that
+owns heap** (a `String`, `List`, `Map`, or any struct holding heap) are a
+compile error — a value with no owner and an invisible lifetime is exactly the
+thing that makes a program hard to reason about, for a person and for a tool.
+
+Constants are fine, because a constant is not state: a module-level `const`
+(`const maxRetries: Int = 5`) is a compile-time value, and a `let` bound to a
+literal (`let title: String = "Rae"`) is a static constant, not a global. What
+is banned is *mutable* state and *heap ownership* at the top level, not names for
+fixed values.
+
+Instead, shared state has an owner. It lives as a **resource on a World or App**
+and is passed to the systems that use it through the same `mod`/`view` parameter
+that already says who may read or change it — a former `var activeTheme` becomes
+`app.theme`, threaded to the code that touches it. This is the ECS architecture
+doing the work the language points you toward: every piece of state is somewhere
+specific, and a call's signature tells you whether it can move.
 
 ## Refactoring stability: change the type, keep the meaning
 
