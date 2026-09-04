@@ -169,6 +169,16 @@ in the final shape in between** — so 112/114 are structured once, not twice.
    #737/#748 anyway, so doing it after avoids double work.
 4. **Last:** #766 flip the diagnostic from warning to hard error; suite green.
 
+**Landed (#766):** the hard error is enforced for **stdlib (`lib/`) modules** —
+lib/ is globals-clean after #764, so this fails the build only on a regression.
+Project/example code still gets the **warning** for now: the rollout above only
+scheduled the lib migration (step 3), but the flagship example apps
+(`106_mobile_ui`, `114_walker`) still hold mutable module-level `var`s (theme-
+color caches + loader state). Erroring on them would red the example smoke suite,
+so their App/World-resource migration is tracked as a follow-up task; once that
+lands, the `in_lib` scope guard in `sema.c`'s no-globals check is dropped and the
+error becomes universal, matching "no exemption" (above).
+
 ## Systems, under this rule
 
 Nothing changes for systems — they were already the right shape:

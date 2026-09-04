@@ -1268,7 +1268,20 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
                         "%s: '%.*s' — no globals: make it a component, a resource on the "
                         "App/World, or a `const`. See docs/globals-and-app-ownership.md",
                         why, (int)decl->as.let_decl.name.len, decl->as.let_decl.name.data);
-                    diag_warn(module->file_path, (int)decl->line, (int)decl->column, nog);
+                    /* #766 ERROR phase: enforce the rule as a HARD ERROR for stdlib
+                     * (lib/) modules — lib/ is globals-clean (#764) so this fails the
+                     * build only on a regression. Project/example code still gets a
+                     * WARNING for now: the flagship example apps carry mutable
+                     * module-level globals whose App/World-resource migration is
+                     * scheduled separately, so erroring on them would red the suite. */
+                    const char* org = decl->origin_file ? decl->origin_file : module->file_path;
+                    bool in_lib = org && (strstr(org, "/lib/") != NULL || strncmp(org, "lib/", 4) == 0);
+                    if (in_lib) {
+                        diag_error(org, (int)decl->line, (int)decl->column, nog);
+                        module->had_error = true;
+                    } else {
+                        diag_warn(org, (int)decl->line, (int)decl->column, nog);
+                    }
                 }
             }
             break;
