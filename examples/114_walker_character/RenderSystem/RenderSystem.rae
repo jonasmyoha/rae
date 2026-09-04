@@ -96,7 +96,7 @@ type RenderState {
 # The shadow pass: fit cascades to this frame, then rasterise every caster
 # (ground, props, the character's skinned parts + crowd). Its own function so the
 # match arm stays a one-liner (and the systems refactor #543 gives it a home).
-func renderShadowPass(cam: mod CameraState, character: mod CharacterState, io: mod InputUi, render: mod RenderState, scene: mod Scene3d, terrain: mod InfiniteTerrain, world: mod GameWorld, aspect: copy Float, palette: view List(Float)) {
+func renderShadowPass(cam: mod CameraState, character: mod CharacterState, io: mod InputUi, render: mod RenderState, terrain: mod InfiniteTerrain, world: mod GameWorld, aspect: copy Float, palette: view List(Float)) {
   let cascades: ShadowCascades = fitShadowCascades(
     camPos: cam.camera.position, camTarget: cam.camera.target,
     fovYDeg: cam.camera.fovYDeg, aspect: aspect,
@@ -105,7 +105,6 @@ func renderShadowPass(cam: mod CameraState, character: mod CharacterState, io: m
   uploadPalette(rows: palette, jointCount: jointCount(sk: character.skeleton))
   if io.settings.shadows {
     beginShadowPass(c: cascades)
-    renderSceneShadow(scene: scene)
     drawTerrainPropsShadow(terrain: terrain, world: world)
     # Each caster's shadow samples the SAME palette slot its G-buffer instance
     # does (#547), so a crowd member casts its own pose. Hero = slot 0.
@@ -133,7 +132,7 @@ func renderShadowPass(cam: mod CameraState, character: mod CharacterState, io: m
 # The G-buffer pass: grass compute first, then the geometry — biome-splat ground,
 # scene, instanced props, and the character's skinned parts + idle crowd — then
 # the grass draw, all into one G-buffer pass.
-func renderGbufferPass(cache: mod GbufferCache, cam: mod CameraState, character: mod CharacterState, scene: mod Scene3d, splashes: mod ParticleSystem, terrain: mod InfiniteTerrain, world: mod GameWorld, aspect: copy Float, palette: view List(Float), t: copy Float, dt: copy Float, profiler: mod Profiler, grassCompute: mod GrassCompute) {
+func renderGbufferPass(cache: mod GbufferCache, cam: mod CameraState, character: mod CharacterState, splashes: mod ParticleSystem, terrain: mod InfiniteTerrain, world: mod GameWorld, aspect: copy Float, palette: view List(Float), t: copy Float, dt: copy Float, profiler: mod Profiler, grassCompute: mod GrassCompute) {
   var grassToonGen: Int = 0
   if character.toon { grassToonGen = 1 }
   let grassView: GrassViewSettings = grassConfig.grassThirdPersonSettings(groundColor: walkerGroundColor())
@@ -149,7 +148,6 @@ func renderGbufferPass(cache: mod GbufferCache, cam: mod CameraState, character:
   grassDiagTick(grass: grassCompute, profiler: profiler)
   gbuffer.beginPass(cache: cache, camera: cam.camera, light: cam.light, aspect: aspect)
   drawTerrainGround(cache: cache, terrain: terrain, world: world, time: t)
-  gbuffer.renderScene(cache: cache, scene: scene)
   drawTerrainProps(terrain: terrain, world: world)
   # Palettes (hero slot 0 + one per crowd member) were uploaded in renderApp.
   let jc: Int = jointCount(sk: character.skeleton)
@@ -190,7 +188,7 @@ func renderGbufferPass(cache: mod GbufferCache, cam: mod CameraState, character:
 }
 
 # ----- render phase: animation sample + render-graph walk ------------------
-func renderApp(cam: mod CameraState, character: mod CharacterState, frame: mod Frame, io: mod InputUi, render: mod RenderState, scene: mod Scene3d, world: mod GameWorld, terrain: mod InfiniteTerrain, splashes: mod ParticleSystem, profiler: mod Profiler, grassCompute: mod GrassCompute) {
+func renderApp(cam: mod CameraState, character: mod CharacterState, frame: mod Frame, io: mod InputUi, render: mod RenderState, emptyWorld: view World3d, world: mod GameWorld, terrain: mod InfiniteTerrain, splashes: mod ParticleSystem, profiler: mod Profiler, grassCompute: mod GrassCompute) {
   frame.renderedOnce = true
   io.lastLogRevision = io.logView.revision
   let dt: Float = frame.dt
@@ -255,27 +253,27 @@ func renderApp(cam: mod CameraState, character: mod CharacterState, frame: mod F
     # handled (#624). Each pass is a helper/one-liner; the five generic passes
     # defer to renderDeferredPass (or-patterns, #622, will merge them into one arm).
     match tag {
-      case RenderTag.shadow { renderShadowPass(cam: cam, character: character, io: io, render: render, scene: scene, terrain: terrain, world: world, aspect: aspect, palette: palette) }
-      case RenderTag.gbuffer { renderGbufferPass(cache: render.renderer.passes.gbuffer, cam: cam, character: character, scene: scene, splashes: splashes, terrain: terrain, world: world, aspect: aspect, palette: palette, t: t, dt: dt, profiler: profiler, grassCompute: grassCompute) }
+      case RenderTag.shadow { renderShadowPass(cam: cam, character: character, io: io, render: render, terrain: terrain, world: world, aspect: aspect, palette: palette) }
+      case RenderTag.gbuffer { renderGbufferPass(cache: render.renderer.passes.gbuffer, cam: cam, character: character, splashes: splashes, terrain: terrain, world: world, aspect: aspect, palette: palette, t: t, dt: dt, profiler: profiler, grassCompute: grassCompute) }
       case RenderTag.ssao {
-        renderDeferredPass(r: render.renderer, tag: tag, scene: scene,
-                           camera: cam.camera, light: cam.light, aspect: aspect)
+        renderDeferredPassWorld(r: render.renderer, tag: tag, world: emptyWorld,
+                                camera: cam.camera, light: cam.light, aspect: aspect)
       }
       case RenderTag.depthPyramid {
-        renderDeferredPass(r: render.renderer, tag: tag, scene: scene,
-                           camera: cam.camera, light: cam.light, aspect: aspect)
+        renderDeferredPassWorld(r: render.renderer, tag: tag, world: emptyWorld,
+                                camera: cam.camera, light: cam.light, aspect: aspect)
       }
       case RenderTag.lighting {
-        renderDeferredPass(r: render.renderer, tag: tag, scene: scene,
-                           camera: cam.camera, light: cam.light, aspect: aspect)
+        renderDeferredPassWorld(r: render.renderer, tag: tag, world: emptyWorld,
+                                camera: cam.camera, light: cam.light, aspect: aspect)
       }
       case RenderTag.taa {
-        renderDeferredPass(r: render.renderer, tag: tag, scene: scene,
-                           camera: cam.camera, light: cam.light, aspect: aspect)
+        renderDeferredPassWorld(r: render.renderer, tag: tag, world: emptyWorld,
+                                camera: cam.camera, light: cam.light, aspect: aspect)
       }
       case RenderTag.composite {
-        renderDeferredPass(r: render.renderer, tag: tag, scene: scene,
-                           camera: cam.camera, light: cam.light, aspect: aspect)
+        renderDeferredPassWorld(r: render.renderer, tag: tag, world: emptyWorld,
+                                camera: cam.camera, light: cam.light, aspect: aspect)
       }
       case RenderTag.uiOverlay {
         gpu2d.beginFrameLoad()
@@ -286,6 +284,5 @@ func renderApp(cam: mod CameraState, character: mod CharacterState, frame: mod F
     }
     profile.zoneEnd(profiler: profiler, name: (tag as RenderTag).toString())
   }
-  snapshotPrevTransforms(scene: scene)
   capFrameSleep(drs: render.drs, frameStartSec: now)
 }

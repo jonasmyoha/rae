@@ -88,7 +88,7 @@ type DeferredRenderer {
   grade: ColorGrade
   # #764: the deferred pass caches (pipeline/bind "made" flags + target
   # generations) were module-level globals in gbuffer_passes / gbufferInspector.
-  # The renderer owns them now; renderDeferredPass threads each pass its cache.
+  # The renderer owns them now; renderDeferredPassWorld threads each pass its cache.
   passes: RenderPasses
 }
 
@@ -298,21 +298,6 @@ func describeDeferred(r: view DeferredRenderer) pub ret String {
 # references, so dispatch is a tag switch, the same pattern renderer3d and
 # lib/ui/registry.rae use; the graph never inspects a tag, so that
 # constraint stays out of it.
-#
-# Every declared pass now executes. The depth pyramid is the one whose
-# CONSUMER is still missing — Hi-Z culling and a deferred SSAO are what
-# will read it — so it is built and unread for now. That is a real pass
-# doing real work early, not a placeholder: building it now is what lets
-# those techniques arrive as consumers of an existing resource instead of
-# as a reshaping of the frame.
-func renderDeferredFrame(r: mod DeferredRenderer, scene: view Scene3d, camera: view Camera3d, light: view Light3d, aspect: view Float) pub {
-  var i: Int = 0
-  loop i < r.graph.order.length {
-    renderDeferredPass(r: r, tag: deferredTagAt(r: r, i: i), scene: scene,
-                       camera: camera, light: light, aspect: aspect)
-    i = i + 1
-  }
-}
 
 # ----- app-driven dispatch (#389) -------------------------------------
 # A UI overlay needs lib/ui types, and a renderer must not depend on the
@@ -330,76 +315,12 @@ func deferredTagAt(r: view DeferredRenderer, i: view Int) pub ret Int {
   ret graphPassAt(values: r.graph.passes, index: p).tag
 }
 
-# Run one pass of the deferred frame. Handles every tag EXCEPT the UI
-# overlay, which the caller owns.
-#
-# PRESENT IS THE ONE TAG THAT DIFFERS WITH A UI. gpu2d.beginFrameLoad
-# opens a 2D pass on the same offscreen the composite just wrote, and
-# gpu2d.endFrame is what presents it — so calling the renderer's own
-# present as well would present twice. With a UI, present belongs to
-# gpu2d; without one, it belongs here.
-func renderDeferredPass(r: mod DeferredRenderer, tag: view Int, scene: view Scene3d,
-                        camera: view Camera3d, light: view Light3d, aspect: view Float) pub {
-  if tag is RenderTag.gbuffer {
-    beginPass(cache: r.passes.gbuffer, camera: camera, light: light, aspect: aspect)
-    gbuffer.renderScene(cache: r.passes.gbuffer, scene: scene)
-    # Metaballs go into the SAME pass as the triangles, so the two kinds
-    # depth-test against each other rather than compositing (#392).
-    renderSceneSdf(scene: scene, camera: camera)
-    endPass()
-  }
-  # RenderTag.shadow is deliberately NOT handled here. Filling the cascades
-  # needs a walk of the scene as CASTERS, which is the app's business —
-  # the same reason the UI overlay is app-owned. An app that skips it
-  # renders unshadowed, which is what a frame with no shadow pass should
-  # look like.
-  if tag is RenderTag.depthPyramid {
-    buildDepthPyramid(cache: r.passes.pyr)
-  }
-  if tag is RenderTag.ssao {
-    ssaoPass(cache: r.passes.ao, camera: camera)
-  }
-  if tag is RenderTag.lighting {
-    # THROUGH THE SKY INTERFACE, always (#399). Routing every deferred
-    # frame through it now — rather than only once a real sky exists —
-    # is what makes this a seam instead of an unused abstraction: when
-    # #401 replaces the hemisphere anchors with SH irradiance, there is
-    # exactly one call site to change and every example moves together.
-    #
-    # A scene that binds no sky gets the fallback built from its own
-    # light, whose irradiance at the two hemisphere anchors is by
-    # construction the values lightingPass passed directly. Test 583
-    # pins that equality, which is why this lands as a no-op.
-    var sky: Sky = createSkyNone(light: light, clearColor: light.clearColor)
-    if r.hasSky {
-      sky = r.sky
-    }
-    lightingPassSky(cache: r.passes.light, camera: camera, light: light, sky: sky)
-  }
-  if tag is RenderTag.taa {
-    taaPass(cache: r.passes.taa)
-  }
-  if tag is RenderTag.composite {
-    if r.debugView is viewLit {
-      compositePassGraded(cache: r.passes.composite, exposure: light.exposure, grade: r.grade)
-    } else {
-      inspect(cache: r.passes.inspect, mode: r.debugView, zNear: camera.nearZ, zFar: camera.farZ)
-    }
-  }
-  if tag is RenderTag.present {
-    if r.hasUi {
-      gpu2d.endFrame()
-    } else {
-      presentFrame()
-    }
-  }
-}
-
-# #794: the World3d twin of renderDeferredPass. Identical to it except the
-# G-buffer pass fills from the World3d ECS queries (renderSceneWorld +
-# renderSceneSdfWorld) instead of the Scene3d parallel lists. Every other tag is
-# scene-independent (they read G-buffer/depth resources the gbuffer pass already
-# wrote), so they are the same calls.
+# Run one pass of the deferred frame from a World3d. Handles every tag EXCEPT the
+# UI overlay, which the caller owns (PRESENT differs with a UI: gpu2d.endFrame
+# presents, so the renderer must not present again). The G-buffer pass fills from
+# the World3d ECS queries (renderSceneWorld + renderSceneSdfWorld); every other tag
+# is scene-independent — it reads G-buffer/depth resources the gbuffer pass already
+# wrote — so those tags ignore the world.
 func renderDeferredPassWorld(r: mod DeferredRenderer, tag: view Int, world: view World3d,
                              camera: view Camera3d, light: view Light3d, aspect: view Float) pub {
   if tag is RenderTag.gbuffer {
