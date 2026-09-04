@@ -105,10 +105,10 @@ func emptyHosekDataset() ret HosekDataset {
 
 func readNumberArray(doc: view JsonDoc, arr: view JsonValue) ret List(Float) {
   var out: List(Float) = createList(Float, cap: 0)
-  let n: Int = jsonArrayLen(this: arr)
+  let n: Int = arrayLen(this: arr)
   var i: Int = 0
   loop i < n {
-    let v: JsonValue = jsonArrayAt(doc: doc, this: arr, idx: i)
+    let v: JsonValue = arrayAt(doc: doc, this: arr, idx: i)
     out.add(value: jsonFloat(this: v, fallback: 0.0))
     i = i + 1
   }
@@ -118,15 +118,15 @@ func readNumberArray(doc: view JsonDoc, arr: view JsonValue) ret List(Float) {
 # One channel out of a "coefficients"/"radiances" array of three.
 func readChannel(doc: view JsonDoc, root: view JsonValue, key: view String, channel: view Int) ret List(Float) {
   let empty: List(Float) = createList(Float, cap: 0)
-  let idx: Int = jsonField(doc: doc, this: root, key: key)
+  let idx: Int = field(doc: doc, this: root, key: key)
   if idx < 0 {
     ret empty
   }
   let arr: JsonValue = valueAt(doc: doc, idx: idx)
-  if jsonArrayLen(this: arr) <= channel {
+  if arrayLen(this: arr) <= channel {
     ret empty
   }
-  ret readNumberArray(doc: doc, arr: jsonArrayAt(doc: doc, this: arr, idx: channel))
+  ret readNumberArray(doc: doc, arr: arrayAt(doc: doc, this: arr, idx: channel))
 }
 
 # Read the table. Call once; cooking a sky afterwards is pure arithmetic over
@@ -145,7 +145,7 @@ func loadHosekDataset(path: view String) pub ret HosekDataset {
     ret emptyHosekDataset()
   }
   let doc: JsonDoc = parseJson(source: raw)
-  let root: JsonValue = jsonRoot(doc: doc)
+  let root: JsonValue = root(doc: doc)
   let cR: List(Float) = readChannel(doc: doc, root: root, key: "coefficients", channel: 0)
   let cG: List(Float) = readChannel(doc: doc, root: root, key: "coefficients", channel: 1)
   let cB: List(Float) = readChannel(doc: doc, root: root, key: "coefficients", channel: 2)

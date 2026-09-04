@@ -14,10 +14,10 @@ func main() ret Int {
   var timing: GpuTiming = GpuTiming.createGpuTiming()
   if webgpuBootstrap() is 0 { log("no wgpu device") ret 1 }
   log("have_timestamp={webgpuHaveTimestamp()}")
-  if GpuTiming.gpuTimingInit(timing: timing) is false { log("gpu timing DISABLED (adapter lacks feature)") ret 0 }
+  if GpuTiming.init(timing: timing) is false { log("gpu timing DISABLED (adapter lacks feature)") ret 0 }
   log("gpu timing enabled")
-  # A throwaway capture so profileCounter has somewhere to record.
-  profile.profileStartCapture(profiler: profiler, seconds: 3600.0, outPath: "/tmp/gt_selftest.json")
+  # A throwaway capture so counter has somewhere to record.
+  profile.startCapture(profiler: profiler, seconds: 3600.0, outPath: "/tmp/gt_selftest.json")
 
   # A render pass that clears a texture — real GPU work, and the exact descriptor
   # timestampWrites path the renderer uses.
@@ -44,8 +44,8 @@ func main() ret Int {
 
   var frame: Int = 0
   loop frame < 5 {
-    GpuTiming.gpuTimingFrameBegin(timing: timing)
-    let tsIdx: Int = GpuTiming.gpuTimingPassBegin(timing: timing, name: "clear")
+    GpuTiming.frameBegin(timing: timing)
+    let tsIdx: Int = GpuTiming.passBegin(timing: timing, name: "clear")
     let encDesc: WGPUCommandEncoderDescriptor = { }
     let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
     atts.set(index: 0, value: {
@@ -55,16 +55,16 @@ func main() ret Int {
     })
     let rpDesc: WGPURenderPassDescriptor = {
       colorAttachmentCount: 1 as UInt64, colorAttachments: atts.data,
-      timestampWrites: GpuTiming.gpuTimingWritesPtr(timing: timing)
+      timestampWrites: GpuTiming.writesPtr(timing: timing)
     }
     let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
     wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
-    GpuTiming.gpuTimingResolve(timing: timing, enc: enc, idx: tsIdx)
+    GpuTiming.resolve(timing: timing, enc: enc, idx: tsIdx)
     let cbDesc: WGPUCommandBufferDescriptor = { }
     let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
     gtSubmitTest(cmd: cmd)
-    GpuTiming.gpuTimingCollect(timing: timing, profiler: profiler)
-    log("frame {frame}: clear-pass GPU time = {GpuTiming.gpuTimingLastTotalUs(timing: timing)} us")
+    GpuTiming.collect(timing: timing, profiler: profiler)
+    log("frame {frame}: clear-pass GPU time = {GpuTiming.lastTotalUs(timing: timing)} us")
     frame = frame + 1
   }
   ret 0

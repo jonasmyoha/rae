@@ -165,11 +165,11 @@ func restoreAppState(backend: view UiBackend, state: mod AppState, playback: mod
     log("[state] parse error in {path} at byte {doc.errorPos}")
     ret
   }
-  let root: JsonValue = json.jsonRoot(doc: doc)
+  let root: JsonValue = json.root(doc: doc)
 
   # Album stem — only restore if the album is still on disk.
   let stemKey: String = "currentAlbumStem"
-  let stemIdx: Int = json.jsonField(doc: doc, this: root, key: stemKey)
+  let stemIdx: Int = json.field(doc: doc, this: root, key: stemKey)
   if stemIdx >= 0 {
     let empty: String = ""
     let savedStem: String = json.jsonString(this: json.jsonValueAt(doc: doc, idx: stemIdx), fallback: empty)
@@ -185,7 +185,7 @@ func restoreAppState(backend: view UiBackend, state: mod AppState, playback: mod
 
   # Track index — clamp to the active album's track count.
   let trackKey: String = "currentTrackIndex"
-  let trackIdx: Int = json.jsonField(doc: doc, this: root, key: trackKey)
+  let trackIdx: Int = json.field(doc: doc, this: root, key: trackKey)
   if trackIdx >= 0 {
     var savedTrack: Int = json.jsonInt(this: json.jsonValueAt(doc: doc, idx: trackIdx), fallback: 0)
     let album: Album = activeAlbum(state: state)
@@ -201,7 +201,7 @@ func restoreAppState(backend: view UiBackend, state: mod AppState, playback: mod
 
   # Playback position — stored as ms, restored to Float seconds.
   let elapsedKey: String = "elapsedMs"
-  let elapsedIdx: Int = json.jsonField(doc: doc, this: root, key: elapsedKey)
+  let elapsedIdx: Int = json.field(doc: doc, this: root, key: elapsedKey)
   if elapsedIdx >= 0 {
     var ms: Int = json.jsonInt(this: json.jsonValueAt(doc: doc, idx: elapsedIdx), fallback: 0)
     if ms < 0 {
@@ -212,7 +212,7 @@ func restoreAppState(backend: view UiBackend, state: mod AppState, playback: mod
 
   # Play / pause flag.
   let playingKey: String = "isPlaying"
-  let playingFieldIdx: Int = json.jsonField(doc: doc, this: root, key: playingKey)
+  let playingFieldIdx: Int = json.field(doc: doc, this: root, key: playingKey)
   if playingFieldIdx >= 0 {
     playback.isPlaying = json.jsonBool(this: json.jsonValueAt(doc: doc, idx: playingFieldIdx), fallback: false)
   }
@@ -236,15 +236,15 @@ func restoreAppState(backend: view UiBackend, state: mod AppState, playback: mod
   # restore — landing the user on a sub-page like NowPlaying with
   # an empty back-stack underneath caused real navigation breakage.
   let tabKey: String = "tab"
-  let tabFieldIdx: Int = json.jsonField(doc: doc, this: root, key: tabKey)
+  let tabFieldIdx: Int = json.field(doc: doc, this: root, key: tabKey)
   if tabFieldIdx >= 0 {
     let tabOrd: Int = json.jsonInt(this: json.jsonValueAt(doc: doc, idx: tabFieldIdx), fallback: 4)
     state.tab = intToScreen(n: tabOrd)
   }
   let winXKey: String = "winX"
-  let winXIdx: Int = json.jsonField(doc: doc, this: root, key: winXKey)
+  let winXIdx: Int = json.field(doc: doc, this: root, key: winXKey)
   let winYKey: String = "winY"
-  let winYIdx: Int = json.jsonField(doc: doc, this: root, key: winYKey)
+  let winYIdx: Int = json.field(doc: doc, this: root, key: winYKey)
   if winXIdx >= 0 {
     if winYIdx >= 0 {
       let savedX: Int = json.jsonInt(this: json.jsonValueAt(doc: doc, idx: winXIdx), fallback: 50)

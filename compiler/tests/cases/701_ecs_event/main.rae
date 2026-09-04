@@ -3,7 +3,7 @@ open ecs/event
 
 # #754: EventQueue(T) is a double-buffered per-frame event channel. One system
 # produces, later systems drain the SAME frame, and the channel clears at the
-# frame boundary (eventFrameAdvance).
+# frame boundary (frameAdvance).
 
 type Damage { amount: Int }
 
@@ -31,7 +31,7 @@ func main() {
   systemA(events: events)
   log("count after A: {eventCount(this: events)}")
   log("B total: {systemB(events: events)}")
-  eventFrameAdvance(this: events)
+  frameAdvance(this: events)
 
   # ---- frame 2: channel cleared ----
   log("count after advance: {eventCount(this: events)}")

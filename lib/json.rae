@@ -8,7 +8,7 @@
 #   fields    for objects: (key, valueIdx) pairs
 # A JsonValue refers into those pools via `rangeStart` + `rangeLen`.
 #
-# Helpers (`jsonField`, `jsonInt`, …) take both the doc and the value so
+# Helpers (`field`, `jsonInt`, …) take both the doc and the value so
 # callers don't have to plumb pool indices manually.
 import core
 import char
@@ -69,7 +69,7 @@ func jsonNull() ret JsonValue {
   }
 }
 
-func jsonBoolValue(v: view Bool) ret JsonValue {
+func boolValue(v: view Bool) ret JsonValue {
   ret JsonValue {
     kind: JsonKind.bool
     asBool: v
@@ -80,7 +80,7 @@ func jsonBoolValue(v: view Bool) ret JsonValue {
   }
 }
 
-func jsonNumberValue(v: view Float) ret JsonValue {
+func numberValue(v: view Float) ret JsonValue {
   ret JsonValue {
     kind: JsonKind.number
     asBool: false
@@ -91,7 +91,7 @@ func jsonNumberValue(v: view Float) ret JsonValue {
   }
 }
 
-func jsonStringValue(v: own String) ret JsonValue {
+func stringValue(v: own String) ret JsonValue {
   ret JsonValue {
     kind: JsonKind.string
     asBool: false
@@ -121,7 +121,7 @@ func fieldAt(doc: view JsonDoc, idx: view Int) ret JsonField {
 
 # ---------- public accessors ----------
 
-func jsonRoot(doc: view JsonDoc) ret JsonValue {
+func root(doc: view JsonDoc) ret JsonValue {
   if doc.ok is false {
     ret json.jsonNull()
   }
@@ -164,7 +164,7 @@ func jsonBool(this: view JsonValue, fallback: view Bool) ret Bool {
 
 # Escape a string for embedding inside a JSON `"..."` literal.
 # This is intentionally Rae stdlib policy, not app glue or C runtime code.
-func jsonEscape(s: view String) ret String {
+func escape(s: view String) ret String {
   var out: String = ""
   var i: Int = 0
   let n: Int = s.length()
@@ -206,18 +206,18 @@ func jsonEscape(s: view String) ret String {
   ret out
 }
 
-func jsonQuote(s: view String) ret String {
-  ret "\"{json.jsonEscape(s: s)}\""
+func quote(s: view String) ret String {
+  ret "\"{json.escape(s: s)}\""
 }
 
-func jsonArrayLen(this: view JsonValue) ret Int {
+func arrayLen(this: view JsonValue) ret Int {
   if this.kind is not JsonKind.array {
     ret 0
   }
   ret this.rangeLen
 }
 
-func jsonArrayAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) ret JsonValue {
+func arrayAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) ret JsonValue {
   if this.kind is not JsonKind.array {
     ret json.jsonNull()
   }
@@ -228,14 +228,14 @@ func jsonArrayAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) ret Jso
   ret json.valueAt(doc: doc, idx: childIdx)
 }
 
-func jsonObjectLen(this: view JsonValue) ret Int {
+func objectLen(this: view JsonValue) ret Int {
   if this.kind is not JsonKind.object {
     ret 0
   }
   ret this.rangeLen
 }
 
-func jsonObjectKeyAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) ret String {
+func objectKeyAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) ret String {
   if this.kind is not JsonKind.object {
     ret ""
   }
@@ -246,7 +246,7 @@ func jsonObjectKeyAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) ret
   ret f.key
 }
 
-func jsonObjectValueAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) ret JsonValue {
+func objectValueAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) ret JsonValue {
   if this.kind is not JsonKind.object {
     ret json.jsonNull()
   }
@@ -261,7 +261,7 @@ func jsonObjectValueAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) r
 # index into doc.values, or -1 if missing. -1 is the "none" indicator
 # because `opt JsonValue` has historically been awkward in Rae and we
 # want this hot path to stay simple.
-func jsonField(doc: view JsonDoc, this: view JsonValue, key: view String) ret Int {
+func field(doc: view JsonDoc, this: view JsonValue, key: view String) ret Int {
   if this.kind is not JsonKind.object {
     ret -1
   }
@@ -277,7 +277,7 @@ func jsonField(doc: view JsonDoc, this: view JsonValue, key: view String) ret In
 }
 
 # Resolve a value-pool index into a JsonValue (for callers chaining off
-# `jsonField`). Returns null-shaped if idx is out of range.
+# `field`). Returns null-shaped if idx is out of range.
 func jsonValueAt(doc: view JsonDoc, idx: view Int) ret JsonValue {
   if idx < 0 or idx >= doc.values.length {
     ret json.jsonNull()
@@ -626,12 +626,12 @@ func parseValue(
     if p.ok is false {
       ret -1
     }
-    ret json.pushValue(vals: vals, v: json.jsonStringValue(v: s))
+    ret json.pushValue(vals: vals, v: json.stringValue(v: s))
   }
 
   if c is 't' {
     if json.consumeKeyword(p: p, kw: "true") {
-      ret json.pushValue(vals: vals, v: json.jsonBoolValue(v: true))
+      ret json.pushValue(vals: vals, v: json.boolValue(v: true))
     }
     p.ok = false
     ret -1
@@ -639,7 +639,7 @@ func parseValue(
 
   if c is 'f' {
     if json.consumeKeyword(p: p, kw: "false") {
-      ret json.pushValue(vals: vals, v: json.jsonBoolValue(v: false))
+      ret json.pushValue(vals: vals, v: json.boolValue(v: false))
     }
     p.ok = false
     ret -1
@@ -658,7 +658,7 @@ func parseValue(
     if p.ok is false {
       ret -1
     }
-    ret json.pushValue(vals: vals, v: json.jsonNumberValue(v: n))
+    ret json.pushValue(vals: vals, v: json.numberValue(v: n))
   }
 
   p.ok = false
@@ -707,7 +707,7 @@ func parseJson(source: view String) ret JsonDoc {
 # `stringify` walks a parsed JsonValue back to a compact JSON String (the
 # inverse of parseJson, so parseJson(stringifyDoc(parseJson(s))) round-trips).
 # The `JsonBuilder` (jb* below) constructs JSON programmatically from scalars /
-# arrays / objects without a parsed doc. Both reuse jsonQuote/jsonEscape for
+# arrays / objects without a parsed doc. Both reuse quote/escape for
 # string escaping. Compact output (no spaces) — parseJson ignores whitespace, so
 # the round-trip is on the VALUES, not byte-identical text.
 # ==========================================================================
@@ -722,15 +722,15 @@ func stringify(doc: view JsonDoc, value: view JsonValue) ret String {
       ret "false"
     }
     case JsonKind.number { ret "{value.asNumber}" }
-    case JsonKind.string { ret jsonQuote(s: value.asString) }
+    case JsonKind.string { ret quote(s: value.asString) }
     case JsonKind.array {
       var out: String = "["
-      let count: Int = jsonArrayLen(this: value)
+      let count: Int = arrayLen(this: value)
       loop var i: Int = 0, i < count, ++i {
         if i > 0 {
           out = out.concat(other: ",")
         }
-        let child: JsonValue = jsonArrayAt(doc: doc, this: value, idx: i)
+        let child: JsonValue = arrayAt(doc: doc, this: value, idx: i)
         out = out.concat(other: stringify(doc: doc, value: child))
       }
       out = out.concat(other: "]")
@@ -738,15 +738,15 @@ func stringify(doc: view JsonDoc, value: view JsonValue) ret String {
     }
     case JsonKind.object {
       var out: String = "\{"
-      let count: Int = jsonObjectLen(this: value)
+      let count: Int = objectLen(this: value)
       loop var i: Int = 0, i < count, ++i {
         if i > 0 {
           out = out.concat(other: ",")
         }
-        let key: String = jsonObjectKeyAt(doc: doc, this: value, idx: i)
-        out = out.concat(other: jsonQuote(s: key))
+        let key: String = objectKeyAt(doc: doc, this: value, idx: i)
+        out = out.concat(other: quote(s: key))
         out = out.concat(other: ":")
-        let childValue: JsonValue = jsonObjectValueAt(doc: doc, this: value, idx: i)
+        let childValue: JsonValue = objectValueAt(doc: doc, this: value, idx: i)
         out = out.concat(other: stringify(doc: doc, value: childValue))
       }
       out = out.concat(other: "\}")
@@ -758,7 +758,7 @@ func stringify(doc: view JsonDoc, value: view JsonValue) ret String {
 
 # Serialize a whole document (from its root).
 func stringifyDoc(doc: view JsonDoc) ret String {
-  ret stringify(doc: doc, value: jsonRoot(doc: doc))
+  ret stringify(doc: doc, value: root(doc: doc))
 }
 
 # ----- JsonBuilder: build JSON programmatically -----------------------------
@@ -781,7 +781,7 @@ func jbBool(value: view Bool) ret String {
 
 func jbNumber(value: view Float) ret String { ret "{value}" }
 
-func jbString(value: view String) ret String { ret jsonQuote(s: value) }
+func jbString(value: view String) ret String { ret quote(s: value) }
 
 # Start an object; add fields with jbField; finish with jbEndObject.
 func jbObject() ret JsonBuilder { ret JsonBuilder { out: "\{", count: 0 } }
@@ -790,7 +790,7 @@ func jbField(builder: mod JsonBuilder, key: view String, valueJson: view String)
   if builder.count > 0 {
     builder.out = builder.out.concat(other: ",")
   }
-  builder.out = builder.out.concat(other: jsonQuote(s: key))
+  builder.out = builder.out.concat(other: quote(s: key))
   builder.out = builder.out.concat(other: ":")
   builder.out = builder.out.concat(other: valueJson)
   builder.count = builder.count + 1

@@ -17,7 +17,7 @@
 # type, inferred from the table); an app's `worldToJson` is a few-line
 # composition that calls it once per table then `finishWorldJson` (see the test).
 # lib/json's JsonBuilder (#718) isn't required — the fragments are assembled from
-# `toJson()` + `jsonQuote`, and parse straight back with `parseJson`.
+# `toJson()` + `quote`, and parse straight back with `parseJson`.
 import core
 open json
 open ecs/entity
@@ -44,7 +44,7 @@ func addComponentTable(T: type, writer: mod WorldJson, table: view ComponentTabl
   if registeredHasFlag(reg: registry, name: name, flag: serialize) is false {
     ret
   }
-  var frag: String = jsonQuote(s: name)
+  var frag: String = quote(s: name)
   frag = frag.concat(other: ": \{")
   loop var i: Int = 0, i < componentCount(this: table), ++i {
     if i > 0 {
@@ -53,7 +53,7 @@ func addComponentTable(T: type, writer: mod WorldJson, table: view ComponentTabl
     let entity: EntityId = componentEntityAt(this: table, i: i)
     let value: T = componentDataAt(this: table, i: i)
     let key: String = "{entity.index}"
-    frag = frag.concat(other: jsonQuote(s: key))
+    frag = frag.concat(other: quote(s: key))
     frag = frag.concat(other: ": ")
     frag = frag.concat(other: value.toJson())
   }
@@ -94,17 +94,17 @@ func loadComponentTable(T: type, table: mod ComponentTable(T), name: view String
   if registeredHasFlag(reg: registry, name: name, flag: serialize) is false {
     ret
   }
-  let root: JsonValue = jsonRoot(doc: doc)
-  let componentIdx: Int = jsonField(doc: doc, this: root, key: name)
+  let root: JsonValue = root(doc: doc)
+  let componentIdx: Int = field(doc: doc, this: root, key: name)
   if componentIdx < 0 {
     ret
   }
   # The component's entry is an object mapping entity index -> the component's
   # own JSON. Re-stringify each value (stringify, #718) and hand it to fromJson.
   let componentObj: JsonValue = jsonValueAt(doc: doc, idx: componentIdx)
-  loop var i: Int = 0, i < jsonObjectLen(this: componentObj), ++i {
-    let key: String = jsonObjectKeyAt(doc: doc, this: componentObj, idx: i)
-    let valueJson: JsonValue = jsonObjectValueAt(doc: doc, this: componentObj, idx: i)
+  loop var i: Int = 0, i < objectLen(this: componentObj), ++i {
+    let key: String = objectKeyAt(doc: doc, this: componentObj, idx: i)
+    let valueJson: JsonValue = objectValueAt(doc: doc, this: componentObj, idx: i)
     let entity: EntityId = { index: key.toInt(), generation: 0 }
     let valueStr: String = stringify(doc: doc, value: valueJson)
     let component: T = T.fromJson(json: valueStr)
@@ -131,7 +131,7 @@ func addResource(writer: mod WorldJson, name: view String, valueJson: view Strin
   if registeredHasFlag(reg: registry, name: name, flag: serialize) is false {
     ret
   }
-  var frag: String = jsonQuote(s: name)
+  var frag: String = quote(s: name)
   frag = frag.concat(other: ": ")
   frag = frag.concat(other: valueJson)
   writer.parts.add(value: own frag)
@@ -143,8 +143,8 @@ func resourceJson(name: view String, registry: view ComponentRegistry, doc: view
   if registeredHasFlag(reg: registry, name: name, flag: serialize) is false {
     ret ""
   }
-  let root: JsonValue = jsonRoot(doc: doc)
-  let idx: Int = jsonField(doc: doc, this: root, key: name)
+  let root: JsonValue = root(doc: doc)
+  let idx: Int = field(doc: doc, this: root, key: name)
   if idx < 0 {
     ret ""
   }
