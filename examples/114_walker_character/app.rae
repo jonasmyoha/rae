@@ -169,11 +169,15 @@ type PersistState {
 }
 
 type App {
-  scene: Scene3d
+  # An empty World3d kept only to satisfy renderDeferredPassWorld's signature on
+  # the scene-independent passes (ssao/depthPyramid/lighting/taa/composite) —
+  # 114 draws its geometry through the skinned/instanced/terrain/grass paths in
+  # renderGbufferPass and renderShadowPass, never through the shared mesh query,
+  # so this world carries no entities and is never read.
+  emptyWorld: World3d
   # #738: the ECS GameWorld — the authoritative gameplay world (EntityAllocator +
-  # Transform3D/WorldTransform3D/Material3D tables). #739-#746 migrate the
-  # character, crowd, terrain and grass onto it; for now `scene` still drives the
-  # renderer.
+  # Transform3D/WorldTransform3D/Material3D tables); the character, crowd, terrain
+  # and grass live here.
   world: GameWorld
   frame: Frame
   io: InputUi
@@ -263,7 +267,7 @@ func createApp() ret App {
   let bindPose: SkeletonPose = captureSkeletonPose(sk: sk)
   log("[anim] idle {clipChannelCount(c: idleClip)} ch / {idleClip.duration}s, walk {clipChannelCount(c: walkClip)} ch / {walkClip.duration}s, run {clipChannelCount(c: runClip)} ch / {runClip.duration}s")
 
-  var scene: Scene3d = createScene3d()
+  var emptyWorld: World3d = createWorld3d()
   let groundZ: Float = 0.0 - 1.0
   var characterController: ThirdPersonController = createThirdPersonController()
   # #739: the GameWorld holds the hero + crowd as entities; built here so
@@ -494,7 +498,7 @@ func createApp() ret App {
   var drs: RenderScaleController = createRenderScaleController(targetFps: 60.0)
 
   ret App {
-    scene: own scene
+    emptyWorld: own emptyWorld
     world: own gameWorld
     frame: {
       dt: 0.0, now: startT, startT: startT, prevT: startT, time: 0.0, aspect: 1.0,
@@ -718,7 +722,7 @@ func runWalkerApp() ret Int {
         frameSec: 0.016667, heartbeatSec: 1.0
       ))
     } else {
-      renderApp(cam: app.cam, character: app.character, frame: app.frame, io: app.io, render: app.render, scene: app.scene, world: app.world, terrain: app.terrain, splashes: app.splashes, profiler: app.profiler, grassCompute: app.grassCompute)
+      renderApp(cam: app.cam, character: app.character, frame: app.frame, io: app.io, render: app.render, emptyWorld: app.emptyWorld, world: app.world, terrain: app.terrain, splashes: app.splashes, profiler: app.profiler, grassCompute: app.grassCompute)
     }
   }
   skinShutdown()
