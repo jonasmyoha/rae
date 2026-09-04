@@ -332,7 +332,7 @@ for TARGET in "${TARGETS[@]}"; do
         # comparison (same idea as the mem-stats filter) — EXCEPT the test that
         # asserts them. Removed by #766 when the warning becomes a hard error.
         case "$TEST_NAME" in
-            708_no_globals_warning) ;;
+            708_no_globals_error) ;;
             *) ACTUAL_OUTPUT=$(printf '%s' "$ACTUAL_OUTPUT" | grep -Ev 'warning: module-level `(var|let)`' || true) ;;
         esac
     fi
