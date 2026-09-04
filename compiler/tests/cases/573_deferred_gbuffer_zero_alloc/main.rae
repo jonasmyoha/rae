@@ -25,7 +25,9 @@ import scene3d
 import vec3
 import math3d
 import rendererDeferred
+import ecs/entity
 open scene3d
+open ecs/entity
 open gbuffer
 open math3d
 open vec3
@@ -33,8 +35,8 @@ open rendererDeferred
 
 func rae_ext_rae_mem_alloc_total() extern ret Int
 
-func buildScene(objects: view Int) ret Scene3d {
-  var scene: Scene3d = createScene3d()
+func buildScene(objects: view Int) ret World3d {
+  var world: World3d = createWorld3d()
   let noEmit: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let unit: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
   # Mesh id 1 need not exist on the GPU: the extern is a no-op under the
@@ -44,25 +46,25 @@ func buildScene(objects: view Int) ret Scene3d {
   var i: Int = 0
   loop i < objects {
     let f: Float = i.toFloat()
-    let mat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.9, y: 0.3, z: 0.2), metallic: 0.5, roughness: 0.4, emission: noEmit)
+    let mat: Material3d = { baseColor: vec3.create(x: 0.9, y: 0.3, z: 0.2), metallic: 0.5, roughness: 0.4, emission: noEmit, toon: false }
     # Rotation and non-unit scale on purpose: they force the full
     # T * Rz * Ry * Rx * S chain — five matrices and four multiplies per
     # object — rather than a translation-only fast path.
-    let e: Int = addMeshInstance(
-      scene: scene, mesh: mesh, material: mat,
+    let e: EntityId = world3dAddMeshInstance(
+      world: world, mesh: mesh, material: mat,
       position: vec3.create(x: f * 0.5, y: f * 0.25, z: 1.0),
       rotation: vec3.create(x: f * 0.1, y: f * 0.2, z: f * 0.3),
       scale: vec3.create(x: 1.5, y: 1.5, z: 1.5)
     )
     i = i + 1
   }
-  ret scene
+  ret world
 }
 
 func main() {
   let objects: Int = 512
   let frames: Int = 20
-  var scene: Scene3d = buildScene(objects: objects)
+  var world: World3d = buildScene(objects: objects)
   let camera: Camera3d = defaultCamera3d()
   let light: Light3d = defaultLight3d()
 
@@ -78,12 +80,12 @@ func main() {
   # allocates once (lazy setup) is not a per-frame cost, and folding it
   # into the sample would either fail the test for the wrong reason or,
   # worse, hide a real per-object allocation behind a tolerance.
-  renderDeferredFrame(r: renderer, scene: scene, camera: camera, light: light, aspect: 1.6)
+  renderDeferredFrameWorld(r: renderer, world: world, camera: camera, light: light, aspect: 1.6)
 
   let before: Int = rae_ext_rae_mem_alloc_total()
   var f: Int = 0
   loop f < frames {
-    renderDeferredFrame(r: renderer, scene: scene, camera: camera, light: light, aspect: 1.6)
+    renderDeferredFrameWorld(r: renderer, world: world, camera: camera, light: light, aspect: 1.6)
     f = f + 1
   }
   let allocations: Int = rae_ext_rae_mem_alloc_total() - before

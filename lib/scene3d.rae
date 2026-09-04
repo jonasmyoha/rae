@@ -19,9 +19,8 @@
 # WORLD CONVENTION: right-handed Z-up (Blender), per
 # `docs/coordinate-system.md`. +X right, +Y forward, +Z up.
 #
-# Storage is parallel component arrays indexed by entity, the extraction-
-# friendly shape 108 established: `renderables[i].entity` indexes
-# `transforms`. Components stay primitive/Vec3-only (no inner String or
+# Storage is the ECS `World3d` below: one ComponentTable per 3D component,
+# keyed by EntityId. Components stay primitive/Vec3-only (no inner String or
 # other heap fields) — Rae's `List(Struct)` does not deep-copy inner heap
 # fields reliably, so keeping components flat avoids that whole class of
 # aliasing bug.
@@ -143,166 +142,6 @@ type SdfPrimitive {
   smoothing: Float
 }
 
-type Scene3d {
-  transforms: List(Transform3d)
-  # Previous-frame transforms, same entity indexing (#336). Motion vectors
-  # (TAA #335) need where each entity WAS; kept in lockstep by addTransform
-  # and advanced once per frame by snapshotPrevTransforms.
-  prevTransforms: List(Transform3d)
-  materials: List(Material3d)
-  meshRenderers: List(MeshRenderer)
-  sdfPrimitives: List(SdfPrimitive)
-  # Monotonic change counter (#336). Bumped by every authoring call and by
-  # setTransform; a consumer (dirty-region GI updates, #338) remembers the
-  # revision it last processed and compares. Mutating component lists
-  # directly bypasses this — setTransform is the sanctioned mutation path.
-  revision: Int
-}
-
-# Renderer extraction reads component tables through scene invariants. Keep
-# failures defined if malformed scene data breaks those invariants.
-func sceneTransformAt(values: view List(Transform3d), index: view Int) ret Transform3d {
-  if let value: Transform3d = values.copyAt(index: index) { ret value }
-  ret Transform3d {
-    position: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
-    rotation: Vec3 { x: 0.0, y: 0.0, z: 0.0 },
-    scale: Vec3 { x: 1.0, y: 1.0, z: 1.0 }
-  }
-}
-
-func sceneMaterialAt(values: view List(Material3d), index: view Int) ret Material3d {
-  if let value: Material3d = values.copyAt(index: index) { ret value }
-  ret Material3d {
-    baseColor: Vec3 { x: 1.0, y: 0.0, z: 1.0 }, metallic: 0.0,
-    roughness: 1.0, emission: Vec3 { x: 0.0, y: 0.0, z: 0.0 }, toon: false
-  }
-}
-
-func sceneMeshRendererAt(values: view List(MeshRenderer), index: view Int) ret MeshRenderer {
-  if let value: MeshRenderer = values.copyAt(index: index) { ret value }
-  ret MeshRenderer { entity: -1, mesh: meshHandleNone(), material: -1, visible: false }
-}
-
-func sceneSdfAt(values: view List(SdfPrimitive), index: view Int) ret SdfPrimitive {
-  if let value: SdfPrimitive = values.copyAt(index: index) { ret value }
-  ret SdfPrimitive { entity: -1, shape: -1, material: -1, noise: 0.0, cluster: -1, smoothing: 0.0 }
-}
-
-func createScene3d() pub ret Scene3d {
-  ret Scene3d {
-    transforms: createList(Transform3d, cap: 16),
-    prevTransforms: createList(Transform3d, cap: 16),
-    materials: createList(Material3d, cap: 8),
-    meshRenderers: createList(MeshRenderer, cap: 16),
-    sdfPrimitives: createList(SdfPrimitive, cap: 16),
-    revision: 0
-  }
-}
-
-# ----- authoring helpers ---------------------------------------------
-func addTransform(scene: mod Scene3d, position: view Vec3, rotation: view Vec3, scale: view Vec3) pub ret Int {
-  let entity: Int = scene.transforms.length
-  scene.transforms.add(value: Transform3d { position: position, rotation: rotation, scale: scale })
-  # A new entity has no history; its previous transform IS its first one,
-  # so its first motion vector is zero rather than a streak from origin.
-  scene.prevTransforms.add(value: Transform3d { position: position, rotation: rotation, scale: scale })
-  scene.revision = scene.revision + 1
-  ret entity
-}
-
-# The sanctioned way to move an entity. Writes the component AND bumps the
-# revision, so change consumers (GI dirty regions) see it. prevTransforms
-# is untouched here — it advances once per frame via snapshotPrevTransforms,
-# not per mutation, so multiple writes in one frame yield one clean delta.
-func setTransform(scene: mod Scene3d, entity: view Int, transform: view Transform3d) pub {
-  scene.transforms.set(index: entity, value: transform)
-  scene.revision = scene.revision + 1
-}
-
-# Reposition an entity without synthesising motion between the old and new
-# locations. Streaming worlds use this when a pooled object wraps from behind
-# the camera to a newly visible cell; treating that reuse as physical motion
-# would create a full-screen velocity streak in TAA.
-func teleportTransform(scene: mod Scene3d, entity: view Int, transform: view Transform3d) {
-  scene.transforms.set(index: entity, value: transform)
-  scene.prevTransforms.set(index: entity, value: transform)
-  scene.revision = scene.revision + 1
-}
-
-# Visibility is renderer-component state rather than a transform trick. This
-# keeps pooled variants resident without submitting inactive meshes or hiding
-# them at extreme coordinates that enlarge culling and shadow bounds.
-func setMeshInstanceVisible(scene: mod Scene3d, entity: view Int, visible: view Bool) {
-  var index: Int = 0
-  loop index < scene.meshRenderers.length {
-    if let renderer: MeshRenderer = scene.meshRenderers.copyAt(index: index) {
-      if renderer.entity is entity {
-        if renderer.visible is not visible {
-          scene.meshRenderers.set(index: index, value: MeshRenderer {
-            entity: renderer.entity, mesh: renderer.mesh,
-            material: renderer.material, visible: visible
-          })
-          scene.revision = scene.revision + 1
-        }
-        ret
-      }
-    }
-    index = index + 1
-  }
-}
-
-# Advance frame history: current transforms become the previous frame's.
-# Call exactly once per rendered frame, AFTER extraction/draw and before
-# the next frame's mutations. Forgetting this makes motion vectors read
-# zero (history always equals current) — not garbage, but TAA/velocity silently
-# degrade to camera-only.
-func snapshotPrevTransforms(scene: mod Scene3d) pub {
-  var i: Int = 0
-  loop i < scene.transforms.length {
-    if let transform: Transform3d = scene.transforms.copyAt(index: i) {
-      scene.prevTransforms.set(index: i, value: transform)
-    }
-    i = i + 1
-  }
-}
-
-func addMaterial(scene: mod Scene3d, baseColor: view Vec3, metallic: view Float, roughness: view Float, emission: view Vec3) pub ret Int {
-  let index: Int = scene.materials.length
-  scene.materials.add(value: Material3d { baseColor: baseColor, metallic: metallic, roughness: roughness, emission: emission, toon: false })
-  ret index
-}
-
-# Switch an existing material between banded and PBR shading. Separate
-# from `addMaterial` so a style toggle does not have to rebuild a scene's
-# materials — the attribute lives on the material, and this flips it in
-# place for every instance already referring to it.
-func setMaterialToon(scene: mod Scene3d, index: view Int, toon: view Bool) pub {
-  if index < 0 or index >= scene.materials.length {
-    ret
-  }
-  if let material: Material3d = scene.materials.copyAt(index: index) {
-    scene.materials.set(index: index, value: Material3d {
-      baseColor: material.baseColor, metallic: material.metallic, roughness: material.roughness,
-      emission: material.emission, toon: toon
-    })
-  }
-}
-
-# Attach a triangle mesh to a fresh entity. Raster backend renders these.
-func addMeshInstance(scene: mod Scene3d, mesh: view MeshHandle, material: view Int, position: view Vec3, rotation: view Vec3, scale: view Vec3) pub ret Int {
-  let entity: Int = addTransform(scene: scene, position: position, rotation: rotation, scale: scale)
-  scene.meshRenderers.add(value: MeshRenderer { entity: entity, mesh: mesh, material: material, visible: true })
-  ret entity
-}
-
-# Attach an SDF primitive to a fresh entity. Raymarch backend renders these.
-func addSdfInstance(scene: mod Scene3d, shape: view Int, material: view Int, position: view Vec3, scale: view Vec3, noise: view Float, cluster: view Int, smoothing: view Float) pub ret Int {
-  let zero: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
-  let entity: Int = addTransform(scene: scene, position: position, rotation: zero, scale: scale)
-  scene.sdfPrimitives.add(value: SdfPrimitive { entity: entity, shape: shape, material: material, noise: noise, cluster: cluster, smoothing: smoothing })
-  ret entity
-}
-
 # ----- defaults ------------------------------------------------------
 # Blender front view: camera on -Y looking toward +Y, world-up +Z.
 func defaultCamera3d() pub ret Camera3d {
@@ -330,11 +169,10 @@ func defaultLight3d() pub ret Light3d {
 # ===== World3d — the ECS 3D world (#732) =============================
 # The 3D counterpart to lib/ui's UiWorld: the reusable entity core
 # (EntityAllocator, lib/ecs/world.rae) plus one ComponentTable per 3D
-# component, keyed by EntityId. This is the ECS replacement for the
-# parallel-List `Scene3d` storage above, where `entity` was a bare index
-# shared across every List. #733 migrates 112's storage onto it (entities
-# via world3dAddEntity, no index-parallel Lists) and #736 points the
-# renderer at its queries.
+# component, keyed by EntityId. This is the 3D scene model — the parallel-List
+# `Scene3d` SoA it replaced (a bare-index `entity` shared across every List) was
+# retired in #797; authoring is world3dAddEntity + the component setters below,
+# and the renderers read its ECS queries.
 #
 # Named `World3d`, NOT `GameWorld` (a 3D example scene is Blender-like
 # content, not a game) and NOT the user's first choice `Scene` (that name is
@@ -396,14 +234,11 @@ func world3dSetSdf(world: mod World3d, entity: view EntityId, sdf: view SdfPrimi
   componentSet(this: world.sdfs, entity: entity, data: sdf)
 }
 
-# The World3d twin of addMeshInstance (#794): allocate an entity and attach its
-# Transform3d + MeshRenderer in one call. The key difference from the Scene3d
-# version is the material — Scene3d shared a `material: Int` INDEX into a
-# parallel List, but World3d stores the Material3d as a per-entity COMPONENT
-# (a copy on the entity), matching buildWorld3dFromScene3d. The MeshRenderer's
-# legacy `entity`/`material` Int fields are ignored by the World3d renderer
-# (renderSceneWorld reads the ECS entity + the Material3d component), so they
-# carry placeholders.
+# Allocate an entity and attach its Transform3d + a per-entity Material3d
+# component + MeshRenderer in one call — the authoring primitive for building a
+# World3d in code (#794). The MeshRenderer's legacy `entity`/`material` Int fields
+# are ignored by the World3d renderer (renderSceneWorld reads the ECS entity + the
+# Material3d component), so they carry placeholders.
 func world3dAddMeshInstance(world: mod World3d, mesh: view MeshHandle, material: view Material3d, position: view Vec3, rotation: view Vec3, scale: view Vec3) ret EntityId {
   let entity: EntityId = world3dAddEntity(world: world)
   world3dSetTransform(world: world, entity: entity, transform: Transform3d { position: position, rotation: rotation, scale: scale })
@@ -416,49 +251,6 @@ func world3dAddMeshInstance(world: mod World3d, mesh: view MeshHandle, material:
 func world3dEntityCount(world: view World3d) ret Int {
   ret allocatorAliveCount(this: world.allocator)
 }
-
-# Build a fully-populated World3d from the legacy parallel-List Scene3d (#733).
-# One entity per transform, created in the loader's transform order so the
-# entity's DENSE POSITION in the transforms table equals the old `entity: Int`
-# index — the invariant world3dToScene3d relies on to hand the renderer an
-# identical scene. Mesh/SDF renderers attach to their transform's entity; the
-# shared `material: Int` becomes a per-entity Material3d COMPONENT (a copy on
-# each referencing entity — same values, so rendering is unchanged).
-#
-# Transitional: #736 has the loader build a World3d directly and the renderer
-# read World3d queries, retiring both Scene3d and this bridge.
-func buildWorld3dFromScene3d(old: view Scene3d) ret World3d {
-  var world: World3d = createWorld3d()
-  loop var i: Int = 0, i < old.transforms.length, ++i {
-    let entity: EntityId = world3dAddEntity(world: world)
-    if let transform: Transform3d = old.transforms.copyAt(index: i) {
-      world3dSetTransform(world: world, entity: entity, transform: transform)
-    }
-  }
-  loop var j: Int = 0, j < old.meshRenderers.length, ++j {
-    if let renderer: MeshRenderer = old.meshRenderers.copyAt(index: j) {
-      let entity: EntityId = componentEntityAt(this: world.transforms, i: renderer.entity)
-      world3dSetMeshRenderer(world: world, entity: entity, renderer: renderer)
-      if let material: Material3d = old.materials.copyAt(index: renderer.material) {
-        world3dSetMaterial(world: world, entity: entity, material: material)
-      }
-    }
-  }
-  loop var j: Int = 0, j < old.sdfPrimitives.length, ++j {
-    if let sdf: SdfPrimitive = old.sdfPrimitives.copyAt(index: j) {
-      let entity: EntityId = componentEntityAt(this: world.transforms, i: sdf.entity)
-      world3dSetSdf(world: world, entity: entity, sdf: sdf)
-      if let material: Material3d = old.materials.copyAt(index: sdf.material) {
-        world3dSetMaterial(world: world, entity: entity, material: material)
-      }
-    }
-  }
-  ret world
-}
-
-# (#737: world3dToScene3d — the per-frame Scene3d extraction — was removed once
-# #736 had the RenderSystem read World3d queries directly. buildWorld3dFromScene3d
-# above stays as the LOAD-time bridge, used by loadWorld3dFile in scene3dFile.)
 
 # ----- World3d runtime access (animation + frame history) ------------
 # Read an entity's current Transform3d.
