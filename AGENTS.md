@@ -58,6 +58,28 @@ These instructions define **how Codex should work**, communicate progress, and i
 - Not yet swept through existing code. Fix it in files you are already editing;
   do not open a mass rename.
 
+### NO type inference — every binding is written with its type (by design):
+- Rae has **no type inference and it is strictly FORBIDDEN to add it.** Types are
+  mandatory. Every `let`/`var`/`const` value binding states its type on the
+  left-hand side: `let count: Int = 5`, `let track: Track = loadTrack(...)`,
+  `const maxRetries: Int = 5`.
+- A binding with no type is a **compile error** (enforced in the parser): the
+  spellings `let count = 5` and `let q = makeR()` (type inferred from the RHS)
+  are rejected, not accepted as a convenience. Never write them, and never
+  "restore" inference to make code shorter.
+- This is the same rule as named arguments and parameter modes: the type of a
+  local is information the reader (human or tool) needs on the page, not
+  reconstructed from the right-hand side or an editor hover. An inferred binding
+  also hides a wrong/changed RHS type until it surfaces far away; a written type
+  is checked at the binding.
+- A **struct is constructed with the type on the LEFT and bare braces on the
+  right** — `let p: Point = { x: 1, y: 2 }`, NOT `let p = Point { x: 1, y: 2 }`
+  (no LHS type) and NOT `let p: Point = Point { ... }` (type written twice). In a
+  `ret`, where there is no LHS, the literal carries the type: `ret Point { ... }`.
+- What is written but not "inferred": `if let v: T = opt` (you still write `T`),
+  `=>` aliases whose `view T`/`mod T` you write, and `loop var i: Int = 0`. The
+  ban is specifically on inferring the type of a binding from its initializer.
+
 ### `pub` is BAD STYLE — do not write it:
 - **Everything is cross-file visible by default.** `pub` on a function changes
   nothing: a plain `func f()` in one module is already callable from another.
