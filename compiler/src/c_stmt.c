@@ -2159,6 +2159,13 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     }
                 }
 
+                // #798: mark THIS return-value expression so a bare owning-local
+                // field of it (when it is a struct literal) moves rather than
+                // deep-copies. The struct-field emitter compares against this exact
+                // node, so only the direct `ret Struct { field: local }` shape is
+                // affected — nested/wrapped literals fall back to deep-copy.
+                ctx->return_value_expr = ret_val;
+
                 if (is_prim_ref_return && !ret_type->is_opt) {
                     // #663: a call returning `opt view/mod prim` (viewAt/modAt,
                     // or a user `ret opt view/mod prim`) already hands back a
@@ -2275,6 +2282,7 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         }
                     } else emit_expr(ctx, ret_val, out, PREC_LOWEST, false, false);
                 }
+                ctx->return_value_expr = NULL;
                 fprintf(out, ";\n");
 
                 // String return: detach from pool so the flush doesn't
