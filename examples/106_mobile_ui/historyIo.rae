@@ -35,14 +35,23 @@ import sys
 
 # Externs are already declared in playback_state_io.rae; reuse those.
 
-var gHistoryArtCursor: Int = 0 - 1
-var gHistoryArtSeenLen: Int = 0
-var gHistoryArtDone: Bool = false
+# #789: the History-artwork loader's scan cursor. Was three module-global vars;
+# now an owned resource threaded from AppState (appState.historyArt) into the
+# functions that scan the history. Transient — never persisted.
+type HistoryArtLoader {
+  cursor: Int
+  seenLen: Int
+  done: Bool
+}
 
-func resetHistoryArtLoader() pub {
-  gHistoryArtCursor = 0 - 1
-  gHistoryArtSeenLen = 0
-  gHistoryArtDone = false
+func createHistoryArtLoader() pub ret HistoryArtLoader {
+  ret HistoryArtLoader { cursor: 0 - 1, seenLen: 0, done: false }
+}
+
+func resetHistoryArtLoader(loader: mod HistoryArtLoader) pub {
+  loader.cursor = 0 - 1
+  loader.seenLen = 0
+  loader.done = false
 }
 
 # Serialise the whole entries list to JSON and overwrite `path`.
@@ -162,8 +171,8 @@ func restoreHistoryFromSource(history: mod PlayHistory, source: view String, loa
 # Read `path`; if present, append the persisted entries to
 # `history.entries`. No-op when the file is missing — fresh
 # install, first launch.
-func restoreHistory(history: mod PlayHistory, path: view String) pub {
-  resetHistoryArtLoader()
+func restoreHistory(history: mod PlayHistory, path: view String, loader: mod HistoryArtLoader) pub {
+  resetHistoryArtLoader(loader: loader)
   let source: String = rae_ext_rae_sys_read_file(path: path)
   if source.length() > 0 {
     restoreHistoryFromSource(history: history, source: source, loadPath: path)
@@ -268,24 +277,24 @@ func refetchHistoryArtChunk(history: view PlayHistory, reg: mod TextureRegistry,
 # boot must re-register cached files before recently-played thumbs can draw.
 # Cached files are loaded immediately; missing files are fetched by the runtime
 # async curl queue and registered on a later frame when ready.
-func loadCachedHistoryArtChunk(history: view PlayHistory, reg: mod TextureRegistry, budget: view Int) pub ret Bool {
+func loadCachedHistoryArtChunk(history: view PlayHistory, reg: mod TextureRegistry, budget: view Int, loader: mod HistoryArtLoader) pub ret Bool {
   let prefix: String = "spotify-art:"
   let pLen: Int = prefix.length()
   let n: Int = history.entries.length
   if n is 0 {
-    gHistoryArtDone = true
+    loader.done = true
     ret false
   }
-  if n is not gHistoryArtSeenLen {
-    gHistoryArtSeenLen = n
-    gHistoryArtCursor = n - 1
-    gHistoryArtDone = false
+  if n is not loader.seenLen {
+    loader.seenLen = n
+    loader.cursor = n - 1
+    loader.done = false
   }
-  if gHistoryArtDone {
+  if loader.done {
     ret false
   }
-  if gHistoryArtCursor < 0 {
-    gHistoryArtCursor = n - 1
+  if loader.cursor < 0 {
+    loader.cursor = n - 1
   }
 
   var did: Int = 0
@@ -304,10 +313,10 @@ func loadCachedHistoryArtChunk(history: view PlayHistory, reg: mod TextureRegist
       budgetHit = true
     }
     if budgetHit is false {
-      let i: Int = gHistoryArtCursor
-      gHistoryArtCursor = gHistoryArtCursor - 1
-      if gHistoryArtCursor < 0 {
-        gHistoryArtCursor = n - 1
+      let i: Int = loader.cursor
+      loader.cursor = loader.cursor - 1
+      if loader.cursor < 0 {
+        loader.cursor = n - 1
       }
       let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
       if e.textureKey.startsWith(prefix: prefix) {
@@ -409,7 +418,7 @@ func loadCachedHistoryArtChunk(history: view PlayHistory, reg: mod TextureRegist
   # entry is loaded, permanently failed, or already-fired-and-waiting.
   # Stop re-scanning entirely (#281) — this is what leaked/churned before,
   # re-firing in-flight fetches every idle wake. A late CDN completion is
-  # picked up on the next history (re)build, which resets gHistoryArtDone.
-  gHistoryArtDone = true
+  # picked up on the next history (re)build, which resets loader.done.
+  loader.done = true
   ret false
 }

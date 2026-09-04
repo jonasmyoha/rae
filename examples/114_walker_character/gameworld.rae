@@ -86,6 +86,10 @@ type GameWorld {
   # spawned/despawned through the generational allocator (#704) — not List stubs.
   physicsBodies: ComponentTable(PhysicsBody)
   netPlayers: ComponentTable(NetPlayer)
+  # #789: per-frame splash animation counter (was the module-global gSplashTick
+  # in splash.rae). A plain resource on the world — the ComponentTable(any) field
+  # loops (#773) skip non-ComponentTable fields, so this is inert to reflection.
+  splashTick: Int
 }
 
 func createGameWorld() ret GameWorld {
@@ -106,6 +110,7 @@ func createGameWorld() ret GameWorld {
     hierarchyOrder: createHierarchyOrder()
     physicsBodies: createComponentTable(PhysicsBody)
     netPlayers: createComponentTable(NetPlayer)
+    splashTick: 0
   }
 }
 
