@@ -3228,7 +3228,9 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                     // project root is (module_name may be a long path).
                     size_t slen = (size_t)qn;  // strlen(qbuf) == "pkg/mod"
                     AstDecl* resolved = NULL;
-                    for (AstDecl* d = module->decls; d && !resolved; d = d->next) {
+                    const char* resolved_mn = NULL;
+                    bool qual_ambiguous = false;  // #787(c): 2+ distinct home modules match
+                    for (AstDecl* d = module->decls; d; d = d->next) {
                         if (d->kind != AST_DECL_FUNC) continue;
                         if (!str_eq(d->as.func_decl.name, fname)) continue;
                         if (d->as.func_decl.specialization_args) continue;
@@ -3240,7 +3242,26 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                         if (!sema_decl_visible(s_current_decl_origin, d)) continue;
                         size_t pc = 0; for (AstParam* p = d->as.func_decl.params; p; p = p->next) pc++;
                         if (pc != argN) continue;
-                        resolved = d;
+                        // #787(c): the `pkg/mod` suffix match can hit two files that
+                        // live in same-named folders at different depths (or two files
+                        // `export`ed into the same main module) — the qualifier `pkg`
+                        // is then not unique. Per the spec (1 hit resolves, 2+ error)
+                        // this is ambiguous: refuse rather than pick the first.
+                        if (!resolved) { resolved = d; resolved_mn = mn; }
+                        else if (d != resolved && !(resolved_mn && strcmp(resolved_mn, mn) == 0)) {
+                            qual_ambiguous = true;
+                        }
+                    }
+                    if (qual_ambiguous) {
+                        char buf[384];
+                        snprintf(buf, sizeof buf,
+                            "ambiguous qualified call '%.*s.%.*s.%.*s(...)': the package name '%.*s' is not unique — it matches modules in more than one folder; rename one folder or qualify differently",
+                            (int)pkg.len, pkg.data, (int)mod.len, mod.data,
+                            (int)fname.len, fname.data, (int)pkg.len, pkg.data);
+                        diag_error(s_current_decl_origin ? s_current_decl_origin : module->file_path,
+                                   (int)expr->line, (int)expr->column, buf);
+                        if (module) module->had_error = true;
+                        break;
                     }
                     if (resolved) {
                         if (getenv("RAE_DUMP_QUALSITES")) fprintf(stderr, "QUALSITE\t%s\t%zu\t%zu\n",
