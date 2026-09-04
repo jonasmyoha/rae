@@ -1050,11 +1050,44 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 f->value->kind == AST_EXPR_IDENT ||
                 f->value->kind == AST_EXPR_MEMBER ||
                 f->value->kind == AST_EXPR_INDEX);
+            // #798: MOVE a bare owning LOCAL into an owning field when THIS object
+            // literal is the function's return value (`ret Struct { f: local }`).
+            // In return position the local is at its last use, so transferring
+            // ownership (bare emit + mark moved, no scope-exit drop) is correct and
+            // skips the deep-copy — whose synthesised helper silently shallow-copies
+            // a nested un-deep-copyable field (e.g. a ComponentTable inside a
+            // World3d), then double-frees against the local's drop. Guarded to this
+            // exact literal, an owning (non view/mod) local, no `own`, and a single
+            // occurrence across the literal's fields (two fields aliasing the same
+            // heap would double-free the returned value on its own drop).
+            bool rhs_is_move_local = false;
+            if (ctx->return_value_expr == expr
+                && f->value && f->value->kind == AST_EXPR_IDENT
+                && eff_field_tr && !eff_field_tr->is_view && !eff_field_tr->is_mod && !eff_field_tr->is_opt
+                && !field_is_owned_string && !field_is_view_string) {
+                Str mv = f->value->as.ident;
+                size_t start = ctx->func_first_let_idx;
+                if (start != (size_t)-1) {
+                    for (size_t li = start; li < ctx->local_count; li++) {
+                        if (str_eq(ctx->locals[li], mv)) {
+                            const AstTypeRef* lt = ctx->local_type_refs[li];
+                            if (lt && !lt->is_view && !lt->is_mod) {
+                                int occ = 0;
+                                for (const AstObjectField* g = expr->as.object_literal.fields; g; g = g->next)
+                                    if (g->value && g->value->kind == AST_EXPR_IDENT
+                                        && str_eq(g->value->as.ident, mv)) occ++;
+                                if (occ == 1) rhs_is_move_local = true;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
             bool field_needs_deep_copy_nonstring = false;
             if (eff_field_tr
                 && !eff_field_tr->is_view && !eff_field_tr->is_mod && !eff_field_tr->is_opt
                 && !field_is_owned_string && !field_is_view_string
-                && rhs_is_aliasing && !rhs_is_own
+                && rhs_is_aliasing && !rhs_is_own && !rhs_is_move_local
                 && type_needs_deep_copy(ctx->compiler_ctx, ctx->module,
                                         (AstTypeRef*)eff_field_tr, 0)) {
                 Str fbase = get_base_type_name(eff_field_tr);
@@ -1110,6 +1143,13 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                         tn_dc, tmp_id, tn_dc, tmp_id);
                 emit_expr(ctx, f->value, out, PREC_LOWEST, false, false);
                 fprintf(out, ")); __fdc%d; }))", tmp_id);
+            } else if (rhs_is_move_local) {
+                // #798: transfer ownership — emit the bare local (shallow byte
+                // copy of the struct value) and mark it moved so the return
+                // epilogue's implicit-drop pass skips it. The returned struct now
+                // solely owns the heap; no deep-copy, no double-free.
+                emit_expr(ctx, f->value, out, PREC_LOWEST, false, false);
+                mark_local_moved_by_name(ctx, f->value->as.ident);
             } else if (field_is_owned_string && (rhs_is_own || rhs_is_owning_temp)) {
                 fprintf(out, "rae_string_pool_take(");
                 emit_expr(ctx, f->value, out, PREC_LOWEST, false, false);

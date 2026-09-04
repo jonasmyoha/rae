@@ -94,6 +94,12 @@ typedef struct {
   // before each return. Set to (size_t)-1 when not inside a function
   // body emit.
   size_t func_first_let_idx;
+  // #798: the object literal currently being emitted AS the function's return
+  // value (`ret Struct { … }`), or NULL. A bare owning-local field of THIS exact
+  // literal is at its last use, so it MOVES into the field instead of being
+  // deep-copied (the deep-copy path shallow-copies un-deep-copyable nested fields
+  // like a ComponentTable, then double-frees against the local's scope-exit drop).
+  const AstExpr* return_value_expr;
   bool returns_value;
   size_t temp_counter;
   AstTypeRef expected_type;
