@@ -44,12 +44,16 @@ error on an "unconventional" name would break:
 - mechanical migrations and refactors,
 - intentionally unusual names.
 
-So any name that is otherwise valid is accepted. The convention is intended to
-be enforced as **optional compiler/linter warnings**, never as compilation
-errors, and externally-imported (`extern`) names should be exempt or easily
-suppressed.
+**Enforced as a hard compiler error (#790).** The convention is not optional:
+the parser rejects a snake_case / SCREAMING_SNAKE_CASE identifier and a
+wrong-first-letter-case name at the declaration site — types/enums/modules must
+be PascalCase; functions, parameters, locals, struct fields, enum cases and
+constants must be camelCase (`_` anywhere, or the wrong case for the first
+letter, is the error).
 
-Rae does not yet have a general lint/warning framework, so for now the
-convention is documented here and the lint is tracked as a focused follow-up
-(see QUEUE.md). The parser's previous PascalCase/camelCase hard checks have been
-removed.
+**C-interop is the one exception**, matching how `extern` is Rae's C-boundary
+escape hatch: an `extern` function name and its parameters name C symbols; a
+`type X: c_struct` name mirrors a C struct (e.g. `div_t`); and the generated
+low-level bindings under `lib/webgpu/` mirror the WebGPU C API verbatim. Those
+are skipped. Everything else is a hard error, so a stray `const MAX_RETRIES` or
+`func my_func` fails to compile in both the Live and Compiled front ends.
