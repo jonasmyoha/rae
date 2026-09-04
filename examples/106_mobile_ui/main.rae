@@ -84,7 +84,6 @@ func main() {
   bootTheme.generation = 1
   applyResolvedTokens(dst: bootTheme.resolved, src: uiTheme)
   let gpuUi: Gpu2dUi = { textFont: gpuTextFont, iconFont: gpuIconFont, theme: uiTheme, activeTheme: chosenTheme }
-  syncColorsFromTheme(active: chosenTheme)
 
   var scenes: AlbumScenes = loadAllScenes()
   let texReg: TextureRegistry = createTextureRegistry()
@@ -113,7 +112,7 @@ func main() {
   }
   # Persisted recently-played. CDN artwork is re-downloaded lazily in
   # the loop (refetchHistoryArtChunk, a few/frame) so it never blocks.
-  restoreHistory(history: appState.playHistory, path: historyFilePath)
+  restoreHistory(history: appState.playHistory, path: historyFilePath, loader: appState.historyArt)
   # User library — first launch seeds it from the catalog so all
   # albums are visible by default. Subsequent launches load the
   # curated subset and stems that aren't in the catalog any more
@@ -170,10 +169,10 @@ func main() {
 
   # Clear color follows the theme surface so scrolled-past-page
   # content reveals the same colour as the page, not a hard-coded
-  # dark grey. The page-background clear reads `pageBgColor` fresh at
-  # each render (see below), which `syncColorsFromTheme` refreshes on
-  # boot AND on every runtime theme toggle — so the background tracks
-  # the theme without depending on a captured startup value.
+  # dark grey. The page-background clear reads `palettePageBg(theme:
+  # appState.theme.active)` fresh at each render (see below) — the color is
+  # derived LIVE from the active theme (#789), so it tracks a runtime theme
+  # toggle with no captured startup value and no explicit refresh step.
 
   # Self-terminate after `RAE_AUTO_EXIT_SEC` seconds of wall-clock
   # uptime. Used by automated test runs (and agents) so the binary
@@ -198,7 +197,7 @@ func main() {
   if runStressMode(scenes: scenes, appState: appState, gpuUi: gpuUi) {
     ret
   }
-  if runScreenshotMode(scenes: scenes, appState: appState, texReg: texReg, bg: pageBgColor) is false {
+  if runScreenshotMode(scenes: scenes, appState: appState, texReg: texReg, bg: palettePageBg(theme: appState.theme.active)) is false {
     # Interactive mode: outer loop owns the world for the *current*
     # screen; the inner loop runs frames until either the user closes
     # the window or a `dispatchActions` call returns a different
@@ -738,11 +737,10 @@ func main() {
           # In-app debug UI: a true return means at least one state bit
           # flipped. Scene-authored colors are now palette slots that
           # resolve at paint (#235), so a theme change needs NO scene
-          # re-parse — `syncColorsFromTheme` refreshes the handful of
-          # code-driven colors and the world rebuild repaints them.
+          # re-parse — the handful of code-driven colors derive live from the
+          # active theme (paletteX accessors) and the world rebuild repaints them.
           var debugChanged: Bool = inputDispatch.debugChanged
           if debugChanged {
-            syncColorsFromTheme(active: appState.theme.active)
             switching = true
           }
 
@@ -752,9 +750,9 @@ func main() {
           # store slot NAMES and re-resolve against the new active theme
           # on the next paint, so no scene re-parse is needed. Code-driven
           # colors (nav-bar surface@238, pill/bg blends) still bake into
-          # components, so `syncColorsFromTheme` + a world rebuild refresh
-          # them — see queue #259 to migrate those to slots and drop the
-          # rebuild entirely.
+          # components, so the world rebuild re-derives them from the new active
+          # theme (paletteX accessors) and repaints — see queue #259 to migrate
+          # those to slots and drop the rebuild entirely.
           let keyT: Int = 84
           if uiIsKeyPressed(key: keyT) {
             # #764: theme lives on AppState; `switching` forces the reseeding rebuild.
@@ -768,7 +766,6 @@ func main() {
               appState.theme.generation = appState.theme.generation + 1
               log("[theme] -> light (gen {appState.theme.generation})")
             }
-            syncColorsFromTheme(active: appState.theme.active)
             switching = true
           }
 
@@ -929,7 +926,7 @@ func main() {
             logW: viewport.layoutW
             logH: viewport.layoutH
             renderCache: renderCache
-            bg: pageBgColor
+            bg: palettePageBg(theme: appState.theme.active)
             now: now
             targetFrameSec: targetFrameSec
             lastRenderTime: lastRenderTime

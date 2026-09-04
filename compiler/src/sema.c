@@ -1235,12 +1235,13 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
                     gs->bind_kind = immut ? BIND_LET : BIND_MUTABLE;
                 }
             }
-            /* #763 no-globals rule (docs/globals-and-app-ownership.md), WARNING
-             * phase: a module-level `var` is mutable global state; a module-level
-             * `let` that owns heap (String/List/Map/struct-with-heap) is global
-             * heap with no owner. Both warn (not error — the #731-#750 ECS
-             * refactor lands under the rule). `const` and POD-literal `let` (Int/
-             * Float/Bool/plain struct, no heap) are fine. */
+            /* #763 no-globals rule (docs/globals-and-app-ownership.md): a
+             * module-level `var` is mutable global state; a module-level `let`
+             * that owns heap (String/List/Map/struct-with-heap) is global heap
+             * with no owner. Both are a HARD ERROR (universal since #789 cleaned
+             * the last example globals; started as a warning in #763, lib/-scoped
+             * error in #766). `const` and POD-/string-literal `let` (Int/Float/
+             * Bool/plain struct, no heap) are fine. */
             if (!decl->as.let_decl.is_const) {
                 const char* why = NULL;
                 /* A `let` initialised from a STRING LITERAL is a compile-time
@@ -1268,20 +1269,14 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
                         "%s: '%.*s' — no globals: make it a component, a resource on the "
                         "App/World, or a `const`. See docs/globals-and-app-ownership.md",
                         why, (int)decl->as.let_decl.name.len, decl->as.let_decl.name.data);
-                    /* #766 ERROR phase: enforce the rule as a HARD ERROR for stdlib
-                     * (lib/) modules — lib/ is globals-clean (#764) so this fails the
-                     * build only on a regression. Project/example code still gets a
-                     * WARNING for now: the flagship example apps carry mutable
-                     * module-level globals whose App/World-resource migration is
-                     * scheduled separately, so erroring on them would red the suite. */
+                    /* #766/#789 ERROR phase: the no-globals rule is a HARD ERROR
+                     * everywhere — "no exemption" (docs/globals-and-app-ownership.md).
+                     * lib/ was cleaned in #764 and the flagship example apps in #789,
+                     * so a module-level mutable `var` / heap-owning `let` now fails
+                     * the build wherever it appears (was lib/-scoped under #766). */
                     const char* org = decl->origin_file ? decl->origin_file : module->file_path;
-                    bool in_lib = org && (strstr(org, "/lib/") != NULL || strncmp(org, "lib/", 4) == 0);
-                    if (in_lib) {
-                        diag_error(org, (int)decl->line, (int)decl->column, nog);
-                        module->had_error = true;
-                    } else {
-                        diag_warn(org, (int)decl->line, (int)decl->column, nog);
-                    }
+                    diag_error(org, (int)decl->line, (int)decl->column, nog);
+                    module->had_error = true;
                 }
             }
             break;

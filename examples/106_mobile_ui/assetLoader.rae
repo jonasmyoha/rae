@@ -71,8 +71,8 @@ func loadAllTextures(reg: mod TextureRegistry, albums: view List(Album)) pub {
 
 # Progressive loader for the interactive path. In 106 this is an alias for
 # the gpu2d image-key path.
-func cascadeAssets(reg: mod TextureRegistry, albums: view List(Album), budget: view Int) pub ret Bool {
-  ret cascadeGpu2dAssets(reg: reg, albums: albums, budget: budget)
+func cascadeAssets(reg: mod TextureRegistry, albums: view List(Album), budget: view Int, load: mod AssetLoad) pub ret Bool {
+  ret cascadeGpu2dAssets(reg: reg, albums: albums, budget: budget, load: load)
 }
 
 # Latches so the progressive loader stops re-scanning once everything is
@@ -85,22 +85,30 @@ func cascadeAssets(reg: mod TextureRegistry, albums: view List(Album), budget: v
 # album per frame (~600 KB/min, #282). Latching also removes the wasteful
 # per-frame O(albums) scan + hasImageKey calls once nothing is left to load.
 # Reset when the album list changes (media library rebuild).
-var gAlbumCoversLoaded: Bool = false
-var gAvatarLoaded: Bool = false
-var gCoversSeenLen: Int = -1
+# #789: was three module-global latch vars; now an owned resource threaded
+# from AppState (appState.assetLoad). Transient — never persisted.
+type AssetLoad {
+  coversLoaded: Bool
+  avatarLoaded: Bool
+  coversSeenLen: Int
+}
+
+func createAssetLoad() pub ret AssetLoad {
+  ret AssetLoad { coversLoaded: false, avatarLoaded: false, coversSeenLen: 0 - 1 }
+}
 
 # Progressive gpu2d image-key loader. Registers each album cover under the same
 # Sprite.textureKey used throughout the ECS world. Idempotent + self-latching:
 # once every cover (and the avatar) is registered it becomes a cheap no-op
 # until the album list changes.
-func cascadeGpu2dAssets(reg: mod TextureRegistry, albums: view List(Album), budget: view Int) pub ret Bool {
-  if albums.length is not gCoversSeenLen {
-    gCoversSeenLen = albums.length
-    gAlbumCoversLoaded = false
-    gAvatarLoaded = false
+func cascadeGpu2dAssets(reg: mod TextureRegistry, albums: view List(Album), budget: view Int, load: mod AssetLoad) pub ret Bool {
+  if albums.length is not load.coversSeenLen {
+    load.coversSeenLen = albums.length
+    load.coversLoaded = false
+    load.avatarLoaded = false
   }
   var busy: Bool = false
-  if gAlbumCoversLoaded is false {
+  if load.coversLoaded is false {
     var i: Int = 0
     var loaded: Int = 0
     loop i < albums.length {
@@ -119,13 +127,13 @@ func cascadeGpu2dAssets(reg: mod TextureRegistry, albums: view List(Album), budg
     # A full pass that registered nothing means every cover is present —
     # latch so future frames skip the scan entirely.
     if loaded is 0 {
-      gAlbumCoversLoaded = true
+      load.coversLoaded = true
     } else {
       busy = true
     }
   }
 
-  if gAvatarLoaded is false {
+  if load.avatarLoaded is false {
     if textureHas(reg: reg, key: profileAvatarKey()) is false {
       let idx: Int = findAlbumIndex(albums: albums, stem: avatarAlbumStem)
       if idx >= 0 {
@@ -134,7 +142,7 @@ func cascadeGpu2dAssets(reg: mod TextureRegistry, albums: view List(Album), budg
       }
       busy = true
     } else {
-      gAvatarLoaded = true
+      load.avatarLoaded = true
     }
   }
   ret busy
