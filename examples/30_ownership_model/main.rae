@@ -63,7 +63,7 @@ func makeTeam(leadName: own String, leadEmail: own String, motto: own String) re
   }
 }
 
-func scenario1_borrowVsTake() {
+func scenario1BorrowVsTake() {
   log("=== 1. borrow vs take ===")
   let p: Profile = { name: "Ada", email: "ada@rae" }
   # `format` borrows — `p` is still alive after the call.
@@ -79,7 +79,7 @@ func scenario1_borrowVsTake() {
   log("scenario 1 done")
 }
 
-func scenario2_ownMove() {
+func scenario2OwnMove() {
   log("=== 2. own keyword ===")
   let label: String = "alpha-".concat(other: "explicit")
   # `own label` opts into move semantics for the struct field init.
@@ -89,7 +89,7 @@ func scenario2_ownMove() {
   log("scenario 2 done")
 }
 
-func scenario3_deepCopyByDefault() {
+func scenario3DeepCopyByDefault() {
   log("=== 3. deep copy by default ===")
   var label: String = "beta-".concat(other: "shared")
   # No `own` — Phase 2 deep-copies `label` into `p.name`. `label`
@@ -100,7 +100,7 @@ func scenario3_deepCopyByDefault() {
   log("scenario 3 done")
 }
 
-func scenario4_modBorrow() {
+func scenario4ModBorrow() {
   log("=== 4. mod borrow ===")
   let p: Profile = { name: "Bob", email: "bob@rae" }
   renameProfile(p: p, newName: "Robert")
@@ -108,7 +108,7 @@ func scenario4_modBorrow() {
   log("scenario 4 done")
 }
 
-func scenario5_cascadeDrop() {
+func scenario5CascadeDrop() {
   log("=== 5. cascade drop stress ===")
   # 5000 short-lived Teams. Each iteration mallocs ~6 Strings + one
   # List buffer; cascade drop must free them all or RSS grows.
@@ -150,9 +150,9 @@ func scenario5_cascadeDrop() {
 }
 
 func main() {
-  scenario1_borrowVsTake()
-  scenario2_ownMove()
-  scenario3_deepCopyByDefault()
-  scenario4_modBorrow()
-  scenario5_cascadeDrop()
+  scenario1BorrowVsTake()
+  scenario2OwnMove()
+  scenario3DeepCopyByDefault()
+  scenario4ModBorrow()
+  scenario5CascadeDrop()
 }
