@@ -153,7 +153,12 @@ const server = Bun.serve<SocketData>({
         return new Response("README.md not found", { status: 404 });
       }
       return new Response(file, {
-        headers: { "Content-Type": "text/markdown; charset=utf-8" }
+        headers: {
+          "Content-Type": "text/markdown; charset=utf-8",
+          // The README is edited during development; never let a browser serve
+          // a stale cached copy (which kept the old image URL showing).
+          "Cache-Control": "no-store"
+        }
       });
     }
 
