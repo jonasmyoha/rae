@@ -2718,8 +2718,45 @@ static bool sema_is_list_value_accessor(const AstExpr* expr) {
     return false;
 }
 
+/* #778 struct-literal field-name validation: every key in a struct literal must
+ * name a real field on the struct. Without this a renamed/typo'd key (`w`/`h` on
+ * a {position,size} Rect) slips through sema and emits mismatched C that only gcc
+ * rejects. A field with a default may be OMITTED, so only UNKNOWN names are
+ * flagged, not missing ones. Called for BOTH the RHS-typed form (`Rect { ... }`,
+ * from AST_EXPR_OBJECT) and the bare-brace form (`let r: Rect = { ... }`, from
+ * ensure_type_match where the type comes from context). */
+static void sema_check_object_literal_fields(TypeInfo* structType, AstObjectField* fields,
+                                             size_t litLine, size_t litCol, const char* errFile) {
+    if (structType && structType->kind == TYPE_REF) structType = structType->as.ref.base;
+    if (!structType || structType->kind != TYPE_STRUCT || !structType->as.structure.decl) return;
+    AstTypeDecl* td = &structType->as.structure.decl->as.type_decl;
+    for (AstObjectField* f = fields; f; f = f->next) {
+        bool known = false;
+        for (AstTypeField* tf = td->fields; tf; tf = tf->next)
+            if (str_eq(tf->name, f->name)) { known = true; break; }
+        if (known) continue;
+        char buf[320];
+        snprintf(buf, sizeof buf,
+            "unknown field '%.*s' in literal of type '%.*s' — no such field on the struct",
+            (int)f->name.len, f->name.data, (int)structType->name.len, structType->name.data);
+        size_t ln = f->value ? f->value->line : litLine;
+        size_t col = f->value ? f->value->column : litCol;
+        diag_error(errFile, (int)ln, (int)col, buf);
+        if (s_current_module) s_current_module->had_error = true;
+    }
+}
+
 static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr** expr_ptr) {
     if (!expected || !expr_ptr || !*expr_ptr) return;
+    /* #778: a bare-brace struct literal (`{ ... }`) carries no type of its own —
+     * its type is `expected` here. Validate its field names against it. Typed
+     * literals (`Type { ... }`) are checked at AST_EXPR_OBJECT instead, so skip
+     * them to avoid a duplicate diagnostic. */
+    if ((*expr_ptr)->kind == AST_EXPR_OBJECT && !(*expr_ptr)->as.object_literal.type) {
+        sema_check_object_literal_fields(expected, (*expr_ptr)->as.object_literal.fields,
+            (*expr_ptr)->line, (*expr_ptr)->column,
+            s_current_decl_origin ? s_current_decl_origin : (s_current_module ? s_current_module->file_path : NULL));
+    }
     AstExpr* expr = *expr_ptr;
     /* A List value-accessor result (`opt T`) cannot land in a non-optional
      * binding, argument, or return. These generic calls are not resolved to
@@ -3700,7 +3737,17 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             sema_analyze_expr(ctx, module, symbols, expr->as.unary.operand);
             if (expr->as.unary.operand) expr->resolved_type = expr->as.unary.operand->resolved_type;
             break;
-        case AST_EXPR_OBJECT: if (expr->as.object_literal.type) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, expr->as.object_literal.type); for (AstObjectField* f = expr->as.object_literal.fields; f; f = f->next) sema_analyze_expr(ctx, module, symbols, f->value); break;
+        case AST_EXPR_OBJECT: {
+            if (expr->as.object_literal.type) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, expr->as.object_literal.type);
+            for (AstObjectField* f = expr->as.object_literal.fields; f; f = f->next) sema_analyze_expr(ctx, module, symbols, f->value);
+            /* #778: the RHS-typed form (`Rect { ... }`) — validate keys against the
+             * named type. The bare-brace form is validated in ensure_type_match. */
+            if (expr->as.object_literal.type)
+                sema_check_object_literal_fields(expr->resolved_type, expr->as.object_literal.fields,
+                    expr->line, expr->column,
+                    s_current_decl_origin ? s_current_decl_origin : module->file_path);
+            break;
+        }
         case AST_EXPR_INTERP: {
             AstInterpPart* part = expr->as.interp.parts;
             while (part) {
