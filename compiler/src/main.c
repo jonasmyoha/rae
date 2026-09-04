@@ -1678,6 +1678,37 @@ static char* try_resolve_lib_module(const char* root, const char* normalized) {
   return NULL;
 }
 
+// #786: resolve `import math` where `math` is a DIRECTORY (folder-package) rather
+// than a `math.rae` file. Mirrors try_resolve_lib_module's search order but checks
+// for a directory. Returns a malloc'd path to the folder, or NULL.
+static char* try_resolve_folder(const char* root, const char* normalized) {
+  if (root) {
+    const char* fmts[2] = { "%s/%s", "%s/lib/%s" };
+    for (int i = 0; i < 2; i++) {
+      size_t total = strlen(root) + strlen(normalized) + 8;
+      char* b = malloc(total);
+      if (!b) return NULL;
+      snprintf(b, total, fmts[i], root, normalized);
+      if (directory_exists(b)) return b;
+      free(b);
+    }
+  }
+  size_t nl = strlen(normalized);
+  char* b2 = malloc(nl + 16);
+  if (b2) {
+    snprintf(b2, nl + 16, "../lib/%s", normalized); if (directory_exists(b2)) return b2;
+    snprintf(b2, nl + 16, "lib/%s", normalized); if (directory_exists(b2)) return b2;
+    free(b2);
+  }
+  const char* stdlib = compiler_stdlib_dir();
+  if (stdlib) {
+    size_t total = strlen(stdlib) + nl + 4;
+    char* b3 = malloc(total);
+    if (b3) { snprintf(b3, total, "%s/%s", stdlib, normalized); if (directory_exists(b3)) return b3; free(b3); }
+  }
+  return NULL;
+}
+
 static bool module_graph_load_module(ModuleGraph* graph,
                                      const char* module_path,
                                      const char* file_path,
@@ -1833,6 +1864,33 @@ static bool module_graph_load_module(ModuleGraph* graph,
         free(child_file);
         child_file = lib_file;
       } else {
+        // #786: folder-package import — `import math` where `math/` is a directory
+        // (no `math.rae`) loads every module in it (math/Vec3, math/Trig, ...). They
+        // become reachable as `math.Vec3.func()` (the `import math` node registers
+        // package `math` for visibility). A file `math.rae` takes precedence above.
+        char* folder = try_resolve_folder(graph->root_path, normalized);
+        if (folder) {
+          DIR* dh = opendir(folder);
+          if (dh) {
+            struct dirent* ent;
+            while ((ent = readdir(dh)) != NULL) {
+              const char* nm = ent->d_name;
+              size_t nlen = strlen(nm);
+              if (nlen > 4 && strcmp(nm + nlen - 4, ".rae") == 0) {
+                char childmod[1024];
+                char childfile[PATH_MAX];
+                snprintf(childmod, sizeof childmod, "%s/%.*s", normalized, (int)(nlen - 4), nm);
+                snprintf(childfile, sizeof childfile, "%s/%s", folder, nm);
+                module_graph_load_module(graph, childmod, childfile, &frame, NULL, no_implicit);
+              }
+            }
+            closedir(dh);
+          }
+          free(folder);
+          free(normalized);
+          free(child_file);
+          continue;
+        }
         fprintf(stderr, "error: imported module '%s' not found (required by '%s')\n", normalized,
                 module_path ? module_path : "<entry>");
         module_stack_print_trace(&frame, normalized);
