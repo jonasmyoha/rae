@@ -1901,18 +1901,52 @@ static AstExpr* parse_match_expression(Parser* parser, const Token* match_token)
   return expr;
 }
 
-// Naming conventions (Types/enums/modules PascalCase; functions, variables,
-// constants and enum cases camelCase) are NO LONGER enforced at parse time:
-// strict parser errors break generated code, foreign/C bindings, and
-// migrations. The convention is documented in docs/naming-conventions.md and
-// is intended to be a linter WARNING (see QUEUE.md), not a hard error. These
-// helpers are kept as no-ops so call sites can stay until the lint lands.
+// Naming conventions are ENFORCED at parse time (AGENTS.md, #790): types, enums
+// and modules are PascalCase; everything else — functions, parameters, locals,
+// struct fields, enum cases and constants — is camelCase. snake_case and
+// SCREAMING_SNAKE_CASE are a hard error (`_` anywhere, or the wrong first-letter
+// case). C-interop names are the one exception, matching how `extern` is Rae's
+// C-boundary escape hatch: EXTERN function names + their params name C symbols,
+// `c_struct` type names mirror a C struct, and the generated `lib/webgpu/`
+// bindings mirror the WebGPU C API — callers skip the check for those.
+static bool str_has_underscore(Str s) {
+  for (size_t i = 0; i < s.len; i++) if (s.data[i] == '_') return true;
+  return false;
+}
+
+static void naming_check(Parser* parser, Str name, const Token* pos, const char* ctx, bool pascal) {
+  // Generated low-level WebGPU bindings mirror the C API names verbatim.
+  if (parser->file_path && strstr(parser->file_path, "/webgpu/")) return;
+  if (name.len == 0) return;
+  char first = name.data[0];
+  bool snake = str_has_underscore(name);
+  if (pascal) {
+    if (first >= 'a' && first <= 'z') {
+      parser_error(parser, pos, "%s name '%.*s' must be PascalCase — types, enums and modules start with an uppercase letter (AGENTS.md)",
+                   ctx, (int)name.len, name.data);
+      return;
+    }
+    if (snake)
+      parser_error(parser, pos, "%s name '%.*s' must be PascalCase — snake_case is banned in Rae (AGENTS.md)",
+                   ctx, (int)name.len, name.data);
+  } else {
+    if (first >= 'A' && first <= 'Z') {
+      parser_error(parser, pos, "%s name '%.*s' must be camelCase — functions, values, fields, enum cases and constants start with a lowercase letter; a PascalCase or SCREAMING_SNAKE const is banned (AGENTS.md)",
+                   ctx, (int)name.len, name.data);
+      return;
+    }
+    if (snake)
+      parser_error(parser, pos, "%s name '%.*s' must be camelCase — snake_case / SCREAMING_SNAKE_CASE is banned in Rae (AGENTS.md)",
+                   ctx, (int)name.len, name.data);
+  }
+}
+
 static void check_camel_case(Parser* parser, const Token* token, const char* context) {
-  (void)parser; (void)token; (void)context;
+  if (token) naming_check(parser, token->lexeme, token, context, false);
 }
 
 static void check_pascal_case(Parser* parser, const Token* token, const char* context) {
-  (void)parser; (void)token; (void)context;
+  if (token) naming_check(parser, token->lexeme, token, context, true);
 }
 
 static bool looks_like_destructure(Parser* parser) {
@@ -2462,7 +2496,7 @@ static AstTypeField* append_field(AstTypeField* head, AstTypeField* node) {
   return head;
 }
 
-static AstTypeField* parse_type_fields(Parser* parser) {
+static AstTypeField* parse_type_fields(Parser* parser, bool skip_name_check) {
   const Token* start = parser_previous(parser); // TOK_LBRACE
   
   // Peek ahead to find the closing RBRACE to determine if it's multi-line
@@ -2493,6 +2527,7 @@ static AstTypeField* parse_type_fields(Parser* parser) {
       }
       continue;
     }
+    if (!skip_name_check) check_camel_case(parser, field_name, "field");
     parser_consume(parser, TOK_COLON, "expected ':' after field name");
     AstTypeField* field = parser_alloc(parser, sizeof(AstTypeField));
     field->name = parser_copy_str(parser, field_name->lexeme);
@@ -2519,7 +2554,6 @@ static AstTypeField* parse_type_fields(Parser* parser) {
 static AstDecl* parse_type_declaration(Parser* parser) {
   const Token* type_token = parser_previous(parser);
   const Token* name = parser_consume_ident(parser, "expected type name");
-  check_pascal_case(parser, name, "type");
   AstDecl* decl = parser_alloc(parser, sizeof(AstDecl));
   decl->kind = AST_DECL_TYPE;
   decl->line = type_token->line;
@@ -2544,6 +2578,12 @@ static AstDecl* parse_type_declaration(Parser* parser) {
       parser_error(parser, parser_peek(parser), "expected property after ':' in type declaration");
     }
   }
+  // #790: enforce PascalCase, EXCEPT a `c_struct` binding — its name mirrors a C
+  // struct verbatim (e.g. `div_t`), the same C-interop exception as `extern`.
+  bool type_is_cstruct = false;
+  for (AstProperty* prop = decl->as.type_decl.properties; prop; prop = prop->next)
+    if (str_eq_cstr(prop->name, "c_struct")) type_is_cstruct = true;
+  if (!type_is_cstruct) check_pascal_case(parser, name, "type");
   /* ONE spelling for a type property. `pub` here (no colon) used to be
    * accepted and silently discarded — a tolerance added because the parser
    * segfaulted on it, and users write it by analogy with `func bar() pub`.
@@ -2564,7 +2604,7 @@ static AstDecl* parse_type_declaration(Parser* parser) {
     parser_advance(parser);
   }
   parser_consume(parser, TOK_LBRACE, "expected '{' to start type body");
-  decl->as.type_decl.fields = parse_type_fields(parser);
+  decl->as.type_decl.fields = parse_type_fields(parser, /*skip_name_check=*/type_is_cstruct);
   parser_consume(parser, TOK_RBRACE, "expected '}' after type body");
   return decl;
 }
@@ -2619,6 +2659,16 @@ static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
   }
   decl->as.func_decl.properties = props_head;
   decl->as.func_decl.is_extern = is_extern;
+
+  // #790: enforce camelCase on the function name and its VALUE parameters,
+  // EXCEPT `extern` functions — the name is a C symbol and the params mirror the
+  // C signature (the ABI is positional; the names keep C-header fidelity). Type
+  // parameters (`T: type`) are collected separately, so `params` is value-only.
+  if (!is_extern) {
+    check_camel_case(parser, name_token, "function");
+    for (AstParam* p = decl->as.func_decl.params; p; p = p->next)
+      naming_check(parser, p->name, name_token, "parameter", false);
+  }
 
   // Handle optional colon before ret (legacy)
   parser_match(parser, TOK_COLON);
@@ -2694,7 +2744,7 @@ static AstDecl* parse_enum_declaration(Parser* parser) {
   if (!parser_check(parser, TOK_RBRACE)) {
     do {
       const Token* member_name = parser_consume_name(parser, "expected enum member name");
-      check_pascal_case(parser, member_name, "enum member");
+      check_camel_case(parser, member_name, "enum case");
       
       AstEnumMember* member = parser_alloc(parser, sizeof(AstEnumMember));
       member->name = parser_copy_str(parser, member_name->lexeme);
@@ -2733,7 +2783,11 @@ static Str str_clone(Parser* parser, Str s) {
 
 static AstDecl* parse_global_let_declaration(Parser* parser, bool is_var, bool is_const) {
   const Token* token = parser_peek_at(parser, -1);
-  Str name = str_clone(parser, parser_consume(parser, TOK_IDENT, "expected identifier after binding keyword")->lexeme);
+  const Token* name_tok = parser_consume(parser, TOK_IDENT, "expected identifier after binding keyword");
+  Str name = str_clone(parser, name_tok->lexeme);
+  // #790: module-level const/let/var names are camelCase (a SCREAMING_SNAKE or
+  // PascalCase const is the most common naming slip).
+  check_camel_case(parser, name_tok, is_const ? "constant" : "binding");
 
   AstTypeRef* type = NULL;
   if (parser_match(parser, TOK_COLON)) {
