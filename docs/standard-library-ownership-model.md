@@ -285,7 +285,10 @@ Do not migrate if:
   fully Rae-owned?
 - Should `NativeHandle` itself be compiler-known, or can it be an ordinary Rae
   struct with compiler-known drop metadata?
-- How should module-level globals that own resources be dropped at program exit?
+- ~~How should module-level globals that own resources be dropped at program
+  exit?~~ RESOLVED: there are none — a module-level `var` or heap-owning `let` is
+  rejected (no globals; see `docs/globals-and-app-ownership.md`). Resource
+  singletons live on a World/App and drop with their owner.
 - What is the final replacement for `RaeAny` bridges?
 - How much typed reflection or compile-time metadata is needed for generic
   container drops without runtime type confusion?
