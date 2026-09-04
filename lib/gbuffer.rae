@@ -143,7 +143,7 @@ func gbSetStaticBind(bind: Ptr) extern("rae_gb_set_static_bind")
 # per-draw instance-record scratch (all zero-alloc, #573) — were module-level
 # globals. They are per-frame state a deferred renderer owns, so they live in a
 # GbufferCache on RenderPasses, threaded from DeferredRenderer through beginPass /
-# renderScene and the draw entry points.
+# renderSceneWorld and the draw entry points.
 type GbufferCache {
   buffersMade: Bool
   staticBindMade: Bool
@@ -775,89 +775,6 @@ func drawSkinnedInstance(cache: mod GbufferCache, mesh: view MeshHandle, model: 
     metallic: material.metallic, roughness: material.roughness, emissive: emissive,
     toon: toonFlag(material: material)
   )
-}
-
-# Fill the G-buffer from a scene's mesh components.
-#
-# SDF primitives now participate too (#392): the raymarch writes packed
-# G-buffer attributes and frag_depth, so a metaball surface is shaded by
-# the same lighting pass as every triangle and depth-tests against them.
-# Metaball clusters into the G-buffer. Cluster discovery mirrors the
-# forward path exactly — scan for unseen cluster ids rather than sorting,
-# since a scene has a handful of clusters — because the two frames must
-# group the same balls into the same surfaces or they render different
-# geometry from one scene.
-func renderSceneSdf(scene: view Scene3d, camera: view Camera3d) pub {
-  if scene.sdfPrimitives.length is 0 {
-    ret
-  }
-  var clusterScan: Int = 0
-  loop clusterScan < scene.sdfPrimitives.length {
-    let head: SdfPrimitive = sceneSdfAt(values: scene.sdfPrimitives, index: clusterScan)
-    var alreadyDrawn: Bool = false
-    var back: Int = 0
-    loop back < clusterScan {
-      let prior: SdfPrimitive = sceneSdfAt(values: scene.sdfPrimitives, index: back)
-      if prior.shape is 0 {
-        if prior.cluster is head.cluster { alreadyDrawn = true }
-      }
-      back = back + 1
-    }
-    if head.shape is 0 {
-      if alreadyDrawn is false {
-        let packed: List(Float) = createList(Float, cap: scene.sdfPrimitives.length * 4)
-        let colors: List(Float) = createList(Float, cap: scene.sdfPrimitives.length * 4)
-        var ballCount: Int = 0
-        var i: Int = 0
-        loop i < scene.sdfPrimitives.length {
-          let sdf: SdfPrimitive = sceneSdfAt(values: scene.sdfPrimitives, index: i)
-          if sdf.shape is 0 {
-            if sdf.cluster is head.cluster {
-              let transform: Transform3d = sceneTransformAt(values: scene.transforms, index: sdf.entity)
-              packed.add(value: transform.position.x)
-              packed.add(value: transform.position.y)
-              packed.add(value: transform.position.z)
-              packed.add(value: transform.scale.x)
-              let ballMaterial: Material3d = sceneMaterialAt(values: scene.materials, index: sdf.material)
-              colors.add(value: ballMaterial.baseColor.x)
-              colors.add(value: ballMaterial.baseColor.y)
-              colors.add(value: ballMaterial.baseColor.z)
-              colors.add(value: 0.0)
-              ballCount = ballCount + 1
-            }
-          }
-          i = i + 1
-        }
-        if ballCount > 0 {
-          let material: Material3d = sceneMaterialAt(values: scene.materials, index: head.material)
-          drawMetaballs(
-            packedBalls: packed.data, count: ballCount,
-            packedColors: colors.data, smoothing: head.smoothing,
-            camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z,
-            metallic: material.metallic, roughness: material.roughness,
-            emR: material.emission.x, emG: material.emission.y, emB: material.emission.z
-          )
-        }
-      }
-    }
-    clusterScan = clusterScan + 1
-  }
-}
-
-func renderScene(cache: mod GbufferCache, scene: view Scene3d) pub {
-  var i: Int = 0
-  loop i < scene.meshRenderers.length {
-    let r: MeshRenderer = sceneMeshRendererAt(values: scene.meshRenderers, index: i)
-    if r.visible {
-      let t: Transform3d = sceneTransformAt(values: scene.transforms, index: r.entity)
-      # prevTransforms is kept in lockstep with transforms by addTransform
-      # (#336), so this index is always valid.
-      let pt: Transform3d = sceneTransformAt(values: scene.prevTransforms, index: r.entity)
-      let m: Material3d = sceneMaterialAt(values: scene.materials, index: r.material)
-      drawInstance(cache: cache, mesh: r.mesh, transform: t, prevTransform: pt, material: m)
-    }
-    i = i + 1
-  }
 }
 
 # Finish and submit the geometry pass (#503, was the C `end`). Draws upload their

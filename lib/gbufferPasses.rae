@@ -98,7 +98,7 @@ func runFullscreen(pipeline: copy Ptr, bind: copy Ptr, target: copy Ptr) {
 # #764: the deferred pass caches (pipeline/bind "made" flags + the target
 # generation each bind was built at) were module-level globals. They are
 # per-frame state a deferred renderer owns, so they now live in RenderPasses,
-# threaded from DeferredRenderer through renderDeferredPass. createRenderPasses()
+# threaded from DeferredRenderer through renderDeferredPassWorld. createRenderPasses()
 # builds them at their old defaults; #771 finds RenderPasses instead of globals.
 type CompositePassCache { pipeMade: Bool, bindGen: Int, bindMade: List(Bool), uniform: List(Float) }
 type AoPassCache { pipeMade: Bool, bindGen: Int, bindMade: Bool }

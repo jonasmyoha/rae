@@ -1,22 +1,28 @@
+# Loader coverage for the World3d-native .raescene path (#796/#797): parse a
+# scene straight into a World3d (no Scene3d intermediate) and check the entity
+# counts, the nodeId->entity map, a resolved mesh handle, camera/light, and that
+# a bad scene fails with the shared validation error.
 import core
 import scene3d
 import scene3dFile
 open scene3d
 open scene3dFile
+open ecs/entity
+open ecs/ComponentTable
 
 func main() {
   var meshes: MeshRegistry3d = createMeshRegistry3d()
   registerMesh3d(reg: meshes, key: "sphere", handle: meshHandle(id: 7, generation: 3))
 
-  let asset: Scene3dAsset = loadScene3dFile(path: "tests/cases/550_scene3d_file/scene.raescene", meshes: meshes)
-  log("ok={asset.ok} materials={asset.scene.materials.length} meshes={asset.scene.meshRenderers.length} sdf={asset.scene.sdfPrimitives.length}")
-  let ball: Int = scene3dAssetEntity(asset: asset, nodeId: "Ball")
-  let blob: Int = scene3dAssetEntity(asset: asset, nodeId: "Blob")
-  log("ball={ball} blob={blob}")
-  if let renderer: MeshRenderer = asset.scene.meshRenderers.copyAt(index: 0) {
-    log("mesh={renderer.mesh.id}:{renderer.mesh.generation} fov={asset.camera.fovYDeg} exposure={asset.light.exposure}")
-  }
+  let asset: World3dAsset = loadWorld3dFile(path: "tests/cases/550_scene3d_file/scene.raescene", meshes: meshes)
+  log("ok={asset.ok} meshes={world3dMeshRendererCount(world: asset.world)} sdf={world3dSdfCount(world: asset.world)} entities={world3dEntityCount(world: asset.world)}")
+  let ball: EntityId = world3dAssetEntity(asset: asset, nodeId: "Ball")
+  let blob: EntityId = world3dAssetEntity(asset: asset, nodeId: "Blob")
+  log("ball={ball.index} blob={blob.index}")
+  let ballEntity: EntityId = world3dMeshRendererEntityAt(world: asset.world, i: 0)
+  let renderer: MeshRenderer = componentGet(this: asset.world.meshRenderers, entity: ballEntity)
+  log("mesh={renderer.mesh.id}:{renderer.mesh.generation} fov={asset.camera.fovYDeg} exposure={asset.light.exposure}")
 
-  let bad: Scene3dAsset = reloadScene3dFile(path: "tests/cases/550_scene3d_file/bad.raescene", meshes: meshes)
+  let bad: World3dAsset = loadWorld3dFile(path: "tests/cases/550_scene3d_file/bad.raescene", meshes: meshes)
   log("bad={bad.ok} error={bad.errorMsg}")
 }

@@ -1,6 +1,6 @@
 # 3D Renderer — PBR scene with persistent ECS/.raescene UI.
 #
-# Frame ownership is explicit: Scene3d renders first, gpu3d.endPass submits
+# Frame ownership is explicit: the World3d renders first, gpu3d.endPass submits
 # without presenting, GPU2D loads the resolved color target and paints UiWorld,
 # then GPU2D presents once. UI hit-testing has priority over orbit input.
 #
@@ -760,11 +760,9 @@ func main() ret Int {
 
       let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
       # Rendering reads the active World3d directly through the RenderSystem's
-      # ECS queries (mesh + per-cluster sdf). The ONLY remaining Scene3d in 112
-      # is this empty placeholder: renderDeferredPass (shared lib) takes a Scene3d
-      # arg its ssao/lighting/taa/composite tags never read, and its signature
-      # can't change here — #748 drops the param when the SoA retires.
-      let emptyScene: Scene3d = createScene3d()
+      # ECS queries (mesh + per-cluster sdf). The generic passes below go through
+      # renderDeferredPassWorld; ssao/lighting/taa/composite never read the world,
+      # so any live world satisfies the signature — asset1.world is passed.
       # Frame order is DERIVED by the render graph (#331/#332): scene3d
       # writes the colour target, the UI overlay MODIFIES it (load-preserving),
       # present reads it. The passes are declared backwards in
@@ -831,8 +829,8 @@ func main() ret Int {
         }
         if tag is RenderTag.ssao or tag is RenderTag.depthPyramid or tag is RenderTag.lighting
           or tag is RenderTag.taa or tag is RenderTag.composite {
-          renderDeferredPass(r: renderer, tag: tag, scene: emptyScene,
-                             camera: camera, light: light, aspect: aspect)
+          renderDeferredPassWorld(r: renderer, tag: tag, world: asset1.world,
+                                  camera: camera, light: light, aspect: aspect)
         }
         if tag is RenderTag.uiOverlay {
           gpu2d.beginFrameLoad()
