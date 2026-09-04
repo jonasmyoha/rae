@@ -396,6 +396,22 @@ func world3dSetSdf(world: mod World3d, entity: view EntityId, sdf: view SdfPrimi
   componentSet(this: world.sdfs, entity: entity, data: sdf)
 }
 
+# The World3d twin of addMeshInstance (#794): allocate an entity and attach its
+# Transform3d + MeshRenderer in one call. The key difference from the Scene3d
+# version is the material — Scene3d shared a `material: Int` INDEX into a
+# parallel List, but World3d stores the Material3d as a per-entity COMPONENT
+# (a copy on the entity), matching buildWorld3dFromScene3d. The MeshRenderer's
+# legacy `entity`/`material` Int fields are ignored by the World3d renderer
+# (renderSceneWorld reads the ECS entity + the Material3d component), so they
+# carry placeholders.
+func world3dAddMeshInstance(world: mod World3d, mesh: view MeshHandle, material: view Material3d, position: view Vec3, rotation: view Vec3, scale: view Vec3) ret EntityId {
+  let entity: EntityId = world3dAddEntity(world: world)
+  world3dSetTransform(world: world, entity: entity, transform: Transform3d { position: position, rotation: rotation, scale: scale })
+  world3dSetMaterial(world: world, entity: entity, material: material)
+  world3dSetMeshRenderer(world: world, entity: entity, renderer: MeshRenderer { entity: 0 - 1, mesh: mesh, material: 0 - 1, visible: true })
+  ret entity
+}
+
 # Live entity count — the ECS analogue of `scene.transforms.length`.
 func world3dEntityCount(world: view World3d) ret Int {
   ret allocatorAliveCount(this: world.allocator)
