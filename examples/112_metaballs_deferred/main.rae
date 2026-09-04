@@ -86,6 +86,8 @@ import rendererDeferred
 import sky
 import skyHosek
 import gbuffer
+import gbufferWorld
+open gbufferWorld
 import app3d/uiShell
 open app3d/CameraRig
 open app3d/cameraBar
@@ -814,15 +816,15 @@ func main() ret Int {
           # renders a black frame with a working UI (found in 113).
           gbuffer.beginPass(cache: renderer.passes.gbuffer, camera: camera, light: light, aspect: aspect)
           if uiState.activeScene is 1 {
-            gbuffer.renderSceneWorld(cache: renderer.passes.gbuffer, world: asset1.world)
+            gbufferWorld.renderSceneWorld(cache: renderer.passes.gbuffer, world: asset1.world)
             renderSdfGbuffer(world: asset1.world, tags: clusters1, camera: camera)
           }
           if uiState.activeScene is 2 {
-            gbuffer.renderSceneWorld(cache: renderer.passes.gbuffer, world: asset2.world)
+            gbufferWorld.renderSceneWorld(cache: renderer.passes.gbuffer, world: asset2.world)
             renderSdfGbuffer(world: asset2.world, tags: clusters2, camera: camera)
           }
           if uiState.activeScene is 3 {
-            gbuffer.renderSceneWorld(cache: renderer.passes.gbuffer, world: asset3.world)
+            gbufferWorld.renderSceneWorld(cache: renderer.passes.gbuffer, world: asset3.world)
             renderSdfGbuffer(world: asset3.world, tags: clusters3, camera: camera)
           }
           gbuffer.endPass()

@@ -242,6 +242,34 @@ func renderFrame(r: view Renderer3d, scene: view Scene3d, camera: view Camera3d,
   }
 }
 
+# #794: the World3d twin of renderFrame — identical graph walk, but the scene
+# pass fills from the World3d ECS queries (gpu3d.renderSceneWorld) instead of the
+# Scene3d parallel lists. Every other tag is scene-independent post-processing.
+func renderFrameWorld(r: view Renderer3d, world: view World3d, camera: view Camera3d, light: view Light3d, aspect: view Float, time: view Float) pub {
+  var i: Int = 0
+  loop i < r.graph.order.length {
+    let p: Int = graphIntAt(values: r.graph.order, index: i)
+    let tag: Int = graphPassAt(values: r.graph.passes, index: p).tag
+    if tag is tagScenePass {
+      beginScene(camera: camera, light: light, aspect: aspect, time: time)
+      renderSceneWorld(world: world)
+    }
+    if tag is tagSsao {
+      ssaoPass()
+    }
+    if tag is tagTaa {
+      taaPass()
+    }
+    if tag is tagTonemap {
+      tonemapPass()
+    }
+    if tag is tagPresent {
+      endFrame()
+    }
+    i = i + 1
+  }
+}
+
 # ----- app-driven dispatch -------------------------------------------
 # Some passes cannot be executed by this module without breaking layering:
 # a UI overlay needs lib/ui types, and a renderer library must not depend
