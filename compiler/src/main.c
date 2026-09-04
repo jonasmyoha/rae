@@ -1842,6 +1842,46 @@ static bool module_graph_load_module(ModuleGraph* graph,
     return false;
   }
 
+  // #787: if this file is a folder-package MAIN module (its basename == PascalCase
+  // of its folder's last component, e.g. renderSystem/RenderSystem), also load the
+  // sibling .rae files in the same folder, so `import pkg.Main` exposes the whole
+  // package. Exporting siblings merge into this main module; the rest become their
+  // own modules. A plain module (not named after its folder) does not pull siblings.
+  if (module_path) {
+    const char* mp = module_path;
+    const char* lastSlash = strrchr(mp, '/');
+    if (lastSlash && lastSlash > mp) {
+      const char* base = lastSlash + 1;
+      const char* folderStart = mp;
+      for (const char* p = mp; p < lastSlash; p++) if (*p == '/') folderStart = p + 1;
+      size_t compLen = (size_t)(lastSlash - folderStart);
+      bool isMain = compLen > 0 && strlen(base) == compLen
+        && (char)toupper((unsigned char)folderStart[0]) == base[0]
+        && (compLen == 1 || strncmp(folderStart + 1, base + 1, compLen - 1) == 0);
+      if (isMain) {
+        size_t folderLen = (size_t)(lastSlash - mp);
+        char dir[PATH_MAX]; snprintf(dir, sizeof dir, "%s", file_path);
+        char* ds = strrchr(dir, '/'); if (ds) *ds = '\0'; else { dir[0] = '.'; dir[1] = '\0'; }
+        char thisname[520]; snprintf(thisname, sizeof thisname, "%s.rae", base);
+        DIR* dh = opendir(dir);
+        if (dh) {
+          struct dirent* ent;
+          while ((ent = readdir(dh)) != NULL) {
+            const char* nm = ent->d_name;
+            size_t nlen = strlen(nm);
+            if (nlen <= 4 || strcmp(nm + nlen - 4, ".rae") != 0) continue;
+            if (strcmp(nm, thisname) == 0) continue;  // skip the main file itself
+            char childmod[1024]; char childfile[PATH_MAX];
+            snprintf(childmod, sizeof childmod, "%.*s/%.*s", (int)folderLen, mp, (int)(nlen - 4), nm);
+            snprintf(childfile, sizeof childfile, "%s/%s", dir, nm);
+            module_graph_load_module(graph, childmod, childfile, &frame, NULL, no_implicit);
+          }
+          closedir(dh);
+        }
+      }
+    }
+  }
+
   for (AstImport* import = module->imports; import; import = import->next) {
     char* raw = str_to_cstr(import->path);
     if (!raw) {
@@ -2101,6 +2141,30 @@ static AstModule merge_module_graph(const ModuleGraph* graph) {
     }
   }
   for (ModuleNode* node = graph->head; node; node = node->next) {
+    // #787: a file with a bare `export` directive belongs to the folder-package's
+    // same-named MAIN module: its decls' logical module_name is retargeted from
+    // `pkg/Helper` to `pkg/PascalCase(pkg)` (e.g. renderSystem/Helper -> renderSystem/
+    // RenderSystem), so importing/opening the main module exposes them too.
+    const char* target_module_name = node->module_path;
+    if (node->module->export_to_main && node->module_path) {
+      const char* mp = node->module_path;
+      const char* lastSlash = strrchr(mp, '/');
+      if (lastSlash && lastSlash > mp) {
+        size_t folderLen = (size_t)(lastSlash - mp);
+        const char* folderStart = mp;
+        for (const char* p = mp; p < lastSlash; p++) if (*p == '/') folderStart = p + 1;
+        size_t compLen = (size_t)(lastSlash - folderStart);
+        char* built = malloc(folderLen + 2 + compLen);
+        if (built) {
+          memcpy(built, mp, folderLen);
+          built[folderLen] = '/';
+          memcpy(built + folderLen + 1, folderStart, compLen);
+          built[folderLen + 1] = (char)toupper((unsigned char)folderStart[0]);
+          built[folderLen + 1 + compLen] = '\0';
+          target_module_name = built;  // persists for the compile (freed at process exit)
+        }
+      }
+    }
     // Stamp each decl with its origin file so sema can answer "did
     // this call come from stdlib?" after the merge — module->file_path
     // alone only remembers the LAST file, not per-decl provenance.
@@ -2109,11 +2173,11 @@ static AstModule merge_module_graph(const ModuleGraph* graph) {
       // Remember the logical module (e.g. "math", "filesystem") so sema can
       // resolve namespace-qualified calls like `math.sin(x)` after the merge
       // flattens everything (docs/module-namespacing.md).
-      if (!d->module_name) d->module_name = node->module_path;
+      if (!d->module_name) d->module_name = target_module_name;
       // Mirror onto the func decl so the mangler (which only sees AstFuncDecl)
       // can build namespace-qualified extern C symbols.
       if (d->kind == AST_DECL_FUNC && !d->as.func_decl.module_name) {
-        d->as.func_decl.module_name = node->module_path;
+        d->as.func_decl.module_name = target_module_name;
         d->as.func_decl.origin_file = d->origin_file;
       }
     }

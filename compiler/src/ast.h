@@ -454,6 +454,10 @@ struct AstModule {
   Token* comments;
   size_t comment_count;
   bool had_error;
+  // #787: a bare `export` directive at file top means "this file's decls belong to
+  // the folder-package's same-named MAIN module" — their module_name is retargeted
+  // to `pkg/MainModule` at merge, so importing/opening the main module exposes them.
+  bool export_to_main;
 };
 
 struct StringInterner;
