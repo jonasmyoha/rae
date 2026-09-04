@@ -56,6 +56,8 @@ import math
 open vec3
 open scene3d
 open math3d
+open ecs/entity          # #793: World3d shadow path reads entities/components
+open ecs/ComponentTable
 # The forward render pass is built in Rae over the WebGPU bindings (#514),
 # the same way gbuffer.rae builds the deferred geometry pass.
 open webgpu/webgpu
@@ -550,6 +552,20 @@ func renderSceneShadow(scene: view Scene3d) pub {
       drawShadowCaster(mesh: r.mesh, model: modelMatrix(t: t))
     }
     i = i + 1
+  }
+}
+
+# #793: the World3d twin of renderSceneShadow — the shadow-caster pass over a
+# World3d, reading each mesh entity's Transform3d through ECS queries. Lifted
+# from 112/114's open-coded renderMeshShadow (#736) into shared lib.
+func renderSceneShadowWorld(world: view World3d) pub {
+  loop var j: Int = 0, j < componentCount(this: world.meshRenderers), ++j {
+    let entity: EntityId = componentEntityAt(this: world.meshRenderers, i: j)
+    let renderer: MeshRenderer = componentGet(this: world.meshRenderers, entity: entity)
+    if renderer.visible {
+      let t: Transform3d = componentGet(this: world.transforms, entity: entity)
+      drawShadowCaster(mesh: renderer.mesh, model: modelMatrix(t: t))
+    }
   }
 }
 
