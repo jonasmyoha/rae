@@ -178,8 +178,8 @@ func handleScreenSwitch(
   let heroKey: String = appState.currentAlbumStem
   let gotSrc: Bool = captureHeroSourceOnPage(anim: anim, world: world, pageId: outgoingPageId, key: heroKey)
   if gotSrc {
-    layoutSystemIfDirty(world: world, cache: layoutCache)
-    transformSystemIfDirty(world: world, cache: transformCache)
+    ifDirty(world: world, cache: layoutCache)
+    systemIfDirty(world: world, cache: transformCache)
     let gotDst: Bool = captureHeroTargetOnPage(anim: anim, world: world, pageId: incomingPageId, key: heroKey)
     if gotDst {
       setHeroVisibleOnPage(world: world, pageId: incomingPageId, key: heroKey, visible: false)

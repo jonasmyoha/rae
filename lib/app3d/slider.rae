@@ -61,7 +61,7 @@ func sliderClamp(v: view Float, lo: view Float, hi: view Float) ret Float {
 
 # Where the value sits in 0..1. Guards a zero-width range rather than dividing
 # by it: a slider whose bounds are equal is a mistake, not a crash.
-func sliderFraction(s: view Slider) pub ret Float {
+func fraction(s: view Slider) pub ret Float {
   let span: Float = s.maxValue - s.minValue
   if span <= 0.0 {
     ret 0.0
@@ -69,14 +69,14 @@ func sliderFraction(s: view Slider) pub ret Float {
   ret sliderClamp(v: (s.value - s.minValue) / span, lo: 0.0, hi: 1.0)
 }
 
-func sliderSetFraction(s: mod Slider, f: view Float) pub {
+func setFraction(s: mod Slider, f: view Float) pub {
   let span: Float = s.maxValue - s.minValue
   s.value = s.minValue + sliderClamp(v: f, lo: 0.0, hi: 1.0) * span
 }
 
 # Pointer x -> value, using the track's laid-out rect. Returns the fraction so
 # the caller can decide what "changed" means for its own value.
-func sliderFractionForX(world: view UiWorld, trackId: view String, x: view Float) ret Float {
+func fractionForX(world: view UiWorld, trackId: view String, x: view Float) ret Float {
   let e: EntityId = nodeEntityFor(world: world, nodeId: trackId)
   if isNone(this: e) {
     ret 0.0
@@ -125,7 +125,7 @@ func updateSlider(s: mod Slider, world: view UiWorld, input: view UiInput) pub r
   }
 
   if s.dragging {
-    sliderSetFraction(s: s, f: sliderFractionForX(world: world, trackId: s.trackId, x: input.pointer.x))
+    setFraction(s: s, f: fractionForX(world: world, trackId: s.trackId, x: input.pointer.x))
   }
 
   # Released, or the button came up somewhere we never saw: either way the drag
@@ -140,7 +140,7 @@ func updateSlider(s: mod Slider, world: view UiWorld, input: view UiInput) pub r
 
 # Resize the fill node to match the value. Separate from `updateSlider` because
 # the visual is the app's scene: a caller that paints its slider differently
-# uses `sliderFraction` and skips this.
+# uses `fraction` and skips this.
 func applySliderFill(s: view Slider, world: mod UiWorld) pub {
   let track: EntityId = nodeEntityFor(world: world, nodeId: s.trackId)
   if isNone(this: track) {
@@ -157,7 +157,7 @@ func applySliderFill(s: view Slider, world: mod UiWorld) pub {
   if componentHas(this: world.computedRects, entity: fill) is false {
     ret
   }
-  let want: Float = tr.size.x * sliderFraction(s: s)
+  let want: Float = tr.size.x * fraction(s: s)
   let fr: ComputedRect = componentGet(this: world.computedRects, entity: fill)
   # Only write on a real change: componentSet bumps the table generation whether
   # or not the value differs, and a per-frame write to an unchanged width keeps
@@ -361,7 +361,7 @@ func centreNodeAtFraction(world: mod UiWorld, trackId: view String,
 #
 #   wasDragging — whether a drag was already running
 #   pressedInside — a press edge landed on the track this frame
-func sliderDragActive(wasDragging: view Bool, pressedInside: view Bool,
+func dragActive(wasDragging: view Bool, pressedInside: view Bool,
                       down: view Bool, released: view Bool) pub ret Bool {
   if released {
     ret false

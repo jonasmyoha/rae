@@ -6,11 +6,11 @@
 # GPU work show side by side).
 #
 # Usage in an app:
-#   profileMaybeAutoStart()                 # once at startup (reads RAE_PROFILE*)
+#   maybeAutoStart()                 # once at startup (reads RAE_PROFILE*)
 #   ... each frame ...
 #   zoneBegin(name: "shadow") ... zoneEnd(name: "shadow")   # nest freely
-#   profileCounter(name: "fps", value: fps)
-#   profileTick()                           # once per frame; auto-stops + writes
+#   counter(name: "fps", value: fps)
+#   tick()                           # once per frame; auto-stops + writes
 #
 # Environment (zero-UI capture, works on desktop AND iPhone):
 #   RAE_PROFILE=1                start a capture at launch
@@ -51,7 +51,7 @@ type Profiler {
   values: List(Int)
 }
 
-# A profiler that is not capturing. Buffers start tiny; profileStartCapture
+# A profiler that is not capturing. Buffers start tiny; startCapture
 # reallocates them to the full cap. Owned by the App / the example's main.
 func createProfiler() pub ret Profiler {
   ret Profiler {
@@ -64,11 +64,11 @@ func createProfiler() pub ret Profiler {
   }
 }
 
-func profileCapturing(profiler: view Profiler) pub ret Bool { ret profiler.capturing }
+func capturing(profiler: view Profiler) pub ret Bool { ret profiler.capturing }
 
 # Begin a capture of `seconds`, writing to `outPath` when it ends. Reallocates the
 # event buffers up front so recording never allocates.
-func profileStartCapture(profiler: mod Profiler, seconds: view Float, outPath: view String) pub {
+func startCapture(profiler: mod Profiler, seconds: view Float, outPath: view String) pub {
   profiler.names = createList(String, cap: profMaxEvents)
   profiler.phases = createList(Int, cap: profMaxEvents)
   profiler.times = createList(Int, cap: profMaxEvents)
@@ -82,7 +82,7 @@ func profileStartCapture(profiler: mod Profiler, seconds: view Float, outPath: v
 }
 
 # Start a capture from the environment if RAE_PROFILE is set. Call once at startup.
-func profileMaybeAutoStart(profiler: mod Profiler) pub {
+func maybeAutoStart(profiler: mod Profiler) pub {
   let flag: String = sys.getEnv(name: "RAE_PROFILE")
   if flag.length() is 0 { ret }
   var seconds: Float = 20.0
@@ -91,7 +91,7 @@ func profileMaybeAutoStart(profiler: mod Profiler) pub {
   var out: String = "rae_profile.json"
   let outEnv: String = sys.getEnv(name: "RAE_PROFILE_OUT")
   if outEnv.length() > 0 { out = "{outEnv}" }
-  profileStartCapture(profiler: profiler, seconds: seconds, outPath: out)
+  startCapture(profiler: profiler, seconds: seconds, outPath: out)
 }
 
 func profRecord(profiler: mod Profiler, name: view String, ph: view Int, tsNs: view Int, tid: view Int, value: view Int) {
@@ -121,14 +121,14 @@ func zoneEnd(profiler: mod Profiler, name: view String) pub {
 
 # A single-value time series (fps, draw count, RSS, caster count, …). Perfetto
 # plots these as a track you can overlay against the zones.
-func profileCounter(profiler: mod Profiler, name: view String, value: view Int) pub {
+func counter(profiler: mod Profiler, name: view String, value: view Int) pub {
   if profiler.capturing is false { ret }
   profRecord(profiler: profiler, name: name, ph: profPhCounter, tsNs: core.nowNs(), tid: 0, value: value)
 }
 
 # Call once per frame. Auto-stops and writes the trace when the capture window
 # elapses. Returns true on the frame it wrote the file.
-func profileTick(profiler: mod Profiler) pub ret Bool {
+func tick(profiler: mod Profiler) pub ret Bool {
   if profiler.capturing is false { ret false }
   if core.nowNs() < profiler.endNs { ret false }
   ret profileStop(profiler: profiler)
@@ -138,7 +138,7 @@ func profileTick(profiler: mod Profiler) pub ret Bool {
 func profileStop(profiler: mod Profiler) pub ret Bool {
   if profiler.capturing is false { ret false }
   profiler.capturing = false
-  ret profileWrite(profiler: profiler, path: profiler.outPath)
+  ret write(profiler: profiler, path: profiler.outPath)
 }
 
 # One trace event object. Literal JSON braces are `\{` / `\}`; `{expr}` is Rae
@@ -178,7 +178,7 @@ func joinBlocked(frags: view List(String), blockSize: view Int) ret String {
   ret blocks.join(sep: ",")
 }
 
-func profileWrite(profiler: view Profiler, path: view String) ret Bool {
+func write(profiler: view Profiler, path: view String) ret Bool {
   let n: Int = profiler.names.length
   let frags: List(String) = createList(String, cap: n + 2)
   # Label the CPU track; a second thread_name for tid 1 (GPU) lands here once GPU

@@ -66,11 +66,11 @@ func resolveTextLineHeight(theme: view ResolvedTheme, styleId: view String) pub 
 func resolveTextColor(theme: view ResolvedTheme, styleId: view String, active: view Theme) pub ret RgbaColor {
   let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
   if i < 0 {
-    ret themeColorByName(theme: active, name: "textPrimary")
+    ret colorByName(theme: active, name: "textPrimary")
   }
   let slot: String = rae_ext_rae_buf_get(buf: theme.textColorSlots.data, index: i)
   if slot.length() > 0 {
-    ret themeColorByName(theme: active, name: slot)
+    ret colorByName(theme: active, name: slot)
   }
   var r: Int = 0
   var g: Int = 0
@@ -137,7 +137,7 @@ func styleOverrideSize(base: view Float, so: view StyleOverride) pub ret Float {
 func styleOverrideColor(base: view RgbaColor, so: view StyleOverride, active: view Theme) pub ret RgbaColor {
   if so.hasColor {
     if so.colorSlot.length() > 0 {
-      ret themeColorByName(theme: active, name: so.colorSlot)
+      ret colorByName(theme: active, name: so.colorSlot)
     }
     ret so.color
   }
@@ -172,26 +172,26 @@ func textStyleSize(styleId: view String) pub ret Float {
 
 # Theme-palette color for a style id. Mirrors render.rae's textStyleColor —
 # light/dark themes flip for free because every branch reads a semantic slot.
-func textStyleColorRgba(styleId: view String, active: view Theme) pub ret RgbaColor {
-  if styleId is "muted" { ret themeColorByName(theme: active, name: "textMuted") }
-  if styleId is "caption" { ret themeColorByName(theme: active, name: "textMuted") }
-  if styleId is "albumCaption" { ret themeColorByName(theme: active, name: "textMuted") }
-  if styleId is "trackMuted" { ret themeColorByName(theme: active, name: "textMuted") }
-  if styleId is "historyArtist" { ret themeColorByName(theme: active, name: "textMuted") }
-  if styleId is "tabInactive" { ret themeColorByName(theme: active, name: "textMuted") }
-  if styleId is "timeTotal" { ret themeColorByName(theme: active, name: "textMuted") }
+func colorRgba(styleId: view String, active: view Theme) pub ret RgbaColor {
+  if styleId is "muted" { ret colorByName(theme: active, name: "textMuted") }
+  if styleId is "caption" { ret colorByName(theme: active, name: "textMuted") }
+  if styleId is "albumCaption" { ret colorByName(theme: active, name: "textMuted") }
+  if styleId is "trackMuted" { ret colorByName(theme: active, name: "textMuted") }
+  if styleId is "historyArtist" { ret colorByName(theme: active, name: "textMuted") }
+  if styleId is "tabInactive" { ret colorByName(theme: active, name: "textMuted") }
+  if styleId is "timeTotal" { ret colorByName(theme: active, name: "textMuted") }
   # "On surfaceAlt"/accent-panel styles.
-  if styleId is "miniTitle" { ret themeColorByName(theme: active, name: "accentText") }
-  if styleId is "miniMuted" { ret themeColorByName(theme: active, name: "accentTextMuted") }
-  if styleId is "pillLabel" { ret themeColorByName(theme: active, name: "accentText") }
+  if styleId is "miniTitle" { ret colorByName(theme: active, name: "accentText") }
+  if styleId is "miniMuted" { ret colorByName(theme: active, name: "accentTextMuted") }
+  if styleId is "pillLabel" { ret colorByName(theme: active, name: "accentText") }
   # primary / h1 / h2 / pageTitle / topBarTitle / trackTitle / tabActive / body
   # and unknowns fall back to primary text.
-  ret themeColorByName(theme: active, name: "textPrimary")
+  ret colorByName(theme: active, name: "textPrimary")
 }
 
 # Whether a style id is horizontally centered within its rect. Mirrors
-# render.rae's textStyleIsCentered.
-func textStyleIsCentered(styleId: view String) pub ret Bool {
+# render.rae's isCentered.
+func isCentered(styleId: view String) pub ret Bool {
   if styleId is "tabActive" { ret true }
   if styleId is "tabInactive" { ret true }
   if styleId is "pageTitle" { ret true }
@@ -199,7 +199,7 @@ func textStyleIsCentered(styleId: view String) pub ret Bool {
 }
 
 # Whether a style id is right-aligned within its rect (NowPlaying TimeTotal).
-func textStyleIsRightAligned(styleId: view String) pub ret Bool {
+func isRightAligned(styleId: view String) pub ret Bool {
   if styleId is "timeTotal" { ret true }
   ret false
 }

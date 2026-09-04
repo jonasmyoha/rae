@@ -10,7 +10,7 @@ import compress/checksums
 
 # Compress to a zlib stream. Header 0x78 0x01: CM=8/CINFO=7 (32 KB window),
 # FCHECK chosen so (CMF*256 + FLG) % 31 == 0, no preset dict.
-func zlibCompress(data: view List(Int), n: view Int) ret List(Int) {
+func compress(data: view List(Int), n: view Int) ret List(Int) {
     let out: List(Int) = createList(cap: n / 2 + 16)
     out.add(value: 120)   # 0x78 CMF
     out.add(value: 1)     # 0x01 FLG
@@ -30,7 +30,7 @@ func zlibCompress(data: view List(Int), n: view Int) ret List(Int) {
 
 # Decompress a zlib stream: skip the 2-byte header, inflate the body (the
 # trailing 4-byte Adler-32 is ignored — inflate stops at the final block).
-func zlibDecompress(data: view List(Int), n: view Int) ret List(Int) {
+func decompress(data: view List(Int), n: view Int) ret List(Int) {
     let inner: List(Int) = createList(cap: n)
     var i: Int = 2
     loop i < n - 4 {

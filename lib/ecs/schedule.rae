@@ -5,7 +5,7 @@
 # entry tracks the COMBINED generation of the tables its system READS; the
 # schedule SKIPS the entry when that combined generation hasn't moved since its
 # last run, and RUNS it (recording the new value) when a read table mutated. This
-# generalizes the per-system layoutSystemIfDirty / transformSystemIfDirty
+# generalizes the per-system ifDirty / systemIfDirty
 # wrappers — the "did my inputs change?" boilerplate — into ONE mechanism (UI
 # switches to it in #728).
 #
@@ -14,10 +14,10 @@
 # per-frame runner walks the entries in order and, for each, computes its read
 # tables' combined generation (the SUM of componentTableGeneration over them — a
 # table generation is monotonic, so the sum changes iff some read table mutated)
-# and calls the system only when scheduleShouldRun returns true:
+# and calls the system only when shouldRun returns true:
 #
-#   if scheduleShouldRun(schedule, layoutIdx, layoutReadGen)       { layoutSystem(world) }
-#   if scheduleShouldRun(schedule, transformIdx, transformReadGen) { transformSystem(world) }
+#   if shouldRun(schedule, layoutIdx, layoutReadGen)       { layoutSystem(world) }
+#   if shouldRun(schedule, transformIdx, transformReadGen) { transformSystem(world) }
 import core
 
 type ScheduleEntry {
@@ -36,7 +36,7 @@ func createSchedule() ret Schedule {
 }
 
 # Append a system entry in run order. Returns its index (its position in the
-# explicit order) — the per-frame runner keys scheduleShouldRun on it.
+# explicit order) — the per-frame runner keys shouldRun on it.
 func addSystem(schedule: mod Schedule, name: view String) ret Int {
   let index: Int = schedule.entries.length
   var nameCopy: String = ""
@@ -63,7 +63,7 @@ func scheduleName(schedule: view Schedule, index: view Int) ret String {
 # generation of the tables that system READS. Returns true — and records the new
 # value — when it differs from the last run (a read table mutated, or the first
 # run); false to skip when nothing it reads has changed.
-func scheduleShouldRun(schedule: mod Schedule, index: view Int, readGeneration: view Int) ret Bool {
+func shouldRun(schedule: mod Schedule, index: view Int, readGeneration: view Int) ret Bool {
   let slot: mod ScheduleEntry => schedule.entries.modAt(index: index)
   if slot.lastGeneration is readGeneration {
     ret false

@@ -45,12 +45,12 @@ const debugDialogTitleH: Float = 47.71084337349397
 const debugCloseIconGlyph: Float = 43.373493975903614
 const debugDialogTitleY: Float = 43.373493975903614
 
-func debugAmberColor() ret RgbaColor { ret RgbaColor { r: 255, g: 191, b: 0, a: 255 } }
-func debugBackdropColor() ret RgbaColor { ret RgbaColor { r: 0, g: 0, b: 0, a: 160 } }
-func debugMenuFillColor() ret RgbaColor { ret RgbaColor { r: 24, g: 24, b: 28, a: 240 } }
-func debugSwitchOnColor() ret RgbaColor { ret RgbaColor { r: 52, g: 199, b: 89, a: 255 } }
-func debugSwitchOffColor() ret RgbaColor { ret RgbaColor { r: 120, g: 120, b: 128, a: 200 } }
-func debugSwitchKnobColor() ret RgbaColor { ret RgbaColor { r: 255, g: 255, b: 255, a: 255 } }
+func amberColor() ret RgbaColor { ret RgbaColor { r: 255, g: 191, b: 0, a: 255 } }
+func backdropColor() ret RgbaColor { ret RgbaColor { r: 0, g: 0, b: 0, a: 160 } }
+func menuFillColor() ret RgbaColor { ret RgbaColor { r: 24, g: 24, b: 28, a: 240 } }
+func switchOnColor() ret RgbaColor { ret RgbaColor { r: 52, g: 199, b: 89, a: 255 } }
+func switchOffColor() ret RgbaColor { ret RgbaColor { r: 120, g: 120, b: 128, a: 200 } }
+func switchKnobColor() ret RgbaColor { ret RgbaColor { r: 255, g: 255, b: 255, a: 255 } }
 
 type DebugSystem {
   menuOpen: Bool
@@ -71,7 +71,7 @@ type DebugSystem {
   hasBlur: Bool
 }
 
-func debugBlurBackdropKey() pub ret String { ret "debug.blurBackdrop" }
+func blurBackdropKey() pub ret String { ret "debug.blurBackdrop" }
 func setDebugHasBlur(debug: mod DebugSystem, value: view Bool) pub { debug.hasBlur = value }
 
 func setDebugButtonTopRight(debug: mod DebugSystem, margin: view Float) pub {
@@ -130,14 +130,14 @@ func restoreDebugFlags(debug: mod DebugSystem, path: view String) pub {
   if doc.ok is false {
     ret
   }
-  let root: JsonValue = json.jsonRoot(doc: doc)
+  let root: JsonValue = json.root(doc: doc)
   let labelsKey: String = "showLabels"
-  let labelsIdx: Int = json.jsonField(doc: doc, this: root, key: labelsKey)
+  let labelsIdx: Int = json.field(doc: doc, this: root, key: labelsKey)
   if labelsIdx >= 0 {
     debug.showLabels = json.jsonBool(this: json.jsonValueAt(doc: doc, idx: labelsIdx), fallback: false)
   }
   let outlinesKey: String = "showInputOutlines"
-  let outlinesIdx: Int = json.jsonField(doc: doc, this: root, key: outlinesKey)
+  let outlinesIdx: Int = json.field(doc: doc, this: root, key: outlinesKey)
   if outlinesIdx >= 0 {
     debug.showInputOutlines = json.jsonBool(this: json.jsonValueAt(doc: doc, idx: outlinesIdx), fallback: false)
   }
@@ -328,8 +328,8 @@ func setDebugSwitchPillStyle(world: mod UiWorld, entity: view EntityId) {
   let emptyText: String = ""
   let emptyTextSel: String = ""
   let noTint: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
-  let offFill: RgbaColor = debugSwitchOffColor()
-  let onFill: RgbaColor = debugSwitchOnColor()
+  let offFill: RgbaColor = switchOffColor()
+  let onFill: RgbaColor = switchOnColor()
   let zeroOffset: Vec2 = { x: 0.0, y: 0.0 }
   let style: StateStyle = {
     spriteKey: own emptySprite
@@ -440,7 +440,7 @@ func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret EntityId 
   let btn: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: btn, w: debug.buttonSize, h: debug.buttonSize)
   setOffset(world: world, entity: btn, x: debug.buttonX, y: debug.buttonY)
-  setCircleShape(world: world, entity: btn, fill: debugAmberColor())
+  setCircleShape(world: world, entity: btn, fill: amberColor())
   setStackLayout(world: world, entity: btn)
   setOnClickAction(world: world, entity: btn, actionId: debugActionToggleMenu)
 
@@ -457,14 +457,14 @@ func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret EntityId 
 func buildDebugIconButton(world: mod UiWorld) ret EntityId {
   let btn: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: btn, w: debugCloseIconSize, h: debugCloseIconSize)
-  setRoundedShape(world: world, entity: btn, fill: themeColorByName(theme: world.theme.active, name: "outline"), radius: debugCloseIconSize / 2.0)
+  setRoundedShape(world: world, entity: btn, fill: colorByName(theme: world.theme.active, name: "outline"), radius: debugCloseIconSize / 2.0)
   setStackLayout(world: world, entity: btn)
   setOnClickAction(world: world, entity: btn, actionId: debugActionDismiss)
 
   let icon: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: icon, w: debugCloseIconGlyph, h: debugCloseIconGlyph)
   setOpticalAlign(world: world, entity: icon, centerX: true, centerY: true, biasX: 0.0, biasY: 0.0)
-  setDebugSprite(world: world, entity: icon, key: "mat:close", tint: themeColorByName(theme: world.theme.active, name: "textPrimary"))
+  setDebugSprite(world: world, entity: icon, key: "mat:close", tint: colorByName(theme: world.theme.active, name: "textPrimary"))
   let kids: List(EntityId) = createList(EntityId, cap: 1)
   kids.add(value: icon)
   attachKids(world: world, parent: btn, kids: kids)
@@ -474,7 +474,7 @@ func buildDebugIconButton(world: mod UiWorld) ret EntityId {
 func buildDebugCloseButton(world: mod UiWorld) ret EntityId {
   let btn: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: btn, w: debugCloseButtonW, h: debugCloseButtonH)
-  setRoundedShape(world: world, entity: btn, fill: themeColorByName(theme: world.theme.active, name: "accent"), radius: debugCloseButtonRadius)
+  setRoundedShape(world: world, entity: btn, fill: colorByName(theme: world.theme.active, name: "accent"), radius: debugCloseButtonRadius)
   setStackLayout(world: world, entity: btn)
   setOnClickAction(world: world, entity: btn, actionId: debugActionDismiss)
 
@@ -541,8 +541,8 @@ func buildSwitchRow(
 
   let pill: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: pill, w: debugSwitchW, h: debugSwitchH)
-  var pillFill: RgbaColor = debugSwitchOffColor()
-  if on { pillFill = debugSwitchOnColor() }
+  var pillFill: RgbaColor = switchOffColor()
+  if on { pillFill = switchOnColor() }
   setRoundedShape(world: world, entity: pill, fill: pillFill, radius: debugSwitchRadius)
   let pillKind: String = "debugSwitchPill"
   tagDebugToggleWidget(world: world, entity: pill, actionId: actionId, kind: pillKind, selected: on)
@@ -551,7 +551,7 @@ func buildSwitchRow(
 
   let knob: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: knob, w: debugSwitchKnob, h: debugSwitchKnob)
-  setCircleShape(world: world, entity: knob, fill: debugSwitchKnobColor())
+  setCircleShape(world: world, entity: knob, fill: switchKnobColor())
   var knobOff: Float = 0.0 - debugSwitchKnobOffset
   if on { knobOff = debugSwitchKnobOffset }
   setOffset(world: world, entity: knob, x: knobOff, y: 0.0)
@@ -574,7 +574,7 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Enti
   let backdrop: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: backdrop, w: debug.screenW, h: debug.screenH)
   setOffset(world: world, entity: backdrop, x: 0.0, y: 0.0)
-  setRectShape(world: world, entity: backdrop, fill: debugBackdropColor())
+  setRectShape(world: world, entity: backdrop, fill: backdropColor())
   setOnClickAction(world: world, entity: backdrop, actionId: debugActionDismiss)
   setStackLayout(world: world, entity: backdrop)
 
@@ -582,7 +582,7 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Enti
   let panelH: Float = debug.screenH * 0.72
   let panel: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: panel, w: panelW, h: panelH)
-  setRoundedShape(world: world, entity: panel, fill: debugMenuFillColor(), radius: debugPanelRadius)
+  setRoundedShape(world: world, entity: panel, fill: menuFillColor(), radius: debugPanelRadius)
   setStackLayout(world: world, entity: panel)
 
   let content: EntityId = createEntity(world: world)

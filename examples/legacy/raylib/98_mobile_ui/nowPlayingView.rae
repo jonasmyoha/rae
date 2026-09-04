@@ -107,7 +107,7 @@ func mountNowPlayingPage(
   if state.settings.roundedAlbumCovers {
     let heroNodeId: String = "Hero"
     if let raw: Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: heroNodeId) {
-      let heroEntity: EntityId = entityId(v: raw)
+      let heroEntity: EntityId = id(v: raw)
       let cr: CornerRadius = { radius: 24.0 }
       componentSet(this: world.cornerRadiuses, entity: heroEntity, data: cr)
     }
@@ -153,7 +153,7 @@ func updateMiniPlayerCover(world: mod UiWorld, stem: view String) pub {
   } else {
     ret
   }
-  let entity: EntityId = entityId(v: raw)
+  let entity: EntityId = id(v: raw)
   if componentHas(this: world.sprites, entity: entity) is false {
     ret
   }

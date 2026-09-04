@@ -141,17 +141,17 @@ func main() {
   var reg: Registry = createRegistry()
 
   # Setup: one track already playing.
-  let tEnt: EntityId = entityId(v: 1)
+  let tEnt: EntityId = id(v: 1)
   componentSet(this: reg.playback.nowPlaying, entity: tEnt, data: Track { id: 100, revision: 0 })
   markChanged(this: reg.playback)
 
   # Three playback observers (system / table / component) + a library
   # control observer, each snapshotted to the current state (clean).
   var observers: ComponentTable(Observe) = createComponentTable(Observe)
-  let oSys: EntityId = entityId(v: 10)
-  let oTbl: EntityId = entityId(v: 11)
-  let oCmp: EntityId = entityId(v: 12)
-  let oLib: EntityId = entityId(v: 13)
+  let oSys: EntityId = id(v: 10)
+  let oTbl: EntityId = id(v: 11)
+  let oCmp: EntityId = id(v: 12)
+  let oLib: EntityId = id(v: 13)
   componentSet(this: observers, entity: oSys, data: makeObserve(reg: reg, system: SystemId.playback, kind: ObserveKind.system, entity: noEntity()))
   componentSet(this: observers, entity: oTbl, data: makeObserve(reg: reg, system: SystemId.playback, kind: ObserveKind.table, entity: noEntity()))
   componentSet(this: observers, entity: oCmp, data: makeObserve(reg: reg, system: SystemId.playback, kind: ObserveKind.component, entity: tEnt))

@@ -101,7 +101,7 @@ func distExtra() ret List(Int) {
 
 # Decode a compressed block body (fixed or dynamic) into `out`, given the
 # literal/length and distance Huffman tables. Returns false on a malformed code.
-func inflateBlock(r: mod BitReader, out: mod List(Int), lenH: view Huff, distH: view Huff,
+func block(r: mod BitReader, out: mod List(Int), lenH: view Huff, distH: view Huff,
                   lBase: view List(Int), lExtra: view List(Int),
                   dBase: view List(Int), dExtra: view List(Int)) ret Bool {
     loop true {
@@ -227,7 +227,7 @@ func inflateRaw(data: own List(Int), len: view Int) ret List(Int) {
             if btype is 1 {
                 let litH: Huff = buildHuff(lengths: fixedLitLengths(), n: 288)
                 let distH: Huff = buildHuff(lengths: fixedDist, n: 30)
-                let ok: Bool = inflateBlock(r: r, out: out, lenH: litH, distH: distH,
+                let ok: Bool = block(r: r, out: out, lenH: litH, distH: distH,
                                             lBase: lBase, lExtra: lExtra, dBase: dBase, dExtra: dExtra)
                 if ok is false { ret out }
             } else {
@@ -243,7 +243,7 @@ func inflateRaw(data: own List(Int), len: view Int) ret List(Int) {
                     loop j < hlit + hdist { distLengths.add(value: bufAt(list: allLengths, index: j)) j = j + 1 }
                     let litH: Huff = buildHuff(lengths: litLengths, n: hlit)
                     let distH: Huff = buildHuff(lengths: distLengths, n: hdist)
-                    let ok: Bool = inflateBlock(r: r, out: out, lenH: litH, distH: distH,
+                    let ok: Bool = block(r: r, out: out, lenH: litH, distH: distH,
                                                 lBase: lBase, lExtra: lExtra, dBase: dBase, dExtra: dExtra)
                     if ok is false { ret out }
                 } else {

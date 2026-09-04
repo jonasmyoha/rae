@@ -297,7 +297,7 @@ func mountSceneInstanceIntoPage(
   let nodeIdsMap: mod StringMap(Int) => world.nodeIds
   var i: Int = 0
   loop i < nodeCount {
-    let node: view SceneNode => sceneNodeAt(this: scene, idx: i)
+    let node: view SceneNode => nodeAt(this: scene, idx: i)
     # Explicit struct construction (not `let entity: EntityId =
     # mountEntity`) — the Live VM treats the latter as a view-ref
     # bind and then refuses the reassignment on the next branch.
@@ -324,15 +324,15 @@ func mountSceneInstanceIntoPage(
   let docView: view JsonDoc => scene.doc
   var j: Int = 0
   loop j < nodeCount {
-    let node: view SceneNode => sceneNodeAt(this: scene, idx: j)
+    let node: view SceneNode => nodeAt(this: scene, idx: j)
     let entity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: j)
     let isRoot: Bool = j is rootIdx
 
     let bag: JsonValue = json.jsonValueAt(doc: docView, idx: node.componentsValueIdx)
-    let keyCount: Int = json.jsonObjectLen(this: bag)
+    let keyCount: Int = json.objectLen(this: bag)
     var k: Int = 0
     loop k < keyCount {
-      let key: String = json.jsonObjectKeyAt(doc: docView, this: bag, idx: k)
+      let key: String = json.objectKeyAt(doc: docView, this: bag, idx: k)
       let childrenKey: String = "Children"
       var skip: Bool = false
       if key is childrenKey {
@@ -344,7 +344,7 @@ func mountSceneInstanceIntoPage(
         }
       }
       if skip is false {
-        let valueAtKey: JsonValue = json.jsonObjectValueAt(doc: docView, this: bag, idx: k)
+        let valueAtKey: JsonValue = json.objectValueAt(doc: docView, this: bag, idx: k)
         applyComponentByName(
           world: world
           entity: entity
@@ -361,7 +361,7 @@ func mountSceneInstanceIntoPage(
   # Pass 3: build hierarchy (Children + Parent).
   var p: Int = 0
   loop p < nodeCount {
-    let node: view SceneNode => sceneNodeAt(this: scene, idx: p)
+    let node: view SceneNode => nodeAt(this: scene, idx: p)
     let parentEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
     let kn: Int = node.childrenIds.length
     var q: Int = 0

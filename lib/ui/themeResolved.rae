@@ -243,7 +243,7 @@ func parseTheme(scene: view Scene) pub ret ResolvedTheme {
   if doc.ok is false {
     ret out
   }
-  let root: JsonValue = json.jsonRoot(doc: doc)
+  let root: JsonValue = json.root(doc: doc)
 
   parseThemePalette(out: out, doc: doc, root: root)
   parseThemeFloatMap(out: out, doc: doc, root: root, section: "space", target: 0)
@@ -264,7 +264,7 @@ func parseTheme(scene: view Scene) pub ret ResolvedTheme {
 # deserialise for bg/radius/padding, at paint for text) — never baked.
 # Missing fields default to "" (that facet is left to the node).
 func parseThemeContainer(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonValue) {
-  let idx: Int = json.jsonField(doc: doc, this: root, key: "container")
+  let idx: Int = json.field(doc: doc, this: root, key: "container")
   if idx < 0 {
     ret
   }
@@ -272,11 +272,11 @@ func parseThemeContainer(out: mod ResolvedTheme, doc: view JsonDoc, root: view J
   if sec.kind is not JsonKind.object {
     ret
   }
-  let n: Int = json.jsonObjectLen(this: sec)
+  let n: Int = json.objectLen(this: sec)
   var i: Int = 0
   loop i < n {
-    let name: String = json.jsonObjectKeyAt(doc: doc, this: sec, idx: i)
-    let val: JsonValue = json.jsonObjectValueAt(doc: doc, this: sec, idx: i)
+    let name: String = json.objectKeyAt(doc: doc, this: sec, idx: i)
+    let val: JsonValue = json.objectValueAt(doc: doc, this: sec, idx: i)
     let bg: String = themeReadStringField(doc: doc, obj: val, key: "background", fallback: "")
     let rad: String = themeReadStringField(doc: doc, obj: val, key: "radius", fallback: "")
     let pad: String = themeReadStringField(doc: doc, obj: val, key: "padding", fallback: "")
@@ -291,7 +291,7 @@ func parseThemeContainer(out: mod ResolvedTheme, doc: view JsonDoc, root: view J
 }
 
 func parseThemePalette(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonValue) {
-  let idx: Int = json.jsonField(doc: doc, this: root, key: "palette")
+  let idx: Int = json.field(doc: doc, this: root, key: "palette")
   if idx < 0 {
     ret
   }
@@ -299,11 +299,11 @@ func parseThemePalette(out: mod ResolvedTheme, doc: view JsonDoc, root: view Jso
   if sec.kind is not JsonKind.object {
     ret
   }
-  let n: Int = json.jsonObjectLen(this: sec)
+  let n: Int = json.objectLen(this: sec)
   var i: Int = 0
   loop i < n {
-    let slot: String = json.jsonObjectKeyAt(doc: doc, this: sec, idx: i)
-    let val: JsonValue = json.jsonObjectValueAt(doc: doc, this: sec, idx: i)
+    let slot: String = json.objectKeyAt(doc: doc, this: sec, idx: i)
+    let val: JsonValue = json.objectValueAt(doc: doc, this: sec, idx: i)
     let r: Int = themeReadIntField(doc: doc, obj: val, key: "r", fallback: 0)
     let g: Int = themeReadIntField(doc: doc, obj: val, key: "g", fallback: 0)
     let b: Int = themeReadIntField(doc: doc, obj: val, key: "b", fallback: 0)
@@ -319,7 +319,7 @@ func parseThemePalette(out: mod ResolvedTheme, doc: view JsonDoc, root: view Jso
 
 # `target`: 0 = space, 1 = radius. Both are name -> Float du maps.
 func parseThemeFloatMap(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonValue, section: view String, target: view Int) {
-  let idx: Int = json.jsonField(doc: doc, this: root, key: section)
+  let idx: Int = json.field(doc: doc, this: root, key: section)
   if idx < 0 {
     ret
   }
@@ -327,11 +327,11 @@ func parseThemeFloatMap(out: mod ResolvedTheme, doc: view JsonDoc, root: view Js
   if sec.kind is not JsonKind.object {
     ret
   }
-  let n: Int = json.jsonObjectLen(this: sec)
+  let n: Int = json.objectLen(this: sec)
   var i: Int = 0
   loop i < n {
-    let name: String = json.jsonObjectKeyAt(doc: doc, this: sec, idx: i)
-    let val: JsonValue = json.jsonObjectValueAt(doc: doc, this: sec, idx: i)
+    let name: String = json.objectKeyAt(doc: doc, this: sec, idx: i)
+    let val: JsonValue = json.objectValueAt(doc: doc, this: sec, idx: i)
     let v: Float = json.jsonFloat(this: val, fallback: 0.0)
     if target is 0 {
       out.spaceNames.add(value: name)
@@ -345,7 +345,7 @@ func parseThemeFloatMap(out: mod ResolvedTheme, doc: view JsonDoc, root: view Js
 }
 
 func parseThemePadding(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonValue) {
-  let idx: Int = json.jsonField(doc: doc, this: root, key: "padding")
+  let idx: Int = json.field(doc: doc, this: root, key: "padding")
   if idx < 0 {
     ret
   }
@@ -353,11 +353,11 @@ func parseThemePadding(out: mod ResolvedTheme, doc: view JsonDoc, root: view Jso
   if sec.kind is not JsonKind.object {
     ret
   }
-  let n: Int = json.jsonObjectLen(this: sec)
+  let n: Int = json.objectLen(this: sec)
   var i: Int = 0
   loop i < n {
-    let name: String = json.jsonObjectKeyAt(doc: doc, this: sec, idx: i)
-    let val: JsonValue = json.jsonObjectValueAt(doc: doc, this: sec, idx: i)
+    let name: String = json.objectKeyAt(doc: doc, this: sec, idx: i)
+    let val: JsonValue = json.objectValueAt(doc: doc, this: sec, idx: i)
     out.padNames.add(value: name)
     out.padL.add(value: themeReadFloatField(doc: doc, obj: val, key: "l", fallback: 0.0))
     out.padT.add(value: themeReadFloatField(doc: doc, obj: val, key: "t", fallback: 0.0))
@@ -368,7 +368,7 @@ func parseThemePadding(out: mod ResolvedTheme, doc: view JsonDoc, root: view Jso
 }
 
 func parseThemeShadows(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonValue) {
-  let idx: Int = json.jsonField(doc: doc, this: root, key: "shadow")
+  let idx: Int = json.field(doc: doc, this: root, key: "shadow")
   if idx < 0 {
     ret
   }
@@ -376,10 +376,10 @@ func parseThemeShadows(out: mod ResolvedTheme, doc: view JsonDoc, root: view Jso
   if sec.kind is not JsonKind.object {
     ret
   }
-  let n: Int = json.jsonObjectLen(this: sec)
+  let n: Int = json.objectLen(this: sec)
   var i: Int = 0
   loop i < n {
-    let name: String = json.jsonObjectKeyAt(doc: doc, this: sec, idx: i)
+    let name: String = json.objectKeyAt(doc: doc, this: sec, idx: i)
     # Resolve the extends chain, root-first, for this shadow token.
     let chain: List(Int) = themeResolveChain(doc: doc, section: sec, name: name, kind: "shadow")
     var r: Int = 0
@@ -393,7 +393,7 @@ func parseThemeShadows(out: mod ResolvedTheme, doc: view JsonDoc, root: view Jso
     loop c < chain.length {
       if let bagIdx: Int = chain.copyAt(index: c) {
         let bag: JsonValue = json.jsonValueAt(doc: doc, idx: bagIdx)
-        let colIdx: Int = json.jsonField(doc: doc, this: bag, key: "color")
+        let colIdx: Int = json.field(doc: doc, this: bag, key: "color")
         if colIdx >= 0 {
           let col: JsonValue = json.jsonValueAt(doc: doc, idx: colIdx)
           if col.kind is JsonKind.object {
@@ -422,7 +422,7 @@ func parseThemeShadows(out: mod ResolvedTheme, doc: view JsonDoc, root: view Jso
 }
 
 func parseThemeText(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonValue) {
-  let idx: Int = json.jsonField(doc: doc, this: root, key: "text")
+  let idx: Int = json.field(doc: doc, this: root, key: "text")
   if idx < 0 {
     ret
   }
@@ -430,10 +430,10 @@ func parseThemeText(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonVa
   if sec.kind is not JsonKind.object {
     ret
   }
-  let n: Int = json.jsonObjectLen(this: sec)
+  let n: Int = json.objectLen(this: sec)
   var i: Int = 0
   loop i < n {
-    let name: String = json.jsonObjectKeyAt(doc: doc, this: sec, idx: i)
+    let name: String = json.objectKeyAt(doc: doc, this: sec, idx: i)
     let chain: List(Int) = themeResolveChain(doc: doc, section: sec, name: name, kind: "text")
     # Accumulator defaults (§3 "every field has a default").
     var font: String = "body"
@@ -453,7 +453,7 @@ func parseThemeText(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonVa
       if let bagIdx: Int = chain.copyAt(index: c) {
       let bag: JsonValue = json.jsonValueAt(doc: doc, idx: bagIdx)
       # Strings
-      let fontIdx: Int = json.jsonField(doc: doc, this: bag, key: "font")
+      let fontIdx: Int = json.field(doc: doc, this: bag, key: "font")
       if fontIdx >= 0 {
         let fv: JsonValue = json.jsonValueAt(doc: doc, idx: fontIdx)
         let empty: String = ""
@@ -464,7 +464,7 @@ func parseThemeText(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonVa
       lineHeight = themeReadFloatField(doc: doc, obj: bag, key: "lineHeight", fallback: lineHeight)
       tracking = themeReadFloatField(doc: doc, obj: bag, key: "tracking", fallback: tracking)
       # color: string slot OR inline object.
-      let colIdx: Int = json.jsonField(doc: doc, this: bag, key: "color")
+      let colIdx: Int = json.field(doc: doc, this: bag, key: "color")
       if colIdx >= 0 {
         let col: JsonValue = json.jsonValueAt(doc: doc, idx: colIdx)
         if col.kind is JsonKind.string {
@@ -481,14 +481,14 @@ func parseThemeText(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonVa
         }
       }
       # shadow token name (string).
-      let shIdx: Int = json.jsonField(doc: doc, this: bag, key: "shadow")
+      let shIdx: Int = json.field(doc: doc, this: bag, key: "shadow")
       if shIdx >= 0 {
         let sh: JsonValue = json.jsonValueAt(doc: doc, idx: shIdx)
         let empty3: String = ""
         shadowName = json.jsonString(this: sh, fallback: empty3)
       }
       # align keyword.
-      let alIdx: Int = json.jsonField(doc: doc, this: bag, key: "align")
+      let alIdx: Int = json.field(doc: doc, this: bag, key: "align")
       if alIdx >= 0 {
         let al: JsonValue = json.jsonValueAt(doc: doc, idx: alIdx)
         let empty4: String = ""
@@ -528,7 +528,7 @@ func themeResolveChain(doc: view JsonDoc, section: view JsonValue, name: view St
   var steps: Int = 0
   var walking: Bool = true
   loop walking {
-    let idx: Int = json.jsonField(doc: doc, this: section, key: curName)
+    let idx: Int = json.field(doc: doc, this: section, key: curName)
     if idx < 0 {
       # Only an error if we got here by following an extends link;
       # the top-level name should always exist.
@@ -543,7 +543,7 @@ func themeResolveChain(doc: view JsonDoc, section: view JsonValue, name: view St
       let seenCopy: String = "{curName}"
       seen.add(value: seenCopy)
       let bag: JsonValue = json.jsonValueAt(doc: doc, idx: idx)
-      let extIdx: Int = json.jsonField(doc: doc, this: bag, key: "extends")
+      let extIdx: Int = json.field(doc: doc, this: bag, key: "extends")
       var parentName: String = ""
       if extIdx >= 0 {
         let extVal: JsonValue = json.jsonValueAt(doc: doc, idx: extIdx)
@@ -607,7 +607,7 @@ func themeParseAlign(s: view String, fallback: view Int) ret Int {
 
 # Read an Int field from a JSON object, or fallback if absent.
 func themeReadIntField(doc: view JsonDoc, obj: view JsonValue, key: view String, fallback: view Int) ret Int {
-  let idx: Int = json.jsonField(doc: doc, this: obj, key: key)
+  let idx: Int = json.field(doc: doc, this: obj, key: key)
   if idx < 0 {
     ret fallback
   }
@@ -616,7 +616,7 @@ func themeReadIntField(doc: view JsonDoc, obj: view JsonValue, key: view String,
 }
 
 func themeReadFloatField(doc: view JsonDoc, obj: view JsonValue, key: view String, fallback: view Float) ret Float {
-  let idx: Int = json.jsonField(doc: doc, this: obj, key: key)
+  let idx: Int = json.field(doc: doc, this: obj, key: key)
   if idx < 0 {
     ret fallback
   }
@@ -625,7 +625,7 @@ func themeReadFloatField(doc: view JsonDoc, obj: view JsonValue, key: view Strin
 }
 
 func themeReadStringField(doc: view JsonDoc, obj: view JsonValue, key: view String, fallback: view String) ret String {
-  let idx: Int = json.jsonField(doc: doc, this: obj, key: key)
+  let idx: Int = json.field(doc: doc, this: obj, key: key)
   if idx < 0 {
     ret "{fallback}"
   }

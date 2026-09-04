@@ -4,8 +4,8 @@
 #
 # EVERY SKY IMPLEMENTATION ANSWERS EXACTLY TWO QUESTIONS.
 #
-#   skyRadiance(dir)    what the camera sees looking that way
-#   skyIrradiance(n)    what a surface facing that way receives
+#   radiance(dir)    what the camera sees looking that way
+#   irradiance(n)    what a surface facing that way receives
 #
 # The first is the background and, later, the reflection source. The
 # second is ambient light. Fixing the interface at two functions is what
@@ -113,7 +113,7 @@ type Sky {
 # The kind, as the number the shader switches on. One place that mapping
 # exists, so adding a kind cannot leave the GPU and CPU disagreeing about
 # which is which.
-func skyKindCode(sky: view Sky) pub ret Float {
+func kindCode(sky: view Sky) pub ret Float {
   if sky.kind is SkyKind.hdri { ret 1.0 }
   if sky.kind is SkyKind.procedural { ret 2.0 }
   if sky.kind is SkyKind.stylised { ret 3.0 }
@@ -177,7 +177,7 @@ func createSkyHosek(data: view HosekDataset, sunDir: view Vec3, sunColor: view V
     yawDeg: 0.0
     sunDir: sunDir
     sunColor: sunColor
-    # The hemisphere anchors stay populated: skyIrradiance still uses them until
+    # The hemisphere anchors stay populated: irradiance still uses them until
     # SH9 irradiance lands (#401), so a Hosek sky is currently lit by the same
     # authored ambient as any other while its BACKGROUND is the fitted model.
     # Leaving them zero would light the scene from nothing.
@@ -204,7 +204,7 @@ func createSkyHosek(data: view HosekDataset, sunDir: view Vec3, sunColor: view V
 }
 
 # Pull a colour toward its own luminance. sat 1 leaves it alone, 0 makes it grey.
-func skyDesaturate(c: view Vec3, sat: view Float) pub ret Vec3 {
+func desaturate(c: view Vec3, sat: view Float) pub ret Vec3 {
   let l: Float = c.x * 0.2126 + c.y * 0.7152 + c.z * 0.0722
   ret vec3.create(x: l + (c.x - l) * sat,
                   y: l + (c.y - l) * sat,
@@ -288,7 +288,7 @@ func hemisphereIrradiance(ambSky: view Vec3, ambGround: view Vec3,
 #
 # EXPOSURE IS APPLIED HERE, not by the caller, so a sky cannot be shown
 # at one brightness and light the scene at another.
-func skyIrradiance(sky: view Sky, n: view Vec3) pub ret Vec3 {
+func irradiance(sky: view Sky, n: view Vec3) pub ret Vec3 {
   if sky.kind is SkyKind.procedural {
     # A STOPGAP, and marked as one. Ambient here is the model sampled at
     # the zenith and at the horizon away from the sun, then blended as a
@@ -331,7 +331,7 @@ func skyIrradiance(sky: view Sky, n: view Vec3) pub ret Vec3 {
 #
 # For `none` this is the clear colour — which is what the lighting pass
 # already returns at far depth, so the background is unchanged too.
-func skyRadiance(sky: view Sky, dir: view Vec3) pub ret Vec3 {
+func radiance(sky: view Sky, dir: view Vec3) pub ret Vec3 {
   if sky.kind is SkyKind.none {
     if sky.exposure is 1.0 {
       ret sky.clearColor
@@ -358,7 +358,7 @@ func skyRadiance(sky: view Sky, dir: view Vec3) pub ret Vec3 {
 # Is this sky merely reproducing the authored constants? Callers use it
 # to keep the old uniform path until a real sky is bound, so that
 # binding one is an opt-in rather than a silent change to every scene.
-func skyIsFallback(sky: view Sky) pub ret Bool {
+func isFallback(sky: view Sky) pub ret Bool {
   ret sky.kind is SkyKind.none
 }
 

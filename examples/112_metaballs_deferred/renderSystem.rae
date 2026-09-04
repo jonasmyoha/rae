@@ -3,7 +3,7 @@
 #
 # - Mesh pass queries the meshRenderers table and reads each entity's
 #   Transform3d / PrevTransform / Material3d.
-# - SDF pass queries each per-cluster tag (#734) with queryTagged over the sdfs
+# - SDF pass queries each per-cluster tag (#734) with tagged over the sdfs
 #   table, packs that cluster's spheres, and issues one metaball draw.
 #
 # The low-level draw primitives (gbuffer.drawInstance / gbuffer.drawMetaballs for
@@ -58,7 +58,7 @@ func renderMeshShadow(world: view World3d) {
 # scale.x) and per-ball baseColor, take metallic/roughness/emission/smoothing
 # from the cluster HEAD (its first sphere in query = list order), and raymarch.
 func renderSdfClusterGbuffer(T: type, world: view World3d, clusterTable: view ComponentTable(T), camera: view Camera3d) {
-  let matches: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: clusterTable)
+  let matches: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: clusterTable)
   if matches.length is 0 {
     ret
   }
@@ -104,7 +104,7 @@ func renderSdfClusterGbuffer(T: type, world: view World3d, clusterTable: view Co
 }
 
 func renderSdfClusterShadow(T: type, world: view World3d, clusterTable: view ComponentTable(T)) {
-  let matches: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: clusterTable)
+  let matches: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: clusterTable)
   if matches.length is 0 {
     ret
   }

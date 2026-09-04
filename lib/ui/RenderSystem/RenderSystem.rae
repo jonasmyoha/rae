@@ -109,7 +109,7 @@ func paintShapeG(world: view UiWorld, e: view EntityId, wt: view WorldTransform2
   # dark/light toggle re-colours without a scene re-parse; empty slot
   # keeps the literal fill.
   var fillBase: RgbaColor = sh.fill
-  if sh.fillSlot.length() > 0 { fillBase = themeColorByName(theme: world.theme.active, name: sh.fillSlot) }
+  if sh.fillSlot.length() > 0 { fillBase = colorByName(theme: world.theme.active, name: sh.fillSlot) }
   let fill: RgbaColor = g2dChain(c: fillBase, chain255: chain255)
   let hoverMul: Float = g2dHoverMul(world: world, e: e)
   let drawW: Float = cr.size.x * hoverMul
@@ -128,7 +128,7 @@ func paintShapeG(world: view UiWorld, e: view EntityId, wt: view WorldTransform2
   if radius <= 0.0 { radius = g2dRadius(world: world, e: e, fallback: 0.0) }
   if sh.strokeWidth > 0.0 {
     var strokeBase: RgbaColor = sh.stroke
-    if sh.strokeSlot.length() > 0 { strokeBase = themeColorByName(theme: world.theme.active, name: sh.strokeSlot) }
+    if sh.strokeSlot.length() > 0 { strokeBase = colorByName(theme: world.theme.active, name: sh.strokeSlot) }
     let stroke: RgbaColor = g2dChain(c: strokeBase, chain255: chain255)
     gpu2d.drawBox(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, fill: g2dColor(c: fill), borderWidth: sh.strokeWidth, border: g2dColor(c: stroke))
     ret
@@ -212,7 +212,7 @@ func visualBoundsAt(world: view UiWorld, e: view EntityId, text: view String, is
 func paintSpriteG(world: view UiWorld, e: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int, res: view Gpu2dUi) {
   let sp: view Sprite => componentView(this: world.sprites, entity: e)
   var tintBase: RgbaColor = sp.tint
-  if sp.tintSlot.length() > 0 { tintBase = themeColorByName(theme: world.theme.active, name: sp.tintSlot) }
+  if sp.tintSlot.length() > 0 { tintBase = colorByName(theme: world.theme.active, name: sp.tintSlot) }
   let tint: RgbaColor = g2dChain(c: tintBase, chain255: chain255)
   let hoverMul: Float = g2dHoverMul(world: world, e: e)
   let drawW: Float = cr.size.x * hoverMul
@@ -250,7 +250,7 @@ func paintSpriteG(world: view UiWorld, e: view EntityId, wt: view WorldTransform
     gpu2d.drawImageKeyScaled(key: sp.textureKey, x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, tint: g2dColor(c: tint), scaleMode: g2dScaleMode(m: sp.scaleMode))
     ret
   }
-  let fallback: RgbaColor = g2dChain(c: themeColorByName(theme: world.theme.active, name: "textMuted"), chain255: chain255)
+  let fallback: RgbaColor = g2dChain(c: colorByName(theme: world.theme.active, name: "textMuted"), chain255: chain255)
   let fallbackRadius: Float = g2dRadius(world: world, e: e, fallback: 8.0)
   gpu2d.drawRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: fallbackRadius * hoverMul, color: g2dColor(c: fallback))
 }
@@ -474,7 +474,7 @@ func paintSubtreeG(world: view UiWorld, e: view EntityId, res: view Gpu2dUi) {
   }
 }
 
-func renderSystemGpu2dLayerRange(world: view UiWorld, res: view Gpu2dUi, minOrder: view Int, maxOrder: view Int) pub {
+func gpu2dLayerRange(world: view UiWorld, res: view Gpu2dUi, minOrder: view Int, maxOrder: view Int) pub {
   let roots: List(EntityId) = collectPaintableRoots(world: world)
   let m: Int = roots.length
   var p: Int = 0
@@ -496,5 +496,5 @@ func renderSystemGpu2dLayerRange(world: view UiWorld, res: view Gpu2dUi, minOrde
 func renderSystemGpu2d(world: view UiWorld, res: view Gpu2dUi) pub {
   let allRangeLow: Int = 0 - 1000000
   let allRangeHi: Int = 1000000
-  renderSystemGpu2dLayerRange(world: world, res: res, minOrder: allRangeLow, maxOrder: allRangeHi)
+  gpu2dLayerRange(world: world, res: res, minOrder: allRangeLow, maxOrder: allRangeHi)
 }

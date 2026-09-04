@@ -85,7 +85,7 @@ func updateNodeText(world: mod UiWorld, pageId: view String, nodeId: view String
   } else {
     ret
   }
-  let entity: EntityId = entityId(v: raw)
+  let entity: EntityId = id(v: raw)
   if componentHas(this: world.texts, entity: entity) is false {
     ret
   }
@@ -160,11 +160,11 @@ func saveHistoryArtworkMetadata(track: view SpotifyTrack, imageHash: view String
   let nl: String = "\n"
   let openBrace: String = "\u{007B}"
   let closeBrace: String = "\u{007D}"
-  let tn: String = json.jsonEscape(s: track.trackName)
-  let an: String = json.jsonEscape(s: track.artistName)
-  let alb: String = json.jsonEscape(s: track.albumName)
-  let url: String = json.jsonEscape(s: track.artworkUrl)
-  let p: String = json.jsonEscape(s: path)
+  let tn: String = json.escape(s: track.trackName)
+  let an: String = json.escape(s: track.artistName)
+  let alb: String = json.escape(s: track.albumName)
+  let url: String = json.escape(s: track.artworkUrl)
+  let p: String = json.escape(s: path)
   var content: String = ""
   content = content.concat(other: openBrace).concat(other: nl)
   content = content.concat(other: "  ").concat(other: q).concat(other: "imageHash").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: imageHash).concat(other: q).concat(other: comma).concat(other: nl)
