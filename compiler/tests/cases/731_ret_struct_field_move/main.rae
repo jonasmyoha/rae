@@ -1,0 +1,36 @@
+# #798: a named heap-owning local placed into a struct-literal FIELD at its last
+# use (return position) must MOVE, not deep-copy. The old behaviour synthesised a
+# deep-copy helper that shallow-copied the un-deep-copyable ComponentTable inside
+# `World`, then dropped the local — freeing the same buffers twice (SIGABRT). With
+# the move, ownership transfers into the returned struct and the heap is freed
+# exactly once at program exit.
+import core
+import ecs/ComponentTable
+import ecs/entity
+open ecs/ComponentTable
+open ecs/entity
+
+type Comp { x: Int }
+type World { table: ComponentTable(Comp) }
+type Holder { world: World }
+
+func makeWorld() ret World {
+  var t: ComponentTable(Comp) = createComponentTable(Comp)
+  let e: EntityId = { index: 1, generation: 0 }
+  componentSet(this: t, entity: e, data: Comp { x: 42 })
+  ret World { table: own t }
+}
+
+# THE #798 PATTERN: `world` is a named owning local; `Holder { world: world }` is
+# the return value, so `world` is at its last use and must move into the field.
+func makeHolder() ret Holder {
+  var world: World = makeWorld()
+  ret Holder { world: world }
+}
+
+func main() {
+  let h: Holder = makeHolder()
+  let e: EntityId = { index: 1, generation: 0 }
+  let c: Comp = componentGet(this: h.world.table, entity: e)
+  log("count={componentCount(this: h.world.table)} x={c.x}")
+}
