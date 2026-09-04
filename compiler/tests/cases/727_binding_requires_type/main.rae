@@ -1,12 +1,14 @@
 import core
 
-# Rae has NO type inference — every value binding states its type on the LHS.
-# `let x = <expr>` (type inferred from the RHS) is a compile error.
+# Rae has NO type inference — every value binding (let/var/const) states its
+# type on the LHS. Inferring it from the RHS is a compile error.
 type Rect { position: Int, size: Int }
 func makeR() ret Rect { ret Rect { position: 1, size: 2 } }
 
 func main() {
   let x = 5
   let q = makeR()
-  log("unreached {x} {q.size}")
+  const c = 5
+  var v = 7
+  log("unreached {x} {q.size} {c} {v}")
 }
