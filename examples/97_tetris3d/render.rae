@@ -1,14 +1,15 @@
 # Persistent ECS extraction for the deferred renderer. Every possible board,
-# active-piece, and particle slot owns one Scene3d entity; inactive slots move
+# active-piece, and particle slot owns one World3d entity; inactive slots move
 # outside the view instead of reallocating scene resources each frame.
 import vec3
 open gpu3d
 open math3d
 open mesh3d
 open scene3d
+open ecs/entity
 
 type TetrisRenderState {
-  scene: Scene3d
+  world: World3d
   gridBase: Int
   currentBase: Int
   particleBase: Int
@@ -19,6 +20,18 @@ func uploadTetrisMesh(meshData: view MeshData) ret MeshHandle {
     verts: meshData.verts
     vertCount: meshData.vertCount
     indices: meshData.indices)
+}
+
+# The Material3d for a tetromino kind color (colorIdx 0..6 -> kind ids 1..7).
+# World3d stores the material as a per-entity COMPONENT, so recolouring a block
+# is a component write rather than the old shared material-index swap.
+func kindMaterial(colorIdx: view Int) ret Material3d {
+  ret Material3d {
+    baseColor: kindColor(id: colorIdx + 1)
+    metallic: 0.08, roughness: 0.3
+    emission: vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    toon: false
+  }
 }
 
 func hiddenTransform() ret Transform3d {
@@ -40,71 +53,79 @@ func blockTransform(gridX: view Int, gridY: view Int, size: view Float) ret Tran
   }
 }
 
-func setEntityMaterial(scene: mod Scene3d, entity: view Int, material: view Int) {
-  let renderer: MeshRenderer = sceneMeshRendererAt(values: scene.meshRenderers, index: entity)
-  scene.meshRenderers.set(index: entity, value: MeshRenderer {
-    entity: renderer.entity
-    mesh: renderer.mesh
-    material: material
-    visible: renderer.visible
-  })
+# Recolour a block by writing its per-entity Material3d component. `entity` is the
+# block's dense slot index (== its position in the transforms table), mapped to an
+# EntityId via world3dEntityAt.
+func setEntityMaterial(world: mod World3d, entity: view Int, colorIdx: view Int) {
+  world3dSetMaterial(
+    world: world, entity: world3dEntityAt(world: world, i: entity)
+    material: kindMaterial(colorIdx: colorIdx))
+}
+
+# Build the persistent World3d: every grid, active-piece and particle slot is a
+# pre-allocated entity, plus the static backing panel. Returned by value so the
+# World3d MOVES into its owner — the world is built here as an rvalue and handed
+# to createTetrisRenderState's struct literal, the same move-safe shape the
+# World3dAsset loader uses (a named local dropped into a struct field would be
+# copied and then double-freed at teardown).
+func buildTetrisWorld(cube: view MeshHandle) ret World3d {
+  var world: World3d = createWorld3d()
+  let hidden: Transform3d = hiddenTransform()
+  var slot: Int = 0
+  loop slot < gridWidth * gridHeight {
+    let entity: EntityId = world3dAddMeshInstance(
+      world: world, mesh: cube, material: kindMaterial(colorIdx: 0)
+      position: hidden.position, rotation: hidden.rotation, scale: hidden.scale)
+    slot = slot + 1
+  }
+  slot = 0
+  loop slot < 4 {
+    let entity: EntityId = world3dAddMeshInstance(
+      world: world, mesh: cube, material: kindMaterial(colorIdx: 0)
+      position: hidden.position, rotation: hidden.rotation, scale: hidden.scale)
+    slot = slot + 1
+  }
+  slot = 0
+  loop slot < maxParticles {
+    let entity: EntityId = world3dAddMeshInstance(
+      world: world, mesh: cube, material: kindMaterial(colorIdx: slot % 7)
+      position: hidden.position, rotation: hidden.rotation, scale: hidden.scale)
+    slot = slot + 1
+  }
+  let backingMaterial: Material3d = {
+    baseColor: vec3.create(x: 0.035, y: 0.05, z: 0.08)
+    metallic: 0.0, roughness: 0.9
+    emission: vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    toon: false
+  }
+  let backingEntity: EntityId = world3dAddMeshInstance(
+    world: world, mesh: cube, material: backingMaterial
+    position: vec3.create(x: 0.0, y: 0.65, z: 10.0)
+    rotation: vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    scale: vec3.create(x: 10.8, y: 0.2, z: 20.8))
+  ret world
 }
 
 func createTetrisRenderState() ret TetrisRenderState {
   let cubeData: MeshData = makeBox(size: 1.0)
   let cube: MeshHandle = uploadTetrisMesh(meshData: cubeData)
-  var scene: Scene3d = createScene3d()
-  let noEmission: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
-  var colorId: Int = 1
-  loop colorId <= 7 {
-    let color: Vec3 = kindColor(id: colorId)
-    let material: Int = addMaterial(
-      scene: scene, baseColor: color
-      metallic: 0.08, roughness: 0.3, emission: noEmission)
-    colorId = colorId + 1
-  }
-  let backingMaterial: Int = addMaterial(
-    scene: scene
-    baseColor: vec3.create(x: 0.035, y: 0.05, z: 0.08)
-    metallic: 0.0, roughness: 0.9, emission: noEmission)
-
-  let hidden: Transform3d = hiddenTransform()
-  let gridBase: Int = 0
-  var slot: Int = 0
-  loop slot < gridWidth * gridHeight {
-    let entity: Int = addMeshInstance(
-      scene: scene, mesh: cube, material: 0
-      position: hidden.position, rotation: hidden.rotation, scale: hidden.scale)
-    slot = slot + 1
-  }
-  let currentBase: Int = scene.transforms.length
-  slot = 0
-  loop slot < 4 {
-    let entity: Int = addMeshInstance(
-      scene: scene, mesh: cube, material: 0
-      position: hidden.position, rotation: hidden.rotation, scale: hidden.scale)
-    slot = slot + 1
-  }
-  let particleBase: Int = scene.transforms.length
-  slot = 0
-  loop slot < maxParticles {
-    let entity: Int = addMeshInstance(
-      scene: scene, mesh: cube, material: slot % 7
-      position: hidden.position, rotation: hidden.rotation, scale: hidden.scale)
-    slot = slot + 1
-  }
-  let backingEntity: Int = addMeshInstance(
-    scene: scene, mesh: cube, material: backingMaterial
-    position: vec3.create(x: 0.0, y: 0.65, z: 10.0)
-    rotation: vec3.create(x: 0.0, y: 0.0, z: 0.0)
-    scale: vec3.create(x: 10.8, y: 0.2, z: 20.8))
-
+  # The slot bases are fixed by the build order above: the grid fills [0, W*H),
+  # the active piece [W*H, W*H+4), the particles follow.
   ret TetrisRenderState {
-    scene: scene
-    gridBase: gridBase
-    currentBase: currentBase
-    particleBase: particleBase
+    world: buildTetrisWorld(cube: cube)
+    gridBase: 0
+    currentBase: gridWidth * gridHeight
+    particleBase: gridWidth * gridHeight + 4
   }
+}
+
+# Write an entity's transform without disturbing its previous-frame transform
+# (the per-frame animation write); `entity` is a dense slot index. Motion-vector
+# history advances once per frame via world3dPrevTransformSystem in renderFrame.
+func writeSlotTransform(renderState: mod TetrisRenderState, entity: view Int, transform: view Transform3d) {
+  world3dWriteTransform(
+    world: renderState.world, entity: world3dEntityAt(world: renderState.world, i: entity)
+    transform: transform)
 }
 
 func extractTetrisScene(renderState: mod TetrisRenderState, world: view World) {
@@ -117,12 +138,12 @@ func extractTetrisScene(renderState: mod TetrisRenderState, world: view World) {
       let entity: Int = renderState.gridBase + slot
       let colorId: Int = gridGet(w: world, x: gridX, y: gridY)
       if colorId > 0 {
-        setTransform(
-          scene: renderState.scene, entity: entity
+        writeSlotTransform(
+          renderState: renderState, entity: entity
           transform: blockTransform(gridX: gridX, gridY: gridY, size: 0.94))
-        setEntityMaterial(scene: renderState.scene, entity: entity, material: colorId - 1)
+        setEntityMaterial(world: renderState.world, entity: entity, colorIdx: colorId - 1)
       } else {
-        setTransform(scene: renderState.scene, entity: entity, transform: hidden)
+        writeSlotTransform(renderState: renderState, entity: entity, transform: hidden)
       }
       gridX = gridX + 1
     }
@@ -139,11 +160,11 @@ func extractTetrisScene(renderState: mod TetrisRenderState, world: view World) {
       loop pieceX < 4 {
         if getShapeCell(kind: piece.kind, rot: piece.rotation, px: pieceX, py: pieceY) is 1 {
           let entity: Int = renderState.currentBase + activeSlot
-          setTransform(
-            scene: renderState.scene, entity: entity
+          writeSlotTransform(
+            renderState: renderState, entity: entity
             transform: blockTransform(
               gridX: piece.x + pieceX, gridY: piece.y + pieceY, size: 0.96))
-          setEntityMaterial(scene: renderState.scene, entity: entity, material: colorId - 1)
+          setEntityMaterial(world: renderState.world, entity: entity, colorIdx: colorId - 1)
           activeSlot = activeSlot + 1
         }
         pieceX = pieceX + 1
@@ -152,8 +173,8 @@ func extractTetrisScene(renderState: mod TetrisRenderState, world: view World) {
     }
   }
   loop activeSlot < 4 {
-    setTransform(
-      scene: renderState.scene, entity: renderState.currentBase + activeSlot
+    writeSlotTransform(
+      renderState: renderState, entity: renderState.currentBase + activeSlot
       transform: hidden)
     activeSlot = activeSlot + 1
   }
@@ -164,8 +185,8 @@ func extractTetrisScene(renderState: mod TetrisRenderState, world: view World) {
       buf: world.particles.data, index: particleIndex)
     let entity: Int = renderState.particleBase + particleIndex
     if particle.active {
-      setTransform(
-        scene: renderState.scene, entity: entity
+      writeSlotTransform(
+        renderState: renderState, entity: entity
         transform: Transform3d {
           position: vec3.create(
             x: particle.px - 5.0, y: particle.pz, z: 20.0 + particle.py)
@@ -173,7 +194,7 @@ func extractTetrisScene(renderState: mod TetrisRenderState, world: view World) {
           scale: vec3.create(x: particle.size, y: particle.size, z: particle.size)
         })
     } else {
-      setTransform(scene: renderState.scene, entity: entity, transform: hidden)
+      writeSlotTransform(renderState: renderState, entity: entity, transform: hidden)
     }
     particleIndex = particleIndex + 1
   }
