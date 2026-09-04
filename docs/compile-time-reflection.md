@@ -1,6 +1,6 @@
 # Compile-time reflection: iterating a struct's fields
 
-**Status:** LANDED for values (#772: non-generic `fields(value)`, `any` wildcard, `fieldName()`) and through a generic world parameter (#773: `func f(W: type, world: mod W) { loop ... in fields(world) }`, expanded per instantiation, W inferred from the argument). First consumer landed (#760): lib/ecs `clearEntityComponents`, UiWorld `destroyEntity`, the 116 registry-gated `worldToJson`/`worldFromJson`, and the 114 despawn seams. `fields(Type)` construction is #774. Supersedes the rejected `clearEntityComponents`
+**Status:** LANDED for values (#772: non-generic `fields(value)`, `any` wildcard, `fieldName()`) and through a generic world parameter (#773: `func f(W: type, world: mod W) { loop ... in fields(world) }`, expanded per instantiation, W inferred from the argument). First consumer landed (#760): lib/ecs `clearEntityComponents`, UiWorld `destroyEntity`, the 116 registry-gated `worldToJson`/`worldFromJson`, and the 114 despawn seams. `fields(Type)` construction was assessed and **declined** (#774 — see "Construction via `fields(Type)` — decided NOT to build" below). Supersedes the rejected `clearEntityComponents`
 compiler builtin (queue #760) and the vague "derive/reflection" bullet in
 `docs/ecs-language-wishlist.md`. See that file for the rules this design obeys.
 
@@ -157,7 +157,8 @@ func worldToJson(W: type, world: view W, reg: view ComponentRegistry) ret String
   ret w.finish()
 }
 
-# Construct — iterate the TYPE's fields; no value exists yet.
+# Construct — iterate the TYPE's fields; no value exists yet. ILLUSTRATIVE ONLY:
+# this half was assessed and declined (#774) — see the decision section below.
 loop let slot: ComponentTable(any) in fields(UiWorld) {
   ...   # emit createComponentTable(T) for each slot
 }
@@ -225,12 +226,51 @@ single helper.
   unrolling instead of arbitrary execution; the type-query precision Odin has, via
   the binding type; no tags, no notes, no sigils.
 
+## Construction via `fields(Type)` — decided NOT to build (#774)
+
+The clear/serialize halves landed because forgetting a table there is a **silent**
+bug: `destroyEntity` leaves stale component data on a recycled index, and a missing
+table drops silently from the JSON. Reflection over `fields(value)` removed the
+hand-listing that caused those. Construction is the opposite case, so #774 is closed
+as not-needed:
+
+- **The failure mode it would prevent is already a compile error.** Rae builds a
+  struct from a literal with *every* field present; omit one and it does not compile.
+  `createUiWorld` / `createWorld3d` / `createGameWorld` cannot silently drop a table
+  the way a hand-listed clear/serialize loop can. Reflection buys no safety here —
+  only brevity.
+- **It is the cheapest boilerplate and written once per world.** One line per field,
+  in a single constructor per world type, touched only when the world gains a field
+  (which the compiler then forces you to initialise).
+- **It is the most expensive to implement, for the least gain.** Unlike
+  clear/serialize — which ITERATE an existing value and call one side-effecting op per
+  field — construction has no value to iterate and no incremental-assembly form in the
+  language: a struct is built all-at-once from a literal. A generic
+  `createWorld(W: type) ret W` would need (a) type-level `fields(Type)` over a type
+  with no value, (b) a NEW struct-assembly construct to accumulate per-field
+  initialisers into a literal (the unsolved "how the loop body assembles the struct"
+  question), and (c) per-field-kind dispatch, because the worlds are NOT uniform:
+  alongside `ComponentTable(T)` fields they carry an `EntityAllocator`, a `StringMap`
+  (`UiWorld.nodeIds`), a `HierarchyOrder` (`GameWorld`), and a plain `Int`
+  (`GameWorld.splashTick: 0`). The `match field { case ComponentTable(any) {…} case
+  EntityAllocator {…} case StringMap(any) {…} … }` needed to emit the right
+  initialiser per kind is plausibly as much code as the three explicit constructors,
+  plus a large amount of new compiler machinery.
+- **No real need surfaced** (the gate was "only if #760/#768/#771 show a real need").
+  The renderer→ECS migration (#771 / #793–797) added `World3d` and used the explicit
+  `createWorld3d` (6 tables) without friction, and #760's own note called construction
+  "the cheapest of the three whole-world ops."
+
+If a world ever grows dozens of same-kind fields *and* a genuine constructor bug
+appears, revisit — but the mechanism to reach for then is incremental struct
+assembly, a general language feature, not a reflection helper.
+
 ## Open questions
 
 - Does a field binding need `match` over its type, or is the binding-type filter
   enough in practice? (Start with the filter only; add `match` if a real need appears.)
-- Construction via `fields(Type)`: how the loop body assembles the struct literal
-  (per-slot initializer emission) needs its own small design.
+- ~~Construction via `fields(Type)`: how the loop body assembles the struct literal.~~
+  RESOLVED (#774): decided NOT to build — see the section above.
 - Nested structs: does `fields()` recurse, or only one level? (One level; recurse
   explicitly with a nested loop.)
 - Inferring the world type `W` from the value argument, so callers write
