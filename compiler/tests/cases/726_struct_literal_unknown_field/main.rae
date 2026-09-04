@@ -4,11 +4,15 @@ type Vec2 { x: Float, y: Float }
 type Rect { position: Vec2, size: Vec2 }
 
 # A stale/renamed literal: Rect's fields are {position, size}, not {x,y,w,h}.
-# #778: sema must reject unknown field names at the literal site, not let the
-# mismatched C reach gcc. Covers both the bare-brace form (type from the `let`)
-# and the RHS-typed form (`Rect { ... }`).
+# #778: sema rejects unknown field names at the literal site, not at gcc. Covers
+# the bare-brace form (type from the `let`) AND the RHS-typed form (`Rect { ... }`
+# in `ret`, which must carry its own type).
+func stale() ret Rect {
+  ret Rect { top: 2.0 }
+}
+
 func main() {
   let bare: Rect = { x: 0.0, y: 0.0, w: 1.0, h: 1.0 }
-  let typed = Rect { top: 2.0 }
-  log("unreached {bare.size.x} {typed.position.x}")
+  let r: Rect = stale()
+  log("unreached {bare.size.x} {r.position.x}")
 }
