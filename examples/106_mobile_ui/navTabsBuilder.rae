@@ -149,7 +149,7 @@ func buildNavTabsForScreen(
   # rounded into a capsule instead of painting a sharp full-width strip.
   let barW: Float = world.layoutW - floatingDockInset * 2.0
   setRectFixed(world: world, entity: bar, w: barW, h: navTabsH)
-  let barFill: RgbaColor = { r: surfaceColor.r, g: surfaceColor.g, b: surfaceColor.b, a: 238 }
+  let barFill: RgbaColor = { r: paletteSurface(theme: world.theme.active).r, g: paletteSurface(theme: world.theme.active).g, b: paletteSurface(theme: world.theme.active).b, a: 238 }
   setShapeRounded(world: world, entity: bar, fill: barFill, radius: floatingDockRadius)
   # Do not attach BackdropImage here yet: gpu2d currently draws it as
   # an unclipped rectangle, which leaks a sharp grey slab under the

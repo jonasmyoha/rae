@@ -466,6 +466,11 @@ type AppState {
   # RAE_UI_CANVAS=1 opens it at boot for headless proofs. Not
   # persisted. See canvas_view.rae.
   canvasOpen: Bool
+  # #789: progressive-loader cursors that used to be module-global `var`s.
+  # Transient (not persisted): the History-artwork scan cursor and the album/
+  # avatar asset-registration latches.
+  historyArt: HistoryArtLoader
+  assetLoad: AssetLoad
 }
 
 func createAppState(albums: own List(Album), theme: own UiTheme) pub ret AppState {
@@ -500,6 +505,8 @@ func createAppState(albums: own List(Album), theme: own UiTheme) pub ret AppStat
     bottomSheet: createBottomSheetState()
     settings: createAppSettings()
     canvasOpen: false
+    historyArt: createHistoryArtLoader()
+    assetLoad: createAssetLoad()
   }
 }
 

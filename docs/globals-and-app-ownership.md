@@ -169,15 +169,18 @@ in the final shape in between** — so 112/114 are structured once, not twice.
    #737/#748 anyway, so doing it after avoids double work.
 4. **Last:** #766 flip the diagnostic from warning to hard error; suite green.
 
-**Landed (#766):** the hard error is enforced for **stdlib (`lib/`) modules** —
-lib/ is globals-clean after #764, so this fails the build only on a regression.
-Project/example code still gets the **warning** for now: the rollout above only
-scheduled the lib migration (step 3), but the flagship example apps
-(`106_mobile_ui`, `114_walker`) still hold mutable module-level `var`s (theme-
-color caches + loader state). Erroring on them would red the example smoke suite,
-so their App/World-resource migration is tracked as a follow-up task; once that
-lands, the `in_lib` scope guard in `sema.c`'s no-globals check is dropped and the
-error becomes universal, matching "no exemption" (above).
+**Landed (#766, then #789):** the hard error is **universal** — a module-level
+mutable `var` or heap-owning `let` fails the build wherever it appears, matching
+"no exemption" (above). It landed in two steps: #766 enforced it for **stdlib
+(`lib/`)** modules only (lib/ was globals-clean after #764) behind an `in_lib`
+scope guard, keeping a warning for project/example code while the flagship
+example apps were still being migrated; #789 then migrated the last example-app
+globals — `106_mobile_ui`'s theme-color caches (now `paletteX(theme:
+world.theme.active)` accessors deriving color live from the active theme) and its
+History/asset loader latches (now `HistoryArtLoader`/`AssetLoad` resources on
+`AppState`), `114_walker`'s `gSplashTick` (now `GameWorld.splashTick`), and
+`legacy/raylib/98_mobile_ui`'s color caches — and dropped the `in_lib` guard so
+`sema.c`'s no-globals check now errors everywhere.
 
 ## Systems, under this rule
 

@@ -57,7 +57,7 @@ func buildProfileAvatar(world: mod UiWorld, reg: view TextureRegistry) ret Entit
     let cr: CornerRadius = { radius: profileAvatarSize / 2.0 }
     componentSet(this: world.cornerRadiuses, entity: avatar, data: cr)
   } else {
-    let accentBg: RgbaColor = darkPillColor
+    let accentBg: RgbaColor = palettePill(theme: world.theme.active)
     setProfileCircleShape(world: world, entity: avatar, fill: accentBg)
     let layS: LayoutType = LayoutType.stack
     let alignC: AlignKind = AlignKind.center
@@ -66,7 +66,7 @@ func buildProfileAvatar(world: mod UiWorld, reg: view TextureRegistry) ret Entit
     let icon: EntityId = createEntity(world: world)
     setRectFixed(world: world, entity: icon, w: profileAvatarIconSize, h: profileAvatarIconSize)
     let personKey: String = "mat:person"
-    setSprite(world: world, entity: icon, key: personKey, tint: lightTextColor)
+    setSprite(world: world, entity: icon, key: personKey, tint: paletteLightText(theme: world.theme.active))
 
     let kids: List(EntityId) = createList(EntityId, cap: 1)
     kids.add(value: icon)
@@ -220,7 +220,7 @@ func buildSettingsRow(world: mod UiWorld, iconKey: view String, label: view Stri
   let iconSize: Float = 60.722891566265055
   let icon: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: icon, w: iconSize, h: iconSize)
-  setSprite(world: world, entity: icon, key: "{iconKey}", tint: iconTint)
+  setSprite(world: world, entity: icon, key: "{iconKey}", tint: paletteIconTint(theme: world.theme.active))
 
   let labelW: Float = rowW - iconSize - 14.0 - 24.0 - 14.0 - 16.0
   let labelEnt: EntityId = createEntity(world: world)
@@ -231,7 +231,7 @@ func buildSettingsRow(world: mod UiWorld, iconKey: view String, label: view Stri
   let chev: EntityId = createEntity(world: world)
   setRectFixed(world: world, entity: chev, w: 24.0, h: 24.0)
   let chevKey: String = "mat:chevron_right"
-  let chevTint: RgbaColor = heroColor
+  let chevTint: RgbaColor = paletteHero(theme: world.theme.active)
   setSprite(world: world, entity: chev, key: chevKey, tint: chevTint)
 
   let kids: List(EntityId) = createList(EntityId, cap: 3)
