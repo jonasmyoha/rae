@@ -57,3 +57,28 @@ escape hatch: an `extern` function name and its parameters name C symbols; a
 low-level bindings under `lib/webgpu/` mirror the WebGPU C API verbatim. Those
 are skipped. Everything else is a hard error, so a stray `const MAX_RETRIES` or
 `func my_func` fails to compile in both the Live and Compiled front ends.
+
+## ECS worlds vs authored scenes (decision, #770)
+
+A symmetric scheme was proposed — `World2d` / `World3d` for the ECS *containers*
+and `Scene2d` / `Scene3d` for authored `.raescene` *content units* — which would
+have renamed `UiWorld` → `World2d` and lib/ui's `Scene` → `Scene2d`. **Decision:
+no renames.** The current names stay:
+
+- **ECS containers: `UiWorld` (2D UI, lib/ui) and `World3d` (3D, lib/scene3d).**
+  `UiWorld` is not renamed to `World2d`: that is ~580 references across ~105 files
+  of pure churn, and `UiWorld` carries a UI-domain hint a bare `World2d` drops. The
+  collision worry that motivated the scheme (two types each wanting a bare `World`)
+  is better answered by per-module qualified type references
+  (`docs/ecs-language-wishlist.md`, "Namespacing & modules") than by a mass rename.
+- **Authored 2D UI content: `Scene` (lib/ui/scene.rae).** Not renamed to `Scene2d`,
+  because the 3D counterpart the symmetry needed — `Scene3d` — no longer exists: the
+  hand-rolled 3D scene model was deleted when the renderer moved onto the ECS
+  (#771/#797), and 3D content now parses straight into a `World3d` (wrapped by
+  `World3dAsset`). A lone `Scene2d` would be a *new* asymmetry, not a symmetric pair,
+  and a type-only rename would split `Scene` from its own family (`SceneNode`,
+  `parseScene`, `SceneRegistry`, `loadScene`) — a larger, worse sweep. The originally
+  blocked `Scene3dAsset` → `Scene3d` half is moot: both types were deleted by #771/#797.
+
+If a real collision ever forces the issue, prefer module-qualified type names over
+renaming.
