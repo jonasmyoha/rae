@@ -62,13 +62,13 @@ func setEntityMaterial(world: mod World3d, entity: view Int, colorIdx: view Int)
     material: kindMaterial(colorIdx: colorIdx))
 }
 
-# Build the persistent World3d: every grid, active-piece and particle slot is a
-# pre-allocated entity, plus the static backing panel. Returned by value so the
-# World3d MOVES into its owner — the world is built here as an rvalue and handed
-# to createTetrisRenderState's struct literal, the same move-safe shape the
-# World3dAsset loader uses (a named local dropped into a struct field would be
-# copied and then double-freed at teardown).
-func buildTetrisWorld(cube: view MeshHandle) ret World3d {
+# Build the persistent World3d — every grid, active-piece and particle slot is a
+# pre-allocated entity, plus the static backing panel — and hand it to the
+# TetrisRenderState. `world` is a named owning local at its last use in the return
+# struct literal, so it MOVES into the field (#798); no helper split is needed.
+func createTetrisRenderState() ret TetrisRenderState {
+  let cubeData: MeshData = makeBox(size: 1.0)
+  let cube: MeshHandle = uploadTetrisMesh(meshData: cubeData)
   var world: World3d = createWorld3d()
   let hidden: Transform3d = hiddenTransform()
   var slot: Int = 0
@@ -103,16 +103,10 @@ func buildTetrisWorld(cube: view MeshHandle) ret World3d {
     position: vec3.create(x: 0.0, y: 0.65, z: 10.0)
     rotation: vec3.create(x: 0.0, y: 0.0, z: 0.0)
     scale: vec3.create(x: 10.8, y: 0.2, z: 20.8))
-  ret world
-}
-
-func createTetrisRenderState() ret TetrisRenderState {
-  let cubeData: MeshData = makeBox(size: 1.0)
-  let cube: MeshHandle = uploadTetrisMesh(meshData: cubeData)
   # The slot bases are fixed by the build order above: the grid fills [0, W*H),
   # the active piece [W*H, W*H+4), the particles follow.
   ret TetrisRenderState {
-    world: buildTetrisWorld(cube: cube)
+    world: world
     gridBase: 0
     currentBase: gridWidth * gridHeight
     particleBase: gridWidth * gridHeight + 4
