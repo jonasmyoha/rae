@@ -80,6 +80,27 @@ These instructions define **how Codex should work**, communicate progress, and i
   `=>` aliases whose `view T`/`mod T` you write, and `loop var i: Int = 0`. The
   ban is specifically on inferring the type of a binding from its initializer.
 
+### NO globals — mutable module-level state is forbidden (see docs/globals-and-app-ownership.md):
+- "No globals" means precisely: a module-level **`var`** (mutable global state)
+  and a module-level **`let` that owns heap** (a `String`, `List`, `Map`, or any
+  struct carrying heap — a global with no owner) are **not allowed**. There is no
+  hidden, program-wide, mutable channel between functions.
+- **`const` is allowed, and so is a plain constant `let`.** A module-level
+  `const` (`const maxRetries: Int = 5`) is a compile-time value, not state. A
+  module-level `let` bound to a POD literal or a string literal
+  (`let title: String = "Rae"`) is likewise a constant with a static buffer, not
+  a global — it should usually just be spelled `const`. What is banned is
+  *mutable* state and *heap ownership* at module level, not named constants.
+- The replacement is **ownership**, matching the ECS architecture: a singleton
+  becomes a **resource on the World or App** and is threaded explicitly through
+  the `mod`/`view` parameter that already says who may touch it — e.g. a former
+  `var activeTheme` becomes `app.theme`, passed to the systems that read it.
+- Enforcement is phased: it is a **hard compiler error in `lib/`** (the stdlib is
+  globals-clean) and a **warning in app/example code** whose singletons are still
+  being migrated onto their owners. Do not add new module-level `var`/heap-`let`
+  anywhere; when you touch a file that still has one, prefer moving it onto its
+  owner.
+
 ### `pub` is BAD STYLE — do not write it:
 - **Everything is cross-file visible by default.** `pub` on a function changes
   nothing: a plain `func f()` in one module is already callable from another.
@@ -136,7 +157,19 @@ These instructions define **how Codex should work**, communicate progress, and i
 
 ## Project overview
 
-Rae is a **language designed for both humans and AI agents**.
+Rae is a **minimalistic language designed for both humans and AI agents**.
+
+**Rae is built around the Entity Component System (ECS) as its general
+architecture — not just for games, but for programs of any kind.** ECS is the
+default way to structure state and behavior: data lives in components on
+entities, logic lives in systems that run over them, and shared singletons are
+resources owned by a World or App. This is a deliberate bet that one small,
+explicit, data-oriented model — the same for a UI, a renderer, a simulation, or
+a CLI tool — is easier for a person to reason about and for an agent to generate
+and refactor than a grab-bag of ad-hoc patterns. Language features (compile-time
+field reflection, the no-globals rule, ownership threaded through `mod`
+parameters) exist to make that architecture clean rather than to bolt frameworks
+on top.
 
 It is intended to work in **two complementary modes**:
 - **Live (bytecode VM)**: for rapid iteration, tooling, analysis, hot-reload, and AI-driven workflows
