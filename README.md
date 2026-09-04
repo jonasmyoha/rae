@@ -172,6 +172,36 @@ library's own track rather than a copy of it.
   big the type is or what it holds. `=>` is required wherever the type contains
   `view` or `mod`, and refused everywhere else.
 
+## No type inference: types are always written
+
+Rae has **no type inference, by design** — and will not add it. Every binding
+states its type:
+
+```rae
+let count: Int = 5
+let track: Track = loadTrack(path: path)
+let pos: Vec2 = { x: 1.0, y: 2.0 }     # struct: type on the left, fields on the right
+```
+
+`let count = 5` or `let track = loadTrack(...)` is a **compile error**, not a
+convenience — the compiler tells you to write the type.
+
+This is the same principle as named arguments and parameter modes: the
+information that matters is on the page, not reconstructed in the reader's head.
+A local's type is part of what a function does, so it is written where the local
+is introduced — you never scroll to a definition, hover in an editor, or run the
+inferencer in your head to learn what `x` is. It also keeps errors honest: an
+inferred binding silently takes whatever type the right-hand side happens to
+produce, so a wrong or changed return type flows outward and surfaces far away
+(or miscompiles); a written type is checked at the binding and the mistake is
+reported there. The cost — a few characters per line — buys code that reads the
+same for a human and for a tool, which is the whole point of the language.
+
+(Inference-free does not mean annotation-heavy everywhere: `if let v: T = ...`
+narrows an optional, `=>` binds a `view`/`mod` alias whose type you still write,
+and a struct is built as `let p: Point = { ... }`. What is *never* inferred is
+the type of a binding.)
+
 ## Refactoring stability: change the type, keep the meaning
 
 In most mainstream languages, what `=` does depends on the type. That makes a
