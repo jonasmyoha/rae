@@ -126,8 +126,8 @@ func syncFrameData(
     applyOverlaysToWorld(world: world, playback: playback, state: appState)
   }
 
-  let loadingCovers: Bool = cascadeAssets(reg: texReg, albums: appState.mediaLibrary.albums, budget: 2)
-  let loadingHistoryArt: Bool = loadCachedHistoryArtChunk(history: appState.playHistory, reg: texReg, budget: 4)
+  let loadingCovers: Bool = cascadeAssets(reg: texReg, albums: appState.mediaLibrary.albums, budget: 2, load: appState.assetLoad)
+  let loadingHistoryArt: Bool = loadCachedHistoryArtChunk(history: appState.playHistory, reg: texReg, budget: 4, loader: appState.historyArt)
   var profileBecameReady: Bool = false
   if visible is Screen.profile {
     let profileKeyNow: String = profileAvatarKey()

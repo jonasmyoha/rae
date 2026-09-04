@@ -102,7 +102,7 @@ func buildLibraryCoverTile(world: mod UiWorld, key: view String, size: view Floa
   let albumsSource: DataResourceId = dataResourceAlbums()
   let allField: DataFieldId = dataFieldAll()
   setDataDependency(world: world, entity: tile, resource: albumsSource, field: allField, observedRevision: 0)
-  setSpriteFill(world: world, entity: tile, key: "{key}", tint: imageTintColor)
+  setSpriteFill(world: world, entity: tile, key: "{key}", tint: paletteImageTint(theme: world.theme.active))
   if rounded {
     let cr: CornerRadius = { radius: 26.024096385542165 }
     componentSet(this: world.cornerRadiuses, entity: tile, data: cr)
@@ -153,7 +153,7 @@ func buildPlaylistCoverTile(world: mod UiWorld, coverStems: view List(String), s
       let cellEntity: EntityId = createEntity(world: world)
       setRectFixed(world: world, entity: cellEntity, w: cell, h: cell)
       if let key: String = coverStems.copyAt(index: idx) {
-        setSpriteFill(world: world, entity: cellEntity, key: key, tint: imageTintColor)
+        setSpriteFill(world: world, entity: cellEntity, key: key, tint: paletteImageTint(theme: world.theme.active))
       } else {
         setShapeRect(world: world, entity: cellEntity, fill: placeholderFill)
       }

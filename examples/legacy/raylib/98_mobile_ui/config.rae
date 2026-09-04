@@ -43,33 +43,17 @@ let miniPlayerH: Float = 80.0
 let navTabsH: Float = 80.0
 
 # ----- palette --------------------------------------------------------
-# These constants hold the current theme's color values. Call
-# `syncColorsFromTheme()` after `setActiveTheme(...)` to push fresh
-# values in — the world is then rebuilt and every code-driven and
-# scene-driven widget picks up the new colors. Initial values match
-# `lightTheme()` so the app boots looking right even if a caller
-# never calls `syncColorsFromTheme`.
-var surfaceColor: RgbaColor = { r: 246, g: 246, b: 248, a: 255 }
-var heroColor: RgbaColor = { r: 130, g: 130, b: 140, a: 255 }
-var iconTint: RgbaColor = { r: 30, g: 30, b: 36, a: 255 }
-var darkPillColor: RgbaColor = { r: 22, g: 22, b: 28, a: 255 }
-var outlineColor: RgbaColor = { r: 200, g: 200, b: 210, a: 255 }
-var lightTextColor: RgbaColor = { r: 246, g: 246, b: 248, a: 255 }
-var imageTintColor: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
-
-# Copy palette values out of the active theme into the lets above.
-# Call this once after `setActiveTheme(...)` and again whenever the
-# user toggles the theme at runtime; the next `buildScreenWorld`
-# then reads the refreshed colors.
-func syncColorsFromTheme(active: view Theme) {
-  surfaceColor = colorByName(theme: active, name: "surface")
-  heroColor = colorByName(theme: active, name: "textMuted")
-  iconTint = colorByName(theme: active, name: "textPrimary")
-  darkPillColor = colorByName(theme: active, name: "accent")
-  outlineColor = colorByName(theme: active, name: "outline")
-  lightTextColor = colorByName(theme: active, name: "accentText")
-  imageTintColor = colorByName(theme: active, name: "imageTint")
-}
+# The app's named colors are derived LIVE from the active theme — no cached
+# module-global state (#789). Call with `world.theme.active` (or, before the
+# world exists, `appState.theme.active`); `world.theme` is seeded from AppState
+# by seedWorldThemeFrom (#764), so a theme toggle changes colors on next read.
+func paletteSurface(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "surface") }
+func paletteHero(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "textMuted") }
+func paletteIconTint(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "textPrimary") }
+func palettePill(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "accent") }
+func paletteOutline(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "outline") }
+func paletteLightText(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "accentText") }
+func paletteImageTint(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "imageTint") }
 
 # ----- asset paths --------------------------------------------------
 let trackRowPath: String = "examples/legacy/raylib/98_mobile_ui/assets/scenes/track-row.raescene"

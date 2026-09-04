@@ -43,38 +43,21 @@ const miniPlayerH: Float = 173.49397590361446
 const navTabsH: Float = 190.84337349397592
 
 # ----- palette --------------------------------------------------------
-# These constants hold the current theme's color values. Call
-# `syncColorsFromTheme()` after `setActiveTheme(...)` to push fresh
-# values in — the world is then rebuilt and every code-driven and
-# scene-driven widget picks up the new colors. Initial values match
-# `lightTheme()` so the app boots looking right even if a caller
-# never calls `syncColorsFromTheme`.
-# Full-screen page background (the render clear color). A distinct
-# near-white in light mode so the whiter cards/menubar read as raised
-# on top; matches `surface` (near-black) in dark mode.
-var pageBgColor: RgbaColor = { r: 246, g: 246, b: 248, a: 255 }
-var surfaceColor: RgbaColor = { r: 232, g: 233, b: 240, a: 255 }
-var heroColor: RgbaColor = { r: 130, g: 130, b: 140, a: 255 }
-var iconTint: RgbaColor = { r: 30, g: 30, b: 36, a: 255 }
-var darkPillColor: RgbaColor = { r: 22, g: 22, b: 28, a: 255 }
-var outlineColor: RgbaColor = { r: 200, g: 200, b: 210, a: 255 }
-var lightTextColor: RgbaColor = { r: 246, g: 246, b: 248, a: 255 }
-var imageTintColor: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
-
-# Copy palette values out of the active theme into the lets above.
-# Call this once after `setActiveTheme(...)` and again whenever the
-# user toggles the theme at runtime; the next `buildScreenWorld`
-# then reads the refreshed colors.
-func syncColorsFromTheme(active: view Theme) {
-  pageBgColor = colorByName(theme: active, name: "background")
-  surfaceColor = colorByName(theme: active, name: "surface")
-  heroColor = colorByName(theme: active, name: "textMuted")
-  iconTint = colorByName(theme: active, name: "textPrimary")
-  darkPillColor = colorByName(theme: active, name: "accent")
-  outlineColor = colorByName(theme: active, name: "outline")
-  lightTextColor = colorByName(theme: active, name: "accentText")
-  imageTintColor = colorByName(theme: active, name: "imageTint")
-}
+# The app's named colors are derived LIVE from the active theme — there is no
+# cached module-global palette state (#789: no globals). Each accessor maps an
+# app color ROLE to a theme color NAME; call it with the current theme, which
+# every builder already carries as `world.theme.active` (or, before the world is
+# built, `appState.theme.active`). A theme toggle changes the colors on the very
+# next read, so no explicit "sync" step is needed. `colorByName` is a cheap
+# name lookup in the active theme's table.
+func palettePageBg(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "background") }
+func paletteSurface(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "surface") }
+func paletteHero(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "textMuted") }
+func paletteIconTint(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "textPrimary") }
+func palettePill(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "accent") }
+func paletteOutline(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "outline") }
+func paletteLightText(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "accentText") }
+func paletteImageTint(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "imageTint") }
 
 # ----- asset paths --------------------------------------------------
 let trackRowPath: String = "examples/106_mobile_ui/assets/scenes/track-row.raescene"
