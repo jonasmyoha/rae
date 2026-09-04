@@ -328,7 +328,7 @@ func tagPlaybackIconDependency(
   } else {
     ret
   }
-  let entity: EntityId = entityId(v: raw)
+  let entity: EntityId = id(v: raw)
   let playbackSource: DataResourceId = dataResourcePlayback()
   let playbackField: DataFieldId = dataFieldIsPlaying()
   let iconKind: String = "playbackIcon"
@@ -732,7 +732,7 @@ func dispatchActions(
       } else {
         # Local playback: play/pause is a command (#265) — enqueue it on
         # the PlaybackSystem inbox; it's applied in the frame's Apply(A)
-        # phase by `playbackProcessCommands`, not mutated inline here.
+        # phase by `processCommands`, not mutated inline here.
         enqueuePlaybackToggle(this: playback)
       }
     }

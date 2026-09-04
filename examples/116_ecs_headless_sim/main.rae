@@ -117,7 +117,7 @@ func applyDamageSystem(world: mod GameWorld) {
       h.hp = h.hp - ev.amount
     }
   }
-  eventFrameAdvance(this: world.damage)
+  frameAdvance(this: world.damage)
 }
 
 # Remove enemies whose HP hit zero.
@@ -144,7 +144,7 @@ func cullSystem(world: mod GameWorld) {
 # frames where no health changed.
 func statsSystem(world: mod GameWorld) {
   var total: Int = 0
-  let matches: List(Query2Match) = queryTagged(dataTable: world.healths, tagTable: world.enemies)
+  let matches: List(Query2Match) = tagged(dataTable: world.healths, tagTable: world.enemies)
   loop let hit: view Query2Match in matches {
     let h: view Health => queryViewAt(table: world.healths, denseIndex: hit.indexA)
     total = total + h.hp
@@ -160,27 +160,27 @@ func heroX(world: view GameWorld, hero: view EntityId) ret Int {
   ret 0 - 1
 }
 
-# One frame: run each system in Schedule order, gated by scheduleShouldRun on the
+# One frame: run each system in Schedule order, gated by shouldRun on the
 # generation of the table(s) it reads. movement/combat/applyDamage/cull are gated
 # on `positions` (which movement bumps every frame, so they always run); stats is
 # gated on `healths`, so it skips when no damage landed.
 func runFrame(world: mod GameWorld, sched: mod Schedule, hero: view EntityId, frameNo: view Int) {
   world.clock.frame = frameNo
 
-  if scheduleShouldRun(schedule: sched, index: 0, readGeneration: componentTableGeneration(this: world.positions)) {
+  if shouldRun(schedule: sched, index: 0, readGeneration: componentTableGeneration(this: world.positions)) {
     movementSystem(world: world)
   }
-  if scheduleShouldRun(schedule: sched, index: 1, readGeneration: componentTableGeneration(this: world.positions)) {
+  if shouldRun(schedule: sched, index: 1, readGeneration: componentTableGeneration(this: world.positions)) {
     combatSystem(world: world)
   }
-  if scheduleShouldRun(schedule: sched, index: 2, readGeneration: componentTableGeneration(this: world.positions)) {
+  if shouldRun(schedule: sched, index: 2, readGeneration: componentTableGeneration(this: world.positions)) {
     applyDamageSystem(world: world)
   }
-  if scheduleShouldRun(schedule: sched, index: 3, readGeneration: componentTableGeneration(this: world.positions)) {
+  if shouldRun(schedule: sched, index: 3, readGeneration: componentTableGeneration(this: world.positions)) {
     cullSystem(world: world)
   }
   var statsRan: Bool = false
-  if scheduleShouldRun(schedule: sched, index: 4, readGeneration: componentTableGeneration(this: world.healths)) {
+  if shouldRun(schedule: sched, index: 4, readGeneration: componentTableGeneration(this: world.healths)) {
     statsSystem(world: world)
     statsRan = true
   }

@@ -17,9 +17,9 @@
 # Idempotency contract: the pass recomputes every touched
 # ComputedRect from AUTHORED components (Rect, Padding), never from
 # a previous pass's output — so it can run every frame after
-# layoutSystemIfDirty regardless of whether layout re-ran. Writes are
+# ifDirty regardless of whether layout re-ran. Writes are
 # change-gated (compare, then componentMod only on a real change) so
-# an idle frame bumps no table generation and transformSystemIfDirty
+# an idle frame bumps no table generation and systemIfDirty
 # still skips.
 #
 # ScaleToFit subtree contract: the tagged entity AND its descendants
@@ -151,8 +151,8 @@ func fitApplyOne(world: mod UiWorld, entity: view EntityId, mode: view FitMode) 
   fitScaleSubtree(world: world, entity: entity, s: s)
 }
 
-# Run both art-direction passes. Call between layoutSystemIfDirty and
-# transformSystemIfDirty every frame — cheap when the aspect /
+# Run both art-direction passes. Call between ifDirty and
+# systemIfDirty every frame — cheap when the aspect /
 # scale-to-fit tables are empty or nothing changed.
 func fitSystem(world: mod UiWorld) pub {
   var n: Int = componentCount(this: world.aspects)

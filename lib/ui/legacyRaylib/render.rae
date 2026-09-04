@@ -45,7 +45,7 @@ let matPrefix: String = "mat:"
 # Compose the entity's effective alpha into a [0,255] integer for
 # raylib. WorldTransform.alpha is already the multiplied chain alpha
 # (see transform.rae); we just clamp + scale here.
-func renderAlpha255(world: view UiWorld, entity: view EntityId) ret Int {
+func alpha255(world: view UiWorld, entity: view EntityId) ret Int {
   if componentHas(this: world.worldTransforms, entity: entity) is false {
     ret 255
   }
@@ -334,39 +334,39 @@ func textStyleColor(styleId: view String, chain255: view Int, active: view Theme
   let tabInactive: String = "tabInactive"
 
   if styleId is mute {
-    ret toRaylibColor(c: themeColorByName(theme: active, name: "textMuted"), chain255: chain255)
+    ret toRaylibColor(c: colorByName(theme: active, name: "textMuted"), chain255: chain255)
   }
   if styleId is caption {
-    ret toRaylibColor(c: themeColorByName(theme: active, name: "textMuted"), chain255: chain255)
+    ret toRaylibColor(c: colorByName(theme: active, name: "textMuted"), chain255: chain255)
   }
   if styleId is primary {
-    ret toRaylibColor(c: themeColorByName(theme: active, name: "textPrimary"), chain255: chain255)
+    ret toRaylibColor(c: colorByName(theme: active, name: "textPrimary"), chain255: chain255)
   }
   if styleId is topBarTitle {
-    ret toRaylibColor(c: themeColorByName(theme: active, name: "textPrimary"), chain255: chain255)
+    ret toRaylibColor(c: colorByName(theme: active, name: "textPrimary"), chain255: chain255)
   }
   let pageTitle: String = "pageTitle"
   if styleId is pageTitle {
-    ret toRaylibColor(c: themeColorByName(theme: active, name: "textPrimary"), chain255: chain255)
+    ret toRaylibColor(c: colorByName(theme: active, name: "textPrimary"), chain255: chain255)
   }
   if styleId is albumCaption {
-    ret toRaylibColor(c: themeColorByName(theme: active, name: "textMuted"), chain255: chain255)
+    ret toRaylibColor(c: colorByName(theme: active, name: "textMuted"), chain255: chain255)
   }
   if styleId is trackTitle {
-    ret toRaylibColor(c: themeColorByName(theme: active, name: "textPrimary"), chain255: chain255)
+    ret toRaylibColor(c: colorByName(theme: active, name: "textPrimary"), chain255: chain255)
   }
   if styleId is trackMuted {
-    ret toRaylibColor(c: themeColorByName(theme: active, name: "textMuted"), chain255: chain255)
+    ret toRaylibColor(c: colorByName(theme: active, name: "textMuted"), chain255: chain255)
   }
   if styleId is tabActive {
-    ret toRaylibColor(c: themeColorByName(theme: active, name: "textPrimary"), chain255: chain255)
+    ret toRaylibColor(c: colorByName(theme: active, name: "textPrimary"), chain255: chain255)
   }
   if styleId is tabInactive {
-    ret toRaylibColor(c: themeColorByName(theme: active, name: "textMuted"), chain255: chain255)
+    ret toRaylibColor(c: colorByName(theme: active, name: "textMuted"), chain255: chain255)
   }
   # "On surfaceAlt" styles read accentText for theme-correct contrast.
   if styleId is miniTitle {
-    ret toRaylibColor(c: themeColorByName(theme: active, name: "accentText"), chain255: chain255)
+    ret toRaylibColor(c: colorByName(theme: active, name: "accentText"), chain255: chain255)
   }
   if styleId is miniMuted {
     # Theme-aware muted color for text on the mini-player pill
@@ -374,12 +374,12 @@ func textStyleColor(styleId: view String, chain255: view Int, active: view Theme
     # pale cyan needing dark muted text; in dark theme it's a
     # darker green needing light muted text. The
     # `accentTextMuted` token carries the right value for each.
-    ret toRaylibColor(c: themeColorByName(theme: active, name: "accentTextMuted"), chain255: chain255)
+    ret toRaylibColor(c: colorByName(theme: active, name: "accentTextMuted"), chain255: chain255)
   }
   # Pill labels sit on top of the `$accent` shape — `$accentText`
   # is the dual.
   if styleId is pillLabelLight {
-    ret toRaylibColor(c: themeColorByName(theme: active, name: "accentText"), chain255: chain255)
+    ret toRaylibColor(c: colorByName(theme: active, name: "accentText"), chain255: chain255)
   }
   # Debug-UI styles (theme-independent — see lib/ui/debug.rae).
   let debugButton: String = "debugButton"
@@ -394,10 +394,10 @@ func textStyleColor(styleId: view String, chain255: view Int, active: view Theme
   }
   # Caption-class right-aligned time label — matches `caption` colour.
   if styleId is "timeTotal" {
-    ret toRaylibColor(c: themeColorByName(theme: active, name: "textMuted"), chain255: chain255)
+    ret toRaylibColor(c: colorByName(theme: active, name: "textMuted"), chain255: chain255)
   }
   # Fallback: treat unknown style ids as primary text.
-  ret toRaylibColor(c: themeColorByName(theme: active, name: "textPrimary"), chain255: chain255)
+  ret toRaylibColor(c: colorByName(theme: active, name: "textPrimary"), chain255: chain255)
 }
 
 # Horizontally-centered styles: the renderer measures the glyph run
@@ -406,7 +406,7 @@ func textStyleColor(styleId: view String, chain255: view Int, active: view Theme
 # already places the rect itself; the explicit-center styles below are
 # for cases where the rect is wider than the text (e.g. tab labels
 # that share a fixed-width container with a centred icon above).
-func textStyleIsCentered(styleId: view String) ret Bool {
+func isCentered(styleId: view String) ret Bool {
   let tabActive: String = "tabActive"
   if styleId is tabActive {
     ret true
@@ -436,7 +436,7 @@ func textStyleHasShadow(styleId: view String) ret Bool {
 
 # NowPlaying's TimeTotal label needs to sit flush against the progress
 # bar's right edge — its containing SpaceBetween row leaves a gap.
-func textStyleIsRightAligned(styleId: view String) ret Bool {
+func isRightAligned(styleId: view String) ret Bool {
   if styleId is "timeTotal" { ret true }
   ret false
 }
@@ -452,9 +452,9 @@ func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransfo
   var drawX: Float = wt.position.x
   var drawY: Float = wt.position.y
   # Alignment: styleId (legacy) or Align component (Center / End).
-  var centerX: Bool = textStyleIsCentered(styleId: tx.styleId)
-  var centerY: Bool = textStyleIsCentered(styleId: tx.styleId)
-  var rightAlignX: Bool = textStyleIsRightAligned(styleId: tx.styleId)
+  var centerX: Bool = isCentered(styleId: tx.styleId)
+  var centerY: Bool = isCentered(styleId: tx.styleId)
+  var rightAlignX: Bool = isRightAligned(styleId: tx.styleId)
   if componentHas(this: world.aligns, entity: entity) {
     let al: Align = componentGet(this: world.aligns, entity: entity)
     if al.hasX {
@@ -623,7 +623,7 @@ func paintEntity(backend: view UiBackend, world: view UiWorld, reg: view Texture
   let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
   # Viewport cull: skip the paint (esp. text shaping) for entities fully off-screen — the big win for long scrolled lists (200+ rows). world.layoutW/H is the screen; 80px margin keeps edge shadows/partial rows.
   if (wt.position.y + cr.size.y + 80.0 < 0.0) or (wt.position.y - 80.0 > world.layoutH) or (wt.position.x + cr.size.x + 80.0 < 0.0) or (wt.position.x - 80.0 > world.layoutW) { ret }
-  let chain255: Int = renderAlpha255(world: world, entity: entity)
+  let chain255: Int = alpha255(world: world, entity: entity)
 
   # GradientFill takes precedence over a solid Shape.fill (the gradient
   # shader does its own rounded-rect alpha mask off CornerRadius).
@@ -710,7 +710,7 @@ func renderSystem(backend: view UiBackend, world: view UiWorld, reg: view Textur
   # top of page content.
   let allRangeLow: Int = 0 - 1000000
   let allRangeHi: Int = 1000000
-  renderSystemLayerRange(backend: backend, world: world, reg: reg, minOrder: allRangeLow, maxOrder: allRangeHi)
+  systemLayerRange(backend: backend, world: world, reg: reg, minOrder: allRangeLow, maxOrder: allRangeHi)
 }
 
 # Same painter walk as `renderSystem` but only paints roots whose
@@ -719,7 +719,7 @@ func renderSystem(backend: view UiBackend, world: view UiWorld, reg: view Textur
 # after content paints (layer 0..99) but before the dock paints
 # (layer 100+) so a `captureAndBlurRegion` doesn't include the very
 # overlay it's meant to sit behind.
-func renderSystemLayerRange(backend: view UiBackend, world: view UiWorld, reg: view TextureRegistry, minOrder: view Int, maxOrder: view Int) pub {
+func systemLayerRange(backend: view UiBackend, world: view UiWorld, reg: view TextureRegistry, minOrder: view Int, maxOrder: view Int) pub {
   let roots: List(EntityId) = collectPaintableRoots(world: world)
   let m: Int = roots.length
   var p: Int = 0
@@ -746,7 +746,7 @@ func renderSystemLayerRange(backend: view UiBackend, world: view UiWorld, reg: v
 # under the cursor. Pass the same mouse coords that the input system
 # polls so the visual matches what hit-test would do. Draw AFTER
 # `renderSystem` so the outlines sit on top of the rendered UI.
-func renderDebugClickRects(
+func debugClickRects(
   world: view UiWorld
   idleColor: view Color
   hoverColor: view Color
@@ -840,7 +840,7 @@ func renderDebugClickRects(
 # exactly where the input system thinks the cursor is. If this
 # crosshair doesn't sit under the OS mouse cursor on screen, there's
 # a coord-system mismatch between rendering and input.
-func renderDebugMouseCursor(mouseX: view Float, mouseY: view Float, color: view Color) pub {
+func debugMouseCursor(mouseX: view Float, mouseY: view Float, color: view Color) pub {
   let size: Float = 12.0
   let half: Float = size / 2.0
   drawRectangle(
@@ -865,7 +865,7 @@ func renderDebugMouseCursor(mouseX: view Float, mouseY: view Float, color: view 
 # Same generation-tracking pattern as `LayoutCache` (layout.rae) and
 # `TransformCache` (transform.rae): the cache stores the table-level
 # generation counter of every ComponentTable the render path reads.
-# `renderCacheDirty` returns true when at least one of those tables
+# `cacheDirty` returns true when at least one of those tables
 # has bumped since the last call (and updates the cache so the next
 # call sees the new baseline).
 #
@@ -922,7 +922,7 @@ func createRenderCache() pub ret RenderCache {
 # changed), and updates `cache` to the current generation values.
 # Returns false when the previous frame's render output is still
 # valid — caller should skip beginDrawing/endDrawing for this frame.
-func renderCacheDirty(world: view UiWorld, cache: mod RenderCache) pub ret Bool {
+func cacheDirty(world: view UiWorld, cache: mod RenderCache) pub ret Bool {
   let crGen: Int = componentTableGeneration(ComputedRect, this: world.computedRects)
   let wtGen: Int = componentTableGeneration(WorldTransform2D, this: world.worldTransforms)
   let shGen: Int = componentTableGeneration(Shape, this: world.shapes)

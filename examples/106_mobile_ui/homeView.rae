@@ -161,7 +161,7 @@ func mountHomePage(
   # Runtime scroll state on the Body container (not authorable —
   # scroll position survives rebuilds via the scrollY argument).
   if let bodyRaw: Int = findNodeInPage(world: world, pageId: homePageId, nodeId: "Body") {
-    let body: EntityId = entityId(v: bodyRaw)
+    let body: EntityId = id(v: bodyRaw)
     let off: Offset = { delta: Vec2 { x: 0.0, y: scrollY } }
     componentSet(this: world.offsets, entity: body, data: off)
     let scroll: ScrollState = { y: scrollY, velocity: 0.0 }
@@ -173,12 +173,12 @@ func mountHomePage(
   # the old builder that simply didn't create it).
   let hasRecent: Bool = state.playHistory.entries.length > 0
   if let headerRaw: Int = findNodeInPage(world: world, pageId: homePageId, nodeId: "RecentlyPlayedHeader") {
-    let header: EntityId = entityId(v: headerRaw)
+    let header: EntityId = id(v: headerRaw)
     let headerActive: Active = { value: hasRecent }
     componentSet(this: world.actives, entity: header, data: headerActive)
   }
   if let stripRaw: Int = findNodeInPage(world: world, pageId: homePageId, nodeId: "RecentlyPlayedStrip") {
-    let strip: EntityId = entityId(v: stripRaw)
+    let strip: EntityId = id(v: stripRaw)
     let stripActive: Active = { value: hasRecent }
     componentSet(this: world.actives, entity: strip, data: stripActive)
     if hasRecent {
@@ -192,7 +192,7 @@ func mountHomePage(
   }
 
   if let gridRaw: Int = findNodeInPage(world: world, pageId: homePageId, nodeId: "CoverGrid") {
-    let grid: EntityId = entityId(v: gridRaw)
+    let grid: EntityId = id(v: gridRaw)
     fillHomeCoverGrid(
       world: world
       grid: grid

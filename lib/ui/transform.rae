@@ -28,7 +28,7 @@ open ecs/HierarchySystem/HierarchySystem
 open ecs/TransformSystem/TransformSystem
 
 # Returns the active flag for entity; defaults to true if no Active.
-func transformActive(world: view UiWorld, entity: view EntityId) ret Bool {
+func active(world: view UiWorld, entity: view EntityId) ret Bool {
   if componentHas(this: world.actives, entity: entity) is false {
     ret true
   }
@@ -36,7 +36,7 @@ func transformActive(world: view UiWorld, entity: view EntityId) ret Bool {
   ret a.value
 }
 
-func transformOpacity(world: view UiWorld, entity: view EntityId) ret Float {
+func opacity(world: view UiWorld, entity: view EntityId) ret Float {
   if componentHas(this: world.opacities, entity: entity) is false {
     ret 1.0
   }
@@ -56,7 +56,7 @@ func worldVisualOf(world: view UiWorld, entity: view EntityId) ret WorldVisual {
   ret wv
 }
 
-func transformFxOf(world: view UiWorld, entity: view EntityId) ret TransformFx {
+func fxOf(world: view UiWorld, entity: view EntityId) ret TransformFx {
   if componentHas(this: world.transforms, entity: entity) is false {
     ret defaultTransformFx()
   }
@@ -90,15 +90,15 @@ func runtimeOffsetOf(world: view UiWorld, entity: view EntityId) ret Vec2 {
 # the general geometry TransformSystem does not track — see accumulateVisibility.)
 func composeVisual(world: view UiWorld, entity: view EntityId,
                    parentAlpha: view Float, parentVisible: view Bool) ret WorldVisual {
-  let fx: TransformFx = transformFxOf(world: world, entity: entity)
+  let fx: TransformFx = fxOf(world: world, entity: entity)
   var visible: Bool = parentVisible
-  if transformActive(world: world, entity: entity) is false {
+  if active(world: world, entity: entity) is false {
     visible = false
   }
   if fx.visible is false {
     visible = false
   }
-  var alpha: Float = parentAlpha * transformOpacity(world: world, entity: entity) * fx.alpha
+  var alpha: Float = parentAlpha * opacity(world: world, entity: entity) * fx.alpha
   if alpha < 0.0 {
     alpha = 0.0
   }
@@ -118,7 +118,7 @@ func buildLocalTransforms(world: mod UiWorld) {
     let entity: EntityId = componentEntityAt(this: world.computedRects, i: i)
     let cr: ComputedRect = componentDataAt(this: world.computedRects, i: i)
     let ro: Vec2 = runtimeOffsetOf(world: world, entity: entity)
-    let fx: TransformFx = transformFxOf(world: world, entity: entity)
+    let fx: TransformFx = fxOf(world: world, entity: entity)
     let local: Transform2D = {
       position: { x: cr.position.x + ro.x, y: cr.position.y + ro.y }
       rotation: fx.rotation
@@ -174,7 +174,7 @@ func transformSystem(world: mod UiWorld) {
   accumulateVisibility(world: world)
 }
 
-# Per-call cache for `transformSystemIfDirty`. Stores the generation
+# Per-call cache for `systemIfDirty`. Stores the generation
 # of every ComponentTable that transformSystem reads. When all of them
 # match the cached values, the whole walk + write-back to
 # `worldTransforms` can be skipped — the output would be identical.
@@ -220,7 +220,7 @@ func createTransformCache() pub ret TransformCache {
 # derived localTransforms / worldVisuals) because we're the only writer
 # and any external mutation would still be observable through one of
 # the other tables (e.g. setHeroVisible reads computedRects first).
-func transformSystemIfDirty(world: mod UiWorld, cache: mod TransformCache) pub ret Bool {
+func systemIfDirty(world: mod UiWorld, cache: mod TransformCache) pub ret Bool {
   let crGen: Int = componentTableGeneration(ComputedRect, this: world.computedRects)
   let acGen: Int = componentTableGeneration(Active, this: world.actives)
   let opGen: Int = componentTableGeneration(Opacity, this: world.opacities)

@@ -49,7 +49,7 @@ let historyFilePath: String = "examples/legacy/raylib/98_mobile_ui/temp/play_his
 # into the live `content` accumulator after a few iterations
 # (suspect alias return path in lib/string.replace when the pattern
 # isn't found).
-func jsonEscape(s: view String) ret String {
+func escape(s: view String) ret String {
   var out: String = ""
   var i: Int = 0
   let n: Int = s.length()
@@ -103,12 +103,12 @@ func saveHistoryToJson(history: view PlayHistory, path: view String) pub {
     # interpolated builder below never references the list's heap
     # storage through `e.fieldName`. The `"{e.field}"` interpolation
     # syntax forces a fresh allocation per field.
-    let tn: String = jsonEscape(s: e.trackName)
-    let an: String = jsonEscape(s: e.artistName)
-    let alb: String = jsonEscape(s: e.albumName)
-    let stem: String = jsonEscape(s: e.albumStem)
-    let url: String = jsonEscape(s: e.artworkUrl)
-    let tk: String = jsonEscape(s: e.textureKey)
+    let tn: String = escape(s: e.trackName)
+    let an: String = escape(s: e.artistName)
+    let alb: String = escape(s: e.albumName)
+    let stem: String = escape(s: e.albumStem)
+    let url: String = escape(s: e.artworkUrl)
+    let tk: String = escape(s: e.textureKey)
     let durStr: String = "{e.durationSec}"
     let atStr: String = "{e.playedAt}"
 
@@ -151,27 +151,27 @@ func restoreHistory(history: mod PlayHistory, path: view String) pub {
     log("[history] parse error in {path} at byte {doc.errorPos}")
     ret
   }
-  let root: JsonValue = json.jsonRoot(doc: doc)
+  let root: JsonValue = json.root(doc: doc)
   let entriesKey: String = "entries"
-  let entriesIdx: Int = json.jsonField(doc: doc, this: root, key: entriesKey)
+  let entriesIdx: Int = json.field(doc: doc, this: root, key: entriesKey)
   if entriesIdx < 0 {
     log("[history] root has no 'entries' array")
     ret
   }
   let entriesVal: JsonValue = json.jsonValueAt(doc: doc, idx: entriesIdx)
-  let n: Int = json.jsonArrayLen(this: entriesVal)
+  let n: Int = json.arrayLen(this: entriesVal)
   var i: Int = 0
   loop i < n {
-    let v: JsonValue = json.jsonArrayAt(doc: doc, this: entriesVal, idx: i)
+    let v: JsonValue = json.arrayAt(doc: doc, this: entriesVal, idx: i)
     let empty: String = ""
-    let tnIdx: Int = json.jsonField(doc: doc, this: v, key: "trackName")
-    let anIdx: Int = json.jsonField(doc: doc, this: v, key: "artistName")
-    let albIdx: Int = json.jsonField(doc: doc, this: v, key: "albumName")
-    let stemIdx: Int = json.jsonField(doc: doc, this: v, key: "albumStem")
-    let urlIdx: Int = json.jsonField(doc: doc, this: v, key: "artworkUrl")
-    let texIdx: Int = json.jsonField(doc: doc, this: v, key: "textureKey")
-    let durIdx: Int = json.jsonField(doc: doc, this: v, key: "durationSec")
-    let atIdx: Int = json.jsonField(doc: doc, this: v, key: "playedAt")
+    let tnIdx: Int = json.field(doc: doc, this: v, key: "trackName")
+    let anIdx: Int = json.field(doc: doc, this: v, key: "artistName")
+    let albIdx: Int = json.field(doc: doc, this: v, key: "albumName")
+    let stemIdx: Int = json.field(doc: doc, this: v, key: "albumStem")
+    let urlIdx: Int = json.field(doc: doc, this: v, key: "artworkUrl")
+    let texIdx: Int = json.field(doc: doc, this: v, key: "textureKey")
+    let durIdx: Int = json.field(doc: doc, this: v, key: "durationSec")
+    let atIdx: Int = json.field(doc: doc, this: v, key: "playedAt")
     let tn: String = json.jsonString(this: json.jsonValueAt(doc: doc, idx: tnIdx), fallback: empty)
     let an: String = json.jsonString(this: json.jsonValueAt(doc: doc, idx: anIdx), fallback: empty)
     let alb: String = json.jsonString(this: json.jsonValueAt(doc: doc, idx: albIdx), fallback: empty)

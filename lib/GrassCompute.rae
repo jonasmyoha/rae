@@ -93,7 +93,7 @@ func createGrassCompute() ret GrassCompute {
 
 # Compute-pass source: the shared noise + biome field, then the grass pass
 # itself. Mirrors how the terrain splat pipeline composes its shader.
-func grassComputeWgsl() ret String {
+func wgsl() ret String {
   let islandSrc: String = worldBiome.islandParamsWgsl()
   let noiseSrc: String = gbuffer.gbReadWgsl(path: "lib/noise.wgsl")
   let biomeSrc: String = gbuffer.gbReadWgsl(path: "lib/world_biome.wgsl")
@@ -204,7 +204,7 @@ func ensureGrassGpu(grass: mod GrassCompute) {
   # terrain-height definition with everything else that touches the ground.
   # Carrying its own copy is what left blades standing on a height field the
   # terrain had already moved off.
-  let grassSrc: String = grassComputeWgsl()
+  let grassSrc: String = wgsl()
   let grassCbuf: Buffer(Any) = grassSrc.toCStr()
   let shaderMod: Ptr = grassMakeShaderModule(wgsl: grassCbuf)
   let pipeDesc: WGPUComputePipelineDescriptor = {
@@ -385,13 +385,13 @@ func grassVisibleCount(grass: view GrassCompute) ret Int { ret grass.visibleCach
 # capture alongside fps and per-pass GPU ms. Call once per frame after
 # grassGenerate.
 func grassDiagTick(grass: mod GrassCompute, profiler: mod Profiler) {
-  if profile.profileCapturing(profiler: profiler) is false { ret }
+  if profile.capturing(profiler: profiler) is false { ret }
   grass.diagFrame = grass.diagFrame + 1
   if grass.diagFrame % 10 is 0 {
     let visible: Int = grassReadVisible(grass: grass)
     if visible >= 0 { grass.visibleCache = visible }
   }
-  profile.profileCounter(profiler: profiler, name: "grass.generated", value: grassGpuBladeCount)
-  profile.profileCounter(profiler: profiler, name: "grass.visible", value: grass.visibleCache)
-  profile.profileCounter(profiler: profiler, name: "grass.culled", value: grassGpuBladeCount - grass.visibleCache)
+  profile.counter(profiler: profiler, name: "grass.generated", value: grassGpuBladeCount)
+  profile.counter(profiler: profiler, name: "grass.visible", value: grass.visibleCache)
+  profile.counter(profiler: profiler, name: "grass.culled", value: grassGpuBladeCount - grass.visibleCache)
 }
