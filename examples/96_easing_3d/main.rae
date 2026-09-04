@@ -28,28 +28,26 @@ func uploadMeshData(meshData: view MeshData) ret MeshHandle {
     indices: meshData.indices)
 }
 
-func buildScene(sphere: view MeshHandle, ground: view MeshHandle) ret Scene3d {
-  var scene: Scene3d = createScene3d()
+func buildScene(sphere: view MeshHandle, ground: view MeshHandle) ret World3d {
+  var sceneWorld: World3d = createWorld3d()
   let noEmission: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let noRotation: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let unitScale: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
-  let ballMaterial: Int = addMaterial(
-    scene: scene
+  let ballMaterial: Material3d = {
     baseColor: vec3.create(x: 0.12, y: 0.62, z: 0.95)
-    metallic: 0.15, roughness: 0.22, emission: noEmission)
-  let groundMaterial: Int = addMaterial(
-    scene: scene
+    metallic: 0.15, roughness: 0.22, emission: noEmission, toon: false }
+  let groundMaterial: Material3d = {
     baseColor: vec3.create(x: 0.16, y: 0.2, z: 0.27)
-    metallic: 0.0, roughness: 0.82, emission: noEmission)
-  let ballEntity: Int = addMeshInstance(
-    scene: scene, mesh: sphere, material: ballMaterial
+    metallic: 0.0, roughness: 0.82, emission: noEmission, toon: false }
+  let ballEntity: EntityId = world3dAddMeshInstance(
+    world: sceneWorld, mesh: sphere, material: ballMaterial
     position: vec3.create(x: 0.0, y: 0.0, z: 5.0)
     rotation: noRotation, scale: unitScale)
-  let groundEntity: Int = addMeshInstance(
-    scene: scene, mesh: ground, material: groundMaterial
+  let groundEntity: EntityId = world3dAddMeshInstance(
+    world: sceneWorld, mesh: ground, material: groundMaterial
     position: vec3.create(x: 0.0, y: 0.0, z: 0.0)
     rotation: noRotation, scale: unitScale)
-  ret scene
+  ret sceneWorld
 }
 
 func main() ret Int {
@@ -60,7 +58,10 @@ func main() ret Int {
   let planeData: MeshData = makePlane(size: 30.0, segments: 1)
   let sphere: MeshHandle = uploadMeshData(meshData: sphereData)
   let ground: MeshHandle = uploadMeshData(meshData: planeData)
-  var scene: Scene3d = buildScene(sphere: sphere, ground: ground)
+  var sceneWorld: World3d = buildScene(sphere: sphere, ground: ground)
+  # The ball is the first mesh added (dense position 0); the easing below
+  # animates its transform in place.
+  let ballEntity: EntityId = world3dMeshRendererEntityAt(world: sceneWorld, i: 0)
   var camera: Camera3d = defaultCamera3d()
   camera.position = vec3.create(x: 10.0, y: 0.0 - 12.0, z: 8.0)
   camera.target = vec3.create(x: 0.0, y: 0.0, z: 2.0)
@@ -97,8 +98,8 @@ func main() ret Int {
     let phase: Float = elapsed / duration
     let bounce: Float = easing.easeOutBounce(t: phase)
     let currentZ: Float = 5.0 - 4.0 * bounce
-    setTransform(
-      scene: scene, entity: 0
+    world3dWriteTransform(
+      world: sceneWorld, entity: ballEntity
       transform: Transform3d {
         position: vec3.create(x: 0.0, y: 0.0, z: currentZ)
         rotation: vec3.create(x: 0.0, y: phase * 3.14159, z: 0.0)
@@ -115,13 +116,13 @@ func main() ret Int {
           gpu2d.beginFrameLoad()
           renderSystemGpu2d(world: world, res: uiResources)
         } else {
-          renderDeferredPass(
-            r: renderer, tag: tag, scene: scene
+          renderDeferredPassWorld(
+            r: renderer, tag: tag, world: sceneWorld
             camera: camera, light: light, aspect: aspect)
         }
         passIndex = passIndex + 1
       }
-      snapshotPrevTransforms(scene: scene)
+      world3dPrevTransformSystem(world: sceneWorld)
     }
   }
 

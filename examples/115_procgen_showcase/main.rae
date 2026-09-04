@@ -14,7 +14,9 @@ import rendererDeferred
 import procgen/rock
 import procgen/tree
 import procgen/texture
+import ecs/entity
 open scene3d
+open ecs/entity
 open gpu3d
 open rendererDeferred
 open rendergraph
@@ -61,25 +63,25 @@ func uploadMeshData(m: view MeshData) ret MeshHandle {
   ret uploadMesh(verts: m.verts, vertCount: m.vertCount, indices: m.indices)
 }
 
-func buildScene(rocks: view List(Int), treeTrunks: view List(Int), treeCanopies: view List(Int), ground: view MeshHandle) ret Scene3d {
-  var scene: Scene3d = createScene3d()
+func buildScene(rocks: view List(Int), treeTrunks: view List(Int), treeCanopies: view List(Int), ground: view MeshHandle) ret World3d {
+  var sceneWorld: World3d = createWorld3d()
   let noEmit: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let noRot: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let unit: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
 
   # Ground plane just below the props.
-  let groundMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.30, y: 0.34, z: 0.24), metallic: 0.0, roughness: 0.95, emission: noEmit)
-  let groundE: Int = addMeshInstance(scene: scene, mesh: ground, material: groundMat, position: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.6), rotation: noRot, scale: unit)
+  let groundMat: Material3d = { baseColor: vec3.create(x: 0.30, y: 0.34, z: 0.24), metallic: 0.0, roughness: 0.95, emission: noEmit, toon: false }
+  let groundE: EntityId = world3dAddMeshInstance(world: sceneWorld, mesh: ground, material: groundMat, position: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.6), rotation: noRot, scale: unit)
 
-  let rockMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.44, y: 0.45, z: 0.47), metallic: 0.0, roughness: 0.9, emission: noEmit)
-  let barkMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.36, y: 0.23, z: 0.13), metallic: 0.0, roughness: 0.85, emission: noEmit)
-  let leafMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.20, y: 0.42, z: 0.16), metallic: 0.0, roughness: 0.8, emission: noEmit)
+  let rockMat: Material3d = { baseColor: vec3.create(x: 0.44, y: 0.45, z: 0.47), metallic: 0.0, roughness: 0.9, emission: noEmit, toon: false }
+  let barkMat: Material3d = { baseColor: vec3.create(x: 0.36, y: 0.23, z: 0.13), metallic: 0.0, roughness: 0.85, emission: noEmit, toon: false }
+  let leafMat: Material3d = { baseColor: vec3.create(x: 0.20, y: 0.42, z: 0.16), metallic: 0.0, roughness: 0.8, emission: noEmit, toon: false }
 
   # Front row: five rocks.
   loop var i: Int = 0, i < rocks.length, ++i {
     if let rk: Int = rocks.copyAt(index: i) {
       let x: Float = (i.toFloat() - 2.0) * 3.2
-      let rockE: Int = addMeshInstance(scene: scene, mesh: meshHandle(id: rk, generation: 1), material: rockMat,
+      let rockE: EntityId = world3dAddMeshInstance(world: sceneWorld, mesh: meshHandle(id: rk, generation: 1), material: rockMat,
         position: vec3.create(x: x, y: 0.0, z: 0.0), rotation: noRot, scale: unit)
     }
   }
@@ -87,15 +89,15 @@ func buildScene(rocks: view List(Int), treeTrunks: view List(Int), treeCanopies:
   loop var t: Int = 0, t < treeTrunks.length, ++t {
     let x: Float = (t.toFloat() - 2.0) * 3.2
     if let tr: Int = treeTrunks.copyAt(index: t) {
-      let trunkE: Int = addMeshInstance(scene: scene, mesh: meshHandle(id: tr, generation: 1), material: barkMat,
+      let trunkE: EntityId = world3dAddMeshInstance(world: sceneWorld, mesh: meshHandle(id: tr, generation: 1), material: barkMat,
         position: vec3.create(x: x, y: 6.0, z: 0.0), rotation: noRot, scale: unit)
     }
     if let cp: Int = treeCanopies.copyAt(index: t) {
-      let canopyE: Int = addMeshInstance(scene: scene, mesh: meshHandle(id: cp, generation: 1), material: leafMat,
+      let canopyE: EntityId = world3dAddMeshInstance(world: sceneWorld, mesh: meshHandle(id: cp, generation: 1), material: leafMat,
         position: vec3.create(x: x, y: 6.0, z: 0.0), rotation: noRot, scale: unit)
     }
   }
-  ret scene
+  ret sceneWorld
 }
 
 func main() ret Int {
@@ -126,7 +128,7 @@ func main() ret Int {
   # Rae and registered as gpu2d images (shown as swatches along the bottom).
   registerTextures()
 
-  var scene: Scene3d = buildScene(rocks: rocks, treeTrunks: trunks, treeCanopies: canopies, ground: ground)
+  var sceneWorld: World3d = buildScene(rocks: rocks, treeTrunks: trunks, treeCanopies: canopies, ground: ground)
 
   var camera: Camera3d = defaultCamera3d()
   var light: Light3d = defaultLight3d()
@@ -178,11 +180,11 @@ func main() ret Int {
           if tag is RenderTag.present {
             gpu2d.endFrame()
           } else {
-            renderDeferredPass(r: renderer, tag: tag, scene: scene, camera: camera, light: light, aspect: aspect)
+            renderDeferredPassWorld(r: renderer, tag: tag, world: sceneWorld, camera: camera, light: light, aspect: aspect)
           }
         }
       }
-      snapshotPrevTransforms(scene: scene)
+      world3dPrevTransformSystem(world: sceneWorld)
     }
   }
   shutdown()

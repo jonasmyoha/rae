@@ -43,7 +43,9 @@ import sys
 import gpu2d
 import vec3
 import gbuffer
+import ecs/entity
 open scene3d
+open ecs/entity
 open gpu3d
 open gbuffer
 open rendererDeferred
@@ -59,8 +61,8 @@ func uploadMeshData(m: view MeshData) ret MeshHandle {
 # same material study as 109: the G-buffer's whole job is to carry these
 # two parameters to the lighting pass intact, so a scene that sweeps both
 # is what makes a wrong material channel visible rather than plausible.
-func buildScene(sphere: view MeshHandle, ground: view MeshHandle, torus: view MeshHandle) ret Scene3d {
-  var scene: Scene3d = createScene3d()
+func buildScene(sphere: view MeshHandle, ground: view MeshHandle, torus: view MeshHandle) ret World3d {
+  var world: World3d = createWorld3d()
   let noEmit: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let noRot: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let unit: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
@@ -74,13 +76,12 @@ func buildScene(sphere: view MeshHandle, ground: view MeshHandle, torus: view Me
       }
       # Hue varies across the grid so the albedo channel is legible as
       # something other than one flat colour.
-      let mat: Int = addMaterial(
-        scene: scene,
+      let mat: Material3d = {
         baseColor: vec3.create(x: 0.85, y: 0.2 + row.toFloat() * 0.15, z: 0.25 + col.toFloat() * 0.15),
-        metallic: metallic, roughness: roughness, emission: noEmit
-      )
+        metallic: metallic, roughness: roughness, emission: noEmit, toon: false
+      }
       let pos: Vec3 = vec3.create(x: (col.toFloat() - 2.0) * 2.4, y: (row.toFloat() - 2.0) * 2.4, z: 0.5)
-      let e: Int = addMeshInstance(scene: scene, mesh: sphere, material: mat, position: pos, rotation: noRot, scale: unit)
+      let e: EntityId = world3dAddMeshInstance(world: world, mesh: sphere, material: mat, position: pos, rotation: noRot, scale: unit)
     }
   }
 
@@ -90,12 +91,12 @@ func buildScene(sphere: view MeshHandle, ground: view MeshHandle, torus: view Me
   # albedo, so an emitter is authored by setting both. A value above 1
   # is the point: it proves the log encoding carries HDR range that a
   # plain 8-bit channel could not.
-  let emitMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.35, y: 0.7, z: 1.0), metallic: 0.0, roughness: 0.5, emission: vec3.create(x: 4.0, y: 4.0, z: 4.0))
-  let torusE: Int = addMeshInstance(scene: scene, mesh: torus, material: emitMat, position: vec3.create(x: 0.0, y: 0.0, z: 3.6), rotation: noRot, scale: unit)
+  let emitMat: Material3d = { baseColor: vec3.create(x: 0.35, y: 0.7, z: 1.0), metallic: 0.0, roughness: 0.5, emission: vec3.create(x: 4.0, y: 4.0, z: 4.0), toon: false }
+  let torusE: EntityId = world3dAddMeshInstance(world: world, mesh: torus, material: emitMat, position: vec3.create(x: 0.0, y: 0.0, z: 3.6), rotation: noRot, scale: unit)
 
-  let groundMat: Int = addMaterial(scene: scene, baseColor: vec3.create(x: 0.42, y: 0.43, z: 0.45), metallic: 0.0, roughness: 0.9, emission: noEmit)
-  let groundE: Int = addMeshInstance(scene: scene, mesh: ground, material: groundMat, position: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.7), rotation: noRot, scale: unit)
-  ret scene
+  let groundMat: Material3d = { baseColor: vec3.create(x: 0.42, y: 0.43, z: 0.45), metallic: 0.0, roughness: 0.9, emission: noEmit, toon: false }
+  let groundE: EntityId = world3dAddMeshInstance(world: world, mesh: ground, material: groundMat, position: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.7), rotation: noRot, scale: unit)
+  ret world
 }
 
 # Channel selection by name. Defaults to the lit frame; the G-buffer
@@ -124,7 +125,7 @@ func main() ret Int {
   let ground: MeshHandle = uploadMeshData(m: planeData)
   let torus: MeshHandle = uploadMeshData(m: torusData)
 
-  var scene: Scene3d = buildScene(sphere: sphere, ground: ground, torus: torus)
+  var world: World3d = buildScene(sphere: sphere, ground: ground, torus: torus)
   var camera: Camera3d = defaultCamera3d()
   var light: Light3d = defaultLight3d()
 
@@ -178,7 +179,7 @@ func main() ret Int {
 
     let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
     if gpu2d.renderGate() {
-      renderDeferredFrame(r: renderer, scene: scene, camera: camera, light: light, aspect: aspect)
+      renderDeferredFrameWorld(r: renderer, world: world, camera: camera, light: light, aspect: aspect)
     }
   }
   gbuffer.shutdownAll()

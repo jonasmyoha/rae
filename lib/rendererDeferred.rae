@@ -33,6 +33,7 @@ import core
 import gpu2d
 import math3d
 import gbuffer
+import gbufferWorld
 import gbufferInspector
 import gbufferPasses
 import sky
@@ -40,6 +41,7 @@ open rendergraph
 open math3d
 open scene3d
 open gbuffer
+open gbufferWorld
 open gbufferInspector
 open gbufferPasses
 open sky
@@ -390,6 +392,64 @@ func renderDeferredPass(r: mod DeferredRenderer, tag: view Int, scene: view Scen
     } else {
       presentFrame()
     }
+  }
+}
+
+# #794: the World3d twin of renderDeferredPass. Identical to it except the
+# G-buffer pass fills from the World3d ECS queries (renderSceneWorld +
+# renderSceneSdfWorld) instead of the Scene3d parallel lists. Every other tag is
+# scene-independent (they read G-buffer/depth resources the gbuffer pass already
+# wrote), so they are the same calls.
+func renderDeferredPassWorld(r: mod DeferredRenderer, tag: view Int, world: view World3d,
+                             camera: view Camera3d, light: view Light3d, aspect: view Float) pub {
+  if tag is RenderTag.gbuffer {
+    beginPass(cache: r.passes.gbuffer, camera: camera, light: light, aspect: aspect)
+    gbufferWorld.renderSceneWorld(cache: r.passes.gbuffer, world: world)
+    # Metaballs go into the SAME pass as the triangles, so the two kinds
+    # depth-test against each other rather than compositing (#392).
+    renderSceneSdfWorld(world: world, camera: camera)
+    endPass()
+  }
+  if tag is RenderTag.depthPyramid {
+    buildDepthPyramid(cache: r.passes.pyr)
+  }
+  if tag is RenderTag.ssao {
+    ssaoPass(cache: r.passes.ao, camera: camera)
+  }
+  if tag is RenderTag.lighting {
+    var sky: Sky = createSkyNone(light: light, clearColor: light.clearColor)
+    if r.hasSky {
+      sky = r.sky
+    }
+    lightingPassSky(cache: r.passes.light, camera: camera, light: light, sky: sky)
+  }
+  if tag is RenderTag.taa {
+    taaPass(cache: r.passes.taa)
+  }
+  if tag is RenderTag.composite {
+    if r.debugView is viewLit {
+      compositePassGraded(cache: r.passes.composite, exposure: light.exposure, grade: r.grade)
+    } else {
+      inspect(cache: r.passes.inspect, mode: r.debugView, zNear: camera.nearZ, zFar: camera.farZ)
+    }
+  }
+  if tag is RenderTag.present {
+    if r.hasUi {
+      gpu2d.endFrame()
+    } else {
+      presentFrame()
+    }
+  }
+}
+
+# #794: the World3d twin of renderDeferredFrame — walk the derived graph order and
+# dispatch each pass through renderDeferredPassWorld.
+func renderDeferredFrameWorld(r: mod DeferredRenderer, world: view World3d, camera: view Camera3d, light: view Light3d, aspect: view Float) pub {
+  var i: Int = 0
+  loop i < r.graph.order.length {
+    renderDeferredPassWorld(r: r, tag: deferredTagAt(r: r, i: i), world: world,
+                            camera: camera, light: light, aspect: aspect)
+    i = i + 1
   }
 }
 
