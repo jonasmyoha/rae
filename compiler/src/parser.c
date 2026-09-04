@@ -1990,12 +1990,13 @@ static AstStmt* parse_destructure_statement(Parser* parser, const Token* let_tok
   return stmt;
 }
 
-// Parses a local binding: `let`/`var`/`const`. The type annotation is
-// optional (`let x = expr` infers the type from the initializer); when
-// present it is written `name: Type`. `var` is mutable; `let`/`const` are
-// immutable (enforced in sema); `const` additionally requires a compile-time
-// initializer.
-static AstStmt* parse_binding_statement(Parser* parser, const Token* kw_token, bool is_var, bool is_const) {
+// Parses a local binding: `let`/`var`/`const`. The type annotation is written
+// `name: Type` and is MANDATORY for a value binding — Rae has no type inference,
+// types are always written (`let x: Int = 5`, never `let x = 5`). `require_type`
+// is false only for `if let`, which runs its own type check afterward. `var` is
+// mutable; `let`/`const` are immutable (enforced in sema); `const` additionally
+// requires a compile-time initializer.
+static AstStmt* parse_binding_statement(Parser* parser, const Token* kw_token, bool is_var, bool is_const, bool require_type) {
   const char* kw = is_const ? "const" : (is_var ? "var" : "let");
   const Token* name = parser_consume_ident(parser, "expected identifier after binding keyword");
   check_camel_case(parser, name, "variable");
@@ -2013,14 +2014,22 @@ static AstStmt* parse_binding_statement(Parser* parser, const Token* kw_token, b
 
   if (parser_match(parser, TOK_ASSIGN)) {
     stmt->as.let_stmt.is_bind = false;
+    // Rae has NO type inference: a value binding must state its type on the LHS.
+    // `let q = makeR()` / `let x = 5` (type inferred from the RHS) is an error —
+    // write `let q: Rect = ...` / `let x: Int = 5`. A struct is built with the
+    // type on the LHS and bare braces on the RHS: `let p: Point = { x: 1, y: 2 }`.
+    if (require_type && type == NULL) {
+        parser_error(parser, kw_token,
+            "'%s' needs an explicit type: Rae has no type inference — write '%s name: Type = ...'", kw, kw);
+    }
     if (type && (type->is_view || type->is_mod)) {
         parser_error(parser, parser_previous(parser), "use '=>' for alias bindings (view/mod)");
     }
     stmt->as.let_stmt.value = parse_expression(parser);
 
-    // Reject a typed constructor on the RHS only when the type is ALSO written
-    // on the LHS (writing it twice). With no LHS type, `let p = Point { ... }`
-    // is the idiomatic typed construction and is allowed.
+    // Reject a typed constructor on the RHS when the type is ALSO written on the
+    // LHS (writing it twice). With the LHS type now mandatory, this is the guard
+    // that steers construction to `let p: Point = { ... }` (bare braces).
     if (type != NULL
         && stmt->as.let_stmt.value->kind == AST_EXPR_OBJECT
         && stmt->as.let_stmt.value->as.object_literal.type != NULL
@@ -2098,7 +2107,7 @@ static AstStmt* parse_if_statement(Parser* parser, const Token* if_token) {
   if (parser_check(parser, TOK_KW_LET)) {
     const Token* let_token = parser_peek(parser);
     parser_advance(parser);
-    AstStmt* bind = parse_binding_statement(parser, let_token, false, false);
+    AstStmt* bind = parse_binding_statement(parser, let_token, false, false, /*require_type=*/false);
     if (bind && bind->kind == AST_STMT_LET) {
       AstTypeRef* bt = bind->as.let_stmt.type;
       if (!bt) {
@@ -2226,7 +2235,7 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
   // lexer deliberately has no newline token, so compare adjacent token lines.
   if (parser_match(parser, TOK_KW_VAR)) {
     const Token* var_token = parser_previous(parser);
-    AstStmt* init = parse_binding_statement(parser, var_token, true, false);
+    AstStmt* init = parse_binding_statement(parser, var_token, true, false, /*require_type=*/true);
     if (!init->as.let_stmt.value) {
       parser_error(parser, var_token, "three-clause loop 'var' requires an initializer");
     }
@@ -2350,13 +2359,13 @@ static AstStmt* parse_statement(Parser* parser) {
     if (looks_like_destructure(parser)) {
       return parse_destructure_statement(parser, let_token);
     }
-    return parse_binding_statement(parser, let_token, false, false);
+    return parse_binding_statement(parser, let_token, false, false, /*require_type=*/true);
   }
   if (parser_match(parser, TOK_KW_VAR)) {
-    return parse_binding_statement(parser, parser_previous(parser), true, false);
+    return parse_binding_statement(parser, parser_previous(parser), true, false, /*require_type=*/true);
   }
   if (parser_match(parser, TOK_KW_CONST)) {
-    return parse_binding_statement(parser, parser_previous(parser), false, true);
+    return parse_binding_statement(parser, parser_previous(parser), false, true, /*require_type=*/true);
   }
   if (parser_match(parser, TOK_KW_RET)) {
     return parse_return_statement(parser, parser_previous(parser));
