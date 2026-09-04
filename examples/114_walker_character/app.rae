@@ -196,7 +196,7 @@ type App {
 func createApp() ret App {
   gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — walker character (animated) [{rendererPathName()}]")
   var windowGeom: WindowGeometry = createWindowGeometry(
-    dir: hotReloadDir(), name: "window.{state114AppId}.geometry")
+    dir: dir(), name: "window.{state114AppId}.geometry")
   restoreWindowGeometry(g: windowGeom)
   let extentW: Float = windowExtentW()
   let extentH: Float = windowExtentH()
@@ -533,7 +533,7 @@ func createApp() ret App {
 
 # ----- per-frame timing + resize -------------------------------------------
 func frameBegin(app: mod App) {
-  profile.profileTick(profiler: app.profiler)
+  profile.tick(profiler: app.profiler)
   resizeUiToWindow(world: app.io.world, res: app.io.gpuUi)
   let now: Float64 = gpu2d.nowSeconds()
   var dt: Float = (now - app.frame.prevT) as Float
@@ -707,7 +707,7 @@ func runWalkerApp() ret Int {
   # skinned body parts (PartRoughness), and the terrain props + heightfield tiles
   # (PropKind) — all recycled ECS entities.
   log("[ecs] GameWorld: {gameWorldEntityCount(world: app.world)} entities ({gameWorldPartCount(world: app.world)} parts + hero + crowd + terrain + grass)")
-  profile.profileMaybeAutoStart(profiler: app.profiler)
+  profile.maybeAutoStart(profiler: app.profiler)
   loop not gpu2d.pollClose() {
     frameBegin(app: app)
     updateApp(app: app)

@@ -58,7 +58,7 @@ const cameraBarSlotOff: String = "surfaceAlt"
 # disappears is worse than a readout that does.
 const cameraBarReadoutCount: Int = 4
 
-func cameraBarReadoutId(index: view Int) ret String {
+func readoutId(index: view Int) ret String {
   if index is 0 { ret "CameraFovLabel" }
   if index is 1 { ret "CameraPositionLabel" }
   if index is 2 { ret "CameraYawLabel" }
@@ -117,7 +117,7 @@ func syncCameraBar(world: mod UiWorld, rig: view CameraRig, camera: view Camera3
     pitchDeg = (rig.freePitch * 57.2957795).toInt()
   }
   let yawDeg: Int = (rig.yaw * 57.2957795).toInt()
-  setNodeText(world: world, nodeId: "CameraModeLabel", value: cameraRigModeName(rig: rig))
+  setNodeText(world: world, nodeId: "CameraModeLabel", value: modeName(rig: rig))
   # THE TOGGLES ARE PAINTED FROM THE RIG, not from a copy of the state
   # kept beside the button. A restored snapshot flips the rig's fields
   # without a click ever happening, and a button that tracked its own
@@ -147,7 +147,7 @@ func fitCameraBar(world: mod UiWorld, res: view Gpu2dUi, hostNodeId: view String
   var visible: Int = cameraBarReadoutCount
   var i: Int = 0
   loop i < cameraBarReadoutCount {
-    setNodeActive(world: world, nodeId: cameraBarReadoutId(index: i), value: true)
+    setNodeActive(world: world, nodeId: readoutId(index: i), value: true)
     i = i + 1
   }
   runUiSystems(world: world, res: res)
@@ -163,7 +163,7 @@ func fitCameraBar(world: mod UiWorld, res: view Gpu2dUi, hostNodeId: view String
     if visible < 0 {
       ret
     }
-    setNodeActive(world: world, nodeId: cameraBarReadoutId(index: visible), value: false)
+    setNodeActive(world: world, nodeId: readoutId(index: visible), value: false)
     runUiSystems(world: world, res: res)
     guard = guard + 1
   }

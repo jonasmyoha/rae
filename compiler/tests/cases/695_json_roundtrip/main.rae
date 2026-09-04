@@ -34,16 +34,16 @@ func main() {
   log("stable: {restr is built}")
 
   let doc2: JsonDoc = parseJson(source: restr)
-  let root2: JsonValue = jsonRoot(doc: doc2)
+  let root2: JsonValue = root(doc: doc2)
 
-  let nameVal: JsonValue = jsonValueAt(doc: doc2, idx: jsonField(doc: doc2, this: root2, key: "name"))
-  let countVal: JsonValue = jsonValueAt(doc: doc2, idx: jsonField(doc: doc2, this: root2, key: "count"))
-  let flagVal: JsonValue = jsonValueAt(doc: doc2, idx: jsonField(doc: doc2, this: root2, key: "flag"))
-  let nestedVal: JsonValue = jsonValueAt(doc: doc2, idx: jsonField(doc: doc2, this: root2, key: "nested"))
-  let listVal: JsonValue = jsonValueAt(doc: doc2, idx: jsonField(doc: doc2, this: root2, key: "list"))
+  let nameVal: JsonValue = jsonValueAt(doc: doc2, idx: field(doc: doc2, this: root2, key: "name"))
+  let countVal: JsonValue = jsonValueAt(doc: doc2, idx: field(doc: doc2, this: root2, key: "count"))
+  let flagVal: JsonValue = jsonValueAt(doc: doc2, idx: field(doc: doc2, this: root2, key: "flag"))
+  let nestedVal: JsonValue = jsonValueAt(doc: doc2, idx: field(doc: doc2, this: root2, key: "nested"))
+  let listVal: JsonValue = jsonValueAt(doc: doc2, idx: field(doc: doc2, this: root2, key: "list"))
 
-  let xVal: JsonValue = jsonValueAt(doc: doc2, idx: jsonField(doc: doc2, this: nestedVal, key: "x"))
-  let list1Val: JsonValue = jsonArrayAt(doc: doc2, this: listVal, idx: 1)
+  let xVal: JsonValue = jsonValueAt(doc: doc2, idx: field(doc: doc2, this: nestedVal, key: "x"))
+  let list1Val: JsonValue = arrayAt(doc: doc2, this: listVal, idx: 1)
 
   let name: String = jsonString(this: nameVal, fallback: dash)
   let count: Int = jsonInt(this: countVal, fallback: 0)

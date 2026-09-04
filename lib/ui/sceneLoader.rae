@@ -76,7 +76,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
       }
       if alreadySeen is false {
         reachable.set(index: cur, value: true)
-        let n: view SceneNode => sceneNodeAt(this: scene, idx: cur)
+        let n: view SceneNode => nodeAt(this: scene, idx: cur)
         let cn: Int = n.childrenIds.length
         var ci: Int = 0
         loop ci < cn {
@@ -105,7 +105,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
       isReachable = reach
     }
     if isReachable {
-      let node: view SceneNode => sceneNodeAt(this: scene, idx: i)
+      let node: view SceneNode => nodeAt(this: scene, idx: i)
       let entity: EntityId = createEntity(world: world)
       appendEntityListSL(lst: entitiesByNodeIndex, value: entity)
       if pageId.length() is 0 {
@@ -132,7 +132,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
     if jReach is false {
       j = j + 1
     } else {
-    let node: view SceneNode => sceneNodeAt(this: scene, idx: j)
+    let node: view SceneNode => nodeAt(this: scene, idx: j)
     let entity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: j)
 
     # Always tag the entity with NodeId + Name (label = nodeId by default)
@@ -145,16 +145,16 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
 
     # Walk the node's component bag in declaration order.
     let bag: JsonValue = json.jsonValueAt(doc: docView, idx: node.componentsValueIdx)
-    let keyCount: Int = json.jsonObjectLen(this: bag)
+    let keyCount: Int = json.objectLen(this: bag)
     var k: Int = 0
     loop k < keyCount {
-      let key: String = json.jsonObjectKeyAt(doc: docView, this: bag, idx: k)
+      let key: String = json.objectKeyAt(doc: docView, this: bag, idx: k)
       # Children is hierarchy, not a component — handled in pass 3.
       let childrenKey: String = "Children"
       if key is childrenKey {
         k = k + 1
       } else {
-        let valueAtKey: JsonValue = json.jsonObjectValueAt(doc: docView, this: bag, idx: k)
+        let valueAtKey: JsonValue = json.objectValueAt(doc: docView, this: bag, idx: k)
         applyComponentByName(
           world: world
           entity: entity
@@ -179,7 +179,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
     if pReach is false {
       p = p + 1
     } else {
-    let node: view SceneNode => sceneNodeAt(this: scene, idx: p)
+    let node: view SceneNode => nodeAt(this: scene, idx: p)
     let parentEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
     let kn: Int = node.childrenIds.length
     var q: Int = 0
@@ -299,12 +299,12 @@ func dumpScene(world: view UiWorld, scene: view Scene) {
   let n: Int = scene.nodes.length
   var i: Int = 0
   loop i < n {
-    let node: view SceneNode => sceneNodeAt(this: scene, idx: i)
+    let node: view SceneNode => nodeAt(this: scene, idx: i)
     let entityIdx: Int = sceneNodeIndex(this: scene, nodeId: node.nodeId)
     # Resolve via the world's nodeIds map (more authoritative than our
     # local list — covers later runtime additions too).
     if let entityRaw: Int = world.nodeIds.get(k: node.nodeId) {
-      let entity: EntityId = entityId(v: entityRaw)
+      let entity: EntityId = id(v: entityRaw)
       var parentStr: String = "(root)"
       if componentHas(this: world.parents, entity: entity) {
         let pl: Parent = componentGet(this: world.parents, entity: entity)

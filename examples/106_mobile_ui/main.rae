@@ -48,10 +48,10 @@ func main() {
   let winH: Float = windowH
   uiInitWindow(width: winW.toInt(), height: winH.toInt(), title: "Rae Mobile UI — {backendEnv}")
   # Remember the window across restarts. Opt-in. The name carries the app id:
-  # hotReloadDir() is ".rae" for every app, so a shared name is a shared window
+  # dir() is ".rae" for every app, so a shared name is a shared window
   # and the 3D examples were restoring this phone-shaped one. See lib/ui.
   var windowGeom: WindowGeometry = createWindowGeometry(
-    dir: hotReloadDir(), name: "window.106_mobile_ui.geometry")
+    dir: dir(), name: "window.106_mobile_ui.geometry")
   restoreWindowGeometry(g: windowGeom)
   # Backend-agnostic window/input hooks are no-ops on GPU2D when the SDL3
   # backend already owns the corresponding event state.
@@ -452,7 +452,7 @@ func main() {
       # overlay) onto the freshly-built world BEFORE layout runs so
       # they participate in measure/place like any other entity.
       addDebugLayer(world: world, debug: debug)
-      # `layoutSystemIfDirty` + `transformSystemIfDirty` consult the
+      # `ifDirty` + `systemIfDirty` consult the
       # table-level generation counters on the world's ComponentTables
       # (introduced in the same series as these calls) and skip the
       # whole walk when none of the inputs has changed since the cache
@@ -464,13 +464,13 @@ func main() {
       # input tables — for example, a future per-frame re-layout /
       # re-transform safety net.
       let layoutCache: LayoutCache = createLayoutCache()
-      layoutSystemIfDirty(world: world, cache: layoutCache)
+      ifDirty(world: world, cache: layoutCache)
       # Art-direction pass (#212 S6): Aspect + ScaleToFit run between
       # layout and transform. Change-gated, so an idle frame with an
       # unchanged layout writes nothing.
       fitSystem(world: world)
       let transformCache: TransformCache = createTransformCache()
-      transformSystemIfDirty(world: world, cache: transformCache)
+      systemIfDirty(world: world, cache: transformCache)
       # Find the scroll-target entity for this world. Scroll handlers
       # mutate this entity's Offset + ScrollState in place every frame
       # — that's what lets wheel/drag/momentum/spring run WITHOUT
@@ -688,7 +688,7 @@ func main() {
           # ---- ECS frame phases (docs/ecs-systems-and-data-observation.md
           # §4) — the named pipeline this loop realises:
           #   1. Input             -> runFrameInputDispatch (below)
-          #   2. Apply(A) commands -> PlaybackSystem.playbackProcessCommands
+          #   2. Apply(A) commands -> PlaybackSystem.processCommands
           #                            (#265; more systems' processCommands
           #                            join here as they're carved out)
           #   3. Observation refresh -> refreshUiDiffs + syncFrameData's
@@ -719,7 +719,7 @@ func main() {
           # Apply(A): the PlaybackSystem drains its own command inbox and
           # applies play/pause (etc.) to its own state before the
           # observation refresh reads it (#265).
-          playbackProcessCommands(this: playback)
+          processCommands(this: playback)
 
           # UI diff/rebuild trigger phase. Runs after input so
           # component visuals depending on changed app/playback data
@@ -854,7 +854,7 @@ func main() {
           # tracked table. Runs BEFORE the active check so a scroll-
           # only frame still ends up dirty downstream — Offset mutate
           # → layout reruns → ComputedRect bumps → transform reruns →
-          # WorldTransform2D bumps → renderCacheDirty trips → active.
+          # WorldTransform2D bumps → cacheDirty trips → active.
           #
           # Refresh safe-area insets before layout. Idempotent (skips
           # entities whose insets are unchanged), so at idle it does not

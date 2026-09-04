@@ -26,7 +26,7 @@ func rockI(l: view List(Int), i: view Int) ret Int {
   if let v: Int = l.copyAt(index: i) { ret v }
   ret 0
 }
-func rockPosAt(pos: view List(Vec3), i: view Int) ret Vec3 {
+func posAt(pos: view List(Vec3), i: view Int) ret Vec3 {
   if let v: Vec3 = pos.copyAt(index: i) { ret v }
   ret create(x: 0.0, y: 0.0, z: 0.0)
 }
@@ -57,7 +57,7 @@ func generateRock(subdivision: copy Int, sliceCount: copy Int, size: copy Float,
     let dist: Float = 0.55 + hash2(x: c, y: 44, seed: seed) * 0.35
     var vi: Int = 0
     loop vi < pos.length {
-      let p: Vec3 = rockPosAt(pos: pos, i: vi)
+      let p: Vec3 = posAt(pos: pos, i: vi)
       let d: Float = vdot(a: p, b: pn)
       if d > dist {
         pos.set(index: vi, value: vsub(a: p, b: vscale(a: pn, s: d - dist)))
@@ -75,9 +75,9 @@ func generateRock(subdivision: copy Int, sliceCount: copy Int, size: copy Float,
     let ia: Int = rockI(l: base.indices, i: t)
     let ib: Int = rockI(l: base.indices, i: t + 1)
     let ic: Int = rockI(l: base.indices, i: t + 2)
-    let pa: Vec3 = vscale(a: rockPosAt(pos: pos, i: ia), s: size)
-    let pb: Vec3 = vscale(a: rockPosAt(pos: pos, i: ib), s: size)
-    let pc: Vec3 = vscale(a: rockPosAt(pos: pos, i: ic), s: size)
+    let pa: Vec3 = vscale(a: posAt(pos: pos, i: ia), s: size)
+    let pb: Vec3 = vscale(a: posAt(pos: pos, i: ib), s: size)
+    let pc: Vec3 = vscale(a: posAt(pos: pos, i: ic), s: size)
     let fn: Vec3 = vnorm(a: vcross(a: vsub(a: pb, b: pa), b: vsub(a: pc, b: pa)))
     pushVert(verts: verts, px: pa.x, py: pa.y, pz: pa.z, nx: fn.x, ny: fn.y, nz: fn.z, u: 0.0, v: 0.0)
     pushVert(verts: verts, px: pb.x, py: pb.y, pz: pb.z, nx: fn.x, ny: fn.y, nz: fn.z, u: 1.0, v: 0.0)

@@ -78,7 +78,7 @@ func syncDesignResolution() {
 # which reads as "my theme file is being ignored" — and is, for exactly
 # one of its five sections.
 #
-# The vocabulary is closed (see themeColorByName): a theme may re-colour
+# The vocabulary is closed (see colorByName): a theme may re-colour
 # these ten slots, not add an eleventh. Any slot the file omits keeps the
 # built-in value rather than going transparent.
 func overlayPalette(base: view Theme, tokens: view ResolvedTheme) ret Theme {
@@ -221,7 +221,7 @@ func resizeUiToWindow(world: mod UiWorld, res: view Gpu2dUi) ret Bool {
 
 func nodeEntityFor(world: view UiWorld, nodeId: view String) ret EntityId {
   if let raw: Int = world.nodeIds.get(k: nodeId) {
-    ret entityId(v: raw)
+    ret id(v: raw)
   }
   ret noEntity()
 }

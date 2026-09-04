@@ -207,17 +207,17 @@ func loadGlb(path: view String) pub ret Glb {
 # ----- JSON convenience ------------------------------------------------
 # glTF documents are deeply nested, so reaching "the byteOffset of the
 # bufferView of the accessor of an attribute" is four lookups. These keep
-# the accessor code readable instead of a wall of valueAt(jsonField(...)).
+# the accessor code readable instead of a wall of valueAt(field(...)).
 
 func objField(g: view Glb, obj: view JsonValue, key: view String) pub ret JsonValue {
-  ret valueAt(doc: g.doc, idx: jsonField(doc: g.doc, this: obj, key: key))
+  ret valueAt(doc: g.doc, idx: field(doc: g.doc, this: obj, key: key))
 }
 
 # Missing numeric fields are COMMON and legal in glTF — byteOffset,
 # byteStride and normalized are all optional with defined defaults — so a
 # missing key returns the fallback rather than being an error.
 func intField(g: view Glb, obj: view JsonValue, key: view String, fallback: view Int) pub ret Int {
-  let idx: Int = jsonField(doc: g.doc, this: obj, key: key)
+  let idx: Int = field(doc: g.doc, this: obj, key: key)
   if idx < 0 {
     ret fallback
   }
@@ -267,12 +267,12 @@ type Accessor {
 # assuming elements are packed end to end. When the bufferView omits it
 # the elements ARE packed and the stride is the element size.
 func accessorAt(g: view Glb, index: view Int) pub ret Accessor {
-  let root: JsonValue = jsonRoot(doc: g.doc)
+  let root: JsonValue = root(doc: g.doc)
   let accessors: JsonValue = arrayField(g: g, obj: root, key: "accessors")
-  if index < 0 or index >= jsonArrayLen(this: accessors) {
+  if index < 0 or index >= arrayLen(this: accessors) {
     ret Accessor { ok: false, count: 0, components: 0, componentType: 0, start: 0, stride: 0 }
   }
-  let acc: JsonValue = jsonArrayAt(doc: g.doc, this: accessors, idx: index)
+  let acc: JsonValue = arrayAt(doc: g.doc, this: accessors, idx: index)
   let typeName: String = jsonString(this: objField(g: g, obj: acc, key: "type"), fallback: "")
   let comps: Int = typeComponents(t: typeName)
   let compType: Int = intField(g: g, obj: acc, key: "componentType", fallback: 0)
@@ -290,7 +290,7 @@ func accessorAt(g: view Glb, index: view Int) pub ret Accessor {
     ret Accessor { ok: false, count: 0, components: 0, componentType: 0, start: 0, stride: 0 }
   }
   let views: JsonValue = arrayField(g: g, obj: root, key: "bufferViews")
-  let bv: JsonValue = jsonArrayAt(doc: g.doc, this: views, idx: bvIndex)
+  let bv: JsonValue = arrayAt(doc: g.doc, this: views, idx: bvIndex)
   let bvOffset: Int = intField(g: g, obj: bv, key: "byteOffset", fallback: 0)
   var stride: Int = intField(g: g, obj: bv, key: "byteStride", fallback: 0)
   if stride is 0 {
@@ -378,11 +378,11 @@ func readInts(g: view Glb, index: view Int) pub ret List(Int) {
 # renders instead of failing to load. A missing POSITION is not
 # recoverable and returns an empty mesh.
 func loadPrimitive(g: view Glb, meshIndex: view Int, primIndex: view Int) pub ret MeshData {
-  let root: JsonValue = jsonRoot(doc: g.doc)
+  let root: JsonValue = root(doc: g.doc)
   let meshes: JsonValue = arrayField(g: g, obj: root, key: "meshes")
-  let mesh: JsonValue = jsonArrayAt(doc: g.doc, this: meshes, idx: meshIndex)
+  let mesh: JsonValue = arrayAt(doc: g.doc, this: meshes, idx: meshIndex)
   let prims: JsonValue = arrayField(g: g, obj: mesh, key: "primitives")
-  let prim: JsonValue = jsonArrayAt(doc: g.doc, this: prims, idx: primIndex)
+  let prim: JsonValue = arrayAt(doc: g.doc, this: prims, idx: primIndex)
   let attrs: JsonValue = objField(g: g, obj: prim, key: "attributes")
 
   let posAcc: Int = intField(g: g, obj: attrs, key: "POSITION", fallback: 0 - 1)
@@ -543,14 +543,14 @@ func loadAllPrimitives(g: view Glb) pub ret MeshData {
   if g.ok is false {
     ret MeshData { verts: own verts, indices: own indices, vertCount: 0 }
   }
-  let root: JsonValue = jsonRoot(doc: g.doc)
+  let root: JsonValue = root(doc: g.doc)
   let meshes: JsonValue = arrayField(g: g, obj: root, key: "meshes")
-  let meshCount: Int = jsonArrayLen(this: meshes)
+  let meshCount: Int = arrayLen(this: meshes)
   var m: Int = 0
   loop m < meshCount {
-    let mesh: JsonValue = jsonArrayAt(doc: g.doc, this: meshes, idx: m)
+    let mesh: JsonValue = arrayAt(doc: g.doc, this: meshes, idx: m)
     let prims: JsonValue = arrayField(g: g, obj: mesh, key: "primitives")
-    let primCount: Int = jsonArrayLen(this: prims)
+    let primCount: Int = arrayLen(this: prims)
     var p: Int = 0
     loop p < primCount {
       let part: MeshData = loadPrimitive(g: g, meshIndex: m, primIndex: p)
@@ -629,19 +629,19 @@ func meshCount(g: view Glb) pub ret Int {
   if g.ok is false {
     ret 0
   }
-  ret jsonArrayLen(this: arrayField(g: g, obj: jsonRoot(doc: g.doc), key: "meshes"))
+  ret arrayLen(this: arrayField(g: g, obj: root(doc: g.doc), key: "meshes"))
 }
 
 func primitiveCount(g: view Glb, meshIndex: view Int) pub ret Int {
   if g.ok is false {
     ret 0
   }
-  let meshes: JsonValue = arrayField(g: g, obj: jsonRoot(doc: g.doc), key: "meshes")
-  if meshIndex < 0 or meshIndex >= jsonArrayLen(this: meshes) {
+  let meshes: JsonValue = arrayField(g: g, obj: root(doc: g.doc), key: "meshes")
+  if meshIndex < 0 or meshIndex >= arrayLen(this: meshes) {
     ret 0
   }
-  let mesh: JsonValue = jsonArrayAt(doc: g.doc, this: meshes, idx: meshIndex)
-  ret jsonArrayLen(this: arrayField(g: g, obj: mesh, key: "primitives"))
+  let mesh: JsonValue = arrayAt(doc: g.doc, this: meshes, idx: meshIndex)
+  ret arrayLen(this: arrayField(g: g, obj: mesh, key: "primitives"))
 }
 
 # The mesh's authored name, which is how a caller tells one part of a
@@ -652,10 +652,10 @@ func meshName(g: view Glb, meshIndex: view Int) pub ret String {
   if g.ok is false {
     ret ""
   }
-  let meshes: JsonValue = arrayField(g: g, obj: jsonRoot(doc: g.doc), key: "meshes")
-  if meshIndex < 0 or meshIndex >= jsonArrayLen(this: meshes) {
+  let meshes: JsonValue = arrayField(g: g, obj: root(doc: g.doc), key: "meshes")
+  if meshIndex < 0 or meshIndex >= arrayLen(this: meshes) {
     ret ""
   }
-  let mesh: JsonValue = jsonArrayAt(doc: g.doc, this: meshes, idx: meshIndex)
+  let mesh: JsonValue = arrayAt(doc: g.doc, this: meshes, idx: meshIndex)
   ret jsonString(this: objField(g: g, obj: mesh, key: "name"), fallback: "")
 }

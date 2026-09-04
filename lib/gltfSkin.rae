@@ -105,11 +105,11 @@ func loadSkinnedPrimitiveSmoothed(g: view Glb, meshIndex: view Int, primIndex: v
   if g.ok is false {
     ret SkinnedMeshData { verts: own verts, indices: own indices, vertCount: 0 }
   }
-  let root: JsonValue = jsonRoot(doc: g.doc)
+  let root: JsonValue = root(doc: g.doc)
   let meshes: JsonValue = arrayField(g: g, obj: root, key: "meshes")
-  let mesh: JsonValue = jsonArrayAt(doc: g.doc, this: meshes, idx: meshIndex)
+  let mesh: JsonValue = arrayAt(doc: g.doc, this: meshes, idx: meshIndex)
   let prims: JsonValue = arrayField(g: g, obj: mesh, key: "primitives")
-  let prim: JsonValue = jsonArrayAt(doc: g.doc, this: prims, idx: primIndex)
+  let prim: JsonValue = arrayAt(doc: g.doc, this: prims, idx: primIndex)
   let attrs: JsonValue = objField(g: g, obj: prim, key: "attributes")
 
   # Geometry comes from the existing loader so the two paths cannot
@@ -322,25 +322,25 @@ func loadSkeleton(g: view Glb, skinIndex: view Int) pub ret Skeleton {
   if g.ok is false {
     ret emptySkeleton()
   }
-  let root: JsonValue = jsonRoot(doc: g.doc)
+  let root: JsonValue = root(doc: g.doc)
   let skins: JsonValue = arrayField(g: g, obj: root, key: "skins")
-  if skinIndex < 0 or skinIndex >= jsonArrayLen(this: skins) {
+  if skinIndex < 0 or skinIndex >= arrayLen(this: skins) {
     ret emptySkeleton()
   }
-  let skin: JsonValue = jsonArrayAt(doc: g.doc, this: skins, idx: skinIndex)
+  let skin: JsonValue = arrayAt(doc: g.doc, this: skins, idx: skinIndex)
   let jointsArr: JsonValue = arrayField(g: g, obj: skin, key: "joints")
-  let jointCount: Int = jsonArrayLen(this: jointsArr)
+  let jointCount: Int = arrayLen(this: jointsArr)
   let jointNodes: List(Int) = createList(Int, cap: jointCount)
   var i: Int = 0
   loop i < jointCount {
-    jointNodes.add(value: jsonInt(this: jsonArrayAt(doc: g.doc, this: jointsArr, idx: i), fallback: 0))
+    jointNodes.add(value: jsonInt(this: arrayAt(doc: g.doc, this: jointsArr, idx: i), fallback: 0))
     i = i + 1
   }
   let ibmAcc: Int = intField(g: g, obj: skin, key: "inverseBindMatrices", fallback: 0 - 1)
   let inverseBind: List(Float) = readFloats(g: g, index: ibmAcc)
 
   let nodes: JsonValue = arrayField(g: g, obj: root, key: "nodes")
-  let nodeCount: Int = jsonArrayLen(this: nodes)
+  let nodeCount: Int = arrayLen(this: nodes)
   let parent: List(Int) = createList(Int, cap: nodeCount)
   let nodeNames: List(String) = createList(String, cap: nodeCount)
   let localT: List(Float) = createList(Float, cap: nodeCount * 3)
@@ -367,42 +367,42 @@ func loadSkeleton(g: view Glb, skinIndex: view Int) pub ret Skeleton {
   }
   n = 0
   loop n < nodeCount {
-    let node: JsonValue = jsonArrayAt(doc: g.doc, this: nodes, idx: n)
+    let node: JsonValue = arrayAt(doc: g.doc, this: nodes, idx: n)
     nodeNames.set(index: n, value: jsonString(this: objField(g: g, obj: node, key: "name"), fallback: ""))
-    let tIdx: Int = jsonField(doc: g.doc, this: node, key: "translation")
+    let tIdx: Int = field(doc: g.doc, this: node, key: "translation")
     if tIdx >= 0 {
       let tv: JsonValue = valueAt(doc: g.doc, idx: tIdx)
       var c: Int = 0
       loop c < 3 {
-        localT.set(index: n * 3 + c, value: jsonFloat(this: jsonArrayAt(doc: g.doc, this: tv, idx: c), fallback: 0.0))
+        localT.set(index: n * 3 + c, value: jsonFloat(this: arrayAt(doc: g.doc, this: tv, idx: c), fallback: 0.0))
         c = c + 1
       }
     }
-    let rIdx: Int = jsonField(doc: g.doc, this: node, key: "rotation")
+    let rIdx: Int = field(doc: g.doc, this: node, key: "rotation")
     if rIdx >= 0 {
       let rv: JsonValue = valueAt(doc: g.doc, idx: rIdx)
       var c: Int = 0
       loop c < 4 {
-        localR.set(index: n * 4 + c, value: jsonFloat(this: jsonArrayAt(doc: g.doc, this: rv, idx: c), fallback: 0.0))
+        localR.set(index: n * 4 + c, value: jsonFloat(this: arrayAt(doc: g.doc, this: rv, idx: c), fallback: 0.0))
         c = c + 1
       }
     }
-    let sIdx: Int = jsonField(doc: g.doc, this: node, key: "scale")
+    let sIdx: Int = field(doc: g.doc, this: node, key: "scale")
     if sIdx >= 0 {
       let sv: JsonValue = valueAt(doc: g.doc, idx: sIdx)
       var c: Int = 0
       loop c < 3 {
-        localS.set(index: n * 3 + c, value: jsonFloat(this: jsonArrayAt(doc: g.doc, this: sv, idx: c), fallback: 1.0))
+        localS.set(index: n * 3 + c, value: jsonFloat(this: arrayAt(doc: g.doc, this: sv, idx: c), fallback: 1.0))
         c = c + 1
       }
     }
     # Invert the children list into a parent map.
-    let cIdx: Int = jsonField(doc: g.doc, this: node, key: "children")
+    let cIdx: Int = field(doc: g.doc, this: node, key: "children")
     if cIdx >= 0 {
       let cv: JsonValue = valueAt(doc: g.doc, idx: cIdx)
       var k: Int = 0
-      loop k < jsonArrayLen(this: cv) {
-        let child: Int = jsonInt(this: jsonArrayAt(doc: g.doc, this: cv, idx: k), fallback: 0 - 1)
+      loop k < arrayLen(this: cv) {
+        let child: Int = jsonInt(this: arrayAt(doc: g.doc, this: cv, idx: k), fallback: 0 - 1)
         if child >= 0 and child < nodeCount {
           parent.set(index: child, value: n)
         }
@@ -673,12 +673,12 @@ func loadClip(g: view Glb, animIndex: view Int, sk: view Skeleton) pub ret Clip 
   if g.ok is false or sk.ok is false {
     ret emptyClip()
   }
-  let root: JsonValue = jsonRoot(doc: g.doc)
+  let root: JsonValue = root(doc: g.doc)
   let anims: JsonValue = arrayField(g: g, obj: root, key: "animations")
-  if animIndex < 0 or animIndex >= jsonArrayLen(this: anims) {
+  if animIndex < 0 or animIndex >= arrayLen(this: anims) {
     ret emptyClip()
   }
-  let anim: JsonValue = jsonArrayAt(doc: g.doc, this: anims, idx: animIndex)
+  let anim: JsonValue = arrayAt(doc: g.doc, this: anims, idx: animIndex)
   let name: String = jsonString(this: objField(g: g, obj: anim, key: "name"), fallback: "clip")
   let samplers: JsonValue = arrayField(g: g, obj: anim, key: "samplers")
   let channels: JsonValue = arrayField(g: g, obj: anim, key: "channels")
@@ -695,8 +695,8 @@ func loadClip(g: view Glb, animIndex: view Int, sk: view Skeleton) pub ret Clip 
   var duration: Float = 0.0
 
   var c: Int = 0
-  loop c < jsonArrayLen(this: channels) {
-    let ch: JsonValue = jsonArrayAt(doc: g.doc, this: channels, idx: c)
+  loop c < arrayLen(this: channels) {
+    let ch: JsonValue = arrayAt(doc: g.doc, this: channels, idx: c)
     let target: JsonValue = objField(g: g, obj: ch, key: "target")
     let clipNode: Int = intField(g: g, obj: target, key: "node", fallback: 0 - 1)
     let pathName: String = jsonString(this: objField(g: g, obj: target, key: "path"), fallback: "")
@@ -707,12 +707,12 @@ func loadClip(g: view Glb, animIndex: view Int, sk: view Skeleton) pub ret Clip 
     # "weights" targets morph targets, which this loader does not do. Skip
     # rather than misinterpret it as a transform channel.
     if p >= 0 and clipNode >= 0 {
-      let clipNodeObj: JsonValue = jsonArrayAt(doc: g.doc, this: nodes, idx: clipNode)
+      let clipNodeObj: JsonValue = arrayAt(doc: g.doc, this: nodes, idx: clipNode)
       let clipName: String = jsonString(this: objField(g: g, obj: clipNodeObj, key: "name"), fallback: "")
       let skNode: Int = nodeByName(sk: sk, name: clipName)
       if skNode >= 0 {
         let samplerIdx: Int = intField(g: g, obj: ch, key: "sampler", fallback: 0 - 1)
-        let sampler: JsonValue = jsonArrayAt(doc: g.doc, this: samplers, idx: samplerIdx)
+        let sampler: JsonValue = arrayAt(doc: g.doc, this: samplers, idx: samplerIdx)
         let interpName: String = jsonString(this: objField(g: g, obj: sampler, key: "interpolation"), fallback: "LINEAR")
         var ip: Int = interpLinear
         if interpName is "STEP" { ip = interpStep }

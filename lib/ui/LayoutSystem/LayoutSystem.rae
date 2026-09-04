@@ -446,8 +446,8 @@ func layoutSystem(world: mod UiWorld) {
 }
 
 # -----------------------------------------------------------------
-# layoutSystemIfDirty — generation-skip wrapper around layoutSystem
-# (mirrors transformSystemIfDirty). Tracks the generation counter of
+# ifDirty — generation-skip wrapper around layoutSystem
+# (mirrors systemIfDirty). Tracks the generation counter of
 # every ComponentTable the layout pass READS; when none bumped since
 # the last call, the measure+compute walk is skipped (identical output).
 # The layout OUTPUT tables (measuredSizes/computedRects) are deliberately
@@ -496,7 +496,7 @@ func createLayoutCache() pub ret LayoutCache {
 # entire layoutSystem once or skips it entirely. It does NOT short-
 # circuit any of the inner measure/compute iterations — those run to
 # convergence as before each time the wrapper actually fires.
-func layoutSystemIfDirty(world: mod UiWorld, cache: mod LayoutCache) pub ret Bool {
+func ifDirty(world: mod UiWorld, cache: mod LayoutCache) pub ret Bool {
   let rGen: Int = componentTableGeneration(Rect, this: world.rects)
   let szGen: Int = componentTableGeneration(Size, this: world.sizes)
   let lyGen: Int = componentTableGeneration(Layout, this: world.layouts)
