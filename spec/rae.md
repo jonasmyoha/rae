@@ -5,6 +5,29 @@
 
 ---
 
+## 0. Design
+
+Rae is a minimalistic language for code that humans and AI agents both read. It
+is built around the **Entity Component System (ECS)** as its general
+architecture — not only for games but as the default shape for programs of any
+kind: data lives in components on entities, behavior lives in systems, and shared
+state is a resource owned by a World or App rather than a global.
+
+The language is deliberately **strict and explicit**, so a reader — person or
+tool — never has to reconstruct missing information:
+
+* **Types are always written** — there is no type inference (§2.4).
+* **No module-level globals** — mutable/heap state lives on an owner (§2.5).
+* **Parameter modes and named arguments are mandatory** (§5.1).
+* **Struct literals are field-checked** — an unknown field name is a compile
+  error (§2.4).
+* **Naming conventions are enforced by the compiler** (§1.2).
+
+See `README.md` / `AGENTS.md` for the fuller rationale, and
+`docs/globals-and-app-ownership.md` for the ownership model behind §2.5.
+
+---
+
 ## 1. Lexical Structure
 
 ### 1.0 Source Files
@@ -21,22 +44,33 @@
 ### 1.2 Identifiers
 
 * Pattern: `[a-zA-Z_][a-zA-Z0-9_]*`
-* **Naming Conventions:**
-  * Function names MUST be `camelCase` (e.g. `add`, `removeLast`)
-  * Type names MUST be `PascalCase` (e.g. `List`, `Map`, `Point`)
-  * Variable names MUST be `camelCase`.
+* **Naming Conventions (compiler-enforced — a violation is a compile error):**
+  * Type, enum and module names MUST be `PascalCase` (e.g. `List`, `Map`, `Point`).
+  * Everything else — functions, parameters, locals, struct fields, enum cases
+    and constants — MUST be `camelCase` (e.g. `add`, `removeLast`, `maxRetries`).
+  * `snake_case` and `SCREAMING_SNAKE_CASE` are rejected everywhere (an `_` in an
+    identifier, or the wrong first-letter case, fails to compile).
+  * The one exception is C-interop names, matching how `extern` is the C-boundary
+    escape hatch: `extern` function names and their parameters name C symbols, a
+    `type X: c_struct` name mirrors a C struct, and generated `lib/webgpu/`
+    bindings mirror the WebGPU C API.
 * Case-sensitive
 
 ### 1.3 Keywords
 
 ```
-type func let var ret spawn
-view mod val opt
+type func let var const ret spawn
+view mod copy own val opt
 if else match case
 true false none
 and or not is
 pub priv extern pack default enum loop in
 ```
+
+`const` is a value binding, not a special category — it holds a compile-time
+constant (`const maxRetries: Int = 5`). (Contextual keywords used for modules —
+`import`, `open`, `as` — are recognised only in directive position and are
+ordinary identifiers elsewhere; see `docs/module-namespacing.md`.)
 
 ### 1.4 Literals
 
@@ -226,27 +260,40 @@ presence test in front. An owned optional produced by a call is taken with
 binding to a produced owned optional is rejected here for the same reason as
 above (§4.2).
 
-### 2.4 Type Visibility Rule
+### 2.4 Type Visibility Rule — no type inference
 
-With `let`, the binding's type MUST appear on the left side only. The right side must be type-free for the top-level expression.
+**Rae has no type inference, by design.** Every value binding — `let`, `var` or
+`const` — writes its type on the left-hand side. A binding without a type is a
+**compile error** (a parse error): the compiler asks for the type, it never
+guesses one from the right-hand side. A struct is constructed with the type on
+the LEFT and bare braces on the right (`let p: Point = { ... }`); the right side
+must be type-free for the top-level expression.
 
-With `ret`, structural literals MUST be explicitly typed at the return site for clarity.
+With `ret`, where there is no left-hand side, the structural literal carries the
+type at the return site: `ret Point { ... }`.
 
 Legal:
 ```rae
 let i: Int = 5
 let v: Pos = { x: 5, y: 12 }
 let v: Pos = {}
-let v: Pos
+let v: Pos                      # declaration, default-initialised
+const maxRetries: Int = 5
 ret Color { r: 255, g: 0, b: 0, a: 255 }
 ```
 
 Illegal:
 ```rae
+let i = 5                       # ERROR: no type — Rae has no inference
+let q = makeTrack()             # ERROR: no type — write `let q: Track = ...`
 let i = Int { 5 }               # ERROR: type on wrong side
 let v: Pos = Pos { x: 5 }       # ERROR: redundant type on RHS
 ret { r: 255, g: 0, b: 0 }      # ERROR: structural literal must be typed in ret
 ```
+
+What is *written* but never *inferred*: `if let v: T = opt` (you still write
+`T`), a `=>` alias whose `view T` / `mod T` you write, and `loop var i: Int = 0`.
+The ban is specifically on inferring the type of a binding from its initializer.
 
 **Exception:** Nested structural literals MUST be typed when their type is not otherwise known from immediate context.
 ```rae
@@ -254,6 +301,34 @@ let t: Transform = {
   position: Pos { y: 12 }       # REQUIRED: Pos type is introduced here
 }
 ```
+
+**Struct-literal field names are checked.** Every field name in a struct literal
+must be a real field of the struct — an unknown or renamed field name is a
+compile error at the literal, not a mismatch discovered later by the C backend.
+A field with a default may be omitted; only *unknown* names are rejected.
+```rae
+type Rect { position: Vec2, size: Vec2 }
+let r: Rect = { x: 0, y: 0, w: 1, h: 1 }   # ERROR: Rect has no field `x`/`w`/…
+```
+
+### 2.5 No module-level globals
+
+There is no hidden, program-wide, mutable channel between functions. At module
+(file) level:
+
+* A **`var`** (mutable global state) and a **`let` that owns heap** (a `String`,
+  `List`, `Map`, or any struct carrying heap) are a **compile error** — anywhere,
+  no exemption. (The rule shipped in phases — warning, then a `lib/`-scoped
+  error, now universal.)
+* A **`const`** and a **`let` bound to a literal** (a POD or string literal) are
+  allowed — those are constants, not state. A constant `let` should usually just
+  be spelled `const`.
+
+Shared state instead has an **owner**: a singleton is a resource on a **World or
+App** and is threaded explicitly through the `mod`/`view` parameter that already
+says who may touch it (e.g. a former `var activeTheme` becomes `app.theme`). This
+is the ECS architecture doing the work the language points toward. Full rationale
+and the migration model: `docs/globals-and-app-ownership.md`.
 
 ---
 
@@ -485,18 +560,25 @@ fine — the temporary outlives the call.
 
 #### 5.1.1 Parameter Passing Semantics
 
-Rae uses "borrow-by-default" for function parameters to prevent accidental performance overhead from copying large structures.
+**Every parameter states its mode explicitly** — `view`, `copy`, `mod` or
+`own`. A bare `x: T` with no mode is a **compile error**; there is no default
+mode. Writing the mode means a call site tells the reader what the function does
+to their value without going to the declaration.
 
-*   **`view` by default:** Any parameter declared as `x: T` is semantically a `view` reference. It is read-only and does not transfer ownership.
-*   **`mod T`**: Explicitly allows mutation of the caller's value.
-*   **`val T`**: Explicitly forces the parameter to be passed by value (copied). This is useful when the function needs its own owned copy to mutate locally without affecting the caller, or for small primitive-like types.
-*   **Optimization (SVO)**: The compiler may internally pass small, trivially copyable types (e.g., `Int`, `Float`, `Vec2`, `Color`) by value even if declared as `view` (default), provided it does not change observable semantics.
+*   **`view T`**: a read-only reference; does not transfer ownership.
+*   **`mod T`**: a mutable reference; may write back into the caller's value.
+*   **`copy T`**: passed by value (a copy); the function owns its copy to mutate
+    locally without affecting the caller.
+*   **`own T`**: ownership of the argument is transferred into the function.
+*   **Optimization (SVO)**: the compiler may internally pass small, trivially
+    copyable types (e.g. `Int`, `Float`, `Vec2`, `Color`) by value even when
+    declared `view`, provided it does not change observable semantics.
 
 Examples:
 ```rae
-func draw(p: Point)           # Semantically: view Point (read-only)
+func draw(p: view Point)      # read-only reference (mode is mandatory)
 func move(p: mod Point)       # mutable reference
-func update(p: val Point)     # explicitly passed by value (copy)
+func update(p: copy Point)    # passed by value (an owned copy)
 ```
 
 ### 5.2 Indexing
