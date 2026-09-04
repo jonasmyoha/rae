@@ -114,10 +114,13 @@ a feature that is not already listed here.
 ## Namespacing & modules
 
 - **Per-module type namespacing / qualified type references.** Same-named types across
-  modules collide confusingly: `Scene` already exists in lib/ui, and a second 3D world
-  named `World3d` would collide with `lib/scene3d` for any file importing both. Being
-  able to say `scene3d.World3d` vs `ui.Scene` (types, not just functions) would let two
-  domains keep the natural name.
+  modules would collide confusingly: `Scene` lives in lib/ui, and if a second module
+  ever wanted a bare `Scene` (or `World`) the two could not coexist for a file importing
+  both. Being able to say `ui.Scene` vs `otherModule.Scene` (types, not just functions)
+  would let two domains keep the natural name. This is the reason the #770 naming
+  decision (see `docs/naming-conventions.md`) keeps `UiWorld` / `World3d` / `Scene`
+  rather than forcing a symmetric `World2d`/`Scene2d` rename: namespacing, not renaming,
+  is the right fix for name collisions.
 - **Cyclic imports across modules `(landed #743)`.** The loader rejected any import
   cycle, which would have forced a shared "types" dumping ground or dependency inversion
   to fold mutually-referential ECS systems. Since Rae merges every module into one unit
