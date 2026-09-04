@@ -65,7 +65,11 @@ a feature that is not already listed here.
     never a phantom member like `world.fields` / `table.fieldName`. Parser unchanged;
     sema dispatches on the iterable; codegen unrolls. Not `#run`, not runtime type
     info, not attributes. Status: values + generic-W landed (#772/#773); first
-    consumer wired in #760.
+    consumer wired in #760. The CLEAR/SERIALIZE halves are done; the CONSTRUCTION
+    half (`createX` via `fields(Type)`) was assessed and **declined** (#774) — a
+    forgotten table is already a compile error there, so reflection buys no safety,
+    and it would need a new incremental struct-assembly construct for the least gain
+    (full reasoning in `docs/compile-time-reflection.md`).
   - **Element type-name reflection `typeName(T)` (new, surfaced by #760).** `fieldName`
     gives a table's FIELD name (`positions`), but the serializer's registry is keyed by
     the COMPONENT type name (`Position`). With only `fieldName`, the registry-gated
