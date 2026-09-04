@@ -88,7 +88,6 @@ func main() {
   bootTheme.active = chosenTheme
   bootTheme.generation = 1
   let gpuUi: Gpu2dUi = { textFont: gpuTextFont, iconFont: gpuIconFont, theme: bootTheme.resolved, activeTheme: chosenTheme }
-  syncColorsFromTheme(active: chosenTheme)
 
   var scenes: AlbumScenes = loadAllScenes()
   let texReg: TextureRegistry = createTextureRegistry()
@@ -155,7 +154,7 @@ func main() {
   # content reveals the same colour as the page, not a hard-coded
   # dark grey. Recomputed on every outer rebuild — including theme
   # toggles, which trigger a rebuild via `switching = true`.
-  let bgSurface: RgbaColor = surfaceColor
+  let bgSurface: RgbaColor = paletteSurface(theme: appState.theme.active)
   let bg: Color = { r: bgSurface.r, g: bgSurface.g, b: bgSurface.b, a: bgSurface.a }
 
   # Self-terminate after `RAE_AUTO_EXIT_SEC` seconds of wall-clock
@@ -675,7 +674,6 @@ func main() {
           if debugChanged {
             # #764: persist the world-level debug theme toggle back to AppState.
             appState.theme.active = world.theme.active
-            syncColorsFromTheme(active: appState.theme.active)
             scenes = loadAllScenes()
             switching = true
           }
@@ -697,7 +695,6 @@ func main() {
               appState.theme.generation = appState.theme.generation + 1
               log("[theme] -> light (gen {appState.theme.generation})")
             }
-            syncColorsFromTheme(active: appState.theme.active)
             scenes = loadAllScenes()
             switching = true
           }

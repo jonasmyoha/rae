@@ -24,8 +24,6 @@ open ecs/entity
 open ecs/ComponentTable
 open app3d/characterController
 
-var gSplashTick: Int = 0
-
 const splashMinDepth: Float = 0.03    # world units of water under a unit before it splashes
 const splashPerBurst: Int = 3         # droplets per splash
 const splashCrowdStride: Int = 3      # a crowd member splashes every Nth frame it wades
@@ -48,7 +46,7 @@ func emitSplashAt(sys: mod ParticleSystem, x: copy Float, y: copy Float, waterZ:
 # Advance + emit splashes for everything wading this frame. Call once per frame.
 func splashStep(character: mod CharacterState, splashes: mod ParticleSystem, world: mod GameWorld, dt: copy Float) {
   particleUpdate(sys: splashes, dt: dt)
-  gSplashTick = gSplashTick + 1
+  world.splashTick = world.splashTick + 1
   # The flat water plane in WORLD space — every splash sprays up from HERE, not
   # from the unit's (ground-relative, chest-high) position z.
   let waterZ: Float = worldWaterZ(groundZ: character.groundZ, cfg: defaultBiomeConfig())
@@ -66,7 +64,7 @@ func splashStep(character: mod CharacterState, splashes: mod ParticleSystem, wor
   loop var i: Int = 0, i < character.crowdEntities.length, ++i {
     if let member: EntityId = character.crowdEntities.copyAt(index: i) {
       let ctrl: ThirdPersonController = componentGet(this: world.controllers, entity: member)
-      if ctrl.moving and (gSplashTick + i) % splashCrowdStride is 0 {
+      if ctrl.moving and (world.splashTick + i) % splashCrowdStride is 0 {
         let depth: Float = terrainWaterDepth(
           x: ctrl.position.x, y: ctrl.position.y)
         if depth > splashMinDepth {
