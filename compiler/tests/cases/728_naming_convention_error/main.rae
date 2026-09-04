@@ -1,0 +1,15 @@
+import core
+
+# #790: naming conventions are a HARD compiler error. Types/enums PascalCase;
+# functions, params, locals, fields, enum cases and constants camelCase.
+# snake_case and SCREAMING_SNAKE_CASE are banned everywhere.
+const MAX_RETRIES: Int = 5              # SCREAMING const -> error
+type my_widget { field_a: Int }         # snake type + snake field -> error
+enum Mode { RoundedRect }               # PascalCase enum case -> error
+func do_thing(bad_arg: copy Int) ret Int {
+  let local_x: Int = bad_arg            # snake local -> error
+  ret local_x
+}
+func main() {
+  log("{do_thing(bad_arg: MAX_RETRIES)}")
+}
