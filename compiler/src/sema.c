@@ -3057,7 +3057,15 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             sema_analyze_expr(ctx, module, symbols, expr->as.call.callee);
             AstCallArg* arg = expr->as.call.args;
             while (arg) { sema_analyze_expr(ctx, module, symbols, arg->value); arg = arg->next; }
-            if (expr->as.call.callee->kind == AST_EXPR_IDENT) {
+            /* Skip name re-resolution if this call is ALREADY resolved (decl_link
+             * set). A module-qualified call `pkg.func(...)` is REWRITTEN in place
+             * to a plain CALL of `func` bound to its decl; if that expr is then
+             * analyzed again — e.g. an object-literal field value re-visited
+             * during type matching — resolving the bare `func` name would wrongly
+             * demand `open pkg` and error, even though the qualifier already
+             * picked the decl. The first pass set resolved_type too, so nothing is
+             * lost. (#792) */
+            if (!expr->decl_link && expr->as.call.callee->kind == AST_EXPR_IDENT) {
                 Str name = expr->as.call.callee->as.ident;
                 if (str_eq_cstr(name, "sizeof")) { expr->is_builtin_sizeof = true; expr->resolved_type = type_get_int(ctx->type_registry); }
                 /* `Array(Float, cap: 16)` doubles as a zero-initialising
