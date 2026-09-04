@@ -41,13 +41,13 @@ func renderFrame(
       drawNextPiecePreview(kind: game.nextKind)
       drawDebugOverlay(d: debug, font: uiResources.textFont, didRealWork: true)
     } else {
-      renderDeferredPass(
-        r: renderer, tag: tag, scene: renderState.scene
+      renderDeferredPassWorld(
+        r: renderer, tag: tag, world: renderState.world
         camera: camera, light: light, aspect: aspect)
     }
     passIndex = passIndex + 1
   }
-  snapshotPrevTransforms(scene: renderState.scene)
+  world3dPrevTransformSystem(world: renderState.world)
 }
 
 func main() ret Int {
