@@ -176,17 +176,17 @@ func failScene3dAsset(asset: mod Scene3dAsset, message: view String) {
 
 func nodeComponent(doc: view JsonDoc, node: view SceneNode, name: view String) ret JsonValue {
   let bag: JsonValue = json.jsonValueAt(doc: doc, idx: node.componentsValueIdx)
-  let idx: Int = json.jsonField(doc: doc, this: bag, key: name)
+  let idx: Int = json.field(doc: doc, this: bag, key: name)
   ret json.jsonValueAt(doc: doc, idx: idx)
 }
 
 func nodeHasComponent(doc: view JsonDoc, node: view SceneNode, name: view String) ret Bool {
   let bag: JsonValue = json.jsonValueAt(doc: doc, idx: node.componentsValueIdx)
-  ret json.jsonField(doc: doc, this: bag, key: name) >= 0
+  ret json.field(doc: doc, this: bag, key: name) >= 0
 }
 
 func objectField(doc: view JsonDoc, object: view JsonValue, key: view String) ret JsonValue {
-  let idx: Int = json.jsonField(doc: doc, this: object, key: key)
+  let idx: Int = json.field(doc: doc, this: object, key: key)
   ret json.jsonValueAt(doc: doc, idx: idx)
 }
 
@@ -296,7 +296,7 @@ func parseScene3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
   # Pass 1: materials are node-addressable resources, independent of node order.
   var i: Int = 0
   loop i < parsed.nodes.length {
-    let node: view SceneNode => sceneNodeAt(this: parsed, idx: i)
+    let node: view SceneNode => nodeAt(this: parsed, idx: i)
     if nodeHasComponent(doc: doc, node: node, name: "Material3d") {
       let value: JsonValue = nodeComponent(doc: doc, node: node, name: "Material3d")
       if material3dValid(doc: doc, value: value) is false {
@@ -325,7 +325,7 @@ func parseScene3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
   var lightCount: Int = 0
   i = 0
   loop i < parsed.nodes.length {
-    let node: view SceneNode => sceneNodeAt(this: parsed, idx: i)
+    let node: view SceneNode => nodeAt(this: parsed, idx: i)
     let hasMesh: Bool = nodeHasComponent(doc: doc, node: node, name: "MeshRenderer")
     let hasSdf: Bool = nodeHasComponent(doc: doc, node: node, name: "SdfPrimitive")
     if hasMesh and hasSdf {

@@ -35,36 +35,36 @@ func near(a: view Float, b: view Float) ret Bool {
 func main() {
   var s: Slider = createSlider(trackId: "Track", fillId: "Fill",
                                minValue: 0.0, maxValue: 24.0, value: 12.0)
-  check(label: "midpoint is half", ok: near(a: sliderFraction(s: s), b: 0.5))
+  check(label: "midpoint is half", ok: near(a: fraction(s: s), b: 0.5))
 
-  sliderSetFraction(s: s, f: 0.0)
+  setFraction(s: s, f: 0.0)
   check(label: "fraction 0 gives min", ok: near(a: s.value, b: 0.0))
-  sliderSetFraction(s: s, f: 1.0)
+  setFraction(s: s, f: 1.0)
   check(label: "fraction 1 gives max", ok: near(a: s.value, b: 24.0))
-  sliderSetFraction(s: s, f: 0.25)
+  setFraction(s: s, f: 0.25)
   check(label: "fraction 0.25 gives 6h", ok: near(a: s.value, b: 6.0))
-  check(label: "round trips", ok: near(a: sliderFraction(s: s), b: 0.25))
+  check(label: "round trips", ok: near(a: fraction(s: s), b: 0.25))
 
   # Out of range in either direction clamps rather than extrapolating: a drag
   # runs past the ends of the track constantly.
-  sliderSetFraction(s: s, f: 0.0 - 0.5)
+  setFraction(s: s, f: 0.0 - 0.5)
   check(label: "below zero clamps to min", ok: near(a: s.value, b: 0.0))
-  sliderSetFraction(s: s, f: 1.7)
+  setFraction(s: s, f: 1.7)
   check(label: "above one clamps to max", ok: near(a: s.value, b: 24.0))
 
   # A range that does not start at zero — speed 0.01..3.0, the animation dial.
   var speed: Slider = createSlider(trackId: "T", fillId: "F",
                                    minValue: 0.5, maxValue: 2.5, value: 1.5)
-  check(label: "offset range midpoint", ok: near(a: sliderFraction(s: speed), b: 0.5))
-  sliderSetFraction(s: speed, f: 0.0)
+  check(label: "offset range midpoint", ok: near(a: fraction(s: speed), b: 0.5))
+  setFraction(s: speed, f: 0.0)
   check(label: "offset range min", ok: near(a: speed.value, b: 0.5))
-  sliderSetFraction(s: speed, f: 1.0)
+  setFraction(s: speed, f: 1.0)
   check(label: "offset range max", ok: near(a: speed.value, b: 2.5))
 
   # Degenerate bounds must not divide by zero.
   let flat: Slider = createSlider(trackId: "T", fillId: "F",
                                   minValue: 5.0, maxValue: 5.0, value: 5.0)
-  check(label: "zero-width range is 0, not NaN", ok: near(a: sliderFraction(s: flat), b: 0.0))
+  check(label: "zero-width range is 0, not NaN", ok: near(a: fraction(s: flat), b: 0.0))
 
   # A fresh slider is not mid-drag; a stuck drag follows the pointer forever.
   check(label: "starts not dragging", ok: s.dragging is false)
@@ -77,17 +77,17 @@ func main() {
   # The press EDGE and the held STATE do not necessarily both read true on the
   # same frame. Requiring `down` on the press frame cancelled the drag at the
   # instant it began, so it never started at all.
-  check(label: "press inside starts a drag even before down", ok: sliderDragActive(wasDragging: false, pressedInside: true, down: false, released: false))
-  check(label: "press inside starts a drag when down", ok: sliderDragActive(wasDragging: false, pressedInside: true, down: true, released: false))
-  check(label: "press outside does not start one", ok: sliderDragActive(wasDragging: false, pressedInside: false, down: true, released: false) is false)
+  check(label: "press inside starts a drag even before down", ok: dragActive(wasDragging: false, pressedInside: true, down: false, released: false))
+  check(label: "press inside starts a drag when down", ok: dragActive(wasDragging: false, pressedInside: true, down: true, released: false))
+  check(label: "press outside does not start one", ok: dragActive(wasDragging: false, pressedInside: false, down: true, released: false) is false)
 
   # Once running it continues while held, INCLUDING when the pointer has left
   # the track — otherwise it slips whenever the user moves faster than a frame.
-  check(label: "continues while held", ok: sliderDragActive(wasDragging: true, pressedInside: false, down: true, released: false))
+  check(label: "continues while held", ok: dragActive(wasDragging: true, pressedInside: false, down: true, released: false))
 
   # It ends on release, and also if the button is simply found to be up, so a
   # release swallowed by a window switch cannot leave the knob stuck.
-  check(label: "release ends it", ok: sliderDragActive(wasDragging: true, pressedInside: false, down: true, released: true) is false)
-  check(label: "button up ends it", ok: sliderDragActive(wasDragging: true, pressedInside: false, down: false, released: false) is false)
-  check(label: "release wins over a press in the same frame", ok: sliderDragActive(wasDragging: false, pressedInside: true, down: true, released: true) is false)
+  check(label: "release ends it", ok: dragActive(wasDragging: true, pressedInside: false, down: true, released: true) is false)
+  check(label: "button up ends it", ok: dragActive(wasDragging: true, pressedInside: false, down: false, released: false) is false)
+  check(label: "release wins over a press in the same frame", ok: dragActive(wasDragging: false, pressedInside: true, down: true, released: true) is false)
 }

@@ -19,7 +19,7 @@ open ecs/query
 
 # #734: per-cluster MARKER TAGS replace the `sdf.cluster is N` if-ladder. Each
 # metaball carries a zero-field ClusterNTag component; the animators QUERY each
-# tag table (queryTagged over the sdfs table) and apply that cluster's motion,
+# tag table (tagged over the sdfs table) and apply that cluster's motion,
 # so per-cluster behaviour is a query, not a branch. `SdfPrimitive.cluster` still
 # exists — the shared renderer groups fused surfaces by it — but the animation
 # never reads it: buildClusterTags does the one-time cluster:Int -> tag
@@ -129,7 +129,7 @@ func animateScene(world: mod World3d, sceneId: view Int, time: view Float) {
 func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view Float) {
   # Swarm (cluster 0): the largest share of the budget, low stickiness (k=0.40)
   # and a wide slow churn, so it separates into a shoal rather than one blob.
-  let m0: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: tags.c0)
+  let m0: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c0)
   loop let hit: view Query2Match in m0 {
     let p: LabPulse = labPulse(time: time, i: hit.indexA)
     var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
@@ -145,7 +145,7 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
   }
   # Titan (cluster 1): very large, very sticky (k=1.35) — never separates, it
   # wallows, the opposite end of the range from the swarm.
-  let m1: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: tags.c1)
+  let m1: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c1)
   loop let hit: view Query2Match in m1 {
     let p: LabPulse = labPulse(time: time, i: hit.indexA)
     var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
@@ -161,7 +161,7 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
   }
   # Mist (cluster 2): small radii and k=0.18 — barely fusing, a cloud of
   # separate droplets, almost no smooth-union.
-  let m2: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: tags.c2)
+  let m2: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c2)
   loop let hit: view Query2Match in m2 {
     let p: LabPulse = labPulse(time: time, i: hit.indexA)
     var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
@@ -176,7 +176,7 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
     world3dWriteTransform(world: world, entity: hit.entity, transform: transform)
   }
   # Ember (cluster 3): fast, hot, medium size, sticky enough to boil internally.
-  let m3: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: tags.c3)
+  let m3: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c3)
   loop let hit: view Query2Match in m3 {
     let p: LabPulse = labPulse(time: time, i: hit.indexA)
     var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
@@ -192,7 +192,7 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
   }
   # Orchid (cluster 4): slow, large-ish, long escapes — the clearest place to
   # watch a droplet pinch off and rejoin.
-  let m4: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: tags.c4)
+  let m4: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c4)
   loop let hit: view Query2Match in m4 {
     let p: LabPulse = labPulse(time: time, i: hit.indexA)
     var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
@@ -208,7 +208,7 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
   }
   # Verdigris (cluster 5): the middle case — medium count, medium stickiness, a
   # ring that breathes in and out through the centre of the frame.
-  let m5: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: tags.c5)
+  let m5: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c5)
   loop let hit: view Query2Match in m5 {
     let p: LabPulse = labPulse(time: time, i: hit.indexA)
     var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
@@ -225,7 +225,7 @@ func animateMetaballLab(world: mod World3d, tags: view ClusterTags, time: view F
   }
   # Pearl (cluster 6): few, big, pale and nearly still — a rest for the eye, the
   # control case showing the same smoothing without motion.
-  let m6: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: tags.c6)
+  let m6: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c6)
   loop let hit: view Query2Match in m6 {
     let p: LabPulse = labPulse(time: time, i: hit.indexA)
     var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
@@ -332,7 +332,7 @@ func animateScene1(world: mod World3d, cubeA: view EntityId, cubeB: view EntityI
   # per-cluster so the blobs never read as one animation applied three times.
   # Obsidian (cluster 1): slow, small orbits, gentle breathing; low stickiness
   # (k 0.30) so even modest motion visibly separates the lobes.
-  let m1: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: tags.c1)
+  let m1: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c1)
   loop let hit: view Query2Match in m1 {
     let phase: Float = hit.indexA.toFloat() * 1.2566371
     var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
@@ -348,7 +348,7 @@ func animateScene1(world: mod World3d, cubeA: view EntityId, cubeB: view EntityI
   }
   # Ember (cluster 2): fast and churning, big size swings; very sticky (k 1.15)
   # so it stays one mass and boils internally, making the colour gradient visible.
-  let m2: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: tags.c2)
+  let m2: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c2)
   loop let hit: view Query2Match in m2 {
     let phase: Float = hit.indexA.toFloat() * 1.2566371
     var transform: Transform3d = world3dGetTransform(world: world, entity: hit.entity)
@@ -366,7 +366,7 @@ func animateScene1(world: mod World3d, cubeA: view EntityId, cubeB: view EntityI
   # camera far enough that the smooth-union (k 0.62) pinches off into a droplet,
   # then drifts back and merges. Cubed half-wave pulse so the departure is an
   # event, not constant drift; it shrinks while away so the pinch-off reads.
-  let m0: List(Query2Match) = queryTagged(dataTable: world.sdfs, tagTable: tags.c0)
+  let m0: List(Query2Match) = tagged(dataTable: world.sdfs, tagTable: tags.c0)
   loop let hit: view Query2Match in m0 {
     let i: Int = hit.indexA
     let phase: Float = i.toFloat() * 1.2566371

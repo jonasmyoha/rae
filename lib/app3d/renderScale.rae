@@ -75,9 +75,9 @@ func updateRenderScale(drs: mod RenderScaleController, dt: copy Float, profiler:
 
   # Surface the current tier in profile captures: render.scale (percent), the
   # frame cap, and the OS thermal state, plotted alongside fps / per-pass GPU ms.
-  profile.profileCounter(profiler: profiler, name: "render.scale", value: rae_float_to_int(f: drs.scale * 100.0))
-  profile.profileCounter(profiler: profiler, name: "render.capFps", value: rae_float_to_int(f: drs.capFps))
-  profile.profileCounter(profiler: profiler, name: "thermal.state", value: therm)
+  profile.counter(profiler: profiler, name: "render.scale", value: rae_float_to_int(f: drs.scale * 100.0))
+  profile.counter(profiler: profiler, name: "render.capFps", value: rae_float_to_int(f: drs.capFps))
+  profile.counter(profiler: profiler, name: "thermal.state", value: therm)
 
   if dt > drs.overBudgetSec {
     drs.overFrames = drs.overFrames + 1

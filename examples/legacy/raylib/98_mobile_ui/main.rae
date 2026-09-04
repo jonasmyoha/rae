@@ -278,7 +278,7 @@ func main() {
     # Cyan for idle outlines, magenta for the rect currently under
     # the cursor (high-contrast against typical UI palettes; the
     # hovered rect also gets a small `x,y w×h` label at its top-right
-    # corner — see `renderDebugClickRects`). The toggle is driven by
+    # corner — see `debugClickRects`). The toggle is driven by
     # the in-app debug menu's "Input outlines" switch:
     # `debug.showInputOutlines` is the source of truth; this local
     # just unpacks it for the renderer below.
@@ -437,7 +437,7 @@ func main() {
       # overlay) onto the freshly-built world BEFORE layout runs so
       # they participate in measure/place like any other entity.
       addDebugLayer(world: world, debug: debug)
-      # `layoutSystemIfDirty` + `transformSystemIfDirty` consult the
+      # `ifDirty` + `systemIfDirty` consult the
       # table-level generation counters on the world's ComponentTables
       # (introduced in the same series as these calls) and skip the
       # whole walk when none of the inputs has changed since the cache
@@ -449,9 +449,9 @@ func main() {
       # input tables — for example, a future per-frame re-layout /
       # re-transform safety net.
       let layoutCache: LayoutCache = createLayoutCache()
-      layoutSystemIfDirty(world: world, cache: layoutCache)
+      ifDirty(world: world, cache: layoutCache)
       let transformCache: TransformCache = createTransformCache()
-      transformSystemIfDirty(world: world, cache: transformCache)
+      systemIfDirty(world: world, cache: transformCache)
       # Find the scroll-target entity for this world. Scroll handlers
       # mutate this entity's Offset + ScrollState in place every frame
       # — that's what lets wheel/drag/momentum/spring run WITHOUT
@@ -806,9 +806,9 @@ func main() {
           # tracked table. Runs BEFORE the active check so a scroll-
           # only frame still ends up dirty downstream — Offset mutate
           # → layout reruns → ComputedRect bumps → transform reruns →
-          # WorldTransform bumps → renderCacheDirty trips → active.
-          layoutSystemIfDirty(world: world, cache: layoutCache)
-          transformSystemIfDirty(world: world, cache: transformCache)
+          # WorldTransform bumps → cacheDirty trips → active.
+          ifDirty(world: world, cache: layoutCache)
+          systemIfDirty(world: world, cache: transformCache)
 
           let activeDecision: RenderActiveDecision = decideActive(
             backend: backend
@@ -859,8 +859,8 @@ func main() {
               renderSystemGpu2d(world: world, res: gpuUi)
               updateAndRenderDebugOverlayGpu2d(debug: debug, now: now as Float64, didRealWork: active, font: gpuUi.textFont)
             } else {
-              renderSystemLayerRange(backend: backend, world: world, reg: texReg, minOrder: 0 - 1000000, maxOrder: 100)
-              renderSystemLayerRange(backend: backend, world: world, reg: texReg, minOrder: 100, maxOrder: 1000000)
+              systemLayerRange(backend: backend, world: world, reg: texReg, minOrder: 0 - 1000000, maxOrder: 100)
+              systemLayerRange(backend: backend, world: world, reg: texReg, minOrder: 100, maxOrder: 1000000)
               if animating {
                 renderHeroOverlay(anim: anim, reg: texReg, now: now as Float64)
               }
@@ -868,7 +868,7 @@ func main() {
                 let mx: Float = uiPointerX(backend: backend)
                 let my: Float = uiPointerY(backend: backend)
                 let pressedNow: Bool = uiPointerButtonDown(backend: backend, button: mouseButtonLeft)
-                renderDebugClickRects(
+                debugClickRects(
                   world: world
                   idleColor: debugRectColor
                   hoverColor: debugHoverColor
@@ -877,7 +877,7 @@ func main() {
                   mouseX: mx
                   mouseY: my
                 )
-                renderDebugMouseCursor(mouseX: mx, mouseY: my, color: debugCursorColor)
+                debugMouseCursor(mouseX: mx, mouseY: my, color: debugCursorColor)
               }
               updateAndRenderDebugOverlay(backend: backend, debug: debug, now: now as Float64, didRealWork: active)
               let versionText: String = "{appVersion}"
@@ -906,7 +906,7 @@ func main() {
                 let texW: Int = blurTex.width
                 let texH: Int = blurTex.height
                 log("[blur] captured tex id={texId} size={texW}x{texH}")
-                let blurKey: String = debugBlurBackdropKey()
+                let blurKey: String = blurBackdropKey()
                 textureRegisterDirect(reg: texReg, key: blurKey, tex: blurTex)
                 setDebugHasBlur(debug: debug, value: true)
               }
@@ -914,7 +914,7 @@ func main() {
 
             uiEndFrame(backend: backend)
             forceRender = false
-            renderCacheDirty(world: world, cache: renderCache)
+            cacheDirty(world: world, cache: renderCache)
           }
           # Persistent-world screen-switch (slice 4b.3 + 4c) — implementation
           # in screen_switch.rae. On willSwitch=true: per-page re-mount + hero
@@ -977,7 +977,7 @@ func main() {
           # (because `debug.hasBlur` flips off), so it's safe to
           # release immediately.
           if debug.menuOpen is false and prevMenuOpen {
-            let blurKey: String = debugBlurBackdropKey()
+            let blurKey: String = blurBackdropKey()
             textureRemove(reg: texReg, key: blurKey)
             setDebugHasBlur(debug: debug, value: false)
           }

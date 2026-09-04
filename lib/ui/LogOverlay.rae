@@ -96,7 +96,7 @@ func createLogOverlay(capacity: view Int, maxLines: view Int, anchor: view Int, 
   }
 }
 
-func logOverlayLineHeight(ov: view LogOverlay) ret Float {
+func lineHeight(ov: view LogOverlay) ret Float {
   ret ov.fontSize + ov.lineGap
 }
 
@@ -157,11 +157,11 @@ func logLevelColor(level: view Int) ret Int {
 
 # How many lines will actually be drawn at this window size: bounded by
 # what has been logged, by `maxLines`, and by the half-height budget.
-func logOverlayVisibleCount(ov: view LogOverlay, screenH: view Float) pub ret Int {
+func visibleCount(ov: view LogOverlay, screenH: view Float) pub ret Int {
   var n: Int = ov.filled
   if n > ov.maxLines { n = ov.maxLines }
   let budget: Float = screenH * 0.5
-  let lineH: Float = logOverlayLineHeight(ov: ov)
+  let lineH: Float = lineHeight(ov: ov)
   if lineH > 0.0 {
     let fits: Int = (budget / lineH).toInt()
     if n > fits { n = fits }
@@ -176,14 +176,14 @@ func drawLogOverlay(ov: view LogOverlay, font: view SdfFont, screenW: view Float
   if ov.visible is false {
     ret
   }
-  let n: Int = logOverlayVisibleCount(ov: ov, screenH: screenH)
+  let n: Int = visibleCount(ov: ov, screenH: screenH)
   if n < 1 {
     ret
   }
   let marginX: Float = ov.marginX
   let marginY: Float = ov.marginY
   let pad: Float = 8.0
-  let lineH: Float = logOverlayLineHeight(ov: ov)
+  let lineH: Float = lineHeight(ov: ov)
   let blockH: Float = n.toFloat() * lineH
   var panelW: Float = screenW * 0.5
   if panelW > 620.0 { panelW = 620.0 }

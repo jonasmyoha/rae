@@ -7,7 +7,7 @@
 # field-wise value equality (both fields) — compare handles with `is` /
 # `is not` directly; there is no `equals` helper. Recycling that bumps
 # `generation` lands in #704 — until then every live handle has
-# generation 0, so reconstructing a handle from a bare index (entityId)
+# generation 0, so reconstructing a handle from a bare index (id)
 # is still exact.
 import core
 
@@ -20,7 +20,7 @@ func noEntity() ret EntityId {
   ret EntityId { index: 0 - 1, generation: 0 }
 }
 
-func entityId(v: view Int) ret EntityId {
+func id(v: view Int) ret EntityId {
   ret EntityId { index: v, generation: 0 }
 }
 

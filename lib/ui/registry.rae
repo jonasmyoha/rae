@@ -301,12 +301,12 @@ func deserRgba(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret 
   # the current `activeTheme` in `lib/ui/theme.rae`. The JSON shape
   # already disambiguates — a literal color is an object, a token
   # reference is a string — so no sigil is needed. Unknown token
-  # names render magenta via `themeColorByName` rather than failing
+  # names render magenta via `colorByName` rather than failing
   # silently, so typos are visible.
   let empty: String = ""
   let asStr: String = json.jsonString(this: val, fallback: empty)
   if asStr.length() > 0 {
-    ret themeColorByName(theme: theme.active, name: asStr)
+    ret colorByName(theme: theme.active, name: asStr)
   }
   let r: Int = optInt(doc: doc, container: val, key: "r", fallback: 0)
   let g: Int = optInt(doc: doc, container: val, key: "g", fallback: 0)
@@ -345,8 +345,8 @@ func deserRect(doc: view JsonDoc, val: view JsonValue) ret Rect {
 }
 
 func deserSize(doc: view JsonDoc, val: view JsonValue) ret Size {
-  let wIdx: Int = json.jsonField(doc: doc, this: val, key: "w")
-  let hIdx: Int = json.jsonField(doc: doc, this: val, key: "h")
+  let wIdx: Int = json.field(doc: doc, this: val, key: "w")
+  let hIdx: Int = json.field(doc: doc, this: val, key: "h")
   var wAxis: SizeAxis = defaultSizeAxis()
   var hAxis: SizeAxis = defaultSizeAxis()
   if wIdx >= 0 {
@@ -393,8 +393,8 @@ func deserMargin(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) re
 }
 
 func deserAlign(doc: view JsonDoc, val: view JsonValue) ret Align {
-  let xIdx: Int = json.jsonField(doc: doc, this: val, key: "x")
-  let yIdx: Int = json.jsonField(doc: doc, this: val, key: "y")
+  let xIdx: Int = json.field(doc: doc, this: val, key: "x")
+  let yIdx: Int = json.field(doc: doc, this: val, key: "y")
   var xK: AlignKind = AlignKind.start
   var yK: AlignKind = AlignKind.start
   if xIdx >= 0 {
@@ -426,7 +426,7 @@ func deserSprite(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) re
   s.textureKey = optString(doc: doc, container: val, key: "textureKey", fallback: "")
   let scaleModeStr: String = optString(doc: doc, container: val, key: "scaleMode", fallback: "Fit")
   s.scaleMode = parseScaleMode(s: scaleModeStr)
-  let tintIdx: Int = json.jsonField(doc: doc, this: val, key: "tint")
+  let tintIdx: Int = json.field(doc: doc, this: val, key: "tint")
   if tintIdx >= 0 {
     let tv: JsonValue = json.jsonValueAt(doc: doc, idx: tintIdx)
     s.tint = deserRgba(doc: doc, theme: theme, val: tv)
@@ -459,12 +459,12 @@ func deserText(doc: view JsonDoc, val: view JsonValue) ret Text {
 # leave their `has*` flag false so the base style value shows through.
 func deserStyleOverride(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret StyleOverride {
   var so: StyleOverride = defaultStyleOverride()
-  let sizeIdx: Int = json.jsonField(doc: doc, this: val, key: "size")
+  let sizeIdx: Int = json.field(doc: doc, this: val, key: "size")
   if sizeIdx >= 0 {
     so.hasSize = true
     so.size = optFloat(doc: doc, container: val, key: "size", fallback: 0.0)
   }
-  let colorIdx: Int = json.jsonField(doc: doc, this: val, key: "color")
+  let colorIdx: Int = json.field(doc: doc, this: val, key: "color")
   if colorIdx >= 0 {
     so.hasColor = true
     let cv: JsonValue = json.jsonValueAt(doc: doc, idx: colorIdx)
@@ -480,7 +480,7 @@ func deserTextShadow(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue
   shadow.offset.x = optFloat(doc: doc, container: val, key: "offsetX", fallback: 0.0)
   shadow.offset.y = optFloat(doc: doc, container: val, key: "offsetY", fallback: 0.0)
   shadow.softness = optFloat(doc: doc, container: val, key: "softness", fallback: 1.0)
-  let colorIdx: Int = json.jsonField(doc: doc, this: val, key: "color")
+  let colorIdx: Int = json.field(doc: doc, this: val, key: "color")
   if colorIdx >= 0 {
     let cv: JsonValue = json.jsonValueAt(doc: doc, idx: colorIdx)
     shadow.color = deserRgba(doc: doc, theme: theme, val: cv)
@@ -494,14 +494,14 @@ func deserShape(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret
   s.kind = parseShapeKind(s: kindStr)
   s.strokeWidth = optFloat(doc: doc, container: val, key: "strokeWidth", fallback: 0.0)
   s.radius = optRadiusOrToken(doc: doc, theme: theme, container: val, key: "radius", fallback: 0.0)
-  let fillIdx: Int = json.jsonField(doc: doc, this: val, key: "fill")
+  let fillIdx: Int = json.field(doc: doc, this: val, key: "fill")
   if fillIdx >= 0 {
     let fv: JsonValue = json.jsonValueAt(doc: doc, idx: fillIdx)
     s.fill = deserRgba(doc: doc, theme: theme, val: fv)
     let emptyFill: String = ""
     s.fillSlot = json.jsonString(this: fv, fallback: emptyFill)
   }
-  let strokeIdx: Int = json.jsonField(doc: doc, this: val, key: "stroke")
+  let strokeIdx: Int = json.field(doc: doc, this: val, key: "stroke")
   if strokeIdx >= 0 {
     let sv: JsonValue = json.jsonValueAt(doc: doc, idx: strokeIdx)
     s.stroke = deserRgba(doc: doc, theme: theme, val: sv)
@@ -559,8 +559,8 @@ func deserBackdropImage(doc: view JsonDoc, val: view JsonValue) ret BackdropImag
 }
 
 func deserGradientFill(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret GradientFill {
-  let fromIdx: Int = json.jsonField(doc: doc, this: val, key: "from")
-  let toIdx: Int = json.jsonField(doc: doc, this: val, key: "to")
+  let fromIdx: Int = json.field(doc: doc, this: val, key: "from")
+  let toIdx: Int = json.field(doc: doc, this: val, key: "to")
   let zero: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
   var fromCol: RgbaColor = zero
   var toCol: RgbaColor = zero
@@ -590,12 +590,12 @@ func deserSafeArea(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) 
   # Insets shape so a scene author can write partial objects.
   let enabled: Bool = optBool(doc: doc, container: val, key: "enabled", fallback: true)
   var apply: Insets = { l: 1.0, t: 1.0, r: 1.0, b: 1.0 }
-  let applyIdx: Int = json.jsonField(doc: doc, this: val, key: "apply")
+  let applyIdx: Int = json.field(doc: doc, this: val, key: "apply")
   if applyIdx >= 0 {
     apply = deserInsets(doc: doc, theme: theme, val: json.jsonValueAt(doc: doc, idx: applyIdx))
   }
   var extra: Insets = { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
-  let extraIdx: Int = json.jsonField(doc: doc, this: val, key: "extra")
+  let extraIdx: Int = json.field(doc: doc, this: val, key: "extra")
   if extraIdx >= 0 {
     extra = deserInsets(doc: doc, theme: theme, val: json.jsonValueAt(doc: doc, idx: extraIdx))
   }
@@ -715,16 +715,16 @@ func deserSceneInstance(doc: view JsonDoc, val: view JsonValue) ret SceneInstanc
   let fields: List(String) = createList(String, cap: 0)
   let values: List(String) = createList(String, cap: 0)
 
-  let paramsIdx: Int = json.jsonField(doc: doc, this: val, key: "params")
+  let paramsIdx: Int = json.field(doc: doc, this: val, key: "params")
   if paramsIdx >= 0 {
     let paramsVal: JsonValue = json.jsonValueAt(doc: doc, idx: paramsIdx)
-    let overridesIdx: Int = json.jsonField(doc: doc, this: paramsVal, key: "overrides")
+    let overridesIdx: Int = json.field(doc: doc, this: paramsVal, key: "overrides")
     if overridesIdx >= 0 {
       let arr: JsonValue = json.jsonValueAt(doc: doc, idx: overridesIdx)
-      let n: Int = json.jsonArrayLen(this: arr)
+      let n: Int = json.arrayLen(this: arr)
       var i: Int = 0
       loop i < n {
-        let elem: JsonValue = json.jsonArrayAt(doc: doc, this: arr, idx: i)
+        let elem: JsonValue = json.arrayAt(doc: doc, this: arr, idx: i)
         let empty: String = ""
         let n2: String = optString(doc: doc, container: elem, key: "nodeId", fallback: empty)
         let c2: String = optString(doc: doc, container: elem, key: "component", fallback: empty)
@@ -823,7 +823,7 @@ func applyComponentByName(
     # bag, stored as a sparse component only when authored. Base styleId
     # (set above) is always kept — the override annotates the link to
     # the theme, never severs it.
-    let soIdx: Int = json.jsonField(doc: doc, this: val, key: "styleOverride")
+    let soIdx: Int = json.field(doc: doc, this: val, key: "styleOverride")
     if soIdx >= 0 {
       let sov: JsonValue = json.jsonValueAt(doc: doc, idx: soIdx)
       componentSet(this: world.styleOverrides, entity: entity, data: deserStyleOverride(doc: doc, theme: world.theme, val: sov))

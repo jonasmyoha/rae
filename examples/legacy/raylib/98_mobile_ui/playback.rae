@@ -122,7 +122,7 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
   # the now-playing page. Absent (returns none) on other screens.
   let playIconKey: String = "PlayIcon"
   if let playIconRaw: Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: playIconKey) {
-    let playIconEntity: EntityId = entityId(v: playIconRaw)
+    let playIconEntity: EntityId = id(v: playIconRaw)
     if componentHas(this: world.sprites, entity: playIconEntity) {
       let sp: mod Sprite => componentMod(this: world.sprites, entity: playIconEntity)
       sp.textureKey = iconKey
@@ -134,7 +134,7 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
   # so this should always resolve while the dock is on screen.
   let miniIconKey: String = "MiniPlayIcon"
   if let miniIconRaw: Int = findNodeInPage(world: world, pageId: miniPlayerPageId, nodeId: miniIconKey) {
-    let miniIconEntity: EntityId = entityId(v: miniIconRaw)
+    let miniIconEntity: EntityId = id(v: miniIconRaw)
     if componentHas(this: world.sprites, entity: miniIconEntity) {
       let sp: mod Sprite => componentMod(this: world.sprites, entity: miniIconEntity)
       sp.textureKey = iconKey
@@ -152,8 +152,8 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
   let fillKey: String = "ProgressFill"
   if let trackRaw: Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: trackKey) {
     if let fillRaw: Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: fillKey) {
-      let trackEntity: EntityId = entityId(v: trackRaw)
-      let fillEntity: EntityId = entityId(v: fillRaw)
+      let trackEntity: EntityId = id(v: trackRaw)
+      let fillEntity: EntityId = id(v: fillRaw)
       var trackW: Float = 0.0
       if componentHas(this: world.computedRects, entity: trackEntity) {
         let tcr: ComputedRect = componentGet(this: world.computedRects, entity: trackEntity)

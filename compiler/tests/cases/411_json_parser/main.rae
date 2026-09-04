@@ -29,7 +29,7 @@ func showPrimitives() {
 
   # null
   let d1: JsonDoc = parseJson(source: "null")
-  let r1: JsonValue = jsonRoot(doc: d1)
+  let r1: JsonValue = root(doc: d1)
   if r1.kind is JsonKind.null {
     log("null: ok")
   }
@@ -37,23 +37,23 @@ func showPrimitives() {
   # The compiled C backend can't take `&` of a function call rvalue
   # passed as `view T`, so always bind the JsonRoot to a local first.
   let d2: JsonDoc = parseJson(source: "true")
-  let r2: JsonValue = jsonRoot(doc: d2)
+  let r2: JsonValue = root(doc: d2)
   log("true: {jsonBool(this: r2, fallback: false)}")
 
   let d3: JsonDoc = parseJson(source: "false")
-  let r3: JsonValue = jsonRoot(doc: d3)
+  let r3: JsonValue = root(doc: d3)
   log("false: {jsonBool(this: r3, fallback: true)}")
 
   let d4: JsonDoc = parseJson(source: "42")
-  let r4: JsonValue = jsonRoot(doc: d4)
+  let r4: JsonValue = root(doc: d4)
   log("int42: {jsonInt(this: r4, fallback: -1)}")
 
   let d5: JsonDoc = parseJson(source: "-3.5")
-  let r5: JsonValue = jsonRoot(doc: d5)
+  let r5: JsonValue = root(doc: d5)
   log("flt: {jsonFloat(this: r5, fallback: 0.0)}")
 
   let d6: JsonDoc = parseJson(source: "\"hi\"")
-  let r6: JsonValue = jsonRoot(doc: d6)
+  let r6: JsonValue = root(doc: d6)
   log("str: {jsonString(this: r6, fallback: qmark)}")
 }
 
@@ -64,32 +64,32 @@ func showObject() {
     log("object failed at {doc.errorPos}")
     ret
   }
-  let root: JsonValue = jsonRoot(doc: doc)
-  log("obj.len = {jsonObjectLen(this: root)}")
+  let root: JsonValue = root(doc: doc)
+  log("obj.len = {objectLen(this: root)}")
 
-  let nameIdx: Int = jsonField(doc: doc, this: root, key: "name")
+  let nameIdx: Int = field(doc: doc, this: root, key: "name")
   let nameVal: JsonValue = jsonValueAt(doc: doc, idx: nameIdx)
   log("name = {jsonString(this: nameVal, fallback: qmark)}")
 
-  let songsIdx: Int = jsonField(doc: doc, this: root, key: "songs")
+  let songsIdx: Int = field(doc: doc, this: root, key: "songs")
   let songsVal: JsonValue = jsonValueAt(doc: doc, idx: songsIdx)
   log("songs = {jsonInt(this: songsVal, fallback: -1)}")
 
-  let onIdx: Int = jsonField(doc: doc, this: root, key: "on")
+  let onIdx: Int = field(doc: doc, this: root, key: "on")
   let onVal: JsonValue = jsonValueAt(doc: doc, idx: onIdx)
   log("on = {jsonBool(this: onVal, fallback: false)}")
 
-  let tagsIdx: Int = jsonField(doc: doc, this: root, key: "tags")
+  let tagsIdx: Int = field(doc: doc, this: root, key: "tags")
   let tagsVal: JsonValue = jsonValueAt(doc: doc, idx: tagsIdx)
-  log("tags.len = {jsonArrayLen(this: tagsVal)}")
+  log("tags.len = {arrayLen(this: tagsVal)}")
   var i: Int = 0
-  loop i < jsonArrayLen(this: tagsVal) {
-    let tagVal: JsonValue = jsonArrayAt(doc: doc, this: tagsVal, idx: i)
+  loop i < arrayLen(this: tagsVal) {
+    let tagVal: JsonValue = arrayAt(doc: doc, this: tagsVal, idx: i)
     log("  tags[{i}] = {jsonString(this: tagVal, fallback: qmark)}")
     i = i + 1
   }
 
-  let missingIdx: Int = jsonField(doc: doc, this: root, key: "nope")
+  let missingIdx: Int = field(doc: doc, this: root, key: "nope")
   log("missing field idx = {missingIdx}")
 }
 
@@ -100,21 +100,21 @@ func showNested() {
     log("nested failed at {doc.errorPos}")
     ret
   }
-  let root: JsonValue = jsonRoot(doc: doc)
-  let outerIdx: Int = jsonField(doc: doc, this: root, key: "outer")
+  let root: JsonValue = root(doc: doc)
+  let outerIdx: Int = field(doc: doc, this: root, key: "outer")
   let outerVal: JsonValue = jsonValueAt(doc: doc, idx: outerIdx)
-  let innerIdx: Int = jsonField(doc: doc, this: outerVal, key: "inner")
+  let innerIdx: Int = field(doc: doc, this: outerVal, key: "inner")
   let innerVal: JsonValue = jsonValueAt(doc: doc, idx: innerIdx)
-  log("inner.len = {jsonArrayLen(this: innerVal)}")
+  log("inner.len = {arrayLen(this: innerVal)}")
 
-  let v0: JsonValue = jsonArrayAt(doc: doc, this: innerVal, idx: 0)
+  let v0: JsonValue = arrayAt(doc: doc, this: innerVal, idx: 0)
   log("inner[0] = {jsonInt(this: v0, fallback: -1)}")
-  let v2: JsonValue = jsonArrayAt(doc: doc, this: innerVal, idx: 2)
-  log("inner[2].len = {jsonArrayLen(this: v2)}")
-  let nestedItem: JsonValue = jsonArrayAt(doc: doc, this: v2, idx: 1)
+  let v2: JsonValue = arrayAt(doc: doc, this: innerVal, idx: 2)
+  log("inner[2].len = {arrayLen(this: v2)}")
+  let nestedItem: JsonValue = arrayAt(doc: doc, this: v2, idx: 1)
   log("inner[2][1] = {jsonInt(this: nestedItem, fallback: -1)}")
 
-  let trailerIdx: Int = jsonField(doc: doc, this: root, key: "trailer")
+  let trailerIdx: Int = field(doc: doc, this: root, key: "trailer")
   let trailerVal: JsonValue = jsonValueAt(doc: doc, idx: trailerIdx)
   log("trailer = {jsonString(this: trailerVal, fallback: qmark)}")
 }
@@ -139,13 +139,13 @@ func showMalformed() {
 
 func showSerializer() {
   let raw: String = "a\"b\\c"
-  let escaped: String = jsonEscape(s: raw)
+  let escaped: String = escape(s: raw)
   log("escape: {escaped}")
-  let quoted: String = jsonQuote(s: raw)
+  let quoted: String = quote(s: raw)
   log("quote: {quoted}")
 
   let line: String = "one\n\ttwo"
-  let escapedLine: String = jsonEscape(s: line)
+  let escapedLine: String = escape(s: line)
   log("escapeCtrl: {escapedLine}")
 }
 

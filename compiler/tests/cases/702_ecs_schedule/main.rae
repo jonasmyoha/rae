@@ -17,10 +17,10 @@ type Vel { v: Int }
 func runFrame(sched: mod Schedule, positions: view ComponentTable(Pos),
               velocities: view ComponentTable(Vel)) ret String {
   var order: String = ""
-  if scheduleShouldRun(schedule: sched, index: 0, readGeneration: componentTableGeneration(this: velocities)) {
+  if shouldRun(schedule: sched, index: 0, readGeneration: componentTableGeneration(this: velocities)) {
     order = order.concat(other: "move ")
   }
-  if scheduleShouldRun(schedule: sched, index: 1, readGeneration: componentTableGeneration(this: positions)) {
+  if shouldRun(schedule: sched, index: 1, readGeneration: componentTableGeneration(this: positions)) {
     order = order.concat(other: "render ")
   }
   ret order

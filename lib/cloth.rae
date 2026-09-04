@@ -39,14 +39,14 @@ type Cloth {
   seeded: Bool           # false until first laid out at a real anchor
 }
 
-func clothParticleCount(c: view Cloth) ret Int { ret c.cols * c.rows }
+func particleCount(c: view Cloth) ret Int { ret c.cols * c.rows }
 # Vertices are DOUBLE-SIDED (front + back with opposite normals) so the sheet is lit
 # from either face — a flag is seen from both sides as it turns.
-func clothVertCount(c: view Cloth) ret Int { ret 2 * c.cols * c.rows }
+func vertCount(c: view Cloth) ret Int { ret 2 * c.cols * c.rows }
 
 # Build the static double-sided index buffer: front faces over verts [0, N), back faces
 # over the duplicate block [N, 2N) with reversed winding.
-func clothBuildIndices(cols: copy Int, rows: copy Int) ret List(Int) {
+func buildIndices(cols: copy Int, rows: copy Int) ret List(Int) {
   let n: Int = cols * rows
   var idx: List(Int) = createList(Int, cap: (cols - 1) * (rows - 1) * 12)
   var r: Int = 0
@@ -69,7 +69,7 @@ func clothBuildIndices(cols: copy Int, rows: copy Int) ret List(Int) {
 }
 
 # A cols x rows cloth of the given world width/height. Particles start collapsed at the
-# origin; the first frame lays them flat at the real anchor (clothLayFlat via seeded).
+# origin; the first frame lays them flat at the real anchor (layFlat via seeded).
 func createCloth(cols: copy Int, rows: copy Int, width: copy Float, height: copy Float,
                  gravity: copy Float, damping: copy Float, iterations: copy Int) ret Cloth {
   let n: Int = cols * rows
@@ -94,7 +94,7 @@ func createCloth(cols: copy Int, rows: copy Int, width: copy Float, height: copy
   ret Cloth {
     cols: cols, rows: rows, restH: rh, restV: rv,
     px: own px, py: own py, pz: own pz, ox: own ox, oy: own oy, oz: own oz,
-    pinned: own pinned, indices: clothBuildIndices(cols: cols, rows: rows),
+    pinned: own pinned, indices: buildIndices(cols: cols, rows: rows),
     gravity: gravity, damping: damping, iterations: iterations,
     anchorX: 0.0, anchorY: 0.0, anchorZ: 0.0, seeded: false
   }
@@ -102,7 +102,7 @@ func createCloth(cols: copy Int, rows: copy Int, width: copy Float, height: copy
 
 # World position of particle (col,row) for a FLAT sheet hanging from `anchor` along
 # `right` (crossbar axis, unit) — width centred on the anchor, dropping in -Z.
-func clothFlatPos(c: view Cloth, col: copy Int, row: copy Int,
+func flatPos(c: view Cloth, col: copy Int, row: copy Int,
                   ax: copy Float, ay: copy Float, az: copy Float,
                   rightX: copy Float, rightY: copy Float) ret Vec3 {
   let lat: Float = (col.toFloat() - (c.cols.toFloat() - 1.0) * 0.5) * c.restH
@@ -112,14 +112,14 @@ func clothFlatPos(c: view Cloth, col: copy Int, row: copy Int,
 
 # Lay the whole cloth flat at the anchor and ZERO its velocity (prev = pos). Used on the
 # first frame and whenever the anchor teleports (restart / a carried flag jumping to the King).
-func clothLayFlat(c: mod Cloth, ax: copy Float, ay: copy Float, az: copy Float,
+func layFlat(c: mod Cloth, ax: copy Float, ay: copy Float, az: copy Float,
                   rightX: copy Float, rightY: copy Float) {
   var r: Int = 0
   loop r < c.rows {
     var cc: Int = 0
     loop cc < c.cols {
       let i: Int = r * c.cols + cc
-      let p: Vec3 = clothFlatPos(c: c, col: cc, row: r, ax: ax, ay: ay, az: az, rightX: rightX, rightY: rightY)
+      let p: Vec3 = flatPos(c: c, col: cc, row: r, ax: ax, ay: ay, az: az, rightX: rightX, rightY: rightY)
       c.px.set(index: i, value: p.x)  c.py.set(index: i, value: p.y)  c.pz.set(index: i, value: p.z)
       c.ox.set(index: i, value: p.x)  c.oy.set(index: i, value: p.y)  c.oz.set(index: i, value: p.z)
       cc = cc + 1
@@ -131,18 +131,18 @@ func clothLayFlat(c: mod Cloth, ax: copy Float, ay: copy Float, az: copy Float,
 
 # Pin the TOP row to the current crossbar line (called every frame so the sheet follows
 # a moving flag; the free rows lag + flutter behind it).
-func clothPinTop(c: mod Cloth, ax: copy Float, ay: copy Float, az: copy Float,
+func pinTop(c: mod Cloth, ax: copy Float, ay: copy Float, az: copy Float,
                  rightX: copy Float, rightY: copy Float) {
   var cc: Int = 0
   loop cc < c.cols {
-    let p: Vec3 = clothFlatPos(c: c, col: cc, row: 0, ax: ax, ay: ay, az: az, rightX: rightX, rightY: rightY)
+    let p: Vec3 = flatPos(c: c, col: cc, row: 0, ax: ax, ay: ay, az: az, rightX: rightX, rightY: rightY)
     c.px.set(index: cc, value: p.x)  c.py.set(index: cc, value: p.y)  c.pz.set(index: cc, value: p.z)
     cc = cc + 1
   }
 }
 
 # Position the cloth for this frame: re-lay flat on a teleport, else just move the pins.
-func clothAnchor(c: mod Cloth, ax: copy Float, ay: copy Float, az: copy Float,
+func anchor(c: mod Cloth, ax: copy Float, ay: copy Float, az: copy Float,
                  rightX: copy Float, rightY: copy Float) {
   let dx: Float = ax - c.anchorX
   let dy: Float = ay - c.anchorY
@@ -150,16 +150,16 @@ func clothAnchor(c: mod Cloth, ax: copy Float, ay: copy Float, az: copy Float,
   let jump2: Float = dx * dx + dy * dy + dz * dz
   let reset: Float = (c.restV * c.rows.toFloat()) * (c.restV * c.rows.toFloat())
   if (not c.seeded) or jump2 > reset {
-    clothLayFlat(c: c, ax: ax, ay: ay, az: az, rightX: rightX, rightY: rightY)
+    layFlat(c: c, ax: ax, ay: ay, az: az, rightX: rightX, rightY: rightY)
   } else {
-    clothPinTop(c: c, ax: ax, ay: ay, az: az, rightX: rightX, rightY: rightY)
+    pinTop(c: c, ax: ax, ay: ay, az: az, rightX: rightX, rightY: rightY)
     c.anchorX = ax  c.anchorY = ay  c.anchorZ = az
   }
 }
 
 # Satisfy one distance constraint between particles i and j at rest length `rest`, moving
 # each free endpoint half the error (a pinned endpoint stays put and the other moves full).
-func clothConstrain(c: mod Cloth, i: copy Int, j: copy Int, rest: copy Float) {
+func constrain(c: mod Cloth, i: copy Int, j: copy Int, rest: copy Float) {
   let dx: Float = c.px.copyAtDefault(index: j) - c.px.copyAtDefault(index: i)
   let dy: Float = c.py.copyAtDefault(index: j) - c.py.copyAtDefault(index: i)
   let dz: Float = c.pz.copyAtDefault(index: j) - c.pz.copyAtDefault(index: i)
@@ -191,7 +191,7 @@ func clothConstrain(c: mod Cloth, i: copy Int, j: copy Int, rest: copy Float) {
 
 # Advance one step: Verlet integrate the free particles under gravity + `wind`, then relax
 # the structural + shear constraints. dt is clamped so a frame hitch can't explode it.
-func clothStep(c: mod Cloth, dt: copy Float, windX: copy Float, windY: copy Float, windZ: copy Float) {
+func step(c: mod Cloth, dt: copy Float, windX: copy Float, windY: copy Float, windZ: copy Float) {
   var h: Float = dt
   if h > 0.02 { h = 0.02 }
   if h <= 0.0 { ret }
@@ -224,13 +224,13 @@ func clothStep(c: mod Cloth, dt: copy Float, windX: copy Float, windY: copy Floa
       loop cc < c.cols {
         let a: Int = r * c.cols + cc
         # structural: right + down neighbour
-        if cc + 1 < c.cols { clothConstrain(c: c, i: a, j: a + 1, rest: c.restH) }
-        if r + 1 < c.rows { clothConstrain(c: c, i: a, j: a + c.cols, rest: c.restV) }
+        if cc + 1 < c.cols { constrain(c: c, i: a, j: a + 1, rest: c.restH) }
+        if r + 1 < c.rows { constrain(c: c, i: a, j: a + c.cols, rest: c.restV) }
         # shear: the two diagonals of the cell to its lower-right
         if cc + 1 < c.cols and r + 1 < c.rows {
           let diag: Float = math.sqrt(x: c.restH * c.restH + c.restV * c.restV)
-          clothConstrain(c: c, i: a, j: a + c.cols + 1, rest: diag)
-          clothConstrain(c: c, i: a + 1, j: a + c.cols, rest: diag)
+          constrain(c: c, i: a, j: a + c.cols + 1, rest: diag)
+          constrain(c: c, i: a + 1, j: a + c.cols, rest: diag)
         }
         cc = cc + 1
       }
@@ -243,7 +243,7 @@ func clothStep(c: mod Cloth, dt: copy Float, windX: copy Float, windY: copy Floa
 # Write the double-sided vertex buffer (8 floats/vertex: pos3, nrm3, uv2). `out` is cleared
 # and refilled — hand the SAME buffer every frame (it keeps capacity), pairing with
 # updateMeshVerts. Front block first (computed smooth normals), then the back block (negated).
-func clothWriteMesh(c: view Cloth, out: mod List(Float)) {
+func writeMesh(c: view Cloth, out: mod List(Float)) {
   out.clear()
   let cols: Int = c.cols
   let rows: Int = c.rows

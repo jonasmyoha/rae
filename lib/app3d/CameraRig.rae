@@ -31,7 +31,7 @@ open math3d
 const cameraRigBoost: Float = 4.0
 const cameraRigSlow: Float = 0.25
 
-func cameraRigSpeedScale() ret Float {
+func speedScale() ret Float {
   if sdl3.isKeyDown(key: keys.keyLShift) or sdl3.isKeyDown(key: keys.keyRShift) {
     ret cameraRigBoost
   }
@@ -335,13 +335,13 @@ func clampRigDistance(rig: view CameraRig, dist: view Float) pub ret Float {
   ret dist
 }
 
-func cameraRigRight(rig: view CameraRig) pub ret Vec3 {
+func right(rig: view CameraRig) pub ret Vec3 {
   let forward: Vec3 = cameraRigForward(rig: rig)
   let up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
   ret vec3.vnorm(a: vec3.vcross(a: forward, b: up))
 }
 
-func cameraRigModeName(rig: view CameraRig) pub ret String {
+func modeName(rig: view CameraRig) pub ret String {
   if rig.mode is CameraRigMode.character {
     ret "Character"
   }
@@ -440,7 +440,7 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
   if allowInput {
     # The wheel is a pointer device, so it rides the mouse toggle.
     mouseDist = 0.0 - gpu2d.wheelMove() * rig.wheelSpeed
-    let boost: Float = cameraRigSpeedScale()
+    let boost: Float = speedScale()
     if rig.mode is CameraRigMode.orbit {
       if sdl3.isKeyDown(key: keys.keyW) { keyDist = keyDist - dt * rig.moveSpeed * boost }
       if sdl3.isKeyDown(key: keys.keyS) { keyDist = keyDist + dt * rig.moveSpeed * boost }
@@ -451,7 +451,7 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
     } else if rig.mode is CameraRigMode.free {
       let step: Float = dt * rig.moveSpeed * boost
       let forward: Vec3 = cameraRigForward(rig: rig)
-      let right: Vec3 = cameraRigRight(rig: rig)
+      let right: Vec3 = right(rig: rig)
       let up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
       if sdl3.isKeyDown(key: keys.keyW) { keyMove = vec3.vadd(a: keyMove, b: vec3.vscale(a: forward, s: step)) }
       if sdl3.isKeyDown(key: keys.keyS) { keyMove = vec3.vsub(a: keyMove, b: vec3.vscale(a: forward, s: step)) }
@@ -576,12 +576,12 @@ func snapCameraRigView(rig: mod CameraRig) pub {
 # half-finished movement.
 const cameraRigFields: Int = 12
 
-func cameraRigPart(parts: view List(String), index: view Int) ret String {
+func part(parts: view List(String), index: view Int) ret String {
   if let value: String = parts.copyAt(index: index) { ret value }
   ret ""
 }
 
-func cameraRigStateString(rig: view CameraRig, camera: view Camera3d) pub ret String {
+func stateString(rig: view CameraRig, camera: view Camera3d) pub ret String {
   var modeNum: Int = 0
   if rig.mode is CameraRigMode.free { modeNum = 1 }
   if rig.mode is CameraRigMode.character { modeNum = 2 }
@@ -601,7 +601,7 @@ func applyCameraRigState(parts: view List(String), offset: view Int,
   if parts.length < offset + cameraRigFields {
     ret false
   }
-  let modeNum: Int = cameraRigPart(parts: parts, index: offset).trim().toInt()
+  let modeNum: Int = part(parts: parts, index: offset).trim().toInt()
   if modeNum is 2 and rig.characterModeEnabled {
     rig.mode = CameraRigMode.character
   } else if modeNum is 1 {
@@ -609,24 +609,24 @@ func applyCameraRigState(parts: view List(String), offset: view Int,
   } else {
     rig.mode = CameraRigMode.orbit
   }
-  rig.yaw = cameraRigPart(parts: parts, index: offset + 1).trim().toFloat()
-  rig.orbitPitch = cameraRigPart(parts: parts, index: offset + 2).trim().toFloat()
-  rig.freePitch = cameraRigPart(parts: parts, index: offset + 3).trim().toFloat()
-  rig.distance = cameraRigPart(parts: parts, index: offset + 4).trim().toFloat()
+  rig.yaw = part(parts: parts, index: offset + 1).trim().toFloat()
+  rig.orbitPitch = part(parts: parts, index: offset + 2).trim().toFloat()
+  rig.freePitch = part(parts: parts, index: offset + 3).trim().toFloat()
+  rig.distance = part(parts: parts, index: offset + 4).trim().toFloat()
   rig.freePosition = vec3.create(
-    x: cameraRigPart(parts: parts, index: offset + 5).trim().toFloat(),
-    y: cameraRigPart(parts: parts, index: offset + 6).trim().toFloat(),
-    z: cameraRigPart(parts: parts, index: offset + 7).trim().toFloat()
+    x: part(parts: parts, index: offset + 5).trim().toFloat(),
+    y: part(parts: parts, index: offset + 6).trim().toFloat(),
+    z: part(parts: parts, index: offset + 7).trim().toFloat()
   )
   # Orbit needs the target restored too, or the camera returns to the
   # right angle around the wrong point.
   camera.target = vec3.create(
-    x: cameraRigPart(parts: parts, index: offset + 8).trim().toFloat(),
-    y: cameraRigPart(parts: parts, index: offset + 9).trim().toFloat(),
+    x: part(parts: parts, index: offset + 8).trim().toFloat(),
+    y: part(parts: parts, index: offset + 9).trim().toFloat(),
     z: camera.target.z
   )
-  rig.smoothMouse = cameraRigPart(parts: parts, index: offset + 10).trim().toInt() is 1
-  rig.smoothKeys = cameraRigPart(parts: parts, index: offset + 11).trim().toInt() is 1
+  rig.smoothMouse = part(parts: parts, index: offset + 10).trim().toInt() is 1
+  rig.smoothKeys = part(parts: parts, index: offset + 11).trim().toInt() is 1
   # A snapshot written by a build with different limits should still land
   # inside this build's.
   rig.distance = clampRigDistance(rig: rig, dist: rig.distance)

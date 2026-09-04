@@ -59,7 +59,7 @@ func resolveVirtualJoystick(joy: mod VirtualJoystick) {
 # Radius of the activation zone (design units). A finger going down inside this
 # radius of the base belongs to the stick; the camera rig excludes the SAME zone
 # so the two are exactly complementary. Valid after resolveVirtualJoystick.
-func virtualJoystickZoneRadius(joy: view VirtualJoystick) pub ret Float {
+func zoneRadius(joy: view VirtualJoystick) pub ret Float {
   ret joy.baseRadius * 1.7
 }
 
@@ -67,7 +67,7 @@ func virtualJoystickZoneRadius(joy: view VirtualJoystick) pub ret Float {
 # capturing the pointer this frame.
 func updateVirtualJoystick(joy: mod VirtualJoystick) pub ret Bool {
   resolveVirtualJoystick(joy: joy)
-  let zone: Float = virtualJoystickZoneRadius(joy: joy)
+  let zone: Float = zoneRadius(joy: joy)
   var px: Float = 0.0
   var py: Float = 0.0
   let touches: Int = gpu2d.touchCount()

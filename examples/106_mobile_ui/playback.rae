@@ -25,7 +25,7 @@ open ecs/entity
 # (docs/ecs-systems-and-data-observation.md §3/§5.1). It owns the
 # playback state + an `inbox` of commands; play/pause is a command
 # (`enqueuePlaybackToggle`) drained in the frame's Apply(A) phase by
-# `playbackProcessCommands` holding `mod` on its own state; `advancePlayback`
+# `processCommands` holding `mod` on its own state; `advancePlayback`
 # is its `update()` step. (No rename — the name is fine; adding the inbox
 # makes it the system, same as ComponentTable being the table.)
 # Deferred to #268: the Spotify play/pause path + `pollSpotify` moving
@@ -82,7 +82,7 @@ type PlaybackState {
   nowPlayingArtKey: String
   nowPlayingRevision: Int
   # Command inbox (#265). Commands are enqueued during Input and drained
-  # in Apply(A) by `playbackProcessCommands` — the system mutates its own
+  # in Apply(A) by `processCommands` — the system mutates its own
   # state only while draining its own inbox.
   inbox: Queue(PlaybackCommand)
 }
@@ -137,7 +137,7 @@ func setNowPlayingArt(state: mod PlaybackState, artKey: view String) pub {
 
 # Input-phase send: enqueue a play/pause toggle. Called from
 # `dispatchActions` (local playback); the toggle itself is applied later,
-# in Apply(A), by `playbackProcessCommands`.
+# in Apply(A), by `processCommands`.
 func enqueuePlaybackToggle(this: mod PlaybackState) pub {
   enqueue(this: this.inbox, value: PlaybackCommand { kind: PlaybackCommandKind.togglePlay })
 }
@@ -145,7 +145,7 @@ func enqueuePlaybackToggle(this: mod PlaybackState) pub {
 # Apply-phase: drain the inbox and apply each command to OWN state,
 # holding `mod self`. Runs in the frame's Apply(A) pass (main.rae). The
 # eager revision bump rides `setPlaybackPlaying`.
-func playbackProcessCommands(this: mod PlaybackState) pub {
+func processCommands(this: mod PlaybackState) pub {
   let n: Int = queueCount(this: this.inbox)
   var i: Int = 0
   loop i < n {
@@ -226,8 +226,8 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
   let fillKey: String = "ProgressFill"
   if let trackRaw: Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: trackKey) {
     if let fillRaw: Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: fillKey) {
-      let trackEntity: EntityId = entityId(v: trackRaw)
-      let fillEntity: EntityId = entityId(v: fillRaw)
+      let trackEntity: EntityId = id(v: trackRaw)
+      let fillEntity: EntityId = id(v: fillRaw)
       var trackW: Float = 0.0
       if componentHas(this: world.computedRects, entity: trackEntity) {
         let tcr: ComputedRect = componentGet(this: world.computedRects, entity: trackEntity)
@@ -239,7 +239,7 @@ func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
       # the table generation whether or not the value differs. Writing the
       # same width each frame therefore pinned the app busy forever: the Rect
       # write marks layout dirty, layout rewrites all ~460 ComputedRects,
-      # transforms follow, renderCacheDirty trips, the frame repaints and
+      # transforms follow, cacheDirty trips, the frame repaints and
       # re-arms `renderUntil` — a self-sustaining 60 Hz loop with the app
       # sitting idle and nothing playing. Paused playback reports a constant
       # progress, so the equality check settles it.

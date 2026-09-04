@@ -32,7 +32,7 @@ type UiWorld {
   allocator: EntityAllocator
 
   # NodeId.id -> entity (stored as `Int` since Rae's `opt T` for struct
-  # T currently miscompiles on unwrap; callers wrap with `entityId()`).
+  # T currently miscompiles on unwrap; callers wrap with `id()`).
   nodeIds: StringMap(Int)
 
   # ----- authored geometry/layout -----
@@ -313,7 +313,7 @@ func pageScopedKey(pageId: view String, nodeId: view String) pub ret String {
 # Resolve a nodeId scoped to a specific page. Returns the underlying
 # raw Int (Rae's opt-struct unwrap miscompiles for struct T, so we
 # keep `world.nodeIds` as `StringMap(Int)` and callers wrap with
-# `entityId()` when they need the typed handle).
+# `id()` when they need the typed handle).
 func findNodeInPage(world: view UiWorld, pageId: view String, nodeId: view String) pub ret opt Int {
   let k: String = pageScopedKey(pageId: pageId, nodeId: nodeId)
   ret world.nodeIds.get(k: k)
@@ -418,8 +418,8 @@ func findScrollTarget(world: view UiWorld) pub ret EntityId {
 }
 
 # Mutate the scroll target's Offset.delta.y AND its ScrollState.y
-# in place. The Offset bump propagates through layoutSystemIfDirty
-# and transformSystemIfDirty into a re-rendered frame without
+# in place. The Offset bump propagates through ifDirty
+# and systemIfDirty into a re-rendered frame without
 # tearing down and rebuilding the world. No-op when `target` is
 # `noEntity()` or carries neither component.
 func updateScrollOffset(world: mod UiWorld, target: view EntityId, scrollY: view Float) pub {

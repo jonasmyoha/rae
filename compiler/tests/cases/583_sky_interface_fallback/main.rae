@@ -6,7 +6,7 @@
 # or dimmer than the constants it replaced, which nobody notices until
 # two scenes disagree and the cause is six commits back.
 #
-#   1. skyIrradiance under SkyKind.none reproduces the deferred lighting
+#   1. irradiance under SkyKind.none reproduces the deferred lighting
 #      pass's hemisphere blend BIT-FOR-BIT — not "close". The expected
 #      values here are computed from the same expression the shader uses,
 #      written out independently below.
@@ -65,7 +65,7 @@ func main() {
     var z: Float = 0.0
     if let value: Float = zs.copyAt(index: i) { z = value }
     let n: Vec3 = vec3.create(x: 0.0, y: 0.0, z: z)
-    let got: Vec3 = skyIrradiance(sky: s, n: n)
+    let got: Vec3 = irradiance(sky: s, n: n)
     let want: Vec3 = referenceHemisphere(ambSky: ambSky, ambGround: ambGround, nz: z)
     if exact(a: got, b: want) is false {
       allExact = false
@@ -75,20 +75,20 @@ func main() {
   log("fallback matches the hemisphere blend exactly: {allExact}")
 
   # Facing up is sky, facing down is ground — the axis check.
-  let up: Vec3 = skyIrradiance(sky: s, n: vec3.create(x: 0.0, y: 0.0, z: 1.0))
-  let down: Vec3 = skyIrradiance(sky: s, n: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0))
+  let up: Vec3 = irradiance(sky: s, n: vec3.create(x: 0.0, y: 0.0, z: 1.0))
+  let down: Vec3 = irradiance(sky: s, n: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0))
   log("up is sky: {exact(a: up, b: ambSky)}")
   log("down is ground: {exact(a: down, b: ambGround)}")
 
   # 4: background passes through untouched.
-  let bg: Vec3 = skyRadiance(sky: s, dir: vec3.create(x: 0.0, y: 1.0, z: 0.0))
+  let bg: Vec3 = radiance(sky: s, dir: vec3.create(x: 0.0, y: 1.0, z: 0.0))
   log("background is the clear colour: {exact(a: bg, b: clear)}")
-  log("reports itself as the fallback: {skyIsFallback(sky: s)}")
+  log("reports itself as the fallback: {isFallback(sky: s)}")
 
   # 3: one exposure moves both answers by the same factor.
   s.exposure = 2.0
-  let litUp: Vec3 = skyIrradiance(sky: s, n: vec3.create(x: 0.0, y: 0.0, z: 1.0))
-  let litBg: Vec3 = skyRadiance(sky: s, dir: vec3.create(x: 0.0, y: 1.0, z: 0.0))
+  let litUp: Vec3 = irradiance(sky: s, n: vec3.create(x: 0.0, y: 0.0, z: 1.0))
+  let litBg: Vec3 = radiance(sky: s, dir: vec3.create(x: 0.0, y: 1.0, z: 0.0))
   log("exposure scales irradiance: {litUp.x is ambSky.x * 2.0}")
   log("exposure scales radiance: {litBg.x is clear.x * 2.0}")
 }
