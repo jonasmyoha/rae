@@ -117,7 +117,9 @@ static void sema_project_namespace(const AstDecl* d, char* out, size_t cap) {
 // any .rae stripped: "ui/ecs" -> "ui", "raylib" -> "raylib", "sys/spotify" -> "sys".
 static void sema_import_package(Str path, char* out, size_t cap) {
     size_t i = 0;
-    while (i < path.len && path.data[i] != '/' && path.data[i] != '\\' && i + 1 < cap) { out[i] = path.data[i]; i++; }
+    // #787: `.` is also a package separator now (`import renderSystem.RenderSystem`),
+    // so the package is the first dotted-or-slashed component.
+    while (i < path.len && path.data[i] != '/' && path.data[i] != '\\' && path.data[i] != '.' && i + 1 < cap) { out[i] = path.data[i]; i++; }
     out[i] = '\0';
     size_t n = strlen(out);
     if (n > 4 && strcmp(out + n - 4, ".rae") == 0) out[n - 4] = '\0';
