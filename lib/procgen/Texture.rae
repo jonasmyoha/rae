@@ -7,9 +7,9 @@
 # tiers: small cheap textures on mobile up to large detailed ones), `tiling` the
 # world-space repeat. Output is a List(Int) of packed RGBA pixels
 # (r | g<<8 | b<<16 | a<<24, built with arithmetic), ready for
-# gpu2d.registerImageRgba or a future terrain-splat / prop texture bind.
+# Gpu2d.registerImageRgba or a future terrain-splat / prop texture bind.
 import core
-import math
+import Math
 import Noise
 open Noise
 
@@ -121,7 +121,7 @@ func generateNormal(resolution: copy Int, tiling: copy Float, strength: copy Flo
       let nx: Float = (hL - hR) * strength
       let ny: Float = (hD - hU) * strength
       let nz: Float = 1.0
-      let invLen: Float = 1.0 / math.sqrt(x: nx * nx + ny * ny + nz * nz)
+      let invLen: Float = 1.0 / Math.sqrt(x: nx * nx + ny * ny + nz * nz)
       px.add(value: texPackRgb(r: nx * invLen * 0.5 + 0.5, g: ny * invLen * 0.5 + 0.5, b: nz * invLen * 0.5 + 0.5))
       x = x + 1
     }

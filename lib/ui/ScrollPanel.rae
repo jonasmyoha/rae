@@ -23,7 +23,7 @@
 # springs back. `offset` may sit briefly outside [0, range] — that overshoot IS
 # the rubber-band, and the viewport clip shows the content pulled past its bound.
 import core
-import gpu2d
+import Gpu2d
 open ui/Ecs
 open ui/Components
 open ui/InputSystem/InputSystem
@@ -211,7 +211,7 @@ func updateScrollPanel(world: mod UiWorld, viewport: view EntityId, input: view 
   }
 
   # ----- wheel (only while hovering the panel) -----
-  let wheel: Float = gpu2d.wheelMove()
+  let wheel: Float = Gpu2d.wheelMove()
   if inside and wheel is not 0.0 {
     let raw: Float = 0.0 - wheel * scrollWheelStep
     state.offset = state.offset + dampedDelta(current: state.offset, delta: raw, low: 0.0, high: range, dim: dim)

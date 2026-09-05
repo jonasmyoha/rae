@@ -2,7 +2,7 @@
 #
 # Renders `scene3d` triangle meshes (MeshRenderer components) with PBR
 # lighting through wgpu-native into the same SDL3 window/surface gpu2d
-# owns. An app opens the window with gpu2d.initWindow(...) then drives
+# owns. An app opens the window with Gpu2d.initWindow(...) then drives
 # frames with gpu3d. Single-sampled since #333 (MSAA dropped so depth is
 # sampleable; TAA #335 takes over antialiasing): the scene pass writes
 # linear HDR (rgba16f) plus depth/normal/velocity prepass targets, and the
@@ -44,15 +44,15 @@
 # instead of failing silently. `RAE_GPU3D_DRAW_LIMIT=N` can lower the effective
 # limit for diagnostics/tests, but cannot raise the hard capacity.
 import core
-import shadow3d
-open shadow3d
+import Shadow3d
+open Shadow3d
 # The sun cascade shadow render moved to Rae (#504); endShadowPass calls it.
-import gbufferShadow
+import GbufferShadow
 # The sky the forward background draws (#418). sky.rae does not import this,
 # so the dependency runs one way only.
 import Sky
 open Sky
-import math
+import Math
 open Vec3
 open Scene3d
 open Math3d
@@ -60,8 +60,8 @@ open ecs/Entity          # #793: World3d shadow path reads entities/components
 open ecs/ComponentTable
 # The forward render pass is built in Rae over the WebGPU bindings (#514),
 # the same way gbuffer.rae builds the deferred geometry pass.
-open webgpu/webgpu
-import webgpu/context
+open webgpu/Webgpu
+import webgpu/Context
 
 # ----- raw C ABI (implementation detail; prefer the typed API below) ---
 func meshCreate(verts: view Buffer(Float), vertCount: Int, indices: view Buffer(Int), indexCount: Int) extern ret Int
@@ -556,8 +556,8 @@ func finishForward() ret Int {
 }
 
 # Submit the 3D pass without screenshot or present (#514, was the C submit).
-# Follow with gpu2d.beginFrameLoad(), the ECS UI render pass, and
-# gpu2d.endFrame() so the composed frame is presented exactly once. Poll only
+# Follow with Gpu2d.beginFrameLoad(), the ECS UI render pass, and
+# Gpu2d.endFrame() so the composed frame is presented exactly once. Poll only
 # when something was actually submitted.
 func submit() pub {
   if finishForward() is not 0 {
@@ -631,7 +631,7 @@ func updateMeshVerts(mesh: view MeshHandle, verts: view List(Float), vertCount: 
 # (pure arithmetic, unit-tested); these only move it to the GPU and
 # rasterise the casters.
 # The shadow-map feed (cascade uniforms + draw queue) is bookkeeping, not a pass
-# encoder — the shadow render itself is in Rae (gbufferShadow.shadowEnd, #504).
+# encoder — the shadow render itself is in Rae (GbufferShadow.shadowEnd, #504).
 # So these bind the shadow-map C helpers under the rae_sm_* prefix (#514), the
 # same prefix the shadow accessors already use.
 func shadowBegin(cascades: view Buffer(Float), count: Int, resolution: Int,
@@ -669,7 +669,7 @@ func drawShadowCasterSkinned(mesh: view MeshHandle, model: view Mat4, paletteBas
 }
 
 func endShadowPass() pub {
-  gbufferShadow.shadowEnd()
+  GbufferShadow.shadowEnd()
 }
 
 # How many casters the shadow pass rasterised. Exposed because a shadow

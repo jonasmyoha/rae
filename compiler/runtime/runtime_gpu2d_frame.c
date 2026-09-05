@@ -255,11 +255,11 @@ void rae_g2d_present_and_cleanup(void) {
     rae_wgpu_poll(presented ? 1 : 0);
 }
 
-rae_Bool rae_ext_gpu2d_lastPresentOk(void) {
+rae_Bool rae_ext_Gpu2d_lastPresentOk(void) {
     return g_g2d_last_present_ok != 0;
 }
 
-void rae_ext_gpu2d_flush(void) {
+void rae_ext_Gpu2d_flush(void) {
     if (!g_g2d_pass) return;
     int have_text = 0;
     for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) if (g_g2d_text_count[i] > 0) have_text = 1;
@@ -362,7 +362,7 @@ void rae_ext_gpu2d_flush(void) {
     }
 }
 
-void rae_ext_gpu2d_closeWindow(void) {
+void rae_ext_Gpu2d_closeWindow(void) {
     if (g_g2d_off_view) { wgpuTextureViewRelease(g_g2d_off_view); g_g2d_off_view = NULL; }
     if (g_g2d_off_tex)  { wgpuTextureRelease(g_g2d_off_tex);  g_g2d_off_tex = NULL; }
     g_g2d_off_w = 0; g_g2d_off_h = 0;

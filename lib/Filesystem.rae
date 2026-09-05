@@ -5,10 +5,10 @@
 # SDL-linked, like lib/sdl3.rae. Call through the `filesystem` namespace:
 #
 #   import filesystem
-#   let p: String = filesystem.renderPath(stem: "rae_render")
-#   filesystem.exists(path: p)
+#   let p: String = Filesystem.renderPath(stem: "rae_render")
+#   Filesystem.exists(path: p)
 import core
-import fs
+import Fs
 
 # Extern bindings — clean names, namespace-mangled to rae_ext_filesystem_* and
 # implemented in the RAE_HAS_SDL3 block of the runtime.
@@ -108,7 +108,7 @@ func pad4(n: view Int) ret String {
 # This is intentionally Rae policy over the raw directory-listing primitive, not
 # a C runtime helper.
 func nextIndex(dir: view String, prefix: view String) ret Int {
-    let entries: List(File) = fs.listDir(folder: dir)
+    let entries: List(File) = Fs.listDir(folder: dir)
     var maxN: Int = 0
     var i: Int = 0
     loop i < entries.length {

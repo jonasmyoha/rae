@@ -6,7 +6,7 @@ func main() {
   let salt: String = "saltsaltsalt"
   let hash: Buffer(Int) = __buf_alloc(size: 32)
   # 1 block (1KB), 1 iteration, 32 bytes output
-  sys.rae_crypto_argon2i(password: pwd, salt: salt, nb_blocks: 1, nb_iterations: 1, hash_buf: hash, hash_len: 32)
+  Sys.rae_crypto_argon2i(password: pwd, salt: salt, nb_blocks: 1, nb_iterations: 1, hash_buf: hash, hash_len: 32)
   log("Hash generated (32 bytes).")
   
   log("2. Encrypting data...")
@@ -22,12 +22,12 @@ func main() {
   let mac: Buffer(Int) = __buf_alloc(size: 16)
   let cipher: Buffer(Int) = __buf_alloc(size: msgLen)
   
-  sys.encrypt(key: key, nonce: nonce, plain: plain, len: msgLen, mac: mac, cipher: cipher)
+  Sys.encrypt(key: key, nonce: nonce, plain: plain, len: msgLen, mac: mac, cipher: cipher)
   log("Encryption done.")
   
   log("3. Decrypting data...")
   let recovered: Buffer(Int) = __buf_alloc(size: msgLen)
-  if sys.decrypt(key: key, nonce: nonce, mac: mac, cipher: cipher, len: msgLen, plain: recovered) {
+  if Sys.decrypt(key: key, nonce: nonce, mac: mac, cipher: cipher, len: msgLen, plain: recovered) {
     log("Decryption successful!")
     let v0: Int = __buf_get(buf: recovered, index: 0)
     let v1: Int = __buf_get(buf: recovered, index: 1)

@@ -198,18 +198,18 @@ static void rae_g2d_fill_clip_uniform(int clipidx, float* cu) {
     }
 }
 
-void rae_ext_gpu2d_pushClipRect(float x, float y, float w, float h){
+void rae_ext_Gpu2d_pushClipRect(float x, float y, float w, float h){
     rae_g2d_push_clip(x, y, w, h, 0.0);
 }
 
 /* #118: rounded clip. The box pipeline applies the rounded-rect SDF in the
  * fragment shader (analytic AA on the corners); the axis-aligned scissor
  * (#144) still bounds all pipelines to the clip bbox. */
-void rae_ext_gpu2d_pushClipRoundedRect(float x, float y, float w, float h, float radius){
+void rae_ext_Gpu2d_pushClipRoundedRect(float x, float y, float w, float h, float radius){
     rae_g2d_push_clip(x, y, w, h, radius);
 }
 
-void rae_ext_gpu2d_popClipRect(void) {
+void rae_ext_Gpu2d_popClipRect(void) {
     if (g_g2d_clip_sp > 0) {
         g_g2d_cur_clip = g_g2d_clip_stack[--g_g2d_clip_sp];
     } else {
@@ -282,7 +282,7 @@ int rae_g2d_window_visible(void) {
  * What C keeps is what only C can do: notice the SDL event. */
 static int g_g2d_win_moved = 0;
 
-void rae_ext_gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
+void rae_ext_Gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         fprintf(stderr, "[gpu2d] SDL init failed: %s\n", SDL_GetError());
         return;
@@ -390,7 +390,7 @@ EMSCRIPTEN_KEEPALIVE void rae_browser_request_stop(void) {
  * surface yet? Used only to explain a headless run that drew nothing. */
 extern rae_Bool rae_frame_presented_any(void);
 
-rae_Bool rae_ext_gpu2d_pollClose(void) {
+rae_Bool rae_ext_Gpu2d_pollClose(void) {
 #ifdef __EMSCRIPTEN__
     /* Browser WebGPU presents at requestAnimationFrame boundaries. Asyncify
      * lets the current Rae loop await that boundary without source changes. */
@@ -516,7 +516,7 @@ rae_Bool rae_ext_gpu2d_pollClose(void) {
  * drain. Passing NULL means SDL doesn't dequeue the event. This is the idle
  * half of the hybrid loop: busy-render while animating, park here when idle so
  * the app sits at ~0% CPU until input arrives. timeoutSec <= 0 returns at once. */
-void rae_ext_gpu2d_waitEvents(float timeoutSec){
+void rae_ext_Gpu2d_waitEvents(float timeoutSec){
     int ms = (int)(timeoutSec * 1000.0);
     if (ms < 0) ms = 0;
     SDL_WaitEventTimeout(NULL, ms);
@@ -536,8 +536,8 @@ static void rae_g2d_pointer_design(double* dx, double* dy) {
     *dx = (xf[2] != 0.0f) ? (physX - xf[4]) / xf[2] : physX;
     *dy = (xf[3] != 0.0f) ? (physY - xf[5]) / xf[3] : physY;
 }
-float rae_ext_gpu2d_pointerX(void){ double x, y; rae_g2d_pointer_design(&x, &y); return x; }
-float rae_ext_gpu2d_pointerY(void){ double x, y; rae_g2d_pointer_design(&x, &y); return y; }
+float rae_ext_Gpu2d_pointerX(void){ double x, y; rae_g2d_pointer_design(&x, &y); return x; }
+float rae_ext_Gpu2d_pointerY(void){ double x, y; rae_g2d_pointer_design(&x, &y); return y; }
 
 /* Multitouch fingers in design units (#526). touchX/Y clamp to 0 out of range. */
 static void rae_g2d_touch_design(int i, double* dx, double* dy) {
@@ -547,22 +547,22 @@ static void rae_g2d_touch_design(int i, double* dx, double* dy) {
     *dx = (xf[2] != 0.0f) ? (physX - xf[4]) / xf[2] : physX;
     *dy = (xf[3] != 0.0f) ? (physY - xf[5]) / xf[3] : physY;
 }
-int64_t rae_ext_gpu2d_touchCount(void) { return (int64_t)g_g2d_touch_n; }
-float rae_ext_gpu2d_touchX(int64_t i) {
+int64_t rae_ext_Gpu2d_touchCount(void) { return (int64_t)g_g2d_touch_n; }
+float rae_ext_Gpu2d_touchX(int64_t i) {
     if (i < 0 || i >= g_g2d_touch_n) return 0.0f;
     double x, y; rae_g2d_touch_design((int)i, &x, &y); return (float)x;
 }
-float rae_ext_gpu2d_touchY(int64_t i) {
+float rae_ext_Gpu2d_touchY(int64_t i) {
     if (i < 0 || i >= g_g2d_touch_n) return 0.0f;
     double x, y; rae_g2d_touch_design((int)i, &x, &y); return (float)y;
 }
 /* A stable per-finger id (SDL_FingerID) so a widget can grab a finger at press
  * and hold it for the whole drag, and whether it went down THIS frame. */
-int64_t rae_ext_gpu2d_touchId(int64_t i) {
+int64_t rae_ext_Gpu2d_touchId(int64_t i) {
     if (i < 0 || i >= g_g2d_touch_n) return -1;
     return (int64_t)g_g2d_touch[(int)i].id;
 }
-rae_Bool rae_ext_gpu2d_touchPressed(int64_t i) {
+rae_Bool rae_ext_Gpu2d_touchPressed(int64_t i) {
     if (i < 0 || i >= g_g2d_touch_n) return 0;
     return g_g2d_touch[(int)i].pressed ? 1 : 0;
 }
@@ -590,18 +590,18 @@ static void rae_g2d_safe_insets_design(double* it, double* ib, double* il, doubl
     *il = leftL * sx / scaleX;
     *ir = rightL * sx / scaleX;
 }
-float rae_ext_gpu2d_safeTop(void){ double t,b,l,r; rae_g2d_safe_insets_design(&t,&b,&l,&r); return (float)t; }
-float rae_ext_gpu2d_safeBottom(void){ double t,b,l,r; rae_g2d_safe_insets_design(&t,&b,&l,&r); return (float)b; }
-float rae_ext_gpu2d_safeLeft(void){ double t,b,l,r; rae_g2d_safe_insets_design(&t,&b,&l,&r); return (float)l; }
-float rae_ext_gpu2d_safeRight(void){ double t,b,l,r; rae_g2d_safe_insets_design(&t,&b,&l,&r); return (float)r; }
+float rae_ext_Gpu2d_safeTop(void){ double t,b,l,r; rae_g2d_safe_insets_design(&t,&b,&l,&r); return (float)t; }
+float rae_ext_Gpu2d_safeBottom(void){ double t,b,l,r; rae_g2d_safe_insets_design(&t,&b,&l,&r); return (float)b; }
+float rae_ext_Gpu2d_safeLeft(void){ double t,b,l,r; rae_g2d_safe_insets_design(&t,&b,&l,&r); return (float)l; }
+float rae_ext_Gpu2d_safeRight(void){ double t,b,l,r; rae_g2d_safe_insets_design(&t,&b,&l,&r); return (float)r; }
 /* Left mouse button held this frame (button index 1 in SDL). */
-rae_Bool rae_ext_gpu2d_pointerDown(void) { return g_sdl_mouse[SDL_BUTTON_LEFT] != 0; }
-rae_Bool rae_ext_gpu2d_pointerPressed(void) { return g_sdl_mouse_pressed[SDL_BUTTON_LEFT] != 0; }
-rae_Bool rae_ext_gpu2d_pointerReleased(void) { return g_sdl_mouse_released[SDL_BUTTON_LEFT] != 0; }
+rae_Bool rae_ext_Gpu2d_pointerDown(void) { return g_sdl_mouse[SDL_BUTTON_LEFT] != 0; }
+rae_Bool rae_ext_Gpu2d_pointerPressed(void) { return g_sdl_mouse_pressed[SDL_BUTTON_LEFT] != 0; }
+rae_Bool rae_ext_Gpu2d_pointerReleased(void) { return g_sdl_mouse_released[SDL_BUTTON_LEFT] != 0; }
 /* Per-frame wheel delta (positive = wheel/scroll up). */
-float rae_ext_gpu2d_wheelMove(void){ return (double)g_g2d_wheel; }
+float rae_ext_Gpu2d_wheelMove(void){ return (double)g_g2d_wheel; }
 
-void rae_ext_gpu2d_setMouseCursor(int64_t kind) {
+void rae_ext_Gpu2d_setMouseCursor(int64_t kind) {
     if (!g_sdl_win) return;
     if (kind < 0 || kind > 6) kind = 0;
     if ((int)kind == g_g2d_cursor_kind) return;
@@ -659,33 +659,33 @@ void rae_g2d_tick_virtual_clock(void) {
     if (g_g2d_fixed_dt > 0.0) g_g2d_virtual_now += g_g2d_fixed_dt;
 }
 
-double rae_ext_gpu2d_nowSeconds(void){
+double rae_ext_Gpu2d_nowSeconds(void){
     g2d_fixed_dt_init();
     if (g_g2d_fixed_dt > 0.0) return g_g2d_virtual_now;
     return (double)rae_ext_nowMs() / 1000.0;
 }
 
-int64_t rae_ext_gpu2d_windowWidth(void) { return g_sdl_w; }
-int64_t rae_ext_gpu2d_windowHeight(void) { return g_sdl_h; }
-void rae_ext_gpu2d_setWindowPosition(int64_t x, int64_t y) {
+int64_t rae_ext_Gpu2d_windowWidth(void) { return g_sdl_w; }
+int64_t rae_ext_Gpu2d_windowHeight(void) { return g_sdl_h; }
+void rae_ext_Gpu2d_setWindowPosition(int64_t x, int64_t y) {
     if (g_sdl_win) SDL_SetWindowPosition(g_sdl_win, (int)x, (int)y);
 }
 /* Counterpart to setWindowPosition, so an app can restore the whole
  * placement it saved. Restoring the position without the size drops the
  * window back in the right corner at the wrong shape, which looks more
  * broken than not restoring at all. */
-void rae_ext_gpu2d_setWindowSize(int64_t w, int64_t h) {
+void rae_ext_Gpu2d_setWindowSize(int64_t w, int64_t h) {
     if (!g_sdl_win) return;
     if (w <= 0 || h <= 0) return;
     SDL_SetWindowSize(g_sdl_win, (int)w, (int)h);
 }
-int64_t rae_ext_gpu2d_windowPositionX(void) {
+int64_t rae_ext_Gpu2d_windowPositionX(void) {
     int x = 0, y = 0;
     if (g_sdl_win) SDL_GetWindowPosition(g_sdl_win, &x, &y);
     (void)y;
     return (int64_t)x;
 }
-int64_t rae_ext_gpu2d_windowPositionY(void) {
+int64_t rae_ext_Gpu2d_windowPositionY(void) {
     int x = 0, y = 0;
     if (g_sdl_win) SDL_GetWindowPosition(g_sdl_win, &x, &y);
     (void)x;
@@ -693,26 +693,26 @@ int64_t rae_ext_gpu2d_windowPositionY(void) {
 }
 /* True once per OS resize (edge-triggered): returns the pending flag and
  * clears it, so the app rebuilds its layout extent for the new window. */
-rae_Bool rae_ext_gpu2d_windowResized(void) {
+rae_Bool rae_ext_Gpu2d_windowResized(void) {
     rae_Bool r = (rae_Bool)g_g2d_win_resized;
     g_g2d_win_resized = 0;
     return r;
 }
 
 /* One-shot, same contract as windowResized: reading it clears it. */
-rae_Bool rae_ext_gpu2d_windowMoved(void) {
+rae_Bool rae_ext_Gpu2d_windowMoved(void) {
     int v = g_g2d_win_moved;
     g_g2d_win_moved = 0;
     return v ? 1 : 0;
 }
 
 /* Coordinate system (#112). */
-void rae_ext_gpu2d_setDesignResolution(float w, float h, int64_t fit){
+void rae_ext_Gpu2d_setDesignResolution(float w, float h, int64_t fit){
     g_g2d_design_w = w; g_g2d_design_h = h; g_g2d_fit_mode = (int)fit;
 }
-float rae_ext_gpu2d_designWidth(void){ return (g_g2d_design_w > 0.0) ? g_g2d_design_w : (double)g_sdl_w; }
-float rae_ext_gpu2d_designHeight(void){ return (g_g2d_design_h > 0.0) ? g_g2d_design_h : (double)g_sdl_h; }
-float rae_ext_gpu2d_dpr(void){
+float rae_ext_Gpu2d_designWidth(void){ return (g_g2d_design_w > 0.0) ? g_g2d_design_w : (double)g_sdl_w; }
+float rae_ext_Gpu2d_designHeight(void){ return (g_g2d_design_h > 0.0) ? g_g2d_design_h : (double)g_sdl_h; }
+float rae_ext_Gpu2d_dpr(void){
     int lw = 0, lh = 0; if (g_sdl_win) SDL_GetWindowSize(g_sdl_win, &lw, &lh);
     (void)lh; return (lw > 0) ? (double)g_sdl_w / (double)lw : 1.0;
 }

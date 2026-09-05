@@ -15,7 +15,7 @@
 #   import quat
 #   let q: Quat = quat.fromAxisAngle(axis: vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: 1.57)
 
-import math
+import Math
 import Vec3
 import Math3d
 open Vec3
@@ -44,8 +44,8 @@ func create(x: view Float, y: view Float, z: view Float, w: view Float) ret Quat
 # `axis` must be unit length; `angle` is in radians.
 func fromAxisAngle(axis: view Vec3, angle: view Float) ret Quat {
     let h: Float = angle * 0.5
-    let s: Float = math.sin(x: h)
-    ret Quat { x: axis.x * s, y: axis.y * s, z: axis.z * s, w: math.cos(x: h) }
+    let s: Float = Math.sin(x: h)
+    ret Quat { x: axis.x * s, y: axis.y * s, z: axis.z * s, w: Math.cos(x: h) }
 }
 
 # Hamilton product: `qmul(a, b)` applies b FIRST, then a — the same
@@ -70,7 +70,7 @@ func qdot(a: view Quat, b: view Quat) ret Float {
 }
 
 func qlen(a: view Quat) ret Float {
-    ret math.sqrt(x: Quat.qdot(a: a, b: a))
+    ret Math.sqrt(x: Quat.qdot(a: a, b: a))
 }
 
 func qnorm(a: view Quat) ret Quat {
@@ -146,10 +146,10 @@ func slerp(a: view Quat, b: view Quat, t: view Float) ret Quat {
             w: a.w + (bw - a.w) * t
         })
     }
-    let theta: Float = math.acos(x: cosTheta)
-    let sinTheta: Float = math.sin(x: theta)
-    let wa: Float = math.sin(x: (1.0 - t) * theta) / sinTheta
-    let wb: Float = math.sin(x: t * theta) / sinTheta
+    let theta: Float = Math.acos(x: cosTheta)
+    let sinTheta: Float = Math.sin(x: theta)
+    let wa: Float = Math.sin(x: (1.0 - t) * theta) / sinTheta
+    let wb: Float = Math.sin(x: t * theta) / sinTheta
     ret Quat {
         x: a.x * wa + bx * wb,
         y: a.y * wa + by * wb,

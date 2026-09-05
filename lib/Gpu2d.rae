@@ -14,8 +14,8 @@
 # Importing this module links both. Window globals are shared with lib/sdl3.rae,
 # so sdl3 input functions (getMouseX/isKeyDown/…) work against this window.
 import core
-open webgpu/webgpu
-import webgpu/context
+open webgpu/Webgpu
+import webgpu/Context
 
 # --- Window + surface ----------------------------------------------------
 # Open a GPU-presenting window (Metal layer wrapped as a wgpu surface) and
@@ -66,7 +66,7 @@ func shouldRenderFrame(appNeedsRender: view Bool) ret Bool {
 
 # Busy-loop convenience for apps that render every frame (games, always-on
 # animation): render this frame only if the window is visible. When hidden it
-# PARKS briefly and returns false, so `if gpu2d.renderGate() { ...render... }`
+# PARKS briefly and returns false, so `if Gpu2d.renderGate() { ...render... }`
 # gets both the macOS backgrounded-render leak fix AND avoids a busy spin, with
 # no else branch. Event-driven loops that already compute a needsRender should
 # use shouldRenderFrame + their own waitEvents instead.
@@ -291,8 +291,8 @@ func decodeImageProbe(path: String) extern ret Int
 func loadImageKey(key: String, path: String) extern ret Int
 # Register an image straight from RGBA pixels generated in Rae (#539) — no file.
 # `pixels` is one packed int per pixel: r | g<<8 | b<<16 | a<<24 (order R,G,B,A).
-func g2dRegisterImageRgba(pixels: view Buffer(Int), w: Int, h: Int) extern("rae_ext_gpu2d_registerImageRgba") ret Int
-func g2dRegisterImageKeyHandle(key: String, handle: Int) extern("rae_ext_gpu2d_registerImageKeyHandle")
+func g2dRegisterImageRgba(pixels: view Buffer(Int), w: Int, h: Int) extern("rae_ext_Gpu2d_registerImageRgba") ret Int
+func g2dRegisterImageKeyHandle(key: String, handle: Int) extern("rae_ext_Gpu2d_registerImageKeyHandle")
 func registerImageRgba(key: copy String, pixels: view Buffer(Int), w: copy Int, h: copy Int) pub ret Int {
   let handle: Int = g2dRegisterImageRgba(pixels: pixels, w: w, h: h)
   if handle > 0 { g2dRegisterImageKeyHandle(key: key, handle: handle) }
@@ -313,7 +313,7 @@ func drawImage(x: Float, y: Float, w: Float, h: Float, radius: Float, handle: In
 # --- Text (#111, MSDF glyph quads) ---------------------------------------
 # Low-level: submit one MSDF glyph quad. Screen rect is (sx0,sy0)-(sx1,sy1)
 # in pixels; UV rect is (u0,v0)-(u1,v1) NORMALISED into the atlas; `atlas` is
-# the sdfText.loadAtlas handle (1-based); `pxRange` is the screen-space px
+# the SdfText.loadAtlas handle (1-based); `pxRange` is the screen-space px
 # range (atlas pxRange * onScreenSize / atlasGlyphSize); colour is 0xAARRGGBB.
 # One atlas/font per frame. Layout helper: lib/gpu2dText.rae drawText.
 func drawGlyph(sx0: Float, sy0: Float, sx1: Float, sy1: Float,

@@ -7,16 +7,16 @@
 # intermediate render targets and their generation counter stay C for now (they
 # are produced by passes not yet migrated); Rae reads them through accessors.
 import core
-import gbuffer
+import Gbuffer
 import Scene3d
 import Vec3
 import Sky
-open gbuffer
+open Gbuffer
 open Scene3d
 open Vec3
 open Sky
-open webgpu/webgpu
-import webgpu/context
+open webgpu/Webgpu
+import webgpu/Context
 
 # Presentable target + resize generation (also declared in gbuffer_inspector;
 # these bind the same C symbols).
@@ -285,7 +285,7 @@ func ssaoPass(cache: mod AoPassCache, camera: view Camera3d) pub {
 # gbLightUpload; Rae builds the 9-entry bind and runs the pass. The lighting
 # pipeline stays C for now (its creation guards the shared init block).
 func gbLightUpload(camX: Float, camY: Float, camZ: Float, exposure: Float, sunX: Float, sunY: Float, sunZ: Float, sunR: Float, sunG: Float, sunB: Float, skyR: Float, skyG: Float, skyB: Float, gndR: Float, gndG: Float, gndB: Float, skyKind: Float, turbidity: Float, skyExposure: Float, sunSizeRad: Float, zenR: Float, zenG: Float, zenB: Float, bands: Float, horR: Float, horG: Float, horB: Float, discI: Float) extern("rae_gb_light_upload")
-func skyHosekPush(index: Int, value: Float) extern("rae_ext_gbuffer_skyHosekPush")
+func skyHosekPush(index: Int, value: Float) extern("rae_ext_Gbuffer_skyHosekPush")
 func gbLightPipeline() extern("rae_gb_light_pipeline") ret Ptr
 func gbLitView() extern("rae_gb_lit_view") ret Ptr
 func gbLightBind() extern("rae_gb_light_bind") ret Ptr
@@ -461,7 +461,7 @@ func gbPyrSrcView(i: Int) extern("rae_gb_pyr_src_view") ret Ptr
 func gbPyrRtView(i: Int) extern("rae_gb_pyr_rt_view") ret Ptr
 func gbPyrBind(i: Int) extern("rae_gb_pyr_bind") ret Ptr
 func gbSetPyrBind(i: Int, bind: Ptr) extern("rae_gb_set_pyr_bind")
-func gbPyramidMips() extern("rae_ext_gbuffer_pyramidMips") ret Int
+func gbPyramidMips() extern("rae_ext_Gbuffer_pyramidMips") ret Int
 
 func depthPyramid(cache: mod PyrPassCache) pub {
   if gbPyramidReady() is 0 { ret }

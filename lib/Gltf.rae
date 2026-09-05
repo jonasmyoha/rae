@@ -33,8 +33,8 @@
 # anyone tests on and then does not.
 import core
 import Json
-import sys
-import math
+import Sys
+import Math
 import Mesh3d
 import Math3d
 import Quat
@@ -117,7 +117,7 @@ func readF32(b: view List(Int), pos: view Int) pub ret Float {
   var value: Float = 0.0
   if exponent is 0 {
     # Denormal (or zero): no implicit leading 1, fixed exponent of -126.
-    value = mantissa.toFloat() / 8388608.0 * math.pow(base: 2.0, exp: 0.0 - 126.0)
+    value = mantissa.toFloat() / 8388608.0 * Math.pow(base: 2.0, exp: 0.0 - 126.0)
   } else {
     if exponent is 255 {
       # Inf/NaN. A mesh containing either is broken; report zero rather
@@ -125,7 +125,7 @@ func readF32(b: view List(Int), pos: view Int) pub ret Float {
       value = 0.0
     } else {
       let frac: Float = 1.0 + mantissa.toFloat() / 8388608.0
-      value = frac * math.pow(base: 2.0, exp: (exponent - 127).toFloat())
+      value = frac * Math.pow(base: 2.0, exp: (exponent - 127).toFloat())
     }
   }
   if sign is 1 {
@@ -140,7 +140,7 @@ func readF32(b: view List(Int), pos: view Int) pub ret Float {
 # parse the JSON. The BIN chunk is NOT copied — accessors index into
 # `bytes` at `binOffset`, so a 500 KB model costs one read.
 func loadGlb(path: view String) pub ret Glb {
-  let bytes: List(Int) = sys.readFileBytes(path: path)
+  let bytes: List(Int) = Sys.readFileBytes(path: path)
   if bytes.length < 12 {
     ret glbFailed(msg: "not a glb: fewer than 12 bytes at {path}")
   }
@@ -192,7 +192,7 @@ func loadGlb(path: view String) pub ret Glb {
   # from `bytes`: Rae's String indexes codepoints, so assembling one byte
   # at a time would be both quadratic and wrong for any non-ASCII string
   # inside the document (node names routinely are).
-  let text: String = sys.readFileTextRange(path: path, offset: jsonStart, len: jsonLen)
+  let text: String = Sys.readFileTextRange(path: path, offset: jsonStart, len: jsonLen)
   let doc: JsonDoc = parseJson(source: text)
   if doc.ok is false {
     ret glbFailed(msg: "glb JSON chunk did not parse: {path}")
@@ -454,7 +454,7 @@ func loadPrimitive(g: view Glb, meshIndex: view Int, primIndex: view Int) pub re
       var cx: Float = ay * bz - az * by
       var cy: Float = az * bx - ax * bz
       var cz: Float = ax * by - ay * bx
-      let len: Float = math.sqrt(x: cx * cx + cy * cy + cz * cz)
+      let len: Float = Math.sqrt(x: cx * cx + cy * cy + cz * cz)
       # A degenerate triangle has no normal to give. Leave its corners at
       # zero rather than dividing by it; a neighbouring face will usually
       # overwrite them, and a zero normal is at least obviously wrong
