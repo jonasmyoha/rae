@@ -1,0 +1,428 @@
+open ui/Ecs
+# Bottom nav-tabs row. Each tab is an instance of
+# `nav-tab.raescene` — a reusable button scene containing an icon
+# and a label inside a container that carries the `OnClick`. The
+# scene declares placeholder defaults (`mat:home`, grey tint,
+# "Tab", styleId "tabInactive", action "nav.unset") and we apply
+# per-instance overrides at mount time to set the real icon key,
+# label text, tint, styleId, and action.
+#
+# Active-tab styling stays in code (one tab is "active" based on
+# `currentScreen`) because the override system is the cleanest place
+# to vary state-dependent styling: the same scene file describes
+# both the active and inactive look, and overrides decide which.
+import core
+import ui/Components
+import ui/Ecs
+import ui/Scene
+import ui/SceneInstance
+open ecs/Entity
+
+const tabIconSize: Float = 69.39759036144578
+const floatingDockInset: Float = 52.04819277108433
+const floatingDockRadius: Float = 69.39759036144578
+
+# Texture-registry key for the nav-tab band's frosted-glass blur.
+# The host renders content first, captures the strip of pixels behind
+# the nav-tabs, blurs them, registers under this key. The nav-tabs
+# bar's `BackdropImage` then samples it. Constant so producer and
+# consumer can't drift apart.
+func tabBlurTextureKey() pub ret String {
+  ret "dock.tabBlur"
+}
+
+# Screen-pixel y-coordinate of the top of the nav-tabs band. The
+# blur capture region runs from this y down by `navTabsH`. Computed
+# from `phoneFrameH`/`navTabsH` so it tracks the dock's actual layout.
+func tabBlurCaptureY() pub ret Float {
+  ret phoneFrameH - navTabsH
+}
+
+# Registry key the dock looks up its frosted-glass blur backdrop
+# under. The host (`main.rae`) writes a fresh blurred screenshot
+# of the dock region after every render; this is the lookup.
+func dockBlurKey() pub ret String {
+  ret "nav.dockBlur"
+}
+
+# Attach a fullscreen Sprite to `entity` (used for the blurred-
+# backdrop texture). Kept local so this module doesn't depend on the
+# debug helpers.
+func setDockSprite(world: mod UiWorld, entity: view EntityId, key: view String, tint: view RgbaColor) {
+  let sp: Sprite = {
+    textureKey: key
+    tint: tint
+    scaleMode: ScaleMode.stretch
+    tileScale: Vec2 { x: 1.0, y: 1.0 }
+    nineSlice: Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+    hasNineSlice: false
+  }
+  componentSet(this: world.sprites, entity: entity, data: sp)
+}
+
+# Mount one nav-tab scene as a child of the bar. `active` picks the
+# active or inactive icon tint and label style; everything else is
+# per-instance.
+func mountNavTab(
+  world: mod UiWorld
+  scene: view Scene
+  w: view Float
+  iconKey: own String
+  label: own String
+  actionId: own String
+  active: view Bool
+) pub ret EntityId {
+  let tab: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: tab, w: w, h: navTabsH)
+
+  # Data-oriented widget tags (#220): identity, selected state, and the
+  # action binding as queryable component data. Tagged BEFORE the
+  # override calls below consume `actionId` (own param) — the setters
+  # copy internally. Active styling itself still flows through the
+  # scene overrides (tabs re-mount on switch); the selected flag makes
+  # the active tab visible to systems without parsing styles.
+  let navKind: String = "navTab"
+  setWidgetIdentity(world: world, entity: tab, id: actionId, kind: navKind)
+  setWidgetState(world: world, entity: tab, enabled: true, selected: active, loading: false, error: false)
+  let bindId: String = "{actionId}"
+  let bindRole: String = "primary"
+  let binding: ActionBinding = {
+    actionId: own bindId
+    role: own bindRole
+  }
+  componentSet(this: world.actionBindings, entity: tab, data: own binding)
+
+  let overrides: List(SceneOverride) = emptyOverrides()
+  let iconNode: String = "Icon"
+  let labelNode: String = "Label"
+  let rootNode: String = "TabRoot"
+
+  addSpriteOverride(list: overrides, nodeId: iconNode, value: iconKey)
+  addTextOverride(list: overrides, nodeId: labelNode, value: label)
+  # Give every visible child the SAME action — the hit-test returns
+  # the deepest entity that owns an OnClick, and the icon and label
+  # are leaves above the root in the hit order. Without OnClick on
+  # them, an icon-area tap returns -1 from those leaves and falls
+  # through to TabRoot, which usually works but has been flaky on
+  # certain layouts; setting OnClick on each clickable visual makes
+  # the click target unambiguous.
+  addOnClickActionOverride(list: overrides, nodeId: rootNode, value: actionId)
+  addOnClickActionOverride(list: overrides, nodeId: iconNode, value: actionId)
+  addOnClickActionOverride(list: overrides, nodeId: labelNode, value: actionId)
+
+  if active {
+    addSpriteTintOverride(list: overrides, nodeId: iconNode, r: 30, g: 30, b: 36, a: 255)
+    let activeStyle: String = "tabActive"
+    addTextStyleOverride(list: overrides, nodeId: labelNode, value: activeStyle)
+  } else {
+    addSpriteTintOverride(list: overrides, nodeId: iconNode, r: 130, g: 130, b: 140, a: 255)
+    let inactiveStyle: String = "tabInactive"
+    addTextStyleOverride(list: overrides, nodeId: labelNode, value: inactiveStyle)
+  }
+
+  let sceneLabel: String = "nav-tab"
+  let mounted: EntityId = mountOrError(
+    world: world
+    mountEntity: tab
+    scene: scene
+    sceneLabel: sceneLabel
+    overrides: overrides
+  )
+  ret tab
+}
+
+# Build the bottom nav bar for the current screen as a normal
+# parented row. Returns the bar entity; the caller decides whether
+# to attach it as a child (legacy) or mount it as a parentless
+# overlay (preferred — see `mountNavBarOverlay`).
+#
+# `activeTab` picks which of the four tabs renders with the active
+# styling. Home, Library, and Profile actually switch screens;
+# Search is still a placeholder that the router no-ops.
+func buildNavTabsForScreen(
+  world: mod UiWorld
+  activeTab: Screen
+  scenes: view AlbumScenes
+) pub ret EntityId {
+  let bar: EntityId = createEntity(world: world)
+  # Modern iOS-style floating tab bar: inset from the screen edges and
+  # rounded into a capsule instead of painting a sharp full-width strip.
+  let barW: Float = world.layoutW - floatingDockInset * 2.0
+  setRectFixed(world: world, entity: bar, w: barW, h: navTabsH)
+  let barFill: RgbaColor = { r: paletteSurface(theme: world.theme.active).r, g: paletteSurface(theme: world.theme.active).g, b: paletteSurface(theme: world.theme.active).b, a: 238 }
+  setShapeRounded(world: world, entity: bar, fill: barFill, radius: floatingDockRadius)
+  # Do not attach BackdropImage here yet: gpu2d currently draws it as
+  # an unclipped rectangle, which leaks a sharp grey slab under the
+  # rounded capsule. Re-enable only after rounded backdrop clipping exists.
+  setLayout(world: world, entity: bar, kind: LayoutType.horizontal, gap: 0.0, alignCross: AlignKind.center)
+
+  # Four base tabs: Home / Library / Search / Profile. Player is
+  # NOT a tab — it's reached by tapping the mini-player above this
+  # bar. Album is also NOT a tab — it's a sub-page opened by tapping
+  # any cover.
+  let tabW: Float = barW / 4.0
+  let homeActive: Bool = activeTab is Screen.home
+  let libraryActive: Bool = activeTab is Screen.library
+  let searchActive: Bool = activeTab is Screen.search
+  let profileActive: Bool = activeTab is Screen.profile
+
+  let homeKey: String = "mat:home"
+  let homeLabel: String = "Home"
+  let homeAction: String = "nav.home"
+  let homeTab: EntityId = mountNavTab(
+    world: world
+    scene: scenes.navTab
+    w: tabW
+    iconKey: homeKey
+    label: homeLabel
+    actionId: homeAction
+    active: homeActive
+  )
+
+  let libraryKey: String = "mat:library_music"
+  let libraryLabel: String = "Library"
+  let libraryAction: String = "nav.library"
+  let libraryTab: EntityId = mountNavTab(
+    world: world
+    scene: scenes.navTab
+    w: tabW
+    iconKey: libraryKey
+    label: libraryLabel
+    actionId: libraryAction
+    active: libraryActive
+  )
+
+  let searchKey: String = "mat:search"
+  let searchLabel: String = "Search"
+  let searchAction: String = "nav.search"
+  let searchTab: EntityId = mountNavTab(
+    world: world
+    scene: scenes.navTab
+    w: tabW
+    iconKey: searchKey
+    label: searchLabel
+    actionId: searchAction
+    active: searchActive
+  )
+
+  let profileKey: String = "mat:person"
+  let profileLabel: String = "Profile"
+  let profileAction: String = "nav.profile"
+  let profileTab: EntityId = mountNavTab(
+    world: world
+    scene: scenes.navTab
+    w: tabW
+    iconKey: profileKey
+    label: profileLabel
+    actionId: profileAction
+    active: profileActive
+  )
+
+  let kids: List(EntityId) = createList(EntityId, cap: 4)
+  kids.add(value: homeTab)
+  kids.add(value: libraryTab)
+  kids.add(value: searchTab)
+  kids.add(value: profileTab)
+  attachChildren(world: world, parent: bar, kids: kids)
+  ret bar
+}
+
+# Mount the bottom "dock" (mini-player + nav-tabs) as a screen-level
+# overlay: a single parentless root containing both bars stacked
+# vertically, positioned via `Offset` at a fixed bottom of the
+# screen. Every screen calls this exactly once at the end of its
+# `build*World`. The dock owns:
+#   * a darker rounded-rect background so the bar visually
+#     separates from page content,
+#   * the mini-player instance (so the play/pause state lives in
+#     one place across screens — no more position-jumping between
+#     Album and NowPlaying),
+#   * the four nav-tabs row beneath it.
+# Returns the dock entity.
+# Floating back button. Top-left corner, semi-transparent dark
+# circle with a chevron-left icon. Mounted parentless (offset-
+# positioned) so it floats above whatever content is below.
+# Fires `nav.back` which `dispatchActions` turns into a
+# `popSubPage`.
+#
+# Returns the button entity, or -1 when no sub-page is open
+# (caller can ignore the return).
+func mountBackButtonOverlay(world: mod UiWorld, state: view AppState) pub ret EntityId {
+  if isSubPage(state: state) is false {
+    ret noEntity()
+  }
+  let size: Float = 121.44578313253011
+  let margin: Float = 34.69879518072289
+  let btn: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: btn, w: size, h: size)
+  var copiedId: String = ""
+  copiedId = copiedId.concat(other: backButtonPageId)
+  let pr: PageRoot = { id: own copiedId }
+  componentSet(this: world.pageRoots, entity: btn, data: own pr)
+  # Slightly transparent dark fill so background content stays
+  # legible underneath. Alpha 180 ≈ 70 % opaque — readable
+  # contrast in both light and dark themes.
+  let bg: RgbaColor = { r: 22, g: 22, b: 28, a: 180 }
+  let stroke: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+  let sh: Shape = {
+    kind: ShapeKind.circle
+    fill: bg
+    stroke: stroke
+    strokeWidth: 0.0
+    radius: 0.0
+  }
+  componentSet(this: world.shapes, entity: btn, data: sh)
+  let layS: LayoutType = LayoutType.stack
+  let alignC: AlignKind = AlignKind.center
+  setLayout(world: world, entity: btn, kind: layS, gap: 0.0, alignCross: alignC)
+  let backAction: String = "nav.back"
+  setOnClick(world: world, entity: btn, actionId: backAction)
+
+  let iconSize: Float = 69.39759036144578
+  let icon: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: icon, w: iconSize, h: iconSize)
+  let iconKey: String = "mat:chevron_left"
+  let iconTintC: RgbaColor = { r: 246, g: 246, b: 248, a: 255 }
+  setSprite(world: world, entity: icon, key: iconKey, tint: iconTintC)
+
+  let kids: List(EntityId) = createList(EntityId, cap: 1)
+  kids.add(value: icon)
+  attachChildren(world: world, parent: btn, kids: kids)
+
+  let off: Offset = { delta: Vec2 { x: margin, y: margin } }
+  componentSet(this: world.offsets, entity: btn, data: off)
+  # Back button sits on its own layer above the dock — page content
+  # can't paint over it, and the dock can't paint over it either.
+  let backLayerId: String = "back-button"
+  setLayerById(world: world, entity: btn, id: backLayerId)
+  ret btn
+}
+
+# Build the nav-tabs bar as a dock child. Same Rect / Layout / styling
+# as before but WITHOUT a parentless Offset — the dock's Vertical
+# layout positions it. PageRoot tag stays so `unmountPage(navTabsPageId)`
+# can find and destroy just this subtree when the user switches tabs.
+func mountNavTabsBar(
+  world: mod UiWorld
+  activeTab: Screen
+  scenes: view AlbumScenes
+) pub ret EntityId {
+  let bar: EntityId = buildNavTabsForScreen(world: world, activeTab: activeTab, scenes: scenes)
+  var copiedId: String = ""
+  copiedId = copiedId.concat(other: navTabsPageId)
+  let pr: PageRoot = { id: own copiedId }
+  componentSet(this: world.pageRoots, entity: bar, data: own pr)
+  ret bar
+}
+
+# The bottom dock — a single parent entity that owns the mini-player
+# AND the nav-tabs bar as its children. The user reads them as one
+# toolbar at the bottom; the ECS treats them as one structural unit
+# so the mini-player can't drift independently of the nav-tabs.
+#
+# Tagged `PageRoot{"dock"}` so `findPageRootEntity(world, dockPageId)`
+# can locate it from any screen-switch site (where we re-attach a
+# fresh nav-tabs bar with new active styling, keeping the existing
+# mini-player as the first child).
+func mountBottomDockOverlay(
+  world: mod UiWorld
+  activeTab: Screen
+  scenes: view AlbumScenes
+  playback: view PlaybackState
+  state: view AppState
+  reg: view TextureRegistry
+) pub ret EntityId {
+  let dock: EntityId = createEntity(world: world)
+  # The dock's visual area extends above the overlapping mini-player
+  # and floating tab capsule so a soft shadow can fade into page
+  # content. The mini-player is intentionally overlapped by the tab bar:
+  # its top half remains visible while the bottom half tucks behind the
+  # capsule, reading as one combined iOS-style bottom control.
+  let dockBgExtend: Float = 216.86746987951807
+  let miniCardH: Float = miniPlayerH + navTabsH
+  let miniOverlap: Float = navTabsH
+  let dockH: Float = miniCardH + navTabsH - miniOverlap + dockBgExtend
+  # Edge-to-edge: the dock spans the full layout extent (window width on
+  # desktop), not the phone content column. ExtentAnchor.fill makes the
+  # layout place it at x=0 with width = world.layoutW; the rect width is
+  # set to match so it's correct even before layout resolves.
+  setRectFixed(world: world, entity: dock, w: world.layoutW, h: dockH)
+  let dockAnchor: ExtentAnchor = { h: HExtent.fill }
+  componentSet(this: world.extentAnchors, entity: dock, data: dockAnchor)
+  let layV: LayoutType = LayoutType.vertical
+  let alignC: AlignKind = AlignKind.center
+  setLayout(world: world, entity: dock, kind: layV, gap: 0.0 - miniOverlap, alignCross: alignC)
+  let dockPad: Padding = { insets: Insets { l: 0.0, t: dockBgExtend, r: 0.0, b: 0.0 } }
+  componentSet(this: world.paddings, entity: dock, data: dockPad)
+  # Position the whole dock so its bottom edge hits the active Viewport
+  # extent bottom (`world.layoutH`) — the window bottom on a tall desktop
+  # window, `phoneFrameH` on a portrait phone — same bottom alignment as
+  # before, just extended upward by dockBgExtend.
+  let dockOff: Offset = { delta: Vec2 { x: 0.0, y: world.layoutH - dockH } }
+  componentSet(this: world.offsets, entity: dock, data: dockOff)
+  var copiedId: String = ""
+  copiedId = copiedId.concat(other: dockPageId)
+  let pr: PageRoot = { id: own copiedId }
+  componentSet(this: world.pageRoots, entity: dock, data: own pr)
+  # Place the dock on the "dock" layer so it always paints (and
+  # hit-tests) above page content. App is responsible for having
+  # created the named layer entities at boot.
+  let dockLayerId: String = "dock"
+  setLayerById(world: world, entity: dock, id: dockLayerId)
+  # Very soft vertical shadow only. Keep this low-alpha so it doesn't
+  # read as a full-width blue rectangle behind the floating controls.
+  let shadowTop: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+  let shadowBottom: RgbaColor = { r: 18, g: 26, b: 56, a: 54 }
+  let shadowGrad: GradientFill = { from: shadowTop, to: shadowBottom, angle: 90.0 }
+  componentSet(this: world.gradientFills, entity: dock, data: shadowGrad)
+  # Register the dock under the "menubar shadow" nodeId so the
+  # shadow can be looked up / mutated independently later. Scoped
+  # under the dock page (`PageRoot{"dock"}`) so the key is
+  # "dock/menubar shadow".
+  let shadowNodeId: String = "menubar shadow"
+  let shadowKey: String = pageScopedKey(pageId: dockPageId, nodeId: shadowNodeId)
+  world.nodeIds.set(k: shadowKey, value: dock.index)
+
+  # Mini-player matches the floating tab capsule width and radius, so
+  # their bottom corners align visually when the tab bar overlaps it.
+  #
+  # The mini-player CARD extends by exactly the nav-tabs height, so the
+  # gradient starts at the menubar bottom edge and its visible content
+  # remains the original miniPlayerH top slice. Extra bottom padding
+  # equal to the overlap keeps the row contents (thumb / titles /
+  # controls) centered in that visible top slice.
+  let miniW: Float = world.layoutW - floatingDockInset * 2.0
+  let miniLabel: String = "mini-player"
+  let mini: EntityId = buildMiniPlayerInstance(
+    world: world
+    scene: scenes.miniPlayer
+    w: miniW
+    h: miniCardH
+    label: miniLabel
+    playback: playback
+    state: state
+  )
+  if componentHas(this: world.paddings, entity: mini) {
+    let curPad: Padding = componentGet(this: world.paddings, entity: mini)
+    let grownPad: Padding = { insets: Insets { l: curPad.insets.l, t: curPad.insets.t, r: curPad.insets.r, b: curPad.insets.b + miniOverlap } }
+    componentSet(this: world.paddings, entity: mini, data: grownPad)
+  } else {
+    let freshPad: Padding = { insets: Insets { l: 0.0, t: 0.0, r: 0.0, b: miniOverlap } }
+    componentSet(this: world.paddings, entity: mini, data: freshPad)
+  }
+
+  # Nav-tabs bar: inset rounded capsule, painted after the mini-player
+  # so it covers the mini-player's lower half.
+  let bar: EntityId = mountNavTabsBar(world: world, activeTab: activeTab, scenes: scenes)
+
+  let kids: List(EntityId) = createList(EntityId, cap: 2)
+  kids.add(value: mini)
+  kids.add(value: bar)
+  attachChildren(world: world, parent: dock, kids: kids)
+
+  # Canvas overlay (#212 S5/S6 demo) — mounted here because every
+  # screen builder already calls mountBottomDockOverlay, and the
+  # mount is idempotent (a resident page survives screen switches).
+  let canvasMount: EntityId = mountCanvasOverlay(world: world, scenes: scenes, state: state)
+  ret dock
+}

@@ -1,13 +1,13 @@
 # Focused 2D easing demo on Rae's GPU2D/SDL3 stack.
 import core
-import easing
+import Easing
 import gpu2d
 import sys
-import ui/ecs
+import ui/Ecs
 import ui/RenderSystem/RenderSystem
-import app3d/uiShell
-open app3d/uiShell
-open ui/ecs
+import app3d/UiShell
+open app3d/UiShell
+open ui/Ecs
 open ui/RenderSystem/RenderSystem
 
 const canvasW: Float = 800.0
@@ -51,7 +51,7 @@ func main() ret Int {
     }
 
     let phase: Float = elapsed / duration
-    let eased: Float = easing.easeInOutQuad(t: phase)
+    let eased: Float = Easing.easeInOutQuad(t: phase)
     let currentX: Float = 150.0 + 500.0 * eased
     let huePhase: Int = (phase * 5.0).toInt()
     var ballColor: Int = 0xFF42A5F5

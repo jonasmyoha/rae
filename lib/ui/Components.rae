@@ -1,0 +1,933 @@
+# UI components — every type the .raescene format can name plus the
+# derived runtime types the layout / transform / render systems
+# populate. All plain data; no methods. The ECS storage in `ecs.rae`
+# parameterises ComponentTable(T) over each of these.
+#
+# Mirrors the inventory in
+# `rae/docs/royal-blush-ruics-ecs-reference.md` § 3 — see
+# `examples/98_mobile_ui/DESIGN.md` for the subset the music player
+# actually needs in phase 1.
+
+# -----------------------------------------------------------------
+# Sub-types and enums shared across components
+# -----------------------------------------------------------------
+
+# #723: UI geometry uses the canonical `Vec2` from lib/vec2.rae (the UI no longer
+# defines its own). Import pulls vec2 into the build graph so its struct is
+# emitted; the type name itself is globally visible to every UI file.
+import Vec2
+# #725: the UI's derived world-transform cache is the general Transform2D /
+# WorldTransform2D from lib/ecs (position/rotation/scale Vec2 pair), not a
+# bespoke scalar struct. Import pulls the module into the build graph.
+import ecs/Transform
+
+enum SizeMode {
+  fixed
+  hug
+  fill
+}
+
+# Per-axis sizing policy. `min` and `max` are signed; -1 means "no
+# clamp" since Rae lacks an inline `opt Int` literal.
+type SizeAxis {
+  mode: SizeMode
+  min: Int
+  max: Int
+}
+
+enum LayoutType {
+  none
+  horizontal
+  vertical
+  grid
+  stack
+}
+
+enum AlignKind {
+  start
+  center
+  end
+  spaceBetween
+  stretch
+}
+
+enum OverflowMode {
+  none
+  clip
+  scaleToFitY
+}
+
+# Horizontal placement of a layout ROOT within the layout extent
+# (world.layoutW). Lets a phone-width app stay a centered column on a
+# wide desktop window while specific roots (a bottom toolbar / header)
+# break out edge-to-edge.
+#   left   — root left-aligned at x=0 (default; overlays self-position
+#            via their own Offset)
+#   center — root centered: x = (extentW - ownW) / 2 (the content column)
+#   fill   — root spans the full extent: width = extentW, x = 0
+enum HExtent {
+  left
+  center
+  fill
+}
+
+enum ShapeKind {
+  rect
+  roundedRect
+  circle
+}
+
+enum ScaleMode {
+  fit
+  fill
+  stretch
+}
+
+enum WrapWidthMode {
+  none
+  nodeWidth
+}
+
+enum HitAreaKind {
+  rect
+  roundedRect
+}
+
+enum MaskKind {
+  circle
+  roundedRect
+}
+
+enum ResolverMode {
+  fixed
+  random
+  hash
+  direct
+}
+
+enum TextFormat {
+  plain
+  number
+  percent1
+  coins
+  handRank
+}
+
+enum DataMode {
+  top
+  aroundSelf
+}
+
+enum AccountIdSource {
+  none
+  activeAccountId
+}
+
+# A 4-sided box: padding, margin, etc.
+type Insets {
+  l: Float
+  t: Float
+  r: Float
+  b: Float
+}
+
+# RGBA in 0..255 ints. Backend renderers convert this into their native
+# colour representation at the draw boundary.
+type RgbaColor {
+  r: Int
+  g: Int
+  b: Int
+  a: Int
+}
+
+# Reused literal for "no value". Rae's opt T storage is awkward for
+# struct types right now, so most numeric-optional fields use a
+# sentinel (`min = -1`, `radius = -1.0`, etc.).
+
+# -----------------------------------------------------------------
+# Authored components (persisted in .raescene)
+# -----------------------------------------------------------------
+
+# Geometry / layout
+
+# Authored absolute placement. #724: geometry is carried as two Vec2 (top-left
+# `position` and `size` extent) instead of loose x/y/w/h floats, so the same
+# vector helpers apply to a rect's corner and its extent. The .raescene wire
+# format stays flat {x,y,w,h} — deserRect bridges it to these fields.
+type Rect {
+  position: Vec2
+  size: Vec2
+}
+
+type Size {
+  w: SizeAxis
+  h: SizeAxis
+}
+
+type Layout {
+  kind: LayoutType
+  gap: Float
+  alignMain: AlignKind
+  alignCross: AlignKind
+  columns: Int
+  rowGap: Float
+  columnGap: Float
+}
+
+type Padding {
+  insets: Insets
+}
+
+type Margin {
+  insets: Insets
+}
+
+type SafeArea {
+  enabled: Bool
+  apply: Insets
+  extra: Insets
+}
+
+# Art direction (§10 S6). FitMode mirrors CSS object-fit vocabulary:
+# contain letterboxes (whole content visible), cover crops (content
+# fills the box).
+enum FitMode {
+  contain
+  cover
+}
+
+# Post-layout aspect lock: height is derived from resolved width as
+# `h = w / ratio` (ratio = w/h). Applied by fitSystem AFTER layout,
+# so siblings do not reflow around the corrected height.
+type Aspect {
+  ratio: Float
+}
+
+# Uniform-scale a fixed-design subtree to fit its parent's box,
+# centered. The tagged entity and every descendant must carry
+# authored fixed Rects (absolute placement) — fitSystem recomputes
+# each ComputedRect as `authored Rect * s` so the pass is idempotent.
+type ScaleToFit {
+  mode: FitMode
+}
+
+type Align {
+  x: AlignKind
+  y: AlignKind
+  hasX: Bool
+  hasY: Bool
+}
+
+type Offset {
+  delta: Vec2
+}
+
+type Constraints {
+  minW: Float
+  maxW: Float
+  minH: Float
+  maxH: Float
+  hasMinW: Bool
+  hasMaxW: Bool
+  hasMinH: Bool
+  hasMaxH: Bool
+}
+
+type OverflowPolicy {
+  mode: OverflowMode
+}
+
+# Extent-relative horizontal placement for a layout root. See HExtent.
+# Only meaningful on parentless roots (the layout entry point reads it);
+# ignored on child entities, which are placed by their parent's layout.
+type ExtentAnchor {
+  h: HExtent
+}
+
+# Visual / interaction
+
+type TransformFx {
+  scaleX: Float
+  scaleY: Float
+  rotation: Float
+  alpha: Float
+  visible: Bool
+  pivot: Vec2
+  anchor: Vec2
+}
+
+type Sprite {
+  textureKey: String
+  tint: RgbaColor
+  # Palette slot the tint came from (#235). Non-empty => the renderer
+  # resolves `tint` from the ACTIVE theme at paint time, so a
+  # dark/light toggle is a repaint, not a scene re-parse. Empty => the
+  # `tint` RGBA is a literal. `tint` still holds the baked colour as a
+  # first-frame value / literal fallback.
+  tintSlot: String
+  scaleMode: ScaleMode
+  tileScale: Vec2
+  nineSlice: Insets
+  hasNineSlice: Bool
+}
+
+type Text {
+  text: String
+  styleId: String
+  wrapWidthMode: WrapWidthMode
+}
+
+type TextShadow {
+  color: RgbaColor
+  offset: Vec2
+  softness: Float
+}
+
+# Tier-2 override in the theme friction ladder (docs/ui-theme-system.md
+# §7): a sparse, per-entity patch over the resolved text style that
+# KEEPS the base `styleId` (the link to the theme is annotated, never
+# severed). Authored nested in a scene Text bag as `"styleOverride":
+# { "size": .., "color": .. }`, stored ONLY on entities that carry one
+# (no cost to the nodes without one). Covers exactly the style scalars
+# that have no dedicated per-entity component — size and color; a
+# different alignment or shadow already has its own tier-3 component
+# (Align / TextShadow). `hasSize`/`hasColor` gate which fields patch;
+# a non-empty `colorSlot` resolves against the active theme at paint
+# (M5-consistent), else the literal `color` is used. #236.
+type StyleOverride {
+  hasSize: Bool
+  size: Float
+  hasColor: Bool
+  color: RgbaColor
+  colorSlot: String
+}
+
+type Shape {
+  kind: ShapeKind
+  fill: RgbaColor
+  stroke: RgbaColor
+  # Palette slots for fill/stroke (#235). Non-empty => resolve from
+  # the active theme at paint (live theme switch); empty => the RGBA
+  # is a literal. See Sprite.tintSlot.
+  fillSlot: String
+  strokeSlot: String
+  strokeWidth: Float
+  radius: Float
+}
+
+type Shadow {
+  blur: Float
+}
+
+type Opacity {
+  value: Float
+}
+
+type PointerEvents {
+  enabled: Bool
+  cursor: String
+  blockChildren: Bool
+}
+
+type HitArea {
+  kind: HitAreaKind
+  radius: Float
+}
+
+type OnClick {
+  actionId: String
+  actionIdDouble: String
+  actionIdTriple: String
+  maxDelayMs: Int
+}
+
+type Button {
+  role: String
+}
+
+type Active {
+  value: Bool
+}
+
+type EditorVisible {
+  value: Bool
+}
+
+type EditorLocked {
+  value: Bool
+}
+
+# `HeroWidget` marks an entity as participating in a shared-element
+# (hero) transition between screens. Entities on the OUTGOING and
+# INCOMING screens that share the same `key` get visually animated
+# from one position+size to the other instead of disappearing and
+# popping into the new layout. See `lib/ui/hero.rae` for the system
+# that drives the interpolation.
+type HeroWidget {
+  key: String
+}
+
+# Marks a Sprite as rendering with rounded corners of the given pixel
+# radius. The renderer routes the lookup from `<textureKey>` to a
+# pre-baked variant registered under `<textureKey>.r<radius>` (see
+# `loadRoundedCroppedTexture` + the asset loader, which pre-bakes the
+# variants at boot). When the variant is missing the renderer falls
+# back to the un-rounded texture so a forgotten pre-bake doesn't
+# crash — it just shows square corners.
+type CornerRadius {
+  radius: Float
+}
+
+# Hover-scale animation. Permanent component on entities that want
+# a hover-driven scale wiggle. `hoverScaleSystem` picks
+# `target = restScale` (cursor outside the rect) or `hoverScale`
+# (cursor inside) and eases `current` toward it each frame at
+# `speed` per second. Sprite paint reads `current` as a multiplier
+# — bumping it scales the rendered texture and re-centers it.
+type HoverScale {
+  restScale: Float
+  hoverScale: Float
+  speed: Float
+  current: Float
+  target: Float
+}
+
+# Linear gradient fill. Renderer paints a rect from `from` to `to`
+# along the direction `angle` (degrees — 0=left→right, 90=top→bottom,
+# 180=right→left, 270=bottom→top). Pair with `CornerRadius` to get a
+# rounded gradient pill. One fragment shader handles size, angle, and
+# rounding in one draw — no pre-baked variants. Takes precedence over
+# any `Shape.fill` on the same entity.
+type GradientFill {
+  from: RgbaColor
+  to: RgbaColor
+  angle: Float
+}
+
+# Texture painted at the entity's full bounds BEFORE its children
+# paint, so it acts as a backdrop for the subtree. Same registry as
+# `Sprite.textureKey`; missing textures silently render nothing.
+# Used for frosted-glass backdrops where the host captures and blurs
+# the framebuffer just before the entity paints, registers the result
+# under a known key, and the BackdropImage points at it.
+type BackdropImage {
+  textureKey: String
+}
+
+type OpticalAlign {
+  enabled: Bool
+  centerX: Bool
+  centerY: Bool
+  bias: Vec2
+}
+
+# Derived, cached visual bounds of a node's rendered glyphs (#219).
+# `left/top/right/bottom` are the glyph-plane extents relative to the
+# text pen origin (baseline at y=0), in framebuffer px at
+# `measuredSize`; `advance` is the total pen advance. This is the
+# measured-centering input the paint path reads INSTEAD of remeasuring
+# every frame — visualBoundsSystem (ui/render_gpu2d) writes it once
+# per change. `measuredText` + `measuredSize` + `measuredIcon` form the
+# invalidation key: when the node's rendered string, size, or
+# text-vs-icon font changes, the system recomputes. NEVER authored in
+# a scene — it is pure derived state.
+type VisualBounds {
+  hasBounds: Bool
+  left: Float
+  top: Float
+  right: Float
+  bottom: Float
+  advance: Float
+  measuredText: String
+  measuredSize: Float
+  measuredIcon: Bool
+}
+
+# A layer is a real entity. `LayerRoot` is what makes one — it carries
+# the layer's stable id (used for lookup from app code) and its paint
+# order (ascending = painted on top of lower orders, hit-tested
+# top-down). Layer-root entities don't have Rect / Layout / Sprite —
+# they're labels for grouping other roots.
+type LayerRoot {
+  id: String
+  order: Int
+}
+
+# Soft link from a root entity to the layer it lives on. The renderer
+# groups parentless roots by their `LayerRef.layer`, looks up each
+# group's `LayerRoot.order`, and paints in ascending order. Roots
+# without a `LayerRef` fall back to the content layer (lookup by
+# id `"content"`), so the default for ordinary screen pages stays
+# zero-config.
+type LayerRef {
+  layer: EntityId
+}
+
+# `DebugAnchor` marks an entity as the placement slot for the in-app
+# debug button (see `lib/ui/debug.rae`). The button itself is BUILT
+# programmatically by `addDebugLayer`, but its position + size come
+# from the anchor entity's own `Rect`. Putting a `DebugAnchor` on a
+# node in a .raescene is what OPTS the app in to the debug UI — drop
+# the line, lose the button (and the menu it opens). The `value`
+# field is just a presence-tag (Rae has no zero-field structs); it's
+# not read.
+type DebugAnchor {
+  value: Bool
+}
+
+# Marks an entity as the root of a page subtree. The `id` is the
+# stable page identifier (e.g. "now-playing", "album:beaches") used to
+# scope nodeIds in `world.nodeIds` under a `"<id>/<nodeId>"` prefix so
+# two resident pages can author the same nodeId without colliding.
+# Descendants belong to the page implicitly via the Parent chain —
+# walk up with `pageOf(world, entity)` to find which page owns an
+# entity. There should be exactly one PageRoot per page subtree.
+type PageRoot {
+  id: String
+}
+
+# Per-page scroll position. Lives on the entity that owns the scroll
+# behaviour (typically the page root or a scrollable body inside it)
+# so a persistent UiWorld can preserve scroll across page switches —
+# the scroll position survives as long as the entity does. The
+# scrolling system reads `.y` and applies it as an `Offset.delta.y`
+# (or uses it directly in layout). `velocity` is the per-frame
+# momentum, retained so a fling continues across a render dip.
+type ScrollState {
+  y: Float
+  velocity: Float
+}
+
+# #729: per-panel scroll state, keyed by the panel's VIEWPORT entity. Replaces the
+# out-of-world, string-keyed `ScrollPanel` struct — the content node is resolved
+# to an entity ONCE (at attach) and stored here, so the per-frame update reads
+# this component instead of re-resolving node-id strings. Carries iOS-style scroll
+# physics (see lib/ui/scrollPhysics.rae): `offset` is how far the content has
+# slid UP and may overshoot the [0, range] bounds during a rubber-band; `velocity`
+# is the momentum after a fling; `d0..d2` are the last three damped drag deltas,
+# from which release velocity is picked ("velocity at lift").
+type ScrollPanelState {
+  content: EntityId
+  offset: Float
+  velocity: Float
+  dragging: Bool
+  lastPointerY: Float
+  d0: Float
+  d1: Float
+  d2: Float
+}
+
+# #729: per-entity pointer interaction state, maintained by the input system
+# (InputSystem/updateUiInput). `hovered` = the pointer is over this entity;
+# `pressed` = the press that is currently down started on this entity. The pointer
+# POSITION and the action-event queue stay singleton on `UiInput` (a pointer is one
+# device — that is not per-entity state), but WHICH entity is hovered/pressed is,
+# so it lives here as a component render/style systems can read directly instead of
+# threading a single hovered/pressed EntityId through every call.
+type Interaction {
+  hovered: Bool
+  pressed: Bool
+}
+
+# Stable widget metadata for data-oriented UI updates. These components
+# intentionally carry app/backend-neutral data only: renderers do not
+# read them directly, and app systems can query them to rebuild or patch
+# dependent UI narrowly when data revisions change.
+type WidgetId {
+  id: String
+  kind: String
+}
+
+type WidgetState {
+  enabled: Bool
+  selected: Bool
+  loading: Bool
+  error: Bool
+}
+
+enum DataResourceId {
+  none
+  albums
+  history
+  library
+  playback
+  playlists
+  spotify
+  settings
+  debug
+}
+
+enum DataFieldId {
+  none
+  all
+  isPlaying
+  likedTrack
+  playingTrack
+  # Currently-playing cover art key — the now-playing / mini-player cover
+  # widgets observe this to re-point their Sprite.textureKey by identity.
+  nowPlayingArt
+  debugToggle
+}
+
+type DataDependency {
+  resource: DataResourceId
+  field: DataFieldId
+  observedRevision: Int
+}
+
+type ActionBinding {
+  actionId: String
+  role: String
+}
+
+type RefreshRegion {
+  regionKey: String
+  resource: DataResourceId
+  observedRevision: Int
+  dirty: Bool
+}
+
+# Declarative state -> visual mapping. Carries the visual variants a
+# widget shows per WidgetState, so app systems flip WidgetState flags
+# and `widgetStyleSystem` (ui/widget_style) applies the matching
+# variant — no imperative per-widget sprite/text patching.
+#
+# Empty-string fields mean "leave that visual alone"; `hasTint` gates
+# the tint pair the same way. `hasShapeFill` and `hasOffset` let the
+# same state system drive simple shape toggles such as switch pills and
+# knobs. `disabledAlpha` / `loadingAlpha` / `errorAlpha` are applied
+# through the Opacity component for the matching WidgetState flags
+# (1.0 = no dim).
+#
+# Theme references (#237, M6): each color pair may name a palette SLOT
+# instead of carrying a baked RGBA. A non-empty `*Slot` wins over the
+# literal and resolves against the active theme when the variant is
+# applied (widget_style.rae), so a state color tracks light/dark like
+# scene colors do (M5). Empty slot (the default) = use the literal —
+# state-specific brand colors that map to no slot (e.g. the coral
+# like-red) stay raw. `textStyle`/`textStyleSelected` were already
+# style references, completing "reference theme, don't bake values".
+type StateStyle {
+  spriteKey: String
+  spriteKeySelected: String
+  tint: RgbaColor
+  tintSelected: RgbaColor
+  tintSlot: String
+  tintSelectedSlot: String
+  hasTint: Bool
+  shapeFill: RgbaColor
+  shapeFillSelected: RgbaColor
+  shapeFillSlot: String
+  shapeFillSelectedSlot: String
+  hasShapeFill: Bool
+  offset: Vec2
+  offsetSelected: Vec2
+  hasOffset: Bool
+  textStyle: String
+  textStyleSelected: String
+  disabledAlpha: Float
+  loadingAlpha: Float
+  errorAlpha: Float
+}
+
+# Identity / metadata
+
+type Name {
+  label: String
+}
+
+type PrimaryType {
+  typeName: String
+}
+
+type NodeId {
+  id: String
+}
+
+type SceneScope {
+  scope: String
+}
+
+type RuntimeOnly {
+  value: Bool
+}
+
+# Dynamic scene + data binding
+
+type SceneInstance {
+  sceneId: String
+  # Per-field overrides captured at deserialization. Same shape as
+  # `lib/ui/sceneInstance.rae`'s SceneOverride (nodeId + componentName
+  # + fieldName + valueString quadruple). The scene-loader's resolve
+  # pass reads these when mounting the referenced child scene.
+  overrideNodeIds: List(String)
+  overrideComponents: List(String)
+  overrideFields: List(String)
+  overrideValues: List(String)
+}
+
+type ImageSourceResolver {
+  mode: ResolverMode
+  textureKeys: List(String)
+  seed: String
+  once: Bool
+  sharedHash: String
+}
+
+type TextBinding {
+  key: String
+  format: TextFormat
+  prefix: String
+  suffix: String
+}
+
+type MaskShape {
+  kind: MaskKind
+  sourceNodeId: String
+  radius: Float
+}
+
+type DataRequest {
+  endpoint: String
+  mode: DataMode
+  initialLimit: Int
+  aroundBefore: Int
+  aroundAfter: Int
+  pageLimit: Int
+  accountIdSource: AccountIdSource
+  itemsField: String
+  cursorBeforeField: String
+  cursorAfterField: String
+}
+
+type ListViewBinding {
+  nodeId: String
+  componentName: String
+  fieldName: String
+  itemField: String
+  prefix: String
+  suffix: String
+}
+
+type ListView {
+  itemSceneId: String
+  itemKeyField: String
+  itemHeight: Float
+  itemGap: Float
+  visibleItemCount: Int
+  overscanRows: Int
+  bindings: List(ListViewBinding)
+  loadingSceneId: String
+  emptySceneId: String
+  errorSceneId: String
+}
+
+# Effects / motion (declared so .raescene can carry them; runtime
+# systems for these arrive in later phases).
+
+type BackgroundPan {
+  speedX: Float
+  speedY: Float
+  amplitudeX: Float
+  amplitudeY: Float
+}
+
+type Carousel {
+  axis: AlignKind
+  swipeThreshold: Float
+  transitionDuration: Float
+  travelFactor: Float
+  previewScale: Float
+}
+
+type SmokeFx {
+  spawnIntervalMs: Float
+  jitter: Float
+  lifetimeMs: Float
+  driftX: Float
+  driftY: Float
+  scaleStart: Float
+  scaleEnd: Float
+  fadeMs: Float
+}
+
+type AnimFrames {
+  baseKey: String
+  frames: List(Int)
+  textureKeys: List(String)
+  fps: Float
+  loopForever: Bool
+  onEndTextureKey: String
+}
+
+type AnimTrigger {
+  event: String
+  actionId: String
+  restartOnTrigger: Bool
+}
+
+type WobbleFx {
+  amp: Float
+  freq: Float
+  secondAmp: Float
+  secondFreq: Float
+}
+
+# Hierarchy: `Children` and `Parent` are now defined ONCE in lib/ecs/hierarchy.rae
+# (#710) so any World can share them; the UI sees them via `open ecs/hierarchy`
+# in ecs.rae.
+
+# -----------------------------------------------------------------
+# Derived / runtime-only components
+# -----------------------------------------------------------------
+
+type MeasuredSize {
+  w: Float
+  h: Float
+}
+
+# Layout output: the resolved on-screen box. #724: `position`/`size` Vec2 pair,
+# mirroring the authored Rect.
+type ComputedRect {
+  position: Vec2
+  size: Vec2
+}
+
+# #725: alpha/visible are NOT part of a transform — they are their own derived
+# cache. The transform pass accumulates them down the tree (parent alpha ×
+# child, ancestor-inactive hides the subtree) and writes them here, beside the
+# entity's WorldTransform2D. Split out of the old scalar WorldTransform so the
+# geometry cache can be the general WorldTransform2D. Derived / runtime-only:
+# registered WITHOUT serialize, rebuilt every transform pass.
+type WorldVisual {
+  alpha: Float
+  visible: Bool
+}
+
+type RuntimeOffset {
+  delta: Vec2
+}
+
+type LayoutScale {
+  scale: Float
+}
+
+type SafeInsets {
+  insets: Insets
+}
+
+type AnimState {
+  playing: Bool
+  elapsedMs: Float
+  frameIndex: Int
+}
+
+# -----------------------------------------------------------------
+# Default-value constructors for primitive components
+#
+# Authored .raescene files may omit fields. Phase 1c's deserialiser
+# starts from these defaults and overlays whatever the JSON specifies.
+# -----------------------------------------------------------------
+
+func defaultSizeAxis() ret SizeAxis {
+  ret SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
+}
+
+func defaultSize() ret Size {
+  ret Size { w: defaultSizeAxis(), h: defaultSizeAxis() }
+}
+
+func defaultInsets() ret Insets {
+  ret Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+}
+
+func defaultLayout() ret Layout {
+  ret Layout {
+    kind: LayoutType.none
+    gap: 0.0
+    alignMain: AlignKind.start
+    alignCross: AlignKind.start
+    columns: 0
+    rowGap: 0.0
+    columnGap: 0.0
+  }
+}
+
+func defaultPadding() ret Padding {
+  ret Padding { insets: defaultInsets() }
+}
+
+func defaultAlign() ret Align {
+  ret Align {
+    x: AlignKind.start
+    y: AlignKind.start
+    hasX: false
+    hasY: false
+  }
+}
+
+func defaultTransformFx() ret TransformFx {
+  ret TransformFx {
+    scaleX: 1.0
+    scaleY: 1.0
+    rotation: 0.0
+    alpha: 1.0
+    visible: true
+    pivot: Vec2 { x: 0.5, y: 0.5 }
+    anchor: Vec2 { x: 0.5, y: 0.5 }
+  }
+}
+
+func defaultSprite() ret Sprite {
+  ret Sprite {
+    textureKey: ""
+    tint: RgbaColor { r: 255, g: 255, b: 255, a: 255 }
+    tintSlot: ""
+    scaleMode: ScaleMode.fit
+    tileScale: Vec2 { x: 1.0, y: 1.0 }
+    nineSlice: defaultInsets()
+    hasNineSlice: false
+  }
+}
+
+func defaultText() ret Text {
+  ret Text { text: "", styleId: "", wrapWidthMode: WrapWidthMode.none }
+}
+
+func defaultTextShadow() ret TextShadow {
+  ret TextShadow {
+    color: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    offset: Vec2 { x: 0.0, y: 0.0 }
+    softness: 1.0
+  }
+}
+
+func defaultStyleOverride() ret StyleOverride {
+  ret StyleOverride {
+    hasSize: false
+    size: 0.0
+    hasColor: false
+    color: RgbaColor { r: 0, g: 0, b: 0, a: 255 }
+    colorSlot: ""
+  }
+}
+
+func defaultShape() ret Shape {
+  ret Shape {
+    kind: ShapeKind.rect
+    fill: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    fillSlot: ""
+    strokeSlot: ""
+    strokeWidth: 0.0
+    radius: 0.0
+  }
+}
+
+func defaultActive() ret Active {
+  ret Active { value: true }
+}
+
+func defaultOpacity() ret Opacity {
+  ret Opacity { value: 1.0 }
+}

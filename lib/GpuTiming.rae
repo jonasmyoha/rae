@@ -26,7 +26,7 @@
 import core
 import webgpu/context
 import webgpu/webgpu
-import profile
+import Profile
 # Match grass_compute's imports/opens exactly: importing webgpu_enums/_types would
 # bulk-emit every WGPU enum constant as a C static that clashes with webgpu.h.
 # Types are cross-file visible without import; the enum constants used here resolve
@@ -182,11 +182,11 @@ func collect(timing: mod GpuTiming, profiler: mod Profiler) pub {
     let endTick: Int = rae_ext_rae_buf_get(V: Int, buf: timing.dst.data, index: i * 2 + 1)
     let us: Int = rae_float_to_int(f: (endTick - begin) as Float * timing.period / 1000.0)
     let nm: String = rae_ext_rae_buf_get(V: String, buf: timing.names.data, index: i)
-    profile.counter(profiler: profiler, name: "gpu.{nm}", value: us)
+    Profile.counter(profiler: profiler, name: "gpu.{nm}", value: us)
     timing.totalUs = timing.totalUs + us
     i = i + 1
   }
-  profile.counter(profiler: profiler, name: "gpu.total", value: timing.totalUs)
+  Profile.counter(profiler: profiler, name: "gpu.total", value: timing.totalUs)
 }
 
 # Total GPU microseconds across all passes from the last collect() — the signal a

@@ -9,22 +9,22 @@
 import core
 import math
 import gpu2d
-import vec3
-import rendererDeferred
-import procgen/rock
-import procgen/tree
-import procgen/texture
-import ecs/entity
-open scene3d
-open ecs/entity
+import Vec3
+import RendererDeferred
+import procgen/Rock
+import procgen/Tree
+import procgen/Texture
+import ecs/Entity
+open Scene3d
+open ecs/Entity
 open gpu3d
-open rendererDeferred
-open rendergraph
-open math3d
-open mesh3d
-open procgen/rock
-open procgen/tree
-open procgen/texture
+open RendererDeferred
+open Rendergraph
+open Math3d
+open Mesh3d
+open procgen/Rock
+open procgen/Tree
+open procgen/Texture
 
 # The five biome-material albedo textures, generated in Rae and registered as
 # gpu2d images so they can be drawn as swatches over the 3D scene.
@@ -65,24 +65,24 @@ func uploadMeshData(m: view MeshData) ret MeshHandle {
 
 func buildScene(rocks: view List(Int), treeTrunks: view List(Int), treeCanopies: view List(Int), ground: view MeshHandle) ret World3d {
   var sceneWorld: World3d = createWorld3d()
-  let noEmit: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
-  let noRot: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
-  let unit: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  let noEmit: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let noRot: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let unit: Vec3 = Vec3.create(x: 1.0, y: 1.0, z: 1.0)
 
   # Ground plane just below the props.
-  let groundMat: Material3d = { baseColor: vec3.create(x: 0.30, y: 0.34, z: 0.24), metallic: 0.0, roughness: 0.95, emission: noEmit, toon: false }
-  let groundE: EntityId = world3dAddMeshInstance(world: sceneWorld, mesh: ground, material: groundMat, position: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.6), rotation: noRot, scale: unit)
+  let groundMat: Material3d = { baseColor: Vec3.create(x: 0.30, y: 0.34, z: 0.24), metallic: 0.0, roughness: 0.95, emission: noEmit, toon: false }
+  let groundE: EntityId = world3dAddMeshInstance(world: sceneWorld, mesh: ground, material: groundMat, position: Vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.6), rotation: noRot, scale: unit)
 
-  let rockMat: Material3d = { baseColor: vec3.create(x: 0.44, y: 0.45, z: 0.47), metallic: 0.0, roughness: 0.9, emission: noEmit, toon: false }
-  let barkMat: Material3d = { baseColor: vec3.create(x: 0.36, y: 0.23, z: 0.13), metallic: 0.0, roughness: 0.85, emission: noEmit, toon: false }
-  let leafMat: Material3d = { baseColor: vec3.create(x: 0.20, y: 0.42, z: 0.16), metallic: 0.0, roughness: 0.8, emission: noEmit, toon: false }
+  let rockMat: Material3d = { baseColor: Vec3.create(x: 0.44, y: 0.45, z: 0.47), metallic: 0.0, roughness: 0.9, emission: noEmit, toon: false }
+  let barkMat: Material3d = { baseColor: Vec3.create(x: 0.36, y: 0.23, z: 0.13), metallic: 0.0, roughness: 0.85, emission: noEmit, toon: false }
+  let leafMat: Material3d = { baseColor: Vec3.create(x: 0.20, y: 0.42, z: 0.16), metallic: 0.0, roughness: 0.8, emission: noEmit, toon: false }
 
   # Front row: five rocks.
   loop var i: Int = 0, i < rocks.length, ++i {
     if let rk: Int = rocks.copyAt(index: i) {
       let x: Float = (i.toFloat() - 2.0) * 3.2
       let rockE: EntityId = world3dAddMeshInstance(world: sceneWorld, mesh: meshHandle(id: rk, generation: 1), material: rockMat,
-        position: vec3.create(x: x, y: 0.0, z: 0.0), rotation: noRot, scale: unit)
+        position: Vec3.create(x: x, y: 0.0, z: 0.0), rotation: noRot, scale: unit)
     }
   }
   # Back row: five trees (trunk + canopy per tree).
@@ -90,11 +90,11 @@ func buildScene(rocks: view List(Int), treeTrunks: view List(Int), treeCanopies:
     let x: Float = (t.toFloat() - 2.0) * 3.2
     if let tr: Int = treeTrunks.copyAt(index: t) {
       let trunkE: EntityId = world3dAddMeshInstance(world: sceneWorld, mesh: meshHandle(id: tr, generation: 1), material: barkMat,
-        position: vec3.create(x: x, y: 6.0, z: 0.0), rotation: noRot, scale: unit)
+        position: Vec3.create(x: x, y: 6.0, z: 0.0), rotation: noRot, scale: unit)
     }
     if let cp: Int = treeCanopies.copyAt(index: t) {
       let canopyE: EntityId = world3dAddMeshInstance(world: sceneWorld, mesh: meshHandle(id: cp, generation: 1), material: leafMat,
-        position: vec3.create(x: x, y: 6.0, z: 0.0), rotation: noRot, scale: unit)
+        position: Vec3.create(x: x, y: 6.0, z: 0.0), rotation: noRot, scale: unit)
     }
   }
   ret sceneWorld
@@ -132,7 +132,7 @@ func main() ret Int {
 
   var camera: Camera3d = defaultCamera3d()
   var light: Light3d = defaultLight3d()
-  camera.target = vec3.create(x: 0.0, y: 3.0, z: 1.0)
+  camera.target = Vec3.create(x: 0.0, y: 3.0, z: 1.0)
 
   var yaw: Float = 0.35
   var pitch: Float = 0.45

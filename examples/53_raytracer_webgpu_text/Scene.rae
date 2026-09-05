@@ -1,0 +1,305 @@
+# Scene + materials. Includes ports of the C++ rae_ray scenes (own_repos/rae_ui),
+# coordinates converted from that engine's Y-up to Rae's Z-up via (x,y,z)_cpp ->
+# (x, z, y)_rae. kind 3 = emissive light (albedo holds the emission colour).
+import core
+import math
+import string
+import Vec3
+
+func rae_ext_rae_sys_read_file(path: String) extern ret String
+
+# kind: 0 = diffuse (Lambertian), 1 = metal (reflect + fuzz), 2 = glass
+#       (dielectric), 3 = emissive light (albedo = emission, may exceed 1)
+type Material {
+    kind: Int
+    albedo: Vec3
+    fuzz: Float
+    ior: Float
+}
+
+type Sphere {
+    center: Vec3
+    radius: Float
+    material: Material
+}
+
+# Axis-aligned box (the C++ rae_ray "cube"). lo/hi are opposite corners.
+type Box {
+    lo: Vec3
+    hi: Vec3
+    material: Material
+}
+
+# A single mesh triangle with per-vertex normals (for smooth shading).
+type Triangle {
+    v0: Vec3
+    v1: Vec3
+    v2: Vec3
+    n0: Vec3
+    n1: Vec3
+    n2: Vec3
+    material: Material
+}
+
+# First (vertex) index of an OBJ face token ("12", "12/3", "12//4") — 0-based.
+func faceIndex(token: view String) ret Int {
+    let parts: List(String) = token.split(sep: "/")
+    let s: String = rae_ext_rae_buf_get(buf: parts.data, index: 0)
+    ret s.toInt() - 1
+}
+
+# Third (normal) index of a face token ("12//4" -> 4); -1 if none.
+func faceNormalIndex(token: view String) ret Int {
+    let parts: List(String) = token.split(sep: "/")
+    if parts.length < 3 { ret -1 }
+    let s: String = rae_ext_rae_buf_get(buf: parts.data, index: 2)
+    if s is "" { ret -1 }
+    ret s.toInt() - 1
+}
+
+# Read a Vec3 out of three parallel component lists at one index, optional-checked.
+# A missing component falls back to 0.0 (indices come from a parsed .obj face).
+func vecFromLists(xs: view List(Float), ys: view List(Float), zs: view List(Float), index: view Int) ret Vec3 {
+    var vxv: Float = 0.0
+    var vyv: Float = 0.0
+    var vzv: Float = 0.0
+    if let value: Float = xs.copyAt(index: index) { vxv = value }
+    if let value: Float = ys.copyAt(index: index) { vyv = value }
+    if let value: Float = zs.copyAt(index: index) { vzv = value }
+    ret Vec3 { x: vxv, y: vyv, z: vzv }
+}
+
+# Load a Wavefront .obj as a triangle list (v + triangular f only). Converts the
+# mesh's Y-up to Rae Z-up via (x,y,z)->(x,z,y), then scales + offsets. Every
+# triangle gets the given material.
+func loadObjTriangles(path: view String, scale: view Float, ox: view Float, oy: view Float, oz: view Float, yaw180: view Bool, mat: view Material) ret List(Triangle) {
+    let text: String = rae_ext_rae_sys_read_file(path: path)
+    let lines: List(String) = text.split(sep: "\n")
+    let vx: List(Float) = createList(Float, cap: 4096)
+    let vy: List(Float) = createList(Float, cap: 4096)
+    let vz: List(Float) = createList(Float, cap: 4096)
+    var flip: Float = 1.0
+    if yaw180 { flip = -1.0 }   # 180deg about the up axis: negate obj x + z
+    var li: Int = 0
+    loop li < lines.length {
+        let line: String = rae_ext_rae_buf_get(buf: lines.data, index: li)
+        let tok: List(String) = line.split(sep: " ")
+        if tok.length >= 4 {
+            let t0: String = rae_ext_rae_buf_get(buf: tok.data, index: 0)
+            if t0 is "v" {
+                let px: Float = rae_ext_rae_buf_get(buf: tok.data, index: 1).toFloat() * flip
+                let py: Float = rae_ext_rae_buf_get(buf: tok.data, index: 2).toFloat()
+                let pz: Float = rae_ext_rae_buf_get(buf: tok.data, index: 3).toFloat() * flip
+                vx.add(value: px * scale + ox)
+                vy.add(value: pz * scale + oy)
+                vz.add(value: py * scale + oz)
+            }
+        }
+        li = li + 1
+    }
+    # Pass 1b: vertex normals (vn), transformed like vertices (no offset/scale).
+    let nx: List(Float) = createList(Float, cap: 4096)
+    let ny: List(Float) = createList(Float, cap: 4096)
+    let nz: List(Float) = createList(Float, cap: 4096)
+    li = 0
+    loop li < lines.length {
+        let line: String = rae_ext_rae_buf_get(buf: lines.data, index: li)
+        let tok: List(String) = line.split(sep: " ")
+        if tok.length >= 4 {
+            let t0: String = rae_ext_rae_buf_get(buf: tok.data, index: 0)
+            if t0 is "vn" {
+                let mnx: Float = rae_ext_rae_buf_get(buf: tok.data, index: 1).toFloat() * flip
+                let mny: Float = rae_ext_rae_buf_get(buf: tok.data, index: 2).toFloat()
+                let mnz: Float = rae_ext_rae_buf_get(buf: tok.data, index: 3).toFloat() * flip
+                let rx: Float = mnx   let ry: Float = mnz   let rz: Float = mny   # Y-up -> Z-up
+                var ln: Float = math.sqrt(x: rx * rx + ry * ry + rz * rz)
+                if ln < 0.000001 { ln = 1.0 }
+                nx.add(value: rx / ln)  ny.add(value: ry / ln)  nz.add(value: rz / ln)
+            }
+        }
+        li = li + 1
+    }
+    let haveNormals: Bool = nx.length > 0
+
+    let tris: List(Triangle) = createList(Triangle, cap: 8192)
+    li = 0
+    loop li < lines.length {
+        let line: String = rae_ext_rae_buf_get(buf: lines.data, index: li)
+        let tok: List(String) = line.split(sep: " ")
+        if tok.length >= 4 {
+            let t0: String = rae_ext_rae_buf_get(buf: tok.data, index: 0)
+            if t0 is "f" {
+                let tk1: String = rae_ext_rae_buf_get(buf: tok.data, index: 1)
+                let tk2: String = rae_ext_rae_buf_get(buf: tok.data, index: 2)
+                let tk3: String = rae_ext_rae_buf_get(buf: tok.data, index: 3)
+                let i0: Int = faceIndex(token: tk1)
+                let i1: Int = faceIndex(token: tk2)
+                let i2: Int = faceIndex(token: tk3)
+                let p0: Vec3 = vecFromLists(xs: vx, ys: vy, zs: vz, index: i0)
+                let p1: Vec3 = vecFromLists(xs: vx, ys: vy, zs: vz, index: i1)
+                let p2: Vec3 = vecFromLists(xs: vx, ys: vy, zs: vz, index: i2)
+                var nn0: Vec3 = { x: 0.0, y: 0.0, z: 1.0 }
+                var nn1: Vec3 = { x: 0.0, y: 0.0, z: 1.0 }
+                var nn2: Vec3 = { x: 0.0, y: 0.0, z: 1.0 }
+                let ni0: Int = faceNormalIndex(token: tk1)
+                let ni1: Int = faceNormalIndex(token: tk2)
+                let ni2: Int = faceNormalIndex(token: tk3)
+                if haveNormals and ni0 >= 0 and ni1 >= 0 and ni2 >= 0 {
+                    nn0 = vecFromLists(xs: nx, ys: ny, zs: nz, index: ni0)
+                    nn1 = vecFromLists(xs: nx, ys: ny, zs: nz, index: ni1)
+                    nn2 = vecFromLists(xs: nx, ys: ny, zs: nz, index: ni2)
+                } else {
+                    # geometric normal: normalize(cross(p1-p0, p2-p0))
+                    let ex: Float = p1.x - p0.x   let ey: Float = p1.y - p0.y   let ez: Float = p1.z - p0.z
+                    let fx: Float = p2.x - p0.x   let fy: Float = p2.y - p0.y   let fz: Float = p2.z - p0.z
+                    let gx: Float = ey * fz - ez * fy
+                    let gy: Float = ez * fx - ex * fz
+                    let gz: Float = ex * fy - ey * fx
+                    var gl: Float = math.sqrt(x: gx * gx + gy * gy + gz * gz)
+                    if gl < 0.000001 { gl = 1.0 }
+                    let g: Vec3 = { x: gx / gl, y: gy / gl, z: gz / gl }
+                    nn0 = g  nn1 = g  nn2 = g
+                }
+                tris.add(value: { v0: p0, v1: p1, v2: p2, n0: nn0, n1: nn1, n2: nn2, material: mat })
+            }
+        }
+        li = li + 1
+    }
+    ret tris
+}
+
+# Boxes for "Scene One": the C++ generateCube — a 1x1x1 cube centred on the
+# world origin (boxSize 0.5), resting on the ground (planet top at z=-0.5).
+# Material = the red diffuse "front ball" (0.8,0.3,0.3) — matte, reads dark
+# under the emitter lighting like the C++ original.
+func buildSceneOneBoxes() ret List(Box) {
+    let b: List(Box) = createList(Box, cap: 1)
+    b.add(value: { lo: { x: -0.5, y: -0.5, z: -0.5 }, hi: { x: 0.5, y: 0.5, z: 0.5 },
+        material: { kind: 0, albedo: { x: 0.8, y: 0.3, z: 0.3 }, fuzz: 0.0, ior: 0.0 } })
+    ret b
+}
+
+# Steps 1-2 scene (examples 40-41): three diffuse balls on a grey ground.
+func buildSceneDiffuse() ret List(Sphere) {
+    let s: List(Sphere) = createList(Sphere, cap: 4)
+    s.add(value: { center: { x: 0.0, y: 1.0, z: 0.0 }, radius: 0.5,
+        material: { kind: 0, albedo: { x: 0.8, y: 0.3, z: 0.3 }, fuzz: 0.0, ior: 0.0 } })
+    s.add(value: { center: { x: -1.05, y: 1.05, z: 0.0 }, radius: 0.5,
+        material: { kind: 0, albedo: { x: 0.3, y: 0.4, z: 0.8 }, fuzz: 0.0, ior: 0.0 } })
+    s.add(value: { center: { x: 1.05, y: 1.05, z: 0.0 }, radius: 0.5,
+        material: { kind: 0, albedo: { x: 0.3, y: 0.7, z: 0.3 }, fuzz: 0.0, ior: 0.0 } })
+    s.add(value: { center: { x: 0.0, y: 1.0, z: -100.5 }, radius: 100.0,
+        material: { kind: 0, albedo: { x: 0.6, y: 0.6, z: 0.6 }, fuzz: 0.0, ior: 0.0 } })
+    ret s
+}
+
+# Step 5 scene (example 44): emissive lights over a cyan planet (dim sky).
+func buildSceneLights() ret List(Sphere) {
+    let s: List(Sphere) = createList(Sphere, cap: 8)
+    s.add(value: { center: { x: 0.0, y: 1.0, z: -100.5 }, radius: 100.0,
+        material: { kind: 0, albedo: { x: 0.45, y: 0.6, z: 0.7 }, fuzz: 0.0, ior: 0.0 } })
+    s.add(value: { center: { x: 0.0, y: 1.0, z: 0.0 }, radius: 0.5,
+        material: { kind: 0, albedo: { x: 0.8, y: 0.3, z: 0.3 }, fuzz: 0.0, ior: 0.0 } })
+    s.add(value: { center: { x: 1.1, y: 1.2, z: 0.0 }, radius: 0.5,
+        material: { kind: 1, albedo: { x: 0.8, y: 0.6, z: 0.2 }, fuzz: 0.0, ior: 0.0 } })
+    s.add(value: { center: { x: -1.6, y: 1.7, z: 0.1 }, radius: 0.4,
+        material: { kind: 1, albedo: { x: 0.8, y: 0.4, z: 0.8 }, fuzz: 0.3, ior: 0.0 } })
+    s.add(value: { center: { x: -1.0, y: 0.8, z: 0.0 }, radius: 0.5,
+        material: { kind: 2, albedo: { x: 1.0, y: 1.0, z: 1.0 }, fuzz: 0.0, ior: 1.5 } })
+    s.add(value: { center: { x: 0.4, y: -0.1, z: -0.25 }, radius: 0.25,
+        material: { kind: 0, albedo: { x: 0.1, y: 0.2, z: 0.8 }, fuzz: 0.0, ior: 0.0 } })
+    s.add(value: { center: { x: 1.4, y: 1.2, z: 3.0 }, radius: 1.2,
+        material: { kind: 3, albedo: { x: 4.0, y: 3.6, z: 3.0 }, fuzz: 0.0, ior: 0.0 } })
+    s.add(value: { center: { x: -0.7, y: 0.2, z: 0.05 }, radius: 0.12,
+        material: { kind: 3, albedo: { x: 16.0, y: 16.0, z: 16.0 }, fuzz: 0.0, ior: 0.0 } })
+    ret s
+}
+
+# The classic Z-up four-sphere scene: diffuse ground, diffuse centre, glass on
+# the left, fuzzed metal on the right.
+func buildScene() ret List(Sphere) {
+    let s: List(Sphere) = createList(Sphere, cap: 4)
+    s.add(value: { center: { x: 0.0, y: 1.0, z: -100.5 }, radius: 100.0,
+        material: { kind: 0, albedo: { x: 0.8, y: 0.8, z: 0.0 }, fuzz: 0.0, ior: 0.0 } })
+    s.add(value: { center: { x: 0.0, y: 1.0, z: 0.0 }, radius: 0.5,
+        material: { kind: 0, albedo: { x: 0.1, y: 0.2, z: 0.5 }, fuzz: 0.0, ior: 0.0 } })
+    s.add(value: { center: { x: -1.0, y: 1.0, z: 0.0 }, radius: 0.5,
+        material: { kind: 2, albedo: { x: 1.0, y: 1.0, z: 1.0 }, fuzz: 0.0, ior: 1.5 } })
+    s.add(value: { center: { x: 1.0, y: 1.0, z: 0.0 }, radius: 0.5,
+        material: { kind: 1, albedo: { x: 0.8, y: 0.6, z: 0.2 }, fuzz: 0.05, ior: 0.0 } })
+    ret s
+}
+
+# rae_ray "Scene One" (createSceneOne): emissive lights + diffuse/metal/glass
+# balls over a teal planet. (The cube from the C++ scene needs a box primitive —
+# see QUEUE.) Lit by glowing spheres, so use the dim sky (skyMode 1).
+func buildSceneOne() ret List(Sphere) {
+    let s: List(Sphere) = createList(Sphere, cap: 8)
+    # A big light + a small bright light (kind 3, albedo = emission)
+    s.add(value: { center: { x: 0.0, y: -1.0, z: 6.0 }, radius: 2.0,
+        material: { kind: 3, albedo: { x: 4.0, y: 4.0, z: 4.0 }, fuzz: 0.0, ior: 0.0 } })
+    s.add(value: { center: { x: 3.85, y: -0.15, z: 2.3 }, radius: 0.2,
+        material: { kind: 3, albedo: { x: 16.0, y: 16.0, z: 16.0 }, fuzz: 0.0, ior: 0.0 } })
+    # A red ball
+    s.add(value: { center: { x: 0.0, y: -2.0, z: 0.3 }, radius: 0.5,
+        material: { kind: 0, albedo: { x: 0.8, y: 0.3, z: 0.3 }, fuzz: 0.0, ior: 0.0 } })
+    # The planet
+    s.add(value: { center: { x: 0.0, y: -1.0, z: -100.5 }, radius: 100.0,
+        material: { kind: 0, albedo: { x: 0.0, y: 0.7, z: 0.8 }, fuzz: 0.0, ior: 0.0 } })
+    # Metal balls
+    s.add(value: { center: { x: 1.0, y: 0.0, z: 0.0 }, radius: 0.5,
+        material: { kind: 1, albedo: { x: 0.8, y: 0.6, z: 0.2 }, fuzz: 0.0, ior: 0.0 } })
+    s.add(value: { center: { x: -1.5, y: 0.5, z: 0.65 }, radius: 0.4,
+        material: { kind: 1, albedo: { x: 0.8, y: 0.4, z: 0.8 }, fuzz: 0.3, ior: 0.0 } })
+    # Glass ball + a blue diffuse ball
+    s.add(value: { center: { x: -1.0, y: 1.0, z: 0.0 }, radius: 0.5,
+        material: { kind: 2, albedo: { x: 1.0, y: 1.0, z: 1.0 }, fuzz: 0.0, ior: 1.5 } })
+    s.add(value: { center: { x: -3.15, y: -5.0, z: 0.1 }, radius: 0.6,
+        material: { kind: 0, albedo: { x: 0.05, y: 0.2, z: 0.8 }, fuzz: 0.0, ior: 0.0 } })
+    ret s
+}
+
+# rae_ray "Scene From Book" — the Ray Tracing in One Weekend cover: a grey
+# ground + a field of ~480 random small spheres + three big feature spheres.
+# Uses the bright sky (skyMode 0).
+func buildSceneBook() ret List(Sphere) {
+    seed(n: 1)
+    let s: List(Sphere) = createList(Sphere, cap: 512)
+    # ground
+    s.add(value: { center: { x: 0.0, y: 0.0, z: -1000.0 }, radius: 1000.0,
+        material: { kind: 0, albedo: { x: 0.5, y: 0.5, z: 0.5 }, fuzz: 0.0, ior: 0.0 } })
+    var a: Int = -11
+    loop a < 11 {
+        var b: Int = -11
+        loop b < 11 {
+            let cx: Float = a.toFloat() + 0.9 * random()
+            let cy: Float = b.toFloat() + 0.9 * random()
+            let dx: Float = cx - 4.0
+            if dx * dx + cy * cy > 0.81 {
+                let chooseMat: Float = random()
+                if chooseMat < 0.8 {
+                    s.add(value: { center: { x: cx, y: cy, z: 0.2 }, radius: 0.2,
+                        material: { kind: 0, albedo: { x: random() * random(), y: random() * random(), z: random() * random() }, fuzz: 0.0, ior: 0.0 } })
+                } else {
+                    if chooseMat < 0.95 {
+                        s.add(value: { center: { x: cx, y: cy, z: 0.2 }, radius: 0.2,
+                            material: { kind: 1, albedo: { x: 0.5 * (1.0 + random()), y: 0.5 * (1.0 + random()), z: 0.5 * (1.0 + random()) }, fuzz: 0.5 * random(), ior: 0.0 } })
+                    } else {
+                        s.add(value: { center: { x: cx, y: cy, z: 0.2 }, radius: 0.2,
+                            material: { kind: 2, albedo: { x: 0.8, y: 0.5, z: 0.3 }, fuzz: 0.0, ior: 1.5 } })
+                    }
+                }
+            }
+            b = b + 1
+        }
+        a = a + 1
+    }
+    # three feature spheres
+    s.add(value: { center: { x: 0.0, y: 0.0, z: 1.0 }, radius: 1.0,
+        material: { kind: 2, albedo: { x: 0.8, y: 0.5, z: 0.3 }, fuzz: 0.0, ior: 1.5 } })
+    s.add(value: { center: { x: -4.0, y: 0.0, z: 1.0 }, radius: 1.0,
+        material: { kind: 0, albedo: { x: 0.0, y: 0.2, z: 0.9 }, fuzz: 0.0, ior: 0.0 } })
+    s.add(value: { center: { x: 4.0, y: 0.0, z: 1.0 }, radius: 1.0,
+        material: { kind: 1, albedo: { x: 0.7, y: 0.6, z: 0.5 }, fuzz: 0.0, ior: 0.0 } })
+    ret s
+}

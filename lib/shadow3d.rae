@@ -27,8 +27,8 @@
 #    with too few texels, which is where the eye actually looks.
 import core
 import math
-import vec3
-open math3d
+import Vec3
+open Math3d
 
 # Per-app cast-shadow ambient darkening (0 = off / pure §5, 1 = full). Opt-in: a
 # bright top-down app whose cast shadows wash out against the ambient floor sets a
@@ -100,8 +100,8 @@ func fitShadowCascades(camPos: view Vec3, camTarget: view Vec3,
     ret ShadowCascades { count: 0, resolution: 0, viewProj: own vp, splitFar: own splits, texelWorld: own texels, depthRange: own ranges }
   }
 
-  let forward: Vec3 = vec3.vnorm(a: vec3.vsub(a: camTarget, b: camPos))
-  let light: Vec3 = vec3.vnorm(a: sunDir)
+  let forward: Vec3 = Vec3.vnorm(a: Vec3.vsub(a: camTarget, b: camPos))
+  let light: Vec3 = Vec3.vnorm(a: sunDir)
   # tan of the half angles, for the slice corner radius.
   let tanY: Float = math.tan(x: fovYDeg * 0.008726646259971648)
   let tanX: Float = tanY * aspect
@@ -127,7 +127,7 @@ func fitShadowCascades(camPos: view Vec3, camTarget: view Vec3,
         centreDist = candidate
       }
     }
-    let centre: Vec3 = vec3.vadd(a: camPos, b: vec3.vscale(a: forward, s: centreDist))
+    let centre: Vec3 = Vec3.vadd(a: camPos, b: Vec3.vscale(a: forward, s: centreDist))
     # Radius is the distance to the far corner ring, which is always the
     # farthest point of the slice from a centre on the axis.
     let dz: Float = sliceFar - centreDist
@@ -148,13 +148,13 @@ func fitShadowCascades(camPos: view Vec3, camTarget: view Vec3,
 
     # Light basis. Any up vector not parallel to the light works; pick the
     # one that is most perpendicular so the basis never collapses.
-    var up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
+    var up: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
     var lz: Float = light.z
     if lz < 0.0 {
       lz = 0.0 - lz
     }
     if lz > 0.99 {
-      up = vec3.create(x: 0.0, y: 1.0, z: 0.0)
+      up = Vec3.create(x: 0.0, y: 1.0, z: 0.0)
     }
 
     # THE LIGHT VIEW IS A PURE ROTATION, anchored at the world origin.

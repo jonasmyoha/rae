@@ -1,0 +1,418 @@
+# mesh3d — procedural mesh generation for the gpu3d renderer.
+#
+# Every generator returns a MeshData: interleaved vertices (8 Floats
+# each — position xyz, normal xyz, uv) and a triangle index list with
+# counter-clockwise winding (gpu3d culls back faces).
+#
+# WORLD CONVENTION: right-handed Z-up (Blender) per
+# `docs/coordinate-system.md` — +X right, +Y forward, +Z up. Sphere poles
+# are on +/-Z, the plane lies in XY with normal +Z, and the torus ring
+# lies in the XY plane with its tube sweeping around +Z.
+import core
+import math
+import Noise
+
+type MeshData {
+  verts: List(Float)
+  indices: List(Int)
+  vertCount: Int
+}
+
+func pushVert(verts: mod List(Float), px: view Float, py: view Float, pz: view Float, nx: view Float, ny: view Float, nz: view Float, u: view Float, v: view Float) {
+  verts.add(value: px)
+  verts.add(value: py)
+  verts.add(value: pz)
+  verts.add(value: nx)
+  verts.add(value: ny)
+  verts.add(value: nz)
+  verts.add(value: u)
+  verts.add(value: v)
+}
+
+# Flat-buffer reads below go through these helpers so the `opt Float` from
+# `.get` is unwrapped in one place; an out-of-range index yields 0.0.
+func sampleHeight(heights: view List(Float), index: copy Int) ret Float {
+  if let value: Float = heights.copyAt(index: index) { ret value }
+  ret 0.0
+}
+
+func vertComponent(verts: view List(Float), index: copy Int) ret Float {
+  if let value: Float = verts.copyAt(index: index) { ret value }
+  ret 0.0
+}
+
+# Unit-radius UV sphere centered at origin.
+func makeSphere(rings: view Int, segments: view Int) pub ret MeshData {
+  let verts: List(Float) = createList(Float, cap: (rings + 1) * (segments + 1) * 8)
+  let indices: List(Int) = createList(Int, cap: rings * segments * 6)
+  let pi: Float = 3.141592653589793
+  var r: Int = 0
+  loop r <= rings {
+    let phi: Float = pi * r.toFloat() / rings.toFloat()   # 0..pi from +Z pole
+    let z: Float = math.cos(x: phi)
+    let ringRad: Float = math.sin(x: phi)
+    var s: Int = 0
+    loop s <= segments {
+      let theta: Float = 2.0 * pi * s.toFloat() / segments.toFloat()
+      let x: Float = ringRad * math.cos(x: theta)
+      let y: Float = ringRad * math.sin(x: theta)
+      pushVert(verts: verts, px: x, py: y, pz: z, nx: x, ny: y, nz: z, u: s.toFloat() / segments.toFloat(), v: r.toFloat() / rings.toFloat())
+      s = s + 1
+    }
+    r = r + 1
+  }
+  let stride: Int = segments + 1
+  var ri: Int = 0
+  loop ri < rings {
+    var si: Int = 0
+    loop si < segments {
+      let a: Int = ri * stride + si
+      let b: Int = a + stride
+      # Winding is (a, b, a+1) / (b, b+1, a+1) — the same convention
+      # makeTorus uses, and the REVERSE of makePlane's.
+      #
+      # It has to differ from the plane's: the sphere's parametrisation
+      # advances `ri` from the +Z pole DOWNWARD while `si` advances
+      # counter-clockwise seen from +Z, and those two together flip the
+      # handedness of the (ri, si) patch relative to the outward normal.
+      # Sharing the plane's order here produced triangles wound clockwise
+      # seen from outside, so back-face culling kept the FAR hemisphere of
+      # every sphere: the depth buffer held the back surface and the
+      # interpolated normals pointed away from the camera. Lighting still
+      # looked smooth, which is what let it survive — it showed up as
+      # inside-out ambient occlusion, because AO is the first thing that
+      # reads depth and normals together.
+      indices.add(value: a)
+      indices.add(value: b)
+      indices.add(value: a + 1)
+      indices.add(value: b)
+      indices.add(value: b + 1)
+      indices.add(value: a + 1)
+      si = si + 1
+    }
+    ri = ri + 1
+  }
+  let vertCount: Int = (rings + 1) * (segments + 1)
+  ret MeshData { verts: own verts, indices: own indices, vertCount: vertCount }
+}
+
+# Flat ground plane in XY (normal +Z), centered, `size` on a side.
+func makePlane(size: view Float, segments: view Int) pub ret MeshData {
+  let verts: List(Float) = createList(Float, cap: (segments + 1) * (segments + 1) * 8)
+  let indices: List(Int) = createList(Int, cap: segments * segments * 6)
+  var yi: Int = 0
+  loop yi <= segments {
+    let vy: Float = yi.toFloat() / segments.toFloat()
+    var xi: Int = 0
+    loop xi <= segments {
+      let vx: Float = xi.toFloat() / segments.toFloat()
+      pushVert(verts: verts, px: (vx - 0.5) * size, py: (vy - 0.5) * size, pz: 0.0, nx: 0.0, ny: 0.0, nz: 1.0, u: vx, v: vy)
+      xi = xi + 1
+    }
+    yi = yi + 1
+  }
+  let stride: Int = segments + 1
+  var y2: Int = 0
+  loop y2 < segments {
+    var x2: Int = 0
+    loop x2 < segments {
+      let a: Int = y2 * stride + x2
+      let b: Int = a + stride
+      indices.add(value: a)
+      indices.add(value: a + 1)
+      indices.add(value: b)
+      indices.add(value: b)
+      indices.add(value: a + 1)
+      indices.add(value: b + 1)
+      x2 = x2 + 1
+    }
+    y2 = y2 + 1
+  }
+  let vertCount: Int = (segments + 1) * (segments + 1)
+  ret MeshData { verts: own verts, indices: own indices, vertCount: vertCount }
+}
+
+# Static CPU-generated terrain. Noise is sampled once into a height grid;
+# smooth normals then reuse neighboring heights instead of reevaluating FBM.
+# Animated or very dense displacement should use lib/noise.wgsl on the GPU.
+func makeFbmTerrain(size: view Float, segments: view Int, heightScale: view Float, frequency: view Float, octaves: view Int, seed: view Int) pub ret MeshData {
+  let stride: Int = segments + 1
+  let vertCount: Int = stride * stride
+  let heights: List(Float) = createList(Float, cap: vertCount)
+  let verts: List(Float) = createList(Float, cap: vertCount * 8)
+  let indices: List(Int) = createList(Int, cap: segments * segments * 6)
+
+  var yi: Int = 0
+  loop yi <= segments {
+    let vy: Float = yi.toFloat() / segments.toFloat()
+    var xi: Int = 0
+    loop xi <= segments {
+      let vx: Float = xi.toFloat() / segments.toFloat()
+      let px: Float = (vx - 0.5) * size
+      let py: Float = (vy - 0.5) * size
+      let height: Float = Noise.fbm2(x: px * frequency, y: py * frequency, octaves: octaves, lacunarity: 2.0, gain: 0.5, seed: seed) * heightScale
+      heights.add(value: height)
+      xi = xi + 1
+    }
+    yi = yi + 1
+  }
+
+  let step: Float = size / segments.toFloat()
+  yi = 0
+  loop yi <= segments {
+    let vy: Float = yi.toFloat() / segments.toFloat()
+    var xi: Int = 0
+    loop xi <= segments {
+      let vx: Float = xi.toFloat() / segments.toFloat()
+      var leftX: Int = xi - 1
+      var rightX: Int = xi + 1
+      var downY: Int = yi - 1
+      var upY: Int = yi + 1
+      if leftX < 0 { leftX = 0 }
+      if rightX > segments { rightX = segments }
+      if downY < 0 { downY = 0 }
+      if upY > segments { upY = segments }
+      let center: Float = sampleHeight(heights: heights, index: yi * stride + xi)
+      let left: Float = sampleHeight(heights: heights, index: yi * stride + leftX)
+      let right: Float = sampleHeight(heights: heights, index: yi * stride + rightX)
+      let down: Float = sampleHeight(heights: heights, index: downY * stride + xi)
+      let up: Float = sampleHeight(heights: heights, index: upY * stride + xi)
+      let dx: Float = (rightX - leftX).toFloat() * step
+      let dy: Float = (upY - downY).toFloat() * step
+      let slopeX: Float = (right - left) / dx
+      let slopeY: Float = (up - down) / dy
+      let normalLen: Float = math.sqrt(x: slopeX * slopeX + slopeY * slopeY + 1.0)
+      pushVert(
+        verts: verts,
+        px: (vx - 0.5) * size, py: (vy - 0.5) * size, pz: center,
+        nx: (0.0 - slopeX) / normalLen, ny: (0.0 - slopeY) / normalLen, nz: 1.0 / normalLen,
+        u: vx, v: vy
+      )
+      xi = xi + 1
+    }
+    yi = yi + 1
+  }
+
+  var y2: Int = 0
+  loop y2 < segments {
+    var x2: Int = 0
+    loop x2 < segments {
+      let a: Int = y2 * stride + x2
+      let b: Int = a + stride
+      indices.add(value: a)
+      indices.add(value: a + 1)
+      indices.add(value: b)
+      indices.add(value: b)
+      indices.add(value: a + 1)
+      indices.add(value: b + 1)
+      x2 = x2 + 1
+    }
+    y2 = y2 + 1
+  }
+  ret MeshData { verts: own verts, indices: own indices, vertCount: vertCount }
+}
+
+# Torus with its ring in the XY plane: `majorR` ring radius, `minorR` tube radius.
+# A unit-ish axis-aligned box centred on the origin, `size` across.
+#
+# FLAT SHADED, which is why it has 24 vertices rather than 8: a cube's
+# corner belongs to three faces with three different normals, and a shared
+# vertex can only carry one. Eight vertices would force the corner normals
+# to be averaged, rounding off exactly the hard edges a box exists to have.
+# Each face therefore gets its own four vertices and its own normal.
+#
+# Winding matches makePlane's convention per face, checked against the
+# outward normal — see the note in makeSphere for what an inverted winding
+# costs.
+func makeBox(size: view Float) pub ret MeshData {
+  let verts: List(Float) = createList(Float, cap: 24 * 8)
+  let indices: List(Int) = createList(Int, cap: 36)
+  let h: Float = size * 0.5
+
+  # Per face: outward normal, then the four corners in counter-clockwise
+  # order seen from OUTSIDE along that normal.
+  # +X
+  pushVert(verts: verts, px: h, py: 0.0 - h, pz: 0.0 - h, nx: 1.0, ny: 0.0, nz: 0.0, u: 0.0, v: 0.0)
+  pushVert(verts: verts, px: h, py: h, pz: 0.0 - h, nx: 1.0, ny: 0.0, nz: 0.0, u: 1.0, v: 0.0)
+  pushVert(verts: verts, px: h, py: h, pz: h, nx: 1.0, ny: 0.0, nz: 0.0, u: 1.0, v: 1.0)
+  pushVert(verts: verts, px: h, py: 0.0 - h, pz: h, nx: 1.0, ny: 0.0, nz: 0.0, u: 0.0, v: 1.0)
+  # -X
+  pushVert(verts: verts, px: 0.0 - h, py: h, pz: 0.0 - h, nx: 0.0 - 1.0, ny: 0.0, nz: 0.0, u: 0.0, v: 0.0)
+  pushVert(verts: verts, px: 0.0 - h, py: 0.0 - h, pz: 0.0 - h, nx: 0.0 - 1.0, ny: 0.0, nz: 0.0, u: 1.0, v: 0.0)
+  pushVert(verts: verts, px: 0.0 - h, py: 0.0 - h, pz: h, nx: 0.0 - 1.0, ny: 0.0, nz: 0.0, u: 1.0, v: 1.0)
+  pushVert(verts: verts, px: 0.0 - h, py: h, pz: h, nx: 0.0 - 1.0, ny: 0.0, nz: 0.0, u: 0.0, v: 1.0)
+  # +Y
+  pushVert(verts: verts, px: h, py: h, pz: 0.0 - h, nx: 0.0, ny: 1.0, nz: 0.0, u: 0.0, v: 0.0)
+  pushVert(verts: verts, px: 0.0 - h, py: h, pz: 0.0 - h, nx: 0.0, ny: 1.0, nz: 0.0, u: 1.0, v: 0.0)
+  pushVert(verts: verts, px: 0.0 - h, py: h, pz: h, nx: 0.0, ny: 1.0, nz: 0.0, u: 1.0, v: 1.0)
+  pushVert(verts: verts, px: h, py: h, pz: h, nx: 0.0, ny: 1.0, nz: 0.0, u: 0.0, v: 1.0)
+  # -Y
+  pushVert(verts: verts, px: 0.0 - h, py: 0.0 - h, pz: 0.0 - h, nx: 0.0, ny: 0.0 - 1.0, nz: 0.0, u: 0.0, v: 0.0)
+  pushVert(verts: verts, px: h, py: 0.0 - h, pz: 0.0 - h, nx: 0.0, ny: 0.0 - 1.0, nz: 0.0, u: 1.0, v: 0.0)
+  pushVert(verts: verts, px: h, py: 0.0 - h, pz: h, nx: 0.0, ny: 0.0 - 1.0, nz: 0.0, u: 1.0, v: 1.0)
+  pushVert(verts: verts, px: 0.0 - h, py: 0.0 - h, pz: h, nx: 0.0, ny: 0.0 - 1.0, nz: 0.0, u: 0.0, v: 1.0)
+  # +Z (top)
+  pushVert(verts: verts, px: 0.0 - h, py: 0.0 - h, pz: h, nx: 0.0, ny: 0.0, nz: 1.0, u: 0.0, v: 0.0)
+  pushVert(verts: verts, px: h, py: 0.0 - h, pz: h, nx: 0.0, ny: 0.0, nz: 1.0, u: 1.0, v: 0.0)
+  pushVert(verts: verts, px: h, py: h, pz: h, nx: 0.0, ny: 0.0, nz: 1.0, u: 1.0, v: 1.0)
+  pushVert(verts: verts, px: 0.0 - h, py: h, pz: h, nx: 0.0, ny: 0.0, nz: 1.0, u: 0.0, v: 1.0)
+  # -Z (bottom)
+  pushVert(verts: verts, px: 0.0 - h, py: h, pz: 0.0 - h, nx: 0.0, ny: 0.0, nz: 0.0 - 1.0, u: 0.0, v: 0.0)
+  pushVert(verts: verts, px: h, py: h, pz: 0.0 - h, nx: 0.0, ny: 0.0, nz: 0.0 - 1.0, u: 1.0, v: 0.0)
+  pushVert(verts: verts, px: h, py: 0.0 - h, pz: 0.0 - h, nx: 0.0, ny: 0.0, nz: 0.0 - 1.0, u: 1.0, v: 1.0)
+  pushVert(verts: verts, px: 0.0 - h, py: 0.0 - h, pz: 0.0 - h, nx: 0.0, ny: 0.0, nz: 0.0 - 1.0, u: 0.0, v: 1.0)
+
+  var f: Int = 0
+  loop f < 6 {
+    let base: Int = f * 4
+    indices.add(value: base)
+    indices.add(value: base + 1)
+    indices.add(value: base + 2)
+    indices.add(value: base)
+    indices.add(value: base + 2)
+    indices.add(value: base + 3)
+    f = f + 1
+  }
+  ret MeshData { verts: own verts, indices: own indices, vertCount: 24 }
+}
+
+func makeTorus(majorR: view Float, minorR: view Float, majorSegs: view Int, minorSegs: view Int) pub ret MeshData {
+  let verts: List(Float) = createList(Float, cap: (majorSegs + 1) * (minorSegs + 1) * 8)
+  let indices: List(Int) = createList(Int, cap: majorSegs * minorSegs * 6)
+  let pi: Float = 3.141592653589793
+  var i: Int = 0
+  loop i <= majorSegs {
+    let u: Float = 2.0 * pi * i.toFloat() / majorSegs.toFloat()
+    let cu: Float = math.cos(x: u)
+    let su: Float = math.sin(x: u)
+    var j: Int = 0
+    loop j <= minorSegs {
+      let v: Float = 2.0 * pi * j.toFloat() / minorSegs.toFloat()
+      let cv: Float = math.cos(x: v)
+      let sv: Float = math.sin(x: v)
+      let px: Float = (majorR + minorR * cv) * cu
+      let py: Float = (majorR + minorR * cv) * su
+      let pz: Float = minorR * sv
+      let nx: Float = cv * cu
+      let ny: Float = cv * su
+      let nz: Float = sv
+      pushVert(verts: verts, px: px, py: py, pz: pz, nx: nx, ny: ny, nz: nz, u: i.toFloat() / majorSegs.toFloat(), v: j.toFloat() / minorSegs.toFloat())
+      j = j + 1
+    }
+    i = i + 1
+  }
+  let stride: Int = minorSegs + 1
+  var a2: Int = 0
+  loop a2 < majorSegs {
+    var b2: Int = 0
+    loop b2 < minorSegs {
+      let a: Int = a2 * stride + b2
+      let b: Int = a + stride
+      indices.add(value: a)
+      indices.add(value: b)
+      indices.add(value: a + 1)
+      indices.add(value: a + 1)
+      indices.add(value: b)
+      indices.add(value: b + 1)
+      b2 = b2 + 1
+    }
+    a2 = a2 + 1
+  }
+  let vertCount: Int = (majorSegs + 1) * (minorSegs + 1)
+  ret MeshData { verts: own verts, indices: own indices, vertCount: vertCount }
+}
+
+# ----- smooth normals -------------------------------------------------
+# Average the normals meeting at a shared position, so a mesh authored
+# with per-face normals shades as a curved surface rather than as a set
+# of flat plates.
+#
+# WHY THIS EXISTS. An exporter chain decides this, not the artist: the
+# walker character's .glb arrives 97.4% flat — 3374 of its 3465 triangles
+# carry one constant normal across the face — because the FBX->glTF
+# conversion produced per-face normals, while the engine it was authored
+# against recalculated them with a smoothing angle. Same source asset,
+# two different normal sets, and the faceted one is the reason a cel
+# shader on this model looks like folded paper: a hard lighting threshold
+# turns each facet's constant N.L into a visibly distinct flat region.
+# Smooth shading hides that; toon shading cannot.
+#
+# THE ANGLE IS WHAT MAKES IT USABLE. Averaging everything at a position
+# would round off the corners of a cube. Only normals within `angleDeg`
+# of each other are merged, so a genuine crease stays a crease and only
+# the joins that were meant to be smooth become smooth. 60 degrees is the
+# long-standing default across DCC tools and engines.
+const meshSmoothAngleDefault: Float = 60.0
+
+# O(n^2) within a primitive, deliberately. Primitives are the unit an
+# exporter splits by, so they are small — the largest here is ~2000
+# vertices — and welding ACROSS them would fuse parts that are meant to
+# have a hard seam. A position hash would trade that clarity for time
+# this does not need to save: it runs once, at load.
+func smoothMeshNormals(m: view MeshData, angleDeg: view Float) pub ret MeshData {
+  let verts: List(Float) = createList(Float, cap: m.verts.length)
+  let indices: List(Int) = createList(Int, cap: m.indices.length)
+  loop let vertValue: view Float in m.verts {
+    verts.add(value: vertValue)
+  }
+  loop let indexValue: view Int in m.indices {
+    indices.add(value: indexValue)
+  }
+  if m.vertCount < 2 {
+    ret MeshData { verts: own verts, indices: own indices, vertCount: m.vertCount }
+  }
+  let cosLimit: Float = math.cos(x: angleDeg * 3.14159265 / 180.0)
+  # Positions are compared with a tolerance rather than exactly: the
+  # duplicated corners of a flat-shaded seam come from one source value,
+  # but a mesh that has been through a float round-trip can differ in the
+  # last bit, and a seam that fails to weld is invisible until it is lit.
+  let eps: Float = 0.000001
+  var i: Int = 0
+  loop i < m.vertCount {
+    let px: Float = vertComponent(verts: m.verts, index: i * 8 + 0)
+    let py: Float = vertComponent(verts: m.verts, index: i * 8 + 1)
+    let pz: Float = vertComponent(verts: m.verts, index: i * 8 + 2)
+    let nx: Float = vertComponent(verts: m.verts, index: i * 8 + 3)
+    let ny: Float = vertComponent(verts: m.verts, index: i * 8 + 4)
+    let nz: Float = vertComponent(verts: m.verts, index: i * 8 + 5)
+    var ax: Float = 0.0
+    var ay: Float = 0.0
+    var az: Float = 0.0
+    var j: Int = 0
+    loop j < m.vertCount {
+      let qx: Float = vertComponent(verts: m.verts, index: j * 8 + 0)
+      let qy: Float = vertComponent(verts: m.verts, index: j * 8 + 1)
+      let qz: Float = vertComponent(verts: m.verts, index: j * 8 + 2)
+      var dx: Float = qx - px
+      var dy: Float = qy - py
+      var dz: Float = qz - pz
+      if dx < 0.0 { dx = 0.0 - dx }
+      if dy < 0.0 { dy = 0.0 - dy }
+      if dz < 0.0 { dz = 0.0 - dz }
+      if dx <= eps and dy <= eps and dz <= eps {
+        let mx: Float = vertComponent(verts: m.verts, index: j * 8 + 3)
+        let my: Float = vertComponent(verts: m.verts, index: j * 8 + 4)
+        let mz: Float = vertComponent(verts: m.verts, index: j * 8 + 5)
+        # The crease test, against THIS vertex's own normal rather than
+        # against a running average: an average drifts as it accumulates,
+        # so which faces merge would depend on the order they are visited.
+        if nx * mx + ny * my + nz * mz >= cosLimit {
+          ax = ax + mx
+          ay = ay + my
+          az = az + mz
+        }
+      }
+      j = j + 1
+    }
+    let len: Float = math.sqrt(x: ax * ax + ay * ay + az * az)
+    # A degenerate sum — opposed normals cancelling — keeps the original
+    # rather than producing a zero vector that would shade as black.
+    if len > 0.00001 {
+      verts.set(index: i * 8 + 3, value: ax / len)
+      verts.set(index: i * 8 + 4, value: ay / len)
+      verts.set(index: i * 8 + 5, value: az / len)
+    }
+    i = i + 1
+  }
+  ret MeshData { verts: own verts, indices: own indices, vertCount: m.vertCount }
+}

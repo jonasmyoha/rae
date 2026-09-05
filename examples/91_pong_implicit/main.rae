@@ -1,13 +1,13 @@
 import core
 import gpu2d
-import sdl3
-import keys
+import Sdl3
+import Keys
 import sys
-import ui/ecs
+import ui/Ecs
 import ui/RenderSystem/RenderSystem
-import app3d/uiShell
-open app3d/uiShell
-open ui/ecs
+import app3d/UiShell
+open app3d/UiShell
+open ui/Ecs
 open ui/RenderSystem/RenderSystem
 
 const fieldW: Float = 800.0
@@ -63,10 +63,10 @@ func paddleCollisionSystem(
 
 func paddleInputSystem(position: mod PaddleTransform, dt: view Float) {
   let speed: Float = 300.0
-  if sdl3.isKeyDown(key: keys.keyW) or sdl3.isKeyDown(key: keys.keyUp) {
+  if Sdl3.isKeyDown(key: Keys.keyW) or Sdl3.isKeyDown(key: Keys.keyUp) {
     position.y = position.y - speed * dt
   }
-  if sdl3.isKeyDown(key: keys.keyS) or sdl3.isKeyDown(key: keys.keyDown) {
+  if Sdl3.isKeyDown(key: Keys.keyS) or Sdl3.isKeyDown(key: Keys.keyDown) {
     position.y = position.y + speed * dt
   }
   if position.y < 0.0 { position.y = 0.0 }
@@ -160,7 +160,7 @@ func main() ret Int {
     previousTime = now
     if dt > 0.05 { dt = 0.05 }
 
-    if testMode is false and sdl3.isKeyPressed(key: keys.keyR) {
+    if testMode is false and Sdl3.isKeyPressed(key: Keys.keyR) {
       playerPosition = { x: 20.0, y: 175.0 }
       cpuPosition = { x: 760.0, y: 175.0 }
       ballPosition = { x: 400.0, y: 225.0 }

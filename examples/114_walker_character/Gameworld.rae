@@ -1,0 +1,178 @@
+# ECS GameWorld for example 114 (#738): the gameplay 3D world — the reusable
+# entity core (EntityAllocator, #706) plus a ComponentTable per core gameplay
+# component, keyed by EntityId.
+#
+# Named `GameWorld`, NOT `World3d`: 114 is a game (walker character, crowd,
+# physics/net seams), and it already imports scene3d whose `World3d` (112's
+# Blender-like scene world, #732) is a DISTINCT type — a second `World3d` would
+# collide. The transform components are lib/ecs's QUATERNION Transform3D /
+# WorldTransform3D (#714/#715) folded by the general TransformSystem (#716), the
+# proper 3D transforms — unlike 112's Euler `Transform3d`. #739-#746 migrate
+# 114's character, crowd, terrain and grass onto this world; the final naming
+# across World2d/World3d/GameWorld is reconciled by #770.
+import core
+import Vec3
+import Quat
+import ecs/Transform
+import ecs/Hierarchy
+import ecs/HierarchySystem/HierarchySystem
+import app3d/CharacterController
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open ecs/Hierarchy
+open ecs/HierarchySystem/HierarchySystem
+open app3d/CharacterController
+
+# Per-entity animation clip + phase (#739). Replaces the CrowdMember.clipIndex /
+# animTime pair; each crowd (and hero) entity holds its own so members animate
+# independently.
+type AnimationState {
+  clipIndex: Int
+  animTime: Float
+}
+
+# One skinned body-mesh part (#740): its uploaded mesh-handle id + surface
+# roughness. Replaces the parallel `partIds`/`partRough` Lists — each part is an
+# entity carrying this component, and the renderer iterates the table.
+type PartRoughness {
+  meshId: Int
+  roughness: Float
+}
+
+# A gameplay surface material. Capital-D `Material3D` to match the capital-D
+# lib/ecs Transform3D/WorldTransform3D components; distinct from scene3d's Euler
+# `Material3d` that 114's current renderer still consumes (migrated later).
+type Material3D {
+  baseColor: Vec3
+  metallic: Float
+  roughness: Float
+  emission: Vec3
+}
+
+type GameWorld {
+  allocator: EntityAllocator
+  transforms: ComponentTable(Transform3D)
+  worldTransforms: ComponentTable(WorldTransform3D)
+  materials: ComponentTable(Material3D)
+  # #739: gameplay controllers + per-entity animation. The hero and every crowd
+  # member is an entity carrying a ThirdPersonController (movement) and an
+  # AnimationState (clip + phase); driven in place via componentMod (#721), no
+  # copy-out/mutate/set-back.
+  controllers: ComponentTable(ThirdPersonController)
+  animStates: ComponentTable(AnimationState)
+  # #740: skinned body-mesh parts, one entity each.
+  partRoughness: ComponentTable(PartRoughness)
+  # #741: infinite-terrain props + heightfield tiles are recycled entities.
+  # PropKind identifies the prop (kind + pool slot + placement-active); TreeVariant
+  # records a tree's broad/tall choice; TileMesh holds a tile's heightfield mesh.
+  propKinds: ComponentTable(PropKind)
+  treeVariants: ComponentTable(TreeVariant)
+  tileMeshes: ComponentTable(TileMesh)
+  # #742: waving-grass blades are entities carrying a GrassBlade descriptor
+  # (base position + yaw/phase/scale + pool slot). The flat instance-stream
+  # buffer is no longer a source of truth — it is derived from these each frame.
+  grassBlades: ComponentTable(GrassBlade)
+  # #744: ECS parent/child hierarchy — Parent (cached upward link) + Children
+  # (authoritative ordered list) folded into WorldTransform3D by the general
+  # TransformSystem, walked in HierarchyOrder. First 3D user is the camera rig
+  # (rig entity -> camera entity as a Parent relation), replacing applyCameraRig.
+  parents: ComponentTable(Parent)
+  childrens: ComponentTable(Children)
+  hierarchyOrder: HierarchyOrder
+  # #746: the physics + multiplayer seams now have a real ECS home. A physics
+  # body and a joined remote player are each an ENTITY carrying a component,
+  # spawned/despawned through the generational allocator (#704) — not List stubs.
+  physicsBodies: ComponentTable(PhysicsBody)
+  netPlayers: ComponentTable(NetPlayer)
+  # #789: per-frame splash animation counter (was the module-global gSplashTick
+  # in splash.rae). A plain resource on the world — the ComponentTable(any) field
+  # loops (#773) skip non-ComponentTable fields, so this is inert to reflection.
+  splashTick: Int
+}
+
+func createGameWorld() ret GameWorld {
+  ret GameWorld {
+    allocator: createEntityAllocator()
+    transforms: createComponentTable(Transform3D)
+    worldTransforms: createComponentTable(WorldTransform3D)
+    materials: createComponentTable(Material3D)
+    controllers: createComponentTable(ThirdPersonController)
+    animStates: createComponentTable(AnimationState)
+    partRoughness: createComponentTable(PartRoughness)
+    propKinds: createComponentTable(PropKind)
+    treeVariants: createComponentTable(TreeVariant)
+    tileMeshes: createComponentTable(TileMesh)
+    grassBlades: createComponentTable(GrassBlade)
+    parents: createComponentTable(Parent)
+    childrens: createComponentTable(Children)
+    hierarchyOrder: createHierarchyOrder()
+    physicsBodies: createComponentTable(PhysicsBody)
+    netPlayers: createComponentTable(NetPlayer)
+    splashTick: 0
+  }
+}
+
+# Allocate a fresh gameplay entity.
+func gameWorldAddEntity(world: mod GameWorld) ret EntityId {
+  ret allocEntity(this: world.allocator)
+}
+
+# Component setters — thin wrappers so call sites read as intent rather than
+# ComponentTable plumbing (mirrors 112's World3d helpers).
+func gameWorldSetTransform(world: mod GameWorld, entity: view EntityId, transform: view Transform3D) {
+  componentSet(this: world.transforms, entity: entity, data: transform)
+}
+
+func gameWorldSetWorldTransform(world: mod GameWorld, entity: view EntityId, worldTransform: view WorldTransform3D) {
+  componentSet(this: world.worldTransforms, entity: entity, data: worldTransform)
+}
+
+func gameWorldSetMaterial(world: mod GameWorld, entity: view EntityId, material: view Material3D) {
+  componentSet(this: world.materials, entity: entity, data: material)
+}
+
+func gameWorldSetController(world: mod GameWorld, entity: view EntityId, controller: view ThirdPersonController) {
+  componentSet(this: world.controllers, entity: entity, data: controller)
+}
+
+func gameWorldSetAnim(world: mod GameWorld, entity: view EntityId, anim: view AnimationState) {
+  componentSet(this: world.animStates, entity: entity, data: anim)
+}
+
+func gameWorldSetPartRoughness(world: mod GameWorld, entity: view EntityId, part: view PartRoughness) {
+  componentSet(this: world.partRoughness, entity: entity, data: part)
+}
+
+# The skinned parts, in creation (= upload) order — a query over the part table.
+func gameWorldPartCount(world: view GameWorld) ret Int {
+  ret componentCount(this: world.partRoughness)
+}
+
+func gameWorldPartAt(world: view GameWorld, i: view Int) ret PartRoughness {
+  ret componentDataAt(this: world.partRoughness, i: i)
+}
+
+# Derive a Transform3D from a controller (its position + heading about +Z). Kept
+# in sync at creation and whenever the controller moves, so the ECS transform
+# tracks the gameplay controller (later systems — camera rig #744, quat #745 —
+# read this rather than the controller directly).
+# The ThirdPersonController of an entity (hero or crowd member). A narrow
+# GameWorld accessor so systems read a controlled character straight from the
+# world without depending on the App aggregate (#743).
+func controllerOf(world: view GameWorld, entity: view EntityId) ret ThirdPersonController {
+  ret componentGet(this: world.controllers, entity: entity)
+}
+
+func controllerTransform3D(controller: view ThirdPersonController) ret Transform3D {
+  ret Transform3D {
+    position: controller.position
+    rotation: Quat.fromAxisAngle(axis: Vec3 { x: 0.0, y: 0.0, z: 1.0 }, angle: controller.heading)
+    scale: Vec3 { x: 1.0, y: 1.0, z: 1.0 }
+  }
+}
+
+func gameWorldEntityCount(world: view GameWorld) ret Int {
+  ret allocatorAliveCount(this: world.allocator)
+}

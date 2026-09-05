@@ -19,11 +19,11 @@ import core
 open webgpu/webgpu
 import webgpu/context
 open webgpu/context
-import profile
-import grassConfig
+import Profile
+import GrassConfig
 import gbuffer
 import string
-import worldBiome
+import WorldBiome
 
 # C shader-source accessors (WGSL text + entry point names).
 func grassWgsl() extern("rae_gb_grass_wgsl") ret Ptr
@@ -94,7 +94,7 @@ func createGrassCompute() ret GrassCompute {
 # Compute-pass source: the shared noise + biome field, then the grass pass
 # itself. Mirrors how the terrain splat pipeline composes its shader.
 func wgsl() ret String {
-  let islandSrc: String = worldBiome.islandParamsWgsl()
+  let islandSrc: String = WorldBiome.islandParamsWgsl()
   let noiseSrc: String = gbuffer.gbReadWgsl(path: "lib/noise.wgsl")
   let biomeSrc: String = gbuffer.gbReadWgsl(path: "lib/world_biome.wgsl")
   let grassSrc: String = gbuffer.gbReadWgsl(path: "lib/grass_compute.wgsl")
@@ -385,13 +385,13 @@ func grassVisibleCount(grass: view GrassCompute) ret Int { ret grass.visibleCach
 # capture alongside fps and per-pass GPU ms. Call once per frame after
 # grassGenerate.
 func grassDiagTick(grass: mod GrassCompute, profiler: mod Profiler) {
-  if profile.capturing(profiler: profiler) is false { ret }
+  if Profile.capturing(profiler: profiler) is false { ret }
   grass.diagFrame = grass.diagFrame + 1
   if grass.diagFrame % 10 is 0 {
     let visible: Int = grassReadVisible(grass: grass)
     if visible >= 0 { grass.visibleCache = visible }
   }
-  profile.counter(profiler: profiler, name: "grass.generated", value: grassGpuBladeCount)
-  profile.counter(profiler: profiler, name: "grass.visible", value: grass.visibleCache)
-  profile.counter(profiler: profiler, name: "grass.culled", value: grassGpuBladeCount - grass.visibleCache)
+  Profile.counter(profiler: profiler, name: "grass.generated", value: grassGpuBladeCount)
+  Profile.counter(profiler: profiler, name: "grass.visible", value: grass.visibleCache)
+  Profile.counter(profiler: profiler, name: "grass.culled", value: grassGpuBladeCount - grass.visibleCache)
 }

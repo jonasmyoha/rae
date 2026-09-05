@@ -27,15 +27,15 @@
 import core
 import math
 import gpu2d
-import vec3
-import rendererDeferred
-import ecs/entity
-open scene3d
-open ecs/entity
+import Vec3
+import RendererDeferred
+import ecs/Entity
+open Scene3d
+open ecs/Entity
 open gpu3d
-open rendererDeferred
-open math3d
-open mesh3d
+open RendererDeferred
+open Math3d
+open Mesh3d
 
 func uploadMeshData(m: view MeshData) ret MeshHandle {
   ret uploadMesh(verts: m.verts, vertCount: m.vertCount, indices: m.indices)
@@ -45,9 +45,9 @@ func uploadMeshData(m: view MeshData) ret MeshHandle {
 # emissive torus above it, and a ground plane.
 func buildScene(sphere: view MeshHandle, torus: view MeshHandle, ground: view MeshHandle) ret World3d {
   var world: World3d = createWorld3d()
-  let noEmit: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
-  let noRot: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
-  let unit: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  let noEmit: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let noRot: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let unit: Vec3 = Vec3.create(x: 1.0, y: 1.0, z: 1.0)
 
   # 5x5 grid: rows sweep metallic, columns sweep roughness.
   loop var row: Int = 0, row < 5, ++row {
@@ -57,20 +57,20 @@ func buildScene(sphere: view MeshHandle, torus: view MeshHandle, ground: view Me
       if roughness < 0.05 {
         roughness = 0.05
       }
-      let mat: Material3d = { baseColor: vec3.create(x: 0.9, y: 0.25, z: 0.2), metallic: metallic, roughness: roughness, emission: noEmit, toon: false }
+      let mat: Material3d = { baseColor: Vec3.create(x: 0.9, y: 0.25, z: 0.2), metallic: metallic, roughness: roughness, emission: noEmit, toon: false }
       # Z-up: the grid spreads across X (right) and Y (forward), lifted on Z.
-      let pos: Vec3 = vec3.create(x: (col.toFloat() - 2.0) * 2.4, y: (row.toFloat() - 2.0) * 2.4, z: 0.5)
+      let pos: Vec3 = Vec3.create(x: (col.toFloat() - 2.0) * 2.4, y: (row.toFloat() - 2.0) * 2.4, z: 0.5)
       let e: EntityId = world3dAddMeshInstance(world: world, mesh: sphere, material: mat, position: pos, rotation: noRot, scale: unit)
     }
   }
 
   # Emissive metallic torus hovering above the grid (+Z is up).
-  let torusMat: Material3d = { baseColor: vec3.create(x: 0.85, y: 0.86, z: 0.9), metallic: 1.0, roughness: 0.18, emission: vec3.create(x: 0.05, y: 0.12, z: 0.3), toon: false }
-  let torusE: EntityId = world3dAddMeshInstance(world: world, mesh: torus, material: torusMat, position: vec3.create(x: 0.0, y: 0.0, z: 3.6), rotation: noRot, scale: unit)
+  let torusMat: Material3d = { baseColor: Vec3.create(x: 0.85, y: 0.86, z: 0.9), metallic: 1.0, roughness: 0.18, emission: Vec3.create(x: 0.05, y: 0.12, z: 0.3), toon: false }
+  let torusE: EntityId = world3dAddMeshInstance(world: world, mesh: torus, material: torusMat, position: Vec3.create(x: 0.0, y: 0.0, z: 3.6), rotation: noRot, scale: unit)
 
   # Ground plane just below the spheres.
-  let groundMat: Material3d = { baseColor: vec3.create(x: 0.42, y: 0.43, z: 0.45), metallic: 0.0, roughness: 0.9, emission: noEmit, toon: false }
-  let groundE: EntityId = world3dAddMeshInstance(world: world, mesh: ground, material: groundMat, position: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.7), rotation: noRot, scale: unit)
+  let groundMat: Material3d = { baseColor: Vec3.create(x: 0.42, y: 0.43, z: 0.45), metallic: 0.0, roughness: 0.9, emission: noEmit, toon: false }
+  let groundE: EntityId = world3dAddMeshInstance(world: world, mesh: ground, material: groundMat, position: Vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.7), rotation: noRot, scale: unit)
   ret world
 }
 
@@ -155,11 +155,11 @@ func main() ret Int {
     # the viewer — without it the highlights face away and the material
     # grid reads flat.
     let sunA: Float = t * 0.15
-    light.sunDir = vec3.create(x: 0.0 - math.cos(x: sunA) * 0.6, y: 0.0 - 0.7 - math.sin(x: sunA) * 0.3, z: 0.0 - 1.0)
+    light.sunDir = Vec3.create(x: 0.0 - math.cos(x: sunA) * 0.6, y: 0.0 - 0.7 - math.sin(x: sunA) * 0.3, z: 0.0 - 1.0)
 
     # Spin the torus about +Z and tumble it about +X.
     var torusT: Transform3d = world3dGetTransform(world: world, entity: torusEntity)
-    torusT.rotation = vec3.create(x: t * 0.4, y: 0.0, z: t * 0.6)
+    torusT.rotation = Vec3.create(x: t * 0.4, y: 0.0, z: t * 0.6)
     world3dWriteTransform(world: world, entity: torusEntity, transform: torusT)
 
     let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()

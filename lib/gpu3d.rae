@@ -50,13 +50,13 @@ open shadow3d
 import gbufferShadow
 # The sky the forward background draws (#418). sky.rae does not import this,
 # so the dependency runs one way only.
-import sky
-open sky
+import Sky
+open Sky
 import math
-open vec3
-open scene3d
-open math3d
-open ecs/entity          # #793: World3d shadow path reads entities/components
+open Vec3
+open Scene3d
+open Math3d
+open ecs/Entity          # #793: World3d shadow path reads entities/components
 open ecs/ComponentTable
 # The forward render pass is built in Rae over the WebGPU bindings (#514),
 # the same way gbuffer.rae builds the deferred geometry pass.
@@ -338,7 +338,7 @@ func drawMetaballs(packedBalls: view Buffer(Float), count: copy Int, packedColor
 
 func beginScene(camera: view Camera3d, light: view Light3d, aspect: view Float, time: view Float) pub {
   var frame: Frame3d = createFrame3d()
-  let worldUp: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  let worldUp: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
   let viewM: Mat4 = mat4LookAt(
     eyeX: camera.position.x, eyeY: camera.position.y, eyeZ: camera.position.z,
     atX: camera.target.x, atY: camera.target.y, atZ: camera.target.z,
