@@ -70,7 +70,7 @@ static bool native_format_timestamp(struct VM* vm, VmNativeResult* out_result, c
     diag_error(NULL, 0, 0, "formatTimestamp expects one Int (epoch ms)");
     return false;
   }
-  rae_String s = rae_ext_time_formatTimestamp(args[0].as.int_value);
+  rae_String s = rae_ext_Time_formatTimestamp(args[0].as.int_value);
   out_result->has_value = true;
   out_result->value = value_string_copy((const char*)s.data, (size_t)s.len);
   rae_ext_rae_str_free(s);
@@ -83,7 +83,7 @@ static bool native_format_date(struct VM* vm, VmNativeResult* out_result, const 
     diag_error(NULL, 0, 0, "formatDate expects one Int (epoch ms)");
     return false;
   }
-  rae_String s = rae_ext_time_formatDate(args[0].as.int_value);
+  rae_String s = rae_ext_Time_formatDate(args[0].as.int_value);
   out_result->has_value = true;
   out_result->value = value_string_copy((const char*)s.data, (size_t)s.len);
   rae_ext_rae_str_free(s);
@@ -1047,18 +1047,18 @@ static bool native_rae_math_##name(struct VM* vm, VmNativeResult* out_result, co
   return true; \
 }
 
-MATH_UNARY_OP(sin, rae_ext_math_sin)
-MATH_UNARY_OP(cos, rae_ext_math_cos)
-MATH_UNARY_OP(tan, rae_ext_math_tan)
-MATH_UNARY_OP(asin, rae_ext_math_asin)
-MATH_UNARY_OP(acos, rae_ext_math_acos)
-MATH_UNARY_OP(atan, rae_ext_math_atan)
-MATH_UNARY_OP(sqrt, rae_ext_math_sqrt)
-MATH_UNARY_OP(exp, rae_ext_math_exp)
-MATH_UNARY_OP(log, rae_ext_math_math_log)
-MATH_UNARY_OP(floor, rae_ext_math_floor)
-MATH_UNARY_OP(ceil, rae_ext_math_ceil)
-MATH_UNARY_OP(round, rae_ext_math_round)
+MATH_UNARY_OP(sin, rae_ext_Math_sin)
+MATH_UNARY_OP(cos, rae_ext_Math_cos)
+MATH_UNARY_OP(tan, rae_ext_Math_tan)
+MATH_UNARY_OP(asin, rae_ext_Math_asin)
+MATH_UNARY_OP(acos, rae_ext_Math_acos)
+MATH_UNARY_OP(atan, rae_ext_Math_atan)
+MATH_UNARY_OP(sqrt, rae_ext_Math_sqrt)
+MATH_UNARY_OP(exp, rae_ext_Math_exp)
+MATH_UNARY_OP(log, rae_ext_Math_math_log)
+MATH_UNARY_OP(floor, rae_ext_Math_floor)
+MATH_UNARY_OP(ceil, rae_ext_Math_ceil)
+MATH_UNARY_OP(round, rae_ext_Math_round)
 
 static bool native_rae_math_atan2(struct VM* vm, VmNativeResult* out_result, const Value* args, size_t arg_count, void* user_data) {
   (void)vm; (void)user_data;
@@ -1069,7 +1069,7 @@ static bool native_rae_math_atan2(struct VM* vm, VmNativeResult* out_result, con
   double y = (val_y->type == VAL_FLOAT) ? val_y->as.float_value : (double)val_y->as.int_value;
   double x = (val_x->type == VAL_FLOAT) ? val_x->as.float_value : (double)val_x->as.int_value;
   out_result->has_value = true;
-  out_result->value = value_float(rae_ext_math_atan2(y, x));
+  out_result->value = value_float(rae_ext_Math_atan2(y, x));
   return true;
 }
 
@@ -1082,7 +1082,7 @@ static bool native_rae_math_pow(struct VM* vm, VmNativeResult* out_result, const
   double b = (val_base->type == VAL_FLOAT) ? val_base->as.float_value : (double)val_base->as.int_value;
   double e = (val_exp->type == VAL_FLOAT) ? val_exp->as.float_value : (double)val_exp->as.int_value;
   out_result->has_value = true;
-  out_result->value = value_float(rae_ext_math_pow(b, e));
+  out_result->value = value_float(rae_ext_Math_pow(b, e));
   return true;
 }
 

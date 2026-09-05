@@ -14,7 +14,7 @@
 # any fixed-step sim, so it never perturbs a deterministic world. Reusable for banners,
 # sails, capes, etc.
 import core
-import math
+import Math
 import Vec3
 
 type Cloth {
@@ -165,7 +165,7 @@ func constrain(c: mod Cloth, i: copy Int, j: copy Int, rest: copy Float) {
   let dz: Float = c.pz.copyAtDefault(index: j) - c.pz.copyAtDefault(index: i)
   let d2: Float = dx * dx + dy * dy + dz * dz
   if d2 <= 0.000001 { ret }
-  let d: Float = math.sqrt(x: d2)
+  let d: Float = Math.sqrt(x: d2)
   let diff: Float = (d - rest) / d
   let pi: Bool = c.pinned.copyAtDefault(index: i)
   let pj: Bool = c.pinned.copyAtDefault(index: j)
@@ -228,7 +228,7 @@ func step(c: mod Cloth, dt: copy Float, windX: copy Float, windY: copy Float, wi
         if r + 1 < c.rows { constrain(c: c, i: a, j: a + c.cols, rest: c.restV) }
         # shear: the two diagonals of the cell to its lower-right
         if cc + 1 < c.cols and r + 1 < c.rows {
-          let diag: Float = math.sqrt(x: c.restH * c.restH + c.restV * c.restV)
+          let diag: Float = Math.sqrt(x: c.restH * c.restH + c.restV * c.restV)
           constrain(c: c, i: a, j: a + c.cols + 1, rest: diag)
           constrain(c: c, i: a + 1, j: a + c.cols, rest: diag)
         }
@@ -276,7 +276,7 @@ func writeMesh(c: view Cloth, out: mod List(Float)) {
       var nx: Float = uy * vz - uz * vy
       var ny: Float = uz * vx - ux * vz
       var nz: Float = ux * vy - uy * vx
-      let nl: Float = math.sqrt(x: nx * nx + ny * ny + nz * nz)
+      let nl: Float = Math.sqrt(x: nx * nx + ny * ny + nz * nz)
       if nl > 0.00001 { nx = nx / nl  ny = ny / nl  nz = nz / nl } else { nx = 0.0  ny = 1.0  nz = 0.0 }
       out.add(value: c.px.copyAtDefault(index: i))  out.add(value: c.py.copyAtDefault(index: i))  out.add(value: c.pz.copyAtDefault(index: i))
       out.add(value: nx)  out.add(value: ny)  out.add(value: nz)
@@ -312,7 +312,7 @@ func writeMesh(c: view Cloth, out: mod List(Float)) {
       var nx: Float = uy * vz - uz * vy
       var ny: Float = uz * vx - ux * vz
       var nz: Float = ux * vy - uy * vx
-      let nl: Float = math.sqrt(x: nx * nx + ny * ny + nz * nz)
+      let nl: Float = Math.sqrt(x: nx * nx + ny * ny + nz * nz)
       if nl > 0.00001 { nx = nx / nl  ny = ny / nl  nz = nz / nl } else { nx = 0.0  ny = 1.0  nz = 0.0 }
       out.add(value: c.px.copyAtDefault(index: i))  out.add(value: c.py.copyAtDefault(index: i))  out.add(value: c.pz.copyAtDefault(index: i))
       out.add(value: 0.0 - nx)  out.add(value: 0.0 - ny)  out.add(value: 0.0 - nz)

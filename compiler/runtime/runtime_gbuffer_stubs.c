@@ -100,8 +100,8 @@ int64_t rae_gb_sdf_prepare(void* packedBalls, int64_t count, void* packedColors,
 }
 void* rae_gb_sdf_pipeline(void)   { return (void*)0; }
 void* rae_gb_sdf_bind(int64_t gi) { (void)gi; return (void*)0; }
-void rae_ext_gbuffer_sdfShutdown(void) {}
-int64_t rae_ext_gbuffer_drawCount(void) { return 0; }
+void rae_ext_Gbuffer_sdfShutdown(void) {}
+int64_t rae_ext_Gbuffer_drawCount(void) { return 0; }
 const char* rae_gb_view_wgsl(void)  { return ""; }
 int64_t rae_g2d_format(void)        { return 0; }
 void* rae_g2d_off_view(void)        { return (void*)0; }
@@ -112,8 +112,8 @@ void* rae_gb_view_bind(void)        { return (void*)0; }
 void rae_gb_set_view_pipeline(void* p) { (void)p; }
 void rae_gb_set_view_ubuf(void* b)     { (void)b; }
 void rae_gb_set_view_bind(void* b)     { (void)b; }
-void rae_ext_gbuffer_present(void) {}
-void rae_ext_gbuffer_shutdown(void) {}
+void rae_ext_Gbuffer_present(void) {}
+void rae_ext_Gbuffer_shutdown(void) {}
 
 /* The passes downstream of the G-buffer are pure GPU work — there is no
  * CPU-side path in them to exercise, unlike the per-object transform
@@ -181,8 +181,8 @@ void* rae_gb_composite_bind(int64_t idx)     { (void)idx; return (void*)0; }
 void rae_gb_set_composite_pipeline(void* p)  { (void)p; }
 void rae_gb_set_composite_ubuf(void* b)      { (void)b; }
 void rae_gb_set_composite_bind(int64_t idx, void* b) { (void)idx; (void)b; }
-int64_t rae_ext_gbuffer_pyramidMips(void) { return 0; }
-void rae_ext_gbuffer_deferredShutdown(void) {}
+int64_t rae_ext_Gbuffer_pyramidMips(void) { return 0; }
+void rae_ext_Gbuffer_deferredShutdown(void) {}
 
 /* Shadows (#382). Stubbed for builds without the GPU backend. */
 void rae_sm_begin(const float* cascades, int64_t count, int64_t resolution,
@@ -214,11 +214,11 @@ void rae_sm_draw_metaballs(int64_t c, void* passptr) { (void)c; (void)passptr; }
 void rae_sm_shutdown(void) {}
 
 /* Skinning (#374). Stubbed for builds without the GPU backend. */
-int64_t rae_ext_gpu3d_skinnedMeshCreate(const float* verts, int64_t vertCount,
+int64_t rae_ext_Gpu3d_skinnedMeshCreate(const float* verts, int64_t vertCount,
                                         const int64_t* indices, int64_t indexCount){
     (void)verts; (void)vertCount; (void)indices; (void)indexCount; return 0;
 }
-void rae_ext_gpu3d_setPalette(const float* rows, int64_t jointCount){
+void rae_ext_Gpu3d_setPalette(const float* rows, int64_t jointCount){
     (void)rows; (void)jointCount;
 }
 int rae_g3d_push_skinned_draw(int64_t mesh, rae_Mat4* model,
@@ -232,8 +232,8 @@ void* rae_g3d_skin_bind(void)     { return (void*)0; }
 void* rae_g3d_skin_vbuf(int64_t mesh){ (void)mesh; return (void*)0; }
 void* rae_g3d_skin_ibuf(int64_t mesh){ (void)mesh; return (void*)0; }
 int64_t rae_g3d_skin_icount(int64_t mesh){ (void)mesh; return 0; }
-void rae_ext_gpu3d_skinFrameBegin(void) {}
-int64_t rae_ext_gpu3d_skinDrawCount(void) { return 0; }
-void rae_ext_gpu3d_skinShutdown(void) {}
+void rae_ext_Gpu3d_skinFrameBegin(void) {}
+int64_t rae_ext_Gpu3d_skinDrawCount(void) { return 0; }
+void rae_ext_Gpu3d_skinShutdown(void) {}
 
-void rae_ext_gbuffer_skyHosekPush(int64_t index, float value){ (void)index; (void)value; }
+void rae_ext_Gbuffer_skyHosekPush(int64_t index, float value){ (void)index; (void)value; }

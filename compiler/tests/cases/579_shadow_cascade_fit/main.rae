@@ -19,11 +19,11 @@
 # must have finer texels than the far one, or the whole cascade idea is
 # backwards.
 import core
-import math
+import Math
 import Vec3
-import shadow3d
+import Shadow3d
 open Math3d
-open shadow3d
+open Shadow3d
 
 const res: Int = 2048
 
@@ -31,7 +31,7 @@ func fitAt(camX: view Float, yaw: view Float) ret ShadowCascades {
   let pos: Vec3 = Vec3.create(x: camX, y: 0.0 - 12.0, z: 5.0)
   # Target derived from yaw so "rotate in place" is a real rotation.
   let target: Vec3 = Vec3.create(
-    x: camX + math.sin(x: yaw), y: 0.0 - 12.0 + math.cos(x: yaw), z: 4.0
+    x: camX + Math.sin(x: yaw), y: 0.0 - 12.0 + Math.cos(x: yaw), z: 4.0
   )
   ret fitShadowCascades(
     camPos: pos, camTarget: target, fovYDeg: 50.0, aspect: 1.6,
@@ -40,7 +40,7 @@ func fitAt(camX: view Float, yaw: view Float) ret ShadowCascades {
   )
 }
 
-# math.abs resolves to the Int overload here, so spell the Float one out.
+# Math.abs resolves to the Int overload here, so spell the Float one out.
 func absF(v: view Float) ret Float {
   if v < 0.0 {
     ret 0.0 - v

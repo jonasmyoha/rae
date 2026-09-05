@@ -18,13 +18,13 @@
 # (packInstanceRecord), never add() — so an instanced field stays inside the
 # walker's zero-alloc frame budget (test 573).
 import core
-import gbuffer
-open gbuffer
+import Gbuffer
+open Gbuffer
 open Scene3d
 open Math3d
 # Per-character palette uploads go straight over the WebGPU bindings (#547).
-open webgpu/webgpu
-import webgpu/context
+open webgpu/Webgpu
+import webgpu/Context
 
 # A caller-owned batch of DrawU records for one mesh + a running fill count.
 # `records` holds capacity * instanceRecordFloats floats (pre-filled with 0.0).
@@ -283,7 +283,7 @@ func addInstanceTransformEmblem(batch: mod InstanceBatch, transform: view Transf
 }
 
 # Draw the whole batch in one instanced DrawIndexed. Must be called inside the
-# geometry pass (between gbuffer.begin and gbuffer.end), like any other draw.
+# geometry pass (between Gbuffer.begin and Gbuffer.end), like any other draw.
 func drawInstances(batch: view InstanceBatch) pub {
   if batch.count <= 0 { ret }
   drawRecords(mesh: batch.meshId, records: batch.records.data, count: batch.count)

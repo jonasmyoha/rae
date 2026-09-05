@@ -301,7 +301,7 @@ int64_t rae_gb_sdf_prepare(void* packedBalls_, int64_t count, void* packedColors
 void* rae_gb_sdf_pipeline(void)      { return (void*)gb_sdf_pipeline; }
 void* rae_gb_sdf_bind(int64_t gi)    { return (gi >= 0 && gi < GB_SDF_MAX_GROUPS) ? (void*)gb_sdf_bind[(int)gi] : NULL; }
 
-void rae_ext_gbuffer_sdfShutdown(void) {
+void rae_ext_Gbuffer_sdfShutdown(void) {
     if (gb_sdf_pipeline) { wgpuRenderPipelineRelease(gb_sdf_pipeline); gb_sdf_pipeline = NULL; }
     if (gb_sdf_frame_ubuf) { wgpuBufferRelease(gb_sdf_frame_ubuf); gb_sdf_frame_ubuf = NULL; }
     for (int i = 0; i < GB_SDF_MAX_GROUPS; i++) {

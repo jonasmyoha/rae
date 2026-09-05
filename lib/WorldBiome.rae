@@ -6,7 +6,7 @@
 # Full design: docs/biome-terrain-system.md. No rendering here.
 import core
 import Noise
-import math
+import Math
 import Vec3
 
 # Material (splat) layers.
@@ -52,7 +52,7 @@ const defaultIslandRadius: Float = 60.0
 const defaultIslandFalloff: Float = 22.0
 
 # The two island-size consts, generated as WGSL text and PREPENDED to the composed
-# terrain/grass shaders (gbufferTerrain.terrainSplatWgsl, GrassCompute.wgsl)
+# terrain/grass shaders (GbufferTerrain.terrainSplatWgsl, GrassCompute.wgsl)
 # so the GPU field uses the same radius as the CPU. worldBiome.wgsl no longer declares
 # them. Regenerated on every pipeline build.
 func islandParamsWgsl() pub ret String {
@@ -88,7 +88,7 @@ func smooth01(edge0: view Float, edge1: view Float, x: view Float) ret Float {
 # is what makes the world a finite place instead of endless noise: an RTS level
 # needs an edge the player can read, and open water is the most legible one.
 func worldIslandMask(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Float {
-  let d: Float = math.sqrt(x: x * x + y * y)
+  let d: Float = Math.sqrt(x: x * x + y * y)
   ret 1.0 - smooth01(edge0: cfg.islandRadius - cfg.islandFalloff, edge1: cfg.islandRadius, x: d)
 }
 
@@ -107,17 +107,17 @@ const pathWave: Float = 46.0
 const pathPropClear: Float = 0.22
 
 func worldPath(x: view Float, y: view Float, cfg: view BiomeConfig) ret Float {
-  let radius: Float = math.sqrt(x: x * x + y * y)
+  let radius: Float = Math.sqrt(x: x * x + y * y)
   if radius < 6.0 { ret 0.0 }
-  let wander: Float = math.sin(x: radius / pathWave * 6.2831853) * pathMeander
+  let wander: Float = Math.sin(x: radius / pathWave * 6.2831853) * pathMeander
   var best: Float = 1000000.0
   var i: Int = 0
   loop i < pathSpokes {
     let angle: Float = i.toFloat() * 2.0943951 + 0.6
-    let directionX: Float = math.cos(x: angle)
-    let directionY: Float = math.sin(x: angle)
+    let directionX: Float = Math.cos(x: angle)
+    let directionY: Float = Math.sin(x: angle)
     if x * directionX + y * directionY > 0.0 {
-      let distance: Float = math.abs(n: x * directionY - y * directionX - wander)
+      let distance: Float = Math.abs(n: x * directionY - y * directionX - wander)
       if distance < best { best = distance }
     }
     i = i + 1
@@ -159,7 +159,7 @@ func worldSlope(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Flo
                  - worldElevation(x: x - eps, y: y, cfg: cfg)) / (2.0 * eps)
   let gy: Float = (worldElevation(x: x, y: y + eps, cfg: cfg)
                  - worldElevation(x: x, y: y - eps, cfg: cfg)) / (2.0 * eps)
-  ret clamp01(v: math.sqrt(x: gx * gx + gy * gy) * 8.0)
+  ret clamp01(v: Math.sqrt(x: gx * gx + gy * gy) * 8.0)
 }
 
 # How far above the sand band the slope-driven rock term stays suppressed.
@@ -368,8 +368,8 @@ func worldSpiralLand(cx: view Float, cy: view Float, cfg: view BiomeConfig) ret 
     var spoke: Int = 0
     loop spoke < worldLandSearchSpokes {
       let angle: Float = spoke.toFloat() / worldLandSearchSpokes.toFloat() * 6.2831853
-      let sx: Float = cx + math.cos(x: angle) * radius
-      let sy: Float = cy + math.sin(x: angle) * radius
+      let sx: Float = cx + Math.cos(x: angle) * radius
+      let sy: Float = cy + Math.sin(x: angle) * radius
       if worldIsLand(x: sx, y: sy, cfg: cfg) {
         ret LandSpot { x: sx, y: sy, found: true }
       }

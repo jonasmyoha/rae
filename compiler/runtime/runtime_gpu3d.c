@@ -798,7 +798,7 @@ static void g3d_ensure_targets(void) {
 /* Create an immutable mesh. verts = interleaved pos3/nrm3/uv2 as Rae
  * Floats (doubles), 8 per vertex; indices as Rae Ints. Converted to
  * float32 / uint32 on upload. Returns handle > 0, or 0 on failure. */
-int64_t rae_ext_gpu3d_meshCreate(const float* verts, int64_t vertCount,
+int64_t rae_ext_Gpu3d_meshCreate(const float* verts, int64_t vertCount,
                                  const int64_t* indices, int64_t indexCount){
     if (!g_wgpu_dev || !verts || !indices) return 0;
     if (vertCount <= 0 || indexCount <= 0 || g3d_mesh_n >= G3D_MAX_MESHES) return 0;
@@ -836,7 +836,7 @@ int64_t rae_ext_gpu3d_meshCreate(const float* verts, int64_t vertCount,
  * clamped to nothing rather than overflowing. Exists for pooled geometry
  * whose shape depends on world position (the walker's terrain tiles get
  * their heights rewritten when a pool slot is recycled onto a new cell). */
-void rae_ext_gpu3d_meshUpdate(int64_t mesh, const float* verts, int64_t vertCount){
+void rae_ext_Gpu3d_meshUpdate(int64_t mesh, const float* verts, int64_t vertCount){
     if (!g_wgpu_dev || !verts || vertCount <= 0) return;
     int slot = (int)mesh - 1;
     if (slot < 0 || slot >= g3d_mesh_n || !g3d_mesh_vbuf[slot]) return;
@@ -911,7 +911,7 @@ int rae_g3d_frame_prepare(const float* frame, int64_t count){
 
 /* Handle accessors + frame handoff for the Rae-side forward pass (#514).
  * rae_g3d_* are platform-ABI accessors (ungated), mirroring rae_gb_* on the
- * deferred path; the gated rae_ext_gpu3d_* set shrinks as passes move to Rae.
+ * deferred path; the gated rae_ext_Gpu3d_* set shrinks as passes move to Rae.
  * The color-target views and the geometry pipeline/bind group are constructed
  * in C (g3d_ensure_targets / g3d_init_pipeline); Rae reads them here to build
  * the render pass over the WebGPU bindings, then hands the encoder + pass back
@@ -1190,13 +1190,13 @@ static void rae_g3d_present_offscreen(void) {
 /* Present the tonemapped offscreen (#514): advance the virtual clock and copy
  * to the drawable. The scene-pass finish and the tonemap-if-pending fallback
  * move to the Rae end() wrapper; rae_g3d_present_offscreen is genuine platform
- * copy-to-drawable, so it stays C (same class as rae_ext_gbuffer_present). */
+ * copy-to-drawable, so it stays C (same class as rae_ext_Gbuffer_present). */
 void rae_g3d_present_frame(void) {
     rae_g2d_tick_virtual_clock();
     rae_g3d_present_offscreen();
 }
 
-void rae_ext_gpu3d_shutdown(void) {
+void rae_ext_Gpu3d_shutdown(void) {
     g3d_sdf_shutdown();
     g3d_sky_shutdown();
     g3d_ssao_shutdown();

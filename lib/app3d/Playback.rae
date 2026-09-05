@@ -19,7 +19,7 @@
 # leaves the value off-grid forever (1.06, 1.11, 1.16 …), which reads as
 # a rounding bug in the readout.
 import core
-import math
+import Math
 
 const speedMin: Float = 0.01
 const speedMax: Float = 3.0
@@ -53,11 +53,11 @@ func nextSpeed(current: view Float, up: view Bool) pub ret Float {
   # Snap to the grid of the step just taken, so a move that crosses a band
   # boundary lands back on round numbers instead of carrying the old
   # band's offset forever.
-  v = math.floor(x: v / step + 0.5) * step
+  v = Math.floor(x: v / step + 0.5) * step
   # ...then to whole percent, because repeated float arithmetic drifts and
   # a readout showing 34% while holding 0.3399999 is how an off-by-one
   # gets into a later comparison.
-  v = math.floor(x: v * 100.0 + 0.5) / 100.0
+  v = Math.floor(x: v * 100.0 + 0.5) / 100.0
   if v < speedMin {
     v = speedMin
   }
@@ -70,5 +70,5 @@ func nextSpeed(current: view Float, up: view Bool) pub ret Float {
 # Whole percent, for a readout. One place, so the label and any assertion
 # about it cannot round differently.
 func speedPercent(v: view Float) pub ret Int {
-  ret math.floor(x: v * 100.0 + 0.5).toInt()
+  ret Math.floor(x: v * 100.0 + 0.5).toInt()
 }

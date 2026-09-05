@@ -1804,15 +1804,15 @@ static bool module_graph_load_module(ModuleGraph* graph,
   // lib/string.rae). All other files get the full stdlib for free.
   if (use_stdlib && !no_implicit &&
       (!module_path || (strcmp(module_path, "core") != 0 &&
-                        strcmp(module_path, "math") != 0 &&
-                        strcmp(module_path, "io") != 0 &&
-                        strcmp(module_path, "string") != 0 &&
-                        strcmp(module_path, "sys") != 0))) {
+                        strcmp(module_path, "Math") != 0 &&
+                        strcmp(module_path, "Io") != 0 &&
+                        strcmp(module_path, "String") != 0 &&
+                        strcmp(module_path, "Sys") != 0))) {
     // Prelude: auto-loaded => auto-opened for every file. List containers
     // (list2*) are here because List is a fundamental type used pervasively via
     // bare/UFCS (.add/.get) — requiring a per-file `open list2*` would be
     // impractical and break "list operations keep working" (docs/module-namespacing.md).
-    static const char* stdlib_modules[] = { "core", "string", "math", "io", "sys", "list2", "list2_int" };
+    static const char* stdlib_modules[] = { "core", "String", "Math", "Io", "Sys", "list2", "list2_int" };
     for (size_t i = 0; i < sizeof(stdlib_modules) / sizeof(stdlib_modules[0]); i++) {
       const char* name = stdlib_modules[i];
       if (module_graph_has_module(graph, name)) continue;
@@ -2522,12 +2522,12 @@ static bool build_c_backend_output(const char* entry_file,
   for (ModuleNode* node = graph.head; node; node = node->next) {
       // sdl3 and filesystem both define functions in the RAE_HAS_SDL3 runtime
       // block, so either one requires linking libSDL3.
-      if (node->module_path && (strcmp(node->module_path, "sdl3") == 0 || strstr(node->module_path, "/sdl3.rae") || strstr(node->module_path, "\\sdl3.rae")
-                                || strcmp(node->module_path, "filesystem") == 0 || strstr(node->module_path, "/filesystem.rae") || strstr(node->module_path, "\\filesystem.rae")
-                                // gpu2d.rae owns an SDL3 window (its surface wraps the SDL Metal layer)
-                                || strcmp(node->module_path, "gpu2d") == 0 || strstr(node->module_path, "gpu2d.rae")
-                                // gpu3d.rae renders through the same SDL3 window/surface
-                                || strcmp(node->module_path, "gpu3d") == 0 || strstr(node->module_path, "gpu3d.rae"))) {
+      if (node->module_path && (strcmp(node->module_path, "Sdl3") == 0 || strstr(node->module_path, "/Sdl3.rae") || strstr(node->module_path, "\\Sdl3.rae")
+                                || strcmp(node->module_path, "Filesystem") == 0 || strstr(node->module_path, "/Filesystem.rae") || strstr(node->module_path, "\\Filesystem.rae")
+                                // Gpu2d owns an SDL3 window (its surface wraps the SDL Metal layer)
+                                || strcmp(node->module_path, "Gpu2d") == 0
+                                // Gpu3d renders through the same SDL3 window/surface
+                                || strcmp(node->module_path, "Gpu3d") == 0)) {
           uses_sdl3 = true;
           break;
       }
@@ -2541,12 +2541,12 @@ static bool build_c_backend_output(const char* entry_file,
       // The generated low-level bindings live under lib/webgpu/ (module paths
       // "webgpu/webgpu", "webgpu/webgpu_types", …), so a plain substring match
       // on "webgpu" catches every generated binding module (#501).
-      if (node->module_path && (strstr(node->module_path, "webgpu") || strcmp(node->module_path, "gpu") == 0 ||
-                                strstr(node->module_path, "gpu.rae") ||
-                                // gpu2d.rae presents through wgpu-native (its own render surface)
-                                strcmp(node->module_path, "gpu2d") == 0 || strstr(node->module_path, "gpu2d.rae") ||
-                                // gpu3d.rae — the 3D renderer (MSAA/depth/PBR) on wgpu-native
-                                strcmp(node->module_path, "gpu3d") == 0 || strstr(node->module_path, "gpu3d.rae"))) {
+      if (node->module_path && (strstr(node->module_path, "webgpu") || strstr(node->module_path, "Webgpu") ||
+                                strcmp(node->module_path, "Gpu") == 0 ||
+                                // Gpu2d — presents through wgpu-native (its own render surface)
+                                strcmp(node->module_path, "Gpu2d") == 0 ||
+                                // Gpu3d — the 3D renderer (MSAA/depth/PBR) on wgpu-native
+                                strcmp(node->module_path, "Gpu3d") == 0)) {
           uses_webgpu = true;
           break;
       }

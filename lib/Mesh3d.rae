@@ -9,7 +9,7 @@
 # are on +/-Z, the plane lies in XY with normal +Z, and the torus ring
 # lies in the XY plane with its tube sweeping around +Z.
 import core
-import math
+import Math
 import Noise
 
 type MeshData {
@@ -49,13 +49,13 @@ func makeSphere(rings: view Int, segments: view Int) pub ret MeshData {
   var r: Int = 0
   loop r <= rings {
     let phi: Float = pi * r.toFloat() / rings.toFloat()   # 0..pi from +Z pole
-    let z: Float = math.cos(x: phi)
-    let ringRad: Float = math.sin(x: phi)
+    let z: Float = Math.cos(x: phi)
+    let ringRad: Float = Math.sin(x: phi)
     var s: Int = 0
     loop s <= segments {
       let theta: Float = 2.0 * pi * s.toFloat() / segments.toFloat()
-      let x: Float = ringRad * math.cos(x: theta)
-      let y: Float = ringRad * math.sin(x: theta)
+      let x: Float = ringRad * Math.cos(x: theta)
+      let y: Float = ringRad * Math.sin(x: theta)
       pushVert(verts: verts, px: x, py: y, pz: z, nx: x, ny: y, nz: z, u: s.toFloat() / segments.toFloat(), v: r.toFloat() / rings.toFloat())
       s = s + 1
     }
@@ -181,7 +181,7 @@ func makeFbmTerrain(size: view Float, segments: view Int, heightScale: view Floa
       let dy: Float = (upY - downY).toFloat() * step
       let slopeX: Float = (right - left) / dx
       let slopeY: Float = (up - down) / dy
-      let normalLen: Float = math.sqrt(x: slopeX * slopeX + slopeY * slopeY + 1.0)
+      let normalLen: Float = Math.sqrt(x: slopeX * slopeX + slopeY * slopeY + 1.0)
       pushVert(
         verts: verts,
         px: (vx - 0.5) * size, py: (vy - 0.5) * size, pz: center,
@@ -283,13 +283,13 @@ func makeTorus(majorR: view Float, minorR: view Float, majorSegs: view Int, mino
   var i: Int = 0
   loop i <= majorSegs {
     let u: Float = 2.0 * pi * i.toFloat() / majorSegs.toFloat()
-    let cu: Float = math.cos(x: u)
-    let su: Float = math.sin(x: u)
+    let cu: Float = Math.cos(x: u)
+    let su: Float = Math.sin(x: u)
     var j: Int = 0
     loop j <= minorSegs {
       let v: Float = 2.0 * pi * j.toFloat() / minorSegs.toFloat()
-      let cv: Float = math.cos(x: v)
-      let sv: Float = math.sin(x: v)
+      let cv: Float = Math.cos(x: v)
+      let sv: Float = Math.sin(x: v)
       let px: Float = (majorR + minorR * cv) * cu
       let py: Float = (majorR + minorR * cv) * su
       let pz: Float = minorR * sv
@@ -361,7 +361,7 @@ func smoothMeshNormals(m: view MeshData, angleDeg: view Float) pub ret MeshData 
   if m.vertCount < 2 {
     ret MeshData { verts: own verts, indices: own indices, vertCount: m.vertCount }
   }
-  let cosLimit: Float = math.cos(x: angleDeg * 3.14159265 / 180.0)
+  let cosLimit: Float = Math.cos(x: angleDeg * 3.14159265 / 180.0)
   # Positions are compared with a tolerance rather than exactly: the
   # duplicated corners of a flat-shaded seam come from one source value,
   # but a mesh that has been through a float round-trip can differ in the
@@ -404,7 +404,7 @@ func smoothMeshNormals(m: view MeshData, angleDeg: view Float) pub ret MeshData 
       }
       j = j + 1
     }
-    let len: Float = math.sqrt(x: ax * ax + ay * ay + az * az)
+    let len: Float = Math.sqrt(x: ax * ax + ay * ay + az * az)
     # A degenerate sum — opposed normals cancelling — keeps the original
     # rather than producing a zero vector that would shade as black.
     if len > 0.00001 {

@@ -28,14 +28,14 @@
 #   RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT=/tmp/char.bmp \
 #     rae run --target compiled main.rae
 import core
-import math
-import gpu2d
+import Math
+import Gpu2d
 import Vec3
 import Gltf
 import ecs/Entity
 open Scene3d
 open ecs/Entity
-open gpu3d
+open Gpu3d
 open Renderer3d
 open Rendergraph
 open Math3d
@@ -47,19 +47,19 @@ func uploadMeshData(m: view MeshData) ret MeshHandle {
 }
 
 func main() ret Int {
-  gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — glTF character (bind pose)")
+  Gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — glTF character (bind pose)")
 
   let g: Glb = loadGlb(path: "examples/113_gltf_character/assets/character.glb")
   if g.ok is false {
     log("[gltf] {g.errorMsg}")
     log("[gltf] expected a rigged .glb at assets/character.glb — see assets/ATTRIBUTION.md")
-    gpu2d.closeWindow()
+    Gpu2d.closeWindow()
     ret 1
   }
   let charData: MeshData = loadPrimitive(g: g, meshIndex: 0, primIndex: 0)
   if charData.vertCount is 0 {
     log("[gltf] primitive had no POSITION accessor")
-    gpu2d.closeWindow()
+    Gpu2d.closeWindow()
     ret 1
   }
   log("[gltf] character: {charData.vertCount} verts, {charData.indices.length / 3} triangles")
@@ -101,7 +101,7 @@ func main() ret Int {
   let gs: Int = compileRenderer(r: renderer)
   if gs is not 0 {
     log("render graph invalid: {statusName(status: gs)}")
-    gpu2d.closeWindow()
+    Gpu2d.closeWindow()
     ret 1
   }
 
@@ -113,12 +113,12 @@ func main() ret Int {
   var lastX: Float = 0.0
   var lastY: Float = 0.0
   var dragging: Bool = false
-  let startT: Float64 = gpu2d.nowSeconds()
+  let startT: Float64 = Gpu2d.nowSeconds()
 
-  loop not gpu2d.pollClose() {
-    let px: Float = gpu2d.pointerX()
-    let py: Float = gpu2d.pointerY()
-    if gpu2d.pointerDown() {
+  loop not Gpu2d.pollClose() {
+    let px: Float = Gpu2d.pointerX()
+    let py: Float = Gpu2d.pointerY()
+    if Gpu2d.pointerDown() {
       if dragging {
         yaw = yaw + (px - lastX) * 0.008
         pitch = pitch - (py - lastY) * 0.008
@@ -135,7 +135,7 @@ func main() ret Int {
     }
     lastX = px
     lastY = py
-    dist = dist - gpu2d.wheelMove() * 0.4
+    dist = dist - Gpu2d.wheelMove() * 0.4
     if dist < 1.5 {
       dist = 1.5
     }
@@ -143,15 +143,15 @@ func main() ret Int {
       dist = 20.0
     }
 
-    let t: Float = (gpu2d.nowSeconds() - startT) as Float
+    let t: Float = (Gpu2d.nowSeconds() - startT) as Float
     camera.position = orbitEye(targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z, yaw: yaw, pitch: pitch, dist: dist)
-    let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
-    if gpu2d.renderGate() {
+    let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
+    if Gpu2d.renderGate() {
       renderFrameWorld(r: renderer, world: sceneWorld, camera: camera, light: light, aspect: aspect, time: t)
       world3dPrevTransformSystem(world: sceneWorld)
     }
   }
   shutdown()
-  gpu2d.closeWindow()
+  Gpu2d.closeWindow()
   ret 0
 }

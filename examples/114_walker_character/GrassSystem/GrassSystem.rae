@@ -18,11 +18,11 @@
 # vertex shader. The instancing primitive this phase adds (gbuffer.drawInstanced)
 # is what those phases build on, and is reusable for rocks/crowds/particles.
 import core
-import math
+import Math
 import Math3d
 import Noise
 import Gltf
-import gpu3d
+import Gpu3d
 import Scene3d
 import Mesh3d
 import Vec3
@@ -31,13 +31,13 @@ import ecs/ComponentTable
 open ecs/ComponentTable
 open Math3d
 open Gltf
-open gpu3d
+open Gpu3d
 open Scene3d
 open Mesh3d
 
 const grassPerCell: Int = 10
 const grassBladeCount: Int = 490
-const grassRecordFloats: Int = 19600   # grassBladeCount * gbuffer.instanceRecordFloats (40)
+const grassRecordFloats: Int = 19600   # grassBladeCount * Gbuffer.instanceRecordFloats (40)
 const grassWindTau: Float = 6.283185307179586
 
 # One clump descriptor, stored as a per-blade COMPONENT: the planted base it
@@ -59,9 +59,9 @@ type GrassField {
   centreCellY: Int
   groundZ: Float
   meshId: Int
-  # DERIVED DrawU staging buffer: grassBladeCount * gbuffer.instanceRecordFloats,
+  # DERIVED DrawU staging buffer: grassBladeCount * Gbuffer.instanceRecordFloats,
   # rebuilt from the GrassBlade components each frame and handed to
-  # gbuffer.drawRecords. Never reallocated, never a source of truth.
+  # Gbuffer.drawRecords. Never reallocated, never a source of truth.
   records: List(Float)
 }
 
@@ -93,8 +93,8 @@ func placeGrassBlade(cellX: view Int, cellY: view Int, slotInCell: view Int,
 # order re-places the whole field correctly.
 func updateGrassField(field: mod GrassField, world: mod GameWorld,
                       playerPosition: view Vec3) ret Bool {
-  let cellX: Int = math.floor(x: playerPosition.x / terrainCellSize).toInt()
-  let cellY: Int = math.floor(x: playerPosition.y / terrainCellSize).toInt()
+  let cellX: Int = Math.floor(x: playerPosition.x / terrainCellSize).toInt()
+  let cellY: Int = Math.floor(x: playerPosition.y / terrainCellSize).toInt()
   if cellX is field.centreCellX and cellY is field.centreCellY {
     ret false
   }
@@ -119,8 +119,8 @@ func updateGrassField(field: mod GrassField, world: mod GameWorld,
 # The wind lean at `time`: two sines at incommensurate rates plus the clump's
 # own phase, so the field ripples rather than pulsing together.
 func grassGust(phase: view Float, baseX: view Float, time: view Float) ret Float {
-  ret 0.16 * math.sin(x: time * 1.7 + phase)
-    + 0.06 * math.sin(x: time * 3.9 + phase * 1.7 + baseX * 0.15)
+  ret 0.16 * Math.sin(x: time * 1.7 + phase)
+    + 0.06 * Math.sin(x: time * 3.9 + phase * 1.7 + baseX * 0.15)
 }
 
 # Build one DrawU record per blade — this frame's sway and last frame's sway
@@ -133,20 +133,20 @@ func drawGrassField(field: mod GrassField, world: view GameWorld,
     let blade: GrassBlade = componentDataAt(this: world.grassBlades, i: index)
     let gust: Float = grassGust(phase: blade.phase, baseX: blade.baseX, time: time)
     let prevGust: Float = grassGust(phase: blade.phase, baseX: blade.baseX, time: time - dt)
-    let model: Mat4 = gbuffer.swayModel(
+    let model: Mat4 = Gbuffer.swayModel(
       x: blade.baseX, y: blade.baseY, z: blade.baseZ, yaw: blade.yaw,
       tiltX: gust * 0.6, tiltY: gust, scale: blade.scale)
-    let prevModel: Mat4 = gbuffer.swayModel(
+    let prevModel: Mat4 = Gbuffer.swayModel(
       x: blade.baseX, y: blade.baseY, z: blade.baseZ, yaw: blade.yaw,
       tiltX: prevGust * 0.6, tiltY: prevGust, scale: blade.scale)
     # Per-blade green: a small deterministic spread off the base colour.
     let cvar: Float = blade.phase / grassWindTau
-    gbuffer.packInstanceRecord(records: field.records, slot: index,
+    Gbuffer.packInstanceRecord(records: field.records, slot: index,
       model: model, prevModel: prevModel,
       r: 0.13 + cvar * 0.09, g: 0.33 + cvar * 0.16, b: 0.05 + cvar * 0.05,
       metallic: 0.0, roughness: 0.95, emissive: 0.0, toon: toon, paletteBase: 0)
   }
-  gbuffer.drawRecords(mesh: field.meshId, records: field.records.data,
+  Gbuffer.drawRecords(mesh: field.meshId, records: field.records.data,
                       count: grassBladeCount)
 }
 

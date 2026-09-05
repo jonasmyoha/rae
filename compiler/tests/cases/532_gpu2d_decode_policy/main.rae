@@ -10,7 +10,7 @@
 # FAILURE policy, which needs no assets and no cwd assumptions.
 # Compiled-target only (the extern has no Live VM binding).
 import core
-import gpu2d
+import Gpu2d
 
 func rae_ext_rae_sys_write_file(path: String, content: String) extern ret Bool
 
@@ -19,10 +19,10 @@ func main() {
   # decode fails cleanly (no cascade into another decoder).
   let junkPath: String = "/tmp/rae_532_junk.jpg"
   let wrote: Bool = rae_ext_rae_sys_write_file(path: junkPath, content: "definitely not an image")
-  let okJunk: Int = gpu2d.decodeImageProbe(path: junkPath)
+  let okJunk: Int = Gpu2d.decodeImageProbe(path: junkPath)
   log("junk wrote={wrote} decode={okJunk}")
 
   # Missing file -> unreadable, decode fails cleanly.
-  let okMissing: Int = gpu2d.decodeImageProbe(path: "/tmp/rae_532_missing.xyz")
+  let okMissing: Int = Gpu2d.decodeImageProbe(path: "/tmp/rae_532_missing.xyz")
   log("missing decode={okMissing}")
 }

@@ -5,8 +5,8 @@
 #
 #   rae run --target compiled main.rae
 import core
-import io
-import gpu
+import Io
+import Gpu
 
 # Raw file read (plain String) — avoids the opt-String/none codegen bug.
 func rae_ext_rae_sys_read_file(path: String) extern ret String
@@ -23,15 +23,15 @@ func main() {
 
     let wgsl: String = rae_ext_rae_sys_read_file(path: "examples/51_gpu_compute/square.wgsl")
 
-    let inBuf: Int = gpu.storageF32(data: input.data, count: n)
-    let outBuf: Int = gpu.allocF32(count: n)
-    let kernel: Int = gpu.kernel(wgsl: wgsl, entry: "main")
+    let inBuf: Int = Gpu.storageF32(data: input.data, count: n)
+    let outBuf: Int = Gpu.allocF32(count: n)
+    let kernel: Int = Gpu.kernel(wgsl: wgsl, entry: "main")
 
     let bufs: List(Int) = createList(cap: 2)
     bufs.add(value: inBuf)
     bufs.add(value: outBuf)
     let groups: Int = (n + 63) / 64
-    gpu.run(kernel: kernel, bufs: bufs.data, bufCount: 2, gx: groups, gy: 1, gz: 1)
+    Gpu.run(kernel: kernel, bufs: bufs.data, bufCount: 2, gx: groups, gy: 1, gz: 1)
 
     let result: List(Float) = createList(Float, cap: n)
     i = 0
@@ -39,12 +39,12 @@ func main() {
         result.add(value: 0.0)
         i = i + 1
     }
-    gpu.downloadF32(buf: outBuf, out: result.data, count: n)
+    Gpu.downloadF32(buf: outBuf, out: result.data, count: n)
 
     log("GPU compute on the native GPU (out[i] = i*i + 1):")
     log("  out[0]    = {result.copyAt(index: 0)}    (expect 1)")
     log("  out[7]    = {result.copyAt(index: 7)}    (expect 50)")
     log("  out[50]   = {result.copyAt(index: 50)}   (expect 2501)")
     log("  out[100]  = {result.copyAt(index: 100)}  (expect 10001)")
-    gpu.reset()
+    Gpu.reset()
 }

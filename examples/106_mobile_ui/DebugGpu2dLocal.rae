@@ -7,9 +7,9 @@ open ui/Theme
 # legacy draw path, so 106 stays SDL3/GPU2D-only.
 import core
 import Json
-import gpu2d
+import Gpu2d
 import Gpu2dText
-import sdfText
+import SdfText
 import ui/Components
 import ui/Ecs
 import ui/Layer
@@ -754,7 +754,7 @@ func drawDebugHeartbeatGpu2d(debug: mod DebugSystem, didRealWork: view Bool) {
     debug.heartbeatX = debug.heartbeatX + 2.1686746987951806
     if debug.heartbeatX > debug.screenW { debug.heartbeatX = -8.674698795180722 }
   }
-  gpu2d.drawBox(x: debug.heartbeatX, y: 0.0, w: 8.674698795180722, h: 8.674698795180722, radius: 0.0, fill: 0xFFFFBF00, borderWidth: 0.0, border: 0x00000000)
+  Gpu2d.drawBox(x: debug.heartbeatX, y: 0.0, w: 8.674698795180722, h: 8.674698795180722, radius: 0.0, fill: 0xFFFFBF00, borderWidth: 0.0, border: 0x00000000)
 }
 
 func drawDebugLabelsGpu2d(debug: view DebugSystem, font: view SdfFont) {
@@ -781,7 +781,7 @@ func drawDebugLabelsGpu2d(debug: view DebugSystem, font: view SdfFont) {
   Gpu2dText.drawText(font: font, text: memText, x: memX, y: memY, sizePx: fontSize, color: amber)
   if debug.showInputOutlines {
     var lb: Int = 0
-    if gpu2d.pointerDown() { lb = 1 }
+    if Gpu2d.pointerDown() { lb = 1 }
     let btnText: String = "btn: {lb}"
     let btnY: Float = memY + lineH + 4.337349397590361
     var btnX: Float = debug.buttonX
