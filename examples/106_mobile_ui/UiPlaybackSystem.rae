@@ -179,7 +179,9 @@ func refreshPlaybackCoversIfNeeded(world: mod UiWorld, playback: view PlaybackSt
 func refreshPlaybackIconEntity(world: mod UiWorld, entity: view EntityId, isPlaying: view Bool, revision: view Int) {
   setWidgetSelected(world: world, entity: entity, selected: isPlaying)
   if componentHas(this: world.dataDependencies, entity: entity) {
-    let dep: view DataDependency => componentView(this: world.dataDependencies, entity: entity)
+    # A value COPY, not a view: the componentSet below mutates this same table,
+    # and a reference into it may not be live across that (#814). POD, so free.
+    let dep: DataDependency = componentGet(this: world.dataDependencies, entity: entity)
     let nextDep: DataDependency = {
       resource: dep.resource
       field: dep.field

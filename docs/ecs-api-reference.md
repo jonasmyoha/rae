@@ -138,8 +138,13 @@ which is not the same as *proven safe*.
    fine. It is a conservative, lexical check: it matches those method names on that
    place; it does not do lifetime inference.
 
-That is all of it. There is **no rule about struct fields**, and (today) **no rule
-about the ECS element accessors** — see the gap below.
+6. **The ECS element-reference rule (#814):** the same guard for
+   `componentMod`/`componentView`/`queryModAt`/`queryViewAt` (and the
+   `queryNViewX`/`forEachView` accessors) against `componentSet`/`componentRemove`/
+   `clearEntityComponents` on the *same* table — detailed under "Element
+   references" below.
+
+That is all of it. There is **no rule about struct fields**.
 
 ### What is allowed — permissive by design
 
@@ -176,16 +181,24 @@ the table is **structurally mutated**:
 - `componentSet` of an entity that is **already present** overwrites in place and
   does not move storage.
 
-**The checker does not catch this for the ECS accessors** — rule 5 above knows
-only `viewAt`/`modAt` on a raw List. Verified reproduction: hold a `componentMod`
-ref, append 599 entities with `componentSet`, write `999` through the ref — the
-write is silently **lost** (`e.x` stays `1`): a use-after-free with no diagnostic.
-Tracked as **#814** (extend the #658 borrow check to `componentMod`/`queryModAt`
-and the structural table mutators). Until it lands the rule is discipline, and it
-is the same contract the query docs already state:
+**This is enforced (#814), with the same shape as rule 5.** Taking a
+`view`/`mod` binding through any of those accessors makes the table the
+accessor's first argument names the *aliased table* for the rest of the
+enclosing block (nested blocks included) and for an `if let` branch; a structural
+mutation of that same table while the reference is live is rejected:
+`componentSet` (any — the append-vs-overwrite case cannot be told statically),
+`componentRemove`, and `clearEntityComponents` on the *owning world* (which
+reaches every table inside it). Diagnostic: *"cannot mutate a ComponentTable while
+a componentMod/queryModAt reference ('p') aliases one of its rows — finish with
+the reference first, or mutate before taking it."* A different table stays legal,
+and so does passing the aliased table on as an argument (parity with the List
+rule). Because the query loop binds its rows through `queryModAt`/`queryViewAt`,
+mutating a **joined** table inside a query-loop body is caught too.
 
-> Never `componentSet` a new entity into, or `componentRemove` from, a table you
-> hold a reference into. Finish with the reference, then mutate — or copy first.
+The fix is always the same:
+
+> Finish with the reference, then mutate — or mutate first and take the
+> reference afterwards. To hold a value across a mutation, copy it out.
 
 ### Worked ECS examples
 
@@ -210,11 +223,11 @@ let pos: mod Position => componentMod(this: world.positions, entity: e)
 let vel: view Velocity => componentView(this: world.velocities, entity: e)
 pos.x = pos.x + vel.v * dt
 
-# NOT SAFE (and NOT diagnosed today, #814) — structural mutation of the table you
-# hold a ref into:
+# REJECTED (#814) — structural mutation of the table you hold a ref into:
 let pos: mod Position => componentMod(this: world.positions, entity: e)
 componentSet(this: world.positions, entity: other, data: Position { x: 0 })   # may realloc -> pos dangles
-pos.x = 1                                                                     # lost write / UAF
+pos.x = 1
+# -> error: cannot mutate a ComponentTable while a componentMod/queryModAt reference ('pos') aliases one of its rows
 # Fix: do the componentSet first, THEN take the ref; or copy the value out.
 ```
 

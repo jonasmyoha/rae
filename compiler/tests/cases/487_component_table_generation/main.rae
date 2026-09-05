@@ -11,6 +11,11 @@ import ui/Components
 open ui/Ecs
 open ecs/Entity
 
+# #814: a mod borrow must end before the table is mutated again — scope it here.
+func modBorrowOnly(tab: mod ComponentTable(Rect), e: view EntityId) {
+  let m: mod Rect => componentMod(Rect, this: tab, entity: e)
+}
+
 func main() {
   let tab: ComponentTable(Rect) = createComponentTable(Rect)
   log("g0={componentTableGeneration(Rect, this: tab)}")
@@ -30,8 +35,8 @@ func main() {
   let got: Rect = componentGet(Rect, this: tab, entity: e1)
   log("get-no-bump={componentTableGeneration(Rect, this: tab)}")
 
-  # mod-borrow bumps eagerly even if caller only reads
-  let m: mod Rect => componentMod(Rect, this: tab, entity: e2)
+  # mod-borrow bumps eagerly even if caller only reads (borrow scoped in a helper, #814)
+  modBorrowOnly(tab: tab, e: e2)
   log("mod-bumps={componentTableGeneration(Rect, this: tab)}")
 
   componentRemove(Rect, this: tab, entity: e1)
