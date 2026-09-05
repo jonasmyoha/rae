@@ -4,7 +4,7 @@
 # (WebGPU), so the SAME ECS scenes lib/ui/render.rae draws with raylib can be
 # drawn on the GPU. The two MSDF fonts (body text + Material icons) are PASSED
 # IN via Gpu2dUi (module-level heap globals miscompile); album-cover images are
-# resolved by key through the gpu2d runtime registry (gpu2d.loadImageKey /
+# resolved by key through the gpu2d runtime registry (Gpu2d.loadImageKey /
 # drawImageKey). Shapes call gpu2d primitives directly so GPU-only apps do not
 # import the dual-backend raylib draw sink.
 #
@@ -22,9 +22,9 @@
 # make animation shimmer.
 open ui/Ecs
 import core
-import gpu2d
+import Gpu2d
 import Gpu2dText
-import sdfText
+import SdfText
 import ui/AnimationSystem/AnimationSystem
 import ui/Components
 import ui/Ecs
@@ -121,7 +121,7 @@ func paintShapeG(world: view UiWorld, e: view EntityId, wt: view WorldTransform2
     if cr.size.y < smaller { smaller = cr.size.y }
     var r: Float = sh.radius
     if r <= 0.0 { r = smaller / 2.0 }
-    gpu2d.drawRoundedRect(x: wt.position.x + cr.size.x / 2.0 - r * hoverMul, y: wt.position.y + cr.size.y / 2.0 - r * hoverMul, w: r * 2.0 * hoverMul, h: r * 2.0 * hoverMul, radius: r * hoverMul, color: g2dColor(c: fill))
+    Gpu2d.drawRoundedRect(x: wt.position.x + cr.size.x / 2.0 - r * hoverMul, y: wt.position.y + cr.size.y / 2.0 - r * hoverMul, w: r * 2.0 * hoverMul, h: r * 2.0 * hoverMul, radius: r * hoverMul, color: g2dColor(c: fill))
     ret
   }
   var radius: Float = sh.radius
@@ -130,10 +130,10 @@ func paintShapeG(world: view UiWorld, e: view EntityId, wt: view WorldTransform2
     var strokeBase: RgbaColor = sh.stroke
     if sh.strokeSlot.length() > 0 { strokeBase = colorByName(theme: world.theme.active, name: sh.strokeSlot) }
     let stroke: RgbaColor = g2dChain(c: strokeBase, chain255: chain255)
-    gpu2d.drawBox(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, fill: g2dColor(c: fill), borderWidth: sh.strokeWidth, border: g2dColor(c: stroke))
+    Gpu2d.drawBox(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, fill: g2dColor(c: fill), borderWidth: sh.strokeWidth, border: g2dColor(c: stroke))
     ret
   }
-  gpu2d.drawRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, color: g2dColor(c: fill))
+  Gpu2d.drawRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, color: g2dColor(c: fill))
 }
 
 # GradientFill uses the gpu2d box shader's gradient mode so dock shadows and
@@ -148,7 +148,7 @@ func paintGradientG(world: view UiWorld, e: view EntityId, wt: view WorldTransfo
   let drawY: Float = wt.position.y + (cr.size.y - drawH) / 2.0
   let from: RgbaColor = g2dChain(c: gf.from, chain255: chain255)
   let to: RgbaColor = g2dChain(c: gf.to, chain255: chain255)
-  gpu2d.drawGradientRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, from: g2dColor(c: from), to: g2dColor(c: to), angleDeg: gf.angle)
+  Gpu2d.drawGradientRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, from: g2dColor(c: from), to: g2dColor(c: to), angleDeg: gf.angle)
 }
 
 func paintBackdropG(world: view UiWorld, e: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
@@ -159,17 +159,17 @@ func paintBackdropG(world: view UiWorld, e: view EntityId, wt: view WorldTransfo
   let drawH: Float = cr.size.y * hoverMul
   let drawX: Float = wt.position.x + (cr.size.x - drawW) / 2.0
   let drawY: Float = wt.position.y + (cr.size.y - drawH) / 2.0
-  if gpu2d.hasImageKey(key: bi.textureKey) {
+  if Gpu2d.hasImageKey(key: bi.textureKey) {
     let white: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
     let tint: RgbaColor = g2dChain(c: white, chain255: chain255)
-    gpu2d.drawImageKey(key: bi.textureKey, x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, tint: g2dColor(c: tint))
+    Gpu2d.drawImageKey(key: bi.textureKey, x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, tint: g2dColor(c: tint))
     ret
   }
   # Raylib uses captured blur textures for BackdropImage. gpu2d does not have
   # framebuffer capture yet, so paint a stable translucent glass fallback.
   let fallback: RgbaColor = { r: 18, g: 22, b: 30, a: 210 }
   let chained: RgbaColor = g2dChain(c: fallback, chain255: chain255)
-  gpu2d.drawRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, color: g2dColor(c: chained))
+  Gpu2d.drawRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, color: g2dColor(c: chained))
 }
 
 
@@ -201,9 +201,9 @@ func visualBoundsAt(world: view UiWorld, e: view EntityId, text: view String, is
     }
   }
   if isIcon {
-    ret sdfText.sdfMeasureTextBounds(font: res.iconFont, text: text, sizePx: sizePx)
+    ret SdfText.sdfMeasureTextBounds(font: res.iconFont, text: text, sizePx: sizePx)
   }
-  ret sdfText.sdfMeasureTextBounds(font: res.textFont, text: text, sizePx: sizePx)
+  ret SdfText.sdfMeasureTextBounds(font: res.textFont, text: text, sizePx: sizePx)
 }
 
 # Sprites: `mat:<name>` icons draw as a Material-atlas glyph; other keys
@@ -246,13 +246,13 @@ func paintSpriteG(world: view UiWorld, e: view EntityId, wt: view WorldTransform
     ret
   }
   let radius: Float = g2dRadius(world: world, e: e, fallback: 0.0)
-  if gpu2d.hasImageKey(key: sp.textureKey) {
-    gpu2d.drawImageKeyScaled(key: sp.textureKey, x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, tint: g2dColor(c: tint), scaleMode: g2dScaleMode(m: sp.scaleMode))
+  if Gpu2d.hasImageKey(key: sp.textureKey) {
+    Gpu2d.drawImageKeyScaled(key: sp.textureKey, x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, tint: g2dColor(c: tint), scaleMode: g2dScaleMode(m: sp.scaleMode))
     ret
   }
   let fallback: RgbaColor = g2dChain(c: colorByName(theme: world.theme.active, name: "textMuted"), chain255: chain255)
   let fallbackRadius: Float = g2dRadius(world: world, e: e, fallback: 8.0)
-  gpu2d.drawRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: fallbackRadius * hoverMul, color: g2dColor(c: fallback))
+  Gpu2d.drawRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: fallbackRadius * hoverMul, color: g2dColor(c: fallback))
 }
 
 func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int, res: view Gpu2dUi) {
@@ -416,7 +416,7 @@ func paintEntityG(world: view UiWorld, e: view EntityId, res: view Gpu2dUi) {
   # gpu2d has separate box/image/text pipelines. Flush per entity so later
   # entities can correctly paint over earlier images/text, matching raylib's
   # immediate-mode painter order.
-  gpu2d.flush()
+  Gpu2d.flush()
 }
 
 # True when `e` clips its descendants (OverflowPolicy.mode == clip).
@@ -447,9 +447,9 @@ func paintSubtreeG(world: view UiWorld, e: view EntityId, res: view Gpu2dUi) {
         let cwt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: e)
         let crad: Float = g2dRadius(world: world, e: e, fallback: 0.0)
         if crad > 0.0 {
-          gpu2d.pushClipRoundedRect(x: cwt.position.x, y: cwt.position.y, w: ccr.size.x, h: ccr.size.y, radius: crad)
+          Gpu2d.pushClipRoundedRect(x: cwt.position.x, y: cwt.position.y, w: ccr.size.x, h: ccr.size.y, radius: crad)
         } else {
-          gpu2d.pushClipRect(x: cwt.position.x, y: cwt.position.y, w: ccr.size.x, h: ccr.size.y)
+          Gpu2d.pushClipRect(x: cwt.position.x, y: cwt.position.y, w: ccr.size.x, h: ccr.size.y)
         }
         clipped = true
       }
@@ -470,7 +470,7 @@ func paintSubtreeG(world: view UiWorld, e: view EntityId, res: view Gpu2dUi) {
     pass = pass + 1
   }
   if clipped {
-    gpu2d.popClipRect()
+    Gpu2d.popClipRect()
   }
 }
 
@@ -492,7 +492,7 @@ func gpu2dLayerRange(world: view UiWorld, res: view Gpu2dUi, minOrder: view Int,
   }
 }
 
-# Render `world` on the gpu2d backend. Call between gpu2d.beginFrame/endFrame.
+# Render `world` on the gpu2d backend. Call between Gpu2d.beginFrame/endFrame.
 func renderSystemGpu2d(world: view UiWorld, res: view Gpu2dUi) pub {
   let allRangeLow: Int = 0 - 1000000
   let allRangeHi: Int = 1000000

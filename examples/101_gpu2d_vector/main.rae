@@ -13,8 +13,8 @@
 # Compiled-target only; needs wgpu-native + SDL3.
 #   rae run --target compiled --project examples/101_gpu2d_vector main.rae
 import core
-import gpu2d
-import math
+import Gpu2d
+import Math
 open ui/WindowGeometry
 
 # --- Design canvas -----------------------------------------------------------
@@ -42,9 +42,9 @@ const pink: Int = 0xFFEC407A
 # A card with a soft drop shadow, a filled body and a hairline border, plus a
 # short accent bar in the top-left corner to tint each panel differently.
 func panel(x: view Float, y: view Float, w: view Float, h: view Float, accent: view Int) {
-  gpu2d.drawRoundedRect(x: x + 6.0, y: y + 8.0, w: w, h: h, radius: 22.0, color: 0x40000000)  # shadow
-  gpu2d.drawBox(x: x, y: y, w: w, h: h, radius: 22.0, fill: panelFill, borderWidth: 1.5, border: panelEdge)
-  gpu2d.drawRoundedRect(x: x + 22.0, y: y + 20.0, w: 56.0, h: 8.0, radius: 4.0, color: accent)
+  Gpu2d.drawRoundedRect(x: x + 6.0, y: y + 8.0, w: w, h: h, radius: 22.0, color: 0x40000000)  # shadow
+  Gpu2d.drawBox(x: x, y: y, w: w, h: h, radius: 22.0, fill: panelFill, borderWidth: 1.5, border: panelEdge)
+  Gpu2d.drawRoundedRect(x: x + 22.0, y: y + 20.0, w: 56.0, h: 8.0, radius: 4.0, color: accent)
 }
 
 # --- Panel 1: gradients ------------------------------------------------------
@@ -54,11 +54,11 @@ func panelGradients(x: view Float, y: view Float, w: view Float, h: view Float) 
   let ix: Float = x + 28.0
   let iy: Float = y + 52.0
   # A tall linear gradient, a diagonal one, and a horizontal one.
-  gpu2d.drawGradientRect(x: ix, y: iy, w: 96.0, h: 168.0, radius: 16.0, from: 0xFF1D2B64, to: 0xFFF89B29, angleDeg: 90.0)
-  gpu2d.drawGradientRect(x: ix + 116.0, y: iy, w: 96.0, h: 168.0, radius: 16.0, from: 0xFF2AF598, to: 0xFF009EFD, angleDeg: 45.0)
-  gpu2d.drawGradientRect(x: ix + 232.0, y: iy, w: 96.0, h: 168.0, radius: 16.0, from: 0xFFEE0979, to: 0xFFFF6A00, angleDeg: 0.0)
+  Gpu2d.drawGradientRect(x: ix, y: iy, w: 96.0, h: 168.0, radius: 16.0, from: 0xFF1D2B64, to: 0xFFF89B29, angleDeg: 90.0)
+  Gpu2d.drawGradientRect(x: ix + 116.0, y: iy, w: 96.0, h: 168.0, radius: 16.0, from: 0xFF2AF598, to: 0xFF009EFD, angleDeg: 45.0)
+  Gpu2d.drawGradientRect(x: ix + 232.0, y: iy, w: 96.0, h: 168.0, radius: 16.0, from: 0xFFEE0979, to: 0xFFFF6A00, angleDeg: 0.0)
   # A gradient pill spanning the bottom.
-  gpu2d.drawGradientRect(x: ix, y: iy + 186.0, w: 328.0, h: 48.0, radius: 24.0, from: 0xFF6A11CB, to: 0xFF2575FC, angleDeg: 0.0)
+  Gpu2d.drawGradientRect(x: ix, y: iy + 186.0, w: 328.0, h: 48.0, radius: 24.0, from: 0xFF6A11CB, to: 0xFF2575FC, angleDeg: 0.0)
 }
 
 # --- Panel 2: rounded-corner progression -------------------------------------
@@ -68,15 +68,15 @@ func panelCorners(x: view Float, y: view Float, w: view Float, h: view Float) {
   let ix: Float = x + 28.0
   var cy: Float = y + 56.0
   # Same box, growing corner radius: square -> rounded -> pill.
-  gpu2d.drawRoundedRect(x: ix, y: cy, w: 300.0, h: 44.0, radius: 0.0, color: 0xFF2E7D32)
+  Gpu2d.drawRoundedRect(x: ix, y: cy, w: 300.0, h: 44.0, radius: 0.0, color: 0xFF2E7D32)
   cy = cy + 56.0
-  gpu2d.drawRoundedRect(x: ix, y: cy, w: 300.0, h: 44.0, radius: 10.0, color: 0xFF388E3C)
+  Gpu2d.drawRoundedRect(x: ix, y: cy, w: 300.0, h: 44.0, radius: 10.0, color: 0xFF388E3C)
   cy = cy + 56.0
-  gpu2d.drawRoundedRect(x: ix, y: cy, w: 300.0, h: 44.0, radius: 22.0, color: 0xFF43A047)
+  Gpu2d.drawRoundedRect(x: ix, y: cy, w: 300.0, h: 44.0, radius: 22.0, color: 0xFF43A047)
   cy = cy + 56.0
   # A perfect circle and a pill sitting side by side.
-  gpu2d.drawRoundedRect(x: ix, y: cy, w: 44.0, h: 44.0, radius: 22.0, color: amber)
-  gpu2d.drawRoundedRect(x: ix + 64.0, y: cy, w: 236.0, h: 44.0, radius: 22.0, color: green)
+  Gpu2d.drawRoundedRect(x: ix, y: cy, w: 44.0, h: 44.0, radius: 22.0, color: amber)
+  Gpu2d.drawRoundedRect(x: ix + 64.0, y: cy, w: 236.0, h: 44.0, radius: 22.0, color: green)
 }
 
 # --- Panel 3: concentric rings (a bullseye) ----------------------------------
@@ -94,7 +94,7 @@ func panelRings(x: view Float, y: view Float, w: view Float, h: view Float) {
     if toggle is 1 {
       col = panelFill
     }
-    gpu2d.drawRoundedRect(x: cx - radius, y: cy - radius, w: radius * 2.0, h: radius * 2.0, radius: radius, color: col)
+    Gpu2d.drawRoundedRect(x: cx - radius, y: cy - radius, w: radius * 2.0, h: radius * 2.0, radius: radius, color: col)
     radius = radius - 20.0
     if toggle is 0 {
       toggle = 1
@@ -102,7 +102,7 @@ func panelRings(x: view Float, y: view Float, w: view Float, h: view Float) {
       toggle = 0
     }
   }
-  gpu2d.drawRoundedRect(x: cx - 8.0, y: cy - 8.0, w: 16.0, h: 16.0, radius: 8.0, color: pink)
+  Gpu2d.drawRoundedRect(x: cx - 8.0, y: cy - 8.0, w: 16.0, h: 16.0, radius: 8.0, color: pink)
 }
 
 # --- Panel 4: bordered boxes -------------------------------------------------
@@ -111,11 +111,11 @@ func panelBorders(x: view Float, y: view Float, w: view Float, h: view Float) {
   panel(x: x, y: y, w: w, h: h, accent: amber)
   let ix: Float = x + 28.0
   let iy: Float = y + 56.0
-  gpu2d.drawBox(x: ix, y: iy, w: 148.0, h: 96.0, radius: 16.0, fill: 0xFF15233F, borderWidth: 2.0, border: blue)
-  gpu2d.drawBox(x: ix + 180.0, y: iy, w: 148.0, h: 96.0, radius: 12.0, fill: 0xFF1F3026, borderWidth: 6.0, border: green)
-  gpu2d.drawBox(x: ix, y: iy + 120.0, w: 148.0, h: 96.0, radius: 48.0, fill: 0xFF3A2233, borderWidth: 10.0, border: pink)
+  Gpu2d.drawBox(x: ix, y: iy, w: 148.0, h: 96.0, radius: 16.0, fill: 0xFF15233F, borderWidth: 2.0, border: blue)
+  Gpu2d.drawBox(x: ix + 180.0, y: iy, w: 148.0, h: 96.0, radius: 12.0, fill: 0xFF1F3026, borderWidth: 6.0, border: green)
+  Gpu2d.drawBox(x: ix, y: iy + 120.0, w: 148.0, h: 96.0, radius: 48.0, fill: 0xFF3A2233, borderWidth: 10.0, border: pink)
   # Outline-only (transparent fill) — a ring the border draws on its own.
-  gpu2d.drawBox(x: ix + 180.0, y: iy + 120.0, w: 148.0, h: 96.0, radius: 48.0, fill: 0x00000000, borderWidth: 3.0, border: amber)
+  Gpu2d.drawBox(x: ix + 180.0, y: iy + 120.0, w: 148.0, h: 96.0, radius: 48.0, fill: 0x00000000, borderWidth: 3.0, border: amber)
 }
 
 # --- Panel 5: line art (a starburst + thickness ramp) ------------------------
@@ -129,8 +129,8 @@ func panelLines(x: view Float, y: view Float, w: view Float, h: view Float) {
   loop i < 16 {
     let angle: Float = i.toFloat() * 0.3927   # ~pi/8
     let radius: Float = 96.0
-    let ex: Float = cx + math.cos(x: angle) * radius
-    let ey: Float = cy + math.sin(x: angle) * radius * 0.62
+    let ex: Float = cx + Math.cos(x: angle) * radius
+    let ey: Float = cy + Math.sin(x: angle) * radius * 0.62
     var col: Int = violet
     let phase: Int = i % 4
     if phase is 0 {
@@ -142,14 +142,14 @@ func panelLines(x: view Float, y: view Float, w: view Float, h: view Float) {
     if phase is 2 {
       col = amber
     }
-    gpu2d.drawLine(x0: cx, y0: cy, x1: ex, y1: ey, thickness: 2.5, color: col)
+    Gpu2d.drawLine(x0: cx, y0: cy, x1: ex, y1: ey, thickness: 2.5, color: col)
     i = i + 1
   }
   # A thickness ramp along the bottom.
   var ty: Float = y + h - 96.0
   var tw: Float = 1.0
   loop tw <= 9.0 {
-    gpu2d.drawLine(x0: x + 28.0, y0: ty, x1: x + w - 28.0, y1: ty, thickness: tw, color: mist)
+    Gpu2d.drawLine(x0: x + 28.0, y0: ty, x1: x + w - 28.0, y1: ty, thickness: tw, color: mist)
     ty = ty + 18.0
     tw = tw + 2.0
   }
@@ -163,11 +163,11 @@ func panelGlass(x: view Float, y: view Float, w: view Float, h: view Float) {
   let cy: Float = y + h * 0.5 + 16.0
   # Three translucent discs in an RGB-style venn overlap.
   let radius: Float = 78.0
-  gpu2d.drawRoundedRect(x: cx - radius - 34.0, y: cy - radius - 12.0, w: radius * 2.0, h: radius * 2.0, radius: radius, color: 0x99EF5350)
-  gpu2d.drawRoundedRect(x: cx - radius + 34.0, y: cy - radius - 12.0, w: radius * 2.0, h: radius * 2.0, radius: radius, color: 0x9942A5F5)
-  gpu2d.drawRoundedRect(x: cx - radius, y: cy - radius + 40.0, w: radius * 2.0, h: radius * 2.0, radius: radius, color: 0x9966BB6A)
+  Gpu2d.drawRoundedRect(x: cx - radius - 34.0, y: cy - radius - 12.0, w: radius * 2.0, h: radius * 2.0, radius: radius, color: 0x99EF5350)
+  Gpu2d.drawRoundedRect(x: cx - radius + 34.0, y: cy - radius - 12.0, w: radius * 2.0, h: radius * 2.0, radius: radius, color: 0x9942A5F5)
+  Gpu2d.drawRoundedRect(x: cx - radius, y: cy - radius + 40.0, w: radius * 2.0, h: radius * 2.0, radius: radius, color: 0x9966BB6A)
   # A bright translucent sheen sweeping across the overlap.
-  gpu2d.drawGradientRect(x: x + 24.0, y: cy - 8.0, w: w - 48.0, h: 20.0, radius: 10.0, from: 0x00FFFFFF, to: 0x66FFFFFF, angleDeg: 0.0)
+  Gpu2d.drawGradientRect(x: x + 24.0, y: cy - 8.0, w: w - 48.0, h: 20.0, radius: 10.0, from: 0x00FFFFFF, to: 0x66FFFFFF, angleDeg: 0.0)
 }
 
 # --- Clipped hero band -------------------------------------------------------
@@ -175,39 +175,39 @@ func panelGlass(x: view Float, y: view Float, w: view Float, h: view Float) {
 # A full-width header whose gradient and diagonal stripes are clipped to a
 # rounded rectangle, so the stripes end cleanly at the rounded corners.
 func heroBand(x: view Float, y: view Float, w: view Float, h: view Float) {
-  gpu2d.pushClipRoundedRect(x: x, y: y, w: w, h: h, radius: 20.0)
-  gpu2d.drawGradientRect(x: x, y: y, w: w, h: h, radius: 0.0, from: 0xFF141E30, to: 0xFF243B55, angleDeg: 0.0)
+  Gpu2d.pushClipRoundedRect(x: x, y: y, w: w, h: h, radius: 20.0)
+  Gpu2d.drawGradientRect(x: x, y: y, w: w, h: h, radius: 0.0, from: 0xFF141E30, to: 0xFF243B55, angleDeg: 0.0)
   # Diagonal accent stripes marching across, clipped to the band.
   var sx: Float = x - h
   loop sx < x + w {
-    gpu2d.drawLine(x0: sx, y0: y + h, x1: sx + h, y1: y, thickness: 10.0, color: 0x14FFFFFF)
+    Gpu2d.drawLine(x0: sx, y0: y + h, x1: sx + h, y1: y, thickness: 10.0, color: 0x14FFFFFF)
     sx = sx + 46.0
   }
   # A row of dots along the left — a legend-like flourish.
-  gpu2d.drawRoundedRect(x: x + 26.0, y: y + h * 0.5 - 9.0, w: 18.0, h: 18.0, radius: 9.0, color: red)
-  gpu2d.drawRoundedRect(x: x + 52.0, y: y + h * 0.5 - 9.0, w: 18.0, h: 18.0, radius: 9.0, color: amber)
-  gpu2d.drawRoundedRect(x: x + 78.0, y: y + h * 0.5 - 9.0, w: 18.0, h: 18.0, radius: 9.0, color: green)
-  gpu2d.drawRoundedRect(x: x + 104.0, y: y + h * 0.5 - 9.0, w: 18.0, h: 18.0, radius: 9.0, color: blue)
+  Gpu2d.drawRoundedRect(x: x + 26.0, y: y + h * 0.5 - 9.0, w: 18.0, h: 18.0, radius: 9.0, color: red)
+  Gpu2d.drawRoundedRect(x: x + 52.0, y: y + h * 0.5 - 9.0, w: 18.0, h: 18.0, radius: 9.0, color: amber)
+  Gpu2d.drawRoundedRect(x: x + 78.0, y: y + h * 0.5 - 9.0, w: 18.0, h: 18.0, radius: 9.0, color: green)
+  Gpu2d.drawRoundedRect(x: x + 104.0, y: y + h * 0.5 - 9.0, w: 18.0, h: 18.0, radius: 9.0, color: blue)
   # A pill on the right edge of the band.
-  gpu2d.drawGradientRect(x: x + w - 220.0, y: y + h * 0.5 - 18.0, w: 190.0, h: 36.0, radius: 18.0, from: 0xFF6A11CB, to: 0xFF2575FC, angleDeg: 0.0)
-  gpu2d.popClipRect()
+  Gpu2d.drawGradientRect(x: x + w - 220.0, y: y + h * 0.5 - 18.0, w: 190.0, h: 36.0, radius: 18.0, from: 0xFF6A11CB, to: 0xFF2575FC, angleDeg: 0.0)
+  Gpu2d.popClipRect()
 }
 
 func main() ret Int {
-  gpu2d.initWindow(width: 1280, height: 800, title: "Rae 2D — vector shapes")
+  Gpu2d.initWindow(width: 1280, height: 800, title: "Rae 2D — vector shapes")
   # Remember the window's size and position across restarts (the name carries
   # this app's id, since the dir ".rae" is shared with every other app).
   var windowGeom: WindowGeometry = createWindowGeometry(dir: ".rae", name: "window.gpu2dVector.geometry")
   restoreWindowGeometry(g: windowGeom)
-  gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
+  Gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
 
-  loop not gpu2d.pollClose() {
-    let now: Float64 = gpu2d.nowSeconds()
-    let resized: Bool = gpu2d.windowResized()
-    gpu2d.beginFrame(r: 0.043, g: 0.055, b: 0.078, a: 1.0)
+  loop not Gpu2d.pollClose() {
+    let now: Float64 = Gpu2d.nowSeconds()
+    let resized: Bool = Gpu2d.windowResized()
+    Gpu2d.beginFrame(r: 0.043, g: 0.055, b: 0.078, a: 1.0)
 
     # A subtle full-canvas vertical gradient behind everything.
-    gpu2d.drawGradientRect(x: 0.0, y: 0.0, w: canvasW, h: canvasH, radius: 0.0, from: ink, to: 0xFF10151F, angleDeg: 90.0)
+    Gpu2d.drawGradientRect(x: 0.0, y: 0.0, w: canvasW, h: canvasH, radius: 0.0, from: ink, to: 0xFF10151F, angleDeg: 90.0)
 
     # Header band.
     heroBand(x: 32.0, y: 28.0, w: canvasW - 64.0, h: 96.0)
@@ -231,11 +231,11 @@ func main() ret Int {
     panelLines(x: col1, y: row1, w: colW, h: rowH)
     panelGlass(x: col2, y: row1, w: colW, h: rowH)
 
-    gpu2d.endFrame()
+    Gpu2d.endFrame()
     updateWindowGeometry(g: windowGeom, now: now, resized: resized)
-    gpu2d.waitEvents(timeoutSec: 0.2)
+    Gpu2d.waitEvents(timeoutSec: 0.2)
   }
 
-  gpu2d.closeWindow()
+  Gpu2d.closeWindow()
   ret 0
 }

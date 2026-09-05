@@ -13,10 +13,10 @@
 # WHERE IT IS DRAWN is the difference, and it is forced by the architecture: the
 # deferred twin computes the sky for every pixel its G-buffer left empty, while
 # this path has no G-buffer to ask and instead draws it as a fullscreen triangle
-# at the start of the scene pass, writing no depth. One call, gpu3d.drawSky,
+# at the start of the scene pass, writing no depth. One call, Gpu3d.drawSky,
 # between beginScene and the geometry.
 #
-# Frame ownership is explicit: the World3d renders first, gpu3d.endPass submits
+# Frame ownership is explicit: the World3d renders first, Gpu3d.endPass submits
 # without presenting, GPU2D loads the resolved color target and paints UiWorld,
 # then GPU2D presents once. UI hit-testing has priority over orbit input.
 #
@@ -37,31 +37,31 @@
 #
 # IDLE COSTS NOTHING: the loop only draws when something it depends on
 # changed — simulation running, camera moved, UI event, resize, or TAA
-# still converging. Otherwise it parks in `gpu2d.waitEvents`, so a paused
+# still converging. Otherwise it parks in `Gpu2d.waitEvents`, so a paused
 # app sits at 0% CPU instead of re-rendering an identical image at frame
 # rate (measured: 0.0% paused vs ~12% animating).
 import core
-import gpu2d
-import math
-import sdfText
-import scene3dFile
+import Gpu2d
+import Math
+import SdfText
+import Scene3dFile
 import SceneAnimation
 import Sdl3
 import Vec3
-open gpu3d
+open Gpu3d
 open Gpu3dWorld
 open Renderer3d
 open Math3d
 open Mesh3d
 open Scene3d
-open scene3dFile
+open Scene3dFile
 open SceneAnimation
 open ui/Ecs
 open ui/InputSystem/InputSystem
 open ui/LayoutSystem/LayoutSystem
 open ui/RenderSystem/RenderSystem
 open ui/VisualBoundsSystem/VisualBoundsSystem
-open ui/sceneFile
+open ui/SceneFile
 open ui/SceneLoader
 open ui/ThemeResolved
 open ui/Transform
@@ -70,14 +70,14 @@ open ui/LogOverlay
 open ui/WindowGeometry
 open ui/ScrollPanel
 open ui/DebugOverlay
-open hotReload
-import string
+open HotReload
+import String
 import ui/Ecs
 import ui/InputSystem/InputSystem
 import ui/LayoutSystem/LayoutSystem
 import ui/RenderSystem/RenderSystem
 import ui/Scene
-import ui/sceneFile
+import ui/SceneFile
 import ui/SceneLoader
 import ui/ThemeResolved
 import ui/Transform
@@ -86,24 +86,24 @@ import ui/LogOverlay
 import ui/WindowGeometry
 import ui/ScrollPanel
 import ui/DebugOverlay
-import hotReload
+import HotReload
 import app3d/CameraRig
 import app3d/CameraBar
 import app3d/Slider
 import app3d/SettingsDialog
-import shadow3d
+import Shadow3d
 import Renderer3d
 import Gpu3dWorld
 import app3d/UiShell
 import Sky
-import skyHosek
+import SkyHosek
 open app3d/CameraRig
 open app3d/CameraBar
 open app3d/SettingsDialog
-open shadow3d
+open Shadow3d
 open app3d/UiShell
 open Sky
-open skyHosek
+open SkyHosek
 
 type DemoUiResource {
   paused: Bool
@@ -286,7 +286,7 @@ func uploadMeshData(mesh: view MeshData) ret MeshHandle {
 }
 
 func main() ret Int {
-  gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — Metaballs ({rendererPathName()} rendering)")
+  Gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — Metaballs ({rendererPathName()} rendering)")
   # Remember where the user put the window, across restarts. Opt-in, and the
   # app picks the file: the hot-reload channel dir is per app, so two examples
   # running at once do not share one window position.
@@ -301,7 +301,7 @@ func main() ret Int {
   # instead of shrinking with window width.
   var extentW: Float = windowExtentW()
   var extentH: Float = windowExtentH()
-  gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
+  Gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
 
   let sphereData: MeshData = makeSphere(rings: 32, segments: 48)
   let torusData: MeshData = makeTorus(majorR: 1.55, minorR: 0.42, majorSegs: 96, minorSegs: 40)
@@ -336,19 +336,19 @@ func main() ret Int {
   if scene1.ok is false {
     log("[scene3d] scene 1 failed: {scene1.errorMsg}")
     shutdown()
-    gpu2d.closeWindow()
+    Gpu2d.closeWindow()
     ret 1
   }
   if scene2.ok is false {
     log("[scene3d] scene 2 failed: {scene2.errorMsg}")
     shutdown()
-    gpu2d.closeWindow()
+    Gpu2d.closeWindow()
     ret 1
   }
   if scene3.ok is false {
     log("[scene3d] scene 3 failed: {scene3.errorMsg}")
     shutdown()
-    gpu2d.closeWindow()
+    Gpu2d.closeWindow()
     ret 1
   }
 
@@ -488,7 +488,7 @@ func main() ret Int {
     ret 1
   }
 
-  var lastFrame: Float64 = gpu2d.nowSeconds()
+  var lastFrame: Float64 = Gpu2d.nowSeconds()
   # Shared sliding-window sampler (lib/ui/FrameStats.rae): it records only
   # frames that actually rendered, so an idle app's reading decays to ~1
   # instead of freezing at the last busy value.
@@ -513,7 +513,7 @@ func main() ret Int {
   # drag changes state every frame and one file write per frame would be
   # exactly the kind of hidden cost this app is meant to measure.
   var stateDirty: Bool = false
-  var lastStateSave: Float64 = gpu2d.nowSeconds()
+  var lastStateSave: Float64 = Gpu2d.nowSeconds()
   var lastSavedScene: Int = uiState.activeScene
   var lastSavedRevision: Int = uiState.revision
   # TAA converges over several frames, so stopping the instant motion ends
@@ -521,8 +521,8 @@ func main() ret Int {
   # after the last change, then idle on a fully converged picture.
   var taaSettleFrames: Int = 0
 
-  loop not gpu2d.pollClose() {
-    let now: Float64 = gpu2d.nowSeconds()
+  loop not Gpu2d.pollClose() {
+    let now: Float64 = Gpu2d.nowSeconds()
     var dt: Float = (now - lastFrame) as Float
     lastFrame = now
     # NO CLAMP ON dt. A long frame is integrated in full, however long it was.
@@ -550,13 +550,13 @@ func main() ret Int {
     # Re-anchor on resize. The window's logical size is the layout extent,
     # so a resize re-runs placement instead of rescaling a fixed canvas.
     var extentChanged: Bool = false
-    let resized: Bool = gpu2d.windowResized()
+    let resized: Bool = Gpu2d.windowResized()
     updateWindowGeometry(g: windowGeom, now: now, resized: resized)
     if resized {
       extentW = windowExtentW()
       extentH = windowExtentH()
       if extentW > 0.0 and extentH > 0.0 {
-        gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
+        Gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
         uiWorld.layoutW = extentW
         uiWorld.layoutH = extentH
         anchorUiToExtent(world: uiWorld, res: gpuUi, w: extentW, h: extentH)
@@ -690,7 +690,7 @@ func main() ret Int {
       or timeAnimating or scrolled or renderedOnce is false
     if taaSettleFrames > 0 { needsRender = true }
     dbgDidWork = needsRender
-    if gpu2d.shouldRenderFrame(appNeedsRender: needsRender) is false {
+    if Gpu2d.shouldRenderFrame(appNeedsRender: needsRender) is false {
       # Nothing to draw: park until the OS has something to say, or until
       # the readout heartbeat is due. Shared policy from
       # lib/ui/eventLoop.rae rather than a hardcoded timeout.
@@ -698,7 +698,7 @@ func main() ret Int {
         animating: false, mouseDown: false, pollWatcher: false,
         frameSec: 0.016667, heartbeatSec: 1.0
       )
-      gpu2d.waitEvents(timeoutSec: idleTimeout)
+      Gpu2d.waitEvents(timeoutSec: idleTimeout)
     } else {
       if sceneAnimating or cameraMoved or uiLayoutDirty or extentChanged or hadUiEvents
         or timeAnimating {
@@ -749,7 +749,7 @@ func main() ret Int {
       if uiState.activeScene is 3 { animateScene3(world: scene3.world, time: simTime) }
 
 
-      let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
+      let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
       # Frame order is DERIVED by the render graph (#331/#332): scene3d
       # writes the colour target, the UI overlay MODIFIES it (load-preserving),
       # present reads it. The passes are declared backwards in
@@ -829,7 +829,7 @@ func main() ret Int {
           tonemapPass()
         }
         if tag is tagUiOverlay {
-          gpu2d.beginFrameLoad()
+          Gpu2d.beginFrameLoad()
           renderSystemGpu2d(world: uiWorld, res: gpuUi)
           # After the app UI, so the diagnostic is never what gets covered up.
           drawLogOverlay(ov: logView, font: gpuUi.textFont, screenW: extentW, screenH: extentH)
@@ -838,7 +838,7 @@ func main() ret Int {
           lastLogRevision = logView.revision
         }
         if tag is tagPresent {
-          gpu2d.endFrame()
+          Gpu2d.endFrame()
         }
         pi3 = pi3 + 1
       }
@@ -858,6 +858,6 @@ func main() ret Int {
     writeHotReloadStateFor(appId: state111AppId, state: serialize111State(ui: uiState, rig: cameraRig, camera: camera))
   }
   shutdown()
-  gpu2d.closeWindow()
+  Gpu2d.closeWindow()
   ret 0
 }

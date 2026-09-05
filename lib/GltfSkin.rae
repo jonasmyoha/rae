@@ -10,7 +10,7 @@
 #   - the skeleton and its Mat3x4 joint palette (#375)
 #   - animation clips and sampling (#376)
 import core
-import math
+import Math
 import Json
 import Gltf
 import Mesh3d
@@ -201,7 +201,7 @@ func srgbToLinear(c: view Float) ret Float {
   if c <= 0.04045 {
     ret c / 12.92
   }
-  ret math.pow(base: (c + 0.055) / 1.055, exp: 2.4)
+  ret Math.pow(base: (c + 0.055) / 1.055, exp: 2.4)
 }
 
 # Return a copy of `m` whose vertex colour channel is the atlas colour at
@@ -242,8 +242,8 @@ func withAtlasColors(m: view SkinnedMeshData, atlas: view List(Int),
   var v: Int = 0
   loop v < m.vertCount {
     let base: Int = v * 20
-    var x: Int = math.floor(x: floatAt(list: out, index: base + 6) * width.toFloat()).toInt()
-    var y: Int = math.floor(x: floatAt(list: out, index: base + 7) * height.toFloat()).toInt()
+    var x: Int = Math.floor(x: floatAt(list: out, index: base + 6) * width.toFloat()).toInt()
+    var y: Int = Math.floor(x: floatAt(list: out, index: base + 7) * height.toFloat()).toInt()
     # Clamp rather than wrap. A UV marginally outside [0,1] is exporter
     # rounding on a swatch edge, and wrapping would fetch the colour from
     # the opposite side of the atlas — a vivid wrong pixel instead of the

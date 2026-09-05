@@ -38,16 +38,16 @@
 #     rae run --target compiled main.rae
 #   RAE_GBUFFER_VIEW=normal ... (same, but the normal channel)
 import core
-import math
-import sys
-import gpu2d
+import Math
+import Sys
+import Gpu2d
 import Vec3
-import gbuffer
+import Gbuffer
 import ecs/Entity
 open Scene3d
 open ecs/Entity
-open gpu3d
-open gbuffer
+open Gpu3d
+open Gbuffer
 open RendererDeferred
 open Rendergraph
 open Math3d
@@ -102,7 +102,7 @@ func buildScene(sphere: view MeshHandle, ground: view MeshHandle, torus: view Me
 # Channel selection by name. Defaults to the lit frame; the G-buffer
 # channels are opt-in for inspection.
 func selectedView() ret Int {
-  let v: String = sys.getEnv(name: "RAE_GBUFFER_VIEW")
+  let v: String = Sys.getEnv(name: "RAE_GBUFFER_VIEW")
   if v is "normal" {
     ret viewNormal
   }
@@ -116,7 +116,7 @@ func selectedView() ret Int {
 }
 
 func main() ret Int {
-  gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — deferred G-buffer (Z-up)")
+  Gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — deferred G-buffer (Z-up)")
 
   let sphereData: MeshData = makeSphere(rings: 32, segments: 48)
   let planeData: MeshData = makePlane(size: 40.0, segments: 1)
@@ -144,12 +144,12 @@ func main() ret Int {
   var lastX: Float = 0.0
   var lastY: Float = 0.0
   var dragging: Bool = false
-  let startT: Float64 = gpu2d.nowSeconds()
+  let startT: Float64 = Gpu2d.nowSeconds()
 
-  loop not gpu2d.pollClose() {
-    let px: Float = gpu2d.pointerX()
-    let py: Float = gpu2d.pointerY()
-    if gpu2d.pointerDown() {
+  loop not Gpu2d.pollClose() {
+    let px: Float = Gpu2d.pointerX()
+    let py: Float = Gpu2d.pointerY()
+    if Gpu2d.pointerDown() {
       if dragging {
         yaw = yaw + (px - lastX) * 0.008
         pitch = pitch - (py - lastY) * 0.008
@@ -166,7 +166,7 @@ func main() ret Int {
     }
     lastX = px
     lastY = py
-    dist = dist - gpu2d.wheelMove() * 0.8
+    dist = dist - Gpu2d.wheelMove() * 0.8
     if dist < 4.0 {
       dist = 4.0
     }
@@ -174,15 +174,15 @@ func main() ret Int {
       dist = 40.0
     }
 
-    let t: Float = (gpu2d.nowSeconds() - startT) as Float
+    let t: Float = (Gpu2d.nowSeconds() - startT) as Float
     camera.position = orbitEye(targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z, yaw: yaw, pitch: pitch, dist: dist)
 
-    let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
-    if gpu2d.renderGate() {
+    let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
+    if Gpu2d.renderGate() {
       renderDeferredFrameWorld(r: renderer, world: world, camera: camera, light: light, aspect: aspect)
     }
   }
-  gbuffer.shutdownAll()
-  gpu2d.closeWindow()
+  Gbuffer.shutdownAll()
+  Gpu2d.closeWindow()
   ret 0
 }

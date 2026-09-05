@@ -11,25 +11,25 @@
 # The pool is allocated once; crossing a cell boundary re-places those same
 # entities onto the square of world cells around the character.
 import core
-import math
+import Math
 import Noise
 import WorldBiome
 open WorldBiome
 import Gltf
-import gpu3d
+import Gpu3d
 import Scene3d
 import Mesh3d
 import Vec3
 import Quat
-import gbuffer
-import gbufferTerrain
-open gbufferTerrain
+import Gbuffer
+import GbufferTerrain
+open GbufferTerrain
 import GbufferInstanced
 import ecs/Entity
 import ecs/ComponentTable
 import ecs/Transform
 open Gltf
-open gpu3d
+open Gpu3d
 open Scene3d
 open Mesh3d
 open GbufferInstanced
@@ -239,7 +239,7 @@ func reshapeTerrainTile(terrain: mod InfiniteTerrain, meshId: view Int,
       let slopeY: Float = (terrainHeightAt(x: worldX, y: worldY + eps, groundZ: terrain.groundZ)
         - terrainHeightAt(x: worldX, y: worldY - eps, groundZ: terrain.groundZ)) / (eps * 2.0)
       let inverseLength: Float = 1.0
-        / math.sqrt(x: slopeX * slopeX + slopeY * slopeY + 1.0)
+        / Math.sqrt(x: slopeX * slopeX + slopeY * slopeY + 1.0)
       let base: Int = (yi * (terrainTileSegments + 1) + xi) * 8
       terrain.scratchVerts.set(index: base, value: localX)
       terrain.scratchVerts.set(index: base + 1, value: localY)
@@ -261,8 +261,8 @@ func reshapeTerrainTile(terrain: mod InfiniteTerrain, meshId: view Int,
 # per-kind list bookkeeping.
 func updateInfiniteTerrain(terrain: mod InfiniteTerrain, world: mod GameWorld,
                            playerPosition: view Vec3) ret Bool {
-  let cellX: Int = math.floor(x: playerPosition.x / terrainCellSize).toInt()
-  let cellY: Int = math.floor(x: playerPosition.y / terrainCellSize).toInt()
+  let cellX: Int = Math.floor(x: playerPosition.x / terrainCellSize).toInt()
+  let cellY: Int = Math.floor(x: playerPosition.y / terrainCellSize).toInt()
   if cellX is terrain.centreCellX and cellY is terrain.centreCellY {
     ret false
   }

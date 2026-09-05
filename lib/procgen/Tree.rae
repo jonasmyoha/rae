@@ -7,7 +7,7 @@
 # colour. Deterministic from `seed`; branchDepth/trunk height/taper/canopy size
 # are the LOD + shape knobs. Z-up: the trunk grows along +Z.
 import core
-import math
+import Math
 import Vec3
 import Noise
 import Mesh3d
@@ -23,7 +23,7 @@ type TreeMesh {
 # A stable basis perpendicular to `dir` (unit): returns u; w = dir x u.
 func perpBasis(dir: view Vec3) ret Vec3 {
   var reference: Vec3 = create(x: 0.0, y: 0.0, z: 1.0)
-  if math.abs(x: dir.z) > 0.9 { reference = create(x: 1.0, y: 0.0, z: 0.0) }
+  if Math.abs(x: dir.z) > 0.9 { reference = create(x: 1.0, y: 0.0, z: 0.0) }
   ret vnorm(a: vcross(a: reference, b: dir))
 }
 
@@ -39,8 +39,8 @@ func addTaperedCylinder(verts: mod List(Float), idx: mod List(Int),
   loop s < sides {
     let t0: Float = s.toFloat() / sides.toFloat() * twoPi
     let t1: Float = (s + 1).toFloat() / sides.toFloat() * twoPi
-    let d0: Vec3 = vadd(a: vscale(a: u, s: math.cos(x: t0)), b: vscale(a: w, s: math.sin(x: t0)))
-    let d1: Vec3 = vadd(a: vscale(a: u, s: math.cos(x: t1)), b: vscale(a: w, s: math.sin(x: t1)))
+    let d0: Vec3 = vadd(a: vscale(a: u, s: Math.cos(x: t0)), b: vscale(a: w, s: Math.sin(x: t0)))
+    let d1: Vec3 = vadd(a: vscale(a: u, s: Math.cos(x: t1)), b: vscale(a: w, s: Math.sin(x: t1)))
     let a0: Vec3 = vadd(a: a, b: vscale(a: d0, s: ra))
     let a1: Vec3 = vadd(a: a, b: vscale(a: d1, s: ra))
     let b0: Vec3 = vadd(a: b, b: vscale(a: d0, s: rb))
@@ -115,8 +115,8 @@ func growBranch(verts: mod List(Float), idx: mod List(Int), tips: mod List(Vec3)
   loop k < children {
     let ang: Float = hash2(x: branchId * 7 + k, y: depth, seed: seed) * 6.283185307179586
     let spread: Float = 0.5 + hash2(x: branchId * 7 + k, y: depth + 50, seed: seed) * 0.5
-    let sideDir: Vec3 = vadd(a: vscale(a: side, s: math.cos(x: ang)),
-                             b: vscale(a: vnorm(a: vcross(a: dir, b: side)), s: math.sin(x: ang)))
+    let sideDir: Vec3 = vadd(a: vscale(a: side, s: Math.cos(x: ang)),
+                             b: vscale(a: vnorm(a: vcross(a: dir, b: side)), s: Math.sin(x: ang)))
     let childDir: Vec3 = vnorm(a: vadd(a: vadd(a: vscale(a: dir, s: 1.0), b: vscale(a: sideDir, s: spread)), b: vscale(a: up, s: 0.25)))
     growBranch(verts: verts, idx: idx, tips: tips, base: tip, dir: childDir,
                length: length * 0.66, radius: radius * 0.6, depth: depth - 1, seed: seed, branchId: branchId * 3 + k + 1)

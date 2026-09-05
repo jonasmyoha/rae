@@ -21,8 +21,8 @@
 # Overhead when NOT capturing is a single bool test per zone call; all string and
 # file work is deferred to stop time so it never skews the frames it measures.
 import core
-import sys
-import string
+import Sys
+import String
 
 # Cap the event buffer so a runaway capture can't exhaust memory. 300k events is
 # ~30s at 60fps with ~160 zones/frame; excess is dropped (flagged in the trace).
@@ -83,13 +83,13 @@ func startCapture(profiler: mod Profiler, seconds: view Float, outPath: view Str
 
 # Start a capture from the environment if RAE_PROFILE is set. Call once at startup.
 func maybeAutoStart(profiler: mod Profiler) pub {
-  let flag: String = sys.getEnv(name: "RAE_PROFILE")
+  let flag: String = Sys.getEnv(name: "RAE_PROFILE")
   if flag.length() is 0 { ret }
   var seconds: Float = 20.0
-  let secStr: String = sys.getEnv(name: "RAE_PROFILE_SECONDS")
+  let secStr: String = Sys.getEnv(name: "RAE_PROFILE_SECONDS")
   if secStr.length() > 0 { seconds = secStr.toFloat() }
   var out: String = "rae_profile.json"
-  let outEnv: String = sys.getEnv(name: "RAE_PROFILE_OUT")
+  let outEnv: String = Sys.getEnv(name: "RAE_PROFILE_OUT")
   if outEnv.length() > 0 { out = "{outEnv}" }
   startCapture(profiler: profiler, seconds: seconds, outPath: out)
 }
@@ -196,7 +196,7 @@ func write(profiler: view Profiler, path: view String) ret Bool {
   }
   let body: String = joinBlocked(frags: frags, blockSize: 256)
   let json: String = "\{\"traceEvents\":[".concat(other: body).concat(other: "]\}")
-  let ok: Bool = sys.writeFile(path: path, content: json)
+  let ok: Bool = Sys.writeFile(path: path, content: json)
   if ok {
     log("profile: wrote {n} events to {path}")
   } else {

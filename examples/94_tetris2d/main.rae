@@ -1,14 +1,14 @@
 import core
-import gpu2d
-import math
+import Gpu2d
+import Math
 import Sdl3
 import Keys
-import sys
+import Sys
 import ui/Ecs
 import ui/RenderSystem/RenderSystem
 import app3d/UiShell
 open app3d/UiShell
-open math
+open Math
 open ui/Ecs
 open ui/DebugOverlay
 open ui/RenderSystem/RenderSystem
@@ -435,14 +435,14 @@ func initGame(g: mod Game) {
 }
 
 func drawFrame(x: view Float, y: view Float, w: view Float, h: view Float) {
-  gpu2d.drawRect(x: x, y: y, w: w, h: 2.0, color: 0xFFB4B4FF)
-  gpu2d.drawRect(x: x, y: y + h - 2.0, w: w, h: 2.0, color: 0xFFB4B4FF)
-  gpu2d.drawRect(x: x, y: y, w: 2.0, h: h, color: 0xFFB4B4FF)
-  gpu2d.drawRect(x: x + w - 2.0, y: y, w: 2.0, h: h, color: 0xFFB4B4FF)
+  Gpu2d.drawRect(x: x, y: y, w: w, h: 2.0, color: 0xFFB4B4FF)
+  Gpu2d.drawRect(x: x, y: y + h - 2.0, w: w, h: 2.0, color: 0xFFB4B4FF)
+  Gpu2d.drawRect(x: x, y: y, w: 2.0, h: h, color: 0xFFB4B4FF)
+  Gpu2d.drawRect(x: x + w - 2.0, y: y, w: 2.0, h: h, color: 0xFFB4B4FF)
 }
 
 func drawCell(x: view Float, y: view Float, size: view Float, colorId: view Int) {
-  gpu2d.drawRect(
+  Gpu2d.drawRect(
     x: x, y: y, w: size - 1.0, h: size - 1.0
     color: getModernColor(index: colorId))
 }
@@ -508,10 +508,10 @@ func drawGame(g: view Game) {
   let cellSize: Float = 22.0
   let offsetX: Float = 290.0
   let offsetY: Float = 80.0
-  gpu2d.drawGradientRect(
+  Gpu2d.drawGradientRect(
     x: 0.0, y: 0.0, w: canvasW, h: canvasH, radius: 0.0
     from: 0xFF111827, to: 0xFF07101B, angleDeg: 90.0)
-  gpu2d.drawRoundedRect(
+  Gpu2d.drawRoundedRect(
     x: offsetX - 12.0, y: offsetY - 12.0
     w: g.width.toFloat() * cellSize + 24.0
     h: g.height.toFloat() * cellSize + 24.0
@@ -682,8 +682,8 @@ func handleInput(g: mod Game) {
 }
 
 func main() ret Int {
-  gpu2d.initWindow(width: canvasW.toInt(), height: canvasH.toInt(), title: "Rae Tetris 2D — GPU2D")
-  gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
+  Gpu2d.initWindow(width: canvasW.toInt(), height: canvasH.toInt(), title: "Rae Tetris 2D — GPU2D")
+  Gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
   let uiResources: Gpu2dUi = loadUiAssets(
     dir: "examples/104_ui_hello/assets/"
     textFontName: "Roboto-Regular"
@@ -728,10 +728,10 @@ func main() ret Int {
   var displayedLines: Int = 0 - 1
   var displayedLevel: Int = 0 - 1
 
-  loop not gpu2d.pollClose() {
-    let now: Float64 = gpu2d.nowSeconds()
+  loop not Gpu2d.pollClose() {
+    let now: Float64 = Gpu2d.nowSeconds()
     if updateDebugOverlay(
-      d: dbg, screenW: gpu2d.designWidth(), screenH: gpu2d.designHeight()
+      d: dbg, screenW: Gpu2d.designWidth(), screenH: Gpu2d.designHeight()
       now: now, didRealWork: true) {
     }
     let resized: Bool = resizeUiToWindow(world: world, res: uiResources)
@@ -769,12 +769,12 @@ func main() ret Int {
     setNodeActive(world: world, nodeId: "GameOverPanel", value: g.state is GameState.gameOver)
     runUiSystems(world: world, res: uiResources)
 
-    gpu2d.beginFrame(r: 0.03, g: 0.05, b: 0.09, a: 1.0)
+    Gpu2d.beginFrame(r: 0.03, g: 0.05, b: 0.09, a: 1.0)
     drawGame(g: g)
     renderSystemGpu2d(world: world, res: uiResources)
     drawDebugOverlay(d: dbg, font: uiResources.textFont, didRealWork: true)
-    gpu2d.endFrame()
+    Gpu2d.endFrame()
   }
-  gpu2d.closeWindow()
+  Gpu2d.closeWindow()
   ret 0
 }

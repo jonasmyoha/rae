@@ -26,16 +26,16 @@
 #      bottom). A UI that repaints an identical frame at 60 Hz is a UI that
 #      keeps a laptop fan on for no reason.
 import core
-import gpu2d
-import string
-import sys
-open sys
+import Gpu2d
+import String
+import Sys
+open Sys
 import ui/Ecs
 import ui/InputSystem/InputSystem
 import ui/LayoutSystem/LayoutSystem
 import ui/RenderSystem/RenderSystem
 import ui/Scene
-import ui/sceneFile
+import ui/SceneFile
 import ui/SceneLoader
 import ui/EventLoop
 open ui/EventLoop
@@ -50,7 +50,7 @@ open ui/Ecs
 open ui/InputSystem/InputSystem
 open ui/LayoutSystem/LayoutSystem
 open ui/RenderSystem/RenderSystem
-open ui/sceneFile
+open ui/SceneFile
 open ui/SceneLoader
 open ui/ThemeResolved
 open ui/Transform
@@ -192,7 +192,7 @@ func applyActions(state: mod CounterState, input: view UiInput) ret Bool {
 }
 
 func main() ret Int {
-  gpu2d.initWindow(width: designW, height: designH, title: "Rae UI — Counter")
+  Gpu2d.initWindow(width: designW, height: designH, title: "Rae UI — Counter")
 
   let base: String = "examples/105_ui_counter/assets/"
   # Fonts and theme in one call. The theme's palette is bridged into the active
@@ -211,13 +211,13 @@ func main() ret Int {
   let scene: Scene = loadSceneFile(path: "{base}ui.raescene")
   if scene.ok is false {
     log("[ui] scene failed to load: {scene.errorMsg}")
-    gpu2d.closeWindow()
+    Gpu2d.closeWindow()
     ret 1
   }
   let root: EntityId = loadScene(world: world, scene: scene)
   if isNone(this: root) {
     log("[ui] scene mounted no root")
-    gpu2d.closeWindow()
+    Gpu2d.closeWindow()
     ret 1
   }
 
@@ -254,7 +254,7 @@ func main() ret Int {
   # Set when the idle wait returns, and consumed by the next iteration.
   var wokeUp: Bool = false
 
-  loop not gpu2d.pollClose() {
+  loop not Gpu2d.pollClose() {
     # One call handles the whole resize: it consumes the event, converts pixels
     # to POINTS (a UI laid out in pixels renders half-size on a retina display),
     # re-points the design resolution and re-runs the systems.
@@ -302,10 +302,10 @@ func main() ret Int {
     let needsRender: Bool = hadEvents or changed or wokeUp or renderedOnce is false
     wokeUp = false
 
-    if gpu2d.shouldRenderFrame(appNeedsRender: needsRender) {
-      gpu2d.beginFrame(r: 0.03, g: 0.05, b: 0.08, a: 1.0)
+    if Gpu2d.shouldRenderFrame(appNeedsRender: needsRender) {
+      Gpu2d.beginFrame(r: 0.03, g: 0.05, b: 0.08, a: 1.0)
       renderSystemGpu2d(world: world, res: gpuUi)
-      gpu2d.endFrame()
+      Gpu2d.endFrame()
       renderedOnce = true
     } else {
       # IDLE AT ~0% CPU. Nothing here animates, so there is nothing to wake for
@@ -314,13 +314,13 @@ func main() ret Int {
       # lib/ui/eventLoop.rae, not a number invented here; an app WITH animation
       # passes animating: true and gets a frame-length wait instead. See
       # docs/ui-render-loop-performance.md.
-      gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
+      Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
         animating: false, mouseDown: false, pollWatcher: false,
         frameSec: 0.016667, heartbeatSec: idleHeartbeatSec))
       wokeUp = true
     }
   }
 
-  gpu2d.closeWindow()
+  Gpu2d.closeWindow()
   ret 0
 }

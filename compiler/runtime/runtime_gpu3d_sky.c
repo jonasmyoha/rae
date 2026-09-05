@@ -156,7 +156,7 @@ static void g3d_sky_init_pipeline(void) {
     wgpuBindGroupLayoutRelease(bgl);
 }
 
-void rae_ext_gpu3d_skyHosekPush(int64_t index, float value) {
+void rae_ext_Gpu3d_skyHosekPush(int64_t index, float value) {
     rae_sky_hosek_push(index, value);
 }
 

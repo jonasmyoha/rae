@@ -6,7 +6,7 @@
 #       dir: dir(), name: "window.{myAppId}.geometry")
 #     restoreWindowGeometry(g: geom)          # after initWindow
 #     ...
-#     updateWindowGeometry(g: geom, now: now, resized: gpu2d.windowResized())
+#     updateWindowGeometry(g: geom, now: now, resized: Gpu2d.windowResized())
 #
 # This used to live in the runtime, in C, and applied to every app whether or
 # not its author asked for it: the C chose the file path, decided when to write,
@@ -18,12 +18,12 @@
 # and `windowResized` are one-shot flags in the same shape as the rest of the
 # gpu2d input surface, and everything below is built on them.
 import core
-import sys
-import gpu2d
-import filesystem
-open filesystem
+import Sys
+import Gpu2d
+import Filesystem
+open Filesystem
 
-# Whole-file read. `sys.readFile` returns `opt String`, and the C backend has a
+# Whole-file read. `Sys.readFile` returns `opt String`, and the C backend has a
 # known bug comparing those against `none`; lib/hot_reload and lib/sky_hosek
 # declare the same raw extern for the same reason.
 func rae_ext_rae_sys_read_file(path: String) extern ret String
@@ -96,8 +96,8 @@ func restoreWindowGeometry(g: mod WindowGeometry) ret Bool {
   if w <= 0 or h <= 0 {
     ret false
   }
-  gpu2d.setWindowSize(w: w, h: h)
-  gpu2d.setWindowPosition(x: x, y: y)
+  Gpu2d.setWindowSize(w: w, h: h)
+  Gpu2d.setWindowPosition(x: x, y: y)
   g.lastX = x
   g.lastY = y
   g.lastW = w
@@ -106,19 +106,19 @@ func restoreWindowGeometry(g: mod WindowGeometry) ret Bool {
 }
 
 # UNITS MATTER HERE, and getting them wrong is not obvious from a screenshot.
-# gpu2d.windowWidth/Height are the DRAWABLE size in physical pixels, while
+# Gpu2d.windowWidth/Height are the DRAWABLE size in physical pixels, while
 # setWindowSize takes LOGICAL points — so on a 2x display, saving the physical
 # size and restoring it as logical doubles the window on every launch. It went
 # 900x640 -> 1800x1280 -> 3600x2560 across three runs before this converted.
 func writeWindowGeometry(g: mod WindowGeometry) {
-  let x: Int = gpu2d.windowPositionX()
-  let y: Int = gpu2d.windowPositionY()
-  var scale: Float = gpu2d.dpr()
+  let x: Int = Gpu2d.windowPositionX()
+  let y: Int = Gpu2d.windowPositionY()
+  var scale: Float = Gpu2d.dpr()
   if scale <= 0.0 {
     scale = 1.0
   }
-  let w: Int = (gpu2d.windowWidth().toFloat() / scale).toInt()
-  let h: Int = (gpu2d.windowHeight().toFloat() / scale).toInt()
+  let w: Int = (Gpu2d.windowWidth().toFloat() / scale).toInt()
+  let h: Int = (Gpu2d.windowHeight().toFloat() / scale).toInt()
   if w <= 0 or h <= 0 {
     ret
   }
@@ -126,7 +126,7 @@ func writeWindowGeometry(g: mod WindowGeometry) {
     ret
   }
   makeDir(path: g.dir)
-  if sys.writeFile(path: g.path, content: "{x} {y} {w} {h}\n") {
+  if Sys.writeFile(path: g.path, content: "{x} {y} {w} {h}\n") {
     g.lastX = x
     g.lastY = y
     g.lastW = w
@@ -142,13 +142,13 @@ func writeWindowGeometry(g: mod WindowGeometry) {
 # is one boolean test. These apps are built to idle at ~0% CPU
 # (docs/ui-render-loop-performance.md), and a feature that fires when a human
 # drags a window has no business waking anything.
-# `resized` is PASSED IN, not read here. gpu2d.windowResized() is one-shot —
+# `resized` is PASSED IN, not read here. Gpu2d.windowResized() is one-shot —
 # reading it clears it — and the apps already read it to rebuild their layout.
 # A module that consumed it behind their back would make adding this feature
 # silently break resize handling, which is a rotten trade for one argument.
 func updateWindowGeometry(g: mod WindowGeometry, now: view Float64,
                           resized: view Bool) {
-  if gpu2d.windowMoved() or resized {
+  if Gpu2d.windowMoved() or resized {
     g.dirty = true
     g.dirtyAt = now
   }

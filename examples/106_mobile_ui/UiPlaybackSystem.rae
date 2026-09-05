@@ -22,7 +22,7 @@ open ui/Ecs
 # (library grid, history list) will hold real scroll/selection state.
 import core
 import ui/Ecs
-import gpu2d
+import Gpu2d
 open ecs/Entity
 
 type UiPlaybackSystem {
@@ -86,10 +86,10 @@ func uiPlaybackObserve(this: mod UiPlaybackSystem, world: mod UiWorld, playback:
 # the first LOADED one wins, so the widget never falls to the grey placeholder
 # when a real cover exists.
 func coverKeyResolved(playback: view PlaybackState, browsedStem: view String) pub ret String {
-  if playback.nowPlayingArtKey.length() > 0 and gpu2d.hasImageKey(key: playback.nowPlayingArtKey) {
+  if playback.nowPlayingArtKey.length() > 0 and Gpu2d.hasImageKey(key: playback.nowPlayingArtKey) {
     ret "{playback.nowPlayingArtKey}"
   }
-  if playback.playingAlbumStem.length() > 0 and gpu2d.hasImageKey(key: playback.playingAlbumStem) {
+  if playback.playingAlbumStem.length() > 0 and Gpu2d.hasImageKey(key: playback.playingAlbumStem) {
     ret "{playback.playingAlbumStem}"
   }
   ret "{browsedStem}"

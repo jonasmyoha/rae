@@ -8,10 +8,10 @@
 # is rae's (a superset — some entries are unused here but harmless).
 
 import core
-import math
+import Math
 import Profile
-import gpu2d
-import sdfText
+import Gpu2d
+import SdfText
 import Vec3
 import ecs/Entity
 import ecs/ComponentTable
@@ -20,16 +20,16 @@ open ecs/ComponentTable
 import Gltf
 import GltfSkin
 import Png
-import sys
+import Sys
 import app3d/CameraRig
-import app3d/renderScale
+import app3d/RenderScale
 import app3d/CharacterController
 import app3d/UiShell
 import app3d/ControlPanel
 import app3d/CameraBar
 import RendererDeferred
 import Sky
-import gbuffer
+import Gbuffer
 import GbufferInstanced
 open GbufferInstanced
 import Particles
@@ -37,12 +37,12 @@ open Particles
 import GrassCompute
 open GrassCompute
 import GrassConfig
-import shadow3d
+import Shadow3d
 import app3d/Playback
 import app3d/Slider
 import app3d/SettingsDialog
-import skyHosek
-import hotReload
+import SkyHosek
+import HotReload
 import ui/LogOverlay
 import ui/WindowGeometry
 import ui/ScrollPanel
@@ -53,27 +53,27 @@ import ui/Ecs
 import ui/InputSystem/InputSystem
 import ui/RenderSystem/RenderSystem
 open Scene3d
-open gpu3d
+open Gpu3d
 open RendererDeferred
 open Sky
-open gbuffer
+open Gbuffer
 open Rendergraph
 open Math3d
 open Mesh3d
 open Gltf
 open GltfSkin
-open sdfText
+open SdfText
 open Png
 open app3d/CameraRig
 open app3d/CharacterController
 open app3d/SettingsDialog
-open skyHosek
+open SkyHosek
 open app3d/UiShell
 open app3d/ControlPanel
 open app3d/CameraBar
-open shadow3d
+open Shadow3d
 open app3d/Playback
-open hotReload
+open HotReload
 open ui/LogOverlay
 open ui/WindowGeometry
 open ui/ScrollPanel
@@ -146,7 +146,7 @@ func renderGbufferPass(cache: mod GbufferCache, cam: mod CameraState, character:
                 fwdZ: cam.camera.target.z - cam.camera.position.z,
                 settings: grassView)
   grassDiagTick(grass: grassCompute, profiler: profiler)
-  gbuffer.beginPass(cache: cache, camera: cam.camera, light: cam.light, aspect: aspect)
+  Gbuffer.beginPass(cache: cache, camera: cam.camera, light: cam.light, aspect: aspect)
   drawTerrainGround(cache: cache, terrain: terrain, world: world, time: t)
   drawTerrainProps(terrain: terrain, world: world)
   # Palettes (hero slot 0 + one per crowd member) were uploaded in renderApp.
@@ -162,7 +162,7 @@ func renderGbufferPass(cache: mod GbufferCache, cam: mod CameraState, character:
       emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0),
       toon: character.toon
     }
-    gbuffer.drawSkinnedInstance(cache: cache, mesh: handle, model: character.model,
+    Gbuffer.drawSkinnedInstance(cache: cache, mesh: handle, model: character.model,
                                 prevModel: character.prevModel, material: mat)
     setInstanceBatchMesh(batch: character.crowdBatch, mesh: handle)
     resetInstanceBatch(batch: character.crowdBatch)
@@ -184,7 +184,7 @@ func renderGbufferPass(cache: mod GbufferCache, cam: mod CameraState, character:
   # the droplets as instanced cubes into this same G-buffer pass (particles.rae).
   splashStep(character: character, splashes: splashes, world: world, dt: dt)
   particleDraw(sys: splashes, toon: character.toon)
-  gbuffer.endPass()
+  Gbuffer.endPass()
 }
 
 # ----- render phase: animation sample + render-graph walk ------------------
@@ -243,7 +243,7 @@ func renderApp(cam: mod CameraState, character: mod CharacterState, frame: mod F
 
   applyCameraRigHierarchy(cam: cam, world: world)
   syncCameraBar(world: io.world, rig: cam.rig, camera: cam.camera)
-  let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
+  let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
   let t: Float = (now - frame.startT) as Float
 
   loop var oi: Int = 0, oi < deferredOrderLength(r: render.renderer), ++oi {
@@ -276,11 +276,11 @@ func renderApp(cam: mod CameraState, character: mod CharacterState, frame: mod F
                                 camera: cam.camera, light: cam.light, aspect: aspect)
       }
       case RenderTag.uiOverlay {
-        gpu2d.beginFrameLoad()
+        Gpu2d.beginFrameLoad()
         renderSystemGpu2d(world: io.world, res: io.gpuUi)
         drawWalkerHud(logView: io.logView, gpuUi: io.gpuUi, dbg: io.dbg, moveStick: io.moveStick, panelOpen: io.settings.open)
       }
-      case RenderTag.present { gpu2d.endFrame() }
+      case RenderTag.present { Gpu2d.endFrame() }
     }
     Profile.zoneEnd(profiler: profiler, name: (tag as RenderTag).toString())
   }

@@ -21,11 +21,11 @@
 # containing exp() and pow(1.5) costs against the reference's doubles.
 
 import core
-import math
-import string
+import Math
+import String
 import Vec3
-import skyHosek
-open skyHosek
+import SkyHosek
+open SkyHosek
 
 func relErr(got: view Float, want: view Float) ret Float {
   var d: Float = got - want
@@ -57,11 +57,11 @@ func check(label: view String, got: view Float, want: view Float) {
 # from it and `theta` from the zenith is found by solving for the component
 # along the sun and taking the rest in the perpendicular direction.
 func dirFromThetaGamma(theta: view Float, gamma: view Float, elevationRad: view Float) ret Vec3 {
-  let sunZ: Float = math.sin(x: elevationRad)
-  let sunX: Float = math.cos(x: elevationRad)
-  let cosTheta: Float = math.cos(x: theta)
-  let sinTheta: Float = math.sin(x: theta)
-  let cosGamma: Float = math.cos(x: gamma)
+  let sunZ: Float = Math.sin(x: elevationRad)
+  let sunX: Float = Math.cos(x: elevationRad)
+  let cosTheta: Float = Math.cos(x: theta)
+  let sinTheta: Float = Math.sin(x: theta)
+  let cosGamma: Float = Math.cos(x: gamma)
   # dir = (x, 0, cosTheta) with x^2 + cosTheta^2 = 1, constrained so
   # dot(dir, sun) = cosGamma. Two unknowns in the XY plane; put the residual on
   # Y so the constraint is satisfiable for any gamma the caller asks for.
@@ -73,7 +73,7 @@ func dirFromThetaGamma(theta: view Float, gamma: view Float, elevationRad: view 
   if x < 0.0 - sinTheta { x = 0.0 - sinTheta }
   var ySq: Float = sinTheta * sinTheta - x * x
   if ySq < 0.0 { ySq = 0.0 }
-  ret Vec3.create(x: x, y: math.sqrt(x: ySq), z: cosTheta)
+  ret Vec3.create(x: x, y: Math.sqrt(x: ySq), z: cosTheta)
 }
 
 func main() {
@@ -135,7 +135,7 @@ func main() {
   # Direction of TRAVEL, the convention Light3d and the shaders use: the sun is
   # up when z is negative. Built by negating the toward-the-sun vector so the
   # relationship is visible rather than a sign to trust.
-  let toSun: Vec3 = Vec3.create(x: math.cos(x: elevation), y: 0.0, z: math.sin(x: elevation))
+  let toSun: Vec3 = Vec3.create(x: Math.cos(x: elevation), y: 0.0, z: Math.sin(x: elevation))
   let sunDir: Vec3 = Vec3.create(x: 0.0 - toSun.x, y: 0.0, z: 0.0 - toSun.z)
   let zenith: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
   let zr: Vec3 = hosekRadiance(sky: sky, dir: zenith, sunDir: toSun)

@@ -113,10 +113,10 @@ bool str_matches(Str a, Str b) {
 
 bool is_stdlib_module(Str name) {
     return str_eq_cstr(name, "core") || 
-           str_eq_cstr(name, "math") || 
-           str_eq_cstr(name, "io") || 
-           str_eq_cstr(name, "string") || 
-           str_eq_cstr(name, "sys") ||
+           str_eq_cstr(name, "Math") ||
+           str_eq_cstr(name, "Io") ||
+           str_eq_cstr(name, "String") ||
+           str_eq_cstr(name, "Sys") ||
            str_eq_cstr(name, "raylib") ||
            str_eq_cstr(name, "time") ||
            str_eq_cstr(name, "easing") ||

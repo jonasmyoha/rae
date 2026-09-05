@@ -10,15 +10,15 @@
 # Controls: W/S forward/back, A/D strafe, E/Q up/down, arrows or left-drag to
 # look, keys 1/2/3 set render quality, F12 writes a PNG.
 import core
-import gpu
+import Gpu
 import Sdl3
 import Keys
-import image
-import filesystem
-import math
-import noiseWgsl
+import Image
+import Filesystem
+import Math
+import NoiseWgsl
 import Vec3
-open noiseWgsl
+open NoiseWgsl
 
 type Transform3d {
     x: Float
@@ -157,14 +157,14 @@ func packCamera(pos: view Vec3, fwd: view Vec3, aspect: view Float) ret List(Flo
 }
 
 func buildGpu3d(wgsl: view String, camera: view List(Float), objects: view List(Float), materials: view List(Float), params: view List(Int), pixels: view Int) ret Gpu3dRt {
-    gpu.reset()
+    Gpu.reset()
     ret Gpu3dRt {
-        paramsBuf: gpu.uniformU32(data: params.data, count: 8),
-        cameraBuf: gpu.storageF32(data: camera.data, count: camera.length),
-        objectBuf: gpu.storageF32(data: objects.data, count: objects.length),
-        materialBuf: gpu.storageF32(data: materials.data, count: materials.length),
-        outBuf: gpu.allocU32(count: pixels),
-        kernel: gpu.kernel(wgsl: wgsl, entry: "main")
+        paramsBuf: Gpu.uniformU32(data: params.data, count: 8),
+        cameraBuf: Gpu.storageF32(data: camera.data, count: camera.length),
+        objectBuf: Gpu.storageF32(data: objects.data, count: objects.length),
+        materialBuf: Gpu.storageF32(data: materials.data, count: materials.length),
+        outBuf: Gpu.allocU32(count: pixels),
+        kernel: Gpu.kernel(wgsl: wgsl, entry: "main")
     }
 }
 
@@ -195,7 +195,7 @@ func main() {
     var camPos: Vec3 = Vec3.create(x: 0.0, y: -2.55, z: 0.55)
     var yaw: Float = pi / 2.0
     var pitch: Float = -0.08
-    var fwd: Vec3 = Vec3.create(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
+    var fwd: Vec3 = Vec3.create(x: Math.cos(x: pitch) * Math.cos(x: yaw), y: Math.cos(x: pitch) * Math.sin(x: yaw), z: Math.sin(x: pitch))
     let moveStep: Float = 0.075
     let rotStep: Float = 0.028
     let mouseSens: Float = 0.0045
@@ -223,7 +223,7 @@ func main() {
 
     loop not Sdl3.shouldClose() {
         if Sdl3.isKeyPressed(key: Keys.keyF2) {
-            let saved: Bool = image.savePng(path: filesystem.renderPath(stem: "rae_3d_minimal"), pixels: fb.data, width: width, height: height)
+            let saved: Bool = Image.savePng(path: Filesystem.renderPath(stem: "rae_3d_minimal"), pixels: fb.data, width: width, height: height)
         }
 
         var newQuality: Int = quality
@@ -271,13 +271,13 @@ func main() {
         if moved {
             if pitch > 1.35 { pitch = 1.35 }
             if pitch < -1.25 { pitch = -1.25 }
-            fwd = Vec3.create(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
+            fwd = Vec3.create(x: Math.cos(x: pitch) * Math.cos(x: yaw), y: Math.cos(x: pitch) * Math.sin(x: yaw), z: Math.sin(x: pitch))
             camera = packCamera(pos: camPos, fwd: fwd, aspect: aspect)
-            gpu.writeF32(buf: rt.cameraBuf, data: camera.data, count: camera.length)
+            Gpu.writeF32(buf: rt.cameraBuf, data: camera.data, count: camera.length)
         }
 
         params.set(index: 2, value: frame)
-        gpu.writeU32(buf: rt.paramsBuf, data: params.data, count: 8)
+        Gpu.writeU32(buf: rt.paramsBuf, data: params.data, count: 8)
 
         let bufs: List(Int) = createList(Int, cap: 5)
         bufs.add(value: rt.paramsBuf)
@@ -285,8 +285,8 @@ func main() {
         bufs.add(value: rt.objectBuf)
         bufs.add(value: rt.materialBuf)
         bufs.add(value: rt.outBuf)
-        gpu.run(kernel: rt.kernel, bufs: bufs.data, bufCount: 5, gx: (width + 7) / 8, gy: (height + 7) / 8, gz: 1)
-        gpu.downloadU32(buf: rt.outBuf, out: fb.data, count: width * height)
+        Gpu.run(kernel: rt.kernel, bufs: bufs.data, bufCount: 5, gx: (width + 7) / 8, gy: (height + 7) / 8, gz: 1)
+        Gpu.downloadU32(buf: rt.outBuf, out: fb.data, count: width * height)
 
         Sdl3.updatePixels(pixels: fb.data, w: width, h: height)
         Sdl3.present()
@@ -294,6 +294,6 @@ func main() {
         frame = frame + 1
     }
 
-    gpu.reset()
+    Gpu.reset()
     Sdl3.closeWindow()
 }

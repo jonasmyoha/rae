@@ -1080,7 +1080,7 @@ void rae_gb_set_pyr_bind(int64_t i, void* b) {
  * The table itself lives in runtime_sky_state.h, shared with the forward sky
  * pass so the two renderers cannot end up under different skies. Layout is
  * documented there. */
-void rae_ext_gbuffer_skyHosekPush(int64_t index, float value) {
+void rae_ext_Gbuffer_skyHosekPush(int64_t index, float value) {
     rae_sky_hosek_push(index, value);
 }
 
@@ -1147,7 +1147,7 @@ void rae_gb_light_upload(float camX, float camY, float camZ, float exposure,
     u[64] = horR; u[65] = horG; u[66] = horB; u[67] = discI;
     /* Cooked Hosek-Wilkie state at u[68..103] (9 vec4). Rae computes these from
      * the fitted table (lib/sky_hosek.rae + lib/data/hosek_wilkie_rgb.json) and
-     * pushes them with rae_ext_gbuffer_skyHosekPush; this pass only copies. The
+     * pushes them with rae_ext_Gbuffer_skyHosekPush; this pass only copies. The
      * model's arithmetic deliberately does not live in C — see
      * docs/tech-stack-and-dependencies.md, and lib/sky_hosek.rae's header for
      * what the earlier C version cost. */
@@ -1228,9 +1228,9 @@ void rae_gb_set_composite_bind(int64_t idx, void* b) { if (idx >= 0 && idx < 3) 
 
 /* Number of mip levels in the pyramid — 0 before the first build. Lets a
  * caller or test confirm the chain was actually built rather than skipped. */
-int64_t rae_ext_gbuffer_pyramidMips(void) { return (int64_t)gb_pyramid_mips; }
+int64_t rae_ext_Gbuffer_pyramidMips(void) { return (int64_t)gb_pyramid_mips; }
 
-void rae_ext_gbuffer_deferredShutdown(void) {
+void rae_ext_Gbuffer_deferredShutdown(void) {
     gb_deferred_release_targets();
     if (gb_pyr_from_depth_pipeline) { wgpuRenderPipelineRelease(gb_pyr_from_depth_pipeline); gb_pyr_from_depth_pipeline = NULL; }
     if (gb_pyr_reduce_pipeline)     { wgpuRenderPipelineRelease(gb_pyr_reduce_pipeline); gb_pyr_reduce_pipeline = NULL; }

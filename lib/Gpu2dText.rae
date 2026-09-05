@@ -1,15 +1,15 @@
 # GPU text layout — draw MSDF text through the gpu2d renderer (#111).
 #
-# This is the GPU sibling of sdfText.sdfDrawText: it does the SAME glyph
+# This is the GPU sibling of SdfText.sdfDrawText: it does the SAME glyph
 # layout (pen advance, plane/atlas bounds, screen-px-range) but emits one
-# gpu2d.drawGlyph instance per glyph instead of CPU-blitting. Kept in a
+# Gpu2d.drawGlyph instance per glyph instead of CPU-blitting. Kept in a
 # SEPARATE module so lib/sdfText.rae stays independent of gpu2d — the
 # raytracer's CPU text path must not drag in the wgpu render surface.
 #
 # Compiled-target only (pulls in gpu2d → wgpu-native + SDL3).
 import core
-import sdfText
-import gpu2d
+import SdfText
+import Gpu2d
 
 # Lay out one run of `text` at baseline (x, y), emitting a glyph quad per
 # character with an optional outline (outlineWidth px of outlineColor). Returns
@@ -28,7 +28,7 @@ func emitRange(font: view SdfFont, text: view String, start: copy Int, end: copy
     var i: Int = start
     loop i < end {
         let cp: Int = text.at(index: i).toInt()
-        let gi: Int = sdfText.sdfGlyphIndex(font: font, cp: cp)
+        let gi: Int = SdfText.sdfGlyphIndex(font: font, cp: cp)
         if gi >= 0 {
             let g: SdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: gi)
             if g.hasBounds {
@@ -46,20 +46,20 @@ func emitRange(font: view SdfFont, text: view String, start: copy Int, end: copy
                 var spr: Float = 1.0
                 if glyphH > 0.0 { spr = font.pxRange * (sy1 - sy0) / glyphH }
                 if spr < 1.0 { spr = 1.0 }
-                gpu2d.drawGlyphEx(sx0: sx0, sy0: sy0, sx1: sx1, sy1: sy1,
+                Gpu2d.drawGlyphEx(sx0: sx0, sy0: sy0, sx1: sx1, sy1: sy1,
                                   u0: u0, v0: v0, u1: u1, v1: v1,
                                   atlas: font.atlas, pxRange: spr, color: color,
                                   outlineWidth: outlineWidth, outlineColor: outlineColor, softness: softness)
             }
             pen = pen + g.advance * scale
         }
-        i = i + sdfText.sdfUtf8ByteWidth(cp: cp)
+        i = i + SdfText.sdfUtf8ByteWidth(cp: cp)
     }
     ret pen
 }
 
 func glyphAdvance(font: view SdfFont, cp: view Int, sizePx: view Float) ret Float {
-    let gi: Int = sdfText.sdfGlyphIndex(font: font, cp: cp)
+    let gi: Int = SdfText.sdfGlyphIndex(font: font, cp: cp)
     if gi < 0 { ret 0.0 }
     let glyph: SdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: gi)
     ret glyph.advance * (sizePx / font.emSize)
@@ -116,7 +116,7 @@ func drawTextWrappedEx(font: view SdfFont, text: view String, x: copy Float, y: 
                 width = 0.0
             } else {
                 width = width + advance
-                i = i + sdfText.sdfUtf8ByteWidth(cp: cp)
+                i = i + SdfText.sdfUtf8ByteWidth(cp: cp)
             }
         }
     }
@@ -130,7 +130,7 @@ func drawTextWrappedEx(font: view SdfFont, text: view String, x: copy Float, y: 
 }
 
 # Draw `text` with baseline pen at (x, y) in pixels, `sizePx` tall em,
-# colour 0xAARRGGBB. Submit between gpu2d.beginFrame and gpu2d.endFrame.
+# colour 0xAARRGGBB. Submit between Gpu2d.beginFrame and Gpu2d.endFrame.
 # Returns the pen x advance (end position), like a text cursor.
 func drawText(font: view SdfFont, text: view String, x: copy Float, y: copy Float, sizePx: copy Float, color: copy Int) ret Float {
     ret emitRun(font: font, text: text, x: x, y: y, sizePx: sizePx, color: color, outlineWidth: 0.0, outlineColor: 0, softness: 1.0)
@@ -159,5 +159,5 @@ func drawTextEx(font: view SdfFont, text: view String, x: copy Float, y: copy Fl
 
 # Width of `text` in pixels at `sizePx` (delegates to sdf_text).
 func measureText(font: view SdfFont, text: view String, sizePx: copy Float) ret Float {
-    ret sdfText.sdfMeasureText(font: font, text: text, sizePx: sizePx)
+    ret SdfText.sdfMeasureText(font: font, text: text, sizePx: sizePx)
 }

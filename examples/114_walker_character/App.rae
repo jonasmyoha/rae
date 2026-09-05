@@ -13,9 +13,9 @@
 # PersistState, createApp, the loop, updateApp, frameBegin. hud/players/splash/
 # state stay flat as shared helpers.
 import core
-import math
+import Math
 import Profile
-import gpu2d
+import Gpu2d
 import ecs/Entity
 import ecs/ComponentTable
 import ecs/Transform
@@ -23,21 +23,21 @@ import Quat
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Transform
-import sdfText
+import SdfText
 import Vec3
 import Gltf
 import GltfSkin
 import Png
-import sys
+import Sys
 import app3d/CameraRig
-import app3d/renderScale
+import app3d/RenderScale
 import app3d/CharacterController
 import app3d/UiShell
 import app3d/ControlPanel
 import app3d/CameraBar
 import RendererDeferred
 import Sky
-import gbuffer
+import Gbuffer
 import GbufferInstanced
 open GbufferInstanced
 import Particles
@@ -45,12 +45,12 @@ open Particles
 import GrassCompute
 open GrassCompute
 import GrassConfig
-import shadow3d
+import Shadow3d
 import app3d/Playback
 import app3d/Slider
 import app3d/SettingsDialog
-import skyHosek
-import hotReload
+import SkyHosek
+import HotReload
 import ui/LogOverlay
 import ui/WindowGeometry
 import ui/ScrollPanel
@@ -61,27 +61,27 @@ import ui/Ecs
 import ui/InputSystem/InputSystem
 import ui/RenderSystem/RenderSystem
 open Scene3d
-open gpu3d
+open Gpu3d
 open RendererDeferred
 open Sky
-open gbuffer
+open Gbuffer
 open Rendergraph
 open Math3d
 open Mesh3d
 open Gltf
 open GltfSkin
-open sdfText
+open SdfText
 open Png
 open app3d/CameraRig
 open app3d/CharacterController
 open app3d/SettingsDialog
-open skyHosek
+open SkyHosek
 open app3d/UiShell
 open app3d/ControlPanel
 open app3d/CameraBar
-open shadow3d
+open Shadow3d
 open app3d/Playback
-open hotReload
+open HotReload
 open ui/LogOverlay
 open ui/WindowGeometry
 open ui/ScrollPanel
@@ -198,13 +198,13 @@ type App {
 
 # ----- setup ---------------------------------------------------------------
 func createApp() ret App {
-  gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — walker character (animated) [{rendererPathName()}]")
+  Gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — walker character (animated) [{rendererPathName()}]")
   var windowGeom: WindowGeometry = createWindowGeometry(
     dir: dir(), name: "window.{state114AppId}.geometry")
   restoreWindowGeometry(g: windowGeom)
   let extentW: Float = windowExtentW()
   let extentH: Float = windowExtentH()
-  gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
+  Gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
 
   var moveStick: VirtualJoystick = createVirtualJoystick(
     padFracX: 0.06, padFracY: 0.11, radiusFrac: 0.14)
@@ -227,14 +227,14 @@ func createApp() ret App {
   if g.ok is false {
     log("[gltf] {g.errorMsg}")
     log("[gltf] regenerate assets/walker.glb — see tools/README.md")
-    gpu2d.closeWindow()
-    sys.exit(code: 1)
+    Gpu2d.closeWindow()
+    Sys.exit(code: 1)
   }
   let charData: MeshData = loadAllPrimitives(g: g)
   if charData.vertCount is 0 {
     log("[gltf] model contained no readable primitives")
-    gpu2d.closeWindow()
-    sys.exit(code: 1)
+    Gpu2d.closeWindow()
+    Sys.exit(code: 1)
   }
   log("[gltf] walker: {charData.vertCount} verts, {charData.indices.length / 3} triangles")
 
@@ -253,8 +253,8 @@ func createApp() ret App {
   var sk: Skeleton = loadSkeleton(g: g, skinIndex: 0)
   if sk.ok is false {
     log("[gltf] walker.glb has no skin — cannot animate")
-    gpu2d.closeWindow()
-    sys.exit(code: 1)
+    Gpu2d.closeWindow()
+    Sys.exit(code: 1)
   }
   log("[gltf] skeleton: {jointCount(sk: sk)} joints, {sk.nodeCount} nodes")
 
@@ -290,7 +290,7 @@ func createApp() ret App {
   groundWalker(controller: characterController, groundZ: groundZ)
   var partModel: Mat4 = walkerWorldModel(baseModel: basePartModel, controller: characterController)
 
-  let pngBytes: List(Int) = sys.readFileBytes(path: "{assets}walker_palette.png")
+  let pngBytes: List(Int) = Sys.readFileBytes(path: "{assets}walker_palette.png")
   var atlasW: Int = 0
   var atlasH: Int = 0
   let atlas: List(Int) = decodePng(png: pngBytes, len: pngBytes.length, width: atlasW, height: atlasH)
@@ -334,8 +334,8 @@ func createApp() ret App {
   log("[gltf] skinned parts: {partCount}")
   if partCount is 0 {
     log("[gltf] no skinned primitives uploaded")
-    gpu2d.closeWindow()
-    sys.exit(code: 1)
+    Gpu2d.closeWindow()
+    Sys.exit(code: 1)
   }
 
   var terrain: InfiniteTerrain = createInfiniteTerrain(world: gameWorld, assets: assets, groundZ: groundZ)
@@ -360,8 +360,8 @@ func createApp() ret App {
   let gs: Int = compileDeferred(r: renderer)
   if gs is not 0 {
     log("render graph invalid: {statusName(status: gs)}")
-    gpu2d.closeWindow()
-    sys.exit(code: 1)
+    Gpu2d.closeWindow()
+    Sys.exit(code: 1)
   }
 
   var rig: CameraRig = createCameraRig(camera: camera)
@@ -404,8 +404,8 @@ func createApp() ret App {
   buildControlPanel(panel: charPanel, world: uiWorld, res: gpuUi)
   setNodeText(world: uiWorld, nodeId: "CharacterReadout", value: "Controlling 1 / {1 + cloneCount}")
 
-  let headless: Bool = sys.getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0
-    or sys.getEnv(name: "RAE_HEADLESS_FRAMES").length() > 0
+  let headless: Bool = Sys.getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0
+    or Sys.getEnv(name: "RAE_HEADLESS_FRAMES").length() > 0
   if not headless {
     let saved: String = readHotReloadStateFor(appId: state114AppId)
     if restore114State(raw: saved, clipIndex: clipIndex, playing: playing, speed: speed,
@@ -431,8 +431,8 @@ func createApp() ret App {
   loop var cloneIndex: Int = 0, cloneIndex < cloneCount, ++cloneIndex {
     let spiralAngle: Float = cloneIndex.toFloat() * 2.3999632
     let spiralRadius: Float = 3.5 + cloneIndex.toFloat() * 0.45
-    let cloneX: Float = characterController.position.x + math.cos(x: spiralAngle) * spiralRadius
-    let cloneY: Float = characterController.position.y + math.sin(x: spiralAngle) * spiralRadius
+    let cloneX: Float = characterController.position.x + Math.cos(x: spiralAngle) * spiralRadius
+    let cloneY: Float = characterController.position.y + Math.sin(x: spiralAngle) * spiralRadius
     let cloneSpot: Vec3 = terrainFindLand(x: cloneX, y: cloneY)
     let cloneZ: Float = terrainHeightAt(x: cloneSpot.x, y: cloneSpot.y, groundZ: groundZ) - groundZ
     # Each crowd member gets its OWN controller (so the player can switch to and
@@ -494,7 +494,7 @@ func createApp() ret App {
   light.sunColor = settingsSunColor(s: settings)
   log("[ui] panel buttons: {clipPanel.buttonEntities.length} clip, {transport.buttonEntities.length} transport, camera bar {barOk}")
 
-  let startT: Float64 = gpu2d.nowSeconds()
+  let startT: Float64 = Gpu2d.nowSeconds()
   var drs: RenderScaleController = createRenderScaleController(targetFps: 60.0)
 
   ret App {
@@ -539,7 +539,7 @@ func createApp() ret App {
 func frameBegin(app: mod App) {
   Profile.tick(profiler: app.profiler)
   resizeUiToWindow(world: app.io.world, res: app.io.gpuUi)
-  let now: Float64 = gpu2d.nowSeconds()
+  let now: Float64 = Gpu2d.nowSeconds()
   var dt: Float = (now - app.frame.prevT) as Float
   app.frame.prevT = now
   app.frame.now = now
@@ -665,7 +665,7 @@ func updateApp(app: mod App) {
   }
   netPublishIntent(net: app.net, world: app.world)
 
-  let resized: Bool = gpu2d.windowResized()
+  let resized: Bool = Gpu2d.windowResized()
   if resized { app.persist.stateDirty = true }
   updateWindowGeometry(g: app.persist.windowGeom, now: now, resized: resized)
 
@@ -712,12 +712,12 @@ func runWalkerApp() ret Int {
   # (PropKind) — all recycled ECS entities.
   log("[ecs] GameWorld: {gameWorldEntityCount(world: app.world)} entities ({gameWorldPartCount(world: app.world)} parts + hero + crowd + terrain + grass)")
   Profile.maybeAutoStart(profiler: app.profiler)
-  loop not gpu2d.pollClose() {
+  loop not Gpu2d.pollClose() {
     frameBegin(app: app)
     updateApp(app: app)
-    if gpu2d.shouldRenderFrame(appNeedsRender: app.frame.needsRender) is false {
+    if Gpu2d.shouldRenderFrame(appNeedsRender: app.frame.needsRender) is false {
       # Park until the OS has something to say (shared policy, lib/ui/event_loop).
-      gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
+      Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
         animating: false, mouseDown: false, pollWatcher: false,
         frameSec: 0.016667, heartbeatSec: 1.0
       ))
@@ -727,6 +727,6 @@ func runWalkerApp() ret Int {
   }
   skinShutdown()
   shutdown()
-  gpu2d.closeWindow()
+  Gpu2d.closeWindow()
   ret 0
 }

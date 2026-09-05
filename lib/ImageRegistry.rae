@@ -4,7 +4,7 @@
 # gpu2d still performs raw decode/upload and render-time lookup, while Rae owns
 # image keys, loaded/failed status, retry throttling, and cache metadata.
 import core
-import gpu2d
+import Gpu2d
 
 enum ImageLoadStatus {
   none
@@ -71,7 +71,7 @@ func imageRegistryHas(reg: view ImageRegistry, key: view String) pub ret Bool {
   }
   # Raw gpu2d still owns the render-time key table for now; consult it as a
   # compatibility bridge while policy moves to Rae.
-  ret gpu2d.hasImageKey(key: key)
+  ret Gpu2d.hasImageKey(key: key)
 }
 
 func isFailedPath(reg: view ImageRegistry, path: view String) pub ret Bool {
@@ -179,7 +179,7 @@ func load(reg: mod ImageRegistry, key: view String, path: view String) pub ret I
   }
   let copiedKey: String = "{key}"
   let copiedPath: String = "{path}"
-  let handle: Int = gpu2d.loadImageKey(key: copiedKey, path: copiedPath)
+  let handle: Int = Gpu2d.loadImageKey(key: copiedKey, path: copiedPath)
   upsertResult(reg: reg, key: key, path: path, handle: handle)
   ret handle
 }

@@ -6,14 +6,14 @@
 # Controls: W/S forward/back, A/D strafe, E/Q up/down, arrows or left-drag look,
 # 1/2/3 quality, F12 screenshot. Compiled target only.
 import core
-import gpu
+import Gpu
 import Sdl3
 import Keys
-import image
-import filesystem
-import noiseWgsl
+import Image
+import Filesystem
+import NoiseWgsl
 import Vec3
-open noiseWgsl
+open NoiseWgsl
 
 type Transform3d {
     position: Vec3
@@ -104,7 +104,7 @@ func extractScene(scene: view Scene3d, cameraPos: view Vec3, forward: view Vec3,
     pushVec3(buf: packed, value: forward)
     pushVec3(buf: packed, value: right)
     pushVec3(buf: packed, value: up)
-    packed.add(value: math.tan(x: 52.0 * pi / 360.0))
+    packed.add(value: Math.tan(x: 52.0 * pi / 360.0))
     packed.add(value: frame.toFloat() / 60.0)
     packed.add(value: 0.0)
     packed.add(value: 0.0)
@@ -128,12 +128,12 @@ func extractScene(scene: view Scene3d, cameraPos: view Vec3, forward: view Vec3,
 }
 
 func buildGpu3d(wgsl: view String, sceneData: view List(Float), params: view List(Int), pixels: view Int) ret Gpu3dRt {
-    gpu.reset()
+    Gpu.reset()
     ret Gpu3dRt {
-        sceneBuf: gpu.storageF32(data: sceneData.data, count: sceneData.length),
-        outBuf: gpu.allocU32(count: pixels),
-        paramsBuf: gpu.uniformU32(data: params.data, count: 8),
-        kernel: gpu.kernel(wgsl: wgsl, entry: "main")
+        sceneBuf: Gpu.storageF32(data: sceneData.data, count: sceneData.length),
+        outBuf: Gpu.allocU32(count: pixels),
+        paramsBuf: Gpu.uniformU32(data: params.data, count: 8),
+        kernel: Gpu.kernel(wgsl: wgsl, entry: "main")
     }
 }
 
@@ -163,7 +163,7 @@ func main() {
     var cameraPos: Vec3 = vec(x: 0.0, y: -4.7, z: 1.2)
     var yaw: Float = pi / 2.0
     var pitch: Float = -0.08
-    var forward: Vec3 = vec(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
+    var forward: Vec3 = vec(x: Math.cos(x: pitch) * Math.cos(x: yaw), y: Math.cos(x: pitch) * Math.sin(x: yaw), z: Math.sin(x: pitch))
     var sceneData: List(Float) = extractScene(scene: scene, cameraPos: cameraPos, forward: forward, frame: 0)
     var rt: Gpu3dRt = buildGpu3d(wgsl: wgsl, sceneData: sceneData, params: params, pixels: width * height)
     var framebuffer: List(Int) = createList(Int, cap: width * height)
@@ -221,30 +221,30 @@ func main() {
         if pitch > 1.45 { pitch = 1.45 }
         if pitch < -1.45 { pitch = -1.45 }
         if moved {
-            forward = vec(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
+            forward = vec(x: Math.cos(x: pitch) * Math.cos(x: yaw), y: Math.cos(x: pitch) * Math.sin(x: yaw), z: Math.sin(x: pitch))
         }
 
         # Time is part of the extracted frame data so procedural animation and
         # camera changes use one upload path.
         sceneData = extractScene(scene: scene, cameraPos: cameraPos, forward: forward, frame: frame)
-        gpu.writeF32(buf: rt.sceneBuf, data: sceneData.data, count: sceneData.length)
+        Gpu.writeF32(buf: rt.sceneBuf, data: sceneData.data, count: sceneData.length)
         params.set(index: 4, value: frame)
-        gpu.writeU32(buf: rt.paramsBuf, data: params.data, count: 8)
+        Gpu.writeU32(buf: rt.paramsBuf, data: params.data, count: 8)
 
         let bufs: List(Int) = createList(Int, cap: 3)
         bufs.add(value: rt.paramsBuf)
         bufs.add(value: rt.sceneBuf)
         bufs.add(value: rt.outBuf)
-        gpu.run(kernel: rt.kernel, bufs: bufs.data, bufCount: 3, gx: (width + 7) / 8, gy: (height + 7) / 8, gz: 1)
-        gpu.downloadU32(buf: rt.outBuf, out: framebuffer.data, count: width * height)
+        Gpu.run(kernel: rt.kernel, bufs: bufs.data, bufCount: 3, gx: (width + 7) / 8, gy: (height + 7) / 8, gz: 1)
+        Gpu.downloadU32(buf: rt.outBuf, out: framebuffer.data, count: width * height)
         Sdl3.updatePixels(pixels: framebuffer.data, w: width, h: height)
         Sdl3.present()
         Sdl3.setTitle(title: "Rae 3D — GPT-5.6-Sol | {width}x{height} | WASD/E-Q + drag | 1/2/3 quality | F12 PNG")
         if Sdl3.isKeyPressed(key: Keys.keyF2) {
-            let saved: Bool = image.savePng(path: filesystem.renderPath(stem: "rae_gpu3d"), pixels: framebuffer.data, width: width, height: height)
+            let saved: Bool = Image.savePng(path: Filesystem.renderPath(stem: "rae_gpu3d"), pixels: framebuffer.data, width: width, height: height)
         }
         frame = frame + 1
     }
-    gpu.reset()
+    Gpu.reset()
     Sdl3.closeWindow()
 }

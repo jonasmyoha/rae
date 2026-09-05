@@ -13,7 +13,7 @@
 #   var drs = createRenderScaleController(targetFps: 60.0)   # once
 #   updateRenderScale(drs: drs, dt: dt)                       # each frame
 import core
-import gpu2d
+import Gpu2d
 import Profile
 
 # Push the render scale to the deferred renderer (#530). C clamps to [0.25, 1.0].
@@ -135,7 +135,7 @@ func drsShadowRes(drs: view RenderScaleController) pub ret Int {
 func capFrameSleep(drs: view RenderScaleController, frameStartSec: copy Float64) pub {
   if drs.capFps >= 60.0 { ret }
   let period: Float = 1.0 / drs.capFps
-  let elapsed: Float = (gpu2d.nowSeconds() - frameStartSec) as Float
+  let elapsed: Float = (Gpu2d.nowSeconds() - frameStartSec) as Float
   if elapsed < period {
     sleep(ms: rae_float_to_int(f: (period - elapsed) * 1000.0))
   }
