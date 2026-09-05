@@ -194,12 +194,14 @@ func runFrame(world: mod GameWorld, sched: mod Schedule, hero: view EntityId, fr
 func worldToJson(world: view GameWorld, registry: view ComponentRegistry) ret String {
   var writer: WorldJson = createWorldJson()
   # #760: registry-gated serialize with NO hand-listing. `fields(world)` unrolls
-  # to one addComponentTable per ComponentTable field, keyed by the field name;
-  # the registry flags still decide WHICH tables serialize (Enemy is registered
+  # to one addComponentTable per ComponentTable field, keyed by the COMPONENT
+  # type name (#809 typeName: `Position`, not the slot name `positions`) — the
+  # one vocabulary shared with the registry and a human-authored scene file; the
+  # registry flags still decide WHICH tables serialize (Enemy is registered
   # without serialize, so it is skipped). Add a component table -> nothing to edit
   # here. Resources (Clock) are not per-entity tables, so they stay explicit.
   loop let table: view ComponentTable(any) in fields(world) {
-    addComponentTable(writer: writer, table: table, name: fieldName(table), registry: registry)
+    addComponentTable(writer: writer, table: table, name: typeName(table), registry: registry)
   }
   # Pass the resource's toJson() directly (do NOT bind it to a `let s: String`
   # first and pass `s` by view — that currently double-frees the owned string;
@@ -210,9 +212,9 @@ func worldToJson(world: view GameWorld, registry: view ComponentRegistry) ret St
 
 func worldFromJson(world: mod GameWorld, registry: view ComponentRegistry, doc: view JsonDoc) {
   # #760: the mirror of worldToJson — one loadComponentTable per ComponentTable
-  # field, registry-gated and keyed by the field name. No hand-listing.
+  # field, registry-gated and keyed by the component type name. No hand-listing.
   loop let table: mod ComponentTable(any) in fields(world) {
-    loadComponentTable(table: table, name: fieldName(table), registry: registry, doc: doc)
+    loadComponentTable(table: table, name: typeName(table), registry: registry, doc: doc)
   }
   let clockStr: String = resourceJson(name: "Clock", registry: registry, doc: doc)
   if clockStr.length() > 0 {
@@ -225,14 +227,15 @@ func main() {
   # tag is runtime-only (registered without serialize); Clock is a serialized
   # resource.
   var reg: ComponentRegistry = createComponentRegistry()
-  # #760: the machine snapshot is keyed by FIELD name (what fieldName(table)
-  # yields), so register each table under its field name. Enemy stays a
-  # runtime-only tag (no serialize) and is skipped by the registry, not by the
-  # loop.
-  registerComponent(reg: reg, name: "positions", flags: serialize)
-  registerComponent(reg: reg, name: "velocities", flags: serialize)
-  registerComponent(reg: reg, name: "healths", flags: serialize)
-  registerComponent(reg: reg, name: "enemies", flags: 0)
+  # #809: the machine snapshot is keyed by the COMPONENT type name (what
+  # typeName(table) yields), so register each component under its own name —
+  # one vocabulary for code, the registry, and a human-authored scene file.
+  # Enemy stays a runtime-only tag (no serialize) and is skipped by the
+  # registry, not by the loop.
+  registerComponent(reg: reg, name: "Position", flags: serialize)
+  registerComponent(reg: reg, name: "Velocity", flags: serialize)
+  registerComponent(reg: reg, name: "Health", flags: serialize)
+  registerComponent(reg: reg, name: "Enemy", flags: 0)
   registerResource(reg: reg, name: "Clock", flags: serialize)
 
   # Spawn a hero (index 1) and two enemies (index 2, 3) through the allocator.

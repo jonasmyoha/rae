@@ -102,7 +102,7 @@ a feature that is not already listed here.
     forgotten table is already a compile error there, so reflection buys no safety,
     and it would need a new incremental struct-assembly construct for the least gain
     (full reasoning in `docs/compile-time-reflection.md`).
-  - **Element type-name reflection `typeName(T)` (new, surfaced by #760).** `fieldName`
+  - **Element type-name reflection `typeName(T)` `(landed #809)`.** `fieldName`
     gives a table's FIELD name (`positions`), but the serializer's registry is keyed by
     the COMPONENT type name (`Position`). With only `fieldName`, the registry-gated
     `loop ... in fields(world) { addComponentTable(name: fieldName(table)) }` forces the
