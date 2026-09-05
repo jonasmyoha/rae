@@ -41,17 +41,17 @@ import core
 import math
 import sys
 import gpu2d
-import vec3
+import Vec3
 import gbuffer
-import ecs/entity
-open scene3d
-open ecs/entity
+import ecs/Entity
+open Scene3d
+open ecs/Entity
 open gpu3d
 open gbuffer
-open rendererDeferred
-open rendergraph
-open math3d
-open mesh3d
+open RendererDeferred
+open Rendergraph
+open Math3d
+open Mesh3d
 
 func uploadMeshData(m: view MeshData) ret MeshHandle {
   ret uploadMesh(verts: m.verts, vertCount: m.vertCount, indices: m.indices)
@@ -63,9 +63,9 @@ func uploadMeshData(m: view MeshData) ret MeshHandle {
 # is what makes a wrong material channel visible rather than plausible.
 func buildScene(sphere: view MeshHandle, ground: view MeshHandle, torus: view MeshHandle) ret World3d {
   var world: World3d = createWorld3d()
-  let noEmit: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
-  let noRot: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
-  let unit: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  let noEmit: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let noRot: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let unit: Vec3 = Vec3.create(x: 1.0, y: 1.0, z: 1.0)
 
   loop var row: Int = 0, row < 5, ++row {
     loop var col: Int = 0, col < 5, ++col {
@@ -77,10 +77,10 @@ func buildScene(sphere: view MeshHandle, ground: view MeshHandle, torus: view Me
       # Hue varies across the grid so the albedo channel is legible as
       # something other than one flat colour.
       let mat: Material3d = {
-        baseColor: vec3.create(x: 0.85, y: 0.2 + row.toFloat() * 0.15, z: 0.25 + col.toFloat() * 0.15),
+        baseColor: Vec3.create(x: 0.85, y: 0.2 + row.toFloat() * 0.15, z: 0.25 + col.toFloat() * 0.15),
         metallic: metallic, roughness: roughness, emission: noEmit, toon: false
       }
-      let pos: Vec3 = vec3.create(x: (col.toFloat() - 2.0) * 2.4, y: (row.toFloat() - 2.0) * 2.4, z: 0.5)
+      let pos: Vec3 = Vec3.create(x: (col.toFloat() - 2.0) * 2.4, y: (row.toFloat() - 2.0) * 2.4, z: 0.5)
       let e: EntityId = world3dAddMeshInstance(world: world, mesh: sphere, material: mat, position: pos, rotation: noRot, scale: unit)
     }
   }
@@ -91,11 +91,11 @@ func buildScene(sphere: view MeshHandle, ground: view MeshHandle, torus: view Me
   # albedo, so an emitter is authored by setting both. A value above 1
   # is the point: it proves the log encoding carries HDR range that a
   # plain 8-bit channel could not.
-  let emitMat: Material3d = { baseColor: vec3.create(x: 0.35, y: 0.7, z: 1.0), metallic: 0.0, roughness: 0.5, emission: vec3.create(x: 4.0, y: 4.0, z: 4.0), toon: false }
-  let torusE: EntityId = world3dAddMeshInstance(world: world, mesh: torus, material: emitMat, position: vec3.create(x: 0.0, y: 0.0, z: 3.6), rotation: noRot, scale: unit)
+  let emitMat: Material3d = { baseColor: Vec3.create(x: 0.35, y: 0.7, z: 1.0), metallic: 0.0, roughness: 0.5, emission: Vec3.create(x: 4.0, y: 4.0, z: 4.0), toon: false }
+  let torusE: EntityId = world3dAddMeshInstance(world: world, mesh: torus, material: emitMat, position: Vec3.create(x: 0.0, y: 0.0, z: 3.6), rotation: noRot, scale: unit)
 
-  let groundMat: Material3d = { baseColor: vec3.create(x: 0.42, y: 0.43, z: 0.45), metallic: 0.0, roughness: 0.9, emission: noEmit, toon: false }
-  let groundE: EntityId = world3dAddMeshInstance(world: world, mesh: ground, material: groundMat, position: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.7), rotation: noRot, scale: unit)
+  let groundMat: Material3d = { baseColor: Vec3.create(x: 0.42, y: 0.43, z: 0.45), metallic: 0.0, roughness: 0.9, emission: noEmit, toon: false }
+  let groundE: EntityId = world3dAddMeshInstance(world: world, mesh: ground, material: groundMat, position: Vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.7), rotation: noRot, scale: unit)
   ret world
 }
 

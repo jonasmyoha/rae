@@ -11,13 +11,13 @@
 #
 #   rae run --target compiled main.rae
 import core
-import sdl3
-import keys
+import Sdl3
+import Keys
 import image
 import filesystem
-import vec3
-import scene
-import render
+import Vec3
+import Scene
+import Render
 
 func main() {
     let width: Int = 1280
@@ -34,14 +34,14 @@ func main() {
         i = i + 1
     }
 
-    sdl3.initWindow(width: width, height: height, title: "Rae raytracer — step 2 (diffuse + AA)")
-    sdl3.setTargetFPS(fps: 60)
+    Sdl3.initWindow(width: width, height: height, title: "Rae raytracer — step 2 (diffuse + AA)")
+    Sdl3.setTargetFPS(fps: 60)
 
     var nextRow: Int = 0
     let startMs: Int = nowMs()
     var doneMs: Int = 0
-    loop not sdl3.shouldClose() {
-        if sdl3.isKeyPressed(key: keys.keyF2) { let s: Bool = image.savePng(path: filesystem.renderPath(stem: "rae_render"), pixels: fb.data, width: width, height: height) }
+    loop not Sdl3.shouldClose() {
+        if Sdl3.isKeyPressed(key: Keys.keyF2) { let s: Bool = image.savePng(path: filesystem.renderPath(stem: "rae_render"), pixels: fb.data, width: width, height: height) }
 
         let frameStart: Int = nowMs()
         loop nextRow < height and nowMs() - frameStart <= 16 {
@@ -53,15 +53,15 @@ func main() {
             doneMs = nowMs() - startMs
         }
 
-        sdl3.updatePixels(pixels: fb.data, w: width, h: height)
-        sdl3.present()
+        Sdl3.updatePixels(pixels: fb.data, w: width, h: height)
+        Sdl3.present()
 
         let pct: Int = nextRow * 100 / height
         if doneMs > 0 {
-            sdl3.setTitle(title: "Rae step 2 (SDL3) | diffuse + {samples}spp | {width}x{height} | done in {doneMs}ms")
+            Sdl3.setTitle(title: "Rae step 2 (SDL3) | diffuse + {samples}spp | {width}x{height} | done in {doneMs}ms")
         } else {
-            sdl3.setTitle(title: "Rae step 2 (SDL3) | diffuse + {samples}spp | {width}x{height} | {pct}%")
+            Sdl3.setTitle(title: "Rae step 2 (SDL3) | diffuse + {samples}spp | {width}x{height} | {pct}%")
         }
     }
-    sdl3.closeWindow()
+    Sdl3.closeWindow()
 }

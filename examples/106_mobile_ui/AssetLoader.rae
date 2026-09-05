@@ -1,0 +1,149 @@
+open ui/Ecs
+# GPU bitmap-asset loading. Driven by the album list produced by
+# `album_loader.rae` — every album's cover becomes a gpu2d image key under
+# `<stem>`. Material icons go through the font atlas, not this registry.
+#
+# The avatar uses the album cover at `avatarAlbumStem` (see
+# `config.rae`) circle-cropped at load time. Missing → placeholder.
+import core
+import fs
+
+# Registry key the texture for an album cover lives under. The stem
+# is the stable identity — it survives folder reshuffles and tracks
+# the same album across renames. Centralised so the grid, the hero
+# rebind path, and the loader all agree.
+func albumCoverKey(stem: view String) pub ret String {
+  ret "{stem}"
+}
+
+
+# Registry key for the circular profile avatar. Lives under a
+# `user.*` namespace so iteration over album-cover keys (which use
+# the bare stem) never picks it up by accident.
+func profileAvatarKey() pub ret String {
+  ret "user.avatar"
+}
+
+# Load every album cover into gpu2d under its stem key. Idempotent.
+func loadAlbumCovers(reg: mod TextureRegistry, albums: view List(Album)) pub {
+  var i: Int = 0
+  var loaded: Int = 0
+  loop i < albums.length {
+    let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
+    let key: String = albumCoverKey(stem: a.stem)
+    if textureHas(reg: reg, key: key) is false {
+      # Two fresh String allocations — neither aliases `a`'s storage,
+      # so the cover keeps loading even if `albums` is dropped before
+      # the next refresh.
+      let copiedKey: String = key
+      let copiedPath: String = a.coverPath
+      let h: Int = textureLoad(reg: reg, key: copiedKey, path: copiedPath)
+      loaded = loaded + 1
+    }
+    i = i + 1
+  }
+  log("[asset_loader] loaded {loaded} album covers")
+}
+
+# Load the profile avatar image key from whichever album stem `config.rae`
+# points at. The GPU2D renderer clips it with the authored rounded/circle
+# shape; no CPU-side pre-crop is used in 106.
+func loadAvatar(reg: mod TextureRegistry, albums: view List(Album)) pub {
+  let avatarStem: String = avatarAlbumStem
+  let idx: Int = findAlbumIndex(albums: albums, stem: avatarStem)
+  if idx < 0 {
+    log("[asset_loader] avatar album stem '{avatarStem}' not found — using placeholder")
+    ret
+  }
+  let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: idx)
+  let avatarKey: String = profileAvatarKey()
+  let avatarPath: String = a.coverPath
+  let copiedKey: String = "{avatarKey}"
+  let copiedPath: String = "{avatarPath}"
+  let h: Int = textureLoad(reg: reg, key: copiedKey, path: copiedPath)
+}
+
+# Aggregate boot loader. Kept for screenshot/stress compatibility.
+func loadAllTextures(reg: mod TextureRegistry, albums: view List(Album)) pub {
+  loadAlbumCovers(reg: reg, albums: albums)
+  loadAvatar(reg: reg, albums: albums)
+}
+
+# Progressive loader for the interactive path. In 106 this is an alias for
+# the gpu2d image-key path.
+func cascadeAssets(reg: mod TextureRegistry, albums: view List(Album), budget: view Int, load: mod AssetLoad) pub ret Bool {
+  ret cascadeGpu2dAssets(reg: reg, albums: albums, budget: budget, load: load)
+}
+
+# Latches so the progressive loader stops re-scanning once everything is
+# registered. Without these, `cascadeGpu2dAssets` (called every frame by
+# frame_pipeline) walked ALL albums every frame forever, allocating a
+# per-album `albumCoverKey(...)` string each time. Those key strings are
+# owned temps the C backend detaches from the statement pool (pool_take)
+# but doesn't auto-drop at scope exit (the String scope-exit-dealloc gap,
+# docs/scope-exit-dealloc.md) — so idle re-scanning leaked ~one string per
+# album per frame (~600 KB/min, #282). Latching also removes the wasteful
+# per-frame O(albums) scan + hasImageKey calls once nothing is left to load.
+# Reset when the album list changes (media library rebuild).
+# #789: was three module-global latch vars; now an owned resource threaded
+# from AppState (appState.assetLoad). Transient — never persisted.
+type AssetLoad {
+  coversLoaded: Bool
+  avatarLoaded: Bool
+  coversSeenLen: Int
+}
+
+func createAssetLoad() pub ret AssetLoad {
+  ret AssetLoad { coversLoaded: false, avatarLoaded: false, coversSeenLen: 0 - 1 }
+}
+
+# Progressive gpu2d image-key loader. Registers each album cover under the same
+# Sprite.textureKey used throughout the ECS world. Idempotent + self-latching:
+# once every cover (and the avatar) is registered it becomes a cheap no-op
+# until the album list changes.
+func cascadeGpu2dAssets(reg: mod TextureRegistry, albums: view List(Album), budget: view Int, load: mod AssetLoad) pub ret Bool {
+  if albums.length is not load.coversSeenLen {
+    load.coversSeenLen = albums.length
+    load.coversLoaded = false
+    load.avatarLoaded = false
+  }
+  var busy: Bool = false
+  if load.coversLoaded is false {
+    var i: Int = 0
+    var loaded: Int = 0
+    loop i < albums.length {
+      if loaded >= budget {
+        ret true
+      }
+      let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
+      # Inline the key builder as a call arg (don't bind a `let`) so its
+      # heap stays a pool temp freed by this function's scope flush.
+      if textureHas(reg: reg, key: albumCoverKey(stem: a.stem)) is false {
+        let h: Int = textureLoad(reg: reg, key: albumCoverKey(stem: a.stem), path: a.coverPath)
+        loaded = loaded + 1
+      }
+      i = i + 1
+    }
+    # A full pass that registered nothing means every cover is present —
+    # latch so future frames skip the scan entirely.
+    if loaded is 0 {
+      load.coversLoaded = true
+    } else {
+      busy = true
+    }
+  }
+
+  if load.avatarLoaded is false {
+    if textureHas(reg: reg, key: profileAvatarKey()) is false {
+      let idx: Int = findAlbumIndex(albums: albums, stem: avatarAlbumStem)
+      if idx >= 0 {
+        let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: idx)
+        let h: Int = textureLoad(reg: reg, key: profileAvatarKey(), path: a.coverPath)
+      }
+      busy = true
+    } else {
+      load.avatarLoaded = true
+    }
+  }
+  ret busy
+}

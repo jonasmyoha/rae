@@ -1,0 +1,23 @@
+# Camera setup and motion. The camera floats around the well in a slow
+# orbit; line clears later get to nudge it for a satisfying screen-shake.
+import Vec3
+open Scene3d
+
+# Static head-on camera matching the 2D Tetris layout. Slight perspective
+# (low fovy + Z pulled back) gives the cubes a tiny bit of depth without
+# rotating away from a flat well view.
+func forWorld(world: view World) ret Camera3d {
+  ret Camera3d {
+    position: Vec3.create(x: 0.0, y: 0.0 - 34.0, z: 11.0)
+    target: Vec3.create(x: 0.0, y: 0.0, z: 10.0)
+    fovYDeg: 34.0
+    nearZ: 0.1
+    farZ: 100.0
+  }
+}
+
+func cameraSystem(w: mod World) {
+  # Camera is static for now, but we still tick `camTime` so future
+  # systems (screen shake, line-clear nudge) have a clock to read.
+  w.camTime = w.camTime + 0.016
+}

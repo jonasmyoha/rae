@@ -1,0 +1,97 @@
+# gbufferWorld — the World3d (ECS) geometry-pass fill for the deferred frame.
+#
+# The World3d twins of gbuffer.rae's `renderScene` / `renderSceneSdf`: the same
+# deferred G-buffer passes, but reading each entity's components through the
+# lib/ecs ComponentTable queries instead of the legacy `Scene3d` parallel Lists
+# (#736 migrates the storage; #793/#794 lift these draws into lib so every 3D
+# example shares one renderer). They live in their own module rather than in
+# gbuffer.rae only because gbuffer.rae is at its 1000-line cap — the encoding
+# (GbufferCache, drawInstance, drawMetaballs) still lives there and is reached
+# through `import gbuffer`.
+import core
+import gbuffer
+open gbuffer
+open Scene3d
+open Vec3
+open ecs/Entity
+open ecs/ComponentTable
+
+# The World3d twin of renderScene (#793) — the deferred G-buffer mesh pass reading
+# each entity's MeshRenderer/Transform3d/PrevTransform/Material3d through ECS
+# queries instead of the Scene3d parallel lists. This is the World3d render path
+# (#736) that 112/114 open-coded in their RenderSystems, lifted into lib so every
+# 3D example shares one renderer. Order-independent for the deferred G-buffer
+# (depth-resolved), so query order vs the old list order does not change the image.
+func renderSceneWorld(cache: mod GbufferCache, world: view World3d) pub {
+  loop var j: Int = 0, j < componentCount(this: world.meshRenderers), ++j {
+    let entity: EntityId = componentEntityAt(this: world.meshRenderers, i: j)
+    let renderer: MeshRenderer = componentGet(this: world.meshRenderers, entity: entity)
+    if renderer.visible {
+      let t: Transform3d = componentGet(this: world.transforms, entity: entity)
+      let pt: Transform3d = componentGet(this: world.prevTransforms, entity: entity)
+      let m: Material3d = componentGet(this: world.materials, entity: entity)
+      drawInstance(cache: cache, mesh: renderer.mesh, transform: t, prevTransform: pt, material: m)
+    }
+  }
+}
+
+# The World3d twin of renderSceneSdf (#794) — the same metaball cluster pass reading
+# each SDF entity's SdfPrimitive/Transform3d/Material3d through ECS queries instead
+# of the Scene3d parallel lists. Cluster discovery is identical (scan for unseen
+# cluster ids), so the two paths group the same balls into the same surfaces. The
+# mesh-only examples migrated in #794 have no SDF entities, so this early-returns;
+# it is here so the World3d deferred path is complete for SDF scenes (#795).
+func renderSceneSdfWorld(world: view World3d, camera: view Camera3d) pub {
+  let count: Int = componentCount(this: world.sdfs)
+  if count is 0 {
+    ret
+  }
+  loop var clusterScan: Int = 0, clusterScan < count, ++clusterScan {
+    let headEntity: EntityId = componentEntityAt(this: world.sdfs, i: clusterScan)
+    let head: SdfPrimitive = componentGet(this: world.sdfs, entity: headEntity)
+    var alreadyDrawn: Bool = false
+    loop var back: Int = 0, back < clusterScan, ++back {
+      let priorEntity: EntityId = componentEntityAt(this: world.sdfs, i: back)
+      let prior: SdfPrimitive = componentGet(this: world.sdfs, entity: priorEntity)
+      if prior.shape is 0 {
+        if prior.cluster is head.cluster { alreadyDrawn = true }
+      }
+    }
+    if head.shape is 0 {
+      if alreadyDrawn is false {
+        let packed: List(Float) = createList(Float, cap: count * 4)
+        let colors: List(Float) = createList(Float, cap: count * 4)
+        var ballCount: Int = 0
+        loop var i: Int = 0, i < count, ++i {
+          let ballEntity: EntityId = componentEntityAt(this: world.sdfs, i: i)
+          let sdf: SdfPrimitive = componentGet(this: world.sdfs, entity: ballEntity)
+          if sdf.shape is 0 {
+            if sdf.cluster is head.cluster {
+              let transform: Transform3d = componentGet(this: world.transforms, entity: ballEntity)
+              packed.add(value: transform.position.x)
+              packed.add(value: transform.position.y)
+              packed.add(value: transform.position.z)
+              packed.add(value: transform.scale.x)
+              let ballMaterial: Material3d = componentGet(this: world.materials, entity: ballEntity)
+              colors.add(value: ballMaterial.baseColor.x)
+              colors.add(value: ballMaterial.baseColor.y)
+              colors.add(value: ballMaterial.baseColor.z)
+              colors.add(value: 0.0)
+              ballCount = ballCount + 1
+            }
+          }
+        }
+        if ballCount > 0 {
+          let material: Material3d = componentGet(this: world.materials, entity: headEntity)
+          drawMetaballs(
+            packedBalls: packed.data, count: ballCount,
+            packedColors: colors.data, smoothing: head.smoothing,
+            camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z,
+            metallic: material.metallic, roughness: material.roughness,
+            emR: material.emission.x, emG: material.emission.y, emB: material.emission.z
+          )
+        }
+      }
+    }
+  }
+}
