@@ -71,7 +71,7 @@ in place, no copy-out/mutate/set-back. Dense order is insertion order UNTIL a
 `componentRemove` swap-removes (which moves the last row into the hole); systems
 that need a stable order use the hierarchy `depthOrder` instead.
 
-## Queries — `lib/ecs/query.rae`
+## Queries — `lib/ecs/Query.rae`
 
 Join tables on the entities they share, probing the smallest table:
 
@@ -80,6 +80,8 @@ type Query2Match { entity: EntityId, denseA: Int, denseB: Int }
 func query2(A: type, B: type, tableA: view ComponentTable(A), tableB: view ComponentTable(B)) ret List(Query2Match)
 type Query3Match { entity: EntityId, denseA: Int, denseB: Int, denseC: Int }
 func query3(A: type, B: type, C: type, tableA: ..., tableB: ..., tableC: view ComponentTable(C)) ret List(Query3Match)
+func query4(A, B, C, D: type, tableA: ..., tableD: view ComponentTable(D)) ret List(Query4Match)
+func query5(A, B, C, D, E: type, tableA: ..., tableE: view ComponentTable(E)) ret List(Query5Match)
 ```
 
 Each match carries the dense indices, so you fetch the row with the accessors
@@ -87,16 +89,38 @@ without a second lookup:
 
 ```rae
 loop let hit: view Query2Match in query2(tableA: world.positions, tableB: world.velocities) {
-  let pos: mod Position => queryModAt(table: world.positions, denseIndex: hit.denseA)
-  let vel: view Velocity => queryViewAt(table: world.velocities, denseIndex: hit.denseB)
+  let pos: mod Position => queryModAt(table: world.positions, denseIndex: hit.indexA)
+  let vel: view Velocity => queryViewAt(table: world.velocities, denseIndex: hit.indexB)
   pos.x = pos.x + vel.dx
 }
 func queryModAt(table: mod ComponentTable(T), denseIndex: view Int) ret mod T
 func queryViewAt(table: view ComponentTable(T), denseIndex: view Int) ret view T
 ```
 
-`queryTagged(D, T, dataTable, tagTable)` is `query2` specialised to "data table
-filtered by a zero-field tag". `forEach` / `forEachView` iterate one table.
+`tagged(D, T, dataTable, tagTable)` is `query2` specialised to "data table
+filtered by a zero-field tag" — the **with T** filter. `forEach` / `forEachView`
+iterate one table.
+
+The query ladder is FIXED at `query2`..`query5` (each hand-written in the same
+smallest-table-probe style; no variadic generics — declined, see the wishlist).
+Each `queryNViewX(tableX, hit)` reads slot X of an N-way match through a `view`
+ref without bumping the generation; `queryModAt(table, hit.indexX)` writes.
+
+Filters are PLAIN FUNCTIONS, not a builder (#807):
+
+```rae
+func tagged(D, T: type, dataTable: view ComponentTable(D), tagTable: view ComponentTable(T)) ret List(Query2Match)   # with T
+func without(D, T: type, dataTable: view ComponentTable(D), tagTable: view ComponentTable(T)) ret List(QueryMatch)  # without T
+func changedSince(T: type, table: view ComponentTable(T), sinceGeneration: view Int) ret List(QueryMatch)         # changed
+```
+
+`without` walks the data table (a negation has no smaller set to drive off) with
+one O(1) probe per entity; its matches index the DATA table. `changedSince`
+returns only entities written after `sinceGeneration`, read straight off the
+per-entity stamps the table already keeps — a system records
+`componentTableGeneration(table)` after a run and passes it next time to touch
+only what moved. It complements `Schedule`'s table-level skip with an
+entity-level filter.
 
 ## Tags — `lib/ecs/tag.rae`
 
