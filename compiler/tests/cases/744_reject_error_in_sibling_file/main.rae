@@ -1,0 +1,13 @@
+import core
+
+# #815: the sema error lives HERE, in the entry file. The diagnostic must name
+# main.rae — not the sibling the module merge happened to load last.
+func nudge(p: view Pos) {
+  p.x = 1
+}
+
+func main() {
+  let p: Pos = { x: 0 }
+  nudge(p: p)
+  log(describe(p: p))
+}
