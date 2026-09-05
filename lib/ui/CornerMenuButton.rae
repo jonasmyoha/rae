@@ -6,12 +6,12 @@
 # design units, safe-area aware, clear of the debug button (top-right), a touch
 # joystick (bottom-left) and the log overlay (bottom-right).
 import core
-import gpu2d
+import Gpu2d
 
 # Square side, and top-left origin (safe-area aware) in gpu2d design units.
-func cornerMenuButtonSize() pub ret Float { ret gpu2d.designWidth() * 0.085 }
-func cornerMenuButtonX() pub ret Float { ret gpu2d.safeLeft() + gpu2d.designWidth() * 0.045 }
-func y() pub ret Float { ret gpu2d.safeTop() + gpu2d.designHeight() * 0.03 }
+func cornerMenuButtonSize() pub ret Float { ret Gpu2d.designWidth() * 0.085 }
+func cornerMenuButtonX() pub ret Float { ret Gpu2d.safeLeft() + Gpu2d.designWidth() * 0.045 }
+func y() pub ret Float { ret Gpu2d.safeTop() + Gpu2d.designHeight() * 0.03 }
 
 # Draw the rounded panel + three bars. Call inside the 2D overlay pass, last, so
 # it draws over the ECS UI world and the settings panel.
@@ -19,22 +19,22 @@ func drawCornerMenuButton() pub {
   let size: Float = cornerMenuButtonSize()
   let bx: Float = cornerMenuButtonX()
   let by: Float = y()
-  gpu2d.drawRoundedRect(x: bx, y: by, w: size, h: size, radius: size * 0.24, color: 0xC01A2028)
+  Gpu2d.drawRoundedRect(x: bx, y: by, w: size, h: size, radius: size * 0.24, color: 0xC01A2028)
   let barW: Float = size * 0.5
   let barH: Float = size * 0.09
   let barX: Float = bx + size * 0.25
-  gpu2d.drawRoundedRect(x: barX, y: by + size * 0.31, w: barW, h: barH, radius: barH * 0.5, color: 0xF0FFFFFF)
-  gpu2d.drawRoundedRect(x: barX, y: by + size * 0.455, w: barW, h: barH, radius: barH * 0.5, color: 0xF0FFFFFF)
-  gpu2d.drawRoundedRect(x: barX, y: by + size * 0.60, w: barW, h: barH, radius: barH * 0.5, color: 0xF0FFFFFF)
+  Gpu2d.drawRoundedRect(x: barX, y: by + size * 0.31, w: barW, h: barH, radius: barH * 0.5, color: 0xF0FFFFFF)
+  Gpu2d.drawRoundedRect(x: barX, y: by + size * 0.455, w: barW, h: barH, radius: barH * 0.5, color: 0xF0FFFFFF)
+  Gpu2d.drawRoundedRect(x: barX, y: by + size * 0.60, w: barW, h: barH, radius: barH * 0.5, color: 0xF0FFFFFF)
 }
 
 # True on the frame the button is pressed (a pointer-press inside its square).
 func tapped() pub ret Bool {
-  if not gpu2d.pointerPressed() { ret false }
+  if not Gpu2d.pointerPressed() { ret false }
   let size: Float = cornerMenuButtonSize()
   let bx: Float = cornerMenuButtonX()
   let by: Float = y()
-  let px: Float = gpu2d.pointerX()
-  let py: Float = gpu2d.pointerY()
+  let px: Float = Gpu2d.pointerX()
+  let py: Float = Gpu2d.pointerY()
   ret px >= bx and px <= bx + size and py >= by and py <= by + size
 }

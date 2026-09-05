@@ -25,14 +25,14 @@
 # Headless screenshot:
 #   RAE_SDL_HEADLESS_MS=2000 RAE_GPU2D_SCREENSHOT=/tmp/3d.bmp rae run ...
 import core
-import math
-import gpu2d
+import Math
+import Gpu2d
 import Vec3
 import RendererDeferred
 import ecs/Entity
 open Scene3d
 open ecs/Entity
-open gpu3d
+open Gpu3d
 open RendererDeferred
 open Math3d
 open Mesh3d
@@ -75,7 +75,7 @@ func buildScene(sphere: view MeshHandle, torus: view MeshHandle, ground: view Me
 }
 
 func main() ret Int {
-  gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — PBR raster (Z-up)")
+  Gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — PBR raster (Z-up)")
 
   let sphereData: MeshData = makeSphere(rings: 32, segments: 48)
   let planeData: MeshData = makePlane(size: 40.0, segments: 1)
@@ -111,13 +111,13 @@ func main() ret Int {
     ret 1
   }
 
-  let startT: Float64 = gpu2d.nowSeconds()
+  let startT: Float64 = Gpu2d.nowSeconds()
 
-  loop not gpu2d.pollClose() {
+  loop not Gpu2d.pollClose() {
     # ---- input: orbit camera -----------------------------------------
-    let px: Float = gpu2d.pointerX()
-    let py: Float = gpu2d.pointerY()
-    if gpu2d.pointerDown() {
+    let px: Float = Gpu2d.pointerX()
+    let py: Float = Gpu2d.pointerY()
+    if Gpu2d.pointerDown() {
       if dragging {
         yaw = yaw + (px - lastX) * 0.008
         # Screen Y grows downward, so invert it: dragging upward raises the
@@ -136,7 +136,7 @@ func main() ret Int {
     }
     lastX = px
     lastY = py
-    dist = dist - gpu2d.wheelMove() * 0.8
+    dist = dist - Gpu2d.wheelMove() * 0.8
     if dist < 4.0 {
       dist = 4.0
     }
@@ -146,7 +146,7 @@ func main() ret Int {
 
     # Elapsed seconds: the subtraction happens in Float64 (full epoch
     # precision) and only the small delta is narrowed, explicitly.
-    let t: Float = (gpu2d.nowSeconds() - startT) as Float
+    let t: Float = (Gpu2d.nowSeconds() - startT) as Float
     camera.position = orbitEye(targetX: camera.target.x, targetY: camera.target.y, targetZ: camera.target.z, yaw: yaw, pitch: pitch, dist: dist)
 
     # Slowly orbiting sun keeps the specular highlight sweeping. Z-up: the
@@ -155,21 +155,21 @@ func main() ret Int {
     # the viewer — without it the highlights face away and the material
     # grid reads flat.
     let sunA: Float = t * 0.15
-    light.sunDir = Vec3.create(x: 0.0 - math.cos(x: sunA) * 0.6, y: 0.0 - 0.7 - math.sin(x: sunA) * 0.3, z: 0.0 - 1.0)
+    light.sunDir = Vec3.create(x: 0.0 - Math.cos(x: sunA) * 0.6, y: 0.0 - 0.7 - Math.sin(x: sunA) * 0.3, z: 0.0 - 1.0)
 
     # Spin the torus about +Z and tumble it about +X.
     var torusT: Transform3d = world3dGetTransform(world: world, entity: torusEntity)
     torusT.rotation = Vec3.create(x: t * 0.4, y: 0.0, z: t * 0.6)
     world3dWriteTransform(world: world, entity: torusEntity, transform: torusT)
 
-    let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
-    if gpu2d.renderGate() {
+    let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
+    if Gpu2d.renderGate() {
       renderDeferredFrameWorld(r: renderer, world: world, camera: camera, light: light, aspect: aspect)
       # Frame history for motion vectors (#336): current becomes previous.
       world3dPrevTransformSystem(world: world)
     }
   }
   shutdown()
-  gpu2d.closeWindow()
+  Gpu2d.closeWindow()
   ret 0
 }

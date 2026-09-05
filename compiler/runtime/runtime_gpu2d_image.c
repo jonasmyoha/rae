@@ -90,7 +90,7 @@ static WGPUBuffer* g_g2d_text_frame_bufs[RAE_SDF_MAX_ATLAS];
 static int* g_g2d_text_frame_buf_cap[RAE_SDF_MAX_ATLAS];
 static int g_g2d_text_frame_buf_n[RAE_SDF_MAX_ATLAS];
 static int g_g2d_text_frame_buf_slots[RAE_SDF_MAX_ATLAS];
-void rae_ext_gpu2d_flush(void);
+void rae_ext_Gpu2d_flush(void);
 
 static void rae_g2d_keep_frame_buf(WGPUBuffer b) {
     if (!b) return;
@@ -246,7 +246,7 @@ static int rae_g2d_decode_rgba(const char* path, unsigned char** out_rgba,
  * corrupt-file behaviour is testable in the headless suite. Returns
  * 1 when the file decodes, 0 (plus the standard stderr line) when it
  * doesn't. Also handy as a CLI-side asset validator. */
-int64_t rae_ext_gpu2d_decodeImageProbe(rae_String path) {
+int64_t rae_ext_Gpu2d_decodeImageProbe(rae_String path) {
     if (!path.data) return 0;
     unsigned char* rgba = NULL; unsigned uw = 0, uh = 0;
     const char* why = "decode failed";
@@ -262,7 +262,7 @@ int64_t rae_ext_gpu2d_decodeImageProbe(rae_String path) {
 /* Decode an image file and upload it as an RGBA8 texture. Decode policy
  * lives in rae_g2d_decode_rgba; a failure logs one line and returns
  * handle 0, which callers already render as their placeholder. */
-int64_t rae_ext_gpu2d_loadImage(rae_String path) {
+int64_t rae_ext_Gpu2d_loadImage(rae_String path) {
     if (!path.data || !g_wgpu_dev || g_g2d_img_n >= RAE_G2D_MAX_IMG) return 0;
     unsigned char* rgba = NULL; unsigned uw = 0, uh = 0;
     const char* cpath = (const char*)path.data;
@@ -296,7 +296,7 @@ int64_t rae_ext_gpu2d_loadImage(rae_String path) {
  * Rae List(Int) instead of a decoded file, so no image files are involved. Each
  * int is one packed pixel r | g<<8 | b<<16 | a<<24 (byte order R,G,B,A, matching
  * RGBA8Unorm). Returns a 1-based handle, 0 on failure. */
-int64_t rae_ext_gpu2d_registerImageRgba(const int64_t* pixels, int64_t w, int64_t h) {
+int64_t rae_ext_Gpu2d_registerImageRgba(const int64_t* pixels, int64_t w, int64_t h) {
     if (!pixels || !g_wgpu_dev || w <= 0 || h <= 0 || g_g2d_img_n >= RAE_G2D_MAX_IMG) return 0;
     size_t n = (size_t)w * (size_t)h;
     unsigned char* rgba = (unsigned char*)malloc(n * 4);
@@ -333,8 +333,8 @@ int64_t rae_ext_gpu2d_registerImageRgba(const int64_t* pixels, int64_t w, int64_
  * view; the terrain G-buffer pass binds this view directly (with its own repeat
  * sampler), so a plate-harvested tile reaches the ground without a second upload
  * path. Returns NULL for an out-of-range handle. 1-based handle, as returned by
- * rae_ext_gpu2d_registerImageRgba. */
-void* rae_ext_gpu2d_imageView(int64_t handle) {
+ * rae_ext_Gpu2d_registerImageRgba. */
+void* rae_ext_Gpu2d_imageView(int64_t handle) {
     if (handle < 1 || handle > g_g2d_img_n) return NULL;
     return (void*)g_g2d_img_view[handle - 1];
 }
@@ -349,7 +349,7 @@ static int  g_g2d_img_key_n = 0;
 
 /* Register an existing handle under a key (for the RGBA path above, which does
  * not know about the key registry defined below). */
-void rae_ext_gpu2d_registerImageKeyHandle(rae_String key, int64_t handle) {
+void rae_ext_Gpu2d_registerImageKeyHandle(rae_String key, int64_t handle) {
     if (!key.data || handle <= 0) return;
     int slot = -1;
     for (int i = 0; i < g_g2d_img_key_n; i++)
@@ -362,7 +362,7 @@ void rae_ext_gpu2d_registerImageKeyHandle(rae_String key, int64_t handle) {
     }
 }
 
-void rae_ext_gpu2d_drawImage(float x, float y, float w, float h, float radius, int64_t handle, int64_t tint);  /* defined below */
+void rae_ext_Gpu2d_drawImage(float x, float y, float w, float h, float radius, int64_t handle, int64_t tint);  /* defined below */
 
 static int rae_g2d_handle_for_key(const char* k) {
     if (!k) return 0;
@@ -373,8 +373,8 @@ static int rae_g2d_handle_for_key(const char* k) {
 
 /* Decode+upload `path` and register it under `key` (returns the handle, 0 on
  * failure). Re-registering a key updates it. */
-int64_t rae_ext_gpu2d_loadImageKey(rae_String key, rae_String path) {
-    int64_t h = rae_ext_gpu2d_loadImage(path);
+int64_t rae_ext_Gpu2d_loadImageKey(rae_String key, rae_String path) {
+    int64_t h = rae_ext_Gpu2d_loadImage(path);
     if (h <= 0 || !key.data) return h;
     int slot = -1;
     for (int i = 0; i < g_g2d_img_key_n; i++)
@@ -390,15 +390,15 @@ int64_t rae_ext_gpu2d_loadImageKey(rae_String key, rae_String path) {
 
 /* True if `key` resolves to a loaded image (so a renderer can fall back to a
  * placeholder / mat: glyph when it doesn't). */
-rae_Bool rae_ext_gpu2d_hasImageKey(rae_String key) {
+rae_Bool rae_ext_Gpu2d_hasImageKey(rae_String key) {
     return key.data && rae_g2d_handle_for_key((const char*)key.data) > 0;
 }
 
 /* Draw a registered image by key (no-op if the key isn't registered). */
-void rae_ext_gpu2d_drawImageKey(rae_String key, float x, float y, float w, float h, float radius, int64_t tint){
+void rae_ext_Gpu2d_drawImageKey(rae_String key, float x, float y, float w, float h, float radius, int64_t tint){
     if (!key.data) return;
     int handle = rae_g2d_handle_for_key((const char*)key.data);
-    if (handle > 0) rae_ext_gpu2d_drawImage(x, y, w, h, radius, (int64_t)handle, tint);
+    if (handle > 0) rae_ext_Gpu2d_drawImage(x, y, w, h, radius, (int64_t)handle, tint);
 }
 
 static void rae_g2d_queue_image(double x, double y, double w, double h, double radius, int64_t handle, int64_t tint,
@@ -425,11 +425,11 @@ static void rae_g2d_queue_image(double x, double y, double w, double h, double r
 /* Queue an image draw for this frame (handle from loadImage). tint is
  * 0xAARRGGBB applied multiplicatively (use 0xFFFFFFFF for the unmodified
  * image). radius rounds the corners (design units). */
-void rae_ext_gpu2d_drawImage(float x, float y, float w, float h, float radius, int64_t handle, int64_t tint){
+void rae_ext_Gpu2d_drawImage(float x, float y, float w, float h, float radius, int64_t handle, int64_t tint){
     rae_g2d_queue_image(x, y, w, h, radius, handle, tint, 0.0f, 0.0f, 1.0f, 1.0f);
 }
 
-void rae_ext_gpu2d_drawImageKeyScaled(rae_String key, float x, float y, float w, float h, float radius, int64_t tint, int64_t scaleMode){
+void rae_ext_Gpu2d_drawImageKeyScaled(rae_String key, float x, float y, float w, float h, float radius, int64_t tint, int64_t scaleMode){
     if (!key.data) return;
     int handle = rae_g2d_handle_for_key((const char*)key.data);
     if (handle <= 0 || handle > g_g2d_img_n || w <= 0.0 || h <= 0.0) return;
@@ -437,7 +437,7 @@ void rae_ext_gpu2d_drawImageKeyScaled(rae_String key, float x, float y, float w,
     double iw = (double)g_g2d_img_w[idx];
     double ih = (double)g_g2d_img_h[idx];
     if (iw <= 0.0 || ih <= 0.0) {
-        rae_ext_gpu2d_drawImage(x, y, w, h, radius, (int64_t)handle, tint);
+        rae_ext_Gpu2d_drawImage(x, y, w, h, radius, (int64_t)handle, tint);
         return;
     }
     double img_aspect = iw / ih;

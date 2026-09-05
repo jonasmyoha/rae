@@ -6,7 +6,7 @@
 open ui/Ecs
 open ui/Layer
 import core
-import gpu2d
+import Gpu2d
 import ui/Ecs
 import ui/Layer
 open ecs/Entity
@@ -141,14 +141,14 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld) pub {
   clearInteraction(world: world, entity: input.hoveredEntity)
   clearInteraction(world: world, entity: input.pressedEntity)
 
-  let x: Float = gpu2d.pointerX()
-  let y: Float = gpu2d.pointerY()
-  let pressed: Bool = gpu2d.pointerPressed()
-  let released: Bool = gpu2d.pointerReleased()
+  let x: Float = Gpu2d.pointerX()
+  let y: Float = Gpu2d.pointerY()
+  let pressed: Bool = Gpu2d.pointerPressed()
+  let released: Bool = Gpu2d.pointerReleased()
   input.pointer = UiPointerState {
     x: x
     y: y
-    down: gpu2d.pointerDown()
+    down: Gpu2d.pointerDown()
     pressed: pressed
     released: released
   }

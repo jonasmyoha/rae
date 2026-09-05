@@ -1354,7 +1354,7 @@ void rae_gb_submit(void* cmd) {
     wgpuQueueSubmit(g_wgpu_queue, 1, &c);
 }
 
-int64_t rae_ext_gbuffer_drawCount(void) { return (int64_t)gb_draw_count; }
+int64_t rae_ext_Gbuffer_drawCount(void) { return (int64_t)gb_draw_count; }
 
 /* Write one G-buffer channel into the presentable target. */
 /* The debug-view pass moved to Rae (lib/gbuffer_inspector.rae debugView, #503). */
@@ -1362,12 +1362,12 @@ int64_t rae_ext_gbuffer_drawCount(void) { return (int64_t)gb_draw_count; }
 /* Present the composed frame. Shares the platform copy-to-drawable with
  * the forward frame — see rae_g3d_present_offscreen. Reached from Rae as
  * gbuffer.present() -> presentFrame() -> renderDeferredPass (no-UI present). */
-void rae_ext_gbuffer_present(void) {
+void rae_ext_Gbuffer_present(void) {
     rae_g2d_tick_virtual_clock();
     rae_g3d_present_offscreen();
 }
 
-void rae_ext_gbuffer_shutdown(void) {
+void rae_ext_Gbuffer_shutdown(void) {
     gb_release_targets();
     if (gb_view_pipeline) { wgpuRenderPipelineRelease(gb_view_pipeline); gb_view_pipeline = NULL; }
     if (gb_view_ubuf)     { wgpuBufferRelease(gb_view_ubuf); gb_view_ubuf = NULL; }

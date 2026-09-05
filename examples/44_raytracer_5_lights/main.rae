@@ -17,8 +17,8 @@
 import core
 import Sdl3
 import Keys
-import image
-import filesystem
+import Image
+import Filesystem
 import Vec3
 import Scene
 import Camera
@@ -67,7 +67,7 @@ func main() {
     let worldUp: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
     let aspect: Float = finalW.toFloat() / finalH.toFloat()
 
-    var fwd: Vec3 = Vec3.create(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
+    var fwd: Vec3 = Vec3.create(x: Math.cos(x: pitch) * Math.cos(x: yaw), y: Math.cos(x: pitch) * Math.sin(x: yaw), z: Math.sin(x: pitch))
     var cam: Camera = buildCamera(pos: camPos, target: Vec3.vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
 
     var hiQ: Bool = false
@@ -80,7 +80,7 @@ func main() {
     var prevMouseY: Int = Sdl3.getMouseY()
 
     loop not Sdl3.shouldClose() {
-        if Sdl3.isKeyPressed(key: Keys.keyF2) { let s: Bool = image.savePng(path: filesystem.renderPath(stem: "rae_render"), pixels: fb.data, width: width, height: height) }
+        if Sdl3.isKeyPressed(key: Keys.keyF2) { let s: Bool = Image.savePng(path: Filesystem.renderPath(stem: "rae_render"), pixels: fb.data, width: width, height: height) }
 
         var moved: Bool = false
 
@@ -178,7 +178,7 @@ func main() {
             if pitch < -1.5 {
                 pitch = -1.5
             }
-            fwd = Vec3.create(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
+            fwd = Vec3.create(x: Math.cos(x: pitch) * Math.cos(x: yaw), y: Math.cos(x: pitch) * Math.sin(x: yaw), z: Math.sin(x: pitch))
             cam = buildCamera(pos: camPos, target: Vec3.vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
             sampleCount = 0
         }

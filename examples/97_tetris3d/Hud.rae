@@ -2,7 +2,7 @@
 # game state into persistent ECS text/active components.
 import ui/Ecs
 import app3d/UiShell
-import gpu2d
+import Gpu2d
 open app3d/UiShell
 open ui/Ecs
 
@@ -42,7 +42,7 @@ func drawNextPiecePreview(kind: TetrominoKind) {
     var pieceX: Int = 0
     loop pieceX < 4 {
       if getShapeCell(kind: kind, rot: 0, px: pieceX, py: pieceY) is 1 {
-        gpu2d.drawRoundedRect(
+        Gpu2d.drawRoundedRect(
           x: previewX + pieceX.toFloat() * cellSize
           y: previewY + pieceY.toFloat() * cellSize
           w: cellSize - 1.0, h: cellSize - 1.0

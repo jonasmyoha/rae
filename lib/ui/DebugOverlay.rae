@@ -24,10 +24,10 @@
 #
 # The amber is 106's: it reads as instrumentation rather than as part of the app.
 import core
-import sys
-import gpu2d
+import Sys
+import Gpu2d
 import Gpu2dText
-import sdfText
+import SdfText
 
 # 0xAARRGGBB.
 const debugAmber: Int = 0xFFFFBF00
@@ -181,15 +181,15 @@ func updateDebugOverlay(d: mod DebugOverlay, screenW: view Float, screenH: view 
   d.screenH = screenH
   debugRecordFrame(d: d, now: now, didRealWork: didRealWork)
 
-  if gpu2d.pointerPressed() is false {
+  if Gpu2d.pointerPressed() is false {
     ret false
   }
   if d.wantButton is false {
     ret false
   }
 
-  let px: Float = gpu2d.pointerX()
-  let py: Float = gpu2d.pointerY()
+  let px: Float = Gpu2d.pointerX()
+  let py: Float = Gpu2d.pointerY()
   if debugPointInRect(px: px, py: py, x: debugButtonX(d: d), y: d.margin,
                       w: d.buttonSize, h: d.buttonSize) {
     d.open = d.open is false
@@ -287,13 +287,13 @@ func drawDebugToggleRow(d: view DebugOverlay, font: view SdfFont, index: view In
   let pillH: Float = 20.0
   let pillX: Float = x + debugDialogW - pillW - 16.0
   let pillY: Float = y + (debugDialogRowH - pillH) * 0.5
-  gpu2d.drawBox(x: pillX, y: pillY, w: pillW, h: pillH, radius: pillH * 0.5,
+  Gpu2d.drawBox(x: pillX, y: pillY, w: pillW, h: pillH, radius: pillH * 0.5,
                 fill: fill, borderWidth: 0.0, border: 0x00000000)
   var knobX: Float = pillX + 2.0
   if on {
     knobX = pillX + pillW - pillH + 2.0
   }
-  gpu2d.drawBox(x: knobX, y: pillY + 2.0, w: pillH - 4.0, h: pillH - 4.0,
+  Gpu2d.drawBox(x: knobX, y: pillY + 2.0, w: pillH - 4.0, h: pillH - 4.0,
                 radius: (pillH - 4.0) * 0.5, fill: 0xFFFFFFFF,
                 borderWidth: 0.0, border: 0x00000000)
 }
@@ -301,7 +301,7 @@ func drawDebugToggleRow(d: view DebugOverlay, font: view SdfFont, index: view In
 func drawDebugDialog(d: view DebugOverlay, font: view SdfFont) {
   let x: Float = debugDialogX(d: d)
   let y: Float = debugDialogY(d: d)
-  gpu2d.drawBox(x: x, y: y, w: debugDialogW, h: debugDialogH(), radius: 10.0,
+  Gpu2d.drawBox(x: x, y: y, w: debugDialogW, h: debugDialogH(), radius: 10.0,
                 fill: debugPanelFill, borderWidth: 1.0, border: debugPanelBorder)
   Gpu2dText.drawText(font: font, text: "Debug", x: x + 16.0, y: y + 28.0,
                       sizePx: 16.0, color: debugAmber)
@@ -321,7 +321,7 @@ func drawDebugHeartbeat(d: mod DebugOverlay, didRealWork: view Bool) {
       d.heartbeatX = 0.0 - 8.0
     }
   }
-  gpu2d.drawBox(x: d.heartbeatX, y: 0.0, w: 8.0, h: 8.0, radius: 0.0,
+  Gpu2d.drawBox(x: d.heartbeatX, y: 0.0, w: 8.0, h: 8.0, radius: 0.0,
                 fill: debugAmber, borderWidth: 0.0, border: 0x00000000)
 }
 
@@ -338,7 +338,7 @@ func drawDebugButton(d: view DebugOverlay, font: view SdfFont) {
     disc = debugInk
     glyph = debugAmber
   }
-  gpu2d.drawBox(x: x, y: d.margin, w: d.buttonSize, h: d.buttonSize,
+  Gpu2d.drawBox(x: x, y: d.margin, w: d.buttonSize, h: d.buttonSize,
                 radius: d.buttonSize * 0.5, fill: disc,
                 borderWidth: 0.0, border: 0x00000000)
   let glyphSize: Float = d.buttonSize * 0.66

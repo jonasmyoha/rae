@@ -10,11 +10,11 @@
 #
 #   rae run --target compiled main.rae
 import core
-import webgpu
+import Webgpu
 import Sdl3
 import Keys
-import image
-import filesystem
+import Image
+import Filesystem
 import Vec3
 import Scene
 import Camera
@@ -76,13 +76,13 @@ func main() {
 
     # Render once on the GPU, then present the framebuffer until the window closes.
     let t0: Int = nowMs()
-    webgpu.raytrace(scene: sceneBuf.data, sceneLen: sceneBuf.length, fb: fb.data,
+    Webgpu.raytrace(scene: sceneBuf.data, sceneLen: sceneBuf.length, fb: fb.data,
                    width: width, height: height, samples: samples, maxDepth: maxDepth, wgsl: wgsl)
     let ms: Int = nowMs() - t0
     Sdl3.setTitle(title: "Rae native WebGPU | {width}x{height} | {samples} spp | rendered in {ms}ms")
 
     loop not Sdl3.shouldClose() {
-        if Sdl3.isKeyPressed(key: Keys.keyF2) { let s: Bool = image.savePng(path: filesystem.renderPath(stem: "rae_render"), pixels: fb.data, width: width, height: height) }
+        if Sdl3.isKeyPressed(key: Keys.keyF2) { let s: Bool = Image.savePng(path: Filesystem.renderPath(stem: "rae_render"), pixels: fb.data, width: width, height: height) }
 
         Sdl3.updatePixels(pixels: fb.data, w: width, h: height)
         Sdl3.present()

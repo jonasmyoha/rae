@@ -16,8 +16,8 @@ func sphereValueAt(world: view List(Sphere), index: view Int) ret Sphere {
 func randomUnit() ret Vec3 {
     let a: Float = random() * tau
     let z: Float = random() * 2.0 - 1.0
-    let r: Float = math.sqrt(x: 1.0 - z * z)
-    ret Vec3.create(x: r * math.cos(x: a), y: r * math.sin(x: a), z: z)
+    let r: Float = Math.sqrt(x: 1.0 - z * z)
+    ret Vec3.create(x: r * Math.cos(x: a), y: r * Math.sin(x: a), z: z)
 }
 
 func vreflect(v: view Vec3, n: view Vec3) ret Vec3 {
@@ -31,14 +31,14 @@ func vrefract(uv: view Vec3, n: view Vec3, etaRatio: view Float) ret Vec3 {
         cosT = 1.0
     }
     let perp: Vec3 = Vec3.vscale(a: Vec3.vadd(a: uv, b: Vec3.vscale(a: n, s: cosT)), s: etaRatio)
-    let pl: Float = 0.0 - math.sqrt(x: abs(n: 1.0 - Vec3.vlenSq(a: perp)))
+    let pl: Float = 0.0 - Math.sqrt(x: abs(n: 1.0 - Vec3.vlenSq(a: perp)))
     ret Vec3.vadd(a: perp, b: Vec3.vscale(a: n, s: pl))
 }
 
 func schlick(cosine: view Float, refIdx: view Float) ret Float {
     var r0: Float = (1.0 - refIdx) / (1.0 + refIdx)
     r0 = r0 * r0
-    ret r0 + (1.0 - r0) * math.pow(base: 1.0 - cosine, exp: 5.0)
+    ret r0 + (1.0 - r0) * Math.pow(base: 1.0 - cosine, exp: 5.0)
 }
 
 func hitSphere(s: view Sphere, r: view Ray) ret Float {
@@ -50,7 +50,7 @@ func hitSphere(s: view Sphere, r: view Ray) ret Float {
     if disc < 0.0 {
         ret -1.0
     }
-    ret (-halfB - math.sqrt(x: disc)) / a
+    ret (-halfB - Math.sqrt(x: disc)) / a
 }
 
 func rayColor(world: view List(Sphere), r: view Ray, depth: view Int) ret Vec3 {
@@ -102,7 +102,7 @@ func rayColor(world: view List(Sphere), r: view Ray, depth: view Int) ret Vec3 {
             if cosT > 1.0 {
                 cosT = 1.0
             }
-            let sinT: Float = math.sqrt(x: 1.0 - cosT * cosT)
+            let sinT: Float = Math.sqrt(x: 1.0 - cosT * cosT)
             if etaRatio * sinT > 1.0 or schlick(cosine: cosT, refIdx: etaRatio) > random() {
                 scatter = vreflect(v: ud, n: frontN)
             } else {
@@ -181,9 +181,9 @@ func buildDisplay(fb: mod List(Int), accum: view List(Float), pixels: view Int, 
         if let value: Float = accum.copyAt(index: base) { accR = value }
         if let value: Float = accum.copyAt(index: base + 1) { accG = value }
         if let value: Float = accum.copyAt(index: base + 2) { accB = value }
-        let r: Float = math.sqrt(x: clampf(x: accR * inv))
-        let g: Float = math.sqrt(x: clampf(x: accG * inv))
-        let b: Float = math.sqrt(x: clampf(x: accB * inv))
+        let r: Float = Math.sqrt(x: clampf(x: accR * inv))
+        let g: Float = Math.sqrt(x: clampf(x: accG * inv))
+        let b: Float = Math.sqrt(x: clampf(x: accB * inv))
         let ir: Int = (255.99 * r).toInt()
         let ig: Int = (255.99 * g).toInt()
         let ib: Int = (255.99 * b).toInt()

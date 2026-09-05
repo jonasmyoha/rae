@@ -1,8 +1,8 @@
 # Focused 2D easing demo on Rae's GPU2D/SDL3 stack.
 import core
 import Easing
-import gpu2d
-import sys
+import Gpu2d
+import Sys
 import ui/Ecs
 import ui/RenderSystem/RenderSystem
 import app3d/UiShell
@@ -14,8 +14,8 @@ const canvasW: Float = 800.0
 const canvasH: Float = 450.0
 
 func main() ret Int {
-  gpu2d.initWindow(width: canvasW.toInt(), height: canvasH.toInt(), title: "Rae Easing 2D — GPU2D")
-  gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
+  Gpu2d.initWindow(width: canvasW.toInt(), height: canvasH.toInt(), title: "Rae Easing 2D — GPU2D")
+  Gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
 
   # The shared font/theme fixture keeps this example small; its authored UI is
   # still local and exercises the same .raescene ECS path as larger apps.
@@ -35,17 +35,17 @@ func main() ret Int {
   )
 
   let duration: Float = 2.0
-  var cycleStart: Float64 = gpu2d.nowSeconds()
+  var cycleStart: Float64 = Gpu2d.nowSeconds()
   let fixedTestFrame: Bool = getEnv(name: "RAE_EASING_TEST_FRAME").length() > 0
 
-  loop not gpu2d.pollClose() {
+  loop not Gpu2d.pollClose() {
     let resized: Bool = resizeUiToWindow(world: world, res: uiResources)
-    var elapsed: Float = (gpu2d.nowSeconds() - cycleStart) as Float
+    var elapsed: Float = (Gpu2d.nowSeconds() - cycleStart) as Float
     if fixedTestFrame {
       elapsed = 1.0
     } else {
       if elapsed > duration {
-        cycleStart = gpu2d.nowSeconds()
+        cycleStart = Gpu2d.nowSeconds()
         elapsed = 0.0
       }
     }
@@ -60,20 +60,20 @@ func main() ret Int {
     if huePhase is 3 { ballColor = 0xFFFFCA28 }
     if huePhase >= 4 { ballColor = 0xFFEC407A }
 
-    gpu2d.beginFrame(r: 0.06, g: 0.09, b: 0.15, a: 1.0)
-    gpu2d.drawGradientRect(
+    Gpu2d.beginFrame(r: 0.06, g: 0.09, b: 0.15, a: 1.0)
+    Gpu2d.drawGradientRect(
       x: 0.0, y: 0.0, w: canvasW, h: canvasH, radius: 0.0
       from: 0xFF141E30, to: 0xFF243B55, angleDeg: 90.0)
-    gpu2d.drawRoundedRect(
+    Gpu2d.drawRoundedRect(
       x: currentX - 35.0, y: 195.0, w: 80.0, h: 80.0
       radius: 40.0, color: 0x44000000)
-    gpu2d.drawGradientRect(
+    Gpu2d.drawGradientRect(
       x: currentX - 40.0, y: 185.0, w: 80.0, h: 80.0
       radius: 40.0, from: 0xFFFFFFFF, to: ballColor, angleDeg: 45.0)
     renderSystemGpu2d(world: world, res: uiResources)
-    gpu2d.endFrame()
+    Gpu2d.endFrame()
   }
 
-  gpu2d.closeWindow()
+  Gpu2d.closeWindow()
   ret 0
 }

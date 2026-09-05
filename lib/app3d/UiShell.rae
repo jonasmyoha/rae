@@ -22,9 +22,9 @@
 # font is too small" rather than like a unit bug, which is why the
 # conversion lives in one place.
 import core
-import gpu2d
-import sdfText
-open sdfText
+import Gpu2d
+import SdfText
+open SdfText
 open ui/Ecs
 open ui/Components
 open ui/Registry
@@ -33,7 +33,7 @@ open ui/LayoutSystem/LayoutSystem
 open ui/RenderSystem/RenderSystem
 open ui/VisualBoundsSystem/VisualBoundsSystem
 open ui/Scene
-open ui/sceneFile
+open ui/SceneFile
 open ui/SceneLoader
 open ui/Theme
 open ui/ThemeResolved
@@ -43,15 +43,15 @@ open ecs/Entity
 # ----- window extent --------------------------------------------------
 
 func windowExtentW() ret Float {
-  let ratio: Float = gpu2d.dpr()
-  if ratio < 0.1 { ret gpu2d.windowWidth().toFloat() }
-  ret gpu2d.windowWidth().toFloat() / ratio
+  let ratio: Float = Gpu2d.dpr()
+  if ratio < 0.1 { ret Gpu2d.windowWidth().toFloat() }
+  ret Gpu2d.windowWidth().toFloat() / ratio
 }
 
 func windowExtentH() ret Float {
-  let ratio: Float = gpu2d.dpr()
-  if ratio < 0.1 { ret gpu2d.windowHeight().toFloat() }
-  ret gpu2d.windowHeight().toFloat() / ratio
+  let ratio: Float = Gpu2d.dpr()
+  if ratio < 0.1 { ret Gpu2d.windowHeight().toFloat() }
+  ret Gpu2d.windowHeight().toFloat() / ratio
 }
 
 # Point the design resolution at the window's logical size, so the
@@ -62,7 +62,7 @@ func syncDesignResolution() {
   let w: Float = windowExtentW()
   let h: Float = windowExtentH()
   if w > 0.0 and h > 0.0 {
-    gpu2d.setDesignResolution(width: w, height: h, fit: 0)
+    Gpu2d.setDesignResolution(width: w, height: h, fit: 0)
   }
 }
 
@@ -122,7 +122,7 @@ func themeSlotOr(theme: view ResolvedTheme, slot: view String, fallback: view Rg
 # — which looks like a theme authoring mistake, not a missing call.
 func loadUiAssets(dir: view String, textFontName: view String,
                   iconFontName: view String, themeFile: view String) ret Gpu2dUi {
-  let textFont: SdfFont = sdfText.loadSdfFont(
+  let textFont: SdfFont = SdfText.loadSdfFont(
     jsonPath: "{dir}{textFontName}.mtsdf.json",
     rawAtlasPath: "{dir}{textFontName}.mtsdf.raw")
   # An empty icon name reuses the text font. The icon atlas is a megabyte
@@ -130,7 +130,7 @@ func loadUiAssets(dir: view String, textFontName: view String,
   # one just to satisfy a struct field.
   var iconFont: SdfFont = textFont
   if iconFontName.length() > 0 {
-    iconFont = sdfText.loadSdfFont(
+    iconFont = SdfText.loadSdfFont(
       jsonPath: "{dir}{iconFontName}.mtsdf.json",
       rawAtlasPath: "{dir}{iconFontName}.mtsdf.raw")
   }
@@ -175,7 +175,7 @@ func runUiSystems(world: mod UiWorld, res: view Gpu2dUi) {
 # Re-fit the world to the window after a resize. Returns whether anything
 # changed, which the caller feeds into its redraw decision.
 func resizeUiToWindow(world: mod UiWorld, res: view Gpu2dUi) ret Bool {
-  if gpu2d.windowResized() is false {
+  if Gpu2d.windowResized() is false {
     ret false
   }
   let w: Float = windowExtentW()
@@ -183,7 +183,7 @@ func resizeUiToWindow(world: mod UiWorld, res: view Gpu2dUi) ret Bool {
   if w <= 0.0 or h <= 0.0 {
     ret false
   }
-  gpu2d.setDesignResolution(width: w, height: h, fit: 0)
+  Gpu2d.setDesignResolution(width: w, height: h, fit: 0)
   world.layoutW = w
   world.layoutH = h
   runUiSystems(world: world, res: res)
@@ -199,7 +199,7 @@ func resizeUiToWindow(world: mod UiWorld, res: view Gpu2dUi) ret Bool {
 # window in the right corner at the wrong shape, which reads as more
 # broken than not restoring at all.
 #
-# POINTS, NOT PIXELS. `gpu2d.windowWidth()` reports PIXELS
+# POINTS, NOT PIXELS. `Gpu2d.windowWidth()` reports PIXELS
 # (SDL_GetWindowSizeInPixels), while setWindowSize takes POINTS. Saving
 # the former and restoring it as the latter doubles the window on a
 # retina display — and doubles it again on the next reload, so it walks

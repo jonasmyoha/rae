@@ -1,8 +1,8 @@
 import core
-import gpu2d
+import Gpu2d
 import Sdl3
 import Keys
-import sys
+import Sys
 import ui/Ecs
 import ui/RenderSystem/RenderSystem
 import app3d/UiShell
@@ -78,19 +78,19 @@ func drawGame(
   cpuPosition: view PaddleTransform
   ballPosition: view PaddleTransform
 ) {
-  gpu2d.drawGradientRect(
+  Gpu2d.drawGradientRect(
     x: 0.0, y: 0.0, w: fieldW, h: fieldH, radius: 0.0
     from: 0xFF101622, to: 0xFF071019, angleDeg: 90.0)
-  gpu2d.drawRoundedRect(
+  Gpu2d.drawRoundedRect(
     x: fieldW * 0.5 - 2.0, y: 78.0, w: 4.0, h: fieldH - 100.0
     radius: 2.0, color: 0x4458E0D0)
-  gpu2d.drawRoundedRect(
+  Gpu2d.drawRoundedRect(
     x: playerPosition.x, y: playerPosition.y, w: paddleW, h: paddleH
     radius: 10.0, color: 0xFFF4F8FF)
-  gpu2d.drawRoundedRect(
+  Gpu2d.drawRoundedRect(
     x: cpuPosition.x, y: cpuPosition.y, w: paddleW, h: paddleH
     radius: 10.0, color: 0xFFF4F8FF)
-  gpu2d.drawRoundedRect(
+  Gpu2d.drawRoundedRect(
     x: ballPosition.x - ballRadius, y: ballPosition.y - ballRadius
     w: ballRadius * 2.0, h: ballRadius * 2.0
     radius: ballRadius, color: 0xFF19E6D0)
@@ -113,8 +113,8 @@ func runPhysicsSelfTest() ret Bool {
 }
 
 func main() ret Int {
-  gpu2d.initWindow(width: fieldW.toInt(), height: fieldH.toInt(), title: "Rae Pong — GPU2D")
-  gpu2d.setDesignResolution(width: fieldW, height: fieldH, fit: 0)
+  Gpu2d.initWindow(width: fieldW.toInt(), height: fieldH.toInt(), title: "Rae Pong — GPU2D")
+  Gpu2d.setDesignResolution(width: fieldW, height: fieldH, fit: 0)
 
   let uiResources: Gpu2dUi = loadUiAssets(
     dir: "examples/104_ui_hello/assets/"
@@ -140,7 +140,7 @@ func main() ret Int {
   var displayedPlayerScore: Int = 0 - 1
   var displayedCpuScore: Int = 0 - 1
   var displayedWinner: Int = 0 - 1
-  var previousTime: Float64 = gpu2d.nowSeconds()
+  var previousTime: Float64 = Gpu2d.nowSeconds()
   let testMode: Bool = getEnv(name: "RAE_PONG_TEST_FRAME").length() > 0
 
   if testMode {
@@ -153,9 +153,9 @@ func main() ret Int {
     log("[pong] self-test passed")
   }
 
-  loop not gpu2d.pollClose() {
+  loop not Gpu2d.pollClose() {
     let resized: Bool = resizeUiToWindow(world: world, res: uiResources)
-    let now: Float64 = gpu2d.nowSeconds()
+    let now: Float64 = Gpu2d.nowSeconds()
     var dt: Float = (now - previousTime) as Float
     previousTime = now
     if dt > 0.05 { dt = 0.05 }
@@ -212,15 +212,15 @@ func main() ret Int {
     }
     runUiSystems(world: world, res: uiResources)
 
-    gpu2d.beginFrame(r: 0.03, g: 0.05, b: 0.08, a: 1.0)
+    Gpu2d.beginFrame(r: 0.03, g: 0.05, b: 0.08, a: 1.0)
     drawGame(
       playerPosition: playerPosition
       cpuPosition: cpuPosition
       ballPosition: ballPosition)
     renderSystemGpu2d(world: world, res: uiResources)
-    gpu2d.endFrame()
+    Gpu2d.endFrame()
   }
 
-  gpu2d.closeWindow()
+  Gpu2d.closeWindow()
   ret 0
 }

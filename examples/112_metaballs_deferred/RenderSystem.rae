@@ -6,8 +6,8 @@
 # - SDF pass queries each per-cluster tag (#734) with tagged over the sdfs
 #   table, packs that cluster's spheres, and issues one metaball draw.
 #
-# The low-level draw primitives (gbuffer.drawInstance / gbuffer.drawMetaballs for
-# the deferred G-buffer, gpu3d.drawShadowCaster / gpu3d.shadowMetaballs for the
+# The low-level draw primitives (Gbuffer.drawInstance / Gbuffer.drawMetaballs for
+# the deferred G-buffer, Gpu3d.drawShadowCaster / Gpu3d.shadowMetaballs for the
 # shadow map) stay in lib and are called QUALIFIED — gpu3d and gbuffer both
 # export drawInstance/drawMetaballs (forward vs deferred), so an unqualified call
 # would silently pick the forward path.
@@ -22,8 +22,8 @@
 import core
 import Scene3d
 import SceneAnimation
-import gpu3d
-import gbuffer
+import Gpu3d
+import Gbuffer
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Query
@@ -68,7 +68,7 @@ func renderSdfClusterGbuffer(T: type, world: view World3d, clusterTable: view Co
     }
   }
   if ballCount > 0 {
-    gbuffer.drawMetaballs(
+    Gbuffer.drawMetaballs(
       packedBalls: packed.data, count: ballCount,
       packedColors: colors.data, smoothing: headSmoothing,
       camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z,
@@ -103,7 +103,7 @@ func renderSdfClusterShadow(T: type, world: view World3d, clusterTable: view Com
     }
   }
   if ballCount > 0 {
-    gpu3d.shadowMetaballs(packedBalls: packed.data, count: ballCount, smoothing: headSmoothing)
+    Gpu3d.shadowMetaballs(packedBalls: packed.data, count: ballCount, smoothing: headSmoothing)
   }
 }
 

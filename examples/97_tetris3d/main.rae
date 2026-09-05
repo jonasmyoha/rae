@@ -1,18 +1,18 @@
 # Tetris 3D on Rae's deferred renderer, SDL3 input, and ECS/.raescene UI.
 import core
-import gpu2d
-import gbuffer
-import math
-import sys
+import Gpu2d
+import Gbuffer
+import Math
+import Sys
 import Vec3
 import RendererDeferred
 import ui/Ecs
 import ui/RenderSystem/RenderSystem
 import app3d/UiShell
 open app3d/UiShell
-open gbuffer
-open gpu3d
-open math
+open Gbuffer
+open Gpu3d
+open Math
 open RendererDeferred
 open Rendergraph
 open Scene3d
@@ -31,12 +31,12 @@ func renderFrame(
   debug: mod DebugOverlay
 ) {
   extractTetrisScene(renderState: renderState, world: game)
-  let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
+  let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
   var passIndex: Int = 0
   loop passIndex < deferredOrderLength(r: renderer) {
     let tag: Int = deferredTagAt(r: renderer, i: passIndex)
     if tag is RenderTag.uiOverlay {
-      gpu2d.beginFrameLoad()
+      Gpu2d.beginFrameLoad()
       renderSystemGpu2d(world: uiWorld, res: uiResources)
       drawNextPiecePreview(kind: game.nextKind)
       drawDebugOverlay(d: debug, font: uiResources.textFont, didRealWork: true)
@@ -51,8 +51,8 @@ func renderFrame(
 }
 
 func main() ret Int {
-  gpu2d.initWindow(width: 900, height: 900, title: "Rae Tetris 3D — Deferred")
-  gpu2d.setDesignResolution(width: 900.0, height: 900.0, fit: 0)
+  Gpu2d.initWindow(width: 900, height: 900, title: "Rae Tetris 3D — Deferred")
+  Gpu2d.setDesignResolution(width: 900.0, height: 900.0, fit: 0)
   seed(n: 2026)
 
   var game: World = {
@@ -96,7 +96,7 @@ func main() ret Int {
   var dbg: DebugOverlay = createDebugOverlay(
     button: true, fps: true, memory: true, heartbeat: false)
 
-  let testMode: Bool = sys.getEnv(name: "RAE_TETRIS3D_TEST_FRAME").length() > 0
+  let testMode: Bool = Sys.getEnv(name: "RAE_TETRIS3D_TEST_FRAME").length() > 0
   if testMode {
     game.score = 4200
     game.lines = 12
@@ -112,15 +112,15 @@ func main() ret Int {
   }
 
   let fixedStep: Float64 = 1.0 / 60.0
-  var previousTime: Float64 = gpu2d.nowSeconds()
+  var previousTime: Float64 = Gpu2d.nowSeconds()
   var accumulator: Float64 = 0.0
   var inputEdges: InputEdges = createInputEdges()
-  loop not gpu2d.pollClose() {
+  loop not Gpu2d.pollClose() {
     pollInputEdges(edges: inputEdges)
     let resized: Bool = resizeUiToWindow(world: uiWorld, res: uiResources)
-    let now: Float64 = gpu2d.nowSeconds()
+    let now: Float64 = Gpu2d.nowSeconds()
     if updateDebugOverlay(
-      d: dbg, screenW: gpu2d.designWidth(), screenH: gpu2d.designHeight()
+      d: dbg, screenW: Gpu2d.designWidth(), screenH: Gpu2d.designHeight()
       now: now, didRealWork: true) {
     }
     var frameTime: Float64 = now - previousTime
@@ -139,7 +139,7 @@ func main() ret Int {
     }
     syncTetrisHud(uiWorld: uiWorld, game: game, state: hudState)
     runUiSystems(world: uiWorld, res: uiResources)
-    if gpu2d.renderGate() {
+    if Gpu2d.renderGate() {
       renderFrame(
         renderer: renderer, renderState: renderState, game: game
         camera: camera, light: light
@@ -148,7 +148,7 @@ func main() ret Int {
   }
 
   if testMode { log("[tetris3d] deterministic deferred frame rendered") }
-  gbuffer.shutdownAll()
-  gpu2d.closeWindow()
+  Gbuffer.shutdownAll()
+  Gpu2d.closeWindow()
   ret 0
 }

@@ -3,7 +3,7 @@
 # physics controller can replace the position integration while retaining the
 # same camera-relative direction, facing and animation state.
 import core
-import math
+import Math
 import Sdl3
 import Vec3
 import Keys
@@ -54,7 +54,7 @@ func stepThirdPersonController(controller: mod ThirdPersonController,
   var localForward: Float = inputForward
   let inputLengthSq: Float = localRight * localRight + localForward * localForward
   if inputLengthSq > 1.0 {
-    let inverseLength: Float = 1.0 / math.sqrt(x: inputLengthSq)
+    let inverseLength: Float = 1.0 / Math.sqrt(x: inputLengthSq)
     localRight = localRight * inverseLength
     localForward = localForward * inverseLength
   }
@@ -65,9 +65,9 @@ func stepThirdPersonController(controller: mod ThirdPersonController,
     # Yaw zero looks from -Y toward +Y. These horizontal basis vectors match
     # camera_rig exactly, so W always moves away from the camera center-line.
     let forward: Vec3 = Vec3.create(
-      x: 0.0 - math.sin(x: cameraYaw), y: math.cos(x: cameraYaw), z: 0.0)
+      x: 0.0 - Math.sin(x: cameraYaw), y: Math.cos(x: cameraYaw), z: 0.0)
     let right: Vec3 = Vec3.create(
-      x: math.cos(x: cameraYaw), y: math.sin(x: cameraYaw), z: 0.0)
+      x: Math.cos(x: cameraYaw), y: Math.sin(x: cameraYaw), z: 0.0)
     let direction: Vec3 = Vec3.vadd(
       a: Vec3.vscale(a: forward, s: localForward),
       b: Vec3.vscale(a: right, s: localRight))
@@ -77,9 +77,9 @@ func stepThirdPersonController(controller: mod ThirdPersonController,
       a: controller.position, b: Vec3.vscale(a: direction, s: moveSpeed * dt))
 
     # A +Z rotation turns the model's +Y forward axis into `direction`.
-    let desiredHeading: Float = math.atan2(y: 0.0 - direction.x, x: direction.y)
+    let desiredHeading: Float = Math.atan2(y: 0.0 - direction.x, x: direction.y)
     let headingGap: Float = wrapCharacterAngle(angle: desiredHeading - controller.heading)
-    let turnAmount: Float = 1.0 - math.exp(x: 0.0 - controller.turnRate * dt)
+    let turnAmount: Float = 1.0 - Math.exp(x: 0.0 - controller.turnRate * dt)
     controller.heading = wrapCharacterAngle(angle: controller.heading + headingGap * turnAmount)
   }
 

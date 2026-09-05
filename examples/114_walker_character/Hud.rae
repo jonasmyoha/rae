@@ -2,7 +2,7 @@
 # debug overlays) and the settings-panel show/hide. Kept out of main.rae to
 # respect the 1000-line file cap.
 import core
-import gpu2d
+import Gpu2d
 import app3d/SettingsDialog
 import app3d/UiShell
 import ui/Ecs
@@ -32,8 +32,8 @@ func updateWalkerTouch(rig: mod CameraRig, moveStick: mod VirtualJoystick, world
   # ECS so UiRoot's padding reserves them — the whole UI, top bar included, sits
   # inside the safe area. Runs before layout (renderSystemGpu2d) this frame.
   let safe: Insets = {
-    l: gpu2d.safeLeft(), t: gpu2d.safeTop(),
-    r: gpu2d.safeRight(), b: gpu2d.safeBottom()
+    l: Gpu2d.safeLeft(), t: Gpu2d.safeTop(),
+    r: Gpu2d.safeRight(), b: Gpu2d.safeBottom()
   }
   safeAreaSystem(world: world, insets: safe)
   let active: Bool = updateVirtualJoystick(joy: moveStick)
