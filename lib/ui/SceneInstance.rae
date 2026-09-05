@@ -1,0 +1,569 @@
+# SceneInstance — RUICS Phase 1f.
+#
+# Mount a parsed `Scene` under an existing entity, preserving the
+# mount entity's placement components (Rect / Size / Align / Offset /
+# Constraints / OverflowPolicy / TransformFx) and replacing the rest
+# with the scene root's components. The scene root's descendants
+# become descendants of the mount entity, with their own components
+# applied as authored.
+#
+# Useful for two patterns:
+#
+# 1. Hand-built scenes that want a reusable child fragment, e.g. the
+#    music-player album view mounting five copies of `track-row.raescene`
+#    instead of laying out each row by hand.
+#
+# 2. Eventually, a top-level `loadAndMount(world, sceneId, params)` for
+#    full-page scenes — but that's the same primitive plus a registry
+#    lookup, which is why `SceneRegistry` lives here too.
+#
+# Overrides
+# ---------
+# `SceneOverride` lets the caller patch specific fields on specific
+# nodes after the scene is loaded. Only string-valued fields are
+# supported in Phase 1f — `Text.text`, `Sprite.textureKey`, and
+# `Active.value` (parsed as `"true"` / `"false"`). The dispatch table
+# lives in `applyOverride`; extending it for numeric / colour overrides
+# is a follow-up when the music player needs them.
+import core
+import Json
+open ecs/Entity
+open ecs/HierarchySystem/HierarchySystem
+
+# -----------------------------------------------------------------
+# Types
+# -----------------------------------------------------------------
+
+# Per-field override. `valueString` is the only value type for now;
+# numeric/colour overrides should encode their value as a string and
+# parse it inside `applyOverride`.
+type SceneOverride {
+  nodeId: String
+  componentName: String
+  fieldName: String
+  valueString: String
+}
+
+# Map of `sceneId` -> parsed Scene. Filled by the host before any
+# `mountSceneInstance` call. Two parallel lists; lookup is linear,
+# which is fine for the tens of authored scenes a typical app has.
+type SceneRegistry {
+  ids: List(String)
+  scenes: List(Scene)
+}
+
+# -----------------------------------------------------------------
+# SceneRegistry
+# -----------------------------------------------------------------
+
+func createSceneRegistry() ret SceneRegistry {
+  ret SceneRegistry {
+    ids: createList(String, cap: 8)
+    scenes: createList(Scene, cap: 8)
+  }
+}
+
+func registerScene(reg: mod SceneRegistry, key: own String, scene: own Scene) {
+  let idsList: mod List(String) => reg.ids
+  let scenesList: mod List(Scene) => reg.scenes
+  idsList.add(value: key)
+  scenesList.add(value: scene)
+}
+
+# Returns the index of `key` in the registry, or -1 if not present.
+func sceneRegistryIndex(reg: view SceneRegistry, key: view String) ret Int {
+  let n: Int = reg.ids.length
+  var i: Int = 0
+  loop i < n {
+    if let k: String = reg.ids.copyAt(index: i) {
+      if k is key {
+        ret i
+      }
+    }
+    i = i + 1
+  }
+  ret -1
+}
+
+func sceneRegistryHas(reg: view SceneRegistry, key: view String) ret Bool {
+  ret sceneRegistryIndex(reg: reg, key: key) >= 0
+}
+
+# Return a view onto the i'th scene. Caller is responsible for bounds
+# checking via sceneRegistryIndex first. View-returning so callers
+# don't copy the underlying Scene struct (the JsonDoc pointers inside
+# don't survive a struct-by-list-index copy in the C backend).
+func sceneRegistryGet(reg: view SceneRegistry, idx: view Int) pub ret view Scene {
+  ret view rae_ext_rae_buf_get(buf: reg.scenes.data, index: idx)
+}
+
+# -----------------------------------------------------------------
+# Override builders — convenience wrappers so the hand-built scene
+# code reads as a list of small declarations.
+# -----------------------------------------------------------------
+
+func emptyOverrides() ret List(SceneOverride) {
+  ret createList(SceneOverride, cap: 4)
+}
+
+func addOverride(
+  list: mod List(SceneOverride)
+  nodeId: own String
+  componentName: own String
+  fieldName: own String
+  value: own String
+) {
+  # `own` opts each param into move semantics: Phase 2 would
+  # normally deep-copy String fields at struct-literal init, but
+  # since we pass them straight through to the stored override,
+  # the copy is wasted work — moving transfers the param's heap
+  # directly into the struct field. Without `own`, each call
+  # leaks 4 String heaps (the originals stay alive while the
+  # deep-copies become the list's canonical owners).
+  let o: SceneOverride = {
+    nodeId: own nodeId
+    componentName: own componentName
+    fieldName: own fieldName
+    valueString: own value
+  }
+  list.add(value: o)
+}
+
+# Shorthand for the most common case: text replacement on a Text node.
+func addTextOverride(list: mod List(SceneOverride), nodeId: own String, value: own String) {
+  let textKey: String = "Text"
+  let textField: String = "text"
+  addOverride(
+    list: list
+    nodeId: own nodeId
+    componentName: own textKey
+    fieldName: own textField
+    value: own value
+  )
+}
+
+# Shorthand for swapping a sprite's textureKey.
+func addSpriteOverride(list: mod List(SceneOverride), nodeId: own String, value: own String) {
+  let spriteKey: String = "Sprite"
+  let spriteField: String = "textureKey"
+  addOverride(
+    list: list
+    nodeId: own nodeId
+    componentName: own spriteKey
+    fieldName: own spriteField
+    value: own value
+  )
+}
+
+# Sprite tint override. Encodes the colour as `"r,g,b,a"` because the
+# override value channel is currently a plain String — applyOverride
+# parses the four numeric components back out.
+func addSpriteTintOverride(list: mod List(SceneOverride), nodeId: own String, r: view Int, g: view Int, b: view Int, a: view Int) {
+  let spriteKey: String = "Sprite"
+  let tintField: String = "tint"
+  # Interpolation is one alloc instead of seven; the nested .concat()
+  # form here used to leak ~6 intermediate concat results per call
+  # because each level's inner result escaped its caller's pool. The
+  # rae_ext_rae_str_interp helper allocates one owned result and frees
+  # each owned input (the toString conversions) in a single cleanup
+  # loop, so this form has zero outstanding allocations per call.
+  let value: String = "{r},{g},{b},{a}"
+  addOverride(
+    list: list
+    nodeId: own nodeId
+    componentName: own spriteKey
+    fieldName: own tintField
+    value: own value
+  )
+}
+
+# Text styleId override (e.g. swap "tabInactive" -> "tabActive").
+func addTextStyleOverride(list: mod List(SceneOverride), nodeId: own String, value: own String) {
+  let textKey: String = "Text"
+  let styleField: String = "styleId"
+  addOverride(
+    list: list
+    nodeId: own nodeId
+    componentName: own textKey
+    fieldName: own styleField
+    value: own value
+  )
+}
+
+# OnClick actionId override. Used when a scene declares a placeholder
+# action and the host wants to bind a real one at mount time.
+func addOnClickActionOverride(list: mod List(SceneOverride), nodeId: own String, value: own String) {
+  let onClickKey: String = "OnClick"
+  let actionField: String = "actionId"
+  addOverride(
+    list: list
+    nodeId: own nodeId
+    componentName: own onClickKey
+    fieldName: own actionField
+    value: own value
+  )
+}
+
+# -----------------------------------------------------------------
+# Mount logic
+# -----------------------------------------------------------------
+
+# Returns true for the components that the *mount entity* keeps when
+# the scene is mounted (geometry/placement live on the parent of the
+# scene; the scene contributes its inner layout, padding, visuals, and
+# behaviour). RUICS § 6.4.
+func isPlacementComponent(name: view String) ret Bool {
+  if name is "Rect" {
+    ret true
+  }
+  if name is "Size" {
+    ret true
+  }
+  if name is "Align" {
+    ret true
+  }
+  if name is "Offset" {
+    ret true
+  }
+  if name is "Constraints" {
+    ret true
+  }
+  if name is "OverflowPolicy" {
+    ret true
+  }
+  if name is "TransformFx" {
+    ret true
+  }
+  ret false
+}
+
+func appendEntityListSI(lst: mod List(EntityId), value: view EntityId) {
+  lst.add(value: value)
+}
+
+# Mount `scene` under `mountEntity`. Returns `mountEntity` on success,
+# or noEntity() if the scene wasn't ok.
+#
+# Behaviour:
+# - The scene's root node's components (excluding placement) are
+#   applied directly onto `mountEntity`. Existing components on the
+#   mount entity are replaced — caller is expected to set placement
+#   *before* calling this.
+# - All non-root nodes are allocated as new entities under
+#   `mountEntity`'s subtree.
+# - `world.nodeIds` is populated for every node in the mounted scene
+#   so overrides and later code can resolve by id.
+# - `overrides` is applied last, after the whole subtree is built.
+func mountSceneInstance(
+  world: mod UiWorld
+  mountEntity: view EntityId
+  scene: view Scene
+  overrides: view List(SceneOverride)
+) ret EntityId {
+  ret mountSceneInstanceIntoPage(
+    world: world
+    mountEntity: mountEntity
+    scene: scene
+    overrides: overrides
+    pageId: ""
+  )
+}
+
+# Same as `mountSceneInstance` but writes nodeIds under a `pageId/`
+# prefix so the scene's nodeIds don't collide with other resident
+# pages. Empty `pageId` is the unscoped path that matches the
+# legacy rebuild flow. Does NOT tag `mountEntity` as a PageRoot —
+# scoping and page-root tagging are separate concerns; the caller
+# typically tags an enclosing entity. `mountPage` does both at once.
+func mountSceneInstanceIntoPage(
+  world: mod UiWorld
+  mountEntity: view EntityId
+  scene: view Scene
+  overrides: view List(SceneOverride)
+  pageId: view String
+) pub ret EntityId {
+  if scene.ok is false {
+    ret noEntity()
+  }
+  let nodeCount: Int = scene.nodes.length
+  let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId)
+  if rootIdx < 0 {
+    ret noEntity()
+  }
+
+  # Pass 1: allocate entities. The scene's root maps to `mountEntity`;
+  # every other node gets a fresh entity.
+  let entitiesByNodeIndex: List(EntityId) = createList(EntityId, cap: nodeCount)
+  let nodeIdsMap: mod StringMap(Int) => world.nodeIds
+  var i: Int = 0
+  loop i < nodeCount {
+    let node: view SceneNode => nodeAt(this: scene, idx: i)
+    # Explicit struct construction (not `let entity: EntityId =
+    # mountEntity`) — the Live VM treats the latter as a view-ref
+    # bind and then refuses the reassignment on the next branch.
+    var entity: EntityId = { index: mountEntity.index, generation: mountEntity.generation }
+    if i is not rootIdx {
+      entity = createEntity(world: world)
+    }
+    appendEntityListSI(lst: entitiesByNodeIndex, value: entity)
+    if pageId.length() is 0 {
+      nodeIdsMap.set(k: node.nodeId, value: entity.index)
+    } else {
+      let key: String = pageScopedKey(pageId: pageId, nodeId: node.nodeId)
+      nodeIdsMap.set(k: key, value: entity.index)
+    }
+    i = i + 1
+  }
+
+  # NOTE: tagging mountEntity with PageRoot moved out of here in
+  # slice 4b — callers tag explicitly when they own the page.
+
+  # Pass 2: apply components. For the scene's root node we skip
+  # placement components — those belong to the mount entity. Other
+  # nodes get all their components applied via `applyComponentByName`.
+  let docView: view JsonDoc => scene.doc
+  var j: Int = 0
+  loop j < nodeCount {
+    let node: view SceneNode => nodeAt(this: scene, idx: j)
+    let entity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: j)
+    let isRoot: Bool = j is rootIdx
+
+    let bag: JsonValue = Json.jsonValueAt(doc: docView, idx: node.componentsValueIdx)
+    let keyCount: Int = Json.objectLen(this: bag)
+    var k: Int = 0
+    loop k < keyCount {
+      let key: String = Json.objectKeyAt(doc: docView, this: bag, idx: k)
+      let childrenKey: String = "Children"
+      var skip: Bool = false
+      if key is childrenKey {
+        skip = true
+      }
+      if isRoot {
+        if isPlacementComponent(name: key) {
+          skip = true
+        }
+      }
+      if skip is false {
+        let valueAtKey: JsonValue = Json.objectValueAt(doc: docView, this: bag, idx: k)
+        applyComponentByName(
+          world: world
+          entity: entity
+          name: key
+          doc: docView
+          val: valueAtKey
+        )
+      }
+      k = k + 1
+    }
+    j = j + 1
+  }
+
+  # Pass 3: build hierarchy (Children + Parent).
+  var p: Int = 0
+  loop p < nodeCount {
+    let node: view SceneNode => nodeAt(this: scene, idx: p)
+    let parentEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
+    let kn: Int = node.childrenIds.length
+    var q: Int = 0
+    loop q < kn {
+      if let childId: String = node.childrenIds.copyAt(index: q) {
+        let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
+        if childIdx >= 0 {
+          let childEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: childIdx)
+          # #726: set only Parent; HierarchySystem.setParent keeps the derived
+          # Children cache in lock-step (authored order via call order).
+          setParent(parents: world.parents, childrens: world.childrens,
+                    child: childEntity, parent: parentEntity)
+        }
+      }
+      q = q + 1
+    }
+    p = p + 1
+  }
+
+  # Pass 4: apply overrides.
+  let on: Int = overrides.length
+  var oi: Int = 0
+  loop oi < on {
+    let o: SceneOverride = rae_ext_rae_buf_get(buf: overrides.data, index: oi)
+    let nodeIdx: Int = sceneNodeIndex(this: scene, nodeId: o.nodeId)
+    if nodeIdx >= 0 {
+      let targetEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: nodeIdx)
+      applyOverride(world: world, entity: targetEntity, override: o)
+    }
+    oi = oi + 1
+  }
+
+  ret mountEntity
+}
+
+# Apply a single SceneOverride to an entity. Currently supports:
+#
+#   Text.text          (string)
+#   Sprite.textureKey  (string)
+#   Active.value       ("true" / "false")
+#
+# Other field types are no-ops — the caller is expected not to pass
+# overrides for unsupported fields. Extending this is a per-field
+# addition; the dispatch is just a name match.
+# Parse `"r,g,b,a"` into an RgbaColor. The override channel is a plain
+# String so colours encode as comma-separated ints. Missing components
+# default to 255 (alpha) / 0 (rgb). Uses `rae_str_to_i64` directly
+# rather than the `String.toInt()` method because the C backend's
+# method-overload resolution currently confuses `String.toInt` with
+# `Float.toInt` when chained off `List(String).get`.
+func parseRgbaString(s: view String) ret RgbaColor {
+  let comma: String = ","
+  let parts: List(String) = s.split(sep: comma)
+  var r: Int = 0
+  var g: Int = 0
+  var b: Int = 0
+  var a: Int = 255
+  if parts.length > 0 {
+    if let rs: String = parts.copyAt(index: 0) {
+      r = rae_str_to_i64(s: rs)
+    }
+  }
+  if parts.length > 1 {
+    if let gs: String = parts.copyAt(index: 1) {
+      g = rae_str_to_i64(s: gs)
+    }
+  }
+  if parts.length > 2 {
+    if let bs: String = parts.copyAt(index: 2) {
+      b = rae_str_to_i64(s: bs)
+    }
+  }
+  if parts.length > 3 {
+    # `as` is now a keyword (explicit conversion), so this alpha component
+    # string follows the rs/gs/bs naming instead.
+    if let alphaStr: String = parts.copyAt(index: 3) {
+      a = rae_str_to_i64(s: alphaStr)
+    }
+  }
+  ret RgbaColor { r: r, g: g, b: b, a: a }
+}
+
+func applyOverride(world: mod UiWorld, entity: view EntityId, override: view SceneOverride) {
+  let textKey: String = "Text"
+  let spriteKey: String = "Sprite"
+  let activeKey: String = "Active"
+  let onClickKey: String = "OnClick"
+
+  # Field-assign via componentMod instead of read-build-replace via
+  # componentSet. The struct-field String reassign drop in c_stmt.c
+  # frees the previous heap before the new one lands, so each
+  # override updates exactly the named field without leaking the
+  # rest of the component's String state.
+
+  if override.componentName is textKey {
+    let textField: String = "text"
+    if override.fieldName is textField {
+      if componentHas(this: world.texts, entity: entity) {
+        let cur: mod Text => componentMod(this: world.texts, entity: entity)
+        cur.text = override.valueString
+      }
+      ret
+    }
+    let styleField: String = "styleId"
+    if override.fieldName is styleField {
+      if componentHas(this: world.texts, entity: entity) {
+        let cur: mod Text => componentMod(this: world.texts, entity: entity)
+        cur.styleId = override.valueString
+      }
+    }
+    ret
+  }
+
+  if override.componentName is spriteKey {
+    let textureField: String = "textureKey"
+    if override.fieldName is textureField {
+      if componentHas(this: world.sprites, entity: entity) {
+        let cur: mod Sprite => componentMod(this: world.sprites, entity: entity)
+        cur.textureKey = override.valueString
+      }
+      ret
+    }
+    let tintField: String = "tint"
+    if override.fieldName is tintField {
+      if componentHas(this: world.sprites, entity: entity) {
+        let cur: mod Sprite => componentMod(this: world.sprites, entity: entity)
+        cur.tint = parseRgbaString(s: override.valueString)
+        # Explicit literal override wins over any scene slot (#235).
+        cur.tintSlot = ""
+      }
+    }
+    ret
+  }
+
+  if override.componentName is onClickKey {
+    let actionField: String = "actionId"
+    if override.fieldName is actionField {
+      if componentHas(this: world.onClicks, entity: entity) {
+        let cur: mod OnClick => componentMod(this: world.onClicks, entity: entity)
+        cur.actionId = override.valueString
+      }
+    }
+    ret
+  }
+
+  if override.componentName is activeKey {
+    let valueField: String = "value"
+    if override.fieldName is valueField {
+      let trueStr: String = "true"
+      let v: Bool = override.valueString is trueStr
+      let active: Active = { value: v }
+      componentSet(this: world.actives, entity: entity, data: active)
+    }
+    ret
+  }
+}
+
+# Mount `scene` as a resident page identified by `pageId`. Creates a
+# fresh root entity sized `w` x `h`, tags it with PageRoot{id: pageId},
+# and writes every node's id under the `"<pageId>/<nodeId>"` key so
+# two pages can coexist without colliding on shared nodeIds.
+#
+# Returns the page-root entity on success, or `noEntity()` when the
+# scene wasn't parseable / had no root — no entity is created in that
+# case. App-level callers usually want the `mountPageOrError`-style
+# wrapper that paints a visible failure sentinel.
+#
+# Calling `mountPage` twice with the same id is the caller's bug —
+# we don't dedup. Use `findPageRootEntity` to gate idempotently.
+func mountPage(
+  world: mod UiWorld
+  pageId: own String
+  scene: view Scene
+  overrides: view List(SceneOverride)
+  w: view Float
+  h: view Float
+) pub ret EntityId {
+  if scene.ok is false {
+    ret noEntity()
+  }
+  let root: EntityId = createEntity(world: world)
+  let r: Rect = { position: { x: 0.0, y: 0.0 }, size: { x: w, y: h } }
+  componentSet(this: world.rects, entity: root, data: r)
+  let size: Size = {
+    w: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
+    h: SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
+  }
+  componentSet(this: world.sizes, entity: root, data: size)
+  let mounted: EntityId = mountSceneInstanceIntoPage(
+    world: world
+    mountEntity: root
+    scene: scene
+    overrides: overrides
+    pageId: pageId
+  )
+  # Tag the page root explicitly — `mountSceneInstanceIntoPage` only
+  # scopes nodeIds, leaving the page-root tagging to callers like us.
+  # The tag goes on the husk even on mount-failure so a later
+  # `findPageRootEntity` / `unmountPage` can still see it.
+  var copiedId: String = ""
+  copiedId = copiedId.concat(other: pageId)
+  let pr: PageRoot = { id: own copiedId }
+  componentSet(this: world.pageRoots, entity: root, data: own pr)
+  ret root
+}

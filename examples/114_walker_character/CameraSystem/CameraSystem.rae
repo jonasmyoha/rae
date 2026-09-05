@@ -11,86 +11,86 @@
 
 import core
 import math
-import profile
+import Profile
 import gpu2d
 import sdfText
-import vec3
-import quat
-import ecs/entity
+import Vec3
+import Quat
+import ecs/Entity
 import ecs/ComponentTable
-import ecs/transform
-import ecs/hierarchy
+import ecs/Transform
+import ecs/Hierarchy
 import ecs/HierarchySystem/HierarchySystem
 import ecs/TransformSystem/TransformSystem
-open ecs/entity
+open ecs/Entity
 open ecs/ComponentTable
-open ecs/transform
-open ecs/hierarchy
+open ecs/Transform
+open ecs/Hierarchy
 open ecs/HierarchySystem/HierarchySystem
 open ecs/TransformSystem/TransformSystem
-import gltf
-import gltfSkin
-import png
+import Gltf
+import GltfSkin
+import Png
 import sys
 import app3d/CameraRig
 import app3d/renderScale
-import app3d/characterController
-import app3d/uiShell
+import app3d/CharacterController
+import app3d/UiShell
 import app3d/ControlPanel
-import app3d/cameraBar
-import rendererDeferred
-import sky
+import app3d/CameraBar
+import RendererDeferred
+import Sky
 import gbuffer
-import gbufferInstanced
-open gbufferInstanced
+import GbufferInstanced
+open GbufferInstanced
 import GrassCompute
 open GrassCompute
-import grassConfig
+import GrassConfig
 import shadow3d
-import app3d/playback
-import app3d/slider
-import app3d/settingsDialog
+import app3d/Playback
+import app3d/Slider
+import app3d/SettingsDialog
 import skyHosek
 import hotReload
 import ui/LogOverlay
 import ui/WindowGeometry
-import ui/scrollPanel
-import ui/eventLoop
+import ui/ScrollPanel
+import ui/EventLoop
 import ui/DebugOverlay
 import ui/VirtualJoystick
-import ui/ecs
+import ui/Ecs
 import ui/InputSystem/InputSystem
 import ui/RenderSystem/RenderSystem
-open scene3d
+open Scene3d
 open gpu3d
-open rendererDeferred
-open sky
+open RendererDeferred
+open Sky
 open gbuffer
-open rendergraph
-open math3d
-open mesh3d
-open gltf
-open gltfSkin
+open Rendergraph
+open Math3d
+open Mesh3d
+open Gltf
+open GltfSkin
 open sdfText
-open png
+open Png
 open app3d/CameraRig
-open app3d/characterController
-open app3d/settingsDialog
+open app3d/CharacterController
+open app3d/SettingsDialog
 open skyHosek
-open app3d/uiShell
+open app3d/UiShell
 open app3d/ControlPanel
-open app3d/cameraBar
+open app3d/CameraBar
 open shadow3d
-open app3d/playback
+open app3d/Playback
 open hotReload
 open ui/LogOverlay
 open ui/WindowGeometry
-open ui/scrollPanel
-open ui/eventLoop
+open ui/ScrollPanel
+open ui/EventLoop
 open ui/DebugOverlay
 open ui/VirtualJoystick
-open ui/ecs
-open ui/components
+open ui/Ecs
+open ui/Components
 open ui/InputSystem/InputSystem
 open ui/RenderSystem/RenderSystem
 
@@ -137,28 +137,28 @@ func createCameraRigLink(world: mod GameWorld) ret CameraRigLink {
 # rig, so it keeps the direct fly-camera placement.
 func applyCameraRigHierarchy(cam: mod CameraState, world: mod GameWorld) {
   if cam.rig.mode is not CameraRigMode.free {
-    let qz: Quat = quat.fromAxisAngle(axis: vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: cam.rig.viewYaw)
-    let qx: Quat = quat.fromAxisAngle(axis: vec3.create(x: 1.0, y: 0.0, z: 0.0), angle: 0.0 - cam.rig.viewOrbitPitch)
+    let qz: Quat = Quat.fromAxisAngle(axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: cam.rig.viewYaw)
+    let qx: Quat = Quat.fromAxisAngle(axis: Vec3.create(x: 1.0, y: 0.0, z: 0.0), angle: 0.0 - cam.rig.viewOrbitPitch)
     componentSet(this: world.transforms, entity: cam.rigEntity, data: Transform3D {
       position: cam.camera.target,
-      rotation: quat.qmul(a: qz, b: qx),
-      scale: vec3.create(x: 1.0, y: 1.0, z: 1.0)
+      rotation: Quat.qmul(a: qz, b: qx),
+      scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
     })
     componentSet(this: world.transforms, entity: cam.camEntity, data: Transform3D {
-      position: vec3.create(x: 0.0, y: 0.0 - cam.rig.viewDistance, z: 0.0),
-      rotation: quat.identity(),
-      scale: vec3.create(x: 1.0, y: 1.0, z: 1.0)
+      position: Vec3.create(x: 0.0, y: 0.0 - cam.rig.viewDistance, z: 0.0),
+      rotation: Quat.identity(),
+      scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
     })
     transformSystem3D(orderState: world.hierarchyOrder,
       transforms: world.transforms, worldTransforms: world.worldTransforms,
       parents: world.parents, childrens: world.childrens)
     let camWorld: WorldTransform3D = componentGet(this: world.worldTransforms, entity: cam.camEntity)
-    cam.camera.position = vec3.create(
+    cam.camera.position = Vec3.create(
       x: camWorld.matrix.m[12], y: camWorld.matrix.m[13], z: camWorld.matrix.m[14])
   } else {
     let forward: Vec3 = cameraRigForward(rig: cam.rig)
     cam.camera.position = cam.rig.viewPosition
-    cam.camera.target = vec3.vadd(a: cam.camera.position, b: forward)
+    cam.camera.target = Vec3.vadd(a: cam.camera.position, b: forward)
   }
 }
 

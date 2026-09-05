@@ -9,79 +9,79 @@
 
 import core
 import math
-import profile
+import Profile
 import gpu2d
 import sdfText
-import vec3
-import ecs/entity
+import Vec3
+import ecs/Entity
 import ecs/ComponentTable
-open ecs/entity
+open ecs/Entity
 open ecs/ComponentTable
-import gltf
-import gltfSkin
-import png
+import Gltf
+import GltfSkin
+import Png
 import sys
 import app3d/CameraRig
 import app3d/renderScale
-import app3d/characterController
-import app3d/uiShell
+import app3d/CharacterController
+import app3d/UiShell
 import app3d/ControlPanel
-import app3d/cameraBar
-import rendererDeferred
-import sky
+import app3d/CameraBar
+import RendererDeferred
+import Sky
 import gbuffer
-import gbufferInstanced
-open gbufferInstanced
-import particles
-open particles
+import GbufferInstanced
+open GbufferInstanced
+import Particles
+open Particles
 import GrassCompute
 open GrassCompute
-import grassConfig
+import GrassConfig
 import shadow3d
-import app3d/playback
-import app3d/slider
-import app3d/settingsDialog
+import app3d/Playback
+import app3d/Slider
+import app3d/SettingsDialog
 import skyHosek
 import hotReload
 import ui/LogOverlay
 import ui/WindowGeometry
-import ui/scrollPanel
-import ui/eventLoop
+import ui/ScrollPanel
+import ui/EventLoop
 import ui/DebugOverlay
 import ui/VirtualJoystick
-import ui/ecs
+import ui/Ecs
 import ui/InputSystem/InputSystem
 import ui/RenderSystem/RenderSystem
-open scene3d
+open Scene3d
 open gpu3d
-open rendererDeferred
-open sky
+open RendererDeferred
+open Sky
 open gbuffer
-open rendergraph
-open math3d
-open mesh3d
-open gltf
-open gltfSkin
+open Rendergraph
+open Math3d
+open Mesh3d
+open Gltf
+open GltfSkin
 open sdfText
-open png
+open Png
 open app3d/CameraRig
-open app3d/characterController
-open app3d/settingsDialog
+open app3d/CharacterController
+open app3d/SettingsDialog
 open skyHosek
-open app3d/uiShell
+open app3d/UiShell
 open app3d/ControlPanel
-open app3d/cameraBar
+open app3d/CameraBar
 open shadow3d
-open app3d/playback
+open app3d/Playback
 open hotReload
 open ui/LogOverlay
 open ui/WindowGeometry
-open ui/scrollPanel
-open ui/eventLoop
+open ui/ScrollPanel
+open ui/EventLoop
 open ui/DebugOverlay
 open ui/VirtualJoystick
-open ui/ecs
-open ui/components
+open ui/Ecs
+open ui/Components
 open ui/InputSystem/InputSystem
 open ui/RenderSystem/RenderSystem
 
@@ -135,7 +135,7 @@ func renderShadowPass(cam: mod CameraState, character: mod CharacterState, io: m
 func renderGbufferPass(cache: mod GbufferCache, cam: mod CameraState, character: mod CharacterState, splashes: mod ParticleSystem, terrain: mod InfiniteTerrain, world: mod GameWorld, aspect: copy Float, palette: view List(Float), t: copy Float, dt: copy Float, profiler: mod Profiler, grassCompute: mod GrassCompute) {
   var grassToonGen: Int = 0
   if character.toon { grassToonGen = 1 }
-  let grassView: GrassViewSettings = grassConfig.grassThirdPersonSettings(groundColor: walkerGroundColor())
+  let grassView: GrassViewSettings = GrassConfig.grassThirdPersonSettings(groundColor: walkerGroundColor())
   let heroPos: Vec3 = controllerOf(world: world, entity: character.heroEntity).position
   grassGenerate(grass: grassCompute, playerX: heroPos.x,
                 playerY: heroPos.y,
@@ -156,10 +156,10 @@ func renderGbufferPass(cache: mod GbufferCache, cam: mod CameraState, character:
     let part: PartRoughness = gameWorldPartAt(world: world, i: p)
     let handle: MeshHandle = meshHandle(id: part.meshId, generation: 1)
     let mat: Material3d = {
-      baseColor: vec3.create(x: 1.0, y: 1.0, z: 1.0),
+      baseColor: Vec3.create(x: 1.0, y: 1.0, z: 1.0),
       metallic: 0.0,
       roughness: part.roughness,
-      emission: vec3.create(x: 0.0, y: 0.0, z: 0.0),
+      emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0),
       toon: character.toon
     }
     gbuffer.drawSkinnedInstance(cache: cache, mesh: handle, model: character.model,
@@ -248,7 +248,7 @@ func renderApp(cam: mod CameraState, character: mod CharacterState, frame: mod F
 
   loop var oi: Int = 0, oi < deferredOrderLength(r: render.renderer), ++oi {
     let tag: Int = deferredTagAt(r: render.renderer, i: oi)
-    profile.zoneBegin(profiler: profiler, name: (tag as RenderTag).toString())
+    Profile.zoneBegin(profiler: profiler, name: (tag as RenderTag).toString())
     # Exhaustive over RenderTag: adding a pass is a compile error here until it is
     # handled (#624). Each pass is a helper/one-liner; the five generic passes
     # defer to renderDeferredPass (or-patterns, #622, will merge them into one arm).
@@ -282,7 +282,7 @@ func renderApp(cam: mod CameraState, character: mod CharacterState, frame: mod F
       }
       case RenderTag.present { gpu2d.endFrame() }
     }
-    profile.zoneEnd(profiler: profiler, name: (tag as RenderTag).toString())
+    Profile.zoneEnd(profiler: profiler, name: (tag as RenderTag).toString())
   }
   capFrameSleep(drs: render.drs, frameStartSec: now)
 }

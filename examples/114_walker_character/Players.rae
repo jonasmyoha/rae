@@ -1,0 +1,70 @@
+# players.rae — the player roster (#546): who controls which character.
+#
+# Today there is one LOCAL player. The roster maps that player to a CONTROLLED
+# character index: 0 = the hero, 1..count-1 = crowd member (index - 1). Switching
+# (Page Up / Page Down, or the settings buttons) moves the local player between
+# characters; the non-controlled characters run their own AI animation. This is
+# the seam multiplayer builds on — a second player would take another index, and
+# a remote player's control would arrive via net.rae instead of a device.
+#
+# Example-114 files are siblings that merge into one module, so this resolves the
+# App/CharacterState types cross-file without importing them.
+import core
+import Keys
+import ecs/Entity
+open ecs/Entity
+
+# The local player's id. (Naming: constants are camelCase — #746 fixed the old
+# SHOUTING_SNAKE_CASE `PLAYER_LOCAL`, which the language bans.)
+const playerLocal: Int = 0
+
+# Character-switch key bindings, named from the canonical SDL scancodes in
+# lib/keys.rae. 1 / Page Up go to the previous character, 2 / Page Down to the
+# next (Page Up/Down are used via keys.keyPageUp/keyPageDown at the call site).
+const keyPrevChar: Int = Keys.key1
+const keyNextChar: Int = Keys.key2
+
+# The local player's control mapping. `count` is the total number of controllable
+# characters (hero + crowd); `controlledIndex` is which one the player drives.
+type PlayerRoster {
+  controlledIndex: Int
+  count: Int
+}
+
+func createPlayerRoster(count: copy Int) ret PlayerRoster {
+  ret PlayerRoster { controlledIndex: 0, count: count }
+}
+
+func rosterControlledIsHero(roster: view PlayerRoster) ret Bool {
+  ret roster.controlledIndex is 0
+}
+
+# The crowd-member index (into CharacterState.crowd) the local player controls,
+# or -1 when the hero is controlled.
+func rosterControlledCrowdIndex(roster: view PlayerRoster) ret Int {
+  if roster.controlledIndex is 0 { ret 0 - 1 }
+  ret roster.controlledIndex - 1
+}
+
+# The GameWorld ENTITY the local player currently controls (#746): the hero
+# entity, or the crowd member entity for the controlled index. This is the
+# roster's ECS view — the same kind of character-entity handle a NetPlayer
+# points at via `controlled`, so local and remote control resolve identically.
+func rosterControlledEntity(players: view PlayerRoster, character: view CharacterState) ret EntityId {
+  if rosterControlledIsHero(roster: players) { ret character.heroEntity }
+  let idx: Int = rosterControlledCrowdIndex(roster: players)
+  if let entity: EntityId = character.crowdEntities.copyAt(index: idx) { ret entity }
+  ret character.heroEntity
+}
+
+# Cycle to the next / previous controllable character (wraps). No-op with one
+# character, so a roster of just the hero behaves exactly as before.
+func rosterSwitchNext(roster: mod PlayerRoster) {
+  if roster.count <= 1 { ret }
+  roster.controlledIndex = (roster.controlledIndex + 1) % roster.count
+}
+
+func rosterSwitchPrev(roster: mod PlayerRoster) {
+  if roster.count <= 1 { ret }
+  roster.controlledIndex = (roster.controlledIndex + roster.count - 1) % roster.count
+}

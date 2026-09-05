@@ -20,19 +20,19 @@
 # pixel-bound primitives such as future one-device-pixel strokes should snap at
 # the backend boundary. Snapping every box here would move centered widgets and
 # make animation shimmer.
-open ui/ecs
+open ui/Ecs
 import core
 import gpu2d
-import gpu2dText
+import Gpu2dText
 import sdfText
 import ui/AnimationSystem/AnimationSystem
-import ui/components
-import ui/ecs
-import ui/iconCodepoints
-import ui/layer
-import ui/theme
-import ui/themeResolved
-import ui/textStyle
+import ui/Components
+import ui/Ecs
+import ui/IconCodepoints
+import ui/Layer
+import ui/Theme
+import ui/ThemeResolved
+import ui/TextStyle
 open ecs/ComponentTable
 
 # Per-app gpu2d render resources, passed to renderSystemGpu2d each frame.
@@ -242,7 +242,7 @@ func paintSpriteG(world: view UiWorld, e: view EntityId, wt: view WorldTransform
         }
       }
     }
-    gpu2dText.drawText(font: res.iconFont, text: glyph, x: gx, y: gy, sizePx: sz, color: g2dColor(c: tint))
+    Gpu2dText.drawText(font: res.iconFont, text: glyph, x: gx, y: gy, sizePx: sz, color: g2dColor(c: tint))
     ret
   }
   let radius: Float = g2dRadius(world: world, e: e, fallback: 0.0)
@@ -306,7 +306,7 @@ func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform2D
   }
   if t.wrapWidthMode is WrapWidthMode.nodeWidth {
     let lineHeight: Float = size * resolveTextLineHeight(theme: res.theme, styleId: t.styleId)
-    gpu2dText.drawTextWrappedEx(
+    Gpu2dText.drawTextWrappedEx(
       font: res.textFont
       text: t.text
       x: drawX
@@ -362,7 +362,7 @@ func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform2D
   }
   if hasShadow {
     let shChained: RgbaColor = g2dChain(c: shCol, chain255: chain255)
-    gpu2dText.drawTextEx(
+    Gpu2dText.drawTextEx(
       font: res.textFont
       text: t.text
       x: drawX
@@ -379,12 +379,12 @@ func paintTextG(world: view UiWorld, e: view EntityId, wt: view WorldTransform2D
     ret
   }
   if boldWidth > 0.0 {
-    gpu2dText.drawTextEx(font: res.textFont, text: t.text, x: drawX, y: drawY, sizePx: size,
+    Gpu2dText.drawTextEx(font: res.textFont, text: t.text, x: drawX, y: drawY, sizePx: size,
                           color: g2dColor(c: col), outlineColor: g2dColor(c: col),
                           outlineWidth: boldWidth, shadowColor: 0, shadowOffX: 0.0,
                           shadowOffY: 0.0, shadowSoftness: 1.0)
   } else {
-    gpu2dText.drawText(font: res.textFont, text: t.text, x: drawX, y: drawY, sizePx: size, color: g2dColor(c: col))
+    Gpu2dText.drawText(font: res.textFont, text: t.text, x: drawX, y: drawY, sizePx: size, color: g2dColor(c: col))
   }
 }
 

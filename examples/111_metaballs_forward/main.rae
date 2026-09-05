@@ -45,64 +45,64 @@ import gpu2d
 import math
 import sdfText
 import scene3dFile
-import sceneAnimation
-import sdl3
-import vec3
+import SceneAnimation
+import Sdl3
+import Vec3
 open gpu3d
-open gpu3dWorld
-open renderer3d
-open math3d
-open mesh3d
-open scene3d
+open Gpu3dWorld
+open Renderer3d
+open Math3d
+open Mesh3d
+open Scene3d
 open scene3dFile
-open sceneAnimation
-open ui/ecs
+open SceneAnimation
+open ui/Ecs
 open ui/InputSystem/InputSystem
 open ui/LayoutSystem/LayoutSystem
 open ui/RenderSystem/RenderSystem
 open ui/VisualBoundsSystem/VisualBoundsSystem
 open ui/sceneFile
-open ui/sceneLoader
-open ui/themeResolved
-open ui/transform
-open ui/eventLoop
+open ui/SceneLoader
+open ui/ThemeResolved
+open ui/Transform
+open ui/EventLoop
 open ui/LogOverlay
 open ui/WindowGeometry
-open ui/scrollPanel
+open ui/ScrollPanel
 open ui/DebugOverlay
 open hotReload
 import string
-import ui/ecs
+import ui/Ecs
 import ui/InputSystem/InputSystem
 import ui/LayoutSystem/LayoutSystem
 import ui/RenderSystem/RenderSystem
-import ui/scene
+import ui/Scene
 import ui/sceneFile
-import ui/sceneLoader
-import ui/themeResolved
-import ui/transform
-import ui/eventLoop
+import ui/SceneLoader
+import ui/ThemeResolved
+import ui/Transform
+import ui/EventLoop
 import ui/LogOverlay
 import ui/WindowGeometry
-import ui/scrollPanel
+import ui/ScrollPanel
 import ui/DebugOverlay
 import hotReload
 import app3d/CameraRig
-import app3d/cameraBar
-import app3d/slider
-import app3d/settingsDialog
+import app3d/CameraBar
+import app3d/Slider
+import app3d/SettingsDialog
 import shadow3d
-import renderer3d
-import gpu3dWorld
-import app3d/uiShell
-import sky
+import Renderer3d
+import Gpu3dWorld
+import app3d/UiShell
+import Sky
 import skyHosek
 open app3d/CameraRig
-open app3d/cameraBar
-open app3d/settingsDialog
+open app3d/CameraBar
+open app3d/SettingsDialog
 open shadow3d
-open app3d/uiShell
-open sky
+open app3d/UiShell
+open Sky
 open skyHosek
 
 type DemoUiResource {
@@ -591,7 +591,7 @@ func main() ret Int {
     let wasOrbit: Bool = cameraRig.mode is CameraRigMode.orbit
     handleCameraBar(input: uiInput, rig: cameraRig, camera: camera)
     if wasOrbit is false and cameraRig.mode is CameraRigMode.orbit {
-      camera.target = vec3.create(x: 0.0, y: 0.0, z: orbitFocusZ)
+      camera.target = Vec3.create(x: 0.0, y: 0.0, z: orbitFocusZ)
     }
     let hadUiEvents: Bool = uiInput.events.length > 0
     dispatchUiActions(input: uiInput, state: uiState, rig: cameraRig, camera: camera)

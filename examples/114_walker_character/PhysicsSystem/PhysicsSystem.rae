@@ -11,16 +11,16 @@
 # the accumulator loop in updateApp does not change. App / GameWorld resolve
 # cross-file (114 files are siblings in one module).
 import core
-import vec3
-import quat
-import ecs/entity
+import Vec3
+import Quat
+import ecs/Entity
 import ecs/ComponentTable
-import ecs/transform
-import ecs/world
-open ecs/entity
+import ecs/Transform
+import ecs/World
+open ecs/Entity
 open ecs/ComponentTable
-open ecs/transform
-open ecs/world
+open ecs/Transform
+open ecs/World
 
 const physicsFixedStep: Float = 1.0 / 60.0
 # Rae world is Z-up; gravity pulls down Z. Scaled per body by gravityScale.
@@ -48,7 +48,7 @@ func spawnPhysicsBody(world: mod GameWorld, position: view Vec3, velocity: view 
                       gravityScale: view Float) ret EntityId {
   let entity: EntityId = gameWorldAddEntity(world: world)
   componentSet(this: world.transforms, entity: entity, data: Transform3D {
-    position: position, rotation: quat.identity(), scale: vec3.create(x: 1.0, y: 1.0, z: 1.0)
+    position: position, rotation: Quat.identity(), scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
   })
   componentSet(this: world.physicsBodies, entity: entity, data: PhysicsBody {
     velocity: velocity, gravityScale: gravityScale

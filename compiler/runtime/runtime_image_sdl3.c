@@ -249,7 +249,7 @@ static bool g_sdl_mouse_captured = false;
 /* isKeyDown/isKeyPressed take a raw SDL_Scancode (see lib/keys.rae). No translation — the
  * value indexes the SDL keyboard-state array directly. */
 
-void rae_ext_sdl3_initWindow(int64_t width, int64_t height, rae_String title) {
+void rae_ext_Sdl3_initWindow(int64_t width, int64_t height, rae_String title) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         fprintf(stderr, "[sdl] init failed: %s\n", SDL_GetError());
         return;
@@ -268,7 +268,7 @@ void rae_ext_sdl3_initWindow(int64_t width, int64_t height, rae_String title) {
     if (hm) g_sdl_headless_ms = (int64_t)atoll(hm);
 }
 
-void rae_ext_sdl3_setTargetFPS(int64_t fps) {
+void rae_ext_Sdl3_setTargetFPS(int64_t fps) {
     g_sdl_target_fps = fps > 0 ? fps : 0;
 }
 
@@ -278,7 +278,7 @@ void rae_ext_sdl3_setTargetFPS(int64_t fps) {
  *    state, else a key/button held at focus-out would stick forever;
  *  - while any mouse button is held we SDL_CaptureMouse so a drag that releases
  *    OUTSIDE the window still delivers its button-up (the stuck-drag bug). */
-rae_Bool rae_ext_sdl3_shouldClose(void) {
+rae_Bool rae_ext_Sdl3_shouldClose(void) {
     memset(g_sdl_pressed, 0, sizeof(g_sdl_pressed));
     SDL_Event ev;
     rae_Bool quit = false;
@@ -335,35 +335,35 @@ rae_Bool rae_ext_sdl3_shouldClose(void) {
     return false;
 }
 
-int64_t rae_ext_sdl3_getMouseX(void) {
+int64_t rae_ext_Sdl3_getMouseX(void) {
     float x = 0, y = 0; SDL_GetMouseState(&x, &y); return (int64_t)x;
 }
-int64_t rae_ext_sdl3_getMouseY(void) {
+int64_t rae_ext_Sdl3_getMouseY(void) {
     float x = 0, y = 0; SDL_GetMouseState(&x, &y); return (int64_t)y;
 }
 /* Current renderer output size in pixels — tracks window resizes (the window
  * is created SDL_WINDOW_RESIZABLE). Apps poll this to re-render at the new size. */
-int64_t rae_ext_sdl3_windowWidth(void) {
+int64_t rae_ext_Sdl3_windowWidth(void) {
     int w = g_sdl_w, h = 0; if (g_sdl_ren) SDL_GetRenderOutputSize(g_sdl_ren, &w, &h); return (int64_t)w;
 }
-int64_t rae_ext_sdl3_windowHeight(void) {
+int64_t rae_ext_Sdl3_windowHeight(void) {
     int w = 0, h = g_sdl_h; if (g_sdl_ren) SDL_GetRenderOutputSize(g_sdl_ren, &w, &h); return (int64_t)h;
 }
-rae_Bool rae_ext_sdl3_isMouseButtonDown(int64_t button) {
+rae_Bool rae_ext_Sdl3_isMouseButtonDown(int64_t button) {
     /* button (0=L,1=R,2=M) -> SDL button index (1=L,2=M,3=R). */
     int sdlb = button == 1 ? SDL_BUTTON_RIGHT : (button == 2 ? SDL_BUTTON_MIDDLE : SDL_BUTTON_LEFT);
     return sdlb < 8 && g_sdl_mouse[sdlb] != 0;
 }
-rae_Bool rae_ext_sdl3_isKeyDown(int64_t key) {
+rae_Bool rae_ext_Sdl3_isKeyDown(int64_t key) {
     if (key <= 0 || key >= SDL_SCANCODE_COUNT) return false;
     return g_sdl_keydown[key] != 0;
 }
-rae_Bool rae_ext_sdl3_isKeyPressed(int64_t key) {
+rae_Bool rae_ext_Sdl3_isKeyPressed(int64_t key) {
     if (key <= 0 || key >= SDL_SCANCODE_COUNT) return false;
     return g_sdl_pressed[key] != 0;
 }
 
-void rae_ext_sdl3_updatePixels(const int64_t* pixels, int64_t w, int64_t h) {
+void rae_ext_Sdl3_updatePixels(const int64_t* pixels, int64_t w, int64_t h) {
     if (!pixels || w <= 0 || h <= 0 || !g_sdl_ren) return;
     int64_t count = w * h;
     /* (Re)create the texture when the framebuffer size changes. */
@@ -390,7 +390,7 @@ void rae_ext_sdl3_updatePixels(const int64_t* pixels, int64_t w, int64_t h) {
     SDL_UpdateTexture(g_sdl_tex, NULL, g_sdl_scratch, (int)w * 4);
 }
 
-void rae_ext_sdl3_present(void) {
+void rae_ext_Sdl3_present(void) {
     if (!g_sdl_ren) return;
     SDL_SetRenderDrawColor(g_sdl_ren, 0, 0, 0, 255);
     SDL_RenderClear(g_sdl_ren);
@@ -427,11 +427,11 @@ void rae_ext_sdl3_present(void) {
     }
 }
 
-void rae_ext_sdl3_setTitle(rae_String title) {
+void rae_ext_Sdl3_setTitle(rae_String title) {
     if (g_sdl_win && title.data) SDL_SetWindowTitle(g_sdl_win, (const char*)title.data);
 }
 
-void rae_ext_sdl3_closeWindow(void) {
+void rae_ext_Sdl3_closeWindow(void) {
     /* Headless snapshot: dump the last uploaded frame as a BMP (reliable —
      * straight from our pixel buffer, not a GPU read-back). */
     const char* shot = getenv("RAE_SDL_SCREENSHOT");

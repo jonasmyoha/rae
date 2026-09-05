@@ -12,7 +12,7 @@
 # supplied manually so the example is deterministic — in a real app
 # you'd pass `getTime()` from raylib (or any other monotonic clock).
 import core
-import fileWatch
+import FileWatch
 
 # Sidestep a known C-backend bug where comparing `opt String` against
 # `none` lowers to a type-mismatched `rae_ext_rae_str_eq` call. Same
@@ -42,7 +42,7 @@ func main() {
 
   let paths: List(String) = createList(String, cap: 1)
   paths.add(value: configPath)
-  let watcher: FileWatcher = fileWatch.createFileWatcher(
+  let watcher: FileWatcher = FileWatch.createFileWatcher(
     paths: paths
     enabled: true
     intervalSec: 0.0
@@ -58,7 +58,7 @@ func main() {
   # and timestamps do not fit in an f32 once they carry a real epoch.
   var now: Float64 = 0.0
   loop tick < 6 {
-    if fileWatch.checkForChanges(watcher: watcher, now: now) {
+    if FileWatch.checkForChanges(watcher: watcher, now: now) {
       log("tick {tick}: reloaded -> {loadConfig(path: configPath)}")
     } else {
       log("tick {tick}: idle")

@@ -1,15 +1,15 @@
 import core
 import gpu2d
 import math
-import sdl3
-import keys
+import Sdl3
+import Keys
 import sys
-import ui/ecs
+import ui/Ecs
 import ui/RenderSystem/RenderSystem
-import app3d/uiShell
-open app3d/uiShell
+import app3d/UiShell
+open app3d/UiShell
 open math
-open ui/ecs
+open ui/Ecs
 open ui/DebugOverlay
 open ui/RenderSystem/RenderSystem
 
@@ -593,8 +593,8 @@ func handleInput(g: mod Game) {
   var moved: Int = 0
 
   # DAS (Delayed Auto Shift)
-  let moveLeft: Bool = sdl3.isKeyDown(key: keys.keyLeft) or sdl3.isKeyDown(key: keys.keyA)
-  let moveRight: Bool = sdl3.isKeyDown(key: keys.keyRight) or sdl3.isKeyDown(key: keys.keyD)
+  let moveLeft: Bool = Sdl3.isKeyDown(key: Keys.keyLeft) or Sdl3.isKeyDown(key: Keys.keyA)
+  let moveRight: Bool = Sdl3.isKeyDown(key: Keys.keyRight) or Sdl3.isKeyDown(key: Keys.keyD)
 
   if moveLeft or moveRight {
     if g.hMoveTimer is 0 {
@@ -634,7 +634,7 @@ func handleInput(g: mod Game) {
   }
 
   # Rotate (still single-press)
-  if sdl3.isKeyPressed(key: keys.keySpace) or sdl3.isKeyPressed(key: keys.keyUp) or sdl3.isKeyPressed(key: keys.keyW) {
+  if Sdl3.isKeyPressed(key: Keys.keySpace) or Sdl3.isKeyPressed(key: Keys.keyUp) or Sdl3.isKeyPressed(key: Keys.keyW) {
     if canMove(g: g, dx: 0, dy: 0, dr: 1) is 1 {
       cp.rotation = (cp.rotation + 1) % 4
       moved = 1
@@ -650,7 +650,7 @@ func handleInput(g: mod Game) {
 
   # Soft Drop
   var effectiveDelay: Int = g.moveDelay
-  if sdl3.isKeyDown(key: keys.keyDown) or sdl3.isKeyDown(key: keys.keyS) {
+  if Sdl3.isKeyDown(key: Keys.keyDown) or Sdl3.isKeyDown(key: Keys.keyS) {
     effectiveDelay = 2
   }
 
@@ -738,13 +738,13 @@ func main() ret Int {
     # Input: Global (Menu/GameOver)
     if g.state is GameState.gameOver {
       # R key
-      if sdl3.isKeyPressed(key: keys.keyR) {
+      if Sdl3.isKeyPressed(key: Keys.keyR) {
         initGame(g)
       }
     }
     # Input: Pause
     # P key
-    if sdl3.isKeyPressed(key: keys.keyP) {
+    if Sdl3.isKeyPressed(key: Keys.keyP) {
       if g.state is GameState.playing {
         g.state = GameState.paused
       } else {
