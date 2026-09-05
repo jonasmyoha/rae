@@ -221,7 +221,7 @@ a feature that is not already listed here.
 ## Iteration-order & lifecycle guarantees
 
 - **Documented stable dense-iteration order — DECIDED: document the truth, do not add
-  a structure.** Migrations rely on "dense order == insertion order," which holds
+  a structure `(landed #810)`.** Migrations rely on "dense order == insertion order," which holds
   *until* a `componentRemove` swap-remove reorders the table; systems that need a
   stable order (render submit order, pool slots) depend on an undocumented invariant.
   The swap-remove is the CORRECT data-oriented choice — O(1) remove, keeps the array
@@ -231,7 +231,12 @@ a feature that is not already listed here.
   at submit), NOT to bolt on a general ordered index that pays memory on every table
   to buy back convenience. Only a specific system that provably cannot be made
   order-independent earns the smallest opt-in (an O(n) order-preserving remove on
-  that one table). Tracked in #810.
+  that one table). Landed in #810: the contract is written in
+  docs/ecs-api-reference.md ("Iteration-order contract") and pinned by test 738;
+  the audit found every dense-order consumer already order-independent except one
+  latent case — the SDF cluster head in `Gpu3dWorld` was "first member in dense
+  order" and now picks the lowest `EntityId.index` (a stable key). No ordered
+  structure was added.
 - **Generational entity recycling `(landed #703/#704)`.** `EntityAllocator` recycling
   freed index slots + bumping generation is what lets pools recycle entities instead of
   scale-to-0 culling (terrain #741). Keep; it is the backbone of entity pooling.
