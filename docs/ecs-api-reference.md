@@ -122,6 +122,44 @@ per-entity stamps the table already keeps — a system records
 only what moved. It complements `Schedule`'s table-level skip with an
 entity-level filter.
 
+### The query loop — Rae's native join walk (#807)
+
+A system's core statement is "for every entity that has these components, give
+me those components". Rae spells that directly:
+
+```rae
+loop let entity: EntityId, p: mod Pos, v: view Vel in query2(tableA: pos, tableB: vel) {
+  p.x = p.x + v.v
+}
+```
+
+- Iterates a `query2`..`query5` or `forEach` call (bare, or `Query.`-qualified).
+- An optional leading `name: EntityId` binding receives the entity.
+- The remaining bindings map POSITIONALLY to the joined tables (binding 1 ↔
+  `tableA`, …) and must be `mod` or `view`: a `mod` binding writes through to the
+  table and bumps its change stamp exactly like `queryModAt`; a `view` binding
+  reads without dirtying anything.
+- Each table argument must be a table name or field path (`pos`,
+  `world.positions`) — the loop aliases each component back into that same table.
+
+It is PURE SUGAR, resolved in the parser: the statement expands to the hoisted
+result list plus the storage-aliasing accessor bindings systems used to write by
+hand, so sema and codegen see ordinary Rae and the compiled C is the hand-written
+idiom exactly:
+
+```rae
+let raeQueryHits0: List(Query2Match) = query2(tableA: pos, tableB: vel)
+loop let raeQueryHit0: view Query2Match in raeQueryHits0 {
+  let entity: EntityId = raeQueryHit0.entity
+  let p: mod Pos  => queryModAt(table: pos, denseIndex: raeQueryHit0.indexA)
+  let v: view Vel => queryViewAt(table: vel, denseIndex: raeQueryHit0.indexB)
+  p.x = p.x + v.v
+}
+```
+
+The explicit form stays valid — it is what the loop means. Nested query loops
+each own their own result list and alias their own hit.
+
 ## Tags — `lib/ecs/tag.rae`
 
 A tag is a zero-field marker component (`type FooTag {}`); its table stores
