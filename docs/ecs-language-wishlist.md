@@ -34,14 +34,30 @@ a feature that is not already listed here.
 - **Multi-type-param generic inference `(landed #707)`.** Foundational: `query2`/
   `query3` joining `ComponentTable(A) × ComponentTable(B)` and inferring every type
   param. Without it there is no ergonomic join.
-- **Richer query combinators.** `queryTagged` covers "data table filtered by a tag,"
-  but real systems want: `with A, without B`, *optional* components, and
-  change-detection ("only entities whose A changed since last run"). A small,
-  composable query builder would replace hand-rolled per-kind scans (terrain draw
-  currently dispatches on a `kind` field inside one loop).
-- **Ergonomic query iteration.** `for (entity, mod a, mod b) in query(world, A, B)`
-  instead of `componentCount` + `componentEntityAt(i)` + `componentDataAt(i)` +
-  `componentGet`. The index-plus-accessor form is verbose and easy to get subtly wrong.
+- **Richer query combinators — DECIDED: plain functions, NOT a query builder.**
+  Real systems want `with A, without B`, and change-detection ("only entities whose
+  A changed since last run"), and the terrain draw still dispatches on a `kind` field
+  inside one loop. But a "small, composable query builder" is a mini-DSL — a framework
+  creeping in — and was declined (#807 scope review). The data-oriented answer is
+  cheaper and needs no new object: `with T`/`without T` is just "is the tag/component
+  present on this entity," an O(1) sparse check; change-detection is a plain
+  comparison against the `generation`/`denseStamps` every table ALREADY carries.
+  *Optional* components are already `componentGet` returning `opt`. Tracked as plain
+  functions in #807.
+- **Ergonomic query iteration `(scoped in #807)`.** `for (entity, mod a, mod b) in
+  query(world, A, B)` instead of `componentCount` + `componentEntityAt(i)` +
+  `componentDataAt(i)` + `componentGet`. The index-plus-accessor form is verbose and
+  easy to get subtly wrong. This is the real boilerplate win on the single most-used
+  ECS operation, and it is pure sugar over the existing join walk (mod/view modes
+  preserved) — keep it.
+- **N-arity joins — DECIDED: a small fixed ladder, NOT variadic generics.** Joins are
+  hand-written per arity (`query2`/`query3`); the answer to "more than N types" is to
+  add `query4`/`query5` in the same explicit style, not variadic / type-list generic
+  parameters. Variadic generics are metaprogramming — clever, hard to analyse, and
+  declined; nobody joins eight tables in a hot loop. Every join stays O(smallest
+  table): drive off the smallest `ComponentTable`, O(1) sparse membership on the rest.
+  That is exactly what a performance engineer hand-writes; #807 only removes the
+  boilerplate around it.
 
 ## World / archetype boilerplate
 
@@ -164,6 +180,13 @@ a feature that is not already listed here.
   decision (see `docs/naming-conventions.md`) keeps `UiWorld` / `World3d` / `Scene`
   rather than forcing a symmetric `World2d`/`Scene2d` rename: namespacing, not renaming,
   is the right fix for name collisions.
+  - **Status: PARKED (low priority).** Through the data-oriented / minimalism lens
+    this is the weakest open item: a purely naming/organisation concern with zero
+    runtime relevance, and a real language feature (type resolution, generics,
+    ambiguity diagnostics) bought to fix an aesthetic — while the workaround, distinct
+    prefixed names (`UiWorld`/`World3d`/`Scene`), works and costs only mild asymmetry.
+    Prefix-naming is the accepted answer for now; revisit only if a collision arises
+    that a prefix genuinely cannot solve (#811).
 - **Cyclic imports across modules `(landed #743)`.** The loader rejected any import
   cycle, which would have forced a shared "types" dumping ground or dependency inversion
   to fold mutually-referential ECS systems. Since Rae merges every module into one unit
@@ -181,11 +204,18 @@ a feature that is not already listed here.
 
 ## Iteration-order & lifecycle guarantees
 
-- **Documented stable dense-iteration order.** Migrations rely on "dense order ==
-  insertion order," which holds *until* a `componentRemove` swap-remove reorders the
-  table. Systems that need a stable order (render submit order, pool slots) currently
-  depend on an undocumented invariant. Either guarantee stable order, or provide an
-  explicit ordered view, so this can't break silently.
+- **Documented stable dense-iteration order — DECIDED: document the truth, do not add
+  a structure.** Migrations rely on "dense order == insertion order," which holds
+  *until* a `componentRemove` swap-remove reorders the table; systems that need a
+  stable order (render submit order, pool slots) depend on an undocumented invariant.
+  The swap-remove is the CORRECT data-oriented choice — O(1) remove, keeps the array
+  dense — and order instability is its honest cost. So the fix is to write the
+  guarantee down ("insertion order UNTIL the first swap-remove, then unspecified") and
+  audit each order-dependent system to be order-independent (e.g. sort by a stable key
+  at submit), NOT to bolt on a general ordered index that pays memory on every table
+  to buy back convenience. Only a specific system that provably cannot be made
+  order-independent earns the smallest opt-in (an O(n) order-preserving remove on
+  that one table). Tracked in #810.
 - **Generational entity recycling `(landed #703/#704)`.** `EntityAllocator` recycling
   freed index slots + bumping generation is what lets pools recycle entities instead of
   scale-to-0 culling (terrain #741). Keep; it is the backbone of entity pooling.
@@ -201,11 +231,25 @@ a feature that is not already listed here.
 
 ## Systems & scheduling
 
-- **First-class systems / schedule `(partly landed: Schedule, resources, EventQueue)`.**
-  A system that declares its component reads/writes could be ordered automatically,
-  checked for conflicts, and parallelised — turning "a function I remember to call in
-  the right phase" into a language-level concept. The manual per-frame call order in
-  the examples is the seam a scheduler would own.
+- **First-class systems / scheduler — DECIDED: NOT a language feature.** `Schedule`,
+  `resources`, and `EventQueue` landed as LIBRARY pieces, and that is the right layer.
+  The proposal was a language-level "system" that declares its component reads/writes
+  so the compiler could order systems automatically, check conflicts, and parallelise
+  them (briefly queued as #813). Declined, for two reasons:
+  - **The "declare your reads/writes" half already exists.** A system's signature —
+    `positions: mod ComponentTable(Position), velocities: view ComponentTable(Velocity)`
+    — IS the declaration. `mod`/`view` already say exactly who writes what. There is
+    nothing new to declare.
+  - **The only genuinely new half — auto-ordering / auto-parallelising — is the
+    anti-Rae part.** It makes frame order *emerge* from dependency analysis instead of
+    being written down: hidden control flow, non-deterministic in spirit, exactly the
+    "clever" mechanism the language refuses. A performance engineer WANTS the explicit
+    hand-written frame order — it is predictable and it is fast. The manual per-frame
+    call order in the examples is not a seam to be owned by a scheduler; it is a
+    feature.
+  - Net: systems stay plain functions called in an explicit order; a scheduler, if
+    ever wanted, is a library, never syntax. Same conclusion as sum types (above):
+    a language-nerd feature, not one a performance-oriented engineer needs.
 
 ## Ownership & the no-globals rule
 
