@@ -2200,6 +2200,311 @@ static AstStmt* parse_if_statement(Parser* parser, const Token* if_token) {
   return stmt;
 }
 
+
+// ---------------------------------------------------------------------------
+// #807 — the ECS query loop (option A of the iteration-sugar design).
+//
+//   loop let entity: EntityId, p: mod Pos, v: view Vel in query2(tableA: pos, tableB: vel) { … }
+//
+// This is Rae's native way to walk a component join: it reads like the
+// architecture — "for each entity that has a Pos and a Vel, give me the entity,
+// a mutable Pos and a read-only Vel". It is PURE SUGAR: the parser rewrites it
+// to the ordinary match loop plus the storage-aliasing accessor bindings that
+// systems used to write by hand, so sema and codegen see plain Rae:
+//
+//   let raeQueryHits0: List(Query2Match) = query2(tableA: pos, tableB: vel)
+//   loop let raeQueryHit0: view Query2Match in raeQueryHits0 {
+//     let entity: EntityId = raeQueryHit0.entity
+//     let p: mod Pos  => queryModAt(table: pos, denseIndex: raeQueryHit0.indexA)
+//     let v: view Vel => queryViewAt(table: vel, denseIndex: raeQueryHit0.indexB)
+//     …
+//   }
+//
+// Rules (all diagnosed here, at parse time):
+//   - the iterable must be a query2 / query3 / query4 / query5 / forEach call
+//     (bare, or module-qualified as `Query.query2(...)`, which is mirrored onto
+//     the accessors);
+//   - an optional FIRST binding typed `EntityId` receives the entity;
+//   - the remaining bindings map POSITIONALLY to the joined tables (binding 1
+//     ↔ tableA / indexA, …) and MUST be `mod` or `view` — they alias the
+//     component in its table; a `mod` binding bumps the change stamp exactly
+//     like queryModAt, a `view` binding never dirties anything;
+//   - each table argument must be a table NAME or field path (`pos`,
+//     `world.positions`): the loop aliases each component back into that same
+//     table, so the expression is re-spelled — a computed table would be
+//     evaluated twice and alias the wrong storage.
+// The query call is HOISTED into a hidden `let raeQueryHits<N>` ahead of the
+// loop (so the result list is owned and dropped exactly like the hand-written
+// idiom — iterating a call directly would leak the snapshot), and the hidden
+// match binding is `raeQueryHit<N>`; both are camelCase and unique per loop, so
+// nested query loops each own and alias their own result. The statement
+// therefore expands to a two-statement chain (hoist -> loop); parse_block walks
+// the chain when appending.
+// ---------------------------------------------------------------------------
+
+#define RAE_QUERY_LOOP_MAX_BINDINGS 6  /* entity + up to 5 components */
+
+typedef struct {
+  const Token* name_tok;
+  Str name;
+  AstTypeRef* type;
+} QueryLoopBinding;
+
+static AstExpr* query_loop_ident(Parser* parser, const Token* tok, Str name) {
+  AstExpr* e = new_expr(parser, AST_EXPR_IDENT, tok);
+  e->as.ident = parser_copy_str(parser, name);
+  return e;
+}
+
+static AstExpr* query_loop_member(Parser* parser, const Token* tok, AstExpr* object, const char* member) {
+  AstExpr* e = new_expr(parser, AST_EXPR_MEMBER, tok);
+  e->as.member.object = object;
+  e->as.member.member = parser_copy_str(parser, str_from_cstr(member));
+  return e;
+}
+
+static AstTypeRef* query_loop_type(Parser* parser, const Token* tok, const char* name, bool is_view) {
+  AstTypeRef* t = parser_alloc(parser, sizeof(AstTypeRef));  /* zeroed */
+  t->line = tok->line;
+  t->column = tok->column;
+  t->parts = make_identifier_part(parser, str_from_cstr(name));
+  t->is_view = is_view;
+  return t;
+}
+
+// Clone an identifier / member-path "place" expression. NULL if `src` is any
+// other shape (a call, a literal, …), which the caller reports.
+static AstExpr* query_loop_clone_place(Parser* parser, const AstExpr* src) {
+  if (!src) return NULL;
+  if (src->kind == AST_EXPR_IDENT) {
+    AstExpr* e = new_expr(parser, AST_EXPR_IDENT, NULL);
+    e->line = src->line; e->column = src->column;
+    e->as.ident = parser_copy_str(parser, src->as.ident);
+    return e;
+  }
+  if (src->kind == AST_EXPR_MEMBER) {
+    AstExpr* object = query_loop_clone_place(parser, src->as.member.object);
+    if (!object) return NULL;
+    AstExpr* e = new_expr(parser, AST_EXPR_MEMBER, NULL);
+    e->line = src->line; e->column = src->column;
+    e->as.member.object = object;
+    e->as.member.member = parser_copy_str(parser, src->as.member.member);
+    return e;
+  }
+  return NULL;
+}
+
+static AstCallArg* query_loop_arg(Parser* parser, const char* name, AstExpr* value, AstCallArg* next) {
+  AstCallArg* a = parser_alloc(parser, sizeof(AstCallArg));
+  a->name = parser_copy_str(parser, str_from_cstr(name));
+  a->value = value;
+  a->next = next;
+  return a;
+}
+
+// `queryModAt(table: T, denseIndex: I)` / `queryViewAt(...)`, mirroring the
+// spelling of the query call: bare, or `Qualifier.fn(...)`.
+static AstExpr* query_loop_accessor(Parser* parser, const Token* tok, const AstExpr* qualifier,
+                                    const char* fn, AstExpr* table, AstExpr* dense_index) {
+  AstCallArg* args = query_loop_arg(parser, "table", table,
+                     query_loop_arg(parser, "denseIndex", dense_index, NULL));
+  if (qualifier) {
+    AstExpr* mc = new_expr(parser, AST_EXPR_METHOD_CALL, tok);
+    mc->as.method_call.object = query_loop_clone_place(parser, qualifier);
+    mc->as.method_call.method_name = parser_copy_str(parser, str_from_cstr(fn));
+    mc->as.method_call.args = args;
+    return mc;
+  }
+  AstExpr* call = new_expr(parser, AST_EXPR_CALL, tok);
+  call->as.call.callee = query_loop_ident(parser, tok, str_from_cstr(fn));
+  call->as.call.args = args;
+  return call;
+}
+
+static AstStmt* parse_query_loop(Parser* parser, AstStmt* stmt, bool has_let,
+                                 const Token* first_name, AstTypeRef* first_type) {
+  static int hit_counter = 0;
+  QueryLoopBinding bindings[RAE_QUERY_LOOP_MAX_BINDINGS];
+  int count = 0;
+  bindings[count++] = (QueryLoopBinding){ first_name, parser_copy_str(parser, first_name->lexeme), first_type };
+  if (!has_let) {
+    parser_error(parser, first_name, "query loop bindings must begin with 'let' (they alias components, they are not counters)");
+  }
+  while (parser_match(parser, TOK_COMMA)) {
+    const Token* name = parser_consume_ident(parser, "expected a binding name after ',' in a query loop");
+    if (!name) break;
+    check_camel_case(parser, name, "variable");
+    parser_consume(parser, TOK_COLON, "expected ':' after the query loop binding name");
+    AstTypeRef* type = parse_type_ref(parser);
+    if (count < RAE_QUERY_LOOP_MAX_BINDINGS) {
+      bindings[count++] = (QueryLoopBinding){ name, parser_copy_str(parser, name->lexeme), type };
+    } else {
+      parser_error(parser, name, "too many query loop bindings: an entity plus at most 5 components (query5 is the top of the ladder)");
+    }
+  }
+  parser_consume(parser, TOK_KW_IN, "expected 'in' after the query loop bindings");
+  AstExpr* iterable = parse_expression(parser);
+
+  // Which query is this, and how is it spelled?
+  Str fname = {0};
+  const AstExpr* qualifier = NULL;
+  AstCallArg* call_args = NULL;
+  bool is_call = false;
+  if (iterable && iterable->kind == AST_EXPR_CALL && iterable->as.call.callee
+      && iterable->as.call.callee->kind == AST_EXPR_IDENT) {
+    fname = iterable->as.call.callee->as.ident;
+    call_args = iterable->as.call.args;
+    is_call = true;
+  } else if (iterable && iterable->kind == AST_EXPR_METHOD_CALL && iterable->as.method_call.object
+             && iterable->as.method_call.object->kind == AST_EXPR_IDENT) {
+    fname = iterable->as.method_call.method_name;
+    qualifier = iterable->as.method_call.object;
+    call_args = iterable->as.method_call.args;
+    is_call = true;
+  }
+  int arity = 0;
+  const char* match_type = NULL;
+  bool single_table = false;
+  if (is_call) {
+    if (str_eq_cstr(fname, "query2"))      { arity = 2; match_type = "Query2Match"; }
+    else if (str_eq_cstr(fname, "query3")) { arity = 3; match_type = "Query3Match"; }
+    else if (str_eq_cstr(fname, "query4")) { arity = 4; match_type = "Query4Match"; }
+    else if (str_eq_cstr(fname, "query5")) { arity = 5; match_type = "Query5Match"; }
+    else if (str_eq_cstr(fname, "forEach")) { arity = 1; match_type = "QueryMatch"; single_table = true; }
+  }
+
+  bool ok = true;
+  if (arity == 0) {
+    parser_error(parser, first_name,
+                 "a query loop (`loop let entity: EntityId, a: mod A, b: view B in ...`) must iterate a "
+                 "query2, query3, query4, query5, or forEach call");
+    ok = false;
+  }
+
+  // Optional leading `entity: EntityId` binding; the rest are components.
+  int comp_start = 0;
+  AstTypeRef* t0 = bindings[0].type;
+  if (t0 && t0->parts && !t0->parts->next && str_eq_cstr(t0->parts->text, "EntityId")
+      && !t0->is_mod && !t0->is_view) {
+    comp_start = 1;
+  }
+  int comp_count = count - comp_start;
+  if (ok && comp_count != arity) {
+    parser_error(parser, first_name,
+                 "query loop binds %d component%s but %.*s joins %d table%s — one `mod`/`view` binding per table, in table order"
+                 "%s",
+                 comp_count, comp_count == 1 ? "" : "s", (int)fname.len, fname.data, arity, arity == 1 ? "" : "s",
+                 comp_start == 0 ? " (a leading `name: EntityId` binding is optional and receives the entity)" : "");
+    ok = false;
+  }
+  for (int i = comp_start; ok && i < count; i++) {
+    AstTypeRef* t = bindings[i].type;
+    if (!t || (!t->is_mod && !t->is_view)) {
+      parser_error(parser, bindings[i].name_tok,
+                   "query loop component binding '%.*s' must be `mod` or `view` — it aliases the component in its table "
+                   "(write `%.*s: view T` to read, `%.*s: mod T` to write)",
+                   (int)bindings[i].name.len, bindings[i].name.data,
+                   (int)bindings[i].name.len, bindings[i].name.data,
+                   (int)bindings[i].name.len, bindings[i].name.data);
+      ok = false;
+    }
+  }
+  AstExpr* tables[5] = {0};
+  int table_count = 0;
+  for (AstCallArg* a = call_args; a; a = a->next) {
+    if (table_count < 5) tables[table_count] = a->value;
+    table_count++;
+  }
+  if (ok && table_count != arity) {
+    parser_error(parser, first_name, "%.*s expects %d table argument%s in a query loop, got %d",
+                 (int)fname.len, fname.data, arity, arity == 1 ? "" : "s", table_count);
+    ok = false;
+  }
+  for (int i = 0; ok && i < arity; i++) {
+    if (!query_loop_clone_place(parser, tables[i])) {
+      parser_error(parser, first_name,
+                   "query loop table arguments must be a table name or field path (e.g. `pos` or `world.positions`) — "
+                   "the loop aliases each component back into that same table");
+      ok = false;
+    }
+  }
+
+  // The query result is hoisted into a hidden owned `let` ahead of the loop
+  // (so it is dropped exactly like the hand-written idiom), and a hidden match
+  // binding drives the loop; the visible bindings alias into it.
+  int loop_id = hit_counter++;
+  char hits_buf[32];
+  snprintf(hits_buf, sizeof hits_buf, "raeQueryHits%d", loop_id);
+  Str hits_name = parser_copy_str(parser, str_from_cstr(hits_buf));
+  char hidden_buf[32];
+  snprintf(hidden_buf, sizeof hidden_buf, "raeQueryHit%d", loop_id);
+  Str hidden = parser_copy_str(parser, str_from_cstr(hidden_buf));
+  const char* mt = match_type ? match_type : "QueryMatch";
+
+  AstStmt* hoist = new_stmt(parser, AST_STMT_LET, first_name);
+  hoist->as.let_stmt.name = hits_name;
+  hoist->as.let_stmt.type = query_loop_type(parser, first_name, "List", false);
+  hoist->as.let_stmt.type->generic_args = query_loop_type(parser, first_name, mt, false);
+  hoist->as.let_stmt.value = iterable;
+  hoist->as.let_stmt.is_bind = false;
+  hoist->as.let_stmt.is_var = false;
+  hoist->as.let_stmt.is_const = false;
+  hoist->next = stmt;
+
+  AstStmt* init = new_stmt(parser, AST_STMT_LET, first_name);
+  init->as.let_stmt.name = hidden;
+  init->as.let_stmt.type = query_loop_type(parser, first_name, mt, true);
+  init->as.let_stmt.value = NULL;
+  init->as.let_stmt.is_bind = false;
+  init->as.let_stmt.is_var = false;
+  init->as.let_stmt.is_const = false;
+
+  stmt->as.loop_stmt.is_range = true;
+  stmt->as.loop_stmt.init = init;
+  stmt->as.loop_stmt.condition = query_loop_ident(parser, first_name, hits_name);
+  stmt->as.loop_stmt.increment = NULL;
+  stmt->as.loop_stmt.body = parse_block(parser);
+  if (!ok || !stmt->as.loop_stmt.body) return hoist;
+
+  AstStmt* head = NULL;
+  AstStmt* tail = NULL;
+  #define RAE_QUERY_LOOP_APPEND(s) do { if (tail) tail->next = (s); else head = (s); tail = (s); } while (0)
+  if (comp_start == 1) {
+    AstStmt* es = new_stmt(parser, AST_STMT_LET, bindings[0].name_tok);
+    es->as.let_stmt.name = bindings[0].name;
+    es->as.let_stmt.type = bindings[0].type;
+    es->as.let_stmt.value = query_loop_member(parser, bindings[0].name_tok,
+                                query_loop_ident(parser, bindings[0].name_tok, hidden), "entity");
+    es->as.let_stmt.is_bind = false;
+    es->as.let_stmt.is_var = false;
+    es->as.let_stmt.is_const = false;
+    RAE_QUERY_LOOP_APPEND(es);
+  }
+  static const char* index_fields[5] = { "indexA", "indexB", "indexC", "indexD", "indexE" };
+  for (int i = 0; i < arity; i++) {
+    QueryLoopBinding* cb = &bindings[comp_start + i];
+    const char* field = single_table ? "index" : index_fields[i];
+    AstExpr* table = query_loop_clone_place(parser, tables[i]);
+    AstExpr* dense = query_loop_member(parser, cb->name_tok, query_loop_ident(parser, cb->name_tok, hidden), field);
+    AstExpr* accessor = query_loop_accessor(parser, cb->name_tok, qualifier,
+                                            cb->type->is_mod ? "queryModAt" : "queryViewAt", table, dense);
+    AstStmt* ls = new_stmt(parser, AST_STMT_LET, cb->name_tok);
+    ls->as.let_stmt.name = cb->name;
+    ls->as.let_stmt.type = cb->type;
+    ls->as.let_stmt.value = accessor;
+    ls->as.let_stmt.is_bind = true;
+    ls->as.let_stmt.is_var = false;
+    ls->as.let_stmt.is_const = false;
+    RAE_QUERY_LOOP_APPEND(ls);
+  }
+  #undef RAE_QUERY_LOOP_APPEND
+  if (tail) {
+    tail->next = stmt->as.loop_stmt.body->first;
+    stmt->as.loop_stmt.body->first = head;
+  }
+  return hoist;
+}
+
 static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
   AstStmt* stmt = new_stmt(parser, AST_STMT_LOOP, loop_token);
   stmt->as.loop_stmt.is_range = false;
@@ -2304,6 +2609,11 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
     const Token* name = parser_advance(parser);
     parser_consume(parser, TOK_COLON, "expected ':' after identifier");
     AstTypeRef* type = parse_type_ref(parser);
+
+    // #807: `loop let a: A, b: B, ... in query…(…)` — the ECS query loop.
+    if (parser_check(parser, TOK_COMMA)) {
+      return parse_query_loop(parser, stmt, has_let, name, type);
+    }
 
     if (parser_match(parser, TOK_KW_IN)) {
       if (!has_let) {
@@ -2415,7 +2725,10 @@ static AstStmt* parse_statement(Parser* parser) {
     // loop for now (real parallel execution lands with the C thread
     // runtime). Reusing parse_loop_statement keeps one loop grammar.
     AstStmt* s = parse_loop_statement(parser, parser_previous(parser));
-    if (s && s->kind == AST_STMT_LOOP) s->as.loop_stmt.is_parallel = true;
+    // A query loop (#807) returns a hoist `let` chained to the loop itself.
+    for (AstStmt* it = s; it; it = it->next) {
+      if (it->kind == AST_STMT_LOOP) it->as.loop_stmt.is_parallel = true;
+    }
     return s;
   }
   if (parser_match(parser, TOK_KW_BREAK)) {
@@ -2475,6 +2788,10 @@ static AstBlock* parse_block(Parser* parser) {
       if (!block->first) block->first = stmt;
       else tail->next = stmt;
       tail = stmt;
+      // A statement may expand to a CHAIN (the #807 query loop hoists its
+      // query call into a `let` ahead of the loop); walk to the chain's end so
+      // the next statement appends after the whole expansion, not inside it.
+      while (tail->next) tail = tail->next;
     }
     if (parser->index == prev_index) {
       parser_advance(parser); // Force progress
