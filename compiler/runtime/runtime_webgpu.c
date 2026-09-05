@@ -191,7 +191,7 @@ int rae_wgpu_map_read(void* buffer, uint64_t size, void* dst) {
 
 /* scene: sceneLen f64 (camera 19 + spheres*10) -> narrowed to f32 for the GPU.
  * fb: width*height int64 written as packed 0xRRGGBB. wgsl: shader source. */
-void rae_ext_webgpu_raytrace(const float* scene, int64_t sceneLen, int64_t* fb,
+void rae_ext_Webgpu_raytrace(const float* scene, int64_t sceneLen, int64_t* fb,
                             int64_t width, int64_t height, int64_t samples,
                             int64_t maxDepth, rae_String wgsl){
     if (!fb || width <= 0 || height <= 0) return;
@@ -297,7 +297,7 @@ static int rae_gpu_add_buf(WGPUBuffer b, size_t size) {
     return ++g_gpu_buf_n;  /* 1-based handle */
 }
 
-int64_t rae_ext_gpu_storageF32(const float* data, int64_t count){
+int64_t rae_ext_Gpu_storageF32(const float* data, int64_t count){
     if (!rae_wgpu_init() || count <= 0) return 0;
     size_t bytes = (size_t)count * 4;
     float* tmp = (float*)malloc(bytes);
@@ -310,7 +310,7 @@ int64_t rae_ext_gpu_storageF32(const float* data, int64_t count){
     free(tmp);
     return rae_gpu_add_buf(b, bytes);
 }
-int64_t rae_ext_gpu_uniformU32(const int64_t* data, int64_t count) {
+int64_t rae_ext_Gpu_uniformU32(const int64_t* data, int64_t count) {
     if (!rae_wgpu_init() || count <= 0) return 0;
     size_t bytes = (size_t)count * 4;
     uint32_t* tmp = (uint32_t*)malloc(bytes);
@@ -331,10 +331,10 @@ static int64_t rae_gpu_alloc(int64_t count) {
     WGPUBuffer b = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
     return rae_gpu_add_buf(b, bytes);
 }
-int64_t rae_ext_gpu_allocF32(int64_t count) { return rae_gpu_alloc(count); }
-int64_t rae_ext_gpu_allocU32(int64_t count) { return rae_gpu_alloc(count); }
+int64_t rae_ext_Gpu_allocF32(int64_t count) { return rae_gpu_alloc(count); }
+int64_t rae_ext_Gpu_allocU32(int64_t count) { return rae_gpu_alloc(count); }
 
-void rae_ext_gpu_writeF32(int64_t buf, const float* data, int64_t count){
+void rae_ext_Gpu_writeF32(int64_t buf, const float* data, int64_t count){
     if (!g_wgpu_queue || buf < 1 || buf > g_gpu_buf_n || count <= 0) return;
     size_t bytes = (size_t)count * 4;
     float* tmp = (float*)malloc(bytes);
@@ -343,7 +343,7 @@ void rae_ext_gpu_writeF32(int64_t buf, const float* data, int64_t count){
     wgpuQueueWriteBuffer(g_wgpu_queue, g_gpu_buf[buf - 1], 0, tmp, bytes);
     free(tmp);
 }
-void rae_ext_gpu_writeU32(int64_t buf, const int64_t* data, int64_t count) {
+void rae_ext_Gpu_writeU32(int64_t buf, const int64_t* data, int64_t count) {
     if (!g_wgpu_queue || buf < 1 || buf > g_gpu_buf_n || count <= 0) return;
     size_t bytes = (size_t)count * 4;
     uint32_t* tmp = (uint32_t*)malloc(bytes);
@@ -353,7 +353,7 @@ void rae_ext_gpu_writeU32(int64_t buf, const int64_t* data, int64_t count) {
     free(tmp);
 }
 
-int64_t rae_ext_gpu_kernel(rae_String wgsl, rae_String entry) {
+int64_t rae_ext_Gpu_kernel(rae_String wgsl, rae_String entry) {
     if (!rae_wgpu_init() || g_gpu_pipe_n >= RAE_GPU_MAX_PIPE) return 0;
     WGPUShaderSourceWGSL src; memset(&src, 0, sizeof(src));
     src.chain.sType = WGPUSType_ShaderSourceWGSL;
@@ -371,7 +371,7 @@ int64_t rae_ext_gpu_kernel(rae_String wgsl, rae_String entry) {
     return ++g_gpu_pipe_n;  /* 1-based */
 }
 
-void rae_ext_gpu_run(int64_t kernel, const int64_t* bufs, int64_t bufCount,
+void rae_ext_Gpu_run(int64_t kernel, const int64_t* bufs, int64_t bufCount,
                     int64_t gx, int64_t gy, int64_t gz) {
     if (!g_wgpu_dev || kernel < 1 || kernel > g_gpu_pipe_n || bufCount < 0 || bufCount > 16) return;
     WGPUComputePipeline pipe = g_gpu_pipe[kernel - 1];
@@ -421,21 +421,21 @@ static const void* rae_gpu_readback(int64_t buf, size_t bytes, WGPUBuffer* stagi
     *staging_out = staging;
     return wgpuBufferGetConstMappedRange(staging, 0, bytes);
 }
-void rae_ext_gpu_downloadF32(int64_t buf, float* out, int64_t count){
+void rae_ext_Gpu_downloadF32(int64_t buf, float* out, int64_t count){
     if (!out || count <= 0) return;
     WGPUBuffer staging = NULL;
     const float* p = (const float*)rae_gpu_readback(buf, (size_t)count * 4, &staging);
     if (p) for (int64_t i = 0; i < count; i++) out[i] = (double)p[i];
     if (staging) { wgpuBufferUnmap(staging); wgpuBufferRelease(staging); }
 }
-void rae_ext_gpu_downloadU32(int64_t buf, int64_t* out, int64_t count) {
+void rae_ext_Gpu_downloadU32(int64_t buf, int64_t* out, int64_t count) {
     if (!out || count <= 0) return;
     WGPUBuffer staging = NULL;
     const uint32_t* p = (const uint32_t*)rae_gpu_readback(buf, (size_t)count * 4, &staging);
     if (p) for (int64_t i = 0; i < count; i++) out[i] = (int64_t)p[i];
     if (staging) { wgpuBufferUnmap(staging); wgpuBufferRelease(staging); }
 }
-void rae_ext_gpu_reset(void) {
+void rae_ext_Gpu_reset(void) {
     for (int i = 0; i < g_gpu_buf_n; i++) if (g_gpu_buf[i]) wgpuBufferRelease(g_gpu_buf[i]);
     for (int i = 0; i < g_gpu_pipe_n; i++) if (g_gpu_pipe[i]) wgpuComputePipelineRelease(g_gpu_pipe[i]);
     g_gpu_buf_n = 0; g_gpu_pipe_n = 0;

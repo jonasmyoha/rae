@@ -1,18 +1,18 @@
 # A minimal 3D easing example on Rae's production deferred renderer.
 import core
 import Easing
-import gpu2d
-import gbuffer
-import math
-import sys
+import Gpu2d
+import Gbuffer
+import Math
+import Sys
 import Vec3
 import RendererDeferred
 import ui/Ecs
 import ui/RenderSystem/RenderSystem
 import app3d/UiShell
 open app3d/UiShell
-open gbuffer
-open gpu3d
+open Gbuffer
+open Gpu3d
 open Math3d
 open Mesh3d
 open RendererDeferred
@@ -51,8 +51,8 @@ func buildScene(sphere: view MeshHandle, ground: view MeshHandle) ret World3d {
 }
 
 func main() ret Int {
-  gpu2d.initWindow(width: 960, height: 600, title: "Rae Easing 3D — Deferred")
-  gpu2d.setDesignResolution(width: 960.0, height: 600.0, fit: 0)
+  Gpu2d.initWindow(width: 960, height: 600, title: "Rae Easing 3D — Deferred")
+  Gpu2d.setDesignResolution(width: 960.0, height: 600.0, fit: 0)
 
   let sphereData: MeshData = makeSphere(rings: 32, segments: 48)
   let planeData: MeshData = makePlane(size: 30.0, segments: 1)
@@ -88,11 +88,11 @@ func main() ret Int {
   }
 
   let duration: Float = 3.0
-  let startTime: Float64 = gpu2d.nowSeconds()
-  let fixedTestFrame: Bool = sys.getEnv(name: "RAE_EASING3D_TEST_FRAME").length() > 0
-  loop not gpu2d.pollClose() {
+  let startTime: Float64 = Gpu2d.nowSeconds()
+  let fixedTestFrame: Bool = Sys.getEnv(name: "RAE_EASING3D_TEST_FRAME").length() > 0
+  loop not Gpu2d.pollClose() {
     let resized: Bool = resizeUiToWindow(world: world, res: uiResources)
-    var elapsed: Float = (gpu2d.nowSeconds() - startTime) as Float
+    var elapsed: Float = (Gpu2d.nowSeconds() - startTime) as Float
     loop elapsed > duration { elapsed = elapsed - duration }
     if fixedTestFrame { elapsed = 1.8 }
     let phase: Float = elapsed / duration
@@ -107,13 +107,13 @@ func main() ret Int {
       })
     runUiSystems(world: world, res: uiResources)
 
-    let aspect: Float = gpu2d.windowWidth().toFloat() / gpu2d.windowHeight().toFloat()
-    if gpu2d.renderGate() {
+    let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
+    if Gpu2d.renderGate() {
       var passIndex: Int = 0
       loop passIndex < deferredOrderLength(r: renderer) {
         let tag: Int = deferredTagAt(r: renderer, i: passIndex)
         if tag is RenderTag.uiOverlay {
-          gpu2d.beginFrameLoad()
+          Gpu2d.beginFrameLoad()
           renderSystemGpu2d(world: world, res: uiResources)
         } else {
           renderDeferredPassWorld(
@@ -127,7 +127,7 @@ func main() ret Int {
   }
 
   if fixedTestFrame { log("[easing3d] deterministic deferred frame rendered") }
-  gbuffer.shutdownAll()
-  gpu2d.closeWindow()
+  Gbuffer.shutdownAll()
+  Gpu2d.closeWindow()
   ret 0
 }

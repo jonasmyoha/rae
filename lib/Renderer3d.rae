@@ -27,7 +27,7 @@
 import core
 open Rendergraph
 open Scene3d
-open gpu3d
+open Gpu3d
 
 # ----- pass tags (renderer-owned; opaque to the graph) ----------------
 const tagScenePass: Int = 1    # 3D raster + depth-integrated SDF geometry
@@ -215,7 +215,7 @@ func compileRenderer(r: mod Renderer3d) pub ret Int {
 }
 
 # Execute one forward frame by walking the DERIVED order and dispatching on tag.
-# The scene pass fills from the World3d ECS queries (gpu3d.renderSceneWorld); every
+# The scene pass fills from the World3d ECS queries (Gpu3d.renderSceneWorld); every
 # other tag is scene-independent post-processing. Per-pass inputs arrive through
 # this call rather than captured state, because passes cannot carry closures.
 func renderFrameWorld(r: view Renderer3d, world: view World3d, camera: view Camera3d, light: view Light3d, aspect: view Float, time: view Float) pub {

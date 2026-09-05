@@ -18,8 +18,8 @@
 # scene. Making them fields is what stops the next example from forking
 # the module to change one number.
 import core
-import math
-import gpu2d
+import Math
+import Gpu2d
 import Sdl3
 import Vec3
 import Keys
@@ -145,12 +145,12 @@ func pointerOutsideCamZone(rig: view CameraRig, x: view Float, y: view Float) re
 
 func resolveCameraPointer(rig: mod CameraRig) {
   if rig.camTouchOn is false {
-    rig.camPointerX = gpu2d.pointerX()
-    rig.camPointerY = gpu2d.pointerY()
-    rig.camPointerDown = gpu2d.pointerDown()
+    rig.camPointerX = Gpu2d.pointerX()
+    rig.camPointerY = Gpu2d.pointerY()
+    rig.camPointerDown = Gpu2d.pointerDown()
     ret
   }
-  let touches: Int = gpu2d.touchCount()
+  let touches: Int = Gpu2d.touchCount()
   if touches > 0 {
     # Own a finger from press and hold it: keep our grabbed finger while it stays
     # down, else grab a newly-pressed finger that goes down OUTSIDE the joystick
@@ -158,10 +158,10 @@ func resolveCameraPointer(rig: mod CameraRig) {
     var found: Bool = false
     var index: Int = 0
     loop index < touches {
-      let id: Int = gpu2d.touchId(index: index)
-      let tx: Float = gpu2d.touchX(index: index)
-      let ty: Float = gpu2d.touchY(index: index)
-      let pressed: Bool = gpu2d.touchPressed(index: index)
+      let id: Int = Gpu2d.touchId(index: index)
+      let tx: Float = Gpu2d.touchX(index: index)
+      let ty: Float = Gpu2d.touchY(index: index)
+      let pressed: Bool = Gpu2d.touchPressed(index: index)
       # Reused-id release: SDL recycles finger ids after a lift, so a FRESH press
       # carrying the id we hold means our finger lifted and a new one took the id.
       # A hold is never a fresh press — drop it here so the grab below re-decides
@@ -187,9 +187,9 @@ func resolveCameraPointer(rig: mod CameraRig) {
     rig.camPointerDown = found
   } else {
     # Desktop mouse: skip while the joystick owns the mouse.
-    rig.camPointerX = gpu2d.pointerX()
-    rig.camPointerY = gpu2d.pointerY()
-    rig.camPointerDown = gpu2d.pointerDown() and rig.camJoyActive is false
+    rig.camPointerX = Gpu2d.pointerX()
+    rig.camPointerY = Gpu2d.pointerY()
+    rig.camPointerDown = Gpu2d.pointerDown() and rig.camJoyActive is false
   }
 }
 
@@ -285,7 +285,7 @@ func smoothTowards(current: view Float, target: view Float,
   if gap < rigSmoothEpsilon and gap > 0.0 - rigSmoothEpsilon {
     ret target
   }
-  ret target - gap * math.exp(x: 0.0 - rate * dt)
+  ret target - gap * Math.exp(x: 0.0 - rate * dt)
 }
 
 # Which rate the rotation and zoom easing runs at. Those quantities are
@@ -314,11 +314,11 @@ func rigRotationRate(rig: view CameraRig) pub ret Float {
 # the camera is still turning to face would feel like the controls were
 # fighting the view.
 func cameraRigForward(rig: view CameraRig) pub ret Vec3 {
-  let cp: Float = math.cos(x: rig.viewFreePitch)
+  let cp: Float = Math.cos(x: rig.viewFreePitch)
   ret Vec3.create(
-    x: (0.0 - math.sin(x: rig.viewYaw)) * cp
-    y: math.cos(x: rig.viewYaw) * cp
-    z: math.sin(x: rig.viewFreePitch)
+    x: (0.0 - Math.sin(x: rig.viewYaw)) * cp
+    y: Math.cos(x: rig.viewYaw) * cp
+    z: Math.sin(x: rig.viewFreePitch)
   )
 }
 
@@ -439,7 +439,7 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
 
   if allowInput {
     # The wheel is a pointer device, so it rides the mouse toggle.
-    mouseDist = 0.0 - gpu2d.wheelMove() * rig.wheelSpeed
+    mouseDist = 0.0 - Gpu2d.wheelMove() * rig.wheelSpeed
     let boost: Float = speedScale()
     if rig.mode is CameraRigMode.orbit {
       if Sdl3.isKeyDown(key: Keys.keyW) { keyDist = keyDist - dt * rig.moveSpeed * boost }

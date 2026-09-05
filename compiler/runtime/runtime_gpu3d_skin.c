@@ -318,7 +318,7 @@ static void g3d_skin_init_pipeline(void) {
 }
 
 /* Upload a skinned mesh: 20 Floats per vertex, indices as Rae Ints. */
-int64_t rae_ext_gpu3d_skinnedMeshCreate(const float* verts, int64_t vertCount,
+int64_t rae_ext_Gpu3d_skinnedMeshCreate(const float* verts, int64_t vertCount,
                                         const int64_t* indices, int64_t indexCount) {
     if (!g_wgpu_dev || !verts || !indices) return 0;
     if (vertCount <= 0 || indexCount <= 0 || g3d_skin_mesh_n >= G3D_SKIN_MAX_MESHES) return 0;
@@ -346,7 +346,7 @@ int64_t rae_ext_gpu3d_skinnedMeshCreate(const float* verts, int64_t vertCount,
 
 /* Replace the joint palette. `rows` is 12 Floats per joint: three vec4
  * rows of the affine transform. */
-void rae_ext_gpu3d_setPalette(const float* rows, int64_t jointCount) {
+void rae_ext_Gpu3d_setPalette(const float* rows, int64_t jointCount) {
     /* Ensure the palette BUFFER alone — not the whole forward pipeline.
      * The deferred and shadow paths read this buffer and may be the only
      * ones drawing, so it cannot depend on the forward pipeline having
@@ -444,11 +444,11 @@ int64_t rae_g3d_skin_icount(int64_t mesh){
     return (int64_t)g3d_skin_icount[slot];
 }
 
-void rae_ext_gpu3d_skinFrameBegin(void) { g3d_skin_draw_count = 0; }
+void rae_ext_Gpu3d_skinFrameBegin(void) { g3d_skin_draw_count = 0; }
 
-int64_t rae_ext_gpu3d_skinDrawCount(void) { return (int64_t)g3d_skin_draw_count; }
+int64_t rae_ext_Gpu3d_skinDrawCount(void) { return (int64_t)g3d_skin_draw_count; }
 
-void rae_ext_gpu3d_skinShutdown(void) {
+void rae_ext_Gpu3d_skinShutdown(void) {
     for (int i = 0; i < g3d_skin_mesh_n; i++) {
         if (g3d_skin_vbuf[i]) { wgpuBufferRelease(g3d_skin_vbuf[i]); g3d_skin_vbuf[i] = NULL; }
         if (g3d_skin_ibuf[i]) { wgpuBufferRelease(g3d_skin_ibuf[i]); g3d_skin_ibuf[i] = NULL; }

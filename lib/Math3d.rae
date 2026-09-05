@@ -23,7 +23,7 @@
 # right-handed view space into WebGPU clip space (z in [0, 1]). The
 # host API's up-axis preference never leaks into Rae world space.
 import core
-import math
+import Math
 open Vec3
 
 # A 4x4 matrix, 16 floats by value, column-major.
@@ -138,8 +138,8 @@ func mat4ScaleXYZ(x: view Float, y: view Float, z: view Float) pub ret Mat4 {
 
 func mat4RotateX(angle: view Float) pub ret Mat4 {
   var m: Mat4 = mat4Identity()
-  let c: Float = math.cos(x: angle)
-  let s: Float = math.sin(x: angle)
+  let c: Float = Math.cos(x: angle)
+  let s: Float = Math.sin(x: angle)
   m.m[5] = c
   m.m[6] = s
   m.m[9] = 0.0 - s
@@ -149,8 +149,8 @@ func mat4RotateX(angle: view Float) pub ret Mat4 {
 
 func mat4RotateY(angle: view Float) pub ret Mat4 {
   var m: Mat4 = mat4Identity()
-  let c: Float = math.cos(x: angle)
-  let s: Float = math.sin(x: angle)
+  let c: Float = Math.cos(x: angle)
+  let s: Float = Math.sin(x: angle)
   m.m[0] = c
   m.m[2] = 0.0 - s
   m.m[8] = s
@@ -160,8 +160,8 @@ func mat4RotateY(angle: view Float) pub ret Mat4 {
 
 func mat4RotateZ(angle: view Float) pub ret Mat4 {
   var m: Mat4 = mat4Identity()
-  let c: Float = math.cos(x: angle)
-  let s: Float = math.sin(x: angle)
+  let c: Float = Math.cos(x: angle)
+  let s: Float = Math.sin(x: angle)
   m.m[0] = c
   m.m[1] = s
   m.m[4] = 0.0 - s
@@ -188,7 +188,7 @@ func mat4RotateZ(angle: view Float) pub ret Mat4 {
 # then clear depth to 0.0 and compare with Greater.
 func mat4PerspectiveReverseZ(fovYDeg: view Float, aspect: view Float, near: view Float, far: view Float) pub ret Mat4 {
   var m: Mat4 = mat4Zero()
-  let f: Float = 1.0 / math.tan(x: fovYDeg * 0.008726646259971648)  # deg->rad, /2
+  let f: Float = 1.0 / Math.tan(x: fovYDeg * 0.008726646259971648)  # deg->rad, /2
   m.m[0] = f / aspect
   m.m[5] = f
   m.m[10] = near / (far - near)
@@ -199,7 +199,7 @@ func mat4PerspectiveReverseZ(fovYDeg: view Float, aspect: view Float, near: view
 
 func mat4Perspective(fovYDeg: view Float, aspect: view Float, near: view Float, far: view Float) pub ret Mat4 {
   var m: Mat4 = mat4Zero()
-  let f: Float = 1.0 / math.tan(x: fovYDeg * 0.008726646259971648)  # deg->rad, /2
+  let f: Float = 1.0 / Math.tan(x: fovYDeg * 0.008726646259971648)  # deg->rad, /2
   m.m[0] = f / aspect
   m.m[5] = f
   m.m[10] = far / (near - far)
@@ -261,7 +261,7 @@ func mat4LookAt(eyeX: view Float, eyeY: view Float, eyeZ: view Float, atX: view 
   var fx: Float = atX - eyeX
   var fy: Float = atY - eyeY
   var fz: Float = atZ - eyeZ
-  let flen: Float = math.sqrt(x: fx * fx + fy * fy + fz * fz)
+  let flen: Float = Math.sqrt(x: fx * fx + fy * fy + fz * fz)
   fx = fx / flen
   fy = fy / flen
   fz = fz / flen
@@ -269,14 +269,14 @@ func mat4LookAt(eyeX: view Float, eyeY: view Float, eyeZ: view Float, atX: view 
   var rx: Float = fy * upZ - fz * upY
   var ry: Float = fz * upX - fx * upZ
   var rz: Float = fx * upY - fy * upX
-  var rlen: Float = math.sqrt(x: rx * rx + ry * ry + rz * rz)
+  var rlen: Float = Math.sqrt(x: rx * rx + ry * ry + rz * rz)
   if rlen < 0.000001 {
     # Degenerate: looking straight along worldUp. Use +Y as the alternate
     # up reference (Blender front-view fallback) and rebuild `right`.
     rx = fy * 0.0 - fz * 1.0
     ry = fz * 0.0 - fx * 0.0
     rz = fx * 1.0 - fy * 0.0
-    rlen = math.sqrt(x: rx * rx + ry * ry + rz * rz)
+    rlen = Math.sqrt(x: rx * rx + ry * ry + rz * rz)
   }
   rx = rx / rlen
   ry = ry / rlen
@@ -306,10 +306,10 @@ func mat4LookAt(eyeX: view Float, eyeY: view Float, eyeZ: view Float, atX: view 
 # Yaw is about +Z (0 puts the camera on -Y, Blender front view); positive
 # pitch raises the camera toward +Z.
 func orbitEye(targetX: view Float, targetY: view Float, targetZ: view Float, yaw: view Float, pitch: view Float, dist: view Float) pub ret Vec3 {
-  let cp: Float = math.cos(x: pitch)
+  let cp: Float = Math.cos(x: pitch)
   ret Vec3.create(
-    x: targetX + dist * cp * math.sin(x: yaw),
-    y: targetY - dist * cp * math.cos(x: yaw),
-    z: targetZ + dist * math.sin(x: pitch)
+    x: targetX + dist * cp * Math.sin(x: yaw),
+    y: targetY - dist * cp * Math.cos(x: yaw),
+    z: targetZ + dist * Math.sin(x: pitch)
   )
 }

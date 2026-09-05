@@ -24,15 +24,15 @@
 #   resolve(enc: enc, idx: tsIdx)               # before finish
 # and once per frame: frameBegin() early, collect() at the end.
 import core
-import webgpu/context
-import webgpu/webgpu
+import webgpu/Context
+import webgpu/Webgpu
 import Profile
 # Match grass_compute's imports/opens exactly: importing webgpu_enums/_types would
 # bulk-emit every WGPU enum constant as a C static that clashes with webgpu.h.
 # Types are cross-file visible without import; the enum constants used here resolve
 # through `open webgpu/webgpu`.
-open webgpu/context
-open webgpu/webgpu
+open webgpu/Context
+open webgpu/Webgpu
 
 const gtMaxPasses: Int = 16
 

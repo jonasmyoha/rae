@@ -33,7 +33,7 @@ void rae_ext_rae_sleep(int64_t ms) {
   }
 }
 
-rae_String rae_ext_time_formatTimestamp(int64_t epoch_ms) {
+rae_String rae_ext_Time_formatTimestamp(int64_t epoch_ms) {
   time_t secs = (time_t)(epoch_ms / 1000);
   struct tm tm_buf;
   struct tm* tm_p = gmtime_r(&secs, &tm_buf);
@@ -49,7 +49,7 @@ rae_String rae_ext_time_formatTimestamp(int64_t epoch_ms) {
   return (rae_String){data, (int64_t)n, (int64_t)n + 1, 1};
 }
 
-rae_String rae_ext_time_formatDate(int64_t epoch_ms) {
+rae_String rae_ext_Time_formatDate(int64_t epoch_ms) {
   time_t secs = (time_t)(epoch_ms / 1000);
   struct tm tm_buf;
   struct tm* tm_p = gmtime_r(&secs, &tm_buf);

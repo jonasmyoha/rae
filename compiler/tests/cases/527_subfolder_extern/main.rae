@@ -2,7 +2,7 @@
 # namespaced as rae_ext_compress_oracle_* and called qualified. Round-trips a
 # buffer through lodepng to prove the symbol links. Compiled-only (lodepng).
 import core
-import compress/oracle
+import compress/Oracle
 
 func main() {
     let n: Int = 64
@@ -10,9 +10,9 @@ func main() {
     var i: Int = 0
     loop i < n { rae_ext_rae_buf_set(buf: raw, index: i, value: 65 + (i % 4)) i = i + 1 }
     var clen: Int = 0
-    let comp: Buffer(Int) = oracle.deflate(data: raw, len: n, outLen: clen)
+    let comp: Buffer(Int) = Oracle.deflate(data: raw, len: n, outLen: clen)
     var dlen: Int = 0
-    let back: Buffer(Int) = oracle.inflate(data: comp, len: clen, outLen: dlen)
+    let back: Buffer(Int) = Oracle.inflate(data: comp, len: clen, outLen: dlen)
     var mism: Int = 0
     i = 0
     loop i < n {

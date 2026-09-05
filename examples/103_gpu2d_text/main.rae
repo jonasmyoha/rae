@@ -11,9 +11,9 @@
 # Compiled-target only; needs wgpu-native + SDL3.
 #   rae run --target compiled examples/103_gpu2d_text/main.rae
 import core
-import gpu2d
+import Gpu2d
 import Gpu2dText
-import sdfText
+import SdfText
 
 # Design canvas — author in logical units; gpu2d scales it to the window.
 const canvasW: Float = 1040.0
@@ -38,7 +38,7 @@ func moutline(font: view SdfFont, s: view String, x: view Float, y: view Float, 
 }
 
 func panel(x: view Float, y: view Float, w: view Float, h: view Float, c: view Int) {
-  gpu2d.drawRoundedRect(x: x, y: y, w: w, h: h, radius: 10.0, color: c)
+  Gpu2d.drawRoundedRect(x: x, y: y, w: w, h: h, radius: 10.0, color: c)
 }
 
 func header(font: view SdfFont, s: view String, x: view Float, y: view Float) {
@@ -135,19 +135,19 @@ func smallShadow(font: view SdfFont, s: view String, x: view Float, y: view Floa
 }
 
 func main() ret Int {
-  gpu2d.initWindow(width: 1040, height: 1040, title: "Rae 2D — GPU MSDF Text")
-  gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
+  Gpu2d.initWindow(width: 1040, height: 1040, title: "Rae 2D — GPU MSDF Text")
+  Gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
   let dir: String = "examples/103_gpu2d_text/"
-  let font: SdfFont = sdfText.loadSdfFont(
+  let font: SdfFont = SdfText.loadSdfFont(
     jsonPath: "{dir}assets/Roboto-Regular.mtsdf.json",
     rawAtlasPath: "{dir}assets/Roboto-Regular.mtsdf.raw")
 
-  loop not gpu2d.pollClose() {
-    gpu2d.beginFrame(r: 0.063, g: 0.070, b: 0.094, a: 1.0)
+  loop not Gpu2d.pollClose() {
+    Gpu2d.beginFrame(r: 0.063, g: 0.070, b: 0.094, a: 1.0)
     drawFrame(font: font)
-    gpu2d.endFrame()
-    gpu2d.waitEvents(timeoutSec: 0.2)
+    Gpu2d.endFrame()
+    Gpu2d.waitEvents(timeoutSec: 0.2)
   }
-  gpu2d.closeWindow()
+  Gpu2d.closeWindow()
   ret 0
 }

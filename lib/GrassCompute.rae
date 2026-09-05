@@ -16,13 +16,13 @@
 # The WGSL lives in C (rae_gb_grass_wgsl, like the other renderer shaders);
 # everything else — buffers, pipeline, bind groups, dispatch, draw — is Rae.
 import core
-open webgpu/webgpu
-import webgpu/context
-open webgpu/context
+open webgpu/Webgpu
+import webgpu/Context
+open webgpu/Context
 import Profile
 import GrassConfig
-import gbuffer
-import string
+import Gbuffer
+import String
 import WorldBiome
 
 # C shader-source accessors (WGSL text + entry point names).
@@ -95,9 +95,9 @@ func createGrassCompute() ret GrassCompute {
 # itself. Mirrors how the terrain splat pipeline composes its shader.
 func wgsl() ret String {
   let islandSrc: String = WorldBiome.islandParamsWgsl()
-  let noiseSrc: String = gbuffer.gbReadWgsl(path: "lib/noise.wgsl")
-  let biomeSrc: String = gbuffer.gbReadWgsl(path: "lib/world_biome.wgsl")
-  let grassSrc: String = gbuffer.gbReadWgsl(path: "lib/grass_compute.wgsl")
+  let noiseSrc: String = Gbuffer.gbReadWgsl(path: "lib/noise.wgsl")
+  let biomeSrc: String = Gbuffer.gbReadWgsl(path: "lib/world_biome.wgsl")
+  let grassSrc: String = Gbuffer.gbReadWgsl(path: "lib/grass_compute.wgsl")
   ret islandSrc.concat(other: noiseSrc).concat(other: "\n").concat(other: biomeSrc)
     .concat(other: "\n").concat(other: grassSrc)
 }
@@ -111,7 +111,7 @@ func resetGrassPipeline(grass: mod GrassCompute) {
   grass.drawBindMade = false
 }
 
-# WGSL text -> shader module (same construction as gbuffer.makeShaderModule; the
+# WGSL text -> shader module (same construction as Gbuffer.makeShaderModule; the
 # one-element List holds the chained WGPUShaderSourceWGSL for nextInChain).
 func grassMakeShaderModule(wgsl: copy Ptr) ret Ptr {
   var srcList: List(WGPUShaderSourceWGSL) = createList(WGPUShaderSourceWGSL, cap: 1)

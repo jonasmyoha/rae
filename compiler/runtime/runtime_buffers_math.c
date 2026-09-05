@@ -226,20 +226,20 @@ RaeAny rae_ext_rae_buf_get_any(void* buf, int64_t index) {
  * round-tripping through double keeps the CPU result in the same
  * representation the GPU uses, which is the point of an f32 default.
  * Higher-precision variants belong on explicit Float64 APIs. */
-float rae_ext_math_sin(float x) { return sinf(x); }
-float rae_ext_math_cos(float x) { return cosf(x); }
-float rae_ext_math_tan(float x) { return tanf(x); }
-float rae_ext_math_asin(float x) { return asinf(x); }
-float rae_ext_math_acos(float x) { return acosf(x); }
-float rae_ext_math_atan(float x) { return atanf(x); }
-float rae_ext_math_atan2(float y, float x) { return atan2f(y, x); }
-float rae_ext_math_sqrt(float x) { return sqrtf(x); }
-float rae_ext_math_pow(float base, float exp) { return powf(base, exp); }
-float rae_ext_math_exp(float x) { return expf(x); }
-float rae_ext_math_math_log(float x) { return logf(x); }
-float rae_ext_math_floor(float x) { return floorf(x); }
-float rae_ext_math_ceil(float x) { return ceilf(x); }
-float rae_ext_math_round(float x) { return roundf(x); }
+float rae_ext_Math_sin(float x) { return sinf(x); }
+float rae_ext_Math_cos(float x) { return cosf(x); }
+float rae_ext_Math_tan(float x) { return tanf(x); }
+float rae_ext_Math_asin(float x) { return asinf(x); }
+float rae_ext_Math_acos(float x) { return acosf(x); }
+float rae_ext_Math_atan(float x) { return atanf(x); }
+float rae_ext_Math_atan2(float y, float x) { return atan2f(y, x); }
+float rae_ext_Math_sqrt(float x) { return sqrtf(x); }
+float rae_ext_Math_pow(float base, float exp) { return powf(base, exp); }
+float rae_ext_Math_exp(float x) { return expf(x); }
+float rae_ext_Math_math_log(float x) { return logf(x); }
+float rae_ext_Math_floor(float x) { return floorf(x); }
+float rae_ext_Math_ceil(float x) { return ceilf(x); }
+float rae_ext_Math_round(float x) { return roundf(x); }
 
 /* JSON helpers for C backend */
 static const char* rae_json_find_key(const char* json, int64_t json_len, const char* key) {

@@ -39,12 +39,12 @@
 # WORLD CONVENTION: right-handed Z-up (Blender), per
 # docs/coordinate-system.md — the same as the forward path.
 import core
-import math
+import Math
 import Vec3
-import string
+import String
 import Sky
-import skyHosek
-open skyHosek
+import SkyHosek
+open SkyHosek
 open Vec3
 open Scene3d
 open Sky
@@ -56,8 +56,8 @@ open ecs/ComponentTable
 # WGPUIndexFormat_Uint32) resolvable as bare cheader-backed references; do NOT
 # `open webgpu/webgpu_enums` — importing that module emits every enum value as a
 # C definition, colliding with the real enumerators from the cheader.
-open webgpu/webgpu
-import webgpu/context
+open webgpu/Webgpu
+import webgpu/Context
 
 # ----- geometry-pass begin: frame prep (C) + render pass (Rae) (#503) --------
 # C preps the frame — lazily creates pipeline/targets, resets counters, builds
@@ -589,7 +589,7 @@ func swayModel(x: view Float, y: view Float, z: view Float, yaw: view Float,
 func encodeEmissive(emissive: view Float, toon: view Int) ret Float {
   if toon is 1 { ret 1.0 }
   if emissive > 0.0 {
-    let e: Float = math.math_log(x: 1.0 + emissive) / gbEmissiveLogK
+    let e: Float = Math.math_log(x: 1.0 + emissive) / gbEmissiveLogK
     if e > 1.0 { ret 1.0 }
     ret e
   }
@@ -755,7 +755,7 @@ func drawInstance(cache: mod GbufferCache, mesh: view MeshHandle, transform: vie
 # Queue a SKINNED mesh (#391). Same materials and the same G-buffer
 # layout as a static draw; the difference is only that the vertex stage
 # poses the mesh by the joint palette first. The palette is uploaded once
-# per frame by gpu3d.uploadPalette and shared by every pipeline that
+# per frame by Gpu3d.uploadPalette and shared by every pipeline that
 # reads it.
 func drawSkinnedInstance(cache: mod GbufferCache, mesh: view MeshHandle, model: view Mat4, prevModel: view Mat4,
                          material: view Material3d) pub {

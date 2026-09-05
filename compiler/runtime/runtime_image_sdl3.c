@@ -58,7 +58,7 @@ static int rae_png_save_rgba32(const char* path, const unsigned char* rgba, int 
 
 /* Rae Image API (lib/image.rae): encode a packed-0xRRGGBB Int framebuffer
  * (width*height entries, row-major top-down) to a PNG file. */
-rae_Bool rae_ext_image_savePng(rae_String path, const int64_t* pixels, int64_t w, int64_t h) {
+rae_Bool rae_ext_Image_savePng(rae_String path, const int64_t* pixels, int64_t w, int64_t h) {
     if (!path.data || !pixels || w <= 0 || h <= 0) return false;
     size_t count = (size_t)w * (size_t)h;
     unsigned char* rgba = (unsigned char*)malloc(count * 4);
@@ -86,7 +86,7 @@ rae_Bool rae_ext_image_savePng(rae_String path, const int64_t* pixels, int64_t w
  * Returns a freshly rae_buf_alloc'd Buffer(Int) the caller owns; writes the
  * dimensions through the `mod Int` out-params. On failure returns NULL and sets
  * *w = *h = 0 (the caller checks width > 0). */
-int64_t* rae_ext_image_loadPng(rae_String path, int64_t* w_out, int64_t* h_out) {
+int64_t* rae_ext_Image_loadPng(rae_String path, int64_t* w_out, int64_t* h_out) {
     if (w_out) *w_out = 0;
     if (h_out) *h_out = 0;
     if (!path.data) return NULL;
@@ -146,21 +146,21 @@ static int64_t* rae_compress_run(const int64_t* data, int64_t len, int64_t* out_
     if (out_len) *out_len = (int64_t)outsize;
     return result;
 }
-int64_t* rae_ext_compress_oracle_deflate(const int64_t* data, int64_t len, int64_t* out_len) {
+int64_t* rae_ext_compress_Oracle_deflate(const int64_t* data, int64_t len, int64_t* out_len) {
     return rae_compress_run(data, len, out_len, 1, 0);
 }
-int64_t* rae_ext_compress_oracle_inflate(const int64_t* data, int64_t len, int64_t* out_len) {
+int64_t* rae_ext_compress_Oracle_inflate(const int64_t* data, int64_t len, int64_t* out_len) {
     return rae_compress_run(data, len, out_len, 0, 0);
 }
-int64_t* rae_ext_compress_oracle_zlibCompress(const int64_t* data, int64_t len, int64_t* out_len) {
+int64_t* rae_ext_compress_Oracle_zlibCompress(const int64_t* data, int64_t len, int64_t* out_len) {
     return rae_compress_run(data, len, out_len, 1, 1);
 }
-int64_t* rae_ext_compress_oracle_zlibDecompress(const int64_t* data, int64_t len, int64_t* out_len) {
+int64_t* rae_ext_compress_Oracle_zlibDecompress(const int64_t* data, int64_t len, int64_t* out_len) {
     return rae_compress_run(data, len, out_len, 0, 1);
 }
 /* Decode a PNG (held in a Buffer(Int) of bytes) to 0xAARRGGBB pixels via
  * lodepng — the oracle for testing the pure-Rae PNG decoder. */
-int64_t* rae_ext_compress_oracle_decodePng(const int64_t* data, int64_t len, int64_t* w_out, int64_t* h_out) {
+int64_t* rae_ext_compress_Oracle_decodePng(const int64_t* data, int64_t len, int64_t* w_out, int64_t* h_out) {
     if (w_out) *w_out = 0; if (h_out) *h_out = 0;
     if (!data || len <= 0) return NULL;
     unsigned char* in = (unsigned char*)malloc((size_t)len);
@@ -180,7 +180,7 @@ int64_t* rae_ext_compress_oracle_decodePng(const int64_t* data, int64_t len, int
     return px;
 }
 /* Encode 0xAARRGGBB pixels to PNG bytes via lodepng — oracle for the encoder. */
-int64_t* rae_ext_compress_oracle_encodePng(const int64_t* pixels, int64_t w, int64_t h, int64_t* out_len) {
+int64_t* rae_ext_compress_Oracle_encodePng(const int64_t* pixels, int64_t w, int64_t h, int64_t* out_len) {
     if (out_len) *out_len = 0;
     if (!pixels || w <= 0 || h <= 0) return NULL;
     size_t count = (size_t)w * (size_t)h;
@@ -459,7 +459,7 @@ static int g_sdf_atlas_w[RAE_SDF_MAX_ATLAS];
 static int g_sdf_atlas_h[RAE_SDF_MAX_ATLAS];
 static int g_sdf_atlas_n = 0;
 
-int64_t rae_ext_sdfText_loadAtlas(rae_String path, int64_t w, int64_t h) {
+int64_t rae_ext_SdfText_loadAtlas(rae_String path, int64_t w, int64_t h) {
     if (!path.data || w <= 0 || h <= 0 || g_sdf_atlas_n >= RAE_SDF_MAX_ATLAS) return 0;
     FILE* f = fopen((const char*)path.data, "rb");
     if (!f) { fprintf(stderr, "[sdf] cannot open %s\n", (const char*)path.data); return 0; }
@@ -479,7 +479,7 @@ static float rae_sdf_median(float a, float b, float c) {
 
 /* sx0..sy1: dest rect in framebuffer pixels (sy0 top, sy1 bottom). au0..av1:
  * source rect in atlas pixels, top-left origin. */
-void rae_ext_sdfText_blitGlyph(int64_t* fb, int64_t fbW, int64_t fbH, int64_t atlas,
+void rae_ext_SdfText_blitGlyph(int64_t* fb, int64_t fbW, int64_t fbH, int64_t atlas,
                           float sx0, float sy0, float sx1, float sy1,
                           float au0, float av0, float au1, float av1,
                           float screenPxRange, int64_t rgb){
@@ -530,7 +530,7 @@ void rae_ext_sdfText_blitGlyph(int64_t* fb, int64_t fbW, int64_t fbH, int64_t at
 /* ---- Rae Filesystem & Paths API (lib/filesystem.rae) — thin wrappers over
  * SDL3's SDL_filesystem.h: known folders, mkdir, exists, and a date helper.
  * Path composition and render-output filename policy live in Rae. ---- */
-rae_String rae_ext_filesystem_userFolder(int64_t kind) {
+rae_String rae_ext_Filesystem_userFolder(int64_t kind) {
     SDL_Folder f = SDL_FOLDER_DESKTOP;
     if (kind == 1) f = SDL_FOLDER_PICTURES;
     else if (kind == 2) f = SDL_FOLDER_DOCUMENTS;
@@ -539,7 +539,7 @@ rae_String rae_ext_filesystem_userFolder(int64_t kind) {
     return rae_str_from_cstr_impl(p ? p : "", RAE_SITE_READ_FILE);
 }
 
-rae_String rae_ext_filesystem_prefDir(rae_String org, rae_String app) {
+rae_String rae_ext_Filesystem_prefDir(rae_String org, rae_String app) {
     char* p = SDL_GetPrefPath(org.data ? (const char*)org.data : "Rae",
                               app.data ? (const char*)app.data : "app");
     rae_String s = rae_str_from_cstr_impl(p ? p : "", RAE_SITE_READ_FILE);
@@ -547,19 +547,19 @@ rae_String rae_ext_filesystem_prefDir(rae_String org, rae_String app) {
     return s;
 }
 
-rae_Bool rae_ext_filesystem_makeDir(rae_String path) {
+rae_Bool rae_ext_Filesystem_makeDir(rae_String path) {
     if (!path.data) return false;
     return SDL_CreateDirectory((const char*)path.data);
 }
 
-rae_Bool rae_ext_filesystem_exists(rae_String path) {
+rae_Bool rae_ext_Filesystem_exists(rae_String path) {
     if (!path.data) return false;
     SDL_PathInfo info;
     return SDL_GetPathInfo((const char*)path.data, &info);
 }
 
 /* Today's local date as "YYYY-MM-DD". */
-rae_String rae_ext_filesystem_today(void) {
+rae_String rae_ext_Filesystem_today(void) {
     time_t t = time(NULL);
     struct tm tmv;
     localtime_r(&t, &tmv);

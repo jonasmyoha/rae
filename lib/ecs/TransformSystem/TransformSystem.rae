@@ -12,7 +12,7 @@
 # A parented entity whose parent has no world transform falls back to world =
 # local. Lone entities (no hierarchy) are handled by pass 1.
 import core
-import math
+import Math
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Hierarchy
@@ -77,8 +77,8 @@ func rootWorld2D(local: view Transform2D) ret WorldTransform2D {
 func composeWorld2D(parentWorld: view WorldTransform2D, local: view Transform2D) ret WorldTransform2D {
   let scaledX: Float = parentWorld.scale.x * local.position.x
   let scaledY: Float = parentWorld.scale.y * local.position.y
-  let cosR: Float = math.cos(x: parentWorld.rotation)
-  let sinR: Float = math.sin(x: parentWorld.rotation)
+  let cosR: Float = Math.cos(x: parentWorld.rotation)
+  let sinR: Float = Math.sin(x: parentWorld.rotation)
   let worldX: Float = parentWorld.position.x + (cosR * scaledX - sinR * scaledY)
   let worldY: Float = parentWorld.position.y + (sinR * scaledX + cosR * scaledY)
   ret WorldTransform2D {

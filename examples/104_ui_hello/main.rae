@@ -15,15 +15,15 @@
 # For the same idea with more of it — a step size, palette-slot highlighting and
 # a list rebuilt from data — see example 105.
 import core
-import gpu2d
-import string
+import Gpu2d
+import String
 import ui/Ecs
 import ui/EventLoop
 import ui/InputSystem/InputSystem
 import ui/LayoutSystem/LayoutSystem
 import ui/RenderSystem/RenderSystem
 import ui/Scene
-import ui/sceneFile
+import ui/SceneFile
 import ui/SceneLoader
 import app3d/UiShell
 open app3d/UiShell
@@ -32,7 +32,7 @@ open ui/EventLoop
 open ui/InputSystem/InputSystem
 open ui/LayoutSystem/LayoutSystem
 open ui/RenderSystem/RenderSystem
-open ui/sceneFile
+open ui/SceneFile
 open ui/SceneLoader
 open ui/Transform
 
@@ -62,7 +62,7 @@ func applyActions(value: view Int, input: view UiInput) ret Int {
 }
 
 func main() ret Int {
-  gpu2d.initWindow(width: designW, height: designH, title: "Rae UI — Hello")
+  Gpu2d.initWindow(width: designW, height: designH, title: "Rae UI — Hello")
 
   let base: String = "examples/104_ui_hello/assets/"
   let gpuUi: Gpu2dUi = loadUiAssets(dir: base, textFontName: "Roboto-Regular",
@@ -78,7 +78,7 @@ func main() ret Int {
   let scene: Scene = loadSceneFile(path: "{base}ui.raescene")
   if scene.ok is false {
     log("[ui] scene failed to load: {scene.errorMsg}")
-    gpu2d.closeWindow()
+    Gpu2d.closeWindow()
     ret 1
   }
   loadScene(world: world, scene: scene)
@@ -91,7 +91,7 @@ func main() ret Int {
   var renderedOnce: Bool = false
   var wokeUp: Bool = false
 
-  loop not gpu2d.pollClose() {
+  loop not Gpu2d.pollClose() {
     var changed: Bool = resizeUiToWindow(world: world, res: gpuUi)
 
     updateUiInput(input: input, world: world)
@@ -112,21 +112,21 @@ func main() ret Int {
     # — a window is not presentable the instant it is created, and a compositor
     # does not promise to keep a frame that was presented once.
     if hadEvents or changed or wokeUp or renderedOnce is false {
-      gpu2d.beginFrame(r: 0.03, g: 0.05, b: 0.08, a: 1.0)
+      Gpu2d.beginFrame(r: 0.03, g: 0.05, b: 0.08, a: 1.0)
       renderSystemGpu2d(world: world, res: gpuUi)
-      gpu2d.endFrame()
+      Gpu2d.endFrame()
       renderedOnce = true
       wokeUp = false
     } else {
       # Idle at ~0% CPU: block until the OS has something to say. The timeout is
       # the shared policy from lib/ui/eventLoop.rae.
-      gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
+      Gpu2d.waitEvents(timeoutSec: nextWaitTimeoutSec(
         animating: false, mouseDown: false, pollWatcher: false,
         frameSec: 0.016667, heartbeatSec: 0.5))
       wokeUp = true
     }
   }
 
-  gpu2d.closeWindow()
+  Gpu2d.closeWindow()
   ret 0
 }

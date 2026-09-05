@@ -1,9 +1,9 @@
-open hotReload
+open HotReload
 open ui/WindowGeometry
 open ui/Ecs
 open ui/EventLoop
 open ui/LogOverlay
-open hotReload
+open HotReload
 # Mobile-UI demo entrypoint. The actual work — scene loading, world
 # building, screen routing — lives in sibling `.rae` files in this same
 # directory, which Rae auto-imports because they share the project
@@ -22,14 +22,14 @@ open hotReload
 #   * asset_loader.rae     — GPU2D image-key loading (per-album cover + avatar)
 import core
 import FileWatch
-import hotReload
+import HotReload
 import ui/WindowGeometry
-import sdfText
-import sys/spotify
+import SdfText
+import sys/Spotify
 import ui/Ecs
 import ui/EventLoop
 import ui/LogOverlay
-import hotReload
+import HotReload
 import ui/FitSystem/FitSystem
 import ui/LayoutSystem/LayoutSystem
 import ui/Theme
@@ -60,10 +60,10 @@ func main() {
   uiDisableAppNap()
   uiSetMouseScale(scaleX: 1.0, scaleY: 1.0)
 
-  let gpuTextFont: SdfFont = sdfText.loadSdfFont(
+  let gpuTextFont: SdfFont = SdfText.loadSdfFont(
     jsonPath: "examples/106_mobile_ui/assets/Roboto-Regular.mtsdf.json",
     rawAtlasPath: "examples/106_mobile_ui/assets/Roboto-Regular.mtsdf.raw")
-  let gpuIconFont: SdfFont = sdfText.loadSdfFont(
+  let gpuIconFont: SdfFont = SdfText.loadSdfFont(
     jsonPath: "examples/106_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.json",
     rawAtlasPath: "examples/106_mobile_ui/assets/MaterialIconsRound-Regular.mtsdf.raw")
   # Load the theme (#231): styleId sizes/colors/align now resolve from
@@ -162,7 +162,7 @@ func main() {
     # shelling out to osascript on the UI thread every poll — the latter
     # spiked the frame rate. The per-frame `pollSpotify` now just reads the
     # warm cache. Started only when Spotify is actually on (never headless).
-    spotify.startPoller(intervalMs: 1000)
+    Spotify.startPoller(intervalMs: 1000)
   } else {
     log("[spotify] OFF (RAE_UI_NO_SPOTIFY or RAE_UI_HEADLESS)")
   }

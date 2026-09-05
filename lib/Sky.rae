@@ -27,10 +27,10 @@
 # a seam that quietly alters the image is not a seam, it is a rewrite
 # with no way to tell which change caused what.
 import core
-import math
+import Math
 import Vec3
-import skyHosek
-open skyHosek
+import SkyHosek
+open SkyHosek
 open Scene3d
 
 enum SkyKind {
@@ -436,9 +436,9 @@ func preethamF(c: view PreethamCoeffs, cosTheta: view Float, gamma: view Float) 
   if ct < 0.01 {
     ct = 0.01
   }
-  let cosGamma: Float = math.cos(x: gamma)
-  ret (1.0 + c.a * math.exp(x: c.b / ct))
-     * (1.0 + c.c * math.exp(x: c.d * gamma) + c.e * cosGamma * cosGamma)
+  let cosGamma: Float = Math.cos(x: gamma)
+  ret (1.0 + c.a * Math.exp(x: c.b / ct))
+     * (1.0 + c.c * Math.exp(x: c.d * gamma) + c.e * cosGamma * cosGamma)
 }
 
 # xyY -> linear sRGB. Two conversions, kept together because they are one
@@ -474,11 +474,11 @@ func preethamRadiance(dir: view Vec3, sunDir: view Vec3,
   var cosGamma: Float = dir.x * sunDir.x + dir.y * sunDir.y + dir.z * sunDir.z
   if cosGamma > 1.0 { cosGamma = 1.0 }
   if cosGamma < 0.0 - 1.0 { cosGamma = 0.0 - 1.0 }
-  let gamma: Float = math.acos(x: cosGamma)
+  let gamma: Float = Math.acos(x: cosGamma)
 
   var sunCosTheta: Float = sunDir.z
   if sunCosTheta < 0.01 { sunCosTheta = 0.01 }
-  let thetaSun: Float = math.acos(x: sunCosTheta)
+  let thetaSun: Float = Math.acos(x: sunCosTheta)
 
   let cy: PreethamCoeffs = preethamY(t: turbidity)
   let cx: PreethamCoeffs = preethamX(t: turbidity)
@@ -503,7 +503,7 @@ func preethamRadiance(dir: view Vec3, sunDir: view Vec3,
   let ts2: Float = ts * ts
   let ts3: Float = ts2 * ts
   let chi: Float = (4.0 / 9.0 - t / 120.0) * (3.14159265 - 2.0 * ts)
-  var zenithY: Float = (4.0453 * t - 4.9710) * math.tan(x: chi) - 0.2155 * t + 2.4192
+  var zenithY: Float = (4.0453 * t - 4.9710) * Math.tan(x: chi) - 0.2155 * t + 2.4192
   if zenithY < 0.0 {
     zenithY = 0.0
   }
@@ -537,7 +537,7 @@ func preethamRadiance(dir: view Vec3, sunDir: view Vec3,
 # position wants a date and a latitude, which is a bigger interface than a
 # settings dialog should grow first.
 
-# Qualified CONSTANTS do not resolve (`math.pi` emits an undeclared `math`),
+# Qualified CONSTANTS do not resolve (`Math.pi` emits an undeclared `math`),
 # though qualified function calls do — so pi is named locally rather than
 # reaching into the module. Same family as #415.
 const skyPi: Float = 3.14159265358979
@@ -571,7 +571,7 @@ const skyLatitudeMax: Float = 90.0
 func solarDeclinationRad(dayOfYear: view Int) pub ret Float {
   let n: Float = dayOfYear.toFloat()
   let angle: Float = 2.0 * skyPi * (284.0 + n) / 365.0
-  ret 23.44 * skyPi / 180.0 * math.sin(x: angle)
+  ret 23.44 * skyPi / 180.0 * Math.sin(x: angle)
 }
 
 # The core geometry, taking declination directly. Local frame is x=east,
@@ -603,12 +603,12 @@ func sunDirForDeclination(hour: view Float, declinationRad: view Float,
   # outside the lit hours so dusk and dawn stay continuous rather than snapping.
   let hourAngle: Float = (h - 12.0) * skyPi / 12.0
   let phi: Float = lat * skyPi / 180.0
-  let cosH: Float = math.cos(x: hourAngle)
-  let sinD: Float = math.sin(x: declinationRad)
-  let cosD: Float = math.cos(x: declinationRad)
-  let sinP: Float = math.sin(x: phi)
-  let cosP: Float = math.cos(x: phi)
-  let toSunX: Float = 0.0 - cosD * math.sin(x: hourAngle)
+  let cosH: Float = Math.cos(x: hourAngle)
+  let sinD: Float = Math.sin(x: declinationRad)
+  let cosD: Float = Math.cos(x: declinationRad)
+  let sinP: Float = Math.sin(x: phi)
+  let cosP: Float = Math.cos(x: phi)
+  let toSunX: Float = 0.0 - cosD * Math.sin(x: hourAngle)
   let toSunY: Float = sinD * cosP - cosD * sinP * cosH
   let toSunZ: Float = sinD * sinP + cosD * cosP * cosH
   ret Vec3.create(x: 0.0 - toSunX, y: 0.0 - toSunY, z: 0.0 - toSunZ)

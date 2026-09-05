@@ -30,20 +30,20 @@
 # value and modelMatrix no longer allocates, so a frame's per-object data
 # path touches the allocator zero times.
 import core
-import gpu2d
+import Gpu2d
 import Math3d
-import gbuffer
+import Gbuffer
 import GbufferWorld
-import gbufferInspector
-import gbufferPasses
+import GbufferInspector
+import GbufferPasses
 import Sky
 open Rendergraph
 open Math3d
 open Scene3d
-open gbuffer
+open Gbuffer
 open GbufferWorld
-open gbufferInspector
-open gbufferPasses
+open GbufferInspector
+open GbufferPasses
 open Sky
 
 # ----- pass tags ------------------------------------------------------
@@ -316,7 +316,7 @@ func deferredTagAt(r: view DeferredRenderer, i: view Int) pub ret Int {
 }
 
 # Run one pass of the deferred frame from a World3d. Handles every tag EXCEPT the
-# UI overlay, which the caller owns (PRESENT differs with a UI: gpu2d.endFrame
+# UI overlay, which the caller owns (PRESENT differs with a UI: Gpu2d.endFrame
 # presents, so the renderer must not present again). The G-buffer pass fills from
 # the World3d ECS queries (renderSceneWorld + renderSceneSdfWorld); every other tag
 # is scene-independent — it reads G-buffer/depth resources the gbuffer pass already
@@ -356,7 +356,7 @@ func renderDeferredPassWorld(r: mod DeferredRenderer, tag: view Int, world: view
   }
   if tag is RenderTag.present {
     if r.hasUi {
-      gpu2d.endFrame()
+      Gpu2d.endFrame()
     } else {
       presentFrame()
     }

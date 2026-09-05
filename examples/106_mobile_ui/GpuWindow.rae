@@ -1,5 +1,5 @@
 import core
-import gpu2d
+import Gpu2d
 import ui/Components
 
 const mouseButtonLeft: Int = 0
@@ -11,32 +11,32 @@ func colorChannel(v: view Int) ret Float {
 }
 
 func uiInitWindow(width: view Int, height: view Int, title: view String) pub {
-  gpu2d.initWindow(width: width, height: height, title: title)
+  Gpu2d.initWindow(width: width, height: height, title: title)
 }
 
 func uiSetConfigFlags(flags: view Int) pub {}
 func uiSetMouseScale(scaleX: view Float, scaleY: view Float) pub {}
 func uiSetMouseCursor(kind: view Int) pub {
-  gpu2d.setMouseCursor(kind: kind)
+  Gpu2d.setMouseCursor(kind: kind)
 }
 func uiInstallWindowCloseWaker() pub {}
 func uiInstallMouseButtonHook() pub {}
 func uiDisableAppNap() pub {}
 
 func uiSetDesignResolution(width: view Float, height: view Float, fit: view Int) pub {
-  gpu2d.setDesignResolution(width: width, height: height, fit: fit)
+  Gpu2d.setDesignResolution(width: width, height: height, fit: fit)
 }
 
 func uiWindowShouldClose() pub ret Bool {
-  ret gpu2d.pollClose()
+  ret Gpu2d.pollClose()
 }
 
 func uiCloseWindow() pub {
-  gpu2d.closeWindow()
+  Gpu2d.closeWindow()
 }
 
 func uiBeginFrame(clear: view RgbaColor) pub {
-  gpu2d.beginFrame(
+  Gpu2d.beginFrame(
     r: colorChannel(v: clear.r),
     g: colorChannel(v: clear.g),
     b: colorChannel(v: clear.b),
@@ -44,69 +44,69 @@ func uiBeginFrame(clear: view RgbaColor) pub {
 }
 
 func uiEndFrame() pub {
-  gpu2d.endFrame()
+  Gpu2d.endFrame()
 }
 
 func uiLastPresentOk() pub ret Bool {
-  ret gpu2d.lastPresentOk()
+  ret Gpu2d.lastPresentOk()
 }
 
 func uiWaitEvents(timeoutSec: view Float) pub {
-  gpu2d.waitEvents(timeoutSec: timeoutSec)
+  Gpu2d.waitEvents(timeoutSec: timeoutSec)
 }
 
 # Epoch seconds — Float64: an f32 epoch (~1.7e9) quantises to ~128s, so
 # two calls in one frame return the SAME value and every delta is 0.0.
 func uiNowSeconds() pub ret Float64 {
-  ret gpu2d.nowSeconds()
+  ret Gpu2d.nowSeconds()
 }
 
 func uiWindowWidth() pub ret Float {
-  ret gpu2d.designWidth()
+  ret Gpu2d.designWidth()
 }
 
 func uiWindowHeight() pub ret Float {
-  ret gpu2d.designHeight()
+  ret Gpu2d.designHeight()
 }
 
 func uiFramebufferWidth() pub ret Int {
-  ret gpu2d.windowWidth()
+  ret Gpu2d.windowWidth()
 }
 
 func uiFramebufferHeight() pub ret Int {
-  ret gpu2d.windowHeight()
+  ret Gpu2d.windowHeight()
 }
 
 func uiWindowPositionX() pub ret Int {
-  ret gpu2d.windowPositionX()
+  ret Gpu2d.windowPositionX()
 }
 
 func uiWindowPositionY() pub ret Int {
-  ret gpu2d.windowPositionY()
+  ret Gpu2d.windowPositionY()
 }
 
 func uiDpr() pub ret Float {
-  ret gpu2d.dpr()
+  ret Gpu2d.dpr()
 }
 
 func uiPointerX() pub ret Float {
-  ret gpu2d.pointerX()
+  ret Gpu2d.pointerX()
 }
 
 func uiPointerY() pub ret Float {
-  ret gpu2d.pointerY()
+  ret Gpu2d.pointerY()
 }
 
 func uiPointerDown() pub ret Bool {
-  ret gpu2d.pointerDown()
+  ret Gpu2d.pointerDown()
 }
 
 func uiWheelMove() pub ret Float {
-  ret gpu2d.wheelMove()
+  ret Gpu2d.wheelMove()
 }
 
 func uiIsWindowResized() pub ret Bool {
-  ret gpu2d.windowResized()
+  ret Gpu2d.windowResized()
 }
 
 func uiIsKeyPressed(key: view Int) pub ret Bool {
@@ -115,21 +115,21 @@ func uiIsKeyPressed(key: view Int) pub ret Bool {
 
 func uiPointerButtonDown(button: view Int) pub ret Bool {
   if button is mouseButtonLeft {
-    ret gpu2d.pointerDown()
+    ret Gpu2d.pointerDown()
   }
   ret false
 }
 
 func uiPointerButtonPressed(button: view Int) pub ret Bool {
   if button is mouseButtonLeft {
-    ret gpu2d.pointerPressed()
+    ret Gpu2d.pointerPressed()
   }
   ret false
 }
 
 func uiPointerButtonReleased(button: view Int) pub ret Bool {
   if button is mouseButtonLeft {
-    ret gpu2d.pointerReleased()
+    ret Gpu2d.pointerReleased()
   }
   ret false
 }

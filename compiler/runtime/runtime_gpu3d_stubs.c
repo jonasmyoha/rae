@@ -1,11 +1,11 @@
 /* gpu3d disabled-capability stubs — builds with WebGPU but without SDL3.
  * Mirrors runtime_gpu2d_stubs.c. Included by rae_runtime.c into one TU. */
 
-int64_t rae_ext_gpu3d_meshCreate(const float* verts, int64_t vertCount,
+int64_t rae_ext_Gpu3d_meshCreate(const float* verts, int64_t vertCount,
                                  const int64_t* indices, int64_t indexCount){
     (void)verts; (void)vertCount; (void)indices; (void)indexCount; return 0;
 }
-void rae_ext_gpu3d_meshUpdate(int64_t mesh, const float* verts, int64_t vertCount){
+void rae_ext_Gpu3d_meshUpdate(int64_t mesh, const float* verts, int64_t vertCount){
     (void)mesh; (void)verts; (void)vertCount;
 }
 int rae_g3d_frame_prepare(const float* frame, int64_t count){ (void)frame; (void)count; return 0; }
@@ -90,8 +90,8 @@ void* rae_g3d_ao_apply_bind(void)     { return (void*)0; }
 void* rae_g3d_ao_debug_pipeline(void) { return (void*)0; }
 void* rae_g3d_ao_debug_bind(void)     { return (void*)0; }
 void rae_g3d_clear_ao(void) {}
-void rae_ext_gpu3d_shutdown(void) {}
-void rae_ext_gpu3d_skyHosekPush(int64_t index, float value){ (void)index; (void)value; }
+void rae_ext_Gpu3d_shutdown(void) {}
+void rae_ext_Gpu3d_skyHosekPush(int64_t index, float value){ (void)index; (void)value; }
 int rae_g3d_sky_prepare(float skyKind, float turbidity, float skyExposure, float sunSizeRad,
                         float sunX, float sunY, float sunZ,
                         float sunR, float sunG, float sunB,

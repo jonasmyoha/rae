@@ -623,11 +623,11 @@ int64_t rae_ext_nowMs(void);
  * three vec4 per channel. Two entry points, ONE table (runtime_sky_state.h):
  * the deferred sky is bound through lib/gbuffer.rae and the forward one
  * through lib/gpu3d.rae, and a Rae extern's C name follows its module. */
-void rae_ext_gbuffer_skyHosekPush(int64_t index, float value);
-void rae_ext_gpu3d_skyHosekPush(int64_t index, float value);
+void rae_ext_Gbuffer_skyHosekPush(int64_t index, float value);
+void rae_ext_Gpu3d_skyHosekPush(int64_t index, float value);
 /* The forward background. Called between gpu3d.begin and the geometry; takes
  * no camera because the frame's own is used. */
-void rae_ext_gpu3d_skyDraw(float skyKind, float turbidity, float skyExposure, float sunSizeRad,
+void rae_ext_Gpu3d_skyDraw(float skyKind, float turbidity, float skyExposure, float sunSizeRad,
                            float sunX, float sunY, float sunZ,
                            float sunR, float sunG, float sunB,
                            float zenR, float zenG, float zenB, float bands,
@@ -635,23 +635,23 @@ void rae_ext_gpu3d_skyDraw(float skyKind, float turbidity, float skyExposure, fl
                            float clearR, float clearG, float clearB);
 int64_t rae_ext_nowNs(void);
 void rae_ext_rae_sleep(int64_t ms);
-rae_String rae_ext_time_formatTimestamp(int64_t epoch_ms);
-rae_String rae_ext_time_formatDate(int64_t epoch_ms);
+rae_String rae_ext_Time_formatTimestamp(int64_t epoch_ms);
+rae_String rae_ext_Time_formatDate(int64_t epoch_ms);
 
-float rae_ext_math_sin(float x);
-float rae_ext_math_cos(float x);
-float rae_ext_math_tan(float x);
-float rae_ext_math_asin(float x);
-float rae_ext_math_acos(float x);
-float rae_ext_math_atan(float x);
-float rae_ext_math_atan2(float y, float x);
-float rae_ext_math_sqrt(float x);
-float rae_ext_math_pow(float b, float e);
-float rae_ext_math_exp(float x);
-float rae_ext_math_math_log(float x);
-float rae_ext_math_floor(float x);
-float rae_ext_math_ceil(float x);
-float rae_ext_math_round(float x);
+float rae_ext_Math_sin(float x);
+float rae_ext_Math_cos(float x);
+float rae_ext_Math_tan(float x);
+float rae_ext_Math_asin(float x);
+float rae_ext_Math_acos(float x);
+float rae_ext_Math_atan(float x);
+float rae_ext_Math_atan2(float y, float x);
+float rae_ext_Math_sqrt(float x);
+float rae_ext_Math_pow(float b, float e);
+float rae_ext_Math_exp(float x);
+float rae_ext_Math_math_log(float x);
+float rae_ext_Math_floor(float x);
+float rae_ext_Math_ceil(float x);
+float rae_ext_Math_round(float x);
 
 RaeAny rae_ext_json_get(const char* json, const char* field);
 
@@ -993,7 +993,7 @@ void* rae_gb_shadow_frame_ubuf(void);
 int64_t rae_gb_shadow_frame_bytes(void);
 void* rae_gb_shadow_array_view(void);
 void* rae_gb_shadow_sampler(void);
-void rae_ext_gbuffer_skyHosekPush(int64_t index, float value);
+void rae_ext_Gbuffer_skyHosekPush(int64_t index, float value);
 /* TAA pass in Rae (#504). */
 int64_t rae_gb_taa_ready(void);
 int64_t rae_gb_taa_begin(void);
@@ -1016,7 +1016,7 @@ void* rae_gb_pyr_rt_view(int64_t i);
 void* rae_gb_pyr_bind(int64_t i);
 void rae_gb_set_pyr_bind(int64_t i, void* b);
 /* Shadow cascade render in Rae (#504). The feed (cascade uniforms + draw queue)
- * is shadow-map bookkeeping, reclassified from rae_ext_gpu3d_shadow* (#514). */
+ * is shadow-map bookkeeping, reclassified from rae_ext_Gpu3d_shadow* (#514). */
 void rae_sm_begin(const float* cascades, int64_t count, int64_t resolution,
                   const float* splits, const float* texelWorld, const float* depthRange);
 void rae_sm_queue_mesh(int64_t mesh, struct rae_Mat4* model);
@@ -1045,11 +1045,11 @@ void* rae_g2d_encoder_get(void);
 int64_t rae_g2d_frame_active(void);
 void rae_g2d_present_and_cleanup(void);
 void rae_g2d_tick(void);
-void rae_ext_gpu2d_flush(void);
+void rae_ext_Gpu2d_flush(void);
 /* Procedural texture registration (#539): upload RGBA pixels generated in Rae. */
-int64_t rae_ext_gpu2d_registerImageRgba(const int64_t* pixels, int64_t w, int64_t h);
-void* rae_ext_gpu2d_imageView(int64_t handle);
-void rae_ext_gpu2d_registerImageKeyHandle(rae_String key, int64_t handle);
+int64_t rae_ext_Gpu2d_registerImageRgba(const int64_t* pixels, int64_t w, int64_t h);
+void* rae_ext_Gpu2d_imageView(int64_t handle);
+void rae_ext_Gpu2d_registerImageKeyHandle(rae_String key, int64_t handle);
 void* rae_gb_view_a(void);
 void* rae_gb_view_b(void);
 void* rae_gb_view_c(void);
