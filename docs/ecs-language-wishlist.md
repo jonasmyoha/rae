@@ -44,12 +44,39 @@ a feature that is not already listed here.
   comparison against the `generation`/`denseStamps` every table ALREADY carries.
   *Optional* components are already `componentGet` returning `opt`. Tracked as plain
   functions in #807.
-- **Ergonomic query iteration `(scoped in #807)`.** `for (entity, mod a, mod b) in
-  query(world, A, B)` instead of `componentCount` + `componentEntityAt(i)` +
-  `componentDataAt(i)` + `componentGet`. The index-plus-accessor form is verbose and
-  easy to get subtly wrong. This is the real boilerplate win on the single most-used
-  ECS operation, and it is pure sugar over the existing join walk (mod/view modes
-  preserved) — keep it.
+- **Ergonomic query iteration — DESIGN NOTE (#807), awaiting sign-off on the
+  spelling.** The verbose form the wishlist originally complained about
+  (`componentCount` + `componentEntityAt(i)` + `componentDataAt(i)` + `componentGet`)
+  is already gone: a query returns a `List` of match records carrying each entity's
+  dense index in every joined table, so today's idiom is one line per component:
+  ```rae
+  loop let hit: view Query2Match in query2(tableA: pos, tableB: vel) {
+    let p: mod Pos => queryModAt(table: pos, denseIndex: hit.indexA)
+    let v: view Vel => query2ViewB(tableB: vel, hit: hit)
+    ...
+  }
+  ```
+  The remaining sugar would bind the components in the loop head. Rae has no `for`
+  and no tuple destructuring, so the informal `for (entity, mod a, mod b) in
+  query(...)` sketch is not Rae; the only spelling that fits the grammar is a
+  MULTI-BINDING loop head — the existing `loop let` with comma-separated bindings
+  that map POSITIONALLY to the joined tables:
+  ```rae
+  loop let entity: EntityId, p: mod Pos, v: view Vel in query2(tableA: pos, tableB: vel) {
+    ...   # p aliases pos[hit.indexA] (mod, bumps stamp); v aliases vel[hit.indexB] (view)
+  }
+  ```
+  It desugars to exactly the match loop + the accessor aliases above (mod/view modes
+  preserved: a `mod` binding bumps the stamp like `queryModAt`, a `view` binding does
+  not). Honest weighing through the data-oriented / minimalism lens: it is NOT a
+  second vocabulary (same walk underneath) and it sits on the hottest path, but the
+  payoff is one saved line per component, it introduces an IMPLICIT positional
+  binding→table mapping, and it costs parser + sema + codegen work. A performance
+  engineer does not need it. **Recommendation: either adopt the multi-binding
+  `loop let` above as the one blessed spelling, or decline the sugar and keep the
+  explicit one-line-per-component form — both are defensible; it is a taste call the
+  maintainer should make, not the implementer.** The non-syntax half of #807
+  (`query4`/`query5`, `without`, `changedSince`) does not depend on this.
 - **N-arity joins — DECIDED: a small fixed ladder, NOT variadic generics.** Joins are
   hand-written per arity (`query2`/`query3`); the answer to "more than N types" is to
   add `query4`/`query5` in the same explicit style, not variadic / type-list generic
