@@ -1,7 +1,7 @@
 #!/bin/sh
 # WebGPU C-surface gate (#505).
 #
-# Fails if a renderer-specific C entry point (rae_ext_gbuffer_* / rae_ext_gpu3d_*)
+# Fails if a renderer-specific C entry point (rae_ext_Gbuffer_* / rae_ext_Gpu3d_*)
 # exists that is NOT on the allowlist. The point is to keep new renderer logic
 # flowing through the Rae WebGPU bindings instead of a growing pile of bespoke C
 # helpers. See docs/webgpu-c-surface-audit.md.
@@ -33,7 +33,7 @@ fi
 # this POSIX sh — no process substitution.
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT TERM
-grep -rhoE '\brae_ext_(gbuffer|gpu3d)_[A-Za-z0-9_]+' "$runtime_glob"/*.c \
+grep -rhoE '\brae_ext_(Gbuffer|Gpu3d)_[A-Za-z0-9_]+' "$runtime_glob"/*.c \
   | sort -u > "$tmp/current"
 # Ignore comment (#...) and blank lines in the allowlist.
 grep -vE '^[[:space:]]*(#|$)' "$allowlist" | sort -u > "$tmp/allowed"
@@ -52,7 +52,7 @@ if [ -n "$new" ]; then
   printf '  %s\n' $new >&2
   echo "" >&2
   echo "Route new renderer functionality through the Rae WebGPU bindings" >&2
-  echo "(lib/webgpu/*.rae, lib/gpu*.rae, lib/gbuffer*.rae). If this is genuine" >&2
+  echo "(lib/webgpu/*.rae, lib/Gpu*.rae, lib/Gbuffer*.rae). If this is genuine" >&2
   echo "platform ABI, add it to tools/webgpu-c-surface-allowlist.txt with a" >&2
   echo "justification. See docs/webgpu-c-surface-audit.md." >&2
 fi
