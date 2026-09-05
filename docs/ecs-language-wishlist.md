@@ -17,7 +17,7 @@ a feature that is not already listed here.
   mutate → set-back." `componentMod` returning a live `mod T` removed the churn in
   crowd movement, per-member animation, and terrain placement. Keep this first-class
   and cheap; it is what makes "drive entities in place via queries" possible.
-- **Disjoint field borrows must be guaranteed + documented `(documented #812; ECS element-ref checker gap filed #814)`.** Migrations routinely
+- **Disjoint field borrows must be guaranteed + documented `(documented #812; ECS element-ref rule enforced #814)`.** Migrations routinely
   need `mod` on two component tables of one world at once (e.g. `world.controllers`
   and `world.animStates`), and a `mod` element ref held across several calls
   (`updateWalkerMovement` then `groundWalker` on the same borrowed controller). It

@@ -1,0 +1,21 @@
+import core
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Query
+type Pos { x: Int }
+type Vel { v: Int }
+type World { positions: ComponentTable(Pos), velocities: ComponentTable(Vel) }
+
+# #814: the query loop binds rows of its joined tables (queryModAt underneath),
+# so mutating a joined table inside the body is the same hazard. Rejected.
+func main() {
+  var pos: ComponentTable(Pos) = createComponentTable(Pos)
+  var vel: ComponentTable(Vel) = createComponentTable(Vel)
+  let e: EntityId = { index: 1, generation: 0 }
+  componentSet(this: pos, entity: e, data: Pos { x: 1 })
+  componentSet(this: vel, entity: e, data: Vel { v: 1 })
+  loop let entity: EntityId, p: mod Pos, vv: view Vel in query2(tableA: pos, tableB: vel) {
+    let g: EntityId = { index: 9, generation: 0 }
+    componentSet(this: pos, entity: g, data: Pos { x: 0 })
+  }
+}

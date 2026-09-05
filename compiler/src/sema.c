@@ -1572,6 +1572,169 @@ static bool sema_stmt_mutates_collection(const AstStmt* stmt,
     }
 }
 
+// ===== #814: the ECS element-reference borrow rule ==========================
+//
+// componentMod / componentView (by entity), queryModAt / queryViewAt (by dense
+// index) and the queryNViewX / forEachView accessors return a pointer into a
+// ComponentTable's dense storage — the same kind of pointer List.viewAt/modAt
+// returns — so the same hazard applies: a STRUCTURAL mutation of that table
+// while the reference is live is a silent use-after-free. componentSet of a new
+// entity appends (past capacity -> realloc -> the reference dangles);
+// componentRemove swap-removes (the row under the reference becomes another
+// entity's); clearEntityComponents(world:) removes from every table of the
+// world. Same shape as #658: conservative, lexical, zero runtime cost. A
+// DIFFERENT table stays legal, and so does passing the table on as an argument
+// (parity with the List rule).
+
+static bool sema_is_table_element_accessor(Str name) {
+    if (str_eq_cstr(name, "componentMod") || str_eq_cstr(name, "componentView")
+        || str_eq_cstr(name, "queryModAt") || str_eq_cstr(name, "queryViewAt")
+        || str_eq_cstr(name, "forEachView")) return true;
+    // query2ViewA .. query5ViewE
+    return name.len == 11 && strncmp(name.data, "query", 5) == 0
+        && name.data[5] >= '2' && name.data[5] <= '5'
+        && strncmp(name.data + 6, "View", 4) == 0
+        && name.data[10] >= 'A' && name.data[10] <= 'E';
+}
+
+// The table argument of an accessor/mutator call: the first NAMED argument
+// (`this:` / `table:` / `tableA:`). A leading UNNAMED argument is a positional
+// type argument (`componentMod(Rect, this: tab, ...)`) and is skipped, so two
+// tables of the same element type are never confused for one another.
+static const AstExpr* sema_call_table_arg(const AstCallArg* args) {
+    for (const AstCallArg* a = args; a; a = a->next)
+        if (a->name.len > 0) return a->value;
+    return args ? args->value : NULL;
+}
+
+// The table an element-reference binding aliases, bare or module-qualified
+// (`Query.queryModAt(table: ...)`). NULL when the source is not such a call.
+static const AstExpr* sema_table_ref_source(const AstExpr* src) {
+    if (!src) return NULL;
+    if (src->kind == AST_EXPR_CALL && src->as.call.callee
+        && src->as.call.callee->kind == AST_EXPR_IDENT
+        && sema_is_table_element_accessor(src->as.call.callee->as.ident))
+        return sema_call_table_arg(src->as.call.args);
+    if (src->kind == AST_EXPR_METHOD_CALL
+        && sema_is_table_element_accessor(src->as.method_call.method_name))
+        return sema_call_table_arg(src->as.method_call.args);
+    return NULL;
+}
+
+// Is `inner` the same place as `outer`, or a field path rooted at it
+// (`world.positions` is within `world`)? A mutation through the outer place
+// (clearEntityComponents(world:)) reaches every table inside it.
+static bool sema_place_within(const AstExpr* inner, const AstExpr* outer) {
+    for (const AstExpr* p = inner; p; ) {
+        if (sema_same_place_expr(p, outer)) return true;
+        if (p->kind == AST_EXPR_MEMBER) p = p->as.member.object; else break;
+    }
+    return false;
+}
+
+static bool sema_is_table_structural_mutator(Str name) {
+    return str_eq_cstr(name, "componentSet") || str_eq_cstr(name, "componentRemove")
+        || str_eq_cstr(name, "clearEntityComponents");
+}
+
+static bool sema_expr_mutates_table(const AstExpr* expr, const AstExpr* table) {
+    if (!expr) return false;
+    if (expr->kind == AST_EXPR_CALL) {
+        if (expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT
+            && sema_is_table_structural_mutator(expr->as.call.callee->as.ident)
+            && sema_place_within(table, sema_call_table_arg(expr->as.call.args))) return true;
+        if (sema_expr_mutates_table(expr->as.call.callee, table)) return true;
+        for (const AstCallArg* a = expr->as.call.args; a; a = a->next)
+            if (sema_expr_mutates_table(a->value, table)) return true;
+        return false;
+    }
+    if (expr->kind == AST_EXPR_METHOD_CALL) {
+        if (sema_is_table_structural_mutator(expr->as.method_call.method_name)) {
+            // UFCS `place.componentSet(...)` or qualified `Mod.componentSet(this: place, ...)`.
+            if (sema_place_within(table, expr->as.method_call.object)) return true;
+            if (sema_place_within(table, sema_call_table_arg(expr->as.method_call.args))) return true;
+        }
+        if (sema_expr_mutates_table(expr->as.method_call.object, table)) return true;
+        for (const AstCallArg* a = expr->as.method_call.args; a; a = a->next)
+            if (sema_expr_mutates_table(a->value, table)) return true;
+        return false;
+    }
+    switch (expr->kind) {
+        case AST_EXPR_BINARY:
+            return sema_expr_mutates_table(expr->as.binary.lhs, table)
+                || sema_expr_mutates_table(expr->as.binary.rhs, table);
+        case AST_EXPR_UNARY: case AST_EXPR_BOX: case AST_EXPR_UNBOX:
+            return sema_expr_mutates_table(expr->as.unary.operand, table);
+        case AST_EXPR_CAST: return sema_expr_mutates_table(expr->as.cast.operand, table);
+        case AST_EXPR_MEMBER: return sema_expr_mutates_table(expr->as.member.object, table);
+        case AST_EXPR_INDEX:
+            return sema_expr_mutates_table(expr->as.index.target, table)
+                || sema_expr_mutates_table(expr->as.index.index, table);
+        default: return false;
+    }
+}
+
+static bool sema_stmt_mutates_table(const AstStmt* stmt, const AstExpr* table) {
+    if (!stmt) return false;
+    switch (stmt->kind) {
+        case AST_STMT_EXPR: return sema_expr_mutates_table(stmt->as.expr_stmt, table);
+        case AST_STMT_LET: return sema_expr_mutates_table(stmt->as.let_stmt.value, table);
+        case AST_STMT_ASSIGN:
+            return sema_same_place_expr(stmt->as.assign_stmt.target, table)
+                || sema_expr_mutates_table(stmt->as.assign_stmt.value, table);
+        case AST_STMT_RET:
+            for (const AstReturnArg* a = stmt->as.ret_stmt.values; a; a = a->next)
+                if (sema_expr_mutates_table(a->value, table)) return true;
+            return false;
+        case AST_STMT_IF:
+            if (sema_stmt_mutates_table(stmt->as.if_stmt.binding, table)) return true;
+            if (sema_expr_mutates_table(stmt->as.if_stmt.condition, table)) return true;
+            for (const AstStmt* b = stmt->as.if_stmt.then_block ? stmt->as.if_stmt.then_block->first : NULL; b; b = b->next)
+                if (sema_stmt_mutates_table(b, table)) return true;
+            for (const AstStmt* b = stmt->as.if_stmt.else_block ? stmt->as.if_stmt.else_block->first : NULL; b; b = b->next)
+                if (sema_stmt_mutates_table(b, table)) return true;
+            return false;
+        case AST_STMT_LOOP:
+            if (sema_stmt_mutates_table(stmt->as.loop_stmt.init, table)) return true;
+            if (sema_expr_mutates_table(stmt->as.loop_stmt.condition, table)) return true;
+            if (sema_expr_mutates_table(stmt->as.loop_stmt.increment, table)) return true;
+            for (const AstStmt* b = stmt->as.loop_stmt.body ? stmt->as.loop_stmt.body->first : NULL; b; b = b->next)
+                if (sema_stmt_mutates_table(b, table)) return true;
+            return false;
+        case AST_STMT_MATCH:
+            if (sema_expr_mutates_table(stmt->as.match_stmt.subject, table)) return true;
+            for (const AstMatchCase* c = stmt->as.match_stmt.cases; c; c = c->next)
+                for (const AstStmt* b = c->block ? c->block->first : NULL; b; b = b->next)
+                    if (sema_stmt_mutates_table(b, table)) return true;
+            return false;
+        case AST_STMT_DEFER:
+            for (const AstStmt* b = stmt->as.defer_stmt.block ? stmt->as.defer_stmt.block->first : NULL; b; b = b->next)
+                if (sema_stmt_mutates_table(b, table)) return true;
+            return false;
+        default: return false;
+    }
+}
+
+// Report the first structural mutation of `table` among `first..` (a statement
+// chain: the rest of a block, or a branch body) while `binding_name` is live.
+static void sema_check_table_ref_borrow(AstModule* module, const AstStmt* first,
+                                        const AstExpr* table, Str binding_name) {
+    for (const AstStmt* s = first; s; s = s->next) {
+        if (!sema_stmt_mutates_table(s, table)) continue;
+        const AstExpr* err_expr = s->kind == AST_STMT_EXPR ? s->as.expr_stmt : NULL;
+        int err_line = (int)(err_expr ? err_expr->line : s->line);
+        int err_col = (int)(err_expr ? err_expr->column : s->column);
+        char buf[320];
+        snprintf(buf, sizeof buf,
+                 "cannot mutate a ComponentTable while a componentMod/queryModAt reference ('%.*s') "
+                 "aliases one of its rows — finish with the reference first, or mutate before taking it",
+                 (int)binding_name.len, binding_name.data);
+        diag_error(module->file_path, err_line, err_col, buf);
+        module->had_error = true;
+        return;
+    }
+}
+
 // Does a match-case pattern expr name the enum member `enum_name.member`?
 // Used for exhaustiveness, checking each pattern in an or-pattern arm.
 static bool sema_pattern_names_member(const AstExpr* pat, Str enum_name, Str member) {
@@ -2161,6 +2324,16 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     }
                 }
             }
+            // #814: an element-reference binding through a ComponentTable
+            // accessor aliases a row of that table for the rest of this block
+            // (nested blocks included); a structural mutation of the SAME
+            // table while it is live is a silent use-after-free. Lexical scan,
+            // like the #658 List rule.
+            if (stmt->as.let_stmt.is_bind && stmt->as.let_stmt.type
+                && (stmt->as.let_stmt.type->is_view || stmt->as.let_stmt.type->is_mod)) {
+                const AstExpr* aliased_table = sema_table_ref_source(stmt->as.let_stmt.value);
+                if (aliased_table) sema_check_table_ref_borrow(module, stmt->next, aliased_table, stmt->as.let_stmt.name);
+            }
             // #661: an anonymous `{ }`/`{ ... }` list literal on an
             // Array/Buffer-typed binding was lowered as a List (createList),
             // misgenerating C (a `rae_List_<T>` initialising a
@@ -2345,6 +2518,15 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     // Plain-call form `viewAt(list, index:)`: the List is the
                     // first positional argument.
                     aliased = bsrc->as.call.args->value;
+                }
+                // #814: the same rule for a ComponentTable element accessor
+                // source, scanning the live then-branch.
+                {
+                    const AstExpr* aliased_table = sema_table_ref_source(bsrc);
+                    if (aliased_table)
+                        sema_check_table_ref_borrow(module,
+                            stmt->as.if_stmt.then_block ? stmt->as.if_stmt.then_block->first : NULL,
+                            aliased_table, b->as.let_stmt.name);
                 }
                 if (aliased) {
                     for (const AstStmt* s = stmt->as.if_stmt.then_block
