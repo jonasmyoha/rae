@@ -108,9 +108,48 @@ a feature that is not already listed here.
 - **Lightweight tuples / multiple return.** Repeatedly hit "can't return `(cellX,
   cellY)` / `(transform, active)`" — had to thread a struct or split into two funcs.
   Cheap multi-return would simplify placement, spatial helpers, and query results.
-- **Data-carrying enums / tagged unions.** `PropKind` is an `Int` discriminator matched
-  with an if-ladder; a real sum type would make kind-dispatch exhaustive and
-  type-safe, and pairs naturally with query-by-variant.
+- **Data-carrying enums / tagged unions (sum types) — DECIDED: Rae will NOT have
+  them.** This was proposed (briefly queued as #808) on the usual grounds — `PropKind`
+  is an `Int` discriminator matched with an if-ladder, and a sum type would make
+  kind-dispatch exhaustive and tie a variant's *data* to its tag so reading the wrong
+  variant's fields is a compile error. It was declined as a definitive decision, for
+  three reasons that hold together; do not re-propose it without a concrete case that
+  defeats all three.
+  - **It is not data-oriented — the memory layout is wrong for ECS.** A tagged union
+    is sized to its LARGEST variant plus a tag plus padding, so every small variant is
+    padded up to the big one. Worse, a *collection* of them is an array of mixed,
+    max-sized slots: iterating "all circles" has to touch every slot including the
+    rects, so you can never get a dense, homogeneous, cache-friendly stream. That is
+    exactly the array-of-structs "bag of mixed things" layout data-oriented design
+    exists to get away from. The ECS answer already gives the right layout for free:
+    each component type is its own packed dense `ComponentTable`, so "all circles" IS
+    a contiguous array of only circles. A sum type optimises the programmer's
+    convenience of "one value, many shapes" at the direct cost of the layout a
+    performance engineer actually needs.
+  - **The ECS *is* the variant mechanism, so a sum type is a competing second way.**
+    In an ECS, "a kind with data" is idiomatically not a sum type but separate
+    **components + tags** on entities: "which variant is this" becomes "which
+    component does the entity have," and dispatch becomes a **query**. The safety a
+    sum type would add — you cannot read a variant's fields unless you established
+    that variant — is already there: `componentGet` returns `opt`, the component is
+    present or it isn't. Adding sum types would give Rae a second vocabulary for
+    variants that fights the architecture the language is built around, which is the
+    precise kind of overlapping feature "few special cases" refuses. The `PropKind`
+    if-ladder that motivated the proposal is therefore an ECS *smell*, not a missing
+    type feature: it should become tag components dispatched through queries (the
+    N-ary / combinator query work in #807), not a new type kind.
+  - **Rae already has the one sum type that pays for itself: `opt T`.** `some`/`none`
+    is a two-variant tagged union, and it covers the overwhelmingly common case
+    (result-or-absent, present-or-not) with a dedicated construct instead of a general
+    one. That is the minimalist move and it works. The residual cases a general sum
+    type would serve are values that are NOT entities and so cannot live in a table —
+    a JSON node, a parsed AST node — and for those a struct-with-kind is acceptable
+    (library-internal, the padded fields do not matter) or `opt` suffices. None of
+    them justifies a whole new type kind touching parser, type system, sema, the C
+    backend, and drop codegen for heap-owning variants.
+  - Net: sum types are a language-nerd feature, not one a performance-oriented
+    engineer needs in a minimalistic ECS language. Variants are components + tags +
+    queries; `opt` is the blessed two-way case; keep it that way.
 - **Zero-field tag structs `(landed #751/#752)`.** `type FooTag {}` as a marker
   component + `addTag`/`hasTag`/`queryTagged`. Keep; it is how a "kind" if-ladder
   becomes a query.
