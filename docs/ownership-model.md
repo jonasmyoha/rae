@@ -365,6 +365,12 @@ sema — no env flag, no opt-in.
   entire call, so each arg has a distinct stack slot whose
   lifetime matches the SE block.
 
+- **Borrowing disjoint fields and element references** (two `mod` fields
+  of one world at once; a `componentMod` ref held across calls; what
+  the checker enforces vs merely permits; the element-reference
+  validity rule) is specified in `docs/ecs-api-reference.md`
+  §"Borrowing rules — disjoint fields and element references" (#812).
+
 ### Final verification numbers (2026-05-25, Stage 6)
 
 - Unit tests: **313 passed, 0 failed** (includes new
