@@ -15,6 +15,12 @@ type Cell {
   v: Int
 }
 
+# #814: a mod borrow must end before the table is mutated again — scope it here.
+func setViaMod(t: mod ComponentTable(Cell), e: view EntityId, v: view Int) {
+  let m: mod Cell => componentMod(this: t, entity: e)
+  m.v = v
+}
+
 func main() {
   var t: ComponentTable(Cell) = createComponentTable(Cell)
   let e1: EntityId = id(v: 1)
@@ -33,9 +39,8 @@ func main() {
   # Absent entity → 0.
   log("stamp_miss: {componentModStamp(this: t, entity: miss)}")
 
-  # mod e2: only e2's stamp advances.
-  let m: mod Cell => componentMod(this: t, entity: e2)
-  m.v = 21
+  # mod e2: only e2's stamp advances (borrow scoped in a helper, #814).
+  setViaMod(t: t, e: e2, v: 21)
   log("after_mod_e2_e1: {componentModStamp(this: t, entity: e1)}")
   log("after_mod_e2_e2: {componentModStamp(this: t, entity: e2)}")
   log("after_mod_e2_e3: {componentModStamp(this: t, entity: e3)}")
