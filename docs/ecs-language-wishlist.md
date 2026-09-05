@@ -44,32 +44,28 @@ a feature that is not already listed here.
   comparison against the `generation`/`denseStamps` every table ALREADY carries.
   *Optional* components are already `componentGet` returning `opt`. Tracked as plain
   functions in #807.
-- **Ergonomic query iteration — OPEN QUESTION (#807): sugar or not?** A query
-  already returns match records with each entity's dense index, so reading the
-  components is one line per component today. The only sugar left is binding them
-  in the loop head. Two options; pick one.
-
-  **(A) Add loop-head sugar** — a multi-binding `loop let`, bindings map to the joined
-  tables by position, `mod`/`view` modes kept (new syntax: parser + sema + codegen):
+- **Ergonomic query iteration — DECIDED (A) and LANDED (#807): the query loop is a
+  first-class statement.** Rae is built around ECS, so the ECS join — "for every
+  entity that has these components, give me those components" — deserves to read
+  like the architecture instead of like plumbing. That is the sentence the language
+  now says directly:
   ```rae
   loop let entity: EntityId, p: mod Pos, v: view Vel in query2(tableA: pos, tableB: vel) {
     p.x = p.x + v.v
   }
   ```
-
-  **(B) Keep the explicit form** — no new syntax, one accessor line per component:
-  ```rae
-  loop let hit: view Query2Match in query2(tableA: pos, tableB: vel) {
-    let p: mod Pos => queryModAt(table: pos, denseIndex: hit.indexA)
-    let v: view Vel => query2ViewB(tableB: vel, hit: hit)
-    p.x = p.x + v.v
-  }
-  ```
-
-  Trade-off in one line: (A) saves one line per component but adds an implicit
-  positional binding→table mapping and real compiler work; (B) is explicit and
-  already fast. Lean: (B). The non-syntax half of #807 (`query4`/`query5`,
-  `without`, `changedSince`) is landed and does not depend on this.
+  An optional leading `EntityId` binding receives the entity; the rest map
+  positionally to the joined tables and must be `mod` (writes through, bumps the
+  change stamp) or `view` (never dirties). Works over `query2`..`query5` and
+  `forEach`; nested query loops each own their own result. Chosen over keeping the
+  explicit accessor form because a language that bets on ECS should make its most
+  common operation its cleanest line — and it costs nothing at runtime: it is PURE
+  SUGAR resolved in the parser (hoisted result list + the accessor aliases systems
+  used to hand-write), so sema and codegen see ordinary Rae and the compiled C is
+  identical to the hand-written idiom. The explicit form remains valid; it is
+  exactly what the loop desugars to. Misuse is a parse-time error (wrong binding
+  count vs table count; a component binding that is neither `mod` nor `view`; a
+  non-query iterable; a computed table argument). Tests 734 (+ rejects 735/736).
 - **N-arity joins — DECIDED: a small fixed ladder, NOT variadic generics.** Joins are
   hand-written per arity (`query2`/`query3`); the answer to "more than N types" is to
   add `query4`/`query5` in the same explicit style, not variadic / type-list generic

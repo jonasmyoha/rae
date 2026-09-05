@@ -1,0 +1,15 @@
+import core
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Query
+
+type Pos { x: Int }
+type Vel { v: Int }
+
+func main() {
+  var pos: ComponentTable(Pos) = createComponentTable(Pos)
+  var vel: ComponentTable(Vel) = createComponentTable(Vel)
+  loop let entity: EntityId, p: Pos, vv: view Vel in query2(tableA: pos, tableB: vel) {
+    log("{p.x}")
+  }
+}
