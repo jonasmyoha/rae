@@ -29,20 +29,33 @@ These instructions define **how Codex should work**, communicate progress, and i
 - A `.rae` file is a MODULE, and its name is spelled in code at every `import`/
   `open` and every qualified call (`GpuTiming.createGpuTiming()`). `snake_case`
   there is the same C habit as a `snake_case` identifier, so it is banned too.
-- **A module whose main export is a type is named after that type, in
-  `PascalCase`:** the file defining `type GpuTiming` is `GpuTiming.rae`, the file
-  defining `type CameraRig` is `CameraRig.rae`. Folders that group such a module
-  match (`ui/RenderSystem/RenderSystem.rae`). Most modules are of this kind, so
-  most file/folder names start with a capital.
-- **A module that is a bag of functions with no single owning type is
-  `camelCase`:** `worldBiome.rae`, `gpu2dText.rae`, `noiseWgsl.rae`.
-- This applies to FOLDERS as well (`legacyRaylib/`, not `legacy_raylib/`). It does
-  NOT apply to non-module data on disk — shader assets (`*.wgsl`), `.raescene`
-  files, images, and the number-prefixed example/test directories (`106_*`,
-  `414_*`) are a separate naming scheme and keep their names.
+- **Module FILES are `PascalCase`; package FOLDERS are `camelCase`.** A module is
+  a namespace, spelled like a type, so its file is PascalCase — `GpuTiming.rae`,
+  `CameraRig.rae`, `Vec3.rae`, `Math.rae`, and EQUALLY `WorldBiome.rae`,
+  `Gpu2dText.rae`, `NoiseWgsl.rae`. There is NO "bag of functions stays
+  camelCase" exception any more: every `.rae` module file is PascalCase whether
+  or not it has a single owning type. A folder is a PACKAGE, not a module, so it
+  is camelCase — `ui/`, `ecs/`, `renderSystem/`, `hierarchySystem/`, `webgpu/`,
+  `compress/`, `legacyRaylib/`. A system module therefore lives at
+  `ui/renderSystem/RenderSystem.rae`: camelCase folder, PascalCase file.
+- The import separator is `/` (never `.`): `import ui/renderSystem/RenderSystem`,
+  `open ecs/hierarchySystem/HierarchySystem`. The program entry file is the
+  `Main` module — `Main.rae`.
+- Exceptions that keep their existing spelling:
+  - `core` stays lowercase — it is the prelude (auto-loaded and special-cased in
+    the compiler), not a normal module.
+  - Number-prefixed example/test directories (`106_*`, `414_*`, `550_*`) are a
+    separate bucket scheme, not packages, and keep their names.
+  - Non-module data on disk is not a module and is not renamed: shader assets
+    (`*.wgsl`), `.raescene` files, images and other assets are referenced only by
+    string paths. And the generated `lib/webgpu/` bindings mirror the WebGPU C
+    API verbatim, so their `WGPU*` symbol names keep the C spelling — the same
+    C-boundary exception `extern` gets.
 - When you rename a module, update every `import`/`open` path and every
   `oldName.` qualifier that referenced it (they live in code, never in strings —
-  a `"lib/foo_bar.wgsl"` asset path is a string and stays).
+  a `"lib/foo_bar.wgsl"` asset path is a string and stays). A package-FOLDER
+  rename only changes the folder component of import paths — the file component
+  stays PascalCase (`ui/RenderSystem/RenderSystem` -> `ui/renderSystem/RenderSystem`).
 
 ### No single-letter names for parameters or meaningful locals:
 - Write `state`, `settings`, `world` — not `s`, `c`, `w`. A single letter says
