@@ -1,0 +1,315 @@
+# math3d — 4x4 matrices + small vector helpers for the gpu3d renderer.
+#
+# A matrix is a `Mat4`: 16 floats BY VALUE, COLUMN-MAJOR (WGSL mat4x4
+# layout), element (row r, column c) at index c*4 + r. mat4Mul composes so
+# that `mat4Mul(a: A, b: B)` applies B first, then A (A*B, like math).
+#
+# ALLOCATION-FREE. These were `List(Float)` until #354, which meant every
+# matrix was a heap allocation: `modelMatrix` alone cost eight alloc/free
+# pairs per object per frame, and it runs twice per drawn instance (current
+# and previous transform, for motion vectors). A Mat4 is now a value —
+# `Array(Float, cap: 16)` wrapped in a struct — so it lives in registers or
+# on the stack, copies with a struct assignment, and never touches the
+# allocator. See docs/value-aggregates-and-ownership.md.
+#
+# WORLD CONVENTION: right-handed, **Z-up**, matching Blender — +X right,
+# +Y forward (into the scene), +Z up. This is the project-wide mandate in
+# `docs/coordinate-system.md` ("New 3D code MUST use Z-up Blender
+# conventions"), NOT the graphics-default Y-up. Yaw rotates about +Z,
+# pitch about +X. Cameras are specified as position + target + worldUp
+# (+Z) and the basis is derived exactly as that doc prescribes.
+#
+# Only the PROJECTION knows about the graphics API: it maps the Z-up
+# right-handed view space into WebGPU clip space (z in [0, 1]). The
+# host API's up-axis preference never leaks into Rae world space.
+import core
+import math
+open Vec3
+
+# A 4x4 matrix, 16 floats by value, column-major.
+type Mat4 {
+  m: Array(Float, cap: 16)
+}
+
+# An affine transform without the constant fourth row (0,0,0,1). Three
+# columns of four, still column-major, so the upper 3x3 rotation/scale and
+# the translation column keep their Mat4 positions. Worth having because a
+# skinning palette or an instance buffer ships 25% fewer floats across the
+# render boundary, and the missing row is implied.
+type Mat3x4 {
+  m: Array(Float, cap: 12)
+}
+
+func mat4Zero() pub ret Mat4 {
+  ret Mat4 { m: Array(Float, cap: 16) }
+}
+
+func mat4Identity() pub ret Mat4 {
+  var m: Mat4 = mat4Zero()
+  m.m[0] = 1.0
+  m.m[5] = 1.0
+  m.m[10] = 1.0
+  m.m[15] = 1.0
+  ret m
+}
+
+func mat4Get(m: view Mat4, i: view Int) pub ret Float {
+  ret m.m[i]
+}
+
+# Drop the implied (0,0,0,1) row: keep the first three entries of each
+# column. Column c of the Mat4 starts at c*4; of the Mat3x4 at c*3.
+func mat4ToMat3x4(a: view Mat4) pub ret Mat3x4 {
+  var o: Mat3x4 = { m: Array(Float, cap: 12) }
+  var c: Int = 0
+  loop c < 4 {
+    o.m[c * 3] = a.m[c * 4]
+    o.m[c * 3 + 1] = a.m[c * 4 + 1]
+    o.m[c * 3 + 2] = a.m[c * 4 + 2]
+    c = c + 1
+  }
+  ret o
+}
+
+# Restore the implied row. The inverse of mat4ToMat3x4 for any affine
+# matrix; for a non-affine one the dropped row was not (0,0,0,1) and this
+# does not round-trip.
+func mat3x4ToMat4(a: view Mat3x4) pub ret Mat4 {
+  var o: Mat4 = mat4Zero()
+  var c: Int = 0
+  loop c < 4 {
+    o.m[c * 4] = a.m[c * 3]
+    o.m[c * 4 + 1] = a.m[c * 3 + 1]
+    o.m[c * 4 + 2] = a.m[c * 3 + 2]
+    c = c + 1
+  }
+  o.m[15] = 1.0
+  ret o
+}
+
+# out = a * b (apply b first, then a).
+func mat4Mul(a: view Mat4, b: view Mat4) pub ret Mat4 {
+  var out: Mat4 = mat4Zero()
+  var c: Int = 0
+  loop c < 4 {
+    var r: Int = 0
+    loop r < 4 {
+      var sum: Float = 0.0
+      var k: Int = 0
+      loop k < 4 {
+        sum = sum + a.m[k * 4 + r] * b.m[c * 4 + k]
+        k = k + 1
+      }
+      out.m[c * 4 + r] = sum
+      r = r + 1
+    }
+    c = c + 1
+  }
+  ret out
+}
+
+func mat4Translate(x: view Float, y: view Float, z: view Float) pub ret Mat4 {
+  var m: Mat4 = mat4Identity()
+  m.m[12] = x
+  m.m[13] = y
+  m.m[14] = z
+  ret m
+}
+
+func mat4Scale(s: view Float) pub ret Mat4 {
+  var m: Mat4 = mat4Identity()
+  m.m[0] = s
+  m.m[5] = s
+  m.m[10] = s
+  ret m
+}
+
+# Non-uniform scale. NOTE: gpu3d transforms normals by the model matrix
+# directly, so a non-uniform scale skews lighting — see the inverse-
+# transpose normal-matrix follow-up before relying on this for shaded
+# geometry.
+func mat4ScaleXYZ(x: view Float, y: view Float, z: view Float) pub ret Mat4 {
+  var m: Mat4 = mat4Identity()
+  m.m[0] = x
+  m.m[5] = y
+  m.m[10] = z
+  ret m
+}
+
+func mat4RotateX(angle: view Float) pub ret Mat4 {
+  var m: Mat4 = mat4Identity()
+  let c: Float = math.cos(x: angle)
+  let s: Float = math.sin(x: angle)
+  m.m[5] = c
+  m.m[6] = s
+  m.m[9] = 0.0 - s
+  m.m[10] = c
+  ret m
+}
+
+func mat4RotateY(angle: view Float) pub ret Mat4 {
+  var m: Mat4 = mat4Identity()
+  let c: Float = math.cos(x: angle)
+  let s: Float = math.sin(x: angle)
+  m.m[0] = c
+  m.m[2] = 0.0 - s
+  m.m[8] = s
+  m.m[10] = c
+  ret m
+}
+
+func mat4RotateZ(angle: view Float) pub ret Mat4 {
+  var m: Mat4 = mat4Identity()
+  let c: Float = math.cos(x: angle)
+  let s: Float = math.sin(x: angle)
+  m.m[0] = c
+  m.m[1] = s
+  m.m[4] = 0.0 - s
+  m.m[5] = c
+  ret m
+}
+
+# Right-handed perspective, WebGPU depth range [0,1].
+# Reverse-Z projection: near maps to 1, far maps to 0 — the opposite of
+# mat4Perspective above.
+#
+# WHY. A float depth buffer has most of its precision near 0, and standard
+# Z puts the near plane there, where the projection is already densest.
+# The two effects fight and most of the buffer's precision is wasted on
+# geometry a metre from the camera. Reverse-Z lines the float's dense
+# region up with the far plane, where the projection is sparse, and the
+# two cancel almost exactly — the classic result is that depth precision
+# becomes nearly uniform for free.
+#
+# This is a SEPARATE function rather than a change to mat4Perspective on
+# purpose. The forward frame and every pass reading its depth assume the
+# standard convention; flipping it globally would silently invert every
+# depth comparison in renderer3d. A caller opts in, and its pipeline must
+# then clear depth to 0.0 and compare with Greater.
+func mat4PerspectiveReverseZ(fovYDeg: view Float, aspect: view Float, near: view Float, far: view Float) pub ret Mat4 {
+  var m: Mat4 = mat4Zero()
+  let f: Float = 1.0 / math.tan(x: fovYDeg * 0.008726646259971648)  # deg->rad, /2
+  m.m[0] = f / aspect
+  m.m[5] = f
+  m.m[10] = near / (far - near)
+  m.m[11] = 0.0 - 1.0
+  m.m[14] = far * near / (far - near)
+  ret m
+}
+
+func mat4Perspective(fovYDeg: view Float, aspect: view Float, near: view Float, far: view Float) pub ret Mat4 {
+  var m: Mat4 = mat4Zero()
+  let f: Float = 1.0 / math.tan(x: fovYDeg * 0.008726646259971648)  # deg->rad, /2
+  m.m[0] = f / aspect
+  m.m[5] = f
+  m.m[10] = far / (near - far)
+  m.m[11] = 0.0 - 1.0
+  m.m[14] = far * near / (near - far)
+  ret m
+}
+
+# Right-handed orthographic projection matching mat4Perspective's
+# conventions: view space looks down -Z, clip depth is WebGPU's [0,1].
+#
+# Used for directional-light shadow cascades. Note that reverse-Z is
+# deliberately NOT offered here: reverse-Z buys precision from the float
+# exponent against perspective's 1/z, and ortho depth is linear, so it
+# would buy nothing while risking a convention mismatch with the main
+# pass (docs/shadow-system-design.md §3).
+func mat4Ortho(left: view Float, right: view Float, bottom: view Float, top: view Float,
+               near: view Float, far: view Float) pub ret Mat4 {
+  var m: Mat4 = mat4Zero()
+  let rl: Float = right - left
+  let tb: Float = top - bottom
+  let nf: Float = near - far
+  if rl is 0.0 or tb is 0.0 or nf is 0.0 {
+    ret mat4Identity()
+  }
+  m.m[0] = 2.0 / rl
+  m.m[5] = 2.0 / tb
+  m.m[10] = 1.0 / nf
+  m.m[12] = 0.0 - (right + left) / rl
+  m.m[13] = 0.0 - (top + bottom) / tb
+  m.m[14] = near / nf
+  m.m[15] = 1.0
+  ret m
+}
+
+# Transform a point by a matrix (w assumed 1, result de-homogenised only
+# for the affine case this is used in). Column-major, so the x row reads
+# m[0], m[4], m[8], m[12].
+func mat4TransformPoint(m: view Mat4, p: view Vec3) pub ret Vec3 {
+  ret Vec3.create(
+    x: m.m[0] * p.x + m.m[4] * p.y + m.m[8] * p.z + m.m[12]
+    y: m.m[1] * p.x + m.m[5] * p.y + m.m[9] * p.z + m.m[13]
+    z: m.m[2] * p.x + m.m[6] * p.y + m.m[10] * p.z + m.m[14]
+  )
+}
+
+# Right-handed Z-up look-at view matrix (docs/coordinate-system.md §Camera):
+#   forward = normalize(target - position)
+#   right   = normalize(cross(forward, worldUp))
+#   up      = cross(right, forward)
+# Pass worldUp = (0, 0, 1) for the standard Blender convention. A degenerate
+# look (forward parallel to worldUp) falls back to an alternate up reference
+# so the basis stays finite, as the doc requires.
+#
+# View space keeps the camera looking down its own -Z (what the WebGPU
+# projection below expects), so the third basis row is -forward.
+func mat4LookAt(eyeX: view Float, eyeY: view Float, eyeZ: view Float, atX: view Float, atY: view Float, atZ: view Float, upX: view Float, upY: view Float, upZ: view Float) pub ret Mat4 {
+  # forward = normalize(target - eye) — the direction the camera looks.
+  var fx: Float = atX - eyeX
+  var fy: Float = atY - eyeY
+  var fz: Float = atZ - eyeZ
+  let flen: Float = math.sqrt(x: fx * fx + fy * fy + fz * fz)
+  fx = fx / flen
+  fy = fy / flen
+  fz = fz / flen
+  # right = normalize(cross(forward, worldUp))
+  var rx: Float = fy * upZ - fz * upY
+  var ry: Float = fz * upX - fx * upZ
+  var rz: Float = fx * upY - fy * upX
+  var rlen: Float = math.sqrt(x: rx * rx + ry * ry + rz * rz)
+  if rlen < 0.000001 {
+    # Degenerate: looking straight along worldUp. Use +Y as the alternate
+    # up reference (Blender front-view fallback) and rebuild `right`.
+    rx = fy * 0.0 - fz * 1.0
+    ry = fz * 0.0 - fx * 0.0
+    rz = fx * 1.0 - fy * 0.0
+    rlen = math.sqrt(x: rx * rx + ry * ry + rz * rz)
+  }
+  rx = rx / rlen
+  ry = ry / rlen
+  rz = rz / rlen
+  # up = cross(right, forward)
+  let ux: Float = ry * fz - rz * fy
+  let uy: Float = rz * fx - rx * fz
+  let uz: Float = rx * fy - ry * fx
+  var m: Mat4 = mat4Zero()
+  m.m[0] = rx
+  m.m[1] = ux
+  m.m[2] = 0.0 - fx
+  m.m[4] = ry
+  m.m[5] = uy
+  m.m[6] = 0.0 - fy
+  m.m[8] = rz
+  m.m[9] = uz
+  m.m[10] = 0.0 - fz
+  m.m[12] = 0.0 - (rx * eyeX + ry * eyeY + rz * eyeZ)
+  m.m[13] = 0.0 - (ux * eyeX + uy * eyeY + uz * eyeZ)
+  m.m[14] = fx * eyeX + fy * eyeY + fz * eyeZ
+  m.m[15] = 1.0
+  ret m
+}
+
+# Z-up orbit camera position from yaw/pitch/distance around a target.
+# Yaw is about +Z (0 puts the camera on -Y, Blender front view); positive
+# pitch raises the camera toward +Z.
+func orbitEye(targetX: view Float, targetY: view Float, targetZ: view Float, yaw: view Float, pitch: view Float, dist: view Float) pub ret Vec3 {
+  let cp: Float = math.cos(x: pitch)
+  ret Vec3.create(
+    x: targetX + dist * cp * math.sin(x: yaw),
+    y: targetY - dist * cp * math.cos(x: yaw),
+    z: targetZ + dist * math.sin(x: pitch)
+  )
+}

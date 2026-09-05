@@ -20,11 +20,11 @@
 import core
 import math
 import gpu2d
-import sdl3
-import vec3
-import keys
-open scene3d
-open math3d
+import Sdl3
+import Vec3
+import Keys
+open Scene3d
+open Math3d
 
 # Shift makes the WASD camera 4x FASTER, Control makes it 4x SLOWER (for fine framing).
 # Applied to translation only — boosting the turn rate as well makes the view hard to aim.
@@ -32,10 +32,10 @@ const cameraRigBoost: Float = 4.0
 const cameraRigSlow: Float = 0.25
 
 func speedScale() ret Float {
-  if sdl3.isKeyDown(key: keys.keyLShift) or sdl3.isKeyDown(key: keys.keyRShift) {
+  if Sdl3.isKeyDown(key: Keys.keyLShift) or Sdl3.isKeyDown(key: Keys.keyRShift) {
     ret cameraRigBoost
   }
-  if sdl3.isKeyDown(key: keys.keyLCtrl) or sdl3.isKeyDown(key: keys.keyRCtrl) {
+  if Sdl3.isKeyDown(key: Keys.keyLCtrl) or Sdl3.isKeyDown(key: Keys.keyRCtrl) {
     ret cameraRigSlow
   }
   ret 1.0
@@ -315,7 +315,7 @@ func rigRotationRate(rig: view CameraRig) pub ret Float {
 # fighting the view.
 func cameraRigForward(rig: view CameraRig) pub ret Vec3 {
   let cp: Float = math.cos(x: rig.viewFreePitch)
-  ret vec3.create(
+  ret Vec3.create(
     x: (0.0 - math.sin(x: rig.viewYaw)) * cp
     y: math.cos(x: rig.viewYaw) * cp
     z: math.sin(x: rig.viewFreePitch)
@@ -337,8 +337,8 @@ func clampRigDistance(rig: view CameraRig, dist: view Float) pub ret Float {
 
 func right(rig: view CameraRig) pub ret Vec3 {
   let forward: Vec3 = cameraRigForward(rig: rig)
-  let up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
-  ret vec3.vnorm(a: vec3.vcross(a: forward, b: up))
+  let up: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  ret Vec3.vnorm(a: Vec3.vcross(a: forward, b: up))
 }
 
 func modeName(rig: view CameraRig) pub ret String {
@@ -365,7 +365,7 @@ func toggleCameraRigMode(rig: mod CameraRig, camera: mod Camera3d) pub {
   } else if rig.mode is CameraRigMode.free {
     let forward: Vec3 = cameraRigForward(rig: rig)
     rig.orbitPitch = clampRigPitch(rig: rig, pitch: 0.0 - rig.freePitch)
-    camera.target = vec3.vadd(a: rig.freePosition, b: vec3.vscale(a: forward, s: rig.distance))
+    camera.target = Vec3.vadd(a: rig.freePosition, b: Vec3.vscale(a: forward, s: rig.distance))
     if rig.characterModeEnabled {
       rig.mode = CameraRigMode.character
     } else {
@@ -410,7 +410,7 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
   var keyYaw: Float = 0.0
   var keyOrbitPitch: Float = 0.0
   var keyDist: Float = 0.0
-  var keyMove: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  var keyMove: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
 
   resolveCameraPointer(rig: rig)
   let px: Float = rig.camPointerX
@@ -442,23 +442,23 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
     mouseDist = 0.0 - gpu2d.wheelMove() * rig.wheelSpeed
     let boost: Float = speedScale()
     if rig.mode is CameraRigMode.orbit {
-      if sdl3.isKeyDown(key: keys.keyW) { keyDist = keyDist - dt * rig.moveSpeed * boost }
-      if sdl3.isKeyDown(key: keys.keyS) { keyDist = keyDist + dt * rig.moveSpeed * boost }
-      if sdl3.isKeyDown(key: keys.keyA) { keyYaw = keyYaw - dt * rig.keyTurnSpeed }
-      if sdl3.isKeyDown(key: keys.keyD) { keyYaw = keyYaw + dt * rig.keyTurnSpeed }
-      if sdl3.isKeyDown(key: keys.keyQ) { keyOrbitPitch = keyOrbitPitch - dt * rig.keyTurnSpeed }
-      if sdl3.isKeyDown(key: keys.keyE) { keyOrbitPitch = keyOrbitPitch + dt * rig.keyTurnSpeed }
+      if Sdl3.isKeyDown(key: Keys.keyW) { keyDist = keyDist - dt * rig.moveSpeed * boost }
+      if Sdl3.isKeyDown(key: Keys.keyS) { keyDist = keyDist + dt * rig.moveSpeed * boost }
+      if Sdl3.isKeyDown(key: Keys.keyA) { keyYaw = keyYaw - dt * rig.keyTurnSpeed }
+      if Sdl3.isKeyDown(key: Keys.keyD) { keyYaw = keyYaw + dt * rig.keyTurnSpeed }
+      if Sdl3.isKeyDown(key: Keys.keyQ) { keyOrbitPitch = keyOrbitPitch - dt * rig.keyTurnSpeed }
+      if Sdl3.isKeyDown(key: Keys.keyE) { keyOrbitPitch = keyOrbitPitch + dt * rig.keyTurnSpeed }
     } else if rig.mode is CameraRigMode.free {
       let step: Float = dt * rig.moveSpeed * boost
       let forward: Vec3 = cameraRigForward(rig: rig)
       let right: Vec3 = right(rig: rig)
-      let up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
-      if sdl3.isKeyDown(key: keys.keyW) { keyMove = vec3.vadd(a: keyMove, b: vec3.vscale(a: forward, s: step)) }
-      if sdl3.isKeyDown(key: keys.keyS) { keyMove = vec3.vsub(a: keyMove, b: vec3.vscale(a: forward, s: step)) }
-      if sdl3.isKeyDown(key: keys.keyA) { keyMove = vec3.vsub(a: keyMove, b: vec3.vscale(a: right, s: step)) }
-      if sdl3.isKeyDown(key: keys.keyD) { keyMove = vec3.vadd(a: keyMove, b: vec3.vscale(a: right, s: step)) }
-      if sdl3.isKeyDown(key: keys.keyQ) { keyMove = vec3.vsub(a: keyMove, b: vec3.vscale(a: up, s: step)) }
-      if sdl3.isKeyDown(key: keys.keyE) { keyMove = vec3.vadd(a: keyMove, b: vec3.vscale(a: up, s: step)) }
+      let up: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+      if Sdl3.isKeyDown(key: Keys.keyW) { keyMove = Vec3.vadd(a: keyMove, b: Vec3.vscale(a: forward, s: step)) }
+      if Sdl3.isKeyDown(key: Keys.keyS) { keyMove = Vec3.vsub(a: keyMove, b: Vec3.vscale(a: forward, s: step)) }
+      if Sdl3.isKeyDown(key: Keys.keyA) { keyMove = Vec3.vsub(a: keyMove, b: Vec3.vscale(a: right, s: step)) }
+      if Sdl3.isKeyDown(key: Keys.keyD) { keyMove = Vec3.vadd(a: keyMove, b: Vec3.vscale(a: right, s: step)) }
+      if Sdl3.isKeyDown(key: Keys.keyQ) { keyMove = Vec3.vsub(a: keyMove, b: Vec3.vscale(a: up, s: step)) }
+      if Sdl3.isKeyDown(key: Keys.keyE) { keyMove = Vec3.vadd(a: keyMove, b: Vec3.vscale(a: up, s: step)) }
     }
   }
 
@@ -473,7 +473,7 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
   rig.orbitPitch = clampRigPitch(rig: rig, pitch: rig.orbitPitch + mouseOrbitPitch + keyOrbitPitch)
   rig.freePitch = clampRigPitch(rig: rig, pitch: rig.freePitch + mouseFreePitch)
   rig.distance = clampRigDistance(rig: rig, dist: rig.distance + mouseDist + keyDist)
-  rig.freePosition = vec3.vadd(a: rig.freePosition, b: keyMove)
+  rig.freePosition = Vec3.vadd(a: rig.freePosition, b: keyMove)
 
   if not rig.smoothMouse {
     rig.viewYaw = rig.viewYaw + mouseYaw
@@ -485,7 +485,7 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
     rig.viewYaw = rig.viewYaw + keyYaw
     rig.viewOrbitPitch = rig.viewOrbitPitch + keyOrbitPitch
     rig.viewDistance = rig.viewDistance + keyDist
-    rig.viewPosition = vec3.vadd(a: rig.viewPosition, b: keyMove)
+    rig.viewPosition = Vec3.vadd(a: rig.viewPosition, b: keyMove)
   }
 
   # Close whatever gap the smoothed sources left. With both toggles off
@@ -498,7 +498,7 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
   # Position is keyboard-driven only, so it follows that toggle alone.
   var moveRate: Float = 0.0
   if rig.smoothKeys { moveRate = rig.keySmoothRate }
-  rig.viewPosition = vec3.create(
+  rig.viewPosition = Vec3.create(
     x: smoothTowards(current: rig.viewPosition.x, target: rig.freePosition.x, rate: moveRate, dt: dt),
     y: smoothTowards(current: rig.viewPosition.y, target: rig.freePosition.y, rate: moveRate, dt: dt),
     z: smoothTowards(current: rig.viewPosition.z, target: rig.freePosition.z, rate: moveRate, dt: dt)
@@ -545,7 +545,7 @@ func applyCameraRig(rig: view CameraRig, camera: mod Camera3d) pub {
   } else {
     let forward: Vec3 = cameraRigForward(rig: rig)
     camera.position = rig.viewPosition
-    camera.target = vec3.vadd(a: camera.position, b: forward)
+    camera.target = Vec3.vadd(a: camera.position, b: forward)
   }
 }
 
@@ -613,14 +613,14 @@ func applyCameraRigState(parts: view List(String), offset: view Int,
   rig.orbitPitch = part(parts: parts, index: offset + 2).trim().toFloat()
   rig.freePitch = part(parts: parts, index: offset + 3).trim().toFloat()
   rig.distance = part(parts: parts, index: offset + 4).trim().toFloat()
-  rig.freePosition = vec3.create(
+  rig.freePosition = Vec3.create(
     x: part(parts: parts, index: offset + 5).trim().toFloat(),
     y: part(parts: parts, index: offset + 6).trim().toFloat(),
     z: part(parts: parts, index: offset + 7).trim().toFloat()
   )
   # Orbit needs the target restored too, or the camera returns to the
   # right angle around the wrong point.
-  camera.target = vec3.create(
+  camera.target = Vec3.create(
     x: part(parts: parts, index: offset + 8).trim().toFloat(),
     y: part(parts: parts, index: offset + 9).trim().toFloat(),
     z: camera.target.z

@@ -1,9 +1,9 @@
 import core
-open json
-open ecs/entity
+open Json
+open ecs/Entity
 open ecs/ComponentTable
-open ecs/registry
-open ecs/serialize
+open ecs/Registry
+open ecs/Serialize
 
 # #719: worldToJson writes entities x registered-serialize components via each
 # component's compiler-generated toJson(). Derived/cache components (no serialize
@@ -57,8 +57,8 @@ func main() {
 
   # Round-trip: parse it back and check which top-level component keys exist.
   let doc: JsonDoc = parseJson(source: jsonStr)
-  let root: JsonValue = json.root(doc: doc)
-  log("has Pos: {json.field(doc: doc, this: root, key: kPos) >= 0}")
-  log("has Vel: {json.field(doc: doc, this: root, key: kVel) >= 0}")
-  log("has WorldCache: {json.field(doc: doc, this: root, key: kCache) >= 0}")
+  let root: JsonValue = Json.root(doc: doc)
+  log("has Pos: {Json.field(doc: doc, this: root, key: kPos) >= 0}")
+  log("has Vel: {Json.field(doc: doc, this: root, key: kVel) >= 0}")
+  log("has WorldCache: {Json.field(doc: doc, this: root, key: kCache) >= 0}")
 }

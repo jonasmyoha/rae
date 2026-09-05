@@ -1,0 +1,268 @@
+open ui/Ecs
+# Mock playback state shared across screens.
+#
+# Both the big circular play button on the now-playing screen and the
+# small one in the mini-player on the album screen fire the same
+# `playback.toggle` action. We carry one `PlaybackState` through the
+# outer loop in `main.rae`, mutate it from `dispatchActions`, and read
+# it back when building the per-frame icon override + progress fill.
+#
+# Time advance is driven by the inner loop sampling the platform clock and
+# computing a delta against the previous frame's sample. When `isPlaying` is true the
+# delta accumulates into `elapsedSec`; when paused, we still update
+# the `prevTime` floor (so the next resume doesn't replay the entire
+# pause interval in one tick) but leave `elapsedSec` alone.
+#
+# At `elapsedSec >= durationSec` we wrap back to 0 and keep playing —
+# auto-loop is the demo-friendly choice. A future pass could expose a
+# `loopMode` enum (Once / Loop) if a real player wires this up.
+import core
+import ui/Components
+import ui/Ecs
+open ecs/Entity
+
+# PlaybackState IS the design's PlaybackSystem — the first ECS "actor"
+# (docs/ecs-systems-and-data-observation.md §3/§5.1). It owns the
+# playback state + an `inbox` of commands; play/pause is a command
+# (`enqueuePlaybackToggle`) drained in the frame's Apply(A) phase by
+# `processCommands` holding `mod` on its own state; `advancePlayback`
+# is its `update()` step. (No rename — the name is fine; adding the inbox
+# makes it the system, same as ComponentTable being the table.)
+# Deferred to #268: the Spotify play/pause path + `pollSpotify` moving
+# fully into `update()`, `like` -> a PlaylistSystem, and the UI consumers
+# switching from DataDependency to `Observe`.
+
+# A play/pause command. A struct (not a bare enum) so future commands
+# (seek, setTrack, ...) can carry data without changing the inbox type.
+enum PlaybackCommandKind {
+  togglePlay
+}
+
+type PlaybackCommand {
+  kind: PlaybackCommandKind
+}
+
+type PlaybackState {
+  isPlaying: Bool
+  # Data-dependency revision. UI that depends on play/pause state caches this
+  # value and refreshes dependent icon bindings instead of waiting for a
+  # delayed per-frame sprite patch.
+  revision: Int
+  elapsedSec: Float
+  durationSec: Float
+  # `prevTime` is the `getTime()` reading the previous frame produced.
+  # `< 0.0` means "first frame" — the inner loop primes it before the
+  # first advance call. Storing the previous frame sample here rather
+  # than computing a delta inside main.rae keeps the state struct
+  # self-contained.
+  # Float64: an epoch TIMESTAMP, not a duration. Narrowed to f32 near
+  # 1.75e9 it quantises to 128 s steps, so `dt` below came out as either
+  # tens of seconds (the track races to its end and wraps, every frame)
+  # or negative — the playback clock was noise, and the resulting
+  # per-frame state changes kept the render cache permanently dirty.
+  prevTime: Float64
+  # The actually-playing track. Distinct from `AppState.currentAlbumStem`
+  # / `AppState.currentTrackIndex` which represent *browsed* state —
+  # those move with the user's navigation even when nothing is playing.
+  # These two only change when the user explicitly starts a song
+  # (`song.open.N`). Empty stem + index -1 means nothing playing —
+  # the album track-list won't highlight any row.
+  playingAlbumStem: String
+  playingTrackIndex: Int
+  # nowPlaying cover identity (#268). `nowPlayingArtKey` is the
+  # texture-registry key of the currently-playing album cover — the local
+  # album stem for catalog tracks, or `"spotify-current"` when Spotify is
+  # driving playback. `nowPlayingRevision` is the component-instance
+  # revision (§7) for this identity: bumped by `setNowPlayingArt` whenever
+  # the key changes. The now-playing Hero + mini-player MiniThumb covers
+  # OBSERVE this revision (via a DataDependency) and re-point their
+  # Sprite.textureKey by identity — replacing the old per-frame cover poll
+  # walk (`rebindAlbumCoversToSpotify`) that matched a stale browsed stem
+  # and so never followed a track change (the motivating bug, §1).
+  nowPlayingArtKey: String
+  nowPlayingRevision: Int
+  # Command inbox (#265). Commands are enqueued during Input and drained
+  # in Apply(A) by `processCommands` — the system mutates its own
+  # state only while draining its own inbox.
+  inbox: Queue(PlaybackCommand)
+}
+
+func createPlaybackState() pub ret PlaybackState {
+  ret PlaybackState {
+    isPlaying: false
+    revision: 0
+    elapsedSec: 0.0
+    durationSec: 20.0
+    prevTime: -1.0
+    playingAlbumStem: ""
+    playingTrackIndex: 0 - 1
+    nowPlayingArtKey: ""
+    nowPlayingRevision: 0
+    inbox: createQueue(PlaybackCommand)
+  }
+}
+
+# Flip the play/pause flag. Called by `dispatchActions` when either
+# play button fires its `playback.toggle` action.
+func togglePlayback(state: mod PlaybackState) pub {
+  if state.isPlaying {
+    setPlaybackPlaying(state: state, value: false)
+  } else {
+    setPlaybackPlaying(state: state, value: true)
+  }
+}
+
+func setPlaybackPlaying(state: mod PlaybackState, value: view Bool) pub {
+  if state.isPlaying is value {
+    ret
+  }
+  state.isPlaying = value
+  state.revision = state.revision + 1
+}
+
+# Set the currently-playing cover art key and bump the nowPlaying
+# instance revision (§7) when it actually changes. The now-playing Hero
+# + mini-player MiniThumb observe this revision and re-point by identity
+# (#268). Idempotent: re-setting the same key is a no-op, so callers can
+# call it every frame / poll without spurious re-paints.
+func setNowPlayingArt(state: mod PlaybackState, artKey: view String) pub {
+  if state.nowPlayingArtKey is artKey {
+    ret
+  }
+  state.nowPlayingArtKey = "{artKey}"
+  state.nowPlayingRevision = state.nowPlayingRevision + 1
+}
+
+# --- PlaybackSystem lifecycle: commands (#265) ---
+
+# Input-phase send: enqueue a play/pause toggle. Called from
+# `dispatchActions` (local playback); the toggle itself is applied later,
+# in Apply(A), by `processCommands`.
+func enqueuePlaybackToggle(this: mod PlaybackState) pub {
+  enqueue(this: this.inbox, value: PlaybackCommand { kind: PlaybackCommandKind.togglePlay })
+}
+
+# Apply-phase: drain the inbox and apply each command to OWN state,
+# holding `mod self`. Runs in the frame's Apply(A) pass (main.rae). The
+# eager revision bump rides `setPlaybackPlaying`.
+func processCommands(this: mod PlaybackState) pub {
+  let n: Int = queueCount(this: this.inbox)
+  var i: Int = 0
+  loop i < n {
+    let cmd: PlaybackCommand = queueAt(this: this.inbox, i: i)
+    if cmd.kind is PlaybackCommandKind.togglePlay {
+      togglePlayback(state: this)
+    }
+    i = i + 1
+  }
+  clearQueue(this: this.inbox)
+}
+
+# Advance `elapsedSec` by the delta against the last sampled frame.
+# Called every frame in the inner loop, regardless of play state, so
+# `prevTime` always tracks the most recent sample (this avoids a giant
+# jump on the first resume after a long pause). When `elapsedSec`
+# reaches `durationSec` we wrap back to 0 and keep playing — the
+# demo-friendly choice, see file-header note.
+func advancePlayback(state: mod PlaybackState, now: view Float64) pub {
+  var dt: Float = 0.0
+  if state.prevTime >= 0.0 {
+    dt = (now - state.prevTime) as Float
+  }
+  state.prevTime = now
+  if state.isPlaying {
+    state.elapsedSec = state.elapsedSec + dt
+    if state.elapsedSec >= state.durationSec {
+      # Wrap. Subtract instead of zero so a very large `dt` doesn't
+      # lose the carry — though in practice dt is well under 1s.
+      state.elapsedSec = state.elapsedSec - state.durationSec
+      if state.elapsedSec < 0.0 {
+        state.elapsedSec = 0.0
+      }
+    }
+  }
+}
+
+# Progress in [0, 1]. Clamped so the rendered fill width can never
+# overshoot the track width when `dt` momentarily pushes elapsedSec
+# past durationSec before the wrap check kicks in.
+func playbackProgress(state: view PlaybackState) pub ret Float {
+  if state.durationSec <= 0.0 {
+    ret 0.0
+  }
+  let p: Float = state.elapsedSec / state.durationSec
+  if p < 0.0 {
+    ret 0.0
+  }
+  if p > 1.0 {
+    ret 1.0
+  }
+  ret p
+}
+
+# Per-frame playback progress refresh. Play/pause icons are intentionally not
+# patched here; they are mounted from PlaybackState and refreshed by
+# `refreshPlaybackViewsIfNeeded` when the playback revision changes. Progress
+# fill remains a per-frame animation because it depends on elapsed time.
+# Sub-pixel width differences are invisible but would still bump the
+# component generation and re-trigger a full layout, so treat them as equal.
+func fillWidthChanged(current: view Float, next: view Float) ret Bool {
+  var delta: Float = next - current
+  if delta < 0.0 {
+    delta = 0.0 - delta
+  }
+  ret delta > 0.05
+}
+
+func applyPlaybackToWorld(world: mod UiWorld, state: view PlaybackState) pub {
+  # Progress fill width: read the parent track's authored width from
+  # its ComputedRect (layout has already filled it in), then scale by
+  # progress and write to the fill's ComputedRect. We also bump the
+  # fill's authored Rect so that any subsequent layout pass (a screen
+  # rebuild leaves both in sync from scratch anyway, but mid-life
+  # layout reflows would otherwise reset the fill width to whatever
+  # was last authored).
+  let trackKey: String = "ProgressBar"
+  let fillKey: String = "ProgressFill"
+  if let trackRaw: Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: trackKey) {
+    if let fillRaw: Int = findNodeInPage(world: world, pageId: playerPageId, nodeId: fillKey) {
+      let trackEntity: EntityId = id(v: trackRaw)
+      let fillEntity: EntityId = id(v: fillRaw)
+      var trackW: Float = 0.0
+      if componentHas(this: world.computedRects, entity: trackEntity) {
+        let tcr: ComputedRect = componentGet(this: world.computedRects, entity: trackEntity)
+        trackW = tcr.size.x
+      }
+      let p: Float = playbackProgress(state: state)
+      let fillW: Float = trackW * p
+      # WRITE ONLY ON CHANGE. This runs every frame, and componentSet bumps
+      # the table generation whether or not the value differs. Writing the
+      # same width each frame therefore pinned the app busy forever: the Rect
+      # write marks layout dirty, layout rewrites all ~460 ComputedRects,
+      # transforms follow, cacheDirty trips, the frame repaints and
+      # re-arms `renderUntil` — a self-sustaining 60 Hz loop with the app
+      # sitting idle and nothing playing. Paused playback reports a constant
+      # progress, so the equality check settles it.
+      if componentHas(this: world.computedRects, entity: fillEntity) {
+        let fcr: ComputedRect = componentGet(this: world.computedRects, entity: fillEntity)
+        if fillWidthChanged(current: fcr.size.x, next: fillW) {
+          let nextCr: ComputedRect = {
+            position: { x: fcr.position.x, y: fcr.position.y }
+            size: { x: fillW, y: fcr.size.y }
+          }
+          componentSet(this: world.computedRects, entity: fillEntity, data: nextCr)
+        }
+      }
+      if componentHas(this: world.rects, entity: fillEntity) {
+        let fr: Rect = componentGet(this: world.rects, entity: fillEntity)
+        if fillWidthChanged(current: fr.size.x, next: fillW) {
+          let nextRect: Rect = {
+            position: { x: fr.position.x, y: fr.position.y }
+            size: { x: fillW, y: fr.size.y }
+          }
+          componentSet(this: world.rects, entity: fillEntity, data: nextRect)
+        }
+      }
+    }
+  }
+}

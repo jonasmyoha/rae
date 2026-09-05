@@ -12,34 +12,34 @@
 # entities onto the square of world cells around the character.
 import core
 import math
-import noise
-import worldBiome
-open worldBiome
-import gltf
+import Noise
+import WorldBiome
+open WorldBiome
+import Gltf
 import gpu3d
-import scene3d
-import mesh3d
-import vec3
-import quat
+import Scene3d
+import Mesh3d
+import Vec3
+import Quat
 import gbuffer
 import gbufferTerrain
 open gbufferTerrain
-import gbufferInstanced
-import ecs/entity
+import GbufferInstanced
+import ecs/Entity
 import ecs/ComponentTable
-import ecs/transform
-open gltf
+import ecs/Transform
+open Gltf
 open gpu3d
-open scene3d
-open mesh3d
-open gbufferInstanced
-open ecs/entity
+open Scene3d
+open Mesh3d
+open GbufferInstanced
+open ecs/Entity
 open ecs/ComponentTable
-open ecs/transform
+open ecs/Transform
 
 # Single source of truth for the ground colour: the terrain ground material AND
 # the GPU grass gradient's bottom both read this, so the grass roots match ground.
-func walkerGroundColor() ret Vec3 { ret vec3.create(x: 0.105, y: 0.245, z: 0.055) }
+func walkerGroundColor() ret Vec3 { ret Vec3.create(x: 0.105, y: 0.245, z: 0.055) }
 
 const terrainGridSide: Int = 7
 const terrainCellSize: Float = 18.0
@@ -138,7 +138,7 @@ func terrainMesh(path: view String) ret MeshHandle {
 }
 
 func terrainHash(cellX: view Int, cellY: view Int, seed: view Int) ret Float {
-  ret noise.hash2(x: cellX, y: cellY, seed: seed)
+  ret Noise.hash2(x: cellX, y: cellY, seed: seed)
 }
 
 func terrainOffset(cellX: view Int, cellY: view Int, seed: view Int) ret Float {
@@ -163,10 +163,10 @@ func propTransform3D(cellX: view Int, cellY: view Int, seedX: view Int, seedY: v
     + terrainOffset(cellX: cellX, cellY: cellY, seed: seedY)
   let yaw: Float = terrainHash(cellX: cellX, cellY: cellY, seed: seedScale + 71) * terrainTau
   ret Transform3D {
-    position: vec3.create(x: posX, y: posY,
+    position: Vec3.create(x: posX, y: posY,
                           z: terrainHeightAt(x: posX, y: posY, groundZ: groundZ)),
-    rotation: quat.fromAxisAngle(axis: vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: yaw),
-    scale: vec3.create(x: scale, y: scale, z: scale)
+    rotation: Quat.fromAxisAngle(axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: yaw),
+    scale: Vec3.create(x: scale, y: scale, z: scale)
   }
 }
 
@@ -278,10 +278,10 @@ func updateInfiniteTerrain(terrain: mod InfiniteTerrain, world: mod GameWorld,
       let tile: TileMesh = componentGet(this: world.tileMeshes, entity: entity)
       reshapeTerrainTile(terrain: terrain, meshId: tile.meshId, cellX: ccx, cellY: ccy)
       componentSet(this: world.transforms, entity: entity, data: Transform3D {
-        position: vec3.create(x: ccx.toFloat() * terrainCellSize,
+        position: Vec3.create(x: ccx.toFloat() * terrainCellSize,
                               y: ccy.toFloat() * terrainCellSize, z: 0.0),
-        rotation: quat.identity(),
-        scale: vec3.create(x: 1.0, y: 1.0, z: 1.0)
+        rotation: Quat.identity(),
+        scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
       })
     } else {
       var broad: Bool = false
@@ -408,7 +408,7 @@ func setInfiniteTerrainToon(terrain: mod InfiniteTerrain, toon: view Bool) {
 func terrainMaterial(color: view Vec3, roughness: view Float) ret Material3d {
   ret Material3d {
     baseColor: color, metallic: 0.0, roughness: roughness,
-    emission: vec3.create(x: 0.0, y: 0.0, z: 0.0), toon: true
+    emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0), toon: true
   }
 }
 
@@ -435,12 +435,12 @@ func createInfiniteTerrain(world: mod GameWorld, assets: view String,
   let flowerMesh: MeshHandle = terrainMesh(path: "{assets}environment/flower.glb")
   let grassMesh: MeshHandle = terrainMesh(path: "{assets}environment/grass.glb")
 
-  let trunkMat: Material3d = terrainMaterial(color: vec3.create(x: 0.205, y: 0.090, z: 0.032), roughness: 0.92)
-  let crownMat: Material3d = terrainMaterial(color: vec3.create(x: 0.055, y: 0.255, z: 0.075), roughness: 0.88)
-  let rockMat: Material3d = terrainMaterial(color: vec3.create(x: 0.235, y: 0.265, z: 0.285), roughness: 0.82)
-  let bushMat: Material3d = terrainMaterial(color: vec3.create(x: 0.035, y: 0.185, z: 0.105), roughness: 0.90)
-  let flowerMat: Material3d = terrainMaterial(color: vec3.create(x: 0.92, y: 0.38, z: 0.045), roughness: 0.72)
-  let grassMat: Material3d = terrainMaterial(color: vec3.create(x: 0.18, y: 0.42, z: 0.055), roughness: 0.94)
+  let trunkMat: Material3d = terrainMaterial(color: Vec3.create(x: 0.205, y: 0.090, z: 0.032), roughness: 0.92)
+  let crownMat: Material3d = terrainMaterial(color: Vec3.create(x: 0.055, y: 0.255, z: 0.075), roughness: 0.88)
+  let rockMat: Material3d = terrainMaterial(color: Vec3.create(x: 0.235, y: 0.265, z: 0.285), roughness: 0.82)
+  let bushMat: Material3d = terrainMaterial(color: Vec3.create(x: 0.035, y: 0.185, z: 0.105), roughness: 0.90)
+  let flowerMat: Material3d = terrainMaterial(color: Vec3.create(x: 0.92, y: 0.38, z: 0.045), roughness: 0.72)
+  let grassMat: Material3d = terrainMaterial(color: Vec3.create(x: 0.18, y: 0.42, z: 0.055), roughness: 0.94)
 
   let scratch: List(Float) = createList(Float, cap: terrainTileFloats)
   loop var scratchIndex: Int = 0, scratchIndex < terrainTileFloats, ++scratchIndex {

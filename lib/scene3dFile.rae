@@ -6,14 +6,14 @@
 # Material references use material node IDs from the same file. Geometry node
 # IDs are retained in World3dAsset for animation and reload-stable lookup.
 import core
-import json
-import scene3d
-import vec3
-import ui/scene
-open scene3d
-open vec3
-open ui/scene
-open ecs/entity
+import Json
+import Scene3d
+import Vec3
+import ui/Scene
+open Scene3d
+open Vec3
+open ui/Scene
+open ecs/Entity
 
 type MeshRegistry3d {
   keys: List(String)
@@ -382,19 +382,19 @@ func world3dAssetEntity(asset: view World3dAsset, nodeId: view String) pub ret E
 }
 
 func nodeComponent(doc: view JsonDoc, node: view SceneNode, name: view String) ret JsonValue {
-  let bag: JsonValue = json.jsonValueAt(doc: doc, idx: node.componentsValueIdx)
-  let idx: Int = json.field(doc: doc, this: bag, key: name)
-  ret json.jsonValueAt(doc: doc, idx: idx)
+  let bag: JsonValue = Json.jsonValueAt(doc: doc, idx: node.componentsValueIdx)
+  let idx: Int = Json.field(doc: doc, this: bag, key: name)
+  ret Json.jsonValueAt(doc: doc, idx: idx)
 }
 
 func nodeHasComponent(doc: view JsonDoc, node: view SceneNode, name: view String) ret Bool {
-  let bag: JsonValue = json.jsonValueAt(doc: doc, idx: node.componentsValueIdx)
-  ret json.field(doc: doc, this: bag, key: name) >= 0
+  let bag: JsonValue = Json.jsonValueAt(doc: doc, idx: node.componentsValueIdx)
+  ret Json.field(doc: doc, this: bag, key: name) >= 0
 }
 
 func objectField(doc: view JsonDoc, object: view JsonValue, key: view String) ret JsonValue {
-  let idx: Int = json.field(doc: doc, this: object, key: key)
-  ret json.jsonValueAt(doc: doc, idx: idx)
+  let idx: Int = Json.field(doc: doc, this: object, key: key)
+  ret Json.jsonValueAt(doc: doc, idx: idx)
 }
 
 func vec3FieldValid(doc: view JsonDoc, object: view JsonValue, key: view String) ret Bool {
@@ -411,10 +411,10 @@ func readVec3Field(doc: view JsonDoc, object: view JsonValue, key: view String) 
   let x: JsonValue = objectField(doc: doc, object: value, key: "x")
   let y: JsonValue = objectField(doc: doc, object: value, key: "y")
   let z: JsonValue = objectField(doc: doc, object: value, key: "z")
-  ret vec3.create(
-    x: json.jsonFloat(this: x, fallback: 0.0)
-    y: json.jsonFloat(this: y, fallback: 0.0)
-    z: json.jsonFloat(this: z, fallback: 0.0)
+  ret Vec3.create(
+    x: Json.jsonFloat(this: x, fallback: 0.0)
+    y: Json.jsonFloat(this: y, fallback: 0.0)
+    z: Json.jsonFloat(this: z, fallback: 0.0)
   )
 }
 
@@ -430,12 +430,12 @@ func stringFieldValid(doc: view JsonDoc, object: view JsonValue, key: view Strin
 
 func readNumberField(doc: view JsonDoc, object: view JsonValue, key: view String, fallback: view Float) ret Float {
   let value: JsonValue = objectField(doc: doc, object: object, key: key)
-  ret json.jsonFloat(this: value, fallback: fallback)
+  ret Json.jsonFloat(this: value, fallback: fallback)
 }
 
 func readStringField(doc: view JsonDoc, object: view JsonValue, key: view String) ret String {
   let value: JsonValue = objectField(doc: doc, object: object, key: key)
-  ret json.jsonString(this: value, fallback: "")
+  ret Json.jsonString(this: value, fallback: "")
 }
 
 func transform3dValid(doc: view JsonDoc, value: view JsonValue) ret Bool {

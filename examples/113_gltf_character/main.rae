@@ -30,17 +30,17 @@
 import core
 import math
 import gpu2d
-import vec3
-import gltf
-import ecs/entity
-open scene3d
-open ecs/entity
+import Vec3
+import Gltf
+import ecs/Entity
+open Scene3d
+open ecs/Entity
 open gpu3d
-open renderer3d
-open rendergraph
-open math3d
-open mesh3d
-open gltf
+open Renderer3d
+open Rendergraph
+open Math3d
+open Mesh3d
+open Gltf
 
 func uploadMeshData(m: view MeshData) ret MeshHandle {
   ret uploadMesh(verts: m.verts, vertCount: m.vertCount, indices: m.indices)
@@ -69,33 +69,33 @@ func main() ret Int {
   let ground: MeshHandle = uploadMeshData(m: planeData)
 
   var sceneWorld: World3d = createWorld3d()
-  let noEmit: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
-  let noRot: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let noEmit: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let noRot: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
 
-  let skinMat: Material3d = { baseColor: vec3.create(x: 0.78, y: 0.66, z: 0.58), metallic: 0.0, roughness: 0.62, emission: noEmit, toon: false }
+  let skinMat: Material3d = { baseColor: Vec3.create(x: 0.78, y: 0.66, z: 0.58), metallic: 0.0, roughness: 0.62, emission: noEmit, toon: false }
   # glTF is Y-up; Rae is Z-up, so a +90 degree turn about X maps one to
   # the other. The Fox is authored ~80 units tall, so it is scaled to
   # share a scene with a 20-unit ground plane rather than dwarfing it.
   let modelScale: Float = 0.025
   let charE: EntityId = world3dAddMeshInstance(
     world: sceneWorld, mesh: character, material: skinMat,
-    position: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0),
-    rotation: vec3.create(x: 1.5707963, y: 0.0, z: 0.0),
-    scale: vec3.create(x: modelScale, y: modelScale, z: modelScale)
+    position: Vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0),
+    rotation: Vec3.create(x: 1.5707963, y: 0.0, z: 0.0),
+    scale: Vec3.create(x: modelScale, y: modelScale, z: modelScale)
   )
 
-  let groundMat: Material3d = { baseColor: vec3.create(x: 0.40, y: 0.41, z: 0.43), metallic: 0.0, roughness: 0.9, emission: noEmit, toon: false }
+  let groundMat: Material3d = { baseColor: Vec3.create(x: 0.40, y: 0.41, z: 0.43), metallic: 0.0, roughness: 0.9, emission: noEmit, toon: false }
   let groundE: EntityId = world3dAddMeshInstance(
     world: sceneWorld, mesh: ground, material: groundMat,
-    position: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0), rotation: noRot,
-    scale: vec3.create(x: 1.0, y: 1.0, z: 1.0)
+    position: Vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0), rotation: noRot,
+    scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
   )
 
   var camera: Camera3d = defaultCamera3d()
   var light: Light3d = defaultLight3d()
   # Aim at the character's midriff rather than the origin under its
   # feet, so it sits centred in frame instead of low in it.
-  camera.target = vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.25)
+  camera.target = Vec3.create(x: 0.0, y: 0.0, z: 0.0 - 0.25)
 
   var renderer: Renderer3d = createRenderer3d()
   let gs: Int = compileRenderer(r: renderer)

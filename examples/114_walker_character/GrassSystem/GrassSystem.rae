@@ -19,21 +19,21 @@
 # is what those phases build on, and is reusable for rocks/crowds/particles.
 import core
 import math
-import math3d
-import noise
-import gltf
+import Math3d
+import Noise
+import Gltf
 import gpu3d
-import scene3d
-import mesh3d
-import vec3
-import ecs/entity
+import Scene3d
+import Mesh3d
+import Vec3
+import ecs/Entity
 import ecs/ComponentTable
 open ecs/ComponentTable
-open math3d
-open gltf
+open Math3d
+open Gltf
 open gpu3d
-open scene3d
-open mesh3d
+open Scene3d
+open Mesh3d
 
 const grassPerCell: Int = 10
 const grassBladeCount: Int = 490
@@ -70,11 +70,11 @@ type GrassField {
 # `slot` is the blade's global pool slot, carried through into the component.
 func placeGrassBlade(cellX: view Int, cellY: view Int, slotInCell: view Int,
                      groundZ: view Float, slot: view Int) ret GrassBlade {
-  let hx: Float = noise.hash2(x: cellX, y: cellY, seed: 200 + slotInCell)
-  let hy: Float = noise.hash2(x: cellX, y: cellY, seed: 400 + slotInCell)
-  let hyaw: Float = noise.hash2(x: cellX, y: cellY, seed: 600 + slotInCell)
-  let hphase: Float = noise.hash2(x: cellX, y: cellY, seed: 800 + slotInCell)
-  let hscale: Float = noise.hash2(x: cellX, y: cellY, seed: 1000 + slotInCell)
+  let hx: Float = Noise.hash2(x: cellX, y: cellY, seed: 200 + slotInCell)
+  let hy: Float = Noise.hash2(x: cellX, y: cellY, seed: 400 + slotInCell)
+  let hyaw: Float = Noise.hash2(x: cellX, y: cellY, seed: 600 + slotInCell)
+  let hphase: Float = Noise.hash2(x: cellX, y: cellY, seed: 800 + slotInCell)
+  let hscale: Float = Noise.hash2(x: cellX, y: cellY, seed: 1000 + slotInCell)
   let baseX: Float = (cellX.toFloat() + hx) * terrainCellSize - terrainCellSize * 0.5
   let baseY: Float = (cellY.toFloat() + hy) * terrainCellSize - terrainCellSize * 0.5
   let baseZ: Float = terrainHeightAt(x: baseX, y: baseY, groundZ: groundZ)

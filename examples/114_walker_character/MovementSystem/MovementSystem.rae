@@ -4,15 +4,15 @@
 # an InputIntent, not the App.
 import core
 import math
-import vec3
-import quat
-import worldBiome
-open worldBiome
-import mesh3d
-open math3d
-open mesh3d
-import app3d/characterController
-open app3d/characterController
+import Vec3
+import Quat
+import WorldBiome
+open WorldBiome
+import Mesh3d
+open Math3d
+open Mesh3d
+import app3d/CharacterController
+open app3d/CharacterController
 import InputSystem/InputSystem
 import TerrainSystem/TerrainSystem
 
@@ -89,8 +89,8 @@ func walkerWorldModel(baseModel: view Mat4,
   let worldTranslation: Mat4 = mat4Translate(
     x: controller.position.x, y: controller.position.y, z: controller.position.z)
   # #745: heading -> quat rotation about Z (not a Euler axis matrix).
-  let worldHeading: Mat4 = quat.toMat4(q: quat.fromAxisAngle(
-    axis: vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: controller.heading + walkerFacingCorrection))
+  let worldHeading: Mat4 = Quat.toMat4(q: Quat.fromAxisAngle(
+    axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: controller.heading + walkerFacingCorrection))
   ret mat4Mul(a: worldTranslation,
                  b: mat4Mul(a: worldHeading, b: baseModel))
 }

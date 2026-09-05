@@ -17,18 +17,18 @@
 #      light the scene at one brightness while being drawn at another.
 #   4. The background under `none` is the clear colour, unchanged.
 import core
-import vec3
-import scene3d
-import sky
-open scene3d
-open sky
+import Vec3
+import Scene3d
+import Sky
+open Scene3d
+open Sky
 
 # The expression the deferred lighting pass performs today, written out
 # separately so the test does not check the implementation against
 # itself.
 func referenceHemisphere(ambSky: view Vec3, ambGround: view Vec3, nz: view Float) ret Vec3 {
   let t: Float = nz * 0.5 + 0.5
-  ret vec3.create(
+  ret Vec3.create(
     x: ambGround.x + (ambSky.x - ambGround.x) * t,
     y: ambGround.y + (ambSky.y - ambGround.y) * t,
     z: ambGround.z + (ambSky.z - ambGround.z) * t
@@ -40,12 +40,12 @@ func exact(a: view Vec3, b: view Vec3) ret Bool {
 }
 
 func main() {
-  let ambSky: Vec3 = vec3.create(x: 0.25, y: 0.30, z: 0.40)
-  let ambGround: Vec3 = vec3.create(x: 0.12, y: 0.10, z: 0.09)
-  let clear: Vec3 = vec3.create(x: 0.05, y: 0.06, z: 0.08)
+  let ambSky: Vec3 = Vec3.create(x: 0.25, y: 0.30, z: 0.40)
+  let ambGround: Vec3 = Vec3.create(x: 0.12, y: 0.10, z: 0.09)
+  let clear: Vec3 = Vec3.create(x: 0.05, y: 0.06, z: 0.08)
   let light: Light3d = {
-    sunDir: vec3.create(x: 0.3, y: 0.5, z: 0.0 - 0.8)
-    sunColor: vec3.create(x: 1.0, y: 0.96, z: 0.9)
+    sunDir: Vec3.create(x: 0.3, y: 0.5, z: 0.0 - 0.8)
+    sunColor: Vec3.create(x: 1.0, y: 0.96, z: 0.9)
     ambSky: ambSky
     ambGround: ambGround
     exposure: 1.0
@@ -64,7 +64,7 @@ func main() {
   loop i < zs.length {
     var z: Float = 0.0
     if let value: Float = zs.copyAt(index: i) { z = value }
-    let n: Vec3 = vec3.create(x: 0.0, y: 0.0, z: z)
+    let n: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: z)
     let got: Vec3 = irradiance(sky: s, n: n)
     let want: Vec3 = referenceHemisphere(ambSky: ambSky, ambGround: ambGround, nz: z)
     if exact(a: got, b: want) is false {
@@ -75,20 +75,20 @@ func main() {
   log("fallback matches the hemisphere blend exactly: {allExact}")
 
   # Facing up is sky, facing down is ground — the axis check.
-  let up: Vec3 = irradiance(sky: s, n: vec3.create(x: 0.0, y: 0.0, z: 1.0))
-  let down: Vec3 = irradiance(sky: s, n: vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0))
+  let up: Vec3 = irradiance(sky: s, n: Vec3.create(x: 0.0, y: 0.0, z: 1.0))
+  let down: Vec3 = irradiance(sky: s, n: Vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0))
   log("up is sky: {exact(a: up, b: ambSky)}")
   log("down is ground: {exact(a: down, b: ambGround)}")
 
   # 4: background passes through untouched.
-  let bg: Vec3 = radiance(sky: s, dir: vec3.create(x: 0.0, y: 1.0, z: 0.0))
+  let bg: Vec3 = radiance(sky: s, dir: Vec3.create(x: 0.0, y: 1.0, z: 0.0))
   log("background is the clear colour: {exact(a: bg, b: clear)}")
   log("reports itself as the fallback: {isFallback(sky: s)}")
 
   # 3: one exposure moves both answers by the same factor.
   s.exposure = 2.0
-  let litUp: Vec3 = irradiance(sky: s, n: vec3.create(x: 0.0, y: 0.0, z: 1.0))
-  let litBg: Vec3 = radiance(sky: s, dir: vec3.create(x: 0.0, y: 1.0, z: 0.0))
+  let litUp: Vec3 = irradiance(sky: s, n: Vec3.create(x: 0.0, y: 0.0, z: 1.0))
+  let litBg: Vec3 = radiance(sky: s, dir: Vec3.create(x: 0.0, y: 1.0, z: 0.0))
   log("exposure scales irradiance: {litUp.x is ambSky.x * 2.0}")
   log("exposure scales radiance: {litBg.x is clear.x * 2.0}")
 }

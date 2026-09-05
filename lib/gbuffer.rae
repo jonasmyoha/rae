@@ -40,16 +40,16 @@
 # docs/coordinate-system.md — the same as the forward path.
 import core
 import math
-import vec3
+import Vec3
 import string
-import sky
+import Sky
 import skyHosek
 open skyHosek
-open vec3
-open scene3d
-open sky
-open math3d
-open ecs/entity          # #793: World3d render path reads entities/components
+open Vec3
+open Scene3d
+open Sky
+open Math3d
+open ecs/Entity          # #793: World3d render path reads entities/components
 open ecs/ComponentTable
 # The instanced draw path (#502) runs in Rae directly on the WebGPU bindings.
 # `open webgpu/webgpu` also makes the sibling enum/flag consts (e.g.
@@ -514,7 +514,7 @@ const viewDepth: Int = 4     # linearised for display
 # block into a List(Float) — one allocation per frame — which this
 # deliberately does not inherit.
 func beginPass(cache: mod GbufferCache, camera: view Camera3d, light: view Light3d, aspect: view Float) pub {
-  let worldUp: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  let worldUp: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
   let viewM: Mat4 = mat4LookAt(
     eyeX: camera.position.x, eyeY: camera.position.y, eyeZ: camera.position.z,
     atX: camera.target.x, atY: camera.target.y, atZ: camera.target.z,

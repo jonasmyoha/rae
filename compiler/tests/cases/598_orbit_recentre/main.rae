@@ -18,12 +18,12 @@
 # own recovery rule shows up here rather than in three examples at once.
 import core
 import math
-import vec3
-import scene3d
-import math3d
+import Vec3
+import Scene3d
+import Math3d
 import app3d/CameraRig
-open math3d
-open scene3d
+open Math3d
+open Scene3d
 open app3d/CameraRig
 
 func approxEq(a: view Float, b: view Float, tol: view Float) ret Bool {
@@ -33,7 +33,7 @@ func approxEq(a: view Float, b: view Float, tol: view Float) ret Bool {
 }
 
 func dist(a: view Vec3, b: view Vec3) ret Float {
-  ret vec3.vlen(a: vec3.vsub(a: a, b: b))
+  ret Vec3.vlen(a: Vec3.vsub(a: a, b: b))
 }
 
 func main() {
@@ -49,7 +49,7 @@ func main() {
   # the apps care about.
   toggleCameraRigMode(rig: rig, camera: cam)
   log("switched to free: {modeName(rig: rig)}")
-  rig.freePosition = vec3.create(x: 20.0, y: 18.0, z: 6.0)
+  rig.freePosition = Vec3.create(x: 20.0, y: 18.0, z: 6.0)
   rig.yaw = 2.4
   rig.freePitch = 0.0 - 0.2
   snapCameraRigView(rig: rig)
@@ -58,12 +58,12 @@ func main() {
   # direction, so it lands out where the free camera was looking, not on the
   # subject.
   toggleCameraRigMode(rig: rig, camera: cam)
-  let origin: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let origin: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
   log("switched to orbit: {modeName(rig: rig)}")
   log("default target is off the subject: {dist(a: cam.target, b: origin) > 5.0}")
 
   # What the apps then do, in full: one assignment.
-  cam.target = vec3.create(x: 0.0, y: 0.0, z: 0.5)
+  cam.target = Vec3.create(x: 0.0, y: 0.0, z: 0.5)
   applyCameraRig(rig: rig, camera: cam)
 
   # The pivot took, and the eye orbits it at the rig's distance -- so the app

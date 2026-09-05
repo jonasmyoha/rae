@@ -1,0 +1,206 @@
+# Theme infrastructure for the UI stdlib — dark and light palettes
+# wrapped in a struct, plus a module-level "active theme" that the
+# scene parser consults when it sees a token color like `"$surface"`
+# in place of an `{r, g, b, a}` JSON object.
+#
+# How to use:
+#
+#   * Call `setActiveTheme(darkTheme())` (or `lightTheme()`) BEFORE
+#     `loadAllScenes()`. Scenes resolve `"$tokenName"` colors against
+#     the current `activeTheme` at parse time.
+#   * `colorByName(name)` exposes the lookup directly for
+#     code-driven UI that wants the same semantic slots.
+#   * To switch themes at runtime, set the active theme and re-parse
+#     the scene files (the data hot-reload path already does the
+#     world rebuild; pointing it at the theme handle gives free
+#     theme switching without restart).
+#
+# The palette is deliberately small — eight semantic slots that
+# cover everything the music-player example uses. Apps that need
+# more colors should compose their own palette structs over this.
+import core
+import ui/Components
+# #764: UiTheme bundles a ResolvedTheme (createResolvedTheme) and the world-typed
+# accessors take a UiWorld. Import both so any graph that pulls ui/theme emits
+# them; the ui/ecs <-> ui/theme cycle is fine (Rae allows import cycles, #743).
+import ui/ThemeResolved
+import ui/Ecs
+
+enum ThemeMode {
+  light
+  dark
+}
+
+# Semantic color slots. Names describe the *role* (surface, accent,
+# outline) not the *value*, so dark and light themes can plug in
+# very different RGBA values for the same slot without callers caring.
+type ThemePalette {
+  # Page background — the full-screen clear color behind everything.
+  # Distinct from `surface` (cards / bars / the floating menubar) so a
+  # light theme can pair a soft near-white page with brighter white
+  # surfaces on top, the way iOS grouped backgrounds do. In dark mode
+  # it matches `surface` (both near-black).
+  background: RgbaColor
+  surface: RgbaColor
+  surfaceAlt: RgbaColor
+  textPrimary: RgbaColor
+  textMuted: RgbaColor
+  outline: RgbaColor
+  accent: RgbaColor
+  # High-contrast text/icon color on top of `accent` / `surfaceAlt`
+  # (typically the play-pill / mini-player background).
+  accentText: RgbaColor
+  # Muted secondary text/icon color on the same accent background.
+  # Sits one step softer than `accentText` so a title/subtitle pair
+  # on the brand-colored panel keeps its hierarchy without losing
+  # contrast. Needed because the global `textMuted` is tuned for
+  # the page surface, not the accent panel.
+  accentTextMuted: RgbaColor
+  imageTint: RgbaColor
+}
+
+type Theme {
+  mode: ThemeMode
+  palette: ThemePalette
+}
+
+# Default light theme. `accent` and `surfaceAlt` use the brand teal
+# (#76e1e1, the same color the rae-devtools-web UI calls `--accent`)
+# so the play button and mini-player carry the project identity in
+# both themes. `accentText` stays dark — teal is light enough that
+# dark text reads cleanly on it.
+func lightTheme() pub ret Theme {
+  ret Theme {
+    mode: ThemeMode.light
+    palette: ThemePalette {
+      # Light mode: the PAGE is the brighter white and cards/bars
+      # (`surface`) take the soft grey, so a full-bleed page (e.g. the
+      # Now Playing screen) reads as clean white and the floating
+      # menubar / panels sit a shade back. (Swapped from the initial
+      # grey-page/white-card pairing per design review.)
+      background: RgbaColor { r: 246, g: 246, b: 248, a: 255 }
+      surface: RgbaColor { r: 232, g: 233, b: 240, a: 255 }
+      surfaceAlt: RgbaColor { r: 118, g: 225, b: 225, a: 255 }
+      textPrimary: RgbaColor { r: 30, g: 30, b: 36, a: 255 }
+      textMuted: RgbaColor { r: 130, g: 130, b: 140, a: 255 }
+      outline: RgbaColor { r: 200, g: 200, b: 210, a: 255 }
+      accent: RgbaColor { r: 118, g: 225, b: 225, a: 255 }
+      accentText: RgbaColor { r: 22, g: 22, b: 28, a: 255 }
+      accentTextMuted: RgbaColor { r: 64, g: 64, b: 76, a: 255 }
+      imageTint: RgbaColor { r: 255, g: 255, b: 255, a: 255 }
+    }
+  }
+}
+
+# Default dark theme. Choices worth explaining:
+#  - `surface` sits near pure black so highlights on top read crisply.
+#  - `textPrimary` is near-white for body copy; `textMuted` is bumped
+#    lighter than the light theme's muted so the contrast against
+#    the dark surface still meets WCAG.
+#  - `accent` and `surfaceAlt` use a darker, slightly greener teal
+#    (#48b498 ≈ rgb 72,180,152) — the light-theme brand teal
+#    (#76e1e1) was too bluish-bright against the near-black
+#    surface. Different palette per mode keeps brand identity
+#    recognisable while letting each theme tune contrast for its
+#    own background.
+#  - `accentText` is white in dark theme — the darker accent panel
+#    needs light text on top, where the light theme's pale teal
+#    panel needed dark text. `accentTextMuted` follows the same
+#    flip (light grey for dark mode, dark grey for light mode).
+func darkTheme() pub ret Theme {
+  ret Theme {
+    mode: ThemeMode.dark
+    palette: ThemePalette {
+      background: RgbaColor { r: 10, g: 10, b: 14, a: 255 }
+      surface: RgbaColor { r: 10, g: 10, b: 14, a: 255 }
+      surfaceAlt: RgbaColor { r: 72, g: 180, b: 152, a: 255 }
+      textPrimary: RgbaColor { r: 248, g: 248, b: 250, a: 255 }
+      textMuted: RgbaColor { r: 170, g: 170, b: 180, a: 255 }
+      outline: RgbaColor { r: 60, g: 60, b: 70, a: 255 }
+      accent: RgbaColor { r: 72, g: 180, b: 152, a: 255 }
+      accentText: RgbaColor { r: 248, g: 248, b: 250, a: 255 }
+      accentTextMuted: RgbaColor { r: 224, g: 232, b: 228, a: 255 }
+      imageTint: RgbaColor { r: 255, g: 255, b: 255, a: 255 }
+    }
+  }
+}
+
+# #764: the active theme + its token cache were module-level globals
+# (`activeTheme`, `g_themeGeneration` here, plus the 15 flattened `g_active*`
+# lists in themeResolved.rae). They are now ONE resource, `UiTheme`, owned as a
+# field on `UiWorld` and threaded to the paint/deser sites that read it (both of
+# which already carry the world). The palette `active` is the closed 10-slot
+# `Theme` that `colorByName` resolves against; `resolved` is the scene-parsed
+# `ResolvedTheme` that space/radius/padding/container tokens resolve against
+# (previously the `g_active*` copy); `generation` is the repaint counter render
+# loops watch (#235). See docs/globals-and-app-ownership.md.
+type UiTheme {
+  active: Theme
+  generation: Int
+  resolved: ResolvedTheme
+}
+
+# The default UiTheme a freshly-created world starts with: the built-in light
+# palette and an empty token table. Apps overwrite `active`/`resolved` from their
+# owned theme (loadUiAssets' Gpu2dUi, or an AppState field) as they build a world.
+# Calling `lightTheme()` here is safe — the forward-reference-in-C hazard only
+# applies to module-GLOBAL initializers, not a function body.
+func createUiTheme() pub ret UiTheme {
+  ret UiTheme { active: lightTheme(), generation: 0, resolved: createResolvedTheme() }
+}
+
+# Set the active palette theme and bump the repaint generation. Scene colors store
+# palette slot NAMES (see `Shape.fillSlot` / `Sprite.tintSlot`) and resolve through
+# `colorByName` at paint time, so a theme swap is a repaint — no scene
+# re-parse. Render loops watch `generation()` and repaint when it advances.
+func setActiveTheme(world: mod UiWorld, theme: own Theme) pub {
+  world.theme.active = theme
+  world.theme.generation = world.theme.generation + 1
+}
+
+func currentTheme(world: view UiWorld) pub ret Theme {
+  ret world.theme.active
+}
+
+# Current theme generation. Advances on every `setActiveTheme`.
+func generation(world: view UiWorld) pub ret Int {
+  ret world.theme.generation
+}
+
+# Resolve a token name (no leading `$`) to a palette color against a given palette
+# `theme`. Unknown names fall back to a vivid magenta sentinel so missing tokens are
+# obvious in the rendered output rather than silently transparent.
+func colorByName(theme: view Theme, name: view String) pub ret RgbaColor {
+  let p: ThemePalette = theme.palette
+  if name is "background" {
+    ret p.background
+  }
+  if name is "surface" {
+    ret p.surface
+  }
+  if name is "surfaceAlt" {
+    ret p.surfaceAlt
+  }
+  if name is "textPrimary" {
+    ret p.textPrimary
+  }
+  if name is "textMuted" {
+    ret p.textMuted
+  }
+  if name is "outline" {
+    ret p.outline
+  }
+  if name is "accent" {
+    ret p.accent
+  }
+  if name is "accentText" {
+    ret p.accentText
+  }
+  if name is "accentTextMuted" {
+    ret p.accentTextMuted
+  }
+  if name is "imageTint" {
+    ret p.imageTint
+  }
+  ret RgbaColor { r: 255, g: 0, b: 255, a: 255 }
+}
