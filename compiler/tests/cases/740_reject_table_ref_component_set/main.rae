@@ -1,0 +1,19 @@
+import core
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Query
+type Pos { x: Int }
+type Vel { v: Int }
+type World { positions: ComponentTable(Pos), velocities: ComponentTable(Vel) }
+
+# #814: componentSet of a NEW entity on the table a live componentMod ref
+# aliases can realloc its dense storage -> the ref dangles. Rejected at compile time.
+func main() {
+  var pos: ComponentTable(Pos) = createComponentTable(Pos)
+  let e: EntityId = { index: 1, generation: 0 }
+  let f: EntityId = { index: 2, generation: 0 }
+  componentSet(this: pos, entity: e, data: Pos { x: 1 })
+  let p: mod Pos => componentMod(this: pos, entity: e)
+  componentSet(this: pos, entity: f, data: Pos { x: 2 })
+  p.x = 9
+}

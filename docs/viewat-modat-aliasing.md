@@ -108,12 +108,13 @@ Implementation tracked as **#658** (extend the borrow check to `viewAt`/`modAt`
 `if let` binding bodies; test that mutating the aliased List in the body is a
 sema error; `copyAt` + `if let` and mutation of a *different* List still allowed).
 
-## Scope note (#812)
+## Scope note (#812 / #814)
 
-#658 landed for `List.viewAt` / `List.modAt` bindings only. The ECS element
-accessors — `componentMod` / `componentView` (by entity) and `queryModAt` /
-`queryViewAt` (by dense index) — return the same kind of pointer into a table's
-dense storage but are **not** covered: holding one across a `componentSet` of a
-new entity (append → realloc) or a `componentRemove` (swap-remove) compiles with
-no diagnostic and reproduces the silent lost write. Tracked as **#814**. The full
-borrowing story is in `docs/ecs-api-reference.md` §"Borrowing rules".
+#658 landed for `List.viewAt` / `List.modAt` bindings. The ECS element accessors
+— `componentMod` / `componentView` (by entity) and `queryModAt` / `queryViewAt`
+(by dense index), plus the `queryNViewX` / `forEachView` accessors — return the
+same kind of pointer into a table's dense storage; #814 extended the rule to them
+(plain `let … =>` bindings and `if let`), rejecting `componentSet` /
+`componentRemove` / `clearEntityComponents` on the same table while the reference
+is live. The full borrowing story is in `docs/ecs-api-reference.md` §"Borrowing
+rules".

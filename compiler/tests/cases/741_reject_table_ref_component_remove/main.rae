@@ -1,0 +1,21 @@
+import core
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Query
+type Pos { x: Int }
+type Vel { v: Int }
+type World { positions: ComponentTable(Pos), velocities: ComponentTable(Vel) }
+
+# #814: componentRemove on the table a live ref aliases swap-removes — the row
+# under the ref can become another entity's. Rejected; also via the owning
+# world (clearEntityComponents reaches every table inside it).
+func main() {
+  var world: World = { positions: createComponentTable(Pos), velocities: createComponentTable(Vel) }
+  let e: EntityId = { index: 1, generation: 0 }
+  let f: EntityId = { index: 2, generation: 0 }
+  componentSet(this: world.positions, entity: e, data: Pos { x: 1 })
+  componentSet(this: world.positions, entity: f, data: Pos { x: 2 })
+  let p: view Pos => componentView(this: world.positions, entity: e)
+  componentRemove(this: world.positions, entity: f)
+  log("{p.x}")
+}
