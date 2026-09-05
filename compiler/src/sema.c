@@ -14,6 +14,18 @@
 // check that forbids raw rae_ext_rae_buf_set with cascade-drop element
 // types outside stdlib. NULL = unknown / top-level scope.
 static const char* s_current_decl_origin = NULL;
+
+// #815: the file a diagnostic should name. After merge_module_graph the merged
+// AstModule's file_path is only the LAST-loaded file, so in a multi-file project
+// an error in any earlier file would be reported against the wrong path (with
+// the wrong file's source line under the caret). Decls carry their own
+// origin_file (stamped at merge, preserved through specialization) and
+// sema_analyze_decl keeps the decl being analysed in s_current_decl_origin —
+// prefer that; fall back to the module path only when no decl is current.
+static const char* sema_diag_file(const AstModule* module) {
+    if (s_current_decl_origin) return s_current_decl_origin;
+    return module ? module->file_path : NULL;
+}
 /* Module under analysis, so deep helpers (ensure_type_match) can flag a
  * hard error and actually fail the build rather than just printing. */
 static AstModule* s_current_module = NULL;
@@ -837,7 +849,7 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
                 snprintf(buf, sizeof buf,
                     "'%.*s' is defined in multiple project folders (%s); qualify the call with the folder name",
                     (int)name.len, name.data, list);
-            diag_error(s_current_decl_origin ? s_current_decl_origin : module->file_path,
+            diag_error(sema_diag_file(module),
                        (int)line, (int)column, buf);
             if (module) module->had_error = true;
             return NULL;
@@ -988,7 +1000,7 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
             "'%.*s' is in package '%s', which is not open here; use `open %s` for a bare call, or %s.%.*s(...)",
             (int)name.len, name.data, ineligible->module_name,
             ineligible->module_name, ineligible->module_name, (int)name.len, name.data);
-        const char* err_file = s_current_decl_origin ? s_current_decl_origin : module->file_path;
+        const char* err_file = sema_diag_file(module);
         diag_error(err_file, (int)line, (int)column, buf);
         if (module) module->had_error = true;
     } else if (generic_value_arity_issue) {
@@ -1001,7 +1013,7 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
             (int)name.len, name.data, generic_expected_values,
             generic_expected_values == 1 ? "" : "s",
             generic_got_values, generic_got_values == 1 ? "was" : "were");
-        const char* err_file = s_current_decl_origin ? s_current_decl_origin : module->file_path;
+        const char* err_file = sema_diag_file(module);
         diag_error(err_file, (int)line, (int)column, buf);
         if (module) module->had_error = true;
     }
@@ -1061,7 +1073,18 @@ static AstDecl* resolve_qualified_function(CompilerContext* ctx, AstModule* modu
     return arity_match;
 }
 
+static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl);
+
+// #815: every diagnostic raised while analysing a decl — a function body, a
+// global let initializer, a type — names THAT decl's file (see sema_diag_file).
 static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl) {
+    const char* saved_origin = s_current_decl_origin;
+    if (decl && decl->origin_file) s_current_decl_origin = decl->origin_file;
+    sema_analyze_decl_inner(ctx, module, symbols, decl);
+    s_current_decl_origin = saved_origin;
+}
+
+static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl) {
     if (!decl) return;
     switch (decl->kind) {
         case AST_DECL_TYPE: {
@@ -1377,7 +1400,7 @@ static void sema_fold_const(CompilerContext* ctx, AstModule* module, SymbolTable
     if (!init) return;
     ConstResult r = const_eval(symbols, init);
     if (!r.ok) {
-        diag_error(module->file_path, (int)line, (int)col,
+        diag_error(sema_diag_file(module), (int)line, (int)col,
                    "'const' initializer must be evaluable at compile time (only literals, earlier constants, enum cases, and arithmetic on them are allowed)");
         module->had_error = true;
         return;
@@ -1456,7 +1479,7 @@ static void sema_check_returned_ref(CompilerContext* ctx, AstModule* module,
     }
     if (!base) return;
 
-    const char* file = module ? module->file_path : NULL;
+    const char* file = sema_diag_file(module);
     if (base->kind == AST_EXPR_IDENT) {
         Symbol* sym = symbol_table_lookup(symbols, base->as.ident);
         if (sym && sym->is_local_storage) {
@@ -1729,7 +1752,7 @@ static void sema_check_table_ref_borrow(AstModule* module, const AstStmt* first,
                  "cannot mutate a ComponentTable while a componentMod/queryModAt reference ('%.*s') "
                  "aliases one of its rows — finish with the reference first, or mutate before taking it",
                  (int)binding_name.len, binding_name.data);
-        diag_error(module->file_path, err_line, err_col, buf);
+        diag_error(sema_diag_file(module), err_line, err_col, buf);
         module->had_error = true;
         return;
     }
@@ -2040,7 +2063,7 @@ static void reflect_expand_field_loop(CompilerContext* ctx, AstModule* module,
     stmt->as.if_stmt.binding = NULL;
 
     #define REFLECT_FAIL(ln, col, msg) do { \
-        diag_error(module->file_path, (int)(ln), (int)(col), (msg)); \
+        diag_error(sema_diag_file(module), (int)(ln), (int)(col), (msg)); \
         module->had_error = true; return; } while (0)
 
     // `fields(value)` must have exactly one positional argument.
@@ -2268,7 +2291,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     }
                 }
                 if (src_is_view) {
-                    diag_error(module->file_path, (int)stmt->line, (int)stmt->column,
+                    diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
                                "cannot bind 'mod' to a read-only view: a view cannot be promoted to mutable access");
                     module->had_error = true;
                 }
@@ -2288,7 +2311,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 if (vfd->returns && vfd->returns->type
                     && (vfd->returns->type->is_view || vfd->returns->type->is_mod)
                     && !vfd->returns->type->is_opt) {
-                    diag_error(module->file_path, (int)stmt->line, (int)stmt->column,
+                    diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
                                "this call returns a reference; copying what it refers to must be spelled out: "
                                "bind it first ('let source: view T => ...'), then copy from the named binding");
                     module->had_error = true;
@@ -2306,7 +2329,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 && !stmt->as.let_stmt.type->is_opt && stmt->as.let_stmt.value) {
                 const AstExpr* bv = stmt->as.let_stmt.value;
                 if (bv->kind == AST_EXPR_OBJECT || bv->kind == AST_EXPR_COLLECTION_LITERAL) {
-                    diag_error(module->file_path, (int)stmt->line, (int)stmt->column,
+                    diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
                                "cannot bind a reference to a literal: a literal is a fresh value with no storage to view; "
                                "write 'let name: T = ...' to own it");
                     module->had_error = true;
@@ -2316,7 +2339,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     bool returns_ref = bfd->returns && bfd->returns->type
                         && (bfd->returns->type->is_view || bfd->returns->type->is_mod);
                     if (bfd->returns && !returns_ref) {
-                        diag_error(module->file_path, (int)stmt->line, (int)stmt->column,
+                        diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
                                    "cannot bind a reference to a call that returns ownership; "
                                    "write 'let name: T = ...' to take the value, or use a reference-returning "
                                    "accessor (viewAt, modAt, viewGet, modGet)");
@@ -2352,7 +2375,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                         "a '{ }' list literal cannot initialize an %.*s: its capacity is part of its type — "
                         "construct it with '%.*s(T, cap: N)' (which zero-initializes), then assign elements by index",
                         (int)dbase.len, dbase.data, (int)dbase.len, dbase.data);
-                    diag_error(module->file_path, (int)stmt->line, (int)stmt->column, buf);
+                    diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column, buf);
                     module->had_error = true;
                 }
             }
@@ -2448,7 +2471,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                         && bsrc->as.call.callee->kind == AST_EXPR_IDENT
                         && str_eq_cstr(bsrc->as.call.callee->as.ident, "copyAt"));
                 if (btr && (btr->is_view || btr->is_mod) && bsrc_is_copy_accessor) {
-                    diag_error(module->file_path, (int)b->line, (int)b->column,
+                    diag_error(sema_diag_file(module), (int)b->line, (int)b->column,
                                "`copyAt` returns a copy; use `viewAt` or `modAt` to alias storage");
                     module->had_error = true;
                 }
@@ -2459,7 +2482,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     // place and copy inside the branch, where the copy is
                     // visible.
                     if (!is_call_src) {
-                        diag_error(module->file_path, (int)b->line, (int)b->column,
+                        diag_error(sema_diag_file(module), (int)b->line, (int)b->column,
                                    "'if let <name>: T = ...' takes ownership, so it needs a call producing "
                                    "'opt T'; narrowing a stored optional copies — bind 'view T =>' and copy "
                                    "inside the branch if a copy is wanted (spec 4.2)");
@@ -2469,12 +2492,12 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                         const AstFuncDecl* cfd = &bsrc->decl_link->as.func_decl;
                         const AstTypeRef* rt = cfd->returns ? cfd->returns->type : NULL;
                         if (rt && rt->is_opt && (rt->is_view || rt->is_mod)) {
-                            diag_error(module->file_path, (int)b->line, (int)b->column,
+                            diag_error(sema_diag_file(module), (int)b->line, (int)b->column,
                                        "this call returns an optional REFERENCE; narrow it with "
                                        "'if let <name>: view T => ...' (or mod) instead of taking ownership");
                             module->had_error = true;
                         } else if (rt && !rt->is_opt) {
-                            diag_error(module->file_path, (int)b->line, (int)b->column,
+                            diag_error(sema_diag_file(module), (int)b->line, (int)b->column,
                                        "'if let' narrows an optional, but this call does not return 'opt'");
                             module->had_error = true;
                         }
@@ -2488,7 +2511,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     const AstFuncDecl* cfd = &bsrc->decl_link->as.func_decl;
                     const AstTypeRef* rt = cfd->returns ? cfd->returns->type : NULL;
                     if (rt && rt->is_opt && !(rt->is_view || rt->is_mod)) {
-                        diag_error(module->file_path, (int)b->line, (int)b->column,
+                        diag_error(sema_diag_file(module), (int)b->line, (int)b->column,
                                    "this call returns an owned optional; a view/mod binding refuses ownership "
                                    "and nothing else would own the value — take it with "
                                    "'if let <name>: T = ...' (spec 4.2)");
@@ -2537,7 +2560,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                                 ? s->as.expr_stmt : NULL;
                             int err_line = (int)(err_expr ? err_expr->line : s->line);
                             int err_col = (int)(err_expr ? err_expr->column : s->column);
-                            diag_error(module->file_path, err_line, err_col,
+                            diag_error(sema_diag_file(module), err_line, err_col,
                                        "cannot mutate a List while a `viewAt`/`modAt` binding aliases one of its elements");
                             module->had_error = true;
                         }
@@ -2570,7 +2593,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                  }
                  if (!sema_struct_template_is(collection_type, "List")
                      || collection_type->as.structure.generic_count != 1) {
-                     diag_error(module->file_path, (int)stmt->line, (int)stmt->column,
+                     diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
                                 "collection loops currently require a List(T) expression");
                      module->had_error = true;
                  } else if (stmt->as.loop_stmt.init
@@ -2578,7 +2601,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                      AstStmt* binding = stmt->as.loop_stmt.init;
                      TypeInfo* element_type = collection_type->as.structure.generic_args[0];
                      if (!binding->as.let_stmt.type) {
-                         diag_error(module->file_path, (int)binding->line,
+                         diag_error(sema_diag_file(module), (int)binding->line,
                                     (int)binding->column,
                                     "collection loop bindings require an explicit type");
                          module->had_error = true;
@@ -2590,7 +2613,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                              binding_value_type = binding_value_type->as.ref.base;
                          }
                          if (!type_is_same(binding_value_type, element_type)) {
-                             diag_error(module->file_path, (int)binding->line,
+                             diag_error(sema_diag_file(module), (int)binding->line,
                                         (int)binding->column,
                                         "collection loop binding type must match the List element type");
                              module->had_error = true;
@@ -2599,7 +2622,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                              && collection && collection->resolved_type
                              && collection->resolved_type->kind == TYPE_REF
                              && !collection->resolved_type->as.ref.is_mod) {
-                             diag_error(module->file_path, (int)binding->line,
+                             diag_error(sema_diag_file(module), (int)binding->line,
                                         (int)binding->column,
                                         "a 'mod' collection loop requires mutable List storage");
                              module->had_error = true;
@@ -2623,7 +2646,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                              ? s->as.expr_stmt : NULL;
                          int error_line = (int)(error_expr ? error_expr->line : s->line);
                          int error_column = (int)(error_expr ? error_expr->column : s->column);
-                         diag_error(module->file_path, error_line, error_column,
+                         diag_error(sema_diag_file(module), error_line, error_column,
                                     "cannot mutate a List while a collection loop borrows its elements");
                          module->had_error = true;
                      }
@@ -2638,7 +2661,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
         case AST_STMT_BREAK:
         case AST_STMT_CONTINUE:
              if (s_loop_depth == 0) {
-                 diag_error(module->file_path, (int)stmt->line, (int)stmt->column,
+                 diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
                             stmt->kind == AST_STMT_BREAK
                                 ? "'break' is only valid inside a loop"
                                 : "'continue' is only valid inside a loop");
@@ -2690,7 +2713,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                         "name every variant (remove 'default' and add the missing case%s)",
                         (int)enum_name.len, enum_name.data,
                         "s, or group them with an or-pattern");
-                    diag_error(module->file_path, (int)stmt->line, (int)stmt->column, buffer);
+                    diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column, buffer);
                     module->had_error = true;
                 } else {
                     for (AstEnumMember* em = enum_decl->as.enum_decl.members; em; em = em->next) {
@@ -2707,7 +2730,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                                 (int)enum_name.len, enum_name.data,
                                 (int)enum_name.len, enum_name.data,
                                 (int)em->name.len, em->name.data);
-                            diag_error(module->file_path, (int)stmt->line, (int)stmt->column, buffer);
+                            diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column, buffer);
                             module->had_error = true;
                             break;
                         }
@@ -2722,13 +2745,13 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 bool is_open = subj && (subj->kind == TYPE_INT || subj->kind == TYPE_STRING);
                 bool is_bool = subj && subj->kind == TYPE_BOOL;
                 if (is_open && !has_default) {
-                    diag_error(module->file_path, (int)stmt->line, (int)stmt->column,
+                    diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
                         subj->kind == TYPE_STRING
                             ? "match on String requires a 'default' arm (its value space is open-ended)"
                             : "match on Int requires a 'default' arm (its value space is open-ended)");
                     module->had_error = true;
                 } else if (is_bool && has_default) {
-                    diag_error(module->file_path, (int)stmt->line, (int)stmt->column,
+                    diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
                         "match on Bool must not use a 'default' arm; handle 'case true' and 'case false'");
                     module->had_error = true;
                 }
@@ -2780,7 +2803,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     // one path, so a statement in a non-recorded file would be
                     // blamed on the wrong file (#221). s_current_decl_origin
                     // tracks the file the current function was parsed from.
-                    diag_error(s_current_decl_origin ? s_current_decl_origin : module->file_path,
+                    diag_error(sema_diag_file(module),
                                (int)stmt->line, (int)stmt->column, buffer);
                     module->had_error = true;
                 }
@@ -2811,7 +2834,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     char buffer[160];
                     snprintf(buffer, sizeof(buffer), "cannot mutate through read-only view '%.*s'",
                         (int)base->as.ident.len, base->as.ident.data);
-                    diag_error(module->file_path, (int)stmt->line, (int)stmt->column, buffer);
+                    diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column, buffer);
                     module->had_error = true;
                 }
             }
@@ -3249,7 +3272,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                                 "cannot spawn: parameter '%.*s' is a %s of non-scalar data, "
                                 "which would be shared across the task boundary; pass it as own or copy",
                                 (int)p->name.len, p->name.data, p->type->is_mod ? "mod" : "view");
-                            diag_error(module->file_path, (int)expr->line, (int)expr->column, buf);
+                            diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column, buf);
                             module->had_error = true;
                         }
                     }
@@ -3310,7 +3333,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                                 }
                                 if (rp->type && (rp->type->is_view || rp->type->is_mod)
                                     && sema_expr_is_temporary(av)) {
-                                    diag_report(module ? module->file_path : NULL,
+                                    diag_report(sema_diag_file(module),
                                                 (int)ra->value->line, (int)ra->value->column,
                                                 "cannot take reference to a temporary literal");
                                     if (module) module->had_error = true;
@@ -3488,7 +3511,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                         (int)lhs.len, lhs.data, (int)lhs.len, lhs.data,
                         (int)expr->as.member.member.len, expr->as.member.member.data,
                         (int)lhs.len, lhs.data);
-                    diag_error(s_current_decl_origin ? s_current_decl_origin : module->file_path,
+                    diag_error(sema_diag_file(module),
                                (int)expr->line, (int)expr->column, buf);
                     if (module) module->had_error = true;
                 }
@@ -3552,7 +3575,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                             "ambiguous qualified call '%.*s.%.*s.%.*s(...)': the package name '%.*s' is not unique — it matches modules in more than one folder; rename one folder or qualify differently",
                             (int)pkg.len, pkg.data, (int)mod.len, mod.data,
                             (int)fname.len, fname.data, (int)pkg.len, pkg.data);
-                        diag_error(s_current_decl_origin ? s_current_decl_origin : module->file_path,
+                        diag_error(sema_diag_file(module),
                                    (int)expr->line, (int)expr->column, buf);
                         if (module) module->had_error = true;
                         break;
@@ -3829,7 +3852,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                         snprintf(buf, sizeof(buf), "ambiguous UFCS call '.%.*s(...)' matches functions in multiple modules; use the qualified form (module.%.*s(...))",
                                  (int)expr->as.method_call.method_name.len, expr->as.method_call.method_name.data,
                                  (int)expr->as.method_call.method_name.len, expr->as.method_call.method_name.data);
-                        diag_error(module->file_path, (int)expr->line, (int)expr->column, buf);
+                        diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column, buf);
                     } else if (ufcs_match) {
                         expr->decl_link = ufcs_match;
                         if (ufcs_match->as.func_decl.returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, ufcs_match->as.func_decl.returns->type);
@@ -3900,7 +3923,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                             else
                                 snprintf(buf, sizeof buf, "no method `%.*s` on `%s`",
                                          (int)mname.len, mname.data, tbuf);
-                            diag_error(s_current_decl_origin ? s_current_decl_origin : module->file_path,
+                            diag_error(sema_diag_file(module),
                                        (int)expr->line, (int)expr->column, buf);
                             module->had_error = true;
                         }
@@ -3989,7 +4012,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             if (expr->as.object_literal.type)
                 sema_check_object_literal_fields(expr->resolved_type, expr->as.object_literal.fields,
                     expr->line, expr->column,
-                    s_current_decl_origin ? s_current_decl_origin : module->file_path);
+                    sema_diag_file(module));
             break;
         }
         case AST_EXPR_INTERP: {
@@ -4018,7 +4041,7 @@ TypeInfo* sema_resolve_type(CompilerContext* ctx, AstTypeRef* type_ref) { return
  * compile-time Int. */
 static bool sema_check_value_arg(AstModule* module, ConstResult r, Str arg_name,
                                  size_t line, size_t column, int64_t* out) {
-    const char* file = module ? module->file_path : NULL;
+    const char* file = sema_diag_file(module);
     AstTypeRef arg_stack = {0}; arg_stack.value_name = arg_name;
     AstTypeRef* arg = &arg_stack;
     arg->line = line; arg->column = column;
@@ -4072,7 +4095,7 @@ static bool sema_resolve_value_arg(AstModule* module, SymbolTable* symbols,
 static TypeInfo* sema_resolve_array_type(CompilerContext* ctx, AstModule* module,
                                          SymbolTable* symbols, AstTypeRef* type_ref,
                                          TypeInfo* (*resolve)(CompilerContext*, AstModule*, SymbolTable*, AstTypeRef*)) {
-    const char* file = module ? module->file_path : NULL;
+    const char* file = sema_diag_file(module);
     AstTypeRef* elem_ref = NULL;
     AstTypeRef* cap_ref = NULL;
     for (AstTypeRef* a = type_ref->generic_args; a; a = a->next) {
@@ -4124,7 +4147,7 @@ static TypeInfo* sema_resolve_array_type(CompilerContext* ctx, AstModule* module
  * Returns NULL (with a diagnostic) if the call is not a well-formed Array. */
 static TypeInfo* sema_array_type_from_call(CompilerContext* ctx, AstModule* module,
                                            SymbolTable* symbols, AstExpr* expr) {
-    const char* file = module ? module->file_path : NULL;
+    const char* file = sema_diag_file(module);
     AstCallArg* elem_arg = NULL;
     AstCallArg* cap_arg = NULL;
     for (AstCallArg* a = expr->as.call.args; a; a = a->next) {
@@ -4297,7 +4320,7 @@ static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolT
              * from many — use the enclosing decl's origin so the location
              * points at the file the reader actually has open. Same reason
              * the rae_ext_rae_buf_set check uses it. */
-            const char* own_file = s_current_decl_origin ? s_current_decl_origin : module->file_path;
+            const char* own_file = sema_diag_file(module);
             diag_error(own_file, (int)a->value->line, (int)a->value->column, buf);
             module->had_error = true;
         }
@@ -4352,7 +4375,7 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
         // a `createList(any)` — so reject it with a pointed message. Note the
         // capital-`Any` runtime box resolves normally just below.
         if (str_eq_cstr(name, "any")) {
-            diag_error(module->file_path, (int)type_ref->line, (int)type_ref->column,
+            diag_error(sema_diag_file(module), (int)type_ref->line, (int)type_ref->column,
                        "'any' is the compile-time type wildcard; it is only valid as a "
                        "binding pattern inside a fields() loop (did you mean the runtime box 'Any'?)");
             module->had_error = true;
