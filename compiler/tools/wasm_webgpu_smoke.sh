@@ -13,7 +13,7 @@ perl -e 'alarm shift; exec @ARGV' 240 compiler/bin/rae build \
   --target wasm --profile dev \
   --project examples/109_gpu3d_pbr \
   --out "$TMP/index.html" \
-  examples/109_gpu3d_pbr/main.rae >/dev/null
+  examples/109_gpu3d_pbr/Main.rae >/dev/null
 
 test -s "$TMP/index.html"
 test -s "$TMP/index.js"
@@ -24,7 +24,7 @@ perl -e 'alarm shift; exec @ARGV' 240 compiler/bin/rae build \
   --target wasm --profile dev \
   --project examples/112_metaballs_deferred \
   --out "$TMP/ui.html" \
-  examples/112_metaballs_deferred/main.rae >/dev/null
+  examples/112_metaballs_deferred/Main.rae >/dev/null
 
 test -s "$TMP/ui.html"
 test -s "$TMP/ui.js"
@@ -36,7 +36,7 @@ perl -e 'alarm shift; exec @ARGV' 240 compiler/bin/rae build \
   --target wasm --profile dev \
   --project examples/109_gpu3d_pbr \
   --out "$TMP/app.mjs" \
-  examples/109_gpu3d_pbr/main.rae >/dev/null
+  examples/109_gpu3d_pbr/Main.rae >/dev/null
 
 test -s "$TMP/app.mjs"
 test -s "$TMP/app.wasm"

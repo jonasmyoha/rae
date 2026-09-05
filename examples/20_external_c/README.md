@@ -6,7 +6,7 @@ This example shows how Rae code can call into the single-file [tinyexpr](https:/
 1. Ensure `third_party/tinyexpr/tinyexpr.c` and `.h` exist (run `tools/ffi/install_tinyexpr.sh` if needed).
 2. Emit C from Rae (repo root):
    ```bash
-   compiler/bin/rae build --emit-c examples/tinyexpr-demo/main.rae --out build/tinyexpr_demo.c
+   compiler/bin/rae build --emit-c examples/tinyexpr-demo/Main.rae --out build/tinyexpr_demo.c
    ```
    This also drops `rae_runtime.{c,h}` beside the emitted source.
 3. Compile/link with the runtime + tinyexpr wrapper:

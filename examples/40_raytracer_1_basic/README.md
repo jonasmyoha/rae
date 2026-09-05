@@ -14,14 +14,14 @@ rather than waiting for one dump at the end.
 Compiled-target only (the Live VM has no SDL bindings). Needs `brew install sdl3`.
 
 ```bash
-rae run --target compiled main.rae
+rae run --target compiled Main.rae
 ```
 
 Headless render (no window — saves the final frame as a BMP):
 
 ```bash
 SDL_VIDEODRIVER=dummy RAE_SDL_SCREENSHOT=/tmp/out.bmp RAE_SDL_HEADLESS_MS=4000 \
-  rae run --target compiled main.rae
+  rae run --target compiled Main.rae
 ```
 
 ## The series
