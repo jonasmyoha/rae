@@ -386,7 +386,12 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
     // main.rae, else the devtools.json manifest's "entry". The target already
     // defaults to Compiled above (Live is frozen); an explicit --target wins.
     const char* entry = NULL;
-    if (file_exists("main.rae")) {
+    // `main.rae` is the `Main` module (module files are PascalCase), so prefer
+    // `Main.rae`; keep accepting a lowercase `main.rae` so un-migrated projects
+    // still run (#803).
+    if (file_exists("Main.rae")) {
+      entry = "Main.rae";
+    } else if (file_exists("main.rae")) {
       entry = "main.rae";
     } else {
       const char* me = manifest_entry_in_cwd();
@@ -409,7 +414,7 @@ static bool parse_run_args(int argc, char** argv, RunOptions* opts) {
   }
 
   if (!opts->input_path) {
-    fprintf(stderr, "error: run requires a file argument, or a main.rae / "
+    fprintf(stderr, "error: run requires a file argument, or a Main.rae / "
                     "devtools.json in the current directory\n");
     return false;
   }
@@ -2237,7 +2242,7 @@ static void print_usage(const char* prog) {
   fprintf(stderr, "  format <file>   Parse Rae source file and pretty-print it\n");
   fprintf(stderr, "  run [opts] [file]\n");
   fprintf(stderr, "                  Build and run Rae source. With no file, infers\n");
-  fprintf(stderr, "                  the entry from the current folder (main.rae, or a\n");
+  fprintf(stderr, "                  the entry from the current folder (Main.rae, or a\n");
   fprintf(stderr, "                  devtools.json 'entry') and defaults to --target compiled.\n");
   fprintf(stderr, "                  Options: --project <dir>, --watch,\n");
   fprintf(stderr, "                           --target <live|compiled>,\n");
@@ -2258,7 +2263,7 @@ static void print_usage(const char* prog) {
   fprintf(stderr,
           "                  can preserve state across reloads via lib/hot_reload.\n");
   fprintf(stderr,
-          "  init            Scaffold src/, assets/, src/main.rae, Makefile in the\n");
+          "  init            Scaffold src/, assets/, src/Main.rae, Makefile in the\n");
   fprintf(stderr,
           "                  current directory and download Roboto-Regular.ttf into\n");
   fprintf(stderr,
@@ -4160,7 +4165,7 @@ static const char* RAE_INIT_TEMPLATE_MAKEFILE =
   "RAE_REPO ?= $(realpath $(CURDIR)/../rae)\n"
   "RAE_BIN  := $(RAE_REPO)/compiler/bin/rae\n"
   "\n"
-  "ENTRY    := $(CURDIR)/src/main.rae\n"
+  "ENTRY    := $(CURDIR)/src/Main.rae\n"
   "PROJECT  := $(CURDIR)\n"
   "BUILD    := $(CURDIR)/build\n"
   "OUT_C    := $(BUILD)/main.c\n"
@@ -4287,7 +4292,7 @@ static int cmd_init(int argc, char** argv) {
   int rc = 0;
   rc |= rae_init_ensure_dir("src");
   rc |= rae_init_ensure_dir("assets");
-  rc |= rae_init_write_if_missing("src/main.rae", RAE_INIT_TEMPLATE_MAIN_RAE);
+  rc |= rae_init_write_if_missing("src/Main.rae", RAE_INIT_TEMPLATE_MAIN_RAE);
   // Font fetch is best-effort: keep going past a download failure so
   // the Makefile + src layout still get written.
   int font_rc = rae_init_download_roboto();

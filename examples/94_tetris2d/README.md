@@ -12,5 +12,5 @@ an ECS-backed `.raescene` HUD.
 ## How to Run
 
 ```bash
-compiler/bin/rae run --target compiled examples/94_tetris2d/main.rae
+compiler/bin/rae run --target compiled examples/94_tetris2d/Main.rae
 ```

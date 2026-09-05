@@ -20,7 +20,7 @@ stream, so there is no shared mutable state. The image fills in progressively
 via the streaming texture.
 
 ```bash
-rae run --target compiled main.rae   # recommended — real threads
+rae run --target compiled Main.rae   # recommended — real threads
 ```
 
 The scene is the classic four-sphere setup: a diffuse ground, a diffuse centre
