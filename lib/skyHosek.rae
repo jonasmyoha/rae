@@ -19,13 +19,13 @@
 #   Lukas Hosek and Alexander Wilkie, Charles University in Prague.
 
 import core
-import json
+import Json
 import math
 import sys
-import vec3
-open json
+import Vec3
+open Json
 open math
-open vec3
+open Vec3
 
 const hosekDatasetPath: String = "lib/data/hosek_wilkie_rgb.json"
 
@@ -350,7 +350,7 @@ func hosekRadiance(sky: view HosekSky, dir: view Vec3, sunDir: view Vec3) pub re
   if cosGamma < 0.0 - 1.0 { cosGamma = 0.0 - 1.0 }
   let gamma: Float = acos(x: cosGamma)
 
-  ret vec3.create(
+  ret Vec3.create(
     x: hosekChannelRadiance(c: sky.r, theta: theta, gamma: gamma) * sky.r.radiance
     y: hosekChannelRadiance(c: sky.g, theta: theta, gamma: gamma) * sky.g.radiance
     z: hosekChannelRadiance(c: sky.b, theta: theta, gamma: gamma) * sky.b.radiance)

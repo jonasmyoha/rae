@@ -1,24 +1,24 @@
 # A minimal 3D easing example on Rae's production deferred renderer.
 import core
-import easing
+import Easing
 import gpu2d
 import gbuffer
 import math
 import sys
-import vec3
-import rendererDeferred
-import ui/ecs
+import Vec3
+import RendererDeferred
+import ui/Ecs
 import ui/RenderSystem/RenderSystem
-import app3d/uiShell
-open app3d/uiShell
+import app3d/UiShell
+open app3d/UiShell
 open gbuffer
 open gpu3d
-open math3d
-open mesh3d
-open rendererDeferred
-open rendergraph
-open scene3d
-open ui/ecs
+open Math3d
+open Mesh3d
+open RendererDeferred
+open Rendergraph
+open Scene3d
+open ui/Ecs
 open ui/RenderSystem/RenderSystem
 
 func uploadMeshData(meshData: view MeshData) ret MeshHandle {
@@ -30,22 +30,22 @@ func uploadMeshData(meshData: view MeshData) ret MeshHandle {
 
 func buildScene(sphere: view MeshHandle, ground: view MeshHandle) ret World3d {
   var sceneWorld: World3d = createWorld3d()
-  let noEmission: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
-  let noRotation: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
-  let unitScale: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  let noEmission: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let noRotation: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let unitScale: Vec3 = Vec3.create(x: 1.0, y: 1.0, z: 1.0)
   let ballMaterial: Material3d = {
-    baseColor: vec3.create(x: 0.12, y: 0.62, z: 0.95)
+    baseColor: Vec3.create(x: 0.12, y: 0.62, z: 0.95)
     metallic: 0.15, roughness: 0.22, emission: noEmission, toon: false }
   let groundMaterial: Material3d = {
-    baseColor: vec3.create(x: 0.16, y: 0.2, z: 0.27)
+    baseColor: Vec3.create(x: 0.16, y: 0.2, z: 0.27)
     metallic: 0.0, roughness: 0.82, emission: noEmission, toon: false }
   let ballEntity: EntityId = world3dAddMeshInstance(
     world: sceneWorld, mesh: sphere, material: ballMaterial
-    position: vec3.create(x: 0.0, y: 0.0, z: 5.0)
+    position: Vec3.create(x: 0.0, y: 0.0, z: 5.0)
     rotation: noRotation, scale: unitScale)
   let groundEntity: EntityId = world3dAddMeshInstance(
     world: sceneWorld, mesh: ground, material: groundMaterial
-    position: vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    position: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
     rotation: noRotation, scale: unitScale)
   ret sceneWorld
 }
@@ -63,8 +63,8 @@ func main() ret Int {
   # animates its transform in place.
   let ballEntity: EntityId = world3dMeshRendererEntityAt(world: sceneWorld, i: 0)
   var camera: Camera3d = defaultCamera3d()
-  camera.position = vec3.create(x: 10.0, y: 0.0 - 12.0, z: 8.0)
-  camera.target = vec3.create(x: 0.0, y: 0.0, z: 2.0)
+  camera.position = Vec3.create(x: 10.0, y: 0.0 - 12.0, z: 8.0)
+  camera.target = Vec3.create(x: 0.0, y: 0.0, z: 2.0)
   let light: Light3d = defaultLight3d()
 
   let uiResources: Gpu2dUi = loadUiAssets(
@@ -96,14 +96,14 @@ func main() ret Int {
     loop elapsed > duration { elapsed = elapsed - duration }
     if fixedTestFrame { elapsed = 1.8 }
     let phase: Float = elapsed / duration
-    let bounce: Float = easing.easeOutBounce(t: phase)
+    let bounce: Float = Easing.easeOutBounce(t: phase)
     let currentZ: Float = 5.0 - 4.0 * bounce
     world3dWriteTransform(
       world: sceneWorld, entity: ballEntity
       transform: Transform3d {
-        position: vec3.create(x: 0.0, y: 0.0, z: currentZ)
-        rotation: vec3.create(x: 0.0, y: phase * 3.14159, z: 0.0)
-        scale: vec3.create(x: 1.0, y: 1.0, z: 1.0)
+        position: Vec3.create(x: 0.0, y: 0.0, z: currentZ)
+        rotation: Vec3.create(x: 0.0, y: phase * 3.14159, z: 0.0)
+        scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
       })
     runUiSystems(world: world, res: uiResources)
 

@@ -20,22 +20,22 @@
 # backwards.
 import core
 import math
-import vec3
+import Vec3
 import shadow3d
-open math3d
+open Math3d
 open shadow3d
 
 const res: Int = 2048
 
 func fitAt(camX: view Float, yaw: view Float) ret ShadowCascades {
-  let pos: Vec3 = vec3.create(x: camX, y: 0.0 - 12.0, z: 5.0)
+  let pos: Vec3 = Vec3.create(x: camX, y: 0.0 - 12.0, z: 5.0)
   # Target derived from yaw so "rotate in place" is a real rotation.
-  let target: Vec3 = vec3.create(
+  let target: Vec3 = Vec3.create(
     x: camX + math.sin(x: yaw), y: 0.0 - 12.0 + math.cos(x: yaw), z: 4.0
   )
   ret fitShadowCascades(
     camPos: pos, camTarget: target, fovYDeg: 50.0, aspect: 1.6,
-    near: 0.1, far: 60.0, sunDir: vec3.create(x: 0.3, y: 0.4, z: 0.0 - 0.86),
+    near: 0.1, far: 60.0, sunDir: Vec3.create(x: 0.3, y: 0.4, z: 0.0 - 0.86),
     count: 3, resolution: res, lambda: 0.7, backExtent: 20.0
   )
 }

@@ -1,0 +1,304 @@
+# scene3d — backend-agnostic 3D scene data model for the unified renderer.
+#
+# This is the layer BOTH renderer backends read, and the reason the three
+# seed examples (107 raymarch, 108 procedural raymarch, 109 PBR raster)
+# can converge without pretending their geometry is the same thing:
+#
+#   - `MeshRenderer`  — explicit triangle meshes. The RASTER backend
+#     (lib/gpu3d.rae + runtime_gpu3d.c) consumes these.
+#   - `SdfPrimitive`  — implicit signed-distance geometry + procedural
+#     displacement. gpu3d currently consumes sphere groups as smooth-union
+#     metaballs; the general raymarch backend will add the other shapes.
+#
+# Geometry is the one place total unification is NOT possible, so it is an
+# explicit tagged split rather than a lowest-common-denominator fudge.
+# Everything above geometry — transforms, materials, camera, lights,
+# environment — is shared, so a scene is authored once and either backend
+# renders the parts it understands.
+#
+# WORLD CONVENTION: right-handed Z-up (Blender), per
+# `docs/coordinate-system.md`. +X right, +Y forward, +Z up.
+#
+# Storage is the ECS `World3d` below: one ComponentTable per 3D component,
+# keyed by EntityId. Components stay primitive/Vec3-only (no inner String or
+# other heap fields) — Rae's `List(Struct)` does not deep-copy inner heap
+# fields reliably, so keeping components flat avoids that whole class of
+# aliasing bug.
+import core
+open Vec3
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+import ecs/PrevTransformSystem/PrevTransformSystem
+
+# ----- typed resource handles ----------------------------------------
+# Raw `Int` handles let a material id be passed where a mesh id belongs
+# and silently render garbage. These wrappers make that a type error, and
+# carry a generation so a stale handle to a freed slot is detectable
+# rather than aliasing whatever got allocated into that slot next.
+type MeshHandle {
+  id: Int
+  generation: Int
+}
+
+type MaterialHandle {
+  id: Int
+  generation: Int
+}
+
+func meshHandle(id: view Int, generation: view Int) pub ret MeshHandle {
+  ret MeshHandle { id: id, generation: generation }
+}
+
+func materialHandle(id: view Int, generation: view Int) pub ret MaterialHandle {
+  ret MaterialHandle { id: id, generation: generation }
+}
+
+# The native mesh registry is 1-based (runtime_gpu3d.c returns slot+1 and
+# subtracts on draw), so id 0 is the natural "nothing" value.
+func meshHandleNone() pub ret MeshHandle {
+  ret MeshHandle { id: 0, generation: 0 }
+}
+
+func meshHandleIsValid(h: view MeshHandle) pub ret Bool {
+  ret h.id > 0
+}
+
+# ----- shared components ---------------------------------------------
+# Rotation is Euler XYZ in radians, right-handed, applied as yaw about +Z
+# and pitch about +X per docs/coordinate-system.md. (A Quat type is the
+# natural upgrade once Rae grows one — see the follow-up queue item.)
+type Transform3d {
+  position: Vec3
+  rotation: Vec3
+  scale: Vec3
+}
+
+type Material3d {
+  baseColor: Vec3
+  metallic: Float
+  roughness: Float
+  emission: Vec3
+  # Shade this surface in bands rather than with the PBR BRDF (#396).
+  #
+  # A MATERIAL FLAG, NOT A FRAME SETTING. The deferred G-buffer stores
+  # surface attributes independently of how they are lit, so the style is
+  # a different read of the same buffer — which means toon and PBR
+  # objects can share one frame and one sun. A frame-wide switch would
+  # have been simpler and could not express that.
+  #
+  # Deferred only. The forward path ignores it rather than growing a
+  # second implementation of the same look.
+  toon: Bool
+}
+
+type Camera3d {
+  position: Vec3
+  target: Vec3
+  fovYDeg: Float
+  nearZ: Float
+  farZ: Float
+}
+
+# One directional sun + hemisphere ambient + exposure. This is exactly the
+# lighting the raster uber-shader and both raymarch shaders already
+# implement, so it is shared rather than duplicated per backend.
+type Light3d {
+  sunDir: Vec3
+  sunColor: Vec3
+  ambSky: Vec3
+  ambGround: Vec3
+  exposure: Float
+  clearColor: Vec3
+}
+
+# ----- geometry components (the backend divergence point) -------------
+type MeshRenderer {
+  entity: Int
+  mesh: MeshHandle
+  material: Int
+  visible: Bool
+}
+
+# shape: 0 sphere, 1 box, 2 torus — matches the raymarch shaders' switch.
+#
+# `cluster` groups primitives that fuse with each other. Only primitives
+# sharing a cluster id blend; separate clusters are independent surfaces
+# that merely occlude one another, so a scene can hold several blobs with
+# different looks. `smoothing` is the cluster's stickiness — the distance
+# over which two balls merge — and is read from the cluster's FIRST
+# primitive (it is a property of the group, not of one ball).
+#
+# Albedo IS per-primitive: each ball's material colour bleeds across the
+# region where its surface merges, using the same weight that fuses the
+# distances. Metallic/roughness/emission come from the first primitive,
+# because those shade the fused surface as a whole.
+type SdfPrimitive {
+  entity: Int
+  shape: Int
+  material: Int
+  noise: Float
+  cluster: Int
+  smoothing: Float
+}
+
+# ----- defaults ------------------------------------------------------
+# Blender front view: camera on -Y looking toward +Y, world-up +Z.
+func defaultCamera3d() pub ret Camera3d {
+  ret Camera3d {
+    position: Vec3.create(x: 0.0, y: 0.0 - 12.0, z: 4.0),
+    target: Vec3.create(x: 0.0, y: 0.0, z: 0.5),
+    fovYDeg: 50.0,
+    nearZ: 0.1,
+    farZ: 200.0
+  }
+}
+
+# Sun from above-front (Z-up: the -Z component points the light downward).
+func defaultLight3d() pub ret Light3d {
+  ret Light3d {
+    sunDir: Vec3.create(x: 0.0 - 0.4, y: 0.3, z: 0.0 - 1.0),
+    sunColor: Vec3.create(x: 3.2, y: 3.0, z: 2.7),
+    ambSky: Vec3.create(x: 0.25, y: 0.3, z: 0.4),
+    ambGround: Vec3.create(x: 0.12, y: 0.1, z: 0.09),
+    exposure: 1.0,
+    clearColor: Vec3.create(x: 0.02, y: 0.02, z: 0.03)
+  }
+}
+
+# ===== World3d — the ECS 3D world (#732) =============================
+# The 3D counterpart to lib/ui's UiWorld: the reusable entity core
+# (EntityAllocator, lib/ecs/world.rae) plus one ComponentTable per 3D
+# component, keyed by EntityId. This is the 3D scene model — the parallel-List
+# `Scene3d` SoA it replaced (a bare-index `entity` shared across every List) was
+# retired in #797; authoring is world3dAddEntity + the component setters below,
+# and the renderers read its ECS queries.
+#
+# Named `World3d`, NOT `GameWorld` (a 3D example scene is Blender-like
+# content, not a game) and NOT the user's first choice `Scene` (that name is
+# already taken by lib/ui/scene.rae's 2D UI scene-graph root — a second bare
+# `Scene` would be a confusing cross-domain clash). `World3d` mirrors the
+# established `UiWorld` (2D) convention, so `UiWorld` / `World3d` read as the
+# two-per-domain ECS worlds. See queue #733 for the naming rationale.
+#
+# The component types are the existing Euler `Transform3d` / `Material3d` /
+# `MeshRenderer` / `SdfPrimitive` — NOT lib/ecs's quaternion `Transform3D`
+# (#714), which is a distinct type — so rotation behaviour is unchanged.
+type World3d {
+  allocator: EntityAllocator
+  transforms: ComponentTable(Transform3d)
+  # Previous-frame transforms, same element type as `transforms`, in a separate
+  # table. Motion vectors (TAA #335) need where each entity WAS; PrevTransformSystem
+  # (#735) derives this from `transforms` once per frame — no manual lockstep.
+  prevTransforms: ComponentTable(Transform3d)
+  materials: ComponentTable(Material3d)
+  meshRenderers: ComponentTable(MeshRenderer)
+  sdfs: ComponentTable(SdfPrimitive)
+}
+
+func createWorld3d() ret World3d {
+  ret World3d {
+    allocator: createEntityAllocator()
+    transforms: createComponentTable(Transform3d)
+    prevTransforms: createComponentTable(Transform3d)
+    materials: createComponentTable(Material3d)
+    meshRenderers: createComponentTable(MeshRenderer)
+    sdfs: createComponentTable(SdfPrimitive)
+  }
+}
+
+# Allocate a fresh world entity — the ECS analogue of the old `add*` calls
+# that pushed onto the parallel Lists and returned an index.
+func world3dAddEntity(world: mod World3d) ret EntityId {
+  ret allocEntity(this: world.allocator)
+}
+
+# Component setters — thin wrappers so call sites read as intent rather
+# than ComponentTable plumbing (mirrors lib/ui's world_helpers). Setting a
+# Transform3d seeds the previous transform to match, so the first frame's
+# motion vectors are zero rather than a jump from an unset previous.
+func world3dSetTransform(world: mod World3d, entity: view EntityId, transform: view Transform3d) {
+  componentSet(this: world.transforms, entity: entity, data: transform)
+  componentSet(this: world.prevTransforms, entity: entity, data: transform)
+}
+
+func world3dSetMaterial(world: mod World3d, entity: view EntityId, material: view Material3d) {
+  componentSet(this: world.materials, entity: entity, data: material)
+}
+
+func world3dSetMeshRenderer(world: mod World3d, entity: view EntityId, renderer: view MeshRenderer) {
+  componentSet(this: world.meshRenderers, entity: entity, data: renderer)
+}
+
+func world3dSetSdf(world: mod World3d, entity: view EntityId, sdf: view SdfPrimitive) {
+  componentSet(this: world.sdfs, entity: entity, data: sdf)
+}
+
+# Allocate an entity and attach its Transform3d + a per-entity Material3d
+# component + MeshRenderer in one call — the authoring primitive for building a
+# World3d in code (#794). The MeshRenderer's legacy `entity`/`material` Int fields
+# are ignored by the World3d renderer (renderSceneWorld reads the ECS entity + the
+# Material3d component), so they carry placeholders.
+func world3dAddMeshInstance(world: mod World3d, mesh: view MeshHandle, material: view Material3d, position: view Vec3, rotation: view Vec3, scale: view Vec3) ret EntityId {
+  let entity: EntityId = world3dAddEntity(world: world)
+  world3dSetTransform(world: world, entity: entity, transform: Transform3d { position: position, rotation: rotation, scale: scale })
+  world3dSetMaterial(world: world, entity: entity, material: material)
+  world3dSetMeshRenderer(world: world, entity: entity, renderer: MeshRenderer { entity: 0 - 1, mesh: mesh, material: 0 - 1, visible: true })
+  ret entity
+}
+
+# Live entity count — the ECS analogue of `scene.transforms.length`.
+func world3dEntityCount(world: view World3d) ret Int {
+  ret allocatorAliveCount(this: world.allocator)
+}
+
+# ----- World3d runtime access (animation + frame history) ------------
+# Read an entity's current Transform3d.
+func world3dGetTransform(world: view World3d, entity: view EntityId) ret Transform3d {
+  ret componentGet(this: world.transforms, entity: entity)
+}
+
+# Write an entity's Transform3d WITHOUT touching its previous transform — the
+# per-frame animation write. Previous transforms advance once per frame via
+# world3dPrevTransformSystem (the setTransform / snapshot split, so multiple
+# writes in one frame still yield one clean motion-vector delta).
+func world3dWriteTransform(world: mod World3d, entity: view EntityId, transform: view Transform3d) {
+  componentSet(this: world.transforms, entity: entity, data: transform)
+}
+
+# The entity at loader transform-index `i` (its dense position in the transforms
+# table). Bridges the asset's nodeId->Int map (scene3dAssetEntity) to an EntityId.
+func world3dEntityAt(world: view World3d, i: view Int) ret EntityId {
+  ret componentEntityAt(this: world.transforms, i: i)
+}
+
+# Iteration over the geometry tables, in dense (= loader) order, for animators
+# and systems that walk every renderable.
+func world3dMeshRendererCount(world: view World3d) ret Int {
+  ret componentCount(this: world.meshRenderers)
+}
+
+func world3dMeshRendererEntityAt(world: view World3d, i: view Int) ret EntityId {
+  ret componentEntityAt(this: world.meshRenderers, i: i)
+}
+
+func world3dSdfCount(world: view World3d) ret Int {
+  ret componentCount(this: world.sdfs)
+}
+
+func world3dSdfEntityAt(world: view World3d, i: view Int) ret EntityId {
+  ret componentEntityAt(this: world.sdfs, i: i)
+}
+
+func world3dSdfDataAt(world: view World3d, i: view Int) ret SdfPrimitive {
+  ret componentDataAt(this: world.sdfs, i: i)
+}
+
+# Advance motion-vector history by running the general PrevTransformSystem
+# (#735) over this world's transform tables: every entity's previous transform
+# becomes its current one. Call once per rendered frame, after extraction/draw.
+# This is World3d's binding to the generic system (the way lib/ui/transform.rae's
+# transformSystem binds transformSystem2D) — not a hand-rolled snapshot loop.
+func world3dPrevTransformSystem(world: mod World3d) {
+  prevTransformSystem(current: world.transforms, prev: world.prevTransforms)
+}

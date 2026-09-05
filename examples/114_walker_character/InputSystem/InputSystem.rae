@@ -19,72 +19,72 @@
 # into a multiplayer-ready roster (#546/#547).
 import core
 import math
-import profile
+import Profile
 import gpu2d
 import sdfText
-import vec3
-import gltf
-import gltfSkin
-import png
+import Vec3
+import Gltf
+import GltfSkin
+import Png
 import sys
 import app3d/CameraRig
 import app3d/renderScale
-import app3d/characterController
-import app3d/uiShell
+import app3d/CharacterController
+import app3d/UiShell
 import app3d/ControlPanel
-import app3d/cameraBar
-import rendererDeferred
-import sky
+import app3d/CameraBar
+import RendererDeferred
+import Sky
 import gbuffer
-import gbufferInstanced
-open gbufferInstanced
+import GbufferInstanced
+open GbufferInstanced
 import GrassCompute
 open GrassCompute
-import grassConfig
+import GrassConfig
 import shadow3d
-import app3d/playback
-import app3d/slider
-import app3d/settingsDialog
+import app3d/Playback
+import app3d/Slider
+import app3d/SettingsDialog
 import skyHosek
 import hotReload
 import ui/LogOverlay
 import ui/WindowGeometry
-import ui/scrollPanel
-import ui/eventLoop
+import ui/ScrollPanel
+import ui/EventLoop
 import ui/DebugOverlay
 import ui/VirtualJoystick
-import ui/ecs
+import ui/Ecs
 import ui/InputSystem/InputSystem
 import ui/RenderSystem/RenderSystem
-open scene3d
+open Scene3d
 open gpu3d
-open rendererDeferred
-open sky
+open RendererDeferred
+open Sky
 open gbuffer
-open rendergraph
-open math3d
-open mesh3d
-open gltf
-open gltfSkin
+open Rendergraph
+open Math3d
+open Mesh3d
+open Gltf
+open GltfSkin
 open sdfText
-open png
+open Png
 open app3d/CameraRig
-open app3d/characterController
-open app3d/settingsDialog
+open app3d/CharacterController
+open app3d/SettingsDialog
 open skyHosek
-open app3d/uiShell
+open app3d/UiShell
 open app3d/ControlPanel
-open app3d/cameraBar
+open app3d/CameraBar
 open shadow3d
-open app3d/playback
+open app3d/Playback
 open hotReload
 open ui/LogOverlay
 open ui/WindowGeometry
-open ui/scrollPanel
-open ui/eventLoop
+open ui/ScrollPanel
+open ui/EventLoop
 open ui/DebugOverlay
-import sdl3
-import keys
+import Sdl3
+import Keys
 
 # A frame's movement intent. moveX/moveY are analog in [-1, 1] (right+/forward+);
 # walking = the shift-to-walk modifier the controller expects (default is run);
@@ -105,11 +105,11 @@ func inputUpdate(moveStick: view VirtualJoystick, joyActive: view Bool,
   var moveY: Float = 0.0
   var walking: Bool = false
   if allowKeys {
-    if sdl3.isKeyDown(key: keys.keyD) or sdl3.isKeyDown(key: keys.keyRight) { moveX = moveX + 1.0 }
-    if sdl3.isKeyDown(key: keys.keyA) or sdl3.isKeyDown(key: keys.keyLeft) { moveX = moveX - 1.0 }
-    if sdl3.isKeyDown(key: keys.keyW) or sdl3.isKeyDown(key: keys.keyUp) { moveY = moveY + 1.0 }
-    if sdl3.isKeyDown(key: keys.keyS) or sdl3.isKeyDown(key: keys.keyDown) { moveY = moveY - 1.0 }
-    walking = sdl3.isKeyDown(key: keys.keyLShift)
+    if Sdl3.isKeyDown(key: Keys.keyD) or Sdl3.isKeyDown(key: Keys.keyRight) { moveX = moveX + 1.0 }
+    if Sdl3.isKeyDown(key: Keys.keyA) or Sdl3.isKeyDown(key: Keys.keyLeft) { moveX = moveX - 1.0 }
+    if Sdl3.isKeyDown(key: Keys.keyW) or Sdl3.isKeyDown(key: Keys.keyUp) { moveY = moveY + 1.0 }
+    if Sdl3.isKeyDown(key: Keys.keyS) or Sdl3.isKeyDown(key: Keys.keyDown) { moveY = moveY - 1.0 }
+    walking = Sdl3.isKeyDown(key: Keys.keyLShift)
   }
   ret InputIntent { moveX: moveX, moveY: moveY, walking: walking, actions: 0 }
 }

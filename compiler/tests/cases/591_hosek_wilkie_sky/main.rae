@@ -23,7 +23,7 @@
 import core
 import math
 import string
-import vec3
+import Vec3
 import skyHosek
 open skyHosek
 
@@ -73,7 +73,7 @@ func dirFromThetaGamma(theta: view Float, gamma: view Float, elevationRad: view 
   if x < 0.0 - sinTheta { x = 0.0 - sinTheta }
   var ySq: Float = sinTheta * sinTheta - x * x
   if ySq < 0.0 { ySq = 0.0 }
-  ret vec3.create(x: x, y: math.sqrt(x: ySq), z: cosTheta)
+  ret Vec3.create(x: x, y: math.sqrt(x: ySq), z: cosTheta)
 }
 
 func main() {
@@ -135,9 +135,9 @@ func main() {
   # Direction of TRAVEL, the convention Light3d and the shaders use: the sun is
   # up when z is negative. Built by negating the toward-the-sun vector so the
   # relationship is visible rather than a sign to trust.
-  let toSun: Vec3 = vec3.create(x: math.cos(x: elevation), y: 0.0, z: math.sin(x: elevation))
-  let sunDir: Vec3 = vec3.create(x: 0.0 - toSun.x, y: 0.0, z: 0.0 - toSun.z)
-  let zenith: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  let toSun: Vec3 = Vec3.create(x: math.cos(x: elevation), y: 0.0, z: math.sin(x: elevation))
+  let sunDir: Vec3 = Vec3.create(x: 0.0 - toSun.x, y: 0.0, z: 0.0 - toSun.z)
+  let zenith: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
   let zr: Vec3 = hosekRadiance(sky: sky, dir: zenith, sunDir: toSun)
   let bluenessZ: Float = zr.z / zr.x
   if bluenessZ > 1.0 {

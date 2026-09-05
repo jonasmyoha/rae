@@ -1,0 +1,265 @@
+# renderer3d — the FORWARD frame, expressed as a render graph (#332).
+#
+# DELIBERATELY RETAINED. The deferred path in lib/rendererDeferred.rae is
+# where new renderer features go, and the examples have migrated onto it —
+# but this path is kept on purpose rather than left behind by accident, so
+# do not delete it as dead code. It is the fallback and the comparison
+# reference while the deferred frame settles; a queued task to remove it
+# was withdrawn for exactly that reason. Removing it is a decision to be
+# taken explicitly, not a cleanup.
+#
+# This is the layer that knows what a "3D scene pass" or a "present pass"
+# IS. `lib/rendergraph.rae` deliberately does not: it only sees resources,
+# read/write declarations and an opaque tag. This module owns the tags and
+# the dispatch that turns them into actual GPU work.
+#
+# Rae has no first-class function references, so dispatch is a switch on
+# the tag — the same pattern lib/ui/registry.rae uses for components. The
+# graph never inspects a tag, so that constraint does not leak into it.
+#
+# WHAT CHANGED, AND WHAT DID NOT (#332): the frame previously ran because
+# main() called beginScene -> renderScene -> endFrame in that written
+# order. It now runs because the graph DERIVES that order from declared
+# resource dependencies: the present pass reads sceneColor, the scene pass
+# writes it, so present must follow. The GPU work per pass is byte-for-byte
+# the same calls in the same order — the port is verified by byte-identical
+# headless screenshots (RAE_FIXED_DT + RAE_HEADLESS_FRAMES).
+import core
+open Rendergraph
+open Scene3d
+open gpu3d
+
+# ----- pass tags (renderer-owned; opaque to the graph) ----------------
+const tagScenePass: Int = 1    # 3D raster + depth-integrated SDF geometry
+const tagPresent: Int = 2      # resolve/screenshot/present the frame
+const tagUiOverlay: Int = 3    # load-preserving 2D UI painted over the 3D frame
+const tagTonemap: Int = 4      # HDR -> LDR resolve (#334); last radiometric op
+const tagTaa: Int = 5          # temporal resolve (#335); HDR in, HDR out
+const tagSsao: Int = 6         # ambient occlusion (#337); modifies hdrColor
+const tagShadow: Int = 7       # sun cascade depth (#382); the scene pass reads it
+
+type Renderer3d {
+  graph: RenderGraph
+  sceneColor: Int   # resource id (LDR offscreen the window presents)
+  hdrColor: Int     # rgba16f linear scene radiance (#334); GI/TAA read/write THIS
+  sceneDepth: Int
+  sceneNormal: Int    # rgba16f world normals (#333 prepass output)
+  sceneVelocity: Int  # rg16f UV-space motion vectors (#333)
+  scenePass: Int    # pass id
+  presentPass: Int
+  uiPass: Int       # -1 when the frame has no UI overlay
+  hasUi: Bool
+}
+
+# Declare the frame. Passes are declared in a deliberately arbitrary order
+# to make the point that execution order comes from the DECLARATIONS, not
+# from the sequence of these calls.
+# Which lighting path this module implements, for window titles and
+# diagnostics. Deliberately shares its NAME with the deferred renderer's
+# version: an example opens one renderer, so the word follows the module
+# it actually uses and cannot go stale when it migrates. Opening both is
+# an ambiguity error, which is the correct failure mode.
+func rendererPathName() pub ret String {
+  ret "forward"
+}
+
+func createRenderer3d() pub ret Renderer3d {
+  var g: RenderGraph = createRenderGraph()
+
+  # sceneColor is External: it is gpu2d's persistent offscreen target,
+  # created and owned outside the graph. Everything else is transient.
+  # Since #334 the scene pass writes LINEAR HDR into hdrColor; tonemap is
+  # the only writer of sceneColor. Lighting passes (SSAO/GI) slot between
+  # scene and tonemap, operating on radiance, never on tonemapped values.
+  let colorId: Int = addResource(g: g, name: "sceneColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeExternal)
+  let hdrId: Int = addResource(g: g, name: "hdrColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let depthId: Int = addResource(g: g, name: "sceneDepth", kind: resDepth, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  # #333 prepass outputs: written by the scene pass, unread until SSAO/TAA/GI
+  # land. Declaring them now keeps the graph a truthful description of the
+  # frame rather than a subset of it.
+  let normalId: Int = addResource(g: g, name: "sceneNormal", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let velocityId: Int = addResource(g: g, name: "sceneVelocity", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  # TAA history is PERSISTENT: it is read next frame, not this one. This is
+  # the lifetime class #331 insisted on having in v1 precisely so temporal
+  # techniques could be declared truthfully instead of hidden in C statics.
+  let taaId: Int = addResource(g: g, name: "taaColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifePersistent)
+  # Ambient (indirect) is its own target so AO can attenuate it without
+  # touching direct light; aoTex is HALF resolution (#337).
+  let ambientId: Int = addResource(g: g, name: "sceneAmbient", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let aoId: Int = addResource(g: g, name: "aoTex", kind: resTexture2d, format: 0, sizing: sizeHalf, lifetime: lifeTransient)
+  # Sun cascades (#382). Fixed-size rather than screen-relative: shadow
+  # resolution is a quality tier, not a function of the window.
+  let shadowId: Int = addResource(g: g, name: "shadowMap", kind: resDepth, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+
+  # Present declared FIRST, scene SECOND — the graph must still order them
+  # scene-then-present, because present reads what scene writes.
+  let present: Int = addPass(g: g, name: "present", kind: passRaster, tag: tagPresent)
+  let tonemap: Int = addPass(g: g, name: "tonemap", kind: passRaster, tag: tagTonemap)
+  let ssao: Int = addPass(g: g, name: "ssao", kind: passRaster, tag: tagSsao)
+  let taa: Int = addPass(g: g, name: "taa", kind: passRaster, tag: tagTaa)
+  let scene: Int = addPass(g: g, name: "scene3d", kind: passRaster, tag: tagScenePass)
+  let shadow: Int = addPass(g: g, name: "shadow", kind: passRaster, tag: tagShadow)
+
+  # The scene pass READS the cascades, so the graph derives shadow-then-
+  # scene ordering rather than anyone asserting it.
+  passWrites(g: g, pass: shadow, resource: shadowId, access: accAttachmentWrite)
+  passReads(g: g, pass: scene, resource: shadowId, access: accSampledRead)
+  passWrites(g: g, pass: scene, resource: hdrId, access: accAttachmentWrite)
+  passWrites(g: g, pass: scene, resource: depthId, access: accAttachmentWrite)
+  passWrites(g: g, pass: scene, resource: normalId, access: accAttachmentWrite)
+  passWrites(g: g, pass: scene, resource: velocityId, access: accAttachmentWrite)
+  passWrites(g: g, pass: scene, resource: ambientId, access: accAttachmentWrite)
+  # SSAO reads the prepass, writes half-res AO, then MODIFIES hdrColor by
+  # adding ambient*AO — a read-modify-write the graph can state honestly.
+  passReads(g: g, pass: ssao, resource: depthId, access: accSampledRead)
+  passReads(g: g, pass: ssao, resource: normalId, access: accSampledRead)
+  passReads(g: g, pass: ssao, resource: ambientId, access: accSampledRead)
+  passWrites(g: g, pass: ssao, resource: aoId, access: accAttachmentWrite)
+  passModifies(g: g, pass: ssao, resource: hdrId, access: accAttachmentRead)
+  passReads(g: g, pass: taa, resource: hdrId, access: accSampledRead)
+  passReads(g: g, pass: taa, resource: velocityId, access: accSampledRead)
+  passWrites(g: g, pass: taa, resource: taaId, access: accAttachmentWrite)
+  passReads(g: g, pass: tonemap, resource: taaId, access: accSampledRead)
+  passWrites(g: g, pass: tonemap, resource: colorId, access: accAttachmentWrite)
+  passReads(g: g, pass: present, resource: colorId, access: accAttachmentRead)
+
+  ret Renderer3d {
+    graph: own g,
+    sceneColor: colorId,
+    hdrColor: hdrId,
+    sceneDepth: depthId,
+    sceneNormal: normalId,
+    sceneVelocity: velocityId,
+    scenePass: scene,
+    presentPass: present,
+    uiPass: 0 - 1,
+    hasUi: false
+  }
+}
+
+# Frame variant with a load-preserving 2D UI overlay between the 3D pass
+# and present. The overlay MODIFIES sceneColor rather than writing it: it
+# loads the resolved 3D image and paints over it. Declaring that as a plain
+# write would be rejected as a second writer, and as a plain read would not
+# order it after the scene — `passModifies` is what states it truthfully.
+func createRenderer3dWithUi() pub ret Renderer3d {
+  var g: RenderGraph = createRenderGraph()
+  let colorId: Int = addResource(g: g, name: "sceneColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeExternal)
+  let hdrId: Int = addResource(g: g, name: "hdrColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let depthId: Int = addResource(g: g, name: "sceneDepth", kind: resDepth, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let normalId: Int = addResource(g: g, name: "sceneNormal", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let velocityId: Int = addResource(g: g, name: "sceneVelocity", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let taaId: Int = addResource(g: g, name: "taaColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifePersistent)
+  # Ambient (indirect) is its own target so AO can attenuate it without
+  # touching direct light; aoTex is HALF resolution (#337).
+  let ambientId: Int = addResource(g: g, name: "sceneAmbient", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let aoId: Int = addResource(g: g, name: "aoTex", kind: resTexture2d, format: 0, sizing: sizeHalf, lifetime: lifeTransient)
+  # Sun cascades (#382). Fixed-size rather than screen-relative: shadow
+  # resolution is a quality tier, not a function of the window.
+  let shadowId: Int = addResource(g: g, name: "shadowMap", kind: resDepth, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+
+  # Declared present -> ui -> tonemap -> scene, i.e. exactly backwards.
+  # The UI overlay modifies the LDR target AFTER tonemap: UI colours are
+  # authored in display space and must not be tone-curved.
+  let present: Int = addPass(g: g, name: "present", kind: passRaster, tag: tagPresent)
+  let ui: Int = addPass(g: g, name: "uiOverlay", kind: passRaster, tag: tagUiOverlay)
+  let tonemap: Int = addPass(g: g, name: "tonemap", kind: passRaster, tag: tagTonemap)
+  let ssao: Int = addPass(g: g, name: "ssao", kind: passRaster, tag: tagSsao)
+  let taa: Int = addPass(g: g, name: "taa", kind: passRaster, tag: tagTaa)
+  let scene: Int = addPass(g: g, name: "scene3d", kind: passRaster, tag: tagScenePass)
+  let shadow: Int = addPass(g: g, name: "shadow", kind: passRaster, tag: tagShadow)
+
+  # The scene pass READS the cascades, so the graph derives shadow-then-
+  # scene ordering rather than anyone asserting it.
+  passWrites(g: g, pass: shadow, resource: shadowId, access: accAttachmentWrite)
+  passReads(g: g, pass: scene, resource: shadowId, access: accSampledRead)
+  passWrites(g: g, pass: scene, resource: hdrId, access: accAttachmentWrite)
+  passWrites(g: g, pass: scene, resource: depthId, access: accAttachmentWrite)
+  passWrites(g: g, pass: scene, resource: normalId, access: accAttachmentWrite)
+  passWrites(g: g, pass: scene, resource: velocityId, access: accAttachmentWrite)
+  passWrites(g: g, pass: scene, resource: ambientId, access: accAttachmentWrite)
+  # SSAO reads the prepass, writes half-res AO, then MODIFIES hdrColor by
+  # adding ambient*AO — a read-modify-write the graph can state honestly.
+  passReads(g: g, pass: ssao, resource: depthId, access: accSampledRead)
+  passReads(g: g, pass: ssao, resource: normalId, access: accSampledRead)
+  passReads(g: g, pass: ssao, resource: ambientId, access: accSampledRead)
+  passWrites(g: g, pass: ssao, resource: aoId, access: accAttachmentWrite)
+  passModifies(g: g, pass: ssao, resource: hdrId, access: accAttachmentRead)
+  passReads(g: g, pass: taa, resource: hdrId, access: accSampledRead)
+  passReads(g: g, pass: taa, resource: velocityId, access: accSampledRead)
+  passWrites(g: g, pass: taa, resource: taaId, access: accAttachmentWrite)
+  passReads(g: g, pass: tonemap, resource: taaId, access: accSampledRead)
+  passWrites(g: g, pass: tonemap, resource: colorId, access: accAttachmentWrite)
+  passModifies(g: g, pass: ui, resource: colorId, access: accAttachmentRead)
+  passReads(g: g, pass: present, resource: colorId, access: accAttachmentRead)
+
+  ret Renderer3d {
+    graph: own g,
+    sceneColor: colorId,
+    hdrColor: hdrId,
+    sceneDepth: depthId,
+    sceneNormal: normalId,
+    sceneVelocity: velocityId,
+    scenePass: scene,
+    presentPass: present,
+    uiPass: ui,
+    hasUi: true
+  }
+}
+
+# Compile the graph once at startup. Returns a rendergraph status code;
+# a non-ok result means the frame declaration is malformed and the caller
+# should not render.
+func compileRenderer(r: mod Renderer3d) pub ret Int {
+  ret compile(g: r.graph)
+}
+
+# Execute one forward frame by walking the DERIVED order and dispatching on tag.
+# The scene pass fills from the World3d ECS queries (gpu3d.renderSceneWorld); every
+# other tag is scene-independent post-processing. Per-pass inputs arrive through
+# this call rather than captured state, because passes cannot carry closures.
+func renderFrameWorld(r: view Renderer3d, world: view World3d, camera: view Camera3d, light: view Light3d, aspect: view Float, time: view Float) pub {
+  var i: Int = 0
+  loop i < r.graph.order.length {
+    let p: Int = graphIntAt(values: r.graph.order, index: i)
+    let tag: Int = graphPassAt(values: r.graph.passes, index: p).tag
+    if tag is tagScenePass {
+      beginScene(camera: camera, light: light, aspect: aspect, time: time)
+      renderSceneWorld(world: world)
+    }
+    if tag is tagSsao {
+      ssaoPass()
+    }
+    if tag is tagTaa {
+      taaPass()
+    }
+    if tag is tagTonemap {
+      tonemapPass()
+    }
+    if tag is tagPresent {
+      endFrame()
+    }
+    i = i + 1
+  }
+}
+
+# ----- app-driven dispatch -------------------------------------------
+# Some passes cannot be executed by this module without breaking layering:
+# a UI overlay needs lib/ui types, and a renderer library must not depend
+# on the UI. Rather than smuggling UI knowledge in here (or reaching for
+# callbacks), expose the DERIVED order so the layer that knows all the
+# passes can dispatch them itself. Order still comes from the graph; only
+# the switch moves to where the knowledge is.
+func frameOrderLength(r: view Renderer3d) pub ret Int {
+  ret r.graph.order.length
+}
+
+func frameTagAt(r: view Renderer3d, i: view Int) pub ret Int {
+  let p: Int = graphIntAt(values: r.graph.order, index: i)
+  ret graphPassAt(values: r.graph.passes, index: p).tag
+}
+
+# Frame structure for logs/diagnostics — the graph describing itself.
+func describeFrame(r: view Renderer3d) pub ret String {
+  ret describe(g: r.graph)
+}

@@ -12,15 +12,15 @@ open sdfText
 #   rae run --target compiled main.rae
 import core
 import gpu
-import sdl3
-import keys
+import Sdl3
+import Keys
 import image
 import filesystem
 import sdfText
-import vec3
-import scene
-import camera
-import bvh
+import Vec3
+import Scene
+import Camera
+import Bvh
 
 type GpuRT {
     sceneBuf: Int
@@ -206,26 +206,26 @@ func main() {
     # the opposite side from where the scene used to be viewed. yaw/pitch are
     # derived from the look target so the angle stays correct if the position
     # is retuned; WASD / arrows / mouse drive them from here.
-    var camPos: Vec3 = vec3.create(x: 2.4, y: 2.4, z: 1.85)
-    let lookTarget: Vec3 = vec3.create(x: -0.3, y: -0.1, z: 0.15)
-    let toTarget: Vec3 = vec3.vsub(a: lookTarget, b: camPos)
+    var camPos: Vec3 = Vec3.create(x: 2.4, y: 2.4, z: 1.85)
+    let lookTarget: Vec3 = Vec3.create(x: -0.3, y: -0.1, z: 0.15)
+    let toTarget: Vec3 = Vec3.vsub(a: lookTarget, b: camPos)
     var yaw: Float = math.atan2(y: toTarget.y, x: toTarget.x)
     var pitch: Float = math.atan2(y: toTarget.z, x: math.sqrt(x: toTarget.x * toTarget.x + toTarget.y * toTarget.y))
     let moveStep: Float = 0.08
     let rotStep: Float = 0.03
     let mouseSens: Float = 0.005
-    let worldUp: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
-    var fwd: Vec3 = vec3.create(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
+    let worldUp: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+    var fwd: Vec3 = Vec3.create(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
 
     let dir: String = "examples/53_raytracer_webgpu_text/"
     let wgsl: String = rae_ext_rae_sys_read_file(path: "{dir}accum.wgsl")
     let font: SdfFont = loadSdfFont(jsonPath: "{dir}assets/Roboto-Regular.mtsdf.json", rawAtlasPath: "{dir}assets/Roboto-Regular.mtsdf.raw")
 
-    sdl3.initWindow(width: 1280, height: 720, title: "Rae raytracer — interactive GPU + MTSDF text")
-    sdl3.setTargetFPS(fps: 0)
+    Sdl3.initWindow(width: 1280, height: 720, title: "Rae raytracer — interactive GPU + MTSDF text")
+    Sdl3.setTargetFPS(fps: 0)
 
     let aspect: Float = 16.0 / 9.0
-    var cam: Camera = buildCamera(pos: camPos, target: vec3.vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
+    var cam: Camera = buildCamera(pos: camPos, target: Vec3.vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
 
     var hiRes: Bool = true
     var width: Int = 1920
@@ -249,34 +249,34 @@ func main() {
 
     var sampleIndex: Int = 0
     var frame: Int = 0
-    var prevMouseX: Int = sdl3.getMouseX()
-    var prevMouseY: Int = sdl3.getMouseY()
+    var prevMouseX: Int = Sdl3.getMouseX()
+    var prevMouseY: Int = Sdl3.getMouseY()
     var lastMs: Int = nowMs()
     var fps: Float = 0.0
     var spp: Int = 1               # adaptive samples/frame (no hard cap; see below)
     let helper: String = "WASD/E-Q move   arrows/drag look   1-6 scene   P quality   F2 save PNG"
     var saveRequested: Bool = false
 
-    loop not sdl3.shouldClose() {
+    loop not Sdl3.shouldClose() {
         var moved: Bool = false
 
         # F2 saves the current frame as a PNG. Defer the actual save to just
         # after the GPU download (below), while fb still holds the raw raytraced
         # image — saving here would capture the PREVIOUS frame with the text
         # overlay composited in.
-        if sdl3.isKeyPressed(key: keys.keyF2) { saveRequested = true }
+        if Sdl3.isKeyPressed(key: Keys.keyF2) { saveRequested = true }
 
         # Scene switch — number keys. 1 = Scene One (lights + cube), 2 = Book
         # (~480 spheres), 3 = bunny mesh (~4968 tris via BVH), and the original
         # step scenes: 4 = diffuse (steps 1-2), 5 = materials (step 3),
         # 6 = lights (step 5). Rebuild geometry + reset accumulation.
         var newScene: Int = sceneId
-        if sdl3.isKeyPressed(key: keys.key1) { newScene = 1 }
-        if sdl3.isKeyPressed(key: keys.key2) { newScene = 2 }
-        if sdl3.isKeyPressed(key: keys.key3) { newScene = 3 }
-        if sdl3.isKeyPressed(key: keys.key4) { newScene = 4 }
-        if sdl3.isKeyPressed(key: keys.key5) { newScene = 5 }
-        if sdl3.isKeyPressed(key: keys.key6) { newScene = 6 }
+        if Sdl3.isKeyPressed(key: Keys.key1) { newScene = 1 }
+        if Sdl3.isKeyPressed(key: Keys.key2) { newScene = 2 }
+        if Sdl3.isKeyPressed(key: Keys.key3) { newScene = 3 }
+        if Sdl3.isKeyPressed(key: Keys.key4) { newScene = 4 }
+        if Sdl3.isKeyPressed(key: Keys.key5) { newScene = 5 }
+        if Sdl3.isKeyPressed(key: Keys.key6) { newScene = 6 }
         if newScene > sceneId or newScene < sceneId {
             sceneId = newScene
             boxes = createList(Box, cap: 0)
@@ -306,7 +306,7 @@ func main() {
         }
 
         # P toggles half-res <-> Full HD; rebuild buffers + framebuffer, reset.
-        if sdl3.isKeyPressed(key: keys.keyP) {
+        if Sdl3.isKeyPressed(key: Keys.keyP) {
             hiRes = not hiRes
             if hiRes { width = 1920  height = 1080 } else { width = 960  height = 540 }
             params.set(index: 0, value: width)
@@ -319,21 +319,21 @@ func main() {
             spp = 1            # re-ramp from scratch at the new resolution
         }
 
-        if sdl3.isKeyDown(key: keys.keyW) { camPos = vec3.vadd(a: camPos, b: vec3.vscale(a: fwd, s: moveStep))  moved = true }
-        if sdl3.isKeyDown(key: keys.keyS) { camPos = vec3.vsub(a: camPos, b: vec3.vscale(a: fwd, s: moveStep))  moved = true }
-        let rgt: Vec3 = vec3.vnorm(a: vec3.vcross(a: fwd, b: worldUp))
-        if sdl3.isKeyDown(key: keys.keyD) { camPos = vec3.vadd(a: camPos, b: vec3.vscale(a: rgt, s: moveStep))  moved = true }
-        if sdl3.isKeyDown(key: keys.keyA) { camPos = vec3.vsub(a: camPos, b: vec3.vscale(a: rgt, s: moveStep))  moved = true }
-        if sdl3.isKeyDown(key: keys.keyE) { camPos = vec3.vadd(a: camPos, b: vec3.vscale(a: worldUp, s: moveStep))  moved = true }
-        if sdl3.isKeyDown(key: keys.keyQ) { camPos = vec3.vsub(a: camPos, b: vec3.vscale(a: worldUp, s: moveStep))  moved = true }
-        if sdl3.isKeyDown(key: keys.keyRight) { yaw = yaw - rotStep  moved = true }
-        if sdl3.isKeyDown(key: keys.keyLeft) { yaw = yaw + rotStep  moved = true }
-        if sdl3.isKeyDown(key: keys.keyUp) { pitch = pitch + rotStep  moved = true }
-        if sdl3.isKeyDown(key: keys.keyDown) { pitch = pitch - rotStep  moved = true }
+        if Sdl3.isKeyDown(key: Keys.keyW) { camPos = Vec3.vadd(a: camPos, b: Vec3.vscale(a: fwd, s: moveStep))  moved = true }
+        if Sdl3.isKeyDown(key: Keys.keyS) { camPos = Vec3.vsub(a: camPos, b: Vec3.vscale(a: fwd, s: moveStep))  moved = true }
+        let rgt: Vec3 = Vec3.vnorm(a: Vec3.vcross(a: fwd, b: worldUp))
+        if Sdl3.isKeyDown(key: Keys.keyD) { camPos = Vec3.vadd(a: camPos, b: Vec3.vscale(a: rgt, s: moveStep))  moved = true }
+        if Sdl3.isKeyDown(key: Keys.keyA) { camPos = Vec3.vsub(a: camPos, b: Vec3.vscale(a: rgt, s: moveStep))  moved = true }
+        if Sdl3.isKeyDown(key: Keys.keyE) { camPos = Vec3.vadd(a: camPos, b: Vec3.vscale(a: worldUp, s: moveStep))  moved = true }
+        if Sdl3.isKeyDown(key: Keys.keyQ) { camPos = Vec3.vsub(a: camPos, b: Vec3.vscale(a: worldUp, s: moveStep))  moved = true }
+        if Sdl3.isKeyDown(key: Keys.keyRight) { yaw = yaw - rotStep  moved = true }
+        if Sdl3.isKeyDown(key: Keys.keyLeft) { yaw = yaw + rotStep  moved = true }
+        if Sdl3.isKeyDown(key: Keys.keyUp) { pitch = pitch + rotStep  moved = true }
+        if Sdl3.isKeyDown(key: Keys.keyDown) { pitch = pitch - rotStep  moved = true }
 
-        let mx: Int = sdl3.getMouseX()
-        let my: Int = sdl3.getMouseY()
-        if sdl3.isMouseButtonDown(button: 0) {
+        let mx: Int = Sdl3.getMouseX()
+        let my: Int = Sdl3.getMouseY()
+        if Sdl3.isMouseButtonDown(button: 0) {
             let dx: Int = mx - prevMouseX
             let dy: Int = my - prevMouseY
             if dx > 0 or dx < 0 { yaw = yaw - dx.toFloat() * mouseSens  moved = true }
@@ -345,8 +345,8 @@ func main() {
         if moved {
             if pitch > 1.5 { pitch = 1.5 }
             if pitch < -1.5 { pitch = -1.5 }
-            fwd = vec3.create(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
-            cam = buildCamera(pos: camPos, target: vec3.vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
+            fwd = Vec3.create(x: math.cos(x: pitch) * math.cos(x: yaw), y: math.cos(x: pitch) * math.sin(x: yaw), z: math.sin(x: pitch))
+            cam = buildCamera(pos: camPos, target: Vec3.vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
             gpu.writeF32(buf: rt.sceneBuf, data: sceneFloats(cam: cam, world: world).data, count: 19 + world.length * 10)
             sampleIndex = 0
         }
@@ -401,11 +401,11 @@ func main() {
         let fpsW: Float = sdfMeasureText(font: font, text: fpsStr, sizePx: textPx)
         drawLabel(fb: fb.data, w: width, h: height, font: font, text: fpsStr, x: width.toFloat() - fpsW - 12.0, y: baseY, px: textPx)
 
-        sdl3.updatePixels(pixels: fb.data, w: width, h: height)
-        sdl3.present()
+        Sdl3.updatePixels(pixels: fb.data, w: width, h: height)
+        Sdl3.present()
         sampleIndex = sampleIndex + spp
         frame = frame + 1
     }
     gpu.reset()
-    sdl3.closeWindow()
+    Sdl3.closeWindow()
 }

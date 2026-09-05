@@ -8,13 +8,13 @@
 # are produced by passes not yet migrated); Rae reads them through accessors.
 import core
 import gbuffer
-import scene3d
-import vec3
-import sky
+import Scene3d
+import Vec3
+import Sky
 open gbuffer
-open scene3d
-open vec3
-open sky
+open Scene3d
+open Vec3
+open Sky
 open webgpu/webgpu
 import webgpu/context
 
@@ -141,8 +141,8 @@ type ColorGrade {
 func neutralGrade() pub ret ColorGrade {
   ret ColorGrade {
     pbrNeutral: false, contrast: 1.0, vibrance: 0.0, saturation: 1.0,
-    shadowTint: vec3.create(x: 0.0, y: 0.0, z: 0.0), shadowTintStrength: 0.0,
-    highlightTint: vec3.create(x: 0.0, y: 0.0, z: 0.0), highlightTintStrength: 0.0
+    shadowTint: Vec3.create(x: 0.0, y: 0.0, z: 0.0), shadowTintStrength: 0.0,
+    highlightTint: Vec3.create(x: 0.0, y: 0.0, z: 0.0), highlightTintStrength: 0.0
   }
 }
 
@@ -355,8 +355,8 @@ func lighting(cache: mod LightPassCache, camX: copy Float, camY: copy Float, cam
 
 # Public: lighting with a bound sky environment (Hosek ambient + background).
 func lightingPassSky(cache: mod LightPassCache, camera: view Camera3d, light: view Light3d, sky: view Sky) pub {
-  let up: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 1.0)
-  let down: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0)
+  let up: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  let down: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0)
   # DESATURATED BY THE SKY'S OWN SETTING. The sky's irradiance is THE ambient
   # term here, so a physically blue daylight sky lights every surface blue --
   # measured, a white ground albedo came out (0.59, 0.71, 0.96), which makes warm

@@ -1,0 +1,115 @@
+open ui/Ecs
+# Layout, palette, and asset-path constants for the music-player demo.
+# Kept in one file so tweaking the look or repointing assets is a single
+# place to edit. Auto-imported by every other file in this project.
+import ui/Theme
+import ui/Spacing
+
+# ----- screen + spacing ---------------------------------------------
+# Window dimensions are logical points for the SDL3 window. Scene/layout
+# dimensions below are design units (du), rendered into this window by
+# gpu2d's design-resolution transform.
+const windowW: Float = 498.0
+const windowH: Float = 1079.0
+const phoneFrameW: Float = 1080.0
+const phoneFrameH: Float = 2280.0
+# Design units per logical point — the one knob of the new coordinate
+# system (rae/docs/ui-coordinate-and-responsive-layout.md). `designScale`
+# is the one-time migration multiplier from the old 498-wide scene space.
+const unitScale: Float = 3.0
+const designScale: Float = 2.1686746987951806
+const legacySceneScale: Float = 1.0
+# outerPad is the screen-edge inset — domain-specific, not a generic
+# spacing step. outerGap is the canonical "section gap" inside a
+# screen; its numeric value is spaceM, but the C backend can't
+# initialise a module-level `let` from another module-level `let`,
+# so we keep it as a literal and rely on the spaceM comment to
+# document the intent.
+const outerPad: Float = 43.373493975903614
+const outerGap: Float = 26.024096385542165  # old spaceM
+
+# ----- per-section heights ------------------------------------------
+const topBarH: Float = 104.09638554216868
+const heroBlockH: Float = 208.19277108433735
+const albumThumbSize: Float = 182.16867469879517
+const actionsRowH: Float = 95.42168674698796
+const pillsRowH: Float = 121.44578313253012
+const trackRowH: Float = 130.12048192771084
+const trackGap: Float = 8.674698795180722  # old spaceXS
+const trackRowCount: Int = 5
+const miniPlayerH: Float = 173.49397590361446
+# 10% taller than the legacy tab bar so the floating iOS-style capsule
+# has more top breathing room while the icon+label stack stays centered.
+const navTabsH: Float = 190.84337349397592
+
+# ----- palette --------------------------------------------------------
+# The app's named colors are derived LIVE from the active theme — there is no
+# cached module-global palette state (#789: no globals). Each accessor maps an
+# app color ROLE to a theme color NAME; call it with the current theme, which
+# every builder already carries as `world.theme.active` (or, before the world is
+# built, `appState.theme.active`). A theme toggle changes the colors on the very
+# next read, so no explicit "sync" step is needed. `colorByName` is a cheap
+# name lookup in the active theme's table.
+func palettePageBg(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "background") }
+func paletteSurface(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "surface") }
+func paletteHero(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "textMuted") }
+func paletteIconTint(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "textPrimary") }
+func palettePill(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "accent") }
+func paletteOutline(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "outline") }
+func paletteLightText(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "accentText") }
+func paletteImageTint(theme: view Theme) ret RgbaColor { ret colorByName(theme: theme, name: "imageTint") }
+
+# ----- asset paths --------------------------------------------------
+let trackRowPath: String = "examples/106_mobile_ui/assets/scenes/track-row.raescene"
+let navTabsPath: String = "examples/106_mobile_ui/assets/scenes/nav-tabs.raescene"
+let navTabPath: String = "examples/106_mobile_ui/assets/scenes/nav-tab.raescene"
+let miniPlayerPath: String = "examples/106_mobile_ui/assets/scenes/mini-player.raescene"
+let nowPlayingPath: String = "examples/106_mobile_ui/assets/scenes/music-player-now-playing.raescene"
+let albumPath: String = "examples/106_mobile_ui/assets/scenes/album.raescene"
+let canvasPath: String = "examples/106_mobile_ui/assets/scenes/canvas.raescene"
+let themePath: String = "examples/106_mobile_ui/assets/scenes/theme.raescene"
+let homePath: String = "examples/106_mobile_ui/assets/scenes/home.raescene"
+
+# Per-album data. Each `albumsFolder/<stem>/` carries `cover.jpg` and
+# `album.json`. The `album_loader.rae` module walks this folder at
+# boot. See `tools/migrate_to_album_folders.py` for the layout.
+let albumsFolder: String = "examples/106_mobile_ui/assets/albums"
+# Persistent UI state — active album stem, active track index, and
+# playback position. Read at boot, written on user action.
+let stateFilePath: String = "examples/106_mobile_ui/assets/state.json"
+# Persistent debug-dialog flag toggles (labels / input outlines). Read at
+# boot, written whenever a flag is toggled in the debug menu.
+let debugFlagsFilePath: String = "examples/106_mobile_ui/assets/debug_flags.json"
+# Stem of the album whose cover we use as the (placeholder) profile
+# avatar. Picked here so swapping it doesn't require editing
+# `profile_view.rae`.
+let avatarAlbumStem: String = "the_beaches-jocelyn"
+
+const robotoFontSlot: Int = 0
+const materialIconFontSlot: Int = 1
+let robotoFontPath: String = "examples/106_mobile_ui/assets/Roboto-Regular.ttf"
+let materialIconFontPath: String = "examples/106_mobile_ui/assets/MaterialIconsRound-Regular.otf"
+let robotoMsdfJsonPath: String = "examples/106_mobile_ui/assets/Roboto-Regular.mtsdf.json"
+
+# Visible build version. Bumped manually when the demo's behaviour
+# changes meaningfully — drawn in white above the debug button so a
+# tester can confirm at a glance which build is running.
+const appVersion: Int = 1
+
+# ----- page ids -------------------------------------------------------
+# Pages mount their nodeIds under `"<pageId>/<nodeId>"` keys in
+# `world.nodeIds` so multiple resident pages don't collide. Keep
+# these in one place so the producer (mount sites) and consumer
+# (`playback.rae`, future page-aware lookups) can never drift.
+let albumPageId: String = "album"
+let playerPageId: String = "player"
+let miniPlayerPageId: String = "mini-player"
+let homePageId: String = "home"
+let libraryPageId: String = "library"
+let searchPageId: String = "search"
+let profilePageId: String = "profile"
+let historyPageId: String = "history"
+let dockPageId: String = "dock"
+let navTabsPageId: String = "nav-tabs"
+let backButtonPageId: String = "back-button"
+let canvasPageId: String = "canvas"

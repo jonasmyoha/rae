@@ -21,14 +21,14 @@
 #   rae run --target compiled main.rae   (recommended — real threads, fast)
 
 import core
-import sdl3
-import keys
+import Sdl3
+import Keys
 import image
 import filesystem
-import vec3
-import scene
-import camera
-import render
+import Vec3
+import Scene
+import Camera
+import Render
 
 # A tile's pixel bounds, unpacked by value from quadTile's 4-int List so the
 # constant-index reads are optional-checked once, in one place.
@@ -60,8 +60,8 @@ func main() {
 
     let world: List(Sphere) = buildScene()
     let aspect: Float = width.toFloat() / height.toFloat()
-    let camPos: Vec3 = vec3.create(x: -1.6, y: -1.2, z: 0.6)
-    let camTarget: Vec3 = vec3.create(x: 0.0, y: 1.0, z: 0.0)
+    let camPos: Vec3 = Vec3.create(x: -1.6, y: -1.2, z: 0.6)
+    let camTarget: Vec3 = Vec3.create(x: 0.0, y: 1.0, z: 0.0)
     let cam: Camera = buildCamera(pos: camPos, target: camTarget, vfovDeg: 45.0, aperture: 0.06, aspect: aspect)
 
     let fb: List(Int) = createList(cap: width * height)
@@ -71,8 +71,8 @@ func main() {
         i = i + 1
     }
 
-    sdl3.initWindow(width: width, height: height, title: "Rae raytracer — step 3 (materials + camera + threads)")
-    sdl3.setTargetFPS(fps: 60)
+    Sdl3.initWindow(width: width, height: height, title: "Rae raytracer — step 3 (materials + camera + threads)")
+    Sdl3.setTargetFPS(fps: 60)
 
     # Four quadrants, one worker thread each (equal 960x540 blocks at Full HD).
     let halfW: Int = width / 2
@@ -91,8 +91,8 @@ func main() {
     var n3: Int = 0
     let startMs: Int = nowMs()
     var doneMs: Int = 0
-    loop not sdl3.shouldClose() {
-        if sdl3.isKeyPressed(key: keys.keyF2) { let s: Bool = image.savePng(path: filesystem.renderPath(stem: "rae_render"), pixels: fb.data, width: width, height: height) }
+    loop not Sdl3.shouldClose() {
+        if Sdl3.isKeyPressed(key: Keys.keyF2) { let s: Bool = image.savePng(path: filesystem.renderPath(stem: "rae_render"), pixels: fb.data, width: width, height: height) }
 
         if n0 < t0 or n1 < t1 or n2 < t2 or n3 < t3 {
             var c0: Int = n0
@@ -148,17 +148,17 @@ func main() {
             }
         }
 
-        sdl3.updatePixels(pixels: fb.data, w: width, h: height)
-        sdl3.present()
+        Sdl3.updatePixels(pixels: fb.data, w: width, h: height)
+        Sdl3.present()
         let done: Int = n0 + n1 + n2 + n3
         let total: Int = t0 + t1 + t2 + t3
         var pct: Int = done * 100 / total
         if pct > 100 { pct = 100 }
         if doneMs > 0 {
-            sdl3.setTitle(title: "Rae step 3 (SDL3) | 4 threads, 1 per quadrant | {width}x{height} | done in {doneMs}ms")
+            Sdl3.setTitle(title: "Rae step 3 (SDL3) | 4 threads, 1 per quadrant | {width}x{height} | done in {doneMs}ms")
         } else {
-            sdl3.setTitle(title: "Rae step 3 (SDL3) | 4 threads, 1 per quadrant | {width}x{height} | {pct}%")
+            Sdl3.setTitle(title: "Rae step 3 (SDL3) | 4 threads, 1 per quadrant | {width}x{height} | {pct}%")
         }
     }
-    sdl3.closeWindow()
+    Sdl3.closeWindow()
 }

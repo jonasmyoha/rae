@@ -1,0 +1,480 @@
+open ui/Ecs
+import ui/WidgetStyleSystem/WidgetStyleSystem
+# Playlists — ordered curation lists that can reference songs, albums,
+# and other playlists by id.
+#
+# ── Shared "collection" data model ───────────────────────────────────
+# Albums and playlists are the same shape on disk: a small envelope
+# plus an ordered `items` array. This is deliberately normalised so the
+# store could move behind a web API / SQLite later without reshaping the
+# domain — an `entities` table (id, type, title, …) and an `items` table
+# (parent_id, position, kind, ref) map onto it 1:1.
+#
+#   Album   (catalog, read-only): { "type":"album",   "id":<stem>,  "title":<album>, "items":[<track>, …] }
+#   Playlist(user-curated)       : { "type":"playlist","id":<id>,    "title":<title>, "items":[<ref>,  …] }
+#
+# A playlist item is a typed reference (a "link"), never an embedded
+# copy — so the same song/album/playlist can appear in many lists and
+# edits stay in one place:
+#
+#   { "kind": "track",    "albumStem": "mitski-puberty", "trackIndex": 2 }
+#   { "kind": "album",    "albumStem": "charlie_xcx-brat" }
+#   { "kind": "playlist", "playlistId": "favorites" }
+#
+# The built-in "Liked Songs" playlist (id "liked") is what the heart
+# button on the mini-player / now-playing screen toggles `track` refs in.
+#
+# Two locations on disk:
+#   * `assets/playlists/<id>.json`        — read-only default shipped with code.
+#   * `app_cache/metadata/playlists/<id>` — user-mutated state, gitignored.
+#                                           loaded first; falls back to old
+#                                           temp/ state, then the asset.
+#
+# Backwards compatible: a legacy `"tracks": [{albumStem,trackIndex}]`
+# array (no `kind`) is still read as a list of `track` items.
+
+import core
+import Json
+import fs
+import sys
+import ui/Components
+import ui/Ecs
+open ecs/Entity
+
+let playlistsAssetDir: String = "examples/106_mobile_ui/assets/playlists"
+
+# Item "kind" tags. Kept as strings so they round-trip to JSON / SQL
+# verbatim and an unknown future kind degrades to "skip" rather than
+# crashing an older client.
+let playlistKindTrack: String = "track"
+let playlistKindAlbum: String = "album"
+let playlistKindPlaylist: String = "playlist"
+
+# A single typed reference inside a playlist. Only the fields relevant
+# to `kind` are meaningful:
+#   kind "track"    → albumStem + trackIndex
+#   kind "album"    → albumStem  (trackIndex = -1)
+#   kind "playlist" → playlistId
+type PlaylistItem {
+  kind: String
+  albumStem: String
+  trackIndex: Int
+  playlistId: String
+}
+
+type Playlist {
+  id: String
+  title: String
+  items: List(PlaylistItem)
+}
+
+func createPlaylist(id: own String, title: own String) pub ret Playlist {
+  ret Playlist {
+    id: own id
+    title: own title
+    items: createList(PlaylistItem, cap: 8)
+  }
+}
+
+# Construct a `track` reference item (the only kind the heart button
+# creates today).
+func makeTrackItem(stem: view String, trackIndex: view Int) ret PlaylistItem {
+  let copiedStem: String = "{stem}"
+  let kind: String = "{playlistKindTrack}"
+  let noPlaylist: String = ""
+  ret PlaylistItem {
+    kind: own kind
+    albumStem: own copiedStem
+    trackIndex: trackIndex
+    playlistId: own noPlaylist
+  }
+}
+
+# Return the index of the `track` ref matching (stem, trackIndex), or
+# -1 if absent. Linear scan; even a heavy Liked playlist is small.
+func playlistFindTrack(playlist: view Playlist, stem: view String, trackIndex: view Int) pub ret Int {
+  let n: Int = playlist.items.length
+  var i: Int = 0
+  loop i < n {
+    let it: PlaylistItem = rae_ext_rae_buf_get(buf: playlist.items.data, index: i)
+    if it.kind is playlistKindTrack {
+      if it.trackIndex is trackIndex {
+        if it.albumStem is stem {
+          ret i
+        }
+      }
+    }
+    i = i + 1
+  }
+  ret -1
+}
+
+func playlistContains(playlist: view Playlist, stem: view String, trackIndex: view Int) pub ret Bool {
+  ret playlistFindTrack(playlist: playlist, stem: stem, trackIndex: trackIndex) >= 0
+}
+
+# Toggle a track's membership. Returns `true` when the track is now
+# present (was added), `false` when it was removed.
+func playlistToggleTrack(playlist: mod Playlist, stem: view String, trackIndex: view Int) pub ret Bool {
+  let existing: Int = playlistFindTrack(playlist: playlist, stem: stem, trackIndex: trackIndex)
+  if existing >= 0 {
+    playlist.items.remove(index: existing)
+    ret false
+  }
+  let entry: PlaylistItem = makeTrackItem(stem: stem, trackIndex: trackIndex)
+  playlist.items.add(value: own entry)
+  ret true
+}
+
+# Up to `max` distinct album-cover stems backing this playlist, in
+# order — used to compose the 2x2 "playlist cover" grid in the Library.
+# `track` and `album` items contribute their `albumStem`; `playlist`
+# links are skipped (no recursion — avoids cycles, and a nested
+# playlist's own cover would be a grid-of-grids).
+func playlistCoverStems(playlist: view Playlist, max: view Int) pub ret List(String) {
+  let result: List(String) = createList(String, cap: max)
+  let n: Int = playlist.items.length
+  var i: Int = 0
+  loop i < n {
+    if result.length >= max {
+      ret result
+    }
+    let it: PlaylistItem = rae_ext_rae_buf_get(buf: playlist.items.data, index: i)
+    let isTrack: Bool = it.kind is playlistKindTrack
+    let isAlbum: Bool = it.kind is playlistKindAlbum
+    if isTrack or isAlbum {
+      if it.albumStem.length() > 0 {
+        # Dedup so a playlist of many songs from one album still
+        # contributes a single cover to the grid.
+        var already: Bool = false
+        loop let existing: view String in result {
+          if existing is it.albumStem {
+            already = true
+          }
+        }
+        if already is false {
+          let copied: String = "{it.albumStem}"
+          result.add(value: own copied)
+        }
+      }
+    }
+    i = i + 1
+  }
+  ret result
+}
+
+# Path the user-mutable copy lives at.
+func playlistTempPath(id: view String) pub ret String {
+  ret cachedPlaylistPath(id: id)
+}
+
+# Default-ship asset path.
+func playlistAssetPath(id: view String) pub ret String {
+  let suffix: String = ".json"
+  ret "{playlistsAssetDir}/{id}{suffix}"
+}
+
+# Read one item object. `kind` defaults to "track" so the legacy
+# `tracks` array (which had no `kind`) parses unchanged.
+func parsePlaylistItem(doc: view JsonDoc, entry: view JsonValue) ret PlaylistItem {
+  let kindKey: String = "kind"
+  let kindIdx: Int = Json.field(doc: doc, this: entry, key: kindKey)
+  let defaultKind: String = "{playlistKindTrack}"
+  var kind: String = defaultKind
+  if kindIdx >= 0 {
+    let kindVal: JsonValue = Json.jsonValueAt(doc: doc, idx: kindIdx)
+    kind = Json.jsonString(this: kindVal, fallback: defaultKind)
+  }
+  let stemKey: String = "albumStem"
+  let stemFieldIdx: Int = Json.field(doc: doc, this: entry, key: stemKey)
+  let emptyStem: String = ""
+  var stem: String = emptyStem
+  if stemFieldIdx >= 0 {
+    let stemVal: JsonValue = Json.jsonValueAt(doc: doc, idx: stemFieldIdx)
+    stem = Json.jsonString(this: stemVal, fallback: emptyStem)
+  }
+  let idxKey: String = "trackIndex"
+  let idxFieldIdx: Int = Json.field(doc: doc, this: entry, key: idxKey)
+  var ti: Int = 0 - 1
+  if idxFieldIdx >= 0 {
+    let idxVal: JsonValue = Json.jsonValueAt(doc: doc, idx: idxFieldIdx)
+    ti = Json.jsonInt(this: idxVal, fallback: 0 - 1)
+  }
+  let plKey: String = "playlistId"
+  let plFieldIdx: Int = Json.field(doc: doc, this: entry, key: plKey)
+  let emptyPl: String = ""
+  var plId: String = emptyPl
+  if plFieldIdx >= 0 {
+    let plVal: JsonValue = Json.jsonValueAt(doc: doc, idx: plFieldIdx)
+    plId = Json.jsonString(this: plVal, fallback: emptyPl)
+  }
+  ret PlaylistItem {
+    kind: own kind
+    albumStem: own stem
+    trackIndex: ti
+    playlistId: own plId
+  }
+}
+
+# True when `item` carries enough to be a usable reference of its kind.
+func playlistItemValid(item: view PlaylistItem) ret Bool {
+  if item.kind is playlistKindPlaylist {
+    ret item.playlistId.length() > 0
+  }
+  ret item.albumStem.length() > 0
+}
+
+# Parse a single Playlist from its JSON source. Returns an empty
+# playlist (with the requested id) if parsing fails — callers can
+# treat a parse error the same as "fresh user state".
+func parsePlaylist(source: view String, id: view String) pub ret Playlist {
+  let doc: JsonDoc = Json.parseJson(source: source)
+  let fallbackTitle: String = "Playlist"
+  if doc.ok is false {
+    log("[playlist] parse error in '{id}' at byte {doc.errorPos}")
+    let copiedId: String = "{id}"
+    ret createPlaylist(id: own copiedId, title: own fallbackTitle)
+  }
+  let root: JsonValue = Json.root(doc: doc)
+  let titleKey: String = "title"
+  let titleIdx: Int = Json.field(doc: doc, this: root, key: titleKey)
+  let titleVal: JsonValue = Json.jsonValueAt(doc: doc, idx: titleIdx)
+  let title: String = Json.jsonString(this: titleVal, fallback: fallbackTitle)
+
+  let copiedId: String = "{id}"
+  let pl: Playlist = createPlaylist(id: own copiedId, title: own title)
+
+  # Prefer the new `items` array; fall back to the legacy `tracks`
+  # array (parsed identically — its entries lack `kind`, which
+  # `parsePlaylistItem` defaults to "track").
+  let itemsKey: String = "items"
+  var arrIdx: Int = Json.field(doc: doc, this: root, key: itemsKey)
+  if arrIdx < 0 {
+    let tracksKey: String = "tracks"
+    arrIdx = Json.field(doc: doc, this: root, key: tracksKey)
+  }
+  if arrIdx < 0 {
+    ret pl
+  }
+  let arrVal: JsonValue = Json.jsonValueAt(doc: doc, idx: arrIdx)
+  let n: Int = Json.arrayLen(this: arrVal)
+  var i: Int = 0
+  loop i < n {
+    let entry: JsonValue = Json.arrayAt(doc: doc, this: arrVal, idx: i)
+    let item: PlaylistItem = parsePlaylistItem(doc: doc, entry: entry)
+    if playlistItemValid(item: item) {
+      pl.items.add(value: own item)
+    }
+    i = i + 1
+  }
+  ret pl
+}
+
+# Load a playlist by id. Prefers the user-mutable copy under app_cache; falls
+# back to the old temp path, then the read-only asset default; finally creates
+# an empty one with the given title if none exists.
+func loadPlaylist(id: view String, defaultTitle: view String) pub ret Playlist {
+  let tempPath: String = playlistTempPath(id: id)
+  let tempSource: String = rae_ext_rae_sys_read_file(path: tempPath)
+  if tempSource.length() > 0 {
+    log("[playlist] restored '{id}' from {tempPath}")
+    ret parsePlaylist(source: tempSource, id: id)
+  }
+  let legacyPath: String = legacyPlaylistPath(id: id)
+  let legacySource: String = rae_ext_rae_sys_read_file(path: legacyPath)
+  if legacySource.length() > 0 {
+    log("[playlist] restored '{id}' from {legacyPath}")
+    let migrated: Playlist = parsePlaylist(source: legacySource, id: id)
+    savePlaylist(playlist: migrated)
+    ret migrated
+  }
+  let assetPath: String = playlistAssetPath(id: id)
+  let assetSource: String = rae_ext_rae_sys_read_file(path: assetPath)
+  if assetSource.length() > 0 {
+    log("[playlist] using ship default for '{id}' at {assetPath}")
+    ret parsePlaylist(source: assetSource, id: id)
+  }
+  log("[playlist] no asset or cache for '{id}' — starting empty")
+  let copiedId: String = "{id}"
+  let copiedTitle: String = "{defaultTitle}"
+  ret createPlaylist(id: own copiedId, title: own copiedTitle)
+}
+
+# Convenience: load the canonical "Liked Songs" playlist.
+func loadDefaultLiked() pub ret Playlist {
+  let id: String = "liked"
+  let title: String = "Liked Songs"
+  ret loadPlaylist(id: id, defaultTitle: title)
+}
+
+# Persist `playlist` to its user-mutable app_cache path. Hand-rolled JSON
+# emit — mirrors `saveLibraryToJson` / `saveHistoryToJson`.
+func savePlaylist(playlist: view Playlist) pub {
+  ensureAppCacheDirs()
+  let path: String = playlistTempPath(id: playlist.id)
+  let openBrace: String = "\u{007B}"
+  let closeBrace: String = "\u{007D}"
+  let openBracket: String = "["
+  let closeBracket: String = "]"
+  let nl: String = "\n"
+  let q: String = "\""
+  let colon: String = ":"
+  let comma: String = ","
+  let escapedId: String = Json.escape(s: playlist.id)
+  let escapedTitle: String = Json.escape(s: playlist.title)
+
+  var content: String = ""
+  content = content.concat(other: openBrace).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "type").concat(other: q)
+  content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(other: "playlist").concat(other: q).concat(other: comma).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "id").concat(other: q)
+  content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(other: escapedId).concat(other: q).concat(other: comma).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "title").concat(other: q)
+  content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(other: escapedTitle).concat(other: q).concat(other: comma).concat(other: nl)
+  content = content.concat(other: "  ").concat(other: q).concat(other: "items").concat(other: q)
+  content = content.concat(other: colon).concat(other: " ").concat(other: openBracket).concat(other: nl)
+  let n: Int = playlist.items.length
+  var i: Int = 0
+  loop i < n {
+    let it: PlaylistItem = rae_ext_rae_buf_get(buf: playlist.items.data, index: i)
+    let escapedKind: String = Json.escape(s: it.kind)
+    let escapedPlaylistId: String = Json.escape(s: it.playlistId)
+    let escapedAlbumStem: String = Json.escape(s: it.albumStem)
+    content = content.concat(other: "    ").concat(other: openBrace).concat(other: " ")
+    content = content.concat(other: q).concat(other: "kind").concat(other: q).concat(other: colon).concat(other: " ")
+    content = content.concat(other: q).concat(other: escapedKind).concat(other: q).concat(other: comma).concat(other: " ")
+    if it.kind is playlistKindPlaylist {
+      content = content.concat(other: q).concat(other: "playlistId").concat(other: q).concat(other: colon).concat(other: " ")
+      content = content.concat(other: q).concat(other: escapedPlaylistId).concat(other: q).concat(other: " ")
+    } else {
+      content = content.concat(other: q).concat(other: "albumStem").concat(other: q).concat(other: colon).concat(other: " ")
+      content = content.concat(other: q).concat(other: escapedAlbumStem).concat(other: q).concat(other: comma).concat(other: " ")
+      content = content.concat(other: q).concat(other: "trackIndex").concat(other: q).concat(other: colon).concat(other: " ")
+      content = content.concat(other: "{it.trackIndex}").concat(other: " ")
+    }
+    content = content.concat(other: closeBrace)
+    if i < n - 1 {
+      content = content.concat(other: comma)
+    }
+    content = content.concat(other: nl)
+    i = i + 1
+  }
+  content = content.concat(other: "  ").concat(other: closeBracket).concat(other: nl)
+  content = content.concat(other: closeBrace).concat(other: nl)
+  let ok: Bool = rae_ext_rae_sys_write_file(path: path, content: content)
+  if ok is false {
+    log("[playlist] save failed: {path}")
+  }
+}
+
+# Sync the liked state of the currently-browsed track into every
+# widget that declares a typed (playlists, likedTrack) DataDependency —
+# today the mini-player + now-playing hearts, tagged at mount by
+# `tagLikedHeart`. Data-only: this flips WidgetState.selected; the
+# visual swap (outline/filled glyph, white/coral tint) lives in each
+# heart's StateStyle and is applied by widgetStyleSystem. The liked
+# bit depends on the (stem, trackIndex) pair rather than a revision,
+# so this runs per frame and `setWidgetSelected` early-outs when the
+# bit already matches.
+#
+# Pass empty stem to skip (e.g. before any user navigation).
+func applyLikedToWorld(
+  world: mod UiWorld
+  liked: view Playlist
+  stem: view String
+  trackIndex: view Int
+) pub {
+  if stem.length() is 0 {
+    ret
+  }
+  let isLiked: Bool = playlistContains(playlist: liked, stem: stem, trackIndex: trackIndex)
+  let likedSource: DataResourceId = dataResourcePlaylists()
+  let likedField: DataFieldId = dataFieldLiked()
+  let n: Int = componentCount(this: world.dataDependencies)
+  var i: Int = 0
+  loop i < n {
+    let entity: EntityId = componentEntityAt(this: world.dataDependencies, i: i)
+    var matches: Bool = false
+    if componentHas(this: world.dataDependencies, entity: entity) {
+      let dep: view DataDependency => componentView(this: world.dataDependencies, entity: entity)
+      if dep.resource is likedSource {
+        if dep.field is likedField {
+          matches = true
+        }
+      }
+    }
+    if matches {
+      setWidgetSelected(world: world, entity: entity, selected: isLiked)
+    }
+    i = i + 1
+  }
+}
+
+# Tag one heart/like button as a data-oriented widget: identity, state
+# flags, the (playlists, likedTrack) dependency `applyLikedToWorld`
+# scans for, and the declarative outline/filled + white/coral visuals.
+# Called at mount time by the pages that own a heart. Skips silently
+# when the node isn't in the page (mount failed / legacy scene).
+func tagLikedHeart(
+  world: mod UiWorld
+  pageId: view String
+  nodeId: view String
+  widgetId: view String
+  observedRevision: view Int
+) pub {
+  var raw: Int = -1
+  if let value: Int = findNodeInPage(world: world, pageId: pageId, nodeId: nodeId) {
+    raw = value
+  } else {
+    ret
+  }
+  let entity: EntityId = id(v: raw)
+  let heartKind: String = "likeButton"
+  setWidgetIdentity(world: world, entity: entity, id: widgetId, kind: heartKind)
+  setWidgetState(world: world, entity: entity, enabled: true, selected: false, loading: false, error: false)
+  let likedSource: DataResourceId = dataResourcePlaylists()
+  let likedField: DataFieldId = dataFieldLiked()
+  setDataDependency(world: world, entity: entity, resource: likedSource, field: likedField, observedRevision: observedRevision)
+  # Warm coral / Spotify-ish like-red when liked. Visibly distinct
+  # from the accentText / textPrimary the scenes author the outline
+  # heart in. Struct built inline with `own`-moved locals (the safe
+  # construction shape for String-bearing components).
+  let baseKey: String = "mat:favorite_border"
+  let selKey: String = "mat:favorite"
+  let noTextStyle: String = ""
+  let noTextStyleSel: String = ""
+  let unlikedTint: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
+  let likedTint: RgbaColor = { r: 250, g: 80, b: 110, a: 255 }
+  let clearFill: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+  let zeroOffset: Vec2 = { x: 0.0, y: 0.0 }
+  let style: StateStyle = {
+    spriteKey: own baseKey
+    spriteKeySelected: own selKey
+    tint: unlikedTint
+    tintSelected: likedTint
+    hasTint: true
+    shapeFill: clearFill
+    shapeFillSelected: clearFill
+    hasShapeFill: false
+    offset: zeroOffset
+    offsetSelected: zeroOffset
+    hasOffset: false
+    textStyle: own noTextStyle
+    textStyleSelected: own noTextStyleSel
+    disabledAlpha: 1.0
+    loadingAlpha: 1.0
+    errorAlpha: 1.0
+  }
+  componentSet(this: world.stateStyles, entity: entity, data: own style)
+}
+
+# Per-frame fan-out: sync playback progress and the liked flags, then
+# let widgetStyleSystem turn WidgetState into visuals for every widget
+# carrying a StateStyle (play/pause icons, hearts, future toggles).
+# Play/pause selected-flags refresh through PlaybackState revision
+# bindings before this runs (refreshMountedUi in main.rae).
+func applyOverlaysToWorld(world: mod UiWorld, playback: view PlaybackState, state: view AppState) pub {
+  applyPlaybackToWorld(world: world, state: playback)
+  applyLikedToWorld(world: world, liked: state.liked, stem: state.currentAlbumStem, trackIndex: state.currentTrackIndex)
+  widgetStyleSystem(world: world)
+}

@@ -1,0 +1,122 @@
+# gpu3dWorld — the World3d (ECS) SDF metaball passes for the FORWARD renderer.
+#
+# The World3d twins of the SDF cluster work that gpu3d.rae's Scene3d renderScene
+# raymarches inline (the mesh half of that has its own twin, gpu3d.renderSceneWorld,
+# added in #794) and of renderSceneShadowSdf. They read each SDF entity's
+# SdfPrimitive/Transform3d/Material3d through the lib/ecs ComponentTable queries
+# instead of the Scene3d parallel Lists. Cluster discovery is identical to the
+# Scene3d path (scan for unseen cluster ids), so the forward and deferred frames
+# group the same balls into the same surfaces. They live in their own module
+# (rather than in gpu3d.rae) only because gpu3d.rae is near the 1000-line cap; the
+# encoding (drawMetaballs / shadowMetaballs) still lives there, reached through
+# `import gpu3d`. #795 (111_metaballs_forward) is the first consumer.
+import core
+import gpu3d
+open gpu3d
+open Scene3d
+open Vec3
+open ecs/Entity
+open ecs/ComponentTable
+
+# The World3d twin of the metaball-cluster block inside gpu3d.renderScene: one
+# raymarch draw per sphere-SDF cluster, each ball contributing its own albedo and
+# the cluster's first primitive supplying the fused surface's material. Call after
+# renderSceneWorld inside the forward scene pass. No SDF entities => no-op.
+func renderSceneSdfWorld(world: view World3d) pub {
+  let count: Int = componentCount(this: world.sdfs)
+  if count is 0 {
+    ret
+  }
+  loop var clusterScan: Int = 0, clusterScan < count, ++clusterScan {
+    let headEntity: EntityId = componentEntityAt(this: world.sdfs, i: clusterScan)
+    let head: SdfPrimitive = componentGet(this: world.sdfs, entity: headEntity)
+    var alreadyDrawn: Bool = false
+    loop var back: Int = 0, back < clusterScan, ++back {
+      let priorEntity: EntityId = componentEntityAt(this: world.sdfs, i: back)
+      let prior: SdfPrimitive = componentGet(this: world.sdfs, entity: priorEntity)
+      if prior.shape is 0 {
+        if prior.cluster is head.cluster { alreadyDrawn = true }
+      }
+    }
+    if head.shape is 0 {
+      if alreadyDrawn is false {
+        let packed: List(Float) = createList(Float, cap: count * 4)
+        let colors: List(Float) = createList(Float, cap: count * 4)
+        var ballCount: Int = 0
+        loop var i: Int = 0, i < count, ++i {
+          let ballEntity: EntityId = componentEntityAt(this: world.sdfs, i: i)
+          let sdf: SdfPrimitive = componentGet(this: world.sdfs, entity: ballEntity)
+          if sdf.shape is 0 {
+            if sdf.cluster is head.cluster {
+              let transform: Transform3d = componentGet(this: world.transforms, entity: ballEntity)
+              packed.add(value: transform.position.x)
+              packed.add(value: transform.position.y)
+              packed.add(value: transform.position.z)
+              packed.add(value: transform.scale.x)
+              let ballMaterial: Material3d = componentGet(this: world.materials, entity: ballEntity)
+              colors.add(value: ballMaterial.baseColor.x)
+              colors.add(value: ballMaterial.baseColor.y)
+              colors.add(value: ballMaterial.baseColor.z)
+              colors.add(value: 0.0)
+              ballCount = ballCount + 1
+            }
+          }
+        }
+        if ballCount > 0 {
+          let material: Material3d = componentGet(this: world.materials, entity: headEntity)
+          drawMetaballs(
+            packedBalls: packed.data, count: ballCount,
+            packedColors: colors.data, smoothing: head.smoothing,
+            metallic: material.metallic, roughness: material.roughness,
+            emR: material.emission.x, emG: material.emission.y, emB: material.emission.z
+          )
+        }
+      }
+    }
+  }
+}
+
+# The World3d twin of renderSceneShadowSdf: fill the shadow cascades with the same
+# metaball clusters, so a blob casts a shadow that matches the shape the scene pass
+# raymarched. Cluster discovery mirrors renderSceneSdfWorld exactly.
+func renderSceneShadowSdfWorld(world: view World3d) pub {
+  let count: Int = componentCount(this: world.sdfs)
+  if count is 0 {
+    ret
+  }
+  loop var clusterScan: Int = 0, clusterScan < count, ++clusterScan {
+    let headEntity: EntityId = componentEntityAt(this: world.sdfs, i: clusterScan)
+    let head: SdfPrimitive = componentGet(this: world.sdfs, entity: headEntity)
+    var alreadyDrawn: Bool = false
+    loop var back: Int = 0, back < clusterScan, ++back {
+      let priorEntity: EntityId = componentEntityAt(this: world.sdfs, i: back)
+      let prior: SdfPrimitive = componentGet(this: world.sdfs, entity: priorEntity)
+      if prior.shape is 0 {
+        if prior.cluster is head.cluster { alreadyDrawn = true }
+      }
+    }
+    if head.shape is 0 {
+      if alreadyDrawn is false {
+        let packed: List(Float) = createList(Float, cap: count * 4)
+        var ballCount: Int = 0
+        loop var i: Int = 0, i < count, ++i {
+          let ballEntity: EntityId = componentEntityAt(this: world.sdfs, i: i)
+          let sdf: SdfPrimitive = componentGet(this: world.sdfs, entity: ballEntity)
+          if sdf.shape is 0 {
+            if sdf.cluster is head.cluster {
+              let transform: Transform3d = componentGet(this: world.transforms, entity: ballEntity)
+              packed.add(value: transform.position.x)
+              packed.add(value: transform.position.y)
+              packed.add(value: transform.position.z)
+              packed.add(value: transform.scale.x)
+              ballCount = ballCount + 1
+            }
+          }
+        }
+        if ballCount > 0 {
+          shadowMetaballs(packedBalls: packed.data, count: ballCount, smoothing: head.smoothing)
+        }
+      }
+    }
+  }
+}

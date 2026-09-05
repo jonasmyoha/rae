@@ -21,24 +21,24 @@
 # the part that could regress by someone reaching for a List.
 import core
 import gbuffer
-import scene3d
-import vec3
-import math3d
-import rendererDeferred
-import ecs/entity
-open scene3d
-open ecs/entity
+import Scene3d
+import Vec3
+import Math3d
+import RendererDeferred
+import ecs/Entity
+open Scene3d
+open ecs/Entity
 open gbuffer
-open math3d
-open vec3
-open rendererDeferred
+open Math3d
+open Vec3
+open RendererDeferred
 
 func rae_ext_rae_mem_alloc_total() extern ret Int
 
 func buildScene(objects: view Int) ret World3d {
   var world: World3d = createWorld3d()
-  let noEmit: Vec3 = vec3.create(x: 0.0, y: 0.0, z: 0.0)
-  let unit: Vec3 = vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  let noEmit: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let unit: Vec3 = Vec3.create(x: 1.0, y: 1.0, z: 1.0)
   # Mesh id 1 need not exist on the GPU: the extern is a no-op under the
   # stub runtime and the handle only has to be VALID, so the Rae path runs
   # end to end including the model-matrix build.
@@ -46,15 +46,15 @@ func buildScene(objects: view Int) ret World3d {
   var i: Int = 0
   loop i < objects {
     let f: Float = i.toFloat()
-    let mat: Material3d = { baseColor: vec3.create(x: 0.9, y: 0.3, z: 0.2), metallic: 0.5, roughness: 0.4, emission: noEmit, toon: false }
+    let mat: Material3d = { baseColor: Vec3.create(x: 0.9, y: 0.3, z: 0.2), metallic: 0.5, roughness: 0.4, emission: noEmit, toon: false }
     # Rotation and non-unit scale on purpose: they force the full
     # T * Rz * Ry * Rx * S chain — five matrices and four multiplies per
     # object — rather than a translation-only fast path.
     let e: EntityId = world3dAddMeshInstance(
       world: world, mesh: mesh, material: mat,
-      position: vec3.create(x: f * 0.5, y: f * 0.25, z: 1.0),
-      rotation: vec3.create(x: f * 0.1, y: f * 0.2, z: f * 0.3),
-      scale: vec3.create(x: 1.5, y: 1.5, z: 1.5)
+      position: Vec3.create(x: f * 0.5, y: f * 0.25, z: 1.0),
+      rotation: Vec3.create(x: f * 0.1, y: f * 0.2, z: f * 0.3),
+      scale: Vec3.create(x: 1.5, y: 1.5, z: 1.5)
     )
     i = i + 1
   }

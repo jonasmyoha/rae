@@ -1,8 +1,8 @@
 import core
-open ecs/transform
-open vec3
-open math3d
-open quat
+open ecs/Transform
+open Vec3
+open Math3d
+open Quat
 
 # #714: local Vec/Quat transform components + a compose unit test. Composing a
 # Transform3D (translate * rotate(quat) * scale) into its model matrix exercises
@@ -30,7 +30,7 @@ func main() {
   # A ~180 deg rotation about Z through the quaternion flips the X/Y axes but
   # leaves Z — FP-robust sign checks (no exact float compare).
   var rot3: Transform3D = createTransform3D()
-  rot3.rotation = quat.fromAxisAngle(axis: Vec3 { x: 0.0, y: 0.0, z: 1.0 }, angle: 3.14159265)
+  rot3.rotation = Quat.fromAxisAngle(axis: Vec3 { x: 0.0, y: 0.0, z: 1.0 }, angle: 3.14159265)
   let rm: Mat4 = transform3dToMatrix(t: rot3)
   log("rot m0 negative: {rm.m[0] < 0.0}")
   log("rot m10 positive: {rm.m[10] > 0.0}")

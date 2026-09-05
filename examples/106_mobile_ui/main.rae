@@ -1,7 +1,7 @@
 open hotReload
 open ui/WindowGeometry
-open ui/ecs
-open ui/eventLoop
+open ui/Ecs
+open ui/EventLoop
 open ui/LogOverlay
 open hotReload
 # Mobile-UI demo entrypoint. The actual work — scene loading, world
@@ -21,24 +21,24 @@ open hotReload
 #   * album_loader.rae     — Album / Track structs + loadAllAlbums (album.json)
 #   * asset_loader.rae     — GPU2D image-key loading (per-album cover + avatar)
 import core
-import fileWatch
+import FileWatch
 import hotReload
 import ui/WindowGeometry
 import sdfText
 import sys/spotify
-import ui/ecs
-import ui/eventLoop
+import ui/Ecs
+import ui/EventLoop
 import ui/LogOverlay
 import hotReload
 import ui/FitSystem/FitSystem
 import ui/LayoutSystem/LayoutSystem
-import ui/theme
-import ui/transform
+import ui/Theme
+import ui/Transform
 import ui/RenderSystem/RenderSystem
 import ui/AnimationSystem/AnimationSystem
-import ui/themeResolved
-import ui/scene
-open ecs/entity
+import ui/ThemeResolved
+import ui/Scene
+open ecs/Entity
 func main() {
   let backendEnv: String = "gpu2d"
   # `RAE_UI_HEADLESS=1`: see headless.rae.
@@ -245,7 +245,7 @@ func main() {
     watchedPaths.add(value: nowPlayingPath)
     watchedPaths.add(value: albumPath)
     watchedPaths.add(value: homePath)
-    let watcher: FileWatcher = fileWatch.createFileWatcher(
+    let watcher: FileWatcher = FileWatch.createFileWatcher(
       paths: watchedPaths
       enabled: dataHotReloadEnabled
       intervalSec: 0.25

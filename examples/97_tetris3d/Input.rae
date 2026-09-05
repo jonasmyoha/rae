@@ -1,0 +1,173 @@
+# Keyboard input. DAS (Delayed Auto-Shift) for repeat-side moves so
+# the piece doesn't sprint at one frame per cell when you hold left/right.
+import Sdl3
+
+# SDL-compatible key codes (no enum because they're sparse and not 0..N).
+const keyLeft: Int = 263
+const keyRight: Int = 262
+const keyDown: Int = 264
+const keyUp: Int = 265
+const keyA: Int = 65
+const keyD: Int = 68
+const keyS: Int = 83
+const keyW: Int = 87
+const keySpace: Int = 32
+const keyP: Int = 80
+const keyR: Int = 82
+
+type InputEdges {
+  restart: Bool
+  pause: Bool
+  rotate: Bool
+  hardDrop: Bool
+}
+
+func createInputEdges() ret InputEdges {
+  ret InputEdges {
+    restart: false
+    pause: false
+    rotate: false
+    hardDrop: false
+  }
+}
+
+# SDL pressed edges last for one rendered frame, while gameplay advances on a
+# fixed tick that may run zero or several times during that frame. Latch each
+# edge until exactly one gameplay tick consumes it.
+func pollInputEdges(edges: mod InputEdges) {
+  if Sdl3.isKeyPressed(key: keyR) {
+    edges.restart = true
+  }
+  if Sdl3.isKeyPressed(key: keyP) {
+    edges.pause = true
+  }
+  if Sdl3.isKeyPressed(key: keyUp) or Sdl3.isKeyPressed(key: keyW) {
+    edges.rotate = true
+  }
+  if Sdl3.isKeyPressed(key: keySpace) {
+    edges.hardDrop = true
+  }
+}
+
+func clearInputEdges(edges: mod InputEdges) {
+  edges.restart = false
+  edges.pause = false
+  edges.rotate = false
+  edges.hardDrop = false
+}
+
+func tryMove(w: mod World, dx: view Int, dr: view Int) {
+  if canMove(w: w, dx: dx, dy: 0, dr: dr) is 1 {
+    w.currentPiece.x = w.currentPiece.x + dx
+    var newRot: Int = (w.currentPiece.rotation + dr) % 4
+    if newRot < 0 {
+      newRot = newRot + 4
+    }
+    w.currentPiece.rotation = newRot
+    w.lockTimer = 0
+  }
+}
+
+func tryRotate(w: mod World) {
+  if canMove(w: w, dx: 0, dy: 0, dr: 1) is 1 {
+    tryMove(w: w, dx: 0, dr: 1)
+    ret
+  }
+  if canMove(w: w, dx: 1, dy: 0, dr: 1) is 1 {
+    tryMove(w: w, dx: 1, dr: 1)
+    ret
+  }
+  if canMove(w: w, dx: -1, dy: 0, dr: 1) is 1 {
+    tryMove(w: w, dx: -1, dr: 1)
+    ret
+  }
+  if canMove(w: w, dx: 2, dy: 0, dr: 1) is 1 {
+    tryMove(w: w, dx: 2, dr: 1)
+    ret
+  }
+  if canMove(w: w, dx: -2, dy: 0, dr: 1) is 1 {
+    tryMove(w: w, dx: -2, dr: 1)
+  }
+}
+
+# Hard drop: slam to the bottom and lock immediately.
+func hardDrop(w: mod World) {
+  loop canMove(w: w, dx: 0, dy: 1, dr: 0) is 1 {
+    w.currentPiece.y = w.currentPiece.y + 1
+    w.score = w.score + 2
+  }
+  lockPiece(w: w)
+  checkLines(w: w)
+  spawnNextPiece(w: w)
+}
+
+func inputSystem(w: mod World, edges: view InputEdges) {
+  if w.state is GameState.gameOver {
+    if edges.restart {
+      initWorld(w)
+    }
+    ret
+  }
+
+  # P toggles between Playing and Paused. Handled BEFORE the
+  # "skip-input-if-not-Playing" gate so the player can unpause.
+  if edges.pause {
+    if w.state is GameState.playing {
+      w.state = GameState.paused
+    } else {
+      if w.state is GameState.paused {
+        w.state = GameState.playing
+      }
+    }
+  }
+
+  if w.state is not GameState.playing {
+    ret
+  }
+
+  let moveLeft: Bool = Sdl3.isKeyDown(key: keyLeft) or Sdl3.isKeyDown(key: keyA)
+  let moveRight: Bool = Sdl3.isKeyDown(key: keyRight) or Sdl3.isKeyDown(key: keyD)
+
+  if moveLeft or moveRight {
+    if w.hMoveTimer is 0 {
+      if moveLeft {
+        tryMove(w: w, dx: -1, dr: 0)
+      } else {
+        tryMove(w: w, dx: 1, dr: 0)
+      }
+      w.hMoveTimer = 1
+    } else {
+      w.hMoveTimer = w.hMoveTimer + 1
+      if w.hMoveTimer >= w.dasDelay {
+        if (w.hMoveTimer - w.dasDelay) % w.hMoveDelay is 0 {
+          if moveLeft {
+            tryMove(w: w, dx: -1, dr: 0)
+          } else {
+            tryMove(w: w, dx: 1, dr: 0)
+          }
+        }
+      }
+    }
+  } else {
+    w.hMoveTimer = 0
+  }
+
+  # Soft drop (down arrow / S) — falls one row each frame, +1 point per row.
+  if Sdl3.isKeyDown(key: keyDown) or Sdl3.isKeyDown(key: keyS) {
+    if canMove(w: w, dx: 0, dy: 1, dr: 0) is 1 {
+      w.currentPiece.y = w.currentPiece.y + 1
+      w.score = w.score + 1
+      w.fallTimer = 0
+    }
+  }
+
+  # Rotate CCW with up / W.
+  if edges.rotate {
+    tryRotate(w: w)
+  }
+
+  # Hard drop with space.
+  if edges.hardDrop {
+    hardDrop(w: w)
+  }
+}

@@ -19,7 +19,7 @@
 # Float` round-tripping was dropping milliseconds in the smoke
 # test.
 import core
-import json
+import Json
 
 # Read whole file. Empty on missing/error — caller treats empty as
 # "no saved state, use defaults".
@@ -146,19 +146,19 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
     log("[state] no state file at {path} — using defaults")
     ret
   }
-  let doc: JsonDoc = json.parseJson(source: source)
+  let doc: JsonDoc = Json.parseJson(source: source)
   if doc.ok is false {
     log("[state] parse error in {path} at byte {doc.errorPos}")
     ret
   }
-  let root: JsonValue = json.root(doc: doc)
+  let root: JsonValue = Json.root(doc: doc)
 
   # Album stem — only restore if the album is still on disk.
   let stemKey: String = "currentAlbumStem"
-  let stemIdx: Int = json.field(doc: doc, this: root, key: stemKey)
+  let stemIdx: Int = Json.field(doc: doc, this: root, key: stemKey)
   if stemIdx >= 0 {
     let empty: String = ""
-    let savedStem: String = json.jsonString(this: json.jsonValueAt(doc: doc, idx: stemIdx), fallback: empty)
+    let savedStem: String = Json.jsonString(this: Json.jsonValueAt(doc: doc, idx: stemIdx), fallback: empty)
     if savedStem.length() > 0 {
       let albumIdx: Int = findAlbumIndex(albums: state.mediaLibrary.albums, stem: savedStem)
       if albumIdx >= 0 {
@@ -171,9 +171,9 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
 
   # Track index — clamp to the active album's track count.
   let trackKey: String = "currentTrackIndex"
-  let trackIdx: Int = json.field(doc: doc, this: root, key: trackKey)
+  let trackIdx: Int = Json.field(doc: doc, this: root, key: trackKey)
   if trackIdx >= 0 {
-    var savedTrack: Int = json.jsonInt(this: json.jsonValueAt(doc: doc, idx: trackIdx), fallback: 0)
+    var savedTrack: Int = Json.jsonInt(this: Json.jsonValueAt(doc: doc, idx: trackIdx), fallback: 0)
     let album: Album = activeAlbum(state: state)
     let n: Int = album.tracks.length
     if savedTrack < 0 {
@@ -187,9 +187,9 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
 
   # Playback position — stored as ms, restored to Float seconds.
   let elapsedKey: String = "elapsedMs"
-  let elapsedIdx: Int = json.field(doc: doc, this: root, key: elapsedKey)
+  let elapsedIdx: Int = Json.field(doc: doc, this: root, key: elapsedKey)
   if elapsedIdx >= 0 {
-    var ms: Int = json.jsonInt(this: json.jsonValueAt(doc: doc, idx: elapsedIdx), fallback: 0)
+    var ms: Int = Json.jsonInt(this: Json.jsonValueAt(doc: doc, idx: elapsedIdx), fallback: 0)
     if ms < 0 {
       ms = 0
     }
@@ -198,9 +198,9 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
 
   # Play / pause flag.
   let playingKey: String = "isPlaying"
-  let playingFieldIdx: Int = json.field(doc: doc, this: root, key: playingKey)
+  let playingFieldIdx: Int = Json.field(doc: doc, this: root, key: playingKey)
   if playingFieldIdx >= 0 {
-    playback.isPlaying = json.jsonBool(this: json.jsonValueAt(doc: doc, idx: playingFieldIdx), fallback: false)
+    playback.isPlaying = Json.jsonBool(this: Json.jsonValueAt(doc: doc, idx: playingFieldIdx), fallback: false)
   }
 
   # Seed the "actually playing" pair from the restored snapshot so the
@@ -224,9 +224,9 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
   # restore — landing the user on a sub-page like NowPlaying with
   # an empty back-stack underneath caused real navigation breakage.
   let tabKey: String = "tab"
-  let tabFieldIdx: Int = json.field(doc: doc, this: root, key: tabKey)
+  let tabFieldIdx: Int = Json.field(doc: doc, this: root, key: tabKey)
   if tabFieldIdx >= 0 {
-    let tabOrd: Int = json.jsonInt(this: json.jsonValueAt(doc: doc, idx: tabFieldIdx), fallback: 4)
+    let tabOrd: Int = Json.jsonInt(this: Json.jsonValueAt(doc: doc, idx: tabFieldIdx), fallback: 4)
     state.tab = intToScreen(n: tabOrd)
   }
   # winX / winY are deliberately NOT read. Window geometry belongs to the

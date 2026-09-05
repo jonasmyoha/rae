@@ -24,7 +24,7 @@
 # chatter without touching call sites.
 import core
 import gpu2d
-import gpu2dText
+import Gpu2dText
 open sdfText
 
 const logTrace: Int = 0
@@ -213,7 +213,7 @@ func drawLogOverlay(ov: view LogOverlay, font: view SdfFont, screenW: view Float
       if let level: Int = ov.levels.copyAt(index: slot) {
         # +fontSize because drawText takes a baseline, not a top edge.
         let baseline: Float = top + pad + ov.fontSize + i.toFloat() * lineH
-        gpu2dText.drawText(
+        Gpu2dText.drawText(
           font: font, text: text, x: left + pad, y: baseline,
           sizePx: ov.fontSize, color: logLevelColor(level: level)
         )
