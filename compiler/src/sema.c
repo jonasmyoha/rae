@@ -1634,140 +1634,161 @@ static bool reflect_type_matches(const AstTypeRef* pattern, const AstTypeRef* fi
     return pa == NULL && fa == NULL;
 }
 
-// Is `e` the reflection call `fieldName(binding)` or `binding.fieldName()`?
-static bool reflect_is_field_name_call(const AstExpr* e, Str binding) {
-    if (!e) return false;
+// Which slot-metadata reflection call is `e` on `binding`, if any?
+//   1 = `fieldName(binding)` / `binding.fieldName()` — the slot (field) name
+//   2 = `typeName(binding)`  / `binding.typeName()`  — the element/component
+//       type name (#809): the `Position` in `ComponentTable(Position)`
+//   0 = neither
+// Both are compile-time plain functions folded to a String literal; there are
+// no phantom members (docs/compile-time-reflection.md).
+static int reflect_metadata_call_kind(const AstExpr* e, Str binding) {
+    if (!e) return 0;
+    Str fn = { .data = NULL, .len = 0 };
     if (e->kind == AST_EXPR_CALL && e->as.call.callee
         && e->as.call.callee->kind == AST_EXPR_IDENT
-        && str_eq_cstr(e->as.call.callee->as.ident, "fieldName")
         && e->as.call.args && !e->as.call.args->next
         && e->as.call.args->name.len == 0
         && e->as.call.args->value
         && e->as.call.args->value->kind == AST_EXPR_IDENT
         && str_eq(e->as.call.args->value->as.ident, binding)) {
-        return true;
-    }
-    if (e->kind == AST_EXPR_METHOD_CALL
-        && str_eq_cstr(e->as.method_call.method_name, "fieldName")
+        fn = e->as.call.callee->as.ident;
+    } else if (e->kind == AST_EXPR_METHOD_CALL
         && !e->as.method_call.args
         && e->as.method_call.object
         && e->as.method_call.object->kind == AST_EXPR_IDENT
         && str_eq(e->as.method_call.object->as.ident, binding)) {
-        return true;
+        fn = e->as.method_call.method_name;
     }
-    return false;
+    if (!fn.data) return 0;
+    if (str_eq_cstr(fn, "fieldName")) return 1;
+    if (str_eq_cstr(fn, "typeName")) return 2;
+    return 0;
 }
 
-static void reflect_fold_field_name_block(AstBlock* block, Str binding, Str field_name);
+// The COMPONENT type name a field folds to for `typeName(binding)` (#809): the
+// base name of the field type's first generic argument — `Position` for a
+// `ComponentTable(Position)` — or, for a non-generic field, the field type's
+// own name (`Int` for `count: Int`). This is the canonical component vocabulary
+// the serialize registry and the human-authored scene loader share, as opposed
+// to the slot name (`positions`) that fieldName yields.
+static Str reflect_element_type_name(const AstTypeRef* field_type) {
+    if (field_type && field_type->generic_args && !field_type->generic_args->is_value_arg)
+        return reflect_base_name(field_type->generic_args);
+    return reflect_base_name(field_type);
+}
 
-// Rewrite every `fieldName(binding)` inside `e` (in place) to the String literal
-// `field_name`, recursing through the whole expression tree.
-static void reflect_fold_field_name_expr(AstExpr* e, Str binding, Str field_name) {
+static void reflect_fold_field_name_block(AstBlock* block, Str binding, Str field_name, Str type_name);
+
+// Rewrite every `fieldName(binding)` / `typeName(binding)` inside `e` (in
+// place) to the String literal `field_name` / `type_name`, recursing through
+// the whole expression tree.
+static void reflect_fold_field_name_expr(AstExpr* e, Str binding, Str field_name, Str type_name) {
     if (!e) return;
-    if (reflect_is_field_name_call(e, binding)) {
+    int kind = reflect_metadata_call_kind(e, binding);
+    if (kind != 0) {
         e->kind = AST_EXPR_STRING;
-        e->as.string_lit = field_name;
+        e->as.string_lit = kind == 1 ? field_name : type_name;
         e->resolved_type = NULL;
         e->decl_link = NULL;
         return;
     }
     switch (e->kind) {
         case AST_EXPR_BINARY:
-            reflect_fold_field_name_expr(e->as.binary.lhs, binding, field_name);
-            reflect_fold_field_name_expr(e->as.binary.rhs, binding, field_name);
+            reflect_fold_field_name_expr(e->as.binary.lhs, binding, field_name, type_name);
+            reflect_fold_field_name_expr(e->as.binary.rhs, binding, field_name, type_name);
             break;
         case AST_EXPR_UNARY:
-            reflect_fold_field_name_expr(e->as.unary.operand, binding, field_name);
+            reflect_fold_field_name_expr(e->as.unary.operand, binding, field_name, type_name);
             break;
         case AST_EXPR_CAST:
-            reflect_fold_field_name_expr(e->as.cast.operand, binding, field_name);
+            reflect_fold_field_name_expr(e->as.cast.operand, binding, field_name, type_name);
             break;
         case AST_EXPR_CALL:
-            reflect_fold_field_name_expr(e->as.call.callee, binding, field_name);
+            reflect_fold_field_name_expr(e->as.call.callee, binding, field_name, type_name);
             for (AstCallArg* a = e->as.call.args; a; a = a->next)
-                reflect_fold_field_name_expr(a->value, binding, field_name);
+                reflect_fold_field_name_expr(a->value, binding, field_name, type_name);
             break;
         case AST_EXPR_METHOD_CALL:
-            reflect_fold_field_name_expr(e->as.method_call.object, binding, field_name);
+            reflect_fold_field_name_expr(e->as.method_call.object, binding, field_name, type_name);
             for (AstCallArg* a = e->as.method_call.args; a; a = a->next)
-                reflect_fold_field_name_expr(a->value, binding, field_name);
+                reflect_fold_field_name_expr(a->value, binding, field_name, type_name);
             break;
         case AST_EXPR_MEMBER:
-            reflect_fold_field_name_expr(e->as.member.object, binding, field_name);
+            reflect_fold_field_name_expr(e->as.member.object, binding, field_name, type_name);
             break;
         case AST_EXPR_INDEX:
-            reflect_fold_field_name_expr(e->as.index.target, binding, field_name);
-            reflect_fold_field_name_expr(e->as.index.index, binding, field_name);
+            reflect_fold_field_name_expr(e->as.index.target, binding, field_name, type_name);
+            reflect_fold_field_name_expr(e->as.index.index, binding, field_name, type_name);
             break;
         case AST_EXPR_OBJECT:
             for (AstObjectField* f = e->as.object_literal.fields; f; f = f->next)
-                reflect_fold_field_name_expr(f->value, binding, field_name);
+                reflect_fold_field_name_expr(f->value, binding, field_name, type_name);
             break;
         case AST_EXPR_INTERP:
             for (AstInterpPart* p = e->as.interp.parts; p; p = p->next)
-                reflect_fold_field_name_expr(p->value, binding, field_name);
+                reflect_fold_field_name_expr(p->value, binding, field_name, type_name);
             break;
         case AST_EXPR_LIST:
             for (AstExprList* l = e->as.list; l; l = l->next)
-                reflect_fold_field_name_expr(l->value, binding, field_name);
+                reflect_fold_field_name_expr(l->value, binding, field_name, type_name);
             break;
         case AST_EXPR_MATCH:
-            reflect_fold_field_name_expr(e->as.match_expr.subject, binding, field_name);
+            reflect_fold_field_name_expr(e->as.match_expr.subject, binding, field_name, type_name);
             for (AstMatchArm* arm = e->as.match_expr.arms; arm; arm = arm->next) {
-                reflect_fold_field_name_expr(arm->pattern, binding, field_name);
-                reflect_fold_field_name_expr(arm->value, binding, field_name);
+                reflect_fold_field_name_expr(arm->pattern, binding, field_name, type_name);
+                reflect_fold_field_name_expr(arm->value, binding, field_name, type_name);
             }
             break;
         default: break;
     }
 }
 
-static void reflect_fold_field_name_stmt(AstStmt* s, Str binding, Str field_name) {
+static void reflect_fold_field_name_stmt(AstStmt* s, Str binding, Str field_name, Str type_name) {
     if (!s) return;
     switch (s->kind) {
-        case AST_STMT_EXPR: reflect_fold_field_name_expr(s->as.expr_stmt, binding, field_name); break;
-        case AST_STMT_LET: reflect_fold_field_name_expr(s->as.let_stmt.value, binding, field_name); break;
-        case AST_STMT_DESTRUCT: reflect_fold_field_name_expr(s->as.destruct_stmt.call, binding, field_name); break;
+        case AST_STMT_EXPR: reflect_fold_field_name_expr(s->as.expr_stmt, binding, field_name, type_name); break;
+        case AST_STMT_LET: reflect_fold_field_name_expr(s->as.let_stmt.value, binding, field_name, type_name); break;
+        case AST_STMT_DESTRUCT: reflect_fold_field_name_expr(s->as.destruct_stmt.call, binding, field_name, type_name); break;
         case AST_STMT_RET:
             for (AstReturnArg* a = s->as.ret_stmt.values; a; a = a->next)
-                reflect_fold_field_name_expr(a->value, binding, field_name);
+                reflect_fold_field_name_expr(a->value, binding, field_name, type_name);
             break;
         case AST_STMT_IF:
-            reflect_fold_field_name_stmt(s->as.if_stmt.binding, binding, field_name);
-            reflect_fold_field_name_expr(s->as.if_stmt.condition, binding, field_name);
-            reflect_fold_field_name_block(s->as.if_stmt.then_block, binding, field_name);
-            reflect_fold_field_name_block(s->as.if_stmt.else_block, binding, field_name);
+            reflect_fold_field_name_stmt(s->as.if_stmt.binding, binding, field_name, type_name);
+            reflect_fold_field_name_expr(s->as.if_stmt.condition, binding, field_name, type_name);
+            reflect_fold_field_name_block(s->as.if_stmt.then_block, binding, field_name, type_name);
+            reflect_fold_field_name_block(s->as.if_stmt.else_block, binding, field_name, type_name);
             break;
         case AST_STMT_LOOP:
-            reflect_fold_field_name_stmt(s->as.loop_stmt.init, binding, field_name);
-            reflect_fold_field_name_expr(s->as.loop_stmt.condition, binding, field_name);
-            reflect_fold_field_name_expr(s->as.loop_stmt.increment, binding, field_name);
-            reflect_fold_field_name_block(s->as.loop_stmt.body, binding, field_name);
+            reflect_fold_field_name_stmt(s->as.loop_stmt.init, binding, field_name, type_name);
+            reflect_fold_field_name_expr(s->as.loop_stmt.condition, binding, field_name, type_name);
+            reflect_fold_field_name_expr(s->as.loop_stmt.increment, binding, field_name, type_name);
+            reflect_fold_field_name_block(s->as.loop_stmt.body, binding, field_name, type_name);
             break;
         case AST_STMT_MATCH:
-            reflect_fold_field_name_expr(s->as.match_stmt.subject, binding, field_name);
+            reflect_fold_field_name_expr(s->as.match_stmt.subject, binding, field_name, type_name);
             for (AstMatchCase* c = s->as.match_stmt.cases; c; c = c->next) {
-                reflect_fold_field_name_expr(c->pattern, binding, field_name);
+                reflect_fold_field_name_expr(c->pattern, binding, field_name, type_name);
                 for (AstCasePattern* op = c->or_patterns; op; op = op->next)
-                    reflect_fold_field_name_expr(op->expr, binding, field_name);
-                reflect_fold_field_name_block(c->block, binding, field_name);
+                    reflect_fold_field_name_expr(op->expr, binding, field_name, type_name);
+                reflect_fold_field_name_block(c->block, binding, field_name, type_name);
             }
             break;
         case AST_STMT_ASSIGN:
-            reflect_fold_field_name_expr(s->as.assign_stmt.target, binding, field_name);
-            reflect_fold_field_name_expr(s->as.assign_stmt.value, binding, field_name);
+            reflect_fold_field_name_expr(s->as.assign_stmt.target, binding, field_name, type_name);
+            reflect_fold_field_name_expr(s->as.assign_stmt.value, binding, field_name, type_name);
             break;
         case AST_STMT_DEFER:
-            reflect_fold_field_name_block(s->as.defer_stmt.block, binding, field_name);
+            reflect_fold_field_name_block(s->as.defer_stmt.block, binding, field_name, type_name);
             break;
         default: break;
     }
 }
 
-static void reflect_fold_field_name_block(AstBlock* block, Str binding, Str field_name) {
+static void reflect_fold_field_name_block(AstBlock* block, Str binding, Str field_name, Str type_name) {
     if (!block) return;
     for (AstStmt* s = block->first; s; s = s->next)
-        reflect_fold_field_name_stmt(s, binding, field_name);
+        reflect_fold_field_name_stmt(s, binding, field_name, type_name);
 }
 
 // Does this range-loop iterate `fields(...)` — i.e. is it a field loop at all?
@@ -1784,7 +1805,7 @@ static bool reflect_loop_is_fields(const AstStmt* stmt) {
 // (#773), so every field loop lowers to identical ordinary AST regardless of how
 // its concrete struct became known.
 static AstExpr* reflect_make_true(CompilerContext* ctx, size_t line, size_t column);
-static void reflect_fold_field_name_block(AstBlock* block, Str binding, Str field_name);
+static void reflect_fold_field_name_block(AstBlock* block, Str binding, Str field_name, Str type_name);
 static void reflect_fill_unrolled(CompilerContext* ctx, AstBlock* out,
                                   AstTypeField* fields, const AstTypeRef* pattern,
                                   bool want_view, bool want_mod, Str bind_name,
@@ -1813,7 +1834,7 @@ static void reflect_fill_unrolled(CompilerContext* ctx, AstBlock* out,
         AstBlock* iter_block = arena_alloc(ctx->ast_arena, sizeof(AstBlock));
         iter_block->first = alias;
         AstBlock* iter_body = clone_block(ctx->ast_arena, body);
-        reflect_fold_field_name_block(iter_body, bind_name, f->name);
+        reflect_fold_field_name_block(iter_body, bind_name, f->name, reflect_element_type_name(f->type));
         alias->next = iter_body ? iter_body->first : NULL;
         AstStmt* wrapper = arena_alloc(ctx->ast_arena, sizeof(AstStmt));
         memset(wrapper, 0, sizeof *wrapper);
