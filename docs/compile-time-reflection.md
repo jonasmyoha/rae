@@ -119,7 +119,15 @@ plain camelCase function the compiler folds to a literal:
 
 ```rae
 fieldName(table)      # -> "rects"   (also table.fieldName() via UFCS)
+typeName(table)       # -> "Rect"    (also table.typeName()  via UFCS)   #809
 ```
+
+`fieldName` is the SLOT name; `typeName` is the COMPONENT type name — the `T` in
+`ComponentTable(T)`, or a non-generic field's own type (`Int` for `count: Int`).
+They are different vocabularies for different consumers: the machine snapshot and
+the registry key by the component name (`Position`), the same name a human writes
+in a `.raescene`, so `typeName` lets one registry vocabulary serve both instead of
+forcing the registry to be re-keyed by slot name (`positions`).
 
 Not `table.fieldName` (no parens): the binding IS the value (`world.rects`), so a
 paren-less property pretends the `ComponentTable` knows its own slot name (a category
@@ -133,6 +141,8 @@ reachable via UFCS. There are no phantom members, ever.**
 - `fields(value)` / `value.fields()` — field set of a value
 - `fields(Type)` — field set of a type
 - `fieldName(binding)` / `binding.fieldName()` — the slot name, folded to a literal
+- `typeName(binding)` / `binding.typeName()` — the component/element type name,
+  folded to a literal (#809)
 
 Two small, general primitives — which is exactly what separates this from the rejected
 #760 builtin (one function, one job, baked into the backend).

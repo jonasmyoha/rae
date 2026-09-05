@@ -1,0 +1,70 @@
+import core
+open ecs/Entity
+open ecs/ComponentTable
+
+# #809: typeName(binding) folds to the COMPONENT type name String literal — the
+# `Rect` in `ComponentTable(Rect)` — where fieldName folds to the SLOT name
+# (`rects`). Same rules as fieldName: a compile-time plain function, called with
+# parens, UFCS ok, never a phantom member. For a non-generic field it folds to
+# the field's own type name. Covered through both the non-generic path and a
+# generic-W instantiation.
+type Rect { x: Int, y: Int }
+type Size { w: Int, h: Int }
+
+type World {
+  rects: ComponentTable(Rect)
+  sizes: ComponentTable(Size)
+  count: Int
+  label: String
+}
+
+# every table: slot name vs component type name, via typeName + UFCS
+func tableNames(world: view World) ret String {
+  var line: String = ""
+  loop let table: view ComponentTable(any) in fields(world) {
+    line = "{line}{fieldName(table)}={table.typeName()} "
+  }
+  ret line
+}
+
+# every field, generic or not: a non-generic field folds to its own type name
+func allNames(world: view World) ret String {
+  var line: String = ""
+  loop let field: view any in fields(world) {
+    line = "{line}{fieldName(field)}:{typeName(field)} "
+  }
+  ret line
+}
+
+# concrete filter: only the ComponentTable(Size) field is bound
+func sizeName(world: view World) ret String {
+  var line: String = ""
+  loop let table: view ComponentTable(Size) in fields(world) {
+    line = "{line}{typeName(table)} "
+  }
+  ret line
+}
+
+# generic W (the #773 instantiation path): same fold, W inferred from the arg
+func genericNames(W: type, world: view W) ret String {
+  var line: String = ""
+  loop let table: view ComponentTable(any) in fields(world) {
+    line = "{line}{typeName(table)}/{fieldName(table)} "
+  }
+  ret line
+}
+
+func main() {
+  var world: World = {
+    rects: createComponentTable(Rect)
+    sizes: createComponentTable(Size)
+    count: 3
+    label: "w"
+  }
+  let e: EntityId = { index: 2, generation: 0 }
+  componentSet(this: world.rects, entity: e, data: Rect { x: 1, y: 1 })
+  log("tables: {tableNames(world: world)}")
+  log("all: {allNames(world: world)}")
+  log("size: {sizeName(world: world)}")
+  log("generic: {genericNames(world: world)}")
+}
