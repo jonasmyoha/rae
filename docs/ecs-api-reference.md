@@ -67,18 +67,58 @@ func componentModStamp(this: view ComponentTable(T), entity: view EntityId) ret 
 ```
 
 `componentMod` returning a live `mod T` is the #1 ECS ergonomic — drive an entity
-in place, no copy-out/mutate/set-back. Dense order is insertion order UNTIL a
-`componentRemove` swap-removes (which moves the last row into the hole); systems
-that need a stable order use the hierarchy `depthOrder` instead.
+in place, no copy-out/mutate/set-back. Dense order is insertion order UNTIL the
+first non-tail `componentRemove` — see the iteration-order contract below.
+
+### Iteration-order contract (#810)
+
+`componentRemove` is a **swap-remove**: the LAST dense row moves into the removed
+row's slot (its data and its change stamp move with it), the sparse map is
+repointed, and the array stays dense. That is the deliberate data-oriented choice
+— O(1) remove, no holes — and order instability is its honest cost. The exact
+guarantee, pinned by test `738_ecs_dense_order`:
+
+- **Dense order is insertion order until the first non-tail `componentRemove`.**
+- **After a non-tail remove, order is UNSPECIFIED** — the moved tail row now sits
+  where the removed row was. Removing the TAIL row leaves the rest untouched.
+- **Dense indices are valid only for the current walk**: never store a dense
+  index (or a `QueryNMatch`) across a structural mutation or across frames.
+  Look the entity up again.
+- **Do not derive draw order, pool slots, or "the first one" from dense order.**
+  Carry the key you mean as a component field (`PropKind.slot`, `LayerRoot.order`,
+  a `cluster` id) or pick by a stable key (lowest `EntityId.index`), and let the
+  iteration be in any order.
+
+There is deliberately NO order-preserving remove and NO ordered index: both would
+pay memory or O(n) on every table to buy back a convenience no system needs (the
+audit below found none). If a future system genuinely cannot be made
+order-independent, the smallest opt-in is an O(n) order-preserving remove used
+by THAT table alone — never a general ordered structure.
+
+**Audit (#810) — every dense-order consumer, and why it holds:**
+
+| System | Iterates | Why order does not matter |
+|---|---|---|
+| UI paint (`ui/renderSystem`) | paintable roots | explicit `LayerRoot.order` + parent-before-child hierarchy traversal; never dense draw order |
+| Deferred G-buffer (`GbufferWorld`) | `meshRenderers` | depth-resolved — submit order does not change the image |
+| Forward meshes (`Gpu3d`) | `meshRenderers` | opaque + depth-tested |
+| SDF clusters (`Gpu3dWorld` scene + shadow) | `sdfs` | membership is the explicit `cluster` id; the cluster HEAD is the lowest `EntityId.index` (stable key — was dense-first, fixed in #810) |
+| 114 grass field | `grassBlades` | each blade carries its own `slot` |
+| 114 terrain props / tiles | `propKinds`, `tileMeshes` | each entity carries `PropKind.slot`; pool slot is a component field, never the dense index |
+| UI layers (`ui/Layer`) | `LayerRoot` | explicit `order` field |
+| 106 hero widgets | `heroWidgets`, `sprites` | key lookup / rename-all — position irrelevant |
+| 106 debug anchor | `debugAnchors` | first-of-one (a singleton by design) |
+| Query joins (`query2`..`query5`) | dense indices | valid only during the walk, by contract |
+| Cross-frame cached dense indices | — | none exist in the tree |
 
 ## Queries — `lib/ecs/Query.rae`
 
 Join tables on the entities they share, probing the smallest table:
 
 ```rae
-type Query2Match { entity: EntityId, denseA: Int, denseB: Int }
+type Query2Match { entity: EntityId, indexA: Int, indexB: Int }
 func query2(A: type, B: type, tableA: view ComponentTable(A), tableB: view ComponentTable(B)) ret List(Query2Match)
-type Query3Match { entity: EntityId, denseA: Int, denseB: Int, denseC: Int }
+type Query3Match { entity: EntityId, indexA: Int, indexB: Int, indexC: Int }
 func query3(A: type, B: type, C: type, tableA: ..., tableB: ..., tableC: view ComponentTable(C)) ret List(Query3Match)
 func query4(A, B, C, D: type, tableA: ..., tableD: view ComponentTable(D)) ret List(Query4Match)
 func query5(A, B, C, D, E: type, tableA: ..., tableE: view ComponentTable(E)) ret List(Query5Match)
