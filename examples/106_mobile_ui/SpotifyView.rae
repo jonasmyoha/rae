@@ -1,4 +1,4 @@
-open sys/spotify
+open sys/Spotify
 open ui/Ecs
 # Spotify-mode display layer for the mobile-UI music player example.
 #
@@ -19,9 +19,9 @@ open ui/Ecs
 # and the mini-player.
 import core
 import Json
-import sys
-import sys/spotify
-import time
+import Sys
+import sys/Spotify
+import Time
 import ui/Ecs
 open ecs/Entity
 # PlaybackState lives in this example's playback.rae — auto-imported
@@ -32,7 +32,7 @@ open ecs/Entity
 # How often to ask Spotify what is playing. A Duration, so it cannot be
 # swapped with the reading it is compared against.
 func spotifyPollInterval() ret Duration {
-  ret time.seconds(n: 1.0)
+  ret Time.seconds(n: 1.0)
 }
 
 # Per-app-instance state for the Spotify display layer. One instance
@@ -69,7 +69,7 @@ func createSpotifyState() pub ret SpotifyState {
   let enabled: Bool = optOut.length() is 0
   ret SpotifyState {
     enabled: enabled
-    lastPoll: time.never()
+    lastPoll: Time.never()
     lastTrackId: ""
     artKey: "spotify-current"
   }
@@ -134,9 +134,9 @@ func loadHistoryEntryArt(track: view SpotifyTrack, reg: mod TextureRegistry) pub
   }
   ensureAppCacheDirs()
   let outPath: String = cachedArtworkPath(imageHash: imageHash)
-  var ok: Bool = sys.exists(path: outPath)
+  var ok: Bool = Sys.exists(path: outPath)
   if ok is false {
-    ok = spotify.fetchArtwork(url: track.artworkUrl, outPath: outPath)
+    ok = Spotify.fetchArtwork(url: track.artworkUrl, outPath: outPath)
   }
   if ok is false {
     ret ""
@@ -174,7 +174,7 @@ func saveHistoryArtworkMetadata(track: view SpotifyTrack, imageHash: view String
   content = content.concat(other: "  ").concat(other: q).concat(other: "artworkUrl").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: url).concat(other: q).concat(other: comma).concat(other: nl)
   content = content.concat(other: "  ").concat(other: q).concat(other: "path").concat(other: q).concat(other: colon).concat(other: " ").concat(other: q).concat(other: p).concat(other: q).concat(other: nl)
   content = content.concat(other: closeBrace).concat(other: nl)
-  let ok: Bool = sys.writeFile(path: metaPath, content: content)
+  let ok: Bool = Sys.writeFile(path: metaPath, content: content)
   if ok is false {
     log("[spotify-art] metadata save failed: {metaPath}")
   }
@@ -194,9 +194,9 @@ func refreshSpotifyArt(state: view SpotifyState, track: view SpotifyTrack, reg: 
   }
   var primaryOk: Bool = false
   if track.artworkUrl.length() > 0 {
-    primaryOk = sys.exists(path: outPath)
+    primaryOk = Sys.exists(path: outPath)
     if primaryOk is false {
-      primaryOk = spotify.fetchArtwork(url: track.artworkUrl, outPath: outPath)
+      primaryOk = Spotify.fetchArtwork(url: track.artworkUrl, outPath: outPath)
     }
   }
   if primaryOk is false {
@@ -207,7 +207,7 @@ func refreshSpotifyArt(state: view SpotifyState, track: view SpotifyTrack, reg: 
     if fallbackUrl.length() is 0 {
       ret false
     }
-    let fbOk: Bool = spotify.fetchArtwork(url: fallbackUrl, outPath: outPath)
+    let fbOk: Bool = Spotify.fetchArtwork(url: fallbackUrl, outPath: outPath)
     if fbOk is false {
       ret false
     }
@@ -241,9 +241,9 @@ func pollSpotify(
     ret
   }
   state.lastPoll = now
-  let track: SpotifyTrack = spotify.current()
-  let pos: Float = spotify.position()
-  let dur: Float = spotify.duration()
+  let track: SpotifyTrack = Spotify.current()
+  let pos: Float = Spotify.position()
+  let dur: Float = Spotify.duration()
   # Mirror Spotify's actual state into the local playback mock so play-button
   # revision invalidation and the progress/readout state
   # match the real player. Includes "user paused in Spotify directly"

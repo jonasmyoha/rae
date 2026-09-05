@@ -569,7 +569,7 @@ const char* rae_mangle_function(CompilerContext* ctx, const AstFuncDecl* func) {
         else if (str_eq_cstr(name, "rae_int_to_float")) mapped = "rae_ext_rae_int_to_float";
         else if (str_eq_cstr(name, "readLine")) mapped = "rae_ext_rae_io_read_line";
         else if (str_eq_cstr(name, "readChar")) mapped = "rae_ext_rae_io_read_char";
-        // math.* now uses the namespace rule below (rae_ext_math_<name>).
+        // math.* now uses the namespace rule below (rae_ext_Math_<name>).
         else if (str_eq_cstr(name, "__buf_alloc")) mapped = "rae_ext___buf_alloc";
         else if (str_eq_cstr(name, "__buf_free")) mapped = "rae_ext___buf_free";
         else if (str_eq_cstr(name, "__buf_set")) mapped = "rae_ext___buf_set";

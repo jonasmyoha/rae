@@ -2984,6 +2984,18 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       for (size_t i = 0; i < ctx->all_decl_count; i++) {
           const AstDecl* d = ctx->all_decls[i];
           if (d->kind != AST_DECL_GLOBAL_LET) continue;
+          // The generated low-level WebGPU bindings under lib/webgpu/ mirror the
+          // wgpu.h enum/flag values as Rae consts (WGPUAdapterType_DiscreteGPU,
+          // WGPUAddressMode_Repeat, …). When the native header is linked
+          // (RAE_HAS_WEBGPU) it defines the SAME identifiers as real enum
+          // constants, so emitting our mirror as a `static int32_t` too is a
+          // redefinition. Guard the mirror behind #ifndef so the header wins on
+          // native builds and the Rae fallback still exists otherwise — the same
+          // "defer to the cheader" rule c_struct binding types already follow.
+          // (Surfaces once webgpu/Webgpu.rae is the package main module, which
+          // pulls the whole binding package via the sibling auto-load.)
+          bool webgpu_binding = d->origin_file && strstr(d->origin_file, "/webgpu/") != NULL;
+          if (webgpu_binding) fprintf(out, "#ifndef RAE_HAS_WEBGPU\n");
           fprintf(out, "RAE_UNUSED static ");
           if (d->as.let_decl.type) emit_type_ref_as_c_type(&gctx, d->as.let_decl.type, out, false);
           else fprintf(out, "int64_t");
@@ -2995,6 +3007,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               // deferred ones are assigned at the top of main().
               emit_auto_init(&gctx, d->as.let_decl.type, out);
           fprintf(out, ";\n");
+          if (webgpu_binding) fprintf(out, "#endif\n");
       }
       fprintf(out, "\n");
   }

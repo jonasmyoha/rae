@@ -25,13 +25,13 @@
 #      infinity here survives into the HDR target and takes the whole
 #      frame with it through the tonemapper.
 import core
-import math
+import Math
 import Vec3
 import Sky
 open Sky
 
 func norm(x: view Float, y: view Float, z: view Float) ret Vec3 {
-  let l: Float = math.sqrt(x: x * x + y * y + z * z)
+  let l: Float = Math.sqrt(x: x * x + y * y + z * z)
   ret Vec3.create(x: x / l, y: y / l, z: z / l)
 }
 
@@ -108,7 +108,7 @@ func main() {
       var j: Int = 0
       loop j < 5 {
         let z: Float = 0.0 - 0.2 + j.toFloat() * 0.3
-        let d: Vec3 = norm(x: math.cos(x: a), y: math.sin(x: a), z: z)
+        let d: Vec3 = norm(x: Math.cos(x: a), y: Math.sin(x: a), z: z)
         if finiteNonNeg(c: preethamRadiance(dir: d, sunDir: sunHigh, turbidity: t)) is false {
           allFinite = false
         }

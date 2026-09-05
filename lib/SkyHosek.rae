@@ -20,11 +20,11 @@
 
 import core
 import Json
-import math
-import sys
+import Math
+import Sys
 import Vec3
 open Json
-open math
+open Math
 open Vec3
 
 const hosekDatasetPath: String = "lib/data/hosek_wilkie_rgb.json"
@@ -133,7 +133,7 @@ func readChannel(doc: view JsonDoc, root: view JsonValue, key: view String, chan
 # what this returns. `loaded` is false when the file is missing or malformed,
 # which callers should treat as "fall back to another sky kind" rather than as
 # a reason to abort — a missing data file should not take a renderer down.
-# Whole-file read. `sys.readFile` returns `opt String`, and the C backend has a
+# Whole-file read. `Sys.readFile` returns `opt String`, and the C backend has a
 # known bug comparing those against `none`; lib/hot_reload declares the same raw
 # extern for the same reason. `rae_sys_read_file_text` is not a substitute — it
 # takes a byte RANGE, so it reads nothing without a length.

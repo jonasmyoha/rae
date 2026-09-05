@@ -28,14 +28,14 @@
 # shows an arbitrary subset, so the bar would visibly reshuffle as the
 # window resizes.
 import core
-import sys
+import Sys
 open ui/Ecs
 open ui/Components
 open ui/Registry
 open ui/InputSystem/InputSystem
 open ui/RenderSystem/RenderSystem
 open ui/Scene
-open ui/sceneFile
+open ui/SceneFile
 open ui/SceneInstance
 open app3d/UiShell
 open app3d/CameraRig
@@ -73,7 +73,7 @@ func readoutId(index: view Int) ret String {
 # whole point of the shared folder is that the next app does not copy
 # the file just to change where it sits.
 func app3dSceneDir() pub ret String {
-  let override: String = sys.getEnv(name: "RAE_APP3D_SCENES")
+  let override: String = Sys.getEnv(name: "RAE_APP3D_SCENES")
   if override.length() > 0 {
     ret "{override}"
   }
