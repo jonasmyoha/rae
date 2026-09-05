@@ -19,7 +19,7 @@ command -v node >/dev/null 2>&1 || { echo "SKIP wasm_smoke: node not found"; exi
 [ -x "$WASI_SDK/bin/clang" ] || { echo "SKIP wasm_smoke: wasi-sdk not at $WASI_SDK (set WASI_SDK)"; exit 0; }
 
 OUT="$PROJ/build/app.wasm"
-if ! compiler/tools/wasm_build.sh "$PROJ" "$PROJ/main.rae" "$OUT" >/dev/null 2>"/tmp/wasm_smoke_build.log"; then
+if ! compiler/tools/wasm_build.sh "$PROJ" "$PROJ/Main.rae" "$OUT" >/dev/null 2>"/tmp/wasm_smoke_build.log"; then
   echo "FAIL wasm_smoke: wasm build"; cat /tmp/wasm_smoke_build.log; exit 1
 fi
 

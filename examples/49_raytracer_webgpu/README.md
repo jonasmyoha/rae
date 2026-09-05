@@ -22,7 +22,7 @@ RGBA8 (`R | G<<8 | B<<16 | A<<24`).
 
 ## W3: same shader in the browser
 
-`web/index.html` is the browser harness. `main.rae` compiles to WASM (it just
+`web/index.html` is the browser harness. `Main.rae` compiles to WASM (it just
 streams the scene floats to stdout via `emitFloat`); the page captures that with
 a minimal WASI shim, uploads it to a storage buffer, runs `raytrace.wgsl` as a
 compute pipeline through the browser's own WebGPU, copies `outBuf` into a

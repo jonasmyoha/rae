@@ -15,7 +15,7 @@ WASI_SDK="${WASI_SDK:-$HOME/.local/wasi-sdk}"
 RAE="${RAE:-compiler/bin/rae}"
 
 PROJ="${1:?usage: wasm_build.sh <project-dir> [entry.rae] [out.wasm]}"
-ENTRY="${2:-$PROJ/main.rae}"
+ENTRY="${2:-$PROJ/Main.rae}"
 OUT="${3:-$PROJ/build/app.wasm}"
 
 CC="$WASI_SDK/bin/clang"

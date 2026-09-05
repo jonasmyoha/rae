@@ -515,7 +515,7 @@ function resolveEntryFile(
       `[examples] Metadata entry "${metadataEntry}" not found for ${relativeBase}, falling back to default entry.`
     );
   }
-  return files.find((file) => file.path.endsWith("main.rae"))?.path ?? files[0].path;
+  return files.find((file) => file.path.endsWith("Main.rae") || file.path.endsWith("main.rae"))?.path ?? files[0].path;
 }
 
 async function readExamplePackFiles(

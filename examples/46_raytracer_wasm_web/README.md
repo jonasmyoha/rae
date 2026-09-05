@@ -14,7 +14,7 @@ stdout and the harness captures it.
 
 - `scene.rae`, `camera.rae`, `render.rae` — copied verbatim from step 3
   (`42_raytracer_3_materials`); the compute core is already raylib-free.
-- `main.rae` — headless render loop; emits each pixel via `fbPixel(r,g,b)`.
+- `Main.rae` — headless render loop; emits each pixel via `fbPixel(r,g,b)`.
 - `fb_out.c` — the `fbPixel` extern: writes raw RGB bytes to stdout.
 - `web/index.html` — browser harness: a minimal WASI shim captures stdout and
   `putImageData`s it onto a `<canvas>`.
