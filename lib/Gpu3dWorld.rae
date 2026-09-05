@@ -30,16 +30,23 @@ func renderSceneSdfWorld(world: view World3d) pub {
   loop var clusterScan: Int = 0, clusterScan < count, ++clusterScan {
     let headEntity: EntityId = componentEntityAt(this: world.sdfs, i: clusterScan)
     let head: SdfPrimitive = componentGet(this: world.sdfs, entity: headEntity)
-    var alreadyDrawn: Bool = false
-    loop var back: Int = 0, back < clusterScan, ++back {
-      let priorEntity: EntityId = componentEntityAt(this: world.sdfs, i: back)
-      let prior: SdfPrimitive = componentGet(this: world.sdfs, entity: priorEntity)
-      if prior.shape is 0 {
-        if prior.cluster is head.cluster { alreadyDrawn = true }
+    # The cluster HEAD (the primitive that supplies the fused surface's
+    # material + smoothing) is the member with the LOWEST entity index — a
+    # stable key independent of dense order (#810), so a componentRemove
+    # swap-remove can never change which ball leads a cluster. Membership
+    # itself is the explicit `cluster` id, never dense adjacency.
+    var isHead: Bool = true
+    loop var back: Int = 0, back < count, ++back {
+      let otherEntity: EntityId = componentEntityAt(this: world.sdfs, i: back)
+      if otherEntity.index < headEntity.index {
+        let other: SdfPrimitive = componentGet(this: world.sdfs, entity: otherEntity)
+        if other.shape is 0 {
+          if other.cluster is head.cluster { isHead = false }
+        }
       }
     }
     if head.shape is 0 {
-      if alreadyDrawn is false {
+      if isHead {
         let packed: List(Float) = createList(Float, cap: count * 4)
         let colors: List(Float) = createList(Float, cap: count * 4)
         var ballCount: Int = 0
@@ -87,16 +94,23 @@ func renderSceneShadowSdfWorld(world: view World3d) pub {
   loop var clusterScan: Int = 0, clusterScan < count, ++clusterScan {
     let headEntity: EntityId = componentEntityAt(this: world.sdfs, i: clusterScan)
     let head: SdfPrimitive = componentGet(this: world.sdfs, entity: headEntity)
-    var alreadyDrawn: Bool = false
-    loop var back: Int = 0, back < clusterScan, ++back {
-      let priorEntity: EntityId = componentEntityAt(this: world.sdfs, i: back)
-      let prior: SdfPrimitive = componentGet(this: world.sdfs, entity: priorEntity)
-      if prior.shape is 0 {
-        if prior.cluster is head.cluster { alreadyDrawn = true }
+    # The cluster HEAD (the primitive that supplies the fused surface's
+    # material + smoothing) is the member with the LOWEST entity index — a
+    # stable key independent of dense order (#810), so a componentRemove
+    # swap-remove can never change which ball leads a cluster. Membership
+    # itself is the explicit `cluster` id, never dense adjacency.
+    var isHead: Bool = true
+    loop var back: Int = 0, back < count, ++back {
+      let otherEntity: EntityId = componentEntityAt(this: world.sdfs, i: back)
+      if otherEntity.index < headEntity.index {
+        let other: SdfPrimitive = componentGet(this: world.sdfs, entity: otherEntity)
+        if other.shape is 0 {
+          if other.cluster is head.cluster { isHead = false }
+        }
       }
     }
     if head.shape is 0 {
-      if alreadyDrawn is false {
+      if isHead {
         let packed: List(Float) = createList(Float, cap: count * 4)
         var ballCount: Int = 0
         loop var i: Int = 0, i < count, ++i {
