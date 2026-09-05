@@ -23,7 +23,7 @@ fi
 
 # Find supported examples only. Devtools already hides examples/legacy; the
 # compiler gate must use the same definition of the active example surface.
-EXAMPLE_FILES=$(find "$EXAMPLES_DIR" -path "$EXAMPLES_DIR/legacy" -prune -o -name "main.rae" -print | sort)
+EXAMPLE_FILES=$(find "$EXAMPLES_DIR" -path "$EXAMPLES_DIR/legacy" -prune -o \( -name "Main.rae" -o -name "main.rae" \) -print | sort)
 
 for EXAMPLE_FILE in $EXAMPLE_FILES; do
   EXAMPLE_NAME=$(basename "$(dirname "$EXAMPLE_FILE")")

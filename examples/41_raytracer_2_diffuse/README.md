@@ -13,7 +13,7 @@ Presented through the SDL3 desktop backend (`lib/sdl3.rae`); compiled-target
 only. Needs `brew install sdl3`.
 
 ```bash
-rae run --target compiled main.rae
+rae run --target compiled Main.rae
 ```
 
 See `../40_raytracer_1_basic/README.md` for the full step roadmap.

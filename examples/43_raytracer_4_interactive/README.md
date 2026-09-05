@@ -29,7 +29,7 @@ core loop of the `rae_ui` C++ raytracer.
   preview-vs-final quality toggle and emissive lights.
 
 ```bash
-rae run --target compiled main.rae   # recommended — real threads
+rae run --target compiled Main.rae   # recommended — real threads
 ```
 
 See `../40_raytracer_1_basic/README.md` for the full step roadmap.

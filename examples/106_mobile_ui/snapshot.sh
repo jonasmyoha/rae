@@ -26,6 +26,6 @@ perl -e 'alarm shift; exec @ARGV' 30 \
       RAE_AUTO_EXIT_SEC=1 \
       RAE_SDL_HEADLESS_MS=1000 \
       RAE_GPU2D_SCREENSHOT="$OUT" \
-  compiler/bin/rae run --project examples/106_mobile_ui --target compiled examples/106_mobile_ui/main.rae
+  compiler/bin/rae run --project examples/106_mobile_ui --target compiled examples/106_mobile_ui/Main.rae
 
 echo "Saved $OUT"
