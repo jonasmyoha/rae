@@ -111,6 +111,113 @@ by THAT table alone — never a general ordered structure.
 | Query joins (`query2`..`query5`) | dense indices | valid only during the walk, by contract |
 | Cross-frame cached dense indices | — | none exist in the tree |
 
+## Borrowing rules — disjoint fields and element references (#812)
+
+Every system leans on these rules; until now they were folklore. This is the
+checked, precise story — including what is *permitted because nothing checks it*,
+which is not the same as *proven safe*.
+
+### What the checker actually enforces (the complete list)
+
+1. **Reference bindings are bind-once.** `let name: view T => place` /
+   `let name: mod T => place`; never `var` (*"aliases are bind-once; declare with
+   'let', not 'var'"*). Collection-loop and field-loop bindings are aliases too.
+2. **`view` never promotes to `mod`.** You cannot bind `mod` to a `view`, nor
+   assign through a `view` (*"cannot assign through read-only view"*).
+3. **A reference cannot alias a copy.** `copyAt` returns a detached value; to alias
+   storage use `viewAt`/`modAt` (*"`copyAt` returns a copy; use `viewAt` or `modAt`
+   to alias storage"*).
+4. **A reference cannot be bound to a call that returns ownership.** Take the value
+   with `let name: T = …`, or use a reference-returning accessor.
+5. **The one aliasing rule (#658):** while an `if let p: view/mod T =>
+   list.viewAt/modAt(index:)` binding is live, the **same** `List` may not be
+   structurally mutated in that branch — `add`, `set`, `insert`, `remove`,
+   `swapRemove`, `clear`, `drop`, `grow`, `pop` — because `add` past capacity
+   reallocates the storage the pointer aliases. The same rule guards a
+   collection-loop body against its source List. Mutating a **different** List is
+   fine. It is a conservative, lexical check: it matches those method names on that
+   place; it does not do lifetime inference.
+
+That is all of it. There is **no rule about struct fields**, and (today) **no rule
+about the ECS element accessors** — see the gap below.
+
+### What is allowed — permissive by design
+
+- **Two `mod` borrows of disjoint fields of one struct/world at once.**
+  `world.controllers` and `world.animStates` both `mod` in one system is the
+  everyday shape; no rule fires. A `mod T` parameter is a borrow of the argument
+  place for the call, so passing two fields as two `mod` args is two disjoint
+  borrows, and the callee may hold element refs into its `mod` table and write
+  through them.
+- **An element ref held across several calls.** The 114 pattern — one borrowed
+  `ThirdPersonController` threaded through `updateWalkerMovement` and then
+  `groundWalker` — is allowed and correct.
+- **An element ref into one table plus a `mod` element ref into another** at the
+  same time.
+- **The same field passed twice as `mod`.** Also allowed — but only because the
+  checker has no struct-field aliasing rule at all. Two live mutable references to
+  one table are the programmer's responsibility; the compiler will not object.
+
+Why this is sound in the common case: a field reference is a pointer into the
+struct, and a field borrow never moves or reallocates the struct, so disjoint
+field refs stay valid for their whole scope. What CAN move is a table's dense
+storage — which is exactly the element-reference rule next.
+
+### Element references: the exact validity rule — and today's hole
+
+`componentView` / `componentMod` (by entity) and `queryViewAt` / `queryModAt` (by
+dense index) return a pointer into the table's dense storage. It is valid until
+the table is **structurally mutated**:
+
+- `componentSet` of a **new** entity appends — past capacity it reallocates, and
+  the ref **dangles**;
+- `componentRemove` swap-removes — the ref's slot may now hold a **different
+  entity's** data;
+- `componentSet` of an entity that is **already present** overwrites in place and
+  does not move storage.
+
+**The checker does not catch this for the ECS accessors** — rule 5 above knows
+only `viewAt`/`modAt` on a raw List. Verified reproduction: hold a `componentMod`
+ref, append 599 entities with `componentSet`, write `999` through the ref — the
+write is silently **lost** (`e.x` stays `1`): a use-after-free with no diagnostic.
+Tracked as **#814** (extend the #658 borrow check to `componentMod`/`queryModAt`
+and the structural table mutators). Until it lands the rule is discipline, and it
+is the same contract the query docs already state:
+
+> Never `componentSet` a new entity into, or `componentRemove` from, a table you
+> hold a reference into. Finish with the reference, then mutate — or copy first.
+
+### Worked ECS examples
+
+```rae
+# ALLOWED — two disjoint tables of one world, both written, in one system:
+func movementSystem(world: mod GameWorld, dt: view Float) {
+  loop let entity: EntityId, controller: mod ThirdPersonController, anim: mod AnimationState
+       in query2(tableA: world.controllers, tableB: world.animStates) {
+    updateWalkerMovement(controller: controller, intent: intent, cameraYaw: yaw, dt: dt)
+    groundWalker(controller: controller, groundZ: groundZ)   # same borrowed ref, next call
+    anim.phase = anim.phase + dt
+  }
+}
+
+# ALLOWED — one element ref threaded through several calls (114):
+let controller: mod ThirdPersonController => componentMod(this: world.controllers, entity: hero)
+updateWalkerMovement(controller: controller, intent: intent, cameraYaw: yaw, dt: dt)
+groundWalker(controller: controller, groundZ: groundZ)
+
+# ALLOWED — a ref into one table plus a ref into another:
+let pos: mod Position => componentMod(this: world.positions, entity: e)
+let vel: view Velocity => componentView(this: world.velocities, entity: e)
+pos.x = pos.x + vel.v * dt
+
+# NOT SAFE (and NOT diagnosed today, #814) — structural mutation of the table you
+# hold a ref into:
+let pos: mod Position => componentMod(this: world.positions, entity: e)
+componentSet(this: world.positions, entity: other, data: Position { x: 0 })   # may realloc -> pos dangles
+pos.x = 1                                                                     # lost write / UAF
+# Fix: do the componentSet first, THEN take the ref; or copy the value out.
+```
+
 ## Queries — `lib/ecs/Query.rae`
 
 Join tables on the entities they share, probing the smallest table:
