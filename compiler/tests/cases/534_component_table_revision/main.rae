@@ -10,6 +10,12 @@ type Cell {
   v: Int
 }
 
+# #814: a mod borrow must end before the table is mutated again — scope it here.
+func setViaMod(t: mod ComponentTable(Cell), e: view EntityId, v: view Int) {
+  let m: mod Cell => componentMod(this: t, entity: e)
+  m.v = v
+}
+
 func main() {
   var t: ComponentTable(Cell) = createComponentTable(Cell)
   log("gen0: {componentTableGeneration(this: t)}")
@@ -37,9 +43,8 @@ func main() {
   let g1b: Cell = componentGet(this: t, entity: e1)
   log("get_e1b: {g1b.v}")
 
-  # mod bumps
-  let m: mod Cell => componentMod(this: t, entity: e2)
-  m.v = 21
+  # mod bumps (borrow scoped in a helper, #814)
+  setViaMod(t: t, e: e2, v: 21)
   log("gen4: {componentTableGeneration(this: t)}")
   let g2: Cell = componentGet(this: t, entity: e2)
   log("get_e2: {g2.v}")
