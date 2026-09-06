@@ -3034,8 +3034,9 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           // cheader" rule c_struct binding types follow: initialise the mirror
           // FROM the header constant there, and from the Rae literal otherwise.
           // (Every lib/webgpu const exists in the native header — checked at
-          // #816 — and e.g. WGPU_WHOLE_SIZE = UINT64_MAX would otherwise come out
-          // of the Rae literal path saturated to INT64_MAX, see QUEUE #817.)
+          // #816. The Rae fallback is exact too since #817 taught the const
+          // folder and the literal emitter uint64, so this is purely the
+          // "header is the source of truth" rule, not a correctness crutch.)
           bool webgpu_binding = d->origin_file && strstr(d->origin_file, "/webgpu/") != NULL;
           const char* gname = global_c_name(ctx, d);
           if (webgpu_binding) {

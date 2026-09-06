@@ -6,6 +6,8 @@
 #include "ownership.h"
 #include "c_backend.h"
 #include <string.h>
+#include <errno.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -230,6 +232,7 @@ struct Symbol {
     // Folded value for `const` symbols (so later consts can reference them).
     bool const_is_number;
     bool const_is_float;
+    bool const_is_unsigned;  // #817: const_i holds a uint64 bit pattern > INT64_MAX
     double const_d;
     long long const_i;
     Symbol* next;
@@ -265,6 +268,7 @@ static Symbol* symbol_table_define(SymbolTable* table, Arena* arena, Str name, A
     sym->is_local_storage = false;
     sym->const_is_number = false;
     sym->const_is_float = false;
+    sym->const_is_unsigned = false;
     sym->const_d = 0.0;
     sym->const_i = 0;
     sym->next = table->head;
@@ -1320,6 +1324,10 @@ typedef struct {
     bool numeric;     // ok AND a number we can fold (Int/Float). Non-numeric
                       // consts (enum case, string, bool) are valid but left as-is.
     bool is_float;
+    bool is_unsigned; // #817: `i` is the bit pattern of a uint64 above INT64_MAX
+                      // (a literal like 18446744073709551615, or a product that
+                      // overflows int64 but fits uint64). Arithmetic on such a
+                      // value is done in uint64 and the result is printed %llu.
     double d;
     long long i;
 } ConstResult;
@@ -1334,7 +1342,14 @@ static ConstResult const_eval(SymbolTable* symbols, AstExpr* e) {
         case AST_EXPR_INTEGER: {
             char buf[64]; size_t n = e->as.integer.len < 63 ? e->as.integer.len : 63;
             memcpy(buf, e->as.integer.data, n); buf[n] = '\0';
-            return (ConstResult){ .ok = true, .numeric = true, .is_float = false, .i = strtoll(buf, NULL, 0) };
+            // #817: parse unsigned so 2^63..2^64-1 survive (strtoll saturated
+            // 18446744073709551615 to INT64_MAX, which is how WGPU_WHOLE_SIZE
+            // reached the C as 9223372036854775807).
+            errno = 0;
+            unsigned long long u = strtoull(buf, NULL, 0);
+            if (errno == ERANGE) return fail;  // beyond uint64: not representable
+            return (ConstResult){ .ok = true, .numeric = true, .is_float = false,
+                                  .is_unsigned = u > (unsigned long long)LLONG_MAX, .i = (long long)u };
         }
         case AST_EXPR_FLOAT: {
             char buf[64]; size_t n = e->as.floating.len < 63 ? e->as.floating.len : 63;
@@ -1352,7 +1367,7 @@ static ConstResult const_eval(SymbolTable* symbols, AstExpr* e) {
             Symbol* s = symbol_table_lookup(symbols, e->as.ident);
             if (!s || s->bind_kind != BIND_CONST) return fail;
             if (s->const_is_number) {
-                return (ConstResult){ .ok = true, .numeric = true, .is_float = s->const_is_float, .d = s->const_d, .i = s->const_i };
+                return (ConstResult){ .ok = true, .numeric = true, .is_float = s->const_is_float, .is_unsigned = s->const_is_unsigned, .d = s->const_d, .i = s->const_i };
             }
             return ok_nonnum;
         }
@@ -1368,23 +1383,36 @@ static ConstResult const_eval(SymbolTable* symbols, AstExpr* e) {
             ConstResult r = const_eval(symbols, e->as.binary.rhs);
             if (!l.ok || !r.ok || !l.numeric || !r.numeric) return fail;
             bool isf = l.is_float || r.is_float;
+            // #817: integer folding runs in uint64 (no signed-overflow UB) and
+            // the result is unsigned when either operand was, or when two
+            // non-negative operands produced a value above INT64_MAX (e.g.
+            // 4294967295 * 4294967295 for a UInt64 const).
+            bool isu = l.is_unsigned || r.is_unsigned;
+            bool nonneg = isu || (l.i >= 0 && r.i >= 0);
+            unsigned long long lu = (unsigned long long)l.i, ru = (unsigned long long)r.i;
+#define RAE_FOLD_U(res) (ConstResult){.ok=1,.numeric=1,.is_unsigned=(isu || (nonneg && (res) > (unsigned long long)LLONG_MAX)),.i=(long long)(res)}
             switch (e->as.binary.op) {
-                case AST_BIN_ADD: return isf ? (ConstResult){.ok=1,.numeric=1,.is_float=1,.d=cr_num(l)+cr_num(r)} : (ConstResult){.ok=1,.numeric=1,.i=l.i+r.i};
-                case AST_BIN_SUB: return isf ? (ConstResult){.ok=1,.numeric=1,.is_float=1,.d=cr_num(l)-cr_num(r)} : (ConstResult){.ok=1,.numeric=1,.i=l.i-r.i};
-                case AST_BIN_MUL: return isf ? (ConstResult){.ok=1,.numeric=1,.is_float=1,.d=cr_num(l)*cr_num(r)} : (ConstResult){.ok=1,.numeric=1,.i=l.i*r.i};
+                case AST_BIN_ADD: return isf ? (ConstResult){.ok=1,.numeric=1,.is_float=1,.d=cr_num(l)+cr_num(r)} : RAE_FOLD_U(lu + ru);
+                case AST_BIN_SUB: return isf ? (ConstResult){.ok=1,.numeric=1,.is_float=1,.d=cr_num(l)-cr_num(r)} : (isu ? RAE_FOLD_U(lu - ru) : (ConstResult){.ok=1,.numeric=1,.i=(long long)(lu - ru)});
+                case AST_BIN_MUL: return isf ? (ConstResult){.ok=1,.numeric=1,.is_float=1,.d=cr_num(l)*cr_num(r)} : (nonneg ? RAE_FOLD_U(lu * ru) : (ConstResult){.ok=1,.numeric=1,.i=(long long)(lu * ru)});
                 case AST_BIN_DIV:
                     if (isf) { if (cr_num(r) == 0.0) return fail; return (ConstResult){.ok=1,.numeric=1,.is_float=1,.d=cr_num(l)/cr_num(r)}; }
-                    if (r.i == 0) return fail; return (ConstResult){.ok=1,.numeric=1,.i=l.i/r.i};
+                    if (r.i == 0) return fail;
+                    if (isu) return (ConstResult){.ok=1,.numeric=1,.is_unsigned=1,.i=(long long)(lu / ru)};
+                    return (ConstResult){.ok=1,.numeric=1,.i=l.i/r.i};
                 case AST_BIN_MOD:
-                    if (isf || r.i == 0) return fail; return (ConstResult){.ok=1,.numeric=1,.i=l.i % r.i};
+                    if (isf || r.i == 0) return fail;
+                    if (isu) return (ConstResult){.ok=1,.numeric=1,.is_unsigned=1,.i=(long long)(lu % ru)};
+                    return (ConstResult){.ok=1,.numeric=1,.i=l.i % r.i};
                 // Bitwise ops fold on integer operands only (Int-only by design).
                 case AST_BIN_BITAND: if (isf) return fail; return (ConstResult){.ok=1,.numeric=1,.i=l.i & r.i};
                 case AST_BIN_BITOR:  if (isf) return fail; return (ConstResult){.ok=1,.numeric=1,.i=l.i | r.i};
                 case AST_BIN_BITXOR: if (isf) return fail; return (ConstResult){.ok=1,.numeric=1,.i=l.i ^ r.i};
                 case AST_BIN_SHL:  if (isf) return fail; return (ConstResult){.ok=1,.numeric=1,.i=l.i << r.i};
-                case AST_BIN_SHR:  if (isf) return fail; return (ConstResult){.ok=1,.numeric=1,.i=l.i >> r.i};
+                case AST_BIN_SHR:  if (isf) return fail; return isu ? (ConstResult){.ok=1,.numeric=1,.is_unsigned=1,.i=(long long)(lu >> ru)} : (ConstResult){.ok=1,.numeric=1,.i=l.i >> r.i};
                 default: return fail;
             }
+#undef RAE_FOLD_U
         }
         default:
             return fail;
@@ -1408,6 +1436,7 @@ static void sema_fold_const(CompilerContext* ctx, AstModule* module, SymbolTable
     if (sym) {
         sym->const_is_number = r.numeric;
         sym->const_is_float = r.is_float;
+        sym->const_is_unsigned = r.is_unsigned;
         sym->const_d = r.d;
         sym->const_i = r.i;
     }
@@ -1420,7 +1449,8 @@ static void sema_fold_const(CompilerContext* ctx, AstModule* module, SymbolTable
             init->kind = AST_EXPR_FLOAT;
             init->as.floating = str_dup_arena(ctx->ast_arena, str_from_cstr(buf));
         } else {
-            snprintf(buf, sizeof buf, "%lld", r.i);
+            if (r.is_unsigned) snprintf(buf, sizeof buf, "%llu", (unsigned long long)r.i);  // #817
+            else snprintf(buf, sizeof buf, "%lld", r.i);
             init->kind = AST_EXPR_INTEGER;
             init->as.integer = str_dup_arena(ctx->ast_arena, str_from_cstr(buf));
         }
