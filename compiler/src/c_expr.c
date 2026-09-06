@@ -14,6 +14,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
+#include <errno.h>
 #include "lexer.h"
 
 // Emit `"file", line` for a runtime diagnostic that points back at Rae source
@@ -179,7 +181,23 @@ static bool expr_is_string_typed(CFuncContext* ctx, const AstExpr* e) {
 bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue, bool suppress_deref) {
   if (!expr) return true;
   switch (expr->kind) {
-    case AST_EXPR_INTEGER: fprintf(out, "((int64_t)%.*sLL)", (int)expr->as.integer.len, expr->as.integer.data); break;
+    case AST_EXPR_INTEGER: {
+        // #817: a literal above INT64_MAX (18446744073709551615) or any integer
+        // literal in a UInt64-typed context is emitted as uint64 — `%sLL` would
+        // be out of range (clang silently reads it unsigned then the
+        // (int64_t) cast makes it -1) and `4294967295 * 4294967295` would
+        // overflow in int64 before the assignment converts.
+        char buf[64]; size_t n = expr->as.integer.len < 63 ? expr->as.integer.len : 63;
+        memcpy(buf, expr->as.integer.data, n); buf[n] = '\0';
+        errno = 0;
+        unsigned long long u = strtoull(buf, NULL, 0);
+        bool big = errno != ERANGE && u > (unsigned long long)LLONG_MAX;
+        bool want_u64 = ctx->has_expected_type && !ctx->expected_type.is_opt
+                     && str_eq_cstr(get_base_type_name(&ctx->expected_type), "UInt64");
+        if (big || want_u64) fprintf(out, "((uint64_t)%.*sULL)", (int)expr->as.integer.len, expr->as.integer.data);
+        else fprintf(out, "((int64_t)%.*sLL)", (int)expr->as.integer.len, expr->as.integer.data);
+        break;
+    }
     case AST_EXPR_FLOAT: fprintf(out, "%.*s", (int)expr->as.floating.len, expr->as.floating.data); break;
     case AST_EXPR_BOOL: fprintf(out, "(bool)%s", expr->as.boolean ? "true" : "false"); break;
     case AST_EXPR_STRING: emit_string_literal(out, expr->as.string_lit); break;
@@ -465,6 +483,15 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                       ctx->expected_type = payload; ctx->has_expected_type = true;
                   }
               }
+          }
+          // #817: an integer literal infers as plain `Int`; inside a UInt64-typed
+          // context (`let y: UInt64 = 4294967295 * 4294967295`) that must not
+          // demote the expectation, or the literals are emitted as int64 and the
+          // arithmetic overflows before the assignment converts.
+          if (picked && had_exp_bin && !saved_exp_bin.is_opt
+              && str_eq_cstr(get_base_type_name(&saved_exp_bin), "UInt64")) {
+              Str pb = get_base_type_name(picked);
+              if (str_eq_cstr(pb, "Int") || str_eq_cstr(pb, "Int64")) picked = NULL;
           }
           if (picked) { ctx->expected_type = *picked; ctx->has_expected_type = true; }
       }

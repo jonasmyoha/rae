@@ -238,6 +238,17 @@ let y: Float64 = 1.5   # fine
 let i: Int     = 42    # fine
 ```
 
+The same holds for the full unsigned 64-bit range. An integer literal above
+`Int`'s maximum, and integer arithmetic that only fits in 64 unsigned bits, is
+materialised in the `UInt64` destination — in a `const` (folded at compile
+time) exactly as in a local (#817):
+
+```rae
+const whole: UInt64 = 18446744073709551615   # 2^64 - 1, exact
+let prod: UInt64 = 4294967295 * 4294967295   # 18446744065119617025, no int64 overflow
+log("{whole}")                                # prints 18446744073709551615, never -1
+```
+
 `let x: Float = 1.5 as Float` is unnecessary noise.
 
 ### The timestamp pattern

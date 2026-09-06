@@ -1,0 +1,21 @@
+import core
+
+# #817: a UInt64 literal above INT64_MAX, and arithmetic that overflows int64
+# but fits uint64, in BOTH the const-folded (module const) and the plain
+# expression (local) paths. Every value used to come out wrong: the const
+# folder parsed with strtoll (saturating to INT64_MAX), the C emitter wrote
+# an out-of-range `LL` literal (read back as -1), the product overflowed in
+# int64, and UInt64 -> String formatted through the signed path.
+const big: UInt64 = 18446744073709551615
+const prod: UInt64 = 4294967295 * 4294967295
+const half: UInt64 = big / 2
+
+func main() {
+  let x: UInt64 = 18446744073709551615
+  let y: UInt64 = 4294967295 * 4294967295
+  let hex: UInt64 = 0xFFFFFFFFFFFFFFFF
+  log("big={big} prod={prod} half={half}")
+  log("x={x} y={y} hex={hex}")
+  log(value: big)
+  log(value: y)
+}
