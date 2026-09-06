@@ -1,10 +1,16 @@
-# Live (bytecode VM) — status: PRESERVED BUT UNSUPPORTED
+# Live (bytecode VM) — status: DEPRECATED (left to rot)
 
-**Policy (2026-06-28):**
+**Policy (updated 2026-09-07):**
 
-> **Live is preserved but unsupported. It remains buildable on a best-effort
-> basis, is absent from normal Rae workflows, and is no longer a compatibility
-> target for new language development.**
+> **The Live / VM (bytecode) target is DEPRECATED and UNMAINTAINED.** It is left
+> in the repo to rot — not removed yet, no plan to remove it yet, and equally no
+> plan to fix, extend, test, or keep it at parity with the Compiled target. The
+> test suite and the example gate run the **Compiled (C backend) target only**.
+> Do not "fix" a VM bug, add a VM feature, or let the VM's existence block,
+> caveat, or complicate Compiled-target work. If a shared change (e.g. a sema
+> diagnostic) happens to help the VM for free, fine — otherwise ignore it.
+> Read the older "preserved but unsupported / best-effort buildable" wording
+> below as historical; the operative word now is **deprecated**.
 
 This is stronger and clearer than "frozen," while staying **completely
 reversible** — nothing is deleted. The future replacement for Live's unique
