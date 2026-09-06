@@ -3290,6 +3290,22 @@ AstModule* parse_module(Arena* arena, const char* file_path, TokenList tokens) {
         parser_advance(&parser);
     }
   }
+  // A file that both `import`s and `open`s the same module is a hard error:
+  // `open` already implies `import` (docs/module-namespacing.md), so the pair
+  // is pure redundancy that reads as if the two directives did different
+  // things. Same for a repeated identical directive.
+  for (AstImport* a = imports; a; a = a->next) {
+    for (AstImport* b = a->next; b; b = b->next) {
+      if (!a->path.data || !b->path.data || !str_eq(a->path, b->path)) continue;
+      Token at = { .line = b->line, .column = b->column };
+      if (a->is_open != b->is_open)
+        parser_error(&parser, &at, "'%.*s' is both imported and opened in this file: `open` already implies `import`, keep only `open %.*s`",
+                     (int)b->path.len, b->path.data, (int)b->path.len, b->path.data);
+      else
+        parser_error(&parser, &at, "duplicate `%s %.*s` directive in this file",
+                     b->is_open ? "open" : "import", (int)b->path.len, b->path.data);
+    }
+  }
   AstDecl* head = NULL;
   while (!parser_check(&parser, TOK_EOF)) {
     size_t prev_index = parser.index;
