@@ -92,7 +92,7 @@ loop let field: view any in fields(world) { ... }
 `any` is the **one new keyword**: the compile-time type wildcard, legal only inside
 a type pattern. It is deliberately NOT the existing type `Any`, and the two cannot be
 merged: `Any` is the *runtime* dynamic-value box (`RaeAny` — `log(value: Any)`,
-`Buffer(Any)`, `List2` elements), so `ComponentTable(Any)` is *already* a legal
+`Buffer(Any)`, `List(Any)` elements), so `ComponentTable(Any)` is *already* a legal
 concrete type today meaning "a table of dynamic boxes". Reusing it in a pattern would
 make `loop let t: ComponentTable(Any) in fields(world)` ambiguous between "only fields
 of that exact concrete type" and "tables of any element type". Hence: `Any` = runtime
