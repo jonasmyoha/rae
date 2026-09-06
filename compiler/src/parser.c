@@ -3296,8 +3296,18 @@ AstModule* parse_module(Arena* arena, const char* file_path, TokenList tokens) {
   // things. Same for a repeated identical directive.
   for (AstImport* a = imports; a; a = a->next) {
     for (AstImport* b = a->next; b; b = b->next) {
-      if (!a->path.data || !b->path.data || !str_eq(a->path, b->path)) continue;
+      if (!a->path.data || !b->path.data) continue;
       Token at = { .line = b->line, .column = b->column };
+      // `open ecs` + `open ecs/Tag`: the package form already covers the module.
+      if (!str_eq(a->path, b->path)) {
+        const AstImport* pk = a->path.len < b->path.len ? a : b; const AstImport* md = pk == a ? b : a;
+        if (pk->is_open == md->is_open && md->path.len > pk->path.len + 1
+            && memcmp(md->path.data, pk->path.data, pk->path.len) == 0 && md->path.data[pk->path.len] == '/')
+          parser_error(&parser, &at, "`%s %.*s` is already covered by `%s %.*s` (the package form covers every module in it)",
+                       md->is_open ? "open" : "import", (int)md->path.len, md->path.data,
+                       pk->is_open ? "open" : "import", (int)pk->path.len, pk->path.data);
+        continue;
+      }
       if (a->is_open != b->is_open)
         parser_error(&parser, &at, "'%.*s' is both imported and opened in this file: `open` already implies `import`, keep only `open %.*s`",
                      (int)b->path.len, b->path.data, (int)b->path.len, b->path.data);

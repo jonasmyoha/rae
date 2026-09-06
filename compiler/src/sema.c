@@ -139,18 +139,32 @@ static void sema_import_package(Str path, char* out, size_t cap) {
     if (n > 4 && strcmp(out + n - 4, ".rae") == 0) out[n - 4] = '\0';
 }
 
-// Does `file` declare `import`/`open` for the package that owns `d`? `open` only
-// counts when require_open is true (bare lookup); `import` or `open` both count
-// otherwise (qualified / UFCS). Directives are package-granular: opening any
-// module in a package opens the whole package. (docs/module-namespacing.md)
+// Normalize a directive path for matching: `\\` -> `/`, drop a trailing `.rae`.
+static size_t sema_norm_import_path(Str path, char* out, size_t cap) {
+    size_t n = 0;
+    for (size_t i = 0; i < path.len && n + 1 < cap; i++) out[n++] = path.data[i] == '\\' ? '/' : path.data[i];
+    out[n] = '\0';
+    if (n > 4 && strcmp(out + n - 4, ".rae") == 0) { n -= 4; out[n] = '\0'; }
+    return n;
+}
+
+// Does `file` declare `import`/`open` that COVERS decl `d`? Directives are
+// MODULE-granular: `open ecs/Tag` covers exactly module `ecs/Tag`; naming a
+// folder (`open ecs`) covers the whole package `ecs/*`. Opening one module
+// never opens its siblings — a bare name's origin is always on the page.
+// `open` only counts when require_open is true (bare lookup); `import` or
+// `open` both count otherwise (qualified / UFCS). (docs/module-namespacing.md)
 static bool sema_file_declares_package(const char* file, const AstDecl* d, bool require_open) {
-    if (!d->origin_file) return false;
-    char dpkg[256]; sema_package_token(d->origin_file, dpkg, sizeof dpkg);
+    if (!d->module_name) return false;
+    const char* mod = d->module_name;
+    size_t mlen = strlen(mod);
     for (AstImport* im = sema_imports_for_file(file); im; im = im->next) {
         if (require_open && !im->is_open) continue;
         if (!im->path.data) continue;
-        char ipkg[256]; sema_import_package(im->path, ipkg, sizeof ipkg);
-        if (strcmp(ipkg, dpkg) == 0) return true;
+        char ip[512]; size_t n = sema_norm_import_path(im->path, ip, sizeof ip);
+        if (n == 0) continue;
+        if (n == mlen && memcmp(ip, mod, n) == 0) return true;                       // exactly this module
+        if (n < mlen && memcmp(ip, mod, n) == 0 && mod[n] == '/') return true;        // the whole package
     }
     return false;
 }
@@ -1008,7 +1022,7 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
     if (ineligible && ineligible->module_name && !open_arity_match) {
         char buf[320];
         snprintf(buf, sizeof(buf),
-            "'%.*s' is in package '%s', which is not open here; use `open %s` for a bare call, or %s.%.*s(...)",
+            "'%.*s' is in module '%s', which is not open here; use `open %s` for a bare call, or %s.%.*s(...)",
             (int)name.len, name.data, ineligible->module_name,
             ineligible->module_name, ineligible->module_name, (int)name.len, name.data);
         const char* err_file = sema_diag_file(module);

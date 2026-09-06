@@ -136,6 +136,18 @@ Because `open` implies `import`, writing BOTH `import X` and `open X` in one fil
 is a **compile error** (as is repeating the same directive). Keep only the `open`.
 The pair used to be a common habit; it never did anything the `open` alone did not.
 
+**Directives are module-granular.** `open ecs/Tag` opens exactly the module
+`ecs/Tag` — never its siblings. A bare name's origin is therefore always a
+directive on the page. To open a whole package you name the package itself:
+`open ecs` covers every module under `ecs/` (the same folder form `import math`
+already uses to load a folder). Writing `open ecs` and `open ecs/Tag` together is
+an error, since the package form already covers the module. The two structural
+auto-visibility rules are unchanged: files inside the same lib package see each
+other bare, and a project's own tree is auto-visible. (Before this rule, opening
+any one module of a lib package silently opened the whole package — `open ui/Theme`
+bare-opened all of `lib/ui/**` — which hid where names came from and made
+collisions silent.)
+
 ```rae
 open io
 io.log("Hello")         # qualified — ok
