@@ -125,6 +125,16 @@ void emitted_list_add(EmittedTypeList* list, const char* name);
 bool types_match(Str a, Str b);
 bool is_primitive_ref(CFuncContext* ctx, const AstTypeRef* tr);
 bool is_pointer_type(CFuncContext* ctx, Str name);
+/* #816: the C symbol of a module-level `let`/`const` (AST_DECL_GLOBAL_LET):
+ * `rae_g_<module>_<name>`, module = module_name with '/' -> '_' (else the
+ * origin file's basename). Globals used to be emitted under their bare Rae
+ * name, so a same-named local self-initialised (`int64_t shade = shade;`)
+ * and two modules' same-named consts collided in the C namespace. */
+const char* global_c_name(CompilerContext* cctx, const AstDecl* decl);
+/* The C spelling of an identifier expression: the prefixed global symbol when
+ * the ident refers to a module global (decl_link, else a non-local name that
+ * matches a global), otherwise the ident itself. */
+Str ident_c_name(CFuncContext* ctx, const AstExpr* expr);
 bool is_generic_param(const AstIdentifierPart* params, Str name);
 bool has_property(const AstProperty* props, const char* name);
 int binary_op_precedence(AstBinaryOp op);
