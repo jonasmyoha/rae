@@ -112,6 +112,8 @@ bool str_matches(Str a, Str b) {
 }
 
 bool is_stdlib_module(Str name) {
+    // #818: core became a package (core/Core, core/List, …)
+    if (name.len >= 5 && memcmp(name.data, "core/", 5) == 0) return true;
     return str_eq_cstr(name, "core") || 
            str_eq_cstr(name, "Math") ||
            str_eq_cstr(name, "Io") ||

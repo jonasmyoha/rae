@@ -1,0 +1,12 @@
+# #818: core is the package lib/core/ (Core, List, StringMap, IntMap), not a
+# lowercase core.rae. This entry uses log() and List(T) with NO import — the
+# package prelude must still auto-open every core sibling so they stay
+# bare-callable. A sibling in a NESTED project folder does the same, proving
+# auto-open reaches the whole compile unit, not just the entry file.
+func main() {
+  let xs: List(Int) = createList(Int, cap: 3)
+  xs.add(value: 10)
+  xs.add(value: 32)
+  log("entry len={xs.length}")
+  scored()
+}

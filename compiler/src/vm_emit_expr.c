@@ -893,7 +893,7 @@ bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           Str int_type = str_from_cstr("Int64");
     FunctionEntry* create_entry = function_table_find_overload(&compiler->compiler_ctx->functions, str_from_cstr("createList"), &int_type, 1);
           if (!create_entry) {
-              diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'createList' not found in core.rae");
+              diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'createList' not found in the core package");
               return false;
           }
 
@@ -917,7 +917,7 @@ bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
           Str add_types[] = { str_from_cstr("List"), str_from_cstr("Any") };
           FunctionEntry* add_entry = function_table_find_overload(&compiler->compiler_ctx->functions, str_from_cstr("add"), add_types, 2);
           if (!add_entry) {
-              diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'add' not found in core.rae");
+              diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'add' not found in the core package");
               return false;
           }
 
@@ -953,7 +953,7 @@ bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       Str int_type = str_from_cstr("Int64");
     FunctionEntry* create_entry = function_table_find_overload(&compiler->compiler_ctx->functions, str_from_cstr("createList"), &int_type, 1);
       if (!create_entry) {
-          diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'createList' not found in core.rae");
+          diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'createList' not found in the core package");
           return false;
       }
 
@@ -973,7 +973,7 @@ bool compile_expr(BytecodeCompiler* compiler, const AstExpr* expr) {
       Str add_types[] = { str_from_cstr("List"), str_from_cstr("Any") };
       FunctionEntry* add_entry = function_table_find_overload(&compiler->compiler_ctx->functions, str_from_cstr("add"), add_types, 2);
       if (!add_entry) {
-          diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'add' not found in core.rae");
+          diag_error(compiler->file_path, (int)expr->line, (int)expr->column, "built-in 'add' not found in the core package");
           return false;
       }
 
