@@ -1813,11 +1813,12 @@ static bool module_graph_load_module(ModuleGraph* graph,
                         strcmp(module_path, "Io") != 0 &&
                         strcmp(module_path, "String") != 0 &&
                         strcmp(module_path, "Sys") != 0))) {
-    // Prelude: auto-loaded => auto-opened for every file. List containers
-    // (list2*) are here because List is a fundamental type used pervasively via
-    // bare/UFCS (.add/.get) — requiring a per-file `open list2*` would be
-    // impractical and break "list operations keep working" (docs/module-namespacing.md).
-    static const char* stdlib_modules[] = { "core/Core", "String", "Math", "Io", "Sys", "List2" };
+    // Prelude: auto-loaded => auto-opened for every file. `core/Core` pulls in
+    // its sibling `core/List` (the generic List(T)), which is a fundamental type
+    // used pervasively via bare/UFCS (.add/.get) — requiring a per-file
+    // `open core/List` would be impractical and break "list operations keep
+    // working" (docs/module-namespacing.md).
+    static const char* stdlib_modules[] = { "core/Core", "String", "Math", "Io", "Sys" };
     for (size_t i = 0; i < sizeof(stdlib_modules) / sizeof(stdlib_modules[0]); i++) {
       const char* name = stdlib_modules[i];
       if (module_graph_has_module(graph, name)) continue;
@@ -2138,7 +2139,7 @@ static AstModule merge_module_graph(const ModuleGraph* graph) {
   }
   // Collision guard: namespaced extern symbols are rae_ext_<module-path>_<name>
   // with '/'->'_'. Two DISTINCT module paths must never map to the same prefix
-  // (e.g. a hypothetical `list2/int` vs top-level `list2_int`), or their externs
+  // (e.g. a hypothetical `map/int` vs top-level `map_int`), or their externs
   // would silently bind to the same C symbol. Reject that at build time so the
   // encoding is provably collision-safe (docs/module-namespacing.md).
   for (ModuleNode* a = graph->head; a; a = a->next) {

@@ -546,7 +546,7 @@ bool compile_stmt(BytecodeCompiler* compiler, const AstStmt* stmt) {
             Str inferred = vm_get_local_type_name(compiler, stmt->as.loop_stmt.condition->as.ident);
             if (inferred.len > 0) col_type_name = inferred;
         } else if (stmt->as.loop_stmt.condition->kind == AST_EXPR_MEMBER) {
-            // HACK: for List2Int prototype, we know 'data' is Buffer
+            // HACK: a Buffer-backed struct looped via its `.data` field — treat `.data` as a Buffer
             if (str_eq_cstr(stmt->as.loop_stmt.condition->as.member.member, "data")) {
                 col_type_name = str_from_cstr("Buffer");
             }
