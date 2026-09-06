@@ -77,7 +77,7 @@
 
 ### Stress proof
 
-* `compiler/tests/cases/416_memory_leak_check/main.rae` allocates
+* `compiler/tests/cases/416_memory_leak_check/Main.rae` allocates
   ~5000 lists in a loop. Passes in Live today — because the
   loop's per-iteration reassignment triggers `value_free` on the
   previous value via `OP_BIND_LOCAL`. That mechanism does *not*

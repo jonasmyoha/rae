@@ -175,7 +175,7 @@ needle = "__rae_list0 ="
 position = generated.find(needle)
 excerpt = generated[max(0, position - 500):position + 1800] if position >= 0 else "Generated accessor not found."
 source_files = [
-    ("Rae", ROOT / "rae" / "main.rae"),
+    ("Rae", ROOT / "rae" / "Main.rae"),
     ("C reference", ROOT / "c" / "list_access.c"),
     ("Rust reference", ROOT / "rust" / "list_access.rs"),
     ("JavaScript reference", ROOT / "javascript" / "list_access.js"),
