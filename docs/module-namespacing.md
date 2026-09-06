@@ -132,6 +132,10 @@ log("Hello")            # NOT introduced by import — error
 Does everything `import` does **and** opens the module's namespace into the
 current file's **bare** function scope (so `open` implies `import`):
 
+Because `open` implies `import`, writing BOTH `import X` and `open X` in one file
+is a **compile error** (as is repeating the same directive). Keep only the `open`.
+The pair used to be a common habit; it never did anything the `open` alone did not.
+
 ```rae
 open io
 io.log("Hello")         # qualified — ok
