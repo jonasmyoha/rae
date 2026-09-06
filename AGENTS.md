@@ -43,11 +43,18 @@ These instructions define **how Codex should work**, communicate progress, and i
   `Main` module — `Main.rae`.
 - **There is no lowercase-file exception any more: EVERY `.rae` file is
   PascalCase.** `core` used to be the one lowercase module; it is now the
-  package `lib/core/` (`Core.rae`, `List.rae`, `StringMap.rae`, `IntMap.rae`),
-  a camelCase folder with PascalCase files like every other package. It is
-  still the prelude — auto-loaded and auto-opened, so `log(x)` and `List` are
-  bare-callable with no import — but the folder name being `core` is just the
-  normal camelCase-package rule, not a special case (#818).
+  package `lib/core/` (`Core.rae`, `List.rae`), a camelCase folder with
+  PascalCase files like every other package. It is still the prelude —
+  auto-loaded and auto-opened, so `log(x)` and `List` are bare-callable with no
+  import — but the folder name being `core` is just the normal camelCase-package
+  rule, not a special case (#818).
+- **Rule of thumb — core vs collections:** put a type in `core/` only if the
+  *compiler itself* understands it (like `List`, which collection loops and the
+  ECS are built on). A data structure written in ordinary Rae over `List`/
+  `Buffer` — the hash maps, and future `Set`/`Queue`/`RingBuffer` — goes in the
+  `collections/` package, which is NOT in the prelude: you `open collections/
+  StringMap` to use it. core = what the language needs; collections = a library
+  you ask for (#819, see `docs/collections.md`).
 - Exceptions that keep their existing spelling:
   - Number-prefixed example/test directories (`106_*`, `414_*`, `550_*`) are a
     separate bucket scheme, not packages, and keep their names.
