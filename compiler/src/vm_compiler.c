@@ -117,11 +117,11 @@ bool is_stdlib_module(Str name) {
            str_eq_cstr(name, "Io") ||
            str_eq_cstr(name, "String") ||
            str_eq_cstr(name, "Sys") ||
-           str_eq_cstr(name, "raylib") ||
+           str_eq_cstr(name, "Raylib") ||
            str_eq_cstr(name, "time") ||
            str_eq_cstr(name, "easing") ||
            str_eq_cstr(name, "tinyexpr") ||
-           str_eq_cstr(name, "list2");
+           str_eq_cstr(name, "List2");
 }
 
 bool is_module_import(BytecodeCompiler* compiler, Str name) {

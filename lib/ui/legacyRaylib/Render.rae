@@ -1,0 +1,989 @@
+open Raylib
+# Render system — RUICS § 9 in Rae form, Phase 1e.
+#
+# Walks the scene top-down (painters' algorithm) and paints every
+# entity that has a visible WorldTransform plus one of:
+#   * Shape: Rect / RoundedRect / Circle  (raylib primitives)
+#   * Sprite                              (raylib texture from registry)
+#   * Text                                (custom font slot 0, falls
+#                                          back to default font)
+#
+# Inputs:
+#   WorldTransform — absolute screen position + alpha + visibility,
+#                    written by transformSystem.
+#   ComputedRect   — local size used for the paint extent; we use w/h
+#                    from here rather than reconstructing it.
+#   Shape, Sprite, Text — the three visual component kinds.
+#   TextureRegistry (optional) — used only when a Sprite needs to
+#                    resolve `textureKey` to a concrete `Texture`.
+#                    `renderSystem` accepts a registry parameter; the
+#                    `renderSystemNoTextures` variant skips Sprites.
+#
+# The render pass does NOT mutate the world; it only reads. Text uses
+# font slot `defaultFontSlot` (0). Callers must `loadFontInto(0, ...)`
+# before drawing if they want a custom font; otherwise raylib's bitmap
+# default font is used.
+import core
+import ui/legacyRaylib/Msdf
+import Raylib
+import ui/legacyRaylib/Draw
+import ui/IconCodepoints
+import ui/Theme
+import ui/Layer
+import ui/AnimationSystem/AnimationSystem
+open ecs/ComponentTable
+# Default text font slot; matches `loadFontInto(slot: 0, ...)`.
+let defaultFontSlot: Int = 0
+
+# Icon font slot. Loaded with `MaterialIconsOutlined-Regular.otf` (or
+# similar) by the host app. Sprite.textureKey values prefixed with
+# `"mat:"` route through this slot via `drawTextWithFont`.
+let iconFontSlot: Int = 1
+
+let matPrefix: String = "mat:"
+
+# Compose the entity's effective alpha into a [0,255] integer for
+# raylib. WorldTransform.alpha is already the multiplied chain alpha
+# (see transform.rae); we just clamp + scale here.
+func alpha255(world: view UiWorld, entity: view EntityId) ret Int {
+  if componentHas(this: world.worldTransforms, entity: entity) is false {
+    ret 255
+  }
+  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
+  var wv: WorldVisual = { alpha: 1.0, visible: true }
+  if componentHas(this: world.worldVisuals, entity: entity) { wv = componentGet(this: world.worldVisuals, entity: entity) }
+  var a: Float = wv.alpha
+  if a < 0.0 {
+    a = 0.0
+  }
+  if a > 1.0 {
+    a = 1.0
+  }
+  ret (a * 255.0).toInt()
+}
+
+# Apply the chain alpha to a `RgbaColor` and return a raylib `Color`.
+func toRaylibColor(c: view RgbaColor, chain255: view Int) ret Color {
+  let combinedA: Int = (c.a * chain255) / 255
+  ret Color { r: c.r, g: c.g, b: c.b, a: combinedA }
+}
+
+# Apply the chain alpha to a `RgbaColor` and return an `RgbaColor` (the
+# backend-neutral form the draw sink takes).
+func chainRgba(c: view RgbaColor, chain255: view Int) ret RgbaColor {
+  let combinedA: Int = (c.a * chain255) / 255
+  ret RgbaColor { r: c.r, g: c.g, b: c.b, a: combinedA }
+}
+
+# Paint Shape variants on `entity` using the world transform / size
+# already on it. Caller has already verified visibility + alpha > 0.
+# Drawing goes through the backend-agnostic sink (lib/ui/draw.rae).
+func paintShape(backend: view UiBackend, world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
+  let sh: Shape = componentGet(this: world.shapes, entity: entity)
+  let fill: RgbaColor = chainRgba(c: sh.fill, chain255: chain255)
+
+  if sh.kind is ShapeKind.rect {
+    sinkRect(backend: backend, x: wt.position.x, y: wt.position.y, w: cr.size.x, h: cr.size.y, c: fill)
+    ret
+  }
+  if sh.kind is ShapeKind.roundedRect {
+    # `Shape.radius` is in pixels; the sink clamps it and converts to
+    # raylib's fraction-of-smaller-side roundness.
+    sinkRoundedRect(backend: backend, x: wt.position.x, y: wt.position.y, w: cr.size.x, h: cr.size.y, radius: sh.radius, c: fill)
+    ret
+  }
+  if sh.kind is ShapeKind.circle {
+    # Centred inside the entity's box. Use radius from Shape, falling
+    # back to half the smaller side if not set.
+    var smaller: Float = cr.size.x
+    if cr.size.y < smaller {
+      smaller = cr.size.y
+    }
+    var r: Float = sh.radius
+    if r <= 0.0 {
+      r = smaller / 2.0
+    }
+    let cx: Float = wt.position.x + (cr.size.x / 2.0)
+    let cy: Float = wt.position.y + (cr.size.y / 2.0)
+    sinkCircle(backend: backend, cx: cx, cy: cy, r: r, c: fill)
+    ret
+  }
+}
+
+func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
+  let sp: view Sprite => componentView(this: world.sprites, entity: entity)
+  let key: String = sp.textureKey
+  let tint: Color = toRaylibColor(c: sp.tint, chain255: chain255)
+
+  # `mat:<icon_name>` routes through the Material Icons font slot.
+  # The whole sprite box is treated as the glyph cell; the icon is
+  # drawn centred at a font size matching the smaller side of the box.
+  let mp: String = matPrefix
+  if key.startsWith(prefix: mp) {
+    let prefixLen: Int = mp.length()
+    let keyLen: Int = key.length()
+    let iconName: String = key.sub(start: prefixLen, len: keyLen - prefixLen)
+    let glyph: String = iconText(name: iconName)
+    if glyph.length() is 0 {
+      ret
+    }
+    var smaller: Float = cr.size.x
+    if cr.size.y < smaller {
+      smaller = cr.size.y
+    }
+    # Material glyphs sit on a roughly em-square; rendering at the box
+    # size lines up with their baked padding. We must measure with the
+    # icon font slot (not the default font) because Material codepoints
+    # like 0xE037 aren't in the default font — measuring there would
+    # return the notdef width and the icon would land off-center.
+    let fontSize: Float = smaller
+    let glyphW: Int = measureTextWithFont(
+      slot: iconFontSlot
+      text: glyph
+      fontSize: fontSize
+      spacing: 0.0
+    )
+    let centerOffsetX: Float = (cr.size.x - glyphW.toFloat()) / 2.0
+    let centerOffsetY: Float = (cr.size.y - fontSize) / 2.0
+    drawTextWithFont(
+      slot: iconFontSlot
+      text: glyph
+      x: wt.position.x + centerOffsetX
+      y: wt.position.y + centerOffsetY
+      fontSize: fontSize
+      spacing: 0.0
+      color: tint
+    )
+    ret
+  }
+
+  if textureHas(reg: reg, key: key) is false {
+    ret
+  }
+  let tex: Texture = textureGet(reg: reg, key: key)
+
+  # All ScaleMode variants: scale to longer edge of the box.
+  var scaleX: Float = 1.0
+  var scaleY: Float = 1.0
+  if tex.width > 0 {
+    scaleX = cr.size.x / tex.width.toFloat()
+  }
+  if tex.height > 0 {
+    scaleY = cr.size.y / tex.height.toFloat()
+  }
+  var scale: Float = scaleX
+  if scaleY < scale {
+    scale = scaleY
+  }
+  if scale <= 0.0 {
+    scale = 1.0
+  }
+
+  # HoverScale: read the per-frame animated multiplier. The actual
+  # easing happens in lib/ui/animation.rae's hoverScaleSystem.
+  var hoverMul: Float = 1.0
+  if componentHas(this: world.hoverScales, entity: entity) {
+    let hs: HoverScale = componentGet(this: world.hoverScales, entity: entity)
+    hoverMul = hs.current
+  }
+  let drawScale: Float = scale * hoverMul
+  let drawW: Float = tex.width.toFloat() * drawScale
+  let drawH: Float = tex.height.toFloat() * drawScale
+  let offX: Float = (cr.size.x - drawW) / 2.0
+  let offY: Float = (cr.size.y - drawH) / 2.0
+
+  # Rounded-corner clip via fragment shader (SDF; live per call).
+  var useRounded: Bool = componentHas(this: world.cornerRadiuses, entity: entity)
+  var roundedRadius: Float = 0.0
+  if useRounded {
+    let crData: CornerRadius = componentGet(this: world.cornerRadiuses, entity: entity)
+    roundedRadius = crData.radius
+    if roundedRadius <= 0.0 {
+      useRounded = false
+    }
+  }
+  if useRounded {
+    roundedSpriteBegin(width: drawW, height: drawH, radius: roundedRadius)
+  }
+  drawTextureEx(
+    texture: tex
+    pos: Vector2 { x: wt.position.x + offX, y: wt.position.y + offY }
+    rotation: 0.0
+    scale: drawScale
+    tint: tint
+  )
+  if useRounded {
+    roundedSpriteEnd()
+  }
+}
+
+# Resolve a Text node's font size / colour from its style id. Phase 1e
+# uses a small built-in stylesheet for the music player; once Phase
+# 1f's `Style` component lands, this routes through that table instead.
+func textStyleSize(styleId: view String) ret Float {
+  let h1: String = "h1"
+  let h2: String = "h2"
+  let body: String = "body"
+  let caption: String = "caption"
+  let miniTitle: String = "miniTitle"
+  let miniMuted: String = "miniMuted"
+  let topBarTitle: String = "topBarTitle"
+  let albumCaption: String = "albumCaption"
+  let pillLabel: String = "pillLabel"
+  let trackTitle: String = "trackTitle"
+  let trackMuted: String = "trackMuted"
+  if styleId is h1 {
+    ret 78.0722891566265
+  }
+  if styleId is h2 {
+    ret 60.722891566265055
+  }
+  if styleId is caption {
+    ret 34.69879518072289
+  }
+  if styleId is miniTitle {
+    ret 39.03614457831325
+  }
+  if styleId is miniMuted {
+    ret 30.361445783132528
+  }
+  if styleId is topBarTitle {
+    ret 39.03614457831325
+  }
+  let pageTitle: String = "pageTitle"
+  if styleId is pageTitle {
+    ret 60.722891566265055
+  }
+  if styleId is albumCaption {
+    ret 30.361445783132528
+  }
+  if styleId is pillLabel {
+    ret 39.03614457831325
+  }
+  if styleId is trackTitle {
+    ret 43.373493975903614
+  }
+  if styleId is trackMuted {
+    ret 30.361445783132528
+  }
+  let tabActive: String = "tabActive"
+  if styleId is tabActive {
+    ret 30.361445783132528
+  }
+  let tabInactive: String = "tabInactive"
+  if styleId is tabInactive {
+    ret 30.361445783132528
+  }
+  # Styles owned by lib/ui/debug.rae's reusable in-app debug UI. The
+  # "D" letter sits inside a 22 px circle, so the glyph is sized to
+  # leave a small breathing margin; the menu label sits at 16 pt to
+  # match iOS's default setting-row text.
+  let debugButton: String = "debugButton"
+  if styleId is debugButton {
+    ret 30.361445783132528
+  }
+  let debugMenuLabel: String = "debugMenuLabel"
+  if styleId is debugMenuLabel {
+    ret 34.69879518072289
+  }
+  # Right-aligned 16 pt label used by NowPlaying's TimeTotal node so
+  # the duration text sits flush against the progress bar's right edge.
+  if styleId is "timeTotal" { ret 34.69879518072289 }
+  # Royal Blush menu.* styleIds — authored in pixi's textStyles.ts for
+  # the 1080-wide canvas. Hosts that scale-to-fit (Camera2D zoom = 0.5)
+  # see these at half-size. Pixi sizes pulled from
+  # royalblush-pixi/src/ui/ruics/textStyles.ts.
+  if styleId is "menu.playLabel" { ret 216.0 }
+  if styleId is "menu.title" { ret 72.0 }
+  if styleId is "menu.titleLevel" { ret 72.0 }
+  if styleId is "menu.shopPrice" { ret 72.0 }
+  if styleId is "menu.levelLabelLarge" { ret 68.0 }
+  if styleId is "menu.crownCountLabel" { ret 62.0 }
+  if styleId is "menu.dialogCloseIcon" { ret 58.0 }
+  if styleId is "menu.playerName" { ret 56.0 }
+  if styleId is "menu.playerNameLevelYellow" { ret 56.0 }
+  if styleId is "menu.musicIcon" { ret 52.0 }
+  if styleId is "menu.coinLabel" { ret 50.0 }
+  if styleId is "menu.chestEmpty" { ret 48.0 }
+  if styleId is "menu.settingsHint" { ret 48.0 }
+  if styleId is "menu.collectionCardDescription" { ret 48.0 }
+  if styleId is "menu.progressLabelLarge" { ret 46.0 }
+  if styleId is "menu.settingsAction" { ret 44.0 }
+  if styleId is "menu.chestTimer" { ret 42.0 }
+  if styleId is "menu.chestTapCta" { ret 42.0 }
+  if styleId is "menu.tabLabel" { ret 40.0 }
+  if styleId is "menu.chestTapCtaTop" { ret 38.0 }
+  if styleId is "menu.settingsCopyright" { ret 38.0 }
+  if styleId is "menu.oddsBody" { ret 34.0 }
+  ret 43.373493975903614
+}
+
+func textStyleColor(styleId: view String, chain255: view Int, active: view Theme) ret Color {
+  # Style id → theme palette mapping (light/dark flips for free).
+  let mute: String = "muted"
+  let caption: String = "caption"
+  let primary: String = "primary"
+  let miniTitle: String = "miniTitle"
+  let miniMuted: String = "miniMuted"
+  let topBarTitle: String = "topBarTitle"
+  let albumCaption: String = "albumCaption"
+  let pillLabelLight: String = "pillLabel"
+  let trackTitle: String = "trackTitle"
+  let trackMuted: String = "trackMuted"
+  let tabActive: String = "tabActive"
+  let tabInactive: String = "tabInactive"
+
+  if styleId is mute {
+    ret toRaylibColor(c: colorByName(theme: active, name: "textMuted"), chain255: chain255)
+  }
+  if styleId is caption {
+    ret toRaylibColor(c: colorByName(theme: active, name: "textMuted"), chain255: chain255)
+  }
+  if styleId is primary {
+    ret toRaylibColor(c: colorByName(theme: active, name: "textPrimary"), chain255: chain255)
+  }
+  if styleId is topBarTitle {
+    ret toRaylibColor(c: colorByName(theme: active, name: "textPrimary"), chain255: chain255)
+  }
+  let pageTitle: String = "pageTitle"
+  if styleId is pageTitle {
+    ret toRaylibColor(c: colorByName(theme: active, name: "textPrimary"), chain255: chain255)
+  }
+  if styleId is albumCaption {
+    ret toRaylibColor(c: colorByName(theme: active, name: "textMuted"), chain255: chain255)
+  }
+  if styleId is trackTitle {
+    ret toRaylibColor(c: colorByName(theme: active, name: "textPrimary"), chain255: chain255)
+  }
+  if styleId is trackMuted {
+    ret toRaylibColor(c: colorByName(theme: active, name: "textMuted"), chain255: chain255)
+  }
+  if styleId is tabActive {
+    ret toRaylibColor(c: colorByName(theme: active, name: "textPrimary"), chain255: chain255)
+  }
+  if styleId is tabInactive {
+    ret toRaylibColor(c: colorByName(theme: active, name: "textMuted"), chain255: chain255)
+  }
+  # "On surfaceAlt" styles read accentText for theme-correct contrast.
+  if styleId is miniTitle {
+    ret toRaylibColor(c: colorByName(theme: active, name: "accentText"), chain255: chain255)
+  }
+  if styleId is miniMuted {
+    # Theme-aware muted color for text on the mini-player pill
+    # (background = `surfaceAlt`). In the light theme that's a
+    # pale cyan needing dark muted text; in dark theme it's a
+    # darker green needing light muted text. The
+    # `accentTextMuted` token carries the right value for each.
+    ret toRaylibColor(c: colorByName(theme: active, name: "accentTextMuted"), chain255: chain255)
+  }
+  # Pill labels sit on top of the `$accent` shape — `$accentText`
+  # is the dual.
+  if styleId is pillLabelLight {
+    ret toRaylibColor(c: colorByName(theme: active, name: "accentText"), chain255: chain255)
+  }
+  # Debug-UI styles (theme-independent — see lib/ui/debug.rae).
+  let debugButton: String = "debugButton"
+  if styleId is debugButton {
+    let dark: RgbaColor = { r: 24, g: 24, b: 28, a: 255 }
+    ret toRaylibColor(c: dark, chain255: chain255)
+  }
+  let debugMenuLabel: String = "debugMenuLabel"
+  if styleId is debugMenuLabel {
+    let light: RgbaColor = { r: 246, g: 246, b: 248, a: 255 }
+    ret toRaylibColor(c: light, chain255: chain255)
+  }
+  # Caption-class right-aligned time label — matches `caption` colour.
+  if styleId is "timeTotal" {
+    ret toRaylibColor(c: colorByName(theme: active, name: "textMuted"), chain255: chain255)
+  }
+  # Fallback: treat unknown style ids as primary text.
+  ret toRaylibColor(c: colorByName(theme: active, name: "textPrimary"), chain255: chain255)
+}
+
+# Horizontally-centered styles: the renderer measures the glyph run
+# and offsets the draw position so the text sits in the middle of its
+# rect. Most styles stay left-aligned because the layout system
+# already places the rect itself; the explicit-center styles below are
+# for cases where the rect is wider than the text (e.g. tab labels
+# that share a fixed-width container with a centred icon above).
+func isCentered(styleId: view String) ret Bool {
+  let tabActive: String = "tabActive"
+  if styleId is tabActive {
+    ret true
+  }
+  let tabInactive: String = "tabInactive"
+  if styleId is tabInactive {
+    ret true
+  }
+  # Debug button: the "D" glyph sits centred inside the amber circle.
+  # `pageTitle` also centers — every top-level screen's title bar.
+  let debugButton: String = "debugButton"
+  if styleId is debugButton { ret true }
+  let pageTitle: String = "pageTitle"
+  if styleId is pageTitle { ret true }
+  ret false
+}
+
+# Mobile UI's playing widgets (now-playing + mini-player titles/artists)
+# get a soft drop-shadow so they read against album-cover backgrounds.
+func textStyleHasShadow(styleId: view String) ret Bool {
+  if styleId is "h1" { ret true }
+  if styleId is "muted" { ret true }
+  if styleId is "miniTitle" { ret true }
+  if styleId is "miniMuted" { ret true }
+  ret false
+}
+
+# NowPlaying's TimeTotal label needs to sit flush against the progress
+# bar's right edge — its containing SpaceBetween row leaves a gap.
+func isRightAligned(styleId: view String) ret Bool {
+  if styleId is "timeTotal" { ret true }
+  ret false
+}
+
+func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
+  let tx: view Text => componentView(this: world.texts, entity: entity)
+  let txt: String = tx.text
+  if txt.length() is 0 {
+    ret
+  }
+  let size: Float = textStyleSize(styleId: tx.styleId)
+  let col: Color = textStyleColor(styleId: tx.styleId, chain255: chain255, active: world.theme.active)
+  var drawX: Float = wt.position.x
+  var drawY: Float = wt.position.y
+  # Alignment: styleId (legacy) or Align component (Center / End).
+  var centerX: Bool = isCentered(styleId: tx.styleId)
+  var centerY: Bool = isCentered(styleId: tx.styleId)
+  var rightAlignX: Bool = isRightAligned(styleId: tx.styleId)
+  if componentHas(this: world.aligns, entity: entity) {
+    let al: Align = componentGet(this: world.aligns, entity: entity)
+    if al.hasX {
+      if al.x is AlignKind.center { centerX = true }
+      if al.x is AlignKind.end { rightAlignX = true }
+    }
+    if al.hasY {
+      if al.y is AlignKind.center { centerY = true }
+    }
+  }
+  if centerX or rightAlignX or centerY {
+    let measured: Int = measureTextWithFont(
+      slot: defaultFontSlot
+      text: txt
+      fontSize: size
+      spacing: 1.0
+    )
+    if centerX {
+      drawX = wt.position.x + (cr.size.x - measured.toFloat()) / 2.0
+    }
+    if rightAlignX {
+      drawX = wt.position.x + cr.size.x - measured.toFloat()
+    }
+    if centerY {
+      drawY = wt.position.y + (cr.size.y - size) / 2.0
+    }
+  }
+  if isUiMsdfEnabled(world: world) {
+    # Shadow gate: in `shadowStylesOnly` mode (mobile UI) only opt-in
+    # styles shadow; otherwise (royalblush) all text does.
+    let applyShadow: Bool = (world.msdfState.shadowStylesOnly is false) or textStyleHasShadow(styleId: tx.styleId)
+    paintMsdfDispatch(world: world, text: txt, x: drawX, y: drawY, sizePx: size, color: col, chain255: chain255, applyShadow: applyShadow)
+    ret
+  }
+  if textStyleHasShadow(styleId: tx.styleId) {
+    var shadowOff: Float = size * 0.06
+    if shadowOff < 1.0 { shadowOff = 1.0 }
+    if shadowOff > 3.0 { shadowOff = 3.0 }
+    var blurRadius: Float = size * 0.09
+    if blurRadius < 1.5 { blurRadius = 1.5 }
+    if blurRadius > 4.0 { blurRadius = 4.0 }
+    # Centre weight 0.30, edge weight 0.10 (sum ≈ 1.1 matches old density).
+    let cx: Float = drawX + shadowOff
+    let cy: Float = drawY + shadowOff
+    let aBase: Int = chain255 * 90 / 255
+    let aCtr: Int = aBase * 30 / 100
+    let aEdge: Int = aBase * 10 / 100
+    let shadowCtr: Color = { r: 0, g: 0, b: 0, a: aCtr }
+    let shadowEdge: Color = { r: 0, g: 0, b: 0, a: aEdge }
+    let d: Float = blurRadius * 0.7071
+    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx, y: cy, fontSize: size, spacing: 1.0, color: shadowCtr)
+    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx, y: cy - blurRadius, fontSize: size, spacing: 1.0, color: shadowEdge)
+    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx + d, y: cy - d, fontSize: size, spacing: 1.0, color: shadowEdge)
+    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx + blurRadius, y: cy, fontSize: size, spacing: 1.0, color: shadowEdge)
+    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx + d, y: cy + d, fontSize: size, spacing: 1.0, color: shadowEdge)
+    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx, y: cy + blurRadius, fontSize: size, spacing: 1.0, color: shadowEdge)
+    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx - d, y: cy + d, fontSize: size, spacing: 1.0, color: shadowEdge)
+    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx - blurRadius, y: cy, fontSize: size, spacing: 1.0, color: shadowEdge)
+    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx - d, y: cy - d, fontSize: size, spacing: 1.0, color: shadowEdge)
+  }
+  drawTextWithFont(
+    slot: defaultFontSlot
+    text: txt
+    x: drawX
+    y: drawY
+    fontSize: size
+    spacing: 1.0
+    color: col
+  )
+}
+
+# BackdropImage paint — draws the entity's referenced texture at the
+# entity's full bounds. Used for frosted-glass / blurred-backdrop
+# effects where a host capture-and-blurs the framebuffer into a
+# texture and points the BackdropImage at the key. Silently no-ops
+# when the texture key isn't registered (first-frame race before the
+# host's first capture lands).
+func paintBackdropImage(reg: view TextureRegistry, world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
+  let bi: BackdropImage = componentGet(this: world.backdropImages, entity: entity)
+  let key: String = bi.textureKey
+  if textureHas(reg: reg, key: key) is false {
+    ret
+  }
+  let tex: Texture = textureGet(reg: reg, key: key)
+  var scaleX: Float = 1.0
+  var scaleY: Float = 1.0
+  if tex.width > 0 {
+    scaleX = cr.size.x / tex.width.toFloat()
+  }
+  if tex.height > 0 {
+    scaleY = cr.size.y / tex.height.toFloat()
+  }
+  var scale: Float = scaleX
+  if scaleY > scale {
+    scale = scaleY
+  }
+  if scale <= 0.0 {
+    scale = 1.0
+  }
+  let drawW: Float = tex.width.toFloat() * scale
+  let drawH: Float = tex.height.toFloat() * scale
+  let offX: Float = (cr.size.x - drawW) / 2.0
+  let offY: Float = (cr.size.y - drawH) / 2.0
+  let white: Color = { r: 255, g: 255, b: 255, a: chain255 }
+  drawTextureEx(
+    texture: tex
+    pos: Vector2 { x: wt.position.x + offX, y: wt.position.y + offY }
+    rotation: 0.0
+    scale: scale
+    tint: white
+  )
+}
+
+# GradientFill paint. One atomic `drawGradientRect` — the shader does
+# the gradient + rounded-rect mask + AA in one fragment program. Reads
+# the entity's CornerRadius if present (defaults to 0 = sharp). Same
+# inherited-alpha multiplication as `paintShape` so opacity chains
+# work the same way.
+func paintGradientFill(world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
+  let gf: view GradientFill => componentView(this: world.gradientFills, entity: entity)
+  var radius: Float = 0.0
+  if componentHas(this: world.cornerRadiuses, entity: entity) {
+    let crData: CornerRadius = componentGet(this: world.cornerRadiuses, entity: entity)
+    radius = crData.radius
+  }
+  let fa: Int = (gf.from.a.toFloat() * chain255.toFloat() / 255.0).toInt()
+  let ta: Int = (gf.to.a.toFloat() * chain255.toFloat() / 255.0).toInt()
+  drawGradientRect(
+    x: wt.position.x
+    y: wt.position.y
+    w: cr.size.x
+    h: cr.size.y
+    radius: radius
+    fromR: gf.from.r
+    fromG: gf.from.g
+    fromB: gf.from.b
+    fromA: fa
+    toR: gf.to.r
+    toG: gf.to.g
+    toB: gf.to.b
+    toA: ta
+    angleDeg: gf.angle
+  )
+}
+
+# Paint a single entity. Order: Shape (background) → Sprite → Text, so
+# text/sprites layer on top of Shape backgrounds correctly when an
+# entity carries multiple visual components (e.g. a button background
+# + label).
+func paintEntity(backend: view UiBackend, world: view UiWorld, reg: view TextureRegistry, entity: view EntityId) {
+  if componentHas(this: world.worldTransforms, entity: entity) is false {
+    ret
+  }
+  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
+  var wv: WorldVisual = { alpha: 1.0, visible: true }
+  if componentHas(this: world.worldVisuals, entity: entity) { wv = componentGet(this: world.worldVisuals, entity: entity) }
+  if wv.visible is false {
+    ret
+  }
+  if wv.alpha <= 0.0 {
+    ret
+  }
+  if componentHas(this: world.computedRects, entity: entity) is false {
+    ret
+  }
+  let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  # Viewport cull: skip the paint (esp. text shaping) for entities fully off-screen — the big win for long scrolled lists (200+ rows). world.layoutW/H is the screen; 80px margin keeps edge shadows/partial rows.
+  if (wt.position.y + cr.size.y + 80.0 < 0.0) or (wt.position.y - 80.0 > world.layoutH) or (wt.position.x + cr.size.x + 80.0 < 0.0) or (wt.position.x - 80.0 > world.layoutW) { ret }
+  let chain255: Int = alpha255(world: world, entity: entity)
+
+  # GradientFill takes precedence over a solid Shape.fill (the gradient
+  # shader does its own rounded-rect alpha mask off CornerRadius).
+  if componentHas(this: world.gradientFills, entity: entity) {
+    paintGradientFill(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
+  } else {
+    if componentHas(this: world.shapes, entity: entity) {
+      paintShape(backend: backend, world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
+    }
+  }
+  if componentHas(this: world.backdropImages, entity: entity) {
+    paintBackdropImage(reg: reg, world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
+  }
+  if componentHas(this: world.sprites, entity: entity) {
+    paintSprite(reg: reg, world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
+  }
+  if componentHas(this: world.texts, entity: entity) {
+    paintText(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
+  }
+}
+
+# Recursive top-down walk. Painter's algorithm — parent before its
+# children, then three passes over the children by *subtree* hover
+# paint rank: normal-flow → contains-easing-back → contains-hovered.
+# Using the subtree max (not the child's own rank) lets a row that
+# contains the hovered tile float above sibling rows whose tiles
+# would otherwise overdraw the popped tile's vertical overflow.
+func paintSubtree(backend: view UiBackend, world: view UiWorld, reg: view TextureRegistry, entity: view EntityId) {
+  paintEntity(backend: backend, world: world, reg: reg, entity: entity)
+  if componentHas(this: world.childrens, entity: entity) is false {
+    ret
+  }
+  let ch: view Children => componentView(this: world.childrens, entity: entity)
+  let n: Int = ch.ids.length
+  var pass: Int = 0
+  loop pass < 3 {
+    var i: Int = 0
+    loop i < n {
+      let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+      if subtreeHoverPaintRank(world: world, entity: cid) is pass {
+        paintSubtree(backend: backend, world: world, reg: reg, entity: cid)
+      }
+      i = i + 1
+    }
+    pass = pass + 1
+  }
+}
+
+# Layer / paint-root helpers moved to `lib/ui/layer.rae` so `ui/input`
+# can hit-test without dragging `ui/render`'s raylib externs. The
+# definitions themselves are unchanged; renderSystem etc. still call
+# `collectPaintableRoots` and `entityLayerOrder` exactly as before.
+
+# Conventional default font path. `rae init` drops a Roboto-Regular.ttf
+# here; apps without that file just keep the empty slot and raylib's
+# bitmap default kicks in (the visible-but-ugly baseline). Apps that
+# need a different face load it manually before calling initRaeUi —
+# the call sees the slot is already populated and bails.
+let raeDefaultUiFontPath: String = "assets/Roboto-Regular.ttf"
+let raeDefaultUiFontSize: Int = 36
+let raeDefaultUiFontSlot: Int = 0
+
+# One-shot host-side setup for the rae UI layer. Call once at boot,
+# after initWindow but before the first renderSystem call. Right now
+# the only thing this loads is the conventional Roboto default into
+# font slot 0; future defaults (icon font, theme bootstrap, debug
+# overlay registration) can chain in here so apps don't have to grow
+# their main.rae each time the stdlib adds an installable.
+#
+# Safe to call multiple times — the body is idempotent.
+func initRaeUi() pub {
+  if isFontSlotLoaded(slot: raeDefaultUiFontSlot) is false {
+    loadFontInto(
+      slot: raeDefaultUiFontSlot
+      path: raeDefaultUiFontPath
+      fontSize: raeDefaultUiFontSize
+    )
+  }
+}
+
+func renderSystem(backend: view UiBackend, world: view UiWorld, reg: view TextureRegistry) {
+  # Painter's algorithm with LayerRef-aware sorting. Roots paint in
+  # ascending layer order so overlays (higher-order layers) sit on
+  # top of page content.
+  let allRangeLow: Int = 0 - 1000000
+  let allRangeHi: Int = 1000000
+  systemLayerRange(backend: backend, world: world, reg: reg, minOrder: allRangeLow, maxOrder: allRangeHi)
+}
+
+# Same painter walk as `renderSystem` but only paints roots whose
+# Layer order falls inside `[minOrder, maxOrder)`. Lets a host
+# interleave work between layers — e.g. capturing the framebuffer
+# after content paints (layer 0..99) but before the dock paints
+# (layer 100+) so a `captureAndBlurRegion` doesn't include the very
+# overlay it's meant to sit behind.
+func systemLayerRange(backend: view UiBackend, world: view UiWorld, reg: view TextureRegistry, minOrder: view Int, maxOrder: view Int) pub {
+  let roots: List(EntityId) = collectPaintableRoots(world: world)
+  let m: Int = roots.length
+  var p: Int = 0
+  loop p < m {
+    let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: p)
+    if componentHas(this: world.layerRoots, entity: root) is false {
+      let ord: Int = entityLayerOrder(world: world, entity: root)
+      if ord >= minOrder {
+        if ord < maxOrder {
+          paintSubtree(backend: backend, world: world, reg: reg, entity: root)
+        }
+      }
+    }
+    p = p + 1
+  }
+}
+
+# Debug overlay — outlines every entity that has an `OnClick`. Useful
+# for spotting click-target / visible-glyph mismatches: an icon glyph
+# that visually sits above its hit-rect won't fire taps, but the
+# outline reveals exactly where the hit-rect actually is. Rects that
+# contain the current mouse position render in `hoverColor` instead
+# of `idleColor` so you can see at a glance which (if any) target is
+# under the cursor. Pass the same mouse coords that the input system
+# polls so the visual matches what hit-test would do. Draw AFTER
+# `renderSystem` so the outlines sit on top of the rendered UI.
+func debugClickRects(
+  world: view UiWorld
+  idleColor: view Color
+  hoverColor: view Color
+  pressColor: view Color
+  pressed: view Bool
+  mouseX: view Float
+  mouseY: view Float
+) pub {
+  let nClicks: Int = componentCount(this: world.onClicks)
+  var i: Int = 0
+  loop i < nClicks {
+    let e: EntityId = componentEntityAt(this: world.onClicks, i: i)
+    if componentHas(this: world.worldTransforms, entity: e) {
+      if componentHas(this: world.computedRects, entity: e) {
+        let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: e)
+        var wv: WorldVisual = { alpha: 1.0, visible: true }
+        if componentHas(this: world.worldVisuals, entity: e) { wv = componentGet(this: world.worldVisuals, entity: e) }
+        if wv.visible {
+          let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
+          var inside: Bool = true
+          if mouseX < wt.position.x {
+            inside = false
+          }
+          if mouseY < wt.position.y {
+            inside = false
+          }
+          if mouseX > wt.position.x + cr.size.x {
+            inside = false
+          }
+          if mouseY > wt.position.y + cr.size.y {
+            inside = false
+          }
+          var col: Color = idleColor
+          if inside {
+            col = hoverColor
+            # Mouse button held while hovering: distinct "armed" tint
+            # so the user can see at a glance that a click on this
+            # rect would land. Mirrors the press-tracking the input
+            # system does internally (pressedEntity).
+            if pressed {
+              col = pressColor
+            }
+          }
+          drawRectangleLines(
+            x: wt.position.x
+            y: wt.position.y
+            width: cr.size.x
+            height: cr.size.y
+            color: col
+          )
+          # Hovered rect: tiny label at the top-LEFT corner showing
+          # the entity id, absolute position, and size. Entity id is
+          # the leading `#N` so the leading number is unambiguous
+          # (otherwise the bare x coordinate can read as an opaque
+          # large value before you spot the ',y' after it). ASCII-
+          # only ('x' as the multiplier instead of U+00D7 — the
+          # host's font atlas is typically built from a small glyph
+          # set and U+00D7 renders as '?' fallback). Drawn with font
+          # slot 0; falls back to raylib's default when the slot
+          # isn't loaded (see `drawTextWithFont`).
+          if inside {
+            let ix: Int = wt.position.x.toInt()
+            let iy: Int = wt.position.y.toInt()
+            let iw: Int = cr.size.x.toInt()
+            let ih: Int = cr.size.y.toInt()
+            let dimText: String = "#{e} {ix},{iy} {iw}x{ih}"
+            let dimSize: Float = 11.0
+            let dimSpacing: Float = 0.5
+            # Anchor inside the top-left corner with a small inset so
+            # the glyphs don't kiss the outline stroke.
+            let labelX: Float = wt.position.x + 4.0
+            let labelY: Float = wt.position.y + 2.0
+            drawTextWithFont(
+              slot: 0
+              text: dimText
+              x: labelX
+              y: labelY
+              fontSize: dimSize
+              spacing: dimSpacing
+              color: col
+            )
+          }
+        }
+      }
+    }
+    i = i + 1
+  }
+}
+
+# Debug overlay — draw a crosshair at (mouseX, mouseY) so we can see
+# exactly where the input system thinks the cursor is. If this
+# crosshair doesn't sit under the OS mouse cursor on screen, there's
+# a coord-system mismatch between rendering and input.
+func debugMouseCursor(mouseX: view Float, mouseY: view Float, color: view Color) pub {
+  let size: Float = 12.0
+  let half: Float = size / 2.0
+  drawRectangle(
+    x: mouseX - half
+    y: mouseY - 1.0
+    width: size
+    height: 2.0
+    color: color
+  )
+  drawRectangle(
+    x: mouseX - 1.0
+    y: mouseY - half
+    width: 2.0
+    height: size
+    color: color
+  )
+}
+
+# -----------------------------------------------------------------
+# RenderCache — frame-skipping for the render pass.
+#
+# Same generation-tracking pattern as `LayoutCache` (layout.rae) and
+# `TransformCache` (transform.rae): the cache stores the table-level
+# generation counter of every ComponentTable the render path reads.
+# `cacheDirty` returns true when at least one of those tables
+# has bumped since the last call (and updates the cache so the next
+# call sees the new baseline).
+#
+# Use this to skip the whole `beginDrawing → renderSystem → endDrawing`
+# block on frames where nothing visible has changed. When skipping,
+# call `sleep(ms: 16)` to throttle to ~60 Hz — raylib's implicit
+# vsync wait lives inside `endDrawing`, so skipping the draw block
+# also skips the wait.
+#
+# Tables tracked (everything the renderer or its inputs read):
+#   computedRects, worldTransforms  — outputs of layout/transform,
+#                                     but renderer reads them too,
+#                                     so any new layout/transform run
+#                                     will dirty this cache
+#   shapes, sprites, texts          — direct visual reads
+#   actives, opacities              — visibility/alpha gating
+#   childrens, parents          — tree walk
+#   onClicks                        — debug-rects overlay reads these
+#
+# `entityCount` snapshots `alive.length` for symmetry with the other
+# caches.
+type RenderCache {
+  computedRectsGen: Int
+  worldTransformsGen: Int
+  shapesGen: Int
+  spritesGen: Int
+  textsGen: Int
+  activesGen: Int
+  opacitiesGen: Int
+  childrensGen: Int
+  parentsGen: Int
+  onClicksGen: Int
+  entityCount: Int
+}
+
+func createRenderCache() pub ret RenderCache {
+  ret RenderCache {
+    computedRectsGen: -1
+    worldTransformsGen: -1
+    shapesGen: -1
+    spritesGen: -1
+    textsGen: -1
+    activesGen: -1
+    opacitiesGen: -1
+    childrensGen: -1
+    parentsGen: -1
+    onClicksGen: -1
+    entityCount: -1
+  }
+}
+
+# Returns true if any tracked ComponentTable has bumped its
+# generation since the last call (or the alive-entity count
+# changed), and updates `cache` to the current generation values.
+# Returns false when the previous frame's render output is still
+# valid — caller should skip beginDrawing/endDrawing for this frame.
+func cacheDirty(world: view UiWorld, cache: mod RenderCache) pub ret Bool {
+  let crGen: Int = componentTableGeneration(ComputedRect, this: world.computedRects)
+  let wtGen: Int = componentTableGeneration(WorldTransform2D, this: world.worldTransforms)
+  let shGen: Int = componentTableGeneration(Shape, this: world.shapes)
+  let spGen: Int = componentTableGeneration(Sprite, this: world.sprites)
+  let txGen: Int = componentTableGeneration(Text, this: world.texts)
+  let acGen: Int = componentTableGeneration(Active, this: world.actives)
+  let opGen: Int = componentTableGeneration(Opacity, this: world.opacities)
+  let chGen: Int = componentTableGeneration(Children, this: world.childrens)
+  let plGen: Int = componentTableGeneration(Parent, this: world.parents)
+  let ocGen: Int = componentTableGeneration(OnClick, this: world.onClicks)
+  let entityCount: Int = world.allocator.alive.length
+
+  var dirty: Bool = false
+  if crGen is not cache.computedRectsGen {
+    dirty = true
+  }
+  if wtGen is not cache.worldTransformsGen {
+    dirty = true
+  }
+  if shGen is not cache.shapesGen {
+    dirty = true
+  }
+  if spGen is not cache.spritesGen {
+    dirty = true
+  }
+  if txGen is not cache.textsGen {
+    dirty = true
+  }
+  if acGen is not cache.activesGen {
+    dirty = true
+  }
+  if opGen is not cache.opacitiesGen {
+    dirty = true
+  }
+  if chGen is not cache.childrensGen {
+    dirty = true
+  }
+  if plGen is not cache.parentsGen {
+    dirty = true
+  }
+  if ocGen is not cache.onClicksGen {
+    dirty = true
+  }
+  if entityCount is not cache.entityCount {
+    dirty = true
+  }
+
+  if dirty is false {
+    ret false
+  }
+
+  cache.computedRectsGen = crGen
+  cache.worldTransformsGen = wtGen
+  cache.shapesGen = shGen
+  cache.spritesGen = spGen
+  cache.textsGen = txGen
+  cache.activesGen = acGen
+  cache.opacitiesGen = opGen
+  cache.childrensGen = chGen
+  cache.parentsGen = plGen
+  cache.onClicksGen = ocGen
+  cache.entityCount = entityCount
+  ret true
+}

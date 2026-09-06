@@ -11,7 +11,7 @@ trap 'rm -f "$ACTUAL"' EXIT
 find "$ROOT/examples" \
   -path "$ROOT/examples/legacy" -prune -o \
   -type f -name '*.rae' \
-  -exec sh -c 'grep -IlE '\''^[[:space:]]*(open|import)[[:space:]]+"?raylib"?([[:space:]]|$)'\'' "$@" || true' sh {} + \
+  -exec sh -c 'grep -IlE '\''^[[:space:]]*(open|import)[[:space:]]+"?[Rr]aylib"?([[:space:]]|$)'\'' "$@" || true' sh {} + \
   | sed "s#^$ROOT/##" \
   | sort > "$ACTUAL"
 

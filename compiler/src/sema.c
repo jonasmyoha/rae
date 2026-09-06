@@ -126,7 +126,7 @@ static void sema_project_namespace(const AstDecl* d, char* out, size_t cap) {
 }
 
 // First component of an import-directive path (the package it refers to), with
-// any .rae stripped: "ui/ecs" -> "ui", "raylib" -> "raylib", "sys/spotify" -> "sys".
+// any .rae stripped: "ui/ecs" -> "ui", "Raylib" -> "Raylib", "sys/spotify" -> "sys".
 static void sema_import_package(Str path, char* out, size_t cap) {
     size_t i = 0;
     // #787: `.` is also a package separator now (`import renderSystem.RenderSystem`),
