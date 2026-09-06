@@ -186,6 +186,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
     case AST_EXPR_CHAR: fprintf(out, "(uint32_t)%uU", (uint32_t)expr->as.char_value); break;
     case AST_EXPR_IDENT: {
         const AstTypeRef* tr = infer_expr_type_ref(ctx, expr);
+        const Str cn = ident_c_name(ctx, expr);  // #816: prefixed symbol for a module global
         bool is_prim_ref = is_primitive_ref(ctx, tr);
         bool is_ptr = is_pointer_type(ctx, expr->as.ident);
         // `view T` / `mod T` for a non-primitive non-Buffer/List/Any
@@ -252,20 +253,20 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         }
 
         if ((is_prim_ref || is_local_prim_view) && !is_lvalue && !suppress_deref) {
-            fprintf(out, "(*%.*s.ptr)", (int)expr->as.ident.len, expr->as.ident.data);
+            fprintf(out, "(*%.*s.ptr)", (int)cn.len, cn.data);
         } else if (is_struct_view && !is_lvalue && !suppress_deref) {
-            fprintf(out, "(*%.*s)", (int)expr->as.ident.len, expr->as.ident.data);
+            fprintf(out, "(*%.*s)", (int)cn.len, cn.data);
         } else if (is_ptr && !is_lvalue && !suppress_deref) {
             // Check if it's a Buffer or List - they are pointers but shouldn't be dereferenced here
             // if we are just passing them or accessing members via ->
             Str base = get_base_type_name(tr);
             if (str_eq_cstr(base, "Buffer") || str_eq_cstr(base, "List")) {
-                fprintf(out, "%.*s", (int)expr->as.ident.len, expr->as.ident.data);
+                fprintf(out, "%.*s", (int)cn.len, cn.data);
             } else {
-                fprintf(out, "(*%.*s)", (int)expr->as.ident.len, expr->as.ident.data);
+                fprintf(out, "(*%.*s)", (int)cn.len, cn.data);
             }
         } else {
-            fprintf(out, "%.*s", (int)expr->as.ident.len, expr->as.ident.data);
+            fprintf(out, "%.*s", (int)cn.len, cn.data);
         }
         break;
     }

@@ -36,6 +36,17 @@ const restart: Int = keys.keyR   # also valid in a const initializer (folds to t
 core's `keys()` on a map) does not shadow it, since `keys.keyW` cannot be a call.
 A genuine value binding of the same name in scope does win.
 
+This works the same for a lib module and for a project sibling (`Pal.shade`
+where `Pal.rae` sits next to `Main.rae`), and in every expression position —
+a plain initializer, an operand, or a `"{Pal.shade}"` interpolation part. A
+project module is matched by its file name (the last path component) no matter
+where the project root was inferred from. (#816)
+
+In the C backend a module-level `const`/`let` is emitted as a
+module-prefixed symbol, `rae_g_<module>_<name>` (module path with `/` -> `_`),
+never under its bare Rae name — so a local named `shade` and `Pal.shade`, or two
+modules' same-named consts, never collide in the C namespace. (#816)
+
 ## Project folders (one auto-visible tree; folders are namespaces, not boundaries)
 
 A Rae **project is one automatically visible module tree**. Every `.rae` file

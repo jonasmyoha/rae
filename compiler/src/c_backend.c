@@ -1383,6 +1383,47 @@ Str infer_expr_type(CFuncContext* ctx, const AstExpr* expr) {
 // C static initializer (static init must be constant). Such globals are emitted
 // as bare (zero-init) declarations and assigned at the top of main() instead.
 // Literal / object / arithmetic initializers stay as valid static initializers.
+const char* global_c_name(CompilerContext* cctx, const AstDecl* decl) {
+    const char* tag = decl->module_name;
+    char base[256];
+    if (!tag || !tag[0]) {
+        const char* f = decl->origin_file ? decl->origin_file : "main";
+        const char* slash = strrchr(f, '/'); const char* b = slash ? slash + 1 : f;
+        size_t n = strlen(b); if (n > 4 && strcmp(b + n - 4, ".rae") == 0) n -= 4;
+        if (n >= sizeof base) n = sizeof base - 1;
+        memcpy(base, b, n); base[n] = '\0'; tag = base;
+    }
+    size_t cap = strlen(tag) + decl->as.let_decl.name.len + 8;
+    char* out = arena_alloc(cctx->ast_arena, cap);
+    size_t j = 0;
+    memcpy(out + j, "rae_g_", 6); j += 6;
+    for (const char* p = tag; *p; p++) out[j++] = (*p == '/' || *p == '\\' || *p == '.') ? '_' : *p;
+    out[j++] = '_';
+    memcpy(out + j, decl->as.let_decl.name.data, decl->as.let_decl.name.len); j += decl->as.let_decl.name.len;
+    out[j] = '\0';
+    return out;
+}
+
+Str ident_c_name(CFuncContext* ctx, const AstExpr* expr) {
+    Str raw = expr->as.ident;
+    if (expr->decl_link && expr->decl_link->kind == AST_DECL_GLOBAL_LET)
+        return str_from_cstr(global_c_name(ctx->compiler_ctx, expr->decl_link));
+    if (get_local_type_ref(ctx, raw)) return raw;      // a local / parameter wins
+    if (ctx->compiler_ctx) {
+        const AstDecl* found = NULL;
+        for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+            const AstDecl* d = ctx->compiler_ctx->all_decls[i];
+            if (d->kind != AST_DECL_GLOBAL_LET || !str_eq(d->as.let_decl.name, raw)) continue;
+            // Prefer the global of the enclosing function's own module.
+            if (ctx->func_decl && ctx->func_decl->origin_file && d->origin_file
+                && strcmp(ctx->func_decl->origin_file, d->origin_file) == 0) { found = d; break; }
+            if (!found) found = d;
+        }
+        if (found) return str_from_cstr(global_c_name(ctx->compiler_ctx, found));
+    }
+    return raw;
+}
+
 static bool global_init_is_deferred(const AstExpr* v) {
     return v && (v->kind == AST_EXPR_CALL || v->kind == AST_EXPR_METHOD_CALL);
 }
@@ -1456,7 +1497,7 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
           if (gd->kind != AST_DECL_GLOBAL_LET || !global_init_is_deferred(gd->as.let_decl.value)) continue;
           bool sh = tctx.has_expected_type; AstTypeRef se = tctx.expected_type;
           if (gd->as.let_decl.type) { tctx.expected_type = *gd->as.let_decl.type; tctx.has_expected_type = true; }
-          fprintf(out, "  %.*s = ", (int)gd->as.let_decl.name.len, gd->as.let_decl.name.data);
+          fprintf(out, "  %s = ", global_c_name(ctx, gd));
           emit_expr(&tctx, gd->as.let_decl.value, out, PREC_LOWEST, false, false);
           fprintf(out, ";\n");
           tctx.has_expected_type = sh; tctx.expected_type = se;
@@ -2985,21 +3026,31 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           const AstDecl* d = ctx->all_decls[i];
           if (d->kind != AST_DECL_GLOBAL_LET) continue;
           // The generated low-level WebGPU bindings under lib/webgpu/ mirror the
-          // wgpu.h enum/flag values as Rae consts (WGPUAdapterType_DiscreteGPU,
-          // WGPUAddressMode_Repeat, …). When the native header is linked
-          // (RAE_HAS_WEBGPU) it defines the SAME identifiers as real enum
-          // constants, so emitting our mirror as a `static int32_t` too is a
-          // redefinition. Guard the mirror behind #ifndef so the header wins on
-          // native builds and the Rae fallback still exists otherwise — the same
-          // "defer to the cheader" rule c_struct binding types already follow.
-          // (Surfaces once webgpu/Webgpu.rae is the package main module, which
-          // pulls the whole binding package via the sibling auto-load.)
+          // wgpu.h enum/flag/sentinel values as Rae consts (WGPUStoreOp_Store,
+          // WGPU_WHOLE_SIZE, …). Since #816 a module global is emitted under its
+          // own `rae_g_<module>_<name>` symbol, so the mirror no longer COLLIDES
+          // with the header's identifier — but on a native build (RAE_HAS_WEBGPU)
+          // the header must still be the source of truth, the same "defer to the
+          // cheader" rule c_struct binding types follow: initialise the mirror
+          // FROM the header constant there, and from the Rae literal otherwise.
+          // (Every lib/webgpu const exists in the native header — checked at
+          // #816 — and e.g. WGPU_WHOLE_SIZE = UINT64_MAX would otherwise come out
+          // of the Rae literal path saturated to INT64_MAX, see QUEUE #817.)
           bool webgpu_binding = d->origin_file && strstr(d->origin_file, "/webgpu/") != NULL;
-          if (webgpu_binding) fprintf(out, "#ifndef RAE_HAS_WEBGPU\n");
+          const char* gname = global_c_name(ctx, d);
+          if (webgpu_binding) {
+              fprintf(out, "#ifdef RAE_HAS_WEBGPU\nRAE_UNUSED static ");
+              if (d->as.let_decl.type) emit_type_ref_as_c_type(&gctx, d->as.let_decl.type, out, false);
+              else fprintf(out, "int64_t");
+              fprintf(out, " %s = (", gname);
+              if (d->as.let_decl.type) emit_type_ref_as_c_type(&gctx, d->as.let_decl.type, out, false);
+              else fprintf(out, "int64_t");
+              fprintf(out, ")(%.*s);\n#else\n", (int)d->as.let_decl.name.len, d->as.let_decl.name.data);
+          }
           fprintf(out, "RAE_UNUSED static ");
           if (d->as.let_decl.type) emit_type_ref_as_c_type(&gctx, d->as.let_decl.type, out, false);
           else fprintf(out, "int64_t");
-          fprintf(out, " %.*s = ", (int)d->as.let_decl.name.len, d->as.let_decl.name.data);
+          fprintf(out, " %s = ", gname);
           if (d->as.let_decl.value && !global_init_is_deferred(d->as.let_decl.value))
               emit_expr(&gctx, d->as.let_decl.value, out, PREC_LOWEST, false, false);
           else
