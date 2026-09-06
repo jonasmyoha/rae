@@ -41,8 +41,7 @@ All functions are deterministic, seeded, allocation-free, and safe to call from 
 Shaders that need noise load through:
 
 ```rae
-import noise_wgsl
-open noise_wgsl
+open NoiseWgsl
 
 let wgsl: String = loadNoiseShader(path: "examples/my_demo/render.wgsl")
 ```
