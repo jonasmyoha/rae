@@ -1,0 +1,12 @@
+import core
+
+# #816: a module-qualified CONST on a PROJECT-SIBLING module, read (a) as a
+# plain initializer and (b) inside string interpolation, with a same-named
+# LOCAL in scope. The harness launches this from compiler/, so the sibling's
+# module_name is a root-relative path (`tests/cases/.../Pal`) — the lookup must
+# match the module's file component. And the local `shade` must not collide
+# with the global in the C namespace (globals are now `rae_g_<module>_<name>`).
+func main() {
+  let shade: Int = Pal.shade
+  log("plain={shade} interp={Pal.shade} sum={shade + Pal.shade}")
+}

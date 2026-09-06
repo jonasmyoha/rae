@@ -3083,9 +3083,25 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
 // "filesystem", "gpu") — i.e. a namespace qualifier rather than a value. Used to
 // tell `module.func(args)` (qualified call) apart from `value.method(args)`
 // (UFCS). See docs/module-namespacing.md.
+// #816: does `name` name the module of decl `d` by its FILE component? A
+// project sibling's module_name is a root-relative PATH (`tests/x/Pal`) that
+// depends on where the project root was inferred, so `Pal.shade` must match
+// the last component — the same robustness rule the shadow diagnostic uses.
+// Only for PROJECT decls (no lib package), so lib qualifier semantics are
+// untouched: `Entity` never silently means `ecs/Entity`.
+static bool sema_module_file_component_is(const AstDecl* d, Str name) {
+    if (!d || !d->module_name || !d->origin_file) return false;
+    char pkg[256]; sema_package_token(d->origin_file, pkg, sizeof pkg);
+    if (pkg[0] != '\0') return false;  // a lib decl
+    const char* slash = strrchr(d->module_name, '/');
+    const char* comp = slash ? slash + 1 : d->module_name;
+    return strlen(comp) == name.len && memcmp(comp, name.data, name.len) == 0;
+}
+
 static bool sema_is_module_name(AstModule* module, Str name) {
     for (AstDecl* d = module->decls; d; d = d->next) {
         if (d->module_name && str_eq_cstr(name, d->module_name)) return true;
+        if (sema_module_file_component_is(d, name)) return true;  // #816
         // A project folder name (`enemies`) also qualifies, so `enemies.tick()`
         // resolves with no import/open. (docs/module-namespacing.md)
         char ns[256]; sema_project_namespace(d, ns, sizeof ns);
@@ -3108,7 +3124,7 @@ static bool sema_is_module_name(AstModule* module, Str name) {
 static AstDecl* sema_find_module_global(AstModule* module, Str modname, Str name) {
     for (AstDecl* d = module->decls; d; d = d->next) {
         if (d->kind == AST_DECL_GLOBAL_LET && d->module_name
-            && str_eq_cstr(modname, d->module_name)
+            && (str_eq_cstr(modname, d->module_name) || sema_module_file_component_is(d, modname))  // #816
             && str_eq(d->as.let_decl.name, name)) return d;
     }
     for (const AstImport* imp = module->imports; imp; imp = imp->next) {
