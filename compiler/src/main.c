@@ -1817,7 +1817,7 @@ static bool module_graph_load_module(ModuleGraph* graph,
     // (list2*) are here because List is a fundamental type used pervasively via
     // bare/UFCS (.add/.get) — requiring a per-file `open list2*` would be
     // impractical and break "list operations keep working" (docs/module-namespacing.md).
-    static const char* stdlib_modules[] = { "core", "String", "Math", "Io", "Sys", "list2", "list2_int" };
+    static const char* stdlib_modules[] = { "core", "String", "Math", "Io", "Sys", "List2" };
     for (size_t i = 0; i < sizeof(stdlib_modules) / sizeof(stdlib_modules[0]); i++) {
       const char* name = stdlib_modules[i];
       if (module_graph_has_module(graph, name)) continue;
@@ -2516,7 +2516,7 @@ static bool build_c_backend_output(const char* entry_file,
   
   bool uses_raylib = false;
   for (ModuleNode* node = graph.head; node; node = node->next) {
-      if (node->module_path && (strcmp(node->module_path, "raylib") == 0 || strstr(node->module_path, "/raylib.rae") || strstr(node->module_path, "\\raylib.rae"))) {
+      if (node->module_path && (strcmp(node->module_path, "Raylib") == 0 || strstr(node->module_path, "/Raylib.rae") || strstr(node->module_path, "\\Raylib.rae"))) {
           uses_raylib = true;
           break;
       }
@@ -4008,7 +4008,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
           FILE* df = fopen(deps_path, "w");
           if (df) {
             fprintf(df, "%s %s %s\n",
-                    b_raylib ? "raylib" : "-",
+                    b_raylib ? "Raylib" : "-",
                     b_sdl3 ? "sdl3" : "-",
                     b_webgpu ? "webgpu" : "-");
             fclose(df);

@@ -1,11 +1,12 @@
 import core
 
-# #788 (c3): a local value named `pal` shadows the module `pal` and WINS
-# silently (the finalized rule). Reading `pal.shade` off the local Int fails
-# (Int has no fields), and the shadowed module `pal` DOES have `shade` — so the
-# diagnostic points at the shadow instead of a bare "unknown field".
+# #788 (c3), revisited under the naming rule: module files are PascalCase and
+# value bindings are camelCase, so a local can NEVER share a name with a module
+# — the "value shadows module" collision class no longer exists by
+# construction. A local `pal` and the sibling module `Pal` simply coexist. (The
+# old "that local shadows module" diagnostic can no longer be reached.)
 func main() {
   let pal: Int = 3
-  let x: Int = pal.shade
-  log("{x}")
+  let viaModule: Int = Pal.shadeOf()
+  log("pal={pal} Pal.shadeOf()={viaModule}")
 }
