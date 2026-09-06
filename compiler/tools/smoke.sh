@@ -10,7 +10,7 @@ echo "--- RAE SMOKE TEST ---"
 
 # 1. Parse check
 echo "Check: Parsing stdlib..."
-$BIN parse ../lib/core.rae > /dev/null
+$BIN parse ../lib/core/Core.rae > /dev/null
 
 # 2. VM Smoke (Hello World)
 echo "Check: VM execution..."

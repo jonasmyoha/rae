@@ -20,7 +20,6 @@
 #
 # Overhead when NOT capturing is a single bool test per zone call; all string and
 # file work is deferred to stop time so it never skews the frames it measures.
-import core
 import Sys
 import String
 
@@ -74,7 +73,7 @@ func startCapture(profiler: mod Profiler, seconds: view Float, outPath: view Str
   profiler.times = createList(Int, cap: profMaxEvents)
   profiler.tids = createList(Int, cap: profMaxEvents)
   profiler.values = createList(Int, cap: profMaxEvents)
-  profiler.startNs = core.nowNs()
+  profiler.startNs = nowNs()
   profiler.endNs = profiler.startNs + rae_float_to_int(f: seconds * 1000000000.0)
   profiler.outPath = "{outPath}"
   profiler.dropped = false
@@ -111,26 +110,26 @@ func profRecord(profiler: mod Profiler, name: view String, ph: view Int, tsNs: v
 # matching zoneEnd, which the Chrome format relies on to build the flame graph.
 func zoneBegin(profiler: mod Profiler, name: view String) pub {
   if profiler.capturing is false { ret }
-  profRecord(profiler: profiler, name: name, ph: profPhBegin, tsNs: core.nowNs(), tid: 0, value: 0)
+  profRecord(profiler: profiler, name: name, ph: profPhBegin, tsNs: nowNs(), tid: 0, value: 0)
 }
 
 func zoneEnd(profiler: mod Profiler, name: view String) pub {
   if profiler.capturing is false { ret }
-  profRecord(profiler: profiler, name: name, ph: profPhEnd, tsNs: core.nowNs(), tid: 0, value: 0)
+  profRecord(profiler: profiler, name: name, ph: profPhEnd, tsNs: nowNs(), tid: 0, value: 0)
 }
 
 # A single-value time series (fps, draw count, RSS, caster count, …). Perfetto
 # plots these as a track you can overlay against the zones.
 func counter(profiler: mod Profiler, name: view String, value: view Int) pub {
   if profiler.capturing is false { ret }
-  profRecord(profiler: profiler, name: name, ph: profPhCounter, tsNs: core.nowNs(), tid: 0, value: value)
+  profRecord(profiler: profiler, name: name, ph: profPhCounter, tsNs: nowNs(), tid: 0, value: value)
 }
 
 # Call once per frame. Auto-stops and writes the trace when the capture window
 # elapses. Returns true on the frame it wrote the file.
 func tick(profiler: mod Profiler) pub ret Bool {
   if profiler.capturing is false { ret false }
-  if core.nowNs() < profiler.endNs { ret false }
+  if nowNs() < profiler.endNs { ret false }
   ret profileStop(profiler: profiler)
 }
 
