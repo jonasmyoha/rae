@@ -294,6 +294,13 @@ rae_String rae_ext_rae_str_i64(int64_t v) {
   return rae_str_from_buf_impl((uint8_t*)buffer, len, RAE_SITE_INT_TO_STR);
 }
 
+// #817: UInt64 formats as unsigned (2^64-1 used to print as -1 via the i64 path).
+rae_String rae_ext_rae_str_u64(uint64_t v) {
+  char buffer[32];
+  int len = snprintf(buffer, 32, "%llu", (unsigned long long)v);
+  return rae_str_from_buf_impl((uint8_t*)buffer, len, RAE_SITE_INT_TO_STR);
+}
+
 rae_String rae_ext_rae_str_i64_ptr(const int64_t* v) {
   return rae_ext_rae_str_i64(*v);
 }
@@ -363,7 +370,7 @@ rae_String rae_ext_rae_str_any(RaeAny v) {
     switch (v.type) {
         case RAE_TYPE_INT64:   return rae_ext_rae_str_i64(v.as.i);
         case RAE_TYPE_INT32:   return rae_ext_rae_str_i64(v.as.i);
-        case RAE_TYPE_UINT64:  return rae_ext_rae_str_i64(v.as.i);
+        case RAE_TYPE_UINT64:  return rae_ext_rae_str_u64((uint64_t)v.as.i);
         case RAE_TYPE_FLOAT64: return rae_ext_rae_str_f64(v.as.f);
         case RAE_TYPE_FLOAT32: return rae_ext_rae_str_f64(v.as.f);
         case RAE_TYPE_BOOL:    return rae_ext_rae_str_bool(v.as.b);

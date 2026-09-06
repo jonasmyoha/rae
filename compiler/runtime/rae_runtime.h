@@ -582,6 +582,7 @@ void    rae_ext_audio_tick(void);
 void    rae_ext_audio_set_muted(int64_t muted);
 
 rae_String rae_ext_rae_str_i64(int64_t v);
+rae_String rae_ext_rae_str_u64(uint64_t v);  // #817
 rae_String rae_ext_rae_str_i64_ptr(const int64_t* v);
 rae_String rae_ext_rae_str_f64(double v);
 rae_String rae_ext_rae_str_f64_ptr(const double* v);
@@ -666,7 +667,7 @@ RAE_UNUSED static const char* rae_str_any(RaeAny v) {
     switch (v.type) {
         case RAE_TYPE_INT64: res = rae_ext_rae_str_to_cstr(rae_ext_rae_str_i64(v.as.i)); break;
         case RAE_TYPE_INT32: res = rae_ext_rae_str_to_cstr(rae_ext_rae_str_i64(v.as.i)); break;
-        case RAE_TYPE_UINT64: res = rae_ext_rae_str_to_cstr(rae_ext_rae_str_i64(v.as.i)); break;
+        case RAE_TYPE_UINT64: res = rae_ext_rae_str_to_cstr(rae_ext_rae_str_u64((uint64_t)v.as.i)); break;
         case RAE_TYPE_FLOAT64: res = rae_ext_rae_str_to_cstr(rae_ext_rae_str_f64(v.as.f)); break;
         case RAE_TYPE_FLOAT32: res = rae_ext_rae_str_to_cstr(rae_ext_rae_str_f64(v.as.f)); break;
         case RAE_TYPE_BOOL: res = rae_ext_rae_str_to_cstr(rae_ext_rae_str_bool(v.as.b)); break;
@@ -825,7 +826,7 @@ void rae_ext_drawTextWithFont(int64_t slot, rae_String text, float x, float y, f
     int16_t: rae_ext_rae_str_i64, \
     uint16_t: rae_ext_rae_str_i64, \
     int32_t: rae_ext_rae_str_i64, \
-    uint64_t: rae_ext_rae_str_i64, \
+    uint64_t: rae_ext_rae_str_u64, \
     RaeAny: rae_ext_rae_str_any, \
     default: rae_ext_rae_str_string \
 )(X)
