@@ -122,8 +122,7 @@ bool is_stdlib_module(Str name) {
            str_eq_cstr(name, "Raylib") ||
            str_eq_cstr(name, "time") ||
            str_eq_cstr(name, "easing") ||
-           str_eq_cstr(name, "tinyexpr") ||
-           str_eq_cstr(name, "List2");
+           str_eq_cstr(name, "tinyexpr");
 }
 
 bool is_module_import(BytecodeCompiler* compiler, Str name) {

@@ -6,8 +6,8 @@
 # and `opt <Enum>` — must lower to the monomorphized
 # `struct rae_opt_<T> { has; value; }`, NEVER the inline `RaeAny` union.
 #
-# A raw "0 RaeAny" grep is NOT a valid check: `import core` always emits the
-# genuinely-`Any` helpers (`log(value: Any)`, `List2`, crypto), so `RaeAny`
+# A raw "0 RaeAny" grep is NOT a valid check: the prelude always emits the
+# genuinely-`Any` helpers (`log(value: Any)`, `Buffer(Any)`, crypto), so `RaeAny`
 # legitimately appears in every program that prints. Instead we assert the
 # *representation* of value-opts:
 #   * value-opt fields/locals lower to `rae_opt_<T>` (struct rep is used), and
