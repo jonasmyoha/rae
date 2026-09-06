@@ -55,10 +55,16 @@ file, with **no `import`/`open`** — across any subfolder depth. Moving a file
 into a subfolder never creates an import boundary or changes its visibility.
 `import`/`open` are for **`lib/` / external** packages only. The prelude
 stays auto-loaded and bare-callable, unchanged: the `core/` package
-(`core/Core`, `core/List`, `core/StringMap`, `core/IntMap`) plus `String`,
-`Math`, `Io`, `Sys` and `List2`. `core` is a normal camelCase folder-package
-now (#818) — a package prelude entry auto-opens its whole folder, so `log`,
-`List` and the maps are bare-callable with no import.
+(`core/Core`, `core/List`) plus `String`, `Math`, `Io`, `Sys` and `List2`.
+`core` is a normal camelCase folder-package now (#818) — a package prelude
+entry auto-opens its whole folder, so `log` and `List` are bare-callable with
+no import.
+
+The hash maps are **not** in the prelude: `StringMap(V)` and `IntMap(V)` live
+in the `collections/` package (#819) and are asked for explicitly with
+`open collections/StringMap` / `open collections/IntMap`. The rule is core =
+the types the compiler itself understands (`List`); collections = pure-Rae
+libraries over `List`/`Buffer` that you import. See `docs/collections.md`.
 
 
 **Project root.** The tree is scanned from the project root. `--project <dir>`
