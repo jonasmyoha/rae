@@ -196,11 +196,32 @@ field reflection, the no-globals rule, ownership threaded through `mod`
 parameters) exist to make that architecture clean rather than to bolt frameworks
 on top.
 
-It is intended to work in **two complementary modes**:
-- **Live (bytecode VM)**: for rapid iteration, tooling, analysis, hot-reload, and AI-driven workflows
-- **Compiled (C backend)**: for performance, distribution, and production use
+**The Compiled (C backend) target is the ONLY supported, maintained, tested
+target. Treat it as "the compiler."**
 
-Use these names consistently. “Live/Compiled/Hybrid” are the official short labels for CLI flags, docs, UI, and marketing copy. When extra clarity is needed, append the descriptive form (“Live (bytecode VM)”, “Compiled (C backend)”, “Hybrid Dev/Hybrid Release”). Avoid introducing new labels like “native” or “interpreted” unless a sentence specifically contrasts implementation details.
+> ## ⚠️ The Live / VM (bytecode) target is DEPRECATED.
+>
+> The Live target (a.k.a. the VM, the bytecode interpreter, "Hybrid") is **no
+> longer maintained** and is **not tested** — the test suite runs the Compiled
+> target only, and the example gate is Compiled-only. It is left in the repo to
+> **rot**: not removed yet, with **no plan to remove it yet**, but equally **no
+> plan to fix, extend, or reason about it**. Do NOT:
+> - "fix" a Live/VM bug, add a Live/VM feature, or keep the two targets at parity;
+> - block, caveat, or complicate Compiled-target work for the VM's sake;
+> - cite "but the VM does X" as a reason for a design or a diagnostic.
+>
+> When a change happens to also improve the VM path for free (e.g. a shared
+> sema diagnostic), that's fine — say so in one clause and move on. When the VM
+> path is in the way, ignore it. If a VM-specific file surfaces (`vm_*.c`,
+> bytecode, `--target live`), leave it as-is unless the task is explicitly about
+> deleting/deprecating it. It resurfaces often precisely because old docs still
+> frame Rae as "two modes" — it is one mode now.
+
+Historically Rae was pitched as **two complementary modes** — Live (bytecode VM)
+for iteration/tooling/hot-reload and Compiled (C backend) for production. Only
+the Compiled half is real today. The short labels "Live/Compiled/Hybrid" still
+appear in older docs and CLI flags; keep the names where they exist, but read
+every "Live"/"Hybrid" claim as **describing a deprecated, unmaintained path**.
 
 The language prioritizes:
 - Clear, readable syntax that is easy to reason about

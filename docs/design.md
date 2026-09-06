@@ -5,7 +5,7 @@
 1. **Explicit ownership** - No hidden aliasing or copying
 2. **Natural syntax** - Reads like structured English
 3. **AI-assisted** - Designed for clarity in AI collaboration
-4. **Dual-mode execution** - Same source runs Live (bytecode VM) or Compiled (C backend)
+4. **Compiled execution (C backend)** - The one supported target. (Rae was once pitched as dual-mode with a Live bytecode VM; that VM is now DEPRECATED and unmaintained — see `docs/live-vm-status.md`.)
 
 ## Ownership System
 
