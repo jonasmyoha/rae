@@ -19,7 +19,7 @@ run_with_timeout 300 make -C "$RAE_ROOT/compiler" build >/dev/null
 
 echo "Compiling benchmarks..."
 run_with_timeout 300 "$RAE_BIN" build --target compiled --profile release --emit-c \
-  --out "$BUILD/rae_generated.c" "$HERE/rae/main.rae"
+  --out "$BUILD/rae_generated.c" "$HERE/rae/Main.rae"
 run_with_timeout 300 cc -std=c11 -O2 -DNDEBUG \
   -include "$HERE/c/opaque_index.h" "$BUILD/rae_generated.c" \
   "$HERE/c/opaque_index.c" \

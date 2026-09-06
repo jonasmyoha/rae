@@ -27,8 +27,8 @@ if [ ! -d "$TEST_DIR" ]; then
   exit 0
 fi
 
-# Find all test directories (directories containing main.rae)
-TEST_FILES=$(find "$TEST_DIR" -name "main.rae" | sort)
+# Find all test directories (directories containing Main.rae)
+TEST_FILES=$(find "$TEST_DIR" \( -name "Main.rae" -o -name "main.rae" \) | sort)
 
 if [ -z "$TEST_FILES" ]; then
   echo "No test files found in $TEST_DIR"
@@ -225,8 +225,8 @@ for TARGET in "${TARGETS[@]}"; do
     SKIP_EXEC=0
     if [ "${CMD_RUN_ARGS[0]}" = "hot-reload" ]; then
         # Special handling for hot-reload tests
-        # It expects a main.rae and a main_v2.rae
-        # It will copy main.rae to a tmp file, start watch run in background,
+        # It expects a Main.rae and a main_v2.rae
+        # It will copy Main.rae to a tmp file, start watch run in background,
         # wait, copy main_v2.rae over the tmp file, wait, then stop.
         TMP_HOT_FILE=$(mktemp -t rae_test_XXXXXX.rae)
         cp "$TEST_FILE" "$TMP_HOT_FILE"
