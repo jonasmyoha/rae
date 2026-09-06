@@ -1583,7 +1583,7 @@ static const char* compiler_stdlib_dir(void) {
   const char* env = getenv("RAE_STDLIB");
   if (env && env[0]) {
     char probe[PATH_MAX];
-    snprintf(probe, sizeof(probe), "%s/core.rae", env);
+    snprintf(probe, sizeof(probe), "%s/core/Core.rae", env);  /* #818: core is a package */
     if (file_exists(probe)) {
       snprintf(cached, sizeof(cached), "%s", env);
       return cached;
@@ -1620,7 +1620,7 @@ static const char* compiler_stdlib_dir(void) {
     char cand[PATH_MAX];
     snprintf(cand, sizeof(cand), "%s%s", real, suffixes[i]);
     char probe[PATH_MAX];
-    snprintf(probe, sizeof(probe), "%s/core.rae", cand);
+    snprintf(probe, sizeof(probe), "%s/core/Core.rae", cand);  /* #818: core is a package */
     if (file_exists(probe)) {
       if (!realpath(cand, cached)) {
         snprintf(cached, sizeof(cached), "%s", cand);
@@ -1808,7 +1808,7 @@ static bool module_graph_load_module(ModuleGraph* graph,
   // depends on lib/core.rae but lib/core.rae must NOT auto-load
   // lib/string.rae). All other files get the full stdlib for free.
   if (use_stdlib && !no_implicit &&
-      (!module_path || (strcmp(module_path, "core") != 0 &&
+      (!module_path || (strncmp(module_path, "core/", 5) != 0 &&
                         strcmp(module_path, "Math") != 0 &&
                         strcmp(module_path, "Io") != 0 &&
                         strcmp(module_path, "String") != 0 &&
@@ -1817,7 +1817,7 @@ static bool module_graph_load_module(ModuleGraph* graph,
     // (list2*) are here because List is a fundamental type used pervasively via
     // bare/UFCS (.add/.get) — requiring a per-file `open list2*` would be
     // impractical and break "list operations keep working" (docs/module-namespacing.md).
-    static const char* stdlib_modules[] = { "core", "String", "Math", "Io", "Sys", "List2" };
+    static const char* stdlib_modules[] = { "core/Core", "String", "Math", "Io", "Sys", "List2" };
     for (size_t i = 0; i < sizeof(stdlib_modules) / sizeof(stdlib_modules[0]); i++) {
       const char* name = stdlib_modules[i];
       if (module_graph_has_module(graph, name)) continue;
@@ -1833,6 +1833,18 @@ static bool module_graph_load_module(ModuleGraph* graph,
       // everywhere — distinct from modules incidentally discovered via imports.
       ModuleNode* loaded = module_graph_find(graph, name);
       if (loaded) loaded->is_auto_loaded = true;
+      // #818: a package prelude entry (`core/Core`) auto-loads its siblings via
+      // the isMain rule; auto-OPEN the whole folder so every sibling's decls
+      // (List, the maps) are bare-callable everywhere, exactly as the single
+      // core.rae was before the split.
+      const char* pkgslash = strrchr(name, '/');
+      if (pkgslash) {
+        size_t folder_len = (size_t)(pkgslash - name) + 1;  // include the '/'
+        for (ModuleNode* n = graph->head; n; n = n->next) {
+          if (n->module_path && strncmp(n->module_path, name, folder_len) == 0)
+            n->is_auto_loaded = true;
+        }
+      }
     }
   }
 
@@ -2067,7 +2079,7 @@ static bool module_graph_build(ModuleGraph* graph, const char* entry_file, uint6
   // Load core library explicitly if it exists in the project root
   if (graph->root_path && !no_implicit) {
       char core_path[PATH_MAX];
-      snprintf(core_path, sizeof(core_path), "%s/lib/core.rae", graph->root_path);
+      snprintf(core_path, sizeof(core_path), "%s/lib/core/Core.rae", graph->root_path);  /* #818 */
       if (file_exists(core_path)) {
           // Don't realpath() here: when <project>/lib/ is a symlink
           // into a sibling stdlib checkout (the rae-port pattern), the
@@ -3102,7 +3114,7 @@ static void find_lib_root(const char* project_root, char* out, size_t cap) {
   if (!realpath(project_root, out)) snprintf(out, cap, "%s", project_root);
   for (int i = 0; i < 8; i++) {
     char probe[PATH_MAX];
-    snprintf(probe, sizeof(probe), "%s/lib/core.rae", out);
+    snprintf(probe, sizeof(probe), "%s/lib/core/Core.rae", out);  /* #818 */
     if (file_exists(probe)) return;
     char* parent = strrchr(out, '/');
     if (!parent || parent == out) break;
@@ -3897,7 +3909,7 @@ static int run_command(const char* cmd, int argc, char** argv) {
               bool found_root = false;
               for (int i = 0; i < 5; ++i) {
                   char test_lib[PATH_MAX];
-                  snprintf(test_lib, sizeof(test_lib), "%s/lib/core.rae", repo_root);
+                  snprintf(test_lib, sizeof(test_lib), "%s/lib/core/Core.rae", repo_root);  /* #818 */
                   if (file_exists(test_lib)) {
                       found_root = true;
                       break;

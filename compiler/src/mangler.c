@@ -471,7 +471,7 @@ const char* rae_mangle_type(CompilerContext* ctx, const struct AstIdentifierPart
 // isKeyDown, …) and (b) emit the qualified symbol below.
 static bool is_namespaced_stdlib_extern(const AstFuncDecl* func) {
     if (!func->is_extern || !func->module_name || !func->origin_file) return false;
-    if (strcmp(func->module_name, "core") == 0 || strcmp(func->module_name, "Raylib") == 0) return false;
+    if (strncmp(func->module_name, "core/", 5) == 0 || strcmp(func->module_name, "Raylib") == 0) return false;  // #818: core is a package
     if (str_starts_with_cstr(func->name, "rae_") || str_starts_with_cstr(func->name, "__")) return false;
     return strstr(func->origin_file, "/lib/") != NULL || strncmp(func->origin_file, "lib/", 4) == 0;
 }
