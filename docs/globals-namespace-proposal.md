@@ -89,7 +89,7 @@ Rae's stated design rules (CLAUDE.md, `design.md`):
    the issue. Could be addressed with a separate `const` keyword later,
    independent of this proposal.
 4. **Cross-module scoping question.** Today, an auto-imported `let
-   foo: Int = 1` in `world.rae` is reachable as `foo` from `main.rae`.
+   foo: Int = 1` in `world.rae` is reachable as `foo` from `Main.rae`.
    Does `global` flatten to a single program-wide namespace, or is
    each module its own `global`? Each-module is closer to how
    Python's `module.attr` works; flat-program is closer to C extern.
@@ -131,8 +131,8 @@ A hand-count from a `git grep` of the current tree:
 | `examples/97_tetris3d/particles.rae` | 4 (`maxParticles` × 3, `gridWidth` × 1) |
 | `examples/97_tetris3d/input.rae` | 11 raylib key codes (`keyLeft`, `keyRight`, `keyUp`, ...) — every `isKeyDown(key: keyLeft)` becomes `isKeyDown(key: global.keyLeft)` |
 | `examples/97_tetris3d/hud.rae` | 6 (palette colours + font slot/path/size) |
-| `tests/cases/392_global_let/main.rae` | 4 |
-| `tests/cases/396_global_persistence/main.rae` | 2 |
+| `tests/cases/392_global_let/Main.rae` | 4 |
+| `tests/cases/396_global_persistence/Main.rae` | 2 |
 
 Roughly 50 use sites in the immediate codebase, mostly trivial
 mechanical migrations — but most of them in *new* code I just wrote.
@@ -233,7 +233,7 @@ cost of seven more characters per reference.
 ## Cross-references
 
 - `design.md` — language design rules cited above.
-- `tests/cases/396_global_persistence/main.rae` — the smallest
+- `tests/cases/396_global_persistence/Main.rae` — the smallest
   exercise of globals today.
 - `examples/97_tetris3d/` — the largest exercise of globals today.
 - `compiler/src/c_backend.c` (the recent `AST_DECL_GLOBAL_LET` emit)
