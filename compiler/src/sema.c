@@ -863,6 +863,7 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
     Symbol* best_sym = NULL;
     AstTypeRef* best_inferred = NULL;
     const AstDecl* ineligible = NULL;  // name matched but its package isn't open here
+    bool open_arity_match = false;     // #819: an OPEN same-name candidate matches arity — the real target, even if this resolver's generic inference is incomplete; suppresses the not-open diagnostic below
     // A single name+arity candidate whose ONLY problem is a numeric-type
     // mismatch (e.g. Float passed where Float64 is wanted) is still the callee
     // the programmer meant — remember it so we can bind to it and let the
@@ -889,6 +890,7 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
         for (AstParam* p = fd->params; p; p = p->next) param_count++;
 
         if (param_count != arg_count) continue;
+        open_arity_match = true;  // #819: an opened candidate matches by name+arity
 
         if (fd->generic_params) {
             // This generic function has value parameters; make sure the call
@@ -998,7 +1000,12 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
 
     // The name only matched a function in a package that isn't open here. Diagnose
     // so it fails (rather than the C backend silently re-resolving by name).
-    if (ineligible && ineligible->module_name) {
+    // #819: but ONLY when there is no OPEN same-name/arity candidate. A bare
+    // `drop(list)` has an open core/List.drop AND (once a collections map is
+    // loaded elsewhere in the unit) a not-open collections drop; the open one
+    // is the real target and is resolved by the downstream fallback, so the
+    // not-open collections candidate must not hijack the call with an error.
+    if (ineligible && ineligible->module_name && !open_arity_match) {
         char buf[320];
         snprintf(buf, sizeof(buf),
             "'%.*s' is in package '%s', which is not open here; use `open %s` for a bare call, or %s.%.*s(...)",
