@@ -1,0 +1,69 @@
+# core/Core.rae — the core package main module.
+# Console output, time, numeric conversions, compiler intrinsics, the raw
+# Buffer primitives, and the general String externs. The List/StringMap/
+# IntMap containers are siblings in this same package (core/List.rae, …),
+# auto-loaded and auto-opened together as the prelude.
+# Everything here is bare-callable everywhere; no import needed.
+
+func nextTick() extern ret Int
+
+# Console output — a core essential (globally visible, callable bare), so
+# everyday code writes `log(x)` not `io.log(x)`. (docs/module-namespacing.md)
+func rae_ext_rae_log_any(value: Any) extern
+func rae_ext_rae_log_stream_any(value: Any) extern
+
+func log(value: Any) {
+    rae_ext_rae_log_any(value: value)
+}
+
+func logS(value: Any) {
+    rae_ext_rae_log_stream_any(value: value)
+}
+
+func nowMs() extern ret Int
+
+func nowNs() extern ret Int
+
+func sleep(ms: Int) extern
+
+func rae_int_to_float(i: Int) extern ret Float
+
+func rae_float_to_int(f: Float) extern ret Int
+
+func toFloat(this: view Int) ret Float {
+  ret rae_int_to_float(i: this)
+}
+
+func toInt(this: view Float) ret Int {
+  ret rae_float_to_int(f: this)
+}
+
+# -- Compiler Intrinsics --
+func sizeof(T: type) extern ret Int
+
+# -- Buffer Primitives (Compiler-internal) --
+func rae_ext_rae_buf_alloc(size: Int, elemSize: Int) extern ret Buffer(Any)
+func rae_ext_rae_buf_free(buf: Buffer(Any)) extern
+func rae_ext_rae_buf_copy(V: type, src: Buffer(V), src_off: Int, dst: Buffer(V), dst_off: Int, len: Int, elemSize: Int) extern
+func rae_ext_rae_buf_set(V: type, buf: mod Buffer(V), index: Int, value: V) extern
+
+# Drop the contents of `buf[index]` via the synthesised
+# rae_drop_struct_<V> (or rae_string_drop for V=String). The
+# compiler recognises this name as an intrinsic and emits the
+# right drop call for V; the slot is left in a stale-pointer state
+# that the caller must overwrite before anything else reads it.
+# Used by the "replace existing element" path of stdlib helpers
+# like StringMap.set / componentSet to avoid leaking the slot's
+# old String fields.
+func rae_ext_rae_buf_drop_at(V: type, buf: mod Buffer(V), index: Int) extern
+func rae_ext_rae_buf_get(V: type, buf: view Buffer(V), index: Int) extern ret V
+
+# -- General String externs (used by String.rae, StringMap, Json, …) --
+func rae_str_hash(s: String) extern ret Int
+
+func rae_str_eq(a: String, b: String) extern ret Bool
+
+# Deep-copy a String — declared here so `StringMap.set` can own its
+# keys without relying on lib/string.rae (which itself imports
+# core). Maps to the same runtime helper as `String.stringCopy`.
+func rae_ext_rae_string_copy(s: view String) extern ret String
