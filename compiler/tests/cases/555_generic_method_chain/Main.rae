@@ -6,8 +6,9 @@
 # because it compares the instantiated struct's mangled name
 # (`List_String`) against the template written in the parameter
 # (`view List(T)`), so the call gets no decl_link and no type — and the
-# NEXT call in the chain then resolves against nothing. `length()` bound
-# to List2Int.length and passed a String where an Int* was expected.
+# NEXT call in the chain then resolves against nothing, so `length()` bound
+# to a same-named overload for a different receiver and was passed a String
+# where an Int* was expected.
 #
 # Fixed in the backend's type inference (not sema's overload selection —
 # changing that regressed eight generic-container tests): recover the

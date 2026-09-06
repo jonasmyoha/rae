@@ -179,9 +179,9 @@ geo.Point.make(x: 1, y: 2)                               # package.Module.func (
   `func(...)`.
 - `open M` — everything `import` does, **plus** module `M`'s names become bare in
   this file (so a UI file writes `open ui/RenderSystem/RenderSystem` for its bare
-  helpers). `open` implies `import`. The prelude (`core/Core`, `String`, `Math`, `Io`,
-  `sys`, `list2`, `list2_int`) is already bare with a plain `import core` — bare
-  `log`/`createList` need no `open`.
+  helpers). `open` implies `import`. The prelude (`core/Core`, `core/List`,
+  `String`, `Math`, `Io`, `Sys`) is auto-opened for every file — bare
+  `log`/`createList` need no `import` or `open`.
 - Aliases: `import filesystem as fs`, `open io as console`.
 
 **`export` merges a file into its folder's same-named main module.** To split a
