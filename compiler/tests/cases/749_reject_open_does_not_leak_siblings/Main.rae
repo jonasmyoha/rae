@@ -1,0 +1,10 @@
+# Directives are module-granular: `open ecs/Entity` must NOT bare-open its
+# sibling `ecs/World`. World is loaded (imported) so the bare constructor call
+# is diagnosed with the exact module to open — never silently resolved.
+import ecs/World
+open ecs/Entity
+
+func main() {
+  var allocator: EntityAllocator = createEntityAllocator()
+  log("unreachable")
+}
