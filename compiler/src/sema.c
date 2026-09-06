@@ -1041,6 +1041,25 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
         const char* err_file = sema_diag_file(module);
         diag_error(err_file, (int)line, (int)column, buf);
         if (module) module->had_error = true;
+    } else if (symbol_table_lookup(symbols, name) == NULL
+               && !(name.len >= 2 && name.data[0] == '_' && name.data[1] == '_')) {
+        // #821: the bare name matches NOTHING loaded — not an open function, not
+        // a not-open one, not a type, not a local. Previously this returned NULL
+        // silently and the C backend emitted `rae_<name>(...)` by name, so the
+        // only error was a cryptic "use of undeclared identifier" from the C
+        // compiler. A `__`-prefixed name is a backend intrinsic (`__buf_alloc`,
+        // `__raeVmDropCount`) with no decl, so it is exempt. When the module IS
+        // loaded but simply not open, the `ineligible` branch above fires with
+        // the precise `open M` hint instead; reaching here means the owning
+        // module was never imported/opened at all.
+        char buf[256];
+        snprintf(buf, sizeof(buf),
+            "unknown function '%.*s': no function by that name is loaded here — "
+            "did you forget to `import`/`open` its module?",
+            (int)name.len, name.data);
+        const char* err_file = sema_diag_file(module);
+        diag_error(err_file, (int)line, (int)column, buf);
+        if (module) module->had_error = true;
     }
     return NULL;
 }
