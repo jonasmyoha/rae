@@ -55,7 +55,7 @@ file, with **no `import`/`open`** — across any subfolder depth. Moving a file
 into a subfolder never creates an import boundary or changes its visibility.
 `import`/`open` are for **`lib/` / external** packages only. The prelude
 stays auto-loaded and bare-callable, unchanged: the `core/` package
-(`core/Core`, `core/List`) plus `String`, `Math`, `Io`, `Sys` and `List2`.
+(`core/Core`, `core/List`) plus `String`, `Math`, `Io` and `Sys`.
 `core` is a normal camelCase folder-package now (#818) — a package prelude
 entry auto-opens its whole folder, so `log` and `List` are bare-callable with
 no import.
