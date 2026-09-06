@@ -1,0 +1,12 @@
+# #821: a bare call to a function whose module was NEVER loaded (not imported,
+# not opened, not in the prelude/project tree) must be a sema error naming the
+# missing directive — not a silent pass that only dies as "undeclared
+# identifier" in the emitted C. `createEntityAllocator` lives in ecs/World,
+# which this file never imports or opens (opening the sibling ecs/Entity does
+# NOT load it — directives are module-granular).
+open ecs/Entity
+
+func main() {
+  var allocator: EntityAllocator = createEntityAllocator()
+  log("unreachable")
+}
