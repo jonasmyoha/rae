@@ -1,0 +1,133 @@
+# Pong in Rae (Live mode)
+open Raylib
+
+type Ball {
+  x: Float
+  y: Float
+  dx: Float
+  dy: Float
+  radius: Float
+}
+
+type Paddle {
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+  score: Int
+}
+
+func main() {
+  initWindow(width: 800, height: 450, title: "Rae Pong")
+  setTargetFPS(fps: 60)
+  let white: Color = { r: 255, g: 255, b: 255, a: 255 }
+  let darkGray: Color = { r: 20, g: 20, b: 20, a: 255 }
+  let ball: Ball = {
+    x: 400.0
+    y: 225.0
+    dx: 4.0
+    dy: 4.0
+    radius: 10.0
+  }
+  let p1: Paddle = {
+    x: 20.0
+    y: 175.0
+    w: 10.0
+    h: 100.0
+    score: 0
+  }
+  let p2: Paddle = {
+    x: 770.0
+    y: 175.0
+    w: 10.0
+    h: 100.0
+    score: 0
+  }
+  loop not windowShouldClose() {
+    # Input
+    # W
+    if isKeyDown(key: 87) {
+      p1.y = p1.y - 5.0
+    }
+    # S
+    if isKeyDown(key: 83) {
+      p1.y = p1.y + 5.0
+    }
+    # Up
+    if isKeyDown(key: 265) {
+      p2.y = p2.y - 5.0
+    }
+    # Down
+    if isKeyDown(key: 264) {
+      p2.y = p2.y + 5.0
+    }
+    # Movement
+    ball.x = ball.x + ball.dx
+    ball.y = ball.y + ball.dy
+    # Bounce top/bottom
+    if ball.y <= 0.0 or ball.y >= 450.0 {
+      ball.dy = ball.dy * -1.0
+    }
+    # Collision with Paddle 1 (Left)
+    if ball.x <= p1.x + p1.w {
+      if ball.y >= p1.y and ball.y <= p1.y + p1.h {
+        if ball.dx < 0.0 {
+          ball.dx = ball.dx * -1.0
+        }
+      }
+    }
+    # Collision with Paddle 2 (Right)
+    if ball.x >= p2.x - ball.radius {
+      if ball.y >= p2.y and ball.y <= p2.y + p2.h {
+        if ball.dx > 0.0 {
+          ball.dx = ball.dx * -1.0
+        }
+      }
+    }
+    # Score
+    if ball.x < 0.0 {
+      p2.score = p2.score + 1
+      ball.x = 400.0
+      ball.y = 225.0
+    }
+    if ball.x > 800.0 {
+      p1.score = p1.score + 1
+      ball.x = 400.0
+      ball.y = 225.0
+    }
+    # Drawing
+    beginDrawing()
+    clearBackground(color: darkGray)
+    drawCircle(x: ball.x, y: ball.y, radius: ball.radius, color: white)
+    drawRectangle(
+      x: p1.x
+      y: p1.y
+      width: p1.w
+      height: p1.h
+      color: white
+    )
+    drawRectangle(
+      x: p2.x
+      y: p2.y
+      width: p2.w
+      height: p2.h
+      color: white
+    )
+    drawText(
+      text: "{p1.score}"
+      x: 200.0
+      y: 20.0
+      fontSize: 40.0
+      color: white
+    )
+    drawText(
+      text: "{p2.score}"
+      x: 600.0
+      y: 20.0
+      fontSize: 40.0
+      color: white
+    )
+    endDrawing()
+  }
+  closeWindow()
+}

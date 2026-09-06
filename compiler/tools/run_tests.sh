@@ -225,9 +225,9 @@ for TARGET in "${TARGETS[@]}"; do
     SKIP_EXEC=0
     if [ "${CMD_RUN_ARGS[0]}" = "hot-reload" ]; then
         # Special handling for hot-reload tests
-        # It expects a Main.rae and a main_v2.rae
+        # It expects a Main.rae and a MainV2.rae
         # It will copy Main.rae to a tmp file, start watch run in background,
-        # wait, copy main_v2.rae over the tmp file, wait, then stop.
+        # wait, copy MainV2.rae over the tmp file, wait, then stop.
         TMP_HOT_FILE=$(mktemp -t rae_test_XXXXXX.rae)
         cp "$TEST_FILE" "$TMP_HOT_FILE"
         
@@ -250,7 +250,7 @@ for TARGET in "${TARGETS[@]}"; do
         done
         
         # Patch
-        V2_FILE="${TEST_DIRNAME}/main_v2.rae"
+        V2_FILE="${TEST_DIRNAME}/MainV2.rae"
         if [ -f "$V2_FILE" ]; then
             cp "$V2_FILE" "$TMP_HOT_FILE"
             # The watcher currently tracks mtimes at whole-second granularity.

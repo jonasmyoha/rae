@@ -1,0 +1,462 @@
+open Raylib
+# Hero (shared-element) transitions — RUICS Phase 1h.
+#
+# When the host swaps from one screen's `UiWorld` to another, any
+# entity carrying a `HeroWidget` with the same `key` on both screens
+# can be visually animated between the two layouts instead of popping
+# in and out. The system owns ONE in-flight animation at a time and
+# renders a single overlay sprite at an interpolated rect, so the
+# transition costs one extra draw call per frame, not a duplicated
+# entity tree.
+#
+# Lifecycle, driven by the host:
+#
+#   1. `captureHeroSource(anim, oldWorld, key)` — just before
+#       discarding the old world, read out the hero's current
+#       worldTransform + computedRect + sprite. The sprite info
+#       (textureKey / tint) is what the overlay later draws.
+#   2. Build the new world.
+#   3. `captureHeroTarget(anim, newWorld, key)` — read the hero's
+#       new worldTransform + computedRect after layout/transform have
+#       run.
+#   4. `startHeroTransition(anim, key, durationSeconds, now)` — flip
+#       the anim to active.
+#   5. Per frame, while `updateHeroAnim(anim, now)` returns true:
+#        - `setHeroVisible(world, key, false)` to hide the new
+#          world's hero entity (the overlay paints it).
+#        - `renderSystem(world, reg)` as usual.
+#        - `renderHeroOverlay(anim, reg, now)` on top.
+#      When the anim ends, `setHeroVisible(world, key, true)`.
+#
+# Easing is a quintic smoothstep ("smootherstep") — flat first AND
+# second derivatives at both endpoints, so the hero settles into its
+# rest position with no perceptible velocity. Linear is jarring for
+# shared-element transitions because the eye notices the constant
+# velocity at the endpoints; plain cubic smoothstep is OK but still
+# feels slightly snappy at the seams.
+import core
+import Raylib
+open ecs/Entity
+
+# In-flight transition state. Owned by the host. Reset between
+# transitions by overwriting; only one transition runs at a time.
+type HeroAnim {
+  active: Bool
+  key: String
+  textureKey: String
+  tintR: Int
+  tintG: Int
+  tintB: Int
+  tintA: Int
+  startTime: Float64
+  duration: Float
+  srcX: Float
+  srcY: Float
+  srcW: Float
+  srcH: Float
+  srcRadius: Float
+  dstX: Float
+  dstY: Float
+  dstW: Float
+  dstH: Float
+  dstRadius: Float
+}
+
+func createHeroAnim() pub ret HeroAnim {
+  ret HeroAnim {
+    active: false
+    key: ""
+    textureKey: ""
+    tintR: 255
+    tintG: 255
+    tintB: 255
+    tintA: 255
+    startTime: 0.0
+    duration: 0.0
+    srcX: 0.0
+    srcY: 0.0
+    srcW: 0.0
+    srcH: 0.0
+    srcRadius: 0.0
+    dstX: 0.0
+    dstY: 0.0
+    dstW: 0.0
+    dstH: 0.0
+    dstRadius: 0.0
+  }
+}
+
+# Linear scan through the heroWidgets table — there are at most a
+# handful of hero widgets per screen, so a sparse-set lookup would
+# be over-engineered. Returns noEntity() if no match.
+func findHeroEntity(world: view UiWorld, key: view String) pub ret EntityId {
+  let n: Int = componentCount(this: world.heroWidgets)
+  var i: Int = 0
+  loop i < n {
+    let e: EntityId = componentEntityAt(this: world.heroWidgets, i: i)
+    let hw: HeroWidget = componentDataAt(this: world.heroWidgets, i: i)
+    if hw.key is key {
+      ret e
+    }
+    i = i + 1
+  }
+  ret noEntity()
+}
+
+# Find a HeroWidget with the given key whose owning PageRoot
+# ancestor matches `pageId`. In a persistent UiWorld with all
+# pages mounted, the same hero key (e.g. an album stem) lives on
+# multiple pages — the source's page, the target's page, and
+# every profile-grid tile that shows the same cover. `findHeroEntity`
+# alone returns the first match in the table, which is unstable
+# across screen changes; this scoped lookup is what hero capture
+# uses to pick the right entity for the source vs target page.
+func findHeroEntityOnPage(world: view UiWorld, pageId: view String, key: view String) pub ret EntityId {
+  let n: Int = componentCount(this: world.heroWidgets)
+  var i: Int = 0
+  loop i < n {
+    let e: EntityId = componentEntityAt(this: world.heroWidgets, i: i)
+    let hw: HeroWidget = componentDataAt(this: world.heroWidgets, i: i)
+    if hw.key is key {
+      let p: String = pageOf(world: world, entity: e)
+      if p is pageId {
+        ret e
+      }
+    }
+    i = i + 1
+  }
+  ret noEntity()
+}
+
+func captureHeroSource(anim: mod HeroAnim, world: view UiWorld, key: view String) pub ret Bool {
+  let e: EntityId = findHeroEntity(world: world, key: key)
+  ret captureHeroSourceFromEntity(anim: anim, world: world, e: e)
+}
+
+# Page-scoped source capture — picks the hero whose owning PageRoot
+# matches `pageId`, then samples its WorldTransform / ComputedRect.
+# Returns `false` when no hero with that key lives on that page.
+func captureHeroSourceOnPage(anim: mod HeroAnim, world: view UiWorld, pageId: view String, key: view String) pub ret Bool {
+  let e: EntityId = findHeroEntityOnPage(world: world, pageId: pageId, key: key)
+  ret captureHeroSourceFromEntity(anim: anim, world: world, e: e)
+}
+
+func captureHeroSourceFromEntity(anim: mod HeroAnim, world: view UiWorld, e: view EntityId) ret Bool {
+  if isNone(this: e) {
+    ret false
+  }
+  if componentHas(this: world.worldTransforms, entity: e) is false {
+    ret false
+  }
+  if componentHas(this: world.computedRects, entity: e) is false {
+    ret false
+  }
+  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: e)
+  let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
+  anim.srcX = wt.position.x
+  anim.srcY = wt.position.y
+  anim.srcW = cr.size.x
+  anim.srcH = cr.size.y
+  anim.srcRadius = 0.0
+  if componentHas(this: world.cornerRadiuses, entity: e) {
+    let crCorner: CornerRadius = componentGet(this: world.cornerRadiuses, entity: e)
+    anim.srcRadius = crCorner.radius
+  }
+  if componentHas(this: world.sprites, entity: e) {
+    let sp: view Sprite => componentView(this: world.sprites, entity: e)
+    anim.textureKey = sp.textureKey
+    anim.tintR = sp.tint.r
+    anim.tintG = sp.tint.g
+    anim.tintB = sp.tint.b
+    anim.tintA = sp.tint.a
+  }
+  ret true
+}
+
+func captureHeroTarget(anim: mod HeroAnim, world: view UiWorld, key: view String) pub ret Bool {
+  let e: EntityId = findHeroEntity(world: world, key: key)
+  ret captureHeroTargetFromEntity(anim: anim, world: world, e: e)
+}
+
+# Page-scoped target capture — symmetric with `captureHeroSourceOnPage`.
+func captureHeroTargetOnPage(anim: mod HeroAnim, world: view UiWorld, pageId: view String, key: view String) pub ret Bool {
+  let e: EntityId = findHeroEntityOnPage(world: world, pageId: pageId, key: key)
+  ret captureHeroTargetFromEntity(anim: anim, world: world, e: e)
+}
+
+func captureHeroTargetFromEntity(anim: mod HeroAnim, world: view UiWorld, e: view EntityId) ret Bool {
+  if isNone(this: e) {
+    ret false
+  }
+  if componentHas(this: world.worldTransforms, entity: e) is false {
+    ret false
+  }
+  if componentHas(this: world.computedRects, entity: e) is false {
+    ret false
+  }
+  # Don't animate between two heroes that paint different textures.
+  # Both the source's Sprite (captured into `anim.textureKey` above)
+  # and the target's Sprite must reference the same registry key —
+  # otherwise the user sees one cover slide into position, then snap
+  # to a different cover at the endpoint (e.g. brat → poker face).
+  # Source-side textures rebound for Spotify mode are the common
+  # cause: the Library tile still shows the album stem while the
+  # player-page cover got rebound to `spotify-current`, so source
+  # and target heroes share the same key string but paint different
+  # images. Bail here and the caller skips `startHeroTransition`,
+  # so the screen change is instant instead of jarring.
+  if anim.textureKey.length() > 0 {
+    if componentHas(this: world.sprites, entity: e) {
+      let sp: view Sprite => componentView(this: world.sprites, entity: e)
+      if sp.textureKey is anim.textureKey is false {
+        ret false
+      }
+    }
+  }
+  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: e)
+  let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
+  anim.dstX = wt.position.x
+  anim.dstY = wt.position.y
+  anim.dstW = cr.size.x
+  anim.dstH = cr.size.y
+  anim.dstRadius = 0.0
+  if componentHas(this: world.cornerRadiuses, entity: e) {
+    let crCorner: CornerRadius = componentGet(this: world.cornerRadiuses, entity: e)
+    anim.dstRadius = crCorner.radius
+  }
+  ret true
+}
+
+func startHeroTransition(anim: mod HeroAnim, key: own String, durationSec: view Float, now: view Float64) pub {
+  anim.active = true
+  anim.key = key
+  anim.startTime = now
+  anim.duration = durationSec
+}
+
+# Toggle the hero entity's visibility for the duration of the hero
+# overlay paint. Mutates the entity's `Active` component (the
+# upstream input to the transform pass), NOT its WorldTransform —
+# WorldTransform.visible is recomputed from Active/fx/parent every
+# `systemIfDirty` call, so writing to it directly would be
+# stomped on the next frame. Active is what owners actually control.
+func setHeroVisible(world: mod UiWorld, key: view String, visible: view Bool) pub {
+  let e: EntityId = findHeroEntity(world: world, key: key)
+  setHeroVisibleForEntity(world: world, e: e, visible: visible)
+}
+
+# Page-scoped version — flips visibility on the hero matching `key`
+# under the given `pageId` only. With multiple pages mounted, two
+# hero entities can share the same key (e.g. album page + now-playing
+# page both have the rebound cover); this picks the right one.
+func setHeroVisibleOnPage(world: mod UiWorld, pageId: view String, key: view String, visible: view Bool) pub {
+  let e: EntityId = findHeroEntityOnPage(world: world, pageId: pageId, key: key)
+  setHeroVisibleForEntity(world: world, e: e, visible: visible)
+}
+
+# Hide via TransformFx.visible — the upstream input that the
+# transform pass routes into WorldTransform.visible (which the
+# render walk reads). Layout doesn't gate on fx.visible, so the
+# entity STAYS in the layout flow (its slot keeps its size, its
+# siblings don't shift) — only the paint is skipped. Mutating
+# Active here would have removed the entity from layout entirely.
+# Mutating WorldTransform.visible would get stomped on the next
+# transform pass since it's a derived field.
+func setHeroVisibleForEntity(world: mod UiWorld, e: view EntityId, visible: view Bool) {
+  if isNone(this: e) {
+    ret
+  }
+  if componentHas(this: world.transforms, entity: e) {
+    let fx: mod TransformFx => componentMod(this: world.transforms, entity: e)
+    fx.visible = visible
+  } else {
+    let fx: TransformFx = {
+      scaleX: 1.0
+      scaleY: 1.0
+      rotation: 0.0
+      alpha: 1.0
+      visible: visible
+      pivot: Vec2 { x: 0.5, y: 0.5 }
+      anchor: Vec2 { x: 0.5, y: 0.5 }
+    }
+    componentSet(this: world.transforms, entity: e, data: fx)
+  }
+}
+
+# Rename every HeroWidget whose key is `fromKey` to `toKey`, and
+# independently rename every Sprite whose `textureKey` is `fromKey`
+# to `toKey`. Use to bind a static scene-authored placeholder
+# (`"albumCover"`) to whichever concrete cover the user is
+# currently viewing — both hero entities (Album/NowPlaying cover
+# block) AND non-hero entities that show the same cover (e.g. the
+# mini-player thumbnail) update in one pass.
+#
+# The two walks are independent: a Sprite doesn't need to carry
+# HeroWidget to be rebound, and vice versa.
+func rebindHero(world: mod UiWorld, fromKey: view String, toKey: view String) pub {
+  # 1) Rename HeroWidget keys.
+  let nh: Int = componentCount(this: world.heroWidgets)
+  var i: Int = 0
+  loop i < nh {
+    let e: EntityId = componentEntityAt(this: world.heroWidgets, i: i)
+    let hw: HeroWidget = componentDataAt(this: world.heroWidgets, i: i)
+    if hw.key is fromKey {
+      # Force a fresh String allocation via interpolation. A direct
+      # `let copied: String = toKey` (toKey is `view String`) can
+      # alias the caller's String storage instead of deep-copying;
+      # the aliased pointer is then written into the world's table
+      # and dangles on the next rebuild, corrupting the HeroWidget
+      # / Sprite tables. Symptom: clicks return pressed=-1.
+      let copied: String = "{toKey}"
+      let renamed: HeroWidget = { key: copied }
+      componentSet(this: world.heroWidgets, entity: e, data: renamed)
+    }
+    i = i + 1
+  }
+
+  # 2) Rename Sprite.textureKey on every entity (independent of
+  #    HeroWidget). Catches both the hero entity's Sprite AND any
+  #    other widget (mini-player, headers, etc.) that shows the
+  #    same cover.
+  let ns: Int = componentCount(this: world.sprites)
+  var j: Int = 0
+  loop j < ns {
+    let se: EntityId = componentEntityAt(this: world.sprites, i: j)
+    let sp: Sprite = componentDataAt(this: world.sprites, i: j)
+    if sp.textureKey is fromKey {
+      # Same defensive fresh-allocation pattern as the HeroWidget
+      # loop above. See that comment for the rationale.
+      let copiedTex: String = "{toKey}"
+      let nsp: Sprite = {
+        textureKey: copiedTex
+        tint: sp.tint
+        scaleMode: sp.scaleMode
+        tileScale: sp.tileScale
+        nineSlice: sp.nineSlice
+        hasNineSlice: sp.hasNineSlice
+      }
+      componentSet(this: world.sprites, entity: se, data: nsp)
+    }
+    j = j + 1
+  }
+}
+
+# Cubic smoothstep: `t² · (3 − 2t)`. Linear-in-the-middle, soft at
+# both endpoints. Cheap, no `pow`/`exp` needed. Kept for callers that
+# specifically want the cubic flavor.
+func smoothstep(t: view Float) pub ret Float {
+  if t <= 0.0 {
+    ret 0.0
+  }
+  if t >= 1.0 {
+    ret 1.0
+  }
+  ret t * t * (3.0 - 2.0 * t)
+}
+
+# Quintic smoothstep ("smootherstep"): `6t⁵ − 15t⁴ + 10t³`. First and
+# second derivatives are zero at both endpoints, so motion eases in
+# and out more gently than cubic — better for hero transitions where
+# the eye fixates on the moving element.
+func smootherstep(t: view Float) pub ret Float {
+  if t <= 0.0 {
+    ret 0.0
+  }
+  if t >= 1.0 {
+    ret 1.0
+  }
+  let t3: Float = t * t * t
+  let t4: Float = t3 * t
+  let t5: Float = t4 * t
+  ret 6.0 * t5 - 15.0 * t4 + 10.0 * t3
+}
+
+func heroLerp(a: view Float, b: view Float, t: view Float) ret Float {
+  ret a + (b - a) * t
+}
+
+# Step the animation against the wall clock. Returns true while the
+# transition still has frames left to render. When it returns false
+# the host should put the new world back into its normal state
+# (set the hero's visible to true and stop calling renderHeroOverlay).
+func updateHeroAnim(anim: mod HeroAnim, now: view Float64) pub ret Bool {
+  if anim.active is false {
+    ret false
+  }
+  let elapsed: Float = (now - anim.startTime) as Float
+  if elapsed >= anim.duration {
+    anim.active = false
+    ret false
+  }
+  ret true
+}
+
+# Paint the hero at its interpolated rect. Designed to be called AFTER
+# `renderSystem` so the overlay sits on top of the destination
+# world's render. Single draw call, no extra entities allocated.
+func renderHeroOverlay(anim: view HeroAnim, reg: view TextureRegistry, now: view Float64) pub {
+  if anim.active is false {
+    ret
+  }
+  let raw: Float = ((now - anim.startTime) / anim.duration) as Float
+  let t: Float = smootherstep(t: raw)
+  let x: Float = heroLerp(a: anim.srcX, b: anim.dstX, t: t)
+  let y: Float = heroLerp(a: anim.srcY, b: anim.dstY, t: t)
+  let w: Float = heroLerp(a: anim.srcW, b: anim.dstW, t: t)
+  let h: Float = heroLerp(a: anim.srcH, b: anim.dstH, t: t)
+  if textureHas(reg: reg, key: anim.textureKey) is false {
+    ret
+  }
+  let tex: Texture = textureGet(reg: reg, key: anim.textureKey)
+
+  # Mirror paintSprite's contain-fit scaling so the texture's aspect
+  # is preserved while it fills the interpolated rect.
+  var scaleX: Float = 1.0
+  var scaleY: Float = 1.0
+  if tex.width > 0 {
+    scaleX = w / tex.width.toFloat()
+  }
+  if tex.height > 0 {
+    scaleY = h / tex.height.toFloat()
+  }
+  var scale: Float = scaleX
+  if scaleY < scale {
+    scale = scaleY
+  }
+  if scale <= 0.0 {
+    scale = 1.0
+  }
+  let drawW: Float = tex.width.toFloat() * scale
+  let drawH: Float = tex.height.toFloat() * scale
+  let offX: Float = (w - drawW) / 2.0
+  let offY: Float = (h - drawH) / 2.0
+
+  let tint: Color = {
+    r: anim.tintR
+    g: anim.tintG
+    b: anim.tintB
+    a: anim.tintA
+  }
+
+  # Corner-radius lerp. Same eased `t` as the rect, so the radius
+  # tracks the size — a 12px library tile growing into a 360px album
+  # hero arrives at the album's authored radius exactly when the rect
+  # arrives at its dst. If either endpoint has no `CornerRadius`,
+  # `srcRadius` / `dstRadius` are 0.0 and the shader is skipped only
+  # at that endpoint (radius ≤ 0 → sharp).
+  let radius: Float = heroLerp(a: anim.srcRadius, b: anim.dstRadius, t: t)
+  let useRounded: Bool = radius > 0.0
+  if useRounded {
+    roundedSpriteBegin(width: drawW, height: drawH, radius: radius)
+  }
+  drawTextureEx(
+    texture: tex
+    pos: Vector2 { x: x + offX, y: y + offY }
+    rotation: 0.0
+    scale: scale
+    tint: tint
+  )
+  if useRounded {
+    roundedSpriteEnd()
+  }
+}
