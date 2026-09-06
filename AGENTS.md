@@ -41,9 +41,14 @@ These instructions define **how Codex should work**, communicate progress, and i
 - The import separator is `/` (never `.`): `import ui/renderSystem/RenderSystem`,
   `open ecs/hierarchySystem/HierarchySystem`. The program entry file is the
   `Main` module — `Main.rae`.
+- **There is no lowercase-file exception any more: EVERY `.rae` file is
+  PascalCase.** `core` used to be the one lowercase module; it is now the
+  package `lib/core/` (`Core.rae`, `List.rae`, `StringMap.rae`, `IntMap.rae`),
+  a camelCase folder with PascalCase files like every other package. It is
+  still the prelude — auto-loaded and auto-opened, so `log(x)` and `List` are
+  bare-callable with no import — but the folder name being `core` is just the
+  normal camelCase-package rule, not a special case (#818).
 - Exceptions that keep their existing spelling:
-  - `core` stays lowercase — it is the prelude (auto-loaded and special-cased in
-    the compiler), not a normal module.
   - Number-prefixed example/test directories (`106_*`, `414_*`, `550_*`) are a
     separate bucket scheme, not packages, and keep their names.
   - Non-module data on disk is not a module and is not renamed: shader assets

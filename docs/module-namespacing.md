@@ -28,12 +28,12 @@ becomes the first argument. Namespace qualification and UFCS are **orthogonal**:
 A module-level **`const`/`let`** is reachable the same qualified way:
 
 ```rae
-keys.keyW            # the module's const, resolved to its value
-const restart: Int = keys.keyR   # also valid in a const initializer (folds to the literal)
+Keys.keyW            # the module's const, resolved to its value
+const restart: Int = Keys.keyR   # also valid in a const initializer (folds to the literal)
 ```
 
-`namespace.value` resolves to the named global; a same-named *function* (e.g.
-core's `keys()` on a map) does not shadow it, since `keys.keyW` cannot be a call.
+`Module.value` resolves to the named global; a same-named *function* does not
+shadow it, since `Keys.keyW` cannot be a call.
 A genuine value binding of the same name in scope does win.
 
 This works the same for a lib module and for a project sibling (`Pal.shade`
@@ -54,8 +54,12 @@ under the project root is compiled and mutually visible to every other project
 file, with **no `import`/`open`** — across any subfolder depth. Moving a file
 into a subfolder never creates an import boundary or changes its visibility.
 `import`/`open` are for **`lib/` / external** packages only. The prelude
-(`core`, `string`, `math`, `io`, `sys`, `list2`, `list2_int`) stays
-auto-loaded and bare-callable, unchanged.
+stays auto-loaded and bare-callable, unchanged: the `core/` package
+(`core/Core`, `core/List`, `core/StringMap`, `core/IntMap`) plus `String`,
+`Math`, `Io`, `Sys` and `List2`. `core` is a normal camelCase folder-package
+now (#818) — a package prelude entry auto-opens its whole folder, so `log`,
+`List` and the maps are bare-callable with no import.
+
 
 **Project root.** The tree is scanned from the project root. `--project <dir>`
 sets that root explicitly, so an entry deep in the tree still sees the whole
@@ -66,7 +70,7 @@ rae run --project game game/ui/hud.rae   # hud.rae sees every file under game/
 ```
 
 Without `--project`, the scan roots at the entry file's own directory. (The
-separate lib-marker root — the nearest ancestor containing `lib/core.rae`, used
+separate lib-marker root — the nearest ancestor containing `lib/core/Core.rae`, used
 to resolve `lib/` imports — is *not* the scan root, so it never drags unrelated
 files in.)
 
