@@ -78,8 +78,9 @@ These instructions define **how Codex should work**, communicate progress, and i
   world, s: state)` puts a meaningless label in front of a meaningful value;
   `syncUi(world: world, state: state)` reads. A one-letter parameter makes the
   language's best readability feature carry no information.
-- Loop counters (`i`, `j`) and genuinely conventional maths (`x`, `y`, `dt`) are
-  fine — those names ARE the meaning.
+- Loop counters (`i`, `j`) and genuinely conventional maths coordinates (`x`,
+  `y`, `z`, `w`) are fine — those names ARE the meaning. (`dt` is NOT — spell it
+  `deltaTime`; see the no-abbreviations rule below.)
 - Not yet swept through existing code. Fix it in files you are already editing;
   do not open a mass rename.
 
@@ -107,17 +108,40 @@ These instructions define **how Codex should work**, communicate progress, and i
   initialisms (`gpu`, `cpu`, `api`, `json`, `html`, `css`, `url`, `uri`, `http`,
   `png`, `wgsl`, `sdf`), the colour initialisms tied to the already-allowed
   `r`/`g`/`b`/`a` (`rgb`, `rgba`, `hsl`), and the dimensional tags `2d`/`3d`
-  (`World3d`, `Gpu2d`). Plus the maths names already blessed above:
-  `x`/`y`/`z`/`w`, `r`/`g`/`b`/`a`, `dt`, and loop `i`/`j`.
+  (`World3d`, `Gpu2d`). Plus the maths coordinates already blessed above
+  (`x`/`y`/`z`/`w`, `r`/`g`/`b`/`a`) and loop counters `i`/`j`.
   - **Case an initialism as an ordinary word** (the PascalCase/camelCase rule
     still applies): `Ui`, `Id`, `Gpu`, `Json`, `Html`, `Url` — NEVER `UI`, `ID`,
     `GPU`, `JSON`, `HTML`. So `EntityId` and `Gpu2d`, not `EntityID` / `GPU2D`.
   - This is a **CLOSED set of real names, not a licence for short names.** It
     does NOT reopen ad-hoc contractions: `cam`, `ctx`, `cfg`, `tmp`, `btn`,
     `msg`, `idx`, `elem` are still banned — they abbreviate a WORD, they are not
-    the thing's name. And `io` is NOT on the list: even genuine input/output is
-    spelled `input`/`output`, because `io` is ambiguous (stream I/O vs an
-    input-system state) — exactly the trap above.
+    the thing's name. Two specific bans worth calling out: `io` (spell the intent
+    — `input`/`output`; `io` reads as stream I/O AND was misused for an
+    input-system state) and `dt` (spell it `deltaTime`; it abbreviates the two
+    words "delta time", it is not an initialism-name).
+  - **The allowed set and its EXACT spelling** (casing follows the
+    PascalCase-type / camelCase-everything-else rule — the initialism is one
+    word, only its first letter capitalises in a type):
+
+    | concept | camelCase (value) | PascalCase (in a type) |
+    |---|---|---|
+    | user interface | `ui`, `uiWorld` | `Ui`, `UiSystem`, `UiWorld` |
+    | identifier | `id`, `nodeId` | `Id`, `EntityId` |
+    | 2D / 3D | `world2d`, `gpu3d` | `World2d`, `Gpu3d` |
+    | GPU / CPU | `gpu`, `cpu` | `Gpu`, `Cpu` |
+    | API | `api` | `Api` |
+    | JSON | `json` | `Json` |
+    | HTML / CSS | `html`, `css` | `Html`, `Css` |
+    | URL / URI | `url`, `uri` | `Url`, `Uri` |
+    | HTTP | `http` | `Http` |
+    | PNG | `png` | `Png` |
+    | WGSL | `wgsl` | `Wgsl` |
+    | SDF | `sdf` | `Sdf` |
+    | RGB / RGBA / HSL | `rgb`, `rgba`, `hsl` | `Rgb`, `Rgba`, `Hsl` |
+
+    Maths coordinates `x`/`y`/`z`/`w`, colour channels `r`/`g`/`b`/`a`, and loop
+    counters `i`/`j` stay single-letter (those letters ARE the meaning).
 - Same phasing as the single-letter rule: fix it in files you are already
   editing; do not open a mass rename of unrelated code.
 

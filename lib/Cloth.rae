@@ -190,8 +190,8 @@ func constrain(c: mod Cloth, i: copy Int, j: copy Int, rest: copy Float) {
 
 # Advance one step: Verlet integrate the free particles under gravity + `wind`, then relax
 # the structural + shear constraints. dt is clamped so a frame hitch can't explode it.
-func step(c: mod Cloth, dt: copy Float, windX: copy Float, windY: copy Float, windZ: copy Float) {
-  var h: Float = dt
+func step(c: mod Cloth, deltaTime: copy Float, windX: copy Float, windY: copy Float, windZ: copy Float) {
+  var h: Float = deltaTime
   if h > 0.02 { h = 0.02 }
   if h <= 0.0 { ret }
   let h2: Float = h * h

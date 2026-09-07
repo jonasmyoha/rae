@@ -38,8 +38,8 @@ func emitSplashAt(sys: mod ParticleSystem, x: copy Float, y: copy Float, waterZ:
 }
 
 # Advance + emit splashes for everything wading this frame. Call once per frame.
-func splashStep(characterSystem: mod CharacterSystem, splashes: mod ParticleSystem, world: mod GameWorld, dt: copy Float) {
-  particleUpdate(sys: splashes, dt: dt)
+func splashStep(characterSystem: mod CharacterSystem, splashes: mod ParticleSystem, world: mod GameWorld, deltaTime: copy Float) {
+  particleUpdate(sys: splashes, deltaTime: deltaTime)
   world.splashTick = world.splashTick + 1
   # The flat water plane in WORLD space — every splash sprays up from HERE, not
   # from the unit's (ground-relative, chest-high) position z.

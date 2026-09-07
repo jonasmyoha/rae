@@ -89,22 +89,22 @@ func spawnLineClearParticles(w: mod World, row: view Int) {
 # Update + cull active particles. Main's fixed-step accumulator drives this
 # exactly at 60 Hz, independently from the deferred render rate.
 func particleSystem(w: mod World) {
-  let dt: Float = 0.016
+  let deltaTime: Float = 0.016
   var i: Int = 0
   loop i < maxParticles {
     let p: Particle = rae_ext_rae_buf_get(buf: w.particles.data, index: i)
     if p.active {
-      let newLife: Float = p.life - dt
+      let newLife: Float = p.life - deltaTime
       if newLife <= 0.0 {
         let dead: Particle = makeEmptyParticle()
         let particles: mod List(Particle) => w.particles
         particles.set(index: i, value: dead)
       } else {
-        let nx: Float = p.px + p.vx * dt
-        let ny: Float = p.py + p.vy * dt
-        let nz: Float = p.pz + p.vz * dt
+        let nx: Float = p.px + p.vx * deltaTime
+        let ny: Float = p.py + p.vy * deltaTime
+        let nz: Float = p.pz + p.vz * deltaTime
         # Simple gravity.
-        let nvy: Float = p.vy - 9.8 * dt
+        let nvy: Float = p.vy - 9.8 * deltaTime
         let updated: Particle = {
           active: true
           px: nx
