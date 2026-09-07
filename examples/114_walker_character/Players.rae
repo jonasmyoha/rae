@@ -8,7 +8,7 @@
 # a remote player's control would arrive via net.rae instead of a device.
 #
 # Example-114 files are siblings that merge into one module, so this resolves the
-# App/CharacterState types cross-file without importing them.
+# App/CharacterSystem types cross-file without importing them.
 import Keys
 open ecs/Entity
 
@@ -37,7 +37,7 @@ func rosterControlledIsHero(roster: view PlayerRoster) ret Bool {
   ret roster.controlledIndex is 0
 }
 
-# The crowd-member index (into CharacterState.crowd) the local player controls,
+# The crowd-member index (into CharacterSystem.crowd) the local player controls,
 # or -1 when the hero is controlled.
 func rosterControlledCrowdIndex(roster: view PlayerRoster) ret Int {
   if roster.controlledIndex is 0 { ret 0 - 1 }
@@ -48,7 +48,7 @@ func rosterControlledCrowdIndex(roster: view PlayerRoster) ret Int {
 # entity, or the crowd member entity for the controlled index. This is the
 # roster's ECS view — the same kind of character-entity handle a NetPlayer
 # points at via `controlled`, so local and remote control resolve identically.
-func rosterControlledEntity(players: view PlayerRoster, character: view CharacterState) ret EntityId {
+func rosterControlledEntity(players: view PlayerRoster, character: view CharacterSystem) ret EntityId {
   if rosterControlledIsHero(roster: players) { ret character.heroEntity }
   let idx: Int = rosterControlledCrowdIndex(roster: players)
   if let entity: EntityId = character.crowdEntities.copyAt(index: idx) { ret entity }

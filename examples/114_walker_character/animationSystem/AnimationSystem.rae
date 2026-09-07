@@ -3,7 +3,7 @@
 # of the old character.rae + poseCharacterPalette from render.rae (#743). Also
 # holds the small character-load helpers and the camera focus heights (where the
 # camera looks on the character). Takes narrow state — a controller, or the
-# CharacterState skeleton — not the App.
+# CharacterSystem skeleton — not the App.
 import Math
 import Vec3
 open Scene3d
@@ -67,7 +67,7 @@ func walkerIntAt(values: view List(Int), index: view Int) ret Int {
 # (#547). Used to build a DISTINCT pose per crowd member — the skeleton is scratch
 # here, re-posed each call; the hero's palette is built separately, before this
 # runs, so re-posing does not disturb it.
-func poseCharacterPalette(character: mod CharacterState, clipIndex: copy Int, animTime: copy Float) ret List(Float) {
+func poseCharacterPalette(character: mod CharacterSystem, clipIndex: copy Int, animTime: copy Float) ret List(Float) {
   applySkeletonPose(sk: character.skeleton, pose: character.bindPose)
   match clipIndex {
     case ClipKind.idle { applyClip(sk: character.skeleton, c: character.idleClip, time: animTime) }
