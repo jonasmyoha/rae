@@ -8,6 +8,7 @@ const disabledTestsInput = document.getElementById("disabled-tests-input");
 const includeExamplesToggle = document.getElementById("include-examples-toggle");
 const parallelTestsToggle = document.getElementById("parallel-tests-toggle");
 const testStatusChip = document.getElementById("test-status-chip");
+const testTimer = document.getElementById("test-timer");
 const testLog = document.getElementById("test-log");
 const buildStatusChip = document.getElementById("build-status-chip");
 const buildLog = document.getElementById("build-log");
@@ -615,6 +616,7 @@ function handleTestRunStarted(event) {
   latestRunId = event.runId;
   lastTestTargetLabel = event.targetLabel;
   setTestStatus(`Running (${event.mode})`, "is-running", event.targetLabel);
+  startTestTimer();
   setTestButtonsDisabled(true);
   clearTestLog();
   allTestLogLines = [];
@@ -657,6 +659,7 @@ function handleTestRunCompleted(event) {
   const duration = (event.durationMs / 1000).toFixed(1);
   const status = event.success ? "passed" : "failed";
   lastTestTargetLabel = event.targetLabel;
+  stopTestTimer(event.durationMs, event.success);
   setTestStatus(`${status} in ${duration}s`, event.success ? "is-success" : "is-failure", event.targetLabel);
   appendTestLine(
     `● [${event.targetLabel}] Test run finished (exit ${event.exitCode ?? "unknown"}) in ${duration}s`,
@@ -696,6 +699,7 @@ function handleBuildRunCompleted(event) {
 
 function handleTestRunError(event) {
   lastTestTargetLabel = event.targetLabel;
+  stopTestTimer(null, false);
   setTestStatus("error", "is-failure", event.targetLabel);
   appendTestLine(`⚠ [${event.targetLabel}] ${event.message}`, "stderr");
   setTestButtonsDisabled(false);
@@ -1128,6 +1132,47 @@ function setTestStatus(label, modifierClass, targetLabel) {
   if (modifierClass) {
     testStatusChip.classList.add(modifierClass);
   }
+}
+
+// --- Test-run elapsed timer (#846) -----------------------------------------
+// A big count-up readout while a run is in flight; freezes at the run's real
+// duration when it finishes. Driven by the same run-started/completed events as
+// the status chip, so it works for dashboard AND agent/CLI runs (the log
+// tailer bridges those in as external runs).
+let testTimerInterval = null;
+let testTimerStart = 0;
+
+function formatElapsed(ms) {
+  const totalSeconds = ms / 1000;
+  if (totalSeconds < 60) return `${totalSeconds.toFixed(1)}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = Math.floor(totalSeconds % 60);
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function setTestTimerText(ms) {
+  if (testTimer) testTimer.textContent = formatElapsed(ms);
+}
+
+function startTestTimer() {
+  if (!testTimer) return;
+  if (testTimerInterval) clearInterval(testTimerInterval);
+  testTimerStart = Date.now();
+  testTimer.dataset.state = "running";
+  setTestTimerText(0);
+  testTimerInterval = setInterval(() => {
+    setTestTimerText(Date.now() - testTimerStart);
+  }, 100);
+}
+
+// finalMs: the run's authoritative duration from the completed event. success:
+// true/false to colour the frozen readout; null leaves it neutral (e.g. error).
+function stopTestTimer(finalMs, success) {
+  if (!testTimer) return;
+  if (testTimerInterval) { clearInterval(testTimerInterval); testTimerInterval = null; }
+  const ms = Number.isFinite(finalMs) ? finalMs : (testTimerStart ? Date.now() - testTimerStart : 0);
+  setTestTimerText(ms);
+  testTimer.dataset.state = success === true ? "success" : success === false ? "failure" : "idle";
 }
 
 function clearTestLog() {
