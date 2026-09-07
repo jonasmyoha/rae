@@ -148,10 +148,10 @@ func renderGbufferPass(cache: mod GbufferCache, cameraSystem: mod CameraSystem, 
     drawSkinnedInstances(cache: cache, batch: characterSystem.crowdBatch)
   }
   grassDraw(grass: grassCompute)
-  # Water splashes for anything wading this frame (#84): advance + emit, then draw
-  # the droplets as instanced cubes into this same G-buffer pass (particles.rae).
+  # Water splashes for anything wading this frame (#84): advance + emit here; the
+  # droplets are DRAWN later, at the transparentForward tag, as alpha-fading
+  # cubes (#844) — they no longer go into this G-buffer pass.
   splashStep(characterSystem: characterSystem, splashes: splashes, world: world, deltaTime: deltaTime)
-  particleDraw(sys: splashes, toon: characterSystem.toon)
   Gbuffer.endPass()
 }
 
@@ -240,6 +240,8 @@ func renderApp(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSys
                                 camera: cameraSystem.camera, light: cameraSystem.light, aspect: aspect)
       }
       case RenderTag.transparentForward {
+        # Splash droplets fade by alpha through the transparent pass (#844).
+        particleDraw(sys: splashes, transparent: renderSystem.renderer.passes.transparent)
         renderDeferredPassWorld(renderer: renderSystem.renderer, tag: tag, world: emptyWorld,
                                 camera: cameraSystem.camera, light: cameraSystem.light, aspect: aspect)
       }
