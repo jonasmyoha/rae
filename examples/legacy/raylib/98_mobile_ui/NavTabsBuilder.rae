@@ -240,12 +240,12 @@ func mountBackButtonOverlay(world: mod UiWorld, state: view AppState) pub ret En
   }
   let size: Float = 56.0
   let margin: Float = 16.0
-  let btn: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: btn, w: size, h: size)
+  let button: EntityId = createEntity(world: world)
+  setRectFixed(world: world, entity: button, w: size, h: size)
   var copiedId: String = ""
   copiedId = copiedId.concat(other: backButtonPageId)
   let pr: PageRoot = { id: own copiedId }
-  componentSet(this: world.pageRoots, entity: btn, data: own pr)
+  componentSet(this: world.pageRoots, entity: button, data: own pr)
   # Slightly transparent dark fill so background content stays
   # legible underneath. Alpha 180 ≈ 70 % opaque — readable
   # contrast in both light and dark themes.
@@ -258,12 +258,12 @@ func mountBackButtonOverlay(world: mod UiWorld, state: view AppState) pub ret En
     strokeWidth: 0.0
     radius: 0.0
   }
-  componentSet(this: world.shapes, entity: btn, data: sh)
+  componentSet(this: world.shapes, entity: button, data: sh)
   let layS: LayoutType = LayoutType.stack
   let alignC: AlignKind = AlignKind.center
-  setLayout(world: world, entity: btn, kind: layS, gap: 0.0, alignCross: alignC)
+  setLayout(world: world, entity: button, kind: layS, gap: 0.0, alignCross: alignC)
   let backAction: String = "nav.back"
-  setOnClick(world: world, entity: btn, actionId: backAction)
+  setOnClick(world: world, entity: button, actionId: backAction)
 
   let iconSize: Float = 32.0
   let icon: EntityId = createEntity(world: world)
@@ -274,15 +274,15 @@ func mountBackButtonOverlay(world: mod UiWorld, state: view AppState) pub ret En
 
   let kids: List(EntityId) = createList(EntityId, cap: 1)
   kids.add(value: icon)
-  attachChildren(world: world, parent: btn, kids: kids)
+  attachChildren(world: world, parent: button, kids: kids)
 
   let off: Offset = { delta: Vec2 { x: margin, y: margin } }
-  componentSet(this: world.offsets, entity: btn, data: off)
+  componentSet(this: world.offsets, entity: button, data: off)
   # Back button sits on its own layer above the dock — page content
   # can't paint over it, and the dock can't paint over it either.
   let backLayerId: String = "back-button"
-  setLayerById(world: world, entity: btn, id: backLayerId)
-  ret btn
+  setLayerById(world: world, entity: button, id: backLayerId)
+  ret button
 }
 
 # Build the nav-tabs bar as a dock child. Same Rect / Layout / styling
