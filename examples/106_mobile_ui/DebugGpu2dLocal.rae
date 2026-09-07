@@ -433,12 +433,12 @@ func attachKids(world: mod UiWorld, parent: view EntityId, kids: view List(Entit
 }
 
 func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret EntityId {
-  let btn: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: btn, w: debug.buttonSize, h: debug.buttonSize)
-  setOffset(world: world, entity: btn, x: debug.buttonX, y: debug.buttonY)
-  setCircleShape(world: world, entity: btn, fill: amberColor())
-  setStackLayout(world: world, entity: btn)
-  setOnClickAction(world: world, entity: btn, actionId: debugActionToggleMenu)
+  let button: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: button, w: debug.buttonSize, h: debug.buttonSize)
+  setOffset(world: world, entity: button, x: debug.buttonX, y: debug.buttonY)
+  setCircleShape(world: world, entity: button, fill: amberColor())
+  setStackLayout(world: world, entity: button)
+  setOnClickAction(world: world, entity: button, actionId: debugActionToggleMenu)
 
   let label: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: label, w: debug.buttonSize, h: debugButtonTextH)
@@ -446,16 +446,16 @@ func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret EntityId 
   setDebugText(world: world, entity: label, text: "D", styleId: "debugButtonSmall")
   let kids: List(EntityId) = createList(EntityId, cap: 1)
   kids.add(value: label)
-  attachKids(world: world, parent: btn, kids: kids)
-  ret btn
+  attachKids(world: world, parent: button, kids: kids)
+  ret button
 }
 
 func buildDebugIconButton(world: mod UiWorld) ret EntityId {
-  let btn: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: btn, w: debugCloseIconSize, h: debugCloseIconSize)
-  setRoundedShape(world: world, entity: btn, fill: colorByName(theme: world.theme.active, name: "outline"), radius: debugCloseIconSize / 2.0)
-  setStackLayout(world: world, entity: btn)
-  setOnClickAction(world: world, entity: btn, actionId: debugActionDismiss)
+  let button: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: button, w: debugCloseIconSize, h: debugCloseIconSize)
+  setRoundedShape(world: world, entity: button, fill: colorByName(theme: world.theme.active, name: "outline"), radius: debugCloseIconSize / 2.0)
+  setStackLayout(world: world, entity: button)
+  setOnClickAction(world: world, entity: button, actionId: debugActionDismiss)
 
   let icon: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: icon, w: debugCloseIconGlyph, h: debugCloseIconGlyph)
@@ -463,16 +463,16 @@ func buildDebugIconButton(world: mod UiWorld) ret EntityId {
   setDebugSprite(world: world, entity: icon, key: "mat:close", tint: colorByName(theme: world.theme.active, name: "textPrimary"))
   let kids: List(EntityId) = createList(EntityId, cap: 1)
   kids.add(value: icon)
-  attachKids(world: world, parent: btn, kids: kids)
-  ret btn
+  attachKids(world: world, parent: button, kids: kids)
+  ret button
 }
 
 func buildDebugCloseButton(world: mod UiWorld) ret EntityId {
-  let btn: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: btn, w: debugCloseButtonW, h: debugCloseButtonH)
-  setRoundedShape(world: world, entity: btn, fill: colorByName(theme: world.theme.active, name: "accent"), radius: debugCloseButtonRadius)
-  setStackLayout(world: world, entity: btn)
-  setOnClickAction(world: world, entity: btn, actionId: debugActionDismiss)
+  let button: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: button, w: debugCloseButtonW, h: debugCloseButtonH)
+  setRoundedShape(world: world, entity: button, fill: colorByName(theme: world.theme.active, name: "accent"), radius: debugCloseButtonRadius)
+  setStackLayout(world: world, entity: button)
+  setOnClickAction(world: world, entity: button, actionId: debugActionDismiss)
 
   let label: EntityId = createEntity(world: world)
   setFixedRect(world: world, entity: label, w: debugCloseButtonW, h: debugCloseTextH)
@@ -480,8 +480,8 @@ func buildDebugCloseButton(world: mod UiWorld) ret EntityId {
   setDebugText(world: world, entity: label, text: "Close", styleId: "debugCloseButton")
   let kids: List(EntityId) = createList(EntityId, cap: 2)
   kids.add(value: label)
-  attachKids(world: world, parent: btn, kids: kids)
-  ret btn
+  attachKids(world: world, parent: button, kids: kids)
+  ret button
 }
 
 func buildDebugMenuTitle(world: mod UiWorld, panelW: view Float) ret EntityId {
@@ -642,8 +642,8 @@ func applyDebugAnchor(world: view UiWorld, debug: mod DebugSystem) ret Bool {
 
 func addDebugLayer(world: mod UiWorld, debug: mod DebugSystem) pub {
   let hasAnchor: Bool = applyDebugAnchor(world: world, debug: debug)
-  let btn: EntityId = buildDebugButton(world: world, debug: debug)
-  setLayerById(world: world, entity: btn, id: "debug")
+  let button: EntityId = buildDebugButton(world: world, debug: debug)
+  setLayerById(world: world, entity: button, id: "debug")
   if debug.menuOpen {
     let menu: EntityId = buildDebugMenuOverlay(world: world, debug: debug)
     setLayerById(world: world, entity: menu, id: "debug")
@@ -778,14 +778,14 @@ func drawDebugLabelsGpu2d(debug: view DebugSystem, font: view SdfFont) {
   if debug.showInputOutlines {
     var lb: Int = 0
     if Gpu2d.pointerDown() { lb = 1 }
-    let btnText: String = "btn: {lb}"
-    let btnY: Float = memY + lineH + 4.337349397590361
-    var btnX: Float = debug.buttonX
+    let buttonText: String = "button: {lb}"
+    let buttonY: Float = memY + lineH + 4.337349397590361
+    var buttonX: Float = debug.buttonX
     if rightAligned {
       let rightEdge: Float = debug.buttonX + debug.buttonSize
-      btnX = rightEdge - btnText.length().toFloat() * fontSize * 0.52
+      buttonX = rightEdge - buttonText.length().toFloat() * fontSize * 0.52
     }
-    Gpu2dText.drawText(font: font, text: btnText, x: btnX, y: btnY, sizePx: fontSize, color: amber)
+    Gpu2dText.drawText(font: font, text: buttonText, x: buttonX, y: buttonY, sizePx: fontSize, color: amber)
   }
 }
 
