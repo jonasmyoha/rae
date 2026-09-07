@@ -21,7 +21,7 @@ instance once (`addTransparentInstance(cache, mesh, transform, r, g, b,
 alpha)` — alpha rides in the record's metallic slot, unused by an unlit blend)
 and the pass issues one instanced DrawIndexed per frame into `gb_lit_view`
 (loadOp Load) with the G-buffer depth attached read-only. Unlit by design;
-shading is the client's (water #830, particles #844). Verified on hardware
+shading is the client's (water #830; particles landed in #844). Verified on hardware
 (not just non-blank): translucent cubes blend over the walker/terrain, are cut
 off by opaque geometry in front, and are clipped where they sink into the
 terrain. Note for clients: readiness is `gbMeshIcount > 0`, NOT `gbMeshReady`
@@ -240,8 +240,11 @@ the existing bindings.
 **Phase 0 — the transparent forward pass (prerequisite, not water).**
 DONE: the `transparentForward` node (#842) and its GPU pass (#843) — read
 depth + hdrColor copy, alpha-blend into hdrColor, between `lighting` and
-`taa`. Remaining validation: the walker's splash particles switched from
-"shrink" to real alpha fade (#844) and an isolated screenshot case (#845).
+`taa`. The walker's splash particles are its first client (#844):
+`lib/Particles.rae` now queues each droplet as a constant-size cube with
+alpha = remaining-life fraction, drawn at the transparentForward tag instead
+of shrinking in the G-buffer — the #829 validation. Remaining: an isolated
+screenshot case (#845).
 
 **Phase 1 — stylized toon water (mobile-first). Do this first; it is the
 biggest visible win for the least code.** Port the Roystan recipe to WGSL:
