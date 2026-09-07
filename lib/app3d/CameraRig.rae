@@ -276,7 +276,7 @@ func clampRigPitch(rig: view CameraRig, pitch: view Float) pub ret Float {
 const rigSmoothEpsilon: Float = 0.00001
 
 func smoothTowards(current: view Float, target: view Float,
-                   rate: view Float, dt: view Float) pub ret Float {
+                   rate: view Float, deltaTime: view Float) pub ret Float {
   if rate <= 0.0 {
     ret target
   }
@@ -284,7 +284,7 @@ func smoothTowards(current: view Float, target: view Float,
   if gap < rigSmoothEpsilon and gap > 0.0 - rigSmoothEpsilon {
     ret target
   }
-  ret target - gap * Math.exp(x: 0.0 - rate * dt)
+  ret target - gap * Math.exp(x: 0.0 - rate * deltaTime)
 }
 
 # Which rate the rotation and zoom easing runs at. Those quantities are
@@ -386,7 +386,7 @@ func toggleCameraRigMode(rig: mod CameraRig, camera: mod Camera3d) pub {
 # a button does not also spin the camera. Note that it gates the KEYBOARD
 # too: a text field would otherwise steer the view while being typed in.
 func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
-                     allowInput: view Bool, dt: view Float) pub ret Bool {
+                     allowInput: view Bool, deltaTime: view Float) pub ret Bool {
   let yaw0: Float = rig.yaw
   let orbitPitch0: Float = rig.orbitPitch
   let freePitch0: Float = rig.freePitch
@@ -441,14 +441,14 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
     mouseDist = 0.0 - Gpu2d.wheelMove() * rig.wheelSpeed
     let boost: Float = speedScale()
     if rig.mode is CameraRigMode.orbit {
-      if Sdl3.isKeyDown(key: Keys.keyW) { keyDist = keyDist - dt * rig.moveSpeed * boost }
-      if Sdl3.isKeyDown(key: Keys.keyS) { keyDist = keyDist + dt * rig.moveSpeed * boost }
-      if Sdl3.isKeyDown(key: Keys.keyA) { keyYaw = keyYaw - dt * rig.keyTurnSpeed }
-      if Sdl3.isKeyDown(key: Keys.keyD) { keyYaw = keyYaw + dt * rig.keyTurnSpeed }
-      if Sdl3.isKeyDown(key: Keys.keyQ) { keyOrbitPitch = keyOrbitPitch - dt * rig.keyTurnSpeed }
-      if Sdl3.isKeyDown(key: Keys.keyE) { keyOrbitPitch = keyOrbitPitch + dt * rig.keyTurnSpeed }
+      if Sdl3.isKeyDown(key: Keys.keyW) { keyDist = keyDist - deltaTime * rig.moveSpeed * boost }
+      if Sdl3.isKeyDown(key: Keys.keyS) { keyDist = keyDist + deltaTime * rig.moveSpeed * boost }
+      if Sdl3.isKeyDown(key: Keys.keyA) { keyYaw = keyYaw - deltaTime * rig.keyTurnSpeed }
+      if Sdl3.isKeyDown(key: Keys.keyD) { keyYaw = keyYaw + deltaTime * rig.keyTurnSpeed }
+      if Sdl3.isKeyDown(key: Keys.keyQ) { keyOrbitPitch = keyOrbitPitch - deltaTime * rig.keyTurnSpeed }
+      if Sdl3.isKeyDown(key: Keys.keyE) { keyOrbitPitch = keyOrbitPitch + deltaTime * rig.keyTurnSpeed }
     } else if rig.mode is CameraRigMode.free {
-      let step: Float = dt * rig.moveSpeed * boost
+      let step: Float = deltaTime * rig.moveSpeed * boost
       let forward: Vec3 = cameraRigForward(rig: rig)
       let right: Vec3 = right(rig: rig)
       let up: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
@@ -490,17 +490,17 @@ func updateCameraRig(rig: mod CameraRig, camera: mod Camera3d,
   # Close whatever gap the smoothed sources left. With both toggles off
   # every gap is already zero and each of these is the identity.
   let rotRate: Float = rigRotationRate(rig: rig)
-  rig.viewYaw = smoothTowards(current: rig.viewYaw, target: rig.yaw, rate: rotRate, dt: dt)
-  rig.viewOrbitPitch = smoothTowards(current: rig.viewOrbitPitch, target: rig.orbitPitch, rate: rotRate, dt: dt)
-  rig.viewFreePitch = smoothTowards(current: rig.viewFreePitch, target: rig.freePitch, rate: rotRate, dt: dt)
-  rig.viewDistance = smoothTowards(current: rig.viewDistance, target: rig.distance, rate: rotRate, dt: dt)
+  rig.viewYaw = smoothTowards(current: rig.viewYaw, target: rig.yaw, rate: rotRate, deltaTime: deltaTime)
+  rig.viewOrbitPitch = smoothTowards(current: rig.viewOrbitPitch, target: rig.orbitPitch, rate: rotRate, deltaTime: deltaTime)
+  rig.viewFreePitch = smoothTowards(current: rig.viewFreePitch, target: rig.freePitch, rate: rotRate, deltaTime: deltaTime)
+  rig.viewDistance = smoothTowards(current: rig.viewDistance, target: rig.distance, rate: rotRate, deltaTime: deltaTime)
   # Position is keyboard-driven only, so it follows that toggle alone.
   var moveRate: Float = 0.0
   if rig.smoothKeys { moveRate = rig.keySmoothRate }
   rig.viewPosition = Vec3.create(
-    x: smoothTowards(current: rig.viewPosition.x, target: rig.freePosition.x, rate: moveRate, dt: dt),
-    y: smoothTowards(current: rig.viewPosition.y, target: rig.freePosition.y, rate: moveRate, dt: dt),
-    z: smoothTowards(current: rig.viewPosition.z, target: rig.freePosition.z, rate: moveRate, dt: dt)
+    x: smoothTowards(current: rig.viewPosition.x, target: rig.freePosition.x, rate: moveRate, deltaTime: deltaTime),
+    y: smoothTowards(current: rig.viewPosition.y, target: rig.freePosition.y, rate: moveRate, deltaTime: deltaTime),
+    z: smoothTowards(current: rig.viewPosition.z, target: rig.freePosition.z, rate: moveRate, deltaTime: deltaTime)
   )
   # A snapshot restored under different limits, or a target clamped after
   # the display already passed the old bound, must not leave the visible

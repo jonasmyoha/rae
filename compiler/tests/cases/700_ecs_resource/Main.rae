@@ -7,7 +7,7 @@ open ecs/Serialize
 # trips through worldToJson; a RUNTIME resource (resource without serialize) is
 # omitted.
 
-type Frame { count: Int, dt: Int }   # authored resource
+type Frame { count: Int, deltaTime: Int }   # authored resource
 type Input { mouseX: Int }           # runtime resource
 
 func main() {
@@ -22,7 +22,7 @@ func main() {
   log("Frame serialize: {registeredHasFlag(reg: reg, name: nFrame, flag: serialize)}")
   log("Input serialize: {registeredHasFlag(reg: reg, name: nInput, flag: serialize)}")
 
-  let frame: Frame = { count: 7, dt: 16 }
+  let frame: Frame = { count: 7, deltaTime: 16 }
   let input: Input = { mouseX: 42 }
 
   # Serialize both resources; only the serialize-registered Frame is written.
@@ -36,7 +36,7 @@ func main() {
   let doc: JsonDoc = parseJson(source: jsonStr)
   let frameStr: String = resourceJson(name: nFrame, registry: reg, doc: doc)
   let loaded: Frame = Frame.fromJson(json: frameStr)
-  log("loaded frame: {loaded.count},{loaded.dt}")
+  log("loaded frame: {loaded.count},{loaded.deltaTime}")
 
   # The runtime resource is absent from the document.
   let root: JsonValue = root(doc: doc)

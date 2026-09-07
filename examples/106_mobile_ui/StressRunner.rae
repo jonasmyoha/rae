@@ -50,7 +50,7 @@ func runHoverStressMode(
   var warm: Int = 0
   loop warm < 120 {
     let hoveredWarm: EntityId = pickHoverEntity(world: world, idx: warm)
-    let dirtyWarm: Bool = hoverScaleSystem(world: world, hovered: hoveredWarm, dt: 0.016)
+    let dirtyWarm: Bool = hoverScaleSystem(world: world, hovered: hoveredWarm, deltaTime: 0.016)
     uiBeginFrame(clear: palettePageBg(theme: world.theme.active))
     renderSystemGpu2d(world: world, res: gpuUi)
     uiEndFrame()
@@ -63,7 +63,7 @@ func runHoverStressMode(
   var lastLog: Int = 0
   loop i < stressN {
     let hovered: EntityId = pickHoverEntity(world: world, idx: i)
-    let dirty: Bool = hoverScaleSystem(world: world, hovered: hovered, dt: 0.016)
+    let dirty: Bool = hoverScaleSystem(world: world, hovered: hovered, deltaTime: 0.016)
     uiBeginFrame(clear: palettePageBg(theme: world.theme.active))
     renderSystemGpu2d(world: world, res: gpuUi)
     uiEndFrame()

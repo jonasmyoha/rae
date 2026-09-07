@@ -22,7 +22,7 @@ open ecs/ComponentTable
 # Move `current` toward `target` by an exponential ease at `speed`
 # units per second. Snaps to `target` when `|target - current|` is
 # below `epsilon` so the system can stop reporting "in flight".
-func easeTowards(current: view Float, target: view Float, speed: view Float, dt: view Float, epsilon: view Float) ret Float {
+func easeTowards(current: view Float, target: view Float, speed: view Float, deltaTime: view Float, epsilon: view Float) ret Float {
   let delta: Float = target - current
   var absDelta: Float = delta
   if absDelta < 0.0 {
@@ -31,7 +31,7 @@ func easeTowards(current: view Float, target: view Float, speed: view Float, dt:
   if absDelta < epsilon {
     ret target
   }
-  var step: Float = dt * speed
+  var step: Float = deltaTime * speed
   if step > 1.0 {
     step = 1.0
   }
@@ -119,14 +119,14 @@ func hoverScaleContains(world: view UiWorld, entity: view EntityId, ancestor: vi
 # Step every HoverScale entity by one frame. `hovered` is the
 # topmost cursor-hit entity (use `noEntity()` when nothing is
 # hovered). Returns true if any entity is still animating.
-func hoverScaleSystem(world: mod UiWorld, hovered: view EntityId, dt: view Float) pub ret Bool {
+func hoverScaleSystem(world: mod UiWorld, hovered: view EntityId, deltaTime: view Float) pub ret Bool {
   # Clamp the frame delta. When the event loop has been idle (the
   # cursor sat still off-screen for several seconds, say), the
   # very first tick after a mouse-move arrives with a huge dt and
   # the ease snaps in one frame. Capping at 1/20 s caps the
   # per-tick step at `speed/20` of the delta — feels right at
   # speed=12 (60% of the remaining delta per frame max).
-  var frameDt: Float = dt
+  var frameDt: Float = deltaTime
   if frameDt > 0.05 {
     frameDt = 0.05
   }
@@ -143,7 +143,7 @@ func hoverScaleSystem(world: mod UiWorld, hovered: view EntityId, dt: view Float
     if hoverScaleContains(world: world, entity: entity, ancestor: hovered) {
       target = hs.hoverScale
     }
-    let next: Float = easeTowards(current: hs.current, target: target, speed: hs.speed, dt: frameDt, epsilon: 0.001)
+    let next: Float = easeTowards(current: hs.current, target: target, speed: hs.speed, deltaTime: frameDt, epsilon: 0.001)
     if next is not hs.current or target is not hs.target {
       # Per-frame animation state is a mutable component update, not a
       # replace/drop cycle. Updating in place avoids allocator churn in the

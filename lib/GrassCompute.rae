@@ -257,7 +257,7 @@ const grassConeCos: Float = 0.36
 # the view cone from the camera) is appended to a compacted list and bumps the
 # indirect draw's instanceCount. No readback, no blocking. Call BEFORE the pass.
 func grassGenerate(grass: mod GrassCompute, playerX: copy Float, playerY: copy Float, groundZ: copy Float,
-                   time: copy Float, dt: copy Float, toon: copy Int,
+                   time: copy Float, deltaTime: copy Float, toon: copy Int,
                    camX: copy Float, camY: copy Float, camZ: copy Float,
                    fwdX: copy Float, fwdY: copy Float, fwdZ: copy Float,
                    settings: view GrassViewSettings) {
@@ -272,7 +272,7 @@ func grassGenerate(grass: mod GrassCompute, playerX: copy Float, playerY: copy F
   grass.uni.set(index: 4, value: grassGpuBladeCount.toFloat())
   grass.uni.set(index: 5, value: settings.extent)
   grass.uni.set(index: 6, value: toonF)
-  grass.uni.set(index: 7, value: dt)
+  grass.uni.set(index: 7, value: deltaTime)
   grass.uni.set(index: 8, value: camX)
   grass.uni.set(index: 9, value: camY)
   grass.uni.set(index: 10, value: camZ)
