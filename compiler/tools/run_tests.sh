@@ -117,7 +117,12 @@ for TARGET in "${TARGETS[@]}"; do
 
     # Filtering logic
     RUN_THIS=1
-    if [ "$TARGET" = "compiled" ] && [ -z "$TEST_NAME_FILTER" ]; then
+    # The compiled-target skip list below is bypassed by a name filter so a
+    # developer can force-run one skipped case. RAE_TEST_APPLY_SKIPS=1 re-applies
+    # it under a filter: the parallel runner (tools/run_tests_parallel.sh) drives
+    # this script one case at a time and must skip exactly what the full loop
+    # skips, or it "runs" the deprecated Live-only cases the loop never does.
+    if [ "$TARGET" = "compiled" ] && { [ -z "$TEST_NAME_FILTER" ] || [ "${RAE_TEST_APPLY_SKIPS:-0}" = "1" ]; }; then
         case "$TEST_NAME" in
             # Skip build tests that target live/hybrid specifically
             407_*|408_*|395_*|498_*|499_*|500_*|501_*|502_*|503_*)
@@ -380,8 +385,12 @@ echo "==========================================
 Results: $PASSED passed, $FAILED failed
 =========================================="
 
-# Update test history
-if [ -f "tools/update_test_history.py" ]; then
+# Update test history. RAE_TEST_NO_HISTORY=1 skips it: the parallel runner
+# (tools/run_tests_parallel.sh) invokes this script once per case, and 400
+# concurrent writers of stats/test_history.json (plus a `git log` per passed
+# test) would race and dominate the wall clock — it updates history once, at
+# the end, itself.
+if [ -f "tools/update_test_history.py" ] && [ "${RAE_TEST_NO_HISTORY:-0}" != "1" ]; then
   ./tools/update_test_history.py $PASSED_TEST_NAMES
 fi
 
