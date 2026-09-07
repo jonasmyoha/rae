@@ -43,7 +43,8 @@ func gbSetTransparentBind(bind: Ptr) extern("rae_gb_set_transparent_bind")
 # Per-renderer state (#764: no module globals). `batch` is sized once at
 # creation and refilled in place each frame — zero per-frame allocation.
 type TransparentPassCache {
-  pipeMade: Bool
+  pipeMade: Bool   # creation attempted (so a missing shader is reported once)
+  pipeReady: Bool  # creation succeeded; the draw is skipped otherwise
   bindMade: Bool
   batch: InstanceBatch
 }
@@ -58,7 +59,7 @@ func createTransparentPassCache(capacity: copy Int) pub ret TransparentPassCache
   }
   # meshId -1: no mesh until the first addTransparentInstance names one.
   ret TransparentPassCache {
-    pipeMade: false, bindMade: false,
+    pipeMade: false, pipeReady: false, bindMade: false,
     batch: { meshId: 0 - 1, capacity: capacity, count: 0, records: records }
   }
 }
@@ -110,7 +111,16 @@ func copyOpaqueRadiance() {
 func ensureTransparentPipeline(cache: mod TransparentPassCache) {
   if cache.pipeMade { ret }
   cache.pipeMade = true
+  # The shader is read relative to the working directory, like every lib/*.wgsl
+  # (run the app from the repo root — the example gates `cd ..` for this).
+  # An empty read must NOT reach wgpu: a module with no `vs` entry point makes
+  # createRenderPipeline abort the process with an unhelpful validation error.
   let source: String = gbReadWgsl(path: "lib/transparentForward.wgsl")
+  if source.length() is 0 {
+    log("[transparentForward] lib/transparentForward.wgsl not readable from the working directory — run from the repo root; transparent draws are skipped")
+    ret
+  }
+  cache.pipeReady = true
   let sourceC: Buffer(Any) = source.toCStr()
   let shaderMod: Ptr = makeShaderModule(wgsl: sourceC)
   var attrs: List(WGPUVertexAttribute) = createList(WGPUVertexAttribute, cap: 3)
@@ -235,8 +245,10 @@ func transparentPass(cache: mod TransparentPassCache) pub {
   copyOpaqueRadiance()
   if cache.batch.count > 0 {
     ensureTransparentPipeline(cache: cache)
-    ensureTransparentBind(cache: cache)
-    drawTransparentBatch(cache: cache)
+    if cache.pipeReady {
+      ensureTransparentBind(cache: cache)
+      drawTransparentBatch(cache: cache)
+    }
   }
   cache.batch.count = 0
 }

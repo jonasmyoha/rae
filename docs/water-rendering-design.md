@@ -243,8 +243,10 @@ depth + hdrColor copy, alpha-blend into hdrColor, between `lighting` and
 `taa`. The walker's splash particles are its first client (#844):
 `lib/Particles.rae` now queues each droplet as a constant-size cube with
 alpha = remaining-life fraction, drawn at the transparentForward tag instead
-of shrinking in the G-buffer — the #829 validation. Remaining: an isolated
-screenshot case (#845).
+of shrinking in the G-buffer — the #829 validation. `examples/117_transparent_pass`
+(#845) proves the pass in isolation: a lit deferred scene with a row of alpha
+cubes 0.1 -> 0.9 and one half-sunk into the ground, gated in run_examples
+(log line + non-blank); the blend itself remains a human check on hardware.
 
 **Phase 1 — stylized toon water (mobile-first). Do this first; it is the
 biggest visible win for the least code.** Port the Roystan recipe to WGSL:

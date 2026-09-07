@@ -154,6 +154,28 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
+        elif [ "$EXAMPLE_NAME" = "117_transparent_pass" ]; then
+          # The transparent forward pass in isolation (#845): the log line
+          # proves the pass ran with instances queued on every rendered frame;
+          # the non-blank shot proves a frame came out. Whether the cubes
+          # actually BLEND and are depth-occluded is a human check on hardware
+          # (see the example header) — a non-blank BMP cannot tell.
+          # Run from the repo root (cd ..) like 112/114: the pass reads
+          # lib/transparentForward.wgsl relative to the working directory.
+          SCREENSHOT="$TMP_OUT/transparent.bmp"
+          if (cd .. && RAE_TRANSPARENT_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=1200 \
+             RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 25 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             && grep -qE '\[transparent\] deterministic deferred frame rendered: 10 alpha instances over 4 opaque, [1-9][0-9]* transparent frames' "$TMP_OUT/render.log" \
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
+                > "$TMP_OUT/screenshot.log" 2>&1; then
+            echo "PASS: $EXAMPLE_NAME (transparentForward: alpha row over a lit deferred scene)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (transparent pass render gate)"
+            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
+            ((FAILED++))
+          fi
         elif [ "$EXAMPLE_NAME" = "114_walker_character" ]; then
           # The multi-primitive gate, plus the skinning and colour chain.
           # 6717 verts / 3465 triangles is every primitive of all 10 meshes
