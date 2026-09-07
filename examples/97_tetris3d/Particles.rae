@@ -9,10 +9,10 @@ func randomRange(minimum: view Float, maximum: view Float) ret Float {
   ret minimum + (maximum - minimum) * Math.random()
 }
 
-func findFreeParticle(w: mod World) ret Int {
+func findFreeParticle(world: mod World) ret Int {
   var i: Int = 0
   loop i < maxParticles {
-    let cur: Particle = rae_ext_rae_buf_get(buf: w.particles.data, index: i)
+    let cur: Particle = rae_ext_rae_buf_get(buf: world.particles.data, index: i)
     if cur.active is false {
       ret i
     }
@@ -22,7 +22,7 @@ func findFreeParticle(w: mod World) ret Int {
 }
 
 func spawnParticle(
-  w: mod World
+  world: mod World
   px: view Float
   py: view Float
   pz: view Float
@@ -33,7 +33,7 @@ func spawnParticle(
   size: view Float
   color: view Vec3
 ) {
-  let idx: Int = findFreeParticle(w)
+  let idx: Int = findFreeParticle(world)
   if idx < 0 {
     ret
   }
@@ -49,13 +49,13 @@ func spawnParticle(
     size: size
     color: color
   }
-  let particles: mod List(Particle) => w.particles
+  let particles: mod List(Particle) => world.particles
   particles.set(index: idx, value: p)
 }
 
 # Sprays particles outward along a row that just cleared. Called from
 # physics.checkLines when a row is full.
-func spawnLineClearParticles(w: mod World, row: view Int) {
+func spawnLineClearParticles(world: mod World, row: view Int) {
   let cellY: Float = (0.0 - row.toFloat()) - 0.5
   var i: Int = 0
   loop i < gridWidth {
@@ -69,7 +69,7 @@ func spawnLineClearParticles(w: mod World, row: view Int) {
       let colorId: Int = i % 7 + 1
       let color: Vec3 = kindColor(id: colorId)
       spawnParticle(
-        w: w
+        world: world
         px: cellX
         py: cellY
         pz: 0.0
@@ -88,16 +88,16 @@ func spawnLineClearParticles(w: mod World, row: view Int) {
 
 # Update + cull active particles. Main's fixed-step accumulator drives this
 # exactly at 60 Hz, independently from the deferred render rate.
-func particleSystem(w: mod World) {
+func particleSystem(world: mod World) {
   let deltaTime: Float = 0.016
   var i: Int = 0
   loop i < maxParticles {
-    let p: Particle = rae_ext_rae_buf_get(buf: w.particles.data, index: i)
+    let p: Particle = rae_ext_rae_buf_get(buf: world.particles.data, index: i)
     if p.active {
       let newLife: Float = p.life - deltaTime
       if newLife <= 0.0 {
         let dead: Particle = makeEmptyParticle()
-        let particles: mod List(Particle) => w.particles
+        let particles: mod List(Particle) => world.particles
         particles.set(index: i, value: dead)
       } else {
         let nx: Float = p.px + p.vx * deltaTime
@@ -117,7 +117,7 @@ func particleSystem(w: mod World) {
           size: p.size
           color: p.color
         }
-        let particles: mod List(Particle) => w.particles
+        let particles: mod List(Particle) => world.particles
         particles.set(index: i, value: updated)
       }
     }
