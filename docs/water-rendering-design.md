@@ -1,8 +1,10 @@
 # Water rendering for Rae — survey and design
 
 Status: staged implementation (September 2026). The copy-only
-`transparentForward` graph node and `litCopy` target are implemented (#842).
-Water and transparent geometry drawing are not implemented yet (#843/#830).
+`transparentForward` graph node and `litCopy` target are implemented (#842),
+and the pass now DRAWS: alpha-blended instanced geometry into the lit HDR
+target against a read-only scene depth (#843, `lib/TransparentForward.rae` +
+`lib/transparentForward.wgsl`). Water itself is not implemented yet (#830).
 The survey below describes the original pre-water baseline.
 
 ### Implemented prerequisite: opaque radiance snapshot
@@ -11,7 +13,19 @@ The survey below describes the original pre-water baseline.
 `passModifies(litColor)`, with an additional depth read and `litCopy` output.
 `TransparentForward.copyOpaqueRadiance` encodes a texture copy through the
 WebGPU bindings and submits on the same queue as lighting. It leaves radiance
-unchanged; alpha pipelines and transparent draws remain #843.
+unchanged. #843 added the blend pipeline (src-alpha / one-minus-src-alpha,
+depth test Greater = reverse-Z, depth write OFF, cull none, one target in the
+HDR format lighting wrote) and the draw: it reuses the geometry pass's Frame
+uniform + DrawU draws storage and vertex layout, so a client packs an
+instance once (`addTransparentInstance(cache, mesh, transform, r, g, b,
+alpha)` — alpha rides in the record's metallic slot, unused by an unlit blend)
+and the pass issues one instanced DrawIndexed per frame into `gb_lit_view`
+(loadOp Load) with the G-buffer depth attached read-only. Unlit by design;
+shading is the client's (water #830, particles #844). Verified on hardware
+(not just non-blank): translucent cubes blend over the walker/terrain, are cut
+off by opaque geometry in front, and are clipped where they sink into the
+terrain. Note for clients: readiness is `gbMeshIcount > 0`, NOT `gbMeshReady`
+— the latter is 0 outside the geometry pass.
 
 The copy is full resolution, single-sampled, and uses the selected HDR format
 (RG11B10Ufloat or RGBA16Float). Its C-owned texture/view follow the deferred
@@ -224,10 +238,10 @@ by the example gate (screenshot cases), and each is a plain Rae package over
 the existing bindings.
 
 **Phase 0 — the transparent forward pass (prerequisite, not water).**
-Add the `transparentForward` node (read depth + hdrColor copy, alpha-blend
-into hdrColor, between `lighting` and `taa`). Validate it with the walker's
-splash particles switched from "shrink" to real alpha fade — a visible win on
-its own and a test that already exists.
+DONE: the `transparentForward` node (#842) and its GPU pass (#843) — read
+depth + hdrColor copy, alpha-blend into hdrColor, between `lighting` and
+`taa`. Remaining validation: the walker's splash particles switched from
+"shrink" to real alpha fade (#844) and an isolated screenshot case (#845).
 
 **Phase 1 — stylized toon water (mobile-first). Do this first; it is the
 biggest visible win for the least code.** Port the Roystan recipe to WGSL:

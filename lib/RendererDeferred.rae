@@ -55,7 +55,7 @@ enum RenderTag {
   uiOverlay     # load-preserving 2D UI painted over the composited frame (#389)
   taa           # temporal resolve (#390); HDR in, HDR out
   shadow        # sun cascade depth (#382); lighting reads it
-  transparentForward # snapshots opaque radiance before transparent draws
+  transparentForward # snapshot opaque radiance, then alpha-blend transparents into it (#842/#843)
 }
 
 type DeferredRenderer {
@@ -98,6 +98,7 @@ type RenderPasses {
   pyr: PyrPassCache
   inspect: ViewPassCache
   gbuffer: GbufferCache
+  transparent: TransparentPassCache
 }
 
 func createRenderPasses() ret RenderPasses {
@@ -108,7 +109,8 @@ func createRenderPasses() ret RenderPasses {
     taa: { bindGen: 0 - 1, bindMade: createList(Bool, cap: 2) },
     pyr: { bindGen: 0 - 1 },
     inspect: { pipeMade: false, bindMade: false, lastTargetsGen: 0 - 1, uniform: createList(Float, cap: 4) },
-    gbuffer: createGbufferCache()
+    gbuffer: createGbufferCache(),
+    transparent: createTransparentPassCache(capacity: 256)
   }
 }
 
@@ -354,7 +356,7 @@ func renderDeferredPassWorld(renderer: mod DeferredRenderer, tag: view Int, worl
     taaPass(cache: renderer.passes.taa)
   }
   if tag is RenderTag.transparentForward {
-    copyOpaqueRadiance()
+    transparentPass(cache: renderer.passes.transparent)
   }
   if tag is RenderTag.composite {
     if renderer.debugView is viewLit {
