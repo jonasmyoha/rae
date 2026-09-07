@@ -127,13 +127,13 @@ func main() ret Int {
   var light: Light3d = defaultLight3d()
 
   var renderer: DeferredRenderer = createDeferredRenderer()
-  let gs: Int = compileDeferred(r: renderer)
+  let gs: Int = compileDeferred(renderer: renderer)
   if gs is not 0 {
     log("deferred graph invalid: {statusName(status: gs)}")
     ret 1
   }
-  setDebugView(r: renderer, mode: selectedView())
-  log("{describeDeferred(r: renderer)}")
+  setDebugView(renderer: renderer, mode: selectedView())
+  log("{describeDeferred(renderer: renderer)}")
 
   var yaw: Float = 0.0
   var pitch: Float = 0.35
@@ -176,7 +176,7 @@ func main() ret Int {
 
     let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
     if Gpu2d.renderGate() {
-      renderDeferredFrameWorld(r: renderer, world: world, camera: camera, light: light, aspect: aspect)
+      renderDeferredFrameWorld(renderer: renderer, world: world, camera: camera, light: light, aspect: aspect)
     }
   }
   Gbuffer.shutdownAll()
