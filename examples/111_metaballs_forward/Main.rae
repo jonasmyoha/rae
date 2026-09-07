@@ -388,7 +388,7 @@ func main() ret Int {
   if mountSettingsDialog(world: uiWorld, res: gpuUi, hostNodeId: "SettingsDialogSlot") is false {
     logWarnLine(ov: logView, text: "settings dialog failed to mount")
   }
-  settingsApplyToWorld(s: settings, world: uiWorld)
+  settingsApplyToWorld(settingsState: settings, world: uiWorld)
   applySettingsPanelOpen(world: uiWorld, open: settings.open)
   var camera: Camera3d = scene1.camera
   var cameraRig: CameraRig = createCameraRig(camera: camera)
@@ -451,11 +451,11 @@ func main() ret Int {
   # createDeferredRendererWithUiSky because its lighting pass needs it from
   # inside the frame graph; here the sky is one draw the app makes itself, so it
   # sits next to `light` — the other thing the panel drives every frame.
-  var sky: Sky = settingsBuildSky(s: settings, data: hosekData,
+  var sky: Sky = settingsBuildSky(settingsState: settings, data: hosekData,
                                   turbidity: skyTurbidity, groundAlbedo: skyGroundAlbedo)
   var renderer: Renderer3d = createRenderer3dWithUi()
-  light.sunDir = settingsSunDir(s: settings)
-  light.sunColor = settingsSunColor(s: settings)
+  light.sunDir = settingsSunDir(settingsState: settings)
+  light.sunColor = settingsSunColor(settingsState: settings)
   let gstatus: Int = compileRenderer(r: renderer)
   if gstatus is not 0 {
     log("render graph invalid: {gstatus}")
@@ -573,24 +573,24 @@ func main() ret Int {
     var settingsChanged: Bool = false
     var sa: Int = 0
     loop sa < uiActionCount(input: uiInput) {
-      if settingsHandleAction(s: settings, actionId: uiActionAt(input: uiInput, index: sa)) {
+      if settingsHandleAction(settingsState: settings, actionId: uiActionAt(input: uiInput, index: sa)) {
         settingsChanged = true
       }
       sa = sa + 1
     }
-    if settingsUpdatePointer(s: settings, world: uiWorld, input: uiInput) {
+    if settingsUpdatePointer(settingsState: settings, world: uiWorld, input: uiInput) {
       settingsChanged = true
     }
-    if settingsUpdateLatitudePointer(s: settings, world: uiWorld, input: uiInput) {
+    if settingsUpdateLatitudePointer(settingsState: settings, world: uiWorld, input: uiInput) {
       settingsChanged = true
     }
-    if settingsUpdateDatePointer(s: settings, world: uiWorld, input: uiInput) {
+    if settingsUpdateDatePointer(settingsState: settings, world: uiWorld, input: uiInput) {
       settingsChanged = true
     }
     # The clock, if it is running. This example PARKS in waitEvents when nothing
     # is moving, so a running clock has to be declared as motion below or it
     # starves to the heartbeat rate and the sky steps once a second.
-    let timeAnimating: Bool = settingsAdvanceTime(s: settings, deltaTime: deltaTime)
+    let timeAnimating: Bool = settingsAdvanceTime(settingsState: settings, deltaTime: deltaTime)
     if timeAnimating {
       settingsChanged = true
     }
@@ -616,14 +616,14 @@ func main() ret Int {
     if settingsChanged {
       # The sky is REBUILT, not nudged: a Hosek sky is a cook, and the panel can
       # move turbidity's inputs (sun height) as well as the sun itself.
-      sky = settingsBuildSky(s: settings, data: hosekData,
+      sky = settingsBuildSky(settingsState: settings, data: hosekData,
                              turbidity: skyTurbidity, groundAlbedo: skyGroundAlbedo)
-      light.sunDir = settingsSunDir(s: settings)
-      light.sunColor = settingsSunColor(s: settings)
+      light.sunDir = settingsSunDir(settingsState: settings)
+      light.sunColor = settingsSunColor(settingsState: settings)
       # Pause is the shared control now; uiState still owns the flag the rest
       # of this example reads.
       uiState.paused = settings.playing is false
-      settingsApplyToWorld(s: settings, world: uiWorld)
+      settingsApplyToWorld(settingsState: settings, world: uiWorld)
       applySettingsPanelOpen(world: uiWorld, open: settings.open)
       stateDirty = true
     }
@@ -713,8 +713,8 @@ func main() ret Int {
       # owned the sun (#328). It won every frame, so the time-of-day slider did
       # nothing at all — and because it keyed off simTime, PAUSING froze the sun
       # solid, which is how the bug was noticed.
-      light.sunDir = settingsSunDir(s: settings)
-      light.sunColor = settingsSunColor(s: settings)
+      light.sunDir = settingsSunDir(settingsState: settings)
+      light.sunColor = settingsSunColor(settingsState: settings)
       if uiState.activeScene is 1 { animateScene1(world: scene1.world, cubeA: cubeAEntity, cubeB: cubeBEntity, torus: torusEntity, time: simTime) }
       if uiState.activeScene is 2 {
         animateScene(world: scene2.world, sceneId: 2, time: simTime)
