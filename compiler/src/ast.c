@@ -6,6 +6,7 @@
 #include "type.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 void compiler_init(CompilerContext* ctx, Arena* ast_arena) {
@@ -22,14 +23,16 @@ void compiler_init(CompilerContext* ctx, Arena* ast_arena) {
     ctx->all_decl_cap = 8192;
     ctx->all_decls = arena_alloc(ast_arena, sizeof(AstDecl*) * ctx->all_decl_cap);
     
+    // generic_types + specialized_funcs GROW dynamically (RAE_GROW1 in c_backend.c),
+    // so they are malloc'd, not arena-bumped — no fixed cap, no silent overflow drop.
     ctx->generic_type_cap = 1024;
-    ctx->generic_types = arena_alloc(ast_arena, sizeof(AstTypeRef*) * ctx->generic_type_cap);
-    
+    ctx->generic_types = malloc(sizeof(AstTypeRef*) * ctx->generic_type_cap);
+
     ctx->emitted_generic_type_cap = 1024;
     ctx->emitted_generic_types = arena_alloc(ast_arena, sizeof(AstTypeRef*) * ctx->emitted_generic_type_cap);
-    
+
     ctx->specialized_func_cap = 2048;
-    ctx->specialized_funcs = arena_alloc(ast_arena, sizeof(FunctionSpecialization) * ctx->specialized_func_cap);
+    ctx->specialized_funcs = malloc(sizeof(FunctionSpecialization) * ctx->specialized_func_cap);
     
     ctx->emitted_method_cap = 2048;
     ctx->emitted_method_names = arena_alloc(ast_arena, sizeof(char*) * ctx->emitted_method_cap);
