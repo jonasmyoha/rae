@@ -160,48 +160,48 @@ func createSettingsState(scene: view Int, sceneCount: view Int, speed: view Floa
 # A DRAG WINS. While the pointer owns the slider the clock holds still, or the
 # two would fight over the same value and the handle would crawl away from
 # where it was put.
-func settingsAdvanceTime(s: mod SettingsState, deltaTime: view Float) ret Bool {
-  if s.playing is false {
+func settingsAdvanceTime(settingsState: mod SettingsState, deltaTime: view Float) ret Bool {
+  if settingsState.playing is false {
     ret false
   }
-  if s.animateTime is false {
+  if settingsState.animateTime is false {
     ret false
   }
-  if s.timeDragging {
+  if settingsState.timeDragging {
     ret false
   }
   if deltaTime <= 0.0 {
     ret false
   }
-  var h: Float = s.hour + deltaTime * 24.0 / settingsDaySeconds
+  var h: Float = settingsState.hour + deltaTime * 24.0 / settingsDaySeconds
   # Midnight rolls the DATE, and the date rolls the YEAR. The point of the
   # control is that it keeps going round, and a clock that wrapped the hour while
   # leaving the calendar behind would be a clock that never reaches tomorrow.
   # lib/calendar owns the year length, so a leap year gets its 29 February.
-  # LOCALS, then assigned back — a readability choice. Passing s.year /
-  # s.dayOfYear straight into a `mod` parameter also works (#762, test 707).
-  var rollYear: Int = s.year
-  var rollDay: Int = s.dayOfYear
+  # LOCALS, then assigned back — a readability choice. Passing settingsState.year /
+  # settingsState.dayOfYear straight into a `mod` parameter also works (#762, test 707).
+  var rollYear: Int = settingsState.year
+  var rollDay: Int = settingsState.dayOfYear
   loop h >= 24.0 {
     h = h - 24.0
     advanceOneDay(year: rollYear, dayOfYear: rollDay)
   }
-  s.year = rollYear
-  s.dayOfYear = rollDay
-  if h is s.hour {
+  settingsState.year = rollYear
+  settingsState.dayOfYear = rollDay
+  if h is settingsState.hour {
     ret false
   }
-  s.hour = h
+  settingsState.hour = h
   ret true
 }
 
 # The date slider, over the real length of the current year.
-func settingsUpdateDatePointer(s: mod SettingsState, world: view UiWorld,
+func settingsUpdateDatePointer(settingsState: mod SettingsState, world: view UiWorld,
                                input: view UiInput) ret Bool {
-  if s.open is false {
+  if settingsState.open is false {
     ret false
   }
-  if s.timeDragging or s.latDragging {
+  if settingsState.timeDragging or settingsState.latDragging {
     ret false
   }
   var pressedInside: Bool = false
@@ -209,28 +209,28 @@ func settingsUpdateDatePointer(s: mod SettingsState, world: view UiWorld,
     pressedInside = pointInNode(world: world, nodeId: "SettingsDateTrack",
                                 x: input.pointer.x, y: input.pointer.y)
   }
-  s.dateDragging = dragActive(wasDragging: s.dateDragging,
+  settingsState.dateDragging = dragActive(wasDragging: settingsState.dateDragging,
                                     pressedInside: pressedInside,
                                     down: input.pointer.down,
                                     released: input.pointer.released)
-  if s.dateDragging is false {
+  if settingsState.dateDragging is false {
     ret false
   }
   let f: Float = fractionAcrossNode(world: world, nodeId: "SettingsDateTrack",
                                     x: input.pointer.x)
-  let span: Int = daysInYear(year: s.year)
+  let span: Int = daysInYear(year: settingsState.year)
   var next: Int = 1 + (f * (span - 1).toFloat() + 0.5).toInt()
-  next = clampDayOfYear(year: s.year, dayOfYear: next)
-  if next is s.dayOfYear {
+  next = clampDayOfYear(year: settingsState.year, dayOfYear: next)
+  if next is settingsState.dayOfYear {
     ret false
   }
-  s.dayOfYear = next
+  settingsState.dayOfYear = next
   ret true
 }
 
 # The date this state is on.
-func settingsDate(s: view SettingsState) ret CalendarDate {
-  ret dateFromDayOfYear(year: s.year, dayOfYear: s.dayOfYear)
+func settingsDate(settingsState: view SettingsState) ret CalendarDate {
+  ret dateFromDayOfYear(year: settingsState.year, dayOfYear: settingsState.dayOfYear)
 }
 
 # Mounted the way camera_bar is: the app authors a host node and owns where the
@@ -278,79 +278,79 @@ func formatHour(hour: view Float) ret String {
 # Apply one action id. Returns true when something changed, so the caller can
 # rebuild only what the change affects. Unknown ids are ignored rather than
 # treated as an error: the app forwards every action it sees, including its own.
-func settingsHandleAction(s: mod SettingsState, actionId: view String) ret Bool {
+func settingsHandleAction(settingsState: mod SettingsState, actionId: view String) ret Bool {
   # One action, and it TOGGLES: the button shows and hides the panel rather
   # than opening a second surface.
   if actionId is "settings.open" {
-    s.open = s.open is false
+    settingsState.open = settingsState.open is false
     ret true
   }
   if actionId is "settings.playback" {
-    s.playing = s.playing is false
+    settingsState.playing = settingsState.playing is false
     ret true
   }
   if actionId is "settings.time.animate" {
-    s.animateTime = s.animateTime is false
+    settingsState.animateTime = settingsState.animateTime is false
     ret true
   }
   if actionId is "settings.toon" {
-    s.toon = s.toon is false
+    settingsState.toon = settingsState.toon is false
     ret true
   }
   if actionId is "settings.anim.slower" {
-    s.speed = nextSpeed(current: s.speed, up: false)
+    settingsState.speed = nextSpeed(current: settingsState.speed, up: false)
     ret true
   }
   if actionId is "settings.anim.faster" {
-    s.speed = nextSpeed(current: s.speed, up: true)
+    settingsState.speed = nextSpeed(current: settingsState.speed, up: true)
     ret true
   }
   if actionId is "settings.sky.hosek" {
-    s.skyModel = SettingsSkyModel.hosek
+    settingsState.skyModel = SettingsSkyModel.hosek
     ret true
   }
   if actionId is "settings.sky.preetham" {
-    s.skyModel = SettingsSkyModel.preetham
+    settingsState.skyModel = SettingsSkyModel.preetham
     ret true
   }
   if actionId is "settings.sky.solid" {
-    s.skyModel = SettingsSkyModel.solid
+    settingsState.skyModel = SettingsSkyModel.solid
     ret true
   }
   if actionId is "settings.render.shadows" {
-    s.shadows = s.shadows is false
+    settingsState.shadows = settingsState.shadows is false
     ret true
   }
   # Scene selection is clamped to what the app actually has, so the buttons can
   # exist in an app with one scene without being able to select a second.
   if actionId is "settings.scene.1" {
-    ret settingsSelectScene(s: s, scene: 1)
+    ret settingsSelectScene(settingsState: settingsState, scene: 1)
   }
   if actionId is "settings.scene.2" {
-    ret settingsSelectScene(s: s, scene: 2)
+    ret settingsSelectScene(settingsState: settingsState, scene: 2)
   }
   if actionId is "settings.scene.3" {
-    ret settingsSelectScene(s: s, scene: 3)
+    ret settingsSelectScene(settingsState: settingsState, scene: 3)
   }
   ret false
 }
 
-func settingsSelectScene(s: mod SettingsState, scene: view Int) ret Bool {
-  if scene > s.sceneCount {
+func settingsSelectScene(settingsState: mod SettingsState, scene: view Int) ret Bool {
+  if scene > settingsState.sceneCount {
     ret false
   }
-  if s.scene is scene {
+  if settingsState.scene is scene {
     ret false
   }
-  s.scene = scene
+  settingsState.scene = scene
   ret true
 }
 
 # Pointer half: drag the time slider. Separate from the action half because
 # actions arrive as discrete events while a drag is a per-frame sample.
-func settingsUpdatePointer(s: mod SettingsState, world: view UiWorld,
+func settingsUpdatePointer(settingsState: mod SettingsState, world: view UiWorld,
                            input: view UiInput) ret Bool {
-  if s.open is false {
+  if settingsState.open is false {
     ret false
   }
   # A press anywhere on the track starts a drag and jumps the handle there: the
@@ -360,32 +360,32 @@ func settingsUpdatePointer(s: mod SettingsState, world: view UiWorld,
     pressedInside = pointInNode(world: world, nodeId: "SettingsTimeTrack",
                                 x: input.pointer.x, y: input.pointer.y)
   }
-  s.timeDragging = dragActive(wasDragging: s.timeDragging,
+  settingsState.timeDragging = dragActive(wasDragging: settingsState.timeDragging,
                                     pressedInside: pressedInside,
                                     down: input.pointer.down,
                                     released: input.pointer.released)
-  if s.timeDragging is false {
+  if settingsState.timeDragging is false {
     ret false
   }
   let f: Float = fractionAcrossNode(world: world, nodeId: "SettingsTimeTrack",
                                     x: input.pointer.x)
   let next: Float = settingsHourMin + f * (settingsHourMax - settingsHourMin)
-  if next is s.hour {
+  if next is settingsState.hour {
     ret false
   }
-  s.hour = next
+  settingsState.hour = next
   ret true
 }
 
 # The latitude slider, the same shape as the time one. Separate function rather
 # than a second block inside settingsUpdatePointer so that neither drag can
 # swallow the other's press: whichever track was hit owns the pointer.
-func settingsUpdateLatitudePointer(s: mod SettingsState, world: view UiWorld,
+func settingsUpdateLatitudePointer(settingsState: mod SettingsState, world: view UiWorld,
                                    input: view UiInput) ret Bool {
-  if s.open is false {
+  if settingsState.open is false {
     ret false
   }
-  if s.timeDragging {
+  if settingsState.timeDragging {
     ret false
   }
   var pressedInside: Bool = false
@@ -393,20 +393,20 @@ func settingsUpdateLatitudePointer(s: mod SettingsState, world: view UiWorld,
     pressedInside = pointInNode(world: world, nodeId: "SettingsLatTrack",
                                 x: input.pointer.x, y: input.pointer.y)
   }
-  s.latDragging = dragActive(wasDragging: s.latDragging,
+  settingsState.latDragging = dragActive(wasDragging: settingsState.latDragging,
                                    pressedInside: pressedInside,
                                    down: input.pointer.down,
                                    released: input.pointer.released)
-  if s.latDragging is false {
+  if settingsState.latDragging is false {
     ret false
   }
   let f: Float = fractionAcrossNode(world: world, nodeId: "SettingsLatTrack",
                                     x: input.pointer.x)
   let next: Float = skyLatitudeMin + f * (skyLatitudeMax - skyLatitudeMin)
-  if next is s.latitude {
+  if next is settingsState.latitude {
     ret false
   }
-  s.latitude = next
+  settingsState.latitude = next
   ret true
 }
 
@@ -443,49 +443,49 @@ func applySettingsPanelOpen(world: mod UiWorld, open: view Bool) {
 # Push the state onto the mounted chrome. Cheap enough to call whenever
 # something changed; every write underneath is guarded against writing an
 # unchanged value.
-func settingsApplyToWorld(s: view SettingsState, world: mod UiWorld) {
+func settingsApplyToWorld(settingsState: view SettingsState, world: mod UiWorld) {
   var playLabel: String = "Pause"
-  if s.playing is false {
+  if settingsState.playing is false {
     playLabel = "Play"
   }
   setNodeText(world: world, nodeId: "SettingsPlayLabel", value: playLabel)
   setNodeFillSlot(world: world, nodeId: "SettingsPlayButton",
-                  slot: settingsSlotFor(on: s.playing is false))
-  let pct: Int = speedPercent(v: s.speed)
+                  slot: settingsSlotFor(on: settingsState.playing is false))
+  let pct: Int = speedPercent(v: settingsState.speed)
   setNodeText(world: world, nodeId: "SettingsSpeedRow", value: "Animation speed {pct}%")
   setNodeText(world: world, nodeId: "SettingsTimeLabel",
-              value: "Time of day {formatHour(hour: s.hour)} {formatCalendarDate(date: settingsDate(s: s))}")
-  setNodeText(world: world, nodeId: "SettingsLatLabel", value: "Latitude {formatLatitude(latitudeDeg: s.latitude)}")
+              value: "Time of day {formatHour(hour: settingsState.hour)} {formatCalendarDate(date: settingsDate(settingsState: settingsState))}")
+  setNodeText(world: world, nodeId: "SettingsLatLabel", value: "Latitude {formatLatitude(latitudeDeg: settingsState.latitude)}")
 
   setNodeFillSlot(world: world, nodeId: "SettingsToonButton",
-                  slot: settingsSlotFor(on: s.toon))
+                  slot: settingsSlotFor(on: settingsState.toon))
   setNodeFillSlot(world: world, nodeId: "SettingsAnimTimeButton",
-                  slot: settingsSlotFor(on: s.animateTime))
+                  slot: settingsSlotFor(on: settingsState.animateTime))
   setNodeFillSlot(world: world, nodeId: "SettingsSkyHosek",
-                  slot: settingsSlotFor(on: s.skyModel is SettingsSkyModel.hosek))
+                  slot: settingsSlotFor(on: settingsState.skyModel is SettingsSkyModel.hosek))
   setNodeFillSlot(world: world, nodeId: "SettingsSkyPreetham",
-                  slot: settingsSlotFor(on: s.skyModel is SettingsSkyModel.preetham))
+                  slot: settingsSlotFor(on: settingsState.skyModel is SettingsSkyModel.preetham))
   setNodeFillSlot(world: world, nodeId: "SettingsSkySolid",
-                  slot: settingsSlotFor(on: s.skyModel is SettingsSkyModel.solid))
+                  slot: settingsSlotFor(on: settingsState.skyModel is SettingsSkyModel.solid))
   setNodeFillSlot(world: world, nodeId: "SettingsShadowsButton",
-                  slot: settingsSlotFor(on: s.shadows))
-  setNodeFillSlot(world: world, nodeId: "SettingsScene1", slot: settingsSlotFor(on: s.scene is 1))
-  setNodeFillSlot(world: world, nodeId: "SettingsScene2", slot: settingsSlotFor(on: s.scene is 2))
-  setNodeFillSlot(world: world, nodeId: "SettingsScene3", slot: settingsSlotFor(on: s.scene is 3))
+                  slot: settingsSlotFor(on: settingsState.shadows))
+  setNodeFillSlot(world: world, nodeId: "SettingsScene1", slot: settingsSlotFor(on: settingsState.scene is 1))
+  setNodeFillSlot(world: world, nodeId: "SettingsScene2", slot: settingsSlotFor(on: settingsState.scene is 2))
+  setNodeFillSlot(world: world, nodeId: "SettingsScene3", slot: settingsSlotFor(on: settingsState.scene is 3))
 
   # Two drawn parts: the track, and the knob that travels along it. A filled
   # portion made it read as a progress bar, which is a different control.
-  let f: Float = (s.hour - settingsHourMin) / (settingsHourMax - settingsHourMin)
+  let f: Float = (settingsState.hour - settingsHourMin) / (settingsHourMax - settingsHourMin)
   centreNodeAtFraction(world: world, trackId: "SettingsTimeTrack",
                        handleId: "SettingsTimeHandle", fraction: f)
-  let dateSpan: Int = daysInYear(year: s.year) - 1
+  let dateSpan: Int = daysInYear(year: settingsState.year) - 1
   var dateF: Float = 0.0
   if dateSpan > 0 {
-    dateF = (s.dayOfYear - 1).toFloat() / dateSpan.toFloat()
+    dateF = (settingsState.dayOfYear - 1).toFloat() / dateSpan.toFloat()
   }
   centreNodeAtFraction(world: world, trackId: "SettingsDateTrack",
                        handleId: "SettingsDateHandle", fraction: dateF)
-  let latF: Float = (s.latitude - skyLatitudeMin) / (skyLatitudeMax - skyLatitudeMin)
+  let latF: Float = (settingsState.latitude - skyLatitudeMin) / (skyLatitudeMax - skyLatitudeMin)
   centreNodeAtFraction(world: world, trackId: "SettingsLatTrack",
                        handleId: "SettingsLatHandle", fraction: latF)
 }
@@ -507,16 +507,16 @@ func settingsSlotFor(on: view Bool) ret String {
 
 # Where the sun is, for this hour. Both the sky and the key light take it, so
 # the visible sun and the cast shadows cannot drift apart.
-func settingsSunDir(s: view SettingsState) ret Vec3 {
-  ret sunDirForDate(hour: s.hour, dayOfYear: s.dayOfYear, latitudeDeg: s.latitude)
+func settingsSunDir(settingsState: view SettingsState) ret Vec3 {
+  ret sunDirForDate(hour: settingsState.hour, dayOfYear: settingsState.dayOfYear, latitudeDeg: settingsState.latitude)
 }
 
 # Warm at the horizon, neutral overhead, and dimmed as the sun sets — the sky
 # model reddens on its own, but the direct light would otherwise stay white and
 # full-strength through a sunset.
-func settingsSunColor(s: view SettingsState) ret Vec3 {
-  let base: Vec3 = sunColorForDate(hour: s.hour, dayOfYear: s.dayOfYear, latitudeDeg: s.latitude)
-  var lift: Float = sunHeightForDate(hour: s.hour, dayOfYear: s.dayOfYear, latitudeDeg: s.latitude)
+func settingsSunColor(settingsState: view SettingsState) ret Vec3 {
+  let base: Vec3 = sunColorForDate(hour: settingsState.hour, dayOfYear: settingsState.dayOfYear, latitudeDeg: settingsState.latitude)
+  var lift: Float = sunHeightForDate(hour: settingsState.hour, dayOfYear: settingsState.dayOfYear, latitudeDeg: settingsState.latitude)
   # Never fully black: a scene lit by nothing reads as broken rather than as
   # night, and there is no night sky model here yet.
   lift = 0.15 + 0.85 * lift
@@ -525,19 +525,19 @@ func settingsSunColor(s: view SettingsState) ret Vec3 {
 
 # Build the sky the panel is asking for. `data` is only read by the Hosek
 # branch; a caller with no dataset can pass an empty one and still get Preetham.
-func settingsBuildSky(s: view SettingsState, data: view HosekDataset,
+func settingsBuildSky(settingsState: view SettingsState, data: view HosekDataset,
                       turbidity: view Float, groundAlbedo: view Float) ret Sky {
-  let dir: Vec3 = settingsSunDir(s: s)
-  let col: Vec3 = settingsSunColor(s: s)
+  let dir: Vec3 = settingsSunDir(settingsState: settingsState)
+  let col: Vec3 = settingsSunColor(settingsState: settingsState)
   # Both models are fitted only for a sun at or above the horizon, so the night
   # side is a fade rather than a different sky. Applied here, once, so the two
   # models darken together.
-  let day: Float = daylightFactorForDate(hour: s.hour, dayOfYear: s.dayOfYear, latitudeDeg: s.latitude)
+  let day: Float = daylightFactorForDate(hour: settingsState.hour, dayOfYear: settingsState.dayOfYear, latitudeDeg: settingsState.latitude)
   # SOLID is the control case: a flat colour, no gradient and no sun disc, so
   # anything still varying across the background is provably not the sky. It
   # still tracks the time of day — a flat sky that stayed bright at midnight
   # would be a second thing to explain rather than a simpler one.
-  if s.skyModel is SettingsSkyModel.solid {
+  if settingsState.skyModel is SettingsSkyModel.solid {
     let base: Vec3 = Vec3.create(x: 0.10, y: 0.16, z: 0.26)
     let lit: Vec3 = Vec3.create(x: base.x * day, y: base.y * day, z: base.z * day)
     var flat: Sky = createSkyNone(light: Light3d {
@@ -547,7 +547,7 @@ func settingsBuildSky(s: view SettingsState, data: view HosekDataset,
     flat.exposure = 1.0
     ret flat
   }
-  if s.skyModel is SettingsSkyModel.preetham {
+  if settingsState.skyModel is SettingsSkyModel.preetham {
     var pre: Sky = createSkyProcedural(sunDir: dir, sunColor: col, turbidity: turbidity)
     pre.exposure = day
     pre.sunDiscIntensity = pre.sunDiscIntensity * day
