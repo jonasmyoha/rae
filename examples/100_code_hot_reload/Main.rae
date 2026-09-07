@@ -23,13 +23,13 @@ open HotReload
 
 # Quick atoi for our trivially-formatted state. The state-file body
 # is just an integer here; a real app would use lib/json.
-func parseIntOrZero(s: view String) ret Int {
+func parseIntOrZero(text: view String) ret Int {
   let digits: String = "0123456789"
-  let n: Int = s.length()
+  let n: Int = text.length()
   var i: Int = 0
   var acc: Int = 0
   loop i < n {
-    let ch: String = s.sub(start: i, len: 1)
+    let ch: String = text.sub(start: i, len: 1)
     let d: Int = digits.indexOf(sub: ch)
     if d < 0 {
       ret acc
@@ -45,7 +45,7 @@ func main() {
   let prior: String = readHotReloadState()
   var count: Int = 0
   if prior.length() > 0 {
-    count = parseIntOrZero(s: prior.trim())
+    count = parseIntOrZero(text: prior.trim())
     clearHotReloadState()
     log("[restored] COUNT={count}")
   } else {

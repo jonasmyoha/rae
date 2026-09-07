@@ -5,8 +5,8 @@
 # exactly: in f32, 2^24 + 1 == 2^24, while in f64 it is 16777217. Comparing
 # rather than printing keeps the check independent of float formatting.
 
-func addOneF(v: view Float) ret Float {
-  ret v + 1.0
+func addOneF(value: view Float) ret Float {
+  ret value + 1.0
 }
 
 func addOneD(v: view Float64) ret Float64 {
@@ -19,8 +19,8 @@ func main() {
   let a64: Float64 = 16777216.0
 
   # 1-3: Float has f32 semantics; Float32 spells the same type; Float64 differs.
-  if addOneF(v: a32) is a32 { log("Float f32: yes") } else { log("Float f32: NO") }
-  if addOneF(v: a32b) is a32b { log("Float32 f32: yes") } else { log("Float32 f32: NO") }
+  if addOneF(value: a32) is a32 { log("Float f32: yes") } else { log("Float f32: NO") }
+  if addOneF(value: a32b) is a32b { log("Float32 f32: yes") } else { log("Float32 f32: NO") }
   if addOneD(v: a64) is a64 { log("Float64 f64: NO") } else { log("Float64 f64: yes") }
 
   # 4: Float and Float32 are interchangeable — same type, not just same width.

@@ -43,7 +43,7 @@ func addComponentTable(T: type, writer: mod WorldJson, table: view ComponentTabl
   if registeredHasFlag(reg: registry, name: name, flag: serialize) is false {
     ret
   }
-  var frag: String = quote(s: name)
+  var frag: String = quote(text: name)
   frag = frag.concat(other: ": \{")
   loop var i: Int = 0, i < componentCount(this: table), ++i {
     if i > 0 {
@@ -52,7 +52,7 @@ func addComponentTable(T: type, writer: mod WorldJson, table: view ComponentTabl
     let entity: EntityId = componentEntityAt(this: table, i: i)
     let value: T = componentDataAt(this: table, i: i)
     let key: String = "{entity.index}"
-    frag = frag.concat(other: quote(s: key))
+    frag = frag.concat(other: quote(text: key))
     frag = frag.concat(other: ": ")
     frag = frag.concat(other: value.toJson())
   }
@@ -130,7 +130,7 @@ func addResource(writer: mod WorldJson, name: view String, valueJson: view Strin
   if registeredHasFlag(reg: registry, name: name, flag: serialize) is false {
     ret
   }
-  var frag: String = quote(s: name)
+  var frag: String = quote(text: name)
   frag = frag.concat(other: ": ")
   frag = frag.concat(other: valueJson)
   writer.parts.add(value: own frag)

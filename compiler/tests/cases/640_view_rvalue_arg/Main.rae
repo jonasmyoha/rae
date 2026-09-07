@@ -20,7 +20,7 @@ func makeVec(a: view Int, b: view Int) ret Vec {
   ret Vec { x: a, y: b }
 }
 func handle(c: view Cmd) ret Int { ret c as Int }
-func readInt(n: view Int) ret Int { ret n }
+func readInt(value: view Int) ret Int { ret value }
 
 func main() {
   let local: Vec = { x: 10, y: 20 }
@@ -28,6 +28,6 @@ func main() {
   log(sumVec(v: makeVec(a: 3, b: 4)))   # call-result rvalue
   log(sumVec(v: Vec { x: 1, y: 2 }))    # object-literal rvalue
   log(handle(c: Cmd.stop))              # enum-literal rvalue
-  log(readInt(n: 2 + 3))                # arithmetic rvalue
-  log(readInt(n: local.x))              # field lvalue
+  log(readInt(value: 2 + 3))                # arithmetic rvalue
+  log(readInt(value: local.x))              # field lvalue
 }

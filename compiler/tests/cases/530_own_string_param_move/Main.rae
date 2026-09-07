@@ -15,8 +15,8 @@ func embellish(content: own String, suffix: view String) ret String {
   ret content.concat(other: suffix)
 }
 
-func consume(s: own String) ret Int {
-  ret s.length()
+func consume(string: own String) ret Int {
+  ret string.length()
 }
 
 # own param moved onward via `own` (the addOverride chain shape).
@@ -35,7 +35,7 @@ func main() {
   # reads as empty afterwards (moved-out, not dangling).
   var gone: String = ""
   gone = gone.concat(other: "abcdef")
-  let n: Int = consume(s: own gone)
+  let n: Int = consume(string: own gone)
   log("consumed {n} moved-len {gone.length()}")
 
   # Chained own-param forwarding.
