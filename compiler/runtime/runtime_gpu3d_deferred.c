@@ -165,7 +165,13 @@ static bool gb_taa_have_history = false;
  * successive frames carry different information. */
 static float gb_jitter_x = 0.0f, gb_jitter_y = 0.0f;
 static int   gb_taa_frame = 0;
-static bool  gb_taa_enabled = true;
+/* DEFAULT OFF: FXAA is the default anti-aliasing, TAA is opt-in
+ * (rae_gb_set_taa_enabled(1) / RendererDeferred.setTaaEnabled(on: true)).
+ * The TAA resolve is the minimal recipe (8-bit motion channel, 3x3 min/max
+ * clamp, fixed 0.9 blend, no mip bias) and blurs/ghosts on detailed top-down
+ * terrain and constant crowd motion; FXAA is ghost-free and cheaper. The
+ * TAA quality fixes are queued as POSTPONED tasks. */
+static bool  gb_taa_enabled = false;
 
 /* DISTANCE FOG (#57, per-app). Off by default so every deferred example is
  * byte-identical. An app opts in with rae_gb_set_fog(1, r,g,b, start, end):
