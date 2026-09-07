@@ -81,6 +81,7 @@ type SettingsState {
   sceneCount: Int
   speed: Float
   toon: Bool
+  taa: Bool     # anti-aliasing: TAA on, or (default) FXAA
   skyModel: SettingsSkyModel
   hour: Float
   # Drag state kept FLAT here (a Bool, not a nested Slider). Nested-field `mod`
@@ -134,6 +135,7 @@ func createSettingsState(scene: view Int, sceneCount: view Int, speed: view Floa
     sceneCount: sceneCount
     speed: speed
     toon: toon
+    taa: false
     skyModel: skyModel
     hour: hour
     timeDragging: false
@@ -295,6 +297,10 @@ func settingsHandleAction(settingsState: mod SettingsState, actionId: view Strin
   }
   if actionId is "settings.toon" {
     settingsState.toon = settingsState.toon is false
+    ret true
+  }
+  if actionId is "settings.taa" {
+    settingsState.taa = settingsState.taa is false
     ret true
   }
   if actionId is "settings.anim.slower" {
@@ -459,6 +465,8 @@ func settingsApplyToWorld(settingsState: view SettingsState, world: mod UiWorld)
 
   setNodeFillSlot(world: world, nodeId: "SettingsToonButton",
                   slot: settingsSlotFor(on: settingsState.toon))
+  setNodeFillSlot(world: world, nodeId: "SettingsTaaButton",
+                  slot: settingsSlotFor(on: settingsState.taa))
   setNodeFillSlot(world: world, nodeId: "SettingsAnimTimeButton",
                   slot: settingsSlotFor(on: settingsState.animateTime))
   setNodeFillSlot(world: world, nodeId: "SettingsSkyHosek",
