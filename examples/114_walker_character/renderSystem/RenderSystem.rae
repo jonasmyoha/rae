@@ -55,7 +55,7 @@ open app3d/RenderScale
 
 # The deferred renderer + dynamic-resolution controller (#552). Lives with the
 # RenderSystem — the App just aggregates it.
-type RenderState {
+type RenderSystem {
   renderer: DeferredRenderer
   drs: RenderScaleController
   shadowLogged: Bool
@@ -64,7 +64,7 @@ type RenderState {
 # The shadow pass: fit cascades to this frame, then rasterise every caster
 # (ground, props, the character's skinned parts + crowd). Its own function so the
 # match arm stays a one-liner (and the systems refactor #543 gives it a home).
-func renderShadowPass(cam: mod CameraState, character: mod CharacterState, io: mod InputUi, render: mod RenderState, terrain: mod InfiniteTerrain, world: mod GameWorld, aspect: copy Float, palette: view List(Float)) {
+func renderShadowPass(cam: mod CameraSystem, character: mod CharacterSystem, io: mod InputSystem, render: mod RenderSystem, terrain: mod TerrainSystem, world: mod GameWorld, aspect: copy Float, palette: view List(Float)) {
   let cascades: ShadowCascades = fitShadowCascades(
     camPos: cam.camera.position, camTarget: cam.camera.target,
     fovYDeg: cam.camera.fovYDeg, aspect: aspect,
@@ -100,7 +100,7 @@ func renderShadowPass(cam: mod CameraState, character: mod CharacterState, io: m
 # The G-buffer pass: grass compute first, then the geometry — biome-splat ground,
 # scene, instanced props, and the character's skinned parts + idle crowd — then
 # the grass draw, all into one G-buffer pass.
-func renderGbufferPass(cache: mod GbufferCache, cam: mod CameraState, character: mod CharacterState, splashes: mod ParticleSystem, terrain: mod InfiniteTerrain, world: mod GameWorld, aspect: copy Float, palette: view List(Float), t: copy Float, dt: copy Float, profiler: mod Profiler, grassCompute: mod GrassCompute) {
+func renderGbufferPass(cache: mod GbufferCache, cam: mod CameraSystem, character: mod CharacterSystem, splashes: mod ParticleSystem, terrain: mod TerrainSystem, world: mod GameWorld, aspect: copy Float, palette: view List(Float), t: copy Float, dt: copy Float, profiler: mod Profiler, grassCompute: mod GrassCompute) {
   var grassToonGen: Int = 0
   if character.toon { grassToonGen = 1 }
   let grassView: GrassViewSettings = GrassConfig.grassThirdPersonSettings(groundColor: walkerGroundColor())
@@ -156,7 +156,7 @@ func renderGbufferPass(cache: mod GbufferCache, cam: mod CameraState, character:
 }
 
 # ----- render phase: animation sample + render-graph walk ------------------
-func renderApp(cam: mod CameraState, character: mod CharacterState, frame: mod Frame, io: mod InputUi, render: mod RenderState, emptyWorld: view World3d, world: mod GameWorld, terrain: mod InfiniteTerrain, splashes: mod ParticleSystem, profiler: mod Profiler, grassCompute: mod GrassCompute) {
+func renderApp(cam: mod CameraSystem, character: mod CharacterSystem, frame: mod Frame, io: mod InputSystem, render: mod RenderSystem, emptyWorld: view World3d, world: mod GameWorld, terrain: mod TerrainSystem, splashes: mod ParticleSystem, profiler: mod Profiler, grassCompute: mod GrassCompute) {
   frame.renderedOnce = true
   io.lastLogRevision = io.logView.revision
   let dt: Float = frame.dt

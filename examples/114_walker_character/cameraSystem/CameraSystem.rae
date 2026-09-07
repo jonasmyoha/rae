@@ -1,12 +1,12 @@
 # Camera system for the walker example (#548).
 #
-# CameraState (rig + camera + scene light + Hosek dataset) and cameraUpdate,
+# CameraSystem (rig + camera + scene light + Hosek dataset) and cameraUpdate,
 # extracted from app.rae with behaviour unchanged. cameraUpdate runs the same
 # operations in the same order as before; it returns a small CameraTick because
 # the touch-stick state it computes (updateWalkerTouch) is consumed by character
 # movement AND the camera-moved flag drives the render decision. joyActive is
 # really input's business — it rides here until #545 splits input out. Example-
-# 114 files are siblings that merge into one module, so App/CharacterState/the
+# 114 files are siblings that merge into one module, so App/CharacterSystem/the
 # focus-Z consts (character.rae) and the stdlib helpers all resolve cross-file.
 
 import Math
@@ -65,7 +65,7 @@ open ui/renderSystem/RenderSystem
 # sits at the focus target oriented by yaw/pitch; the camera hangs a fixed
 # distance behind it. TransformSystem composes the child's world position, which
 # IS the camera eye — replacing the hand-rolled orbitEye trig in applyCameraRig.
-type CameraState {
+type CameraSystem {
   camera: Camera3d
   rig: CameraRig
   light: Light3d
@@ -76,7 +76,7 @@ type CameraState {
 
 # The two entity ids of the rig->camera relation. Rae has no lightweight tuple
 # (see docs/ecs-language-wishlist.md), so a named 2-field carrier hands both ids
-# back from setup to the CameraState literal.
+# back from setup to the CameraSystem literal.
 type CameraRigLink {
   rigEntity: EntityId
   camEntity: EntityId
@@ -100,7 +100,7 @@ func createCameraRigLink(world: mod GameWorld) ret CameraRigLink {
 # camEntity's local offset is (0, -distance, 0). TransformSystem folds child onto
 # parent, and the composed world translation IS the eye. Free mode has no orbit
 # rig, so it keeps the direct fly-camera placement.
-func applyCameraRigHierarchy(cam: mod CameraState, world: mod GameWorld) {
+func applyCameraRigHierarchy(cam: mod CameraSystem, world: mod GameWorld) {
   if cam.rig.mode is not CameraRigMode.free {
     let qz: Quat = Quat.fromAxisAngle(axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: cam.rig.viewYaw)
     let qx: Quat = Quat.fromAxisAngle(axis: Vec3.create(x: 1.0, y: 0.0, z: 0.0), angle: 0.0 - cam.rig.viewOrbitPitch)
@@ -134,10 +134,10 @@ type CameraTick {
   cameraMoved: Bool
 }
 
-# #743: consumes the narrow state it needs — the CameraState, the input/UI
+# #743: consumes the narrow state it needs — the CameraSystem, the input/UI
 # bundle, the persist dirty flag, and the world + hero entity to read the
 # followed controller — not the whole App.
-func cameraUpdate(cam: mod CameraState, io: mod InputUi, persist: mod PersistState,
+func cameraUpdate(cam: mod CameraSystem, io: mod InputSystem, persist: mod PersistState,
                   world: view GameWorld, heroEntity: view EntityId, dt: copy Float) ret CameraTick {
   let previousMode: CameraRigMode = cam.rig.mode
   if handleCameraBar(input: io.ui, rig: cam.rig, camera: cam.camera) { persist.stateDirty = true }

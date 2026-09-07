@@ -99,7 +99,7 @@ func createPropInstancer(mesh: view MeshHandle, material: view Material3d,
   }
 }
 
-type InfiniteTerrain {
+type TerrainSystem {
   centreCellX: Int
   centreCellY: Int
   groundZ: Float
@@ -207,7 +207,7 @@ func slotCellY(centreCellY: view Int, slot: view Int) ret Int {
 
 # Rewrite a tile's mesh so its vertices carry the ABSOLUTE world height of the
 # cell it now covers. Normals from central differences of the height function.
-func reshapeTerrainTile(terrain: mod InfiniteTerrain, meshId: view Int,
+func reshapeTerrainTile(terrain: mod TerrainSystem, meshId: view Int,
                         cellX: view Int, cellY: view Int) {
   if meshId < 1 { ret }
   let tileSize: Float = terrainCellSize + 0.04
@@ -248,7 +248,7 @@ func reshapeTerrainTile(terrain: mod InfiniteTerrain, meshId: view Int,
 # Re-place every prop/tile entity onto the world cell its pool slot now maps to.
 # A single query over the PropKind table drives placement; no per-slot,
 # per-kind list bookkeeping.
-func updateInfiniteTerrain(terrain: mod InfiniteTerrain, world: mod GameWorld,
+func updateInfiniteTerrain(terrain: mod TerrainSystem, world: mod GameWorld,
                            playerPosition: view Vec3) ret Bool {
   let cellX: Int = Math.floor(x: playerPosition.x / terrainCellSize).toInt()
   let cellY: Int = Math.floor(x: playerPosition.y / terrainCellSize).toInt()
@@ -294,7 +294,7 @@ func gatherKind(prop: mod PropInstancer, model: view Mat4) {
   addInstance(batch: prop.batch, model: model, prevModel: model, material: prop.material)
 }
 
-func drawTerrainProps(terrain: mod InfiniteTerrain, world: view GameWorld) {
+func drawTerrainProps(terrain: mod TerrainSystem, world: view GameWorld) {
   resetInstanceBatch(batch: terrain.rockProp.batch)
   resetInstanceBatch(batch: terrain.bushProp.batch)
   resetInstanceBatch(batch: terrain.flowerProp.batch)
@@ -334,7 +334,7 @@ func drawTerrainProps(terrain: mod InfiniteTerrain, world: view GameWorld) {
   drawInstances(batch: terrain.tallCrownProp.batch)
 }
 
-func drawTerrainGround(cache: mod GbufferCache, terrain: view InfiniteTerrain, world: view GameWorld, time: copy Float) {
+func drawTerrainGround(cache: mod GbufferCache, terrain: view TerrainSystem, world: view GameWorld, time: copy Float) {
   loop var i: Int = 0, i < componentCount(this: world.tileMeshes), ++i {
     let entity: EntityId = componentEntityAt(this: world.tileMeshes, i: i)
     let tile: TileMesh = componentDataAt(this: world.tileMeshes, i: i)
@@ -353,7 +353,7 @@ func castKind(mesh: view MeshHandle, model: view Mat4) {
   drawShadowCaster(mesh: mesh, model: model)
 }
 
-func drawTerrainPropsShadow(terrain: view InfiniteTerrain, world: view GameWorld) {
+func drawTerrainPropsShadow(terrain: view TerrainSystem, world: view GameWorld) {
   loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
     let entity: EntityId = componentEntityAt(this: world.propKinds, i: i)
     let pk: PropKind = componentDataAt(this: world.propKinds, i: i)
@@ -381,7 +381,7 @@ func setPropInstancerToon(prop: mod PropInstancer, toon: view Bool) {
   prop.material.toon = toon
 }
 
-func setInfiniteTerrainToon(terrain: mod InfiniteTerrain, toon: view Bool) {
+func setInfiniteTerrainToon(terrain: mod TerrainSystem, toon: view Bool) {
   if terrain.toon is toon { ret }
   terrain.toon = toon
   setPropInstancerToon(prop: terrain.rockProp, toon: toon)
@@ -411,8 +411,8 @@ func spawnProp(world: mod GameWorld, kind: view Int, slot: view Int) ret EntityI
   ret entity
 }
 
-func createInfiniteTerrain(world: mod GameWorld, assets: view String,
-                           groundZ: view Float) ret InfiniteTerrain {
+func createTerrainSystem(world: mod GameWorld, assets: view String,
+                           groundZ: view Float) ret TerrainSystem {
   let tilePlane: MeshData = makePlane(size: terrainCellSize + 0.04,
                                       segments: terrainTileSegments)
   let broadTrunk: MeshHandle = terrainMesh(path: "{assets}environment/tree_broad_trunk.glb")
@@ -456,7 +456,7 @@ func createInfiniteTerrain(world: mod GameWorld, assets: view String,
     let unusedGrassB: EntityId = spawnProp(world: world, kind: kindGrassB, slot: slot)
   }
 
-  var terrain: InfiniteTerrain = {
+  var terrain: TerrainSystem = {
     centreCellX: 1000000000, centreCellY: 1000000000,
     groundZ: groundZ, toon: true,
     scratchVerts: own scratch,

@@ -47,7 +47,7 @@ type GrassBlade {
   slot: Int
 }
 
-type GrassField {
+type GrassSystem {
   centreCellX: Int
   centreCellY: Int
   groundZ: Float
@@ -84,7 +84,7 @@ func placeGrassBlade(cellX: view Int, cellY: view Int, slotInCell: view Int,
 # of cells now around the player. Returns true when it re-placed. Each blade's
 # own `slot` fixes its cell + clump, so iterating the component table in any
 # order re-places the whole field correctly.
-func updateGrassField(field: mod GrassField, world: mod GameWorld,
+func updateGrassField(field: mod GrassSystem, world: mod GameWorld,
                       playerPosition: view Vec3) ret Bool {
   let cellX: Int = Math.floor(x: playerPosition.x / terrainCellSize).toInt()
   let cellY: Int = Math.floor(x: playerPosition.y / terrainCellSize).toInt()
@@ -120,7 +120,7 @@ func grassGust(phase: view Float, baseX: view Float, time: view Float) ret Float
 # (so TAA gets correct motion while the field waves), plus a per-blade green —
 # then one instanced draw for the whole field. The matrices and the record
 # layout are gbuffer's Rae helpers; nothing here touches raw float offsets.
-func drawGrassField(field: mod GrassField, world: view GameWorld,
+func drawGrassField(field: mod GrassSystem, world: view GameWorld,
                     time: view Float, dt: view Float, toon: view Int) {
   loop var index: Int = 0, index < componentCount(this: world.grassBlades), ++index {
     let blade: GrassBlade = componentDataAt(this: world.grassBlades, i: index)
@@ -143,8 +143,8 @@ func drawGrassField(field: mod GrassField, world: view GameWorld,
                       count: grassBladeCount)
 }
 
-func createGrassField(world: mod GameWorld, assets: view String,
-                      groundZ: view Float) ret GrassField {
+func createGrassSystem(world: mod GameWorld, assets: view String,
+                      groundZ: view Float) ret GrassSystem {
   let grassMesh: MeshHandle = terrainMesh(path: "{assets}environment/grass.glb")
   # One blade entity per pool slot; the first updateGrassField wrap re-places
   # them onto the cells around the player.
@@ -158,7 +158,7 @@ func createGrassField(world: mod GameWorld, assets: view String,
   loop var floatIndex: Int = 0, floatIndex < grassRecordFloats, ++floatIndex {
     records.add(value: 0.0)
   }
-  ret GrassField {
+  ret GrassSystem {
     centreCellX: 1000000000, centreCellY: 1000000000,
     groundZ: groundZ, meshId: grassMesh.id,
     records: own records

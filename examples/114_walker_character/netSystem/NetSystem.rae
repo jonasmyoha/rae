@@ -14,13 +14,13 @@ open ecs/Transform
 open ecs/World
 
 # role: 0 = offline, 1 = server, 2 = client. tick counts published local frames.
-type NetState {
+type NetSystem {
   role: Int
   tick: Int
 }
 
 # A joined remote player. `remoteId` is the transport-assigned peer id; `role`
-# mirrors NetState.role for that peer; `controlled` is the character ENTITY this
+# mirrors NetSystem.role for that peer; `controlled` is the character ENTITY this
 # remote player drives (noEntity until it is assigned one). A remote player's
 # input will arrive here instead of from a local device.
 type NetPlayer {
@@ -57,7 +57,7 @@ func netPlayerCount(world: view GameWorld) ret Int {
 # Pull remote players' intents in before the local sim. Iterates the NetPlayer
 # table — a real system. Offline there are no joined players, so it is a no-op;
 # a transport fills the loop body (apply each peer's intent to its `controlled`).
-func netApplyRemote(net: mod NetState, world: mod GameWorld) {
+func netApplyRemote(net: mod NetSystem, world: mod GameWorld) {
   loop var i: Int = 0, i < componentCount(this: world.netPlayers), ++i {
     # Offline: no wire, so nothing to apply. A transport reads the i-th
     # NetPlayer's latest intent here and drives its `controlled` character
@@ -67,7 +67,7 @@ func netApplyRemote(net: mod NetState, world: mod GameWorld) {
 
 # Publish the local player's intent after the sim. Offline: just advance the
 # tick so the seam is observably live.
-func netPublishIntent(net: mod NetState, world: mod GameWorld) {
+func netPublishIntent(net: mod NetSystem, world: mod GameWorld) {
   net.tick = net.tick + 1
 }
 
