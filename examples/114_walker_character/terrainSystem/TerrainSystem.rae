@@ -207,7 +207,7 @@ func slotCellY(centreCellY: view Int, slot: view Int) ret Int {
 
 # Rewrite a tile's mesh so its vertices carry the ABSOLUTE world height of the
 # cell it now covers. Normals from central differences of the height function.
-func reshapeTerrainTile(terrain: mod TerrainSystem, meshId: view Int,
+func reshapeTerrainTile(terrainSystem: mod TerrainSystem, meshId: view Int,
                         cellX: view Int, cellY: view Int) {
   if meshId < 1 { ret }
   let tileSize: Float = terrainCellSize + 0.04
@@ -222,41 +222,41 @@ func reshapeTerrainTile(terrain: mod TerrainSystem, meshId: view Int,
       let fx: Float = xi.toFloat() / terrainTileSegments.toFloat()
       let localX: Float = (fx - 0.5) * tileSize
       let worldX: Float = centreX + localX
-      let height: Float = terrainHeightAt(x: worldX, y: worldY, groundZ: terrain.groundZ)
-      let slopeX: Float = (terrainHeightAt(x: worldX + eps, y: worldY, groundZ: terrain.groundZ)
-        - terrainHeightAt(x: worldX - eps, y: worldY, groundZ: terrain.groundZ)) / (eps * 2.0)
-      let slopeY: Float = (terrainHeightAt(x: worldX, y: worldY + eps, groundZ: terrain.groundZ)
-        - terrainHeightAt(x: worldX, y: worldY - eps, groundZ: terrain.groundZ)) / (eps * 2.0)
+      let height: Float = terrainHeightAt(x: worldX, y: worldY, groundZ: terrainSystem.groundZ)
+      let slopeX: Float = (terrainHeightAt(x: worldX + eps, y: worldY, groundZ: terrainSystem.groundZ)
+        - terrainHeightAt(x: worldX - eps, y: worldY, groundZ: terrainSystem.groundZ)) / (eps * 2.0)
+      let slopeY: Float = (terrainHeightAt(x: worldX, y: worldY + eps, groundZ: terrainSystem.groundZ)
+        - terrainHeightAt(x: worldX, y: worldY - eps, groundZ: terrainSystem.groundZ)) / (eps * 2.0)
       let inverseLength: Float = 1.0
         / Math.sqrt(x: slopeX * slopeX + slopeY * slopeY + 1.0)
       let base: Int = (yi * (terrainTileSegments + 1) + xi) * 8
-      terrain.scratchVerts.set(index: base, value: localX)
-      terrain.scratchVerts.set(index: base + 1, value: localY)
-      terrain.scratchVerts.set(index: base + 2, value: height)
-      terrain.scratchVerts.set(index: base + 3, value: 0.0 - slopeX * inverseLength)
-      terrain.scratchVerts.set(index: base + 4, value: 0.0 - slopeY * inverseLength)
-      terrain.scratchVerts.set(index: base + 5, value: inverseLength)
-      terrain.scratchVerts.set(index: base + 6, value: fx)
-      terrain.scratchVerts.set(index: base + 7, value: fy)
+      terrainSystem.scratchVerts.set(index: base, value: localX)
+      terrainSystem.scratchVerts.set(index: base + 1, value: localY)
+      terrainSystem.scratchVerts.set(index: base + 2, value: height)
+      terrainSystem.scratchVerts.set(index: base + 3, value: 0.0 - slopeX * inverseLength)
+      terrainSystem.scratchVerts.set(index: base + 4, value: 0.0 - slopeY * inverseLength)
+      terrainSystem.scratchVerts.set(index: base + 5, value: inverseLength)
+      terrainSystem.scratchVerts.set(index: base + 6, value: fx)
+      terrainSystem.scratchVerts.set(index: base + 7, value: fy)
     }
   }
   updateMeshVerts(mesh: meshHandle(id: meshId, generation: 0),
-                  verts: terrain.scratchVerts, vertCount: terrainTileVerts)
+                  verts: terrainSystem.scratchVerts, vertCount: terrainTileVerts)
 }
 
 # ----- streaming -----------------------------------------------------
 # Re-place every prop/tile entity onto the world cell its pool slot now maps to.
 # A single query over the PropKind table drives placement; no per-slot,
 # per-kind list bookkeeping.
-func updateInfiniteTerrain(terrain: mod TerrainSystem, world: mod GameWorld,
+func updateInfiniteTerrain(terrainSystem: mod TerrainSystem, world: mod GameWorld,
                            playerPosition: view Vec3) ret Bool {
   let cellX: Int = Math.floor(x: playerPosition.x / terrainCellSize).toInt()
   let cellY: Int = Math.floor(x: playerPosition.y / terrainCellSize).toInt()
-  if cellX is terrain.centreCellX and cellY is terrain.centreCellY {
+  if cellX is terrainSystem.centreCellX and cellY is terrainSystem.centreCellY {
     ret false
   }
-  terrain.centreCellX = cellX
-  terrain.centreCellY = cellY
+  terrainSystem.centreCellX = cellX
+  terrainSystem.centreCellY = cellY
 
   loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
     let entity: EntityId = componentEntityAt(this: world.propKinds, i: i)
@@ -265,7 +265,7 @@ func updateInfiniteTerrain(terrain: mod TerrainSystem, world: mod GameWorld,
     let ccy: Int = slotCellY(centreCellY: cellY, slot: pk.slot)
     if pk.kind is kindTile {
       let tile: TileMesh = componentGet(this: world.tileMeshes, entity: entity)
-      reshapeTerrainTile(terrain: terrain, meshId: tile.meshId, cellX: ccx, cellY: ccy)
+      reshapeTerrainTile(terrainSystem: terrainSystem, meshId: tile.meshId, cellX: ccx, cellY: ccy)
       componentSet(this: world.transforms, entity: entity, data: Transform3D {
         position: Vec3.create(x: ccx.toFloat() * terrainCellSize,
                               y: ccy.toFloat() * terrainCellSize, z: 0.0),
@@ -279,7 +279,7 @@ func updateInfiniteTerrain(terrain: mod TerrainSystem, world: mod GameWorld,
         componentSet(this: world.treeVariants, entity: entity, data: TreeVariant { broad: broad })
       }
       let t: Transform3D = kindTransform(kind: pk.kind, broad: broad,
-        cellX: ccx, cellY: ccy, groundZ: terrain.groundZ)
+        cellX: ccx, cellY: ccy, groundZ: terrainSystem.groundZ)
       componentSet(this: world.transforms, entity: entity, data: t)
       pk.active = terrainPropAllowed(x: t.position.x, y: t.position.y,
         minGrass: kindMinGrass(kind: pk.kind))
@@ -294,47 +294,47 @@ func gatherKind(prop: mod PropInstancer, model: view Mat4) {
   addInstance(batch: prop.batch, model: model, prevModel: model, material: prop.material)
 }
 
-func drawTerrainProps(terrain: mod TerrainSystem, world: view GameWorld) {
-  resetInstanceBatch(batch: terrain.rockProp.batch)
-  resetInstanceBatch(batch: terrain.bushProp.batch)
-  resetInstanceBatch(batch: terrain.flowerProp.batch)
-  resetInstanceBatch(batch: terrain.grassProp.batch)
-  resetInstanceBatch(batch: terrain.broadTrunkProp.batch)
-  resetInstanceBatch(batch: terrain.broadCrownProp.batch)
-  resetInstanceBatch(batch: terrain.tallTrunkProp.batch)
-  resetInstanceBatch(batch: terrain.tallCrownProp.batch)
+func drawTerrainProps(terrainSystem: mod TerrainSystem, world: view GameWorld) {
+  resetInstanceBatch(batch: terrainSystem.rockProp.batch)
+  resetInstanceBatch(batch: terrainSystem.bushProp.batch)
+  resetInstanceBatch(batch: terrainSystem.flowerProp.batch)
+  resetInstanceBatch(batch: terrainSystem.grassProp.batch)
+  resetInstanceBatch(batch: terrainSystem.broadTrunkProp.batch)
+  resetInstanceBatch(batch: terrainSystem.broadCrownProp.batch)
+  resetInstanceBatch(batch: terrainSystem.tallTrunkProp.batch)
+  resetInstanceBatch(batch: terrainSystem.tallCrownProp.batch)
   loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
     let entity: EntityId = componentEntityAt(this: world.propKinds, i: i)
     let pk: PropKind = componentDataAt(this: world.propKinds, i: i)
     if pk.active and pk.kind is not kindTile {
       let model: Mat4 = transform3dToMatrix(t: componentGet(this: world.transforms, entity: entity))
-      if pk.kind is kindRock { gatherKind(prop: terrain.rockProp, model: model) }
-      if pk.kind is kindBush { gatherKind(prop: terrain.bushProp, model: model) }
-      if pk.kind is kindFlower { gatherKind(prop: terrain.flowerProp, model: model) }
-      if pk.kind is kindGrassA { gatherKind(prop: terrain.grassProp, model: model) }
-      if pk.kind is kindGrassB { gatherKind(prop: terrain.grassProp, model: model) }
+      if pk.kind is kindRock { gatherKind(prop: terrainSystem.rockProp, model: model) }
+      if pk.kind is kindBush { gatherKind(prop: terrainSystem.bushProp, model: model) }
+      if pk.kind is kindFlower { gatherKind(prop: terrainSystem.flowerProp, model: model) }
+      if pk.kind is kindGrassA { gatherKind(prop: terrainSystem.grassProp, model: model) }
+      if pk.kind is kindGrassB { gatherKind(prop: terrainSystem.grassProp, model: model) }
       if pk.kind is kindTree {
         if componentGet(this: world.treeVariants, entity: entity).broad {
-          gatherKind(prop: terrain.broadTrunkProp, model: model)
-          gatherKind(prop: terrain.broadCrownProp, model: model)
+          gatherKind(prop: terrainSystem.broadTrunkProp, model: model)
+          gatherKind(prop: terrainSystem.broadCrownProp, model: model)
         } else {
-          gatherKind(prop: terrain.tallTrunkProp, model: model)
-          gatherKind(prop: terrain.tallCrownProp, model: model)
+          gatherKind(prop: terrainSystem.tallTrunkProp, model: model)
+          gatherKind(prop: terrainSystem.tallCrownProp, model: model)
         }
       }
     }
   }
-  drawInstances(batch: terrain.rockProp.batch)
-  drawInstances(batch: terrain.bushProp.batch)
-  drawInstances(batch: terrain.flowerProp.batch)
-  drawInstances(batch: terrain.grassProp.batch)
-  drawInstances(batch: terrain.broadTrunkProp.batch)
-  drawInstances(batch: terrain.broadCrownProp.batch)
-  drawInstances(batch: terrain.tallTrunkProp.batch)
-  drawInstances(batch: terrain.tallCrownProp.batch)
+  drawInstances(batch: terrainSystem.rockProp.batch)
+  drawInstances(batch: terrainSystem.bushProp.batch)
+  drawInstances(batch: terrainSystem.flowerProp.batch)
+  drawInstances(batch: terrainSystem.grassProp.batch)
+  drawInstances(batch: terrainSystem.broadTrunkProp.batch)
+  drawInstances(batch: terrainSystem.broadCrownProp.batch)
+  drawInstances(batch: terrainSystem.tallTrunkProp.batch)
+  drawInstances(batch: terrainSystem.tallCrownProp.batch)
 }
 
-func drawTerrainGround(cache: mod GbufferCache, terrain: view TerrainSystem, world: view GameWorld, time: copy Float) {
+func drawTerrainGround(cache: mod GbufferCache, terrainSystem: view TerrainSystem, world: view GameWorld, time: copy Float) {
   loop var i: Int = 0, i < componentCount(this: world.tileMeshes), ++i {
     let entity: EntityId = componentEntityAt(this: world.tileMeshes, i: i)
     let tile: TileMesh = componentDataAt(this: world.tileMeshes, i: i)
@@ -353,24 +353,24 @@ func castKind(mesh: view MeshHandle, model: view Mat4) {
   drawShadowCaster(mesh: mesh, model: model)
 }
 
-func drawTerrainPropsShadow(terrain: view TerrainSystem, world: view GameWorld) {
+func drawTerrainPropsShadow(terrainSystem: view TerrainSystem, world: view GameWorld) {
   loop var i: Int = 0, i < componentCount(this: world.propKinds), ++i {
     let entity: EntityId = componentEntityAt(this: world.propKinds, i: i)
     let pk: PropKind = componentDataAt(this: world.propKinds, i: i)
     if pk.active and pk.kind is not kindTile {
       let model: Mat4 = transform3dToMatrix(t: componentGet(this: world.transforms, entity: entity))
-      if pk.kind is kindRock { castKind(mesh: terrain.rockProp.mesh, model: model) }
-      if pk.kind is kindBush { castKind(mesh: terrain.bushProp.mesh, model: model) }
-      if pk.kind is kindFlower { castKind(mesh: terrain.flowerProp.mesh, model: model) }
-      if pk.kind is kindGrassA { castKind(mesh: terrain.grassProp.mesh, model: model) }
-      if pk.kind is kindGrassB { castKind(mesh: terrain.grassProp.mesh, model: model) }
+      if pk.kind is kindRock { castKind(mesh: terrainSystem.rockProp.mesh, model: model) }
+      if pk.kind is kindBush { castKind(mesh: terrainSystem.bushProp.mesh, model: model) }
+      if pk.kind is kindFlower { castKind(mesh: terrainSystem.flowerProp.mesh, model: model) }
+      if pk.kind is kindGrassA { castKind(mesh: terrainSystem.grassProp.mesh, model: model) }
+      if pk.kind is kindGrassB { castKind(mesh: terrainSystem.grassProp.mesh, model: model) }
       if pk.kind is kindTree {
         if componentGet(this: world.treeVariants, entity: entity).broad {
-          castKind(mesh: terrain.broadTrunkProp.mesh, model: model)
-          castKind(mesh: terrain.broadCrownProp.mesh, model: model)
+          castKind(mesh: terrainSystem.broadTrunkProp.mesh, model: model)
+          castKind(mesh: terrainSystem.broadCrownProp.mesh, model: model)
         } else {
-          castKind(mesh: terrain.tallTrunkProp.mesh, model: model)
-          castKind(mesh: terrain.tallCrownProp.mesh, model: model)
+          castKind(mesh: terrainSystem.tallTrunkProp.mesh, model: model)
+          castKind(mesh: terrainSystem.tallCrownProp.mesh, model: model)
         }
       }
     }
@@ -381,17 +381,17 @@ func setPropInstancerToon(prop: mod PropInstancer, toon: view Bool) {
   prop.material.toon = toon
 }
 
-func setInfiniteTerrainToon(terrain: mod TerrainSystem, toon: view Bool) {
-  if terrain.toon is toon { ret }
-  terrain.toon = toon
-  setPropInstancerToon(prop: terrain.rockProp, toon: toon)
-  setPropInstancerToon(prop: terrain.bushProp, toon: toon)
-  setPropInstancerToon(prop: terrain.flowerProp, toon: toon)
-  setPropInstancerToon(prop: terrain.grassProp, toon: toon)
-  setPropInstancerToon(prop: terrain.broadTrunkProp, toon: toon)
-  setPropInstancerToon(prop: terrain.broadCrownProp, toon: toon)
-  setPropInstancerToon(prop: terrain.tallTrunkProp, toon: toon)
-  setPropInstancerToon(prop: terrain.tallCrownProp, toon: toon)
+func setInfiniteTerrainToon(terrainSystem: mod TerrainSystem, toon: view Bool) {
+  if terrainSystem.toon is toon { ret }
+  terrainSystem.toon = toon
+  setPropInstancerToon(prop: terrainSystem.rockProp, toon: toon)
+  setPropInstancerToon(prop: terrainSystem.bushProp, toon: toon)
+  setPropInstancerToon(prop: terrainSystem.flowerProp, toon: toon)
+  setPropInstancerToon(prop: terrainSystem.grassProp, toon: toon)
+  setPropInstancerToon(prop: terrainSystem.broadTrunkProp, toon: toon)
+  setPropInstancerToon(prop: terrainSystem.broadCrownProp, toon: toon)
+  setPropInstancerToon(prop: terrainSystem.tallTrunkProp, toon: toon)
+  setPropInstancerToon(prop: terrainSystem.tallCrownProp, toon: toon)
 }
 
 func terrainMaterial(color: view Vec3, roughness: view Float) ret Material3d {
@@ -456,7 +456,7 @@ func createTerrainSystem(world: mod GameWorld, assets: view String,
     let unusedGrassB: EntityId = spawnProp(world: world, kind: kindGrassB, slot: slot)
   }
 
-  var terrain: TerrainSystem = {
+  var terrainSystem: TerrainSystem = {
     centreCellX: 1000000000, centreCellY: 1000000000,
     groundZ: groundZ, toon: true,
     scratchVerts: own scratch,
@@ -469,7 +469,7 @@ func createTerrainSystem(world: mod GameWorld, assets: view String,
     tallTrunkProp: own createPropInstancer(mesh: tallTrunk, material: trunkMat, capacity: terrainCellCount),
     tallCrownProp: own createPropInstancer(mesh: tallCrown, material: crownMat, capacity: terrainCellCount)
   }
-  ret own terrain
+  ret own terrainSystem
 }
 
 func uploadMeshDataForTerrain(mesh: view MeshData) ret MeshHandle {

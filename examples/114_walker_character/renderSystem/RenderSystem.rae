@@ -64,26 +64,26 @@ type RenderSystem {
 # The shadow pass: fit cascades to this frame, then rasterise every caster
 # (ground, props, the character's skinned parts + crowd). Its own function so the
 # match arm stays a one-liner (and the systems refactor #543 gives it a home).
-func renderShadowPass(cam: mod CameraSystem, character: mod CharacterSystem, io: mod InputSystem, render: mod RenderSystem, terrain: mod TerrainSystem, world: mod GameWorld, aspect: copy Float, palette: view List(Float)) {
+func renderShadowPass(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSystem, inputSystem: mod InputSystem, renderSystem: mod RenderSystem, terrainSystem: mod TerrainSystem, world: mod GameWorld, aspect: copy Float, palette: view List(Float)) {
   let cascades: ShadowCascades = fitShadowCascades(
-    camPos: cam.camera.position, camTarget: cam.camera.target,
-    fovYDeg: cam.camera.fovYDeg, aspect: aspect,
-    near: cam.camera.nearZ, far: 24.0, sunDir: cam.light.sunDir,
-    count: 3, resolution: drsShadowRes(drs: render.drs), lambda: 0.75, backExtent: 12.0)
-  uploadPalette(rows: palette, jointCount: jointCount(sk: character.skeleton))
-  if io.settings.shadows {
+    camPos: cameraSystem.camera.position, camTarget: cameraSystem.camera.target,
+    fovYDeg: cameraSystem.camera.fovYDeg, aspect: aspect,
+    near: cameraSystem.camera.nearZ, far: 24.0, sunDir: cameraSystem.light.sunDir,
+    count: 3, resolution: drsShadowRes(drs: renderSystem.drs), lambda: 0.75, backExtent: 12.0)
+  uploadPalette(rows: palette, jointCount: jointCount(sk: characterSystem.skeleton))
+  if inputSystem.settings.shadows {
     beginShadowPass(c: cascades)
-    drawTerrainPropsShadow(terrain: terrain, world: world)
+    drawTerrainPropsShadow(terrainSystem: terrainSystem, world: world)
     # Each caster's shadow samples the SAME palette slot its G-buffer instance
     # does (#547), so a crowd member casts its own pose. Hero = slot 0.
-    let jc: Int = jointCount(sk: character.skeleton)
+    let jc: Int = jointCount(sk: characterSystem.skeleton)
     loop var sp: Int = 0, sp < gameWorldPartCount(world: world), ++sp {
       let sh: MeshHandle = meshHandle(id: gameWorldPartAt(world: world, i: sp).meshId, generation: 1)
-      drawShadowCasterSkinned(mesh: sh, model: character.model, paletteBase: 0)
-      loop var shadowClone: Int = 0, shadowClone < character.crowdEntities.length, ++shadowClone {
-        if let member: EntityId = character.crowdEntities.copyAt(index: shadowClone) {
+      drawShadowCasterSkinned(mesh: sh, model: characterSystem.model, paletteBase: 0)
+      loop var shadowClone: Int = 0, shadowClone < characterSystem.crowdEntities.length, ++shadowClone {
+        if let member: EntityId = characterSystem.crowdEntities.copyAt(index: shadowClone) {
           let ctrl: ThirdPersonController = componentGet(this: world.controllers, entity: member)
-          let cloneModel: Mat4 = walkerWorldModel(baseModel: character.basePartModel, controller: ctrl)
+          let cloneModel: Mat4 = walkerWorldModel(baseModel: characterSystem.basePartModel, controller: ctrl)
           drawShadowCasterSkinned(mesh: sh, model: cloneModel,
                                   paletteBase: characterPaletteBase(slot: shadowClone + 1, jointCount: jc))
         }
@@ -91,34 +91,34 @@ func renderShadowPass(cam: mod CameraSystem, character: mod CharacterSystem, io:
     }
     endShadowPass()
   }
-  if render.shadowLogged is false {
+  if renderSystem.shadowLogged is false {
     log("[shadow] casters {shadowCasterCount()}, {cascades.count} cascades at {cascades.resolution}")
-    render.shadowLogged = true
+    renderSystem.shadowLogged = true
   }
 }
 
 # The G-buffer pass: grass compute first, then the geometry — biome-splat ground,
 # scene, instanced props, and the character's skinned parts + idle crowd — then
 # the grass draw, all into one G-buffer pass.
-func renderGbufferPass(cache: mod GbufferCache, cam: mod CameraSystem, character: mod CharacterSystem, splashes: mod ParticleSystem, terrain: mod TerrainSystem, world: mod GameWorld, aspect: copy Float, palette: view List(Float), t: copy Float, dt: copy Float, profiler: mod Profiler, grassCompute: mod GrassCompute) {
+func renderGbufferPass(cache: mod GbufferCache, cameraSystem: mod CameraSystem, characterSystem: mod CharacterSystem, splashes: mod ParticleSystem, terrainSystem: mod TerrainSystem, world: mod GameWorld, aspect: copy Float, palette: view List(Float), t: copy Float, dt: copy Float, profiler: mod Profiler, grassCompute: mod GrassCompute) {
   var grassToonGen: Int = 0
-  if character.toon { grassToonGen = 1 }
+  if characterSystem.toon { grassToonGen = 1 }
   let grassView: GrassViewSettings = GrassConfig.grassThirdPersonSettings(groundColor: walkerGroundColor())
-  let heroPos: Vec3 = controllerOf(world: world, entity: character.heroEntity).position
+  let heroPos: Vec3 = controllerOf(world: world, entity: characterSystem.heroEntity).position
   grassGenerate(grass: grassCompute, playerX: heroPos.x,
                 playerY: heroPos.y,
-                groundZ: character.groundZ, time: t, dt: dt, toon: grassToonGen,
-                camX: cam.camera.position.x, camY: cam.camera.position.y, camZ: cam.camera.position.z,
-                fwdX: cam.camera.target.x - cam.camera.position.x,
-                fwdY: cam.camera.target.y - cam.camera.position.y,
-                fwdZ: cam.camera.target.z - cam.camera.position.z,
+                groundZ: characterSystem.groundZ, time: t, dt: dt, toon: grassToonGen,
+                camX: cameraSystem.camera.position.x, camY: cameraSystem.camera.position.y, camZ: cameraSystem.camera.position.z,
+                fwdX: cameraSystem.camera.target.x - cameraSystem.camera.position.x,
+                fwdY: cameraSystem.camera.target.y - cameraSystem.camera.position.y,
+                fwdZ: cameraSystem.camera.target.z - cameraSystem.camera.position.z,
                 settings: grassView)
   grassDiagTick(grass: grassCompute, profiler: profiler)
-  Gbuffer.beginPass(cache: cache, camera: cam.camera, light: cam.light, aspect: aspect)
-  drawTerrainGround(cache: cache, terrain: terrain, world: world, time: t)
-  drawTerrainProps(terrain: terrain, world: world)
+  Gbuffer.beginPass(cache: cache, camera: cameraSystem.camera, light: cameraSystem.light, aspect: aspect)
+  drawTerrainGround(cache: cache, terrainSystem: terrainSystem, world: world, time: t)
+  drawTerrainProps(terrainSystem: terrainSystem, world: world)
   # Palettes (hero slot 0 + one per crowd member) were uploaded in renderApp.
-  let jc: Int = jointCount(sk: character.skeleton)
+  let jc: Int = jointCount(sk: characterSystem.skeleton)
   uploadPalette(rows: palette, jointCount: jc)
   loop var p: Int = 0, p < gameWorldPartCount(world: world), ++p {
     let part: PartRoughness = gameWorldPartAt(world: world, i: p)
@@ -128,63 +128,63 @@ func renderGbufferPass(cache: mod GbufferCache, cam: mod CameraSystem, character
       metallic: 0.0,
       roughness: part.roughness,
       emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0),
-      toon: character.toon
+      toon: characterSystem.toon
     }
-    Gbuffer.drawSkinnedInstance(cache: cache, mesh: handle, model: character.model,
-                                prevModel: character.prevModel, material: mat)
-    setInstanceBatchMesh(batch: character.crowdBatch, mesh: handle)
-    resetInstanceBatch(batch: character.crowdBatch)
-    loop var cloneDraw: Int = 0, cloneDraw < character.crowdEntities.length, ++cloneDraw {
-      if let member: EntityId = character.crowdEntities.copyAt(index: cloneDraw) {
+    Gbuffer.drawSkinnedInstance(cache: cache, mesh: handle, model: characterSystem.model,
+                                prevModel: characterSystem.prevModel, material: mat)
+    setInstanceBatchMesh(batch: characterSystem.crowdBatch, mesh: handle)
+    resetInstanceBatch(batch: characterSystem.crowdBatch)
+    loop var cloneDraw: Int = 0, cloneDraw < characterSystem.crowdEntities.length, ++cloneDraw {
+      if let member: EntityId = characterSystem.crowdEntities.copyAt(index: cloneDraw) {
         # Each crowd member samples its OWN palette slot (#547) so it holds a
         # distinct pose in this single instanced skinned draw. Its model is
         # derived from the entity's controller (#739) — no stored model.
         let ctrl: ThirdPersonController = componentGet(this: world.controllers, entity: member)
-        let cloneModel: Mat4 = walkerWorldModel(baseModel: character.basePartModel, controller: ctrl)
-        addSkinnedInstance(batch: character.crowdBatch, model: cloneModel, prevModel: cloneModel,
+        let cloneModel: Mat4 = walkerWorldModel(baseModel: characterSystem.basePartModel, controller: ctrl)
+        addSkinnedInstance(batch: characterSystem.crowdBatch, model: cloneModel, prevModel: cloneModel,
                            material: mat, paletteBase: characterPaletteBase(slot: cloneDraw + 1, jointCount: jc))
       }
     }
-    drawSkinnedInstances(cache: cache, batch: character.crowdBatch)
+    drawSkinnedInstances(cache: cache, batch: characterSystem.crowdBatch)
   }
   grassDraw(grass: grassCompute)
   # Water splashes for anything wading this frame (#84): advance + emit, then draw
   # the droplets as instanced cubes into this same G-buffer pass (particles.rae).
-  splashStep(character: character, splashes: splashes, world: world, dt: dt)
-  particleDraw(sys: splashes, toon: character.toon)
+  splashStep(characterSystem: characterSystem, splashes: splashes, world: world, dt: dt)
+  particleDraw(sys: splashes, toon: characterSystem.toon)
   Gbuffer.endPass()
 }
 
 # ----- render phase: animation sample + render-graph walk ------------------
-func renderApp(cam: mod CameraSystem, character: mod CharacterSystem, frame: mod Frame, io: mod InputSystem, render: mod RenderSystem, emptyWorld: view World3d, world: mod GameWorld, terrain: mod TerrainSystem, splashes: mod ParticleSystem, profiler: mod Profiler, grassCompute: mod GrassCompute) {
+func renderApp(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSystem, frame: mod Frame, inputSystem: mod InputSystem, renderSystem: mod RenderSystem, emptyWorld: view World3d, world: mod GameWorld, terrainSystem: mod TerrainSystem, splashes: mod ParticleSystem, profiler: mod Profiler, grassCompute: mod GrassCompute) {
   frame.renderedOnce = true
-  io.lastLogRevision = io.logView.revision
+  inputSystem.lastLogRevision = inputSystem.logView.revision
   let dt: Float = frame.dt
   let now: Float64 = frame.now
 
   var clipRate: Float = 1.0
-  if character.clipIndex is ClipKind.walkFast { clipRate = 1.6 }
-  if character.playing {
-    character.animTime = character.animTime + dt * character.speed * clipRate
+  if characterSystem.clipIndex is ClipKind.walkFast { clipRate = 1.6 }
+  if characterSystem.playing {
+    characterSystem.animTime = characterSystem.animTime + dt * characterSystem.speed * clipRate
   }
-  applySkeletonPose(sk: character.skeleton, pose: character.bindPose)
+  applySkeletonPose(sk: characterSystem.skeleton, pose: characterSystem.bindPose)
   # Which clip feeds the pose. walk and walkFast share the walk clip (walkFast is
   # it at 1.6x via clipRate above); once or-patterns land (#622) they merge.
-  match character.clipIndex {
-    case ClipKind.idle { applyClip(sk: character.skeleton, c: character.idleClip, time: character.animTime) }
-    case ClipKind.walk { applyClip(sk: character.skeleton, c: character.walkClip, time: character.animTime) }
-    case ClipKind.walkFast { applyClip(sk: character.skeleton, c: character.walkClip, time: character.animTime) }
-    case ClipKind.run { applyClip(sk: character.skeleton, c: character.runClip, time: character.animTime) }
+  match characterSystem.clipIndex {
+    case ClipKind.idle { applyClip(sk: characterSystem.skeleton, c: characterSystem.idleClip, time: characterSystem.animTime) }
+    case ClipKind.walk { applyClip(sk: characterSystem.skeleton, c: characterSystem.walkClip, time: characterSystem.animTime) }
+    case ClipKind.walkFast { applyClip(sk: characterSystem.skeleton, c: characterSystem.walkClip, time: characterSystem.animTime) }
+    case ClipKind.run { applyClip(sk: characterSystem.skeleton, c: characterSystem.runClip, time: characterSystem.animTime) }
   }
-  let transitionActive: Bool = character.transitionElapsed < clipTransitionDuration
+  let transitionActive: Bool = characterSystem.transitionElapsed < clipTransitionDuration
   if transitionActive {
-    character.transitionElapsed = character.transitionElapsed + dt
-    var blendWeight: Float = character.transitionElapsed / clipTransitionDuration
+    characterSystem.transitionElapsed = characterSystem.transitionElapsed + dt
+    var blendWeight: Float = characterSystem.transitionElapsed / clipTransitionDuration
     if blendWeight > 1.0 { blendWeight = 1.0 }
     blendWeight = blendWeight * blendWeight * (3.0 - 2.0 * blendWeight)
-    blendSkeletonPose(sk: character.skeleton, from: character.transitionFrom, weight: blendWeight)
+    blendSkeletonPose(sk: characterSystem.skeleton, from: characterSystem.transitionFrom, weight: blendWeight)
   }
-  let palette: List(Float) = buildPalette(sk: character.skeleton)
+  let palette: List(Float) = buildPalette(sk: characterSystem.skeleton)
 
   # Per-character crowd palettes (#547): upload the hero into slot 0 first (this
   # also creates the shared palette buffer on frame 0), then give each crowd
@@ -194,63 +194,63 @@ func renderApp(cam: mod CameraSystem, character: mod CharacterSystem, frame: mod
   # Each crowd member advances its OWN animation and poses into its OWN palette
   # slot (#547) — independent of the player, so member 2 can idle while member 0
   # walks. Slot 0 is the hero (uploaded first, which also creates the buffer).
-  let jc: Int = jointCount(sk: character.skeleton)
+  let jc: Int = jointCount(sk: characterSystem.skeleton)
   uploadPalette(rows: palette, jointCount: jc)
-  loop var crowdSlot: Int = 0, crowdSlot < character.crowdEntities.length, ++crowdSlot {
-    if let member: EntityId = character.crowdEntities.copyAt(index: crowdSlot) {
+  loop var crowdSlot: Int = 0, crowdSlot < characterSystem.crowdEntities.length, ++crowdSlot {
+    if let member: EntityId = characterSystem.crowdEntities.copyAt(index: crowdSlot) {
       # Advance this member's AnimationState IN PLACE (#739) — no copy/set-back.
       let anim: mod AnimationState => componentMod(this: world.animStates, entity: member)
       anim.animTime = anim.animTime + dt * clipPlaybackRate(clipIndex: anim.clipIndex)
       let memberClip: Int = anim.clipIndex
       let memberTime: Float = anim.animTime
-      let crowdPalette: List(Float) = poseCharacterPalette(character: character,
+      let crowdPalette: List(Float) = poseCharacterPalette(characterSystem: characterSystem,
         clipIndex: memberClip, animTime: memberTime)
       uploadPaletteSlot(rows: crowdPalette, jointCount: jc, slot: crowdSlot + 1)
     }
   }
 
-  applyCameraRigHierarchy(cam: cam, world: world)
-  syncCameraBar(world: io.world, rig: cam.rig, camera: cam.camera)
+  applyCameraRigHierarchy(cameraSystem: cameraSystem, world: world)
+  syncCameraBar(world: inputSystem.world, rig: cameraSystem.rig, camera: cameraSystem.camera)
   let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
   let t: Float = (now - frame.startT) as Float
 
-  loop var oi: Int = 0, oi < deferredOrderLength(r: render.renderer), ++oi {
-    let tag: Int = deferredTagAt(r: render.renderer, i: oi)
+  loop var oi: Int = 0, oi < deferredOrderLength(r: renderSystem.renderer), ++oi {
+    let tag: Int = deferredTagAt(r: renderSystem.renderer, i: oi)
     Profile.zoneBegin(profiler: profiler, name: (tag as RenderTag).toString())
     # Exhaustive over RenderTag: adding a pass is a compile error here until it is
     # handled (#624). Each pass is a helper/one-liner; the five generic passes
     # defer to renderDeferredPass (or-patterns, #622, will merge them into one arm).
     match tag {
-      case RenderTag.shadow { renderShadowPass(cam: cam, character: character, io: io, render: render, terrain: terrain, world: world, aspect: aspect, palette: palette) }
-      case RenderTag.gbuffer { renderGbufferPass(cache: render.renderer.passes.gbuffer, cam: cam, character: character, splashes: splashes, terrain: terrain, world: world, aspect: aspect, palette: palette, t: t, dt: dt, profiler: profiler, grassCompute: grassCompute) }
+      case RenderTag.shadow { renderShadowPass(cameraSystem: cameraSystem, characterSystem: characterSystem, inputSystem: inputSystem, renderSystem: renderSystem, terrainSystem: terrainSystem, world: world, aspect: aspect, palette: palette) }
+      case RenderTag.gbuffer { renderGbufferPass(cache: renderSystem.renderer.passes.gbuffer, cameraSystem: cameraSystem, characterSystem: characterSystem, splashes: splashes, terrainSystem: terrainSystem, world: world, aspect: aspect, palette: palette, t: t, dt: dt, profiler: profiler, grassCompute: grassCompute) }
       case RenderTag.ssao {
-        renderDeferredPassWorld(r: render.renderer, tag: tag, world: emptyWorld,
-                                camera: cam.camera, light: cam.light, aspect: aspect)
+        renderDeferredPassWorld(r: renderSystem.renderer, tag: tag, world: emptyWorld,
+                                camera: cameraSystem.camera, light: cameraSystem.light, aspect: aspect)
       }
       case RenderTag.depthPyramid {
-        renderDeferredPassWorld(r: render.renderer, tag: tag, world: emptyWorld,
-                                camera: cam.camera, light: cam.light, aspect: aspect)
+        renderDeferredPassWorld(r: renderSystem.renderer, tag: tag, world: emptyWorld,
+                                camera: cameraSystem.camera, light: cameraSystem.light, aspect: aspect)
       }
       case RenderTag.lighting {
-        renderDeferredPassWorld(r: render.renderer, tag: tag, world: emptyWorld,
-                                camera: cam.camera, light: cam.light, aspect: aspect)
+        renderDeferredPassWorld(r: renderSystem.renderer, tag: tag, world: emptyWorld,
+                                camera: cameraSystem.camera, light: cameraSystem.light, aspect: aspect)
       }
       case RenderTag.taa {
-        renderDeferredPassWorld(r: render.renderer, tag: tag, world: emptyWorld,
-                                camera: cam.camera, light: cam.light, aspect: aspect)
+        renderDeferredPassWorld(r: renderSystem.renderer, tag: tag, world: emptyWorld,
+                                camera: cameraSystem.camera, light: cameraSystem.light, aspect: aspect)
       }
       case RenderTag.composite {
-        renderDeferredPassWorld(r: render.renderer, tag: tag, world: emptyWorld,
-                                camera: cam.camera, light: cam.light, aspect: aspect)
+        renderDeferredPassWorld(r: renderSystem.renderer, tag: tag, world: emptyWorld,
+                                camera: cameraSystem.camera, light: cameraSystem.light, aspect: aspect)
       }
       case RenderTag.uiOverlay {
         Gpu2d.beginFrameLoad()
-        renderSystemGpu2d(world: io.world, res: io.gpuUi)
-        drawWalkerHud(logView: io.logView, gpuUi: io.gpuUi, dbg: io.dbg, moveStick: io.moveStick, panelOpen: io.settings.open)
+        renderSystemGpu2d(world: inputSystem.world, res: inputSystem.gpuUi)
+        drawWalkerHud(logView: inputSystem.logView, gpuUi: inputSystem.gpuUi, dbg: inputSystem.dbg, moveStick: inputSystem.moveStick, panelOpen: inputSystem.settings.open)
       }
       case RenderTag.present { Gpu2d.endFrame() }
     }
     Profile.zoneEnd(profiler: profiler, name: (tag as RenderTag).toString())
   }
-  capFrameSleep(drs: render.drs, frameStartSec: now)
+  capFrameSleep(drs: renderSystem.drs, frameStartSec: now)
 }
