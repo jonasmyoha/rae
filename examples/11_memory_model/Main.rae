@@ -14,9 +14,9 @@ type Point {
   y: Float
 }
 
-func updatePosition(p: mod Point, v: view Velocity) {
-  p.x = p.x + v.dx
-  p.y = p.y + v.dy
+func updatePosition(point: mod Point, v: view Velocity) {
+  point.x = point.x + v.dx
+  point.y = point.y + v.dy
 }
 
 func main() {
@@ -30,17 +30,17 @@ func main() {
   log(v1.dx)
   log("v2.dx (should be 2.0):")
   log(v2.dx)
-  let p: Point = { x: 0.0, y: 0.0 }
+  let point: Point = { x: 0.0, y: 0.0 }
   # Mutable binding
-  let pRef: mod Point => p
+  let pRef: mod Point => point
   pRef.x = 10.0
   # 3. Complex types: mod alias
   log("p.x after pRef modification (should be 10.0):")
-  log(p.x)
+  log(point.x)
   let target: Point = { x: 5.0, y: 5.0 }
   let selected: mod Point => target
   log("Selected point exists, moving it...")
-  updatePosition(p: selected, v: v1)
+  updatePosition(point: selected, v: v1)
   log("target.x after update (should be 6.0):")
   log(target.x)
 }

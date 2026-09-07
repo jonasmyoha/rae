@@ -27,11 +27,11 @@ func main() {
     ret
   }
 
-  var skeleton: Skeleton = loadSkeleton(g: characterGlb, skinIndex: 0)
+  var skeleton: Skeleton = loadSkeleton(glb: characterGlb, skinIndex: 0)
   let bindPose: SkeletonPose = captureSkeletonPose(sk: skeleton)
   let bindPalette: List(Float) = buildPalette(sk: skeleton)
-  let idleClip: Clip = loadClip(g: idleGlb, animIndex: 0, sk: skeleton)
-  let walkClip: Clip = loadClip(g: walkGlb, animIndex: 0, sk: skeleton)
+  let idleClip: Clip = loadClip(glb: idleGlb, animIndex: 0, sk: skeleton)
+  let walkClip: Clip = loadClip(glb: walkGlb, animIndex: 0, sk: skeleton)
 
   applySkeletonPose(sk: skeleton, pose: bindPose)
   applyClip(sk: skeleton, c: idleClip, time: idleClip.duration * 0.35)
