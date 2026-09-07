@@ -90,12 +90,17 @@ OBJS += $(BUILD_DIR)/rae_tinyexpr.o $(BUILD_DIR)/monocypher.o
 DEPS = $(OBJS:.o=.d)
 
 TARGET = $(BIN_DIR)/rae
-# RAE_TEST_PARALLEL=1 routes `make test` (and so tools/watch-tests.sh + the
-# devtools Test Runner tab) through the parallel case runner (#824).
-ifeq ($(RAE_TEST_PARALLEL),1)
-TEST_RUNNER = tools/run_tests_parallel.sh
-else
+# Test runner selection. The PARALLEL per-case runner (#824) is the DEFAULT for
+# `make test` (and so tools/watch-tests.sh + the devtools Test Runner tab): it
+# gives byte-identical verdicts to the serial runner at ~2.7x on 10 cores.
+# The sequential runner is a debugging fallback only (e.g. isolating a runner
+# bug or a machine where parallelism confuses things) — force it with
+# RAE_TEST_SEQUENTIAL=1. RAE_TEST_PARALLEL=1 is still accepted (now a no-op,
+# parallel being the default) so older invocations keep working.
+ifeq ($(RAE_TEST_SEQUENTIAL),1)
 TEST_RUNNER = tools/run_tests.sh
+else
+TEST_RUNNER = tools/run_tests_parallel.sh
 endif
 
 .PHONY: all build test clean smoke install uninstall c-surface-gate

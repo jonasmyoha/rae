@@ -141,13 +141,13 @@ export class TestRunner {
     if (!this.activeRun.includeExamples) {
       env.RAE_SKIP_EXAMPLES = "1";
     }
-    // #824: run the unit cases in parallel (default ON). The Makefile routes
-    // `make test` through tools/run_tests_parallel.sh when RAE_TEST_PARALLEL=1.
-    // A single-test run (testName) has no parallel form — it is one case, and
-    // the parallel script just delegates a name argument to run_tests.sh — so
-    // the switch is simply not set for it.
-    if (this.activeRun.parallel && !this.activeRun.testName) {
-      env.RAE_TEST_PARALLEL = "1";
+    // #824/#846: the Makefile runs the unit cases in parallel BY DEFAULT, so
+    // the common (ticked) case needs no env at all. When the user unticks the
+    // toggle we force the serial runner with RAE_TEST_SEQUENTIAL=1. A
+    // single-test run (testName) has no parallel form — the parallel script
+    // just delegates a name argument to run_tests.sh — so neither is set.
+    if (!this.activeRun.parallel && !this.activeRun.testName) {
+      env.RAE_TEST_SEQUENTIAL = "1";
     }
 
     let command = target.testCommand;
