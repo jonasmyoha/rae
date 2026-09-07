@@ -1,11 +1,12 @@
 # particles.rae — a small CPU particle system (engine subsystem, #84).
 #
 # A general, reusable particle pool: emit particles with a position + velocity + life,
-# advance them under gravity each frame, and draw them as instanced CUBES that SHRINK to
-# nothing over their life (the deferred G-buffer has no alpha blend, so fade == shrink).
-# It reuses the instanced draw path (gbuffer_instanced) — one cube mesh, one batch
-# refilled per frame — the same shape the bodies / tombstones / castle draws use. Purely
-# visual: update it per-frame (not in a fixed sim step) so it never touches lockstep state.
+# advance them under gravity each frame, and draw them as instanced cubes that FADE by
+# ALPHA over their life through the transparent forward pass (#843/#844) — constant
+# size, alpha = remaining-life fraction. (Until #843 the G-buffer had no alpha blend,
+# so "fade" had to be faked by shrinking; that is gone.) One cube mesh; the pass owns
+# the per-frame batch, so this module keeps no GPU batch of its own. Purely visual:
+# update it per-frame (not in a fixed sim step) so it never touches lockstep state.
 #
 # First user is the game's water splashes (#84), but nothing here is game-specific:
 # `particleEmit` / `particleBurst` take a colour + spread, so any effect (dust, sparks,
@@ -14,8 +15,8 @@ import Vec3
 import Math
 open Mesh3d
 open Gpu3d
-open GbufferInstanced
 open Scene3d
+open TransparentForward
 
 type Particle {
   x: Float
@@ -35,7 +36,6 @@ type Particle {
 type ParticleSystem {
   list: List(Particle)
   mesh: MeshHandle
-  batch: InstanceBatch
   gravity: Float    # downward accel (world units / s^2)
   cap: Int
 }
@@ -43,8 +43,7 @@ type ParticleSystem {
 func createParticleSystem(cap: copy Int, gravity: copy Float) pub ret ParticleSystem {
   let box: MeshData = makeBox(size: 1.0)
   let mesh: MeshHandle = uploadMesh(verts: box.verts, vertCount: box.vertCount, indices: box.indices)
-  let batch: InstanceBatch = createInstanceBatch(mesh: mesh, capacity: cap)
-  ret ParticleSystem { list: createList(Particle, cap: cap), mesh: mesh, batch: own batch, gravity: gravity, cap: cap }
+  ret ParticleSystem { list: createList(Particle, cap: cap), mesh: mesh, gravity: gravity, cap: cap }
 }
 
 # Emit one particle. Drops the oldest if the pool is full, so emission never grows
@@ -102,28 +101,26 @@ func particleUpdate(sys: mod ParticleSystem, deltaTime: copy Float) pub {
   sys.list = own live
 }
 
-# Draw every particle as a small cube, scaled by its remaining-life fraction so it
-# shrinks away (the deferred pass has no alpha). Call in the G-buffer pass.
-func particleDraw(sys: mod ParticleSystem, toon: copy Bool) pub {
-  resetInstanceBatch(batch: sys.batch)
-  setInstanceBatchMesh(batch: sys.batch, mesh: sys.mesh)
+# Queue every particle into the transparent forward pass as a constant-size cube
+# whose ALPHA is its remaining-life fraction, so it fades out instead of shrinking.
+# Call at the transparentForward tag (before renderDeferredPassWorld runs it) —
+# NOT inside the G-buffer pass; the pass draws and resets the batch itself. The
+# pool cap should not exceed the pass batch capacity or the oldest are dropped.
+func particleDraw(sys: view ParticleSystem, transparent: mod TransparentPassCache) pub {
   var i: Int = 0
   loop i < sys.list.length {
     if let p: Particle = sys.list.copyAt(index: i) {
-      var frac: Float = p.life / p.maxLife
-      if frac < 0.0 { frac = 0.0 }
-      if frac > 1.0 { frac = 1.0 }
-      let s: Float = p.size * frac
-      let mat: Material3d = { baseColor: Vec3.create(x: p.r, y: p.g, z: p.b),
-        metallic: 0.0, roughness: 0.6, emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0), toon: toon }
+      var alpha: Float = p.life / p.maxLife
+      if alpha < 0.0 { alpha = 0.0 }
+      if alpha > 1.0 { alpha = 1.0 }
       let t: Transform3d = {
         position: Vec3.create(x: p.x, y: p.y, z: p.z),
         rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0),
-        scale: Vec3.create(x: s, y: s, z: s)
+        scale: Vec3.create(x: p.size, y: p.size, z: p.size)
       }
-      addInstanceTransform(batch: sys.batch, transform: t, prevTransform: t, material: mat)
+      addTransparentInstance(cache: transparent, mesh: sys.mesh, transform: t,
+        r: p.r, g: p.g, b: p.b, alpha: alpha)
     }
     i = i + 1
   }
-  drawInstances(batch: sys.batch)
 }
