@@ -11,14 +11,14 @@ open ecs/Serialize
 # up by the loop with zero edits; `notes` proves the registry flag still gates.
 
 type Position { x: Int }
-type Vel { dx: Int }
+type Velocity { dx: Int }
 type Tag { on: Int }
 type Note { n: Int }
 
 type Mini {
   allocator: EntityAllocator
   poss: ComponentTable(Position)
-  vels: ComponentTable(Vel)
+  vels: ComponentTable(Velocity)
   tags: ComponentTable(Tag)
   notes: ComponentTable(Note)
 }
@@ -27,7 +27,7 @@ func createMini() ret Mini {
   ret Mini {
     allocator: createEntityAllocator(),
     poss: createComponentTable(Position),
-    vels: createComponentTable(Vel),
+    vels: createComponentTable(Velocity),
     tags: createComponentTable(Tag),
     notes: createComponentTable(Note)
   }
@@ -61,7 +61,7 @@ func main() {
   let e1: EntityId = id(v: 1)
   let e2: EntityId = id(v: 2)
   componentSet(this: world.poss, entity: e1, data: Position { x: 7 })
-  componentSet(this: world.vels, entity: e1, data: Vel { dx: 3 })
+  componentSet(this: world.vels, entity: e1, data: Velocity { dx: 3 })
   componentSet(this: world.tags, entity: e1, data: Tag { on: 1 })
   componentSet(this: world.tags, entity: e2, data: Tag { on: 0 })
   componentSet(this: world.notes, entity: e1, data: Note { n: 99 })

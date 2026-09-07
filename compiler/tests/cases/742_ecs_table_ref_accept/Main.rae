@@ -2,8 +2,8 @@ open ecs/Entity
 open ecs/ComponentTable
 open ecs/Query
 type Position { x: Int }
-type Vel { v: Int }
-type World { positions: ComponentTable(Position), velocities: ComponentTable(Vel) }
+type Velocity { v: Int }
+type World { positions: ComponentTable(Position), velocities: ComponentTable(Velocity) }
 
 # #814 accept cases: the rule is about the SAME table only, and it is LEXICAL —
 # a reference is treated as live for the rest of its enclosing block. So:
@@ -15,19 +15,19 @@ type World { positions: ComponentTable(Position), velocities: ComponentTable(Vel
 #   - a query loop body mutating a table it did NOT join.
 func touch(t: mod ComponentTable(Position)) { }
 func main() {
-  var world: World = { positions: createComponentTable(Position), velocities: createComponentTable(Vel) }
+  var world: World = { positions: createComponentTable(Position), velocities: createComponentTable(Velocity) }
   var extra: ComponentTable(Position) = createComponentTable(Position)
   let e: EntityId = { index: 1, generation: 0 }
   let f: EntityId = { index: 2, generation: 0 }
   componentSet(this: world.positions, entity: e, data: Position { x: 10 })
-  componentSet(this: world.velocities, entity: e, data: Vel { v: 1 })
+  componentSet(this: world.velocities, entity: e, data: Velocity { v: 1 })
 
   componentSet(this: world.positions, entity: f, data: Position { x: 20 })   # mutate first ...
   let r: view Position => componentView(this: world.positions, entity: f)    # ... then borrow
   log("late ref: {r.x}")
 
   let position: mod Position => componentMod(this: world.positions, entity: e)
-  componentSet(this: world.velocities, entity: f, data: Vel { v: 2 })   # different table
+  componentSet(this: world.velocities, entity: f, data: Velocity { v: 2 })   # different table
   componentRemove(this: world.velocities, entity: f)                    # different table
   touch(t: world.positions)                                             # passing it on is fine
   position.x = position.x + 1

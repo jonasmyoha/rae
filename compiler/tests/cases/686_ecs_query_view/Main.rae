@@ -8,12 +8,12 @@ open ecs/Query
 # mutating queryModAt), so a read-only pass leaves change-detection untouched.
 
 type Position { x: Int }
-type Vel { v: Int }
+type Velocity { v: Int }
 type Tag { t: Int }
 
 func main() {
   var pos: ComponentTable(Position) = createComponentTable(Position)
-  var vel: ComponentTable(Vel) = createComponentTable(Vel)
+  var vel: ComponentTable(Velocity) = createComponentTable(Velocity)
   var tag: ComponentTable(Tag) = createComponentTable(Tag)
   let e1: EntityId = { index: 1, generation: 0 }
   let e2: EntityId = { index: 2, generation: 0 }
@@ -21,8 +21,8 @@ func main() {
   componentSet(this: pos, entity: e1, data: Position { x: 10 })
   componentSet(this: pos, entity: e2, data: Position { x: 20 })
   componentSet(this: pos, entity: e3, data: Position { x: 30 })
-  componentSet(this: vel, entity: e2, data: Vel { v: 5 })
-  componentSet(this: vel, entity: e3, data: Vel { v: 7 })
+  componentSet(this: vel, entity: e2, data: Velocity { v: 5 })
+  componentSet(this: vel, entity: e3, data: Velocity { v: 7 })
   componentSet(this: tag, entity: e2, data: Tag { t: 9 })
 
   # Dense single-table forEach over pos: sum every x through a view ref.
@@ -44,8 +44,8 @@ func main() {
   var dot: Int = 0
   loop let row: view Query2Match in hits {
     let position: view Position => query2ViewA(tableA: pos, hit: row)
-    let vv: view Vel => query2ViewB(tableB: vel, hit: row)
-    dot = dot + position.x * vv.v
+    let velocity: view Velocity => query2ViewB(tableB: vel, hit: row)
+    dot = dot + position.x * velocity.v
   }
   log("dot: {dot}")
   log("pos gen unchanged: {componentTableGeneration(this: pos) is posGen}")
@@ -56,8 +56,8 @@ func main() {
   log("q3 count: {hits3.length}")
   loop let row: view Query3Match in hits3 {
     let position: view Position => query3ViewA(tableA: pos, hit: row)
-    let vv: view Vel => query3ViewB(tableB: vel, hit: row)
+    let velocity: view Velocity => query3ViewB(tableB: vel, hit: row)
     let tg: view Tag => query3ViewC(tableC: tag, hit: row)
-    log("q3 read: {position.x} {vv.v} {tg.t}")
+    log("q3 read: {position.x} {velocity.v} {tg.t}")
   }
 }

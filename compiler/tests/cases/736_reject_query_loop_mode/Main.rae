@@ -3,12 +3,12 @@ open ecs/ComponentTable
 open ecs/Query
 
 type Position { x: Int }
-type Vel { v: Int }
+type Velocity { v: Int }
 
 func main() {
   var pos: ComponentTable(Position) = createComponentTable(Position)
-  var vel: ComponentTable(Vel) = createComponentTable(Vel)
-  loop let entity: EntityId, p: Position, vv: view Vel in query2(tableA: pos, tableB: vel) {
+  var vel: ComponentTable(Velocity) = createComponentTable(Velocity)
+  loop let entity: EntityId, p: Position, velocity: view Velocity in query2(tableA: pos, tableB: vel) {
     log("{p.x}")
   }
 }
