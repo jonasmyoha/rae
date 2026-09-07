@@ -454,6 +454,12 @@ A bare `make test > /tmp/some-other-file.log` is invisible to the UI (wrong file
 perl -e 'alarm shift; exec @ARGV' 600 bash compiler/tools/watch-tests.sh
 ```
 
+**The unit cases run in PARALLEL by default** (`tools/run_tests_parallel.sh`,
+#824/#846 — byte-identical verdicts to the serial runner at ~2.7x on 10 cores;
+the example gate still runs sequentially afterwards). You do not need any flag.
+The old sequential runner is a debugging-only fallback: `RAE_TEST_SEQUENTIAL=1
+… watch-tests.sh` forces it. See `docs/parallel-tests.md`.
+
 **Only ONE test run at a time.** Concurrent `make test` / `watch-tests.sh`
 processes corrupt each other's build cache and interleave the shared log, which
 shows up as spurious failures. Before starting a run, KILL any earlier one:
