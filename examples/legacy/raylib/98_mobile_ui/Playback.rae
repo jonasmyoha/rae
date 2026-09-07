@@ -68,13 +68,13 @@ func togglePlayback(state: mod PlaybackState) pub {
 # reaches `durationSec` we wrap back to 0 and keep playing — the
 # demo-friendly choice, see file-header note.
 func advancePlayback(state: mod PlaybackState, now: view Float) pub {
-  var dt: Float = 0.0
+  var deltaTime: Float = 0.0
   if state.prevTime >= 0.0 {
-    dt = now - state.prevTime
+    deltaTime = now - state.prevTime
   }
   state.prevTime = now
   if state.isPlaying {
-    state.elapsedSec = state.elapsedSec + dt
+    state.elapsedSec = state.elapsedSec + deltaTime
     if state.elapsedSec >= state.durationSec {
       # Wrap. Subtract instead of zero so a very large `dt` doesn't
       # lose the carry — though in practice dt is well under 1s.

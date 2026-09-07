@@ -82,18 +82,18 @@ func particleBurst(sys: mod ParticleSystem, x: copy Float, y: copy Float, z: cop
 
 # Advance every particle: integrate velocity + gravity, age, and compact out the dead.
 # Call once per frame with the frame dt.
-func particleUpdate(sys: mod ParticleSystem, dt: copy Float) pub {
+func particleUpdate(sys: mod ParticleSystem, deltaTime: copy Float) pub {
   var live: List(Particle) = createList(Particle, cap: sys.list.length)
   var i: Int = 0
   loop i < sys.list.length {
     if let p: Particle = sys.list.copyAt(index: i) {
       var pp: Particle = p
-      pp.life = pp.life - dt
+      pp.life = pp.life - deltaTime
       if pp.life > 0.0 {
-        pp.vz = pp.vz - sys.gravity * dt
-        pp.x = pp.x + pp.vx * dt
-        pp.y = pp.y + pp.vy * dt
-        pp.z = pp.z + pp.vz * dt
+        pp.vz = pp.vz - sys.gravity * deltaTime
+        pp.x = pp.x + pp.vx * deltaTime
+        pp.y = pp.y + pp.vy * deltaTime
+        pp.z = pp.z + pp.vz * deltaTime
         live.add(value: pp)
       }
     }
