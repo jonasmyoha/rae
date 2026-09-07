@@ -214,8 +214,8 @@ func renderApp(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSys
   let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
   let t: Float = (now - frame.startT) as Float
 
-  loop var oi: Int = 0, oi < deferredOrderLength(r: renderSystem.renderer), ++oi {
-    let tag: Int = deferredTagAt(r: renderSystem.renderer, i: oi)
+  loop var oi: Int = 0, oi < deferredOrderLength(renderer: renderSystem.renderer), ++oi {
+    let tag: Int = deferredTagAt(renderer: renderSystem.renderer, i: oi)
     Profile.zoneBegin(profiler: profiler, name: (tag as RenderTag).toString())
     # Exhaustive over RenderTag: adding a pass is a compile error here until it is
     # handled (#624). Each pass is a helper/one-liner; the five generic passes
@@ -224,23 +224,23 @@ func renderApp(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSys
       case RenderTag.shadow { renderShadowPass(cameraSystem: cameraSystem, characterSystem: characterSystem, inputSystem: inputSystem, renderSystem: renderSystem, terrainSystem: terrainSystem, world: world, aspect: aspect, palette: palette) }
       case RenderTag.gbuffer { renderGbufferPass(cache: renderSystem.renderer.passes.gbuffer, cameraSystem: cameraSystem, characterSystem: characterSystem, splashes: splashes, terrainSystem: terrainSystem, world: world, aspect: aspect, palette: palette, t: t, deltaTime: deltaTime, profiler: profiler, grassCompute: grassCompute) }
       case RenderTag.ssao {
-        renderDeferredPassWorld(r: renderSystem.renderer, tag: tag, world: emptyWorld,
+        renderDeferredPassWorld(renderer: renderSystem.renderer, tag: tag, world: emptyWorld,
                                 camera: cameraSystem.camera, light: cameraSystem.light, aspect: aspect)
       }
       case RenderTag.depthPyramid {
-        renderDeferredPassWorld(r: renderSystem.renderer, tag: tag, world: emptyWorld,
+        renderDeferredPassWorld(renderer: renderSystem.renderer, tag: tag, world: emptyWorld,
                                 camera: cameraSystem.camera, light: cameraSystem.light, aspect: aspect)
       }
       case RenderTag.lighting {
-        renderDeferredPassWorld(r: renderSystem.renderer, tag: tag, world: emptyWorld,
+        renderDeferredPassWorld(renderer: renderSystem.renderer, tag: tag, world: emptyWorld,
                                 camera: cameraSystem.camera, light: cameraSystem.light, aspect: aspect)
       }
       case RenderTag.taa {
-        renderDeferredPassWorld(r: renderSystem.renderer, tag: tag, world: emptyWorld,
+        renderDeferredPassWorld(renderer: renderSystem.renderer, tag: tag, world: emptyWorld,
                                 camera: cameraSystem.camera, light: cameraSystem.light, aspect: aspect)
       }
       case RenderTag.composite {
-        renderDeferredPassWorld(r: renderSystem.renderer, tag: tag, world: emptyWorld,
+        renderDeferredPassWorld(renderer: renderSystem.renderer, tag: tag, world: emptyWorld,
                                 camera: cameraSystem.camera, light: cameraSystem.light, aspect: aspect)
       }
       case RenderTag.uiOverlay {

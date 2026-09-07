@@ -452,7 +452,7 @@ func main() ret Int {
   # the cast shadows disagree.
   light.sunDir = settingsSunDir(settingsState: settings)
   light.sunColor = settingsSunColor(settingsState: settings)
-  let gstatus: Int = compileDeferred(r: renderer)
+  let gstatus: Int = compileDeferred(renderer: renderer)
   if gstatus is not 0 {
     log("render graph invalid: {gstatus}")
     ret 1
@@ -741,8 +741,8 @@ func main() ret Int {
       # present reads it. The passes are declared backwards in
       # createRenderer3dWithUi; this loop runs them in dependency order.
       var pi3: Int = 0
-      loop pi3 < deferredOrderLength(r: renderer) {
-        let tag: Int = deferredTagAt(r: renderer, i: pi3)
+      loop pi3 < deferredOrderLength(renderer: renderer) {
+        let tag: Int = deferredTagAt(renderer: renderer, i: pi3)
         if tag is RenderTag.shadow {
           # Fit the cascades to THIS frame's camera and sun, then
           # rasterise every visible mesh into them (#382). The graph put
@@ -802,7 +802,7 @@ func main() ret Int {
         }
         if tag is RenderTag.ssao or tag is RenderTag.depthPyramid or tag is RenderTag.lighting
           or tag is RenderTag.taa or tag is RenderTag.composite {
-          renderDeferredPassWorld(r: renderer, tag: tag, world: asset1.world,
+          renderDeferredPassWorld(renderer: renderer, tag: tag, world: asset1.world,
                                   camera: camera, light: light, aspect: aspect)
         }
         if tag is RenderTag.uiOverlay {

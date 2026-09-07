@@ -102,7 +102,7 @@ func main() ret Int {
   # and write, and execution order is DERIVED from those declarations
   # rather than from the order of calls written below.
   var renderer: DeferredRenderer = createDeferredRenderer()
-  let gs: Int = compileDeferred(r: renderer)
+  let gs: Int = compileDeferred(renderer: renderer)
   if gs is not 0 {
     log("render graph invalid: {gs}")
     ret 1
@@ -161,7 +161,7 @@ func main() ret Int {
 
     let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
     if Gpu2d.renderGate() {
-      renderDeferredFrameWorld(r: renderer, world: world, camera: camera, light: light, aspect: aspect)
+      renderDeferredFrameWorld(renderer: renderer, world: world, camera: camera, light: light, aspect: aspect)
       # Frame history for motion vectors (#336): current becomes previous.
       world3dPrevTransformSystem(world: world)
     }
