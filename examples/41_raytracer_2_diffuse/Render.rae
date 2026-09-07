@@ -18,11 +18,11 @@ func randomUnit() ret Vec3 {
     ret Vec3.create(x: r * Math.cos(x: a), y: r * Math.sin(x: a), z: z)
 }
 
-func hitSphere(s: view Sphere, ro: view Vec3, rd: view Vec3) ret Float {
-    let oc: Vec3 = Vec3.vsub(a: ro, b: s.center)
+func hitSphere(sphere: view Sphere, ro: view Vec3, rd: view Vec3) ret Float {
+    let oc: Vec3 = Vec3.vsub(a: ro, b: sphere.center)
     let a: Float = Vec3.vdot(a: rd, b: rd)
     let halfB: Float = Vec3.vdot(a: oc, b: rd)
-    let c: Float = Vec3.vdot(a: oc, b: oc) - s.radius * s.radius
+    let c: Float = Vec3.vdot(a: oc, b: oc) - sphere.radius * sphere.radius
     let disc: Float = halfB * halfB - a * c
     if disc < 0.0 {
         ret -1.0
@@ -38,8 +38,8 @@ func rayColor(world: view List(Sphere), ro: view Vec3, rd: view Vec3, depth: vie
     var best: Float = 1000000.0
     var hitIdx: Int = -1
     var i: Int = 0
-    loop let s: view Sphere in world {
-        let t: Float = hitSphere(s: s, ro: ro, rd: rd)
+    loop let sphere: view Sphere in world {
+        let t: Float = hitSphere(sphere: sphere, ro: ro, rd: rd)
         if t > 0.001 {
             if t < best {
                 best = t
@@ -53,13 +53,13 @@ func rayColor(world: view List(Sphere), ro: view Vec3, rd: view Vec3, depth: vie
         let tt: Float = 0.5 * (u.z + 1.0)
         ret Vec3.create(x: (1.0 - tt) + tt * 0.5, y: (1.0 - tt) + tt * 0.7, z: (1.0 - tt) + tt * 1.0)
     }
-    let s: Sphere = sphereValueAt(world: world, index: hitIdx)
-    let p: Vec3 = Vec3.vadd(a: ro, b: Vec3.vscale(a: rd, s: best))
-    let n: Vec3 = Vec3.vscale(a: Vec3.vsub(a: p, b: s.center), s: 1.0 / s.radius)
+    let sphere: Sphere = sphereValueAt(world: world, index: hitIdx)
+    let p: Vec3 = Vec3.vadd(a: ro, b: Vec3.vscale(a: rd, sphere: best))
+    let n: Vec3 = Vec3.vscale(a: Vec3.vsub(a: p, b: sphere.center), sphere: 1.0 / sphere.radius)
     # Lambertian scatter toward normal + random unit vector.
     let scatter: Vec3 = Vec3.vadd(a: n, b: randomUnit())
     let bounced: Vec3 = rayColor(world: world, ro: p, rd: scatter, depth: depth - 1)
-    ret Vec3.vmul(a: s.albedo, b: bounced)
+    ret Vec3.vmul(a: sphere.albedo, b: bounced)
 }
 
 # Render one scanline with `samples` jittered rays per pixel + gamma. Z-up.

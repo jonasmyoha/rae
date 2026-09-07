@@ -26,7 +26,7 @@ func randomUnit() ret Vec3 {
 
 func vreflect(v: view Vec3, n: view Vec3) ret Vec3 {
     let d: Float = 2.0 * Vec3.vdot(a: v, b: n)
-    ret Vec3.vsub(a: v, b: Vec3.vscale(a: n, s: d))
+    ret Vec3.vsub(a: v, b: Vec3.vscale(a: n, sphere: d))
 }
 
 func vrefract(uv: view Vec3, n: view Vec3, etaRatio: view Float) ret Vec3 {
@@ -34,9 +34,9 @@ func vrefract(uv: view Vec3, n: view Vec3, etaRatio: view Float) ret Vec3 {
     if cosT > 1.0 {
         cosT = 1.0
     }
-    let perp: Vec3 = Vec3.vscale(a: Vec3.vadd(a: uv, b: Vec3.vscale(a: n, s: cosT)), s: etaRatio)
+    let perp: Vec3 = Vec3.vscale(a: Vec3.vadd(a: uv, b: Vec3.vscale(a: n, sphere: cosT)), sphere: etaRatio)
     let pl: Float = 0.0 - Math.sqrt(x: abs(n: 1.0 - Vec3.vlenSq(a: perp)))
-    ret Vec3.vadd(a: perp, b: Vec3.vscale(a: n, s: pl))
+    ret Vec3.vadd(a: perp, b: Vec3.vscale(a: n, sphere: pl))
 }
 
 func schlick(cosine: view Float, refIdx: view Float) ret Float {
@@ -45,11 +45,11 @@ func schlick(cosine: view Float, refIdx: view Float) ret Float {
     ret r0 + (1.0 - r0) * Math.pow(base: 1.0 - cosine, exp: 5.0)
 }
 
-func hitSphere(s: view Sphere, r: view Ray) ret Float {
-    let oc: Vec3 = Vec3.vsub(a: r.origin, b: s.center)
+func hitSphere(sphere: view Sphere, r: view Ray) ret Float {
+    let oc: Vec3 = Vec3.vsub(a: r.origin, b: sphere.center)
     let a: Float = Vec3.vdot(a: r.dir, b: r.dir)
     let halfB: Float = Vec3.vdot(a: oc, b: r.dir)
-    let c: Float = Vec3.vdot(a: oc, b: oc) - s.radius * s.radius
+    let c: Float = Vec3.vdot(a: oc, b: oc) - sphere.radius * sphere.radius
     let disc: Float = halfB * halfB - a * c
     if disc < 0.0 {
         ret -1.0
@@ -74,8 +74,8 @@ func rayColor(world: view List(Sphere), r: view Ray, depth: view Int) ret Vec3 {
     var best: Float = 1000000.0
     var hitIdx: Int = -1
     var i: Int = 0
-    loop let sp: view Sphere in world {
-        let t: Float = hitSphere(s: sp, r: r)
+    loop let sphere: view Sphere in world {
+        let t: Float = hitSphere(sphere: sphere, r: r)
         if t > 0.001 {
             if t < best {
                 best = t
@@ -87,21 +87,21 @@ func rayColor(world: view List(Sphere), r: view Ray, depth: view Int) ret Vec3 {
     if hitIdx < 0 {
         ret skyColor(dir: r.dir)
     }
-    let sp: Sphere = sphereValueAt(world: world, index: hitIdx)
+    let sphere: Sphere = sphereValueAt(world: world, index: hitIdx)
     # emissive: the surface is a light, its radiance is returned and the path ends
-    if sp.material.kind is 3 {
-        ret sp.material.albedo
+    if sphere.material.kind is 3 {
+        ret sphere.material.albedo
     }
-    let p: Vec3 = Vec3.vadd(a: r.origin, b: Vec3.vscale(a: r.dir, s: best))
-    let n: Vec3 = Vec3.vscale(a: Vec3.vsub(a: p, b: sp.center), s: 1.0 / sp.radius)
+    let p: Vec3 = Vec3.vadd(a: r.origin, b: Vec3.vscale(a: r.dir, sphere: best))
+    let n: Vec3 = Vec3.vscale(a: Vec3.vsub(a: p, b: sphere.center), sphere: 1.0 / sphere.radius)
     var scatter: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
-    var atten: Vec3 = sp.material.albedo
-    if sp.material.kind is 0 {
+    var atten: Vec3 = sphere.material.albedo
+    if sphere.material.kind is 0 {
         scatter = Vec3.vadd(a: n, b: randomUnit())
     } else {
-        if sp.material.kind is 1 {
+        if sphere.material.kind is 1 {
             let ud: Vec3 = Vec3.vnorm(a: r.dir)
-            scatter = Vec3.vadd(a: vreflect(v: ud, n: n), b: Vec3.vscale(a: randomUnit(), s: sp.material.fuzz))
+            scatter = Vec3.vadd(a: vreflect(v: ud, n: n), b: Vec3.vscale(a: randomUnit(), sphere: sphere.material.fuzz))
             if Vec3.vdot(a: scatter, b: n) <= 0.0 {
                 ret Vec3.create(x: 0.0, y: 0.0, z: 0.0)
             }
@@ -109,10 +109,10 @@ func rayColor(world: view List(Sphere), r: view Ray, depth: view Int) ret Vec3 {
             atten = Vec3.create(x: 1.0, y: 1.0, z: 1.0)
             let ud: Vec3 = Vec3.vnorm(a: r.dir)
             var frontN: Vec3 = n
-            var etaRatio: Float = 1.0 / sp.material.ior
+            var etaRatio: Float = 1.0 / sphere.material.ior
             if Vec3.vdot(a: ud, b: n) > 0.0 {
                 frontN = Vec3.vneg(a: n)
-                etaRatio = sp.material.ior
+                etaRatio = sphere.material.ior
             }
             var cosT: Float = Vec3.vdot(a: Vec3.vneg(a: ud), b: frontN)
             if cosT > 1.0 {

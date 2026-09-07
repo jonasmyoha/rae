@@ -207,7 +207,7 @@ func createApp() ret App {
     Gpu2d.closeWindow()
     Sys.exit(code: 1)
   }
-  let charData: MeshData = loadAllPrimitives(g: g)
+  let charData: MeshData = loadAllPrimitives(glb: g)
   if charData.vertCount is 0 {
     log("[gltf] model contained no readable primitives")
     Gpu2d.closeWindow()
@@ -227,7 +227,7 @@ func createApp() ret App {
   let footY: Float = walkerFloatAt(values: b, index: 1)
   log("[gltf] bounds height {height}, scale {modelScale}")
 
-  var sk: Skeleton = loadSkeleton(g: g, skinIndex: 0)
+  var sk: Skeleton = loadSkeleton(glb: g, skinIndex: 0)
   if sk.ok is false {
     log("[gltf] walker.glb has no skin — cannot animate")
     Gpu2d.closeWindow()
@@ -238,9 +238,9 @@ func createApp() ret App {
   let idleGlb: Glb = loadGlb(path: "{assets}idle.glb")
   let walkGlb: Glb = loadGlb(path: "{assets}walk.glb")
   let runGlb: Glb = loadGlb(path: "{assets}run.glb")
-  let idleClip: Clip = loadClip(g: idleGlb, animIndex: 0, sk: sk)
-  let walkClip: Clip = loadClip(g: walkGlb, animIndex: 0, sk: sk)
-  let runClip: Clip = loadClip(g: runGlb, animIndex: 0, sk: sk)
+  let idleClip: Clip = loadClip(glb: idleGlb, animIndex: 0, sk: sk)
+  let walkClip: Clip = loadClip(glb: walkGlb, animIndex: 0, sk: sk)
+  let runClip: Clip = loadClip(glb: runGlb, animIndex: 0, sk: sk)
   let bindPose: SkeletonPose = captureSkeletonPose(sk: sk)
   log("[anim] idle {clipChannelCount(c: idleClip)} ch / {idleClip.duration}s, walk {clipChannelCount(c: walkClip)} ch / {walkClip.duration}s, run {clipChannelCount(c: runClip)} ch / {runClip.duration}s")
 
@@ -283,14 +283,14 @@ func createApp() ret App {
   # instance batch's capacity mesh.
   var firstPartId: Int = 0
   var haveFirstPart: Bool = false
-  loop var mi: Int = 0, mi < meshCount(g: g), ++mi {
-    let name: String = meshName(g: g, meshIndex: mi)
+  loop var mi: Int = 0, mi < meshCount(glb: g), ++mi {
+    let name: String = meshName(glb: g, meshIndex: mi)
     var rough: Float = 0.68
     if name.startsWith(prefix: "Cylinder") {
       rough = 0.35
     }
-    loop var pi: Int = 0, pi < primitiveCount(g: g, meshIndex: mi), ++pi {
-      let raw: SkinnedMeshData = loadSkinnedPrimitive(g: g, meshIndex: mi, primIndex: pi)
+    loop var pi: Int = 0, pi < primitiveCount(glb: g, meshIndex: mi), ++pi {
+      let raw: SkinnedMeshData = loadSkinnedPrimitive(glb: g, meshIndex: mi, primIndex: pi)
       if raw.vertCount > 0 {
         let part: SkinnedMeshData = withAtlasColors(m: raw, atlas: atlas, width: atlasW, height: atlasH)
         let handle: MeshHandle = uploadSkinnedMesh(verts: part.verts, vertCount: part.vertCount, indices: part.indices)
