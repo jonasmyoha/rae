@@ -33,8 +33,8 @@ func main() {
   let withoutHits: List(QueryMatch) = without(dataTable: pos, tagTable: tag)
   log("without count: {withoutHits.length}")
   loop let row: view QueryMatch in withoutHits {
-    let p: view Position => forEachView(table: pos, hit: row)
-    log("without e{row.entity.index} x={p.x}")
+    let position: view Position => forEachView(table: pos, hit: row)
+    log("without e{row.entity.index} x={position.x}")
   }
 
   # change-detection: nothing changed since the current generation.
@@ -48,8 +48,8 @@ func main() {
   let ch1: List(QueryMatch) = changedSince(table: pos, sinceGeneration: gen0)
   log("changed since gen0: {ch1.length}")
   loop let row: view QueryMatch in ch1 {
-    let p: view Position => forEachView(table: pos, hit: row)
-    log("changed e{row.entity.index} x={p.x}")
+    let position: view Position => forEachView(table: pos, hit: row)
+    log("changed e{row.entity.index} x={position.x}")
   }
 
   # Record the new generation; an idle pass reports nothing (the skip case).

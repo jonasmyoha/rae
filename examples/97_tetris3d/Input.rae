@@ -56,55 +56,55 @@ func clearInputEdges(edges: mod InputEdges) {
   edges.hardDrop = false
 }
 
-func tryMove(w: mod World, dx: view Int, dr: view Int) {
-  if canMove(w: w, dx: dx, dy: 0, dr: dr) is 1 {
-    w.currentPiece.x = w.currentPiece.x + dx
-    var newRot: Int = (w.currentPiece.rotation + dr) % 4
+func tryMove(world: mod World, dx: view Int, dr: view Int) {
+  if canMove(world: world, dx: dx, dy: 0, dr: dr) is 1 {
+    world.currentPiece.x = world.currentPiece.x + dx
+    var newRot: Int = (world.currentPiece.rotation + dr) % 4
     if newRot < 0 {
       newRot = newRot + 4
     }
-    w.currentPiece.rotation = newRot
-    w.lockTimer = 0
+    world.currentPiece.rotation = newRot
+    world.lockTimer = 0
   }
 }
 
-func tryRotate(w: mod World) {
-  if canMove(w: w, dx: 0, dy: 0, dr: 1) is 1 {
-    tryMove(w: w, dx: 0, dr: 1)
+func tryRotate(world: mod World) {
+  if canMove(world: world, dx: 0, dy: 0, dr: 1) is 1 {
+    tryMove(world: world, dx: 0, dr: 1)
     ret
   }
-  if canMove(w: w, dx: 1, dy: 0, dr: 1) is 1 {
-    tryMove(w: w, dx: 1, dr: 1)
+  if canMove(world: world, dx: 1, dy: 0, dr: 1) is 1 {
+    tryMove(world: world, dx: 1, dr: 1)
     ret
   }
-  if canMove(w: w, dx: -1, dy: 0, dr: 1) is 1 {
-    tryMove(w: w, dx: -1, dr: 1)
+  if canMove(world: world, dx: -1, dy: 0, dr: 1) is 1 {
+    tryMove(world: world, dx: -1, dr: 1)
     ret
   }
-  if canMove(w: w, dx: 2, dy: 0, dr: 1) is 1 {
-    tryMove(w: w, dx: 2, dr: 1)
+  if canMove(world: world, dx: 2, dy: 0, dr: 1) is 1 {
+    tryMove(world: world, dx: 2, dr: 1)
     ret
   }
-  if canMove(w: w, dx: -2, dy: 0, dr: 1) is 1 {
-    tryMove(w: w, dx: -2, dr: 1)
+  if canMove(world: world, dx: -2, dy: 0, dr: 1) is 1 {
+    tryMove(world: world, dx: -2, dr: 1)
   }
 }
 
 # Hard drop: slam to the bottom and lock immediately.
-func hardDrop(w: mod World) {
-  loop canMove(w: w, dx: 0, dy: 1, dr: 0) is 1 {
-    w.currentPiece.y = w.currentPiece.y + 1
-    w.score = w.score + 2
+func hardDrop(world: mod World) {
+  loop canMove(world: world, dx: 0, dy: 1, dr: 0) is 1 {
+    world.currentPiece.y = world.currentPiece.y + 1
+    world.score = world.score + 2
   }
-  lockPiece(w: w)
-  checkLines(w: w)
-  spawnNextPiece(w: w)
+  lockPiece(world: world)
+  checkLines(world: world)
+  spawnNextPiece(world: world)
 }
 
-func inputSystem(w: mod World, edges: view InputEdges) {
-  if w.state is GameState.gameOver {
+func inputSystem(world: mod World, edges: view InputEdges) {
+  if world.state is GameState.gameOver {
     if edges.restart {
-      initWorld(w)
+      initWorld(world)
     }
     ret
   }
@@ -112,16 +112,16 @@ func inputSystem(w: mod World, edges: view InputEdges) {
   # P toggles between Playing and Paused. Handled BEFORE the
   # "skip-input-if-not-Playing" gate so the player can unpause.
   if edges.pause {
-    if w.state is GameState.playing {
-      w.state = GameState.paused
+    if world.state is GameState.playing {
+      world.state = GameState.paused
     } else {
-      if w.state is GameState.paused {
-        w.state = GameState.playing
+      if world.state is GameState.paused {
+        world.state = GameState.playing
       }
     }
   }
 
-  if w.state is not GameState.playing {
+  if world.state is not GameState.playing {
     ret
   }
 
@@ -129,45 +129,45 @@ func inputSystem(w: mod World, edges: view InputEdges) {
   let moveRight: Bool = Sdl3.isKeyDown(key: keyRight) or Sdl3.isKeyDown(key: keyD)
 
   if moveLeft or moveRight {
-    if w.hMoveTimer is 0 {
+    if world.hMoveTimer is 0 {
       if moveLeft {
-        tryMove(w: w, dx: -1, dr: 0)
+        tryMove(world: world, dx: -1, dr: 0)
       } else {
-        tryMove(w: w, dx: 1, dr: 0)
+        tryMove(world: world, dx: 1, dr: 0)
       }
-      w.hMoveTimer = 1
+      world.hMoveTimer = 1
     } else {
-      w.hMoveTimer = w.hMoveTimer + 1
-      if w.hMoveTimer >= w.dasDelay {
-        if (w.hMoveTimer - w.dasDelay) % w.hMoveDelay is 0 {
+      world.hMoveTimer = world.hMoveTimer + 1
+      if world.hMoveTimer >= world.dasDelay {
+        if (world.hMoveTimer - world.dasDelay) % world.hMoveDelay is 0 {
           if moveLeft {
-            tryMove(w: w, dx: -1, dr: 0)
+            tryMove(world: world, dx: -1, dr: 0)
           } else {
-            tryMove(w: w, dx: 1, dr: 0)
+            tryMove(world: world, dx: 1, dr: 0)
           }
         }
       }
     }
   } else {
-    w.hMoveTimer = 0
+    world.hMoveTimer = 0
   }
 
   # Soft drop (down arrow / S) — falls one row each frame, +1 point per row.
   if Sdl3.isKeyDown(key: keyDown) or Sdl3.isKeyDown(key: keyS) {
-    if canMove(w: w, dx: 0, dy: 1, dr: 0) is 1 {
-      w.currentPiece.y = w.currentPiece.y + 1
-      w.score = w.score + 1
-      w.fallTimer = 0
+    if canMove(world: world, dx: 0, dy: 1, dr: 0) is 1 {
+      world.currentPiece.y = world.currentPiece.y + 1
+      world.score = world.score + 1
+      world.fallTimer = 0
     }
   }
 
   # Rotate CCW with up / W.
   if edges.rotate {
-    tryRotate(w: w)
+    tryRotate(world: world)
   }
 
   # Hard drop with space.
   if edges.hardDrop {
-    hardDrop(w: w)
+    hardDrop(world: world)
   }
 }
