@@ -12,6 +12,22 @@
 #include "lexer.h"
 #include "diag.h"
 
+// Grow a heap dynamic array so it can hold at least one more element, doubling
+// its capacity. Replaces the old fixed-size collectors that SILENTLY DROPPED the
+// overflow past a hard cap (which then failed to link for large modules). `arr`
+// is a malloc'd pointer, `count`/`cap` are its element count + capacity; the
+// element size is inferred from `sizeof(*arr)`. The compiler is short-lived, so
+// growth here is bounded by the program's real specialization count, not a guess.
+#define RAE_GROW1(arr, count, cap) do { \
+    if ((size_t)(count) >= (size_t)(cap)) { \
+      size_t _nc = (cap) ? (size_t)(cap) * 2 : 16; \
+      void* _np = realloc((void*)(arr), _nc * sizeof(*(arr))); \
+      if (!_np) { fprintf(stderr, "c backend: out of memory growing a collector\n"); abort(); } \
+      (arr) = _np; \
+      (cap) = _nc; \
+    } \
+  } while (0)
+
 // Forward declarations for buffer primitives
 void* rae_ext_rae_buf_alloc(int64_t size);
 void rae_ext_rae_buf_free(void* ptr);
@@ -408,11 +424,10 @@ void register_function_specialization(CompilerContext* ctx, const AstFuncDecl* d
             if (match && !a && !b) return;
         }
     }
-    if (ctx->specialized_func_count < ctx->specialized_func_cap) {
-        ctx->specialized_funcs[ctx->specialized_func_count].decl = decl;
-        ctx->specialized_funcs[ctx->specialized_func_count].concrete_args = (AstTypeRef*)concrete_args;
-        ctx->specialized_func_count++;
-    }
+    RAE_GROW1(ctx->specialized_funcs, ctx->specialized_func_count, ctx->specialized_func_cap);
+    ctx->specialized_funcs[ctx->specialized_func_count].decl = decl;
+    ctx->specialized_funcs[ctx->specialized_func_count].concrete_args = (AstTypeRef*)concrete_args;
+    ctx->specialized_func_count++;
 }
 
 void register_generic_type(CompilerContext* ctx, const AstTypeRef* type) {
@@ -449,7 +464,8 @@ void register_generic_type(CompilerContext* ctx, const AstTypeRef* type) {
     if (type->parts) base = type->parts->text; else if (type->resolved_type) base = type->resolved_type->name;
     if (base.len > 0) { if (str_eq_cstr(base, "Void") || str_eq_cstr(base, "void") || is_primitive_type(base)) return; }
     for (size_t i = 0; i < ctx->generic_type_count; i++) { if (type_refs_equal(ctx->generic_types[i], type)) goto scan_args; }
-    if (ctx->generic_type_count < ctx->generic_type_cap) ctx->generic_types[ctx->generic_type_count++] = type;
+    RAE_GROW1(ctx->generic_types, ctx->generic_type_count, ctx->generic_type_cap);
+    ctx->generic_types[ctx->generic_type_count++] = type;
 scan_args:
     for (const AstTypeRef* arg = type->generic_args; arg; arg = arg->next) register_generic_type(ctx, arg);
     bool is_list = str_eq_cstr(base, "List");
@@ -1896,12 +1912,13 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     bool needs_drop;
     bool needs_copy;
   } OptHelperEntry;
-  OptHelperEntry opt_entries[512];
+  size_t opt_entry_cap = 512;
+  OptHelperEntry* opt_entries = malloc(sizeof(OptHelperEntry) * opt_entry_cap);
   size_t opt_entry_count = 0;
   // Add one struct-rep opt type (the AstTypeRef `_gt`) to opt_entries.
   #define TRY_ADD_OPT(_gt) do { \
     const AstTypeRef* gt = (_gt); \
-    if (gt && gt->is_opt && !gt->is_view && !gt->is_mod && opt_entry_count < 512) { \
+    if (gt && gt->is_opt && !gt->is_view && !gt->is_mod) { \
       CFuncContext octx = {0}; octx.compiler_ctx = ctx; octx.module = module; \
       if (rae_opt_is_struct_rep(&octx, gt)) { \
         const char* optm = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)gt); \
@@ -1915,6 +1932,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           payload.resolved_type = (gt->resolved_type && gt->resolved_type->kind == TYPE_OPT) \
               ? gt->resolved_type->as.opt.base \
               : (payload.parts ? NULL : gt->resolved_type); \
+          RAE_GROW1(opt_entries, opt_entry_count, opt_entry_cap); \
           opt_entries[opt_entry_count].type = gt; \
           opt_entries[opt_entry_count].payload = payload; \
           opt_entries[opt_entry_count].optm = optm; \
@@ -2384,7 +2402,8 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     const AstTypeRef* type_ref;  // non-NULL when this is a generic specialisation
     const char* mangled;
   } StructDropEntry;
-  StructDropEntry drop_entries[512];
+  size_t drop_entry_cap = 512;
+  StructDropEntry* drop_entries = malloc(sizeof(StructDropEntry) * drop_entry_cap);
   size_t drop_entry_count = 0;
   // Pass A — non-generic user structs that transitively need cascade
   // drop. Uses the permissive predicate (includes String fields), so
@@ -2402,7 +2421,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   // status. Function-call results are conservatively aliasing too;
   // callees that genuinely transfer ownership need to return into
   // a struct literal at the call site to trigger cascade today.
-  for (size_t i = 0; i < ctx->all_decl_count && drop_entry_count < 512; i++) {
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
     const AstDecl* d = ctx->all_decls[i];
     if (d->kind != AST_DECL_TYPE) continue;
     if (d->as.type_decl.generic_params) continue;
@@ -2413,6 +2432,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     *tr = (AstTypeRef){.parts = part};
     if (!type_needs_cascade_drop(ctx, module, tr, 0)) { free(tr); free(part); continue; }
     const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, tr);
+    RAE_GROW1(drop_entries, drop_entry_count, drop_entry_cap);
     drop_entries[drop_entry_count++] = (StructDropEntry){.decl = d, .type_ref = tr, .mangled = mangled};
   }
   // Pass A' — concrete generic struct specializations from
@@ -2439,7 +2459,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   // `drop(Box(T))` overload. Treating it as a regular user struct
   // means `Box(String)` correctly gets a synthesised cascade drop.
   for (size_t gi = 0;
-       gi < ctx->generic_type_count && drop_entry_count < 512;
+       gi < ctx->generic_type_count;
        gi++) {
     const AstTypeRef* gt = ctx->generic_types[gi];
     if (!gt || gt->is_view || gt->is_mod || gt->is_opt) continue;
@@ -2474,6 +2494,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       }
     }
     if (seen) continue;
+    RAE_GROW1(drop_entries, drop_entry_count, drop_entry_cap);
     drop_entries[drop_entry_count++] = (StructDropEntry){
       .decl = tdecl, .type_ref = gt, .mangled = mangled,
     };
@@ -2485,9 +2506,10 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   // loop where the struct path is a field walk. Only arrays whose ELEMENT
   // cascades appear here — Array(Float, cap: 16) gets no helper at all, which
   // is the renderer case and must stay exactly free.
-  const TypeInfo* array_drops[128];
+  size_t array_drop_cap = 128;
+  const TypeInfo** array_drops = malloc(sizeof(const TypeInfo*) * array_drop_cap);
   size_t array_drop_count = 0;
-  for (size_t gi = 0; gi < ctx->generic_type_count && array_drop_count < 128; gi++) {
+  for (size_t gi = 0; gi < ctx->generic_type_count; gi++) {
     const AstTypeRef* gt = ctx->generic_types[gi];
     if (!gt || gt->is_view || gt->is_mod || !gt->resolved_type) continue;
     const TypeInfo* at = gt->resolved_type;
@@ -2496,7 +2518,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     if (!type_needs_cascade_drop(ctx, module, (AstTypeRef*)gt, 0)) continue;
     bool seen = false;
     for (size_t k = 0; k < array_drop_count; k++) if (array_drops[k] == at) { seen = true; break; }
-    if (!seen) array_drops[array_drop_count++] = at;
+    if (!seen) { RAE_GROW1(array_drops, array_drop_count, array_drop_cap); array_drops[array_drop_count++] = at; }
   }
   for (size_t i = 0; i < array_drop_count; i++) {
     const TypeInfo* at = array_drops[i];
@@ -2706,9 +2728,10 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   // `a` is a bare identifier and T needs deep copy).
 
   // Pass A: collect struct entries (permissive — string-only structs included).
-  StructDropEntry copy_entries[512];
+  size_t copy_entry_cap = 512;
+  StructDropEntry* copy_entries = malloc(sizeof(StructDropEntry) * copy_entry_cap);
   size_t copy_entry_count = 0;
-  for (size_t i = 0; i < ctx->all_decl_count && copy_entry_count < 512; i++) {
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
     const AstDecl* d = ctx->all_decls[i];
     if (d->kind != AST_DECL_TYPE) continue;
     if (d->as.type_decl.generic_params) continue;
@@ -2719,6 +2742,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     *tr = (AstTypeRef){.parts = part};
     if (!type_needs_cascade_drop(ctx, module, tr, 0)) { free(tr); free(part); continue; }
     const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, tr);
+    RAE_GROW1(copy_entries, copy_entry_count, copy_entry_cap);
     copy_entries[copy_entry_count++] = (StructDropEntry){.decl = d, .type_ref = tr, .mangled = mangled};
   }
 
@@ -2732,9 +2756,10 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     const char* mangled;          // rae_List_<E>, rae_StringMap_<V>, rae_IntMap_<V>
     int kind;                     // 0=list, 1=smap, 2=imap
   } ContainerCopyEntry;
-  ContainerCopyEntry container_entries[512];
+  size_t container_entry_cap = 512;
+  ContainerCopyEntry* container_entries = malloc(sizeof(ContainerCopyEntry) * container_entry_cap);
   size_t container_entry_count = 0;
-  for (size_t i = 0; i < ctx->generic_type_count && container_entry_count < 512; i++) {
+  for (size_t i = 0; i < ctx->generic_type_count; i++) {
     const AstTypeRef* gt = ctx->generic_types[i];
     if (!gt || gt->is_view || gt->is_mod || gt->is_opt) continue;
     Str gb = get_base_type_name(gt);
@@ -2750,6 +2775,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       if (strcmp(container_entries[k].mangled, mangled) == 0) { seen = true; break; }
     }
     if (seen) continue;
+    RAE_GROW1(container_entries, container_entry_count, container_entry_cap);
     container_entries[container_entry_count].type_ref = gt;
     container_entries[container_entry_count].mangled = mangled;
     container_entries[container_entry_count].kind = is_list ? 0 : (is_smap ? 1 : 2);

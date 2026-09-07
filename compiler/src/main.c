@@ -2765,12 +2765,13 @@ static bool build_hybrid_output(const char* entry_file,
   ctx.ast_arena = arena;
   ctx.all_decl_cap = 8192;
   ctx.all_decls = arena_alloc(arena, sizeof(AstDecl*) * ctx.all_decl_cap);
+  // generic_types + specialized_funcs GROW dynamically (RAE_GROW1), so malloc'd.
   ctx.generic_type_cap = 1024;
-  ctx.generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.generic_type_cap);
+  ctx.generic_types = malloc(sizeof(AstTypeRef*) * ctx.generic_type_cap);
   ctx.emitted_generic_type_cap = 1024;
   ctx.emitted_generic_types = arena_alloc(arena, sizeof(AstTypeRef*) * ctx.emitted_generic_type_cap);
   ctx.specialized_func_cap = 2048;
-  ctx.specialized_funcs = arena_alloc(arena, sizeof(FunctionSpecialization) * ctx.specialized_func_cap);
+  ctx.specialized_funcs = malloc(sizeof(FunctionSpecialization) * ctx.specialized_func_cap);
   ctx.emitted_method_cap = 2048;
   ctx.emitted_method_names = arena_alloc(arena, sizeof(char*) * ctx.emitted_method_cap);
 
