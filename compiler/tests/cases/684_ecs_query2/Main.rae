@@ -9,7 +9,7 @@ open ecs/Query
 # ref; the write must alias table storage and be visible on read-back.
 
 type Position { x: Int }
-type Vel { v: Int }
+type Velocity { v: Int }
 
 func posOf(table: view ComponentTable(Position), entity: view EntityId) ret Int {
   if componentHas(this: table, entity: entity) {
@@ -21,24 +21,24 @@ func posOf(table: view ComponentTable(Position), entity: view EntityId) ret Int 
 
 func main() {
   var pos: ComponentTable(Position) = createComponentTable(Position)
-  var vel: ComponentTable(Vel) = createComponentTable(Vel)
+  var vel: ComponentTable(Velocity) = createComponentTable(Velocity)
   let e1: EntityId = { index: 1, generation: 0 }
   let e2: EntityId = { index: 2, generation: 0 }
   let e3: EntityId = { index: 3, generation: 0 }
   componentSet(this: pos, entity: e1, data: Position { x: 10 })
   componentSet(this: pos, entity: e2, data: Position { x: 20 })
   componentSet(this: pos, entity: e3, data: Position { x: 30 })
-  componentSet(this: vel, entity: e2, data: Vel { v: 2 })
-  componentSet(this: vel, entity: e3, data: Vel { v: 3 })
+  componentSet(this: vel, entity: e2, data: Velocity { v: 2 })
+  componentSet(this: vel, entity: e3, data: Velocity { v: 3 })
 
   let hits: List(Query2Match) = query2(tableA: pos, tableB: vel)
   log("q2 count: {hits.length}")
   loop let row: view Query2Match in hits {
-    let velv: view Vel => queryViewAt(table: vel, denseIndex: row.indexB)
+    let velocity: view Velocity => queryViewAt(table: vel, denseIndex: row.indexB)
     let posx: mod Position => queryModAt(table: pos, denseIndex: row.indexA)
-    posx.x = posx.x + velv.v
+    posx.x = posx.x + velocity.v
   }
-  # e1 has no Vel so it is not in the join and stays 10; e2 -> 22, e3 -> 33.
+  # e1 has no Velocity so it is not in the join and stays 10; e2 -> 22, e3 -> 33.
   log("e1.x: {posOf(table: pos, entity: e1)}")
   log("e2.x: {posOf(table: pos, entity: e2)}")
   log("e3.x: {posOf(table: pos, entity: e3)}")

@@ -13,25 +13,25 @@ open ecs/Query
 # pinned here on purpose — it is #814's reject test.
 
 type Position { x: Int }
-type Vel { v: Int }
-type World { positions: ComponentTable(Position), velocities: ComponentTable(Vel) }
+type Velocity { v: Int }
+type World { positions: ComponentTable(Position), velocities: ComponentTable(Velocity) }
 
 func bump(position: mod Position) { position.x = position.x + 1 }
 func ground(position: mod Position, floor: view Int) { if position.x < floor { position.x = floor } }
 
 func main() {
-  var world: World = { positions: createComponentTable(Position), velocities: createComponentTable(Vel) }
+  var world: World = { positions: createComponentTable(Position), velocities: createComponentTable(Velocity) }
   let e1: EntityId = { index: 1, generation: 0 }
   let e2: EntityId = { index: 2, generation: 0 }
   componentSet(this: world.positions, entity: e1, data: Position { x: 10 })
   componentSet(this: world.positions, entity: e2, data: Position { x: 20 })
-  componentSet(this: world.velocities, entity: e1, data: Vel { v: 1 })
-  componentSet(this: world.velocities, entity: e2, data: Vel { v: 2 })
+  componentSet(this: world.velocities, entity: e1, data: Velocity { v: 1 })
+  componentSet(this: world.velocities, entity: e2, data: Velocity { v: 2 })
 
   # 1. disjoint tables, both mod, one system
-  loop let entity: EntityId, position: mod Position, vv: mod Vel in query2(tableA: world.positions, tableB: world.velocities) {
-    position.x = position.x + vv.v
-    vv.v = vv.v * 10
+  loop let entity: EntityId, position: mod Position, velocity: mod Velocity in query2(tableA: world.positions, tableB: world.velocities) {
+    position.x = position.x + velocity.v
+    velocity.v = velocity.v * 10
   }
   log("after system: e1={componentGet(this: world.positions, entity: e1).x}/{componentGet(this: world.velocities, entity: e1).v} e2={componentGet(this: world.positions, entity: e2).x}/{componentGet(this: world.velocities, entity: e2).v}")
 
@@ -44,8 +44,8 @@ func main() {
 
   # 3. a ref into one table plus a ref into another, at once
   let p2: mod Position => componentMod(this: world.positions, entity: e2)
-  let v2: view Vel => componentView(this: world.velocities, entity: e2)
-  p2.x = p2.x + v2.v
+  let velocity: view Velocity => componentView(this: world.velocities, entity: e2)
+  p2.x = p2.x + velocity.v
   log("two-table refs: e2.x={componentGet(this: world.positions, entity: e2).x}")
 
   # 4. modAt binding live while a DIFFERENT List is mutated
