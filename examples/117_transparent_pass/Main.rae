@@ -1,0 +1,137 @@
+# The transparent forward pass in isolation (#845): a lit deferred scene with a
+# row of alpha-blended cubes drawn over it, so the pass is proven without the
+# walker (114). Opaque geometry goes through the G-buffer as usual; at the
+# transparentForward tag we queue instances into the renderer's transparent
+# batch (addTransparentInstance) and the pass alpha-blends them into the lit
+# HDR target against a READ-ONLY scene depth.
+#
+# What the picture must show (the headless gate checks the log line + a
+# non-blank frame; the blend itself is a human check on hardware):
+#   * nine cubes floating in a row, alpha 0.1 -> 0.9 left to right, the ground
+#     and the opaque cubes visible THROUGH the faint ones;
+#   * one cube half-sunk into the ground: its lower half is cut off by the
+#     opaque ground (depth test), its upper half blends;
+#   * the opaque cubes in front of the row occlude it (depth), the row never
+#     occludes them (depth is not written).
+import Gpu2d
+import Sys
+import Vec3
+open Gbuffer
+open Gpu3d
+open Math3d
+open Mesh3d
+open RendererDeferred
+open Rendergraph
+open Scene3d
+open TransparentForward
+open ecs/Entity
+
+const alphaCubeCount: Int = 9
+const opaqueCubeCount: Int = 4
+
+func uploadMeshData(meshData: view MeshData) ret MeshHandle {
+  ret uploadMesh(verts: meshData.verts, vertCount: meshData.vertCount, indices: meshData.indices)
+}
+
+# Ground plane + four opaque cubes: two in FRONT of the alpha row (they must
+# occlude it) and two behind (they must show through the faint cubes).
+func buildScene(box: view MeshHandle, ground: view MeshHandle) ret World3d {
+  var sceneWorld: World3d = createWorld3d()
+  let noEmission: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let noRotation: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let unitScale: Vec3 = Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  let groundMaterial: Material3d = {
+    baseColor: Vec3.create(x: 0.16, y: 0.2, z: 0.27)
+    metallic: 0.0, roughness: 0.82, emission: noEmission, toon: false }
+  let groundEntity: EntityId = world3dAddMeshInstance(
+    world: sceneWorld, mesh: ground, material: groundMaterial
+    position: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    rotation: noRotation, scale: unitScale)
+  loop var i: Int = 0, i < opaqueCubeCount, ++i {
+    # i 0,1 sit in front of the row (y = -3); i 2,3 behind it (y = +3).
+    let front: Bool = i < 2
+    var y: Float = 3.0
+    if front { y = 0.0 - 3.0 }
+    let x: Float = (i % 2).toFloat() * 4.0 - 2.0
+    let cubeMaterial: Material3d = {
+      baseColor: Vec3.create(x: 0.85, y: 0.35 + (i.toFloat() * 0.15), z: 0.2)
+      metallic: 0.05, roughness: 0.55, emission: noEmission, toon: false }
+    let cubeEntity: EntityId = world3dAddMeshInstance(
+      world: sceneWorld, mesh: box, material: cubeMaterial
+      position: Vec3.create(x: x, y: y, z: 0.75)
+      rotation: noRotation, scale: Vec3.create(x: 1.5, y: 1.5, z: 1.5))
+  }
+  ret sceneWorld
+}
+
+# Queue this frame's transparent instances: the alpha row + the sunk cube.
+func queueTransparents(transparent: mod TransparentPassCache, box: view MeshHandle) {
+  let noRotation: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  loop var i: Int = 0, i < alphaCubeCount, ++i {
+    let alpha: Float = (i + 1).toFloat() / 10.0
+    let x: Float = i.toFloat() * 1.4 - 5.6
+    let cube: Transform3d = {
+      position: Vec3.create(x: x, y: 0.0, z: 2.2)
+      rotation: noRotation
+      scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0) }
+    addTransparentInstance(cache: transparent, mesh: box, transform: cube,
+      r: 0.25, g: 0.65, b: 1.0, alpha: alpha)
+  }
+  # Half-sunk: centre at z = 0, so the lower half is below the ground plane.
+  let sunk: Transform3d = {
+    position: Vec3.create(x: 0.0, y: 1.5, z: 0.0)
+    rotation: noRotation
+    scale: Vec3.create(x: 1.6, y: 1.6, z: 1.6) }
+  addTransparentInstance(cache: transparent, mesh: box, transform: sunk,
+    r: 1.0, g: 0.9, b: 0.3, alpha: 0.6)
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: 960, height: 600, title: "Rae Transparent Pass — Deferred")
+  Gpu2d.setDesignResolution(width: 960.0, height: 600.0, fit: 0)
+
+  let boxData: MeshData = makeBox(size: 1.0)
+  let planeData: MeshData = makePlane(size: 30.0, segments: 1)
+  let box: MeshHandle = uploadMeshData(meshData: boxData)
+  let ground: MeshHandle = uploadMeshData(meshData: planeData)
+  var sceneWorld: World3d = buildScene(box: box, ground: ground)
+  var camera: Camera3d = defaultCamera3d()
+  camera.position = Vec3.create(x: 1.0, y: 0.0 - 13.0, z: 7.0)
+  camera.target = Vec3.create(x: 0.0, y: 0.0, z: 1.5)
+  let light: Light3d = defaultLight3d()
+
+  var renderer: DeferredRenderer = createDeferredRenderer()
+  let graphStatus: Int = compileDeferred(renderer: renderer)
+  if graphStatus is not 0 {
+    log("deferred graph invalid: {statusName(status: graphStatus)}")
+    ret 1
+  }
+
+  let fixedTestFrame: Bool = Sys.getEnv(name: "RAE_TRANSPARENT_TEST_FRAME").length() > 0
+  var transparentFrames: Int = 0
+  loop not Gpu2d.pollClose() {
+    let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
+    if Gpu2d.renderGate() {
+      var passIndex: Int = 0
+      loop passIndex < deferredOrderLength(renderer: renderer) {
+        let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
+        if tag is RenderTag.transparentForward {
+          queueTransparents(transparent: renderer.passes.transparent, box: box)
+          transparentFrames = transparentFrames + 1
+        }
+        renderDeferredPassWorld(
+          renderer: renderer, tag: tag, world: sceneWorld
+          camera: camera, light: light, aspect: aspect)
+        passIndex = passIndex + 1
+      }
+      world3dPrevTransformSystem(world: sceneWorld)
+    }
+  }
+
+  if fixedTestFrame {
+    log("[transparent] deterministic deferred frame rendered: {alphaCubeCount + 1} alpha instances over {opaqueCubeCount} opaque, {transparentFrames} transparent frames")
+  }
+  Gbuffer.shutdownAll()
+  Gpu2d.closeWindow()
+  ret 0
+}
