@@ -10,14 +10,14 @@ open ecs/Serialize
 # "the newly added table": snapshot/restore never name any table, so it is picked
 # up by the loop with zero edits; `notes` proves the registry flag still gates.
 
-type Pos { x: Int }
+type Position { x: Int }
 type Vel { dx: Int }
 type Tag { on: Int }
 type Note { n: Int }
 
 type Mini {
   allocator: EntityAllocator
-  poss: ComponentTable(Pos)
+  poss: ComponentTable(Position)
   vels: ComponentTable(Vel)
   tags: ComponentTable(Tag)
   notes: ComponentTable(Note)
@@ -26,7 +26,7 @@ type Mini {
 func createMini() ret Mini {
   ret Mini {
     allocator: createEntityAllocator(),
-    poss: createComponentTable(Pos),
+    poss: createComponentTable(Position),
     vels: createComponentTable(Vel),
     tags: createComponentTable(Tag),
     notes: createComponentTable(Note)
@@ -60,7 +60,7 @@ func main() {
   var world: Mini = createMini()
   let e1: EntityId = id(v: 1)
   let e2: EntityId = id(v: 2)
-  componentSet(this: world.poss, entity: e1, data: Pos { x: 7 })
+  componentSet(this: world.poss, entity: e1, data: Position { x: 7 })
   componentSet(this: world.vels, entity: e1, data: Vel { dx: 3 })
   componentSet(this: world.tags, entity: e1, data: Tag { on: 1 })
   componentSet(this: world.tags, entity: e2, data: Tag { on: 0 })

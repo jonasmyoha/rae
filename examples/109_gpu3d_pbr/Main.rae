@@ -34,8 +34,8 @@ open RendererDeferred
 open Math3d
 open Mesh3d
 
-func uploadMeshData(m: view MeshData) ret MeshHandle {
-  ret uploadMesh(verts: m.verts, vertCount: m.vertCount, indices: m.indices)
+func uploadMeshData(meshData: view MeshData) ret MeshHandle {
+  ret uploadMesh(verts: meshData.verts, vertCount: meshData.vertCount, indices: meshData.indices)
 }
 
 # Build the material-study scene: a metallic x roughness sphere grid, an
@@ -77,9 +77,9 @@ func main() ret Int {
   let sphereData: MeshData = makeSphere(rings: 32, segments: 48)
   let planeData: MeshData = makePlane(size: 40.0, segments: 1)
   let torusData: MeshData = makeTorus(majorR: 1.0, minorR: 0.35, majorSegs: 96, minorSegs: 48)
-  let sphere: MeshHandle = uploadMeshData(m: sphereData)
-  let ground: MeshHandle = uploadMeshData(m: planeData)
-  let torus: MeshHandle = uploadMeshData(m: torusData)
+  let sphere: MeshHandle = uploadMeshData(meshData: sphereData)
+  let ground: MeshHandle = uploadMeshData(meshData: planeData)
+  let torus: MeshHandle = uploadMeshData(meshData: torusData)
 
   var world: World3d = buildScene(sphere: sphere, torus: torus, ground: ground)
   # The torus is the last-but-one instance; remember its entity so the

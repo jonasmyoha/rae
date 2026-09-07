@@ -39,8 +39,8 @@ open Math3d
 open Mesh3d
 open Gltf
 
-func uploadMeshData(m: view MeshData) ret MeshHandle {
-  ret uploadMesh(verts: m.verts, vertCount: m.vertCount, indices: m.indices)
+func uploadMeshData(meshData: view MeshData) ret MeshHandle {
+  ret uploadMesh(verts: meshData.verts, vertCount: meshData.vertCount, indices: meshData.indices)
 }
 
 func main() ret Int {
@@ -62,8 +62,8 @@ func main() ret Int {
   log("[gltf] character: {charData.vertCount} verts, {charData.indices.length / 3} triangles")
 
   let planeData: MeshData = makePlane(size: 20.0, segments: 1)
-  let character: MeshHandle = uploadMeshData(m: charData)
-  let ground: MeshHandle = uploadMeshData(m: planeData)
+  let character: MeshHandle = uploadMeshData(meshData: charData)
+  let ground: MeshHandle = uploadMeshData(meshData: planeData)
 
   var sceneWorld: World3d = createWorld3d()
   let noEmit: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)

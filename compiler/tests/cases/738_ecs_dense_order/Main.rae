@@ -10,28 +10,28 @@ open ecs/ComponentTable
 # The swap-remove is the deliberate data-oriented choice (O(1), keeps the
 # array dense); order instability is its documented cost.
 
-type Pos { x: Int }
+type Position { x: Int }
 
-func order(pos: view ComponentTable(Pos)) ret String {
+func order(pos: view ComponentTable(Position)) ret String {
   var line: String = ""
   loop var i: Int = 0, i < componentCount(this: pos), ++i {
     let e: EntityId = componentEntityAt(this: pos, i: i)
-    let p: Pos = componentDataAt(this: pos, i: i)
+    let p: Position = componentDataAt(this: pos, i: i)
     line = "{line}e{e.index}:{p.x} "
   }
   ret line
 }
 
 func main() {
-  var pos: ComponentTable(Pos) = createComponentTable(Pos)
+  var pos: ComponentTable(Position) = createComponentTable(Position)
   let e1: EntityId = { index: 1, generation: 0 }
   let e2: EntityId = { index: 2, generation: 0 }
   let e3: EntityId = { index: 3, generation: 0 }
   let e4: EntityId = { index: 4, generation: 0 }
-  componentSet(this: pos, entity: e1, data: Pos { x: 10 })
-  componentSet(this: pos, entity: e2, data: Pos { x: 20 })
-  componentSet(this: pos, entity: e3, data: Pos { x: 30 })
-  componentSet(this: pos, entity: e4, data: Pos { x: 40 })
+  componentSet(this: pos, entity: e1, data: Position { x: 10 })
+  componentSet(this: pos, entity: e2, data: Position { x: 20 })
+  componentSet(this: pos, entity: e3, data: Position { x: 30 })
+  componentSet(this: pos, entity: e4, data: Position { x: 40 })
   log("insertion: {order(pos: pos)}")
 
   # Non-tail remove: e2's slot (dense 1) receives the TAIL row (e4).
