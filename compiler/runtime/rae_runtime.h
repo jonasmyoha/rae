@@ -988,6 +988,9 @@ void rae_gb_light_upload(float camX, float camY, float camZ, float exposure,
                          float bands, float horR, float horG, float horB, float discI);
 void* rae_gb_light_pipeline(void);
 void* rae_gb_lit_view(void);
+void* rae_gb_lit_texture(void);
+void* rae_gb_lit_copy_texture(void);
+void* rae_gb_lit_copy_view(void);
 void* rae_gb_light_bind(void);
 void rae_gb_set_light_bind(void* b);
 void* rae_gb_shadow_frame_ubuf(void);

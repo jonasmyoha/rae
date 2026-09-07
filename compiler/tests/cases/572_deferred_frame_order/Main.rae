@@ -10,14 +10,16 @@
 #   gbuffer writes gAlbedo/gNormal/gMaterial/gDepth
 #   depthPyramid reads gDepth, writes depthPyramid
 #   lighting reads all four + the pyramid, writes litColor
-#   composite reads litColor, writes sceneColor
+#   transparentForward modifies litColor, writes litCopy
+#   taa reads litColor, writes taaColor
+#   composite reads taaColor, writes sceneColor
 #   present reads sceneColor
 open Rendergraph
 open RendererDeferred
 
 func main() {
-  var r: DeferredRenderer = createDeferredRenderer()
-  let st: Int = compileDeferred(renderer: r)
-  log("status={statusName(status: st)}")
-  log("{describeDeferred(renderer: r)}")
+  var renderer: DeferredRenderer = createDeferredRenderer()
+  let status: Int = compileDeferred(renderer: renderer)
+  log("status={statusName(status: status)}")
+  log("{describeDeferred(renderer: renderer)}")
 }
