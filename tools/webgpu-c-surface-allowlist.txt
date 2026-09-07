@@ -5,6 +5,10 @@
 #
 # Known debt tracked separately: #513 removed the dead gbuffer_{debugView,ssao};
 # #514 migrates/retires the forward renderer (rae_ext_Gpu3d_* pass encoders).
+# #842 platform ABI accessors (outside this gate's rae_ext_* pattern):
+# rae_gb_lit_texture: borrowed source texture for a Rae-encoded HDR copy.
+# rae_gb_lit_copy_texture: borrowed destination, owned by deferred target lifecycle.
+# rae_gb_lit_copy_view: borrowed sampled snapshot view for transparent materials.
 rae_ext_Gbuffer_deferredShutdown
 rae_ext_Gbuffer_drawCount
 # present: no-UI final blit to the swapchain; reached from Rae as

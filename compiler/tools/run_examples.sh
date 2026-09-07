@@ -27,6 +27,14 @@ EXAMPLE_FILES=$(find "$EXAMPLES_DIR" -path "$EXAMPLES_DIR/legacy" -prune -o \( -
 
 for EXAMPLE_FILE in $EXAMPLE_FILES; do
   EXAMPLE_NAME=$(basename "$(dirname "$EXAMPLE_FILE")")
+  # Exact directory names, space-separated: narrow GPU gates without running
+  # every example. An unset filter preserves the full-suite behaviour.
+  if [ -n "${RAE_EXAMPLE_FILTER:-}" ]; then
+    case " $RAE_EXAMPLE_FILTER " in
+      *" $EXAMPLE_NAME "*) ;;
+      *) continue ;;
+    esac
+  fi
   PROJECT_DIR=$(dirname "$EXAMPLE_FILE")
 
   # Compiled-target smoke only. The Live (bytecode VM) target is frozen /
@@ -306,6 +314,6 @@ echo "=========================================="
 echo "Results: $PASSED passed, $FAILED failed"
 echo "=========================================="
 
-if [ $FAILED -gt 0 ]; then
+if [ $FAILED -gt 0 ] || [ $PASSED -eq 0 ]; then
   exit 1
 fi

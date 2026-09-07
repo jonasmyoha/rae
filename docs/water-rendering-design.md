@@ -1,8 +1,36 @@
 # Water rendering for Rae — survey and design
 
-Status: proposal (September 2026). Nothing in this document is implemented;
-Rae has no water today (no `water`/`ocean` code anywhere in `lib/` or the
-examples — only the walker's splash particles).
+Status: staged implementation (September 2026). The copy-only
+`transparentForward` graph node and `litCopy` target are implemented (#842).
+Water and transparent geometry drawing are not implemented yet (#843/#830).
+The survey below describes the original pre-water baseline.
+
+### Implemented prerequisite: opaque radiance snapshot
+
+`RendererDeferred` derives `lighting -> transparentForward -> taa` using
+`passModifies(litColor)`, with an additional depth read and `litCopy` output.
+`TransparentForward.copyOpaqueRadiance` encodes a texture copy through the
+WebGPU bindings and submits on the same queue as lighting. It leaves radiance
+unchanged; alpha pipelines and transparent draws remain #843.
+
+The copy is full resolution, single-sampled, and uses the selected HDR format
+(RG11B10Ufloat or RGBA16Float). Its C-owned texture/view follow the deferred
+target generation, resize and shutdown lifecycle. The three new `rae_gb_*`
+accessors only borrow handles. A client caching `gbLitCopyView()` must rebuild
+its bind group whenever `gbTargetsGen()` changes. Do not release borrowed handles.
+This currently adds one full-frame GPU copy and one HDR texture even when the
+scene has no transparent objects; there is no CPU readback or compute pass.
+
+Focused verification (from the repository root, one command at a time):
+
+```sh
+TEST=572 RAE_TEST_NO_HISTORY=1 perl -e 'alarm shift; exec @ARGV' 180 bash compiler/tools/watch-tests.sh
+TEST=580 RAE_TEST_NO_HISTORY=1 perl -e 'alarm shift; exec @ARGV' 180 bash compiler/tools/watch-tests.sh
+MAKEFLAGS='TEST_RUNNER=tools/run_examples.sh' RAE_EXAMPLE_FILTER='112_metaballs_deferred 114_walker_character' perl -e 'alarm shift; exec @ARGV' 420 bash compiler/tools/watch-tests.sh
+sh tools/webgpu-c-surface-gate.sh
+```
+
+The screenshots check continued rendering, not refraction or alpha blending.
 
 Two visual targets were asked for:
 

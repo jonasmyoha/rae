@@ -1,0 +1,32 @@
+# Opaque HDR snapshot for the transparent forward pass. GPU draws follow
+# in the next slice; this pass deliberately leaves the lit target unchanged.
+open Gbuffer
+open GbufferPasses
+open webgpu/Webgpu
+open webgpu/Context
+
+func gbLitTexture() extern("rae_gb_lit_texture") ret Ptr
+func gbLitCopyTexture() extern("rae_gb_lit_copy_texture") ret Ptr
+func gbLitCopyView() extern("rae_gb_lit_copy_view") ret Ptr
+
+func copyOpaqueRadiance() {
+  if gbDeferredPrepare() is 0 { ret }
+  # Geometry has already submitted its encoder. Like the fullscreen post
+  # passes, submit on the same queue to preserve graph execution order.
+  let encoderDescriptor: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
+  let encoder: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encoderDescriptor)
+  let texture: Ptr = gbLitTexture()
+  let source: WGPUTexelCopyTextureInfo = { texture: texture, aspect: WGPUTextureAspect_All }
+  let destination: WGPUTexelCopyTextureInfo = { texture: gbLitCopyTexture(), aspect: WGPUTextureAspect_All }
+  let extent: WGPUExtent3D = {
+    width: wgpuTextureGetWidth(texture: texture)
+    height: wgpuTextureGetHeight(texture: texture)
+    depthOrArrayLayers: 1 as UInt32
+  }
+  wgpuCommandEncoderCopyTextureToTexture(commandEncoder: encoder, source: source, destination: destination, copySize: extent)
+  let bufferDescriptor: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
+  let commandBuffer: Ptr = wgpuCommandEncoderFinish(commandEncoder: encoder, descriptor: bufferDescriptor)
+  gbSubmit(cmd: commandBuffer)
+  wgpuCommandBufferRelease(commandBuffer: commandBuffer)
+  wgpuCommandEncoderRelease(commandEncoder: encoder)
+}
