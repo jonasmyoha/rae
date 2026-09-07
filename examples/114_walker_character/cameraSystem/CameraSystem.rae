@@ -100,30 +100,30 @@ func createCameraRigLink(world: mod GameWorld) ret CameraRigLink {
 # camEntity's local offset is (0, -distance, 0). TransformSystem folds child onto
 # parent, and the composed world translation IS the eye. Free mode has no orbit
 # rig, so it keeps the direct fly-camera placement.
-func applyCameraRigHierarchy(cam: mod CameraSystem, world: mod GameWorld) {
-  if cam.rig.mode is not CameraRigMode.free {
-    let qz: Quat = Quat.fromAxisAngle(axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: cam.rig.viewYaw)
-    let qx: Quat = Quat.fromAxisAngle(axis: Vec3.create(x: 1.0, y: 0.0, z: 0.0), angle: 0.0 - cam.rig.viewOrbitPitch)
-    componentSet(this: world.transforms, entity: cam.rigEntity, data: Transform3D {
-      position: cam.camera.target,
+func applyCameraRigHierarchy(cameraSystem: mod CameraSystem, world: mod GameWorld) {
+  if cameraSystem.rig.mode is not CameraRigMode.free {
+    let qz: Quat = Quat.fromAxisAngle(axis: Vec3.create(x: 0.0, y: 0.0, z: 1.0), angle: cameraSystem.rig.viewYaw)
+    let qx: Quat = Quat.fromAxisAngle(axis: Vec3.create(x: 1.0, y: 0.0, z: 0.0), angle: 0.0 - cameraSystem.rig.viewOrbitPitch)
+    componentSet(this: world.transforms, entity: cameraSystem.rigEntity, data: Transform3D {
+      position: cameraSystem.camera.target,
       rotation: Quat.qmul(a: qz, b: qx),
       scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
     })
-    componentSet(this: world.transforms, entity: cam.camEntity, data: Transform3D {
-      position: Vec3.create(x: 0.0, y: 0.0 - cam.rig.viewDistance, z: 0.0),
+    componentSet(this: world.transforms, entity: cameraSystem.camEntity, data: Transform3D {
+      position: Vec3.create(x: 0.0, y: 0.0 - cameraSystem.rig.viewDistance, z: 0.0),
       rotation: Quat.identity(),
       scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
     })
     transformSystem3D(orderState: world.hierarchyOrder,
       transforms: world.transforms, worldTransforms: world.worldTransforms,
       parents: world.parents, childrens: world.childrens)
-    let camWorld: WorldTransform3D = componentGet(this: world.worldTransforms, entity: cam.camEntity)
-    cam.camera.position = Vec3.create(
+    let camWorld: WorldTransform3D = componentGet(this: world.worldTransforms, entity: cameraSystem.camEntity)
+    cameraSystem.camera.position = Vec3.create(
       x: camWorld.matrix.m[12], y: camWorld.matrix.m[13], z: camWorld.matrix.m[14])
   } else {
-    let forward: Vec3 = cameraRigForward(rig: cam.rig)
-    cam.camera.position = cam.rig.viewPosition
-    cam.camera.target = Vec3.vadd(a: cam.camera.position, b: forward)
+    let forward: Vec3 = cameraRigForward(rig: cameraSystem.rig)
+    cameraSystem.camera.position = cameraSystem.rig.viewPosition
+    cameraSystem.camera.target = Vec3.vadd(a: cameraSystem.camera.position, b: forward)
   }
 }
 
@@ -137,22 +137,22 @@ type CameraTick {
 # #743: consumes the narrow state it needs — the CameraSystem, the input/UI
 # bundle, the persist dirty flag, and the world + hero entity to read the
 # followed controller — not the whole App.
-func cameraUpdate(cam: mod CameraSystem, io: mod InputSystem, persist: mod PersistState,
+func cameraUpdate(cameraSystem: mod CameraSystem, inputSystem: mod InputSystem, persist: mod PersistState,
                   world: view GameWorld, heroEntity: view EntityId, dt: copy Float) ret CameraTick {
-  let previousMode: CameraRigMode = cam.rig.mode
-  if handleCameraBar(input: io.ui, rig: cam.rig, camera: cam.camera) { persist.stateDirty = true }
-  if previousMode is not CameraRigMode.character and cam.rig.mode is CameraRigMode.character {
-    cam.rig.yaw = controllerOf(world: world, entity: heroEntity).heading
-    cam.rig.orbitPitch = 0.24
-    cam.camera.target = thirdPersonCameraTarget(controller: controllerOf(world: world, entity: heroEntity), focusZ: characterFocusZ)
-    snapCameraRigView(rig: cam.rig)
+  let previousMode: CameraRigMode = cameraSystem.rig.mode
+  if handleCameraBar(input: inputSystem.ui, rig: cameraSystem.rig, camera: cameraSystem.camera) { persist.stateDirty = true }
+  if previousMode is not CameraRigMode.character and cameraSystem.rig.mode is CameraRigMode.character {
+    cameraSystem.rig.yaw = controllerOf(world: world, entity: heroEntity).heading
+    cameraSystem.rig.orbitPitch = 0.24
+    cameraSystem.camera.target = thirdPersonCameraTarget(controller: controllerOf(world: world, entity: heroEntity), focusZ: characterFocusZ)
+    snapCameraRigView(rig: cameraSystem.rig)
   }
-  if previousMode is not CameraRigMode.orbit and cam.rig.mode is CameraRigMode.orbit {
-    cam.camera.target = thirdPersonCameraTarget(controller: controllerOf(world: world, entity: heroEntity), focusZ: orbitFocusZ)
+  if previousMode is not CameraRigMode.orbit and cameraSystem.rig.mode is CameraRigMode.orbit {
+    cameraSystem.camera.target = thirdPersonCameraTarget(controller: controllerOf(world: world, entity: heroEntity), focusZ: orbitFocusZ)
   }
-  let joyActive: Bool = updateWalkerTouch(rig: cam.rig, moveStick: io.moveStick, world: io.world)
-  let cameraMoved: Bool = updateCameraRig(rig: cam.rig, camera: cam.camera,
-                     allowInput: uiPointerCaptured(input: io.ui) is false, dt: dt)
+  let joyActive: Bool = updateWalkerTouch(rig: cameraSystem.rig, moveStick: inputSystem.moveStick, world: inputSystem.world)
+  let cameraMoved: Bool = updateCameraRig(rig: cameraSystem.rig, camera: cameraSystem.camera,
+                     allowInput: uiPointerCaptured(input: inputSystem.ui) is false, dt: dt)
   if cameraMoved { persist.stateDirty = true }
   ret CameraTick { joyActive: joyActive, cameraMoved: cameraMoved }
 }

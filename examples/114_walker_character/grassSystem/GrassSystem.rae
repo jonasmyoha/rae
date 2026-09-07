@@ -84,15 +84,15 @@ func placeGrassBlade(cellX: view Int, cellY: view Int, slotInCell: view Int,
 # of cells now around the player. Returns true when it re-placed. Each blade's
 # own `slot` fixes its cell + clump, so iterating the component table in any
 # order re-places the whole field correctly.
-func updateGrassField(field: mod GrassSystem, world: mod GameWorld,
+func updateGrassField(grassSystem: mod GrassSystem, world: mod GameWorld,
                       playerPosition: view Vec3) ret Bool {
   let cellX: Int = Math.floor(x: playerPosition.x / terrainCellSize).toInt()
   let cellY: Int = Math.floor(x: playerPosition.y / terrainCellSize).toInt()
-  if cellX is field.centreCellX and cellY is field.centreCellY {
+  if cellX is grassSystem.centreCellX and cellY is grassSystem.centreCellY {
     ret false
   }
-  field.centreCellX = cellX
-  field.centreCellY = cellY
+  grassSystem.centreCellX = cellX
+  grassSystem.centreCellY = cellY
   loop var i: Int = 0, i < componentCount(this: world.grassBlades), ++i {
     let entity: EntityId = componentEntityAt(this: world.grassBlades, i: i)
     let blade: GrassBlade = componentDataAt(this: world.grassBlades, i: i)
@@ -104,7 +104,7 @@ func updateGrassField(field: mod GrassSystem, world: mod GameWorld,
       data: placeGrassBlade(
         cellX: cellX + column - terrainHalfGrid,
         cellY: cellY + row - terrainHalfGrid,
-        slotInCell: slotInCell, groundZ: field.groundZ, slot: blade.slot))
+        slotInCell: slotInCell, groundZ: grassSystem.groundZ, slot: blade.slot))
   }
   ret true
 }
@@ -120,7 +120,7 @@ func grassGust(phase: view Float, baseX: view Float, time: view Float) ret Float
 # (so TAA gets correct motion while the field waves), plus a per-blade green —
 # then one instanced draw for the whole field. The matrices and the record
 # layout are gbuffer's Rae helpers; nothing here touches raw float offsets.
-func drawGrassField(field: mod GrassSystem, world: view GameWorld,
+func drawGrassField(grassSystem: mod GrassSystem, world: view GameWorld,
                     time: view Float, dt: view Float, toon: view Int) {
   loop var index: Int = 0, index < componentCount(this: world.grassBlades), ++index {
     let blade: GrassBlade = componentDataAt(this: world.grassBlades, i: index)
@@ -134,12 +134,12 @@ func drawGrassField(field: mod GrassSystem, world: view GameWorld,
       tiltX: prevGust * 0.6, tiltY: prevGust, scale: blade.scale)
     # Per-blade green: a small deterministic spread off the base colour.
     let cvar: Float = blade.phase / grassWindTau
-    Gbuffer.packInstanceRecord(records: field.records, slot: index,
+    Gbuffer.packInstanceRecord(records: grassSystem.records, slot: index,
       model: model, prevModel: prevModel,
       r: 0.13 + cvar * 0.09, g: 0.33 + cvar * 0.16, b: 0.05 + cvar * 0.05,
       metallic: 0.0, roughness: 0.95, emissive: 0.0, toon: toon, paletteBase: 0)
   }
-  Gbuffer.drawRecords(mesh: field.meshId, records: field.records.data,
+  Gbuffer.drawRecords(mesh: grassSystem.meshId, records: grassSystem.records.data,
                       count: grassBladeCount)
 }
 

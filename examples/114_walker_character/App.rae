@@ -315,7 +315,7 @@ func createApp() ret App {
     Sys.exit(code: 1)
   }
 
-  var terrain: TerrainSystem = createTerrainSystem(world: gameWorld, assets: assets, groundZ: groundZ)
+  var terrainSystem: TerrainSystem = createTerrainSystem(world: gameWorld, assets: assets, groundZ: groundZ)
   var grass: GrassSystem = createGrassSystem(world: gameWorld, assets: assets, groundZ: groundZ)
 
   let cloneCount: Int = 5
@@ -431,7 +431,7 @@ func createApp() ret App {
     gameWorldSetTransform(world: gameWorld, entity: cloneEntity, transform: controllerTransform3D(controller: cloneController))
     crowdEntities.add(value: cloneEntity)
   }
-  updateInfiniteTerrain(terrain: terrain, world: gameWorld, playerPosition: characterController.position)
+  updateInfiniteTerrain(terrainSystem: terrainSystem, world: gameWorld, playerPosition: characterController.position)
   updateGrassField(field: grass, world: gameWorld, playerPosition: characterController.position)
   # #746: exercise the physics/net ECS seams once at startup — spawn/despawn via
   # generational entities, iterate a physics body. Leaves the world untouched.
@@ -498,7 +498,7 @@ func createApp() ret App {
       model: partModel, prevModel: partModel, crowdEntities: own crowdEntities,
       crowdBatch: own characterClones, groundZ: groundZ
     }
-    terrainSystem: own terrain
+    terrainSystem: own terrainSystem
     grassSystem: own grass
     renderSystem: { renderer: own renderer, drs: own drs, shadowLogged: false }
     profiler: Profile.createProfiler(),
@@ -530,23 +530,23 @@ func frameBegin(app: mod App) {
 # The world position / heading of whichever character the local player controls
 # (#546) — the hero or a crowd member. Used to aim the camera and stream the
 # terrain/grass around the ACTIVE character rather than always the hero.
-func controlledPosition(world: view GameWorld, players: view PlayerRoster, character: view CharacterSystem) ret Vec3 {
-  ret controllerOf(world: world, entity: rosterControlledEntity(players: players, character: character)).position
+func controlledPosition(world: view GameWorld, players: view PlayerRoster, characterSystem: view CharacterSystem) ret Vec3 {
+  ret controllerOf(world: world, entity: rosterControlledEntity(players: players, characterSystem: characterSystem)).position
 }
 
-func controlledHeading(world: view GameWorld, players: view PlayerRoster, character: view CharacterSystem) ret Float {
-  ret controllerOf(world: world, entity: rosterControlledEntity(players: players, character: character)).heading
+func controlledHeading(world: view GameWorld, players: view PlayerRoster, characterSystem: view CharacterSystem) ret Float {
+  ret controllerOf(world: world, entity: rosterControlledEntity(players: players, characterSystem: characterSystem)).heading
 }
 
 # Shared reaction to a character switch (#546), from Page Up/Down, keys 1/2, or
 # the settings-panel Prev/Next buttons: snap the orbit camera behind the new
 # character and update the panel readout.
-func onCharacterSwitched(cam: mod CameraSystem, io: mod InputSystem, persist: mod PersistState,
-                         players: view PlayerRoster, world: view GameWorld, character: view CharacterSystem) {
-  cam.rig.yaw = controlledHeading(world: world, players: players, character: character)
-  snapCameraRigView(rig: cam.rig)
+func onCharacterSwitched(cameraSystem: mod CameraSystem, inputSystem: mod InputSystem, persist: mod PersistState,
+                         players: view PlayerRoster, world: view GameWorld, characterSystem: view CharacterSystem) {
+  cameraSystem.rig.yaw = controlledHeading(world: world, players: players, characterSystem: characterSystem)
+  snapCameraRigView(rig: cameraSystem.rig)
   persist.stateDirty = true
-  setNodeText(world: io.world, nodeId: "CharacterReadout",
+  setNodeText(world: inputSystem.world, nodeId: "CharacterReadout",
     value: "Controlling {players.controlledIndex + 1} / {players.count}")
 }
 
@@ -556,12 +556,12 @@ func updateApp(app: mod App) {
   let now: Float64 = app.frame.now
   # Multiplayer seam (offline no-op today, #554): pull remote intents in before
   # the local sim; the matching publish runs after it, below.
-  netApplyRemote(net: app.netSystem, world: app.world)
-  let uiTick: UiTick = uiUpdate(cam: app.cameraSystem, character: app.characterSystem, frame: app.frame, io: app.inputSystem, persist: app.persist, players: app.players, render: app.renderSystem, terrain: app.terrainSystem, world: app.world, dt: dt, now: now)
+  netApplyRemote(netSystem: app.netSystem, world: app.world)
+  let uiTick: UiTick = uiUpdate(cameraSystem: app.cameraSystem, characterSystem: app.characterSystem, frame: app.frame, inputSystem: app.inputSystem, persist: app.persist, players: app.players, renderSystem: app.renderSystem, terrainSystem: app.terrainSystem, world: app.world, dt: dt, now: now)
   let settingsChanged: Bool = uiTick.settingsChanged
   let scrolled: Bool = uiTick.scrolled
 
-  let camTick: CameraTick = cameraUpdate(cam: app.cameraSystem, io: app.inputSystem, persist: app.persist, world: app.world, heroEntity: app.characterSystem.heroEntity, dt: dt)
+  let camTick: CameraTick = cameraUpdate(cameraSystem: app.cameraSystem, inputSystem: app.inputSystem, persist: app.persist, world: app.world, heroEntity: app.characterSystem.heroEntity, dt: dt)
   let joyActive: Bool = camTick.joyActive
   let cameraMoved: Bool = camTick.cameraMoved
 
@@ -577,7 +577,7 @@ func updateApp(app: mod App) {
       rosterSwitchPrev(roster: app.players)
       switched = true
     }
-    if switched { onCharacterSwitched(cam: app.cameraSystem, io: app.inputSystem, persist: app.persist, players: app.players, world: app.world, character: app.characterSystem) }
+    if switched { onCharacterSwitched(cameraSystem: app.cameraSystem, inputSystem: app.inputSystem, persist: app.persist, players: app.players, world: app.world, characterSystem: app.characterSystem) }
   }
 
   app.characterSystem.prevModel = app.characterSystem.model
@@ -625,11 +625,11 @@ func updateApp(app: mod App) {
       # The hero, no longer player-driven, stands idle.
       app.characterSystem.clipIndex = ClipKind.idle as Int
     }
-    let focusPos: Vec3 = controlledPosition(world: app.world, players: app.players, character: app.characterSystem)
+    let focusPos: Vec3 = controlledPosition(world: app.world, players: app.players, characterSystem: app.characterSystem)
     app.cameraSystem.camera.target = Vec3.create(x: focusPos.x, y: focusPos.y, z: focusPos.z + characterFocusZ)
   }
-  let followPos: Vec3 = controlledPosition(world: app.world, players: app.players, character: app.characterSystem)
-  let terrainWrapped: Bool = updateInfiniteTerrain(terrain: app.terrainSystem, world: app.world, playerPosition: followPos)
+  let followPos: Vec3 = controlledPosition(world: app.world, players: app.players, characterSystem: app.characterSystem)
+  let terrainWrapped: Bool = updateInfiniteTerrain(terrainSystem: app.terrainSystem, world: app.world, playerPosition: followPos)
   let grassWrapped: Bool = updateGrassField(field: app.grassSystem, world: app.world, playerPosition: followPos)
 
   # Fixed-timestep physics seam (#553): accumulate frame time and step at a fixed
@@ -640,7 +640,7 @@ func updateApp(app: mod App) {
     physicsStepWorld(world: app.world, fixedDt: physicsFixedStep)
     app.physicsSystem.accumulator = app.physicsSystem.accumulator - physicsFixedStep
   }
-  netPublishIntent(net: app.netSystem, world: app.world)
+  netPublishIntent(netSystem: app.netSystem, world: app.world)
 
   let resized: Bool = Gpu2d.windowResized()
   if resized { app.persist.stateDirty = true }
@@ -699,7 +699,7 @@ func runWalkerApp() ret Int {
         frameSec: 0.016667, heartbeatSec: 1.0
       ))
     } else {
-      renderApp(cam: app.cameraSystem, character: app.characterSystem, frame: app.frame, io: app.inputSystem, render: app.renderSystem, emptyWorld: app.emptyWorld, world: app.world, terrain: app.terrainSystem, splashes: app.splashes, profiler: app.profiler, grassCompute: app.grassCompute)
+      renderApp(cameraSystem: app.cameraSystem, characterSystem: app.characterSystem, frame: app.frame, inputSystem: app.inputSystem, renderSystem: app.renderSystem, emptyWorld: app.emptyWorld, world: app.world, terrainSystem: app.terrainSystem, splashes: app.splashes, profiler: app.profiler, grassCompute: app.grassCompute)
     }
   }
   skinShutdown()

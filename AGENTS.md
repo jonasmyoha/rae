@@ -83,6 +83,25 @@ These instructions define **how Codex should work**, communicate progress, and i
 - Not yet swept through existing code. Fix it in files you are already editing;
   do not open a mass rename.
 
+### No abbreviations — a binding is named for what it HOLDS (usually its type):
+- `cam` -> `cameraSystem`, `io` -> `inputSystem`, `ctx` -> `context`,
+  `cfg` -> `config`, `tmp` -> `temporary`. An abbreviation makes the reader
+  decode it and, because arguments are named at the call site, stamps the
+  decoded-in-your-head short form onto every call — the exact spot the language
+  wants to READ. Write the whole word.
+- **A local/parameter that holds ONE instance of a type is named the camelCase
+  of that type**: `renderSystem: RenderSystem`, `world: GameWorld`,
+  `settings: Settings`. This is the default; reach for a different name only when
+  it says something the type does not (a ROLE: `previous`/`current`, `source`/
+  `destination`, `hero`/`crowd`).
+- **Resolve a name conflict by making the name MORE specific, never by
+  abbreviating.** Two cameras are `playerCamera` and `debugCamera`, not `cam1`/
+  `cam2` or `cam`/`c`. Add words; do not remove them. `io` is doubly wrong — it
+  is an abbreviation AND misleading (it reads as filesystem/stream I/O, not an
+  input-system state).
+- Same phasing as the single-letter rule: fix it in files you are already
+  editing; do not open a mass rename of unrelated code.
+
 ### NO type inference — every binding is written with its type (by design):
 - Rae has **no type inference and it is strictly FORBIDDEN to add it.** Types are
   mandatory. Every `let`/`var`/`const` value binding states its type on the
