@@ -9,6 +9,11 @@
 # rae_gb_lit_texture: borrowed source texture for a Rae-encoded HDR copy.
 # rae_gb_lit_copy_texture: borrowed destination, owned by deferred target lifecycle.
 # rae_gb_lit_copy_view: borrowed sampled snapshot view for transparent materials.
+# #843 platform ABI (same handle-slot idiom as the AO/composite passes):
+# rae_gb_lit_format: the HDR target's runtime-chosen format (rg11b10 vs rgba16f), so the
+#   Rae-built transparent blend pipeline targets exactly what lighting wrote.
+# rae_gb_transparent_pipeline / rae_gb_set_transparent_pipeline: parked Rae-created blend pipeline.
+# rae_gb_transparent_bind / rae_gb_set_transparent_bind: parked Rae-created bind group.
 rae_ext_Gbuffer_deferredShutdown
 rae_ext_Gbuffer_drawCount
 # present: no-UI final blit to the swapchain; reached from Rae as
