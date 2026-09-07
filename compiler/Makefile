@@ -90,7 +90,13 @@ OBJS += $(BUILD_DIR)/rae_tinyexpr.o $(BUILD_DIR)/monocypher.o
 DEPS = $(OBJS:.o=.d)
 
 TARGET = $(BIN_DIR)/rae
+# RAE_TEST_PARALLEL=1 routes `make test` (and so tools/watch-tests.sh + the
+# devtools Test Runner tab) through the parallel case runner (#824).
+ifeq ($(RAE_TEST_PARALLEL),1)
+TEST_RUNNER = tools/run_tests_parallel.sh
+else
 TEST_RUNNER = tools/run_tests.sh
+endif
 
 .PHONY: all build test clean smoke install uninstall c-surface-gate
 

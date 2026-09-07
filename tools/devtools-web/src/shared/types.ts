@@ -319,6 +319,12 @@ export type ClientRunTestsMessage = {
   // example). Defaults to false — the "Run all tests" button stays fast unless
   // the user opts in via the toggle. Ignored for single-test (testName) runs.
   includeExamples?: boolean;
+  // Run the unit cases N at a time (compiler/tools/run_tests_parallel.sh via
+  // `make test` + RAE_TEST_PARALLEL=1; #824: ~2.7x on 10 cores, identical
+  // verdicts). Defaults to TRUE — the client's toggle is checked unless the user
+  // unticks it (e.g. while something else is compiling). Ignored for
+  // single-test (testName) runs, which have no parallel form.
+  parallel?: boolean;
 };
 
 export type ClientRunBuildMessage = {

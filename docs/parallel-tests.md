@@ -80,9 +80,19 @@ relax it, it makes violating it more visible.
 
 ## Status
 
-Prototype, opt-in, not wired into `make test` by this task. Making it the
-default would mean: routing `make test` / `watch-tests.sh` through it (an
-uncommitted `RAE_TEST_PARALLEL=1` Makefile switch was drafted alongside),
-deciding whether the per-case fixed cost is worth attacking (runtime object
-caching), and keeping the sequential runner as the reference the parallel
-one is diffed against.
+Wired in, opt-in at the CLI and default-on in devtools:
+
+* `RAE_TEST_PARALLEL=1 make test` routes `make test` (and so
+  `tools/watch-tests.sh`) through the parallel runner. Without the variable,
+  `make test` is the sequential reference runner, unchanged. `make test
+  TEST=<case>` always runs sequentially — the parallel script delegates a name
+  argument straight to `run_tests.sh`, since one case has no parallel form.
+* The devtools Test Runner has a "Parallel cases (fast)" toggle next to the
+  examples toggle. It is ON by default (an absent localStorage key means on; only
+  an explicit untick is remembered), and the server sets `RAE_TEST_PARALLEL=1`
+  for a full run when it is on. Single-test runs ignore it. Untick it while
+  something else is compiling — parallel work on a saturated machine only
+  spreads the same wall time thinner (see the 459–503 s runs above).
+* The sequential runner stays the reference the parallel one is diffed against.
+  The remaining win is the fixed per-case cost (one gcc of the runtime), which
+  is a build change, not a runner change.
