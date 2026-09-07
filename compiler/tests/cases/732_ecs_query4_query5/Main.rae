@@ -41,11 +41,11 @@ func main() {
   let h4: List(Query4Match) = query4(tableA: pos, tableB: vel, tableC: hp, tableD: tag)
   log("q4 count: {h4.length}")
   loop let row: view Query4Match in h4 {
-    let p: view Position => query4ViewA(tableA: pos, hit: row)
+    let position: view Position => query4ViewA(tableA: pos, hit: row)
     let vv: view Vel => query4ViewB(tableB: vel, hit: row)
     let h: view Hp => query4ViewC(tableC: hp, hit: row)
     let tg: view Tag => query4ViewD(tableD: tag, hit: row)
-    log("q4 e{row.entity.index}: {p.x} {vv.v} {h.hp} {tg.t}")
+    log("q4 e{row.entity.index}: {position.x} {vv.v} {h.hp} {tg.t}")
   }
 
   # query4 again with the smallest table in slot B (a different driver branch).
@@ -62,12 +62,12 @@ func main() {
   let h5: List(Query5Match) = query5(tableA: pos, tableB: vel, tableC: hp, tableD: nm, tableE: tag)
   log("q5 count: {h5.length}")
   loop let row: view Query5Match in h5 {
-    let p: view Position => query5ViewA(tableA: pos, hit: row)
+    let position: view Position => query5ViewA(tableA: pos, hit: row)
     let vv: view Vel => query5ViewB(tableB: vel, hit: row)
     let h: view Hp => query5ViewC(tableC: hp, hit: row)
     let nn: view Nm => query5ViewD(tableD: nm, hit: row)
     let tg: view Tag => query5ViewE(tableE: tag, hit: row)
-    log("q5 e{row.entity.index}: {p.x} {vv.v} {h.hp} {nn.n} {tg.t}")
+    log("q5 e{row.entity.index}: {position.x} {vv.v} {h.hp} {nn.n} {tg.t}")
   }
 
   # query5 with the smallest table in slot A.

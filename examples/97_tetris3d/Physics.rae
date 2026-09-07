@@ -4,21 +4,21 @@
 # Returns 1 if the cell at (x, y) is solid (locked block or out of
 # bounds on the sides / bottom). Above the well (y < 0) is treated as
 # empty so a piece can spawn there.
-func isOccupied(w: view World, x: view Int, y: view Int) ret Int {
+func isOccupied(world: view World, x: view Int, y: view Int) ret Int {
   if x < 0 or x >= gridWidth or y >= gridHeight {
     ret 1
   }
   if y < 0 {
     ret 0
   }
-  if gridGet(w: w, x: x, y: y) > 0 {
+  if gridGet(world: world, x: x, y: y) > 0 {
     ret 1
   }
   ret 0
 }
 
-func canMove(w: view World, dx: view Int, dy: view Int, dr: view Int) ret Int {
-  let cp: view Piece => w.currentPiece
+func canMove(world: view World, dx: view Int, dy: view Int, dr: view Int) ret Int {
+  let cp: view Piece => world.currentPiece
   let newX: Int = cp.x + dx
   let newY: Int = cp.y + dy
   var newRot: Int = (cp.rotation + dr) % 4
@@ -30,7 +30,7 @@ func canMove(w: view World, dx: view Int, dy: view Int, dr: view Int) ret Int {
     var px: Int = 0
     loop px < 4 {
       if getShapeCell(kind: cp.kind, rot: newRot, px: px, py: py) is 1 {
-        if isOccupied(w: w, x: newX + px, y: newY + py) is 1 {
+        if isOccupied(world: world, x: newX + px, y: newY + py) is 1 {
           ret 0
         }
       }
@@ -41,8 +41,8 @@ func canMove(w: view World, dx: view Int, dy: view Int, dr: view Int) ret Int {
   ret 1
 }
 
-func lockPiece(w: mod World) {
-  let cp: view Piece => w.currentPiece
+func lockPiece(world: mod World) {
+  let cp: view Piece => world.currentPiece
   let kindId: Int = getKindId(kind: cp.kind)
   var py: Int = 0
   loop py < 4 {
@@ -52,45 +52,45 @@ func lockPiece(w: mod World) {
         let gx: Int = cp.x + px
         let gy: Int = cp.y + py
         if gy >= 0 and gy < gridHeight {
-          gridSet(w: w, x: gx, y: gy, value: kindId)
+          gridSet(world: world, x: gx, y: gy, value: kindId)
         }
       }
       px = px + 1
     }
     py = py + 1
   }
-  w.lockFlash = 1.0
+  world.lockFlash = 1.0
 }
 
-func checkLines(w: mod World) {
+func checkLines(world: mod World) {
   var cleared: Int = 0
   var y: Int = gridHeight - 1
   loop y >= 0 {
     var full: Int = 1
     var x: Int = 0
     loop x < gridWidth {
-      if gridGet(w: w, x: x, y: y) is 0 {
+      if gridGet(world: world, x: x, y: y) is 0 {
         full = 0
       }
       x = x + 1
     }
     if full is 1 {
       cleared = cleared + 1
-      spawnLineClearParticles(w: w, row: y)
+      spawnLineClearParticles(world: world, row: y)
       # Shift everything above one row down.
       var ty: Int = y
       loop ty > 0 {
         var tx: Int = 0
         loop tx < gridWidth {
-          let above: Int = gridGet(w: w, x: tx, y: ty - 1)
-          gridSet(w: w, x: tx, y: ty, value: above)
+          let above: Int = gridGet(world: world, x: tx, y: ty - 1)
+          gridSet(world: world, x: tx, y: ty, value: above)
           tx = tx + 1
         }
         ty = ty - 1
       }
       var tx: Int = 0
       loop tx < gridWidth {
-        gridSet(w: w, x: tx, y: 0, value: 0)
+        gridSet(world: world, x: tx, y: 0, value: 0)
         tx = tx + 1
       }
       # Re-check the same row index since rows shifted down.
@@ -99,7 +99,7 @@ func checkLines(w: mod World) {
     y = y - 1
   }
   if cleared > 0 {
-    w.lines = w.lines + cleared
+    world.lines = world.lines + cleared
     # 1/2/3/4-line bonus matching modern guideline scoring.
     var mult: Int = 100
     if cleared is 2 {
@@ -111,29 +111,29 @@ func checkLines(w: mod World) {
     if cleared is 4 {
       mult = 800
     }
-    w.score = w.score + mult * w.level
-    let newLevel: Int = w.lines / 10 + 1
-    if newLevel > w.level {
-      w.level = newLevel
-      w.fallDelay = 30 - (w.level * 2)
-      if w.fallDelay < 4 {
-        w.fallDelay = 4
+    world.score = world.score + mult * world.level
+    let newLevel: Int = world.lines / 10 + 1
+    if newLevel > world.level {
+      world.level = newLevel
+      world.fallDelay = 30 - (world.level * 2)
+      if world.fallDelay < 4 {
+        world.fallDelay = 4
       }
     }
   }
 }
 
-func spawnNextPiece(w: mod World) {
+func spawnNextPiece(world: mod World) {
   let p: Piece = {
-    kind: w.nextKind
+    kind: world.nextKind
     x: 3
     y: 0
     rotation: 0
   }
-  w.currentPiece = p
-  w.nextKind = randomKind()
-  if canMove(w: w, dx: 0, dy: 0, dr: 0) is 0 {
-    w.state = GameState.gameOver
+  world.currentPiece = p
+  world.nextKind = randomKind()
+  if canMove(world: world, dx: 0, dy: 0, dr: 0) is 0 {
+    world.state = GameState.gameOver
   }
 }
 
@@ -146,44 +146,44 @@ func spawnNextPiece(w: mod World) {
 # (~lockDelay frames after touchdown, not lockDelay×fallDelay frames).
 # Sliding is preserved: a successful left/right/rotate while grounded
 # resets the timer (handled in input.tryMove).
-func physicsSystem(w: mod World) {
+func physicsSystem(world: mod World) {
   # Lock-flash decay runs every frame regardless of state. Otherwise the
   # flash from the piece that triggered Game Over freezes mid-bright and
   # never returns to normal colour.
-  if w.lockFlash > 0.0 {
-    w.lockFlash = w.lockFlash - 0.05
-    if w.lockFlash < 0.0 {
-      w.lockFlash = 0.0
+  if world.lockFlash > 0.0 {
+    world.lockFlash = world.lockFlash - 0.05
+    if world.lockFlash < 0.0 {
+      world.lockFlash = 0.0
     }
   }
 
-  if w.state is not GameState.playing {
+  if world.state is not GameState.playing {
     ret
   }
 
-  var grounded: Bool = canMove(w: w, dx: 0, dy: 1, dr: 0) is 0
+  var grounded: Bool = canMove(world: world, dx: 0, dy: 1, dr: 0) is 0
 
   # Gravity tick.
-  w.fallTimer = w.fallTimer + 1
-  if w.fallTimer >= w.fallDelay {
-    w.fallTimer = 0
+  world.fallTimer = world.fallTimer + 1
+  if world.fallTimer >= world.fallDelay {
+    world.fallTimer = 0
     if not grounded {
-      w.currentPiece.y = w.currentPiece.y + 1
-      grounded = canMove(w: w, dx: 0, dy: 1, dr: 0) is 0
+      world.currentPiece.y = world.currentPiece.y + 1
+      grounded = canMove(world: world, dx: 0, dy: 1, dr: 0) is 0
     }
   }
 
   # Lock tick: only counts while grounded; resets the moment the piece
   # finds it can fall again (e.g. after the player slides into a hole).
   if grounded {
-    w.lockTimer = w.lockTimer + 1
-    if w.lockTimer >= w.lockDelay {
-      w.lockTimer = 0
-      lockPiece(w: w)
-      checkLines(w: w)
-      spawnNextPiece(w: w)
+    world.lockTimer = world.lockTimer + 1
+    if world.lockTimer >= world.lockDelay {
+      world.lockTimer = 0
+      lockPiece(world: world)
+      checkLines(world: world)
+      spawnNextPiece(world: world)
     }
   } else {
-    w.lockTimer = 0
+    world.lockTimer = 0
   }
 }

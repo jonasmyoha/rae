@@ -26,11 +26,11 @@ func main() {
   let r: view Position => componentView(this: world.positions, entity: f)    # ... then borrow
   log("late ref: {r.x}")
 
-  let p: mod Position => componentMod(this: world.positions, entity: e)
+  let position: mod Position => componentMod(this: world.positions, entity: e)
   componentSet(this: world.velocities, entity: f, data: Vel { v: 2 })   # different table
   componentRemove(this: world.velocities, entity: f)                    # different table
   touch(t: world.positions)                                             # passing it on is fine
-  p.x = p.x + 1
+  position.x = position.x + 1
   log("after: e.x={componentGet(this: world.positions, entity: e).x} vel count={componentCount(this: world.velocities)}")
 
   loop let entity: EntityId, q: mod Position in forEach(table: world.positions) {

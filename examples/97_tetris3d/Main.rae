@@ -61,7 +61,7 @@ func main() ret Int {
     particles: createList(Particle, cap: 0)
     lockFlash: 0.0
   }
-  initWorld(w: game)
+  initWorld(world: game)
 
   var renderState: TetrisRenderState = createTetrisRenderState()
   let camera: Camera3d = forWorld(world: game)
@@ -96,9 +96,9 @@ func main() ret Int {
     game.level = 2
     var testX: Int = 0
     loop testX < gridWidth {
-      gridSet(w: game, x: testX, y: gridHeight - 1, value: testX % 7 + 1)
+      gridSet(world: game, x: testX, y: gridHeight - 1, value: testX % 7 + 1)
       if testX % 2 is 0 {
-        gridSet(w: game, x: testX, y: gridHeight - 2, value: testX % 7 + 1)
+        gridSet(world: game, x: testX, y: gridHeight - 2, value: testX % 7 + 1)
       }
       testX = testX + 1
     }
@@ -122,11 +122,11 @@ func main() ret Int {
     accumulator = accumulator + frameTime
     if testMode is false {
       loop accumulator >= fixedStep {
-        inputSystem(w: game, edges: inputEdges)
+        inputSystem(world: game, edges: inputEdges)
         clearInputEdges(edges: inputEdges)
-        physicsSystem(w: game)
-        particleSystem(w: game)
-        cameraSystem(w: game)
+        physicsSystem(world: game)
+        particleSystem(world: game)
+        cameraSystem(world: game)
         accumulator = accumulator - fixedStep
       }
     }
