@@ -614,7 +614,7 @@ static const char* GB_GRASS_WGSL =
 "};\n"
 "struct GrassU {\n"
 "  a: vec4<f32>,\n"   /* playerX, playerY, groundZ, time */
-"  b: vec4<f32>,\n"   /* count, extent, toon, dt */
+"  b: vec4<f32>,\n"   /* count, extent, toon, deltaTime */
 "  c: vec4<f32>,\n"   /* camX, camY, camZ, nearKeep */
 "  d: vec4<f32>,\n"   /* forwardX, forwardY, forwardZ, coneCos */
 "  e: vec4<f32>,\n"   /* groundColour.rgb (gradient bottom, = terrain ground) */
@@ -740,7 +740,7 @@ static const char* GB_GRASS_WGSL =
  * shader (grass epic #487) so it can curve the blade progressively (base fixed,
  * tip leaning most) from a coherent world-space wave, which a single rigid model
  * tilt cannot do. model == prevModel; the render shader derives motion from the
- * bend at time and time-dt. */
+ * bend at time and time minus deltaTime. */
 "  let pos = vec3<f32>(bx, by, bz);\n"
 /* GPU CULLING (grass epic #487 indirect / #488): skip faded blades and anything
  * outside the view cone, then append the survivors to a COMPACTED list via an
@@ -803,7 +803,7 @@ static const char* GB_GRASS_RENDER_WGSL =
 "};\n"
 "struct GrassU {\n"
 "  a: vec4<f32>,\n"   /* playerX, playerY, groundZ, time */
-"  b: vec4<f32>,\n"   /* count, extent, toon, dt */
+"  b: vec4<f32>,\n"   /* count, extent, toon, deltaTime */
 "  c: vec4<f32>,\n"   /* cam (unused here) */
 "  d: vec4<f32>,\n"   /* forward (unused here) */
 "  e: vec4<f32>,\n"   /* groundColour (unused here; blade carries it) */
