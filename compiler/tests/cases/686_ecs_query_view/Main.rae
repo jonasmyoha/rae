@@ -30,8 +30,8 @@ func main() {
   log("forEach count: {all.length}")
   var sum: Int = 0
   loop let row: view QueryMatch in all {
-    let p: view Position => forEachView(table: pos, hit: row)
-    sum = sum + p.x
+    let position: view Position => forEachView(table: pos, hit: row)
+    sum = sum + position.x
   }
   log("pos sum: {sum}")
 
@@ -43,9 +43,9 @@ func main() {
   log("q2 count: {hits.length}")
   var dot: Int = 0
   loop let row: view Query2Match in hits {
-    let p: view Position => query2ViewA(tableA: pos, hit: row)
+    let position: view Position => query2ViewA(tableA: pos, hit: row)
     let vv: view Vel => query2ViewB(tableB: vel, hit: row)
-    dot = dot + p.x * vv.v
+    dot = dot + position.x * vv.v
   }
   log("dot: {dot}")
   log("pos gen unchanged: {componentTableGeneration(this: pos) is posGen}")
@@ -55,9 +55,9 @@ func main() {
   let hits3: List(Query3Match) = query3(tableA: pos, tableB: vel, tableC: tag)
   log("q3 count: {hits3.length}")
   loop let row: view Query3Match in hits3 {
-    let p: view Position => query3ViewA(tableA: pos, hit: row)
+    let position: view Position => query3ViewA(tableA: pos, hit: row)
     let vv: view Vel => query3ViewB(tableB: vel, hit: row)
     let tg: view Tag => query3ViewC(tableC: tag, hit: row)
-    log("q3 read: {p.x} {vv.v} {tg.t}")
+    log("q3 read: {position.x} {vv.v} {tg.t}")
   }
 }
