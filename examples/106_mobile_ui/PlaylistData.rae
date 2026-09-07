@@ -319,8 +319,8 @@ func savePlaylist(playlist: view Playlist) pub {
   let q: String = "\""
   let colon: String = ":"
   let comma: String = ","
-  let escapedId: String = Json.escape(s: playlist.id)
-  let escapedTitle: String = Json.escape(s: playlist.title)
+  let escapedId: String = Json.escape(text: playlist.id)
+  let escapedTitle: String = Json.escape(text: playlist.title)
 
   var content: String = ""
   content = content.concat(other: openBrace).concat(other: nl)
@@ -336,9 +336,9 @@ func savePlaylist(playlist: view Playlist) pub {
   var i: Int = 0
   loop i < n {
     let it: PlaylistItem = rae_ext_rae_buf_get(buf: playlist.items.data, index: i)
-    let escapedKind: String = Json.escape(s: it.kind)
-    let escapedPlaylistId: String = Json.escape(s: it.playlistId)
-    let escapedAlbumStem: String = Json.escape(s: it.albumStem)
+    let escapedKind: String = Json.escape(text: it.kind)
+    let escapedPlaylistId: String = Json.escape(text: it.playlistId)
+    let escapedAlbumStem: String = Json.escape(text: it.albumStem)
     content = content.concat(other: "    ").concat(other: openBrace).concat(other: " ")
     content = content.concat(other: q).concat(other: "kind").concat(other: q).concat(other: colon).concat(other: " ")
     content = content.concat(other: q).concat(other: escapedKind).concat(other: q).concat(other: comma).concat(other: " ")

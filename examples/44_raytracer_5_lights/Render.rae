@@ -24,19 +24,19 @@ func randomUnit() ret Vec3 {
     ret Vec3.create(x: radius * Math.cos(x: a), y: radius * Math.sin(x: a), z: z)
 }
 
-func vreflect(v: view Vec3, n: view Vec3) ret Vec3 {
-    let d: Float = 2.0 * Vec3.vdot(a: v, b: n)
-    ret Vec3.vsub(a: v, b: Vec3.vscale(a: n, sphere: d))
+func vreflect(v: view Vec3, normal: view Vec3) ret Vec3 {
+    let d: Float = 2.0 * Vec3.vdot(a: v, b: normal)
+    ret Vec3.vsub(a: v, b: Vec3.vscale(a: normal, s: d))
 }
 
-func vrefract(uv: view Vec3, n: view Vec3, etaRatio: view Float) ret Vec3 {
-    var cosT: Float = Vec3.vdot(a: Vec3.vneg(a: uv), b: n)
+func vrefract(uv: view Vec3, normal: view Vec3, etaRatio: view Float) ret Vec3 {
+    var cosT: Float = Vec3.vdot(a: Vec3.vneg(a: uv), b: normal)
     if cosT > 1.0 {
         cosT = 1.0
     }
-    let perp: Vec3 = Vec3.vscale(a: Vec3.vadd(a: uv, b: Vec3.vscale(a: n, sphere: cosT)), sphere: etaRatio)
-    let pl: Float = 0.0 - Math.sqrt(x: abs(n: 1.0 - Vec3.vlenSq(a: perp)))
-    ret Vec3.vadd(a: perp, b: Vec3.vscale(a: n, sphere: pl))
+    let perp: Vec3 = Vec3.vscale(a: Vec3.vadd(a: uv, b: Vec3.vscale(a: normal, s: cosT)), s: etaRatio)
+    let pl: Float = 0.0 - Math.sqrt(x: abs(value: 1.0 - Vec3.vlenSq(a: perp)))
+    ret Vec3.vadd(a: perp, b: Vec3.vscale(a: normal, s: pl))
 }
 
 func schlick(cosine: view Float, refIdx: view Float) ret Float {
@@ -92,8 +92,8 @@ func rayColor(world: view List(Sphere), ray: view Ray, depth: view Int) ret Vec3
     if sphere.material.kind is 3 {
         ret sphere.material.albedo
     }
-    let p: Vec3 = Vec3.vadd(a: ray.origin, b: Vec3.vscale(a: ray.dir, sphere: best))
-    let n: Vec3 = Vec3.vscale(a: Vec3.vsub(a: p, b: sphere.center), sphere: 1.0 / sphere.radius)
+    let p: Vec3 = Vec3.vadd(a: ray.origin, b: Vec3.vscale(a: ray.dir, s: best))
+    let n: Vec3 = Vec3.vscale(a: Vec3.vsub(a: p, b: sphere.center), s: 1.0 / sphere.radius)
     var scatter: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
     var atten: Vec3 = sphere.material.albedo
     if sphere.material.kind is 0 {
@@ -101,7 +101,7 @@ func rayColor(world: view List(Sphere), ray: view Ray, depth: view Int) ret Vec3
     } else {
         if sphere.material.kind is 1 {
             let ud: Vec3 = Vec3.vnorm(a: ray.dir)
-            scatter = Vec3.vadd(a: vreflect(v: ud, n: n), b: Vec3.vscale(a: randomUnit(), sphere: sphere.material.fuzz))
+            scatter = Vec3.vadd(a: vreflect(v: ud, normal: n), b: Vec3.vscale(a: randomUnit(), s: sphere.material.fuzz))
             if Vec3.vdot(a: scatter, b: n) <= 0.0 {
                 ret Vec3.create(x: 0.0, y: 0.0, z: 0.0)
             }
@@ -120,9 +120,9 @@ func rayColor(world: view List(Sphere), ray: view Ray, depth: view Int) ret Vec3
             }
             let sinT: Float = Math.sqrt(x: 1.0 - cosT * cosT)
             if etaRatio * sinT > 1.0 or schlick(cosine: cosT, refIdx: etaRatio) > random() {
-                scatter = vreflect(v: ud, n: frontN)
+                scatter = vreflect(v: ud, normal: frontN)
             } else {
-                scatter = vrefract(uv: ud, n: frontN, etaRatio: etaRatio)
+                scatter = vrefract(uv: ud, normal: frontN, etaRatio: etaRatio)
             }
         }
     }

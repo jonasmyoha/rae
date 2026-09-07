@@ -130,71 +130,71 @@ func registeredComponentCount() ret Int {
 # Live-VM corner.
 # -----------------------------------------------------------------
 
-func parseSizeMode(s: view String) ret SizeMode {
+func parseSizeMode(text: view String) ret SizeMode {
   let hugStr: String = "Hug"
   let fillStr: String = "Fill"
-  if s is hugStr {
+  if text is hugStr {
     ret SizeMode.hug
   }
-  if s is fillStr {
+  if text is fillStr {
     ret SizeMode.fill
   }
   ret SizeMode.fixed
 }
 
-func parseLayoutType(s: view String) ret LayoutType {
+func parseLayoutType(text: view String) ret LayoutType {
   let h: String = "Horizontal"
   let v: String = "Vertical"
   let g: String = "Grid"
   let st: String = "Stack"
-  if s is h {
+  if text is h {
     ret LayoutType.horizontal
   }
-  if s is v {
+  if text is v {
     ret LayoutType.vertical
   }
-  if s is g {
+  if text is g {
     ret LayoutType.grid
   }
-  if s is st {
+  if text is st {
     ret LayoutType.stack
   }
   ret LayoutType.none
 }
 
-func parseAlignKind(s: view String) ret AlignKind {
+func parseAlignKind(text: view String) ret AlignKind {
   let c: String = "Center"
   let e: String = "End"
   let sb: String = "SpaceBetween"
   let str: String = "Stretch"
-  if s is c {
+  if text is c {
     ret AlignKind.center
   }
-  if s is e {
+  if text is e {
     ret AlignKind.end
   }
-  if s is sb {
+  if text is sb {
     ret AlignKind.spaceBetween
   }
-  if s is str {
+  if text is str {
     ret AlignKind.stretch
   }
   ret AlignKind.start
 }
 
-func parseShapeKind(s: view String) ret ShapeKind {
+func parseShapeKind(text: view String) ret ShapeKind {
   let rr: String = "RoundedRect"
   let c: String = "Circle"
-  if s is rr {
+  if text is rr {
     ret ShapeKind.roundedRect
   }
-  if s is c {
+  if text is c {
     ret ShapeKind.circle
   }
   ret ShapeKind.rect
 }
 
-func parseScaleMode(s: view String) ret ScaleMode {
+func parseScaleMode(text: view String) ret ScaleMode {
   let fi: String = "Fill"
   let st: String = "Stretch"
   # CSS object-fit vocabulary (S6): Cover = aspect-preserving crop
@@ -202,73 +202,73 @@ func parseScaleMode(s: view String) ret ScaleMode {
   # the Fit default). Both spellings are accepted so scenes can use
   # whichever reads better.
   let cover: String = "Cover"
-  if s is fi {
+  if text is fi {
     ret ScaleMode.fill
   }
-  if s is cover {
+  if text is cover {
     ret ScaleMode.fill
   }
-  if s is st {
+  if text is st {
     ret ScaleMode.stretch
   }
   ret ScaleMode.fit
 }
 
-func parseWrapWidthMode(s: view String) ret WrapWidthMode {
+func parseWrapWidthMode(text: view String) ret WrapWidthMode {
   let nw: String = "NodeWidth"
-  if s is nw {
+  if text is nw {
     ret WrapWidthMode.nodeWidth
   }
   ret WrapWidthMode.none
 }
 
-func parseHitAreaKind(s: view String) ret HitAreaKind {
+func parseHitAreaKind(text: view String) ret HitAreaKind {
   let rr: String = "RoundedRect"
-  if s is rr {
+  if text is rr {
     ret HitAreaKind.roundedRect
   }
   ret HitAreaKind.rect
 }
 
-func parseMaskKind(s: view String) ret MaskKind {
+func parseMaskKind(text: view String) ret MaskKind {
   let rr: String = "RoundedRect"
-  if s is rr {
+  if text is rr {
     ret MaskKind.roundedRect
   }
   ret MaskKind.circle
 }
 
-func parseResolverMode(s: view String) ret ResolverMode {
+func parseResolverMode(text: view String) ret ResolverMode {
   let r: String = "Random"
   let h: String = "Hash"
   let d: String = "Direct"
-  if s is r {
+  if text is r {
     ret ResolverMode.random
   }
-  if s is h {
+  if text is h {
     ret ResolverMode.hash
   }
-  if s is d {
+  if text is d {
     ret ResolverMode.direct
   }
   ret ResolverMode.fixed
 }
 
-func parseTextFormat(s: view String) ret TextFormat {
+func parseTextFormat(text: view String) ret TextFormat {
   let n: String = "Number"
   let p: String = "Percent1"
   let c: String = "Coins"
   let h: String = "HandRank"
-  if s is n {
+  if text is n {
     ret TextFormat.number
   }
-  if s is p {
+  if text is p {
     ret TextFormat.percent1
   }
-  if s is c {
+  if text is c {
     ret TextFormat.coins
   }
-  if s is h {
+  if text is h {
     ret TextFormat.handRank
   }
   ret TextFormat.plain
@@ -314,7 +314,7 @@ func deserRgba(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret 
 
 func deserSizeAxis(doc: view JsonDoc, val: view JsonValue) ret SizeAxis {
   let modeStr: String = optString(doc: doc, container: val, key: "mode", fallback: "Fixed")
-  let mode: SizeMode = parseSizeMode(s: modeStr)
+  let mode: SizeMode = parseSizeMode(text: modeStr)
   let minV: Int = optInt(doc: doc, container: val, key: "min", fallback: -1)
   let maxV: Int = optInt(doc: doc, container: val, key: "max", fallback: -1)
   ret SizeAxis { mode: mode, min: minV, max: maxV }
@@ -362,10 +362,10 @@ func deserLayout(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) re
   let alignMainStr: String = optString(doc: doc, container: val, key: "alignMain", fallback: "Start")
   let alignCrossStr: String = optString(doc: doc, container: val, key: "alignCross", fallback: "Start")
   ret Layout {
-    kind: parseLayoutType(s: typeStr)
+    kind: parseLayoutType(text: typeStr)
     gap: optFloatOrToken(doc: doc, theme: theme, container: val, key: "gap", fallback: 0.0)
-    alignMain: parseAlignKind(s: alignMainStr)
-    alignCross: parseAlignKind(s: alignCrossStr)
+    alignMain: parseAlignKind(text: alignMainStr)
+    alignCross: parseAlignKind(text: alignCrossStr)
     columns: optInt(doc: doc, container: val, key: "columns", fallback: 0)
     rowGap: optFloatOrToken(doc: doc, theme: theme, container: val, key: "rowGap", fallback: 0.0)
     columnGap: optFloatOrToken(doc: doc, theme: theme, container: val, key: "columnGap", fallback: 0.0)
@@ -397,12 +397,12 @@ func deserAlign(doc: view JsonDoc, val: view JsonValue) ret Align {
   if xIdx >= 0 {
     let xv: JsonValue = Json.jsonValueAt(doc: doc, idx: xIdx)
     let s: String = Json.jsonString(this: xv, fallback: "Start")
-    xK = parseAlignKind(s: s)
+    xK = parseAlignKind(text: s)
   }
   if yIdx >= 0 {
     let yv: JsonValue = Json.jsonValueAt(doc: doc, idx: yIdx)
     let s: String = Json.jsonString(this: yv, fallback: "Start")
-    yK = parseAlignKind(s: s)
+    yK = parseAlignKind(text: s)
   }
   ret Align {
     x: xK
@@ -422,7 +422,7 @@ func deserSprite(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) re
   let s: Sprite = defaultSprite()
   s.textureKey = optString(doc: doc, container: val, key: "textureKey", fallback: "")
   let scaleModeStr: String = optString(doc: doc, container: val, key: "scaleMode", fallback: "Fit")
-  s.scaleMode = parseScaleMode(s: scaleModeStr)
+  s.scaleMode = parseScaleMode(text: scaleModeStr)
   let tintIdx: Int = Json.field(doc: doc, this: val, key: "tint")
   if tintIdx >= 0 {
     let tv: JsonValue = Json.jsonValueAt(doc: doc, idx: tintIdx)
@@ -445,7 +445,7 @@ func deserText(doc: view JsonDoc, val: view JsonValue) ret Text {
   ret Text {
     text: own txt
     styleId: own style
-    wrapWidthMode: parseWrapWidthMode(s: wrapStr)
+    wrapWidthMode: parseWrapWidthMode(text: wrapStr)
   }
 }
 
@@ -488,7 +488,7 @@ func deserTextShadow(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue
 func deserShape(doc: view JsonDoc, theme: view UiTheme, val: view JsonValue) ret Shape {
   let kindStr: String = optString(doc: doc, container: val, key: "kind", fallback: "Rect")
   let s: Shape = defaultShape()
-  s.kind = parseShapeKind(s: kindStr)
+  s.kind = parseShapeKind(text: kindStr)
   s.strokeWidth = optFloat(doc: doc, container: val, key: "strokeWidth", fallback: 0.0)
   s.radius = optRadiusOrToken(doc: doc, theme: theme, container: val, key: "radius", fallback: 0.0)
   let fillIdx: Int = Json.field(doc: doc, this: val, key: "fill")
@@ -751,7 +751,7 @@ func deserTextBinding(doc: view JsonDoc, val: view JsonValue) ret TextBinding {
   let bk: String = optString(doc: doc, container: val, key: "key", fallback: "")
   let bp: String = optString(doc: doc, container: val, key: "prefix", fallback: "")
   let bs: String = optString(doc: doc, container: val, key: "suffix", fallback: "")
-  let bf: TextFormat = parseTextFormat(s: formatStr)
+  let bf: TextFormat = parseTextFormat(text: formatStr)
   let r: TextBinding = {
     key: own bk
     format: bf
@@ -764,7 +764,7 @@ func deserTextBinding(doc: view JsonDoc, val: view JsonValue) ret TextBinding {
 func deserMaskShape(doc: view JsonDoc, val: view JsonValue) ret MaskShape {
   let kindStr: String = optString(doc: doc, container: val, key: "kind", fallback: "Circle")
   ret MaskShape {
-    kind: parseMaskKind(s: kindStr)
+    kind: parseMaskKind(text: kindStr)
     sourceNodeId: optString(doc: doc, container: val, key: "sourceNodeId", fallback: "")
     radius: optFloat(doc: doc, container: val, key: "radius", fallback: 0.0)
   }

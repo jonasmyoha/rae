@@ -17,8 +17,8 @@ const matRock: Int = 2
 const matMud: Int = 3
 const matWater: Int = 4
 
-func texClampByte(v: view Float) ret Int {
-  var x: Int = (v * 255.0) as Int
+func texClampByte(value: view Float) ret Int {
+  var x: Int = (value * 255.0) as Int
   if x < 0 { x = 0 }
   if x > 255 { x = 255 }
   ret x
@@ -26,7 +26,7 @@ func texClampByte(v: view Float) ret Int {
 
 # Pack r,g,b (0..1 Floats) + opaque alpha into one RGBA pixel (byte order R,G,B,A).
 func texPackRgb(r: view Float, g: view Float, b: view Float) ret Int {
-  ret texClampByte(v: r) + texClampByte(v: g) * 256 + texClampByte(v: b) * 65536 + 255 * 16777216
+  ret texClampByte(value: r) + texClampByte(value: g) * 256 + texClampByte(value: b) * 65536 + 255 * 16777216
 }
 
 # fbm is ~[-1,1]; remap to [0,1].
