@@ -10,12 +10,12 @@ open ecs/Serialize
 # the cache component is absent.
 
 type Position { x: Int, y: Int }
-type Vel { dx: Int, dy: Int }
+type Velocity { dx: Int, dy: Int }
 type WorldCache { w: Int }   # derived cache — registered WITHOUT serialize
 
 type MiniWorld {
   positions: ComponentTable(Position)
-  velocities: ComponentTable(Vel)
+  velocities: ComponentTable(Velocity)
   caches: ComponentTable(WorldCache)
 }
 
@@ -24,31 +24,31 @@ type MiniWorld {
 func worldToJson(world: view MiniWorld, registry: view ComponentRegistry) ret String {
   var writer: WorldJson = createWorldJson()
   addComponentTable(writer: writer, table: world.positions, name: "Position", registry: registry)
-  addComponentTable(writer: writer, table: world.velocities, name: "Vel", registry: registry)
+  addComponentTable(writer: writer, table: world.velocities, name: "Velocity", registry: registry)
   addComponentTable(writer: writer, table: world.caches, name: "WorldCache", registry: registry)
   ret finishWorldJson(writer: writer)
 }
 
 func main() {
   let kPos: String = "Position"
-  let kVel: String = "Vel"
+  let kVelocity: String = "Velocity"
   let kCache: String = "WorldCache"
 
   var reg: ComponentRegistry = createComponentRegistry()
   registerComponent(reg: reg, name: kPos, flags: serialize)
-  registerComponent(reg: reg, name: kVel, flags: serialize)
+  registerComponent(reg: reg, name: kVelocity, flags: serialize)
   registerComponent(reg: reg, name: kCache, flags: 0)   # derived cache: not serialized
 
   var world: MiniWorld = {
     positions: createComponentTable(Position),
-    velocities: createComponentTable(Vel),
+    velocities: createComponentTable(Velocity),
     caches: createComponentTable(WorldCache)
   }
   let e1: EntityId = { index: 1, generation: 0 }
   let e2: EntityId = { index: 2, generation: 0 }
   componentSet(this: world.positions, entity: e1, data: Position { x: 10, y: 20 })
   componentSet(this: world.positions, entity: e2, data: Position { x: 30, y: 40 })
-  componentSet(this: world.velocities, entity: e2, data: Vel { dx: 1, dy: 2 })
+  componentSet(this: world.velocities, entity: e2, data: Velocity { dx: 1, dy: 2 })
   componentSet(this: world.caches, entity: e2, data: WorldCache { w: 999 })
 
   let jsonStr: String = worldToJson(world: world, registry: reg)
@@ -58,6 +58,6 @@ func main() {
   let doc: JsonDoc = parseJson(source: jsonStr)
   let root: JsonValue = Json.root(doc: doc)
   log("has Position: {Json.field(doc: doc, this: root, key: kPos) >= 0}")
-  log("has Vel: {Json.field(doc: doc, this: root, key: kVel) >= 0}")
+  log("has Velocity: {Json.field(doc: doc, this: root, key: kVelocity) >= 0}")
   log("has WorldCache: {Json.field(doc: doc, this: root, key: kCache) >= 0}")
 }
