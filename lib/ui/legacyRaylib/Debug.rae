@@ -443,13 +443,13 @@ func attachKids(world: mod UiWorld, parent: view EntityId, kids: view List(Entit
 # layout containing a "D" text glyph. Sized `buttonSize` × `buttonSize`,
 # positioned at (buttonX, buttonY) via Offset.
 func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret EntityId {
-  let btn: EntityId = createEntity(world: world)
-  setFixedRect(world: world, entity: btn, w: debug.buttonSize, h: debug.buttonSize)
-  setOffset(world: world, entity: btn, x: debug.buttonX, y: debug.buttonY)
-  setCircleShape(world: world, entity: btn, fill: amberColor())
-  setStackLayout(world: world, entity: btn)
+  let button: EntityId = createEntity(world: world)
+  setFixedRect(world: world, entity: button, w: debug.buttonSize, h: debug.buttonSize)
+  setOffset(world: world, entity: button, x: debug.buttonX, y: debug.buttonY)
+  setCircleShape(world: world, entity: button, fill: amberColor())
+  setStackLayout(world: world, entity: button)
   let actionId: String = debugActionToggleMenu
-  setOnClickAction(world: world, entity: btn, actionId: actionId)
+  setOnClickAction(world: world, entity: button, actionId: actionId)
 
   let label: EntityId = createEntity(world: world)
   let labelW: Float = debug.buttonSize
@@ -461,8 +461,8 @@ func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret EntityId 
 
   let kids: List(EntityId) = createList(EntityId, cap: 1)
   kids.add(value: label)
-  attachKids(world: world, parent: btn, kids: kids)
-  ret btn
+  attachKids(world: world, parent: button, kids: kids)
+  ret button
 }
 
 # Build one row of the menu: a label on the left, an iOS-style switch
@@ -676,11 +676,11 @@ func addDebugLayer(world: mod UiWorld, debug: mod DebugSystem) pub {
   # Anchor lookup is best-effort: it picks up per-screen overrides
   # if a scene declared one, but the button renders either way.
   let hasAnchor: Bool = applyDebugAnchor(world: world, debug: debug)
-  let btn: EntityId = buildDebugButton(world: world, debug: debug)
+  let button: EntityId = buildDebugButton(world: world, debug: debug)
   # Debug button + (optional) menu sit on the topmost plane so app
   # chrome (dock, back-button, dialogs) never paints over them.
   let debugLayerId: String = "debug"
-  setLayerById(world: world, entity: btn, id: debugLayerId)
+  setLayerById(world: world, entity: button, id: debugLayerId)
   if debug.menuOpen {
     let menu: EntityId = buildDebugMenuOverlay(world: world, debug: debug)
     setLayerById(world: world, entity: menu, id: debugLayerId)
@@ -871,24 +871,24 @@ func drawDebugLabels(backend: view UiBackend, debug: view DebugSystem) {
       mb = 4
     }
     let buttons: Int = lb + rb + mb
-    let btnText: String = "btn: {buttons}"
-    let btnY: Float = memY + lineH + 2.0
-    var btnX: Float = debug.buttonX
+    let buttonText: String = "button: {buttons}"
+    let buttonY: Float = memY + lineH + 2.0
+    var buttonX: Float = debug.buttonX
     if rightAligned {
       let rightEdge: Float = debug.buttonX + debug.buttonSize
-      let btnW: Int = measureTextWithFont(
+      let buttonW: Int = measureTextWithFont(
         slot: 0
-        text: btnText
+        text: buttonText
         fontSize: fontSize
         spacing: 1.0
       )
-      btnX = rightEdge - btnW.toFloat()
+      buttonX = rightEdge - buttonW.toFloat()
     }
     drawTextWithFont(
       slot: 0
-      text: btnText
-      x: btnX
-      y: btnY
+      text: buttonText
+      x: buttonX
+      y: buttonY
       fontSize: fontSize
       spacing: 1.0
       color: col
