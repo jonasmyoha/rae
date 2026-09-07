@@ -7,12 +7,12 @@ type Wrapper(T: type) {
   value: T
 }
 
-func makeW(s: own String) ret Wrapper(String) {
-  ret Wrapper(String) { value: s }
+func makeW(string: own String) ret Wrapper(String) {
+  ret Wrapper(String) { value: string }
 }
 
 func main() {
-  let a: Wrapper(String) = makeW(s: "hel" + "lo")
+  let a: Wrapper(String) = makeW(string: "hel" + "lo")
   log(a.value)
   # also exercise a generic Int field (no ownership) alongside
   let b: Wrapper(Int) = { value: 7 }

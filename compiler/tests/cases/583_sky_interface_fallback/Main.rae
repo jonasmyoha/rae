@@ -62,7 +62,7 @@ func main() {
     var z: Float = 0.0
     if let value: Float = zs.copyAt(index: i) { z = value }
     let n: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: z)
-    let got: Vec3 = irradiance(sky: s, n: n)
+    let got: Vec3 = irradiance(sky: s, normal: n)
     let want: Vec3 = referenceHemisphere(ambSky: ambSky, ambGround: ambGround, nz: z)
     if exact(a: got, b: want) is false {
       allExact = false
@@ -72,8 +72,8 @@ func main() {
   log("fallback matches the hemisphere blend exactly: {allExact}")
 
   # Facing up is sky, facing down is ground — the axis check.
-  let up: Vec3 = irradiance(sky: s, n: Vec3.create(x: 0.0, y: 0.0, z: 1.0))
-  let down: Vec3 = irradiance(sky: s, n: Vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0))
+  let up: Vec3 = irradiance(sky: s, normal: Vec3.create(x: 0.0, y: 0.0, z: 1.0))
+  let down: Vec3 = irradiance(sky: s, normal: Vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0))
   log("up is sky: {exact(a: up, b: ambSky)}")
   log("down is ground: {exact(a: down, b: ambGround)}")
 
@@ -84,7 +84,7 @@ func main() {
 
   # 3: one exposure moves both answers by the same factor.
   s.exposure = 2.0
-  let litUp: Vec3 = irradiance(sky: s, n: Vec3.create(x: 0.0, y: 0.0, z: 1.0))
+  let litUp: Vec3 = irradiance(sky: s, normal: Vec3.create(x: 0.0, y: 0.0, z: 1.0))
   let litBg: Vec3 = radiance(sky: s, dir: Vec3.create(x: 0.0, y: 1.0, z: 0.0))
   log("exposure scales irradiance: {litUp.x is ambSky.x * 2.0}")
   log("exposure scales radiance: {litBg.x is clear.x * 2.0}")

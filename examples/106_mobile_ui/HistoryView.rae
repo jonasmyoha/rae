@@ -81,7 +81,7 @@ func historyBodyH() pub ret Float {
 # Topmost VISUAL row index (0 = newest, at the top) to build for a given
 # scroll offset. scrollY is <= 0 (content scrolled up); clamped to [0, n],
 # with `historyWindowBuffer` rows of lead-in above the viewport.
-func historyWindowFirstVisual(scrollY: view Float, n: view Int) pub ret Int {
+func historyWindowFirstVisual(scrollY: view Float, count: view Int) pub ret Int {
   let pitch: Float = historyRowH + historyRowGap
   var top: Float = 0.0 - scrollY
   if top < 0.0 {
@@ -91,8 +91,8 @@ func historyWindowFirstVisual(scrollY: view Float, n: view Int) pub ret Int {
   if fv < 0 {
     fv = 0
   }
-  if fv > n {
-    fv = n
+  if fv > count {
+    fv = count
   }
   ret fv
 }
@@ -248,7 +248,7 @@ func attachHistoryWindow(world: mod UiWorld, body: view EntityId, history: view 
   }
 
   let pitch: Float = historyRowH + historyRowGap
-  let fv: Int = historyWindowFirstVisual(scrollY: scrollY, n: n)
+  let fv: Int = historyWindowFirstVisual(scrollY: scrollY, count: n)
   let wc: Int = historyWindowCount(bodyH: bodyH)
   var lv: Int = fv + wc - 1
   if lv > n - 1 {

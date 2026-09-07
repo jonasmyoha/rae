@@ -492,7 +492,7 @@ func parseThemeText(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonVa
         let al: JsonValue = Json.jsonValueAt(doc: doc, idx: alIdx)
         let empty4: String = ""
         let alStr: String = Json.jsonString(this: al, fallback: empty4)
-        align = themeParseAlign(s: alStr, fallback: align)
+        align = themeParseAlign(text: alStr, fallback: align)
       }
       }
       c = c + 1
@@ -591,14 +591,14 @@ func themeReverseIntList(src: view List(Int)) ret List(Int) {
   ret out
 }
 
-func themeParseAlign(s: view String, fallback: view Int) ret Int {
-  if s is "start" {
+func themeParseAlign(text: view String, fallback: view Int) ret Int {
+  if text is "start" {
     ret themeAlignStart
   }
-  if s is "center" {
+  if text is "center" {
     ret themeAlignCenter
   }
-  if s is "end" {
+  if text is "end" {
     ret themeAlignEnd
   }
   ret fallback

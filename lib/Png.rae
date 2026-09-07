@@ -139,7 +139,7 @@ func encodePng(pixels: view List(Int), width: view Int, height: view Int, hasAlp
     ihdr.add(value: 0)            # interlace
     writeChunk(out: out, t0: 73, t1: 72, t2: 68, t3: 82, data: ihdr)   # "IHDR"
     # IDAT (zlib-compressed filtered scanlines).
-    let idat: List(Int) = compress(data: raw, n: raw.length)
+    let idat: List(Int) = compress(data: raw, value: raw.length)
     writeChunk(out: out, t0: 73, t1: 68, t2: 65, t3: 84, data: idat)   # "IDAT"
     # IEND (empty).
     let iend: List(Int) = createList(cap: 1)
@@ -209,7 +209,7 @@ func decodePng(png: view List(Int), len: view Int, width: mod Int, height: mod I
     var channels: Int = 3
     if colorType is 6 { channels = 4 }
     # Inflate the IDAT zlib stream into filtered scanlines.
-    let raw: List(Int) = decompress(data: idat, n: idat.length)
+    let raw: List(Int) = decompress(data: idat, value: idat.length)
     let stride: Int = w * channels
 
     # Unfilter into a flat byte buffer `recon` (stride bytes per row, no filter byte).

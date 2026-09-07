@@ -26,10 +26,10 @@ func rae_ext_rae_str_to_cstr(s: String) extern ret Buffer(Any)
 # canonical case. The result is always is_owned=1, so the caller
 # can safely store it in a binding/struct field and rely on cascade
 # drop to free it without double-freeing the source.
-func rae_ext_rae_string_copy(s: view String) extern ret String
+func rae_ext_rae_string_copy(string: view String) extern ret String
 
-func stringCopy(s: view String) ret String {
-  ret rae_ext_rae_string_copy(s: s)
+func stringCopy(string: view String) ret String {
+  ret rae_ext_rae_string_copy(string: string)
 }
 
 func fromCStr(s: view Buffer(Any)) ret String {

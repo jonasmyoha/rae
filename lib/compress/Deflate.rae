@@ -19,15 +19,15 @@ type Match {
 
 # Canonical Huffman codes from per-symbol code lengths (RFC 1951 §3.2.2). Used
 # for the fixed literal/length alphabet (and reusable for dynamic blocks later).
-func buildCanonicalCodes(lengths: view List(Int), n: view Int) ret List(Int) {
-    let blCount: List(Int) = zeros(n: 16)
+func buildCanonicalCodes(lengths: view List(Int), value: view Int) ret List(Int) {
+    let blCount: List(Int) = zeros(value: 16)
     var i: Int = 0
-    loop i < n {
+    loop i < value {
         let codeLen: Int = bufAt(list: lengths, index: i)
         if codeLen is not 0 { blCount.set(index: codeLen, value: bufAt(list: blCount, index: codeLen) + 1) }
         i = i + 1
     }
-    let nextCode: List(Int) = zeros(n: 16)
+    let nextCode: List(Int) = zeros(value: 16)
     var code: Int = 0
     var bits: Int = 1
     loop bits <= 15 {
@@ -35,9 +35,9 @@ func buildCanonicalCodes(lengths: view List(Int), n: view Int) ret List(Int) {
         nextCode.set(index: bits, value: code)
         bits = bits + 1
     }
-    let codes: List(Int) = zeros(n: n)
+    let codes: List(Int) = zeros(value: value)
     i = 0
-    loop i < n {
+    loop i < value {
         let codeLen: Int = bufAt(list: lengths, index: i)
         if codeLen is not 0 {
             codes.set(index: i, value: bufAt(list: nextCode, index: codeLen))
@@ -57,9 +57,9 @@ func hash3(data: view List(Int), pos: view Int) ret Int {
 }
 
 # Insert `pos` into the hash chain so later positions can match against it.
-func insertHash(data: view List(Int), pos: view Int, n: view Int,
+func insertHash(data: view List(Int), pos: view Int, value: view Int,
                 head: mod List(Int), prev: mod List(Int)) {
-    if pos + 3 <= n {
+    if pos + 3 <= value {
         let h: Int = hash3(data: data, pos: pos)
         prev.set(index: pos, value: chainAt(list: head, index: h))
         head.set(index: h, value: pos)
@@ -68,10 +68,10 @@ func insertHash(data: view List(Int), pos: view Int, n: view Int,
 
 # Find the longest match for the bytes at `pos` within the 32 KB window, walking
 # the hash chain up to `maxChain` candidates. Greedy.
-func findMatch(data: view List(Int), pos: view Int, n: view Int,
+func findMatch(data: view List(Int), pos: view Int, value: view Int,
                head: view List(Int), prev: view List(Int)) ret Match {
-    if pos + 3 > n { ret Match { len: 0, dist: 0 } }
-    var maxL: Int = n - pos
+    if pos + 3 > value { ret Match { len: 0, dist: 0 } }
+    var maxL: Int = value - pos
     if maxL > 258 { maxL = 258 }
     let h: Int = hash3(data: data, pos: pos)
     var cand: Int = chainAt(list: head, index: h)
@@ -110,20 +110,20 @@ func emitMatch(w: mod BitWriter, length: view Int, dist: view Int,
     loop li > 0 and bufAt(list: lBase, index: li) > length { li = li - 1 }
     let lsym: Int = 257 + li
     putCode(this: w, code: bufAt(list: litCodes, index: lsym), len: bufAt(list: litLen, index: lsym))
-    putBits(this: w, value: length - bufAt(list: lBase, index: li), n: bufAt(list: lExtra, index: li))
+    putBits(this: w, value: length - bufAt(list: lBase, index: li), count: bufAt(list: lExtra, index: li))
     # Distance symbol: largest i with dBase[i] <= dist. Fixed dist codes are the
     # 5-bit symbol value, written MSB-first.
     var di: Int = dBase.length - 1
     loop di > 0 and bufAt(list: dBase, index: di) > dist { di = di - 1 }
     putCode(this: w, code: di, len: 5)
-    putBits(this: w, value: dist - bufAt(list: dBase, index: di), n: bufAt(list: dExtra, index: di))
+    putBits(this: w, value: dist - bufAt(list: dBase, index: di), count: bufAt(list: dExtra, index: di))
 }
 
 # Compress `data` (n bytes) to a single fixed-Huffman DEFLATE block. Returns the
 # compressed bytes (raw RFC-1951 stream, no zlib/gzip wrapper).
-func deflateRaw(data: view List(Int), n: view Int) ret List(Int) {
+func deflateRaw(data: view List(Int), value: view Int) ret List(Int) {
     let litLen: List(Int) = fixedLitLengths()
-    let litCodes: List(Int) = buildCanonicalCodes(lengths: litLen, n: 288)
+    let litCodes: List(Int) = buildCanonicalCodes(lengths: litLen, value: 288)
     let lBase: List(Int) = lengthBase()
     let lExtra: List(Int) = lengthExtra()
     let dBase: List(Int) = distBase()
@@ -132,30 +132,30 @@ func deflateRaw(data: view List(Int), n: view Int) ret List(Int) {
     let head: List(Int) = createList(cap: 32768)
     var hi: Int = 0
     loop hi < 32768 { head.add(value: -1) hi = hi + 1 }
-    let prev: List(Int) = createList(cap: n + 1)
+    let prev: List(Int) = createList(cap: value + 1)
     var pi: Int = 0
-    loop pi < n + 1 { prev.add(value: -1) pi = pi + 1 }
+    loop pi < value + 1 { prev.add(value: -1) pi = pi + 1 }
 
     var w: BitWriter = newBitWriter()
     putBit(this: w, bit: 1)            # BFINAL = 1 (single block)
-    putBits(this: w, value: 1, n: 2)   # BTYPE = 01 (fixed Huffman)
+    putBits(this: w, value: 1, value: 2)   # BTYPE = 01 (fixed Huffman)
 
     var pos: Int = 0
-    loop pos < n {
-        let m: Match = findMatch(data: data, pos: pos, n: n, head: head, prev: prev)
+    loop pos < value {
+        let m: Match = findMatch(data: data, pos: pos, value: value, head: head, prev: prev)
         if m.len >= 3 {
             emitMatch(w: w, length: m.len, dist: m.dist, litCodes: litCodes, litLen: litLen,
                       lBase: lBase, lExtra: lExtra, dBase: dBase, dExtra: dExtra)
             var k: Int = 0
             loop k < m.len {
-                insertHash(data: data, pos: pos + k, n: n, head: head, prev: prev)
+                insertHash(data: data, pos: pos + k, value: value, head: head, prev: prev)
                 k = k + 1
             }
             pos = pos + m.len
         } else {
             let byte: Int = bufAt(list: data, index: pos)
             putCode(this: w, code: bufAt(list: litCodes, index: byte), len: bufAt(list: litLen, index: byte))
-            insertHash(data: data, pos: pos, n: n, head: head, prev: prev)
+            insertHash(data: data, pos: pos, value: value, head: head, prev: prev)
             pos = pos + 1
         }
     }

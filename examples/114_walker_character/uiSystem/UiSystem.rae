@@ -100,7 +100,7 @@ func uiUpdate(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSyst
   if transportHit is "slower" { characterSystem.speed = nextSpeed(current: characterSystem.speed, up: false) }
   if transportHit is "faster" { characterSystem.speed = nextSpeed(current: characterSystem.speed, up: true) }
   if transportHit.length() > 0 {
-    let pct: Int = speedPercent(v: characterSystem.speed)
+    let pct: Int = speedPercent(value: characterSystem.speed)
     setNodeText(world: inputSystem.world, nodeId: "SpeedLabel", value: "Speed {pct}%")
   }
   # Character-switch buttons (#546): same effect as Page Up/Down and keys 1/2.
@@ -134,7 +134,7 @@ func uiUpdate(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSyst
       characterSystem.toon = inputSystem.settings.toon
       setPanelButtonOn(panel: inputSystem.transport, world: inputSystem.world, id: "toon", on: characterSystem.toon)
     }
-    let pctS: Int = speedPercent(v: characterSystem.speed)
+    let pctS: Int = speedPercent(value: characterSystem.speed)
     setNodeText(world: inputSystem.world, nodeId: "SpeedLabel", value: "Speed {pctS}%")
     settingsApplyToWorld(settingsState: inputSystem.settings, world: inputSystem.world)
     applyWalkerPanel(world: inputSystem.world, open: inputSystem.settings.open)

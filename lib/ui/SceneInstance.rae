@@ -413,33 +413,33 @@ func mountSceneInstanceIntoPage(
 # rather than the `String.toInt()` method because the C backend's
 # method-overload resolution currently confuses `String.toInt` with
 # `Float.toInt` when chained off `List(String).get`.
-func parseRgbaString(s: view String) ret RgbaColor {
+func parseRgbaString(text: view String) ret RgbaColor {
   let comma: String = ","
-  let parts: List(String) = s.split(sep: comma)
+  let parts: List(String) = text.split(sep: comma)
   var r: Int = 0
   var g: Int = 0
   var b: Int = 0
   var a: Int = 255
   if parts.length > 0 {
     if let rs: String = parts.copyAt(index: 0) {
-      r = rae_str_to_i64(s: rs)
+      r = rae_str_to_i64(text: rs)
     }
   }
   if parts.length > 1 {
     if let gs: String = parts.copyAt(index: 1) {
-      g = rae_str_to_i64(s: gs)
+      g = rae_str_to_i64(text: gs)
     }
   }
   if parts.length > 2 {
     if let bs: String = parts.copyAt(index: 2) {
-      b = rae_str_to_i64(s: bs)
+      b = rae_str_to_i64(text: bs)
     }
   }
   if parts.length > 3 {
     # `as` is now a keyword (explicit conversion), so this alpha component
     # string follows the rs/gs/bs naming instead.
     if let alphaStr: String = parts.copyAt(index: 3) {
-      a = rae_str_to_i64(s: alphaStr)
+      a = rae_str_to_i64(text: alphaStr)
     }
   }
   ret RgbaColor { r: r, g: g, b: b, a: a }
@@ -489,7 +489,7 @@ func applyOverride(world: mod UiWorld, entity: view EntityId, override: view Sce
     if override.fieldName is tintField {
       if componentHas(this: world.sprites, entity: entity) {
         let cur: mod Sprite => componentMod(this: world.sprites, entity: entity)
-        cur.tint = parseRgbaString(s: override.valueString)
+        cur.tint = parseRgbaString(text: override.valueString)
         # Explicit literal override wins over any scene slot (#235).
         cur.tintSlot = ""
       }

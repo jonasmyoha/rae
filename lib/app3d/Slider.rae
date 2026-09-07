@@ -49,14 +49,14 @@ func createSlider(trackId: view String, fillId: view String,
   }
 }
 
-func sliderClamp(v: view Float, lo: view Float, hi: view Float) ret Float {
-  if v < lo {
+func sliderClamp(value: view Float, lo: view Float, hi: view Float) ret Float {
+  if value < lo {
     ret lo
   }
-  if v > hi {
+  if value > hi {
     ret hi
   }
-  ret v
+  ret value
 }
 
 # Where the value sits in 0..1. Guards a zero-width range rather than dividing
@@ -66,12 +66,12 @@ func fraction(s: view Slider) pub ret Float {
   if span <= 0.0 {
     ret 0.0
   }
-  ret sliderClamp(v: (s.value - s.minValue) / span, lo: 0.0, hi: 1.0)
+  ret sliderClamp(value: (s.value - s.minValue) / span, lo: 0.0, hi: 1.0)
 }
 
 func setFraction(s: mod Slider, f: view Float) pub {
   let span: Float = s.maxValue - s.minValue
-  s.value = s.minValue + sliderClamp(v: f, lo: 0.0, hi: 1.0) * span
+  s.value = s.minValue + sliderClamp(value: f, lo: 0.0, hi: 1.0) * span
 }
 
 # Pointer x -> value, using the track's laid-out rect. Returns the fraction so
@@ -90,7 +90,7 @@ func fractionForX(world: view UiWorld, trackId: view String, x: view Float) ret 
   }
   # Screen x, for the same reason as pointInNode.
   let sx: Float = nodeScreenX(world: world, entity: entity)
-  ret sliderClamp(v: (x - sx) / r.size.x, lo: 0.0, hi: 1.0)
+  ret sliderClamp(value: (x - sx) / r.size.x, lo: 0.0, hi: 1.0)
 }
 
 func pointInRect(r: view ComputedRect, x: view Float, y: view Float) ret Bool {
@@ -267,7 +267,7 @@ func fractionAcrossNode(world: view UiWorld, nodeId: view String, x: view Float)
   }
   # Screen x, for the same reason as pointInNode.
   let sx: Float = nodeScreenX(world: world, entity: entity)
-  ret sliderClamp(v: (x - sx) / r.size.x, lo: 0.0, hi: 1.0)
+  ret sliderClamp(value: (x - sx) / r.size.x, lo: 0.0, hi: 1.0)
 }
 
 # Resize `fillId` to a fraction of `trackId`. Writes only on a real change:
@@ -288,7 +288,7 @@ func setNodeFractionWidth(world: mod UiWorld, trackId: view String,
   }
   let tr: ComputedRect = componentGet(this: world.computedRects, entity: te)
   let fr: ComputedRect = componentGet(this: world.computedRects, entity: fe)
-  let want: Float = tr.size.x * sliderClamp(v: fraction, lo: 0.0, hi: 1.0)
+  let want: Float = tr.size.x * sliderClamp(value: fraction, lo: 0.0, hi: 1.0)
   var delta: Float = want - fr.size.x
   if delta < 0.0 {
     delta = 0.0 - delta
@@ -322,7 +322,7 @@ func centreNodeAtFraction(world: mod UiWorld, trackId: view String,
   }
   let tr: ComputedRect = componentGet(this: world.computedRects, entity: te)
   let hr: Rect = componentGet(this: world.rects, entity: he)
-  let f: Float = sliderClamp(v: fraction, lo: 0.0, hi: 1.0)
+  let f: Float = sliderClamp(value: fraction, lo: 0.0, hi: 1.0)
   # The handle is a CHILD of the track, so its authored x is already relative to
   # the track's origin: the travel is the track's width less the handle's, so it
   # stays inside at both ends instead of hanging off.

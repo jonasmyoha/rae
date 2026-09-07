@@ -39,11 +39,11 @@ func fitAt(camX: view Float, yaw: view Float) ret ShadowCascades {
 }
 
 # Math.abs resolves to the Int overload here, so spell the Float one out.
-func absF(v: view Float) ret Float {
-  if v < 0.0 {
-    ret 0.0 - v
+func absF(value: view Float) ret Float {
+  if value < 0.0 {
+    ret 0.0 - value
   }
-  ret v
+  ret value
 }
 
 # Flat-buffer reads go through these so the `opt Float` from `.at` is
@@ -81,7 +81,7 @@ func maxGridDelta(a: view ShadowCascades, b: view ShadowCascades, index: view In
     if k is 1 { slot = 5 }
     if k is 2 { slot = 12 }
     if k is 3 { slot = 13 }
-    let d: Float = absF(v: viewProjAt(cascades: a, index: index * 16 + slot) - viewProjAt(cascades: b, index: index * 16 + slot))
+    let d: Float = absF(value: viewProjAt(cascades: a, index: index * 16 + slot) - viewProjAt(cascades: b, index: index * 16 + slot))
     if d > worst {
       worst = d
     }
@@ -142,7 +142,7 @@ func main() {
   var texelStable: Bool = true
   var k: Int = 0
   loop k < base.count {
-    let d: Float = absF(v: texelWorldAt(cascades: base, index: k) - texelWorldAt(cascades: turned, index: k))
+    let d: Float = absF(value: texelWorldAt(cascades: base, index: k) - texelWorldAt(cascades: turned, index: k))
     if d > texelWorldAt(cascades: base, index: k) * 0.001 {
       texelStable = false
     }
