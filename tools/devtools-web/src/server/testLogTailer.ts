@@ -2,6 +2,7 @@ import { statSync, existsSync, openSync, readSync, closeSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { ServerEvent } from "../shared/types";
 import { parseTestLine } from "./parsers/testsParser";
+import type { StatsStore } from "./stats";
 
 type BroadcastFn = (event: ServerEvent) => void;
 
@@ -37,7 +38,7 @@ export class TestLogTailer {
   private readonly idleMs = 6000;
   private readonly pollMs = 500;
 
-  constructor(private logPath: string, private broadcast: BroadcastFn) {}
+  constructor(private logPath: string, private broadcast: BroadcastFn, private stats?: StatsStore) {}
 
   start() {
     if (this.timer) return;
@@ -121,6 +122,15 @@ export class TestLogTailer {
     if (!this.runId) return;
     const rid = this.runId; this.runId = null; this.markerRun = false;
     const success = exitCode === undefined ? this.failed === 0 : exitCode === 0;
-    this.broadcast({ type: "test-run-completed", runId: rid, exitCode: exitCode ?? (success ? 0 : 1), success, durationMs: Date.now() - this.startedAt, targetId: "external", targetLabel: "Agent run (live log)", timestamp: new Date().toISOString() });
+    const durationMs = Date.now() - this.startedAt;
+    this.broadcast({ type: "test-run-completed", runId: rid, exitCode: exitCode ?? (success ? 0 : 1), success, durationMs, targetId: "external", targetLabel: "Agent run (live log)", timestamp: new Date().toISOString() });
+    // Persist the external run's timing into the same metrics store the
+    // dashboard-initiated runs use, so the Statistics tab stays current whether
+    // a run came from the button OR from an agent/CLI `watch-tests.sh` (#846).
+    // Only meaningful runs count — a truncation/idle blip with no verdicts is
+    // skipped so it can't overwrite today's real figure with a 0/0 entry.
+    if (this.stats && this.passed + this.failed > 0) {
+      this.stats.recordTestRun({ runId: rid, durationMs, success, passed: this.passed, failed: this.failed, targetId: "external", targetLabel: "Agent run (live log)" });
+    }
   }
 }

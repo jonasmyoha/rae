@@ -54,7 +54,7 @@ const exampleRunner = new ExampleRunner(CONFIG, broadcastEvent);
 // Bridge agent-driven `make test > /tmp/rae-test-live.log` runs into the live
 // WebSocket test pipeline so the Test Runner UI auto-connects to them.
 const TEST_LIVE_LOG = process.env.RAE_TEST_LOG ?? "/tmp/rae-test-live.log";
-const testLogTailer = new TestLogTailer(TEST_LIVE_LOG, broadcastEvent);
+const testLogTailer = new TestLogTailer(TEST_LIVE_LOG, broadcastEvent, statsStore);
 testLogTailer.start();
 const testsRoot = getTestsRoot(CONFIG);
 const syntaxSummaryPath = getSyntaxSummaryPath(CONFIG);
@@ -336,7 +336,14 @@ const server = Bun.serve<SocketData>({
       // the user sees — they are a wire detail, not test output.
       const done = /^@@RAE_RUN_END\b/m.test(raw) || /\bResults:\s+\d+ passed/.test(raw);
       const content = raw.replace(/^@@RAE_RUN_(START|END)\b[^\n]*@@\n?/gm, "");
-      return new Response(JSON.stringify({ size: content.length, content, path: logPath, exists: true, done }), {
+      // Elapsed-timer support (#846): the sentinels are stripped from `content`,
+      // so surface the run's start (the epoch in RAE_RUN_START) and — once it is
+      // done — its end (the log's mtime) as explicit fields. This lets the Test
+      // log tab show an accurate frozen duration no matter when it is opened.
+      const startMatch = raw.match(/@@RAE_RUN_START (\d+)-/);
+      const startedAt = startMatch ? Number(startMatch[1]) * 1000 : null;
+      const endedAt = done ? f.lastModified : null;
+      return new Response(JSON.stringify({ size: content.length, content, path: logPath, exists: true, done, startedAt, endedAt }), {
         headers: { "Content-Type": "application/json" }
       });
     }

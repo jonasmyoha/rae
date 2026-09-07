@@ -178,6 +178,8 @@
 
                 <div class="panel-actions">
 
+                  <div class="run-timer" id="test-timer" title="Time elapsed for the current test run (freezes at the final duration when it finishes)" data-state="idle">0.0s</div>
+
                   <div class="test-status" id="test-status-chip">Idle</div>
 
                 </div>
@@ -665,6 +667,7 @@
               <p class="panel-subtitle">Live tail of <code id="testlog-path">/tmp/rae-test-live.log</code> (the CLI test runner). Run <code>make test &gt; /tmp/rae-test-live.log</code> or <code>tools/watch-tests.sh</code>.</p>
             </div>
             <div class="panel-actions">
+              <div class="run-timer run-timer--lg" id="testlog-timer" title="Time elapsed for the run being watched (freezes when it finishes)" data-state="idle">0.0s</div>
               <div class="test-status" id="testlog-status">Idle</div>
               <label class="testlog-autoscroll"><input type="checkbox" id="testlog-autoscroll" checked /> Auto-scroll</label>
             </div>
@@ -720,7 +723,33 @@
       const statusEl = document.getElementById("testlog-status");
       const autoEl = document.getElementById("testlog-autoscroll");
       const pathEl = document.getElementById("testlog-path");
+      const timerEl = document.getElementById("testlog-timer");
       let lastSize = -1;
+      // Elapsed-time readout (#846). The server surfaces startedAt (the epoch in
+      // the RAE_RUN_START sentinel) and, once the run is done, endedAt (the log
+      // mtime). While running we tick from startedAt every 100ms; when done we
+      // freeze at endedAt-startedAt — accurate even if the tab is opened long
+      // after the run finished. No startedAt -> the timer stays idle.
+      let timerStartMs = 0;
+      let timerDone = false;
+      let timerEndMs = 0;
+      let timerFailed = false;
+      function fmtElapsed(ms) {
+        const s = Math.max(0, ms) / 1000;
+        if (s < 60) return s.toFixed(1) + "s";
+        return Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
+      }
+      function tickTimer() {
+        if (!timerEl) return;
+        if (!timerStartMs) { timerEl.textContent = "0.0s"; timerEl.dataset.state = "idle"; return; }
+        if (timerDone) {
+          timerEl.textContent = fmtElapsed(timerEndMs - timerStartMs);
+          timerEl.dataset.state = timerFailed ? "failure" : "success";
+        } else {
+          timerEl.textContent = fmtElapsed(Date.now() - timerStartMs);
+          timerEl.dataset.state = "running";
+        }
+      }
       function lineClass(line) {
         if (line.startsWith("PASS:") || /\bResults:\s+\d+ passed, 0 failed/.test(line)) return "log-pass";
         if (line.startsWith("FAIL:") || /error:/i.test(line) || /\bfailed\b/.test(line)) return "log-fail";
@@ -744,16 +773,25 @@
           const res = await fetch("/api/tests/live-log", { cache: "no-store" });
           const data = await res.json();
           if (pathEl && data.path) pathEl.textContent = data.path;
-          if (!data.exists) { statusEl.textContent = "no log"; statusEl.className = "test-status"; }
-          else {
+          if (!data.exists) {
+            statusEl.textContent = "no log"; statusEl.className = "test-status";
+            timerStartMs = 0; timerDone = false; tickTimer();
+          } else {
             statusEl.textContent = data.done ? "done" : "running…";
             statusEl.className = "test-status" + (data.done ? " is-done" : " is-running");
             if (data.size !== lastSize) { lastSize = data.size; render(data.content); }
+            timerStartMs = Number(data.startedAt) || 0;
+            timerDone = !!data.done;
+            timerEndMs = Number(data.endedAt) || Date.now();
+            timerFailed = /\bResults:\s+\d+ passed,\s+[1-9]\d* failed/.test(data.content) || /^FAIL:/m.test(data.content);
+            tickTimer();
           }
         } catch (_) { statusEl.textContent = "server?"; }
       }
       poll();
       setInterval(poll, 800);
+      // Smooth 100ms count-up between the 800ms polls while a run is live.
+      setInterval(() => { if (timerStartMs && !timerDone) tickTimer(); }, 100);
     </script>
     <link rel="preload" href="/rae_syntax.json" as="fetch" type="application/json" crossorigin="anonymous" />
   </body>
