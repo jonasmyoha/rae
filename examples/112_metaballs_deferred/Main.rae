@@ -384,6 +384,7 @@ func main() ret Int {
     logWarnLine(ov: logView, text: "settings dialog failed to mount")
   }
   settingsApplyToWorld(settingsState: settings, world: uiWorld)
+  setTaaEnabled(on: settings.taa)   # default FXAA; the settings pane toggles TAA
   applySettingsPanelOpen(world: uiWorld, open: settings.open)
   # The legacy in-scene "Settings" button is superseded by the shared corner
   # menu button (#546 UI unification), so hide it — one settings affordance, the
@@ -582,6 +583,7 @@ func main() ret Int {
       }
       sa = sa + 1
     }
+    if settingsChanged { setTaaEnabled(on: settings.taa) }   # TAA opt-in; FXAA when off
     if settingsUpdatePointer(settingsState: settings, world: uiWorld, input: uiInput) {
       settingsChanged = true
     }
