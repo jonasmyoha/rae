@@ -38,14 +38,14 @@ func emitSplashAt(sys: mod ParticleSystem, x: copy Float, y: copy Float, waterZ:
 }
 
 # Advance + emit splashes for everything wading this frame. Call once per frame.
-func splashStep(character: mod CharacterSystem, splashes: mod ParticleSystem, world: mod GameWorld, dt: copy Float) {
+func splashStep(characterSystem: mod CharacterSystem, splashes: mod ParticleSystem, world: mod GameWorld, dt: copy Float) {
   particleUpdate(sys: splashes, dt: dt)
   world.splashTick = world.splashTick + 1
   # The flat water plane in WORLD space — every splash sprays up from HERE, not
   # from the unit's (ground-relative, chest-high) position z.
-  let waterZ: Float = worldWaterZ(groundZ: character.groundZ, cfg: defaultBiomeConfig())
+  let waterZ: Float = worldWaterZ(groundZ: characterSystem.groundZ, cfg: defaultBiomeConfig())
   # The hero (always evaluated — the character the player is watching).
-  let heroCtrl: ThirdPersonController = controllerOf(world: world, entity: character.heroEntity)
+  let heroCtrl: ThirdPersonController = controllerOf(world: world, entity: characterSystem.heroEntity)
   if heroCtrl.moving {
     let heroDepth: Float = terrainWaterDepth(
       x: heroCtrl.position.x, y: heroCtrl.position.y)
@@ -55,8 +55,8 @@ func splashStep(character: mod CharacterSystem, splashes: mod ParticleSystem, wo
     }
   }
   # Every moving crowd member in water, strided so the pool is not swamped.
-  loop var i: Int = 0, i < character.crowdEntities.length, ++i {
-    if let member: EntityId = character.crowdEntities.copyAt(index: i) {
+  loop var i: Int = 0, i < characterSystem.crowdEntities.length, ++i {
+    if let member: EntityId = characterSystem.crowdEntities.copyAt(index: i) {
       let ctrl: ThirdPersonController = componentGet(this: world.controllers, entity: member)
       if ctrl.moving and (world.splashTick + i) % splashCrowdStride is 0 {
         let depth: Float = terrainWaterDepth(

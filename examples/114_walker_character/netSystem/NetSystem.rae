@@ -57,7 +57,7 @@ func netPlayerCount(world: view GameWorld) ret Int {
 # Pull remote players' intents in before the local sim. Iterates the NetPlayer
 # table — a real system. Offline there are no joined players, so it is a no-op;
 # a transport fills the loop body (apply each peer's intent to its `controlled`).
-func netApplyRemote(net: mod NetSystem, world: mod GameWorld) {
+func netApplyRemote(netSystem: mod NetSystem, world: mod GameWorld) {
   loop var i: Int = 0, i < componentCount(this: world.netPlayers), ++i {
     # Offline: no wire, so nothing to apply. A transport reads the i-th
     # NetPlayer's latest intent here and drives its `controlled` character
@@ -67,8 +67,8 @@ func netApplyRemote(net: mod NetSystem, world: mod GameWorld) {
 
 # Publish the local player's intent after the sim. Offline: just advance the
 # tick so the seam is observably live.
-func netPublishIntent(net: mod NetSystem, world: mod GameWorld) {
-  net.tick = net.tick + 1
+func netPublishIntent(netSystem: mod NetSystem, world: mod GameWorld) {
+  netSystem.tick = netSystem.tick + 1
 }
 
 # Spawn/despawn smoke test for the ECS seams (#746 Verify). Proves generational

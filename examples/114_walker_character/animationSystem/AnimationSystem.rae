@@ -67,15 +67,15 @@ func walkerIntAt(values: view List(Int), index: view Int) ret Int {
 # (#547). Used to build a DISTINCT pose per crowd member — the skeleton is scratch
 # here, re-posed each call; the hero's palette is built separately, before this
 # runs, so re-posing does not disturb it.
-func poseCharacterPalette(character: mod CharacterSystem, clipIndex: copy Int, animTime: copy Float) ret List(Float) {
-  applySkeletonPose(sk: character.skeleton, pose: character.bindPose)
+func poseCharacterPalette(characterSystem: mod CharacterSystem, clipIndex: copy Int, animTime: copy Float) ret List(Float) {
+  applySkeletonPose(sk: characterSystem.skeleton, pose: characterSystem.bindPose)
   match clipIndex {
-    case ClipKind.idle { applyClip(sk: character.skeleton, c: character.idleClip, time: animTime) }
-    case ClipKind.walk { applyClip(sk: character.skeleton, c: character.walkClip, time: animTime) }
-    case ClipKind.walkFast { applyClip(sk: character.skeleton, c: character.walkClip, time: animTime) }
-    case ClipKind.run { applyClip(sk: character.skeleton, c: character.runClip, time: animTime) }
+    case ClipKind.idle { applyClip(sk: characterSystem.skeleton, c: characterSystem.idleClip, time: animTime) }
+    case ClipKind.walk { applyClip(sk: characterSystem.skeleton, c: characterSystem.walkClip, time: animTime) }
+    case ClipKind.walkFast { applyClip(sk: characterSystem.skeleton, c: characterSystem.walkClip, time: animTime) }
+    case ClipKind.run { applyClip(sk: characterSystem.skeleton, c: characterSystem.runClip, time: animTime) }
   }
-  ret buildPalette(sk: character.skeleton)
+  ret buildPalette(sk: characterSystem.skeleton)
 }
 
 # Where "Orbit" re-centres: THE CHARACTER'S MIDDLE, not the world floor. The
