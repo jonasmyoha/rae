@@ -1,7 +1,8 @@
 # Running the unit cases in parallel (#824)
 
-`compiler/tools/run_tests_parallel.sh` is a prototype that runs the 450 unit
-cases N at a time. It does NOT re-implement any test logic: each case is one
+`compiler/tools/run_tests_parallel.sh` runs the 450 unit cases N at a time and
+is the DEFAULT runner for `make test` (see "Status" below; #846). It does NOT
+re-implement any test logic: each case is one
 `tools/run_tests.sh <case>` invocation (same discovery, same `config.cmd`
 handling, same `expected.txt` comparison), writing its own log; the verdicts
 are aggregated afterwards. The example smoke tests (`run_examples.sh`) still
@@ -80,18 +81,21 @@ relax it, it makes violating it more visible.
 
 ## Status
 
-Wired in, opt-in at the CLI and default-on in devtools:
+The DEFAULT everywhere; the sequential runner is a debugging fallback (#846):
 
-* `RAE_TEST_PARALLEL=1 make test` routes `make test` (and so
-  `tools/watch-tests.sh`) through the parallel runner. Without the variable,
-  `make test` is the sequential reference runner, unchanged. `make test
-  TEST=<case>` always runs sequentially — the parallel script delegates a name
-  argument straight to `run_tests.sh`, since one case has no parallel form.
+* `make test` (and so `tools/watch-tests.sh`) runs the parallel runner with no
+  flag needed. To force the sequential reference runner — only for debugging the
+  runner itself, or a machine where parallelism confuses things — set
+  `RAE_TEST_SEQUENTIAL=1 make test`. `RAE_TEST_PARALLEL=1` is still accepted (a
+  no-op now that parallel is the default) so older invocations keep working.
+  `make test TEST=<case>` always runs sequentially — the parallel script
+  delegates a name argument straight to `run_tests.sh`, since one case has no
+  parallel form.
 * The devtools Test Runner has a "Parallel cases (fast)" toggle next to the
   examples toggle. It is ON by default (an absent localStorage key means on; only
-  an explicit untick is remembered), and the server sets `RAE_TEST_PARALLEL=1`
-  for a full run when it is on. Single-test runs ignore it. Untick it while
-  something else is compiling — parallel work on a saturated machine only
+  an explicit untick is remembered); when unticked the server sets
+  `RAE_TEST_SEQUENTIAL=1` for that run. Single-test runs ignore it. Untick it
+  while something else is compiling — parallel work on a saturated machine only
   spreads the same wall time thinner (see the 459–503 s runs above).
 * The sequential runner stays the reference the parallel one is diffed against.
   The remaining win is the fixed per-case cost (one gcc of the runtime), which
