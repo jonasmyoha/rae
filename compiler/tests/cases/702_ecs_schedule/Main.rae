@@ -6,14 +6,14 @@ open ecs/Schedule
 # none of the tables its system READS changed generation since the last run.
 # Here: `move` reads velocities, `render` reads positions.
 
-type Pos { x: Int }
+type Position { x: Int }
 type Vel { v: Int }
 
 # One frame of the schedule: walk entries in order, run each only when its read
 # tables' generation moved. Returns the space-joined names that ran (proves order
 # + dirty-skip). Entry 0 = move (reads velocities), entry 1 = render (reads
 # positions) — matching addSystem order.
-func runFrame(sched: mod Schedule, positions: view ComponentTable(Pos),
+func runFrame(sched: mod Schedule, positions: view ComponentTable(Position),
               velocities: view ComponentTable(Vel)) ret String {
   var order: String = ""
   if shouldRun(schedule: sched, index: 0, readGeneration: componentTableGeneration(this: velocities)) {
@@ -26,7 +26,7 @@ func runFrame(sched: mod Schedule, positions: view ComponentTable(Pos),
 }
 
 func main() {
-  var positions: ComponentTable(Pos) = createComponentTable(Pos)
+  var positions: ComponentTable(Position) = createComponentTable(Position)
   var velocities: ComponentTable(Vel) = createComponentTable(Vel)
   var sched: Schedule = createSchedule()
   let moveIdx: Int = addSystem(schedule: sched, name: "move")
@@ -35,7 +35,7 @@ func main() {
   log("order: {scheduleName(schedule: sched, index: moveIdx)} {scheduleName(schedule: sched, index: renderIdx)}")
 
   let e1: EntityId = { index: 1, generation: 0 }
-  componentSet(this: positions, entity: e1, data: Pos { x: 10 })
+  componentSet(this: positions, entity: e1, data: Position { x: 10 })
   componentSet(this: velocities, entity: e1, data: Vel { v: 2 })
 
   # Frame 1: first run — both systems run, in order.
@@ -47,7 +47,7 @@ func main() {
   vm.v = 9
   log("frame3: {runFrame(sched: sched, positions: positions, velocities: velocities)}")
   # Frame 4: mutate positions — only render (reads positions) runs.
-  let pm: mod Pos => componentMod(this: positions, entity: e1)
+  let pm: mod Position => componentMod(this: positions, entity: e1)
   pm.x = 99
   log("frame4: {runFrame(sched: sched, positions: positions, velocities: velocities)}")
 }

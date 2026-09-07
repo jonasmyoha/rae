@@ -9,7 +9,7 @@
 # The output is columnar (natural for a sparse-set ECS): one object per
 # component, keyed by component name, whose entries map an entity's index to that
 # component's `toJson()` (the compiler-generated per-struct serializer). E.g.
-#   { "Pos": { "1": {"x":10,"y":20}, "2": {...} }, "Vel": { "2": {...} } }
+#   { "Position": { "1": {"x":10,"y":20}, "2": {...} }, "Vel": { "2": {...} } }
 #
 # Because Rae has no reflection and no first-class function references, a World
 # can't enumerate its own heterogeneous tables generically. So the reusable piece
@@ -116,7 +116,7 @@ func loadComponentTable(T: type, table: mod ComponentTable(T), name: view String
 # A resource is a world-global singleton (a plain field on the World, e.g.
 # world.frame / world.layoutW), NOT a per-entity component — so it serializes as
 # a SINGLE top-level value, keyed by name, rather than an entity->value map:
-#   { "Frame": {"count":7,"deltaTime":16}, "Pos": { "1": {...} } }
+#   { "Frame": {"count":7,"deltaTime":16}, "Position": { "1": {...} } }
 # addResource / resourceJson stay non-generic: the caller passes value.toJson()
 # in and calls Type.fromJson on the way out (both concrete, so they monomorphize
 # cleanly). Registry-gated exactly like components — written only when the name
