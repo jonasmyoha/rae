@@ -1,5 +1,15 @@
 # App composition + main loop for the walker example.
 #
+# CONVENTION (#822): the `App` struct IS the system list. Each system's `App`
+# member is named for its folder and typed as that folder's `<Folder>System`
+# state — `cameraSystem: CameraSystem`, `renderSystem: RenderSystem`,
+# `physicsSystem: PhysicsSystem`, `inputSystem: InputSystem`, … — so reading the
+# `App` fields reads the systems. Cross-cutting DATA and resources stay
+# data-typed and are NOT forced into an `XSystem` wrapper: the per-frame `frame:
+# Frame` scratch, the ECS `world: GameWorld`, the `players: PlayerRoster` control
+# roster, and pure resources (`profiler: Profiler`, `grassCompute: GrassCompute`)
+# are not systems. See docs/naming-conventions.md.
+#
 # Structure (#743): every system is its own PascalCase folder + file —
 # InputSystem/ MovementSystem/ AnimationSystem/ TerrainSystem/ GrassSystem/
 # CameraSystem/ RenderSystem/ PhysicsSystem/ NetSystem/ UiSystem/ (plus the
@@ -9,7 +19,7 @@
 # createApp, sequenced by updateApp / renderApp, and never threaded into a
 # system as a God-object. (Rae auto-scans every project file into one compile
 # unit, so the folders are namespaces, not import walls; the decoupling is at the
-# parameter level.) app.rae keeps only App + Frame/InputUi/CharacterState/
+# parameter level.) app.rae keeps only App + Frame/InputSystem/CharacterSystem/
 # PersistState, createApp, the loop, updateApp, frameBegin. hud/players/splash/
 # state stay flat as shared helpers.
 import Math
@@ -79,7 +89,7 @@ type Frame {
 
 # Input devices + the UI world state (panels, dialog, overlays). Split further in
 # #545 (input intent) and #549 (UI system).
-type InputUi {
+type InputSystem {
   moveStick: VirtualJoystick
   ui: UiInput
   world: UiWorld
@@ -94,9 +104,9 @@ type InputUi {
   lastLogRevision: Int
 }
 
-# CameraState + cameraUpdate live in CameraSystem/ (#548, foldered #743).
-# RenderState lives in RenderSystem/; the per-system state types live with their
-# systems. app.rae keeps only the cross-cutting Frame / InputUi / CharacterState /
+# CameraSystem + cameraUpdate live in CameraSystem/ (#548, foldered #743).
+# RenderSystem lives in RenderSystem/; the per-system state types live with their
+# systems. app.rae keeps only the cross-cutting Frame / InputSystem / CharacterSystem /
 # PersistState that no single system owns.
 
 # The animated character: the player-controlled hero plus a `crowd` of
@@ -106,7 +116,7 @@ type InputUi {
 # with a ThirdPersonController + AnimationState{clipIndex,animTime} + Transform3D.
 # They're driven in place via componentMod (no copy-out/mutate/set-back), and
 # each member's render model is derived from its controller (walkerWorldModel).
-type CharacterState {
+type CharacterSystem {
   skeleton: Skeleton
   idleClip: Clip
   walkClip: Clip
@@ -147,16 +157,16 @@ type App {
   # and grass live here.
   world: GameWorld
   frame: Frame
-  io: InputUi
-  cam: CameraState
-  character: CharacterState
-  terrain: InfiniteTerrain
-  grass: GrassField
-  render: RenderState
+  inputSystem: InputSystem
+  cameraSystem: CameraSystem
+  characterSystem: CharacterSystem
+  terrainSystem: TerrainSystem
+  grassSystem: GrassSystem
+  renderSystem: RenderSystem
   profiler: Profiler   # #764: was lib/profile.rae gProf* globals
   grassCompute: GrassCompute   # #764: was lib/GrassCompute.rae gGrass* globals
-  physics: PhysicsState   # fixed-step sim seam (physics.rae, #553)
-  net: NetState           # multiplayer seam (net.rae, #554)
+  physicsSystem: PhysicsSystem   # fixed-step sim seam (physics.rae, #553)
+  netSystem: NetSystem           # multiplayer seam (net.rae, #554)
   players: PlayerRoster   # who the local player controls (players.rae, #546)
   persist: PersistState
   splashes: ParticleSystem   # water-splash droplets when the character wades (splash.rae, #84)
@@ -305,8 +315,8 @@ func createApp() ret App {
     Sys.exit(code: 1)
   }
 
-  var terrain: InfiniteTerrain = createInfiniteTerrain(world: gameWorld, assets: assets, groundZ: groundZ)
-  var grass: GrassField = createGrassField(world: gameWorld, assets: assets, groundZ: groundZ)
+  var terrain: TerrainSystem = createTerrainSystem(world: gameWorld, assets: assets, groundZ: groundZ)
+  var grass: GrassSystem = createGrassSystem(world: gameWorld, assets: assets, groundZ: groundZ)
 
   let cloneCount: Int = 5
   var crowdEntities: List(EntityId) = createList(EntityId, cap: cloneCount)
@@ -389,7 +399,7 @@ func createApp() ret App {
   partModel = walkerWorldModel(baseModel: basePartModel, controller: characterController)
 
   # #739: the hero is an entity carrying its ThirdPersonController + Transform3D.
-  # Its clip/animTime + motion-vector model stay on CharacterState (hero-specific
+  # Its clip/animTime + motion-vector model stay on CharacterSystem (hero-specific
   # transitions); only the controller moves into the world.
   let heroEntity: EntityId = gameWorldAddEntity(world: gameWorld)
   gameWorldSetController(world: gameWorld, entity: heroEntity, controller: characterController)
@@ -472,14 +482,14 @@ func createApp() ret App {
       needsRender: true, dbgDidWork: true, taaSettleFrames: 0, renderedOnce: false,
       headless: headless
     }
-    io: {
+    inputSystem: {
       moveStick: own moveStick, ui: own uiInput, world: own uiWorld, gpuUi: gpuUi,
       clipPanel: own clipPanel, transport: own transport, charPanel: own charPanel, settings: own settings,
       panelScroll: panelScroll, dbg: own dbg, logView: own logView, lastLogRevision: 0 - 1
     }
-    cam: { camera: camera, rig: own rig, light: light, hosek: hosekData,
+    cameraSystem: { camera: camera, rig: own rig, light: light, hosek: hosekData,
            rigEntity: rigLink.rigEntity, camEntity: rigLink.camEntity }
-    character: {
+    characterSystem: {
       skeleton: own sk, idleClip: idleClip, walkClip: walkClip, runClip: runClip,
       bindPose: bindPose, transitionFrom: bindPose, transitionElapsed: clipTransitionDuration,
       heroEntity: heroEntity, clipIndex: clipIndex, playing: playing,
@@ -488,13 +498,13 @@ func createApp() ret App {
       model: partModel, prevModel: partModel, crowdEntities: own crowdEntities,
       crowdBatch: own characterClones, groundZ: groundZ
     }
-    terrain: own terrain
-    grass: own grass
-    render: { renderer: own renderer, drs: own drs, shadowLogged: false }
+    terrainSystem: own terrain
+    grassSystem: own grass
+    renderSystem: { renderer: own renderer, drs: own drs, shadowLogged: false }
     profiler: Profile.createProfiler(),
     grassCompute: createGrassCompute()
-    physics: { accumulator: 0.0, worldHandle: 0 }
-    net: { role: 0, tick: 0 }
+    physicsSystem: { accumulator: 0.0, worldHandle: 0 }
+    netSystem: { role: 0, tick: 0 }
     players: createPlayerRoster(count: 1 + cloneCount)
     persist: { windowGeom: own windowGeom, lastStateSave: startT, stateDirty: false }
     splashes: own createParticleSystem(cap: 256, gravity: 24.0)
@@ -505,13 +515,13 @@ func createApp() ret App {
 # ----- per-frame timing + resize -------------------------------------------
 func frameBegin(app: mod App) {
   Profile.tick(profiler: app.profiler)
-  resizeUiToWindow(world: app.io.world, res: app.io.gpuUi)
+  resizeUiToWindow(world: app.inputSystem.world, res: app.inputSystem.gpuUi)
   let now: Float64 = Gpu2d.nowSeconds()
   var dt: Float = (now - app.frame.prevT) as Float
   app.frame.prevT = now
   app.frame.now = now
   # NO CLAMP before DRS: the scale controller reacts to the true frame time.
-  updateRenderScale(drs: app.render.drs, dt: dt, profiler: app.profiler)
+  updateRenderScale(drs: app.renderSystem.drs, dt: dt, profiler: app.profiler)
   # Negative dt is a clock going backwards, not a long frame; refuse it.
   if dt < 0.0 { dt = 0.0 }
   app.frame.dt = dt
@@ -520,19 +530,19 @@ func frameBegin(app: mod App) {
 # The world position / heading of whichever character the local player controls
 # (#546) — the hero or a crowd member. Used to aim the camera and stream the
 # terrain/grass around the ACTIVE character rather than always the hero.
-func controlledPosition(world: view GameWorld, players: view PlayerRoster, character: view CharacterState) ret Vec3 {
+func controlledPosition(world: view GameWorld, players: view PlayerRoster, character: view CharacterSystem) ret Vec3 {
   ret controllerOf(world: world, entity: rosterControlledEntity(players: players, character: character)).position
 }
 
-func controlledHeading(world: view GameWorld, players: view PlayerRoster, character: view CharacterState) ret Float {
+func controlledHeading(world: view GameWorld, players: view PlayerRoster, character: view CharacterSystem) ret Float {
   ret controllerOf(world: world, entity: rosterControlledEntity(players: players, character: character)).heading
 }
 
 # Shared reaction to a character switch (#546), from Page Up/Down, keys 1/2, or
 # the settings-panel Prev/Next buttons: snap the orbit camera behind the new
 # character and update the panel readout.
-func onCharacterSwitched(cam: mod CameraState, io: mod InputUi, persist: mod PersistState,
-                         players: view PlayerRoster, world: view GameWorld, character: view CharacterState) {
+func onCharacterSwitched(cam: mod CameraSystem, io: mod InputSystem, persist: mod PersistState,
+                         players: view PlayerRoster, world: view GameWorld, character: view CharacterSystem) {
   cam.rig.yaw = controlledHeading(world: world, players: players, character: character)
   snapCameraRigView(rig: cam.rig)
   persist.stateDirty = true
@@ -546,18 +556,18 @@ func updateApp(app: mod App) {
   let now: Float64 = app.frame.now
   # Multiplayer seam (offline no-op today, #554): pull remote intents in before
   # the local sim; the matching publish runs after it, below.
-  netApplyRemote(net: app.net, world: app.world)
-  let uiTick: UiTick = uiUpdate(cam: app.cam, character: app.character, frame: app.frame, io: app.io, persist: app.persist, players: app.players, render: app.render, terrain: app.terrain, world: app.world, dt: dt, now: now)
+  netApplyRemote(net: app.netSystem, world: app.world)
+  let uiTick: UiTick = uiUpdate(cam: app.cameraSystem, character: app.characterSystem, frame: app.frame, io: app.inputSystem, persist: app.persist, players: app.players, render: app.renderSystem, terrain: app.terrainSystem, world: app.world, dt: dt, now: now)
   let settingsChanged: Bool = uiTick.settingsChanged
   let scrolled: Bool = uiTick.scrolled
 
-  let camTick: CameraTick = cameraUpdate(cam: app.cam, io: app.io, persist: app.persist, world: app.world, heroEntity: app.character.heroEntity, dt: dt)
+  let camTick: CameraTick = cameraUpdate(cam: app.cameraSystem, io: app.inputSystem, persist: app.persist, world: app.world, heroEntity: app.characterSystem.heroEntity, dt: dt)
   let joyActive: Bool = camTick.joyActive
   let cameraMoved: Bool = camTick.cameraMoved
 
   # Character switching (#546): Page Up / Page Down cycle who the local player
   # controls. On a switch, snap the orbit camera behind the new character.
-  if app.cam.rig.mode is CameraRigMode.character {
+  if app.cameraSystem.rig.mode is CameraRigMode.character {
     var switched: Bool = false
     if sdl3.isKeyPressed(key: Keys.keyPageDown) or sdl3.isKeyPressed(key: keyNextChar) {
       rosterSwitchNext(roster: app.players)
@@ -567,70 +577,70 @@ func updateApp(app: mod App) {
       rosterSwitchPrev(roster: app.players)
       switched = true
     }
-    if switched { onCharacterSwitched(cam: app.cam, io: app.io, persist: app.persist, players: app.players, world: app.world, character: app.character) }
+    if switched { onCharacterSwitched(cam: app.cameraSystem, io: app.inputSystem, persist: app.persist, players: app.players, world: app.world, character: app.characterSystem) }
   }
 
-  app.character.prevModel = app.character.model
+  app.characterSystem.prevModel = app.characterSystem.model
   var characterMoved: Bool = false
-  if app.cam.rig.mode is CameraRigMode.character {
+  if app.cameraSystem.rig.mode is CameraRigMode.character {
     # Devices -> intent (input.rae), then apply it to the CONTROLLED character.
     # A remote player's intent would arrive from net.rae instead; the apply is
     # the same. Non-controlled characters run their own AI animation elsewhere.
-    let intent: InputIntent = inputUpdate(moveStick: app.io.moveStick, joyActive: joyActive,
-      allowKeys: uiPointerCaptured(input: app.io.ui) is false and app.character.playing)
+    let intent: InputIntent = inputUpdate(moveStick: app.inputSystem.moveStick, joyActive: joyActive,
+      allowKeys: uiPointerCaptured(input: app.inputSystem.ui) is false and app.characterSystem.playing)
     if rosterControlledIsHero(roster: app.players) {
       # Drive the hero's controller IN PLACE through the world's controllers table
       # (write-through componentMod, #721) — no copy-out/set-back.
-      let heroE: EntityId = app.character.heroEntity
+      let heroE: EntityId = app.characterSystem.heroEntity
       let heroCtrl: mod ThirdPersonController => componentMod(this: app.world.controllers, entity: heroE)
       characterMoved = updateWalkerMovement(controller: heroCtrl,
-        intent: intent, cameraYaw: app.cam.rig.viewYaw, dt: dt * app.character.speed)
-      groundWalker(controller: heroCtrl, groundZ: app.character.groundZ)
+        intent: intent, cameraYaw: app.cameraSystem.rig.viewYaw, dt: dt * app.characterSystem.speed)
+      groundWalker(controller: heroCtrl, groundZ: app.characterSystem.groundZ)
       if characterMoved {
-        app.character.model = walkerWorldModel(baseModel: app.character.basePartModel, controller: heroCtrl)
+        app.characterSystem.model = walkerWorldModel(baseModel: app.characterSystem.basePartModel, controller: heroCtrl)
         app.persist.stateDirty = true
       }
       let heroClip: Int = locomotionClipFor(controller: heroCtrl)
-      if heroClip is not app.character.clipIndex {
-        app.character.transitionFrom = captureSkeletonPose(sk: app.character.skeleton)
-        app.character.transitionElapsed = 0.0
-        app.character.clipIndex = heroClip
-        app.character.animTime = 0.0
-        setPanelSelection(panel: app.io.clipPanel, world: app.io.world, group: 1, id: (app.character.clipIndex as ClipKind).toString())
+      if heroClip is not app.characterSystem.clipIndex {
+        app.characterSystem.transitionFrom = captureSkeletonPose(sk: app.characterSystem.skeleton)
+        app.characterSystem.transitionElapsed = 0.0
+        app.characterSystem.clipIndex = heroClip
+        app.characterSystem.animTime = 0.0
+        setPanelSelection(panel: app.inputSystem.clipPanel, world: app.inputSystem.world, group: 1, id: (app.characterSystem.clipIndex as ClipKind).toString())
       }
     } else {
       # The player drives a crowd member: step its controller entity IN PLACE and
       # set its animation clip — both write-through componentMod, no copy/set-back.
       let idx: Int = rosterControlledCrowdIndex(roster: app.players)
-      if let crowdE: EntityId = app.character.crowdEntities.copyAt(index: idx) {
+      if let crowdE: EntityId = app.characterSystem.crowdEntities.copyAt(index: idx) {
         let drivenCtrl: mod ThirdPersonController => componentMod(this: app.world.controllers, entity: crowdE)
         characterMoved = updateWalkerMovement(controller: drivenCtrl,
-          intent: intent, cameraYaw: app.cam.rig.viewYaw, dt: dt * app.character.speed)
-        groundWalker(controller: drivenCtrl, groundZ: app.character.groundZ)
+          intent: intent, cameraYaw: app.cameraSystem.rig.viewYaw, dt: dt * app.characterSystem.speed)
+        groundWalker(controller: drivenCtrl, groundZ: app.characterSystem.groundZ)
         let drivenClip: Int = locomotionClipFor(controller: drivenCtrl)
         let drivenAnim: mod AnimationState => componentMod(this: app.world.animStates, entity: crowdE)
         drivenAnim.clipIndex = drivenClip
         if characterMoved { app.persist.stateDirty = true }
       }
       # The hero, no longer player-driven, stands idle.
-      app.character.clipIndex = ClipKind.idle as Int
+      app.characterSystem.clipIndex = ClipKind.idle as Int
     }
-    let focusPos: Vec3 = controlledPosition(world: app.world, players: app.players, character: app.character)
-    app.cam.camera.target = Vec3.create(x: focusPos.x, y: focusPos.y, z: focusPos.z + characterFocusZ)
+    let focusPos: Vec3 = controlledPosition(world: app.world, players: app.players, character: app.characterSystem)
+    app.cameraSystem.camera.target = Vec3.create(x: focusPos.x, y: focusPos.y, z: focusPos.z + characterFocusZ)
   }
-  let followPos: Vec3 = controlledPosition(world: app.world, players: app.players, character: app.character)
-  let terrainWrapped: Bool = updateInfiniteTerrain(terrain: app.terrain, world: app.world, playerPosition: followPos)
-  let grassWrapped: Bool = updateGrassField(field: app.grass, world: app.world, playerPosition: followPos)
+  let followPos: Vec3 = controlledPosition(world: app.world, players: app.players, character: app.characterSystem)
+  let terrainWrapped: Bool = updateInfiniteTerrain(terrain: app.terrainSystem, world: app.world, playerPosition: followPos)
+  let grassWrapped: Bool = updateGrassField(field: app.grassSystem, world: app.world, playerPosition: followPos)
 
   # Fixed-timestep physics seam (#553): accumulate frame time and step at a fixed
   # rate, decoupled from render. physicsStepWorld iterates the (empty) body table until a physics backend
   # lands; the loop shape does not change then.
-  app.physics.accumulator = app.physics.accumulator + dt
-  loop app.physics.accumulator >= physicsFixedStep {
+  app.physicsSystem.accumulator = app.physicsSystem.accumulator + dt
+  loop app.physicsSystem.accumulator >= physicsFixedStep {
     physicsStepWorld(world: app.world, fixedDt: physicsFixedStep)
-    app.physics.accumulator = app.physics.accumulator - physicsFixedStep
+    app.physicsSystem.accumulator = app.physicsSystem.accumulator - physicsFixedStep
   }
-  netPublishIntent(net: app.net, world: app.world)
+  netPublishIntent(net: app.netSystem, world: app.world)
 
   let resized: Bool = Gpu2d.windowResized()
   if resized { app.persist.stateDirty = true }
@@ -639,30 +649,30 @@ func updateApp(app: mod App) {
   if app.persist.stateDirty and not app.frame.headless {
     if (now - app.persist.lastStateSave) as Float >= 0.25 {
       writeHotReloadStateFor(appId: state114AppId,
-                             state: serialize114State(clipIndex: app.character.clipIndex, playing: app.character.playing,
-                                                      speed: app.character.speed, toon: app.character.toon,
-                                                      controller: controllerOf(world: app.world, entity: app.character.heroEntity),
-                                                      rig: app.cam.rig, camera: app.cam.camera))
+                             state: serialize114State(clipIndex: app.characterSystem.clipIndex, playing: app.characterSystem.playing,
+                                                      speed: app.characterSystem.speed, toon: app.characterSystem.toon,
+                                                      controller: controllerOf(world: app.world, entity: app.characterSystem.heroEntity),
+                                                      rig: app.cameraSystem.rig, camera: app.cameraSystem.camera))
       app.persist.lastStateSave = now
       app.persist.stateDirty = false
     }
   }
 
-  let hadUiEvents: Bool = app.io.ui.events.length > 0 or app.io.ui.pointer.down
-    or app.io.ui.pointer.pressed or app.io.ui.pointer.released
-  let logChanged: Bool = app.io.logView.revision is not app.io.lastLogRevision
-  let transitionActive: Bool = app.character.transitionElapsed < clipTransitionDuration
+  let hadUiEvents: Bool = app.inputSystem.ui.events.length > 0 or app.inputSystem.ui.pointer.down
+    or app.inputSystem.ui.pointer.pressed or app.inputSystem.ui.pointer.released
+  let logChanged: Bool = app.inputSystem.logView.revision is not app.inputSystem.lastLogRevision
+  let transitionActive: Bool = app.characterSystem.transitionElapsed < clipTransitionDuration
   # Live splash droplets are an animation source: keep rendering until the last one
   # dies out, or the wait-loop would freeze them mid-air when you stop wading (#84,
   # the "feed animation sources into the loop" lesson in AGENTS.md).
   let splashesAlive: Bool = app.splashes.list.length > 0
-  var needsRender: Bool = app.character.playing or transitionActive or settingsChanged or cameraMoved
+  var needsRender: Bool = app.characterSystem.playing or transitionActive or settingsChanged or cameraMoved
     or characterMoved or terrainWrapped or grassWrapped or splashesAlive
     or hadUiEvents or logChanged or resized or scrolled or app.frame.renderedOnce is false
   if app.frame.taaSettleFrames > 0 { needsRender = true }
   app.frame.dbgDidWork = needsRender
   if needsRender {
-    if app.character.playing or settingsChanged or cameraMoved or hadUiEvents or resized {
+    if app.characterSystem.playing or settingsChanged or cameraMoved or hadUiEvents or resized {
       app.frame.taaSettleFrames = 6
     } else {
       app.frame.taaSettleFrames = app.frame.taaSettleFrames - 1
@@ -689,7 +699,7 @@ func runWalkerApp() ret Int {
         frameSec: 0.016667, heartbeatSec: 1.0
       ))
     } else {
-      renderApp(cam: app.cam, character: app.character, frame: app.frame, io: app.io, render: app.render, emptyWorld: app.emptyWorld, world: app.world, terrain: app.terrain, splashes: app.splashes, profiler: app.profiler, grassCompute: app.grassCompute)
+      renderApp(cam: app.cameraSystem, character: app.characterSystem, frame: app.frame, io: app.inputSystem, render: app.renderSystem, emptyWorld: app.emptyWorld, world: app.world, terrain: app.terrainSystem, splashes: app.splashes, profiler: app.profiler, grassCompute: app.grassCompute)
     }
   }
   skinShutdown()
