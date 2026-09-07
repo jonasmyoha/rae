@@ -6,6 +6,7 @@ const runTestsBtn = document.getElementById("run-tests-btn");
 const stopTestsBtn = document.getElementById("stop-tests-btn");
 const disabledTestsInput = document.getElementById("disabled-tests-input");
 const includeExamplesToggle = document.getElementById("include-examples-toggle");
+const parallelTestsToggle = document.getElementById("parallel-tests-toggle");
 const testStatusChip = document.getElementById("test-status-chip");
 const testLog = document.getElementById("test-log");
 const buildStatusChip = document.getElementById("build-status-chip");
@@ -463,6 +464,16 @@ if (includeExamplesToggle) {
   });
 }
 
+// Parallel unit cases default ON (#824: ~2.7x, identical verdicts). Persist an
+// explicit opt-OUT only — an absent key means on, so a fresh browser gets the
+// fast path without ever touching the toggle.
+if (parallelTestsToggle) {
+  parallelTestsToggle.checked = localStorage.getItem("rae_parallel_tests") !== "0";
+  parallelTestsToggle.addEventListener("change", () => {
+    localStorage.setItem("rae_parallel_tests", parallelTestsToggle.checked ? "1" : "0");
+  });
+}
+
 buildBtn?.addEventListener("click", () => requestBuildCommand("build"));
 cleanBtn?.addEventListener("click", () => requestBuildCommand("clean"));
 rebuildBtn?.addEventListener("click", () => requestBuildCommand("rebuild"));
@@ -529,13 +540,15 @@ function requestTestRun(mode = "all") {
 
   const disabledTests = disabledTestsInput ? disabledTestsInput.value : "";
   const includeExamples = includeExamplesToggle ? includeExamplesToggle.checked : false;
+  const parallel = parallelTestsToggle ? parallelTestsToggle.checked : true;
 
   socket.send(
     JSON.stringify({
       type: "run-tests",
       mode,
       disabledTests,
-      includeExamples
+      includeExamples,
+      parallel
     })
   );
 }

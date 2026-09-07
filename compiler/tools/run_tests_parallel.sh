@@ -26,6 +26,11 @@
 # Exit code: 1 if any case (or example) failed.
 set -u
 cd "$(dirname "$0")/.."
+# `make test TEST=<case>` passes the case name as $1. One case has no parallel
+# form: delegate straight to the sequential runner (it also skips the examples
+# for a single-name run), so the Makefile's RAE_TEST_PARALLEL switch is safe to
+# leave on for single-test runs too.
+if [ -n "${1:-}" ]; then exec bash tools/run_tests.sh "$1"; fi
 BIN="bin/rae"; TEST_DIR="tests/cases"
 JOBS="${JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)}"
 [ -f "$BIN" ] || { echo "Error: $BIN not found. Run 'make build' first."; exit 1; }

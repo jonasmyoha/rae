@@ -345,7 +345,8 @@ const server = Bun.serve<SocketData>({
       const payload = await safeJson(req);
       const targetId = typeof payload.targetId === "string" ? payload.targetId : undefined;
       const includeExamples = payload.includeExamples === true;
-      testRunner.runTests("all", targetId, undefined, undefined, includeExamples);
+      const parallel = payload.parallel !== false;   // default ON (#824)
+      testRunner.runTests("all", targetId, undefined, undefined, includeExamples, parallel);
       return new Response(JSON.stringify({ ok: true }), {
         headers: { "Content-Type": "application/json" }
       });
@@ -615,7 +616,7 @@ async function handleClientEvent(event: ClientEvent) {
 
   if (event.type === "run-tests") {
     const mode = event.mode ?? "all";
-    testRunner.runTests(mode, event.targetId, event.disabledTests, event.testName, event.includeExamples);
+    testRunner.runTests(mode, event.targetId, event.disabledTests, event.testName, event.includeExamples, event.parallel !== false);
   }
 
   if (event.type === "stop-tests") {
