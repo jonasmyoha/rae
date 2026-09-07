@@ -85,8 +85,8 @@ func makeEmptyParticle() ret Particle {
   }
 }
 
-func initWorld(w: mod World) {
-  w.state = GameState.playing
+func initWorld(world: mod World) {
+  world.state = GameState.playing
 
   let grid: List(Int) = createList(cap: gridWidth * gridHeight)
   var i: Int = 0
@@ -94,24 +94,24 @@ func initWorld(w: mod World) {
     grid.add(value: 0)
     i = i + 1
   }
-  w.grid = grid
+  world.grid = grid
 
-  w.currentPiece = Piece { kind: randomKind(), x: 3, y: 0, rotation: 0 }
-  w.nextKind = randomKind()
+  world.currentPiece = Piece { kind: randomKind(), x: 3, y: 0, rotation: 0 }
+  world.nextKind = randomKind()
 
-  w.score = 0
-  w.lines = 0
-  w.level = 1
-  w.fallTimer = 0
-  w.fallDelay = 30
-  w.hMoveTimer = 0
-  w.hMoveDelay = 4
-  w.dasDelay = 12
-  w.lockTimer = 0
-  w.lockDelay = 30
+  world.score = 0
+  world.lines = 0
+  world.level = 1
+  world.fallTimer = 0
+  world.fallDelay = 30
+  world.hMoveTimer = 0
+  world.hMoveDelay = 4
+  world.dasDelay = 12
+  world.lockTimer = 0
+  world.lockDelay = 30
 
-  w.camTime = 0.0
-  w.lockFlash = 0.0
+  world.camTime = 0.0
+  world.lockFlash = 0.0
 
   let particles: List(Particle) = createList(cap: maxParticles)
   var p: Int = 0
@@ -120,23 +120,23 @@ func initWorld(w: mod World) {
     add(particles, value: blank)
     p = p + 1
   }
-  w.particles = particles
+  world.particles = particles
 }
 
-func gridGet(w: view World, x: view Int, y: view Int) ret Int {
+func gridGet(world: view World, x: view Int, y: view Int) ret Int {
   if x < 0 or x >= gridWidth or y < 0 or y >= gridHeight {
     ret 1
   }
-  if let cell: Int = w.grid.copyAt(index: y * gridWidth + x) {
+  if let cell: Int = world.grid.copyAt(index: y * gridWidth + x) {
     ret cell
   }
   ret 1
 }
 
-func gridSet(w: mod World, x: view Int, y: view Int, value: view Int) {
+func gridSet(world: mod World, x: view Int, y: view Int, value: view Int) {
   if x < 0 or x >= gridWidth or y < 0 or y >= gridHeight {
     ret
   }
-  let g: mod List(Int) => w.grid
+  let g: mod List(Int) => world.grid
   g.set(index: y * gridWidth + x, value: value)
 }
