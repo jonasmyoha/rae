@@ -45,13 +45,13 @@ func sceneFloats(cam: view Camera, world: view List(Sphere)) ret List(Float) {
     pushVec3(buf: s, a: cam.right)
     pushVec3(buf: s, a: cam.up)
     s.add(value: cam.lensRadius)
-    loop let sp: view Sphere in world {
-        pushVec3(buf: s, a: sp.center)
-        s.add(value: sp.radius)
-        pushVec3(buf: s, a: sp.material.albedo)
-        s.add(value: sp.material.kind.toFloat())
-        s.add(value: sp.material.fuzz)
-        s.add(value: sp.material.ior)
+    loop let sphere: view Sphere in world {
+        pushVec3(buf: s, a: sphere.center)
+        s.add(value: sphere.radius)
+        pushVec3(buf: s, a: sphere.material.albedo)
+        s.add(value: sphere.material.kind.toFloat())
+        s.add(value: sphere.material.fuzz)
+        s.add(value: sphere.material.ior)
     }
     ret s
 }
