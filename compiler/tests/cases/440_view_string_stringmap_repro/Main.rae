@@ -9,7 +9,7 @@
 #   the temp's data ptr and length get read from different
 #   compound-literal temps in the same enclosing block. Children
 #   "TopBar" (len 6) gets the data pointer from a sibling's
-#   "PlayBtn" — equals returns false even when the value should
+#   "PlayButton" — equals returns false even when the value should
 #   match.
 #
 # Test asserts EXACT string identity, not just length.
@@ -42,21 +42,21 @@ func main() {
   let rootKids: List(String) = createList(String, cap: 4)
   rootKids.add(value: "TopBar")
   rootKids.add(value: "AlbumHero")
-  rootKids.add(value: "PlayBtn")
+  rootKids.add(value: "PlayButton")
   nodes.add(value: { nodeId: "AlbumRoot", childIds: own rootKids })
 
   let topKids: List(String) = createList(String, cap: 1)
-  topKids.add(value: "BackBtn")
+  topKids.add(value: "BackButton")
   nodes.add(value: { nodeId: "TopBar", childIds: own topKids })
 
   let backKids: List(String) = createList(String, cap: 0)
-  nodes.add(value: { nodeId: "BackBtn", childIds: own backKids })
+  nodes.add(value: { nodeId: "BackButton", childIds: own backKids })
 
   let heroKids: List(String) = createList(String, cap: 0)
   nodes.add(value: { nodeId: "AlbumHero", childIds: own heroKids })
 
   let playKids: List(String) = createList(String, cap: 0)
-  nodes.add(value: { nodeId: "PlayBtn", childIds: own playKids })
+  nodes.add(value: { nodeId: "PlayButton", childIds: own playKids })
 
   # Build a parallel map of nodeId → index, mirroring world.nodeIds.
   let map: StringMap(Int) = createStringMap(Int, cap: 16)

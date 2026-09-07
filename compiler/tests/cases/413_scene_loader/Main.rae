@@ -23,13 +23,13 @@ func sampleScene() ret String {
   s = s.concat(other: "\"Rect\":\{\"x\":0,\"y\":0,\"w\":600,\"h\":1300\},")
   s = s.concat(other: "\"Layout\":\{\"type\":\"Vertical\",\"gap\":16,\"alignCross\":\"Start\"\},")
   s = s.concat(other: "\"Padding\":\{\"l\":24,\"t\":24,\"r\":24,\"b\":12\},")
-  s = s.concat(other: "\"Children\":[\"TopBar\",\"AlbumHero\",\"PlayBtn\"]")
+  s = s.concat(other: "\"Children\":[\"TopBar\",\"AlbumHero\",\"PlayButton\"]")
   s = s.concat(other: "\},")
   s = s.concat(other: "\"TopBar\":\{")
   s = s.concat(other: "\"Layout\":\{\"type\":\"Horizontal\",\"gap\":12,\"alignCross\":\"Center\"\},")
-  s = s.concat(other: "\"Children\":[\"BackBtn\"]")
+  s = s.concat(other: "\"Children\":[\"BackButton\"]")
   s = s.concat(other: "\},")
-  s = s.concat(other: "\"BackBtn\":\{")
+  s = s.concat(other: "\"BackButton\":\{")
   s = s.concat(other: "\"Sprite\":\{\"textureKey\":\"icon-back\"\},")
   s = s.concat(other: "\"OnClick\":\{\"actionId\":\"nav.back\"\}")
   s = s.concat(other: "\},")
@@ -37,7 +37,7 @@ func sampleScene() ret String {
   s = s.concat(other: "\"Text\":\{\"text\":\"Charcoal\",\"styleId\":\"h1\"\},")
   s = s.concat(other: "\"Active\":\{\"value\":true\}")
   s = s.concat(other: "\},")
-  s = s.concat(other: "\"PlayBtn\":\{")
+  s = s.concat(other: "\"PlayButton\":\{")
   s = s.concat(other: "\"Shape\":\{\"kind\":\"RoundedRect\",\"radius\":24,\"fill\":\{\"r\":0,\"g\":0,\"b\":0,\"a\":255\}\},")
   s = s.concat(other: "\"Button\":\{\"role\":\"primary\"\},")
   s = s.concat(other: "\"OnClick\":\{\"actionId\":\"music.play\"\}")
@@ -88,23 +88,23 @@ func main() {
     log("AlbumRoot missing")
   }
 
-  if let backBtnRaw: Int = world.nodeIds.get(k: "BackBtn") {
-    let backBtnId: EntityId = id(v: backBtnRaw)
-    let oc: view OnClick => componentView(this: world.onClicks, entity: backBtnId)
-    log("BackBtn OnClick.actionId = {oc.actionId}")
-    let sp: view Sprite => componentView(this: world.sprites, entity: backBtnId)
-    log("BackBtn Sprite.textureKey = {sp.textureKey}")
+  if let backButtonRaw: Int = world.nodeIds.get(k: "BackButton") {
+    let backButtonId: EntityId = id(v: backButtonRaw)
+    let oc: view OnClick => componentView(this: world.onClicks, entity: backButtonId)
+    log("BackButton OnClick.actionId = {oc.actionId}")
+    let sp: view Sprite => componentView(this: world.sprites, entity: backButtonId)
+    log("BackButton Sprite.textureKey = {sp.textureKey}")
   } else {
-    log("BackBtn missing")
+    log("BackButton missing")
   }
 
-  if let playBtnRaw: Int = world.nodeIds.get(k: "PlayBtn") {
-    let playBtnId: EntityId = id(v: playBtnRaw)
-    let sh: Shape = componentGet(this: world.shapes, entity: playBtnId)
-    log("PlayBtn Shape.kind={sh.kind} radius={sh.radius}")
-    log("PlayBtn Shape.fill.r={sh.fill.r} a={sh.fill.a}")
+  if let playButtonRaw: Int = world.nodeIds.get(k: "PlayButton") {
+    let playButtonId: EntityId = id(v: playButtonRaw)
+    let sh: Shape = componentGet(this: world.shapes, entity: playButtonId)
+    log("PlayButton Shape.kind={sh.kind} radius={sh.radius}")
+    log("PlayButton Shape.fill.r={sh.fill.r} a={sh.fill.a}")
   } else {
-    log("PlayBtn missing")
+    log("PlayButton missing")
   }
 
   # --- malformed input ---
