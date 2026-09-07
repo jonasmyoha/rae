@@ -459,6 +459,7 @@ func createApp() ret App {
                                                     speed: speed, toon: toonShading,
                                                     hour: 12.0,
                                                     skyModel: SettingsSkyModel.preetham)
+  setTaaEnabled(on: settings.taa)   # default FXAA; the settings pane toggles TAA
   let settingsOk: Bool = mountSettingsDialog(world: uiWorld, res: gpuUi, hostNodeId: "SettingsDialogSlot")
   if settingsOk is false {
     logWarnLine(ov: logView, text: "settings dialog failed to mount")
@@ -669,10 +670,12 @@ func updateApp(app: mod App) {
   var needsRender: Bool = app.characterSystem.playing or transitionActive or settingsChanged or cameraMoved
     or characterMoved or terrainWrapped or grassWrapped or splashesAlive
     or hadUiEvents or logChanged or resized or scrolled or app.frame.renderedOnce is false
-  if app.frame.taaSettleFrames > 0 { needsRender = true }
+  if app.frame.taaSettleFrames > 0 { needsRender = true }   # only meaningful with TAA on
   app.frame.dbgDidWork = needsRender
   if needsRender {
-    if app.characterSystem.playing or settingsChanged or cameraMoved or hadUiEvents or resized {
+    if app.inputSystem.settings.taa is false {
+      app.frame.taaSettleFrames = 0   # FXAA has no history to converge
+    } else if app.characterSystem.playing or settingsChanged or cameraMoved or hadUiEvents or resized {
       app.frame.taaSettleFrames = 6
     } else {
       app.frame.taaSettleFrames = app.frame.taaSettleFrames - 1
