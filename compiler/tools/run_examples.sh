@@ -175,35 +175,6 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/shot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
-        elif [ "$EXAMPLE_NAME" = "113_gltf_character" ]; then
-          # The glTF loader gate. Asserts the COUNTS it reports, not just
-          # that something rendered: a loader reading half a buffer still
-          # draws a plausible blob, and counts are the cheapest thing that
-          # cannot be faked by accident. 1728 verts / 576 triangles is the
-          # Khronos Fox — non-indexed, hence exactly verts/3 triangles.
-          SHOT="$TMP_OUT/gltf-character.bmp"
-          # #759: 113 is also the FORWARD-path mesh host that exercises the
-          # runtime draw-limit guard (rae_g3d_push_draw_record). It issues two
-          # forward mesh draws (character + ground) via gpu3d.renderScene, so a
-          # second run under RAE_GPU3D_DRAW_LIMIT=1 must discard the 2nd draw with
-          # "[gpu3d] ERROR: draw limit exceeded". (No example draws >4 forward
-          # meshes — every >4-mesh example uses the DEFERRED path — so a low
-          # limit on this 2-mesh forward example is what trips the guard, which
-          # lost its host when 109 migrated to deferred in #514.)
-          if (cd .. && RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SHOT" \
-                perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
-             && python3 tools/assert_nonblank_bmp.py "$SHOT" --min-colors=20 > "$TMP_OUT/shot.log" 2>&1 \
-             && [ "$(grep -c "character: 1728 verts, 576 triangles" "$TMP_OUT/render.log")" -eq 1 ] \
-             && (cd .. && RAE_GPU3D_DRAW_LIMIT=1 RAE_SDL_HEADLESS_MS=800 \
-                   perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/drawlimit.log" 2>&1 \
-             && [ "$(grep -c "\[gpu3d\] ERROR: draw limit exceeded" "$TMP_OUT/drawlimit.log")" -eq 1 ]; then
-            echo "PASS: $EXAMPLE_NAME (glb loaded: 1728 verts / 576 tris, non-blank render, forward draw-limit guard fires)"
-            ((PASSED++))
-          else
-            echo "FAIL: $EXAMPLE_NAME (glTF character)"
-            cat "$TMP_OUT/render.log" "$TMP_OUT/shot.log" "$TMP_OUT/drawlimit.log" 2>/dev/null | sed 's/^/  /'
-            ((FAILED++))
-          fi
         elif [ "$EXAMPLE_NAME" = "110_deferred_gbuffer" ]; then
           # The deferred G-buffer (#356). Each channel is checked separately
           # because they fail differently: a broken albedo write still leaves
@@ -251,6 +222,10 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             ((FAILED++))
           fi
         elif [ "$EXAMPLE_NAME" = "111_metaballs_forward" ]; then
+          # 111 is now ALSO the forward-path host of the runtime draw-limit guard
+          # (rae_g3d_push_draw_record): a second run under RAE_GPU3D_DRAW_LIMIT=1
+          # must log "[gpu3d] ERROR: draw limit exceeded". This moved here from the
+          # retired 113_gltf_character (its glTF loading coverage lives in 114).
           # The forward twin: one screenshot is enough. 112 owns the deep
           # coverage (scene switching, pause, settings, free camera); repeating
           # all of it here would double the slowest example in the suite to
@@ -260,8 +235,11 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           if (cd .. && RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
              perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --gpu3d-ui > "$TMP_OUT/screenshot.log" 2>&1 \
-             && [ "$(grep -c '\[shadow\] casters 17, 3 cascades' "$TMP_OUT/render.log")" -eq 1 ]; then
-            echo "PASS: $EXAMPLE_NAME (forward path, lit frame + shadow cascades)"
+             && [ "$(grep -c '\[shadow\] casters 17, 3 cascades' "$TMP_OUT/render.log")" -eq 1 ] \
+             && (cd .. && RAE_GPU3D_DRAW_LIMIT=1 RAE_SDL_HEADLESS_MS=800 \
+                   perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/drawlimit.log" 2>&1 \
+             && [ "$(grep -c "\[gpu3d\] ERROR: draw limit exceeded" "$TMP_OUT/drawlimit.log")" -ge 1 ]; then
+            echo "PASS: $EXAMPLE_NAME (forward path, lit frame + shadow cascades, draw-limit guard fires)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (forward 3D/UI screenshot)"

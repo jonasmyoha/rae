@@ -254,8 +254,11 @@ func setDebugView(r: mod DeferredRenderer, mode: view Int) pub {
   r.debugView = mode
 }
 
-# TAA on/off (#20). Off routes the composite to the raw lit result, no-ops the
-# taa pass, suppresses the G-buffer jitter, and switches on FXAA in its place.
+# TAA on/off (#20). DEFAULT IS OFF = FXAA: the composite paints the raw lit
+# result through FXAA, the taa pass is a no-op and the G-buffer jitter is
+# suppressed. TAA is opt-in (the shared settings pane has a toggle) because the
+# current resolve blurs/ghosts on detailed top-down terrain and crowd motion;
+# its quality fixes are POSTPONED queue tasks.
 func setTaaEnabled(on: copy Bool) pub {
   if on { gbSetTaaEnabled(on: 1) } else { gbSetTaaEnabled(on: 0) }
 }
