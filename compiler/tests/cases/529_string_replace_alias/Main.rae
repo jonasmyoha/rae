@@ -6,8 +6,8 @@
 # Symptom was chain-returned values later reading bytes from whatever
 # reused/owned the aliased buffer.
 
-func scrub(s: view String) ret String {
-  var r: String = "{s}"
+func scrub(text: view String) ret String {
+  var r: String = "{text}"
   r = r.replace(old: "%A%", new: "_")
   r = r.replace(old: "", new: "!")
   r = r.replace(old: "%B%", new: "_")
@@ -21,7 +21,7 @@ func scrub(s: view String) ret String {
 func main() {
   var src: String = ""
   src = src.concat(other: "keep %A% and %B% here")
-  let v: String = scrub(s: src)
+  let v: String = scrub(text: src)
 
   # Churn the allocator so an aliased/freed buffer would get reused
   # before we read v back.

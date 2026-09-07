@@ -95,8 +95,8 @@ func stem(path: view String) ret String {
 }
 
 # Zero-pad an Int to (at least) 4 digits.
-func pad4(n: view Int) ret String {
-    var s: String = "{n}"
+func pad4(value: view Int) ret String {
+    var s: String = "{value}"
     loop s.length() < 4 {
         s = "0{s}"
     }
@@ -140,5 +140,5 @@ func renderPath(stem: view String) ret String {
     let date: String = today()
     let prefix: String = "{stem}_{date}_"
     let n: Int = nextIndex(dir: dir, prefix: prefix)
-    ret join(a: dir, b: "{prefix}{pad4(n: n)}.png")
+    ret join(a: dir, b: "{prefix}{pad4(value: n)}.png")
 }

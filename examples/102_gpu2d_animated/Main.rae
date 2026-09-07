@@ -73,9 +73,9 @@ func chan(value: view Float) ret Int {
 func hueColor(hue: view Float, alpha: view Int) ret Int {
   let wrapped: Float = frac(value: hue)
   let hue6: Float = wrapped * 6.0
-  let redCh: Int = chan(value: Math.abs(n: hue6 - 3.0) - 1.0)
-  let greenCh: Int = chan(value: 2.0 - Math.abs(n: hue6 - 2.0))
-  let blueCh: Int = chan(value: 2.0 - Math.abs(n: hue6 - 4.0))
+  let redCh: Int = chan(value: Math.abs(value: hue6 - 3.0) - 1.0)
+  let greenCh: Int = chan(value: 2.0 - Math.abs(value: hue6 - 2.0))
+  let blueCh: Int = chan(value: 2.0 - Math.abs(value: hue6 - 4.0))
   ret (alpha shl 24) bitor (redCh shl 16) bitor (greenCh shl 8) bitor blueCh
 }
 
@@ -101,9 +101,9 @@ func clampUnit(value: view Float) ret Float {
 func hsv(hue: view Float, sat: view Float, val: view Float, alpha: view Int) ret Int {
   let wrapped: Float = frac(value: hue)
   let hue6: Float = wrapped * 6.0
-  let pureR: Float = clampUnit(value: Math.abs(n: hue6 - 3.0) - 1.0)
-  let pureG: Float = clampUnit(value: 2.0 - Math.abs(n: hue6 - 2.0))
-  let pureB: Float = clampUnit(value: 2.0 - Math.abs(n: hue6 - 4.0))
+  let pureR: Float = clampUnit(value: Math.abs(value: hue6 - 3.0) - 1.0)
+  let pureG: Float = clampUnit(value: 2.0 - Math.abs(value: hue6 - 2.0))
+  let pureB: Float = clampUnit(value: 2.0 - Math.abs(value: hue6 - 4.0))
   let floor: Float = 1.0 - sat
   let redCh: Int = chan(value: (floor + sat * pureR) * val)
   let greenCh: Int = chan(value: (floor + sat * pureG) * val)

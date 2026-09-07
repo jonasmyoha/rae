@@ -36,13 +36,13 @@ type RestoredState {
 # `100_code_hot_reload` demo. `s` may have a leading `-`; callers
 # strip that themselves before calling (it's only used for scroll,
 # which can be negative).
-func parseUInt(s: view String) ret Int {
+func parseUInt(text: view String) ret Int {
   let digits: String = "0123456789"
-  let n: Int = s.length()
+  let n: Int = text.length()
   var i: Int = 0
   var acc: Int = 0
   loop i < n {
-    let ch: String = s.sub(start: i, len: 1)
+    let ch: String = text.sub(start: i, len: 1)
     let d: Int = digits.indexOf(sub: ch)
     if d < 0 {
       ret acc
@@ -55,16 +55,16 @@ func parseUInt(s: view String) ret Int {
 
 # Signed parse: handles a leading `-`. Used for scroll position
 # (clamped negative in the running app).
-func parseSignedInt(s: view String) ret Int {
-  if s.length() is 0 {
+func parseSignedInt(text: view String) ret Int {
+  if text.length() is 0 {
     ret 0
   }
-  let first: String = s.sub(start: 0, len: 1)
+  let first: String = text.sub(start: 0, len: 1)
   if first is "-" {
-    let body: String = s.sub(start: 1, len: s.length() - 1)
-    ret 0 - parseUInt(s: body)
+    let body: String = text.sub(start: 1, len: text.length() - 1)
+    ret 0 - parseUInt(text: body)
   }
-  ret parseUInt(s: s)
+  ret parseUInt(text: text)
 }
 
 # Screen <-> Int. The enum's literal ordinal is the same value the
@@ -86,13 +86,13 @@ func screenToInt(s: view Screen) ret Int {
   ret 4
 }
 
-func intToScreen(n: view Int) ret Screen {
-  if n is 0 { ret Screen.player }
-  if n is 1 { ret Screen.album }
-  if n is 2 { ret Screen.search }
-  if n is 3 { ret Screen.library }
-  if n is 5 { ret Screen.profile }
-  if n is 6 { ret Screen.history }
+func intToScreen(value: view Int) ret Screen {
+  if value is 0 { ret Screen.player }
+  if value is 1 { ret Screen.album }
+  if value is 2 { ret Screen.search }
+  if value is 3 { ret Screen.library }
+  if value is 5 { ret Screen.profile }
+  if value is 6 { ret Screen.history }
   ret Screen.home
 }
 
@@ -128,10 +128,10 @@ func loadRestoredState(fallback: view RestoredState) pub ret RestoredState {
       let key: String = kv.sub(start: 0, len: sepIndex)
       let val: String = kv.sub(start: sepIndex + 1, len: kv.length() - sepIndex - 1)
       if key is "screen" {
-        result.screen = intToScreen(n: parseSignedInt(s: val))
+        result.screen = intToScreen(value: parseSignedInt(text: val))
       }
       if key is "scroll" {
-        result.scrollY = parseSignedInt(s: val).toFloat()
+        result.scrollY = parseSignedInt(text: val).toFloat()
       }
     }
   }

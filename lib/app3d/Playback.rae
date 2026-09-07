@@ -29,11 +29,11 @@ const speedCoarseStep: Float = 0.05
 # because the caller probes just past the current value to decide which
 # band the move is heading into, and exact float equality on 0.05 is not
 # something to rely on.
-func speedStepSize(v: view Float) pub ret Float {
-  if v <= 0.0501 {
+func speedStepSize(value: view Float) pub ret Float {
+  if value <= 0.0501 {
     ret speedFineStep
   }
-  if v >= 0.9499 and v <= 1.0501 {
+  if value >= 0.9499 and value <= 1.0501 {
     ret speedFineStep
   }
   ret speedCoarseStep
@@ -43,10 +43,10 @@ func nextSpeed(current: view Float, up: view Bool) pub ret Float {
   var step: Float = speedCoarseStep
   var v: Float = current
   if up {
-    step = speedStepSize(v: v + 0.0001)
+    step = speedStepSize(value: v + 0.0001)
     v = v + step
   } else {
-    step = speedStepSize(v: v - 0.0001)
+    step = speedStepSize(value: v - 0.0001)
     v = v - step
   }
   # Snap to the grid of the step just taken, so a move that crosses a band
@@ -68,6 +68,6 @@ func nextSpeed(current: view Float, up: view Bool) pub ret Float {
 
 # Whole percent, for a readout. One place, so the label and any assertion
 # about it cannot round differently.
-func speedPercent(v: view Float) pub ret Int {
-  ret Math.floor(x: v * 100.0 + 0.5).toInt()
+func speedPercent(value: view Float) pub ret Int {
+  ret Math.floor(x: value * 100.0 + 0.5).toInt()
 }

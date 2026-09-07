@@ -2,8 +2,8 @@
 # Rae has NO implicit numeric conversions: every change of numeric
 # representation is written out. See docs/primitive-types.md.
 
-func takesFloat(v: view Float) ret Float {
-  ret v * 2.0
+func takesFloat(value: view Float) ret Float {
+  ret value * 2.0
 }
 
 func takesF64(v: view Float64) ret Float64 {
@@ -38,7 +38,7 @@ func main() {
   let chained: Float64 = i as Float as Float64
 
   # Conversions at call boundaries.
-  let called: Float = takesFloat(v: b as Float)
+  let called: Float = takesFloat(value: b as Float)
   let called64: Float64 = takesF64(v: a as Float64)
 
   log("a={a} b={b} alias={aliasF32} back={back}")

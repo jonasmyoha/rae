@@ -16,10 +16,10 @@ type Huff {
 }
 
 # A List(Int) of `n` zeros.
-func zeros(n: view Int) ret List(Int) {
-    let l: List(Int) = createList(cap: n)
+func zeros(count: view Int) ret List(Int) {
+    let l: List(Int) = createList(cap: count)
     var i: Int = 0
-    loop i < n {
+    loop i < count {
         l.add(value: 0)
         i = i + 1
     }
@@ -27,24 +27,24 @@ func zeros(n: view Int) ret List(Int) {
 }
 
 # Build a canonical Huffman table from per-symbol code lengths (0 = unused).
-func buildHuff(lengths: view List(Int), n: view Int) ret Huff {
-    let counts: List(Int) = zeros(n: 16)
+func buildHuff(lengths: view List(Int), value: view Int) ret Huff {
+    let counts: List(Int) = zeros(value: 16)
     var i: Int = 0
-    loop i < n {
+    loop i < value {
         let len: Int = bufAt(list: lengths, index: i)
         counts.set(index: len, value: bufAt(list: counts, index: len) + 1)
         i = i + 1
     }
     # offs[len] = first symbol-array index for codes of this length.
-    let offs: List(Int) = zeros(n: 16)
+    let offs: List(Int) = zeros(value: 16)
     var len2: Int = 1
     loop len2 < 16 {
         offs.set(index: len2 + 1, value: bufAt(list: offs, index: len2) + bufAt(list: counts, index: len2))
         len2 = len2 + 1
     }
-    let symbols: List(Int) = zeros(n: n)
+    let symbols: List(Int) = zeros(value: value)
     var sym: Int = 0
-    loop sym < n {
+    loop sym < value {
         let codeLen: Int = bufAt(list: lengths, index: sym)
         if codeLen is not 0 {
             symbols.set(index: bufAt(list: offs, index: codeLen), value: sym)
@@ -112,10 +112,10 @@ func block(r: mod BitReader, out: mod List(Int), lenH: view Huff, distH: view Hu
         } else {
             let li: Int = sym - 257
             if li >= lBase.length { ret false }
-            let length: Int = bufAt(list: lBase, index: li) + getBits(this: r, n: bufAt(list: lExtra, index: li))
+            let length: Int = bufAt(list: lBase, index: li) + getBits(this: r, count: bufAt(list: lExtra, index: li))
             let dsym: Int = decodeSymbol(r: r, h: distH)
             if dsym < 0 or dsym >= dBase.length { ret false }
-            let dist: Int = bufAt(list: dBase, index: dsym) + getBits(this: r, n: bufAt(list: dExtra, index: dsym))
+            let dist: Int = bufAt(list: dBase, index: dsym) + getBits(this: r, count: bufAt(list: dExtra, index: dsym))
             # Copy `length` bytes from `dist` back in the output (overlap allowed).
             var k: Int = 0
             let start: Int = out.length - dist
@@ -132,7 +132,7 @@ func block(r: mod BitReader, out: mod List(Int), lenH: view Huff, distH: view Hu
 # Fixed Huffman tables (RFC 1951 §3.2.6): literal/length lengths are fixed, and
 # all distance codes have length 5.
 func fixedLitLengths() ret List(Int) {
-    let l: List(Int) = zeros(n: 288)
+    let l: List(Int) = zeros(count: 288)
     var i: Int = 0
     loop i < 288 {
         var v: Int = 8
@@ -153,21 +153,21 @@ func clcOrder() ret List(Int) {
 # Read the dynamic-block code-length arrays and return [litLengths.., distLengths..]
 # packed; the caller knows hlit to split. Writes hlit/hdist back through mods.
 func readDynamicLengths(r: mod BitReader, hlit: mod Int, hdist: mod Int) ret List(Int) {
-    let nlit: Int = getBits(this: r, n: 5) + 257
-    let ndist: Int = getBits(this: r, n: 5) + 1
-    let nclen: Int = getBits(this: r, n: 4) + 4
+    let nlit: Int = getBits(this: r, count: 5) + 257
+    let ndist: Int = getBits(this: r, count: 5) + 1
+    let nclen: Int = getBits(this: r, count: 4) + 4
     hlit = nlit
     hdist = ndist
 
     # Code-length code lengths, in the shuffled order.
     let order: List(Int) = clcOrder()
-    let clLengths: List(Int) = zeros(n: 19)
+    let clLengths: List(Int) = zeros(count: 19)
     var i: Int = 0
     loop i < nclen {
-        clLengths.set(index: bufAt(list: order, index: i), value: getBits(this: r, n: 3))
+        clLengths.set(index: bufAt(list: order, index: i), value: getBits(this: r, count: 3))
         i = i + 1
     }
-    let clHuff: Huff = buildHuff(lengths: clLengths, n: 19)
+    let clHuff: Huff = buildHuff(lengths: clLengths, value: 19)
 
     # Decode nlit+ndist code lengths, honouring repeat codes 16/17/18.
     let total: Int = nlit + ndist
@@ -180,12 +180,12 @@ func readDynamicLengths(r: mod BitReader, hlit: mod Int, hdist: mod Int) ret Lis
         } else {
             if sym is 16 {
                 let prev: Int = bufAt(list: lengths, index: lengths.length - 1)
-                var rep: Int = 3 + getBits(this: r, n: 2)
+                var rep: Int = 3 + getBits(this: r, count: 2)
                 loop rep > 0 { lengths.add(value: prev) rep = rep - 1 }
             } else {
                 var count: Int = 0
-                if sym is 17 { count = 3 + getBits(this: r, n: 3) }
-                if sym is 18 { count = 11 + getBits(this: r, n: 7) }
+                if sym is 17 { count = 3 + getBits(this: r, count: 3) }
+                if sym is 18 { count = 11 + getBits(this: r, count: 7) }
                 loop count > 0 { lengths.add(value: 0) count = count - 1 }
             }
         }
@@ -202,13 +202,13 @@ func inflateRaw(data: own List(Int), len: view Int) ret List(Int) {
     let lExtra: List(Int) = lengthExtra()
     let dBase: List(Int) = distBase()
     let dExtra: List(Int) = distExtra()
-    let fixedDist: List(Int) = zeros(n: 30)
+    let fixedDist: List(Int) = zeros(count: 30)
     var fi: Int = 0
     loop fi < 30 { fixedDist.set(index: fi, value: 5) fi = fi + 1 }
 
     loop true {
         let final: Int = getBit(this: r)
-        let btype: Int = getBits(this: r, n: 2)
+        let btype: Int = getBits(this: r, count: 2)
         if btype is 0 {
             # Stored: align, read LEN (NLEN ignored), copy LEN raw bytes.
             alignToByte(this: r)
@@ -224,8 +224,8 @@ func inflateRaw(data: own List(Int), len: view Int) ret List(Int) {
             }
         } else {
             if btype is 1 {
-                let litH: Huff = buildHuff(lengths: fixedLitLengths(), n: 288)
-                let distH: Huff = buildHuff(lengths: fixedDist, n: 30)
+                let litH: Huff = buildHuff(lengths: fixedLitLengths(), value: 288)
+                let distH: Huff = buildHuff(lengths: fixedDist, value: 30)
                 let ok: Bool = block(r: r, out: out, lenH: litH, distH: distH,
                                             lBase: lBase, lExtra: lExtra, dBase: dBase, dExtra: dExtra)
                 if ok is false { ret out }
@@ -240,8 +240,8 @@ func inflateRaw(data: own List(Int), len: view Int) ret List(Int) {
                     var j: Int = 0
                     loop j < hlit { litLengths.add(value: bufAt(list: allLengths, index: j)) j = j + 1 }
                     loop j < hlit + hdist { distLengths.add(value: bufAt(list: allLengths, index: j)) j = j + 1 }
-                    let litH: Huff = buildHuff(lengths: litLengths, n: hlit)
-                    let distH: Huff = buildHuff(lengths: distLengths, n: hdist)
+                    let litH: Huff = buildHuff(lengths: litLengths, value: hlit)
+                    let distH: Huff = buildHuff(lengths: distLengths, value: hdist)
                     let ok: Bool = block(r: r, out: out, lenH: litH, distH: distH,
                                                 lBase: lBase, lExtra: lExtra, dBase: dBase, dExtra: dExtra)
                     if ok is false { ret out }
