@@ -173,6 +173,42 @@ body {
   background: rgba(248, 113, 113, 0.05);
 }
 
+/* Big elapsed-time readout for a test run (#846). Monospaced tabular figures
+   so the digits don't jitter as the timer ticks; state drives the colour. */
+.run-timer {
+  font-family: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  font-size: 1.5rem;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  padding: 0.35rem 0.9rem;
+  border-radius: 12px;
+  border: 2px solid rgba(154, 161, 185, 0.25);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-muted);
+  min-width: 5.5ch;
+  text-align: center;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+.run-timer--lg { font-size: 2.1rem; padding: 0.35rem 1.1rem; }
+.run-timer[data-state="running"] {
+  color: var(--accent);
+  border-color: rgba(118, 225, 225, 0.5);
+  background: var(--accent-soft);
+  animation: status-pulse 1.6s infinite;
+}
+.run-timer[data-state="success"] {
+  color: var(--success);
+  border-color: var(--success);
+  background: rgba(52, 211, 153, 0.06);
+}
+.run-timer[data-state="failure"] {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: rgba(248, 113, 113, 0.06);
+}
+
 .app-nav {
   display: flex;
   gap: 0.5rem;
