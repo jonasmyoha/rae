@@ -138,7 +138,7 @@ type CameraTick {
 # bundle, the persist dirty flag, and the world + hero entity to read the
 # followed controller — not the whole App.
 func cameraUpdate(cameraSystem: mod CameraSystem, inputSystem: mod InputSystem, persist: mod PersistState,
-                  world: view GameWorld, heroEntity: view EntityId, dt: copy Float) ret CameraTick {
+                  world: view GameWorld, heroEntity: view EntityId, deltaTime: copy Float) ret CameraTick {
   let previousMode: CameraRigMode = cameraSystem.rig.mode
   if handleCameraBar(input: inputSystem.ui, rig: cameraSystem.rig, camera: cameraSystem.camera) { persist.stateDirty = true }
   if previousMode is not CameraRigMode.character and cameraSystem.rig.mode is CameraRigMode.character {
@@ -152,7 +152,7 @@ func cameraUpdate(cameraSystem: mod CameraSystem, inputSystem: mod InputSystem, 
   }
   let joyActive: Bool = updateWalkerTouch(rig: cameraSystem.rig, moveStick: inputSystem.moveStick, world: inputSystem.world)
   let cameraMoved: Bool = updateCameraRig(rig: cameraSystem.rig, camera: cameraSystem.camera,
-                     allowInput: uiPointerCaptured(input: inputSystem.ui) is false, dt: dt)
+                     allowInput: uiPointerCaptured(input: inputSystem.ui) is false, deltaTime: deltaTime)
   if cameraMoved { persist.stateDirty = true }
   ret CameraTick { joyActive: joyActive, cameraMoved: cameraMoved }
 }

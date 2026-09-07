@@ -77,9 +77,9 @@ func paddleAiSystem(
   ballPosition: view PaddleTransform
   ballVelocity: view Velocity
   paddleY: copy Float
-  dt: view Float
+  deltaTime: view Float
 ) ret Float {
-  ai.reactionTimer = ai.reactionTimer + dt
+  ai.reactionTimer = ai.reactionTimer + deltaTime
   if ai.reactionTimer >= ai.reactionDelay {
     ai.reactionTimer = 0.0
     updateAiTarget(
@@ -95,7 +95,7 @@ func paddleAiSystem(
   if distance > deadZone { desiredVelocity = speed }
   if distance < 0.0 - deadZone { desiredVelocity = 0.0 - speed }
 
-  let velocityStep: Float = acceleration * dt
+  let velocityStep: Float = acceleration * deltaTime
   if ai.velocityY < desiredVelocity {
     ai.velocityY = ai.velocityY + velocityStep
     if ai.velocityY > desiredVelocity { ai.velocityY = desiredVelocity }
@@ -105,7 +105,7 @@ func paddleAiSystem(
     if ai.velocityY < desiredVelocity { ai.velocityY = desiredVelocity }
   }
 
-  paddleY = paddleY + ai.velocityY * dt
+  paddleY = paddleY + ai.velocityY * deltaTime
   if paddleY < 0.0 {
     paddleY = 0.0
     ai.velocityY = 0.0

@@ -492,7 +492,7 @@ func main() ret Int {
 
   loop not Gpu2d.pollClose() {
     let now: Float64 = Gpu2d.nowSeconds()
-    var dt: Float = (now - lastFrame) as Float
+    var deltaTime: Float = (now - lastFrame) as Float
     lastFrame = now
     # NO CLAMP ON dt. A long frame is integrated in full, however long it was.
     #
@@ -514,7 +514,7 @@ func main() ret Int {
     #
     # Negative is still refused: that is a clock going backwards, not a long
     # frame, and no amount of honesty makes it meaningful.
-    if dt < 0.0 { dt = 0.0 }
+    if deltaTime < 0.0 { deltaTime = 0.0 }
 
     # Re-anchor on resize. The window's logical size is the layout extent,
     # so a resize re-runs placement instead of rescaling a fixed canvas.
@@ -594,7 +594,7 @@ func main() ret Int {
     # The clock, if it is running. This example PARKS in waitEvents when nothing
     # is moving, so a running clock has to be declared as motion below or it
     # starves to the heartbeat rate and the sky steps once a second.
-    let timeAnimating: Bool = settingsAdvanceTime(s: settings, dt: dt)
+    let timeAnimating: Bool = settingsAdvanceTime(s: settings, deltaTime: deltaTime)
     if timeAnimating {
       settingsChanged = true
     }
@@ -649,7 +649,7 @@ func main() ret Int {
     # all. `cameraMoved` already forces a redraw, so the idle wait-loop
     # still wakes for it.
     let cameraInput: Bool = uiPointerCaptured(input: uiInput) is false
-    let cameraMoved: Bool = updateCameraRig(rig: cameraRig, camera: camera, allowInput: cameraInput, dt: dt)
+    let cameraMoved: Bool = updateCameraRig(rig: cameraRig, camera: camera, allowInput: cameraInput, deltaTime: deltaTime)
 
     # The frame is only worth drawing if something it depends on changed.
     # While paused the 3D scene is frozen, so the presented image is still
@@ -703,7 +703,7 @@ func main() ret Int {
         # Was a half-speed TOGGLE; now the shared percentage, so 110 and 113
         # express animation speed the same way (settings_dialog).
         motionScale = motionScale * settings.speed
-        simTime = simTime + dt * motionScale
+        simTime = simTime + deltaTime * motionScale
       }
       applyCameraRig(rig: cameraRig, camera: camera)
       syncCameraBar(world: uiWorld, rig: cameraRig, camera: camera)

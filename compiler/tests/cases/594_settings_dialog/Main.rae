@@ -94,20 +94,20 @@ func main() {
   var clock: SettingsState = createSettingsState(scene: 1, sceneCount: 1, speed: 1.0,
                                                  toon: false, hour: 12.0,
                                                  skyModel: SettingsSkyModel.hosek)
-  check(label: "2.5s advances one hour", ok: settingsAdvanceTime(s: clock, dt: 2.5) and clock.hour > 12.99 and clock.hour < 13.01)
+  check(label: "2.5s advances one hour", ok: settingsAdvanceTime(s: clock, deltaTime: 2.5) and clock.hour > 12.99 and clock.hour < 13.01)
   # Half a real minute is half a day, and 13:00 plus twelve hours is 01:00 the
   # next day — so this covers the rate and the MIDNIGHT WRAP at once. Clamping
   # at 24 instead of wrapping would park the sun there and the day would only
   # ever run once.
-  check(label: "half a minute is half a day, past midnight", ok: settingsAdvanceTime(s: clock, dt: 30.0) and clock.hour > 0.99 and clock.hour < 1.01)
+  check(label: "half a minute is half a day, past midnight", ok: settingsAdvanceTime(s: clock, deltaTime: 30.0) and clock.hour > 0.99 and clock.hour < 1.01)
   # A whole day later it reads the same hour, so nothing CHANGED and the caller
   # is told so rather than being made to rebuild the sky for an identical value.
-  check(label: "a full minute is a full day", ok: settingsAdvanceTime(s: clock, dt: 60.0) is false)
+  check(label: "a full minute is a full day", ok: settingsAdvanceTime(s: clock, deltaTime: 60.0) is false)
   # A drag WINS: otherwise the clock and the pointer fight over one value and
   # the handle crawls away from where it was put.
   clock.timeDragging = true
   let heldAt: Float = clock.hour
-  check(label: "a drag pauses the clock", ok: settingsAdvanceTime(s: clock, dt: 2.5) is false and clock.hour is heldAt)
+  check(label: "a drag pauses the clock", ok: settingsAdvanceTime(s: clock, deltaTime: 2.5) is false and clock.hour is heldAt)
   clock.timeDragging = false
   # PLAY/PAUSE IS THE MASTER. Pausing stops the clock whatever the Animate time
   # toggle says — a paused scene with the sun still sweeping across it is not
@@ -115,17 +115,17 @@ func main() {
   check(label: "animate time is on for the master test", ok: clock.animateTime)
   clock.playing = false
   let pausedAt: Float = clock.hour
-  check(label: "pause stops the clock", ok: settingsAdvanceTime(s: clock, dt: 2.5) is false and clock.hour is pausedAt)
+  check(label: "pause stops the clock", ok: settingsAdvanceTime(s: clock, deltaTime: 2.5) is false and clock.hour is pausedAt)
   # The toggle KEEPS its value rather than being written to false, so resuming
   # restores exactly what was set instead of silently turning the feature off.
   check(label: "pause does not clear the toggle", ok: clock.animateTime)
   clock.playing = true
-  check(label: "resume starts the clock again", ok: settingsAdvanceTime(s: clock, dt: 2.5) and clock.hour is not pausedAt)
+  check(label: "resume starts the clock again", ok: settingsAdvanceTime(s: clock, deltaTime: 2.5) and clock.hour is not pausedAt)
 
   # And the toggle turns it off entirely.
   check(label: "toggle turns animation off", ok: settingsHandleAction(s: clock, actionId: "settings.time.animate") and clock.animateTime is false)
   let stoppedAt: Float = clock.hour
-  check(label: "a stopped clock does not move", ok: settingsAdvanceTime(s: clock, dt: 2.5) is false and clock.hour is stoppedAt)
+  check(label: "a stopped clock does not move", ok: settingsAdvanceTime(s: clock, deltaTime: 2.5) is false and clock.hour is stoppedAt)
 
   # ----- the calendar rides the clock ---------------------------------
   # One real minute is one day, so a minute later the DATE has moved. A clock
@@ -138,28 +138,28 @@ func main() {
   # default", and a test that hardcodes the year fails the day someone changes it
   # — which is exactly what happened when the default moved from 2026 to 1995.
   check(label: "date defaults to the June solstice", ok: cal.dayOfYear is settingsDefaultDayOfYear and cal.year is settingsDefaultYear)
-  settingsAdvanceTime(s: cal, dt: 60.0)
+  settingsAdvanceTime(s: cal, deltaTime: 60.0)
   check(label: "a day of clock advances the date", ok: cal.dayOfYear is settingsDefaultDayOfYear + 1 and cal.year is settingsDefaultYear)
   # The year rolls at the year's REAL length, so 29 February exists in 2028 and
   # does not in 2029.
   cal.year = 2028
   cal.dayOfYear = 59
-  settingsAdvanceTime(s: cal, dt: 60.0)
+  settingsAdvanceTime(s: cal, deltaTime: 60.0)
   let feb29: CalendarDate = settingsDate(s: cal)
   check(label: "29 Feb exists in a leap year", ok: feb29.month is 2 and feb29.day is 29)
   cal.year = 2029
   cal.dayOfYear = 59
-  settingsAdvanceTime(s: cal, dt: 60.0)
+  settingsAdvanceTime(s: cal, deltaTime: 60.0)
   let mar1: CalendarDate = settingsDate(s: cal)
   check(label: "and is skipped in a plain year", ok: mar1.month is 3 and mar1.day is 1)
   cal.year = 2026
   cal.dayOfYear = 365
-  settingsAdvanceTime(s: cal, dt: 60.0)
+  settingsAdvanceTime(s: cal, deltaTime: 60.0)
   check(label: "new year rolls the year over", ok: cal.year is 2027 and cal.dayOfYear is 1)
   # Pause is the master over the calendar too, not just the hour.
   cal.playing = false
   let heldDay: Int = cal.dayOfYear
-  settingsAdvanceTime(s: cal, dt: 600.0)
+  settingsAdvanceTime(s: cal, deltaTime: 600.0)
   check(label: "pause holds the date as well", ok: cal.dayOfYear is heldDay)
 
   # Play/pause is shared, so both examples show the same word for it.

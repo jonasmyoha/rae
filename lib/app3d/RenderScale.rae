@@ -60,7 +60,7 @@ func createRenderScaleController(targetFps: copy Float) pub ret RenderScaleContr
 
 # Feed one frame's dt (seconds). Walks the ladder in place: drop fast after 4
 # missed frames, restore one rung after ~3s good, 30-frame cooldown between moves.
-func updateRenderScale(drs: mod RenderScaleController, dt: copy Float, profiler: mod Profiler) pub {
+func updateRenderScale(drs: mod RenderScaleController, deltaTime: copy Float, profiler: mod Profiler) pub {
   # Proactive OS-thermal ceiling: snap the scale down (and force the 30fps cap at
   # critical) the moment the OS reports heat, without waiting for missed frames.
   let therm: Int = thermalState()
@@ -78,7 +78,7 @@ func updateRenderScale(drs: mod RenderScaleController, dt: copy Float, profiler:
   Profile.counter(profiler: profiler, name: "render.capFps", value: rae_float_to_int(f: drs.capFps))
   Profile.counter(profiler: profiler, name: "thermal.state", value: therm)
 
-  if dt > drs.overBudgetSec {
+  if deltaTime > drs.overBudgetSec {
     drs.overFrames = drs.overFrames + 1
     drs.goodFrames = 0
   } else {

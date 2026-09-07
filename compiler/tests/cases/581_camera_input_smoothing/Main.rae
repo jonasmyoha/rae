@@ -32,28 +32,28 @@ func approxEq(a: view Float, b: view Float, tol: view Float) ret Bool {
 func main() {
   # 1. One long step == many short steps covering the same time.
   let rate: Float = 12.0
-  let oneStep: Float = smoothTowards(current: 0.0, target: 10.0, rate: rate, dt: 0.1)
+  let oneStep: Float = smoothTowards(current: 0.0, target: 10.0, rate: rate, deltaTime: 0.1)
   var many: Float = 0.0
   var i: Int = 0
   loop i < 10 {
-    many = smoothTowards(current: many, target: 10.0, rate: rate, dt: 0.01)
+    many = smoothTowards(current: many, target: 10.0, rate: rate, deltaTime: 0.01)
     i = i + 1
   }
   log("framerate independent: {approxEq(a: oneStep, b: many, tol: 0.0001)}")
 
   # 2. A 2-second frame at a high rate must not sail past the target.
-  let huge: Float = smoothTowards(current: 0.0, target: 10.0, rate: 30.0, dt: 2.0)
+  let huge: Float = smoothTowards(current: 0.0, target: 10.0, rate: 30.0, deltaTime: 2.0)
   log("no overshoot on a long frame: {huge <= 10.0 and huge > 9.99}")
 
   # 3. Rate 0 is the "smoothing off" path and must be exact.
-  let off: Float = smoothTowards(current: 3.25, target: 7.5, rate: 0.0, dt: 0.016)
+  let off: Float = smoothTowards(current: 3.25, target: 7.5, rate: 0.0, deltaTime: 0.016)
   log("off snaps exactly: {off is 7.5}")
 
   # 4. Repeated easing converges to the target EXACTLY, so movement stops.
   var conv: Float = 0.0
   var n: Int = 0
   loop n < 500 {
-    conv = smoothTowards(current: conv, target: 1.0, rate: 20.0, dt: 0.016)
+    conv = smoothTowards(current: conv, target: 1.0, rate: 20.0, deltaTime: 0.016)
     n = n + 1
   }
   log("converges exactly: {conv is 1.0}")

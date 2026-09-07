@@ -52,12 +52,12 @@ func spawnOnLand(controller: mod ThirdPersonController, groundZ: view Float) {
 # along the drop-off at an angle SLIDES along it instead of sticking.
 func updateWalkerMovement(controller: mod ThirdPersonController,
                           intent: view InputIntent, cameraYaw: view Float,
-                          dt: view Float) ret Bool {
+                          deltaTime: view Float) ret Bool {
   let fromX: Float = controller.position.x
   let fromY: Float = controller.position.y
   let moved: Bool = stepThirdPersonController(controller: controller,
     inputRight: intent.moveX, inputForward: intent.moveY,
-    walking: intent.walking, cameraYaw: cameraYaw, dt: dt)
+    walking: intent.walking, cameraYaw: cameraYaw, deltaTime: deltaTime)
   if moved is false { ret moved }
   let toX: Float = controller.position.x
   let toY: Float = controller.position.y

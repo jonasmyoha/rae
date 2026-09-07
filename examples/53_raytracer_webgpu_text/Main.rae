@@ -375,10 +375,10 @@ func main() {
 
         # FPS (exponential smoothing) + MTSDF text overlay, composited into fb.
         let now: Int = nowMs()
-        let dt: Int = now - lastMs
+        let deltaTime: Int = now - lastMs
         lastMs = now
-        if dt > 0 {
-            let inst: Float = 1000.0 / dt.toFloat()
+        if deltaTime > 0 {
+            let inst: Float = 1000.0 / deltaTime.toFloat()
             fps = fps * 0.9 + inst * 0.1
         }
         # Adaptive samples/frame, NO hard cap: while the camera is still the

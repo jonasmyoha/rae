@@ -160,7 +160,7 @@ func createSettingsState(scene: view Int, sceneCount: view Int, speed: view Floa
 # A DRAG WINS. While the pointer owns the slider the clock holds still, or the
 # two would fight over the same value and the handle would crawl away from
 # where it was put.
-func settingsAdvanceTime(s: mod SettingsState, dt: view Float) ret Bool {
+func settingsAdvanceTime(s: mod SettingsState, deltaTime: view Float) ret Bool {
   if s.playing is false {
     ret false
   }
@@ -170,10 +170,10 @@ func settingsAdvanceTime(s: mod SettingsState, dt: view Float) ret Bool {
   if s.timeDragging {
     ret false
   }
-  if dt <= 0.0 {
+  if deltaTime <= 0.0 {
     ret false
   }
-  var h: Float = s.hour + dt * 24.0 / settingsDaySeconds
+  var h: Float = s.hour + deltaTime * 24.0 / settingsDaySeconds
   # Midnight rolls the DATE, and the date rolls the YEAR. The point of the
   # control is that it keeps going round, and a clock that wrapped the hour while
   # leaving the calendar behind would be a clock that never reaches tomorrow.
