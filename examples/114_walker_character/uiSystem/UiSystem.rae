@@ -61,96 +61,96 @@ type UiTick {
   scrolled: Bool
 }
 
-func uiUpdate(cam: mod CameraSystem, character: mod CharacterSystem, frame: mod Frame, io: mod InputSystem, persist: mod PersistState, players: mod PlayerRoster, render: mod RenderSystem, terrain: mod TerrainSystem, world: view GameWorld, dt: copy Float, now: copy Float64) ret UiTick {
-  updateUiInput(input: io.ui, world: io.world)
-  if walkerMenuTapped() { toggleWalkerPanel(settings: io.settings, world: io.world) suppressUiPress(input: io.ui) }
-  let scrolled: Bool = updateScrollPanel(world: io.world, viewport: io.panelScroll, input: io.ui)
-  if updateDebugOverlay(d: io.dbg, screenW: windowExtentW(), screenH: windowExtentH(),
+func uiUpdate(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSystem, frame: mod Frame, inputSystem: mod InputSystem, persist: mod PersistState, players: mod PlayerRoster, renderSystem: mod RenderSystem, terrainSystem: mod TerrainSystem, world: view GameWorld, dt: copy Float, now: copy Float64) ret UiTick {
+  updateUiInput(input: inputSystem.ui, world: inputSystem.world)
+  if walkerMenuTapped() { toggleWalkerPanel(settings: inputSystem.settings, world: inputSystem.world) suppressUiPress(input: inputSystem.ui) }
+  let scrolled: Bool = updateScrollPanel(world: inputSystem.world, viewport: inputSystem.panelScroll, input: inputSystem.ui)
+  if updateDebugOverlay(d: inputSystem.dbg, screenW: windowExtentW(), screenH: windowExtentH(),
                         now: now, didRealWork: frame.dbgDidWork) {
-    suppressUiPress(input: io.ui)
+    suppressUiPress(input: inputSystem.ui)
   }
-  let clipHit: String = panelClickedId(panel: io.clipPanel, input: io.ui)
-  if clipHit.length() > 0 and cam.rig.mode is not CameraRigMode.character {
-    var nextClipIndex: Int = character.clipIndex
+  let clipHit: String = panelClickedId(panel: inputSystem.clipPanel, input: inputSystem.ui)
+  if clipHit.length() > 0 and cameraSystem.rig.mode is not CameraRigMode.character {
+    var nextClipIndex: Int = characterSystem.clipIndex
     if clipHit is "idle" { nextClipIndex = 0 }
     if clipHit is "walk" { nextClipIndex = 1 }
     if clipHit is "walkFast" { nextClipIndex = 2 }
     if clipHit is "run" { nextClipIndex = 3 }
-    if nextClipIndex is not character.clipIndex {
-      character.transitionFrom = captureSkeletonPose(sk: character.skeleton)
-      character.transitionElapsed = 0.0
-      character.clipIndex = nextClipIndex
-      character.animTime = 0.0
+    if nextClipIndex is not characterSystem.clipIndex {
+      characterSystem.transitionFrom = captureSkeletonPose(sk: characterSystem.skeleton)
+      characterSystem.transitionElapsed = 0.0
+      characterSystem.clipIndex = nextClipIndex
+      characterSystem.animTime = 0.0
       persist.stateDirty = true
     }
-    setPanelSelection(panel: io.clipPanel, world: io.world, group: 1, id: clipHit)
+    setPanelSelection(panel: inputSystem.clipPanel, world: inputSystem.world, group: 1, id: clipHit)
   }
-  let transportHit: String = panelClickedId(panel: io.transport, input: io.ui)
+  let transportHit: String = panelClickedId(panel: inputSystem.transport, input: inputSystem.ui)
   if transportHit is "play" {
-    character.playing = not character.playing
+    characterSystem.playing = not characterSystem.playing
     var playLabel: String = "Pause"
-    if not character.playing { playLabel = "Play" }
-    setPanelButtonLabel(panel: io.transport, world: io.world, id: "play", label: playLabel)
-    setPanelButtonOn(panel: io.transport, world: io.world, id: "play", on: character.playing)
+    if not characterSystem.playing { playLabel = "Play" }
+    setPanelButtonLabel(panel: inputSystem.transport, world: inputSystem.world, id: "play", label: playLabel)
+    setPanelButtonOn(panel: inputSystem.transport, world: inputSystem.world, id: "play", on: characterSystem.playing)
   }
   if transportHit is "toon" {
-    character.toon = not character.toon
-    setPanelButtonOn(panel: io.transport, world: io.world, id: "toon", on: character.toon)
+    characterSystem.toon = not characterSystem.toon
+    setPanelButtonOn(panel: inputSystem.transport, world: inputSystem.world, id: "toon", on: characterSystem.toon)
   }
-  if transportHit is "slower" { character.speed = nextSpeed(current: character.speed, up: false) }
-  if transportHit is "faster" { character.speed = nextSpeed(current: character.speed, up: true) }
+  if transportHit is "slower" { characterSystem.speed = nextSpeed(current: characterSystem.speed, up: false) }
+  if transportHit is "faster" { characterSystem.speed = nextSpeed(current: characterSystem.speed, up: true) }
   if transportHit.length() > 0 {
-    let pct: Int = speedPercent(v: character.speed)
-    setNodeText(world: io.world, nodeId: "SpeedLabel", value: "Speed {pct}%")
+    let pct: Int = speedPercent(v: characterSystem.speed)
+    setNodeText(world: inputSystem.world, nodeId: "SpeedLabel", value: "Speed {pct}%")
   }
   # Character-switch buttons (#546): same effect as Page Up/Down and keys 1/2.
-  let charHit: String = panelClickedId(panel: io.charPanel, input: io.ui)
+  let charHit: String = panelClickedId(panel: inputSystem.charPanel, input: inputSystem.ui)
   if charHit is "prev" {
     rosterSwitchPrev(roster: players)
-    onCharacterSwitched(cam: cam, io: io, persist: persist, players: players, world: world, character: character)
+    onCharacterSwitched(cameraSystem: cameraSystem, inputSystem: inputSystem, persist: persist, players: players, world: world, characterSystem: characterSystem)
   }
   if charHit is "next" {
     rosterSwitchNext(roster: players)
-    onCharacterSwitched(cam: cam, io: io, persist: persist, players: players, world: world, character: character)
+    onCharacterSwitched(cameraSystem: cameraSystem, inputSystem: inputSystem, persist: persist, players: players, world: world, characterSystem: characterSystem)
   }
   var settingsChanged: Bool = false
-  loop var ai: Int = 0, ai < uiActionCount(input: io.ui), ++ai {
-    if settingsHandleAction(s: io.settings, actionId: uiActionAt(input: io.ui, index: ai)) {
+  loop var ai: Int = 0, ai < uiActionCount(input: inputSystem.ui), ++ai {
+    if settingsHandleAction(s: inputSystem.settings, actionId: uiActionAt(input: inputSystem.ui, index: ai)) {
       settingsChanged = true
     }
   }
-  if settingsUpdatePointer(s: io.settings, world: io.world, input: io.ui) { settingsChanged = true }
-  if settingsUpdateLatitudePointer(s: io.settings, world: io.world, input: io.ui) { settingsChanged = true }
-  if settingsUpdateDatePointer(s: io.settings, world: io.world, input: io.ui) { settingsChanged = true }
-  if settingsAdvanceTime(s: io.settings, dt: dt) { settingsChanged = true }
+  if settingsUpdatePointer(s: inputSystem.settings, world: inputSystem.world, input: inputSystem.ui) { settingsChanged = true }
+  if settingsUpdateLatitudePointer(s: inputSystem.settings, world: inputSystem.world, input: inputSystem.ui) { settingsChanged = true }
+  if settingsUpdateDatePointer(s: inputSystem.settings, world: inputSystem.world, input: inputSystem.ui) { settingsChanged = true }
+  if settingsAdvanceTime(s: inputSystem.settings, dt: dt) { settingsChanged = true }
   if settingsChanged {
-    render.renderer.sky = settingsBuildSky(s: io.settings, data: cam.hosek, turbidity: 3.0, groundAlbedo: 0.30)
-    cam.light.sunDir = settingsSunDir(s: io.settings)
-    cam.light.sunColor = settingsSunColor(s: io.settings)
-    character.speed = io.settings.speed
-    character.playing = io.settings.playing
-    if character.toon is not io.settings.toon {
-      character.toon = io.settings.toon
-      setPanelButtonOn(panel: io.transport, world: io.world, id: "toon", on: character.toon)
+    renderSystem.renderer.sky = settingsBuildSky(s: inputSystem.settings, data: cameraSystem.hosek, turbidity: 3.0, groundAlbedo: 0.30)
+    cameraSystem.light.sunDir = settingsSunDir(s: inputSystem.settings)
+    cameraSystem.light.sunColor = settingsSunColor(s: inputSystem.settings)
+    characterSystem.speed = inputSystem.settings.speed
+    characterSystem.playing = inputSystem.settings.playing
+    if characterSystem.toon is not inputSystem.settings.toon {
+      characterSystem.toon = inputSystem.settings.toon
+      setPanelButtonOn(panel: inputSystem.transport, world: inputSystem.world, id: "toon", on: characterSystem.toon)
     }
-    let pctS: Int = speedPercent(v: character.speed)
-    setNodeText(world: io.world, nodeId: "SpeedLabel", value: "Speed {pctS}%")
-    settingsApplyToWorld(s: io.settings, world: io.world)
-    applyWalkerPanel(world: io.world, open: io.settings.open)
+    let pctS: Int = speedPercent(v: characterSystem.speed)
+    setNodeText(world: inputSystem.world, nodeId: "SpeedLabel", value: "Speed {pctS}%")
+    settingsApplyToWorld(s: inputSystem.settings, world: inputSystem.world)
+    applyWalkerPanel(world: inputSystem.world, open: inputSystem.settings.open)
     persist.stateDirty = true
   }
   if clipHit.length() > 0 or transportHit.length() > 0 {
-    io.settings.speed = character.speed
-    io.settings.toon = character.toon
-    settingsApplyToWorld(s: io.settings, world: io.world)
-    applyWalkerPanel(world: io.world, open: io.settings.open)
+    inputSystem.settings.speed = characterSystem.speed
+    inputSystem.settings.toon = characterSystem.toon
+    settingsApplyToWorld(s: inputSystem.settings, world: inputSystem.world)
+    applyWalkerPanel(world: inputSystem.world, open: inputSystem.settings.open)
     persist.stateDirty = true
   }
-  if terrain.toon is not character.toon {
-    setInfiniteTerrainToon(terrain: terrain, toon: character.toon)
+  if terrainSystem.toon is not characterSystem.toon {
+    setInfiniteTerrainToon(terrainSystem: terrainSystem, toon: characterSystem.toon)
   }
-  if uiActionCount(input: io.ui) > 0 or settingsChanged {
-    runUiSystems(world: io.world, res: io.gpuUi)
+  if uiActionCount(input: inputSystem.ui) > 0 or settingsChanged {
+    runUiSystems(world: inputSystem.world, res: inputSystem.gpuUi)
   }
   ret UiTick { settingsChanged: settingsChanged, scrolled: scrolled }
 }
