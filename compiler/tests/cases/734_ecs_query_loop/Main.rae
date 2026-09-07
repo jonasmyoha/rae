@@ -3,67 +3,67 @@ open ecs/ComponentTable
 open ecs/Query
 
 # #807: the ECS query loop — Rae's native way to walk a component join.
-#   loop let entity: EntityId, p: mod Pos, v: view Vel in query2(tableA: pos, tableB: vel) { … }
+#   loop let entity: EntityId, p: mod Position, v: view Vel in query2(tableA: pos, tableB: vel) { … }
 # It is pure sugar over the match loop + the storage-aliasing accessors: a `mod`
 # binding writes through (and bumps the change stamp like queryModAt), a `view`
 # binding reads without dirtying the table. The leading EntityId binding is
 # optional; component bindings map to the tables in order.
 
-type Pos { x: Int }
+type Position { x: Int }
 type Vel { v: Int }
 type Tag { t: Int }
 
 func main() {
-  var pos: ComponentTable(Pos) = createComponentTable(Pos)
+  var pos: ComponentTable(Position) = createComponentTable(Position)
   var vel: ComponentTable(Vel) = createComponentTable(Vel)
   var tag: ComponentTable(Tag) = createComponentTable(Tag)
   let e1: EntityId = { index: 1, generation: 0 }
   let e2: EntityId = { index: 2, generation: 0 }
   let e3: EntityId = { index: 3, generation: 0 }
-  componentSet(this: pos, entity: e1, data: Pos { x: 10 })
-  componentSet(this: pos, entity: e2, data: Pos { x: 20 })
-  componentSet(this: pos, entity: e3, data: Pos { x: 30 })
+  componentSet(this: pos, entity: e1, data: Position { x: 10 })
+  componentSet(this: pos, entity: e2, data: Position { x: 20 })
+  componentSet(this: pos, entity: e3, data: Position { x: 30 })
   componentSet(this: vel, entity: e2, data: Vel { v: 2 })
   componentSet(this: vel, entity: e3, data: Vel { v: 3 })
   componentSet(this: tag, entity: e3, data: Tag { t: 9 })
 
   # query2: entity + mod + view. Integrates v into x for every entity in both.
-  loop let entity: EntityId, p: mod Pos, vv: view Vel in query2(tableA: pos, tableB: vel) {
+  loop let entity: EntityId, p: mod Position, vv: view Vel in query2(tableA: pos, tableB: vel) {
     p.x = p.x + vv.v
     log("q2 e{entity.index} x={p.x} v={vv.v}")
   }
-  let r2: Pos = componentGet(this: pos, entity: e2)
-  let r3: Pos = componentGet(this: pos, entity: e3)
+  let r2: Position = componentGet(this: pos, entity: e2)
+  let r3: Position = componentGet(this: pos, entity: e3)
   log("readback e2={r2.x} e3={r3.x}")
 
   # view-only loop, no entity binding: reads must not bump the generation.
   let gen: Int = componentTableGeneration(this: pos)
   var dot: Int = 0
-  loop let p: view Pos, vv: view Vel in query2(tableA: pos, tableB: vel) {
+  loop let p: view Position, vv: view Vel in query2(tableA: pos, tableB: vel) {
     dot = dot + p.x * vv.v
   }
   log("view dot: {dot}")
   log("pos gen delta: {componentTableGeneration(this: pos) - gen}")
 
   # query3: three bindings, two of them mod.
-  loop let entity: EntityId, p: mod Pos, vv: view Vel, tg: mod Tag in query3(tableA: pos, tableB: vel, tableC: tag) {
+  loop let entity: EntityId, p: mod Position, vv: view Vel, tg: mod Tag in query3(tableA: pos, tableB: vel, tableC: tag) {
     p.x = p.x + 100
     tg.t = tg.t + 1
     log("q3 e{entity.index}")
   }
-  let r3b: Pos = componentGet(this: pos, entity: e3)
+  let r3b: Position = componentGet(this: pos, entity: e3)
   let t3: Tag = componentGet(this: tag, entity: e3)
   log("q3 readback x={r3b.x} t={t3.t}")
 
   # forEach: the single-table base case, in dense order.
-  loop let entity: EntityId, p: view Pos in forEach(table: pos) {
+  loop let entity: EntityId, p: view Position in forEach(table: pos) {
     log("all e{entity.index} x={p.x}")
   }
 
   # nested query loops each alias their own hit.
   var pairs: Int = 0
   loop let outer: EntityId, ov: view Vel in forEach(table: vel) {
-    loop let inner: EntityId, ip: view Pos, iv: view Vel in query2(tableA: pos, tableB: vel) {
+    loop let inner: EntityId, ip: view Position, iv: view Vel in query2(tableA: pos, tableB: vel) {
       pairs = pairs + 1
     }
   }

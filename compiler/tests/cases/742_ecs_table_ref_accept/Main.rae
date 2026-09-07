@@ -1,9 +1,9 @@
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Query
-type Pos { x: Int }
+type Position { x: Int }
 type Vel { v: Int }
-type World { positions: ComponentTable(Pos), velocities: ComponentTable(Vel) }
+type World { positions: ComponentTable(Position), velocities: ComponentTable(Vel) }
 
 # #814 accept cases: the rule is about the SAME table only, and it is LEXICAL —
 # a reference is treated as live for the rest of its enclosing block. So:
@@ -13,28 +13,28 @@ type World { positions: ComponentTable(Pos), velocities: ComponentTable(Vel) }
 #   - mutate a DIFFERENT table while a ref is live;
 #   - pass the aliased table on as an argument (parity with the List rule);
 #   - a query loop body mutating a table it did NOT join.
-func touch(t: mod ComponentTable(Pos)) { }
+func touch(t: mod ComponentTable(Position)) { }
 func main() {
-  var world: World = { positions: createComponentTable(Pos), velocities: createComponentTable(Vel) }
-  var extra: ComponentTable(Pos) = createComponentTable(Pos)
+  var world: World = { positions: createComponentTable(Position), velocities: createComponentTable(Vel) }
+  var extra: ComponentTable(Position) = createComponentTable(Position)
   let e: EntityId = { index: 1, generation: 0 }
   let f: EntityId = { index: 2, generation: 0 }
-  componentSet(this: world.positions, entity: e, data: Pos { x: 10 })
+  componentSet(this: world.positions, entity: e, data: Position { x: 10 })
   componentSet(this: world.velocities, entity: e, data: Vel { v: 1 })
 
-  componentSet(this: world.positions, entity: f, data: Pos { x: 20 })   # mutate first ...
-  let r: view Pos => componentView(this: world.positions, entity: f)    # ... then borrow
+  componentSet(this: world.positions, entity: f, data: Position { x: 20 })   # mutate first ...
+  let r: view Position => componentView(this: world.positions, entity: f)    # ... then borrow
   log("late ref: {r.x}")
 
-  let p: mod Pos => componentMod(this: world.positions, entity: e)
+  let p: mod Position => componentMod(this: world.positions, entity: e)
   componentSet(this: world.velocities, entity: f, data: Vel { v: 2 })   # different table
   componentRemove(this: world.velocities, entity: f)                    # different table
   touch(t: world.positions)                                             # passing it on is fine
   p.x = p.x + 1
   log("after: e.x={componentGet(this: world.positions, entity: e).x} vel count={componentCount(this: world.velocities)}")
 
-  loop let entity: EntityId, q: mod Pos in forEach(table: world.positions) {
-    componentSet(this: extra, entity: entity, data: Pos { x: q.x * 2 })  # a table NOT joined
+  loop let entity: EntityId, q: mod Position in forEach(table: world.positions) {
+    componentSet(this: extra, entity: entity, data: Position { x: q.x * 2 })  # a table NOT joined
   }
   log("extra: {componentGet(this: extra, entity: e).x}")
 }

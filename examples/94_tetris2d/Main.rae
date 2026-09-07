@@ -23,14 +23,14 @@ enum TetrominoKind {
   z
 }
 
-type Pos {
+type Position {
   x: Int
   y: Int
 }
 
 type Piece {
   kind: TetrominoKind
-  pos: Pos
+  pos: Position
   rotation: Int
 }
 
@@ -254,7 +254,7 @@ func getShapeCell(kind: TetrominoKind, rot: view Int, px: view Int, py: view Int
 
 func canMove(g: view Game, dx: view Int, dy: view Int, dr: view Int) ret Int {
   let cp: view Piece => g.currentPiece
-  let pos: view Pos => cp.pos
+  let pos: view Position => cp.pos
   let newX: Int = pos.x + dx
   let newY: Int = pos.y + dy
   var newRot: Int = (cp.rotation + dr) % 4
@@ -279,7 +279,7 @@ func canMove(g: view Game, dx: view Int, dy: view Int, dr: view Int) ret Int {
 
 func lockPiece(g: mod Game) {
   let cp: mod Piece => g.currentPiece
-  let pos: view Pos => cp.pos
+  let pos: view Position => cp.pos
   let grid: mod List(Int) => g.grid
   let kindId: Int = getKindId(kind: cp.kind)
   var py: Int = 0
@@ -384,7 +384,7 @@ func spawnPiece(g: mod Game) {
   cp.kind = g.nextPieceKind
   g.nextPieceKind = randomKind()
 
-  let pos: mod Pos => cp.pos
+  let pos: mod Position => cp.pos
   pos.x = g.width / 2 - 2
   pos.y = -1
   cp.rotation = 0
@@ -535,7 +535,7 @@ func drawGame(g: view Game) {
   }
   # Draw current piece
   let cp: view Piece => g.currentPiece
-  let pos: view Pos => cp.pos
+  let pos: view Position => cp.pos
   let kindId: Int = getKindId(kind: cp.kind)
   var py: Int = 0
   loop py < 4 {
@@ -584,7 +584,7 @@ func handleInput(g: mod Game) {
     ret
   }
   let cp: mod Piece => g.currentPiece
-  let pos: mod Pos => cp.pos
+  let pos: mod Position => cp.pos
   var moved: Int = 0
 
   # DAS (Delayed Auto Shift)
@@ -767,7 +767,7 @@ func main() ret Int {
     Gpu2d.beginFrame(r: 0.03, g: 0.05, b: 0.09, a: 1.0)
     drawGame(g: g)
     renderSystemGpu2d(world: world, res: uiResources)
-    drawDebugOverlay(d: dbg, font: uiResources.textFont, didRealWork: true)
+    drawDebugOverlay(debugOverlay: dbg, font: uiResources.textFont, didRealWork: true)
     Gpu2d.endFrame()
   }
   Gpu2d.closeWindow()

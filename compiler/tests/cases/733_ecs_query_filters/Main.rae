@@ -8,18 +8,18 @@ open ecs/Query
 #   changed   -> changedSince(table, gen): only entities written AFTER gen, read
 #                off the per-entity stamps the table already keeps.
 
-type Pos { x: Int }
+type Position { x: Int }
 type Tag { t: Int }
 
 func main() {
-  var pos: ComponentTable(Pos) = createComponentTable(Pos)
+  var pos: ComponentTable(Position) = createComponentTable(Position)
   var tag: ComponentTable(Tag) = createComponentTable(Tag)
   let e1: EntityId = { index: 1, generation: 0 }
   let e2: EntityId = { index: 2, generation: 0 }
   let e3: EntityId = { index: 3, generation: 0 }
-  componentSet(this: pos, entity: e1, data: Pos { x: 10 })
-  componentSet(this: pos, entity: e2, data: Pos { x: 20 })
-  componentSet(this: pos, entity: e3, data: Pos { x: 30 })
+  componentSet(this: pos, entity: e1, data: Position { x: 10 })
+  componentSet(this: pos, entity: e2, data: Position { x: 20 })
+  componentSet(this: pos, entity: e3, data: Position { x: 30 })
   componentSet(this: tag, entity: e2, data: Tag { t: 1 })
 
   # with: only the tagged entity.
@@ -33,7 +33,7 @@ func main() {
   let withoutHits: List(QueryMatch) = without(dataTable: pos, tagTable: tag)
   log("without count: {withoutHits.length}")
   loop let row: view QueryMatch in withoutHits {
-    let p: view Pos => forEachView(table: pos, hit: row)
+    let p: view Position => forEachView(table: pos, hit: row)
     log("without e{row.entity.index} x={p.x}")
   }
 
@@ -43,12 +43,12 @@ func main() {
 
   # Mutate ONLY e2 through a mod ref; only e2 must be reported.
   let idx2: Int = componentIndexOf(this: pos, entity: e2)
-  let p2: mod Pos => queryModAt(table: pos, denseIndex: idx2)
+  let p2: mod Position => queryModAt(table: pos, denseIndex: idx2)
   p2.x = p2.x + 5
   let ch1: List(QueryMatch) = changedSince(table: pos, sinceGeneration: gen0)
   log("changed since gen0: {ch1.length}")
   loop let row: view QueryMatch in ch1 {
-    let p: view Pos => forEachView(table: pos, hit: row)
+    let p: view Position => forEachView(table: pos, hit: row)
     log("changed e{row.entity.index} x={p.x}")
   }
 
@@ -58,7 +58,7 @@ func main() {
 
   # Mutate e3; only e3 is newer than gen1.
   let idx3: Int = componentIndexOf(this: pos, entity: e3)
-  let p3: mod Pos => queryModAt(table: pos, denseIndex: idx3)
+  let p3: mod Position => queryModAt(table: pos, denseIndex: idx3)
   p3.x = p3.x + 7
   let ch2: List(QueryMatch) = changedSince(table: pos, sinceGeneration: gen1)
   log("changed since gen1: {ch2.length}")

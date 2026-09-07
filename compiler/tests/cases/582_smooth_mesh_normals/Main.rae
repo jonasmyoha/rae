@@ -34,16 +34,16 @@ func deg(a: view Float) ret Int {
 }
 
 # Angle between a vertex's resulting normal and a reference direction.
-func vertComp(m: view MeshData, index: copy Int) ret Float {
-  if let value: Float = m.verts.copyAt(index: index) { ret value }
+func vertComp(meshData: view MeshData, index: copy Int) ret Float {
+  if let value: Float = meshData.verts.copyAt(index: index) { ret value }
   ret 0.0
 }
 
-func angleTo(m: view MeshData, i: view Int,
+func angleTo(meshData: view MeshData, i: view Int,
              rx: view Float, ry: view Float, rz: view Float) ret Int {
-  let nx: Float = vertComp(m: m, index: i * 8 + 3)
-  let ny: Float = vertComp(m: m, index: i * 8 + 4)
-  let nz: Float = vertComp(m: m, index: i * 8 + 5)
+  let nx: Float = vertComp(meshData: meshData, index: i * 8 + 3)
+  let ny: Float = vertComp(meshData: meshData, index: i * 8 + 4)
+  let nz: Float = vertComp(meshData: meshData, index: i * 8 + 5)
   var d: Float = nx * rx + ny * ry + nz * rz
   if d > 1.0 { d = 1.0 }
   if d < 0.0 - 1.0 { d = 0.0 - 1.0 }
@@ -64,24 +64,24 @@ func main() {
   indices.add(value: 2)
   let src: MeshData = { verts: own verts, indices: own indices, vertCount: 4 }
 
-  let out: MeshData = smoothMeshNormals(m: src, angleDeg: 60.0)
+  let out: MeshData = smoothMeshNormals(meshData: src, angleDeg: 60.0)
 
   # 1 + 2: v0 merges only the 10-degree neighbour, landing halfway
   # between them, and is NOT dragged toward +Y by the crease.
-  log("v0 angle from +X: {angleTo(m: out, i: 0, rx: 1.0, ry: 0.0, rz: 0.0)}")
-  log("v0 angle from +Y: {angleTo(m: out, i: 2 - 2, rx: 0.0, ry: 1.0, rz: 0.0)}")
+  log("v0 angle from +X: {angleTo(meshData: out, i: 0, rx: 1.0, ry: 0.0, rz: 0.0)}")
+  log("v0 angle from +Y: {angleTo(meshData: out, i: 2 - 2, rx: 0.0, ry: 1.0, rz: 0.0)}")
   # The crease vertex keeps its own direction exactly.
-  log("v2 still +Y: {angleTo(m: out, i: 2, rx: 0.0, ry: 1.0, rz: 0.0)}")
+  log("v2 still +Y: {angleTo(meshData: out, i: 2, rx: 0.0, ry: 1.0, rz: 0.0)}")
   # 3: the distant vertex is untouched despite an identical normal.
-  log("v3 still +X: {angleTo(m: out, i: 3, rx: 1.0, ry: 0.0, rz: 0.0)}")
+  log("v3 still +X: {angleTo(meshData: out, i: 3, rx: 1.0, ry: 0.0, rz: 0.0)}")
 
   # A threshold below the join angle must merge NOTHING — the failure
   # mode where smoothing silently does nothing has to be distinguishable.
-  let strict: MeshData = smoothMeshNormals(m: src, angleDeg: 5.0)
-  log("strict v0 unchanged: {angleTo(m: strict, i: 0, rx: 1.0, ry: 0.0, rz: 0.0)}")
+  let strict: MeshData = smoothMeshNormals(meshData: src, angleDeg: 5.0)
+  log("strict v0 unchanged: {angleTo(meshData: strict, i: 0, rx: 1.0, ry: 0.0, rz: 0.0)}")
 
   # 4: counts and other attributes survive.
   log("vertCount {out.vertCount}, indices {out.indices.length}")
-  let uv: Float = vertComp(m: out, index: 2 * 8 + 6)
+  let uv: Float = vertComp(meshData: out, index: 2 * 8 + 6)
   log("uv preserved: {uv}")
 }

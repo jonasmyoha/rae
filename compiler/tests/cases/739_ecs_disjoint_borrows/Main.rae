@@ -12,38 +12,38 @@ open ecs/Query
 # The one hazard (structural mutation of the table you hold a ref into) is NOT
 # pinned here on purpose — it is #814's reject test.
 
-type Pos { x: Int }
+type Position { x: Int }
 type Vel { v: Int }
-type World { positions: ComponentTable(Pos), velocities: ComponentTable(Vel) }
+type World { positions: ComponentTable(Position), velocities: ComponentTable(Vel) }
 
-func bump(p: mod Pos) { p.x = p.x + 1 }
-func ground(p: mod Pos, floor: view Int) { if p.x < floor { p.x = floor } }
+func bump(position: mod Position) { position.x = position.x + 1 }
+func ground(position: mod Position, floor: view Int) { if position.x < floor { position.x = floor } }
 
 func main() {
-  var world: World = { positions: createComponentTable(Pos), velocities: createComponentTable(Vel) }
+  var world: World = { positions: createComponentTable(Position), velocities: createComponentTable(Vel) }
   let e1: EntityId = { index: 1, generation: 0 }
   let e2: EntityId = { index: 2, generation: 0 }
-  componentSet(this: world.positions, entity: e1, data: Pos { x: 10 })
-  componentSet(this: world.positions, entity: e2, data: Pos { x: 20 })
+  componentSet(this: world.positions, entity: e1, data: Position { x: 10 })
+  componentSet(this: world.positions, entity: e2, data: Position { x: 20 })
   componentSet(this: world.velocities, entity: e1, data: Vel { v: 1 })
   componentSet(this: world.velocities, entity: e2, data: Vel { v: 2 })
 
   # 1. disjoint tables, both mod, one system
-  loop let entity: EntityId, p: mod Pos, vv: mod Vel in query2(tableA: world.positions, tableB: world.velocities) {
-    p.x = p.x + vv.v
+  loop let entity: EntityId, position: mod Position, vv: mod Vel in query2(tableA: world.positions, tableB: world.velocities) {
+    position.x = position.x + vv.v
     vv.v = vv.v * 10
   }
   log("after system: e1={componentGet(this: world.positions, entity: e1).x}/{componentGet(this: world.velocities, entity: e1).v} e2={componentGet(this: world.positions, entity: e2).x}/{componentGet(this: world.velocities, entity: e2).v}")
 
   # 2. one element ref threaded through calls (the 114 walker shape)
-  let c: mod Pos => componentMod(this: world.positions, entity: e1)
-  bump(p: c)
-  bump(p: c)
-  ground(p: c, floor: 100)
+  let c: mod Position => componentMod(this: world.positions, entity: e1)
+  bump(position: c)
+  bump(position: c)
+  ground(position: c, floor: 100)
   log("threaded ref: e1.x={componentGet(this: world.positions, entity: e1).x}")
 
   # 3. a ref into one table plus a ref into another, at once
-  let p2: mod Pos => componentMod(this: world.positions, entity: e2)
+  let p2: mod Position => componentMod(this: world.positions, entity: e2)
   let v2: view Vel => componentView(this: world.velocities, entity: e2)
   p2.x = p2.x + v2.v
   log("two-table refs: e2.x={componentGet(this: world.positions, entity: e2).x}")
