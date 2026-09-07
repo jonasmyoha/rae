@@ -75,7 +75,7 @@ func main() ret Int {
     res: uiResources)
 
   var renderer: DeferredRenderer = createDeferredRendererWithUi()
-  let graphStatus: Int = compileDeferred(r: renderer)
+  let graphStatus: Int = compileDeferred(renderer: renderer)
   if graphStatus is not 0 {
     log("deferred graph invalid: {statusName(status: graphStatus)}")
     ret 1
@@ -104,8 +104,8 @@ func main() ret Int {
     let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
     if Gpu2d.renderGate() {
       var passIndex: Int = 0
-      loop passIndex < deferredOrderLength(r: renderer) {
-        let tag: Int = deferredTagAt(r: renderer, i: passIndex)
+      loop passIndex < deferredOrderLength(renderer: renderer) {
+        let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
         if tag is RenderTag.uiOverlay {
           Gpu2d.beginFrameLoad()
           renderSystemGpu2d(world: world, res: uiResources)
