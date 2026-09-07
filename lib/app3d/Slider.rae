@@ -77,19 +77,19 @@ func setFraction(s: mod Slider, f: view Float) pub {
 # Pointer x -> value, using the track's laid-out rect. Returns the fraction so
 # the caller can decide what "changed" means for its own value.
 func fractionForX(world: view UiWorld, trackId: view String, x: view Float) ret Float {
-  let e: EntityId = nodeEntityFor(world: world, nodeId: trackId)
-  if isNone(this: e) {
+  let entity: EntityId = nodeEntityFor(world: world, nodeId: trackId)
+  if isNone(this: entity) {
     ret 0.0
   }
-  if componentHas(this: world.computedRects, entity: e) is false {
+  if componentHas(this: world.computedRects, entity: entity) is false {
     ret 0.0
   }
-  let r: ComputedRect = componentGet(this: world.computedRects, entity: e)
+  let r: ComputedRect = componentGet(this: world.computedRects, entity: entity)
   if r.size.x <= 0.0 {
     ret 0.0
   }
   # Screen x, for the same reason as pointInNode.
-  let sx: Float = nodeScreenX(world: world, e: e)
+  let sx: Float = nodeScreenX(world: world, entity: entity)
   ret sliderClamp(v: (x - sx) / r.size.x, lo: 0.0, hi: 1.0)
 }
 
@@ -110,10 +110,10 @@ func updateSlider(s: mod Slider, world: view UiWorld, input: view UiInput) pub r
   let before: Float = s.value
 
   if input.pointer.pressed {
-    let e: EntityId = nodeEntityFor(world: world, nodeId: s.trackId)
-    if isNone(this: e) is false {
-      if componentHas(this: world.computedRects, entity: e) {
-        let r: ComputedRect = componentGet(this: world.computedRects, entity: e)
+    let entity: EntityId = nodeEntityFor(world: world, nodeId: s.trackId)
+    if isNone(this: entity) is false {
+      if componentHas(this: world.computedRects, entity: entity) {
+        let r: ComputedRect = componentGet(this: world.computedRects, entity: entity)
         # A press anywhere on the track jumps the handle there and begins a
         # drag, rather than requiring the handle itself to be hit — the handle
         # is a few pixels wide and the track is the affordance.
@@ -183,28 +183,28 @@ func applySliderFill(s: view Slider, world: mod UiWorld) pub {
 # guaranteed, locked by compiler test 707_nested_mod_writeback, #762.)
 
 func nodeComputedRect(world: view UiWorld, nodeId: view String, out: mod ComputedRect) ret Bool {
-  let e: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
-  if isNone(this: e) {
+  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entity) {
     ret false
   }
-  if componentHas(this: world.computedRects, entity: e) is false {
+  if componentHas(this: world.computedRects, entity: entity) is false {
     ret false
   }
-  out = componentGet(this: world.computedRects, entity: e)
+  out = componentGet(this: world.computedRects, entity: entity)
   ret true
 }
 
 func debugNodeRect(world: view UiWorld, nodeId: view String) pub {
-  let e: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
-  if isNone(this: e) {
+  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entity) {
     log("[slider] {nodeId}: NO ENTITY")
     ret
   }
-  if componentHas(this: world.computedRects, entity: e) is false {
+  if componentHas(this: world.computedRects, entity: entity) is false {
     log("[slider] {nodeId}: no ComputedRect")
     ret
   }
-  let r: ComputedRect = componentGet(this: world.computedRects, entity: e)
+  let r: ComputedRect = componentGet(this: world.computedRects, entity: entity)
   log("[slider] {nodeId}: x={r.position.x} y={r.position.y} w={r.size.x} h={r.size.y}")
 }
 
@@ -215,34 +215,34 @@ func debugNodeRect(world: view UiWorld, nodeId: view String) pub {
 # compares screen coordinates to local ones, so a press is never inside and the
 # control is silently inert. uiHitTest gets this right (wt.position.x + cr.size.x) and is the
 # reference; these helpers now match it.
-func nodeScreenX(world: view UiWorld, e: view EntityId) ret Float {
-  if componentHas(this: world.worldTransforms, entity: e) is false {
+func nodeScreenX(world: view UiWorld, entity: view EntityId) ret Float {
+  if componentHas(this: world.worldTransforms, entity: entity) is false {
     ret 0.0
   }
-  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: e)
+  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
   ret wt.position.x
 }
 
-func nodeScreenY(world: view UiWorld, e: view EntityId) ret Float {
-  if componentHas(this: world.worldTransforms, entity: e) is false {
+func nodeScreenY(world: view UiWorld, entity: view EntityId) ret Float {
+  if componentHas(this: world.worldTransforms, entity: entity) is false {
     ret 0.0
   }
-  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: e)
+  let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
   ret wt.position.y
 }
 
 func pointInNode(world: view UiWorld, nodeId: view String,
                  x: view Float, y: view Float) pub ret Bool {
-  let e: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
-  if isNone(this: e) {
+  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entity) {
     ret false
   }
-  if componentHas(this: world.computedRects, entity: e) is false {
+  if componentHas(this: world.computedRects, entity: entity) is false {
     ret false
   }
-  let r: ComputedRect = componentGet(this: world.computedRects, entity: e)
-  let sx: Float = nodeScreenX(world: world, e: e)
-  let sy: Float = nodeScreenY(world: world, e: e)
+  let r: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+  let sx: Float = nodeScreenX(world: world, entity: entity)
+  let sy: Float = nodeScreenY(world: world, entity: entity)
   if x < sx or x > sx + r.size.x {
     ret false
   }
@@ -254,19 +254,19 @@ func pointInNode(world: view UiWorld, nodeId: view String,
 
 # Where x falls across the node, 0..1.
 func fractionAcrossNode(world: view UiWorld, nodeId: view String, x: view Float) pub ret Float {
-  let e: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
-  if isNone(this: e) {
+  let entity: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if isNone(this: entity) {
     ret 0.0
   }
-  if componentHas(this: world.computedRects, entity: e) is false {
+  if componentHas(this: world.computedRects, entity: entity) is false {
     ret 0.0
   }
-  let r: ComputedRect = componentGet(this: world.computedRects, entity: e)
+  let r: ComputedRect = componentGet(this: world.computedRects, entity: entity)
   if r.size.x <= 0.0 {
     ret 0.0
   }
   # Screen x, for the same reason as pointInNode.
-  let sx: Float = nodeScreenX(world: world, e: e)
+  let sx: Float = nodeScreenX(world: world, entity: entity)
   ret sliderClamp(v: (x - sx) / r.size.x, lo: 0.0, hi: 1.0)
 }
 
