@@ -539,7 +539,7 @@ func main() ret Int {
     let scrolled: Bool = updateScrollPanel(world: uiWorld, viewport: panelScroll, input: uiInput)
     # The debug button sits over the side panel, so a press it takes has to be
     # withdrawn from the UI world or the same click works the control beneath.
-    if updateDebugOverlay(d: dbg, screenW: windowExtentW(), screenH: windowExtentH(),
+    if updateDebugOverlay(debugOverlay: dbg, screenW: windowExtentW(), screenH: windowExtentH(),
                           now: now, didRealWork: dbgDidWork) {
       suppressUiPress(input: uiInput)
     }
@@ -812,7 +812,7 @@ func main() ret Int {
           # After the app UI, so the diagnostic is never what gets covered up.
           drawLogOverlay(ov: logView, font: gpuUi.textFont, screenW: extentW, screenH: extentH)
           # LAST, so it is above the scene, the UI world and the log.
-          drawDebugOverlay(d: dbg, font: gpuUi.textFont, didRealWork: dbgDidWork)
+          drawDebugOverlay(debugOverlay: dbg, font: gpuUi.textFont, didRealWork: dbgDidWork)
           lastLogRevision = logView.revision
         }
         if tag is RenderTag.present {

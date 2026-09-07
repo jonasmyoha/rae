@@ -110,7 +110,7 @@ func loadSkinnedPrimitiveSmoothed(g: view Glb, meshIndex: view Int, primIndex: v
   # disagree about positions, generated normals or index rebasing.
   var base: MeshData = loadPrimitive(g: g, meshIndex: meshIndex, primIndex: primIndex)
   if smoothAngleDeg > 0.0 {
-    base = smoothMeshNormals(m: base, angleDeg: smoothAngleDeg)
+    base = smoothMeshNormals(meshData: base, angleDeg: smoothAngleDeg)
   }
   if base.vertCount is 0 {
     ret SkinnedMeshData { verts: own verts, indices: own indices, vertCount: 0 }
