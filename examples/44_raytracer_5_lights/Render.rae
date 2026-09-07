@@ -20,8 +20,8 @@ func sphereValueAt(world: view List(Sphere), index: view Int) ret Sphere {
 func randomUnit() ret Vec3 {
     let a: Float = random() * tau
     let z: Float = random() * 2.0 - 1.0
-    let r: Float = Math.sqrt(x: 1.0 - z * z)
-    ret Vec3.create(x: r * Math.cos(x: a), y: r * Math.sin(x: a), z: z)
+    let radius: Float = Math.sqrt(x: 1.0 - z * z)
+    ret Vec3.create(x: radius * Math.cos(x: a), y: radius * Math.sin(x: a), z: z)
 }
 
 func vreflect(v: view Vec3, n: view Vec3) ret Vec3 {
@@ -45,10 +45,10 @@ func schlick(cosine: view Float, refIdx: view Float) ret Float {
     ret r0 + (1.0 - r0) * Math.pow(base: 1.0 - cosine, exp: 5.0)
 }
 
-func hitSphere(sphere: view Sphere, r: view Ray) ret Float {
-    let oc: Vec3 = Vec3.vsub(a: r.origin, b: sphere.center)
-    let a: Float = Vec3.vdot(a: r.dir, b: r.dir)
-    let halfB: Float = Vec3.vdot(a: oc, b: r.dir)
+func hitSphere(sphere: view Sphere, ray: view Ray) ret Float {
+    let oc: Vec3 = Vec3.vsub(a: ray.origin, b: sphere.center)
+    let a: Float = Vec3.vdot(a: ray.dir, b: ray.dir)
+    let halfB: Float = Vec3.vdot(a: oc, b: ray.dir)
     let c: Float = Vec3.vdot(a: oc, b: oc) - sphere.radius * sphere.radius
     let disc: Float = halfB * halfB - a * c
     if disc < 0.0 {
@@ -67,7 +67,7 @@ func skyColor(dir: view Vec3) ret Vec3 {
              z: (1.0 - tt) * 0.03 + tt * 0.10)
 }
 
-func rayColor(world: view List(Sphere), r: view Ray, depth: view Int) ret Vec3 {
+func rayColor(world: view List(Sphere), ray: view Ray, depth: view Int) ret Vec3 {
     if depth <= 0 {
         ret Vec3.create(x: 0.0, y: 0.0, z: 0.0)
     }
@@ -75,7 +75,7 @@ func rayColor(world: view List(Sphere), r: view Ray, depth: view Int) ret Vec3 {
     var hitIdx: Int = -1
     var i: Int = 0
     loop let sphere: view Sphere in world {
-        let t: Float = hitSphere(sphere: sphere, r: r)
+        let t: Float = hitSphere(sphere: sphere, ray: ray)
         if t > 0.001 {
             if t < best {
                 best = t
@@ -85,14 +85,14 @@ func rayColor(world: view List(Sphere), r: view Ray, depth: view Int) ret Vec3 {
         i = i + 1
     }
     if hitIdx < 0 {
-        ret skyColor(dir: r.dir)
+        ret skyColor(dir: ray.dir)
     }
     let sphere: Sphere = sphereValueAt(world: world, index: hitIdx)
     # emissive: the surface is a light, its radiance is returned and the path ends
     if sphere.material.kind is 3 {
         ret sphere.material.albedo
     }
-    let p: Vec3 = Vec3.vadd(a: r.origin, b: Vec3.vscale(a: r.dir, sphere: best))
+    let p: Vec3 = Vec3.vadd(a: ray.origin, b: Vec3.vscale(a: ray.dir, sphere: best))
     let n: Vec3 = Vec3.vscale(a: Vec3.vsub(a: p, b: sphere.center), sphere: 1.0 / sphere.radius)
     var scatter: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
     var atten: Vec3 = sphere.material.albedo
@@ -100,14 +100,14 @@ func rayColor(world: view List(Sphere), r: view Ray, depth: view Int) ret Vec3 {
         scatter = Vec3.vadd(a: n, b: randomUnit())
     } else {
         if sphere.material.kind is 1 {
-            let ud: Vec3 = Vec3.vnorm(a: r.dir)
+            let ud: Vec3 = Vec3.vnorm(a: ray.dir)
             scatter = Vec3.vadd(a: vreflect(v: ud, n: n), b: Vec3.vscale(a: randomUnit(), sphere: sphere.material.fuzz))
             if Vec3.vdot(a: scatter, b: n) <= 0.0 {
                 ret Vec3.create(x: 0.0, y: 0.0, z: 0.0)
             }
         } else {
             atten = Vec3.create(x: 1.0, y: 1.0, z: 1.0)
-            let ud: Vec3 = Vec3.vnorm(a: r.dir)
+            let ud: Vec3 = Vec3.vnorm(a: ray.dir)
             var frontN: Vec3 = n
             var etaRatio: Float = 1.0 / sphere.material.ior
             if Vec3.vdot(a: ud, b: n) > 0.0 {
@@ -127,7 +127,7 @@ func rayColor(world: view List(Sphere), r: view Ray, depth: view Int) ret Vec3 {
         }
     }
     let bounce: Ray = { origin: p, dir: scatter }
-    ret Vec3.vmul(a: atten, b: rayColor(world: world, r: bounce, depth: depth - 1))
+    ret Vec3.vmul(a: atten, b: rayColor(world: world, ray: bounce, depth: depth - 1))
 }
 
 # One sample pass over rows [y0, y1): one path-traced sample per pixel,
@@ -143,8 +143,8 @@ func renderSampleBand(world: own List(Sphere), cam: own Camera, width: view Int,
         loop x < width {
             let u: Float = (x.toFloat() + random()) / (width - 1).toFloat()
             let v: Float = ((height - 1 - y).toFloat() + random()) / (height - 1).toFloat()
-            let r: Ray = makeRay(cam: cam, u: u, v: v)
-            let col: Vec3 = rayColor(world: world, r: r, depth: maxDepth)
+            let ray: Ray = makeRay(cam: cam, u: u, v: v)
+            let col: Vec3 = rayColor(world: world, ray: ray, depth: maxDepth)
             out.add(value: col.x)
             out.add(value: col.y)
             out.add(value: col.z)
@@ -198,10 +198,10 @@ func buildDisplay(fb: mod List(Int), accum: view List(Float), pixels: view Int, 
         if let value: Float = accum.copyAt(index: base) { accR = value }
         if let value: Float = accum.copyAt(index: base + 1) { accG = value }
         if let value: Float = accum.copyAt(index: base + 2) { accB = value }
-        let r: Float = Math.sqrt(x: clampf(x: accR * inv))
+        let radius: Float = Math.sqrt(x: clampf(x: accR * inv))
         let g: Float = Math.sqrt(x: clampf(x: accG * inv))
         let b: Float = Math.sqrt(x: clampf(x: accB * inv))
-        let ir: Int = (255.99 * r).toInt()
+        let ir: Int = (255.99 * radius).toInt()
         let ig: Int = (255.99 * g).toInt()
         let ib: Int = (255.99 * b).toInt()
         fb.set(index: p, value: ir * 65536 + ig * 256 + ib)
