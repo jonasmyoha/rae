@@ -288,40 +288,40 @@ func jsonValueAt(doc: view JsonDoc, idx: view Int) ret JsonValue {
 # `isWhitespace` / `isDigit` predicates live in lib/char.rae now and
 # are auto-loaded. Use UFCS-style `c.isWhitespace()` / `c.isDigit()`.
 
-func skipWhitespace(p: mod JsonParser) {
-  loop p.pos < p.source.length() {
-    let c: Char32 = p.source.at(index: p.pos)
+func skipWhitespace(jsonParser: mod JsonParser) {
+  loop jsonParser.pos < jsonParser.source.length() {
+    let c: Char32 = jsonParser.source.at(index: jsonParser.pos)
     if c.isWhitespace() {
-      p.pos = p.pos + 1
+      jsonParser.pos = jsonParser.pos + 1
     } else {
       ret
     }
   }
 }
 
-func peek(p: view JsonParser) ret Char32 {
-  if p.pos >= p.source.length() {
+func peek(jsonParser: view JsonParser) ret Char32 {
+  if jsonParser.pos >= jsonParser.source.length() {
     ret '\0'
   }
-  ret p.source.at(index: p.pos)
+  ret jsonParser.source.at(index: jsonParser.pos)
 }
 
-func consume(p: mod JsonParser, c: view Char32) ret Bool {
-  if Json.peek(p: p) is c {
-    p.pos = p.pos + 1
+func consume(jsonParser: mod JsonParser, c: view Char32) ret Bool {
+  if Json.peek(jsonParser: jsonParser) is c {
+    jsonParser.pos = jsonParser.pos + 1
     ret true
   }
   ret false
 }
 
-func consumeKeyword(p: mod JsonParser, kw: view String) ret Bool {
+func consumeKeyword(jsonParser: mod JsonParser, kw: view String) ret Bool {
   let len: Int = kw.length()
-  if p.pos + len > p.source.length() {
+  if jsonParser.pos + len > jsonParser.source.length() {
     ret false
   }
-  let slice: String = p.source.sub(start: p.pos, len: len)
+  let slice: String = jsonParser.source.sub(start: jsonParser.pos, len: len)
   if slice is kw {
-    p.pos = p.pos + len
+    jsonParser.pos = jsonParser.pos + len
     ret true
   }
   ret false
@@ -356,32 +356,32 @@ func pushField(fields: mod List(JsonField), key: own String, valueIdx: view Int)
 # closing `"`. Backslash escapes recognised: `"`, `\`, `/`, `b`, `f`,
 # `n`, `r`, `t`. Unicode `\uXXXX` sequences are passed through as-is for
 # now (caller can normalise later if needed).
-func parseString(p: mod JsonParser) ret String {
-  if not Json.consume(p: p, c: '"') {
-    p.ok = false
+func parseString(jsonParser: mod JsonParser) ret String {
+  if not Json.consume(jsonParser: jsonParser, c: '"') {
+    jsonParser.ok = false
     ret ""
   }
-  let start: Int = p.pos
+  let start: Int = jsonParser.pos
   var result: String = ""
-  var chunkStart: Int = p.pos
-  loop p.pos < p.source.length() {
-    let c: Char32 = p.source.at(index: p.pos)
+  var chunkStart: Int = jsonParser.pos
+  loop jsonParser.pos < jsonParser.source.length() {
+    let c: Char32 = jsonParser.source.at(index: jsonParser.pos)
     if c is '"' {
-      let chunk: String = p.source.sub(start: chunkStart, len: p.pos - chunkStart)
+      let chunk: String = jsonParser.source.sub(start: chunkStart, len: jsonParser.pos - chunkStart)
       result = result.concat(other: chunk)
-      p.pos = p.pos + 1
+      jsonParser.pos = jsonParser.pos + 1
       ret result
     }
     if c is '\\' {
       # Flush chunk before the escape.
-      let chunk: String = p.source.sub(start: chunkStart, len: p.pos - chunkStart)
+      let chunk: String = jsonParser.source.sub(start: chunkStart, len: jsonParser.pos - chunkStart)
       result = result.concat(other: chunk)
-      p.pos = p.pos + 1
-      if p.pos >= p.source.length() {
-        p.ok = false
+      jsonParser.pos = jsonParser.pos + 1
+      if jsonParser.pos >= jsonParser.source.length() {
+        jsonParser.ok = false
         ret result
       }
-      let esc: Char32 = p.source.at(index: p.pos)
+      let esc: Char32 = jsonParser.source.at(index: jsonParser.pos)
       var one: String = ""
       if esc is '"' {
         one = "\""
@@ -409,7 +409,7 @@ func parseString(p: mod JsonParser) ret String {
                     } else {
                       # \uXXXX or unknown: pass through as raw 1 byte
                       # (good enough for ASCII-heavy scene files)
-                      one = p.source.sub(start: p.pos, len: 1)
+                      one = jsonParser.source.sub(start: jsonParser.pos, len: 1)
                     }
                   }
                 }
@@ -419,46 +419,46 @@ func parseString(p: mod JsonParser) ret String {
         }
       }
       result = result.concat(other: one)
-      p.pos = p.pos + 1
-      chunkStart = p.pos
+      jsonParser.pos = jsonParser.pos + 1
+      chunkStart = jsonParser.pos
     } else {
-      p.pos = p.pos + 1
+      jsonParser.pos = jsonParser.pos + 1
     }
   }
   # Reached end of source without closing quote.
-  p.ok = false
+  jsonParser.ok = false
   ret result
 }
 
 # Consume a JSON number (int or float). `\-?\d+(\.\d+)?([eE][+-]?\d+)?`.
-func parseNumber(p: mod JsonParser) ret Float {
-  let start: Int = p.pos
-  if Json.peek(p: p) is '-' {
-    p.pos = p.pos + 1
+func parseNumber(jsonParser: mod JsonParser) ret Float {
+  let start: Int = jsonParser.pos
+  if Json.peek(jsonParser: jsonParser) is '-' {
+    jsonParser.pos = jsonParser.pos + 1
   }
-  loop p.pos < p.source.length() and Json.peek(p: p).isDigit() {
-    p.pos = p.pos + 1
+  loop jsonParser.pos < jsonParser.source.length() and Json.peek(jsonParser: jsonParser).isDigit() {
+    jsonParser.pos = jsonParser.pos + 1
   }
-  if Json.peek(p: p) is '.' {
-    p.pos = p.pos + 1
-    loop p.pos < p.source.length() and Json.peek(p: p).isDigit() {
-      p.pos = p.pos + 1
+  if Json.peek(jsonParser: jsonParser) is '.' {
+    jsonParser.pos = jsonParser.pos + 1
+    loop jsonParser.pos < jsonParser.source.length() and Json.peek(jsonParser: jsonParser).isDigit() {
+      jsonParser.pos = jsonParser.pos + 1
     }
   }
-  if Json.peek(p: p) is 'e' or Json.peek(p: p) is 'E' {
-    p.pos = p.pos + 1
-    if Json.peek(p: p) is '+' or Json.peek(p: p) is '-' {
-      p.pos = p.pos + 1
+  if Json.peek(jsonParser: jsonParser) is 'e' or Json.peek(jsonParser: jsonParser) is 'E' {
+    jsonParser.pos = jsonParser.pos + 1
+    if Json.peek(jsonParser: jsonParser) is '+' or Json.peek(jsonParser: jsonParser) is '-' {
+      jsonParser.pos = jsonParser.pos + 1
     }
-    loop p.pos < p.source.length() and Json.peek(p: p).isDigit() {
-      p.pos = p.pos + 1
+    loop jsonParser.pos < jsonParser.source.length() and Json.peek(jsonParser: jsonParser).isDigit() {
+      jsonParser.pos = jsonParser.pos + 1
     }
   }
-  if p.pos is start {
-    p.ok = false
+  if jsonParser.pos is start {
+    jsonParser.ok = false
     ret 0.0
   }
-  let lit: String = p.source.sub(start: start, len: p.pos - start)
+  let lit: String = jsonParser.source.sub(start: start, len: jsonParser.pos - start)
   ret lit.toFloat()
 }
 
@@ -468,55 +468,55 @@ func parseNumber(p: mod JsonParser) ret Float {
 # single `mod JsonDoc` because of the Live VM mod-struct-list quirk
 # noted on `pushValue`.
 func parseValue(
-  p: mod JsonParser
+  jsonParser: mod JsonParser
   vals: mod List(JsonValue)
   kids: mod List(Int)
   fields: mod List(JsonField)
 ) ret Int {
-  Json.skipWhitespace(p)
-  if p.pos >= p.source.length() {
-    p.ok = false
+  Json.skipWhitespace(jsonParser)
+  if jsonParser.pos >= jsonParser.source.length() {
+    jsonParser.ok = false
     ret -1
   }
-  let c: Char32 = Json.peek(p: p)
+  let c: Char32 = Json.peek(jsonParser: jsonParser)
 
   if c is '{' {
-    p.pos = p.pos + 1
-    Json.skipWhitespace(p)
+    jsonParser.pos = jsonParser.pos + 1
+    Json.skipWhitespace(jsonParser)
     # Collect this object's fields into a *local* list and bulk-append
     # to the shared `fields` pool only when the object closes. Without
     # this, a nested object's fields would be interleaved into the outer
     # object's range, and the start/len pair would no longer point at a
     # contiguous slice.
     let localFields: List(JsonField) = createList(JsonField, cap: 4)
-    if Json.peek(p: p) is '}' {
-      p.pos = p.pos + 1
+    if Json.peek(jsonParser: jsonParser) is '}' {
+      jsonParser.pos = jsonParser.pos + 1
     } else {
       loop true {
-        Json.skipWhitespace(p)
-        let key: String = Json.parseString(p)
-        if p.ok is false {
+        Json.skipWhitespace(jsonParser)
+        let key: String = Json.parseString(jsonParser)
+        if jsonParser.ok is false {
           ret -1
         }
-        Json.skipWhitespace(p)
-        if not Json.consume(p: p, c: ':') {
-          p.ok = false
+        Json.skipWhitespace(jsonParser)
+        if not Json.consume(jsonParser: jsonParser, c: ':') {
+          jsonParser.ok = false
           ret -1
         }
-        let valIdx: Int = Json.parseValue(p, vals: vals, kids: kids, fields: fields)
-        if p.ok is false {
+        let valIdx: Int = Json.parseValue(jsonParser, vals: vals, kids: kids, fields: fields)
+        if jsonParser.ok is false {
           ret -1
         }
         let f: JsonField = { key: key, valueIdx: valIdx }
         localFields.add(value: f)
-        Json.skipWhitespace(p)
-        if Json.consume(p: p, c: ',') {
+        Json.skipWhitespace(jsonParser)
+        if Json.consume(jsonParser: jsonParser, c: ',') {
           # Continue, parse next field.
         } else {
-          if Json.consume(p: p, c: '}') {
+          if Json.consume(jsonParser: jsonParser, c: '}') {
             # Exit loop by jumping out via a sentinel value of -2.
             # Rae has no `break`, so we use a flag and re-check below.
-            p.pos = p.pos
+            jsonParser.pos = jsonParser.pos
             let firstField: Int = fields.length
             let count: Int = localFields.length
             var i: Int = 0
@@ -544,7 +544,7 @@ func parseValue(
             }
             ret Json.pushValue(vals: vals, v: v)
           } else {
-            p.ok = false
+            jsonParser.ok = false
             ret -1
           }
         }
@@ -564,26 +564,26 @@ func parseValue(
   }
 
   if c is '[' {
-    p.pos = p.pos + 1
-    Json.skipWhitespace(p)
+    jsonParser.pos = jsonParser.pos + 1
+    Json.skipWhitespace(jsonParser)
     # Same trick as for objects — collect into a local list first so a
     # nested array's children don't interleave with the outer array's.
     let localKids: List(Int) = createList(cap: 4)
-    if Json.peek(p: p) is ']' {
-      p.pos = p.pos + 1
+    if Json.peek(jsonParser: jsonParser) is ']' {
+      jsonParser.pos = jsonParser.pos + 1
     } else {
       loop true {
-        Json.skipWhitespace(p)
-        let elemIdx: Int = Json.parseValue(p, vals: vals, kids: kids, fields: fields)
-        if p.ok is false {
+        Json.skipWhitespace(jsonParser)
+        let elemIdx: Int = Json.parseValue(jsonParser, vals: vals, kids: kids, fields: fields)
+        if jsonParser.ok is false {
           ret -1
         }
         localKids.add(value: elemIdx)
-        Json.skipWhitespace(p)
-        if Json.consume(p: p, c: ',') {
+        Json.skipWhitespace(jsonParser)
+        if Json.consume(jsonParser: jsonParser, c: ',') {
           # Continue, parse next element.
         } else {
-          if Json.consume(p: p, c: ']') {
+          if Json.consume(jsonParser: jsonParser, c: ']') {
             let firstChild: Int = kids.length
             let count: Int = localKids.length
             var i: Int = 0
@@ -602,7 +602,7 @@ func parseValue(
             }
             ret Json.pushValue(vals: vals, v: v)
           } else {
-            p.ok = false
+            jsonParser.ok = false
             ret -1
           }
         }
@@ -621,46 +621,46 @@ func parseValue(
   }
 
   if c is '"' {
-    let s: String = Json.parseString(p)
-    if p.ok is false {
+    let s: String = Json.parseString(jsonParser)
+    if jsonParser.ok is false {
       ret -1
     }
     ret Json.pushValue(vals: vals, v: Json.stringValue(v: s))
   }
 
   if c is 't' {
-    if Json.consumeKeyword(p: p, kw: "true") {
+    if Json.consumeKeyword(jsonParser: jsonParser, kw: "true") {
       ret Json.pushValue(vals: vals, v: Json.boolValue(v: true))
     }
-    p.ok = false
+    jsonParser.ok = false
     ret -1
   }
 
   if c is 'f' {
-    if Json.consumeKeyword(p: p, kw: "false") {
+    if Json.consumeKeyword(jsonParser: jsonParser, kw: "false") {
       ret Json.pushValue(vals: vals, v: Json.boolValue(v: false))
     }
-    p.ok = false
+    jsonParser.ok = false
     ret -1
   }
 
   if c is 'n' {
-    if Json.consumeKeyword(p: p, kw: "null") {
+    if Json.consumeKeyword(jsonParser: jsonParser, kw: "null") {
       ret Json.pushValue(vals: vals, v: Json.jsonNull())
     }
-    p.ok = false
+    jsonParser.ok = false
     ret -1
   }
 
   if c is '-' or c.isDigit() {
-    let n: Float = Json.parseNumber(p)
-    if p.ok is false {
+    let n: Float = Json.parseNumber(jsonParser)
+    if jsonParser.ok is false {
       ret -1
     }
     ret Json.pushValue(vals: vals, v: Json.numberValue(v: n))
   }
 
-  p.ok = false
+  jsonParser.ok = false
   ret -1
 }
 
@@ -676,23 +676,23 @@ func parseJson(source: view String) ret JsonDoc {
     ok: false
     errorPos: 0
   }
-  let p: JsonParser = { source: source, pos: 0, ok: true }
+  let jsonParser: JsonParser = { source: source, pos: 0, ok: true }
   let rootIdx: Int = Json.parseValue(
-    p
+    jsonParser
     vals: doc.values
     kids: doc.children
     fields: doc.fields
   )
-  Json.skipWhitespace(p)
-  if p.ok is false {
+  Json.skipWhitespace(jsonParser)
+  if jsonParser.ok is false {
     doc.ok = false
-    doc.errorPos = p.pos
+    doc.errorPos = jsonParser.pos
     ret doc
   }
-  if p.pos < source.length() {
+  if jsonParser.pos < source.length() {
     # Trailing garbage after the root value.
     doc.ok = false
-    doc.errorPos = p.pos
+    doc.errorPos = jsonParser.pos
     ret doc
   }
   doc.rootIdx = rootIdx

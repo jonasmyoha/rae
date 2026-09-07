@@ -117,11 +117,11 @@ func createRenderPasses() ret RenderPasses {
 # of its graph (with and without the UI overlay) and they have to be kept
 # in step by hand; this does not repeat that.
 func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
-  var g: RenderGraph = createRenderGraph()
+  var renderGraph: RenderGraph = createRenderGraph()
 
   # --- resources ---
   # sceneColor is External: the target gpu2d owns and presents.
-  let colorId: Int = addResource(g: g, name: "sceneColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeExternal)
+  let colorId: Int = addResource(renderGraph: renderGraph, name: "sceneColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeExternal)
 
   # The G-buffer (#366). Three attachments plus depth, 16 bytes/pixel, with
   # attributes packed ACROSS the targets rather than one per target: A holds
@@ -129,78 +129,78 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
   # motion, metallic and occlusion-or-emissive. Named A/B/C rather than by
   # content precisely because no target holds one thing — a name like
   # "gNormal" would be a lie about where roughness lives.
-  let albedoId: Int = addResource(g: g, name: "gbufferA", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
-  let normalId: Int = addResource(g: g, name: "gbufferB", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
-  let materialId: Int = addResource(g: g, name: "gbufferC", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
-  let depthId: Int = addResource(g: g, name: "gDepth", kind: resDepth, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let albedoId: Int = addResource(renderGraph: renderGraph, name: "gbufferA", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let normalId: Int = addResource(renderGraph: renderGraph, name: "gbufferB", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let materialId: Int = addResource(renderGraph: renderGraph, name: "gbufferC", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let depthId: Int = addResource(renderGraph: renderGraph, name: "gDepth", kind: resDepth, format: 0, sizing: sizeFull, lifetime: lifeTransient)
 
   # Hi-Z / coarse-trace source. Half-res because the top mip is gDepth
   # itself; this is the chain below it.
-  let pyramidId: Int = addResource(g: g, name: "depthPyramid", kind: resTexture2d, format: 0, sizing: sizeHalf, lifetime: lifeTransient)
+  let pyramidId: Int = addResource(renderGraph: renderGraph, name: "depthPyramid", kind: resTexture2d, format: 0, sizing: sizeHalf, lifetime: lifeTransient)
 
   # Linear HDR radiance. Everything radiometric happens here; only
   # composite writes the presentable target.
-  let litId: Int = addResource(g: g, name: "litColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let litId: Int = addResource(renderGraph: renderGraph, name: "litColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
   # AO is full-resolution for now. It is low-frequency and belongs at half
   # res with a depth-aware upsample, which is a tier knob rather than a
   # correctness question — declared truthfully as Full until it moves.
-  let aoId: Int = addResource(g: g, name: "aoTex", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let aoId: Int = addResource(renderGraph: renderGraph, name: "aoTex", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
   # PERSISTENT, not transient: the history is read NEXT frame, which is
   # the lifetime class #331 put in graph v1 so temporal techniques could
   # be declared truthfully instead of hidden in C statics.
-  let taaId: Int = addResource(g: g, name: "taaColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifePersistent)
-  let shadowId: Int = addResource(g: g, name: "shadowMap", kind: resDepth, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let taaId: Int = addResource(renderGraph: renderGraph, name: "taaColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifePersistent)
+  let shadowId: Int = addResource(renderGraph: renderGraph, name: "shadowMap", kind: resDepth, format: 0, sizing: sizeFull, lifetime: lifeTransient)
 
   # --- passes, declared backwards on purpose ---
-  let present: Int = addPass(g: g, name: "present", kind: passRaster, tag: RenderTag.present)
-  let composite: Int = addPass(g: g, name: "composite", kind: passRaster, tag: RenderTag.composite)
-  let lighting: Int = addPass(g: g, name: "lighting", kind: passRaster, tag: RenderTag.lighting)
-  let ssaoP: Int = addPass(g: g, name: "ssao", kind: passRaster, tag: RenderTag.ssao)
-  let taaP: Int = addPass(g: g, name: "taa", kind: passRaster, tag: RenderTag.taa)
-  let shadowP: Int = addPass(g: g, name: "shadow", kind: passRaster, tag: RenderTag.shadow)
-  let pyramid: Int = addPass(g: g, name: "depthPyramid", kind: passCompute, tag: RenderTag.depthPyramid)
-  let gbuffer: Int = addPass(g: g, name: "gbuffer", kind: passRaster, tag: RenderTag.gbuffer)
+  let present: Int = addPass(renderGraph: renderGraph, name: "present", kind: passRaster, tag: RenderTag.present)
+  let composite: Int = addPass(renderGraph: renderGraph, name: "composite", kind: passRaster, tag: RenderTag.composite)
+  let lighting: Int = addPass(renderGraph: renderGraph, name: "lighting", kind: passRaster, tag: RenderTag.lighting)
+  let ssaoP: Int = addPass(renderGraph: renderGraph, name: "ssao", kind: passRaster, tag: RenderTag.ssao)
+  let taaP: Int = addPass(renderGraph: renderGraph, name: "taa", kind: passRaster, tag: RenderTag.taa)
+  let shadowP: Int = addPass(renderGraph: renderGraph, name: "shadow", kind: passRaster, tag: RenderTag.shadow)
+  let pyramid: Int = addPass(renderGraph: renderGraph, name: "depthPyramid", kind: passCompute, tag: RenderTag.depthPyramid)
+  let gbuffer: Int = addPass(renderGraph: renderGraph, name: "gbuffer", kind: passRaster, tag: RenderTag.gbuffer)
 
   # --- edges: these, and only these, determine the order ---
-  passWrites(g: g, pass: gbuffer, resource: albedoId, access: accAttachmentWrite)
-  passWrites(g: g, pass: gbuffer, resource: normalId, access: accAttachmentWrite)
-  passWrites(g: g, pass: gbuffer, resource: materialId, access: accAttachmentWrite)
-  passWrites(g: g, pass: gbuffer, resource: depthId, access: accAttachmentWrite)
+  passWrites(renderGraph: renderGraph, pass: gbuffer, resource: albedoId, access: accAttachmentWrite)
+  passWrites(renderGraph: renderGraph, pass: gbuffer, resource: normalId, access: accAttachmentWrite)
+  passWrites(renderGraph: renderGraph, pass: gbuffer, resource: materialId, access: accAttachmentWrite)
+  passWrites(renderGraph: renderGraph, pass: gbuffer, resource: depthId, access: accAttachmentWrite)
 
   # The pyramid is built from finished depth, so it must follow gbuffer.
-  passReads(g: g, pass: pyramid, resource: depthId, access: accSampledRead)
-  passWrites(g: g, pass: pyramid, resource: pyramidId, access: accStorageWrite)
+  passReads(renderGraph: renderGraph, pass: pyramid, resource: depthId, access: accSampledRead)
+  passWrites(renderGraph: renderGraph, pass: pyramid, resource: pyramidId, access: accStorageWrite)
 
   # Lighting consumes every G-buffer attachment plus the pyramid, and is
   # the only writer of radiance.
   # SSAO reads what the G-buffer wrote and lighting reads the AO, so the
   # graph derives gbuffer -> ssao -> lighting with nobody stating it.
-  passReads(g: g, pass: ssaoP, resource: normalId, access: accSampledRead)
-  passReads(g: g, pass: ssaoP, resource: depthId, access: accSampledRead)
-  passWrites(g: g, pass: ssaoP, resource: aoId, access: accAttachmentWrite)
+  passReads(renderGraph: renderGraph, pass: ssaoP, resource: normalId, access: accSampledRead)
+  passReads(renderGraph: renderGraph, pass: ssaoP, resource: depthId, access: accSampledRead)
+  passWrites(renderGraph: renderGraph, pass: ssaoP, resource: aoId, access: accAttachmentWrite)
   # Lighting reads the cascades, so the graph orders shadow before it —
   # and, since shadow has no other edges, before the G-buffer too, which
   # is fine: the cascades depend on the scene, not on the G-buffer.
-  passWrites(g: g, pass: shadowP, resource: shadowId, access: accAttachmentWrite)
-  passReads(g: g, pass: lighting, resource: shadowId, access: accSampledRead)
-  passReads(g: g, pass: lighting, resource: aoId, access: accSampledRead)
-  passReads(g: g, pass: lighting, resource: albedoId, access: accSampledRead)
-  passReads(g: g, pass: lighting, resource: normalId, access: accSampledRead)
-  passReads(g: g, pass: lighting, resource: materialId, access: accSampledRead)
-  passReads(g: g, pass: lighting, resource: depthId, access: accSampledRead)
-  passReads(g: g, pass: lighting, resource: pyramidId, access: accStorageRead)
-  passWrites(g: g, pass: lighting, resource: litId, access: accAttachmentWrite)
+  passWrites(renderGraph: renderGraph, pass: shadowP, resource: shadowId, access: accAttachmentWrite)
+  passReads(renderGraph: renderGraph, pass: lighting, resource: shadowId, access: accSampledRead)
+  passReads(renderGraph: renderGraph, pass: lighting, resource: aoId, access: accSampledRead)
+  passReads(renderGraph: renderGraph, pass: lighting, resource: albedoId, access: accSampledRead)
+  passReads(renderGraph: renderGraph, pass: lighting, resource: normalId, access: accSampledRead)
+  passReads(renderGraph: renderGraph, pass: lighting, resource: materialId, access: accSampledRead)
+  passReads(renderGraph: renderGraph, pass: lighting, resource: depthId, access: accSampledRead)
+  passReads(renderGraph: renderGraph, pass: lighting, resource: pyramidId, access: accStorageRead)
+  passWrites(renderGraph: renderGraph, pass: lighting, resource: litId, access: accAttachmentWrite)
 
   # TAA reads radiance and the motion the G-buffer packed, and writes the
   # history the composite then reads — so the graph derives
   # lighting -> taa -> composite.
-  passReads(g: g, pass: taaP, resource: litId, access: accSampledRead)
-  passReads(g: g, pass: taaP, resource: materialId, access: accSampledRead)
-  passWrites(g: g, pass: taaP, resource: taaId, access: accAttachmentWrite)
+  passReads(renderGraph: renderGraph, pass: taaP, resource: litId, access: accSampledRead)
+  passReads(renderGraph: renderGraph, pass: taaP, resource: materialId, access: accSampledRead)
+  passWrites(renderGraph: renderGraph, pass: taaP, resource: taaId, access: accAttachmentWrite)
 
   # Composite is the only writer of the presentable target.
-  passReads(g: g, pass: composite, resource: taaId, access: accSampledRead)
-  passWrites(g: g, pass: composite, resource: colorId, access: accAttachmentWrite)
+  passReads(renderGraph: renderGraph, pass: composite, resource: taaId, access: accSampledRead)
+  passWrites(renderGraph: renderGraph, pass: composite, resource: colorId, access: accAttachmentWrite)
 
   # The UI overlay MODIFIES the composited target rather than writing it:
   # it loads the finished 3D image and paints over it. Declaring that as a
@@ -209,14 +209,14 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
   # honest statement, and the graph derives composite -> ui -> present.
   var ui: Int = 0 - 1
   if withUi {
-    ui = addPass(g: g, name: "uiOverlay", kind: passRaster, tag: RenderTag.uiOverlay)
-    passModifies(g: g, pass: ui, resource: colorId, access: accAttachmentRead)
+    ui = addPass(renderGraph: renderGraph, name: "uiOverlay", kind: passRaster, tag: RenderTag.uiOverlay)
+    passModifies(renderGraph: renderGraph, pass: ui, resource: colorId, access: accAttachmentRead)
   }
 
-  passReads(g: g, pass: present, resource: colorId, access: accSampledRead)
+  passReads(renderGraph: renderGraph, pass: present, resource: colorId, access: accSampledRead)
 
   ret DeferredRenderer {
-    graph: g,
+    graph: renderGraph,
     gbufferPass: gbuffer,
     pyramidPass: pyramid,
     lightingPass: lighting,
@@ -250,8 +250,8 @@ func createDeferredRendererWithUi() pub ret DeferredRenderer {
 }
 
 # Choose which channel the composite pass paints (see gbuffer.view*).
-func setDebugView(r: mod DeferredRenderer, mode: view Int) pub {
-  r.debugView = mode
+func setDebugView(renderer: mod DeferredRenderer, mode: view Int) pub {
+  renderer.debugView = mode
 }
 
 # TAA on/off (#20). DEFAULT IS OFF = FXAA: the composite paints the raw lit
@@ -269,19 +269,19 @@ func setTaaEnabled(on: copy Bool) pub {
 # ground/sea plane dissolves into the horizon with no far-clip seam. Off by
 # default; every deferred example that never calls this keeps its sky.
 func setFog(color: copy Vec3, start: copy Float, end: copy Float) pub {
-  gbSetFog(on: 1, r: color.x, g: color.y, b: color.z, start: start, end: end)
+  gbSetFog(on: 1, renderer: color.x, renderGraph: color.y, b: color.z, start: start, end: end)
 }
 
 func setFogDisabled() pub {
-  gbSetFog(on: 0, r: 0.0, g: 0.0, b: 0.0, start: 0.0, end: 0.0)
+  gbSetFog(on: 0, renderer: 0.0, renderGraph: 0.0, b: 0.0, start: 0.0, end: 0.0)
 }
 
-func compileDeferred(r: mod DeferredRenderer) pub ret Int {
-  ret compile(g: r.graph)
+func compileDeferred(renderer: mod DeferredRenderer) pub ret Int {
+  ret compile(renderGraph: renderer.graph)
 }
 
-func describeDeferred(r: view DeferredRenderer) pub ret String {
-  ret describe(g: r.graph)
+func describeDeferred(renderer: view DeferredRenderer) pub ret String {
+  ret describe(renderGraph: renderer.graph)
 }
 
 # Execute one deferred frame.
@@ -302,13 +302,13 @@ func describeDeferred(r: view DeferredRenderer) pub ret String {
 # from the graph; only the switch moves to where the UI knowledge is.
 # Same seam renderer3d.rae opened for the forward frame.
 
-func deferredOrderLength(r: view DeferredRenderer) pub ret Int {
-  ret r.graph.order.length
+func deferredOrderLength(renderer: view DeferredRenderer) pub ret Int {
+  ret renderer.graph.order.length
 }
 
-func deferredTagAt(r: view DeferredRenderer, i: view Int) pub ret Int {
-  let p: Int = graphIntAt(values: r.graph.order, index: i)
-  ret graphPassAt(values: r.graph.passes, index: p).tag
+func deferredTagAt(renderer: view DeferredRenderer, i: view Int) pub ret Int {
+  let p: Int = graphIntAt(values: renderer.graph.order, index: i)
+  ret graphPassAt(values: renderer.graph.passes, index: p).tag
 }
 
 # Run one pass of the deferred frame from a World3d. Handles every tag EXCEPT the
@@ -317,41 +317,41 @@ func deferredTagAt(r: view DeferredRenderer, i: view Int) pub ret Int {
 # the World3d ECS queries (renderSceneWorld + renderSceneSdfWorld); every other tag
 # is scene-independent — it reads G-buffer/depth resources the gbuffer pass already
 # wrote — so those tags ignore the world.
-func renderDeferredPassWorld(r: mod DeferredRenderer, tag: view Int, world: view World3d,
+func renderDeferredPassWorld(renderer: mod DeferredRenderer, tag: view Int, world: view World3d,
                              camera: view Camera3d, light: view Light3d, aspect: view Float) pub {
   if tag is RenderTag.gbuffer {
-    beginPass(cache: r.passes.gbuffer, camera: camera, light: light, aspect: aspect)
-    GbufferWorld.renderSceneWorld(cache: r.passes.gbuffer, world: world)
+    beginPass(cache: renderer.passes.gbuffer, camera: camera, light: light, aspect: aspect)
+    GbufferWorld.renderSceneWorld(cache: renderer.passes.gbuffer, world: world)
     # Metaballs go into the SAME pass as the triangles, so the two kinds
     # depth-test against each other rather than compositing (#392).
     renderSceneSdfWorld(world: world, camera: camera)
     endPass()
   }
   if tag is RenderTag.depthPyramid {
-    buildDepthPyramid(cache: r.passes.pyr)
+    buildDepthPyramid(cache: renderer.passes.pyr)
   }
   if tag is RenderTag.ssao {
-    ssaoPass(cache: r.passes.ao, camera: camera)
+    ssaoPass(cache: renderer.passes.ao, camera: camera)
   }
   if tag is RenderTag.lighting {
     var sky: Sky = createSkyNone(light: light, clearColor: light.clearColor)
-    if r.hasSky {
-      sky = r.sky
+    if renderer.hasSky {
+      sky = renderer.sky
     }
-    lightingPassSky(cache: r.passes.light, camera: camera, light: light, sky: sky)
+    lightingPassSky(cache: renderer.passes.light, camera: camera, light: light, sky: sky)
   }
   if tag is RenderTag.taa {
-    taaPass(cache: r.passes.taa)
+    taaPass(cache: renderer.passes.taa)
   }
   if tag is RenderTag.composite {
-    if r.debugView is viewLit {
-      compositePassGraded(cache: r.passes.composite, exposure: light.exposure, grade: r.grade)
+    if renderer.debugView is viewLit {
+      compositePassGraded(cache: renderer.passes.composite, exposure: light.exposure, grade: renderer.grade)
     } else {
-      inspect(cache: r.passes.inspect, mode: r.debugView, zNear: camera.nearZ, zFar: camera.farZ)
+      inspect(cache: renderer.passes.inspect, mode: renderer.debugView, zNear: camera.nearZ, zFar: camera.farZ)
     }
   }
   if tag is RenderTag.present {
-    if r.hasUi {
+    if renderer.hasUi {
       Gpu2d.endFrame()
     } else {
       presentFrame()
@@ -361,31 +361,31 @@ func renderDeferredPassWorld(r: mod DeferredRenderer, tag: view Int, world: view
 
 # #794: the World3d twin of renderDeferredFrame — walk the derived graph order and
 # dispatch each pass through renderDeferredPassWorld.
-func renderDeferredFrameWorld(r: mod DeferredRenderer, world: view World3d, camera: view Camera3d, light: view Light3d, aspect: view Float) pub {
+func renderDeferredFrameWorld(renderer: mod DeferredRenderer, world: view World3d, camera: view Camera3d, light: view Light3d, aspect: view Float) pub {
   var i: Int = 0
-  loop i < r.graph.order.length {
-    renderDeferredPassWorld(r: r, tag: deferredTagAt(r: r, i: i), world: world,
+  loop i < renderer.graph.order.length {
+    renderDeferredPassWorld(renderer: renderer, tag: deferredTagAt(renderer: renderer, i: i), world: world,
                             camera: camera, light: light, aspect: aspect)
     i = i + 1
   }
 }
 
 # How many instances the G-buffer pass submitted last frame.
-func deferredDrawCount(r: view DeferredRenderer) pub ret Int {
+func deferredDrawCount(renderer: view DeferredRenderer) pub ret Int {
   ret passDrawCount()
 }
 
 # Mip levels in the depth pyramid built by the last frame.
-func deferredPyramidMips(r: view DeferredRenderer) pub ret Int {
+func deferredPyramidMips(renderer: view DeferredRenderer) pub ret Int {
   ret depthPyramidMips()
 }
 
 # Bind an environment. The frame's background and its ambient both come
 # from it after this, which is the whole point of #399's interface — a
 # scene cannot end up lit by one sky and drawn against another.
-func setRendererSky(r: mod DeferredRenderer, sky: view Sky) pub {
-  r.sky = sky
-  r.hasSky = true
+func setRendererSky(renderer: mod DeferredRenderer, sky: view Sky) pub {
+  renderer.sky = sky
+  renderer.hasSky = true
 }
 
 # Build a UI-composited deferred frame with an environment already bound.
@@ -395,8 +395,8 @@ func setRendererSky(r: mod DeferredRenderer, sky: view Sky) pub {
 # nested renderer field — now that nested-field `mod` write-back is guaranteed
 # (#762, test 707_nested_mod_writeback); this just saves the two-line build+set.
 func createDeferredRendererWithUiSky(sky: view Sky) pub ret DeferredRenderer {
-  var r: DeferredRenderer = buildDeferredGraph(withUi: true)
-  r.sky = sky
-  r.hasSky = true
-  ret r
+  var renderer: DeferredRenderer = buildDeferredGraph(withUi: true)
+  renderer.sky = sky
+  renderer.hasSky = true
+  ret renderer
 }

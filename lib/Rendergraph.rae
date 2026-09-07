@@ -161,29 +161,29 @@ func createRenderGraph() pub ret RenderGraph {
 }
 
 # ----- declaration ----------------------------------------------------
-func addResource(g: mod RenderGraph, name: view String, kind: view Int, format: view Int, sizing: view Int, lifetime: view Int) pub ret Int {
-  let id: Int = g.resources.length
+func addResource(renderGraph: mod RenderGraph, name: view String, kind: view Int, format: view Int, sizing: view Int, lifetime: view Int) pub ret Int {
+  let id: Int = renderGraph.resources.length
   # A COPY: the graph owns resourceNames and drops it, and `name` is a
   # view we do not own. Storing the borrow would free the caller's buffer.
-  g.resourceNames.add(value: "{name}")
-  g.resources.add(value: ResourceDesc { kind: kind, format: format, sizing: sizing, lifetime: lifetime })
+  renderGraph.resourceNames.add(value: "{name}")
+  renderGraph.resources.add(value: ResourceDesc { kind: kind, format: format, sizing: sizing, lifetime: lifetime })
   ret id
 }
 
-func addPass(g: mod RenderGraph, name: view String, kind: view Int, tag: view Int) pub ret Int {
-  let id: Int = g.passes.length
+func addPass(renderGraph: mod RenderGraph, name: view String, kind: view Int, tag: view Int) pub ret Int {
+  let id: Int = renderGraph.passes.length
   # Copy for the same reason as addResource above.
-  g.passNames.add(value: "{name}")
-  g.passes.add(value: PassDesc { kind: kind, tag: tag })
+  renderGraph.passNames.add(value: "{name}")
+  renderGraph.passes.add(value: PassDesc { kind: kind, tag: tag })
   ret id
 }
 
-func passReads(g: mod RenderGraph, pass: view Int, resource: view Int, access: view Int) pub {
-  g.edges.add(value: Edge { pass: pass, resource: resource, access: access, isWrite: false, isModify: false })
+func passReads(renderGraph: mod RenderGraph, pass: view Int, resource: view Int, access: view Int) pub {
+  renderGraph.edges.add(value: Edge { pass: pass, resource: resource, access: access, isWrite: false, isModify: false })
 }
 
-func passWrites(g: mod RenderGraph, pass: view Int, resource: view Int, access: view Int) pub {
-  g.edges.add(value: Edge { pass: pass, resource: resource, access: access, isWrite: true, isModify: false })
+func passWrites(renderGraph: mod RenderGraph, pass: view Int, resource: view Int, access: view Int) pub {
+  renderGraph.edges.add(value: Edge { pass: pass, resource: resource, access: access, isWrite: true, isModify: false })
 }
 
 # Read-modify-write: the pass consumes the resource's current contents and
@@ -197,19 +197,19 @@ func passWrites(g: mod RenderGraph, pass: view Int, resource: view Int, access: 
 # "who paints over whom" is a semantic decision by the frame author, not
 # something a dependency graph can infer. Ordering BETWEEN the chain and
 # every other pass is still derived normally.
-func passModifies(g: mod RenderGraph, pass: view Int, resource: view Int, access: view Int) pub {
-  g.edges.add(value: Edge { pass: pass, resource: resource, access: access, isWrite: true, isModify: true })
+func passModifies(renderGraph: mod RenderGraph, pass: view Int, resource: view Int, access: view Int) pub {
+  renderGraph.edges.add(value: Edge { pass: pass, resource: resource, access: access, isWrite: true, isModify: true })
 }
 
 # ----- queries --------------------------------------------------------
 # Index of the pass that writes `resource`, or -1. v1 permits at most one
 # writer per resource per frame; compile() reports a violation rather than
 # picking one arbitrarily.
-func writerOf(g: view RenderGraph, resource: view Int) ret Int {
+func writerOf(renderGraph: view RenderGraph, resource: view Int) ret Int {
   var last: Int = 0 - 1
   var i: Int = 0
-  loop i < g.edges.length {
-    let e: Edge = graphEdgeAt(edges: g.edges, index: i)
+  loop i < renderGraph.edges.length {
+    let e: Edge = graphEdgeAt(edges: renderGraph.edges, index: i)
     if e.isWrite {
       if e.resource is resource {
         last = e.pass
@@ -221,11 +221,11 @@ func writerOf(g: view RenderGraph, resource: view Int) ret Int {
 }
 
 # The producer immediately before `edgeIndex` in `resource`'s chain, or -1.
-func producerBefore(g: view RenderGraph, resource: view Int, edgeIndex: view Int) ret Int {
+func producerBefore(renderGraph: view RenderGraph, resource: view Int, edgeIndex: view Int) ret Int {
   var prev: Int = 0 - 1
   var i: Int = 0
   loop i < edgeIndex {
-    let e: Edge = graphEdgeAt(edges: g.edges, index: i)
+    let e: Edge = graphEdgeAt(edges: renderGraph.edges, index: i)
     if e.isWrite {
       if e.resource is resource {
         prev = e.pass
@@ -236,8 +236,8 @@ func producerBefore(g: view RenderGraph, resource: view Int, edgeIndex: view Int
   ret prev
 }
 
-func resourceLifetime(g: view RenderGraph, resource: view Int) ret Int {
-  ret graphResourceAt(values: g.resources, index: resource).lifetime
+func resourceLifetime(renderGraph: view RenderGraph, resource: view Int) ret Int {
+  ret graphResourceAt(values: renderGraph.resources, index: resource).lifetime
 }
 
 # ----- compilation ----------------------------------------------------
@@ -247,28 +247,28 @@ func resourceLifetime(g: view RenderGraph, resource: view Int) ret Int {
 # Kahn's algorithm: repeatedly emit any pass whose dependencies are all
 # already emitted. If a round emits nothing while passes remain, the
 # remaining passes form a cycle.
-func compile(g: mod RenderGraph) pub ret Int {
-  g.order = createList(Int, cap: g.passes.length)
-  g.status = graphOk
-  g.errorPass = 0 - 1
-  g.errorResource = 0 - 1
+func compile(renderGraph: mod RenderGraph) pub ret Int {
+  renderGraph.order = createList(Int, cap: renderGraph.passes.length)
+  renderGraph.status = graphOk
+  renderGraph.errorPass = 0 - 1
+  renderGraph.errorResource = 0 - 1
 
   # --- validation: at most one writer per resource ---
   var i: Int = 0
-  loop i < g.edges.length {
-    let a: Edge = graphEdgeAt(edges: g.edges, index: i)
+  loop i < renderGraph.edges.length {
+    let a: Edge = graphEdgeAt(edges: renderGraph.edges, index: i)
     if a.isWrite {
       if not a.isModify {
       var j: Int = i + 1
-      loop j < g.edges.length {
-        let b: Edge = graphEdgeAt(edges: g.edges, index: j)
+      loop j < renderGraph.edges.length {
+        let b: Edge = graphEdgeAt(edges: renderGraph.edges, index: j)
         if b.isWrite {
           if not b.isModify {
           if b.resource is a.resource {
-            g.status = graphErrDoubleWrite
-            g.errorPass = b.pass
-            g.errorResource = b.resource
-            ret g.status
+            renderGraph.status = graphErrDoubleWrite
+            renderGraph.errorPass = b.pass
+            renderGraph.errorResource = b.resource
+            ret renderGraph.status
           }
           }
         }
@@ -283,15 +283,15 @@ func compile(g: mod RenderGraph) pub ret Int {
   # External resources (swapchain, gpu2d offscreen) are produced outside
   # the graph, so reading one without an in-graph writer is legitimate.
   i = 0
-  loop i < g.edges.length {
-    let e: Edge = graphEdgeAt(edges: g.edges, index: i)
+  loop i < renderGraph.edges.length {
+    let e: Edge = graphEdgeAt(edges: renderGraph.edges, index: i)
     if not e.isWrite {
-      if writerOf(g: g, resource: e.resource) < 0 {
-        if resourceLifetime(g: g, resource: e.resource) is not lifeExternal {
-          g.status = graphErrUnwritten
-          g.errorPass = e.pass
-          g.errorResource = e.resource
-          ret g.status
+      if writerOf(renderGraph: renderGraph, resource: e.resource) < 0 {
+        if resourceLifetime(renderGraph: renderGraph, resource: e.resource) is not lifeExternal {
+          renderGraph.status = graphErrUnwritten
+          renderGraph.errorPass = e.pass
+          renderGraph.errorResource = e.resource
+          ret renderGraph.status
         }
       }
     }
@@ -299,25 +299,25 @@ func compile(g: mod RenderGraph) pub ret Int {
   }
 
   # --- topological order ---
-  let emitted: List(Bool) = createList(Bool, cap: g.passes.length)
+  let emitted: List(Bool) = createList(Bool, cap: renderGraph.passes.length)
   var p: Int = 0
-  loop p < g.passes.length {
+  loop p < renderGraph.passes.length {
     emitted.add(value: false)
     p = p + 1
   }
 
-  var remaining: Int = g.passes.length
+  var remaining: Int = renderGraph.passes.length
   loop remaining > 0 {
     var progressed: Bool = false
     p = 0
-    loop p < g.passes.length {
+    loop p < renderGraph.passes.length {
       if not graphBoolAt(values: emitted, index: p) {
         # ready when every resource this pass reads is either External or
         # written by a pass already emitted
         var ready: Bool = true
         var k: Int = 0
-        loop k < g.edges.length {
-          let e: Edge = graphEdgeAt(edges: g.edges, index: k)
+        loop k < renderGraph.edges.length {
+          let e: Edge = graphEdgeAt(edges: renderGraph.edges, index: k)
           if e.pass is p {
             # A pure reader waits for the LAST producer in the chain (it
             # wants the finished contents). A modifier waits only for the
@@ -325,10 +325,10 @@ func compile(g: mod RenderGraph) pub ret Int {
             # correctly instead of deadlocking on itself.
             var dep: Int = 0 - 1
             if e.isModify {
-              dep = producerBefore(g: g, resource: e.resource, edgeIndex: k)
+              dep = producerBefore(renderGraph: renderGraph, resource: e.resource, edgeIndex: k)
             } else {
               if not e.isWrite {
-                dep = writerOf(g: g, resource: e.resource)
+                dep = writerOf(renderGraph: renderGraph, resource: e.resource)
               }
             }
             if dep >= 0 {
@@ -342,7 +342,7 @@ func compile(g: mod RenderGraph) pub ret Int {
           k = k + 1
         }
         if ready {
-          g.order.add(value: p)
+          renderGraph.order.add(value: p)
           emitted.set(index: p, value: true)
           remaining = remaining - 1
           progressed = true
@@ -352,35 +352,35 @@ func compile(g: mod RenderGraph) pub ret Int {
     }
     if not progressed {
       # nothing became ready and passes remain -> cycle
-      g.status = graphErrCycle
+      renderGraph.status = graphErrCycle
       var q: Int = 0
-      loop q < g.passes.length {
+      loop q < renderGraph.passes.length {
         if not graphBoolAt(values: emitted, index: q) {
-          if g.errorPass < 0 {
-            g.errorPass = q
+          if renderGraph.errorPass < 0 {
+            renderGraph.errorPass = q
           }
         }
         q = q + 1
       }
-      ret g.status
+      ret renderGraph.status
     }
   }
-  ret g.status
+  ret renderGraph.status
 }
 
 # ----- introspection --------------------------------------------------
 # The graph can describe itself; per-pass GPU timing gets a natural home
 # here later.
-func describe(g: view RenderGraph) pub ret String {
-  var out: String = "rendergraph: {g.passes.length} passes, {g.resources.length} resources\n"
-  if g.status is not graphOk {
-    out = "{out}  INVALID (status {g.status}, pass {g.errorPass}, resource {g.errorResource})\n"
+func describe(renderGraph: view RenderGraph) pub ret String {
+  var out: String = "rendergraph: {renderGraph.passes.length} passes, {renderGraph.resources.length} resources\n"
+  if renderGraph.status is not graphOk {
+    out = "{out}  INVALID (status {renderGraph.status}, pass {renderGraph.errorPass}, resource {renderGraph.errorResource})\n"
     ret out
   }
   var i: Int = 0
-  loop i < g.order.length {
-    let p: Int = graphIntAt(values: g.order, index: i)
-    out = "{out}  {i}: {graphStringAt(values: g.passNames, index: p)}\n"
+  loop i < renderGraph.order.length {
+    let p: Int = graphIntAt(values: renderGraph.order, index: i)
+    out = "{out}  {i}: {graphStringAt(values: renderGraph.passNames, index: p)}\n"
     i = i + 1
   }
   ret out
