@@ -9,14 +9,14 @@ open ecs/Query
 # every table. A mod write through queryModAt must be visible on read-back.
 
 type Position { x: Int }
-type Vel { v: Int }
+type Velocity { v: Int }
 type Hp { hp: Int }
 type Tag { t: Int }
 type Nm { n: Int }
 
 func main() {
   var pos: ComponentTable(Position) = createComponentTable(Position)
-  var vel: ComponentTable(Vel) = createComponentTable(Vel)
+  var vel: ComponentTable(Velocity) = createComponentTable(Velocity)
   var hp: ComponentTable(Hp) = createComponentTable(Hp)
   var tag: ComponentTable(Tag) = createComponentTable(Tag)
   var nm: ComponentTable(Nm) = createComponentTable(Nm)
@@ -28,9 +28,9 @@ func main() {
   componentSet(this: pos, entity: e2, data: Position { x: 20 })
   componentSet(this: pos, entity: e3, data: Position { x: 30 })
   componentSet(this: pos, entity: e4, data: Position { x: 40 })
-  componentSet(this: vel, entity: e2, data: Vel { v: 2 })
-  componentSet(this: vel, entity: e3, data: Vel { v: 3 })
-  componentSet(this: vel, entity: e4, data: Vel { v: 4 })
+  componentSet(this: vel, entity: e2, data: Velocity { v: 2 })
+  componentSet(this: vel, entity: e3, data: Velocity { v: 3 })
+  componentSet(this: vel, entity: e4, data: Velocity { v: 4 })
   componentSet(this: hp, entity: e3, data: Hp { hp: 33 })
   componentSet(this: hp, entity: e4, data: Hp { hp: 44 })
   componentSet(this: tag, entity: e4, data: Tag { t: 1 })
@@ -42,10 +42,10 @@ func main() {
   log("q4 count: {h4.length}")
   loop let row: view Query4Match in h4 {
     let position: view Position => query4ViewA(tableA: pos, hit: row)
-    let vv: view Vel => query4ViewB(tableB: vel, hit: row)
+    let velocity: view Velocity => query4ViewB(tableB: vel, hit: row)
     let h: view Hp => query4ViewC(tableC: hp, hit: row)
     let tg: view Tag => query4ViewD(tableD: tag, hit: row)
-    log("q4 e{row.entity.index}: {position.x} {vv.v} {h.hp} {tg.t}")
+    log("q4 e{row.entity.index}: {position.x} {velocity.v} {h.hp} {tg.t}")
   }
 
   # query4 again with the smallest table in slot B (a different driver branch).
@@ -63,11 +63,11 @@ func main() {
   log("q5 count: {h5.length}")
   loop let row: view Query5Match in h5 {
     let position: view Position => query5ViewA(tableA: pos, hit: row)
-    let vv: view Vel => query5ViewB(tableB: vel, hit: row)
+    let velocity: view Velocity => query5ViewB(tableB: vel, hit: row)
     let h: view Hp => query5ViewC(tableC: hp, hit: row)
     let nn: view Nm => query5ViewD(tableD: nm, hit: row)
     let tg: view Tag => query5ViewE(tableE: tag, hit: row)
-    log("q5 e{row.entity.index}: {position.x} {vv.v} {h.hp} {nn.n} {tg.t}")
+    log("q5 e{row.entity.index}: {position.x} {velocity.v} {h.hp} {nn.n} {tg.t}")
   }
 
   # query5 with the smallest table in slot A.

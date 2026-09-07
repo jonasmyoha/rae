@@ -10,19 +10,19 @@ open ecs/Serialize
 # serialize flag) are neither written nor loaded.
 
 type Position { x: Int, y: Int }
-type Vel { dx: Int, dy: Int }
+type Velocity { dx: Int, dy: Int }
 type WorldCache { w: Int }
 
 type MiniWorld {
   positions: ComponentTable(Position)
-  velocities: ComponentTable(Vel)
+  velocities: ComponentTable(Velocity)
   caches: ComponentTable(WorldCache)
 }
 
 func emptyWorld() ret MiniWorld {
   ret MiniWorld {
     positions: createComponentTable(Position),
-    velocities: createComponentTable(Vel),
+    velocities: createComponentTable(Velocity),
     caches: createComponentTable(WorldCache)
   }
 }
@@ -30,7 +30,7 @@ func emptyWorld() ret MiniWorld {
 func worldToJson(world: view MiniWorld, registry: view ComponentRegistry) ret String {
   var writer: WorldJson = createWorldJson()
   addComponentTable(writer: writer, table: world.positions, name: "Position", registry: registry)
-  addComponentTable(writer: writer, table: world.velocities, name: "Vel", registry: registry)
+  addComponentTable(writer: writer, table: world.velocities, name: "Velocity", registry: registry)
   addComponentTable(writer: writer, table: world.caches, name: "WorldCache", registry: registry)
   ret finishWorldJson(writer: writer)
 }
@@ -38,14 +38,14 @@ func worldToJson(world: view MiniWorld, registry: view ComponentRegistry) ret St
 # Registry-driven load: one uniform call per table, no per-name parse switch.
 func worldFromJson(world: mod MiniWorld, registry: view ComponentRegistry, doc: view JsonDoc) {
   loadComponentTable(table: world.positions, name: "Position", registry: registry, doc: doc)
-  loadComponentTable(table: world.velocities, name: "Vel", registry: registry, doc: doc)
+  loadComponentTable(table: world.velocities, name: "Velocity", registry: registry, doc: doc)
   loadComponentTable(table: world.caches, name: "WorldCache", registry: registry, doc: doc)
 }
 
 func main() {
   var reg: ComponentRegistry = createComponentRegistry()
   registerComponent(reg: reg, name: "Position", flags: serialize)
-  registerComponent(reg: reg, name: "Vel", flags: serialize)
+  registerComponent(reg: reg, name: "Velocity", flags: serialize)
   registerComponent(reg: reg, name: "WorldCache", flags: 0)
 
   let e1: EntityId = { index: 1, generation: 0 }
@@ -54,7 +54,7 @@ func main() {
   var src: MiniWorld = emptyWorld()
   componentSet(this: src.positions, entity: e1, data: Position { x: 10, y: 20 })
   componentSet(this: src.positions, entity: e2, data: Position { x: 30, y: 40 })
-  componentSet(this: src.velocities, entity: e2, data: Vel { dx: 1, dy: 2 })
+  componentSet(this: src.velocities, entity: e2, data: Velocity { dx: 1, dy: 2 })
   componentSet(this: src.caches, entity: e2, data: WorldCache { w: 999 })
 
   let jsonStr: String = worldToJson(world: src, registry: reg)
@@ -71,7 +71,7 @@ func main() {
 
   let p1: Position = componentGet(this: dst.positions, entity: e1)
   let p2: Position = componentGet(this: dst.positions, entity: e2)
-  let v2: Vel = componentGet(this: dst.velocities, entity: e2)
+  let v2: Velocity = componentGet(this: dst.velocities, entity: e2)
   log("e1 pos: {p1.x},{p1.y}")
   log("e2 pos: {p2.x},{p2.y}")
   log("e2 vel: {v2.dx},{v2.dy}")
