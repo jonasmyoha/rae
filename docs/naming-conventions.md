@@ -82,3 +82,26 @@ no renames.** The current names stay:
 
 If a real collision ever forces the issue, prefer module-qualified type names over
 renaming.
+
+## App members name their system (folder-per-system apps, #822)
+
+In a folder-per-system app (the reference shape is `examples/114_walker_character`),
+the composition-root `App` struct should read as the list of systems. The rule:
+
+- **A system's `App` member is named for its folder and typed as that folder's
+  `<Folder>System` state.** Camera lives in `cameraSystem/CameraSystem.rae` and
+  owns a `type CameraSystem`; the `App` carries `cameraSystem: CameraSystem`.
+  Likewise `renderSystem: RenderSystem`, `physicsSystem: PhysicsSystem`,
+  `netSystem: NetSystem`, `inputSystem: InputSystem`, `terrainSystem:
+  TerrainSystem`, `grassSystem: GrassSystem`. Member name == its system, so the
+  `App` fields ARE the system list and a downstream app copying this shape gets
+  one unambiguous rule.
+- **Cross-cutting data and resources stay data-typed — do NOT wrap them in an
+  `XSystem`.** The per-frame scratch (`frame: Frame`), the ECS world (`world:
+  GameWorld`), a control roster (`players: PlayerRoster`), and pure resources
+  (`profiler: Profiler`, `grassCompute: GrassCompute`) are not systems; forcing
+  them into `XSystem` names would lie about the architecture.
+- The `<Folder>System` type lives in the module of the same name (`type
+  RenderSystem` in `renderSystem/RenderSystem.rae`), so `RenderSystem` resolves
+  to the local type; it does not clash with an opened lib module of the same
+  name, which is a module, not a type.

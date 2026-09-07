@@ -7,8 +7,8 @@
 # feed the render decision back in updateApp. It mutates character / cam
 # / render as the inline code did.
 #
-# The UI STATE still lives in rae's InputUi type (input + ui combined); the
-# InputUi -> InputState/UiState split rides with #545 (input intent), which owns
+# The UI STATE still lives in rae's InputSystem type (input + ui combined); the
+# InputSystem -> InputState/UiState split rides with #545 (input intent), which owns
 # that decomposition. Example-114 files are siblings in one module, so App and
 # the sibling/stdlib helpers resolve cross-file.
 
@@ -61,7 +61,7 @@ type UiTick {
   scrolled: Bool
 }
 
-func uiUpdate(cam: mod CameraState, character: mod CharacterState, frame: mod Frame, io: mod InputUi, persist: mod PersistState, players: mod PlayerRoster, render: mod RenderState, terrain: mod InfiniteTerrain, world: view GameWorld, dt: copy Float, now: copy Float64) ret UiTick {
+func uiUpdate(cam: mod CameraSystem, character: mod CharacterSystem, frame: mod Frame, io: mod InputSystem, persist: mod PersistState, players: mod PlayerRoster, render: mod RenderSystem, terrain: mod TerrainSystem, world: view GameWorld, dt: copy Float, now: copy Float64) ret UiTick {
   updateUiInput(input: io.ui, world: io.world)
   if walkerMenuTapped() { toggleWalkerPanel(settings: io.settings, world: io.world) suppressUiPress(input: io.ui) }
   let scrolled: Bool = updateScrollPanel(world: io.world, viewport: io.panelScroll, input: io.ui)
