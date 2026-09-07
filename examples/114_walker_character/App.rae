@@ -74,7 +74,7 @@ const clipTransitionDuration: Float = 0.28
 
 # Per-frame scratch shared across systems: timing and the render/park decision.
 type Frame {
-  dt: Float
+  deltaTime: Float
   now: Float64
   startT: Float64
   prevT: Float64
@@ -478,7 +478,7 @@ func createApp() ret App {
     emptyWorld: own emptyWorld
     world: own gameWorld
     frame: {
-      dt: 0.0, now: startT, startT: startT, prevT: startT, time: 0.0, aspect: 1.0,
+      deltaTime: 0.0, now: startT, startT: startT, prevT: startT, time: 0.0, aspect: 1.0,
       needsRender: true, dbgDidWork: true, taaSettleFrames: 0, renderedOnce: false,
       headless: headless
     }
@@ -517,14 +517,14 @@ func frameBegin(app: mod App) {
   Profile.tick(profiler: app.profiler)
   resizeUiToWindow(world: app.inputSystem.world, res: app.inputSystem.gpuUi)
   let now: Float64 = Gpu2d.nowSeconds()
-  var dt: Float = (now - app.frame.prevT) as Float
+  var deltaTime: Float = (now - app.frame.prevT) as Float
   app.frame.prevT = now
   app.frame.now = now
   # NO CLAMP before DRS: the scale controller reacts to the true frame time.
-  updateRenderScale(drs: app.renderSystem.drs, dt: dt, profiler: app.profiler)
+  updateRenderScale(drs: app.renderSystem.drs, deltaTime: deltaTime, profiler: app.profiler)
   # Negative dt is a clock going backwards, not a long frame; refuse it.
-  if dt < 0.0 { dt = 0.0 }
-  app.frame.dt = dt
+  if deltaTime < 0.0 { deltaTime = 0.0 }
+  app.frame.deltaTime = deltaTime
 }
 
 # The world position / heading of whichever character the local player controls
@@ -552,16 +552,16 @@ func onCharacterSwitched(cameraSystem: mod CameraSystem, inputSystem: mod InputS
 
 # ----- update phase: input, UI, camera, character, terrain, grass, persist --
 func updateApp(app: mod App) {
-  let dt: Float = app.frame.dt
+  let deltaTime: Float = app.frame.deltaTime
   let now: Float64 = app.frame.now
   # Multiplayer seam (offline no-op today, #554): pull remote intents in before
   # the local sim; the matching publish runs after it, below.
   netApplyRemote(netSystem: app.netSystem, world: app.world)
-  let uiTick: UiTick = uiUpdate(cameraSystem: app.cameraSystem, characterSystem: app.characterSystem, frame: app.frame, inputSystem: app.inputSystem, persist: app.persist, players: app.players, renderSystem: app.renderSystem, terrainSystem: app.terrainSystem, world: app.world, dt: dt, now: now)
+  let uiTick: UiTick = uiUpdate(cameraSystem: app.cameraSystem, characterSystem: app.characterSystem, frame: app.frame, inputSystem: app.inputSystem, persist: app.persist, players: app.players, renderSystem: app.renderSystem, terrainSystem: app.terrainSystem, world: app.world, deltaTime: deltaTime, now: now)
   let settingsChanged: Bool = uiTick.settingsChanged
   let scrolled: Bool = uiTick.scrolled
 
-  let camTick: CameraTick = cameraUpdate(cameraSystem: app.cameraSystem, inputSystem: app.inputSystem, persist: app.persist, world: app.world, heroEntity: app.characterSystem.heroEntity, dt: dt)
+  let camTick: CameraTick = cameraUpdate(cameraSystem: app.cameraSystem, inputSystem: app.inputSystem, persist: app.persist, world: app.world, heroEntity: app.characterSystem.heroEntity, deltaTime: deltaTime)
   let joyActive: Bool = camTick.joyActive
   let cameraMoved: Bool = camTick.cameraMoved
 
@@ -594,7 +594,7 @@ func updateApp(app: mod App) {
       let heroE: EntityId = app.characterSystem.heroEntity
       let heroCtrl: mod ThirdPersonController => componentMod(this: app.world.controllers, entity: heroE)
       characterMoved = updateWalkerMovement(controller: heroCtrl,
-        intent: intent, cameraYaw: app.cameraSystem.rig.viewYaw, dt: dt * app.characterSystem.speed)
+        intent: intent, cameraYaw: app.cameraSystem.rig.viewYaw, deltaTime: deltaTime * app.characterSystem.speed)
       groundWalker(controller: heroCtrl, groundZ: app.characterSystem.groundZ)
       if characterMoved {
         app.characterSystem.model = walkerWorldModel(baseModel: app.characterSystem.basePartModel, controller: heroCtrl)
@@ -615,7 +615,7 @@ func updateApp(app: mod App) {
       if let crowdE: EntityId = app.characterSystem.crowdEntities.copyAt(index: idx) {
         let drivenCtrl: mod ThirdPersonController => componentMod(this: app.world.controllers, entity: crowdE)
         characterMoved = updateWalkerMovement(controller: drivenCtrl,
-          intent: intent, cameraYaw: app.cameraSystem.rig.viewYaw, dt: dt * app.characterSystem.speed)
+          intent: intent, cameraYaw: app.cameraSystem.rig.viewYaw, deltaTime: deltaTime * app.characterSystem.speed)
         groundWalker(controller: drivenCtrl, groundZ: app.characterSystem.groundZ)
         let drivenClip: Int = locomotionClipFor(controller: drivenCtrl)
         let drivenAnim: mod AnimationState => componentMod(this: app.world.animStates, entity: crowdE)
@@ -635,7 +635,7 @@ func updateApp(app: mod App) {
   # Fixed-timestep physics seam (#553): accumulate frame time and step at a fixed
   # rate, decoupled from render. physicsStepWorld iterates the (empty) body table until a physics backend
   # lands; the loop shape does not change then.
-  app.physicsSystem.accumulator = app.physicsSystem.accumulator + dt
+  app.physicsSystem.accumulator = app.physicsSystem.accumulator + deltaTime
   loop app.physicsSystem.accumulator >= physicsFixedStep {
     physicsStepWorld(world: app.world, fixedDt: physicsFixedStep)
     app.physicsSystem.accumulator = app.physicsSystem.accumulator - physicsFixedStep
