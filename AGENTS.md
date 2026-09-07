@@ -99,6 +99,25 @@ These instructions define **how Codex should work**, communicate progress, and i
   `cam2` or `cam`/`c`. Add words; do not remove them. `io` is doubly wrong — it
   is an abbreviation AND misleading (it reads as filesystem/stream I/O, not an
   input-system state).
+- **The ONE exception: an established initialism that IS the thing's real,
+  universally-recognised name** — where spelling it out would read as wrong or
+  pedantic to any practitioner. `ui`/`Ui` (user interface — `UiSystem`,
+  `uiWorld`) is the case that prompted this rule and is explicitly fine. So are
+  `id` (identifier — `EntityId`, `nodeId`), the hardware/format/protocol
+  initialisms (`gpu`, `cpu`, `api`, `json`, `html`, `css`, `url`, `uri`, `http`,
+  `png`, `wgsl`, `sdf`), the colour initialisms tied to the already-allowed
+  `r`/`g`/`b`/`a` (`rgb`, `rgba`, `hsl`), and the dimensional tags `2d`/`3d`
+  (`World3d`, `Gpu2d`). Plus the maths names already blessed above:
+  `x`/`y`/`z`/`w`, `r`/`g`/`b`/`a`, `dt`, and loop `i`/`j`.
+  - **Case an initialism as an ordinary word** (the PascalCase/camelCase rule
+    still applies): `Ui`, `Id`, `Gpu`, `Json`, `Html`, `Url` — NEVER `UI`, `ID`,
+    `GPU`, `JSON`, `HTML`. So `EntityId` and `Gpu2d`, not `EntityID` / `GPU2D`.
+  - This is a **CLOSED set of real names, not a licence for short names.** It
+    does NOT reopen ad-hoc contractions: `cam`, `ctx`, `cfg`, `tmp`, `btn`,
+    `msg`, `idx`, `elem` are still banned — they abbreviate a WORD, they are not
+    the thing's name. And `io` is NOT on the list: even genuine input/output is
+    spelled `input`/`output`, because `io` is ambiguous (stream I/O vs an
+    input-system state) — exactly the trap above.
 - Same phasing as the single-letter rule: fix it in files you are already
   editing; do not open a mass rename of unrelated code.
 
