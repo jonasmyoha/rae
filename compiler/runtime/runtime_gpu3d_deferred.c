@@ -53,6 +53,8 @@ static int             gb_pyramid_w = 0, gb_pyramid_h = 0;
 
 static WGPUTexture     gb_lit_tex = NULL;        /* linear HDR radiance */
 static WGPUTextureView gb_lit_view = NULL;
+static WGPUTexture gb_lit_copy_tex = NULL;
+static WGPUTextureView gb_lit_copy_view = NULL;
 /* HDR radiance format (#370). rg11b10ufloat halves the bandwidth of the
  * largest full-res float target in the frame, but it is an optional
  * WebGPU feature; when the adapter does not offer it we fall back to
@@ -882,6 +884,8 @@ static void gb_deferred_release_targets(void) {
     if (gb_ao_bind)        { wgpuBindGroupRelease(gb_ao_bind); gb_ao_bind = NULL; }
     if (gb_lit_view)       { wgpuTextureViewRelease(gb_lit_view); gb_lit_view = NULL; }
     if (gb_lit_tex)        { wgpuTextureRelease(gb_lit_tex); gb_lit_tex = NULL; }
+    if (gb_lit_copy_view) { wgpuTextureViewRelease(gb_lit_copy_view); gb_lit_copy_view = NULL; }
+    if (gb_lit_copy_tex) { wgpuTextureRelease(gb_lit_copy_tex); gb_lit_copy_tex = NULL; }
     gb_pyramid_mips = 0;
 }
 
@@ -890,7 +894,7 @@ static void gb_deferred_release_targets(void) {
  * a resize back to a previous size still invalidates the bind groups, and
  * comparing sizes would miss that. */
 static void gb_deferred_ensure(void) {
-    if (gb_deferred_gen == gb_targets_gen && gb_pyramid_tex && gb_lit_tex) return;
+    if (gb_deferred_gen == gb_targets_gen && gb_pyramid_tex && gb_lit_tex && gb_lit_copy_tex) return;
     if (gb_target_w <= 0 || gb_target_h <= 0) return;
     gb_deferred_release_targets();
 
@@ -929,8 +933,15 @@ static void gb_deferred_ensure(void) {
     td.mipLevelCount = 1; td.sampleCount = 1;
     td.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding;
     td.format = gb_lit_format;
+    td.usage |= WGPUTextureUsage_CopySrc;
     gb_lit_tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
     gb_lit_view = wgpuTextureCreateView(gb_lit_tex, NULL);
+    /* Same extent/format as HDR, sampled by later transparent materials.
+     * Recreated and released with the other generation-keyed targets. */
+    td.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding;
+    gb_lit_copy_tex = wgpuDeviceCreateTexture(g_wgpu_dev, &td);
+    gb_lit_copy_view = wgpuTextureCreateView(gb_lit_copy_tex, NULL);
+    td.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding;
 
     /* AO target (#387). Full resolution and r8unorm: one byte per pixel,
      * and a fragment pass can write r8unorm as a colour attachment even
@@ -1098,6 +1109,9 @@ void rae_ext_Gbuffer_skyHosekPush(int64_t index, float value) {
  * light-uniform / shadow init block. */
 void* rae_gb_light_pipeline(void)     { return (void*)gb_light_pipeline; }
 void* rae_gb_lit_view(void)           { return (void*)gb_lit_view; }
+void* rae_gb_lit_texture(void)        { return (void*)gb_lit_tex; }
+void* rae_gb_lit_copy_texture(void)   { return (void*)gb_lit_copy_tex; }
+void* rae_gb_lit_copy_view(void)      { return (void*)gb_lit_copy_view; }
 void* rae_gb_light_bind(void)         { return (void*)gb_light_bind; }
 void rae_gb_set_light_bind(void* b)   { gb_light_bind = (WGPUBindGroup)b; }
 void* rae_gb_shadow_frame_ubuf(void)  { return (void*)g3d_sm_frame_ubuf; }

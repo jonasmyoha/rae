@@ -37,6 +37,7 @@ open Gbuffer
 open GbufferWorld
 open GbufferInspector
 open GbufferPasses
+open TransparentForward
 open Sky
 
 # ----- pass tags ------------------------------------------------------
@@ -54,6 +55,7 @@ enum RenderTag {
   uiOverlay     # load-preserving 2D UI painted over the composited frame (#389)
   taa           # temporal resolve (#390); HDR in, HDR out
   shadow        # sun cascade depth (#382); lighting reads it
+  transparentForward # snapshots opaque radiance before transparent draws
 }
 
 type DeferredRenderer {
@@ -141,6 +143,7 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
   # Linear HDR radiance. Everything radiometric happens here; only
   # composite writes the presentable target.
   let litId: Int = addResource(renderGraph: renderGraph, name: "litColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  let litCopyId: Int = addResource(renderGraph: renderGraph, name: "litCopy", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
   # AO is full-resolution for now. It is low-frequency and belongs at half
   # res with a depth-aware upsample, which is a tier knob rather than a
   # correctness question — declared truthfully as Full until it moves.
@@ -155,6 +158,7 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
   let present: Int = addPass(renderGraph: renderGraph, name: "present", kind: passRaster, tag: RenderTag.present)
   let composite: Int = addPass(renderGraph: renderGraph, name: "composite", kind: passRaster, tag: RenderTag.composite)
   let lighting: Int = addPass(renderGraph: renderGraph, name: "lighting", kind: passRaster, tag: RenderTag.lighting)
+  let transparent: Int = addPass(renderGraph: renderGraph, name: "transparentForward", kind: passRaster, tag: RenderTag.transparentForward)
   let ssaoP: Int = addPass(renderGraph: renderGraph, name: "ssao", kind: passRaster, tag: RenderTag.ssao)
   let taaP: Int = addPass(renderGraph: renderGraph, name: "taa", kind: passRaster, tag: RenderTag.taa)
   let shadowP: Int = addPass(renderGraph: renderGraph, name: "shadow", kind: passRaster, tag: RenderTag.shadow)
@@ -191,9 +195,15 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
   passReads(renderGraph: renderGraph, pass: lighting, resource: pyramidId, access: accStorageRead)
   passWrites(renderGraph: renderGraph, pass: lighting, resource: litId, access: accAttachmentWrite)
 
+  # Snapshot opaque radiance before any transparent draw modifies it.
+  # passModifies orders all later radiance readers after this pass.
+  passReads(renderGraph: renderGraph, pass: transparent, resource: depthId, access: accSampledRead)
+  passModifies(renderGraph: renderGraph, pass: transparent, resource: litId, access: accAttachmentRead)
+  passWrites(renderGraph: renderGraph, pass: transparent, resource: litCopyId, access: accAttachmentWrite)
+
   # TAA reads radiance and the motion the G-buffer packed, and writes the
   # history the composite then reads — so the graph derives
-  # lighting -> taa -> composite.
+  # lighting -> transparentForward -> taa -> composite.
   passReads(renderGraph: renderGraph, pass: taaP, resource: litId, access: accSampledRead)
   passReads(renderGraph: renderGraph, pass: taaP, resource: materialId, access: accSampledRead)
   passWrites(renderGraph: renderGraph, pass: taaP, resource: taaId, access: accAttachmentWrite)
@@ -342,6 +352,9 @@ func renderDeferredPassWorld(renderer: mod DeferredRenderer, tag: view Int, worl
   }
   if tag is RenderTag.taa {
     taaPass(cache: renderer.passes.taa)
+  }
+  if tag is RenderTag.transparentForward {
+    copyOpaqueRadiance()
   }
   if tag is RenderTag.composite {
     if renderer.debugView is viewLit {
