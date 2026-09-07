@@ -121,11 +121,11 @@ func grassGust(phase: view Float, baseX: view Float, time: view Float) ret Float
 # then one instanced draw for the whole field. The matrices and the record
 # layout are gbuffer's Rae helpers; nothing here touches raw float offsets.
 func drawGrassField(grassSystem: mod GrassSystem, world: view GameWorld,
-                    time: view Float, dt: view Float, toon: view Int) {
+                    time: view Float, deltaTime: view Float, toon: view Int) {
   loop var index: Int = 0, index < componentCount(this: world.grassBlades), ++index {
     let blade: GrassBlade = componentDataAt(this: world.grassBlades, i: index)
     let gust: Float = grassGust(phase: blade.phase, baseX: blade.baseX, time: time)
-    let prevGust: Float = grassGust(phase: blade.phase, baseX: blade.baseX, time: time - dt)
+    let prevGust: Float = grassGust(phase: blade.phase, baseX: blade.baseX, time: time - deltaTime)
     let model: Mat4 = Gbuffer.swayModel(
       x: blade.baseX, y: blade.baseY, z: blade.baseZ, yaw: blade.yaw,
       tiltX: gust * 0.6, tiltY: gust, scale: blade.scale)

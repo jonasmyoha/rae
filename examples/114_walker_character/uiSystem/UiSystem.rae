@@ -61,7 +61,7 @@ type UiTick {
   scrolled: Bool
 }
 
-func uiUpdate(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSystem, frame: mod Frame, inputSystem: mod InputSystem, persist: mod PersistState, players: mod PlayerRoster, renderSystem: mod RenderSystem, terrainSystem: mod TerrainSystem, world: view GameWorld, dt: copy Float, now: copy Float64) ret UiTick {
+func uiUpdate(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSystem, frame: mod Frame, inputSystem: mod InputSystem, persist: mod PersistState, players: mod PlayerRoster, renderSystem: mod RenderSystem, terrainSystem: mod TerrainSystem, world: view GameWorld, deltaTime: copy Float, now: copy Float64) ret UiTick {
   updateUiInput(input: inputSystem.ui, world: inputSystem.world)
   if walkerMenuTapped() { toggleWalkerPanel(settings: inputSystem.settings, world: inputSystem.world) suppressUiPress(input: inputSystem.ui) }
   let scrolled: Bool = updateScrollPanel(world: inputSystem.world, viewport: inputSystem.panelScroll, input: inputSystem.ui)
@@ -122,7 +122,7 @@ func uiUpdate(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSyst
   if settingsUpdatePointer(s: inputSystem.settings, world: inputSystem.world, input: inputSystem.ui) { settingsChanged = true }
   if settingsUpdateLatitudePointer(s: inputSystem.settings, world: inputSystem.world, input: inputSystem.ui) { settingsChanged = true }
   if settingsUpdateDatePointer(s: inputSystem.settings, world: inputSystem.world, input: inputSystem.ui) { settingsChanged = true }
-  if settingsAdvanceTime(s: inputSystem.settings, dt: dt) { settingsChanged = true }
+  if settingsAdvanceTime(s: inputSystem.settings, deltaTime: deltaTime) { settingsChanged = true }
   if settingsChanged {
     renderSystem.renderer.sky = settingsBuildSky(s: inputSystem.settings, data: cameraSystem.hosek, turbidity: 3.0, groundAlbedo: 0.30)
     cameraSystem.light.sunDir = settingsSunDir(s: inputSystem.settings)

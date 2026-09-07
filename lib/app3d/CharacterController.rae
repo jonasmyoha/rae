@@ -43,7 +43,7 @@ func wrapCharacterAngle(angle: view Float) ret Float {
 func stepThirdPersonController(controller: mod ThirdPersonController,
                                inputRight: view Float, inputForward: view Float,
                                walking: view Bool, cameraYaw: view Float,
-                               dt: view Float) ret Bool {
+                               deltaTime: view Float) ret Bool {
   let oldPosition: Vec3 = controller.position
   let oldHeading: Float = controller.heading
   let oldMoving: Bool = controller.moving
@@ -57,7 +57,7 @@ func stepThirdPersonController(controller: mod ThirdPersonController,
     localRight = localRight * inverseLength
     localForward = localForward * inverseLength
   }
-  controller.moving = inputLengthSq > 0.0001 and dt > 0.0
+  controller.moving = inputLengthSq > 0.0001 and deltaTime > 0.0
   controller.walking = controller.moving and walking
 
   if controller.moving {
@@ -73,12 +73,12 @@ func stepThirdPersonController(controller: mod ThirdPersonController,
     var moveSpeed: Float = controller.runSpeed
     if walking { moveSpeed = controller.walkSpeed }
     controller.position = Vec3.vadd(
-      a: controller.position, b: Vec3.vscale(a: direction, s: moveSpeed * dt))
+      a: controller.position, b: Vec3.vscale(a: direction, s: moveSpeed * deltaTime))
 
     # A +Z rotation turns the model's +Y forward axis into `direction`.
     let desiredHeading: Float = Math.atan2(y: 0.0 - direction.x, x: direction.y)
     let headingGap: Float = wrapCharacterAngle(angle: desiredHeading - controller.heading)
-    let turnAmount: Float = 1.0 - Math.exp(x: 0.0 - controller.turnRate * dt)
+    let turnAmount: Float = 1.0 - Math.exp(x: 0.0 - controller.turnRate * deltaTime)
     controller.heading = wrapCharacterAngle(angle: controller.heading + headingGap * turnAmount)
   }
 
@@ -94,7 +94,7 @@ func stepThirdPersonController(controller: mod ThirdPersonController,
 # the slower walk gait, as requested for this game-mode experiment.
 func updateThirdPersonController(controller: mod ThirdPersonController,
                                  allowInput: view Bool, cameraYaw: view Float,
-                                 dt: view Float) ret Bool {
+                                 deltaTime: view Float) ret Bool {
   var inputRight: Float = 0.0
   var inputForward: Float = 0.0
   var walking: Bool = false
@@ -115,7 +115,7 @@ func updateThirdPersonController(controller: mod ThirdPersonController,
   }
   ret stepThirdPersonController(
     controller: controller, inputRight: inputRight, inputForward: inputForward,
-    walking: walking, cameraYaw: cameraYaw, dt: dt)
+    walking: walking, cameraYaw: cameraYaw, deltaTime: deltaTime)
 }
 
 func thirdPersonCameraTarget(controller: view ThirdPersonController,
