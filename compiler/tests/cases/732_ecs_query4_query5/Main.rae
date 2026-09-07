@@ -8,14 +8,14 @@ open ecs/Query
 # different driver branches (query4: D then B; query5: E then A). Only e4 is in
 # every table. A mod write through queryModAt must be visible on read-back.
 
-type Pos { x: Int }
+type Position { x: Int }
 type Vel { v: Int }
 type Hp { hp: Int }
 type Tag { t: Int }
 type Nm { n: Int }
 
 func main() {
-  var pos: ComponentTable(Pos) = createComponentTable(Pos)
+  var pos: ComponentTable(Position) = createComponentTable(Position)
   var vel: ComponentTable(Vel) = createComponentTable(Vel)
   var hp: ComponentTable(Hp) = createComponentTable(Hp)
   var tag: ComponentTable(Tag) = createComponentTable(Tag)
@@ -24,10 +24,10 @@ func main() {
   let e2: EntityId = { index: 2, generation: 0 }
   let e3: EntityId = { index: 3, generation: 0 }
   let e4: EntityId = { index: 4, generation: 0 }
-  componentSet(this: pos, entity: e1, data: Pos { x: 10 })
-  componentSet(this: pos, entity: e2, data: Pos { x: 20 })
-  componentSet(this: pos, entity: e3, data: Pos { x: 30 })
-  componentSet(this: pos, entity: e4, data: Pos { x: 40 })
+  componentSet(this: pos, entity: e1, data: Position { x: 10 })
+  componentSet(this: pos, entity: e2, data: Position { x: 20 })
+  componentSet(this: pos, entity: e3, data: Position { x: 30 })
+  componentSet(this: pos, entity: e4, data: Position { x: 40 })
   componentSet(this: vel, entity: e2, data: Vel { v: 2 })
   componentSet(this: vel, entity: e3, data: Vel { v: 3 })
   componentSet(this: vel, entity: e4, data: Vel { v: 4 })
@@ -41,7 +41,7 @@ func main() {
   let h4: List(Query4Match) = query4(tableA: pos, tableB: vel, tableC: hp, tableD: tag)
   log("q4 count: {h4.length}")
   loop let row: view Query4Match in h4 {
-    let p: view Pos => query4ViewA(tableA: pos, hit: row)
+    let p: view Position => query4ViewA(tableA: pos, hit: row)
     let vv: view Vel => query4ViewB(tableB: vel, hit: row)
     let h: view Hp => query4ViewC(tableC: hp, hit: row)
     let tg: view Tag => query4ViewD(tableD: tag, hit: row)
@@ -52,17 +52,17 @@ func main() {
   let h4b: List(Query4Match) = query4(tableA: pos, tableB: tag, tableC: vel, tableD: hp)
   log("q4b count: {h4b.length}")
   loop let row: view Query4Match in h4b {
-    let px: mod Pos => queryModAt(table: pos, denseIndex: row.indexA)
+    let px: mod Position => queryModAt(table: pos, denseIndex: row.indexA)
     px.x = px.x + 1000
   }
-  let got: Pos = componentGet(this: pos, entity: e4)
+  let got: Position = componentGet(this: pos, entity: e4)
   log("e4.x after q4 mod: {got.x}")
 
   # query5, smallest table (tag) in slot E.
   let h5: List(Query5Match) = query5(tableA: pos, tableB: vel, tableC: hp, tableD: nm, tableE: tag)
   log("q5 count: {h5.length}")
   loop let row: view Query5Match in h5 {
-    let p: view Pos => query5ViewA(tableA: pos, hit: row)
+    let p: view Position => query5ViewA(tableA: pos, hit: row)
     let vv: view Vel => query5ViewB(tableB: vel, hit: row)
     let h: view Hp => query5ViewC(tableC: hp, hit: row)
     let nn: view Nm => query5ViewD(tableD: nm, hit: row)

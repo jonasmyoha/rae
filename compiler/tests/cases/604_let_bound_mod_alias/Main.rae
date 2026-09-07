@@ -6,16 +6,16 @@
 # already forbids for every alias. Writing through the alias lands in the
 # aliased storage.
 
-type Pos { x: Int, y: Int }
-type Transform { p: Pos }
+type Position { x: Int, y: Int }
+type Transform { p: Position }
 
-func position(t: mod Transform) ret mod Pos {
+func position(t: mod Transform) ret mod Position {
   ret t.p
 }
 
 func main() {
-  var tr: Transform = { p: Pos { x: 5, y: 12 } }
-  let w: mod Pos => position(t: mod tr)
-  w = Pos { x: 1, y: 2 }
+  var tr: Transform = { p: Position { x: 5, y: 12 } }
+  let w: mod Position => position(t: mod tr)
+  w = Position { x: 1, y: 2 }
   log("wrote through a let-bound mod alias: {tr.p.x}")
 }
