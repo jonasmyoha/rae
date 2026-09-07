@@ -55,6 +55,12 @@ static WGPUTexture     gb_lit_tex = NULL;        /* linear HDR radiance */
 static WGPUTextureView gb_lit_view = NULL;
 static WGPUTexture gb_lit_copy_tex = NULL;
 static WGPUTextureView gb_lit_copy_view = NULL;
+/* Transparent forward pass (#843): the blend pipeline + its bind group are
+ * created in Rae (lib/TransparentForward.rae) and parked here, the same slot
+ * idiom as the AO / composite passes. Released in deferredShutdown; a resize
+ * does not invalidate them (they bind the once-created frame/draws buffers). */
+static WGPURenderPipeline gb_transparent_pipeline = NULL;
+static WGPUBindGroup      gb_transparent_bind = NULL;
 /* HDR radiance format (#370). rg11b10ufloat halves the bandwidth of the
  * largest full-res float target in the frame, but it is an optional
  * WebGPU feature; when the adapter does not offer it we fall back to
@@ -1112,6 +1118,11 @@ void* rae_gb_lit_view(void)           { return (void*)gb_lit_view; }
 void* rae_gb_lit_texture(void)        { return (void*)gb_lit_tex; }
 void* rae_gb_lit_copy_texture(void)   { return (void*)gb_lit_copy_tex; }
 void* rae_gb_lit_copy_view(void)      { return (void*)gb_lit_copy_view; }
+int64_t rae_gb_lit_format(void)       { return (int64_t)gb_lit_format; }
+void* rae_gb_transparent_pipeline(void)     { return (void*)gb_transparent_pipeline; }
+void  rae_gb_set_transparent_pipeline(void* p) { gb_transparent_pipeline = (WGPURenderPipeline)p; }
+void* rae_gb_transparent_bind(void)         { return (void*)gb_transparent_bind; }
+void  rae_gb_set_transparent_bind(void* b)  { gb_transparent_bind = (WGPUBindGroup)b; }
 void* rae_gb_light_bind(void)         { return (void*)gb_light_bind; }
 void rae_gb_set_light_bind(void* b)   { gb_light_bind = (WGPUBindGroup)b; }
 void* rae_gb_shadow_frame_ubuf(void)  { return (void*)g3d_sm_frame_ubuf; }
@@ -1261,5 +1272,7 @@ void rae_ext_Gbuffer_deferredShutdown(void) {
     if (gb_composite_samp)          { wgpuSamplerRelease(gb_composite_samp); gb_composite_samp = NULL; }
     if (gb_taa_ubuf)                { wgpuBufferRelease(gb_taa_ubuf); gb_taa_ubuf = NULL; }
     if (gb_taa_pipeline)            { wgpuRenderPipelineRelease(gb_taa_pipeline); gb_taa_pipeline = NULL; }
+    if (gb_transparent_bind)        { wgpuBindGroupRelease(gb_transparent_bind); gb_transparent_bind = NULL; }
+    if (gb_transparent_pipeline)    { wgpuRenderPipelineRelease(gb_transparent_pipeline); gb_transparent_pipeline = NULL; }
     gb_deferred_gen = -1;
 }
