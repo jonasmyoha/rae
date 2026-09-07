@@ -5,25 +5,25 @@ type Point {
 
 # view by default (implicit when an explicit mode is used) — bare T
 # is rejected at sema; tests below all use explicit modes.
-func testView(p: view Point) {
-  log("testView x: {p.x}")
+func testView(point: view Point) {
+  log("testView x: {point.x}")
   # p.x = 10 # Error: p is view
 }
 
 # Explicit view
-func testExplicitView(p: view Point) {
-  log("testExplicitView x: {p.x}")
+func testExplicitView(point: view Point) {
+  log("testExplicitView x: {point.x}")
 }
 
 # mod reference
-func testMod(p: mod Point) {
-  p.x = p.x + 1
-  log("testMod x: {p.x}")
+func testMod(point: mod Point) {
+  point.x = point.x + 1
+  log("testMod x: {point.x}")
 }
 
 # copy (deep-copy of the value — callee owns an independent copy)
-func testCopy(p: copy Point) {
-  log("testCopy x: {p.x}")
+func testCopy(point: copy Point) {
+  log("testCopy x: {point.x}")
 }
 
 # Primitive view (passed by value internally but semantically view)
