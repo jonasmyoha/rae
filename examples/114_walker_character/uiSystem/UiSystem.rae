@@ -115,18 +115,18 @@ func uiUpdate(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSyst
   }
   var settingsChanged: Bool = false
   loop var ai: Int = 0, ai < uiActionCount(input: inputSystem.ui), ++ai {
-    if settingsHandleAction(s: inputSystem.settings, actionId: uiActionAt(input: inputSystem.ui, index: ai)) {
+    if settingsHandleAction(settingsState: inputSystem.settings, actionId: uiActionAt(input: inputSystem.ui, index: ai)) {
       settingsChanged = true
     }
   }
-  if settingsUpdatePointer(s: inputSystem.settings, world: inputSystem.world, input: inputSystem.ui) { settingsChanged = true }
-  if settingsUpdateLatitudePointer(s: inputSystem.settings, world: inputSystem.world, input: inputSystem.ui) { settingsChanged = true }
-  if settingsUpdateDatePointer(s: inputSystem.settings, world: inputSystem.world, input: inputSystem.ui) { settingsChanged = true }
-  if settingsAdvanceTime(s: inputSystem.settings, deltaTime: deltaTime) { settingsChanged = true }
+  if settingsUpdatePointer(settingsState: inputSystem.settings, world: inputSystem.world, input: inputSystem.ui) { settingsChanged = true }
+  if settingsUpdateLatitudePointer(settingsState: inputSystem.settings, world: inputSystem.world, input: inputSystem.ui) { settingsChanged = true }
+  if settingsUpdateDatePointer(settingsState: inputSystem.settings, world: inputSystem.world, input: inputSystem.ui) { settingsChanged = true }
+  if settingsAdvanceTime(settingsState: inputSystem.settings, deltaTime: deltaTime) { settingsChanged = true }
   if settingsChanged {
-    renderSystem.renderer.sky = settingsBuildSky(s: inputSystem.settings, data: cameraSystem.hosek, turbidity: 3.0, groundAlbedo: 0.30)
-    cameraSystem.light.sunDir = settingsSunDir(s: inputSystem.settings)
-    cameraSystem.light.sunColor = settingsSunColor(s: inputSystem.settings)
+    renderSystem.renderer.sky = settingsBuildSky(settingsState: inputSystem.settings, data: cameraSystem.hosek, turbidity: 3.0, groundAlbedo: 0.30)
+    cameraSystem.light.sunDir = settingsSunDir(settingsState: inputSystem.settings)
+    cameraSystem.light.sunColor = settingsSunColor(settingsState: inputSystem.settings)
     characterSystem.speed = inputSystem.settings.speed
     characterSystem.playing = inputSystem.settings.playing
     if characterSystem.toon is not inputSystem.settings.toon {
@@ -135,14 +135,14 @@ func uiUpdate(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSyst
     }
     let pctS: Int = speedPercent(v: characterSystem.speed)
     setNodeText(world: inputSystem.world, nodeId: "SpeedLabel", value: "Speed {pctS}%")
-    settingsApplyToWorld(s: inputSystem.settings, world: inputSystem.world)
+    settingsApplyToWorld(settingsState: inputSystem.settings, world: inputSystem.world)
     applyWalkerPanel(world: inputSystem.world, open: inputSystem.settings.open)
     persist.stateDirty = true
   }
   if clipHit.length() > 0 or transportHit.length() > 0 {
     inputSystem.settings.speed = characterSystem.speed
     inputSystem.settings.toon = characterSystem.toon
-    settingsApplyToWorld(s: inputSystem.settings, world: inputSystem.world)
+    settingsApplyToWorld(settingsState: inputSystem.settings, world: inputSystem.world)
     applyWalkerPanel(world: inputSystem.world, open: inputSystem.settings.open)
     persist.stateDirty = true
   }
