@@ -226,7 +226,7 @@ func restoreAppState(state: mod AppState, playback: mod PlaybackState, path: vie
   let tabFieldIdx: Int = Json.field(doc: doc, this: root, key: tabKey)
   if tabFieldIdx >= 0 {
     let tabOrd: Int = Json.jsonInt(this: Json.jsonValueAt(doc: doc, idx: tabFieldIdx), fallback: 4)
-    state.tab = intToScreen(n: tabOrd)
+    state.tab = intToScreen(value: tabOrd)
   }
   # winX / winY are deliberately NOT read. Window geometry belongs to the
   # runtime now (runtime_gpu2d_platform.c), which persists it for every app.

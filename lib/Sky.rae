@@ -286,7 +286,7 @@ func hemisphereIrradiance(ambSky: view Vec3, ambGround: view Vec3,
 #
 # EXPOSURE IS APPLIED HERE, not by the caller, so a sky cannot be shown
 # at one brightness and light the scene at another.
-func irradiance(sky: view Sky, n: view Vec3) pub ret Vec3 {
+func irradiance(sky: view Sky, normal: view Vec3) pub ret Vec3 {
   if sky.kind is SkyKind.procedural {
     # A STOPGAP, and marked as one. Ambient here is the model sampled at
     # the zenith and at the horizon away from the sun, then blended as a
@@ -301,7 +301,7 @@ func irradiance(sky: view Sky, n: view Vec3) pub ret Vec3 {
     let horiz: Vec3 = Vec3.create(x: 0.0 - toSun.x, y: 0.0 - toSun.y, z: 0.08)
     let zc: Vec3 = preethamRadiance(dir: up, sunDir: toSun, turbidity: sky.turbidity)
     let hc: Vec3 = preethamRadiance(dir: horiz, sunDir: toSun, turbidity: sky.turbidity)
-    let blended: Vec3 = hemisphereIrradiance(ambSky: zc, ambGround: hc, n: n)
+    let blended: Vec3 = hemisphereIrradiance(ambSky: zc, ambGround: hc, normal: normal)
     ret Vec3.vscale(a: blended, s: sky.exposure)
   }
   if sky.kind is SkyKind.stylised {
@@ -309,10 +309,10 @@ func irradiance(sky: view Sky, n: view Vec3) pub ret Vec3 {
     # CHOSEN ambient — the toon path tints shadows toward this value, so
     # it has to be the palette the artist picked, not whatever averaging
     # a gradient produces.
-    let blended: Vec3 = hemisphereIrradiance(ambSky: sky.zenithColor, ambGround: sky.horizonColor, n: n)
+    let blended: Vec3 = hemisphereIrradiance(ambSky: sky.zenithColor, ambGround: sky.horizonColor, normal: normal)
     ret Vec3.vscale(a: blended, s: sky.exposure)
   }
-  var c: Vec3 = hemisphereIrradiance(ambSky: sky.ambSky, ambGround: sky.ambGround, n: n)
+  var c: Vec3 = hemisphereIrradiance(ambSky: sky.ambSky, ambGround: sky.ambGround, normal: normal)
   if sky.kind is SkyKind.none {
     # EXACTLY the existing expression when exposure is 1, which is what
     # createSkyNone sets. Multiplying unconditionally would introduce a
