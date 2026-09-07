@@ -29,47 +29,47 @@ func check(label: view String, ok: view Bool) {
 
 func main() {
   # Three scenes, as 110 has.
-  var s: SettingsState = createSettingsState(scene: 1, sceneCount: 3, speed: 1.0,
+  var settingsState: SettingsState = createSettingsState(scene: 1, sceneCount: 3, speed: 1.0,
                                              toon: false, hour: 12.0,
                                              skyModel: SettingsSkyModel.hosek)
   # The panel is a panel, not a dialog: it is showing to begin with, and one
   # action toggles it. There is no separate close, because the button that hides
   # it is the button that shows it — and that button stays visible either way,
   # or there would be no way back.
-  check(label: "starts showing", ok: s.open)
-  check(label: "toggles hidden", ok: settingsHandleAction(s: s, actionId: "settings.open") and s.open is false)
-  check(label: "toggles back", ok: settingsHandleAction(s: s, actionId: "settings.open") and s.open)
+  check(label: "starts showing", ok: settingsState.open)
+  check(label: "toggles hidden", ok: settingsHandleAction(settingsState: settingsState, actionId: "settings.open") and settingsState.open is false)
+  check(label: "toggles back", ok: settingsHandleAction(settingsState: settingsState, actionId: "settings.open") and settingsState.open)
 
   # An action nobody here owns must be ignored, not mistaken for a change: the
   # app forwards every action it sees, including its own.
-  check(label: "unknown action is ignored", ok: settingsHandleAction(s: s, actionId: "camera.mode") is false)
+  check(label: "unknown action is ignored", ok: settingsHandleAction(settingsState: settingsState, actionId: "camera.mode") is false)
 
-  check(label: "toon toggles on", ok: settingsHandleAction(s: s, actionId: "settings.toon") and s.toon)
-  check(label: "toon toggles off", ok: settingsHandleAction(s: s, actionId: "settings.toon") and s.toon is false)
+  check(label: "toon toggles on", ok: settingsHandleAction(settingsState: settingsState, actionId: "settings.toon") and settingsState.toon)
+  check(label: "toon toggles off", ok: settingsHandleAction(settingsState: settingsState, actionId: "settings.toon") and settingsState.toon is false)
 
   # Speed is the shared step ladder, not a toggle.
-  let base: Float = s.speed
-  settingsHandleAction(s: s, actionId: "settings.anim.faster")
-  check(label: "faster raises speed", ok: s.speed > base)
-  settingsHandleAction(s: s, actionId: "settings.anim.slower")
-  check(label: "slower returns", ok: s.speed <= base + 0.0001 and s.speed >= base - 0.0001)
+  let base: Float = settingsState.speed
+  settingsHandleAction(settingsState: settingsState, actionId: "settings.anim.faster")
+  check(label: "faster raises speed", ok: settingsState.speed > base)
+  settingsHandleAction(settingsState: settingsState, actionId: "settings.anim.slower")
+  check(label: "slower returns", ok: settingsState.speed <= base + 0.0001 and settingsState.speed >= base - 0.0001)
 
   # Sky model is a radio, so re-picking the current one reports no change.
-  check(label: "defaults to hosek", ok: s.skyModel is SettingsSkyModel.hosek)
-  check(label: "switches to preetham", ok: settingsHandleAction(s: s, actionId: "settings.sky.preetham") and s.skyModel is SettingsSkyModel.preetham)
-  check(label: "back to hosek", ok: settingsHandleAction(s: s, actionId: "settings.sky.hosek") and s.skyModel is SettingsSkyModel.hosek)
+  check(label: "defaults to hosek", ok: settingsState.skyModel is SettingsSkyModel.hosek)
+  check(label: "switches to preetham", ok: settingsHandleAction(settingsState: settingsState, actionId: "settings.sky.preetham") and settingsState.skyModel is SettingsSkyModel.preetham)
+  check(label: "back to hosek", ok: settingsHandleAction(settingsState: settingsState, actionId: "settings.sky.hosek") and settingsState.skyModel is SettingsSkyModel.hosek)
 
-  check(label: "scene 2 selects", ok: settingsHandleAction(s: s, actionId: "settings.scene.2") and s.scene is 2)
-  check(label: "re-selecting reports no change", ok: settingsHandleAction(s: s, actionId: "settings.scene.2") is false)
-  check(label: "scene 3 selects", ok: settingsHandleAction(s: s, actionId: "settings.scene.3") and s.scene is 3)
+  check(label: "scene 2 selects", ok: settingsHandleAction(settingsState: settingsState, actionId: "settings.scene.2") and settingsState.scene is 2)
+  check(label: "re-selecting reports no change", ok: settingsHandleAction(settingsState: settingsState, actionId: "settings.scene.2") is false)
+  check(label: "scene 3 selects", ok: settingsHandleAction(settingsState: settingsState, actionId: "settings.scene.3") and settingsState.scene is 3)
 
   # One scene, as 113 has. The buttons still EXIST — hiding controls per app is
   # how two dialogs drift apart — but they cannot select what is not there.
   var one: SettingsState = createSettingsState(scene: 1, sceneCount: 1, speed: 1.0,
                                                toon: true, hour: 8.0,
                                                skyModel: SettingsSkyModel.preetham)
-  check(label: "single-scene app refuses scene 2", ok: settingsHandleAction(s: one, actionId: "settings.scene.2") is false and one.scene is 1)
-  check(label: "single-scene app keeps its other settings", ok: settingsHandleAction(s: one, actionId: "settings.toon") and one.toon is false)
+  check(label: "single-scene app refuses scene 2", ok: settingsHandleAction(settingsState: one, actionId: "settings.scene.2") is false and one.scene is 1)
+  check(label: "single-scene app keeps its other settings", ok: settingsHandleAction(settingsState: one, actionId: "settings.toon") and one.toon is false)
 
   # The time readout is hours and minutes; 6.5 on screen reads as a number.
   check(label: "noon formats", ok: formatHour(hour: 12.0) is "12:00")
@@ -86,7 +86,7 @@ func main() {
 
   # Each app picks its own starting model: 110 is the realistic scene and opens
   # on Preetham, 113 the stylised one and opens on Hosek.
-  check(label: "sky default is per app", ok: s.skyModel is SettingsSkyModel.hosek and one.skyModel is SettingsSkyModel.preetham)
+  check(label: "sky default is per app", ok: settingsState.skyModel is SettingsSkyModel.hosek and one.skyModel is SettingsSkyModel.preetham)
 
   # ----- the clock ----------------------------------------------------
   # A whole day in one minute, so 2.5 real seconds is one hour.
@@ -94,20 +94,20 @@ func main() {
   var clock: SettingsState = createSettingsState(scene: 1, sceneCount: 1, speed: 1.0,
                                                  toon: false, hour: 12.0,
                                                  skyModel: SettingsSkyModel.hosek)
-  check(label: "2.5s advances one hour", ok: settingsAdvanceTime(s: clock, deltaTime: 2.5) and clock.hour > 12.99 and clock.hour < 13.01)
+  check(label: "2.5s advances one hour", ok: settingsAdvanceTime(settingsState: clock, deltaTime: 2.5) and clock.hour > 12.99 and clock.hour < 13.01)
   # Half a real minute is half a day, and 13:00 plus twelve hours is 01:00 the
   # next day — so this covers the rate and the MIDNIGHT WRAP at once. Clamping
   # at 24 instead of wrapping would park the sun there and the day would only
   # ever run once.
-  check(label: "half a minute is half a day, past midnight", ok: settingsAdvanceTime(s: clock, deltaTime: 30.0) and clock.hour > 0.99 and clock.hour < 1.01)
+  check(label: "half a minute is half a day, past midnight", ok: settingsAdvanceTime(settingsState: clock, deltaTime: 30.0) and clock.hour > 0.99 and clock.hour < 1.01)
   # A whole day later it reads the same hour, so nothing CHANGED and the caller
   # is told so rather than being made to rebuild the sky for an identical value.
-  check(label: "a full minute is a full day", ok: settingsAdvanceTime(s: clock, deltaTime: 60.0) is false)
+  check(label: "a full minute is a full day", ok: settingsAdvanceTime(settingsState: clock, deltaTime: 60.0) is false)
   # A drag WINS: otherwise the clock and the pointer fight over one value and
   # the handle crawls away from where it was put.
   clock.timeDragging = true
   let heldAt: Float = clock.hour
-  check(label: "a drag pauses the clock", ok: settingsAdvanceTime(s: clock, deltaTime: 2.5) is false and clock.hour is heldAt)
+  check(label: "a drag pauses the clock", ok: settingsAdvanceTime(settingsState: clock, deltaTime: 2.5) is false and clock.hour is heldAt)
   clock.timeDragging = false
   # PLAY/PAUSE IS THE MASTER. Pausing stops the clock whatever the Animate time
   # toggle says — a paused scene with the sun still sweeping across it is not
@@ -115,17 +115,17 @@ func main() {
   check(label: "animate time is on for the master test", ok: clock.animateTime)
   clock.playing = false
   let pausedAt: Float = clock.hour
-  check(label: "pause stops the clock", ok: settingsAdvanceTime(s: clock, deltaTime: 2.5) is false and clock.hour is pausedAt)
+  check(label: "pause stops the clock", ok: settingsAdvanceTime(settingsState: clock, deltaTime: 2.5) is false and clock.hour is pausedAt)
   # The toggle KEEPS its value rather than being written to false, so resuming
   # restores exactly what was set instead of silently turning the feature off.
   check(label: "pause does not clear the toggle", ok: clock.animateTime)
   clock.playing = true
-  check(label: "resume starts the clock again", ok: settingsAdvanceTime(s: clock, deltaTime: 2.5) and clock.hour is not pausedAt)
+  check(label: "resume starts the clock again", ok: settingsAdvanceTime(settingsState: clock, deltaTime: 2.5) and clock.hour is not pausedAt)
 
   # And the toggle turns it off entirely.
-  check(label: "toggle turns animation off", ok: settingsHandleAction(s: clock, actionId: "settings.time.animate") and clock.animateTime is false)
+  check(label: "toggle turns animation off", ok: settingsHandleAction(settingsState: clock, actionId: "settings.time.animate") and clock.animateTime is false)
   let stoppedAt: Float = clock.hour
-  check(label: "a stopped clock does not move", ok: settingsAdvanceTime(s: clock, deltaTime: 2.5) is false and clock.hour is stoppedAt)
+  check(label: "a stopped clock does not move", ok: settingsAdvanceTime(settingsState: clock, deltaTime: 2.5) is false and clock.hour is stoppedAt)
 
   # ----- the calendar rides the clock ---------------------------------
   # One real minute is one day, so a minute later the DATE has moved. A clock
@@ -138,31 +138,31 @@ func main() {
   # default", and a test that hardcodes the year fails the day someone changes it
   # — which is exactly what happened when the default moved from 2026 to 1995.
   check(label: "date defaults to the June solstice", ok: cal.dayOfYear is settingsDefaultDayOfYear and cal.year is settingsDefaultYear)
-  settingsAdvanceTime(s: cal, deltaTime: 60.0)
+  settingsAdvanceTime(settingsState: cal, deltaTime: 60.0)
   check(label: "a day of clock advances the date", ok: cal.dayOfYear is settingsDefaultDayOfYear + 1 and cal.year is settingsDefaultYear)
   # The year rolls at the year's REAL length, so 29 February exists in 2028 and
   # does not in 2029.
   cal.year = 2028
   cal.dayOfYear = 59
-  settingsAdvanceTime(s: cal, deltaTime: 60.0)
-  let feb29: CalendarDate = settingsDate(s: cal)
+  settingsAdvanceTime(settingsState: cal, deltaTime: 60.0)
+  let feb29: CalendarDate = settingsDate(settingsState: cal)
   check(label: "29 Feb exists in a leap year", ok: feb29.month is 2 and feb29.day is 29)
   cal.year = 2029
   cal.dayOfYear = 59
-  settingsAdvanceTime(s: cal, deltaTime: 60.0)
-  let mar1: CalendarDate = settingsDate(s: cal)
+  settingsAdvanceTime(settingsState: cal, deltaTime: 60.0)
+  let mar1: CalendarDate = settingsDate(settingsState: cal)
   check(label: "and is skipped in a plain year", ok: mar1.month is 3 and mar1.day is 1)
   cal.year = 2026
   cal.dayOfYear = 365
-  settingsAdvanceTime(s: cal, deltaTime: 60.0)
+  settingsAdvanceTime(settingsState: cal, deltaTime: 60.0)
   check(label: "new year rolls the year over", ok: cal.year is 2027 and cal.dayOfYear is 1)
   # Pause is the master over the calendar too, not just the hour.
   cal.playing = false
   let heldDay: Int = cal.dayOfYear
-  settingsAdvanceTime(s: cal, deltaTime: 600.0)
+  settingsAdvanceTime(settingsState: cal, deltaTime: 600.0)
   check(label: "pause holds the date as well", ok: cal.dayOfYear is heldDay)
 
   # Play/pause is shared, so both examples show the same word for it.
   check(label: "starts playing", ok: one.playing)
-  check(label: "playback toggles", ok: settingsHandleAction(s: one, actionId: "settings.playback") and one.playing is false)
+  check(label: "playback toggles", ok: settingsHandleAction(settingsState: one, actionId: "settings.playback") and one.playing is false)
 }

@@ -34,18 +34,18 @@ func approxEq(a: view Float, b: view Float, tol: view Float) ret Bool {
 # step that crosses two midnights -- it read a correct two-day jump as twelve
 # hours and failed a passing implementation.
 func hoursAfter(deltaTime: view Float, frames: view Int) ret Float {
-  var s: SettingsState = createSettingsState(scene: 1, sceneCount: 3, speed: 1.0,
+  var settingsState: SettingsState = createSettingsState(scene: 1, sceneCount: 3, speed: 1.0,
                                              toon: false, hour: 0.0,
                                              skyModel: SettingsSkyModel.preetham)
-  let startDay: Int = s.dayOfYear
+  let startDay: Int = settingsState.dayOfYear
   var i: Int = 0
   loop i < frames {
-    settingsAdvanceTime(s: s, deltaTime: deltaTime)
+    settingsAdvanceTime(settingsState: settingsState, deltaTime: deltaTime)
     i = i + 1
   }
   # No year wrap in these runs: the default day is midsummer and the longest
   # case here advances two days.
-  ret (s.dayOfYear - startDay).toFloat() * 24.0 + s.hour
+  ret (settingsState.dayOfYear - startDay).toFloat() * 24.0 + settingsState.hour
 }
 
 func main() {
