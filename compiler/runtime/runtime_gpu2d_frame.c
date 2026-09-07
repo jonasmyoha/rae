@@ -17,7 +17,7 @@ rae_Bool rae_frame_presented_any(void) { return g_rae_presented_any; }
  *
  * This logs such a skip (rate-limited so a persistent failure is a handful of
  * lines, not per-frame spam) so the condition is visible in the log instead of
- * silent. Diagnostics only — no behaviour change, no reconfigure added here. */
+ * silent, AND recovers: see rae_present_recover below. */
 static const char* rae_present_status_name(int s) {
     switch (s) {
         case 0:                                                    return "none(0)";
@@ -52,9 +52,34 @@ void rae_present_note_skip(const char* which, const char* reason) {
     if (n < RAE_PRESENT_SKIP_ALARM) return;
     if (n <= 12 || (n % 120) == 0) {
         fprintf(stderr, "[present] %s: nothing presented for %ld frame(s) — surface status=%s. "
-                        "The window stays BLACK while the sim keeps running; nothing on this path "
-                        "reconfigures the surface, so it will not recover on its own.\n",
+                        "The window would stay BLACK while the app keeps stepping, so the surface is "
+                        "reconfigured at the current drawable size for the next frame. A streak that "
+                        "keeps repeating means the drawable is genuinely unavailable.\n",
                 which, n, reason);
+    }
+}
+
+/* RECOVERY. A non-success acquire status (Outdated / Lost / Timeout / Error, or a
+ * value outside the enum) means the configured surface no longer matches the
+ * drawable. The two classic causes: the drawable size settles a frame after the
+ * window appears, and a window MOVED onto a display with a different backing
+ * scale — a bare move fires no RESIZED event, so the resize handler never
+ * reconfigures. Left alone the surface never comes back: the window stays black
+ * while the app keeps stepping. The standard wgpu answer is to reconfigure the
+ * surface at the current drawable size and try again next frame, which is what
+ * this does (rae_g2d_configure keeps the offscreen target if the size is
+ * unchanged). It also reports the RAW status number alongside the name, so a
+ * value the name table does not know is measured instead of guessed at. Call it
+ * AFTER the acquired drawable (if any) has been released — reconfiguring with a
+ * surface texture still outstanding is a validation hazard. */
+static void rae_present_recover(const char* which, int status) {
+    char reason[48];
+    snprintf(reason, sizeof(reason), "%s(%d)", rae_present_status_name(status), status);
+    rae_present_note_skip(which, reason);
+    if (g_sdl_win && g_g2d_surface) {
+        int pw = 0, ph = 0;
+        SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
+        rae_g2d_configure(pw, ph);
     }
 }
 
@@ -223,12 +248,11 @@ void rae_g2d_present_and_cleanup(void) {
             g_g2d_last_present_ok = 1;
             presented = 1;
             rae_present_note_ok();
-        } else {
-            /* Visible but the surface would not vend a usable drawable — the
-             * black-screen suspect. Nothing reconfigures, so this can persist. */
-            rae_present_note_skip("gpu2d", rae_present_status_name(st.status));
         }
+        /* Visible but the surface would not vend a usable drawable — the black-
+         * screen case. Release the drawable first, then log + reconfigure. */
         if (st.texture) wgpuTextureRelease(st.texture);
+        if (!presented) rae_present_recover("gpu2d", st.status);
     } else {
         rae_present_note_skip("gpu2d", "window-not-visible");
     }
