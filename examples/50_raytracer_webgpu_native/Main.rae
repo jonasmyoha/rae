@@ -50,13 +50,13 @@ func main() {
     pushVec3(buf: sceneBuf, a: cam.up)
     sceneBuf.add(value: cam.lensRadius)
     let world: List(Sphere) = buildScene()
-    loop let sp: view Sphere in world {
-        pushVec3(buf: sceneBuf, a: sp.center)
-        sceneBuf.add(value: sp.radius)
-        pushVec3(buf: sceneBuf, a: sp.material.albedo)
-        sceneBuf.add(value: sp.material.kind.toFloat())
-        sceneBuf.add(value: sp.material.fuzz)
-        sceneBuf.add(value: sp.material.ior)
+    loop let sphere: view Sphere in world {
+        pushVec3(buf: sceneBuf, a: sphere.center)
+        sceneBuf.add(value: sphere.radius)
+        pushVec3(buf: sceneBuf, a: sphere.material.albedo)
+        sceneBuf.add(value: sphere.material.kind.toFloat())
+        sceneBuf.add(value: sphere.material.fuzz)
+        sceneBuf.add(value: sphere.material.ior)
     }
 
     # Load the shared WGSL kernel (same file as the browser example). Read
