@@ -357,8 +357,8 @@ func main() {
     var lastHoveredEntity: EntityId = noEntity()
     # Mouse-button bitfield (bit 0/1/2 = left/right/middle) from the
     # previous gate check — promotes a re-render on any transition
-    # so the debug "btn:" readout updates without 60 fps polling.
-    var lastMouseBtns: Int = 0
+    # so the debug "button:" readout updates without 60 fps polling.
+    var lastMouseButtons: Int = 0
     # Profile-avatar readiness at the time the current world was built.
     # If the async image cascade loads it later, Profile needs one rebuild.
     var profileLoaded: Bool = false
@@ -813,18 +813,18 @@ func main() {
             animating: animating
             prevPressed: lastPressed
             prevHovered: lastHoveredEntity
-            prevMouseBtns: lastMouseBtns
+            prevMouseButtons: lastMouseButtons
           )
           var active: Bool = activeDecision.active or loadingAssets
           let currentHovered: EntityId = activeDecision.currentHovered
-          let currentMouseBtns: Int = activeDecision.currentMouseBtns
+          let currentMouseButtons: Int = activeDecision.currentMouseButtons
           lastHoverAnimDirty = hoverScaleSystem(world: world, hovered: currentHovered, deltaTime: now - lastFrameTime)
           lastFrameTime = now
           if lastHoverAnimDirty { active = true }
           # Any activity this frame extends the active-render window.
           if active { renderUntil = now + 0.5 }
           lastHoveredEntity = currentHovered
-          lastMouseBtns = currentMouseBtns
+          lastMouseButtons = currentMouseButtons
           lastPressed = input.pressedEntity
 
           # Render decision trace: prints whether we'll paint this
