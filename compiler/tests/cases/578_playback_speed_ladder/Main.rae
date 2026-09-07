@@ -25,20 +25,20 @@ func check(label: view String, got: view Int, want: view Int) {
 
 func main() {
   # 1: coarse band, both directions.
-  check(label: "0.50 down", got: speedPercent(v: nextSpeed(current: 0.5, up: false)), want: 45)
-  check(label: "0.50 up", got: speedPercent(v: nextSpeed(current: 0.5, up: true)), want: 55)
+  check(label: "0.50 down", got: speedPercent(value: nextSpeed(current: 0.5, up: false)), want: 45)
+  check(label: "0.50 up", got: speedPercent(value: nextSpeed(current: 0.5, up: true)), want: 55)
 
   # 2: fine near zero, and fine around real time.
-  check(label: "0.05 down", got: speedPercent(v: nextSpeed(current: 0.05, up: false)), want: 4)
-  check(label: "1.00 down", got: speedPercent(v: nextSpeed(current: 1.0, up: false)), want: 99)
-  check(label: "1.00 up", got: speedPercent(v: nextSpeed(current: 1.0, up: true)), want: 101)
-  check(label: "0.95 up", got: speedPercent(v: nextSpeed(current: 0.95, up: true)), want: 96)
+  check(label: "0.05 down", got: speedPercent(value: nextSpeed(current: 0.05, up: false)), want: 4)
+  check(label: "1.00 down", got: speedPercent(value: nextSpeed(current: 1.0, up: false)), want: 99)
+  check(label: "1.00 up", got: speedPercent(value: nextSpeed(current: 1.0, up: true)), want: 101)
+  check(label: "0.95 up", got: speedPercent(value: nextSpeed(current: 0.95, up: true)), want: 96)
 
   # 3: leaving a fine band snaps back onto the 5% grid rather than
   # carrying 1.06 -> 1.11 -> 1.16.
-  check(label: "1.06 up", got: speedPercent(v: nextSpeed(current: 1.06, up: true)), want: 110)
+  check(label: "1.06 up", got: speedPercent(value: nextSpeed(current: 1.06, up: true)), want: 110)
   # ...and entering one from above lands on a whole percent.
-  check(label: "1.10 down", got: speedPercent(v: nextSpeed(current: 1.10, up: false)), want: 105)
+  check(label: "1.10 down", got: speedPercent(value: nextSpeed(current: 1.10, up: false)), want: 105)
 
   # 4: the floor is reachable by pressing, and holds.
   var v: Float = 0.5
@@ -47,7 +47,7 @@ func main() {
     v = nextSpeed(current: v, up: false)
     i = i + 1
   }
-  check(label: "floor", got: speedPercent(v: v), want: 1)
+  check(label: "floor", got: speedPercent(value: v), want: 1)
 
   # ...and the ceiling likewise.
   var u: Float = 1.0
@@ -56,5 +56,5 @@ func main() {
     u = nextSpeed(current: u, up: true)
     k = k + 1
   }
-  check(label: "ceiling", got: speedPercent(v: u), want: 300)
+  check(label: "ceiling", got: speedPercent(value: u), want: 300)
 }

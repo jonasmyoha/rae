@@ -79,11 +79,11 @@ func boolValue(v: view Bool) ret JsonValue {
   }
 }
 
-func numberValue(v: view Float) ret JsonValue {
+func numberValue(value: view Float) ret JsonValue {
   ret JsonValue {
     kind: JsonKind.number
     asBool: false
-    asNumber: v
+    asNumber: value
     asString: ""
     rangeStart: 0
     rangeLen: 0
@@ -163,10 +163,10 @@ func jsonBool(this: view JsonValue, fallback: view Bool) ret Bool {
 
 # Escape a string for embedding inside a JSON `"..."` literal.
 # This is intentionally Rae stdlib policy, not app glue or C runtime code.
-func escape(s: view String) ret String {
+func escape(text: view String) ret String {
   var out: String = ""
   var i: Int = 0
-  let n: Int = s.length()
+  let n: Int = text.length()
   let bs: String = "\\"
   let q: String = "\""
   let bsbs: String = "\\\\"
@@ -178,7 +178,7 @@ func escape(s: view String) ret String {
   let tab: String = "\t"
   let cr: String = "\r"
   loop i < n {
-    let ch: String = s.sub(start: i, len: 1)
+    let ch: String = text.sub(start: i, len: 1)
     if ch is bs {
       out = out.concat(other: bsbs)
     } else {
@@ -205,8 +205,8 @@ func escape(s: view String) ret String {
   ret out
 }
 
-func quote(s: view String) ret String {
-  ret "\"{Json.escape(s: s)}\""
+func quote(text: view String) ret String {
+  ret "\"{Json.escape(text: text)}\""
 }
 
 func arrayLen(this: view JsonValue) ret Int {
@@ -657,7 +657,7 @@ func parseValue(
     if jsonParser.ok is false {
       ret -1
     }
-    ret Json.pushValue(vals: vals, v: Json.numberValue(v: n))
+    ret Json.pushValue(vals: vals, v: Json.numberValue(value: n))
   }
 
   jsonParser.ok = false
@@ -721,7 +721,7 @@ func stringify(doc: view JsonDoc, value: view JsonValue) ret String {
       ret "false"
     }
     case JsonKind.number { ret "{value.asNumber}" }
-    case JsonKind.string { ret quote(s: value.asString) }
+    case JsonKind.string { ret quote(text: value.asString) }
     case JsonKind.array {
       var out: String = "["
       let count: Int = arrayLen(this: value)
@@ -743,7 +743,7 @@ func stringify(doc: view JsonDoc, value: view JsonValue) ret String {
           out = out.concat(other: ",")
         }
         let key: String = objectKeyAt(doc: doc, this: value, idx: i)
-        out = out.concat(other: quote(s: key))
+        out = out.concat(other: quote(text: key))
         out = out.concat(other: ":")
         let childValue: JsonValue = objectValueAt(doc: doc, this: value, idx: i)
         out = out.concat(other: stringify(doc: doc, value: childValue))
@@ -780,7 +780,7 @@ func jbBool(value: view Bool) ret String {
 
 func jbNumber(value: view Float) ret String { ret "{value}" }
 
-func jbString(value: view String) ret String { ret quote(s: value) }
+func jbString(value: view String) ret String { ret quote(text: value) }
 
 # Start an object; add fields with jbField; finish with jbEndObject.
 func jbObject() ret JsonBuilder { ret JsonBuilder { out: "\{", count: 0 } }
@@ -789,7 +789,7 @@ func jbField(builder: mod JsonBuilder, key: view String, valueJson: view String)
   if builder.count > 0 {
     builder.out = builder.out.concat(other: ",")
   }
-  builder.out = builder.out.concat(other: quote(s: key))
+  builder.out = builder.out.concat(other: quote(text: key))
   builder.out = builder.out.concat(other: ":")
   builder.out = builder.out.concat(other: valueJson)
   builder.count = builder.count + 1

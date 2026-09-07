@@ -48,11 +48,11 @@ const momentumFriction: Float = 0.97
 const scrollVelEps: Float = 0.3
 const scrollPosEps: Float = 1.0
 
-func scrollAbs(v: view Float) ret Float {
-  if v < 0.0 {
-    ret 0.0 - v
+func scrollAbs(value: view Float) ret Float {
+  if value < 0.0 {
+    ret 0.0 - value
   }
-  ret v
+  ret value
 }
 
 # One-time node-id -> entity resolution (the ONLY string lookup; done at attach).
@@ -234,7 +234,7 @@ func updateScrollPanel(world: mod UiWorld, viewport: view EntityId, input: view 
     if state.offset < 0.0 {
       state.velocity = springStepVelocity(pos: state.offset, velocity: state.velocity, target: 0.0, tension: springTension, friction: springFriction)
       state.offset = state.offset + state.velocity
-      if scrollAbs(v: state.offset) < scrollPosEps and scrollAbs(v: state.velocity) < scrollVelEps {
+      if scrollAbs(value: state.offset) < scrollPosEps and scrollAbs(value: state.velocity) < scrollVelEps {
         state.offset = 0.0
         state.velocity = 0.0
       }
@@ -242,13 +242,13 @@ func updateScrollPanel(world: mod UiWorld, viewport: view EntityId, input: view 
       if state.offset > range {
         state.velocity = springStepVelocity(pos: state.offset, velocity: state.velocity, target: range, tension: springTension, friction: springFriction)
         state.offset = state.offset + state.velocity
-        if scrollAbs(v: state.offset - range) < scrollPosEps and scrollAbs(v: state.velocity) < scrollVelEps {
+        if scrollAbs(value: state.offset - range) < scrollPosEps and scrollAbs(value: state.velocity) < scrollVelEps {
           state.offset = range
           state.velocity = 0.0
         }
       } else {
         # In bounds: momentum fling, decaying under friction.
-        if scrollAbs(v: state.velocity) > scrollVelEps {
+        if scrollAbs(value: state.velocity) > scrollVelEps {
           state.offset = state.offset + state.velocity
           state.velocity = state.velocity * momentumFriction
         } else {

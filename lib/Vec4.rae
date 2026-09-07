@@ -26,14 +26,14 @@ func create(x: view Float, y: view Float, z: view Float, w: view Float) ret Vec4
 }
 
 # A point in homogeneous coordinates (w = 1): translation applies.
-func fromPoint(v: view Vec3) ret Vec4 {
-    ret Vec4 { x: v.x, y: v.y, z: v.z, w: 1.0 }
+func fromPoint(point: view Vec3) ret Vec4 {
+    ret Vec4 { x: point.x, y: point.y, z: point.z, w: 1.0 }
 }
 
 # A direction in homogeneous coordinates (w = 0): translation does NOT
 # apply. Using fromPoint for a direction is the classic transform bug.
-func fromDirection(v: view Vec3) ret Vec4 {
-    ret Vec4 { x: v.x, y: v.y, z: v.z, w: 0.0 }
+func fromDirection(direction: view Vec3) ret Vec4 {
+    ret Vec4 { x: direction.x, y: direction.y, z: direction.z, w: 0.0 }
 }
 
 func xyz(a: view Vec4) ret Vec3 {

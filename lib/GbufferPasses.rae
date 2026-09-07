@@ -357,8 +357,8 @@ func lightingPassSky(cache: mod LightPassCache, camera: view Camera3d, light: vi
   # measured, a white ground albedo came out (0.59, 0.71, 0.96), which makes warm
   # materials unreachable at any albedo. Default is 1.0, so this is a no-op for
   # every existing caller; the visible sky is untouched either way.
-  let skyC: Vec3 = desaturate(c: irradiance(sky: sky, n: up), sat: sky.ambientSaturation)
-  let gndC: Vec3 = desaturate(c: irradiance(sky: sky, n: down), sat: sky.ambientSaturation)
+  let skyC: Vec3 = desaturate(c: irradiance(sky: sky, normal: up), sat: sky.ambientSaturation)
+  let gndC: Vec3 = desaturate(c: irradiance(sky: sky, normal: down), sat: sky.ambientSaturation)
   pushHosekChannel(c: sky.hosek.r, base: 0)
   pushHosekChannel(c: sky.hosek.g, base: 12)
   pushHosekChannel(c: sky.hosek.b, base: 24)

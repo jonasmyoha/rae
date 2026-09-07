@@ -66,10 +66,10 @@ func defaultBiomeConfig() pub ret BiomeConfig {
   }
 }
 
-func clamp01(v: view Float) ret Float {
-  if v < 0.0 { ret 0.0 }
-  if v > 1.0 { ret 1.0 }
-  ret v
+func clamp01(value: view Float) ret Float {
+  if value < 0.0 { ret 0.0 }
+  if value > 1.0 { ret 1.0 }
+  ret value
 }
 
 # Same shape as WGSL smoothstep. Guards a >= b to a step.
@@ -78,7 +78,7 @@ func smooth01(edge0: view Float, edge1: view Float, x: view Float) ret Float {
     if x < edge0 { ret 0.0 }
     ret 1.0
   }
-  let t: Float = clamp01(v: (x - edge0) / (edge1 - edge0))
+  let t: Float = clamp01(value: (x - edge0) / (edge1 - edge0))
   ret t * t * (3.0 - 2.0 * t)
 }
 
@@ -116,7 +116,7 @@ func worldPath(x: view Float, y: view Float, cfg: view BiomeConfig) ret Float {
     let directionX: Float = Math.cos(x: angle)
     let directionY: Float = Math.sin(x: angle)
     if x * directionX + y * directionY > 0.0 {
-      let distance: Float = Math.abs(n: x * directionY - y * directionX - wander)
+      let distance: Float = Math.abs(value: x * directionY - y * directionX - wander)
       if distance < best { best = distance }
     }
     i = i + 1
@@ -125,7 +125,7 @@ func worldPath(x: view Float, y: view Float, cfg: view BiomeConfig) ret Float {
   let onLand: Float = smooth01(edge0: cfg.waterLevel + 0.02,
                                edge1: cfg.waterLevel + 0.16,
                                x: worldElevation(x: x, y: y, cfg: cfg))
-  ret clamp01(v: weight * onLand)
+  ret clamp01(value: weight * onLand)
 }
 
 # Elevation, shaped into an island by SUBTRACTING at the rim rather than fading
@@ -148,7 +148,7 @@ func worldElevation(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret
 func worldMoisture(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Float {
   let m: Float = Noise.fbm2(x: x / cfg.moistScale, y: y / cfg.moistScale,
                             octaves: 3, lacunarity: 2.0, gain: 0.5, seed: cfg.seed + 7919)
-  ret clamp01(v: m * 0.5 + 0.5)
+  ret clamp01(value: m * 0.5 + 0.5)
 }
 
 # Slope 0..1 from the elevation gradient (central differences, world units).
@@ -158,7 +158,7 @@ func worldSlope(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Flo
                  - worldElevation(x: x - eps, y: y, cfg: cfg)) / (2.0 * eps)
   let gy: Float = (worldElevation(x: x, y: y + eps, cfg: cfg)
                  - worldElevation(x: x, y: y - eps, cfg: cfg)) / (2.0 * eps)
-  ret clamp01(v: Math.sqrt(x: gx * gx + gy * gy) * 8.0)
+  ret clamp01(value: Math.sqrt(x: gx * gx + gy * gy) * 8.0)
 }
 
 # How far above the sand band the slope-driven rock term stays suppressed.
@@ -198,7 +198,7 @@ func classifyWeights(elev: copy Float, moist: copy Float, slope: copy Float,
   #
   # MUST MATCH worldBiome.wgsl.
   let notShore: Float = smooth01(edge0: sandHi, edge1: sandHi + shoreRockFade, x: elev)
-  let wRock: Float = land * clamp01(v: smooth01(edge0: cfg.rockSlope, edge1: cfg.rockSlope + 0.12, x: slope) * notShore
+  let wRock: Float = land * clamp01(value: smooth01(edge0: cfg.rockSlope, edge1: cfg.rockSlope + 0.12, x: slope) * notShore
     + smooth01(edge0: 0.35, edge1: 0.55, x: elev))
   # Mud/swamp: low, flat, wet.
   let aboveSand: Float = smooth01(edge0: sandHi, edge1: sandHi + 0.04, x: elev)

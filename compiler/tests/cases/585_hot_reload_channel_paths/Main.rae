@@ -17,11 +17,11 @@ import String
 import Sys
 open HotReload
 
-func startsWith(s: view String, prefix: view String) ret Bool {
-  if prefix.length() > s.length() {
+func startsWith(text: view String, prefix: view String) ret Bool {
+  if prefix.length() > text.length() {
     ret false
   }
-  ret s.sub(start: 0, len: prefix.length()) is prefix
+  ret text.sub(start: 0, len: prefix.length()) is prefix
 }
 
 func check(label: view String, ok: view Bool) {
@@ -53,11 +53,11 @@ func main() {
   # Every channel file derives from the directory. If one of these were
   # hardcoded it would keep pointing at the shared path after a redirect,
   # which is exactly the crosstalk being fixed.
-  check(label: "state path derived", ok: startsWith(s: statePath(), prefix: "{dir}/"))
-  check(label: "signal path derived", ok: startsWith(s: signalPath(), prefix: "{dir}/"))
-  check(label: "status path derived", ok: startsWith(s: buildStatusPath(), prefix: "{dir}/"))
-  check(label: "generation path derived", ok: startsWith(s: generationPath(), prefix: "{dir}/"))
-  check(label: "app state path derived", ok: startsWith(s: statePathFor(appId: "demo"), prefix: "{dir}/"))
+  check(label: "state path derived", ok: startsWith(text: statePath(), prefix: "{dir}/"))
+  check(label: "signal path derived", ok: startsWith(text: signalPath(), prefix: "{dir}/"))
+  check(label: "status path derived", ok: startsWith(text: buildStatusPath(), prefix: "{dir}/"))
+  check(label: "generation path derived", ok: startsWith(text: generationPath(), prefix: "{dir}/"))
+  check(label: "app state path derived", ok: startsWith(text: statePathFor(appId: "demo"), prefix: "{dir}/"))
 
   # The file names themselves are the wire contract with the supervisor,
   # which writes them from C. A rename on either side silently stops the
