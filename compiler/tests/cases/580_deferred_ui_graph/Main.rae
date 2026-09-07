@@ -33,8 +33,8 @@ func indexOfTag(renderer: view DeferredRenderer, tag: view Int) ret Int {
 
 func main() {
   var plain: DeferredRenderer = createDeferredRenderer()
-  let ps: Int = compileDeferred(renderer: plain)
-  log("plain status={statusName(status: ps)} passes={deferredOrderLength(renderer: plain)}")
+  let plainStatus: Int = compileDeferred(renderer: plain)
+  log("plain status={statusName(status: plainStatus)} passes={deferredOrderLength(renderer: plain)}")
   if indexOfTag(renderer: plain, tag: RenderTag.uiOverlay) is 0 - 1 {
     log("plain has no ui pass: yes")
   } else {
@@ -42,8 +42,8 @@ func main() {
   }
 
   var withUi: DeferredRenderer = createDeferredRendererWithUi()
-  let us: Int = compileDeferred(renderer: withUi)
-  log("ui status={statusName(status: us)} passes={deferredOrderLength(renderer: withUi)}")
+  let uiStatus: Int = compileDeferred(renderer: withUi)
+  log("ui status={statusName(status: uiStatus)} passes={deferredOrderLength(renderer: withUi)}")
 
   let composite: Int = indexOfTag(renderer: withUi, tag: RenderTag.composite)
   let ui: Int = indexOfTag(renderer: withUi, tag: RenderTag.uiOverlay)
@@ -59,5 +59,13 @@ func main() {
     log("ui after lighting: yes")
   } else {
     log("ui after lighting: NO")
+  }
+  let lighting: Int = indexOfTag(renderer: withUi, tag: RenderTag.lighting)
+  let transparent: Int = indexOfTag(renderer: withUi, tag: RenderTag.transparentForward)
+  let temporal: Int = indexOfTag(renderer: withUi, tag: RenderTag.taa)
+  if lighting >= 0 and transparent is lighting + 1 and temporal is transparent + 1 {
+    log("derived lighting -> transparent -> taa: yes")
+  } else {
+    log("derived lighting -> transparent -> taa: NO")
   }
 }
