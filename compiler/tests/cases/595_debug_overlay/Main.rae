@@ -22,17 +22,17 @@ func main() ret Int {
   var t: Float64 = 1000.0
   var i: Int = 0
   loop i < 11 {
-    debugRecordFrame(d: d, now: t, didRealWork: true)
+    debugRecordFrame(debugOverlay: d, now: t, didRealWork: true)
     t = t + 0.01
     i = i + 1
   }
-  check(label: "steady 10ms frames read as 100 fps", ok: debugOverlayFps(d: d) > 99.0 and debugOverlayFps(d: d) < 101.0)
+  check(label: "steady 10ms frames read as 100 fps", ok: debugOverlayFps(debugOverlay: d) > 99.0 and debugOverlayFps(debugOverlay: d) < 101.0)
 
   # A frame that did NO work must not count, or an idle app parked in
   # waitEvents would report a healthy frame rate it is not achieving.
-  let before: Float = debugOverlayFps(d: d)
-  debugRecordFrame(d: d, now: t + 5.0, didRealWork: false)
-  check(label: "idle frames do not count as work", ok: debugOverlayFps(d: d) is before)
+  let before: Float = debugOverlayFps(debugOverlay: d)
+  debugRecordFrame(debugOverlay: d, now: t + 5.0, didRealWork: false)
+  check(label: "idle frames do not count as work", ok: debugOverlayFps(debugOverlay: d) is before)
 
   # Memory is one decimal of MB: enough to watch a leak, not so much that the
   # last digit twitches every frame.

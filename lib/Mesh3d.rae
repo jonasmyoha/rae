@@ -348,17 +348,17 @@ const meshSmoothAngleDefault: Float = 60.0
 # vertices — and welding ACROSS them would fuse parts that are meant to
 # have a hard seam. A position hash would trade that clarity for time
 # this does not need to save: it runs once, at load.
-func smoothMeshNormals(m: view MeshData, angleDeg: view Float) pub ret MeshData {
-  let verts: List(Float) = createList(Float, cap: m.verts.length)
-  let indices: List(Int) = createList(Int, cap: m.indices.length)
-  loop let vertValue: view Float in m.verts {
+func smoothMeshNormals(meshData: view MeshData, angleDeg: view Float) pub ret MeshData {
+  let verts: List(Float) = createList(Float, cap: meshData.verts.length)
+  let indices: List(Int) = createList(Int, cap: meshData.indices.length)
+  loop let vertValue: view Float in meshData.verts {
     verts.add(value: vertValue)
   }
-  loop let indexValue: view Int in m.indices {
+  loop let indexValue: view Int in meshData.indices {
     indices.add(value: indexValue)
   }
-  if m.vertCount < 2 {
-    ret MeshData { verts: own verts, indices: own indices, vertCount: m.vertCount }
+  if meshData.vertCount < 2 {
+    ret MeshData { verts: own verts, indices: own indices, vertCount: meshData.vertCount }
   }
   let cosLimit: Float = Math.cos(x: angleDeg * 3.14159265 / 180.0)
   # Positions are compared with a tolerance rather than exactly: the
@@ -367,21 +367,21 @@ func smoothMeshNormals(m: view MeshData, angleDeg: view Float) pub ret MeshData 
   # last bit, and a seam that fails to weld is invisible until it is lit.
   let eps: Float = 0.000001
   var i: Int = 0
-  loop i < m.vertCount {
-    let px: Float = vertComponent(verts: m.verts, index: i * 8 + 0)
-    let py: Float = vertComponent(verts: m.verts, index: i * 8 + 1)
-    let pz: Float = vertComponent(verts: m.verts, index: i * 8 + 2)
-    let nx: Float = vertComponent(verts: m.verts, index: i * 8 + 3)
-    let ny: Float = vertComponent(verts: m.verts, index: i * 8 + 4)
-    let nz: Float = vertComponent(verts: m.verts, index: i * 8 + 5)
+  loop i < meshData.vertCount {
+    let px: Float = vertComponent(verts: meshData.verts, index: i * 8 + 0)
+    let py: Float = vertComponent(verts: meshData.verts, index: i * 8 + 1)
+    let pz: Float = vertComponent(verts: meshData.verts, index: i * 8 + 2)
+    let nx: Float = vertComponent(verts: meshData.verts, index: i * 8 + 3)
+    let ny: Float = vertComponent(verts: meshData.verts, index: i * 8 + 4)
+    let nz: Float = vertComponent(verts: meshData.verts, index: i * 8 + 5)
     var ax: Float = 0.0
     var ay: Float = 0.0
     var az: Float = 0.0
     var j: Int = 0
-    loop j < m.vertCount {
-      let qx: Float = vertComponent(verts: m.verts, index: j * 8 + 0)
-      let qy: Float = vertComponent(verts: m.verts, index: j * 8 + 1)
-      let qz: Float = vertComponent(verts: m.verts, index: j * 8 + 2)
+    loop j < meshData.vertCount {
+      let qx: Float = vertComponent(verts: meshData.verts, index: j * 8 + 0)
+      let qy: Float = vertComponent(verts: meshData.verts, index: j * 8 + 1)
+      let qz: Float = vertComponent(verts: meshData.verts, index: j * 8 + 2)
       var dx: Float = qx - px
       var dy: Float = qy - py
       var dz: Float = qz - pz
@@ -389,9 +389,9 @@ func smoothMeshNormals(m: view MeshData, angleDeg: view Float) pub ret MeshData 
       if dy < 0.0 { dy = 0.0 - dy }
       if dz < 0.0 { dz = 0.0 - dz }
       if dx <= eps and dy <= eps and dz <= eps {
-        let mx: Float = vertComponent(verts: m.verts, index: j * 8 + 3)
-        let my: Float = vertComponent(verts: m.verts, index: j * 8 + 4)
-        let mz: Float = vertComponent(verts: m.verts, index: j * 8 + 5)
+        let mx: Float = vertComponent(verts: meshData.verts, index: j * 8 + 3)
+        let my: Float = vertComponent(verts: meshData.verts, index: j * 8 + 4)
+        let mz: Float = vertComponent(verts: meshData.verts, index: j * 8 + 5)
         # The crease test, against THIS vertex's own normal rather than
         # against a running average: an average drifts as it accumulates,
         # so which faces merge would depend on the order they are visited.
@@ -413,5 +413,5 @@ func smoothMeshNormals(m: view MeshData, angleDeg: view Float) pub ret MeshData 
     }
     i = i + 1
   }
-  ret MeshData { verts: own verts, indices: own indices, vertCount: m.vertCount }
+  ret MeshData { verts: own verts, indices: own indices, vertCount: meshData.vertCount }
 }

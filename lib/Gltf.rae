@@ -575,9 +575,9 @@ func loadAllPrimitives(g: view Glb) pub ret MeshData {
 # that assumes models are centred on the origin puts them off-screen. This
 # lets an example FRAME whatever it loaded instead of hard-coding an
 # offset that is right for exactly one file.
-func meshBounds(m: view MeshData) pub ret List(Float) {
+func meshBounds(meshData: view MeshData) pub ret List(Float) {
   let out: List(Float) = createList(Float, cap: 6)
-  if m.vertCount is 0 {
+  if meshData.vertCount is 0 {
     var z: Int = 0
     loop z < 6 {
       out.add(value: 0.0)
@@ -585,18 +585,18 @@ func meshBounds(m: view MeshData) pub ret List(Float) {
     }
     ret own out
   }
-  var minX: Float = gltfFloatAt(values: m.verts, index: 0)
-  var minY: Float = gltfFloatAt(values: m.verts, index: 1)
-  var minZ: Float = gltfFloatAt(values: m.verts, index: 2)
+  var minX: Float = gltfFloatAt(values: meshData.verts, index: 0)
+  var minY: Float = gltfFloatAt(values: meshData.verts, index: 1)
+  var minZ: Float = gltfFloatAt(values: meshData.verts, index: 2)
   var maxX: Float = minX
   var maxY: Float = minY
   var maxZ: Float = minZ
   var i: Int = 0
-  loop i < m.vertCount {
+  loop i < meshData.vertCount {
     # Stride is 8: pos3, nrm3, uv2.
-    let x: Float = gltfFloatAt(values: m.verts, index: i * 8)
-    let y: Float = gltfFloatAt(values: m.verts, index: i * 8 + 1)
-    let z: Float = gltfFloatAt(values: m.verts, index: i * 8 + 2)
+    let x: Float = gltfFloatAt(values: meshData.verts, index: i * 8)
+    let y: Float = gltfFloatAt(values: meshData.verts, index: i * 8 + 1)
+    let z: Float = gltfFloatAt(values: meshData.verts, index: i * 8 + 2)
     if x < minX { minX = x }
     if y < minY { minY = y }
     if z < minZ { minZ = z }

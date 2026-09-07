@@ -53,8 +53,8 @@ func drawTextureSwatches() {
   }
 }
 
-func uploadMeshData(m: view MeshData) ret MeshHandle {
-  ret uploadMesh(verts: m.verts, vertCount: m.vertCount, indices: m.indices)
+func uploadMeshData(meshData: view MeshData) ret MeshHandle {
+  ret uploadMesh(verts: meshData.verts, vertCount: meshData.vertCount, indices: meshData.indices)
 }
 
 func buildScene(rocks: view List(Int), treeTrunks: view List(Int), treeCanopies: view List(Int), ground: view MeshHandle) ret World3d {
@@ -102,7 +102,7 @@ func main() ret Int {
   loop var ri: Int = 0, ri < 5, ++ri {
     let rockMesh: MeshData = generateRock(subdivision: 5, sliceCount: 3 + ri, size: 1.0 + ri.toFloat() * 0.12,
                                           seed: 1000 + ri * 37, irregularity: 0.28 + ri.toFloat() * 0.05)
-    rocks.add(value: uploadMeshData(m: rockMesh).id)
+    rocks.add(value: uploadMeshData(meshData: rockMesh).id)
   }
 
   # Five tree variants: vary seed, branch depth, canopy size.
@@ -111,12 +111,12 @@ func main() ret Int {
   loop var ti: Int = 0, ti < 5, ++ti {
     let tree: TreeMesh = generateTree(branchDepth: 2 + ti % 2, trunkHeight: 3.0 + ti.toFloat() * 0.3, taper: 1.0,
                                       canopySize: 1.1 + ti.toFloat() * 0.12, leafDensity: 1 + ti % 3, seed: 500 + ti * 53)
-    trunks.add(value: uploadMeshData(m: tree.trunk).id)
-    canopies.add(value: uploadMeshData(m: tree.canopy).id)
+    trunks.add(value: uploadMeshData(meshData: tree.trunk).id)
+    canopies.add(value: uploadMeshData(meshData: tree.canopy).id)
   }
 
   let groundData: MeshData = makePlane(size: 40.0, segments: 1)
-  let ground: MeshHandle = uploadMeshData(m: groundData)
+  let ground: MeshHandle = uploadMeshData(meshData: groundData)
 
   # Five procedural material textures (grass/sand/rock/mud/water), generated in
   # Rae and registered as gpu2d images (shown as swatches along the bottom).
