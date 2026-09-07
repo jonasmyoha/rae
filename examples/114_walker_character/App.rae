@@ -463,12 +463,12 @@ func createApp() ret App {
   if settingsOk is false {
     logWarnLine(ov: logView, text: "settings dialog failed to mount")
   }
-  settingsApplyToWorld(s: settings, world: uiWorld)
+  settingsApplyToWorld(settingsState: settings, world: uiWorld)
   settings.open = false
   applyWalkerPanel(world: uiWorld, open: settings.open)
-  renderer.sky = settingsBuildSky(s: settings, data: hosekData, turbidity: 3.0, groundAlbedo: 0.30)
-  light.sunDir = settingsSunDir(s: settings)
-  light.sunColor = settingsSunColor(s: settings)
+  renderer.sky = settingsBuildSky(settingsState: settings, data: hosekData, turbidity: 3.0, groundAlbedo: 0.30)
+  light.sunDir = settingsSunDir(settingsState: settings)
+  light.sunColor = settingsSunColor(settingsState: settings)
   log("[ui] panel buttons: {clipPanel.buttonEntities.length} clip, {transport.buttonEntities.length} transport, camera bar {barOk}")
 
   let startT: Float64 = Gpu2d.nowSeconds()
