@@ -67,18 +67,18 @@ func main() {
   # allocates without anyone noticing, so it belongs inside the
   # measurement rather than outside it.
   var renderer: DeferredRenderer = createDeferredRenderer()
-  let st: Int = compileDeferred(r: renderer)
+  let st: Int = compileDeferred(renderer: renderer)
 
   # One warm-up frame OUTSIDE the measurement. Anything a first call
   # allocates once (lazy setup) is not a per-frame cost, and folding it
   # into the sample would either fail the test for the wrong reason or,
   # worse, hide a real per-object allocation behind a tolerance.
-  renderDeferredFrameWorld(r: renderer, world: world, camera: camera, light: light, aspect: 1.6)
+  renderDeferredFrameWorld(renderer: renderer, world: world, camera: camera, light: light, aspect: 1.6)
 
   let before: Int = rae_ext_rae_mem_alloc_total()
   var f: Int = 0
   loop f < frames {
-    renderDeferredFrameWorld(r: renderer, world: world, camera: camera, light: light, aspect: 1.6)
+    renderDeferredFrameWorld(renderer: renderer, world: world, camera: camera, light: light, aspect: 1.6)
     f = f + 1
   }
   let allocations: Int = rae_ext_rae_mem_alloc_total() - before

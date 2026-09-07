@@ -26,8 +26,8 @@ func renderFrame(
   extractTetrisScene(renderState: renderState, world: game)
   let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
   var passIndex: Int = 0
-  loop passIndex < deferredOrderLength(r: renderer) {
-    let tag: Int = deferredTagAt(r: renderer, i: passIndex)
+  loop passIndex < deferredOrderLength(renderer: renderer) {
+    let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
     if tag is RenderTag.uiOverlay {
       Gpu2d.beginFrameLoad()
       renderSystemGpu2d(world: uiWorld, res: uiResources)
@@ -67,7 +67,7 @@ func main() ret Int {
   let camera: Camera3d = forWorld(world: game)
   let light: Light3d = defaultLight3d()
   var renderer: DeferredRenderer = createDeferredRendererWithUi()
-  let graphStatus: Int = compileDeferred(r: renderer)
+  let graphStatus: Int = compileDeferred(renderer: renderer)
   if graphStatus is not 0 {
     log("deferred graph invalid: {statusName(status: graphStatus)}")
     ret 1
