@@ -22,6 +22,13 @@ const splashMinDepth: Float = 0.03    # world units of water under a unit before
 const splashPerBurst: Int = 3         # droplets per splash
 const splashCrowdStride: Int = 3      # a crowd member splashes every Nth frame it wades
 
+# Where the lake surface sits in WORLD space (#830): the biome's flat water plane
+# over the walker's groundZ — the same plane the splashes spray up from. Lives
+# here because this file already opens WorldBiome; App reads it cross-file.
+func lakeSurfaceZ(groundZ: copy Float) ret Float {
+  ret worldWaterZ(groundZ: groundZ, cfg: defaultBiomeConfig())
+}
+
 # Pale blue-white water droplet colour (splash spray).
 func colorR() ret Float { ret 0.82 }
 func colorG() ret Float { ret 0.90 }
