@@ -1,0 +1,70 @@
+# water — the water package main (#830): the WaterBody component and its wave set.
+#
+# One `WaterBody` describes a body of water as DATA (docs/water-rendering-design.md
+# §4): what kind it is, where its still surface sits, how big it is, and the toon
+# look — shallow/deep colours, shoreline foam distance, absorption, ripple
+# parameters — plus a small Gerstner wave set that gives the surface its motion
+# and normal. `WaterSystem` (WaterSystem.rae) owns the GPU side and draws every
+# body through the transparent forward pass; this file is plain values.
+#
+# Style: `toon` is the mobile-first stylised path (the Roystan recipe) and the
+# only one implemented here; `realistic` (FFT cascades, #831) EXTENDS it later.
+import Vec3
+
+enum WaterKind { ocean, lake, river }
+enum WaterStyle { toon, realistic }
+
+# One Gerstner wave: travels along (dirX, dirY); `steepness` 0..1 sharpens
+# crests (the sum over all waves should stay <= 1 or the surface loops).
+type GerstnerWave {
+  dirX: Float
+  dirY: Float
+  amplitude: Float   # world units
+  wavelength: Float  # world units crest to crest
+  steepness: Float   # 0 = pure sine, 1 = maximum crest sharpening
+  speed: Float       # world units / s along the direction
+}
+
+# The 1-2 waves the toon surface sums in the vertex shader.
+type WaterWaves {
+  first: GerstnerWave
+  second: GerstnerWave
+}
+
+type WaterBody {
+  kind: WaterKind
+  style: WaterStyle
+  centre: Vec3          # still-surface centre; centre.z IS the water level
+  extent: Float         # side of the square surface, world units
+  shallowColor: Vec3    # colour where the ground is just under the surface
+  deepColor: Vec3       # colour once the water is `depthMax` deep
+  depthMax: Float       # water depth (view-depth difference) at which deepColor saturates
+  absorb: Float         # 0..1 opacity scale of the deep water
+  foamDistance: Float   # water shallower than this gets shoreline foam
+  rippleScale: Float    # noise cells per world unit for the toon ripples
+  rippleSpeed: Float    # ripple pan speed, world units / s
+  rippleCutoff: Float   # posterise threshold (0..1) of the ripple noise in deep water
+  distortion: Float     # strength of the second noise octave that warps the ripples
+  highlightStep: Float  # specular threshold for the stepped toon sun highlight
+  highlightPower: Float # specular exponent before the step
+  waves: WaterWaves
+}
+
+# A stylised lake with the surface at `surfaceZ`: pale turquoise shallows, a deep
+# blue body, soft foam at the banks, two small crossing Gerstner waves.
+func createLakeToon(surfaceZ: copy Float, extent: copy Float) pub ret WaterBody {
+  ret WaterBody {
+    kind: WaterKind.lake, style: WaterStyle.toon,
+    centre: Vec3.create(x: 0.0, y: 0.0, z: surfaceZ), extent: extent,
+    shallowColor: Vec3.create(x: 0.32, y: 0.78, z: 0.82),
+    deepColor: Vec3.create(x: 0.05, y: 0.22, z: 0.48),
+    depthMax: 6.0, absorb: 0.92,
+    foamDistance: 0.9,
+    rippleScale: 0.35, rippleSpeed: 0.35, rippleCutoff: 0.78, distortion: 0.9,
+    highlightStep: 0.55, highlightPower: 48.0,
+    waves: {
+      first:  { dirX: 1.0, dirY: 0.35, amplitude: 0.08, wavelength: 6.0, steepness: 0.35, speed: 1.4 },
+      second: { dirX: 0.0 - 0.4, dirY: 1.0, amplitude: 0.05, wavelength: 3.2, steepness: 0.3, speed: 1.0 }
+    }
+  }
+}

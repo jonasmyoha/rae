@@ -16,6 +16,7 @@ open ecs/ComponentTable
 import Sys
 open GbufferInstanced
 open Particles
+open water/WaterSystem
 open GrassCompute
 import GrassConfig
 import app3d/Slider
@@ -156,7 +157,7 @@ func renderGbufferPass(cache: mod GbufferCache, cameraSystem: mod CameraSystem, 
 }
 
 # ----- render phase: animation sample + render-graph walk ------------------
-func renderApp(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSystem, frame: mod Frame, inputSystem: mod InputSystem, renderSystem: mod RenderSystem, emptyWorld: view World3d, world: mod GameWorld, terrainSystem: mod TerrainSystem, splashes: mod ParticleSystem, profiler: mod Profiler, grassCompute: mod GrassCompute) {
+func renderApp(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSystem, frame: mod Frame, inputSystem: mod InputSystem, renderSystem: mod RenderSystem, emptyWorld: view World3d, world: mod GameWorld, terrainSystem: mod TerrainSystem, splashes: mod ParticleSystem, waterSystem: mod WaterSystem, profiler: mod Profiler, grassCompute: mod GrassCompute) {
   frame.renderedOnce = true
   inputSystem.lastLogRevision = inputSystem.logView.revision
   let deltaTime: Float = frame.deltaTime
@@ -240,6 +241,9 @@ func renderApp(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSys
                                 camera: cameraSystem.camera, light: cameraSystem.light, aspect: aspect)
       }
       case RenderTag.transparentForward {
+        # The toon lake first (#830), so the splash droplets blend OVER it.
+        waterDraw(waterSystem: waterSystem, camera: cameraSystem.camera, light: cameraSystem.light,
+          sky: renderSystem.renderer.sky, hasSky: renderSystem.renderer.hasSky, deltaTime: deltaTime)
         # Splash droplets fade by alpha through the transparent pass (#844).
         particleDraw(sys: splashes, transparent: renderSystem.renderer.passes.transparent)
         renderDeferredPassWorld(renderer: renderSystem.renderer, tag: tag, world: emptyWorld,
