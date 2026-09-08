@@ -21,7 +21,7 @@
 struct FftU {
   grid: vec4<f32>,   // x = N, y = tile L (m), z = wind speed U (m/s), w = wind direction (rad)
   sea: vec4<f32>,    // x = fetch F (m), y = gravity g, z = depth h (m), w = seed
-  band: vec4<f32>,   // x = kLow, y = kHigh, z = cascade index
+  band: vec4<f32>,   // x = kLow, y = kHigh, z = cascade index, w = test mode (1: one known wave)
 };
 @group(0) @binding(0) var<uniform> U: FftU;
 @group(0) @binding(1) var h0Out: texture_storage_2d<rgba32float, write>;
@@ -89,6 +89,13 @@ fn h0At(px: u32, py: u32) -> vec2<f32> {
   let n = f32(U.grid.x);
   let half = u32(U.grid.x) / 2u;
   if (px == 0u || py == 0u) { return vec2<f32>(0.0, 0.0); }
+  // Test mode (#850): ONE known wave, h0 = 0.25 at k index +-(3, 0), so that
+  // after evolution at t = 0 (h = h0 + conj(h0(-k)) = 0.5 at both) the
+  // unnormalised inverse transform is exactly cos(2 pi 3 x / N) of amplitude 1.
+  if (U.band.w > 0.5) {
+    if (py == half && (px == half + 3u || px + 3u == half)) { return vec2<f32>(0.25, 0.0); }
+    return vec2<f32>(0.0, 0.0);
+  }
   let kx = 2.0 * PI / U.grid.y * (f32(px) - f32(half));
   let ky = 2.0 * PI / U.grid.y * (f32(py) - f32(half));
   let kLen = length(vec2<f32>(kx, ky));
@@ -97,7 +104,9 @@ fn h0At(px: u32, py: u32) -> vec2<f32> {
   let depth = U.sea.z;
   let windSpeed = U.grid.z;
   let fetch = U.sea.x;
-  let kh = kLen * depth;
+  // tanh saturates by ~20 in f32; larger arguments overflow the GPU's
+  // exp-based tanh into NaN (k h reaches 160 on the 8 m tile at 50 m depth).
+  let kh = min(kLen * depth, 20.0);
   let th = tanh(kh);
   let w = sqrt(g * kLen * th);
   // dw/dk = g (tanh(kh) + kh sech^2(kh)) / (2 w)
@@ -144,4 +153,142 @@ fn butterfly(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (k >= ns) { sign = -1.0; }
   textureStore(butterflyOut, vec2<i32>(i32(stage), i32(i)),
     vec4<f32>(sign * cos(angle), sign * sin(angle), f32(j), f32(j + n / 2u)));
+}
+
+// ---------------------------------------------------------------------------
+// Per-frame evolution + inverse FFT (#850). All bindings that are READ are
+// plain texture_2d<f32> (textureLoad, core WebGPU); only destinations are
+// storage textures. One compute pass per frame issues every dispatch below;
+// dispatches in a pass see each other's storage writes in order.
+struct EvolveU {
+  grid: vec4<f32>,   // x = N, y = tile L, z = gravity, w = depth
+  wave: vec4<f32>,   // x = time, y = field index, z = choppiness, w = unused
+};
+@group(0) @binding(0) var<uniform> E: EvolveU;
+@group(0) @binding(1) var h0In: texture_2d<f32>;
+@group(0) @binding(2) var evolveOut: texture_storage_2d<rgba32float, write>;
+
+fn cmul(a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
+  return vec2<f32>(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}
+// i * z
+fn ctimesI(z: vec2<f32>) -> vec2<f32> { return vec2<f32>(-z.y, z.x); }
+
+// h(k, t) = h0(k) e^{i w t} + conj(h0(-k)) e^{-i w t}, then the field pair this
+// dispatch packs: field f = A + i B where A and B are real-valued fields
+// (their spectra are Hermitian), so the inverse FFT's real part is A and its
+// imaginary part is B — two fields for one transform.
+@compute @workgroup_size(8, 8)
+fn evolve(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let n = u32(E.grid.x);
+  if (gid.x >= n || gid.y >= n) { return; }
+  let half = n / 2u;
+  let packed = textureLoad(h0In, vec2<i32>(gid.xy), 0);
+  let h0 = packed.xy;
+  let h0m = packed.zw;
+  let kx = 2.0 * PI / E.grid.y * (f32(gid.x) - f32(half));
+  let ky = 2.0 * PI / E.grid.y * (f32(gid.y) - f32(half));
+  let kLen = max(length(vec2<f32>(kx, ky)), 1e-6);
+  let g = E.grid.z;
+  let w = sqrt(g * kLen * tanh(min(kLen * E.grid.w, 20.0)));   // see h0At: tanh overflows past ~44
+  let t = E.wave.x;
+  let e = vec2<f32>(cos(w * t), sin(w * t));
+  let h = cmul(h0, e) + cmul(vec2<f32>(h0m.x, -h0m.y), vec2<f32>(e.x, -e.y));
+  let dx = -kx / kLen;   // Dx = -i (kx/k) h  -> (kx/k) * (h.y, -h.x)
+  let dy = -ky / kLen;
+  let Dx = ctimesI(h) * dx;
+  let Dy = ctimesI(h) * dy;
+  let dhdx = ctimesI(h) * kx;
+  let dhdy = ctimesI(h) * ky;
+  let dDxdx = ctimesI(Dx) * kx;
+  let dDydy = ctimesI(Dy) * ky;
+  let dDxdy = ctimesI(Dx) * ky;
+  var a = h;
+  var b = Dx;
+  let field = u32(E.wave.y + 0.5);
+  if (field == 1u) { a = Dy; b = dhdx; }
+  if (field == 2u) { a = dhdy; b = dDxdx; }
+  if (field == 3u) { a = dDydy; b = dDxdy; }
+  // Z = A + i B
+  let z = vec2<f32>(a.x - b.y, a.y + b.x);
+  textureStore(evolveOut, vec2<i32>(gid.xy), vec4<f32>(z, 0.0, 0.0));
+}
+
+// One Stockham stage along x for every row: output i of row y is
+// src[a] + w * src[b] with (w, a, b) from the butterfly table's column `stage`.
+struct StageU { stage: vec4<u32> };
+@group(0) @binding(0) var<uniform> S: StageU;
+@group(0) @binding(1) var butterflyIn: texture_2d<f32>;
+@group(0) @binding(2) var stageSrc: texture_2d<f32>;
+@group(0) @binding(3) var stageDst: texture_storage_2d<rgba32float, write>;
+
+@compute @workgroup_size(8, 8)
+fn stockham(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let dims = textureDimensions(stageSrc);
+  if (gid.x >= dims.x || gid.y >= dims.y) { return; }
+  let bf = textureLoad(butterflyIn, vec2<i32>(i32(S.stage.x), i32(gid.x)), 0);
+  let w = bf.xy;
+  let a = textureLoad(stageSrc, vec2<i32>(i32(bf.z), i32(gid.y)), 0);
+  let b = textureLoad(stageSrc, vec2<i32>(i32(bf.w), i32(gid.y)), 0);
+  let out = a.xy + cmul(w, b.xy);
+  textureStore(stageDst, vec2<i32>(gid.xy), vec4<f32>(out, 0.0, 0.0));
+}
+
+@group(0) @binding(0) var transposeSrc: texture_2d<f32>;
+@group(0) @binding(1) var transposeDst: texture_storage_2d<rgba32float, write>;
+
+@compute @workgroup_size(8, 8)
+fn transpose(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let dims = textureDimensions(transposeSrc);
+  if (gid.x >= dims.x || gid.y >= dims.y) { return; }
+  textureStore(transposeDst, vec2<i32>(gid.xy), textureLoad(transposeSrc, vec2<i32>(i32(gid.y), i32(gid.x)), 0));
+}
+
+// After the column pass the data is transposed; put it back as field f's result.
+@group(0) @binding(0) var fieldSrc: texture_2d<f32>;
+@group(0) @binding(1) var fieldDst: texture_storage_2d<rgba32float, write>;
+
+@compute @workgroup_size(8, 8)
+fn fieldOut(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let dims = textureDimensions(fieldSrc);
+  if (gid.x >= dims.x || gid.y >= dims.y) { return; }
+  textureStore(fieldDst, vec2<i32>(gid.xy), textureLoad(fieldSrc, vec2<i32>(i32(gid.y), i32(gid.x)), 0));
+}
+
+// The cascade maps: undo the centred spectrum's (-1)^(x+y), chop, normal from
+// the slopes, Jacobian of the horizontal displacement (folding = J < 0).
+@group(0) @binding(0) var<uniform> Pu: EvolveU;
+@group(0) @binding(1) var field0: texture_2d<f32>;
+@group(0) @binding(2) var field1: texture_2d<f32>;
+@group(0) @binding(3) var field2: texture_2d<f32>;
+@group(0) @binding(4) var field3: texture_2d<f32>;
+@group(0) @binding(5) var displacementOut: texture_storage_2d<rgba16float, write>;
+@group(0) @binding(6) var normalOut: texture_storage_2d<rgba16float, write>;
+@group(0) @binding(7) var jacobianOut: texture_storage_2d<rgba16float, write>;
+
+@compute @workgroup_size(8, 8)
+fn post(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let n = u32(Pu.grid.x);
+  if (gid.x >= n || gid.y >= n) { return; }
+  var sign = 1.0;
+  if (((gid.x + gid.y) & 1u) == 1u) { sign = -1.0; }
+  let p = vec2<i32>(gid.xy);
+  let f0 = textureLoad(field0, p, 0).xy * sign;
+  let f1 = textureLoad(field1, p, 0).xy * sign;
+  let f2 = textureLoad(field2, p, 0).xy * sign;
+  let f3 = textureLoad(field3, p, 0).xy * sign;
+  let lambda = Pu.wave.z;
+  let h = f0.x;
+  let Dx = f0.y;
+  let Dy = f1.x;
+  let dhdx = f1.y;
+  let dhdy = f2.x;
+  let dDxdx = f2.y;
+  let dDydy = f3.x;
+  let dDxdy = f3.y;
+  let normal = normalize(vec3<f32>(-dhdx, -dhdy, 1.0));
+  let jacobian = (1.0 + lambda * dDxdx) * (1.0 + lambda * dDydy) - lambda * lambda * dDxdy * dDxdy;
+  textureStore(displacementOut, p, vec4<f32>(lambda * Dx, lambda * Dy, h, jacobian));
+  textureStore(normalOut, p, vec4<f32>(normal, 0.0));
+  textureStore(jacobianOut, p, vec4<f32>(clamp(1.0 - jacobian, 0.0, 1.0), jacobian, 0.0, 0.0));
 }

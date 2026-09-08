@@ -186,6 +186,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              perl -e 'alarm shift; exec @ARGV' 25 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && grep -qE '\[water example\] deterministic deferred frame rendered: hour [0-9.]+, 3 islands, [1-9][0-9]* water frames' "$TMP_OUT/render.log" \
              && grep -q '\[water fft\] h0 ok' "$TMP_OUT/render.log" \
+             && grep -q '\[water fft\] ifft ok' "$TMP_OUT/render.log" \
              && [ "$(grep -c "\[water\] toon lake" "$TMP_OUT/render.log")" -eq 1 ] \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
                 > "$TMP_OUT/screenshot.log" 2>&1; then
