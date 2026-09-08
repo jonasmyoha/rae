@@ -1,6 +1,6 @@
 # WebGPU resource management in Rae
 
-Status: **revision 3 direction accepted; language details await example-led review.**
+Status: **revision 3 direction accepted; concrete revision 4 awaits approval.**
 
 The active proposal is [Ptr and GPU resources](ptr-and-gpu-resource-design.md).
 Historical task #295 sketches and the rejected revision 2 registration/runtime
@@ -19,15 +19,18 @@ Rae owns descriptors, validation, caches, labels, resource groups, rebuild polic
 command dependencies and completion scheduling. Native calls use generated
 bindings and narrow generic ABI glue for opaque objects and stable callback state.
 Safe wrappers may use explicitly unsafe implementation operations; no compiler
-list of privileged module names grants access. The exact source-level native
-owner and unsafe-function/block contracts are still pending queue #878 review.
+list of privileged module names grants access. Revision 4 provides the full native-buffer example, exact opaque/noncopyable/drop
+properties and unsafe-function/block rules for queue #878 review. Implementation
+waits for approval of those concrete examples.
 
 ## Resource validity and completion
 
 Before native access, validate owner identity, kind, slot, generation, live state,
-usage and overflow-safe ranges. Cross-App identity must work with ordinary context
-constructors; no injected runtime parameter or hidden current-manager API is
-approved. Generation exhaustion must not make stale IDs valid again.
+usage and overflow-safe ranges. Revision 4 recommends 256-bit OS-random context nonces obtained by ordinary
+constructors. Its collision guarantee is explicitly probabilistic and awaits
+approval; do not describe it as absolute wrong-context rejection. Within a
+context, generation/sequence exhaustion fails or retires slots rather than wraps.
+No injected runtime parameter or hidden current-manager API is approved.
 
 The manager holds dependencies from command recording through submission and
 completion, including indirect bind-group/view dependencies. Abandoned recordings
