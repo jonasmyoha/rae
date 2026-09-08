@@ -2,6 +2,12 @@
 
 Status: design for runtime migration task `#295`.
 
+Latest proposal: [Ptr and GPU resources](ptr-and-gpu-resource-design.md) revises
+the ownership/API direction below: typed IDs are non-owning values, while an
+explicit App-owned manager controls native resources and GPU completion. Read it
+before implementing this historical plan; code and paths below reflect the
+earlier migration design, not an inventory of the current renderer.
+
 ## Motivation
 
 Rae already has working WebGPU paths:
