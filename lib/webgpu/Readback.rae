@@ -1,0 +1,23 @@
+# Owned nonblocking MapRead requests. See docs/webgpu-readback.md.
+# All calls and WebGPU polling belong to the context thread.
+open webgpu/Context
+
+# An opaque, uniquely owned request: do not copy it. Release it explicitly;
+# the callback retains its own state until completion after cancellation.
+# The original buffer may be released, but must not be destroyed, unmapped,
+# submitted for GPU use or mapped again while the request owns its mapping.
+func startRead(buffer: Ptr, offset: UInt64, size: UInt64) extern("rae_wgpu_read_start") ret Ptr
+
+# Advances events once without waiting. 0 = pending, 1 = success, -1 = failure.
+# No timestamps are required. A null request also reports failure.
+func pollRead(request: Ptr) extern("rae_wgpu_read_poll") ret Int
+
+# Copies the requested bytes only after success. capacity is destination bytes,
+# not element count. Returns 1 on copy, 0 on pending/failure/insufficient space.
+# The destination is never retained, so its List may grow while the map waits.
+func copyRead(request: Ptr, destination: Ptr, capacity: UInt64) extern("rae_wgpu_read_copy") ret Int
+
+# Cancel/unmap and release exactly once. Store the returned null handle:
+# request = releaseRead(request: request). Releasing null is harmless.
+# Continue ordinary context polling to deliver any deferred cancellation callback.
+func releaseRead(request: Ptr) extern("rae_wgpu_read_release") ret Ptr

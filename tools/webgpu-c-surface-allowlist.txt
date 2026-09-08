@@ -3,6 +3,11 @@
 # Adding a line = reviewable event (justify in the commit); removing one = always fine.
 # Enforced by tools/webgpu-c-surface-gate.sh (make c-surface-gate). Lines starting with # are ignored.
 #
+# #862 generic asynchronous buffer-map platform ABI (outside renderer pattern):
+# rae_wgpu_read_start: retained buffer plus request-owned C callback state.
+# rae_wgpu_read_poll: single nonblocking context event poll and request status.
+# rae_wgpu_read_copy: bounded completed-map copy; no retained destination pointer.
+# rae_wgpu_read_release: cancel/unmap and release owner, preserving late callback state.
 # Known debt tracked separately: #513 removed the dead gbuffer_{debugView,ssao};
 # #514 migrates/retires the forward renderer (rae_ext_Gpu3d_* pass encoders).
 # #842 platform ABI accessors (outside this gate's rae_ext_* pattern):
