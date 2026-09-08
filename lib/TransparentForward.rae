@@ -46,6 +46,7 @@ type TransparentPassCache {
   pipeMade: Bool   # creation attempted (so a missing shader is reported once)
   pipeReady: Bool  # creation succeeded; the draw is skipped otherwise
   bindMade: Bool
+  snapshotDone: Bool  # this frame's opaque snapshot was taken early (transparentSnapshot)
   batch: InstanceBatch
 }
 
@@ -59,7 +60,7 @@ func createTransparentPassCache(capacity: copy Int) pub ret TransparentPassCache
   }
   # meshId -1: no mesh until the first addTransparentInstance names one.
   ret TransparentPassCache {
-    pipeMade: false, pipeReady: false, bindMade: false,
+    pipeMade: false, pipeReady: false, bindMade: false, snapshotDone: false,
     batch: { meshId: 0 - 1, capacity: capacity, count: 0, records: records }
   }
 }
@@ -240,9 +241,20 @@ func drawTransparentBatch(cache: mod TransparentPassCache) {
 # The render graph's transparentForward step: snapshot, then draw this frame's
 # batch, then reset it for the next frame. With nothing queued only the
 # snapshot runs — the pass costs no GPU work until a client uses it.
-func transparentPass(cache: mod TransparentPassCache) pub {
+# Take the opaque snapshot EARLY, before something refractive (the water, #832)
+# draws and reads litCopy. An app that draws refracting surfaces calls this
+# first, then its draws, then transparentPass; an app without them just calls
+# transparentPass, which snapshots on its own.
+func transparentSnapshot(cache: mod TransparentPassCache) pub {
   if gbDeferredPrepare() is 0 { ret }
   copyOpaqueRadiance()
+  cache.snapshotDone = true
+}
+
+func transparentPass(cache: mod TransparentPassCache) pub {
+  if gbDeferredPrepare() is 0 { ret }
+  if not cache.snapshotDone { copyOpaqueRadiance() }
+  cache.snapshotDone = false
   if cache.batch.count > 0 {
     ensureTransparentPipeline(cache: cache)
     if cache.pipeReady {
