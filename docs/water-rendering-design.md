@@ -27,7 +27,15 @@ its own background and is drawn opaque, the mobile tier keeps the alpha path
 Gerstner mirror with the horizontal displacement inverted by two fixed-point
 iterations, and `lib/water/Buoyancy.rae` is the `Buoyant` component + a `query2`
 system over Transform3d — never a callback; both pinned by unit cases 752/753.
-SSR and the FFT displacement readback are #854. #831 slice 1 is in: the `waterFft` compute node + three persistent
+SSR and the FFT displacement readback are #854. Rivers (#833) are in:
+`lib/water/River.rae` bakes a bezier `RiverSpline` ONCE into a ribbon mesh whose uv
+is metres along/across the flow and whose normal packs (flow tangent, curvature
+foam); bank rows take caller-sampled terrain heights and tuck under a bank that
+is below the surface. A river is a `WaterBody` with `meshId` (its own world-space
+mesh) and `flowSpeed`: the surface shader draws the ribbon as-is, skips Gerstner,
+and advects the ripple noise along u — the spline parameter IS the flow map, so no
+texture and no phase reset. 114 has a stream through the meadow sampled from
+terrainHeightAt. Underwater (tint/fog, caustics) is a follow-up. #831 slice 1 is in: the `waterFft` compute node + three persistent
 fixed-size cascade resources are declared in the graph (derived `waterFft ->
 transparentForward`), `WaterBody` carries the tier (`fftSize`, `cascadeCount`,
 `cascadeTile0..2`, `updateRate`) and `waterFftStep` allocates the cascade maps
