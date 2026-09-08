@@ -1,6 +1,6 @@
 # Water lake — the lib/water toon surface on its own (#853), with a free WASD
 # camera and a scrubbable time of day. Nothing else is in the scene but a deep
-# bed and three islands, so the water is what you look at: the shallow -> deep
+# bed, one brown island and three boxes, so the water is what you look at: the shallow -> deep
 # colour gradient, the shoreline foam around the islands, the posterised
 # ripples, the sky tint and the stepped sun highlight.
 #
@@ -33,14 +33,14 @@ open ecs/Entity
 
 const lakeExtent: Float = 400.0
 const bedDepth: Float = 6.0      # the bed sits this far under the surface
-const islandCount: Int = 3
+const cubeCount: Int = 3
 
 func uploadMeshData(meshData: view MeshData) ret MeshHandle {
   ret uploadMesh(verts: meshData.verts, vertCount: meshData.vertCount, indices: meshData.indices)
 }
 
-# A deep sandy bed and three flat islands whose tops break the surface, so
-# the shoreline foam and the shallow colour have banks to work against.
+# Identical comparison geometry in 118 and 119: a bed, three boxes and a
+# central island with sloping shores. Keep this fixture synchronized.
 func buildScene(box: view MeshHandle, ground: view MeshHandle) ret World3d {
   var sceneWorld: World3d = createWorld3d()
   let noEmission: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
@@ -52,7 +52,7 @@ func buildScene(box: view MeshHandle, ground: view MeshHandle) ret World3d {
     world: sceneWorld, mesh: ground, material: sand
     position: Vec3.create(x: 0.0, y: 0.0, z: 0.0 - bedDepth)
     rotation: noRotation, scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0))
-  loop var i: Int = 0, i < islandCount, ++i {
+  loop var i: Int = 0, i < cubeCount, ++i {
     let angle: Float = i.toFloat() * 2.1 + 0.6
     let radius: Float = 26.0 + i.toFloat() * 9.0
     let size: Float = 14.0 + i.toFloat() * 6.0
@@ -64,6 +64,18 @@ func buildScene(box: view MeshHandle, ground: view MeshHandle) ret World3d {
       rotation: Vec3.create(x: 0.0, y: 0.0, z: angle)
       scale: Vec3.create(x: size, y: size * 0.7, z: bedDepth + 1.0))
   }
+
+  # Low, untextured brown island: its sloping sides cross the waterline.
+  let islandData: MeshData = makeSphere(rings: 24, segments: 48)
+  let islandMesh: MeshHandle = uploadMeshData(meshData: islandData)
+  let earth: Material3d = {
+    baseColor: Vec3.create(x: 0.38, y: 0.19, z: 0.075)
+    metallic: 0.0, roughness: 0.95, emission: noEmission, toon: true }
+  let island: EntityId = world3dAddMeshInstance(
+    world: sceneWorld, mesh: islandMesh, material: earth
+    position: Vec3.create(x: 0.0, y: 0.0, z: -4.0)
+    rotation: noRotation, scale: Vec3.create(x: 18.0, y: 14.0, z: 8.0))
+  log("[water comparison] 1 brown island, 3 boxes")
   ret sceneWorld
 }
 
@@ -190,7 +202,7 @@ func main() ret Int {
   }
 
   if fixedTestFrame {
-    log("[water example] deterministic deferred frame rendered: hour {hour}, {islandCount} islands, {waterFrames} water frames")
+    log("[water example] deterministic deferred frame rendered: hour {hour}, 1 island, {cubeCount} boxes, {waterFrames} water frames")
   }
   waterShutdown(waterSystem: waterSystem)
   Gbuffer.shutdownAll()
