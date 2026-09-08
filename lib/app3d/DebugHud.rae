@@ -1,0 +1,30 @@
+# Minimal deferred-scene HUD, backed by the shared DebugOverlay widget.
+# Create the renderer with createDeferredRendererWithUi; update before camera
+# input, then draw at RenderTag.uiOverlay. The renderer handles presentation.
+import Gpu2d
+import SdfText
+open ui/DebugOverlay
+
+type DebugHud {
+  debugOverlay: DebugOverlay
+  font: SdfFont
+}
+
+func createDebugHud(fontBase: view String) ret DebugHud {
+  ret DebugHud {
+    debugOverlay: createDebugOverlay(button: true, fps: true, memory: true, heartbeat: true),
+    font: SdfText.loadSdfFont(jsonPath: "{fontBase}.mtsdf.json", rawAtlasPath: "{fontBase}.mtsdf.raw")
+  }
+}
+
+# A visible dialog owns input until dismissed; the dismissing press is consumed.
+func updateDebugHud(debugHud: mod DebugHud, now: copy Float64, rendered: copy Bool) ret Bool {
+  let tookPointer: Bool = updateDebugOverlay(debugOverlay: debugHud.debugOverlay,
+    screenW: Gpu2d.designWidth(), screenH: Gpu2d.designHeight(), now: now, didRealWork: rendered)
+  ret tookPointer or debugHud.debugOverlay.open
+}
+
+func drawDebugHud(debugHud: mod DebugHud) {
+  Gpu2d.beginFrameLoad()
+  drawDebugOverlay(debugOverlay: debugHud.debugOverlay, font: debugHud.font, didRealWork: true)
+}
