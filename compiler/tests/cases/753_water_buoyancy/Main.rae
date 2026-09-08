@@ -1,0 +1,56 @@
+# Buoyancy as an ECS query (#832): entities with Transform3d + Buoyant follow
+# the water surface; entities without Buoyant are untouched; the offset rides
+# above the surface. Never a callback.
+import Math
+import Vec3
+open Scene3d
+open ecs/Entity
+open ecs/ComponentTable
+open water/Water
+open water/Buoyancy
+
+func check(name: view String, ok: view Bool) {
+  if ok { log("ok   {name}") } else { log("FAIL {name}") }
+}
+
+func near(a: view Float, b: view Float, tolerance: view Float) ret Bool {
+  ret Math.abs(value: a - b) <= tolerance
+}
+
+func placed(x: copy Float, y: copy Float, z: copy Float) ret Transform3d {
+  ret Transform3d {
+    position: Vec3.create(x: x, y: y, z: z),
+    rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0),
+    scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  }
+}
+
+func main() {
+  var body: WaterBody = createLakeToon(surfaceZ: 2.0, extent: 50.0)
+  body.waveCount = 1
+  body.waves.first = { dirX: 1.0, dirY: 0.0, amplitude: 0.5, wavelength: 8.0, steepness: 0.0, speed: 0.0 }
+
+  var transforms: ComponentTable(Transform3d) = createComponentTable(Transform3d)
+  var buoyants: ComponentTable(Buoyant) = createComponentTable(Buoyant)
+  let boat: EntityId = { index: 1, generation: 0 }
+  let rock: EntityId = { index: 2, generation: 0 }
+  let buoy: EntityId = { index: 3, generation: 0 }
+  componentSet(this: transforms, entity: boat, data: placed(x: 2.0, y: 0.0, z: -9.0))
+  componentSet(this: transforms, entity: rock, data: placed(x: 2.0, y: 0.0, z: -9.0))
+  componentSet(this: transforms, entity: buoy, data: placed(x: 6.0, y: 5.0, z: 40.0))
+  componentSet(this: buoyants, entity: boat, data: Buoyant { offset: 0.3 })
+  componentSet(this: buoyants, entity: buoy, data: Buoyant { offset: 0.0 })
+
+  buoyancySystem(transforms: transforms, buoyants: buoyants, body: body, time: 0.0)
+
+  let boatNow: Transform3d = componentGet(this: transforms, entity: boat)
+  let rockNow: Transform3d = componentGet(this: transforms, entity: rock)
+  let buoyNow: Transform3d = componentGet(this: transforms, entity: buoy)
+  # x=2 is the crest of the 8 m wave: surface 2.5, boat rides 0.3 above it.
+  check(name: "the boat sits on the crest plus its offset", ok: near(a: boatNow.position.z, b: 2.8, tolerance: 0.0001))
+  check(name: "the boat keeps its x and y", ok: near(a: boatNow.position.x, b: 2.0, tolerance: 0.0) and near(a: boatNow.position.y, b: 0.0, tolerance: 0.0))
+  check(name: "a rock without Buoyant is untouched", ok: near(a: rockNow.position.z, b: -9.0, tolerance: 0.0))
+  # x=6 is the trough: surface 1.5, the buoy drops from 40 to exactly that.
+  check(name: "the buoy in the trough", ok: near(a: buoyNow.position.z, b: 1.5, tolerance: 0.0001))
+  check(name: "the height query agrees with the system", ok: near(a: waterHeightAt(body: body, x: 6.0, y: 5.0, t: 0.0), b: buoyNow.position.z, tolerance: 0.0))
+}

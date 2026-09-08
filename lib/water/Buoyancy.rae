@@ -1,0 +1,22 @@
+# Buoyancy — floating things follow the water surface (#832), as an ECS QUERY.
+#
+# `Buoyant` is a component; `buoyancySystem` is a #807 query loop over the
+# world's Transform3d table joined with its Buoyant table: every entity that has
+# both gets its Z set to the surface height under it plus its rest offset.
+# Never a callback: the water does not know who floats, the system asks.
+open Scene3d
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Query
+open water/Water
+
+type Buoyant {
+  offset: Float   # rest height of the entity's origin above the surface (m)
+}
+
+func buoyancySystem(transforms: mod ComponentTable(Transform3d), buoyants: view ComponentTable(Buoyant),
+                    body: view WaterBody, time: copy Float) pub {
+  loop let entity: EntityId, transform: mod Transform3d, buoyant: view Buoyant in query2(tableA: transforms, tableB: buoyants) {
+    transform.position.z = waterHeightAt(body: body, x: transform.position.x, y: transform.position.y, t: time) + buoyant.offset
+  }
+}
