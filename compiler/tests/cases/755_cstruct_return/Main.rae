@@ -1,0 +1,43 @@
+# C-boundary return spelling must match local and parameter spelling.
+# No GPU device is needed: these are plain descriptor values.
+open webgpu/WebgpuTypes
+
+func literalEntry() ret WGPUBindGroupEntry {
+  ret WGPUBindGroupEntry { binding: 3, offset: 16, size: 64 }
+}
+
+func localEntry() ret WGPUBindGroupEntry {
+  let entry: WGPUBindGroupEntry = { binding: 5, offset: 32, size: 128 }
+  ret entry
+}
+
+func selectedEntry(entries: view List(WGPUBindGroupEntry), index: copy Int) ret WGPUBindGroupEntry {
+  if let entry: WGPUBindGroupEntry = entries.copyAt(index: index) {
+    ret entry
+  }
+  ret WGPUBindGroupEntry { binding: 7, offset: 48, size: 256 }
+}
+
+func copyEntry(T: type, value: copy T) ret T {
+  ret value
+}
+
+func printEntry(label: view String, entry: view WGPUBindGroupEntry) {
+  let binding: Int = entry.binding as Int
+  log("{label} {binding} {entry.offset} {entry.size}")
+}
+
+func main() {
+  let direct: WGPUBindGroupEntry = literalEntry()
+  let local: WGPUBindGroupEntry = localEntry()
+  var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 1)
+  entries.add(value: local)
+  let selected: WGPUBindGroupEntry = selectedEntry(entries: entries, index: 0)
+  let fallback: WGPUBindGroupEntry = selectedEntry(entries: entries, index: 1)
+  let copied: WGPUBindGroupEntry = copyEntry(value: direct)
+  printEntry(label: "literal", entry: direct)
+  printEntry(label: "local", entry: local)
+  printEntry(label: "selected", entry: selected)
+  printEntry(label: "fallback", entry: fallback)
+  printEntry(label: "generic", entry: copied)
+}
