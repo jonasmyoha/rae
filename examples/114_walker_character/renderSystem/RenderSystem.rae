@@ -16,6 +16,7 @@ open ecs/ComponentTable
 import Sys
 open GbufferInstanced
 open Particles
+open TransparentForward
 open water/WaterSystem
 open GrassCompute
 import GrassConfig
@@ -246,7 +247,9 @@ func renderApp(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSys
         waterFftStep(waterSystem: waterSystem)
       }
       case RenderTag.transparentForward {
-        # The toon lake first (#830), so the splash droplets blend OVER it.
+        # Opaque snapshot BEFORE the water so a refracting surface can read it (#832),
+        # then the toon lake (#830), then the splash droplets blend OVER it.
+        transparentSnapshot(cache: renderSystem.renderer.passes.transparent)
         waterDraw(waterSystem: waterSystem, camera: cameraSystem.camera, light: cameraSystem.light,
           sky: renderSystem.renderer.sky, hasSky: renderSystem.renderer.hasSky, deltaTime: deltaTime)
         # Splash droplets fade by alpha through the transparent pass (#844).

@@ -35,10 +35,14 @@ struct Water {
   wave1: vec4<f32>,
   wave1b: vec4<f32>,
   tuning: vec4<f32>,        // x = distortion, y = waveCount (1 or 2)
+  refract: vec4<f32>,       // x = refraction on (1) / off (0), y = strength, zw = lit target size
+  absorb: vec4<f32>,        // rgb = Beer-Lambert absorption per metre
 };
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<uniform> W: Water;
 @group(0) @binding(2) var depthTex: texture_depth_2d;
+@group(0) @binding(3) var litCopyTex: texture_2d<f32>;   // the opaque frame (#842 snapshot)
+@group(0) @binding(4) var litSampler: sampler;
 
 struct VsOut {
   @builtin(position) pos: vec4<f32>,
@@ -129,13 +133,44 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   colour = mix(colour, vec3<f32>(0.96, 0.98, 1.0), foam * 0.85);
   alpha = max(alpha, foam * 0.9);
 
-  // Sky tint through Fresnel: the stylised sky hemisphere along the reflection.
+  // Reflection: the stylised sky hemisphere along the reflected view ray,
+  // weighted by Schlick Fresnel (F0 = 0.02, water's normal-incidence reflectance).
   let n = normalize(i.nrm);
   let toCamera = normalize(W.camera.xyz - i.world);
   let r = reflect(-toCamera, n);
   let skyTint = mix(W.horizon.rgb, W.zenith.rgb, clamp(r.z, 0.0, 1.0));
-  let fresnel = pow(1.0 - clamp(dot(n, toCamera), 0.0, 1.0), 4.0);
-  colour = mix(colour, skyTint, fresnel * 0.55);
+  let ndv = clamp(dot(n, toCamera), 0.0, 1.0);
+  let fresnel = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
+
+  // Refraction (#832): read the opaque scene through the surface, offset by the
+  // normal. DEPTH MASK: if the pixel the offset lands on is ABOVE the water
+  // (closer than the surface), it is an object out of the water and must not
+  // bleed into it — fall back to the unrefracted pixel (the Boat Attack/Crest
+  // trick). Then Beer-Lambert: light travelling `refrDepth` metres of water is
+  // absorbed per channel, the lost part replaced by scattered deep colour.
+  let litSize = W.refract.zw;
+  let screenUv = i.pos.xy / litSize;
+  var refrUv = screenUv + n.xy * W.refract.y;
+  refrUv = clamp(refrUv, vec2<f32>(0.001), vec2<f32>(0.999));
+  let depthDims = vec2<f32>(textureDimensions(depthTex));
+  let refrPx = clamp(vec2<i32>(refrUv * depthDims), vec2<i32>(0), vec2<i32>(depthDims) - vec2<i32>(1));
+  var refrSceneLinear = linearDepth(textureLoad(depthTex, refrPx, 0));
+  if (refrSceneLinear < surfaceLinear) {
+    refrUv = screenUv;
+    refrSceneLinear = sceneLinear;
+  }
+  let refrDepth = max(refrSceneLinear - surfaceLinear, 0.0);
+  let sceneColour = textureSample(litCopyTex, litSampler, refrUv).rgb;
+  let absorption = exp(-refrDepth * W.absorb.rgb);
+  let underwater = sceneColour * absorption + W.deep.rgb * (1.0 - absorption) * 0.7;
+  if (W.refract.x > 0.5) {
+    // Refracting surface: it composes its own background, so it is opaque.
+    let foamMix = foam * 0.85;
+    colour = mix(mix(underwater, skyTint, fresnel), vec3<f32>(0.96, 0.98, 1.0), foamMix);
+    alpha = 1.0;
+  } else {
+    colour = mix(colour, skyTint, fresnel);
+  }
 
   // Toon shading: a two-band diffuse and a STEPPED Blinn-Phong sun highlight.
   let toSun = normalize(-W.sun.xyz);
