@@ -1,0 +1,272 @@
+# WaterSystem — the GPU side of the water package (#830). Owned by the app as a
+# resource (`app.waterSystem: WaterSystem`, the #822 convention), it steps wave
+# time, keeps the surface pipeline / uniform buffer / bind group (parked in the
+# C handle slots, the grass idiom), and draws ONE body per call as ONE draw of a
+# unit grid — no compute — through the transparent forward pass (#843): a render
+# pass that LOADS the lit HDR target, alpha-blends the surface into it, and
+# tests the opaque scene depth READ-ONLY. The same depth is bound as a texture
+# so the fragment shader can compute the water depth under every pixel
+# (sceneDepth - surfaceDepth) — the depth-gradient colour and shoreline foam of
+# the Roystan toon recipe (waterSurface.wgsl).
+#
+# Call order at the transparentForward tag: waterDraw FIRST, then the renderer's
+# transparentPass (particles), so splashes blend OVER the surface. Refraction is
+# off on this tier, so the #842 opaque snapshot taken after the water is fine;
+# #832 (refraction) will want the snapshot before the water — split
+# transparentPass then, it is a two-line change.
+import Math
+import Vec3
+open Gbuffer
+open GbufferPasses
+open Gpu3d
+open Math3d
+open Mesh3d
+open Scene3d
+open Sky
+open water/Water
+open webgpu/Webgpu
+open webgpu/Context
+
+func gbLitFormat() extern("rae_gb_lit_format") ret Int
+# Handle slots: 0 = surface pipeline, 1 = uniform buffer, 2 = bind group.
+func waterSet(index: Int, ptr: Ptr) extern("rae_gb_water_set")
+func waterGet(index: Int) extern("rae_gb_water_get") ret Ptr
+func waterRelease() extern("rae_gb_water_release")
+
+const waterUniformFloats: Int = 56   # fourteen vec4 (see waterSurface.wgsl `Water`)
+const waterGridSegments: Int = 96
+
+type WaterSystem {
+  body: WaterBody
+  mesh: MeshHandle
+  pipeMade: Bool    # creation attempted (a missing shader is reported once)
+  pipeReady: Bool   # creation succeeded; the draw is skipped otherwise
+  bindGen: Int      # targets generation the bind group was built at (depth view changes on resize)
+  bindMade: Bool
+  time: Float
+  uniform: List(Float)
+  drawCount: Int
+}
+
+func createWaterSystem(body: view WaterBody) pub ret WaterSystem {
+  # A unit grid (-0.5..0.5) the vertex shader scales to the body's extent, so
+  # one mesh serves every body. 96x96 quads is enough for two gentle Gerstner
+  # waves at lake scale; a tier knob later.
+  let grid: MeshData = makePlane(size: 1.0, segments: waterGridSegments)
+  let mesh: MeshHandle = uploadMesh(verts: grid.verts, vertCount: grid.vertCount, indices: grid.indices)
+  let uniform: List(Float) = createList(Float, cap: waterUniformFloats)
+  var i: Int = 0
+  loop i < waterUniformFloats {
+    uniform.add(value: 0.0)
+    i = i + 1
+  }
+  ret WaterSystem {
+    body: body, mesh: mesh, pipeMade: false, pipeReady: false,
+    bindGen: 0 - 1, bindMade: false, time: 0.0, uniform: uniform, drawCount: 0
+  }
+}
+
+func waterSurfaceWgsl() ret String {
+  let noiseSrc: String = gbReadWgsl(path: "lib/noise.wgsl")
+  let surfaceSrc: String = gbReadWgsl(path: "lib/water/waterSurface.wgsl")
+  if surfaceSrc.length() is 0 { ret surfaceSrc }
+  ret noiseSrc.concat(other: "\n").concat(other: surfaceSrc)
+}
+
+# The surface pipeline: the geometry pass's vertex layout (pos/nrm/uv, stride 32),
+# straight alpha blending, reverse-Z depth TEST without write, cull none (a lake is
+# seen from above and, wading, from just under its surface), one target in the HDR
+# format lighting wrote. Built lazily after the first deferred prepare.
+func ensureWaterPipeline(waterSystem: mod WaterSystem) {
+  if waterSystem.pipeMade { ret }
+  waterSystem.pipeMade = true
+  let source: String = waterSurfaceWgsl()
+  if source.length() is 0 {
+    log("[water] lib/water/waterSurface.wgsl not readable from the working directory — run from the repo root; water is not drawn")
+    ret
+  }
+  let sourceC: Buffer(Any) = source.toCStr()
+  let shaderMod: Ptr = makeShaderModule(wgsl: sourceC)
+  var attrs: List(WGPUVertexAttribute) = createList(WGPUVertexAttribute, cap: 3)
+  attrs.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0 as UInt64, shaderLocation: 0 as UInt32 })
+  attrs.add(value: { format: WGPUVertexFormat_Float32x3, offset: 12 as UInt64, shaderLocation: 1 as UInt32 })
+  attrs.add(value: { format: WGPUVertexFormat_Float32x2, offset: 24 as UInt64, shaderLocation: 2 as UInt32 })
+  var vbls: List(WGPUVertexBufferLayout) = createList(WGPUVertexBufferLayout, cap: 1)
+  vbls.add(value: {
+    stepMode: WGPUVertexStepMode_Vertex, arrayStride: 32 as UInt64,
+    attributeCount: 3 as UInt64, attributes: attrs.data
+  })
+  var blends: List(WGPUBlendState) = createList(WGPUBlendState, cap: 1)
+  blends.add(value: {
+    color: { operation: WGPUBlendOperation_Add, srcFactor: WGPUBlendFactor_SrcAlpha, dstFactor: WGPUBlendFactor_OneMinusSrcAlpha },
+    alpha: { operation: WGPUBlendOperation_Add, srcFactor: WGPUBlendFactor_One, dstFactor: WGPUBlendFactor_OneMinusSrcAlpha }
+  })
+  var targets: List(WGPUColorTargetState) = createList(WGPUColorTargetState, cap: 1)
+  targets.add(value: { format: gbLitFormat() as Int32, blend: blends.data, writeMask: WGPUColorWriteMask_All })
+  var frags: List(WGPUFragmentState) = createList(WGPUFragmentState, cap: 1)
+  frags.add(value: {
+    module: shaderMod, entryPoint: { data: gbEntryFs(), length: WGPU_STRLEN },
+    targetCount: 1 as UInt64, targets: targets.data
+  })
+  var depths: List(WGPUDepthStencilState) = createList(WGPUDepthStencilState, cap: 1)
+  depths.add(value: {
+    format: WGPUTextureFormat_Depth32Float,
+    depthWriteEnabled: WGPUOptionalBool_False,
+    depthCompare: WGPUCompareFunction_Greater,
+    stencilFront: { compare: WGPUCompareFunction_Always, failOp: WGPUStencilOperation_Keep, depthFailOp: WGPUStencilOperation_Keep, passOp: WGPUStencilOperation_Keep },
+    stencilBack: { compare: WGPUCompareFunction_Always, failOp: WGPUStencilOperation_Keep, depthFailOp: WGPUStencilOperation_Keep, passOp: WGPUStencilOperation_Keep },
+    stencilReadMask: 4294967295 as UInt32, stencilWriteMask: 4294967295 as UInt32
+  })
+  let desc: WGPURenderPipelineDescriptor = {
+    vertex: {
+      module: shaderMod, entryPoint: { data: gbEntryVs(), length: WGPU_STRLEN },
+      bufferCount: 1 as UInt64, buffers: vbls.data
+    },
+    primitive: {
+      topology: WGPUPrimitiveTopology_TriangleList,
+      frontFace: WGPUFrontFace_CCW, cullMode: WGPUCullMode_None
+    },
+    depthStencil: depths.data,
+    multisample: { count: 1 as UInt32, mask: 4294967295 as UInt32 },
+    fragment: frags.data
+  }
+  waterSet(index: 0, ptr: wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: desc))
+  wgpuShaderModuleRelease(shaderModule: shaderMod)
+  let uDesc: WGPUBufferDescriptor = {
+    usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst,
+    size: (waterUniformFloats * 4) as UInt64
+  }
+  waterSet(index: 1, ptr: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: uDesc))
+  waterSystem.pipeReady = true
+}
+
+# Frame uniform @0 (viewProj + jitter, the geometry pass's), water uniform @1,
+# scene depth @2. The depth view is recreated on resize, so the bind follows
+# the targets generation like the other post passes.
+func ensureWaterBind(waterSystem: mod WaterSystem) {
+  let gen: Int = gbTargetsGen()
+  if waterSystem.bindMade and gen is waterSystem.bindGen { ret }
+  waterSystem.bindMade = true
+  waterSystem.bindGen = gen
+  let old: Ptr = waterGet(index: 2)
+  if not (old is webgpuNull()) { wgpuBindGroupRelease(bindGroup: old) }
+  let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: waterGet(index: 0), groupIndex: 0 as UInt32)
+  var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 3)
+  entries.add(value: { binding: 0 as UInt32, buffer: gbFrameUbuf(), size: gbFrameBytes() as UInt64 })
+  entries.add(value: { binding: 1 as UInt32, buffer: waterGet(index: 1), size: (waterUniformFloats * 4) as UInt64 })
+  entries.add(value: { binding: 2 as UInt32, textureView: gbViewDepth() })
+  let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 3 as UInt64, entries: entries.data }
+  waterSet(index: 2, ptr: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
+  wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+}
+
+func put4(uniform: mod List(Float), base: view Int, x: view Float, y: view Float, z: view Float, w: view Float) {
+  uniform.set(index: base, value: x)
+  uniform.set(index: base + 1, value: y)
+  uniform.set(index: base + 2, value: z)
+  uniform.set(index: base + 3, value: w)
+}
+
+func putWave(uniform: mod List(Float), base: view Int, wave: view GerstnerWave) {
+  # Normalise the direction here so the shader never has to.
+  var length: Float = Math.sqrt(x: wave.dirX * wave.dirX + wave.dirY * wave.dirY)
+  if length < 0.0001 { length = 1.0 }
+  put4(uniform: uniform, base: base, x: wave.dirX / length, y: wave.dirY / length, z: wave.amplitude, w: wave.wavelength)
+  put4(uniform: uniform, base: base + 4, x: wave.steepness, y: wave.speed, z: 0.0, w: 0.0)
+}
+
+# Fill + upload the `Water` uniform (layout mirrored in waterSurface.wgsl).
+func uploadWaterUniform(waterSystem: mod WaterSystem, camera: view Camera3d, light: view Light3d,
+                        sky: view Sky, hasSky: view Bool) {
+  let body: WaterBody = waterSystem.body
+  var sunDir: Vec3 = light.sunDir
+  var sunColor: Vec3 = light.sunColor
+  var zenith: Vec3 = light.ambSky
+  var horizon: Vec3 = light.ambGround
+  if hasSky {
+    sunDir = sky.sunDir
+    sunColor = sky.sunColor
+    zenith = sky.zenithColor
+    horizon = sky.horizonColor
+  }
+  put4(uniform: waterSystem.uniform, base: 0, x: body.centre.x, y: body.centre.y, z: body.centre.z, w: body.extent)
+  put4(uniform: waterSystem.uniform, base: 4, x: body.shallowColor.x, y: body.shallowColor.y, z: body.shallowColor.z, w: body.depthMax)
+  put4(uniform: waterSystem.uniform, base: 8, x: body.deepColor.x, y: body.deepColor.y, z: body.deepColor.z, w: body.absorb)
+  put4(uniform: waterSystem.uniform, base: 12, x: body.foamDistance, y: body.rippleScale, z: body.rippleSpeed, w: body.rippleCutoff)
+  put4(uniform: waterSystem.uniform, base: 16, x: camera.position.x, y: camera.position.y, z: camera.position.z, w: waterSystem.time)
+  put4(uniform: waterSystem.uniform, base: 20, x: sunDir.x, y: sunDir.y, z: sunDir.z, w: body.highlightStep)
+  put4(uniform: waterSystem.uniform, base: 24, x: sunColor.x, y: sunColor.y, z: sunColor.z, w: body.highlightPower)
+  put4(uniform: waterSystem.uniform, base: 28, x: zenith.x, y: zenith.y, z: zenith.z, w: camera.nearZ)
+  put4(uniform: waterSystem.uniform, base: 32, x: horizon.x, y: horizon.y, z: horizon.z, w: camera.farZ)
+  putWave(uniform: waterSystem.uniform, base: 36, wave: body.waves.first)
+  putWave(uniform: waterSystem.uniform, base: 44, wave: body.waves.second)
+  put4(uniform: waterSystem.uniform, base: 52, x: body.distortion, y: 0.0, z: 0.0, w: 0.0)
+  wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: waterGet(index: 1),
+    bufferOffset: 0 as UInt64, data: waterSystem.uniform.data,
+    size: (waterUniformFloats * 4) as UInt64)
+}
+
+# Draw the body: one render pass into the lit target with read-only depth, one
+# indexed draw of the grid. Call at the transparentForward tag, BEFORE the
+# renderer's transparentPass. `deltaTime` steps the wave clock (visual only).
+func waterDraw(waterSystem: mod WaterSystem, camera: view Camera3d, light: view Light3d,
+               sky: view Sky, hasSky: view Bool, deltaTime: copy Float) pub {
+  if gbDeferredPrepare() is 0 { ret }
+  waterSystem.time = waterSystem.time + deltaTime
+  ensureWaterPipeline(waterSystem: waterSystem)
+  if not waterSystem.pipeReady { ret }
+  ensureWaterBind(waterSystem: waterSystem)
+  uploadWaterUniform(waterSystem: waterSystem, camera: camera, light: light, sky: sky, hasSky: hasSky)
+  let mesh: Int = waterSystem.mesh.id
+  if gbMeshIcount(mesh: mesh) <= 0 { ret }
+
+  let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
+  let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
+  var colorAtts: List(WGPURenderPassColorAttachment) = createList(WGPURenderPassColorAttachment, cap: 1)
+  colorAtts.add(value: {
+    view_: gbLitView(), depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32,
+    loadOp: WGPULoadOp_Load, storeOp: WGPUStoreOp_Store
+  })
+  var depthAtts: List(WGPURenderPassDepthStencilAttachment) = createList(WGPURenderPassDepthStencilAttachment, cap: 1)
+  depthAtts.add(value: {
+    view_: gbViewDepth(),
+    depthLoadOp: WGPULoadOp_Undefined, depthStoreOp: WGPUStoreOp_Undefined,
+    depthReadOnly: 1 as UInt32
+  })
+  let rpDesc: WGPURenderPassDescriptor = {
+    colorAttachmentCount: 1 as UInt64, colorAttachments: colorAtts.data,
+    depthStencilAttachment: depthAtts.data
+  }
+  let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
+  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: waterGet(index: 0))
+  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+    group: waterGet(index: 2), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  let vbuf: Ptr = gbMeshVbuf(mesh: mesh)
+  let ibuf: Ptr = gbMeshIbuf(mesh: mesh)
+  wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder: pass, slot: 0 as UInt32,
+    buffer: vbuf, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: vbuf))
+  wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder: pass, buffer: ibuf,
+    format: WGPUIndexFormat_Uint32, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: ibuf))
+  wgpuRenderPassEncoderDrawIndexed(renderPassEncoder: pass,
+    indexCount: gbMeshIcount(mesh: mesh) as UInt32, instanceCount: 1 as UInt32,
+    firstIndex: 0 as UInt32, baseVertex: 0 as Int32, firstInstance: 0 as UInt32)
+  wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
+  let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
+  let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
+  gbSubmit(cmd: cmd)
+  wgpuCommandBufferRelease(commandBuffer: cmd)
+  wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
+  wgpuCommandEncoderRelease(commandEncoder: enc)
+  if waterSystem.drawCount is 0 {
+    log("[water] toon lake: extent {waterSystem.body.extent}, {waterGridSegments}x{waterGridSegments} grid, 2 gerstner waves, surface z {waterSystem.body.centre.z}")
+  }
+  waterSystem.drawCount = waterSystem.drawCount + 1
+}
+
+# Release the GPU handles (app shutdown or a rebuild). Null-safe.
+func waterShutdown(waterSystem: mod WaterSystem) pub {
+  waterRelease()
+  waterSystem.pipeMade = false
+  waterSystem.pipeReady = false
+  waterSystem.bindMade = false
+}
