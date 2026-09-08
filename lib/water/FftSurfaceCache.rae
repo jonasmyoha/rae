@@ -1,0 +1,144 @@
+# CPU snapshot/query side of the shared FFT readback. No GPU calls in queries.
+import Math
+import Vec3
+open water/Water
+open water/WaterSchedule
+
+const fftCacheSize: Int = 32
+const fftCacheFloats: Int = 4096
+
+type FftCascadeCache {
+  values: List(Float) # 32 x 32 RGBA: world displacement xyz, signed Jacobian
+  generation: Int
+  sampleTime: Float
+  tileSize: Float
+  pendingGeneration: Int
+  pendingTime: Float
+  pendingTile: Float
+  submittedUpdate: Int
+}
+
+type FftSurfaceCache {
+  generation: Int
+  activeCount: Int
+  seaState: WaterBody
+  cascades: List(FftCascadeCache)
+}
+
+type FftSurfaceSample {
+  inversionError: Float
+  height: Float
+  displacement: Vec3
+  sampleTimes: Vec3
+  signedJacobians: Vec3 # per-cascade determinants, not a determinant of the sum
+  tileSizes: Vec3
+  cascadeCount: Int
+  generation: Int
+}
+
+func createFftSurfaceCache(body: view WaterBody) ret FftSurfaceCache {
+  var cascades: List(FftCascadeCache) = createList(FftCascadeCache, cap: 3)
+  loop var i: Int = 0, i < 3, ++i {
+    cascades.add(value: FftCascadeCache {
+      values: createList(Float, cap: fftCacheFloats), generation: -1,
+      sampleTime: 0.0, tileSize: 0.0, pendingGeneration: -1,
+      pendingTime: 0.0, pendingTile: 0.0, submittedUpdate: -1
+    })
+  }
+  ret FftSurfaceCache { generation: 0, activeCount: 0, seaState: body, cascades: own cascades }
+}
+
+func invalidateFftSurfaceCache(cache: mod FftSurfaceCache) {
+  cache.generation = cache.generation + 1
+  cache.activeCount = 0
+  loop let cascade: mod FftCascadeCache in cache.cascades {
+    cascade.generation = -1
+    cascade.pendingGeneration = -1
+    cascade.submittedUpdate = -1
+  }
+}
+
+func fftCacheTile(body: view WaterBody, cascade: copy Int) ret Float {
+  if cascade is 0 { ret body.cascadeTile0 }
+  if cascade is 1 { ret body.cascadeTile1 }
+  ret body.cascadeTile2
+}
+
+func fftCacheValue(cascade: view FftCascadeCache, x: copy Int, y: copy Int, channel: copy Int) ret Float {
+  let wrappedX: Int = (x % fftCacheSize + fftCacheSize) % fftCacheSize
+  let wrappedY: Int = (y % fftCacheSize + fftCacheSize) % fftCacheSize
+  ret cascade.values.copyAtFallback(index: (wrappedY * fftCacheSize + wrappedX) * 4 + channel, fallback: 0.0)
+}
+
+# Match normalized repeat/linear sampling: texel centres lie at (i + .5)/size.
+func fftCacheChannel(cascade: view FftCascadeCache, x: copy Float, y: copy Float, channel: copy Int) ret Float {
+  let scaledX: Float = (x / cascade.tileSize - Math.floor(x: x / cascade.tileSize)) * fftCacheSize.toFloat() - 0.5
+  let scaledY: Float = (y / cascade.tileSize - Math.floor(x: y / cascade.tileSize)) * fftCacheSize.toFloat() - 0.5
+  let baseX: Int = Math.floor(x: scaledX).toInt()
+  let baseY: Int = Math.floor(x: scaledY).toInt()
+  let fractionX: Float = scaledX - baseX.toFloat()
+  let fractionY: Float = scaledY - baseY.toFloat()
+  let lower: Float = fftCacheValue(cascade: cascade, x: baseX, y: baseY, channel: channel) * (1.0 - fractionX)
+    + fftCacheValue(cascade: cascade, x: baseX + 1, y: baseY, channel: channel) * fractionX
+  let upper: Float = fftCacheValue(cascade: cascade, x: baseX, y: baseY + 1, channel: channel) * (1.0 - fractionX)
+    + fftCacheValue(cascade: cascade, x: baseX + 1, y: baseY + 1, channel: channel) * fractionX
+  ret lower * (1.0 - fractionY) + upper * fractionY
+}
+
+func fftCacheDisplacement(cache: view FftSurfaceCache, x: copy Float, y: copy Float) ret Vec3 {
+  var total: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
+  loop var i: Int = 0, i < cache.activeCount, ++i {
+    if let cascade: view FftCascadeCache => cache.cascades.viewAt(index: i) {
+      total.x = total.x + fftCacheChannel(cascade: cascade, x: x, y: y, channel: 0)
+      total.y = total.y + fftCacheChannel(cascade: cascade, x: x, y: y, channel: 1)
+      total.z = total.z + fftCacheChannel(cascade: cascade, x: x, y: y, channel: 2)
+    }
+  }
+  ret total
+}
+
+func setFftSampleComponent(vector: mod Vec3, cascade: copy Int, value: copy Float) {
+  if cascade is 0 { vector.x = value }
+  if cascade is 1 { vector.y = value }
+  if cascade is 2 { vector.z = value }
+}
+
+# All active cascades must be usable. Age is measured from simulation time,
+# not completion time; N=2/N=3 snapshots intentionally have different ages.
+func sampleFftSurface(cache: view FftSurfaceCache, body: view WaterBody, x: copy Float, y: copy Float, now: copy Float, maxAge: copy Float) ret opt FftSurfaceSample {
+  if body.style is not WaterStyle.realistic or cache.activeCount < 1
+    or cache.activeCount is not body.cascadeCount or maxAge < 0.0
+    or not sameWaterSpectrum(previous: cache.seaState, current: body)
+    or cache.seaState.fftSize is not body.fftSize { ret none }
+  loop var i: Int = 0, i < cache.activeCount, ++i {
+    if let cascade: view FftCascadeCache => cache.cascades.viewAt(index: i) {
+      if cascade.generation is not cache.generation or cascade.values.length is not fftCacheFloats
+        or cascade.tileSize <= 0.0 or cascade.sampleTime > now
+        or now - cascade.sampleTime > maxAge { ret none }
+    } else { ret none }
+  }
+  var px: Float = x
+  var py: Float = y
+  # Bounded damped fixed-point inversion of world = grid + displacementXY.
+  # Folded surfaces can have multiple roots; expose residual to the caller.
+  loop var iteration: Int = 0, iteration < 16, ++iteration {
+    let displacement: Vec3 = fftCacheDisplacement(cache: cache, x: px, y: py)
+    px = px + (x - displacement.x - px) * 0.5
+    py = py + (y - displacement.y - py) * 0.5
+  }
+  let displacement: Vec3 = fftCacheDisplacement(cache: cache, x: px, y: py)
+  let inversionError: Float = Math.abs(value: px + displacement.x - x) + Math.abs(value: py + displacement.y - y)
+  var times: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
+  var jacobians: Vec3 = { x: 1.0, y: 1.0, z: 1.0 }
+  var tiles: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
+  loop var i: Int = 0, i < cache.activeCount, ++i {
+    if let cascade: view FftCascadeCache => cache.cascades.viewAt(index: i) {
+      setFftSampleComponent(vector: times, cascade: i, value: cascade.sampleTime)
+      setFftSampleComponent(vector: tiles, cascade: i, value: cascade.tileSize)
+      setFftSampleComponent(vector: jacobians, cascade: i, value: fftCacheChannel(cascade: cascade, x: px, y: py, channel: 3))
+    }
+  }
+  ret FftSurfaceSample { inversionError: inversionError, height: body.centre.z + displacement.z, displacement: displacement,
+    sampleTimes: times, signedJacobians: jacobians, tileSizes: tiles,
+    cascadeCount: cache.activeCount, generation: cache.generation }
+}

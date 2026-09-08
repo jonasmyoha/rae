@@ -1,0 +1,120 @@
+# GPU producer for FftSurfaceCache. Uses the existing WaterSystem handle store;
+# slots 137..150 belong exclusively to this system's readback lifetime.
+open water/FftSurfaceCache
+open water/WaterSystem
+open water/WaterFft
+open webgpu/Context
+open webgpu/Readback
+open webgpu/Webgpu
+open Gbuffer
+open GbufferPasses
+
+const fftCacheRequestBase: Int = 137
+const fftCacheStagingBase: Int = 140
+const fftCacheStorageBase: Int = 143
+const fftCacheBindBase: Int = 146
+const fftCachePipelineSlot: Int = 149
+const fftCacheSamplerSlot: Int = 150
+const fftCacheBytes: Int = 16384
+
+func releaseWaterReadback(waterSystem: mod WaterSystem) {
+  loop var i: Int = 0, i < 3, ++i {
+    waterSet(index: fftCacheRequestBase + i, ptr: releaseRead(request: waterGet(index: fftCacheRequestBase + i)))
+    let bind: Ptr = waterGet(index: fftCacheBindBase + i)
+    if bind is not webgpuNull() { wgpuBindGroupRelease(bindGroup: bind) }
+    waterSet(index: fftCacheBindBase + i, ptr: webgpuNull())
+    let staging: Ptr = waterGet(index: fftCacheStagingBase + i)
+    if staging is not webgpuNull() { wgpuBufferRelease(buffer: staging) }
+    waterSet(index: fftCacheStagingBase + i, ptr: webgpuNull())
+    let storage: Ptr = waterGet(index: fftCacheStorageBase + i)
+    if storage is not webgpuNull() { wgpuBufferRelease(buffer: storage) }
+    waterSet(index: fftCacheStorageBase + i, ptr: webgpuNull())
+  }
+  let pipeline: Ptr = waterGet(index: fftCachePipelineSlot)
+  if pipeline is not webgpuNull() { wgpuComputePipelineRelease(computePipeline: pipeline) }
+  waterSet(index: fftCachePipelineSlot, ptr: webgpuNull())
+  let sampler: Ptr = waterGet(index: fftCacheSamplerSlot)
+  if sampler is not webgpuNull() { wgpuSamplerRelease(sampler: sampler) }
+  waterSet(index: fftCacheSamplerSlot, ptr: webgpuNull())
+  invalidateFftSurfaceCache(cache: waterSystem.surfaceCache)
+}
+
+func ensureWaterReadback(waterSystem: mod WaterSystem) ret Bool {
+  if waterGet(index: fftCachePipelineSlot) is not webgpuNull() { ret true }
+  let source: String = gbReadWgsl(path: "lib/water/waterReadback.wgsl")
+  if source.length() is 0 { ret false }
+  let shader: Ptr = makeShaderModule(wgsl: source.toCStr())
+  let pipeline: Ptr = makeComputePipeline(shaderMod: shader, entry: "capture")
+  wgpuShaderModuleRelease(shaderModule: shader)
+  if pipeline is webgpuNull() { ret false }
+  waterSet(index: fftCachePipelineSlot, ptr: pipeline)
+  let samplerDescriptor: WGPUSamplerDescriptor = {
+    addressModeU: WGPUAddressMode_Repeat, addressModeV: WGPUAddressMode_Repeat,
+    magFilter: WGPUFilterMode_Linear, minFilter: WGPUFilterMode_Linear, maxAnisotropy: 1 as UInt16
+  }
+  waterSet(index: fftCacheSamplerSlot, ptr: wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: samplerDescriptor))
+  loop var i: Int = 0, i < waterSystem.fftAllocatedCount, ++i {
+    let stagingDescriptor: WGPUBufferDescriptor = { size: fftCacheBytes as UInt64, usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst }
+    waterSet(index: fftCacheStagingBase + i, ptr: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: stagingDescriptor))
+    let storageDescriptor: WGPUBufferDescriptor = { size: fftCacheBytes as UInt64, usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopySrc }
+    waterSet(index: fftCacheStorageBase + i, ptr: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: storageDescriptor))
+    var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 3)
+    entries.add(value: { binding: 0 as UInt32, textureView: waterGet(index: waterCascadeSlot(cascade: i, map: 0) + 1) })
+    entries.add(value: { binding: 1 as UInt32, sampler: waterGet(index: fftCacheSamplerSlot) })
+    entries.add(value: { binding: 2 as UInt32, buffer: waterGet(index: fftCacheStorageBase + i), size: fftCacheBytes as UInt64 })
+    waterSet(index: fftCacheBindBase + i, ptr: makeBindGroup(pipeline: pipeline, entries: entries))
+    if let cascade: mod FftCascadeCache => waterSystem.surfaceCache.cascades.modAt(index: i) {
+      loop cascade.values.length < fftCacheFloats { cascade.values.add(value: 0.0) }
+    }
+  }
+  waterSystem.surfaceCache.activeCount = waterSystem.fftAllocatedCount
+  waterSystem.surfaceCache.seaState = primaryBody(waterSystem: waterSystem)
+  ret true
+}
+
+# Poll even on idle FFT frames. Each cascade has at most one outstanding map.
+# A busy slot keeps its old CPU snapshot; it never stalls to catch up.
+func updateWaterReadback(waterSystem: mod WaterSystem) {
+  if not waterSystem.fftBaked or not waterSystem.fftFrameMade { ret }
+  if not ensureWaterReadback(waterSystem: waterSystem) { ret }
+  let body: WaterBody = primaryBody(waterSystem: waterSystem)
+  loop var i: Int = 0, i < waterSystem.fftAllocatedCount, ++i {
+    if let cascade: mod FftCascadeCache => waterSystem.surfaceCache.cascades.modAt(index: i) {
+      let request: Ptr = waterGet(index: fftCacheRequestBase + i)
+      if request is not webgpuNull() {
+        let status: Int = pollRead(request: request)
+        if status is 0 { continue }
+        if status is 1 and cascade.pendingGeneration is waterSystem.surfaceCache.generation {
+          if copyRead(request: request, destination: cascade.values.data, capacity: fftCacheBytes as UInt64) is 1 {
+            cascade.generation = cascade.pendingGeneration
+            cascade.sampleTime = cascade.pendingTime
+            cascade.tileSize = cascade.pendingTile
+          }
+        }
+        waterSet(index: fftCacheRequestBase + i, ptr: releaseRead(request: request))
+        if status is not 1 { cascade.submittedUpdate = -1 }
+      }
+      let update: Int = waterSystem.fftUpdateCounts.copyAtFallback(index: i, fallback: 0)
+      if update is cascade.submittedUpdate or update < 1 { continue }
+      let encoderDescriptor: WGPUCommandEncoderDescriptor = { }
+      let encoder: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encoderDescriptor)
+      let passDescriptor: WGPUComputePassDescriptor = { }
+      let pass: Ptr = wgpuCommandEncoderBeginComputePass(commandEncoder: encoder, descriptor: passDescriptor)
+      dispatchIn(pass: pass, pipeline: waterGet(index: fftCachePipelineSlot), bind: waterGet(index: fftCacheBindBase + i), width: fftCacheSize, height: fftCacheSize)
+      wgpuComputePassEncoderEnd(computePassEncoder: pass)
+      wgpuComputePassEncoderRelease(computePassEncoder: pass)
+      wgpuCommandEncoderCopyBufferToBuffer(commandEncoder: encoder, source: waterGet(index: fftCacheStorageBase + i), sourceOffset: 0 as UInt64,
+        destination: waterGet(index: fftCacheStagingBase + i), destinationOffset: 0 as UInt64, size: fftCacheBytes as UInt64)
+      let commandDescriptor: WGPUCommandBufferDescriptor = { }
+      let command: Ptr = wgpuCommandEncoderFinish(commandEncoder: encoder, descriptor: commandDescriptor)
+      gbSubmit(cmd: command)
+      wgpuCommandBufferRelease(commandBuffer: command)
+      wgpuCommandEncoderRelease(commandEncoder: encoder)
+      cascade.pendingTime = waterSystem.fftSampleTimes.copyAtFallback(index: i, fallback: 0.0)
+      cascade.pendingGeneration = waterSystem.surfaceCache.generation
+      cascade.pendingTile = fftCacheTile(body: body, cascade: i)
+      cascade.submittedUpdate = update
+      waterSet(index: fftCacheRequestBase + i, ptr: startRead(buffer: waterGet(index: fftCacheStagingBase + i), offset: 0 as UInt64, size: fftCacheBytes as UInt64))
+    }
+  }
+}

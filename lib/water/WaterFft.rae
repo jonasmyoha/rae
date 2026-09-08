@@ -1,3 +1,4 @@
+open water/WaterReadback
 # WaterFft — the FFT ocean's GPU side (#831 slice 1, #849, #850), split out of
 # WaterSystem.rae at the 1000-line cap. Owns the cascade maps, the one-time
 # spectrum + butterfly bake, the per-frame evolution + Stockham inverse FFT into
@@ -48,6 +49,7 @@ func makeCascadeView(texture: copy Ptr) ret Ptr {
 # Rebuild resource-dependent bindings before replacing cascade textures. Cleanup
 # walks the fixed slot capacity, never a newly edited body's cascade count.
 func resetWaterFft(waterSystem: mod WaterSystem) {
+  releaseWaterReadback(waterSystem: waterSystem)
   let surfaceBind: Ptr = waterGet(index: 2)
   if not (surfaceBind is webgpuNull()) { wgpuBindGroupRelease(bindGroup: surfaceBind) waterSet(index: 2, ptr: webgpuNull()) }
   waterSystem.bindMade = false
@@ -89,6 +91,7 @@ func waterFftStep(waterSystem: mod WaterSystem) {
   bakeFftSpectrum(waterSystem: waterSystem)
   if body.style is WaterStyle.realistic {
     waterFftUpdate(waterSystem: waterSystem, time: waterSystem.time)
+    updateWaterReadback(waterSystem: waterSystem)
   }
 }
 
@@ -275,6 +278,7 @@ func bakeFftSpectrum(waterSystem: mod WaterSystem) {
 
 # Sea state or resolution changed: re-bake next frame.
 func waterFftInvalidate(waterSystem: mod WaterSystem) {
+  releaseWaterReadback(waterSystem: waterSystem)
   waterSystem.fftBaked = false
   waterSystem.fftNeedsRefresh = true
 }
@@ -641,7 +645,7 @@ func waterFftDiagnoseIfft(waterSystem: mod WaterSystem) ret Bool {
   let body: WaterBody = primaryBody(waterSystem: waterSystem)
   let size: Int = body.fftSize
   waterSystem.fftTestMode = true
-  waterSystem.fftBaked = false
+  waterFftInvalidate(waterSystem: waterSystem)
   bakeFftSpectrum(waterSystem: waterSystem)
   waterFftUpdate(waterSystem: waterSystem, time: 0.0)
   var amplitude: Float = 0.0
@@ -669,7 +673,7 @@ func waterFftDiagnoseIfft(waterSystem: mod WaterSystem) ret Bool {
   }
   # Back to the sea: re-bake JONSWAP and check the height field is sane.
   waterSystem.fftTestMode = false
-  waterSystem.fftBaked = false
+  waterFftInvalidate(waterSystem: waterSystem)
   bakeFftSpectrum(waterSystem: waterSystem)
   waterFftUpdate(waterSystem: waterSystem, time: 1.0)
   var seaMax: Float = 0.0
@@ -774,6 +778,7 @@ func releaseCascades(waterSystem: mod WaterSystem) {
 
 # Release the GPU handles (app shutdown or a rebuild). Null-safe.
 func waterShutdown(waterSystem: mod WaterSystem) {
+  releaseWaterReadback(waterSystem: waterSystem)
   releaseFftFrameGpu(waterSystem: waterSystem)
   releaseFftGpu(waterSystem: waterSystem)
   releaseCascades(waterSystem: waterSystem)
