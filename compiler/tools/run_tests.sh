@@ -308,7 +308,7 @@ for TARGET in "${TARGETS[@]}"; do
         # and is deterministic; they keep their own RSS-threshold leak check.
         ENABLE_MEM_STATS=0
         case "$TEST_NAME" in
-            43[4-9]_*|449_*|542_*|543_*|545_*|666_*|712_*) ENABLE_MEM_STATS=1 ;;
+            43[4-9]_*|449_*|542_*|543_*|545_*|666_*|712_*|757_*) ENABLE_MEM_STATS=1 ;;
         esac
         # For parse/lex/format, we want to capture both stdout and stderr to see errors + any partial results
         if [[ "${CMD_ARGS[0]}" =~ ^(parse|lex|format)$ ]]; then

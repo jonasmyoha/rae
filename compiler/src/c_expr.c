@@ -1233,6 +1233,63 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         fprintf(out, " }");
         break;
     }
+    case AST_EXPR_COLLECTION_LITERAL: {
+        // Unlike a binding initializer, a returned struct field needs a C
+        // expression. Build an owning List in a statement expression and move
+        // its value into the field; the enclosing struct owns its cleanup.
+        // The expected type comes from the declared field, never its elements.
+        bool savedHasExpected = ctx->has_expected_type;
+        AstTypeRef savedExpected = ctx->expected_type;
+        const AstTypeRef* listType = savedHasExpected
+            ? substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
+                                  ctx->generic_args, &savedExpected) : NULL;
+        const AstTypeRef* elementType = listType ? listType->generic_args : NULL;
+        const AstFuncDecl* createFunction = NULL;
+        const AstFuncDecl* addFunction = NULL;
+        for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
+            const AstDecl* declaration = ctx->compiler_ctx->all_decls[i];
+            if (declaration->kind != AST_DECL_FUNC) continue;
+            const AstFuncDecl* function = &declaration->as.func_decl;
+            if (!function->generic_params) continue;
+            if (str_eq_cstr(function->name, "createList")) createFunction = function;
+            if (str_eq_cstr(function->name, "add")) addFunction = function;
+        }
+        if (!elementType || !createFunction || !addFunction) {
+            diag_error(ctx->module ? ctx->module->file_path : "<unknown>",
+                       expr->line, expr->column,
+                       "cannot lower collection literal without a declared List element type");
+            break;
+        }
+        register_generic_type(ctx->compiler_ctx, listType);
+        register_function_specialization(ctx->compiler_ctx, createFunction, elementType);
+        register_function_specialization(ctx->compiler_ctx, addFunction, elementType);
+        const char* createName = rae_mangle_specialized_function(ctx->compiler_ctx, createFunction, elementType);
+        const char* addName = rae_mangle_specialized_function(ctx->compiler_ctx, addFunction, elementType);
+        int count = 0;
+        for (const AstCollectionElement* element = expr->as.collection.elements; element; element = element->next) count++;
+        int temporaryId = ctx->temp_counter++;
+        fprintf(out, "({ ");
+        AstTypeRef valueType = *listType;
+        valueType.is_view = false;
+        valueType.is_mod = false;
+        emit_type_ref_as_c_type(ctx, &valueType, out, false);
+        fprintf(out, " __collection%d = %s(((int64_t)%dLL)); ", temporaryId, createName, count);
+        Str elementBase = get_base_type_name(elementType);
+        bool elementIsAny = str_eq_cstr(elementBase, "Any") || str_eq_cstr(elementBase, "RaeAny");
+        for (const AstCollectionElement* element = expr->as.collection.elements; element; element = element->next) {
+            ctx->has_expected_type = true;
+            ctx->expected_type = *elementType;
+            fprintf(out, "%s(&__collection%d, ", addName, temporaryId);
+            if (elementIsAny) fprintf(out, "rae_any((");
+            emit_expr(ctx, element->value, out, PREC_LOWEST, false, false);
+            if (elementIsAny) fprintf(out, "))");
+            fprintf(out, "); ");
+        }
+        fprintf(out, "__collection%d; })", temporaryId);
+        ctx->has_expected_type = savedHasExpected;
+        ctx->expected_type = savedExpected;
+        break;
+    }
     case AST_EXPR_LIST: {
         for (const AstExprList* item = expr->as.list; item; item = item->next) {
             emit_expr(ctx, item->value, out, PREC_LOWEST, false, false);
