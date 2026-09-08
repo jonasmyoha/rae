@@ -52,7 +52,14 @@ normal from the slopes, the Jacobian and its folding foam) into the cascade maps
 one compute pass, one submit per frame, for `realistic` bodies. Verified by the
 only honest FFT test: a known single wave (h0 = 0.25 at k index +-3) inverse-
 transforms to cos(2pi 3x/N) of amplitude 1 (amplitude, phase, six zero crossings
-checked by readback), then the JONSWAP field is finite and bounded. #831 slice 1 is in: the `waterFft` compute node + three persistent
+checked by readback), then the JONSWAP field is finite and bounded. #851 (slice 4) is in: `WaterStyle.realistic` sums the three cascades' displacement in
+the vertex shader (world-space lookup, `textureSampleLevel`) and their slopes +
+Jacobian foam in the fragment — whitecaps where a cascade folds, the shoreline depth
+foam kept, smooth shading and a sharp sun glint instead of the toon steps — bound as
+six more textures on the surface bind group; `lib/water/ClipMap.rae` is the
+camera-centred radial LOD grid (ring spacing grows geometrically, re-snapped to the
+camera each frame, one draw) and `WaterBody.meshMode` 2 places it; example
+119_ocean_fft is the gated showcase. #831 slice 1 is in: the `waterFft` compute node + three persistent
 fixed-size cascade resources are declared in the graph (derived `waterFft ->
 transparentForward`), `WaterBody` carries the tier (`fftSize`, `cascadeCount`,
 `cascadeTile0..2`, `updateRate`) and `waterFftStep` allocates the cascade maps

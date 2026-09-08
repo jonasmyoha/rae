@@ -1,0 +1,147 @@
+# Ocean — the realistic water tier on its own (#851): three FFT cascades
+# (#849 spectrum, #850 evolution + inverse FFT) summed in the surface shader on
+# a camera-centred radial LOD grid (lib/water/ClipMap.rae), whitecaps where the
+# Jacobian folds, refraction and Fresnel over a deep bed. Nothing else is in
+# the scene but the bed, so the ocean is what you look at.
+#
+# Controls: W/A/S/D move, Q/E down/up, shift boost, mouse-drag look;
+# comma / period move the sun.
+import Gpu2d
+import Keys
+import Math
+import Sdl3
+import Sys
+import Vec3
+open Gbuffer
+open GbufferPasses
+open Gpu3d
+open Math3d
+open Mesh3d
+open RendererDeferred
+open Rendergraph
+open Scene3d
+open Sky
+open TransparentForward
+open app3d/CameraRig
+open water/Water
+open water/WaterSystem
+open water/WaterFft
+open water/ClipMap
+open ecs/Entity
+
+const bedDepth: Float = 40.0
+
+func uploadMeshData(meshData: view MeshData) ret MeshHandle {
+  ret uploadMesh(verts: meshData.verts, vertCount: meshData.vertCount, indices: meshData.indices)
+}
+
+func skyForHour(hour: copy Float) ret Sky {
+  let sunDir: Vec3 = sunDirForHour(hour: hour)
+  let height: Float = sunHeightForHour(hour: hour)
+  let warm: Float = 1.0 - height
+  let sunColor: Vec3 = Vec3.create(x: 1.0, y: 0.92 - 0.35 * warm, z: 0.85 - 0.6 * warm)
+  let zenith: Vec3 = Vec3.create(x: 0.16 + 0.1 * warm, y: 0.38, z: 0.8 - 0.25 * warm)
+  let horizon: Vec3 = Vec3.create(x: 0.7 + 0.2 * warm, y: 0.78, z: 0.88 - 0.3 * warm)
+  ret createSkyStylised(sunDir: sunDir, sunColor: Vec3.vscale(a: sunColor, s: 2.5 + 3.0 * height),
+    zenith: zenith, horizon: horizon, bands: 4.0)
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: 1280, height: 800, title: "Rae Ocean — FFT cascades, free camera")
+  Gpu2d.setDesignResolution(width: 1280.0, height: 800.0, fit: 0)
+
+  # A deep bed far below: the refraction has something to absorb toward.
+  let planeData: MeshData = makePlane(size: 6000.0, segments: 1)
+  let ground: MeshHandle = uploadMeshData(meshData: planeData)
+  var sceneWorld: World3d = createWorld3d()
+  let noEmission: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let bed: Material3d = {
+    baseColor: Vec3.create(x: 0.2, y: 0.22, z: 0.18)
+    metallic: 0.0, roughness: 0.95, emission: noEmission, toon: false }
+  let bedEntity: EntityId = world3dAddMeshInstance(
+    world: sceneWorld, mesh: ground, material: bed
+    position: Vec3.create(x: 0.0, y: 0.0, z: 0.0 - bedDepth)
+    rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0), scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0))
+
+  var camera: Camera3d = defaultCamera3d()
+  camera.position = Vec3.create(x: 0.0, y: 0.0 - 30.0, z: 6.0)
+  camera.target = Vec3.create(x: 0.0, y: 40.0, z: 0.0)
+  camera.farZ = 4000.0
+  var cameraRig: CameraRig = createCameraRig(camera: camera)
+  toggleCameraRigMode(rig: cameraRig, camera: camera)
+  var light: Light3d = defaultLight3d()
+
+  var hour: Float = 15.5
+  var sky: Sky = skyForHour(hour: hour)
+  var renderer: DeferredRenderer = createDeferredRenderer()
+  setRendererSky(renderer: renderer, sky: sky)
+  let graphStatus: Int = compileDeferred(renderer: renderer)
+  if graphStatus is not 0 {
+    log("deferred graph invalid: {statusName(status: graphStatus)}")
+    ret 1
+  }
+
+  # The ocean: a realistic body on the camera-centred radial grid.
+  let grid: MeshData = createRadialGridMesh(rings: 64, segments: 96, firstCell: 1.0, growth: 1.09)
+  let gridMesh: MeshHandle = uploadMeshData(meshData: grid)
+  var ocean: WaterBody = createOceanRealistic(surfaceZ: 0.0)
+  ocean.meshId = gridMesh.id
+  var waterSystem: WaterSystem = createWaterSystem(body: ocean)
+
+  log("[ocean] W/A/S/D move, Q/E down/up, shift boost, mouse-drag look; comma/period move the sun")
+  let fixedTestFrame: Bool = Sys.getEnv(name: "RAE_OCEAN_TEST_FRAME").length() > 0
+  var lastTime: Float64 = Gpu2d.nowSeconds()
+  var oceanFrames: Int = 0
+  loop not Gpu2d.pollClose() {
+    let now: Float64 = Gpu2d.nowSeconds()
+    var deltaTime: Float = (now - lastTime) as Float
+    lastTime = now
+    if deltaTime > 0.1 { deltaTime = 0.1 }
+    if fixedTestFrame { deltaTime = 0.0 }
+    var hourChanged: Bool = false
+    if Sdl3.isKeyDown(key: Keys.keyComma) { hour = hour - deltaTime * 1.5 hourChanged = true }
+    if Sdl3.isKeyDown(key: Keys.keyPeriod) { hour = hour + deltaTime * 1.5 hourChanged = true }
+    if hour < 0.0 { hour = hour + 24.0 }
+    if hour >= 24.0 { hour = hour - 24.0 }
+    if hourChanged {
+      sky = skyForHour(hour: hour)
+      setRendererSky(renderer: renderer, sky: sky)
+    }
+    light.sunDir = sky.sunDir
+    light.sunColor = sky.sunColor
+    let cameraMoved: Bool = updateCameraRig(rig: cameraRig, camera: camera, allowInput: not fixedTestFrame, deltaTime: deltaTime)
+    applyCameraRig(rig: cameraRig, camera: camera)
+
+    let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
+    if Gpu2d.renderGate() {
+      var passIndex: Int = 0
+      loop passIndex < deferredOrderLength(renderer: renderer) {
+        let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
+        if tag is RenderTag.waterFft {
+          # In the test frame the sea is frozen at t = 2 s so the frame repeats.
+          if fixedTestFrame { waterSystem.time = 2.0 }
+          waterFftStep(waterSystem: waterSystem)
+        }
+        if tag is RenderTag.transparentForward {
+          transparentSnapshot(cache: renderer.passes.transparent)
+          waterDraw(waterSystem: waterSystem, camera: camera, light: light,
+            sky: renderer.sky, hasSky: renderer.hasSky, deltaTime: deltaTime)
+          oceanFrames = oceanFrames + 1
+        }
+        renderDeferredPassWorld(
+          renderer: renderer, tag: tag, world: sceneWorld
+          camera: camera, light: light, aspect: aspect)
+        passIndex = passIndex + 1
+      }
+      world3dPrevTransformSystem(world: sceneWorld)
+    }
+  }
+
+  if fixedTestFrame {
+    log("[ocean] deterministic deferred frame rendered: hour {hour}, {ocean.cascadeCount} cascades of {ocean.fftSize}, {oceanFrames} ocean frames")
+  }
+  waterShutdown(waterSystem: waterSystem)
+  Gbuffer.shutdownAll()
+  Gpu2d.closeWindow()
+  ret 0
+}

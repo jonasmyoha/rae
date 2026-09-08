@@ -66,6 +66,11 @@ type WaterBody {
   # flowSpeed advects the ripples downstream in m/s.
   meshId: Int
   flowSpeed: Float
+  # How the mesh maps to the world: 0 = the shared unit grid scaled to
+  # centre/extent (lakes), 1 = a baked WORLD-space mesh (rivers), 2 = a
+  # camera-CENTRED metres mesh re-snapped to the camera every frame (oceans,
+  # #851 — the radial LOD grid of ClipMap.rae).
+  meshMode: Int
   # Sea state for the FFT spectrum (#849): a JONSWAP/TMA sea is defined by the
   # wind speed at 10 m, its direction, the fetch it blew over, and the depth.
   windSpeed: Float      # m/s
@@ -101,7 +106,7 @@ func createLakeToon(surfaceZ: copy Float, extent: copy Float) pub ret WaterBody 
     },
     gridSegments: 96, waveCount: 2,
     refraction: 0, refractStrength: 0.02, absorbColor: Vec3.create(x: 0.45, y: 0.16, z: 0.08),
-    meshId: 0, flowSpeed: 0.0,
+    meshId: 0, flowSpeed: 0.0, meshMode: 0,
     windSpeed: 9.0, windDirRad: 0.7, fetch: 250000.0, waterDepth: 50.0,
     choppiness: 1.2,
     fftSize: 256, cascadeCount: 3, cascadeTile0: 250.0, cascadeTile1: 60.0, cascadeTile2: 8.0, updateRate: 1
@@ -154,4 +159,22 @@ func waterHeightAt(body: view WaterBody, x: copy Float, y: copy Float, t: copy F
   }
   let d: Vec3 = wavesDisplacement(body: body, px: px, py: py, t: t)
   ret body.centre.z + d.z
+}
+
+# An open ocean on the FFT cascades (#851): realistic style, refraction on,
+# deep-sea colours, a camera-centred mesh (set its meshId to a ClipMap grid).
+func createOceanRealistic(surfaceZ: copy Float) pub ret WaterBody {
+  var body: WaterBody = createLakeToon(surfaceZ: surfaceZ, extent: 1.0)
+  body.kind = WaterKind.ocean
+  body.style = WaterStyle.realistic
+  body.meshMode = 2
+  body.refraction = 1
+  body.shallowColor = Vec3.create(x: 0.1, y: 0.4, z: 0.5)
+  body.deepColor = Vec3.create(x: 0.01, y: 0.09, z: 0.2)
+  body.depthMax = 12.0
+  body.absorb = 1.0
+  body.foamDistance = 0.6
+  body.highlightPower = 180.0
+  body.waveCount = 0
+  ret body
 }

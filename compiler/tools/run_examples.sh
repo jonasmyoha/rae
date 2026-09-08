@@ -176,6 +176,25 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
+        elif [ "$EXAMPLE_NAME" = "119_ocean_fft" ]; then
+          # The realistic water tier on its own (#851): the log line proves the
+          # FFT baked and the ocean drew every rendered frame; the shot proves a
+          # frame came out. Whether the waves look right is a human check.
+          SCREENSHOT="$TMP_OUT/ocean.bmp"
+          if (cd .. && RAE_OCEAN_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=1500 \
+             RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             && grep -qE '\[ocean\] deterministic deferred frame rendered: hour [0-9.]+, 3 cascades of 256, [1-9][0-9]* ocean frames' "$TMP_OUT/render.log" \
+             && grep -q '\[water fft\] spectrum baked' "$TMP_OUT/render.log" \
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
+                > "$TMP_OUT/screenshot.log" 2>&1; then
+            echo "PASS: $EXAMPLE_NAME (FFT ocean on the camera-centred grid, deferred)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (ocean render gate)"
+            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
+            ((FAILED++))
+          fi
         elif [ "$EXAMPLE_NAME" = "118_water_lake" ]; then
           # The toon water on its own (#853): the log line proves the lake was
           # drawn on every rendered frame under the deferred graph; the shot
