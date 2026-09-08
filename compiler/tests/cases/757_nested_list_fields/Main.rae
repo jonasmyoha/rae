@@ -1,0 +1,52 @@
+func rae_ext_rae_mem_stats_buf_outstanding() extern ret Int
+
+type CounterState {
+  counts: List(Int)
+  times: List(Float)
+}
+
+func createCounterState() ret CounterState {
+  ret CounterState { counts: { 0, 3, 7 }, times: { 0.0, 1.5, 2.75 } }
+}
+
+# Returning a typed local must transfer the lists just like a direct literal.
+func createLocalState() ret CounterState {
+  let counterState: CounterState = { counts: { 0, 0, 0 }, times: { 0.0 } }
+  ret counterState
+}
+
+func checkState() ret Bool {
+  let before: Int = rae_ext_rae_mem_stats_buf_outstanding()
+  let counterState: CounterState = createCounterState()
+  # Prove accounting is active and both returned buffers are still owned.
+  if rae_ext_rae_mem_stats_buf_outstanding() is not before + 2 { ret false }
+  let localState: CounterState = createLocalState()
+  if localState.counts.length is not 3 or localState.times.length is not 1 { ret false }
+  loop let count: Int in localState.counts { if count is not 0 { ret false } }
+  var copiedState: CounterState = counterState
+  copiedState.counts.add(value: 11)
+  if copiedState.counts.length is not 4 { ret false }
+  if counterState.counts.length is not 3 or counterState.times.length is not 3 { ret false }
+  var total: Int = 0
+  var weight: Int = 1
+  loop let count: Int in counterState.counts {
+    total = total + count * weight
+    weight = weight + 1
+  }
+  var elapsed: Float = 0.0
+  loop let time: Float in counterState.times {
+    elapsed = elapsed * 2.0 + time
+  }
+  ret total is 27 and elapsed is 5.75
+}
+
+func main() {
+  if checkState() { log("returned Int and Float contents and independent copy OK") }
+  let baseline: Int = rae_ext_rae_mem_stats_buf_outstanding()
+  var i: Int = 0
+  loop i < 1000 {
+    if not checkState() { log("bad returned contents") }
+    i = i + 1
+  }
+  if rae_ext_rae_mem_stats_buf_outstanding() is baseline { log("cleanup OK") }
+}
