@@ -186,6 +186,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && grep -qE '\[ocean\] deterministic deferred frame rendered: hour [0-9.]+, 3 cascades of 256, [1-9][0-9]* ocean frames' "$TMP_OUT/render.log" \
              && grep -q '\[water fft\] spectrum baked' "$TMP_OUT/render.log" \
+             && grep -qF '[water comparison] 1 brown island, 3 boxes' "$TMP_OUT/render.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
                 > "$TMP_OUT/screenshot.log" 2>&1; then
             echo "PASS: $EXAMPLE_NAME (FFT ocean on the camera-centred grid, deferred)"
@@ -203,7 +204,8 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           if (cd .. && RAE_WATER_TEST_FRAME=1 RAE_WATER_FFT_DIAG=1 RAE_SDL_HEADLESS_MS=1200 \
              RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
              perl -e 'alarm shift; exec @ARGV' 25 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
-             && grep -qE '\[water example\] deterministic deferred frame rendered: hour [0-9.]+, 3 islands, [1-9][0-9]* water frames' "$TMP_OUT/render.log" \
+             && grep -qE '\[water example\] deterministic deferred frame rendered: hour [0-9.]+, 1 island, 3 boxes, [1-9][0-9]* water frames' "$TMP_OUT/render.log" \
+             && grep -qF '[water comparison] 1 brown island, 3 boxes' "$TMP_OUT/render.log" \
              && grep -q '\[water fft\] h0 ok' "$TMP_OUT/render.log" \
              && grep -q '\[water fft\] ifft ok' "$TMP_OUT/render.log" \
              && [ "$(grep -c "\[water\] toon lake" "$TMP_OUT/render.log")" -eq 1 ] \
