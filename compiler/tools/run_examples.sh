@@ -176,6 +176,25 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
+        elif [ "$EXAMPLE_NAME" = "118_water_lake" ]; then
+          # The toon water on its own (#853): the log line proves the lake was
+          # drawn on every rendered frame under the deferred graph; the shot
+          # proves a frame came out. Runs from the repo root (lib/*.wgsl).
+          SCREENSHOT="$TMP_OUT/water-lake.bmp"
+          if (cd .. && RAE_WATER_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=1200 \
+             RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 25 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             && grep -qE '\[water example\] deterministic deferred frame rendered: hour [0-9.]+, 3 islands, [1-9][0-9]* water frames' "$TMP_OUT/render.log" \
+             && [ "$(grep -c "\[water\] toon lake" "$TMP_OUT/render.log")" -eq 1 ] \
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
+                > "$TMP_OUT/screenshot.log" 2>&1; then
+            echo "PASS: $EXAMPLE_NAME (toon water lake, free camera, deferred)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (water lake render gate)"
+            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
+            ((FAILED++))
+          fi
         elif [ "$EXAMPLE_NAME" = "114_walker_character" ]; then
           # The multi-primitive gate, plus the skinning and colour chain.
           # 6717 verts / 3465 triangles is every primitive of all 10 meshes
