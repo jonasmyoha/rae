@@ -2,7 +2,7 @@
 # (#849 spectrum, #850 evolution + inverse FFT) summed in the surface shader on
 # a camera-centred radial LOD grid (lib/water/ClipMap.rae), whitecaps where the
 # Jacobian folds, refraction and Fresnel over a deep bed. Nothing else is in
-# the scene but the bed, so the ocean is what you look at.
+# the scene except the same brown island and three boxes as the toon lake.
 #
 # Controls: W/A/S/D move, Q/E down/up, shift boost, mouse-drag look;
 # comma / period move the sun.
@@ -29,10 +29,51 @@ open water/WaterFft
 open water/ClipMap
 open ecs/Entity
 
-const bedDepth: Float = 40.0
+const bedDepth: Float = 6.0
+const cubeCount: Int = 3
 
 func uploadMeshData(meshData: view MeshData) ret MeshHandle {
   ret uploadMesh(verts: meshData.verts, vertCount: meshData.vertCount, indices: meshData.indices)
+}
+
+# Identical comparison geometry in 118 and 119: a bed, three boxes and a
+# central island with sloping shores. Keep this fixture synchronized.
+func buildScene(box: view MeshHandle, ground: view MeshHandle) ret World3d {
+  var sceneWorld: World3d = createWorld3d()
+  let noEmission: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let noRotation: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let sand: Material3d = {
+    baseColor: Vec3.create(x: 0.62, y: 0.52, z: 0.34)
+    metallic: 0.0, roughness: 0.9, emission: noEmission, toon: true }
+  let bedEntity: EntityId = world3dAddMeshInstance(
+    world: sceneWorld, mesh: ground, material: sand
+    position: Vec3.create(x: 0.0, y: 0.0, z: 0.0 - bedDepth)
+    rotation: noRotation, scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0))
+  loop var i: Int = 0, i < cubeCount, ++i {
+    let angle: Float = i.toFloat() * 2.1 + 0.6
+    let radius: Float = 26.0 + i.toFloat() * 9.0
+    let size: Float = 14.0 + i.toFloat() * 6.0
+    # Centre a little under the surface: the top face pokes out by ~1 m, the
+    # sides run down to the bed, so depth goes 0 -> bedDepth around each island.
+    let islandEntity: EntityId = world3dAddMeshInstance(
+      world: sceneWorld, mesh: box, material: sand
+      position: Vec3.create(x: Math.cos(x: angle) * radius, y: Math.sin(x: angle) * radius, z: 0.0 - bedDepth * 0.5 + 0.5)
+      rotation: Vec3.create(x: 0.0, y: 0.0, z: angle)
+      scale: Vec3.create(x: size, y: size * 0.7, z: bedDepth + 1.0))
+  }
+
+  # Low, untextured brown island: its sloping sides cross the waterline.
+  let islandData: MeshData = makeSphere(rings: 24, segments: 48)
+  let islandMesh: MeshHandle = uploadMeshData(meshData: islandData)
+  let earth: Material3d = {
+    baseColor: Vec3.create(x: 0.38, y: 0.19, z: 0.075)
+    metallic: 0.0, roughness: 0.95, emission: noEmission, toon: true }
+  let island: EntityId = world3dAddMeshInstance(
+    world: sceneWorld, mesh: islandMesh, material: earth
+    position: Vec3.create(x: 0.0, y: 0.0, z: -4.0)
+    rotation: noRotation, scale: Vec3.create(x: 18.0, y: 14.0, z: 8.0))
+  log("[water comparison] 1 brown island, 3 boxes")
+  ret sceneWorld
 }
 
 func skyForHour(hour: copy Float) ret Sky {
@@ -50,22 +91,16 @@ func main() ret Int {
   Gpu2d.initWindow(width: 1280, height: 800, title: "Rae Ocean — FFT cascades, free camera")
   Gpu2d.setDesignResolution(width: 1280.0, height: 800.0, fit: 0)
 
-  # A deep bed far below: the refraction has something to absorb toward.
+  # Match the lake's depth and shoreline fixture; extend the bed to the horizon.
   let planeData: MeshData = makePlane(size: 6000.0, segments: 1)
   let ground: MeshHandle = uploadMeshData(meshData: planeData)
-  var sceneWorld: World3d = createWorld3d()
-  let noEmission: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
-  let bed: Material3d = {
-    baseColor: Vec3.create(x: 0.2, y: 0.22, z: 0.18)
-    metallic: 0.0, roughness: 0.95, emission: noEmission, toon: false }
-  let bedEntity: EntityId = world3dAddMeshInstance(
-    world: sceneWorld, mesh: ground, material: bed
-    position: Vec3.create(x: 0.0, y: 0.0, z: 0.0 - bedDepth)
-    rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0), scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0))
+  let boxData: MeshData = makeBox(size: 1.0)
+  let box: MeshHandle = uploadMeshData(meshData: boxData)
+  var sceneWorld: World3d = buildScene(box: box, ground: ground)
 
   var camera: Camera3d = defaultCamera3d()
-  camera.position = Vec3.create(x: 0.0, y: 0.0 - 30.0, z: 6.0)
-  camera.target = Vec3.create(x: 0.0, y: 40.0, z: 0.0)
+  camera.position = Vec3.create(x: 0.0, y: 0.0 - 48.0, z: 9.0)
+  camera.target = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
   camera.farZ = 4000.0
   var cameraRig: CameraRig = createCameraRig(camera: camera)
   toggleCameraRigMode(rig: cameraRig, camera: camera)
