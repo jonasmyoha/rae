@@ -1,0 +1,121 @@
+# Bounded diagnostic polling only; ordinary rendering polls once per frame.
+import Math
+import Gpu2d
+open water/Water
+open water/WaterSystem
+open water/WaterFft
+open water/WaterReadback
+open water/FftSurfaceCache
+open webgpu/Context
+
+func drainWaterCache(waterSystem: mod WaterSystem) ret Bool {
+  let deadline: Float64 = Gpu2d.nowSeconds() + 2.0 as Float64
+  loop Gpu2d.nowSeconds() < deadline {
+    updateWaterReadback(waterSystem: waterSystem)
+    var complete: Bool = waterSystem.surfaceCache.activeCount is waterSystem.fftAllocatedCount
+    loop var i: Int = 0, i < waterSystem.fftAllocatedCount, ++i {
+      if let cascade: view FftCascadeCache => waterSystem.surfaceCache.cascades.viewAt(index: i) {
+        let expectedTime: Float = waterSystem.fftSampleTimes.copyAtFallback(index: i, fallback: -1.0)
+        if cascade.generation is not waterSystem.surfaceCache.generation or cascade.sampleTime is not expectedTime { complete = false }
+      } else { complete = false }
+    }
+    if complete { ret true }
+  }
+  log("[water cache] timed out generation {waterSystem.surfaceCache.generation}")
+  loop var i: Int = 0, i < waterSystem.fftAllocatedCount, ++i {
+    if let cascade: view FftCascadeCache => waterSystem.surfaceCache.cascades.viewAt(index: i) {
+      log("cascade {i}: gen {cascade.generation} time {cascade.sampleTime}, expected {waterSystem.fftSampleTimes.copyAtFallback(index: i, fallback: -1.0)}, pending {cascade.pendingTime}, update {cascade.submittedUpdate}")
+    }
+  }
+  ret false
+}
+
+func verifyWaterCacheFrame(waterSystem: mod WaterSystem) ret Bool {
+  if not drainWaterCache(waterSystem: waterSystem) { ret false }
+  let body: WaterBody = primaryBody(waterSystem: waterSystem)
+  if let sample: FftSurfaceSample = sampleFftSurface(cache: waterSystem.surfaceCache, body: body, x: 3.0, y: -7.0, now: waterSystem.time, maxAge: 1000.0) {
+    if sample.generation is not waterSystem.surfaceCache.generation { ret false }
+    # No completed-map receipt time may masquerade as wave time.
+    if sample.sampleTimes.x is not waterSystem.fftSampleTimes.copyAtFallback(index: 0, fallback: -1.0) { ret false }
+    if body.cascadeCount > 1 and sample.sampleTimes.y is not waterSystem.fftSampleTimes.copyAtFallback(index: 1, fallback: -1.0) { ret false }
+    if body.cascadeCount > 2 and sample.sampleTimes.z is not waterSystem.fftSampleTimes.copyAtFallback(index: 2, fallback: -1.0) { ret false }
+  } else { log("[water cache] complete frame unavailable") ret false }
+  if let stale: FftSurfaceSample = sampleFftSurface(cache: waterSystem.surfaceCache, body: body, x: 0.0, y: 0.0, now: waterSystem.time + 10.0, maxAge: 1.0) {
+    log("[water cache] stale data accepted") ret false
+  }
+  ret true
+}
+
+func verifyKnownWaterCache(waterSystem: mod WaterSystem) ret Bool {
+  let savedBody: WaterBody = primaryBody(waterSystem: waterSystem)
+  var body: WaterBody = savedBody
+  body.choppiness = 0.0
+  waterSystem.bodies.set(index: 0, value: body)
+  waterFftInvalidate(waterSystem: waterSystem)
+  waterSystem.fftTestMode = true
+  bakeFftSpectrum(waterSystem: waterSystem)
+  waterFftUpdate(waterSystem: waterSystem, time: 0.0)
+  updateWaterReadback(waterSystem: waterSystem)
+  # Cancel outstanding maps BEFORE polling them, then prove old generation
+  # callbacks cannot make a query available. Recreate bindings to the same maps.
+  let oldGeneration: Int = waterSystem.surfaceCache.generation
+  releaseWaterReadback(waterSystem: waterSystem)
+  var ok: Bool = waterSystem.surfaceCache.generation > oldGeneration
+  if let old: FftSurfaceSample = sampleFftSurface(cache: waterSystem.surfaceCache, body: body, x: 0.0, y: 0.0, now: 0.0, maxAge: 1.0) { ok = false }
+  if not drainWaterCache(waterSystem: waterSystem) { ok = false }
+  loop var point: Int = 0, point < 3, ++point {
+    let x: Float = (point - 1).toFloat() * body.cascadeTile0 / 12.0
+    var expected: Float = body.centre.z
+    loop var i: Int = 0, i < body.cascadeCount, ++i {
+      expected = expected + Math.cos(x: 6.2831853 * 3.0 * x / fftCacheTile(body: body, cascade: i))
+    }
+    if let sample: FftSurfaceSample = sampleFftSurface(cache: waterSystem.surfaceCache, body: body, x: x, y: 0.0, now: 0.0, maxAge: 0.0) {
+      # Includes 32-grid interpolation and half-texel phase of the drawn map.
+      if Math.abs(value: sample.height - expected) > 0.13 * body.cascadeCount.toFloat() {
+        log("[water cache] wave height {sample.height}, expected {expected}") ok = false
+      }
+      if sample.inversionError > 0.001 { ok = false }
+    } else { ok = false }
+  }
+  # Temporal phase uses each cascade's ACTUAL scheduled time, including N=2/3.
+  waterFftUpdate(waterSystem: waterSystem, time: 0.7)
+  if not drainWaterCache(waterSystem: waterSystem) { ok = false }
+  var temporalHeight: Float = body.centre.z
+  loop var i: Int = 0, i < body.cascadeCount, ++i {
+    let waveNumber: Float = 6.2831853 * 3.0 / fftCacheTile(body: body, cascade: i)
+    var depth: Float = waveNumber * body.waterDepth
+    if depth > 20.0 { depth = 20.0 }
+    let exponential: Float = Math.exp(x: 2.0 * depth)
+    let frequency: Float = Math.sqrt(x: 9.81 * waveNumber * (exponential - 1.0) / (exponential + 1.0))
+    let time: Float = waterSystem.fftSampleTimes.copyAtFallback(index: i, fallback: 0.0)
+    temporalHeight = temporalHeight + Math.cos(x: frequency * time)
+  }
+  if let sample: FftSurfaceSample = sampleFftSurface(cache: waterSystem.surfaceCache, body: body, x: 0.0, y: 0.0, now: 0.7, maxAge: 1.0) {
+    if Math.abs(value: sample.height - temporalHeight) > 0.13 * body.cascadeCount.toFloat() { ok = false }
+  } else { ok = false }
+  # A deliberately folded wave proves the GPU path preserves NEGATIVE J.
+  body.choppiness = 10.0
+  body.cascadeTile0 = 32.0
+  body.cascadeTile1 = 32.0
+  body.cascadeTile2 = 32.0
+  waterSystem.bodies.set(index: 0, value: body)
+  waterFftInvalidate(waterSystem: waterSystem)
+  bakeFftSpectrum(waterSystem: waterSystem)
+  waterFftUpdate(waterSystem: waterSystem, time: 0.0)
+  if not drainWaterCache(waterSystem: waterSystem) { ok = false }
+  if let cascade: view FftCascadeCache => waterSystem.surfaceCache.cascades.viewAt(index: 0) {
+    var minimum: Float = 1.0
+    loop var texel: Int = 0, texel < fftCacheSize * fftCacheSize, ++texel {
+      let jacobian: Float = cascade.values.copyAtFallback(index: texel * 4 + 3, fallback: 1.0)
+      if jacobian < minimum { minimum = jacobian }
+    }
+    if minimum >= 0.0 { log("[water cache] signed Jacobian lost") ok = false }
+  } else { ok = false }
+  waterSystem.bodies.set(index: 0, value: savedBody)
+  waterSystem.fftTestMode = false
+  waterFftInvalidate(waterSystem: waterSystem)
+  bakeFftSpectrum(waterSystem: waterSystem)
+  waterFftUpdate(waterSystem: waterSystem, time: waterSystem.time)
+  if ok { log("[water cache] known wave and pending invalidation OK") } else { log("[water cache] FAIL") }
+  ret ok
+}
