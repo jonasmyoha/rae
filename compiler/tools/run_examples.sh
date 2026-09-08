@@ -276,15 +276,17 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # skipped pass would still leave a correct-looking lit image,
           # since nothing reads the pyramid yet. Every declared pass now
           # executes (renderer_deferred.rae), so the pyramid's presence in
-          # the derived pass order (`3: depthPyramid`) is the built signal —
+          # the derived pass order (`4: depthPyramid`; waterFft leads since #831) is the built signal —
           # the old per-build `depth pyramid: N mips` debug log was removed.
           if [ "$GB_OK" = "1" ] \
-             && [ "$(grep -c '  0: shadow' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
-             && [ "$(grep -c '  1: gbuffer' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
-             && [ "$(grep -c '  2: ssao' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
-             && [ "$(grep -c '  3: depthPyramid' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
-             && [ "$(grep -c '  5: taa' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
-             && [ "$(grep -c '  7: present' "$TMP_OUT/gb-lit.log")" -ge 1 ]; then
+             && [ "$(grep -c '  0: waterFft' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
+             && [ "$(grep -c '  1: shadow' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
+             && [ "$(grep -c '  2: gbuffer' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
+             && [ "$(grep -c '  3: ssao' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
+             && [ "$(grep -c '  4: depthPyramid' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
+             && [ "$(grep -c '  6: transparentForward' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
+             && [ "$(grep -c '  7: taa' "$TMP_OUT/gb-lit.log")" -ge 1 ] \
+             && [ "$(grep -c '  9: present' "$TMP_OUT/gb-lit.log")" -ge 1 ]; then
             echo "PASS: $EXAMPLE_NAME (lit frame + 4 G-buffer channels, pyramid built, derived pass order)"
             ((PASSED++))
           else

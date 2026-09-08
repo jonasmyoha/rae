@@ -38,7 +38,7 @@ struct Water {
   refract: vec4<f32>,       // x = refraction on (1) / off (0), y = strength, zw = lit target size
   absorb: vec4<f32>,        // rgb = Beer-Lambert absorption per metre
   cascades: vec4<f32>,      // xyz = cascade tile sizes (m), w = realistic path (1) / toon (0)
-  centre: vec4<f32>,        // xy = camera position snapped to metres (mesh mode 2), z = cascade count
+  centre: vec4<f32>,        // xy = camera position snapped to metres (mesh mode 2), z = cascade count, w = grid cell (m, lakes)
 };
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<uniform> W: Water;
@@ -118,6 +118,12 @@ fn gerstner(w: vec4<f32>, wb: vec4<f32>, xy: vec2<f32>, t: f32,
   (*dNormal) += vec3<f32>(d.x * k * amplitude * c, d.y * k * amplitude * c, steepness * k * amplitude * s);
 }
 
+fn waveGridFactor(wavelength: f32) -> f32 {
+  let cell = W.centre.w;
+  if (cell <= 0.0) { return 1.0; }
+  return smoothstep(2.0, 4.0, wavelength / cell);
+}
+
 @vertex
 fn vs(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec2<f32>) -> VsOut {
   var o: VsOut;
@@ -135,8 +141,14 @@ fn vs(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec
   let t = W.camera.w;
   var disp = vec3<f32>(0.0, 0.0, 0.0);
   var dn = vec3<f32>(0.0, 0.0, 0.0);
-  if (!river && !realistic && W.tuning.y > 0.5) { gerstner(W.wave0, W.wave0b, base.xy, t, &disp, &dn); }
-  if (!river && !realistic && W.tuning.y > 1.5) { gerstner(W.wave1, W.wave1b, base.xy, t, &disp, &dn); }
+  // A wave the grid cannot sample (under ~2 cells) aliases into wide bands,
+  // so its amplitude fades out (Water.waveGridFactor is the CPU mirror, #857).
+  var wave0 = W.wave0;
+  var wave1 = W.wave1;
+  wave0.z *= waveGridFactor(wave0.w);
+  wave1.z *= waveGridFactor(wave1.w);
+  if (!river && !realistic && W.tuning.y > 0.5) { gerstner(wave0, W.wave0b, base.xy, t, &disp, &dn); }
+  if (!river && !realistic && W.tuning.y > 1.5) { gerstner(wave1, W.wave1b, base.xy, t, &disp, &dn); }
   // Realistic: the FFT cascades displace the vertex (world-space lookup, so
   // the waves stay put while the centred mesh moves under them).
   if (realistic) { disp = cascadeDisplacement(base.xy); }
@@ -183,7 +195,7 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   // Depth-gradient body colour.
   let depthT = clamp(waterDepth / max(W.shallow.w, 0.01), 0.0, 1.0);
   var colour = mix(W.shallow.rgb, W.deep.rgb, depthT);
-  var alpha = mix(0.45, 0.95, depthT) * W.deep.w;
+  var alpha = mix(0.7, 0.97, depthT) * W.deep.w;
 
   // Toon ripples + shoreline foam: world-space value noise, panned, warped by a
   // second octave, then posterised by a depth-driven cutoff.
@@ -193,12 +205,28 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   let distortion = vec2<f32>(
     raeNoiseValue2(i.distortUvA, 11u) - 0.5,
     raeNoiseValue2(i.distortUvB, 23u) - 0.5) * W.tuning.x;
-  let ripple = raeNoiseValue2(i.rippleUv + distortion * W.foam.y, 7u);
+  // Toon ripples are LINES, not blobs: a ridged two-octave noise (1 - |2n-1|)
+  // peaks along thin curves, and only its highest values pass the cutoff, so
+  // the surface carries sparse cel crests rather than white patches.
+  let rippleXy = i.rippleUv + distortion * W.foam.y;
+  let ridged = 1.0 - abs(2.0 * raeNoiseValue2(rippleXy, 7u) - 1.0);
+  let ridged2 = 1.0 - abs(2.0 * raeNoiseValue2(rippleXy * 2.3 + vec2<f32>(3.1, 7.7), 19u) - 1.0);
+  let ripple = ridged * 0.65 + ridged2 * 0.35;
   let foamT = clamp(waterDepth / max(W.foam.x, 0.01), 0.0, 1.0);
-  let cutoff = foamT * W.foam.w;
-  var foam = smoothstep(cutoff - 0.03, cutoff + 0.03, ripple);
+  // Shoreline: a solid foam band where the water is shallower than a third of
+  // foamDistance, broken up by the noise as it thins out; deep water keeps
+  // only the crest lines above rippleCutoff (0.86..0.92 reads well).
+  let shorelineBand = 1.0 - smoothstep(0.1, 0.5, foamT);
+  let shoreline = max(shorelineBand * smoothstep(0.2, 0.35, ripple), 1.0 - smoothstep(0.05, 0.18, foamT));
+  // Crests thin out with distance: the cutoff rises and the lines fade, so the
+  // far water is a calm colour field instead of a moire strip at the horizon.
+  let viewDistance = length(W.camera.xyz - i.world);
+  let crestFade = 1.0 - smoothstep(20.0, 140.0, viewDistance);
+  let crestCutoff = W.foam.w + (1.0 - crestFade) * 0.1;
+  let crests = smoothstep(crestCutoff - 0.015, crestCutoff + 0.015, ripple) * crestFade;
+  var foam = max(shoreline, crests);
   // River rapids: the baked curvature foam, streaked by the same noise.
-  foam = max(foam, i.bakedFoam * smoothstep(0.35, 0.75, ripple));
+  foam = max(foam, i.bakedFoam * smoothstep(0.45, 0.8, ripple));
   // Realistic (#851): no toon ripples — whitecaps where a cascade folds
   // (Jacobian < 1 -> foam), streaked by the noise; the shoreline depth foam
   // (cutoff ~0 in the shallows) stays.
@@ -216,6 +244,9 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   // weighted by Schlick Fresnel (F0 = 0.02, water's normal-incidence reflectance).
   var n = normalize(i.nrm);
   if (realisticPath) { n = normalize(vec3<f32>(-cascade.xy, 1.0)); }
+  // Toon: the Gerstner normal flattens with distance, or the two waves tile a
+  // checkerboard through the Fresnel rim and the glint along the horizon.
+  if (!realisticPath) { n = normalize(mix(n, vec3<f32>(0.0, 0.0, 1.0), 1.0 - crestFade)); }
   let toCamera = normalize(W.camera.xyz - i.world);
   let r = reflect(-toCamera, n);
   let skyTint = mix(W.horizon.rgb, W.zenith.rgb, clamp(r.z, 0.0, 1.0));
@@ -248,8 +279,11 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
     let foamMix = foam * 0.85;
     colour = mix(mix(underwater, skyTint, fresnel), vec3<f32>(0.96, 0.98, 1.0), foamMix);
     alpha = 1.0;
-  } else {
+  } else if (realisticPath) {
     colour = mix(colour, skyTint, fresnel);
+  } else {
+    // Toon: the sky is a RIM at grazing angles, never a wash over the body colour.
+    colour = mix(colour, skyTint, fresnel * 0.35);
   }
 
   // Shading. Toon: a two-band diffuse and a STEPPED Blinn-Phong sun highlight.
@@ -264,6 +298,9 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
     highlight = spec;
   } else {
     colour *= 0.78 + 0.22 * smoothstep(0.25, 0.32, ndl);
+    // The stepped glint on the Gerstner normals tiles into a checkerboard at
+    // the horizon; let it fade with the crests.
+    highlight *= crestFade;
   }
   colour += W.sunColor.rgb * highlight * 0.7;
   alpha = max(alpha, highlight * 0.8);

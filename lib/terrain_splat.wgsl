@@ -52,11 +52,6 @@ const RAE_TERRAIN_TEX_SCALE: f32 = 0.16666667;
 const RAE_TERRAIN_GRASS_TEX_MEAN: vec3<f32> = vec3<f32>(0.644, 0.665, 0.395);
 const RAE_TERRAIN_SAND_TEX_MEAN:  vec3<f32> = vec3<f32>(0.922, 0.798, 0.715);
 const RAE_TERRAIN_ROAD_TEX_MEAN:  vec3<f32> = vec3<f32>(0.761, 0.640, 0.511);
-const RAE_TERRAIN_WATER_TEX_MEAN: vec3<f32> = vec3<f32>(0.037, 0.378, 0.619);
-// Water scrolls (the task's "(scrolling) water"): world units per second the
-// water tile drifts, so the sea surface has moving detail over the procedural
-// ripples. Small — a fast scroll reads as a conveyor belt from the fixed camera.
-const RAE_TERRAIN_WATER_SCROLL: f32 = 0.06;
 
 fn octWrap(v: vec2<f32>) -> vec2<f32> {
   let s = vec2<f32>(select(-1.0, 1.0, v.x >= 0.0), select(-1.0, 1.0, v.y >= 0.0));
@@ -144,18 +139,13 @@ fn fs(in: VsOut) -> FsOut {
   let uv = in.worldXY * RAE_TERRAIN_TEX_SCALE;
   let grassT = RAE_TERRAIN_GRASS * (textureSample(terrainTex, terrainSamp, uv, RAE_TL_GRASS).rgb / RAE_TERRAIN_GRASS_TEX_MEAN);
   let sandT  = RAE_TERRAIN_SAND  * (textureSample(terrainTex, terrainSamp, uv, RAE_TL_SAND ).rgb / RAE_TERRAIN_SAND_TEX_MEAN);
-  // Water tile drifts with the clock (d.params.w carries time), for moving
-  // surface detail over the procedural ripples/foam.
-  let wuv = uv + vec2<f32>(d.params.w * RAE_TERRAIN_WATER_SCROLL, d.params.w * RAE_TERRAIN_WATER_SCROLL * 0.6);
-  let waterT = RAE_TERRAIN_WATER * (textureSample(terrainTex, terrainSamp, wuv, RAE_TL_WATER).rgb / RAE_TERRAIN_WATER_TEX_MEAN);
   // Sequential blend by weight -- at any pixel one weight dominates, so this
   // reads as "the dominant material's texture" while shore blends average.
   albedo = mix(albedo, grassT, clamp(texBlend * wGrass83, 0.0, 1.0));
   albedo = mix(albedo, sandT,  clamp(texBlend * wSand83,  0.0, 1.0));
-  // Water gets HALF weight: the sea already carries procedural foam/ripples, so
-  // the tile is subtle surface detail, not a replacement -- full strength reads
-  // as cracked ice under the top-down camera.
-  albedo = mix(albedo, waterT, clamp(texBlend * b.wWater * 0.5, 0.0, 1.0));
+  // Under water the ground is the seabed (#857): the wet sand tile, so the
+  // lib/water surface has a bed to colour by depth instead of a painted sea.
+  albedo = mix(albedo, sandT * RAE_WET_SAND_DARKEN, clamp(texBlend * b.wWater, 0.0, 1.0));
   // Road is an overlay (raeBiomePath), not a biome weight; stamp it over land
   // under the same gate, below water so a shore crossing still reads wet.
   let roadT = RAE_TERRAIN_PATH * (textureSample(terrainTex, terrainSamp, uv, RAE_TL_ROAD).rgb / RAE_TERRAIN_ROAD_TEX_MEAN);

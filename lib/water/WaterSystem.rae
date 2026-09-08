@@ -289,7 +289,11 @@ func uploadWaterUniform(waterSystem: mod WaterSystem, body: view WaterBody, came
   var realistic: Float = 0.0
   if body.style is WaterStyle.realistic { realistic = 1.0 }
   put4(uniform: waterSystem.uniform, base: 64, x: body.cascadeTile0, y: body.cascadeTile1, z: body.cascadeTile2, w: realistic)
-  put4(uniform: waterSystem.uniform, base: 68, x: Math.floor(x: camera.position.x), y: Math.floor(x: camera.position.y), z: body.cascadeCount.toFloat(), w: 0.0)
+  # The grid cell (m) lets the vertex shader fade Gerstner waves the grid
+  # cannot sample (#857) — the same rule as Water.waveGridFactor.
+  var gridCell: Float = 0.0
+  if body.meshMode is 0 and body.gridSegments > 0 { gridCell = body.extent / body.gridSegments.toFloat() }
+  put4(uniform: waterSystem.uniform, base: 68, x: Math.floor(x: camera.position.x), y: Math.floor(x: camera.position.y), z: body.cascadeCount.toFloat(), w: gridCell)
   wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: waterGet(index: 1),
     bufferOffset: 0 as UInt64, data: waterSystem.uniform.data,
     size: (waterUniformFloats * 4) as UInt64)
