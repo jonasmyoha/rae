@@ -1,0 +1,85 @@
+# Opt-in hardware regression for tier lifecycle, exact cadence and wave time.
+# Driven by the normal ocean renderer so every tier also builds and draws the
+# real surface bind group. No special allocation or dispatch path for the test.
+import Math
+open water/Water
+open water/WaterSystem
+open water/WaterFft
+open webgpu/Context
+
+const waterCheckStageFrames: Int = 6
+const waterCheckFrames: Int = 84
+
+type WaterCheckSample {
+  ordinal: Int
+  counts: List(Int)
+  times: List(Float)
+}
+
+func takeWaterCheckSample(waterSystem: view WaterSystem) ret WaterCheckSample {
+  let counts: List(Int) = waterSystem.fftUpdateCounts
+  let times: List(Float) = waterSystem.fftSampleTimes
+  ret WaterCheckSample { ordinal: waterSystem.fftFrame, counts: own counts, times: own times }
+}
+
+func prepareWaterCheck(waterSystem: mod WaterSystem, frame: copy Int) {
+  let stage: Int = frame / waterCheckStageFrames
+  var body: WaterBody = primaryBody(waterSystem: waterSystem)
+  if frame % waterCheckStageFrames is 0 {
+    body.fftSize = 128
+    body.cascadeCount = stage % 3 + 1
+    if stage / 3 is 1 { body.fftSize = 256 }
+    if stage / 3 is 2 { body.fftSize = 512 }
+    body.updateRate = stage % 3 + 1
+    # Nine combinations, shrink from 512x3 to 128x1, then sea state,
+    # cadence-only, explicit invalidation, and expansion back to 256x3.
+    if stage is 9 { body.cascadeCount = 1 body.updateRate = 2 }
+    if stage is 10 { body.cascadeCount = 1 body.windSpeed = 11.0 body.updateRate = 2 }
+    if stage is 11 { body.cascadeCount = 1 body.updateRate = 5 }
+    if stage is 12 { body.cascadeCount = 1 body.updateRate = 5 waterFftInvalidate(waterSystem: waterSystem) }
+    if stage is 13 { body.fftSize = 256 body.cascadeCount = 3 body.updateRate = 2 }
+    waterSystem.bodies.set(index: 0, value: body)
+    log("[water tiers] stage {stage}: {body.fftSize} x {body.cascadeCount}, N={body.updateRate}")
+  }
+  # Deliberately non-unit elapsed time: missed updates must sample the CURRENT
+  # absolute clock, not advance a cascade-local clock by one small timestep.
+  waterSystem.time = frame.toFloat() * 0.27 + 2.0
+}
+
+func verifyWaterCheck(waterSystem: view WaterSystem, before: view WaterCheckSample, frame: copy Int) ret Bool {
+  let body: WaterBody = primaryBody(waterSystem: waterSystem)
+  let stage: Int = frame / waterCheckStageFrames
+  # The previous stage's end diagnostic re-bakes the spectrum. It finishes with
+  # fresh maps; stage 11 is cadence-only, so that boundary must NOT refresh all.
+  let refreshAll: Bool = frame % waterCheckStageFrames is 0 and stage is not 11
+  var expectedUpdates: Int = 0
+  var ok: Bool = waterSystem.fftAllocatedSize is body.fftSize and waterSystem.fftAllocatedCount is body.cascadeCount
+  if waterSystem.fftFrame is not before.ordinal + 1 { ok = false }
+  loop var cascade: Int = 0, cascade < 3, ++cascade {
+    var expectedCount: Int = 0
+    var expectedTime: Float = 0.0
+    if let count: Int = before.counts.copyAt(index: cascade) { expectedCount = count }
+    if let time: Float = before.times.copyAt(index: cascade) { expectedTime = time }
+    if cascade < body.cascadeCount and (refreshAll or before.ordinal % body.updateRate is cascade % body.updateRate) {
+      expectedCount = expectedCount + 1
+      expectedTime = waterSystem.time
+      expectedUpdates = expectedUpdates + 1
+    }
+    if let count: Int = waterSystem.fftUpdateCounts.copyAt(index: cascade) { if count is not expectedCount { ok = false } }
+    if let time: Float = waterSystem.fftSampleTimes.copyAt(index: cascade) { if Math.abs(value: time - expectedTime) > 0.0001 { ok = false } }
+    let texture: Ptr = waterGet(index: waterCascadeSlot(cascade: cascade, map: 0))
+    if cascade < body.cascadeCount { if texture is webgpuNull() { ok = false } }
+    else { if not (texture is webgpuNull()) { ok = false } }
+  }
+  if waterSystem.fftLastUpdates is not expectedUpdates { ok = false }
+  if not ok { log("[water tiers] frame {frame} FAIL: expected {expectedUpdates} updates, got {waterSystem.fftLastUpdates}") }
+  ret ok
+}
+
+func verifyWaterReleased() ret Bool {
+  var ok: Bool = true
+  loop var slot: Int = 0, slot < 160, ++slot {
+    if not (waterGet(index: slot) is webgpuNull()) { log("[water tiers] leaked handle slot {slot}") ok = false }
+  }
+  ret ok
+}

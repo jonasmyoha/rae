@@ -1,0 +1,51 @@
+open water/Water
+open water/WaterSchedule
+
+func check(label: view String, ok: copy Bool) {
+  if ok { log("ok {label}") } else { log("FAIL {label}") }
+}
+
+func maskAt(frame: copy Int, rate: copy Int, refresh: copy Bool) ret Int {
+  var mask: Int = 0
+  var bit: Int = 1
+  loop var cascade: Int = 0, cascade < 3, ++cascade {
+    if waterCascadeDue(frame: frame, cascade: cascade, updateRate: rate, refreshAll: refresh) { mask = mask + bit }
+    bit = bit * 2
+  }
+  ret mask
+}
+
+func main() {
+  check(label: "N1 all cascades", ok: maskAt(frame: 8, rate: 1, refresh: false) is 7)
+  check(label: "N2 index phases", ok: maskAt(frame: 0, rate: 2, refresh: false) is 5 and maskAt(frame: 1, rate: 2, refresh: false) is 2)
+  check(label: "N3 round robin", ok: maskAt(frame: 0, rate: 3, refresh: false) is 1 and maskAt(frame: 1, rate: 3, refresh: false) is 2 and maskAt(frame: 2, rate: 3, refresh: false) is 4)
+  check(label: "N5 idle slots", ok: maskAt(frame: 3, rate: 5, refresh: false) is 0 and maskAt(frame: 4, rate: 5, refresh: false) is 0 and maskAt(frame: 5, rate: 5, refresh: false) is 1)
+  check(label: "invalidation refreshes all", ok: maskAt(frame: 4, rate: 5, refresh: true) is 7)
+  var balanced: Bool = true
+  loop var rate: Int = 1, rate <= 5, ++rate {
+    loop var cascade: Int = 0, cascade < 3, ++cascade {
+      var count: Int = 0
+      loop var frame: Int = 0, frame < 60, ++frame {
+        if waterCascadeDue(frame: frame, cascade: cascade, updateRate: rate, refreshAll: false) { count = count + 1 }
+      }
+      if count is not 60 / rate { balanced = false }
+    }
+  }
+  check(label: "each cascade once per N frames", ok: balanced)
+  var body: WaterBody = createOceanRealistic(surfaceZ: 0.0)
+  useMobileWaterTier(body: body)
+  check(label: "mobile 128x1 every other frame", ok: body.fftSize is 128 and body.cascadeCount is 1 and body.updateRate is 2)
+  body.fftSize = 7
+  body.cascadeCount = 0
+  body.updateRate = 0
+  normalizeWaterTier(body: body)
+  check(label: "invalid settings safe defaults", ok: body.fftSize is 256 and body.cascadeCount is 1 and body.updateRate is 1)
+  body.cascadeCount = 4
+  normalizeWaterTier(body: body)
+  check(label: "cascade capacity bounded", ok: body.cascadeCount is 3)
+  var current: WaterBody = body
+  current.updateRate = 3
+  check(label: "cadence does not rebake", ok: sameWaterSpectrum(previous: body, current: current))
+  current.windSpeed = 12.0
+  check(label: "sea state rebakes", ok: not sameWaterSpectrum(previous: body, current: current))
+}

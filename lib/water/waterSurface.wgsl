@@ -231,8 +231,9 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   // (Jacobian < 1 -> foam), streaked by the noise; the shoreline depth foam
   // (cutoff ~0 in the shallows) stays.
   let realisticPath = W.cascades.w > 0.5;
-  let cascade = cascadeSlopeFoam(i.gridXy);
+  var cascade = vec3<f32>(0.0);
   if (realisticPath) {
+    cascade = cascadeSlopeFoam(i.gridXy);
     let shoreline = smoothstep(-0.03, 0.03, 0.15 - foamT);
     let whitecap = clamp(cascade.z, 0.0, 1.0) * smoothstep(0.25, 0.65, ripple);
     foam = max(shoreline, whitecap);
