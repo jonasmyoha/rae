@@ -48,6 +48,10 @@ type WaterBody {
   highlightStep: Float  # specular threshold for the stepped toon sun highlight
   highlightPower: Float # specular exponent before the step
   waves: WaterWaves
+  # Toon tier knobs (#847): the grid the surface is drawn on and how many of
+  # the Gerstner waves the vertex shader sums (1 on mobile, 2 on desktop).
+  gridSegments: Int     # quads per side of the unit grid (48 mobile, 96 desktop)
+  waveCount: Int        # 1 or 2
   # Realistic tier (#831): the FFT ocean cascades. Data only until the compute
   # lands; the toon path ignores them.
   fftSize: Int          # 128 / 256 / 512 texels per cascade side
@@ -74,6 +78,7 @@ func createLakeToon(surfaceZ: copy Float, extent: copy Float) pub ret WaterBody 
       first:  { dirX: 1.0, dirY: 0.35, amplitude: 0.08, wavelength: 6.0, steepness: 0.35, speed: 1.4 },
       second: { dirX: 0.0 - 0.4, dirY: 1.0, amplitude: 0.05, wavelength: 3.2, steepness: 0.3, speed: 1.0 }
     },
+    gridSegments: 96, waveCount: 2,
     fftSize: 256, cascadeCount: 3, cascadeTile0: 250.0, cascadeTile1: 60.0, cascadeTile2: 8.0, updateRate: 1
   }
 }
