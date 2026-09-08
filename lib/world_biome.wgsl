@@ -9,6 +9,8 @@ const RAE_BIOME_SEED: u32 = 1337u;
 const RAE_BIOME_ELEV_SCALE: f32 = 90.0;
 const RAE_BIOME_MOIST_SCALE: f32 = 140.0;
 const RAE_BIOME_WATER_LEVEL: f32 = -0.28;
+// Seabed floor below the water level (elevation units) — WorldBiome.seabedMaxDepth.
+const RAE_BIOME_SEABED_DEPTH: f32 = 1.25;
 // Widened: the reference's beach is a broad band, and the old 0.15 put sand in a
 // strip only a few units across.
 const RAE_BIOME_BEACH_BAND: f32 = 0.24;
@@ -187,10 +189,11 @@ const RAE_BIOME_TERRAIN_AMPLITUDE: f32 = 3.2;
 // standing on a surface that no longer existed — hovering over water among other
 // things. One definition, shared.
 //
-// Water is one height: elevation below the water level clamps to exactly the
-// water level, matching terrainHeightAt on the CPU.
+// Below the water level the ground keeps going down as the SEABED (#857), to at
+// most RAE_BIOME_SEABED_DEPTH under the plane; the water surface is lib/water's
+// own mesh at worldWaterZ. Matches worldTerrainHeight on the CPU.
 fn raeTerrainHeight(p: vec2<f32>, groundZ: f32) -> f32 {
-  let e = max(raeBiomeElevation(p), RAE_BIOME_WATER_LEVEL);
+  let e = max(raeBiomeElevation(p), RAE_BIOME_WATER_LEVEL - RAE_BIOME_SEABED_DEPTH);
   return groundZ + e * RAE_BIOME_TERRAIN_AMPLITUDE;
 }
 

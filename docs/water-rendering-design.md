@@ -353,6 +353,37 @@ only the shader path and the compute node differ.
 
 ---
 
+## 6. The toon look, revisited (#857)
+
+What made the first toon water read badly, and what changed:
+
+- **The walker's sea was two water shaders on one plane.** The biome terrain
+  clamped every submerged point flat to the water level and painted its own sea
+  there (depth tint, sine ripples, surf, a cel shore rim), and the `lib/water`
+  lake was drawn coplanar on top of it — z-fighting stripes, foam everywhere
+  because the surface shader read a depth of zero. Now the terrain under the
+  water level is a **seabed** (`worldTerrainHeight` / `raeTerrainHeight` follow
+  the field down to `seabedMaxDepth` = 4 m) painted as wet sand, and the water
+  surface alone draws the water: shallow -> deep colour, the shoreline foam band
+  and the crest lines all come from real depth. The beach keeps its wet-sand band
+  and swash tongues.
+- **Gerstner waves shorter than the grid aliased into wide slow bands.** A 6 m
+  wave on a 7 m cell (700 m sea, 96 segments) cannot be sampled; both the shader
+  and the CPU mirror now fade a wave out between 4 and 2 cells
+  (`waveGridFactor`), the walker sea uses a 256 grid with 12 m / 7 m swell.
+- **Crest lines are ridged noise, thinned with distance.** `1 - |2n - 1|` peaks
+  along curves, so the cutoff passes thin cel lines instead of white blobs; the
+  cutoff rises and the lines fade past ~20-140 m, and the toon normal flattens
+  with the same fade, or the two Gerstner normals tile a checkerboard through the
+  Fresnel rim along the horizon. The sky is a Fresnel rim (x0.35), never a wash.
+- **Rivers use metre-scale noise** (`rippleScale` 2, cutoff 0.92) so a 4 m stream
+  carries streaks, not patches wider than itself, and 114's stream now starts at
+  the shore instead of riding out over the sea on the seabed.
+
+Screenshot cameras: 118 is the fixed test frame; 114 takes `RAE_WALKER_CAMERA`
+(the twelve values of `CameraRig.stateString`, mode 1 = free) so a headless frame
+can look at the river or the shore.
+
 ## Sources
 
 - Roystan / IronWarrior — Toon Water Shader: <https://github.com/IronWarrior/ToonWaterShader>, tutorial <https://roystan.net/articles/toon-water/>

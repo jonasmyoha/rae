@@ -19,8 +19,10 @@ const riverAcross: Int = 4
 # surface hides the edge behind terrain and a lower one gets tucked under.
 func addMeadowRiver(waterSystem: mod WaterSystem, groundZ: copy Float) {
   let spline: RiverSpline = {
-    p0: Vec3.create(x: 0.0 - 48.0, y: 74.0, z: 0.0),
-    p1: Vec3.create(x: 0.0 - 22.0, y: 34.0, z: 0.0),
+    # Starts at the shore, not out at sea: the seabed drops below the water
+    # plane (#857), so a ribbon carried past the coast would ride under the sea.
+    p0: Vec3.create(x: 0.0 - 27.0, y: 42.0, z: 0.0),
+    p1: Vec3.create(x: 0.0 - 18.0, y: 32.0, z: 0.0),
     p2: Vec3.create(x: 14.0, y: 26.0, z: 0.0),
     p3: Vec3.create(x: 38.0, y: 0.0 - 22.0, z: 0.0)
   }
