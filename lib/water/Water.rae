@@ -8,7 +8,7 @@
 # body through the transparent forward pass; this file is plain values.
 #
 # Style: `toon` is the mobile-first stylised path (the Roystan recipe) and the
-# only one implemented here; `realistic` (FFT cascades, #831) EXTENDS it later.
+# `realistic` uses FFT cascades. Both are described by the same body data.
 import Math
 import Vec3
 
@@ -78,19 +78,21 @@ type WaterBody {
   fetch: Float          # metres of open water the wind acted on (~250 km)
   waterDepth: Float     # metres; the TMA factor damps long waves in shallow water
   choppiness: Float     # lateral Gerstner-style displacement scale for the FFT surface (~1.2)
-  # Realistic tier (#831): the FFT ocean cascades. Data only until the compute
-  # lands; the toon path ignores them.
+  # FFT size and active cascade count; the toon surface skips these samples.
   fftSize: Int          # 128 / 256 / 512 texels per cascade side
   cascadeCount: Int     # 1..3 cascades summed by the surface shader
   cascadeTile0: Float   # world metres one cascade tile covers (~250 / 60 / 8)
   cascadeTile1: Float
   cascadeTile2: Float
-  updateRate: Int       # 1 = every cascade every frame; N = one cascade per frame, round-robin
+  # N frames per cascade update: cascade i runs when frame % N == i % N.
+  # 1 updates all every frame; mobile defaults to 2. Initialization/invalidation
+  # refresh all maps once. Wave time always follows real elapsed time, not updates.
+  updateRate: Int
 }
 
 # A stylised lake with the surface at `surfaceZ`: pale turquoise shallows, a deep
 # blue body, soft foam at the banks, two small crossing Gerstner waves.
-func createLakeToon(surfaceZ: copy Float, extent: copy Float) pub ret WaterBody {
+func createLakeToon(surfaceZ: copy Float, extent: copy Float) ret WaterBody {
   ret WaterBody {
     kind: WaterKind.lake, style: WaterStyle.toon,
     centre: Vec3.create(x: 0.0, y: 0.0, z: surfaceZ), extent: extent,
@@ -138,7 +140,7 @@ func gerstnerDisplacement(wave: view GerstnerWave, px: view Float, py: view Floa
 # and this mirror fade such a wave out — full above 4 cells, gone under 2 —
 # so a big lake on a coarse grid goes calm instead of striped. The cell is the
 # body's own extent / gridSegments (the lake grid tier knob, #847).
-func waveGridFactor(body: view WaterBody, wavelength: view Float) pub ret Float {
+func waveGridFactor(body: view WaterBody, wavelength: view Float) ret Float {
   if body.meshMode is not 0 or body.gridSegments < 1 { ret 1.0 }
   let cell: Float = body.extent / body.gridSegments.toFloat()
   if cell <= 0.0 { ret 1.0 }
@@ -167,7 +169,7 @@ func wavesDisplacement(body: view WaterBody, px: view Float, py: view Float, t: 
 # (x, y) started somewhere else; two fixed-point iterations of p = (x, y) -
 # displacementXY(p) recover it to well under a centimetre for the steepness
 # values these bodies use. (FFT cascades will need a readback, #854.)
-func waterHeightAt(body: view WaterBody, x: copy Float, y: copy Float, t: copy Float) pub ret Float {
+func waterHeightAt(body: view WaterBody, x: copy Float, y: copy Float, t: copy Float) ret Float {
   var px: Float = x
   var py: Float = y
   var i: Int = 0
@@ -183,7 +185,7 @@ func waterHeightAt(body: view WaterBody, x: copy Float, y: copy Float, t: copy F
 
 # An open ocean on the FFT cascades (#851): realistic style, refraction on,
 # deep-sea colours, a camera-centred mesh (set its meshId to a ClipMap grid).
-func createOceanRealistic(surfaceZ: copy Float) pub ret WaterBody {
+func createOceanRealistic(surfaceZ: copy Float) ret WaterBody {
   var body: WaterBody = createLakeToon(surfaceZ: surfaceZ, extent: 1.0)
   body.kind = WaterKind.ocean
   body.style = WaterStyle.realistic
