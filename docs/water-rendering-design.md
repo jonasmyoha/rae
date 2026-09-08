@@ -29,7 +29,7 @@ its own background and is drawn opaque, the mobile tier keeps the alpha path
 Gerstner mirror with the horizontal displacement inverted by two fixed-point
 iterations, and `lib/water/Buoyancy.rae` is the `Buoyant` component + a `query2`
 system over Transform3d — never a callback; both pinned by unit cases 752/753.
-SSR and the FFT displacement readback are #854. Rivers (#833) are in:
+SSR is #854. The shared FFT displacement/Jacobian cache and optional gameplay query are #858 (see water-readback.md). Rivers (#833) are in:
 `lib/water/River.rae` bakes a bezier `RiverSpline` ONCE into a ribbon mesh whose uv
 is metres along/across the flow and whose normal packs (flow tangent, curvature
 foam); bank rows take caller-sampled terrain heights and tuck under a bank that
@@ -67,7 +67,7 @@ transparentForward`), `WaterBody` carries the tier (`fftSize`, `cascadeCount`,
 `cascadeTile0..2`, `updateRate`) and `waterFftStep` allocates the cascade maps
 (rgba16float storage+sampled) in the C handle slots; spectrum, evolution, the
 Stockham iFFT and surface sampling are implemented, as are the quality tiers
-and cadence. Shared gameplay readback and spray remain follow-ups.
+and cadence. Shared gameplay readback is implemented in #858; spray remains #859.
 The survey below describes the original pre-water baseline.
 
 ### Implemented prerequisite: opaque radiance snapshot

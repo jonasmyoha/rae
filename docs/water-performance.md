@@ -89,3 +89,13 @@ run and keep it exclusive with other test runs:
 ```sh
 MAKEFLAGS='TEST_RUNNER=tools/run_examples.sh' RAE_EXAMPLE_FILTER='114_walker_character 118_water_lake 119_ocean_fft zz_gpu_timing_check' perl -e 'alarm shift; exec @ARGV' 300 bash compiler/tools/watch-tests.sh
 ```
+
+## Gameplay readback (#858)
+
+Realistic water now publishes a bounded 32×32 displacement/signed-Jacobian cache
+per active cascade through nonblocking map requests. Busy requests retain the
+previous completed snapshot; there is no wait or adaptive cadence change.
+Queries explicitly take the cache and a maximum sample age. See
+[water-readback.md](water-readback.md) for the contract, generation invalidation,
+low-resolution limitations and hardware checks. Capture-only `GpuTiming.collect`
+remains separate from ordinary rendering.

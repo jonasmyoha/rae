@@ -1,3 +1,4 @@
+open water/FftSurfaceCache
 # WaterSystem — the GPU side of the water package (#830). Owned by the app as a
 # resource (`app.waterSystem: WaterSystem`, the #822 convention), it steps wave
 # time, keeps the surface pipeline / uniform buffer / bind group (parked in the
@@ -53,6 +54,7 @@ func waterCascadeSlot(cascade: view Int, map: view Int) ret Int {
 }
 
 type WaterSystem {
+  surfaceCache: FftSurfaceCache
   # Every body this system draws (#847): they share ONE unit-grid mesh (sized
   # by the first body's gridSegments) and one pipeline; each is one draw with
   # its own uniform upload. The first body also owns the FFT cascades.
@@ -103,6 +105,7 @@ func createWaterSystem(body: view WaterBody) ret WaterSystem {
   let updateCounts: List(Int) = { 0, 0, 0 }
   let sampleTimes: List(Float) = { 0.0, 0.0, 0.0 }
   ret WaterSystem {
+    surfaceCache: createFftSurfaceCache(body: body),
     bodies: own bodies, mesh: mesh, pipeMade: false, pipeReady: false,
     bindGen: 0 - 1, bindMade: false, time: 0.0, uniform: uniform, drawCount: 0,
     cascadesMade: false, fftGpuMade: false, fftBaked: false,
