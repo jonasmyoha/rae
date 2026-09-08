@@ -134,6 +134,7 @@ func main() ret Int {
 
   log("[water example] W/A/S/D move, Q/E down/up, shift boost, mouse-drag look; comma/period move the sun")
   let fixedTestFrame: Bool = Sys.getEnv(name: "RAE_WATER_TEST_FRAME").length() > 0
+  let fftDiag: Bool = Sys.getEnv(name: "RAE_WATER_FFT_DIAG") is "1"
   # TAA is opt-in (FXAA is the default); RAE_WATER_TAA=1 turns it on for the
   # #832 interaction check — the surface must not smear or ghost under it.
   if Sys.getEnv(name: "RAE_WATER_TAA") is "1" { gbSetTaaEnabled(on: 1) }
@@ -169,6 +170,8 @@ func main() ret Int {
         let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
         if tag is RenderTag.waterFft {
           waterFftStep(waterSystem: waterSystem)
+          # #849: read the baked spectrum back once and check it (blocking; test only).
+          if fftDiag and waterFrames is 2 { let ok: Bool = waterFftDiagnose(waterSystem: waterSystem) }
         }
         if tag is RenderTag.transparentForward {
           # Snapshot the opaque frame, the lake refracts it, then the transparent pass.
