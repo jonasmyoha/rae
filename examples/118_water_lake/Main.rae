@@ -26,6 +26,7 @@ open Scene3d
 open Sky
 open TransparentForward
 open app3d/CameraRig
+open app3d/DebugHud
 open water/Water
 open water/WaterSystem
 open water/WaterFft
@@ -113,7 +114,9 @@ func main() ret Int {
 
   var hour: Float = 10.5
   var sky: Sky = skyForHour(hour: hour)
-  var renderer: DeferredRenderer = createDeferredRenderer()
+  # Reuse the existing shared-widget font atlas; no per-example asset copies.
+  var debugHud: DebugHud = createDebugHud(fontBase: "examples/114_walker_character/assets/Roboto-Regular")
+  var renderer: DeferredRenderer = createDeferredRendererWithUi()
   setRendererSky(renderer: renderer, sky: sky)
   let graphStatus: Int = compileDeferred(renderer: renderer)
   if graphStatus is not 0 {
@@ -169,11 +172,13 @@ func main() ret Int {
     light.sunDir = sky.sunDir
     light.sunColor = sky.sunColor
 
-    let cameraMoved: Bool = updateCameraRig(rig: cameraRig, camera: camera, allowInput: not fixedTestFrame, deltaTime: deltaTime)
+    let renderFrame: Bool = Gpu2d.renderGate()
+    let debugInputTaken: Bool = updateDebugHud(debugHud: debugHud, now: now, rendered: renderFrame)
+    let cameraMoved: Bool = updateCameraRig(rig: cameraRig, camera: camera, allowInput: not fixedTestFrame and not debugInputTaken, deltaTime: deltaTime)
     applyCameraRig(rig: cameraRig, camera: camera)
 
     let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
-    if Gpu2d.renderGate() {
+    if renderFrame {
       var passIndex: Int = 0
       loop passIndex < deferredOrderLength(renderer: renderer) {
         let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
@@ -192,6 +197,7 @@ func main() ret Int {
             sky: renderer.sky, hasSky: renderer.hasSky, deltaTime: deltaTime)
           waterFrames = waterFrames + 1
         }
+        if tag is RenderTag.uiOverlay { drawDebugHud(debugHud: debugHud) }
         renderDeferredPassWorld(
           renderer: renderer, tag: tag, world: sceneWorld
           camera: camera, light: light, aspect: aspect)
