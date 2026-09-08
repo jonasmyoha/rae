@@ -1,0 +1,175 @@
+# Water lake — the lib/water toon surface on its own (#853), with a free WASD
+# camera and a scrubbable time of day. Nothing else is in the scene but a deep
+# bed and three islands, so the water is what you look at: the shallow -> deep
+# colour gradient, the shoreline foam around the islands, the posterised
+# ripples, the sky tint and the stepped sun highlight.
+#
+# Controls (printed at start): W/A/S/D move, Q/E down/up, hold shift to boost,
+# mouse-drag to look, wheel unused in free mode; comma / period move the sun
+# back / forward through the day. Deliberately no settings UI — the shared
+# app3d dialog is a lot of wiring for a demo whose subject is the water; the
+# time of day is a key instead.
+import Gpu2d
+import Keys
+import Math
+import Sdl3
+import Sys
+import Vec3
+open Gbuffer
+open Gpu3d
+open Math3d
+open Mesh3d
+open RendererDeferred
+open Rendergraph
+open Scene3d
+open Sky
+open app3d/CameraRig
+open water/Water
+open water/WaterSystem
+open ecs/Entity
+
+const lakeExtent: Float = 400.0
+const bedDepth: Float = 6.0      # the bed sits this far under the surface
+const islandCount: Int = 3
+
+func uploadMeshData(meshData: view MeshData) ret MeshHandle {
+  ret uploadMesh(verts: meshData.verts, vertCount: meshData.vertCount, indices: meshData.indices)
+}
+
+# A deep sandy bed and three flat islands whose tops break the surface, so
+# the shoreline foam and the shallow colour have banks to work against.
+func buildScene(box: view MeshHandle, ground: view MeshHandle) ret World3d {
+  var sceneWorld: World3d = createWorld3d()
+  let noEmission: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let noRotation: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let sand: Material3d = {
+    baseColor: Vec3.create(x: 0.62, y: 0.52, z: 0.34)
+    metallic: 0.0, roughness: 0.9, emission: noEmission, toon: true }
+  let bedEntity: EntityId = world3dAddMeshInstance(
+    world: sceneWorld, mesh: ground, material: sand
+    position: Vec3.create(x: 0.0, y: 0.0, z: 0.0 - bedDepth)
+    rotation: noRotation, scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0))
+  loop var i: Int = 0, i < islandCount, ++i {
+    let angle: Float = i.toFloat() * 2.1 + 0.6
+    let radius: Float = 26.0 + i.toFloat() * 9.0
+    let size: Float = 14.0 + i.toFloat() * 6.0
+    # Centre a little under the surface: the top face pokes out by ~1 m, the
+    # sides run down to the bed, so depth goes 0 -> bedDepth around each island.
+    let islandEntity: EntityId = world3dAddMeshInstance(
+      world: sceneWorld, mesh: box, material: sand
+      position: Vec3.create(x: Math.cos(x: angle) * radius, y: Math.sin(x: angle) * radius, z: 0.0 - bedDepth * 0.5 + 0.5)
+      rotation: Vec3.create(x: 0.0, y: 0.0, z: angle)
+      scale: Vec3.create(x: size, y: size * 0.7, z: bedDepth + 1.0))
+  }
+  ret sceneWorld
+}
+
+# A stylised sky for the hour of the day: the sun from Sky.sunDirForHour, a
+# warm low sun and a cooler high one, the hemisphere colours following it.
+func skyForHour(hour: copy Float) ret Sky {
+  let sunDir: Vec3 = sunDirForHour(hour: hour)
+  let height: Float = sunHeightForHour(hour: hour)
+  let warm: Float = 1.0 - height
+  let sunColor: Vec3 = Vec3.create(x: 1.0, y: 0.92 - 0.35 * warm, z: 0.85 - 0.6 * warm)
+  let zenith: Vec3 = Vec3.create(x: 0.18 + 0.1 * warm, y: 0.42, z: 0.85 - 0.25 * warm)
+  let horizon: Vec3 = Vec3.create(x: 0.75 + 0.2 * warm, y: 0.8, z: 0.9 - 0.3 * warm)
+  ret createSkyStylised(sunDir: sunDir, sunColor: Vec3.vscale(a: sunColor, s: 2.5 + 3.0 * height),
+    zenith: zenith, horizon: horizon, bands: 4.0)
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: 1280, height: 800, title: "Rae Water Lake — toon water, free camera")
+  Gpu2d.setDesignResolution(width: 1280.0, height: 800.0, fit: 0)
+
+  let boxData: MeshData = makeBox(size: 1.0)
+  let planeData: MeshData = makePlane(size: lakeExtent, segments: 1)
+  let box: MeshHandle = uploadMeshData(meshData: boxData)
+  let ground: MeshHandle = uploadMeshData(meshData: planeData)
+  var sceneWorld: World3d = buildScene(box: box, ground: ground)
+
+  var camera: Camera3d = defaultCamera3d()
+  camera.position = Vec3.create(x: 0.0, y: 0.0 - 48.0, z: 9.0)
+  camera.target = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  camera.farZ = 900.0
+  var cameraRig: CameraRig = createCameraRig(camera: camera)
+  # Start in the free (WASD fly) mode rather than orbit.
+  toggleCameraRigMode(rig: cameraRig, camera: camera)
+  var light: Light3d = defaultLight3d()
+
+  var hour: Float = 10.5
+  var sky: Sky = skyForHour(hour: hour)
+  var renderer: DeferredRenderer = createDeferredRenderer()
+  setRendererSky(renderer: renderer, sky: sky)
+  let graphStatus: Int = compileDeferred(renderer: renderer)
+  if graphStatus is not 0 {
+    log("deferred graph invalid: {statusName(status: graphStatus)}")
+    ret 1
+  }
+  # The lake defaults are tuned for 114's distant sea; this camera sits low
+  # and close, so finer, sparser ripples and a deeper blue read better.
+  var lake: WaterBody = createLakeToon(surfaceZ: 0.0, extent: lakeExtent)
+  lake.rippleScale = 0.6
+  lake.rippleCutoff = 0.86
+  lake.distortion = 0.6
+  lake.deepColor = Vec3.create(x: 0.03, y: 0.16, z: 0.42)
+  lake.shallowColor = Vec3.create(x: 0.25, y: 0.7, z: 0.78)
+  var waterSystem: WaterSystem = createWaterSystem(body: lake)
+
+  log("[water example] W/A/S/D move, Q/E down/up, shift boost, mouse-drag look; comma/period move the sun")
+  let fixedTestFrame: Bool = Sys.getEnv(name: "RAE_WATER_TEST_FRAME").length() > 0
+  var lastTime: Float64 = Gpu2d.nowSeconds()
+  var waterFrames: Int = 0
+  loop not Gpu2d.pollClose() {
+    let now: Float64 = Gpu2d.nowSeconds()
+    var deltaTime: Float = (now - lastTime) as Float
+    lastTime = now
+    if deltaTime > 0.1 { deltaTime = 0.1 }
+    if fixedTestFrame { deltaTime = 0.0 }
+
+    # Time of day on the keys: a scrub, not a clock, so a frame is repeatable.
+    var hourChanged: Bool = false
+    if Sdl3.isKeyDown(key: Keys.keyComma) { hour = hour - deltaTime * 1.5 hourChanged = true }
+    if Sdl3.isKeyDown(key: Keys.keyPeriod) { hour = hour + deltaTime * 1.5 hourChanged = true }
+    if hour < 0.0 { hour = hour + 24.0 }
+    if hour >= 24.0 { hour = hour - 24.0 }
+    if hourChanged {
+      sky = skyForHour(hour: hour)
+      setRendererSky(renderer: renderer, sky: sky)
+    }
+    light.sunDir = sky.sunDir
+    light.sunColor = sky.sunColor
+
+    let cameraMoved: Bool = updateCameraRig(rig: cameraRig, camera: camera, allowInput: not fixedTestFrame, deltaTime: deltaTime)
+    applyCameraRig(rig: cameraRig, camera: camera)
+
+    let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
+    if Gpu2d.renderGate() {
+      var passIndex: Int = 0
+      loop passIndex < deferredOrderLength(renderer: renderer) {
+        let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
+        if tag is RenderTag.waterFft {
+          waterFftStep(waterSystem: waterSystem)
+        }
+        if tag is RenderTag.transparentForward {
+          # The lake first, then the renderer's transparent pass (nothing queued here).
+          waterDraw(waterSystem: waterSystem, camera: camera, light: light,
+            sky: renderer.sky, hasSky: renderer.hasSky, deltaTime: deltaTime)
+          waterFrames = waterFrames + 1
+        }
+        renderDeferredPassWorld(
+          renderer: renderer, tag: tag, world: sceneWorld
+          camera: camera, light: light, aspect: aspect)
+        passIndex = passIndex + 1
+      }
+      world3dPrevTransformSystem(world: sceneWorld)
+    }
+  }
+
+  if fixedTestFrame {
+    log("[water example] deterministic deferred frame rendered: hour {hour}, {islandCount} islands, {waterFrames} water frames")
+  }
+  waterShutdown(waterSystem: waterSystem)
+  Gbuffer.shutdownAll()
+  Gpu2d.closeWindow()
+  ret 0
+}
