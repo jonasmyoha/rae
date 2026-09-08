@@ -66,6 +66,12 @@ type WaterBody {
   # flowSpeed advects the ripples downstream in m/s.
   meshId: Int
   flowSpeed: Float
+  # Sea state for the FFT spectrum (#849): a JONSWAP/TMA sea is defined by the
+  # wind speed at 10 m, its direction, the fetch it blew over, and the depth.
+  windSpeed: Float      # m/s
+  windDirRad: Float     # radians, direction the wind blows TOWARD
+  fetch: Float          # metres of open water the wind acted on (~250 km)
+  waterDepth: Float     # metres; the TMA factor damps long waves in shallow water
   # Realistic tier (#831): the FFT ocean cascades. Data only until the compute
   # lands; the toon path ignores them.
   fftSize: Int          # 128 / 256 / 512 texels per cascade side
@@ -95,6 +101,7 @@ func createLakeToon(surfaceZ: copy Float, extent: copy Float) pub ret WaterBody 
     gridSegments: 96, waveCount: 2,
     refraction: 0, refractStrength: 0.02, absorbColor: Vec3.create(x: 0.45, y: 0.16, z: 0.08),
     meshId: 0, flowSpeed: 0.0,
+    windSpeed: 9.0, windDirRad: 0.7, fetch: 250000.0, waterDepth: 50.0,
     fftSize: 256, cascadeCount: 3, cascadeTile0: 250.0, cascadeTile1: 60.0, cascadeTile2: 8.0, updateRate: 1
   }
 }

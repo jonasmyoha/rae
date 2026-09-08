@@ -35,7 +35,15 @@ is below the surface. A river is a `WaterBody` with `meshId` (its own world-spac
 mesh) and `flowSpeed`: the surface shader draws the ribbon as-is, skips Gerstner,
 and advects the ripple noise along u — the spline parameter IS the flow map, so no
 texture and no phase reset. 114 has a stream through the meadow sampled from
-terrainHeightAt. Underwater (tint/fog, caustics) is a follow-up. #831 slice 1 is in: the `waterFft` compute node + three persistent
+terrainHeightAt. Underwater (tint/fog, caustics) is a follow-up. #849 (slice 2) is in: `lib/water/waterFft.wgsl` bakes, once per sea state, the
+h0 spectrum per cascade (JONSWAP with the TMA depth factor, Hasselmann directional
+spreading, the k-plane Jacobian, hash-seeded Gaussians, packed as (h0(k), h0(-k)),
+per-cascade k bands handed over where the next, finer tile resolves a wave with ~6
+grid cells — kHigh = 6·2pi/L_next — so the 250 m cascade keeps a real field instead of a
+4-cell disc) and the per-output Stockham butterfly
+table (signed inverse twiddle + two read indices per stage; no bit reversal); both
+verified by a readback in 118 (non-zero, exact (k,-k) packing symmetry, radial energy
+peak at the JONSWAP k_p, butterfly stage 0). #831 slice 1 is in: the `waterFft` compute node + three persistent
 fixed-size cascade resources are declared in the graph (derived `waterFft ->
 transparentForward`), `WaterBody` carries the tier (`fftSize`, `cascadeCount`,
 `cascadeTile0..2`, `updateRate`) and `waterFftStep` allocates the cascade maps

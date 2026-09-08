@@ -930,11 +930,12 @@ void rae_gb_grass_release(void) {
     if (g_grass_ptrs[7]) { wgpuBufferRelease((WGPUBuffer)g_grass_ptrs[7]);                   g_grass_ptrs[7] = 0; } /* readback buffer  */
 }
 /* Same slot-store idiom for the Rae water package (#830, lib/water/WaterSystem.rae):
- * 0 = surface render pipeline, 1 = uniform buffer, 2 = bind group; 8.. = the FFT
- * cascade textures + views (#831, layout owned and released by the Rae side). */
-static void* g_water_ptrs[32];
-void  rae_gb_water_set(int64_t index, void* ptr) { if (index >= 0 && index < 32) g_water_ptrs[index] = ptr; }
-void* rae_gb_water_get(int64_t index) { return (index >= 0 && index < 32) ? g_water_ptrs[index] : (void*)0; }
+ * 0 = surface render pipeline, 1 = uniform buffer, 2 = bind group, 3 = sampler; 8.. =
+ * the FFT cascade textures + views (#831) and 32.. the FFT spectrum/butterfly GPU
+ * state (#849); layout owned and released by the Rae side. */
+static void* g_water_ptrs[64];
+void  rae_gb_water_set(int64_t index, void* ptr) { if (index >= 0 && index < 64) g_water_ptrs[index] = ptr; }
+void* rae_gb_water_get(int64_t index) { return (index >= 0 && index < 64) ? g_water_ptrs[index] : (void*)0; }
 void rae_gb_water_release(void) {
     if (g_water_ptrs[2]) { wgpuBindGroupRelease((WGPUBindGroup)g_water_ptrs[2]);           g_water_ptrs[2] = 0; } /* bind group   */
     if (g_water_ptrs[0]) { wgpuRenderPipelineRelease((WGPURenderPipeline)g_water_ptrs[0]); g_water_ptrs[0] = 0; } /* pipeline     */
