@@ -1,0 +1,66 @@
+import Math
+open water/Water
+open water/FftSurfaceCache
+
+func fillCache(cache: mod FftSurfaceCache, count: copy Int) {
+  cache.activeCount = count
+  loop var i: Int = 0, i < count, ++i {
+    if let cascade: mod FftCascadeCache => cache.cascades.modAt(index: i) {
+      cascade.generation = cache.generation
+      cascade.tileSize = 32.0
+      cascade.sampleTime = 1.0 + i.toFloat()
+      loop cascade.values.length < fftCacheFloats { cascade.values.add(value: 0.0) }
+      loop var texel: Int = 0, texel < fftCacheSize * fftCacheSize, ++texel {
+        cascade.values.set(index: texel * 4, value: 2.0)
+        cascade.values.set(index: texel * 4 + 1, value: -1.0)
+        cascade.values.set(index: texel * 4 + 2, value: 3.0)
+        cascade.values.set(index: texel * 4 + 3, value: -0.4)
+      }
+    }
+  }
+}
+
+func main() {
+  var body: WaterBody = createOceanRealistic(surfaceZ: 5.0)
+  body.cascadeCount = 3
+  var cache: FftSurfaceCache = createFftSurfaceCache(body: body)
+  if let sample: FftSurfaceSample = sampleFftSurface(cache: cache, body: body, x: 0.0, y: 0.0, now: 3.0, maxAge: 2.0) {
+    log("FAIL missing")
+  } else { log("missing returns none") }
+  fillCache(cache: cache, count: 3)
+  if let sample: FftSurfaceSample = sampleFftSurface(cache: cache, body: body, x: -65.0, y: 97.0, now: 3.0, maxAge: 2.0) {
+    if Math.abs(value: sample.height - 14.0) < 0.001 and sample.displacement.x is 6.0 and sample.displacement.y is -3.0
+      and sample.signedJacobians.z < 0.0 and sample.sampleTimes.x is 1.0 and sample.sampleTimes.z is 3.0 {
+      log("cascade sums, signed Jacobians, ages and inversion OK")
+    }
+  }
+  if let sample: FftSurfaceSample = sampleFftSurface(cache: cache, body: body, x: 0.0, y: 0.0, now: 3.0, maxAge: 1.9) {
+    log("FAIL stale")
+  } else { log("oldest cascade controls staleness") }
+  if let cascade: mod FftCascadeCache => cache.cascades.modAt(index: 2) { cascade.generation = -1 }
+  if let sample: FftSurfaceSample = sampleFftSurface(cache: cache, body: body, x: 0.0, y: 0.0, now: 3.0, maxAge: 9.0) {
+    log("FAIL generation")
+  } else { log("mixed generation returns none") }
+  invalidateFftSurfaceCache(cache: cache)
+  if cache.activeCount is 0 { log("invalidation clears availability") }
+  body.cascadeCount = 1
+  cache.seaState = body
+  fillCache(cache: cache, count: 1)
+  if let cascade: mod FftCascadeCache => cache.cascades.modAt(index: 0) {
+    loop var texel: Int = 0, texel < fftCacheSize * fftCacheSize, ++texel {
+      let coordinate: Float = (texel % fftCacheSize).toFloat() + 0.5
+      cascade.values.set(index: texel * 4 + 2, value: Math.cos(x: 6.2831853 * coordinate / 32.0))
+    }
+  }
+  if let sample: FftSurfaceSample = sampleFftSurface(cache: cache, body: body, x: 7.0, y: 0.0, now: 1.0, maxAge: 0.0) {
+    # The surface over x=7 originated at x=5, because displacement.x = 2.
+    if Math.abs(value: sample.height - 5.0 - Math.cos(x: 6.2831853 * 5.0 / 32.0)) < 0.01 { log("known wave with horizontal inversion OK") }
+    if let wrapped: FftSurfaceSample = sampleFftSurface(cache: cache, body: body, x: -57.0, y: 96.0, now: 1.0, maxAge: 0.0) {
+      if Math.abs(value: wrapped.height - sample.height) < 0.001 { log("negative and positive tile wrapping OK") }
+    }
+  }
+  body.windSpeed = body.windSpeed + 1.0
+  if let sample: FftSurfaceSample = sampleFftSurface(cache: cache, body: body, x: 0.0, y: 0.0, now: 1.0, maxAge: 9.0) {
+    log("FAIL sea state")
+  } else { log("changed sea state rejected") }
+}

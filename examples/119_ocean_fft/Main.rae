@@ -28,6 +28,8 @@ open water/WaterSystem
 open water/WaterFft
 open water/WaterSchedule
 open WaterChecks
+open ReadbackChecks
+open water/FftSurfaceCache
 open water/ClipMap
 open ecs/Entity
 
@@ -99,6 +101,19 @@ func main() ret Int {
   let boxData: MeshData = makeBox(size: 1.0)
   let box: MeshHandle = uploadMeshData(meshData: boxData)
   var sceneWorld: World3d = buildScene(box: box, ground: ground)
+  let buoyancyDemo: Bool = Sys.getEnv(name: "RAE_WATER_BUOYANCY") is "1"
+  let buoyEntity: EntityId = world3dAddEntity(world: sceneWorld)
+  if buoyancyDemo {
+    world3dSetMeshRenderer(world: sceneWorld, entity: buoyEntity, renderer: MeshRenderer { entity: -1, mesh: box, material: -1, visible: true })
+    world3dSetMaterial(world: sceneWorld, entity: buoyEntity, material: Material3d {
+      baseColor: { x: 1.0, y: 0.3, z: 0.02 }, metallic: 0.0, roughness: 0.7,
+      emission: { x: 0.0, y: 0.0, z: 0.0 }, toon: false
+    })
+  }
+  var buoyUpdates: Int = 0
+  var buoyMinimum: Float = 1000000.0
+  var buoyMaximum: Float = -1000000.0
+
 
   var camera: Camera3d = defaultCamera3d()
   camera.position = Vec3.create(x: 0.0, y: 0.0 - 48.0, z: 9.0)
@@ -178,7 +193,22 @@ func main() ret Int {
             let before: WaterCheckSample = takeWaterCheckSample(waterSystem: waterSystem)
             waterFftStep(waterSystem: waterSystem)
             if not verifyWaterCheck(waterSystem: waterSystem, before: before, frame: oceanFrames) { checksOk = false }
+            if not verifyWaterCacheFrame(waterSystem: waterSystem) { checksOk = false }
           } else { waterFftStep(waterSystem: waterSystem) }
+          if buoyancyDemo {
+            let currentBody: WaterBody = primaryBody(waterSystem: waterSystem)
+            # A missed/stale sample leaves the last transform in place.
+            if let sample: FftSurfaceSample = sampleFftSurface(cache: waterSystem.surfaceCache, body: currentBody,
+              x: -5.0, y: -20.0, now: waterSystem.time, maxAge: 0.5) {
+              world3dSetTransform(world: sceneWorld, entity: buoyEntity, transform: Transform3d {
+                position: { x: -5.0, y: -20.0, z: sample.height + 0.8 },
+                rotation: { x: 0.0, y: 0.0, z: 0.0 }, scale: { x: 2.0, y: 2.0, z: 2.0 }
+              })
+              if sample.height < buoyMinimum { buoyMinimum = sample.height }
+              if sample.height > buoyMaximum { buoyMaximum = sample.height }
+              buoyUpdates = buoyUpdates + 1
+            }
+          }
         }
         if tag is RenderTag.transparentForward {
           transparentSnapshot(cache: renderer.passes.transparent)
@@ -194,6 +224,7 @@ func main() ret Int {
       world3dPrevTransformSystem(world: sceneWorld)
       if tierCheck and oceanFrames > 0 and oceanFrames % waterCheckStageFrames is 0 {
         if not waterFftDiagnoseIfft(waterSystem: waterSystem) { checksOk = false }
+        if not verifyKnownWaterCache(waterSystem: waterSystem) { checksOk = false }
       }
     }
   }
@@ -213,6 +244,10 @@ func main() ret Int {
     if not verifyWaterReleased() { checksOk = false }
     if oceanFrames is not waterCheckFrames { checksOk = false }
     if checksOk { log("[water tiers] 14 stages ok") } else { log("[water tiers] FAIL") }
+  }
+  if buoyancyDemo {
+    log("[water buoyancy] {buoyUpdates} samples, height {buoyMinimum}..{buoyMaximum}")
+    if buoyUpdates < 2 { checksOk = false }
   }
   Gbuffer.shutdownAll()
   Gpu2d.closeWindow()
