@@ -70,6 +70,10 @@ const grassBladeVerts: Int = 6
 # the app owns (example 114 drives the only grass field today); every entry point
 # threads it. The WGPU handles stay in C behind rae_gb_grass_set/get.
 type GrassCompute {
+  # Optional WGSL defining raeTerrainHeight(vec2<f32>, f32) -> f32 and
+  # raeBiomeGrassWeight(vec2<f32>) -> f32. Empty keeps the default biome.
+  # Set before first generation; resetGrassPipeline after changing it.
+  surfaceShader: String
   made: Bool
   drawBindMade: Bool
   uni: List(Float)
@@ -81,7 +85,7 @@ type GrassCompute {
 
 func createGrassCompute() ret GrassCompute {
   ret GrassCompute {
-    made: false, drawBindMade: false,
+    surfaceShader: "", made: false, drawBindMade: false,
     uni: createList(Float, cap: 28),
     indReset: createList(Int32, cap: 4),
     read: createList(Int, cap: 2),
@@ -91,7 +95,10 @@ func createGrassCompute() ret GrassCompute {
 
 # Compute-pass source: the shared noise + biome field, then the grass pass
 # itself. Mirrors how the terrain splat pipeline composes its shader.
-func wgsl() ret String {
+func wgsl(surfaceShader: view String) ret String {
+  if surfaceShader.length() > 0 {
+    ret surfaceShader.concat(other: "\n").concat(other: Gbuffer.gbReadWgsl(path: "lib/grass_compute.wgsl"))
+  }
   let islandSrc: String = WorldBiome.islandParamsWgsl()
   let noiseSrc: String = Gbuffer.gbReadWgsl(path: "lib/noise.wgsl")
   let biomeSrc: String = Gbuffer.gbReadWgsl(path: "lib/world_biome.wgsl")
@@ -202,7 +209,7 @@ func ensureGrassGpu(grass: mod GrassCompute) {
   # terrain-height definition with everything else that touches the ground.
   # Carrying its own copy is what left blades standing on a height field the
   # terrain had already moved off.
-  let grassSrc: String = wgsl()
+  let grassSrc: String = wgsl(surfaceShader: grass.surfaceShader)
   let grassCbuf: Buffer(Any) = grassSrc.toCStr()
   let shaderMod: Ptr = grassMakeShaderModule(wgsl: grassCbuf)
   let pipeDesc: WGPUComputePipelineDescriptor = {
