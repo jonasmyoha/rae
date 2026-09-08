@@ -33,6 +33,8 @@ import Vec3
 import Sys
 open GbufferInstanced
 open Particles
+open water/Water
+open water/WaterSystem
 open GrassCompute
 import GrassConfig
 import app3d/Slider
@@ -170,6 +172,7 @@ type App {
   players: PlayerRoster   # who the local player controls (players.rae, #546)
   persist: PersistState
   splashes: ParticleSystem   # water-splash droplets when the character wades (splash.rae, #84)
+  waterSystem: WaterSystem   # the toon lake at the biome water plane (lib/water, #830)
   ok: Bool
 }
 
@@ -509,6 +512,7 @@ func createApp() ret App {
     players: createPlayerRoster(count: 1 + cloneCount)
     persist: { windowGeom: own windowGeom, lastStateSave: startT, stateDirty: false }
     splashes: own createParticleSystem(cap: 256, gravity: 24.0)
+    waterSystem: own createWaterSystem(body: createLakeToon(surfaceZ: lakeSurfaceZ(groundZ: groundZ), extent: 700.0))
     ok: true
   }
 }
@@ -702,7 +706,7 @@ func runWalkerApp() ret Int {
         frameSec: 0.016667, heartbeatSec: 1.0
       ))
     } else {
-      renderApp(cameraSystem: app.cameraSystem, characterSystem: app.characterSystem, frame: app.frame, inputSystem: app.inputSystem, renderSystem: app.renderSystem, emptyWorld: app.emptyWorld, world: app.world, terrainSystem: app.terrainSystem, splashes: app.splashes, profiler: app.profiler, grassCompute: app.grassCompute)
+      renderApp(cameraSystem: app.cameraSystem, characterSystem: app.characterSystem, frame: app.frame, inputSystem: app.inputSystem, renderSystem: app.renderSystem, emptyWorld: app.emptyWorld, world: app.world, terrainSystem: app.terrainSystem, splashes: app.splashes, waterSystem: app.waterSystem, profiler: app.profiler, grassCompute: app.grassCompute)
     }
   }
   skinShutdown()
