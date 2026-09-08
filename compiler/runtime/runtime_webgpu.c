@@ -189,6 +189,8 @@ int rae_wgpu_map_read(void* buffer, uint64_t size, void* dst) {
     return 1;
 }
 
+#include "runtime_webgpu_readback.c"
+
 /* scene: sceneLen f64 (camera 19 + spheres*10) -> narrowed to f32 for the GPU.
  * fb: width*height int64 written as packed 0xRRGGBB. wgsl: shader source. */
 void rae_ext_Webgpu_raytrace(const float* scene, int64_t sceneLen, int64_t* fb,
