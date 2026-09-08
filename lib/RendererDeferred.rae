@@ -56,6 +56,7 @@ enum RenderTag {
   taa           # temporal resolve (#390); HDR in, HDR out
   shadow        # sun cascade depth (#382); lighting reads it
   transparentForward # snapshot opaque radiance, then alpha-blend transparents into it (#842/#843)
+  waterFft      # compute: the FFT ocean cascades the water surface samples (#831); app-dispatched
 }
 
 type DeferredRenderer {
@@ -146,6 +147,13 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
   # composite writes the presentable target.
   let litId: Int = addResource(renderGraph: renderGraph, name: "litColor", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
   let litCopyId: Int = addResource(renderGraph: renderGraph, name: "litCopy", kind: resTexture2d, format: 0, sizing: sizeFull, lifetime: lifeTransient)
+  # FFT ocean cascades (#831): three fixed-size displacement/normal/Jacobian map
+  # sets, PERSISTENT because the update-rate knob refreshes one cascade per
+  # frame and the others must survive. Declared here so the graph derives
+  # waterFft -> transparentForward; the app's WaterSystem owns the textures.
+  let waterCascade0Id: Int = addResource(renderGraph: renderGraph, name: "waterCascade0", kind: resTexture2d, format: 0, sizing: sizeFixed, lifetime: lifePersistent)
+  let waterCascade1Id: Int = addResource(renderGraph: renderGraph, name: "waterCascade1", kind: resTexture2d, format: 0, sizing: sizeFixed, lifetime: lifePersistent)
+  let waterCascade2Id: Int = addResource(renderGraph: renderGraph, name: "waterCascade2", kind: resTexture2d, format: 0, sizing: sizeFixed, lifetime: lifePersistent)
   # AO is full-resolution for now. It is low-frequency and belongs at half
   # res with a depth-aware upsample, which is a tier knob rather than a
   # correctness question — declared truthfully as Full until it moves.
@@ -161,6 +169,7 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
   let composite: Int = addPass(renderGraph: renderGraph, name: "composite", kind: passRaster, tag: RenderTag.composite)
   let lighting: Int = addPass(renderGraph: renderGraph, name: "lighting", kind: passRaster, tag: RenderTag.lighting)
   let transparent: Int = addPass(renderGraph: renderGraph, name: "transparentForward", kind: passRaster, tag: RenderTag.transparentForward)
+  let waterFftP: Int = addPass(renderGraph: renderGraph, name: "waterFft", kind: passCompute, tag: RenderTag.waterFft)
   let ssaoP: Int = addPass(renderGraph: renderGraph, name: "ssao", kind: passRaster, tag: RenderTag.ssao)
   let taaP: Int = addPass(renderGraph: renderGraph, name: "taa", kind: passRaster, tag: RenderTag.taa)
   let shadowP: Int = addPass(renderGraph: renderGraph, name: "shadow", kind: passRaster, tag: RenderTag.shadow)
@@ -202,6 +211,14 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
   passReads(renderGraph: renderGraph, pass: transparent, resource: depthId, access: accSampledRead)
   passModifies(renderGraph: renderGraph, pass: transparent, resource: litId, access: accAttachmentRead)
   passWrites(renderGraph: renderGraph, pass: transparent, resource: litCopyId, access: accAttachmentWrite)
+  # The FFT compute writes the cascades the transparent surface reads, so the
+  # graph derives waterFft -> transparentForward (#831).
+  passWrites(renderGraph: renderGraph, pass: waterFftP, resource: waterCascade0Id, access: accStorageWrite)
+  passWrites(renderGraph: renderGraph, pass: waterFftP, resource: waterCascade1Id, access: accStorageWrite)
+  passWrites(renderGraph: renderGraph, pass: waterFftP, resource: waterCascade2Id, access: accStorageWrite)
+  passReads(renderGraph: renderGraph, pass: transparent, resource: waterCascade0Id, access: accSampledRead)
+  passReads(renderGraph: renderGraph, pass: transparent, resource: waterCascade1Id, access: accSampledRead)
+  passReads(renderGraph: renderGraph, pass: transparent, resource: waterCascade2Id, access: accSampledRead)
 
   # TAA reads radiance and the motion the G-buffer packed, and writes the
   # history the composite then reads — so the graph derives
@@ -358,6 +375,8 @@ func renderDeferredPassWorld(renderer: mod DeferredRenderer, tag: view Int, worl
   if tag is RenderTag.transparentForward {
     transparentPass(cache: renderer.passes.transparent)
   }
+  # waterFft is dispatched by the app that owns a WaterSystem (waterFftStep);
+  # an app without water simply has nothing to do at this tag.
   if tag is RenderTag.composite {
     if renderer.debugView is viewLit {
       compositePassGraded(cache: renderer.passes.composite, exposure: light.exposure, grade: renderer.grade)
