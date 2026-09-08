@@ -37,12 +37,54 @@ struct Water {
   tuning: vec4<f32>,        // x = distortion, y = waveCount (0..2), z = river mode, w = flow speed (m/s)
   refract: vec4<f32>,       // x = refraction on (1) / off (0), y = strength, zw = lit target size
   absorb: vec4<f32>,        // rgb = Beer-Lambert absorption per metre
+  cascades: vec4<f32>,      // xyz = cascade tile sizes (m), w = realistic path (1) / toon (0)
+  centre: vec4<f32>,        // xy = camera position snapped to metres (mesh mode 2), z = cascade count
 };
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<uniform> W: Water;
 @group(0) @binding(2) var depthTex: texture_depth_2d;
 @group(0) @binding(3) var litCopyTex: texture_2d<f32>;   // the opaque frame (#842 snapshot)
 @group(0) @binding(4) var litSampler: sampler;
+// The FFT cascades (#851): displacement (xyz, w = Jacobian) and normal per cascade.
+@group(0) @binding(5) var cascadeDisp0: texture_2d<f32>;
+@group(0) @binding(6) var cascadeNorm0: texture_2d<f32>;
+@group(0) @binding(7) var cascadeDisp1: texture_2d<f32>;
+@group(0) @binding(8) var cascadeNorm1: texture_2d<f32>;
+@group(0) @binding(9) var cascadeDisp2: texture_2d<f32>;
+@group(0) @binding(10) var cascadeNorm2: texture_2d<f32>;
+@group(0) @binding(11) var cascadeSampler: sampler;   // repeat: the cascades tile
+
+// Sum the cascades' displacement at world xy (each tiles its own size).
+fn cascadeDisplacement(xy: vec2<f32>) -> vec3<f32> {
+  var d = textureSampleLevel(cascadeDisp0, cascadeSampler, xy / W.cascades.x, 0.0).xyz;
+  if (W.centre.z > 1.5) { d += textureSampleLevel(cascadeDisp1, cascadeSampler, xy / W.cascades.y, 0.0).xyz; }
+  if (W.centre.z > 2.5) { d += textureSampleLevel(cascadeDisp2, cascadeSampler, xy / W.cascades.z, 0.0).xyz; }
+  return d;
+}
+// Slopes add across cascades (a normal is -slope, 1). Whitecaps come from the
+// Jacobian of the horizontal displacement: J = 1 is flat, J -> 0 is the
+// surface folding over itself, so foam starts near J = 0.5 and is full at 0.
+fn foamFromJacobian(j: f32) -> f32 {
+  return clamp((0.5 - j) * 2.0, 0.0, 1.0);
+}
+fn cascadeSlopeFoam(xy: vec2<f32>) -> vec3<f32> {
+  var slope = vec2<f32>(0.0);
+  var foam = 0.0;
+  let n0 = textureSample(cascadeNorm0, cascadeSampler, xy / W.cascades.x).xyz;
+  slope += -n0.xy / max(n0.z, 0.05);
+  foam += foamFromJacobian(textureSample(cascadeDisp0, cascadeSampler, xy / W.cascades.x).w);
+  if (W.centre.z > 1.5) {
+    let n1 = textureSample(cascadeNorm1, cascadeSampler, xy / W.cascades.y).xyz;
+    slope += -n1.xy / max(n1.z, 0.05);
+    foam += foamFromJacobian(textureSample(cascadeDisp1, cascadeSampler, xy / W.cascades.y).w);
+  }
+  if (W.centre.z > 2.5) {
+    let n2 = textureSample(cascadeNorm2, cascadeSampler, xy / W.cascades.z).xyz;
+    slope += -n2.xy / max(n2.z, 0.05);
+    foam += foamFromJacobian(textureSample(cascadeDisp2, cascadeSampler, xy / W.cascades.z).w);
+  }
+  return vec3<f32>(slope, foam);
+}
 
 struct VsOut {
   @builtin(position) pos: vec4<f32>,
@@ -56,6 +98,7 @@ struct VsOut {
   @location(3) distortUvA: vec2<f32>,
   @location(4) distortUvB: vec2<f32>,
   @location(5) bakedFoam: f32,   // river: curvature foam baked into the mesh (#833)
+  @location(6) gridXy: vec2<f32>, // undisplaced world xy (cascade lookups in the fragment)
 };
 
 const TAU: f32 = 6.28318530718;
@@ -79,18 +122,27 @@ fn gerstner(w: vec4<f32>, wb: vec4<f32>, xy: vec2<f32>, t: f32,
 fn vs(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec2<f32>) -> VsOut {
   var o: VsOut;
   let extent = W.centreExtent.w;
-  let river = W.tuning.z > 0.5;
-  // A lake is the unit grid scaled to the body; a river is its own baked
-  // world-space ribbon (#833) whose uv is metres along / across the flow.
+  let mode = W.tuning.z;
+  let river = mode > 0.5 && mode < 1.5;
+  let centred = mode > 1.5;
+  let realistic = W.cascades.w > 0.5;
+  // Mesh modes: a lake is the unit grid scaled to the body; a river is its own
+  // baked world-space ribbon (#833); an ocean is a camera-centred metres mesh
+  // (#851) placed at the snapped camera position every frame.
   var base = vec3<f32>(W.centreExtent.x + p.x * extent, W.centreExtent.y + p.y * extent, W.centreExtent.z);
   if (river) { base = p; }
+  if (centred) { base = vec3<f32>(W.centre.x + p.x, W.centre.y + p.y, W.centreExtent.z); }
   let t = W.camera.w;
   var disp = vec3<f32>(0.0, 0.0, 0.0);
   var dn = vec3<f32>(0.0, 0.0, 0.0);
-  if (!river && W.tuning.y > 0.5) { gerstner(W.wave0, W.wave0b, base.xy, t, &disp, &dn); }
-  if (!river && W.tuning.y > 1.5) { gerstner(W.wave1, W.wave1b, base.xy, t, &disp, &dn); }
+  if (!river && !realistic && W.tuning.y > 0.5) { gerstner(W.wave0, W.wave0b, base.xy, t, &disp, &dn); }
+  if (!river && !realistic && W.tuning.y > 1.5) { gerstner(W.wave1, W.wave1b, base.xy, t, &disp, &dn); }
+  // Realistic: the FFT cascades displace the vertex (world-space lookup, so
+  // the waves stay put while the centred mesh moves under them).
+  if (realistic) { disp = cascadeDisplacement(base.xy); }
   let world = base + disp;
   o.world = world;
+  o.gridXy = base.xy;
   // Noise coordinates: a lake pans in world space; a river ADVECTS along its
   // own u (arc length) at the flow speed — the spline parameter is the flow
   // map, so there is no texture and no phase reset to hide.
@@ -147,12 +199,23 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   var foam = smoothstep(cutoff - 0.03, cutoff + 0.03, ripple);
   // River rapids: the baked curvature foam, streaked by the same noise.
   foam = max(foam, i.bakedFoam * smoothstep(0.35, 0.75, ripple));
+  // Realistic (#851): no toon ripples — whitecaps where a cascade folds
+  // (Jacobian < 1 -> foam), streaked by the noise; the shoreline depth foam
+  // (cutoff ~0 in the shallows) stays.
+  let realisticPath = W.cascades.w > 0.5;
+  let cascade = cascadeSlopeFoam(i.gridXy);
+  if (realisticPath) {
+    let shoreline = smoothstep(-0.03, 0.03, 0.15 - foamT);
+    let whitecap = clamp(cascade.z, 0.0, 1.0) * smoothstep(0.25, 0.65, ripple);
+    foam = max(shoreline, whitecap);
+  }
   colour = mix(colour, vec3<f32>(0.96, 0.98, 1.0), foam * 0.85);
   alpha = max(alpha, foam * 0.9);
 
   // Reflection: the stylised sky hemisphere along the reflected view ray,
   // weighted by Schlick Fresnel (F0 = 0.02, water's normal-incidence reflectance).
-  let n = normalize(i.nrm);
+  var n = normalize(i.nrm);
+  if (realisticPath) { n = normalize(vec3<f32>(-cascade.xy, 1.0)); }
   let toCamera = normalize(W.camera.xyz - i.world);
   let r = reflect(-toCamera, n);
   let skyTint = mix(W.horizon.rgb, W.zenith.rgb, clamp(r.z, 0.0, 1.0));
@@ -189,13 +252,19 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
     colour = mix(colour, skyTint, fresnel);
   }
 
-  // Toon shading: a two-band diffuse and a STEPPED Blinn-Phong sun highlight.
+  // Shading. Toon: a two-band diffuse and a STEPPED Blinn-Phong sun highlight.
+  // Realistic: smooth diffuse and a sharp smooth Blinn-Phong sun glint.
   let toSun = normalize(-W.sun.xyz);
   let ndl = clamp(dot(n, toSun), 0.0, 1.0);
-  colour *= 0.78 + 0.22 * smoothstep(0.25, 0.32, ndl);
   let h = normalize(toSun + toCamera);
   let spec = pow(clamp(dot(n, h), 0.0, 1.0), W.sunColor.w);
-  let highlight = smoothstep(W.sun.w - 0.03, W.sun.w + 0.03, spec);
+  var highlight = smoothstep(W.sun.w - 0.03, W.sun.w + 0.03, spec);
+  if (realisticPath) {
+    colour *= 0.85 + 0.15 * ndl;
+    highlight = spec;
+  } else {
+    colour *= 0.78 + 0.22 * smoothstep(0.25, 0.32, ndl);
+  }
   colour += W.sunColor.rgb * highlight * 0.7;
   alpha = max(alpha, highlight * 0.8);
 

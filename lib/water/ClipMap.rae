@@ -1,0 +1,59 @@
+# ClipMap — a camera-centred LOD grid for open water (#851, Crest's idea in one
+# draw). Concentric rings of vertices whose spacing grows geometrically with
+# distance, so the cell size follows the camera: fine underfoot, coarse at the
+# horizon, one mesh, no clip-map ring management. The vertex shader adds the
+# camera position (snapped to whole metres) to every vertex each frame, so the
+# grid rides with the camera; because the FFT cascades are sampled in WORLD
+# space (world.xy / tile), the waves stay put while the mesh moves under them.
+#
+# Vertices carry only a position (metres from the centre); the surface shader
+# ignores the normal (it builds its own) and the uv.
+import Math
+open Mesh3d
+
+# rings * segments + 1 vertices; the first ring at `firstCell` metres, each ring
+# `growth` times farther than the previous step. rings=64, segments=96,
+# firstCell=1, growth=1.09 reaches ~2.5 km with ~6k vertices.
+func createRadialGridMesh(rings: copy Int, segments: copy Int, firstCell: copy Float, growth: copy Float) pub ret MeshData {
+  var ringCount: Int = rings
+  if ringCount < 1 { ringCount = 1 }
+  var segmentCount: Int = segments
+  if segmentCount < 3 { segmentCount = 3 }
+  let verts: List(Float) = createList(Float, cap: (ringCount * segmentCount + 1) * 8)
+  let indices: List(Int) = createList(Int, cap: ringCount * segmentCount * 6)
+  pushVert(verts: verts, px: 0.0, py: 0.0, pz: 0.0, nx: 0.0, ny: 0.0, nz: 1.0, u: 0.0, value: 0.0)
+  var radius: Float = 0.0
+  var cell: Float = firstCell
+  loop var ring: Int = 0, ring < ringCount, ++ring {
+    radius = radius + cell
+    cell = cell * growth
+    loop var segment: Int = 0, segment < segmentCount, ++segment {
+      let angle: Float = segment.toFloat() / segmentCount.toFloat() * 6.28318530718
+      pushVert(verts: verts, px: Math.cos(x: angle) * radius, py: Math.sin(x: angle) * radius, pz: 0.0,
+        nx: 0.0, ny: 0.0, nz: 1.0, u: 0.0, value: 0.0)
+    }
+  }
+  # Centre fan.
+  loop var s0: Int = 0, s0 < segmentCount, ++s0 {
+    let a: Int = 1 + s0
+    let b: Int = 1 + (s0 + 1) % segmentCount
+    indices.add(value: 0)
+    indices.add(value: a)
+    indices.add(value: b)
+  }
+  # Quads between rings.
+  loop var ring2: Int = 0, ring2 < ringCount - 1, ++ring2 {
+    let inner: Int = 1 + ring2 * segmentCount
+    let outer: Int = inner + segmentCount
+    loop var s1: Int = 0, s1 < segmentCount, ++s1 {
+      let next: Int = (s1 + 1) % segmentCount
+      indices.add(value: inner + s1)
+      indices.add(value: outer + s1)
+      indices.add(value: inner + next)
+      indices.add(value: inner + next)
+      indices.add(value: outer + s1)
+      indices.add(value: outer + next)
+    }
+  }
+  ret MeshData { verts: verts, indices: indices, vertCount: ringCount * segmentCount + 1 }
+}
