@@ -1,0 +1,115 @@
+# Link the existing one-command submission ABI (no window is created).
+import Sdl3
+open webgpu/Context
+open webgpu/Webgpu
+open webgpu/Readback
+
+func createBuffer(usage: copy UInt64) ret Ptr {
+  let descriptor: WGPUBufferDescriptor = { size: 32 as UInt64, usage: usage }
+  ret wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: descriptor)
+}
+
+func checkCycle() ret Bool {
+  let source: Ptr = createBuffer(usage: WGPUBufferUsage_CopySrc + WGPUBufferUsage_CopyDst)
+  let first: Ptr = createBuffer(usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst)
+  let second: Ptr = createBuffer(usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst)
+  let input: List(Int) = { 11, 22, 33, 44 }
+  wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: source, bufferOffset: 0 as UInt64, data: input.data, size: 32 as UInt64)
+  let encoderDescriptor: WGPUCommandEncoderDescriptor = { }
+  let encoder: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encoderDescriptor)
+  wgpuCommandEncoderCopyBufferToBuffer(commandEncoder: encoder, source: source, sourceOffset: 0 as UInt64, destination: first, destinationOffset: 0 as UInt64, size: 32 as UInt64)
+  wgpuCommandEncoderCopyBufferToBuffer(commandEncoder: encoder, source: source, sourceOffset: 0 as UInt64, destination: second, destinationOffset: 0 as UInt64, size: 32 as UInt64)
+  let commandDescriptor: WGPUCommandBufferDescriptor = { }
+  let command: Ptr = wgpuCommandEncoderFinish(commandEncoder: encoder, descriptor: commandDescriptor)
+  submitCommand(command: command)
+  wgpuCommandBufferRelease(commandBuffer: command)
+  wgpuCommandEncoderRelease(commandEncoder: encoder)
+  wgpuBufferRelease(buffer: source)
+  var firstRead: Ptr = startRead(buffer: first, offset: 8 as UInt64, size: 16 as UInt64)
+  var secondRead: Ptr = startRead(buffer: second, offset: 0 as UInt64, size: 32 as UInt64)
+  # The requests retain the buffers independently of these original handles.
+  wgpuBufferRelease(buffer: first)
+  wgpuBufferRelease(buffer: second)
+  var output: List(Int) = { 0 }
+  var i: Int = 0
+  loop i < 20 {
+    output.add(value: 0)
+    i = i + 1
+  }
+  var firstStatus: Int = 0
+  var secondStatus: Int = 0
+  var spins: Int = 0
+  loop (firstStatus is 0 or secondStatus is 0) and spins < 100000 {
+    firstStatus = pollRead(request: firstRead)
+    secondStatus = pollRead(request: secondRead)
+    spins = spins + 1
+  }
+  var correct: Bool = firstStatus is 1 and secondStatus is 1
+  if copyRead(request: firstRead, destination: output.data, capacity: 8 as UInt64) is not 0 { correct = false }
+  if copyRead(request: firstRead, destination: output.data, capacity: 16 as UInt64) is not 1 { correct = false }
+  if output.copyAtFallback(index: 0, fallback: -1) is not 22 { correct = false }
+  if output.copyAtFallback(index: 1, fallback: -1) is not 33 { correct = false }
+  firstRead = releaseRead(request: firstRead)
+  firstRead = releaseRead(request: firstRead)
+  if copyRead(request: secondRead, destination: output.data, capacity: 32 as UInt64) is not 1 { correct = false }
+  if output.copyAtFallback(index: 3, fallback: -1) is not 44 { correct = false }
+  secondRead = releaseRead(request: secondRead)
+  ret correct
+}
+
+func main() ret Int {
+  if webgpuBootstrap() is not 1 {
+    log("no GPU")
+    ret 1
+  }
+  var i: Int = 0
+  loop i < 32 {
+    if not checkCycle() {
+      log("read cycle failed {i}")
+      ret 1
+    }
+    i = i + 1
+  }
+  log("32 independent paired reads, bounded copies and growing destinations OK")
+  let buffer: Ptr = createBuffer(usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst)
+  var invalid: Ptr = startRead(buffer: buffer, offset: 8 as UInt64, size: 32 as UInt64)
+  if pollRead(request: invalid) is not -1 { ret 2 }
+  invalid = releaseRead(request: invalid)
+  var cancelled: Ptr = startRead(buffer: buffer, offset: 0 as UInt64, size: 32 as UInt64)
+  cancelled = releaseRead(request: cancelled)
+  webgpuPoll(wait: 0)
+  # Reuse the same buffer after cancellation and completion/unmap.
+  i = 0
+  loop i < 32 {
+    var request: Ptr = startRead(buffer: buffer, offset: 0 as UInt64, size: 32 as UInt64)
+    var status: Int = 0
+    var spins: Int = 0
+    loop status is 0 and spins < 100000 {
+      status = pollRead(request: request)
+      spins = spins + 1
+    }
+    if status is not 1 { ret 3 }
+    request = releaseRead(request: request)
+    i = i + 1
+  }
+  let blockingOutput: List(Int) = { 1, 1, 1, 1 }
+  if webgpuMapRead(buffer: buffer, size: 32 as UInt64, dst: blockingOutput.data) is not 1 { ret 5 }
+  if blockingOutput.copyAtFallback(index: 3, fallback: -1) is not 0 { ret 5 }
+  log("existing blocking read diagnostic OK")
+  var destroyed: Ptr = startRead(buffer: buffer, offset: 0 as UInt64, size: 32 as UInt64)
+  wgpuBufferDestroy(buffer: buffer)
+  var status: Int = 0
+  i = 0
+  loop status is 0 and i < 100000 {
+    status = pollRead(request: destroyed)
+    i = i + 1
+  }
+  if status is not -1 { ret 4 }
+  destroyed = releaseRead(request: destroyed)
+  wgpuBufferRelease(buffer: buffer)
+  log("failure, cancellation, repeated map/unmap and destroyed-buffer callback OK")
+  ret 0
+}
+
+# Existing generic single-command submission ABI.
+func submitCommand(command: Ptr) extern("rae_gb_submit")
