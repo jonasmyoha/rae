@@ -15,7 +15,19 @@ toon tier knobs (`WaterBody.gridSegments`, `waveCount`), vertex-shader-panned no
 coordinates (the Roystan mobile trick), and many bodies per `WaterSystem` sharing
 one unit-grid mesh (`waterAddBody`; each body is one uniform upload + one submitted
 draw, so a shared uniform buffer stays correct). Realistic FFT water (#831) and shading/refraction
-(#832) extend it. #831 slice 1 is in: the `waterFft` compute node + three persistent
+(#832) extend it. #832 on the toon surface is in: Schlick Fresnel (F0 = 0.02)
+between the sky reflection and a REFRACTION that reads the #842 opaque snapshot
+(`litCopy`) offset by the normal, depth-MASKED (a refracted pixel that lies above
+the surface falls back to the unrefracted one, so objects out of the water do not
+bleed in) and absorbed per channel by Beer-Lambert `exp(-depth * absorbColor)`
+with the lost light replaced by scattered deep colour; a refracting body composes
+its own background and is drawn opaque, the mobile tier keeps the alpha path
+(`WaterBody.refraction`). The snapshot now precedes the water
+(`transparentSnapshot`). Gameplay: `waterHeightAt(body, x, y, t)` is the CPU
+Gerstner mirror with the horizontal displacement inverted by two fixed-point
+iterations, and `lib/water/Buoyancy.rae` is the `Buoyant` component + a `query2`
+system over Transform3d — never a callback; both pinned by unit cases 752/753.
+SSR and the FFT displacement readback are #854. #831 slice 1 is in: the `waterFft` compute node + three persistent
 fixed-size cascade resources are declared in the graph (derived `waterFft ->
 transparentForward`), `WaterBody` carries the tier (`fftSize`, `cascadeCount`,
 `cascadeTile0..2`, `updateRate`) and `waterFftStep` allocates the cascade maps

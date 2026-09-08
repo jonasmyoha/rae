@@ -16,6 +16,7 @@ import Sdl3
 import Sys
 import Vec3
 open Gbuffer
+open GbufferPasses
 open Gpu3d
 open Math3d
 open Mesh3d
@@ -23,6 +24,7 @@ open RendererDeferred
 open Rendergraph
 open Scene3d
 open Sky
+open TransparentForward
 open app3d/CameraRig
 open water/Water
 open water/WaterSystem
@@ -113,6 +115,10 @@ func main() ret Int {
   lake.distortion = 0.6
   lake.deepColor = Vec3.create(x: 0.03, y: 0.16, z: 0.42)
   lake.shallowColor = Vec3.create(x: 0.25, y: 0.7, z: 0.78)
+  # Desktop look (#832): see the bed and the islands' feet THROUGH the water,
+  # absorbed with depth. RAE_WATER_REFRACTION=0 shows the mobile alpha path.
+  lake.refraction = 1
+  if Sys.getEnv(name: "RAE_WATER_REFRACTION") is "0" { lake.refraction = 0 }
   var waterSystem: WaterSystem = createWaterSystem(body: lake)
   # A second body on the first island: proves one mesh, many bodies (#847).
   # Greener and calmer than the lake, one wave, sitting just above the island top.
@@ -128,6 +134,9 @@ func main() ret Int {
 
   log("[water example] W/A/S/D move, Q/E down/up, shift boost, mouse-drag look; comma/period move the sun")
   let fixedTestFrame: Bool = Sys.getEnv(name: "RAE_WATER_TEST_FRAME").length() > 0
+  # TAA is opt-in (FXAA is the default); RAE_WATER_TAA=1 turns it on for the
+  # #832 interaction check — the surface must not smear or ghost under it.
+  if Sys.getEnv(name: "RAE_WATER_TAA") is "1" { gbSetTaaEnabled(on: 1) }
   var lastTime: Float64 = Gpu2d.nowSeconds()
   var waterFrames: Int = 0
   loop not Gpu2d.pollClose() {
@@ -162,7 +171,8 @@ func main() ret Int {
           waterFftStep(waterSystem: waterSystem)
         }
         if tag is RenderTag.transparentForward {
-          # The lake first, then the renderer's transparent pass (nothing queued here).
+          # Snapshot the opaque frame, the lake refracts it, then the transparent pass.
+          transparentSnapshot(cache: renderer.passes.transparent)
           waterDraw(waterSystem: waterSystem, camera: camera, light: light,
             sky: renderer.sky, hasSky: renderer.hasSky, deltaTime: deltaTime)
           waterFrames = waterFrames + 1

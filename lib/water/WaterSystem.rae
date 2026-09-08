@@ -23,17 +23,18 @@ open Math3d
 open Mesh3d
 open Scene3d
 open Sky
+open TransparentForward
 open water/Water
 open webgpu/Webgpu
 open webgpu/Context
 
 func gbLitFormat() extern("rae_gb_lit_format") ret Int
-# Handle slots: 0 = surface pipeline, 1 = uniform buffer, 2 = bind group.
+# Handle slots: 0 = surface pipeline, 1 = uniform buffer, 2 = bind group, 3 = lit sampler.
 func waterSet(index: Int, ptr: Ptr) extern("rae_gb_water_set")
 func waterGet(index: Int) extern("rae_gb_water_get") ret Ptr
 func waterRelease() extern("rae_gb_water_release")
 
-const waterUniformFloats: Int = 56   # fourteen vec4 (see waterSurface.wgsl `Water`)
+const waterUniformFloats: Int = 64   # sixteen vec4 (see waterSurface.wgsl `Water`)
 
 type WaterSystem {
   # Every body this system draws (#847): they share ONE unit-grid mesh (sized
@@ -156,6 +157,15 @@ func ensureWaterPipeline(waterSystem: mod WaterSystem) {
     size: (waterUniformFloats * 4) as UInt64
   }
   waterSet(index: 1, ptr: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: uDesc))
+  # Linear clamped sampler for reading the opaque snapshot through the surface.
+  let sd: WGPUSamplerDescriptor = {
+    addressModeU: WGPUAddressMode_ClampToEdge, addressModeV: WGPUAddressMode_ClampToEdge,
+    addressModeW: WGPUAddressMode_ClampToEdge,
+    magFilter: WGPUFilterMode_Linear, minFilter: WGPUFilterMode_Linear,
+    mipmapFilter: WGPUMipmapFilterMode_Nearest,
+    lodMinClamp: 0.0 as Float32, lodMaxClamp: 1.0 as Float32, maxAnisotropy: 1 as UInt16
+  }
+  waterSet(index: 3, ptr: wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: sd))
   waterSystem.pipeReady = true
 }
 
@@ -170,11 +180,15 @@ func ensureWaterBind(waterSystem: mod WaterSystem) {
   let old: Ptr = waterGet(index: 2)
   if not (old is webgpuNull()) { wgpuBindGroupRelease(bindGroup: old) }
   let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: waterGet(index: 0), groupIndex: 0 as UInt32)
-  var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 3)
+  var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 5)
   entries.add(value: { binding: 0 as UInt32, buffer: gbFrameUbuf(), size: gbFrameBytes() as UInt64 })
   entries.add(value: { binding: 1 as UInt32, buffer: waterGet(index: 1), size: (waterUniformFloats * 4) as UInt64 })
   entries.add(value: { binding: 2 as UInt32, textureView: gbViewDepth() })
-  let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 3 as UInt64, entries: entries.data }
+  # The opaque snapshot (#842 litCopy) + its sampler: refraction reads the scene
+  # through the surface. Generation-keyed like the depth view.
+  entries.add(value: { binding: 3 as UInt32, textureView: gbLitCopyView() })
+  entries.add(value: { binding: 4 as UInt32, sampler: waterGet(index: 3) })
+  let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 5 as UInt64, entries: entries.data }
   waterSet(index: 2, ptr: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
   wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
 }
@@ -219,6 +233,11 @@ func uploadWaterUniform(waterSystem: mod WaterSystem, body: view WaterBody, came
   putWave(uniform: waterSystem.uniform, base: 36, wave: body.waves.first)
   putWave(uniform: waterSystem.uniform, base: 44, wave: body.waves.second)
   put4(uniform: waterSystem.uniform, base: 52, x: body.distortion, y: body.waveCount.toFloat(), z: 0.0, w: 0.0)
+  # Refraction: on/off, strength, and the lit target's size for screen uvs.
+  let litTexture: Ptr = gbLitTexture()
+  put4(uniform: waterSystem.uniform, base: 56, x: body.refraction.toFloat(), y: body.refractStrength,
+    z: (wgpuTextureGetWidth(texture: litTexture) as Int).toFloat(), w: (wgpuTextureGetHeight(texture: litTexture) as Int).toFloat())
+  put4(uniform: waterSystem.uniform, base: 60, x: body.absorbColor.x, y: body.absorbColor.y, z: body.absorbColor.z, w: 0.0)
   wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: waterGet(index: 1),
     bufferOffset: 0 as UInt64, data: waterSystem.uniform.data,
     size: (waterUniformFloats * 4) as UInt64)
@@ -380,6 +399,8 @@ func releaseCascades(waterSystem: mod WaterSystem) {
 # Release the GPU handles (app shutdown or a rebuild). Null-safe.
 func waterShutdown(waterSystem: mod WaterSystem) pub {
   releaseCascades(waterSystem: waterSystem)
+  let sampler: Ptr = waterGet(index: 3)
+  if not (sampler is webgpuNull()) { wgpuSamplerRelease(sampler: sampler) waterSet(index: 3, ptr: webgpuNull()) }
   waterRelease()
   waterSystem.pipeMade = false
   waterSystem.pipeReady = false
