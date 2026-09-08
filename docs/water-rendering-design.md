@@ -11,7 +11,12 @@ and `waterSurface.wgsl` (Gerstner vertex waves; Roystan toon fragment: depth-gra
 colour from the G-buffer depth, posterised noise ripples + shoreline foam, Fresnel sky
 tint from the stylised hemisphere, stepped sun highlight). Landed as the lake at the
 biome water plane in example 114. Realistic FFT water (#831) and shading/refraction
-(#832) extend it.
+(#832) extend it. #831 slice 1 is in: the `waterFft` compute node + three persistent
+fixed-size cascade resources are declared in the graph (derived `waterFft ->
+transparentForward`), `WaterBody` carries the tier (`fftSize`, `cascadeCount`,
+`cascadeTile0..2`, `updateRate`) and `waterFftStep` allocates the cascade maps
+(rgba16float storage+sampled) in the C handle slots; spectrum, evolution, the
+Stockham iFFT and the surface sampling are the remaining slices.
 The survey below describes the original pre-water baseline.
 
 ### Implemented prerequisite: opaque radiance snapshot
