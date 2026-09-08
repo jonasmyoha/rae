@@ -1,0 +1,55 @@
+# bakeRiverMesh (#833): the ribbon's shape, its banks and what it packs.
+import Math
+import Vec3
+open Mesh3d
+open water/Water
+open water/River
+
+func check(name: view String, ok: view Bool) {
+  if ok { log("ok   {name}") } else { log("FAIL {name}") }
+}
+func near(a: view Float, b: view Float, tolerance: view Float) ret Bool { ret Math.abs(value: a - b) <= tolerance }
+func vertAt(mesh: view MeshData, index: view Int, slot: view Int) ret Float {
+  if let f: Float = mesh.verts.copyAt(index: index * 8 + slot) { ret f }
+  ret -999.0
+}
+
+func main() {
+  # A straight river along +x, 10 m long, 4 m wide, 5 rows, 2 quads across.
+  let straight: RiverSpline = {
+    p0: Vec3.create(x: 0.0, y: 0.0, z: 5.0), p1: Vec3.create(x: 3.0, y: 0.0, z: 5.0),
+    p2: Vec3.create(x: 7.0, y: 0.0, z: 5.0), p3: Vec3.create(x: 10.0, y: 0.0, z: 5.0) }
+  var heights: List(Float) = createList(Float, cap: 15)
+  loop var i: Int = 0, i < 5, ++i {
+    heights.add(value: 6.0)   # left bank ABOVE the surface: edge stays at the surface
+    heights.add(value: 5.0)   # surface
+    heights.add(value: 4.0)   # right bank BELOW the surface: edge tucks under it
+  }
+  let mesh: MeshData = bakeRiverMesh(spline: straight, width: 4.0, samples: 5, across: 2, heights: heights, bankMargin: 0.25)
+  check(name: "5 rows x 3 columns of vertices", ok: mesh.vertCount is 15)
+  check(name: "4 x 2 quads x 2 triangles of indices", ok: mesh.indices.length is 48)
+  check(name: "u is arc length: the last row is 10 m in", ok: near(a: vertAt(mesh: mesh, index: 13, slot: 6), b: 10.0, tolerance: 0.01))
+  check(name: "v runs across the width", ok: near(a: vertAt(mesh: mesh, index: 12, slot: 7), b: -2.0, tolerance: 0.0001) and near(a: vertAt(mesh: mesh, index: 14, slot: 7), b: 2.0, tolerance: 0.0001))
+  check(name: "the centre column sits on the surface", ok: near(a: vertAt(mesh: mesh, index: 13, slot: 2), b: 5.0, tolerance: 0.0001))
+  check(name: "a bank above the surface keeps the edge at the surface", ok: near(a: vertAt(mesh: mesh, index: 12, slot: 2), b: 5.0, tolerance: 0.0001))
+  check(name: "a bank below the surface tucks the edge under it", ok: near(a: vertAt(mesh: mesh, index: 14, slot: 2), b: 3.75, tolerance: 0.0001))
+  check(name: "the flow tangent is packed in the normal", ok: near(a: vertAt(mesh: mesh, index: 13, slot: 3), b: 1.0, tolerance: 0.0001) and near(a: vertAt(mesh: mesh, index: 13, slot: 4), b: 0.0, tolerance: 0.0001))
+  check(name: "a straight river has no curvature foam", ok: near(a: vertAt(mesh: mesh, index: 13, slot: 5), b: 0.0, tolerance: 0.0001))
+
+  # A bend: the tangent turns, so foam appears somewhere along it.
+  let bend: RiverSpline = {
+    p0: Vec3.create(x: 0.0, y: 0.0, z: 1.0), p1: Vec3.create(x: 8.0, y: 0.0, z: 1.0),
+    p2: Vec3.create(x: 8.0, y: 8.0, z: 1.0), p3: Vec3.create(x: 0.0, y: 8.0, z: 1.0) }
+  var flat: List(Float) = createList(Float, cap: 60)
+  loop var j: Int = 0, j < 60, ++j { flat.add(value: 1.0) }
+  let bent: MeshData = bakeRiverMesh(spline: bend, width: 3.0, samples: 20, across: 1, heights: flat, bankMargin: 0.2)
+  var maxFoam: Float = 0.0
+  loop var k: Int = 0, k < bent.vertCount, ++k {
+    let f: Float = vertAt(mesh: bent, index: k, slot: 5)
+    if f > maxFoam { maxFoam = f }
+  }
+  check(name: "a bend bakes curvature foam", ok: maxFoam > 0.05 and maxFoam <= 1.0)
+  let tx: Float = vertAt(mesh: bent, index: 20, slot: 3)
+  let ty: Float = vertAt(mesh: bent, index: 20, slot: 4)
+  check(name: "the tangent stays unit length round the bend", ok: near(a: tx * tx + ty * ty, b: 1.0, tolerance: 0.0001))
+}

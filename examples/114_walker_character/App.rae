@@ -691,6 +691,8 @@ func updateApp(app: mod App) {
 # ----- the loop ------------------------------------------------------------
 func runWalkerApp() ret Int {
   var app: App = createApp()
+  # A stream through the meadow (#833), baked once against the terrain.
+  addMeadowRiver(waterSystem: app.waterSystem, groundZ: app.characterSystem.groundZ)
   # #739/#740/#741: the GameWorld holds the hero + crowd (controllers), the
   # skinned body parts (PartRoughness), and the terrain props + heightfield tiles
   # (PropKind) — all recycled ECS entities.

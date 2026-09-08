@@ -1,0 +1,153 @@
+# River — a river is a WaterBody with its OWN baked mesh (#833). Given a cubic
+# bezier `RiverSpline` and the terrain heights along it, `bakeRiverMesh` builds,
+# ONCE, a ribbon mesh that follows the spline: `samples` rows along the flow,
+# `across` quads across the width. The Waterways idea (Arnklit, MIT — technique
+# reference only): bake the flow and the foam into the mesh so the surface
+# shader is just UV animation.
+#
+# What the bake stores, because the water shader ignores a mesh's normal (it
+# builds its own) and reads the uv as metres:
+#   uv      = (arc length along the river, offset across it), both in metres,
+#             so the ripple noise keeps the lake's scale and the flow is simply
+#             "u - flowSpeed * t" — no flow-map texture and no phase reset,
+#             the spline parameter IS the flow map.
+#   normal  = (flowTangent.x, flowTangent.y, foamWeight): the downstream
+#             direction, and how much the river bends here (curvature x width,
+#             0..1) — rapids foam where it turns.
+# Banks: the two edge rows take the caller's bank heights. Where the bank is
+# BELOW the surface the edge is tucked to (bank - margin) so it hides under the
+# ground instead of floating; where the bank is above, the flat surface simply
+# runs into it and the depth test + shoreline foam do the rest. The heights are
+# DATA the caller samples from its own heightfield (terrainHeightAt in 114, a
+# constant in a flat scene) — Rae has no callbacks and the bake needs none.
+import Math
+import Vec3
+open Mesh3d
+open water/Water
+
+type RiverSpline {
+  p0: Vec3
+  p1: Vec3
+  p2: Vec3
+  p3: Vec3
+}
+
+func bezierPoint(spline: view RiverSpline, t: copy Float) pub ret Vec3 {
+  let u: Float = 1.0 - t
+  let a: Float = u * u * u
+  let b: Float = 3.0 * u * u * t
+  let c: Float = 3.0 * u * t * t
+  let d: Float = t * t * t
+  ret Vec3.create(
+    x: a * spline.p0.x + b * spline.p1.x + c * spline.p2.x + d * spline.p3.x,
+    y: a * spline.p0.y + b * spline.p1.y + c * spline.p2.y + d * spline.p3.y,
+    z: a * spline.p0.z + b * spline.p1.z + c * spline.p2.z + d * spline.p3.z)
+}
+
+# Unit tangent in the ground plane (rivers flow horizontally).
+func bezierTangent(spline: view RiverSpline, t: copy Float) pub ret Vec3 {
+  let u: Float = 1.0 - t
+  let dx: Float = 3.0 * u * u * (spline.p1.x - spline.p0.x) + 6.0 * u * t * (spline.p2.x - spline.p1.x) + 3.0 * t * t * (spline.p3.x - spline.p2.x)
+  let dy: Float = 3.0 * u * u * (spline.p1.y - spline.p0.y) + 6.0 * u * t * (spline.p2.y - spline.p1.y) + 3.0 * t * t * (spline.p3.y - spline.p2.y)
+  var length: Float = Math.sqrt(x: dx * dx + dy * dy)
+  if length < 0.000001 { ret Vec3.create(x: 1.0, y: 0.0, z: 0.0) }
+  ret Vec3.create(x: dx / length, y: dy / length, z: 0.0)
+}
+
+# `heights` holds 3 floats per sample: left bank, surface centre, right bank
+# (metres, world z), samples * 3 entries. `across` >= 1 quads across the width.
+func bakeRiverMesh(spline: view RiverSpline, width: copy Float, samples: copy Int, across: copy Int,
+                   heights: view List(Float), bankMargin: copy Float) pub ret MeshData {
+  var rows: Int = samples
+  if rows < 2 { rows = 2 }
+  var cols: Int = across
+  if cols < 1 { cols = 1 }
+  let verts: List(Float) = createList(Float, cap: rows * (cols + 1) * 8)
+  let indices: List(Int) = createList(Int, cap: (rows - 1) * cols * 6)
+  var arc: Float = 0.0
+  var previous: Vec3 = bezierPoint(spline: spline, t: 0.0)
+  var previousTangent: Vec3 = bezierTangent(spline: spline, t: 0.0)
+  loop var row: Int = 0, row < rows, ++row {
+    let t: Float = row.toFloat() / (rows - 1).toFloat()
+    let centre: Vec3 = bezierPoint(spline: spline, t: t)
+    let tangent: Vec3 = bezierTangent(spline: spline, t: t)
+    if row > 0 {
+      let dx: Float = centre.x - previous.x
+      let dy: Float = centre.y - previous.y
+      arc = arc + Math.sqrt(x: dx * dx + dy * dy)
+    }
+    # Curvature foam: how far the tangent turned per metre, scaled by the
+    # width (a wide river bending the same angle is rougher), clamped 0..1.
+    var foam: Float = 0.0
+    if row > 0 {
+      let turnX: Float = tangent.x - previousTangent.x
+      let turnY: Float = tangent.y - previousTangent.y
+      let dx: Float = centre.x - previous.x
+      let dy: Float = centre.y - previous.y
+      let step: Float = Math.sqrt(x: dx * dx + dy * dy)
+      if step > 0.000001 {
+        foam = Math.sqrt(x: turnX * turnX + turnY * turnY) / step * width * 1.5
+        if foam > 1.0 { foam = 1.0 }
+      }
+    }
+    var leftBank: Float = centre.z
+    var surface: Float = centre.z
+    var rightBank: Float = centre.z
+    if let hl: Float = heights.copyAt(index: row * 3) { leftBank = hl }
+    if let hc: Float = heights.copyAt(index: row * 3 + 1) { surface = hc }
+    if let hr: Float = heights.copyAt(index: row * 3 + 2) { rightBank = hr }
+    # Across the river: v from -width/2 (left) to +width/2 (right).
+    let sideX: Float = 0.0 - tangent.y
+    let sideY: Float = tangent.x
+    loop var col: Int = 0, col <= cols, ++col {
+      let across01: Float = col.toFloat() / cols.toFloat()
+      let v: Float = (across01 - 0.5) * width
+      var z: Float = surface
+      if col is 0 {
+        if leftBank - bankMargin < surface { z = leftBank - bankMargin }
+      }
+      if col is cols {
+        if rightBank - bankMargin < surface { z = rightBank - bankMargin }
+      }
+      pushVert(verts: verts,
+        px: centre.x + sideX * v, py: centre.y + sideY * v, pz: z,
+        nx: tangent.x, ny: tangent.y, nz: foam,
+        u: arc, value: v)
+    }
+    previous = centre
+    previousTangent = tangent
+  }
+  let stride: Int = cols + 1
+  loop var row2: Int = 0, row2 < rows - 1, ++row2 {
+    loop var col2: Int = 0, col2 < cols, ++col2 {
+      let a: Int = row2 * stride + col2
+      let b: Int = a + stride
+      indices.add(value: a)
+      indices.add(value: a + 1)
+      indices.add(value: b)
+      indices.add(value: b)
+      indices.add(value: a + 1)
+      indices.add(value: b + 1)
+    }
+  }
+  ret MeshData { verts: verts, indices: indices, vertCount: rows * stride }
+}
+
+# A river body over an uploaded river mesh: toon style, no Gerstner (the flow
+# is the animation), narrow-band foam, its own flow speed in m/s.
+func createRiverToon(mesh: view MeshHandle, flowSpeed: copy Float) pub ret WaterBody {
+  var body: WaterBody = createLakeToon(surfaceZ: 0.0, extent: 1.0)
+  body.kind = WaterKind.river
+  body.meshId = mesh.id
+  body.flowSpeed = flowSpeed
+  body.waveCount = 0
+  # A stream is shallow: reach the deep colour by 0.6 m so it reads, and keep
+  # the foam to the banks (the cutoff is 0 only where the depth is ~0).
+  body.depthMax = 0.6
+  body.foamDistance = 0.25
+  body.absorb = 0.95
+  body.rippleScale = 0.9
+  body.rippleCutoff = 0.8
+  body.distortion = 0.5
+  ret body
+}
