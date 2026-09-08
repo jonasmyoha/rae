@@ -26,6 +26,8 @@ open app3d/CameraRig
 open water/Water
 open water/WaterSystem
 open water/WaterFft
+open water/WaterSchedule
+open WaterChecks
 open water/ClipMap
 open ecs/Entity
 
@@ -121,13 +123,26 @@ func main() ret Int {
   let gridMesh: MeshHandle = uploadMeshData(meshData: grid)
   var ocean: WaterBody = createOceanRealistic(surfaceZ: 0.0)
   ocean.meshId = gridMesh.id
+  if Sys.getEnv(name: "RAE_WATER_MOBILE") is "1" { useMobileWaterTier(body: ocean) }
+  let sizeSetting: String = Sys.getEnv(name: "RAE_WATER_FFT_SIZE")
+  let cascadeSetting: String = Sys.getEnv(name: "RAE_WATER_CASCADES")
+  let rateSetting: String = Sys.getEnv(name: "RAE_WATER_UPDATE_RATE")
+  if sizeSetting.length() > 0 { ocean.fftSize = sizeSetting.toInt() }
+  if cascadeSetting.length() > 0 { ocean.cascadeCount = cascadeSetting.toInt() }
+  if rateSetting.length() > 0 { ocean.updateRate = rateSetting.toInt() }
+  normalizeWaterTier(body: ocean)
   var waterSystem: WaterSystem = createWaterSystem(body: ocean)
+
+  waterSystem.performance.enabled = Sys.getEnv(name: "RAE_WATER_PERF").length() > 0
 
   log("[ocean] W/A/S/D move, Q/E down/up, shift boost, mouse-drag look; comma/period move the sun")
   let fixedTestFrame: Bool = Sys.getEnv(name: "RAE_OCEAN_TEST_FRAME").length() > 0
-  var lastTime: Float64 = Gpu2d.nowSeconds()
+  let startTime: Float64 = Gpu2d.nowSeconds()
+  var lastTime: Float64 = startTime
+  let tierCheck: Bool = Sys.getEnv(name: "RAE_WATER_TIER_CHECK") is "1"
+  var checksOk: Bool = true
   var oceanFrames: Int = 0
-  loop not Gpu2d.pollClose() {
+  loop not Gpu2d.pollClose() and (not tierCheck or oceanFrames < waterCheckFrames) {
     let now: Float64 = Gpu2d.nowSeconds()
     var deltaTime: Float = (now - lastTime) as Float
     lastTime = now
@@ -154,14 +169,22 @@ func main() ret Int {
         let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
         if tag is RenderTag.waterFft {
           # In the test frame the sea is frozen at t = 2 s so the frame repeats.
+          # Wave time is absolute elapsed time, independent of the camera's
+          # capped deltaTime and of any skipped FFT update or render frame.
+          waterSystem.time = (now - startTime) as Float
           if fixedTestFrame { waterSystem.time = 2.0 }
-          waterFftStep(waterSystem: waterSystem)
+          if tierCheck and gbDeferredPrepare() is not 0 {
+            prepareWaterCheck(waterSystem: waterSystem, frame: oceanFrames)
+            let before: WaterCheckSample = takeWaterCheckSample(waterSystem: waterSystem)
+            waterFftStep(waterSystem: waterSystem)
+            if not verifyWaterCheck(waterSystem: waterSystem, before: before, frame: oceanFrames) { checksOk = false }
+          } else { waterFftStep(waterSystem: waterSystem) }
         }
         if tag is RenderTag.transparentForward {
           transparentSnapshot(cache: renderer.passes.transparent)
           waterDraw(waterSystem: waterSystem, camera: camera, light: light,
-            sky: renderer.sky, hasSky: renderer.hasSky, deltaTime: deltaTime)
-          oceanFrames = oceanFrames + 1
+            sky: renderer.sky, hasSky: renderer.hasSky, deltaTime: 0.0)
+          oceanFrames = waterSystem.drawCount
         }
         renderDeferredPassWorld(
           renderer: renderer, tag: tag, world: sceneWorld
@@ -169,14 +192,30 @@ func main() ret Int {
         passIndex = passIndex + 1
       }
       world3dPrevTransformSystem(world: sceneWorld)
+      if tierCheck and oceanFrames > 0 and oceanFrames % waterCheckStageFrames is 0 {
+        if not waterFftDiagnoseIfft(waterSystem: waterSystem) { checksOk = false }
+      }
     }
   }
 
   if fixedTestFrame {
     log("[ocean] deterministic deferred frame rendered: hour {hour}, {ocean.cascadeCount} cascades of {ocean.fftSize}, {oceanFrames} ocean frames")
   }
+  # Deliberately edit the count before shutdown: release must use allocated
+  # resources, not the caller's newly requested tier.
+  if tierCheck {
+    var endingBody: WaterBody = primaryBody(waterSystem: waterSystem)
+    endingBody.cascadeCount = 1
+    waterSystem.bodies.set(index: 0, value: endingBody)
+  }
   waterShutdown(waterSystem: waterSystem)
+  if tierCheck {
+    if not verifyWaterReleased() { checksOk = false }
+    if oceanFrames is not waterCheckFrames { checksOk = false }
+    if checksOk { log("[water tiers] 14 stages ok") } else { log("[water tiers] FAIL") }
+  }
   Gbuffer.shutdownAll()
   Gpu2d.closeWindow()
+  if not checksOk { ret 1 }
   ret 0
 }

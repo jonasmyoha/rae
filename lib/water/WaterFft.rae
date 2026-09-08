@@ -14,6 +14,8 @@ open Scene3d
 open TransparentForward
 open water/Water
 open water/WaterSystem
+open water/WaterPerf
+open water/WaterSchedule
 open webgpu/Webgpu
 open webgpu/Context
 
@@ -43,42 +45,51 @@ func makeCascadeView(texture: copy Ptr) ret Ptr {
   ret wgpuTextureCreateView(texture: texture, descriptor: vd)
 }
 
-# The render graph's waterFft step (#831). Slice 1: make sure the cascade maps
-# exist for the body's tier (fftSize x fftSize, cascadeCount sets of
-# displacement / normal / Jacobian), then bake the h0 spectrum + the Stockham
-# butterfly (#849). The per-frame evolution + iFFT that fill the maps are the
-# next slice; until then the maps are allocated, declared to the graph, and
-# left untouched (the toon surface does not read them). Call at RenderTag.waterFft.
-func waterFftStep(waterSystem: mod WaterSystem) pub {
+# Rebuild resource-dependent bindings before replacing cascade textures. Cleanup
+# walks the fixed slot capacity, never a newly edited body's cascade count.
+func resetWaterFft(waterSystem: mod WaterSystem) {
+  let surfaceBind: Ptr = waterGet(index: 2)
+  if not (surfaceBind is webgpuNull()) { wgpuBindGroupRelease(bindGroup: surfaceBind) waterSet(index: 2, ptr: webgpuNull()) }
+  waterSystem.bindMade = false
+  releaseFftFrameGpu(waterSystem: waterSystem)
+  releaseFftGpu(waterSystem: waterSystem)
+  releaseCascades(waterSystem: waterSystem)
+  waterSystem.fftNeedsRefresh = true
+}
+
+# Call once at the waterFft render tag. Allocation, baking and the initial full
+# refresh finish in this call, before the first surface draw can sample the maps.
+func waterFftStep(waterSystem: mod WaterSystem) {
+  waterSystem.fftLastUpdates = 0
   if gbDeferredPrepare() is 0 { ret }
-  if waterSystem.cascadesMade {
-    # Slice 2 (#849): the spectrum + butterfly, baked once (or after invalidate).
-    ensureFftGpu(waterSystem: waterSystem)
-    bakeFftSpectrum(waterSystem: waterSystem)
-    # Slice 3 (#850): the per-frame evolution + iFFT, for realistic bodies only —
-    # a toon body never reads the maps, so it does not pay for them.
-    let body: WaterBody = primaryBody(waterSystem: waterSystem)
-    if body.style is WaterStyle.realistic {
-      waterFftUpdate(waterSystem: waterSystem, time: waterSystem.time)
-    }
-    ret
-  }
-  waterSystem.cascadesMade = true
   let body: WaterBody = primaryBody(waterSystem: waterSystem)
-  let size: Int = body.fftSize
-  var cascade: Int = 0
-  loop cascade < body.cascadeCount {
-    var map: Int = 0
-    loop map < waterCascadeMaps {
-      let slot: Int = waterCascadeSlot(cascade: cascade, map: map)
-      let texture: Ptr = makeCascadeMap(size: size)
-      waterSet(index: slot, ptr: texture)
-      waterSet(index: slot + 1, ptr: makeCascadeView(texture: texture))
-      map = map + 1
-    }
-    cascade = cascade + 1
+  if waterSystem.cascadesMade and (body.fftSize is not waterSystem.fftAllocatedSize or body.cascadeCount is not waterSystem.fftAllocatedCount) {
+    resetWaterFft(waterSystem: waterSystem)
   }
-  log("[water] fft cascades: {body.cascadeCount} x {size}x{size} (displacement, normal, jacobian), tiles {body.cascadeTile0}/{body.cascadeTile1}/{body.cascadeTile2} m, update rate {body.updateRate}")
+  if not waterSystem.cascadesMade {
+    loop var cascade: Int = 0, cascade < body.cascadeCount, ++cascade {
+      loop var map: Int = 0, map < waterCascadeMaps, ++map {
+        let slot: Int = waterCascadeSlot(cascade: cascade, map: map)
+        let texture: Ptr = makeCascadeMap(size: body.fftSize)
+        waterSet(index: slot, ptr: texture)
+        waterSet(index: slot + 1, ptr: makeCascadeView(texture: texture))
+      }
+    }
+    waterSystem.cascadesMade = true
+    waterSystem.fftAllocatedSize = body.fftSize
+    waterSystem.fftAllocatedCount = body.cascadeCount
+    waterSystem.fftNeedsRefresh = true
+    log("[water] fft cascades: {body.cascadeCount} x {body.fftSize}x{body.fftSize}, update rate {body.updateRate}")
+  }
+  if not sameWaterSpectrum(previous: waterSystem.fftSeaState, current: body) {
+    waterFftInvalidate(waterSystem: waterSystem)
+  }
+  waterSystem.fftSeaState = body
+  ensureFftGpu(waterSystem: waterSystem)
+  bakeFftSpectrum(waterSystem: waterSystem)
+  if body.style is WaterStyle.realistic {
+    waterFftUpdate(waterSystem: waterSystem, time: waterSystem.time)
+  }
 }
 
 # ----- FFT spectrum + butterfly (#849) ----------------------------------------
@@ -258,12 +269,14 @@ func bakeFftSpectrum(waterSystem: mod WaterSystem) {
   # The butterfly only needs N; the last uniform upload carries it.
   dispatchFft(pipeline: waterGet(index: fftSlotButterflyPipe), bind: waterGet(index: fftSlotButterflyBind), width: log2Int(n: size), height: size)
   waterSystem.fftBaked = true
+  waterSystem.fftNeedsRefresh = true
   log("[water fft] spectrum baked: {body.cascadeCount} cascades of {size}x{size}, wind {body.windSpeed} m/s, fetch {body.fetch} m, depth {body.waterDepth} m; butterfly {log2Int(n: size)} stages")
 }
 
 # Sea state or resolution changed: re-bake next frame.
-func waterFftInvalidate(waterSystem: mod WaterSystem) pub {
+func waterFftInvalidate(waterSystem: mod WaterSystem) {
   waterSystem.fftBaked = false
+  waterSystem.fftNeedsRefresh = true
 }
 
 # ----- diagnostics: read a baked texture back (#849) -------------------------
@@ -315,7 +328,7 @@ func readAt(waterSystem: view WaterSystem, index: view Int) ret Float {
 # surface real, (c) the radial energy peaks at the JONSWAP peak wavenumber
 # k_p = w_p^2 / g (deep water), and (d) the butterfly's first stage reads (i/2,
 # i/2 + N/2) with twiddle +-1. Logs one "[water fft] h0 ok ..." line (or FAIL).
-func waterFftDiagnose(waterSystem: mod WaterSystem) pub ret Bool {
+func waterFftDiagnose(waterSystem: mod WaterSystem) ret Bool {
   if not waterSystem.fftBaked { log("[water fft] h0 FAIL: not baked") ret false }
   let body: WaterBody = primaryBody(waterSystem: waterSystem)
   let size: Int = body.fftSize
@@ -539,16 +552,28 @@ func dispatchIn(pass: copy Ptr, pipeline: copy Ptr, bind: copy Ptr, width: copy 
 # compute pass, ONE submit. Per cascade and field: evolve -> P; log2N Stockham
 # row stages ping-ponging P/Q; transpose; the same stages again for the
 # columns; fieldOut un-transposes into R_f. Then post writes the maps.
-func waterFftUpdate(waterSystem: mod WaterSystem, time: copy Float) pub {
+func waterFftUpdate(waterSystem: mod WaterSystem, time: copy Float) {
   if not waterSystem.fftBaked { ret }
   ensureFftFrameGpu(waterSystem: waterSystem)
   if waterGet(index: fftSlotPostPipe) is webgpuNull() { ret }
   let body: WaterBody = primaryBody(waterSystem: waterSystem)
+  waterSystem.fftLastUpdates = 0
+  loop var cascade: Int = 0, cascade < body.cascadeCount, ++cascade {
+    if waterCascadeDue(frame: waterSystem.fftFrame, cascade: cascade, updateRate: body.updateRate, refreshAll: waterSystem.fftNeedsRefresh) {
+      waterSystem.fftLastUpdates = waterSystem.fftLastUpdates + 1
+    }
+  }
+  if waterSystem.fftLastUpdates is 0 {
+    waterSystem.fftFrame = waterSystem.fftFrame + 1
+    idleWaterPerf(performance: waterSystem.performance)
+    ret
+  }
   let size: Int = body.fftSize
   let stages: Int = log2Int(n: size)
   loop waterSystem.evolveUniform.length < evolveUniformFloats { waterSystem.evolveUniform.add(value: 0.0) }
   # All uniforms first (queued writes land before the submit below).
   loop var cascade: Int = 0, cascade < body.cascadeCount, ++cascade {
+    if not waterCascadeDue(frame: waterSystem.fftFrame, cascade: cascade, updateRate: body.updateRate, refreshAll: waterSystem.fftNeedsRefresh) { continue }
     loop var field: Int = 0, field < fftFields, ++field {
       put4(uniform: waterSystem.evolveUniform, base: 0, x: size.toFloat(), y: cascadeTile(body: body, cascade: cascade), z: 9.81, w: body.waterDepth)
       put4(uniform: waterSystem.evolveUniform, base: 4, x: time, y: field.toFloat(), z: body.choppiness, w: 0.0)
@@ -556,42 +581,54 @@ func waterFftUpdate(waterSystem: mod WaterSystem, time: copy Float) pub {
         bufferOffset: 0 as UInt64, data: waterSystem.evolveUniform.data, size: (evolveUniformFloats * 4) as UInt64)
     }
   }
-  let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
-  let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
-  let cpDesc: WGPUComputePassDescriptor = { nextInChain: webgpuNull() }
-  let pass: Ptr = wgpuCommandEncoderBeginComputePass(commandEncoder: enc, descriptor: cpDesc)
+  let encoderDescriptor: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
+  let commandEncoder: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encoderDescriptor)
+  let timingIndex: Int = beginWaterPerf(performance: waterSystem.performance)
+  let computeDescriptor: WGPUComputePassDescriptor = { nextInChain: webgpuNull(), timestampWrites: waterPerfWrites(performance: waterSystem.performance) }
+  let computePass: Ptr = wgpuCommandEncoderBeginComputePass(commandEncoder: commandEncoder, descriptor: computeDescriptor)
   loop var cascade2: Int = 0, cascade2 < body.cascadeCount, ++cascade2 {
+    if not waterCascadeDue(frame: waterSystem.fftFrame, cascade: cascade2, updateRate: body.updateRate, refreshAll: waterSystem.fftNeedsRefresh) { continue }
     loop var field2: Int = 0, field2 < fftFields, ++field2 {
-      dispatchIn(pass: pass, pipeline: waterGet(index: fftSlotEvolvePipe),
+      dispatchIn(pass: computePass, pipeline: waterGet(index: fftSlotEvolvePipe),
         bind: waterGet(index: fftSlotEvolveBindBase + cascade2 * fftFields + field2), width: size, height: size)
       # Rows: the data starts in P (current = 0).
       var current: Int = 0
       loop var stage: Int = 0, stage < stages, ++stage {
-        dispatchIn(pass: pass, pipeline: waterGet(index: fftSlotStockhamPipe),
+        dispatchIn(pass: computePass, pipeline: waterGet(index: fftSlotStockhamPipe),
           bind: waterGet(index: fftSlotStageBindBase + stage * 2 + current), width: size, height: size)
         current = 1 - current
       }
-      dispatchIn(pass: pass, pipeline: waterGet(index: fftSlotTransposePipe),
+      dispatchIn(pass: computePass, pipeline: waterGet(index: fftSlotTransposePipe),
         bind: waterGet(index: fftSlotTransposeBindBase + current), width: size, height: size)
       current = 1 - current
       loop var stage2: Int = 0, stage2 < stages, ++stage2 {
-        dispatchIn(pass: pass, pipeline: waterGet(index: fftSlotStockhamPipe),
+        dispatchIn(pass: computePass, pipeline: waterGet(index: fftSlotStockhamPipe),
           bind: waterGet(index: fftSlotStageBindBase + stage2 * 2 + current), width: size, height: size)
         current = 1 - current
       }
-      dispatchIn(pass: pass, pipeline: waterGet(index: fftSlotFieldOutPipe),
+      dispatchIn(pass: computePass, pipeline: waterGet(index: fftSlotFieldOutPipe),
         bind: waterGet(index: fftSlotFieldOutBindBase + field2 * 2 + current), width: size, height: size)
     }
-    dispatchIn(pass: pass, pipeline: waterGet(index: fftSlotPostPipe),
+    dispatchIn(pass: computePass, pipeline: waterGet(index: fftSlotPostPipe),
       bind: waterGet(index: fftSlotPostBindBase + cascade2), width: size, height: size)
   }
-  wgpuComputePassEncoderEnd(computePassEncoder: pass)
-  let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
-  let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
-  gbSubmit(cmd: cmd)
-  wgpuCommandBufferRelease(commandBuffer: cmd)
-  wgpuComputePassEncoderRelease(computePassEncoder: pass)
-  wgpuCommandEncoderRelease(commandEncoder: enc)
+  wgpuComputePassEncoderEnd(computePassEncoder: computePass)
+  resolveWaterPerf(performance: waterSystem.performance, commandEncoder: commandEncoder, index: timingIndex)
+  let commandDescriptor: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
+  let commandBuffer: Ptr = wgpuCommandEncoderFinish(commandEncoder: commandEncoder, descriptor: commandDescriptor)
+  gbSubmit(cmd: commandBuffer)
+  wgpuCommandBufferRelease(commandBuffer: commandBuffer)
+  loop var cascade: Int = 0, cascade < body.cascadeCount, ++cascade {
+    if waterCascadeDue(frame: waterSystem.fftFrame, cascade: cascade, updateRate: body.updateRate, refreshAll: waterSystem.fftNeedsRefresh) {
+      if let count: Int = waterSystem.fftUpdateCounts.copyAt(index: cascade) { waterSystem.fftUpdateCounts.set(index: cascade, value: count + 1) }
+      waterSystem.fftSampleTimes.set(index: cascade, value: time)
+    }
+  }
+  waterSystem.fftFrame = waterSystem.fftFrame + 1
+  waterSystem.fftNeedsRefresh = false
+  collectWaterPerf(performance: waterSystem.performance)
+  wgpuComputePassEncoderRelease(computePassEncoder: computePass)
+  wgpuCommandEncoderRelease(commandEncoder: commandEncoder)
 }
 
 # THE FFT CORRECTNESS CHECK (#850): bake one known wave (h0 = 0.25 at k index
@@ -600,7 +637,7 @@ func waterFftUpdate(waterSystem: mod WaterSystem, time: copy Float) pub {
 # must be cos(2 pi 3 x / N) of amplitude 1 — amplitude, phase at x = 0, and
 # the six zero crossings. Then re-bake JONSWAP, transform, and check the height
 # field is finite and bounded. Logs "[water fft] ifft ok ..." (or FAIL).
-func waterFftDiagnoseIfft(waterSystem: mod WaterSystem) pub ret Bool {
+func waterFftDiagnoseIfft(waterSystem: mod WaterSystem) ret Bool {
   let body: WaterBody = primaryBody(waterSystem: waterSystem)
   let size: Int = body.fftSize
   waterSystem.fftTestMode = true
@@ -663,7 +700,7 @@ func waterFftDiagnoseIfft(waterSystem: mod WaterSystem) pub ret Bool {
 func releaseFftFrameGpu(waterSystem: mod WaterSystem) {
   if not waterSystem.fftFrameMade { ret }
   waterSystem.fftFrameMade = false
-  loop var slot: Int = fftSlotStageBindBase, slot <= fftSlotPostBindBase + fftMaxCascades, ++slot {
+  loop var slot: Int = fftSlotStageBindBase, slot < fftSlotPostBindBase + fftMaxCascades, ++slot {
     let bind: Ptr = waterGet(index: slot)
     if not (bind is webgpuNull()) { wgpuBindGroupRelease(bindGroup: bind) waterSet(index: slot, ptr: webgpuNull()) }
   }
@@ -689,9 +726,8 @@ func releaseFftGpu(waterSystem: mod WaterSystem) {
   if not waterSystem.fftGpuMade { ret }
   waterSystem.fftGpuMade = false
   waterSystem.fftBaked = false
-  let body: WaterBody = primaryBody(waterSystem: waterSystem)
   var cascade: Int = 0
-  loop cascade < body.cascadeCount {
+  loop cascade < waterCascadeCount {
     let bind: Ptr = waterGet(index: fftSlotSpectrumBindBase + cascade)
     if not (bind is webgpuNull()) { wgpuBindGroupRelease(bindGroup: bind) waterSet(index: fftSlotSpectrumBindBase + cascade, ptr: webgpuNull()) }
     let h0View: Ptr = waterGet(index: fftSlotH0Base + cascade * 2 + 1)
@@ -719,9 +755,8 @@ func releaseFftGpu(waterSystem: mod WaterSystem) {
 func releaseCascades(waterSystem: mod WaterSystem) {
   if not waterSystem.cascadesMade { ret }
   waterSystem.cascadesMade = false
-  let body: WaterBody = primaryBody(waterSystem: waterSystem)
   var cascade: Int = 0
-  loop cascade < body.cascadeCount {
+  loop cascade < waterCascadeCount {
     var map: Int = 0
     loop map < waterCascadeMaps {
       let slot: Int = waterCascadeSlot(cascade: cascade, map: map)
@@ -738,7 +773,7 @@ func releaseCascades(waterSystem: mod WaterSystem) {
 }
 
 # Release the GPU handles (app shutdown or a rebuild). Null-safe.
-func waterShutdown(waterSystem: mod WaterSystem) pub {
+func waterShutdown(waterSystem: mod WaterSystem) {
   releaseFftFrameGpu(waterSystem: waterSystem)
   releaseFftGpu(waterSystem: waterSystem)
   releaseCascades(waterSystem: waterSystem)
@@ -746,6 +781,7 @@ func waterShutdown(waterSystem: mod WaterSystem) pub {
   if not (sampler is webgpuNull()) { wgpuSamplerRelease(sampler: sampler) waterSet(index: 3, ptr: webgpuNull()) }
   let cascadeSampler: Ptr = waterGet(index: 4)
   if not (cascadeSampler is webgpuNull()) { wgpuSamplerRelease(sampler: cascadeSampler) waterSet(index: 4, ptr: webgpuNull()) }
+  releaseWaterPerf(performance: waterSystem.performance)
   waterRelease()
   waterSystem.pipeMade = false
   waterSystem.pipeReady = false

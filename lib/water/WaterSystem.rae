@@ -28,6 +28,8 @@ open Scene3d
 open Sky
 open TransparentForward
 open water/Water
+open water/WaterPerf
+open water/WaterSchedule
 open webgpu/Webgpu
 open webgpu/Context
 
@@ -72,9 +74,18 @@ type WaterSystem {
   fftTestMode: Bool    # bake ONE known wave instead of JONSWAP (diagnostics)
   evolveUniform: List(Float)
   stageUniform: List(Int32)
+  performance: WaterPerf
+  fftAllocatedSize: Int
+  fftAllocatedCount: Int
+  fftSeaState: WaterBody
+  fftFrame: Int          # render-frame ordinal, independent of skipped updates
+  fftNeedsRefresh: Bool  # force every active map before sampling a new state
+  fftUpdateCounts: List(Int)
+  fftSampleTimes: List(Float)
+  fftLastUpdates: Int
 }
 
-func createWaterSystem(body: view WaterBody) pub ret WaterSystem {
+func createWaterSystem(body: view WaterBody) ret WaterSystem {
   # A unit grid (-0.5..0.5) the vertex shader scales to each body's extent, so
   # one mesh serves every body; its density is the first body's tier knob.
   var segments: Int = body.gridSegments
@@ -89,25 +100,34 @@ func createWaterSystem(body: view WaterBody) pub ret WaterSystem {
   }
   var bodies: List(WaterBody) = createList(WaterBody, cap: 4)
   bodies.add(value: body)
+  let updateCounts: List(Int) = { 0, 0, 0 }
+  let sampleTimes: List(Float) = { 0.0, 0.0, 0.0 }
   ret WaterSystem {
     bodies: own bodies, mesh: mesh, pipeMade: false, pipeReady: false,
     bindGen: 0 - 1, bindMade: false, time: 0.0, uniform: uniform, drawCount: 0,
     cascadesMade: false, fftGpuMade: false, fftBaked: false,
     fftUniform: createList(Float, cap: fftUniformFloats), fftRead: createList(Float, cap: 16),
     fftFrameMade: false, fftTestMode: false,
-    evolveUniform: createList(Float, cap: 8), stageUniform: createList(Int32, cap: 4)
+    evolveUniform: createList(Float, cap: 8), stageUniform: createList(Int32, cap: 4), performance: createWaterPerf(),
+    fftAllocatedSize: 0, fftAllocatedCount: 0, fftSeaState: body,
+    fftFrame: 0, fftNeedsRefresh: true, fftUpdateCounts: own updateCounts,
+    fftSampleTimes: own sampleTimes, fftLastUpdates: 0
   }
 }
 
 # Add another body (a pond on an island, an ocean beyond a lake). Same mesh,
 # same pipeline; drawn after the earlier bodies.
-func waterAddBody(waterSystem: mod WaterSystem, body: view WaterBody) pub {
+func waterAddBody(waterSystem: mod WaterSystem, body: view WaterBody) {
   waterSystem.bodies.add(value: body)
 }
 
 # The first body: it sizes the shared mesh and owns the FFT cascades.
 func primaryBody(waterSystem: view WaterSystem) ret WaterBody {
-  if let body: WaterBody = waterSystem.bodies.copyAt(index: 0) { ret body }
+  if let body: WaterBody = waterSystem.bodies.copyAt(index: 0) {
+    var normalized: WaterBody = body
+    normalizeWaterTier(body: normalized)
+    ret normalized
+  }
   ret createLakeToon(surfaceZ: 0.0, extent: 1.0)
 }
 
@@ -212,7 +232,7 @@ func ensureWaterBind(waterSystem: mod WaterSystem) {
   if waterSystem.bindMade and gen is waterSystem.bindGen { ret }
   # The cascade maps are allocated by waterFftStep at the waterFft tag; without
   # them the layout cannot be satisfied — draw nothing until they exist.
-  if waterGet(index: waterCascadeSlot(cascade: waterCascadeCount - 1, map: 1) + 1) is webgpuNull() { ret }
+  if waterGet(index: waterCascadeSlot(cascade: 0, map: 1) + 1) is webgpuNull() { ret }
   waterSystem.bindMade = true
   waterSystem.bindGen = gen
   let old: Ptr = waterGet(index: 2)
@@ -229,9 +249,14 @@ func ensureWaterBind(waterSystem: mod WaterSystem) {
   # The FFT cascades (#851): displacement+Jacobian and normal per cascade,
   # summed by the realistic path; the toon path binds them too (one layout)
   # but never samples them.
+  let primary: WaterBody = primaryBody(waterSystem: waterSystem)
   loop var cascade: Int = 0, cascade < waterCascadeCount, ++cascade {
-    entries.add(value: { binding: (5 + cascade * 2) as UInt32, textureView: waterGet(index: waterCascadeSlot(cascade: cascade, map: 0) + 1) })
-    entries.add(value: { binding: (6 + cascade * 2) as UInt32, textureView: waterGet(index: waterCascadeSlot(cascade: cascade, map: 1) + 1) })
+    # All six layout entries must be valid. Unused entries borrow cascade 0;
+    # the shader's active-count branch never samples those extra bindings.
+    var sourceCascade: Int = cascade
+    if sourceCascade >= primary.cascadeCount { sourceCascade = 0 }
+    entries.add(value: { binding: (5 + cascade * 2) as UInt32, textureView: waterGet(index: waterCascadeSlot(cascade: sourceCascade, map: 0) + 1) })
+    entries.add(value: { binding: (6 + cascade * 2) as UInt32, textureView: waterGet(index: waterCascadeSlot(cascade: sourceCascade, map: 1) + 1) })
   }
   entries.add(value: { binding: 11 as UInt32, sampler: waterGet(index: 4) })
   let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 12 as UInt64, entries: entries.data }
@@ -288,12 +313,13 @@ func uploadWaterUniform(waterSystem: mod WaterSystem, body: view WaterBody, came
   # mesh is snapped to whole metres so its vertices never swim under the camera.
   var realistic: Float = 0.0
   if body.style is WaterStyle.realistic { realistic = 1.0 }
-  put4(uniform: waterSystem.uniform, base: 64, x: body.cascadeTile0, y: body.cascadeTile1, z: body.cascadeTile2, w: realistic)
+  let fftBody: WaterBody = primaryBody(waterSystem: waterSystem)
+  put4(uniform: waterSystem.uniform, base: 64, x: fftBody.cascadeTile0, y: fftBody.cascadeTile1, z: fftBody.cascadeTile2, w: realistic)
   # The grid cell (m) lets the vertex shader fade Gerstner waves the grid
   # cannot sample (#857) — the same rule as Water.waveGridFactor.
   var gridCell: Float = 0.0
   if body.meshMode is 0 and body.gridSegments > 0 { gridCell = body.extent / body.gridSegments.toFloat() }
-  put4(uniform: waterSystem.uniform, base: 68, x: Math.floor(x: camera.position.x), y: Math.floor(x: camera.position.y), z: body.cascadeCount.toFloat(), w: gridCell)
+  put4(uniform: waterSystem.uniform, base: 68, x: Math.floor(x: camera.position.x), y: Math.floor(x: camera.position.y), z: fftBody.cascadeCount.toFloat(), w: gridCell)
   wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: waterGet(index: 1),
     bufferOffset: 0 as UInt64, data: waterSystem.uniform.data,
     size: (waterUniformFloats * 4) as UInt64)
@@ -352,9 +378,11 @@ func drawWaterBody(waterSystem: mod WaterSystem, body: view WaterBody, camera: v
 # Draw every body. Call at the transparentForward tag, BEFORE the renderer's
 # transparentPass. `deltaTime` steps the shared wave clock (visual only).
 func waterDraw(waterSystem: mod WaterSystem, camera: view Camera3d, light: view Light3d,
-               sky: view Sky, hasSky: view Bool, deltaTime: copy Float) pub {
-  if gbDeferredPrepare() is 0 { ret }
+               sky: view Sky, hasSky: view Bool, deltaTime: copy Float) {
   waterSystem.time = waterSystem.time + deltaTime
+  if gbDeferredPrepare() is 0 { ret }
+  let primary: WaterBody = primaryBody(waterSystem: waterSystem)
+  if primary.style is WaterStyle.realistic and waterSystem.fftNeedsRefresh { ret }
   ensureWaterPipeline(waterSystem: waterSystem)
   if not waterSystem.pipeReady { ret }
   ensureWaterBind(waterSystem: waterSystem)
