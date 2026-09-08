@@ -181,10 +181,11 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # drawn on every rendered frame under the deferred graph; the shot
           # proves a frame came out. Runs from the repo root (lib/*.wgsl).
           SCREENSHOT="$TMP_OUT/water-lake.bmp"
-          if (cd .. && RAE_WATER_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=1200 \
+          if (cd .. && RAE_WATER_TEST_FRAME=1 RAE_WATER_FFT_DIAG=1 RAE_SDL_HEADLESS_MS=1200 \
              RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
              perl -e 'alarm shift; exec @ARGV' 25 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && grep -qE '\[water example\] deterministic deferred frame rendered: hour [0-9.]+, 3 islands, [1-9][0-9]* water frames' "$TMP_OUT/render.log" \
+             && grep -q '\[water fft\] h0 ok' "$TMP_OUT/render.log" \
              && [ "$(grep -c "\[water\] toon lake" "$TMP_OUT/render.log")" -eq 1 ] \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
                 > "$TMP_OUT/screenshot.log" 2>&1; then
