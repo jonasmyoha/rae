@@ -163,7 +163,8 @@ $(BUILD_DIR)/monocypher.o: ../third_party/monocypher/monocypher.c
 
 test: build
 	@chmod +x $(TEST_RUNNER)
-	@$(TEST_RUNNER) $(TEST)
+	@if [ -z "$(TEST)" ] || [ "$(TEST)" = "webgpuReadback" ]; then bash tools/test-webgpu-readback.sh; fi
+	@if [ "$(TEST)" != "webgpuReadback" ]; then $(TEST_RUNNER) $(TEST); fi
 
 smoke: build
 	@chmod +x tools/smoke.sh
