@@ -1,0 +1,48 @@
+# river.rae — a stream through the meadow near the spawn (#833): a bezier
+# spline, its banks and surface sampled from the terrain heightfield, baked
+# ONCE into a ribbon mesh and added to the water system as a river body.
+# Siblings merge into one module, so terrainHeightAt resolves cross-file.
+import Vec3
+open Mesh3d
+open Gpu3d
+open Scene3d
+open water/Water
+open water/WaterSystem
+open water/River
+
+const riverWidth: Float = 4.0
+const riverSamples: Int = 48
+const riverAcross: Int = 4
+
+# The river rides 35 cm above the local ground so it has a visible channel; the
+# banks are the ground half a width to each side, so a bank higher than the
+# surface hides the edge behind terrain and a lower one gets tucked under.
+func addMeadowRiver(waterSystem: mod WaterSystem, groundZ: copy Float) {
+  let spline: RiverSpline = {
+    p0: Vec3.create(x: 0.0 - 48.0, y: 74.0, z: 0.0),
+    p1: Vec3.create(x: 0.0 - 22.0, y: 34.0, z: 0.0),
+    p2: Vec3.create(x: 14.0, y: 26.0, z: 0.0),
+    p3: Vec3.create(x: 38.0, y: 0.0 - 22.0, z: 0.0)
+  }
+  var heights: List(Float) = createList(Float, cap: riverSamples * 3)
+  loop var i: Int = 0, i < riverSamples, ++i {
+    let t: Float = i.toFloat() / (riverSamples - 1).toFloat()
+    let centre: Vec3 = bezierPoint(spline: spline, t: t)
+    let tangent: Vec3 = bezierTangent(spline: spline, t: t)
+    let sideX: Float = 0.0 - tangent.y
+    let sideY: Float = tangent.x
+    let half: Float = riverWidth * 0.5
+    let surface: Float = terrainHeightAt(x: centre.x, y: centre.y, groundZ: groundZ) + 0.35
+    heights.add(value: terrainHeightAt(x: centre.x - sideX * half, y: centre.y - sideY * half, groundZ: groundZ))
+    heights.add(value: surface)
+    heights.add(value: terrainHeightAt(x: centre.x + sideX * half, y: centre.y + sideY * half, groundZ: groundZ))
+  }
+  let ribbon: MeshData = bakeRiverMesh(spline: spline, width: riverWidth, samples: riverSamples,
+    across: riverAcross, heights: heights, bankMargin: 0.3)
+  let mesh: MeshHandle = uploadMesh(verts: ribbon.verts, vertCount: ribbon.vertCount, indices: ribbon.indices)
+  var river: WaterBody = createRiverToon(mesh: mesh, flowSpeed: 1.6)
+  # Saturated on purpose: over snow a pale teal disappears.
+  river.shallowColor = Vec3.create(x: 0.2, y: 0.55, z: 0.62)
+  river.deepColor = Vec3.create(x: 0.05, y: 0.25, z: 0.42)
+  waterAddBody(waterSystem: waterSystem, body: river)
+}

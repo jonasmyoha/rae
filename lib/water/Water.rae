@@ -60,6 +60,12 @@ type WaterBody {
   refraction: Int
   refractStrength: Float  # screen-space offset per unit of normal xy (~0.02)
   absorbColor: Vec3
+  # A body with its OWN baked mesh (#833 rivers): meshId is an uploaded mesh in
+  # WORLD space (0 = the shared unit grid scaled to centre/extent), whose uv is
+  # metres along / across the flow and whose normal packs (flow tangent, foam);
+  # flowSpeed advects the ripples downstream in m/s.
+  meshId: Int
+  flowSpeed: Float
   # Realistic tier (#831): the FFT ocean cascades. Data only until the compute
   # lands; the toon path ignores them.
   fftSize: Int          # 128 / 256 / 512 texels per cascade side
@@ -88,6 +94,7 @@ func createLakeToon(surfaceZ: copy Float, extent: copy Float) pub ret WaterBody 
     },
     gridSegments: 96, waveCount: 2,
     refraction: 0, refractStrength: 0.02, absorbColor: Vec3.create(x: 0.45, y: 0.16, z: 0.08),
+    meshId: 0, flowSpeed: 0.0,
     fftSize: 256, cascadeCount: 3, cascadeTile0: 250.0, cascadeTile1: 60.0, cascadeTile2: 8.0, updateRate: 1
   }
 }

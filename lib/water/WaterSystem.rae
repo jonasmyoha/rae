@@ -232,7 +232,9 @@ func uploadWaterUniform(waterSystem: mod WaterSystem, body: view WaterBody, came
   put4(uniform: waterSystem.uniform, base: 32, x: horizon.x, y: horizon.y, z: horizon.z, w: camera.farZ)
   putWave(uniform: waterSystem.uniform, base: 36, wave: body.waves.first)
   putWave(uniform: waterSystem.uniform, base: 44, wave: body.waves.second)
-  put4(uniform: waterSystem.uniform, base: 52, x: body.distortion, y: body.waveCount.toFloat(), z: 0.0, w: 0.0)
+  var riverMode: Float = 0.0
+  if body.meshId > 0 { riverMode = 1.0 }
+  put4(uniform: waterSystem.uniform, base: 52, x: body.distortion, y: body.waveCount.toFloat(), z: riverMode, w: body.flowSpeed)
   # Refraction: on/off, strength, and the lit target's size for screen uvs.
   let litTexture: Ptr = gbLitTexture()
   put4(uniform: waterSystem.uniform, base: 56, x: body.refraction.toFloat(), y: body.refractStrength,
@@ -250,7 +252,8 @@ func uploadWaterUniform(waterSystem: mod WaterSystem, body: view WaterBody, came
 func drawWaterBody(waterSystem: mod WaterSystem, body: view WaterBody, camera: view Camera3d,
                    light: view Light3d, sky: view Sky, hasSky: view Bool) {
   uploadWaterUniform(waterSystem: waterSystem, body: body, camera: camera, light: light, sky: sky, hasSky: hasSky)
-  let mesh: Int = waterSystem.mesh.id
+  var mesh: Int = waterSystem.mesh.id
+  if body.meshId > 0 { mesh = body.meshId }   # a baked river ribbon instead of the unit grid
   if gbMeshIcount(mesh: mesh) <= 0 { ret }
 
   let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
