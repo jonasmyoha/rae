@@ -1,0 +1,32 @@
+# Pure tier and scheduling policy; no GPU state or frame-time prediction.
+open water/Water
+
+func waterCascadeDue(frame: copy Int, cascade: copy Int, updateRate: copy Int, refreshAll: copy Bool) ret Bool {
+  if refreshAll or updateRate <= 1 { ret true }
+  ret frame % updateRate is cascade % updateRate
+}
+
+func normalizeWaterTier(body: mod WaterBody) {
+  if body.fftSize is not 128 and body.fftSize is not 256 and body.fftSize is not 512 { body.fftSize = 256 }
+  if body.cascadeCount < 1 { body.cascadeCount = 1 }
+  if body.cascadeCount > 3 { body.cascadeCount = 3 }
+  if body.updateRate < 1 { body.updateRate = 1 }
+}
+
+# Opt-in mobile FFT preset; the cheaper toon style remains available.
+func useMobileWaterTier(body: mod WaterBody) {
+  body.fftSize = 128
+  body.cascadeCount = 1
+  body.updateRate = 2
+  body.refraction = 0
+}
+
+# These settings affect the spectrum or already-cached displacement. Changes
+# require every active cascade to refresh at the same current wave time.
+func sameWaterSpectrum(previous: view WaterBody, current: view WaterBody) ret Bool {
+  ret previous.windSpeed is current.windSpeed and previous.windDirRad is current.windDirRad
+    and previous.fetch is current.fetch and previous.waterDepth is current.waterDepth
+    and previous.cascadeTile0 is current.cascadeTile0 and previous.cascadeTile1 is current.cascadeTile1
+    and previous.cascadeTile2 is current.cascadeTile2 and previous.choppiness is current.choppiness
+    and previous.style is current.style
+}

@@ -112,7 +112,7 @@ func init(timing: mod GpuTiming) pub ret Bool {
 func frameBegin(timing: mod GpuTiming) pub {
   if timing.enabled is false { ret }
   timing.count = 0
-  timing.names.length = 0
+  timing.names.clear()
 }
 
 # Claim a pass slot and point the shared timestampWrites at its two query indices.
@@ -151,36 +151,38 @@ func resolve(timing: view GpuTiming, enc: copy Ptr, idx: copy Int) pub {
 
 # Copy the frame's resolved timestamps to the readback buffer, read them (blocking
 # until GPU-complete), and emit per-pass GPU microseconds as profiler counters.
-func collect(timing: mod GpuTiming, profiler: mod Profiler) pub {
+func collect(timing: mod GpuTiming, profiler: mod Profiler) {
   if timing.enabled is false or timing.count is 0 { ret }
   let bytes: Int = timing.count * 16
   # Fresh MapRead staging buffer each frame + release after: this mirrors the
   # runtime's proven readback (rae_gpu_readback); reusing one buffer across
   # map/unmap cycles did not read back correctly on Metal.
-  let stDesc: WGPUBufferDescriptor = {
+  let stagingDescriptor: WGPUBufferDescriptor = {
     usage: WGPUBufferUsage_CopyDst + WGPUBufferUsage_MapRead, size: bytes as UInt64
   }
-  let staging: Ptr = wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: stDesc)
-  let encDesc: WGPUCommandEncoderDescriptor = { }
-  let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
-  wgpuCommandEncoderCopyBufferToBuffer(commandEncoder: enc, source: gtResolve(),
+  let staging: Ptr = wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: stagingDescriptor)
+  let encoderDescriptor: WGPUCommandEncoderDescriptor = { }
+  let commandEncoder: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encoderDescriptor)
+  wgpuCommandEncoderCopyBufferToBuffer(commandEncoder: commandEncoder, source: gtResolve(),
     sourceOffset: 0 as UInt64, destination: staging, destinationOffset: 0 as UInt64,
     size: bytes as UInt64)
-  let cbDesc: WGPUCommandBufferDescriptor = { }
-  let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
-  gtSubmit(cmd: cmd)
-  let ok: Int = webgpuMapRead(buffer: staging, size: bytes as UInt64, dst: timing.dst.data)
+  let commandDescriptor: WGPUCommandBufferDescriptor = { }
+  let commandBuffer: Ptr = wgpuCommandEncoderFinish(commandEncoder: commandEncoder, descriptor: commandDescriptor)
+  gtSubmit(cmd: commandBuffer)
+  wgpuCommandBufferRelease(commandBuffer: commandBuffer)
+  wgpuCommandEncoderRelease(commandEncoder: commandEncoder)
+  let mapped: Int = webgpuMapRead(buffer: staging, size: bytes as UInt64, dst: timing.dst.data)
   wgpuBufferRelease(buffer: staging)
-  if ok is 0 { ret }
   timing.totalUs = 0
+  if mapped is 0 { ret }
   var i: Int = 0
   loop i < timing.count {
     let begin: Int = rae_ext_rae_buf_get(V: Int, buf: timing.dst.data, index: i * 2)
     let endTick: Int = rae_ext_rae_buf_get(V: Int, buf: timing.dst.data, index: i * 2 + 1)
-    let us: Int = rae_float_to_int(f: (endTick - begin) as Float * timing.period / 1000.0)
-    let nm: String = rae_ext_rae_buf_get(V: String, buf: timing.names.data, index: i)
-    Profile.counter(profiler: profiler, name: "gpu.{nm}", value: us)
-    timing.totalUs = timing.totalUs + us
+    let microseconds: Int = rae_float_to_int(f: (endTick - begin) as Float * timing.period / 1000.0)
+    let name: String = rae_ext_rae_buf_get(V: String, buf: timing.names.data, index: i)
+    Profile.counter(profiler: profiler, name: "gpu.{name}", value: microseconds)
+    timing.totalUs = timing.totalUs + microseconds
     i = i + 1
   }
   Profile.counter(profiler: profiler, name: "gpu.total", value: timing.totalUs)
@@ -194,3 +196,21 @@ func lastTotalUs(timing: view GpuTiming) pub ret Int { ret timing.totalUs }
 # Submit one command buffer to the global queue. Reuses the existing C shim (Rae
 # cannot yet take the address of a single handle for wgpuQueueSubmit).
 func gtSubmit(cmd: Ptr) extern("rae_gb_submit")
+
+# Release capture resources before the owning app releases the WebGPU device.
+func shutdown(timing: mod GpuTiming) {
+  if not timing.inited { ret }
+  loop var slot: Int = 1, slot <= 2, ++slot {
+    let buffer: Ptr = gtGet(index: slot)
+    if not (buffer is webgpuNull()) { wgpuBufferRelease(buffer: buffer) gtSet(index: slot, ptr: webgpuNull()) }
+  }
+  let queries: Ptr = gtGet(index: 0)
+  if not (queries is webgpuNull()) { wgpuQuerySetRelease(querySet: queries) gtSet(index: 0, ptr: webgpuNull()) }
+  timing.enabled = false
+  timing.inited = false
+  timing.names.clear()
+  timing.tsw.clear()
+  timing.dst.clear()
+  timing.count = 0
+  timing.totalUs = 0
+}
