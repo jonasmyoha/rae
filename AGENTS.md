@@ -332,6 +332,19 @@ Do not introduce features that increase expressive power at the cost of clarity,
   - **Commit messages**: Use good, clear, and descriptive commit messages that explain *why* the change was made.
   - Suggest committing and/or pushing when there is meaningful work and a good state to push, but do not push unless explicitly told.
   - When asked to push, commit and push first, then continue with the next task without pushing at the end.
+  - **Pull with rebase and autostash before pushing.** Use `git pull --rebase --autostash`
+    to replay local commits on the upstream branch and preserve uncommitted edits.
+    Resolve rebase or stash-restoration conflicts before pushing; do not discard local
+    edits. Autostash preserves edits locally; it does not commit or publish them.
+    On each clone, configure the same defaults for plain `git pull`:
+
+    ```bash
+    git config --local pull.rebase true
+    git config --local rebase.autoStash true
+    ```
+
+    These settings live in `.git/config` and are not shared by a push. Keep this
+    instruction so agents and new clones apply the same workflow.
   - **Do not commit large temporary or log files**: Files exceeding 10,000 lines of text (e.g., debug logs, trace outputs) must not be committed to the repository. If such a file is generated, stop, re-evaluate its necessity, and consult with a human for approval before proceeding.
 
 If the task reveals a **design ambiguity**, stop and ask instead of guessing.
