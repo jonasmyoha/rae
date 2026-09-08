@@ -913,13 +913,21 @@ const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
     // function lowers to void*, not the phantom rae_Ptr. Mirrors sema resolving
     // Ptr to Buffer(void) and the param path.
     if (str_eq_cstr(base, "Ptr")) return "void*";
-    const char* m = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
-    if (strcmp(m, "RaeAny") == 0) return "RaeAny";
-    if (strcmp(m, "rae_Int64") == 0 || strcmp(m, "int64_t") == 0) return "int64_t";
-    if (strcmp(m, "rae_Bool") == 0) return "rae_Bool";
-    if (strcmp(m, "rae_String") == 0) return "rae_String";
-    if (is_ptr) { char* b = malloc(strlen(m) + 16); sprintf(b, "%s%s*", is_view ? "const " : "", m); return b; }
-    return m;
+    // Match emit_type_ref_as_c_type: C-boundary structs use the header's
+    // bare name in signatures and return temporaries, including after generic
+    // substitution. Keep view/mod pointer qualification below unchanged.
+    const AstDecl* typeDecl = find_type_decl(ctx, ctx->module, base);
+    bool isCStruct = typeDecl && typeDecl->kind == AST_DECL_TYPE
+        && has_property(typeDecl->as.type_decl.properties, "c_struct");
+    const char* typeName = (isCStruct || is_raylib_builtin_type(base))
+        ? str_to_cstr(base)
+        : rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
+    if (strcmp(typeName, "RaeAny") == 0) return "RaeAny";
+    if (strcmp(typeName, "rae_Int64") == 0 || strcmp(typeName, "int64_t") == 0) return "int64_t";
+    if (strcmp(typeName, "rae_Bool") == 0) return "rae_Bool";
+    if (strcmp(typeName, "rae_String") == 0) return "rae_String";
+    if (is_ptr) { char* pointerType = malloc(strlen(typeName) + 16); sprintf(pointerType, "%s%s*", is_view ? "const " : "", typeName); return pointerType; }
+    return typeName;
   }
   return func_has_return_value(func) ? "int64_t" : "void";
 }
