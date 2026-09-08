@@ -4,7 +4,14 @@ Status: staged implementation (September 2026). The copy-only
 `transparentForward` graph node and `litCopy` target are implemented (#842),
 and the pass now DRAWS: alpha-blended instanced geometry into the lit HDR
 target against a read-only scene depth (#843, `lib/TransparentForward.rae` +
-`lib/transparentForward.wgsl`). Water itself is not implemented yet (#830).
+`lib/transparentForward.wgsl`). The stylised toon water package `lib/water/` is implemented (#830): `Water.rae`
+(`WaterBody`, `WaterWaves`), `WaterSystem.rae` (resource: pipeline/uniform/bind in the
+grass-style C handle slots, one draw of a unit grid through the transparent pass)
+and `waterSurface.wgsl` (Gerstner vertex waves; Roystan toon fragment: depth-gradient
+colour from the G-buffer depth, posterised noise ripples + shoreline foam, Fresnel sky
+tint from the stylised hemisphere, stepped sun highlight). Landed as the lake at the
+biome water plane in example 114. Realistic FFT water (#831) and shading/refraction
+(#832) extend it.
 The survey below describes the original pre-water baseline.
 
 ### Implemented prerequisite: opaque radiance snapshot
@@ -248,6 +255,7 @@ of shrinking in the G-buffer — the #829 validation. `examples/117_transparent_
 cubes 0.1 -> 0.9 and one half-sunk into the ground, gated in run_examples
 (log line + non-blank); the blend itself remains a human check on hardware.
 
+**Phase 1 — stylized toon water: DONE (#830, see status above).** Original plan:
 **Phase 1 — stylized toon water (mobile-first). Do this first; it is the
 biggest visible win for the least code.** Port the Roystan recipe to WGSL:
 one grid mesh, depth-gradient colour, depth-based shoreline foam, posterised
