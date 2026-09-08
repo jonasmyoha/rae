@@ -34,7 +34,7 @@ struct Water {
   wave0b: vec4<f32>,        // steepness, speed
   wave1: vec4<f32>,
   wave1b: vec4<f32>,
-  tuning: vec4<f32>,        // x = distortion, y = waveCount (1 or 2)
+  tuning: vec4<f32>,        // x = distortion, y = waveCount (0..2), z = river mode, w = flow speed (m/s)
   refract: vec4<f32>,       // x = refraction on (1) / off (0), y = strength, zw = lit target size
   absorb: vec4<f32>,        // rgb = Beer-Lambert absorption per metre
 };
@@ -55,6 +55,7 @@ struct VsOut {
   @location(2) rippleUv: vec2<f32>,
   @location(3) distortUvA: vec2<f32>,
   @location(4) distortUvB: vec2<f32>,
+  @location(5) bakedFoam: f32,   // river: curvature foam baked into the mesh (#833)
 };
 
 const TAU: f32 = 6.28318530718;
@@ -78,17 +79,31 @@ fn gerstner(w: vec4<f32>, wb: vec4<f32>, xy: vec2<f32>, t: f32,
 fn vs(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec2<f32>) -> VsOut {
   var o: VsOut;
   let extent = W.centreExtent.w;
-  let base = vec3<f32>(W.centreExtent.x + p.x * extent, W.centreExtent.y + p.y * extent, W.centreExtent.z);
+  let river = W.tuning.z > 0.5;
+  // A lake is the unit grid scaled to the body; a river is its own baked
+  // world-space ribbon (#833) whose uv is metres along / across the flow.
+  var base = vec3<f32>(W.centreExtent.x + p.x * extent, W.centreExtent.y + p.y * extent, W.centreExtent.z);
+  if (river) { base = p; }
   let t = W.camera.w;
   var disp = vec3<f32>(0.0, 0.0, 0.0);
   var dn = vec3<f32>(0.0, 0.0, 0.0);
-  gerstner(W.wave0, W.wave0b, base.xy, t, &disp, &dn);
-  if (W.tuning.y > 1.5) { gerstner(W.wave1, W.wave1b, base.xy, t, &disp, &dn); }
+  if (!river && W.tuning.y > 0.5) { gerstner(W.wave0, W.wave0b, base.xy, t, &disp, &dn); }
+  if (!river && W.tuning.y > 1.5) { gerstner(W.wave1, W.wave1b, base.xy, t, &disp, &dn); }
   let world = base + disp;
   o.world = world;
-  o.rippleUv = base.xy * W.foam.y + vec2<f32>(t * W.foam.z, t * W.foam.z * 0.7);
-  o.distortUvA = base.xy * 0.08 + vec2<f32>(t * 0.05, -t * 0.03);
-  o.distortUvB = base.xy * 0.08 + vec2<f32>(-t * 0.04, t * 0.06);
+  // Noise coordinates: a lake pans in world space; a river ADVECTS along its
+  // own u (arc length) at the flow speed — the spline parameter is the flow
+  // map, so there is no texture and no phase reset to hide.
+  var noiseXy = base.xy;
+  var pan = vec2<f32>(t * W.foam.z, t * W.foam.z * 0.7);
+  if (river) {
+    noiseXy = vec2<f32>(uv.x - t * W.tuning.w, uv.y);
+    pan = vec2<f32>(0.0, 0.0);
+  }
+  o.rippleUv = noiseXy * W.foam.y + pan;
+  o.distortUvA = noiseXy * 0.08 + vec2<f32>(t * 0.05, -t * 0.03);
+  o.distortUvB = noiseXy * 0.08 + vec2<f32>(-t * 0.04, t * 0.06);
+  o.bakedFoam = select(0.0, n.z, river);
   o.nrm = normalize(vec3<f32>(-dn.x, -dn.y, 1.0 - dn.z));
   var clip = F.viewProj * vec4<f32>(world, 1.0);
   // Jitter LAST, matching the G-buffer pass (#397), so the surface sits in the
@@ -129,7 +144,9 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   let ripple = raeNoiseValue2(i.rippleUv + distortion * W.foam.y, 7u);
   let foamT = clamp(waterDepth / max(W.foam.x, 0.01), 0.0, 1.0);
   let cutoff = foamT * W.foam.w;
-  let foam = smoothstep(cutoff - 0.03, cutoff + 0.03, ripple);
+  var foam = smoothstep(cutoff - 0.03, cutoff + 0.03, ripple);
+  // River rapids: the baked curvature foam, streaked by the same noise.
+  foam = max(foam, i.bakedFoam * smoothstep(0.35, 0.75, ripple));
   colour = mix(colour, vec3<f32>(0.96, 0.98, 1.0), foam * 0.85);
   alpha = max(alpha, foam * 0.9);
 
