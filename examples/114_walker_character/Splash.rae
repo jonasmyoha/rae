@@ -12,6 +12,7 @@
 # so App / terrainWaterDepth resolve cross-file.
 import Vec3
 import Math
+open water/Water
 open WorldBiome
 open Particles
 open ecs/Entity
@@ -21,6 +22,19 @@ open app3d/CharacterController
 const splashMinDepth: Float = 0.03    # world units of water under a unit before it splashes
 const splashPerBurst: Int = 3         # droplets per splash
 const splashCrowdStride: Int = 3      # a crowd member splashes every Nth frame it wades
+
+# The sea around the meadow (#830): 700 m on a 256 grid, so its 2.7 m cells
+# can still carry the 6 m shore wave (Water.waveGridFactor fades the rest, #857).
+func walkerLake(groundZ: copy Float) ret WaterBody {
+  var lake: WaterBody = createLakeToon(surfaceZ: lakeSurfaceZ(groundZ: groundZ), extent: 700.0)
+  lake.gridSegments = 256
+  # A slow swell the grid can carry: 12 m and 7 m, not the lake default's 6/3.2.
+  lake.waves.first.wavelength = 12.0
+  lake.waves.first.speed = 2.0
+  lake.waves.second.wavelength = 7.0
+  lake.waves.second.speed = 1.5
+  ret lake
+}
 
 # Where the lake surface sits in WORLD space (#830): the biome's flat water plane
 # over the walker's groundZ — the same plane the splashes spray up from. Lives

@@ -523,6 +523,22 @@ loadRaeSyntax("/rae_syntax.json")
     loadExamples();
   });
 
+// A new example on disk showed up in /api/examples but not in an already-open
+// page, because the list was fetched once at load. Re-fetch when the page
+// comes back into view or the window regains focus (throttled): loadExamples
+// re-renders idempotently and only picks a default selection when there is
+// none, so a refresh never yanks the user's selection.
+let lastExamplesRefresh = Date.now();
+function refreshExamplesIfStale() {
+  if (Date.now() - lastExamplesRefresh < 10000) return;
+  lastExamplesRefresh = Date.now();
+  loadExamples();
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") refreshExamplesIfStale();
+});
+window.addEventListener("focus", refreshExamplesIfStale);
+
 errorIndicator?.addEventListener("click", () => toggleErrorModal(true));
 errorLogClose?.addEventListener("click", () => toggleErrorModal(false));
 errorLogBackdrop?.addEventListener("click", () => toggleErrorModal(false));

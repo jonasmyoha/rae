@@ -94,12 +94,12 @@ func createLakeToon(surfaceZ: copy Float, extent: copy Float) pub ret WaterBody 
   ret WaterBody {
     kind: WaterKind.lake, style: WaterStyle.toon,
     centre: Vec3.create(x: 0.0, y: 0.0, z: surfaceZ), extent: extent,
-    shallowColor: Vec3.create(x: 0.32, y: 0.78, z: 0.82),
-    deepColor: Vec3.create(x: 0.05, y: 0.22, z: 0.48),
-    depthMax: 6.0, absorb: 0.92,
-    foamDistance: 0.9,
-    rippleScale: 0.35, rippleSpeed: 0.35, rippleCutoff: 0.78, distortion: 0.9,
-    highlightStep: 0.55, highlightPower: 48.0,
+    shallowColor: Vec3.create(x: 0.2, y: 0.72, z: 0.75),
+    deepColor: Vec3.create(x: 0.02, y: 0.18, z: 0.45),
+    depthMax: 4.0, absorb: 0.96,
+    foamDistance: 1.6,
+    rippleScale: 0.5, rippleSpeed: 0.25, rippleCutoff: 0.9, distortion: 0.7,
+    highlightStep: 0.7, highlightPower: 64.0,
     waves: {
       first:  { dirX: 1.0, dirY: 0.35, amplitude: 0.08, wavelength: 6.0, steepness: 0.35, speed: 1.4 },
       second: { dirX: 0.0 - 0.4, dirY: 1.0, amplitude: 0.05, wavelength: 3.2, steepness: 0.3, speed: 1.0 }
@@ -133,10 +133,30 @@ func gerstnerDisplacement(wave: view GerstnerWave, px: view Float, py: view Floa
     z: wave.amplitude * Math.sin(x: f))
 }
 
+# A wave shorter than ~2 grid cells cannot be sampled by the vertex grid: it
+# aliases into wide slow bands across the whole body (#857). Both the shader
+# and this mirror fade such a wave out — full above 4 cells, gone under 2 —
+# so a big lake on a coarse grid goes calm instead of striped. The cell is the
+# body's own extent / gridSegments (the lake grid tier knob, #847).
+func waveGridFactor(body: view WaterBody, wavelength: view Float) pub ret Float {
+  if body.meshMode is not 0 or body.gridSegments < 1 { ret 1.0 }
+  let cell: Float = body.extent / body.gridSegments.toFloat()
+  if cell <= 0.0 { ret 1.0 }
+  let ratio: Float = wavelength / cell
+  if ratio <= 2.0 { ret 0.0 }
+  if ratio >= 4.0 { ret 1.0 }
+  let x: Float = (ratio - 2.0) / 2.0
+  ret x * x * (3.0 - 2.0 * x)
+}
+
 func wavesDisplacement(body: view WaterBody, px: view Float, py: view Float, t: view Float) ret Vec3 {
-  var total: Vec3 = gerstnerDisplacement(wave: body.waves.first, px: px, py: py, t: t)
+  var first: GerstnerWave = body.waves.first
+  first.amplitude = first.amplitude * waveGridFactor(body: body, wavelength: first.wavelength)
+  var total: Vec3 = gerstnerDisplacement(wave: first, px: px, py: py, t: t)
   if body.waveCount > 1 {
-    total = Vec3.vadd(a: total, b: gerstnerDisplacement(wave: body.waves.second, px: px, py: py, t: t))
+    var second: GerstnerWave = body.waves.second
+    second.amplitude = second.amplitude * waveGridFactor(body: body, wavelength: second.wavelength)
+    total = Vec3.vadd(a: total, b: gerstnerDisplacement(wave: second, px: px, py: py, t: t))
   }
   ret total
 }
