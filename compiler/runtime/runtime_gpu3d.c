@@ -1148,6 +1148,11 @@ static void rae_g3d_present_offscreen(void) {
      * on. The screenshot above has already captured the frame, which is the
      * whole point of running headless, so returning here loses nothing. */
     if (!g_g2d_surface) { rae_wgpu_poll(0); return; }
+    if (!rae_g2d_window_visible()) {
+        rae_present_note_skip("gpu3d", "window-not-visible");
+        rae_wgpu_poll(0);
+        return;
+    }
 
     /* Present best-effort: copy the resolved offscreen image into the
      * surface drawable (same policy as the 2D endFrame). */
@@ -1173,7 +1178,7 @@ static void rae_g3d_present_offscreen(void) {
         rae_present_note_ok();
     }
     /* No usable drawable — the black-screen case. Release the drawable first,
-     * then log + reconfigure so the next frame can present (rae_present_recover). */
+     * then apply status-specific recovery (occlusion does not reconfigure). */
     if (st.texture) wgpuTextureRelease(st.texture);
     if (!presented) rae_present_recover("gpu3d", st.status);
     /* Blocking poll on a presented frame retires the surface-present
