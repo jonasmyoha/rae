@@ -147,8 +147,10 @@ func createRiverToon(mesh: view MeshHandle, flowSpeed: copy Float) pub ret Water
   body.depthMax = 0.6
   body.foamDistance = 0.25
   body.absorb = 0.95
-  body.rippleScale = 0.9
-  body.rippleCutoff = 0.8
+  # Metre-scale streaks (#857): the ribbon's uv is metres, and a 4 m stream
+  # wants crest lines narrower than itself, sparse.
+  body.rippleScale = 2.0
+  body.rippleCutoff = 0.92
   body.distortion = 0.5
   ret body
 }

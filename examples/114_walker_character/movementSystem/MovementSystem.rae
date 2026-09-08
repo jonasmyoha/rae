@@ -12,9 +12,8 @@ open app3d/CharacterController
 import inputSystem/InputSystem
 import terrainSystem/TerrainSystem
 
-# Is this spot walkable ground? NOT a height test: terrainHeightAt clamps the sea
-# flat, which also makes it perfectly walkable, so a character standing on the
-# water looks like it because geometrically it is. Only the biome can tell.
+# Is this spot walkable ground? NOT a height test: the seabed is ordinary ground
+# to terrainHeightAt (#857), so only the biome can tell land from sea.
 func terrainIsLand(x: view Float, y: view Float) ret Bool {
   ret worldIsLand(x: x, y: y, cfg: defaultBiomeConfig())
 }
