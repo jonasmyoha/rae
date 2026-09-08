@@ -28,6 +28,7 @@ open TransparentForward
 open app3d/CameraRig
 open water/Water
 open water/WaterSystem
+open water/WaterFft
 open ecs/Entity
 
 const lakeExtent: Float = 400.0
@@ -171,7 +172,10 @@ func main() ret Int {
         if tag is RenderTag.waterFft {
           waterFftStep(waterSystem: waterSystem)
           # #849: read the baked spectrum back once and check it (blocking; test only).
-          if fftDiag and waterFrames is 2 { let ok: Bool = waterFftDiagnose(waterSystem: waterSystem) }
+          if fftDiag and waterFrames is 2 {
+            let ok: Bool = waterFftDiagnose(waterSystem: waterSystem)
+            let ifftOk: Bool = waterFftDiagnoseIfft(waterSystem: waterSystem)
+          }
         }
         if tag is RenderTag.transparentForward {
           # Snapshot the opaque frame, the lake refracts it, then the transparent pass.
