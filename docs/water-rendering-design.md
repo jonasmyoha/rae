@@ -1,6 +1,8 @@
 # Water rendering for Rae — survey and design
 
-Status: staged implementation (September 2026). The copy-only
+Status: staged implementation (September 2026). FFT tiers and deterministic
+cascade scheduling are implemented; see [water performance](water-performance.md)
+for the agreed updateRate cadence, mobile N=2 preset, lifecycle checks and GPU measurements. The copy-only
 `transparentForward` graph node and `litCopy` target are implemented (#842),
 and the pass now DRAWS: alpha-blended instanced geometry into the lit HDR
 target against a read-only scene depth (#843, `lib/TransparentForward.rae` +
@@ -64,7 +66,8 @@ fixed-size cascade resources are declared in the graph (derived `waterFft ->
 transparentForward`), `WaterBody` carries the tier (`fftSize`, `cascadeCount`,
 `cascadeTile0..2`, `updateRate`) and `waterFftStep` allocates the cascade maps
 (rgba16float storage+sampled) in the C handle slots; spectrum, evolution, the
-Stockham iFFT and the surface sampling are the remaining slices.
+Stockham iFFT and surface sampling are implemented, as are the quality tiers
+and cadence. Shared gameplay readback and spray remain follow-ups.
 The survey below describes the original pre-water baseline.
 
 ### Implemented prerequisite: opaque radiance snapshot

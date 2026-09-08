@@ -178,8 +178,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           fi
         elif [ "$EXAMPLE_NAME" = "119_ocean_fft" ]; then
           # The realistic water tier on its own (#851): the log line proves the
-          # FFT baked and the ocean drew every rendered frame; the shot proves a
-          # frame came out. Whether the waves look right is a human check.
+          # FFT baked and the ocean drew. Then cycle all size/count combinations
+          # on hardware, checking exact cadence, wave times and FFT readbacks.
+          # Whether the waves look right remains a visual check.
           SCREENSHOT="$TMP_OUT/ocean.bmp"
           if (cd .. && RAE_OCEAN_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=1500 \
              RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
@@ -188,12 +189,16 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && grep -q '\[water fft\] spectrum baked' "$TMP_OUT/render.log" \
              && grep -qF '[water comparison] 1 brown island, 3 boxes' "$TMP_OUT/render.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
-                > "$TMP_OUT/screenshot.log" 2>&1; then
-            echo "PASS: $EXAMPLE_NAME (FFT ocean on the camera-centred grid, deferred)"
+                > "$TMP_OUT/screenshot.log" 2>&1 \
+             && (cd .. && RAE_WATER_TIER_CHECK=1 RAE_OCEAN_TEST_FRAME=1 RAE_SDL_HEADLESS_MS=15000 \
+                 perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/tiers.log" 2>&1 \
+             && grep -qF '[water tiers] 14 stages ok' "$TMP_OUT/tiers.log" \
+             && [ "$(grep -c '\[water fft\] ifft ok' "$TMP_OUT/tiers.log")" -eq 14 ]; then
+            echo "PASS: $EXAMPLE_NAME (FFT ocean screenshot + 9 tiers, cadence, invalidation, shutdown)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ocean render gate)"
-            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
+            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" "$TMP_OUT/tiers.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
         elif [ "$EXAMPLE_NAME" = "118_water_lake" ]; then

@@ -1,0 +1,60 @@
+# Explicit capture-only FFT timing. Normal frames never map or wait for the GPU.
+import GpuTiming
+import Profile
+open webgpu/Webgpu
+open webgpu/Context
+
+type WaterPerf {
+  enabled: Bool
+  timing: GpuTiming
+  profiler: Profiler
+  samples: Int
+}
+
+func createWaterPerf() ret WaterPerf {
+  ret WaterPerf {
+    enabled: false, timing: GpuTiming.createGpuTiming(),
+    profiler: Profile.createProfiler(), samples: 0
+  }
+}
+
+func beginWaterPerf(performance: mod WaterPerf) ret Int {
+  if not performance.enabled { ret -1 }
+  let available: Bool = GpuTiming.init(timing: performance.timing)
+  if not available {
+    if performance.samples is 0 { log("[water perf] GPU timestamps unavailable; configured cadence unchanged") }
+    performance.samples = performance.samples + 1
+    ret -1
+  }
+  GpuTiming.frameBegin(timing: performance.timing)
+  ret GpuTiming.passBegin(timing: performance.timing, name: "waterFft")
+}
+
+func waterPerfWrites(performance: view WaterPerf) ret Ptr {
+  if not performance.enabled { ret webgpuNull() }
+  ret GpuTiming.writesPtr(timing: performance.timing)
+}
+
+func resolveWaterPerf(performance: view WaterPerf, commandEncoder: copy Ptr, index: copy Int) {
+  if not performance.enabled { ret }
+  GpuTiming.resolve(timing: performance.timing, enc: commandEncoder, idx: index)
+}
+
+func collectWaterPerf(performance: mod WaterPerf) {
+  if not performance.enabled or not performance.timing.enabled { ret }
+  GpuTiming.collect(timing: performance.timing, profiler: performance.profiler)
+  let microseconds: Int = GpuTiming.lastTotalUs(timing: performance.timing)
+  log("[water perf] sample {performance.samples}: fft GPU {microseconds} us")
+  performance.samples = performance.samples + 1
+}
+
+func releaseWaterPerf(performance: mod WaterPerf) {
+  GpuTiming.shutdown(timing: performance.timing)
+}
+
+# Empty schedule slots cost no dispatch or readback and count as zero GPU work.
+func idleWaterPerf(performance: mod WaterPerf) {
+  if not performance.enabled { ret }
+  log("[water perf] sample {performance.samples}: fft GPU 0 us (idle)")
+  performance.samples = performance.samples + 1
+}
