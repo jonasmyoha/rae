@@ -290,16 +290,26 @@ const worldTerrainAmplitude: Float = 3.2
 # THE ground height at a world position — the surface the mesh is built from,
 # props stand on, grass is scattered over and characters walk across.
 #
-# Water is one height: elevation below the water level is clamped to exactly the
-# water level, so every submerged point lands on the same plane and the sea is
-# flat by construction, with no separate water mesh. The bumps in the field
-# decide where water IS; they never decide how high it sits.
+# Below the water level the field keeps going DOWN as the seabed (#857): the
+# water surface is its own mesh now (lib/water, drawn at worldWaterZ), so the
+# ground under it slopes from the shore to at most seabedMaxDepth below the
+# plane. That depth is what the surface shader's shallow -> deep colour and its
+# shoreline foam read. (Before lib/water the sea was this terrain clamped flat
+# to the water plane and painted blue; the two then fought for the same plane.)
+# The bumps in the field decide where water IS; worldWaterZ decides how high it
+# sits. MUST match raeTerrainHeight in world_biome.wgsl.
 func worldTerrainHeight(x: view Float, y: view Float, groundZ: view Float,
                         cfg: view BiomeConfig) pub ret Float {
   var e: Float = worldElevation(x: x, y: y, cfg: cfg)
-  if e < cfg.waterLevel { e = cfg.waterLevel }
+  if e < cfg.waterLevel - seabedMaxDepth { e = cfg.waterLevel - seabedMaxDepth }
   ret groundZ + e * worldTerrainAmplitude
 }
+
+# How far below the water level the seabed may drop, in elevation units:
+# 1.25 * worldTerrainAmplitude (3.2) = 4 m, the lake body's depthMax, so the
+# open sea reaches the full deep colour without a cliff at the island rim.
+# MUST match RAE_BIOME_SEABED_DEPTH in world_biome.wgsl.
+const seabedMaxDepth: Float = 1.25
 
 # The flat water surface in world Z. Anything at this height is sea.
 func worldWaterZ(groundZ: view Float, cfg: view BiomeConfig) pub ret Float {
@@ -313,9 +323,8 @@ const worldWalkMaxWater: Float = 0.55
 
 # Can something stand here?
 #
-# NOT a height test. worldTerrainHeight clamps the sea flat, which also makes it
-# perfectly walkable — a character standing on the water looks like it because
-# geometrically it is. Only the biome can tell land from sea.
+# NOT a height test: the seabed is ordinary ground to the height field, so a
+# character could stand on it under water. Only the biome can tell land from sea.
 func worldIsLand(x: view Float, y: view Float, cfg: view BiomeConfig) pub ret Bool {
   ret sampleWorld(x: x, y: y, cfg: cfg).wWater <= worldWalkMaxWater
 }
