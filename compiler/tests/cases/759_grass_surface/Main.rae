@@ -1,0 +1,11 @@
+import GrassCompute
+func main() ret Int {
+  let custom: String = GrassCompute.wgsl(surfaceShader: "customSurfaceMarker")
+  log(custom.startsWith(prefix: "customSurfaceMarker"))
+  log(not custom.contains(sub: "RAE_BIOME_ISLAND_RADIUS"))
+  let standard: String = GrassCompute.wgsl(surfaceShader: "")
+  log(standard.contains(sub: "RAE_BIOME_ISLAND_RADIUS"))
+  let grassCompute: GrassCompute = GrassCompute.createGrassCompute()
+  log(grassCompute.surfaceShader.length() is 0)
+  ret 0
+}
