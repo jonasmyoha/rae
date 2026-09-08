@@ -1,0 +1,141 @@
+// waterSurface.wgsl — the stylised (toon) water surface (#830), the Roystan
+// recipe over a Gerstner grid. Composed AFTER lib/noise.wgsl (raeNoiseValue2).
+//
+// Vertex: a unit grid scaled to the body's extent, displaced by 1-2 Gerstner
+// waves that also give the normal; TAA jitter applied last like the G-buffer.
+// Fragment (all toon, no refraction on this tier):
+//   * water depth under the pixel = linear(sceneDepth) - linear(surfaceDepth),
+//     from the G-buffer depth bound as a texture (the same texture is the
+//     pass's read-only depth attachment);
+//   * depth-gradient colour shallow -> deep, alpha rising with depth;
+//   * shoreline foam + toon ripples: value noise panned in world space, warped
+//     by a second octave, POSTERISED by a cutoff that goes to zero at the shore
+//     (so the bank is all foam) and to `rippleCutoff` in deep water (sparse
+//     ripple flecks);
+//   * sky tint through a Fresnel term: the stylised sky's own hemisphere
+//     (horizon -> zenith by reflect(v, n).z — what Sky.radiance does on the CPU);
+//   * a STEPPED sun highlight (Blinn-Phong thresholded, not smooth).
+struct Frame {
+  viewProj: mat4x4<f32>,
+  prevViewProj: mat4x4<f32>,
+  jitter: vec4<f32>,
+};
+struct Water {
+  centreExtent: vec4<f32>,  // xyz = still-surface centre, w = extent
+  shallow: vec4<f32>,       // rgb = shallow colour, w = depthMax
+  deep: vec4<f32>,          // rgb = deep colour, w = absorb
+  foam: vec4<f32>,          // x = foamDistance, y = rippleScale, z = rippleSpeed, w = rippleCutoff
+  camera: vec4<f32>,        // xyz = camera position, w = time
+  sun: vec4<f32>,           // xyz = sun direction (FROM the sun), w = highlightStep
+  sunColor: vec4<f32>,      // rgb, w = highlightPower
+  zenith: vec4<f32>,        // rgb, w = nearZ
+  horizon: vec4<f32>,       // rgb, w = farZ
+  wave0: vec4<f32>,         // dir.xy (unit), amplitude, wavelength
+  wave0b: vec4<f32>,        // steepness, speed
+  wave1: vec4<f32>,
+  wave1b: vec4<f32>,
+  tuning: vec4<f32>,        // x = distortion
+};
+@group(0) @binding(0) var<uniform> F: Frame;
+@group(0) @binding(1) var<uniform> W: Water;
+@group(0) @binding(2) var depthTex: texture_depth_2d;
+
+struct VsOut {
+  @builtin(position) pos: vec4<f32>,
+  @location(0) world: vec3<f32>,
+  @location(1) nrm: vec3<f32>,
+};
+
+const TAU: f32 = 6.28318530718;
+
+// One Gerstner wave: accumulates displacement + the normal's partial sums.
+fn gerstner(w: vec4<f32>, wb: vec4<f32>, xy: vec2<f32>, t: f32,
+            disp: ptr<function, vec3<f32>>, dNormal: ptr<function, vec3<f32>>) {
+  let d = w.xy;
+  let amplitude = w.z;
+  let k = TAU / max(w.w, 0.01);
+  let steepness = wb.x;
+  let f = k * (dot(d, xy) - wb.y * t);
+  let c = cos(f);
+  let s = sin(f);
+  (*disp) += vec3<f32>(steepness * amplitude * d.x * c, steepness * amplitude * d.y * c, amplitude * s);
+  // GPU Gems 1 ch.1: n = (-sum d.x k A cos, -sum d.y k A cos, 1 - sum Q k A sin)
+  (*dNormal) += vec3<f32>(d.x * k * amplitude * c, d.y * k * amplitude * c, steepness * k * amplitude * s);
+}
+
+@vertex
+fn vs(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec2<f32>) -> VsOut {
+  var o: VsOut;
+  let extent = W.centreExtent.w;
+  let base = vec3<f32>(W.centreExtent.x + p.x * extent, W.centreExtent.y + p.y * extent, W.centreExtent.z);
+  let t = W.camera.w;
+  var disp = vec3<f32>(0.0, 0.0, 0.0);
+  var dn = vec3<f32>(0.0, 0.0, 0.0);
+  gerstner(W.wave0, W.wave0b, base.xy, t, &disp, &dn);
+  gerstner(W.wave1, W.wave1b, base.xy, t, &disp, &dn);
+  let world = base + disp;
+  o.world = world;
+  o.nrm = normalize(vec3<f32>(-dn.x, -dn.y, 1.0 - dn.z));
+  var clip = F.viewProj * vec4<f32>(world, 1.0);
+  // Jitter LAST, matching the G-buffer pass (#397), so the surface sits in the
+  // same sub-pixel frame as the depth it tests and TAA does not smear it.
+  clip = vec4<f32>(clip.xy + F.jitter.xy * clip.w, clip.zw);
+  o.pos = clip;
+  return o;
+}
+
+// Reverse-Z perspective (Math3d.mat4PerspectiveReverseZ): ndc 1 at near, 0 at far.
+fn linearDepth(ndc: f32) -> f32 {
+  let near = W.zenith.w;
+  let far = W.horizon.w;
+  return near * far / (ndc * (far - near) + near);
+}
+
+@fragment
+fn fs(i: VsOut) -> @location(0) vec4<f32> {
+  let px = vec2<i32>(i32(i.pos.x), i32(i.pos.y));
+  let sceneNdc = textureLoad(depthTex, px, 0);
+  let sceneLinear = linearDepth(sceneNdc);
+  let surfaceLinear = linearDepth(i.pos.z);
+  let waterDepth = max(sceneLinear - surfaceLinear, 0.0);
+
+  // Depth-gradient body colour.
+  let depthT = clamp(waterDepth / max(W.shallow.w, 0.01), 0.0, 1.0);
+  var colour = mix(W.shallow.rgb, W.deep.rgb, depthT);
+  var alpha = mix(0.45, 0.95, depthT) * W.deep.w;
+
+  // Toon ripples + shoreline foam: world-space value noise, panned, warped by a
+  // second octave, then posterised by a depth-driven cutoff.
+  let t = W.camera.w;
+  let uvW = i.world.xy;
+  let distortion = vec2<f32>(
+    raeNoiseValue2(uvW * 0.08 + vec2<f32>(t * 0.05, -t * 0.03), 11u) - 0.5,
+    raeNoiseValue2(uvW * 0.08 + vec2<f32>(-t * 0.04, t * 0.06), 23u) - 0.5) * W.tuning.x;
+  let rippleUv = (uvW + distortion) * W.foam.y + vec2<f32>(t * W.foam.z, t * W.foam.z * 0.7);
+  let ripple = raeNoiseValue2(rippleUv, 7u);
+  let foamT = clamp(waterDepth / max(W.foam.x, 0.01), 0.0, 1.0);
+  let cutoff = foamT * W.foam.w;
+  let foam = smoothstep(cutoff - 0.03, cutoff + 0.03, ripple);
+  colour = mix(colour, vec3<f32>(0.96, 0.98, 1.0), foam * 0.85);
+  alpha = max(alpha, foam * 0.9);
+
+  // Sky tint through Fresnel: the stylised sky hemisphere along the reflection.
+  let n = normalize(i.nrm);
+  let toCamera = normalize(W.camera.xyz - i.world);
+  let r = reflect(-toCamera, n);
+  let skyTint = mix(W.horizon.rgb, W.zenith.rgb, clamp(r.z, 0.0, 1.0));
+  let fresnel = pow(1.0 - clamp(dot(n, toCamera), 0.0, 1.0), 4.0);
+  colour = mix(colour, skyTint, fresnel * 0.55);
+
+  // Toon shading: a two-band diffuse and a STEPPED Blinn-Phong sun highlight.
+  let toSun = normalize(-W.sun.xyz);
+  let ndl = clamp(dot(n, toSun), 0.0, 1.0);
+  colour *= 0.78 + 0.22 * smoothstep(0.25, 0.32, ndl);
+  let h = normalize(toSun + toCamera);
+  let spec = pow(clamp(dot(n, h), 0.0, 1.0), W.sunColor.w);
+  let highlight = smoothstep(W.sun.w - 0.03, W.sun.w + 0.03, spec);
+  colour += W.sunColor.rgb * highlight * 0.7;
+  alpha = max(alpha, highlight * 0.8);
+
+  return vec4<f32>(colour, alpha);
+}
