@@ -20,13 +20,6 @@ open webgpu/Context
 # ----- FFT cascades (#831) -----------------------------------------------------
 # Slot layout in the C handle store: cascade c, map m (0 displacement, 1 normal,
 # 2 Jacobian/foam) -> texture at waterCascadeSlot(c, m), its view one slot up.
-const waterCascadeSlotBase: Int = 8
-const waterCascadeMaps: Int = 3
-
-func waterCascadeSlot(cascade: view Int, map: view Int) ret Int {
-  ret waterCascadeSlotBase + (cascade * waterCascadeMaps + map) * 2
-}
-
 # Allocate one cascade map: a storage texture the FFT compute will write and
 # the surface shader will sample. rgba16float is enough for displacement in
 # metres and unit normals; the Jacobian map uses the same format for one path.
@@ -751,6 +744,8 @@ func waterShutdown(waterSystem: mod WaterSystem) pub {
   releaseCascades(waterSystem: waterSystem)
   let sampler: Ptr = waterGet(index: 3)
   if not (sampler is webgpuNull()) { wgpuSamplerRelease(sampler: sampler) waterSet(index: 3, ptr: webgpuNull()) }
+  let cascadeSampler: Ptr = waterGet(index: 4)
+  if not (cascadeSampler is webgpuNull()) { wgpuSamplerRelease(sampler: cascadeSampler) waterSet(index: 4, ptr: webgpuNull()) }
   waterRelease()
   waterSystem.pipeMade = false
   waterSystem.pipeReady = false
