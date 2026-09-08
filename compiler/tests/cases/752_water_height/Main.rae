@@ -1,0 +1,51 @@
+# waterHeightAt: the CPU Gerstner mirror of the water surface (#832).
+#
+# Pins the RELATIONSHIPS, not a table of numbers: flat water is the still
+# level, a single sine-like wave peaks at +amplitude a quarter wavelength in
+# and troughs at three quarters, the height never leaves +-(sum of amplitudes),
+# a steep wave is still bounded, and the surface moves with time.
+import Math
+import Vec3
+open water/Water
+
+func check(name: view String, ok: view Bool) {
+  if ok { log("ok   {name}") } else { log("FAIL {name}") }
+}
+
+func near(a: view Float, b: view Float, tolerance: view Float) ret Bool {
+  ret Math.abs(value: a - b) <= tolerance
+}
+
+func main() {
+  var body: WaterBody = createLakeToon(surfaceZ: 3.0, extent: 100.0)
+  body.waves.first.amplitude = 0.0
+  body.waves.second.amplitude = 0.0
+  check(name: "flat water is the still level", ok: near(a: waterHeightAt(body: body, x: 12.5, y: -4.0, t: 7.0), b: 3.0, tolerance: 0.000001))
+
+  # One pure sine along +x: no steepness, so there is no horizontal displacement.
+  body.waveCount = 1
+  body.waves.first = { dirX: 1.0, dirY: 0.0, amplitude: 0.5, wavelength: 8.0, steepness: 0.0, speed: 0.0 }
+  check(name: "quarter wavelength in is the crest", ok: near(a: waterHeightAt(body: body, x: 2.0, y: 0.0, t: 0.0), b: 3.5, tolerance: 0.0001))
+  check(name: "three quarters in is the trough", ok: near(a: waterHeightAt(body: body, x: 6.0, y: 0.0, t: 0.0), b: 2.5, tolerance: 0.0001))
+  check(name: "a full wavelength later repeats", ok: near(a: waterHeightAt(body: body, x: 10.0, y: 0.0, t: 0.0), b: 3.5, tolerance: 0.0001))
+  check(name: "y does not matter for an x wave", ok: near(a: waterHeightAt(body: body, x: 2.0, y: 33.0, t: 0.0), b: 3.5, tolerance: 0.0001))
+
+  # The wave travels: with speed 2 the crest that was at x=2 is at x=2+2t later.
+  body.waves.first.speed = 2.0
+  check(name: "the crest moves with the wave", ok: near(a: waterHeightAt(body: body, x: 4.0, y: 0.0, t: 1.0), b: 3.5, tolerance: 0.0001))
+
+  # Two steep waves: bounded by the amplitude sum, and the horizontal
+  # displacement is recovered (the height at a crest stays a crest).
+  body.waveCount = 2
+  body.waves.first = { dirX: 1.0, dirY: 0.3, amplitude: 0.4, wavelength: 6.0, steepness: 0.5, speed: 1.3 }
+  body.waves.second = { dirX: -0.4, dirY: 1.0, amplitude: 0.3, wavelength: 3.5, steepness: 0.4, speed: 0.9 }
+  var lowest: Float = 100.0
+  var highest: Float = -100.0
+  loop var i: Int = 0, i < 400, ++i {
+    let h: Float = waterHeightAt(body: body, x: i.toFloat() * 0.173, y: i.toFloat() * 0.091, t: 0.37)
+    if h < lowest { lowest = h }
+    if h > highest { highest = h }
+  }
+  check(name: "steep waves stay within the amplitude sum", ok: lowest >= 3.0 - 0.7001 and highest <= 3.0 + 0.7001)
+  check(name: "steep waves actually move the surface", ok: highest - lowest > 0.5)
+}

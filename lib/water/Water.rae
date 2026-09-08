@@ -9,6 +9,7 @@
 #
 # Style: `toon` is the mobile-first stylised path (the Roystan recipe) and the
 # only one implemented here; `realistic` (FFT cascades, #831) EXTENDS it later.
+import Math
 import Vec3
 
 enum WaterKind { ocean, lake, river }
@@ -52,6 +53,13 @@ type WaterBody {
   # the Gerstner waves the vertex shader sums (1 on mobile, 2 on desktop).
   gridSegments: Int     # quads per side of the unit grid (48 mobile, 96 desktop)
   waveCount: Int        # 1 or 2
+  # Refraction (#832): 1 = read the opaque scene through the surface (the #842
+  # litCopy) offset by the normal, depth-masked, with Beer-Lambert absorption;
+  # 0 = plain alpha blend (the mobile tier). absorbColor is per-channel 1/m:
+  # red is absorbed fastest, so deep water goes blue-green.
+  refraction: Int
+  refractStrength: Float  # screen-space offset per unit of normal xy (~0.02)
+  absorbColor: Vec3
   # Realistic tier (#831): the FFT ocean cascades. Data only until the compute
   # lands; the toon path ignores them.
   fftSize: Int          # 128 / 256 / 512 texels per cascade side
@@ -79,6 +87,55 @@ func createLakeToon(surfaceZ: copy Float, extent: copy Float) pub ret WaterBody 
       second: { dirX: 0.0 - 0.4, dirY: 1.0, amplitude: 0.05, wavelength: 3.2, steepness: 0.3, speed: 1.0 }
     },
     gridSegments: 96, waveCount: 2,
+    refraction: 0, refractStrength: 0.02, absorbColor: Vec3.create(x: 0.45, y: 0.16, z: 0.08),
     fftSize: 256, cascadeCount: 3, cascadeTile0: 250.0, cascadeTile1: 60.0, cascadeTile2: 8.0, updateRate: 1
   }
+}
+
+# ----- gameplay query (#832) -------------------------------------------------
+# One Gerstner wave's displacement at grid point (px, py) — the CPU mirror of
+# waterSurface.wgsl's `gerstner`, same maths, same constants. Returns (dx, dy,
+# dz) in world units.
+func gerstnerDisplacement(wave: view GerstnerWave, px: view Float, py: view Float, t: view Float) ret Vec3 {
+  var length: Float = Math.sqrt(x: wave.dirX * wave.dirX + wave.dirY * wave.dirY)
+  if length < 0.0001 { length = 1.0 }
+  let dx: Float = wave.dirX / length
+  let dy: Float = wave.dirY / length
+  var wavelength: Float = wave.wavelength
+  if wavelength < 0.01 { wavelength = 0.01 }
+  let k: Float = 6.28318530718 / wavelength
+  let f: Float = k * (dx * px + dy * py - wave.speed * t)
+  let c: Float = Math.cos(x: f)
+  ret Vec3.create(
+    x: wave.steepness * wave.amplitude * dx * c,
+    y: wave.steepness * wave.amplitude * dy * c,
+    z: wave.amplitude * Math.sin(x: f))
+}
+
+func wavesDisplacement(body: view WaterBody, px: view Float, py: view Float, t: view Float) ret Vec3 {
+  var total: Vec3 = gerstnerDisplacement(wave: body.waves.first, px: px, py: py, t: t)
+  if body.waveCount > 1 {
+    total = Vec3.vadd(a: total, b: gerstnerDisplacement(wave: body.waves.second, px: px, py: py, t: t))
+  }
+  ret total
+}
+
+# The surface height at WORLD (x, y) at time t — what buoyancy, splashes and
+# wading ask. Exact for the Gerstner surface up to the horizontal displacement:
+# a Gerstner wave moves grid points sideways, so the point that ENDS UP over
+# (x, y) started somewhere else; two fixed-point iterations of p = (x, y) -
+# displacementXY(p) recover it to well under a centimetre for the steepness
+# values these bodies use. (FFT cascades will need a readback, #854.)
+func waterHeightAt(body: view WaterBody, x: copy Float, y: copy Float, t: copy Float) pub ret Float {
+  var px: Float = x
+  var py: Float = y
+  var i: Int = 0
+  loop i < 2 {
+    let d: Vec3 = wavesDisplacement(body: body, px: px, py: py, t: t)
+    px = x - d.x
+    py = y - d.y
+    i = i + 1
+  }
+  let d: Vec3 = wavesDisplacement(body: body, px: px, py: py, t: t)
+  ret body.centre.z + d.z
 }
