@@ -10,7 +10,11 @@ grass-style C handle slots, one draw of a unit grid through the transparent pass
 and `waterSurface.wgsl` (Gerstner vertex waves; Roystan toon fragment: depth-gradient
 colour from the G-buffer depth, posterised noise ripples + shoreline foam, Fresnel sky
 tint from the stylised hemisphere, stepped sun highlight). Landed as the lake at the
-biome water plane in example 114. Realistic FFT water (#831) and shading/refraction
+biome water plane in example 114 and on its own in 118_water_lake. #847 added the
+toon tier knobs (`WaterBody.gridSegments`, `waveCount`), vertex-shader-panned noise
+coordinates (the Roystan mobile trick), and many bodies per `WaterSystem` sharing
+one unit-grid mesh (`waterAddBody`; each body is one uniform upload + one submitted
+draw, so a shared uniform buffer stays correct). Realistic FFT water (#831) and shading/refraction
 (#832) extend it. #831 slice 1 is in: the `waterFft` compute node + three persistent
 fixed-size cascade resources are declared in the graph (derived `waterFft ->
 transparentForward`), `WaterBody` carries the tier (`fftSize`, `cascadeCount`,

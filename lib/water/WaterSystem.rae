@@ -34,10 +34,12 @@ func waterGet(index: Int) extern("rae_gb_water_get") ret Ptr
 func waterRelease() extern("rae_gb_water_release")
 
 const waterUniformFloats: Int = 56   # fourteen vec4 (see waterSurface.wgsl `Water`)
-const waterGridSegments: Int = 96
 
 type WaterSystem {
-  body: WaterBody
+  # Every body this system draws (#847): they share ONE unit-grid mesh (sized
+  # by the first body's gridSegments) and one pipeline; each is one draw with
+  # its own uniform upload. The first body also owns the FFT cascades.
+  bodies: List(WaterBody)
   mesh: MeshHandle
   pipeMade: Bool    # creation attempted (a missing shader is reported once)
   pipeReady: Bool   # creation succeeded; the draw is skipped otherwise
@@ -50,10 +52,11 @@ type WaterSystem {
 }
 
 func createWaterSystem(body: view WaterBody) pub ret WaterSystem {
-  # A unit grid (-0.5..0.5) the vertex shader scales to the body's extent, so
-  # one mesh serves every body. 96x96 quads is enough for two gentle Gerstner
-  # waves at lake scale; a tier knob later.
-  let grid: MeshData = makePlane(size: 1.0, segments: waterGridSegments)
+  # A unit grid (-0.5..0.5) the vertex shader scales to each body's extent, so
+  # one mesh serves every body; its density is the first body's tier knob.
+  var segments: Int = body.gridSegments
+  if segments < 4 { segments = 4 }
+  let grid: MeshData = makePlane(size: 1.0, segments: segments)
   let mesh: MeshHandle = uploadMesh(verts: grid.verts, vertCount: grid.vertCount, indices: grid.indices)
   let uniform: List(Float) = createList(Float, cap: waterUniformFloats)
   var i: Int = 0
@@ -61,11 +64,25 @@ func createWaterSystem(body: view WaterBody) pub ret WaterSystem {
     uniform.add(value: 0.0)
     i = i + 1
   }
+  var bodies: List(WaterBody) = createList(WaterBody, cap: 4)
+  bodies.add(value: body)
   ret WaterSystem {
-    body: body, mesh: mesh, pipeMade: false, pipeReady: false,
+    bodies: own bodies, mesh: mesh, pipeMade: false, pipeReady: false,
     bindGen: 0 - 1, bindMade: false, time: 0.0, uniform: uniform, drawCount: 0,
     cascadesMade: false
   }
+}
+
+# Add another body (a pond on an island, an ocean beyond a lake). Same mesh,
+# same pipeline; drawn after the earlier bodies.
+func waterAddBody(waterSystem: mod WaterSystem, body: view WaterBody) pub {
+  waterSystem.bodies.add(value: body)
+}
+
+# The first body: it sizes the shared mesh and owns the FFT cascades.
+func primaryBody(waterSystem: view WaterSystem) ret WaterBody {
+  if let body: WaterBody = waterSystem.bodies.copyAt(index: 0) { ret body }
+  ret createLakeToon(surfaceZ: 0.0, extent: 1.0)
 }
 
 func waterSurfaceWgsl() ret String {
@@ -178,9 +195,8 @@ func putWave(uniform: mod List(Float), base: view Int, wave: view GerstnerWave) 
 }
 
 # Fill + upload the `Water` uniform (layout mirrored in waterSurface.wgsl).
-func uploadWaterUniform(waterSystem: mod WaterSystem, camera: view Camera3d, light: view Light3d,
-                        sky: view Sky, hasSky: view Bool) {
-  let body: WaterBody = waterSystem.body
+func uploadWaterUniform(waterSystem: mod WaterSystem, body: view WaterBody, camera: view Camera3d,
+                        light: view Light3d, sky: view Sky, hasSky: view Bool) {
   var sunDir: Vec3 = light.sunDir
   var sunColor: Vec3 = light.sunColor
   var zenith: Vec3 = light.ambSky
@@ -202,23 +218,19 @@ func uploadWaterUniform(waterSystem: mod WaterSystem, camera: view Camera3d, lig
   put4(uniform: waterSystem.uniform, base: 32, x: horizon.x, y: horizon.y, z: horizon.z, w: camera.farZ)
   putWave(uniform: waterSystem.uniform, base: 36, wave: body.waves.first)
   putWave(uniform: waterSystem.uniform, base: 44, wave: body.waves.second)
-  put4(uniform: waterSystem.uniform, base: 52, x: body.distortion, y: 0.0, z: 0.0, w: 0.0)
+  put4(uniform: waterSystem.uniform, base: 52, x: body.distortion, y: body.waveCount.toFloat(), z: 0.0, w: 0.0)
   wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: waterGet(index: 1),
     bufferOffset: 0 as UInt64, data: waterSystem.uniform.data,
     size: (waterUniformFloats * 4) as UInt64)
 }
 
-# Draw the body: one render pass into the lit target with read-only depth, one
-# indexed draw of the grid. Call at the transparentForward tag, BEFORE the
-# renderer's transparentPass. `deltaTime` steps the wave clock (visual only).
-func waterDraw(waterSystem: mod WaterSystem, camera: view Camera3d, light: view Light3d,
-               sky: view Sky, hasSky: view Bool, deltaTime: copy Float) pub {
-  if gbDeferredPrepare() is 0 { ret }
-  waterSystem.time = waterSystem.time + deltaTime
-  ensureWaterPipeline(waterSystem: waterSystem)
-  if not waterSystem.pipeReady { ret }
-  ensureWaterBind(waterSystem: waterSystem)
-  uploadWaterUniform(waterSystem: waterSystem, camera: camera, light: light, sky: sky, hasSky: hasSky)
+# One body: upload its uniform, then one render pass into the lit target with
+# read-only depth and one indexed draw of the shared grid. The upload is a
+# queued write and the pass is SUBMITTED here, so the next body's upload
+# cannot overtake this draw (several bodies share the one uniform buffer).
+func drawWaterBody(waterSystem: mod WaterSystem, body: view WaterBody, camera: view Camera3d,
+                   light: view Light3d, sky: view Sky, hasSky: view Bool) {
+  uploadWaterUniform(waterSystem: waterSystem, body: body, camera: camera, light: light, sky: sky, hasSky: hasSky)
   let mesh: Int = waterSystem.mesh.id
   if gbMeshIcount(mesh: mesh) <= 0 { ret }
 
@@ -259,8 +271,27 @@ func waterDraw(waterSystem: mod WaterSystem, camera: view Camera3d, light: view 
   wgpuCommandBufferRelease(commandBuffer: cmd)
   wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
   wgpuCommandEncoderRelease(commandEncoder: enc)
+}
+
+# Draw every body. Call at the transparentForward tag, BEFORE the renderer's
+# transparentPass. `deltaTime` steps the shared wave clock (visual only).
+func waterDraw(waterSystem: mod WaterSystem, camera: view Camera3d, light: view Light3d,
+               sky: view Sky, hasSky: view Bool, deltaTime: copy Float) pub {
+  if gbDeferredPrepare() is 0 { ret }
+  waterSystem.time = waterSystem.time + deltaTime
+  ensureWaterPipeline(waterSystem: waterSystem)
+  if not waterSystem.pipeReady { ret }
+  ensureWaterBind(waterSystem: waterSystem)
+  var i: Int = 0
+  loop i < waterSystem.bodies.length {
+    if let body: WaterBody = waterSystem.bodies.copyAt(index: i) {
+      drawWaterBody(waterSystem: waterSystem, body: body, camera: camera, light: light, sky: sky, hasSky: hasSky)
+    }
+    i = i + 1
+  }
   if waterSystem.drawCount is 0 {
-    log("[water] toon lake: extent {waterSystem.body.extent}, {waterGridSegments}x{waterGridSegments} grid, 2 gerstner waves, surface z {waterSystem.body.centre.z}")
+    let first: WaterBody = primaryBody(waterSystem: waterSystem)
+    log("[water] toon lake: {waterSystem.bodies.length} bodies, extent {first.extent}, {first.gridSegments}x{first.gridSegments} grid, {first.waveCount} gerstner waves, surface z {first.centre.z}")
   }
   waterSystem.drawCount = waterSystem.drawCount + 1
 }
@@ -308,9 +339,10 @@ func waterFftStep(waterSystem: mod WaterSystem) pub {
   if gbDeferredPrepare() is 0 { ret }
   if waterSystem.cascadesMade { ret }
   waterSystem.cascadesMade = true
-  let size: Int = waterSystem.body.fftSize
+  let body: WaterBody = primaryBody(waterSystem: waterSystem)
+  let size: Int = body.fftSize
   var cascade: Int = 0
-  loop cascade < waterSystem.body.cascadeCount {
+  loop cascade < body.cascadeCount {
     var map: Int = 0
     loop map < waterCascadeMaps {
       let slot: Int = waterCascadeSlot(cascade: cascade, map: map)
@@ -321,14 +353,15 @@ func waterFftStep(waterSystem: mod WaterSystem) pub {
     }
     cascade = cascade + 1
   }
-  log("[water] fft cascades: {waterSystem.body.cascadeCount} x {size}x{size} (displacement, normal, jacobian), tiles {waterSystem.body.cascadeTile0}/{waterSystem.body.cascadeTile1}/{waterSystem.body.cascadeTile2} m, update rate {waterSystem.body.updateRate}")
+  log("[water] fft cascades: {body.cascadeCount} x {size}x{size} (displacement, normal, jacobian), tiles {body.cascadeTile0}/{body.cascadeTile1}/{body.cascadeTile2} m, update rate {body.updateRate}")
 }
 
 func releaseCascades(waterSystem: mod WaterSystem) {
   if not waterSystem.cascadesMade { ret }
   waterSystem.cascadesMade = false
+  let body: WaterBody = primaryBody(waterSystem: waterSystem)
   var cascade: Int = 0
-  loop cascade < waterSystem.body.cascadeCount {
+  loop cascade < body.cascadeCount {
     var map: Int = 0
     loop map < waterCascadeMaps {
       let slot: Int = waterCascadeSlot(cascade: cascade, map: map)
