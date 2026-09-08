@@ -34,7 +34,7 @@ struct Water {
   wave0b: vec4<f32>,        // steepness, speed
   wave1: vec4<f32>,
   wave1b: vec4<f32>,
-  tuning: vec4<f32>,        // x = distortion
+  tuning: vec4<f32>,        // x = distortion, y = waveCount (1 or 2)
 };
 @group(0) @binding(0) var<uniform> F: Frame;
 @group(0) @binding(1) var<uniform> W: Water;
@@ -44,6 +44,13 @@ struct VsOut {
   @builtin(position) pos: vec4<f32>,
   @location(0) world: vec3<f32>,
   @location(1) nrm: vec3<f32>,
+  // Noise lookup coordinates panned in the VERTEX shader (the Roystan mobile
+  // trick, #847): the world->noise scaling and the time pan are per-vertex
+  // work, the fragment only samples. Built from the UNDISPLACED grid position
+  // so the pattern does not swim with the Gerstner motion.
+  @location(2) rippleUv: vec2<f32>,
+  @location(3) distortUvA: vec2<f32>,
+  @location(4) distortUvB: vec2<f32>,
 };
 
 const TAU: f32 = 6.28318530718;
@@ -72,9 +79,12 @@ fn vs(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) uv: vec
   var disp = vec3<f32>(0.0, 0.0, 0.0);
   var dn = vec3<f32>(0.0, 0.0, 0.0);
   gerstner(W.wave0, W.wave0b, base.xy, t, &disp, &dn);
-  gerstner(W.wave1, W.wave1b, base.xy, t, &disp, &dn);
+  if (W.tuning.y > 1.5) { gerstner(W.wave1, W.wave1b, base.xy, t, &disp, &dn); }
   let world = base + disp;
   o.world = world;
+  o.rippleUv = base.xy * W.foam.y + vec2<f32>(t * W.foam.z, t * W.foam.z * 0.7);
+  o.distortUvA = base.xy * 0.08 + vec2<f32>(t * 0.05, -t * 0.03);
+  o.distortUvB = base.xy * 0.08 + vec2<f32>(-t * 0.04, t * 0.06);
   o.nrm = normalize(vec3<f32>(-dn.x, -dn.y, 1.0 - dn.z));
   var clip = F.viewProj * vec4<f32>(world, 1.0);
   // Jitter LAST, matching the G-buffer pass (#397), so the surface sits in the
@@ -106,13 +116,13 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
 
   // Toon ripples + shoreline foam: world-space value noise, panned, warped by a
   // second octave, then posterised by a depth-driven cutoff.
-  let t = W.camera.w;
-  let uvW = i.world.xy;
+  // Distortion (world units) warps the vertex-panned ripple coordinate; the
+  // ripple scale (W.foam.y) converts it, so this equals the old per-fragment
+  // ((uvW + distortion) * scale + pan) exactly, minus the per-pixel maths.
   let distortion = vec2<f32>(
-    raeNoiseValue2(uvW * 0.08 + vec2<f32>(t * 0.05, -t * 0.03), 11u) - 0.5,
-    raeNoiseValue2(uvW * 0.08 + vec2<f32>(-t * 0.04, t * 0.06), 23u) - 0.5) * W.tuning.x;
-  let rippleUv = (uvW + distortion) * W.foam.y + vec2<f32>(t * W.foam.z, t * W.foam.z * 0.7);
-  let ripple = raeNoiseValue2(rippleUv, 7u);
+    raeNoiseValue2(i.distortUvA, 11u) - 0.5,
+    raeNoiseValue2(i.distortUvB, 23u) - 0.5) * W.tuning.x;
+  let ripple = raeNoiseValue2(i.rippleUv + distortion * W.foam.y, 7u);
   let foamT = clamp(waterDepth / max(W.foam.x, 0.01), 0.0, 1.0);
   let cutoff = foamT * W.foam.w;
   let foam = smoothstep(cutoff - 0.03, cutoff + 0.03, ripple);

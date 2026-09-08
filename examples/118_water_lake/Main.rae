@@ -114,6 +114,17 @@ func main() ret Int {
   lake.deepColor = Vec3.create(x: 0.03, y: 0.16, z: 0.42)
   lake.shallowColor = Vec3.create(x: 0.25, y: 0.7, z: 0.78)
   var waterSystem: WaterSystem = createWaterSystem(body: lake)
+  # A second body on the first island: proves one mesh, many bodies (#847).
+  # Greener and calmer than the lake, one wave, sitting just above the island top.
+  var pond: WaterBody = createLakeToon(surfaceZ: 1.05, extent: 6.0)
+  pond.centre = Vec3.create(x: Math.cos(x: 0.6) * 26.0, y: Math.sin(x: 0.6) * 26.0, z: 1.05)
+  pond.shallowColor = Vec3.create(x: 0.35, y: 0.75, z: 0.45)
+  pond.deepColor = Vec3.create(x: 0.05, y: 0.3, z: 0.2)
+  pond.depthMax = 1.5
+  pond.rippleScale = 1.4
+  pond.waveCount = 1
+  pond.waves.first.amplitude = 0.02
+  waterAddBody(waterSystem: waterSystem, body: pond)
 
   log("[water example] W/A/S/D move, Q/E down/up, shift boost, mouse-drag look; comma/period move the sun")
   let fixedTestFrame: Bool = Sys.getEnv(name: "RAE_WATER_TEST_FRAME").length() > 0
