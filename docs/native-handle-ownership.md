@@ -4,6 +4,12 @@ Queue: `#289 Runtime migration R3`
 
 Status: design contract. No implementation yet.
 
+Latest proposal: [Ptr and GPU resources](ptr-and-gpu-resource-design.md) separates
+copyable, non-owning `TextureId`/`BufferId` values from an App-owned GPU resource
+manager. For the GPU migration, review that proposal before implementing this
+older document's individually owning handles. Neither proposal grants approval
+for new language semantics.
+
 This document defines the target ownership model for native platform resources
 that Rae code can create, pass around, and drop. It builds on:
 
