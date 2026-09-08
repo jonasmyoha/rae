@@ -43,7 +43,16 @@ grid cells — kHigh = 6·2pi/L_next — so the 250 m cascade keeps a real field
 4-cell disc) and the per-output Stockham butterfly
 table (signed inverse twiddle + two read indices per stage; no bit reversal); both
 verified by a readback in 118 (non-zero, exact (k,-k) packing symmetry, radial energy
-peak at the JONSWAP k_p, butterfly stage 0). #831 slice 1 is in: the `waterFft` compute node + three persistent
+peak at the JONSWAP k_p, butterfly stage 0). #850 (slice 3) is in: `evolve` (h0 -> h(k,t) with the finite-depth dispersion; four
+complex fields each packing two real ones — h+iDx, Dy+i dh/dx, dh/dy+i dDx/dx,
+dDy/dy+i dDx/dy — since every field is Hermitian), the `stockham` row pass over the
+#849 butterfly ping-ponging two rgba32float textures, a `transpose`, the same row
+pass for the columns, `fieldOut`, and `post` (the centred-spectrum (-1)^(x+y), chop,
+normal from the slopes, the Jacobian and its folding foam) into the cascade maps —
+one compute pass, one submit per frame, for `realistic` bodies. Verified by the
+only honest FFT test: a known single wave (h0 = 0.25 at k index +-3) inverse-
+transforms to cos(2pi 3x/N) of amplitude 1 (amplitude, phase, six zero crossings
+checked by readback), then the JONSWAP field is finite and bounded. #831 slice 1 is in: the `waterFft` compute node + three persistent
 fixed-size cascade resources are declared in the graph (derived `waterFft ->
 transparentForward`), `WaterBody` carries the tier (`fftSize`, `cascadeCount`,
 `cascadeTile0..2`, `updateRate`) and `waterFftStep` allocates the cascade maps
