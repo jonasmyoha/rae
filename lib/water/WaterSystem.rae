@@ -32,12 +32,23 @@ open webgpu/Webgpu
 open webgpu/Context
 
 func gbLitFormat() extern("rae_gb_lit_format") ret Int
-# Handle slots: 0 = surface pipeline, 1 = uniform buffer, 2 = bind group, 3 = lit sampler.
+# Handle slots: 0 = surface pipeline, 1 = uniform buffer, 2 = bind group, 3 = lit sampler,
+# 4 = cascade sampler (repeat).
 func waterSet(index: Int, ptr: Ptr) extern("rae_gb_water_set")
 func waterGet(index: Int) extern("rae_gb_water_get") ret Ptr
 func waterRelease() extern("rae_gb_water_release")
 
-const waterUniformFloats: Int = 64   # sixteen vec4 (see waterSurface.wgsl `Water`)
+const waterUniformFloats: Int = 72   # eighteen vec4 (see waterSurface.wgsl `Water`)
+# FFT cascade maps live in the handle store (#831; WaterFft.rae fills them):
+# cascade c, map m (0 displacement+Jacobian, 1 normal, 2 foam) -> texture at
+# waterCascadeSlot(c, m), its view one slot up. The surface binds them here.
+const waterCascadeSlotBase: Int = 8
+const waterCascadeMaps: Int = 3
+const waterCascadeCount: Int = 3
+
+func waterCascadeSlot(cascade: view Int, map: view Int) ret Int {
+  ret waterCascadeSlotBase + (cascade * waterCascadeMaps + map) * 2
+}
 
 type WaterSystem {
   # Every body this system draws (#847): they share ONE unit-grid mesh (sized
@@ -180,6 +191,16 @@ func ensureWaterPipeline(waterSystem: mod WaterSystem) {
     lodMinClamp: 0.0 as Float32, lodMaxClamp: 1.0 as Float32, maxAnisotropy: 1 as UInt16
   }
   waterSet(index: 3, ptr: wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: sd))
+  # The cascades TILE: world.xy / tile runs far outside [0, 1], so they need a
+  # repeating sampler (clamp-to-edge stretches the edge texels into streaks).
+  let cd: WGPUSamplerDescriptor = {
+    addressModeU: WGPUAddressMode_Repeat, addressModeV: WGPUAddressMode_Repeat,
+    addressModeW: WGPUAddressMode_Repeat,
+    magFilter: WGPUFilterMode_Linear, minFilter: WGPUFilterMode_Linear,
+    mipmapFilter: WGPUMipmapFilterMode_Nearest,
+    lodMinClamp: 0.0 as Float32, lodMaxClamp: 1.0 as Float32, maxAnisotropy: 1 as UInt16
+  }
+  waterSet(index: 4, ptr: wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: cd))
   waterSystem.pipeReady = true
 }
 
@@ -189,12 +210,15 @@ func ensureWaterPipeline(waterSystem: mod WaterSystem) {
 func ensureWaterBind(waterSystem: mod WaterSystem) {
   let gen: Int = gbTargetsGen()
   if waterSystem.bindMade and gen is waterSystem.bindGen { ret }
+  # The cascade maps are allocated by waterFftStep at the waterFft tag; without
+  # them the layout cannot be satisfied — draw nothing until they exist.
+  if waterGet(index: waterCascadeSlot(cascade: waterCascadeCount - 1, map: 1) + 1) is webgpuNull() { ret }
   waterSystem.bindMade = true
   waterSystem.bindGen = gen
   let old: Ptr = waterGet(index: 2)
   if not (old is webgpuNull()) { wgpuBindGroupRelease(bindGroup: old) }
   let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: waterGet(index: 0), groupIndex: 0 as UInt32)
-  var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 5)
+  var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 12)
   entries.add(value: { binding: 0 as UInt32, buffer: gbFrameUbuf(), size: gbFrameBytes() as UInt64 })
   entries.add(value: { binding: 1 as UInt32, buffer: waterGet(index: 1), size: (waterUniformFloats * 4) as UInt64 })
   entries.add(value: { binding: 2 as UInt32, textureView: gbViewDepth() })
@@ -202,7 +226,15 @@ func ensureWaterBind(waterSystem: mod WaterSystem) {
   # through the surface. Generation-keyed like the depth view.
   entries.add(value: { binding: 3 as UInt32, textureView: gbLitCopyView() })
   entries.add(value: { binding: 4 as UInt32, sampler: waterGet(index: 3) })
-  let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 5 as UInt64, entries: entries.data }
+  # The FFT cascades (#851): displacement+Jacobian and normal per cascade,
+  # summed by the realistic path; the toon path binds them too (one layout)
+  # but never samples them.
+  loop var cascade: Int = 0, cascade < waterCascadeCount, ++cascade {
+    entries.add(value: { binding: (5 + cascade * 2) as UInt32, textureView: waterGet(index: waterCascadeSlot(cascade: cascade, map: 0) + 1) })
+    entries.add(value: { binding: (6 + cascade * 2) as UInt32, textureView: waterGet(index: waterCascadeSlot(cascade: cascade, map: 1) + 1) })
+  }
+  entries.add(value: { binding: 11 as UInt32, sampler: waterGet(index: 4) })
+  let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 12 as UInt64, entries: entries.data }
   waterSet(index: 2, ptr: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
   wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
 }
@@ -246,14 +278,18 @@ func uploadWaterUniform(waterSystem: mod WaterSystem, body: view WaterBody, came
   put4(uniform: waterSystem.uniform, base: 32, x: horizon.x, y: horizon.y, z: horizon.z, w: camera.farZ)
   putWave(uniform: waterSystem.uniform, base: 36, wave: body.waves.first)
   putWave(uniform: waterSystem.uniform, base: 44, wave: body.waves.second)
-  var riverMode: Float = 0.0
-  if body.meshId > 0 { riverMode = 1.0 }
-  put4(uniform: waterSystem.uniform, base: 52, x: body.distortion, y: body.waveCount.toFloat(), z: riverMode, w: body.flowSpeed)
+  put4(uniform: waterSystem.uniform, base: 52, x: body.distortion, y: body.waveCount.toFloat(), z: body.meshMode.toFloat(), w: body.flowSpeed)
   # Refraction: on/off, strength, and the lit target's size for screen uvs.
   let litTexture: Ptr = gbLitTexture()
   put4(uniform: waterSystem.uniform, base: 56, x: body.refraction.toFloat(), y: body.refractStrength,
     z: (wgpuTextureGetWidth(texture: litTexture) as Int).toFloat(), w: (wgpuTextureGetHeight(texture: litTexture) as Int).toFloat())
   put4(uniform: waterSystem.uniform, base: 60, x: body.absorbColor.x, y: body.absorbColor.y, z: body.absorbColor.z, w: 0.0)
+  # Realistic path (#851): the cascade tiles and the flag; the camera-centred
+  # mesh is snapped to whole metres so its vertices never swim under the camera.
+  var realistic: Float = 0.0
+  if body.style is WaterStyle.realistic { realistic = 1.0 }
+  put4(uniform: waterSystem.uniform, base: 64, x: body.cascadeTile0, y: body.cascadeTile1, z: body.cascadeTile2, w: realistic)
+  put4(uniform: waterSystem.uniform, base: 68, x: Math.floor(x: camera.position.x), y: Math.floor(x: camera.position.y), z: body.cascadeCount.toFloat(), w: 0.0)
   wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: waterGet(index: 1),
     bufferOffset: 0 as UInt64, data: waterSystem.uniform.data,
     size: (waterUniformFloats * 4) as UInt64)
@@ -318,6 +354,7 @@ func waterDraw(waterSystem: mod WaterSystem, camera: view Camera3d, light: view 
   ensureWaterPipeline(waterSystem: waterSystem)
   if not waterSystem.pipeReady { ret }
   ensureWaterBind(waterSystem: waterSystem)
+  if not waterSystem.bindMade { ret }
   var i: Int = 0
   loop i < waterSystem.bodies.length {
     if let body: WaterBody = waterSystem.bodies.copyAt(index: i) {
