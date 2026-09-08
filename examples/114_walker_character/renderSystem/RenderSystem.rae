@@ -240,6 +240,11 @@ func renderApp(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSys
         renderDeferredPassWorld(renderer: renderSystem.renderer, tag: tag, world: emptyWorld,
                                 camera: cameraSystem.camera, light: cameraSystem.light, aspect: aspect)
       }
+      case RenderTag.waterFft {
+        # FFT ocean cascades (#831): allocated for the body's tier; the compute
+        # that fills them is the next slice.
+        waterFftStep(waterSystem: waterSystem)
+      }
       case RenderTag.transparentForward {
         # The toon lake first (#830), so the splash droplets blend OVER it.
         waterDraw(waterSystem: waterSystem, camera: cameraSystem.camera, light: cameraSystem.light,

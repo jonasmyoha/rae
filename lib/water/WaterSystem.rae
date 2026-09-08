@@ -46,6 +46,7 @@ type WaterSystem {
   time: Float
   uniform: List(Float)
   drawCount: Int
+  cascadesMade: Bool   # the FFT cascade textures exist (#831 slice 1)
 }
 
 func createWaterSystem(body: view WaterBody) pub ret WaterSystem {
@@ -62,7 +63,8 @@ func createWaterSystem(body: view WaterBody) pub ret WaterSystem {
   }
   ret WaterSystem {
     body: body, mesh: mesh, pipeMade: false, pipeReady: false,
-    bindGen: 0 - 1, bindMade: false, time: 0.0, uniform: uniform, drawCount: 0
+    bindGen: 0 - 1, bindMade: false, time: 0.0, uniform: uniform, drawCount: 0,
+    cascadesMade: false
   }
 }
 
@@ -263,8 +265,88 @@ func waterDraw(waterSystem: mod WaterSystem, camera: view Camera3d, light: view 
   waterSystem.drawCount = waterSystem.drawCount + 1
 }
 
+# ----- FFT cascades (#831) -----------------------------------------------------
+# Slot layout in the C handle store: cascade c, map m (0 displacement, 1 normal,
+# 2 Jacobian/foam) -> texture at waterCascadeSlot(c, m), its view one slot up.
+const waterCascadeSlotBase: Int = 8
+const waterCascadeMaps: Int = 3
+
+func waterCascadeSlot(cascade: view Int, map: view Int) ret Int {
+  ret waterCascadeSlotBase + (cascade * waterCascadeMaps + map) * 2
+}
+
+# Allocate one cascade map: a storage texture the FFT compute will write and
+# the surface shader will sample. rgba16float is enough for displacement in
+# metres and unit normals; the Jacobian map uses the same format for one path.
+func makeCascadeMap(size: copy Int) ret Ptr {
+  let td: WGPUTextureDescriptor = {
+    usage: WGPUTextureUsage_StorageBinding + WGPUTextureUsage_TextureBinding,
+    dimension: WGPUTextureDimension_2D,
+    size: { width: size as UInt32, height: size as UInt32, depthOrArrayLayers: 1 as UInt32 },
+    format: WGPUTextureFormat_RGBA16Float, mipLevelCount: 1 as UInt32, sampleCount: 1 as UInt32
+  }
+  ret wgpuDeviceCreateTexture(device: webgpuDevice(), descriptor: td)
+}
+
+func makeCascadeView(texture: copy Ptr) ret Ptr {
+  let vd: WGPUTextureViewDescriptor = {
+    format: WGPUTextureFormat_RGBA16Float, dimension: WGPUTextureViewDimension_2D,
+    baseMipLevel: 0 as UInt32, mipLevelCount: 1 as UInt32,
+    baseArrayLayer: 0 as UInt32, arrayLayerCount: 1 as UInt32,
+    aspect: WGPUTextureAspect_All
+  }
+  ret wgpuTextureCreateView(texture: texture, descriptor: vd)
+}
+
+# The render graph's waterFft step (#831). Slice 1: make sure the cascade maps
+# exist for the body's tier (fftSize x fftSize, cascadeCount sets of
+# displacement / normal / Jacobian). The spectrum, the per-frame evolution and
+# the Stockham iFFT that fill them are the next slices; until then the maps are
+# allocated, declared to the graph, and left untouched (the toon surface does
+# not read them). Call at RenderTag.waterFft.
+func waterFftStep(waterSystem: mod WaterSystem) pub {
+  if gbDeferredPrepare() is 0 { ret }
+  if waterSystem.cascadesMade { ret }
+  waterSystem.cascadesMade = true
+  let size: Int = waterSystem.body.fftSize
+  var cascade: Int = 0
+  loop cascade < waterSystem.body.cascadeCount {
+    var map: Int = 0
+    loop map < waterCascadeMaps {
+      let slot: Int = waterCascadeSlot(cascade: cascade, map: map)
+      let texture: Ptr = makeCascadeMap(size: size)
+      waterSet(index: slot, ptr: texture)
+      waterSet(index: slot + 1, ptr: makeCascadeView(texture: texture))
+      map = map + 1
+    }
+    cascade = cascade + 1
+  }
+  log("[water] fft cascades: {waterSystem.body.cascadeCount} x {size}x{size} (displacement, normal, jacobian), tiles {waterSystem.body.cascadeTile0}/{waterSystem.body.cascadeTile1}/{waterSystem.body.cascadeTile2} m, update rate {waterSystem.body.updateRate}")
+}
+
+func releaseCascades(waterSystem: mod WaterSystem) {
+  if not waterSystem.cascadesMade { ret }
+  waterSystem.cascadesMade = false
+  var cascade: Int = 0
+  loop cascade < waterSystem.body.cascadeCount {
+    var map: Int = 0
+    loop map < waterCascadeMaps {
+      let slot: Int = waterCascadeSlot(cascade: cascade, map: map)
+      let textureView: Ptr = waterGet(index: slot + 1)
+      if not (textureView is webgpuNull()) { wgpuTextureViewRelease(textureView: textureView) }
+      let texture: Ptr = waterGet(index: slot)
+      if not (texture is webgpuNull()) { wgpuTextureRelease(texture: texture) }
+      waterSet(index: slot + 1, ptr: webgpuNull())
+      waterSet(index: slot, ptr: webgpuNull())
+      map = map + 1
+    }
+    cascade = cascade + 1
+  }
+}
+
 # Release the GPU handles (app shutdown or a rebuild). Null-safe.
 func waterShutdown(waterSystem: mod WaterSystem) pub {
+  releaseCascades(waterSystem: waterSystem)
   waterRelease()
   waterSystem.pipeMade = false
   waterSystem.pipeReady = false
