@@ -41,6 +41,11 @@ const char* rae_mangle_type_ext(CompilerContext* ctx, const AstIdentifierPart* g
  */
 bool is_primitive_type(Str type_name);
 
+/* Scalar primitives whose `view` parameters lower as read-only C values.
+ * String/Buffer/Any are deliberately excluded because they have reference or
+ * pointer representations. */
+bool is_scalar_primitive_type(Str type_name);
+
 /**
  * Checks if a type name refers to a Raylib built-in type.
  */
