@@ -1,11 +1,11 @@
 # Pointer and GPU interop over Rae lifecycle values
 
-Status: **revision 6 proposal, 2026-09-10. Exact syntax and rules await
-maintainer approval. No language changes in this document are implemented.**
+Status: **revision 7 approved contract, 2026-09-10. The language changes in
+this document are not implemented yet.**
 
 This revision starts from the shipped `create`, `drop` and `copy` behavior and
-the working `webgpu/ReadRequest` pilot. It proposes one additional language
-boundary: raw pointer operations and foreign calls are explicit `unsafe` code.
+the working `webgpu/ReadRequest` pilot. It adds one approved language boundary:
+raw pointer operations and foreign calls are explicit `unsafe` code.
 It does not add another ownership system.
 
 ## Recommendation
@@ -17,7 +17,7 @@ unsafe {
   # individual raw operations are allowed in this lexical block
 }
 
-unsafe func adoptNativeBuffer(handle: copy Ptr, byteCount: view Int) ret NativeBuffer {
+func adoptNativeBuffer(handle: copy Ptr, byteCount: view Int) unsafe ret NativeBuffer {
   # callers must accept this function's documented native preconditions
 }
 ```
@@ -25,27 +25,29 @@ unsafe func adoptNativeBuffer(handle: copy Ptr, byteCount: view Int) ret NativeB
 Keep the existing spelling for foreign declarations:
 
 ```rae
-func nativeBufferCreate(byteCount: view Int) extern("example_buffer_create") ret Ptr
+func nativeBufferCreate(byteCount: view Int) unsafe extern("example_buffer_create") ret Ptr
 ```
 
-Every call to an `extern` function is unsafe automatically. The declaration
-does not repeat the word because `extern("...")` already identifies the foreign
-boundary. An `unsafe func` is an ordinary Rae function whose caller must uphold
-preconditions that its types cannot express. Calling either form requires an
-`unsafe { ... }` block.
+Every extern declaration must include `unsafe`; omitting it is a compiler error.
+The two modifiers say different things. `extern("...")` selects a foreign symbol
+and ABI. `unsafe` says callers must accept obligations Rae cannot prove. An
+unsafe Rae function has `unsafe` in the same post-parameter modifier sequence
+without `extern`. Calling either form requires an `unsafe { ... }` block.
 
 An unsafe function body does not become an unmarked region. Raw operations in
 its implementation still appear inside `unsafe { ... }`. This keeps the two
 responsibilities visible:
 
-- `unsafe func` tells the caller that it accepts an external obligation.
+- the post-parameter `unsafe` modifier tells the caller that the function accepts
+  an external obligation.
 - `unsafe { ... }` shows where an implementation relies on that obligation.
 
 An unsafe block has ordinary block control flow and cleanup. `ret`, `break` and
 scope exit behave exactly as they do in any other block; unsafe creates no new
 lifetime or cleanup exception.
 
-Any user module may declare externs, unsafe functions and unsafe blocks. There
+Any user module may declare explicitly unsafe externs, unsafe Rae functions and
+unsafe blocks. There
 is no trusted-module list, package registration, stdlib privilege, special
 `main` parameter, opaque type modifier or noncopyable modifier.
 
@@ -121,7 +123,7 @@ The following source operations require an enclosing unsafe block:
 6. Pointer casts, arithmetic and dereference. Pointer arithmetic and dereference
    should remain unavailable until a concrete API separately justifies their
    spelling; `unsafe` does not make an unimplemented operator exist.
-7. Calling an extern function or an `unsafe func`.
+7. Calling an extern function or an unsafe Rae function.
 8. Forming, installing or reading a raw callback address or userdata Ptr.
 
 Declaring a type with a Ptr field is allowed in any module. Declaring an extern
@@ -130,8 +132,9 @@ the ABI.
 
 A call whose argument or result is directly `Ptr` requires unsafe even if the
 called Rae function is not declared unsafe, because the call itself produces or
-consumes a raw pointer. Mark the function `unsafe func` as well when it delegates
-additional validity, ownership, alignment or lifetime obligations to callers.
+consumes a raw pointer. Add `unsafe` after the parameter list as well when the
+function delegates additional validity, ownership, alignment or lifetime
+obligations to callers.
 A safe factory can return a wrapper containing Ptr because the caller receives
 the whole wrapper rather than its raw field.
 
@@ -194,15 +197,15 @@ type NativeBuffer {
   byteCount: Int
 }
 
-# Existing extern syntax. Calls are unsafe by definition.
-func nativeBufferCreate(byteCount: view Int) extern("example_buffer_create") ret Ptr
-func nativeBufferConfigure(handle: copy Ptr) extern("example_buffer_configure") ret Bool
-func nativeBufferRelease(handle: copy Ptr) extern("example_buffer_release") ret Ptr
+# Every extern declaration explicitly states its unsafe caller obligation.
+func nativeBufferCreate(byteCount: view Int) unsafe extern("example_buffer_create") ret Ptr
+func nativeBufferConfigure(handle: copy Ptr) unsafe extern("example_buffer_configure") ret Bool
+func nativeBufferRelease(handle: copy Ptr) unsafe extern("example_buffer_release") ret Ptr
 func nativeBufferWriteByteChecked(
   handle: copy Ptr,
   index: view Int,
   value: view UInt8
-) extern("example_buffer_write_byte_checked") ret Bool
+) unsafe extern("example_buffer_write_byte_checked") ret Bool
 
 # Safe factory. Failure before the return releases every acquired native value.
 func create(byteCount: view Int) ret opt NativeBuffer {
@@ -245,10 +248,10 @@ func drop(this: mod NativeBuffer) {
 }
 
 # Adoption cannot verify unique ownership, so its caller accepts that obligation.
-unsafe func adoptNativeBuffer(
+func adoptNativeBuffer(
   handle: copy Ptr,
   byteCount: view Int
-) ret NativeBuffer {
+) unsafe ret NativeBuffer {
   unsafe {
     ret NativeBuffer { handle: handle, byteCount: byteCount }
   }
@@ -398,15 +401,16 @@ For an extern call, the author is responsible for:
 - checking return/status values before using outputs; and
 - following the foreign ownership and release protocol exactly once.
 
-For an `unsafe func`, its documentation states the subset delegated to the
-caller. The implementation remains responsible for everything else. A safe Rae
-function may use unsafe internally only when it establishes all preconditions
-it hides from its caller.
+For a function with the post-parameter `unsafe` modifier, its documentation
+states the subset delegated to the caller. The implementation remains
+responsible for everything else. A safe Rae function may use unsafe internally
+only when it establishes all preconditions it hides from its caller.
 
-All extern calls are unsafe, including calls whose visible signature contains
-only numbers. C implementation behavior and ABI agreement are outside Rae's
-type proof. Rather than add `safe extern` or privileged declarations, expose an
-ordinary safe Rae wrapper when a foreign operation has a safe contract.
+All extern declarations explicitly include `unsafe`, and all their calls require
+an unsafe block, including calls whose visible signature contains only numbers.
+C implementation behavior and ABI agreement are outside Rae's type proof.
+Rather than add a safe-extern escape hatch or privileged declarations, expose
+an ordinary safe Rae wrapper when a foreign operation has a safe contract.
 
 ## Raw callbacks and future callables
 
@@ -638,16 +642,19 @@ work; unsafe syntax does not solve those protocols.
 The compiler implementation should be staged so existing bindings can migrate
 without pretending enforcement is complete:
 
-1. Parse `unsafe { ... }` and `unsafe func`; retain the effect on resolved calls.
-2. Diagnose source Ptr creation, field access, default initialization and copy
+1. Parse `unsafe { ... }` and the post-parameter function modifier, as in
+   `func adopt(...) unsafe ret T`; retain the effect on resolved calls.
+2. Require every extern declaration to spell the modifier before `extern`, as in
+   `func native(...) unsafe extern("symbol") ret T`.
+3. Diagnose source Ptr creation, field access, default initialization and copy
    outside unsafe blocks.
-3. Treat every extern call as unsafe and preserve the obligation through
-   qualified calls and every compiler-supported alias path.
-4. Apply the rule after generic substitution and during field reflection,
+4. Preserve unsafe call obligations through qualified calls and every
+   compiler-supported alias path.
+5. Apply the rule after generic substitution and during field reflection,
    formatting and serialization generation.
-5. Add the safe ReadRequest collection-copy surface while retaining raw internal
+6. Add the safe ReadRequest collection-copy surface while retaining raw internal
    functions for existing manager protocols.
-6. Inventory and migrate current Ptr/extern consumers in bounded tasks. During
+7. Inventory and migrate current Ptr/extern consumers in bounded tasks. During
    migration, enforcement may be opt-in or diagnostic-only, but exemptions must
    be explicit and temporary. Final enforcement waits for the compatibility
    task and maintained example gates.
@@ -677,27 +684,29 @@ semantics. The separate manager-identity review must choose an ID strategy after
 demonstrating two independent Apps, matching slots/generations, recreation and
 exhaustion. No fixed nonce, global issuer or hidden manager is approved here.
 
-## Approval requested
+## Approved contract
 
-Compiler work must not begin from general agreement with this direction. It
-requires explicit approval of all of these exact points:
+The maintainer approved these exact points on 2026-09-10, including the revised
+post-parameter spelling and explicit marking of extern declarations:
 
-1. Syntax is `unsafe { ... }` and `unsafe func name(...)` with no sigils.
-2. Every extern call is unsafe automatically; extern declarations retain their
-   current `func name(...) extern("symbol")` spelling.
-3. Unsafe-function bodies still mark their raw operations with unsafe blocks.
-4. The eight listed Ptr operations require unsafe, while whole-owner
+1. Blocks use `unsafe { ... }`.
+2. Unsafe Rae functions use `func name(...) unsafe ret T` or
+   `func name(...) unsafe { ... }`; function modifiers stay after `)`.
+3. Every extern declaration explicitly includes both distinct modifiers, as in
+   `func name(...) unsafe extern("symbol") ret T`. An extern without `unsafe` is
+   a compile error. All extern calls require an unsafe block.
+4. Unsafe-function bodies still mark their raw operations with unsafe blocks.
+5. The eight listed Ptr operations require unsafe, while whole-owner
    borrow/move/return/container/drop operations remain ordinary Rae.
-5. Unsafe never bypasses copy, move, drop or stored-borrow diagnostics.
-6. Generic/reflection/serialization resolution cannot erase Ptr or unsafe-call
+6. Unsafe never bypasses copy, move, drop or stored-borrow diagnostics.
+7. Generic/reflection/serialization resolution cannot erase Ptr or unsafe-call
    obligations.
-7. There is no callable feature in this implementation; raw callbacks remain C
+8. There is no callable feature in this implementation; raw callbacks remain C
    ABI Ptr values with explicit unsafe construction and native-owned state.
-8. Safe wrappers validate authoritative native/manager state and cannot trust
+9. Safe wrappers validate authoritative native/manager state and cannot trust
    publicly mutable metadata to enlarge memory access.
-9. Any module may author the same boundary; there is no privileged inventory,
+10. Any module may author the same boundary; there is no privileged inventory,
    opacity/noncopyable property or special `main` signature.
 
-Approval should either accept these points together or name the point and exact
-replacement desired. The GPU identity and resource-retirement decisions remain
-separate library reviews.
+The GPU identity and resource-retirement decisions remain separate library
+reviews.
