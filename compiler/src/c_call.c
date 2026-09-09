@@ -636,13 +636,8 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                                 gp2 = gp2->next; ga2 = ga2->next;
                             }
                         }
-                        bool concrete_is_num_prim = str_eq_cstr(pbase_concrete, "Int") || str_eq_cstr(pbase_concrete, "Int64") ||
-                            str_eq_cstr(pbase_concrete, "Float") || str_eq_cstr(pbase_concrete, "Float64") ||
-                            str_eq_cstr(pbase_concrete, "Bool") || str_eq_cstr(pbase_concrete, "Char") || str_eq_cstr(pbase_concrete, "Char32");
-                        bool is_num_prim = (is_primitive_type(pbase)
-                            && !str_eq_cstr(pbase, "String")
-                            && !str_eq_cstr(pbase, "Buffer")
-                            && !str_eq_cstr(pbase, "Any")) || concrete_is_num_prim;
+                        bool concrete_is_num_prim = is_scalar_primitive_type(pbase_concrete);
+                        bool is_num_prim = is_scalar_primitive_type(pbase) || concrete_is_num_prim;
                         bool view_is_value = is_num_prim
                             && sp->type->is_view && !sp->type->is_mod;
                         // #758: use the CONCRETE base (T resolved) so a generic
@@ -827,17 +822,8 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                         gp = gp->next; ga = ga->next;
                     }
                 }
-                bool concrete_is_num_prim = !str_eq_cstr(base_concrete, "String")
-                    && !str_eq_cstr(base_concrete, "Buffer")
-                    && !str_eq_cstr(base_concrete, "Any")
-                    && (str_eq_cstr(base_concrete, "Int") || str_eq_cstr(base_concrete, "Int64") ||
-                        str_eq_cstr(base_concrete, "Float") || str_eq_cstr(base_concrete, "Float64") ||
-                        str_eq_cstr(base_concrete, "Bool") || str_eq_cstr(base_concrete, "Char") ||
-                        str_eq_cstr(base_concrete, "Char32"));
-                bool is_num_prim = (is_primitive_type(base)
-                    && !str_eq_cstr(base, "Buffer")
-                    && !str_eq_cstr(base, "Any")
-                    && !str_eq_cstr(base, "String")) || concrete_is_num_prim;
+                bool concrete_is_num_prim = is_scalar_primitive_type(base_concrete);
+                bool is_num_prim = is_scalar_primitive_type(base) || concrete_is_num_prim;
                 bool view_is_value = is_num_prim && p->type->is_view && !p->type->is_mod;
                 // `none` for an OPTIONAL REFERENCE parameter is already a null
                 // pointer (spec 4.1); taking its address would yield `&NULL`.

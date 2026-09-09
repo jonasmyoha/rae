@@ -115,6 +115,25 @@ bool is_primitive_type(Str type_name) {
            str_eq_cstr(type_name, "RaeAny");
 }
 
+bool is_scalar_primitive_type(Str type_name) {
+    return str_eq_cstr(type_name, "Int") ||
+           str_eq_cstr(type_name, "Int64") ||
+           str_eq_cstr(type_name, "Int32") ||
+           str_eq_cstr(type_name, "Int16") ||
+           str_eq_cstr(type_name, "Int8") ||
+           str_eq_cstr(type_name, "UInt64") ||
+           str_eq_cstr(type_name, "UInt32") ||
+           str_eq_cstr(type_name, "UInt16") ||
+           str_eq_cstr(type_name, "UInt8") ||
+           str_eq_cstr(type_name, "Id") ||
+           str_eq_cstr(type_name, "Float") ||
+           str_eq_cstr(type_name, "Float32") ||
+           str_eq_cstr(type_name, "Float64") ||
+           str_eq_cstr(type_name, "Bool") ||
+           str_eq_cstr(type_name, "Char") ||
+           str_eq_cstr(type_name, "Char32");
+}
+
 bool is_raylib_builtin_type(Str type_name) {
     return str_eq_cstr(type_name, "Vector2") ||
            str_eq_cstr(type_name, "Vector3") ||
