@@ -2,11 +2,75 @@
 import Sdl3
 open webgpu/Context
 open webgpu/Webgpu
-open webgpu/Readback
+open webgpu/ReadRequest
 
 func createBuffer(usage: copy UInt64) ret Ptr {
   let descriptor: WGPUBufferDescriptor = { size: 32 as UInt64, usage: usage }
   ret wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: descriptor)
+}
+
+type ReadPair {
+  first: ReadRequest
+  second: ReadRequest
+}
+
+func createReadPair(firstBuffer: copy Ptr, secondBuffer: copy Ptr) ret opt ReadPair {
+  if let first: ReadRequest = ReadRequest.create(buffer: firstBuffer, range: { offset: 8 as UInt64, size: 16 as UInt64 }) {
+    if let second: ReadRequest = ReadRequest.create(buffer: secondBuffer, range: { offset: 0 as UInt64, size: 32 as UInt64 }) {
+      ret ReadPair { first: own first, second: own second }
+    }
+  }
+  ret none
+}
+
+func waitForRead(request: view ReadRequest) ret Int {
+  var status: Int = 0
+  var spins: Int = 0
+  loop status is 0 and spins < 100000 {
+    status = poll(this: request)
+    spins = spins + 1
+  }
+  ret status
+}
+
+func consumeCompleted(request: own ReadRequest) ret Bool {
+  ret waitForRead(request: request) is 1
+}
+
+func checkListCleanup() ret Bool {
+  let firstBuffer: Ptr = createBuffer(usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst)
+  let secondBuffer: Ptr = createBuffer(usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst)
+  let requests: List(ReadRequest) = List.create(ReadRequest, cap: 2)
+  if let first: ReadRequest = ReadRequest.create(buffer: firstBuffer, range: { offset: 0 as UInt64, size: 32 as UInt64 }) {
+    requests.add(value: own first)
+  } else {
+    wgpuBufferRelease(buffer: firstBuffer)
+    wgpuBufferRelease(buffer: secondBuffer)
+    ret false
+  }
+  if let second: ReadRequest = ReadRequest.create(buffer: secondBuffer, range: { offset: 0 as UInt64, size: 32 as UInt64 }) {
+    requests.add(value: own second)
+  } else {
+    wgpuBufferRelease(buffer: firstBuffer)
+    wgpuBufferRelease(buffer: secondBuffer)
+    ret false
+  }
+  # The two list elements now own the retained native requests and buffers.
+  wgpuBufferRelease(buffer: firstBuffer)
+  wgpuBufferRelease(buffer: secondBuffer)
+  var correct: Bool = requests.length is 2
+  if let firstRequest: view ReadRequest => requests.viewAt(index: 0) {
+    if waitForRead(request: firstRequest) is not 1 { correct = false }
+  } else {
+    correct = false
+  }
+  if let secondRequest: view ReadRequest => requests.viewAt(index: 1) {
+    if waitForRead(request: secondRequest) is not 1 { correct = false }
+  } else {
+    correct = false
+  }
+  # List cleanup consumes each element and invokes ReadRequest.drop exactly once.
+  ret correct
 }
 
 func checkCycle() ret Bool {
@@ -25,36 +89,32 @@ func checkCycle() ret Bool {
   wgpuCommandBufferRelease(commandBuffer: command)
   wgpuCommandEncoderRelease(commandEncoder: encoder)
   wgpuBufferRelease(buffer: source)
-  var firstRead: Ptr = startRead(buffer: first, offset: 8 as UInt64, size: 16 as UInt64)
-  var secondRead: Ptr = startRead(buffer: second, offset: 0 as UInt64, size: 32 as UInt64)
-  # The requests retain the buffers independently of these original handles.
+  if let reads: ReadPair = createReadPair(firstBuffer: first, secondBuffer: second) {
+    # Each native request retains its buffer independently of these handles.
+    wgpuBufferRelease(buffer: first)
+    wgpuBufferRelease(buffer: second)
+    var output: List(Int) = { 0 }
+    var i: Int = 0
+    loop i < 20 {
+      output.add(value: 0)
+      i = i + 1
+    }
+    let firstStatus: Int = waitForRead(request: reads.first)
+    let secondStatus: Int = waitForRead(request: reads.second)
+    var correct: Bool = firstStatus is 1 and secondStatus is 1
+    if reads.first.byteCount is not (16 as UInt64) { correct = false }
+    if reads.second.byteCount is not (32 as UInt64) { correct = false }
+    if copyTo(this: reads.first, destination: output.data, capacity: 8 as UInt64) { correct = false }
+    if not copyTo(this: reads.first, destination: output.data, capacity: 16 as UInt64) { correct = false }
+    if output.copyAtFallback(index: 0, fallback: -1) is not 22 { correct = false }
+    if output.copyAtFallback(index: 1, fallback: -1) is not 33 { correct = false }
+    if not copyTo(this: reads.second, destination: output.data, capacity: 32 as UInt64) { correct = false }
+    if output.copyAtFallback(index: 3, fallback: -1) is not 44 { correct = false }
+    ret correct
+  }
   wgpuBufferRelease(buffer: first)
   wgpuBufferRelease(buffer: second)
-  var output: List(Int) = { 0 }
-  var i: Int = 0
-  loop i < 20 {
-    output.add(value: 0)
-    i = i + 1
-  }
-  var firstStatus: Int = 0
-  var secondStatus: Int = 0
-  var spins: Int = 0
-  loop (firstStatus is 0 or secondStatus is 0) and spins < 100000 {
-    firstStatus = pollRead(request: firstRead)
-    secondStatus = pollRead(request: secondRead)
-    spins = spins + 1
-  }
-  var correct: Bool = firstStatus is 1 and secondStatus is 1
-  if copyRead(request: firstRead, destination: output.data, capacity: 8 as UInt64) is not 0 { correct = false }
-  if copyRead(request: firstRead, destination: output.data, capacity: 16 as UInt64) is not 1 { correct = false }
-  if output.copyAtFallback(index: 0, fallback: -1) is not 22 { correct = false }
-  if output.copyAtFallback(index: 1, fallback: -1) is not 33 { correct = false }
-  firstRead = releaseRead(request: firstRead)
-  firstRead = releaseRead(request: firstRead)
-  if copyRead(request: secondRead, destination: output.data, capacity: 32 as UInt64) is not 1 { correct = false }
-  if output.copyAtFallback(index: 3, fallback: -1) is not 44 { correct = false }
-  secondRead = releaseRead(request: secondRead)
-  ret correct
+  ret false
 }
 
 func main() ret Int {
@@ -71,41 +131,43 @@ func main() ret Int {
     i = i + 1
   }
   log("32 independent paired reads, bounded copies and growing destinations OK")
+  if not checkListCleanup() { ret 6 }
+  log("owner fields, transfer and List cleanup OK")
   let buffer: Ptr = createBuffer(usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst)
-  var invalid: Ptr = startRead(buffer: buffer, offset: 8 as UInt64, size: 32 as UInt64)
-  if pollRead(request: invalid) is not -1 { ret 2 }
-  invalid = releaseRead(request: invalid)
-  var cancelled: Ptr = startRead(buffer: buffer, offset: 0 as UInt64, size: 32 as UInt64)
-  cancelled = releaseRead(request: cancelled)
+  if let invalid: ReadRequest = ReadRequest.create(buffer: buffer, range: { offset: 8 as UInt64, size: 32 as UInt64 }) {
+    ret 2
+  }
+  if let cancelled: ReadRequest = ReadRequest.create(buffer: buffer, range: { offset: 0 as UInt64, size: 32 as UInt64 }) {
+    cancelled.drop()
+  } else {
+    ret 2
+  }
   webgpuPoll(wait: 0)
   # Reuse the same buffer after cancellation and completion/unmap.
   i = 0
   loop i < 32 {
-    var request: Ptr = startRead(buffer: buffer, offset: 0 as UInt64, size: 32 as UInt64)
-    var status: Int = 0
-    var spins: Int = 0
-    loop status is 0 and spins < 100000 {
-      status = pollRead(request: request)
-      spins = spins + 1
+    if let request: ReadRequest = ReadRequest.create(buffer: buffer, range: { offset: 0 as UInt64, size: 32 as UInt64 }) {
+      if waitForRead(request: request) is not 1 { ret 3 }
+    } else {
+      ret 3
     }
-    if status is not 1 { ret 3 }
-    request = releaseRead(request: request)
     i = i + 1
+  }
+  if let transferred: ReadRequest = ReadRequest.create(buffer: buffer, range: { offset: 0 as UInt64, size: 32 as UInt64 }) {
+    if not consumeCompleted(request: own transferred) { ret 3 }
+  } else {
+    ret 3
   }
   let blockingOutput: List(Int) = { 1, 1, 1, 1 }
   if webgpuMapRead(buffer: buffer, size: 32 as UInt64, dst: blockingOutput.data) is not 1 { ret 5 }
   if blockingOutput.copyAtFallback(index: 3, fallback: -1) is not 0 { ret 5 }
   log("existing blocking read diagnostic OK")
-  var destroyed: Ptr = startRead(buffer: buffer, offset: 0 as UInt64, size: 32 as UInt64)
-  wgpuBufferDestroy(buffer: buffer)
-  var status: Int = 0
-  i = 0
-  loop status is 0 and i < 100000 {
-    status = pollRead(request: destroyed)
-    i = i + 1
+  if let destroyed: ReadRequest = ReadRequest.create(buffer: buffer, range: { offset: 0 as UInt64, size: 32 as UInt64 }) {
+    wgpuBufferDestroy(buffer: buffer)
+    if waitForRead(request: destroyed) is not -1 { ret 4 }
+  } else {
+    ret 4
   }
-  if status is not -1 { ret 4 }
-  destroyed = releaseRead(request: destroyed)
   wgpuBufferRelease(buffer: buffer)
   log("failure, cancellation, repeated map/unmap and destroyed-buffer callback OK")
   ret 0
