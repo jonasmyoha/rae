@@ -261,6 +261,12 @@ func createUiWorld() ret UiWorld {
   }
 }
 
+# The constructor by name (#883): `let uiWorld: UiWorld = create()`.
+# `createUiWorld()` stays as its explicit-name twin.
+func create() ret UiWorld {
+  ret createUiWorld()
+}
+
 # Allocate a new entity id and mark it alive. Delegates to the shared entity
 # core (#706), which records the live-set bookkeeping for an O(1) destroy.
 # The UiWorld-facing entity API — thin one-line adapters over the shared entity

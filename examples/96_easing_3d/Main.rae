@@ -23,7 +23,7 @@ func uploadMeshData(meshData: view MeshData) ret MeshHandle {
 }
 
 func buildScene(sphere: view MeshHandle, ground: view MeshHandle) ret World3d {
-  var sceneWorld: World3d = createWorld3d()
+  var sceneWorld: World3d = create()
   let noEmission: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let noRotation: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
   let unitScale: Vec3 = Vec3.create(x: 1.0, y: 1.0, z: 1.0)
@@ -66,7 +66,7 @@ func main() ret Int {
     textFontName: "Roboto-Regular"
     iconFontName: ""
     themeFile: "theme.raescene")
-  var world: UiWorld = createUiWorld()
+  var world: UiWorld = create()
   # #764: install the app's theme (palette + scene tokens) onto this world.
   seedWorldTheme(world: world, res: uiResources)
   let uiRoot: EntityId = mountUiScene(
