@@ -44,6 +44,37 @@ static bool array_element_ref(const AstTypeRef* type, AstTypeRef* out) {
   return false;
 }
 
+static const AstFuncDecl* find_named_unary_for(CompilerContext* cctx, const char* name, Str base) {
+  if (!cctx || base.len == 0) return NULL;
+  for (size_t j = 0; j < cctx->all_decl_count; j++) {
+    const AstDecl* d = cctx->all_decls[j];
+    if (d->kind != AST_DECL_FUNC) continue;
+    if (!str_eq_cstr(d->as.func_decl.name, name)) continue;
+    if (d->as.func_decl.generic_params) continue;
+    if (d->as.func_decl.is_extern) continue;
+    const AstParam* first = d->as.func_decl.params;
+    if (!first || !first->type || first->next) continue;
+    if (!str_eq(get_base_type_name(first->type), base)) continue;
+    return &d->as.func_decl;
+  }
+  return NULL;
+}
+
+const AstFuncDecl* find_user_drop_for(CompilerContext* cctx, Str base) {
+  return find_named_unary_for(cctx, "drop", base);
+}
+
+const AstFuncDecl* find_user_copy_for(CompilerContext* cctx, Str base) {
+  return find_named_unary_for(cctx, "copy", base);
+}
+
+bool type_has_user_drop(CompilerContext* cctx, const AstTypeRef* type) {
+  if (!cctx || !type) return false;
+  if (type->is_view || type->is_mod || type->is_opt) return false;
+  if (type->generic_args) return false;
+  return find_user_drop_for(cctx, get_base_type_name(type)) != NULL;
+}
+
 bool is_drop_target_type(const AstTypeRef* type) {
   if (!type) return false;
   if (type->is_opt) return false;
@@ -59,7 +90,6 @@ bool is_drop_target_type(const AstTypeRef* type) {
 
 bool type_owns_heap_storage(CompilerContext* cctx, const AstModule* module,
                             const AstTypeRef* type, int depth) {
-  (void)cctx;
   if (!type || depth > 32) return false;
   if (type->is_view || type->is_mod) return false;
   if (type->is_opt) {
@@ -69,6 +99,7 @@ bool type_owns_heap_storage(CompilerContext* cctx, const AstModule* module,
   }
   if (is_drop_target_type(type)) return true;
   { AstTypeRef elem; if (array_element_ref(type, &elem)) return type_owns_heap_storage(cctx, module, &elem, depth + 1); }
+  if (type_has_user_drop(cctx, type)) return true;
   Str base = get_base_type_name(type);
   /* c_struct (raylib Color / Vector2 / etc.) and primitives never
    * own Rae-allocated heap storage. */
@@ -92,6 +123,7 @@ bool type_needs_cascade_drop(CompilerContext* cctx, const AstModule* module,
   }
   if (is_drop_target_type(type)) return true;
   { AstTypeRef elem; if (array_element_ref(type, &elem)) return type_needs_cascade_drop(cctx, module, &elem, depth + 1); }
+  if (type_has_user_drop(cctx, type)) return true;
   Str base = get_base_type_name(type);
   if (str_eq_cstr(base, "String")) return true;
   const AstDecl* d = find_type_decl(NULL, module, base);
@@ -124,6 +156,7 @@ bool type_needs_deep_copy(CompilerContext* cctx, const AstModule* module,
   }
   if (is_drop_target_type(type)) return true;
   { AstTypeRef elem; if (array_element_ref(type, &elem)) return type_needs_deep_copy(cctx, module, &elem, depth + 1); }
+  if (type_has_user_drop(cctx, type)) return true;
   Str base = get_base_type_name(type);
   if (str_eq_cstr(base, "String")) return true;
   /* Any / RaeAny is an opaque box — shallow assignment is fine

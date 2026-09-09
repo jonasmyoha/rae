@@ -225,12 +225,6 @@ func growStringMap(V: type, this: mod StringMap(V)) {
   this.isGrowing = false
 }
 
-func free(V: type, this: mod StringMap(V)) {
-  rae_ext_rae_buf_free(buf: this.data)
-  this.length = 0
-  this.cap = 0
-}
-
 # Canonical scope-exit dealloc name per docs/scope-exit-dealloc.md.
 # Same body as `free()`. Once Stage 2 codegen lands and starts
 # emitting `drop()` calls automatically, `free()` becomes dead and

@@ -1,0 +1,13 @@
+# #881: `drop` is reserved for the destructor: exactly `func drop(this: mod T)`.
+type Slot {
+  id: Int
+}
+
+func drop(this: own Slot) ret Bool {
+  log("release {this.id}")
+  ret true
+}
+
+func main() {
+  let a: Slot = { id: 1 }
+}
