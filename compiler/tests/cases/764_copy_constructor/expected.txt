@@ -1,0 +1,31 @@
+-- owning binding from a place
+acquire 1
+copy 1 -> 101
+-- copy parameter
+copy 1 -> 101
+keep 101
+release 101
+-- struct literal field, then a structural copy of the struct
+copy 1 -> 101
+copy 101 -> 201
+-- list element: copyAt and whole-list copy
+acquire 2
+copy 2 -> 102
+element 102
+release 102
+copy 2 -> 102
+-- reassignment from a place releases the old value
+acquire 3
+copy 1 -> 101
+release 3
+-- explicit copy call
+copy 101 -> 201
+-- end of main
+release 201
+release 101
+release 102
+release 2
+release 201
+release 101
+release 101
+release 1

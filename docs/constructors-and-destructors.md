@@ -1,6 +1,6 @@
 # Constructors, destructors and copies in Rae: `create`, `drop`, `copy`
 
-Status: **`drop` implemented (#881, 2026-09-09); `create` (#880) and `copy` (#882)
+Status: **`drop` (#881) and `copy` (#882) implemented, 2026-09-09; `create` (#880)
 pending.** The rest of this document is the design as approved for implementation. This document covers constructors, destructors and copies only.
 Native
 pointers, `unsafe`, GPU resource identity and the rest of
@@ -261,6 +261,11 @@ It receives the original by `view` and returns a new, independent value. Any
 other function named `copy` whose first parameter is a `T` is a compile error
 (`copy` is reserved for the copy of `T`). Explicit calls, `let twin: Counter =
 counter.copy()`, are ordinary calls.
+
+`copy` is also the parameter-mode keyword (`slot: copy Slot`). The parser
+accepts it as a name after `func` and after `.`, where a mode can never
+appear, the same way it already accepts `val`; nothing else about the keyword
+changes.
 
 ### 5.3 When it runs
 

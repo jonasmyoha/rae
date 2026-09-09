@@ -75,6 +75,13 @@ bool type_has_user_drop(CompilerContext* cctx, const AstTypeRef* type) {
   return find_user_drop_for(cctx, get_base_type_name(type)) != NULL;
 }
 
+bool type_has_user_copy(CompilerContext* cctx, const AstTypeRef* type) {
+  if (!cctx || !type) return false;
+  if (type->is_view || type->is_mod || type->is_opt) return false;
+  if (type->generic_args) return false;
+  return find_user_copy_for(cctx, get_base_type_name(type)) != NULL;
+}
+
 bool is_drop_target_type(const AstTypeRef* type) {
   if (!type) return false;
   if (type->is_opt) return false;
@@ -156,7 +163,7 @@ bool type_needs_deep_copy(CompilerContext* cctx, const AstModule* module,
   }
   if (is_drop_target_type(type)) return true;
   { AstTypeRef elem; if (array_element_ref(type, &elem)) return type_needs_deep_copy(cctx, module, &elem, depth + 1); }
-  if (type_has_user_drop(cctx, type)) return true;
+  if (type_has_user_drop(cctx, type) || type_has_user_copy(cctx, type)) return true;
   Str base = get_base_type_name(type);
   if (str_eq_cstr(base, "String")) return true;
   /* Any / RaeAny is an opaque box — shallow assignment is fine
