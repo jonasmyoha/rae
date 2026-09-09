@@ -360,20 +360,18 @@ The VM target is not touched (deprecated).
 - Examples stop calling any shutdown function at the end of `main`; the App
   local's drop does it.
 
-## 8. Relation to #878
+## 8. Relation to the GPU and Ptr design
 
-If approved, this replaces these #878 spellings:
+This lifecycle model is implemented. The rewritten
+[GPU and C-interop proposal](ptr-and-gpu-resource-design.md) uses it directly:
+ordinary `create`, `drop` and `copy`, derived copy restrictions, consuming explicit
+`value.drop()` and containers following element ownership. It does not add owner
+properties or reimplement cleanup through registration.
 
-| #878 | Here |
-| --- | --- |
-| `drop` type property + "exactly one defining-module hook" | The destructor by name and shape, section 4.1 |
-| `noncopyable` type property | Derived: a destructor without a `copy` means not copyable, section 5.4; `copy` makes it copyable again |
-| "Direct calls to the hook are rejected; `close` must be idempotent" | `x.drop()` consumes the value, section 4.3 |
-| "Reject owners in containers initially" | Allowed; containers inherit non-copyability, section 5 |
-| `createNativeBuffer` named factory | `create`, section 3 |
-
-Everything else in #878 (`opaque`, `unsafe`, extern obligations, resource IDs)
-is a separate decision that this document neither needs nor contradicts.
+Raw pointer access and foreign-call safety remain separate proposed work. The GPU
+document now considers an explicit low-level operation boundary without requiring
+a separate opaque-type feature. Resource IDs and GPU completion remain library
+responsibilities. These proposals do not alter the lifecycle contract here.
 
 ## 9. The destructor's name
 
