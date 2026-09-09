@@ -54,4 +54,21 @@ bool type_needs_cascade_drop(CompilerContext* cctx, const AstModule* module,
 bool type_needs_deep_copy(CompilerContext* cctx, const AstModule* module,
                           const AstTypeRef* type, int depth);
 
+/* Destructors and copies by name and shape (docs/constructors-and-destructors.md,
+ * #881/#882). A DESTRUCTOR of a non-generic user type T is the function
+ *   func drop(this: mod T)
+ * declared in T's module; a COPY of T is
+ *   func copy(this: view T) ret T
+ * The shape is checked by sema; these lookups only match by name and first-
+ * parameter base type so the backends and the classifiers agree. Generic
+ * containers keep their existing `drop(T)(this: mod X(T))` overloads, which
+ * the backends look up separately. NULL when there is none. */
+const AstFuncDecl* find_user_drop_for(CompilerContext* cctx, Str base);
+const AstFuncDecl* find_user_copy_for(CompilerContext* cctx, Str base);
+
+/* True iff `type` (not a borrow, not opt) names a non-generic user type that
+ * has a destructor. Such a type needs cleanup even when no field owns heap,
+ * and it cannot be copied unless it also has a copy. */
+bool type_has_user_drop(CompilerContext* cctx, const AstTypeRef* type);
+
 #endif /* RAE_OWNERSHIP_H */

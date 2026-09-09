@@ -37,8 +37,8 @@ When implementing collections or common data types, use these names:
 
 ## 4. Allocation & Cleanup
 
-- **Explicit Creation:** Types that allocate memory should have a `createType()` or `new()` function.
-- **Explicit Freeing:** Until destructors are implemented, types that allocate must provide a `free()` method.
+- **Creation:** Types that allocate have a constructor: a function named `create` returning the type (`createType()` names remain until #880 lands).
+- **Cleanup:** A type that holds anything the compiler cannot see (a handle, a slot, native memory) declares its destructor, `func drop(this: mod T)`, in its own module; the compiler runs it wherever the value is released (docs/constructors-and-destructors.md, #881). Do not add `free()` methods.
 - **Buffers:** Use `Buffer(T)` primitives for raw memory management within the stdlib.
 
 ## 5. Module Structure

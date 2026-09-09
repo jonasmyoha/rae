@@ -31,6 +31,7 @@ static const char* sema_diag_file(const AstModule* module) {
 /* Module under analysis, so deep helpers (ensure_type_match) can flag a
  * hard error and actually fail the build rather than just printing. */
 static AstModule* s_current_module = NULL;
+static CompilerContext* s_lifecycle_ctx = NULL;  /* #881: the context for lifecycle lookups in literal checks */
 
 /* True while analyzing an `if let` binding statement. There, an `opt T`
  * initializer bound to a non-optional name is the NARROWING itself (the
@@ -297,6 +298,223 @@ static Symbol* symbol_table_lookup(SymbolTable* table, Str name) {
         curr = curr->next;
     }
     return NULL;
+}
+
+// ===== #881: destructors by name and shape (docs/constructors-and-destructors.md)
+//
+// `func drop(this: mod T)` in T's module is T's DESTRUCTOR; the backends run it
+// wherever they release a T. `func copy(this: view T) ret T` is T's COPY
+// (#882). Both are ordinary functions: the name plus the exact shape is the
+// whole opt-in, so a wrong shape under a reserved name is a declaration error
+// rather than a silently ignored function.
+
+bool has_property(const AstProperty* props, const char* name);  /* c_backend_internal.h */
+void register_decl(CompilerContext* ctx, const AstDecl* decl);       /* c_backend_internal.h */
+
+static const char* sema_decl_file(const AstDecl* decl, const AstModule* module) {
+    if (decl && decl->origin_file) return decl->origin_file;
+    return (module && module->file_path) ? module->file_path : "<unknown>";
+}
+
+/* A user (non-generic, non-c_struct) struct type named `base`, or NULL. */
+static const AstDecl* sema_user_struct_decl(SymbolTable* symbols, Str base) {
+    Symbol* sym = symbol_table_lookup(symbols, base);
+    if (!sym || !sym->decl || sym->decl->kind != AST_DECL_TYPE) return NULL;
+    return sym->decl;
+}
+
+static bool sema_typeinfo_uncopyable(CompilerContext* ctx, TypeInfo* t) {
+    if (!t) return false;
+    if (t->kind == TYPE_REF) return false;              /* a borrow copies nothing */
+    if (t->kind != TYPE_STRUCT) return false;
+    if (!find_user_drop_for(ctx, t->name)) return false;
+    return find_user_copy_for(ctx, t->name) == NULL;
+}
+
+/* Does evaluating `e` COPY an existing value (a place), as opposed to
+ * producing a fresh one (call, literal) or transferring it (`own`)? */
+static bool sema_expr_copies_place(const AstExpr* e) {
+    if (!e) return false;
+    switch (e->kind) {
+        case AST_EXPR_IDENT: return true;
+        case AST_EXPR_MEMBER: return sema_expr_copies_place(e->as.member.object) || e->as.member.object->kind == AST_EXPR_IDENT;
+        case AST_EXPR_INDEX: return true;
+        case AST_EXPR_UNBOX: return sema_expr_copies_place(e->as.unary.operand);
+        default: return false;
+    }
+}
+
+static void sema_report_uncopyable(AstModule* module, const char* file, size_t line, size_t col,
+                                   Str type_name, const char* how) {
+    char buf[360];
+    snprintf(buf, sizeof buf,
+             "cannot copy '%.*s' %s: it has a destructor (`func drop(this: mod %.*s)`) and no "
+             "`func copy(this: view %.*s) ret %.*s`; write 'own <expr>' to transfer it, or bind a "
+             "'view'/'mod' reference",
+             (int)type_name.len, type_name.data, how,
+             (int)type_name.len, type_name.data,
+             (int)type_name.len, type_name.data, (int)type_name.len, type_name.data);
+    diag_error(file, (int)line, (int)col, buf);
+    if (module) module->had_error = true;
+}
+
+/* The reserved shapes. Called for every non-extern function declaration. */
+static void sema_check_lifecycle_decl(CompilerContext* ctx, AstModule* module,
+                                      SymbolTable* symbols, const AstDecl* decl) {
+    (void)ctx;
+    const AstFuncDecl* fd = &decl->as.func_decl;
+    bool is_drop = str_eq_cstr(fd->name, "drop");
+    bool is_copy = str_eq_cstr(fd->name, "copy");
+    if (!is_drop && !is_copy) return;
+    if (fd->generic_params || fd->specialization_args) return;   /* container overloads keep their shape */
+    const AstParam* first = fd->params;
+    if (!first || !first->type) return;
+    Str base = get_base_type_name(first->type);
+    const AstDecl* td = sema_user_struct_decl(symbols, base);
+    if (!td) return;                                             /* not a user type: an ordinary function */
+    if (has_property(td->as.type_decl.properties, "c_struct")) return;
+    const char* file = sema_decl_file(decl, module);
+    char buf[360];
+    bool shape_ok;
+    if (is_drop) {
+        shape_ok = first->type->is_mod && !first->next && !fd->returns
+            && str_eq_cstr(first->name, "this") && !first->type->is_opt;
+        if (!shape_ok) {
+            snprintf(buf, sizeof buf,
+                     "'drop' is reserved for the destructor of '%.*s': it must be exactly "
+                     "`func drop(this: mod %.*s)` with no return value",
+                     (int)base.len, base.data, (int)base.len, base.data);
+            diag_error(file, (int)decl->line, (int)decl->column, buf);
+            module->had_error = true;
+            return;
+        }
+    } else {
+        Str ret_base = (fd->returns && fd->returns->type) ? get_base_type_name(fd->returns->type) : (Str){0};
+        shape_ok = first->type->is_view && !first->next && !first->type->is_opt
+            && str_eq_cstr(first->name, "this")
+            && fd->returns && !fd->returns->next && fd->returns->type
+            && !fd->returns->type->is_opt && !fd->returns->type->is_view && !fd->returns->type->is_mod
+            && str_eq(ret_base, base);
+        if (!shape_ok) {
+            snprintf(buf, sizeof buf,
+                     "'copy' is reserved for the copy of '%.*s': it must be exactly "
+                     "`func copy(this: view %.*s) ret %.*s`",
+                     (int)base.len, base.data, (int)base.len, base.data, (int)base.len, base.data);
+            diag_error(file, (int)decl->line, (int)decl->column, buf);
+            module->had_error = true;
+            return;
+        }
+    }
+    /* Same module as the type: the type's author owns its lifecycle. */
+    const char* fm = decl->module_name ? decl->module_name : "";
+    const char* tm = td->module_name ? td->module_name : "";
+    if (strcmp(fm, tm) != 0) {
+        snprintf(buf, sizeof buf,
+                 "'%s' for '%.*s' must be declared in the module that declares '%.*s'",
+                 is_drop ? "drop" : "copy", (int)base.len, base.data, (int)base.len, base.data);
+        diag_error(file, (int)decl->line, (int)decl->column, buf);
+        module->had_error = true;
+    }
+}
+
+/* Use after an explicit `name.drop()`: a lexical scan of the statements that
+ * follow in the same list (nested blocks included). An assignment to the bare
+ * name or a shadowing `let` reinitialises it and ends the scan. */
+static bool sema_expr_mentions_ident(const AstExpr* e, Str name) {
+    if (!e) return false;
+    switch (e->kind) {
+        case AST_EXPR_IDENT: return str_eq(e->as.ident, name);
+        case AST_EXPR_BINARY: return sema_expr_mentions_ident(e->as.binary.lhs, name) || sema_expr_mentions_ident(e->as.binary.rhs, name);
+        case AST_EXPR_UNARY: case AST_EXPR_OWN: case AST_EXPR_BOX: case AST_EXPR_UNBOX:
+            return sema_expr_mentions_ident(e->as.unary.operand, name);
+        case AST_EXPR_CAST: return sema_expr_mentions_ident(e->as.cast.operand, name);
+        case AST_EXPR_CALL:
+            if (sema_expr_mentions_ident(e->as.call.callee, name)) return true;
+            for (const AstCallArg* a = e->as.call.args; a; a = a->next) if (sema_expr_mentions_ident(a->value, name)) return true;
+            return false;
+        case AST_EXPR_METHOD_CALL:
+            if (sema_expr_mentions_ident(e->as.method_call.object, name)) return true;
+            for (const AstCallArg* a = e->as.method_call.args; a; a = a->next) if (sema_expr_mentions_ident(a->value, name)) return true;
+            return false;
+        case AST_EXPR_MEMBER: return sema_expr_mentions_ident(e->as.member.object, name);
+        case AST_EXPR_INDEX: return sema_expr_mentions_ident(e->as.index.target, name) || sema_expr_mentions_ident(e->as.index.index, name);
+        case AST_EXPR_OBJECT:
+            for (const AstObjectField* f = e->as.object_literal.fields; f; f = f->next) if (sema_expr_mentions_ident(f->value, name)) return true;
+            return false;
+        case AST_EXPR_COLLECTION_LITERAL:
+            for (const AstCollectionElement* c = e->as.collection.elements; c; c = c->next) if (sema_expr_mentions_ident(c->value, name)) return true;
+            return false;
+        case AST_EXPR_LIST:
+            for (const AstExprList* l = e->as.list; l; l = l->next) if (sema_expr_mentions_ident(l->value, name)) return true;
+            return false;
+        case AST_EXPR_INTERP:
+            for (const AstInterpPart* p = e->as.interp.parts; p; p = p->next) if (sema_expr_mentions_ident(p->value, name)) return true;
+            return false;
+        case AST_EXPR_MATCH:
+            if (sema_expr_mentions_ident(e->as.match_expr.subject, name)) return true;
+            for (const AstMatchArm* arm = e->as.match_expr.arms; arm; arm = arm->next) if (sema_expr_mentions_ident(arm->value, name)) return true;
+            return false;
+        default: return false;
+    }
+}
+
+static bool sema_stmt_mentions_ident(const AstStmt* s, Str name);
+static bool sema_block_mentions_ident(const AstBlock* b, Str name) {
+    for (const AstStmt* s = b ? b->first : NULL; s; s = s->next) if (sema_stmt_mentions_ident(s, name)) return true;
+    return false;
+}
+static bool sema_stmt_mentions_ident(const AstStmt* s, Str name) {
+    if (!s) return false;
+    switch (s->kind) {
+        case AST_STMT_LET: return sema_expr_mentions_ident(s->as.let_stmt.value, name);
+        case AST_STMT_DESTRUCT: return sema_expr_mentions_ident(s->as.destruct_stmt.call, name);
+        case AST_STMT_EXPR: return sema_expr_mentions_ident(s->as.expr_stmt, name);
+        case AST_STMT_RET:
+            for (const AstReturnArg* r = s->as.ret_stmt.values; r; r = r->next) if (sema_expr_mentions_ident(r->value, name)) return true;
+            return false;
+        case AST_STMT_IF:
+            return sema_stmt_mentions_ident(s->as.if_stmt.binding, name)
+                || sema_expr_mentions_ident(s->as.if_stmt.condition, name)
+                || sema_block_mentions_ident(s->as.if_stmt.then_block, name)
+                || sema_block_mentions_ident(s->as.if_stmt.else_block, name);
+        case AST_STMT_LOOP:
+            return sema_stmt_mentions_ident(s->as.loop_stmt.init, name)
+                || sema_expr_mentions_ident(s->as.loop_stmt.condition, name)
+                || sema_expr_mentions_ident(s->as.loop_stmt.increment, name)
+                || sema_block_mentions_ident(s->as.loop_stmt.body, name);
+        case AST_STMT_MATCH:
+            if (sema_expr_mentions_ident(s->as.match_stmt.subject, name)) return true;
+            for (const AstMatchCase* c = s->as.match_stmt.cases; c; c = c->next) if (sema_block_mentions_ident(c->block, name)) return true;
+            return false;
+        case AST_STMT_ASSIGN:
+            return sema_expr_mentions_ident(s->as.assign_stmt.target, name)
+                || sema_expr_mentions_ident(s->as.assign_stmt.value, name);
+        case AST_STMT_DEFER: return sema_block_mentions_ident(s->as.defer_stmt.block, name);
+        default: return false;
+    }
+}
+
+static void sema_check_use_after_drop(AstModule* module, const char* file, const AstStmt* drop_stmt, Str name) {
+    for (const AstStmt* s = drop_stmt->next; s; s = s->next) {
+        if (s->kind == AST_STMT_ASSIGN && s->as.assign_stmt.target
+            && s->as.assign_stmt.target->kind == AST_EXPR_IDENT
+            && str_eq(s->as.assign_stmt.target->as.ident, name)) {
+            if (sema_expr_mentions_ident(s->as.assign_stmt.value, name)) break; /* reported below */
+            return;                                                             /* reinitialised */
+        }
+        if (s->kind == AST_STMT_LET && str_eq(s->as.let_stmt.name, name)) return; /* shadowed */
+        if (!sema_stmt_mentions_ident(s, name)) continue;
+        char buf[240];
+        snprintf(buf, sizeof buf,
+                 "use of '%.*s' after '%.*s.drop()': the value was released and consumed; "
+                 "assign it a new value before using it again",
+                 (int)name.len, name.data, (int)name.len, name.data);
+        size_t line = s->line, col = s->column;
+        if (s->kind == AST_STMT_EXPR && s->as.expr_stmt) { line = s->as.expr_stmt->line; col = s->as.expr_stmt->column; }
+        diag_error(file, (int)line, (int)col, buf);
+        module->had_error = true;
+        return;
+    }
 }
 
 // Defined further down (near the statement analyzer); used earlier by the
@@ -1193,6 +1411,7 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
             // mutable borrow vs consume), which matters when a
             // function later changes to a non-primitive type.
             if (!decl->as.func_decl.is_extern) {
+                sema_check_lifecycle_decl(ctx, module, symbols, decl);
                 // After merge + generic specialization, module->file_path
                 // is whichever file was merged last — not the file the
                 // decl actually came from. Prefer decl->origin_file when
@@ -1216,6 +1435,13 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
                         continue;
                     }
                     bool has_mode = pt->is_view || pt->is_mod || pt->is_own || pt->is_copy;
+                    if (pt->is_copy && !pt->is_opt && !pt->generic_args) {
+                        Str cbase = get_base_type_name(pt);
+                        if (find_user_drop_for(ctx, cbase) && !find_user_copy_for(ctx, cbase)) {
+                            sema_report_uncopyable(module, err_file, pt->line, pt->column, cbase,
+                                                   "through a 'copy' parameter");
+                        }
+                    }
                     if (has_mode) continue;
                     // Any and enum types are bare-allowed: they're
                     // value-types (tagged union / int tag) with no
@@ -2322,7 +2548,22 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
     }
     if (!stmt) return;
     switch (stmt->kind) {
-        case AST_STMT_EXPR: if (stmt->as.expr_stmt) sema_analyze_expr(ctx, module, symbols, stmt->as.expr_stmt); break;
+        case AST_STMT_EXPR: {
+            if (stmt->as.expr_stmt) sema_analyze_expr(ctx, module, symbols, stmt->as.expr_stmt);
+            // #881: `name.drop()` on a value whose type has a destructor consumes it.
+            const AstExpr* e = stmt->as.expr_stmt;
+            if (e && e->kind == AST_EXPR_METHOD_CALL && !e->as.method_call.args
+                && str_eq_cstr(e->as.method_call.method_name, "drop")
+                && e->as.method_call.object && e->as.method_call.object->kind == AST_EXPR_IDENT) {
+                Symbol* sym = symbol_table_lookup(symbols, e->as.method_call.object->as.ident);
+                TypeInfo* st = sym ? sym->type : NULL;
+                if (st && st->kind == TYPE_STRUCT && find_user_drop_for(ctx, st->name)) {
+                    sema_check_use_after_drop(module, sema_diag_file(module), stmt,
+                                              e->as.method_call.object->as.ident);
+                }
+            }
+            break;
+        }
         case AST_STMT_LET: {
             TypeInfo* t = NULL;
             if (stmt->as.let_stmt.type) t = sema_resolve_type_internal(ctx, module, symbols, stmt->as.let_stmt.type);
@@ -2330,6 +2571,14 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 sema_analyze_expr(ctx, module, symbols, stmt->as.let_stmt.value);
                 if (!t && stmt->as.let_stmt.value->resolved_type) t = stmt->as.let_stmt.value->resolved_type;
                 if (t) ensure_type_match(ctx, t, &stmt->as.let_stmt.value);
+                // #881: an owning binding from a place copies the value.
+                if (!stmt->as.let_stmt.is_bind && stmt->as.let_stmt.type
+                    && !stmt->as.let_stmt.type->is_view && !stmt->as.let_stmt.type->is_mod
+                    && sema_typeinfo_uncopyable(ctx, t)
+                    && sema_expr_copies_place(stmt->as.let_stmt.value)) {
+                    sema_report_uncopyable(module, sema_diag_file(module), stmt->line, stmt->column,
+                                           t->name, "into a new binding");
+                }
             }
             // A `mod` binding mints mutable access, so its source must be
             // mutable: an owned place, a mod param, a mod binding, or a call
@@ -3025,7 +3274,21 @@ static void sema_check_object_literal_fields(TypeInfo* structType, AstObjectFiel
         bool known = false;
         for (AstTypeField* tf = td->fields; tf; tf = tf->next)
             if (str_eq(tf->name, f->name)) { known = true; break; }
-        if (known) continue;
+        if (known) {
+            const AstTypeField* tf = td->fields;
+            while (tf && !str_eq(tf->name, f->name)) tf = tf->next;
+            if (tf && tf->type && !tf->type->is_opt && !tf->type->generic_args
+                && s_lifecycle_ctx && sema_expr_copies_place(f->value)) {
+                Str fbase = get_base_type_name(tf->type);
+                if (find_user_drop_for(s_lifecycle_ctx, fbase) && !find_user_copy_for(s_lifecycle_ctx, fbase)) {
+                    sema_report_uncopyable(s_current_module, errFile,
+                                           f->value ? f->value->line : litLine,
+                                           f->value ? f->value->column : litCol,
+                                           fbase, "into a struct literal field (write 'field: own <expr>')");
+                }
+            }
+            continue;
+        }
         char buf[320];
         snprintf(buf, sizeof buf,
             "unknown field '%.*s' in literal of type '%.*s' — no such field on the struct",
@@ -4600,6 +4863,11 @@ static void sema_check_enum_package_clash(AstModule* module) {
 
 bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
     s_current_module = module;
+    s_lifecycle_ctx = ctx;
+    /* #881: the destructor/copy lookups (ownership.c) read ctx->all_decls, which
+     * the C backend fills later; register the merged module's declarations now
+     * (register_decl dedupes by pointer, so the backend's pass is unaffected). */
+    for (const AstDecl* d = module->decls; d; d = d->next) register_decl(ctx, d);
     sema_check_enum_package_clash(module);  // #788 (c2)
     if (!ctx->type_registry) {
         ctx->type_registry = arena_alloc(ctx->ast_arena, sizeof(TypeRegistry));

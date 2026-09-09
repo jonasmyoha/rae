@@ -1,0 +1,91 @@
+# #881: a destructor is `func drop(this: mod T)` in T's module. The compiler
+# runs it once wherever a T is released: scope exit, early ret, loop
+# iterations, an `own` parameter consumed by the callee, a field of a struct,
+# an element of a List, an optional payload, a reassigned local and an
+# explicit `x.drop()` (which consumes the local). A `ret x` moves the value
+# out instead. The fake resource logs, so the order and the count are visible.
+type Slot {
+  id: Int
+}
+
+func acquire(id: view Int) ret Slot {
+  log("acquire {id}")
+  ret Slot { id: id }
+}
+
+func drop(this: mod Slot) {
+  log("release {this.id}")
+}
+
+type Pair {
+  first: Slot
+  second: Slot
+}
+
+type Holder {
+  name: String
+  slots: List(Slot)
+}
+
+func consume(slot: own Slot) {
+  log("consumed {slot.id}")
+}
+
+func inspect(slot: view Slot) {
+  log("inspect {slot.id}")
+}
+
+func passThrough(id: view Int) ret Slot {
+  let slot: Slot = acquire(id: id)
+  ret slot
+}
+
+func earlyExit(flag: view Bool) {
+  let slot: Slot = acquire(id: 30)
+  if flag {
+    log("early ret")
+    ret
+  }
+  log("no early ret")
+}
+
+func maybeSlot(present: view Bool) ret opt Slot {
+  if present { ret acquire(id: 40) }
+  ret none
+}
+
+func main() {
+  log("-- scope and own")
+  let a: Slot = acquire(id: 1)
+  inspect(slot: a)
+  consume(slot: own a)
+  log("-- returned local moves out")
+  var b: Slot = passThrough(id: 2)
+  log("-- struct fields drop after the destructor, in reverse order")
+  let pair: Pair = { first: acquire(id: 3), second: acquire(id: 4) }
+  log("-- loop iterations")
+  var i: Int = 0
+  loop i < 2 {
+    let inner: Slot = acquire(id: 10 + i)
+    i = i + 1
+  }
+  log("-- early ret")
+  earlyExit(flag: true)
+  earlyExit(flag: false)
+  log("-- list elements")
+  var holder: Holder = { name: "holder", slots: createList(Slot, cap: 2) }
+  holder.slots.add(value: acquire(id: 20))
+  holder.slots.add(value: acquire(id: 21))
+  log("-- optional payload")
+  if let found: Slot = maybeSlot(present: true) {
+    log("found {found.id}")
+  }
+  if let missing: Slot = maybeSlot(present: false) {
+    log("unexpected {missing.id}")
+  }
+  log("-- explicit drop consumes, reassignment releases the old value")
+  b.drop()
+  b = acquire(id: 5)
+  b = acquire(id: 6)
+  log("-- end of main")
+}
