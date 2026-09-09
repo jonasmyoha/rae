@@ -1,60 +1,36 @@
 # Native resource ownership
 
-Status: **revision 3 direction accepted; concrete revision 4 awaits approval.**
+Status: **use the shipped create/drop/copy contract; the remaining pointer boundary
+is proposed in revision 5 of the GPU design.**
 
-[Ptr and GPU resources](ptr-and-gpu-resource-design.md) is the active design.
-Its revision 2 module/owner registration scheme and special runtime parameter
-were rejected by the maintainer. Do not implement them. Earlier versions of this
-file remain in Git history rather than competing with the current proposal.
+[Constructors, destructors and copies](constructors-and-destructors.md) defines
+Rae's implemented lifecycle model. A native owner uses ordinary `create` and
+`drop` functions and normally has no `copy`. A custom copy must produce an
+independent value. Containers follow element ownership; there is no additional
+owner property, registration or blanket container prohibition.
 
-## General-purpose owner support
+The rewritten [GPU and C-interop proposal](ptr-and-gpu-resource-design.md) builds
+on that model. It recommends marking raw pointer operations and foreign-call
+obligations explicitly in source, equally available to any module. Its current
+proposal needs neither privileged module lists nor an opaque-type keyword:
+reading or installing the native pointer itself would require unsafe code.
+These additional operation rules still need approval and implementation.
 
-Any library author should be able to declare an opaque noncopyable native owner,
-its cleanup operation and explicitly unsafe implementation operations in source.
-The standard library uses the same rules. No privileged module inventory,
-compiler-maintained per-type registration or GPU-specific language exception is
-part of the revised direction.
+This does not create general field privacy. Safe wrappers must validate against
+authoritative native bounds/state rather than trusting publicly mutable metadata.
+Review generic access, reflection, serialization and raw callback formation as
+well as direct field access. Lifecycle hooks alone cannot prove native contracts.
 
-Revision 4 now supplies a complete C demonstration library, its Rae wrapper and
-an ordinary `Main.rae` caller. It proposes `type NativeBuffer: opaque noncopyable
-drop`, a defining-module `func drop(this: mod NativeBuffer)` hook, `unsafe` blocks
-and a trailing `unsafe` function property. These are concrete proposed semantics,
-not already available language features. Review the
-[complete example](ptr-and-gpu-resource-design.md#complete-native-buffer-example)
-before implementing #867/#868.
+GPU IDs are copyable identities with no native release on drop. An App-owned
+manager controls their resources, groups and asynchronous dependencies. Native
+reference retention for outstanding work is not an independent value copy.
+The manager-identity representation remains a library design choice; no fixed
+random token layout or special main parameter is approved.
 
-Ordinary copies remain deep copies or errors. Noncopyability propagates through
-owned fields and optionals; version one explicitly rejects owner containers and
-boxing until their transfer/drop operations are implemented safely. CPU data and
-lists of IDs remain copyable. Opacity prevents representation access outside the
-defining module, including in unsafe blocks; every module can define such a type.
-No stored Rae references are permitted.
+The first proposed native-owner pilot wraps the existing nonblocking readback
+request bridge after its Ptr lowering blockers are repaired. Verify exact-once
+cleanup, explicit drop, transfer, cancellation and late callbacks before migrating
+the whole renderer. This pilot is not itself a completed safe-pointer boundary.
 
-The opt-in hook runs before normal field cleanup, and direct user calls to it are
-rejected. An idempotent `close` is a separate public operation. Existing ordinary
-cleanup order is preserved; the proposed hook ordering does not reinstate the
-rejected revision 2 ordering contract. Approval of this exact behavior is pending.
-
-## GPU owners and identities
-
-`GpuResources` owns native GPU resources; `TextureId` and `BufferId` identify them.
-IDs are ordinary copyable values with no native release on drop. A copied ID
-names the same resource, like a copied entity ID. Independent GPU data requires
-an explicit allocation/copy operation.
-
-The manager validates identity, kind, live slot and generation before native
-access. Resource retirement invalidates new uses while retaining recorded,
-submitted and callback dependencies until safe release. Native retain/release
-inside that machinery does not change ordinary Rae copy semantics.
-
-Explicit manager shutdown leaves it inert; automatic owner cleanup remains the
-backstop. A copied controller containing IDs is not a second cleanup owner.
-For context identity, revision 4 recommends fresh 256-bit OS-random nonces with
-checked generations. Its cross-context uniqueness guarantee is probabilistic,
-not absolute, and requires explicit approval. The design compares alternatives
-and includes two independently created Apps with the same slot/generation,
-without a special main signature or hidden manager singleton.
-
-The same general owner mechanism may later serve files, windows and audio, but
-this design does not authorize those unrelated migrations. For current examples,
-review steps and detailed verification, use the active design document.
+The older ownership-property and registered-native-owner proposals are superseded.
+Use the linked documents as the current contracts; historical text remains in Git.
