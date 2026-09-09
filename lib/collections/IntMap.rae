@@ -229,12 +229,6 @@ func growInt64Map(V: type, this: mod IntMap(V)) {
   this.isGrowing = false
 }
 
-func free(V: type, this: mod IntMap(V)) {
-  rae_ext_rae_buf_free(buf: this.data)
-  this.length = 0
-  this.cap = 0
-}
-
 # Canonical scope-exit dealloc name — see `drop(V, StringMap(V))`.
 func drop(V: type, this: mod IntMap(V)) {
   rae_ext_rae_buf_free(buf: this.data)

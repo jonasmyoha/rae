@@ -1274,6 +1274,26 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             fprintf(out, "  { int __rae_spm = rae_string_pool_mark(); ");
             emit_expr(ctx, stmt->as.expr_stmt, out, PREC_LOWEST, false, false);
             fprintf(out, "; rae_string_pool_flush(__rae_spm); }\n");
+            // #881: `value.drop()` on a local whose type has a destructor
+            // consumes the local — scope exit must not release it again.
+            // Sema rejects any later use in the same block.
+            {
+                const AstExpr* e = stmt->as.expr_stmt;
+                if (e && e->kind == AST_EXPR_METHOD_CALL
+                    && str_eq_cstr(e->as.method_call.method_name, "drop")
+                    && !e->as.method_call.args
+                    && e->as.method_call.object
+                    && e->as.method_call.object->kind == AST_EXPR_IDENT) {
+                    Str name = e->as.method_call.object->as.ident;
+                    for (int i = (int)ctx->local_count - 1; i >= 0; i--) {
+                        if (!str_eq(ctx->locals[i], name)) continue;
+                        if (type_has_user_drop(ctx->compiler_ctx, ctx->local_type_refs[i])) {
+                            ctx->local_moved[i] = true;
+                        }
+                        break;
+                    }
+                }
+            }
             break;
         }
         case AST_STMT_LET: {
@@ -1918,7 +1938,38 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     && target_tr && !target_tr->is_view && !target_tr->is_mod
                     && type_needs_deep_copy(ctx->compiler_ctx, ctx->module,
                                             target_tr, 0);
-                if (target_is_opt) {
+                // #881: a local whose type has a destructor. Evaluate the new
+                // value first, release the old one (unless an explicit
+                // `x.drop()` already consumed it), install, and the local
+                // owns again — so scope exit releases the new value once.
+                int hook_local = -1;
+                if (stmt->as.assign_stmt.target->kind == AST_EXPR_IDENT && target_tr
+                    && !target_tr->is_opt && type_has_user_drop(ctx->compiler_ctx, target_tr)) {
+                    Str tname = stmt->as.assign_stmt.target->as.ident;
+                    for (int i = (int)ctx->local_count - 1; i >= 0; i--) {
+                        if (str_eq(ctx->locals[i], tname)) { hook_local = i; break; }
+                    }
+                }
+                if (hook_local >= 0) {
+                    Str tname = stmt->as.assign_stmt.target->as.ident;
+                    const char* tn_hook = rae_mangle_type_specialized(
+                        ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, target_tr);
+                    int tmpn = ctx->temp_counter++;
+                    fprintf(out, "{ %s __asg%d = ", tn_hook, tmpn);
+                    emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
+                    fprintf(out, "; ");
+                    if (!ctx->local_moved[hook_local]) {
+                        fprintf(out, "rae_drop_struct_%s(&%.*s); ", tn_hook, (int)tname.len, tname.data);
+                    }
+                    fprintf(out, "%.*s = __asg%d; }", (int)tname.len, tname.data, tmpn);
+                    ctx->local_moved[hook_local] = false;
+                    ctx->local_struct_owns_heap[hook_local] = true;
+                    if (stmt->as.assign_stmt.value->kind == AST_EXPR_OWN) {
+                        mark_expr_moved_if_local(ctx, stmt->as.assign_stmt.value);
+                    }
+                    ctx->has_expected_type = had_exp;
+                    ctx->expected_type = saved_exp;
+                } else if (target_is_opt) {
                     int tmpn = ctx->temp_counter++;
                     bool opt_struct = target_tr && !(target_tr->is_view || target_tr->is_mod)
                         && rae_opt_is_struct_rep(ctx, target_tr);

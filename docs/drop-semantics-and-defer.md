@@ -1,3 +1,7 @@
+> **Update (#881):** the custom destructor this document leaves open now exists:
+> `func drop(this: mod T)` in T's module, by name and shape, run before the
+> structural field drops. See `docs/constructors-and-destructors.md`.
+
 # Drop semantics, destructors, and defer in Rae
 
 > Design notes on how cleanup should work in Rae. Captures the

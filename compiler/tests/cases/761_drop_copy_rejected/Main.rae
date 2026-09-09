@@ -1,0 +1,24 @@
+# #881: a type with a destructor and no `copy` cannot be copied — not into a
+# binding, not through a `copy` parameter, not into a struct literal field.
+type Slot {
+  id: Int
+}
+
+func drop(this: mod Slot) {
+  log("release {this.id}")
+}
+
+type Box {
+  slot: Slot
+}
+
+func keep(slot: copy Slot) {
+  log("{slot.id}")
+}
+
+func main() {
+  let a: Slot = { id: 1 }
+  let b: Slot = a
+  let box: Box = { slot: a }
+  keep(slot: a)
+}
