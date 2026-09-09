@@ -62,7 +62,7 @@ func ensureSpriteDefaults() {
   ensureSpriteUniform()
   if gbSpriteGet(i: 3) is webgpuNull() {
     gbSpriteArrayInit(w: 1, h: 1, layers: 1)
-    var one: List(Int) = createList(Int, cap: 1)
+    var one: List(Int) = List.create(Int, cap: 1)
     one.add(value: 0)   # transparent -> alpha-tested away; never visible
     gbSpriteArrayWrite(layer: 0, pixels: one.data, w: 1, h: 1)
   }
@@ -82,7 +82,7 @@ func ensureSpritePipeline(cache: mod SpriteCache) {
   if not (gen is cache.bindGen) {
     cache.bindGen = gen
     let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbSpriteGet(i: 0), groupIndex: 0 as UInt32)
-    var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 5)
+    var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 5)
     entries.add(value: { binding: 0 as UInt32, buffer: gbFrameUbuf(), size: gbFrameBytes() as UInt64 })
     entries.add(value: { binding: 1 as UInt32, buffer: gbDrawsBuffer(), size: gbDrawsSize() as UInt64 })
     entries.add(value: { binding: 2 as UInt32, buffer: gbSpriteGet(i: 2), size: spriteUniformBytes as UInt64 })
@@ -100,7 +100,7 @@ func ensureSpritePipeline(cache: mod SpriteCache) {
 # from viewProj, so no camera vector is needed here. Set once (or when tuning).
 func spriteSetParams(heightK: copy Float, aspect: copy Float, cutoff: copy Float, time: copy Float, tilt: copy Float) pub {
   ensureSpriteUniform()
-  var u: List(Float) = createList(Float, cap: 8)
+  var u: List(Float) = List.create(Float, cap: 8)
   u.add(value: heightK)
   u.add(value: aspect)
   u.add(value: cutoff)

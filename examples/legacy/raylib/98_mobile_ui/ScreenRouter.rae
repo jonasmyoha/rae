@@ -217,7 +217,7 @@ func buildPageTopBar(world: mod UiWorld, title: view String) pub ret EntityId {
   let text: String = "{title}"
   setText(world: world, entity: titleE, text: own text, styleId: own style)
 
-  let kids: List(EntityId) = createList(EntityId, cap: 1)
+  let kids: List(EntityId) = List.create(EntityId, cap: 1)
   kids.add(value: titleE)
   attachChildren(world: world, parent: bar, kids: kids)
   ret bar
@@ -356,9 +356,9 @@ func createAppState(albums: own List(Album), theme: own UiTheme) pub ret AppStat
     currentAlbumStem: firstStem
     currentTrackIndex: 0
     tab: Screen.home
-    subPageStack: createList(Int, cap: 4)
+    subPageStack: List.create(Int, cap: 4)
     playHistory: createPlayHistory(cap: 100)
-    library: createList(String, cap: 8)
+    library: List.create(String, cap: 8)
     liked: own liked
     viewingPlaylist: false
     currentPlaylistId: ""
@@ -434,7 +434,7 @@ func activeAlbum(state: view AppState) pub ret Album {
       genre: empty
       status: empty
       coverPath: empty
-      tracks: createList(Track, cap: 0)
+      tracks: List.create(Track, cap: 0)
       totalDurationMs: 0
     }
   }
@@ -741,7 +741,7 @@ func dispatchActions(
       # Three-dots affordance on track rows / album header. Opens
       # the bottom-sheet with the actions available for whatever
       # album the user is currently in.
-      let acts: List(BottomSheetAction) = createList(BottomSheetAction, cap: 2)
+      let acts: List(BottomSheetAction) = List.create(BottomSheetAction, cap: 2)
       acts.add(value: own mkSheetAction(label: "Remove from library", actionId: libraryRemoveKey))
       acts.add(value: own mkSheetAction(label: "Cancel", actionId: sheetCancelKey))
       openBottomSheet(sheet: state.bottomSheet, actions: own acts)

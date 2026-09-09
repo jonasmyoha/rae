@@ -66,7 +66,7 @@ func buildProfileAvatar(world: mod UiWorld, reg: view TextureRegistry) ret Entit
     let personKey: String = "mat:person"
     setSprite(world: world, entity: icon, key: personKey, tint: paletteLightText(theme: world.theme.active))
 
-    let kids: List(EntityId) = createList(EntityId, cap: 1)
+    let kids: List(EntityId) = List.create(EntityId, cap: 1)
     kids.add(value: icon)
     attachChildren(world: world, parent: avatar, kids: kids)
   }
@@ -93,7 +93,7 @@ func buildProfileStatColumn(world: mod UiWorld, value: view String, label: view 
   let labelStyle: String = "muted"
   setText(world: world, entity: labelText, text: label, styleId: labelStyle)
 
-  let kids: List(EntityId) = createList(EntityId, cap: 2)
+  let kids: List(EntityId) = List.create(EntityId, cap: 2)
   kids.add(value: valueText)
   kids.add(value: labelText)
   attachChildren(world: world, parent: col, kids: kids)
@@ -133,7 +133,7 @@ func buildProfileStatsRow(world: mod UiWorld, state: view AppState) ret EntityId
   let tracksCol: EntityId = buildProfileStatColumn(world: world, value: tracksStr, label: tracksLabel)
   let hoursCol: EntityId = buildProfileStatColumn(world: world, value: hoursStr, label: hoursLabel)
 
-  let kids: List(EntityId) = createList(EntityId, cap: 3)
+  let kids: List(EntityId) = List.create(EntityId, cap: 3)
   kids.add(value: albumsCol)
   kids.add(value: tracksCol)
   kids.add(value: hoursCol)
@@ -193,7 +193,7 @@ func buildSpotifyStatusCard(world: mod UiWorld) ret EntityId {
   }
   setText(world: world, entity: line, text: line1, styleId: bodyStyle)
 
-  let kids: List(EntityId) = createList(EntityId, cap: 2)
+  let kids: List(EntityId) = List.create(EntityId, cap: 2)
   kids.add(value: title)
   kids.add(value: line)
   attachChildren(world: world, parent: card, kids: kids)
@@ -232,7 +232,7 @@ func buildSettingsRow(world: mod UiWorld, iconKey: view String, label: view Stri
   let chevTint: RgbaColor = paletteHero(theme: world.theme.active)
   setSprite(world: world, entity: chev, key: chevKey, tint: chevTint)
 
-  let kids: List(EntityId) = createList(EntityId, cap: 3)
+  let kids: List(EntityId) = List.create(EntityId, cap: 3)
   kids.add(value: icon)
   kids.add(value: labelEnt)
   kids.add(value: chev)
@@ -257,7 +257,7 @@ func buildSettingsList(world: mod UiWorld) ret EntityId {
   let r3: EntityId = buildSettingsRow(world: world, iconKey: "mat:person", label: "Account")
   let r4: EntityId = buildSettingsRow(world: world, iconKey: "mat:logout", label: "Sign out")
 
-  let kids: List(EntityId) = createList(EntityId, cap: 4)
+  let kids: List(EntityId) = List.create(EntityId, cap: 4)
   kids.add(value: r1)
   kids.add(value: r2)
   kids.add(value: r3)
@@ -303,7 +303,7 @@ func buildProfileBody(
   let stats: EntityId = buildProfileStatsRow(world: world, state: state)
   let settings: EntityId = buildSettingsList(world: world)
 
-  let kids: List(EntityId) = createList(EntityId, cap: 6)
+  let kids: List(EntityId) = List.create(EntityId, cap: 6)
   kids.add(value: avatar)
   kids.add(value: handle)
   kids.add(value: bio)
@@ -338,7 +338,7 @@ func mountProfilePage(
   let topBar: EntityId = buildPageTopBar(world: world, title: "Profile")
   let body: EntityId = buildProfileBody(world: world, reg: reg, state: state, scrollY: scrollY)
 
-  let kids: List(EntityId) = createList(EntityId, cap: 2)
+  let kids: List(EntityId) = List.create(EntityId, cap: 2)
   kids.add(value: topBar)
   kids.add(value: body)
   attachChildren(world: world, parent: root, kids: kids)

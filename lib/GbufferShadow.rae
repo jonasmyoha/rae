@@ -30,7 +30,7 @@ func shadowEnd() pub {
   smUploadModels()
   # Per-call scratch (#764: was a module-level global). WebGPU copies the
   # attachment during BeginRenderPass, so the local only needs to outlive that.
-  var shadowDepthAtt: List(WGPURenderPassDepthStencilAttachment) = createList(WGPURenderPassDepthStencilAttachment, cap: 1)
+  var shadowDepthAtt: List(WGPURenderPassDepthStencilAttachment) = List.create(WGPURenderPassDepthStencilAttachment, cap: 1)
   loop shadowDepthAtt.length < 1 { shadowDepthAtt.add(value: { depthReadOnly: 0 as UInt32 }) }
 
   let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }

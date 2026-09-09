@@ -15,8 +15,8 @@ type World { positions: ComponentTable(Position), velocities: ComponentTable(Vel
 #   - a query loop body mutating a table it did NOT join.
 func touch(t: mod ComponentTable(Position)) { }
 func main() {
-  var world: World = { positions: createComponentTable(Position), velocities: createComponentTable(Velocity) }
-  var extra: ComponentTable(Position) = createComponentTable(Position)
+  var world: World = { positions: ComponentTable.create(Position), velocities: ComponentTable.create(Velocity) }
+  var extra: ComponentTable(Position) = ComponentTable.create(Position)
   let e: EntityId = { index: 1, generation: 0 }
   let f: EntityId = { index: 2, generation: 0 }
   componentSet(this: world.positions, entity: e, data: Position { x: 10 })

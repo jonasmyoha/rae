@@ -122,9 +122,9 @@ func growBranch(verts: mod List(Float), idx: mod List(Int), tips: mod List(Vec3)
 
 func generateTree(branchDepth: copy Int, trunkHeight: copy Float, taper: copy Float,
                   canopySize: copy Float, leafDensity: copy Int, seed: copy Int) pub ret TreeMesh {
-  var trunkVerts: List(Float) = createList(Float, cap: 512)
-  var trunkIdx: List(Int) = createList(Int, cap: 512)
-  var tips: List(Vec3) = createList(Vec3, cap: 32)
+  var trunkVerts: List(Float) = List.create(Float, cap: 512)
+  var trunkIdx: List(Int) = List.create(Int, cap: 512)
+  var tips: List(Vec3) = List.create(Vec3, cap: 32)
 
   let baseRadius: Float = trunkHeight * 0.09 * taper
   growBranch(verts: trunkVerts, idx: trunkIdx, tips: tips,
@@ -134,8 +134,8 @@ func generateTree(branchDepth: copy Int, trunkHeight: copy Float, taper: copy Fl
   # Canopy: a faceted blob at every branch tip, sized by canopySize; more tips
   # (deeper branching) => a fuller crown. leafDensity adds extra blobs around the
   # crown for a denser look.
-  var canopyVerts: List(Float) = createList(Float, cap: 1024)
-  var canopyIdx: List(Int) = createList(Int, cap: 1024)
+  var canopyVerts: List(Float) = List.create(Float, cap: 1024)
+  var canopyIdx: List(Int) = List.create(Int, cap: 1024)
   var ti: Int = 0
   loop ti < tips.length {
     if let tip: Vec3 = tips.copyAt(index: ti) {

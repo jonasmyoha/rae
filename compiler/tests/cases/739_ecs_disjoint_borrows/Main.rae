@@ -20,7 +20,7 @@ func bump(position: mod Position) { position.x = position.x + 1 }
 func ground(position: mod Position, floor: view Int) { if position.x < floor { position.x = floor } }
 
 func main() {
-  var world: World = { positions: createComponentTable(Position), velocities: createComponentTable(Velocity) }
+  var world: World = { positions: ComponentTable.create(Position), velocities: ComponentTable.create(Velocity) }
   let e1: EntityId = { index: 1, generation: 0 }
   let e2: EntityId = { index: 2, generation: 0 }
   componentSet(this: world.positions, entity: e1, data: Position { x: 10 })
@@ -49,8 +49,8 @@ func main() {
   log("two-table refs: e2.x={componentGet(this: world.positions, entity: e2).x}")
 
   # 4. modAt binding live while a DIFFERENT List is mutated
-  var xs: List(Int) = createList(Int, cap: 1)
-  var ys: List(Int) = createList(Int, cap: 1)
+  var xs: List(Int) = List.create(Int, cap: 1)
+  var ys: List(Int) = List.create(Int, cap: 1)
   xs.add(value: 5)
   if let q: mod Int => xs.modAt(index: 0) {
     ys.add(value: 6)

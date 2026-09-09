@@ -76,7 +76,7 @@ func ensureTerrainTexDefaults() {
   }
   if gbTerrainTexView() is webgpuNull() {
     gbTerrainArrayInit(w: 1, h: 1, layers: terrainLayers())
-    var one: List(Int) = createList(Int, cap: 1)
+    var one: List(Int) = List.create(Int, cap: 1)
     one.add(value: 4294967295)   # 0xFFFFFFFF, opaque white
     var l: Int = 0
     loop l < terrainLayers() {
@@ -122,7 +122,7 @@ func ensureTerrainPipeline(cache: mod GbufferCache) {
     let composed: String = terrainSplatWgsl()
     let cbuf: Buffer(Any) = composed.toCStr()
     let terrainMod: Ptr = makeShaderModule(wgsl: cbuf)
-    var attrs: List(WGPUVertexAttribute) = createList(WGPUVertexAttribute, cap: 3)
+    var attrs: List(WGPUVertexAttribute) = List.create(WGPUVertexAttribute, cap: 3)
     attrs.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0 as UInt64, shaderLocation: 0 as UInt32 })
     attrs.add(value: { format: WGPUVertexFormat_Float32x3, offset: 12 as UInt64, shaderLocation: 1 as UInt32 })
     attrs.add(value: { format: WGPUVertexFormat_Float32x2, offset: 24 as UInt64, shaderLocation: 2 as UInt32 })
@@ -138,7 +138,7 @@ func ensureTerrainPipeline(cache: mod GbufferCache) {
   if not (gen is cache.terrainBindGen) {
     cache.terrainBindGen = gen
     let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbTerrainPipeline(), groupIndex: 0 as UInt32)
-    var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 4)
+    var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 4)
     entries.add(value: { binding: 0 as UInt32, buffer: gbFrameUbuf(), size: gbFrameBytes() as UInt64 })
     entries.add(value: { binding: 1 as UInt32, buffer: gbDrawsBuffer(), size: gbDrawsSize() as UInt64 })
     entries.add(value: { binding: 2 as UInt32, textureView: gbTerrainTexView() })

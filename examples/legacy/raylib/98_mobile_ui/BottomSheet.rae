@@ -41,7 +41,7 @@ type BottomSheetState {
 func createBottomSheetState() pub ret BottomSheetState {
   ret BottomSheetState {
     visible: false
-    actions: createList(BottomSheetAction, cap: 4)
+    actions: List.create(BottomSheetAction, cap: 4)
     epoch: 0
   }
 }
@@ -138,7 +138,7 @@ func addBottomSheetLayer(world: mod UiWorld, sheet: view BottomSheetState) pub {
   setLayout(world: world, entity: panel, kind: layV, gap: spaceXS, alignCross: alignS)
   setPaddingAll(world: world, entity: panel, n: spaceXL)
 
-  let rowKids: List(EntityId) = createList(EntityId, cap: n)
+  let rowKids: List(EntityId) = List.create(EntityId, cap: n)
   var i: Int = 0
   loop i < n {
     let a: BottomSheetAction = rae_ext_rae_buf_get(buf: sheet.actions.data, index: i)
@@ -149,7 +149,7 @@ func addBottomSheetLayer(world: mod UiWorld, sheet: view BottomSheetState) pub {
   }
   attachChildren(world: world, parent: panel, kids: rowKids)
 
-  let kids: List(EntityId) = createList(EntityId, cap: 2)
+  let kids: List(EntityId) = List.create(EntityId, cap: 2)
   kids.add(value: scrim)
   kids.add(value: panel)
   attachChildren(world: world, parent: root, kids: kids)

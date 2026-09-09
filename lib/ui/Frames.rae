@@ -103,10 +103,10 @@ type FrameSet {
 
 func emptyFrameSet() ret FrameSet {
   ret FrameSet {
-    names: createList(String, cap: 4)
-    minPtWs: createList(Float, cap: 4)
-    defaultFlags: createList(Int, cap: 4)
-    nodesValueIdxs: createList(Int, cap: 4)
+    names: List.create(String, cap: 4)
+    minPtWs: List.create(Float, cap: 4)
+    defaultFlags: List.create(Int, cap: 4)
+    nodesValueIdxs: List.create(Int, cap: 4)
     count: 0
   }
 }
@@ -177,8 +177,8 @@ type StateSet {
 
 func emptyStateSet() ret StateSet {
   ret StateSet {
-    names: createList(String, cap: 4)
-    nodesValueIdxs: createList(Int, cap: 4)
+    names: List.create(String, cap: 4)
+    nodesValueIdxs: List.create(Int, cap: 4)
     count: 0
   }
 }
@@ -485,7 +485,7 @@ func accumulateNodeIds(scene: view Scene, nodesIdx: view Int, out: mod List(Stri
 # nodes bag — the reset set: switching frame or deactivating a state
 # must restore every node anything could have overridden.
 func overriddenNodeIds(scene: view Scene, frames: view FrameSet, states: view StateSet) ret List(String) {
-  let out: List(String) = createList(String, cap: 8)
+  let out: List(String) = List.create(String, cap: 8)
   var f: Int = 0
   loop f < frames.count {
     if let nodesIdx: Int = frames.nodesValueIdxs.copyAt(index: f) {
@@ -590,7 +590,7 @@ func deriveActiveHierarchy(world: mod UiWorld, scene: view Scene, frames: view F
   }
 
   # Raw entity value per scene node (-1 = not mounted in this page).
-  let entityVals: List(Int) = createList(Int, cap: nodeCount)
+  let entityVals: List(Int) = List.create(Int, cap: nodeCount)
   var e: Int = 0
   loop e < nodeCount {
     let node: view SceneNode => nodeAt(this: scene, idx: e)
@@ -603,8 +603,8 @@ func deriveActiveHierarchy(world: mod UiWorld, scene: view Scene, frames: view F
   }
 
   # Authored parent map + within-parent sort keys.
-  let parentIdxs: List(Int) = createList(Int, cap: nodeCount)
-  let sortKeys: List(Float) = createList(Float, cap: nodeCount)
+  let parentIdxs: List(Int) = List.create(Int, cap: nodeCount)
+  let sortKeys: List(Float) = List.create(Float, cap: nodeCount)
   var z: Int = 0
   loop z < nodeCount {
     parentIdxs.add(value: -1)
@@ -695,7 +695,7 @@ func deriveActiveHierarchy(world: mod UiWorld, scene: view Scene, frames: view F
     if parentRaw >= 0 {
       let parentEntity: EntityId = id(v: parentRaw)
       # Gather b's mounted children, selection-sorted by sort key.
-      let unsorted: List(Int) = createList(Int, cap: 8)
+      let unsorted: List(Int) = List.create(Int, cap: 8)
       var c: Int = 0
       loop c < nodeCount {
         if parentIdxs.copyAt(index: c) is b {
@@ -707,7 +707,7 @@ func deriveActiveHierarchy(world: mod UiWorld, scene: view Scene, frames: view F
       }
       let childCount: Int = unsorted.length
       if childCount > 0 {
-        let used: List(Int) = createList(Int, cap: childCount)
+        let used: List(Int) = List.create(Int, cap: childCount)
         var w: Int = 0
         loop w < childCount {
           used.add(value: 0)
@@ -881,7 +881,7 @@ func applyFrameToPage(world: mod UiWorld, scene: view Scene, frames: view FrameS
 # scene has no frames / none matched). Cheap enough to run on every
 # (re)mount — the table is a few JsonDoc lookups.
 func applySceneFramesToPage(world: mod UiWorld, scene: view Scene, pageId: view String, windowPtW: view Float, forcedFrameId: view String) ret Int {
-  let noStates: List(String) = createList(String, cap: 1)
+  let noStates: List(String) = List.create(String, cap: 1)
   ret applySceneFramesToPageWithStates(world: world, scene: scene, pageId: pageId, windowPtW: windowPtW, forcedFrameId: forcedFrameId, activeStates: noStates)
 }
 

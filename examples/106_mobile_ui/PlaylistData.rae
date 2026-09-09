@@ -71,7 +71,7 @@ func createPlaylist(id: own String, title: own String) pub ret Playlist {
   ret Playlist {
     id: own id
     title: own title
-    items: createList(PlaylistItem, cap: 8)
+    items: List.create(PlaylistItem, cap: 8)
   }
 }
 
@@ -131,7 +131,7 @@ func playlistToggleTrack(playlist: mod Playlist, stem: view String, trackIndex: 
 # links are skipped (no recursion — avoids cycles, and a nested
 # playlist's own cover would be a grid-of-grids).
 func playlistCoverStems(playlist: view Playlist, max: view Int) pub ret List(String) {
-  let result: List(String) = createList(String, cap: max)
+  let result: List(String) = List.create(String, cap: max)
   let n: Int = playlist.items.length
   var i: Int = 0
   loop i < n {

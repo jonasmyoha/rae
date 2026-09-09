@@ -12,7 +12,7 @@ type Thing {
 }
 
 func scenario(seed: view Int) {
-  var xs: List(Thing) = createList(Thing, cap: 2)
+  var xs: List(Thing) = List.create(Thing, cap: 2)
   xs.add(value: Thing { tag: "payload-{seed}-with-enough-bytes-to-show-a-leak" })
   # General (non-peephole) path: store the accessor result in an opt binding.
   let x: opt Thing = xs.copyAt(index: 0)

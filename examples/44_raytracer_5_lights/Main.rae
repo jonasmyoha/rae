@@ -40,13 +40,13 @@ func main() {
     # accumulator + framebuffer sized for the largest (final) resolution; in
     # preview mode only the first width*height entries are used.
     let maxPixels: Int = finalW * finalH
-    let accum: List(Float) = createList(cap: maxPixels * 3)
+    let accum: List(Float) = List.create(Float, cap: maxPixels * 3)
     var i: Int = 0
     loop i < maxPixels * 3 {
         accum.add(value: 0.0)
         i = i + 1
     }
-    let fb: List(Int) = createList(cap: maxPixels)
+    let fb: List(Int) = List.create(Int, cap: maxPixels)
     i = 0
     loop i < maxPixels {
         fb.add(value: 0)

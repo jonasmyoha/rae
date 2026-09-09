@@ -165,7 +165,7 @@ func handleScreenSwitch(
   let newBar: EntityId = mountNavTabsBar(world: world, activeTab: appState.tab, scenes: scenes)
   let dock: EntityId = findPageRootEntity(world: world, pageId: dockPageId)
   let mini: EntityId = findPageRootEntity(world: world, pageId: miniPlayerPageId)
-  let dockKids: List(EntityId) = createList(EntityId, cap: 2)
+  let dockKids: List(EntityId) = List.create(EntityId, cap: 2)
   dockKids.add(value: mini)
   dockKids.add(value: newBar)
   attachChildren(world: world, parent: dock, kids: dockKids)

@@ -10,9 +10,9 @@ let okPodLet: Float = 3.14                       # fine (POD literal)
 let okStrLiteral: String = "static"              # fine (string literal = constant)
 
 var warnVarInt: Int = 0                           # ERROR: mutable global
-var warnVarList: List(Int) = createList(Int, cap: 2)   # ERROR: mutable global
+var warnVarList: List(Int) = List.create(Int, cap: 2)   # ERROR: mutable global
 let warnHeapStr: String = "a".concat(other: "b")       # ERROR: let allocates heap
-let warnHeapList: List(Int) = createList(Int, cap: 2)  # ERROR: let owns heap
+let warnHeapList: List(Int) = List.create(Int, cap: 2)  # ERROR: let owns heap
 
 func main() {
   warnVarInt = warnVarInt + okConst

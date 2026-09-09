@@ -32,9 +32,9 @@ func ensureViewPipeline(cache: mod ViewPassCache) {
   if cache.pipeMade { ret }
   cache.pipeMade = true
   let shaderMod: Ptr = makeShaderModule(wgsl: gbViewWgsl())
-  var targets: List(WGPUColorTargetState) = createList(WGPUColorTargetState, cap: 1)
+  var targets: List(WGPUColorTargetState) = List.create(WGPUColorTargetState, cap: 1)
   targets.add(value: { format: g2dFormat() as Int32, writeMask: WGPUColorWriteMask_All })
-  var frags: List(WGPUFragmentState) = createList(WGPUFragmentState, cap: 1)
+  var frags: List(WGPUFragmentState) = List.create(WGPUFragmentState, cap: 1)
   frags.add(value: {
     module: shaderMod, entryPoint: { data: gbEntryFs(), length: WGPU_STRLEN },
     targetCount: 1 as UInt64, targets: targets.data
@@ -65,7 +65,7 @@ func ensureViewBind(cache: mod ViewPassCache) {
   cache.bindMade = true
   cache.lastTargetsGen = gen
   let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbViewPipeline(), groupIndex: 0 as UInt32)
-  var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 5)
+  var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 5)
   entries.add(value: { binding: 0 as UInt32, buffer: gbViewUbuf(), size: 16 as UInt64 })
   entries.add(value: { binding: 1 as UInt32, textureView: gbViewA() })
   entries.add(value: { binding: 2 as UInt32, textureView: gbViewB() })
@@ -94,7 +94,7 @@ func debugView(cache: mod ViewPassCache, mode: copy Int, zNear: copy Float, zFar
 
   let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
   let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
-  var atts: List(WGPURenderPassColorAttachment) = createList(WGPURenderPassColorAttachment, cap: 1)
+  var atts: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 1)
   atts.add(value: {
     view_: g2dOffView(), depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32,
     loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store

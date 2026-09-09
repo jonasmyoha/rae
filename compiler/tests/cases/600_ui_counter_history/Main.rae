@@ -19,11 +19,11 @@ type CounterState {
 }
 
 func createCounterState() ret CounterState {
-  ret CounterState { value: 0, step: 1, history: own createList(Int, cap: historyRows) }
+  ret CounterState { value: 0, step: 1, history: own List.create(Int, cap: historyRows) }
 }
 
 func rememberValue(s: mod CounterState, value: view Int) {
-  var next: List(Int) = createList(Int, cap: historyRows)
+  var next: List(Int) = List.create(Int, cap: historyRows)
   next.add(value: value)
   var i: Int = 0
   loop i < s.history.length and next.length < historyRows {

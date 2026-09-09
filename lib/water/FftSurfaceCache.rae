@@ -37,10 +37,10 @@ type FftSurfaceSample {
 }
 
 func createFftSurfaceCache(body: view WaterBody) ret FftSurfaceCache {
-  var cascades: List(FftCascadeCache) = createList(FftCascadeCache, cap: 3)
+  var cascades: List(FftCascadeCache) = List.create(FftCascadeCache, cap: 3)
   loop var i: Int = 0, i < 3, ++i {
     cascades.add(value: FftCascadeCache {
-      values: createList(Float, cap: fftCacheFloats), generation: -1,
+      values: List.create(Float, cap: fftCacheFloats), generation: -1,
       sampleTime: 0.0, tileSize: 0.0, pendingGeneration: -1,
       pendingTime: 0.0, pendingTile: 0.0, submittedUpdate: -1
     })

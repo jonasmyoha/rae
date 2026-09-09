@@ -38,7 +38,7 @@ func triBase() ret Int { ret 1000000 }
 # Pack triangles into f32 (v0 v1 v2 albedo kind fuzz ior = 15 each). Dummy when
 # empty so the storage binding is never zero-size.
 func triFloats(tris: view List(Triangle)) ret List(Float) {
-    let f: List(Float) = createList(Float, cap: 16)
+    let f: List(Float) = List.create(Float, cap: 16)
     var i: Int = 0
     loop i < tris.length {
         let t: Triangle = rae_ext_rae_buf_get(buf: tris.data, index: i)
@@ -69,7 +69,7 @@ type SceneGpu {
 }
 
 func buildSceneBvh(world: view List(Sphere), tris: view List(Triangle)) ret SceneGpu {
-    let prims: List(PrimRec) = createList(PrimRec, cap: world.length + tris.length + 1)
+    let prims: List(PrimRec) = List.create(PrimRec, cap: world.length + tris.length + 1)
     var i: Int = 0
     loop i < world.length {
         let s: Sphere = rae_ext_rae_buf_get(buf: world.data, index: i)
@@ -98,7 +98,7 @@ func buildSceneBvh(world: view List(Sphere), tris: view List(Triangle)) ret Scen
         k = k + 1
     }
     let nodes: List(Float) = buildBvh(prims: prims, leafSize: 4)
-    let refs: List(Float) = createList(Float, cap: prims.length + 1)
+    let refs: List(Float) = List.create(Float, cap: prims.length + 1)
     i = 0
     loop i < prims.length {
         let p: PrimRec = rae_ext_rae_buf_get(buf: prims.data, index: i)
@@ -118,7 +118,7 @@ func buildSceneBvh(world: view List(Sphere), tris: view List(Triangle)) ret Scen
 # dummy box when empty so the storage binding is never zero-size (boxCount=0
 # means the kernel never reads it).
 func boxFloats(boxes: view List(Box)) ret List(Float) {
-    let f: List(Float) = createList(Float, cap: 16)
+    let f: List(Float) = List.create(Float, cap: 16)
     var i: Int = 0
     loop i < boxes.length {
         let bx: Box = rae_ext_rae_buf_get(buf: boxes.data, index: i)
@@ -144,7 +144,7 @@ func pushVec3(buf: mod List(Float), a: view Vec3) {
 }
 
 func sceneFloats(cam: view Camera, world: view List(Sphere)) ret List(Float) {
-    let s: List(Float) = createList(Float, cap: 64)
+    let s: List(Float) = List.create(Float, cap: 64)
     pushVec3(buf: s, a: cam.origin)
     pushVec3(buf: s, a: cam.lowerLeft)
     pushVec3(buf: s, a: cam.horizontal)
@@ -196,7 +196,7 @@ func main() {
     var sceneId: Int = 1
     var world: List(Sphere) = buildSceneOne()
     var boxes: List(Box) = buildSceneOneBoxes()
-    var tris: List(Triangle) = createList(Triangle, cap: 0)
+    var tris: List(Triangle) = List.create(Triangle, cap: 0)
     var skyMode: Int = 1
 
     # Initial view: from the north-east and above, looking down at the cube
@@ -229,7 +229,7 @@ func main() {
     var width: Int = 1920
     var height: Int = 1080
 
-    let params: List(Int) = createList(cap: 12)
+    let params: List(Int) = List.create(Int, cap: 12)
     var pinit: Int = 0
     loop pinit < 12 { params.add(value: 0)  pinit = pinit + 1 }
     params.set(index: 0, value: width)
@@ -241,7 +241,7 @@ func main() {
 
     var sceneGpu: SceneGpu = buildSceneBvh(world: world, tris: tris)
     var rt: GpuRT = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), boxes: boxFloats(boxes: boxes), tris: triFloats(tris: tris), nodes: sceneGpu.nodes, refs: sceneGpu.refs, params: params, pixels: width * height)
-    var fb: List(Int) = createList(cap: width * height)
+    var fb: List(Int) = List.create(Int, cap: width * height)
     var fbi: Int = 0
     loop fbi < width * height { fb.add(value: 0)  fbi = fbi + 1 }
 
@@ -277,8 +277,8 @@ func main() {
         if Sdl3.isKeyPressed(key: Keys.key6) { newScene = 6 }
         if newScene > sceneId or newScene < sceneId {
             sceneId = newScene
-            boxes = createList(Box, cap: 0)
-            tris = createList(Triangle, cap: 0)
+            boxes = List.create(Box, cap: 0)
+            tris = List.create(Triangle, cap: 0)
             if sceneId is 1 {
                 world = buildSceneOne()  boxes = buildSceneOneBoxes()  skyMode = 1
             } else { if sceneId is 2 {
@@ -310,7 +310,7 @@ func main() {
             params.set(index: 0, value: width)
             params.set(index: 1, value: height)
             rt = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), boxes: boxFloats(boxes: boxes), tris: triFloats(tris: tris), nodes: sceneGpu.nodes, refs: sceneGpu.refs, params: params, pixels: width * height)
-            fb = createList(cap: width * height)
+            fb = List.create(Int, cap: width * height)
             fbi = 0
             loop fbi < width * height { fb.add(value: 0)  fbi = fbi + 1 }
             sampleIndex = 0
@@ -354,7 +354,7 @@ func main() {
         params.set(index: 6, value: spp)
         Gpu.writeU32(buf: rt.paramsBuf, data: params.data, count: 8)
 
-        let bufs: List(Int) = createList(cap: 8)
+        let bufs: List(Int) = List.create(Int, cap: 8)
         bufs.add(value: rt.paramsBuf)
         bufs.add(value: rt.sceneBuf)
         bufs.add(value: rt.accumBuf)

@@ -129,10 +129,10 @@ func deflateRaw(data: view List(Int), value: view Int) ret List(Int) {
     let dBase: List(Int) = distBase()
     let dExtra: List(Int) = distExtra()
 
-    let head: List(Int) = createList(cap: 32768)
+    let head: List(Int) = List.create(Int, cap: 32768)
     var hi: Int = 0
     loop hi < 32768 { head.add(value: -1) hi = hi + 1 }
-    let prev: List(Int) = createList(cap: value + 1)
+    let prev: List(Int) = List.create(Int, cap: value + 1)
     var pi: Int = 0
     loop pi < value + 1 { prev.add(value: -1) pi = pi + 1 }
 

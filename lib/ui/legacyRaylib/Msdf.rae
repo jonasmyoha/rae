@@ -222,7 +222,7 @@ func loadMsdfFont(jsonPath: view String, atlasPath: view String) pub ret MsdfFon
   let glyphsIdx: Int = json.field(doc: doc, this: root, key: "glyphs")
   let glyphsArr: JsonValue = json.jsonValueAt(doc: doc, idx: glyphsIdx)
   let n: Int = json.arrayLen(this: glyphsArr)
-  let glyphs: List(MsdfGlyph) = createList(MsdfGlyph, cap: n)
+  let glyphs: List(MsdfGlyph) = List.create(MsdfGlyph, cap: n)
   var i: Int = 0
   loop i < n {
     let entry: JsonValue = json.arrayAt(doc: doc, this: glyphsArr, idx: i)

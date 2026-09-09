@@ -20,7 +20,7 @@ func createStringMap(V: type, cap: view Int) ret StringMap(V) {
 
 # The constructor by name (#880): `var m: StringMap(Int) = create(cap: 8)`.
 func create(V: type, cap: view Int) ret StringMap(V) {
-  ret createStringMap(V, cap: cap)
+  ret StringMap.create(V, cap: cap)
 }
 
 func set(V: type, this: mod StringMap(V), k: view String, value: own V) {
@@ -182,7 +182,7 @@ func remove(V: type, this: mod StringMap(V), k: view String) {
 }
 
 func keys(V: type, this: view StringMap(V)) ret List(String) {
-  let result: List(String) = createList(cap: this.length)
+  let result: List(String) = List.create(String, cap: this.length)
   var i: Int = 0
   loop i < this.cap {
     let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: i)
@@ -195,7 +195,7 @@ func keys(V: type, this: view StringMap(V)) ret List(String) {
 }
 
 func values(V: type, this: view StringMap(V)) ret List(V) {
-  let result: List(V) = createList(cap: this.length)
+  let result: List(V) = List.create(V, cap: this.length)
   var i: Int = 0
   loop i < this.cap {
     let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: i)

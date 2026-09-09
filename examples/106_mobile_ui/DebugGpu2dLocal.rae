@@ -85,7 +85,7 @@ func createDebugSystem() pub ret DebugSystem {
     buttonSize: 47.71084337349397
     screenW: 1080.0
     screenH: 2280.0
-    fpsTimes: createList(Float64, cap: 256)
+    fpsTimes: List.create(Float64, cap: 256)
     fpsWindowSec: 3.0
     lastFps: 0.0
     lastRssKb: 0
@@ -444,7 +444,7 @@ func buildDebugButton(world: mod UiWorld, debug: view DebugSystem) ret EntityId 
   setFixedRect(world: world, entity: label, w: debug.buttonSize, h: debugButtonTextH)
   setOpticalAlign(world: world, entity: label, centerX: true, centerY: true, biasX: 0.0, biasY: 0.0)
   setDebugText(world: world, entity: label, text: "D", styleId: "debugButtonSmall")
-  let kids: List(EntityId) = createList(EntityId, cap: 1)
+  let kids: List(EntityId) = List.create(EntityId, cap: 1)
   kids.add(value: label)
   attachKids(world: world, parent: button, kids: kids)
   ret button
@@ -461,7 +461,7 @@ func buildDebugIconButton(world: mod UiWorld) ret EntityId {
   setFixedRect(world: world, entity: icon, w: debugCloseIconGlyph, h: debugCloseIconGlyph)
   setOpticalAlign(world: world, entity: icon, centerX: true, centerY: true, biasX: 0.0, biasY: 0.0)
   setDebugSprite(world: world, entity: icon, key: "mat:close", tint: colorByName(theme: world.theme.active, name: "textPrimary"))
-  let kids: List(EntityId) = createList(EntityId, cap: 1)
+  let kids: List(EntityId) = List.create(EntityId, cap: 1)
   kids.add(value: icon)
   attachKids(world: world, parent: button, kids: kids)
   ret button
@@ -478,7 +478,7 @@ func buildDebugCloseButton(world: mod UiWorld) ret EntityId {
   setFixedRect(world: world, entity: label, w: debugCloseButtonW, h: debugCloseTextH)
   setOpticalAlign(world: world, entity: label, centerX: true, centerY: true, biasX: 0.0, biasY: 0.0)
   setDebugText(world: world, entity: label, text: "Close", styleId: "debugCloseButton")
-  let kids: List(EntityId) = createList(EntityId, cap: 2)
+  let kids: List(EntityId) = List.create(EntityId, cap: 2)
   kids.add(value: label)
   attachKids(world: world, parent: button, kids: kids)
   ret button
@@ -496,7 +496,7 @@ func buildDebugMenuTitle(world: mod UiWorld, panelW: view Float) ret EntityId {
   setOpticalAlign(world: world, entity: label, centerX: true, centerY: true, biasX: 0.0, biasY: 0.0)
   setDebugText(world: world, entity: label, text: "Debug", styleId: "debugDialogTitle")
 
-  let kids: List(EntityId) = createList(EntityId, cap: 2)
+  let kids: List(EntityId) = List.create(EntityId, cap: 2)
   kids.add(value: label)
   attachKids(world: world, parent: title, kids: kids)
   ret title
@@ -555,11 +555,11 @@ func buildSwitchRow(
   tagDebugToggleWidget(world: world, entity: knob, actionId: actionId, kind: knobKind, selected: on)
   setDebugSwitchKnobStyle(world: world, entity: knob)
 
-  let pillKids: List(EntityId) = createList(EntityId, cap: 1)
+  let pillKids: List(EntityId) = List.create(EntityId, cap: 1)
   pillKids.add(value: knob)
   attachKids(world: world, parent: pill, kids: pillKids)
 
-  let rowKids: List(EntityId) = createList(EntityId, cap: 2)
+  let rowKids: List(EntityId) = List.create(EntityId, cap: 2)
   rowKids.add(value: label)
   rowKids.add(value: pill)
   attachKids(world: world, parent: row, kids: rowKids)
@@ -593,7 +593,7 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Enti
   let labelsRow: EntityId = buildSwitchRow(world: world, labelText: "FPS / mem labels", actionId: debugActionToggleLabels, on: debug.showLabels, width: contentW)
   let outlinesRow: EntityId = buildSwitchRow(world: world, labelText: "Input outlines", actionId: debugActionToggleInputOutlines, on: debug.showInputOutlines, width: contentW)
 
-  let rows: List(EntityId) = createList(EntityId, cap: 3)
+  let rows: List(EntityId) = List.create(EntityId, cap: 3)
   rows.add(value: themeRow)
   rows.add(value: labelsRow)
   rows.add(value: outlinesRow)
@@ -609,14 +609,14 @@ func buildDebugMenuOverlay(world: mod UiWorld, debug: view DebugSystem) ret Enti
 
   let title: EntityId = buildDebugMenuTitle(world: world, panelW: panelW)
 
-  let panelKids: List(EntityId) = createList(EntityId, cap: 4)
+  let panelKids: List(EntityId) = List.create(EntityId, cap: 4)
   panelKids.add(value: content)
   panelKids.add(value: title)
   panelKids.add(value: closeX)
   panelKids.add(value: closeButton)
   attachKids(world: world, parent: panel, kids: panelKids)
 
-  let backdropKids: List(EntityId) = createList(EntityId, cap: 1)
+  let backdropKids: List(EntityId) = List.create(EntityId, cap: 1)
   backdropKids.add(value: panel)
   attachKids(world: world, parent: backdrop, kids: backdropKids)
   ret backdrop

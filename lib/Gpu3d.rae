@@ -148,7 +148,7 @@ type Frame3d {
 }
 
 func createFrame3d() pub ret Frame3d {
-  let d: List(Float) = createList(Float, cap: 36)
+  let d: List(Float) = List.create(Float, cap: 36)
   var i: Int = 0
   loop i < 36 {
     d.add(value: 0.0)
@@ -198,7 +198,7 @@ func fullscreenPostPass(target: copy Ptr, pipeline: copy Ptr, bind: copy Ptr, lo
     loadOp: loadOp, storeOp: WGPUStoreOp_Store,
     clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }
   }
-  var postAtt: List(WGPURenderPassColorAttachment) = createList(WGPURenderPassColorAttachment, cap: 1)
+  var postAtt: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 1)
   postAtt.add(value: att)
   let rpDesc: WGPURenderPassDescriptor = {
     colorAttachmentCount: 1 as UInt64, colorAttachments: postAtt.data
@@ -255,7 +255,7 @@ func beginForward(frame: view Buffer(Float), count: copy Int,
     loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store,
     clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }
   }
-  var colorAtts: List(WGPURenderPassColorAttachment) = createList(WGPURenderPassColorAttachment, cap: 4)
+  var colorAtts: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 4)
   colorAtts.add(value: att0)
   colorAtts.add(value: att1)
   colorAtts.add(value: att2)
@@ -268,7 +268,7 @@ func beginForward(frame: view Buffer(Float), count: copy Int,
     depthLoadOp: WGPULoadOp_Clear, depthStoreOp: WGPUStoreOp_Store,
     depthClearValue: 1.0
   }
-  var depthAtts: List(WGPURenderPassDepthStencilAttachment) = createList(WGPURenderPassDepthStencilAttachment, cap: 1)
+  var depthAtts: List(WGPURenderPassDepthStencilAttachment) = List.create(WGPURenderPassDepthStencilAttachment, cap: 1)
   depthAtts.add(value: depthAtt)
 
   let rpDesc: WGPURenderPassDescriptor = {
