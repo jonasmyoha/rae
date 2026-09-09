@@ -1,0 +1,57 @@
+# #882: `func copy(this: view T) ret T` in T's module is T's copy. It is what
+# `=` means for the type: an owning binding from a place, a `copy` parameter,
+# a struct-literal field without `own`, a List element copied by `copyAt` or
+# by copying the whole List, and a reassignment from a place all call it. A
+# struct that contains a T and has no copy of its own copies structurally,
+# through T's copy. Each copy is an independent value with its own release.
+type Slot {
+  id: Int
+  tag: String
+}
+
+func acquire(id: view Int) ret Slot {
+  log("acquire {id}")
+  ret Slot { id: id, tag: "slot" }
+}
+
+func drop(this: mod Slot) {
+  log("release {this.id}")
+}
+
+func copy(this: view Slot) ret Slot {
+  log("copy {this.id} -> {this.id + 100}")
+  ret Slot { id: this.id + 100, tag: this.tag }
+}
+
+type Box {
+  slot: Slot
+  count: Int
+}
+
+func keep(slot: copy Slot) {
+  log("keep {slot.id}")
+}
+
+func main() {
+  log("-- owning binding from a place")
+  let a: Slot = acquire(id: 1)
+  let b: Slot = a
+  log("-- copy parameter")
+  keep(slot: a)
+  log("-- struct literal field, then a structural copy of the struct")
+  let box: Box = { slot: a, count: 1 }
+  let box2: Box = box
+  log("-- list element: copyAt and whole-list copy")
+  var list: List(Slot) = createList(Slot, cap: 2)
+  list.add(value: acquire(id: 2))
+  if let element: Slot = list.copyAt(index: 0) {
+    log("element {element.id}")
+  }
+  let list2: List(Slot) = list
+  log("-- reassignment from a place releases the old value")
+  var c: Slot = acquire(id: 3)
+  c = a
+  log("-- explicit copy call")
+  let d: Slot = b.copy()
+  log("-- end of main")
+}

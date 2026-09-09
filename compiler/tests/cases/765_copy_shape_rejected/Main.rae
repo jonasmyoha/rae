@@ -1,0 +1,16 @@
+# #882: `copy` is reserved for the copy: exactly `func copy(this: view T) ret T`.
+type Slot {
+  id: Int
+}
+
+func drop(this: mod Slot) {
+  log("release {this.id}")
+}
+
+func copy(this: mod Slot) ret Slot {
+  ret Slot { id: this.id }
+}
+
+func main() {
+  let a: Slot = { id: 1 }
+}

@@ -123,7 +123,12 @@ static const Token* parser_consume(Parser* parser, TokenKind kind, const char* m
 }
 
 static bool is_ident_like(TokenKind kind) {
-  return kind == TOK_IDENT || kind == TOK_KW_VAL;
+  // `copy` is the parameter-mode keyword AND the name of a type's copy
+  // constructor (`func copy(this: view T) ret T`, `value.copy()`, #882).
+  // Modes are matched before identifiers wherever a type is parsed, so
+  // accepting it as a name here is unambiguous — the same treatment `val`
+  // gets.
+  return kind == TOK_IDENT || kind == TOK_KW_VAL || kind == TOK_KW_COPY;
 }
 
 static bool looks_like_ident(Parser* parser) {

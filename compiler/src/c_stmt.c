@@ -1955,9 +1955,20 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     const char* tn_hook = rae_mangle_type_specialized(
                         ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, target_tr);
                     int tmpn = ctx->temp_counter++;
-                    fprintf(out, "{ %s __asg%d = ", tn_hook, tmpn);
-                    emit_expr(ctx, stmt->as.assign_stmt.value, out, PREC_LOWEST, false, false);
-                    fprintf(out, "; ");
+                    const AstExpr* hv = stmt->as.assign_stmt.value;
+                    bool hv_is_place = hv->kind == AST_EXPR_IDENT || hv->kind == AST_EXPR_MEMBER
+                        || hv->kind == AST_EXPR_INDEX;
+                    if (hv_is_place) {
+                        // A place copies (#882: through the type's `copy`); sema
+                        // has already rejected it when the type has none.
+                        fprintf(out, "{ %s __asg%d; rae_deep_copy_%s(&__asg%d, &(", tn_hook, tmpn, tn_hook, tmpn);
+                        emit_expr(ctx, hv, out, PREC_LOWEST, false, false);
+                        fprintf(out, ")); ");
+                    } else {
+                        fprintf(out, "{ %s __asg%d = ", tn_hook, tmpn);
+                        emit_expr(ctx, hv, out, PREC_LOWEST, false, false);
+                        fprintf(out, "; ");
+                    }
                     if (!ctx->local_moved[hook_local]) {
                         fprintf(out, "rae_drop_struct_%s(&%.*s); ", tn_hook, (int)tname.len, tname.data);
                     }
