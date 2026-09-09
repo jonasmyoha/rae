@@ -1,0 +1,22 @@
+# #880: `create` needs a type to construct; a positional type argument is not
+# how the constructor is chosen; and the type must have a constructor with
+# that argument count.
+type Slot {
+  id: Int
+}
+
+func create(id: view Int) ret Slot {
+  ret Slot { id: id }
+}
+
+type Pond {
+  depth: Float
+}
+
+func main() {
+  let a: Slot = create(id: 1)
+  create(id: 2)
+  let names: List(String) = create(String, cap: 4)
+  let pond: Pond = create(depth: 1.0)
+  let two: Slot = create(id: 1, extra: 2)
+}
