@@ -1,6 +1,6 @@
 # WebGPU resource management in Rae
 
-Status: **revision 5 proposal over the shipped create/drop/copy lifecycle.**
+Status: **revision 6 proposal over the shipped create/drop/copy lifecycle.**
 
 The active [GPU and C-interop design](ptr-and-gpu-resource-design.md) has been
 rewritten. Use ordinary lifecycle functions from
@@ -30,8 +30,9 @@ contract. Compare representations using two independently created managers; no
 fixed 256-bit nonce or global issuer is required by the current design. State any
 probabilistic guarantees honestly. Keep normal main and explicit owner parameters.
 
-Start with a lifecycle wrapper around existing readback, then establish the raw
-pointer boundary and checked manager before migrating water and other consumers.
+The lifecycle wrapper around existing readback is complete as an internal pilot.
+Next establish the reviewed raw pointer boundary and checked manager before
+migrating water and other consumers.
 Manager-owned water groups allow independent instances; a copied controller of
 IDs does not acquire a destructor that releases another copy's resources.
 
