@@ -1,7 +1,7 @@
 # Native resource ownership
 
 Status: **use the shipped create/drop/copy contract; the remaining pointer
-boundary is proposed in revision 6 of the GPU design.**
+boundary is approved in revision 7 of the GPU design and awaits implementation.**
 
 [Constructors, destructors and copies](constructors-and-destructors.md) defines
 Rae's implemented lifecycle model. A native owner uses ordinary `create` and
@@ -9,12 +9,13 @@ Rae's implemented lifecycle model. A native owner uses ordinary `create` and
 independent value. Containers follow element ownership; there is no additional
 owner property, registration or blanket container prohibition.
 
-The rewritten [GPU and C-interop proposal](ptr-and-gpu-resource-design.md) builds
-on that model. It recommends marking raw pointer operations and foreign-call
-obligations explicitly in source, equally available to any module. Its current
-proposal needs neither privileged module lists nor an opaque-type keyword:
-reading or installing the native pointer itself would require unsafe code.
-These additional operation rules still need approval and implementation.
+The rewritten [GPU and C-interop contract](ptr-and-gpu-resource-design.md) builds
+on that model. It requires raw pointer operations and foreign-call obligations
+to be explicit in source, equally available to any module. Unsafe function and
+extern modifiers follow the parameter list; every extern declaration spells
+`unsafe` separately before `extern`. The contract needs neither privileged
+module lists nor an opaque-type keyword. These operation rules still need
+implementation.
 
 This does not create general field privacy. Safe wrappers must validate against
 authoritative native bounds/state rather than trusting publicly mutable metadata.
