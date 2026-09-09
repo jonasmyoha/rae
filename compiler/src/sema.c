@@ -495,27 +495,228 @@ static bool sema_stmt_mentions_ident(const AstStmt* s, Str name) {
     }
 }
 
-static void sema_check_use_after_drop(AstModule* module, const char* file, const AstStmt* drop_stmt, Str name) {
-    for (const AstStmt* s = drop_stmt->next; s; s = s->next) {
-        if (s->kind == AST_STMT_ASSIGN && s->as.assign_stmt.target
-            && s->as.assign_stmt.target->kind == AST_EXPR_IDENT
-            && str_eq(s->as.assign_stmt.target->as.ident, name)) {
-            if (sema_expr_mentions_ident(s->as.assign_stmt.value, name)) break; /* reported below */
-            return;                                                             /* reinitialised */
-        }
-        if (s->kind == AST_STMT_LET && str_eq(s->as.let_stmt.name, name)) return; /* shadowed */
-        if (!sema_stmt_mentions_ident(s, name)) continue;
+static bool sema_is_pending_create(const AstExpr* e);
+static bool sema_create_was_attempted(const AstExpr* e);
+
+// ===== #885: the lifecycle post-pass over a function body ===================
+//
+// Runs after the body is analysed. Two jobs, both needing the whole body:
+//
+//  1. A `create(...)` that no position bound (it is not in a typed binding,
+//     an argument, a literal field or a `ret`) is reported wherever it sits —
+//     an operand of `+`, a receiver of `.id`, an interpolation part, ...
+//  2. Use after `x.drop()` is a DATAFLOW check, not a scan of one statement
+//     list: a name dropped on ANY path into a point is "maybe dropped" there
+//     unless every such path reassigned it; using it is an error. Branches
+//     merge by union, a loop body is walked twice so a drop late in one
+//     iteration meets a use early in the next, a `let`/assignment of the
+//     name makes it live again. The C backend pairs this with a runtime drop
+//     flag per explicitly dropped local, so scope exit releases exactly once
+//     on every path.
+
+typedef struct DroppedSet { Str names[64]; int count; } DroppedSet;
+
+static bool dropped_has(const DroppedSet* set, Str name) {
+    for (int i = 0; i < set->count; i++) if (str_eq(set->names[i], name)) return true;
+    return false;
+}
+static void dropped_add(DroppedSet* set, Str name) {
+    if (dropped_has(set, name) || set->count >= 64) return;
+    set->names[set->count++] = name;
+}
+static void dropped_remove(DroppedSet* set, Str name) {
+    for (int i = 0; i < set->count; i++) {
+        if (str_eq(set->names[i], name)) { set->names[i] = set->names[--set->count]; return; }
+    }
+}
+static void dropped_union(DroppedSet* into, const DroppedSet* from) {
+    for (int i = 0; i < from->count; i++) dropped_add(into, from->names[i]);
+}
+
+typedef struct LifecycleFlow {
+    CompilerContext* ctx;
+    AstModule* module;
+    const char* file;
+    // names declared with a type that has a destructor (params + lets)
+    Str hook_names[128]; int hook_count;
+    // (line, column) already reported, so a second loop pass stays quiet
+    size_t reported_lines[64]; size_t reported_cols[64]; int reported_count;
+} LifecycleFlow;
+
+static bool flow_is_hook_name(const LifecycleFlow* flow, Str name) {
+    for (int i = 0; i < flow->hook_count; i++) if (str_eq(flow->hook_names[i], name)) return true;
+    return false;
+}
+static void flow_declare(LifecycleFlow* flow, Str name, const AstTypeRef* type) {
+    if (!type || type->is_view || type->is_mod || type->is_opt || type->generic_args) return;
+    if (!find_user_drop_for(flow->ctx, get_base_type_name(type))) return;
+    if (flow->hook_count < 128) flow->hook_names[flow->hook_count++] = name;
+}
+static void flow_report(LifecycleFlow* flow, size_t line, size_t col, const char* text) {
+    for (int i = 0; i < flow->reported_count; i++)
+        if (flow->reported_lines[i] == line && flow->reported_cols[i] == col) return;
+    if (flow->reported_count < 64) {
+        flow->reported_lines[flow->reported_count] = line;
+        flow->reported_cols[flow->reported_count] = col;
+        flow->reported_count++;
+    }
+    diag_error(flow->file, (int)line, (int)col, text);
+    flow->module->had_error = true;
+}
+static void flow_check_expr(LifecycleFlow* flow, const AstExpr* e, const DroppedSet* set, size_t line, size_t col) {
+    if (!e) return;
+    for (int i = 0; i < set->count; i++) {
+        if (!sema_expr_mentions_ident(e, set->names[i])) continue;
+        Str name = set->names[i];
         char buf[240];
         snprintf(buf, sizeof buf,
-                 "use of '%.*s' after '%.*s.drop()': the value was released and consumed; "
-                 "assign it a new value before using it again",
+                 "use of '%.*s' after '%.*s.drop()': the value was released and consumed on a path "
+                 "reaching here; assign it a new value before using it again",
                  (int)name.len, name.data, (int)name.len, name.data);
-        size_t line = s->line, col = s->column;
-        if (s->kind == AST_STMT_EXPR && s->as.expr_stmt) { line = s->as.expr_stmt->line; col = s->as.expr_stmt->column; }
-        diag_error(file, (int)line, (int)col, buf);
-        module->had_error = true;
+        flow_report(flow, e->line ? e->line : line, e->line ? e->column : col, buf);
+    }
+}
+static void flow_sweep_create(LifecycleFlow* flow, const AstExpr* e);
+static void flow_sweep_create_args(LifecycleFlow* flow, const AstCallArg* a) {
+    for (; a; a = a->next) flow_sweep_create(flow, a->value);
+}
+static void flow_sweep_create(LifecycleFlow* flow, const AstExpr* e) {
+    if (!e) return;
+    if (sema_is_pending_create(e)) {
+        if (!sema_create_was_attempted(e))
+            flow_report(flow, e->line, e->column,
+                        "'create(...)' has no expected type here; bind it ('let x: T = create(...)') or write 'T.create(...)'");
+        flow_sweep_create_args(flow, e->as.call.args);
         return;
     }
+    switch (e->kind) {
+        case AST_EXPR_BINARY: flow_sweep_create(flow, e->as.binary.lhs); flow_sweep_create(flow, e->as.binary.rhs); break;
+        case AST_EXPR_UNARY: case AST_EXPR_OWN: case AST_EXPR_BOX: case AST_EXPR_UNBOX:
+            flow_sweep_create(flow, e->as.unary.operand); break;
+        case AST_EXPR_CAST: flow_sweep_create(flow, e->as.cast.operand); break;
+        case AST_EXPR_CALL: flow_sweep_create(flow, e->as.call.callee); flow_sweep_create_args(flow, e->as.call.args); break;
+        case AST_EXPR_METHOD_CALL: flow_sweep_create(flow, e->as.method_call.object); flow_sweep_create_args(flow, e->as.method_call.args); break;
+        case AST_EXPR_MEMBER: flow_sweep_create(flow, e->as.member.object); break;
+        case AST_EXPR_INDEX: flow_sweep_create(flow, e->as.index.target); flow_sweep_create(flow, e->as.index.index); break;
+        case AST_EXPR_OBJECT:
+            for (const AstObjectField* f = e->as.object_literal.fields; f; f = f->next) flow_sweep_create(flow, f->value);
+            break;
+        case AST_EXPR_COLLECTION_LITERAL:
+            for (const AstCollectionElement* c = e->as.collection.elements; c; c = c->next) flow_sweep_create(flow, c->value);
+            break;
+        case AST_EXPR_LIST:
+            for (const AstExprList* l = e->as.list; l; l = l->next) flow_sweep_create(flow, l->value);
+            break;
+        case AST_EXPR_INTERP:
+            for (const AstInterpPart* p = e->as.interp.parts; p; p = p->next) flow_sweep_create(flow, p->value);
+            break;
+        case AST_EXPR_MATCH:
+            flow_sweep_create(flow, e->as.match_expr.subject);
+            for (const AstMatchArm* arm = e->as.match_expr.arms; arm; arm = arm->next) flow_sweep_create(flow, arm->value);
+            break;
+        default: break;
+    }
+}
+
+static void flow_block(LifecycleFlow* flow, const AstBlock* block, DroppedSet* set);
+static void flow_stmt(LifecycleFlow* flow, const AstStmt* s, DroppedSet* set) {
+    if (!s) return;
+    switch (s->kind) {
+        case AST_STMT_LET:
+            flow_sweep_create(flow, s->as.let_stmt.value);
+            flow_check_expr(flow, s->as.let_stmt.value, set, s->line, s->column);
+            dropped_remove(set, s->as.let_stmt.name);   /* a new binding is live */
+            if (!s->as.let_stmt.is_bind) flow_declare(flow, s->as.let_stmt.name, s->as.let_stmt.type);
+            break;
+        case AST_STMT_DESTRUCT:
+            flow_sweep_create(flow, s->as.destruct_stmt.call);
+            flow_check_expr(flow, s->as.destruct_stmt.call, set, s->line, s->column);
+            break;
+        case AST_STMT_ASSIGN: {
+            flow_sweep_create(flow, s->as.assign_stmt.value);
+            flow_check_expr(flow, s->as.assign_stmt.value, set, s->line, s->column);
+            const AstExpr* t = s->as.assign_stmt.target;
+            if (t && t->kind == AST_EXPR_IDENT) dropped_remove(set, t->as.ident);   /* reinitialised */
+            else flow_check_expr(flow, t, set, s->line, s->column);
+            break;
+        }
+        case AST_STMT_EXPR: {
+            const AstExpr* e = s->as.expr_stmt;
+            flow_sweep_create(flow, e);
+            bool is_drop = e && e->kind == AST_EXPR_METHOD_CALL && !e->as.method_call.args
+                && str_eq_cstr(e->as.method_call.method_name, "drop")
+                && e->as.method_call.object && e->as.method_call.object->kind == AST_EXPR_IDENT
+                && flow_is_hook_name(flow, e->as.method_call.object->as.ident);
+            flow_check_expr(flow, e, set, s->line, s->column);   /* dropping twice is a use */
+            if (is_drop) dropped_add(set, e->as.method_call.object->as.ident);
+            break;
+        }
+        case AST_STMT_RET:
+            for (const AstReturnArg* r = s->as.ret_stmt.values; r; r = r->next) {
+                flow_sweep_create(flow, r->value);
+                flow_check_expr(flow, r->value, set, s->line, s->column);
+            }
+            break;
+        case AST_STMT_IF: {
+            if (s->as.if_stmt.binding) flow_stmt(flow, s->as.if_stmt.binding, set);
+            flow_sweep_create(flow, s->as.if_stmt.condition);
+            flow_check_expr(flow, s->as.if_stmt.condition, set, s->line, s->column);
+            DroppedSet then_set = *set; DroppedSet else_set = *set;
+            flow_block(flow, s->as.if_stmt.then_block, &then_set);
+            flow_block(flow, s->as.if_stmt.else_block, &else_set);
+            *set = then_set; dropped_union(set, &else_set);
+            break;
+        }
+        case AST_STMT_LOOP: {
+            if (s->as.loop_stmt.init) flow_stmt(flow, s->as.loop_stmt.init, set);
+            flow_sweep_create(flow, s->as.loop_stmt.condition);
+            flow_sweep_create(flow, s->as.loop_stmt.increment);
+            flow_check_expr(flow, s->as.loop_stmt.condition, set, s->line, s->column);
+            DroppedSet body_set = *set;
+            flow_block(flow, s->as.loop_stmt.body, &body_set);
+            flow_check_expr(flow, s->as.loop_stmt.increment, &body_set, s->line, s->column);
+            dropped_union(set, &body_set);
+            /* second iteration: what the first one dropped meets the top of the body */
+            flow_check_expr(flow, s->as.loop_stmt.condition, set, s->line, s->column);
+            DroppedSet again = *set;
+            flow_block(flow, s->as.loop_stmt.body, &again);
+            dropped_union(set, &again);
+            break;
+        }
+        case AST_STMT_MATCH: {
+            flow_sweep_create(flow, s->as.match_stmt.subject);
+            flow_check_expr(flow, s->as.match_stmt.subject, set, s->line, s->column);
+            DroppedSet merged = *set;
+            for (const AstMatchCase* c = s->as.match_stmt.cases; c; c = c->next) {
+                DroppedSet case_set = *set;
+                flow_block(flow, c->block, &case_set);
+                dropped_union(&merged, &case_set);
+            }
+            *set = merged;
+            break;
+        }
+        case AST_STMT_DEFER: {
+            DroppedSet defer_set = *set;
+            flow_block(flow, s->as.defer_stmt.block, &defer_set);
+            break;
+        }
+        default: break;
+    }
+}
+static void flow_block(LifecycleFlow* flow, const AstBlock* block, DroppedSet* set) {
+    for (const AstStmt* s = block ? block->first : NULL; s; s = s->next) flow_stmt(flow, s, set);
+}
+
+static void sema_lifecycle_post_pass(CompilerContext* ctx, AstModule* module, const char* file,
+                                     const AstFuncDecl* fd) {
+    if (!fd || !fd->body) return;
+    LifecycleFlow flow = {0};
+    flow.ctx = ctx; flow.module = module; flow.file = file;
+    for (const AstParam* p = fd->params; p; p = p->next) {
+        if (p->type && p->type->is_own) flow_declare(&flow, p->name, p->type);
+    }
+    DroppedSet set = {0};
+    flow_block(&flow, fd->body, &set);
 }
 
 // Defined further down (near the statement analyzer); used earlier by the
@@ -840,6 +1041,7 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
             TypeInfo* ret_type = NULL;
             if (spec->as.func_decl.returns) ret_type = sema_resolve_type_internal(ctx, module, symbols, spec->as.func_decl.returns->type);
             sema_analyze_stmt(ctx, module, symbols, spec->as.func_decl.body->first, ret_type);
+            sema_lifecycle_post_pass(ctx, module, sema_diag_file(module), &spec->as.func_decl);
             symbol_table_pop_scope(symbols);
         }
     } else if (generic_decl->kind == AST_DECL_TYPE) {
@@ -1494,6 +1696,7 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
                 s_current_decl_origin = decl->origin_file;
                 AstStmt* stmt = decl->as.func_decl.body->first;
                 while (stmt) { sema_analyze_stmt(ctx, module, symbols, stmt, current_return_type); stmt = stmt->next; }
+                sema_lifecycle_post_pass(ctx, module, sema_diag_file(module), &decl->as.func_decl);
                 s_current_decl_origin = saved_origin;
             }
             symbol_table_pop_scope(symbols);
@@ -2552,24 +2755,8 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
     switch (stmt->kind) {
         case AST_STMT_EXPR: {
             if (stmt->as.expr_stmt) sema_analyze_expr(ctx, module, symbols, stmt->as.expr_stmt);
-            // #880: a constructor call needs a type to construct.
-            if (sema_is_pending_create(stmt->as.expr_stmt)) {
-                diag_error(sema_diag_file(module), (int)stmt->as.expr_stmt->line, (int)stmt->as.expr_stmt->column,
-                           "'create(...)' has no expected type here; bind it ('let x: T = create(...)') or write 'T.create(...)'");
-                module->had_error = true;
-            }
-            // #881: `name.drop()` on a value whose type has a destructor consumes it.
-            const AstExpr* e = stmt->as.expr_stmt;
-            if (e && e->kind == AST_EXPR_METHOD_CALL && !e->as.method_call.args
-                && str_eq_cstr(e->as.method_call.method_name, "drop")
-                && e->as.method_call.object && e->as.method_call.object->kind == AST_EXPR_IDENT) {
-                Symbol* sym = symbol_table_lookup(symbols, e->as.method_call.object->as.ident);
-                TypeInfo* st = sym ? sym->type : NULL;
-                if (st && st->kind == TYPE_STRUCT && find_user_drop_for(ctx, st->name)) {
-                    sema_check_use_after_drop(module, sema_diag_file(module), stmt,
-                                              e->as.method_call.object->as.ident);
-                }
-            }
+            // #880/#881/#885: stray `create(...)` and use after `x.drop()` are
+            // reported by sema_lifecycle_post_pass over the whole body.
             break;
         }
         case AST_STMT_LET: {
@@ -3330,9 +3517,47 @@ static void sema_bind_call_decl(CompilerContext* ctx, AstModule* module, SymbolT
     sema_check_own_args(ctx, module, symbols, &decl->as.func_decl, expr->as.call.args, false);
 }
 
+/* Every `create` the resolver looked at, bound or reported. The post-pass
+ * sweep reports only the ones NO position ever looked at (#885). */
+static const AstExpr* s_create_attempted[512];
+static int s_create_attempted_count;
+static bool sema_create_was_attempted(const AstExpr* e) {
+    for (int i = 0; i < s_create_attempted_count; i++) if (s_create_attempted[i] == e) return true;
+    return false;
+}
+
+static bool sema_resolve_create(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                                AstExpr* expr, TypeInfo* expected);
+
+/* #885: arguments of a GENERIC callee. The parameter types are the template's
+ * (`own T`, `view T`); substitute the call's type arguments so a pending
+ * `create(...)` argument is chosen by the real type (`list.add(value:
+ * create(id: 4))` on a `List(Slot)`, `pick(Slot, value: create(...))`).
+ * `fd` is the template (generic_params set) or a specialisation (params
+ * already substituted, `ga` NULL). Only pending constructors are touched. */
+static void sema_bind_create_args(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                                  const AstFuncDecl* fd, const AstTypeRef* ga,
+                                  AstCallArg* args, bool skip_receiver) {
+    if (!fd) return;
+    const AstParam* p = fd->params;
+    AstCallArg* a = args;
+    if (skip_receiver && p) p = p->next;
+    while (p && a) {
+        if (a->value && sema_is_pending_create(a->value) && p->type) {
+            AstTypeRef* pt_ref = p->type;
+            if (fd->generic_params && ga) pt_ref = substitute_type_ref(ctx, fd->generic_params, ga, p->type);
+            TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, pt_ref);
+            if (pt) sema_resolve_create(ctx, module, symbols, a->value, pt);
+        }
+        p = p->next; a = a->next;
+    }
+}
+
 static bool sema_resolve_create(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
                                 AstExpr* expr, TypeInfo* expected) {
     const char* file = sema_diag_file(module);
+    if (!sema_create_was_attempted(expr) && s_create_attempted_count < 512)
+        s_create_attempted[s_create_attempted_count++] = expr;
     if (expr->as.call.args && sema_arg_is_type_name(symbols, expr->as.call.args->value)) {
         diag_error(file, (int)expr->line, (int)expr->column,
                    "'create' takes no positional type argument; write 'List(String).create(...)' "
@@ -3468,8 +3693,18 @@ static TypeInfo* sema_type_qualifier_type(CompilerContext* ctx, AstModule* modul
 static void sema_check_object_literal_fields(TypeInfo* structType, AstObjectField* fields,
                                              size_t litLine, size_t litCol, const char* errFile) {
     if (structType && structType->kind == TYPE_REF) structType = structType->as.ref.base;
-    if (!structType || structType->kind != TYPE_STRUCT || !structType->as.structure.decl) return;
+    /* #885: a generic INSTANCE (`Box(Slot)`) is checked through its specialised
+     * decl, whose fields already carry the substituted types, so a `create(...)`
+     * in `{ value: create(id: 1) }` resolves against `Slot`, not `T`. */
+    if (!structType || (structType->kind != TYPE_STRUCT && structType->kind != TYPE_GENERIC_INST)
+        || !structType->as.structure.decl) return;
     AstTypeDecl* td = &structType->as.structure.decl->as.type_decl;
+    /* A generic instance's TypeInfo points at the TEMPLATE decl (fields typed
+     * `T`); substitute the instance's arguments to get each field's real type. */
+    const AstTypeRef* inst_args = NULL;
+    if (td->generic_params && s_lifecycle_ctx && structType->as.structure.generic_count > 0) {
+        inst_args = sema_type_ref_of(s_lifecycle_ctx, structType)->generic_args;
+    }
     for (AstObjectField* f = fields; f; f = f->next) {
         bool known = false;
         for (AstTypeField* tf = td->fields; tf; tf = tf->next)
@@ -3477,9 +3712,20 @@ static void sema_check_object_literal_fields(TypeInfo* structType, AstObjectFiel
         if (known) {
             const AstTypeField* tf = td->fields;
             while (tf && !str_eq(tf->name, f->name)) tf = tf->next;
-            if (tf && tf->type && sema_is_pending_create(f->value) && s_lifecycle_ctx && s_lifecycle_symbols && s_current_module) {
-                TypeInfo* ft = sema_resolve_type_internal(s_lifecycle_ctx, s_current_module, s_lifecycle_symbols, tf->type);
+            AstTypeRef* field_type = tf ? tf->type : NULL;
+            if (field_type && inst_args)
+                field_type = substitute_type_ref(s_lifecycle_ctx, td->generic_params, inst_args, field_type);
+            if (field_type && sema_is_pending_create(f->value) && s_lifecycle_ctx && s_lifecycle_symbols && s_current_module) {
+                TypeInfo* ft = sema_resolve_type_internal(s_lifecycle_ctx, s_current_module, s_lifecycle_symbols, field_type);
                 if (ft) sema_resolve_create(s_lifecycle_ctx, s_current_module, s_lifecycle_symbols, f->value, ft);
+            }
+            /* A nested bare literal gets the field's (substituted) type, so a
+             * `create` inside `{ value: { value: create(...) } }` resolves too. */
+            if (field_type && f->value && f->value->kind == AST_EXPR_OBJECT && !f->value->as.object_literal.type
+                && s_lifecycle_ctx && s_lifecycle_symbols && s_current_module) {
+                TypeInfo* ft = sema_resolve_type_internal(s_lifecycle_ctx, s_current_module, s_lifecycle_symbols, field_type);
+                if (ft) sema_check_object_literal_fields(ft, f->value->as.object_literal.fields,
+                                                         f->value->line, f->value->column, errFile);
             }
             if (tf && tf->type && !tf->type->is_opt && !tf->type->generic_args
                 && s_lifecycle_ctx && sema_expr_copies_place(f->value)) {
@@ -3864,11 +4110,47 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 }
                 else {
                     AstDecl* resolved = resolve_function_overload(ctx, module, symbols, name, expr->as.call.args, expr->as.call.generic_args, expr->line, expr->column);
+                    if (!resolved && expr->as.call.args && sema_arg_is_type_name(symbols, expr->as.call.args->value)
+                        && expr->as.call.args->value->kind == AST_EXPR_IDENT) {
+                        // #885: `pick(Slot, value: create(id: 6))` — a generic callee
+                        // with a positional type argument is bound by the backend by
+                        // name; bind its pending `create(...)` arguments here from the
+                        // type argument so they are not left without a type.
+                        AstTypeRef* cga = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef)); memset(cga, 0, sizeof(*cga));
+                        cga->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart)); memset(cga->parts, 0, sizeof(*cga->parts));
+                        cga->parts->text = expr->as.call.args->value->as.ident;
+                        size_t value_args = 0;
+                        for (AstCallArg* va = expr->as.call.args->next; va; va = va->next) value_args++;
+                        for (size_t di = 0; di < ctx->all_decl_count; di++) {
+                            const AstDecl* cd = ctx->all_decls[di];
+                            if (cd->kind != AST_DECL_FUNC || !cd->as.func_decl.generic_params) continue;
+                            if (!str_eq(cd->as.func_decl.name, name) || cd->as.func_decl.specialization_args) continue;
+                            size_t pc = 0;
+                            for (const AstParam* pp = cd->as.func_decl.params; pp; pp = pp->next) pc++;
+                            if (pc != value_args) continue;
+                            sema_bind_create_args(ctx, module, symbols, &cd->as.func_decl, cga, expr->as.call.args->next, false);
+                            break;
+                        }
+                    }
                     if (resolved) {
                         expr->decl_link = resolved;
                         if (resolved->as.func_decl.returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, resolved->as.func_decl.returns->type);
                         AstParam* p = resolved->as.func_decl.params; AstCallArg* a = expr->as.call.args;
                         while (p && a) { TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, p->type); ensure_type_match(ctx, pt, &a->value); p = p->next; a = a->next; }
+                        // #885: a generic callee's `T` parameters bind a pending `create(...)`
+                        // argument through the call's type arguments.
+                        if (resolved->as.func_decl.generic_params) {
+                            AstTypeRef* cga = expr->as.call.generic_args;
+                            if (!cga && expr->as.call.args && sema_arg_is_type_name(symbols, expr->as.call.args->value)) {
+                                AstExpr* ta = expr->as.call.args->value;
+                                if (ta->kind == AST_EXPR_IDENT) {
+                                    cga = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef)); memset(cga, 0, sizeof(*cga));
+                                    cga->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart)); memset(cga->parts, 0, sizeof(*cga->parts));
+                                    cga->parts->text = ta->as.ident;
+                                }
+                            }
+                            if (cga) sema_bind_create_args(ctx, module, symbols, &resolved->as.func_decl, cga, expr->as.call.args, false);
+                        }
                         sema_check_own_args(ctx, module, symbols, &resolved->as.func_decl, expr->as.call.args, false);
                         /* If this call hands back a reference, that reference
                          * may point into any of its `view`/`mod` arguments. A
@@ -4393,6 +4675,13 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                             }
                         } else expr->decl_link = best_decl;
                         if (expr->decl_link->as.func_decl.returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, expr->decl_link->as.func_decl.returns->type);
+                        // #885: a pending `create(...)` argument meets the substituted parameter type.
+                        if (fd->generic_params && rec) {
+                            AstTypeRef* ga2 = infer_generic_args(ctx, fd, fd->params->type, &rec_tr);
+                            sema_bind_create_args(ctx, module, symbols, fd, ga2, expr->as.method_call.args, true);
+                        } else {
+                            sema_bind_create_args(ctx, module, symbols, fd, NULL, expr->as.method_call.args, true);
+                        }
                         found = true;
                     }
                 }
@@ -4510,6 +4799,33 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                             diag_error(sema_diag_file(module),
                                        (int)expr->line, (int)expr->column, buf);
                             module->had_error = true;
+                        }
+                    }
+                }
+                // #885: a generic CONTAINER method (`list.add(value: create(id: 4))`)
+                // is matched structurally and bound by the backend, so no decl
+                // reached the arguments above. Give a pending `create(...)`
+                // argument its type from the receiver's generic arguments.
+                {
+                    bool any_pending = false;
+                    for (AstCallArg* a = expr->as.method_call.args; a; a = a->next)
+                        if (sema_is_pending_create(a->value)) { any_pending = true; break; }
+                    if (any_pending && (t->kind == TYPE_STRUCT || t->kind == TYPE_GENERIC_INST)
+                        && t->as.structure.decl && t->as.structure.generic_count > 0) {
+                        AstTypeRef* rec_ref = sema_type_ref_of(ctx, t);
+                        Str rec_base = rec_ref->parts ? rec_ref->parts->text : (Str){0};
+                        for (size_t di = 0; di < ctx->all_decl_count; di++) {
+                            const AstDecl* cd = ctx->all_decls[di];
+                            if (cd->kind != AST_DECL_FUNC || !cd->as.func_decl.generic_params) continue;
+                            if (cd->as.func_decl.specialization_args) continue;
+                            if (!str_eq(cd->as.func_decl.name, expr->as.method_call.method_name)) continue;
+                            const AstParam* fp = cd->as.func_decl.params;
+                            if (!fp || !fp->type || !str_eq_cstr(fp->name, "this")) continue;
+                            if (!str_eq(get_base_type_name(fp->type), rec_base)) continue;
+                            AstTypeRef* ga = infer_generic_args(ctx, &cd->as.func_decl, fp->type, rec_ref);
+                            if (!ga) continue;
+                            sema_bind_create_args(ctx, module, symbols, &cd->as.func_decl, ga, expr->as.method_call.args, true);
+                            break;
                         }
                     }
                 }
