@@ -246,6 +246,13 @@ static void mangle_type_recursive(CompilerContext* ctx, const struct AstIdentifi
 
     Str base = get_base_type_name(type);
     if (mangle_primitive_ref(type, base, buf, pos, cap)) return;
+    /* Ptr resolves to Buffer(void). Use the same identifier-safe spelling as
+     * TypeInfo mangling so List(Ptr)'s parsed and resolved forms name one C
+     * specialization. Ordinary declarations still emit void* in c_backend. */
+    if (str_eq_cstr(base, "Ptr")) {
+        *pos += snprintf(buf + *pos, cap - *pos, "Buffer_void");
+        return;
+    }
     if (type->is_opt && !type->is_view && !type->is_mod) {
         // Value optional: struct-rep -> rae_opt_<T>; else the inline RaeAny
         // box. Emit RaeAny (matching the C type) rather than the bare payload
@@ -336,6 +343,12 @@ static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct
 
     Str base = get_base_type_name(type);
     if (mangle_primitive_ref(type, base, buf, pos, cap)) return;
+    /* Keep the parsed Ptr spelling identical to its resolved Buffer(void)
+     * TypeInfo spelling inside generic specializations. */
+    if (str_eq_cstr(base, "Ptr")) {
+        *pos += snprintf(buf + *pos, cap - *pos, "Buffer_void");
+        return;
+    }
     if (type->is_opt && !type->is_view && !type->is_mod) {
         if (mangler_opt_is_struct_rep(generic_params, concrete_args, type)) {
             *pos += snprintf(buf + *pos, cap - *pos, "rae_opt_");

@@ -120,7 +120,8 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                 Str obj_name = expr->as.method_call.object->as.ident;
                 bool obj_has_local = get_local_type_ref(ctx, obj_name) != NULL;
                 bool obj_is_type = !obj_has_local && obj_name.len > 0 &&
-                    (is_primitive_type(obj_name) || (ctx->module && find_type_decl(ctx, ctx->module, obj_name) != NULL));
+                    (is_primitive_type(obj_name) || str_eq_cstr(obj_name, "Ptr")
+                     || (ctx->module && find_type_decl(ctx, ctx->module, obj_name) != NULL));
                 if (obj_is_type) {
                     AstExpr* synth_call = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstExpr));
                     *synth_call = (AstExpr){.kind = AST_EXPR_CALL, .line = expr->line, .column = expr->column};
