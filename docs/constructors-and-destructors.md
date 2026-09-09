@@ -1,7 +1,7 @@
 # Constructors, destructors and copies in Rae: `create`, `drop`, `copy`
 
-Status: **design proposal, 2026-09-09, for maintainer approval.** Nothing here is
-implemented. This document covers constructors, destructors and copies only.
+Status: **`drop` implemented (#881, 2026-09-09); `create` (#880) and `copy` (#882)
+pending.** The rest of this document is the design as approved for implementation. This document covers constructors, destructors and copies only.
 Native
 pointers, `unsafe`, GPU resource identity and the rest of
 `ptr-and-gpu-resource-design.md` (#878) are out of scope; section 8 says only

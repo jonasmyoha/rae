@@ -1,0 +1,84 @@
+# 120 — Resource lifetimes: destructors by name (#881).
+#
+# A `Voice` owns one slot of a small native mixer (mixer.c) — the kind of thing
+# the compiler cannot see through and cannot copy: a number that must be given
+# back exactly once. Its destructor is an ordinary function,
+# `func drop(this: mod Voice)`, and the compiler runs it wherever a Voice is
+# released: scope exit, an `own` parameter, a List element, a struct field, an
+# explicit `voice.drop()`. There is no shutdown call at the end of main; the
+# values return their slots themselves.
+#
+# Headless CLI: prints the mixer's bookkeeping and ends with the line the
+# example gate asserts, `[lifetimes] live voices: 0`.
+
+func mixerAcquire() extern ret Int
+func mixerRelease(slot: Int) extern
+func mixerLive() extern ret Int
+
+# A voice: the mixer slot it holds and the note it plays.
+type Voice {
+  slot: Int
+  note: Int
+}
+
+func startVoice(note: view Int) ret Voice {
+  let slot: Int = mixerAcquire()
+  log("[voice] start note {note} on slot {slot}")
+  ret Voice { slot: slot, note: note }
+}
+
+# The destructor. The compiler calls it once for every Voice that is released;
+# user code never has to, but may (`lead.drop()` below consumes the binding).
+func drop(this: mod Voice) {
+  log("[voice] release slot {this.slot} (note {this.note})")
+  mixerRelease(slot: this.slot)
+}
+
+# A chord owns its voices. Dropping the chord runs the chord's destructor
+# first, then its fields in reverse declaration order, so the voices release
+# after the "ends" line.
+type Chord {
+  name: String
+  voices: List(Voice)
+}
+
+func drop(this: mod Chord) {
+  log("[chord] {this.name} ends")
+}
+
+func playChord(name: view String) ret Chord {
+  var chord: Chord = { name: name, voices: createList(Voice, cap: 3) }
+  chord.voices.add(value: startVoice(note: 60))
+  chord.voices.add(value: startVoice(note: 64))
+  chord.voices.add(value: startVoice(note: 67))
+  ret chord
+}
+
+func handOver(voice: own Voice) {
+  log("[voice] handed over note {voice.note}")
+}
+
+func main() ret Int {
+  log("[lifetimes] mixer live voices: {mixerLive()}")
+
+  log("-- a chord in its own scope")
+  loop var round: Int = 0, round < 1, ++round {
+    let chord: Chord = playChord(name: "C major")
+    log("[chord] {chord.name} has {chord.voices.length} voices, live {mixerLive()}")
+  }
+  log("[lifetimes] after the chord: live {mixerLive()}")
+
+  log("-- a lead voice, stopped early, then a new one on the same binding")
+  var lead: Voice = startVoice(note: 72)
+  lead.drop()
+  lead = startVoice(note: 74)
+
+  log("-- ownership moves, the callee releases")
+  let bass: Voice = startVoice(note: 36)
+  handOver(voice: own bass)
+
+  log("-- stop the lead explicitly so the count can be printed")
+  lead.drop()
+  log("[lifetimes] live voices: {mixerLive()}")
+  ret 0
+}

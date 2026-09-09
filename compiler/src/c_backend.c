@@ -1,5 +1,6 @@
 #include "c_backend.h"
 #include "c_backend_internal.h"
+#include "ownership.h"
 #include "mangler.h"
 #include "sema.h"
 
@@ -2578,6 +2579,19 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
             drop_entries[i].mangled, drop_entries[i].mangled);
     fprintf(out, "RAE_UNUSED static void rae_drop_struct_%s_alias(%s* this);\n",
             drop_entries[i].mangled, drop_entries[i].mangled);
+    // #881: a user destructor `func drop(this: mod T)` is an ordinary
+    // function whose prototype is emitted later with the others; the
+    // synthesised struct drop calls it, so declare it here.
+    if (!drop_entries[i].decl->as.type_decl.generic_params) {
+      const AstFuncDecl* user_drop = find_user_drop_for(ctx, drop_entries[i].decl->as.type_decl.name);
+      if (user_drop) {
+        CFuncContext ptctx = {.compiler_ctx = ctx, .module = module};
+        fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&ptctx, user_drop),
+                rae_mangle_function(ctx, user_drop));
+        emit_param_list(&ptctx, user_drop->params, out, false);
+        fprintf(out, ");\n");
+      }
+    }
   }
   for (size_t i = 0; i < drop_entry_count; i++) {
     const StructDropEntry* e = &drop_entries[i];
@@ -2635,9 +2649,19 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     for (const AstTypeField* f = e->decl->as.type_decl.fields; f && field_count < 256; f = f->next) {
       fields[field_count++] = f;
     }
+    const AstFuncDecl* user_drop = gp ? NULL
+        : find_user_drop_for(ctx, e->decl->as.type_decl.name);
     for (int is_alias = 0; is_alias < 2; is_alias++) {
       fprintf(out, "RAE_UNUSED static void rae_drop_struct_%s%s(%s* this) {\n",
               e->mangled, is_alias ? "_alias" : "", e->mangled);
+      // #881: the destructor runs FIRST, with every field still live, then
+      // the fields drop in reverse declaration order. Both variants call it:
+      // a value of a type with a destructor is never an alias of another
+      // (it cannot be copied without a `copy`), so it is released exactly
+      // once wherever it ends up.
+      if (user_drop) {
+        fprintf(out, "  %s(this);\n", rae_mangle_function(ctx, user_drop));
+      }
       for (size_t j = field_count; j > 0; j--) {
         const AstTypeField* f = fields[j - 1];
         AstTypeRef* concrete = (gp && ga) ? substitute_type_ref(ctx, gp, ga, f->type) : f->type;
