@@ -93,8 +93,7 @@ func frame(app: mod App) {
 }
 
 func main() {
-  if let createdApp: App = App.create() {
-    var app: App = own createdApp
+  if let app: App = App.create() {
     loop not shouldClose(resources: app.renderSystem.resources) {
       frame(app: app)
     }
@@ -119,6 +118,19 @@ The App and all of this state survive across frames. `frame(app: mod App)` and
 receives ownership or constructs another manager. `own` appears at construction
 boundaries to put each value into its lasting owner without copying it. Returning
 the owned local `renderSystem` transfers it out under the existing return rules.
+
+`if let app: App = App.create()` already takes ownership of the produced optional
+payload. The then-branch owns `app`; it needs no second binding or `own` transfer.
+An owned `let` binding can be borrowed through `mod` to update its contents;
+`var` is needed if the binding itself must be reassigned. Exiting the branch,
+including an early return, drops the owned App and its fields. A `none` result
+enters the else-branch without constructing an App there.
+
+This pattern is supported by the Compiled target. The focused
+[App-owner regression](../compiler/tests/cases/775_if_let_app_owner/Main.rae)
+checks nested `mod` calls over multiple frames and exact-once resource cleanup
+on normal branch exit, early return and constructor failure. The GPU library
+operations shown above remain proposed; that ownership behavior is tested today.
 
 The texture ID itself does not own or release the allocation. At scope exit,
 App field cleanup reaches `RenderSystem`, then its `GpuResources` destructor,
