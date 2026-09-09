@@ -592,3 +592,29 @@ Any function whose first parameter matches a type `T` can be called using member
 ---
 
 **End of Rae Specification v0.3**
+
+### 5.4 Constructors, destructors and copies by name
+
+Three function names are reserved by shape (`docs/constructors-and-destructors.md`):
+
+- **`create`** — a constructor of `T` is any function named `create` whose return
+  type is `T` or `opt T`. A bare `create(...)` is resolved by the type of the
+  position it appears in, exactly where an untyped struct literal is legal: a
+  typed binding, an `if let` binding, a call argument, a struct-literal field.
+  `T.create(...)` (and `List(String).create(...)`) names the type where nothing
+  expects one, such as `ret`. Generic types bind their arguments from the
+  expected type. At most one `create` per type and argument count is visible.
+- **`drop`** — `func drop(this: mod T)` in T's module is T's destructor. The
+  compiler runs it wherever a T is released (scope exit, `ret`, `break`/`continue`,
+  reassignment, an `own` parameter, a field, a `List` element, an optional),
+  before the fields drop in reverse declaration order, once per value that was
+  not moved out. `value.drop()` consumes the binding; a later use is an error
+  until it is assigned again. Any other function named `drop` on a user type
+  is an error.
+- **`copy`** — `func copy(this: view T) ret T` in T's module is T's copy, and is
+  what `=` means for T: an owning binding from a place, a `copy` parameter, a
+  literal field without `own`, a `copyAt`, a whole-container copy and a
+  structural copy of a containing struct all call it. A type with a destructor
+  and no `copy` cannot be copied at all; it moves with `own` and is borrowed
+  with `view`/`mod`. `copy` is also the parameter-mode keyword; it is accepted
+  as a name after `func` and after `.`.

@@ -1,8 +1,9 @@
-# 120 — Resource lifetimes: destructors and copies by name (#881, #882).
+# 120 — Resource lifetimes: constructors, destructors and copies by name (#880-#882).
 #
 # A `Voice` owns one slot of a small native mixer (mixer.c) — the kind of thing
 # the compiler cannot see through and cannot copy: a number that must be given
-# back exactly once. Its destructor is an ordinary function,
+# back exactly once. Its constructor is `func create(note: view Int) ret Voice`,
+# resolved by the type each call lands in. Its destructor is an ordinary function,
 # `func drop(this: mod Voice)`, and the compiler runs it wherever a Voice is
 # released: scope exit, an `own` parameter, a List element, a struct field, an
 # explicit `voice.drop()`. Its copy, `func copy(this: view Voice) ret Voice`,
@@ -23,7 +24,10 @@ type Voice {
   note: Int
 }
 
-func startVoice(note: view Int) ret Voice {
+# The constructor: any function named `create` returning the type. A bare
+# `create(note: 60)` is chosen by the type of the binding, field or argument it
+# lands in; `Voice.create(...)` names the type where nothing expects one.
+func create(note: view Int) ret Voice {
   let slot: Int = mixerAcquire()
   log("[voice] start note {note} on slot {slot}")
   ret Voice { slot: slot, note: note }
@@ -49,10 +53,10 @@ func drop(this: mod Chord) {
 }
 
 func playChord(name: view String) ret Chord {
-  var chord: Chord = { name: name, voices: createList(Voice, cap: 3) }
-  chord.voices.add(value: startVoice(note: 60))
-  chord.voices.add(value: startVoice(note: 64))
-  chord.voices.add(value: startVoice(note: 67))
+  var chord: Chord = { name: name, voices: create(cap: 3) }   # List(Voice) from the field type
+  chord.voices.add(value: create(note: 60))                    # Voice from the parameter type
+  chord.voices.add(value: create(note: 64))
+  chord.voices.add(value: create(note: 67))
   ret chord
 }
 
@@ -81,12 +85,12 @@ func main() ret Int {
   log("[lifetimes] after the chord: live {mixerLive()}")
 
   log("-- a lead voice, stopped early, then a new one on the same binding")
-  var lead: Voice = startVoice(note: 72)
+  var lead: Voice = create(note: 72)
   lead.drop()
-  lead = startVoice(note: 74)
+  lead = Voice.create(note: 74)
 
   log("-- ownership moves, the callee releases")
-  let bass: Voice = startVoice(note: 36)
+  let bass: Voice = create(note: 36)
   handOver(voice: own bass)
 
   log("-- a copy is a second voice on its own slot")

@@ -18,6 +18,11 @@ func createStringMap(V: type, cap: view Int) ret StringMap(V) {
   ret StringMap(V) { data: rae_ext_rae_buf_alloc(size: cap, elemSize: sizeof(StringMapEntry(V))), length: 0, cap: cap, isGrowing: false }
 }
 
+# The constructor by name (#880): `var m: StringMap(Int) = create(cap: 8)`.
+func create(V: type, cap: view Int) ret StringMap(V) {
+  ret createStringMap(V, cap: cap)
+}
+
 func set(V: type, this: mod StringMap(V), k: view String, value: own V) {
   if this.cap is 0 {
     this.cap = 8
