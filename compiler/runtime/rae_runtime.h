@@ -11,6 +11,13 @@
 #include <wchar.h>
 #include <pthread.h>
 
+/* Ptr lowers directly to void* in ordinary declarations. Generic storage also
+ * needs an identifier-safe spelling because the concrete type is embedded in
+ * generated List/function names. This is the canonical TypeInfo spelling for
+ * Buffer(void), which is Ptr's internal representation. It carries no
+ * ownership and exists only at the native interop boundary. */
+typedef void* Buffer_void;
+
 /* Compiled-backend task runtime (Task(T)). The Rae type Task(T) lowers to
  * `RaeTask*` (type-erased): the worker thread stores its T result into the
  * `result` buffer (malloc'd to sizeof(T)); `task.get()` joins and reads it.
