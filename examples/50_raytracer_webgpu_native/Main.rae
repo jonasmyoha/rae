@@ -41,7 +41,7 @@ func main() {
 
     # Pack the scene as f32-as-Float: camera(19) then per sphere center(3)
     # radius albedo(3) kind fuzz ior (10) — exactly what raytrace.wgsl reads.
-    let sceneBuf: List(Float) = createList(Float, cap: 64)
+    let sceneBuf: List(Float) = List.create(Float, cap: 64)
     pushVec3(buf: sceneBuf, a: cam.origin)
     pushVec3(buf: sceneBuf, a: cam.lowerLeft)
     pushVec3(buf: sceneBuf, a: cam.horizontal)
@@ -63,7 +63,7 @@ func main() {
     # relative to the repo root (how `rae run` / the dashboard invoke examples).
     let wgsl: String = rae_ext_rae_sys_read_file(path: "examples/50_raytracer_webgpu_native/raytrace.wgsl")
 
-    let fb: List(Int) = createList(cap: width * height)
+    let fb: List(Int) = List.create(Int, cap: width * height)
     var i: Int = 0
     loop i < width * height {
         fb.add(value: 0)

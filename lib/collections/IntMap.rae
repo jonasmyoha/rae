@@ -25,7 +25,7 @@ func createIntMap(V: type, cap: view Int) ret IntMap(V) {
 
 # The constructor by name (#880): `var m: IntMap(Int) = create(cap: 8)`.
 func create(V: type, cap: view Int) ret IntMap(V) {
-  ret createIntMap(V, cap: cap)
+  ret IntMap.create(V, cap: cap)
 }
 
 func set(V: type, this: mod IntMap(V), k: view Int, value: own V) {
@@ -186,7 +186,7 @@ func remove(V: type, this: mod IntMap(V), k: view Int) {
 }
 
 func keys(V: type, this: view IntMap(V)) ret List(Int) {
-  let result: List(Int) = createList(cap: this.length)
+  let result: List(Int) = List.create(Int, cap: this.length)
   var i: Int = 0
   loop i < this.cap {
     let entry: IntMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: i)
@@ -199,7 +199,7 @@ func keys(V: type, this: view IntMap(V)) ret List(Int) {
 }
 
 func values(V: type, this: view IntMap(V)) ret List(V) {
-  let result: List(V) = createList(cap: this.length)
+  let result: List(V) = List.create(V, cap: this.length)
   var i: Int = 0
   loop i < this.cap {
     let entry: IntMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: i)

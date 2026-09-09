@@ -86,9 +86,9 @@ type GrassCompute {
 func createGrassCompute() ret GrassCompute {
   ret GrassCompute {
     surfaceShader: "", made: false, drawBindMade: false,
-    uni: createList(Float, cap: 28),
-    indReset: createList(Int32, cap: 4),
-    read: createList(Int, cap: 2),
+    uni: List.create(Float, cap: 28),
+    indReset: List.create(Int32, cap: 4),
+    read: List.create(Int, cap: 2),
     diagFrame: 0, visibleCache: 0
   }
 }
@@ -119,7 +119,7 @@ func resetGrassPipeline(grass: mod GrassCompute) {
 # WGSL text -> shader module (same construction as Gbuffer.makeShaderModule; the
 # one-element List holds the chained WGPUShaderSourceWGSL for nextInChain).
 func grassMakeShaderModule(wgsl: copy Ptr) ret Ptr {
-  var srcList: List(WGPUShaderSourceWGSL) = createList(WGPUShaderSourceWGSL, cap: 1)
+  var srcList: List(WGPUShaderSourceWGSL) = List.create(WGPUShaderSourceWGSL, cap: 1)
   srcList.add(value: {
     chain: { sType: WGPUSType_ShaderSourceWGSL },
     code: { data: wgsl, length: WGPU_STRLEN }
@@ -133,16 +133,16 @@ func grassMakeShaderModule(wgsl: copy Ptr) ret Ptr {
 # geometry is generated in the vertex shader from vertex_index — and no back-face
 # cull, since a thin blade is seen from both sides.
 func makeGrassPipeline(shaderMod: copy Ptr) ret Ptr {
-  var targets: List(WGPUColorTargetState) = createList(WGPUColorTargetState, cap: 3)
+  var targets: List(WGPUColorTargetState) = List.create(WGPUColorTargetState, cap: 3)
   targets.add(value: { format: WGPUTextureFormat_RGB10A2Unorm, writeMask: WGPUColorWriteMask_All })
   targets.add(value: { format: WGPUTextureFormat_RGBA8Unorm, writeMask: WGPUColorWriteMask_All })
   targets.add(value: { format: WGPUTextureFormat_RGBA8Unorm, writeMask: WGPUColorWriteMask_All })
-  var frags: List(WGPUFragmentState) = createList(WGPUFragmentState, cap: 1)
+  var frags: List(WGPUFragmentState) = List.create(WGPUFragmentState, cap: 1)
   frags.add(value: {
     module: shaderMod, entryPoint: { data: gbEntryFs(), length: WGPU_STRLEN },
     targetCount: 3 as UInt64, targets: targets.data
   })
-  var depths: List(WGPUDepthStencilState) = createList(WGPUDepthStencilState, cap: 1)
+  var depths: List(WGPUDepthStencilState) = List.create(WGPUDepthStencilState, cap: 1)
   depths.add(value: {
     format: WGPUTextureFormat_Depth32Float,
     depthWriteEnabled: WGPUOptionalBool_True,
@@ -220,7 +220,7 @@ func ensureGrassGpu(grass: mod GrassCompute) {
   wgpuShaderModuleRelease(shaderModule: shaderMod)   # #leak: the compute pipeline keeps its own ref
 
   let cLayout: Ptr = wgpuComputePipelineGetBindGroupLayout(computePipeline: pipeline, groupIndex: 0 as UInt32)
-  var cEntries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 3)
+  var cEntries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 3)
   cEntries.add(value: { binding: 0 as UInt32, buffer: uniform, size: grassUniformBytes as UInt64 })
   cEntries.add(value: { binding: 1 as UInt32, buffer: instances, size: instBytes as UInt64 })
   cEntries.add(value: { binding: 2 as UInt32, buffer: grassGet(index: 6), size: grassIndirectBytes as UInt64 })
@@ -242,7 +242,7 @@ func ensureGrassDrawBind(grass: mod GrassCompute) {
   grass.drawBindMade = true
   let instBytes: Int = grassGpuBladeCount * grassRecordBytes
   let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: grassGet(index: 5), groupIndex: 0 as UInt32)
-  var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 3)
+  var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 3)
   entries.add(value: { binding: 0 as UInt32, buffer: gbFrameUbuf(), size: gbFrameBytes() as UInt64 })
   entries.add(value: { binding: 1 as UInt32, buffer: grassGet(index: 1), size: instBytes as UInt64 })
   entries.add(value: { binding: 2 as UInt32, buffer: grassGet(index: 2), size: grassUniformBytes as UInt64 })

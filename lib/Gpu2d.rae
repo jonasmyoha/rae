@@ -174,7 +174,7 @@ func g2dOpenPass(loadOp: copy Int32, r: copy Float, g: copy Float, b: copy Float
   # array the pass descriptor points at; WebGPU copies the attachments during
   # BeginRenderPass below, so the local only needs to outlive that call. set() is
   # a no-op past the length, so grow to one slot first (as gbuffer.rae does).
-  var g2dColorAtts: List(WGPURenderPassColorAttachment) = createList(WGPURenderPassColorAttachment, cap: 1)
+  var g2dColorAtts: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 1)
   loop g2dColorAtts.length < 1 { g2dColorAtts.add(value: { depthSlice: 0 as UInt32 }) }
   g2dColorAtts.set(index: 0, value: att)
   let rpDesc: WGPURenderPassDescriptor = {

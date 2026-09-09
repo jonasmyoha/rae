@@ -49,7 +49,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
   # itself; without this filter we mount both copies (once via the
   # SceneInstance resolver, once as orphans here).
   let nodeCount: Int = scene.nodes.length
-  let reachable: List(Bool) = createList(Bool, cap: nodeCount)
+  let reachable: List(Bool) = List.create(Bool, cap: nodeCount)
   var ri: Int = 0
   loop ri < nodeCount {
     reachable.add(value: false)
@@ -59,7 +59,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
   if rootIdxR < 0 {
     ret noEntity()
   }
-  let stack: List(Int) = createList(Int, cap: 32)
+  let stack: List(Int) = List.create(Int, cap: 32)
   stack.add(value: rootIdxR)
   loop stack.length > 0 {
     let popAt: Int = stack.length - 1
@@ -97,7 +97,7 @@ func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view Strin
   # Non-reachable slots keep a noEntity() sentinel so later passes
   # can detect + skip them while keeping the index-by-nodeIndex map
   # intact for sceneNodeIndex lookups.
-  let entitiesByNodeIndex: List(EntityId) = createList(EntityId, cap: nodeCount)
+  let entitiesByNodeIndex: List(EntityId) = List.create(EntityId, cap: nodeCount)
   let nodeIdsMap: mod StringMap(Int) => world.nodeIds
   var i: Int = 0
   loop i < nodeCount {
@@ -250,7 +250,7 @@ func resolveSceneInstances(
         let idx: Int = sceneRegistryIndex(reg: registry, key: inst.sceneId)
         if idx >= 0 {
           let scene: view Scene => sceneRegistryGet(reg: registry, idx: idx)
-          let overrides: List(SceneOverride) = createList(SceneOverride, cap: inst.overrideNodeIds.length)
+          let overrides: List(SceneOverride) = List.create(SceneOverride, cap: inst.overrideNodeIds.length)
           let m: Int = inst.overrideNodeIds.length
           var j: Int = 0
           loop j < m {
@@ -324,7 +324,7 @@ func dumpScene(world: view UiWorld, scene: view Scene) {
 # to `entity`. Order matches `registeredComponentNames()` for stable
 # diagnostic output.
 func componentNamesFor(world: view UiWorld, entity: view EntityId) ret String {
-  let parts: List(String) = createList(String, cap: 8)
+  let parts: List(String) = List.create(String, cap: 8)
   if componentHas(this: world.rects, entity: entity) {
     parts.add(value: "Rect")
   }

@@ -65,9 +65,9 @@ func addObject(scene: mod Scene3d, shape: view Int, material: view Int, position
 
 func buildScene() ret Scene3d {
     var scene: Scene3d = {
-        transforms: createList(Transform3d, cap: 8),
-        renderables: createList(Renderable3d, cap: 8),
-        materials: createList(Material3d, cap: 8)
+        transforms: List.create(Transform3d, cap: 8),
+        renderables: List.create(Renderable3d, cap: 8),
+        materials: List.create(Material3d, cap: 8)
     }
 
     let ground: Int = addMaterial(scene: scene, color: vec(x: 0.12, y: 0.15, z: 0.2), metallic: 0.05, roughness: 0.8, emission: vec(x: 0.0, y: 0.0, z: 0.0))
@@ -94,7 +94,7 @@ func pushVec3(buf: mod List(Float), value: view Vec3) {
 # Extract ECS data into the stable GPU layout documented in raymarch.wgsl:
 # camera(16), materials(8 each), renderables(8 each).
 func extractScene(scene: view Scene3d, cameraPos: view Vec3, forward: view Vec3, frame: view Int) ret List(Float) {
-    let packed: List(Float) = createList(Float, cap: 16 + scene.materials.length * 8 + scene.renderables.length * 8)
+    let packed: List(Float) = List.create(Float, cap: 16 + scene.materials.length * 8 + scene.renderables.length * 8)
     let worldUp: Vec3 = vec(x: 0.0, y: 0.0, z: 1.0)
     let right: Vec3 = Vec3.vnorm(a: Vec3.vcross(a: forward, b: worldUp))
     let up: Vec3 = Vec3.vcross(a: right, b: forward)
@@ -146,7 +146,7 @@ func main() {
     var quality: Int = 1
     var width: Int = 960
     var height: Int = 540
-    let params: List(Int) = createList(Int, cap: 8)
+    let params: List(Int) = List.create(Int, cap: 8)
     # Named pIdx, not pi: `pi` is `const pi: Float` in lib/math, and an Int
     # loop counter of that name shadowed it — `yaw = pi / 2.0` below silently
     # computed 0 instead of pi/2. The no-implicit-conversion rule caught it.
@@ -164,7 +164,7 @@ func main() {
     var forward: Vec3 = vec(x: Math.cos(x: pitch) * Math.cos(x: yaw), y: Math.cos(x: pitch) * Math.sin(x: yaw), z: Math.sin(x: pitch))
     var sceneData: List(Float) = extractScene(scene: scene, cameraPos: cameraPos, forward: forward, frame: 0)
     var rt: Gpu3dRt = buildGpu3d(wgsl: wgsl, sceneData: sceneData, params: params, pixels: width * height)
-    var framebuffer: List(Int) = createList(Int, cap: width * height)
+    var framebuffer: List(Int) = List.create(Int, cap: width * height)
     var fi: Int = 0
     loop fi < width * height { framebuffer.add(value: 0)  fi = fi + 1 }
 
@@ -186,7 +186,7 @@ func main() {
             params.set(index: 5, value: quality)
             sceneData = extractScene(scene: scene, cameraPos: cameraPos, forward: forward, frame: frame)
             rt = buildGpu3d(wgsl: wgsl, sceneData: sceneData, params: params, pixels: width * height)
-            framebuffer = createList(Int, cap: width * height)
+            framebuffer = List.create(Int, cap: width * height)
             fi = 0
             loop fi < width * height { framebuffer.add(value: 0)  fi = fi + 1 }
         }
@@ -229,7 +229,7 @@ func main() {
         params.set(index: 4, value: frame)
         Gpu.writeU32(buf: rt.paramsBuf, data: params.data, count: 8)
 
-        let bufs: List(Int) = createList(Int, cap: 3)
+        let bufs: List(Int) = List.create(Int, cap: 3)
         bufs.add(value: rt.paramsBuf)
         bufs.add(value: rt.sceneBuf)
         bufs.add(value: rt.outBuf)

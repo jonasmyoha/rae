@@ -95,7 +95,7 @@ func entityLayerOrder(world: view UiWorld, entity: view EntityId) pub ret Int {
 # Layer order. Used by both `renderSystem` (painter's algorithm) and
 # the input hit-test (which walks the result in reverse).
 func collectPaintableRoots(world: view UiWorld) pub ret List(EntityId) {
-  let roots: List(EntityId) = createList(EntityId, cap: 16)
+  let roots: List(EntityId) = List.create(EntityId, cap: 16)
   let alive: view List(EntityId) => world.allocator.alive
   let n: Int = alive.length
   var i: Int = 0

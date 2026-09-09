@@ -136,7 +136,7 @@ func rayColor(world: view List(Sphere), ray: view Ray, depth: view Int) ret Vec3
 func renderSampleBand(world: own List(Sphere), cam: own Camera, width: view Int, height: view Int,
                       y0: view Int, y1: view Int, maxDepth: view Int, sampleIndex: view Int) ret List(Float) {
     seed(n: sampleIndex * 2654435761 + y0 * 9781 + 1)
-    let out: List(Float) = createList(cap: (y1 - y0) * width * 3)
+    let out: List(Float) = List.create(Float, cap: (y1 - y0) * width * 3)
     var y: Int = y0
     loop y < y1 {
         var x: Int = 0

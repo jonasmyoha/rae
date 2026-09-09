@@ -32,7 +32,7 @@ func generateRock(subdivision: copy Int, sliceCount: copy Int, size: copy Float,
   let base: MeshData = makeSphere(rings: subdivision, segments: subdivision * 2)
 
   # 1. Displace each base vertex radially by 3D noise.
-  var pos: List(Vec3) = createList(Vec3, cap: base.vertCount)
+  var pos: List(Vec3) = List.create(Vec3, cap: base.vertCount)
   var i: Int = 0
   loop i < base.vertCount {
     let b: Int = i * 8
@@ -64,8 +64,8 @@ func generateRock(subdivision: copy Int, sliceCount: copy Int, size: copy Float,
   }
 
   # 3. Flat-shade: one face normal per triangle, verts duplicated.
-  var verts: List(Float) = createList(Float, cap: base.indices.length * 8)
-  var idx: List(Int) = createList(Int, cap: base.indices.length)
+  var verts: List(Float) = List.create(Float, cap: base.indices.length * 8)
+  var idx: List(Int) = List.create(Int, cap: base.indices.length)
   var t: Int = 0
   loop t < base.indices.length - 2 {
     let ia: Int = rockI(l: base.indices, i: t)

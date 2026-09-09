@@ -126,7 +126,7 @@ func buildHistoryRow(world: mod UiWorld, entry: view PlayHistoryEntry, entryInde
   let subText: String = "{entry.artistName}"
   setText(world: world, entity: sub, text: subText, styleId: subStyle)
 
-  let infoKids: List(EntityId) = createList(EntityId, cap: 2)
+  let infoKids: List(EntityId) = List.create(EntityId, cap: 2)
   infoKids.add(value: title)
   infoKids.add(value: sub)
   attachChildren(world: world, parent: info, kids: infoKids)
@@ -138,7 +138,7 @@ func buildHistoryRow(world: mod UiWorld, entry: view PlayHistoryEntry, entryInde
   let durText: String = formatDurationMs(ms: durMs)
   setText(world: world, entity: dur, text: durText, styleId: durStyle)
 
-  let rowKids: List(EntityId) = createList(EntityId, cap: 3)
+  let rowKids: List(EntityId) = List.create(EntityId, cap: 3)
   rowKids.add(value: thumb)
   rowKids.add(value: info)
   rowKids.add(value: dur)
@@ -166,13 +166,13 @@ func buildHistoryBody(world: mod UiWorld, history: view PlayHistory, rounded: vi
     let style: String = "muted"
     let text: String = "Nothing played yet."
     setText(world: world, entity: empty, text: text, styleId: style)
-    let kids: List(EntityId) = createList(EntityId, cap: 1)
+    let kids: List(EntityId) = List.create(EntityId, cap: 1)
     kids.add(value: empty)
     attachChildren(world: world, parent: body, kids: kids)
     ret body
   }
 
-  let rowKids: List(EntityId) = createList(EntityId, cap: n)
+  let rowKids: List(EntityId) = List.create(EntityId, cap: n)
   # Walk newest-first: the user expects the most recent play at
   # the top. `entries` is oldest-first, so iterate from n-1 down to
   # 0 and pass each index through as the replay actionId payload.
@@ -207,7 +207,7 @@ func mountHistoryPage(
   let topBar: EntityId = buildPageTopBar(world: world, title: "Recently played")
   let body: EntityId = buildHistoryBody(world: world, history: state.playHistory, rounded: state.settings.roundedAlbumCovers, scrollY: scrollY)
 
-  let kids: List(EntityId) = createList(EntityId, cap: 2)
+  let kids: List(EntityId) = List.create(EntityId, cap: 2)
   kids.add(value: topBar)
   kids.add(value: body)
   attachChildren(world: world, parent: root, kids: kids)
@@ -256,7 +256,7 @@ func buildRecentlyPlayedStrip(world: mod UiWorld, history: view PlayHistory, rou
   if n < kidsCount {
     kidsCount = n
   }
-  let kids: List(EntityId) = createList(EntityId, cap: kidsCount)
+  let kids: List(EntityId) = List.create(EntityId, cap: kidsCount)
   var visual: Int = 0
   loop visual < kidsCount {
     let entryIdx: Int = n - 1 - visual

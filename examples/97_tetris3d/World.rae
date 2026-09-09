@@ -88,7 +88,7 @@ func makeEmptyParticle() ret Particle {
 func initWorld(world: mod World) {
   world.state = GameState.playing
 
-  let grid: List(Int) = createList(cap: gridWidth * gridHeight)
+  let grid: List(Int) = List.create(Int, cap: gridWidth * gridHeight)
   var i: Int = 0
   loop i < gridWidth * gridHeight {
     grid.add(value: 0)
@@ -113,7 +113,7 @@ func initWorld(world: mod World) {
   world.camTime = 0.0
   world.lockFlash = 0.0
 
-  let particles: List(Particle) = createList(cap: maxParticles)
+  let particles: List(Particle) = List.create(Particle, cap: maxParticles)
   var p: Int = 0
   let blank: Particle = makeEmptyParticle()
   loop p < maxParticles {

@@ -42,8 +42,8 @@ type Registry {
 
 func createRegistry() ret Registry {
   ret Registry {
-    playback: PlaybackSys { revision: 0, nowPlaying: createComponentTable(Track) }
-    library: LibrarySys { revision: 0, albums: createComponentTable(Track) }
+    playback: PlaybackSys { revision: 0, nowPlaying: ComponentTable.create(Track) }
+    library: LibrarySys { revision: 0, albums: ComponentTable.create(Track) }
   }
 }
 
@@ -148,7 +148,7 @@ func main() {
 
   # Three playback observers (system / table / component) + a library
   # control observer, each snapshotted to the current state (clean).
-  var observers: ComponentTable(Observe) = createComponentTable(Observe)
+  var observers: ComponentTable(Observe) = ComponentTable.create(Observe)
   let oSys: EntityId = id(v: 10)
   let oTbl: EntityId = id(v: 11)
   let oCmp: EntityId = id(v: 12)

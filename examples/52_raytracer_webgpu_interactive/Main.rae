@@ -37,7 +37,7 @@ func pushVec3(buf: mod List(Float), a: view Vec3) {
 
 # Pack camera(19) + spheres(10 each) into an f32-as-Float buffer for accum.wgsl.
 func sceneFloats(cam: view Camera, world: view List(Sphere)) ret List(Float) {
-    let s: List(Float) = createList(Float, cap: 64)
+    let s: List(Float) = List.create(Float, cap: 64)
     pushVec3(buf: s, a: cam.origin)
     pushVec3(buf: s, a: cam.lowerLeft)
     pushVec3(buf: s, a: cam.horizontal)
@@ -100,7 +100,7 @@ func main() {
     let aspect: Float = 16.0 / 9.0
     var cam: Camera = buildCamera(pos: camPos, target: Vec3.vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
 
-    let params: List(Int) = createList(cap: 8)
+    let params: List(Int) = List.create(Int, cap: 8)
     var pinit: Int = 0
     loop pinit < 8 { params.add(value: 0)  pinit = pinit + 1 }
     params.set(index: 0, value: width)
@@ -109,7 +109,7 @@ func main() {
     params.set(index: 4, value: world.length)
 
     var rt: GpuRT = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), params: params, pixels: width * height)
-    var fb: List(Int) = createList(cap: width * height)
+    var fb: List(Int) = List.create(Int, cap: width * height)
     var fi: Int = 0
     loop fi < width * height { fb.add(value: 0)  fi = fi + 1 }
 
@@ -138,7 +138,7 @@ func main() {
             params.set(index: 0, value: width)
             params.set(index: 1, value: height)
             rt = buildGpuRT(wgsl: wgsl, scene: sceneFloats(cam: cam, world: world), params: params, pixels: width * height)
-            fb = createList(cap: width * height)
+            fb = List.create(Int, cap: width * height)
             fi = 0
             loop fi < width * height { fb.add(value: 0)  fi = fi + 1 }
             sampleIndex = 0
@@ -180,7 +180,7 @@ func main() {
         params.set(index: 5, value: frame)
         Gpu.writeU32(buf: rt.paramsBuf, data: params.data, count: 8)
 
-        let bufs: List(Int) = createList(cap: 4)
+        let bufs: List(Int) = List.create(Int, cap: 4)
         bufs.add(value: rt.paramsBuf)
         bufs.add(value: rt.sceneBuf)
         bufs.add(value: rt.accumBuf)

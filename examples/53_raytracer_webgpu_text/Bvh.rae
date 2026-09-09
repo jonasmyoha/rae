@@ -97,7 +97,7 @@ func buildNodeRight(prims: mod List(PrimRec), lo: view Int, m: view Int, hi: vie
 }
 
 func buildBvh(prims: mod List(PrimRec), leafSize: view Int) ret List(Float) {
-    let nodes: List(Float) = createList(Float, cap: prims.length * 16 + 8)
+    let nodes: List(Float) = List.create(Float, cap: prims.length * 16 + 8)
     if prims.length > 0 {
         let r: Int = buildNode(prims: prims, lo: 0, hi: prims.length, nodes: nodes, leafSize: leafSize)
     }

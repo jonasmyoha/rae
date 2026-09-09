@@ -96,7 +96,7 @@ func buildTrackList(world: mod UiWorld, trackScene: view Scene, rows: view List(
   let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: list, kind: layV, gap: trackGap, alignCross: alignS)
 
-  let rowKids: List(EntityId) = createList(EntityId, cap: trackRowCount)
+  let rowKids: List(EntityId) = List.create(EntityId, cap: trackRowCount)
   var i: Int = 0
   loop i < n {
     let cr: CollectionRow = rae_ext_rae_buf_get(buf: rows.data, index: i)
@@ -252,7 +252,7 @@ func mountAlbumPage(
   let trackList: EntityId = buildTrackList(world: world, trackScene: scenes.trackRow, rows: cv.rows, playback: playback)
   let spacer: EntityId = buildVerticalSpacer(world: world)
 
-  let kids: List(EntityId) = createList(EntityId, cap: 3)
+  let kids: List(EntityId) = List.create(EntityId, cap: 3)
   kids.add(value: header)
   kids.add(value: trackList)
   kids.add(value: spacer)

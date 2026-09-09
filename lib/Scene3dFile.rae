@@ -25,8 +25,8 @@ type MaterialRegistry3d {
 
 func createMaterialRegistry3d() ret MaterialRegistry3d {
   ret MaterialRegistry3d {
-    keys: createList(String, cap: 8)
-    indices: createList(Int, cap: 8)
+    keys: List.create(String, cap: 8)
+    indices: List.create(Int, cap: 8)
   }
 }
 
@@ -50,8 +50,8 @@ func materialRegistry3dGet(reg: view MaterialRegistry3d, key: view String) ret I
 
 func createMeshRegistry3d() pub ret MeshRegistry3d {
   ret MeshRegistry3d {
-    keys: createList(String, cap: 8)
-    handles: createList(MeshHandle, cap: 8)
+    keys: List.create(String, cap: 8)
+    handles: List.create(MeshHandle, cap: 8)
   }
 }
 
@@ -106,8 +106,8 @@ func emptyWorld3dAsset() ret World3dAsset {
     world: create()
     camera: defaultCamera3d()
     light: defaultLight3d()
-    nodeIds: createList(String, cap: 16)
-    entityIds: createList(Int, cap: 16)
+    nodeIds: List.create(String, cap: 16)
+    entityIds: List.create(Int, cap: 16)
     ok: false
     errorMsg: ""
   }
@@ -144,7 +144,7 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
   # to its index in this list so a MeshRenderer/SdfPrimitive can copy the value
   # onto its own entity.
   let materials: MaterialRegistry3d = createMaterialRegistry3d()
-  let materialValues: List(Material3d) = createList(Material3d, cap: 8)
+  let materialValues: List(Material3d) = List.create(Material3d, cap: 8)
 
   # Pass 1: materials, independent of node order.
   var i: Int = 0

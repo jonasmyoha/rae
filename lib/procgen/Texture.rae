@@ -60,7 +60,7 @@ func texMaterialColor(kind: view Int, n: view Float, d: view Float) ret Int {
 
 # Albedo texture for a material `kind` at `resolution` x `resolution`.
 func generateAlbedo(kind: copy Int, resolution: copy Int, tiling: copy Float, seed: copy Int) pub ret List(Int) {
-  var px: List(Int) = createList(Int, cap: resolution * resolution)
+  var px: List(Int) = List.create(Int, cap: resolution * resolution)
   let inv: Float = 1.0 / resolution.toFloat()
   var y: Int = 0
   loop y < resolution {
@@ -80,7 +80,7 @@ func generateAlbedo(kind: copy Int, resolution: copy Int, tiling: copy Float, se
 
 # Grayscale roughness map for a material: rougher where the surface is broken up.
 func generateRoughness(kind: copy Int, resolution: copy Int, tiling: copy Float, seed: copy Int) pub ret List(Int) {
-  var px: List(Int) = createList(Int, cap: resolution * resolution)
+  var px: List(Int) = List.create(Int, cap: resolution * resolution)
   let inv: Float = 1.0 / resolution.toFloat()
   var y: Int = 0
   loop y < resolution {
@@ -103,7 +103,7 @@ func generateRoughness(kind: copy Int, resolution: copy Int, tiling: copy Float,
 # Tangent-space normal map derived from the same height field (central
 # differences), packed so RGB = (n*0.5+0.5).
 func generateNormal(resolution: copy Int, tiling: copy Float, strength: copy Float, seed: copy Int) pub ret List(Int) {
-  var px: List(Int) = createList(Int, cap: resolution * resolution)
+  var px: List(Int) = List.create(Int, cap: resolution * resolution)
   let inv: Float = 1.0 / resolution.toFloat()
   let e: Float = inv * tiling
   var y: Int = 0

@@ -232,7 +232,7 @@ func refreshSpotifyArt(backend: view UiBackend, state: view SpotifyState, track:
 # replace every Library tile with the current Spotify track's art
 # (the exact "library grid is being clobbered" bug the user hit).
 func rebindAlbumCoversToSpotify(world: mod UiWorld, currentStem: view String, artKey: view String) {
-  let pages: List(String) = createList(String, cap: 2)
+  let pages: List(String) = List.create(String, cap: 2)
   pages.add(value: playerPageId)
   pages.add(value: miniPlayerPageId)
   rebindCoverOnPages(world: world, fromKey: currentStem, toKey: artKey, pageIds: pages)

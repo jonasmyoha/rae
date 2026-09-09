@@ -82,8 +82,8 @@ func scenarioReassignBareString() ret String {
 # Return the post-reassign length to confirm the new list is the
 # one observable.
 func scenarioReassignBareList() ret Int {
-  var xs: List(String) = createList(String, cap: 0)
-  xs = createList(String, cap: 4)
+  var xs: List(String) = List.create(String, cap: 0)
+  xs = List.create(String, cap: 4)
   ret xs.length
 }
 
@@ -93,7 +93,7 @@ func scenarioReassignBareList() ret Int {
 func scenarioFieldReturnDeepCopy() ret String {
   let outerLet: Outer = {
     inner: { text: "original" }
-    names: createList(String, cap: 0)
+    names: List.create(String, cap: 0)
   }
   let captured: Inner = outerLet.inner
   outerLet.inner = { text: "mutated-after-capture" }
@@ -106,7 +106,7 @@ func scenarioFieldReturnDeepCopy() ret String {
 func scenarioFieldReassign() ret String {
   let o: Outer = {
     inner: { text: "field-original" }
-    names: createList(String, cap: 0)
+    names: List.create(String, cap: 0)
   }
   o.inner = { text: "field-replaced" }
   ret o.inner.text

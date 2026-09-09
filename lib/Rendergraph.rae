@@ -148,12 +148,12 @@ func graphStringAt(values: view List(String), index: view Int) ret String {
 
 func createRenderGraph() pub ret RenderGraph {
   ret RenderGraph {
-    resourceNames: createList(String, cap: 16),
-    resources: createList(ResourceDesc, cap: 16),
-    passNames: createList(String, cap: 16),
-    passes: createList(PassDesc, cap: 16),
-    edges: createList(Edge, cap: 64),
-    order: createList(Int, cap: 16),
+    resourceNames: List.create(String, cap: 16),
+    resources: List.create(ResourceDesc, cap: 16),
+    passNames: List.create(String, cap: 16),
+    passes: List.create(PassDesc, cap: 16),
+    edges: List.create(Edge, cap: 64),
+    order: List.create(Int, cap: 16),
     status: graphOk,
     errorPass: 0 - 1,
     errorResource: 0 - 1
@@ -248,7 +248,7 @@ func resourceLifetime(renderGraph: view RenderGraph, resource: view Int) ret Int
 # already emitted. If a round emits nothing while passes remain, the
 # remaining passes form a cycle.
 func compile(renderGraph: mod RenderGraph) pub ret Int {
-  renderGraph.order = createList(Int, cap: renderGraph.passes.length)
+  renderGraph.order = List.create(Int, cap: renderGraph.passes.length)
   renderGraph.status = graphOk
   renderGraph.errorPass = 0 - 1
   renderGraph.errorResource = 0 - 1
@@ -299,7 +299,7 @@ func compile(renderGraph: mod RenderGraph) pub ret Int {
   }
 
   # --- topological order ---
-  let emitted: List(Bool) = createList(Bool, cap: renderGraph.passes.length)
+  let emitted: List(Bool) = List.create(Bool, cap: renderGraph.passes.length)
   var p: Int = 0
   loop p < renderGraph.passes.length {
     emitted.add(value: false)

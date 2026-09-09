@@ -55,11 +55,11 @@ type Profiler {
 func createProfiler() pub ret Profiler {
   ret Profiler {
     capturing: false, startNs: 0, endNs: 0, outPath: "rae_profile.json", dropped: false,
-    names: createList(String, cap: 1),
-    phases: createList(Int, cap: 1),
-    times: createList(Int, cap: 1),
-    tids: createList(Int, cap: 1),
-    values: createList(Int, cap: 1)
+    names: List.create(String, cap: 1),
+    phases: List.create(Int, cap: 1),
+    times: List.create(Int, cap: 1),
+    tids: List.create(Int, cap: 1),
+    values: List.create(Int, cap: 1)
   }
 }
 
@@ -68,11 +68,11 @@ func capturing(profiler: view Profiler) pub ret Bool { ret profiler.capturing }
 # Begin a capture of `seconds`, writing to `outPath` when it ends. Reallocates the
 # event buffers up front so recording never allocates.
 func startCapture(profiler: mod Profiler, seconds: view Float, outPath: view String) pub {
-  profiler.names = createList(String, cap: profMaxEvents)
-  profiler.phases = createList(Int, cap: profMaxEvents)
-  profiler.times = createList(Int, cap: profMaxEvents)
-  profiler.tids = createList(Int, cap: profMaxEvents)
-  profiler.values = createList(Int, cap: profMaxEvents)
+  profiler.names = List.create(String, cap: profMaxEvents)
+  profiler.phases = List.create(Int, cap: profMaxEvents)
+  profiler.times = List.create(Int, cap: profMaxEvents)
+  profiler.tids = List.create(Int, cap: profMaxEvents)
+  profiler.values = List.create(Int, cap: profMaxEvents)
   profiler.startNs = nowNs()
   profiler.endNs = profiler.startNs + rae_float_to_int(f: seconds * 1000000000.0)
   profiler.outPath = "{outPath}"
@@ -159,7 +159,7 @@ func profFragment(name: view String, ph: view Int, ts: view Int, tid: view Int, 
 func joinBlocked(frags: view List(String), blockSize: view Int) ret String {
   let n: Int = frags.length
   if n is 0 { ret "" }
-  let blocks: List(String) = createList(String, cap: n / blockSize + 2)
+  let blocks: List(String) = List.create(String, cap: n / blockSize + 2)
   var i: Int = 0
   loop i < n {
     var stop: Int = i + blockSize
@@ -179,7 +179,7 @@ func joinBlocked(frags: view List(String), blockSize: view Int) ret String {
 
 func write(profiler: view Profiler, path: view String) ret Bool {
   let n: Int = profiler.names.length
-  let frags: List(String) = createList(String, cap: n + 2)
+  let frags: List(String) = List.create(String, cap: n + 2)
   # Label the CPU track; a second thread_name for tid 1 (GPU) lands here once GPU
   # timestamp events exist (phase 2).
   frags.add(value: "\{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":1,\"tid\":0,\"args\":\{\"name\":\"CPU main loop\"\}\}")

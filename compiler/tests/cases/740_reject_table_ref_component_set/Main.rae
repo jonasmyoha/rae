@@ -8,7 +8,7 @@ type World { positions: ComponentTable(Position), velocities: ComponentTable(Vel
 # #814: componentSet of a NEW entity on the table a live componentMod ref
 # aliases can realloc its dense storage -> the ref dangles. Rejected at compile time.
 func main() {
-  var pos: ComponentTable(Position) = createComponentTable(Position)
+  var pos: ComponentTable(Position) = ComponentTable.create(Position)
   let e: EntityId = { index: 1, generation: 0 }
   let f: EntityId = { index: 2, generation: 0 }
   componentSet(this: pos, entity: e, data: Position { x: 1 })

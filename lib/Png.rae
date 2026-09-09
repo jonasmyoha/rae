@@ -36,7 +36,7 @@ func writeChunk(out: mod List(Int), t0: view Int, t1: view Int, t2: view Int, t3
                 data: view List(Int)) {
     pushBE32(out: out, value: data.length)
     # CRC is over the type bytes followed by the data.
-    let crcIn: List(Int) = createList(cap: data.length + 4)
+    let crcIn: List(Int) = List.create(Int, cap: data.length + 4)
     crcIn.add(value: t0) crcIn.add(value: t1) crcIn.add(value: t2) crcIn.add(value: t3)
     var i: Int = 0
     loop let value: Int in data { crcIn.add(value: value) }
@@ -65,13 +65,13 @@ func encodePng(pixels: view List(Int), width: view Int, height: view Int, hasAlp
     if hasAlpha { channels = 4 colorType = 6 }
     let stride: Int = width * channels
 
-    let raw: List(Int) = createList(cap: height * (1 + stride))
-    let prevRow: List(Int) = createList(cap: stride)   # previous row, raw (unfiltered) bytes
+    let raw: List(Int) = List.create(Int, cap: height * (1 + stride))
+    let prevRow: List(Int) = List.create(Int, cap: stride)   # previous row, raw (unfiltered) bytes
     var havePrev: Bool = false
     var y: Int = 0
     loop y < height {
         # Extract this row's raw bytes.
-        let cur: List(Int) = createList(cap: stride)
+        let cur: List(Int) = List.create(Int, cap: stride)
         var x: Int = 0
         loop x < width {
             let p: Int = pngIntAt(data: pixels, index: y * width + x)
@@ -82,12 +82,12 @@ func encodePng(pixels: view List(Int), width: view Int, height: view Int, hasAlp
             x = x + 1
         }
         # Try the five filters, keep the one with the smallest signed-abs sum.
-        let best: List(Int) = createList(cap: stride)
+        let best: List(Int) = List.create(Int, cap: stride)
         var bestType: Int = 0
         var bestCost: Int = -1
         var ft: Int = 0
         loop ft <= 4 {
-            let cand: List(Int) = createList(cap: stride)
+            let cand: List(Int) = List.create(Int, cap: stride)
             var cost: Int = 0
             var i: Int = 0
             loop i < stride {
@@ -124,12 +124,12 @@ func encodePng(pixels: view List(Int), width: view Int, height: view Int, hasAlp
         y = y + 1
     }
 
-    let out: List(Int) = createList(cap: raw.length / 2 + 64)
+    let out: List(Int) = List.create(Int, cap: raw.length / 2 + 64)
     # Signature.
     out.add(value: 137) out.add(value: 80) out.add(value: 78) out.add(value: 71)
     out.add(value: 13) out.add(value: 10) out.add(value: 26) out.add(value: 10)
     # IHDR.
-    let ihdr: List(Int) = createList(cap: 13)
+    let ihdr: List(Int) = List.create(Int, cap: 13)
     pushBE32(out: ihdr, value: width)
     pushBE32(out: ihdr, value: height)
     ihdr.add(value: 8)            # bit depth
@@ -142,7 +142,7 @@ func encodePng(pixels: view List(Int), width: view Int, height: view Int, hasAlp
     let idat: List(Int) = compress(data: raw, value: raw.length)
     writeChunk(out: out, t0: 73, t1: 68, t2: 65, t3: 84, data: idat)   # "IDAT"
     # IEND (empty).
-    let iend: List(Int) = createList(cap: 1)
+    let iend: List(Int) = List.create(Int, cap: 1)
     writeChunk(out: out, t0: 73, t1: 69, t2: 78, t3: 68, data: iend)   # "IEND"
     ret out
 }
@@ -171,13 +171,13 @@ func paeth(a: view Int, b: view Int, c: view Int) ret Int {
 func decodePng(png: view List(Int), len: view Int, width: mod Int, height: mod Int) ret List(Int) {
     width = 0
     height = 0
-    let empty: List(Int) = createList(cap: 1)
+    let empty: List(Int) = List.create(Int, cap: 1)
     if len < 8 { ret empty }
 
     var w: Int = 0
     var h: Int = 0
     var colorType: Int = 6
-    let idat: List(Int) = createList(cap: len)
+    let idat: List(Int) = List.create(Int, cap: len)
 
     var pos: Int = 8                       # skip the 8-byte signature
     loop pos + 8 <= len {
@@ -213,7 +213,7 @@ func decodePng(png: view List(Int), len: view Int, width: mod Int, height: mod I
     let stride: Int = w * channels
 
     # Unfilter into a flat byte buffer `recon` (stride bytes per row, no filter byte).
-    let recon: List(Int) = createList(cap: h * stride)
+    let recon: List(Int) = List.create(Int, cap: h * stride)
     var rp: Int = 0                        # read cursor in `raw`
     var y: Int = 0
     loop y < h {
@@ -241,7 +241,7 @@ func decodePng(png: view List(Int), len: view Int, width: mod Int, height: mod I
     }
 
     # Pack to 0xAARRGGBB.
-    let pixels: List(Int) = createList(cap: w * h)
+    let pixels: List(Int) = List.create(Int, cap: w * h)
     var py: Int = 0
     loop py < h {
         var px: Int = 0

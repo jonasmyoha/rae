@@ -111,46 +111,46 @@ type ResolvedTheme {
 
 func createResolvedTheme() pub ret ResolvedTheme {
   ret ResolvedTheme {
-    palNames: createList(String, cap: 12)
-    palR: createList(Int, cap: 12)
-    palG: createList(Int, cap: 12)
-    palB: createList(Int, cap: 12)
-    palA: createList(Int, cap: 12)
-    spaceNames: createList(String, cap: 8)
-    spaceVals: createList(Float, cap: 8)
-    radiusNames: createList(String, cap: 8)
-    radiusVals: createList(Float, cap: 8)
-    padNames: createList(String, cap: 8)
-    padL: createList(Float, cap: 8)
-    padT: createList(Float, cap: 8)
-    padR: createList(Float, cap: 8)
-    padB: createList(Float, cap: 8)
-    shadowNames: createList(String, cap: 8)
-    shadowR: createList(Int, cap: 8)
-    shadowG: createList(Int, cap: 8)
-    shadowB: createList(Int, cap: 8)
-    shadowA: createList(Int, cap: 8)
-    shadowOffX: createList(Float, cap: 8)
-    shadowOffY: createList(Float, cap: 8)
-    shadowSoft: createList(Float, cap: 8)
-    textNames: createList(String, cap: 32)
-    textFonts: createList(String, cap: 32)
-    textSizes: createList(Float, cap: 32)
-    textWeights: createList(Float, cap: 32)
-    textLineHeights: createList(Float, cap: 32)
-    textTrackings: createList(Float, cap: 32)
-    textColorSlots: createList(String, cap: 32)
-    textColorR: createList(Int, cap: 32)
-    textColorG: createList(Int, cap: 32)
-    textColorB: createList(Int, cap: 32)
-    textColorA: createList(Int, cap: 32)
-    textShadowNames: createList(String, cap: 32)
-    textAligns: createList(Int, cap: 32)
-    containerNames: createList(String, cap: 8)
-    containerBgSlots: createList(String, cap: 8)
-    containerRadiusTokens: createList(String, cap: 8)
-    containerPadTokens: createList(String, cap: 8)
-    containerTextStyles: createList(String, cap: 8)
+    palNames: List.create(String, cap: 12)
+    palR: List.create(Int, cap: 12)
+    palG: List.create(Int, cap: 12)
+    palB: List.create(Int, cap: 12)
+    palA: List.create(Int, cap: 12)
+    spaceNames: List.create(String, cap: 8)
+    spaceVals: List.create(Float, cap: 8)
+    radiusNames: List.create(String, cap: 8)
+    radiusVals: List.create(Float, cap: 8)
+    padNames: List.create(String, cap: 8)
+    padL: List.create(Float, cap: 8)
+    padT: List.create(Float, cap: 8)
+    padR: List.create(Float, cap: 8)
+    padB: List.create(Float, cap: 8)
+    shadowNames: List.create(String, cap: 8)
+    shadowR: List.create(Int, cap: 8)
+    shadowG: List.create(Int, cap: 8)
+    shadowB: List.create(Int, cap: 8)
+    shadowA: List.create(Int, cap: 8)
+    shadowOffX: List.create(Float, cap: 8)
+    shadowOffY: List.create(Float, cap: 8)
+    shadowSoft: List.create(Float, cap: 8)
+    textNames: List.create(String, cap: 32)
+    textFonts: List.create(String, cap: 32)
+    textSizes: List.create(Float, cap: 32)
+    textWeights: List.create(Float, cap: 32)
+    textLineHeights: List.create(Float, cap: 32)
+    textTrackings: List.create(Float, cap: 32)
+    textColorSlots: List.create(String, cap: 32)
+    textColorR: List.create(Int, cap: 32)
+    textColorG: List.create(Int, cap: 32)
+    textColorB: List.create(Int, cap: 32)
+    textColorA: List.create(Int, cap: 32)
+    textShadowNames: List.create(String, cap: 32)
+    textAligns: List.create(Int, cap: 32)
+    containerNames: List.create(String, cap: 8)
+    containerBgSlots: List.create(String, cap: 8)
+    containerRadiusTokens: List.create(String, cap: 8)
+    containerPadTokens: List.create(String, cap: 8)
+    containerTextStyles: List.create(String, cap: 8)
     ok: false
   }
 }
@@ -521,8 +521,8 @@ func parseThemeText(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonVa
 # `kind` is only used for the diagnostic text.
 func themeResolveChain(doc: view JsonDoc, section: view JsonValue, name: view String, kind: view String) ret List(Int) {
   # child-first while walking up, reversed at the end.
-  let up: List(Int) = createList(Int, cap: 4)
-  let seen: List(String) = createList(String, cap: 4)
+  let up: List(Int) = List.create(Int, cap: 4)
+  let seen: List(String) = List.create(String, cap: 4)
   var curName: String = "{name}"
   var steps: Int = 0
   var walking: Bool = true
@@ -580,7 +580,7 @@ func themeSeenName(seen: view List(String), name: view String) ret Bool {
 }
 
 func themeReverseIntList(src: view List(Int)) ret List(Int) {
-  let out: List(Int) = createList(Int, cap: src.length)
+  let out: List(Int) = List.create(Int, cap: src.length)
   var i: Int = src.length - 1
   loop i >= 0 {
     if let value: Int = src.copyAt(index: i) {
