@@ -1,0 +1,65 @@
+# An owned optional payload is the App owner for the whole then-branch.
+# It can be borrowed through mod without moving to a second mutable binding.
+type GpuResources {
+  id: Int
+  frames: Int
+}
+
+func drop(this: mod GpuResources) {
+  log("release {this.id} frames {this.frames}")
+}
+
+type RenderSystem {
+  resources: GpuResources
+}
+
+type App {
+  renderSystem: RenderSystem
+}
+
+func create(id: view Int, succeed: view Bool) ret opt App {
+  let resources: GpuResources = { id: id, frames: 0 }
+  log("acquire {id}")
+  if not succeed { ret none }
+  ret App { renderSystem: { resources: own resources } }
+}
+
+func shouldClose(resources: view GpuResources) ret Bool {
+  ret resources.frames >= 2
+}
+
+func drawFrame(this: mod RenderSystem) {
+  this.resources.frames = this.resources.frames + 1
+  log("frame {this.resources.id} count {this.resources.frames}")
+}
+
+func frame(app: mod App) {
+  drawFrame(this: app.renderSystem)
+}
+
+func returnEarly() {
+  if let app: App = App.create(id: 2, succeed: true) {
+    frame(app: app)
+    ret
+  }
+  log("unexpected early-return failure")
+}
+
+func main() {
+  if let app: App = App.create(id: 1, succeed: true) {
+    loop not shouldClose(resources: app.renderSystem.resources) {
+      frame(app: app)
+    }
+  } else {
+    log("unexpected construction failure")
+  }
+  log("after app scope")
+  returnEarly()
+  log("after early return")
+  if let app: App = App.create(id: 3, succeed: false) {
+    frame(app: app)
+  } else {
+    log("creation failed")
+  }
+  log("done")
+}
