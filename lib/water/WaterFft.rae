@@ -181,7 +181,7 @@ func ensureFftGpu(waterSystem: mod WaterSystem) {
     waterSet(index: fftSlotH0Base + cascade * 2, ptr: h0)
     waterSet(index: fftSlotH0Base + cascade * 2 + 1, ptr: makeFloat4View(texture: h0))
     let layout: Ptr = wgpuComputePipelineGetBindGroupLayout(computePipeline: waterGet(index: fftSlotSpectrumPipe), groupIndex: 0 as UInt32)
-    var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 2)
+    var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 2)
     entries.add(value: { binding: 0 as UInt32, buffer: waterGet(index: fftSlotUniform), size: (fftUniformFloats * 4) as UInt64 })
     entries.add(value: { binding: 1 as UInt32, textureView: waterGet(index: fftSlotH0Base + cascade * 2 + 1) })
     let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 2 as UInt64, entries: entries.data }
@@ -190,7 +190,7 @@ func ensureFftGpu(waterSystem: mod WaterSystem) {
     cascade = cascade + 1
   }
   let bLayout: Ptr = wgpuComputePipelineGetBindGroupLayout(computePipeline: waterGet(index: fftSlotButterflyPipe), groupIndex: 0 as UInt32)
-  var bEntries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 2)
+  var bEntries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 2)
   bEntries.add(value: { binding: 0 as UInt32, buffer: waterGet(index: fftSlotUniform), size: (fftUniformFloats * 4) as UInt64 })
   bEntries.add(value: { binding: 2 as UInt32, textureView: waterGet(index: fftSlotButterflyTex + 1) })
   let bDesc: WGPUBindGroupDescriptor = { layout: bLayout, entryCount: 2 as UInt64, entries: bEntries.data }
@@ -342,7 +342,7 @@ func waterFftDiagnose(waterSystem: mod WaterSystem) ret Bool {
   }
   let deltaK: Float = 6.28318530718 / body.cascadeTile0
   let bins: Int = size / 2
-  var energy: List(Float) = createList(Float, cap: bins)
+  var energy: List(Float) = List.create(Float, cap: bins)
   loop var b: Int = 0, b < bins, ++b { energy.add(value: 0.0) }
   var nonZero: Int = 0
   var maxAsymmetry: Float = 0.0
@@ -496,7 +496,7 @@ func ensureFftFrameGpu(waterSystem: mod WaterSystem) {
     waterSystem.stageUniform.set(index: 0, value: stage as Int32)
     wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: ubuf, bufferOffset: 0 as UInt64, data: waterSystem.stageUniform.data, size: 16 as UInt64)
     loop var direction: Int = 0, direction < 2, ++direction {
-      var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 4)
+      var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 4)
       entries.add(value: { binding: 0 as UInt32, buffer: ubuf, size: (16) as UInt64 })
       entries.add(value: { binding: 1 as UInt32, textureView: waterGet(index: fftSlotButterflyTex + 1) })
       entries.add(value: { binding: 2 as UInt32, textureView: waterGet(index: fftWorkSlot(which: direction) + 1) })
@@ -506,7 +506,7 @@ func ensureFftFrameGpu(waterSystem: mod WaterSystem) {
   }
   # Transpose binds: direction 0 = P -> Q, 1 = Q -> P.
   loop var direction2: Int = 0, direction2 < 2, ++direction2 {
-    var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 2)
+    var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 2)
     entries.add(value: { binding: 0 as UInt32, textureView: waterGet(index: fftWorkSlot(which: direction2) + 1) })
     entries.add(value: { binding: 1 as UInt32, textureView: waterGet(index: fftWorkSlot(which: 1 - direction2) + 1) })
     waterSet(index: fftSlotTransposeBindBase + direction2, ptr: makeBindGroup(pipeline: waterGet(index: fftSlotTransposePipe), entries: entries))
@@ -514,7 +514,7 @@ func ensureFftFrameGpu(waterSystem: mod WaterSystem) {
   # fieldOut binds: field f from P (0) or Q (1).
   loop var field2: Int = 0, field2 < fftFields, ++field2 {
     loop var source2: Int = 0, source2 < 2, ++source2 {
-      var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 2)
+      var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 2)
       entries.add(value: { binding: 0 as UInt32, textureView: waterGet(index: fftWorkSlot(which: source2) + 1) })
       entries.add(value: { binding: 1 as UInt32, textureView: waterGet(index: fftSlotRBase + field2 * 2 + 1) })
       waterSet(index: fftSlotFieldOutBindBase + field2 * 2 + source2, ptr: makeBindGroup(pipeline: waterGet(index: fftSlotFieldOutPipe), entries: entries))
@@ -525,13 +525,13 @@ func ensureFftFrameGpu(waterSystem: mod WaterSystem) {
     loop var field3: Int = 0, field3 < fftFields, ++field3 {
       let ubuf: Ptr = makeSmallUniform(bytes: evolveUniformFloats * 4)
       waterSet(index: fftSlotEvolveUniformBase + cascade * fftFields + field3, ptr: ubuf)
-      var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 3)
+      var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 3)
       entries.add(value: { binding: 0 as UInt32, buffer: ubuf, size: (evolveUniformFloats * 4) as UInt64 })
       entries.add(value: { binding: 1 as UInt32, textureView: waterGet(index: fftSlotH0Base + cascade * 2 + 1) })
       entries.add(value: { binding: 2 as UInt32, textureView: waterGet(index: fftSlotP + 1) })
       waterSet(index: fftSlotEvolveBindBase + cascade * fftFields + field3, ptr: makeBindGroup(pipeline: waterGet(index: fftSlotEvolvePipe), entries: entries))
     }
-    var postEntries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 8)
+    var postEntries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 8)
     postEntries.add(value: { binding: 0 as UInt32, buffer: waterGet(index: fftSlotEvolveUniformBase + cascade * fftFields), size: (evolveUniformFloats * 4) as UInt64 })
     loop var field4: Int = 0, field4 < fftFields, ++field4 {
       postEntries.add(value: { binding: 1 + field4 as UInt32, textureView: waterGet(index: fftSlotRBase + field4 * 2 + 1) })

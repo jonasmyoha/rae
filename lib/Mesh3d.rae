@@ -42,8 +42,8 @@ func vertComponent(verts: view List(Float), index: copy Int) ret Float {
 
 # Unit-radius UV sphere centered at origin.
 func makeSphere(rings: view Int, segments: view Int) pub ret MeshData {
-  let verts: List(Float) = createList(Float, cap: (rings + 1) * (segments + 1) * 8)
-  let indices: List(Int) = createList(Int, cap: rings * segments * 6)
+  let verts: List(Float) = List.create(Float, cap: (rings + 1) * (segments + 1) * 8)
+  let indices: List(Int) = List.create(Int, cap: rings * segments * 6)
   let pi: Float = 3.141592653589793
   var r: Int = 0
   loop r <= rings {
@@ -97,8 +97,8 @@ func makeSphere(rings: view Int, segments: view Int) pub ret MeshData {
 
 # Flat ground plane in XY (normal +Z), centered, `size` on a side.
 func makePlane(size: view Float, segments: view Int) pub ret MeshData {
-  let verts: List(Float) = createList(Float, cap: (segments + 1) * (segments + 1) * 8)
-  let indices: List(Int) = createList(Int, cap: segments * segments * 6)
+  let verts: List(Float) = List.create(Float, cap: (segments + 1) * (segments + 1) * 8)
+  let indices: List(Int) = List.create(Int, cap: segments * segments * 6)
   var yi: Int = 0
   loop yi <= segments {
     let vy: Float = yi.toFloat() / segments.toFloat()
@@ -137,9 +137,9 @@ func makePlane(size: view Float, segments: view Int) pub ret MeshData {
 func makeFbmTerrain(size: view Float, segments: view Int, heightScale: view Float, frequency: view Float, octaves: view Int, seed: view Int) pub ret MeshData {
   let stride: Int = segments + 1
   let vertCount: Int = stride * stride
-  let heights: List(Float) = createList(Float, cap: vertCount)
-  let verts: List(Float) = createList(Float, cap: vertCount * 8)
-  let indices: List(Int) = createList(Int, cap: segments * segments * 6)
+  let heights: List(Float) = List.create(Float, cap: vertCount)
+  let verts: List(Float) = List.create(Float, cap: vertCount * 8)
+  let indices: List(Int) = List.create(Int, cap: segments * segments * 6)
 
   var yi: Int = 0
   loop yi <= segments {
@@ -224,8 +224,8 @@ func makeFbmTerrain(size: view Float, segments: view Int, heightScale: view Floa
 # outward normal — see the note in makeSphere for what an inverted winding
 # costs.
 func makeBox(size: view Float) pub ret MeshData {
-  let verts: List(Float) = createList(Float, cap: 24 * 8)
-  let indices: List(Int) = createList(Int, cap: 36)
+  let verts: List(Float) = List.create(Float, cap: 24 * 8)
+  let indices: List(Int) = List.create(Int, cap: 36)
   let h: Float = size * 0.5
 
   # Per face: outward normal, then the four corners in counter-clockwise
@@ -276,8 +276,8 @@ func makeBox(size: view Float) pub ret MeshData {
 }
 
 func makeTorus(majorR: view Float, minorR: view Float, majorSegs: view Int, minorSegs: view Int) pub ret MeshData {
-  let verts: List(Float) = createList(Float, cap: (majorSegs + 1) * (minorSegs + 1) * 8)
-  let indices: List(Int) = createList(Int, cap: majorSegs * minorSegs * 6)
+  let verts: List(Float) = List.create(Float, cap: (majorSegs + 1) * (minorSegs + 1) * 8)
+  let indices: List(Int) = List.create(Int, cap: majorSegs * minorSegs * 6)
   let pi: Float = 3.141592653589793
   var i: Int = 0
   loop i <= majorSegs {
@@ -349,8 +349,8 @@ const meshSmoothAngleDefault: Float = 60.0
 # have a hard seam. A position hash would trade that clarity for time
 # this does not need to save: it runs once, at load.
 func smoothMeshNormals(meshData: view MeshData, angleDeg: view Float) pub ret MeshData {
-  let verts: List(Float) = createList(Float, cap: meshData.verts.length)
-  let indices: List(Int) = createList(Int, cap: meshData.indices.length)
+  let verts: List(Float) = List.create(Float, cap: meshData.verts.length)
+  let indices: List(Int) = List.create(Int, cap: meshData.indices.length)
   loop let vertValue: view Float in meshData.verts {
     verts.add(value: vertValue)
   }

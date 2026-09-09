@@ -42,9 +42,9 @@ func gbRenderScale() extern("rae_gb_render_scale") ret Float64
 # reusable primitive every deferred post-pass builds on.
 func makeFullscreenPipeline(wgsl: copy Ptr, format: copy Int32) ret Ptr {
   let shaderMod: Ptr = makeShaderModule(wgsl: wgsl)
-  var targets: List(WGPUColorTargetState) = createList(WGPUColorTargetState, cap: 1)
+  var targets: List(WGPUColorTargetState) = List.create(WGPUColorTargetState, cap: 1)
   targets.add(value: { format: format, writeMask: WGPUColorWriteMask_All })
-  var frags: List(WGPUFragmentState) = createList(WGPUFragmentState, cap: 1)
+  var frags: List(WGPUFragmentState) = List.create(WGPUFragmentState, cap: 1)
   frags.add(value: {
     module: shaderMod, entryPoint: { data: gbEntryFs(), length: WGPU_STRLEN },
     targetCount: 1 as UInt64, targets: targets.data
@@ -67,7 +67,7 @@ func makeFullscreenPipeline(wgsl: copy Ptr, format: copy Int32) ret Ptr {
 func runFullscreen(pipeline: copy Ptr, bind: copy Ptr, target: copy Ptr) {
   let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
   let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
-  var atts: List(WGPURenderPassColorAttachment) = createList(WGPURenderPassColorAttachment, cap: 1)
+  var atts: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 1)
   atts.add(value: {
     view_: target, depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32,
     loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store
@@ -176,7 +176,7 @@ func composite(cache: mod CompositePassCache, exposure: copy Float, grade: view 
   let idx: Int = gbCompositeSourceIndex()
   if not compositeSlotMade(cache: cache, idx: idx) {
     let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbCompositePipeline(), groupIndex: 0 as UInt32)
-    var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 3)
+    var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 3)
     entries.add(value: { binding: 0 as UInt32, buffer: gbCompositeUbuf(), size: 64 as UInt64 })
     entries.add(value: { binding: 1 as UInt32, textureView: gbCompositeSourceView() })
     entries.add(value: { binding: 2 as UInt32, sampler: gbCompositeSampler() })
@@ -257,7 +257,7 @@ func ssao(cache: mod AoPassCache, camX: copy Float, camY: copy Float, camZ: copy
   if not cache.bindMade {
     cache.bindMade = true
     let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbAoPipeline(), groupIndex: 0 as UInt32)
-    var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 3)
+    var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 3)
     entries.add(value: { binding: 0 as UInt32, buffer: gbLightUbuf(), size: gbLightBytes() as UInt64 })
     entries.add(value: { binding: 1 as UInt32, textureView: gbViewA() })
     entries.add(value: { binding: 2 as UInt32, textureView: gbViewDepth() })
@@ -331,7 +331,7 @@ func lighting(cache: mod LightPassCache, camX: copy Float, camY: copy Float, cam
   if not cache.bindMade {
     cache.bindMade = true
     let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbLightPipeline(), groupIndex: 0 as UInt32)
-    var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 9)
+    var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 9)
     entries.add(value: { binding: 0 as UInt32, buffer: gbLightUbuf(), size: gbLightBytes() as UInt64 })
     entries.add(value: { binding: 1 as UInt32, textureView: gbViewA() })
     entries.add(value: { binding: 2 as UInt32, textureView: gbViewB() })
@@ -425,7 +425,7 @@ func taa(cache: mod TaaPassCache) pub {
   }
   if not taaSlotMade(cache: cache, idx: cur) {
     let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbTaaPipeline(), groupIndex: 0 as UInt32)
-    var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 4)
+    var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 4)
     entries.add(value: { binding: 0 as UInt32, textureView: gbLitView() })
     entries.add(value: { binding: 1 as UInt32, textureView: gbTaaHistoryView() })
     entries.add(value: { binding: 2 as UInt32, textureView: gbViewC() })
@@ -472,7 +472,7 @@ func depthPyramid(cache: mod PyrPassCache) pub {
     # C nulls the per-mip binds on resize; also rebuild when the gen changed.
     if bindsStale {
       let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: pipeline, groupIndex: 0 as UInt32)
-      var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 1)
+      var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 1)
       entries.add(value: { binding: 0 as UInt32, textureView: gbPyrSrcView(i: i) })
       let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 1 as UInt64, entries: entries.data }
       gbSetPyrBind(i: i, bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))

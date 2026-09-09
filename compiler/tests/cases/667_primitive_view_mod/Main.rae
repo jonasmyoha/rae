@@ -3,11 +3,11 @@
 # (rae_View_*/rae_Mod_*), NOT a boxed copy — a `modAt` write persists in place
 # and is visible to a later `viewAt` read (proving it aliases the element).
 func main() {
-  var ints: List(Int) = createList(Int, cap: 2)
+  var ints: List(Int) = List.create(Int, cap: 2)
   ints.add(value: 5)
-  var floats: List(Float) = createList(Float, cap: 2)
+  var floats: List(Float) = List.create(Float, cap: 2)
   floats.add(value: 1.5)
-  var bools: List(Bool) = createList(Bool, cap: 2)
+  var bools: List(Bool) = List.create(Bool, cap: 2)
   bools.add(value: false)
 
   if let vi: view Int => ints.viewAt(index: 0) { log("vi={vi}") }

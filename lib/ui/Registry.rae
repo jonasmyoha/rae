@@ -30,7 +30,7 @@ open ecs/ComponentTable
 # this to validate that every node's keys (other than `Children`) name
 # a real component.
 func registeredComponentNames() ret List(String) {
-  let names: List(String) = createList(String, cap: 42)
+  let names: List(String) = List.create(String, cap: 42)
   # Geometry / layout
   names.add(value: "Rect")
   names.add(value: "Size")
@@ -707,10 +707,10 @@ func deserSceneInstance(doc: view JsonDoc, val: view JsonValue) ret SceneInstanc
   # copy a List-of-structs (the C backend's struct-by-list-index
   # path still corrupts those).
   let sid: String = optString(doc: doc, container: val, key: "sceneId", fallback: "")
-  let nodeIds: List(String) = createList(String, cap: 0)
-  let components: List(String) = createList(String, cap: 0)
-  let fields: List(String) = createList(String, cap: 0)
-  let values: List(String) = createList(String, cap: 0)
+  let nodeIds: List(String) = List.create(String, cap: 0)
+  let components: List(String) = List.create(String, cap: 0)
+  let fields: List(String) = List.create(String, cap: 0)
+  let values: List(String) = List.create(String, cap: 0)
 
   let paramsIdx: Int = Json.field(doc: doc, this: val, key: "params")
   if paramsIdx >= 0 {

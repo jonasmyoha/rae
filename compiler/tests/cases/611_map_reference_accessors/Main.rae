@@ -10,7 +10,7 @@ type Track {
 }
 
 func main() {
-  var byName: StringMap(Track) = createStringMap(Track, cap: 8)
+  var byName: StringMap(Track) = StringMap.create(Track, cap: 8)
   byName.set(k: "intro", value: Track { title: "Intro", seconds: 95 })
 
   if let found: view Track => byName.viewGet(key: "intro") {
@@ -30,7 +30,7 @@ func main() {
     log("stringmap after modGet: {after.seconds}")
   }
 
-  var byId: IntMap(Track) = createIntMap(Track, cap: 8)
+  var byId: IntMap(Track) = IntMap.create(Track, cap: 8)
   byId.set(k: 7, value: Track { title: "Seven", seconds: 42 })
   if let found: view Track => byId.viewGet(key: 7) {
     log("intmap viewGet: {found.title} / {found.seconds}")

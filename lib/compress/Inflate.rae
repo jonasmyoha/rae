@@ -17,7 +17,7 @@ type Huff {
 
 # A List(Int) of `n` zeros.
 func zeros(count: view Int) ret List(Int) {
-    let l: List(Int) = createList(cap: count)
+    let l: List(Int) = List.create(Int, cap: count)
     var i: Int = 0
     loop i < count {
         l.add(value: 0)
@@ -171,7 +171,7 @@ func readDynamicLengths(r: mod BitReader, hlit: mod Int, hdist: mod Int) ret Lis
 
     # Decode nlit+ndist code lengths, honouring repeat codes 16/17/18.
     let total: Int = nlit + ndist
-    let lengths: List(Int) = createList(cap: total)
+    let lengths: List(Int) = List.create(Int, cap: total)
     loop lengths.length < total {
         let sym: Int = decodeSymbol(r: r, h: clHuff)
         if sym < 0 { ret lengths }
@@ -196,7 +196,7 @@ func readDynamicLengths(r: mod BitReader, hlit: mod Int, hdist: mod Int) ret Lis
 # Inflate a raw DEFLATE stream (no zlib/gzip wrapper). Returns the decoded bytes.
 func inflateRaw(data: own List(Int), len: view Int) ret List(Int) {
     var r: BitReader = newBitReader(data: data, len: len)
-    let out: List(Int) = createList(cap: len * 4)
+    let out: List(Int) = List.create(Int, cap: len * 4)
 
     let lBase: List(Int) = lengthBase()
     let lExtra: List(Int) = lengthExtra()
@@ -235,8 +235,8 @@ func inflateRaw(data: own List(Int), len: view Int) ret List(Int) {
                     var hdist: Int = 0
                     let allLengths: List(Int) = readDynamicLengths(r: r, hlit: hlit, hdist: hdist)
                     # Split into literal/length and distance code lengths.
-                    let litLengths: List(Int) = createList(cap: hlit)
-                    let distLengths: List(Int) = createList(cap: hdist)
+                    let litLengths: List(Int) = List.create(Int, cap: hlit)
+                    let distLengths: List(Int) = List.create(Int, cap: hdist)
                     var j: Int = 0
                     loop j < hlit { litLengths.add(value: bufAt(list: allLengths, index: j)) j = j + 1 }
                     loop j < hlit + hdist { distLengths.add(value: bufAt(list: allLengths, index: j)) j = j + 1 }

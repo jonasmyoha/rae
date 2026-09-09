@@ -89,12 +89,12 @@ func panelEntityAt(values: view List(EntityId), index: view Int) ret EntityId {
 func createControlPanel(hostNodeId: view String) pub ret ControlPanel {
   ret ControlPanel {
     hostNodeId: "{hostNodeId}"
-    ids: createList(String, cap: 8)
-    actionIds: createList(String, cap: 8)
-    groups: createList(Int, cap: 8)
-    buttonEntities: createList(EntityId, cap: 8)
-    labelEntities: createList(EntityId, cap: 8)
-    selectedIds: createList(String, cap: 4)
+    ids: List.create(String, cap: 8)
+    actionIds: List.create(String, cap: 8)
+    groups: List.create(Int, cap: 8)
+    buttonEntities: List.create(EntityId, cap: 8)
+    labelEntities: List.create(EntityId, cap: 8)
+    selectedIds: List.create(String, cap: 4)
     buttonW: panelButtonW
     buttonH: panelButtonH
     textStyleId: "panelButton"
@@ -151,7 +151,7 @@ func buildControlPanel(panel: mod ControlPanel, world: mod UiWorld, res: view Gp
   # APPEND rather than replace. A host may already have authored
   # children — a title, a readout — and a panel that overwrote them would
   # silently delete part of the scene it was asked to extend.
-  let kids: List(EntityId) = createList(EntityId, cap: panel.ids.length + 4)
+  let kids: List(EntityId) = List.create(EntityId, cap: panel.ids.length + 4)
   if componentHas(this: world.childrens, entity: host) {
     let existing: view Children => componentView(this: world.childrens, entity: host)
     var e: Int = 0
@@ -199,7 +199,7 @@ func buildControlPanel(panel: mod ControlPanel, world: mod UiWorld, res: view Gp
     }
     componentSet(this: world.opticalAligns, entity: labelE, data: optical)
 
-    let labelKids: List(EntityId) = createList(EntityId, cap: 1)
+    let labelKids: List(EntityId) = List.create(EntityId, cap: 1)
     labelKids.add(value: labelE)
     let buttonChildren: Children = { ids: own labelKids }
     componentSet(this: world.childrens, entity: buttonE, data: buttonChildren)

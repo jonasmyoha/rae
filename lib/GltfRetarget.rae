@@ -95,8 +95,8 @@ func quatIntoList(a: mod List(Float), i: copy Int, q: view Quat) {
 # still pending waits for the next pass. It converges in at most `depth` passes;
 # the `pass <= nodeCount` guard is the cycle backstop nodeWorldMatrix also keeps.
 func accumModelRot(localR: view List(Float), parent: view List(Int), nodeCount: copy Int) ret List(Float) {
-  let out: List(Float) = createList(Float, cap: nodeCount * 4)
-  let done: List(Bool) = createList(Bool, cap: nodeCount)
+  let out: List(Float) = List.create(Float, cap: nodeCount * 4)
+  let done: List(Bool) = List.create(Bool, cap: nodeCount)
   var i: Int = 0
   loop i < nodeCount {
     out.add(value: 0.0)
@@ -141,21 +141,21 @@ func accumModelRot(localR: view List(Float), parent: view List(Int), nodeCount: 
 # but localT/localS are copied so applyClip's translation/scale writes land
 # somewhere valid. nodeNames/jointNodes/inverseBind are unused by applyClip.
 func cloneSourceForSampling(from: view Skeleton, fromBind: view SkeletonPose) ret Skeleton {
-  let localR: List(Float) = createList(Float, cap: fromBind.localR.length)
+  let localR: List(Float) = List.create(Float, cap: fromBind.localR.length)
   var i: Int = 0
   loop i < fromBind.localR.length { localR.add(value: floatAt(list: fromBind.localR, index: i)) i = i + 1 }
-  let localT: List(Float) = createList(Float, cap: fromBind.localT.length)
+  let localT: List(Float) = List.create(Float, cap: fromBind.localT.length)
   i = 0
   loop i < fromBind.localT.length { localT.add(value: floatAt(list: fromBind.localT, index: i)) i = i + 1 }
-  let localS: List(Float) = createList(Float, cap: fromBind.localS.length)
+  let localS: List(Float) = List.create(Float, cap: fromBind.localS.length)
   i = 0
   loop i < fromBind.localS.length { localS.add(value: floatAt(list: fromBind.localS, index: i)) i = i + 1 }
-  let parent: List(Int) = createList(Int, cap: from.parent.length)
+  let parent: List(Int) = List.create(Int, cap: from.parent.length)
   i = 0
   loop i < from.parent.length { parent.add(value: intAt(list: from.parent, index: i, fallback: 0 - 1)) i = i + 1 }
   ret Skeleton {
-    ok: true, jointNodes: createList(Int, cap: 0), inverseBind: createList(Float, cap: 0),
-    nodeCount: from.nodeCount, parent: own parent, nodeNames: createList(String, cap: 0),
+    ok: true, jointNodes: List.create(Int, cap: 0), inverseBind: List.create(Float, cap: 0),
+    nodeCount: from.nodeCount, parent: own parent, nodeNames: List.create(String, cap: 0),
     localT: own localT, localR: own localR, localS: own localS
   }
 }
@@ -211,7 +211,7 @@ func retargetClip(c: view Clip, from: view Skeleton, fromBind: view SkeletonPose
   # dst node -> matching source node (by name), or -1. `skipRoot` maps the hip to
   # -1 so it holds bind. Built dst-first because Mdst_key is computed for EVERY
   # dst node (an unmatched parent still frames its matched children).
-  let srcOfDst: List(Int) = createList(Int, cap: to.nodeCount)
+  let srcOfDst: List(Int) = List.create(Int, cap: to.nodeCount)
   var d: Int = 0
   loop d < to.nodeCount {
     var s: Int = 0 - 1
@@ -232,7 +232,7 @@ func retargetClip(c: view Clip, from: view Skeleton, fromBind: view SkeletonPose
   }
 
   # The dst nodes that actually get a channel (those with a source match).
-  let chanDst: List(Int) = createList(Int, cap: to.nodeCount)
+  let chanDst: List(Int) = List.create(Int, cap: to.nodeCount)
   d = 0
   loop d < to.nodeCount {
     if intAt(list: srcOfDst, index: d, fallback: 0 - 1) >= 0 { chanDst.add(value: d) }
@@ -247,10 +247,10 @@ func retargetClip(c: view Clip, from: view Skeleton, fromBind: view SkeletonPose
   let scratch: Skeleton = cloneSourceForSampling(from: from, fromBind: fromBind)
 
   # Output values, joint-major: (channel m, sample s) at (m * nSamp + s) * 4.
-  let valBuf: List(Float) = createList(Float, cap: matched * nSamp * 4)
+  let valBuf: List(Float) = List.create(Float, cap: matched * nSamp * 4)
   var z: Int = 0
   loop z < matched * nSamp * 4 { valBuf.add(value: 0.0) z = z + 1 }
-  let mdstKey: List(Float) = createList(Float, cap: to.nodeCount * 4)
+  let mdstKey: List(Float) = List.create(Float, cap: to.nodeCount * 4)
   z = 0
   loop z < to.nodeCount * 4 { mdstKey.add(value: 0.0) z = z + 1 }
 
@@ -297,14 +297,14 @@ func retargetClip(c: view Clip, from: view Skeleton, fromBind: view SkeletonPose
   }
 
   # Assemble the clip: one shared time grid, one rotation channel per joint.
-  let targetNode: List(Int) = createList(Int, cap: matched)
-  let path: List(Int) = createList(Int, cap: matched)
-  let interp: List(Int) = createList(Int, cap: matched)
-  let timeStart: List(Int) = createList(Int, cap: matched)
-  let timeCount: List(Int) = createList(Int, cap: matched)
-  let valueStart: List(Int) = createList(Int, cap: matched)
-  let times: List(Float) = createList(Float, cap: nSamp)
-  let values: List(Float) = createList(Float, cap: matched * nSamp * 4)
+  let targetNode: List(Int) = List.create(Int, cap: matched)
+  let path: List(Int) = List.create(Int, cap: matched)
+  let interp: List(Int) = List.create(Int, cap: matched)
+  let timeStart: List(Int) = List.create(Int, cap: matched)
+  let timeCount: List(Int) = List.create(Int, cap: matched)
+  let valueStart: List(Int) = List.create(Int, cap: matched)
+  let times: List(Float) = List.create(Float, cap: nSamp)
+  let values: List(Float) = List.create(Float, cap: matched * nSamp * 4)
   s = 0
   loop s < nSamp {
     times.add(value: c.duration * s.toFloat() / lastT)

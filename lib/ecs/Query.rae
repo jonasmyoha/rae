@@ -58,7 +58,7 @@ func query2(A: type, B: type,
             tableA: view ComponentTable(A), tableB: view ComponentTable(B)) ret List(Query2Match) {
   let countA: Int = componentCount(this: tableA)
   let countB: Int = componentCount(this: tableB)
-  let matches: List(Query2Match) = createList(Query2Match, cap: 16)
+  let matches: List(Query2Match) = List.create(Query2Match, cap: 16)
   if countA <= countB {
     loop var i: Int = 0, i < countA, ++i {
       let entity: EntityId = componentEntityAt(this: tableA, i: i)
@@ -96,7 +96,7 @@ func query3(A: type, B: type, C: type,
   let countA: Int = componentCount(this: tableA)
   let countB: Int = componentCount(this: tableB)
   let countC: Int = componentCount(this: tableC)
-  let matches: List(Query3Match) = createList(Query3Match, cap: 16)
+  let matches: List(Query3Match) = List.create(Query3Match, cap: 16)
   if countA <= countB and countA <= countC {
     loop var i: Int = 0, i < countA, ++i {
       let entity: EntityId = componentEntityAt(this: tableA, i: i)
@@ -145,7 +145,7 @@ type QueryMatch {
 # lookup.
 func forEach(T: type, table: view ComponentTable(T)) ret List(QueryMatch) {
   let count: Int = componentCount(this: table)
-  let matches: List(QueryMatch) = createList(QueryMatch, cap: 16)
+  let matches: List(QueryMatch) = List.create(QueryMatch, cap: 16)
   loop var i: Int = 0, i < count, ++i {
     matches.add(value: QueryMatch { entity: componentEntityAt(this: table, i: i), index: i })
   }
@@ -223,7 +223,7 @@ func query4(A: type, B: type, C: type, D: type,
   let countB: Int = componentCount(this: tableB)
   let countC: Int = componentCount(this: tableC)
   let countD: Int = componentCount(this: tableD)
-  let matches: List(Query4Match) = createList(Query4Match, cap: 16)
+  let matches: List(Query4Match) = List.create(Query4Match, cap: 16)
   if countA <= countB and countA <= countC and countA <= countD {
     loop var i: Int = 0, i < countA, ++i {
       let entity: EntityId = componentEntityAt(this: tableA, i: i)
@@ -306,7 +306,7 @@ func query5(A: type, B: type, C: type, D: type, E: type,
   let countC: Int = componentCount(this: tableC)
   let countD: Int = componentCount(this: tableD)
   let countE: Int = componentCount(this: tableE)
-  let matches: List(Query5Match) = createList(Query5Match, cap: 16)
+  let matches: List(Query5Match) = List.create(Query5Match, cap: 16)
   if countA <= countB and countA <= countC and countA <= countD and countA <= countE {
     loop var i: Int = 0, i < countA, ++i {
       let entity: EntityId = componentEntityAt(this: tableA, i: i)
@@ -407,7 +407,7 @@ func query5ViewE(E: type, tableE: view ComponentTable(E), hit: view Query5Match)
 func without(D: type, T: type, dataTable: view ComponentTable(D),
              tagTable: view ComponentTable(T)) ret List(QueryMatch) {
   let count: Int = componentCount(this: dataTable)
-  let matches: List(QueryMatch) = createList(QueryMatch, cap: 16)
+  let matches: List(QueryMatch) = List.create(QueryMatch, cap: 16)
   loop var i: Int = 0, i < count, ++i {
     let entity: EntityId = componentEntityAt(this: dataTable, i: i)
     if componentIndexOf(this: tagTable, entity: entity) < 0 {
@@ -430,7 +430,7 @@ func without(D: type, T: type, dataTable: view ComponentTable(D),
 # lookups — the stamps are dense, aligned 1:1 with the data.
 func changedSince(T: type, table: view ComponentTable(T), sinceGeneration: view Int) ret List(QueryMatch) {
   let count: Int = componentCount(this: table)
-  let matches: List(QueryMatch) = createList(QueryMatch, cap: 16)
+  let matches: List(QueryMatch) = List.create(QueryMatch, cap: 16)
   loop var i: Int = 0, i < count, ++i {
     let stamp: Int = rae_ext_rae_buf_get(buf: table.denseStamps.data, index: i)
     if stamp > sinceGeneration {

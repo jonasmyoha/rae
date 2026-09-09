@@ -57,7 +57,7 @@ func emptyScene() ret Scene {
   ret Scene {
     sceneId: ""
     rootNodeId: ""
-    nodes: createList(SceneNode, cap: 0)
+    nodes: List.create(SceneNode, cap: 0)
     doc: Json.parseJson(source: "null")
     ok: false
     errorMsg: ""
@@ -87,7 +87,7 @@ func nodeAt(this: view Scene, idx: view Int) ret view SceneNode {
 # strings, not a component object. Pulled out so the loader can
 # resolve them once entity ids exist.
 func extractChildrenIds(doc: view JsonDoc, nodeVal: view JsonValue) ret List(String) {
-  let out: List(String) = createList(String, cap: 4)
+  let out: List(String) = List.create(String, cap: 4)
   let childrenIdx: Int = Json.field(doc: doc, this: nodeVal, key: "Children")
   if childrenIdx < 0 {
     ret out

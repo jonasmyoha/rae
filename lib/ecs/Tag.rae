@@ -33,7 +33,7 @@ func tagCount(T: type, table: view ComponentTable(T)) ret Int {
 
 # Every entity carrying tag T, in the tag table's dense order.
 func taggedEntities(T: type, table: view ComponentTable(T)) ret List(EntityId) {
-  let out: List(EntityId) = createList(EntityId, cap: 16)
+  let out: List(EntityId) = List.create(EntityId, cap: 16)
   loop var i: Int = 0, i < componentCount(this: table), ++i {
     out.add(value: componentEntityAt(this: table, i: i))
   }

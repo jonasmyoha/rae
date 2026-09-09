@@ -19,7 +19,7 @@ func main() {
   let straight: RiverSpline = {
     p0: Vec3.create(x: 0.0, y: 0.0, z: 5.0), p1: Vec3.create(x: 3.0, y: 0.0, z: 5.0),
     p2: Vec3.create(x: 7.0, y: 0.0, z: 5.0), p3: Vec3.create(x: 10.0, y: 0.0, z: 5.0) }
-  var heights: List(Float) = createList(Float, cap: 15)
+  var heights: List(Float) = List.create(Float, cap: 15)
   loop var i: Int = 0, i < 5, ++i {
     heights.add(value: 6.0)   # left bank ABOVE the surface: edge stays at the surface
     heights.add(value: 5.0)   # surface
@@ -40,7 +40,7 @@ func main() {
   let bend: RiverSpline = {
     p0: Vec3.create(x: 0.0, y: 0.0, z: 1.0), p1: Vec3.create(x: 8.0, y: 0.0, z: 1.0),
     p2: Vec3.create(x: 8.0, y: 8.0, z: 1.0), p3: Vec3.create(x: 0.0, y: 8.0, z: 1.0) }
-  var flat: List(Float) = createList(Float, cap: 60)
+  var flat: List(Float) = List.create(Float, cap: 60)
   loop var j: Int = 0, j < 60, ++j { flat.add(value: 1.0) }
   let bent: MeshData = bakeRiverMesh(spline: bend, width: 3.0, samples: 20, across: 1, heights: flat, bankMargin: 0.2)
   var maxFoam: Float = 0.0

@@ -76,7 +76,7 @@ func collectionFromAlbum(album: view Album) pub ret CollectionView {
   let artist: String = "{album.artist}"
   let coverStem: String = "{album.stem}"
 
-  let rows: List(CollectionRow) = createList(CollectionRow, cap: n)
+  let rows: List(CollectionRow) = List.create(CollectionRow, cap: n)
   var i: Int = 0
   loop i < n {
     let t: Track = rae_ext_rae_buf_get(buf: album.tracks.data, index: i)
@@ -111,7 +111,7 @@ func collectionFromAlbum(album: view Album) pub ret CollectionView {
 # song; `album` items expand to all of that album's tracks; `playlist`
 # links are skipped (no recursion — avoids cycles).
 func collectionFromPlaylist(playlist: view Playlist, albums: view List(Album)) pub ret CollectionView {
-  let rows: List(CollectionRow) = createList(CollectionRow, cap: playlist.items.length)
+  let rows: List(CollectionRow) = List.create(CollectionRow, cap: playlist.items.length)
   let n: Int = playlist.items.length
   var i: Int = 0
   loop i < n {

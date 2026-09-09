@@ -188,7 +188,7 @@ func buildHistoryRow(world: mod UiWorld, entry: view PlayHistoryEntry, entryInde
   let subText: String = "{entry.artistName}"
   setText(world: world, entity: sub, text: subText, styleId: subStyle)
 
-  let infoKids: List(EntityId) = createList(EntityId, cap: 2)
+  let infoKids: List(EntityId) = List.create(EntityId, cap: 2)
   infoKids.add(value: title)
   infoKids.add(value: sub)
   attachChildren(world: world, parent: info, kids: infoKids)
@@ -200,7 +200,7 @@ func buildHistoryRow(world: mod UiWorld, entry: view PlayHistoryEntry, entryInde
   let durText: String = formatDurationMs(ms: durMs)
   setText(world: world, entity: dur, text: durText, styleId: durStyle)
 
-  let rowKids: List(EntityId) = createList(EntityId, cap: 3)
+  let rowKids: List(EntityId) = List.create(EntityId, cap: 3)
   rowKids.add(value: thumb)
   rowKids.add(value: info)
   rowKids.add(value: dur)
@@ -241,7 +241,7 @@ func attachHistoryWindow(world: mod UiWorld, body: view EntityId, history: view 
     let style: String = "muted"
     let text: String = "Nothing played yet."
     setText(world: world, entity: empty, text: text, styleId: style)
-    let kids: List(EntityId) = createList(EntityId, cap: 1)
+    let kids: List(EntityId) = List.create(EntityId, cap: 1)
     kids.add(value: empty)
     attachChildren(world: world, parent: body, kids: kids)
     ret
@@ -255,7 +255,7 @@ func attachHistoryWindow(world: mod UiWorld, body: view EntityId, history: view 
     lv = n - 1
   }
 
-  let rowKids: List(EntityId) = createList(EntityId, cap: wc + 2)
+  let rowKids: List(EntityId) = List.create(EntityId, cap: wc + 2)
 
   # Top spacer reserves the height of the `fv` rows above the window so the
   # first built row lands at its true position under vertical layout (minus
@@ -304,7 +304,7 @@ func rewindowHistoryBody(world: mod UiWorld, body: view EntityId, history: view 
   # table across the destroy loop (a view would dangle; a componentGet copy
   # would also auto-drop the aliased ids buffer). EntityIds are plain
   # values, so the local snapshot is independent of the table.
-  let old: List(EntityId) = createList(EntityId, cap: 32)
+  let old: List(EntityId) = List.create(EntityId, cap: 32)
   if componentHas(this: world.childrens, entity: body) {
     let ch: view Children => componentView(this: world.childrens, entity: body)
     let kn: Int = ch.ids.length
@@ -346,7 +346,7 @@ func mountHistoryPage(
   let topBar: EntityId = buildPageTopBar(world: world, title: "Recently played")
   let body: EntityId = buildHistoryBody(world: world, history: state.playHistory, rounded: state.settings.roundedAlbumCovers, scrollY: scrollY)
 
-  let kids: List(EntityId) = createList(EntityId, cap: 2)
+  let kids: List(EntityId) = List.create(EntityId, cap: 2)
   kids.add(value: topBar)
   kids.add(value: body)
   attachChildren(world: world, parent: root, kids: kids)
@@ -392,7 +392,7 @@ func fillRecentlyPlayedStrip(world: mod UiWorld, strip: view EntityId, history: 
   if n < kidsCount {
     kidsCount = n
   }
-  let kids: List(EntityId) = createList(EntityId, cap: kidsCount)
+  let kids: List(EntityId) = List.create(EntityId, cap: kidsCount)
   var visual: Int = 0
   loop visual < kidsCount {
     let entryIdx: Int = n - 1 - visual

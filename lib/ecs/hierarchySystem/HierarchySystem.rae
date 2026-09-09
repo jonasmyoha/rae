@@ -24,7 +24,7 @@ open ecs/World
 # through here / insertChildAt, never by callers.
 func addChildTo(childrens: mod ComponentTable(Children), parent: view EntityId, child: view EntityId) {
   if componentHas(this: childrens, entity: parent) is false {
-    componentSet(this: childrens, entity: parent, data: Children { ids: createList(EntityId, cap: 4) })
+    componentSet(this: childrens, entity: parent, data: Children { ids: List.create(EntityId, cap: 4) })
   }
   let cache: mod Children => componentMod(this: childrens, entity: parent)
   cache.ids.add(value: child)
@@ -35,7 +35,7 @@ func addChildTo(childrens: mod ComponentTable(Children), parent: view EntityId, 
 func insertChildAt(childrens: mod ComponentTable(Children), parent: view EntityId,
                    child: view EntityId, index: view Int) {
   if componentHas(this: childrens, entity: parent) is false {
-    componentSet(this: childrens, entity: parent, data: Children { ids: createList(EntityId, cap: 4) })
+    componentSet(this: childrens, entity: parent, data: Children { ids: List.create(EntityId, cap: 4) })
   }
   let cache: mod Children => componentMod(this: childrens, entity: parent)
   var at: Int = index
@@ -108,7 +108,7 @@ func insertChild(parents: mod ComponentTable(Parent), childrens: mod ComponentTa
 # The children of `parent`, in order — a COPY, so a caller can iterate freely
 # without being able to corrupt the authoritative list. Empty when `parent` has none.
 func getChildren(childrens: view ComponentTable(Children), parent: view EntityId) ret List(EntityId) {
-  let out: List(EntityId) = createList(EntityId, cap: 4)
+  let out: List(EntityId) = List.create(EntityId, cap: 4)
   if componentHas(this: childrens, entity: parent) {
     let cache: view Children => componentView(this: childrens, entity: parent)
     loop var i: Int = 0, i < cache.ids.length, ++i {
@@ -173,7 +173,7 @@ type HierarchyOrder {
 }
 
 func createHierarchyOrder() ret HierarchyOrder {
-  ret HierarchyOrder { order: createList(EntityId, cap: 16), builtGeneration: 0 - 1 }
+  ret HierarchyOrder { order: List.create(EntityId, cap: 16), builtGeneration: 0 - 1 }
 }
 
 # Append `node` then recurse into its Children, depth-first — pre-order, so a
@@ -279,7 +279,7 @@ func detachForDestroy(parents: mod ComponentTable(Parent), childrens: mod Compon
 # the owning World's concern; this is the hierarchy + entity-lifetime teardown.)
 func destroySubtree(allocator: mod EntityAllocator, parents: mod ComponentTable(Parent),
                     childrens: mod ComponentTable(Children), root: view EntityId) {
-  let subtree: List(EntityId) = createList(EntityId, cap: 16)
+  let subtree: List(EntityId) = List.create(EntityId, cap: 16)
   collectSubtree(childrens: childrens, node: root, out: subtree)
   # Unlink the root from its parent's Children so the (surviving) parent doesn't
   # dangle to the destroyed root.

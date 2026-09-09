@@ -62,7 +62,7 @@ func readFileTextRange(path: view String, offset: view Int, len: view Int) pub r
 func readFileBytes(path: view String) pub ret List(Int) {
   var count: Int = 0
   let raw: Buffer(Int) = rae_sys_read_file_bytes(path: path, outLen: count)
-  let out: List(Int) = createList(Int, cap: count)
+  let out: List(Int) = List.create(Int, cap: count)
   if count is 0 {
     ret own out
   }

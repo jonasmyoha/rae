@@ -20,7 +20,7 @@ let libraryFilePath: String = "examples/legacy/raylib/98_mobile_ui/temp/library.
 # and after a wipe — preserves the "all albums in library" default
 # users had before this feature.
 func librarySeedFromCatalog(albums: view List(Album)) pub ret List(String) {
-  let lib: List(String) = createList(String, cap: albums.length)
+  let lib: List(String) = List.create(String, cap: albums.length)
   var i: Int = 0
   loop i < albums.length {
     let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
@@ -128,7 +128,7 @@ func loadLibraryFromJson(albums: view List(Album), path: view String) pub ret Li
   }
   let stemsVal: JsonValue = json.jsonValueAt(doc: doc, idx: stemsIdx)
   let n: Int = json.arrayLen(this: stemsVal)
-  let out: List(String) = createList(String, cap: n)
+  let out: List(String) = List.create(String, cap: n)
   var i: Int = 0
   loop i < n {
     let v: JsonValue = json.arrayAt(doc: doc, this: stemsVal, idx: i)
