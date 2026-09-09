@@ -1,0 +1,34 @@
+# #885 (a): a `create(...)` in a literal field of a GENERIC struct instance is
+# resolved against the substituted field type (`Slot`), not the template's `T`.
+type Slot {
+  id: Int
+}
+
+func create(id: view Int) ret Slot {
+  log("acquire {id}")
+  ret Slot { id: id }
+}
+
+func drop(this: mod Slot) {
+  log("release {this.id}")
+}
+
+type Box(T: type) {
+  value: T
+  label: String
+}
+
+type Pair(A: type, B: type) {
+  first: A
+  second: B
+}
+
+func main() {
+  let boxed: Box(Slot) = { value: create(id: 1), label: "one" }
+  log("boxed {boxed.value.id} {boxed.label}")
+  let pair: Pair(Slot, Int) = { first: create(id: 2), second: 7 }
+  log("pair {pair.first.id} {pair.second}")
+  let nested: Box(Box(Slot)) = { value: { value: create(id: 3), label: "inner" }, label: "outer" }
+  log("nested {nested.value.value.id}")
+  log("-- end of main")
+}

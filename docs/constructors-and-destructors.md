@@ -1,9 +1,8 @@
 # Constructors, destructors and copies in Rae: `create`, `drop`, `copy`
 
 Status: **implemented — `drop` (#881), `copy` (#882), `create` (#880), 2026-09-09.**
-Known limits: `create` in a generic struct's literal field with an
-unsubstituted `T` is not resolved (#885); a temporary made in a `loop`
-condition is released once, after the loop, not per iteration (#886). The rest of this document is the design as approved for implementation. This document covers constructors, destructors and copies only.
+Known limit: a temporary made in a `loop` condition is released once, after
+the loop, not per iteration (#886). The rest of this document is the design as approved for implementation. This document covers constructors, destructors and copies only.
 Native
 pointers, `unsafe`, GPU resource identity and the rest of
 `ptr-and-gpu-resource-design.md` (#878) are out of scope; section 8 says only
@@ -230,6 +229,15 @@ var water: WaterSystem = create(body: lake)
 water.drop()                 # releases now; `water` is consumed
 water.step()                 # ERROR: use of dropped value `water`
 ```
+
+The check is a dataflow over the whole function body (#885): a name dropped
+on ANY path into a point is "maybe dropped" there unless every such path
+reassigned it, so a `drop` inside one branch of an `if` makes a use after the
+`if` an error, and a `drop` late in a loop body makes a use at the top of the
+body an error (the next iteration). A `let` or an assignment of the name makes
+it live again on that path; dropping a dropped value counts as a use. At run
+time a local that is dropped explicitly anywhere carries a live flag, so scope
+exit and reassignment release it exactly once whichever path ran.
 
 A type may still offer `close` or `shutdown` for a partial, resumable release
 (stop accepting work, keep the value alive). That is an ordinary method with no

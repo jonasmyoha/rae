@@ -102,6 +102,7 @@ static bool emit_list_if_let(CFuncContext* ctx, const AstStmt* stmt, FILE* out) 
     ctx->local_is_ptr[local_index] = is_ref;
     ctx->local_is_mod[local_index] = element_type->is_mod;
     ctx->local_moved[local_index] = false;
+    ctx->local_drop_flag[local_index] = false;
     ctx->local_struct_owns_heap[local_index] = !is_ref;
   }
   if (stmt->as.if_stmt.then_block) {
@@ -835,6 +836,38 @@ void emit_stmt_temp_drops_now(CFuncContext* ctx, FILE* out) {
   temps->flushed = true;
 }
 
+static bool block_has_explicit_drop(const AstBlock* b, Str name);
+static bool stmt_has_explicit_drop(const AstStmt* s, Str name) {
+  if (!s) return false;
+  switch (s->kind) {
+    case AST_STMT_EXPR: {
+      const AstExpr* e = s->as.expr_stmt;
+      return e && e->kind == AST_EXPR_METHOD_CALL && !e->as.method_call.args
+          && str_eq_cstr(e->as.method_call.method_name, "drop")
+          && e->as.method_call.object && e->as.method_call.object->kind == AST_EXPR_IDENT
+          && str_eq(e->as.method_call.object->as.ident, name);
+    }
+    case AST_STMT_IF:
+      return stmt_has_explicit_drop(s->as.if_stmt.binding, name)
+          || block_has_explicit_drop(s->as.if_stmt.then_block, name)
+          || block_has_explicit_drop(s->as.if_stmt.else_block, name);
+    case AST_STMT_LOOP:
+      return stmt_has_explicit_drop(s->as.loop_stmt.init, name)
+          || block_has_explicit_drop(s->as.loop_stmt.body, name);
+    case AST_STMT_MATCH:
+      for (const AstMatchCase* c = s->as.match_stmt.cases; c; c = c->next)
+        if (block_has_explicit_drop(c->block, name)) return true;
+      return false;
+    case AST_STMT_DEFER: return block_has_explicit_drop(s->as.defer_stmt.block, name);
+    default: return false;
+  }
+}
+static bool block_has_explicit_drop(const AstBlock* b, Str name) {
+  for (const AstStmt* s = b ? b->first : NULL; s; s = s->next)
+    if (stmt_has_explicit_drop(s, name)) return true;
+  return false;
+}
+
 bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
                                   size_t first_let_index) {
   if (!ctx || !out) return false;
@@ -914,6 +947,13 @@ bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
       const char* struct_mangled = rae_mangle_type_specialized(
           ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
       const char* suffix = ctx->local_struct_owns_heap[idx] ? "" : "_alias";
+      if (ctx->local_drop_flag[idx]) {
+        // #885: released only while the local still owns a value.
+        fprintf(out, "  if (__rae_live_%.*s) { __rae_live_%.*s = 0; rae_drop_struct_%s%s(&%.*s); }\n",
+                (int)name.len, name.data, (int)name.len, name.data,
+                struct_mangled, suffix, (int)name.len, name.data);
+        continue;
+      }
       fprintf(out, "  rae_drop_struct_%s%s(&%.*s);\n", struct_mangled, suffix,
               (int)name.len, name.data);
     }
@@ -1016,6 +1056,7 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             ctx->local_is_ptr[local_index] = false;
             ctx->local_is_mod[local_index] = false;
             ctx->local_moved[local_index] = false;
+    ctx->local_drop_flag[local_index] = false;
             ctx->local_struct_owns_heap[local_index] = true;
             ctx->local_count++;
         }
@@ -1139,6 +1180,7 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             ctx->local_is_ptr[local_index] = binding_is_ref;
             ctx->local_is_mod[local_index] = binding_type->is_mod;
             ctx->local_moved[local_index] = false;
+    ctx->local_drop_flag[local_index] = false;
             ctx->local_struct_owns_heap[local_index] = !binding_is_ref;
         }
         // break/continue drop back to here (before the element binding), so a
@@ -1389,7 +1431,13 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     for (int i = (int)ctx->local_count - 1; i >= 0; i--) {
                         if (!str_eq(ctx->locals[i], name)) continue;
                         if (type_has_user_drop(ctx->compiler_ctx, ctx->local_type_refs[i])) {
-                            ctx->local_moved[i] = true;
+                            if (ctx->local_drop_flag[i]) {
+                                // #885: a runtime flag makes a drop inside a branch
+                                // exactly-once on every path.
+                                fprintf(out, "  __rae_live_%.*s = 0;\n", (int)name.len, name.data);
+                            } else {
+                                ctx->local_moved[i] = true;
+                            }
                         }
                         break;
                     }
@@ -1943,6 +1991,18 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 }
                 ctx->local_count++;
             }
+            // #885: a local with a destructor that this body drops explicitly
+            // carries a runtime live flag (see CFuncContext.local_drop_flag).
+            if (!is_ref_bind && ctx->func_decl && ctx->func_decl->body && ctx->local_count > 0) {
+                size_t li = ctx->local_count - 1;
+                Str ln = stmt->as.let_stmt.name;
+                if (str_eq(ctx->locals[li], ln) && !ctx->local_drop_flag[li]
+                    && type_has_user_drop(ctx->compiler_ctx, ctx->local_type_refs[li])
+                    && block_has_explicit_drop(ctx->func_decl->body, ln)) {
+                    ctx->local_drop_flag[li] = true;
+                    fprintf(out, "  int __rae_live_%.*s = 1;\n", (int)ln.len, ln.data);
+                }
+            }
             break;
         }
         case AST_STMT_ASSIGN: {
@@ -2070,7 +2130,11 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         emit_expr(ctx, hv, out, PREC_LOWEST, false, false);
                         fprintf(out, "; ");
                     }
-                    if (!ctx->local_moved[hook_local]) {
+                    if (ctx->local_drop_flag[hook_local]) {
+                        fprintf(out, "if (__rae_live_%.*s) { rae_drop_struct_%s(&%.*s); } __rae_live_%.*s = 1; ",
+                                (int)tname.len, tname.data, tn_hook, (int)tname.len, tname.data,
+                                (int)tname.len, tname.data);
+                    } else if (!ctx->local_moved[hook_local]) {
                         fprintf(out, "rae_drop_struct_%s(&%.*s); ", tn_hook, (int)tname.len, tname.data);
                     }
                     fprintf(out, "%.*s = __asg%d; }", (int)tname.len, tname.data, tmpn);

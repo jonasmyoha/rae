@@ -86,6 +86,12 @@ typedef struct {
   // becomes unnecessary and Layer 5 can fire on all owning struct
   // lets unconditionally.
   bool local_struct_owns_heap[256];
+  // #885: a local with a destructor that the body drops explicitly somewhere
+  // gets a runtime flag `int __rae_live_<name>`: 1 while it owns a value, 0
+  // after `<name>.drop()`, 1 again after reassignment. Scope exit and
+  // reassignment release it only while the flag is set, so a drop inside one
+  // branch is exactly-once on every path (sema forbids using it meanwhile).
+  bool local_drop_flag[256];
   size_t local_count;
   // Stage 7 early-return cleanup: the index in `locals[]` after which
   // entries are this function's `let` bindings (i.e. NOT parameters).
