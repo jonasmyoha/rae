@@ -1169,7 +1169,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 if (tmp_id >= 0) {
                     fprintf(out, "((__rae_stmt_tmp%d = (", tmp_id);
                     emit_expr(ctx, a->value, out, PREC_LOWEST, false, pass_view_through);
-                    fprintf(out, ")), &__rae_stmt_tmp%d)", tmp_id);
+                    fprintf(out, ")), (__rae_stmt_tmp%d_set = 1), &__rae_stmt_tmp%d)", tmp_id, tmp_id);
                 } else {
                     fprintf(out, "((");
                     emit_type_ref_as_c_type(ctx, &base_type, out, false);
@@ -1252,7 +1252,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 if (tmp_id >= 0) {
                     fprintf(out, "((__rae_stmt_tmp%d = (", tmp_id);
                     emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
-                    fprintf(out, ")), &__rae_stmt_tmp%d)", tmp_id);
+                    fprintf(out, ")), (__rae_stmt_tmp%d_set = 1), &__rae_stmt_tmp%d)", tmp_id, tmp_id);
                 } else {
                     fprintf(out, "&(");
                     emit_type_ref_as_c_type(ctx, base_emit, out, false);
