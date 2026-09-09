@@ -1,4 +1,4 @@
-# Constructors and destructors in Rae: `create` and `drop`
+# Constructors, destructors and copies in Rae: `create`, `drop`, `copy`
 
 Status: **design proposal, 2026-09-09, for maintainer approval.** Nothing here is
 implemented. This document covers constructors and destructors only. Native
@@ -10,11 +10,16 @@ which #878 spellings this replaces.
 
 A **constructor** is an ordinary free function named `create` that returns the
 type. A **destructor** is an ordinary free function named `drop` whose first
-parameter is `this: mod T`. Both are written the way every Rae method is written
-today (`func size(this: view Buffer) ret Int`). There are no new keywords, no
-type properties, no attributes and no registration. The **name and the
-signature** are the whole contract, exactly as a first parameter named `this`
-is the whole contract for member-call sugar.
+parameter is `this: mod T`. A **copy** is an ordinary free function named
+`copy` that takes `this: view T` and returns a new `T`. All three are written
+the way every Rae method is written today (`func size(this: view Buffer) ret
+Int`). There are no new keywords, no type properties, no attributes and no
+registration. The **name and the signature** are the whole contract, exactly
+as a first parameter named `this` is the whole contract for member-call sugar.
+
+The three are one design and can be three implementation tasks (#880 `create`,
+#881 `drop`, #882 `copy`); section 5 says why `drop` without `copy` is already
+a consistent state.
 
 ```rae
 type Counter {
@@ -32,14 +37,20 @@ func drop(this: mod Counter) {
   counterTableRelease(slot: this.handle)
 }
 
+func copy(this: view Counter) ret Counter {
+  let handle: Int = counterTableAcquire()      # a second slot, not the same one twice
+  ret Counter { handle: handle, count: this.count }
+}
+
 func bump(this: mod Counter) {
   this.count = this.count + 1
 }
 
 func main() {
   if let counter: Counter = create(start: 3) {
+    let twin: Counter = counter      # copy(this: counter): its own slot
     counter.bump()
-  }                        # drop(this: counter) runs here, exactly once
+  }                        # drop runs for twin, then for counter, each exactly once
 }
 ```
 
@@ -224,33 +235,76 @@ language meaning.
 - Not fail. A release that can report an error belongs in an explicit `close`
   method that returns the error; the destructor is best effort.
 
-## 5. Copying a type that has a destructor
+## 5. `copy`: the copy constructor
 
-The rule is derived, not declared: **a value of a type that has a destructor,
-or contains one, cannot be copied with `=` or passed by `copy`.** It moves with
-`own`, is borrowed with `view`/`mod`, and is produced by `create` or a literal.
+### 5.1 The problem it solves
+
+A plain `=` on a value that owns something makes a second owner, and at scope
+exit both are dropped. For `List` and `String` that is fine because `=` is a
+deep copy the compiler knows how to make: two buffers, two drops. For a type
+with a user destructor the compiler cannot make a second resource; it only
+knows how to copy the bits, which would duplicate a handle and release it
+twice. So a type with a destructor needs to say how it is copied, or say that
+it cannot be.
+
+### 5.2 Definition
+
+A copy of `T` is a function of exactly this shape, in the module that declares
+`T`:
 
 ```rae
-let alias: Counter = counter              # ERROR: Counter has a destructor and no copy
-useCounter(initial: own counter)          # ok: transfer
-inspect(counter: counter)                 # ok: borrow, as today
+func copy(this: view T) ret T
 ```
 
-Why derived: a destructor exists precisely because the value holds something
-the compiler cannot see (a slot in an external table, a handle). The compiler
-cannot deep-copy what it cannot see, so silently copying such a struct would
-duplicate the thing and release it twice. `List` and `String` deep-copy on `=`
-today because the compiler does know their contents; a user destructor is the
-signal that it does not.
+It receives the original by `view` and returns a new, independent value. Any
+other function named `copy` whose first parameter is a `T` is a compile error
+(`copy` is reserved for the copy of `T`). Explicit calls, `let twin: Counter =
+counter.copy()`, are ordinary calls.
 
-If a type wants to be copyable anyway, the same by-name pattern can give it a
-copy constructor later, `func copy(this: view T) ret T`, resolved where `=`
-would otherwise be an error. That extension is deliberately **not** part of
-this proposal; today the answer is "own it or borrow it".
+### 5.3 When it runs
 
-Containers follow the value: `List(Counter)` is legal, its elements drop
-through the existing per-element loop, and the list itself is non-copyable.
-Component tables of such types follow the same rule.
+`copy` is what `=` means for that type. The compiler calls it everywhere it
+performs a value copy today:
+
+```rae
+let twin: Counter = counter               # copy(this: counter)
+useCounter(value: counter)                # `copy` parameter: copy(this: counter)
+let pair: Pair = { left: counter, ... }   # literal field without own: copy(this: counter)
+if let element: Counter = list.copyAt(index: 0) { ... }   # element copy: copy(this: element)
+```
+
+A struct that contains a `Counter` field and has no `copy` of its own is
+copied structurally, as today, with the field copied through `copy`. A struct
+that defines its own `copy` replaces the structural copy entirely and is
+responsible for every field. A type without a destructor may also define
+`copy`; it simply overrides the structural deep copy.
+
+### 5.4 The rule for types with a destructor and no `copy`
+
+**A type that has a destructor (or contains one) and has no `copy` cannot be
+copied.** `=`, `copy` parameters, literal fields without `own` and `copyAt` on
+a container of it are compile errors. The value moves with `own` and is
+borrowed with `view`/`mod`.
+
+```rae
+let alias: Session = session              # ERROR: Session has a destructor and no copy
+useSession(initial: own session)          # ok: transfer
+inspect(session: session)                 # ok: borrow
+```
+
+This is the point of shipping `drop` before `copy`: with the error in place a
+destructor is safe on its own, and adding `copy` later only removes errors,
+never changes the meaning of code that compiled.
+
+### 5.5 What `copy` may do
+
+- Acquire a new resource for the result and read anything from `this`.
+- Return `T` only. A copy that can fail is not a copy; provide a named function
+  returning `opt T` and let callers move or borrow instead.
+- Not modify `this` (it is `view`), and not return `this` itself.
+
+Containers follow the element: `List(Counter)` copies element by element
+through `copy`, and `List(Session)` is non-copyable.
 
 ## 6. What changes in the compiler
 
@@ -262,7 +316,7 @@ Each row maps onto machinery that already exists.
 | Which types need cleanup (`ownership.c` `is_drop_target_type`, `type_needs_cascade_drop`) | Hard-coded `String`/`List`/`StringMap`/`IntMap` | "has a destructor or contains one" |
 | Dropping a struct | Fields only | Destructor first, then fields in reverse declaration order |
 | Explicit `x.drop()` | Ordinary call, value dropped again at scope exit | Marks the local moved (`local_moved`); later use is a sema error |
-| Copy check (sema) | Heap types deep-copy on `=` | `=` and `copy` rejected for types with a destructor |
+| Copy (sema + `c_backend.c` `rae_deep_copy_<T>`) | Structural deep copy for heap types | Call the user `copy` where one exists; structural copy recurses into it for fields; reject copies of destructor-bearing types without one |
 | `create` resolution (sema) | None | Resolve by expected type in literal positions; `T.create(...)`; ambiguity diagnostic |
 | Lists of such types | Element loop exists for stdlib | Same loop calls the user destructor |
 
@@ -288,7 +342,7 @@ If approved, this replaces these #878 spellings:
 | #878 | Here |
 | --- | --- |
 | `drop` type property + "exactly one defining-module hook" | The destructor by name and shape, section 4.1 |
-| `noncopyable` type property | Derived: has a destructor, so not copyable, section 5 |
+| `noncopyable` type property | Derived: a destructor without a `copy` means not copyable, section 5.4; `copy` makes it copyable again |
 | "Direct calls to the hook are rejected; `close` must be idempotent" | `x.drop()` consumes the value, section 4.3 |
 | "Reject owners in containers initially" | Allowed; containers inherit non-copyability, section 5 |
 | `createNativeBuffer` named factory | `create`, section 3 |
@@ -308,8 +362,8 @@ The mechanism is the same for any spelling; the name is the open choice.
 | `free` | Exists today on containers | C's word for raw memory; no call sites, so nothing is lost by removing it |
 | `close`/`release`/`dispose` | Familiar from files and handles | Each already means "explicit, partial, may fail" somewhere in lib; the destructor is implicit and may not fail |
 
-Recommendation: `create` / `drop`. If the maintainer prefers `destroy`, the
-only change to this document is the reserved name.
+Recommendation: `create` / `drop` / `copy`. If the maintainer prefers `destroy`,
+the only change to this document is the reserved name.
 
 ## 10. Examples end to end
 
@@ -351,8 +405,12 @@ let anything: Int = create(cap: 4)               # ERROR: no `create` returns In
   of a struct, an element of a `List`, an element of a component table.
 - Explicit `x.drop()` then scope exit: one run. Use after explicit drop: sema
   error.
-- Copy of a type with a destructor by `=`, by `copy` parameter, by a
-  struct-literal field without `own`: sema errors.
+- Copy of a type with a destructor and no `copy`, by `=`, by `copy` parameter,
+  by a struct-literal field without `own`, by `copyAt`: sema errors.
+- With a `copy` defined: each of those calls it once, the result is independent
+  (drop both, the fake resource counter shows two releases), a struct containing
+  the type copies structurally through it, and a `copy` of the wrong shape is a
+  declaration error.
 - `create` resolution: by binding type, parameter type, field type; error
   without an expected type; `T.create` in `ret`; generic `List(String)`
   binding; ambiguity with two visible `create` for one type.
