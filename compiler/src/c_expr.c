@@ -234,9 +234,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     gp = gp->next; ga = ga->next;
                 }
             }
-            bool is_num_prim = str_eq_cstr(vb_concrete, "Int") || str_eq_cstr(vb_concrete, "Int64") ||
-                str_eq_cstr(vb_concrete, "Float") || str_eq_cstr(vb_concrete, "Float64") ||
-                str_eq_cstr(vb_concrete, "Bool") || str_eq_cstr(vb_concrete, "Char") || str_eq_cstr(vb_concrete, "Char32");
+            bool is_num_prim = is_scalar_primitive_type(vb_concrete);
             if (!str_eq_cstr(vb, "Buffer") && !str_eq_cstr(vb, "List") && !str_eq_cstr(vb, "Any") && !is_num_prim) {
                 is_struct_view = true;
             }
@@ -1217,9 +1215,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                         // Stage 6: view-on-numeric-primitive is a value at
                         // the C level, not a pointer — no deref needed.
                         Str rhs_base = get_base_type_name(rhs_tr);
-                        bool rhs_is_num_prim = str_eq_cstr(rhs_base, "Int") || str_eq_cstr(rhs_base, "Int64") ||
-                            str_eq_cstr(rhs_base, "Float") || str_eq_cstr(rhs_base, "Float64") ||
-                            str_eq_cstr(rhs_base, "Bool") || str_eq_cstr(rhs_base, "Char") || str_eq_cstr(rhs_base, "Char32");
+                        bool rhs_is_num_prim = is_scalar_primitive_type(rhs_base);
                         if (!rhs_is_num_prim) needs_view_deref = true;
                     }
                 }
