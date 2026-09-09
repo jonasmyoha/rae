@@ -71,4 +71,7 @@ const AstFuncDecl* find_user_copy_for(CompilerContext* cctx, Str base);
  * and it cannot be copied unless it also has a copy. */
 bool type_has_user_drop(CompilerContext* cctx, const AstTypeRef* type);
 
+/* True iff `type` names a non-generic user type with `func copy(this: view T) ret T`. */
+bool type_has_user_copy(CompilerContext* cctx, const AstTypeRef* type);
+
 #endif /* RAE_OWNERSHIP_H */
