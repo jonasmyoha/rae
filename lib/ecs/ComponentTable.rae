@@ -54,6 +54,11 @@ func createComponentTable(T: type) ret ComponentTable(T) {
   }
 }
 
+# The constructor by name (#880): `positions: create()` in a world literal.
+func create(T: type) ret ComponentTable(T) {
+  ret createComponentTable(T)
+}
+
 # Release both backing Lists. Called by the synthesised
 # rae_drop_struct_UiWorld when its enclosing UiWorld goes out of
 # scope — see docs/scope-exit-dealloc.md Layer 5. ComponentTable is a

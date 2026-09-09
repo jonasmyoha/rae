@@ -11,6 +11,12 @@ func createList(T: type, cap: view Int) ret List(T) {
   ret List(T) { data: rae_ext_rae_buf_alloc(size: cap, elemSize: sizeof(T)), length: 0, cap: cap }
 }
 
+# The constructor by name (#880): `let names: List(String) = create(cap: 4)`
+# binds T from the binding's type; `List(String).create(cap: 4)` names it.
+func create(T: type, cap: view Int) ret List(T) {
+  ret createList(T, cap: cap)
+}
+
 func grow(T: type, this: mod List(T)) {
   var newCap: Int = this.cap * 2
   if newCap is 0 {
