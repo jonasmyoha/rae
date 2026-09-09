@@ -117,7 +117,32 @@ typedef struct {
   // as fallthrough. Index [loop_depth-1] is the innermost loop.
   size_t loop_body_local_start[32];
   int loop_depth;
+  // #884: heap-owning temporaries produced inside the statement being
+  // emitted (a call result borrowed by a `view` parameter). Each is
+  // hoisted to a named C local declared before the statement and dropped
+  // after it, so `inspect(slot: create(id: 1))` releases its slot. NULL
+  // outside emit_stmt.
+  struct CStmtTemps* stmt_temps;
 } CFuncContext;
+
+typedef struct CStmtTemps {
+  FILE* decls; char* decls_buf; size_t decls_len;   // "  T __rae_stmt_tmpN;" lines
+  FILE* drops; char* drops_buf; size_t drops_len;   // "  rae_drop_...(&__rae_stmt_tmpN);" lines
+  int count;
+  bool flushed;   // drops already written (a `ret` writes them before returning)
+} CStmtTemps;
+
+// Register a statement temporary of `type`; returns its id (spell it
+// `__rae_stmt_tmp<id>`), or -1 when not inside a statement.
+// `owns_heap` follows the rule for locals: a struct literal uniquely owns
+// its heap (full drop); a call result may shallow-alias the callee's storage
+// (alias drop: destructors and containers still run, String fields skipped).
+int register_stmt_temp(CFuncContext* ctx, const AstTypeRef* type, bool owns_heap);
+// Write the pending temporary drops now (before a `return`).
+void emit_stmt_temp_drops_now(CFuncContext* ctx, FILE* out);
+// Emit the drop of one owned value of `type` held in the C lvalue `cname`.
+void emit_drop_for_value(CFuncContext* ctx, FILE* out, const AstTypeRef* type,
+                         const char* cname, bool owns_heap);
 
 // -- Helpers (small, used widely) --
 bool emitted_list_contains(EmittedTypeList* list, const char* name);
