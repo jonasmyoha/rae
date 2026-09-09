@@ -766,6 +766,75 @@ bool emit_implicit_drops_for_own_params(CFuncContext* ctx, FILE* out,
   return true;
 }
 
+// The drop of ONE owned value of `type` held in the C lvalue `cname`.
+// `owns_heap` picks the full struct-drop variant (the value uniquely owns
+// its String fields) over the alias variant. Shared by the scope-exit pass
+// over locals and by the statement-temporary drops (#884).
+void emit_drop_for_value(CFuncContext* ctx, FILE* out, const AstTypeRef* type,
+                         const char* cname, bool owns_heap) {
+  if (!ctx || !out || !type) return;
+  if (type->is_view || type->is_mod) return;
+  if (str_eq_cstr(get_base_type_name(type), "Task")) {
+    fprintf(out, "  rae_task_drop(%s);\n", cname);
+    return;
+  }
+  if (!type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, type, 0)) return;
+  if (type->is_opt) {
+    if (rae_opt_is_struct_rep(ctx, type))
+      fprintf(out, "  rae_drop_%s(&%s);\n", rae_opt_type_name(ctx, type), cname);
+    else
+      fprintf(out, "  rae_any_drop(&%s);\n", cname);
+    return;
+  }
+  Str tbase = get_base_type_name(type);
+  if (str_eq_cstr(tbase, "String")) {
+    if (owns_heap) fprintf(out, "  rae_string_drop(&%s);\n", cname);
+    return;
+  }
+  if (is_drop_target_type(type)) {
+    const AstTypeRef* elem_type = type->generic_args;
+    if (!elem_type) return;
+    const AstFuncDecl* drop_fd = find_drop_overload_for(ctx, tbase);
+    if (!drop_fd) return;
+    register_function_specialization(ctx->compiler_ctx, drop_fd, elem_type);
+    const char* drop_name =
+        rae_mangle_specialized_function(ctx->compiler_ctx, drop_fd, elem_type);
+    fprintf(out, "  %s(&%s);\n", drop_name, cname);
+    return;
+  }
+  if (type->generic_args) return;
+  const char* struct_mangled = rae_mangle_type_specialized(
+      ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
+  fprintf(out, "  rae_drop_struct_%s%s(&%s);\n", struct_mangled,
+          owns_heap ? "" : "_alias", cname);
+}
+
+int register_stmt_temp(CFuncContext* ctx, const AstTypeRef* type, bool owns_heap) {
+  if (!ctx || !ctx->stmt_temps || !type) return -1;
+  CStmtTemps* temps = ctx->stmt_temps;
+  if (!temps->decls) temps->decls = open_memstream(&temps->decls_buf, &temps->decls_len);
+  if (!temps->drops) temps->drops = open_memstream(&temps->drops_buf, &temps->drops_len);
+  if (!temps->decls || !temps->drops) return -1;
+  int id = (int)ctx->temp_counter++;
+  fprintf(temps->decls, "  ");
+  emit_type_ref_as_c_type(ctx, type, temps->decls, false);
+  fprintf(temps->decls, " __rae_stmt_tmp%d;\n", id);
+  char cname[48];
+  snprintf(cname, sizeof cname, "__rae_stmt_tmp%d", id);
+  emit_drop_for_value(ctx, temps->drops, type, cname, owns_heap);
+  temps->count++;
+  return id;
+}
+
+void emit_stmt_temp_drops_now(CFuncContext* ctx, FILE* out) {
+  if (!ctx || !ctx->stmt_temps || ctx->stmt_temps->count == 0) return;
+  CStmtTemps* temps = ctx->stmt_temps;
+  if (temps->flushed || !temps->drops) return;
+  fflush(temps->drops);
+  if (temps->drops_buf) fputs(temps->drops_buf, out);
+  temps->flushed = true;
+}
+
 bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
                                   size_t first_let_index) {
   if (!ctx || !out) return false;
@@ -1261,7 +1330,39 @@ static void emit_match_case_test(CFuncContext* ctx, const AstExpr* subject,
     }
 }
 
+static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
+
+// #884: every statement is emitted into a buffer first. A heap-owning
+// temporary produced inside it (a call result borrowed by a `view`
+// parameter, see c_call.c) is hoisted to a named C local: its declaration
+// goes BEFORE the statement, its drop AFTER, so the value is released at the
+// end of the statement that made it. A `ret` writes the drops itself before
+// returning. Statements without temporaries come out byte-identical.
 bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
+    if (!stmt) return true;
+    CStmtTemps temps = {0};
+    CStmtTemps* saved = ctx->stmt_temps;
+    ctx->stmt_temps = &temps;
+    char* body = NULL; size_t body_len = 0;
+    FILE* buf = open_memstream(&body, &body_len);
+    if (!buf) { ctx->stmt_temps = saved; return emit_stmt_inner(ctx, stmt, out); }
+    bool ok = emit_stmt_inner(ctx, stmt, buf);
+    fclose(buf);
+    ctx->stmt_temps = saved;
+    if (temps.count > 0 && temps.decls) {
+        fclose(temps.decls);
+        if (temps.decls_buf) fputs(temps.decls_buf, out);
+    }
+    if (body) fputs(body, out);
+    if (temps.count > 0 && temps.drops) {
+        fclose(temps.drops);
+        if (!temps.flushed && temps.drops_buf) fputs(temps.drops_buf, out);
+    }
+    free(body); free(temps.decls_buf); free(temps.drops_buf);
+    return ok;
+}
+
+static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     if (!stmt) return true;
     switch (stmt->kind) {
         case AST_STMT_EXPR: {
@@ -2359,6 +2460,9 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 }
             }
 
+            // #884: temporaries made while computing the return value die here,
+            // before the locals, and before `return` makes anything unreachable.
+            emit_stmt_temp_drops_now(ctx, out);
             if (ctx->defer_stack.count > 0) emit_defers(ctx, 0, out);
             if (ctx->func_first_let_idx != (size_t)-1) {
                 emit_implicit_drops_for_body(ctx, out, ctx->func_first_let_idx);
