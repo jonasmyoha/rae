@@ -1,0 +1,12 @@
+tests/cases/771_drop_flow_errors/Main.rae:19:6: use of 'slot' after 'slot.drop()': the value was released and consumed on a path reaching here; assign it a new value before using it again
+    19 |   log("{slot.id}")           # ERROR: dropped on the `flag` path
+       |      ^~~~
+tests/cases/771_drop_flow_errors/Main.rae:25:8: use of 'slot' after 'slot.drop()': the value was released and consumed on a path reaching here; assign it a new value before using it again
+    25 |     log("{slot.id}")         # ERROR: dropped at the end of the previous iteration
+       |        ^~~~
+tests/cases/771_drop_flow_errors/Main.rae:26:14: use of 'slot' after 'slot.drop()': the value was released and consumed on a path reaching here; assign it a new value before using it again
+    26 |     slot.drop()
+       |              ^~~~
+tests/cases/771_drop_flow_errors/Main.rae:33:12: use of 'slot' after 'slot.drop()': the value was released and consumed on a path reaching here; assign it a new value before using it again
+    33 |   slot.drop()                # ERROR: dropping a dropped value is a use
+       |            ^~~~

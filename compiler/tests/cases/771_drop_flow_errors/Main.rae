@@ -1,0 +1,50 @@
+# #885 (c): use after `x.drop()` is a dataflow error across branches and loops.
+type Slot {
+  id: Int
+}
+
+func create(id: view Int) ret Slot {
+  ret Slot { id: id }
+}
+
+func drop(this: mod Slot) {
+  log("release {this.id}")
+}
+
+func afterBranch(flag: view Bool) {
+  var slot: Slot = create(id: 1)
+  if flag {
+    slot.drop()
+  }
+  log("{slot.id}")           # ERROR: dropped on the `flag` path
+}
+
+func nextIteration() {
+  var slot: Slot = create(id: 2)
+  loop var i: Int = 0, i < 2, ++i {
+    log("{slot.id}")         # ERROR: dropped at the end of the previous iteration
+    slot.drop()
+  }
+}
+
+func twice() {
+  var slot: Slot = create(id: 3)
+  slot.drop()
+  slot.drop()                # ERROR: dropping a dropped value is a use
+}
+
+func fine(flag: view Bool) {
+  var slot: Slot = create(id: 4)
+  if flag {
+    slot.drop()
+    slot = create(id: 5)     # reinitialised on that path: no error below
+  }
+  log("{slot.id}")
+}
+
+func main() {
+  afterBranch(flag: true)
+  nextIteration()
+  twice()
+  fine(flag: true)
+}

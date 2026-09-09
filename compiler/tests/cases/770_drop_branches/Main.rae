@@ -1,0 +1,58 @@
+# #885 (c): an explicit `x.drop()` inside ONE branch is released exactly once
+# on every path — the backend keeps a runtime live flag per such local, so
+# scope exit releases only what is still owned, and reassignment after a drop
+# does not release twice.
+type Slot {
+  id: Int
+}
+
+func create(id: view Int) ret Slot {
+  log("acquire {id}")
+  ret Slot { id: id }
+}
+
+func drop(this: mod Slot) {
+  log("release {this.id}")
+}
+
+func maybeDrop(early: view Bool) {
+  var slot: Slot = create(id: 10)
+  if early {
+    slot.drop()
+    log("dropped early")
+  } else {
+    log("kept")
+  }
+}                               # early: nothing more; kept: release 10 here
+
+func dropThenReuse(flag: view Bool) {
+  var slot: Slot = create(id: 20)
+  if flag {
+    slot.drop()
+    slot = create(id: 21)      # reinitialised on this path; live again
+  }
+  log("slot is {slot.id}")
+}                               # release 21 or release 20, once
+
+func dropInLoop() {
+  var slot: Slot = create(id: 30)
+  loop var i: Int = 0, i < 3, ++i {
+    slot.drop()
+    slot = create(id: 31 + i)
+  }
+  log("after loop {slot.id}")
+}                               # release 33
+
+func main() {
+  log("-- early")
+  maybeDrop(early: true)
+  log("-- kept")
+  maybeDrop(early: false)
+  log("-- reuse yes")
+  dropThenReuse(flag: true)
+  log("-- reuse no")
+  dropThenReuse(flag: false)
+  log("-- loop")
+  dropInLoop()
+  log("-- end of main")
+}
