@@ -1,0 +1,22 @@
+# A numeric view parameter is read-only source intent and lowers by value.
+# Forwarding one into a C-boundary field must read that scalar directly.
+open webgpu/WebgpuTypes
+
+func createDescriptor(usage: view UInt64, mapped: view UInt32) ret WGPUBufferDescriptor {
+  ret WGPUBufferDescriptor { usage: usage, mappedAtCreation: mapped }
+}
+
+func readUsage(usage: view UInt64) ret UInt64 {
+  ret usage
+}
+
+func main() {
+  let usage: UInt64 = 9223372036854775813
+  let mapped: UInt32 = 17 as UInt32
+  let descriptor: WGPUBufferDescriptor = createDescriptor(usage: usage, mapped: mapped)
+  let direct: UInt64 = readUsage(usage: usage)
+  let mappedValue: UInt64 = descriptor.mappedAtCreation as UInt64
+  log("usage {descriptor.usage}")
+  log("mapped {mappedValue}")
+  log("direct {direct}")
+}

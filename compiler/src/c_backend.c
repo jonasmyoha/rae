@@ -297,9 +297,7 @@ bool is_primitive_ref(CFuncContext* ctx, const AstTypeRef* tr) {
     // reference wrapper, because the callee must write back through
     // the pointer. String stays a ref under view/mod because it is
     // heap-owning at the language level (the ref avoids deep copies).
-    bool is_num_prim = str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int64") ||
-        str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32") || str_eq_cstr(base, "Float64") ||
-        str_eq_cstr(base, "Bool") || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32");
+    bool is_num_prim = is_scalar_primitive_type(base);
     if (is_num_prim) return tr->is_mod;
     if (str_eq_cstr(base, "String")) return true;
     return false;
@@ -851,10 +849,7 @@ bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out, bool 
         // to the same plain pass-by-value type as bare T. Only `mod`
         // on a numeric primitive needs the ref wrapper. String stays
         // a ref under view/mod because String owns heap.
-        bool is_num_prim = is_primitive_type(base)
-            && !str_eq_cstr(base, "String")
-            && !str_eq_cstr(base, "Buffer")
-            && !str_eq_cstr(base, "Any");
+        bool is_num_prim = is_scalar_primitive_type(base);
         bool view_or_mod = is_view || is_mod;
         if (is_num_prim && view_or_mod && !is_mod) {
             // view-on-primitive collapses to bare T at the C level.
