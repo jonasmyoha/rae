@@ -1,6 +1,7 @@
 # WebGPU resource management in Rae
 
-Status: **revision 6 proposal over the shipped create/drop/copy lifecycle.**
+Status: **revision 7 approved interop contract over the shipped
+create/drop/copy lifecycle; GPU manager identity remains under review.**
 
 The active [GPU and C-interop design](ptr-and-gpu-resource-design.md) has been
 rewritten. Use ordinary lifecycle functions from
@@ -15,9 +16,11 @@ fallible operation; native retain alone is not a deep copy.
 
 Rae owns descriptors, validation, groups, caches, dependencies and scheduling.
 Use generated WebGPU bindings and generic stable callback glue for the native
-boundary. The proposed source-level unsafe facility marks raw pointer access and
-foreign obligations in any module. It does not grant special privileges to stdlib
-or automatically make public cached bounds authoritative.
+boundary. The approved source-level unsafe facility marks raw pointer access and
+foreign obligations in any module. Function modifiers follow `)`, and every
+extern explicitly includes the distinct `unsafe` modifier before `extern`. This
+does not grant special privileges to stdlib or make public cached bounds
+authoritative.
 
 Resource uses start at recording, include bind-group/view dependencies and finish
 only after submission/completion or abandonment. Retired IDs reject new uses;
