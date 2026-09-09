@@ -206,11 +206,12 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           # voice must release its slot through `drop`, including the field
           # and List-element paths — the log proves the count and the order.
           if perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app" > "$TMP_OUT/run.log" 2>&1 \
-             && [ "$(grep -c '\[voice\] release slot' "$TMP_OUT/run.log")" -eq 6 ] \
+             && [ "$(grep -c '\[voice\] release slot' "$TMP_OUT/run.log")" -eq 7 ] \
+             && grep -q '^\[voice\] double note 74 on slot 1$' "$TMP_OUT/run.log" \
              && ! grep -q 'BAD release' "$TMP_OUT/run.log" \
              && grep -q '^\[chord\] C major ends$' "$TMP_OUT/run.log" \
              && [ "$(tail -1 "$TMP_OUT/run.log")" = "[lifetimes] live voices: 0" ]; then
-            echo "PASS: $EXAMPLE_NAME (destructors ran for every voice: scope, field, list element, own, explicit)"
+            echo "PASS: $EXAMPLE_NAME (destructors ran for every voice: scope, field, list element, own, explicit; copy took a new slot)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (destructor gate)"

@@ -2772,7 +2772,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     *part = (AstIdentifierPart){.text = d->as.type_decl.name};
     AstTypeRef* tr = malloc(sizeof(AstTypeRef));
     *tr = (AstTypeRef){.parts = part};
-    if (!type_needs_cascade_drop(ctx, module, tr, 0)) { free(tr); free(part); continue; }
+    if (!type_needs_cascade_drop(ctx, module, tr, 0) && !type_has_user_copy(ctx, tr)) { free(tr); free(part); continue; }
     const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, tr);
     RAE_GROW1(copy_entries, copy_entry_count, copy_entry_cap);
     copy_entries[copy_entry_count++] = (StructDropEntry){.decl = d, .type_ref = tr, .mangled = mangled};
@@ -2884,6 +2884,20 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   // Struct bodies.
   for (size_t i = 0; i < copy_entry_count; i++) {
     const StructDropEntry* e = &copy_entries[i];
+    // #882: a user copy `func copy(this: view T) ret T` IS the deep copy of T.
+    // Every copy site (owning let, copy parameter, literal field, container
+    // element, copyAt) reaches it through this helper.
+    const AstFuncDecl* user_copy = find_user_copy_for(ctx, e->decl->as.type_decl.name);
+    if (user_copy) {
+      CFuncContext ptctx = {.compiler_ctx = ctx, .module = module};
+      fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&ptctx, user_copy), rae_mangle_function(ctx, user_copy));
+      emit_param_list(&ptctx, user_copy->params, out, false);
+      fprintf(out, ");\n");
+      fprintf(out, "RAE_UNUSED static void rae_deep_copy_%s(%s* dst, const %s* src) {\n",
+              e->mangled, e->mangled, e->mangled);
+      fprintf(out, "  *dst = %s((%s*)src);\n}\n\n", rae_mangle_function(ctx, user_copy), e->mangled);
+      continue;
+    }
     fprintf(out, "RAE_UNUSED static void rae_deep_copy_%s(%s* dst, const %s* src) {\n",
             e->mangled, e->mangled, e->mangled);
     for (const AstTypeField* f = e->decl->as.type_decl.fields; f; f = f->next) {

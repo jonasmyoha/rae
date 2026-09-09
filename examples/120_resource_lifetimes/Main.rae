@@ -1,12 +1,14 @@
-# 120 — Resource lifetimes: destructors by name (#881).
+# 120 — Resource lifetimes: destructors and copies by name (#881, #882).
 #
 # A `Voice` owns one slot of a small native mixer (mixer.c) — the kind of thing
 # the compiler cannot see through and cannot copy: a number that must be given
 # back exactly once. Its destructor is an ordinary function,
 # `func drop(this: mod Voice)`, and the compiler runs it wherever a Voice is
 # released: scope exit, an `own` parameter, a List element, a struct field, an
-# explicit `voice.drop()`. There is no shutdown call at the end of main; the
-# values return their slots themselves.
+# explicit `voice.drop()`. Its copy, `func copy(this: view Voice) ret Voice`,
+# is what `=` means for a Voice: a second slot, never the same one twice. There
+# is no shutdown call at the end of main; the values return their slots
+# themselves.
 #
 # Headless CLI: prints the mixer's bookkeeping and ends with the line the
 # example gate asserts, `[lifetimes] live voices: 0`.
@@ -54,6 +56,16 @@ func playChord(name: view String) ret Chord {
   ret chord
 }
 
+# The copy. `let doubled: Voice = lead` calls it: a copy of a voice is a NEW
+# voice on its own slot, never the same slot twice. Without this function the
+# binding would be a compile error, because the compiler cannot duplicate a
+# mixer slot by itself.
+func copy(this: view Voice) ret Voice {
+  let slot: Int = mixerAcquire()
+  log("[voice] double note {this.note} on slot {slot}")
+  ret Voice { slot: slot, note: this.note }
+}
+
 func handOver(voice: own Voice) {
   log("[voice] handed over note {voice.note}")
 }
@@ -76,6 +88,12 @@ func main() ret Int {
   log("-- ownership moves, the callee releases")
   let bass: Voice = startVoice(note: 36)
   handOver(voice: own bass)
+
+  log("-- a copy is a second voice on its own slot")
+  loop var pass: Int = 0, pass < 1, ++pass {
+    let doubled: Voice = lead
+    log("[voice] lead on slot {lead.slot}, doubled on slot {doubled.slot}, live {mixerLive()}")
+  }
 
   log("-- stop the lead explicitly so the count can be printed")
   lead.drop()

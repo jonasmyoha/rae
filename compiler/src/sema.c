@@ -2571,6 +2571,14 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 sema_analyze_expr(ctx, module, symbols, stmt->as.let_stmt.value);
                 if (!t && stmt->as.let_stmt.value->resolved_type) t = stmt->as.let_stmt.value->resolved_type;
                 if (t) ensure_type_match(ctx, t, &stmt->as.let_stmt.value);
+                // #881/#882: a List value accessor copies the element.
+                if (!stmt->as.let_stmt.is_bind && t && sema_is_list_value_accessor(stmt->as.let_stmt.value)) {
+                    TypeInfo* payload = (t->kind == TYPE_OPT) ? t->as.opt.base : t;
+                    if (sema_typeinfo_uncopyable(ctx, payload)) {
+                        sema_report_uncopyable(module, sema_diag_file(module), stmt->line, stmt->column,
+                                               payload->name, "out of a List with 'copyAt' (use 'viewAt'/'modAt')");
+                    }
+                }
                 // #881: an owning binding from a place copies the value.
                 if (!stmt->as.let_stmt.is_bind && stmt->as.let_stmt.type
                     && !stmt->as.let_stmt.type->is_view && !stmt->as.let_stmt.type->is_mod
