@@ -68,6 +68,14 @@ int rae_wgpu_read_poll(void* handle) {
     return request->status;
 }
 
+/* Constructor-only status check: unlike poll, this never processes device
+ * events. It lets the Rae owner reject immediate validation/allocation failure
+ * without allowing a valid map callback to run during construction. */
+int rae_wgpu_read_start_status(void* handle) {
+    RaeWgpuReadRequest* request = handle;
+    return request ? request->status : -1;
+}
+
 int rae_wgpu_read_copy(void* handle, void* destination, uint64_t capacity) {
     RaeWgpuReadRequest* request = handle;
     if (!request || request->status != 1 || !destination || capacity < request->size)

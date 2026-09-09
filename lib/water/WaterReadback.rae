@@ -4,7 +4,7 @@ open water/FftSurfaceCache
 open water/WaterSystem
 open water/WaterFft
 open webgpu/Context
-open webgpu/Readback
+import webgpu/Readback
 open webgpu/Webgpu
 open Gbuffer
 open GbufferPasses
@@ -19,7 +19,7 @@ const fftCacheBytes: Int = 16384
 
 func releaseWaterReadback(waterSystem: mod WaterSystem) {
   loop var i: Int = 0, i < 3, ++i {
-    waterSet(index: fftCacheRequestBase + i, ptr: releaseRead(request: waterGet(index: fftCacheRequestBase + i)))
+    waterSet(index: fftCacheRequestBase + i, ptr: Readback.releaseRead(request: waterGet(index: fftCacheRequestBase + i)))
     let bind: Ptr = waterGet(index: fftCacheBindBase + i)
     if bind is not webgpuNull() { wgpuBindGroupRelease(bindGroup: bind) }
     waterSet(index: fftCacheBindBase + i, ptr: webgpuNull())
@@ -82,16 +82,16 @@ func updateWaterReadback(waterSystem: mod WaterSystem) {
     if let cascade: mod FftCascadeCache => waterSystem.surfaceCache.cascades.modAt(index: i) {
       let request: Ptr = waterGet(index: fftCacheRequestBase + i)
       if request is not webgpuNull() {
-        let status: Int = pollRead(request: request)
+        let status: Int = Readback.pollRead(request: request)
         if status is 0 { continue }
         if status is 1 and cascade.pendingGeneration is waterSystem.surfaceCache.generation {
-          if copyRead(request: request, destination: cascade.values.data, capacity: fftCacheBytes as UInt64) is 1 {
+          if Readback.copyRead(request: request, destination: cascade.values.data, capacity: fftCacheBytes as UInt64) is 1 {
             cascade.generation = cascade.pendingGeneration
             cascade.sampleTime = cascade.pendingTime
             cascade.tileSize = cascade.pendingTile
           }
         }
-        waterSet(index: fftCacheRequestBase + i, ptr: releaseRead(request: request))
+        waterSet(index: fftCacheRequestBase + i, ptr: Readback.releaseRead(request: request))
         if status is not 1 { cascade.submittedUpdate = -1 }
       }
       let update: Int = waterSystem.fftUpdateCounts.copyAtFallback(index: i, fallback: 0)
@@ -114,7 +114,7 @@ func updateWaterReadback(waterSystem: mod WaterSystem) {
       cascade.pendingGeneration = waterSystem.surfaceCache.generation
       cascade.pendingTile = fftCacheTile(body: body, cascade: i)
       cascade.submittedUpdate = update
-      waterSet(index: fftCacheRequestBase + i, ptr: startRead(buffer: waterGet(index: fftCacheStagingBase + i), offset: 0 as UInt64, size: fftCacheBytes as UInt64))
+      waterSet(index: fftCacheRequestBase + i, ptr: Readback.startRead(buffer: waterGet(index: fftCacheStagingBase + i), offset: 0 as UInt64, size: fftCacheBytes as UInt64))
     }
   }
 }

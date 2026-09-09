@@ -857,6 +857,7 @@ int   rae_g2d_window_visible(void);   /* 0 while window hidden/minimized/occlude
 int   rae_wgpu_map_read(void* buffer, uint64_t size, void* dst);
 /* Owned asynchronous map requests; serialized on the WebGPU context thread. */
 void* rae_wgpu_read_start(void* buffer, uint64_t offset, uint64_t size);
+int   rae_wgpu_read_start_status(void* request);
 int   rae_wgpu_read_poll(void* request);
 int   rae_wgpu_read_copy(void* request, void* destination, uint64_t capacity);
 void* rae_wgpu_read_release(void* request);

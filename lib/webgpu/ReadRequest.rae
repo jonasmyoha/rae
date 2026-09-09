@@ -1,0 +1,43 @@
+# Internal lifecycle pilot: this ordinary Rae owner proves create/drop around
+# the existing callback-owned native request. Its Ptr field remains trusted
+# interop until Rae's pointer boundary is implemented.
+open webgpu/Readback
+
+type ReadRequest {
+  nativeRequest: Ptr
+  byteCount: UInt64
+}
+
+type ReadRange {
+  offset: UInt64
+  size: UInt64
+}
+
+# Construction fails for allocation errors and ranges rejected synchronously by
+# the native bridge. This check does not poll the device; asynchronous mapping
+# failures are reported later by poll.
+func create(buffer: copy Ptr, range: view ReadRange) ret opt ReadRequest {
+  let nativeRequest: Ptr = startRead(buffer: buffer, offset: range.offset, size: range.size)
+  if readStartStatus(request: nativeRequest) is -1 {
+    releaseRead(request: nativeRequest)
+    ret none
+  }
+  ret ReadRequest { nativeRequest: nativeRequest, byteCount: range.size }
+}
+
+# The owner reference is released exactly once. A pending callback keeps its
+# independent native reference until the context delivers it after cancellation.
+func drop(this: mod ReadRequest) {
+  this.nativeRequest = releaseRead(request: this.nativeRequest)
+}
+
+# Polls platform events once with wait: 0 through the existing bridge.
+func poll(this: view ReadRequest) ret Int {
+  ret pollRead(request: this.nativeRequest)
+}
+
+# Copies only a completed full range. The destination pointer is borrowed for
+# this call and is never retained, so a List may grow while the request waits.
+func copyTo(this: view ReadRequest, destination: copy Ptr, capacity: view UInt64) ret Bool {
+  ret copyRead(request: this.nativeRequest, destination: destination, capacity: capacity) is 1
+}
