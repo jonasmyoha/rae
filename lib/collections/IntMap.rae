@@ -23,6 +23,11 @@ func createIntMap(V: type, cap: view Int) ret IntMap(V) {
   ret createInt64Map(V, cap: cap)
 }
 
+# The constructor by name (#880): `var m: IntMap(Int) = create(cap: 8)`.
+func create(V: type, cap: view Int) ret IntMap(V) {
+  ret createIntMap(V, cap: cap)
+}
+
 func set(V: type, this: mod IntMap(V), k: view Int, value: own V) {
   if this.cap is 0 {
     this.cap = 8

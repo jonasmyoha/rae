@@ -1,7 +1,9 @@
 # Constructors, destructors and copies in Rae: `create`, `drop`, `copy`
 
-Status: **`drop` (#881) and `copy` (#882) implemented, 2026-09-09; `create` (#880)
-pending.** The rest of this document is the design as approved for implementation. This document covers constructors, destructors and copies only.
+Status: **implemented — `drop` (#881), `copy` (#882), `create` (#880), 2026-09-09.**
+Known limits: a produced value passed straight to a `view`/`mod` parameter is
+not released (#884, the pre-existing temporary rule); `create` in a generic
+struct's literal field with an unsubstituted `T` is not resolved (#885). The rest of this document is the design as approved for implementation. This document covers constructors, destructors and copies only.
 Native
 pointers, `unsafe`, GPU resource identity and the rest of
 `ptr-and-gpu-resource-design.md` (#878) are out of scope; section 8 says only

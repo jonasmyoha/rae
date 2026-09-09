@@ -32,6 +32,7 @@ static const char* sema_diag_file(const AstModule* module) {
  * hard error and actually fail the build rather than just printing. */
 static AstModule* s_current_module = NULL;
 static CompilerContext* s_lifecycle_ctx = NULL;  /* #881: the context for lifecycle lookups in literal checks */
+static struct SymbolTable* s_lifecycle_symbols = NULL;  /* #880: the module's symbols, for `create` resolution from literal fields */
 
 /* True while analyzing an `if let` binding statement. There, an `opt T`
  * initializer bound to a non-optional name is the NARROWING itself (the
@@ -543,6 +544,7 @@ static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolT
 static bool expr_is_owning(SymbolTable* symbols, const AstExpr* e);
 static TypeInfo* sema_array_type_from_call(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr);
 static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr** expr_ptr);
+static bool sema_is_pending_create(const AstExpr* e);
 static bool sema_is_numeric_kind(TypeKind k);
 static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* generic_decl, TypeInfo** args, size_t arg_count, size_t line, size_t column);
 
@@ -2550,6 +2552,12 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
     switch (stmt->kind) {
         case AST_STMT_EXPR: {
             if (stmt->as.expr_stmt) sema_analyze_expr(ctx, module, symbols, stmt->as.expr_stmt);
+            // #880: a constructor call needs a type to construct.
+            if (sema_is_pending_create(stmt->as.expr_stmt)) {
+                diag_error(sema_diag_file(module), (int)stmt->as.expr_stmt->line, (int)stmt->as.expr_stmt->column,
+                           "'create(...)' has no expected type here; bind it ('let x: T = create(...)') or write 'T.create(...)'");
+                module->had_error = true;
+            }
             // #881: `name.drop()` on a value whose type has a destructor consumes it.
             const AstExpr* e = stmt->as.expr_stmt;
             if (e && e->kind == AST_EXPR_METHOD_CALL && !e->as.method_call.args
@@ -3266,6 +3274,190 @@ static bool sema_is_list_value_accessor(const AstExpr* expr) {
     return false;
 }
 
+
+// ===== #880: constructors by name — `create(...)` resolved by the expected type
+//
+// A constructor of T is any function named `create` returning T or opt T. A
+// bare `create(...)` is resolved by the type of the position it sits in, in
+// exactly the positions an untyped struct literal is legal (binding, argument,
+// literal field, ret); `T.create(...)` names the type explicitly. The call is
+// left PENDING by the ordinary call analysis (decl_link NULL) and bound here
+// once the expected type is known (docs/constructors-and-destructors.md §3).
+
+static bool sema_is_pending_create(const AstExpr* e) {
+    return e && e->kind == AST_EXPR_CALL && !e->decl_link && e->as.call.callee
+        && e->as.call.callee->kind == AST_EXPR_IDENT
+        && str_eq_cstr(e->as.call.callee->as.ident, "create");
+}
+
+/* An AstTypeRef naming `t` (a struct or generic instance), generic args included. */
+static AstTypeRef* sema_type_ref_of(CompilerContext* ctx, TypeInfo* t) {
+    AstTypeRef* tr = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+    memset(tr, 0, sizeof(*tr));
+    tr->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart));
+    memset(tr->parts, 0, sizeof(*tr->parts));
+    tr->parts->text = t->name;
+    tr->resolved_type = t;
+    if ((t->kind == TYPE_STRUCT || t->kind == TYPE_GENERIC_INST) && t->as.structure.decl) {
+        const AstDecl* d = t->as.structure.decl;
+        if (d->as.type_decl.generic_template) d = d->as.type_decl.generic_template;
+        tr->parts->text = d->as.type_decl.name;
+        AstTypeRef* tail = NULL;
+        for (size_t i = 0; i < t->as.structure.generic_count; i++) {
+            AstTypeRef* ga = sema_type_ref_of(ctx, t->as.structure.generic_args[i]);
+            if (!tr->generic_args) tr->generic_args = ga; else tail->next = ga;
+            tail = ga;
+        }
+    }
+    return tr;
+}
+
+/* Bind a resolved (possibly specialised) decl to a call the way the ordinary
+ * resolver does: decl_link, result type, argument checks, own-argument rule. */
+static void sema_bind_call_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                                AstExpr* expr, AstDecl* decl) {
+    expr->decl_link = decl;
+    if (expr->as.call.callee) expr->as.call.callee->decl_link = decl;
+    if (decl->as.func_decl.returns)
+        expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, decl->as.func_decl.returns->type);
+    AstParam* p = decl->as.func_decl.params;
+    AstCallArg* a = expr->as.call.args;
+    while (p && a) {
+        TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, p->type);
+        ensure_type_match(ctx, pt, &a->value);
+        p = p->next; a = a->next;
+    }
+    sema_check_own_args(ctx, module, symbols, &decl->as.func_decl, expr->as.call.args, false);
+}
+
+static bool sema_resolve_create(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                                AstExpr* expr, TypeInfo* expected) {
+    const char* file = sema_diag_file(module);
+    if (expr->as.call.args && sema_arg_is_type_name(symbols, expr->as.call.args->value)) {
+        diag_error(file, (int)expr->line, (int)expr->column,
+                   "'create' takes no positional type argument; write 'List(String).create(...)' "
+                   "or give the binding its type so the constructor is chosen by it");
+        module->had_error = true;
+        return false;
+    }
+    TypeInfo* target = expected;
+    /* A produced value may be passed to a `view`/`mod` parameter; the constructor
+     * builds the referent. */
+    if (target && target->kind == TYPE_REF) target = target->as.ref.base;
+    if (target && target->kind == TYPE_OPT) target = target->as.opt.base;
+    if (!target
+        || (target->kind != TYPE_STRUCT && target->kind != TYPE_GENERIC_INST)
+        || !target->as.structure.decl) {
+        char buf[320];
+        snprintf(buf, sizeof buf,
+                 "'create(...)' needs a struct type to construct, and the type expected here is '%.*s'; "
+                 "write 'Type.create(...)' or give the binding its type",
+                 target ? (int)target->name.len : 9, target ? target->name.data : "<unknown>");
+        diag_error(file, (int)expr->line, (int)expr->column, buf);
+        module->had_error = true;
+        return false;
+    }
+    const AstDecl* td = target->as.structure.decl;
+    if (td->as.type_decl.generic_template) td = td->as.type_decl.generic_template;
+    Str tname = td->as.type_decl.name;
+    size_t arg_count = 0;
+    for (AstCallArg* a = expr->as.call.args; a; a = a->next) arg_count++;
+    AstDecl* found = NULL;
+    int matches = 0;
+    for (Symbol* curr = symbols->head; curr; curr = curr->next) {
+        if (!str_eq_cstr(curr->name, "create")) continue;
+        if (!curr->decl || curr->decl->kind != AST_DECL_FUNC) continue;
+        const AstFuncDecl* fd = &curr->decl->as.func_decl;
+        if (fd->specialization_args) continue;
+        if (!fd->returns || !fd->returns->type) continue;
+        if (!sema_decl_opened(s_current_decl_origin, curr->decl)) continue;
+        if (!str_eq(get_base_type_name(fd->returns->type), tname)) continue;
+        size_t pc = 0;
+        for (const AstParam* p = fd->params; p; p = p->next) pc++;
+        if (pc != arg_count) continue;
+        if (!found) found = curr->decl;
+        matches++;
+    }
+    char buf[360];
+    if (matches == 0) {
+        snprintf(buf, sizeof buf,
+                 "no 'create' constructs '%.*s' with %zu argument%s here: declare `func create(...) ret %.*s` "
+                 "(or `ret opt %.*s`) in its module, or check the argument count",
+                 (int)tname.len, tname.data, arg_count, arg_count == 1 ? "" : "s",
+                 (int)tname.len, tname.data, (int)tname.len, tname.data);
+        diag_error(file, (int)expr->line, (int)expr->column, buf);
+        module->had_error = true;
+        return false;
+    }
+    if (matches > 1) {
+        snprintf(buf, sizeof buf,
+                 "ambiguous 'create' for '%.*s': %d visible constructors take %zu argument%s; a type has one `create` per argument count",
+                 (int)tname.len, tname.data, matches, arg_count, arg_count == 1 ? "" : "s");
+        diag_error(file, (int)expr->line, (int)expr->column, buf);
+        module->had_error = true;
+        return false;
+    }
+    AstDecl* decl = found;
+    if (found->as.func_decl.generic_params) {
+        AstTypeRef* expected_tr = sema_type_ref_of(ctx, target);
+        AstTypeRef* inferred = infer_generic_args(ctx, &found->as.func_decl,
+                                                  found->as.func_decl.returns->type, expected_tr);
+        if (!inferred) {
+            snprintf(buf, sizeof buf,
+                     "cannot bind the type parameters of 'create' from '%.*s'",
+                     (int)target->name.len, target->name.data);
+            diag_error(file, (int)expr->line, (int)expr->column, buf);
+            module->had_error = true;
+            return false;
+        }
+        TypeInfo* type_args[16]; size_t ac = 0;
+        for (AstTypeRef* tr = inferred; tr && ac < 16; tr = tr->next)
+            type_args[ac++] = tr->resolved_type ? tr->resolved_type
+                                                : sema_resolve_type_internal(ctx, module, symbols, tr);
+        AstDecl* spec = type_registry_find_specialization(ctx->type_registry, found, type_args, ac);
+        if (!spec) spec = specialize_decl(ctx, module, symbols, found, type_args, ac, expr->line, expr->column);
+        if (!spec) return false;
+        decl = spec;
+    }
+    sema_bind_call_decl(ctx, module, symbols, expr, decl);
+    return true;
+}
+
+/* `Type.create(...)`: the type named by the qualifier, or NULL when the object
+ * is not a type name. Accepts a bare type (`WaterBody`) and a generic
+ * instance spelled as a type application (`List(String)`). */
+static TypeInfo* sema_type_qualifier_type(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                                          const AstExpr* object) {
+    if (!object) return NULL;
+    AstTypeRef tr; memset(&tr, 0, sizeof tr);
+    AstIdentifierPart part; memset(&part, 0, sizeof part);
+    Str name = {0};
+    const AstCallArg* type_args = NULL;
+    if (object->kind == AST_EXPR_IDENT) {
+        name = object->as.ident;
+    } else if (object->kind == AST_EXPR_CALL && object->as.call.callee
+               && object->as.call.callee->kind == AST_EXPR_IDENT) {
+        name = object->as.call.callee->as.ident;
+        type_args = object->as.call.args;
+    } else return NULL;
+    Symbol* sym = symbol_table_lookup(symbols, name);
+    if (!sym || !sym->decl || sym->decl->kind != AST_DECL_TYPE) return NULL;
+    part.text = name;
+    tr.parts = &part;
+    AstTypeRef* tail = NULL;
+    for (const AstCallArg* a = type_args; a; a = a->next) {
+        if (!a->value || a->value->kind != AST_EXPR_IDENT) return NULL;
+        AstTypeRef* ga = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+        memset(ga, 0, sizeof(*ga));
+        ga->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart));
+        memset(ga->parts, 0, sizeof(*ga->parts));
+        ga->parts->text = a->value->as.ident;
+        if (!tr.generic_args) tr.generic_args = ga; else tail->next = ga;
+        tail = ga;
+    }
+    return sema_resolve_type_internal(ctx, module, symbols, &tr);
+}
+
 /* #778 struct-literal field-name validation: every key in a struct literal must
  * name a real field on the struct. Without this a renamed/typo'd key (`w`/`h` on
  * a {position,size} Rect) slips through sema and emits mismatched C that only gcc
@@ -3285,6 +3477,10 @@ static void sema_check_object_literal_fields(TypeInfo* structType, AstObjectFiel
         if (known) {
             const AstTypeField* tf = td->fields;
             while (tf && !str_eq(tf->name, f->name)) tf = tf->next;
+            if (tf && tf->type && sema_is_pending_create(f->value) && s_lifecycle_ctx && s_lifecycle_symbols && s_current_module) {
+                TypeInfo* ft = sema_resolve_type_internal(s_lifecycle_ctx, s_current_module, s_lifecycle_symbols, tf->type);
+                if (ft) sema_resolve_create(s_lifecycle_ctx, s_current_module, s_lifecycle_symbols, f->value, ft);
+            }
             if (tf && tf->type && !tf->type->is_opt && !tf->type->generic_args
                 && s_lifecycle_ctx && sema_expr_copies_place(f->value)) {
                 Str fbase = get_base_type_name(tf->type);
@@ -3320,6 +3516,10 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
             s_current_decl_origin ? s_current_decl_origin : (s_current_module ? s_current_module->file_path : NULL));
     }
     AstExpr* expr = *expr_ptr;
+    /* #880: a pending `create(...)` takes its constructor from the expected type. */
+    if (sema_is_pending_create(expr) && s_lifecycle_symbols && s_current_module) {
+        if (!sema_resolve_create(ctx, s_current_module, s_lifecycle_symbols, expr, expected)) return;
+    }
     /* A List value-accessor result (`opt T`) cannot land in a non-optional
      * binding, argument, or return. These generic calls are not resolved to
      * `opt T` in sema — their call node's resolved_type is often null — so
@@ -3657,6 +3857,11 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                  * `createList(T, cap: N)` line with an Array a one-token
                  * edit instead of a rewrite. */
                 else if (str_eq_cstr(name, "Array")) { expr->resolved_type = sema_array_type_from_call(ctx, module, symbols, expr); }
+                else if (str_eq_cstr(name, "create") && !expr->as.call.generic_args) {
+                    // #880: a constructor call is resolved by the EXPECTED type
+                    // (ensure_type_match / literal field / `Type.create`), not
+                    // by name — several types have a `create`. Left pending here.
+                }
                 else {
                     AstDecl* resolved = resolve_function_overload(ctx, module, symbols, name, expr->as.call.args, expr->as.call.generic_args, expr->line, expr->column);
                     if (resolved) {
@@ -4040,6 +4245,28 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 break;
                 } // if (resolved)
                 } // if (modname.data)
+            }
+            // #880: `Type.create(...)` — the type before the dot picks the
+            // constructor by its return type (the type-qualified form for
+            // positions with no expected type, e.g. `ret`).
+            if (str_eq_cstr(expr->as.method_call.method_name, "create")) {
+                TypeInfo* ct = sema_type_qualifier_type(ctx, module, symbols, expr->as.method_call.object);
+                if (ct) {
+                    AstCallArg* cargs = expr->as.method_call.args;
+                    for (AstCallArg* a = cargs; a; a = a->next) sema_analyze_expr(ctx, module, symbols, a->value);
+                    AstExpr* callee = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
+                    memset(callee, 0, sizeof(*callee));
+                    callee->kind = AST_EXPR_IDENT;
+                    callee->as.ident = str_from_cstr("create");
+                    callee->line = expr->line; callee->column = expr->column;
+                    expr->kind = AST_EXPR_CALL;
+                    expr->as.call.callee = callee;
+                    expr->as.call.args = cargs;
+                    expr->as.call.generic_args = NULL;
+                    expr->decl_link = NULL;
+                    sema_resolve_create(ctx, module, symbols, expr, ct);
+                    break;
+                }
             }
             sema_analyze_expr(ctx, module, symbols, expr->as.method_call.object);
             AstCallArg* marg = expr->as.method_call.args;
@@ -4886,6 +5113,7 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
         ctx->instantiation_stack->head = NULL;
     }
     SymbolTable symbols = {0};
+    s_lifecycle_symbols = &symbols;
  size_t processed_count = 0; const AstDecl* processed[8192]; memset(processed, 0, sizeof(processed));
     AstDecl* d = module->decls;
     while (d) {
