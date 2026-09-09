@@ -83,7 +83,7 @@ func createCounterState() ret CounterState {
   ret CounterState {
     value: 0
     step: 1
-    history: own createList(Int, cap: historyRows)
+    history: own List.create(Int, cap: historyRows)
   }
 }
 
@@ -92,7 +92,7 @@ func createCounterState() ret CounterState {
 # A list that grows without bound is a leak with a friendly name, so this keeps
 # exactly `historyRows` entries — the number the scene can show.
 func rememberValue(state: mod CounterState, value: view Int) {
-  var next: List(Int) = createList(Int, cap: historyRows)
+  var next: List(Int) = List.create(Int, cap: historyRows)
   next.add(value: value)
   var i: Int = 0
   loop i < state.history.length and next.length < historyRows {

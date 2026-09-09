@@ -46,17 +46,17 @@ type ComponentTable(T: type) {
 
 func createComponentTable(T: type) ret ComponentTable(T) {
   ret ComponentTable(T) {
-    denseEntities: createList(EntityId, cap: 256)
-    denseData: createList(T, cap: 256)
-    sparse: createList(Int, cap: 256)
+    denseEntities: List.create(EntityId, cap: 256)
+    denseData: List.create(T, cap: 256)
+    sparse: List.create(Int, cap: 256)
     generation: 0
-    denseStamps: createList(Int, cap: 256)
+    denseStamps: List.create(Int, cap: 256)
   }
 }
 
 # The constructor by name (#880): `positions: create()` in a world literal.
 func create(T: type) ret ComponentTable(T) {
-  ret createComponentTable(T)
+  ret ComponentTable.create(T)
 }
 
 # Release both backing Lists. Called by the synthesised

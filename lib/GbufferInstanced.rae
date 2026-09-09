@@ -37,7 +37,7 @@ type InstanceBatch {
 # the record buffer ONCE; per-frame use never grows it.
 func createInstanceBatch(mesh: view MeshHandle, capacity: copy Int) pub ret InstanceBatch {
   let floatCount: Int = capacity * instanceRecordFloats
-  let records: List(Float) = createList(Float, cap: floatCount)
+  let records: List(Float) = List.create(Float, cap: floatCount)
   var floatIndex: Int = 0
   loop floatIndex < floatCount {
     records.add(value: 0.0)

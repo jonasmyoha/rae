@@ -12,7 +12,7 @@ type World { table: ComponentTable(Comp) }
 type Holder { world: World }
 
 func makeWorld() ret World {
-  var t: ComponentTable(Comp) = createComponentTable(Comp)
+  var t: ComponentTable(Comp) = ComponentTable.create(Comp)
   let e: EntityId = { index: 1, generation: 0 }
   componentSet(this: t, entity: e, data: Comp { x: 42 })
   ret World { table: own t }

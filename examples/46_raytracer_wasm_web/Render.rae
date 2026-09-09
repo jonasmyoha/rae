@@ -119,7 +119,7 @@ func renderTile(world: own List(Sphere), cam: own Camera, width: view Int, heigh
                 tx0: view Int, ty0: view Int, tw: view Int, th: view Int,
                 samples: view Int, maxDepth: view Int, seedBase: view Int) ret List(Int) {
     seed(n: seedBase + ty0 * 9781 + tx0 * 17)
-    let out: List(Int) = createList(cap: tw * th)
+    let out: List(Int) = List.create(Int, cap: tw * th)
     var ry: Int = 0
     loop ry < th {
         let py: Int = ty0 + ry
@@ -179,7 +179,7 @@ func quadTile(qx0: view Int, qy0: view Int, qw: view Int, qh: view Int, tileSize
     var th: Int = tileSize
     if tx0 + tw > qx0 + qw { tw = qx0 + qw - tx0 }
     if ty0 + th > qy0 + qh { th = qy0 + qh - ty0 }
-    let res: List(Int) = createList(cap: 4)
+    let res: List(Int) = List.create(Int, cap: 4)
     res.add(value: tx0)
     res.add(value: ty0)
     res.add(value: tw)

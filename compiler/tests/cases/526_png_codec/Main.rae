@@ -3,7 +3,7 @@ open compress/Deflate
 open compress/Inflate
 
 func main() {
-    let data: List(Int) = createList(cap: 500)
+    let data: List(Int) = List.create(Int, cap: 500)
     var i: Int = 0
     loop i < 500 { data.add(value: 65 + ((i / 9) % 7) + (i % 2)) i = i + 1 }
     let comp: List(Int) = deflateRaw(data: data, value: data.length)
@@ -16,7 +16,7 @@ func main() {
 
     let w: Int = 12
     let h: Int = 8
-    let img: List(Int) = createList(cap: w * h)
+    let img: List(Int) = List.create(Int, cap: w * h)
     var y: Int = 0
     loop y < h {
         var x: Int = 0

@@ -95,7 +95,7 @@ func buildHomeGridRow(
   let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: row, kind: layH, gap: homeGridTileGap, alignCross: alignS)
 
-  let kids: List(EntityId) = createList(EntityId, cap: homeGridColumns)
+  let kids: List(EntityId) = List.create(EntityId, cap: homeGridColumns)
   let cols: Int = homeCols()
   var col: Int = 0
   loop col < cols {
@@ -118,7 +118,7 @@ func fillHomeCoverGrid(world: mod UiWorld, grid: view EntityId, albums: view Lis
   let cols: Int = homeCols()
   let total: Int = keys.length
   let rows: Int = (total + cols - 1) / cols
-  let rowKids: List(EntityId) = createList(EntityId, cap: rows)
+  let rowKids: List(EntityId) = List.create(EntityId, cap: rows)
   var i: Int = 0
   loop i < rows {
     let startIndex: Int = i * cols

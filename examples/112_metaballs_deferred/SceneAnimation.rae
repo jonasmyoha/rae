@@ -45,13 +45,13 @@ type ClusterTags {
 # 0-6); unused tables stay empty and their query loops simply don't fire.
 func buildClusterTags(world: view World3d) ret ClusterTags {
   var tags: ClusterTags = {
-    c0: createComponentTable(Cluster0Tag)
-    c1: createComponentTable(Cluster1Tag)
-    c2: createComponentTable(Cluster2Tag)
-    c3: createComponentTable(Cluster3Tag)
-    c4: createComponentTable(Cluster4Tag)
-    c5: createComponentTable(Cluster5Tag)
-    c6: createComponentTable(Cluster6Tag)
+    c0: ComponentTable.create(Cluster0Tag)
+    c1: ComponentTable.create(Cluster1Tag)
+    c2: ComponentTable.create(Cluster2Tag)
+    c3: ComponentTable.create(Cluster3Tag)
+    c4: ComponentTable.create(Cluster4Tag)
+    c5: ComponentTable.create(Cluster5Tag)
+    c6: ComponentTable.create(Cluster6Tag)
   }
   loop var i: Int = 0, i < world3dSdfCount(world: world), ++i {
     let entity: EntityId = world3dSdfEntityAt(world: world, i: i)

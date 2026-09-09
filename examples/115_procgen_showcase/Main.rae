@@ -23,7 +23,7 @@ open procgen/Texture
 # The five biome-material albedo textures, generated in Rae and registered as
 # gpu2d images so they can be drawn as swatches over the 3D scene.
 func registerTextures() {
-  let names: List(String) = createList(String, cap: 5)
+  let names: List(String) = List.create(String, cap: 5)
   names.add(value: "grass")
   names.add(value: "sand")
   names.add(value: "rock")
@@ -39,7 +39,7 @@ func registerTextures() {
 
 # Draw the five texture swatches in a row along the bottom.
 func drawTextureSwatches() {
-  let names: List(String) = createList(String, cap: 5)
+  let names: List(String) = List.create(String, cap: 5)
   names.add(value: "grass")
   names.add(value: "sand")
   names.add(value: "rock")
@@ -98,7 +98,7 @@ func main() ret Int {
   Gpu2d.initWindow(width: 1280, height: 800, title: "Rae — procedural rocks & trees")
 
   # Five rock variants: vary seed, slice count, irregularity.
-  var rocks: List(Int) = createList(Int, cap: 5)
+  var rocks: List(Int) = List.create(Int, cap: 5)
   loop var ri: Int = 0, ri < 5, ++ri {
     let rockMesh: MeshData = generateRock(subdivision: 5, sliceCount: 3 + ri, size: 1.0 + ri.toFloat() * 0.12,
                                           seed: 1000 + ri * 37, irregularity: 0.28 + ri.toFloat() * 0.05)
@@ -106,8 +106,8 @@ func main() ret Int {
   }
 
   # Five tree variants: vary seed, branch depth, canopy size.
-  var trunks: List(Int) = createList(Int, cap: 5)
-  var canopies: List(Int) = createList(Int, cap: 5)
+  var trunks: List(Int) = List.create(Int, cap: 5)
+  var canopies: List(Int) = List.create(Int, cap: 5)
   loop var ti: Int = 0, ti < 5, ++ti {
     let tree: TreeMesh = generateTree(branchDepth: 2 + ti % 2, trunkHeight: 3.0 + ti.toFloat() * 0.3, taper: 1.0,
                                       canopySize: 1.1 + ti.toFloat() * 0.12, leafDensity: 1 + ti % 3, seed: 500 + ti * 53)
