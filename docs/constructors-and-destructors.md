@@ -1,8 +1,7 @@
 # Constructors, destructors and copies in Rae: `create`, `drop`, `copy`
 
 Status: **implemented — `drop` (#881), `copy` (#882), `create` (#880), 2026-09-09.**
-Known limit: a temporary made in a `loop` condition is released once, after
-the loop, not per iteration (#886). The rest of this document is the design as approved for implementation. This document covers constructors, destructors and copies only.
+No known limits are open against this design. The rest of this document is the design as approved for implementation. This document covers constructors, destructors and copies only.
 Native
 pointers, `unsafe`, GPU resource identity and the rest of
 `ptr-and-gpu-resource-design.md` (#878) are out of scope; section 8 says only
@@ -211,7 +210,11 @@ A **temporary** — a produced value that no binding names, such as the argument
 in `inspect(slot: create(id: 1))` — lives to the end of the statement that made
 it and drops there (#884). In a `ret`, the temporaries made while computing the
 value drop before the function's locals do. An `if` condition's temporary drops
-after the whole `if`.
+after the whole `if`, or on the `break`/`continue` that leaves through it. A
+`loop` condition's temporary drops at the end of every iteration, on
+`break`/`continue`, and after the loop (#886). A temporary that a short-circuited
+condition never produced is never dropped: each carries a flag its producing
+expression raises.
 
 Nothing runs on process abort or an unhandled panic; that is unchanged and not
 promised. `defer` stays a separate statement for caller-side cleanup and is not

@@ -819,12 +819,37 @@ int register_stmt_temp(CFuncContext* ctx, const AstTypeRef* type, bool owns_heap
   int id = (int)ctx->temp_counter++;
   fprintf(temps->decls, "  ");
   emit_type_ref_as_c_type(ctx, type, temps->decls, false);
-  fprintf(temps->decls, " __rae_stmt_tmp%d;\n", id);
+  fprintf(temps->decls, " __rae_stmt_tmp%d; int __rae_stmt_tmp%d_set = 0;\n", id, id);
   char cname[48];
   snprintf(cname, sizeof cname, "__rae_stmt_tmp%d", id);
+  // #886: the drop is guarded by the `_set` flag the producing expression
+  // raises, and clears it: a short-circuited condition never produced the
+  // value, and a loop condition's temporary is dropped once per iteration,
+  // on break/continue, and again after the loop — each time at most once.
+  fprintf(temps->drops, "  if (__rae_stmt_tmp%d_set) { __rae_stmt_tmp%d_set = 0;", id, id);
   emit_drop_for_value(ctx, temps->drops, type, cname, owns_heap);
+  fprintf(temps->drops, "  }\n");
   temps->count++;
   return id;
+}
+
+void emit_stmt_temp_drops_keep(CFuncContext* ctx, FILE* out) {
+  if (!ctx || !ctx->stmt_temps || ctx->stmt_temps->count == 0) return;
+  CStmtTemps* temps = ctx->stmt_temps;
+  if (!temps->drops) return;
+  fflush(temps->drops);
+  if (temps->drops_buf) fputs(temps->drops_buf, out);
+}
+
+void emit_stmt_temp_drops_chain(CFuncContext* ctx, FILE* out, const CStmtTemps* stop_at) {
+  if (!ctx) return;
+  for (CStmtTemps* t = ctx->stmt_temps; t; t = t->parent) {
+    if (t->count > 0 && t->drops) {
+      fflush(t->drops);
+      if (t->drops_buf) fputs(t->drops_buf, out);
+    }
+    if (t == stop_at) break;
+  }
 }
 
 void emit_stmt_temp_drops_now(CFuncContext* ctx, FILE* out) {
@@ -1187,6 +1212,7 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         // non-local exit drops the current element too, matching the per-
         // iteration drop below.
         if (ctx->loop_depth < 32) ctx->loop_body_local_start[ctx->loop_depth] = saved_locals;
+        if (ctx->loop_depth < 32) ctx->loop_temps[ctx->loop_depth] = ctx->stmt_temps;
         ctx->loop_depth++;
         if (stmt->as.loop_stmt.body) {
             for (const AstStmt* body_stmt = stmt->as.loop_stmt.body->first;
@@ -1195,6 +1221,7 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             }
         }
         ctx->loop_depth--;
+        emit_stmt_temp_drops_keep(ctx, out);
         emit_implicit_drops_for_body(ctx, out, saved_locals);
         ctx->local_count = saved_locals;
         fprintf(out, "    }\n  }\n");
@@ -1228,11 +1255,15 @@ static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     // break/continue only drop locals introduced by the current body.
     size_t body_locals = ctx->local_count;
     if (ctx->loop_depth < 32) ctx->loop_body_local_start[ctx->loop_depth] = body_locals;
+    if (ctx->loop_depth < 32) ctx->loop_temps[ctx->loop_depth] = ctx->stmt_temps;
     ctx->loop_depth++;
     if (stmt->as.loop_stmt.body) {
         for (const AstStmt* s = stmt->as.loop_stmt.body->first; s; s = s->next) emit_stmt(ctx, s, out);
     }
     ctx->loop_depth--;
+    // #886: the condition's temporaries die at the end of every iteration,
+    // before the increment re-tests it.
+    emit_stmt_temp_drops_keep(ctx, out);
     emit_implicit_drops_for_body(ctx, out, body_locals);
     ctx->local_count = body_locals;
     fprintf(out, "  }\n");
@@ -1384,6 +1415,7 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     if (!stmt) return true;
     CStmtTemps temps = {0};
     CStmtTemps* saved = ctx->stmt_temps;
+    temps.parent = saved;
     ctx->stmt_temps = &temps;
     char* body = NULL; size_t body_len = 0;
     FILE* buf = open_memstream(&body, &body_len);
@@ -2618,6 +2650,9 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             // loop body up to here (reverse-construction order), then jump.
             // Sema has already rejected these outside a loop; guard anyway.
             if (ctx->loop_depth > 0) {
+                // #886: temporaries of every enclosing statement up to the loop
+                // (an `if` condition's, the loop condition's) die on this path too.
+                emit_stmt_temp_drops_chain(ctx, out, ctx->loop_temps[ctx->loop_depth - 1]);
                 emit_implicit_drops_for_body(
                     ctx, out, ctx->loop_body_local_start[ctx->loop_depth - 1]);
             }
