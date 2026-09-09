@@ -1,31 +1,55 @@
 # Nonblocking buffer readback
 
-`open webgpu/Readback` provides an explicitly owned asynchronous read request.
+`open webgpu/ReadRequest` provides an ordinary Rae owner for an asynchronous
+read request. This is an internal lifecycle pilot for shipped `create`/`drop`;
+its native `Ptr` field remains trusted interop until Rae's pointer boundary is
+implemented. It does not establish pointers as Rae's public ownership model.
 Staging allocation, command encoding and queue submission remain in Rae over
 `webgpu/Webgpu`. The small runtime bridge supplies the C callback pointer and
 retains its request state; the generated callback-info field is currently `Ptr`,
 not a callable Rae callback.
 
 1. Allocate a buffer with `MapRead + CopyDst`, copy GPU output into it and submit.
-2. `var request: Ptr = startRead(buffer: staging, offset: 0 as UInt64, size: bytes)`.
-3. Each frame call `pollRead(request: request)`: `0` pending, `1` success, `-1`
+2. Construct directly in its owning scope:
+
+   ```rae
+   if let request: ReadRequest = ReadRequest.create(
+     buffer: staging,
+     range: { offset: 0 as UInt64, size: bytes }
+   ) {
+     # use request here; drop runs when this branch ends
+   }
+   ```
+
+   `none` reports allocation, usage or range failure detected while starting.
+   Construction only reads the initial status and never polls device events.
+3. Each frame call `poll(this: request)`: `0` pending, `1` success, `-1`
    failure. This advances the context once with `wait: 0`, never waits for GPU
    completion, and does not require timestamp-query support.
-4. On success, call `copyRead(request: request, destination: output.data,
+4. On success, call `copyTo(this: request, destination: output.data,
    capacity: capacityBytes)`. It returns `1` only when it copied the entire
    requested range. It returns `0` for pending/failed requests, null destinations,
    or insufficient capacity. The map stays open until release; copying again is
    allowed. Capacity must reflect actual allocated destination **bytes**.
-5. Always finish with `request = releaseRead(request: request)`, including on
-   failure or cancellation. This returns null; releasing null is harmless.
+5. Scope exit consumes the owner and calls `drop`. `request.drop()` is available
+   for explicit cancellation, and passing `own request` transfers cleanup to the
+   callee. A `ReadRequest` has no `copy` function. It can be moved into another
+   owner field or a supported owner container such as `List(ReadRequest)`; those
+   owners recursively drop it.
+
+The raw functions remain in `webgpu/Readback` for existing manager-owned slot
+protocols and blocking diagnostics. New direct use should prefer `ReadRequest`
+so every successful start has one Rae owner.
 
 Offsets must be multiples of 8; sizes must be positive multiples of 4. The
 requested range must fit in the buffer and the platform's `size_t`. Invalid
 ranges or usage produce a failed request that must still be released. Allocation
 failure returns null, which polls as failure. Only the requested bytes are copied.
 
-The request is uniquely owned: **do not copy its handle or release an alias**.
-All operations, including event polling, run on the WebGPU context thread.
+The native request is uniquely owned: **do not copy its raw handle or release an
+alias**. The `ReadRequest` wrapper enforces this through the ordinary Rae
+destructor/no-copy lifecycle. All operations, including event polling, run on
+the WebGPU context thread.
 The callback uses `AllowProcessEvents`, so owner and callback references are
 serialized on that thread. The request retains the buffer: releasing the
 caller's original buffer reference while a read is pending is safe. Start only
@@ -70,7 +94,9 @@ perl -e 'alarm shift; exec @ARGV' 120 compiler/bin/rae run --target compiled exa
 Verified on Apple M1 Max / Metal: 32 pairs of independent reads with known Int
 contents and an offset subrange, destinations grown after starting reads,
 releasing original buffer references while requests remain alive, rejected short
-copies and invalid ranges, cancellation followed by 32 map/unmap cycles on the
-same buffer, the existing blocking read diagnostic, and failure from destruction before the callback. The deterministic
-sanitizer test covers late-callback cleanup even when hardware delivers early.
+copies and invalid ranges, owner fields, explicit transfer, a two-element owner
+List, cancellation followed by 32 map/unmap cycles on the same buffer, the
+existing blocking read diagnostic, and failure from destruction before the
+callback. The deterministic sanitizer test covers late-callback cleanup even
+when hardware delivers early.
 Browser execution has not been verified by this hardware check.
