@@ -129,14 +129,27 @@ typedef struct {
   // after it, so `inspect(slot: create(id: 1))` releases its slot. NULL
   // outside emit_stmt.
   struct CStmtTemps* stmt_temps;
+  // #886: per open loop, that loop statement's own temporaries (its condition's),
+  // dropped at the end of every iteration and on break/continue.
+  struct CStmtTemps* loop_temps[32];
 } CFuncContext;
 
 typedef struct CStmtTemps {
-  FILE* decls; char* decls_buf; size_t decls_len;   // "  T __rae_stmt_tmpN;" lines
-  FILE* drops; char* drops_buf; size_t drops_len;   // "  rae_drop_...(&__rae_stmt_tmpN);" lines
+  FILE* decls; char* decls_buf; size_t decls_len;   // "  T __rae_stmt_tmpN; int __rae_stmt_tmpN_set = 0;" lines
+  FILE* drops; char* drops_buf; size_t drops_len;   // "  if (__rae_stmt_tmpN_set) { ... drop ... }" lines
   int count;
   bool flushed;   // drops already written (a `ret` writes them before returning)
+  struct CStmtTemps* parent;   // the enclosing statement's temporaries (#886)
 } CStmtTemps;
+
+// #886: write the drops of every statement from the current one up to and
+// including `stop_at` (the enclosing loop's own temporaries) — the path a
+// `break`/`continue` takes out of nested conditions. Each temporary's drop is
+// guarded by its `_set` flag and clears it, so writing a drop twice is safe.
+void emit_stmt_temp_drops_chain(CFuncContext* ctx, FILE* out, const struct CStmtTemps* stop_at);
+// Write the current statement's temporary drops without marking them
+// flushed (the end of each loop iteration; the wrapper still drops after).
+void emit_stmt_temp_drops_keep(CFuncContext* ctx, FILE* out);
 
 // Register a statement temporary of `type`; returns its id (spell it
 // `__rae_stmt_tmp<id>`), or -1 when not inside a statement.
