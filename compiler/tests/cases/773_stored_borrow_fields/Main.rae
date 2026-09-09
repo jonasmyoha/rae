@@ -1,0 +1,30 @@
+# #866: a struct field may not STORE a borrow. `view`/`mod` are for parameters
+# and locals only. Every form below is rejected in the maintained Compiled
+# front end (before invalid C is generated): a direct `view` field, a direct
+# `mod` field, a `view` field inside a generic template, and — transitively —
+# a struct that embeds a type which itself has a borrow field (the inner type
+# fails at its own declaration). The generic-argument escape `List(view Int)`
+# is rejected earlier by the parser and is covered by test cases elsewhere.
+type DirectView {
+  r: view Int
+}
+
+type DirectMod {
+  m: mod Int
+}
+
+type GenericBorrow(T: type) {
+  g: view T
+}
+
+type InnerBorrow {
+  r: view Int
+}
+
+type OuterEmbedsBorrow {
+  inner: InnerBorrow
+}
+
+func main() {
+  log("unreachable")
+}

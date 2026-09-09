@@ -5527,7 +5527,36 @@ static void desugar_typed_create_module(CompilerContext* ctx, AstModule* module)
             desugar_typed_create_block(ctx, d->as.func_decl.body);
 }
 
+
+// #866: a struct field may not STORE a borrow. `view`/`mod` are parameter and
+// local binding modes only; a `field: view T` / `field: mod T` reaches invalid
+// generated C in the maintained Compiled backend (the field lowers to a
+// `rae_View_T*` that ordinary field code then assigns a value to and hands to
+// string conversion). Reject it in the shared front end, at every type decl
+// including generic templates (which sema does not otherwise analyse). The
+// generic-argument escape `field: List(view T)` is already rejected by the
+// parser ("references (view/mod) cannot be used as generic type arguments"),
+// and a nested escape fails at the INNER type's own declaration, so this direct
+// check closes the remaining hole. No new reference semantics; enforcement only.
+static void sema_check_struct_field_borrows(CompilerContext* ctx, AstModule* module) {
+    (void)ctx;
+    for (AstDecl* d = module ? module->decls : NULL; d; d = d->next) {
+        if (d->kind != AST_DECL_TYPE) continue;
+        for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
+            if (f->type && (f->type->is_view || f->type->is_mod)) {
+                const char* file = d->origin_file ? d->origin_file
+                    : (module && module->file_path ? module->file_path : NULL);
+                diag_error(file, (int)f->type->line, (int)f->type->column,
+                    "view/mod not allowed in struct fields: a struct cannot store a borrow; "
+                    "make the field own its value, or take the borrow as a parameter instead");
+                module->had_error = true;
+            }
+        }
+    }
+}
+
 bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
+    sema_check_struct_field_borrows(ctx, module);
     desugar_typed_create_module(ctx, module);
     s_current_module = module;
     s_lifecycle_ctx = ctx;
