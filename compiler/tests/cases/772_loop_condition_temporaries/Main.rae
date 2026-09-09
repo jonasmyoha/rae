@@ -1,0 +1,72 @@
+# #886: a temporary made in a loop CONDITION is released once per iteration,
+# and on break/continue; a temporary of an `if` condition inside a loop is
+# released when break/continue leaves through it; a short-circuited condition
+# that never produced its temporary never releases one. Every acquire pairs
+# with exactly one release.
+type Slot {
+  id: Int
+}
+
+func create(id: view Int) ret Slot {
+  log("acquire {id}")
+  ret Slot { id: id }
+}
+
+func drop(this: mod Slot) {
+  log("release {this.id}")
+}
+
+func inspect(slot: view Slot) ret Int {
+  ret slot.id
+}
+
+func main() {
+  log("-- loop condition")
+  var i: Int = 0
+  loop inspect(slot: create(id: i)) < 2 {
+    i = i + 1
+  }
+  log("after loop {i}")
+
+  log("-- break through an if condition")
+  var j: Int = 10
+  loop j < 20 {
+    if inspect(slot: create(id: j)) is 12 {
+      break
+    }
+    j = j + 1
+  }
+  log("after break {j}")
+
+  log("-- continue through an if condition")
+  var k: Int = 20
+  var hits: Int = 0
+  loop k < 23 {
+    k = k + 1
+    if inspect(slot: create(id: k)) is 22 {
+      continue
+    }
+    hits = hits + 1
+  }
+  log("after continue {hits}")
+
+  log("-- short circuit")
+  let never: Bool = false
+  if never and inspect(slot: create(id: 30)) is 30 {
+    log("not reached")
+  }
+  if inspect(slot: create(id: 31)) is 31 or inspect(slot: create(id: 32)) is 32 {
+    log("first only")
+  }
+
+  log("-- nested loops")
+  var outer: Int = 0
+  loop inspect(slot: create(id: 40 + outer)) < 42 {
+    var inner: Int = 0
+    loop inspect(slot: create(id: 50 + inner)) < 51 {
+      inner = inner + 1
+    }
+    outer = outer + 1
+  }
+  log("-- end of main")
+}
