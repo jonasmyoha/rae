@@ -73,6 +73,9 @@ int main(void) {
     MockBuffer second = {.references = 1, .data = {55, 66, 77, 88}};
     void* firstRead = rae_wgpu_read_start(&first, 8, 16);
     void* secondRead = rae_wgpu_read_start(&second, 0, 32);
+    assert(rae_wgpu_read_start_status(firstRead) == 0);
+    assert(rae_wgpu_read_start_status(secondRead) == 0);
+    assert(polls == 0);
     uint64_t destination[4] = {0};
     assert(rae_wgpu_read_poll(firstRead) == 0 && polls == 1);
     assert(!rae_wgpu_read_copy(firstRead, destination, sizeof(destination)));
@@ -111,11 +114,13 @@ int main(void) {
     const uint64_t sizes[] = {0, 4, 4, 4, UINT64_MAX};
     for (size_t i = 0; i < 5; i++) {
         void* invalid = rae_wgpu_read_start(&second, offsets[i], sizes[i]);
+        assert(rae_wgpu_read_start_status(invalid) == -1);
         assert(rae_wgpu_read_poll(invalid) == -1);
         rae_wgpu_read_release(invalid);
     }
     assert(liveRequests == 0 && second.references == 1);
     assert(rae_wgpu_read_poll(NULL) == -1);
+    assert(rae_wgpu_read_start_status(NULL) == -1);
     rae_wgpu_read_release(NULL);
     puts("readback callback ownership and nonblocking polling OK");
 }
