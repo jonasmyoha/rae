@@ -1,0 +1,9 @@
+tests/cases/761_drop_copy_rejected/Main.rae:15:17: cannot copy 'Slot' through a 'copy' parameter: it has a destructor (`func drop(this: mod Slot)`) and no `func copy(this: view Slot) ret Slot`; write 'own <expr>' to transfer it, or bind a 'view'/'mod' reference
+    15 | func keep(slot: copy Slot) {
+       |                 ^~~~
+tests/cases/761_drop_copy_rejected/Main.rae:21:3: cannot copy 'Slot' into a new binding: it has a destructor (`func drop(this: mod Slot)`) and no `func copy(this: view Slot) ret Slot`; write 'own <expr>' to transfer it, or bind a 'view'/'mod' reference
+    21 |   let b: Slot = a
+       |   ^~~~
+tests/cases/761_drop_copy_rejected/Main.rae:22:26: cannot copy 'Slot' into a struct literal field (write 'field: own <expr>'): it has a destructor (`func drop(this: mod Slot)`) and no `func copy(this: view Slot) ret Slot`; write 'own <expr>' to transfer it, or bind a 'view'/'mod' reference
+    22 |   let box: Box = { slot: a }
+       |                          ^~~~

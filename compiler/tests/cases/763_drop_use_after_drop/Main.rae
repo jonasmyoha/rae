@@ -1,0 +1,22 @@
+# #881: `x.drop()` consumes x; using it afterwards is an error until it is
+# assigned a new value.
+type Slot {
+  id: Int
+}
+
+func drop(this: mod Slot) {
+  log("release {this.id}")
+}
+
+func inspect(slot: view Slot) {
+  log("inspect {slot.id}")
+}
+
+func main() {
+  var a: Slot = { id: 1 }
+  a.drop()
+  a = Slot { id: 2 }
+  inspect(slot: a)
+  a.drop()
+  inspect(slot: a)
+}

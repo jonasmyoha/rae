@@ -1,0 +1,40 @@
+-- scope and own
+acquire 1
+inspect 1
+consumed 1
+release 1
+-- returned local moves out
+acquire 2
+-- struct fields drop after the destructor, in reverse order
+acquire 3
+acquire 4
+-- loop iterations
+acquire 10
+release 10
+acquire 11
+release 11
+-- early ret
+acquire 30
+early ret
+release 30
+acquire 30
+no early ret
+release 30
+-- list elements
+acquire 20
+acquire 21
+-- optional payload
+acquire 40
+found 40
+release 40
+-- explicit drop consumes, reassignment releases the old value
+release 2
+acquire 5
+acquire 6
+release 5
+-- end of main
+release 20
+release 21
+release 4
+release 3
+release 6

@@ -201,6 +201,22 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" "$TMP_OUT/tiers.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
+        elif [ "$EXAMPLE_NAME" = "120_resource_lifetimes" ]; then
+          # Destructors by name (#881): the compiled binary must run and every
+          # voice must release its slot through `drop`, including the field
+          # and List-element paths — the log proves the count and the order.
+          if perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app" > "$TMP_OUT/run.log" 2>&1 \
+             && [ "$(grep -c '\[voice\] release slot' "$TMP_OUT/run.log")" -eq 6 ] \
+             && ! grep -q 'BAD release' "$TMP_OUT/run.log" \
+             && grep -q '^\[chord\] C major ends$' "$TMP_OUT/run.log" \
+             && [ "$(tail -1 "$TMP_OUT/run.log")" = "[lifetimes] live voices: 0" ]; then
+            echo "PASS: $EXAMPLE_NAME (destructors ran for every voice: scope, field, list element, own, explicit)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (destructor gate)"
+            cat "$TMP_OUT/run.log" | sed 's/^/  /'
+            ((FAILED++))
+          fi
         elif [ "$EXAMPLE_NAME" = "118_water_lake" ]; then
           # The toon water on its own (#853): the log line proves the lake was
           # drawn on every rendered frame under the deferred graph; the shot
