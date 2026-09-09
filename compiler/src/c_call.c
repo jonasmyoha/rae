@@ -1153,11 +1153,30 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 AstTypeRef base_type = *p->type;
                 base_type.is_view = false;
                 base_type.is_mod = false;
-                fprintf(out, "((");
-                emit_type_ref_as_c_type(ctx, &base_type, out, false);
-                fprintf(out, "[1]){ ");
-                emit_expr(ctx, a->value, out, PREC_LOWEST, false, pass_view_through);
-                fprintf(out, " })");
+                // #884: when the produced value owns heap or has a destructor,
+                // an anonymous compound literal would never be released. It
+                // becomes a statement temporary (declared before the statement,
+                // dropped after it) and the callee borrows that.
+                const AstTypeRef* base_concrete = &base_type;
+                if (fd->generic_params && concrete) {
+                    base_concrete = substitute_type_ref(ctx->compiler_ctx, fd->generic_params, concrete, &base_type);
+                }
+                int tmp_id = -1;
+                if (!base_concrete->is_opt
+                    && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, base_concrete, 0)) {
+                    tmp_id = register_stmt_temp(ctx, base_concrete, a->value->kind == AST_EXPR_OBJECT);
+                }
+                if (tmp_id >= 0) {
+                    fprintf(out, "((__rae_stmt_tmp%d = (", tmp_id);
+                    emit_expr(ctx, a->value, out, PREC_LOWEST, false, pass_view_through);
+                    fprintf(out, ")), &__rae_stmt_tmp%d)", tmp_id);
+                } else {
+                    fprintf(out, "((");
+                    emit_type_ref_as_c_type(ctx, &base_type, out, false);
+                    fprintf(out, "[1]){ ");
+                    emit_expr(ctx, a->value, out, PREC_LOWEST, false, pass_view_through);
+                    fprintf(out, " })");
+                }
             } else if (copy_arg_kind == 2) {
                 // `copy T` deep-copy of a container / user struct
                 // aliasing source. Emit a GCC statement-expression
@@ -1222,11 +1241,25 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 if (fd->generic_params && concrete) {
                     base_emit = substitute_type_ref(ctx->compiler_ctx, fd->generic_params, concrete, &base);
                 }
-                fprintf(out, "&(");
-                emit_type_ref_as_c_type(ctx, base_emit, out, false);
-                fprintf(out, "){");
-                emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
-                fprintf(out, "}");
+                // #884: a produced value that owns heap (or has a destructor)
+                // is not an anonymous compound literal — nobody would release
+                // it. It becomes a statement temporary: declared before the
+                // statement, borrowed here, dropped after the statement.
+                int tmp_id = -1;
+                if (type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, base_emit, 0)) {
+                    tmp_id = register_stmt_temp(ctx, base_emit, a->value->kind == AST_EXPR_OBJECT);
+                }
+                if (tmp_id >= 0) {
+                    fprintf(out, "((__rae_stmt_tmp%d = (", tmp_id);
+                    emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
+                    fprintf(out, ")), &__rae_stmt_tmp%d)", tmp_id);
+                } else {
+                    fprintf(out, "&(");
+                    emit_type_ref_as_c_type(ctx, base_emit, out, false);
+                    fprintf(out, "){");
+                    emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
+                    fprintf(out, "}");
+                }
             } else if (copy_arg_kind == 4) {
                 // Struct-rep opt argument, deep-copied for a copy/own param.
                 int oc = ctx->temp_counter++;

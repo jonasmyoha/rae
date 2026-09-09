@@ -1,0 +1,69 @@
+# #884: a produced value borrowed straight by a `view` parameter is a
+# temporary nobody names. It must still be released at the end of the
+# statement that made it — in an expression statement, a `let`, an
+# assignment, an `if` condition, a `ret` value, and through a generic
+# callee — and exactly once. A fake resource counts acquires and releases.
+type Slot {
+  id: Int
+}
+
+type Tally {
+  acquired: Int
+  released: Int
+}
+
+func create(id: view Int) ret Slot {
+  log("acquire {id}")
+  ret Slot { id: id }
+}
+
+func drop(this: mod Slot) {
+  log("release {this.id}")
+}
+
+func inspect(slot: view Slot) ret Int {
+  ret slot.id
+}
+
+func total(slots: view List(Slot)) ret Int {
+  var sum: Int = 0
+  loop var i: Int = 0, i < slots.length, ++i {
+    if let slot: view Slot => slots.viewAt(index: i) { sum = sum + slot.id }
+  }
+  ret sum
+}
+
+func pick(T: type, value: view T) ret Bool {
+  ret true
+}
+
+func twice(id: view Int) ret Int {
+  ret inspect(slot: create(id: id)) * 2
+}
+
+func main() {
+  log("-- expression statement")
+  inspect(slot: create(id: 1))
+  log("-- let")
+  let seen: Int = inspect(slot: create(id: 2))
+  log("seen {seen}")
+  log("-- assignment")
+  var again: Int = 0
+  again = inspect(slot: create(id: 3))
+  log("again {again}")
+  log("-- if condition")
+  if inspect(slot: create(id: 4)) is 4 {
+    log("four")
+  }
+  log("-- ret value")
+  log("twice {twice(id: 5)}")
+  log("-- generic callee")
+  let picked: Bool = pick(Slot, value: create(id: 6))
+  log("picked {picked}")
+  log("-- a produced list of slots")
+  var built: List(Slot) = create(cap: 2)
+  built.add(value: create(id: 7))
+  built.add(value: create(id: 8))
+  log("total {total(slots: built)}")
+  log("-- end of main")
+}
