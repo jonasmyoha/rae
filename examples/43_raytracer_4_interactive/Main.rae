@@ -47,13 +47,13 @@ func main() {
     var fwd: Vec3 = Vec3.create(x: Math.cos(x: pitch) * Math.cos(x: yaw), y: Math.cos(x: pitch) * Math.sin(x: yaw), z: Math.sin(x: pitch))
     var cam: Camera = buildCamera(pos: camPos, target: Vec3.vadd(a: camPos, b: fwd), vfovDeg: 50.0, aperture: 0.0, aspect: aspect)
 
-    let accum: List(Float) = createList(cap: width * height * 3)
+    let accum: List(Float) = List.create(Float, cap: width * height * 3)
     var i: Int = 0
     loop i < width * height * 3 {
         accum.add(value: 0.0)
         i = i + 1
     }
-    let fb: List(Int) = createList(cap: width * height)
+    let fb: List(Int) = List.create(Int, cap: width * height)
     i = 0
     loop i < width * height {
         fb.add(value: 0)

@@ -5412,7 +5412,123 @@ static void sema_check_enum_package_clash(AstModule* module) {
     }
 }
 
+
+// #890: desugar the typed-constructor surface syntax `List.create(EntityId,
+// cap: N)` (a generic-collection qualifier + the element/value type as the
+// first positional argument) to the internal per-type constructor call
+// `createList(EntityId, cap: N)`. Purely syntactic, run over EVERY function
+// body BEFORE analysis — templates included, since generic templates are not
+// sema-analysed and are cloned verbatim for each specialisation. Routing
+// through the proven `createList`/`createStringMap`/`createIntMap`/
+// `createComponentTable` machinery keeps the backend's positional-type-arg
+// specialisation (which works inside generic functions, #889-proof).
+static void desugar_typed_create_expr(CompilerContext* ctx, AstExpr* e);
+static void desugar_typed_create_block(CompilerContext* ctx, AstBlock* b);
+static void desugar_typed_create_stmt(CompilerContext* ctx, AstStmt* s) {
+    if (!s) return;
+    switch (s->kind) {
+        case AST_STMT_LET: desugar_typed_create_expr(ctx, s->as.let_stmt.value); break;
+        case AST_STMT_DESTRUCT: desugar_typed_create_expr(ctx, s->as.destruct_stmt.call); break;
+        case AST_STMT_EXPR: desugar_typed_create_expr(ctx, s->as.expr_stmt); break;
+        case AST_STMT_RET:
+            for (AstReturnArg* r = s->as.ret_stmt.values; r; r = r->next) desugar_typed_create_expr(ctx, r->value);
+            break;
+        case AST_STMT_IF:
+            desugar_typed_create_stmt(ctx, s->as.if_stmt.binding);
+            desugar_typed_create_expr(ctx, s->as.if_stmt.condition);
+            desugar_typed_create_block(ctx, s->as.if_stmt.then_block);
+            desugar_typed_create_block(ctx, s->as.if_stmt.else_block);
+            break;
+        case AST_STMT_LOOP:
+            desugar_typed_create_stmt(ctx, s->as.loop_stmt.init);
+            desugar_typed_create_expr(ctx, s->as.loop_stmt.condition);
+            desugar_typed_create_expr(ctx, s->as.loop_stmt.increment);
+            desugar_typed_create_block(ctx, s->as.loop_stmt.body);
+            break;
+        case AST_STMT_MATCH:
+            desugar_typed_create_expr(ctx, s->as.match_stmt.subject);
+            for (AstMatchCase* c = s->as.match_stmt.cases; c; c = c->next) desugar_typed_create_block(ctx, c->block);
+            break;
+        case AST_STMT_ASSIGN:
+            desugar_typed_create_expr(ctx, s->as.assign_stmt.target);
+            desugar_typed_create_expr(ctx, s->as.assign_stmt.value);
+            break;
+        case AST_STMT_DEFER: desugar_typed_create_block(ctx, s->as.defer_stmt.block); break;
+        default: break;
+    }
+}
+static void desugar_typed_create_block(CompilerContext* ctx, AstBlock* b) {
+    for (AstStmt* s = b ? b->first : NULL; s; s = s->next) desugar_typed_create_stmt(ctx, s);
+}
+static void desugar_typed_create_expr(CompilerContext* ctx, AstExpr* e) {
+    if (!e) return;
+    switch (e->kind) {
+        case AST_EXPR_CALL:
+            desugar_typed_create_expr(ctx, e->as.call.callee);
+            for (AstCallArg* a = e->as.call.args; a; a = a->next) desugar_typed_create_expr(ctx, a->value);
+            break;
+        case AST_EXPR_METHOD_CALL: {
+            desugar_typed_create_expr(ctx, e->as.method_call.object);
+            for (AstCallArg* a = e->as.method_call.args; a; a = a->next) desugar_typed_create_expr(ctx, a->value);
+            if (str_eq_cstr(e->as.method_call.method_name, "create")
+                && e->as.method_call.object && e->as.method_call.object->kind == AST_EXPR_IDENT
+                && e->as.method_call.args
+                && e->as.method_call.args->value
+                && e->as.method_call.args->value->kind == AST_EXPR_IDENT) {
+                Str q = e->as.method_call.object->as.ident;
+                const char* internal = NULL;
+                if (str_eq_cstr(q, "List")) internal = "createList";
+                else if (str_eq_cstr(q, "StringMap")) internal = "createStringMap";
+                else if (str_eq_cstr(q, "IntMap")) internal = "createIntMap";
+                else if (str_eq_cstr(q, "ComponentTable")) internal = "createComponentTable";
+                if (internal) {
+                    AstCallArg* saved_args = e->as.method_call.args;
+                    size_t ln = e->line, col = e->column;
+                    AstExpr* callee = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
+                    memset(callee, 0, sizeof(*callee));
+                    callee->kind = AST_EXPR_IDENT; callee->as.ident = str_from_cstr(internal);
+                    callee->line = ln; callee->column = col;
+                    e->kind = AST_EXPR_CALL;
+                    e->as.call.callee = callee;
+                    e->as.call.args = saved_args;
+                    e->as.call.generic_args = NULL;
+                }
+            }
+            break;
+        }
+        case AST_EXPR_MEMBER: desugar_typed_create_expr(ctx, e->as.member.object); break;
+        case AST_EXPR_INDEX: desugar_typed_create_expr(ctx, e->as.index.target); desugar_typed_create_expr(ctx, e->as.index.index); break;
+        case AST_EXPR_UNARY: case AST_EXPR_OWN: case AST_EXPR_BOX: case AST_EXPR_UNBOX:
+            desugar_typed_create_expr(ctx, e->as.unary.operand); break;
+        case AST_EXPR_CAST: desugar_typed_create_expr(ctx, e->as.cast.operand); break;
+        case AST_EXPR_BINARY: desugar_typed_create_expr(ctx, e->as.binary.lhs); desugar_typed_create_expr(ctx, e->as.binary.rhs); break;
+        case AST_EXPR_OBJECT:
+            for (AstObjectField* f = e->as.object_literal.fields; f; f = f->next) desugar_typed_create_expr(ctx, f->value);
+            break;
+        case AST_EXPR_COLLECTION_LITERAL:
+            for (AstCollectionElement* c = e->as.collection.elements; c; c = c->next) desugar_typed_create_expr(ctx, c->value);
+            break;
+        case AST_EXPR_LIST:
+            for (AstExprList* l = e->as.list; l; l = l->next) desugar_typed_create_expr(ctx, l->value);
+            break;
+        case AST_EXPR_INTERP:
+            for (AstInterpPart* pt = e->as.interp.parts; pt; pt = pt->next) desugar_typed_create_expr(ctx, pt->value);
+            break;
+        case AST_EXPR_MATCH:
+            desugar_typed_create_expr(ctx, e->as.match_expr.subject);
+            for (AstMatchArm* arm = e->as.match_expr.arms; arm; arm = arm->next) { desugar_typed_create_expr(ctx, arm->pattern); desugar_typed_create_expr(ctx, arm->value); }
+            break;
+        default: break;
+    }
+}
+static void desugar_typed_create_module(CompilerContext* ctx, AstModule* module) {
+    for (AstDecl* d = module ? module->decls : NULL; d; d = d->next)
+        if (d->kind == AST_DECL_FUNC && d->as.func_decl.body)
+            desugar_typed_create_block(ctx, d->as.func_decl.body);
+}
+
 bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
+    desugar_typed_create_module(ctx, module);
     s_current_module = module;
     s_lifecycle_ctx = ctx;
     /* #881: the destructor/copy lookups (ownership.c) read ctx->all_decls, which

@@ -43,7 +43,7 @@ type ParticleSystem {
 func createParticleSystem(cap: copy Int, gravity: copy Float) pub ret ParticleSystem {
   let box: MeshData = makeBox(size: 1.0)
   let mesh: MeshHandle = uploadMesh(verts: box.verts, vertCount: box.vertCount, indices: box.indices)
-  ret ParticleSystem { list: createList(Particle, cap: cap), mesh: mesh, gravity: gravity, cap: cap }
+  ret ParticleSystem { list: List.create(Particle, cap: cap), mesh: mesh, gravity: gravity, cap: cap }
 }
 
 # Emit one particle. Drops the oldest if the pool is full, so emission never grows
@@ -82,7 +82,7 @@ func particleBurst(sys: mod ParticleSystem, x: copy Float, y: copy Float, z: cop
 # Advance every particle: integrate velocity + gravity, age, and compact out the dead.
 # Call once per frame with the frame dt.
 func particleUpdate(sys: mod ParticleSystem, deltaTime: copy Float) pub {
-  var live: List(Particle) = createList(Particle, cap: sys.list.length)
+  var live: List(Particle) = List.create(Particle, cap: sys.list.length)
   var i: Int = 0
   loop i < sys.list.length {
     if let p: Particle = sys.list.copyAt(index: i) {

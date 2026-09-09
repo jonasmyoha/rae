@@ -47,7 +47,7 @@ func vertCount(c: view Cloth) ret Int { ret 2 * c.cols * c.rows }
 # over the duplicate block [N, 2N) with reversed winding.
 func buildIndices(cols: copy Int, rows: copy Int) ret List(Int) {
   let n: Int = cols * rows
-  var idx: List(Int) = createList(Int, cap: (cols - 1) * (rows - 1) * 12)
+  var idx: List(Int) = List.create(Int, cap: (cols - 1) * (rows - 1) * 12)
   var r: Int = 0
   loop r < rows - 1 {
     var cc: Int = 0
@@ -72,13 +72,13 @@ func buildIndices(cols: copy Int, rows: copy Int) ret List(Int) {
 func createCloth(cols: copy Int, rows: copy Int, width: copy Float, height: copy Float,
                  gravity: copy Float, damping: copy Float, iterations: copy Int) ret Cloth {
   let n: Int = cols * rows
-  var px: List(Float) = createList(Float, cap: n)
-  var py: List(Float) = createList(Float, cap: n)
-  var pz: List(Float) = createList(Float, cap: n)
-  var ox: List(Float) = createList(Float, cap: n)
-  var oy: List(Float) = createList(Float, cap: n)
-  var oz: List(Float) = createList(Float, cap: n)
-  var pinned: List(Bool) = createList(Bool, cap: n)
+  var px: List(Float) = List.create(Float, cap: n)
+  var py: List(Float) = List.create(Float, cap: n)
+  var pz: List(Float) = List.create(Float, cap: n)
+  var ox: List(Float) = List.create(Float, cap: n)
+  var oy: List(Float) = List.create(Float, cap: n)
+  var oz: List(Float) = List.create(Float, cap: n)
+  var pinned: List(Bool) = List.create(Bool, cap: n)
   var i: Int = 0
   loop i < n {
     px.add(value: 0.0)  py.add(value: 0.0)  pz.add(value: 0.0)

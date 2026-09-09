@@ -94,13 +94,13 @@ func createWaterSystem(body: view WaterBody) ret WaterSystem {
   if segments < 4 { segments = 4 }
   let grid: MeshData = makePlane(size: 1.0, segments: segments)
   let mesh: MeshHandle = uploadMesh(verts: grid.verts, vertCount: grid.vertCount, indices: grid.indices)
-  let uniform: List(Float) = createList(Float, cap: waterUniformFloats)
+  let uniform: List(Float) = List.create(Float, cap: waterUniformFloats)
   var i: Int = 0
   loop i < waterUniformFloats {
     uniform.add(value: 0.0)
     i = i + 1
   }
-  var bodies: List(WaterBody) = createList(WaterBody, cap: 4)
+  var bodies: List(WaterBody) = List.create(WaterBody, cap: 4)
   bodies.add(value: body)
   let updateCounts: List(Int) = { 0, 0, 0 }
   let sampleTimes: List(Float) = { 0.0, 0.0, 0.0 }
@@ -109,9 +109,9 @@ func createWaterSystem(body: view WaterBody) ret WaterSystem {
     bodies: own bodies, mesh: mesh, pipeMade: false, pipeReady: false,
     bindGen: 0 - 1, bindMade: false, time: 0.0, uniform: uniform, drawCount: 0,
     cascadesMade: false, fftGpuMade: false, fftBaked: false,
-    fftUniform: createList(Float, cap: fftUniformFloats), fftRead: createList(Float, cap: 16),
+    fftUniform: List.create(Float, cap: fftUniformFloats), fftRead: List.create(Float, cap: 16),
     fftFrameMade: false, fftTestMode: false,
-    evolveUniform: createList(Float, cap: 8), stageUniform: createList(Int32, cap: 4), performance: createWaterPerf(),
+    evolveUniform: List.create(Float, cap: 8), stageUniform: List.create(Int32, cap: 4), performance: createWaterPerf(),
     fftAllocatedSize: 0, fftAllocatedCount: 0, fftSeaState: body,
     fftFrame: 0, fftNeedsRefresh: true, fftUpdateCounts: own updateCounts,
     fftSampleTimes: own sampleTimes, fftLastUpdates: 0
@@ -155,28 +155,28 @@ func ensureWaterPipeline(waterSystem: mod WaterSystem) {
   }
   let sourceC: Buffer(Any) = source.toCStr()
   let shaderMod: Ptr = makeShaderModule(wgsl: sourceC)
-  var attrs: List(WGPUVertexAttribute) = createList(WGPUVertexAttribute, cap: 3)
+  var attrs: List(WGPUVertexAttribute) = List.create(WGPUVertexAttribute, cap: 3)
   attrs.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0 as UInt64, shaderLocation: 0 as UInt32 })
   attrs.add(value: { format: WGPUVertexFormat_Float32x3, offset: 12 as UInt64, shaderLocation: 1 as UInt32 })
   attrs.add(value: { format: WGPUVertexFormat_Float32x2, offset: 24 as UInt64, shaderLocation: 2 as UInt32 })
-  var vbls: List(WGPUVertexBufferLayout) = createList(WGPUVertexBufferLayout, cap: 1)
+  var vbls: List(WGPUVertexBufferLayout) = List.create(WGPUVertexBufferLayout, cap: 1)
   vbls.add(value: {
     stepMode: WGPUVertexStepMode_Vertex, arrayStride: 32 as UInt64,
     attributeCount: 3 as UInt64, attributes: attrs.data
   })
-  var blends: List(WGPUBlendState) = createList(WGPUBlendState, cap: 1)
+  var blends: List(WGPUBlendState) = List.create(WGPUBlendState, cap: 1)
   blends.add(value: {
     color: { operation: WGPUBlendOperation_Add, srcFactor: WGPUBlendFactor_SrcAlpha, dstFactor: WGPUBlendFactor_OneMinusSrcAlpha },
     alpha: { operation: WGPUBlendOperation_Add, srcFactor: WGPUBlendFactor_One, dstFactor: WGPUBlendFactor_OneMinusSrcAlpha }
   })
-  var targets: List(WGPUColorTargetState) = createList(WGPUColorTargetState, cap: 1)
+  var targets: List(WGPUColorTargetState) = List.create(WGPUColorTargetState, cap: 1)
   targets.add(value: { format: gbLitFormat() as Int32, blend: blends.data, writeMask: WGPUColorWriteMask_All })
-  var frags: List(WGPUFragmentState) = createList(WGPUFragmentState, cap: 1)
+  var frags: List(WGPUFragmentState) = List.create(WGPUFragmentState, cap: 1)
   frags.add(value: {
     module: shaderMod, entryPoint: { data: gbEntryFs(), length: WGPU_STRLEN },
     targetCount: 1 as UInt64, targets: targets.data
   })
-  var depths: List(WGPUDepthStencilState) = createList(WGPUDepthStencilState, cap: 1)
+  var depths: List(WGPUDepthStencilState) = List.create(WGPUDepthStencilState, cap: 1)
   depths.add(value: {
     format: WGPUTextureFormat_Depth32Float,
     depthWriteEnabled: WGPUOptionalBool_False,
@@ -241,7 +241,7 @@ func ensureWaterBind(waterSystem: mod WaterSystem) {
   let old: Ptr = waterGet(index: 2)
   if not (old is webgpuNull()) { wgpuBindGroupRelease(bindGroup: old) }
   let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: waterGet(index: 0), groupIndex: 0 as UInt32)
-  var entries: List(WGPUBindGroupEntry) = createList(WGPUBindGroupEntry, cap: 12)
+  var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 12)
   entries.add(value: { binding: 0 as UInt32, buffer: gbFrameUbuf(), size: gbFrameBytes() as UInt64 })
   entries.add(value: { binding: 1 as UInt32, buffer: waterGet(index: 1), size: (waterUniformFloats * 4) as UInt64 })
   entries.add(value: { binding: 2 as UInt32, textureView: gbViewDepth() })
@@ -341,12 +341,12 @@ func drawWaterBody(waterSystem: mod WaterSystem, body: view WaterBody, camera: v
 
   let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
   let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
-  var colorAtts: List(WGPURenderPassColorAttachment) = createList(WGPURenderPassColorAttachment, cap: 1)
+  var colorAtts: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 1)
   colorAtts.add(value: {
     view_: gbLitView(), depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32,
     loadOp: WGPULoadOp_Load, storeOp: WGPUStoreOp_Store
   })
-  var depthAtts: List(WGPURenderPassDepthStencilAttachment) = createList(WGPURenderPassDepthStencilAttachment, cap: 1)
+  var depthAtts: List(WGPURenderPassDepthStencilAttachment) = List.create(WGPURenderPassDepthStencilAttachment, cap: 1)
   depthAtts.add(value: {
     view_: gbViewDepth(),
     depthLoadOp: WGPULoadOp_Undefined, depthStoreOp: WGPUStoreOp_Undefined,

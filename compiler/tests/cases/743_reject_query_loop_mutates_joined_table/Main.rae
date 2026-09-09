@@ -8,8 +8,8 @@ type World { positions: ComponentTable(Position), velocities: ComponentTable(Vel
 # #814: the query loop binds rows of its joined tables (queryModAt underneath),
 # so mutating a joined table inside the body is the same hazard. Rejected.
 func main() {
-  var pos: ComponentTable(Position) = createComponentTable(Position)
-  var vel: ComponentTable(Velocity) = createComponentTable(Velocity)
+  var pos: ComponentTable(Position) = ComponentTable.create(Position)
+  var vel: ComponentTable(Velocity) = ComponentTable.create(Velocity)
   let e: EntityId = { index: 1, generation: 0 }
   componentSet(this: pos, entity: e, data: Position { x: 1 })
   componentSet(this: vel, entity: e, data: Velocity { v: 1 })

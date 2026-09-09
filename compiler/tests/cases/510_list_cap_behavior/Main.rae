@@ -3,7 +3,7 @@
 # kicks in — exercise both paths against Live VM and Compiled C.
 func main() {
   # cap: 0 ("no cap") — first add must trigger a growth.
-  let zero: List(Int) = createList(Int, cap: 0)
+  let zero: List(Int) = List.create(Int, cap: 0)
   log("zero.start len={zero.length} cap={zero.cap}")
   zero.add(value: 10)
   log("zero.add1 len={zero.length} cap={zero.cap}")
@@ -13,7 +13,7 @@ func main() {
   log("zero.get0={zero.copyAt(index: 0)} zero.get2={zero.copyAt(index: 2)}")
 
   # cap: 8 — pre-allocated; the first 8 adds must not regrow.
-  let pre: List(Int) = createList(Int, cap: 8)
+  let pre: List(Int) = List.create(Int, cap: 8)
   log("pre.start len={pre.length} cap={pre.cap}")
   var i: Int = 0
   loop i < 8 {

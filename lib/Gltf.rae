@@ -70,7 +70,7 @@ func glbFailed(msg: view String) ret Glb {
     ok: false,
     errorMsg: "{msg}",
     doc: parseJson(source: "null"),
-    binOffset: 0, binLength: 0, bytes: createList(Int, cap: 0)
+    binOffset: 0, binLength: 0, bytes: List.create(Int, cap: 0)
   }
 }
 
@@ -303,7 +303,7 @@ func accessorAt(glb: view Glb, index: view Int) pub ret Accessor {
 # which is what WEIGHTS_0 stored as ubyte needs.
 func readFloats(glb: view Glb, index: view Int) pub ret List(Float) {
   let a: Accessor = accessorAt(glb: glb, index: index)
-  let out: List(Float) = createList(Float, cap: a.count * a.components)
+  let out: List(Float) = List.create(Float, cap: a.count * a.components)
   if a.ok is false {
     ret own out
   }
@@ -337,7 +337,7 @@ func readFloats(glb: view Glb, index: view Int) pub ret List(Float) {
 # practice; joint indices are ubyte or ushort.
 func readInts(glb: view Glb, index: view Int) pub ret List(Int) {
   let a: Accessor = accessorAt(glb: glb, index: index)
-  let out: List(Int) = createList(Int, cap: a.count * a.components)
+  let out: List(Int) = List.create(Int, cap: a.count * a.components)
   if a.ok is false {
     ret own out
   }
@@ -385,8 +385,8 @@ func loadPrimitive(glb: view Glb, meshIndex: view Int, primIndex: view Int) pub 
   let uvAcc: Int = intField(glb: glb, obj: attrs, key: "TEXCOORD_0", fallback: 0 - 1)
   let idxAcc: Int = intField(glb: glb, obj: prim, key: "indices", fallback: 0 - 1)
 
-  let verts: List(Float) = createList(Float, cap: 0)
-  let indices: List(Int) = createList(Int, cap: 0)
+  let verts: List(Float) = List.create(Float, cap: 0)
+  let indices: List(Int) = List.create(Int, cap: 0)
   if posAcc < 0 {
     ret MeshData { verts: own verts, indices: own indices, vertCount: 0 }
   }
@@ -401,7 +401,7 @@ func loadPrimitive(glb: view Glb, meshIndex: view Int, primIndex: view Int) pub 
   # Read the index list up front: flat-normal generation below needs to
   # know which vertices share a face, and a non-indexed primitive is just
   # the identity index list.
-  let tri: List(Int) = createList(Int, cap: vertCount)
+  let tri: List(Int) = List.create(Int, cap: vertCount)
   if idxAcc >= 0 {
     let src: List(Int) = readInts(glb: glb, index: idxAcc)
     var k: Int = 0
@@ -429,7 +429,7 @@ func loadPrimitive(glb: view Glb, meshIndex: view Int, primIndex: view Int) pub 
   # vertices are shared the last triangle wins, which is the accepted cost
   # of flat shading an indexed mesh.
   if hasNrm is false {
-    nrm = createList(Float, cap: vertCount * 3)
+    nrm = List.create(Float, cap: vertCount * 3)
     var z: Int = 0
     loop z < vertCount * 3 {
       nrm.add(value: 0.0)
@@ -532,8 +532,8 @@ func loadPrimitive(glb: view Glb, meshIndex: view Int, primIndex: view Int) pub 
 # applied. For an unskinned model this would need the node hierarchy
 # walked instead.
 func loadAllPrimitives(glb: view Glb) pub ret MeshData {
-  let verts: List(Float) = createList(Float, cap: 0)
-  let indices: List(Int) = createList(Int, cap: 0)
+  let verts: List(Float) = List.create(Float, cap: 0)
+  let indices: List(Int) = List.create(Int, cap: 0)
   var total: Int = 0
   if glb.ok is false {
     ret MeshData { verts: own verts, indices: own indices, vertCount: 0 }
@@ -576,7 +576,7 @@ func loadAllPrimitives(glb: view Glb) pub ret MeshData {
 # lets an example FRAME whatever it loaded instead of hard-coding an
 # offset that is right for exactly one file.
 func meshBounds(meshData: view MeshData) pub ret List(Float) {
-  let out: List(Float) = createList(Float, cap: 6)
+  let out: List(Float) = List.create(Float, cap: 6)
   if meshData.vertCount is 0 {
     var z: Int = 0
     loop z < 6 {

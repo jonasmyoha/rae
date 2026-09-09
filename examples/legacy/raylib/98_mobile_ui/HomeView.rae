@@ -90,7 +90,7 @@ func buildHomeGridRow(
   let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: row, kind: layH, gap: homeGridTileGap, alignCross: alignS)
 
-  let kids: List(EntityId) = createList(EntityId, cap: homeGridColumns)
+  let kids: List(EntityId) = List.create(EntityId, cap: homeGridColumns)
   let cols: Int = homeCols()
   var col: Int = 0
   loop col < cols {
@@ -119,7 +119,7 @@ func buildHomeCoverGrid(world: mod UiWorld, albums: view List(Album), library: v
   let alignS: AlignKind = AlignKind.start
   setLayout(world: world, entity: grid, kind: layV, gap: homeGridTileGap, alignCross: alignS)
 
-  let rowKids: List(EntityId) = createList(EntityId, cap: rows)
+  let rowKids: List(EntityId) = List.create(EntityId, cap: rows)
   var i: Int = 0
   loop i < rows {
     let startIndex: Int = i * cols
@@ -158,7 +158,7 @@ func buildHomeBody(world: mod UiWorld, albums: view List(Album), library: view L
   if hasRecent {
     kidsCap = 4
   }
-  let kids: List(EntityId) = createList(EntityId, cap: kidsCap)
+  let kids: List(EntityId) = List.create(EntityId, cap: kidsCap)
   kids.add(value: sub)
   if hasRecent {
     let recentHeader: EntityId = buildRecentlyPlayedHeader(world: world)
@@ -193,7 +193,7 @@ func mountHomePage(
   let topBar: EntityId = buildPageTopBar(world: world, title: "Good evening")
   let body: EntityId = buildHomeBody(world: world, albums: albums, library: state.library, history: state.playHistory, rounded: state.settings.roundedAlbumCovers, scrollY: scrollY)
 
-  let kids: List(EntityId) = createList(EntityId, cap: 2)
+  let kids: List(EntityId) = List.create(EntityId, cap: 2)
   kids.add(value: topBar)
   kids.add(value: body)
   attachChildren(world: world, parent: root, kids: kids)

@@ -92,7 +92,7 @@ func loadSdfFont(jsonPath: view String, rawAtlasPath: view String) ret SdfFont {
     let glyphsIdx: Int = Json.field(doc: doc, this: root, key: "glyphs")
     let glyphsArr: JsonValue = Json.jsonValueAt(doc: doc, idx: glyphsIdx)
     let n: Int = Json.arrayLen(this: glyphsArr)
-    let glyphs: List(SdfGlyph) = createList(SdfGlyph, cap: n)
+    let glyphs: List(SdfGlyph) = List.create(SdfGlyph, cap: n)
     var i: Int = 0
     loop i < n {
         let entry: JsonValue = Json.arrayAt(doc: doc, this: glyphsArr, idx: i)

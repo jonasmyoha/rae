@@ -47,10 +47,10 @@ type GameWorld {
 func createGameWorld() ret GameWorld {
   ret GameWorld {
     allocator: createEntityAllocator(),
-    positions: createComponentTable(Position),
-    velocities: createComponentTable(Velocity),
-    healths: createComponentTable(Health),
-    enemies: createComponentTable(Enemy),
+    positions: ComponentTable.create(Position),
+    velocities: ComponentTable.create(Velocity),
+    healths: ComponentTable.create(Health),
+    enemies: ComponentTable.create(Enemy),
     damage: createEventQueue(DamageEvent),
     clock: Clock { frame: 0 },
     totalEnemyHp: 0
@@ -122,7 +122,7 @@ func applyDamageSystem(world: mod GameWorld) {
 # Remove enemies whose HP hit zero.
 func cullSystem(world: mod GameWorld) {
   let tagged: List(EntityId) = taggedEntities(table: world.enemies)
-  let dead: List(EntityId) = createList(EntityId, cap: 8)
+  let dead: List(EntityId) = List.create(EntityId, cap: 8)
   loop var i: Int = 0, i < tagged.length, ++i {
     let e: EntityId = rae_ext_rae_buf_get(buf: tagged.data, index: i)
     if componentHas(this: world.healths, entity: e) {
