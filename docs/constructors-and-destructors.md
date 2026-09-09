@@ -1,9 +1,9 @@
 # Constructors, destructors and copies in Rae: `create`, `drop`, `copy`
 
 Status: **implemented — `drop` (#881), `copy` (#882), `create` (#880), 2026-09-09.**
-Known limits: a produced value passed straight to a `view`/`mod` parameter is
-not released (#884, the pre-existing temporary rule); `create` in a generic
-struct's literal field with an unsubstituted `T` is not resolved (#885). The rest of this document is the design as approved for implementation. This document covers constructors, destructors and copies only.
+Known limits: `create` in a generic struct's literal field with an
+unsubstituted `T` is not resolved (#885); a temporary made in a `loop`
+condition is released once, after the loop, not per iteration (#886). The rest of this document is the design as approved for implementation. This document covers constructors, destructors and copies only.
 Native
 pointers, `unsafe`, GPU resource identity and the rest of
 `ptr-and-gpu-resource-design.md` (#878) are out of scope; section 8 says only
@@ -207,6 +207,12 @@ types count and what dropping one does:
 - **Once.** Each initialized value that has not been moved out drops exactly
   once. `own` parameters, `own` fields, `if let` payloads and returned locals
   follow the existing move rules; moved-from storage is skipped.
+
+A **temporary** — a produced value that no binding names, such as the argument
+in `inspect(slot: create(id: 1))` — lives to the end of the statement that made
+it and drops there (#884). In a `ret`, the temporaries made while computing the
+value drop before the function's locals do. An `if` condition's temporary drops
+after the whole `if`.
 
 Nothing runs on process abort or an unhandled panic; that is unchanged and not
 promised. `defer` stays a separate statement for caller-side cleanup and is not
