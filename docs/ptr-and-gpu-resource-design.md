@@ -1,80 +1,577 @@
-# GPU resources and C interop using Rae's lifecycle functions
+# Pointer and GPU interop over Rae lifecycle values
 
-Status: **new proposal, revision 5, 2026-09-09.** Rewritten around the shipped
-`create`, `drop` and `copy` model. The remaining low-level rules below are
-recommendations for review, not implemented or approved language changes.
+Status: **revision 6 proposal, 2026-09-10. Exact syntax and rules await
+maintainer approval. No language changes in this document are implemented.**
+
+This revision starts from the shipped `create`, `drop` and `copy` behavior and
+the working `webgpu/ReadRequest` pilot. It proposes one additional language
+boundary: raw pointer operations and foreign calls are explicit `unsafe` code.
+It does not add another ownership system.
 
 ## Recommendation
 
-Build the GPU library with ordinary Rae types and lifecycle functions:
-
-- A resource owner defines `create` and `drop`. It normally has no `copy`.
-- `TextureId` and `BufferId` are ordinary copyable identities into that owner.
-- The App owns the resource manager and passes it explicitly to systems.
-- Native pointers are implementation data. Propose explicit `unsafe` operations
-  for inspecting or manipulating them, available to every library author.
-
-No ownership properties, type registration, special module privileges or runtime
-parameter on `main` are needed. Do not introduce a separate opacity feature as a
-prerequisite: first test whether restricting raw pointer access itself provides
-an adequate boundary for these wrappers.
-
-This replaces the previous GPU proposal, not the shipped lifecycle contract.
-[Constructors, destructors and copies](constructors-and-destructors.md) is the
-source of truth for those semantics. Historical queue wording or earlier drafts
-must not be used to reintroduce removed properties or container restrictions.
-
-## What already works
-
-Recent compiler work provides constructors by expected type, destructors by
-name/signature, custom independent copies, cleanup of temporaries and rejection
-of stored `view`/`mod` fields. Explicit `value.drop()` consumes a value. Owners can
-live in fields and supported containers; copying follows their element rules.
-
-The existing [resource lifetime example](../examples/120_resource_lifetimes/Main.rae)
-acquires a native mixer slot in `create`, releases it in `drop`, and implements
-`copy` by acquiring a different slot. It demonstrates lifecycle ownership, not
-complete protection against forging native handles or asynchronous GPU hazards.
-
-This is enough to express the ownership half of a native wrapper. We should
-exercise and fix that machinery rather than add another ownership system.
-
-## An ordinary graphics application
-
-These GPU APIs are proposed; the lifecycle syntax is already Rae. All examples
-in this document describe intended APIs rather than runnable GPU examples.
-The `GpuResources` constructor, texture loading/drawing and window polling are
-the proposed library operations; this example shows the App and system that own
-and use them.
+Use these two spellings:
 
 ```rae
+unsafe {
+  # individual raw operations are allowed in this lexical block
+}
+
+unsafe func adoptNativeBuffer(handle: copy Ptr, byteCount: view Int) ret NativeBuffer {
+  # callers must accept this function's documented native preconditions
+}
+```
+
+Keep the existing spelling for foreign declarations:
+
+```rae
+func nativeBufferCreate(byteCount: view Int) extern("example_buffer_create") ret Ptr
+```
+
+Every call to an `extern` function is unsafe automatically. The declaration
+does not repeat the word because `extern("...")` already identifies the foreign
+boundary. An `unsafe func` is an ordinary Rae function whose caller must uphold
+preconditions that its types cannot express. Calling either form requires an
+`unsafe { ... }` block.
+
+An unsafe function body does not become an unmarked region. Raw operations in
+its implementation still appear inside `unsafe { ... }`. This keeps the two
+responsibilities visible:
+
+- `unsafe func` tells the caller that it accepts an external obligation.
+- `unsafe { ... }` shows where an implementation relies on that obligation.
+
+An unsafe block has ordinary block control flow and cleanup. `ret`, `break` and
+scope exit behave exactly as they do in any other block; unsafe creates no new
+lifetime or cleanup exception.
+
+Any user module may declare externs, unsafe functions and unsafe blocks. There
+is no trusted-module list, package registration, stdlib privilege, special
+`main` parameter, opaque type modifier or noncopyable modifier.
+
+Unsafe code does not disable Rae's ownership rules. It cannot make a type with
+`drop` and no `copy` copyable, revive a consumed binding, store a `view`/`mod`
+reference, silently move a value or suppress cleanup.
+
+## What is already Rae today
+
+[Constructors, destructors and copies](constructors-and-destructors.md) is the
+implemented lifecycle contract:
+
+- `create` is selected by the expected result type.
+- A correctly shaped `drop(this: mod T)` runs once for each owned value.
+- Explicit `value.drop()` consumes the value.
+- A correctly shaped `copy(this: view T) ret T` creates an independent value.
+- A type with `drop` and no `copy` cannot be copied.
+- Owner fields, optionals, returns and supported containers recursively move and
+  clean up their values.
+- `if let app: App = App.create()` directly owns the successful payload and
+  drops it when the branch ends.
+- Struct copying remains a full value copy. Heap-owning fields use their copy
+  operations. A resource ID copies its identity bits because those bits are the
+  complete value of the ID.
+- Stored `view` and `mod` fields are rejected.
+
+The [resource lifetime example](../examples/120_resource_lifetimes/Main.rae)
+demonstrates these rules for native audio slots. The
+[App owner regression](../compiler/tests/cases/775_if_let_app_owner/Main.rae)
+proves direct optional ownership, nested fields, repeated `mod` frame calls,
+early returns and partial-construction cleanup.
+
+The proposal below does not alter any of those rules.
+
+## What the shipped readback pilot proves
+
+`webgpu/ReadRequest` is an ordinary Rae type with a raw native request field,
+metadata, `create`, `drop` and no `copy`. The hardware and deterministic tests
+prove:
+
+- optional construction failure;
+- transfer through a returned owner and an `own` parameter;
+- automatic branch cleanup and explicit consuming drop;
+- cleanup through nested owner fields and `List(ReadRequest)`;
+- two independent requests and repeated map/unmap;
+- a destination List may grow while mapping is pending;
+- cancellation callbacks may arrive after the Rae owner is gone; and
+- native request and buffer references are released exactly once.
+
+The native bridge owns stable callback state. It never retains a pointer into a
+Rae List. This is the correct asynchronous lifetime protocol.
+
+The pilot is not yet a safe public pointer boundary. Its source can currently
+read `nativeRequest: Ptr`, call raw externs without a marker, and accept a raw
+destination pointer in `copyTo`. Revision 6 makes those operations explicit and
+keeps the lifecycle behavior unchanged.
+
+## Exact proposed pointer rules
+
+`Ptr` remains a primitive for an untyped foreign address. It never owns the
+allocation it names. Copying a Ptr copies an address, not the foreign object.
+
+The following source operations require an enclosing unsafe block:
+
+1. Creating a Ptr value, including a cast, null/default initialization, native
+   address extraction or an extern result.
+2. Reading, writing, comparing, copying or moving a Ptr value.
+3. Reading or writing a struct field whose declared type is Ptr.
+4. Constructing or default-initializing a struct payload that initializes a Ptr
+   field, including an omitted default for that field.
+5. Reading or writing a `List(Ptr)`, `Array(Ptr, ...)`, `opt Ptr` or generic
+   specialization at the point where it produces, consumes or copies a Ptr.
+6. Pointer casts, arithmetic and dereference. Pointer arithmetic and dereference
+   should remain unavailable until a concrete API separately justifies their
+   spelling; `unsafe` does not make an unimplemented operator exist.
+7. Calling an extern function or an `unsafe func`.
+8. Forming, installing or reading a raw callback address or userdata Ptr.
+
+Declaring a type with a Ptr field is allowed in any module. Declaring an extern
+is also allowed. The boundary applies when code manipulates the value or crosses
+the ABI.
+
+A call whose argument or result is directly `Ptr` requires unsafe even if the
+called Rae function is not declared unsafe, because the call itself produces or
+consumes a raw pointer. Mark the function `unsafe func` as well when it delegates
+additional validity, ownership, alignment or lifetime obligations to callers.
+A safe factory can return a wrapper containing Ptr because the caller receives
+the whole wrapper rather than its raw field.
+
+Safe code may perform these whole-value operations without seeing the Ptr:
+
+- own a wrapper returned by a safe constructor;
+- borrow the whole wrapper as `view T` or `mod T`;
+- call its safe methods;
+- move it with `own` into a field, return, optional or supported container;
+- let normal scope cleanup call its destructor; and
+- read or modify ordinary public metadata fields.
+
+These operations are safe because the compiler moves or borrows the complete
+value according to the shipped lifecycle contract. They do not project the raw
+field or manufacture a second owner.
+
+Compiler-generated moved-from bookkeeping and cleanup dispatch are not source
+pointer operations. The compiler may use null internally while implementing a
+move, but source code cannot obtain that Ptr without an unsafe site.
+
+### Defaults and partial values
+
+This is rejected in safe code because it constructs a Ptr field:
+
+```rae
+let buffer: NativeBuffer
+```
+
+It is allowed inside unsafe code only when `NativeBuffer.drop` accepts the null
+default and the programmer accepts that contract. Safe code instead calls the
+factory:
+
+```rae
+if let buffer: NativeBuffer = NativeBuffer.create(byteCount: 4096) {
+  useBuffer(buffer: buffer)
+}
+```
+
+`none` does not construct an optional payload, so an empty
+`opt NativeBuffer` is safe. Creating an empty `List(NativeBuffer)` is safe
+because no element exists yet. Moving a constructed owner into that List is
+safe. Default-constructing an Array of pointer wrappers would construct every
+element and therefore requires unsafe code unless an ordinary safe constructor
+builds valid elements.
+
+This is an operation rule, not a hidden property attached to `NativeBuffer`.
+
+## Complete user-authored native buffer module
+
+The following is the proposed complete shape of a module outside stdlib. The C
+side stores the authoritative allocation size and makes release of null harmless.
+`nativeBufferWriteByteChecked` validates the live handle, checks the index using
+overflow-safe arithmetic and performs no write on failure.
+
+```rae
+# nativeBuffer/NativeBuffer.rae
+
+type NativeBuffer {
+  handle: Ptr
+  byteCount: Int
+}
+
+# Existing extern syntax. Calls are unsafe by definition.
+func nativeBufferCreate(byteCount: view Int) extern("example_buffer_create") ret Ptr
+func nativeBufferConfigure(handle: copy Ptr) extern("example_buffer_configure") ret Bool
+func nativeBufferRelease(handle: copy Ptr) extern("example_buffer_release") ret Ptr
+func nativeBufferWriteByteChecked(
+  handle: copy Ptr,
+  index: view Int,
+  value: view UInt8
+) extern("example_buffer_write_byte_checked") ret Bool
+
+# Safe factory. Failure before the return releases every acquired native value.
+func create(byteCount: view Int) ret opt NativeBuffer {
+  if byteCount < 1 {
+    ret none
+  }
+  unsafe {
+    let handle: Ptr = nativeBufferCreate(byteCount: byteCount)
+    if not nativeBufferConfigure(handle: handle) {
+      nativeBufferRelease(handle: handle)
+      ret none
+    }
+    ret NativeBuffer { handle: handle, byteCount: byteCount }
+  }
+}
+
+# Safe borrowed operation. Public metadata is deliberately not used as a bound.
+func writeByte(
+  this: mod NativeBuffer,
+  index: view Int,
+  value: view UInt8
+) ret Bool {
+  if index < 0 {
+    ret false
+  }
+  unsafe {
+    ret nativeBufferWriteByteChecked(
+      handle: this.handle,
+      index: index,
+      value: value
+    )
+  }
+}
+
+# Safe destructor around a null-safe native release. There is no copy function.
+func drop(this: mod NativeBuffer) {
+  unsafe {
+    this.handle = nativeBufferRelease(handle: this.handle)
+  }
+}
+
+# Adoption cannot verify unique ownership, so its caller accepts that obligation.
+unsafe func adoptNativeBuffer(
+  handle: copy Ptr,
+  byteCount: view Int
+) ret NativeBuffer {
+  unsafe {
+    ret NativeBuffer { handle: handle, byteCount: byteCount }
+  }
+}
+
+# Returning an existing whole owner is an ordinary move.
+func passThrough(buffer: own NativeBuffer) ret NativeBuffer {
+  ret buffer
+}
+```
+
+`create` is safe because it accepts ordinary values, validates them, confines
+the foreign work to an unsafe block and returns either one valid owner or none.
+If configure fails, the local raw handle is released before returning. Once the
+struct is constructed, every path is covered by Rae cleanup.
+
+`writeByte` is safe even if application code changes `buffer.byteCount`. It does
+not pass that public field as the authoritative bound. The native allocation
+record validates the actual handle and size:
+
+```rae
+if let buffer: NativeBuffer = NativeBuffer.create(byteCount: 16) {
+  buffer.byteCount = 1000000
+  let wrote: Bool = writeByte(this: buffer, index: 999999, value: 7 as UInt8)
+  # wrote is false; no out-of-bounds access occurs.
+}
+```
+
+Public metadata may affect display, scheduling or an early conservative reject.
+It must never enlarge the range accepted by a safe memory operation. A pure Rae
+GPU manager follows the same rule: validate an ID against its authoritative
+manager slot, generation, usage and allocation size.
+
+### Ordinary owner use
+
+```rae
+func consume(buffer: own NativeBuffer) ret Bool {
+  # buffer drops on return.
+  ret writeByte(this: buffer, index: 0, value: 42 as UInt8)
+}
+
+func demonstrateOwners() ret Bool {
+  let buffers: List(NativeBuffer) = List.create(NativeBuffer, cap: 2)
+
+  if let first: NativeBuffer = NativeBuffer.create(byteCount: 16) {
+    buffers.add(value: own first)
+  } else {
+    ret false
+  }
+
+  if let second: NativeBuffer = NativeBuffer.create(byteCount: 32) {
+    let returned: NativeBuffer = passThrough(buffer: own second)
+    if not consume(buffer: own returned) {
+      ret false
+    }
+  } else {
+    ret false
+  }
+
+  # The List drops its first NativeBuffer here.
+  ret true
+}
+
+func explicitCancellation() ret Bool {
+  if let buffer: NativeBuffer = NativeBuffer.create(byteCount: 64) {
+    buffer.drop()
+    # buffer is consumed and cannot be used again.
+    ret true
+  }
+  ret false
+}
+```
+
+No second mutable owner binding is needed after `if let`. The branch binding is
+the owner and can be borrowed as `mod`. The List and optional behavior are the
+already shipped behavior, not permissions granted by unsafe code.
+
+For this owner, early close is spelled `buffer.drop()` and consumes the value.
+There is no reusable `close` state. A different API may define an ordinary
+`close(this: mod T)` transition when callers must retain and inspect a closed
+value; its `drop` must still be a harmless cleanup backstop. That is a library
+state machine, not another language lifecycle hook.
+
+An infallible independent native copy could use the shipped
+`func copy(this: view T) ret T` hook. This buffer deliberately has none because
+allocation and device copies can fail. A named fallible operation is clearer:
+
+```rae
+func duplicateBuffer(source: view NativeBuffer) ret opt NativeBuffer
+```
+
+It must allocate independent native storage. Retaining or aliasing the same
+handle is not a deep copy. An App or manager containing `NativeBuffer` therefore
+also cannot be copied through its fields.
+
+## Rejected duplication and representation access
+
+Given a live `first: NativeBuffer`, safe code gets these diagnostics:
+
+```rae
+let second: NativeBuffer = first
+# error: NativeBuffer has drop but no copy; move it with own or define a real copy
+
+let handle: Ptr = first.handle
+# error: reading a Ptr field requires unsafe { ... }
+
+first.handle = otherHandle
+# error: writing a Ptr field requires unsafe { ... }
+
+let forged: NativeBuffer = { handle: otherHandle, byteCount: 64 }
+# error: initializing a Ptr field requires unsafe { ... }
+
+let empty: NativeBuffer
+# error: default-initializing a Ptr field requires unsafe { ... }
+```
+
+The first error remains inside an unsafe block. Unsafe authorizes the pointer
+operations it encloses; it does not bypass the missing copy function. A library
+author can intentionally forge a wrapper inside unsafe code, just as C can. That
+site carries responsibility for unique ownership, validity and eventual drop.
+
+The following raw adoption is explicit at both levels:
+
+```rae
+unsafe {
+  let raw: Ptr = obtainPointerSomehow()
+  let buffer: NativeBuffer = adoptNativeBuffer(handle: raw, byteCount: 64)
+  useBuffer(buffer: buffer)
+}
+```
+
+`adoptNativeBuffer` is unsafe because no implementation can infer whether
+`raw` is live, uniquely transferred, correctly typed or owned by the matching
+foreign allocator.
+
+## Extern and unsafe-function obligations
+
+An unsafe block means the author has checked every documented precondition for
+the enclosed operation. It is not a general request to ignore diagnostics.
+
+For an extern call, the author is responsible for:
+
+- matching the declared C ABI, including widths, layout and calling convention;
+- passing live pointers with the required alignment and access mode;
+- keeping pointed-to storage alive for the full time C may use it;
+- respecting thread, context and reentrancy constraints;
+- checking return/status values before using outputs; and
+- following the foreign ownership and release protocol exactly once.
+
+For an `unsafe func`, its documentation states the subset delegated to the
+caller. The implementation remains responsible for everything else. A safe Rae
+function may use unsafe internally only when it establishes all preconditions
+it hides from its caller.
+
+All extern calls are unsafe, including calls whose visible signature contains
+only numbers. C implementation behavior and ABI agreement are outside Rae's
+type proof. Rather than add `safe extern` or privileged declarations, expose an
+ordinary safe Rae wrapper when a foreign operation has a safe contract.
+
+## Raw callbacks and future callables
+
+Rae currently has no first-class function values or Rae-to-C callback syntax.
+This proposal does not add either feature. Existing WebGPU callbacks remain in
+generic C ABI glue with request-owned native state.
+
+A callback stored as Ptr follows the pointer rules. Obtaining the callback
+address, placing it in a C callback-info field, reading it back and passing its
+userdata are unsafe. The unsafe site must establish:
+
+- the exact C signature and calling convention;
+- stable callback and userdata addresses;
+- a lifetime extending through a possible late callback;
+- thread-safe access or confinement to the documented thread; and
+- cancellation that does not free callback-reachable state early.
+
+A pointer into a Rae stack value, List storage or other movable allocation
+cannot be retained by an asynchronous callback. The readback bridge is the
+model: native request state holds separate owner/callback references, and the
+callback may retire its reference after Rae cancellation.
+
+If Rae later gains callable values, unsafe is part of the callable type/effect.
+Assigning an unsafe function to a safe callable, returning it through a generic
+identity helper or erasing the effect through an alias must be rejected. Calling
+an unsafe callable requires an unsafe block. No callable syntax is proposed or
+implemented by this work; the non-erasure rule prevents this boundary from
+being designed away accidentally later.
+
+## Generics, reflection and serialization
+
+Unsafe cannot disappear through a generic specialization.
+
+Safe generic code may move, borrow and drop a whole `NativeBuffer` because those
+operations use the normal lifecycle contract. `List(NativeBuffer).add(value:
+own buffer)`, `viewAt` of the whole wrapper and List cleanup remain legal.
+
+A generic operation that produces or consumes Ptr becomes unsafe at the
+specialization site. For example, `identity(Ptr, value: raw)` and
+`List(Ptr).copyAt(...)` require an unsafe block. The compiler must never infer a
+safe specialization merely because the source wrote a generic `T`.
+
+Existing copy rules still govern aggregates:
+
+- copying `NativeBuffer` fails because it has drop and no copy;
+- copying a struct containing `NativeBuffer` fails transitively;
+- copying a copyable record containing a Ptr is itself a raw Ptr copy and
+  requires unsafe code; and
+- unsafe does not turn a bitwise copy into an independent native allocation.
+
+Field reflection follows the selected field type. A safe `fields(value)` loop
+may process ordinary metadata fields. If it selects a Ptr field, compiling that
+specialization reports that raw field access requires unsafe. Binding it as
+`any` does not erase the requirement.
+
+Automatic formatting, equality, hashing or serialization must not print,
+compare or encode a Ptr through a safe generic path. A reflection serializer
+that reaches a Ptr field fails to compile unless its operation and call site are
+unsafe. A custom safe serializer can explicitly emit ordinary metadata while
+omitting native representation:
+
+```rae
+func describe(buffer: view NativeBuffer) ret String {
+  ret "NativeBuffer(byteCount={buffer.byteCount})"
+}
+```
+
+Deserialization cannot construct a pointer owner from an address. A safe decoder
+must call a safe factory and create a new allocation. Serializing an address and
+later adopting it is an unsafe application protocol, not value persistence.
+
+These checks are based on the concrete operation's resolved type. They do not
+need a module allowlist, an owner registry or an opaque/noncopyable property.
+
+## ReadRequest after enforcement
+
+The current owner remains structurally the same:
+
+```rae
+type ReadRequest {
+  nativeRequest: Ptr
+  byteCount: UInt64
+}
+```
+
+Its implementation gains local markers:
+
+```rae
+func drop(this: mod ReadRequest) {
+  unsafe {
+    this.nativeRequest = Readback.releaseRead(request: this.nativeRequest)
+  }
+}
+
+func poll(this: view ReadRequest) ret Int {
+  unsafe {
+    ret Readback.pollRead(request: this.nativeRequest)
+  }
+}
+```
+
+The current `copyTo(... destination: Ptr ...)` remains an unsafe internal
+operation because its caller supplies an untyped address and claimed capacity.
+The safe public form takes a collection borrow and exposes its address only
+inside the wrapper for the duration of the synchronous copy:
+
+```rae
+func copyTo(
+  this: view ReadRequest,
+  destination: mod List(UInt8)
+) ret Bool {
+  unsafe {
+    ret Readback.copyReadChecked(
+      request: this.nativeRequest,
+      destination: destination.data,
+      destinationBytes: destination.length
+    ) is 1
+  }
+}
+```
+
+The native request's stored size and the collection's actual initialized byte
+length are authoritative. `ReadRequest.byteCount` may be useful metadata, but
+changing it cannot enlarge the native copy. The native function retains neither
+`destination.data` nor the List. Growth before or after this call remains safe.
+
+This safe overload may require a small ABI adjustment during implementation.
+It does not change the callback-owned request state or cancellation protocol.
+
+## Normal App and RenderSystem ownership
+
+The GPU library uses the same lifecycle functions. Typed IDs are copyable
+identities; `GpuResources` owns allocations and has `create`/`drop` with no
+`copy`. The exact manager identity representation is intentionally deferred to
+the separate GPU identity review.
+
+```rae
+open gpu/GpuResources
+
 type RenderSystem {
   resources: GpuResources
-  texture: opt TextureId
+  waterTexture: TextureId
 }
 
 func create(texturePath: view String) ret opt RenderSystem {
   if let resources: GpuResources = GpuResources.create() {
-    var renderSystem: RenderSystem = {
-      resources: own resources,
-      texture: none
-    }
     if let texture: TextureId = loadTexture(
-      resources: renderSystem.resources,
+      resources: resources,
       path: texturePath
     ) {
-      renderSystem.texture = texture
-      ret renderSystem
+      ret RenderSystem {
+        resources: own resources,
+        waterTexture: texture
+      }
     }
-    # Texture loading failed. The local renderSystem drops its resources.
+    # resources drops here if texture creation failed.
   }
   ret none
 }
 
 func drawFrame(this: mod RenderSystem) {
-  if let texture: view TextureId => this.texture {
-    drawTexture(resources: this.resources, texture: texture)
-  }
+  drawTexture(
+    resources: this.resources,
+    texture: this.waterTexture
+  )
 }
 
 type App {
@@ -82,7 +579,9 @@ type App {
 }
 
 func create() ret opt App {
-  if let renderSystem: RenderSystem = RenderSystem.create(texturePath: "water.png") {
+  if let renderSystem: RenderSystem = RenderSystem.create(
+    texturePath: "water.png"
+  ) {
     ret App { renderSystem: own renderSystem }
   }
   ret none
@@ -97,301 +596,108 @@ func main() {
     loop not shouldClose(resources: app.renderSystem.resources) {
       frame(app: app)
     }
-    # app leaves scope here; its owned fields are cleaned up automatically.
+    # app, RenderSystem and GpuResources drop in field order here.
   } else {
     log("App creation failed")
   }
 }
 ```
 
-The ownership tree is explicit:
+`gpu/GpuResources` supplies `GpuResources`, `TextureId`, `loadTexture`,
+`drawTexture` and `shouldClose`. Their ownership roles are fixed here; the
+fields and bit layout of `TextureId` wait for the manager-identity review. The
+application does not depend on that representation.
+
+There is one persistent ownership tree:
 
 ```text
-main's app
-  renderSystem
-    resources   -> owns the GPU context and actual texture allocation
-    texture     -> stores an optional ID naming that allocation
+main branch owns App
+  App owns RenderSystem
+    RenderSystem owns GpuResources
+      GpuResources owns native resources and pending-operation state
+    RenderSystem stores copyable TextureId values
 ```
 
-The App and all of this state survive across frames. `frame(app: mod App)` and
-`drawFrame(this: mod RenderSystem)` temporarily borrow existing state; neither
-receives ownership or constructs another manager. `own` appears at construction
-boundaries to put each value into its lasting owner without copying it. Returning
-the owned local `renderSystem` transfers it out under the existing return rules.
+`main` has its normal signature. No runtime resource is injected. Frame calls
+borrow the existing App and manager. There is no redundant mutable rebinding
+after `if let`, no hidden current manager and no stored borrow between systems.
 
-`if let app: App = App.create()` already takes ownership of the produced optional
-payload. The then-branch owns `app`; it needs no second binding or `own` transfer.
-An owned `let` binding can be borrowed through `mod` to update its contents;
-`var` is needed if the binding itself must be reassigned. Exiting the branch,
-including an early return, drops the owned App and its fields. A `none` result
-enters the else-branch without constructing an App there.
+Copying `TextureId` copies the complete identity value. It does not deep-copy a
+texture because the ID does not own that texture. A named fallible operation
+such as `duplicateTexture(resources: mod GpuResources, source: view TextureId)`
+creates an independent allocation when that behavior is wanted.
 
-This pattern is supported by the Compiled target. The focused
-[App-owner regression](../compiler/tests/cases/775_if_let_app_owner/Main.rae)
-checks nested `mod` calls over multiple frames and exact-once resource cleanup
-on normal branch exit, early return and constructor failure. The GPU library
-operations shown above remain proposed; that ownership behavior is tested today.
+Safe manager operations validate the ID against authoritative manager state:
+manager identity, kind, live slot, generation, usage and overflow-safe range.
+Changing a caller-visible cached field cannot extend access. Resource recording,
+submission retirement, manager identity and exhaustion remain library design
+work; unsafe syntax does not solve those protocols.
 
-The texture ID itself does not own or release the allocation. At scope exit,
-App field cleanup reaches `RenderSystem`, then its `GpuResources` destructor,
-which performs the native teardown protocol. App and RenderSystem need no custom
-destructors just to drop their fields, and no custom copies are provided for these
-resource-owning types. Partial App creation also cleans up the owners already
-created; there is no orphan manager on the failure path.
+## Implementation and migration boundary
 
-For a larger scene, the App can also own a `WaterSystem`. Pass the renderer's
-resource manager explicitly to the water operations, while water stores its own
-CPU data and resource IDs. Multiple water instances can use separate resource
-groups in that same manager. No system stores a borrowed reference to another
-system, and no hidden current-manager getter supplies state.
+The compiler implementation should be staged so existing bindings can migrate
+without pretending enforcement is complete:
 
-## Owners, IDs and copies
+1. Parse `unsafe { ... }` and `unsafe func`; retain the effect on resolved calls.
+2. Diagnose source Ptr creation, field access, default initialization and copy
+   outside unsafe blocks.
+3. Treat every extern call as unsafe and preserve the obligation through
+   qualified calls and every compiler-supported alias path.
+4. Apply the rule after generic substitution and during field reflection,
+   formatting and serialization generation.
+5. Add the safe ReadRequest collection-copy surface while retaining raw internal
+   functions for existing manager protocols.
+6. Inventory and migrate current Ptr/extern consumers in bounded tasks. During
+   migration, enforcement may be opt-in or diagnostic-only, but exemptions must
+   be explicit and temporary. Final enforcement waits for the compatibility
+   task and maintained example gates.
 
-| Value | Ordinary copy | Cleanup |
-| --- | --- | --- |
-| CPU pixels, descriptor, FFT snapshot | Independent owned data | Normal field/container cleanup |
-| `TextureId` or `BufferId` | Same identity value naming a separate object | No native release |
-| Native owner with `drop` and no `copy` | Compile error under the shipped lifecycle rules | Its destructor releases its resource |
-| App containing such an owner | Cannot copy the owner through an enclosing aggregate | Fields drop under the existing rules |
+Positive tests must include the same native-buffer module authored outside
+stdlib, safe wrapper use, direct `if let` owners, owner fields, returns,
+`List(NativeBuffer)`, optional failure and explicit drop.
 
-```rae
-let first: TextureId = texture
-let second: TextureId = first
-```
+Negative tests must cover every example in the rejection section, unsafe-effect
+erasure through generics/reflection/serialization, unsafe extern calls from safe
+code, default Ptr fields, and attempts to call an unsafe function without a
+block. Existing owner-container tests remain green.
 
-Both IDs refer to the same texture, just as copied entity IDs refer to the same
-entity. This is not a deep copy of the texture; the value being copied is an ID.
+This work does not add pointer arithmetic, stored borrows, first-class callables,
+a GPU backend, a native-owner property or a module permission mechanism.
 
-A GPU manager should define no `copy`: duplicating a live device, queued work and
-all resources is not a sensible implicit operation. A texture allocation is also
-usually inappropriate for `copy`, which must return a new independent `T`.
-Instead, provide an explicit fallible operation:
+## Relationship to older proposals
 
-```rae
-func duplicateTexture(resources: mod GpuResources, source: view TextureId) ret opt TextureId
-```
+Earlier native-handle drafts proposed registered modules, ownership properties,
+noncopyable/opaque declarations and a resource parameter supplied to `main`.
+Those mechanisms are withdrawn. The shipped lifecycle contract replaces their
+ownership portion. This revision proposes only a local operation/call boundary.
 
-It creates another texture and records the supported data copy. Its API specifies
-failure and when the result can be used. Native `retain` is not an implementation
-of independent value copying: it keeps the same native object alive.
+The older WebGPU management notes remain useful for asynchronous native holds,
+resource retirement and manager-owned groups. They do not define language
+semantics. The separate manager-identity review must choose an ID strategy after
+demonstrating two independent Apps, matching slots/generations, recreation and
+exhaustion. No fixed nonce, global issuer or hidden manager is approved here.
 
-Rae cannot prove that arbitrary C code inside a user `copy` actually creates
-independent native contents. That remains part of the function's contract. Do
-not confuse calling the copy hook with proving every foreign resource invariant.
+## Approval requested
 
-## The small remaining language proposal: mark raw pointer operations
+Compiler work must not begin from general agreement with this direction. It
+requires explicit approval of all of these exact points:
 
-Recommend an `unsafe` statement block and an `unsafe` function property. Their
-exact semantics need approval. Unlike a module permission scheme, this is local
-source code that any app or library can write under the same rules.
+1. Syntax is `unsafe { ... }` and `unsafe func name(...)` with no sigils.
+2. Every extern call is unsafe automatically; extern declarations retain their
+   current `func name(...) extern("symbol")` spelling.
+3. Unsafe-function bodies still mark their raw operations with unsafe blocks.
+4. The eight listed Ptr operations require unsafe, while whole-owner
+   borrow/move/return/container/drop operations remain ordinary Rae.
+5. Unsafe never bypasses copy, move, drop or stored-borrow diagnostics.
+6. Generic/reflection/serialization resolution cannot erase Ptr or unsafe-call
+   obligations.
+7. There is no callable feature in this implementation; raw callbacks remain C
+   ABI Ptr values with explicit unsafe construction and native-owned state.
+8. Safe wrappers validate authoritative native/manager state and cannot trust
+   publicly mutable metadata to enlarge memory access.
+9. Any module may author the same boundary; there is no privileged inventory,
+   opacity/noncopyable property or special `main` signature.
 
-The key distinction is between **carrying an owner value** and **accessing its
-native representation**. Owning, borrowing and transferring an entire native
-wrapper use ordinary Rae. Reading its raw pointer is an explicitly low-level act,
-regardless of which module does it.
-
-```rae
-type NativeBuffer {
-  handle: Ptr
-  byteCount: Int
-}
-
-# No copy function: this type has a destructor and cannot be copied.
-func drop(this: mod NativeBuffer) {
-  unsafe {
-    releaseNativeBuffer(handle: this.handle)
-  }
-}
-```
-
-`unsafe` is proposed syntax. `releaseNativeBuffer` is the binding operation whose
-contract requires a live allocation owned by this wrapper. It is not a new
-renderer-specific compiler helper.
-
-Outside an unsafe block, these operations would be rejected:
-
-```rae
-let handle: Ptr = buffer.handle
-let forged: NativeBuffer = { handle: other.handle, byteCount: 64 }
-```
-
-The first reads raw native representation. The second reads and installs it into
-another wrapper, bypassing the ownership protocol. Ordinary `let other:
-NativeBuffer = buffer` is already rejected by the destructor-without-copy rule.
-
-Inside an unsafe block, a library author can inspect or construct native
-representation and is responsible for validity. Unsafe code can create a bad
-wrapper or corrupt native memory; it does not acquire permission to bypass Rae's
-ordinary copy rules or store a Rae borrow past its lifetime.
-
-This is deliberately less than general field privacy. Ordinary fields such as
-`byteCount` remain accessible. Therefore a safe wrapper must not rely on mutable
-public metadata as its only memory-safety check. For example, a safe buffer write
-must check the allocation's authoritative extent at the native boundary, or the
-raw field must identify an internal allocation record carrying that extent.
-Changing a public cached size must produce an error, not an out-of-bounds access.
-If a real wrapper cannot enforce its invariants this way, bring that example to
-review before adding a broader representation-hiding feature.
-
-### Proposed rules to prove with one wrapper
-
-1. Raw pointer field reads/writes, initialization (including defaults), casts,
-   address extraction, arithmetic, dereference and unchecked foreign calls
-   require explicit unsafe code. A function exposing raw pointer arguments or
-   results carries that obligation in its signature.
-2. Safe code can hold and borrow a whole owner returned by a safe factory. It can
-   transfer owners into fields or supported containers without exposing their
-   pointer fields. Generated lifecycle code follows the checked copy/drop rules;
-   a user cannot obtain that privilege by using a generic function or reflection.
-3. Reflection, formatting, serialization, generic accessors and callable aliases
-   must not turn a raw pointer into an ordinary accessible value or create an
-   owning bitwise copy. Audit these paths rather than assuming field syntax is
-   the only way to reach native representation.
-4. Every raw extern call initially requires an unsafe site. An ordinary safe Rae
-   wrapper can satisfy its contract. A function marked unsafe requires an unsafe
-   call site; its obligations must survive imports and callable conversions.
-   If the current callable representation cannot preserve them, reject that
-   conversion until it can. Do not invent an erased safe callback workaround.
-5. `unsafe` does not allow stored `view`/`mod` references, silent owner copies or
-   implicit lifetime extension. An asynchronous C callback owns stable native
-   state and must not retain a pointer into movable Rae storage.
-
-Marking every raw extern call is a conservative starting point, including calls
-without pointers. Before implementation, review a complete user-authored binding
-with these rules and verify that the same source works outside the standard
-library. No path allowlist, registration file or special compiler type name is
-part of the proposal.
-
-## Use readback as the first real owner
-
-The shipped `webgpu/Readback` bridge already has request-owned native state,
-nonblocking polling and safe late-callback cancellation. Wrap that existing
-protocol with the shipped lifecycle functions before migrating the whole renderer.
-
-```rae
-type ReadRequest {
-  handle: Ptr
-}
-
-func drop(this: mod ReadRequest) {
-  unsafe {
-    this.handle = Readback.releaseRead(request: this.handle)
-  }
-}
-```
-
-This is an illustrative wrapper over the existing bridge; the import and unsafe
-marking of the foreign declarations belong in the actual implementation. `Ptr`
-struct-field lowering must first be fixed. No custom copy function is provided.
-An explicit `request.drop()` consumes the request; scope exit otherwise drops it.
-Do not redefine `drop` as a reusable close operation.
-
-A factory returns `opt ReadRequest` after starting a bounded map on a manager-owned
-buffer. It must validate bounds and mapping state and mark the buffer unavailable
-for conflicting use until unmapping completes. A pointer wrapper with a destructor
-alone does not enforce that buffer protocol. Keep destination addresses out of
-pending request state; copy completed bytes during a temporary destination borrow.
-
-Required first tests: allocation failure, transfer, scope-exit and explicit drop,
-repeated requests, cancellation before/after completion, two independent requests,
-no double release, and no retained pointer into a growing List. Reuse the existing
-native bridge tests and add lifecycle checks around the Rae wrapper.
-
-This pilot proves that the new lifecycle functions help real GPU code. It does
-not by itself remove global device state or finish the public GPU resource API.
-
-## GPU ownership stays a library problem
-
-`GpuResources` owns native objects, bookkeeping, groups and pending operations.
-The first public resource values are typed IDs; the internal representation can
-use lifecycle-managed native wrappers once their lowering and pointer boundary
-work. Prefer named fields and lists to numeric global C slots.
-
-A safe native wrapper does not imply that releasing it at any time is valid for
-a render operation. Track resource uses from command recording through submission
-and completion, including dependencies reached through bind groups and views.
-Dropping an unsubmitted recording releases its holds. Retiring a resource rejects
-new uses immediately while preserving existing uses until they complete.
-
-Native reference retention may implement those internal holds. It is separate
-from ordinary Rae value copying and does not justify a `copy` that merely aliases
-an owning texture or manager.
-
-Normal polling never waits for GPU completion. Bounded staging pools defer new
-readback when full. Explicit shutdown may wait or transfer native completion
-ownership safely. A timeout never justifies freeing callback-reachable memory.
-The manager destructor can see all its fields before field cleanup; use the
-shipped order instead of inventing another destruction mechanism.
-
-A `WaterSystem` holding only resource IDs must not get a destructor that needs an
-unstored borrow of some other App field to release them. Initially the manager
-owns water groups, explicit water teardown retires a group through the manager,
-and manager drop is the cleanup backstop. Copying such a controller copies CPU
-data and IDs; it does not create an independent simulation or cleanup owner.
-Create independent water instances through separate factory calls.
-
-Preserve FFT tiers, modulo cascade scheduling, real elapsed wave time, per-cascade
-sample times and sea-state generations. A native resource ID being valid does
-not make an old readback valid for a rebuilt ocean. Preserve the existing optional
-FFT query and Gerstner behavior.
-
-## Resource identity: requirements before representation
-
-A buffer/texture ID must identify the correct manager, resource kind, slot and
-live generation. Check before native access in release builds; check byte ranges
-without overflow. Releasing/reusing a slot must not silently revive an old ID.
-IDs name resources and are not an anti-forgery security boundary.
-
-Do not freeze a 256-bit nonce into the public design now. It was one candidate,
-not a language feature or an approved requirement. Compare these implementation
-choices using the manager pilot:
-
-| Choice | Useful property | What must be acknowledged |
-| --- | --- | --- |
-| Manager-local slot and generation only | Small, deterministic within one manager | Cannot distinguish two managers with matching slot/generation |
-| Explicitly shared ID issuer for participating managers | Deterministic namespace within that issuer | Adds creation plumbing; independent issuers still need separation |
-| Random per-manager namespace | Ordinary independent constructors; no shared issuer | Probabilistic collision guarantee, entropy failure and ID-size cost |
-| Retained immutable identity token | Prevents identity allocation reuse while old tokens survive | Extra lifetime/copy machinery; must fit Rae's value-copy contract |
-
-A reusable native address alone is not sufficient. Choose only after demonstrating
-two managers in separate Apps, matching slots/generations, teardown/recreation and
-exhaustion. State whether the guarantee is deterministic or probabilistic and
-measure the cost. Do not smuggle in a global current manager or change `main` to
-solve this implementation choice. It remains a review prerequisite for the
-multi-manager safe API, not a claim solved by lifecycle hooks.
-
-## Practical work order
-
-1. Treat the shipped create/drop/copy design and stored-borrow diagnostic as the
-   baseline. Reconcile old implementation tasks before running them; do not add
-   ownership properties or re-ban supported owner containers.
-2. Fix necessary existing Ptr C-lowering bugs. This repairs interop; it does not
-   authorize exposing pointers throughout application state.
-3. Prove the small read-request owner using normal create/drop and no copy. If
-   done before unsafe support, label it an internal lifecycle pilot, not a safe
-   interop guarantee. Keep explicit shutdown where its protocol is still needed.
-4. Review and implement the minimal pointer-access/foreign-call boundary with
-   full source examples, especially metadata mutation and generic/reflection
-   escape attempts. Test the same library authored outside stdlib.
-5. Build the checked manager and settle its identity representation, then migrate
-   water, shared 3D, 2D/UI and remaining consumers incrementally.
-
-Keep generated WebGPU bindings and generic callback glue. No new GPU backend,
-renderer-specific C policy or unrelated water feature belongs in this work.
-Follow the [C-surface gate](webgpu-c-surface-audit.md). Compiler suites use
-`compiler/tools/watch-tests.sh` with explicit timeouts and one run at a time;
-hardware checks also use explicit timeouts. Preserve maintained example gates
-and measure CPU/GPU costs under matched settings.
-
-## Decisions still requiring approval
-
-The remaining proposed language feature is explicit unsafe operations/functions,
-with raw pointer access itself carrying the boundary rather than module privilege
-or a new owner property. Exact operation, foreign-call and callable rules require
-review; the snippets above are not syntax approval.
-
-The GPU library must also select a concrete manager-identity strategy and validate
-asynchronous ownership. These are separate decisions. This document changes no
-compiler/runtime code, and does not claim lifecycle hooks alone prove native
-memory safety. Its purpose is to build on what Rae now has with the smallest
-additional mechanism that a real example demonstrates it needs.
+Approval should either accept these points together or name the point and exact
+replacement desired. The GPU identity and resource-retirement decisions remain
+separate library reviews.
