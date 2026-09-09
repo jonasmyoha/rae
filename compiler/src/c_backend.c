@@ -680,6 +680,14 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
   }
     if (type->resolved_type) {
       TypeInfo* t = type->resolved_type; bool is_ptr = (type->is_view || type->is_mod) && !skip_ptr;
+      /* Ptr's TypeInfo is Buffer(void), but a borrowed Ptr is a reference to
+       * the pointer value itself. Preserve that extra level: Ptr -> void*,
+       * view/mod Ptr -> void**. */
+      if (type->parts && str_eq_cstr(type->parts->text, "Ptr")) {
+          fprintf(out, "void*");
+          if (is_ptr) fprintf(out, "*");
+          return true;
+      }
       if (t->kind == TYPE_GENERIC_PARAM && ctx && ctx->generic_params && ctx->generic_args) {
           const AstIdentifierPart* gp = ctx->generic_params; const AstTypeRef* arg = ctx->generic_args;
           while (gp && arg) {
@@ -776,6 +784,7 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
   if (str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) { if (is_ptr) fprintf(out, "rae_%s_Char%s", is_mod ? "Mod" : "View", str_eq_cstr(base, "Char32") ? "32" : ""); else fprintf(out, "uint32_t"); return true; }
   if (str_eq_cstr(base, "String")) { if (is_ptr) fprintf(out, "rae_%s_String", is_mod ? "Mod" : "View"); else fprintf(out, "rae_String"); return true; }
   if (str_eq_cstr(base, "Any")) { if (is_ptr) fprintf(out, "%sRaeAny*", type->is_view ? "const " : ""); else fprintf(out, "RaeAny"); return true; }
+  if (str_eq_cstr(base, "Ptr")) { fprintf(out, "void*"); if (is_ptr) fprintf(out, "*"); return true; }
   if (str_eq_cstr(base, "Buffer") && type->generic_args) {
         if (type->is_view) fprintf(out, "const ");
         Str arg_base = get_base_type_name(type->generic_args); if (str_eq_cstr(arg_base, "Any") || arg_base.len == 0) { fprintf(out, "void*"); return true; }
@@ -1022,7 +1031,8 @@ AstTypeRef* try_as_type_arg(CFuncContext* ctx, const AstExpr* val) {
     // A local / global binding with the same name takes priority —
     // `let String = 0; foo(String, ...)` passes a value, not a type.
     if (get_local_type_ref(ctx, name)) return NULL;
-    bool is_type = is_primitive_type(name) || (ctx->module && find_type_decl(ctx, ctx->module, name) != NULL);
+    bool is_type = is_primitive_type(name) || str_eq_cstr(name, "Ptr")
+        || (ctx->module && find_type_decl(ctx, ctx->module, name) != NULL);
     // Inside a generic function body, the bound generic param is also
     // a valid type expression — e.g. `createIntMap(V)` body calls
     // `createInt64Map(V, initialCap: …)` where V resolves to a type.
@@ -2372,7 +2382,8 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               const char* fmangled = rae_mangle_type_specialized(ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = fbase}});
               fprintf(out, "  __out = rae_ext_rae_str_concat(__out, rae_to_str_%s_(&this->%.*s));\n",
                   fmangled, (int)f->name.len, f->name.data);
-          } else if ((is_c_struct || has_generic_args || is_generic_template) && !is_opt_field) {
+          } else if ((is_c_struct || has_generic_args || is_generic_template
+                      || str_eq_cstr(fbase, "Ptr")) && !is_opt_field) {
               fprintf(out, "  __out = rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\"<%.*s>\", %d});\n",
                   (int)fbase.len, fbase.data, (int)fbase.len + 2);
           } else {

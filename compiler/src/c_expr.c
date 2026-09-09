@@ -711,7 +711,8 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             //   createList(String, initialCap: 4)
             //   String.createList(initialCap: 4)
             bool obj_is_type = !obj_has_value && obj_name.len > 0 &&
-                (is_primitive_type(obj_name) || (ctx->module && find_type_decl(ctx, ctx->module, obj_name) != NULL));
+                (is_primitive_type(obj_name) || str_eq_cstr(obj_name, "Ptr")
+                 || (ctx->module && find_type_decl(ctx, ctx->module, obj_name) != NULL));
             if (obj_is_type && fn_exists) {
                 AstExpr call = { .kind = AST_EXPR_CALL, .line = expr->line, .column = expr->column, .decl_link = expr->decl_link };
                 call.as.call.callee = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstExpr));
