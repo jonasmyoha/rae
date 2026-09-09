@@ -206,6 +206,13 @@ func createWorld3d() ret World3d {
   }
 }
 
+# The constructor by name (#883): `let world: World3d = create()` and
+# `world: create()` in a scene literal resolve here from the expected type.
+# `createWorld3d()` stays as its explicit-name twin.
+func create() ret World3d {
+  ret createWorld3d()
+}
+
 # Allocate a fresh world entity — the ECS analogue of the old `add*` calls
 # that pushed onto the parallel Lists and returned an index.
 func world3dAddEntity(world: mod World3d) ret EntityId {
