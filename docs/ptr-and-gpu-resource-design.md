@@ -43,32 +43,95 @@ exercise and fix that machinery rather than add another ownership system.
 
 These GPU APIs are proposed; the lifecycle syntax is already Rae. All examples
 in this document describe intended APIs rather than runnable GPU examples.
+The `GpuResources` constructor, texture loading/drawing and window polling are
+the proposed library operations; this example shows the App and system that own
+and use them.
 
 ```rae
-func runGraphics(initial: own GpuResources) {
-  var resources: GpuResources = own initial
+type RenderSystem {
+  resources: GpuResources
+  texture: opt TextureId
+}
 
-  if let texture: TextureId = loadTexture(resources: resources, path: "water.png") {
-    drawTexture(resources: resources, texture: texture)
+func create(texturePath: view String) ret opt RenderSystem {
+  if let resources: GpuResources = GpuResources.create() {
+    var renderSystem: RenderSystem = {
+      resources: own resources,
+      texture: none
+    }
+    if let texture: TextureId = loadTexture(
+      resources: renderSystem.resources,
+      path: texturePath
+    ) {
+      renderSystem.texture = texture
+      ret renderSystem
+    }
+    # Texture loading failed. The local renderSystem drops its resources.
+  }
+  ret none
+}
+
+func drawFrame(this: mod RenderSystem) {
+  if let texture: view TextureId => this.texture {
+    drawTexture(resources: this.resources, texture: texture)
   }
 }
 
+type App {
+  renderSystem: RenderSystem
+}
+
+func create() ret opt App {
+  if let renderSystem: RenderSystem = RenderSystem.create(texturePath: "water.png") {
+    ret App { renderSystem: own renderSystem }
+  }
+  ret none
+}
+
+func frame(app: mod App) {
+  drawFrame(this: app.renderSystem)
+}
+
 func main() {
-  if let resources: GpuResources = create() {
-    runGraphics(initial: resources)
+  if let createdApp: App = App.create() {
+    var app: App = own createdApp
+    loop not shouldClose(resources: app.renderSystem.resources) {
+      frame(app: app)
+    }
+    # app leaves scope here; its owned fields are cleaned up automatically.
   } else {
-    log("GPU creation failed")
+    log("App creation failed")
   }
 }
 ```
 
-The manager owns the context and GPU objects. The ID names a texture; it does not
-own or release it. Leaving `runGraphics` drops the manager. Its destructor must
-perform the required native teardown protocol before that storage disappears.
+The ownership tree is explicit:
 
-A larger App stores `GpuResources` as a field and passes it through `mod`/`view`
-parameters. Nothing is found through a hidden current-manager getter. Multiple
-water instances can share the manager while using separate resource groups.
+```text
+main's app
+  renderSystem
+    resources   -> owns the GPU context and actual texture allocation
+    texture     -> stores an optional ID naming that allocation
+```
+
+The App and all of this state survive across frames. `frame(app: mod App)` and
+`drawFrame(this: mod RenderSystem)` temporarily borrow existing state; neither
+receives ownership or constructs another manager. `own` appears at construction
+boundaries to put each value into its lasting owner without copying it. Returning
+the owned local `renderSystem` transfers it out under the existing return rules.
+
+The texture ID itself does not own or release the allocation. At scope exit,
+App field cleanup reaches `RenderSystem`, then its `GpuResources` destructor,
+which performs the native teardown protocol. App and RenderSystem need no custom
+destructors just to drop their fields, and no custom copies are provided for these
+resource-owning types. Partial App creation also cleans up the owners already
+created; there is no orphan manager on the failure path.
+
+For a larger scene, the App can also own a `WaterSystem`. Pass the renderer's
+resource manager explicitly to the water operations, while water stores its own
+CPU data and resource IDs. Multiple water instances can use separate resource
+groups in that same manager. No system stores a borrowed reference to another
+system, and no hidden current-manager getter supplies state.
 
 ## Owners, IDs and copies
 
