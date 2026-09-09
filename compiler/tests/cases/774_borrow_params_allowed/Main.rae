@@ -1,0 +1,23 @@
+# #866 positive side: legal borrows still compile and run. A struct owns its
+# fields; functions borrow them with `view`/`mod` parameters, and locals may
+# bind borrows. The field-borrow rule must NOT reject any of this.
+type Point {
+  x: Int
+  y: Int
+}
+
+func peek(p: view Point) ret Int {
+  ret p.x + p.y
+}
+
+func bump(p: mod Point) {
+  p.x = p.x + 1
+}
+
+func main() {
+  var p: Point = { x: 3, y: 4 }
+  log("sum {peek(p: p)}")
+  bump(p: p)
+  let borrowed: view Point => p
+  log("after {borrowed.x}")
+}
