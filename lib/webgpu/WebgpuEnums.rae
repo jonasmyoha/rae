@@ -5,8 +5,9 @@
 # Low-level Rae bindings to the C ABI (general FFI, #497/#498). Handles are
 # opaque Ptr; enums are Int32 consts; flag sets are UInt64 consts; structs
 # are c_struct mirrors of the real C types; functions bind via
-# extern("symbol") straight to the library. Build ergonomic wrappers on
-# top in a separate module, not here.
+# `unsafe extern("symbol")` straight to the library (raw C ABI, #868).
+# Build ergonomic wrappers — which take the `unsafe { ... }` obligation —
+# in a separate module, not here.
 
 # ============================ enums ============================
 

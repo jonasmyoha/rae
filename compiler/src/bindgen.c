@@ -466,7 +466,11 @@ static void emit_function(FILE* out, const char* text) {
         fprintf(out, "# skipped func %s (unmapped param type %s)\n", fname, badtype);
         skipped(fname); return;
     }
-    sp += snprintf(sig + sp, sizeof(sig) - sp, ") extern(\"%s\")", fname);
+    // #893: every generated declaration is a raw C-ABI call, so it carries the
+    // post-parameter `unsafe` modifier BEFORE `extern` (the #868 approved order:
+    // `func f(...) unsafe extern("sym") ret T`). This marks the ABI declaration
+    // only; callers opt into `unsafe { ... }` in their wrapper/consumer modules.
+    sp += snprintf(sig + sp, sizeof(sig) - sp, ") unsafe extern(\"%s\")", fname);
     // return
     char rret[128];
     if (rd.ok && !(rd.base[0] == 'v' && !strcmp(rd.base, "void") && rd.ptr == 0)) {
@@ -641,8 +645,9 @@ static void emit_file_header(FILE* out, const char* module_comment) {
     fprintf(out, "#\n# Low-level Rae bindings to the C ABI (general FFI, #497/#498). Handles are\n");
     fprintf(out, "# opaque Ptr; enums are Int32 consts; flag sets are UInt64 consts; structs\n");
     fprintf(out, "# are c_struct mirrors of the real C types; functions bind via\n");
-    fprintf(out, "# extern(\"symbol\") straight to the library. Build ergonomic wrappers on\n");
-    fprintf(out, "# top in a separate module, not here.\n\n");
+    fprintf(out, "# `unsafe extern(\"symbol\")` straight to the library (raw C ABI, #868).\n");
+    fprintf(out, "# Build ergonomic wrappers — which take the `unsafe { ... }` obligation —\n");
+    fprintf(out, "# in a separate module, not here.\n\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -687,10 +692,18 @@ int bindgen_run(int argc, char** argv) {
 
     classify(combined);
 
+    // Module FILES are PascalCase and the two sub-modules drop the underscore
+    // (`webgpu` -> `Webgpu`, `webgpu_enums` -> `WebgpuEnums`) per the naming
+    // convention (#801/#818). The package FOLDER stays the camelCase
+    // `import_prefix`. Compute the PascalCase file base from `module`.
+    char pascal[256];
+    snprintf(pascal, sizeof(pascal), "%s", module);
+    if (pascal[0] >= 'a' && pascal[0] <= 'z') pascal[0] = (char)(pascal[0] - 'a' + 'A');
+
     char pe[1024], pt[1024], pf[1024];
-    snprintf(pe, sizeof(pe), "%s/%s_enums.rae", out_dir, module);
-    snprintf(pt, sizeof(pt), "%s/%s_types.rae", out_dir, module);
-    snprintf(pf, sizeof(pf), "%s/%s.rae", out_dir, module);
+    snprintf(pe, sizeof(pe), "%s/%sEnums.rae", out_dir, pascal);
+    snprintf(pt, sizeof(pt), "%s/%sTypes.rae", out_dir, pascal);
+    snprintf(pf, sizeof(pf), "%s/%s.rae", out_dir, pascal);
     FILE* fe = fopen(pe, "w"); FILE* ft = fopen(pt, "w"); FILE* ff = fopen(pf, "w");
     if (!fe || !ft || !ff) { fprintf(stderr, "[bindgen] cannot write outputs under %s\n", out_dir); free(combined); return 1; }
 
@@ -700,15 +713,15 @@ int bindgen_run(int argc, char** argv) {
     // Types and functions reference the real C library structs -> need the header.
     if (cheader) { fprintf(ft, "cheader \"%s\"\n\n", cheader); fprintf(ff, "cheader \"%s\"\n\n", cheader); }
     // Functions use the c_struct types by name (view WGPUXDescriptor).
-    fprintf(ff, "import %s/%s_types\n\n", import_prefix, module);
+    fprintf(ff, "import %s/%sTypes\n\n", import_prefix, pascal);
 
     emit_all(fe, ft, ff, combined);
     fclose(fe); fclose(ft); fclose(ff);
     free(combined);
 
     fprintf(stderr,
-        "[bindgen] %s/{%s_enums,%s_types,%s}.rae: enums=%d flags=%d defines=%d structs=%d functions=%d handles=%d callbacks=%d skipped=%d\n",
-        out_dir, module, module, module,
+        "[bindgen] %s/{%sEnums,%sTypes,%s}.rae: enums=%d flags=%d defines=%d structs=%d functions=%d handles=%d callbacks=%d skipped=%d\n",
+        out_dir, pascal, pascal, pascal,
         g_n_enum, g_n_flags, g_n_const, g_n_struct, g_n_func, g_n_handle, g_n_callback, g_n_skipped);
     return 0;
 }
