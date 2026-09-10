@@ -47,6 +47,70 @@ static bool s_in_if_let_binding = false;
  * 0 between top-level function analyses. */
 static int s_loop_depth = 0;
 
+/* #868 staged unsafe boundary. A source file opts in by containing an unsafe
+ * block or unsafe Rae function; #877 removes the compatibility staging after
+ * legacy consumers migrate. Unsafe function bodies intentionally start at
+ * depth zero: their raw operations still need local unsafe blocks. */
+static bool s_unsafe_checks_enabled = false;
+static int s_unsafe_depth = 0;
+
+static bool sema_is_raw_ptr_type(const TypeInfo* type) {
+    while (type && type->kind == TYPE_REF) type = type->as.ref.base;
+    return type && type->kind == TYPE_BUFFER && type->as.buffer.base
+        && type->as.buffer.base->kind == TYPE_VOID;
+}
+
+static bool sema_is_ptr_value_type(const TypeInfo* type) {
+    while (type && type->kind == TYPE_REF) type = type->as.ref.base;
+    if (type && type->kind == TYPE_OPT) type = type->as.opt.base;
+    return sema_is_raw_ptr_type(type);
+}
+
+static bool sema_type_contains_ptr(const TypeInfo* type, int depth) {
+    if (!type || depth > 32) return false;
+    while (type->kind == TYPE_REF) type = type->as.ref.base;
+    if (sema_is_raw_ptr_type(type)) return true;
+    if (type->kind == TYPE_OPT) return sema_type_contains_ptr(type->as.opt.base, depth + 1);
+    if (type->kind == TYPE_ARRAY) return sema_type_contains_ptr(type->as.array.base, depth + 1);
+    if ((type->kind == TYPE_STRUCT || type->kind == TYPE_GENERIC_INST)
+        && type->as.structure.decl) {
+        for (const AstTypeField* field = type->as.structure.decl->as.type_decl.fields;
+             field; field = field->next) {
+            TypeInfo* field_type = field->type ? field->type->resolved_type : NULL;
+            if (sema_type_contains_ptr(field_type, depth + 1)) return true;
+        }
+        for (size_t i = 0; i < type->as.structure.generic_count; i++)
+            if (sema_type_contains_ptr(type->as.structure.generic_args[i], depth + 1)) return true;
+    }
+    return false;
+}
+
+static bool sema_default_constructs_ptr(const TypeInfo* type, int depth) {
+    if (!type || depth > 32) return false;
+    while (type->kind == TYPE_REF) type = type->as.ref.base;
+    if (sema_is_raw_ptr_type(type)) return true;
+    if (type->kind == TYPE_OPT) return false; /* default is none: no payload */
+    if (type->kind == TYPE_ARRAY) return sema_default_constructs_ptr(type->as.array.base, depth + 1);
+    if ((type->kind == TYPE_STRUCT || type->kind == TYPE_GENERIC_INST)
+        && type->as.structure.decl) {
+        Str name = type->as.structure.decl->as.type_decl.name;
+        if (str_eq_cstr(name, "List")) return false; /* empty: no element */
+        for (const AstTypeField* field = type->as.structure.decl->as.type_decl.fields;
+             field; field = field->next) {
+            TypeInfo* field_type = field->type ? field->type->resolved_type : NULL;
+            if (sema_default_constructs_ptr(field_type, depth + 1)) return true;
+        }
+    }
+    return false;
+}
+
+static void sema_unsafe_error(AstModule* module, size_t line, size_t column,
+                              const char* message) {
+    if (!s_unsafe_checks_enabled || s_unsafe_depth > 0) return;
+    diag_error(sema_diag_file(module), (int)line, (int)column, message);
+    if (module) module->had_error = true;
+}
+
 // Per-file import/open directives (docs/module-namespacing.md). Registered from
 // the module graph before sema; consulted via s_current_decl_origin so a call
 // resolves names against ITS file's imports (aliases, open-vs-import). Auto-
@@ -491,6 +555,7 @@ static bool sema_stmt_mentions_ident(const AstStmt* s, Str name) {
             return sema_expr_mentions_ident(s->as.assign_stmt.target, name)
                 || sema_expr_mentions_ident(s->as.assign_stmt.value, name);
         case AST_STMT_DEFER: return sema_block_mentions_ident(s->as.defer_stmt.block, name);
+        case AST_STMT_UNSAFE: return sema_block_mentions_ident(s->as.unsafe_stmt.block, name);
         default: return false;
     }
 }
@@ -700,6 +765,9 @@ static void flow_stmt(LifecycleFlow* flow, const AstStmt* s, DroppedSet* set) {
             flow_block(flow, s->as.defer_stmt.block, &defer_set);
             break;
         }
+        case AST_STMT_UNSAFE:
+            flow_block(flow, s->as.unsafe_stmt.block, set);
+            break;
         default: break;
     }
 }
@@ -965,6 +1033,9 @@ static AstStmt* clone_stmt(Arena* arena, const AstStmt* stmt) {
         case AST_STMT_ASSIGN:
             res->as.assign_stmt.target = clone_expr(arena, stmt->as.assign_stmt.target);
             res->as.assign_stmt.value = clone_expr(arena, stmt->as.assign_stmt.value);
+            break;
+        case AST_STMT_UNSAFE:
+            res->as.unsafe_stmt.block = clone_block(arena, stmt->as.unsafe_stmt.block);
             break;
         default: break;
     }
@@ -1545,9 +1616,15 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
 // global let initializer, a type — names THAT decl's file (see sema_diag_file).
 static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl) {
     const char* saved_origin = s_current_decl_origin;
+    bool saved_unsafe_checks = s_unsafe_checks_enabled;
+    int saved_unsafe_depth = s_unsafe_depth;
     if (decl && decl->origin_file) s_current_decl_origin = decl->origin_file;
+    s_unsafe_checks_enabled = decl && decl->unsafe_checks_enabled;
+    s_unsafe_depth = 0;
     sema_analyze_decl_inner(ctx, module, symbols, decl);
     s_current_decl_origin = saved_origin;
+    s_unsafe_checks_enabled = saved_unsafe_checks;
+    s_unsafe_depth = saved_unsafe_depth;
 }
 
 static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl) {
@@ -2235,6 +2312,10 @@ static bool sema_stmt_mutates_table(const AstStmt* stmt, const AstExpr* table) {
             for (const AstStmt* b = stmt->as.defer_stmt.block ? stmt->as.defer_stmt.block->first : NULL; b; b = b->next)
                 if (sema_stmt_mutates_table(b, table)) return true;
             return false;
+        case AST_STMT_UNSAFE:
+            for (const AstStmt* b = stmt->as.unsafe_stmt.block ? stmt->as.unsafe_stmt.block->first : NULL; b; b = b->next)
+                if (sema_stmt_mutates_table(b, table)) return true;
+            return false;
         default: return false;
     }
 }
@@ -2468,6 +2549,9 @@ static void reflect_fold_field_name_stmt(AstStmt* s, Str binding, Str field_name
         case AST_STMT_DEFER:
             reflect_fold_field_name_block(s->as.defer_stmt.block, binding, field_name, type_name);
             break;
+        case AST_STMT_UNSAFE:
+            reflect_fold_field_name_block(s->as.unsafe_stmt.block, binding, field_name, type_name);
+            break;
         default: break;
     }
 }
@@ -2661,6 +2745,7 @@ static bool reflect_stmt_has_fields_loop(const AstStmt* s) {
                 if (reflect_block_has_fields_loop(c->block)) return true;
             return false;
         case AST_STMT_DEFER: return reflect_block_has_fields_loop(s->as.defer_stmt.block);
+        case AST_STMT_UNSAFE: return reflect_block_has_fields_loop(s->as.unsafe_stmt.block);
         default: return false;
     }
 }
@@ -2722,6 +2807,9 @@ static void reflect_expand_stmt_concrete(CompilerContext* ctx, const AstModule* 
         case AST_STMT_DEFER:
             reflect_expand_block_concrete(ctx, module, stmt->as.defer_stmt.block, params, gparams, cargs);
             break;
+        case AST_STMT_UNSAFE:
+            reflect_expand_block_concrete(ctx, module, stmt->as.unsafe_stmt.block, params, gparams, cargs);
+            break;
         default: break;
     }
 }
@@ -2782,6 +2870,10 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     sema_report_uncopyable(module, sema_diag_file(module), stmt->line, stmt->column,
                                            t->name, "into a new binding");
                 }
+            }
+            if (!stmt->as.let_stmt.value && t && sema_default_constructs_ptr(t, 0)) {
+                sema_unsafe_error(module, stmt->line, stmt->column,
+                    "default construction initializes raw Ptr storage; put it in an 'unsafe { ... }' block or use a safe factory");
             }
             // A `mod` binding mints mutable access, so its source must be
             // mutable: an owned place, a mod param, a mod binding, or a call
@@ -3362,8 +3454,21 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             }
             break;
         }
+        case AST_STMT_UNSAFE: {
+            symbol_table_push_scope(symbols);
+            s_unsafe_depth++;
+            for (AstStmt* inner = stmt->as.unsafe_stmt.block
+                     ? stmt->as.unsafe_stmt.block->first : NULL;
+                 inner; inner = inner->next) {
+                sema_analyze_stmt(ctx, module, symbols, inner, current_return_type);
+            }
+            s_unsafe_depth--;
+            symbol_table_pop_scope(symbols);
+            break;
+        }
         default: break;
     }
+
 }
 
 /* Distinct numeric types never convert implicitly — see
@@ -4926,6 +5031,39 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
         }
         default: break;
     }
+
+    if (s_unsafe_checks_enabled && s_unsafe_depth == 0) {
+        const AstFuncDecl* called = NULL;
+        if ((expr->kind == AST_EXPR_CALL || expr->kind == AST_EXPR_METHOD_CALL)
+            && expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC) {
+            called = &expr->decl_link->as.func_decl;
+        }
+        if (called && (called->is_unsafe || called->is_extern)) {
+            sema_unsafe_error(module, expr->line, expr->column,
+                "calling an unsafe function or extern requires an enclosing 'unsafe { ... }' block");
+        } else if (expr->kind == AST_EXPR_METHOD_CALL
+                   && (str_eq_cstr(expr->as.method_call.method_name, "toJson")
+                       || str_eq_cstr(expr->as.method_call.method_name, "toString"))
+                   && expr->as.method_call.object
+                   && sema_type_contains_ptr(expr->as.method_call.object->resolved_type, 0)) {
+            sema_unsafe_error(module, expr->line, expr->column,
+                "reflection and serialization cannot expose a value containing raw Ptr storage in safe code");
+        } else if ((expr->kind == AST_EXPR_IDENT || expr->kind == AST_EXPR_MEMBER
+                    || expr->kind == AST_EXPR_INDEX || expr->kind == AST_EXPR_CALL
+                    || expr->kind == AST_EXPR_METHOD_CALL)
+                   && sema_is_ptr_value_type(expr->resolved_type)) {
+            sema_unsafe_error(module, expr->line, expr->column,
+                "reading, writing, copying or producing a raw Ptr requires an enclosing 'unsafe { ... }' block");
+        } else if (expr->kind == AST_EXPR_OBJECT
+                   && sema_type_contains_ptr(expr->resolved_type, 0)) {
+            sema_unsafe_error(module, expr->line, expr->column,
+                "constructing a value with raw Ptr storage requires an enclosing 'unsafe { ... }' block or a safe factory");
+        } else if (expr->kind == AST_EXPR_BOX && expr->as.unary.operand
+                   && sema_type_contains_ptr(expr->as.unary.operand->resolved_type, 0)) {
+            sema_unsafe_error(module, expr->line, expr->column,
+                "erasing a value containing raw Ptr storage into Any requires an enclosing 'unsafe { ... }' block");
+        }
+    }
 }
 
 TypeInfo* sema_resolve_type(CompilerContext* ctx, AstTypeRef* type_ref) { return sema_resolve_type_internal(ctx, NULL, NULL, type_ref); }
@@ -5454,6 +5592,7 @@ static void desugar_typed_create_stmt(CompilerContext* ctx, AstStmt* s) {
             desugar_typed_create_expr(ctx, s->as.assign_stmt.value);
             break;
         case AST_STMT_DEFER: desugar_typed_create_block(ctx, s->as.defer_stmt.block); break;
+        case AST_STMT_UNSAFE: desugar_typed_create_block(ctx, s->as.unsafe_stmt.block); break;
         default: break;
     }
 }

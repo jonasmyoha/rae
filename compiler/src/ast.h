@@ -272,6 +272,7 @@ typedef enum {
   AST_STMT_MATCH,
   AST_STMT_ASSIGN,
   AST_STMT_DEFER,
+  AST_STMT_UNSAFE,
   AST_STMT_BREAK,
   AST_STMT_CONTINUE
 } AstStmtKind;
@@ -350,6 +351,9 @@ struct AstStmt {
     struct {
       AstBlock* block;
     } defer_stmt;
+    struct {
+      AstBlock* block;
+    } unsafe_stmt;
   } as;
 };
 
@@ -393,6 +397,9 @@ typedef struct {
   AstProperty* properties;
   AstReturnItem* returns;
   bool is_extern;
+  bool is_unsafe;
+  bool extern_before_func;
+  bool invalid_unsafe_extern_order;
   const char* extern_symbol; // Explicit C ABI symbol from `extern("name")` (general FFI, #497). When set, the mangler binds this extern to exactly this C symbol — no rae_ext_ prefix, no shim. NULL = default mangling.
   const char* module_name; // Logical module (mirrors AstDecl.module_name); used by the mangler for namespace-qualified extern C symbols. NULL for entry/project.
   const char* origin_file; // Source file (mirrors AstDecl.origin_file); lets the mangler restrict namespace-qualified externs to stdlib (lib/) and not project FFI.
@@ -406,6 +413,7 @@ struct AstDecl {
   size_t column;
   const char* origin_file; // Source file the decl was parsed from (preserved through module merge + specialization). NULL until set.
   const char* module_name; // Logical module this decl came from (e.g. "math", "filesystem"); set at merge. Used for namespace-qualified access (docs/module-namespacing.md). NULL for the entry/project module.
+  bool unsafe_checks_enabled; // Temporary #868 migration: source file adopted the unsafe boundary.
   AstDecl* next;
   union {
     AstTypeDecl type_decl;

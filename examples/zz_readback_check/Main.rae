@@ -104,11 +104,12 @@ func checkCycle() ret Bool {
     var correct: Bool = firstStatus is 1 and secondStatus is 1
     if reads.first.byteCount is not (16 as UInt64) { correct = false }
     if reads.second.byteCount is not (32 as UInt64) { correct = false }
-    if copyTo(this: reads.first, destination: output.data, capacity: 8 as UInt64) { correct = false }
-    if not copyTo(this: reads.first, destination: output.data, capacity: 16 as UInt64) { correct = false }
+    var tooSmall: List(Int) = { 0 }
+    if copyTo(this: reads.first, destination: tooSmall) { correct = false }
+    if not copyTo(this: reads.first, destination: output) { correct = false }
     if output.copyAtFallback(index: 0, fallback: -1) is not 22 { correct = false }
     if output.copyAtFallback(index: 1, fallback: -1) is not 33 { correct = false }
-    if not copyTo(this: reads.second, destination: output.data, capacity: 32 as UInt64) { correct = false }
+    if not copyTo(this: reads.second, destination: output) { correct = false }
     if output.copyAtFallback(index: 3, fallback: -1) is not 44 { correct = false }
     ret correct
   }
