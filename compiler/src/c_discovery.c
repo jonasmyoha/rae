@@ -282,6 +282,10 @@ static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt*
                 }
                 break;
             }
+            case AST_STMT_UNSAFE:
+                if (s->as.unsafe_stmt.block)
+                    discover_specializations_stmt_impl(ctx, s->as.unsafe_stmt.block->first);
+                break;
             default: break;
         }
     }

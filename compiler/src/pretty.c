@@ -229,14 +229,21 @@ static void pp_write_type(PrettyPrinter* pp, const AstTypeRef* type) {
   }
 }
 
-static void pp_write_properties(PrettyPrinter* pp, const AstProperty* prop) {
+static void pp_write_properties(PrettyPrinter* pp, const AstProperty* prop,
+                                const char* extern_symbol) {
   const AstProperty* current = prop;
   int first = 1;
   while (current) {
     if (!first) {
       pp_space(pp);
     }
-    pp_write_str(pp, current->name);
+    if (extern_symbol && str_eq_cstr(current->name, "extern")) {
+      pp_write(pp, "extern(\"");
+      pp_write(pp, extern_symbol);
+      pp_write(pp, "\")");
+    } else {
+      pp_write_str(pp, current->name);
+    }
     first = 0;
     current = current->next;
   }
@@ -963,6 +970,15 @@ static void pp_print_defer_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   pp_newline(pp);
 }
 
+static void pp_print_unsafe_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
+  pp_check_comments(pp, stmt->line);
+  pp_write(pp, "unsafe ");
+  pp_begin_block(pp);
+  pp_print_block_body(pp, stmt->as.unsafe_stmt.block);
+  pp_end_block(pp);
+  pp_newline(pp);
+}
+
 static void pp_print_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   switch (stmt->kind) {
     case AST_STMT_LET: pp_print_let_stmt(pp, stmt); break;
@@ -978,6 +994,7 @@ static void pp_print_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
     case AST_STMT_MATCH: pp_print_match_stmt(pp, stmt); break;
     case AST_STMT_ASSIGN: pp_print_assign_stmt(pp, stmt); break;
     case AST_STMT_DEFER: pp_print_defer_stmt(pp, stmt); break;
+    case AST_STMT_UNSAFE: pp_print_unsafe_stmt(pp, stmt); break;
     case AST_STMT_BREAK:
       pp_check_comments(pp, stmt->line);
       pp_write(pp, "break");
@@ -1011,7 +1028,7 @@ static void pp_print_type_decl(PrettyPrinter* pp, const AstDecl* decl) {
   }
   if (decl->as.type_decl.properties) {
     pp_write(pp, ": ");
-    pp_write_properties(pp, decl->as.type_decl.properties);
+    pp_write_properties(pp, decl->as.type_decl.properties, NULL);
   }
   pp_space(pp);
   pp_begin_block(pp);
@@ -1133,7 +1150,8 @@ static void pp_print_func_decl(PrettyPrinter* pp, const AstDecl* decl) {
   
   if (decl->as.func_decl.properties) {
     pp_space(pp);
-    pp_write_properties(pp, decl->as.func_decl.properties);
+    pp_write_properties(pp, decl->as.func_decl.properties,
+                        decl->as.func_decl.extern_symbol);
   }
 
   if (decl->as.func_decl.returns) {

@@ -2,8 +2,8 @@
 
 `open webgpu/ReadRequest` provides an ordinary Rae owner for an asynchronous
 read request. This is an internal lifecycle pilot for shipped `create`/`drop`;
-its native `Ptr` field remains trusted interop until Rae's pointer boundary is
-implemented. It does not establish pointers as Rae's public ownership model.
+its native `Ptr` field and bridge calls now live inside the implemented unsafe
+boundary. It does not establish pointers as Rae's public ownership model.
 Staging allocation, command encoding and queue submission remain in Rae over
 `webgpu/Webgpu`. The small runtime bridge supplies the C callback pointer and
 retains its request state; the generated callback-info field is currently `Ptr`,
@@ -26,11 +26,13 @@ not a callable Rae callback.
 3. Each frame call `poll(this: request)`: `0` pending, `1` success, `-1`
    failure. This advances the context once with `wait: 0`, never waits for GPU
    completion, and does not require timestamp-query support.
-4. On success, call `copyTo(this: request, destination: output.data,
-   capacity: capacityBytes)`. It returns `1` only when it copied the entire
-   requested range. It returns `0` for pending/failed requests, null destinations,
-   or insufficient capacity. The map stays open until release; copying again is
-   allowed. Capacity must reflect actual allocated destination **bytes**.
+4. On success, call `copyTo(this: request, destination: output)`, where `output`
+   is a mutable `List(T)`. It returns true only when the List's initialized
+   elements provide enough bytes for the entire requested range. It returns
+   false for pending/failed requests or insufficient capacity. The safe wrapper
+   exposes the backing pointer only inside its unsafe block, and the native call
+   never retains it. The map stays open until release, so copying again is
+   allowed.
 5. Scope exit consumes the owner and calls `drop`. `request.drop()` is available
    for explicit cancellation, and passing `own request` transfers cleanup to the
    callee. A `ReadRequest` has no `copy` function. It can be moved into another

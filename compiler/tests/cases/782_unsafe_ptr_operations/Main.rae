@@ -1,0 +1,22 @@
+type NativeOwner {
+  pointer: Ptr
+}
+
+func rawIdentity(pointer: copy Ptr) unsafe ret Ptr {
+  ret pointer
+}
+
+func expose(this: view NativeOwner) ret Ptr {
+  ret this.pointer
+}
+
+func makeDefault() ret NativeOwner {
+  let owner: NativeOwner
+  ret owner
+}
+
+func main() {
+  unsafe {
+    log("activate boundary")
+  }
+}

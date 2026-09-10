@@ -16,6 +16,7 @@ typedef struct {
   size_t count;
   size_t index;
   bool had_error;
+  bool uses_unsafe_checks;
 } Parser;
 
 typedef struct {
@@ -84,7 +85,7 @@ static bool parser_match(Parser* parser, TokenKind kind) {
 }
 
 static bool is_keyword(TokenKind kind) {
-  return kind >= TOK_KW_TYPE && kind <= TOK_KW_AS;
+  return kind >= TOK_KW_TYPE && kind <= TOK_KW_UNSAFE;
 }
 
 /* Placeholder returned when an identifier was required but not found. Callers
@@ -2703,6 +2704,13 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
 }
 
 static AstStmt* parse_statement(Parser* parser) {
+  if (parser_match(parser, TOK_KW_UNSAFE)) {
+    const Token* unsafe_token = parser_previous(parser);
+    parser->uses_unsafe_checks = true;
+    AstStmt* stmt = new_stmt(parser, AST_STMT_UNSAFE, unsafe_token);
+    stmt->as.unsafe_stmt.block = parse_block(parser);
+    return stmt;
+  }
   if (parser_match(parser, TOK_KW_LET)) {
     const Token* let_token = parser_previous(parser);
     if (looks_like_destructure(parser)) {
@@ -2940,6 +2948,7 @@ static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
   decl->line = func_token->line;
   decl->column = func_token->column;
   decl->as.func_decl.name = parser_copy_str(parser, name_token->lexeme);
+  decl->as.func_decl.extern_before_func = is_extern;
   // Unified parameter list — type parameters (`T: type`) come first, then
   // value parameters. The parser routes type params into `generic_params`
   // for compatibility with the existing sema / mangler / codegen readers.
@@ -2953,11 +2962,19 @@ static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
   // Also handle legacy colon before properties
   parser_match(parser, TOK_COLON);
 
-  while (parser_check(parser, TOK_IDENT) || parser_check(parser, TOK_KW_EXTERN) || 
+  bool is_unsafe = false;
+  bool saw_extern_modifier = false;
+  while (parser_check(parser, TOK_IDENT) || parser_check(parser, TOK_KW_EXTERN) ||
          parser_check(parser, TOK_KW_PRIV) || parser_check(parser, TOK_KW_PUB) || 
-         parser_check(parser, TOK_KW_SPAWN)) {
+         parser_check(parser, TOK_KW_SPAWN) || parser_check(parser, TOK_KW_UNSAFE)) {
     const Token* mod_token = parser_advance(parser);
+    if (mod_token->kind == TOK_KW_UNSAFE) {
+      if (is_unsafe) parser_error(parser, mod_token, "duplicate 'unsafe' function modifier");
+      if (saw_extern_modifier) decl->as.func_decl.invalid_unsafe_extern_order = true;
+      is_unsafe = true;
+    }
     if (mod_token->kind == TOK_KW_EXTERN) {
+      saw_extern_modifier = true;
       is_extern = true;
       // `extern("wgpuDeviceCreateBuffer")` — bind to an exact C ABI symbol
       // (general FFI, #497). The parenthesised string is the C symbol name;
@@ -2981,6 +2998,8 @@ static AstDecl* parse_func_declaration(Parser* parser, bool is_extern) {
   }
   decl->as.func_decl.properties = props_head;
   decl->as.func_decl.is_extern = is_extern;
+  decl->as.func_decl.is_unsafe = is_unsafe;
+  if (is_unsafe && !is_extern) parser->uses_unsafe_checks = true;
 
   // #790: enforce camelCase on the function name and its VALUE parameters,
   // EXCEPT `extern` functions — the name is a C symbol and the params mirror the
@@ -3328,6 +3347,27 @@ AstModule* parse_module(Arena* arena, const char* file_path, TokenList tokens) {
     head = append_decl(head, decl);
     if (parser.index == prev_index) {
         parser_advance(&parser);
+    }
+  }
+  /* #868 compatibility stage: adopting an unsafe block or an unsafe Rae
+   * function opts this whole source file into the boundary. This source rule
+   * is identical for every module; #877 enables it for all migrated files. */
+  if (parser.uses_unsafe_checks) {
+    for (AstDecl* decl = head; decl; decl = decl->next) {
+      decl->unsafe_checks_enabled = true;
+      if (decl->kind == AST_DECL_FUNC && decl->as.func_decl.is_extern
+          && !decl->as.func_decl.is_unsafe) {
+        Token token = { .line = decl->line, .column = decl->column };
+        parser_error(&parser, &token,
+            "extern declarations must explicitly include 'unsafe' after the parameter list, before 'extern'");
+      }
+      if (decl->kind == AST_DECL_FUNC && decl->as.func_decl.is_extern
+          && (decl->as.func_decl.extern_before_func
+              || decl->as.func_decl.invalid_unsafe_extern_order)) {
+        Token token = { .line = decl->line, .column = decl->column };
+        parser_error(&parser, &token,
+            "foreign declarations must be written 'func name(...) unsafe extern(\"symbol\")'");
+      }
     }
   }
   module->imports = imports;

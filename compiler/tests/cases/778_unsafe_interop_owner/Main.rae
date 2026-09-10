@@ -1,0 +1,37 @@
+# The approved unsafe boundary is available to an ordinary user module. The
+# wrapper itself follows shipped create/drop behavior and remains ordinary Rae.
+cheader "stdlib.h"
+
+func nativeAllocate(byteCount: UInt64) unsafe extern("malloc") ret Ptr
+func nativeRelease(pointer: Ptr) unsafe extern("free")
+
+type NativeBuffer {
+  pointer: Ptr
+  byteCount: Int
+}
+
+func adopt(pointer: copy Ptr, byteCount: view Int) unsafe ret NativeBuffer {
+  unsafe {
+    ret NativeBuffer { pointer: pointer, byteCount: byteCount }
+  }
+}
+
+func create(byteCount: view Int) ret opt NativeBuffer {
+  unsafe {
+    let pointer: Ptr = nativeAllocate(byteCount: byteCount as UInt64)
+    ret adopt(pointer: pointer, byteCount: byteCount)
+  }
+}
+
+func drop(this: mod NativeBuffer) {
+  unsafe {
+    nativeRelease(pointer: this.pointer)
+  }
+  log("drop {this.byteCount}")
+}
+
+func main() {
+  if let buffer: NativeBuffer = NativeBuffer.create(byteCount: 16) {
+    log("bytes {buffer.byteCount}")
+  }
+}

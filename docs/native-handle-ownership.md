@@ -1,7 +1,8 @@
 # Native resource ownership
 
 Status: **use the shipped create/drop/copy contract; the remaining pointer
-boundary is approved in revision 7 of the GPU design and awaits implementation.**
+boundary is approved in revision 7 of the GPU design and is implemented with
+staged source-file enforcement while legacy consumers migrate.**
 
 [Constructors, destructors and copies](constructors-and-destructors.md) defines
 Rae's implemented lifecycle model. A native owner uses ordinary `create` and
@@ -14,8 +15,9 @@ on that model. It requires raw pointer operations and foreign-call obligations
 to be explicit in source, equally available to any module. Unsafe function and
 extern modifiers follow the parameter list; every extern declaration spells
 `unsafe` separately before `extern`. The contract needs neither privileged
-module lists nor an opaque-type keyword. These operation rules still need
-implementation.
+module lists nor an opaque-type keyword. Files that adopt unsafe syntax receive
+the checks now; final repository-wide enforcement follows the recorded binding
+and consumer migrations.
 
 This does not create general field privacy. Safe wrappers must validate against
 authoritative native bounds/state rather than trusting publicly mutable metadata.
