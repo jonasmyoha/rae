@@ -3352,22 +3352,25 @@ AstModule* parse_module(Arena* arena, const char* file_path, TokenList tokens) {
   /* #868 compatibility stage: adopting an unsafe block or an unsafe Rae
    * function opts this whole source file into the boundary. This source rule
    * is identical for every module; #877 enables it for all migrated files. */
-  if (parser.uses_unsafe_checks) {
-    for (AstDecl* decl = head; decl; decl = decl->next) {
-      decl->unsafe_checks_enabled = true;
-      if (decl->kind == AST_DECL_FUNC && decl->as.func_decl.is_extern
-          && !decl->as.func_decl.is_unsafe) {
-        Token token = { .line = decl->line, .column = decl->column };
-        parser_error(&parser, &token,
-            "extern declarations must explicitly include 'unsafe' after the parameter list, before 'extern'");
-      }
-      if (decl->kind == AST_DECL_FUNC && decl->as.func_decl.is_extern
-          && (decl->as.func_decl.extern_before_func
-              || decl->as.func_decl.invalid_unsafe_extern_order)) {
-        Token token = { .line = decl->line, .column = decl->column };
-        parser_error(&parser, &token,
-            "foreign declarations must be written 'func name(...) unsafe extern(\"symbol\")'");
-      }
+  for (AstDecl* decl = head; decl; decl = decl->next) {
+    if (parser.uses_unsafe_checks) decl->unsafe_checks_enabled = true;
+    if (decl->kind != AST_DECL_FUNC || !decl->as.func_decl.is_extern) continue;
+    // The compatibility staging (#868): once a file adopts the boundary, every
+    // extern in it must say `unsafe`. Ungated in #877.
+    if (parser.uses_unsafe_checks && !decl->as.func_decl.is_unsafe) {
+      Token token = { .line = decl->line, .column = decl->column };
+      parser_error(&parser, &token,
+          "extern declarations must explicitly include 'unsafe' after the parameter list, before 'extern'");
+    }
+    // #896: wrong modifier order is rejected whenever the file adopted the
+    // boundary OR the extern is EXPLICITLY marked `unsafe` — the latter catches
+    // a declaration-only bindings file that never opened an unsafe block.
+    if ((decl->as.func_decl.extern_before_func
+         || decl->as.func_decl.invalid_unsafe_extern_order)
+        && (parser.uses_unsafe_checks || decl->as.func_decl.is_unsafe)) {
+      Token token = { .line = decl->line, .column = decl->column };
+      parser_error(&parser, &token,
+          "foreign declarations must be written 'func name(...) unsafe extern(\"symbol\")'");
     }
   }
   module->imports = imports;

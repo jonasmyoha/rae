@@ -107,6 +107,49 @@ and `copyTo` accepts `mod List(T)` rather than a public destination Ptr. The
 native bridge still borrows the List data only during the completed copy and
 never retains it. Lifecycle behavior is unchanged.
 
+## Interop boundary audit (#896)
+
+The staged boundary from #868/#891 was audited against resolved AST paths. It is
+STAGED: the checks run only in a source file that opted in by containing an
+`unsafe { ... }` block or an unsafe (non-extern) Rae function; a file with none
+gets no pointer checks until the final unconditional pass (#877).
+
+Caught in an opted-in file, outside `unsafe`:
+
+- calling an extern or an unsafe Rae function;
+- reading, writing, copying or producing a bare `Ptr` or `opt Ptr` value
+  (identifier, field, index, call or method-call result);
+- constructing a Ptr-containing value with a struct literal;
+- default-constructing raw Ptr storage — a bare `Ptr` field, and transitively an
+  `Array` of a Ptr-containing element (an `opt` defaults to `none` and an empty
+  `List` has no element, so both stay safe);
+- erasing a Ptr-containing value into `Any` with an explicit `box`;
+- exposing a Ptr-containing value through `.toJson()` / `.toString()`, and — added
+  by this audit — through string interpolation `"{owner}"` and generated
+  deserialization `T.fromJson(...)` (deserialization null-constructs the Ptr field).
+
+Also enforced by this audit, independent of the opt-in: an explicitly `unsafe`
+extern written with the modifiers in the wrong order (`... extern(...) unsafe`)
+is rejected even in a declaration-only bindings file that never opens an unsafe
+block. `as Ptr` is separately unavailable (only numeric casts exist), so a raw
+pointer cannot be manufactured by a cast in any code.
+
+Staged/missing, deferred to the final unconditional pass (#877) and tracked as
+#898 because a correct fix needs the move-versus-copy distinction and must not
+over-restrict legal whole-owner moves:
+
+- a whole-value COPY of a raw-Ptr aggregate that has no destructor — `let ys:
+  List(Ptr) = xs`, `Array(Ptr, ...)` and a plain `struct { p: Ptr }` copied from
+  a place — deep-copies the raw pointer silently. Construction (struct literal,
+  default) and copies of destructor-bearing owners are already caught; only the
+  no-destructor place-copy slips through. It duplicates an address, not memory,
+  and reaches valid C, so it is a contract inconsistency rather than a
+  memory-safety escape.
+- implicit `Any` boxing at a `ret`/assignment whose target type is `Any` (only an
+  explicit `box` operand is checked today).
+
+Neither reaches invalid generated C; both are pointer-visibility contract gaps.
+
 ## Exact pointer rules
 
 `Ptr` remains a primitive for an untyped foreign address. It never owns the
