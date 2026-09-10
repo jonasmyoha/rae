@@ -1,0 +1,8 @@
+# #896: an explicitly-unsafe extern with the modifiers in the wrong order is
+# rejected even in a declaration-only file that never opens an unsafe block.
+# The approved spelling is `func name(...) unsafe extern("symbol")`.
+func nativeAbs(value: Int) extern("llabs") unsafe ret Int
+
+func main() {
+  log("this file adopts no unsafe block")
+}
