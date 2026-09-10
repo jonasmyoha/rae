@@ -77,6 +77,23 @@ const char* map_rae_type_to_c(Str type_name) {
   return NULL;
 }
 
+/* A resolved integer TypeInfo carries its C spelling as its name
+ * (rae_int_c_name: "uint8_t", "int32_t", ...). When such a name reaches the
+ * type mangler as the base, it is ALREADY a C primitive spelling and must pass
+ * through verbatim — prefixing "rae_" would fabricate an undeclared type like
+ * `rae_uint8_t` (the two mangler entry points otherwise disagree with the
+ * `UInt8` -> `uint8_t` map path, so List(UInt8) got two clashing
+ * monomorphizations). Only "int64_t" was handled before; List(Int) worked by
+ * luck, the narrower widths did not. */
+static bool mangle_is_c_scalar_spelling(Str base) {
+    return str_eq_cstr(base, "int8_t") || str_eq_cstr(base, "int16_t") ||
+           str_eq_cstr(base, "int32_t") || str_eq_cstr(base, "int64_t") ||
+           str_eq_cstr(base, "uint8_t") || str_eq_cstr(base, "uint16_t") ||
+           str_eq_cstr(base, "uint32_t") || str_eq_cstr(base, "uint64_t") ||
+           str_eq_cstr(base, "double") || str_eq_cstr(base, "float") ||
+           str_eq_cstr(base, "rae_String");
+}
+
 bool is_primitive_type(Str type_name) {
     return str_eq_cstr(type_name, "Void") || 
            str_eq_cstr(type_name, "void") || 
@@ -342,7 +359,7 @@ static void mangle_type_recursive(CompilerContext* ctx, const struct AstIdentifi
         } else {
             *pos += snprintf(buf + *pos, cap - *pos, "%s", mapped);
         }
-    } else if (str_eq_cstr(base, "int64_t") || str_eq_cstr(base, "double") || str_eq_cstr(base, "float") || str_eq_cstr(base, "rae_String") || str_starts_with_cstr(base, "rae_")) {
+    } else if (mangle_is_c_scalar_spelling(base) || str_starts_with_cstr(base, "rae_")) {
         *pos += snprintf(buf + *pos, cap - *pos, "%.*s", (int)base.len, base.data);
     } else {
         *pos += snprintf(buf + *pos, cap - *pos, "rae_%.*s", (int)base.len, base.data);
@@ -458,7 +475,7 @@ static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct
         } else {
             *pos += snprintf(buf + *pos, cap - *pos, "%s", mapped);
         }
-    } else if (str_eq_cstr(base, "int64_t") || str_eq_cstr(base, "double") || str_eq_cstr(base, "float") || str_eq_cstr(base, "rae_String") || str_starts_with_cstr(base, "rae_")) {
+    } else if (mangle_is_c_scalar_spelling(base) || str_starts_with_cstr(base, "rae_")) {
         *pos += snprintf(buf + *pos, cap - *pos, "%.*s", (int)base.len, base.data);
     } else if (is_raylib_builtin_type(base)) {
         *pos += snprintf(buf + *pos, cap - *pos, "%.*s", (int)base.len, base.data);

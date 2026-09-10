@@ -83,6 +83,40 @@ early returns and partial-construction cleanup.
 
 The boundary below does not alter any of those rules.
 
+## Readback copy hardening (#897)
+
+The pilot's collection-copy surface was hardened before manager integration:
+
+- `ReadRequest.copyToBytes(destination: mod List(UInt8))` is the SAFE surface.
+  A byte has no representation to corrupt, and the native copy is bounded by the
+  destination's REAL allocation size (from the allocator), which no caller field
+  can inflate, so a forged `length`/`cap` cannot overflow the heap.
+- `ReadRequest.copyTo(T, destination: mod List(T))` is the UNSAFE raw reinterpret
+  protocol. It memcpys raw GPU bytes over the in-memory representation of the
+  elements, which the compiler cannot prove matches (T may be `String`, `Ptr` or
+  a destructor-bearing owner whose reps it would corrupt), so the caller takes
+  that obligation in an `unsafe { ... }` block.
+- `ReadRequest.create(buffer: copy Ptr, range)` is `unsafe`: it adopts a raw
+  buffer whose map validity and lifetime the caller must guarantee.
+- The native copy `rae_wgpu_read_copy` refuses any request larger than the
+  destination's real allocation, so a forged capacity is contained rather than
+  overflowing. The request's own recorded byte count is used, never a
+  caller-modified mirror. Callback-owned state, exact-once cleanup, cancellation
+  and the no-retained-List-pointer property are unchanged.
+
+Enforcing the raw protocol's `unsafe` marker required closing a gap: a call to a
+GENERIC unsafe function left the call unresolved in sema (the backend resolves
+generic calls by name), so the unsafe-call check did not fire. It now resolves
+the callee by name when every visible same-name generic overload is unsafe.
+
+Introducing the first `List(UInt8)` also uncovered a latent backend mangling
+bug: the type mangler passed a resolved integer TypeInfo's C spelling
+(`uint8_t`, from `rae_int_c_name`) through the `rae_`-prefix fallback, producing
+an undeclared `rae_uint8_t` and a second, clashing `List` monomorphization. Only
+`int64_t` was whitelisted, so `List(Int)` worked by luck while the narrower
+widths would have miscompiled. The mangler now recognises every C scalar
+spelling and passes it through verbatim.
+
 ## What the shipped readback pilot proves
 
 `webgpu/ReadRequest` is an ordinary Rae type with a raw native request field,

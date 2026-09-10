@@ -16,7 +16,7 @@ type ReadRange {
 # Construction fails for allocation errors and ranges rejected synchronously by
 # the native bridge. This check does not poll the device; asynchronous mapping
 # failures are reported later by poll.
-func create(buffer: copy Ptr, range: view ReadRange) ret opt ReadRequest {
+func create(buffer: copy Ptr, range: view ReadRange) unsafe ret opt ReadRequest {
   unsafe {
     let nativeRequest: Ptr = startRead(buffer: buffer, offset: range.offset, size: range.size)
     if readStartStatus(request: nativeRequest) is -1 {
@@ -42,12 +42,36 @@ func poll(this: view ReadRequest) ret Int {
   }
 }
 
-# Copies only a completed full range into the List's initialized elements. The
-# native call borrows data only for this call; no pointer survives List growth.
-func copyTo(T: type, this: view ReadRequest, destination: mod List(T)) ret Bool {
-  # Native code treats this capacity as authoritative. Reject visibly corrupt
-  # List metadata before deriving it, and cast before multiplication so signed
-  # Int overflow cannot turn a small negative value into a huge capacity.
+# SAFE byte copy (#897). Copies the completed bytes into a `List(UInt8)`. A byte
+# has no representation to corrupt, and the native copy is bounded by the
+# destination's REAL allocation (reported by the allocator), so a forged
+# `length`/`cap` cannot overflow the heap: an over-large request is refused, and
+# the caller sizes the byte list to the range it wants. A caller that needs
+# typed numbers reads them from the bytes.
+func copyToBytes(this: view ReadRequest, destination: mod List(UInt8)) ret Bool {
+  if destination.length < 0 or destination.cap < destination.length {
+    ret false
+  }
+  # Element size is one byte, so the stated capacity is the element count. The
+  # authoritative bound is enforced natively; this is only the caller's stated
+  # size, cross-checked there against the real allocation.
+  let capacity: UInt64 = destination.length as UInt64
+  unsafe {
+    ret copyRead(request: this.nativeRequest, destination: destination.data, capacity: capacity) is 1
+  }
+}
+
+# UNSAFE raw reinterpret (#897). Copies the completed bytes over the in-memory
+# representation of `List(T)` elements. The compiler cannot check that T's
+# representation matches the raw GPU bytes — T may be `String`, `Ptr` or a
+# destructor-bearing owner whose reps this would corrupt into dangling pointers —
+# so the CALLER takes that obligation with an `unsafe { ... }` block. Bounds are
+# still enforced authoritatively by the native copy; the native call borrows the
+# mapping only for this call and no pointer survives List growth.
+func copyTo(T: type, this: view ReadRequest, destination: mod List(T)) unsafe ret Bool {
+  # Native code cross-checks against the real allocation; reject visibly corrupt
+  # List metadata first, and cast before multiplication so signed Int overflow
+  # cannot turn a small negative value into a huge capacity.
   if destination.length < 0 or destination.cap < destination.length {
     ret false
   }
