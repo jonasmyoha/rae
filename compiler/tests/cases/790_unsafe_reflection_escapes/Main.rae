@@ -1,0 +1,22 @@
+# #896: the reflection/serialization guard now also covers string interpolation
+# and generated deserialization, not just the `.toJson()`/`.toString()` method
+# calls. A value containing raw Ptr storage cannot be interpolated or built from
+# JSON in safe code. The file adopts the boundary via the unsafe block in main.
+type NativeOwner {
+  pointer: Ptr
+  byteCount: Int
+}
+
+func render(this: view NativeOwner) ret String {
+  ret "owner {this}"
+}
+
+func parse(json: view String) ret NativeOwner {
+  ret NativeOwner.fromJson(json)
+}
+
+func main() {
+  unsafe {
+    log("activate boundary")
+  }
+}
