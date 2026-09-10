@@ -5038,7 +5038,40 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
             && expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC) {
             called = &expr->decl_link->as.func_decl;
         }
-        if (called && (called->is_unsafe || called->is_extern)) {
+        // #897: a GENERIC unsafe function (e.g. `copyTo(T, ...)`) leaves the call
+        // decl_link null — sema does not resolve generic calls, the backend does
+        // by name. Resolve the callee's unsafe-ness here by name so marking a
+        // generic function `unsafe` is actually enforced. Only fire when EVERY
+        // visible same-name generic function is unsafe, so a mixed overload set
+        // (some safe) is never a false positive.
+        bool called_unsafe_by_name = false;
+        if (!called && (expr->kind == AST_EXPR_CALL || expr->kind == AST_EXPR_METHOD_CALL)) {
+            Str cname = {0};
+            if (expr->kind == AST_EXPR_CALL && expr->as.call.callee
+                && expr->as.call.callee->kind == AST_EXPR_IDENT)
+                cname = expr->as.call.callee->as.ident;
+            else if (expr->kind == AST_EXPR_METHOD_CALL)
+                cname = expr->as.method_call.method_name;
+            if (cname.len > 0) {
+                AstModule* scan[64]; size_t sn = 0; scan[sn++] = module;
+                for (const AstImport* imp = module->imports; imp && sn < 64; imp = imp->next)
+                    if (imp->module) scan[sn++] = imp->module;
+                int generic_matches = 0, unsafe_matches = 0;
+                for (size_t si = 0; si < sn; si++)
+                    for (AstDecl* d = scan[si]->decls; d; d = d->next) {
+                        if (d->kind != AST_DECL_FUNC) continue;
+                        const AstFuncDecl* fd = &d->as.func_decl;
+                        if (!fd->generic_params || fd->specialization_args) continue;
+                        if (!str_eq(fd->name, cname)) continue;
+                        if (!sema_decl_opened(s_current_decl_origin, d)) continue;
+                        generic_matches++;
+                        if (fd->is_unsafe || fd->is_extern) unsafe_matches++;
+                    }
+                if (generic_matches > 0 && generic_matches == unsafe_matches)
+                    called_unsafe_by_name = true;
+            }
+        }
+        if ((called && (called->is_unsafe || called->is_extern)) || called_unsafe_by_name) {
             sema_unsafe_error(module, expr->line, expr->column,
                 "calling an unsafe function or extern requires an enclosing 'unsafe { ... }' block");
         } else if (expr->kind == AST_EXPR_METHOD_CALL

@@ -1,0 +1,41 @@
+# #897: the readback copy surface is hardened. The raw reinterpret protocol
+# `ReadRequest.copyTo(T, ...)` is unsafe — it would memcpy raw GPU bytes over
+# the in-memory representation of List(T) elements, corrupting String, Ptr or
+# destructor-bearing owner reps into dangling pointers — so a safe caller cannot
+# reach it without taking the obligation in an `unsafe { ... }` block. The safe
+# `copyToBytes(List(UInt8))` needs no unsafe block: a byte has no representation
+# to corrupt, and the native copy is bounded by the destination's real
+# allocation. This file adopts the boundary via the unsafe block in main.
+open webgpu/ReadRequest
+
+type NativeOwner {
+  pointer: Ptr
+  slot: Int
+}
+
+func drop(this: mod NativeOwner) {
+  unsafe {
+    let raw: Ptr = this.pointer
+  }
+}
+
+# Rejected: an owner-bearing destination in safe code.
+func intoOwners(request: view ReadRequest, destination: mod List(NativeOwner)) ret Bool {
+  ret copyTo(this: request, destination: destination)
+}
+
+# Rejected: a String-bearing destination in safe code.
+func intoStrings(request: view ReadRequest, destination: mod List(String)) ret Bool {
+  ret copyTo(this: request, destination: destination)
+}
+
+# Allowed: the safe byte surface needs no unsafe block.
+func intoBytes(request: view ReadRequest, destination: mod List(UInt8)) ret Bool {
+  ret copyToBytes(this: request, destination: destination)
+}
+
+func main() {
+  unsafe {
+    log("boundary adopted")
+  }
+}

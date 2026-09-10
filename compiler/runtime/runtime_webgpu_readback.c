@@ -80,6 +80,16 @@ int rae_wgpu_read_copy(void* handle, void* destination, uint64_t capacity) {
     RaeWgpuReadRequest* request = handle;
     if (!request || request->status != 1 || !destination || capacity < request->size)
         return 0;
+    /* #897: the caller-supplied `capacity` is derived from the destination
+     * List's public length/cap fields and can be forged. Bound the write by the
+     * destination's REAL allocation size, reported by the allocator, which no
+     * caller field can inflate. A forged length/cap therefore cannot overflow
+     * the heap: if the request does not fit the real allocation the copy is
+     * refused. `request->size` is the request's own recorded byte count, never a
+     * caller-modified mirror. */
+    int64_t allocated = rae_malloc_size_safe(destination);
+    if (allocated <= 0 || (uint64_t)allocated < request->size)
+        return 0;
     const void* source = wgpuBufferGetConstMappedRange(request->buffer,
                                                      request->offset, request->size);
     if (!source) { request->status = -1; return 0; }
