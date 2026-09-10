@@ -47,9 +47,18 @@ Output is **deterministic** (same headers → byte-identical files) and checked
 in, so a normal build never needs the generator. Because the compiler caps
 files at 1000 lines, the output is split into three files:
 
-- `lib/webgpu/webgpu_enums.rae` — enum / flag / `#define` constants
-- `lib/webgpu/webgpu_types.rae` — `c_struct` type mirrors (+ `cheader`)
-- `lib/webgpu/webgpu.rae` — the functions (`import webgpu/webgpu_types`)
+- `lib/webgpu/WebgpuEnums.rae` — enum / flag / `#define` constants
+- `lib/webgpu/WebgpuTypes.rae` — `c_struct` type mirrors (+ `cheader`)
+- `lib/webgpu/Webgpu.rae` — the functions (`import webgpu/WebgpuTypes`)
+
+Module files are PascalCase (the package folder stays camelCase `webgpu/`), so
+the generator writes `Webgpu.rae` / `WebgpuEnums.rae` / `WebgpuTypes.rae` (#801).
+Every generated function binds via `unsafe extern("symbol")` in the #868
+post-parameter modifier order (`func f(...) unsafe extern("sym") ret T`): the
+declaration is a raw C-ABI call, so it is marked `unsafe`, and callers take the
+`unsafe { ... }` obligation in their wrapper modules. (Per the current staging
+note, a declaration-only `unsafe extern` does not by itself opt a file into the
+lexical unsafe checks; #877 removes that bypass.)
 
 `cheader "webgpu/wgpu.h"` is enough for both headers, since `wgpu.h` itself
 `#include`s `webgpu.h`.
