@@ -1,7 +1,8 @@
 # Pointer and GPU interop over Rae lifecycle values
 
-Status: **revision 7 approved contract, 2026-09-10. The language changes in
-this document are not implemented yet.**
+Status: **revision 7 approved contract, 2026-09-10. The syntax and source-file
+migration checks are implemented; repository-wide enforcement follows after
+the recorded legacy consumers migrate.**
 
 This revision starts from the shipped `create`, `drop` and `copy` behavior and
 the working `webgpu/ReadRequest` pilot. It adds one approved language boundary:
@@ -80,7 +81,7 @@ demonstrates these rules for native audio slots. The
 proves direct optional ownership, nested fields, repeated `mod` frame calls,
 early returns and partial-construction cleanup.
 
-The proposal below does not alter any of those rules.
+The boundary below does not alter any of those rules.
 
 ## What the shipped readback pilot proves
 
@@ -100,12 +101,13 @@ prove:
 The native bridge owns stable callback state. It never retains a pointer into a
 Rae List. This is the correct asynchronous lifetime protocol.
 
-The pilot is not yet a safe public pointer boundary. Its source can currently
-read `nativeRequest: Ptr`, call raw externs without a marker, and accept a raw
-destination pointer in `copyTo`. Revision 6 makes those operations explicit and
-keeps the lifecycle behavior unchanged.
+The pilot now uses the boundary: `ReadRequest` keeps `nativeRequest: Ptr` behind
+local unsafe blocks, all bridge declarations explicitly say `unsafe extern`,
+and `copyTo` accepts `mod List(T)` rather than a public destination Ptr. The
+native bridge still borrows the List data only during the completed copy and
+never retains it. Lifecycle behavior is unchanged.
 
-## Exact proposed pointer rules
+## Exact pointer rules
 
 `Ptr` remains a primitive for an untyped foreign address. It never owns the
 allocation it names. Copying a Ptr copies an address, not the foreign object.
@@ -639,25 +641,31 @@ work; unsafe syntax does not solve those protocols.
 
 ## Implementation and migration boundary
 
-The compiler implementation should be staged so existing bindings can migrate
-without pretending enforcement is complete:
+The compiler implementation is staged so existing bindings can migrate without
+pretending repository-wide enforcement is complete:
 
-1. Parse `unsafe { ... }` and the post-parameter function modifier, as in
+1. **Implemented:** parse `unsafe { ... }` and the post-parameter function modifier, as in
    `func adopt(...) unsafe ret T`; retain the effect on resolved calls.
-2. Require every extern declaration to spell the modifier before `extern`, as in
+2. **Implemented for adopted source files:** require every extern declaration to spell the modifier before `extern`, as in
    `func native(...) unsafe extern("symbol") ret T`.
-3. Diagnose source Ptr creation, field access, default initialization and copy
+3. **Implemented for adopted source files:** diagnose source Ptr creation, field access, default initialization and copy
    outside unsafe blocks.
-4. Preserve unsafe call obligations through qualified calls and every
+4. **Implemented for resolved calls:** preserve unsafe call obligations through qualified calls and every
    compiler-supported alias path.
-5. Apply the rule after generic substitution and during field reflection,
+5. **Implemented at resolved expression sites:** apply the rule after generic substitution and during field reflection,
    formatting and serialization generation.
-6. Add the safe ReadRequest collection-copy surface while retaining raw internal
+6. **Implemented:** add the safe ReadRequest collection-copy surface while retaining raw internal
    functions for existing manager protocols.
-7. Inventory and migrate current Ptr/extern consumers in bounded tasks. During
-   migration, enforcement may be opt-in or diagnostic-only, but exemptions must
-   be explicit and temporary. Final enforcement waits for the compatibility
-   task and maintained example gates.
+7. **Inventoried and queued:** migrate current Ptr/extern consumers in bounded tasks. During
+   migration, a source file adopts enforcement when it contains an unsafe block
+   or unsafe Rae function. This rule is identical for every module and grants no
+   package privilege. The inventory found 804 extern declarations across 62
+   library/example source files (779 in 41 library files and 25 in 21 example
+   files), plus 23 library/example files that mention Ptr. Compiler regression
+   fixtures are tracked separately. Generated bindings, non-renderer interop,
+   legacy platform surfaces and hand-written GPU consumers have bounded
+   migrations; final unconditional enforcement waits for those migrations and
+   maintained example gates.
 
 Positive tests must include the same native-buffer module authored outside
 stdlib, safe wrapper use, direct `if let` owners, owner fields, returns,
