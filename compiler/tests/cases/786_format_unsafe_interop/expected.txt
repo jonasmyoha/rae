@@ -1,0 +1,13 @@
+func nativeAbs(value: Int) unsafe extern("llabs") ret Int
+
+func risky(value: copy Int) unsafe ret Int {
+  unsafe {
+    ret value
+  }
+}
+
+func main() {
+  unsafe {
+    log("{nativeAbs(value: risky(value: 4))}")
+  }
+}

@@ -1,7 +1,8 @@
 # WebGPU resource management in Rae
 
 Status: **revision 7 approved interop contract over the shipped
-create/drop/copy lifecycle; GPU manager identity remains under review.**
+create/drop/copy lifecycle, with staged source-file enforcement implemented;
+GPU manager identity remains under review.**
 
 The active [GPU and C-interop design](ptr-and-gpu-resource-design.md) has been
 rewritten. Use ordinary lifecycle functions from
