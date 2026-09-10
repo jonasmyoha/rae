@@ -62,6 +62,12 @@ static const void* wgpuBufferGetConstMappedRange(WGPUBuffer buffer, size_t offse
     assert(buffer->state == 2 && offset + size <= 32);
     return (const char*)buffer->data + offset;
 }
+/* #897: the readback copy now bounds by the destination's real allocation.
+ * The runtime uses the static rae_malloc_size_safe from runtime_core_memory.c;
+ * this deterministic test mocks it so the allocation size is set explicitly,
+ * exercising forged-capacity and too-small destinations without a device. */
+static int64_t g_destAllocated = 0;
+static int64_t rae_malloc_size_safe(void* p) { return p ? g_destAllocated : 0; }
 #define calloc requestAllocate
 #define free requestFree
 #include "../runtime/runtime_webgpu_readback.c"
@@ -77,16 +83,32 @@ int main(void) {
     assert(rae_wgpu_read_start_status(secondRead) == 0);
     assert(polls == 0);
     uint64_t destination[4] = {0};
+    g_destAllocated = (int64_t)sizeof(destination);
     assert(rae_wgpu_read_poll(firstRead) == 0 && polls == 1);
     assert(!rae_wgpu_read_copy(firstRead, destination, sizeof(destination)));
     deliver(&second, WGPUMapAsyncStatus_Success);
     assert(rae_wgpu_read_poll(firstRead) == 0);
     assert(rae_wgpu_read_poll(secondRead) == 1);
     deliver(&first, WGPUMapAsyncStatus_Success);
+    /* Caller states too small a capacity: refused (as before). */
     assert(!rae_wgpu_read_copy(firstRead, destination, 8));
+    /* #897: a FORGED capacity (>= size) with a real allocation SMALLER than the
+     * request must be refused, not overflow. `request->size` is 16 here. */
+    g_destAllocated = 8;
+    assert(!rae_wgpu_read_copy(firstRead, destination, 16));
+    assert(!rae_wgpu_read_copy(firstRead, destination, 1024));
+    /* A destination the allocator does not recognise (size 0) is refused. */
+    g_destAllocated = 0;
+    assert(!rae_wgpu_read_copy(firstRead, destination, 16));
+    /* Real allocation large enough: the copy succeeds and lands correctly. */
+    g_destAllocated = (int64_t)sizeof(destination);
     assert(rae_wgpu_read_copy(firstRead, destination, 16));
     assert(destination[0] == 22 && destination[1] == 33 && destination[2] == 0);
     rae_wgpu_read_release(firstRead);
+    /* Second request needs 32 bytes; a 16-byte real allocation is refused. */
+    g_destAllocated = 16;
+    assert(!rae_wgpu_read_copy(secondRead, destination, 1024));
+    g_destAllocated = (int64_t)sizeof(destination);
     assert(rae_wgpu_read_copy(secondRead, destination, 32));
     assert(destination[0] == 55 && destination[3] == 88);
     rae_wgpu_read_release(secondRead);
