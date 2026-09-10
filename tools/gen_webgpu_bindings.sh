@@ -20,4 +20,4 @@ if [ ! -f "$WGPU_INC/webgpu.h" ]; then echo "webgpu.h not found under $WGPU_INC 
   --cheader "webgpu/wgpu.h" \
   --module-comment "WebGPU (webgpu.h + wgpu-native wgpu.h) low-level bindings."
 
-echo "Regenerated lib/webgpu/{webgpu_enums,webgpu_types,webgpu}.rae"
+echo "Regenerated lib/webgpu/{WebgpuEnums,WebgpuTypes,Webgpu}.rae"
