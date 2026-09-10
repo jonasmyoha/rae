@@ -74,6 +74,7 @@ typedef enum {
   TOK_KW_ANY,  /* compile-time type wildcard, legal only inside a type pattern
                 * (a `fields()` loop binding). NOT the runtime `Any` box — see
                 * docs/compile-time-reflection.md. */
+  TOK_KW_UNSAFE,
 
   /* Operators */
   TOK_ASSIGN,

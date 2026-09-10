@@ -1,6 +1,6 @@
 # Internal lifecycle pilot: this ordinary Rae owner proves create/drop around
-# the existing callback-owned native request. Its Ptr field remains trusted
-# interop until Rae's pointer boundary is implemented.
+# the existing callback-owned native request. Raw state stays behind the unsafe
+# boundary; public copying borrows a whole List and never exposes its data Ptr.
 open webgpu/Readback
 
 type ReadRequest {
@@ -17,27 +17,47 @@ type ReadRange {
 # the native bridge. This check does not poll the device; asynchronous mapping
 # failures are reported later by poll.
 func create(buffer: copy Ptr, range: view ReadRange) ret opt ReadRequest {
-  let nativeRequest: Ptr = startRead(buffer: buffer, offset: range.offset, size: range.size)
-  if readStartStatus(request: nativeRequest) is -1 {
-    releaseRead(request: nativeRequest)
-    ret none
+  unsafe {
+    let nativeRequest: Ptr = startRead(buffer: buffer, offset: range.offset, size: range.size)
+    if readStartStatus(request: nativeRequest) is -1 {
+      releaseRead(request: nativeRequest)
+      ret none
+    }
+    ret ReadRequest { nativeRequest: nativeRequest, byteCount: range.size }
   }
-  ret ReadRequest { nativeRequest: nativeRequest, byteCount: range.size }
 }
 
 # The owner reference is released exactly once. A pending callback keeps its
 # independent native reference until the context delivers it after cancellation.
 func drop(this: mod ReadRequest) {
-  this.nativeRequest = releaseRead(request: this.nativeRequest)
+  unsafe {
+    this.nativeRequest = releaseRead(request: this.nativeRequest)
+  }
 }
 
 # Polls platform events once with wait: 0 through the existing bridge.
 func poll(this: view ReadRequest) ret Int {
-  ret pollRead(request: this.nativeRequest)
+  unsafe {
+    ret pollRead(request: this.nativeRequest)
+  }
 }
 
-# Copies only a completed full range. The destination pointer is borrowed for
-# this call and is never retained, so a List may grow while the request waits.
-func copyTo(this: view ReadRequest, destination: copy Ptr, capacity: view UInt64) ret Bool {
-  ret copyRead(request: this.nativeRequest, destination: destination, capacity: capacity) is 1
+# Copies only a completed full range into the List's initialized elements. The
+# native call borrows data only for this call; no pointer survives List growth.
+func copyTo(T: type, this: view ReadRequest, destination: mod List(T)) ret Bool {
+  # Native code treats this capacity as authoritative. Reject visibly corrupt
+  # List metadata before deriving it, and cast before multiplication so signed
+  # Int overflow cannot turn a small negative value into a huge capacity.
+  if destination.length < 0 or destination.cap < destination.length {
+    ret false
+  }
+  let elementCount: UInt64 = destination.length as UInt64
+  let elementSize: UInt64 = sizeof(T) as UInt64
+  if elementSize > 0 and elementCount > (18446744073709551615 / elementSize) {
+    ret false
+  }
+  let capacity: UInt64 = elementCount * elementSize
+  unsafe {
+    ret copyRead(request: this.nativeRequest, destination: destination.data, capacity: capacity) is 1
+  }
 }

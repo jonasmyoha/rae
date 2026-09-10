@@ -659,6 +659,8 @@ static int count_ident_refs_stmt(const AstStmt* s, Str name) {
              count_ident_refs_expr(s->as.assign_stmt.value, name);
     case AST_STMT_DEFER:
       return count_ident_refs_block(s->as.defer_stmt.block, name);
+    case AST_STMT_UNSAFE:
+      return count_ident_refs_block(s->as.unsafe_stmt.block, name);
     case AST_STMT_BREAK:
     case AST_STMT_CONTINUE:
       return 0;  // no operands
@@ -884,6 +886,7 @@ static bool stmt_has_explicit_drop(const AstStmt* s, Str name) {
         if (block_has_explicit_drop(c->block, name)) return true;
       return false;
     case AST_STMT_DEFER: return block_has_explicit_drop(s->as.defer_stmt.block, name);
+    case AST_STMT_UNSAFE: return block_has_explicit_drop(s->as.unsafe_stmt.block, name);
     default: return false;
   }
 }
@@ -2666,6 +2669,18 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 ctx->defer_stack.entries[ctx->defer_stack.count].scope_depth = 0;
                 ctx->defer_stack.count++;
             }
+            break;
+        }
+        case AST_STMT_UNSAFE: {
+            size_t saved_locals = ctx->local_count;
+            fprintf(out, "  { /* unsafe */\n");
+            if (stmt->as.unsafe_stmt.block) {
+                for (AstStmt* inner = stmt->as.unsafe_stmt.block->first; inner; inner = inner->next)
+                    emit_stmt(ctx, inner, out);
+            }
+            emit_implicit_drops_for_body(ctx, out, saved_locals);
+            ctx->local_count = saved_locals;
+            fprintf(out, "  }\n");
             break;
         }
         default: break;
