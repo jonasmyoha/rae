@@ -1,0 +1,46 @@
+# #896 positive side: the audit must NOT over-restrict. In an opted-in file the
+# whole-owner operations stay safe — a safe factory returns a Ptr wrapper, the
+# caller owns/borrows/moves it and reads its non-Ptr metadata, and interpolating
+# ordinary (non-Ptr) values still works.
+cheader "stdlib.h"
+
+func nativeAllocate(byteCount: UInt64) unsafe extern("malloc") ret Ptr
+func nativeRelease(pointer: Ptr) unsafe extern("free")
+
+type NativeBuffer {
+  pointer: Ptr
+  byteCount: Int
+}
+
+func create(byteCount: view Int) ret opt NativeBuffer {
+  unsafe {
+    let pointer: Ptr = nativeAllocate(byteCount: byteCount as UInt64)
+    ret NativeBuffer { pointer: pointer, byteCount: byteCount }
+  }
+}
+
+func drop(this: mod NativeBuffer) {
+  unsafe {
+    nativeRelease(pointer: this.pointer)
+  }
+}
+
+# Whole-value borrow: reads only public metadata, never the Ptr field.
+func size(this: view NativeBuffer) ret Int {
+  ret this.byteCount
+}
+
+# Whole-value move into and out of a helper (own transfer), still safe.
+func passThrough(buffer: own NativeBuffer) ret NativeBuffer {
+  ret buffer
+}
+
+func main() {
+  if let buffer: NativeBuffer = NativeBuffer.create(byteCount: 64) {
+    var moved: NativeBuffer = own passThrough(buffer: own buffer)
+    log("size {size(this: moved)}")
+    # Interpolating ordinary values is unaffected.
+    let count: Int = 3
+    log("count {count} doubled {count * 2}")
+  }
+}
