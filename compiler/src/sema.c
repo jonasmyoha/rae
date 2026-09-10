@@ -5048,6 +5048,35 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                    && sema_type_contains_ptr(expr->as.method_call.object->resolved_type, 0)) {
             sema_unsafe_error(module, expr->line, expr->column,
                 "reflection and serialization cannot expose a value containing raw Ptr storage in safe code");
+        } else if (expr->kind == AST_EXPR_METHOD_CALL
+                   && str_eq_cstr(expr->as.method_call.method_name, "fromJson")
+                   && expr->as.method_call.object) {
+            // #896: generated deserialization CONSTRUCTS a value's raw Ptr field
+            // (from JSON, as null), the deserialization mirror of the toJson
+            // guard. `Own.fromJson(json)` is a type-qualified intrinsic sema
+            // leaves backend-resolved, so read the type from the qualifier.
+            TypeInfo* built = sema_type_qualifier_type(ctx, module, symbols,
+                                                       expr->as.method_call.object);
+            if (!built) built = expr->as.method_call.object->resolved_type;
+            if (sema_type_contains_ptr(built, 0)) {
+                sema_unsafe_error(module, expr->line, expr->column,
+                    "reflection and deserialization cannot construct a value containing raw Ptr storage in safe code");
+            }
+        } else if (expr->kind == AST_EXPR_INTERP) {
+            // #896: string interpolation runs the generated to-string over the
+            // value, the same reflection path `.toString()`/`.toJson()` guard,
+            // so a Ptr-containing value cannot be interpolated in safe code.
+            for (const AstInterpPart* ip = expr->as.interp.parts; ip; ip = ip->next) {
+                // A bare Ptr / opt Ptr value is already caught reading it; only the
+                // AGGREGATE case (a struct/container carrying a Ptr) needs the extra
+                // reflection guard, so the diagnostic is not duplicated.
+                if (ip->value && sema_type_contains_ptr(ip->value->resolved_type, 0)
+                    && !sema_is_ptr_value_type(ip->value->resolved_type)) {
+                    sema_unsafe_error(module, ip->value->line, ip->value->column,
+                        "reflection and serialization cannot expose a value containing raw Ptr storage in safe code");
+                    break;
+                }
+            }
         } else if ((expr->kind == AST_EXPR_IDENT || expr->kind == AST_EXPR_MEMBER
                     || expr->kind == AST_EXPR_INDEX || expr->kind == AST_EXPR_CALL
                     || expr->kind == AST_EXPR_METHOD_CALL)
