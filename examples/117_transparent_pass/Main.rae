@@ -131,6 +131,7 @@ func main() ret Int {
   if fixedTestFrame {
     log("[transparent] deterministic deferred frame rendered: {alphaCubeCount + 1} alpha instances over {opaqueCubeCount} opaque, {transparentFrames} transparent frames")
   }
+  shutdownDeferredRenderer(renderer: renderer)   # #904: the renderer-owned GPU manager, before the C shutdown
   Gbuffer.shutdownAll()
   Gpu2d.closeWindow()
   ret 0

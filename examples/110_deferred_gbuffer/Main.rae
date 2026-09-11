@@ -179,6 +179,7 @@ func main() ret Int {
       renderDeferredFrameWorld(renderer: renderer, world: world, camera: camera, light: light, aspect: aspect)
     }
   }
+  shutdownDeferredRenderer(renderer: renderer)   # #904: the renderer-owned GPU manager, before the C shutdown
   Gbuffer.shutdownAll()
   Gpu2d.closeWindow()
   ret 0

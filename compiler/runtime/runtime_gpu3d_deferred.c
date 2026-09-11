@@ -56,11 +56,8 @@ static WGPUTextureView gb_lit_view = NULL;
 static WGPUTexture gb_lit_copy_tex = NULL;
 static WGPUTextureView gb_lit_copy_view = NULL;
 /* Transparent forward pass (#843): the blend pipeline + its bind group are
- * created in Rae (lib/TransparentForward.rae) and parked here, the same slot
- * idiom as the AO / composite passes. Released in deferredShutdown; a resize
- * does not invalidate them (they bind the once-created frame/draws buffers). */
-static WGPURenderPipeline gb_transparent_pipeline = NULL;
-static WGPUBindGroup      gb_transparent_bind = NULL;
+ * manager IDs on the Rae side since #904 (lib/TransparentForward.rae); C keeps
+ * only the lit / litCopy accessors it binds. */
 /* HDR radiance format (#370). rg11b10ufloat halves the bandwidth of the
  * largest full-res float target in the frame, but it is an optional
  * WebGPU feature; when the adapter does not offer it we fall back to
@@ -70,19 +67,12 @@ static WGPUTextureFormat gb_lit_format = WGPUTextureFormat_RGBA16Float;
 
 static WGPURenderPipeline gb_pyr_from_depth_pipeline = NULL;  /* depth32f -> r32f */
 static WGPURenderPipeline gb_pyr_reduce_pipeline = NULL;      /* r32f -> r32f */
-static WGPUBindGroup      gb_pyr_bind[GB_PYRAMID_MAX_MIPS];
 
 static WGPURenderPipeline gb_light_pipeline = NULL;
-static WGPUBindGroup      gb_light_bind = NULL;
 static WGPUBuffer         gb_light_ubuf = NULL;
-
-static WGPURenderPipeline gb_composite_pipeline = NULL;
-/* One per history slot: the composite's source alternates with the TAA
- * ping-pong, and a single cached bind group would pin frame one's
- * choice forever. */
-static WGPUBindGroup      gb_composite_bind[3] = {NULL, NULL, NULL};
-static WGPUBuffer         gb_composite_ubuf = NULL;
-static WGPUSampler        gb_composite_samp = NULL;   /* #530: linear upscale sampler */
+/* #904: the light / taa / pyramid bind groups and the composite pipeline,
+ * uniform, sampler and binds are manager IDs on the Rae side
+ * (lib/GbufferPasses.rae); the C pipelines above are adopted there. */
 static WGPUBuffer         gb_taa_ubuf = NULL;
 
 static int gb_deferred_gen = -1;   /* gb_targets_gen this file's binds were built for */
@@ -164,7 +154,6 @@ GB_FULLSCREEN_VS
 static WGPUTexture     gb_taa_tex[2] = {NULL, NULL};
 static WGPUTextureView gb_taa_view[2] = {NULL, NULL};
 static WGPURenderPipeline gb_taa_pipeline = NULL;
-static WGPUBindGroup   gb_taa_bind[2] = {NULL, NULL};
 static int  gb_taa_cur = 0;
 static bool gb_taa_have_history = false;
 /* Sub-pixel jitter (#390). WITHOUT IT TAA IS NOT ANTIALIASING: every
@@ -264,8 +253,6 @@ GB_FULLSCREEN_VS
  */
 static WGPUTexture     gb_ao_tex = NULL;
 static WGPUTextureView gb_ao_view = NULL;
-static WGPURenderPipeline gb_ao_pipeline = NULL;
-static WGPUBindGroup   gb_ao_bind = NULL;
 
 static const char* GB_AO_WGSL =
 "struct LightU {\n"
@@ -867,27 +854,19 @@ static WGPURenderPipeline gb_make_fullscreen_pipeline(const char* wgsl, WGPUText
 
 static void gb_deferred_release_targets(void) {
     for (int i = 0; i < GB_PYRAMID_MAX_MIPS; i++) {
-        if (gb_pyr_bind[i])    { wgpuBindGroupRelease(gb_pyr_bind[i]); gb_pyr_bind[i] = NULL; }
         if (gb_pyramid_rt[i])  { wgpuTextureViewRelease(gb_pyramid_rt[i]); gb_pyramid_rt[i] = NULL; }
         if (gb_pyramid_src[i]) { wgpuTextureViewRelease(gb_pyramid_src[i]); gb_pyramid_src[i] = NULL; }
     }
     if (gb_pyramid_tex)    { wgpuTextureRelease(gb_pyramid_tex); gb_pyramid_tex = NULL; }
-    if (gb_light_bind)     { wgpuBindGroupRelease(gb_light_bind); gb_light_bind = NULL; }
-    /* Slots 0/1 are the TAA-ping-pong source binds, slot 2 the no-TAA (lit)
-     * source bind. They are created in Rae now (#504) but released here so the
-     * lifetime stays with the targets they sample. */
-    for (int i = 0; i < 3; i++) {
-        if (gb_composite_bind[i]) { wgpuBindGroupRelease(gb_composite_bind[i]); gb_composite_bind[i] = NULL; }
-    }
+    /* The bind groups sampling these targets are manager-owned (#904): Rae
+     * retires them when gb_targets_gen changes, before re-adopting the views. */
     for (int i = 0; i < 2; i++) {
         if (gb_taa_view[i]) { wgpuTextureViewRelease(gb_taa_view[i]); gb_taa_view[i] = NULL; }
         if (gb_taa_tex[i])  { wgpuTextureRelease(gb_taa_tex[i]); gb_taa_tex[i] = NULL; }
-        if (gb_taa_bind[i]) { wgpuBindGroupRelease(gb_taa_bind[i]); gb_taa_bind[i] = NULL; }
     }
     gb_taa_have_history = false;
     if (gb_ao_view)        { wgpuTextureViewRelease(gb_ao_view); gb_ao_view = NULL; }
     if (gb_ao_tex)         { wgpuTextureRelease(gb_ao_tex); gb_ao_tex = NULL; }
-    if (gb_ao_bind)        { wgpuBindGroupRelease(gb_ao_bind); gb_ao_bind = NULL; }
     if (gb_lit_view)       { wgpuTextureViewRelease(gb_lit_view); gb_lit_view = NULL; }
     if (gb_lit_tex)        { wgpuTextureRelease(gb_lit_tex); gb_lit_tex = NULL; }
     if (gb_lit_copy_view) { wgpuTextureViewRelease(gb_lit_copy_view); gb_lit_copy_view = NULL; }
@@ -1028,12 +1007,8 @@ void rae_gb_ssao_upload(float camX, float camY, float camZ) {
 }
 const char* rae_gb_ao_wgsl(void)   { return GB_AO_WGSL; }
 void* rae_gb_ao_view(void)         { return (void*)gb_ao_view; }
-void* rae_gb_ao_pipeline(void)     { return (void*)gb_ao_pipeline; }
-void* rae_gb_ao_bind(void)         { return (void*)gb_ao_bind; }
 void* rae_gb_light_ubuf(void)      { return (void*)gb_light_ubuf; }
 int64_t rae_gb_light_bytes(void)   { return (int64_t)GB_LIGHT_BYTES; }
-void rae_gb_set_ao_pipeline(void* p) { gb_ao_pipeline = (WGPURenderPipeline)p; }
-void rae_gb_set_ao_bind(void* b)     { gb_ao_bind = (WGPUBindGroup)b; }
 
 static void gb_run_fullscreen(WGPURenderPipeline pipeline, WGPUBindGroup bind,
                               WGPUTextureView target) {
@@ -1081,12 +1056,6 @@ void* rae_gb_pyr_src_view(int64_t i) {
 void* rae_gb_pyr_rt_view(int64_t i) {
     return (i >= 0 && i < GB_PYRAMID_MAX_MIPS) ? (void*)gb_pyramid_rt[(int)i] : NULL;
 }
-void* rae_gb_pyr_bind(int64_t i) {
-    return (i >= 0 && i < GB_PYRAMID_MAX_MIPS) ? (void*)gb_pyr_bind[(int)i] : NULL;
-}
-void rae_gb_set_pyr_bind(int64_t i, void* b) {
-    if (i >= 0 && i < GB_PYRAMID_MAX_MIPS) gb_pyr_bind[(int)i] = (WGPUBindGroup)b;
-}
 
 /* Deferred lighting. Sun direction points TOWARD the scene, matching
  * Light3d and the forward path. */
@@ -1119,12 +1088,6 @@ void* rae_gb_lit_texture(void)        { return (void*)gb_lit_tex; }
 void* rae_gb_lit_copy_texture(void)   { return (void*)gb_lit_copy_tex; }
 void* rae_gb_lit_copy_view(void)      { return (void*)gb_lit_copy_view; }
 int64_t rae_gb_lit_format(void)       { return (int64_t)gb_lit_format; }
-void* rae_gb_transparent_pipeline(void)     { return (void*)gb_transparent_pipeline; }
-void  rae_gb_set_transparent_pipeline(void* p) { gb_transparent_pipeline = (WGPURenderPipeline)p; }
-void* rae_gb_transparent_bind(void)         { return (void*)gb_transparent_bind; }
-void  rae_gb_set_transparent_bind(void* b)  { gb_transparent_bind = (WGPUBindGroup)b; }
-void* rae_gb_light_bind(void)         { return (void*)gb_light_bind; }
-void rae_gb_set_light_bind(void* b)   { gb_light_bind = (WGPUBindGroup)b; }
 void* rae_gb_shadow_frame_ubuf(void)  { return (void*)g3d_sm_frame_ubuf; }
 int64_t rae_gb_shadow_frame_bytes(void){ return 320; }
 void* rae_gb_shadow_array_view(void)  { return (void*)g3d_sm_array_view; }
@@ -1212,8 +1175,6 @@ void* rae_gb_taa_pipeline(void)      { return (void*)gb_taa_pipeline; }
 void* rae_gb_taa_ubuf(void)          { return (void*)gb_taa_ubuf; }
 void* rae_gb_taa_target_view(void)   { return (void*)gb_taa_view[gb_taa_cur]; }
 void* rae_gb_taa_history_view(void)  { return (void*)gb_taa_view[1 - gb_taa_cur]; }
-void* rae_gb_taa_bind(int64_t idx)   { return (idx >= 0 && idx < 2) ? (void*)gb_taa_bind[(int)idx] : NULL; }
-void rae_gb_set_taa_bind(int64_t idx, void* b) { if (idx >= 0 && idx < 2) gb_taa_bind[(int)idx] = (WGPUBindGroup)b; }
 /* TAA on/off (#20, the game). Default is on so shared examples keep their look;
  * an app disables it with rae_gb_set_taa_enabled(0). When off the composite
  * routes to the raw lit slot (source-index 2), the taa graph pass no-ops via
@@ -1248,14 +1209,6 @@ void* rae_gb_composite_source_view(void) {
     return (void*)((gb_taa_enabled && gb_taa_view[gb_taa_cur]) ? gb_taa_view[gb_taa_cur] : gb_lit_view);
 }
 int64_t rae_gb_composite_source_index(void) { return gb_taa_enabled ? (int64_t)gb_taa_cur : 2; }
-void* rae_gb_composite_pipeline(void)    { return (void*)gb_composite_pipeline; }
-void* rae_gb_composite_ubuf(void)        { return (void*)gb_composite_ubuf; }
-void* rae_gb_composite_sampler(void)     { return (void*)gb_composite_samp; }
-void  rae_gb_set_composite_sampler(void* s) { gb_composite_samp = (WGPUSampler)s; }
-void* rae_gb_composite_bind(int64_t idx) { return (idx >= 0 && idx < 3) ? (void*)gb_composite_bind[(int)idx] : NULL; }
-void rae_gb_set_composite_pipeline(void* p) { gb_composite_pipeline = (WGPURenderPipeline)p; }
-void rae_gb_set_composite_ubuf(void* b)     { gb_composite_ubuf = (WGPUBuffer)b; }
-void rae_gb_set_composite_bind(int64_t idx, void* b) { if (idx >= 0 && idx < 3) gb_composite_bind[(int)idx] = (WGPUBindGroup)b; }
 
 /* Number of mip levels in the pyramid — 0 before the first build. Lets a
  * caller or test confirm the chain was actually built rather than skipped. */
@@ -1267,12 +1220,7 @@ void rae_ext_Gbuffer_deferredShutdown(void) {
     if (gb_pyr_reduce_pipeline)     { wgpuRenderPipelineRelease(gb_pyr_reduce_pipeline); gb_pyr_reduce_pipeline = NULL; }
     if (gb_light_pipeline)          { wgpuRenderPipelineRelease(gb_light_pipeline); gb_light_pipeline = NULL; }
     if (gb_light_ubuf)              { wgpuBufferRelease(gb_light_ubuf); gb_light_ubuf = NULL; }
-    if (gb_composite_pipeline)      { wgpuRenderPipelineRelease(gb_composite_pipeline); gb_composite_pipeline = NULL; }
-    if (gb_composite_ubuf)          { wgpuBufferRelease(gb_composite_ubuf); gb_composite_ubuf = NULL; }
-    if (gb_composite_samp)          { wgpuSamplerRelease(gb_composite_samp); gb_composite_samp = NULL; }
     if (gb_taa_ubuf)                { wgpuBufferRelease(gb_taa_ubuf); gb_taa_ubuf = NULL; }
     if (gb_taa_pipeline)            { wgpuRenderPipelineRelease(gb_taa_pipeline); gb_taa_pipeline = NULL; }
-    if (gb_transparent_bind)        { wgpuBindGroupRelease(gb_transparent_bind); gb_transparent_bind = NULL; }
-    if (gb_transparent_pipeline)    { wgpuRenderPipelineRelease(gb_transparent_pipeline); gb_transparent_pipeline = NULL; }
     gb_deferred_gen = -1;
 }

@@ -281,6 +281,7 @@ func main() ret Int {
     log("[water buoyancy] {buoyUpdates} samples, height {buoyMinimum}..{buoyMaximum}")
     if buoyUpdates < 2 { checksOk = false }
   }
+  shutdownDeferredRenderer(renderer: renderer)   # #904: the renderer-owned GPU manager, before the C shutdown
   Gbuffer.shutdownAll()
   Gpu2d.closeWindow()
   if not checksOk { ret 1 }

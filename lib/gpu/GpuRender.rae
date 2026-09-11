@@ -38,6 +38,12 @@ type ExternalId {
 
 const externalBuffer: Int = 0
 const externalTextureView: Int = 1
+# #904: the deferred post-passes bind C-owned samplers and build bind groups
+# over C-owned pipelines (lighting / taa / depth pyramid), so those are
+# adoptable too. A pipeline external is a LAYOUT source and a draw pipeline,
+# never a bind entry.
+const externalRenderPipeline: Int = 2
+const externalSampler: Int = 3
 
 # ----- resource references (ordered bind entries and attachments) --------
 
@@ -171,6 +177,67 @@ func adoptExternalBuffer(resources: mod GpuResources, handle: copy Ptr) unsafe r
 # Adopts a native texture view the adopter owns and keeps valid while adopted.
 func adoptExternalTextureView(resources: mod GpuResources, handle: copy Ptr) unsafe ret opt ExternalId {
   unsafe { ret adoptExternal(resources: resources, handle: handle, subKind: externalTextureView) }
+}
+
+# Adopts a native sampler the adopter owns and keeps valid while adopted.
+func adoptExternalSampler(resources: mod GpuResources, handle: copy Ptr) unsafe ret opt ExternalId {
+  unsafe { ret adoptExternal(resources: resources, handle: handle, subKind: externalSampler) }
+}
+
+# Adopts a native RENDER PIPELINE the adopter owns (a C-created deferred pass
+# pipeline): usable as the layout source of createRenderBindGroupExternal and
+# as the pipeline of recordDrawInPassExternal.
+func adoptExternalRenderPipeline(resources: mod GpuResources, handle: copy Ptr) unsafe ret opt ExternalId {
+  unsafe { ret adoptExternal(resources: resources, handle: handle, subKind: externalRenderPipeline) }
+}
+
+func isExternalRenderPipeline(resources: view GpuResources, id: view ExternalId) ret Bool {
+  if isValidExternal(resources: resources, id: id) is false { ret false }
+  ret intAt(list: resources.externals.nativeIndex, index: id.slot) is externalRenderPipeline
+}
+
+# Adopt-and-collect helpers for a pass that re-adopts its C-owned inputs every
+# targets generation: each adopts `handle`, records the ExternalId in `adopted`
+# (so releaseExternalIds can drop the whole generation at once) and returns
+# the bind entry for it. A null handle yields a dead reference, so the bind
+# group creation fails closed instead of binding nothing.
+func adoptBufferRef(resources: mod GpuResources, adopted: mod List(ExternalId), handle: copy Ptr) unsafe ret ResourceRef {
+  unsafe {
+    if let id: ExternalId = adoptExternalBuffer(resources: resources, handle: handle) {
+      adopted.add(value: id)
+      ret externalRef(id: id)
+    }
+  }
+  ret noRef()
+}
+
+func adoptTextureViewRef(resources: mod GpuResources, adopted: mod List(ExternalId), handle: copy Ptr) unsafe ret ResourceRef {
+  unsafe {
+    if let id: ExternalId = adoptExternalTextureView(resources: resources, handle: handle) {
+      adopted.add(value: id)
+      ret externalRef(id: id)
+    }
+  }
+  ret noRef()
+}
+
+func adoptSamplerRef(resources: mod GpuResources, adopted: mod List(ExternalId), handle: copy Ptr) unsafe ret ResourceRef {
+  unsafe {
+    if let id: ExternalId = adoptExternalSampler(resources: resources, handle: handle) {
+      adopted.add(value: id)
+      ret externalRef(id: id)
+    }
+  }
+  ret noRef()
+}
+
+# Releases every external in `list` and empties it (a pass's per-generation
+# adoptions, dropped after the bind groups over them were retired).
+func releaseExternalIds(resources: mod GpuResources, list: mod List(ExternalId)) {
+  loop var i: Int = 0, i < list.length, ++i {
+    if let id: ExternalId = list.copyAt(index: i) { releaseExternal(resources: resources, id: id) }
+  }
+  list.clear()
 }
 
 # Drops the reference: the generation bumps (no new use) and the slot frees
@@ -377,6 +444,25 @@ func createRenderBindGroup(resources: mod GpuResources, pipeline: view RenderPip
   }
 }
 
+# Group 0 of an ADOPTED render pipeline (a C-owned deferred pass pipeline)
+# with `entries` in binding order; the group pins the external pipeline slot
+# like a manager pipeline, so releasing the external behind a live group is
+# deferred the same way.
+func createRenderBindGroupExternal(resources: mod GpuResources, pipeline: view ExternalId, entries: view List(ResourceRef)) ret opt BindGroupId {
+  if isExternalRenderPipeline(resources: resources, id: pipeline) is false { ret none }
+  if entries.length < 1 { ret none }
+  let slot: Int = findFreeSlot(table: resources.bindGroups, capacity: resources.capacity)
+  if slot < 0 { ret none }
+  let start: Int = resources.depKinds.length
+  appendDep(resources: resources, kind: kindExternal, slot: pipeline.slot, generation: pipeline.generation)
+  var nativeEntries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: entries.length)
+  if appendOrderedEntries(resources: resources, entries: entries, nativeEntries: nativeEntries) is false { ret none }
+  unsafe {
+    let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: slotHandle(table: resources.externals, slot: pipeline.slot), groupIndex: 0 as UInt32)
+    ret finishBindGroup(resources: resources, slot: slot, start: start, layout: layout, nativeEntries: nativeEntries)
+  }
+}
+
 # The same over a COMPUTE pipeline's group 0: the ordered, mixed-kind (and
 # external-capable) counterpart of GpuLifetime.createBindGroup, for layouts
 # whose binding order is not buffers-then-views-then-samplers.
@@ -560,6 +646,40 @@ func recordDrawInPass(resources: view GpuResources, pass: copy Ptr, pipeline: vi
     wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: slotHandle(table: resources.renderPipelines, slot: pipeline.slot))
     wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32, group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
     wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: vertexCount as UInt32, instanceCount: instanceCount as UInt32, firstVertex: firstVertex as UInt32, firstInstance: firstInstance as UInt32)
+  }
+  ret true
+}
+
+# recordDrawInPass over an ADOPTED render pipeline (see adoptExternalRenderPipeline).
+func recordDrawInPassExternal(resources: view GpuResources, pass: copy Ptr, pipeline: view ExternalId, bindGroup: view BindGroupId, vertexCount: view Int, instanceCount: view Int, firstVertex: view Int, firstInstance: view Int) unsafe ret Bool {
+  if isExternalRenderPipeline(resources: resources, id: pipeline) is false { ret false }
+  if bindGroupIsUsable(resources: resources, id: bindGroup) is false { ret false }
+  if vertexCount < 1 or instanceCount < 1 or firstVertex < 0 or firstInstance < 0 { ret false }
+  unsafe {
+    if pass is webgpuNull() { ret false }
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: slotHandle(table: resources.externals, slot: pipeline.slot))
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32, group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+    wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: vertexCount as UInt32, instanceCount: instanceCount as UInt32, firstVertex: firstVertex as UInt32, firstInstance: firstInstance as UInt32)
+  }
+  ret true
+}
+
+# An instanced indexed draw into a pass the caller opened, over the legacy
+# gbuffer's C-owned mesh buffers (raw handles the mesh registry keeps valid for
+# the frame — hence unsafe, like the pass encoder). The pipeline and bind group
+# are validated manager objects; nothing is pinned (the caller's submission is
+# not tracked here), as recordDrawInPass.
+func recordDrawIndexedInPass(resources: view GpuResources, pass: copy Ptr, pipeline: view RenderPipelineId, bindGroup: view BindGroupId, vertexBuffer: copy Ptr, indexBuffer: copy Ptr, indexCount: view Int, instanceCount: view Int, firstInstance: view Int) unsafe ret Bool {
+  if isValidRenderPipeline(resources: resources, id: pipeline) is false { ret false }
+  if bindGroupIsUsable(resources: resources, id: bindGroup) is false { ret false }
+  if indexCount < 1 or instanceCount < 1 or firstInstance < 0 { ret false }
+  unsafe {
+    if pass is webgpuNull() or vertexBuffer is webgpuNull() or indexBuffer is webgpuNull() { ret false }
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: slotHandle(table: resources.renderPipelines, slot: pipeline.slot))
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32, group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+    wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder: pass, slot: 0 as UInt32, buffer: vertexBuffer, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: vertexBuffer))
+    wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder: pass, buffer: indexBuffer, format: WGPUIndexFormat_Uint32, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: indexBuffer))
+    wgpuRenderPassEncoderDrawIndexed(renderPassEncoder: pass, indexCount: indexCount as UInt32, instanceCount: instanceCount as UInt32, firstIndex: 0 as UInt32, baseVertex: 0 as Int32, firstInstance: firstInstance as UInt32)
   }
   ret true
 }
