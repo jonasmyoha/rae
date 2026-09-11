@@ -148,7 +148,12 @@ func listDirByExt(folder: view String, ext: view String) pub ret List(File) {
     unsafe {
       let f: File = rae_ext_rae_buf_get(buf: all.data, index: i)
       if f.hasExtension(ext: ext) {
-        result.add(value: f)
+        # #899: adding `f` itself would add the ALIAS — `result` and `all`
+        # would then share the same `name`/`folder` String heap, and dropping
+        # both frees it twice. The struct literal below deep-copies the
+        # String fields (the same mechanism `listDir` uses to build `entry`
+        # above), so `result` owns independent storage.
+        result.add(value: { name: f.name, folder: f.folder })
       }
     }
     i = i + 1
