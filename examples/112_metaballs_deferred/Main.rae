@@ -841,6 +841,7 @@ func main() ret Int {
   if not headless {
     writeHotReloadStateFor(appId: state112AppId, state: serialize112State(ui: uiState, rig: cameraRig, camera: camera))
   }
+  shutdownDeferredRenderer(renderer: renderer)   # #904: the renderer-owned GPU manager, before the C shutdown
   shutdown()
   Gpu2d.closeWindow()
   ret 0

@@ -745,6 +745,7 @@ func runWalkerApp() ret Int {
     waterShutdown(waterSystem: app.waterSystem, resources: resources)
     shutdown(resources: resources)
   }
+  shutdownDeferredRenderer(renderer: app.renderSystem.renderer)   # #904: the renderer-owned GPU manager, before the C shutdown
   skinShutdown()
   shutdown()
   Gpu2d.closeWindow()

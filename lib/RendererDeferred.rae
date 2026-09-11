@@ -39,6 +39,8 @@ open GbufferInspector
 open GbufferPasses
 open TransparentForward
 open Sky
+open gpu/GpuResources
+open gpu/GpuLifetime
 
 # ----- pass tags ------------------------------------------------------
 # Which pass of the deferred frame this is. An enum (not Int consts) so the
@@ -86,6 +88,12 @@ type DeferredRenderer {
   # generations) were module-level globals in gbuffer_passes / gbufferInspector.
   # The renderer owns them now; renderDeferredPassWorld threads each pass its cache.
   passes: RenderPasses
+  # #904: the renderer-owned GPU manager every deferred pass's objects (its
+  # pipelines, uniforms, samplers, bind groups and the adopted C-owned inputs)
+  # are typed IDs in. Created lazily at the first frame (the device must be up)
+  # and released by shutdownDeferredRenderer BEFORE the C shutdown.
+  idIssuer: IdIssuer
+  gpuResources: opt GpuResources
 }
 
 # The Rae-side deferred-pass caches, aggregated. Fields hold each pass's "have I
@@ -105,16 +113,42 @@ type RenderPasses {
 func createRenderPasses() ret RenderPasses {
   unsafe {
     ret RenderPasses {
-      composite: { pipeMade: false, bindGen: 0 - 1, bindMade: List.create(Bool, cap: 3), uniform: List.create(Float, cap: 16) },
-      ao: { pipeMade: false, bindGen: 0 - 1, bindMade: false },
-      light: { bindGen: 0 - 1, bindMade: false },
-      taa: { bindGen: 0 - 1, bindMade: List.create(Bool, cap: 2) },
-      pyr: { bindGen: 0 - 1 },
-      inspect: { pipeMade: false, bindMade: false, lastTargetsGen: 0 - 1, uniform: List.create(Float, cap: 4) },
+      composite: createCompositePassCache(),
+      ao: createAoPassCache(),
+      light: createLightPassCache(),
+      taa: createTaaPassCache(),
+      pyr: createPyrPassCache(),
+      inspect: createViewPassCache(),
       gbuffer: createGbufferCache(),
       transparent: createTransparentPassCache(capacity: 256)
     }
   }
+}
+
+# The manager slot budget: per targets generation the post-passes adopt ~40
+# C-owned inputs (views, uniforms, the shadow sampler, the C pipelines) plus
+# their bind groups; retired slots are reused, so 128 leaves headroom for the
+# geometry-pass objects of the next slices (#912).
+const deferredManagerCapacity: Int = 128
+
+func ensureRendererResources(renderer: mod DeferredRenderer) {
+  if let existing: view GpuResources => renderer.gpuResources { ret }
+  renderer.gpuResources = GpuResources.create(issuer: renderer.idIssuer, capacity: deferredManagerCapacity)
+}
+
+# Retire every manager object the passes hold and drop the manager. Call BEFORE
+# Gbuffer.shutdownAll() / Gpu3d.shutdown(): the adopted C-owned handles must
+# still be valid while their bind groups are released, and the device must
+# still be up for the releases.
+func shutdownDeferredRenderer(renderer: mod DeferredRenderer) pub {
+  if let resources: mod GpuResources => renderer.gpuResources {
+    postPassesShutdown(composite: renderer.passes.composite, ao: renderer.passes.ao, light: renderer.passes.light,
+                       taa: renderer.passes.taa, pyr: renderer.passes.pyr, resources: resources)
+    inspectorShutdown(cache: renderer.passes.inspect, resources: resources)
+    transparentShutdown(cache: renderer.passes.transparent, resources: resources)
+    shutdown(resources: resources)
+  }
+  renderer.gpuResources = none
 }
 
 # Declare the deferred frame. Pass declaration order here is deliberately
@@ -261,6 +295,8 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
       hasSky: false
       grade: neutralGrade()
       passes: createRenderPasses()
+      idIssuer: IdIssuer.create()
+      gpuResources: none
     }
   }
 }
@@ -352,6 +388,8 @@ func deferredTagAt(renderer: view DeferredRenderer, i: view Int) pub ret Int {
 # wrote — so those tags ignore the world.
 func renderDeferredPassWorld(renderer: mod DeferredRenderer, tag: view Int, world: view World3d,
                              camera: view Camera3d, light: view Light3d, aspect: view Float) pub {
+  # The geometry pass and present are still C-driven (#912/#906) and run with
+  # no manager — a device-less run (the zero-alloc fixture) still packs draws.
   if tag is RenderTag.gbuffer {
     beginPass(cache: renderer.passes.gbuffer, camera: camera, light: light, aspect: aspect)
     GbufferWorld.renderSceneWorld(cache: renderer.passes.gbuffer, world: world)
@@ -359,40 +397,51 @@ func renderDeferredPassWorld(renderer: mod DeferredRenderer, tag: view Int, worl
     # depth-test against each other rather than compositing (#392).
     renderSceneSdfWorld(world: world, camera: camera)
     endPass()
-  }
-  if tag is RenderTag.depthPyramid {
-    buildDepthPyramid(cache: renderer.passes.pyr)
-  }
-  if tag is RenderTag.ssao {
-    ssaoPass(cache: renderer.passes.ao, camera: camera)
-  }
-  if tag is RenderTag.lighting {
-    var sky: Sky = createSkyNone(light: light, clearColor: light.clearColor)
-    if renderer.hasSky {
-      sky = renderer.sky
-    }
-    lightingPassSky(cache: renderer.passes.light, camera: camera, light: light, sky: sky)
-  }
-  if tag is RenderTag.taa {
-    taaPass(cache: renderer.passes.taa)
-  }
-  if tag is RenderTag.transparentForward {
-    transparentPass(cache: renderer.passes.transparent)
-  }
-  # waterFft is dispatched by the app that owns a WaterSystem (waterFftStep);
-  # an app without water simply has nothing to do at this tag.
-  if tag is RenderTag.composite {
-    if renderer.debugView is viewLit {
-      compositePassGraded(cache: renderer.passes.composite, exposure: light.exposure, grade: renderer.grade)
-    } else {
-      inspect(cache: renderer.passes.inspect, mode: renderer.debugView, zNear: camera.nearZ, zFar: camera.farZ)
-    }
+    ret
   }
   if tag is RenderTag.present {
     if renderer.hasUi {
       Gpu2d.endFrame()
     } else {
       presentFrame()
+    }
+    ret
+  }
+  ensureRendererResources(renderer: renderer)
+  if let resources: mod GpuResources => renderer.gpuResources {
+    renderDeferredPassWith(renderer: renderer, resources: resources, tag: tag, camera: camera, light: light)
+  }
+}
+
+# The manager-backed passes (#904): every tag but gbuffer / present.
+func renderDeferredPassWith(renderer: mod DeferredRenderer, resources: mod GpuResources, tag: view Int,
+                            camera: view Camera3d, light: view Light3d) {
+  if tag is RenderTag.depthPyramid {
+    buildDepthPyramid(cache: renderer.passes.pyr, resources: resources)
+  }
+  if tag is RenderTag.ssao {
+    ssaoPass(cache: renderer.passes.ao, resources: resources, camera: camera)
+  }
+  if tag is RenderTag.lighting {
+    var sky: Sky = createSkyNone(light: light, clearColor: light.clearColor)
+    if renderer.hasSky {
+      sky = renderer.sky
+    }
+    lightingPassSky(cache: renderer.passes.light, resources: resources, camera: camera, light: light, sky: sky)
+  }
+  if tag is RenderTag.taa {
+    taaPass(cache: renderer.passes.taa, resources: resources)
+  }
+  if tag is RenderTag.transparentForward {
+    transparentPass(cache: renderer.passes.transparent, resources: resources)
+  }
+  # waterFft is dispatched by the app that owns a WaterSystem (waterFftStep);
+  # an app without water simply has nothing to do at this tag.
+  if tag is RenderTag.composite {
+    if renderer.debugView is viewLit {
+      compositePassGraded(cache: renderer.passes.composite, resources: resources, exposure: light.exposure, grade: renderer.grade)
+    } else {
+      inspect(cache: renderer.passes.inspect, resources: resources, mode: renderer.debugView, zNear: camera.nearZ, zFar: camera.farZ)
     }
   }
 }
