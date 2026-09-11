@@ -1,7 +1,7 @@
 # GPU resource identity: manager IDs and the public resource API (#892)
 
-Status: **proposed contract, pending maintainer approval of the tradeoffs listed
-at the end; implementation is #869.** Executable model:
+Status: **approved contract (maintainer approval 2026-09-11: all four
+recommendations taken as written); implementation is #869.** Executable model:
 `compiler/tests/cases/794_gpu_identity_model` (deterministic, no GPU).
 
 This is library design over the shipped lifecycle (`create`/`drop`/`copy`,
@@ -206,7 +206,11 @@ The only change to the shipped example is the explicit `issuer` thread; a second
 App in the same `main` takes the same issuer and is distinguishable by
 construction.
 
-## Unresolved tradeoffs requiring approval before #869
+## Tradeoffs — APPROVED 2026-09-11 (all recommendations as written)
+
+The maintainer approved every recommended option below on 2026-09-11; #869
+implements exactly these. Only a conflict surfaced by #870/#871 reopens them.
+
 
 1. **Issuer sharing scope** (the identity guarantee). Recommended: one
    `IdIssuer` owned by the root that creates managers and passed explicitly;
