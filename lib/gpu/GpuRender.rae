@@ -683,3 +683,18 @@ func recordDrawIndexedInPass(resources: view GpuResources, pass: copy Ptr, pipel
   }
   ret true
 }
+
+# Binds a manager pipeline + bind group in a pass the caller opened without
+# drawing — for a pass that the legacy C-driven code expects to find a known
+# pipeline bound in (the geometry pass's static pipeline).
+func recordBindInPass(resources: view GpuResources, pass: copy Ptr, pipeline: view RenderPipelineId, bindGroup: view BindGroupId) unsafe ret Bool {
+  if isValidRenderPipeline(resources: resources, id: pipeline) is false { ret false }
+  if bindGroupIsUsable(resources: resources, id: bindGroup) is false { ret false }
+  unsafe {
+    if pass is webgpuNull() { ret false }
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: slotHandle(table: resources.renderPipelines, slot: pipeline.slot))
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32, group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  }
+  ret true
+}
+

@@ -871,26 +871,15 @@ void* rae_gt_get(int64_t i);
  * real prototypes and does not truncate the 64-bit handle pointers. Unguarded:
  * the stub build (no real geometry pass) provides no-op versions too. */
 void* rae_gb_pass(void);
-void* rae_gb_static_pipeline(void);
-void  rae_gb_set_terrain_pipeline(void* p);  /* #533 */
-void* rae_gb_terrain_pipeline(void);
-void  rae_gb_set_terrain_bind(void* b);
-void* rae_gb_terrain_bind(void);
-void  rae_gb_set_terrain_tex_view(void* v);
-void* rae_gb_terrain_tex_view(void);
-void  rae_gb_set_terrain_sampler(void* s);
-void* rae_gb_terrain_sampler(void);
-void  rae_gb_set_terrain_blend(double b);
-double rae_gb_terrain_blend(void);
 void  rae_gb_bump_terrain_tex_gen(void);
 int64_t rae_gb_terrain_tex_gen(void);
+void* rae_gb_terrain_array_view(void);   /* #912: the C material array's 2d-array view, adopted by Rae */
 void rae_gb_terrain_array_init(int64_t w, int64_t h, int64_t layers);
 void rae_gb_terrain_array_write(int64_t layer, const int64_t* pixels, int64_t w, int64_t h);
 void* rae_gb_sprite_array_view(void);
 int64_t rae_gb_sprite_tex_gen(void);
 void rae_gb_sprite_array_init(int64_t w, int64_t h, int64_t layers);
 void rae_gb_sprite_array_write(int64_t layer, const int64_t* pixels, int64_t w, int64_t h);
-void* rae_gb_static_bind(void);
 void* rae_gb_draws_buffer(void);
 int64_t rae_gb_max_draws(void);
 int64_t rae_gb_draw_count(void);
@@ -906,13 +895,10 @@ int64_t rae_gb_sdf_prepare(void* packedBalls, int64_t count, void* packedColors,
 void* rae_gb_sdf_pipeline(void);
 void* rae_gb_sdf_bind(int64_t gi);
 /* Skinned single draw ported to Rae (#503). */
-void* rae_gb_skin_pipeline(void);
-void* rae_gb_skin_bind(void);
 int64_t rae_gb_skin_ready(int64_t mesh);
 void* rae_gb_skin_vbuf(int64_t mesh);
 void* rae_gb_skin_ibuf(int64_t mesh);
 int64_t rae_gb_skin_icount(int64_t mesh);
-void rae_gb_set_skin_bind(void* bind);
 void* rae_gb_skin_palette(void);
 int64_t rae_gb_skin_palette_size(void);
 int64_t rae_gb_skin_palette_ready(void);
@@ -945,10 +931,6 @@ int64_t rae_gb_targets_gen(void);
 /* Render pipelines + WGSL shader modules created in Rae (#503). */
 const char* rae_gb_wgsl(void);
 const char* rae_gb_skin_wgsl(void);
-const char* rae_gb_entry_vs(void);
-const char* rae_gb_entry_fs(void);
-void rae_gb_set_pipeline(void* p);
-void rae_gb_set_skin_pipeline(void* p);
 /* G-buffer inspector built in Rae (#503). */
 const char* rae_gb_view_wgsl(void);
 int64_t rae_g2d_format(void);
@@ -1110,6 +1092,5 @@ int64_t rae_g3d_skin_icount(int64_t mesh);
 void* rae_gb_frame_ubuf(void);
 int64_t rae_gb_frame_bytes(void);
 int64_t rae_gb_draws_size(void);
-void rae_gb_set_static_bind(void* bind);
 
 #endif

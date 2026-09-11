@@ -35,6 +35,7 @@ open Math3d
 open Scene3d
 open Gbuffer
 open GbufferWorld
+open GbufferTerrain
 open GbufferInspector
 open GbufferPasses
 open TransparentForward
@@ -131,7 +132,7 @@ func createRenderPasses() ret RenderPasses {
 # geometry-pass objects of the next slices (#912).
 const deferredManagerCapacity: Int = 128
 
-func ensureRendererResources(renderer: mod DeferredRenderer) {
+func ensureRendererResources(renderer: mod DeferredRenderer) pub {
   if let existing: view GpuResources => renderer.gpuResources { ret }
   renderer.gpuResources = GpuResources.create(issuer: renderer.idIssuer, capacity: deferredManagerCapacity)
 }
@@ -146,6 +147,8 @@ func shutdownDeferredRenderer(renderer: mod DeferredRenderer) pub {
                        taa: renderer.passes.taa, pyr: renderer.passes.pyr, resources: resources)
     inspectorShutdown(cache: renderer.passes.inspect, resources: resources)
     transparentShutdown(cache: renderer.passes.transparent, resources: resources)
+    gbufferShutdown(cache: renderer.passes.gbuffer, resources: resources)
+    terrainShutdown(cache: renderer.passes.gbuffer, resources: resources)
     shutdown(resources: resources)
   }
   renderer.gpuResources = none
@@ -388,17 +391,7 @@ func deferredTagAt(renderer: view DeferredRenderer, i: view Int) pub ret Int {
 # wrote — so those tags ignore the world.
 func renderDeferredPassWorld(renderer: mod DeferredRenderer, tag: view Int, world: view World3d,
                              camera: view Camera3d, light: view Light3d, aspect: view Float) pub {
-  # The geometry pass and present are still C-driven (#912/#906) and run with
-  # no manager — a device-less run (the zero-alloc fixture) still packs draws.
-  if tag is RenderTag.gbuffer {
-    beginPass(cache: renderer.passes.gbuffer, camera: camera, light: light, aspect: aspect)
-    GbufferWorld.renderSceneWorld(cache: renderer.passes.gbuffer, world: world)
-    # Metaballs go into the SAME pass as the triangles, so the two kinds
-    # depth-test against each other rather than compositing (#392).
-    renderSceneSdfWorld(world: world, camera: camera)
-    endPass()
-    ret
-  }
+  # Present is still C-driven (#906) and needs no manager.
   if tag is RenderTag.present {
     if renderer.hasUi {
       Gpu2d.endFrame()
@@ -409,13 +402,21 @@ func renderDeferredPassWorld(renderer: mod DeferredRenderer, tag: view Int, worl
   }
   ensureRendererResources(renderer: renderer)
   if let resources: mod GpuResources => renderer.gpuResources {
-    renderDeferredPassWith(renderer: renderer, resources: resources, tag: tag, camera: camera, light: light)
+    renderDeferredPassWith(renderer: renderer, resources: resources, tag: tag, world: world, camera: camera, light: light, aspect: aspect)
   }
 }
 
-# The manager-backed passes (#904): every tag but gbuffer / present.
-func renderDeferredPassWith(renderer: mod DeferredRenderer, resources: mod GpuResources, tag: view Int,
-                            camera: view Camera3d, light: view Light3d) {
+# The manager-backed passes (#904, geometry since #912): every tag but present.
+func renderDeferredPassWith(renderer: mod DeferredRenderer, resources: mod GpuResources, tag: view Int, world: view World3d,
+                            camera: view Camera3d, light: view Light3d, aspect: view Float) {
+  if tag is RenderTag.gbuffer {
+    beginPass(cache: renderer.passes.gbuffer, resources: resources, camera: camera, light: light, aspect: aspect)
+    GbufferWorld.renderSceneWorld(cache: renderer.passes.gbuffer, resources: resources, world: world)
+    # Metaballs go into the SAME pass as the triangles, so the two kinds
+    # depth-test against each other rather than compositing (#392).
+    renderSceneSdfWorld(world: world, camera: camera)
+    endPass()
+  }
   if tag is RenderTag.depthPyramid {
     buildDepthPyramid(cache: renderer.passes.pyr, resources: resources)
   }
