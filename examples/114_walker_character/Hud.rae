@@ -14,6 +14,7 @@ open ui/renderSystem/RenderSystem
 open ui/VirtualJoystick
 open app3d/CameraRig
 open ui/safeAreaSystem/SafeAreaSystem
+open Gpu2dCanvas
 
 # Update the touch stick AND tell the camera rig to exclude its region, so on a
 # phone one finger drives the joystick while another rotates the camera (#526).
@@ -64,14 +65,14 @@ func toggleWalkerPanel(settings: mod SettingsState, world: mod UiWorld) pub {
 func walkerMenuTapped(input: view UiInput) pub ret Bool { ret menuToggleTapped(input: input) }
 
 # All HUD overlays, drawn inside the 2D overlay pass (after the ECS UI world).
-func drawWalkerHud(logView: view LogOverlay, gpuUi: view Gpu2dUi,
+func drawWalkerHud(logView: view LogOverlay, gpuUi: view Gpu2dUi, canvas: mod Gpu2dCanvas,
                    dbg: view DebugOverlay, moveStick: view VirtualJoystick,
                    panelOpen: view Bool) pub {
   # Joystick hides while the settings panel is open (it would otherwise draw over
   # the panel — the panel is the higher layer).
-  if panelOpen is false { drawVirtualJoystick(joy: moveStick) }
-  drawLogOverlay(ov: logView, font: gpuUi.textFont,
+  if panelOpen is false { drawVirtualJoystick(joy: moveStick, canvas: canvas) }
+  drawLogOverlay(ov: logView, canvas: canvas, font: gpuUi.textFont,
                  screenW: windowExtentW(), screenH: windowExtentH())
   # Debug D last, so it is above everything else.
-  drawDebugOverlay(debugOverlay: dbg, font: gpuUi.textFont, didRealWork: true)
+  drawDebugOverlay(debugOverlay: dbg, canvas: canvas, font: gpuUi.textFont, didRealWork: true)
 }

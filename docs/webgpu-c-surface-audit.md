@@ -271,3 +271,18 @@ batches, #913); and the viewport uniform (adopted). The canvas's pass is a
 Rae-opened raw pass, not yet a manager `Recording` — that, the present/teardown
 replacement and the clip stack are #915.
 
+**#913 update (2D renderer slice 1b — the box batch):** the primitive
+accumulation is Rae: `Gpu2dCanvas` holds `prims: List(Float)` (the same
+24-float record — rect, four radii, premultiplied fill, premultiplied border,
+params, premultiplied gradient end) + `primClips`, packed by
+`canvasDrawRect / RoundedRect / Box / GradientRect / Line` with the same
+0xAARRGGBB premultiply and the same line→capsule math; `boxFlush` uploads
+`canvas.prims` directly. The owner spelling is `canvas: mod Gpu2dCanvas` on
+the whole `Gpu2d.draw*` family (one owner, already carrying the image and
+text passes). Removed from C: `rae_g2d_push` / `push_gradient`, `g2d_color`,
+the prims array + per-prim clip index, the `rae_g2d_prim_*` accessors and the
+`rae_ext_Gpu2d_drawRect / drawRoundedRect / drawBox / drawGradientRect /
+drawLine` entry points; `rae_g2d_prepare_flush(pending)` now takes the canvas's
+box + image count. Still C behind a stateless API: the text glyph batch
+(`drawGlyph` / `drawGlyphEx`) and the clip stack — both #915.
+

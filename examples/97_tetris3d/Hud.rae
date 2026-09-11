@@ -3,6 +3,7 @@
 import Gpu2d
 open app3d/UiShell
 open ui/Ecs
+open Gpu2dCanvas
 
 type TetrisHudState {
   score: Int
@@ -30,7 +31,7 @@ func previewColor(kind: TetrominoKind) ret Int {
   ret 0xFFFF788C
 }
 
-func drawNextPiecePreview(kind: TetrominoKind) {
+func drawNextPiecePreview(kind: TetrominoKind, canvas: mod Gpu2dCanvas) {
   let cellSize: Float = 20.0
   let previewX: Float = 745.0
   let previewY: Float = 158.0
@@ -40,7 +41,7 @@ func drawNextPiecePreview(kind: TetrominoKind) {
     var pieceX: Int = 0
     loop pieceX < 4 {
       if getShapeCell(kind: kind, rot: 0, px: pieceX, py: pieceY) is 1 {
-        Gpu2d.drawRoundedRect(
+        Gpu2d.drawRoundedRect(canvas: canvas, 
           x: previewX + pieceX.toFloat() * cellSize
           y: previewY + pieceY.toFloat() * cellSize
           world: cellSize - 1.0, h: cellSize - 1.0

@@ -71,23 +71,24 @@ func paddleInputSystem(position: mod PaddleTransform, deltaTime: view Float) {
 }
 
 func drawGame(
+  canvas: mod Gpu2dCanvas
   playerPosition: view PaddleTransform
   cpuPosition: view PaddleTransform
   ballPosition: view PaddleTransform
 ) {
-  Gpu2d.drawGradientRect(
+  Gpu2d.drawGradientRect(canvas: canvas, 
     x: 0.0, y: 0.0, w: fieldW, h: fieldH, radius: 0.0
     from: 0xFF101622, to: 0xFF071019, angleDeg: 90.0)
-  Gpu2d.drawRoundedRect(
+  Gpu2d.drawRoundedRect(canvas: canvas, 
     x: fieldW * 0.5 - 2.0, y: 78.0, w: 4.0, h: fieldH - 100.0
     radius: 2.0, color: 0x4458E0D0)
-  Gpu2d.drawRoundedRect(
+  Gpu2d.drawRoundedRect(canvas: canvas, 
     x: playerPosition.x, y: playerPosition.y, w: paddleW, h: paddleH
     radius: 10.0, color: 0xFFF4F8FF)
-  Gpu2d.drawRoundedRect(
+  Gpu2d.drawRoundedRect(canvas: canvas, 
     x: cpuPosition.x, y: cpuPosition.y, w: paddleW, h: paddleH
     radius: 10.0, color: 0xFFF4F8FF)
-  Gpu2d.drawRoundedRect(
+  Gpu2d.drawRoundedRect(canvas: canvas, 
     x: ballPosition.x - ballRadius, y: ballPosition.y - ballRadius
     w: ballRadius * 2.0, h: ballRadius * 2.0
     radius: ballRadius, color: 0xFF19E6D0)
@@ -212,6 +213,7 @@ func main() ret Int {
 
     Gpu2d.beginFrame(canvas: canvas, r: 0.03, g: 0.05, b: 0.08, a: 1.0)
     drawGame(
+      canvas: canvas
       playerPosition: playerPosition
       cpuPosition: cpuPosition
       ballPosition: ballPosition)

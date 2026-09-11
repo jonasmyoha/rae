@@ -36,46 +36,46 @@ func main() ret Int {
         Gpu2d.beginFrame(canvas: canvas, r: 0.02, g: 0.02, b: 0.03, a: 1.0)
 
         # The design canvas itself (0,0)-(1080,720).
-        Gpu2d.drawRect(x: 0.0, y: 0.0, w: 1080.0, h: 720.0, color: 0xFF0E131C)
+        Gpu2d.drawRect(canvas: canvas, x: 0.0, y: 0.0, w: 1080.0, h: 720.0, color: 0xFF0E131C)
 
         # Minor grid every 120 du, major lines every 240 du — Gpu2d.drawLine.
         var gx: Float = 0.0
         loop gx <= 1080.0 {
-            Gpu2d.drawLine(x0: gx, y0: 0.0, x1: gx, y1: 720.0, thickness: 1.5, color: 0x22557088)
+            Gpu2d.drawLine(canvas: canvas, x0: gx, y0: 0.0, x1: gx, y1: 720.0, thickness: 1.5, color: 0x22557088)
             gx = gx + 120.0
         }
         var gy: Float = 0.0
         loop gy <= 720.0 {
-            Gpu2d.drawLine(x0: 0.0, y0: gy, x1: 1080.0, y1: gy, thickness: 1.5, color: 0x22557088)
+            Gpu2d.drawLine(canvas: canvas, x0: 0.0, y0: gy, x1: 1080.0, y1: gy, thickness: 1.5, color: 0x22557088)
             gy = gy + 120.0
         }
         var mx: Float = 0.0
         loop mx <= 1080.0 {
-            Gpu2d.drawLine(x0: mx, y0: 0.0, x1: mx, y1: 720.0, thickness: 2.0, color: 0x66789CC0)
+            Gpu2d.drawLine(canvas: canvas, x0: mx, y0: 0.0, x1: mx, y1: 720.0, thickness: 2.0, color: 0x66789CC0)
             mx = mx + 240.0
         }
         var my: Float = 0.0
         loop my <= 720.0 {
-            Gpu2d.drawLine(x0: 0.0, y0: my, x1: 1080.0, y1: my, thickness: 2.0, color: 0x66789CC0)
+            Gpu2d.drawLine(canvas: canvas, x0: 0.0, y0: my, x1: 1080.0, y1: my, thickness: 2.0, color: 0x66789CC0)
             my = my + 240.0
         }
         # Diagonals across the canvas — show drawLine works at any angle.
-        Gpu2d.drawLine(x0: 0.0, y0: 0.0, x1: 1080.0, y1: 720.0, thickness: 2.0, color: 0x33EF5350)
-        Gpu2d.drawLine(x0: 1080.0, y0: 0.0, x1: 0.0, y1: 720.0, thickness: 2.0, color: 0x3342A5F5)
+        Gpu2d.drawLine(canvas: canvas, x0: 0.0, y0: 0.0, x1: 1080.0, y1: 720.0, thickness: 2.0, color: 0x33EF5350)
+        Gpu2d.drawLine(canvas: canvas, x0: 1080.0, y0: 0.0, x1: 0.0, y1: 720.0, thickness: 2.0, color: 0x3342A5F5)
 
         # Safe-area inset (48 du) — outline only (transparent fill + border).
-        Gpu2d.drawBox(x: 48.0, y: 48.0, w: 984.0, h: 624.0, radius: 16.0,
+        Gpu2d.drawBox(canvas: canvas, x: 48.0, y: 48.0, w: 984.0, h: 624.0, radius: 16.0,
                       fill: 0x00000000, borderWidth: 2.0, border: 0xFFFFB300)
 
         # Centred content card (in design units; stays centred at any window size).
-        Gpu2d.drawBox(x: 360.0, y: 250.0, w: 360.0, h: 220.0, radius: 20.0,
+        Gpu2d.drawBox(canvas: canvas, x: 360.0, y: 250.0, w: 360.0, h: 220.0, radius: 20.0,
                       fill: 0xFF1B2E4A, borderWidth: 2.0, border: 0xFF4F8DF7)
 
         # Corner + origin markers (design-canvas extremes).
-        Gpu2d.drawRect(x: 0.0,    y: 0.0,   w: 24.0, h: 24.0, color: 0xFFEF5350)  # origin (0,0)
-        Gpu2d.drawRect(x: 1056.0, y: 0.0,   w: 24.0, h: 24.0, color: 0xFF42A5F5)
-        Gpu2d.drawRect(x: 0.0,    y: 696.0, w: 24.0, h: 24.0, color: 0xFF42A5F5)
-        Gpu2d.drawRect(x: 1056.0, y: 696.0, w: 24.0, h: 24.0, color: 0xFF42A5F5)
+        Gpu2d.drawRect(canvas: canvas, x: 0.0,    y: 0.0,   w: 24.0, h: 24.0, color: 0xFFEF5350)  # origin (0,0)
+        Gpu2d.drawRect(canvas: canvas, x: 1056.0, y: 0.0,   w: 24.0, h: 24.0, color: 0xFF42A5F5)
+        Gpu2d.drawRect(canvas: canvas, x: 0.0,    y: 696.0, w: 24.0, h: 24.0, color: 0xFF42A5F5)
+        Gpu2d.drawRect(canvas: canvas, x: 1056.0, y: 696.0, w: 24.0, h: 24.0, color: 0xFF42A5F5)
 
         # Labels.
         Gpu2dText.drawText(font: font, text: "0,0", x: 30.0, y: 44.0, sizePx: 22.0, color: 0xFFEF5350)

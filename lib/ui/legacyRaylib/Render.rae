@@ -30,6 +30,7 @@ import ui/Theme
 import ui/Layer
 import ui/AnimationSystem/AnimationSystem
 open ecs/ComponentTable
+open Gpu2dCanvas
 # Default text font slot; matches `loadFontInto(slot: 0, ...)`.
 let defaultFontSlot: Int = 0
 
@@ -76,18 +77,18 @@ func chainRgba(color: view RgbaColor, chain255: view Int) ret RgbaColor {
 # Paint Shape variants on `entity` using the world transform / size
 # already on it. Caller has already verified visibility + alpha > 0.
 # Drawing goes through the backend-agnostic sink (lib/ui/draw.rae).
-func paintShape(backend: view UiBackend, world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
+func paintShape(backend: view UiBackend, canvas: mod Gpu2dCanvas, world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
   let sh: Shape = componentGet(this: world.shapes, entity: entity)
   let fill: RgbaColor = chainRgba(color: sh.fill, chain255: chain255)
 
   if sh.kind is ShapeKind.rect {
-    sinkRect(backend: backend, x: wt.position.x, y: wt.position.y, w: cr.size.x, h: cr.size.y, color: fill)
+    sinkRect(backend: backend, canvas: canvas, x: wt.position.x, y: wt.position.y, w: cr.size.x, h: cr.size.y, color: fill)
     ret
   }
   if sh.kind is ShapeKind.roundedRect {
     # `Shape.radius` is in pixels; the sink clamps it and converts to
     # raylib's fraction-of-smaller-side roundness.
-    sinkRoundedRect(backend: backend, x: wt.position.x, y: wt.position.y, w: cr.size.x, h: cr.size.y, radius: sh.radius, color: fill)
+    sinkRoundedRect(backend: backend, canvas: canvas, x: wt.position.x, y: wt.position.y, w: cr.size.x, h: cr.size.y, radius: sh.radius, color: fill)
     ret
   }
   if sh.kind is ShapeKind.circle {
@@ -103,7 +104,7 @@ func paintShape(backend: view UiBackend, world: view UiWorld, entity: view Entit
     }
     let cx: Float = wt.position.x + (cr.size.x / 2.0)
     let cy: Float = wt.position.y + (cr.size.y / 2.0)
-    sinkCircle(backend: backend, cx: cx, cy: cy, r: r, color: fill)
+    sinkCircle(backend: backend, canvas: canvas, cx: cx, cy: cy, r: r, color: fill)
     ret
   }
 }
@@ -597,7 +598,7 @@ func paintGradientFill(world: view UiWorld, entity: view EntityId, wt: view Worl
 # text/sprites layer on top of Shape backgrounds correctly when an
 # entity carries multiple visual components (e.g. a button background
 # + label).
-func paintEntity(backend: view UiBackend, world: view UiWorld, reg: view TextureRegistry, entity: view EntityId) {
+func paintEntity(backend: view UiBackend, world: view UiWorld, reg: mod TextureRegistry, entity: view EntityId) {
   if componentHas(this: world.worldTransforms, entity: entity) is false {
     ret
   }
@@ -624,7 +625,7 @@ func paintEntity(backend: view UiBackend, world: view UiWorld, reg: view Texture
     paintGradientFill(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
   } else {
     if componentHas(this: world.shapes, entity: entity) {
-      paintShape(backend: backend, world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
+      paintShape(backend: backend, canvas: reg.canvas, world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
     }
   }
   if componentHas(this: world.backdropImages, entity: entity) {
@@ -644,7 +645,7 @@ func paintEntity(backend: view UiBackend, world: view UiWorld, reg: view Texture
 # Using the subtree max (not the child's own rank) lets a row that
 # contains the hovered tile float above sibling rows whose tiles
 # would otherwise overdraw the popped tile's vertical overflow.
-func paintSubtree(backend: view UiBackend, world: view UiWorld, reg: view TextureRegistry, entity: view EntityId) {
+func paintSubtree(backend: view UiBackend, world: view UiWorld, reg: mod TextureRegistry, entity: view EntityId) {
   unsafe {
     paintEntity(backend: backend, world: world, reg: reg, entity: entity)
     if componentHas(this: world.childrens, entity: entity) is false {
@@ -701,7 +702,7 @@ func initRaeUi() pub {
   }
 }
 
-func renderSystem(backend: view UiBackend, world: view UiWorld, reg: view TextureRegistry) {
+func renderSystem(backend: view UiBackend, world: view UiWorld, reg: mod TextureRegistry) {
   # Painter's algorithm with LayerRef-aware sorting. Roots paint in
   # ascending layer order so overlays (higher-order layers) sit on
   # top of page content.
