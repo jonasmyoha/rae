@@ -54,6 +54,15 @@ void* rae_g2d_encoder_get(void) { return (void*)0; }
 int64_t rae_g2d_frame_active(void) { return 0; }
 void rae_g2d_present_and_cleanup(void) {}
 void rae_g2d_tick(void) {}
+void* rae_g2d_viewport_uniform(void) { return (void*)0; }
+int64_t rae_g2d_prim_count(void) { return 0; }
+int64_t rae_g2d_prim_floats(void) { return 24; }
+void* rae_g2d_prim_data(void) { return (void*)0; }
+int64_t rae_g2d_prim_clip_at(int64_t i) { (void)i; return 0; }
+void rae_g2d_prim_reset(void) {}
+void* rae_g2d_clip_frame_uniform(int64_t clip) { (void)clip; return (void*)0; }
+void rae_g2d_scissor(int64_t clip) { (void)clip; }
+void rae_g2d_prepare_flush(void) {}
 rae_Bool rae_ext_Gpu2d_lastPresentOk(void) { return 0; }
 void rae_ext_Gpu2d_flush(void) {}
 void rae_ext_Gpu2d_closeWindow(void) {}

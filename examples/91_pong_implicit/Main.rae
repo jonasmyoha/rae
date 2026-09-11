@@ -5,6 +5,7 @@ import Sys
 open app3d/UiShell
 open ui/Ecs
 open ui/renderSystem/RenderSystem
+open Gpu2dBox
 
 const fieldW: Float = 800.0
 const fieldH: Float = 450.0
@@ -110,6 +111,7 @@ func runPhysicsSelfTest() ret Bool {
 
 func main() ret Int {
   Gpu2d.initWindow(width: fieldW.toInt(), height: fieldH.toInt(), title: "Rae Pong — GPU2D")
+  var boxPass: Gpu2dBoxPass = createGpu2dBoxPass()   # #907: the app-owned 2D box pass
   Gpu2d.setDesignResolution(width: fieldW, height: fieldH, fit: 0)
 
   let uiResources: Gpu2dUi = loadUiAssets(
@@ -213,10 +215,11 @@ func main() ret Int {
       playerPosition: playerPosition
       cpuPosition: cpuPosition
       ballPosition: ballPosition)
-    renderSystemGpu2d(world: world, res: uiResources)
-    Gpu2d.endFrame()
+    renderSystemGpu2d(world: world, res: uiResources, box: boxPass)
+    Gpu2d.endFrame(box: boxPass)
   }
 
+  boxPassShutdown(box: boxPass)
   Gpu2d.closeWindow()
   ret 0
 }

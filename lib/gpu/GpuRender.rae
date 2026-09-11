@@ -278,6 +278,10 @@ type RenderPipelineSpec {
   attributes: List(VertexAttributeSpec)
   colorFormats: List(Int32)
   alphaBlend: Bool
+  # With alphaBlend: true, the source colour is already premultiplied by its
+  # alpha (One / OneMinusSrcAlpha — the 2D box pass) instead of straight
+  # (SrcAlpha / OneMinusSrcAlpha — water, transparents).
+  premultiplied: Bool
   depthFormat: Int32
   depthWrite: Bool
   depthCompare: Int32
@@ -311,9 +315,11 @@ func createRenderPipeline(resources: mod GpuResources, wgsl: view String, vertex
       layouts.add(value: { stepMode: WGPUVertexStepMode_Vertex, arrayStride: spec.vertexStride as UInt64, attributeCount: attributes.length as UInt64, attributes: attributes.data })
       bufferCount = 1
     }
+    var sourceFactor: Int32 = WGPUBlendFactor_SrcAlpha
+    if spec.premultiplied { sourceFactor = WGPUBlendFactor_One }
     var blends: List(WGPUBlendState) = List.create(WGPUBlendState, cap: 1)
     blends.add(value: {
-      color: { operation: WGPUBlendOperation_Add, srcFactor: WGPUBlendFactor_SrcAlpha, dstFactor: WGPUBlendFactor_OneMinusSrcAlpha }
+      color: { operation: WGPUBlendOperation_Add, srcFactor: sourceFactor, dstFactor: WGPUBlendFactor_OneMinusSrcAlpha }
       alpha: { operation: WGPUBlendOperation_Add, srcFactor: WGPUBlendFactor_One, dstFactor: WGPUBlendFactor_OneMinusSrcAlpha }
     })
     var targets: List(WGPUColorTargetState) = List.create(WGPUColorTargetState, cap: spec.colorFormats.length)
@@ -694,6 +700,20 @@ func recordBindInPass(resources: view GpuResources, pass: copy Ptr, pipeline: vi
     if pass is webgpuNull() { ret false }
     wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: slotHandle(table: resources.renderPipelines, slot: pipeline.slot))
     wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32, group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  }
+  ret true
+}
+
+# Uploads `size` bytes from a raw C pointer into a manager buffer at `offset`
+# (the legacy C-batched 2D primitives, #907). Same range/usage validation as
+# writeBuffer; the source pointer is the caller's obligation, hence unsafe.
+func writeBufferFromPtr(resources: view GpuResources, id: view BufferId, offset: view Int, data: copy Ptr, size: view Int) unsafe ret Bool {
+  if size < 1 { ret false }
+  if bufferRangeIsValid(resources: resources, id: id, offset: offset, size: size) is false { ret false }
+  if hasUsageFlag(usage: bufferUsage(resources: resources, id: id), flag: WGPUBufferUsage_CopyDst) is false { ret false }
+  unsafe {
+    if data is webgpuNull() { ret false }
+    wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: slotHandle(table: resources.buffers, slot: id.slot), bufferOffset: offset as UInt64, data: data, size: size as UInt64)
   }
   ret true
 }

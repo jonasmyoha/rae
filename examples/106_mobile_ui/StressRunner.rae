@@ -6,6 +6,7 @@ open ui/layoutSystem/LayoutSystem
 open ui/Transform
 open ui/animationSystem/AnimationSystem
 open ui/renderSystem/RenderSystem
+open Gpu2dBox
 
 func pickHoverEntity(world: view UiWorld, idx: view Int) ret EntityId {
   let n: Int = componentCount(this: world.hoverScales)
@@ -23,6 +24,7 @@ func runHoverStressMode(
   scenes: view AlbumScenes
   appState: mod AppState
   gpuUi: view Gpu2dUi
+  box: mod Gpu2dBoxPass
 ) ret Bool {
   let hoverEnv: String = getEnv(name: "RAE_UI_STRESS_HOVER")
   if hoverEnv.length() is 0 {
@@ -52,8 +54,8 @@ func runHoverStressMode(
     let hoveredWarm: EntityId = pickHoverEntity(world: world, idx: warm)
     let dirtyWarm: Bool = hoverScaleSystem(world: world, hovered: hoveredWarm, deltaTime: 0.016)
     uiBeginFrame(clear: palettePageBg(theme: world.theme.active))
-    renderSystemGpu2d(world: world, res: gpuUi)
-    uiEndFrame()
+    renderSystemGpu2d(world: world, res: gpuUi, box: box)
+    uiEndFrame(box: box)
     warm = warm + 1
   }
 
@@ -65,8 +67,8 @@ func runHoverStressMode(
     let hovered: EntityId = pickHoverEntity(world: world, idx: i)
     let dirty: Bool = hoverScaleSystem(world: world, hovered: hovered, deltaTime: 0.016)
     uiBeginFrame(clear: palettePageBg(theme: world.theme.active))
-    renderSystemGpu2d(world: world, res: gpuUi)
-    uiEndFrame()
+    renderSystemGpu2d(world: world, res: gpuUi, box: box)
+    uiEndFrame(box: box)
     i = i + 1
     if i - lastLog >= 600 {
       let nowKb: Int = processRssKb()
@@ -99,8 +101,9 @@ func runStressMode(
   scenes: view AlbumScenes
   appState: mod AppState
   gpuUi: view Gpu2dUi
+  box: mod Gpu2dBoxPass
 ) ret Bool {
-  if runHoverStressMode(scenes: scenes, appState: appState, gpuUi: gpuUi) {
+  if runHoverStressMode(scenes: scenes, appState: appState, gpuUi: gpuUi, box: box) {
     ret true
   }
 

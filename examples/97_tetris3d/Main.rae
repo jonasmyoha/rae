@@ -12,9 +12,10 @@ open Scene3d
 open ui/DebugOverlay
 open ui/Ecs
 open ui/renderSystem/RenderSystem
+open Gpu2dBox
 
 func renderFrame(
-  renderer: view DeferredRenderer
+  renderer: mod DeferredRenderer
   renderState: mod TetrisRenderState
   game: view World
   camera: view Camera3d
@@ -30,7 +31,7 @@ func renderFrame(
     let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
     if tag is RenderTag.uiOverlay {
       Gpu2d.beginFrameLoad()
-      renderSystemGpu2d(world: uiWorld, res: uiResources)
+      renderSystemGpu2d(world: uiWorld, res: uiResources, box: renderer.boxPass)
       drawNextPiecePreview(kind: game.nextKind)
       drawDebugOverlay(debugOverlay: debug, font: uiResources.textFont, didRealWork: true)
     } else {

@@ -189,3 +189,26 @@ The render/2D modules listed above were made #868-clean as part of #877 itself
 (public APIs became safe wrappers over renamed `native*` externs; internal
 Ptr-handling functions wrap at their source site), so #904–#910 inherit
 already-clean modules rather than owning the migration.
+
+**#907 update (2D renderer slice 1 — the box pass):** the box/primitive
+pipeline, its per-flush instance buffers and per-run bind groups are typed IDs
+in a Rae-owned `gpu/GpuResources` manager (`lib/Gpu2dBox.rae`, `Gpu2dBoxPass`,
+the WGSL is the asset `lib/gpu2d_box.wgsl`); the draws go into the C-owned
+frame pass via `recordDrawInPass`, one draw per contiguous same-clip run with
+the scissor and a per-run clip uniform, exactly as the C flush did. C keeps
+the CPU-side batch (`rae_g2d_push` / `rae_g2d_push_gradient` behind the
+`drawRect/RoundedRect/Box/GradientRect/Line` entry points, read back through
+`rae_g2d_prim_count/floats/data/clip_at/reset`), the shared viewport uniform
+(`rae_g2d_viewport_uniform`, adopted as an external; the image and text bind
+groups still reference it) and the per-run clip uniform + scissor
+(`rae_g2d_clip_frame_uniform`, `rae_g2d_scissor`); `rae_g2d_prepare_flush`
+uploads the viewport transform before the Rae draw and `rae_ext_Gpu2d_flush`
+now draws only images and text. Removed from C: `rae_g2d_init_pipeline`,
+`rae_g2d_ensure_inst`, `rae_g2d_rebuild_bind`, `rae_g2d_box_frame_buffer`,
+the box globals and `G2D_BOX_WGSL`. Ownership: `Gpu2d.flush` / `Gpu2d.endFrame`
+take `box: mod Gpu2dBoxPass` — an app owns one (the deferred renderer owns one
+for its UI-overlay present) and the UI render system threads it to its
+per-entity flush. The batch accumulation itself stays C because the public
+draw API (`Gpu2d.drawRect(...)`) is stateless; moving it is the owner-threading
+decision recorded as a follow-up.
+

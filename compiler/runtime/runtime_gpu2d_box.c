@@ -14,105 +14,14 @@
  * Instance layout = 6×vec4 (std430): rect, radius, fill, border, params, grad. */
 #define G2D_PRIM_FLOATS 24
 
-static const char* G2D_BOX_WGSL =
-"struct Prim {\n"
-"  rect: vec4<f32>,\n"
-"  radius: vec4<f32>,\n"
-"  fill: vec4<f32>,\n"
-"  border: vec4<f32>,\n"
-"  params: vec4<f32>,\n"
-"  grad: vec4<f32>,\n"
-"};\n"
-/* uXform[0] = (physW, physH, scaleX, scaleY); uXform[1] = (offsetX, offsetY,..)
- * maps design-unit coords -> physical px: px = design*scale + offset. */
-"@group(0) @binding(0) var<uniform> uXform: array<vec4<f32>, 2>;\n"
-"@group(0) @binding(1) var<storage, read> prims: array<Prim>;\n"
-/* #118 rounded clip: uClip[0]=(x,y,w,h) design units, uClip[1]=(radius,enabled,..) */
-"@group(0) @binding(2) var<uniform> uClip: array<vec4<f32>, 2>;\n"
-"struct VsOut {\n"
-"  @builtin(position) pos: vec4<f32>,\n"
-"  @location(0) local: vec2<f32>,\n"
-"  @location(1) @interpolate(flat) inst: u32,\n"
-"  @location(2) posD: vec2<f32>,\n"
-"};\n"
-"@vertex\n"
-"fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VsOut {\n"
-"  var corners = array<vec2<f32>, 6>(\n"
-"    vec2<f32>(0.0,0.0), vec2<f32>(1.0,0.0), vec2<f32>(0.0,1.0),\n"
-"    vec2<f32>(0.0,1.0), vec2<f32>(1.0,0.0), vec2<f32>(1.0,1.0));\n"
-"  let c = corners[vi];\n"
-"  let p = prims[ii];\n"
-"  let phys = uXform[0].xy;\n"
-"  let local = c * p.rect.zw;\n"            /* box-local, unrotated (0..w, 0..h) */
-"  let center = p.rect.zw * 0.5;\n"
-"  let a = p.params.y;\n"                   /* rotation (radians), 0 for rects */
-"  let ca = cos(a); let sa = sin(a);\n"
-"  let rel = local - center;\n"
-"  let rot = vec2<f32>(rel.x * ca - rel.y * sa, rel.x * sa + rel.y * ca);\n"
-"  let posDesign = p.rect.xy + center + rot;\n"
-"  let posPx = posDesign * uXform[0].zw + uXform[1].xy;\n"
-"  let ndc = vec2<f32>(posPx.x / phys.x * 2.0 - 1.0,\n"
-"                      1.0 - posPx.y / phys.y * 2.0);\n"
-"  var o: VsOut;\n"
-"  o.pos = vec4<f32>(ndc, 0.0, 1.0);\n"
-"  o.local = local;\n"                      /* SDF evaluates in unrotated box frame */
-"  o.inst = ii;\n"
-"  o.posD = posDesign;\n"                   /* design-space pos for the clip SDF */
-"  return o;\n"
-"}\n"
-"fn sdRoundBox(p: vec2<f32>, b: vec2<f32>, r: vec4<f32>) -> f32 {\n"
-"  let rad = select(r.zw, r.xy, p.x > 0.0);\n"
-"  let rr = select(rad.y, rad.x, p.y > 0.0);\n"
-"  let q = abs(p) - b + vec2<f32>(rr, rr);\n"
-"  return min(max(q.x, q.y), 0.0) + length(max(q, vec2<f32>(0.0, 0.0))) - rr;\n"
-"}\n"
-"@fragment\n"
-"fn fs(in: VsOut) -> @location(0) vec4<f32> {\n"
-"  let p = prims[in.inst];\n"
-"  let halfSize = p.rect.zw * 0.5;\n"
-"  let center = in.local - halfSize;\n"
-/* CLAMP THE RADIUS. sdRoundBox is only defined for r <= min(halfSize);
- * beyond that `abs(p) - b + r` is positive everywhere and the rounded box
- * degenerates into a pointed shape. A "pill" radius is authored as a number
- * large enough to round any button (20 in the app3d theme), so every control
- * shorter than 40 units hit this — the camera bar's 34-tall buttons rendered
- * as spear tips rather than pills. Clamping here rather than at each call
- * site also covers buttons whose height only becomes small after layout. */
-"  let rmax = min(halfSize.x, halfSize.y);\n"
-"  let rad4 = min(p.radius, vec4<f32>(rmax, rmax, rmax, rmax));\n"
-"  let d = sdRoundBox(center, halfSize, rad4);\n"
-"  let aa = max(fwidth(d), 0.0001);\n"
-"  var cov = 1.0 - smoothstep(-aa, aa, d);\n"
-"  if (uClip[1].y > 0.5) {\n"                /* #118: rounded clip coverage */
-"    let cc = uClip[0].xy + uClip[0].zw * 0.5;\n"
-"    let ch = uClip[0].zw * 0.5;\n"
-"    let cr = uClip[1].x;\n"
-"    let cd = sdRoundBox(in.posD - cc, ch, vec4<f32>(cr, cr, cr, cr));\n"
-"    let caa = max(fwidth(cd), 0.0001);\n"
-"    cov = cov * (1.0 - smoothstep(-caa, caa, cd));\n"
-"  }\n"
-"  var col = p.fill;\n"
-"  if (p.params.z > 0.5) {\n"
-"    let uv = in.local / max(p.rect.zw, vec2<f32>(1.0, 1.0));\n"
-"    let dir = vec2<f32>(cos(p.params.w), sin(p.params.w));\n"
-"    let centered = uv - vec2<f32>(0.5, 0.5);\n"
-"    let extent = max(abs(dir.x) * 0.5 + abs(dir.y) * 0.5, 0.0001);\n"
-"    let t = clamp(dot(centered, dir) / (extent * 2.0) + 0.5, 0.0, 1.0);\n"
-"    col = mix(p.fill, p.grad, t);\n"
-"  }\n"
-"  let bw = p.params.x;\n"
-"  if (bw > 0.0) {\n"
-"    let inner = 1.0 - smoothstep(-aa, aa, d + bw);\n"
-"    col = mix(p.border, p.fill, inner);\n"
-"  }\n"
-"  return col * cov;\n"
-"}\n";
+/* The box WGSL is a Rae asset since #907: lib/gpu2d_box.wgsl. */
 
-static WGPURenderPipeline g_g2d_pipeline = NULL;
+/* #907: the box pipeline, its per-flush instance buffers and bind groups are
+ * typed IDs in a Rae-owned gpu/GpuResources manager (lib/Gpu2dBox.rae); C keeps
+ * the CPU-side batch (the prims array + per-prim clip index, pushed by the draw
+ * entry points below, read back through the rae_g2d_prim_* accessors) and the
+ * shared viewport uniform every 2D pipeline binds at @binding(0). */
 static WGPUBuffer    g_g2d_uniform = NULL;
-static WGPUBuffer    g_g2d_instbuf = NULL;
-static WGPUBindGroup g_g2d_bind = NULL;
-static int   g_g2d_inst_cap = 0;       /* capacity in primitives */
 static float* g_g2d_prims = NULL;      /* CPU accumulation (floats) */
 static int   g_g2d_prim_count = 0;
 static int   g_g2d_prim_capf = 0;      /* capacity in floats */
@@ -173,67 +82,26 @@ static void rae_g2d_push_gradient(double x, double y, double w, double h,
     g_g2d_prim_count++;
 }
 
-static void rae_g2d_init_pipeline(void) {
-    if (g_g2d_pipeline) return;
-    WGPUShaderSourceWGSL src; memset(&src, 0, sizeof(src));
-    src.chain.sType = WGPUSType_ShaderSourceWGSL;
-    src.code = rae_wgpu_sv(G2D_BOX_WGSL);
-    WGPUShaderModuleDescriptor smd; memset(&smd, 0, sizeof(smd));
-    smd.nextInChain = &src.chain;
-    WGPUShaderModule mod = wgpuDeviceCreateShaderModule(g_wgpu_dev, &smd);
-
-    WGPUBlendState blend; memset(&blend, 0, sizeof(blend));
-    blend.color.operation = WGPUBlendOperation_Add;
-    blend.color.srcFactor = WGPUBlendFactor_One;            /* premultiplied alpha */
-    blend.color.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha;
-    blend.alpha.operation = WGPUBlendOperation_Add;
-    blend.alpha.srcFactor = WGPUBlendFactor_One;
-    blend.alpha.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha;
-    WGPUColorTargetState cts; memset(&cts, 0, sizeof(cts));
-    cts.format = g_g2d_fmt; cts.blend = &blend; cts.writeMask = WGPUColorWriteMask_All;
-    WGPUFragmentState fs; memset(&fs, 0, sizeof(fs));
-    fs.module = mod; fs.entryPoint = rae_wgpu_sv("fs"); fs.targetCount = 1; fs.targets = &cts;
-
-    WGPURenderPipelineDescriptor pd; memset(&pd, 0, sizeof(pd));
-    pd.layout = NULL;  /* auto layout from shader bindings */
-    pd.vertex.module = mod; pd.vertex.entryPoint = rae_wgpu_sv("vs");
-    pd.primitive.topology = WGPUPrimitiveTopology_TriangleList;
-    pd.primitive.frontFace = WGPUFrontFace_CCW;
-    pd.primitive.cullMode = WGPUCullMode_None;
-    pd.multisample.count = 1; pd.multisample.mask = 0xFFFFFFFFu;
-    pd.fragment = &fs;
-    g_g2d_pipeline = wgpuDeviceCreateRenderPipeline(g_wgpu_dev, &pd);
-    wgpuShaderModuleRelease(mod);
-
+/* The shared viewport uniform (2 x vec4: physW, physH, scaleX, scaleY /
+ * offsetX, offsetY, ..). Created on first use; the image and text bind groups
+ * reference it at binding 0 and the Rae box pass adopts it as an external. */
+static void rae_g2d_ensure_viewport_uniform(void) {
+    if (g_g2d_uniform) return;
     WGPUBufferDescriptor ud; memset(&ud, 0, sizeof(ud));
     ud.size = 32; ud.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;  /* 2*vec4 xform */
     g_g2d_uniform = wgpuDeviceCreateBuffer(g_wgpu_dev, &ud);
 }
+void* rae_g2d_viewport_uniform(void) { rae_g2d_ensure_viewport_uniform(); return (void*)g_g2d_uniform; }
 
-static void rae_g2d_rebuild_bind(void) {
-    WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g_g2d_pipeline, 0);
-    WGPUBindGroupEntry e[2]; memset(e, 0, sizeof(e));
-    e[0].binding = 0; e[0].buffer = g_g2d_uniform; e[0].size = 32;
-    e[1].binding = 1; e[1].buffer = g_g2d_instbuf;
-    e[1].size = (uint64_t)g_g2d_inst_cap * G2D_PRIM_FLOATS * sizeof(float);
-    WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
-    bgd.layout = bgl; bgd.entryCount = 2; bgd.entries = e;
-    g_g2d_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
-    wgpuBindGroupLayoutRelease(bgl);
+/* Batch accessors for the Rae box pass (#907): the packed prims, their count
+ * and stride, each prim's clip index, and the reset after a flush. */
+int64_t rae_g2d_prim_count(void)  { return (int64_t)g_g2d_prim_count; }
+int64_t rae_g2d_prim_floats(void) { return (int64_t)G2D_PRIM_FLOATS; }
+void*   rae_g2d_prim_data(void)   { return (void*)g_g2d_prims; }
+int64_t rae_g2d_prim_clip_at(int64_t i) {
+    return (g_g2d_prim_clip && i >= 0 && i < g_g2d_prim_clip_cap) ? (int64_t)g_g2d_prim_clip[(int)i] : 0;
 }
-
-static void rae_g2d_ensure_inst(int prims) {
-    if (g_g2d_instbuf && prims <= g_g2d_inst_cap) return;
-    int cap = g_g2d_inst_cap ? g_g2d_inst_cap : 64;
-    while (cap < prims) cap *= 2;
-    if (g_g2d_instbuf) wgpuBufferRelease(g_g2d_instbuf);
-    if (g_g2d_bind) { wgpuBindGroupRelease(g_g2d_bind); g_g2d_bind = NULL; }
-    WGPUBufferDescriptor bd; memset(&bd, 0, sizeof(bd));
-    bd.size = (uint64_t)cap * G2D_PRIM_FLOATS * sizeof(float);
-    bd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
-    g_g2d_instbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
-    g_g2d_inst_cap = cap;
-}
+void    rae_g2d_prim_reset(void)  { g_g2d_prim_count = 0; }
 
 void rae_ext_Gpu2d_drawRect(float x, float y, float w, float h, int64_t color){
     rae_g2d_push(x, y, w, h, 0, 0, 0, 0, (uint32_t)color, 0, 0.0, 0.0);

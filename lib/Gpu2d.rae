@@ -13,6 +13,7 @@
 # compiler/runtime/rae_runtime.c. Compiled-target only; needs wgpu-native + SDL3.
 # Importing this module links both. Window globals are shared with lib/sdl3.rae,
 # so sdl3 input functions (getMouseX/isKeyDown/…) work against this window.
+open Gpu2dBox
 open webgpu/Webgpu
 open webgpu/Context
 
@@ -322,12 +323,15 @@ func beginFrameLoad() {
 }
 
 # Finish the render pass, submit the command buffer, and present the frame.
-func endFrame() {
+# `box` is the app-owned 2D box pass (#907): the frame's queued primitives are
+# drawn from its manager before images and text, and its per-frame objects are
+# retired after the submit.
+func endFrame(box: mod Gpu2dBoxPass) {
   unsafe {
     # Advance the deterministic clock every frame, even one with no drawable yet.
     g2dTick()
     if g2dFrameActive() is 0 { ret }
-    flush()
+    flush(box: box)
     let pass: Ptr = g2dPass()
     let enc: Ptr = g2dEncoder()
     wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
@@ -338,6 +342,7 @@ func endFrame() {
     wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
     wgpuCommandEncoderRelease(commandEncoder: enc)
     g2dPresentCleanup()
+    boxFrameEnd(box: box)
   }
 }
 
@@ -351,9 +356,12 @@ func lastPresentOk() ret Bool {
 
 # Flush queued primitives into the active render pass without ending the
 # frame. Use this when painter order must be preserved across primitive
-# pipelines (for example: image, then later shape, then text).
+# pipelines (for example: image, then later shape, then text). Order within a
+# flush: boxes (the Rae box pass, #907), then images, then text (C).
 func nativeFlush() unsafe extern("rae_ext_Gpu2d_flush")
-func flush() {
+func flush(box: mod Gpu2dBoxPass) {
+  g2dPrepareFlush()
+  boxFlush(box: box)
   unsafe { nativeFlush() }
 }
 

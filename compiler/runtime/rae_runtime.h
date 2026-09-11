@@ -1014,6 +1014,17 @@ void* rae_g2d_encoder_get(void);
 int64_t rae_g2d_frame_active(void);
 void rae_g2d_present_and_cleanup(void);
 void rae_g2d_tick(void);
+/* #907: the box pass runs in Rae (lib/Gpu2dBox.rae) over a manager; C keeps the
+ * CPU batch + the shared viewport uniform + the per-run clip uniform/scissor. */
+void* rae_g2d_viewport_uniform(void);
+int64_t rae_g2d_prim_count(void);
+int64_t rae_g2d_prim_floats(void);
+void* rae_g2d_prim_data(void);
+int64_t rae_g2d_prim_clip_at(int64_t i);
+void rae_g2d_prim_reset(void);
+void* rae_g2d_clip_frame_uniform(int64_t clip);
+void rae_g2d_scissor(int64_t clip);
+void rae_g2d_prepare_flush(void);
 void rae_ext_Gpu2d_flush(void);
 /* Procedural texture registration (#539): upload RGBA pixels generated in Rae. */
 int64_t rae_ext_Gpu2d_registerImageRgba(const int64_t* pixels, int64_t w, int64_t h);
