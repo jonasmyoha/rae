@@ -52,46 +52,46 @@ type SpotifyTrack {
 # implicitly). No return value — failures (e.g. permission denied) are
 # silent at this layer; the next `current()` snapshot will
 # reveal the unchanged state.
-func launch() extern
-func play() extern
-func pause() extern
-func next() extern
-func previous() extern
+func launch() unsafe extern
+func play() unsafe extern
+func pause() unsafe extern
+func next() unsafe extern
+func previous() unsafe extern
 
 # Play a specific Spotify URI directly. Accepts the full URI form
 # Spotify hands out — spotify:track:<id>, spotify:album:<id>,
 # spotify:playlist:<id>. Use this when the local catalog has a URI
 # stored (e.g. annotated album.json).
-func playUri(uri: view String) extern
+func playUri(uri: view String) unsafe extern
 
 # Search-and-play. Opens Spotify's search panel for `query` and
 # plays the top hit. Use when the local catalog has only a free-form
 # label (artist + track / artist + album). The query is URL-encoded
 # inside the C bridge; pass plain text, no escaping required.
-func playQuery(query: view String) extern
+func playQuery(query: view String) unsafe extern
 
 # Force ONE synchronous osascript refresh of the cache (fork+exec; ~tens
 # of ms). AVOID calling this on the UI thread in a per-frame/per-poll loop
 # — it spikes the frame rate. Prefer `startPoller`, which refreshes the
 # cache on a background thread; the getters then read the cache cheaply.
-func refresh() extern
+func refresh() unsafe extern
 # Start a background thread (#279) that calls `refresh` every `intervalMs`
 # milliseconds, keeping the cache warm off the UI thread. Idempotent (a
 # second call is a no-op). osascript is a fork/exec subprocess, so running
 # it off-thread is safe. Call once at boot when Spotify mode is on.
-func startPoller(intervalMs: Int) extern
+func startPoller(intervalMs: Int) unsafe extern
 # Stop the background poll thread and join it. Safe if never started.
-func stopPoller() extern
-func state() extern ret String
-func trackId() extern ret String
-func trackName() extern ret String
-func artistName() extern ret String
-func albumName() extern ret String
-func artworkUrl() extern ret String
+func stopPoller() unsafe extern
+func state() unsafe extern ret String
+func trackId() unsafe extern ret String
+func trackName() unsafe extern ret String
+func artistName() unsafe extern ret String
+func albumName() unsafe extern ret String
+func artworkUrl() unsafe extern ret String
 # Wall-clock playback position in seconds (0 when stopped).
-func position() extern ret Float
+func position() unsafe extern ret Float
 # Total track length in seconds (0 when stopped / unknown).
-func duration() extern ret Float
+func duration() unsafe extern ret Float
 
 # Snapshot the current cache into a `SpotifyTrack` value. The struct's
 # String fields are independent owned copies of the cache, so dropping the
@@ -99,26 +99,28 @@ func duration() extern ret Float
 # poller (`startPoller`) keeps the cache warm off the UI thread (#279);
 # this returns the latest poll's data (≤ the poll interval stale).
 func current() ret SpotifyTrack {
-  ret SpotifyTrack {
-    state: state()
-    trackId: trackId()
-    trackName: trackName()
-    artistName: artistName()
-    albumName: albumName()
-    artworkUrl: artworkUrl()
+  unsafe {
+    ret SpotifyTrack {
+      state: state()
+      trackId: trackId()
+      trackName: trackName()
+      artistName: artistName()
+      albumName: albumName()
+      artworkUrl: artworkUrl()
+    }
   }
 }
 
 # Download an artwork URL to a local file. Uses curl, follows redirects,
 # fails fast (`-sLf`). Returns true on HTTP 2xx + file written, false
 # otherwise. Used for both Spotify's CDN URL and the iTunes fallback.
-func fetchArtwork(url: view String, outPath: view String) extern ret Bool
+func fetchArtwork(url: view String, outPath: view String) unsafe extern ret Bool
 
 # Non-blocking artwork download. `fetchArtworkAsync` starts or reuses one
 # background curl job for `outPath`; `fetchArtworkStatus` returns:
 # 0 = missing/pending, 1 = fetched, 2 = failed.
-func fetchArtworkAsync(url: view String, outPath: view String) extern ret Bool
-func fetchArtworkStatus(outPath: view String) extern ret Int
+func fetchArtworkAsync(url: view String, outPath: view String) unsafe extern ret Bool
+func fetchArtworkStatus(outPath: view String) unsafe extern ret Int
 
 # iTunes Search API fallback for album art. Queries
 # https://itunes.apple.com/search?term=<term>&entity=song&limit=1,
@@ -128,4 +130,4 @@ func fetchArtworkStatus(outPath: view String) extern ret Int
 #
 # `term` should be artist + " " + track name. Example:
 #     itunesSearchArtworkUrl(term: "Charli XCX brat")
-func itunesSearchArtworkUrl(term: view String) extern ret String
+func itunesSearchArtworkUrl(term: view String) unsafe extern ret String

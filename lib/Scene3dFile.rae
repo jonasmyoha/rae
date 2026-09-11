@@ -31,7 +31,9 @@ func createMaterialRegistry3d() ret MaterialRegistry3d {
 }
 
 func registerMaterial3d(reg: mod MaterialRegistry3d, key: view String, index: view Int) {
-  reg.keys.add(value: rae_ext_rae_string_copy(s: key))
+  var keyCopy: String = ""
+  unsafe { keyCopy = rae_ext_rae_string_copy(s: key) }
+  reg.keys.add(value: keyCopy)
   reg.indices.add(value: index)
 }
 
@@ -72,7 +74,9 @@ func registerMesh3d(reg: mod MeshRegistry3d, key: view String, handle: view Mesh
     reg.handles.set(index: existing, value: handle)
     ret
   }
-  reg.keys.add(value: rae_ext_rae_string_copy(s: key))
+  var keyCopy: String = ""
+  unsafe { keyCopy = rae_ext_rae_string_copy(s: key) }
+  reg.keys.add(value: keyCopy)
   reg.handles.add(value: handle)
 }
 
@@ -115,7 +119,7 @@ func emptyWorld3dAsset() ret World3dAsset {
 
 func failWorld3dAsset(asset: mod World3dAsset, message: view String) {
   asset.ok = false
-  asset.errorMsg = rae_ext_rae_string_copy(s: message)
+  unsafe { asset.errorMsg = rae_ext_rae_string_copy(s: message) }
 }
 
 # nodeId -> the renderable's DENSE transform index. Because entities are created
@@ -123,7 +127,9 @@ func failWorld3dAsset(asset: mod World3dAsset, message: view String) {
 # entity's dense position, which world3dAssetEntity resolves back with
 # world3dEntityAt — the same mapping the Scene3d asset used.
 func addWorldAssetEntity(asset: mod World3dAsset, nodeId: view String, entity: view Int) {
-  asset.nodeIds.add(value: rae_ext_rae_string_copy(s: nodeId))
+  var nodeIdCopy: String = ""
+  unsafe { nodeIdCopy = rae_ext_rae_string_copy(s: nodeId) }
+  asset.nodeIds.add(value: nodeIdCopy)
   asset.entityIds.add(value: entity)
 }
 
@@ -356,7 +362,8 @@ func parseWorld3dAsset(source: view String, meshes: view MeshRegistry3d) pub ret
 }
 
 func loadWorld3dFile(path: view String, meshes: view MeshRegistry3d) pub ret World3dAsset {
-  let source: String = rae_ext_rae_sys_read_file(path: path)
+  var source: String = ""
+  unsafe { source = rae_ext_rae_sys_read_file(path: path) }
   ret parseWorld3dAsset(source: source, meshes: meshes)
 }
 
@@ -480,4 +487,4 @@ func light3dValid(doc: view JsonDoc, value: view JsonValue) ret Bool {
   ret true
 }
 
-func rae_ext_rae_sys_read_file(path: String) extern ret String
+func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
