@@ -28,6 +28,8 @@ open water/Water
 open water/WaterSystem
 open water/WaterFft
 open water/WaterSchedule
+open gpu/GpuResources
+open gpu/GpuLifetime
 open WaterChecks
 open ReadbackChecks
 open water/FftSurfaceCache
@@ -150,6 +152,13 @@ func main() ret Int {
   if rateSetting.length() > 0 { ocean.updateRate = rateSetting.toInt() }
   normalizeWaterTier(body: ocean)
   var waterSystem: WaterSystem = createWaterSystem(body: ocean)
+  # The App-owned GPU manager (#873): water's pipelines, maps and readbacks are
+  # typed IDs in it, passed explicitly to every water operation. Sized for two
+  # simultaneously active water systems (the tier check runs a twin).
+  var idIssuer: IdIssuer = IdIssuer.create()
+  var gpuManager: opt GpuResources = GpuResources.create(issuer: idIssuer, capacity: 160)
+  var twin: WaterSystem = createWaterSystem(body: createOceanRealistic(surfaceZ: 0.0))
+  var twinActive: Bool = false
 
   waterSystem.performance.enabled = Sys.getEnv(name: "RAE_WATER_PERF").length() > 0
 
@@ -193,13 +202,21 @@ func main() ret Int {
           # capped deltaTime and of any skipped FFT update or render frame.
           waterSystem.time = (now - startTime) as Float
           if fixedTestFrame { waterSystem.time = 2.0 }
-          if tierCheck and gbDeferredPrepare() is not 0 {
-            prepareWaterCheck(waterSystem: waterSystem, frame: oceanFrames)
-            let before: WaterCheckSample = takeWaterCheckSample(waterSystem: waterSystem)
-            waterFftStep(waterSystem: waterSystem)
-            if not verifyWaterCheck(waterSystem: waterSystem, before: before, frame: oceanFrames) { checksOk = false }
-            if not verifyWaterCacheFrame(waterSystem: waterSystem) { checksOk = false }
-          } else { waterFftStep(waterSystem: waterSystem) }
+          if let resources: mod GpuResources => gpuManager {
+            if tierCheck and gbDeferredPrepare() is not 0 {
+              prepareWaterCheck(waterSystem: waterSystem, resources: resources, frame: oceanFrames)
+              let before: WaterCheckSample = takeWaterCheckSample(waterSystem: waterSystem)
+              waterFftStep(waterSystem: waterSystem, resources: resources)
+              if not verifyWaterCheck(waterSystem: waterSystem, resources: resources, before: before, frame: oceanFrames) { checksOk = false }
+              if not verifyWaterCacheFrame(waterSystem: waterSystem, resources: resources) { checksOk = false }
+              # Two simultaneously active systems on one manager (#873): a twin
+              # ocean runs beside the primary for a few frames of a stable stage,
+              # then shuts down; the primary's checks above keep passing and the
+              # manager's live counts return to the primary's alone.
+              if not stepTwinWater(twin: twin, primary: waterSystem, resources: resources, frame: oceanFrames, active: twinActive) { checksOk = false }
+              twinActive = twinWaterActive(frame: oceanFrames)
+            } else { waterFftStep(waterSystem: waterSystem, resources: resources) }
+          }
           if buoyancyDemo {
             let currentBody: WaterBody = primaryBody(waterSystem: waterSystem)
             # A missed/stale sample leaves the last transform in place.
@@ -217,8 +234,10 @@ func main() ret Int {
         }
         if tag is RenderTag.transparentForward {
           transparentSnapshot(cache: renderer.passes.transparent)
-          waterDraw(waterSystem: waterSystem, camera: camera, light: light,
-            sky: renderer.sky, hasSky: renderer.hasSky, deltaTime: 0.0)
+          if let resources: mod GpuResources => gpuManager {
+            waterDraw(waterSystem: waterSystem, resources: resources, camera: camera, light: light,
+              sky: renderer.sky, hasSky: renderer.hasSky, deltaTime: 0.0)
+          }
           oceanFrames = waterSystem.drawCount
         }
         if tag is RenderTag.uiOverlay { drawDebugHud(debugHud: debugHud) }
@@ -229,8 +248,10 @@ func main() ret Int {
       }
       world3dPrevTransformSystem(world: sceneWorld)
       if tierCheck and oceanFrames > 0 and oceanFrames % waterCheckStageFrames is 0 {
-        if not waterFftDiagnoseIfft(waterSystem: waterSystem) { checksOk = false }
-        if not verifyKnownWaterCache(waterSystem: waterSystem) { checksOk = false }
+        if let resources: mod GpuResources => gpuManager {
+          if not waterFftDiagnoseIfft(waterSystem: waterSystem, resources: resources) { checksOk = false }
+          if not verifyKnownWaterCache(waterSystem: waterSystem, resources: resources) { checksOk = false }
+        }
       }
     }
   }
@@ -245,9 +266,14 @@ func main() ret Int {
     endingBody.cascadeCount = 1
     waterSystem.bodies.set(index: 0, value: endingBody)
   }
-  waterShutdown(waterSystem: waterSystem)
+  if let resources: mod GpuResources => gpuManager {
+    waterShutdown(waterSystem: waterSystem, resources: resources)
+    shutdown(resources: resources)
+    if tierCheck {
+      if not verifyWaterReleased(resources: resources) { checksOk = false }
+    }
+  }
   if tierCheck {
-    if not verifyWaterReleased() { checksOk = false }
     if oceanFrames is not waterCheckFrames { checksOk = false }
     if checksOk { log("[water tiers] 14 stages ok") } else { log("[water tiers] FAIL") }
   }

@@ -28,6 +28,8 @@ open TransparentForward
 open app3d/CameraRig
 open app3d/DebugHud
 open water/Water
+open gpu/GpuResources
+open gpu/GpuLifetime
 open water/WaterSystem
 open water/WaterFft
 open ecs/Entity
@@ -132,6 +134,10 @@ func main() ret Int {
   lake.refraction = 0
   if Sys.getEnv(name: "RAE_WATER_REFRACTION") is "1" { lake.refraction = 1 }
   var waterSystem: WaterSystem = createWaterSystem(body: lake)
+  # The App-owned GPU manager (#873): water's pipelines, maps and readbacks are
+  # typed IDs in it, passed explicitly to every water operation.
+  var idIssuer: IdIssuer = IdIssuer.create()
+  var gpuManager: opt GpuResources = GpuResources.create(issuer: idIssuer, capacity: 96)
   # A second body on the first island: proves one mesh, many bodies (#847).
   # Greener and calmer than the lake, one wave, sitting just above the island top.
   var pond: WaterBody = createLakeToon(surfaceZ: 1.05, extent: 6.0)
@@ -183,18 +189,22 @@ func main() ret Int {
       loop passIndex < deferredOrderLength(renderer: renderer) {
         let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
         if tag is RenderTag.waterFft {
-          waterFftStep(waterSystem: waterSystem)
-          # #849: read the baked spectrum back once and check it (blocking; test only).
-          if fftDiag and waterFrames is 2 {
-            let ok: Bool = waterFftDiagnose(waterSystem: waterSystem)
-            let ifftOk: Bool = waterFftDiagnoseIfft(waterSystem: waterSystem)
+          if let resources: mod GpuResources => gpuManager {
+            waterFftStep(waterSystem: waterSystem, resources: resources)
+            # #849: read the baked spectrum back once and check it (blocking; test only).
+            if fftDiag and waterFrames is 2 {
+              let ok: Bool = waterFftDiagnose(waterSystem: waterSystem, resources: resources)
+              let ifftOk: Bool = waterFftDiagnoseIfft(waterSystem: waterSystem, resources: resources)
+            }
           }
         }
         if tag is RenderTag.transparentForward {
           # Snapshot the opaque frame, the lake refracts it, then the transparent pass.
           transparentSnapshot(cache: renderer.passes.transparent)
-          waterDraw(waterSystem: waterSystem, camera: camera, light: light,
-            sky: renderer.sky, hasSky: renderer.hasSky, deltaTime: deltaTime)
+          if let resources: mod GpuResources => gpuManager {
+            waterDraw(waterSystem: waterSystem, resources: resources, camera: camera, light: light,
+              sky: renderer.sky, hasSky: renderer.hasSky, deltaTime: deltaTime)
+          }
           waterFrames = waterFrames + 1
         }
         if tag is RenderTag.uiOverlay { drawDebugHud(debugHud: debugHud) }
@@ -210,7 +220,10 @@ func main() ret Int {
   if fixedTestFrame {
     log("[water example] deterministic deferred frame rendered: hour {hour}, 1 island, {cubeCount} boxes, {waterFrames} water frames")
   }
-  waterShutdown(waterSystem: waterSystem)
+  if let resources: mod GpuResources => gpuManager {
+    waterShutdown(waterSystem: waterSystem, resources: resources)
+    shutdown(resources: resources)
+  }
   Gbuffer.shutdownAll()
   Gpu2d.closeWindow()
   ret 0

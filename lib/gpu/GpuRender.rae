@@ -45,6 +45,10 @@ const refBuffer: Int = 0
 const refTextureView: Int = 1
 const refSampler: Int = 2
 const refExternal: Int = 3
+# A placeholder entry: consumes a binding number without binding anything, for
+# a layout whose entry point leaves a binding unused (wgpu derives layouts from
+# the bindings an entry point actually touches).
+const refSkip: Int = 4
 
 # One reference to a manager resource or an adopted external, used for bind
 # entries (in binding order) and for attachments / vertex / index buffers.
@@ -69,6 +73,10 @@ func samplerRef(id: view SamplerId) ret ResourceRef {
 
 func externalRef(id: view ExternalId) ret ResourceRef {
   ret ResourceRef { refKind: refExternal, managerTag: id.managerTag, slot: id.slot, generation: id.generation }
+}
+
+func skipRef() ret ResourceRef {
+  ret ResourceRef { refKind: refSkip, managerTag: 0, slot: 0 - 1, generation: 0 }
 }
 
 func noRef() ret ResourceRef {
@@ -287,7 +295,54 @@ func retireRenderPipeline(resources: mod GpuResources, id: view RenderPipelineId
   ret true
 }
 
-# ----- render bind groups -----------------------------------------------
+# ----- bind groups over an ordered entry list ---------------------------
+
+# Appends `entries` (binding i = entry i, skips consume a number) as native
+# bind-group entries and as dependencies in the arena. false if any is dead.
+func appendOrderedEntries(resources: mod GpuResources, entries: view List(ResourceRef), nativeEntries: mod List(WGPUBindGroupEntry)) ret Bool {
+  var i: Int = 0
+  loop i < entries.length {
+    if let entry: ResourceRef = entries.copyAt(index: i) {
+      if entry.refKind is not refSkip {
+        if isValidRef(resources: resources, ref: entry) is false { ret false }
+        appendRefDep(resources: resources, ref: entry)
+        unsafe {
+          if refIsBuffer(resources: resources, ref: entry) {
+            nativeEntries.add(value: { binding: i as UInt32, buffer: refHandle(resources: resources, ref: entry), size: refBufferSize(resources: resources, ref: entry) as UInt64 })
+          } else if refIsTextureView(resources: resources, ref: entry) {
+            nativeEntries.add(value: { binding: i as UInt32, textureView: refHandle(resources: resources, ref: entry) })
+          } else {
+            nativeEntries.add(value: { binding: i as UInt32, sampler: refHandle(resources: resources, ref: entry) })
+          }
+        }
+      }
+    }
+    i = i + 1
+  }
+  ret true
+}
+
+# Finishes a bind group over `layout` (consumed: released here) whose
+# dependencies were appended from `start`: creates the native group, stores
+# it in `slot`, pins the dependency slice.
+func finishBindGroup(resources: mod GpuResources, slot: view Int, start: view Int, layout: copy Ptr, nativeEntries: view List(WGPUBindGroupEntry)) ret opt BindGroupId {
+  let count: Int = resources.depKinds.length - start
+  if sliceIsLive(resources: resources, start: start, count: count) is false {
+    unsafe { wgpuBindGroupLayoutRelease(bindGroupLayout: layout) }
+    ret none
+  }
+  unsafe {
+    let descriptor: WGPUBindGroupDescriptor = { layout: layout, entryCount: nativeEntries.length as UInt64, entries: nativeEntries.data }
+    let handle: Ptr = wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: descriptor)
+    wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+    if handle is webgpuNull() { ret none }
+    storeHandle(table: resources.bindGroups, slot: slot, handle: handle)
+  }
+  resources.bindGroups.depStart.set(index: slot, value: start)
+  resources.bindGroups.depCount.set(index: slot, value: count)
+  pinSlice(resources: resources, start: start, count: count)
+  ret BindGroupId { managerTag: resources.managerTag, slot: slot, generation: slotGeneration(table: resources.bindGroups, slot: slot) }
+}
 
 # Group 0 of `pipeline` with `entries` bound at consecutive binding numbers in
 # list order (buffers bound whole). Every entry must be live; the group pins
@@ -301,37 +356,29 @@ func createRenderBindGroup(resources: mod GpuResources, pipeline: view RenderPip
   let start: Int = resources.depKinds.length
   appendDep(resources: resources, kind: kindRenderPipeline, slot: pipeline.slot, generation: pipeline.generation)
   var nativeEntries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: entries.length)
-  var i: Int = 0
-  loop i < entries.length {
-    if let entry: ResourceRef = entries.copyAt(index: i) {
-      if isValidRef(resources: resources, ref: entry) is false { ret none }
-      appendRefDep(resources: resources, ref: entry)
-      unsafe {
-        if refIsBuffer(resources: resources, ref: entry) {
-          nativeEntries.add(value: { binding: i as UInt32, buffer: refHandle(resources: resources, ref: entry), size: refBufferSize(resources: resources, ref: entry) as UInt64 })
-        } else if refIsTextureView(resources: resources, ref: entry) {
-          nativeEntries.add(value: { binding: i as UInt32, textureView: refHandle(resources: resources, ref: entry) })
-        } else {
-          nativeEntries.add(value: { binding: i as UInt32, sampler: refHandle(resources: resources, ref: entry) })
-        }
-      }
-    }
-    i = i + 1
-  }
-  let count: Int = resources.depKinds.length - start
-  if sliceIsLive(resources: resources, start: start, count: count) is false { ret none }
+  if appendOrderedEntries(resources: resources, entries: entries, nativeEntries: nativeEntries) is false { ret none }
   unsafe {
     let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: slotHandle(table: resources.renderPipelines, slot: pipeline.slot), groupIndex: 0 as UInt32)
-    let descriptor: WGPUBindGroupDescriptor = { layout: layout, entryCount: nativeEntries.length as UInt64, entries: nativeEntries.data }
-    let handle: Ptr = wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: descriptor)
-    wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
-    if handle is webgpuNull() { ret none }
-    storeHandle(table: resources.bindGroups, slot: slot, handle: handle)
+    ret finishBindGroup(resources: resources, slot: slot, start: start, layout: layout, nativeEntries: nativeEntries)
   }
-  resources.bindGroups.depStart.set(index: slot, value: start)
-  resources.bindGroups.depCount.set(index: slot, value: count)
-  pinSlice(resources: resources, start: start, count: count)
-  ret BindGroupId { managerTag: resources.managerTag, slot: slot, generation: slotGeneration(table: resources.bindGroups, slot: slot) }
+}
+
+# The same over a COMPUTE pipeline's group 0: the ordered, mixed-kind (and
+# external-capable) counterpart of GpuLifetime.createBindGroup, for layouts
+# whose binding order is not buffers-then-views-then-samplers.
+func createComputeBindGroupOrdered(resources: mod GpuResources, pipeline: view PipelineId, entries: view List(ResourceRef)) ret opt BindGroupId {
+  if isValidPipeline(resources: resources, id: pipeline) is false { ret none }
+  if entries.length < 1 { ret none }
+  let slot: Int = findFreeSlot(table: resources.bindGroups, capacity: resources.capacity)
+  if slot < 0 { ret none }
+  let start: Int = resources.depKinds.length
+  appendDep(resources: resources, kind: kindPipeline, slot: pipeline.slot, generation: pipeline.generation)
+  var nativeEntries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: entries.length)
+  if appendOrderedEntries(resources: resources, entries: entries, nativeEntries: nativeEntries) is false { ret none }
+  unsafe {
+    let layout: Ptr = wgpuComputePipelineGetBindGroupLayout(computePipeline: slotHandle(table: resources.pipelines, slot: pipeline.slot), groupIndex: 0 as UInt32)
+    ret finishBindGroup(resources: resources, slot: slot, start: start, layout: layout, nativeEntries: nativeEntries)
+  }
 }
 
 # ----- render targets and draws ----------------------------------------
@@ -429,16 +476,29 @@ func recordDrawIndexed(recording: mod Recording, resources: view GpuResources, t
   ret true
 }
 
-# Copies a 2D RGBA8 texture's level 0 into a buffer laid out row by row with
-# `bytesPerRow` (a multiple of 256, at least width * 4) — the pixel readback
-# path for checks and screenshots. Both resources become uses of the recording.
+# Bytes per texel of the formats the manager copies; -1 for an unknown one
+# (refused rather than handed to wgpu, which would abort on a bad row pitch).
+func texelBytes(format: view Int32) ret Int {
+  if (format is WGPUTextureFormat_RGBA8Unorm) or (format is WGPUTextureFormat_BGRA8Unorm) or (format is WGPUTextureFormat_R32Float) { ret 4 }
+  if (format is WGPUTextureFormat_RGBA16Float) or (format is WGPUTextureFormat_RG32Float) { ret 8 }
+  if (format is WGPUTextureFormat_RGBA32Float) { ret 16 }
+  ret 0 - 1
+}
+
+# Copies a 2D texture's level 0 into a buffer laid out row by row with
+# `bytesPerRow` (a multiple of 256, at least width * texel size) — the pixel
+# readback path for checks, diagnostics and screenshots. Both resources become
+# uses of the recording.
 func recordCopyTextureToBuffer(recording: mod Recording, resources: view GpuResources, texture: view TextureId, buffer: view BufferId, bytesPerRow: view Int) ret Bool {
   if recordingIsOpen(recording: recording, resources: resources) is false { ret false }
   if isValidTexture(resources: resources, id: texture) is false { ret false }
   let width: Int = textureWidth(resources: resources, id: texture)
   let height: Int = textureHeight(resources: resources, id: texture)
   if width < 1 or height < 1 { ret false }
-  if bytesPerRow - (bytesPerRow / 256) * 256 is not 0 or bytesPerRow < width * 4 { ret false }
+  var texel: Int = 0 - 1
+  unsafe { texel = texelBytes(format: wgpuTextureGetFormat(texture: slotHandle(table: resources.textures, slot: texture.slot))) }
+  if texel < 1 { ret false }
+  if bytesPerRow - (bytesPerRow / 256) * 256 is not 0 or bytesPerRow < width * texel { ret false }
   if bufferRangeIsValid(resources: resources, id: buffer, offset: 0, size: bytesPerRow * height) is false { ret false }
   if hasUsageFlag(usage: bufferUsage(resources: resources, id: buffer), flag: WGPUBufferUsage_CopyDst) is false { ret false }
   unsafe {
