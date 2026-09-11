@@ -32,6 +32,7 @@ open ui/layoutSystem/LayoutSystem
 open ui/Theme
 open ui/Transform
 open ui/animationSystem/AnimationSystem
+open Gpu2dBox
 func main() {
   let backendEnv: String = "gpu2d"
   # `RAE_UI_HEADLESS=1`: see headless.rae.
@@ -77,6 +78,7 @@ func main() {
   bootTheme.generation = 1
   applyResolvedTokens(dst: bootTheme.resolved, src: uiTheme)
   let gpuUi: Gpu2dUi = { textFont: gpuTextFont, iconFont: gpuIconFont, theme: uiTheme, activeTheme: chosenTheme }
+  var boxPass: Gpu2dBoxPass = createGpu2dBoxPass()   # #907: the app-owned 2D box pass
 
   var scenes: AlbumScenes = loadAllScenes()
   let texReg: TextureRegistry = createTextureRegistry()
@@ -187,7 +189,7 @@ func main() {
   # (closeWindow / falls through to teardown). Implementations live in
   # `stress_runner.rae` and `screenshot_runner.rae` so this file only
   # owns the interactive lifecycle.
-  if runStressMode(scenes: scenes, appState: appState, gpuUi: gpuUi) {
+  if runStressMode(scenes: scenes, appState: appState, gpuUi: gpuUi, box: boxPass) {
     ret
   }
   if runScreenshotMode(scenes: scenes, appState: appState, texReg: texReg, bg: palettePageBg(theme: appState.theme.active)) is false {
@@ -914,6 +916,7 @@ func main() {
           let frameRender: FrameRenderResult = renderGpu2dFrame(
             world: world
             gpuUi: gpuUi
+            box: boxPass
             debug: debug
             logView: logView
             logW: viewport.layoutW
@@ -986,5 +989,6 @@ func main() {
   # dispatched action fired (and thus no in-loop save ran).
   saveAppState(path: stateFilePath, state: appState, playback: playback)
   textureUnloadAll(reg: texReg)
+  boxPassShutdown(box: boxPass)
   uiCloseWindow()
 }

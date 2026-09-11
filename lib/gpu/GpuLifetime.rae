@@ -73,6 +73,24 @@ func liveSubmissionCount(resources: view GpuResources) ret Int {
 
 # ----- dependency arena ------------------------------------------------
 
+# Empties the append-only dependency arena when nothing indexes it any more:
+# no bind group, submission or readback is live or retired-and-pending. A
+# consumer that builds bind groups per frame (the 2D box pass, #907) calls
+# this at its frame end so the arena does not grow without bound; a manager
+# with long-lived groups simply never qualifies. Returns whether it compacted.
+func compactDependencies(resources: mod GpuResources) ret Bool {
+  if liveCount(table: resources.bindGroups, capacity: resources.capacity) > 0 { ret false }
+  if pendingCount(table: resources.bindGroups, capacity: resources.capacity) > 0 { ret false }
+  if liveCount(table: resources.submissions, capacity: resources.capacity) > 0 { ret false }
+  if pendingCount(table: resources.submissions, capacity: resources.capacity) > 0 { ret false }
+  if liveCount(table: resources.readbacks, capacity: resources.capacity) > 0 { ret false }
+  if pendingCount(table: resources.readbacks, capacity: resources.capacity) > 0 { ret false }
+  resources.depKinds.clear()
+  resources.depSlots.clear()
+  resources.depGenerations.clear()
+  ret true
+}
+
 func depIsLive(resources: view GpuResources, kind: view Int, slot: view Int, generation: view Int) ret Bool {
   ret slotIsLive(table: tableFor(resources: resources, kind: kind), capacity: resources.capacity, slot: slot, generation: generation)
 }

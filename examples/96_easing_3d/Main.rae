@@ -14,6 +14,7 @@ open Rendergraph
 open Scene3d
 open ui/Ecs
 open ui/renderSystem/RenderSystem
+open Gpu2dBox
 
 func uploadMeshData(meshData: view MeshData) ret MeshHandle {
   ret uploadMesh(
@@ -108,7 +109,7 @@ func main() ret Int {
         let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
         if tag is RenderTag.uiOverlay {
           Gpu2d.beginFrameLoad()
-          renderSystemGpu2d(world: world, res: uiResources)
+          renderSystemGpu2d(world: world, res: uiResources, box: renderer.boxPass)
         } else {
           renderDeferredPassWorld(
             r: renderer, tag: tag, world: sceneWorld

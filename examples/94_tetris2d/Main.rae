@@ -7,6 +7,7 @@ open Math
 open ui/Ecs
 open ui/DebugOverlay
 open ui/renderSystem/RenderSystem
+open Gpu2dBox
 
 const canvasW: Float = 800.0
 const canvasH: Float = 600.0
@@ -678,6 +679,7 @@ func handleInput(game: mod Game) {
 
 func main() ret Int {
   Gpu2d.initWindow(width: canvasW.toInt(), height: canvasH.toInt(), title: "Rae Tetris 2D — GPU2D")
+  var boxPass: Gpu2dBoxPass = createGpu2dBoxPass()   # #907: the app-owned 2D box pass
   Gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
   let uiResources: Gpu2dUi = loadUiAssets(
     dir: "examples/104_ui_hello/assets/"
@@ -766,10 +768,11 @@ func main() ret Int {
 
     Gpu2d.beginFrame(r: 0.03, game: 0.05, b: 0.09, a: 1.0)
     drawGame(game: game)
-    renderSystemGpu2d(world: world, res: uiResources)
+    renderSystemGpu2d(world: world, res: uiResources, box: boxPass)
     drawDebugOverlay(debugOverlay: dbg, font: uiResources.textFont, didRealWork: true)
-    Gpu2d.endFrame()
+    Gpu2d.endFrame(box: boxPass)
   }
+  boxPassShutdown(box: boxPass)
   Gpu2d.closeWindow()
   ret 0
 }
