@@ -1,0 +1,52 @@
+# #901: `List(Ptr).copyAt(index:)` used to miscompile. The generic accessor's
+# `opt Ptr` result got the struct-rep form (`.has`/`.value`), but the
+# name-mangler's `Ptr -> Buffer(void)` shortcut fired BEFORE its `is_opt`
+# check and named `opt Ptr` "Buffer_void" — the same name bare `Ptr` gets, a
+# plain `void*` typedef, not a struct — so gcc rejected the generated C
+# ("member reference base type 'Buffer_void' is not a structure or union").
+# Reproduces the exact shape from the task: a struct with a `handles:
+# List(Ptr)` field, `add` inside unsafe, then `if let ... = copyAt(...)`.
+cheader "stdlib.h"
+
+func allocate(byteCount: copy UInt64) unsafe extern("malloc") ret Ptr
+func release(pointer: copy Ptr) unsafe extern("free")
+
+type Holder {
+  handles: List(Ptr)
+}
+
+func main() {
+  var holder: Holder = { handles: List.create(Ptr, cap: 4) }
+  var ok: Bool = true
+  unsafe {
+    let a: Ptr = allocate(byteCount: 8 as UInt64)
+    let b: Ptr = allocate(byteCount: 8 as UInt64)
+    holder.handles.add(value: a)
+    holder.handles.add(value: b)
+
+    # Round-trips the right value at the right index...
+    if let raw0: Ptr = holder.handles.copyAt(index: 0) {
+      if raw0 is not a { ok = false }
+      if raw0 is b { ok = false }
+    } else {
+      ok = false
+    }
+    if let raw1: Ptr = holder.handles.copyAt(index: 1) {
+      if raw1 is not b { ok = false }
+    } else {
+      ok = false
+    }
+    # ...and an out-of-range index gives `none`, not garbage.
+    if let outOfRange: Ptr = holder.handles.copyAt(index: 9) {
+      ok = false
+    }
+
+    release(pointer: a)
+    release(pointer: b)
+  }
+  if ok {
+    log("List(Ptr).copyAt ok")
+  } else {
+    log("List(Ptr).copyAt FAIL")
+  }
+}

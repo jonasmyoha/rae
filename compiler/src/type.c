@@ -415,6 +415,12 @@ static void type_mangle_recursive(Arena* arena, TypeInfo* t, char* buf, size_t* 
              * (mangle_type_recursive_specialized) or a local var decl won't
              * match the struct typedef (#238). */
             TypeInfo* opt_base = t->as.opt.base;
+            // #901: TYPE_BUFFER (Ptr and any Buffer(T)) is struct-rep too —
+            // must agree with rae_typeinfo_opt_is_struct_rep (c_backend.c)
+            // and mangler_opt_is_struct_rep / mangler_payload_is_struct_rep
+            // (mangler.c), or the opt-Ptr local var decl and its struct
+            // typedef name disagree (#238 — this is exactly what #901's
+            // List(Ptr).copyAt bug was).
             bool struct_rep = opt_base && (opt_base->kind == TYPE_STRUCT
                 || opt_base->kind == TYPE_GENERIC_INST
                 || opt_base->kind == TYPE_TASK
@@ -424,7 +430,8 @@ static void type_mangle_recursive(Arena* arena, TypeInfo* t, char* buf, size_t* 
                 || opt_base->kind == TYPE_FLOAT64
                 || opt_base->kind == TYPE_BOOL
                 || opt_base->kind == TYPE_CHAR
-                || opt_base->kind == TYPE_STRING);
+                || opt_base->kind == TYPE_STRING
+                || opt_base->kind == TYPE_BUFFER);
             if (struct_rep) {
                 *pos += snprintf(buf + *pos, cap - *pos, "rae_opt_");
                 type_mangle_recursive(arena, opt_base, buf, pos, cap, depth + 1);

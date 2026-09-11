@@ -196,8 +196,17 @@ func pendingCount(table: view SlotTable, capacity: view Int) ret Int {
 
 # Hands out the raw native handle of a slot: an unchecked pointer, so the
 # caller takes the obligation (internal use, always inside unsafe blocks).
+# #901: goes through the checked `copyAt` (now that List(Ptr)'s `opt Ptr`
+# representation is fixed) rather than the raw buf_get workaround; an
+# out-of-range slot — never expected here, every caller validates the slot
+# first — returns null instead of reading past the buffer.
 func slotHandle(table: view SlotTable, slot: view Int) unsafe ret Ptr {
-  unsafe { ret rae_ext_rae_buf_get(V: Ptr, buf: table.handles.data, index: slot) }
+  unsafe {
+    if let handle: Ptr = table.handles.copyAt(index: slot) {
+      ret handle
+    }
+    ret webgpuNull()
+  }
 }
 
 func storeHandle(table: mod SlotTable, slot: view Int, handle: copy Ptr) {
