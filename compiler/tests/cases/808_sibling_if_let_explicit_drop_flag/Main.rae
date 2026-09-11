@@ -1,0 +1,43 @@
+# #902: a slot index used for a local is REUSED across sibling scopes (an
+# if-let block's locals pop back off at scope exit, so the next sibling
+# if-let block's first local claims the same slot). Codegen tracks whether a
+# local's scope-exit drop must be flag-guarded (because the body already
+# dropped it explicitly, via `.drop()`) with a runtime flag
+# `int __rae_live_<name>`, keyed by SLOT INDEX — but never reset the flag
+# when a new, unrelated local claimed a reused slot. An explicit `.drop()`
+# in one `if let` block left the flag true for its slot; a LATER sibling
+# `if let` block whose own local (a different name, never explicitly
+# dropped) reused that slot then had its scope-exit drop guarded by
+# `if (__rae_live_<newName>)` — a flag that was never declared for that
+# name, so gcc rejected the generated C ("use of undeclared identifier").
+#
+# Four sibling `if let` blocks alternate explicit / implicit drop of a
+# `Recording` (has a user `drop`), each printing its tag exactly once.
+type Recording {
+  tag: Int
+}
+
+func drop(this: mod Recording) {
+  log("dropping {this.tag}")
+}
+
+func maybe(n: view Int) ret opt Int {
+  ret n
+}
+
+func main() {
+  if let one: Int = maybe(n: 1) {
+    var a: Recording = { tag: one }
+    a.drop()
+  }
+  if let two: Int = maybe(n: 2) {
+    var b: Recording = { tag: two }
+  }
+  if let three: Int = maybe(n: 3) {
+    var c: Recording = { tag: three }
+    c.drop()
+  }
+  if let four: Int = maybe(n: 4) {
+    var d: Recording = { tag: four }
+  }
+}
