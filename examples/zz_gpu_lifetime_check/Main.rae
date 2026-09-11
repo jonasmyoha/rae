@@ -1,0 +1,213 @@
+# Hardware check for gpu/GpuLifetime (#870): a real compute dispatch and copy
+# through recordings and submissions, nonblocking completion polling, early
+# retirement behind in-flight work, old bind groups, abandoned recordings,
+# repeated submissions and independent managers. Exit code 0 = all passed.
+import Sdl3
+open webgpu/Context
+open webgpu/WebgpuEnums
+open webgpu/ReadRequest
+open gpu/GpuResources
+open gpu/GpuLifetime
+
+func fail(message: view String) ret Bool {
+  log("FAIL: {message}")
+  ret false
+}
+
+# 16 threads write data[i] = i * 2.
+func kernelSource() ret String {
+  ret "@group(0) @binding(0) var<storage, read_write> data: array<u32>; @compute @workgroup_size(16) fn main(@builtin(global_invocation_id) id: vec3<u32>) \{ data[id.x] = id.x * 2u; \}"
+}
+
+# Polls without waiting until the submission completes; counts the polls.
+func awaitSubmission(resources: mod GpuResources, id: view SubmissionId) ret Int {
+  var status: Int = 0
+  var spins: Int = 0
+  loop status is 0 and spins < 1000000 {
+    status = pollSubmission(resources: resources, id: id)
+    spins = spins + 1
+  }
+  ret status
+}
+
+func readWords(resources: view GpuResources, id: view BufferId, words: view Int, out: mod List(Int)) ret Bool {
+  if let request: ReadRequest = readBuffer(resources: resources, id: id, offset: 0, size: words * 4) {
+    var status: Int = 0
+    var spins: Int = 0
+    loop status is 0 and spins < 100000 {
+      status = poll(this: request)
+      spins = spins + 1
+    }
+    if status is not 1 { ret false }
+    let bytes: List(UInt8) = List.create(UInt8, cap: words * 4)
+    var i: Int = 0
+    loop i < words * 4 {
+      bytes.add(value: 0 as UInt8)
+      i = i + 1
+    }
+    if copyToBytes(this: request, destination: bytes) is false { ret false }
+    var word: Int = 0
+    loop word < words {
+      var value: Int = 0
+      var byte: Int = 3
+      loop byte >= 0 {
+        if let b: UInt8 = bytes.copyAt(index: word * 4 + byte) { value = value * 256 + (b as Int) }
+        byte = byte - 1
+      }
+      out.add(value: value)
+      word = word + 1
+    }
+    ret true
+  }
+  ret false
+}
+
+func checkComputeAndCopy(resources: mod GpuResources) ret Bool {
+  if let storage: BufferId = createBuffer(resources: resources, size: 64, usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopySrc) {
+    if let readback: BufferId = createBuffer(resources: resources, size: 64, usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst) {
+      if let pipeline: PipelineId = createComputePipeline(resources: resources, wgsl: kernelSource(), entryPoint: "main") {
+        let buffers: List(BufferId) = List.create(BufferId, cap: 1)
+        buffers.add(value: storage)
+        let noViews: List(TextureViewId) = List.create(TextureViewId, cap: 1)
+        let noSamplers: List(SamplerId) = List.create(SamplerId, cap: 1)
+        if let bindGroup: BindGroupId = createBindGroup(resources: resources, pipeline: pipeline, buffers: buffers, textureViews: noViews, samplers: noSamplers) {
+          if let recording: Recording = beginRecording(resources: resources) {
+            if recordCompute(recording: recording, resources: resources, pipeline: pipeline, bindGroup: bindGroup, workgroupsX: 1, workgroupsY: 1, workgroupsZ: 1) is false { ret fail(message: "recordCompute") }
+            if recordCopyBuffer(recording: recording, resources: resources, source: storage, sourceOffset: 0, destination: readback, destinationOffset: 0, size: 64) is false { ret fail(message: "recordCopyBuffer") }
+            if let submission: SubmissionId = submit(resources: resources, recording: recording) {
+              if liveSubmissionCount(resources: resources) is not 1 { ret fail(message: "live submission count") }
+              if awaitSubmission(resources: resources, id: submission) is not 1 { ret fail(message: "submission did not complete") }
+              if pollSubmission(resources: resources, id: submission) is not 1 { ret fail(message: "repeated poll after completion") }
+              let words: List(Int) = List.create(Int, cap: 16)
+              if readWords(resources: resources, id: readback, words: 16, out: words) is false { ret fail(message: "readback") }
+              var i: Int = 0
+              loop i < 16 {
+                if let value: Int = words.copyAt(index: i) {
+                  if value is not i * 2 { ret fail(message: "word {i} is {value}, expected {i * 2}") }
+                }
+                i = i + 1
+              }
+              if retireSubmission(resources: resources, id: submission) is false { ret fail(message: "retireSubmission") }
+              if pollSubmission(resources: resources, id: submission) is not (0 - 1) { ret fail(message: "retired submission still polls") }
+              # Early retirement: retire the storage buffer while a new
+              # submission that uses it is in flight. No new use, deferred release.
+              if let second: Recording = beginRecording(resources: resources) {
+                if recordCompute(recording: second, resources: resources, pipeline: pipeline, bindGroup: bindGroup, workgroupsX: 1, workgroupsY: 1, workgroupsZ: 1) is false { ret fail(message: "second recordCompute") }
+                if let inFlight: SubmissionId = submit(resources: resources, recording: second) {
+                  if retireBuffer(resources: resources, id: storage) is false { ret fail(message: "early retire") }
+                  if isValidBuffer(resources: resources, id: storage) { ret fail(message: "retired buffer still valid") }
+                  if pendingReleaseCount(resources: resources) is not 1 { ret fail(message: "expected 1 deferred release, got {pendingReleaseCount(resources: resources)}") }
+                  if bindGroupIsUsable(resources: resources, id: bindGroup) { ret fail(message: "old bind group still usable") }
+                  if let stale: Recording = beginRecording(resources: resources) {
+                    if recordCompute(recording: stale, resources: resources, pipeline: pipeline, bindGroup: bindGroup, workgroupsX: 1, workgroupsY: 1, workgroupsZ: 1) { ret fail(message: "old bind group accepted a new use") }
+                  }
+                  if awaitSubmission(resources: resources, id: inFlight) is not 1 { ret fail(message: "in-flight did not complete") }
+                  # The bind group still pins the buffer; retiring the group releases it.
+                  if pendingReleaseCount(resources: resources) is not 1 { ret fail(message: "buffer released while bind group pinned it") }
+                  if retireBindGroup(resources: resources, id: bindGroup) is false { ret fail(message: "retireBindGroup") }
+                  if pendingReleaseCount(resources: resources) is not 0 { ret fail(message: "deferred release not reclaimed") }
+                  if retireSubmission(resources: resources, id: inFlight) is false { ret fail(message: "retire inFlight") }
+                } else {
+                  ret fail(message: "second submit")
+                }
+              } else {
+                ret fail(message: "second beginRecording")
+              }
+              # Abandoned recording: dropped unsubmitted, nothing pinned or leaked.
+              if let abandoned: Recording = beginRecording(resources: resources) {
+                if recordCopyBuffer(recording: abandoned, resources: resources, source: readback, sourceOffset: 0, destination: readback, destinationOffset: 0, size: 0) { ret fail(message: "zero-size copy accepted") }
+              }
+              if liveSubmissionCount(resources: resources) is not 0 { ret fail(message: "abandoned recording left a submission") }
+              # A submission whose use was retired between record and submit is refused.
+              if let doomed: Recording = beginRecording(resources: resources) {
+                if let scratch: BufferId = createBuffer(resources: resources, size: 64, usage: WGPUBufferUsage_CopySrc + WGPUBufferUsage_CopyDst) {
+                  if recordCopyBuffer(recording: doomed, resources: resources, source: scratch, sourceOffset: 0, destination: readback, destinationOffset: 0, size: 64) is false { ret fail(message: "scratch copy") }
+                  if retireBuffer(resources: resources, id: scratch) is false { ret fail(message: "retire scratch") }
+                  if let accepted: SubmissionId = submit(resources: resources, recording: doomed) { ret fail(message: "submit accepted a retired use") }
+                }
+              }
+              if retirePipeline(resources: resources, id: pipeline) is false { ret fail(message: "retirePipeline") }
+              ret retireBuffer(resources: resources, id: readback)
+            }
+            ret fail(message: "submit")
+          }
+          ret fail(message: "beginRecording")
+        }
+        ret fail(message: "createBindGroup")
+      }
+      ret fail(message: "createComputePipeline")
+    }
+  }
+  ret fail(message: "createBuffer")
+}
+
+# Repeated submissions reuse one pipeline and bind group; each gets its own ID.
+func checkRepeated(resources: mod GpuResources) ret Bool {
+  if let storage: BufferId = createBuffer(resources: resources, size: 64, usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopySrc) {
+    if let pipeline: PipelineId = createComputePipeline(resources: resources, wgsl: kernelSource(), entryPoint: "main") {
+      let buffers: List(BufferId) = List.create(BufferId, cap: 1)
+      buffers.add(value: storage)
+      let noViews: List(TextureViewId) = List.create(TextureViewId, cap: 1)
+      let noSamplers: List(SamplerId) = List.create(SamplerId, cap: 1)
+      if let bindGroup: BindGroupId = createBindGroup(resources: resources, pipeline: pipeline, buffers: buffers, textureViews: noViews, samplers: noSamplers) {
+        var round: Int = 0
+        var lastSlot: Int = 0 - 1
+        loop round < 3 {
+          if let recording: Recording = beginRecording(resources: resources) {
+            if recordCompute(recording: recording, resources: resources, pipeline: pipeline, bindGroup: bindGroup, workgroupsX: 1, workgroupsY: 1, workgroupsZ: 1) is false { ret fail(message: "repeat record") }
+            if let submission: SubmissionId = submit(resources: resources, recording: recording) {
+              if awaitSubmission(resources: resources, id: submission) is not 1 { ret fail(message: "repeat complete") }
+              if retireSubmission(resources: resources, id: submission) is false { ret fail(message: "repeat retire") }
+              lastSlot = submission.slot
+            } else {
+              ret fail(message: "repeat submit")
+            }
+          }
+          round = round + 1
+        }
+        if liveSubmissionCount(resources: resources) is not 0 { ret fail(message: "repeat leak") }
+        if retireBindGroup(resources: resources, id: bindGroup) is false { ret fail(message: "repeat retire group") }
+        if retirePipeline(resources: resources, id: pipeline) is false { ret fail(message: "repeat retire pipeline") }
+        ret retireBuffer(resources: resources, id: storage)
+      }
+    }
+  }
+  ret fail(message: "repeated setup")
+}
+
+func main() ret Int {
+  if webgpuBootstrap() is not 1 {
+    log("no GPU")
+    ret 1
+  }
+  var issuer: IdIssuer = IdIssuer.create()
+  if let managerA: GpuResources = GpuResources.create(issuer: issuer, capacity: 8) {
+    if let managerB: GpuResources = GpuResources.create(issuer: issuer, capacity: 8) {
+      if checkComputeAndCopy(resources: managerA) is false { ret 1 }
+      log("compute + copy, known contents, nonblocking polling, early retirement, old bind group, abandoned and refused recordings OK")
+      if checkRepeated(resources: managerB) is false { ret 1 }
+      log("repeated submissions OK")
+      # Independent managers: a submission of one is unknown to the other.
+      if let storage: BufferId = createBuffer(resources: managerA, size: 64, usage: WGPUBufferUsage_CopySrc + WGPUBufferUsage_CopyDst) {
+        if let recording: Recording = beginRecording(resources: managerA) {
+          # A self-copy is invalid WebGPU; the manager refuses it before wgpu sees it.
+          if recordCopyBuffer(recording: recording, resources: managerA, source: storage, sourceOffset: 0, destination: storage, destinationOffset: 32, size: 32) { ret 1 }
+          if let other: BufferId = createBuffer(resources: managerA, size: 64, usage: WGPUBufferUsage_CopyDst) {
+            if recordCopyBuffer(recording: recording, resources: managerA, source: storage, sourceOffset: 0, destination: other, destinationOffset: 0, size: 64) is false { ret 1 }
+          } else { ret 1 }
+          if let submission: SubmissionId = submit(resources: managerA, recording: recording) {
+            if pollSubmission(resources: managerB, id: submission) is not (0 - 1) { ret 1 }
+            if awaitSubmission(resources: managerA, id: submission) is not 1 { ret 1 }
+          } else { ret 1 }
+        }
+      }
+      shutdown(resources: managerA)
+      shutdown(resources: managerB)
+      if liveSubmissionCount(resources: managerA) is not 0 or pendingReleaseCount(resources: managerA) is not 0 { ret 1 }
+      log("independent managers and shutdown OK")
+      ret 0
+    }
+  }
+  log("FAIL: manager creation")
+  ret 1
+}
