@@ -547,7 +547,32 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 p = p->next; a = a->next;
             }
             concrete = infer_generic_args_multi(ctx->compiler_ctx, fd, patterns, concretes, np);
-            // 2. Fallback: map the callee's own generic-param NAMES through the
+            // 2. Infer from the EXPECTED return type before the name-mapping
+            //    fallback below. For a return-typed constructor whose args do not
+            //    bind the type params (`create(cap: 8)`, `createList(cap: 8)`),
+            //    the field/binding type is authoritative and may differ from the
+            //    enclosing generic `T` — e.g. `items: List(EntityId)` inside
+            //    `makeBox(T)` must specialise from the FIELD's `EntityId`, not the
+            //    enclosing `T` (#889). The name-mapping fallback (#3) reuses the
+            //    enclosing `T` for every param and so silently mis-binds such a
+            //    field; a structural inference from the expected return type does
+            //    not. Substitute the inferred args through the enclosing context
+            //    so a field literally typed `List(T)` still resolves its `T`.
+            if (!concrete && ctx->has_expected_type && fd->returns && fd->returns->type) {
+                AstTypeRef* from_expected = infer_generic_args(ctx->compiler_ctx, fd, fd->returns->type, &ctx->expected_type);
+                if (from_expected && ctx->generic_params && ctx->generic_args) {
+                    AstTypeRef* head = NULL; AstTypeRef* tail = NULL;
+                    for (AstTypeRef* tr = from_expected; tr; tr = tr->next) {
+                        AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
+                        AstTypeRef* node = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef)); *node = *sub; node->next = NULL;
+                        if (!head) head = node; else tail->next = node; tail = node;
+                    }
+                    concrete = head;
+                } else if (from_expected) {
+                    concrete = from_expected;
+                }
+            }
+            // 3. Fallback: map the callee's own generic-param NAMES through the
             //    enclosing generic context. Only correct when the names coincide
             //    (the common "everyone calls it T" case) or for type-arg-only
             //    calls with no value arg to infer from; hence a fallback, not the
@@ -561,10 +586,6 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     if (!head) head = node; else tail->next = node; tail = node;
                 }
                 concrete = head;
-            }
-            // 3. Fallback: infer from the expected return type.
-            if (!concrete && ctx->has_expected_type && fd->returns && fd->returns->type) {
-                concrete = infer_generic_args(ctx->compiler_ctx, fd, fd->returns->type, &ctx->expected_type);
             }
         }
         if (concrete) {
