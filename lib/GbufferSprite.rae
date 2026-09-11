@@ -29,8 +29,6 @@ func gbSpriteArrayWrite(layer: Int, pixels: view Buffer(Int), w: Int, h: Int) un
 func gbFrameUbuf() unsafe extern("rae_gb_frame_ubuf") ret Ptr
 func gbDrawsBuffer() unsafe extern("rae_gb_draws_buffer") ret Ptr
 func gbPass() unsafe extern("rae_gb_pass") ret Ptr
-func gbStaticPipeline() unsafe extern("rae_gb_static_pipeline") ret Ptr
-func gbStaticBind() unsafe extern("rae_gb_static_bind") ret Ptr
 func gbDrawCount() unsafe extern("rae_gb_draw_count") ret Int
 func gbMaxDraws() unsafe extern("rae_gb_max_draws") ret Int
 func gbAdvanceDraws(count: Int) unsafe extern("rae_gb_advance_draws")
@@ -144,8 +142,7 @@ func spriteSetParams(cache: mod SpriteCache, resources: mod GpuResources, height
 
 # Draw a batch of billboard instances from packed DrawU `records` (count of them):
 # upload to the shared draws buffer at the running base, draw 6 procedural verts x
-# count with the sprite pipeline, then restore the static pipeline (as grassDraw
-# does) so a following static draw is unaffected. `records` is a raw record
+# count with the sprite pipeline. `records` is a raw record
 # pointer into the caller's packed floats, hence unsafe.
 func drawSpriteInstances(cache: mod SpriteCache, resources: mod GpuResources, records: copy Ptr, count: copy Int) unsafe {
   if count <= 0 { ret }
@@ -159,12 +156,10 @@ func drawSpriteInstances(cache: mod SpriteCache, resources: mod GpuResources, re
       size: (count * strideBytes) as UInt64)
     let pass: Ptr = gbPass()
     if pass is webgpuNull() { ret }
+    # No static re-bind after: every G-buffer draw binds its own pipeline (#912).
     if recordDrawInPass(resources: resources, pass: pass, pipeline: cache.pipeline, bindGroup: cache.bindGroup, vertexCount: 6, instanceCount: count, firstVertex: 0, firstInstance: base) {
       gbAdvanceDraws(count: count)
     }
-    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: gbStaticPipeline())
-    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
-      group: gbStaticBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
   }
 }
 
