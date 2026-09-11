@@ -459,3 +459,54 @@ surface. It exists so a render surface such as water's can be manager-owned
   while the adopter still owns and releases its buffer, and a released
   external, a retired pipeline and a misaligned row pitch are refused.
 - No new C: generated bindings only; the C-surface gate is unchanged.
+
+## Implementation notes (#873): water on the manager
+
+Water was the first real consumer: `g_water_ptrs[160]` and its three C
+accessors are gone (runtime, stubs, header, allowlist), and every GPU object
+of the water package is a typed ID in an App-owned `gpu/GpuResources`.
+
+- **Ownership.** The App (or the example's main) owns the manager and the
+  `WaterSystem` CPU state; every water operation takes `resources: mod
+  GpuResources` explicitly and nothing stores a reference to it. The IDs live
+  in `water/WaterGpuIds.rae` grouped by lifetime — `WaterSurfaceGpu`
+  (render pipeline, uniform, bind group, samplers, adopted frame + mesh
+  externals), `WaterCascadeGpu`, `WaterFftGpu` (bake + per-frame transform),
+  `WaterCacheGpu` (readback producer) — plus the system's in-flight
+  `SubmissionId`s. Copying a group copies IDs only: the manager is the single
+  cleanup owner and `waterShutdown` / `resetWaterFft` retire explicitly.
+- **Two instances.** `createWaterSystem` builds an independent group; two
+  systems on one manager (or on two managers) share nothing. 119's tier check
+  runs a twin ocean beside the primary for two frames of a stable stage, shuts
+  it down alone, and asserts the primary's cascades stay live and the live
+  object count returns to the primary-only value.
+- **The surface** uses #903: `createRenderPipeline` (the geometry layout,
+  straight alpha, reverse-Z read-only depth), a `createRenderBindGroup` over an
+  ordered entry list mixing manager IDs and the ADOPTED gbuffer frame
+  externals (frame uniform, depth view, opaque snapshot, lit view — re-adopted
+  when the targets generation changes), adopted mesh vertex/index buffers, and
+  `recordDrawIndexed` per body, submitted per body so the shared uniform's
+  flushed write cannot overtake the previous draw.
+- **The FFT** uses `createComputePipeline` per entry point,
+  `createComputeBindGroupOrdered` (a `skipRef` keeps the butterfly's binding
+  numbers aligned with the shared WGSL), and `recordComputeCommands` — ONE
+  compute pass for the whole evolution + inverse transform, carrying the
+  timestamp writes of the nonblocking `gpu/GpuTiming` when `RAE_WATER_PERF` is
+  on (`WaterPerf` now samples through a `ReadbackId`; "[water perf] sample N"
+  lines are logged when the readback lands, never blocking a frame).
+- **Readbacks** (#871): the diagnostics copy a texture to the MapRead buffer
+  with `recordCopyTextureToBuffer` (texel size from the texture's format) and
+  wait on a `ReadbackId` (tests only); the surface cache keeps at most one
+  `ReadbackId` per cascade and never stalls. Uniforms are packed with #872
+  (`uploadFloats` / `uploadInts` over `ArgWriter`).
+- **Unsafe boundary.** Only `water/WaterGpuBridge.rae` is opted in: it adopts
+  the gbuffer handles, reinterprets readback bytes as floats, and passes the
+  timing pointer. The other water modules never touch a `Ptr`.
+- **Verified on hardware**: 118 (toon lake, h0 + ifft diagnostics), 119 (14
+  tier stages — fftSize 128/256/512, cascades 1..3, N=1/2/3 cadence, sample
+  times, invalidation, known waves, surface cache, buoyancy sampling, twin
+  instance, release check = every live and pending count zero after
+  `waterShutdown` + manager `shutdown`), 114 (walker with lake + river).
+- Manager additions made for this: `createSamplerWith(addressMode)`,
+  `createComputeBindGroupOrdered` + `skipRef`, format-aware
+  `recordCopyTextureToBuffer`, `recordComputeCommands`.
