@@ -1,0 +1,202 @@
+# #892: executable model of the chosen GPU manager-identity contract
+# (docs/gpu-resource-identity-design.md). No GPU is touched — the manager is a
+# plain Rae owner over a slot table — so the identity guarantees are checked
+# deterministically. It demonstrates, with two independently created managers
+# ("two Apps"): matching slots/generations that still reject wrong-owner use,
+# stale rejection after retirement, manager destruction/recreation, and
+# exhaustion.
+
+# An explicitly shared issuer. main OWNS it and passes it to each manager's
+# constructor: no hidden current-manager registry, no injected main parameter.
+# One issuer never hands out the same tag twice, so two managers built from it
+# are distinguishable by construction.
+type IdIssuer {
+  nextTag: Int
+}
+
+func create() ret IdIssuer {
+  ret IdIssuer { nextTag: 1 }
+}
+
+func issue(this: mod IdIssuer) ret Int {
+  let tag: Int = this.nextTag
+  this.nextTag = this.nextTag + 1
+  ret tag
+}
+
+# A copyable identity: no pointer, no destructor, plain value equality.
+# `managerTag` says WHICH manager issued it; `slot` addresses the manager's
+# slot table; `generation` distinguishes a live resource from a stale handle to
+# a since-retired/reused slot (the EntityId idiom).
+type TextureId {
+  managerTag: Int
+  slot: Int
+  generation: Int
+}
+
+# The manager owns its slot table; it has create/drop and no copy. The slot
+# record is the AUTHORITATIVE state every safe operation validates against —
+# the fields of a TextureId are hints and can never widen access.
+type Resources {
+  managerTag: Int
+  capacity: Int
+  generations: List(Int)
+  live: List(Int)
+}
+
+# Manager construction can fail (here: a nonsensical capacity stands in for a
+# missing device / failed table allocation). The caller uses the direct owned
+# `if let` branch.
+func create(issuer: mod IdIssuer, capacity: view Int) ret opt Resources {
+  if capacity < 1 {
+    ret none
+  }
+  let generations: List(Int) = List.create(Int, cap: capacity)
+  let live: List(Int) = List.create(Int, cap: capacity)
+  var i: Int = 0
+  loop i < capacity {
+    generations.add(value: 0)
+    live.add(value: 0)
+    i = i + 1
+  }
+  let tag: Int = issue(this: issuer)
+  log("manager {tag} created (capacity {capacity})")
+  ret Resources { managerTag: tag, capacity: capacity, generations: own generations, live: own live }
+}
+
+func drop(this: mod Resources) {
+  log("manager {this.managerTag} dropped")
+}
+
+# Validation order: owner tag, slot range, live slot, generation. A rejected ID
+# is a plain `false`; it never reaches the slot record.
+func isValid(resources: view Resources, id: view TextureId) ret Bool {
+  if id.managerTag is not resources.managerTag { ret false }
+  if id.slot < 0 or id.slot >= resources.capacity { ret false }
+  if let liveFlag: Int = resources.live.copyAt(index: id.slot) {
+    if liveFlag is 0 { ret false }
+  } else {
+    ret false
+  }
+  if let generation: Int = resources.generations.copyAt(index: id.slot) {
+    ret generation is id.generation
+  }
+  ret false
+}
+
+# Creation fails by returning none when every slot is live (exhaustion). The
+# reused slot carries the generation bumped by its last retirement.
+func createTexture(resources: mod Resources) ret opt TextureId {
+  var slot: Int = 0
+  loop slot < resources.capacity {
+    if let liveFlag: Int = resources.live.copyAt(index: slot) {
+      if liveFlag is 0 {
+        resources.live.set(index: slot, value: 1)
+        if let generation: Int = resources.generations.copyAt(index: slot) {
+          ret TextureId { managerTag: resources.managerTag, slot: slot, generation: generation }
+        }
+      }
+    }
+    slot = slot + 1
+  }
+  ret none
+}
+
+# Retiring bumps the slot's generation, so EVERY copy of the old ID is stale at
+# once, and frees the slot. Retiring an invalid/stale/foreign ID is a `false`,
+# not a crash, so a double retire is harmless.
+func retireTexture(resources: mod Resources, id: view TextureId) ret Bool {
+  if isValid(resources: resources, id: id) is false { ret false }
+  if let generation: Int = resources.generations.copyAt(index: id.slot) {
+    resources.generations.set(index: id.slot, value: generation + 1)
+  }
+  resources.live.set(index: id.slot, value: 0)
+  ret true
+}
+
+func describe(id: view TextureId) ret String {
+  ret "tag {id.managerTag} slot {id.slot} gen {id.generation}"
+}
+
+# A manager that lives only for this call: its ID escapes as a copyable value
+# while the manager itself is destroyed at scope exit.
+func idFromShortLivedManager(issuer: mod IdIssuer) ret TextureId {
+  if let shortLived: Resources = Resources.create(issuer: issuer, capacity: 1) {
+    if let id: TextureId = createTexture(resources: shortLived) {
+      ret id
+    }
+  }
+  ret TextureId { managerTag: 0, slot: 0 - 1, generation: 0 }
+}
+
+func main() {
+  var issuer: IdIssuer = IdIssuer.create()
+
+  # Two independent Apps, each with its own manager built from the shared issuer.
+  if let managerA: Resources = Resources.create(issuer: issuer, capacity: 2) {
+    if let managerB: Resources = Resources.create(issuer: issuer, capacity: 2) {
+      if let idA: TextureId = createTexture(resources: managerA) {
+        if let idB: TextureId = createTexture(resources: managerB) {
+          log("A: {describe(id: idA)}")
+          log("B: {describe(id: idB)}")
+          log("slots and generations match: {idA.slot is idB.slot and idA.generation is idB.generation}")
+          log("A id valid in A: {isValid(resources: managerA, id: idA)}")
+          log("A id valid in B (wrong owner): {isValid(resources: managerB, id: idA)}")
+          log("B id valid in A (wrong owner): {isValid(resources: managerA, id: idB)}")
+
+          # A copied ID is the same identity, not a second resource.
+          let copied: TextureId = idA
+          log("copy is same identity: {copied is idA}")
+
+          # Retirement makes every copy stale at once; the slot is reused with a
+          # new generation, so the old handle stays rejected.
+          log("retire A id: {retireTexture(resources: managerA, id: idA)}")
+          log("A id valid after retire (stale): {isValid(resources: managerA, id: idA)}")
+          log("copy valid after retire (stale): {isValid(resources: managerA, id: copied)}")
+          log("double retire: {retireTexture(resources: managerA, id: idA)}")
+          if let reused: TextureId = createTexture(resources: managerA) {
+            log("reused: {describe(id: reused)}")
+            log("reused valid: {isValid(resources: managerA, id: reused)}")
+            log("old id still stale: {isValid(resources: managerA, id: idA)}")
+          }
+
+          # Exhaustion: capacity 2 with both slots live refuses a third.
+          if let second: TextureId = createTexture(resources: managerA) {
+            log("second: {describe(id: second)}")
+            if let third: TextureId = createTexture(resources: managerA) {
+              log("third: {describe(id: third)}")
+            } else {
+              log("third create: none (exhausted)")
+            }
+            log("retire second: {retireTexture(resources: managerA, id: second)}")
+            if let again: TextureId = createTexture(resources: managerA) {
+              log("after freeing: {describe(id: again)}")
+            }
+          }
+        }
+      }
+    }
+  }
+
+  # Destruction and recreation: a manager is dropped, a new one is built from
+  # the same issuer. The old ID's tag was retired with its manager, so it is
+  # rejected by the new manager even though slot 0 / generation 0 match.
+  let stale: TextureId = idFromShortLivedManager(issuer: issuer)
+  log("escaped: {describe(id: stale)}")
+  if let fresh: Resources = Resources.create(issuer: issuer, capacity: 1) {
+    if let freshId: TextureId = createTexture(resources: fresh) {
+      log("fresh: {describe(id: freshId)}")
+      log("same slot and generation as escaped: {stale.slot is freshId.slot and stale.generation is freshId.generation}")
+      log("escaped valid in recreated manager: {isValid(resources: fresh, id: stale)}")
+      log("fresh valid: {isValid(resources: fresh, id: freshId)}")
+    }
+  }
+
+  # Manager construction failure takes the else branch; nothing leaks.
+  if let bad: Resources = Resources.create(issuer: issuer, capacity: 0) {
+    log("unexpected manager {bad.managerTag}")
+  } else {
+    log("construction failed: none")
+  }
+  log("issuer next tag: {issuer.nextTag}")
+}
