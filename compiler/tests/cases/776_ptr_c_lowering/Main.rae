@@ -3,8 +3,8 @@
 # field must also remain printable through its owner's generated formatter.
 cheader "stdlib.h"
 
-func allocate(byteCount: copy UInt64) extern("malloc") ret Ptr
-func release(pointer: copy Ptr) extern("free")
+func allocate(byteCount: copy UInt64) unsafe extern("malloc") ret Ptr
+func release(pointer: copy Ptr) unsafe extern("free")
 
 type NativeOwner {
   pointer: Ptr
@@ -13,36 +13,45 @@ type NativeOwner {
 
 func drop(this: mod NativeOwner) {
   log("drop {this.marker}")
-  release(pointer: this.pointer)
+  unsafe { release(pointer: this.pointer) }
 }
 
 func replace(pointer: mod Ptr, replacement: copy Ptr) {
-  release(pointer: pointer)
-  pointer = replacement
+  unsafe {
+    release(pointer: pointer)
+    pointer = replacement
+  }
 }
 
 func pointerCount(pointers: copy List(Ptr)) ret Int {
   ret pointers.length
 }
 
-func main() {
-  var owner: NativeOwner = {
-    pointer: allocate(byteCount: 8 as UInt64)
-    marker: 7
-  }
-  log("owner {owner}")
+func makeOwner(byteCount: copy UInt64, marker: copy Int) ret NativeOwner {
+  unsafe { ret NativeOwner { pointer: allocate(byteCount: byteCount), marker: marker } }
+}
 
-  replace(
-    pointer: owner.pointer
-    replacement: allocate(byteCount: 16 as UInt64)
-  )
+func main() {
+  var owner: NativeOwner = makeOwner(byteCount: 8 as UInt64, marker: 7)
+  unsafe { log("owner {owner}") }
+
+  unsafe {
+    replace(
+      pointer: owner.pointer
+      replacement: allocate(byteCount: 16 as UInt64)
+    )
+  }
 
   var pointers: List(Ptr) = List.create(Ptr, cap: 2)
-  pointers.add(value: allocate(byteCount: 24 as UInt64))
-  pointers.add(value: allocate(byteCount: 32 as UInt64))
+  unsafe {
+    pointers.add(value: allocate(byteCount: 24 as UInt64))
+    pointers.add(value: allocate(byteCount: 32 as UInt64))
+  }
   log("count {pointers.length}")
   log("copy count {pointerCount(pointers: pointers)}")
-  loop let pointer: Ptr in pointers {
-    release(pointer: pointer)
+  unsafe {
+    loop let pointer: Ptr in pointers {
+      release(pointer: pointer)
+    }
   }
 }
