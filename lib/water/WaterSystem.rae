@@ -40,6 +40,7 @@ open gpu/GpuResources
 open gpu/GpuLifetime
 open gpu/GpuRender
 open gpu/GpuArgs
+open gpu/GpuIds
 open webgpu/Webgpu
 open webgpu/WebgpuEnums
 open webgpu/Context
@@ -129,35 +130,17 @@ func createWaterSystem(body: view WaterBody) ret WaterSystem {
   }
 }
 
-# ----- submissions ----------------------------------------------------------
-# Every submit is tracked so completed ones are retired (dropping their pins)
-# and shutdown can drain them. Water never blocks on the GPU per frame.
+# ----- submissions (gpu/GpuIds helpers over this system's own list) --------
 func waterSubmit(waterSystem: mod WaterSystem, resources: mod GpuResources, recording: mod Recording) ret opt SubmissionId {
-  if let id: SubmissionId = submit(resources: resources, recording: recording) {
-    waterSystem.inFlight.add(value: id)
-    ret id
-  }
-  ret none
+  ret trackSubmission(inFlight: waterSystem.inFlight, resources: resources, recording: recording)
 }
 
 func waterPollSubmissions(waterSystem: mod WaterSystem, resources: mod GpuResources) {
-  var i: Int = 0
-  loop i < waterSystem.inFlight.length {
-    var done: Bool = true
-    if let id: SubmissionId = waterSystem.inFlight.copyAt(index: i) {
-      if pollSubmission(resources: resources, id: id) is 0 { done = false } else { retireSubmission(resources: resources, id: id) }
-    }
-    if done { waterSystem.inFlight.removeAt(index: i) } else { i = i + 1 }
-  }
+  pollSubmissions(inFlight: waterSystem.inFlight, resources: resources)
 }
 
-# Blocks until this system's submissions complete (shutdown / rebuild only).
 func waterDrainSubmissions(waterSystem: mod WaterSystem, resources: mod GpuResources) {
-  var spins: Int = 0
-  loop waterSystem.inFlight.length > 0 and spins < 100000000 {
-    waterPollSubmissions(waterSystem: waterSystem, resources: resources)
-    spins = spins + 1
-  }
+  drainSubmissions(inFlight: waterSystem.inFlight, resources: resources)
 }
 
 # Add another body (a pond on an island, an ocean beyond a lake). Same mesh,
@@ -199,8 +182,10 @@ func ensureWaterPipeline(waterSystem: mod WaterSystem, resources: mod GpuResourc
   attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0, location: 0 })
   attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 12, location: 1 })
   attributes.add(value: { format: WGPUVertexFormat_Float32x2, offset: 24, location: 2 })
+  let colorFormats: List(Int32) = List.create(Int32, cap: 1)
+  colorFormats.add(value: waterLitFormat())
   let spec: RenderPipelineSpec = {
-    vertexStride: 32, attributes: own attributes, colorFormat: waterLitFormat(), alphaBlend: true,
+    vertexStride: 32, attributes: own attributes, colorFormats: own colorFormats, alphaBlend: true,
     depthFormat: WGPUTextureFormat_Depth32Float, depthWrite: false, depthCompare: WGPUCompareFunction_Greater,
     cullMode: WGPUCullMode_None
   }
