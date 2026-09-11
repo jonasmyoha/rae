@@ -1,7 +1,108 @@
 # Rae Format: Canonical Source Formatting
 
-**Status:** Proposed design, no implementation in this document  
-**Date:** 2026-08-30
+**Status:** Adopted design (#911, 2026-09-12); implementation tracked as queue
+tasks #916–#919. The sections below this decision record are the original
+proposal (2026-08-30) and remain the detailed rationale.
+**Date:** 2026-08-30, decisions 2026-09-12
+
+## Decisions (#911)
+
+These are the settled answers; where they differ from the proposal below, the
+decision wins.
+
+1. **One style, no configuration.** 2-space indent, 100-column target, LF, one
+   final newline, no trailing whitespace, braces on the declaration line. The
+   1,000-line file cap is unchanged and the formatter never overrides it.
+2. **Parameters and arguments go vertical from FOUR items, or earlier when the
+   line would not fit.** A declaration or call with 1–3 parameters/arguments
+   stays on one line if the whole header (modifiers, return type) or the whole
+   call fits in 100 columns; with 4 or more, or when it does not fit, every
+   item is on its own line, two spaces deeper, no commas, `)` back at the
+   declaration's indentation. The same rule with a threshold of FIVE applies to
+   type fields, object literals and collection literals (1–4 items may stay
+   compact if they fit). The current implementation uses `> 4` in some nodes
+   and `> 3` in others and estimates every parameter type as ~15 columns; both
+   are replaced by one shared policy over exact rendered widths.
+3. **The compiler formats FIRST, by default, in place.** `rae run`, `rae build`
+   and `rae watch` run the formatter over the project's transitive `.rae` /
+   `.raepack` source closure before lexing anything for the build: changed
+   files are rewritten atomically (temp file + rename, mtime untouched when the
+   bytes are equal), then the build proceeds from the canonical bytes. This is
+   the user's explicit call — "the compiler should by default run it, before it
+   runs all other things" — and it is what guarantees no example or library
+   file is ever left unformatted. The proposal's concern (read-only checkouts,
+   CI must not mutate the tree) is met by a CHECK mode instead of by making
+   check the default: `rae build --check-format` / `rae run --check-format` (and
+   `RAE_FORMAT=check` in the environment) refuse to write and fail with the list
+   of files plus the repair command. The test suite and the example gate run in
+   check mode; `rae format --check .` stays as the explicit standalone gate.
+4. **A formatted file that would exceed 1,000 lines is an error, never a
+   rewrite.** The formatter reports "would expand X from N to M lines; split the
+   module" and leaves the file alone; the build fails the same way. No
+   auto-splitting.
+5. **`rae format <path>` writes in place; `--stdout` prints.** Today's
+   print-to-stdout default becomes `--stdout`; `--write`/`-w` stay as accepted
+   aliases through the migration. Add `--check`, `--stdin --stdout`, `--json`,
+   `--rules --json`. Directory traversal takes `.rae` and `.raepack`, sorted,
+   and SKIPS `.git`, build output and — found in the survey — the per-app
+   state folders literally named `.rae` (`examples/106_mobile_ui/.rae/`,
+   `compiler/tests/cases/721_*/.rae/`), which are not source.
+6. **Formatter fixtures are the one place unformatted input is legal.** The
+   `200_*`–`208_*`, `568_*`, `786_*` format cases feed deliberately
+   non-canonical input to the formatter; every other fixture, every `lib/` and
+   `examples/` file is canonical. The test runner formats-in-check-mode
+   everything except the format fixtures' inputs.
+7. **Migration is one mechanical commit, after splitting.** Format the whole
+   active tree in a formatter-only commit with AST-equivalence verification; no
+   semantic change rides along.
+
+### Survey of the tree as of 2026-09-12 (why the order below)
+
+Run over every active `.rae` (lib, examples, compiler/tests/cases; legacy
+excluded), 928 files:
+
+- 746 would change under the current formatter (395 test cases, 178 lib, 173
+  examples).
+- 16 would be pushed OVER the 1,000-line cap and must be split first:
+  `lib/GpuRender.rae` (748→1549), `lib/Gpu3d.rae` (878→1476), `lib/webgpu/
+  WebgpuEnums.rae` (798→1346), `lib/Gpu2dCanvas.rae` (895→1338), `lib/Gbuffer.rae`
+  (840→1296), `lib/ui/legacyRaylib/Render.rae` (992→1270), `lib/GbufferPasses.rae`
+  (683→1266), `lib/gpu/GpuLifetime.rae` (694→1202), `lib/ui/Registry.rae`
+  (975→1140), `lib/water/WaterFft.rae` (713→1116), `examples/106_mobile_ui/
+  ScreenRouter.rae` (962→1076), `examples/114_walker_character/App.rae`
+  (753→1050), `examples/106_mobile_ui/Main.rae` (994→1044), `lib/ui/Frames.rae`
+  (903→1034), `lib/ui/ThemeResolved.rae` (898→1005), `examples/106_mobile_ui/
+  DebugGpu2dLocal.rae` (806→1003).
+- 303 files have a line over 100 columns today; 158 still would after
+  formatting (the formatter does not yet wrap every construct — long
+  expressions, long string literals, comments emitted toward 120).
+- The formatter CRASHES (SIGSEGV in `pp_expr_prec` → `pp_write_str`) on any
+  char literal: `lib/Char.rae`, `lib/Json.rae`, `lib/String.rae` and a one-line
+  `let c: Char = 'a'` all die. 4 test fixtures fail for the same reason.
+- The formatter is NOT idempotent on comments after a multi-line call: in
+  `examples/101_gpu2d_vector/Main.rae` a trailing `# ...` line moves from
+  after the call to before it on the second run (three occurrences).
+- 58 test fixtures are expected-diagnostic cases whose input must not parse;
+  the formatter rightly refuses them — they are excluded from the check by
+  the format-fixture rule above generalised to "fixtures that expect a parse
+  error".
+
+### Task map
+
+- **#916** formatter correctness: the char-literal crash, comment attachment
+  idempotence, one shared threshold policy (4+ / 5+) over exact widths,
+  100-column comment wrapping, split `pretty.c` (1,349 lines) into
+  `pretty_writer.c` / `pretty_expr.c` / `pretty_decl.c`, fixtures for all of it.
+- **#917** the project formatter CLI and library entry point (in-memory
+  `rae_format_source`, traversal, in-place default, `--check` / `--stdout` /
+  `--stdin` / `--json` / `--rules`, atomic writes, over-cap refusal).
+- **#918** the migration: split the 16 over-cap files, then the one mechanical
+  `rae format .` commit, fixture expectations re-anchored where diagnostic
+  columns move.
+- **#919** default enforcement: format-first `run`/`build`/`watch`,
+  `--check-format` + `RAE_FORMAT=check`, the suite and the example gate in check
+  mode, `rae init` / `AGENTS.md` / `docs/rae_syntax.json` / VS Code
+  format-on-save.
 
 ## Summary
 
