@@ -1,0 +1,191 @@
+# gpu/GpuArgs — centralized, checked packing of Rae scalar/vector/matrix values
+# into GPU-uploadable bytes with correct WGSL layout, plus a compact,
+# snapshotted compute command, over gpu/GpuResources / gpu/GpuLifetime (#872).
+#
+# Why: shader arguments were packed ad hoc (a bare List(Float) with hand-counted
+# offsets). This centralizes the WGSL alignment/offset rules so a mismatch with
+# the shader's struct is caught in one place, and it makes the safety rule
+# structural: the API only accepts NUMBERS (f32/u32/i32 scalars, vectors,
+# mat4x4), so a Rae owner, List, String or a CPU validation identity (a
+# BufferId/TextureId manager tag) can never be uploaded as shader data. IDs are
+# resolved to native handles on the CPU when a bind group is built (#870), never
+# serialized into a buffer.
+#
+# Layout: WGSL std140 (uniform) and std430 (storage) share member alignment for
+# a flat struct of scalars/vectors/matrices — scalar align 4, vec2 align 8,
+# vec3/vec4/mat4x4 align 16 — differing only in that a uniform struct rounds its
+# TOTAL size up to 16. `uniform: true` applies that final round. Each push pads
+# to the member's alignment first, so offsets always match the shader.
+#
+# Snapshot: `uploadArgs` copies the packed bytes into the GPU buffer (a queue
+# write that lands before submit), and a ComputeCommand copies its scalar
+# workgroup counts and its (already copyable) resource IDs at build time — so a
+# later CPU write to the source cannot change work that was already recorded.
+open webgpu/Context
+open webgpu/WebgpuEnums
+open gpu/GpuResources
+open gpu/GpuLifetime
+
+type ArgWriter {
+  bytes: List(UInt8)
+  uniform: Bool
+}
+
+# `uniform`: true for a uniform buffer (std140 — the total size is rounded up to
+# 16 at finalize); false for a storage buffer (std430).
+func createArgs(uniform: view Bool) ret ArgWriter {
+  ret ArgWriter { bytes: List.create(UInt8, cap: 64), uniform: uniform }
+}
+
+# The current byte offset — equals the WGSL offset the next aligned push lands
+# at once padded. Used by the layout test to assert offsets.
+func argsLength(writer: view ArgWriter) ret Int {
+  ret writer.bytes.length
+}
+
+# Zero-pad up to a multiple of `alignment` (a power of two: 4, 8 or 16).
+func padTo(writer: mod ArgWriter, alignment: view Int) {
+  loop writer.bytes.length - (writer.bytes.length / alignment) * alignment is not 0 {
+    writer.bytes.add(value: 0 as UInt8)
+  }
+}
+
+# Append the 4 little-endian bytes of a 32-bit word given its unsigned value
+# (0 .. 2^32-1). Rae has no bitwise operators, so the bytes are peeled off with
+# integer division and remainder.
+func appendWord(writer: mod ArgWriter, word: view Int) {
+  var value: Int = word
+  var i: Int = 0
+  loop i < 4 {
+    writer.bytes.add(value: (value - (value / 256) * 256) as UInt8)
+    value = value / 256
+    i = i + 1
+  }
+}
+
+func pushU32(writer: mod ArgWriter, value: view Int) {
+  padTo(writer: writer, alignment: 4)
+  appendWord(writer: writer, word: value)
+}
+
+func pushI32(writer: mod ArgWriter, value: view Int) {
+  padTo(writer: writer, alignment: 4)
+  var word: Int = value
+  if word < 0 { word = word + 4294967296 }
+  appendWord(writer: writer, word: word)
+}
+
+# Appends an f32's exact IEEE-754 bytes. The reinterpret is a raw byte copy from
+# a one-element Float buffer into the byte stream (buf_copy is a memmove with an
+# explicit element size), so no value conversion happens.
+func pushF32(writer: mod ArgWriter, value: view Float) {
+  padTo(writer: writer, alignment: 4)
+  var scratch: List(Float) = List.create(Float, cap: 1)
+  scratch.add(value: value)
+  let base: Int = writer.bytes.length
+  var i: Int = 0
+  loop i < 4 {
+    writer.bytes.add(value: 0 as UInt8)
+    i = i + 1
+  }
+  unsafe {
+    rae_ext_rae_buf_copy(V: UInt8, src: scratch.data, src_off: 0, dst: writer.bytes.data, dst_off: base, len: 4, elemSize: 1)
+  }
+}
+
+func pushVec2F(writer: mod ArgWriter, x: view Float, y: view Float) {
+  padTo(writer: writer, alignment: 8)
+  pushF32(writer: writer, value: x)
+  pushF32(writer: writer, value: y)
+}
+
+func pushVec3F(writer: mod ArgWriter, x: view Float, y: view Float, z: view Float) {
+  padTo(writer: writer, alignment: 16)
+  pushF32(writer: writer, value: x)
+  pushF32(writer: writer, value: y)
+  pushF32(writer: writer, value: z)
+}
+
+func pushVec4F(writer: mod ArgWriter, x: view Float, y: view Float, z: view Float, w: view Float) {
+  padTo(writer: writer, alignment: 16)
+  pushF32(writer: writer, value: x)
+  pushF32(writer: writer, value: y)
+  pushF32(writer: writer, value: z)
+  pushF32(writer: writer, value: w)
+}
+
+func pushVec2U(writer: mod ArgWriter, x: view Int, y: view Int) {
+  padTo(writer: writer, alignment: 8)
+  pushU32(writer: writer, value: x)
+  pushU32(writer: writer, value: y)
+}
+
+func pushVec4U(writer: mod ArgWriter, x: view Int, y: view Int, z: view Int, w: view Int) {
+  padTo(writer: writer, alignment: 16)
+  pushU32(writer: writer, value: x)
+  pushU32(writer: writer, value: y)
+  pushU32(writer: writer, value: z)
+  pushU32(writer: writer, value: w)
+}
+
+# A column-major mat4x4<f32> (16 floats, column 0 first). Alignment 16, size 64.
+func pushMat4(writer: mod ArgWriter, columns: view List(Float)) ret Bool {
+  if columns.length < 16 { ret false }
+  padTo(writer: writer, alignment: 16)
+  var i: Int = 0
+  loop i < 16 {
+    if let value: Float = columns.copyAt(index: i) {
+      pushF32(writer: writer, value: value)
+    }
+    i = i + 1
+  }
+  ret true
+}
+
+# Finalizes the buffer: a uniform (std140) struct rounds its size up to 16.
+# Idempotent; call before uploading.
+func finalizeArgs(writer: mod ArgWriter) {
+  if writer.uniform {
+    padTo(writer: writer, alignment: 16)
+  }
+}
+
+# Uploads the packed bytes into `buffer` at `offset` — a snapshot: the queue
+# write copies the bytes and lands before the next submit, so a later change to
+# this writer does not affect the uploaded data. Requires a CopyDst buffer big
+# enough for the packed size.
+func uploadArgs(writer: mod ArgWriter, resources: view GpuResources, buffer: view BufferId, offset: view Int) ret Bool {
+  finalizeArgs(writer: writer)
+  ret writeBuffer(resources: resources, id: buffer, offset: offset, bytes: writer.bytes)
+}
+
+# ----- compact typed dispatch -----------------------------------------
+#
+# A snapshotted compute command: plain workgroup counts plus the (copyable)
+# pipeline and bind group identities, all copied at build time. The IDs are
+# resolved to native handles only when recorded (#870), never uploaded. The
+# manager is compute-only, so this is the dispatch input; a draw command waits
+# for a render-pipeline surface on the manager.
+type ComputeCommand {
+  pipeline: PipelineId
+  bindGroup: BindGroupId
+  workgroupsX: Int
+  workgroupsY: Int
+  workgroupsZ: Int
+}
+
+func computeCommand(pipeline: view PipelineId, bindGroup: view BindGroupId, workgroupsX: view Int, workgroupsY: view Int, workgroupsZ: view Int) ret ComputeCommand {
+  ret ComputeCommand {
+    pipeline: pipeline
+    bindGroup: bindGroup
+    workgroupsX: workgroupsX
+    workgroupsY: workgroupsY
+    workgroupsZ: workgroupsZ
+  }
+}
+
+# Records the snapshotted command over #870's checked recordCompute (which
+# re-validates the resolved IDs and pins the dependencies).
+func recordComputeCommand(recording: mod Recording, resources: view GpuResources, command: view ComputeCommand) ret Bool {
+  ret recordCompute(recording: recording, resources: resources, pipeline: command.pipeline, bindGroup: command.bindGroup, workgroupsX: command.workgroupsX, workgroupsY: command.workgroupsY, workgroupsZ: command.workgroupsZ)
+}
