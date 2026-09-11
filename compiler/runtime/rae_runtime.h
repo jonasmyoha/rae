@@ -1013,14 +1013,9 @@ void rae_g2d_tick(void);
 /* #907: the box pass runs in Rae (lib/Gpu2dBox.rae) over a manager; C keeps the
  * CPU batch + the shared viewport uniform + the per-run clip uniform/scissor. */
 void* rae_g2d_viewport_uniform(void);
-int64_t rae_g2d_prim_count(void);
-int64_t rae_g2d_prim_floats(void);
-void* rae_g2d_prim_data(void);
-int64_t rae_g2d_prim_clip_at(int64_t i);
-void rae_g2d_prim_reset(void);
 void rae_g2d_scissor(int64_t clip, void* pass);
 void rae_g2d_clip_uniform_at(int64_t clip, float* out);
-void rae_g2d_prepare_flush(int64_t images_pending);
+void rae_g2d_prepare_flush(int64_t pending);
 int64_t rae_g2d_current_clip(void);
 /* #908: CPU image decode for the Rae image pass (textures + upload are manager objects). */
 void* rae_g2d_decode_image(rae_String path);

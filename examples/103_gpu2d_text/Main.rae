@@ -37,15 +37,15 @@ func moutline(font: view SdfFont, text: view String, x: view Float, y: view Floa
                         shadowColor: 0, shadowOffX: 0.0, shadowOffY: 0.0, shadowSoftness: 1.0)
 }
 
-func panel(x: view Float, y: view Float, w: view Float, h: view Float, c: view Int) {
-  Gpu2d.drawRoundedRect(x: x, y: y, w: w, h: h, radius: 10.0, color: c)
+func panel(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view Float, h: view Float, c: view Int) {
+  Gpu2d.drawRoundedRect(canvas: canvas, x: x, y: y, w: w, h: h, radius: 10.0, color: c)
 }
 
 func header(font: view SdfFont, text: view String, x: view Float, y: view Float) {
   Gpu2dText.drawText(font: font, text: text, x: x, y: y, sizePx: 17.0, color: 0xFF78C8FF)
 }
 
-func drawFrame(font: view SdfFont) {
+func drawFrame(canvas: mod Gpu2dCanvas, font: view SdfFont) {
   let white: Int = 0xFFECEFF5
   let gray: Int = 0xFF969AA5
   let darkInk: Int = 0xFF181A20
@@ -61,7 +61,7 @@ func drawFrame(font: view SdfFont) {
 
   # --- Block A: size ramp ---
   header(font: font, text: "SIZES (one atlas, crisp at every scale)", x: 32.0, y: 116.0)
-  panel(x: 32.0, y: 128.0, w: 976.0, h: 170.0, c: panelDark)
+  panel(canvas: canvas, x: 32.0, y: 128.0, w: 976.0, h: 170.0, c: panelDark)
   mtext(font: font, text: "Grumpy wizards 14", x: 56.0, y: 156.0, size: 14.0, c: white)
   mtext(font: font, text: "Grumpy wizards 18", x: 56.0, y: 180.0, size: 18.0, c: white)
   mtext(font: font, text: "Grumpy wizards 26", x: 56.0, y: 212.0, size: 26.0, c: white)
@@ -70,7 +70,7 @@ func drawFrame(font: view SdfFont) {
 
   # --- Block B: colours ---
   header(font: font, text: "COLOURS", x: 32.0, y: 320.0)
-  panel(x: 32.0, y: 332.0, w: 976.0, h: 60.0, c: panelMid)
+  panel(canvas: canvas, x: 32.0, y: 332.0, w: 976.0, h: 60.0, c: panelMid)
   mtext(font: font, text: "White", x: 48.0, y: 374.0, size: 32.0, c: white)
   mtext(font: font, text: "Red", x: 210.0, y: 374.0, size: 32.0, c: 0xFFEB4646)
   mtext(font: font, text: "Green", x: 320.0, y: 374.0, size: 32.0, c: 0xFF46D26E)
@@ -80,10 +80,10 @@ func drawFrame(font: view SdfFont) {
 
   # --- Block C: white text on varied backgrounds (no edge halo) ---
   header(font: font, text: "WHITE ON BACKGROUNDS (no edge halo)", x: 32.0, y: 414.0)
-  panel(x: 32.0, y: 426.0, w: 232.0, h: 72.0, c: panelDark)
-  panel(x: 272.0, y: 426.0, w: 232.0, h: 72.0, c: panelMid)
-  panel(x: 512.0, y: 426.0, w: 232.0, h: 72.0, c: panelLight)
-  panel(x: 752.0, y: 426.0, w: 256.0, h: 72.0, c: panelCyan)
+  panel(canvas: canvas, x: 32.0, y: 426.0, w: 232.0, h: 72.0, c: panelDark)
+  panel(canvas: canvas, x: 272.0, y: 426.0, w: 232.0, h: 72.0, c: panelMid)
+  panel(canvas: canvas, x: 512.0, y: 426.0, w: 232.0, h: 72.0, c: panelLight)
+  panel(canvas: canvas, x: 752.0, y: 426.0, w: 256.0, h: 72.0, c: panelCyan)
   mtext(font: font, text: "Sample", x: 56.0, y: 474.0, size: 30.0, c: white)
   mtext(font: font, text: "Sample", x: 296.0, y: 474.0, size: 30.0, c: white)
   mtext(font: font, text: "Sample", x: 536.0, y: 474.0, size: 30.0, c: white)
@@ -91,16 +91,16 @@ func drawFrame(font: view SdfFont) {
 
   # --- Block D: low-contrast (premultiplied-alpha test) ---
   header(font: font, text: "LOW-CONTRAST (premultiplied alpha)", x: 32.0, y: 514.0)
-  panel(x: 32.0, y: 526.0, w: 472.0, h: 60.0, c: panelLight)
+  panel(canvas: canvas, x: 32.0, y: 526.0, w: 472.0, h: 60.0, c: panelLight)
   mtext(font: font, text: "Dark on light 0123", x: 56.0, y: 566.0, size: 28.0, c: darkInk)
-  panel(x: 536.0, y: 526.0, w: 472.0, h: 60.0, c: panelLight)
+  panel(canvas: canvas, x: 536.0, y: 526.0, w: 472.0, h: 60.0, c: panelLight)
   mtext(font: font, text: "Light on light 0123", x: 560.0, y: 566.0, size: 28.0, c: 0xFFF6F7FA)
 
   # --- Block E: drop-shadows across sizes — white text on a coloured panel,
   # diagonal dark shadow (reads against colour, not black-on-white). Big sharp
   # + soft samples with a TIGHT offset, then the small-size ramp. ---
   header(font: font, text: "DROP-SHADOWS (diagonal, sharp & soft, every size)", x: 32.0, y: 606.0)
-  panel(x: 32.0, y: 618.0, w: 976.0, h: 152.0, c: 0xFF4E7D6B)
+  panel(canvas: canvas, x: 32.0, y: 618.0, w: 976.0, h: 152.0, c: 0xFF4E7D6B)
   # Big samples — shadow sits close to the glyph (small offset).
   mtext(font: font, text: "None", x: 56.0, y: 682.0, size: 42.0, c: white)
   mshadow(font: font, text: "Sharp", x: 320.0, y: 682.0, size: 42.0, c: white, sh: 0xC8000000, sy: 2.0, soft: 1.0)
@@ -113,7 +113,7 @@ func drawFrame(font: view SdfFont) {
 
   # --- Block F: outlines — across sizes (like the size ramp) AND widths ---
   header(font: font, text: "OUTLINES — across sizes, then thin / bold / heavy", x: 32.0, y: 790.0)
-  panel(x: 32.0, y: 802.0, w: 976.0, h: 208.0, c: 0xFF463C78)
+  panel(canvas: canvas, x: 32.0, y: 802.0, w: 976.0, h: 208.0, c: 0xFF463C78)
   let olInk: Int = 0xFF120E26
   # Row 1: same outlined word growing through four sizes (outline stays crisp).
   moutline(font: font, text: "Rae", x: 56.0, y: 868.0, size: 28.0, c: white, ol: olInk, olw: 2.0)
@@ -145,7 +145,7 @@ func main() ret Int {
 
   loop not Gpu2d.pollClose() {
     Gpu2d.beginFrame(canvas: canvas, r: 0.063, g: 0.070, b: 0.094, a: 1.0)
-    drawFrame(font: font)
+    drawFrame(canvas: canvas, font: font)
     Gpu2d.endFrame(canvas: canvas)
     Gpu2d.waitEvents(timeoutSec: 0.2)
   }

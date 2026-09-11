@@ -13,6 +13,7 @@
 #   drawVirtualJoystick(joy: stick)                               # in the 2D pass
 import Gpu2d
 import Math
+open Gpu2dCanvas
 
 # The anchor is stored as FRACTIONS of the design canvas (left pad / bottom pad /
 # radius as a fraction of the shorter side), so the stick sits in the same
@@ -139,11 +140,11 @@ func updateVirtualJoystick(joy: mod VirtualJoystick) pub ret Bool {
 
 # Draw the base ring + knob (translucent white so it reads over any scene). A
 # rounded rect with radius = half its size is a circle. Call inside the 2D pass.
-func drawVirtualJoystick(joy: view VirtualJoystick) pub {
+func drawVirtualJoystick(joy: view VirtualJoystick, canvas: mod Gpu2dCanvas) pub {
   let baseDiam: Float = joy.baseRadius * 2.0
-  Gpu2d.drawRoundedRect(x: joy.baseX - joy.baseRadius, y: joy.baseY - joy.baseRadius,
+  Gpu2d.drawRoundedRect(canvas: canvas, x: joy.baseX - joy.baseRadius, y: joy.baseY - joy.baseRadius,
     w: baseDiam, h: baseDiam, radius: joy.baseRadius, color: 0x38FFFFFF)
   let knobDiam: Float = joy.knobRadius * 2.0
-  Gpu2d.drawRoundedRect(x: joy.knobX - joy.knobRadius, y: joy.knobY - joy.knobRadius,
+  Gpu2d.drawRoundedRect(canvas: canvas, x: joy.knobX - joy.knobRadius, y: joy.knobY - joy.knobRadius,
     w: knobDiam, h: knobDiam, radius: joy.knobRadius, color: 0xB0FFFFFF)
 }
