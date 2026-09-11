@@ -3022,6 +3022,23 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     sema_report_uncopyable(module, sema_diag_file(module), stmt->line, stmt->column,
                                            t->name, "into a new binding");
                 }
+                // #898: an owning COPY of a raw-Ptr aggregate that has no
+                // lifecycle (no `drop`, no `copy`) duplicates its pointer
+                // storage — the pointer-visibility gap the destructor-copy
+                // check above does not reach (`let ys: List(Ptr) = xs`, a plain
+                // `struct { p: Ptr }` copied from a place). `own` transfers,
+                // `view`/`mod` borrow, and a fresh factory result (a call, not a
+                // place) stay safe; a bare `Ptr`/`opt Ptr` place-read and a
+                // type with a user `copy` are handled elsewhere / legal.
+                if (!stmt->as.let_stmt.is_bind && stmt->as.let_stmt.type
+                    && !stmt->as.let_stmt.type->is_view && !stmt->as.let_stmt.type->is_mod
+                    && sema_expr_copies_place(stmt->as.let_stmt.value)
+                    && sema_type_contains_ptr(t, 0) && !sema_is_ptr_value_type(t)
+                    && !sema_typeinfo_uncopyable(ctx, t)
+                    && (t->name.len == 0 || find_user_copy_for(ctx, t->name) == NULL)) {
+                    sema_unsafe_error(module, stmt->line, stmt->column,
+                        "copying a value with raw Ptr storage requires an enclosing 'unsafe { ... }' block or a safe factory");
+                }
             }
             if (!stmt->as.let_stmt.value && t && sema_default_constructs_ptr(t, 0)) {
                 sema_unsafe_error(module, stmt->line, stmt->column,
@@ -4092,6 +4109,15 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
         return;
     }
     if (expected->kind == TYPE_ANY && expr->resolved_type->kind != TYPE_ANY) {
+        // #898: implicit boxing into Any at a ret / assignment / Any argument
+        // erases the value's type, hiding raw Ptr storage exactly as an
+        // explicit `box` does. The explicit-box guard runs in sema_analyze_expr,
+        // but this implicit box is minted here and never re-analysed, so guard
+        // it at the point of insertion (a no-op inside an `unsafe { ... }`).
+        if (sema_type_contains_ptr(expr->resolved_type, 0)) {
+            sema_unsafe_error(s_current_module, expr->line, expr->column,
+                "erasing a value containing raw Ptr storage into Any requires an enclosing 'unsafe { ... }' block");
+        }
         AstExpr* box = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
         *box = (AstExpr){.kind = AST_EXPR_BOX, .resolved_type = expected, .line = expr->line, .column = expr->column};
         box->as.unary.operand = expr; *expr_ptr = box;
@@ -5270,6 +5296,17 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
                 "reading, writing, copying or producing a raw Ptr requires an enclosing 'unsafe { ... }' block");
         } else if (expr->kind == AST_EXPR_OBJECT
                    && sema_type_contains_ptr(expr->resolved_type, 0)) {
+            sema_unsafe_error(module, expr->line, expr->column,
+                "constructing a value with raw Ptr storage requires an enclosing 'unsafe { ... }' block or a safe factory");
+        } else if (expr->kind == AST_EXPR_CALL && expr->as.call.callee
+                   && expr->as.call.callee->kind == AST_EXPR_IDENT
+                   && str_eq_cstr(expr->as.call.callee->as.ident, "Array")
+                   && sema_type_contains_ptr(expr->resolved_type, 0)) {
+            // #898: `Array(Ptr, cap: N)` is a value CONSTRUCTOR (zero-inits its
+            // element storage, like a struct literal), not a factory function —
+            // it produces raw Ptr storage and needs the same guard as an object
+            // literal. User factory functions returning a Ptr aggregate stay
+            // safe: only the built-in Array constructor is caught here.
             sema_unsafe_error(module, expr->line, expr->column,
                 "constructing a value with raw Ptr storage requires an enclosing 'unsafe { ... }' block or a safe factory");
         } else if (expr->kind == AST_EXPR_BOX && expr->as.unary.operand

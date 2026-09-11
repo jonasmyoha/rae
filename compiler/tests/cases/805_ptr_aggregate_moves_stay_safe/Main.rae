@@ -1,0 +1,39 @@
+# #898 positive side: the new copy/box guards must NOT over-restrict legal
+# whole-owner operations on a raw-Ptr aggregate. A safe factory produces one,
+# the caller MOVES it with `own`, BORROWS it with `view`, reads its non-Ptr
+# metadata, and an explicit `unsafe { }` block still permits the whole-value
+# copy the guard rejects in safe code.
+func allocate(byteCount: copy UInt64) unsafe extern("malloc") ret Ptr
+
+type Wrap {
+  p: Ptr
+  tag: Int
+}
+
+func makeWrap(tag: view Int) ret Wrap {
+  unsafe { ret Wrap { p: allocate(byteCount: 8 as UInt64), tag: tag } }
+}
+
+func peek(wrap: view Wrap) ret Int {
+  ret wrap.tag
+}
+
+func passThrough(wrap: own Wrap) ret Wrap {
+  ret wrap
+}
+
+func main() {
+  # Factory result into an owning binding: a fresh value, not a place-copy.
+  var wrap: Wrap = makeWrap(tag: 7)
+  # Borrow: reads only the non-Ptr metadata.
+  let borrowed: view Wrap => wrap
+  log("borrow {peek(wrap: wrap)} {borrowed.tag}")
+  # Move: transfer, not a copy.
+  var moved: Wrap = own passThrough(wrap: own wrap)
+  log("moved {moved.tag}")
+  # A deliberate whole-value copy is permitted inside an unsafe block.
+  unsafe {
+    let duplicate: Wrap = moved
+    log("copy {duplicate.tag}")
+  }
+}
