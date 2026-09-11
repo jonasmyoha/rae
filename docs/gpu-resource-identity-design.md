@@ -270,3 +270,54 @@ and are implemented by #870/#871 over this ID layout.
   the struct-rep optional form for `opt Ptr`, which lowers to a bare `void*`.
 - Everything routes through the generated WebGPU bindings; no renderer C
   helper was added (C-surface gate unchanged).
+
+## Implementation notes (#870): recording and submission lifetime
+
+`lib/gpu/GpuLifetime.rae` adds `PipelineId`, `BindGroupId` and `SubmissionId`
+(same layout), a `Recording` owner and nonblocking completion polling over the
+`GpuResources` slot tables, which gained per-slot `useCount`/`retired` pins, a
+flat dependency arena and a view's texture as its recorded indirect dependency.
+
+- Completion is tracked with wgpu's own submission index:
+  `wgpuQueueSubmitForIndex` at submit, `wgpuDevicePoll(wait: 0, &index)` at
+  poll. No callbacks, so no callback-reachable state exists in this layer;
+  normal polling never waits.
+- Retention has two levels. Natively, an encoder and a bind group hold
+  references to what they record/bind and wgpu keeps a submission's resources
+  alive until it completes. At the manager level a use is validated when
+  recorded (a retired resource never enters a recording), validated again at
+  submit (a resource retired in between refuses the whole submission with
+  `none`) and pinned from submit through the first poll that observes
+  completion. A bind group pins its direct dependencies (buffers, views,
+  samplers, pipeline) and each view's texture (indirect) for its lifetime.
+- `retire` always bumps the generation — every copy is stale, no new use —
+  and releases the native reference only when the last pin drops; until then
+  the slot is retired-and-pinned (`pendingReleaseCount`). A bind group whose
+  dependency was retired is an "old bind group": `bindGroupIsUsable` is false
+  and `recordCompute` refuses it, while an in-flight submission that already
+  uses it finishes safely.
+- Release vs destroy vs copy: the manager only ever calls `wgpu*Release`
+  (drops its reference), never `wgpu*Destroy`; copying an ID is an ordinary
+  value copy with no native effect.
+- `Recording` is an owner: dropping it unsubmitted releases its encoder
+  (abandonment needs no manager access, so nothing can leak). `submit` takes
+  `mod Recording` and SPENDS it — its encoder is handed over and nulled, so a
+  later drop is a no-op and a second submit returns `none`. (`own` parameters
+  are read-only in Rae, which is why the spent-`mod` form was chosen.)
+- `shutdown` polls every live submission once without waiting, treats the rest
+  as finished so deferred releases proceed, and the destructor then drops the
+  manager's references dependents-first (bind groups, pipelines, views,
+  textures, buffers, samplers); this is also the device-loss path.
+- Rae-side validation is a SAFETY property here: wgpu-native turns a WebGPU
+  validation error into a process abort at `wgpuCommandEncoderFinish`, so every
+  rule wgpu would enforce (usages, ranges, alignment, no self-copy, a usable
+  bind group) is refused in Rae before wgpu sees it.
+- Checks: `compiler/tests/cases/795_gpu_lifetime_model` (deterministic, no GPU:
+  early retirement, old bind group, abandoned recording, refused submit,
+  repeated submissions, submission exhaustion, independent managers) and
+  `examples/zz_gpu_lifetime_check` on hardware (a real compute dispatch and
+  copy with byte-exact readback, polling, early retirement, old bind group,
+  abandoned/refused recordings, repeated submissions, independent managers,
+  shutdown). #871 layers `ReadbackId` on `readBuffer`; explicit `.drop()` of a
+  `Recording` local hits a compiler codegen bug (#902), so abandon by scope
+  exit for now.
