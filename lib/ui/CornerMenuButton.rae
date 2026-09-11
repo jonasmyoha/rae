@@ -1,11 +1,63 @@
-# A shared top-left "hamburger" menu button that opens/closes a settings panel.
+# A shared "hamburger" menu button that opens/closes a settings panel.
 #
-# Drawn directly with gpu2d (not an ECS UI node) so it sits ABOVE the settings
-# panel and stays put regardless of the panel's layout — the same widget across
-# examples (114, 112, …) rather than each rolling its own. Top-left in gpu2d
-# design units, safe-area aware, clear of the debug button (top-right), a touch
-# joystick (bottom-left) and the log overlay (bottom-right).
+# Two forms, one look:
+#
+# 1. mountCornerMenuButton — an ECS UI node mounted into an app-authored host,
+#    meant to sit in the same row as the camera bar (app3d/CameraBar). It is
+#    built exactly like the bar — surface card, spaceS padding, a 34-unit
+#    icon — so the two hug to the SAME height and resize together, instead of
+#    a free-floating square that drifts relative to the bar when the design
+#    resolution changes. Its press is an ordinary UI action ("menu.toggle"),
+#    read with menuToggleTapped, so the app's normal action->layout gate runs
+#    layout for the panel it opens.
+#
+# 2. drawCornerMenuButton / tapped — the original immediate-mode overlay,
+#    drawn directly with gpu2d at a fixed top-left position, above everything.
+#    Kept for apps that have no top bar to sit beside.
 import Gpu2d
+open ecs/Entity
+open ui/Ecs
+open ui/Scene
+open ui/SceneFile
+open ui/SceneInstance
+open ui/inputSystem/InputSystem
+open app3d/UiShell
+open app3d/CameraBar
+
+const menuToggleActionId: String = "menu.toggle"
+
+# Mount the button into an app-authored host node (a slot in the top row, right
+# before the camera bar's slot). Returns false when the host id is not in the
+# world or the scene file is missing — the two mistakes worth reporting.
+func mountCornerMenuButton(world: mod UiWorld, res: view Gpu2dUi, hostNodeId: view String) ret Bool {
+  let host: EntityId = nodeEntityFor(world: world, nodeId: hostNodeId)
+  if isNone(this: host) {
+    ret false
+  }
+  let scene: Scene = loadSceneFile(path: "{app3dSceneDir()}corner_menu_button.raescene")
+  if scene.ok is false {
+    ret false
+  }
+  let overrides: List(SceneOverride) = List.create(SceneOverride, cap: 0)
+  let root: EntityId = mountSceneInstance(
+    world: world, mountEntity: host, scene: scene, overrides: overrides
+  )
+  if isNone(this: root) {
+    ret false
+  }
+  runUiSystems(world: world, res: res)
+  ret true
+}
+
+# True on a frame whose UI actions include the mounted button's press.
+func menuToggleTapped(input: view UiInput) ret Bool {
+  loop var i: Int = 0, i < uiActionCount(input: input), ++i {
+    if uiActionAt(input: input, index: i) is menuToggleActionId { ret true }
+  }
+  ret false
+}
+
+# ----- immediate-mode overlay form ------------------------------------------
 
 # Square side, and top-left origin (safe-area aware) in gpu2d design units.
 func cornerMenuButtonSize() pub ret Float { ret Gpu2d.designWidth() * 0.085 }
