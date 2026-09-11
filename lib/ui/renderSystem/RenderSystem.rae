@@ -102,7 +102,7 @@ func g2dHoverMul(world: view UiWorld, entity: view EntityId) ret Float {
   ret 1.0
 }
 
-func paintShapeG(world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
+func paintShapeG(world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int, canvas: mod Gpu2dCanvas) {
   let sh: Shape = componentGet(this: world.shapes, entity: entity)
   # Resolve a palette slot from the ACTIVE theme at paint (#235) so a
   # dark/light toggle re-colours without a scene re-parse; empty slot
@@ -120,7 +120,7 @@ func paintShapeG(world: view UiWorld, entity: view EntityId, wt: view WorldTrans
     if cr.size.y < smaller { smaller = cr.size.y }
     var r: Float = sh.radius
     if r <= 0.0 { r = smaller / 2.0 }
-    Gpu2d.drawRoundedRect(x: wt.position.x + cr.size.x / 2.0 - r * hoverMul, y: wt.position.y + cr.size.y / 2.0 - r * hoverMul, w: r * 2.0 * hoverMul, h: r * 2.0 * hoverMul, radius: r * hoverMul, color: g2dColor(color: fill))
+    Gpu2d.drawRoundedRect(canvas: canvas, x: wt.position.x + cr.size.x / 2.0 - r * hoverMul, y: wt.position.y + cr.size.y / 2.0 - r * hoverMul, w: r * 2.0 * hoverMul, h: r * 2.0 * hoverMul, radius: r * hoverMul, color: g2dColor(color: fill))
     ret
   }
   var radius: Float = sh.radius
@@ -129,15 +129,15 @@ func paintShapeG(world: view UiWorld, entity: view EntityId, wt: view WorldTrans
     var strokeBase: RgbaColor = sh.stroke
     if sh.strokeSlot.length() > 0 { strokeBase = colorByName(theme: world.theme.active, name: sh.strokeSlot) }
     let stroke: RgbaColor = g2dChain(color: strokeBase, chain255: chain255)
-    Gpu2d.drawBox(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, fill: g2dColor(color: fill), borderWidth: sh.strokeWidth, border: g2dColor(color: stroke))
+    Gpu2d.drawBox(canvas: canvas, x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, fill: g2dColor(color: fill), borderWidth: sh.strokeWidth, border: g2dColor(color: stroke))
     ret
   }
-  Gpu2d.drawRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, color: g2dColor(color: fill))
+  Gpu2d.drawRoundedRect(canvas: canvas, x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, color: g2dColor(color: fill))
 }
 
 # GradientFill uses the gpu2d box shader's gradient mode so dock shadows and
 # dialog scrims stay in the same painter-order pipeline as normal shapes.
-func paintGradientG(world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
+func paintGradientG(world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int, canvas: mod Gpu2dCanvas) {
   let gf: GradientFill = componentGet(this: world.gradientFills, entity: entity)
   let radius: Float = g2dRadius(world: world, entity: entity, fallback: 0.0)
   let hoverMul: Float = g2dHoverMul(world: world, entity: entity)
@@ -147,7 +147,7 @@ func paintGradientG(world: view UiWorld, entity: view EntityId, wt: view WorldTr
   let drawY: Float = wt.position.y + (cr.size.y - drawH) / 2.0
   let from: RgbaColor = g2dChain(color: gf.from, chain255: chain255)
   let to: RgbaColor = g2dChain(color: gf.to, chain255: chain255)
-  Gpu2d.drawGradientRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, from: g2dColor(color: from), to: g2dColor(color: to), angleDeg: gf.angle)
+  Gpu2d.drawGradientRect(canvas: canvas, x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, from: g2dColor(color: from), to: g2dColor(color: to), angleDeg: gf.angle)
 }
 
 func paintBackdropG(world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int, canvas: mod Gpu2dCanvas) {
@@ -168,7 +168,7 @@ func paintBackdropG(world: view UiWorld, entity: view EntityId, wt: view WorldTr
   # framebuffer capture yet, so paint a stable translucent glass fallback.
   let fallback: RgbaColor = { r: 18, g: 22, b: 30, a: 210 }
   let chained: RgbaColor = g2dChain(color: fallback, chain255: chain255)
-  Gpu2d.drawRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, color: g2dColor(color: chained))
+  Gpu2d.drawRoundedRect(canvas: canvas, x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, color: g2dColor(color: chained))
 }
 
 
@@ -251,7 +251,7 @@ func paintSpriteG(world: view UiWorld, entity: view EntityId, wt: view WorldTran
   }
   let fallback: RgbaColor = g2dChain(color: colorByName(theme: world.theme.active, name: "textMuted"), chain255: chain255)
   let fallbackRadius: Float = g2dRadius(world: world, entity: entity, fallback: 8.0)
-  Gpu2d.drawRoundedRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: fallbackRadius * hoverMul, color: g2dColor(color: fallback))
+  Gpu2d.drawRoundedRect(canvas: canvas, x: drawX, y: drawY, w: drawW, h: drawH, radius: fallbackRadius * hoverMul, color: g2dColor(color: fallback))
 }
 
 func paintTextG(world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int, res: view Gpu2dUi) {
@@ -399,9 +399,9 @@ func paintEntityG(world: view UiWorld, entity: view EntityId, res: view Gpu2dUi,
   if chain255 > 255 { chain255 = 255 }
   if chain255 < 0 { chain255 = 0 }
   if componentHas(this: world.gradientFills, entity: entity) {
-    paintGradientG(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
+    paintGradientG(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255, canvas: canvas)
   } else if componentHas(this: world.shapes, entity: entity) {
-    paintShapeG(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
+    paintShapeG(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255, canvas: canvas)
   }
   if componentHas(this: world.backdropImages, entity: entity) {
     paintBackdropG(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255, canvas: canvas)

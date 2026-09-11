@@ -1,4 +1,5 @@
 open Raylib
+open Gpu2dCanvas
 # Texture registry — lazy-loaded raylib textures keyed by string.
 #
 # `Sprite.textureKey` carries a logical name (e.g. "icon-back"); the
@@ -20,11 +21,15 @@ type TextureEntry {
 
 type TextureRegistry {
   entries: List(TextureEntry)
+  canvas: Gpu2dCanvas   # the gpu2d backend's 2D canvas (#913): boxes/images/text batch here
 }
 
 func createTextureRegistry() ret TextureRegistry {
-  ret TextureRegistry {
-    entries: List.create(TextureEntry, cap: 16)
+  unsafe {
+    ret TextureRegistry {
+      entries: List.create(TextureEntry, cap: 16)
+      canvas: createGpu2dCanvas()
+    }
   }
 }
 

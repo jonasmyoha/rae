@@ -822,9 +822,9 @@ func main() ret Int {
           Gpu2d.beginFrameLoad(canvas: canvas)
           renderSystemGpu2d(world: uiWorld, res: gpuUi, canvas: canvas)
           # After the app UI, so the diagnostic is never what gets covered up.
-          drawLogOverlay(ov: logView, font: gpuUi.textFont, screenW: extentW, screenH: extentH)
+          drawLogOverlay(ov: logView, canvas: canvas, font: gpuUi.textFont, screenW: extentW, screenH: extentH)
           # LAST, so it is above the scene, the UI world and the log.
-          drawDebugOverlay(debugOverlay: dbg, font: gpuUi.textFont, didRealWork: dbgDidWork)
+          drawDebugOverlay(debugOverlay: dbg, canvas: canvas, font: gpuUi.textFont, didRealWork: dbgDidWork)
           lastLogRevision = logView.revision
         }
         if tag is tagPresent {
