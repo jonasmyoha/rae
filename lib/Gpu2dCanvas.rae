@@ -5,7 +5,8 @@
 # per-run clip uniform + scissor; everything the passes CREATE — pipelines,
 # instance buffers, image textures + views + sampler, per-draw uniforms and
 # bind groups — is a typed ID here, and the draws go into the C-owned frame
-# pass (rae_g2d_pass_get) with recordDrawInPass, the #874 grass pattern.
+# pass the canvas opened (#910: the encoder + pass live HERE, no longer parked
+# in C) with recordDrawInPass, the #874 grass pattern.
 #
 # Box pass: one pipeline (lib/gpu2d_box.wgsl) draws every rect / rounded rect /
 # bordered box / gradient / line the frame queued, in contiguous same-clip
@@ -37,7 +38,6 @@ open gpu/GpuLifetime
 open gpu/GpuRender
 open gpu/GpuIds
 
-func g2dBoxPass() unsafe extern("rae_g2d_pass_get") ret Ptr
 func nativeG2dBoxFormat() unsafe extern("rae_g2d_format") ret Int
 func g2dViewportUniform() unsafe extern("rae_g2d_viewport_uniform") ret Ptr
 func nativeG2dPrimCount() unsafe extern("rae_g2d_prim_count") ret Int
@@ -45,8 +45,11 @@ func nativeG2dPrimFloats() unsafe extern("rae_g2d_prim_floats") ret Int
 func g2dPrimData() unsafe extern("rae_g2d_prim_data") ret Ptr
 func nativeG2dPrimClipAt(i: Int) unsafe extern("rae_g2d_prim_clip_at") ret Int
 func nativeG2dPrimReset() unsafe extern("rae_g2d_prim_reset")
-func g2dClipFrameUniform(clip: Int) unsafe extern("rae_g2d_clip_frame_uniform") ret Ptr
-func nativeG2dScissor(clip: Int) unsafe extern("rae_g2d_scissor")
+# The clip stack stays C (behind the stateless pushClipRect/popClipRect, see
+# #913): C fills a run's 8-float clip uniform and sets the scissor on the pass
+# the canvas hands it.
+func nativeG2dClipUniformAt(clip: Int, out: view Buffer(Float)) unsafe extern("rae_g2d_clip_uniform_at")
+func nativeG2dScissor(clip: Int, pass: Ptr) unsafe extern("rae_g2d_scissor")
 func nativeG2dPrepareFlush(imagesPending: Int) unsafe extern("rae_g2d_prepare_flush")
 func nativeG2dCurrentClip() unsafe extern("rae_g2d_current_clip") ret Int
 func nativeG2dBoxReadFile(path: String) unsafe extern("rae_ext_rae_sys_read_file") ret String
@@ -81,8 +84,8 @@ func g2dPrimClipAt(i: copy Int) ret Int {
 func g2dPrimReset() {
   unsafe { nativeG2dPrimReset() }
 }
-func g2dScissor(clip: copy Int) {
-  unsafe { nativeG2dScissor(clip: clip) }
+func g2dScissor(canvas: view Gpu2dCanvas, clip: copy Int) {
+  unsafe { nativeG2dScissor(clip: clip, pass: canvas.framePass) }
 }
 func g2dPrepareFlush(imagesPending: copy Int) {
   unsafe { nativeG2dPrepareFlush(imagesPending: imagesPending) }
@@ -144,6 +147,12 @@ type Gpu2dImage {
 type Gpu2dCanvas {
   idIssuer: IdIssuer
   gpuResources: opt GpuResources
+  # --- frame (#910) ---
+  frameEncoder: Ptr                 # the open frame's command encoder (null between frames)
+  framePass: Ptr                    # the open frame's render pass into the C offscreen target
+  clipUniforms: List(BufferId)      # per-run 32-byte clip uniforms, slot = run index in the frame
+  clipCursor: Int
+  clipScratch: List(Float)          # one clip uniform's 8 floats, staged for the upload
   # --- box pass ---
   pipeMade: Bool
   pipeline: RenderPipelineId
@@ -152,7 +161,6 @@ type Gpu2dCanvas {
   frameCapacities: List(Int)        # each slot's capacity in primitives
   flushIndex: Int
   frameBinds: List(BindGroupId)     # this frame's per-run bind groups
-  frameExternals: List(ExternalId)  # this frame's adopted clip uniforms
   # --- image pass ---
   imagePipeMade: Bool
   imagePipeline: RenderPipelineId
@@ -183,10 +191,13 @@ const imageUniformFloats: Int = 16
 func createGpu2dCanvas() ret Gpu2dCanvas {
   unsafe {
     ret Gpu2dCanvas {
-      idIssuer: IdIssuer.create(), gpuResources: none, pipeMade: false,
+      idIssuer: IdIssuer.create(), gpuResources: none,
+      frameEncoder: webgpuNull(), framePass: webgpuNull(),
+      clipUniforms: List.create(BufferId, cap: 64), clipCursor: 0, clipScratch: List.create(Float, cap: 8),
+      pipeMade: false,
       pipeline: noRenderPipelineId(), viewport: noExternalId(),
       frameBuffers: List.create(BufferId, cap: 8), frameCapacities: List.create(Int, cap: 8), flushIndex: 0,
-      frameBinds: List.create(BindGroupId, cap: 64), frameExternals: List.create(ExternalId, cap: 64),
+      frameBinds: List.create(BindGroupId, cap: 64),
       imagePipeMade: false, imagePipeline: noRenderPipelineId(), imageSampler: noSamplerId(),
       images: List.create(Gpu2dImage, cap: 32), imageKeys: List.create(String, cap: 32), imageKeyHandles: List.create(Int, cap: 32),
       imageCommands: List.create(Float, cap: 32 * imageUniformFloats), imageCommandHandles: List.create(Int, cap: 32), imageCommandClips: List.create(Int, cap: 32),
@@ -263,6 +274,34 @@ func boxFlushBuffer(canvas: mod Gpu2dCanvas, resources: mod GpuResources, prims:
   ret made
 }
 
+# The frame is open once beginFrame opened its pass (endFrame closes it).
+func canvasFrameActive(canvas: view Gpu2dCanvas) ret Bool {
+  unsafe { ret canvas.framePass is not webgpuNull() }
+}
+
+# This run's clip uniform (a persistent per-run-slot pool of 32-byte
+# uniforms): C fills the 8 floats for `clip`, the manager buffer takes them.
+func clipUniformFor(canvas: mod Gpu2dCanvas, resources: mod GpuResources, clip: copy Int) ret BufferId {
+  let slot: Int = canvas.clipCursor
+  canvas.clipCursor = slot + 1
+  loop canvas.clipUniforms.length <= slot { canvas.clipUniforms.add(value: noBufferId()) }
+  var uniform: BufferId = noBufferId()
+  if let known: BufferId = canvas.clipUniforms.copyAt(index: slot) { uniform = known }
+  if not isValidBuffer(resources: resources, id: uniform) {
+    if let made: BufferId = createBuffer(resources: resources, size: 32, usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst) {
+      uniform = made
+      canvas.clipUniforms.set(index: slot, value: made)
+    }
+  }
+  canvas.clipScratch.clear()
+  loop var k: Int = 0, k < 8, ++k { canvas.clipScratch.add(value: 0.0) }
+  unsafe {
+    nativeG2dClipUniformAt(clip: clip, out: canvas.clipScratch.data)
+    let written: Bool = writeBufferFromPtr(resources: resources, id: uniform, offset: 0, data: canvas.clipScratch.data, size: 32)
+  }
+  ret uniform
+}
+
 # Draw the queued primitives into the active frame pass and reset the batch.
 # Contiguous same-clip runs: each sets the scissor (#144, the axis-aligned
 # bbox cull) and binds a per-run clip uniform (#118, the rounded-corner SDF in
@@ -279,7 +318,7 @@ func boxFlushWith(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
   let count: Int = g2dPrimCount()
   if count <= 0 { ret }
   # No open frame pass: keep the batch (the frame reset clears it), like C did.
-  unsafe { if g2dBoxPass() is webgpuNull() { ret } }
+  if not canvasFrameActive(canvas: canvas) { ret }
   ensureBoxPipeline(canvas: canvas, resources: resources)
   if not isValidRenderPipeline(resources: resources, id: canvas.pipeline) {
     g2dPrimReset()
@@ -301,12 +340,12 @@ func boxFlushWith(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
     let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
     entries.add(value: externalRef(id: canvas.viewport))
     entries.add(value: bufferRef(id: instances))
-    unsafe { entries.add(value: adoptBufferRef(resources: resources, adopted: canvas.frameExternals, handle: g2dClipFrameUniform(clip: clip))) }
+    entries.add(value: bufferRef(id: clipUniformFor(canvas: canvas, resources: resources, clip: clip)))
     if let bind: BindGroupId = createRenderBindGroup(resources: resources, pipeline: canvas.pipeline, entries: entries) {
       canvas.frameBinds.add(value: bind)
-      g2dScissor(clip: clip)
+      g2dScissor(canvas: canvas, clip: clip)
       unsafe {
-        let drawn: Bool = recordDrawInPass(resources: resources, pass: g2dBoxPass(), pipeline: canvas.pipeline, bindGroup: bind, vertexCount: 6, instanceCount: runEnd - runStart, firstVertex: 0, firstInstance: runStart)
+        let drawn: Bool = recordDrawInPass(resources: resources, pass: canvas.framePass, pipeline: canvas.pipeline, bindGroup: bind, vertexCount: 6, instanceCount: runEnd - runStart, firstVertex: 0, firstInstance: runStart)
       }
     }
     runStart = runEnd
@@ -569,7 +608,7 @@ func clearImageQueue(canvas: mod Gpu2dCanvas) {
 }
 
 func imageFlushWith(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
-  unsafe { if g2dBoxPass() is webgpuNull() { ret } }
+  if not canvasFrameActive(canvas: canvas) { ret }
   ensureImagePipeline(canvas: canvas, resources: resources)
   if not isValidRenderPipeline(resources: resources, id: canvas.imagePipeline) {
     clearImageQueue(canvas: canvas)
@@ -620,9 +659,9 @@ func imageDrawCommand(canvas: mod Gpu2dCanvas, resources: mod GpuResources, inde
   }
   var clip: Int = 0
   if let known: Int = canvas.imageCommandClips.copyAt(index: i) { clip = known }
-  g2dScissor(clip: clip)
+  g2dScissor(canvas: canvas, clip: clip)
   unsafe {
-    let drawn: Bool = recordDrawInPass(resources: resources, pass: g2dBoxPass(), pipeline: canvas.imagePipeline, bindGroup: bind, vertexCount: 6, instanceCount: 1, firstVertex: 0, firstInstance: 0)
+    let drawn: Bool = recordDrawInPass(resources: resources, pass: canvas.framePass, pipeline: canvas.imagePipeline, bindGroup: bind, vertexCount: 6, instanceCount: 1, firstVertex: 0, firstInstance: 0)
   }
 }
 
@@ -727,7 +766,7 @@ func textFlush(canvas: mod Gpu2dCanvas) {
 }
 
 func textFlushWith(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
-  unsafe { if g2dBoxPass() is webgpuNull() { ret } }
+  if not canvasFrameActive(canvas: canvas) { ret }
   let atlasMax: Int = g2dTextAtlasMax()
   loop var ai: Int = 0, ai < atlasMax, ++ai {
     let count: Int = g2dTextCount(ai: ai)
@@ -767,9 +806,9 @@ func textFlushAtlas(canvas: mod Gpu2dCanvas, resources: mod GpuResources, ai: co
       let clip: Int = g2dTextClipAt(ai: ai, i: runStart)
       var runEnd: Int = runStart + 1
       loop runEnd < count and g2dTextClipAt(ai: ai, i: runEnd) is clip { runEnd = runEnd + 1 }
-      g2dScissor(clip: clip)
+      g2dScissor(canvas: canvas, clip: clip)
       unsafe {
-        let drawn: Bool = recordDrawInPass(resources: resources, pass: g2dBoxPass(), pipeline: canvas.textPipeline, bindGroup: bind, vertexCount: 6, instanceCount: runEnd - runStart, firstVertex: 0, firstInstance: runStart)
+        let drawn: Bool = recordDrawInPass(resources: resources, pass: canvas.framePass, pipeline: canvas.textPipeline, bindGroup: bind, vertexCount: 6, instanceCount: runEnd - runStart, firstVertex: 0, firstInstance: runStart)
       }
       runStart = runEnd
     }
@@ -785,10 +824,10 @@ func boxFrameEnd(canvas: mod Gpu2dCanvas) {
   if let resources: mod GpuResources => canvas.gpuResources {
     retireBindGroupIds(resources: resources, list: canvas.frameBinds)
     canvas.frameBinds.clear()
-    releaseExternalIds(resources: resources, list: canvas.frameExternals)
     let compacted: Bool = compactDependencies(resources: resources)
   }
   canvas.flushIndex = 0
+  canvas.clipCursor = 0
   canvas.imageDrawCursor = 0
   loop var ai: Int = 0, ai < canvas.textAtlases.length, ++ai {
     if let atlas: Gpu2dTextAtlas = canvas.textAtlases.copyAt(index: ai) {
@@ -805,7 +844,8 @@ func canvasShutdown(canvas: mod Gpu2dCanvas) {
   if let resources: mod GpuResources => canvas.gpuResources {
     retireBindGroupIds(resources: resources, list: canvas.frameBinds)
     canvas.frameBinds.clear()
-    releaseExternalIds(resources: resources, list: canvas.frameExternals)
+    retireBufferIds(resources: resources, list: canvas.clipUniforms)
+    canvas.clipUniforms.clear()
     retireBufferIds(resources: resources, list: canvas.frameBuffers)
     canvas.frameBuffers.clear()
     canvas.frameCapacities.clear()
@@ -845,6 +885,7 @@ func canvasShutdown(canvas: mod Gpu2dCanvas) {
   canvas.viewport = noExternalId()
   canvas.pipeMade = false
   canvas.flushIndex = 0
+  canvas.clipCursor = 0
   canvas.imagePipeMade = false
   canvas.imagePipeline = noRenderPipelineId()
   canvas.imageSampler = noSamplerId()
