@@ -255,13 +255,6 @@ func nativeG2dFrameReset() unsafe extern("rae_g2d_frame_reset")
 func g2dFrameReset() {
   unsafe { nativeG2dFrameReset() }
 }
-func g2dSetFrame(enc: Ptr, pass: Ptr) unsafe extern("rae_g2d_set_frame")
-func g2dPass() unsafe extern("rae_g2d_pass_get") ret Ptr
-func g2dEncoder() unsafe extern("rae_g2d_encoder_get") ret Ptr
-func nativeG2dFrameActive() unsafe extern("rae_g2d_frame_active") ret Int
-func g2dFrameActive() ret Int {
-  unsafe { ret nativeG2dFrameActive() }
-}
 func nativeG2dPresentCleanup() unsafe extern("rae_g2d_present_and_cleanup")
 func g2dPresentCleanup() {
   unsafe { nativeG2dPresentCleanup() }
@@ -278,9 +271,9 @@ func g2dOffViewReady() ret Int {
 func g2dSubmit(cmd: Ptr) unsafe extern("rae_gb_submit")
 
 # Shared: create the command encoder and begin the offscreen colour pass with
-# the given load op + clear colour, then hand the encoder/pass to C so flush()
-# and the present tail see the live frame.
-func g2dOpenPass(loadOp: copy Int32, r: copy Float, g: copy Float, b: copy Float, a: copy Float) {
+# the given load op + clear colour; the canvas owns the encoder/pass for the
+# frame (#910) — flush() draws into it and endFrame closes and submits it.
+func g2dOpenPass(canvas: mod Gpu2dCanvas, loadOp: copy Int32, r: copy Float, g: copy Float, b: copy Float, a: copy Float) {
   unsafe {
     let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
     let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
@@ -301,25 +294,26 @@ func g2dOpenPass(loadOp: copy Int32, r: copy Float, g: copy Float, b: copy Float
       colorAttachments: g2dColorAtts.data
     }
     let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
-    g2dSetFrame(enc: enc, pass: pass)
+    canvas.frameEncoder = enc
+    canvas.framePass = pass
   }
 }
 
 # Acquire the next surface texture and begin a render pass that clears it to
 # the given linear RGBA colour (components 0..1). Must be paired with endFrame.
-func beginFrame(r: copy Float, g: copy Float, b: copy Float, a: copy Float) {
+func beginFrame(canvas: mod Gpu2dCanvas, r: copy Float, g: copy Float, b: copy Float, a: copy Float) {
   g2dFrameReset()
   if g2dOffViewReady() is 0 { ret }
-  g2dOpenPass(loadOp: WGPULoadOp_Clear, r: r, g: g, b: b, a: a)
+  g2dOpenPass(canvas: canvas, loadOp: WGPULoadOp_Clear, r: r, g: g, b: b, a: a)
 }
 
 # Begin a 2D/UI overlay pass that preserves the persistent offscreen color
 # target produced by a preceding renderer pass. Pair with endFrame; this is the
 # only pass that should screenshot/present the composed frame.
-func beginFrameLoad() {
+func beginFrameLoad(canvas: mod Gpu2dCanvas) {
   g2dFrameReset()
   if g2dOffViewReady() is 0 { ret }
-  g2dOpenPass(loadOp: WGPULoadOp_Load, r: 0.0, g: 0.0, b: 0.0, a: 0.0)
+  g2dOpenPass(canvas: canvas, loadOp: WGPULoadOp_Load, r: 0.0, g: 0.0, b: 0.0, a: 0.0)
 }
 
 # Finish the render pass, submit the command buffer, and present the frame.
@@ -330,10 +324,10 @@ func endFrame(canvas: mod Gpu2dCanvas) {
   unsafe {
     # Advance the deterministic clock every frame, even one with no drawable yet.
     g2dTick()
-    if g2dFrameActive() is 0 { ret }
+    if not canvasFrameActive(canvas: canvas) { ret }
     flush(canvas: canvas)
-    let pass: Ptr = g2dPass()
-    let enc: Ptr = g2dEncoder()
+    let pass: Ptr = canvas.framePass
+    let enc: Ptr = canvas.frameEncoder
     wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
     let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
     let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
@@ -341,6 +335,8 @@ func endFrame(canvas: mod Gpu2dCanvas) {
     wgpuCommandBufferRelease(commandBuffer: cmd)
     wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
     wgpuCommandEncoderRelease(commandEncoder: enc)
+    canvas.framePass = webgpuNull()
+    canvas.frameEncoder = webgpuNull()
     g2dPresentCleanup()
     boxFrameEnd(canvas: canvas)
   }

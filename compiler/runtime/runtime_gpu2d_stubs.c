@@ -40,10 +40,6 @@ float rae_ext_Gpu2d_designHeight(void){ return 0.0; }
 float rae_ext_Gpu2d_dpr(void){ return 1.0; }
 /* Frame lifecycle moved to Rae (#504); these back it, no-op without a GPU. */
 void rae_g2d_frame_reset(void) {}
-void rae_g2d_set_frame(void* enc, void* pass){ (void)enc; (void)pass; }
-void* rae_g2d_pass_get(void)    { return (void*)0; }
-void* rae_g2d_encoder_get(void) { return (void*)0; }
-int64_t rae_g2d_frame_active(void) { return 0; }
 void rae_g2d_present_and_cleanup(void) {}
 void rae_g2d_tick(void) {}
 void* rae_g2d_viewport_uniform(void) { return (void*)0; }
@@ -52,8 +48,8 @@ int64_t rae_g2d_prim_floats(void) { return 24; }
 void* rae_g2d_prim_data(void) { return (void*)0; }
 int64_t rae_g2d_prim_clip_at(int64_t i) { (void)i; return 0; }
 void rae_g2d_prim_reset(void) {}
-void* rae_g2d_clip_frame_uniform(int64_t clip) { (void)clip; return (void*)0; }
-void rae_g2d_scissor(int64_t clip) { (void)clip; }
+void rae_g2d_scissor(int64_t clip, void* pass) { (void)clip; (void)pass; }
+void rae_g2d_clip_uniform_at(int64_t clip, float* out) { (void)clip; if (out) { for (int i = 0; i < 8; i++) out[i] = 0.0f; } }
 void rae_g2d_prepare_flush(int64_t images_pending) { (void)images_pending; }
 int64_t rae_g2d_current_clip(void) { return 0; }
 void* rae_g2d_decode_image(rae_String path) { (void)path; return (void*)0; }
