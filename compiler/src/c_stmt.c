@@ -1574,6 +1574,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         ctx->local_type_refs[li] = stmt->as.let_stmt.type;
                         ctx->local_is_ptr[li] = false;
                         ctx->local_is_mod[li] = false;
+                        ctx->local_drop_flag[li] = false;  // #902: never inherit a reused slot's stale flag
                         ctx->local_count++;
                     }
                     break;
@@ -1598,6 +1599,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     ctx->local_type_refs[local_index] = stmt->as.let_stmt.type;
                     ctx->local_is_ptr[local_index] = false;
                     ctx->local_is_mod[local_index] = false;
+                    ctx->local_drop_flag[local_index] = false;  // #902: never inherit a reused slot's stale flag
                     ctx->local_count++;
                 }
                 break;
@@ -1799,6 +1801,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     ctx->local_type_refs[local_index] = stmt->as.let_stmt.type;
                     ctx->local_is_ptr[local_index] = false;
                     ctx->local_is_mod[local_index] = false;
+                    ctx->local_drop_flag[local_index] = false;  // #902: never inherit a reused slot's stale flag
                     ctx->local_count++;
                 }
                 break;
@@ -1941,6 +1944,20 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 ctx->locals[ctx->local_count] = stmt->as.let_stmt.name;
                 ctx->local_types[ctx->local_count] = str_from_cstr(tn);
                 ctx->local_type_refs[ctx->local_count] = stmt->as.let_stmt.type;
+                // #902: a slot index is REUSED across sibling scopes (an
+                // if-let/loop body's locals pop back to `saved_locals` on
+                // scope exit, so the next sibling scope's first local claims
+                // the same index) but `local_drop_flag` was never cleared
+                // here. If an earlier local at this slot was explicitly
+                // `.drop()`-ed (so its `__rae_live_<name>` flag was declared
+                // and set true), a later, unrelated local reusing the slot
+                // inherited that STALE true — the scope-exit drop pass then
+                // guarded ITS drop with `if (__rae_live_<newName>)`, a flag
+                // that was never declared for the new name (gcc: "use of
+                // undeclared identifier"). Reset it so the flag is always
+                // scoped to the exact local it is declared for, never
+                // leaked from whatever local last occupied this slot.
+                ctx->local_drop_flag[ctx->local_count] = false;
                 // Phase 3 ownership classification — does this binding
                 // uniquely own its heap, or does it shallow-alias
                 // someone else's storage? Used by emit_implicit_drops
