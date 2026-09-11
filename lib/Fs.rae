@@ -98,7 +98,7 @@ func hasExtension(this: view File, ext: view String) ret Bool {
 # (no trailing newline), or "" on error / empty. `.` and `..` are
 # filtered by the native; everything else passes through, including
 # hidden files starting with `.` and broken symlinks.
-func rae_sys_list_dir(folder: String) extern ret String
+func rae_sys_list_dir(folder: String) unsafe extern ret String
 
 # Scan `folder` for direct children. Non-recursive. Returns an
 # empty list when the folder doesn't exist, can't be read, or is
@@ -110,7 +110,8 @@ func rae_sys_list_dir(folder: String) extern ret String
 # rely on either — sort the result if your UI needs stable
 # ordering.
 func listDir(folder: view String) pub ret List(File) {
-  let raw: String = rae_sys_list_dir(folder: folder)
+  var raw: String = ""
+  unsafe { raw = rae_sys_list_dir(folder: folder) }
   let lines: List(String) = raw.split(sep: "\n")
   let result: List(File) = List.create(File, cap: lines.length)
   var i: Int = 0
@@ -140,9 +141,14 @@ func listDirByExt(folder: view String, ext: view String) pub ret List(File) {
   let result: List(File) = List.create(File, cap: all.length)
   var i: Int = 0
   loop i < all.length {
-    let f: File = rae_ext_rae_buf_get(buf: all.data, index: i)
-    if f.hasExtension(ext: ext) {
-      result.add(value: f)
+    # `rae_ext_rae_buf_get` returns a shallow copy aliasing the list's storage,
+    # so `f` must stay a non-owning `let` scoped to this block; the raw region
+    # is its whole use (rebinding would drop the alias and free list memory).
+    unsafe {
+      let f: File = rae_ext_rae_buf_get(buf: all.data, index: i)
+      if f.hasExtension(ext: ext) {
+        result.add(value: f)
+      }
     }
     i = i + 1
   }

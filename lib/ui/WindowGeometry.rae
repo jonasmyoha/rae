@@ -24,7 +24,7 @@ open Filesystem
 # Whole-file read. `Sys.readFile` returns `opt String`, and the C backend has a
 # known bug comparing those against `none`; lib/hot_reload and lib/sky_hosek
 # declare the same raw extern for the same reason.
-func rae_ext_rae_sys_read_file(path: String) extern ret String
+func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
 
 # A move fires an event per frame of the drag, and the value that matters is the
 # one it ends on. Waiting for the drag to settle turns a drag into one write
@@ -76,6 +76,11 @@ func createWindowGeometry(dir: view String, name: view String) ret WindowGeometr
 #
 # CALL AFTER initWindow. There is no window to place before that.
 func restoreWindowGeometry(g: mod WindowGeometry) ret Bool {
+  # Declaration-only marking for now: this module is coupled to the Gpu2d
+  # renderer externs (window position/size/dpr), whose unsafe migration lands
+  # with the GPU consumers (#876). Opting this file in here would require
+  # wrapping those renderer calls too, so the raw read stays unwrapped until
+  # then. The extern is still marked `unsafe extern`.
   let raw: String = rae_ext_rae_sys_read_file(path: g.path)
   if raw.length() < 1 {
     ret false
