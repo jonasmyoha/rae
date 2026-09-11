@@ -35,6 +35,12 @@ open Raylib
 # velocity at the endpoints; plain cubic smoothstep is OK but still
 # feels slightly snappy at the seams.
 open ecs/Entity
+# #900: Hero calls componentHas/componentGet/componentView/componentSet/
+# componentCount/componentEntityAt/componentDataAt/componentMod bare, all from
+# ecs/ComponentTable — but never opened it. A pre-existing missing open (no
+# maintained build imports this legacy module, so it stayed latent); required
+# here so the file resolves and its unsafe-boundary migration can be verified.
+open ecs/ComponentTable
 
 # In-flight transition state. Owned by the host. Reset between
 # transitions by overwriting; only one transition runs at a time.
@@ -393,68 +399,70 @@ func updateHeroAnim(anim: mod HeroAnim, now: view Float64) pub ret Bool {
 # `renderSystem` so the overlay sits on top of the destination
 # world's render. Single draw call, no extra entities allocated.
 func renderHeroOverlay(anim: view HeroAnim, reg: view TextureRegistry, now: view Float64) pub {
-  if anim.active is false {
-    ret
-  }
-  let raw: Float = ((now - anim.startTime) / anim.duration) as Float
-  let t: Float = smootherstep(t: raw)
-  let x: Float = heroLerp(a: anim.srcX, b: anim.dstX, t: t)
-  let y: Float = heroLerp(a: anim.srcY, b: anim.dstY, t: t)
-  let w: Float = heroLerp(a: anim.srcW, b: anim.dstW, t: t)
-  let h: Float = heroLerp(a: anim.srcH, b: anim.dstH, t: t)
-  if textureHas(reg: reg, key: anim.textureKey) is false {
-    ret
-  }
-  let tex: Texture = textureGet(reg: reg, key: anim.textureKey)
+  unsafe {
+    if anim.active is false {
+      ret
+    }
+    let raw: Float = ((now - anim.startTime) / anim.duration) as Float
+    let t: Float = smootherstep(t: raw)
+    let x: Float = heroLerp(a: anim.srcX, b: anim.dstX, t: t)
+    let y: Float = heroLerp(a: anim.srcY, b: anim.dstY, t: t)
+    let w: Float = heroLerp(a: anim.srcW, b: anim.dstW, t: t)
+    let h: Float = heroLerp(a: anim.srcH, b: anim.dstH, t: t)
+    if textureHas(reg: reg, key: anim.textureKey) is false {
+      ret
+    }
+    let tex: Texture = textureGet(reg: reg, key: anim.textureKey)
 
-  # Mirror paintSprite's contain-fit scaling so the texture's aspect
-  # is preserved while it fills the interpolated rect.
-  var scaleX: Float = 1.0
-  var scaleY: Float = 1.0
-  if tex.width > 0 {
-    scaleX = w / tex.width.toFloat()
-  }
-  if tex.height > 0 {
-    scaleY = h / tex.height.toFloat()
-  }
-  var scale: Float = scaleX
-  if scaleY < scale {
-    scale = scaleY
-  }
-  if scale <= 0.0 {
-    scale = 1.0
-  }
-  let drawW: Float = tex.width.toFloat() * scale
-  let drawH: Float = tex.height.toFloat() * scale
-  let offX: Float = (w - drawW) / 2.0
-  let offY: Float = (h - drawH) / 2.0
+    # Mirror paintSprite's contain-fit scaling so the texture's aspect
+    # is preserved while it fills the interpolated rect.
+    var scaleX: Float = 1.0
+    var scaleY: Float = 1.0
+    if tex.width > 0 {
+      scaleX = w / tex.width.toFloat()
+    }
+    if tex.height > 0 {
+      scaleY = h / tex.height.toFloat()
+    }
+    var scale: Float = scaleX
+    if scaleY < scale {
+      scale = scaleY
+    }
+    if scale <= 0.0 {
+      scale = 1.0
+    }
+    let drawW: Float = tex.width.toFloat() * scale
+    let drawH: Float = tex.height.toFloat() * scale
+    let offX: Float = (w - drawW) / 2.0
+    let offY: Float = (h - drawH) / 2.0
 
-  let tint: Color = {
-    r: anim.tintR
-    g: anim.tintG
-    b: anim.tintB
-    a: anim.tintA
-  }
+    let tint: Color = {
+      r: anim.tintR
+      g: anim.tintG
+      b: anim.tintB
+      a: anim.tintA
+    }
 
-  # Corner-radius lerp. Same eased `t` as the rect, so the radius
-  # tracks the size — a 12px library tile growing into a 360px album
-  # hero arrives at the album's authored radius exactly when the rect
-  # arrives at its dst. If either endpoint has no `CornerRadius`,
-  # `srcRadius` / `dstRadius` are 0.0 and the shader is skipped only
-  # at that endpoint (radius ≤ 0 → sharp).
-  let radius: Float = heroLerp(a: anim.srcRadius, b: anim.dstRadius, t: t)
-  let useRounded: Bool = radius > 0.0
-  if useRounded {
-    roundedSpriteBegin(width: drawW, height: drawH, radius: radius)
-  }
-  drawTextureEx(
-    texture: tex
-    pos: Vector2 { x: x + offX, y: y + offY }
-    rotation: 0.0
-    scale: scale
-    tint: tint
-  )
-  if useRounded {
-    roundedSpriteEnd()
+    # Corner-radius lerp. Same eased `t` as the rect, so the radius
+    # tracks the size — a 12px library tile growing into a 360px album
+    # hero arrives at the album's authored radius exactly when the rect
+    # arrives at its dst. If either endpoint has no `CornerRadius`,
+    # `srcRadius` / `dstRadius` are 0.0 and the shader is skipped only
+    # at that endpoint (radius ≤ 0 → sharp).
+    let radius: Float = heroLerp(a: anim.srcRadius, b: anim.dstRadius, t: t)
+    let useRounded: Bool = radius > 0.0
+    if useRounded {
+      roundedSpriteBegin(width: drawW, height: drawH, radius: radius)
+    }
+    drawTextureEx(
+      texture: tex
+      pos: Vector2 { x: x + offX, y: y + offY }
+      rotation: 0.0
+      scale: scale
+      tint: tint
+    )
+    if useRounded {
+      roundedSpriteEnd()
+    }
   }
 }
