@@ -159,12 +159,14 @@ func paletteReserve(arena: mod PaletteArena, jointCount: copy Int) pub ret Int {
 # `rows` is jointCount * 12 Floats — three vec4 rows per joint. A vec4 row is 16
 # bytes, which is what turns baseRow into the write offset.
 func uploadPaletteAt(rows: view List(Float), jointCount: copy Int, baseRow: copy Int) pub {
-  if gbSkinPaletteReady() is 0 { ret }
-  if baseRow < 0 { ret }
-  let paletteFloats: Int = jointCount * 12
-  wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: gbSkinPalette(),
-    bufferOffset: (baseRow * 16) as UInt64, data: rows.data,
-    size: (paletteFloats * 4) as UInt64)
+  unsafe {
+    if gbSkinPaletteReady() is 0 { ret }
+    if baseRow < 0 { ret }
+    let paletteFloats: Int = jointCount * 12
+    wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: gbSkinPalette(),
+      bufferOffset: (baseRow * 16) as UInt64, data: rows.data,
+      size: (paletteFloats * 4) as UInt64)
+  }
 }
 
 # Upload one character's joint palette into the shared skin palette buffer at a
@@ -176,11 +178,13 @@ func uploadPaletteAt(rows: view List(Float), jointCount: copy Int, baseRow: copy
 # buffer is created lazily by the first uploadPalette, so call that (slot 0) once
 # before uploading higher slots.
 func uploadPaletteSlot(rows: view List(Float), jointCount: copy Int, slot: copy Int) pub {
-  if gbSkinPaletteReady() is 0 { ret }
-  let paletteFloats: Int = jointCount * 12
-  wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: gbSkinPalette(),
-    bufferOffset: (slot * paletteFloats * 4) as UInt64, data: rows.data,
-    size: (paletteFloats * 4) as UInt64)
+  unsafe {
+    if gbSkinPaletteReady() is 0 { ret }
+    let paletteFloats: Int = jointCount * 12
+    wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: gbSkinPalette(),
+      bufferOffset: (slot * paletteFloats * 4) as UInt64, data: rows.data,
+      size: (paletteFloats * 4) as UInt64)
+  }
 }
 
 # Append one SKINNED instance that samples its OWN joint palette (#547): the same

@@ -26,7 +26,7 @@ open Math3d
 open Vec3
 open RendererDeferred
 
-func rae_ext_rae_mem_alloc_total() extern ret Int
+func rae_ext_rae_mem_alloc_total() unsafe extern ret Int
 
 func buildScene(objects: view Int) ret World3d {
   var world: World3d = createWorld3d()
@@ -55,43 +55,45 @@ func buildScene(objects: view Int) ret World3d {
 }
 
 func main() {
-  let objects: Int = 512
-  let frames: Int = 20
-  var world: World3d = buildScene(objects: objects)
-  let camera: Camera3d = defaultCamera3d()
-  let light: Light3d = defaultLight3d()
+  unsafe {
+    let objects: Int = 512
+    let frames: Int = 20
+    var world: World3d = buildScene(objects: objects)
+    let camera: Camera3d = defaultCamera3d()
+    let light: Light3d = defaultLight3d()
 
-  # The measured entry point is the WHOLE frame, not just the draw calls:
-  # renderDeferredFrame also walks the graph's derived order and reads a
-  # PassDesc per pass. That read is exactly the kind of thing that
-  # allocates without anyone noticing, so it belongs inside the
-  # measurement rather than outside it.
-  var renderer: DeferredRenderer = createDeferredRenderer()
-  let st: Int = compileDeferred(renderer: renderer)
+    # The measured entry point is the WHOLE frame, not just the draw calls:
+    # renderDeferredFrame also walks the graph's derived order and reads a
+    # PassDesc per pass. That read is exactly the kind of thing that
+    # allocates without anyone noticing, so it belongs inside the
+    # measurement rather than outside it.
+    var renderer: DeferredRenderer = createDeferredRenderer()
+    let st: Int = compileDeferred(renderer: renderer)
 
-  # One warm-up frame OUTSIDE the measurement. Anything a first call
-  # allocates once (lazy setup) is not a per-frame cost, and folding it
-  # into the sample would either fail the test for the wrong reason or,
-  # worse, hide a real per-object allocation behind a tolerance.
-  renderDeferredFrameWorld(renderer: renderer, world: world, camera: camera, light: light, aspect: 1.6)
-
-  let before: Int = rae_ext_rae_mem_alloc_total()
-  var f: Int = 0
-  loop f < frames {
+    # One warm-up frame OUTSIDE the measurement. Anything a first call
+    # allocates once (lazy setup) is not a per-frame cost, and folding it
+    # into the sample would either fail the test for the wrong reason or,
+    # worse, hide a real per-object allocation behind a tolerance.
     renderDeferredFrameWorld(renderer: renderer, world: world, camera: camera, light: light, aspect: 1.6)
-    f = f + 1
-  }
-  let allocations: Int = rae_ext_rae_mem_alloc_total() - before
 
-  log("graph status: {st}")
-  log("objects per frame: {objects}")
-  log("frames measured: {frames}")
-  log("allocations: {allocations}")
-  # Not "small", not "bounded" — zero. A per-object allocation would show
-  # up here as 10240 (512 x 20), so this number failing is unambiguous.
-  if allocations is 0 {
-    log("verdict: OK")
-  } else {
-    log("verdict: REGRESSED")
+    let before: Int = rae_ext_rae_mem_alloc_total()
+    var f: Int = 0
+    loop f < frames {
+      renderDeferredFrameWorld(renderer: renderer, world: world, camera: camera, light: light, aspect: 1.6)
+      f = f + 1
+    }
+    let allocations: Int = rae_ext_rae_mem_alloc_total() - before
+
+    log("graph status: {st}")
+    log("objects per frame: {objects}")
+    log("frames measured: {frames}")
+    log("allocations: {allocations}")
+    # Not "small", not "bounded" — zero. A per-object allocation would show
+    # up here as 10240 (512 x 20), so this number failing is unambiguous.
+    if allocations is 0 {
+      log("verdict: OK")
+    } else {
+      log("verdict: REGRESSED")
+    }
   }
 }

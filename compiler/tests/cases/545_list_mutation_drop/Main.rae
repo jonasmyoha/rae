@@ -5,7 +5,7 @@
 # without destroying their owned heap payloads.
 import String
 
-func rae_ext_rae_mem_stats_outstanding() extern ret Int
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
 
 func makeName(prefix: view String, i: view Int) ret String {
   let n: String = i.toString()
@@ -28,25 +28,27 @@ func mutateList(iter: view Int) {
 }
 
 func main() {
-  var i: Int = 0
-  loop i < 50 {
-    mutateList(iter: i)
-    i = i + 1
-  }
-  let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+  unsafe {
+    var i: Int = 0
+    loop i < 50 {
+      mutateList(iter: i)
+      i = i + 1
+    }
+    let baseline: Int = rae_ext_rae_mem_stats_outstanding()
 
-  let iterations: Int = 5000
-  i = 0
-  loop i < iterations {
-    mutateList(iter: i)
-    i = i + 1
-  }
+    let iterations: Int = 5000
+    i = 0
+    loop i < iterations {
+      mutateList(iter: i)
+      i = i + 1
+    }
 
-  let leaked: Int = rae_ext_rae_mem_stats_outstanding() - baseline
-  log("iterations: {iterations}")
-  if leaked < 100 {
-    log("verdict: OK")
-  } else {
-    log("verdict: LEAK outstanding={leaked}")
+    let leaked: Int = rae_ext_rae_mem_stats_outstanding() - baseline
+    log("iterations: {iterations}")
+    if leaked < 100 {
+      log("verdict: OK")
+    } else {
+      log("verdict: LEAK outstanding={leaked}")
+    }
   }
 }

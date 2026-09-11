@@ -61,35 +61,39 @@ func uiPointInEntity(world: view UiWorld, entity: view EntityId, x: view Float, 
 }
 
 func uiHitTestEntity(world: view UiWorld, entity: view EntityId, x: view Float, y: view Float) ret EntityId {
-  if uiEntityActive(world: world, entity: entity) is false { ret noEntity() }
-  if componentHas(this: world.childrens, entity: entity) {
-    let children: view Children => componentView(this: world.childrens, entity: entity)
-    var i: Int = children.ids.length - 1
-    loop i >= 0 {
-      let child: EntityId = rae_ext_rae_buf_get(buf: children.ids.data, index: i)
-      let hit: EntityId = uiHitTestEntity(world: world, entity: child, x: x, y: y)
-      if isNone(this: hit) is false { ret hit }
-      i = i - 1
+  unsafe {
+    if uiEntityActive(world: world, entity: entity) is false { ret noEntity() }
+    if componentHas(this: world.childrens, entity: entity) {
+      let children: view Children => componentView(this: world.childrens, entity: entity)
+      var i: Int = children.ids.length - 1
+      loop i >= 0 {
+        let child: EntityId = rae_ext_rae_buf_get(buf: children.ids.data, index: i)
+        let hit: EntityId = uiHitTestEntity(world: world, entity: child, x: x, y: y)
+        if isNone(this: hit) is false { ret hit }
+        i = i - 1
+      }
     }
+    if componentHas(this: world.onClicks, entity: entity) {
+      if uiPointInEntity(world: world, entity: entity, x: x, y: y) { ret entity }
+    }
+    ret noEntity()
   }
-  if componentHas(this: world.onClicks, entity: entity) {
-    if uiPointInEntity(world: world, entity: entity, x: x, y: y) { ret entity }
-  }
-  ret noEntity()
 }
 
 func uiHitTest(world: view UiWorld, x: view Float, y: view Float) pub ret EntityId {
-  let roots: List(EntityId) = collectPaintableRoots(world: world)
-  var i: Int = roots.length - 1
-  loop i >= 0 {
-    let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
-    if componentHas(this: world.layerRoots, entity: root) is false {
-      let hit: EntityId = uiHitTestEntity(world: world, entity: root, x: x, y: y)
-      if isNone(this: hit) is false { ret hit }
+  unsafe {
+    let roots: List(EntityId) = collectPaintableRoots(world: world)
+    var i: Int = roots.length - 1
+    loop i >= 0 {
+      let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
+      if componentHas(this: world.layerRoots, entity: root) is false {
+        let hit: EntityId = uiHitTestEntity(world: world, entity: root, x: x, y: y)
+        if isNone(this: hit) is false { ret hit }
+      }
+      i = i - 1
     }
-    i = i - 1
+    ret noEntity()
   }
-  ret noEntity()
 }
 
 func clearUiActions(input: mod UiInput) {

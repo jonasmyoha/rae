@@ -10,19 +10,23 @@ func appendEntityList(lst: mod List(EntityId), value: view EntityId) {
 }
 
 func entityListAt(lst: view List(EntityId), index: view Int) ret EntityId {
-  ret rae_ext_rae_buf_get(buf: lst.data, index: index)
+  unsafe {
+    ret rae_ext_rae_buf_get(buf: lst.data, index: index)
+  }
 }
 
 func swapRemoveEntityList(lst: mod List(EntityId), index: view Int) {
-  if index < 0 or index >= lst.length {
-    ret
+  unsafe {
+    if index < 0 or index >= lst.length {
+      ret
+    }
+    let last: Int = lst.length - 1
+    if index is not last {
+      let e: EntityId = entityListAt(lst: lst, index: last)
+      rae_ext_rae_buf_set(buf: lst.data, index: index, value: e)
+    }
+    lst.length = last
   }
-  let last: Int = lst.length - 1
-  if index is not last {
-    let e: EntityId = entityListAt(lst: lst, index: last)
-    rae_ext_rae_buf_set(buf: lst.data, index: index, value: e)
-  }
-  lst.length = last
 }
 
 func popLastEntity(lst: mod List(EntityId)) {
@@ -41,11 +45,15 @@ func appendIntList(lst: mod List(Int), value: view Int) {
 }
 
 func intListAt(lst: view List(Int), index: view Int) ret Int {
-  ret rae_ext_rae_buf_get(buf: lst.data, index: index)
+  unsafe {
+    ret rae_ext_rae_buf_get(buf: lst.data, index: index)
+  }
 }
 
 func setIntListAt(lst: mod List(Int), index: view Int, value: view Int) {
-  rae_ext_rae_buf_set(buf: lst.data, index: index, value: value)
+  unsafe {
+    rae_ext_rae_buf_set(buf: lst.data, index: index, value: value)
+  }
 }
 
 func swapRemoveIntList(lst: mod List(Int), index: view Int) {

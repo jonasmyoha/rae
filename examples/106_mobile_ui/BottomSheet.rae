@@ -51,9 +51,11 @@ func createBottomSheetState() pub ret BottomSheetState {
 # to hand to `openBottomSheet` from a transient call site without
 # worrying about caller-pool ownership.
 func mkSheetAction(label: view String, actionId: view String) pub ret BottomSheetAction {
-  ret BottomSheetAction {
-    label: rae_ext_rae_string_copy(s: label)
-    actionId: rae_ext_rae_string_copy(s: actionId)
+  unsafe {
+    ret BottomSheetAction {
+      label: rae_ext_rae_string_copy(s: label)
+      actionId: rae_ext_rae_string_copy(s: actionId)
+    }
   }
 }
 
@@ -93,72 +95,74 @@ func buildSheetActionRow(world: mod UiWorld, action: view BottomSheetAction, w: 
 # if you need to refresh after `openBottomSheet`. Tagged with
 # `PageRoot{bottomSheetPageId}` so the unmount path can find it.
 func addBottomSheetLayer(world: mod UiWorld, sheet: view BottomSheetState) pub {
-  if sheet.visible is false {
-    ret
+  unsafe {
+    if sheet.visible is false {
+      ret
+    }
+    let dialogLayerId: String = "dialog"
+    let transparent: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
+
+    # Page-root container so the unmount path can find this subtree.
+    let root: EntityId = createEntity(world: world)
+    setRectFixed(world: world, entity: root, w: phoneFrameW, h: phoneFrameH)
+    let copiedId: String = "{bottomSheetPageId}"
+    let pr: PageRoot = { id: own copiedId }
+    componentSet(this: world.pageRoots, entity: root, data: own pr)
+    setLayerById(world: world, entity: root, id: dialogLayerId)
+
+    # Scrim — full screen, tap-anywhere dismiss.
+    let scrim: EntityId = createEntity(world: world)
+    setRectFixed(world: world, entity: scrim, w: phoneFrameW, h: phoneFrameH)
+    let scrimFill: RgbaColor = { r: 0, g: 0, b: 0, a: 140 }
+    let scrimShape: Shape = {
+      kind: ShapeKind.rect
+      fill: scrimFill
+      stroke: transparent
+      strokeWidth: 0.0
+      radius: 0.0
+    }
+    componentSet(this: world.shapes, entity: scrim, data: scrimShape)
+    let dismissId: String = "{sheetDismissAction}"
+    setOnClick(world: world, entity: scrim, actionId: own dismissId)
+
+    # Panel — bottom-anchored, rounded top corners, action rows stacked.
+    let n: Int = sheet.actions.length
+    let panelW: Float = phoneFrameW
+    let panelH: Float = 52.04819277108433 + 121.44578313253011 * n.toFloat() + 52.04819277108433
+    let panel: EntityId = createEntity(world: world)
+    setRectFixed(world: world, entity: panel, w: panelW, h: panelH)
+    let panelFill: RgbaColor = colorByName(theme: world.theme.active, name: "surface")
+    let panelShape: Shape = {
+      kind: ShapeKind.roundedRect
+      fill: panelFill
+      stroke: transparent
+      strokeWidth: 0.0
+      radius: 52.04819277108433
+    }
+    componentSet(this: world.shapes, entity: panel, data: panelShape)
+    let panelOff: Offset = { delta: Vec2 { x: 0.0, y: phoneFrameH - panelH } }
+    componentSet(this: world.offsets, entity: panel, data: panelOff)
+    let layV: LayoutType = LayoutType.vertical
+    let alignS: AlignKind = AlignKind.start
+    setLayout(world: world, entity: panel, kind: layV, gap: 8.674698795180722, alignCross: alignS)  # spaceXS (full-precision literal; token is 6-dec)
+    setPaddingAll(world: world, entity: panel, n: 52.04819277108433)
+
+    let rowKids: List(EntityId) = List.create(EntityId, cap: n)
+    var i: Int = 0
+    loop i < n {
+      let a: BottomSheetAction = rae_ext_rae_buf_get(buf: sheet.actions.data, index: i)
+      let rowW: Float = panelW - 48.0
+      let row: EntityId = buildSheetActionRow(world: world, action: a, w: rowW)
+      rowKids.add(value: row)
+      i = i + 1
+    }
+    attachChildren(world: world, parent: panel, kids: rowKids)
+
+    let kids: List(EntityId) = List.create(EntityId, cap: 2)
+    kids.add(value: scrim)
+    kids.add(value: panel)
+    attachChildren(world: world, parent: root, kids: kids)
   }
-  let dialogLayerId: String = "dialog"
-  let transparent: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
-
-  # Page-root container so the unmount path can find this subtree.
-  let root: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: root, w: phoneFrameW, h: phoneFrameH)
-  let copiedId: String = "{bottomSheetPageId}"
-  let pr: PageRoot = { id: own copiedId }
-  componentSet(this: world.pageRoots, entity: root, data: own pr)
-  setLayerById(world: world, entity: root, id: dialogLayerId)
-
-  # Scrim — full screen, tap-anywhere dismiss.
-  let scrim: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: scrim, w: phoneFrameW, h: phoneFrameH)
-  let scrimFill: RgbaColor = { r: 0, g: 0, b: 0, a: 140 }
-  let scrimShape: Shape = {
-    kind: ShapeKind.rect
-    fill: scrimFill
-    stroke: transparent
-    strokeWidth: 0.0
-    radius: 0.0
-  }
-  componentSet(this: world.shapes, entity: scrim, data: scrimShape)
-  let dismissId: String = "{sheetDismissAction}"
-  setOnClick(world: world, entity: scrim, actionId: own dismissId)
-
-  # Panel — bottom-anchored, rounded top corners, action rows stacked.
-  let n: Int = sheet.actions.length
-  let panelW: Float = phoneFrameW
-  let panelH: Float = 52.04819277108433 + 121.44578313253011 * n.toFloat() + 52.04819277108433
-  let panel: EntityId = createEntity(world: world)
-  setRectFixed(world: world, entity: panel, w: panelW, h: panelH)
-  let panelFill: RgbaColor = colorByName(theme: world.theme.active, name: "surface")
-  let panelShape: Shape = {
-    kind: ShapeKind.roundedRect
-    fill: panelFill
-    stroke: transparent
-    strokeWidth: 0.0
-    radius: 52.04819277108433
-  }
-  componentSet(this: world.shapes, entity: panel, data: panelShape)
-  let panelOff: Offset = { delta: Vec2 { x: 0.0, y: phoneFrameH - panelH } }
-  componentSet(this: world.offsets, entity: panel, data: panelOff)
-  let layV: LayoutType = LayoutType.vertical
-  let alignS: AlignKind = AlignKind.start
-  setLayout(world: world, entity: panel, kind: layV, gap: 8.674698795180722, alignCross: alignS)  # spaceXS (full-precision literal; token is 6-dec)
-  setPaddingAll(world: world, entity: panel, n: 52.04819277108433)
-
-  let rowKids: List(EntityId) = List.create(EntityId, cap: n)
-  var i: Int = 0
-  loop i < n {
-    let a: BottomSheetAction = rae_ext_rae_buf_get(buf: sheet.actions.data, index: i)
-    let rowW: Float = panelW - 48.0
-    let row: EntityId = buildSheetActionRow(world: world, action: a, w: rowW)
-    rowKids.add(value: row)
-    i = i + 1
-  }
-  attachChildren(world: world, parent: panel, kids: rowKids)
-
-  let kids: List(EntityId) = List.create(EntityId, cap: 2)
-  kids.add(value: scrim)
-  kids.add(value: panel)
-  attachChildren(world: world, parent: root, kids: kids)
 }
 
 # Re-mount the sheet layer if `state.epoch` differs from

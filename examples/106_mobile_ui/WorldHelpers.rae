@@ -308,12 +308,14 @@ func setPaddingAll(world: mod UiWorld, entity: view EntityId, n: view Float) pub
 }
 
 func attachChildren(world: mod UiWorld, parent: view EntityId, kids: view List(EntityId)) pub {
-  # #726: set only the authoritative Parent link; HierarchySystem.setParent keeps
-  # the derived Children cache in lock-step, appending in call (= input) order.
-  var i: Int = 0
-  loop i < kids.length {
-    let kid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
-    setParent(parents: world.parents, childrens: world.childrens, child: kid, parent: parent)
-    i = i + 1
+  unsafe {
+    # #726: set only the authoritative Parent link; HierarchySystem.setParent keeps
+    # the derived Children cache in lock-step, appending in call (= input) order.
+    var i: Int = 0
+    loop i < kids.length {
+      let kid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
+      setParent(parents: world.parents, childrens: world.childrens, child: kid, parent: parent)
+      i = i + 1
+    }
   }
 }

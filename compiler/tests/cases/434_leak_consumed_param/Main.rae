@@ -18,7 +18,7 @@
 import String
 import Sys
 
-func rae_ext_rae_mem_stats_outstanding() extern ret Int
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
 
 type Foo {
   name: String
@@ -32,33 +32,35 @@ func consume(name: own String) {
 }
 
 func main() {
-  let warmups: Int = 50
-  var i: Int = 0
-  loop i < warmups {
-    let s: String = "warmup-".concat(other: "x")
-    consume(name: s)
-    i = i + 1
-  }
-  let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+  unsafe {
+    let warmups: Int = 50
+    var i: Int = 0
+    loop i < warmups {
+      let s: String = "warmup-".concat(other: "x")
+      consume(name: s)
+      i = i + 1
+    }
+    let baseline: Int = rae_ext_rae_mem_stats_outstanding()
 
-  let iterations: Int = 5000
-  i = 0
-  loop i < iterations {
-    let s: String = "msg-".concat(other: "x")
-    consume(name: s)
-    i = i + 1
-  }
-  let final: Int = rae_ext_rae_mem_stats_outstanding()
-  let leaked: Int = final - baseline
+    let iterations: Int = 5000
+    i = 0
+    loop i < iterations {
+      let s: String = "msg-".concat(other: "x")
+      consume(name: s)
+      i = i + 1
+    }
+    let final: Int = rae_ext_rae_mem_stats_outstanding()
+    let leaked: Int = final - baseline
 
-  log("iterations: {iterations}")
-  # Allow a tiny slop for one-shot interp/log allocations made
-  # by the test infrastructure itself. The leak this catches is
-  # ~1 allocation per call to consume, so 5000 iter * 1 = 5000
-  # outstanding under the param-leak bug.
-  if leaked < 100 {
-    log("verdict: OK")
-  } else {
-    log("verdict: LEAK outstanding={leaked}")
+    log("iterations: {iterations}")
+    # Allow a tiny slop for one-shot interp/log allocations made
+    # by the test infrastructure itself. The leak this catches is
+    # ~1 allocation per call to consume, so 5000 iter * 1 = 5000
+    # outstanding under the param-leak bug.
+    if leaked < 100 {
+      log("verdict: OK")
+    } else {
+      log("verdict: LEAK outstanding={leaked}")
+    }
   }
 }

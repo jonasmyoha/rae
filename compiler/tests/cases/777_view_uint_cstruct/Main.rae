@@ -3,7 +3,9 @@
 open webgpu/WebgpuTypes
 
 func createDescriptor(usage: view UInt64, mapped: view UInt32) ret WGPUBufferDescriptor {
-  ret WGPUBufferDescriptor { usage: usage, mappedAtCreation: mapped }
+  unsafe {
+    ret WGPUBufferDescriptor { usage: usage, mappedAtCreation: mapped }
+  }
 }
 
 func readUsage(usage: view UInt64) ret UInt64 {

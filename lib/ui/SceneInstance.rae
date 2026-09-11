@@ -95,7 +95,9 @@ func sceneRegistryHas(reg: view SceneRegistry, key: view String) ret Bool {
 # don't copy the underlying Scene struct (the JsonDoc pointers inside
 # don't survive a struct-by-list-index copy in the C backend).
 func sceneRegistryGet(reg: view SceneRegistry, idx: view Int) pub ret view Scene {
-  ret view rae_ext_rae_buf_get(buf: reg.scenes.data, index: idx)
+  unsafe {
+    ret view rae_ext_rae_buf_get(buf: reg.scenes.data, index: idx)
+  }
 }
 
 # -----------------------------------------------------------------
@@ -239,7 +241,9 @@ func isPlacementComponent(name: view String) ret Bool {
 }
 
 func appendEntityListSI(lst: mod List(EntityId), value: view EntityId) {
-  lst.add(value: value)
+  unsafe {
+    lst.add(value: value)
+  }
 }
 
 # Mount `scene` under `mountEntity`. Returns `mountEntity` on success,
@@ -283,119 +287,121 @@ func mountSceneInstanceIntoPage(
   overrides: view List(SceneOverride)
   pageId: view String
 ) pub ret EntityId {
-  if scene.ok is false {
-    ret noEntity()
-  }
-  let nodeCount: Int = scene.nodes.length
-  let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId)
-  if rootIdx < 0 {
-    ret noEntity()
-  }
-
-  # Pass 1: allocate entities. The scene's root maps to `mountEntity`;
-  # every other node gets a fresh entity.
-  let entitiesByNodeIndex: List(EntityId) = List.create(EntityId, cap: nodeCount)
-  let nodeIdsMap: mod StringMap(Int) => world.nodeIds
-  var i: Int = 0
-  loop i < nodeCount {
-    let node: view SceneNode => nodeAt(this: scene, idx: i)
-    # Explicit struct construction (not `let entity: EntityId =
-    # mountEntity`) — the Live VM treats the latter as a view-ref
-    # bind and then refuses the reassignment on the next branch.
-    var entity: EntityId = { index: mountEntity.index, generation: mountEntity.generation }
-    if i is not rootIdx {
-      entity = createEntity(world: world)
+  unsafe {
+    if scene.ok is false {
+      ret noEntity()
     }
-    appendEntityListSI(lst: entitiesByNodeIndex, value: entity)
-    if pageId.length() is 0 {
-      nodeIdsMap.set(k: node.nodeId, value: entity.index)
-    } else {
-      let key: String = pageScopedKey(pageId: pageId, nodeId: node.nodeId)
-      nodeIdsMap.set(k: key, value: entity.index)
+    let nodeCount: Int = scene.nodes.length
+    let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId)
+    if rootIdx < 0 {
+      ret noEntity()
     }
-    i = i + 1
-  }
 
-  # NOTE: tagging mountEntity with PageRoot moved out of here in
-  # slice 4b — callers tag explicitly when they own the page.
-
-  # Pass 2: apply components. For the scene's root node we skip
-  # placement components — those belong to the mount entity. Other
-  # nodes get all their components applied via `applyComponentByName`.
-  let docView: view JsonDoc => scene.doc
-  var j: Int = 0
-  loop j < nodeCount {
-    let node: view SceneNode => nodeAt(this: scene, idx: j)
-    let entity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: j)
-    let isRoot: Bool = j is rootIdx
-
-    let bag: JsonValue = Json.jsonValueAt(doc: docView, idx: node.componentsValueIdx)
-    let keyCount: Int = Json.objectLen(this: bag)
-    var k: Int = 0
-    loop k < keyCount {
-      let key: String = Json.objectKeyAt(doc: docView, this: bag, idx: k)
-      let childrenKey: String = "Children"
-      var skip: Bool = false
-      if key is childrenKey {
-        skip = true
+    # Pass 1: allocate entities. The scene's root maps to `mountEntity`;
+    # every other node gets a fresh entity.
+    let entitiesByNodeIndex: List(EntityId) = List.create(EntityId, cap: nodeCount)
+    let nodeIdsMap: mod StringMap(Int) => world.nodeIds
+    var i: Int = 0
+    loop i < nodeCount {
+      let node: view SceneNode => nodeAt(this: scene, idx: i)
+      # Explicit struct construction (not `let entity: EntityId =
+      # mountEntity`) — the Live VM treats the latter as a view-ref
+      # bind and then refuses the reassignment on the next branch.
+      var entity: EntityId = { index: mountEntity.index, generation: mountEntity.generation }
+      if i is not rootIdx {
+        entity = createEntity(world: world)
       }
-      if isRoot {
-        if isPlacementComponent(name: key) {
+      appendEntityListSI(lst: entitiesByNodeIndex, value: entity)
+      if pageId.length() is 0 {
+        nodeIdsMap.set(k: node.nodeId, value: entity.index)
+      } else {
+        let key: String = pageScopedKey(pageId: pageId, nodeId: node.nodeId)
+        nodeIdsMap.set(k: key, value: entity.index)
+      }
+      i = i + 1
+    }
+
+    # NOTE: tagging mountEntity with PageRoot moved out of here in
+    # slice 4b — callers tag explicitly when they own the page.
+
+    # Pass 2: apply components. For the scene's root node we skip
+    # placement components — those belong to the mount entity. Other
+    # nodes get all their components applied via `applyComponentByName`.
+    let docView: view JsonDoc => scene.doc
+    var j: Int = 0
+    loop j < nodeCount {
+      let node: view SceneNode => nodeAt(this: scene, idx: j)
+      let entity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: j)
+      let isRoot: Bool = j is rootIdx
+
+      let bag: JsonValue = Json.jsonValueAt(doc: docView, idx: node.componentsValueIdx)
+      let keyCount: Int = Json.objectLen(this: bag)
+      var k: Int = 0
+      loop k < keyCount {
+        let key: String = Json.objectKeyAt(doc: docView, this: bag, idx: k)
+        let childrenKey: String = "Children"
+        var skip: Bool = false
+        if key is childrenKey {
           skip = true
         }
-      }
-      if skip is false {
-        let valueAtKey: JsonValue = Json.objectValueAt(doc: docView, this: bag, idx: k)
-        applyComponentByName(
-          world: world
-          entity: entity
-          name: key
-          doc: docView
-          val: valueAtKey
-        )
-      }
-      k = k + 1
-    }
-    j = j + 1
-  }
-
-  # Pass 3: build hierarchy (Children + Parent).
-  var p: Int = 0
-  loop p < nodeCount {
-    let node: view SceneNode => nodeAt(this: scene, idx: p)
-    let parentEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
-    let kn: Int = node.childrenIds.length
-    var q: Int = 0
-    loop q < kn {
-      if let childId: String = node.childrenIds.copyAt(index: q) {
-        let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
-        if childIdx >= 0 {
-          let childEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: childIdx)
-          # #726: set only Parent; HierarchySystem.setParent keeps the derived
-          # Children cache in lock-step (authored order via call order).
-          setParent(parents: world.parents, childrens: world.childrens,
-                    child: childEntity, parent: parentEntity)
+        if isRoot {
+          if isPlacementComponent(name: key) {
+            skip = true
+          }
         }
+        if skip is false {
+          let valueAtKey: JsonValue = Json.objectValueAt(doc: docView, this: bag, idx: k)
+          applyComponentByName(
+            world: world
+            entity: entity
+            name: key
+            doc: docView
+            val: valueAtKey
+          )
+        }
+        k = k + 1
       }
-      q = q + 1
+      j = j + 1
     }
-    p = p + 1
-  }
 
-  # Pass 4: apply overrides.
-  let on: Int = overrides.length
-  var oi: Int = 0
-  loop oi < on {
-    let o: SceneOverride = rae_ext_rae_buf_get(buf: overrides.data, index: oi)
-    let nodeIdx: Int = sceneNodeIndex(this: scene, nodeId: o.nodeId)
-    if nodeIdx >= 0 {
-      let targetEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: nodeIdx)
-      applyOverride(world: world, entity: targetEntity, override: o)
+    # Pass 3: build hierarchy (Children + Parent).
+    var p: Int = 0
+    loop p < nodeCount {
+      let node: view SceneNode => nodeAt(this: scene, idx: p)
+      let parentEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
+      let kn: Int = node.childrenIds.length
+      var q: Int = 0
+      loop q < kn {
+        if let childId: String = node.childrenIds.copyAt(index: q) {
+          let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
+          if childIdx >= 0 {
+            let childEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: childIdx)
+            # #726: set only Parent; HierarchySystem.setParent keeps the derived
+            # Children cache in lock-step (authored order via call order).
+            setParent(parents: world.parents, childrens: world.childrens,
+                      child: childEntity, parent: parentEntity)
+          }
+        }
+        q = q + 1
+      }
+      p = p + 1
     }
-    oi = oi + 1
-  }
 
-  ret mountEntity
+    # Pass 4: apply overrides.
+    let on: Int = overrides.length
+    var oi: Int = 0
+    loop oi < on {
+      let o: SceneOverride = rae_ext_rae_buf_get(buf: overrides.data, index: oi)
+      let nodeIdx: Int = sceneNodeIndex(this: scene, nodeId: o.nodeId)
+      if nodeIdx >= 0 {
+        let targetEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: nodeIdx)
+        applyOverride(world: world, entity: targetEntity, override: o)
+      }
+      oi = oi + 1
+    }
+
+    ret mountEntity
+  }
 }
 
 # Apply a single SceneOverride to an entity. Currently supports:
@@ -414,35 +420,37 @@ func mountSceneInstanceIntoPage(
 # method-overload resolution currently confuses `String.toInt` with
 # `Float.toInt` when chained off `List(String).get`.
 func parseRgbaString(text: view String) ret RgbaColor {
-  let comma: String = ","
-  let parts: List(String) = text.split(sep: comma)
-  var r: Int = 0
-  var g: Int = 0
-  var b: Int = 0
-  var a: Int = 255
-  if parts.length > 0 {
-    if let rs: String = parts.copyAt(index: 0) {
-      r = rae_str_to_i64(text: rs)
+  unsafe {
+    let comma: String = ","
+    let parts: List(String) = text.split(sep: comma)
+    var r: Int = 0
+    var g: Int = 0
+    var b: Int = 0
+    var a: Int = 255
+    if parts.length > 0 {
+      if let rs: String = parts.copyAt(index: 0) {
+        r = rae_str_to_i64(text: rs)
+      }
     }
-  }
-  if parts.length > 1 {
-    if let gs: String = parts.copyAt(index: 1) {
-      g = rae_str_to_i64(text: gs)
+    if parts.length > 1 {
+      if let gs: String = parts.copyAt(index: 1) {
+        g = rae_str_to_i64(text: gs)
+      }
     }
-  }
-  if parts.length > 2 {
-    if let bs: String = parts.copyAt(index: 2) {
-      b = rae_str_to_i64(text: bs)
+    if parts.length > 2 {
+      if let bs: String = parts.copyAt(index: 2) {
+        b = rae_str_to_i64(text: bs)
+      }
     }
-  }
-  if parts.length > 3 {
-    # `as` is now a keyword (explicit conversion), so this alpha component
-    # string follows the rs/gs/bs naming instead.
-    if let alphaStr: String = parts.copyAt(index: 3) {
-      a = rae_str_to_i64(text: alphaStr)
+    if parts.length > 3 {
+      # `as` is now a keyword (explicit conversion), so this alpha component
+      # string follows the rs/gs/bs naming instead.
+      if let alphaStr: String = parts.copyAt(index: 3) {
+        a = rae_str_to_i64(text: alphaStr)
+      }
     }
+    ret RgbaColor { r: r, g: g, b: b, a: a }
   }
-  ret RgbaColor { r: r, g: g, b: b, a: a }
 }
 
 func applyOverride(world: mod UiWorld, entity: view EntityId, override: view SceneOverride) {
