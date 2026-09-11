@@ -746,7 +746,7 @@ pretending repository-wide enforcement is complete:
 
    Migration progress: generated WebGPU bindings adopted the boundary (#893).
    The bounded non-renderer interop surface adopted it too (#894): `core`,
-   `String`, `Math`, `Time`, `Io`, `Sys`, `Channel`, `Filesystem`/`Fs`, `Image`,
+   `String`, `Math`, `Time`, `Io`, `Sys`, `Channel`, `Filesystem`/`Files`, `Image`,
    `Tinyexpr`, `compress/Oracle`, `sys/Spotify`, `HotReload` and the
    `ui/SceneFile` / `Scene3dFile` serialization bridges. Every extern in those
    modules now spells `unsafe extern`; each safe wrapper keeps its ordinary
