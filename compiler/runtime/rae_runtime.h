@@ -1031,7 +1031,16 @@ void* rae_g2d_decode_image(rae_String path);
 int64_t rae_g2d_decoded_width(void);
 int64_t rae_g2d_decoded_height(void);
 void rae_g2d_decode_free(void* rgba);
-void rae_ext_Gpu2d_flush(void);
+/* #909: the text pass is Rae; C keeps the per-atlas glyph batch + the CPU atlas pixels. */
+int64_t rae_g2d_text_atlas_max(void);
+int64_t rae_g2d_text_floats(void);
+int64_t rae_g2d_text_count(int64_t ai);
+void* rae_g2d_text_data(int64_t ai);
+int64_t rae_g2d_text_clip_at(int64_t ai, int64_t i);
+void rae_g2d_text_reset(int64_t ai);
+void* rae_sdf_atlas_pixels(int64_t handle);
+int64_t rae_sdf_atlas_width(int64_t handle);
+int64_t rae_sdf_atlas_height(int64_t handle);
 /* Procedural texture registration (#539): upload RGBA pixels generated in Rae. */
 void* rae_gb_view_a(void);
 void* rae_gb_view_b(void);

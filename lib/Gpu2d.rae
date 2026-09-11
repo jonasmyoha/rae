@@ -357,13 +357,12 @@ func lastPresentOk() ret Bool {
 # Flush queued primitives into the active render pass without ending the
 # frame. Use this when painter order must be preserved across primitive
 # pipelines (for example: image, then later shape, then text). Order within a
-# flush: boxes (the Rae box pass, #907), then images (#908), then text (C).
-func nativeFlush() unsafe extern("rae_ext_Gpu2d_flush")
+# flush: boxes (the Rae box pass, #907), then images (#908), then text (#909).
 func flush(canvas: mod Gpu2dCanvas) {
   g2dPrepareFlush(imagesPending: canvas.imageCommandHandles.length)
   boxFlush(canvas: canvas)
   imageFlush(canvas: canvas)
-  unsafe { nativeFlush() }
+  textFlush(canvas: canvas)
 }
 
 # --- 2D primitives (#110, Box uber-shader) -------------------------------
