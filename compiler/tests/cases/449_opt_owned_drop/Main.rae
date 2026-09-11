@@ -6,7 +6,7 @@
 import String
 import Sys
 
-func rae_ext_rae_mem_stats_outstanding() extern ret Int
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
 
 type Holder {
   value: String
@@ -58,31 +58,33 @@ func scenario(seed: view Int) {
 }
 
 func main() {
-  let present: opt String = maybeString(flag: true, seed: 1)
-  let absent: opt String = maybeString(flag: false, seed: 2)
-  let moved: opt String = moveOptional(seed: 3)
-  log("present={present is not none} absent={absent is not none} moved={moved is not none}")
+  unsafe {
+    let present: opt String = maybeString(flag: true, seed: 1)
+    let absent: opt String = maybeString(flag: false, seed: 2)
+    let moved: opt String = moveOptional(seed: 3)
+    log("present={present is not none} absent={absent is not none} moved={moved is not none}")
 
-  var warm: Int = 0
-  loop warm < 50 {
-    scenario(seed: warm)
-    warm = warm + 1
-  }
-  let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+    var warm: Int = 0
+    loop warm < 50 {
+      scenario(seed: warm)
+      warm = warm + 1
+    }
+    let baseline: Int = rae_ext_rae_mem_stats_outstanding()
 
-  let iterations: Int = 3000
-  var i: Int = 0
-  loop i < iterations {
-    scenario(seed: i)
-    i = i + 1
-  }
+    let iterations: Int = 3000
+    var i: Int = 0
+    loop i < iterations {
+      scenario(seed: i)
+      i = i + 1
+    }
 
-  let final: Int = rae_ext_rae_mem_stats_outstanding()
-  let leaked: Int = final - baseline
-  log("iterations: {iterations}")
-  if leaked < 100 {
-    log("verdict: OK")
-  } else {
-    log("verdict: LEAK outstanding={leaked}")
+    let final: Int = rae_ext_rae_mem_stats_outstanding()
+    let leaked: Int = final - baseline
+    log("iterations: {iterations}")
+    if leaked < 100 {
+      log("verdict: OK")
+    } else {
+      log("verdict: LEAK outstanding={leaked}")
+    }
   }
 }

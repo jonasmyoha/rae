@@ -95,42 +95,44 @@ func entityLayerOrder(world: view UiWorld, entity: view EntityId) pub ret Int {
 # Layer order. Used by both `renderSystem` (painter's algorithm) and
 # the input hit-test (which walks the result in reverse).
 func collectPaintableRoots(world: view UiWorld) pub ret List(EntityId) {
-  let roots: List(EntityId) = List.create(EntityId, cap: 16)
-  let alive: view List(EntityId) => world.allocator.alive
-  let n: Int = alive.length
-  var i: Int = 0
-  loop i < n {
-    let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
-    if componentHas(this: world.parents, entity: e) is false {
-      if componentHas(this: world.worldTransforms, entity: e) {
-        roots.add(value: e)
+  unsafe {
+    let roots: List(EntityId) = List.create(EntityId, cap: 16)
+    let alive: view List(EntityId) => world.allocator.alive
+    let n: Int = alive.length
+    var i: Int = 0
+    loop i < n {
+      let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
+      if componentHas(this: world.parents, entity: e) is false {
+        if componentHas(this: world.worldTransforms, entity: e) {
+          roots.add(value: e)
+        }
       }
+      i = i + 1
     }
-    i = i + 1
-  }
-  let m: Int = roots.length
-  var outer: Int = 0
-  loop outer < m {
-    var minIdx: Int = outer
-    let outerE: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: outer)
-    var minOrd: Int = entityLayerOrder(world: world, entity: outerE)
-    var inner: Int = outer + 1
-    loop inner < m {
-      let innerE: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: inner)
-      let ord: Int = entityLayerOrder(world: world, entity: innerE)
-      if ord < minOrd {
-        minIdx = inner
-        minOrd = ord
+    let m: Int = roots.length
+    var outer: Int = 0
+    loop outer < m {
+      var minIdx: Int = outer
+      let outerE: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: outer)
+      var minOrd: Int = entityLayerOrder(world: world, entity: outerE)
+      var inner: Int = outer + 1
+      loop inner < m {
+        let innerE: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: inner)
+        let ord: Int = entityLayerOrder(world: world, entity: innerE)
+        if ord < minOrd {
+          minIdx = inner
+          minOrd = ord
+        }
+        inner = inner + 1
       }
-      inner = inner + 1
+      if minIdx is not outer {
+        let a: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: outer)
+        let b: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: minIdx)
+        rae_ext_rae_buf_set(buf: roots.data, index: outer, value: b)
+        rae_ext_rae_buf_set(buf: roots.data, index: minIdx, value: a)
+      }
+      outer = outer + 1
     }
-    if minIdx is not outer {
-      let a: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: outer)
-      let b: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: minIdx)
-      rae_ext_rae_buf_set(buf: roots.data, index: outer, value: b)
-      rae_ext_rae_buf_set(buf: roots.data, index: minIdx, value: a)
-    }
-    outer = outer + 1
+    ret roots
   }
-  ret roots
 }

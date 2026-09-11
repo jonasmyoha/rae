@@ -183,3 +183,9 @@ module that becomes manager-owned wraps its remaining genuine-platform calls
 naturally, as water/grass did). `#877` must therefore run only after #904/#905/
 #906 and #907–#910. One dead adapter noted for removal there: `setShadowAmbient`
 (`rae_sm_set_shadow_ambient`) has zero call sites.
+
+**#877 update:** the boundary is now unconditional (see `docs/unsafe-boundary.md`).
+The render/2D modules listed above were made #868-clean as part of #877 itself
+(public APIs became safe wrappers over renamed `native*` externs; internal
+Ptr-handling functions wrap at their source site), so #904–#910 inherit
+already-clean modules rather than owning the migration.

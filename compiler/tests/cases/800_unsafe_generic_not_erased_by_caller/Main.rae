@@ -1,0 +1,12 @@
+# A generic function's raw operation keeps its own obligation: instantiating it
+# from inside the caller's `unsafe { }` block must NOT erase it (#877).
+func pick(T: type, items: view List(T), index: view Int) ret T {
+  ret rae_ext_rae_buf_get(buf: items.data, index: index)
+}
+
+func main() {
+  let xs: List(Int) = { 7, 8, 9 }
+  var chosen: Int = 0
+  unsafe { chosen = pick(Int, items: xs, index: 1) }
+  log("{chosen}")
+}

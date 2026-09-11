@@ -20,48 +20,52 @@ func emitRun(font: view SdfFont, text: view String, x: copy Float, y: copy Float
 
 # Allocation-free subset emitter used by word wrapping. `end` is exclusive.
 func emitRange(font: view SdfFont, text: view String, start: copy Int, end: copy Int, x: copy Float, y: copy Float, sizePx: copy Float, color: copy Int, outlineWidth: copy Float, outlineColor: copy Int, softness: copy Float) ret Float {
-    let scale: Float = sizePx / font.emSize
-    let aw: Float = font.atlasWidth
-    let ah: Float = font.atlasHeight
-    var pen: Float = x
-    var i: Int = start
-    loop i < end {
-        let cp: Int = text.at(index: i).toInt()
-        let gi: Int = SdfText.sdfGlyphIndex(font: font, cp: cp)
-        if gi >= 0 {
-            let g: SdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: gi)
-            if g.hasBounds {
-                let sx0: Float = pen + g.planeLeft * scale
-                let sx1: Float = pen + g.planeRight * scale
-                let sy0: Float = y - g.planeTop * scale
-                let sy1: Float = y - g.planeBottom * scale
-                # atlasBounds are bottom-left origin; flip V to the top-left image,
-                # then normalise into [0,1] for the GPU sampler.
-                let u0: Float = g.atlasLeft / aw
-                let u1: Float = g.atlasRight / aw
-                let v0: Float = (ah - g.atlasTop) / ah
-                let v1: Float = (ah - g.atlasBottom) / ah
-                let glyphH: Float = g.atlasTop - g.atlasBottom
-                var spr: Float = 1.0
-                if glyphH > 0.0 { spr = font.pxRange * (sy1 - sy0) / glyphH }
-                if spr < 1.0 { spr = 1.0 }
-                Gpu2d.drawGlyphEx(sx0: sx0, sy0: sy0, sx1: sx1, sy1: sy1,
-                                  u0: u0, v0: v0, u1: u1, v1: v1,
-                                  atlas: font.atlas, pxRange: spr, color: color,
-                                  outlineWidth: outlineWidth, outlineColor: outlineColor, softness: softness)
-            }
-            pen = pen + g.advance * scale
-        }
-        i = i + SdfText.sdfUtf8ByteWidth(cp: cp)
-    }
-    ret pen
+  unsafe {
+      let scale: Float = sizePx / font.emSize
+      let aw: Float = font.atlasWidth
+      let ah: Float = font.atlasHeight
+      var pen: Float = x
+      var i: Int = start
+      loop i < end {
+          let cp: Int = text.at(index: i).toInt()
+          let gi: Int = SdfText.sdfGlyphIndex(font: font, cp: cp)
+          if gi >= 0 {
+              let g: SdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: gi)
+              if g.hasBounds {
+                  let sx0: Float = pen + g.planeLeft * scale
+                  let sx1: Float = pen + g.planeRight * scale
+                  let sy0: Float = y - g.planeTop * scale
+                  let sy1: Float = y - g.planeBottom * scale
+                  # atlasBounds are bottom-left origin; flip V to the top-left image,
+                  # then normalise into [0,1] for the GPU sampler.
+                  let u0: Float = g.atlasLeft / aw
+                  let u1: Float = g.atlasRight / aw
+                  let v0: Float = (ah - g.atlasTop) / ah
+                  let v1: Float = (ah - g.atlasBottom) / ah
+                  let glyphH: Float = g.atlasTop - g.atlasBottom
+                  var spr: Float = 1.0
+                  if glyphH > 0.0 { spr = font.pxRange * (sy1 - sy0) / glyphH }
+                  if spr < 1.0 { spr = 1.0 }
+                  Gpu2d.drawGlyphEx(sx0: sx0, sy0: sy0, sx1: sx1, sy1: sy1,
+                                    u0: u0, v0: v0, u1: u1, v1: v1,
+                                    atlas: font.atlas, pxRange: spr, color: color,
+                                    outlineWidth: outlineWidth, outlineColor: outlineColor, softness: softness)
+              }
+              pen = pen + g.advance * scale
+          }
+          i = i + SdfText.sdfUtf8ByteWidth(cp: cp)
+      }
+      ret pen
+  }
 }
 
 func glyphAdvance(font: view SdfFont, cp: view Int, sizePx: view Float) ret Float {
-    let gi: Int = SdfText.sdfGlyphIndex(font: font, cp: cp)
-    if gi < 0 { ret 0.0 }
-    let glyph: SdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: gi)
-    ret glyph.advance * (sizePx / font.emSize)
+  unsafe {
+      let gi: Int = SdfText.sdfGlyphIndex(font: font, cp: cp)
+      if gi < 0 { ret 0.0 }
+      let glyph: SdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: gi)
+      ret glyph.advance * (sizePx / font.emSize)
+  }
 }
 
 # Draw allocation-free word-wrapped text. Wrapping occurs at spaces where

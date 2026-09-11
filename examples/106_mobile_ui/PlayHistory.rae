@@ -50,15 +50,17 @@ func createPlayHistory(cap: view Int) pub ret PlayHistory {
 }
 
 func copyHistoryEntryWithArt(entry: view PlayHistoryEntry, artworkUrl: view String, textureKey: view String) ret PlayHistoryEntry {
-  ret PlayHistoryEntry {
-    trackName: rae_ext_rae_string_copy(s: entry.trackName)
-    artistName: rae_ext_rae_string_copy(s: entry.artistName)
-    albumName: rae_ext_rae_string_copy(s: entry.albumName)
-    albumStem: rae_ext_rae_string_copy(s: entry.albumStem)
-    artworkUrl: rae_ext_rae_string_copy(s: artworkUrl)
-    textureKey: rae_ext_rae_string_copy(s: textureKey)
-    durationSec: entry.durationSec
-    playedAt: entry.playedAt
+  unsafe {
+    ret PlayHistoryEntry {
+      trackName: rae_ext_rae_string_copy(s: entry.trackName)
+      artistName: rae_ext_rae_string_copy(s: entry.artistName)
+      albumName: rae_ext_rae_string_copy(s: entry.albumName)
+      albumStem: rae_ext_rae_string_copy(s: entry.albumStem)
+      artworkUrl: rae_ext_rae_string_copy(s: artworkUrl)
+      textureKey: rae_ext_rae_string_copy(s: textureKey)
+      durationSec: entry.durationSec
+      playedAt: entry.playedAt
+    }
   }
 }
 
@@ -78,60 +80,62 @@ func historySameSong(a: view PlayHistoryEntry, b: view PlayHistoryEntry) ret Boo
 # repeated row pointed at the same cached image instead of leaving stale grey
 # placeholders behind.
 func normalizePlayHistoryArtwork(history: mod PlayHistory) pub ret Bool {
-  var changed: Bool = false
-  let n: Int = history.entries.length
-  var i: Int = 0
-  loop i < n {
-    let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
-    var bestUrl: String = "{e.artworkUrl}"
-    var bestKey: String = "{e.textureKey}"
-    if bestKey.length() is 0 {
-      if bestUrl.length() > 0 {
-        bestKey = cachedArtworkKeyFromUrl(url: bestUrl)
-      }
-    }
-    var j: Int = n - 1
-    loop j >= 0 {
-      if bestUrl.length() > 0 {
-        if bestKey.length() > 0 {
-          j = -1
+  unsafe {
+    var changed: Bool = false
+    let n: Int = history.entries.length
+    var i: Int = 0
+    loop i < n {
+      let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
+      var bestUrl: String = "{e.artworkUrl}"
+      var bestKey: String = "{e.textureKey}"
+      if bestKey.length() is 0 {
+        if bestUrl.length() > 0 {
+          bestKey = cachedArtworkKeyFromUrl(url: bestUrl)
         }
       }
-      if j >= 0 {
-        let other: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: j)
-        if historySameSong(a: e, b: other) {
-          if bestUrl.length() is 0 {
-            if other.artworkUrl.length() > 0 {
-              bestUrl = "{other.artworkUrl}"
-            }
+      var j: Int = n - 1
+      loop j >= 0 {
+        if bestUrl.length() > 0 {
+          if bestKey.length() > 0 {
+            j = -1
           }
-          if bestKey.length() is 0 {
-            if other.textureKey.length() > 0 {
-              bestKey = "{other.textureKey}"
-            } else {
+        }
+        if j >= 0 {
+          let other: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: j)
+          if historySameSong(a: e, b: other) {
+            if bestUrl.length() is 0 {
               if other.artworkUrl.length() > 0 {
-                bestKey = cachedArtworkKeyFromUrl(url: other.artworkUrl)
+                bestUrl = "{other.artworkUrl}"
+              }
+            }
+            if bestKey.length() is 0 {
+              if other.textureKey.length() > 0 {
+                bestKey = "{other.textureKey}"
+              } else {
+                if other.artworkUrl.length() > 0 {
+                  bestKey = cachedArtworkKeyFromUrl(url: other.artworkUrl)
+                }
               }
             }
           }
+          j = j - 1
         }
-        j = j - 1
       }
-    }
-    if bestUrl is e.artworkUrl is false {
-      let updated: PlayHistoryEntry = copyHistoryEntryWithArt(entry: e, artworkUrl: bestUrl, textureKey: bestKey)
-      history.entries.set(index: i, value: own updated)
-      changed = true
-    } else {
-      if bestKey is e.textureKey is false {
+      if bestUrl is e.artworkUrl is false {
         let updated: PlayHistoryEntry = copyHistoryEntryWithArt(entry: e, artworkUrl: bestUrl, textureKey: bestKey)
         history.entries.set(index: i, value: own updated)
         changed = true
+      } else {
+        if bestKey is e.textureKey is false {
+          let updated: PlayHistoryEntry = copyHistoryEntryWithArt(entry: e, artworkUrl: bestUrl, textureKey: bestKey)
+          history.entries.set(index: i, value: own updated)
+          changed = true
+        }
       }
+      i = i + 1
     }
-    i = i + 1
+    ret changed
   }
-  ret changed
 }
 
 # Find a local album whose tracks include one matching `trackName`
@@ -141,22 +145,24 @@ func normalizePlayHistoryArtwork(history: mod PlayHistory) pub ret Bool {
 # catalogue is small and titles are author-controlled, so the strict
 # `.equals` is fine for v1.
 func historyMatchLocalStem(albums: view List(Album), trackName: view String, artistName: view String) pub ret String {
-  var i: Int = 0
-  loop i < albums.length {
-    let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
-    if a.artist is artistName {
-      var j: Int = 0
-      loop j < a.tracks.length {
-        let t: Track = rae_ext_rae_buf_get(buf: a.tracks.data, index: j)
-        if t.title is trackName {
-          ret "{a.stem}"
+  unsafe {
+    var i: Int = 0
+    loop i < albums.length {
+      let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
+      if a.artist is artistName {
+        var j: Int = 0
+        loop j < a.tracks.length {
+          let t: Track = rae_ext_rae_buf_get(buf: a.tracks.data, index: j)
+          if t.title is trackName {
+            ret "{a.stem}"
+          }
+          j = j + 1
         }
-        j = j + 1
       }
+      i = i + 1
     }
-    i = i + 1
+    ret ""
   }
-  ret ""
 }
 
 # Push an entry onto the history. De-duplicates only against the
@@ -176,33 +182,35 @@ func historyMatchLocalStem(albums: view List(Album), trackName: view String, art
 # the pool doesn't track. The list then owns Strings that survive
 # any number of caller-side pool flushes.
 func recordPlay(history: mod PlayHistory, entry: own PlayHistoryEntry) pub {
-  var entryTextureKey: String = "{entry.textureKey}"
-  if entryTextureKey.length() is 0 {
-    if entry.artworkUrl.length() > 0 {
-      entryTextureKey = cachedArtworkKeyFromUrl(url: entry.artworkUrl)
+  unsafe {
+    var entryTextureKey: String = "{entry.textureKey}"
+    if entryTextureKey.length() is 0 {
+      if entry.artworkUrl.length() > 0 {
+        entryTextureKey = cachedArtworkKeyFromUrl(url: entry.artworkUrl)
+      }
     }
-  }
-  let n: Int = history.entries.length
-  if n > 0 {
-    let last: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: n - 1)
-    if last.trackName is entry.trackName {
-      if last.artistName is entry.artistName {
-        if last.textureKey is entryTextureKey {
-          ret
+    let n: Int = history.entries.length
+    if n > 0 {
+      let last: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: n - 1)
+      if last.trackName is entry.trackName {
+        if last.artistName is entry.artistName {
+          if last.textureKey is entryTextureKey {
+            ret
+          }
         }
       }
     }
+    let owned: PlayHistoryEntry = {
+      trackName: rae_ext_rae_string_copy(s: entry.trackName)
+      artistName: rae_ext_rae_string_copy(s: entry.artistName)
+      albumName: rae_ext_rae_string_copy(s: entry.albumName)
+      albumStem: rae_ext_rae_string_copy(s: entry.albumStem)
+      artworkUrl: rae_ext_rae_string_copy(s: entry.artworkUrl)
+      textureKey: rae_ext_rae_string_copy(s: entryTextureKey)
+      durationSec: entry.durationSec
+      playedAt: entry.playedAt
+    }
+    history.entries.add(value: own owned)
+    normalizePlayHistoryArtwork(history: history)
   }
-  let owned: PlayHistoryEntry = {
-    trackName: rae_ext_rae_string_copy(s: entry.trackName)
-    artistName: rae_ext_rae_string_copy(s: entry.artistName)
-    albumName: rae_ext_rae_string_copy(s: entry.albumName)
-    albumStem: rae_ext_rae_string_copy(s: entry.albumStem)
-    artworkUrl: rae_ext_rae_string_copy(s: entry.artworkUrl)
-    textureKey: rae_ext_rae_string_copy(s: entryTextureKey)
-    durationSec: entry.durationSec
-    playedAt: entry.playedAt
-  }
-  history.entries.add(value: own owned)
-  normalizePlayHistoryArtwork(history: history)
 }

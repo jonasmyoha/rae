@@ -56,39 +56,43 @@ func pointInEntity(world: view UiWorld, entity: view EntityId, x: view Float, y:
 }
 
 func hitTestEntity(world: view UiWorld, entity: view EntityId, x: view Float, y: view Float) ret EntityId {
-  if componentHas(this: world.childrens, entity: entity) {
-    let ch: view Children => componentView(this: world.childrens, entity: entity)
-    let n: Int = ch.ids.length
-    var i: Int = n - 1
-    loop i >= 0 {
-      let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
-      let hit: EntityId = hitTestEntity(world: world, entity: cid, x: x, y: y)
-      if isNone(this: hit) is false { ret hit }
-      i = i - 1
+  unsafe {
+    if componentHas(this: world.childrens, entity: entity) {
+      let ch: view Children => componentView(this: world.childrens, entity: entity)
+      let n: Int = ch.ids.length
+      var i: Int = n - 1
+      loop i >= 0 {
+        let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+        let hit: EntityId = hitTestEntity(world: world, entity: cid, x: x, y: y)
+        if isNone(this: hit) is false { ret hit }
+        i = i - 1
+      }
     }
-  }
 
-  if componentHas(this: world.onClicks, entity: entity) {
-    if pointInEntity(world: world, entity: entity, x: x, y: y) {
-      ret entity
+    if componentHas(this: world.onClicks, entity: entity) {
+      if pointInEntity(world: world, entity: entity, x: x, y: y) {
+        ret entity
+      }
     }
+    ret inputNoEntity
   }
-  ret inputNoEntity
 }
 
 func hitTest(world: view UiWorld, x: view Float, y: view Float) ret EntityId {
-  let roots: List(EntityId) = collectPaintableRoots(world: world)
-  let n: Int = roots.length
-  var i: Int = n - 1
-  loop i >= 0 {
-    let e: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
-    if componentHas(this: world.layerRoots, entity: e) is false {
-      let hit: EntityId = hitTestEntity(world: world, entity: e, x: x, y: y)
-      if isNone(this: hit) is false { ret hit }
+  unsafe {
+    let roots: List(EntityId) = collectPaintableRoots(world: world)
+    let n: Int = roots.length
+    var i: Int = n - 1
+    loop i >= 0 {
+      let e: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
+      if componentHas(this: world.layerRoots, entity: e) is false {
+        let hit: EntityId = hitTestEntity(world: world, entity: e, x: x, y: y)
+        if isNone(this: hit) is false { ret hit }
+      }
+      i = i - 1
     }
-    i = i - 1
+    ret inputNoEntity
   }
-  ret inputNoEntity
 }
 
 func appendActionEvent(input: mod InputSystem, entity: view EntityId, actionId: own String) {

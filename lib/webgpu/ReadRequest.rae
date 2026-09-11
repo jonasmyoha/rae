@@ -18,12 +18,12 @@ type ReadRange {
 # failures are reported later by poll.
 func create(buffer: copy Ptr, range: view ReadRange) unsafe ret opt ReadRequest {
   unsafe {
-    let nativeRequest: Ptr = startRead(buffer: buffer, offset: range.offset, size: range.size)
-    if readStartStatus(request: nativeRequest) is -1 {
-      releaseRead(request: nativeRequest)
-      ret none
-    }
-    ret ReadRequest { nativeRequest: nativeRequest, byteCount: range.size }
+      let nativeRequest: Ptr = startRead(buffer: buffer, offset: range.offset, size: range.size)
+      if readStartStatus(request: nativeRequest) is -1 {
+        releaseRead(request: nativeRequest)
+        ret none
+      }
+      ret ReadRequest { nativeRequest: nativeRequest, byteCount: range.size }
   }
 }
 
@@ -31,14 +31,14 @@ func create(buffer: copy Ptr, range: view ReadRange) unsafe ret opt ReadRequest 
 # independent native reference until the context delivers it after cancellation.
 func drop(this: mod ReadRequest) {
   unsafe {
-    this.nativeRequest = releaseRead(request: this.nativeRequest)
+      this.nativeRequest = releaseRead(request: this.nativeRequest)
   }
 }
 
 # Polls platform events once with wait: 0 through the existing bridge.
 func poll(this: view ReadRequest) ret Int {
   unsafe {
-    ret pollRead(request: this.nativeRequest)
+      ret pollRead(request: this.nativeRequest)
   }
 }
 
@@ -69,19 +69,21 @@ func copyToBytes(this: view ReadRequest, destination: mod List(UInt8)) ret Bool 
 # still enforced authoritatively by the native copy; the native call borrows the
 # mapping only for this call and no pointer survives List growth.
 func copyTo(T: type, this: view ReadRequest, destination: mod List(T)) unsafe ret Bool {
-  # Native code cross-checks against the real allocation; reject visibly corrupt
-  # List metadata first, and cast before multiplication so signed Int overflow
-  # cannot turn a small negative value into a huge capacity.
-  if destination.length < 0 or destination.cap < destination.length {
-    ret false
-  }
-  let elementCount: UInt64 = destination.length as UInt64
-  let elementSize: UInt64 = sizeof(T) as UInt64
-  if elementSize > 0 and elementCount > (18446744073709551615 / elementSize) {
-    ret false
-  }
-  let capacity: UInt64 = elementCount * elementSize
   unsafe {
-    ret copyRead(request: this.nativeRequest, destination: destination.data, capacity: capacity) is 1
+    # Native code cross-checks against the real allocation; reject visibly corrupt
+    # List metadata first, and cast before multiplication so signed Int overflow
+    # cannot turn a small negative value into a huge capacity.
+    if destination.length < 0 or destination.cap < destination.length {
+      ret false
+    }
+    let elementCount: UInt64 = destination.length as UInt64
+    let elementSize: UInt64 = sizeof(T) as UInt64
+    if elementSize > 0 and elementCount > (18446744073709551615 / elementSize) {
+      ret false
+    }
+    let capacity: UInt64 = elementCount * elementSize
+    unsafe {
+      ret copyRead(request: this.nativeRequest, destination: destination.data, capacity: capacity) is 1
+    }
   }
 }

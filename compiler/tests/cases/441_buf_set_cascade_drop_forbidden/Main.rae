@@ -6,7 +6,9 @@
 # fresh — user code can't be trusted with that contract.
 
 func main() {
-  let buf: Buffer(String) = rae_ext_rae_buf_alloc(size: 4, elemSize: sizeof(String))
-  let s: String = "hello"
-  rae_ext_rae_buf_set(buf: buf, index: 0, value: s)
+  unsafe {
+    let buf: Buffer(String) = rae_ext_rae_buf_alloc(size: 4, elemSize: sizeof(String))
+    let s: String = "hello"
+    rae_ext_rae_buf_set(buf: buf, index: 0, value: s)
+  }
 }

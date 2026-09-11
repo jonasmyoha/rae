@@ -10,11 +10,13 @@ open ui/Scene
 # returns `rae_String` directly. Declaring a non-opt extern with the
 # same C name skips the C backend's double-unbox bug for `opt String`
 # returns. Empty string on miss.
-func rae_ext_rae_sys_read_file(path: String) extern ret String
+func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
 
 func loadSceneFile(path: view String) pub ret Scene {
-  let content: String = rae_ext_rae_sys_read_file(path: path)
-  ret parseScene(source: content)
+  unsafe {
+    let content: String = rae_ext_rae_sys_read_file(path: path)
+    ret parseScene(source: content)
+  }
 }
 
 type AlbumScenes {
