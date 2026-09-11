@@ -234,3 +234,20 @@ now take `canvas`. The manager's dependency arena is compacted by relocation
 submissions and readbacks) so the per-frame box groups and the cached image
 groups coexist without growth.
 
+**#909 update (2D renderer slice 3 — the text pass):** the MSDF text pipeline
+(`lib/gpu2d_text.wgsl`), the atlas textures + views (uploaded lazily from the
+C atlas pixels through `writeTextureFromPtr`), the per-atlas per-flush glyph
+instance buffers and the per-flush bind groups are manager IDs on the
+`Gpu2dCanvas`; the text draw is one bind per atlas per flush and one
+`recordDrawInPass` per contiguous same-clip run, after the images, exactly
+the C flush's shape. C keeps glyph rasterization + the CPU atlas pixels
+(`SdfText.loadAtlas`, read back via `rae_sdf_atlas_pixels/width/height`) and
+the per-atlas CPU glyph batch behind the stateless `drawGlyph` /
+`drawGlyphEx` (read back via `rae_g2d_text_atlas_max/floats/count/data/
+clip_at/reset` — the same owner-threading question as the box batch, #913).
+Removed from C: `rae_g2d_init_text_pipeline`, `rae_g2d_rebuild_text_bind`,
+`rae_g2d_ensure_text_inst`, `rae_g2d_atlas_texview`, `rae_g2d_text_frame_buffer`,
+the text pipeline / sampler / atlas texture globals, `G2D_TEXT_WGSL`, and
+`rae_ext_Gpu2d_flush` itself — `Gpu2d.flush` is now entirely Rae (boxes,
+images, text), C only uploads the viewport transform in `rae_g2d_prepare_flush`.
+
