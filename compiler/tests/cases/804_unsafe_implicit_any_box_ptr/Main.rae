@@ -1,0 +1,23 @@
+# #898 gap (b): implicit boxing into Any at a `ret` (or assignment / Any
+# argument) erases the value's type and hides its raw Ptr storage, exactly as
+# an explicit `box` does. Only the explicit `box` operand was checked before.
+func allocate(byteCount: copy UInt64) unsafe extern("malloc") ret Ptr
+
+type Wrap {
+  p: Ptr
+  tag: Int
+}
+
+func makeWrap() ret Wrap {
+  unsafe { ret Wrap { p: allocate(byteCount: 8 as UInt64), tag: 1 } }
+}
+
+func erase() ret Any {
+  let wrap: Wrap = makeWrap()
+  ret wrap
+}
+
+func main() {
+  let boxed: Any = erase()
+  log("done")
+}
