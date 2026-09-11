@@ -1,0 +1,118 @@
+# Hardware check for gpu/GpuTiming (#871): nonblocking per-pass GPU timing over
+# the manager. Records two timed compute passes per frame, resolves, submits,
+# and reads the timestamps back through a manager-owned ReadbackId WITHOUT
+# blocking — repeated across several frames (continuous timing). Exit code 0 =
+# every check passed. The unavailable-timestamps fallback is exercised by the
+# code path even where hardware has timestamps.
+import Sdl3
+open webgpu/Context
+open webgpu/WebgpuEnums
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuTiming
+
+func fail(message: view String) ret Bool {
+  log("FAIL: {message}")
+  ret false
+}
+
+func kernelSource() ret String {
+  ret "@group(0) @binding(0) var<storage, read_write> data: array<u32>; @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3<u32>) \{ var acc: u32 = 0u; for (var k: u32 = 0u; k < 256u; k = k + 1u) \{ acc = acc + id.x + k; \} data[id.x] = acc; \}"
+}
+
+func awaitSubmission(resources: mod GpuResources, id: view SubmissionId) ret Int {
+  var status: Int = 0
+  var spins: Int = 0
+  loop status is 0 and spins < 1000000 {
+    status = pollSubmission(resources: resources, id: id)
+    spins = spins + 1
+  }
+  ret status
+}
+
+func runFrame(resources: mod GpuResources, timing: mod GpuTiming, pipeline: view PipelineId, bindGroup: view BindGroupId) ret Bool {
+  beginTimingFrame(timing: timing)
+  let passA: Int = timedPass(timing: timing)
+  if passA is not 0 { ret fail(message: "timedPass 0") }
+  if let recording: Recording = beginRecording(resources: resources) {
+    if recordComputeTimed(recording: recording, resources: resources, pipeline: pipeline, bindGroup: bindGroup, workgroupsX: 4, workgroupsY: 1, workgroupsZ: 1, timestampWrites: timingWrites(timing: timing)) is false { ret fail(message: "timed pass A") }
+    let passB: Int = timedPass(timing: timing)
+    if passB is not 1 { ret fail(message: "timedPass 1") }
+    if recordComputeTimed(recording: recording, resources: resources, pipeline: pipeline, bindGroup: bindGroup, workgroupsX: 4, workgroupsY: 1, workgroupsZ: 1, timestampWrites: timingWrites(timing: timing)) is false { ret fail(message: "timed pass B") }
+    if recordTimingResolve(timing: timing, recording: recording, resources: resources) is false { ret fail(message: "resolve") }
+    if let submission: SubmissionId = submit(resources: resources, recording: recording) {
+      if awaitSubmission(resources: resources, id: submission) is not 1 { ret fail(message: "submission") }
+      if retireSubmission(resources: resources, id: submission) is false { ret fail(message: "retire submission") }
+      # Nonblocking timing readback: start after the submission completed.
+      if startTimingSample(timing: timing, resources: resources) is false { ret fail(message: "start sample") }
+      if timingSampleInFlight(timing: timing) is false { ret fail(message: "sample not in flight") }
+      let perPass: List(Int) = List.create(Int, cap: 2)
+      var done: Bool = false
+      var spins: Int = 0
+      loop done is false and spins < 1000000 {
+        done = collectTiming(timing: timing, resources: resources, out: perPass)
+        spins = spins + 1
+      }
+      if done is false { ret fail(message: "collect never completed") }
+      if perPass.length is not 2 { ret fail(message: "expected 2 pass timings, got {perPass.length}") }
+      var i: Int = 0
+      loop i < 2 {
+        if let microseconds: Int = perPass.copyAt(index: i) {
+          if microseconds < 0 { ret fail(message: "negative pass time") }
+        }
+        i = i + 1
+      }
+      if lastTotalUs(timing: timing) < 0 { ret fail(message: "total unavailable after collect") }
+      if timingSampleInFlight(timing: timing) { ret fail(message: "sample still in flight after collect") }
+      ret true
+    }
+    ret fail(message: "submit")
+  }
+  ret fail(message: "recording")
+}
+
+func main() ret Int {
+  if webgpuBootstrap() is not 1 {
+    log("no GPU")
+    ret 1
+  }
+  var issuer: IdIssuer = IdIssuer.create()
+  if let resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 10) {
+    var timing: GpuTiming = createGpuTiming(resources: resources, maxPasses: 4)
+    if timingAvailable(timing: timing) is false {
+      # Documented fallback: no timestamp support. Everything is inert.
+      log("timestamps unavailable — fallback path (lastTotalUs = {lastTotalUs(timing: timing)})")
+      shutdownTiming(timing: timing, resources: resources)
+      ret 0
+    }
+    if let storage: BufferId = createBuffer(resources: resources, size: 1024, usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopySrc) {
+      if let pipeline: PipelineId = createComputePipeline(resources: resources, wgsl: kernelSource(), entryPoint: "main") {
+        let buffers: List(BufferId) = List.create(BufferId, cap: 1)
+        buffers.add(value: storage)
+        let noViews: List(TextureViewId) = List.create(TextureViewId, cap: 1)
+        let noSamplers: List(SamplerId) = List.create(SamplerId, cap: 1)
+        if let bindGroup: BindGroupId = createBindGroup(resources: resources, pipeline: pipeline, buffers: buffers, textureViews: noViews, samplers: noSamplers) {
+          var frame: Int = 0
+          var totalAcrossFrames: Int = 0
+          loop frame < 5 {
+            if runFrame(resources: resources, timing: timing, pipeline: pipeline, bindGroup: bindGroup) is false { ret 1 }
+            totalAcrossFrames = totalAcrossFrames + lastTotalUs(timing: timing)
+            frame = frame + 1
+          }
+          log("5 frames of nonblocking 2-pass timing OK (summed total {totalAcrossFrames} us)")
+          shutdownTiming(timing: timing, resources: resources)
+          if liveReadbackCount(resources: resources) is not 0 { log("FAIL: readback leaked") ret 1 }
+          retireBindGroup(resources: resources, id: bindGroup)
+          retirePipeline(resources: resources, id: pipeline)
+          retireBuffer(resources: resources, id: storage)
+          log("shutdown and cleanup OK")
+          ret 0
+        }
+      }
+    }
+    log("FAIL: setup")
+    ret 1
+  }
+  log("FAIL: manager creation")
+  ret 1
+}

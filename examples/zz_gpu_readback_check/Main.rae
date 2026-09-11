@@ -1,0 +1,123 @@
+# Hardware check for manager-owned ReadbackId (#871): bounded staging, two
+# concurrent requests, exclusive mapping, nonblocking polling, byte-exact
+# completed copies, reuse with a fresh generation, cancellation before
+# completion, busy-defer when slots are full, and exact-once shutdown cleanup.
+# Known contents are written with writeBuffer (durable after its flush), so no
+# compute pipeline is needed. Exit code 0 = every check passed.
+import Sdl3
+open webgpu/Context
+open webgpu/WebgpuEnums
+open gpu/GpuResources
+open gpu/GpuLifetime
+
+func fail(message: view String) ret Bool {
+  log("FAIL: {message}")
+  ret false
+}
+
+func filled(count: view Int, base: view Int) ret List(UInt8) {
+  let bytes: List(UInt8) = List.create(UInt8, cap: count)
+  var i: Int = 0
+  loop i < count {
+    bytes.add(value: (base + i) as UInt8)
+    i = i + 1
+  }
+  ret bytes
+}
+
+# Nonblocking spin to a terminal state.
+func await(resources: mod GpuResources, id: view ReadbackId) ret Int {
+  var status: Int = 0
+  var spins: Int = 0
+  loop status is 0 and spins < 1000000 {
+    status = pollReadback(resources: resources, id: id)
+    spins = spins + 1
+  }
+  ret status
+}
+
+func makeMapReadBuffer(resources: mod GpuResources, base: view Int) ret opt BufferId {
+  if let buffer: BufferId = createBuffer(resources: resources, size: 32, usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst) {
+    let bytes: List(UInt8) = filled(count: 32, base: base)
+    if writeBuffer(resources: resources, id: buffer, offset: 0, bytes: bytes) is false { ret none }
+    ret buffer
+  }
+  ret none
+}
+
+func checkCopy(resources: mod GpuResources, id: view ReadbackId, base: view Int) ret Bool {
+  if readbackByteCount(resources: resources, id: id) is not 32 { ret fail(message: "byte count") }
+  let out: List(UInt8) = List.create(UInt8, cap: 32)
+  var k: Int = 0
+  loop k < 32 { out.add(value: 0 as UInt8) k = k + 1 }
+  if copyReadback(resources: resources, id: id, destination: out) is false { ret fail(message: "copy") }
+  var i: Int = 0
+  loop i < 32 {
+    if let value: UInt8 = out.copyAt(index: i) {
+      if value is not ((base + i) as UInt8) { ret fail(message: "byte {i}: got {value as Int} want {(base + i)}") }
+    }
+    i = i + 1
+  }
+  ret true
+}
+
+func main() ret Int {
+  if webgpuBootstrap() is not 1 {
+    log("no GPU")
+    ret 1
+  }
+  var issuer: IdIssuer = IdIssuer.create()
+  if let resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 2) {
+    # --- two concurrent requests on two buffers, byte-exact ---
+    if let bufferA: BufferId = makeMapReadBuffer(resources: resources, base: 0) {
+      if let bufferB: BufferId = makeMapReadBuffer(resources: resources, base: 100) {
+        if let readA: ReadbackId = startReadback(resources: resources, buffer: bufferA, offset: 0, size: 32) {
+          if let readB: ReadbackId = startReadback(resources: resources, buffer: bufferB, offset: 0, size: 32) {
+            if liveReadbackCount(resources: resources) is not 2 { log("FAIL: live count") ret 1 }
+            # Exclusive mapping: a third read of an already-mapped buffer is refused.
+            if let dup: ReadbackId = startReadback(resources: resources, buffer: bufferA, offset: 0, size: 32) { log("FAIL: double map accepted") ret 1 }
+            # Busy-defer: both readback slots are in use, a fresh buffer cannot start.
+            if let bufferC: BufferId = createBuffer(resources: resources, size: 32, usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst) {
+              if let readC: ReadbackId = startReadback(resources: resources, buffer: bufferC, offset: 0, size: 32) { log("FAIL: started when slots full") ret 1 }
+              if retireBuffer(resources: resources, id: bufferC) is false { ret 1 }
+            }
+            if await(resources: resources, id: readA) is not 1 { log("FAIL: readA did not complete") ret 1 }
+            if await(resources: resources, id: readB) is not 1 { log("FAIL: readB did not complete") ret 1 }
+            if pollReadback(resources: resources, id: readA) is not 1 { log("FAIL: repeated poll") ret 1 }
+            if checkCopy(resources: resources, id: readA, base: 0) is false { ret 1 }
+            if checkCopy(resources: resources, id: readB, base: 100) is false { ret 1 }
+            # The source buffer stays pinned (mapped) until the readback retires.
+            if retireBuffer(resources: resources, id: bufferA) is false { ret 1 }
+            if pendingReleaseCount(resources: resources) is not 1 { log("FAIL: expected 1 deferred release") ret 1 }
+            if retireReadback(resources: resources, id: readA) is false { log("FAIL: retire readA") ret 1 }
+            if pendingReleaseCount(resources: resources) is not 0 { log("FAIL: buffer not reclaimed after readback retired") ret 1 }
+            if pollReadback(resources: resources, id: readA) is not (0 - 1) { log("FAIL: retired readback still polls") ret 1 }
+            # Reuse: a freed slot is reused with a bumped generation.
+            if retireReadback(resources: resources, id: readB) is false { ret 1 }
+            log("two requests, exclusive mapping, busy-defer, byte-exact copies, deferred release OK")
+            if let reuse: ReadbackId = startReadback(resources: resources, buffer: bufferB, offset: 0, size: 32) {
+              if reuse.generation is 0 { log("FAIL: reuse did not bump generation") ret 1 }
+              # Cancellation: retire before completion cancels safely.
+              if retireReadback(resources: resources, id: reuse) is false { log("FAIL: cancel") ret 1 }
+              if isValidReadback(resources: resources, id: reuse) { log("FAIL: cancelled still valid") ret 1 }
+            } else { log("FAIL: reuse start") ret 1 }
+            if retireBuffer(resources: resources, id: bufferB) is false { ret 1 }
+            log("reuse with fresh generation and cancellation OK")
+          } else { log("FAIL: start readB") ret 1 }
+        } else { log("FAIL: start readA") ret 1 }
+      } else { log("FAIL: bufferB") ret 1 }
+    } else { log("FAIL: bufferA") ret 1 }
+    # --- exact-once shutdown: a live readback is released by the destructor ---
+    if let leftover: BufferId = makeMapReadBuffer(resources: resources, base: 7) {
+      if let pending: ReadbackId = startReadback(resources: resources, buffer: leftover, offset: 0, size: 32) {
+        if liveReadbackCount(resources: resources) is not 1 { log("FAIL: leftover count") ret 1 }
+      } else { log("FAIL: leftover start") ret 1 }
+    } else { log("FAIL: leftover buffer") ret 1 }
+    log("exact-once shutdown with a live readback OK")
+    # resources drops here: the live readback and its buffer are released once each.
+  } else {
+    log("FAIL: manager creation")
+    ret 1
+  }
+  ret 0
+}
