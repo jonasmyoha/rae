@@ -7,7 +7,7 @@
 # bind groups — is a typed ID here, and the draws go into the C-owned frame
 # pass (rae_g2d_pass_get) with recordDrawInPass, the #874 grass pattern.
 #
-# Box pass: one pipeline (lib/gpu2d_canvas.wgsl) draws every rect / rounded rect /
+# Box pass: one pipeline (lib/gpu2d_box.wgsl) draws every rect / rounded rect /
 # bordered box / gradient / line the frame queued, in contiguous same-clip
 # runs (scissor + clip uniform per run). Instance buffers are per flush slot
 # within a frame (a later flush must not overwrite what an earlier draw still
@@ -19,6 +19,13 @@
 # cache policy over it). Each queued draw is one 64-byte uniform + one bind
 # group [viewport, uniform, view, sampler], cached per draw slot by handle
 # exactly as the C flush cached them; draws go after the boxes, before text.
+#
+# Text pass (#909): MSDF glyph quads batched PER ATLAS (so one frame mixes
+# fonts, e.g. Roboto body text + the Material-icon atlas). Glyph rasterization
+# and the CPU atlas pixels stay C (SdfText.loadAtlas); the atlas texture +
+# view are uploaded lazily into manager textures, the per-atlas per-flush
+# instance buffers persist like the box pool, and one bind group per atlas per
+# flush draws its contiguous same-clip runs after the images.
 #
 # Owner: an app (or the deferred renderer for its UI overlay) holds ONE
 # Gpu2dCanvas and hands it to Gpu2d.flush / Gpu2d.endFrame and the image API.
@@ -50,6 +57,17 @@ func g2dDecodeImage(path: String) unsafe extern("rae_g2d_decode_image") ret Ptr
 func nativeG2dDecodedWidth() unsafe extern("rae_g2d_decoded_width") ret Int
 func nativeG2dDecodedHeight() unsafe extern("rae_g2d_decoded_height") ret Int
 func g2dDecodeFree(rgba: Ptr) unsafe extern("rae_g2d_decode_free")
+# The C per-atlas glyph batch (drawGlyph/drawGlyphEx accumulate there) and the
+# CPU MSDF atlas pixels (SdfText.loadAtlas), read back for the text pass.
+func nativeG2dTextAtlasMax() unsafe extern("rae_g2d_text_atlas_max") ret Int
+func nativeG2dTextFloats() unsafe extern("rae_g2d_text_floats") ret Int
+func nativeG2dTextCount(ai: Int) unsafe extern("rae_g2d_text_count") ret Int
+func g2dTextData(ai: Int) unsafe extern("rae_g2d_text_data") ret Ptr
+func nativeG2dTextClipAt(ai: Int, i: Int) unsafe extern("rae_g2d_text_clip_at") ret Int
+func nativeG2dTextReset(ai: Int) unsafe extern("rae_g2d_text_reset")
+func sdfAtlasPixels(handle: Int) unsafe extern("rae_sdf_atlas_pixels") ret Ptr
+func nativeSdfAtlasWidth(handle: Int) unsafe extern("rae_sdf_atlas_width") ret Int
+func nativeSdfAtlasHeight(handle: Int) unsafe extern("rae_sdf_atlas_height") ret Int
 
 func g2dPrimCount() ret Int {
   unsafe { ret nativeG2dPrimCount() }
@@ -77,6 +95,41 @@ func g2dDecodedWidth() ret Int {
 }
 func g2dDecodedHeight() ret Int {
   unsafe { ret nativeG2dDecodedHeight() }
+}
+func g2dTextAtlasMax() ret Int {
+  unsafe { ret nativeG2dTextAtlasMax() }
+}
+func g2dTextFloats() ret Int {
+  unsafe { ret nativeG2dTextFloats() }
+}
+func g2dTextCount(ai: copy Int) ret Int {
+  unsafe { ret nativeG2dTextCount(ai: ai) }
+}
+func g2dTextClipAt(ai: copy Int, i: copy Int) ret Int {
+  unsafe { ret nativeG2dTextClipAt(ai: ai, i: i) }
+}
+func g2dTextReset(ai: copy Int) {
+  unsafe { nativeG2dTextReset(ai: ai) }
+}
+func sdfAtlasWidth(handle: copy Int) ret Int {
+  unsafe { ret nativeSdfAtlasWidth(handle: handle) }
+}
+func sdfAtlasHeight(handle: copy Int) ret Int {
+  unsafe { ret nativeSdfAtlasHeight(handle: handle) }
+}
+
+# One MSDF atlas on the GPU (uploaded lazily from the C pixels) and its
+# per-flush instance buffer pool (slot = flush index in the frame).
+type Gpu2dTextAtlas {
+  texture: TextureId
+  textureView: TextureViewId
+  buffers: List(BufferId)
+  capacities: List(Int)
+  flushIndex: Int
+}
+
+func emptyTextAtlas() ret Gpu2dTextAtlas {
+  ret Gpu2dTextAtlas { texture: noTextureId(), textureView: noTextureViewId(), buffers: List.create(BufferId, cap: 4), capacities: List.create(Int, cap: 4), flushIndex: 0 }
 }
 
 # One uploaded image: its manager texture + default view and the size the
@@ -115,6 +168,10 @@ type Gpu2dCanvas {
   imageBindHandles: List(Int)
   imageDrawCursor: Int              # draw slots used so far this frame
   imageScratch: List(Float)         # one command's 16 floats, staged for the upload
+  # --- text pass ---
+  textPipeMade: Bool
+  textPipeline: RenderPipelineId
+  textAtlases: List(Gpu2dTextAtlas) # index = atlas handle - 1, sized to the C atlas max
 }
 
 # Slot budget: one bind group + one clip external per same-clip run per flush
@@ -134,7 +191,8 @@ func createGpu2dCanvas() ret Gpu2dCanvas {
       images: List.create(Gpu2dImage, cap: 32), imageKeys: List.create(String, cap: 32), imageKeyHandles: List.create(Int, cap: 32),
       imageCommands: List.create(Float, cap: 32 * imageUniformFloats), imageCommandHandles: List.create(Int, cap: 32), imageCommandClips: List.create(Int, cap: 32),
       imageUniforms: List.create(BufferId, cap: 32), imageBinds: List.create(BindGroupId, cap: 32), imageBindHandles: List.create(Int, cap: 32),
-      imageDrawCursor: 0, imageScratch: List.create(Float, cap: imageUniformFloats)
+      imageDrawCursor: 0, imageScratch: List.create(Float, cap: imageUniformFloats),
+      textPipeMade: false, textPipeline: noRenderPipelineId(), textAtlases: List.create(Gpu2dTextAtlas, cap: 8)
     }
   }
 }
@@ -163,9 +221,9 @@ func ensureBoxPipeline(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
   # Read relative to the working directory like every lib/*.wgsl asset (the
   # example gates run from the repo root). An empty read must not reach wgpu.
   var source: String = ""
-  unsafe { source = nativeG2dBoxReadFile(path: "lib/gpu2d_canvas.wgsl") }
+  unsafe { source = nativeG2dBoxReadFile(path: "lib/gpu2d_box.wgsl") }
   if source.length() is 0 {
-    log("[gpu2d] lib/gpu2d_canvas.wgsl not readable from the working directory — run from the repo root; 2D boxes are skipped")
+    log("[gpu2d] lib/gpu2d_box.wgsl not readable from the working directory — run from the repo root; 2D boxes are skipped")
     ret
   }
   var format: Int = 0
@@ -568,6 +626,157 @@ func imageDrawCommand(canvas: mod Gpu2dCanvas, resources: mod GpuResources, inde
   }
 }
 
+# ----- text pass (#909) ---------------------------------------------------
+
+func ensureTextPipeline(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
+  if canvas.textPipeMade { ret }
+  canvas.textPipeMade = true
+  var source: String = ""
+  unsafe { source = nativeG2dBoxReadFile(path: "lib/gpu2d_text.wgsl") }
+  if source.length() is 0 {
+    log("[gpu2d] lib/gpu2d_text.wgsl not readable from the working directory — run from the repo root; 2D text is skipped")
+    ret
+  }
+  var format: Int = 0
+  unsafe { format = nativeG2dBoxFormat() }
+  if let pipeline: RenderPipelineId = createRenderPipeline(resources: resources, wgsl: source, vertexEntry: "vs", fragmentEntry: "fs", spec: boxPipelineSpec(format: format as Int32)) {
+    canvas.textPipeline = pipeline
+  }
+  # MSDF needs bilinear sampling: the same linear clamp sampler the images use.
+  if not isValidSampler(resources: resources, id: canvas.imageSampler) {
+    if let sampler: SamplerId = createSampler(resources: resources) { canvas.imageSampler = sampler }
+  }
+  unsafe {
+    if not isValidExternal(resources: resources, id: canvas.viewport) {
+      if let viewport: ExternalId = adoptExternalBuffer(resources: resources, handle: g2dViewportUniform()) { canvas.viewport = viewport }
+    }
+  }
+  loop canvas.textAtlases.length < g2dTextAtlasMax() {
+    canvas.textAtlases.add(value: emptyTextAtlas())
+  }
+}
+
+# Lazily upload atlas `ai` + 1 (1-based handle from SdfText.loadAtlas) as an
+# RGBA8 manager texture (MSDF data is linear, not sRGB); cached.
+func ensureTextAtlas(canvas: mod Gpu2dCanvas, resources: mod GpuResources, ai: copy Int) ret Bool {
+  var atlas: Gpu2dTextAtlas = emptyTextAtlas()
+  if let known: Gpu2dTextAtlas = canvas.textAtlases.copyAt(index: ai) { atlas = own known }
+  if isValidTextureView(resources: resources, id: atlas.textureView) { ret true }
+  let handle: Int = ai + 1
+  let width: Int = sdfAtlasWidth(handle: handle)
+  let height: Int = sdfAtlasHeight(handle: handle)
+  if width <= 0 or height <= 0 { ret false }
+  var made: Bool = false
+  if let texture: TextureId = createTexture(resources: resources, width: width, height: height, format: WGPUTextureFormat_RGBA8Unorm, usage: WGPUTextureUsage_TextureBinding + WGPUTextureUsage_CopyDst) {
+    var uploaded: Bool = false
+    unsafe { uploaded = writeTextureFromPtr(resources: resources, texture: texture, data: sdfAtlasPixels(handle: handle), bytesPerRow: width * 4, rows: height) }
+    if uploaded {
+      if let textureView: TextureViewId = createTextureView(resources: resources, texture: texture) {
+        atlas.texture = texture
+        atlas.textureView = textureView
+        made = true
+      }
+    }
+    if not made { retireTexture(resources: resources, id: texture) }
+  }
+  canvas.textAtlases.set(index: ai, value: own atlas)
+  ret made
+}
+
+# This flush's glyph instance buffer for atlas `ai`: the slot for its flush
+# index, grown (retired and re-created, doubling) when the batch outgrew it.
+func textFlushBuffer(canvas: mod Gpu2dCanvas, resources: mod GpuResources, ai: copy Int, glyphs: copy Int) ret BufferId {
+  var atlas: Gpu2dTextAtlas = emptyTextAtlas()
+  if let known: Gpu2dTextAtlas = canvas.textAtlases.copyAt(index: ai) { atlas = own known }
+  let slot: Int = atlas.flushIndex
+  atlas.flushIndex = slot + 1
+  loop atlas.buffers.length <= slot {
+    atlas.buffers.add(value: noBufferId())
+    atlas.capacities.add(value: 0)
+  }
+  var capacity: Int = 0
+  if let known: Int = atlas.capacities.copyAt(index: slot) { capacity = known }
+  var current: BufferId = noBufferId()
+  if let known: BufferId = atlas.buffers.copyAt(index: slot) { current = known }
+  if not (isValidBuffer(resources: resources, id: current) and capacity >= glyphs) {
+    retireBuffer(resources: resources, id: current)
+    var grown: Int = capacity
+    if grown < 16 { grown = 16 }
+    loop grown < glyphs { grown = grown * 2 }
+    current = noBufferId()
+    if let buffer: BufferId = createBuffer(resources: resources, size: grown * g2dTextFloats() * 4, usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst) {
+      current = buffer
+    }
+    atlas.buffers.set(index: slot, value: current)
+    atlas.capacities.set(index: slot, value: grown)
+  }
+  canvas.textAtlases.set(index: ai, value: own atlas)
+  ret current
+}
+
+# One text draw per atlas that has glyphs this frame: upload its batch, bind
+# [viewport, glyphs, atlas view, sampler] (a per-flush group, retired at frame
+# end like the box groups), then draw the contiguous same-clip runs with their
+# scissor. instance_index includes firstInstance, so the storage buffer still
+# indexes the right glyph. Then reset that atlas's batch.
+func textFlush(canvas: mod Gpu2dCanvas) {
+  ensureBoxResources(canvas: canvas)
+  if let resources: mod GpuResources => canvas.gpuResources {
+    textFlushWith(canvas: canvas, resources: resources)
+  }
+}
+
+func textFlushWith(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
+  unsafe { if g2dBoxPass() is webgpuNull() { ret } }
+  let atlasMax: Int = g2dTextAtlasMax()
+  loop var ai: Int = 0, ai < atlasMax, ++ai {
+    let count: Int = g2dTextCount(ai: ai)
+    if count > 0 {
+      textFlushAtlas(canvas: canvas, resources: resources, ai: ai, count: count)
+    }
+  }
+}
+
+func textFlushAtlas(canvas: mod Gpu2dCanvas, resources: mod GpuResources, ai: copy Int, count: copy Int) {
+  ensureTextPipeline(canvas: canvas, resources: resources)
+  if not isValidRenderPipeline(resources: resources, id: canvas.textPipeline) {
+    g2dTextReset(ai: ai)
+    ret
+  }
+  # An atlas that is not loaded keeps its batch (the frame reset clears it), as C did.
+  if not ensureTextAtlas(canvas: canvas, resources: resources, ai: ai) { ret }
+  let glyphs: BufferId = textFlushBuffer(canvas: canvas, resources: resources, ai: ai, glyphs: count)
+  let strideBytes: Int = g2dTextFloats() * 4
+  unsafe {
+    if not writeBufferFromPtr(resources: resources, id: glyphs, offset: 0, data: g2dTextData(ai: ai), size: count * strideBytes) {
+      g2dTextReset(ai: ai)
+      ret
+    }
+  }
+  var atlasView: TextureViewId = noTextureViewId()
+  if let atlas: Gpu2dTextAtlas = canvas.textAtlases.copyAt(index: ai) { atlasView = atlas.textureView }
+  let entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
+  entries.add(value: externalRef(id: canvas.viewport))
+  entries.add(value: bufferRef(id: glyphs))
+  entries.add(value: textureViewRef(id: atlasView))
+  entries.add(value: samplerRef(id: canvas.imageSampler))
+  if let bind: BindGroupId = createRenderBindGroup(resources: resources, pipeline: canvas.textPipeline, entries: entries) {
+    canvas.frameBinds.add(value: bind)
+    var runStart: Int = 0
+    loop runStart < count {
+      let clip: Int = g2dTextClipAt(ai: ai, i: runStart)
+      var runEnd: Int = runStart + 1
+      loop runEnd < count and g2dTextClipAt(ai: ai, i: runEnd) is clip { runEnd = runEnd + 1 }
+      g2dScissor(clip: clip)
+      unsafe {
+        let drawn: Bool = recordDrawInPass(resources: resources, pass: g2dBoxPass(), pipeline: canvas.textPipeline, bindGroup: bind, vertexCount: 6, instanceCount: runEnd - runStart, firstVertex: 0, firstInstance: runStart)
+      }
+      runStart = runEnd
+    }
+  }
+  g2dTextReset(ai: ai)
+}
+
 # Frame end (after the frame's command buffer was submitted): retire this
 # frame's per-run bind groups and clip adoptions (wgpu keeps the natives alive
 # until the submission completes), reset the flush slot cursor and compact the
@@ -580,6 +789,14 @@ func boxFrameEnd(canvas: mod Gpu2dCanvas) {
     let compacted: Bool = compactDependencies(resources: resources)
   }
   canvas.flushIndex = 0
+  canvas.imageDrawCursor = 0
+  loop var ai: Int = 0, ai < canvas.textAtlases.length, ++ai {
+    if let atlas: Gpu2dTextAtlas = canvas.textAtlases.copyAt(index: ai) {
+      var reset: Gpu2dTextAtlas = own atlas
+      reset.flushIndex = 0
+      canvas.textAtlases.set(index: ai, value: own reset)
+    }
+  }
 }
 
 # Retire every manager object and drop the manager (app shutdown, BEFORE
@@ -611,6 +828,16 @@ func canvasShutdown(canvas: mod Gpu2dCanvas) {
     clearImageQueue(canvas: canvas)
     retireSampler(resources: resources, id: canvas.imageSampler)
     retireRenderPipeline(resources: resources, id: canvas.imagePipeline)
+    loop var ai: Int = 0, ai < canvas.textAtlases.length, ++ai {
+      if let atlas: Gpu2dTextAtlas = canvas.textAtlases.copyAt(index: ai) {
+        var retired: Gpu2dTextAtlas = own atlas
+        retireBufferIds(resources: resources, list: retired.buffers)
+        retireTextureView(resources: resources, id: retired.textureView)
+        retireTexture(resources: resources, id: retired.texture)
+      }
+    }
+    canvas.textAtlases.clear()
+    retireRenderPipeline(resources: resources, id: canvas.textPipeline)
     shutdown(resources: resources)
   }
   canvas.gpuResources = none
@@ -622,4 +849,6 @@ func canvasShutdown(canvas: mod Gpu2dCanvas) {
   canvas.imagePipeline = noRenderPipelineId()
   canvas.imageSampler = noSamplerId()
   canvas.imageDrawCursor = 0
+  canvas.textPipeMade = false
+  canvas.textPipeline = noRenderPipelineId()
 }

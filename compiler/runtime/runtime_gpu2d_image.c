@@ -24,11 +24,6 @@ static int g_g2d_frame_buf_cap = 0;
 static WGPUBindGroup* g_g2d_frame_binds = NULL;      /* transient per-flush bind groups */
 static int g_g2d_frame_bind_n = 0;
 static int g_g2d_frame_bind_cap = 0;
-static WGPUBuffer* g_g2d_text_frame_bufs[RAE_SDF_MAX_ATLAS];
-static int* g_g2d_text_frame_buf_cap[RAE_SDF_MAX_ATLAS];
-static int g_g2d_text_frame_buf_n[RAE_SDF_MAX_ATLAS];
-static int g_g2d_text_frame_buf_slots[RAE_SDF_MAX_ATLAS];
-void rae_ext_Gpu2d_flush(void);
 
 static void rae_g2d_keep_frame_buf(WGPUBuffer b) {
     if (!b) return;
@@ -51,29 +46,6 @@ static void rae_g2d_keep_frame_bind(WGPUBindGroup b) {
 }
 
 
-static WGPUBuffer rae_g2d_text_frame_buffer(int ai, int glyphs) {
-    int slot = g_g2d_text_frame_buf_n[ai]++;
-    if (slot >= g_g2d_text_frame_buf_slots[ai]) {
-        int old = g_g2d_text_frame_buf_slots[ai];
-        int cap = old ? old * 2 : 64;
-        while (cap <= slot) cap *= 2;
-        g_g2d_text_frame_bufs[ai] = (WGPUBuffer*)realloc(g_g2d_text_frame_bufs[ai], (size_t)cap * sizeof(WGPUBuffer));
-        g_g2d_text_frame_buf_cap[ai] = (int*)realloc(g_g2d_text_frame_buf_cap[ai], (size_t)cap * sizeof(int));
-        for (int i = old; i < cap; i++) { g_g2d_text_frame_bufs[ai][i] = NULL; g_g2d_text_frame_buf_cap[ai][i] = 0; }
-        g_g2d_text_frame_buf_slots[ai] = cap;
-    }
-    if (!g_g2d_text_frame_bufs[ai][slot] || g_g2d_text_frame_buf_cap[ai][slot] < glyphs) {
-        if (g_g2d_text_frame_bufs[ai][slot]) wgpuBufferRelease(g_g2d_text_frame_bufs[ai][slot]);
-        int cap = g_g2d_text_frame_buf_cap[ai][slot] ? g_g2d_text_frame_buf_cap[ai][slot] : 16;
-        while (cap < glyphs) cap *= 2;
-        WGPUBufferDescriptor bd; memset(&bd, 0, sizeof(bd));
-        bd.size = (uint64_t)cap * G2D_TEXT_FLOATS * sizeof(float);
-        bd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
-        g_g2d_text_frame_bufs[ai][slot] = wgpuDeviceCreateBuffer(g_wgpu_dev, &bd);
-        g_g2d_text_frame_buf_cap[ai][slot] = cap;
-    }
-    return g_g2d_text_frame_bufs[ai][slot];
-}
 
 /* Read a whole file into a malloc'd buffer. Returns NULL on failure. */
 static unsigned char* rae_g2d_read_whole_file(const char* path, size_t* out_len) {

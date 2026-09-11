@@ -61,7 +61,15 @@ int64_t rae_g2d_decoded_width(void) { return 0; }
 int64_t rae_g2d_decoded_height(void) { return 0; }
 void rae_g2d_decode_free(void* rgba) { (void)rgba; }
 rae_Bool rae_ext_Gpu2d_lastPresentOk(void) { return 0; }
-void rae_ext_Gpu2d_flush(void) {}
+int64_t rae_g2d_text_atlas_max(void) { return 8; }
+int64_t rae_g2d_text_floats(void) { return 20; }
+int64_t rae_g2d_text_count(int64_t ai) { (void)ai; return 0; }
+void* rae_g2d_text_data(int64_t ai) { (void)ai; return (void*)0; }
+int64_t rae_g2d_text_clip_at(int64_t ai, int64_t i) { (void)ai; (void)i; return 0; }
+void rae_g2d_text_reset(int64_t ai) { (void)ai; }
+void* rae_sdf_atlas_pixels(int64_t handle) { (void)handle; return (void*)0; }
+int64_t rae_sdf_atlas_width(int64_t handle) { (void)handle; return 0; }
+int64_t rae_sdf_atlas_height(int64_t handle) { (void)handle; return 0; }
 void rae_ext_Gpu2d_closeWindow(void) {}
 void rae_ext_Gpu2d_drawRect(float x, float y, float w, float h, int64_t color){ (void)x; (void)y; (void)w; (void)h; (void)color; }
 void rae_ext_Gpu2d_drawRoundedRect(float x, float y, float w, float h, float radius, int64_t color){ (void)x; (void)y; (void)w; (void)h; (void)radius; (void)color; }
