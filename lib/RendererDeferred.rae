@@ -42,7 +42,7 @@ open TransparentForward
 open Sky
 open gpu/GpuResources
 open gpu/GpuLifetime
-open Gpu2dBox
+open Gpu2dCanvas
 
 # ----- pass tags ------------------------------------------------------
 # Which pass of the deferred frame this is. An enum (not Int consts) so the
@@ -97,7 +97,7 @@ type DeferredRenderer {
   idIssuer: IdIssuer
   gpuResources: opt GpuResources
   # #907: the 2D box pass the UI-overlay present flushes with (its own manager).
-  boxPass: Gpu2dBoxPass
+  canvas: Gpu2dCanvas
 }
 
 # The Rae-side deferred-pass caches, aggregated. Fields hold each pass's "have I
@@ -155,7 +155,7 @@ func shutdownDeferredRenderer(renderer: mod DeferredRenderer) pub {
     shutdown(resources: resources)
   }
   renderer.gpuResources = none
-  boxPassShutdown(box: renderer.boxPass)
+  canvasShutdown(canvas: renderer.canvas)
 }
 
 # Declare the deferred frame. Pass declaration order here is deliberately
@@ -304,7 +304,7 @@ func buildDeferredGraph(withUi: view Bool) ret DeferredRenderer {
       passes: createRenderPasses()
       idIssuer: IdIssuer.create()
       gpuResources: none
-      boxPass: createGpu2dBoxPass()
+      canvas: createGpu2dCanvas()
     }
   }
 }
@@ -399,7 +399,7 @@ func renderDeferredPassWorld(renderer: mod DeferredRenderer, tag: view Int, worl
   # Present is still C-driven (#906) and needs no manager.
   if tag is RenderTag.present {
     if renderer.hasUi {
-      Gpu2d.endFrame(box: renderer.boxPass)
+      Gpu2d.endFrame(canvas: renderer.canvas)
     } else {
       presentFrame()
     }

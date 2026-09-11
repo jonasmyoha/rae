@@ -32,7 +32,7 @@ import ui/Theme
 import ui/ThemeResolved
 import ui/TextStyle
 open ecs/ComponentTable
-open Gpu2dBox
+open Gpu2dCanvas
 
 # Per-app gpu2d render resources, passed to renderSystemGpu2d each frame.
 type Gpu2dUi {
@@ -150,7 +150,7 @@ func paintGradientG(world: view UiWorld, entity: view EntityId, wt: view WorldTr
   Gpu2d.drawGradientRect(x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, from: g2dColor(color: from), to: g2dColor(color: to), angleDeg: gf.angle)
 }
 
-func paintBackdropG(world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
+func paintBackdropG(world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int, canvas: mod Gpu2dCanvas) {
   let bi: BackdropImage = componentGet(this: world.backdropImages, entity: entity)
   let radius: Float = g2dRadius(world: world, entity: entity, fallback: 0.0)
   let hoverMul: Float = g2dHoverMul(world: world, entity: entity)
@@ -158,10 +158,10 @@ func paintBackdropG(world: view UiWorld, entity: view EntityId, wt: view WorldTr
   let drawH: Float = cr.size.y * hoverMul
   let drawX: Float = wt.position.x + (cr.size.x - drawW) / 2.0
   let drawY: Float = wt.position.y + (cr.size.y - drawH) / 2.0
-  if Gpu2d.hasImageKey(key: bi.textureKey) {
+  if Gpu2d.hasImageKey(canvas: canvas, key: bi.textureKey) {
     let white: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
     let tint: RgbaColor = g2dChain(color: white, chain255: chain255)
-    Gpu2d.drawImageKey(key: bi.textureKey, x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, tint: g2dColor(color: tint))
+    Gpu2d.drawImageKey(canvas: canvas, key: bi.textureKey, x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, tint: g2dColor(color: tint))
     ret
   }
   # Raylib uses captured blur textures for BackdropImage. gpu2d does not have
@@ -208,7 +208,7 @@ func visualBoundsAt(world: view UiWorld, entity: view EntityId, text: view Strin
 # Sprites: `mat:<name>` icons draw as a Material-atlas glyph; other keys
 # (album covers etc.) draw via the gpu2d image-key registry. Unregistered keys
 # fall back to a tinted chip so layout still reads.
-func paintSpriteG(world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int, res: view Gpu2dUi) {
+func paintSpriteG(world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int, res: view Gpu2dUi, canvas: mod Gpu2dCanvas) {
   let sp: view Sprite => componentView(this: world.sprites, entity: entity)
   var tintBase: RgbaColor = sp.tint
   if sp.tintSlot.length() > 0 { tintBase = colorByName(theme: world.theme.active, name: sp.tintSlot) }
@@ -245,8 +245,8 @@ func paintSpriteG(world: view UiWorld, entity: view EntityId, wt: view WorldTran
     ret
   }
   let radius: Float = g2dRadius(world: world, entity: entity, fallback: 0.0)
-  if Gpu2d.hasImageKey(key: sp.textureKey) {
-    Gpu2d.drawImageKeyScaled(key: sp.textureKey, x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, tint: g2dColor(color: tint), scaleMode: g2dScaleMode(m: sp.scaleMode))
+  if Gpu2d.hasImageKey(canvas: canvas, key: sp.textureKey) {
+    Gpu2d.drawImageKeyScaled(canvas: canvas, key: sp.textureKey, x: drawX, y: drawY, w: drawW, h: drawH, radius: radius * hoverMul, tint: g2dColor(color: tint), scaleMode: g2dScaleMode(m: sp.scaleMode))
     ret
   }
   let fallback: RgbaColor = g2dChain(color: colorByName(theme: world.theme.active, name: "textMuted"), chain255: chain255)
@@ -387,7 +387,7 @@ func paintTextG(world: view UiWorld, entity: view EntityId, wt: view WorldTransf
   }
 }
 
-func paintEntityG(world: view UiWorld, entity: view EntityId, res: view Gpu2dUi, box: mod Gpu2dBoxPass) {
+func paintEntityG(world: view UiWorld, entity: view EntityId, res: view Gpu2dUi, canvas: mod Gpu2dCanvas) {
   if componentHas(this: world.computedRects, entity: entity) is false { ret }
   if componentHas(this: world.worldTransforms, entity: entity) is false { ret }
   let cr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
@@ -404,10 +404,10 @@ func paintEntityG(world: view UiWorld, entity: view EntityId, res: view Gpu2dUi,
     paintShapeG(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
   }
   if componentHas(this: world.backdropImages, entity: entity) {
-    paintBackdropG(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255)
+    paintBackdropG(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255, canvas: canvas)
   }
   if componentHas(this: world.sprites, entity: entity) {
-    paintSpriteG(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255, res: res)
+    paintSpriteG(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255, res: res, canvas: canvas)
   }
   if componentHas(this: world.texts, entity: entity) {
     paintTextG(world: world, entity: entity, wt: wt, cr: cr, chain255: chain255, res: res)
@@ -415,7 +415,7 @@ func paintEntityG(world: view UiWorld, entity: view EntityId, res: view Gpu2dUi,
   # gpu2d has separate box/image/text pipelines. Flush per entity so later
   # entities can correctly paint over earlier images/text, matching raylib's
   # immediate-mode painter order.
-  Gpu2d.flush(box: box)
+  Gpu2d.flush(canvas: canvas)
 }
 
 # True when `e` clips its descendants (OverflowPolicy.mode == clip).
@@ -427,9 +427,9 @@ func entityClipsChildrenG(world: view UiWorld, entity: view EntityId) ret Bool {
   ret op.mode is OverflowMode.clip
 }
 
-func paintSubtreeG(world: view UiWorld, entity: view EntityId, res: view Gpu2dUi, box: mod Gpu2dBoxPass) {
+func paintSubtreeG(world: view UiWorld, entity: view EntityId, res: view Gpu2dUi, canvas: mod Gpu2dCanvas) {
   unsafe {
-    paintEntityG(world: world, entity: entity, res: res, box: box)
+    paintEntityG(world: world, entity: entity, res: res, canvas: canvas)
     if componentHas(this: world.childrens, entity: entity) is false {
       ret
     }
@@ -463,7 +463,7 @@ func paintSubtreeG(world: view UiWorld, entity: view EntityId, res: view Gpu2dUi
       loop i < n {
         let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
         if subtreeHoverPaintRank(world: world, entity: cid) is pass {
-          paintSubtreeG(world: world, entity: cid, res: res, box: box)
+          paintSubtreeG(world: world, entity: cid, res: res, canvas: canvas)
         }
         i = i + 1
       }
@@ -475,7 +475,7 @@ func paintSubtreeG(world: view UiWorld, entity: view EntityId, res: view Gpu2dUi
   }
 }
 
-func gpu2dLayerRange(world: view UiWorld, res: view Gpu2dUi, box: mod Gpu2dBoxPass, minOrder: view Int, maxOrder: view Int) pub {
+func gpu2dLayerRange(world: view UiWorld, res: view Gpu2dUi, canvas: mod Gpu2dCanvas, minOrder: view Int, maxOrder: view Int) pub {
   unsafe {
     let roots: List(EntityId) = collectPaintableRoots(world: world)
     let m: Int = roots.length
@@ -486,7 +486,7 @@ func gpu2dLayerRange(world: view UiWorld, res: view Gpu2dUi, box: mod Gpu2dBoxPa
         let ord: Int = entityLayerOrder(world: world, entity: root)
         if ord >= minOrder {
           if ord < maxOrder {
-            paintSubtreeG(world: world, entity: root, res: res, box: box)
+            paintSubtreeG(world: world, entity: root, res: res, canvas: canvas)
           }
         }
       }
@@ -496,8 +496,8 @@ func gpu2dLayerRange(world: view UiWorld, res: view Gpu2dUi, box: mod Gpu2dBoxPa
 }
 
 # Render `world` on the gpu2d backend. Call between Gpu2d.beginFrame/endFrame.
-func renderSystemGpu2d(world: view UiWorld, res: view Gpu2dUi, box: mod Gpu2dBoxPass) pub {
+func renderSystemGpu2d(world: view UiWorld, res: view Gpu2dUi, canvas: mod Gpu2dCanvas) pub {
   let allRangeLow: Int = 0 - 1000000
   let allRangeHi: Int = 1000000
-  gpu2dLayerRange(world: world, res: res, box: box, minOrder: allRangeLow, maxOrder: allRangeHi)
+  gpu2dLayerRange(world: world, res: res, canvas: canvas, minOrder: allRangeLow, maxOrder: allRangeHi)
 }

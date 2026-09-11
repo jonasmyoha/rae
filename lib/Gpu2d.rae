@@ -13,7 +13,7 @@
 # compiler/runtime/rae_runtime.c. Compiled-target only; needs wgpu-native + SDL3.
 # Importing this module links both. Window globals are shared with lib/sdl3.rae,
 # so sdl3 input functions (getMouseX/isKeyDown/…) work against this window.
-open Gpu2dBox
+open Gpu2dCanvas
 open webgpu/Webgpu
 open webgpu/Context
 
@@ -326,12 +326,12 @@ func beginFrameLoad() {
 # `box` is the app-owned 2D box pass (#907): the frame's queued primitives are
 # drawn from its manager before images and text, and its per-frame objects are
 # retired after the submit.
-func endFrame(box: mod Gpu2dBoxPass) {
+func endFrame(canvas: mod Gpu2dCanvas) {
   unsafe {
     # Advance the deterministic clock every frame, even one with no drawable yet.
     g2dTick()
     if g2dFrameActive() is 0 { ret }
-    flush(box: box)
+    flush(canvas: canvas)
     let pass: Ptr = g2dPass()
     let enc: Ptr = g2dEncoder()
     wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
@@ -342,7 +342,7 @@ func endFrame(box: mod Gpu2dBoxPass) {
     wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
     wgpuCommandEncoderRelease(commandEncoder: enc)
     g2dPresentCleanup()
-    boxFrameEnd(box: box)
+    boxFrameEnd(canvas: canvas)
   }
 }
 
@@ -357,11 +357,12 @@ func lastPresentOk() ret Bool {
 # Flush queued primitives into the active render pass without ending the
 # frame. Use this when painter order must be preserved across primitive
 # pipelines (for example: image, then later shape, then text). Order within a
-# flush: boxes (the Rae box pass, #907), then images, then text (C).
+# flush: boxes (the Rae box pass, #907), then images (#908), then text (C).
 func nativeFlush() unsafe extern("rae_ext_Gpu2d_flush")
-func flush(box: mod Gpu2dBoxPass) {
-  g2dPrepareFlush()
-  boxFlush(box: box)
+func flush(canvas: mod Gpu2dCanvas) {
+  g2dPrepareFlush(imagesPending: canvas.imageCommandHandles.length)
+  boxFlush(canvas: canvas)
+  imageFlush(canvas: canvas)
   unsafe { nativeFlush() }
 }
 
@@ -431,12 +432,13 @@ func popClipRect() {
 }
 
 # --- Images (#143, textured rounded quads) -------------------------------
-# Decode a PNG file and upload it as a GPU texture; returns a 1-based handle
-# (0 on failure). PNG only (lodepng) — convert JPEG assets to PNG. Load once,
-# at startup; the texture is cached for the window's lifetime.
-func nativeLoadImage(path: String) unsafe extern("rae_ext_Gpu2d_loadImage") ret Int
-func loadImage(path: copy String) ret Int {
-  unsafe { ret nativeLoadImage(path: path) }
+# Since #908 the images live on the app-owned Gpu2dCanvas (decoded by C, the
+# textures + draws are manager objects there); these are the Gpu2d-spelled
+# entry points over it. Decode a PNG/JPEG file and upload it as a GPU texture;
+# returns a 1-based handle (0 on failure). Load once, at startup; the texture
+# is cached for the canvas's lifetime.
+func loadImage(canvas: mod Gpu2dCanvas, path: copy String) ret Int {
+  ret canvasLoadImage(canvas: canvas, path: path)
 }
 
 # Device-free decode probe (#228): runs loadImage's exact decode +
@@ -452,47 +454,34 @@ func decodeImageProbe(path: copy String) ret Int {
 # Decode+upload `path` and register it under `key` (returns the handle, 0 on
 # failure). Lets a renderer resolve a Sprite.textureKey to an image without a
 # Rae-side map. drawImageKey draws a registered key; hasImageKey tests one.
-func nativeLoadImageKey(key: String, path: String) unsafe extern("rae_ext_Gpu2d_loadImageKey") ret Int
-func loadImageKey(key: copy String, path: copy String) ret Int {
-  unsafe { ret nativeLoadImageKey(key: key, path: path) }
+func loadImageKey(canvas: mod Gpu2dCanvas, key: copy String, path: copy String) ret Int {
+  ret canvasLoadImageKey(canvas: canvas, key: key, path: path)
 }
 # Register an image straight from RGBA pixels generated in Rae (#539) — no file.
 # `pixels` is one packed int per pixel: r | g<<8 | b<<16 | a<<24 (order R,G,B,A).
-func nativeG2dRegisterImageRgba(pixels: view Buffer(Int), w: Int, h: Int) unsafe extern("rae_ext_Gpu2d_registerImageRgba") ret Int
-func g2dRegisterImageRgba(pixels: view Buffer(Int), w: copy Int, h: copy Int) ret Int {
-  unsafe { ret nativeG2dRegisterImageRgba(pixels: pixels, w: w, h: h) }
-}
-func nativeG2dRegisterImageKeyHandle(key: String, handle: Int) unsafe extern("rae_ext_Gpu2d_registerImageKeyHandle")
-func g2dRegisterImageKeyHandle(key: copy String, handle: copy Int) {
-  unsafe { nativeG2dRegisterImageKeyHandle(key: key, handle: handle) }
-}
-func registerImageRgba(key: copy String, pixels: view Buffer(Int), w: copy Int, h: copy Int) pub ret Int {
-  let handle: Int = g2dRegisterImageRgba(pixels: pixels, w: w, h: h)
-  if handle > 0 { g2dRegisterImageKeyHandle(key: key, handle: handle) }
+func registerImageRgba(canvas: mod Gpu2dCanvas, key: copy String, pixels: view Buffer(Int), w: copy Int, h: copy Int) pub ret Int {
+  let handle: Int = canvasRegisterImageRgba(canvas: canvas, pixels: pixels, width: w, height: h)
+  if handle > 0 { canvasRegisterImageKey(canvas: canvas, key: key, handle: handle) }
   ret handle
 }
-func nativeHasImageKey(key: String) unsafe extern("rae_ext_Gpu2d_hasImageKey") ret Bool
-func hasImageKey(key: copy String) ret Bool {
-  unsafe { ret nativeHasImageKey(key: key) }
+func hasImageKey(canvas: view Gpu2dCanvas, key: copy String) ret Bool {
+  ret canvasHasImageKey(canvas: canvas, key: key)
 }
-func nativeDrawImageKey(key: String, x: Float, y: Float, w: Float, h: Float, radius: Float, tint: Int) unsafe extern("rae_ext_Gpu2d_drawImageKey")
-func drawImageKey(key: copy String, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, tint: copy Int) {
-  unsafe { nativeDrawImageKey(key: key, x: x, y: y, w: w, h: h, radius: radius, tint: tint) }
+func drawImageKey(canvas: mod Gpu2dCanvas, key: copy String, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, tint: copy Int) {
+  canvasDrawImageKey(canvas: canvas, key: key, x: x, y: y, w: w, h: h, radius: radius, tint: tint)
 }
 # Draw a registered image with ScaleMode semantics:
 # 0 = fit, 1 = fill/cover-crop, 2 = stretch.
-func nativeDrawImageKeyScaled(key: String, x: Float, y: Float, w: Float, h: Float, radius: Float, tint: Int, scaleMode: Int) unsafe extern("rae_ext_Gpu2d_drawImageKeyScaled")
-func drawImageKeyScaled(key: copy String, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, tint: copy Int, scaleMode: copy Int) {
-  unsafe { nativeDrawImageKeyScaled(key: key, x: x, y: y, w: w, h: h, radius: radius, tint: tint, scaleMode: scaleMode) }
+func drawImageKeyScaled(canvas: mod Gpu2dCanvas, key: copy String, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, tint: copy Int, scaleMode: copy Int) {
+  canvasDrawImageKeyScaled(canvas: canvas, key: key, x: x, y: y, w: w, h: h, radius: radius, tint: tint, scaleMode: scaleMode)
 }
 
 # Draw image `handle` into the rect at (x,y) sized w×h, with optional corner
 # `radius`. `tint` is 0xAARRGGBB applied multiplicatively — 0xFFFFFFFF draws
 # the image unchanged; a solid color tints a white/alpha icon to that color.
 # Submitted between beginFrame/endFrame; drawn above boxes, below text.
-func nativeDrawImage(x: Float, y: Float, w: Float, h: Float, radius: Float, handle: Int, tint: Int) unsafe extern("rae_ext_Gpu2d_drawImage")
-func drawImage(x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, handle: copy Int, tint: copy Int) {
-  unsafe { nativeDrawImage(x: x, y: y, w: w, h: h, radius: radius, handle: handle, tint: tint) }
+func drawImage(canvas: mod Gpu2dCanvas, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, handle: copy Int, tint: copy Int) {
+  canvasDrawImage(canvas: canvas, x: x, y: y, w: w, h: h, radius: radius, handle: handle, tint: tint)
 }
 
 # --- Text (#111, MSDF glyph quads) ---------------------------------------

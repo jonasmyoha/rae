@@ -8,7 +8,7 @@ open Raylib
 import Gpu2d
 import ui/Components
 import ui/legacyRaylib/Draw
-open Gpu2dBox
+open Gpu2dCanvas
 
 func uiRaylibColor(color: view RgbaColor) ret Color {
   ret Color { r: color.r, g: color.g, b: color.b, a: color.a }
@@ -84,10 +84,10 @@ func uiBeginFrame(backend: view UiBackend, clear: view RgbaColor) pub {
   }
 }
 
-func uiEndFrame(backend: view UiBackend, box: mod Gpu2dBoxPass) pub {
+func uiEndFrame(backend: view UiBackend, canvas: mod Gpu2dCanvas) pub {
   unsafe {
     if backend is UiBackend.gpu2d {
-      Gpu2d.endFrame(box: box)
+      Gpu2d.endFrame(canvas: canvas)
       ret
     }
     endDrawing()

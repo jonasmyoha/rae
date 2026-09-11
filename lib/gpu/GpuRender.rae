@@ -718,3 +718,31 @@ func writeBufferFromPtr(resources: view GpuResources, id: view BufferId, offset:
   ret true
 }
 
+# Uploads a whole-texture RGBA8 image (`rows` rows of `bytesPerRow` bytes) into
+# a manager texture through the queue: the 2D image pass (#908). The texture
+# must be CopyDst and exactly `rows` high; the row size must match its width.
+func writeTextureFromPtr(resources: view GpuResources, texture: view TextureId, data: copy Ptr, bytesPerRow: view Int, rows: view Int) unsafe ret Bool {
+  if isValidTexture(resources: resources, id: texture) is false { ret false }
+  if bytesPerRow < 4 or rows < 1 { ret false }
+  if textureHeight(resources: resources, id: texture) is not rows { ret false }
+  if textureWidth(resources: resources, id: texture) * 4 is not bytesPerRow { ret false }
+  unsafe {
+    if data is webgpuNull() { ret false }
+    let handle: Ptr = slotHandle(table: resources.textures, slot: texture.slot)
+    if hasUsageFlag(usage: wgpuTextureGetUsage(texture: handle), flag: WGPUTextureUsage_CopyDst) is false { ret false }
+    let destination: WGPUTexelCopyTextureInfo = { texture: handle, aspect: WGPUTextureAspect_All }
+    let layout: WGPUTexelCopyBufferLayout = { bytesPerRow: bytesPerRow as UInt32, rowsPerImage: rows as UInt32 }
+    let extent: WGPUExtent3D = { width: (bytesPerRow / 4) as UInt32, height: rows as UInt32, depthOrArrayLayers: 1 as UInt32 }
+    wgpuQueueWriteTexture(queue: webgpuQueue(), destination: destination, data: data, dataSize: (bytesPerRow * rows) as UInt64, dataLayout: layout, writeSize: extent)
+  }
+  ret true
+}
+
+# The same from a Rae byte list (procedural RGBA pixels); the list is only
+# borrowed for the call, the queue copies it.
+func writeTexture(resources: view GpuResources, texture: view TextureId, bytes: view List(UInt8), bytesPerRow: view Int) ret Bool {
+  if bytesPerRow < 4 or bytes.length < bytesPerRow { ret false }
+  if bytes.length % bytesPerRow is not 0 { ret false }
+  unsafe { ret writeTextureFromPtr(resources: resources, texture: texture, data: bytes.data, bytesPerRow: bytesPerRow, rows: bytes.length / bytesPerRow) }
+}
+

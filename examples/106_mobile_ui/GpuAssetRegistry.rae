@@ -1,23 +1,30 @@
 open ImageRegistry
+open Gpu2dCanvas
 
 # GPU2D-only compatibility registry for the 98-derived app code.
 #
 # 106 keeps the 98-derived TextureRegistry parameter shape, but image resource
-# policy now lives in Rae. gpu2d remains the raw decode/upload bridge.
+# policy lives in Rae and, since #908, so do the textures: the registry OWNS
+# the app's Gpu2dCanvas (the 2D box + image passes on one GPU manager), which
+# is also what the frame is flushed/presented with — one canvas holds the
+# images the UI draws by key.
 type TextureRegistry {
   images: ImageRegistry
+  canvas: Gpu2dCanvas
 }
 
 func createTextureRegistry() pub ret TextureRegistry {
-  ret TextureRegistry { images: createImageRegistry() }
+  unsafe {
+    ret TextureRegistry { images: createImageRegistry(), canvas: createGpu2dCanvas() }
+  }
 }
 
 func textureHas(reg: view TextureRegistry, key: view String) pub ret Bool {
-  ret imageRegistryHas(reg: reg.images, key: key)
+  ret imageRegistryHas(reg: reg.images, canvas: reg.canvas, key: key)
 }
 
 func textureLoad(reg: mod TextureRegistry, key: view String, path: view String) pub ret Int {
-  ret load(reg: reg.images, key: key, path: path)
+  ret load(reg: reg.images, canvas: reg.canvas, key: key, path: path)
 }
 
 func textureFailedPath(reg: view TextureRegistry, path: view String) pub ret Bool {
@@ -42,5 +49,6 @@ func textureRemove(reg: mod TextureRegistry, key: view String) pub {
 }
 
 func textureUnloadAll(reg: mod TextureRegistry) pub {
-  # GPU resources are owned by the gpu2d context and released by uiCloseWindow.
+  # Retires every image texture and the canvas's passes (call before uiCloseWindow).
+  canvasShutdown(canvas: reg.canvas)
 }

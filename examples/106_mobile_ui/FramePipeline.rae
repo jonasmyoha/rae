@@ -5,7 +5,7 @@ open ui/LogOverlay
 open ui/Transform
 open ui/renderSystem/RenderSystem
 open ui/visualBoundsSystem/VisualBoundsSystem
-open Gpu2dBox
+open Gpu2dCanvas
 
 # Frame-phase helpers for 106. The app still owns the loop policy, but the
 # systems now run through explicit phases: input dispatch, UI refresh/data sync,
@@ -82,8 +82,9 @@ func refreshUiDiffs(
   cache: mod UiRefreshCache
   viewport: view Viewport
   applyOverlaySync: view Bool
+  reg: view TextureRegistry
 ) pub ret FrameUiRefreshResult {
-  let refreshed: UiRefreshResult = refreshMountedUi(world: world, scenes: scenes, state: appState, playback: playback, visible: visible, cache: cache, viewport: viewport)
+  let refreshed: UiRefreshResult = refreshMountedUi(world: world, scenes: scenes, state: appState, playback: playback, visible: visible, cache: cache, viewport: viewport, reg: reg)
   if applyOverlaySync or refreshed.playbackChanged {
     applyOverlaysToWorld(world: world, playback: playback, state: appState)
   }
@@ -122,7 +123,7 @@ func syncFrameData(
   # Wrap at the boundary: the frame pipeline still carries a raw Float64 clock,
   # while the poller's throttle is expressed in Timestamp/Duration.
   pollSpotify(state: spotifyState, world: world, reg: texReg, playback: playback, appState: appState, now: Time.atSeconds(s: now))
-  let spotifyRefresh: UiRefreshResult = refreshMountedUi(world: world, scenes: scenes, state: appState, playback: playback, visible: visible, cache: uiRefresh, viewport: viewport)
+  let spotifyRefresh: UiRefreshResult = refreshMountedUi(world: world, scenes: scenes, state: appState, playback: playback, visible: visible, cache: uiRefresh, viewport: viewport, reg: texReg)
   if spotifyRefresh.playbackChanged {
     applyOverlaysToWorld(world: world, playback: playback, state: appState)
   }
@@ -227,7 +228,7 @@ type FrameRenderResult {
 func renderGpu2dFrame(
   world: mod UiWorld
   gpuUi: view Gpu2dUi
-  box: mod Gpu2dBoxPass
+  canvas: mod Gpu2dCanvas
   debug: mod DebugSystem
   logView: view LogOverlay
   logW: view Float
@@ -246,12 +247,12 @@ func renderGpu2dFrame(
   let frameDue: Bool = busyAnimating or forceRender or (now - lastRenderTime) >= targetFrameSec * 0.85
   if (busyAnimating or active or forceRender or now < renderUntil) and frameDue and switching is false {
     uiBeginFrame(clear: bg)
-    renderSystemGpu2d(world: world, res: gpuUi, box: box)
+    renderSystemGpu2d(world: world, res: gpuUi, canvas: canvas)
     updateAndRenderDebugOverlayGpu2d(debug: debug, now: now, didRealWork: active, font: gpuUi.textFont)
     # Shared log overlay (lib/ui/LogOverlay.rae) — top-left here, bottom-left
     # in the 3D example. Drawn last so it is never covered by app UI.
     drawLogOverlay(ov: logView, font: gpuUi.textFont, screenW: logW, screenH: logH)
-    uiEndFrame(box: box)
+    uiEndFrame(canvas: canvas)
     cacheDirty(world: world, cache: renderCache)
     ret FrameRenderResult {
       forceRender: uiLastPresentOk() is false

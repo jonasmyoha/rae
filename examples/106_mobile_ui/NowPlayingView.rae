@@ -33,6 +33,7 @@ func mountNowPlayingPage(
   scenes: view AlbumScenes
   playback: view PlaybackState
   state: view AppState
+  reg: view TextureRegistry
   viewport: view Viewport
 ) pub ret EntityId {
   let album: Album = activeAlbum(state: state)
@@ -104,7 +105,7 @@ func mountNowPlayingPage(
   # Cover observes the nowPlaying instance revision (#268): the big Hero
   # cover re-points by identity on a track change without a re-mount.
   let heroCoverNode: String = "Hero"
-  let heroCoverSeed: String = nowPlayingCoverSeed(playback: playback, browsedStem: state.currentAlbumStem)
+  let heroCoverSeed: String = nowPlayingCoverSeed(reg: reg, playback: playback, browsedStem: state.currentAlbumStem)
   tagPlaybackCoverDependency(world: world, pageId: playerPageId, nodeId: heroCoverNode, observedRevision: playback.nowPlayingRevision, artKey: heroCoverSeed)
   let heartNode: String = "HeartButton"
   let heartWidgetId: String = "player.likeButton"
@@ -138,7 +139,7 @@ func buildNowPlayingWorld(scenes: view AlbumScenes, playback: view PlaybackState
   let world: UiWorld = create()
   seedWorldThemeFrom(world: world, src: state.theme)  # #764: theme from AppState
   applyViewportExtent(world: world, viewport: viewport)
-  let page: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: state, viewport: viewport)
+  let page: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: state, reg: reg, viewport: viewport)
   let dock: EntityId = mountBottomDockOverlay(
     world: world
     activeTab: state.tab
@@ -167,6 +168,7 @@ func buildMiniPlayerInstance(
   label: view String
   playback: view PlaybackState
   state: view AppState
+  reg: view TextureRegistry
 ) pub ret EntityId {
   let album: Album = activeAlbum(state: state)
   let track: Track = trackAt(album: album, idx: state.currentTrackIndex)
@@ -224,7 +226,7 @@ func buildMiniPlayerInstance(
   # Cover observes the nowPlaying instance revision (#268): the persistent
   # dock's MiniThumb re-points by identity on a track change — this is the
   # widget the motivating bug left stuck on the first album (§1).
-  let miniThumbCoverSeed: String = nowPlayingCoverSeed(playback: playback, browsedStem: state.currentAlbumStem)
+  let miniThumbCoverSeed: String = nowPlayingCoverSeed(reg: reg, playback: playback, browsedStem: state.currentAlbumStem)
   tagPlaybackCoverDependency(world: world, pageId: miniPlayerPageId, nodeId: "MiniThumb", observedRevision: playback.nowPlayingRevision, artKey: miniThumbCoverSeed)
   let miniHeartNode: String = "MiniHeartButton"
   let miniHeartWidgetId: String = "miniPlayer.likeButton"
