@@ -23,6 +23,7 @@ open ui/Ecs
 import Gpu2d
 open ecs/Entity
 open ecs/ComponentTable
+open GpuAssetRegistry
 
 type UiPlaybackSystem {
   # Observe cache: the last PlaybackSystem `revision` (isPlaying) this UI
@@ -51,11 +52,11 @@ func createUiPlaybackSystem(observedRevision: view Int) pub ret UiPlaybackSystem
 # playback widgets, then advance the observe cache. Returns whether anything
 # changed (so callers can trigger a repaint). Bumps this UI system's own
 # revision eagerly on change. Never writes PlaybackState — reads only.
-func uiPlaybackObserve(this: mod UiPlaybackSystem, world: mod UiWorld, playback: view PlaybackState) pub ret Bool {
+func uiPlaybackObserve(this: mod UiPlaybackSystem, world: mod UiWorld, playback: view PlaybackState, reg: view TextureRegistry) pub ret Bool {
   let oldIcon: Int = this.observedRevision
   let oldArt: Int = this.observedNowPlayingRevision
   this.observedRevision = refreshPlaybackViewsIfNeeded(world: world, playback: playback, cachedRevision: this.observedRevision)
-  this.observedNowPlayingRevision = refreshPlaybackCoversIfNeeded(world: world, playback: playback, cachedRevision: this.observedNowPlayingRevision)
+  this.observedNowPlayingRevision = refreshPlaybackCoversIfNeeded(world: world, playback: playback, reg: reg, cachedRevision: this.observedNowPlayingRevision)
   if this.observedRevision is not oldIcon {
     this.revision = this.revision + 1
     ret true
@@ -84,18 +85,18 @@ func uiPlaybackObserve(this: mod UiPlaybackSystem, world: mod UiWorld, playback:
 # cover (boot-loaded), then the browsed stem. All three are candidate covers;
 # the first LOADED one wins, so the widget never falls to the grey placeholder
 # when a real cover exists.
-func coverKeyResolved(playback: view PlaybackState, browsedStem: view String) pub ret String {
-  if playback.nowPlayingArtKey.length() > 0 and Gpu2d.hasImageKey(key: playback.nowPlayingArtKey) {
+func coverKeyResolved(reg: view TextureRegistry, playback: view PlaybackState, browsedStem: view String) pub ret String {
+  if playback.nowPlayingArtKey.length() > 0 and textureHas(reg: reg, key: playback.nowPlayingArtKey) {
     ret "{playback.nowPlayingArtKey}"
   }
-  if playback.playingAlbumStem.length() > 0 and Gpu2d.hasImageKey(key: playback.playingAlbumStem) {
+  if playback.playingAlbumStem.length() > 0 and textureHas(reg: reg, key: playback.playingAlbumStem) {
     ret "{playback.playingAlbumStem}"
   }
   ret "{browsedStem}"
 }
 
-func nowPlayingCoverSeed(playback: view PlaybackState, browsedStem: view String) pub ret String {
-  ret coverKeyResolved(playback: playback, browsedStem: browsedStem)
+func nowPlayingCoverSeed(reg: view TextureRegistry, playback: view PlaybackState, browsedStem: view String) pub ret String {
+  ret coverKeyResolved(reg: reg, playback: playback, browsedStem: browsedStem)
 }
 
 func tagPlaybackCoverDependency(world: mod UiWorld, pageId: view String, nodeId: view String, observedRevision: view Int, artKey: view String) pub {
@@ -137,7 +138,7 @@ func repointCoverSprite(world: mod UiWorld, entity: view EntityId, artKey: view 
 # to `playback.nowPlayingArtKey` and advance its observed revision. This is
 # the generic replacement for `rebindAlbumCoversToSpotify` — no per-frame
 # sprite walk keyed on a stale browsed stem. Reads PlaybackState only.
-func refreshPlaybackCoversIfNeeded(world: mod UiWorld, playback: view PlaybackState, cachedRevision: view Int) pub ret Int {
+func refreshPlaybackCoversIfNeeded(world: mod UiWorld, playback: view PlaybackState, reg: view TextureRegistry, cachedRevision: view Int) pub ret Int {
   if playback.nowPlayingRevision is cachedRevision {
     ret cachedRevision
   }
@@ -159,7 +160,7 @@ func refreshPlaybackCoversIfNeeded(world: mod UiWorld, playback: view PlaybackSt
             # Repoint to a LOADED key, not the raw now-playing art: if that
             # art isn't in the registry (failed Spotify fetch), show the
             # playing track's local cover instead of a grey rect.
-            let coverKey: String = coverKeyResolved(playback: playback, browsedStem: playback.playingAlbumStem)
+            let coverKey: String = coverKeyResolved(reg: reg, playback: playback, browsedStem: playback.playingAlbumStem)
             repointCoverSprite(world: world, entity: entity, artKey: coverKey)
           }
           setDataDependency(world: world, entity: entity, resource: playbackSource, field: coverField, observedRevision: playback.nowPlayingRevision)

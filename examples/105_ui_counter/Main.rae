@@ -45,7 +45,7 @@ open ui/SceneLoader
 open ui/ThemeResolved
 open ui/Transform
 open ecs/Entity
-open Gpu2dBox
+open Gpu2dCanvas
 
 # Phone-shaped, and the same numbers the scene was authored against so nothing
 # has to be scaled at load.
@@ -184,7 +184,7 @@ func applyActions(state: mod CounterState, input: view UiInput) ret Bool {
 
 func main() ret Int {
   Gpu2d.initWindow(width: designW, height: designH, title: "Rae UI — Counter")
-  var boxPass: Gpu2dBoxPass = createGpu2dBoxPass()   # #907: the app-owned 2D box pass
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()   # #907: the app-owned 2D canvas (box + image passes)
 
   let base: String = "examples/105_ui_counter/assets/"
   # Fonts and theme in one call. The theme's palette is bridged into the active
@@ -296,8 +296,8 @@ func main() ret Int {
 
     if Gpu2d.shouldRenderFrame(appNeedsRender: needsRender) {
       Gpu2d.beginFrame(r: 0.03, g: 0.05, b: 0.08, a: 1.0)
-      renderSystemGpu2d(world: world, res: gpuUi, box: boxPass)
-      Gpu2d.endFrame(box: boxPass)
+      renderSystemGpu2d(world: world, res: gpuUi, canvas: canvas)
+      Gpu2d.endFrame(canvas: canvas)
       renderedOnce = true
     } else {
       # IDLE AT ~0% CPU. Nothing here animates, so there is nothing to wake for
@@ -313,7 +313,7 @@ func main() ret Int {
     }
   }
 
-  boxPassShutdown(box: boxPass)
+  canvasShutdown(canvas: canvas)
   Gpu2d.closeWindow()
   ret 0
 }

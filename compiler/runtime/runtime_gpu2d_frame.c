@@ -93,9 +93,7 @@ void rae_g2d_frame_reset(void) {
     g_g2d_last_present_ok = 0;
     g_g2d_prim_count = 0;
     for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) g_g2d_text_count[i] = 0;
-    g_g2d_img_cmd_count = 0;
     rae_g2d_clip_reset();
-    g_g2d_img_frame_bind_n = 0;
     g_g2d_frame_buf_n = 0;
     g_g2d_frame_bind_n = 0;
     for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) g_g2d_text_frame_buf_n[i] = 0;
@@ -189,7 +187,6 @@ void rae_g2d_present_and_cleanup(void) {
     g_g2d_frame_buf_n = 0;
     /* Per-image bind groups are cached by draw slot + texture handle.
      * They stay alive across frames and are released at gpu2d shutdown. */
-    g_g2d_img_frame_bind_n = 0;
     g_g2d_pass = NULL;
     g_g2d_enc = NULL;
 
@@ -288,15 +285,14 @@ void* rae_g2d_clip_frame_uniform(int64_t clip) {
 }
 void rae_g2d_scissor(int64_t clip) { rae_g2d_set_scissor((int)clip); }
 
-/* Upload this flush's viewport transform when anything is queued. Called by
- * the Rae flush BEFORE it draws the boxes; the C flush below then draws images
- * and text. */
-void rae_g2d_prepare_flush(void) {
+/* Upload this flush's viewport transform when anything is queued (the Rae
+ * image queue's pending count comes in as an argument). Called by the Rae
+ * flush BEFORE it draws boxes and images; the C flush below then draws text. */
+void rae_g2d_prepare_flush(int64_t images_pending) {
     if (!g_g2d_pass) return;
     int have_text = 0;
     for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) if (g_g2d_text_count[i] > 0) have_text = 1;
-    int have_img = (g_g2d_img_cmd_count > 0);
-    if (g_g2d_prim_count > 0 || have_text || have_img) {
+    if (g_g2d_prim_count > 0 || have_text || images_pending > 0) {
         rae_g2d_ensure_viewport_uniform();
         float xf[8]; rae_g2d_compute_xform(xf);
         wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_uniform, 0, xf, sizeof(xf));
@@ -310,8 +306,7 @@ void rae_ext_Gpu2d_flush(void) {
     int have_text = 0;
     for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) if (g_g2d_text_count[i] > 0) have_text = 1;
     rae_g2d_ensure_viewport_uniform();
-    /* Images on top of boxes, under text. */
-    rae_g2d_flush_images();
+    /* Images (the Rae image pass) were drawn between the boxes and this. */
     if (have_text) {
         /* One text draw per atlas that has glyphs this frame (so Roboto text
          * and the Material-icon atlas coexist). */
@@ -392,23 +387,6 @@ void rae_ext_Gpu2d_closeWindow(void) {
         g_g2d_text_frame_buf_n[ai] = 0; g_g2d_text_frame_buf_slots[ai] = 0;
     }
     /* Image pipeline + textures. */
-    for (int i = 0; i < g_g2d_img_frame_bind_cap; i++) {
-        if (g_g2d_img_frame_binds[i]) wgpuBindGroupRelease(g_g2d_img_frame_binds[i]);
-    }
-    g_g2d_img_frame_bind_n = 0;
-    if (g_g2d_img_frame_binds) { free(g_g2d_img_frame_binds); g_g2d_img_frame_binds = NULL; g_g2d_img_frame_bind_cap = 0; }
-    if (g_g2d_img_frame_handles) { free(g_g2d_img_frame_handles); g_g2d_img_frame_handles = NULL; }
-    for (int i = 0; i < g_g2d_img_ubuf_n; i++) if (g_g2d_img_ubuf[i]) wgpuBufferRelease(g_g2d_img_ubuf[i]);
-    if (g_g2d_img_ubuf) { free(g_g2d_img_ubuf); g_g2d_img_ubuf = NULL; g_g2d_img_ubuf_n = 0; }
-    for (int i = 0; i < g_g2d_img_n; i++) {
-        if (g_g2d_img_view[i]) { wgpuTextureViewRelease(g_g2d_img_view[i]); g_g2d_img_view[i] = NULL; }
-        if (g_g2d_img_tex[i]) { wgpuTextureRelease(g_g2d_img_tex[i]); g_g2d_img_tex[i] = NULL; }
-    }
-    g_g2d_img_n = 0;
-    g_g2d_img_key_n = 0;
-    if (g_g2d_img_cmds) { free(g_g2d_img_cmds); g_g2d_img_cmds = NULL; g_g2d_img_cmd_cap = 0; }
-    g_g2d_img_cmd_count = 0;
-    if (g_g2d_img_pipeline) { wgpuRenderPipelineRelease(g_g2d_img_pipeline); g_g2d_img_pipeline = NULL; }
     if (g_g2d_surface) { wgpuSurfaceRelease(g_g2d_surface); g_g2d_surface = NULL; }
     for (int i = 0; i < 7; i++) {
         if (g_g2d_cursors[i]) { SDL_DestroyCursor(g_g2d_cursors[i]); g_g2d_cursors[i] = NULL; }

@@ -5,14 +5,14 @@ import Sys
 open app3d/UiShell
 open ui/Ecs
 open ui/renderSystem/RenderSystem
-open Gpu2dBox
+open Gpu2dCanvas
 
 const canvasW: Float = 800.0
 const canvasH: Float = 450.0
 
 func main() ret Int {
   Gpu2d.initWindow(width: canvasW.toInt(), height: canvasH.toInt(), title: "Rae Easing 2D — GPU2D")
-  var boxPass: Gpu2dBoxPass = createGpu2dBoxPass()   # #907: the app-owned 2D box pass
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()   # #907: the app-owned 2D canvas (box + image passes)
   Gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
 
   # The shared font/theme fixture keeps this example small; its authored UI is
@@ -68,11 +68,11 @@ func main() ret Int {
     Gpu2d.drawGradientRect(
       x: currentX - 40.0, y: 185.0, w: 80.0, h: 80.0
       radius: 40.0, from: 0xFFFFFFFF, to: ballColor, angleDeg: 45.0)
-    renderSystemGpu2d(world: world, res: uiResources, box: boxPass)
-    Gpu2d.endFrame(box: boxPass)
+    renderSystemGpu2d(world: world, res: uiResources, canvas: canvas)
+    Gpu2d.endFrame(canvas: canvas)
   }
 
-  boxPassShutdown(box: boxPass)
+  canvasShutdown(canvas: canvas)
   Gpu2d.closeWindow()
   ret 0
 }

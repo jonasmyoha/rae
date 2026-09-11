@@ -96,6 +96,8 @@ static int g_g2d_cur_clip = 0;           /* current clip index */
 /* parallel clip index per box primitive */
 static int* g_g2d_prim_clip = NULL;
 static int  g_g2d_prim_clip_cap = 0;     /* in prims */
+/* #908: the Rae image queue tags each draw with the clip active at queue time. */
+int64_t rae_g2d_current_clip(void) { return (int64_t)g_g2d_cur_clip; }
 /* parallel clip index per glyph, per atlas */
 static int* g_g2d_text_clip[RAE_SDF_MAX_ATLAS];
 static int  g_g2d_text_clip_cap[RAE_SDF_MAX_ATLAS];
