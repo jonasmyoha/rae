@@ -3,7 +3,7 @@
 Status: **revision 7 approved interop contract over the shipped
 create/drop/copy lifecycle, with staged source-file enforcement implemented;
 GPU manager identity contract proposed in
-[gpu-resource-identity-design.md](gpu-resource-identity-design.md) (#892), pending approval.**
+[gpu-resource-identity-design.md](gpu-resource-identity-design.md) (#892), approved 2026-09-11.**
 
 The active [GPU and C-interop design](ptr-and-gpu-resource-design.md) has been
 rewritten. Use ordinary lifecycle functions from
