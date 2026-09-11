@@ -57,6 +57,7 @@ open ui/Components
 open ui/inputSystem/InputSystem
 open ui/renderSystem/RenderSystem
 open app3d/RenderScale
+open Gpu2dBox
 
 # The deferred renderer + dynamic-resolution controller (#552). Lives with the
 # RenderSystem — the App just aggregates it.
@@ -273,10 +274,10 @@ func renderApp(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSys
       }
       case RenderTag.uiOverlay {
         Gpu2d.beginFrameLoad()
-        renderSystemGpu2d(world: inputSystem.world, res: inputSystem.gpuUi)
+        renderSystemGpu2d(world: inputSystem.world, res: inputSystem.gpuUi, box: renderSystem.renderer.boxPass)
         drawWalkerHud(logView: inputSystem.logView, gpuUi: inputSystem.gpuUi, dbg: inputSystem.dbg, moveStick: inputSystem.moveStick, panelOpen: inputSystem.settings.open)
       }
-      case RenderTag.present { Gpu2d.endFrame() }
+      case RenderTag.present { Gpu2d.endFrame(box: renderSystem.renderer.boxPass) }
     }
     Profile.zoneEnd(profiler: profiler, name: (tag as RenderTag).toString())
   }

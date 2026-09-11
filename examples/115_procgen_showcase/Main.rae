@@ -19,6 +19,7 @@ open Mesh3d
 open procgen/Rock
 open procgen/Tree
 open procgen/Texture
+open Gpu2dBox
 
 # The five biome-material albedo textures, generated in Rae and registered as
 # gpu2d images so they can be drawn as swatches over the 3D scene.
@@ -96,6 +97,7 @@ func buildScene(rocks: view List(Int), treeTrunks: view List(Int), treeCanopies:
 
 func main() ret Int {
   Gpu2d.initWindow(width: 1280, height: 800, title: "Rae — procedural rocks & trees")
+  var boxPass: Gpu2dBoxPass = createGpu2dBoxPass()   # #907: the app-owned 2D box pass
 
   # Five rock variants: vary seed, slice count, irregularity.
   var rocks: List(Int) = List.create(Int, cap: 5)
@@ -172,7 +174,7 @@ func main() ret Int {
           drawTextureSwatches()
         } else {
           if tag is RenderTag.present {
-            Gpu2d.endFrame()
+            Gpu2d.endFrame(box: boxPass)
           } else {
             renderDeferredPassWorld(renderer: renderer, tag: tag, world: sceneWorld, camera: camera, light: light, aspect: aspect)
           }
@@ -183,6 +185,7 @@ func main() ret Int {
   }
   shutdownDeferredRenderer(renderer: renderer)   # #904: the renderer-owned GPU manager, before the C shutdown
   shutdown()
+  boxPassShutdown(box: boxPass)
   Gpu2d.closeWindow()
   ret 0
 }

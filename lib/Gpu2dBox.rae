@@ -1,0 +1,237 @@
+# Gpu2dBox — the 2D box/primitive pass (#110) in Rae over the WebGPU bindings
+# (#907, the first 2D renderer C->Rae slice). One pipeline draws every rect /
+# rounded rect / bordered box / gradient / line the frame queued: instanced
+# quads over a rounded-box SDF (lib/gpu2d_box.wgsl). The pipeline, the
+# per-flush instance buffers and the per-run bind groups are typed IDs in the
+# box pass's own gpu/GpuResources manager; the CPU-side batch (the packed
+# primitives + per-primitive clip index) and the frame lifecycle stay C for
+# now and are read through accessors — the shared viewport uniform and each
+# run's clip uniform are adopted as externals, the draws go into the C-owned
+# frame pass (rae_g2d_pass_get) with recordDrawInPass, exactly the #874 grass
+# pattern. Batch accumulation and draw order are unchanged: a flush draws the
+# queued primitives in contiguous same-clip runs (scissor + clip uniform per
+# run), then C draws images and text on top.
+#
+# Owner: an app (or the deferred renderer for its UI overlay) holds ONE
+# Gpu2dBoxPass and hands it to Gpu2d.flush / Gpu2d.endFrame. Instance buffers
+# are per flush slot within a frame (a later flush must not overwrite what an
+# earlier draw still reads) and persist across frames, like the C pool did.
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuIds
+
+func g2dBoxPass() unsafe extern("rae_g2d_pass_get") ret Ptr
+func nativeG2dBoxFormat() unsafe extern("rae_g2d_format") ret Int
+func g2dViewportUniform() unsafe extern("rae_g2d_viewport_uniform") ret Ptr
+func nativeG2dPrimCount() unsafe extern("rae_g2d_prim_count") ret Int
+func nativeG2dPrimFloats() unsafe extern("rae_g2d_prim_floats") ret Int
+func g2dPrimData() unsafe extern("rae_g2d_prim_data") ret Ptr
+func nativeG2dPrimClipAt(i: Int) unsafe extern("rae_g2d_prim_clip_at") ret Int
+func nativeG2dPrimReset() unsafe extern("rae_g2d_prim_reset")
+func g2dClipFrameUniform(clip: Int) unsafe extern("rae_g2d_clip_frame_uniform") ret Ptr
+func nativeG2dScissor(clip: Int) unsafe extern("rae_g2d_scissor")
+func nativeG2dPrepareFlush() unsafe extern("rae_g2d_prepare_flush")
+func nativeG2dBoxReadFile(path: String) unsafe extern("rae_ext_rae_sys_read_file") ret String
+
+func g2dPrimCount() ret Int {
+  unsafe { ret nativeG2dPrimCount() }
+}
+func g2dPrimFloats() ret Int {
+  unsafe { ret nativeG2dPrimFloats() }
+}
+func g2dPrimClipAt(i: copy Int) ret Int {
+  unsafe { ret nativeG2dPrimClipAt(i: i) }
+}
+func g2dPrimReset() {
+  unsafe { nativeG2dPrimReset() }
+}
+func g2dScissor(clip: copy Int) {
+  unsafe { nativeG2dScissor(clip: clip) }
+}
+func g2dPrepareFlush() {
+  unsafe { nativeG2dPrepareFlush() }
+}
+
+type Gpu2dBoxPass {
+  idIssuer: IdIssuer
+  gpuResources: opt GpuResources
+  pipeMade: Bool
+  pipeline: RenderPipelineId
+  viewport: ExternalId              # the C viewport uniform, adopted once
+  frameBuffers: List(BufferId)      # per-flush instance buffers, slot = flush index in the frame
+  frameCapacities: List(Int)        # each slot's capacity in primitives
+  flushIndex: Int
+  frameBinds: List(BindGroupId)     # this frame's per-run bind groups
+  frameExternals: List(ExternalId)  # this frame's adopted clip uniforms
+}
+
+# Slot budget: one bind group + one clip external per same-clip run per flush,
+# and the UI render system flushes once per entity, so a busy UI frame makes a
+# few hundred. Retired at frame end and the slots reused.
+const boxPassManagerCapacity: Int = 1024
+
+func createGpu2dBoxPass() ret Gpu2dBoxPass {
+  unsafe {
+    ret Gpu2dBoxPass {
+      idIssuer: IdIssuer.create(), gpuResources: none, pipeMade: false,
+      pipeline: noRenderPipelineId(), viewport: noExternalId(),
+      frameBuffers: List.create(BufferId, cap: 8), frameCapacities: List.create(Int, cap: 8), flushIndex: 0,
+      frameBinds: List.create(BindGroupId, cap: 64), frameExternals: List.create(ExternalId, cap: 64)
+    }
+  }
+}
+
+func ensureBoxResources(box: mod Gpu2dBoxPass) {
+  if let existing: view GpuResources => box.gpuResources { ret }
+  box.gpuResources = GpuResources.create(issuer: box.idIssuer, capacity: boxPassManagerCapacity)
+}
+
+# The box pipeline: a procedural quad (no vertex buffer), one colour target in
+# the gpu2d presentable format, premultiplied alpha blending, no depth, no cull.
+func boxPipelineSpec(format: copy Int32) ret RenderPipelineSpec {
+  let colorFormats: List(Int32) = List.create(Int32, cap: 1)
+  colorFormats.add(value: format)
+  let attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 1)
+  ret RenderPipelineSpec {
+    vertexStride: 0, attributes: own attributes, colorFormats: own colorFormats,
+    alphaBlend: true, premultiplied: true, depthFormat: 0 as Int32, depthWrite: false,
+    depthCompare: WGPUCompareFunction_Always, cullMode: WGPUCullMode_None
+  }
+}
+
+func ensureBoxPipeline(box: mod Gpu2dBoxPass, resources: mod GpuResources) {
+  if box.pipeMade { ret }
+  box.pipeMade = true
+  # Read relative to the working directory like every lib/*.wgsl asset (the
+  # example gates run from the repo root). An empty read must not reach wgpu.
+  var source: String = ""
+  unsafe { source = nativeG2dBoxReadFile(path: "lib/gpu2d_box.wgsl") }
+  if source.length() is 0 {
+    log("[gpu2d] lib/gpu2d_box.wgsl not readable from the working directory — run from the repo root; 2D boxes are skipped")
+    ret
+  }
+  var format: Int = 0
+  unsafe { format = nativeG2dBoxFormat() }
+  if let pipeline: RenderPipelineId = createRenderPipeline(resources: resources, wgsl: source, vertexEntry: "vs", fragmentEntry: "fs", spec: boxPipelineSpec(format: format as Int32)) {
+    box.pipeline = pipeline
+  }
+  unsafe {
+    if let viewport: ExternalId = adoptExternalBuffer(resources: resources, handle: g2dViewportUniform()) { box.viewport = viewport }
+  }
+}
+
+# This flush's instance buffer: the slot for the flush index, grown (retired
+# and re-created, doubling) when the batch outgrew it.
+func boxFlushBuffer(box: mod Gpu2dBoxPass, resources: mod GpuResources, prims: copy Int) ret BufferId {
+  let slot: Int = box.flushIndex
+  box.flushIndex = slot + 1
+  loop box.frameBuffers.length <= slot {
+    box.frameBuffers.add(value: noBufferId())
+    box.frameCapacities.add(value: 0)
+  }
+  var capacity: Int = 0
+  if let known: Int = box.frameCapacities.copyAt(index: slot) { capacity = known }
+  var current: BufferId = noBufferId()
+  if let known: BufferId = box.frameBuffers.copyAt(index: slot) { current = known }
+  if isValidBuffer(resources: resources, id: current) and capacity >= prims { ret current }
+  retireBuffer(resources: resources, id: current)
+  var grown: Int = capacity
+  if grown < 4 { grown = 4 }
+  loop grown < prims { grown = grown * 2 }
+  var made: BufferId = noBufferId()
+  if let buffer: BufferId = createBuffer(resources: resources, size: grown * g2dPrimFloats() * 4, usage: WGPUBufferUsage_Storage + WGPUBufferUsage_CopyDst) {
+    made = buffer
+  }
+  box.frameBuffers.set(index: slot, value: made)
+  box.frameCapacities.set(index: slot, value: grown)
+  ret made
+}
+
+# Draw the queued primitives into the active frame pass and reset the batch.
+# Contiguous same-clip runs: each sets the scissor (#144, the axis-aligned
+# bbox cull) and binds a per-run clip uniform (#118, the rounded-corner SDF in
+# the fragment shader). instance_index includes firstInstance, so the storage
+# buffer still indexes the right primitive.
+func boxFlush(box: mod Gpu2dBoxPass) {
+  ensureBoxResources(box: box)
+  if let resources: mod GpuResources => box.gpuResources {
+    boxFlushWith(box: box, resources: resources)
+  }
+}
+
+func boxFlushWith(box: mod Gpu2dBoxPass, resources: mod GpuResources) {
+  let count: Int = g2dPrimCount()
+  if count <= 0 { ret }
+  # No open frame pass: keep the batch (the frame reset clears it), like C did.
+  unsafe { if g2dBoxPass() is webgpuNull() { ret } }
+  ensureBoxPipeline(box: box, resources: resources)
+  if not isValidRenderPipeline(resources: resources, id: box.pipeline) {
+    g2dPrimReset()
+    ret
+  }
+  let instances: BufferId = boxFlushBuffer(box: box, resources: resources, prims: count)
+  let strideBytes: Int = g2dPrimFloats() * 4
+  unsafe {
+    if not writeBufferFromPtr(resources: resources, id: instances, offset: 0, data: g2dPrimData(), size: count * strideBytes) {
+      g2dPrimReset()
+      ret
+    }
+  }
+  var runStart: Int = 0
+  loop runStart < count {
+    let clip: Int = g2dPrimClipAt(i: runStart)
+    var runEnd: Int = runStart + 1
+    loop runEnd < count and g2dPrimClipAt(i: runEnd) is clip { runEnd = runEnd + 1 }
+    let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
+    entries.add(value: externalRef(id: box.viewport))
+    entries.add(value: bufferRef(id: instances))
+    unsafe { entries.add(value: adoptBufferRef(resources: resources, adopted: box.frameExternals, handle: g2dClipFrameUniform(clip: clip))) }
+    if let bind: BindGroupId = createRenderBindGroup(resources: resources, pipeline: box.pipeline, entries: entries) {
+      box.frameBinds.add(value: bind)
+      g2dScissor(clip: clip)
+      unsafe {
+        let drawn: Bool = recordDrawInPass(resources: resources, pass: g2dBoxPass(), pipeline: box.pipeline, bindGroup: bind, vertexCount: 6, instanceCount: runEnd - runStart, firstVertex: 0, firstInstance: runStart)
+      }
+    }
+    runStart = runEnd
+  }
+  g2dPrimReset()
+}
+
+# Frame end (after the frame's command buffer was submitted): retire this
+# frame's per-run bind groups and clip adoptions (wgpu keeps the natives alive
+# until the submission completes), reset the flush slot cursor and compact the
+# manager's dependency arena so per-frame groups cannot grow it.
+func boxFrameEnd(box: mod Gpu2dBoxPass) {
+  if let resources: mod GpuResources => box.gpuResources {
+    retireBindGroupIds(resources: resources, list: box.frameBinds)
+    box.frameBinds.clear()
+    releaseExternalIds(resources: resources, list: box.frameExternals)
+    let compacted: Bool = compactDependencies(resources: resources)
+  }
+  box.flushIndex = 0
+}
+
+# Retire every manager object and drop the manager (app shutdown, BEFORE
+# Gpu2d.closeWindow releases the adopted C viewport uniform).
+func boxPassShutdown(box: mod Gpu2dBoxPass) {
+  if let resources: mod GpuResources => box.gpuResources {
+    retireBindGroupIds(resources: resources, list: box.frameBinds)
+    box.frameBinds.clear()
+    releaseExternalIds(resources: resources, list: box.frameExternals)
+    retireBufferIds(resources: resources, list: box.frameBuffers)
+    box.frameBuffers.clear()
+    box.frameCapacities.clear()
+    releaseExternal(resources: resources, id: box.viewport)
+    retireRenderPipeline(resources: resources, id: box.pipeline)
+    shutdown(resources: resources)
+  }
+  box.gpuResources = none
+  box.pipeline = noRenderPipelineId()
+  box.viewport = noExternalId()
+  box.pipeMade = false
+  box.flushIndex = 0
+}

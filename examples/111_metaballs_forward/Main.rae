@@ -78,6 +78,7 @@ open app3d/SettingsDialog
 open Shadow3d
 open app3d/UiShell
 open Sky
+open Gpu2dBox
 open SkyHosek
 
 type DemoUiResource {
@@ -264,6 +265,7 @@ func uploadMeshData(mesh: view MeshData) ret MeshHandle {
 
 func main() ret Int {
   Gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — Metaballs ({rendererPathName()} rendering)")
+  var boxPass: Gpu2dBoxPass = createGpu2dBoxPass()   # #907: the app-owned 2D box pass
   # Remember where the user put the window, across restarts. Opt-in, and the
   # app picks the file: the hot-reload channel dir is per app, so two examples
   # running at once do not share one window position.
@@ -818,7 +820,7 @@ func main() ret Int {
         }
         if tag is tagUiOverlay {
           Gpu2d.beginFrameLoad()
-          renderSystemGpu2d(world: uiWorld, res: gpuUi)
+          renderSystemGpu2d(world: uiWorld, res: gpuUi, box: boxPass)
           # After the app UI, so the diagnostic is never what gets covered up.
           drawLogOverlay(ov: logView, font: gpuUi.textFont, screenW: extentW, screenH: extentH)
           # LAST, so it is above the scene, the UI world and the log.
@@ -826,7 +828,7 @@ func main() ret Int {
           lastLogRevision = logView.revision
         }
         if tag is tagPresent {
-          Gpu2d.endFrame()
+          Gpu2d.endFrame(box: boxPass)
         }
         pi3 = pi3 + 1
       }
@@ -846,6 +848,7 @@ func main() ret Int {
     writeHotReloadStateFor(appId: state111AppId, state: serialize111State(ui: uiState, rig: cameraRig, camera: camera))
   }
   shutdown()
+  boxPassShutdown(box: boxPass)
   Gpu2d.closeWindow()
   ret 0
 }

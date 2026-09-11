@@ -98,7 +98,6 @@ void rae_g2d_frame_reset(void) {
     g_g2d_img_frame_bind_n = 0;
     g_g2d_frame_buf_n = 0;
     g_g2d_frame_bind_n = 0;
-    g_g2d_box_frame_buf_n = 0;
     for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) g_g2d_text_frame_buf_n[i] = 0;
 }
 void rae_g2d_set_frame(void* enc, void* pass) {
@@ -275,61 +274,42 @@ rae_Bool rae_ext_Gpu2d_lastPresentOk(void) {
     return g_g2d_last_present_ok != 0;
 }
 
-void rae_ext_Gpu2d_flush(void) {
+/* Per-run clip support for the Rae box pass (#907): a frame-kept 32-byte clip
+ * uniform for `clip` (released with the frame's transient buffers, like the C
+ * box path made) and the scissor for it on the active pass. */
+void* rae_g2d_clip_frame_uniform(int64_t clip) {
+    float cu[8]; rae_g2d_fill_clip_uniform((int)clip, cu);
+    WGPUBufferDescriptor cbd; memset(&cbd, 0, sizeof(cbd));
+    cbd.size = sizeof(cu); cbd.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+    WGPUBuffer cub = wgpuDeviceCreateBuffer(g_wgpu_dev, &cbd);
+    wgpuQueueWriteBuffer(g_wgpu_queue, cub, 0, cu, sizeof(cu));
+    rae_g2d_keep_frame_buf(cub);
+    return (void*)cub;
+}
+void rae_g2d_scissor(int64_t clip) { rae_g2d_set_scissor((int)clip); }
+
+/* Upload this flush's viewport transform when anything is queued. Called by
+ * the Rae flush BEFORE it draws the boxes; the C flush below then draws images
+ * and text. */
+void rae_g2d_prepare_flush(void) {
     if (!g_g2d_pass) return;
     int have_text = 0;
     for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) if (g_g2d_text_count[i] > 0) have_text = 1;
     int have_img = (g_g2d_img_cmd_count > 0);
     if (g_g2d_prim_count > 0 || have_text || have_img) {
-        /* rae_g2d_init_pipeline also creates the shared viewport uniform that
-         * the box, image, and text bind groups reference at binding 0. */
-        rae_g2d_init_pipeline();
+        rae_g2d_ensure_viewport_uniform();
         float xf[8]; rae_g2d_compute_xform(xf);
         wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_uniform, 0, xf, sizeof(xf));
     }
-    if (g_g2d_prim_count > 0) {
-        WGPUBuffer instbuf = rae_g2d_box_frame_buffer(g_g2d_prim_count);
-        wgpuQueueWriteBuffer(g_wgpu_queue, instbuf, 0, g_g2d_prims,
-                             (size_t)g_g2d_prim_count * G2D_PRIM_FLOATS * sizeof(float));
-        WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g_g2d_pipeline, 0);
-        wgpuRenderPassEncoderSetPipeline(g_g2d_pass, g_g2d_pipeline);
-        /* Draw contiguous same-clip runs. Each run sets the scissor (#144, the
-         * axis-aligned bbox cull) and binds a per-run clip uniform (#118, the
-         * rounded-corner SDF applied in the fragment shader). instance_index in
-         * the shader includes firstInstance, so the storage buffer still
-         * indexes the right primitive. */
-        int bs = 0;
-        while (bs < g_g2d_prim_count) {
-            int clip = (g_g2d_prim_clip && bs < g_g2d_prim_clip_cap) ? g_g2d_prim_clip[bs] : 0;
-            int be = bs + 1;
-            while (be < g_g2d_prim_count) {
-                int ec = (g_g2d_prim_clip && be < g_g2d_prim_clip_cap) ? g_g2d_prim_clip[be] : 0;
-                if (ec != clip) break;
-                be++;
-            }
-            float cu[8]; rae_g2d_fill_clip_uniform(clip, cu);
-            WGPUBufferDescriptor cbd; memset(&cbd, 0, sizeof(cbd));
-            cbd.size = sizeof(cu); cbd.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
-            WGPUBuffer cub = wgpuDeviceCreateBuffer(g_wgpu_dev, &cbd);
-            wgpuQueueWriteBuffer(g_wgpu_queue, cub, 0, cu, sizeof(cu));
-            rae_g2d_keep_frame_buf(cub);
-            WGPUBindGroupEntry e[3]; memset(e, 0, sizeof(e));
-            e[0].binding = 0; e[0].buffer = g_g2d_uniform; e[0].size = 32;
-            e[1].binding = 1; e[1].buffer = instbuf;
-            e[1].size = (uint64_t)g_g2d_prim_count * G2D_PRIM_FLOATS * sizeof(float);
-            e[2].binding = 2; e[2].buffer = cub; e[2].size = sizeof(cu);
-            WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
-            bgd.layout = bgl; bgd.entryCount = 3; bgd.entries = e;
-            WGPUBindGroup bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
-            rae_g2d_keep_frame_bind(bind);
-            rae_g2d_set_scissor(clip);
-            wgpuRenderPassEncoderSetBindGroup(g_g2d_pass, 0, bind, 0, NULL);
-            wgpuRenderPassEncoderDraw(g_g2d_pass, 6, (uint32_t)(be - bs), 0, (uint32_t)bs);
-            bs = be;
-        }
-        wgpuBindGroupLayoutRelease(bgl);
-        g_g2d_prim_count = 0;
-    }
+}
+
+/* Images, then text, into the active pass (the boxes were drawn by the Rae
+ * box pass before this, #907). */
+void rae_ext_Gpu2d_flush(void) {
+    if (!g_g2d_pass) return;
+    int have_text = 0;
+    for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) if (g_g2d_text_count[i] > 0) have_text = 1;
+    rae_g2d_ensure_viewport_uniform();
     /* Images on top of boxes, under text. */
     rae_g2d_flush_images();
     if (have_text) {
@@ -394,10 +374,7 @@ void rae_ext_Gpu2d_closeWindow(void) {
         if (g_g2d_atlas_view[ai]) { wgpuTextureViewRelease(g_g2d_atlas_view[ai]); g_g2d_atlas_view[ai] = NULL; }
         if (g_g2d_atlas_tex[ai]) { wgpuTextureRelease(g_g2d_atlas_tex[ai]); g_g2d_atlas_tex[ai] = NULL; }
     }
-    if (g_g2d_bind) { wgpuBindGroupRelease(g_g2d_bind); g_g2d_bind = NULL; }
-    if (g_g2d_instbuf) { wgpuBufferRelease(g_g2d_instbuf); g_g2d_instbuf = NULL; g_g2d_inst_cap = 0; }
     if (g_g2d_uniform) { wgpuBufferRelease(g_g2d_uniform); g_g2d_uniform = NULL; }
-    if (g_g2d_pipeline) { wgpuRenderPipelineRelease(g_g2d_pipeline); g_g2d_pipeline = NULL; }
     if (g_g2d_prims) { free(g_g2d_prims); g_g2d_prims = NULL; g_g2d_prim_capf = 0; }
     g_g2d_prim_count = 0;
     for (int i = 0; i < g_g2d_frame_bind_n; i++) wgpuBindGroupRelease(g_g2d_frame_binds[i]);
@@ -406,12 +383,6 @@ void rae_ext_Gpu2d_closeWindow(void) {
     for (int i = 0; i < g_g2d_frame_buf_n; i++) wgpuBufferRelease(g_g2d_frame_bufs[i]);
     g_g2d_frame_buf_n = 0;
     if (g_g2d_frame_bufs) { free(g_g2d_frame_bufs); g_g2d_frame_bufs = NULL; g_g2d_frame_buf_cap = 0; }
-    for (int i = 0; i < g_g2d_box_frame_buf_slots; i++) {
-        if (g_g2d_box_frame_bufs[i]) wgpuBufferRelease(g_g2d_box_frame_bufs[i]);
-    }
-    if (g_g2d_box_frame_bufs) { free(g_g2d_box_frame_bufs); g_g2d_box_frame_bufs = NULL; }
-    if (g_g2d_box_frame_buf_cap) { free(g_g2d_box_frame_buf_cap); g_g2d_box_frame_buf_cap = NULL; }
-    g_g2d_box_frame_buf_n = 0; g_g2d_box_frame_buf_slots = 0;
     for (int ai = 0; ai < RAE_SDF_MAX_ATLAS; ai++) {
         for (int i = 0; i < g_g2d_text_frame_buf_slots[ai]; i++) {
             if (g_g2d_text_frame_bufs[ai][i]) wgpuBufferRelease(g_g2d_text_frame_bufs[ai][i]);
