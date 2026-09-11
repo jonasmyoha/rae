@@ -199,6 +199,8 @@ static const char* c_optional_payload_drop_fn(CFuncContext* ctx,
   if (is_drop_target_type(payload)) {
     const AstTypeRef* elem_type = payload->generic_args;
     if (!elem_type) return NULL;
+    if (ctx->generic_params && ctx->generic_args) // #889: concrete element in a generic fn
+      elem_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)elem_type);
     Str loc_base = get_base_type_name(payload);
     const AstFuncDecl* drop_fd = find_drop_overload_for(ctx, loc_base);
     if (!drop_fd) return NULL;
@@ -750,6 +752,12 @@ bool emit_implicit_drops_for_own_params(CFuncContext* ctx, FILE* out,
     if (is_drop_target_type(type)) {
       const AstTypeRef* elem_type = type->generic_args;
       if (!elem_type) continue;
+      // #889: inside a monomorphized generic function a `List(T)` local's
+      // element is the abstract `T`; substitute the enclosing type arguments so
+      // the drop is emitted for the concrete element (e.g. List(Int)), not the
+      // undeclared `rae_T`.
+      if (ctx->generic_params && ctx->generic_args)
+        elem_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)elem_type);
       Str loc_base = get_base_type_name(type);
       const AstFuncDecl* drop_fd = find_drop_overload_for(ctx, loc_base);
       if (!drop_fd) continue;
@@ -797,6 +805,8 @@ void emit_drop_for_value(CFuncContext* ctx, FILE* out, const AstTypeRef* type,
   if (is_drop_target_type(type)) {
     const AstTypeRef* elem_type = type->generic_args;
     if (!elem_type) return;
+    if (ctx->generic_params && ctx->generic_args) // #889: concrete element in a generic fn
+      elem_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)elem_type);
     const AstFuncDecl* drop_fd = find_drop_overload_for(ctx, tbase);
     if (!drop_fd) return;
     register_function_specialization(ctx->compiler_ctx, drop_fd, elem_type);
@@ -948,6 +958,12 @@ bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
       // user-defined generic `drop(T)` from lib/core.rae.
       const AstTypeRef* elem_type = type->generic_args;
       if (!elem_type) continue;
+      // #889: inside a monomorphized generic function a `List(T)` local's
+      // element is the abstract `T`; substitute the enclosing type arguments so
+      // the drop is emitted for the concrete element (e.g. List(Int)), not the
+      // undeclared `rae_T`.
+      if (ctx->generic_params && ctx->generic_args)
+        elem_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)elem_type);
       Str loc_base = get_base_type_name(type);
       const AstFuncDecl* drop_fd = find_drop_overload_for(ctx, loc_base);
       if (!drop_fd) continue;
