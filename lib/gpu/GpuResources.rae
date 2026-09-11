@@ -590,13 +590,19 @@ func retireTextureView(resources: mod GpuResources, id: view TextureViewId) ret 
 
 # A default clamp-to-edge, linear sampler.
 func createSampler(resources: mod GpuResources) ret opt SamplerId {
+  ret createSamplerWith(resources: resources, addressMode: WGPUAddressMode_ClampToEdge)
+}
+
+# A linear sampler with one address mode on every axis (Repeat for tiling
+# maps such as water's FFT cascades, ClampToEdge for screen-space reads).
+func createSamplerWith(resources: mod GpuResources, addressMode: view Int32) ret opt SamplerId {
   let slot: Int = findFreeSlot(table: resources.samplers, capacity: resources.capacity)
   if slot < 0 { ret none }
   unsafe {
     let descriptor: WGPUSamplerDescriptor = {
-      addressModeU: WGPUAddressMode_ClampToEdge
-      addressModeV: WGPUAddressMode_ClampToEdge
-      addressModeW: WGPUAddressMode_ClampToEdge
+      addressModeU: addressMode
+      addressModeV: addressMode
+      addressModeW: addressMode
       magFilter: WGPUFilterMode_Linear
       minFilter: WGPUFilterMode_Linear
       mipmapFilter: WGPUMipmapFilterMode_Nearest

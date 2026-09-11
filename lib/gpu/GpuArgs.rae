@@ -22,6 +22,8 @@
 # workgroup counts and its (already copyable) resource IDs at build time — so a
 # later CPU write to the source cannot change work that was already recorded.
 open webgpu/Context
+open webgpu/Webgpu
+open webgpu/WebgpuTypes
 open webgpu/WebgpuEnums
 open gpu/GpuResources
 open gpu/GpuLifetime
@@ -188,4 +190,54 @@ func computeCommand(pipeline: view PipelineId, bindGroup: view BindGroupId, work
 # re-validates the resolved IDs and pins the dependencies).
 func recordComputeCommand(recording: mod Recording, resources: view GpuResources, command: view ComputeCommand) ret Bool {
   ret recordCompute(recording: recording, resources: resources, pipeline: command.pipeline, bindGroup: command.bindGroup, workgroupsX: command.workgroupsX, workgroupsY: command.workgroupsY, workgroupsZ: command.workgroupsZ)
+}
+
+# Records `commands` as ONE compute pass (many dispatches, one set of pass
+# timestamps when `timestampWrites` is not null — the fallback for unavailable
+# timing) over #870's Recording. Every command is validated before the pass is
+# opened, so a dead ID refuses the whole sequence rather than half of it.
+func recordComputeCommands(recording: mod Recording, resources: view GpuResources, commands: view List(ComputeCommand), timestampWrites: copy Ptr) ret Bool {
+  if recordingIsOpen(recording: recording, resources: resources) is false { ret false }
+  if commands.length < 1 { ret false }
+  var i: Int = 0
+  loop i < commands.length {
+    if let command: ComputeCommand = commands.copyAt(index: i) {
+      if isValidPipeline(resources: resources, id: command.pipeline) is false { ret false }
+      if bindGroupIsUsable(resources: resources, id: command.bindGroup) is false { ret false }
+      if command.workgroupsX < 1 or command.workgroupsY < 1 or command.workgroupsZ < 1 { ret false }
+    }
+    i = i + 1
+  }
+  unsafe {
+    let passDescriptor: WGPUComputePassDescriptor = { nextInChain: webgpuNull(), timestampWrites: timestampWrites }
+    let pass: Ptr = wgpuCommandEncoderBeginComputePass(commandEncoder: recording.encoder, descriptor: passDescriptor)
+    if pass is webgpuNull() { ret false }
+    i = 0
+    loop i < commands.length {
+      if let command: ComputeCommand = commands.copyAt(index: i) {
+        wgpuComputePassEncoderSetPipeline(computePassEncoder: pass, pipeline: slotHandle(table: resources.pipelines, slot: command.pipeline.slot))
+        wgpuComputePassEncoderSetBindGroup(computePassEncoder: pass, groupIndex: 0 as UInt32, group: slotHandle(table: resources.bindGroups, slot: command.bindGroup.slot), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+        wgpuComputePassEncoderDispatchWorkgroups(computePassEncoder: pass, workgroupCountX: command.workgroupsX as UInt32, workgroupCountY: command.workgroupsY as UInt32, workgroupCountZ: command.workgroupsZ as UInt32)
+      }
+      i = i + 1
+    }
+    wgpuComputePassEncoderEnd(computePassEncoder: pass)
+    wgpuComputePassEncoderRelease(computePassEncoder: pass)
+  }
+  i = 0
+  loop i < commands.length {
+    if let command: ComputeCommand = commands.copyAt(index: i) {
+      recordUse(recording: recording, kind: kindPipeline, slot: command.pipeline.slot, generation: command.pipeline.generation)
+      recordUse(recording: recording, kind: kindBindGroup, slot: command.bindGroup.slot, generation: command.bindGroup.generation)
+      let start: Int = intAt(list: resources.bindGroups.depStart, index: command.bindGroup.slot)
+      let count: Int = intAt(list: resources.bindGroups.depCount, index: command.bindGroup.slot)
+      var dep: Int = start
+      loop dep < start + count {
+        recordUse(recording: recording, kind: intAt(list: resources.depKinds, index: dep), slot: intAt(list: resources.depSlots, index: dep), generation: intAt(list: resources.depGenerations, index: dep))
+        dep = dep + 1
+      }
+    }
+    i = i + 1
+  }
+  ret true
 }

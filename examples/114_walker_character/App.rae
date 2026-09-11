@@ -35,6 +35,9 @@ open GbufferInstanced
 open Particles
 open water/Water
 open water/WaterSystem
+open water/WaterFft
+open gpu/GpuResources
+open gpu/GpuLifetime
 open GrassCompute
 import GrassConfig
 import app3d/Slider
@@ -174,12 +177,15 @@ type App {
   persist: PersistState
   splashes: ParticleSystem   # water-splash droplets when the character wades (splash.rae, #84)
   waterSystem: WaterSystem   # the toon lake at the biome water plane (lib/water, #830)
+  idIssuer: IdIssuer         # the root's shared ID issuer (#869)
+  gpuResources: opt GpuResources   # the App-owned GPU manager water's IDs live in (#873)
   ok: Bool
 }
 
 # ----- setup ---------------------------------------------------------------
 func createApp() ret App {
   Gpu2d.initWindow(width: 1280, height: 800, title: "Rae 3D — walker character (animated) [{rendererPathName()}]")
+  var idIssuer: IdIssuer = IdIssuer.create()
   var windowGeom: WindowGeometry = createWindowGeometry(
     dir: dir(), name: "window.{state114AppId}.geometry")
   restoreWindowGeometry(g: windowGeom)
@@ -530,6 +536,8 @@ func createApp() ret App {
     persist: { windowGeom: own windowGeom, lastStateSave: startT, stateDirty: false }
     splashes: own createParticleSystem(cap: 256, gravity: 24.0)
     waterSystem: own createWaterSystem(body: walkerLake(groundZ: groundZ))
+    idIssuer: own idIssuer
+    gpuResources: GpuResources.create(issuer: idIssuer, capacity: 96)
     ok: true
   }
 }
@@ -725,8 +733,14 @@ func runWalkerApp() ret Int {
         frameSec: 0.016667, heartbeatSec: 1.0
       ))
     } else {
-      renderApp(cameraSystem: app.cameraSystem, characterSystem: app.characterSystem, frame: app.frame, inputSystem: app.inputSystem, renderSystem: app.renderSystem, emptyWorld: app.emptyWorld, world: app.world, terrainSystem: app.terrainSystem, splashes: app.splashes, waterSystem: app.waterSystem, profiler: app.profiler, grassCompute: app.grassCompute)
+      if let resources: mod GpuResources => app.gpuResources {
+        renderApp(cameraSystem: app.cameraSystem, characterSystem: app.characterSystem, frame: app.frame, inputSystem: app.inputSystem, renderSystem: app.renderSystem, emptyWorld: app.emptyWorld, world: app.world, terrainSystem: app.terrainSystem, splashes: app.splashes, waterSystem: app.waterSystem, resources: resources, profiler: app.profiler, grassCompute: app.grassCompute)
+      }
     }
+  }
+  if let resources: mod GpuResources => app.gpuResources {
+    waterShutdown(waterSystem: app.waterSystem, resources: resources)
+    shutdown(resources: resources)
   }
   skinShutdown()
   shutdown()
