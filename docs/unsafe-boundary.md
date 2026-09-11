@@ -24,6 +24,16 @@ a file only checked once it contained an `unsafe` token — is gone).
    forwarding or producing a raw `Ptr`, constructing a value that stores one
    (use a safe factory whose body wraps the literal), and formatting /
    reflecting / serialising a value with `Ptr` storage.
+3b. **Whole-value copy / implicit boxing of a raw-Ptr aggregate** (#898).
+   Deep-copying a raw-Ptr aggregate that has no lifecycle — `let ys: List(Ptr)
+   = xs`, a plain `struct { p: Ptr }` copied from a place, an `Array(Ptr, cap:
+   N)` value constructor — needs an `unsafe { }` block, because it duplicates
+   pointer storage the same way a struct literal or default construction does.
+   So does IMPLICIT boxing into `Any` at a `ret`, assignment or `Any` argument
+   (the explicit `box` operand was already checked). `own` transfers,
+   `view`/`mod` borrows, a fresh factory-call result, and a type with a user
+   `func copy` all stay safe.
+
 4. **Obligations are not erased** through fields, defaults, generics (above),
    reflection or serialization; `unsafe` is statement-level (`let x = unsafe
    { }` is rejected) and an `unsafe` block is a *transparent scope* for the
