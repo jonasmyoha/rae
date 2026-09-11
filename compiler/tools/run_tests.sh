@@ -398,24 +398,18 @@ if [ $FAILED -gt 0 ]; then
   exit 1
 fi
 
-# The example smoke tests (run_examples.sh) ALWAYS build compiled binaries, so
-# they are part of THE one suite — not a per-target extra. Run them whenever we
-# are not filtering to a single named test, regardless of TEST_TARGET. Before,
-# the condition skipped examples for TARGET_FILTER=compiled, so the devtools
-# "Test" button (which runs `TEST_TARGET=compiled make test`) silently ran only
-# the unit cases and showed green while `make test` was red on example gates.
-# One suite, one result.
-#
-# Opt-out: RAE_SKIP_EXAMPLES=1 runs the unit cases only. The graphical example
-# smoke tests build + render every 3D example and take minutes, so the devtools
-# "Test" button leaves them OFF by default (a toggle turns them back on); the
-# CLI `make test` runs the full suite unless you export RAE_SKIP_EXAMPLES=1.
+# The example smoke tests (run_examples.sh) are the VISUAL gate: they build +
+# render every example in a real SDL/GPU window and take screenshots, and take
+# minutes. They are NOT part of the default `make test` — the default run is
+# the non-visual unit suite only. Opt in with RAE_RUN_EXAMPLES=1 (which is what
+# `make test-examples` does); RAE_SKIP_EXAMPLES=1 is still honoured and wins.
+# A single named test never runs them.
 if [ -z "$TEST_NAME_FILTER" ]; then
-  if [ "${RAE_SKIP_EXAMPLES:-0}" = "1" ]; then
-    echo
-    echo "Skipping example smoke tests (RAE_SKIP_EXAMPLES=1)."
-  else
+  if [ "${RAE_RUN_EXAMPLES:-0}" = "1" ] && [ "${RAE_SKIP_EXAMPLES:-0}" != "1" ]; then
     echo
     ./tools/run_examples.sh
+  else
+    echo
+    echo "Example smoke tests (visual) not run — RAE_RUN_EXAMPLES=1 or 'make test-examples' runs them."
   fi
 fi
