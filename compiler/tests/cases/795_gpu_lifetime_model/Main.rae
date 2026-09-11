@@ -1,0 +1,447 @@
+# #870: executable, GPU-free model of the recording/submission lifetime rules
+# implemented by gpu/GpuLifetime over gpu/GpuResources. Submissions complete
+# when the test says so (`complete`), standing in for a nonblocking poll that
+# observed completion. Native release is logged so deferred release is visible.
+#
+# Rules modelled exactly as shipped: a use is validated when recorded and again
+# at submit; pins (useCount) run from submit to completion; a bind group pins
+# its dependencies for its lifetime; retire bumps the generation at once (no
+# new use) and releases only when the last pin drops; an unsubmitted recording
+# is simply dropped (no manager access, nothing to unpin).
+
+type IdIssuer {
+  nextTag: Int
+}
+
+func create() ret IdIssuer {
+  ret IdIssuer { nextTag: 1 }
+}
+
+func issue(this: mod IdIssuer) ret Int {
+  let tag: Int = this.nextTag
+  this.nextTag = this.nextTag + 1
+  ret tag
+}
+
+type BufferId {
+  managerTag: Int
+  slot: Int
+  generation: Int
+}
+
+type BindGroupId {
+  managerTag: Int
+  slot: Int
+  generation: Int
+}
+
+type SubmissionId {
+  managerTag: Int
+  slot: Int
+  generation: Int
+}
+
+const kindBuffer: Int = 0
+const kindBindGroup: Int = 1
+
+type Table {
+  generations: List(Int)
+  live: List(Int)
+  useCount: List(Int)
+  retired: List(Int)
+  depStart: List(Int)
+  depCount: List(Int)
+  completed: List(Int)
+}
+
+func intList(capacity: view Int, value: view Int) ret List(Int) {
+  let list: List(Int) = List.create(Int, cap: capacity)
+  var i: Int = 0
+  loop i < capacity {
+    list.add(value: value)
+    i = i + 1
+  }
+  ret list
+}
+
+func createTable(capacity: view Int) ret Table {
+  ret Table {
+    generations: intList(capacity: capacity, value: 0)
+    live: intList(capacity: capacity, value: 0)
+    useCount: intList(capacity: capacity, value: 0)
+    retired: intList(capacity: capacity, value: 0)
+    depStart: intList(capacity: capacity, value: 0)
+    depCount: intList(capacity: capacity, value: 0)
+    completed: intList(capacity: capacity, value: 0)
+  }
+}
+
+func intAt(list: view List(Int), index: view Int) ret Int {
+  if let value: Int = list.copyAt(index: index) { ret value }
+  ret 0
+}
+
+type Manager {
+  managerTag: Int
+  capacity: Int
+  buffers: Table
+  bindGroups: Table
+  submissions: Table
+  depKinds: List(Int)
+  depSlots: List(Int)
+  depGenerations: List(Int)
+}
+
+func create(issuer: mod IdIssuer, capacity: view Int) ret opt Manager {
+  if capacity < 1 { ret none }
+  let tag: Int = issue(this: issuer)
+  ret Manager {
+    managerTag: tag
+    capacity: capacity
+    buffers: createTable(capacity: capacity)
+    bindGroups: createTable(capacity: capacity)
+    submissions: createTable(capacity: capacity)
+    depKinds: List.create(Int, cap: 8)
+    depSlots: List.create(Int, cap: 8)
+    depGenerations: List.create(Int, cap: 8)
+  }
+}
+
+func findFree(table: view Table, capacity: view Int) ret Int {
+  var slot: Int = 0
+  loop slot < capacity {
+    if intAt(list: table.live, index: slot) is 0 and intAt(list: table.retired, index: slot) is 0 { ret slot }
+    slot = slot + 1
+  }
+  ret 0 - 1
+}
+
+func isLive(table: view Table, capacity: view Int, slot: view Int, generation: view Int) ret Bool {
+  if slot < 0 or slot >= capacity { ret false }
+  if intAt(list: table.live, index: slot) is 0 { ret false }
+  ret intAt(list: table.generations, index: slot) is generation
+}
+
+func tableFor(manager: view Manager, kind: view Int) ret view Table {
+  if kind is kindBuffer { ret manager.buffers }
+  ret manager.bindGroups
+}
+
+func kindName(kind: view Int) ret String {
+  if kind is kindBuffer { ret "buffer" }
+  ret "bind group"
+}
+
+# Releasing the (modelled) native reference and freeing the slot.
+func freeSlot(manager: mod Manager, kind: view Int, slot: view Int) {
+  log("  released {kindName(kind: kind)} slot {slot} of manager {manager.managerTag}")
+  if kind is kindBuffer {
+    manager.buffers.live.set(index: slot, value: 0)
+    manager.buffers.retired.set(index: slot, value: 0)
+  } else {
+    manager.bindGroups.live.set(index: slot, value: 0)
+    manager.bindGroups.retired.set(index: slot, value: 0)
+  }
+}
+
+func retireSlot(manager: mod Manager, kind: view Int, slot: view Int) {
+  if kind is kindBuffer {
+    manager.buffers.generations.set(index: slot, value: intAt(list: manager.buffers.generations, index: slot) + 1)
+    manager.buffers.live.set(index: slot, value: 0)
+    if intAt(list: manager.buffers.useCount, index: slot) is 0 { freeSlot(manager: manager, kind: kind, slot: slot) } else { manager.buffers.retired.set(index: slot, value: 1) }
+  } else {
+    manager.bindGroups.generations.set(index: slot, value: intAt(list: manager.bindGroups.generations, index: slot) + 1)
+    manager.bindGroups.live.set(index: slot, value: 0)
+    if intAt(list: manager.bindGroups.useCount, index: slot) is 0 { freeSlot(manager: manager, kind: kind, slot: slot) } else { manager.bindGroups.retired.set(index: slot, value: 1) }
+  }
+}
+
+func pin(manager: mod Manager, kind: view Int, slot: view Int) {
+  if kind is kindBuffer {
+    manager.buffers.useCount.set(index: slot, value: intAt(list: manager.buffers.useCount, index: slot) + 1)
+  } else {
+    manager.bindGroups.useCount.set(index: slot, value: intAt(list: manager.bindGroups.useCount, index: slot) + 1)
+  }
+}
+
+func unpin(manager: mod Manager, kind: view Int, slot: view Int) {
+  if kind is kindBuffer {
+    let remaining: Int = intAt(list: manager.buffers.useCount, index: slot) - 1
+    manager.buffers.useCount.set(index: slot, value: remaining)
+    if remaining is 0 and intAt(list: manager.buffers.retired, index: slot) is 1 { freeSlot(manager: manager, kind: kind, slot: slot) }
+  } else {
+    let remaining: Int = intAt(list: manager.bindGroups.useCount, index: slot) - 1
+    manager.bindGroups.useCount.set(index: slot, value: remaining)
+    if remaining is 0 and intAt(list: manager.bindGroups.retired, index: slot) is 1 { freeSlot(manager: manager, kind: kind, slot: slot) }
+  }
+}
+
+func sliceIsLive(manager: view Manager, start: view Int, count: view Int) ret Bool {
+  var i: Int = start
+  loop i < start + count {
+    if isLive(table: tableFor(manager: manager, kind: intAt(list: manager.depKinds, index: i)), capacity: manager.capacity, slot: intAt(list: manager.depSlots, index: i), generation: intAt(list: manager.depGenerations, index: i)) is false { ret false }
+    i = i + 1
+  }
+  ret true
+}
+
+func pinSlice(manager: mod Manager, start: view Int, count: view Int) {
+  var i: Int = start
+  loop i < start + count {
+    pin(manager: manager, kind: intAt(list: manager.depKinds, index: i), slot: intAt(list: manager.depSlots, index: i))
+    i = i + 1
+  }
+}
+
+func unpinSlice(manager: mod Manager, start: view Int, count: view Int) {
+  var i: Int = start
+  loop i < start + count {
+    unpin(manager: manager, kind: intAt(list: manager.depKinds, index: i), slot: intAt(list: manager.depSlots, index: i))
+    i = i + 1
+  }
+}
+
+func pendingReleases(manager: view Manager) ret Int {
+  var count: Int = 0
+  var slot: Int = 0
+  loop slot < manager.capacity {
+    count = count + intAt(list: manager.buffers.retired, index: slot) + intAt(list: manager.bindGroups.retired, index: slot)
+    slot = slot + 1
+  }
+  ret count
+}
+
+func createBuffer(manager: mod Manager) ret opt BufferId {
+  let slot: Int = findFree(table: manager.buffers, capacity: manager.capacity)
+  if slot < 0 { ret none }
+  manager.buffers.live.set(index: slot, value: 1)
+  ret BufferId { managerTag: manager.managerTag, slot: slot, generation: intAt(list: manager.buffers.generations, index: slot) }
+}
+
+func isValidBuffer(manager: view Manager, id: view BufferId) ret Bool {
+  if id.managerTag is not manager.managerTag { ret false }
+  ret isLive(table: manager.buffers, capacity: manager.capacity, slot: id.slot, generation: id.generation)
+}
+
+func retireBuffer(manager: mod Manager, id: view BufferId) ret Bool {
+  if isValidBuffer(manager: manager, id: id) is false { ret false }
+  retireSlot(manager: manager, kind: kindBuffer, slot: id.slot)
+  ret true
+}
+
+# A bind group over one buffer: pins it for the group's lifetime.
+func createBindGroup(manager: mod Manager, buffer: view BufferId) ret opt BindGroupId {
+  if isValidBuffer(manager: manager, id: buffer) is false { ret none }
+  let slot: Int = findFree(table: manager.bindGroups, capacity: manager.capacity)
+  if slot < 0 { ret none }
+  let start: Int = manager.depKinds.length
+  manager.depKinds.add(value: kindBuffer)
+  manager.depSlots.add(value: buffer.slot)
+  manager.depGenerations.add(value: buffer.generation)
+  manager.bindGroups.live.set(index: slot, value: 1)
+  manager.bindGroups.depStart.set(index: slot, value: start)
+  manager.bindGroups.depCount.set(index: slot, value: 1)
+  pinSlice(manager: manager, start: start, count: 1)
+  ret BindGroupId { managerTag: manager.managerTag, slot: slot, generation: intAt(list: manager.bindGroups.generations, index: slot) }
+}
+
+func isValidBindGroup(manager: view Manager, id: view BindGroupId) ret Bool {
+  if id.managerTag is not manager.managerTag { ret false }
+  ret isLive(table: manager.bindGroups, capacity: manager.capacity, slot: id.slot, generation: id.generation)
+}
+
+func bindGroupIsUsable(manager: view Manager, id: view BindGroupId) ret Bool {
+  if isValidBindGroup(manager: manager, id: id) is false { ret false }
+  ret sliceIsLive(manager: manager, start: intAt(list: manager.bindGroups.depStart, index: id.slot), count: intAt(list: manager.bindGroups.depCount, index: id.slot))
+}
+
+func retireBindGroup(manager: mod Manager, id: view BindGroupId) ret Bool {
+  if isValidBindGroup(manager: manager, id: id) is false { ret false }
+  let start: Int = intAt(list: manager.bindGroups.depStart, index: id.slot)
+  let count: Int = intAt(list: manager.bindGroups.depCount, index: id.slot)
+  retireSlot(manager: manager, kind: kindBindGroup, slot: id.slot)
+  unpinSlice(manager: manager, start: start, count: count)
+  ret true
+}
+
+# The recording owner: dropping it unsubmitted is abandonment.
+type Recording {
+  managerTag: Int
+  open: Int
+  useKinds: List(Int)
+  useSlots: List(Int)
+  useGenerations: List(Int)
+}
+
+func beginRecording(manager: view Manager) ret Recording {
+  ret Recording { managerTag: manager.managerTag, open: 1, useKinds: List.create(Int, cap: 4), useSlots: List.create(Int, cap: 4), useGenerations: List.create(Int, cap: 4) }
+}
+
+func drop(this: mod Recording) {
+  if this.open is 1 { log("  recording abandoned (encoder released)") }
+}
+
+func recordUse(recording: mod Recording, manager: view Manager, bindGroup: view BindGroupId) ret Bool {
+  if recording.open is 0 or recording.managerTag is not manager.managerTag { ret false }
+  if bindGroupIsUsable(manager: manager, id: bindGroup) is false { ret false }
+  recording.useKinds.add(value: kindBindGroup)
+  recording.useSlots.add(value: bindGroup.slot)
+  recording.useGenerations.add(value: bindGroup.generation)
+  let start: Int = intAt(list: manager.bindGroups.depStart, index: bindGroup.slot)
+  var i: Int = start
+  loop i < start + intAt(list: manager.bindGroups.depCount, index: bindGroup.slot) {
+    recording.useKinds.add(value: intAt(list: manager.depKinds, index: i))
+    recording.useSlots.add(value: intAt(list: manager.depSlots, index: i))
+    recording.useGenerations.add(value: intAt(list: manager.depGenerations, index: i))
+    i = i + 1
+  }
+  ret true
+}
+
+func submit(manager: mod Manager, recording: mod Recording) ret opt SubmissionId {
+  if recording.open is 0 or recording.managerTag is not manager.managerTag { ret none }
+  var i: Int = 0
+  loop i < recording.useKinds.length {
+    if isLive(table: tableFor(manager: manager, kind: intAt(list: recording.useKinds, index: i)), capacity: manager.capacity, slot: intAt(list: recording.useSlots, index: i), generation: intAt(list: recording.useGenerations, index: i)) is false { ret none }
+    i = i + 1
+  }
+  let slot: Int = findFree(table: manager.submissions, capacity: manager.capacity)
+  if slot < 0 { ret none }
+  let start: Int = manager.depKinds.length
+  i = 0
+  loop i < recording.useKinds.length {
+    manager.depKinds.add(value: intAt(list: recording.useKinds, index: i))
+    manager.depSlots.add(value: intAt(list: recording.useSlots, index: i))
+    manager.depGenerations.add(value: intAt(list: recording.useGenerations, index: i))
+    i = i + 1
+  }
+  recording.open = 0
+  manager.submissions.live.set(index: slot, value: 1)
+  manager.submissions.completed.set(index: slot, value: 0)
+  manager.submissions.depStart.set(index: slot, value: start)
+  manager.submissions.depCount.set(index: slot, value: recording.useKinds.length)
+  pinSlice(manager: manager, start: start, count: recording.useKinds.length)
+  ret SubmissionId { managerTag: manager.managerTag, slot: slot, generation: intAt(list: manager.submissions.generations, index: slot) }
+}
+
+func isValidSubmission(manager: view Manager, id: view SubmissionId) ret Bool {
+  if id.managerTag is not manager.managerTag { ret false }
+  ret isLive(table: manager.submissions, capacity: manager.capacity, slot: id.slot, generation: id.generation)
+}
+
+# Stands in for a poll that observed completion: -1 invalid, 1 completed.
+func complete(manager: mod Manager, id: view SubmissionId) ret Int {
+  if isValidSubmission(manager: manager, id: id) is false { ret 0 - 1 }
+  if intAt(list: manager.submissions.completed, index: id.slot) is 1 { ret 1 }
+  manager.submissions.completed.set(index: id.slot, value: 1)
+  unpinSlice(manager: manager, start: intAt(list: manager.submissions.depStart, index: id.slot), count: intAt(list: manager.submissions.depCount, index: id.slot))
+  ret 1
+}
+
+func retireSubmission(manager: mod Manager, id: view SubmissionId) ret Bool {
+  if isValidSubmission(manager: manager, id: id) is false { ret false }
+  if intAt(list: manager.submissions.completed, index: id.slot) is 0 { ret false }
+  manager.submissions.generations.set(index: id.slot, value: intAt(list: manager.submissions.generations, index: id.slot) + 1)
+  manager.submissions.live.set(index: id.slot, value: 0)
+  ret true
+}
+
+func liveSubmissions(manager: view Manager) ret Int {
+  var count: Int = 0
+  var slot: Int = 0
+  loop slot < manager.capacity {
+    count = count + intAt(list: manager.submissions.live, index: slot)
+    slot = slot + 1
+  }
+  ret count
+}
+
+# Records one use and returns without submitting: the recording drops at scope
+# exit, which is abandonment (no explicit drop call needed).
+func recordThenAbandon(manager: view Manager, group: view BindGroupId) ret Bool {
+  var abandoned: Recording = beginRecording(manager: manager)
+  ret recordUse(recording: abandoned, manager: manager, bindGroup: group)
+}
+
+func main() {
+  var issuer: IdIssuer = IdIssuer.create()
+  if let managerA: Manager = Manager.create(issuer: issuer, capacity: 3) {
+    if let managerB: Manager = Manager.create(issuer: issuer, capacity: 3) {
+      # --- early retirement behind in-flight work, then behind the bind group ---
+      if let buffer: BufferId = createBuffer(manager: managerA) {
+        if let group: BindGroupId = createBindGroup(manager: managerA, buffer: buffer) {
+          var first: Recording = beginRecording(manager: managerA)
+          log("record use: {recordUse(recording: first, manager: managerA, bindGroup: group)}")
+          if let submission: SubmissionId = submit(manager: managerA, recording: first) {
+            log("retire buffer in flight: {retireBuffer(manager: managerA, id: buffer)}")
+            log("buffer valid after retire: {isValidBuffer(manager: managerA, id: buffer)}")
+            log("pending releases while in flight: {pendingReleases(manager: managerA)}")
+            # --- old bind group: its dependency is retired ---
+            log("old bind group usable: {bindGroupIsUsable(manager: managerA, id: group)}")
+            var late: Recording = beginRecording(manager: managerA)
+            log("record with old bind group: {recordUse(recording: late, manager: managerA, bindGroup: group)}")
+            log("complete: {complete(manager: managerA, id: submission)}")
+            log("complete again: {complete(manager: managerA, id: submission)}")
+            log("pending after completion (still pinned by the group): {pendingReleases(manager: managerA)}")
+            log("retire bind group: {retireBindGroup(manager: managerA, id: group)}")
+            log("pending after group retired: {pendingReleases(manager: managerA)}")
+            log("retire submission: {retireSubmission(manager: managerA, id: submission)}")
+            log("resubmit spent recording: {submit(manager: managerA, recording: first) is none}")
+          }
+        }
+      }
+      # --- abandoned recording: nothing pinned, later retire releases at once ---
+      if let buffer: BufferId = createBuffer(manager: managerA) {
+        if let group: BindGroupId = createBindGroup(manager: managerA, buffer: buffer) {
+          log("record before abandon: {recordThenAbandon(manager: managerA, group: group)}")
+          log("live submissions after abandon: {liveSubmissions(manager: managerA)}")
+          log("retire group: {retireBindGroup(manager: managerA, id: group)}")
+          log("retire buffer (unpinned, immediate): {retireBuffer(manager: managerA, id: buffer)}")
+          log("pending: {pendingReleases(manager: managerA)}")
+        }
+      }
+      # --- a use retired between record and submit refuses the submission ---
+      if let buffer: BufferId = createBuffer(manager: managerA) {
+        if let group: BindGroupId = createBindGroup(manager: managerA, buffer: buffer) {
+          var doomed: Recording = beginRecording(manager: managerA)
+          log("record: {recordUse(recording: doomed, manager: managerA, bindGroup: group)}")
+          log("retire group before submit: {retireBindGroup(manager: managerA, id: group)}")
+          log("submit refused: {submit(manager: managerA, recording: doomed) is none}")
+          log("retire buffer: {retireBuffer(manager: managerA, id: buffer)}")
+        }
+      }
+      # --- repeated submissions and submission exhaustion ---
+      if let buffer: BufferId = createBuffer(manager: managerB) {
+        if let group: BindGroupId = createBindGroup(manager: managerB, buffer: buffer) {
+          var round: Int = 0
+          loop round < 3 {
+            var recording: Recording = beginRecording(manager: managerB)
+            recordUse(recording: recording, manager: managerB, bindGroup: group)
+            if let submission: SubmissionId = submit(manager: managerB, recording: recording) {
+              log("round {round}: submission slot {submission.slot} gen {submission.generation}")
+              # --- independent managers: unknown to the other manager ---
+              log("  complete in the other manager: {complete(manager: managerA, id: submission)}")
+              log("  complete: {complete(manager: managerB, id: submission)} retire: {retireSubmission(manager: managerB, id: submission)}")
+            }
+            round = round + 1
+          }
+          var fillA: Recording = beginRecording(manager: managerB)
+          recordUse(recording: fillA, manager: managerB, bindGroup: group)
+          var fillB: Recording = beginRecording(manager: managerB)
+          recordUse(recording: fillB, manager: managerB, bindGroup: group)
+          var fillC: Recording = beginRecording(manager: managerB)
+          recordUse(recording: fillC, manager: managerB, bindGroup: group)
+          var fillD: Recording = beginRecording(manager: managerB)
+          recordUse(recording: fillD, manager: managerB, bindGroup: group)
+          let one: Bool = submit(manager: managerB, recording: fillA) is none
+          let two: Bool = submit(manager: managerB, recording: fillB) is none
+          let three: Bool = submit(manager: managerB, recording: fillC) is none
+          log("three in flight refused: {one} {two} {three}")
+          log("fourth submission exhausted: {submit(manager: managerB, recording: fillD) is none}")
+          log("live submissions: {liveSubmissions(manager: managerB)}")
+          log("cross-manager buffer valid: {isValidBuffer(manager: managerA, id: buffer)}")
+        }
+      }
+    }
+  }
+}
