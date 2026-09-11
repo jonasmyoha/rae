@@ -14,7 +14,9 @@ open Raylib
 # at `fontSize`. Height is conventionally `fontSize` for the default
 # font; raylib doesn't expose a per-line height with its default.
 func measureTextWidth(text: view String, fontSize: view Int) ret Int {
-  ret measureText(text: text, fontSize: fontSize)
+  unsafe {
+    ret measureText(text: text, fontSize: fontSize)
+  }
 }
 
 func measureTextHeight(fontSize: view Int) ret Int {

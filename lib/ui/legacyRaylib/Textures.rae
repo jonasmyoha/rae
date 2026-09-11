@@ -32,28 +32,32 @@ func createTextureRegistry() ret TextureRegistry {
 # Does not deduplicate — callers should check `textureHas` first if a
 # key might be re-registered.
 func textureLoad(reg: mod TextureRegistry, key: own String, path: own String) ret Texture {
-  let tex: Texture = loadTexture(fileName: path)
-  let entry: TextureEntry = {
-    key: key
-    texture: tex
-    path: path
+  unsafe {
+    let tex: Texture = loadTexture(fileName: path)
+    let entry: TextureEntry = {
+      key: key
+      texture: tex
+      path: path
+    }
+    reg.entries.add(value: entry)
+    ret tex
   }
-  reg.entries.add(value: entry)
-  ret tex
 }
 
 # Find the index of `key` in the registry, or -1 if not present.
 func textureIndex(reg: view TextureRegistry, key: view String) ret Int {
-  let n: Int = reg.entries.length
-  var i: Int = 0
-  loop i < n {
-    let e: TextureEntry = rae_ext_rae_buf_get(buf: reg.entries.data, index: i)
-    if e.key is key {
-      ret i
+  unsafe {
+    let n: Int = reg.entries.length
+    var i: Int = 0
+    loop i < n {
+      let e: TextureEntry = rae_ext_rae_buf_get(buf: reg.entries.data, index: i)
+      if e.key is key {
+        ret i
+      }
+      i = i + 1
     }
-    i = i + 1
+    ret -1
   }
-  ret -1
 }
 
 func textureHas(reg: view TextureRegistry, key: view String) ret Bool {
@@ -65,14 +69,16 @@ func textureHas(reg: view TextureRegistry, key: view String) ret Bool {
 # asset doesn't crash the program. Callers that need to detect this
 # should `textureHas` first.
 func textureGet(reg: view TextureRegistry, key: view String) ret Texture {
-  let idx: Int = textureIndex(reg: reg, key: key)
-  if idx < 0 {
-    let empty: Texture = { id: 0, width: 0, height: 0, mipmaps: 0, format: 0 }
-    ret empty
+  unsafe {
+    let idx: Int = textureIndex(reg: reg, key: key)
+    if idx < 0 {
+      let empty: Texture = { id: 0, width: 0, height: 0, mipmaps: 0, format: 0 }
+      ret empty
+    }
+    let e: TextureEntry = rae_ext_rae_buf_get(buf: reg.entries.data, index: idx)
+    let t: Texture = e.texture
+    ret t
   }
-  let e: TextureEntry = rae_ext_rae_buf_get(buf: reg.entries.data, index: idx)
-  let t: Texture = e.texture
-  ret t
 }
 
 # Bulk loader: takes parallel `keys` and `paths` lists and registers
@@ -105,45 +111,51 @@ func textureLoadBatch(
 # from `captureAndBlurBackdrop`) where there is no on-disk path. The
 # `path` field is set to the empty string for these entries.
 func textureRegisterDirect(reg: mod TextureRegistry, key: own String, tex: view Texture) pub {
-  let idx: Int = textureIndex(reg: reg, key: key)
-  if idx >= 0 {
-    let old: TextureEntry = rae_ext_rae_buf_get(buf: reg.entries.data, index: idx)
-    unloadTexture(texture: old.texture)
-    reg.entries.remove(index: idx)
+  unsafe {
+    let idx: Int = textureIndex(reg: reg, key: key)
+    if idx >= 0 {
+      let old: TextureEntry = rae_ext_rae_buf_get(buf: reg.entries.data, index: idx)
+      unloadTexture(texture: old.texture)
+      reg.entries.remove(index: idx)
+    }
+    let emptyPath: String = ""
+    let entry: TextureEntry = {
+      key: key
+      texture: tex
+      path: emptyPath
+    }
+    reg.entries.add(value: entry)
   }
-  let emptyPath: String = ""
-  let entry: TextureEntry = {
-    key: key
-    texture: tex
-    path: emptyPath
-  }
-  reg.entries.add(value: entry)
 }
 
 # Remove and unload the texture registered under `key`. No-op when
 # `key` is not present.
 func textureRemove(reg: mod TextureRegistry, key: view String) pub {
-  let idx: Int = textureIndex(reg: reg, key: key)
-  if idx < 0 {
-    ret
+  unsafe {
+    let idx: Int = textureIndex(reg: reg, key: key)
+    if idx < 0 {
+      ret
+    }
+    let e: TextureEntry = rae_ext_rae_buf_get(buf: reg.entries.data, index: idx)
+    unloadTexture(texture: e.texture)
+    reg.entries.remove(index: idx)
   }
-  let e: TextureEntry = rae_ext_rae_buf_get(buf: reg.entries.data, index: idx)
-  unloadTexture(texture: e.texture)
-  reg.entries.remove(index: idx)
 }
 
 # Release every loaded texture and clear the registry. Call before
 # `closeWindow()` so raylib doesn't leak GPU memory.
 func textureUnloadAll(reg: mod TextureRegistry) {
-  let n: Int = reg.entries.length
-  var i: Int = 0
-  loop i < n {
-    let e: TextureEntry = rae_ext_rae_buf_get(buf: reg.entries.data, index: i)
-    unloadTexture(texture: e.texture)
-    i = i + 1
-  }
-  let entries: mod List(TextureEntry) => reg.entries
-  loop entries.length > 0 {
-    entries.remove(index: entries.length - 1)
+  unsafe {
+    let n: Int = reg.entries.length
+    var i: Int = 0
+    loop i < n {
+      let e: TextureEntry = rae_ext_rae_buf_get(buf: reg.entries.data, index: i)
+      unloadTexture(texture: e.texture)
+      i = i + 1
+    }
+    let entries: mod List(TextureEntry) => reg.entries
+    loop entries.length > 0 {
+      entries.remove(index: entries.length - 1)
+    }
   }
 }

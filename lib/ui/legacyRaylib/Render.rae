@@ -109,109 +109,98 @@ func paintShape(backend: view UiBackend, world: view UiWorld, entity: view Entit
 }
 
 func paintSprite(reg: view TextureRegistry, world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
-  let sp: view Sprite => componentView(this: world.sprites, entity: entity)
-  let key: String = sp.textureKey
-  let tint: Color = toRaylibColor(color: sp.tint, chain255: chain255)
+  unsafe {
+    let sp: view Sprite => componentView(this: world.sprites, entity: entity)
+    let key: String = sp.textureKey
+    let tint: Color = toRaylibColor(color: sp.tint, chain255: chain255)
 
-  # `mat:<icon_name>` routes through the Material Icons font slot.
-  # The whole sprite box is treated as the glyph cell; the icon is
-  # drawn centred at a font size matching the smaller side of the box.
-  let mp: String = matPrefix
-  if key.startsWith(prefix: mp) {
-    let prefixLen: Int = mp.length()
-    let keyLen: Int = key.length()
-    let iconName: String = key.sub(start: prefixLen, len: keyLen - prefixLen)
-    let glyph: String = iconText(name: iconName)
-    if glyph.length() is 0 {
+    # `mat:<icon_name>` routes through the Material Icons font slot.
+    # The whole sprite box is treated as the glyph cell; the icon is
+    # drawn centred at a font size matching the smaller side of the box.
+    let mp: String = matPrefix
+    if key.startsWith(prefix: mp) {
+      let prefixLen: Int = mp.length()
+      let keyLen: Int = key.length()
+      let iconName: String = key.sub(start: prefixLen, len: keyLen - prefixLen)
+      let glyph: String = iconText(name: iconName)
+      if glyph.length() is 0 {
+        ret
+      }
+      var smaller: Float = cr.size.x
+      if cr.size.y < smaller {
+        smaller = cr.size.y
+      }
+      # Material glyphs sit on a roughly em-square; rendering at the box
+      # size lines up with their baked padding. We must measure with the
+      # icon font slot (not the default font) because Material codepoints
+      # like 0xE037 aren't in the default font — measuring there would
+      # return the notdef width and the icon would land off-center.
+      let fontSize: Float = smaller
+      let glyphW: Int = measureTextWithFont(slot: iconFontSlot, text: glyph, fontSize: fontSize, spacing: 0.0)
+      let centerOffsetX: Float = (cr.size.x - glyphW.toFloat()) / 2.0
+      let centerOffsetY: Float = (cr.size.y - fontSize) / 2.0
+      drawTextWithFont(slot: iconFontSlot, text: glyph, x: wt.position.x + centerOffsetX, y: wt.position.y + centerOffsetY, fontSize: fontSize, spacing: 0.0, color: tint)
       ret
     }
-    var smaller: Float = cr.size.x
-    if cr.size.y < smaller {
-      smaller = cr.size.y
+
+    if textureHas(reg: reg, key: key) is false {
+      ret
     }
-    # Material glyphs sit on a roughly em-square; rendering at the box
-    # size lines up with their baked padding. We must measure with the
-    # icon font slot (not the default font) because Material codepoints
-    # like 0xE037 aren't in the default font — measuring there would
-    # return the notdef width and the icon would land off-center.
-    let fontSize: Float = smaller
-    let glyphW: Int = measureTextWithFont(
-      slot: iconFontSlot
-      text: glyph
-      fontSize: fontSize
-      spacing: 0.0
-    )
-    let centerOffsetX: Float = (cr.size.x - glyphW.toFloat()) / 2.0
-    let centerOffsetY: Float = (cr.size.y - fontSize) / 2.0
-    drawTextWithFont(
-      slot: iconFontSlot
-      text: glyph
-      x: wt.position.x + centerOffsetX
-      y: wt.position.y + centerOffsetY
-      fontSize: fontSize
-      spacing: 0.0
-      color: tint
-    )
-    ret
-  }
+    let tex: Texture = textureGet(reg: reg, key: key)
 
-  if textureHas(reg: reg, key: key) is false {
-    ret
-  }
-  let tex: Texture = textureGet(reg: reg, key: key)
-
-  # All ScaleMode variants: scale to longer edge of the box.
-  var scaleX: Float = 1.0
-  var scaleY: Float = 1.0
-  if tex.width > 0 {
-    scaleX = cr.size.x / tex.width.toFloat()
-  }
-  if tex.height > 0 {
-    scaleY = cr.size.y / tex.height.toFloat()
-  }
-  var scale: Float = scaleX
-  if scaleY < scale {
-    scale = scaleY
-  }
-  if scale <= 0.0 {
-    scale = 1.0
-  }
-
-  # HoverScale: read the per-frame animated multiplier. The actual
-  # easing happens in lib/ui/animation.rae's hoverScaleSystem.
-  var hoverMul: Float = 1.0
-  if componentHas(this: world.hoverScales, entity: entity) {
-    let hs: HoverScale = componentGet(this: world.hoverScales, entity: entity)
-    hoverMul = hs.current
-  }
-  let drawScale: Float = scale * hoverMul
-  let drawW: Float = tex.width.toFloat() * drawScale
-  let drawH: Float = tex.height.toFloat() * drawScale
-  let offX: Float = (cr.size.x - drawW) / 2.0
-  let offY: Float = (cr.size.y - drawH) / 2.0
-
-  # Rounded-corner clip via fragment shader (SDF; live per call).
-  var useRounded: Bool = componentHas(this: world.cornerRadiuses, entity: entity)
-  var roundedRadius: Float = 0.0
-  if useRounded {
-    let crData: CornerRadius = componentGet(this: world.cornerRadiuses, entity: entity)
-    roundedRadius = crData.radius
-    if roundedRadius <= 0.0 {
-      useRounded = false
+    # All ScaleMode variants: scale to longer edge of the box.
+    var scaleX: Float = 1.0
+    var scaleY: Float = 1.0
+    if tex.width > 0 {
+      scaleX = cr.size.x / tex.width.toFloat()
     }
-  }
-  if useRounded {
-    roundedSpriteBegin(width: drawW, height: drawH, radius: roundedRadius)
-  }
-  drawTextureEx(
-    texture: tex
-    pos: Vector2 { x: wt.position.x + offX, y: wt.position.y + offY }
-    rotation: 0.0
-    scale: drawScale
-    tint: tint
-  )
-  if useRounded {
-    roundedSpriteEnd()
+    if tex.height > 0 {
+      scaleY = cr.size.y / tex.height.toFloat()
+    }
+    var scale: Float = scaleX
+    if scaleY < scale {
+      scale = scaleY
+    }
+    if scale <= 0.0 {
+      scale = 1.0
+    }
+
+    # HoverScale: read the per-frame animated multiplier. The actual
+    # easing happens in lib/ui/animation.rae's hoverScaleSystem.
+    var hoverMul: Float = 1.0
+    if componentHas(this: world.hoverScales, entity: entity) {
+      let hs: HoverScale = componentGet(this: world.hoverScales, entity: entity)
+      hoverMul = hs.current
+    }
+    let drawScale: Float = scale * hoverMul
+    let drawW: Float = tex.width.toFloat() * drawScale
+    let drawH: Float = tex.height.toFloat() * drawScale
+    let offX: Float = (cr.size.x - drawW) / 2.0
+    let offY: Float = (cr.size.y - drawH) / 2.0
+
+    # Rounded-corner clip via fragment shader (SDF; live per call).
+    var useRounded: Bool = componentHas(this: world.cornerRadiuses, entity: entity)
+    var roundedRadius: Float = 0.0
+    if useRounded {
+      let crData: CornerRadius = componentGet(this: world.cornerRadiuses, entity: entity)
+      roundedRadius = crData.radius
+      if roundedRadius <= 0.0 {
+        useRounded = false
+      }
+    }
+    if useRounded {
+      roundedSpriteBegin(width: drawW, height: drawH, radius: roundedRadius)
+    }
+    drawTextureEx(
+      texture: tex
+      pos: Vector2 { x: wt.position.x + offX, y: wt.position.y + offY }
+      rotation: 0.0
+      scale: drawScale
+      tint: tint
+    )
+    if useRounded {
+      roundedSpriteEnd()
+    }
   }
 }
 
@@ -440,88 +429,90 @@ func isRightAligned(styleId: view String) ret Bool {
 }
 
 func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
-  let tx: view Text => componentView(this: world.texts, entity: entity)
-  let txt: String = tx.text
-  if txt.length() is 0 {
-    ret
-  }
-  let size: Float = textStyleSize(styleId: tx.styleId)
-  let col: Color = textStyleColor(styleId: tx.styleId, chain255: chain255, active: world.theme.active)
-  var drawX: Float = wt.position.x
-  var drawY: Float = wt.position.y
-  # Alignment: styleId (legacy) or Align component (Center / End).
-  var centerX: Bool = isCentered(styleId: tx.styleId)
-  var centerY: Bool = isCentered(styleId: tx.styleId)
-  var rightAlignX: Bool = isRightAligned(styleId: tx.styleId)
-  if componentHas(this: world.aligns, entity: entity) {
-    let al: Align = componentGet(this: world.aligns, entity: entity)
-    if al.hasX {
-      if al.x is AlignKind.center { centerX = true }
-      if al.x is AlignKind.end { rightAlignX = true }
+  unsafe {
+    let tx: view Text => componentView(this: world.texts, entity: entity)
+    let txt: String = tx.text
+    if txt.length() is 0 {
+      ret
     }
-    if al.hasY {
-      if al.y is AlignKind.center { centerY = true }
+    let size: Float = textStyleSize(styleId: tx.styleId)
+    let col: Color = textStyleColor(styleId: tx.styleId, chain255: chain255, active: world.theme.active)
+    var drawX: Float = wt.position.x
+    var drawY: Float = wt.position.y
+    # Alignment: styleId (legacy) or Align component (Center / End).
+    var centerX: Bool = isCentered(styleId: tx.styleId)
+    var centerY: Bool = isCentered(styleId: tx.styleId)
+    var rightAlignX: Bool = isRightAligned(styleId: tx.styleId)
+    if componentHas(this: world.aligns, entity: entity) {
+      let al: Align = componentGet(this: world.aligns, entity: entity)
+      if al.hasX {
+        if al.x is AlignKind.center { centerX = true }
+        if al.x is AlignKind.end { rightAlignX = true }
+      }
+      if al.hasY {
+        if al.y is AlignKind.center { centerY = true }
+      }
     }
-  }
-  if centerX or rightAlignX or centerY {
-    let measured: Int = measureTextWithFont(
+    if centerX or rightAlignX or centerY {
+      let measured: Int = measureTextWithFont(
+        slot: defaultFontSlot
+        text: txt
+        fontSize: size
+        spacing: 1.0
+      )
+      if centerX {
+        drawX = wt.position.x + (cr.size.x - measured.toFloat()) / 2.0
+      }
+      if rightAlignX {
+        drawX = wt.position.x + cr.size.x - measured.toFloat()
+      }
+      if centerY {
+        drawY = wt.position.y + (cr.size.y - size) / 2.0
+      }
+    }
+    if isUiMsdfEnabled(world: world) {
+      # Shadow gate: in `shadowStylesOnly` mode (mobile UI) only opt-in
+      # styles shadow; otherwise (game proto1) all text does.
+      let applyShadow: Bool = (world.msdfState.shadowStylesOnly is false) or textStyleHasShadow(styleId: tx.styleId)
+      paintMsdfDispatch(world: world, text: txt, x: drawX, y: drawY, sizePx: size, color: col, chain255: chain255, applyShadow: applyShadow)
+      ret
+    }
+    if textStyleHasShadow(styleId: tx.styleId) {
+      var shadowOff: Float = size * 0.06
+      if shadowOff < 1.0 { shadowOff = 1.0 }
+      if shadowOff > 3.0 { shadowOff = 3.0 }
+      var blurRadius: Float = size * 0.09
+      if blurRadius < 1.5 { blurRadius = 1.5 }
+      if blurRadius > 4.0 { blurRadius = 4.0 }
+      # Centre weight 0.30, edge weight 0.10 (sum ≈ 1.1 matches old density).
+      let cx: Float = drawX + shadowOff
+      let cy: Float = drawY + shadowOff
+      let aBase: Int = chain255 * 90 / 255
+      let aCtr: Int = aBase * 30 / 100
+      let aEdge: Int = aBase * 10 / 100
+      let shadowCtr: Color = { r: 0, g: 0, b: 0, a: aCtr }
+      let shadowEdge: Color = { r: 0, g: 0, b: 0, a: aEdge }
+      let d: Float = blurRadius * 0.7071
+      drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx, y: cy, fontSize: size, spacing: 1.0, color: shadowCtr)
+      drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx, y: cy - blurRadius, fontSize: size, spacing: 1.0, color: shadowEdge)
+      drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx + d, y: cy - d, fontSize: size, spacing: 1.0, color: shadowEdge)
+      drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx + blurRadius, y: cy, fontSize: size, spacing: 1.0, color: shadowEdge)
+      drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx + d, y: cy + d, fontSize: size, spacing: 1.0, color: shadowEdge)
+      drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx, y: cy + blurRadius, fontSize: size, spacing: 1.0, color: shadowEdge)
+      drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx - d, y: cy + d, fontSize: size, spacing: 1.0, color: shadowEdge)
+      drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx - blurRadius, y: cy, fontSize: size, spacing: 1.0, color: shadowEdge)
+      drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx - d, y: cy - d, fontSize: size, spacing: 1.0, color: shadowEdge)
+    }
+    drawTextWithFont(
       slot: defaultFontSlot
       text: txt
+      x: drawX
+      y: drawY
       fontSize: size
       spacing: 1.0
+      color: col
     )
-    if centerX {
-      drawX = wt.position.x + (cr.size.x - measured.toFloat()) / 2.0
-    }
-    if rightAlignX {
-      drawX = wt.position.x + cr.size.x - measured.toFloat()
-    }
-    if centerY {
-      drawY = wt.position.y + (cr.size.y - size) / 2.0
-    }
   }
-  if isUiMsdfEnabled(world: world) {
-    # Shadow gate: in `shadowStylesOnly` mode (mobile UI) only opt-in
-    # styles shadow; otherwise (game proto1) all text does.
-    let applyShadow: Bool = (world.msdfState.shadowStylesOnly is false) or textStyleHasShadow(styleId: tx.styleId)
-    paintMsdfDispatch(world: world, text: txt, x: drawX, y: drawY, sizePx: size, color: col, chain255: chain255, applyShadow: applyShadow)
-    ret
-  }
-  if textStyleHasShadow(styleId: tx.styleId) {
-    var shadowOff: Float = size * 0.06
-    if shadowOff < 1.0 { shadowOff = 1.0 }
-    if shadowOff > 3.0 { shadowOff = 3.0 }
-    var blurRadius: Float = size * 0.09
-    if blurRadius < 1.5 { blurRadius = 1.5 }
-    if blurRadius > 4.0 { blurRadius = 4.0 }
-    # Centre weight 0.30, edge weight 0.10 (sum ≈ 1.1 matches old density).
-    let cx: Float = drawX + shadowOff
-    let cy: Float = drawY + shadowOff
-    let aBase: Int = chain255 * 90 / 255
-    let aCtr: Int = aBase * 30 / 100
-    let aEdge: Int = aBase * 10 / 100
-    let shadowCtr: Color = { r: 0, g: 0, b: 0, a: aCtr }
-    let shadowEdge: Color = { r: 0, g: 0, b: 0, a: aEdge }
-    let d: Float = blurRadius * 0.7071
-    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx, y: cy, fontSize: size, spacing: 1.0, color: shadowCtr)
-    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx, y: cy - blurRadius, fontSize: size, spacing: 1.0, color: shadowEdge)
-    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx + d, y: cy - d, fontSize: size, spacing: 1.0, color: shadowEdge)
-    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx + blurRadius, y: cy, fontSize: size, spacing: 1.0, color: shadowEdge)
-    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx + d, y: cy + d, fontSize: size, spacing: 1.0, color: shadowEdge)
-    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx, y: cy + blurRadius, fontSize: size, spacing: 1.0, color: shadowEdge)
-    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx - d, y: cy + d, fontSize: size, spacing: 1.0, color: shadowEdge)
-    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx - blurRadius, y: cy, fontSize: size, spacing: 1.0, color: shadowEdge)
-    drawTextWithFont(slot: defaultFontSlot, text: txt, x: cx - d, y: cy - d, fontSize: size, spacing: 1.0, color: shadowEdge)
-  }
-  drawTextWithFont(
-    slot: defaultFontSlot
-    text: txt
-    x: drawX
-    y: drawY
-    fontSize: size
-    spacing: 1.0
-    color: col
-  )
 }
 
 # BackdropImage paint — draws the entity's referenced texture at the
@@ -531,39 +522,41 @@ func paintText(world: view UiWorld, entity: view EntityId, wt: view WorldTransfo
 # when the texture key isn't registered (first-frame race before the
 # host's first capture lands).
 func paintBackdropImage(reg: view TextureRegistry, world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
-  let bi: BackdropImage = componentGet(this: world.backdropImages, entity: entity)
-  let key: String = bi.textureKey
-  if textureHas(reg: reg, key: key) is false {
-    ret
+  unsafe {
+    let bi: BackdropImage = componentGet(this: world.backdropImages, entity: entity)
+    let key: String = bi.textureKey
+    if textureHas(reg: reg, key: key) is false {
+      ret
+    }
+    let tex: Texture = textureGet(reg: reg, key: key)
+    var scaleX: Float = 1.0
+    var scaleY: Float = 1.0
+    if tex.width > 0 {
+      scaleX = cr.size.x / tex.width.toFloat()
+    }
+    if tex.height > 0 {
+      scaleY = cr.size.y / tex.height.toFloat()
+    }
+    var scale: Float = scaleX
+    if scaleY > scale {
+      scale = scaleY
+    }
+    if scale <= 0.0 {
+      scale = 1.0
+    }
+    let drawW: Float = tex.width.toFloat() * scale
+    let drawH: Float = tex.height.toFloat() * scale
+    let offX: Float = (cr.size.x - drawW) / 2.0
+    let offY: Float = (cr.size.y - drawH) / 2.0
+    let white: Color = { r: 255, g: 255, b: 255, a: chain255 }
+    drawTextureEx(
+      texture: tex
+      pos: Vector2 { x: wt.position.x + offX, y: wt.position.y + offY }
+      rotation: 0.0
+      scale: scale
+      tint: white
+    )
   }
-  let tex: Texture = textureGet(reg: reg, key: key)
-  var scaleX: Float = 1.0
-  var scaleY: Float = 1.0
-  if tex.width > 0 {
-    scaleX = cr.size.x / tex.width.toFloat()
-  }
-  if tex.height > 0 {
-    scaleY = cr.size.y / tex.height.toFloat()
-  }
-  var scale: Float = scaleX
-  if scaleY > scale {
-    scale = scaleY
-  }
-  if scale <= 0.0 {
-    scale = 1.0
-  }
-  let drawW: Float = tex.width.toFloat() * scale
-  let drawH: Float = tex.height.toFloat() * scale
-  let offX: Float = (cr.size.x - drawW) / 2.0
-  let offY: Float = (cr.size.y - drawH) / 2.0
-  let white: Color = { r: 255, g: 255, b: 255, a: chain255 }
-  drawTextureEx(
-    texture: tex
-    pos: Vector2 { x: wt.position.x + offX, y: wt.position.y + offY }
-    rotation: 0.0
-    scale: scale
-    tint: white
-  )
 }
 
 # GradientFill paint. One atomic `drawGradientRect` — the shader does
@@ -572,30 +565,32 @@ func paintBackdropImage(reg: view TextureRegistry, world: view UiWorld, entity: 
 # inherited-alpha multiplication as `paintShape` so opacity chains
 # work the same way.
 func paintGradientFill(world: view UiWorld, entity: view EntityId, wt: view WorldTransform2D, cr: view ComputedRect, chain255: view Int) {
-  let gf: view GradientFill => componentView(this: world.gradientFills, entity: entity)
-  var radius: Float = 0.0
-  if componentHas(this: world.cornerRadiuses, entity: entity) {
-    let crData: CornerRadius = componentGet(this: world.cornerRadiuses, entity: entity)
-    radius = crData.radius
+  unsafe {
+    let gf: view GradientFill => componentView(this: world.gradientFills, entity: entity)
+    var radius: Float = 0.0
+    if componentHas(this: world.cornerRadiuses, entity: entity) {
+      let crData: CornerRadius = componentGet(this: world.cornerRadiuses, entity: entity)
+      radius = crData.radius
+    }
+    let fa: Int = (gf.from.a.toFloat() * chain255.toFloat() / 255.0).toInt()
+    let ta: Int = (gf.to.a.toFloat() * chain255.toFloat() / 255.0).toInt()
+    drawGradientRect(
+      x: wt.position.x
+      y: wt.position.y
+      w: cr.size.x
+      h: cr.size.y
+      radius: radius
+      fromR: gf.from.r
+      fromG: gf.from.g
+      fromB: gf.from.b
+      fromA: fa
+      toR: gf.to.r
+      toG: gf.to.g
+      toB: gf.to.b
+      toA: ta
+      angleDeg: gf.angle
+    )
   }
-  let fa: Int = (gf.from.a.toFloat() * chain255.toFloat() / 255.0).toInt()
-  let ta: Int = (gf.to.a.toFloat() * chain255.toFloat() / 255.0).toInt()
-  drawGradientRect(
-    x: wt.position.x
-    y: wt.position.y
-    w: cr.size.x
-    h: cr.size.y
-    radius: radius
-    fromR: gf.from.r
-    fromG: gf.from.g
-    fromB: gf.from.b
-    fromA: fa
-    toR: gf.to.r
-    toG: gf.to.g
-    toB: gf.to.b
-    toA: ta
-    angleDeg: gf.angle
-  )
 }
 
 # Paint a single entity. Order: Shape (background) → Sprite → Text, so
@@ -650,23 +645,25 @@ func paintEntity(backend: view UiBackend, world: view UiWorld, reg: view Texture
 # contains the hovered tile float above sibling rows whose tiles
 # would otherwise overdraw the popped tile's vertical overflow.
 func paintSubtree(backend: view UiBackend, world: view UiWorld, reg: view TextureRegistry, entity: view EntityId) {
-  paintEntity(backend: backend, world: world, reg: reg, entity: entity)
-  if componentHas(this: world.childrens, entity: entity) is false {
-    ret
-  }
-  let ch: view Children => componentView(this: world.childrens, entity: entity)
-  let n: Int = ch.ids.length
-  var pass: Int = 0
-  loop pass < 3 {
-    var i: Int = 0
-    loop i < n {
-      let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
-      if subtreeHoverPaintRank(world: world, entity: cid) is pass {
-        paintSubtree(backend: backend, world: world, reg: reg, entity: cid)
-      }
-      i = i + 1
+  unsafe {
+    paintEntity(backend: backend, world: world, reg: reg, entity: entity)
+    if componentHas(this: world.childrens, entity: entity) is false {
+      ret
     }
-    pass = pass + 1
+    let ch: view Children => componentView(this: world.childrens, entity: entity)
+    let n: Int = ch.ids.length
+    var pass: Int = 0
+    loop pass < 3 {
+      var i: Int = 0
+      loop i < n {
+        let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+        if subtreeHoverPaintRank(world: world, entity: cid) is pass {
+          paintSubtree(backend: backend, world: world, reg: reg, entity: cid)
+        }
+        i = i + 1
+      }
+      pass = pass + 1
+    }
   }
 }
 
@@ -693,12 +690,14 @@ let raeDefaultUiFontSlot: Int = 0
 #
 # Safe to call multiple times — the body is idempotent.
 func initRaeUi() pub {
-  if isFontSlotLoaded(slot: raeDefaultUiFontSlot) is false {
-    loadFontInto(
-      slot: raeDefaultUiFontSlot
-      path: raeDefaultUiFontPath
-      fontSize: raeDefaultUiFontSize
-    )
+  unsafe {
+    if isFontSlotLoaded(slot: raeDefaultUiFontSlot) is false {
+      loadFontInto(
+        slot: raeDefaultUiFontSlot
+        path: raeDefaultUiFontPath
+        fontSize: raeDefaultUiFontSize
+      )
+    }
   }
 }
 
@@ -718,20 +717,22 @@ func renderSystem(backend: view UiBackend, world: view UiWorld, reg: view Textur
 # (layer 100+) so a `captureAndBlurRegion` doesn't include the very
 # overlay it's meant to sit behind.
 func systemLayerRange(backend: view UiBackend, world: view UiWorld, reg: view TextureRegistry, minOrder: view Int, maxOrder: view Int) pub {
-  let roots: List(EntityId) = collectPaintableRoots(world: world)
-  let m: Int = roots.length
-  var p: Int = 0
-  loop p < m {
-    let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: p)
-    if componentHas(this: world.layerRoots, entity: root) is false {
-      let ord: Int = entityLayerOrder(world: world, entity: root)
-      if ord >= minOrder {
-        if ord < maxOrder {
-          paintSubtree(backend: backend, world: world, reg: reg, entity: root)
+  unsafe {
+    let roots: List(EntityId) = collectPaintableRoots(world: world)
+    let m: Int = roots.length
+    var p: Int = 0
+    loop p < m {
+      let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: p)
+      if componentHas(this: world.layerRoots, entity: root) is false {
+        let ord: Int = entityLayerOrder(world: world, entity: root)
+        if ord >= minOrder {
+          if ord < maxOrder {
+            paintSubtree(backend: backend, world: world, reg: reg, entity: root)
+          }
         }
       }
+      p = p + 1
     }
-    p = p + 1
   }
 }
 
@@ -753,84 +754,86 @@ func debugClickRects(
   mouseX: view Float
   mouseY: view Float
 ) pub {
-  let nClicks: Int = componentCount(this: world.onClicks)
-  var i: Int = 0
-  loop i < nClicks {
-    let e: EntityId = componentEntityAt(this: world.onClicks, i: i)
-    if componentHas(this: world.worldTransforms, entity: e) {
-      if componentHas(this: world.computedRects, entity: e) {
-        let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: e)
-        var wv: WorldVisual = { alpha: 1.0, visible: true }
-        if componentHas(this: world.worldVisuals, entity: e) { wv = componentGet(this: world.worldVisuals, entity: e) }
-        if wv.visible {
-          let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
-          var inside: Bool = true
-          if mouseX < wt.position.x {
-            inside = false
-          }
-          if mouseY < wt.position.y {
-            inside = false
-          }
-          if mouseX > wt.position.x + cr.size.x {
-            inside = false
-          }
-          if mouseY > wt.position.y + cr.size.y {
-            inside = false
-          }
-          var col: Color = idleColor
-          if inside {
-            col = hoverColor
-            # Mouse button held while hovering: distinct "armed" tint
-            # so the user can see at a glance that a click on this
-            # rect would land. Mirrors the press-tracking the input
-            # system does internally (pressedEntity).
-            if pressed {
-              col = pressColor
+  unsafe {
+    let nClicks: Int = componentCount(this: world.onClicks)
+    var i: Int = 0
+    loop i < nClicks {
+      let e: EntityId = componentEntityAt(this: world.onClicks, i: i)
+      if componentHas(this: world.worldTransforms, entity: e) {
+        if componentHas(this: world.computedRects, entity: e) {
+          let wt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: e)
+          var wv: WorldVisual = { alpha: 1.0, visible: true }
+          if componentHas(this: world.worldVisuals, entity: e) { wv = componentGet(this: world.worldVisuals, entity: e) }
+          if wv.visible {
+            let cr: ComputedRect = componentGet(this: world.computedRects, entity: e)
+            var inside: Bool = true
+            if mouseX < wt.position.x {
+              inside = false
             }
-          }
-          drawRectangleLines(
-            x: wt.position.x
-            y: wt.position.y
-            width: cr.size.x
-            height: cr.size.y
-            color: col
-          )
-          # Hovered rect: tiny label at the top-LEFT corner showing
-          # the entity id, absolute position, and size. Entity id is
-          # the leading `#N` so the leading number is unambiguous
-          # (otherwise the bare x coordinate can read as an opaque
-          # large value before you spot the ',y' after it). ASCII-
-          # only ('x' as the multiplier instead of U+00D7 — the
-          # host's font atlas is typically built from a small glyph
-          # set and U+00D7 renders as '?' fallback). Drawn with font
-          # slot 0; falls back to raylib's default when the slot
-          # isn't loaded (see `drawTextWithFont`).
-          if inside {
-            let ix: Int = wt.position.x.toInt()
-            let iy: Int = wt.position.y.toInt()
-            let iw: Int = cr.size.x.toInt()
-            let ih: Int = cr.size.y.toInt()
-            let dimText: String = "#{e} {ix},{iy} {iw}x{ih}"
-            let dimSize: Float = 11.0
-            let dimSpacing: Float = 0.5
-            # Anchor inside the top-left corner with a small inset so
-            # the glyphs don't kiss the outline stroke.
-            let labelX: Float = wt.position.x + 4.0
-            let labelY: Float = wt.position.y + 2.0
-            drawTextWithFont(
-              slot: 0
-              text: dimText
-              x: labelX
-              y: labelY
-              fontSize: dimSize
-              spacing: dimSpacing
+            if mouseY < wt.position.y {
+              inside = false
+            }
+            if mouseX > wt.position.x + cr.size.x {
+              inside = false
+            }
+            if mouseY > wt.position.y + cr.size.y {
+              inside = false
+            }
+            var col: Color = idleColor
+            if inside {
+              col = hoverColor
+              # Mouse button held while hovering: distinct "armed" tint
+              # so the user can see at a glance that a click on this
+              # rect would land. Mirrors the press-tracking the input
+              # system does internally (pressedEntity).
+              if pressed {
+                col = pressColor
+              }
+            }
+            drawRectangleLines(
+              x: wt.position.x
+              y: wt.position.y
+              width: cr.size.x
+              height: cr.size.y
               color: col
             )
+            # Hovered rect: tiny label at the top-LEFT corner showing
+            # the entity id, absolute position, and size. Entity id is
+            # the leading `#N` so the leading number is unambiguous
+            # (otherwise the bare x coordinate can read as an opaque
+            # large value before you spot the ',y' after it). ASCII-
+            # only ('x' as the multiplier instead of U+00D7 — the
+            # host's font atlas is typically built from a small glyph
+            # set and U+00D7 renders as '?' fallback). Drawn with font
+            # slot 0; falls back to raylib's default when the slot
+            # isn't loaded (see `drawTextWithFont`).
+            if inside {
+              let ix: Int = wt.position.x.toInt()
+              let iy: Int = wt.position.y.toInt()
+              let iw: Int = cr.size.x.toInt()
+              let ih: Int = cr.size.y.toInt()
+              let dimText: String = "#{e} {ix},{iy} {iw}x{ih}"
+              let dimSize: Float = 11.0
+              let dimSpacing: Float = 0.5
+              # Anchor inside the top-left corner with a small inset so
+              # the glyphs don't kiss the outline stroke.
+              let labelX: Float = wt.position.x + 4.0
+              let labelY: Float = wt.position.y + 2.0
+              drawTextWithFont(
+                slot: 0
+                text: dimText
+                x: labelX
+                y: labelY
+                fontSize: dimSize
+                spacing: dimSpacing
+                color: col
+              )
+            }
           }
         }
       }
+      i = i + 1
     }
-    i = i + 1
   }
 }
 
@@ -839,22 +842,24 @@ func debugClickRects(
 # crosshair doesn't sit under the OS mouse cursor on screen, there's
 # a coord-system mismatch between rendering and input.
 func debugMouseCursor(mouseX: view Float, mouseY: view Float, color: view Color) pub {
-  let size: Float = 12.0
-  let half: Float = size / 2.0
-  drawRectangle(
-    x: mouseX - half
-    y: mouseY - 1.0
-    width: size
-    height: 2.0
-    color: color
-  )
-  drawRectangle(
-    x: mouseX - 1.0
-    y: mouseY - half
-    width: 2.0
-    height: size
-    color: color
-  )
+  unsafe {
+    let size: Float = 12.0
+    let half: Float = size / 2.0
+    drawRectangle(
+      x: mouseX - half
+      y: mouseY - 1.0
+      width: size
+      height: 2.0
+      color: color
+    )
+    drawRectangle(
+      x: mouseX - 1.0
+      y: mouseY - half
+      width: 2.0
+      height: size
+      color: color
+    )
+  }
 }
 
 # -----------------------------------------------------------------
