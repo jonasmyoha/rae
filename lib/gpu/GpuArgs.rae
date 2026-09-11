@@ -41,6 +41,11 @@ func createArgs(uniform: view Bool) ret ArgWriter {
 
 # The current byte offset — equals the WGSL offset the next aligned push lands
 # at once padded. Used by the layout test to assert offsets.
+# Empties the writer for reuse (a per-frame writer stays allocated once).
+func resetArgs(writer: mod ArgWriter) {
+  writer.bytes.clear()
+}
+
 func argsLength(writer: view ArgWriter) ret Int {
   ret writer.bytes.length
 }

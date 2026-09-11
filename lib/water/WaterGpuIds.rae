@@ -9,6 +9,7 @@
 open gpu/GpuResources
 open gpu/GpuLifetime
 open gpu/GpuRender
+open gpu/GpuIds
 
 const waterCascadeMaps: Int = 3      # 0 displacement+Jacobian, 1 normal, 2 foam
 const waterCascadeCount: Int = 3
@@ -16,76 +17,6 @@ const fftMaxStages: Int = 10         # up to 1024^2
 const fftFields: Int = 4
 const fftMaxCascades: Int = 3
 const fftWorkTextures: Int = 6       # P, Q, R0..R3
-
-func noBufferId() ret BufferId { ret BufferId { managerTag: 0, slot: 0 - 1, generation: 0 } }
-func noTextureId() ret TextureId { ret TextureId { managerTag: 0, slot: 0 - 1, generation: 0 } }
-func noTextureViewId() ret TextureViewId { ret TextureViewId { managerTag: 0, slot: 0 - 1, generation: 0 } }
-func noSamplerId() ret SamplerId { ret SamplerId { managerTag: 0, slot: 0 - 1, generation: 0 } }
-func noPipelineId() ret PipelineId { ret PipelineId { managerTag: 0, slot: 0 - 1, generation: 0 } }
-func noBindGroupId() ret BindGroupId { ret BindGroupId { managerTag: 0, slot: 0 - 1, generation: 0 } }
-func noRenderPipelineId() ret RenderPipelineId { ret RenderPipelineId { managerTag: 0, slot: 0 - 1, generation: 0 } }
-func noExternalId() ret ExternalId { ret ExternalId { managerTag: 0, slot: 0 - 1, generation: 0 } }
-func noReadbackId() ret ReadbackId { ret ReadbackId { managerTag: 0, slot: 0 - 1, generation: 0 } }
-
-func fillBufferIds(count: view Int) ret List(BufferId) {
-  let list: List(BufferId) = List.create(BufferId, cap: count)
-  loop var i: Int = 0, i < count, ++i { list.add(value: noBufferId()) }
-  ret list
-}
-
-func fillTextureIds(count: view Int) ret List(TextureId) {
-  let list: List(TextureId) = List.create(TextureId, cap: count)
-  loop var i: Int = 0, i < count, ++i { list.add(value: noTextureId()) }
-  ret list
-}
-
-func fillTextureViewIds(count: view Int) ret List(TextureViewId) {
-  let list: List(TextureViewId) = List.create(TextureViewId, cap: count)
-  loop var i: Int = 0, i < count, ++i { list.add(value: noTextureViewId()) }
-  ret list
-}
-
-func fillBindGroupIds(count: view Int) ret List(BindGroupId) {
-  let list: List(BindGroupId) = List.create(BindGroupId, cap: count)
-  loop var i: Int = 0, i < count, ++i { list.add(value: noBindGroupId()) }
-  ret list
-}
-
-func fillReadbackIds(count: view Int) ret List(ReadbackId) {
-  let list: List(ReadbackId) = List.create(ReadbackId, cap: count)
-  loop var i: Int = 0, i < count, ++i { list.add(value: noReadbackId()) }
-  ret list
-}
-
-# ----- retire helpers: retire every valid ID in a list and blank it ---------
-
-func retireBufferIds(resources: mod GpuResources, list: mod List(BufferId)) {
-  loop var i: Int = 0, i < list.length, ++i {
-    if let id: BufferId = list.copyAt(index: i) { retireBuffer(resources: resources, id: id) }
-    list.set(index: i, value: noBufferId())
-  }
-}
-
-func retireTextureIds(resources: mod GpuResources, list: mod List(TextureId)) {
-  loop var i: Int = 0, i < list.length, ++i {
-    if let id: TextureId = list.copyAt(index: i) { retireTexture(resources: resources, id: id) }
-    list.set(index: i, value: noTextureId())
-  }
-}
-
-func retireTextureViewIds(resources: mod GpuResources, list: mod List(TextureViewId)) {
-  loop var i: Int = 0, i < list.length, ++i {
-    if let id: TextureViewId = list.copyAt(index: i) { retireTextureView(resources: resources, id: id) }
-    list.set(index: i, value: noTextureViewId())
-  }
-}
-
-func retireBindGroupIds(resources: mod GpuResources, list: mod List(BindGroupId)) {
-  loop var i: Int = 0, i < list.length, ++i {
-    if let id: BindGroupId = list.copyAt(index: i) { retireBindGroup(resources: resources, id: id) }
-    list.set(index: i, value: noBindGroupId())
-  }
-}
 
 # ----- the groups -----------------------------------------------------------
 
