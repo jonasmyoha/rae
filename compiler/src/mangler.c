@@ -209,11 +209,15 @@ static bool mangler_payload_is_struct_rep(const AstTypeRef* payload) {
     if (!payload) return false;
     const TypeInfo* ti = payload->resolved_type;
     if (ti && ti->kind != TYPE_GENERIC_PARAM) {
+        // #901: TYPE_BUFFER (Ptr and any Buffer(T)) is struct-rep too —
+        // must agree with rae_typeinfo_opt_is_struct_rep (c_backend.c) and
+        // type_mangle_recursive's TYPE_OPT case (type.c).
         return ti->kind == TYPE_STRUCT || ti->kind == TYPE_GENERIC_INST
             || ti->kind == TYPE_TASK || ti->kind == TYPE_ARRAY
             || ti->kind == TYPE_INT || ti->kind == TYPE_FLOAT
             || ti->kind == TYPE_FLOAT64 || ti->kind == TYPE_BOOL
-            || ti->kind == TYPE_CHAR || ti->kind == TYPE_STRING;
+            || ti->kind == TYPE_CHAR || ti->kind == TYPE_STRING
+            || ti->kind == TYPE_BUFFER;
     }
     Str b = get_base_type_name(payload);
     if (b.len == 0) return false;
@@ -250,11 +254,14 @@ static bool mangler_opt_is_struct_rep(const struct AstIdentifierPart* generic_pa
         }
     }
     if (base && base->kind != TYPE_OPT && base->kind != TYPE_GENERIC_PARAM) {
+        // #901: TYPE_BUFFER (Ptr and any Buffer(T)) is struct-rep too — see
+        // the matching comment in mangler_payload_is_struct_rep above.
         return base->kind == TYPE_STRUCT || base->kind == TYPE_GENERIC_INST
             || base->kind == TYPE_TASK || base->kind == TYPE_ARRAY
             || base->kind == TYPE_INT || base->kind == TYPE_FLOAT
             || base->kind == TYPE_FLOAT64 || base->kind == TYPE_BOOL
-            || base->kind == TYPE_CHAR || base->kind == TYPE_STRING;
+            || base->kind == TYPE_CHAR || base->kind == TYPE_STRING
+            || base->kind == TYPE_BUFFER;
     }
     Str b = get_base_type_name(type);
     if (b.len == 0) return false;
@@ -282,13 +289,15 @@ static void mangle_type_recursive(CompilerContext* ctx, const struct AstIdentifi
 
     Str base = get_base_type_name(type);
     if (mangle_primitive_ref(type, base, buf, pos, cap)) return;
-    /* Ptr resolves to Buffer(void). Use the same identifier-safe spelling as
-     * TypeInfo mangling so List(Ptr)'s parsed and resolved forms name one C
-     * specialization. Ordinary declarations still emit void* in c_backend. */
-    if (str_eq_cstr(base, "Ptr")) {
-        *pos += snprintf(buf + *pos, cap - *pos, "Buffer_void");
-        return;
-    }
+    // #901: the `opt` check MUST run before the Ptr shortcut below — `is_opt`
+    // is a flag on this SAME typeref, not a separate wrapper node, so
+    // `get_base_type_name` on `opt Ptr` still returns "Ptr" and the shortcut
+    // used to fire first, naming `opt Ptr` "Buffer_void" — the IDENTICAL name
+    // bare `Ptr` gets, so no `rae_opt_Buffer_void` struct type ever existed
+    // and codegen's `.has`/`.value` struct-rep access on that name (a bare
+    // `void*` typedef) was invalid C. Checking `is_opt` first recurses into
+    // the payload (`mangler_opt_payload` clears `is_opt`), and THAT call
+    // correctly hits the Ptr shortcut for the payload alone.
     if (type->is_opt && !type->is_view && !type->is_mod) {
         // Value optional: struct-rep -> rae_opt_<T>; else the inline RaeAny
         // box. Emit RaeAny (matching the C type) rather than the bare payload
@@ -300,6 +309,13 @@ static void mangle_type_recursive(CompilerContext* ctx, const struct AstIdentifi
         } else {
             *pos += snprintf(buf + *pos, cap - *pos, "RaeAny");
         }
+        return;
+    }
+    /* Ptr resolves to Buffer(void). Use the same identifier-safe spelling as
+     * TypeInfo mangling so List(Ptr)'s parsed and resolved forms name one C
+     * specialization. Ordinary declarations still emit void* in c_backend. */
+    if (str_eq_cstr(base, "Ptr")) {
+        *pos += snprintf(buf + *pos, cap - *pos, "Buffer_void");
         return;
     }
 
@@ -379,12 +395,12 @@ static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct
 
     Str base = get_base_type_name(type);
     if (mangle_primitive_ref(type, base, buf, pos, cap)) return;
-    /* Keep the parsed Ptr spelling identical to its resolved Buffer(void)
-     * TypeInfo spelling inside generic specializations. */
-    if (str_eq_cstr(base, "Ptr")) {
-        *pos += snprintf(buf + *pos, cap - *pos, "Buffer_void");
-        return;
-    }
+    // #901: check `is_opt` before the Ptr shortcut below — see the identical
+    // comment in mangle_type_recursive. Inside a generic specialization
+    // (T=Ptr), `opt T`'s base name is ALSO "Ptr", so without this ordering
+    // `opt Ptr` mangled to the same "Buffer_void" name as bare `Ptr`, and
+    // codegen's struct-rep `.has`/`.value` access on that bare-pointer
+    // typedef was invalid C (List(Ptr).copyAt/get/first/last...).
     if (type->is_opt && !type->is_view && !type->is_mod) {
         if (mangler_opt_is_struct_rep(generic_params, concrete_args, type)) {
             *pos += snprintf(buf + *pos, cap - *pos, "rae_opt_");
@@ -393,6 +409,12 @@ static void mangle_type_recursive_specialized(CompilerContext* ctx, const struct
         } else {
             *pos += snprintf(buf + *pos, cap - *pos, "RaeAny");
         }
+        return;
+    }
+    /* Keep the parsed Ptr spelling identical to its resolved Buffer(void)
+     * TypeInfo spelling inside generic specializations. */
+    if (str_eq_cstr(base, "Ptr")) {
+        *pos += snprintf(buf + *pos, cap - *pos, "Buffer_void");
         return;
     }
 
