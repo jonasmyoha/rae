@@ -345,6 +345,9 @@ func main() ret Int {
   let uiRoot: EntityId = loadScene(world: uiWorld, scene: uiScene)
   # The camera readout bar is the SHARED component; this scene supplies
   # only the slot it mounts into. Example 113 mounts the same one.
+  # The menu button is an ECS node in the same top row as the camera bar, so
+  # the two hug to one height and resize together (lib/ui/CornerMenuButton).
+  mountCornerMenuButton(world: uiWorld, res: gpuUi, hostNodeId: "CornerMenuSlot")
   mountCameraBar(world: uiWorld, res: gpuUi, hostNodeId: "CameraBarSlot")
   anchorUiToExtent(world: uiWorld, res: gpuUi, w: extentW, h: extentH)
   layoutSystem(world: uiWorld)
@@ -544,11 +547,10 @@ func main() ret Int {
                           now: now, didRealWork: dbgDidWork) {
       suppressUiPress(input: uiInput)
     }
-    # Shared corner menu button (top-left) — the same widget example 114 uses.
-    # Detected here (before dispatchUiActions) so its press is withdrawn from the
-    # UI world; the panel open/close applies below where settingsChanged is set.
-    let menuTapped: Bool = tapped()
-    if menuTapped { suppressUiPress(input: uiInput) }
+    # Shared corner menu button, mounted beside the camera bar — its press is an
+    # ordinary UI action; the panel open/close applies below where
+    # settingsChanged is set.
+    let menuTapped: Bool = menuToggleTapped(input: uiInput)
     # RE-CENTRE ON SWITCHING TO ORBIT. The rig recovers the orbit target by
     # walking `distance` along the free camera's view direction, so the view
     # never jumps -- the right library default. But after flying around in WASD
@@ -639,7 +641,10 @@ func main() ret Int {
     # `settingsChanged` too: a slider DRAG produces no action and does not dirty
     # the demo UI, so without it the knob's new rect only reached the screen when
     # the release finally produced one (see 113 for the same gate).
-    if uiLayoutDirty or extentChanged or settingsChanged {
+    # `scrolled` too: updateScrollPanel writes the new offset into an Offset
+    # component, and only transformSystem turns that into screen positions —
+    # without it the wheel moved nothing until the next relayout.
+    if uiLayoutDirty or extentChanged or settingsChanged or scrolled {
       layoutSystem(world: uiWorld)
       transformSystem(world: uiWorld)
       visualBoundsSystem(world: uiWorld, res: gpuUi)
@@ -808,9 +813,6 @@ func main() ret Int {
         if tag is RenderTag.uiOverlay {
           Gpu2d.beginFrameLoad()
           renderSystemGpu2d(world: uiWorld, res: gpuUi)
-          # Shared corner menu button (top-left), over the UI world — same widget
-          # as example 114 (drawn here, not an ECS node, so it stays put).
-          drawCornerMenuButton()
           # After the app UI, so the diagnostic is never what gets covered up.
           drawLogOverlay(ov: logView, font: gpuUi.textFont, screenW: extentW, screenH: extentH)
           # LAST, so it is above the scene, the UI world and the log.
