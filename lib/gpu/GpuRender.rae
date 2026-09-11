@@ -1,0 +1,453 @@
+# gpu/GpuRender — render support for the manager (#903): render pipelines,
+# render bind groups over an ORDERED entry list, adopted external handles, and
+# indexed-draw recording over gpu/GpuLifetime's Recording. Pure Rae over the
+# generated bindings; the same owner, validation, pinning and deferred-release
+# rules as the compute surface. This is the "render-pipeline surface" #870
+# deferred, so a render surface such as water's can be manager-owned.
+#
+# Adopted externals: `adoptExternalBuffer` / `adoptExternalTextureView` give an
+# `ExternalId` over a native handle the manager REFERENCES — it can be bound,
+# attached and pinned like any dependency — but NEVER owns: the manager never
+# releases it (the adopter does), and `releaseExternal` only frees the slot.
+# This is how the legacy gbuffer's per-frame resources (frame uniform, depth and
+# lit views, mesh buffers) are bound without migrating the whole renderer. The
+# adopter guarantees the handle stays valid while adopted (re-adopt when the
+# gbuffer's targets generation changes), which is why adoption is `unsafe`.
+#
+# Rae-side validation is a safety property here as in #870: wgpu-native aborts
+# the process on a WebGPU validation error, so usages, formats, alignment and
+# liveness are refused in Rae before wgpu sees them.
+open webgpu/Context
+open webgpu/Webgpu
+open webgpu/WebgpuEnums
+open webgpu/WebgpuTypes
+open gpu/GpuResources
+open gpu/GpuLifetime
+
+type RenderPipelineId {
+  managerTag: Int
+  slot: Int
+  generation: Int
+}
+
+type ExternalId {
+  managerTag: Int
+  slot: Int
+  generation: Int
+}
+
+const externalBuffer: Int = 0
+const externalTextureView: Int = 1
+
+# ----- resource references (ordered bind entries and attachments) --------
+
+const refBuffer: Int = 0
+const refTextureView: Int = 1
+const refSampler: Int = 2
+const refExternal: Int = 3
+
+# One reference to a manager resource or an adopted external, used for bind
+# entries (in binding order) and for attachments / vertex / index buffers.
+type ResourceRef {
+  refKind: Int
+  managerTag: Int
+  slot: Int
+  generation: Int
+}
+
+func bufferRef(id: view BufferId) ret ResourceRef {
+  ret ResourceRef { refKind: refBuffer, managerTag: id.managerTag, slot: id.slot, generation: id.generation }
+}
+
+func textureViewRef(id: view TextureViewId) ret ResourceRef {
+  ret ResourceRef { refKind: refTextureView, managerTag: id.managerTag, slot: id.slot, generation: id.generation }
+}
+
+func samplerRef(id: view SamplerId) ret ResourceRef {
+  ret ResourceRef { refKind: refSampler, managerTag: id.managerTag, slot: id.slot, generation: id.generation }
+}
+
+func externalRef(id: view ExternalId) ret ResourceRef {
+  ret ResourceRef { refKind: refExternal, managerTag: id.managerTag, slot: id.slot, generation: id.generation }
+}
+
+func noRef() ret ResourceRef {
+  ret ResourceRef { refKind: refBuffer, managerTag: 0, slot: 0 - 1, generation: 0 }
+}
+
+# The slot-table kind a reference pins and validates against.
+func refDepKind(ref: view ResourceRef) ret Int {
+  if ref.refKind is refBuffer { ret kindBuffer }
+  if ref.refKind is refTextureView { ret kindTextureView }
+  if ref.refKind is refSampler { ret kindSampler }
+  ret kindExternal
+}
+
+func isValidRef(resources: view GpuResources, ref: view ResourceRef) ret Bool {
+  if ref.managerTag is not resources.managerTag { ret false }
+  ret slotIsLive(table: tableFor(resources: resources, kind: refDepKind(ref: ref)), capacity: resources.capacity, slot: ref.slot, generation: ref.generation)
+}
+
+# An external's sub-kind (buffer or texture view); -1 when not an external.
+func externalKind(resources: view GpuResources, ref: view ResourceRef) ret Int {
+  if ref.refKind is not refExternal { ret 0 - 1 }
+  ret intAt(list: resources.externals.nativeIndex, index: ref.slot)
+}
+
+func refIsBuffer(resources: view GpuResources, ref: view ResourceRef) ret Bool {
+  if ref.refKind is refBuffer { ret true }
+  ret externalKind(resources: resources, ref: ref) is externalBuffer
+}
+
+func refIsTextureView(resources: view GpuResources, ref: view ResourceRef) ret Bool {
+  if ref.refKind is refTextureView { ret true }
+  ret externalKind(resources: resources, ref: ref) is externalTextureView
+}
+
+# The raw native handle behind a reference — an unchecked pointer, so this is
+# unsafe and only used inside unsafe blocks after validation.
+func refHandle(resources: view GpuResources, ref: view ResourceRef) unsafe ret Ptr {
+  unsafe { ret slotHandle(table: tableFor(resources: resources, kind: refDepKind(ref: ref)), slot: ref.slot) }
+}
+
+# The authoritative native size of a buffer reference (manager or external).
+func refBufferSize(resources: view GpuResources, ref: view ResourceRef) ret Int {
+  if refIsBuffer(resources: resources, ref: ref) is false { ret 0 - 1 }
+  unsafe { ret wgpuBufferGetSize(buffer: refHandle(resources: resources, ref: ref)) as Int }
+}
+
+func refBufferUsage(resources: view GpuResources, ref: view ResourceRef) ret UInt64 {
+  if refIsBuffer(resources: resources, ref: ref) is false { ret 0 as UInt64 }
+  unsafe { ret wgpuBufferGetUsage(buffer: refHandle(resources: resources, ref: ref)) }
+}
+
+# Records a reference (and a manager view's parent texture, indirectly) as a
+# dependency in the arena.
+func appendRefDep(resources: mod GpuResources, ref: view ResourceRef) {
+  appendDep(resources: resources, kind: refDepKind(ref: ref), slot: ref.slot, generation: ref.generation)
+  if ref.refKind is refTextureView {
+    let parent: Int = intAt(list: resources.textureViews.parentSlot, index: ref.slot)
+    if parent >= 0 {
+      appendDep(resources: resources, kind: kindTexture, slot: parent, generation: intAt(list: resources.textureViews.parentGeneration, index: ref.slot))
+    }
+  }
+}
+
+# ----- adopted externals ----------------------------------------------
+
+func isValidExternal(resources: view GpuResources, id: view ExternalId) ret Bool {
+  if id.managerTag is not resources.managerTag { ret false }
+  ret slotIsLive(table: resources.externals, capacity: resources.capacity, slot: id.slot, generation: id.generation)
+}
+
+func liveExternalCount(resources: view GpuResources) ret Int {
+  ret liveCount(table: resources.externals, capacity: resources.capacity)
+}
+
+func adoptExternal(resources: mod GpuResources, handle: copy Ptr, subKind: view Int) unsafe ret opt ExternalId {
+  let slot: Int = findFreeSlot(table: resources.externals, capacity: resources.capacity)
+  if slot < 0 { ret none }
+  unsafe {
+    if handle is webgpuNull() { ret none }
+    storeHandle(table: resources.externals, slot: slot, handle: handle)
+  }
+  resources.externals.nativeIndex.set(index: slot, value: subKind)
+  ret ExternalId { managerTag: resources.managerTag, slot: slot, generation: slotGeneration(table: resources.externals, slot: slot) }
+}
+
+# Adopts a native buffer the adopter owns and keeps valid while adopted.
+func adoptExternalBuffer(resources: mod GpuResources, handle: copy Ptr) unsafe ret opt ExternalId {
+  unsafe { ret adoptExternal(resources: resources, handle: handle, subKind: externalBuffer) }
+}
+
+# Adopts a native texture view the adopter owns and keeps valid while adopted.
+func adoptExternalTextureView(resources: mod GpuResources, handle: copy Ptr) unsafe ret opt ExternalId {
+  unsafe { ret adoptExternal(resources: resources, handle: handle, subKind: externalTextureView) }
+}
+
+# Drops the reference: the generation bumps (no new use) and the slot frees
+# once nothing pins it. The native handle is NOT released — it never was ours.
+func releaseExternal(resources: mod GpuResources, id: view ExternalId) ret Bool {
+  if isValidExternal(resources: resources, id: id) is false { ret false }
+  unsafe { retireSlot(table: resources.externals, slot: id.slot, kind: kindExternal, empty: webgpuNull()) }
+  ret true
+}
+
+# ----- render pipelines -------------------------------------------------
+
+func isValidRenderPipeline(resources: view GpuResources, id: view RenderPipelineId) ret Bool {
+  if id.managerTag is not resources.managerTag { ret false }
+  ret slotIsLive(table: resources.renderPipelines, capacity: resources.capacity, slot: id.slot, generation: id.generation)
+}
+
+func liveRenderPipelineCount(resources: view GpuResources) ret Int {
+  ret liveCount(table: resources.renderPipelines, capacity: resources.capacity)
+}
+
+# One vertex attribute of the single vertex buffer.
+type VertexAttributeSpec {
+  format: Int32
+  offset: Int
+  location: Int
+}
+
+# What a render pipeline needs beyond its shader: one interleaved vertex buffer
+# layout, one colour target (optionally alpha-blended, as water's surface is),
+# and an optional depth test (format 0 = none; water uses read-only reverse-Z:
+# Depth32Float, no write, Greater).
+type RenderPipelineSpec {
+  vertexStride: Int
+  attributes: List(VertexAttributeSpec)
+  colorFormat: Int32
+  alphaBlend: Bool
+  depthFormat: Int32
+  depthWrite: Bool
+  depthCompare: Int32
+  cullMode: Int32
+}
+
+func createRenderPipeline(resources: mod GpuResources, wgsl: view String, vertexEntry: view String, fragmentEntry: view String, spec: view RenderPipelineSpec) ret opt RenderPipelineId {
+  if wgsl.length() is 0 or vertexEntry.length() is 0 or fragmentEntry.length() is 0 { ret none }
+  if spec.vertexStride < 1 or spec.attributes.length < 1 { ret none }
+  let slot: Int = findFreeSlot(table: resources.renderPipelines, capacity: resources.capacity)
+  if slot < 0 { ret none }
+  unsafe {
+    let sourceC: Buffer(Any) = wgsl.toCStr()
+    var sourceList: List(WGPUShaderSourceWGSL) = List.create(WGPUShaderSourceWGSL, cap: 1)
+    sourceList.add(value: { chain: { sType: WGPUSType_ShaderSourceWGSL }, code: { data: sourceC, length: WGPU_STRLEN } })
+    let moduleDescriptor: WGPUShaderModuleDescriptor = { nextInChain: sourceList.data }
+    let shaderModule: Ptr = wgpuDeviceCreateShaderModule(device: webgpuDevice(), descriptor: moduleDescriptor)
+    if shaderModule is webgpuNull() { ret none }
+    var attributes: List(WGPUVertexAttribute) = List.create(WGPUVertexAttribute, cap: spec.attributes.length)
+    var i: Int = 0
+    loop i < spec.attributes.length {
+      if let attribute: VertexAttributeSpec = spec.attributes.copyAt(index: i) {
+        attributes.add(value: { format: attribute.format, offset: attribute.offset as UInt64, shaderLocation: attribute.location as UInt32 })
+      }
+      i = i + 1
+    }
+    var layouts: List(WGPUVertexBufferLayout) = List.create(WGPUVertexBufferLayout, cap: 1)
+    layouts.add(value: { stepMode: WGPUVertexStepMode_Vertex, arrayStride: spec.vertexStride as UInt64, attributeCount: attributes.length as UInt64, attributes: attributes.data })
+    var blends: List(WGPUBlendState) = List.create(WGPUBlendState, cap: 1)
+    blends.add(value: {
+      color: { operation: WGPUBlendOperation_Add, srcFactor: WGPUBlendFactor_SrcAlpha, dstFactor: WGPUBlendFactor_OneMinusSrcAlpha }
+      alpha: { operation: WGPUBlendOperation_Add, srcFactor: WGPUBlendFactor_One, dstFactor: WGPUBlendFactor_OneMinusSrcAlpha }
+    })
+    var targets: List(WGPUColorTargetState) = List.create(WGPUColorTargetState, cap: 1)
+    if spec.alphaBlend {
+      targets.add(value: { format: spec.colorFormat, blend: blends.data, writeMask: WGPUColorWriteMask_All })
+    } else {
+      targets.add(value: { format: spec.colorFormat, writeMask: WGPUColorWriteMask_All })
+    }
+    let vertexC: Buffer(Any) = vertexEntry.toCStr()
+    let fragmentC: Buffer(Any) = fragmentEntry.toCStr()
+    var fragments: List(WGPUFragmentState) = List.create(WGPUFragmentState, cap: 1)
+    fragments.add(value: { module: shaderModule, entryPoint: { data: fragmentC, length: WGPU_STRLEN }, targetCount: 1 as UInt64, targets: targets.data })
+    var depths: List(WGPUDepthStencilState) = List.create(WGPUDepthStencilState, cap: 1)
+    var writeFlag: Int32 = WGPUOptionalBool_False
+    if spec.depthWrite { writeFlag = WGPUOptionalBool_True }
+    depths.add(value: {
+      format: spec.depthFormat
+      depthWriteEnabled: writeFlag
+      depthCompare: spec.depthCompare
+      stencilFront: { compare: WGPUCompareFunction_Always, failOp: WGPUStencilOperation_Keep, depthFailOp: WGPUStencilOperation_Keep, passOp: WGPUStencilOperation_Keep }
+      stencilBack: { compare: WGPUCompareFunction_Always, failOp: WGPUStencilOperation_Keep, depthFailOp: WGPUStencilOperation_Keep, passOp: WGPUStencilOperation_Keep }
+      stencilReadMask: 4294967295 as UInt32
+      stencilWriteMask: 4294967295 as UInt32
+    })
+    var handle: Ptr = webgpuNull()
+    if spec.depthFormat is (0 as Int32) {
+      let descriptor: WGPURenderPipelineDescriptor = {
+        vertex: { module: shaderModule, entryPoint: { data: vertexC, length: WGPU_STRLEN }, bufferCount: 1 as UInt64, buffers: layouts.data }
+        primitive: { topology: WGPUPrimitiveTopology_TriangleList, frontFace: WGPUFrontFace_CCW, cullMode: spec.cullMode }
+        multisample: { count: 1 as UInt32, mask: 4294967295 as UInt32 }
+        fragment: fragments.data
+      }
+      handle = wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: descriptor)
+    } else {
+      let descriptor: WGPURenderPipelineDescriptor = {
+        vertex: { module: shaderModule, entryPoint: { data: vertexC, length: WGPU_STRLEN }, bufferCount: 1 as UInt64, buffers: layouts.data }
+        primitive: { topology: WGPUPrimitiveTopology_TriangleList, frontFace: WGPUFrontFace_CCW, cullMode: spec.cullMode }
+        depthStencil: depths.data
+        multisample: { count: 1 as UInt32, mask: 4294967295 as UInt32 }
+        fragment: fragments.data
+      }
+      handle = wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: descriptor)
+    }
+    wgpuShaderModuleRelease(shaderModule: shaderModule)
+    if handle is webgpuNull() { ret none }
+    storeHandle(table: resources.renderPipelines, slot: slot, handle: handle)
+  }
+  ret RenderPipelineId { managerTag: resources.managerTag, slot: slot, generation: slotGeneration(table: resources.renderPipelines, slot: slot) }
+}
+
+func retireRenderPipeline(resources: mod GpuResources, id: view RenderPipelineId) ret Bool {
+  if isValidRenderPipeline(resources: resources, id: id) is false { ret false }
+  unsafe { retireSlot(table: resources.renderPipelines, slot: id.slot, kind: kindRenderPipeline, empty: webgpuNull()) }
+  ret true
+}
+
+# ----- render bind groups -----------------------------------------------
+
+# Group 0 of `pipeline` with `entries` bound at consecutive binding numbers in
+# list order (buffers bound whole). Every entry must be live; the group pins
+# each entry (and a manager view's texture) for its lifetime, exactly like the
+# compute bind groups, and is a BindGroupId usable by recordDrawIndexed.
+func createRenderBindGroup(resources: mod GpuResources, pipeline: view RenderPipelineId, entries: view List(ResourceRef)) ret opt BindGroupId {
+  if isValidRenderPipeline(resources: resources, id: pipeline) is false { ret none }
+  if entries.length < 1 { ret none }
+  let slot: Int = findFreeSlot(table: resources.bindGroups, capacity: resources.capacity)
+  if slot < 0 { ret none }
+  let start: Int = resources.depKinds.length
+  appendDep(resources: resources, kind: kindRenderPipeline, slot: pipeline.slot, generation: pipeline.generation)
+  var nativeEntries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: entries.length)
+  var i: Int = 0
+  loop i < entries.length {
+    if let entry: ResourceRef = entries.copyAt(index: i) {
+      if isValidRef(resources: resources, ref: entry) is false { ret none }
+      appendRefDep(resources: resources, ref: entry)
+      unsafe {
+        if refIsBuffer(resources: resources, ref: entry) {
+          nativeEntries.add(value: { binding: i as UInt32, buffer: refHandle(resources: resources, ref: entry), size: refBufferSize(resources: resources, ref: entry) as UInt64 })
+        } else if refIsTextureView(resources: resources, ref: entry) {
+          nativeEntries.add(value: { binding: i as UInt32, textureView: refHandle(resources: resources, ref: entry) })
+        } else {
+          nativeEntries.add(value: { binding: i as UInt32, sampler: refHandle(resources: resources, ref: entry) })
+        }
+      }
+    }
+    i = i + 1
+  }
+  let count: Int = resources.depKinds.length - start
+  if sliceIsLive(resources: resources, start: start, count: count) is false { ret none }
+  unsafe {
+    let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: slotHandle(table: resources.renderPipelines, slot: pipeline.slot), groupIndex: 0 as UInt32)
+    let descriptor: WGPUBindGroupDescriptor = { layout: layout, entryCount: nativeEntries.length as UInt64, entries: nativeEntries.data }
+    let handle: Ptr = wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: descriptor)
+    wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+    if handle is webgpuNull() { ret none }
+    storeHandle(table: resources.bindGroups, slot: slot, handle: handle)
+  }
+  resources.bindGroups.depStart.set(index: slot, value: start)
+  resources.bindGroups.depCount.set(index: slot, value: count)
+  pinSlice(resources: resources, start: start, count: count)
+  ret BindGroupId { managerTag: resources.managerTag, slot: slot, generation: slotGeneration(table: resources.bindGroups, slot: slot) }
+}
+
+# ----- render targets and draws ----------------------------------------
+
+# A pass target: one colour view (cleared or loaded) and an optional depth view.
+type RenderTarget {
+  colorView: ResourceRef
+  clear: Bool
+  clearR: Float
+  clearG: Float
+  clearB: Float
+  clearA: Float
+  hasDepth: Bool
+  depthView: ResourceRef
+  depthReadOnly: Bool
+}
+
+func renderTarget(colorView: view ResourceRef, clear: view Bool, r: view Float, g: view Float, b: view Float, a: view Float) ret RenderTarget {
+  ret RenderTarget { colorView: colorView, clear: clear, clearR: r, clearG: g, clearB: b, clearA: a, hasDepth: false, depthView: noRef(), depthReadOnly: true }
+}
+
+func renderTargetWithDepth(colorView: view ResourceRef, clear: view Bool, r: view Float, g: view Float, b: view Float, a: view Float, depthView: view ResourceRef, depthReadOnly: view Bool) ret RenderTarget {
+  ret RenderTarget { colorView: colorView, clear: clear, clearR: r, clearG: g, clearB: b, clearA: a, hasDepth: true, depthView: depthView, depthReadOnly: depthReadOnly }
+}
+
+# One render pass with one indexed draw (a water body is exactly this): begin
+# the pass on the target, set the pipeline, bind group, vertex and index
+# buffers (u32 indices, whole buffers, authoritative native sizes), draw, end.
+# Manager buffers must carry Vertex / Index usage; adopted externals are the
+# adopter's obligation. Every referenced resource becomes a use of the
+# recording, validated again at submit and pinned until completion.
+func recordDrawIndexed(recording: mod Recording, resources: view GpuResources, target: view RenderTarget, pipeline: view RenderPipelineId, bindGroup: view BindGroupId, vertexBuffer: view ResourceRef, indexBuffer: view ResourceRef, indexCount: view Int) ret Bool {
+  if recordingIsOpen(recording: recording, resources: resources) is false { ret false }
+  if isValidRenderPipeline(resources: resources, id: pipeline) is false { ret false }
+  if bindGroupIsUsable(resources: resources, id: bindGroup) is false { ret false }
+  if indexCount < 1 { ret false }
+  if isValidRef(resources: resources, ref: target.colorView) is false or refIsTextureView(resources: resources, ref: target.colorView) is false { ret false }
+  if target.hasDepth {
+    if isValidRef(resources: resources, ref: target.depthView) is false or refIsTextureView(resources: resources, ref: target.depthView) is false { ret false }
+  }
+  if isValidRef(resources: resources, ref: vertexBuffer) is false or refIsBuffer(resources: resources, ref: vertexBuffer) is false { ret false }
+  if isValidRef(resources: resources, ref: indexBuffer) is false or refIsBuffer(resources: resources, ref: indexBuffer) is false { ret false }
+  if vertexBuffer.refKind is refBuffer and hasUsageFlag(usage: refBufferUsage(resources: resources, ref: vertexBuffer), flag: WGPUBufferUsage_Vertex) is false { ret false }
+  if indexBuffer.refKind is refBuffer and hasUsageFlag(usage: refBufferUsage(resources: resources, ref: indexBuffer), flag: WGPUBufferUsage_Index) is false { ret false }
+  if refBufferSize(resources: resources, ref: indexBuffer) < indexCount * 4 { ret false }
+  unsafe {
+    var loadOp: Int32 = WGPULoadOp_Load
+    if target.clear { loadOp = WGPULoadOp_Clear }
+    var colorAttachments: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 1)
+    colorAttachments.add(value: {
+      view_: refHandle(resources: resources, ref: target.colorView)
+      depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
+      loadOp: loadOp
+      storeOp: WGPUStoreOp_Store
+      clearValue: { r: target.clearR as Float64, g: target.clearG as Float64, b: target.clearB as Float64, a: target.clearA as Float64 }
+    })
+    var depthAttachments: List(WGPURenderPassDepthStencilAttachment) = List.create(WGPURenderPassDepthStencilAttachment, cap: 1)
+    var pass: Ptr = webgpuNull()
+    if target.hasDepth {
+      if target.depthReadOnly {
+        depthAttachments.add(value: { view_: refHandle(resources: resources, ref: target.depthView), depthLoadOp: WGPULoadOp_Undefined, depthStoreOp: WGPUStoreOp_Undefined, depthReadOnly: 1 as UInt32 })
+      } else {
+        depthAttachments.add(value: { view_: refHandle(resources: resources, ref: target.depthView), depthLoadOp: WGPULoadOp_Load, depthStoreOp: WGPUStoreOp_Store, depthReadOnly: 0 as UInt32 })
+      }
+      let descriptor: WGPURenderPassDescriptor = { colorAttachmentCount: 1 as UInt64, colorAttachments: colorAttachments.data, depthStencilAttachment: depthAttachments.data }
+      pass = wgpuCommandEncoderBeginRenderPass(commandEncoder: recording.encoder, descriptor: descriptor)
+    } else {
+      let descriptor: WGPURenderPassDescriptor = { colorAttachmentCount: 1 as UInt64, colorAttachments: colorAttachments.data }
+      pass = wgpuCommandEncoderBeginRenderPass(commandEncoder: recording.encoder, descriptor: descriptor)
+    }
+    if pass is webgpuNull() { ret false }
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: slotHandle(table: resources.renderPipelines, slot: pipeline.slot))
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32, group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+    let vertexHandle: Ptr = refHandle(resources: resources, ref: vertexBuffer)
+    wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder: pass, slot: 0 as UInt32, buffer: vertexHandle, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: vertexHandle))
+    let indexHandle: Ptr = refHandle(resources: resources, ref: indexBuffer)
+    wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder: pass, buffer: indexHandle, format: WGPUIndexFormat_Uint32, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: indexHandle))
+    wgpuRenderPassEncoderDrawIndexed(renderPassEncoder: pass, indexCount: indexCount as UInt32, instanceCount: 1 as UInt32, firstIndex: 0 as UInt32, baseVertex: 0 as Int32, firstInstance: 0 as UInt32)
+    wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
+    wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
+  }
+  recordUse(recording: recording, kind: kindRenderPipeline, slot: pipeline.slot, generation: pipeline.generation)
+  recordUse(recording: recording, kind: kindBindGroup, slot: bindGroup.slot, generation: bindGroup.generation)
+  let start: Int = intAt(list: resources.bindGroups.depStart, index: bindGroup.slot)
+  let count: Int = intAt(list: resources.bindGroups.depCount, index: bindGroup.slot)
+  var i: Int = start
+  loop i < start + count {
+    recordUse(recording: recording, kind: intAt(list: resources.depKinds, index: i), slot: intAt(list: resources.depSlots, index: i), generation: intAt(list: resources.depGenerations, index: i))
+    i = i + 1
+  }
+  recordUse(recording: recording, kind: refDepKind(ref: target.colorView), slot: target.colorView.slot, generation: target.colorView.generation)
+  if target.hasDepth { recordUse(recording: recording, kind: refDepKind(ref: target.depthView), slot: target.depthView.slot, generation: target.depthView.generation) }
+  recordUse(recording: recording, kind: refDepKind(ref: vertexBuffer), slot: vertexBuffer.slot, generation: vertexBuffer.generation)
+  recordUse(recording: recording, kind: refDepKind(ref: indexBuffer), slot: indexBuffer.slot, generation: indexBuffer.generation)
+  ret true
+}
+
+# Copies a 2D RGBA8 texture's level 0 into a buffer laid out row by row with
+# `bytesPerRow` (a multiple of 256, at least width * 4) — the pixel readback
+# path for checks and screenshots. Both resources become uses of the recording.
+func recordCopyTextureToBuffer(recording: mod Recording, resources: view GpuResources, texture: view TextureId, buffer: view BufferId, bytesPerRow: view Int) ret Bool {
+  if recordingIsOpen(recording: recording, resources: resources) is false { ret false }
+  if isValidTexture(resources: resources, id: texture) is false { ret false }
+  let width: Int = textureWidth(resources: resources, id: texture)
+  let height: Int = textureHeight(resources: resources, id: texture)
+  if width < 1 or height < 1 { ret false }
+  if bytesPerRow - (bytesPerRow / 256) * 256 is not 0 or bytesPerRow < width * 4 { ret false }
+  if bufferRangeIsValid(resources: resources, id: buffer, offset: 0, size: bytesPerRow * height) is false { ret false }
+  if hasUsageFlag(usage: bufferUsage(resources: resources, id: buffer), flag: WGPUBufferUsage_CopyDst) is false { ret false }
+  unsafe {
+    let source: WGPUTexelCopyTextureInfo = { texture: slotHandle(table: resources.textures, slot: texture.slot), mipLevel: 0 as UInt32, origin: { x: 0 as UInt32, y: 0 as UInt32, z: 0 as UInt32 }, aspect: WGPUTextureAspect_All }
+    let destination: WGPUTexelCopyBufferInfo = { layout: { offset: 0 as UInt64, bytesPerRow: bytesPerRow as UInt32, rowsPerImage: height as UInt32 }, buffer: slotHandle(table: resources.buffers, slot: buffer.slot) }
+    let size: WGPUExtent3D = { width: width as UInt32, height: height as UInt32, depthOrArrayLayers: 1 as UInt32 }
+    wgpuCommandEncoderCopyTextureToBuffer(commandEncoder: recording.encoder, source: source, destination: destination, copySize: size)
+  }
+  recordUse(recording: recording, kind: kindTexture, slot: texture.slot, generation: texture.generation)
+  recordUse(recording: recording, kind: kindBuffer, slot: buffer.slot, generation: buffer.generation)
+  ret true
+}

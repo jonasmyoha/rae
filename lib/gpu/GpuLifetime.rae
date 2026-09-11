@@ -90,6 +90,8 @@ func pinDep(resources: mod GpuResources, kind: view Int, slot: view Int) {
   if kind is kindSampler { pinSlot(table: resources.samplers, slot: slot) }
   if kind is kindPipeline { pinSlot(table: resources.pipelines, slot: slot) }
   if kind is kindBindGroup { pinSlot(table: resources.bindGroups, slot: slot) }
+  if kind is kindRenderPipeline { pinSlot(table: resources.renderPipelines, slot: slot) }
+  if kind is kindExternal { pinSlot(table: resources.externals, slot: slot) }
 }
 
 func unpinDep(resources: mod GpuResources, kind: view Int, slot: view Int) {
@@ -101,6 +103,8 @@ func unpinDep(resources: mod GpuResources, kind: view Int, slot: view Int) {
     if kind is kindSampler { unpinSlot(table: resources.samplers, slot: slot, kind: kind, empty: empty) }
     if kind is kindPipeline { unpinSlot(table: resources.pipelines, slot: slot, kind: kind, empty: empty) }
     if kind is kindBindGroup { unpinSlot(table: resources.bindGroups, slot: slot, kind: kind, empty: empty) }
+    if kind is kindRenderPipeline { unpinSlot(table: resources.renderPipelines, slot: slot, kind: kind, empty: empty) }
+    if kind is kindExternal { unpinSlot(table: resources.externals, slot: slot, kind: kind, empty: empty) }
   }
 }
 
