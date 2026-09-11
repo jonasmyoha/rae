@@ -96,7 +96,6 @@ void rae_g2d_frame_reset(void) {
     rae_g2d_clip_reset();
     g_g2d_frame_buf_n = 0;
     g_g2d_frame_bind_n = 0;
-    for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) g_g2d_text_frame_buf_n[i] = 0;
 }
 void rae_g2d_set_frame(void* enc, void* pass) {
     g_g2d_enc = (WGPUCommandEncoder)enc;
@@ -299,75 +298,13 @@ void rae_g2d_prepare_flush(int64_t images_pending) {
     }
 }
 
-/* Images, then text, into the active pass (the boxes were drawn by the Rae
- * box pass before this, #907). */
-void rae_ext_Gpu2d_flush(void) {
-    if (!g_g2d_pass) return;
-    int have_text = 0;
-    for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) if (g_g2d_text_count[i] > 0) have_text = 1;
-    rae_g2d_ensure_viewport_uniform();
-    /* Images (the Rae image pass) were drawn between the boxes and this. */
-    if (have_text) {
-        /* One text draw per atlas that has glyphs this frame (so Roboto text
-         * and the Material-icon atlas coexist). */
-        rae_g2d_init_text_pipeline();
-        wgpuRenderPassEncoderSetPipeline(g_g2d_pass, g_g2d_text_pipeline);
-        for (int ai = 0; ai < RAE_SDF_MAX_ATLAS; ai++) {
-            if (g_g2d_text_count[ai] <= 0) continue;
-            if (!rae_g2d_atlas_texview(ai + 1)) continue;
-            WGPUBuffer instbuf = rae_g2d_text_frame_buffer(ai, g_g2d_text_count[ai]);
-            wgpuQueueWriteBuffer(g_wgpu_queue, instbuf, 0, g_g2d_text_prims[ai],
-                                 (size_t)g_g2d_text_count[ai] * G2D_TEXT_FLOATS * sizeof(float));
-            WGPUTextureView view = rae_g2d_atlas_texview(ai + 1);
-            WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g_g2d_text_pipeline, 0);
-            WGPUBindGroupEntry e[4]; memset(e, 0, sizeof(e));
-            e[0].binding = 0; e[0].buffer = g_g2d_uniform; e[0].size = 32;
-            e[1].binding = 1; e[1].buffer = instbuf;
-            e[1].size = (uint64_t)g_g2d_text_count[ai] * G2D_TEXT_FLOATS * sizeof(float);
-            e[2].binding = 2; e[2].textureView = view;
-            e[3].binding = 3; e[3].sampler = g_g2d_sampler;
-            WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
-            bgd.layout = bgl; bgd.entryCount = 4; bgd.entries = e;
-            WGPUBindGroup bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
-            wgpuBindGroupLayoutRelease(bgl);
-            rae_g2d_keep_frame_bind(bind);
-            wgpuRenderPassEncoderSetBindGroup(g_g2d_pass, 0, bind, 0, NULL);
-            int cnt = g_g2d_text_count[ai];
-            int* tclip = g_g2d_text_clip[ai];
-            int tcap = g_g2d_text_clip_cap[ai];
-            int ts = 0;
-            while (ts < cnt) {
-                int clip = (tclip && ts < tcap) ? tclip[ts] : 0;
-                int te = ts + 1;
-                while (te < cnt) {
-                    int ec = (tclip && te < tcap) ? tclip[te] : 0;
-                    if (ec != clip) break;
-                    te++;
-                }
-                rae_g2d_set_scissor(clip);
-                wgpuRenderPassEncoderDraw(g_g2d_pass, 6, (uint32_t)(te - ts), 0, (uint32_t)ts);
-                ts = te;
-            }
-            g_g2d_text_count[ai] = 0;
-        }
-    }
-}
-
 void rae_ext_Gpu2d_closeWindow(void) {
     if (g_g2d_off_view) { wgpuTextureViewRelease(g_g2d_off_view); g_g2d_off_view = NULL; }
     if (g_g2d_off_tex)  { wgpuTextureRelease(g_g2d_off_tex);  g_g2d_off_tex = NULL; }
     g_g2d_off_w = 0; g_g2d_off_h = 0;
     for (int ai = 0; ai < RAE_SDF_MAX_ATLAS; ai++) {
-        if (g_g2d_text_bind[ai]) { wgpuBindGroupRelease(g_g2d_text_bind[ai]); g_g2d_text_bind[ai] = NULL; }
-        if (g_g2d_text_instbuf[ai]) { wgpuBufferRelease(g_g2d_text_instbuf[ai]); g_g2d_text_instbuf[ai] = NULL; g_g2d_text_cap[ai] = 0; }
         if (g_g2d_text_prims[ai]) { free(g_g2d_text_prims[ai]); g_g2d_text_prims[ai] = NULL; g_g2d_text_capf[ai] = 0; }
         g_g2d_text_count[ai] = 0;
-    }
-    if (g_g2d_text_pipeline) { wgpuRenderPipelineRelease(g_g2d_text_pipeline); g_g2d_text_pipeline = NULL; }
-    if (g_g2d_sampler) { wgpuSamplerRelease(g_g2d_sampler); g_g2d_sampler = NULL; }
-    for (int ai = 0; ai < RAE_SDF_MAX_ATLAS; ai++) {
-        if (g_g2d_atlas_view[ai]) { wgpuTextureViewRelease(g_g2d_atlas_view[ai]); g_g2d_atlas_view[ai] = NULL; }
-        if (g_g2d_atlas_tex[ai]) { wgpuTextureRelease(g_g2d_atlas_tex[ai]); g_g2d_atlas_tex[ai] = NULL; }
     }
     if (g_g2d_uniform) { wgpuBufferRelease(g_g2d_uniform); g_g2d_uniform = NULL; }
     if (g_g2d_prims) { free(g_g2d_prims); g_g2d_prims = NULL; g_g2d_prim_capf = 0; }
@@ -378,15 +315,6 @@ void rae_ext_Gpu2d_closeWindow(void) {
     for (int i = 0; i < g_g2d_frame_buf_n; i++) wgpuBufferRelease(g_g2d_frame_bufs[i]);
     g_g2d_frame_buf_n = 0;
     if (g_g2d_frame_bufs) { free(g_g2d_frame_bufs); g_g2d_frame_bufs = NULL; g_g2d_frame_buf_cap = 0; }
-    for (int ai = 0; ai < RAE_SDF_MAX_ATLAS; ai++) {
-        for (int i = 0; i < g_g2d_text_frame_buf_slots[ai]; i++) {
-            if (g_g2d_text_frame_bufs[ai][i]) wgpuBufferRelease(g_g2d_text_frame_bufs[ai][i]);
-        }
-        if (g_g2d_text_frame_bufs[ai]) { free(g_g2d_text_frame_bufs[ai]); g_g2d_text_frame_bufs[ai] = NULL; }
-        if (g_g2d_text_frame_buf_cap[ai]) { free(g_g2d_text_frame_buf_cap[ai]); g_g2d_text_frame_buf_cap[ai] = NULL; }
-        g_g2d_text_frame_buf_n[ai] = 0; g_g2d_text_frame_buf_slots[ai] = 0;
-    }
-    /* Image pipeline + textures. */
     if (g_g2d_surface) { wgpuSurfaceRelease(g_g2d_surface); g_g2d_surface = NULL; }
     for (int i = 0; i < 7; i++) {
         if (g_g2d_cursors[i]) { SDL_DestroyCursor(g_g2d_cursors[i]); g_g2d_cursors[i] = NULL; }
