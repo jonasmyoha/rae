@@ -40,10 +40,6 @@ void rae_gb_commit_targets(int64_t w, int64_t h) { (void)w; (void)h; }
 int64_t rae_gb_targets_gen(void)        { return 0; }
 const char* rae_gb_wgsl(void)      { return ""; }
 const char* rae_gb_skin_wgsl(void) { return ""; }
-const char* rae_gb_entry_vs(void)  { return "vs"; }
-const char* rae_gb_entry_fs(void)  { return "fs"; }
-void rae_gb_set_pipeline(void* p)      { (void)p; }
-void rae_gb_set_skin_pipeline(void* p) { (void)p; }
 void* rae_gb_view_a(void)     { return (void*)0; }
 void* rae_gb_view_b(void)     { return (void*)0; }
 void* rae_gb_view_c(void)     { return (void*)0; }
@@ -56,8 +52,6 @@ void rae_gb_set_frame(void* enc, void* pass){ (void)enc; (void)pass; }
  * versions. mesh_ready / skin_ready return 0, so the Rae draws early-return and
  * issue no GPU work. */
 void* rae_gb_pass(void)                 { return (void*)0; }
-void* rae_gb_static_pipeline(void)      { return (void*)0; }
-void* rae_gb_static_bind(void)          { return (void*)0; }
 void* rae_gb_draws_buffer(void)         { return (void*)0; }
 int64_t rae_gb_max_draws(void)          { return 0; }
 int64_t rae_gb_draw_count(void)         { return 0; }
@@ -66,9 +60,6 @@ int64_t rae_gb_mesh_ready(int64_t mesh) { (void)mesh; return 0; }
 void* rae_gb_mesh_vbuf(int64_t mesh)    { (void)mesh; return (void*)0; }
 void* rae_gb_mesh_ibuf(int64_t mesh)    { (void)mesh; return (void*)0; }
 int64_t rae_gb_mesh_icount(int64_t mesh){ (void)mesh; return 0; }
-void* rae_gb_skin_pipeline(void)        { return (void*)0; }
-void* rae_gb_skin_bind(void)            { return (void*)0; }
-void rae_gb_set_skin_bind(void* bind)   { (void)bind; }
 void* rae_gb_skin_palette(void)         { return (void*)0; }
 int64_t rae_gb_skin_palette_size(void)  { return 0; }
 int64_t rae_gb_skin_palette_ready(void) { return 0; }
@@ -83,7 +74,6 @@ void rae_gb_submit(void* cmd)           { (void)cmd; }
 void* rae_gb_frame_ubuf(void)           { return (void*)0; }
 int64_t rae_gb_frame_bytes(void)        { return 0; }
 int64_t rae_gb_draws_size(void)         { return 0; }
-void rae_gb_set_static_bind(void* bind) { (void)bind; }
 int64_t rae_gb_sdf_prepare(void* packedBalls, int64_t count, void* packedColors,
                            float smoothing, float camX, float camY, float camZ,
                            float metallic, float roughness,

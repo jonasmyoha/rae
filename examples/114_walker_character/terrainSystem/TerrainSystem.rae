@@ -17,6 +17,7 @@ import Vec3
 import Quat
 import Gbuffer
 open GbufferTerrain
+open gpu/GpuResources
 open Gltf
 open Gpu3d
 open Scene3d
@@ -294,7 +295,7 @@ func gatherKind(prop: mod PropInstancer, model: view Mat4) {
   addInstance(batch: prop.batch, model: model, prevModel: model, material: prop.material)
 }
 
-func drawTerrainProps(terrainSystem: mod TerrainSystem, world: view GameWorld) {
+func drawTerrainProps(cache: mod GbufferCache, resources: mod GpuResources, terrainSystem: mod TerrainSystem, world: view GameWorld) {
   resetInstanceBatch(batch: terrainSystem.rockProp.batch)
   resetInstanceBatch(batch: terrainSystem.bushProp.batch)
   resetInstanceBatch(batch: terrainSystem.flowerProp.batch)
@@ -324,17 +325,17 @@ func drawTerrainProps(terrainSystem: mod TerrainSystem, world: view GameWorld) {
       }
     }
   }
-  drawInstances(batch: terrainSystem.rockProp.batch)
-  drawInstances(batch: terrainSystem.bushProp.batch)
-  drawInstances(batch: terrainSystem.flowerProp.batch)
-  drawInstances(batch: terrainSystem.grassProp.batch)
-  drawInstances(batch: terrainSystem.broadTrunkProp.batch)
-  drawInstances(batch: terrainSystem.broadCrownProp.batch)
-  drawInstances(batch: terrainSystem.tallTrunkProp.batch)
-  drawInstances(batch: terrainSystem.tallCrownProp.batch)
+  drawInstances(cache: cache, resources: resources, batch: terrainSystem.rockProp.batch)
+  drawInstances(cache: cache, resources: resources, batch: terrainSystem.bushProp.batch)
+  drawInstances(cache: cache, resources: resources, batch: terrainSystem.flowerProp.batch)
+  drawInstances(cache: cache, resources: resources, batch: terrainSystem.grassProp.batch)
+  drawInstances(cache: cache, resources: resources, batch: terrainSystem.broadTrunkProp.batch)
+  drawInstances(cache: cache, resources: resources, batch: terrainSystem.broadCrownProp.batch)
+  drawInstances(cache: cache, resources: resources, batch: terrainSystem.tallTrunkProp.batch)
+  drawInstances(cache: cache, resources: resources, batch: terrainSystem.tallCrownProp.batch)
 }
 
-func drawTerrainGround(cache: mod GbufferCache, terrainSystem: view TerrainSystem, world: view GameWorld, time: copy Float) {
+func drawTerrainGround(cache: mod GbufferCache, resources: mod GpuResources, terrainSystem: view TerrainSystem, world: view GameWorld, time: copy Float) {
   loop var i: Int = 0, i < componentCount(this: world.tileMeshes), ++i {
     let entity: EntityId = componentEntityAt(this: world.tileMeshes, i: i)
     let tile: TileMesh = componentDataAt(this: world.tileMeshes, i: i)
@@ -343,7 +344,7 @@ func drawTerrainGround(cache: mod GbufferCache, terrainSystem: view TerrainSyste
       # Quat Transform3D; compose it straight to a Mat4 (no Euler Vec3 detour).
       let q: Transform3D = componentGet(this: world.transforms, entity: entity)
       let model: Mat4 = transform3dToMatrix(t: q)
-      drawTerrainMesh(cache: cache, mesh: tile.meshId, model: model, prevModel: model,
+      drawTerrainMesh(cache: cache, resources: resources, mesh: tile.meshId, model: model, prevModel: model,
                       roughness: 0.96, time: time)
     }
   }

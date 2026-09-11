@@ -62,6 +62,12 @@ func main() {
     let camera: Camera3d = defaultCamera3d()
     let light: Light3d = defaultLight3d()
 
+    # Since #912 the geometry pass draws from the renderer-owned GPU manager,
+    # which cannot exist without a device: in this headless run the gbuffer tag
+    # (ECS query + per-object packing) is skipped and what is measured is the
+    # graph walk + the manager-less dispatch. The per-object packing path is
+    # zero-alloc by construction (record scratch grown once, #573) and is
+    # exercised by the visual example gates.
     # The measured entry point is the WHOLE frame, not just the draw calls:
     # renderDeferredFrame also walks the graph's derived order and reads a
     # PassDesc per pass. That read is exactly the kind of thing that

@@ -105,7 +105,7 @@ func renderShadowPass(cameraSystem: mod CameraSystem, characterSystem: mod Chara
 # The G-buffer pass: grass compute first, then the geometry — biome-splat ground,
 # scene, instanced props, and the character's skinned parts + idle crowd — then
 # the grass draw, all into one G-buffer pass.
-func renderGbufferPass(cache: mod GbufferCache, cameraSystem: mod CameraSystem, characterSystem: mod CharacterSystem, splashes: mod ParticleSystem, terrainSystem: mod TerrainSystem, world: mod GameWorld, aspect: copy Float, palette: view List(Float), t: copy Float, deltaTime: copy Float, profiler: mod Profiler, grassCompute: mod GrassCompute, resources: mod GpuResources) {
+func renderGbufferPass(cache: mod GbufferCache, rendererResources: mod GpuResources, cameraSystem: mod CameraSystem, characterSystem: mod CharacterSystem, splashes: mod ParticleSystem, terrainSystem: mod TerrainSystem, world: mod GameWorld, aspect: copy Float, palette: view List(Float), t: copy Float, deltaTime: copy Float, profiler: mod Profiler, grassCompute: mod GrassCompute, resources: mod GpuResources) {
   var grassToonGen: Int = 0
   if characterSystem.toon { grassToonGen = 1 }
   let grassView: GrassViewSettings = GrassConfig.grassThirdPersonSettings(groundColor: walkerGroundColor())
@@ -119,9 +119,11 @@ func renderGbufferPass(cache: mod GbufferCache, cameraSystem: mod CameraSystem, 
                 fwdZ: cameraSystem.camera.target.z - cameraSystem.camera.position.z,
                 settings: grassView)
   grassDiagTick(grass: grassCompute, resources: resources, profiler: profiler)
-  Gbuffer.beginPass(cache: cache, camera: cameraSystem.camera, light: cameraSystem.light, aspect: aspect)
-  drawTerrainGround(cache: cache, terrainSystem: terrainSystem, world: world, time: t)
-  drawTerrainProps(terrainSystem: terrainSystem, world: world)
+  # #912: the geometry pass's pipelines/binds live in the RENDERER's manager
+  # (rendererResources); the grass compute objects stay in the App's (resources).
+  Gbuffer.beginPass(cache: cache, resources: rendererResources, camera: cameraSystem.camera, light: cameraSystem.light, aspect: aspect)
+  drawTerrainGround(cache: cache, resources: rendererResources, terrainSystem: terrainSystem, world: world, time: t)
+  drawTerrainProps(cache: cache, resources: rendererResources, terrainSystem: terrainSystem, world: world)
   # Palettes (hero slot 0 + one per crowd member) were uploaded in renderApp.
   let jc: Int = jointCount(sk: characterSystem.skeleton)
   uploadPalette(rows: palette, jointCount: jc)
@@ -135,7 +137,7 @@ func renderGbufferPass(cache: mod GbufferCache, cameraSystem: mod CameraSystem, 
       emission: Vec3.create(x: 0.0, y: 0.0, z: 0.0),
       toon: characterSystem.toon
     }
-    Gbuffer.drawSkinnedInstance(cache: cache, mesh: handle, model: characterSystem.model,
+    Gbuffer.drawSkinnedInstance(cache: cache, resources: rendererResources, mesh: handle, model: characterSystem.model,
                                 prevModel: characterSystem.prevModel, material: mat)
     setInstanceBatchMesh(batch: characterSystem.crowdBatch, mesh: handle)
     resetInstanceBatch(batch: characterSystem.crowdBatch)
@@ -150,7 +152,7 @@ func renderGbufferPass(cache: mod GbufferCache, cameraSystem: mod CameraSystem, 
                            material: mat, paletteBase: characterPaletteBase(slot: cloneDraw + 1, jointCount: jc))
       }
     }
-    drawSkinnedInstances(cache: cache, batch: characterSystem.crowdBatch)
+    drawSkinnedInstances(cache: cache, resources: rendererResources, batch: characterSystem.crowdBatch)
   }
   grassDraw(grass: grassCompute, resources: resources)
   # Water splashes for anything wading this frame (#84): advance + emit here; the
@@ -227,7 +229,12 @@ func renderApp(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSys
     # defer to renderDeferredPass (or-patterns, #622, will merge them into one arm).
     match tag {
       case RenderTag.shadow { renderShadowPass(cameraSystem: cameraSystem, characterSystem: characterSystem, inputSystem: inputSystem, renderSystem: renderSystem, terrainSystem: terrainSystem, world: world, aspect: aspect, palette: palette) }
-      case RenderTag.gbuffer { renderGbufferPass(cache: renderSystem.renderer.passes.gbuffer, cameraSystem: cameraSystem, characterSystem: characterSystem, splashes: splashes, terrainSystem: terrainSystem, world: world, aspect: aspect, palette: palette, t: t, deltaTime: deltaTime, profiler: profiler, grassCompute: grassCompute, resources: resources) }
+      case RenderTag.gbuffer {
+        ensureRendererResources(renderer: renderSystem.renderer)
+        if let rendererResources: mod GpuResources => renderSystem.renderer.gpuResources {
+          renderGbufferPass(cache: renderSystem.renderer.passes.gbuffer, rendererResources: rendererResources, cameraSystem: cameraSystem, characterSystem: characterSystem, splashes: splashes, terrainSystem: terrainSystem, world: world, aspect: aspect, palette: palette, t: t, deltaTime: deltaTime, profiler: profiler, grassCompute: grassCompute, resources: resources)
+        }
+      }
       case RenderTag.ssao {
         renderDeferredPassWorld(renderer: renderSystem.renderer, tag: tag, world: emptyWorld,
                                 camera: cameraSystem.camera, light: cameraSystem.light, aspect: aspect)

@@ -1,0 +1,126 @@
+# GbufferRecord — the G-buffer's DrawU wire format and the transforms that
+# feed it (#912: split out of Gbuffer.rae, which sits at the 1000-line cap).
+# Pure value code: model matrices, the packed instance record, the material
+# encodes. No GPU objects, no C — every draw path (static, skinned, instanced,
+# terrain, transparent, grass) packs through here.
+open Scene3d
+open Math3d
+
+# Model matrix for a typed transform: M = T * Rz * Ry * Rx * S, Euler XYZ
+# radians, right-handed. Same construction as the forward path's — the two
+# frames must agree about where an object IS, whatever they disagree about
+# in how it is shaded.
+func modelMatrixOf(t: view Transform3d) pub ret Mat4 {
+  let s: Mat4 = mat4ScaleXYZ(x: t.scale.x, y: t.scale.y, z: t.scale.z)
+  let rx: Mat4 = mat4RotateX(angle: t.rotation.x)
+  let ry: Mat4 = mat4RotateY(angle: t.rotation.y)
+  let rz: Mat4 = mat4RotateZ(angle: t.rotation.z)
+  let tr: Mat4 = mat4Translate(x: t.position.x, y: t.position.y, z: t.position.z)
+  let rxs: Mat4 = mat4Mul(a: rx, b: s)
+  let ryrxs: Mat4 = mat4Mul(a: ry, b: rxs)
+  let rot: Mat4 = mat4Mul(a: rz, b: ryrxs)
+  ret mat4Mul(a: tr, b: rot)
+}
+
+# ----- instanced draw: DrawU records built in Rae (grass epic #485) --------
+#
+# The instanced path hands the GPU seam ready-made DrawU records, the same way
+# `drawInstance` hands it a ready-made Mat4. The matrix and the G-buffer's
+# packed wire format both live HERE, in Rae — C's `drawRecords` only copies and
+# draws. One DrawU record is `instanceRecordFloats` floats:
+#   [0..15]  model         [16..31] prevModel
+#   [32..34] albedo rgb    [35] metallic
+#   [36] roughness  [37] emissive-or-occlusion  [38] shading mode  [39] spare
+# mirroring the C staging layout (GB_DRAW_FLOATS). Kept in one Rae place so a
+# caller never touches raw offsets.
+const instanceRecordFloats: Int = 40
+
+# Shading-mode field values, mirroring GB_MODE_* in the runtime. The 2-bit
+# field is stored as a Float in 0..1 so it survives the rgb10a2 target.
+const gbModeLit: Float = 0.0
+const gbModeEmissive: Float = 0.3333333
+const gbModeToon: Float = 1.0
+# Emissive is log-encoded into the 8-bit channel it shares with occlusion;
+# lighting decodes with the matching constant (GB_EMISSIVE_LOG_K).
+const gbEmissiveLogK: Float = 6.91
+
+# Position + yaw + two wind-driven tilt angles + uniform scale -> a model
+# matrix, as T * Rz(yaw) * Rx(tiltX) * Ry(tiltY) * S(scale). This is what the C
+# `gb_sway_model` used to compute; it is plain Mat4 composition, so it belongs
+# in Rae like every other transform the renderer builds.
+func swayModel(x: view Float, y: view Float, z: view Float, yaw: view Float,
+               tiltX: view Float, tiltY: view Float, scale: view Float) pub ret Mat4 {
+  let scaleM: Mat4 = mat4Scale(s: scale)
+  let ry: Mat4 = mat4RotateY(angle: tiltY)
+  let rx: Mat4 = mat4RotateX(angle: tiltX)
+  let rz: Mat4 = mat4RotateZ(angle: yaw)
+  let tr: Mat4 = mat4Translate(x: x, y: y, z: z)
+  let rys: Mat4 = mat4Mul(a: ry, b: scaleM)
+  let rxrys: Mat4 = mat4Mul(a: rx, b: rys)
+  let rot: Mat4 = mat4Mul(a: rz, b: rxrys)
+  ret mat4Mul(a: tr, b: rot)
+}
+
+# The shared param encode both draw paths need: emissive log-encoded into the
+# channel it shares with occlusion, plus the shading-mode flag. A non-emitter
+# stores 1.0 there — "unoccluded", the right default until AO writes something.
+func encodeEmissive(emissive: view Float, toon: view Int) ret Float {
+  if toon is 1 { ret 1.0 }
+  if emissive > 0.0 {
+    let e: Float = Math.naturalLog(x: 1.0 + emissive) / gbEmissiveLogK
+    if e > 1.0 { ret 1.0 }
+    ret e
+  }
+  ret 1.0
+}
+
+func encodeMode(emissive: view Float, toon: view Int) ret Float {
+  if toon is 1 { ret gbModeToon }
+  if emissive > 0.0 { ret gbModeEmissive }
+  ret gbModeLit
+}
+
+# Pack one fully-built DrawU record into `records` at instance `slot`. Writes
+# `instanceRecordFloats` floats; callers size the buffer by that constant and
+# never see the layout.
+# `paletteBase` is the instance's start offset into the shared skin palette
+# buffer, in vec4 units (`characterPaletteBase(slot, jointCount)`), read by the
+# skinned shader as `d.params.w`. 0 for non-skinned instances and for skinned
+# instances that use palette slot 0 — every current caller, so behaviour is
+# unchanged until a caller passes a non-zero base (#547 per-character crowd).
+func packInstanceRecord(records: mod List(Float), slot: view Int,
+                        model: view Mat4, prevModel: view Mat4,
+                        r: view Float, g: view Float, b: view Float,
+                        metallic: view Float, roughness: view Float,
+                        emissive: view Float, toon: view Int, paletteBase: view Int) pub {
+  let base: Int = slot * instanceRecordFloats
+  var i: Int = 0
+  loop i < 16 {
+    records.set(index: base + i, value: mat4Get(m: model, i: i))
+    records.set(index: base + 16 + i, value: mat4Get(m: prevModel, i: i))
+    i = i + 1
+  }
+  records.set(index: base + 32, value: r)
+  records.set(index: base + 33, value: g)
+  records.set(index: base + 34, value: b)
+  records.set(index: base + 35, value: metallic)
+  records.set(index: base + 36, value: roughness)
+  records.set(index: base + 37, value: encodeEmissive(emissive: emissive, toon: toon))
+  records.set(index: base + 38, value: encodeMode(emissive: emissive, toon: toon))
+  records.set(index: base + 39, value: paletteBase.toFloat())
+}
+
+# Write one mesh instance's surface attributes. Note what is NOT passed:
+# no light, no camera, no emission. A geometry pass that needed any of
+# those would not be a geometry pass.
+# `prevTransform` is where the instance was LAST frame; it drives the
+# G-buffer's motion channel, which TAA reads (#390). Pass the same
+# transform when an object did not move.
+# Bool -> Int at the extern boundary, where Rae's Bool has no defined
+# representation. One place to cross it, so both draw paths agree.
+func toonFlag(material: view Material3d) ret Int {
+  if material.toon {
+    ret 1
+  }
+  ret 0
+}

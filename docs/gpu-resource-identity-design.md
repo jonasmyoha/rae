@@ -604,10 +604,26 @@ of the water package is a typed ID in an App-owned `gpu/GpuResources`.
   are scalar frame-math inputs (fog goes into the C-built light uniform; the
   TAA flag gates the C jitter and the composite source) — they migrate with
   the light / frame uniform math, not with a slot store.
-- **Still parked for the next slice (#912):** Gbuffer's static / skin /
-  terrain pipelines + binds and GbufferTerrain's blend / sampler / tex view —
-  geometry-pass objects drawn from many call sites (GbufferWorld, GrassCompute,
-  GbufferSprite, 114's TerrainSystem) and checked by C's `rae_gb_skin_ready`.
+- **Geometry pass (#912, the slice this split off):** Gbuffer's static / skin
+  pipelines + binds and GbufferTerrain's pipeline / bind / repeat sampler /
+  blend are on the same renderer-owned manager (`GbufferCache` holds the IDs
+  plus `adopted` / `terrainAdopted`: the frame uniform, draws buffer and skin
+  palette — still C-stored — and the C material array's view via the new
+  `rae_gb_terrain_array_view`). `gbufferPipelineSpec` / `createGbufferPipeline`
+  replace the hand-built descriptor (3 targets, Depth32Float write/Greater,
+  back-face cull); every draw goes through `recordDrawIndexedInPass`, so each
+  draw binds its own pipeline + group and the "restore the static pipeline
+  after" dance (skin, terrain, metaballs, grass, sprites) is gone — the pass
+  opens with nothing bound. `resetTerrainPipeline` now RETIRES the old terrain
+  pipeline + bind (no per-recompose leak). C's `rae_gb_skin_ready` checks only
+  the pass + mesh slot. Callers thread `resources` (`beginPass`, `draw*`,
+  `drawInstances`, `drawSkinnedInstances`, `drawTerrainMesh`,
+  `renderSceneWorld`); the geometry tag runs inside the manager gate, so the
+  device-less zero-alloc fixture (573) no longer reaches the ECS packing loop
+  (annotated there). 114 keeps its App-owned manager for grass/water and takes
+  the renderer's (`renderer.gpuResources`, `ensureRendererResources` is public)
+  for the geometry pass. The DrawU record helpers moved to `GbufferRecord.rae`
+  to keep Gbuffer.rae under the 1000-line cap.
 - The composite sampler moved from a hand-built descriptor (lodMaxClamp 1) to
   `createSampler` (lodMaxClamp 32): both sample a single-mip target, so the
   result is identical.

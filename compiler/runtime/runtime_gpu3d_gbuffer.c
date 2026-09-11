@@ -76,10 +76,11 @@ static int             gb_target_w = 0, gb_target_h = 0;
  * sometimes, and a stale one silently samples the pre-resize image. */
 static int             gb_targets_gen = 0;
 
-static WGPURenderPipeline gb_pipeline = NULL;
+/* #912: the static / skin / terrain pipelines and bind groups are manager IDs
+ * on the Rae side (lib/Gbuffer.rae, lib/GbufferTerrain.rae); C keeps the frame
+ * uniform + draws buffer (adopted there) and the WGSL sources. */
 static WGPUBuffer         gb_frame_ubuf = NULL;
 static WGPUBuffer         gb_draw_sbuf = NULL;
-static WGPUBindGroup      gb_bind = NULL;
 static int                gb_draw_count = 0;
 /* Metaball cluster slots are PER FRAME (#392). Declared here because the
  * reset belongs beside every other per-frame counter, while the buffers
@@ -423,9 +424,6 @@ GB_EMBLEM_WGSL
  * duplicated. One buffer, one upload, three readers: two decoders of one
  * format is how a pose ends up subtly sheared in exactly one pass.
  */
-static WGPURenderPipeline gb_skin_pipeline = NULL;
-static WGPUBindGroup      gb_skin_bind = NULL;
-
 static const char* GB_SKIN_WGSL =
 "struct Frame {\n"
 "  viewProj: mat4x4<f32>,\n"
@@ -605,19 +603,14 @@ static void gb_release_targets(void) {
  * mirrors GB_WGSL's (model, prevModel, albedoMetallic, params). */
 const char* rae_gb_wgsl(void)      { return GB_WGSL; }
 const char* rae_gb_skin_wgsl(void) { return GB_SKIN_WGSL; }
-const char* rae_gb_entry_vs(void)  { return "vs"; }
-const char* rae_gb_entry_fs(void)  { return "fs"; }
 /* The grass shaders are Rae assets since #874: lib/grass_compute.wgsl (composed in
  * Rae with the biome + noise chunks) and lib/grass_render.wgsl; the grass GPU objects
  * are typed IDs in the App-owned manager, so the C slot store is gone too. */
-void rae_gb_set_pipeline(void* p)      { gb_pipeline = (WGPURenderPipeline)p; }
-void rae_gb_set_skin_pipeline(void* p) { gb_skin_pipeline = (WGPURenderPipeline)p; }
 
 /* Accessors + setters for the Rae-side buffer / bind-group creation (#503). */
 void* rae_gb_frame_ubuf(void)      { return (void*)gb_frame_ubuf; }
 int64_t rae_gb_frame_bytes(void)   { return (int64_t)GB_FRAME_BYTES; }
 int64_t rae_gb_draws_size(void)    { return (int64_t)((uint64_t)GB_MAX_DRAWS * GB_DRAW_FLOATS * sizeof(float)); }
-void rae_gb_set_static_bind(void* bind) { gb_bind = (WGPUBindGroup)bind; }
 void rae_gb_set_frame_ubuf(void* buf)   { gb_frame_ubuf = (WGPUBuffer)buf; }
 void rae_gb_set_draws_buffer(void* buf) { gb_draw_sbuf = (WGPUBuffer)buf; }
 
@@ -798,11 +791,6 @@ void rae_gb_set_frame(void* enc, void* pass) {
  * The skin bind group is still created here (lazily): it needs the pipeline's
  * layout plus the palette storage buffer, genuine resource creation that stays
  * C for now (its Rae migration is later in #503/#504). */
-void* rae_gb_skin_pipeline(void) { return (void*)gb_skin_pipeline; }
-/* The skin bind group (frame uniform + draws buffer + joint palette) is created
- * in Rae now (lib/gbuffer.rae:ensureSkinBind, #503) and stored back here. */
-void* rae_gb_skin_bind(void) { return (void*)gb_skin_bind; }
-void rae_gb_set_skin_bind(void* bind) { gb_skin_bind = (WGPUBindGroup)bind; }
 /* The joint palette storage buffer + its byte size, for the Rae-built skin bind
  * group. It comes up asynchronously with the first skinned upload, so a
  * readiness check lets Rae defer creating the bind until it exists. */
@@ -814,7 +802,8 @@ int64_t rae_gb_skin_palette_ready(void){ return g3d_skin_palette_sbuf ? 1 : 0; }
  * ensureSkinBind before this is checked. */
 int64_t rae_gb_skin_ready(int64_t mesh) {
     int slot = (int)mesh - 1;
-    if (!gb_pass || !gb_skin_pipeline || !gb_skin_bind) return 0;
+    /* #912: the skin pipeline / bind are manager objects checked on the Rae side. */
+    if (!gb_pass) return 0;
     if (slot < 0 || slot >= g3d_skin_mesh_n) return 0;
     if (!g3d_skin_vbuf[slot] || !g3d_skin_ibuf[slot]) return 0;
     return 1;
@@ -837,41 +826,15 @@ int64_t rae_gb_skin_icount(int64_t mesh){ int s=(int)mesh-1; return (s>=0 && s<g
  * C drawRecords did. The static vertex shader indexes draws[instance_index], so
  * instanceCount=N / firstInstance=base gives each instance its own record. */
 void* rae_gb_pass(void)          { return (void*)gb_pass; }
-void* rae_gb_static_pipeline(void){ return (void*)gb_pipeline; }
-/* #533 terrain-splat pipeline (a static-layout pipeline whose shader samples the
- * biome field). Created + owned from Rae; stored here for the draw. */
-static void* gb_terrain_pipeline = NULL;
-static void* gb_terrain_bind = NULL;
-/* RELEASE the previous handle before storing the new one. An app that RECOMPOSES the
- * terrain shader at runtime (e.g. a resizing island bakes its radius into the shader as
- * a const, so it rebuilds the pipeline + bind group on each change) would otherwise leak
- * one render pipeline AND one bind group per rebuild — unbounded over a long session. */
-void  rae_gb_set_terrain_pipeline(void* p) {
-    if (gb_terrain_pipeline && gb_terrain_pipeline != p) wgpuRenderPipelineRelease((WGPURenderPipeline)gb_terrain_pipeline);
-    gb_terrain_pipeline = p;
-}
-void* rae_gb_terrain_pipeline(void)        { return gb_terrain_pipeline; }
-void  rae_gb_set_terrain_bind(void* b)     {
-    if (gb_terrain_bind && gb_terrain_bind != b) wgpuBindGroupRelease((WGPUBindGroup)gb_terrain_bind);
-    gb_terrain_bind = b;
-}
-void* rae_gb_terrain_bind(void)            { return gb_terrain_bind; }
-/* #9 textured terrain: the sampled tile's view + a repeat sampler + the global
- * blend amount. Handles are created + owned from Rae (the view is borrowed from
- * the gpu2d image registry); stored here so Ptr state stays C-side like every
- * other gb_* handle. gen bumps whenever the tile changes, so Rae rebuilds the
- * bind group. blend defaults to 0 -> terrain draws untextured until an app sets
- * a tile, which keeps example 114 and any other terrain user unchanged. */
-static void* gb_terrain_tex_view = NULL;
-static void* gb_terrain_sampler  = NULL;
-static float gb_terrain_blend    = 0.0f;
+/* #533/#9/#14 textured terrain: the terrain-splat pipeline, its bind group, the
+ * repeat sampler and the blend amount are manager objects / cache fields on the
+ * Rae side since #912 (lib/GbufferTerrain.rae). C keeps the material ARRAY as an
+ * asset-upload ABI (rae_gb_terrain_array_*) and exposes its 2d-array view, which
+ * Rae adopts into the bind group; gen bumps whenever the array is (re)created so
+ * Rae rebuilds the bind group. */
+static WGPUTextureView gb_terrain_tex_view = NULL;
 static int64_t gb_terrain_tex_gen = 0;
-void  rae_gb_set_terrain_tex_view(void* v) { gb_terrain_tex_view = v; }
-void* rae_gb_terrain_tex_view(void)        { return gb_terrain_tex_view; }
-void  rae_gb_set_terrain_sampler(void* s)  { gb_terrain_sampler = s; }
-void* rae_gb_terrain_sampler(void)         { return gb_terrain_sampler; }
-void  rae_gb_set_terrain_blend(double b)   { gb_terrain_blend = (float)b; }
-double rae_gb_terrain_blend(void)          { return (double)gb_terrain_blend; }
+void* rae_gb_terrain_array_view(void)      { return (void*)gb_terrain_tex_view; }
 void  rae_gb_bump_terrain_tex_gen(void)    { gb_terrain_tex_gen++; }
 int64_t rae_gb_terrain_tex_gen(void)       { return gb_terrain_tex_gen; }
 
@@ -900,7 +863,8 @@ void rae_gb_terrain_array_init(int64_t w, int64_t h, int64_t layers) {
     vd.baseMipLevel = 0; vd.mipLevelCount = 1;
     vd.baseArrayLayer = 0; vd.arrayLayerCount = (uint32_t)layers;
     vd.aspect = WGPUTextureAspect_All;
-    gb_terrain_tex_view = (void*)wgpuTextureCreateView(gb_terrain_array_tex, &vd);
+    if (gb_terrain_tex_view) { wgpuTextureViewRelease(gb_terrain_tex_view); gb_terrain_tex_view = NULL; }
+    gb_terrain_tex_view = wgpuTextureCreateView(gb_terrain_array_tex, &vd);
     gb_terrain_tex_gen++;
 }
 void rae_gb_terrain_array_write(int64_t layer, const int64_t* pixels, int64_t w, int64_t h) {
@@ -985,7 +949,6 @@ void rae_gb_sprite_array_write(int64_t layer, const int64_t* pixels, int64_t w, 
     free(rgba);
 }
 
-void* rae_gb_static_bind(void)   { return (void*)gb_bind; }
 void* rae_gb_draws_buffer(void)  { return (void*)gb_draw_sbuf; }
 int64_t rae_gb_max_draws(void)   { return (int64_t)GB_MAX_DRAWS; }
 int64_t rae_gb_draw_count(void)  { return (int64_t)gb_draw_count; }
@@ -1045,11 +1008,7 @@ void rae_ext_Gbuffer_present(void) {
 
 void rae_ext_Gbuffer_shutdown(void) {
     gb_release_targets();
-    if (gb_bind)          { wgpuBindGroupRelease(gb_bind); gb_bind = NULL; }
     if (gb_draw_sbuf)     { wgpuBufferRelease(gb_draw_sbuf); gb_draw_sbuf = NULL; }
     if (gb_frame_ubuf)    { wgpuBufferRelease(gb_frame_ubuf); gb_frame_ubuf = NULL; }
-    if (gb_pipeline)      { wgpuRenderPipelineRelease(gb_pipeline); gb_pipeline = NULL; }
-    if (gb_skin_pipeline) { wgpuRenderPipelineRelease(gb_skin_pipeline); gb_skin_pipeline = NULL; }
-    if (gb_skin_bind)     { wgpuBindGroupRelease(gb_skin_bind); gb_skin_bind = NULL; }
     gb_target_w = 0; gb_target_h = 0;
 }
