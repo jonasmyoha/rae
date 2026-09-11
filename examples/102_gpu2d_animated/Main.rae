@@ -20,7 +20,7 @@ import SdfText
 import Math
 open ui/WindowGeometry
 open ui/DebugOverlay
-open Gpu2dBox
+open Gpu2dCanvas
 
 # --- Design canvas -----------------------------------------------------------
 
@@ -369,7 +369,7 @@ func heroBand(x: view Float, y: view Float, w: view Float, h: view Float, t: vie
 
 func main() ret Int {
   Gpu2d.initWindow(width: 1280, height: 800, title: "Rae 2D — animated vector shapes")
-  var boxPass: Gpu2dBoxPass = createGpu2dBoxPass()   # #907: the app-owned 2D box pass
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()   # #907: the app-owned 2D canvas (box + image passes)
   # Remember the window's size and position across restarts (the name carries
   # this app's id, since the dir ".rae" is shared with every other app).
   var windowGeom: WindowGeometry = createWindowGeometry(dir: ".rae", name: "window.gpu2dAnimated.geometry")
@@ -427,11 +427,11 @@ func main() ret Int {
     }
     drawDebugOverlay(debugOverlay: dbg, font: font, didRealWork: true)
 
-    Gpu2d.endFrame(box: boxPass)
+    Gpu2d.endFrame(canvas: canvas)
     updateWindowGeometry(g: windowGeom, now: now, resized: resized)
   }
 
-  boxPassShutdown(box: boxPass)
+  canvasShutdown(canvas: canvas)
   Gpu2d.closeWindow()
   ret 0
 }

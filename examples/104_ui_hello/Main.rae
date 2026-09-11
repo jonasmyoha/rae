@@ -26,7 +26,7 @@ open ui/renderSystem/RenderSystem
 open ui/SceneFile
 open ui/SceneLoader
 open ui/Transform
-open Gpu2dBox
+open Gpu2dCanvas
 
 const designW: Int = 440
 const designH: Int = 880
@@ -55,7 +55,7 @@ func applyActions(value: view Int, input: view UiInput) ret Int {
 
 func main() ret Int {
   Gpu2d.initWindow(width: designW, height: designH, title: "Rae UI — Hello")
-  var boxPass: Gpu2dBoxPass = createGpu2dBoxPass()   # #907: the app-owned 2D box pass
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()   # #907: the app-owned 2D canvas (box + image passes)
 
   let base: String = "examples/104_ui_hello/assets/"
   let gpuUi: Gpu2dUi = loadUiAssets(dir: base, textFontName: "Roboto-Regular",
@@ -106,8 +106,8 @@ func main() ret Int {
     # does not promise to keep a frame that was presented once.
     if hadEvents or changed or wokeUp or renderedOnce is false {
       Gpu2d.beginFrame(r: 0.03, g: 0.05, b: 0.08, a: 1.0)
-      renderSystemGpu2d(world: world, res: gpuUi, box: boxPass)
-      Gpu2d.endFrame(box: boxPass)
+      renderSystemGpu2d(world: world, res: gpuUi, canvas: canvas)
+      Gpu2d.endFrame(canvas: canvas)
       renderedOnce = true
       wokeUp = false
     } else {
@@ -120,7 +120,7 @@ func main() ret Int {
     }
   }
 
-  boxPassShutdown(box: boxPass)
+  canvasShutdown(canvas: canvas)
   Gpu2d.closeWindow()
   ret 0
 }

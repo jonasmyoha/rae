@@ -212,3 +212,25 @@ per-entity flush. The batch accumulation itself stays C because the public
 draw API (`Gpu2d.drawRect(...)`) is stateless; moving it is the owner-threading
 decision recorded as a follow-up.
 
+**#908 update (2D renderer slice 2 — the image pass):** `Gpu2dBoxPass` became
+`Gpu2dCanvas` (`lib/Gpu2dCanvas.rae`), the ONE app-owned owner of the 2D
+passes on one manager. Images: C keeps CPU decode only (`rae_g2d_decode_image`
+/ `decoded_width` / `decoded_height` / `decode_free` over stb_image, plus the
+device-free `decodeImageProbe`); the RGBA8 textures + views (`createTexture`,
+new `writeTextureFromPtr` / `writeTexture` uploads), the image pipeline
+(`lib/gpu2d_image.wgsl`), the linear clamp sampler, the per-draw 64-byte
+uniform pool and the per-draw-slot bind groups (cached by image handle, as the
+C flush cached them) are manager IDs; the key->handle registry and the draw
+queue are Rae lists on the canvas (`ImageRegistry.rae` keeps its load / retry /
+cache policy over `canvas`). Draws go into the C frame pass after the boxes
+and before text, one `recordDrawInPass` per queued image with its scissor. C
+lost the image texture table, `rae_g2d_init_img_pipeline`, `queue_image`,
+`flush_images`, the per-slot bind cache and every `rae_ext_Gpu2d_*Image*` entry
+point (`loadImage`, `loadImageKey`, `registerImageRgba`, `registerImageKeyHandle`,
+`hasImageKey`, `drawImage`, `drawImageKey`, `drawImageKeyScaled`, `imageView`);
+`Gpu2d.loadImage / loadImageKey / registerImageRgba / hasImageKey / drawImage*`
+now take `canvas`. The manager's dependency arena is compacted by relocation
+(`compactDependencies` copies the slices still owned by live / pending groups,
+submissions and readbacks) so the per-frame box groups and the cached image
+groups coexist without growth.
+

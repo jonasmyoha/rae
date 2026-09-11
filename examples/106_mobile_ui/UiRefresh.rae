@@ -1,4 +1,5 @@
 open ui/Ecs
+open GpuAssetRegistry
 
 # The per-frame UI observer state. The playback slice has been carved out
 # into its own per-feature `UiPlaybackSystem` (#267, §5.2); `historyLen` and
@@ -32,12 +33,13 @@ func refreshMountedUi(
   visible: view Screen
   cache: mod UiRefreshCache
   viewport: view Viewport
+  reg: view TextureRegistry
 ) pub ret UiRefreshResult {
   let oldHistory: Int = cache.historyLen
   let oldSheet: Int = cache.sheetEpoch
 
   cache.historyLen = refreshHistoryViewsIfNeeded(world: world, scenes: scenes, state: state, visible: visible, cachedLen: cache.historyLen, viewport: viewport)
-  let playbackChanged: Bool = uiPlaybackObserve(this: cache.uiPlayback, world: world, playback: playback)
+  let playbackChanged: Bool = uiPlaybackObserve(this: cache.uiPlayback, world: world, playback: playback, reg: reg)
   cache.sheetEpoch = refreshBottomSheetIfNeeded(world: world, sheet: state.bottomSheet, cachedEpoch: cache.sheetEpoch)
 
   ret UiRefreshResult {
