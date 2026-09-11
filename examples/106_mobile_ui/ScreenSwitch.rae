@@ -50,6 +50,7 @@ func handleScreenSwitch(
   prevPendingSrc: view Bool
   prevPendingHeroTargetPageId: view String
   viewport: view Viewport
+  reg: view TextureRegistry
 ) ret ScreenSwitchResult {
   let result: ScreenSwitchResult = {
     newScreen: currentScreen
@@ -78,7 +79,7 @@ func handleScreenSwitch(
     unmountPage(world: world, pageId: albumPageId)
     let freshAlbum: EntityId = mountAlbumPage(world: world, scenes: scenes, state: appState, playback: playback, scrollY: 0.0, viewport: viewport)
     unmountPage(world: world, pageId: playerPageId)
-    let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState, viewport: viewport)
+    let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState, reg: reg, viewport: viewport)
     rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
     # Dock stays mounted; its MiniThumb cover now follows the nowPlaying
     # instance revision via the UiPlaybackSystem observer (#268) rather
@@ -102,7 +103,7 @@ func handleScreenSwitch(
       unmountPage(world: world, pageId: albumPageId)
       let freshAlbum: EntityId = mountAlbumPage(world: world, scenes: scenes, state: appState, playback: playback, scrollY: preservedScrollY, viewport: viewport)
       unmountPage(world: world, pageId: playerPageId)
-      let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState, viewport: viewport)
+      let freshNP: EntityId = mountNowPlayingPage(world: world, scenes: scenes, playback: playback, state: appState, reg: reg, viewport: viewport)
       rebindHero(world: world, fromKey: "albumCover", toKey: appState.currentAlbumStem)
       setPageActive(world: world, pageId: albumPageId, active: false)
       setPageActive(world: world, pageId: playerPageId, active: false)

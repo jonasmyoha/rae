@@ -73,22 +73,41 @@ func liveSubmissionCount(resources: view GpuResources) ret Int {
 
 # ----- dependency arena ------------------------------------------------
 
-# Empties the append-only dependency arena when nothing indexes it any more:
-# no bind group, submission or readback is live or retired-and-pending. A
-# consumer that builds bind groups per frame (the 2D box pass, #907) calls
-# this at its frame end so the arena does not grow without bound; a manager
-# with long-lived groups simply never qualifies. Returns whether it compacted.
+# Compacts the append-only dependency arena: every slice still indexed by a
+# live or retired-and-pending bind group, submission or readback is copied into
+# a fresh arena and its owner re-pointed; everything else (the slices of freed
+# groups) is dropped. Pins are counts on the slots, so copying the triples
+# changes nothing about liveness. A consumer that builds bind groups per frame
+# (the 2D canvas, #907/#908) calls this at its frame end so the arena stays
+# bounded by what is actually referenced. Returns whether anything was dropped.
 func compactDependencies(resources: mod GpuResources) ret Bool {
-  if liveCount(table: resources.bindGroups, capacity: resources.capacity) > 0 { ret false }
-  if pendingCount(table: resources.bindGroups, capacity: resources.capacity) > 0 { ret false }
-  if liveCount(table: resources.submissions, capacity: resources.capacity) > 0 { ret false }
-  if pendingCount(table: resources.submissions, capacity: resources.capacity) > 0 { ret false }
-  if liveCount(table: resources.readbacks, capacity: resources.capacity) > 0 { ret false }
-  if pendingCount(table: resources.readbacks, capacity: resources.capacity) > 0 { ret false }
-  resources.depKinds.clear()
-  resources.depSlots.clear()
-  resources.depGenerations.clear()
-  ret true
+  let before: Int = resources.depKinds.length
+  let kinds: List(Int) = List.create(Int, cap: before)
+  let slots: List(Int) = List.create(Int, cap: before)
+  let generations: List(Int) = List.create(Int, cap: before)
+  relocateSlices(resources: resources, table: resources.bindGroups, kinds: kinds, slots: slots, generations: generations)
+  relocateSlices(resources: resources, table: resources.submissions, kinds: kinds, slots: slots, generations: generations)
+  relocateSlices(resources: resources, table: resources.readbacks, kinds: kinds, slots: slots, generations: generations)
+  let after: Int = kinds.length
+  resources.depKinds = own kinds
+  resources.depSlots = own slots
+  resources.depGenerations = own generations
+  ret after < before
+}
+
+func relocateSlices(resources: view GpuResources, table: mod SlotTable, kinds: mod List(Int), slots: mod List(Int), generations: mod List(Int)) {
+  loop var slot: Int = 0, slot < resources.capacity, ++slot {
+    if intAt(list: table.live, index: slot) is 1 or intAt(list: table.retired, index: slot) is 1 {
+      let start: Int = intAt(list: table.depStart, index: slot)
+      let count: Int = intAt(list: table.depCount, index: slot)
+      table.depStart.set(index: slot, value: kinds.length)
+      loop var i: Int = 0, i < count, ++i {
+        kinds.add(value: intAt(list: resources.depKinds, index: start + i))
+        slots.add(value: intAt(list: resources.depSlots, index: start + i))
+        generations.add(value: intAt(list: resources.depGenerations, index: start + i))
+      }
+    }
+  }
 }
 
 func depIsLive(resources: view GpuResources, kind: view Int, slot: view Int, generation: view Int) ret Bool {

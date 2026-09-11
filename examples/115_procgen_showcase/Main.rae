@@ -19,11 +19,11 @@ open Mesh3d
 open procgen/Rock
 open procgen/Tree
 open procgen/Texture
-open Gpu2dBox
+open Gpu2dCanvas
 
 # The five biome-material albedo textures, generated in Rae and registered as
 # gpu2d images so they can be drawn as swatches over the 3D scene.
-func registerTextures() {
+func registerTextures(canvas: mod Gpu2dCanvas) {
   let names: List(String) = List.create(String, cap: 5)
   names.add(value: "grass")
   names.add(value: "sand")
@@ -33,13 +33,13 @@ func registerTextures() {
   loop var k: Int = 0, k < 5, ++k {
     let pixels: List(Int) = generateAlbedo(kind: k, resolution: 128, tiling: 4.0, seed: 700 + k * 17)
     if let name: String = names.copyAt(index: k) {
-      let handle: Int = Gpu2d.registerImageRgba(key: "tex.{name}", pixels: pixels.data, w: 128, h: 128)
+      let handle: Int = Gpu2d.registerImageRgba(canvas: canvas, key: "tex.{name}", pixels: pixels.data, w: 128, h: 128)
     }
   }
 }
 
 # Draw the five texture swatches in a row along the bottom.
-func drawTextureSwatches() {
+func drawTextureSwatches(canvas: mod Gpu2dCanvas) {
   let names: List(String) = List.create(String, cap: 5)
   names.add(value: "grass")
   names.add(value: "sand")
@@ -49,7 +49,7 @@ func drawTextureSwatches() {
   loop var k: Int = 0, k < 5, ++k {
     if let name: String = names.copyAt(index: k) {
       let sx: Float = 40.0 + k.toFloat() * 168.0
-      Gpu2d.drawImageKey(key: "tex.{name}", x: sx, y: 630.0, w: 150.0, h: 150.0, radius: 10.0, tint: 0xFFFFFFFF)
+      Gpu2d.drawImageKey(canvas: canvas, key: "tex.{name}", x: sx, y: 630.0, w: 150.0, h: 150.0, radius: 10.0, tint: 0xFFFFFFFF)
     }
   }
 }
@@ -97,7 +97,7 @@ func buildScene(rocks: view List(Int), treeTrunks: view List(Int), treeCanopies:
 
 func main() ret Int {
   Gpu2d.initWindow(width: 1280, height: 800, title: "Rae — procedural rocks & trees")
-  var boxPass: Gpu2dBoxPass = createGpu2dBoxPass()   # #907: the app-owned 2D box pass
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()   # #907: the app-owned 2D canvas (box + image passes)
 
   # Five rock variants: vary seed, slice count, irregularity.
   var rocks: List(Int) = List.create(Int, cap: 5)
@@ -122,7 +122,7 @@ func main() ret Int {
 
   # Five procedural material textures (grass/sand/rock/mud/water), generated in
   # Rae and registered as gpu2d images (shown as swatches along the bottom).
-  registerTextures()
+  registerTextures(canvas: canvas)
 
   var sceneWorld: World3d = buildScene(rocks: rocks, treeTrunks: trunks, treeCanopies: canopies, ground: ground)
 
@@ -171,10 +171,10 @@ func main() ret Int {
         let tag: Int = deferredTagAt(renderer: renderer, i: oi)
         if tag is RenderTag.uiOverlay {
           Gpu2d.beginFrameLoad()
-          drawTextureSwatches()
+          drawTextureSwatches(canvas: canvas)
         } else {
           if tag is RenderTag.present {
-            Gpu2d.endFrame(box: boxPass)
+            Gpu2d.endFrame(canvas: canvas)
           } else {
             renderDeferredPassWorld(renderer: renderer, tag: tag, world: sceneWorld, camera: camera, light: light, aspect: aspect)
           }
@@ -185,7 +185,7 @@ func main() ret Int {
   }
   shutdownDeferredRenderer(renderer: renderer)   # #904: the renderer-owned GPU manager, before the C shutdown
   shutdown()
-  boxPassShutdown(box: boxPass)
+  canvasShutdown(canvas: canvas)
   Gpu2d.closeWindow()
   ret 0
 }

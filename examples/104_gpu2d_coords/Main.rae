@@ -18,11 +18,11 @@
 import Gpu2d
 import Gpu2dText
 import SdfText
-open Gpu2dBox
+open Gpu2dCanvas
 
 func main() ret Int {
     Gpu2d.initWindow(width: 1000, height: 640, title: "Rae 2D — coordinate system")
-    var boxPass: Gpu2dBoxPass = createGpu2dBoxPass()   # #907: the app-owned 2D box pass
+    var canvas: Gpu2dCanvas = createGpu2dCanvas()   # #907: the app-owned 2D canvas (box + image passes)
     let dir: String = "examples/104_gpu2d_coords/"
     let font: SdfFont = SdfText.loadSdfFont(
         jsonPath: "{dir}assets/Roboto-Regular.mtsdf.json",
@@ -88,10 +88,10 @@ func main() ret Int {
         Gpu2dText.drawText(font: font, text: "centred card stays centred at any size",
                             x: 388.0, y: 370.0, sizePx: 20.0, color: 0xFF9FC0FF)
 
-        Gpu2d.endFrame(box: boxPass)
+        Gpu2d.endFrame(canvas: canvas)
     }
 
-    boxPassShutdown(box: boxPass)
+    canvasShutdown(canvas: canvas)
     Gpu2d.closeWindow()
     ret 0
 }
