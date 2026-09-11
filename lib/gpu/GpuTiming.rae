@@ -1,0 +1,253 @@
+# gpu/GpuTiming — nonblocking per-pass GPU timing over gpu/GpuResources /
+# gpu/GpuLifetime (#871). Timestamps are written at compute-pass boundaries
+# (Metal only supports pass-boundary timestamps), resolved into a manager
+# QueryResolve buffer, copied to a MapRead buffer and read back through a
+# manager-owned ReadbackId — so collection NEVER blocks on the GPU. The legacy
+# lib/GpuTiming.rae keeps the blocking webgpuMapRead diagnostic for captures;
+# this is the nonblocking production path and does no adaptive scheduling.
+#
+# Unavailable-timestamps fallback: when the adapter lacks timestamp queries,
+# createGpuTiming still returns a valid GpuTiming with `available` false. Every
+# call is then an inert no-op — timedPass returns -1, timingWrites returns null
+# (a pass with null timestampWrites simply runs untimed), sampling returns none,
+# and lastTotalUs returns -1, the documented "timing unavailable" sentinel.
+open webgpu/Context
+open webgpu/Webgpu
+open webgpu/WebgpuEnums
+open webgpu/WebgpuTypes
+open gpu/GpuResources
+open gpu/GpuLifetime
+
+# Owns the raw timestamp query set (released by drop); the resolve and readback
+# buffers are manager BufferIds (the manager owns and releases them). `writes`
+# is a single reusable WGPUPassTimestampWrites the current pass points at.
+type GpuTiming {
+  available: Bool
+  managerTag: Int
+  maxPasses: Int
+  querySet: Ptr
+  resolve: BufferId
+  readback: BufferId
+  periodNs: Float
+  writes: List(WGPUPassTimestampWrites)
+  passCount: Int
+  sampling: Bool
+  current: ReadbackId
+  lastTotalUs: Int
+}
+
+# 8 bytes per timestamp, 2 timestamps per pass.
+func timingBytes(maxPasses: view Int) ret Int {
+  ret maxPasses * 2 * 8
+}
+
+# Returns an inert, unavailable GpuTiming (no device resources) — the fallback.
+func unavailableTiming(resources: view GpuResources) ret GpuTiming {
+  unsafe {
+    ret GpuTiming {
+      available: false
+      managerTag: resources.managerTag
+      maxPasses: 0
+      querySet: webgpuNull()
+      resolve: { managerTag: 0, slot: 0 - 1, generation: 0 }
+      readback: { managerTag: 0, slot: 0 - 1, generation: 0 }
+      periodNs: 1.0
+      writes: List.create(WGPUPassTimestampWrites, cap: 1)
+      passCount: 0
+      sampling: false
+      current: { managerTag: 0, slot: 0 - 1, generation: 0 }
+      lastTotalUs: 0 - 1
+    }
+  }
+}
+
+# Builds a timing over `resources`. When timestamps are unavailable, or the
+# resolve/readback buffers cannot be allocated, returns the inert fallback so
+# callers need no separate unavailable path.
+func createGpuTiming(resources: mod GpuResources, maxPasses: view Int) ret GpuTiming {
+  if maxPasses < 1 { ret unavailableTiming(resources: resources) }
+  var haveTimestamps: Bool = false
+  unsafe { haveTimestamps = webgpuHaveTimestamp() is 1 }
+  if haveTimestamps is false { ret unavailableTiming(resources: resources) }
+  let bytes: Int = timingBytes(maxPasses: maxPasses)
+  if let resolve: BufferId = createBuffer(resources: resources, size: bytes, usage: WGPUBufferUsage_QueryResolve + WGPUBufferUsage_CopySrc) {
+    if let readback: BufferId = createBuffer(resources: resources, size: bytes, usage: WGPUBufferUsage_CopyDst + WGPUBufferUsage_MapRead) {
+      var writes: List(WGPUPassTimestampWrites) = List.create(WGPUPassTimestampWrites, cap: 1)
+      unsafe {
+        let descriptor: WGPUQuerySetDescriptor = { type_: WGPUQueryType_Timestamp, count: (maxPasses * 2) as UInt32 }
+        let querySet: Ptr = wgpuDeviceCreateQuerySet(device: webgpuDevice(), descriptor: descriptor)
+        let period: Float = wgpuQueueGetTimestampPeriod(queue: webgpuQueue())
+        if querySet is webgpuNull() {
+          retireBuffer(resources: resources, id: resolve)
+          retireBuffer(resources: resources, id: readback)
+          ret unavailableTiming(resources: resources)
+        }
+        writes.add(value: { querySet: querySet, beginningOfPassWriteIndex: 0 as UInt32, endOfPassWriteIndex: 1 as UInt32 })
+        ret GpuTiming {
+          available: true
+          managerTag: resources.managerTag
+          maxPasses: maxPasses
+          querySet: querySet
+          resolve: resolve
+          readback: readback
+          periodNs: period
+          writes: own writes
+          passCount: 0
+          sampling: false
+          current: { managerTag: 0, slot: 0 - 1, generation: 0 }
+          lastTotalUs: 0 - 1
+        }
+      }
+    }
+    retireBuffer(resources: resources, id: resolve)
+  }
+  ret unavailableTiming(resources: resources)
+}
+
+func drop(this: mod GpuTiming) {
+  unsafe {
+    if this.querySet is not webgpuNull() {
+      wgpuQuerySetRelease(querySet: this.querySet)
+      this.querySet = webgpuNull()
+    }
+  }
+}
+
+func timingAvailable(timing: view GpuTiming) ret Bool {
+  ret timing.available
+}
+
+# Resets the per-frame pass list. Call once before recording a frame's passes.
+func beginTimingFrame(timing: mod GpuTiming) {
+  timing.passCount = 0
+}
+
+# Claims a pass slot and points the shared timestampWrites at its two query
+# indices. Returns the pass index, or -1 when unavailable or the budget is full.
+func timedPass(timing: mod GpuTiming) ret Int {
+  if timing.available is false { ret 0 - 1 }
+  let index: Int = timing.passCount
+  if index >= timing.maxPasses { ret 0 - 1 }
+  unsafe {
+    timing.writes.set(index: 0, value: {
+      querySet: timing.querySet
+      beginningOfPassWriteIndex: (index * 2) as UInt32
+      endOfPassWriteIndex: (index * 2 + 1) as UInt32
+    })
+  }
+  timing.passCount = index + 1
+  ret index
+}
+
+# The Ptr to hand to a compute pass descriptor's `timestampWrites` (via
+# recordComputeTimed); null when unavailable, which means "untimed pass".
+func timingWrites(timing: view GpuTiming) ret Ptr {
+  if timing.available is false { unsafe { ret webgpuNull() } }
+  ret timing.writes.data
+}
+
+# Records, on `recording`, a resolve of every claimed pass pair into the resolve
+# buffer and a copy of it into the readback buffer. Call after the timed passes
+# and before submit. A no-op (true) when unavailable or nothing was timed.
+func recordTimingResolve(timing: view GpuTiming, recording: mod Recording, resources: view GpuResources) ret Bool {
+  if timing.available is false or timing.passCount is 0 { ret true }
+  let bytes: Int = timing.passCount * 2 * 8
+  var resolved: Bool = false
+  unsafe { resolved = recordResolveTimestamps(recording: recording, resources: resources, querySet: timing.querySet, firstQuery: 0, queryCount: timing.passCount * 2, into: timing.resolve, intoOffset: 0) }
+  if resolved is false { ret false }
+  ret recordCopyBuffer(recording: recording, resources: resources, source: timing.resolve, sourceOffset: 0, destination: timing.readback, destinationOffset: 0, size: bytes)
+}
+
+# Starts a nonblocking readback of the resolved timestamps. Call after the
+# submission that ran recordTimingResolve has completed. false when unavailable,
+# nothing was timed, a sample is already in flight, or the readback could not
+# start (slots busy — retry next frame).
+func startTimingSample(timing: mod GpuTiming, resources: mod GpuResources) ret Bool {
+  if timing.available is false or timing.passCount is 0 or timing.sampling { ret false }
+  let bytes: Int = timing.passCount * 2 * 8
+  if let id: ReadbackId = startReadback(resources: resources, buffer: timing.readback, offset: 0, size: bytes) {
+    timing.current = id
+    timing.sampling = true
+    ret true
+  }
+  ret false
+}
+
+func timingSampleInFlight(timing: view GpuTiming) ret Bool {
+  ret timing.sampling
+}
+
+# Nonblocking. When the in-flight sample has completed, reads the timestamps,
+# fills `out` with per-pass microseconds, sets lastTotalUs and retires the
+# readback, returning true. Returns false while pending / when idle. A failed
+# readback is retired and reported false (lastTotalUs stays -1).
+func collectTiming(timing: mod GpuTiming, resources: mod GpuResources, out: mod List(Int)) ret Bool {
+  if timing.available is false or timing.sampling is false { ret false }
+  let status: Int = pollReadback(resources: resources, id: timing.current)
+  if status is 0 { ret false }
+  if status is not 1 {
+    retireReadback(resources: resources, id: timing.current)
+    timing.sampling = false
+    ret false
+  }
+  let count: Int = timing.passCount
+  let bytes: List(UInt8) = List.create(UInt8, cap: count * 16)
+  var b: Int = 0
+  loop b < count * 16 {
+    bytes.add(value: 0 as UInt8)
+    b = b + 1
+  }
+  var copied: Bool = false
+  copied = copyReadback(resources: resources, id: timing.current, destination: bytes)
+  retireReadback(resources: resources, id: timing.current)
+  timing.sampling = false
+  if copied is false { ret false }
+  out.clear()
+  var total: Int = 0
+  var pass: Int = 0
+  loop pass < count {
+    let begin: Int = readU64(bytes: bytes, offset: pass * 16)
+    let endTick: Int = readU64(bytes: bytes, offset: pass * 16 + 8)
+    var microseconds: Int = 0
+    if endTick > begin {
+      microseconds = ((endTick - begin) as Float * timing.periodNs / 1000.0).toInt()
+    }
+    out.add(value: microseconds)
+    total = total + microseconds
+    pass = pass + 1
+  }
+  timing.lastTotalUs = total
+  ret true
+}
+
+# Little-endian u64 from 8 bytes (values fit comfortably in Int for GPU ticks).
+func readU64(bytes: view List(UInt8), offset: view Int) ret Int {
+  var value: Int = 0
+  var i: Int = 7
+  loop i >= 0 {
+    if let byte: UInt8 = bytes.copyAt(index: offset + i) {
+      value = value * 256 + (byte as Int)
+    }
+    i = i - 1
+  }
+  ret value
+}
+
+# Total GPU microseconds across passes from the last collect, or -1 when timing
+# is unavailable / has not collected yet.
+func lastTotalUs(timing: view GpuTiming) ret Int {
+  ret timing.lastTotalUs
+}
+
+# Releases the timing's manager buffers; the query set is released by drop. Call
+# before the manager is dropped if the buffers should be reclaimed early.
+func shutdownTiming(timing: mod GpuTiming, resources: mod GpuResources) {
+  if timing.available is false { ret }
+  if timing.sampling {
+    retireReadback(resources: resources, id: timing.current)
+    timing.sampling = false
+  }
+  retireBuffer(resources: resources, id: timing.readback)
+  retireBuffer(resources: resources, id: timing.resolve)
+  timing.available = false
+}
