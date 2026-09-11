@@ -8,15 +8,7 @@
 void rae_ext_Gpu2d_initWindow(int64_t w, int64_t h, rae_String t) { (void)w; (void)h; (void)t; }
 rae_Bool rae_ext_Gpu2d_pollClose(void) { return 1; }
 void rae_ext_Gpu2d_waitEvents(float timeoutSec){ (void)timeoutSec; }
-int64_t rae_ext_Gpu2d_loadImage(rae_String path) { (void)path; return 0; }
 int64_t rae_ext_Gpu2d_decodeImageProbe(rae_String path) { (void)path; return 0; }
-int64_t rae_ext_Gpu2d_loadImageKey(rae_String key, rae_String path) { (void)key; (void)path; return 0; }
-int64_t rae_ext_Gpu2d_registerImageRgba(const int64_t* pixels, int64_t w, int64_t h) { (void)pixels; (void)w; (void)h; return 0; }
-void rae_ext_Gpu2d_registerImageKeyHandle(rae_String key, int64_t handle) { (void)key; (void)handle; }
-rae_Bool rae_ext_Gpu2d_hasImageKey(rae_String key) { (void)key; return 0; }
-void rae_ext_Gpu2d_drawImageKey(rae_String key, float x, float y, float w, float h, float radius, int64_t tint){ (void)key; (void)x; (void)y; (void)w; (void)h; (void)radius; (void)tint; }
-void rae_ext_Gpu2d_drawImageKeyScaled(rae_String key, float x, float y, float w, float h, float radius, int64_t tint, int64_t scaleMode){ (void)key; (void)x; (void)y; (void)w; (void)h; (void)radius; (void)tint; (void)scaleMode; }
-void rae_ext_Gpu2d_drawImage(float x, float y, float w, float h, float radius, int64_t handle, int64_t tint){ (void)x; (void)y; (void)w; (void)h; (void)radius; (void)handle; (void)tint; }
 float rae_ext_Gpu2d_pointerX(void){ return 0.0; }
 float rae_ext_Gpu2d_pointerY(void){ return 0.0; }
 int64_t rae_ext_Gpu2d_touchCount(void) { return 0; }
@@ -62,7 +54,12 @@ int64_t rae_g2d_prim_clip_at(int64_t i) { (void)i; return 0; }
 void rae_g2d_prim_reset(void) {}
 void* rae_g2d_clip_frame_uniform(int64_t clip) { (void)clip; return (void*)0; }
 void rae_g2d_scissor(int64_t clip) { (void)clip; }
-void rae_g2d_prepare_flush(void) {}
+void rae_g2d_prepare_flush(int64_t images_pending) { (void)images_pending; }
+int64_t rae_g2d_current_clip(void) { return 0; }
+void* rae_g2d_decode_image(rae_String path) { (void)path; return (void*)0; }
+int64_t rae_g2d_decoded_width(void) { return 0; }
+int64_t rae_g2d_decoded_height(void) { return 0; }
+void rae_g2d_decode_free(void* rgba) { (void)rgba; }
 rae_Bool rae_ext_Gpu2d_lastPresentOk(void) { return 0; }
 void rae_ext_Gpu2d_flush(void) {}
 void rae_ext_Gpu2d_closeWindow(void) {}

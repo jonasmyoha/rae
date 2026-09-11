@@ -32,7 +32,7 @@ open ui/layoutSystem/LayoutSystem
 open ui/Theme
 open ui/Transform
 open ui/animationSystem/AnimationSystem
-open Gpu2dBox
+open Gpu2dCanvas
 func main() {
   let backendEnv: String = "gpu2d"
   # `RAE_UI_HEADLESS=1`: see headless.rae.
@@ -78,10 +78,9 @@ func main() {
   bootTheme.generation = 1
   applyResolvedTokens(dst: bootTheme.resolved, src: uiTheme)
   let gpuUi: Gpu2dUi = { textFont: gpuTextFont, iconFont: gpuIconFont, theme: uiTheme, activeTheme: chosenTheme }
-  var boxPass: Gpu2dBoxPass = createGpu2dBoxPass()   # #907: the app-owned 2D box pass
 
   var scenes: AlbumScenes = loadAllScenes()
-  let texReg: TextureRegistry = createTextureRegistry()
+  var texReg: TextureRegistry = createTextureRegistry()   # owns the app's Gpu2dCanvas (#907/#908)
   ensureAppCacheDirs()
   # Album catalogue (cheap json parse). Per-cover textures are NOT
   # loaded here — the interactive loop streams them in via
@@ -189,7 +188,7 @@ func main() {
   # (closeWindow / falls through to teardown). Implementations live in
   # `stress_runner.rae` and `screenshot_runner.rae` so this file only
   # owns the interactive lifecycle.
-  if runStressMode(scenes: scenes, appState: appState, gpuUi: gpuUi, box: boxPass) {
+  if runStressMode(scenes: scenes, appState: appState, gpuUi: gpuUi) {
     ret
   }
   if runScreenshotMode(scenes: scenes, appState: appState, texReg: texReg, bg: palettePageBg(theme: appState.theme.active)) is false {
@@ -727,6 +726,7 @@ func main() {
             cache: uiRefresh
             viewport: viewport
             applyOverlaySync: inputDispatch.hadActions
+            reg: texReg
           )
 
           # In-app debug UI: a true return means at least one state bit
@@ -916,7 +916,7 @@ func main() {
           let frameRender: FrameRenderResult = renderGpu2dFrame(
             world: world
             gpuUi: gpuUi
-            box: boxPass
+            canvas: texReg.canvas
             debug: debug
             logView: logView
             logW: viewport.layoutW
@@ -961,6 +961,7 @@ func main() {
             prevPendingSrc: pendingSrc
             prevPendingHeroTargetPageId: pendingHeroTargetPageId
             viewport: viewport
+            reg: texReg
           )
           currentScreen = switchResult.newScreen
           scrollTarget = switchResult.newScrollTarget
@@ -989,6 +990,5 @@ func main() {
   # dispatched action fired (and thus no in-loop save ran).
   saveAppState(path: stateFilePath, state: appState, playback: playback)
   textureUnloadAll(reg: texReg)
-  boxPassShutdown(box: boxPass)
   uiCloseWindow()
 }
