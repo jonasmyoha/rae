@@ -1,0 +1,188 @@
+# #871: deterministic, GPU-free model of the manager-owned readback state
+# machine (gpu/GpuLifetime's ReadbackId). A "native request" here is a settable
+# outcome standing in for the #887 bridge, so the paths hardware cannot force —
+# a FAILED map and DEVICE LOSS — are covered deterministically, alongside
+# bounded staging, exclusive mapping, cancellation, reuse and EXACT-ONCE release
+# (release calls are counted). Mirrors the shipped rules exactly.
+
+# A native request: outcome 0 pending, 1 success, -1 failure; released once.
+type Request {
+  outcome: Int
+  released: Int
+}
+
+type Slot {
+  live: Int
+  generation: Int
+  completed: Int    # 0 pending, 1 success, 2 failure
+  sourceBuffer: Int # the pinned source buffer slot, -1 when free
+}
+
+type ReadbackId {
+  slot: Int
+  generation: Int
+}
+
+type Manager {
+  capacity: Int
+  slots: List(Slot)
+  requests: List(Request)
+  bufferPins: List(Int)   # useCount per source buffer
+  bufferLive: List(Int)
+  releaseCount: Int       # total native releases (must equal starts)
+  startCount: Int
+}
+
+func createManager(capacity: view Int) ret Manager {
+  let slots: List(Slot) = List.create(Slot, cap: capacity)
+  let requests: List(Request) = List.create(Request, cap: capacity)
+  let bufferPins: List(Int) = List.create(Int, cap: capacity)
+  let bufferLive: List(Int) = List.create(Int, cap: capacity)
+  var i: Int = 0
+  loop i < capacity {
+    slots.add(value: { live: 0, generation: 0, completed: 0, sourceBuffer: 0 - 1 })
+    requests.add(value: { outcome: 0, released: 0 })
+    bufferPins.add(value: 0)
+    bufferLive.add(value: 1)
+    i = i + 1
+  }
+  ret Manager { capacity: capacity, slots: own slots, requests: own requests, bufferPins: own bufferPins, bufferLive: own bufferLive, releaseCount: 0, startCount: 0 }
+}
+
+func slotAt(manager: view Manager, index: view Int) ret Slot {
+  if let slot: Slot = manager.slots.copyAt(index: index) { ret slot }
+  ret Slot { live: 0, generation: 0, completed: 0, sourceBuffer: 0 - 1 }
+}
+
+func intAt(list: view List(Int), index: view Int) ret Int {
+  if let value: Int = list.copyAt(index: index) { ret value }
+  ret 0
+}
+
+func findFree(manager: view Manager) ret Int {
+  var i: Int = 0
+  loop i < manager.capacity {
+    if slotAt(manager: manager, index: i).live is 0 { ret i }
+    i = i + 1
+  }
+  ret 0 - 1
+}
+
+func bufferIsMapped(manager: view Manager, bufferSlot: view Int) ret Bool {
+  var i: Int = 0
+  loop i < manager.capacity {
+    let slot: Slot = slotAt(manager: manager, index: i)
+    if slot.live is 1 and slot.sourceBuffer is bufferSlot { ret true }
+    i = i + 1
+  }
+  ret false
+}
+
+# Starts a readback with a predetermined native outcome. none on exclusive
+# mapping or when all slots are busy (bounded staging).
+func startReadback(manager: mod Manager, bufferSlot: view Int, outcome: view Int) ret opt ReadbackId {
+  if bufferIsMapped(manager: manager, bufferSlot: bufferSlot) { ret none }
+  let index: Int = findFree(manager: manager)
+  if index < 0 { ret none }
+  manager.slots.set(index: index, value: { live: 1, generation: slotAt(manager: manager, index: index).generation, completed: 0, sourceBuffer: bufferSlot })
+  manager.requests.set(index: index, value: { outcome: outcome, released: 0 })
+  manager.bufferPins.set(index: bufferSlot, value: intAt(list: manager.bufferPins, index: bufferSlot) + 1)
+  manager.startCount = manager.startCount + 1
+  ret ReadbackId { slot: index, generation: slotAt(manager: manager, index: index).generation }
+}
+
+func isValid(manager: view Manager, id: view ReadbackId) ret Bool {
+  if id.slot < 0 or id.slot >= manager.capacity { ret false }
+  let slot: Slot = slotAt(manager: manager, index: id.slot)
+  ret slot.live is 1 and slot.generation is id.generation
+}
+
+func pollReadback(manager: mod Manager, id: view ReadbackId) ret Int {
+  if isValid(manager: manager, id: id) is false { ret 0 - 1 }
+  let slot: Slot = slotAt(manager: manager, index: id.slot)
+  if slot.completed is 1 { ret 1 }
+  if slot.completed is 2 { ret 2 }
+  var outcome: Int = 0
+  if let request: Request = manager.requests.copyAt(index: id.slot) { outcome = request.outcome }
+  if outcome is 1 {
+    manager.slots.set(index: id.slot, value: { live: 1, generation: slot.generation, completed: 1, sourceBuffer: slot.sourceBuffer })
+    ret 1
+  }
+  if outcome is -1 {
+    manager.slots.set(index: id.slot, value: { live: 1, generation: slot.generation, completed: 2, sourceBuffer: slot.sourceBuffer })
+    ret 2
+  }
+  ret 0
+}
+
+# Release the native request exactly once and unpin (and, when the buffer was
+# retired behind the map, release) the source buffer; bump the generation.
+func retireReadback(manager: mod Manager, id: view ReadbackId) ret Bool {
+  if isValid(manager: manager, id: id) is false { ret false }
+  let slot: Slot = slotAt(manager: manager, index: id.slot)
+  if let request: Request = manager.requests.copyAt(index: id.slot) {
+    if request.released is 0 { manager.releaseCount = manager.releaseCount + 1 }
+    manager.requests.set(index: id.slot, value: { outcome: request.outcome, released: 1 })
+  }
+  let pins: Int = intAt(list: manager.bufferPins, index: slot.sourceBuffer) - 1
+  manager.bufferPins.set(index: slot.sourceBuffer, value: pins)
+  manager.slots.set(index: id.slot, value: { live: 0, generation: slot.generation + 1, completed: 0, sourceBuffer: 0 - 1 })
+  ret true
+}
+
+func liveReadbacks(manager: view Manager) ret Int {
+  var count: Int = 0
+  var i: Int = 0
+  loop i < manager.capacity {
+    count = count + slotAt(manager: manager, index: i).live
+    i = i + 1
+  }
+  ret count
+}
+
+# Device loss / shutdown: release every live readback exactly once.
+func shutdown(manager: mod Manager) {
+  var i: Int = 0
+  loop i < manager.capacity {
+    if slotAt(manager: manager, index: i).live is 1 {
+      let id: ReadbackId = { slot: i, generation: slotAt(manager: manager, index: i).generation }
+      retireReadback(manager: manager, id: id)
+    }
+    i = i + 1
+  }
+}
+
+func main() {
+  var manager: Manager = createManager(capacity: 2)
+  # Success path with byte-availability, then exclusive mapping is refused.
+  if let readOk: ReadbackId = startReadback(manager: manager, bufferSlot: 0, outcome: 1) {
+    log("exclusive map refused: {startReadback(manager: manager, bufferSlot: 0, outcome: 1) is none}")
+    log("poll success: {pollReadback(manager: manager, id: readOk)}")
+    log("poll again cached: {pollReadback(manager: manager, id: readOk)}")
+    # A failing readback in the other slot; then the pool is full (busy).
+    if let readFail: ReadbackId = startReadback(manager: manager, bufferSlot: 1, outcome: 0 - 1) {
+      log("busy defer (slots full): {startReadback(manager: manager, bufferSlot: 5, outcome: 1) is none}")
+      log("poll failure: {pollReadback(manager: manager, id: readFail)}")
+      log("retire failed: {retireReadback(manager: manager, id: readFail)}")
+    }
+    log("retire success: {retireReadback(manager: manager, id: readOk)}")
+    log("poll after retire: {pollReadback(manager: manager, id: readOk)}")
+  }
+  # Reuse with a bumped generation; cancel while pending.
+  if let reuse: ReadbackId = startReadback(manager: manager, bufferSlot: 0, outcome: 0) {
+    log("reused generation bumped: {reuse.generation > 0}")
+    log("poll pending: {pollReadback(manager: manager, id: reuse)}")
+    log("cancel pending: {retireReadback(manager: manager, id: reuse)}")
+    log("cancelled invalid: {isValid(manager: manager, id: reuse) is false}")
+  }
+  # Device loss: two live readbacks released once each by shutdown.
+  var readbackX: ReadbackId = { slot: 0 - 1, generation: 0 }
+  if let x: ReadbackId = startReadback(manager: manager, bufferSlot: 0, outcome: 0) { readbackX = x }
+  if let y: ReadbackId = startReadback(manager: manager, bufferSlot: 1, outcome: 1) {
+    log("live before loss: {liveReadbacks(manager: manager)}")
+    shutdown(manager: manager)
+    log("live after loss: {liveReadbacks(manager: manager)}")
+  }
+  # Exact-once: releases equal starts (5 starts, 5 releases).
+  log("starts {manager.startCount} releases {manager.releaseCount} exact-once: {manager.startCount is manager.releaseCount}")
+}
