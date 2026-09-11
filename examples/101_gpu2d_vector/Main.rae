@@ -15,6 +15,7 @@
 import Gpu2d
 import Math
 open ui/WindowGeometry
+open Gpu2dBox
 
 # --- Design canvas -----------------------------------------------------------
 
@@ -194,6 +195,7 @@ func heroBand(x: view Float, y: view Float, w: view Float, h: view Float) {
 
 func main() ret Int {
   Gpu2d.initWindow(width: 1280, height: 800, title: "Rae 2D — vector shapes")
+  var boxPass: Gpu2dBoxPass = createGpu2dBoxPass()   # #907: the app-owned 2D box pass
   # Remember the window's size and position across restarts (the name carries
   # this app's id, since the dir ".rae" is shared with every other app).
   var windowGeom: WindowGeometry = createWindowGeometry(dir: ".rae", name: "window.gpu2dVector.geometry")
@@ -230,11 +232,12 @@ func main() ret Int {
     panelLines(x: col1, y: row1, w: colW, h: rowH)
     panelGlass(x: col2, y: row1, w: colW, h: rowH)
 
-    Gpu2d.endFrame()
+    Gpu2d.endFrame(box: boxPass)
     updateWindowGeometry(g: windowGeom, now: now, resized: resized)
     Gpu2d.waitEvents(timeoutSec: 0.2)
   }
 
+  boxPassShutdown(box: boxPass)
   Gpu2d.closeWindow()
   ret 0
 }

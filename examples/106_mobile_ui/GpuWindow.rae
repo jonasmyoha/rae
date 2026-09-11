@@ -1,5 +1,6 @@
 import Gpu2d
 import ui/Components
+open Gpu2dBox
 
 const mouseButtonLeft: Int = 0
 const mouseButtonRight: Int = 1
@@ -42,8 +43,8 @@ func uiBeginFrame(clear: view RgbaColor) pub {
     a: colorChannel(v: clear.a))
 }
 
-func uiEndFrame() pub {
-  Gpu2d.endFrame()
+func uiEndFrame(box: mod Gpu2dBoxPass) pub {
+  Gpu2d.endFrame(box: box)
 }
 
 func uiLastPresentOk() pub ret Bool {

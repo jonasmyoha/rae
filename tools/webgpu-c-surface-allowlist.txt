@@ -20,6 +20,9 @@
 # (#843's rae_gb_transparent_{pipeline,bind} / rae_gb_set_* slot stores, and the AO / composite /
 #   light / taa / pyramid / inspector parked slots, were REMOVED by #904: those objects are typed
 #   IDs in the DeferredRenderer-owned gpu/GpuResources manager; the C-owned inputs are adopted.)
+# (#907: the 2D box pass moved to Rae (lib/Gpu2dBox.rae over a manager); the C rae_g2d_* platform
+#   accessors it reads (prim_count/floats/data/clip_at/reset, viewport_uniform, clip_frame_uniform,
+#   scissor, prepare_flush) are outside this gate's rae_ext_* pattern, like rae_g2d_pass_get.)
 # (#912 removed the geometry-pass slots the same way: rae_gb_{set_,}{pipeline,skin_pipeline,static_bind,
 #   skin_bind,terrain_pipeline,terrain_bind,terrain_tex_view,terrain_sampler,terrain_blend} and
 #   rae_gb_entry_{vs,fs}; the C material array's view is read via rae_gb_terrain_array_view.)
