@@ -17,6 +17,10 @@ build:
 test:
 	@$(MAKE) -C compiler test
 
+# Visual example gates (windows + screenshots). Not part of `make test`.
+test-examples:
+	@$(MAKE) -C compiler test-examples
+
 stop:
 	@$(MAKE) -C tools/devtools-web stop
 
