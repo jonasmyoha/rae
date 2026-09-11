@@ -11,18 +11,18 @@ import Fs
 
 # Extern bindings — clean names, namespace-mangled to rae_ext_filesystem_* and
 # implemented in the RAE_HAS_SDL3 block of the runtime.
-func userFolder(kind: view Int) extern ret String
-func prefDir(org: view String, app: view String) extern ret String
-func makeDir(path: view String) extern ret Bool
-func exists(path: view String) extern ret Bool
-func today() extern ret String
+func userFolder(kind: view Int) unsafe extern ret String
+func prefDir(org: view String, app: view String) unsafe extern ret String
+func makeDir(path: view String) unsafe extern ret Bool
+func exists(path: view String) unsafe extern ret Bool
+func today() unsafe extern ret String
 
 # Platform "known" folders. Each returns "" when the platform has no such folder
 # (e.g. there is no Desktop on mobile) — callers fall back accordingly.
-func desktopDir() ret String { ret userFolder(kind: 0) }
-func picturesDir() ret String { ret userFolder(kind: 1) }
-func documentsDir() ret String { ret userFolder(kind: 2) }
-func homeDir() ret String { ret userFolder(kind: 3) }
+func desktopDir() ret String { unsafe { ret userFolder(kind: 0) } }
+func picturesDir() ret String { unsafe { ret userFolder(kind: 1) } }
+func documentsDir() ret String { unsafe { ret userFolder(kind: 2) } }
+func homeDir() ret String { unsafe { ret userFolder(kind: 3) } }
 
 # Remove trailing "/" separators except for the filesystem root.
 func trimTrailingSeparators(path: view String) ret String {
@@ -111,14 +111,20 @@ func nextIndex(dir: view String, prefix: view String) ret Int {
     var maxN: Int = 0
     var i: Int = 0
     loop i < entries.length {
-        let f: File = rae_ext_rae_buf_get(buf: entries.data, index: i)
-        if f.name.startsWith(prefix: prefix) and f.name.endsWith(suffix: ".png") {
-            let suffixLen: Int = f.name.length() - prefix.length() - 4
-            if suffixLen > 0 {
-                let raw: String = f.name.sub(start: prefix.length(), len: suffixLen)
-                let n: Int = raw.toInt()
-                if n > maxN {
-                    maxN = n
+        # `rae_ext_rae_buf_get` returns a shallow copy that ALIASES the list's
+        # storage, so `f` must stay a non-owning `let` scoped to this block —
+        # rebinding it would drop the alias and free the list's memory. The
+        # whole use of the alias is therefore the raw region.
+        unsafe {
+            let f: File = rae_ext_rae_buf_get(buf: entries.data, index: i)
+            if f.name.startsWith(prefix: prefix) and f.name.endsWith(suffix: ".png") {
+                let suffixLen: Int = f.name.length() - prefix.length() - 4
+                if suffixLen > 0 {
+                    let raw: String = f.name.sub(start: prefix.length(), len: suffixLen)
+                    let n: Int = raw.toInt()
+                    if n > maxN {
+                        maxN = n
+                    }
                 }
             }
         }
@@ -133,11 +139,15 @@ func nextIndex(dir: view String, prefix: view String) ret Int {
 func renderPath(stem: view String) ret String {
     var dir: String = desktopDir()
     if dir.length() is 0 {
-        dir = join(a: prefDir(org: "Rae", app: "render"), b: "render")
+        var pref: String = ""
+        unsafe { pref = prefDir(org: "Rae", app: "render") }
+        dir = join(a: pref, b: "render")
     }
     dir = trimTrailingSeparators(path: dir)
-    let made: Bool = makeDir(path: dir)
-    let date: String = today()
+    var made: Bool = false
+    unsafe { made = makeDir(path: dir) }
+    var date: String = ""
+    unsafe { date = today() }
     let prefix: String = "{stem}_{date}_"
     let n: Int = nextIndex(dir: dir, prefix: prefix)
     ret join(a: dir, b: "{prefix}{pad4(value: n)}.png")

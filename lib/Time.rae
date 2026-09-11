@@ -1,8 +1,8 @@
 # Time and Timer library for Rae
 
-func formatTimestamp(epochMs: Int) extern ret String
+func formatTimestamp(epochMs: Int) unsafe extern ret String
 
-func formatDate(epochMs: Int) extern ret String
+func formatDate(epochMs: Int) unsafe extern ret String
 
 type Timer {
   startTime: Int
@@ -18,7 +18,7 @@ func start(t: mod Timer) {
   if t.running {
     ret
   }
-  t.startTime = nowNs()
+  unsafe { t.startTime = nowNs() }
   t.running = true
 }
 
@@ -26,7 +26,8 @@ func stop(t: mod Timer) {
   if t.running is false {
     ret
   }
-  let now: Int = nowNs()
+  var now: Int = 0
+  unsafe { now = nowNs() }
   t.accumulated = t.accumulated + (now - t.startTime)
   t.running = false
 }
@@ -40,7 +41,8 @@ func reset(t: mod Timer) {
 func elapsedNs(t: view Timer) ret Int {
   let total: Int = t.accumulated
   if t.running {
-    let now: Int = nowNs()
+    var now: Int = 0
+    unsafe { now = nowNs() }
     ret total + (now - t.startTime)
   }
   ret total
@@ -108,7 +110,8 @@ type Duration {
 # so this module stays linkable in a headless program; both read the same
 # gettimeofday underneath, so the values are comparable with `uiNowSeconds()`.
 func now() ret Timestamp {
-  let ms: Int = nowMs()
+  var ms: Int = 0
+  unsafe { ms = nowMs() }
   let secs: Float64 = ms.toFloat() as Float64
   ret Timestamp { seconds: secs / 1000.0 }
 }

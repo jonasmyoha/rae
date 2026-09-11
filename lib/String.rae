@@ -1,24 +1,24 @@
 # String utilities for Rae
 import Char
 
-func rae_str_len(s: String) extern ret Int
+func rae_str_len(s: String) unsafe extern ret Int
 
-func rae_str_compare(a: String, b: String) extern ret Int
+func rae_str_compare(a: String, b: String) unsafe extern ret Int
 
-func rae_str_eq(a: String, b: String) extern ret Bool
+func rae_str_eq(a: String, b: String) unsafe extern ret Bool
 
-func rae_str_hash(s: String) extern ret Int
+func rae_str_hash(s: String) unsafe extern ret Int
 
-func rae_str_concat(a: String, b: String) extern ret String
+func rae_str_concat(a: String, b: String) unsafe extern ret String
 
-func rae_str_sub(s: String, start: Int, len: Int) extern ret String
+func rae_str_sub(s: String, start: Int, len: Int) unsafe extern ret String
 
-func rae_str_to_f64(s: String) extern ret Float
+func rae_str_to_f64(s: String) unsafe extern ret Float
 
-func rae_str_to_i64(s: String) extern ret Int
+func rae_str_to_i64(s: String) unsafe extern ret Int
 
-func rae_ext_rae_str_from_cstr(s: view Buffer(Any)) extern ret String
-func rae_ext_rae_str_to_cstr(s: String) extern ret Buffer(Any)
+func rae_ext_rae_str_from_cstr(s: view Buffer(Any)) unsafe extern ret String
+func rae_ext_rae_str_to_cstr(s: String) unsafe extern ret Buffer(Any)
 
 # Deep-copy a String into a fresh owned heap allocation. Use this
 # in any accessor that would otherwise return a shallow alias of
@@ -26,24 +26,28 @@ func rae_ext_rae_str_to_cstr(s: String) extern ret Buffer(Any)
 # canonical case. The result is always is_owned=1, so the caller
 # can safely store it in a binding/struct field and rely on cascade
 # drop to free it without double-freeing the source.
-func rae_ext_rae_string_copy(string: view String) extern ret String
+func rae_ext_rae_string_copy(string: view String) unsafe extern ret String
 
 func stringCopy(string: view String) ret String {
-  ret rae_ext_rae_string_copy(string: string)
+  unsafe { ret rae_ext_rae_string_copy(string: string) }
 }
 
-func fromCStr(s: view Buffer(Any)) ret String {
-    ret rae_ext_rae_str_from_cstr(s: s)
+# Adopts a raw C string pointer whose validity and NUL-termination the caller
+# must guarantee — an unchecked lifetime obligation, so the wrapper is unsafe.
+func fromCStr(s: view Buffer(Any)) unsafe ret String {
+    unsafe { ret rae_ext_rae_str_from_cstr(s: s) }
 }
 
-func toCStr(this: view String) ret Buffer(Any) {
-    ret rae_ext_rae_str_to_cstr(s: this)
+# Hands out a raw pointer aliasing this String's storage; the caller must not
+# let it outlive the String. Delegates that obligation, so it is unsafe.
+func toCStr(this: view String) unsafe ret Buffer(Any) {
+    unsafe { ret rae_ext_rae_str_to_cstr(s: this) }
 }
 
-func rae_ext_rae_str_at(s: String, index: Int) extern ret Char32
+func rae_ext_rae_str_at(s: String, index: Int) unsafe extern ret Char32
 
 func at(this: view String, index: view Int) ret Char32 {
-    ret rae_ext_rae_str_at(s: this, index: index)
+    unsafe { ret rae_ext_rae_str_at(s: this, index: index) }
 }
 
 # Stage 5: read-only String helpers take `view String` so callers
@@ -52,23 +56,23 @@ func at(this: view String, index: view Int) ret Char32 {
 # auto-derefs the view when emitting the call.
 
 func length(this: view String) ret Int {
-  ret rae_str_len(s: this)
+  unsafe { ret rae_str_len(s: this) }
 }
 
 func compare(this: view String, other: view String) ret Int {
-  ret rae_str_compare(a: this, b: other)
+  unsafe { ret rae_str_compare(a: this, b: other) }
 }
 
 func hash(this: view String) ret Int {
-  ret rae_str_hash(s: this)
+  unsafe { ret rae_str_hash(s: this) }
 }
 
 func concat(this: view String, other: view String) ret String {
-  ret rae_str_concat(a: this, b: other)
+  unsafe { ret rae_str_concat(a: this, b: other) }
 }
 
 func sub(this: view String, start: view Int, len: view Int) ret String {
-  ret rae_str_sub(s: this, start: start, len: len)
+  unsafe { ret rae_str_sub(s: this, start: start, len: len) }
 }
 
 func contains(this: view String, sub: view String) ret Bool {
@@ -281,9 +285,9 @@ func join(this: view List(String), sep: view String) ret String {
 }
 
 func toFloat(this: view String) ret Float {
-  ret rae_str_to_f64(s: this)
+  unsafe { ret rae_str_to_f64(s: this) }
 }
 
 func toInt(this: view String) ret Int {
-  ret rae_str_to_i64(s: this)
+  unsafe { ret rae_str_to_i64(s: this) }
 }
