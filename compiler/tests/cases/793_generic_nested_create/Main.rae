@@ -1,0 +1,77 @@
+# #889: a nested generic constructor must specialise each field/local from its
+# OWN declared type, not reuse the enclosing generic T. `items: List(EntityId)`
+# inside `makeBox(T)` builds a List(EntityId); `more: List(T)` builds List(T).
+open ecs/Entity
+
+type Box(T: type) {
+  items: List(EntityId)
+  more: List(T)
+}
+
+func makeBox(T: type) ret Box(T) {
+  ret Box(T) {
+    items: create(cap: 8)
+    more: create(cap: 8)
+  }
+}
+
+# One type param, several fields of DIFFERENT fixed element types plus a T field.
+type Bag(T: type) {
+  ids: List(EntityId)
+  names: List(String)
+  vals: List(T)
+}
+
+func makeBag(T: type) ret Bag(T) {
+  ret Bag(T) {
+    ids: create(cap: 2)
+    names: create(cap: 2)
+    vals: create(cap: 2)
+  }
+}
+
+# Typed locals inside a generic function, expected-type `create` form.
+func buildLocals(T: type) ret Int {
+  let ids: List(EntityId) = create(cap: 2)
+  let mine: List(T) = create(cap: 2)
+  ids.add(value: id(v: 3))
+  ret ids.length + mine.length
+}
+
+# Nested generic constructor: an Outer(T) whose field is another generic
+# instance Holder(T), each with its own fixed-type and T fields.
+type Holder(T: type) {
+  inner: List(EntityId)
+  vals: List(T)
+}
+
+type Outer(T: type) {
+  h: Holder(T)
+  tag: List(EntityId)
+}
+
+func makeOuter(T: type) ret Outer(T) {
+  ret Outer(T) {
+    h: Holder(T) { inner: create(cap: 1), vals: create(cap: 1) }
+    tag: create(cap: 1)
+  }
+}
+
+func main() {
+  let b: Box(Int) = makeBox(Int)
+  log("box items={b.items.length} more={b.more.length}")
+
+  let bag: Bag(Int) = makeBag(Int)
+  bag.ids.add(value: id(v: 5))
+  bag.names.add(value: "x")
+  bag.vals.add(value: 9)
+  log("bag ids={bag.ids.length} names={bag.names.length} vals={bag.vals.length}")
+  if let e: EntityId = bag.ids.copyAt(index: 0) { log("id0={e.index}") }
+  if let n: String = bag.names.copyAt(index: 0) { log("name0={n}") }
+  if let v: Int = bag.vals.copyAt(index: 0) { log("val0={v}") }
+
+  log("locals={buildLocals(String)}")
+
+  let o: Outer(Int) = makeOuter(Int)
+  log("outer inner={o.h.inner.length} vals={o.h.vals.length} tag={o.tag.length}")
+}
