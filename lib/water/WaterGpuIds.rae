@@ -1,0 +1,219 @@
+# water/WaterGpuIds — the named, typed manager IDs the water package owns
+# (#873). Every GPU object water creates lives in an App-owned gpu/GpuResources
+# manager and is named here by a copyable ID grouped by lifetime: the surface
+# (pipeline, uniform, bind group, samplers, the ADOPTED gbuffer frame and mesh
+# externals), the cascade maps, the FFT bake + per-frame transform, and the
+# readback cache. Copying a group copies IDs only — the manager is the single
+# cleanup owner, and the water functions retire through it explicitly
+# (waterShutdown / resetWaterFft); a copied group never releases anything.
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+
+const waterCascadeMaps: Int = 3      # 0 displacement+Jacobian, 1 normal, 2 foam
+const waterCascadeCount: Int = 3
+const fftMaxStages: Int = 10         # up to 1024^2
+const fftFields: Int = 4
+const fftMaxCascades: Int = 3
+const fftWorkTextures: Int = 6       # P, Q, R0..R3
+
+func noBufferId() ret BufferId { ret BufferId { managerTag: 0, slot: 0 - 1, generation: 0 } }
+func noTextureId() ret TextureId { ret TextureId { managerTag: 0, slot: 0 - 1, generation: 0 } }
+func noTextureViewId() ret TextureViewId { ret TextureViewId { managerTag: 0, slot: 0 - 1, generation: 0 } }
+func noSamplerId() ret SamplerId { ret SamplerId { managerTag: 0, slot: 0 - 1, generation: 0 } }
+func noPipelineId() ret PipelineId { ret PipelineId { managerTag: 0, slot: 0 - 1, generation: 0 } }
+func noBindGroupId() ret BindGroupId { ret BindGroupId { managerTag: 0, slot: 0 - 1, generation: 0 } }
+func noRenderPipelineId() ret RenderPipelineId { ret RenderPipelineId { managerTag: 0, slot: 0 - 1, generation: 0 } }
+func noExternalId() ret ExternalId { ret ExternalId { managerTag: 0, slot: 0 - 1, generation: 0 } }
+func noReadbackId() ret ReadbackId { ret ReadbackId { managerTag: 0, slot: 0 - 1, generation: 0 } }
+
+func fillBufferIds(count: view Int) ret List(BufferId) {
+  let list: List(BufferId) = List.create(BufferId, cap: count)
+  loop var i: Int = 0, i < count, ++i { list.add(value: noBufferId()) }
+  ret list
+}
+
+func fillTextureIds(count: view Int) ret List(TextureId) {
+  let list: List(TextureId) = List.create(TextureId, cap: count)
+  loop var i: Int = 0, i < count, ++i { list.add(value: noTextureId()) }
+  ret list
+}
+
+func fillTextureViewIds(count: view Int) ret List(TextureViewId) {
+  let list: List(TextureViewId) = List.create(TextureViewId, cap: count)
+  loop var i: Int = 0, i < count, ++i { list.add(value: noTextureViewId()) }
+  ret list
+}
+
+func fillBindGroupIds(count: view Int) ret List(BindGroupId) {
+  let list: List(BindGroupId) = List.create(BindGroupId, cap: count)
+  loop var i: Int = 0, i < count, ++i { list.add(value: noBindGroupId()) }
+  ret list
+}
+
+func fillReadbackIds(count: view Int) ret List(ReadbackId) {
+  let list: List(ReadbackId) = List.create(ReadbackId, cap: count)
+  loop var i: Int = 0, i < count, ++i { list.add(value: noReadbackId()) }
+  ret list
+}
+
+# ----- retire helpers: retire every valid ID in a list and blank it ---------
+
+func retireBufferIds(resources: mod GpuResources, list: mod List(BufferId)) {
+  loop var i: Int = 0, i < list.length, ++i {
+    if let id: BufferId = list.copyAt(index: i) { retireBuffer(resources: resources, id: id) }
+    list.set(index: i, value: noBufferId())
+  }
+}
+
+func retireTextureIds(resources: mod GpuResources, list: mod List(TextureId)) {
+  loop var i: Int = 0, i < list.length, ++i {
+    if let id: TextureId = list.copyAt(index: i) { retireTexture(resources: resources, id: id) }
+    list.set(index: i, value: noTextureId())
+  }
+}
+
+func retireTextureViewIds(resources: mod GpuResources, list: mod List(TextureViewId)) {
+  loop var i: Int = 0, i < list.length, ++i {
+    if let id: TextureViewId = list.copyAt(index: i) { retireTextureView(resources: resources, id: id) }
+    list.set(index: i, value: noTextureViewId())
+  }
+}
+
+func retireBindGroupIds(resources: mod GpuResources, list: mod List(BindGroupId)) {
+  loop var i: Int = 0, i < list.length, ++i {
+    if let id: BindGroupId = list.copyAt(index: i) { retireBindGroup(resources: resources, id: id) }
+    list.set(index: i, value: noBindGroupId())
+  }
+}
+
+# ----- the groups -----------------------------------------------------------
+
+# The legacy gbuffer's per-frame resources, ADOPTED (referenced, never owned):
+# re-adopted whenever the targets generation changes, released on shutdown.
+type WaterFrameExternals {
+  valid: Bool
+  frameUniform: ExternalId
+  depthView: ExternalId
+  litCopyView: ExternalId
+  litView: ExternalId
+}
+
+func noFrameExternals() ret WaterFrameExternals {
+  ret WaterFrameExternals { valid: false, frameUniform: noExternalId(), depthView: noExternalId(), litCopyView: noExternalId(), litView: noExternalId() }
+}
+
+# One gbuffer mesh's vertex/index buffers, adopted once per mesh id.
+type WaterMeshExternals {
+  valid: Bool
+  mesh: Int
+  vertex: ExternalId
+  index: ExternalId
+  indexCount: Int
+}
+
+func noMeshExternals() ret WaterMeshExternals {
+  ret WaterMeshExternals { valid: false, mesh: 0, vertex: noExternalId(), index: noExternalId(), indexCount: 0 }
+}
+
+type WaterSurfaceGpu {
+  pipeline: RenderPipelineId
+  uniform: BufferId
+  bindGroup: BindGroupId
+  litSampler: SamplerId
+  cascadeSampler: SamplerId
+  frame: WaterFrameExternals
+  meshes: List(WaterMeshExternals)
+}
+
+func createSurfaceGpu() ret WaterSurfaceGpu {
+  ret WaterSurfaceGpu {
+    pipeline: noRenderPipelineId(), uniform: noBufferId(), bindGroup: noBindGroupId(),
+    litSampler: noSamplerId(), cascadeSampler: noSamplerId(), frame: noFrameExternals(),
+    meshes: List.create(WaterMeshExternals, cap: 4)
+  }
+}
+
+# Cascade c, map m -> index c * waterCascadeMaps + m in both lists.
+type WaterCascadeGpu {
+  textures: List(TextureId)
+  views: List(TextureViewId)
+}
+
+func createCascadeGpu() ret WaterCascadeGpu {
+  ret WaterCascadeGpu { textures: fillTextureIds(count: waterCascadeCount * waterCascadeMaps), views: fillTextureViewIds(count: waterCascadeCount * waterCascadeMaps) }
+}
+
+func waterCascadeIndex(cascade: view Int, map: view Int) ret Int {
+  ret cascade * waterCascadeMaps + map
+}
+
+# The FFT bake (spectrum + butterfly, per-cascade h0) and the per-frame
+# evolution + inverse transform (working textures P/Q/R0..R3, one stage
+# uniform + two binds per Stockham stage, evolve uniform + bind per
+# (cascade, field), post bind per cascade). Indices: stageBinds stage * 2 +
+# direction; fieldOutBinds field * 2 + source; evolve* cascade * fftFields + field.
+type WaterFftGpu {
+  uniform: BufferId
+  spectrumPipeline: PipelineId
+  butterflyPipeline: PipelineId
+  butterflyTexture: TextureId
+  butterflyView: TextureViewId
+  readback: BufferId
+  h0Textures: List(TextureId)
+  h0Views: List(TextureViewId)
+  spectrumBinds: List(BindGroupId)
+  butterflyBind: BindGroupId
+  evolvePipeline: PipelineId
+  stockhamPipeline: PipelineId
+  transposePipeline: PipelineId
+  fieldOutPipeline: PipelineId
+  postPipeline: PipelineId
+  workTextures: List(TextureId)
+  workViews: List(TextureViewId)
+  stageUniforms: List(BufferId)
+  stageBinds: List(BindGroupId)
+  transposeBinds: List(BindGroupId)
+  fieldOutBinds: List(BindGroupId)
+  evolveUniforms: List(BufferId)
+  evolveBinds: List(BindGroupId)
+  postBinds: List(BindGroupId)
+}
+
+func createFftGpu() ret WaterFftGpu {
+  ret WaterFftGpu {
+    uniform: noBufferId(), spectrumPipeline: noPipelineId(), butterflyPipeline: noPipelineId(),
+    butterflyTexture: noTextureId(), butterflyView: noTextureViewId(), readback: noBufferId(),
+    h0Textures: fillTextureIds(count: fftMaxCascades), h0Views: fillTextureViewIds(count: fftMaxCascades),
+    spectrumBinds: fillBindGroupIds(count: fftMaxCascades), butterflyBind: noBindGroupId(),
+    evolvePipeline: noPipelineId(), stockhamPipeline: noPipelineId(), transposePipeline: noPipelineId(),
+    fieldOutPipeline: noPipelineId(), postPipeline: noPipelineId(),
+    workTextures: fillTextureIds(count: fftWorkTextures), workViews: fillTextureViewIds(count: fftWorkTextures),
+    stageUniforms: fillBufferIds(count: fftMaxStages), stageBinds: fillBindGroupIds(count: fftMaxStages * 2),
+    transposeBinds: fillBindGroupIds(count: 2), fieldOutBinds: fillBindGroupIds(count: fftFields * 2),
+    evolveUniforms: fillBufferIds(count: fftMaxCascades * fftFields), evolveBinds: fillBindGroupIds(count: fftMaxCascades * fftFields),
+    postBinds: fillBindGroupIds(count: fftMaxCascades)
+  }
+}
+
+# The FftSurfaceCache producer: a capture pipeline, per-cascade storage +
+# staging buffers and binds, and at most one outstanding ReadbackId per cascade.
+type WaterCacheGpu {
+  pipeline: PipelineId
+  sampler: SamplerId
+  storage: List(BufferId)
+  staging: List(BufferId)
+  binds: List(BindGroupId)
+  requests: List(ReadbackId)
+  requestActive: List(Int)
+}
+
+func createCacheGpu() ret WaterCacheGpu {
+  let active: List(Int) = { 0, 0, 0 }
+  ret WaterCacheGpu {
+    pipeline: noPipelineId(), sampler: noSamplerId(),
+    storage: fillBufferIds(count: fftMaxCascades), staging: fillBufferIds(count: fftMaxCascades),
+    binds: fillBindGroupIds(count: fftMaxCascades), requests: fillReadbackIds(count: fftMaxCascades),
+    requestActive: own active
+  }
+}

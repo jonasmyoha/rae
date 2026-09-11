@@ -5,6 +5,9 @@ import Math
 open water/Water
 open water/WaterSystem
 open water/WaterFft
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
 open webgpu/Context
 
 const waterCheckStageFrames: Int = 6
@@ -22,7 +25,7 @@ func takeWaterCheckSample(waterSystem: view WaterSystem) ret WaterCheckSample {
   ret WaterCheckSample { ordinal: waterSystem.fftFrame, counts: own counts, times: own times }
 }
 
-func prepareWaterCheck(waterSystem: mod WaterSystem, frame: copy Int) {
+func prepareWaterCheck(waterSystem: mod WaterSystem, resources: mod GpuResources, frame: copy Int) {
   let stage: Int = frame / waterCheckStageFrames
   var body: WaterBody = primaryBody(waterSystem: waterSystem)
   if frame % waterCheckStageFrames is 0 {
@@ -36,7 +39,7 @@ func prepareWaterCheck(waterSystem: mod WaterSystem, frame: copy Int) {
     if stage is 9 { body.cascadeCount = 1 body.updateRate = 2 }
     if stage is 10 { body.cascadeCount = 1 body.windSpeed = 11.0 body.updateRate = 2 }
     if stage is 11 { body.cascadeCount = 1 body.updateRate = 5 }
-    if stage is 12 { body.cascadeCount = 1 body.updateRate = 5 waterFftInvalidate(waterSystem: waterSystem) }
+    if stage is 12 { body.cascadeCount = 1 body.updateRate = 5 waterFftInvalidate(waterSystem: waterSystem, resources: resources) }
     if stage is 13 { body.fftSize = 256 body.cascadeCount = 3 body.updateRate = 2 }
     waterSystem.bodies.set(index: 0, value: body)
     log("[water tiers] stage {stage}: {body.fftSize} x {body.cascadeCount}, N={body.updateRate}")
@@ -46,7 +49,7 @@ func prepareWaterCheck(waterSystem: mod WaterSystem, frame: copy Int) {
   waterSystem.time = frame.toFloat() * 0.27 + 2.0
 }
 
-func verifyWaterCheck(waterSystem: view WaterSystem, before: view WaterCheckSample, frame: copy Int) ret Bool {
+func verifyWaterCheck(waterSystem: view WaterSystem, resources: view GpuResources, before: view WaterCheckSample, frame: copy Int) ret Bool {
   let body: WaterBody = primaryBody(waterSystem: waterSystem)
   let stage: Int = frame / waterCheckStageFrames
   # The previous stage's end diagnostic re-bakes the spectrum. It finishes with
@@ -67,19 +70,72 @@ func verifyWaterCheck(waterSystem: view WaterSystem, before: view WaterCheckSamp
     }
     if let count: Int = waterSystem.fftUpdateCounts.copyAt(index: cascade) { if count is not expectedCount { ok = false } }
     if let time: Float = waterSystem.fftSampleTimes.copyAt(index: cascade) { if Math.abs(value: time - expectedTime) > 0.0001 { ok = false } }
-    let texture: Ptr = waterGet(index: waterCascadeSlot(cascade: cascade, map: 0))
-    if cascade < body.cascadeCount { if texture is webgpuNull() { ok = false } }
-    else { if not (texture is webgpuNull()) { ok = false } }
+    let textureLive: Bool = isValidTexture(resources: resources, id: cascadeTexture(waterSystem: waterSystem, cascade: cascade, map: 0))
+    if cascade < body.cascadeCount { if not textureLive { ok = false } }
+    else { if textureLive { ok = false } }
   }
   if waterSystem.fftLastUpdates is not expectedUpdates { ok = false }
   if not ok { log("[water tiers] frame {frame} FAIL: expected {expectedUpdates} updates, got {waterSystem.fftLastUpdates}") }
   ret ok
 }
 
-func verifyWaterReleased() ret Bool {
+# After waterShutdown + manager shutdown nothing of water's may be live or
+# pending: every kind's live count is zero (the manager was water's alone).
+func verifyWaterReleased(resources: view GpuResources) ret Bool {
+  let live: Int = liveBufferCount(resources: resources) + liveTextureCount(resources: resources)
+    + liveTextureViewCount(resources: resources) + liveSamplerCount(resources: resources)
+    + livePipelineCount(resources: resources) + liveBindGroupCount(resources: resources)
+    + liveRenderPipelineCount(resources: resources) + liveExternalCount(resources: resources)
+    + liveReadbackCount(resources: resources) + liveSubmissionCount(resources: resources)
+  let pending: Int = pendingReleaseCount(resources: resources)
+  if live is not 0 or pending is not 0 { log("[water tiers] leaked: {live} live, {pending} pending release") }
+  ret live is 0 and pending is 0
+}
+
+# ----- two systems on one manager (#873) --------------------------------------
+# The twin is alive for frames twinStart..twinEnd of stage 1 (frames 6..11,
+# whose tier is stable): created after the primary's frame-6 rebuild settled,
+# stepped beside it, shut down mid-stage. Live counts are compared before it
+# exists and after it is gone.
+const twinStart: Int = 8
+const twinEnd: Int = 10
+
+func twinWaterActive(frame: view Int) ret Bool {
+  ret frame >= twinStart and frame < twinEnd
+}
+
+func liveWaterObjects(resources: view GpuResources) ret Int {
+  ret liveBufferCount(resources: resources) + liveTextureCount(resources: resources)
+    + liveTextureViewCount(resources: resources) + liveSamplerCount(resources: resources)
+    + livePipelineCount(resources: resources) + liveBindGroupCount(resources: resources)
+}
+
+func stepTwinWater(twin: mod WaterSystem, primary: view WaterSystem, resources: mod GpuResources, frame: view Int, active: view Bool) ret Bool {
   var ok: Bool = true
-  loop var slot: Int = 0, slot < 160, ++slot {
-    if not (waterGet(index: slot) is webgpuNull()) { log("[water tiers] leaked handle slot {slot}") ok = false }
+  if frame is twinStart {
+    var body: WaterBody = primaryBody(waterSystem: twin)
+    body.fftSize = 128
+    body.cascadeCount = 1
+    body.updateRate = 1
+    twin.bodies.set(index: 0, value: body)
+    twin.fftFrame = 0
+    twin.time = 1.0
+    twin.drawCount = liveWaterObjects(resources: resources)   # remembers the primary-only count
+  }
+  if twinWaterActive(frame: frame) {
+    twin.time = twin.time + 0.1
+    waterFftStep(waterSystem: twin, resources: resources)
+    if not twin.cascadesMade or not twin.fftBaked { log("[water twin] frame {frame}: twin did not allocate/bake") ok = false }
+    if twin.fftLastUpdates is not 1 { log("[water twin] frame {frame}: expected 1 twin update, got {twin.fftLastUpdates}") ok = false }
+    if not isValidTexture(resources: resources, id: cascadeTexture(waterSystem: primary, cascade: 0, map: 0)) { log("[water twin] primary cascade lost") ok = false }
+  }
+  if frame is twinEnd {
+    waterShutdown(waterSystem: twin, resources: resources)
+    if twin.cascadesMade or twin.fftGpuMade or twin.fftFrameMade { ok = false }
+    if not isValidTexture(resources: resources, id: cascadeTexture(waterSystem: primary, cascade: 0, map: 0)) { log("[water twin] primary cascade lost at twin shutdown") ok = false }
+    let after: Int = liveWaterObjects(resources: resources)
+    if after is not twin.drawCount { log("[water twin] live objects {after} after twin shutdown, {twin.drawCount} before it existed") ok = false }
+    if ok { log("[water twin] two systems on one manager ok: twin ran frames {twinStart}..{twinEnd - 1} and shut down alone") }
   }
   ret ok
 }
