@@ -200,13 +200,16 @@ type VertexAttributeSpec {
 }
 
 # What a render pipeline needs beyond its shader: one interleaved vertex buffer
-# layout, one colour target (optionally alpha-blended, as water's surface is),
-# and an optional depth test (format 0 = none; water uses read-only reverse-Z:
-# Depth32Float, no write, Greater).
+# layout (NO vertex buffer when `attributes` is empty and the vertex shader
+# builds geometry from vertex_index, as grass and sprites do), one or more
+# colour targets (all alpha-blended when `alphaBlend`, as water's surface is;
+# the G-buffer's three targets are unblended), and an optional depth test
+# (format 0 = none; water uses read-only reverse-Z: Depth32Float, no write,
+# Greater; the geometry pass writes depth).
 type RenderPipelineSpec {
   vertexStride: Int
   attributes: List(VertexAttributeSpec)
-  colorFormat: Int32
+  colorFormats: List(Int32)
   alphaBlend: Bool
   depthFormat: Int32
   depthWrite: Bool
@@ -216,7 +219,8 @@ type RenderPipelineSpec {
 
 func createRenderPipeline(resources: mod GpuResources, wgsl: view String, vertexEntry: view String, fragmentEntry: view String, spec: view RenderPipelineSpec) ret opt RenderPipelineId {
   if wgsl.length() is 0 or vertexEntry.length() is 0 or fragmentEntry.length() is 0 { ret none }
-  if spec.vertexStride < 1 or spec.attributes.length < 1 { ret none }
+  if spec.attributes.length > 0 and spec.vertexStride < 1 { ret none }
+  if spec.colorFormats.length < 1 { ret none }
   let slot: Int = findFreeSlot(table: resources.renderPipelines, capacity: resources.capacity)
   if slot < 0 { ret none }
   unsafe {
@@ -235,22 +239,32 @@ func createRenderPipeline(resources: mod GpuResources, wgsl: view String, vertex
       i = i + 1
     }
     var layouts: List(WGPUVertexBufferLayout) = List.create(WGPUVertexBufferLayout, cap: 1)
-    layouts.add(value: { stepMode: WGPUVertexStepMode_Vertex, arrayStride: spec.vertexStride as UInt64, attributeCount: attributes.length as UInt64, attributes: attributes.data })
+    var bufferCount: Int = 0
+    if attributes.length > 0 {
+      layouts.add(value: { stepMode: WGPUVertexStepMode_Vertex, arrayStride: spec.vertexStride as UInt64, attributeCount: attributes.length as UInt64, attributes: attributes.data })
+      bufferCount = 1
+    }
     var blends: List(WGPUBlendState) = List.create(WGPUBlendState, cap: 1)
     blends.add(value: {
       color: { operation: WGPUBlendOperation_Add, srcFactor: WGPUBlendFactor_SrcAlpha, dstFactor: WGPUBlendFactor_OneMinusSrcAlpha }
       alpha: { operation: WGPUBlendOperation_Add, srcFactor: WGPUBlendFactor_One, dstFactor: WGPUBlendFactor_OneMinusSrcAlpha }
     })
-    var targets: List(WGPUColorTargetState) = List.create(WGPUColorTargetState, cap: 1)
-    if spec.alphaBlend {
-      targets.add(value: { format: spec.colorFormat, blend: blends.data, writeMask: WGPUColorWriteMask_All })
-    } else {
-      targets.add(value: { format: spec.colorFormat, writeMask: WGPUColorWriteMask_All })
+    var targets: List(WGPUColorTargetState) = List.create(WGPUColorTargetState, cap: spec.colorFormats.length)
+    var target: Int = 0
+    loop target < spec.colorFormats.length {
+      if let colorFormat: Int32 = spec.colorFormats.copyAt(index: target) {
+        if spec.alphaBlend {
+          targets.add(value: { format: colorFormat, blend: blends.data, writeMask: WGPUColorWriteMask_All })
+        } else {
+          targets.add(value: { format: colorFormat, writeMask: WGPUColorWriteMask_All })
+        }
+      }
+      target = target + 1
     }
     let vertexC: Buffer(Any) = vertexEntry.toCStr()
     let fragmentC: Buffer(Any) = fragmentEntry.toCStr()
     var fragments: List(WGPUFragmentState) = List.create(WGPUFragmentState, cap: 1)
-    fragments.add(value: { module: shaderModule, entryPoint: { data: fragmentC, length: WGPU_STRLEN }, targetCount: 1 as UInt64, targets: targets.data })
+    fragments.add(value: { module: shaderModule, entryPoint: { data: fragmentC, length: WGPU_STRLEN }, targetCount: targets.length as UInt64, targets: targets.data })
     var depths: List(WGPUDepthStencilState) = List.create(WGPUDepthStencilState, cap: 1)
     var writeFlag: Int32 = WGPUOptionalBool_False
     if spec.depthWrite { writeFlag = WGPUOptionalBool_True }
@@ -266,7 +280,7 @@ func createRenderPipeline(resources: mod GpuResources, wgsl: view String, vertex
     var handle: Ptr = webgpuNull()
     if spec.depthFormat is (0 as Int32) {
       let descriptor: WGPURenderPipelineDescriptor = {
-        vertex: { module: shaderModule, entryPoint: { data: vertexC, length: WGPU_STRLEN }, bufferCount: 1 as UInt64, buffers: layouts.data }
+        vertex: { module: shaderModule, entryPoint: { data: vertexC, length: WGPU_STRLEN }, bufferCount: bufferCount as UInt64, buffers: layouts.data }
         primitive: { topology: WGPUPrimitiveTopology_TriangleList, frontFace: WGPUFrontFace_CCW, cullMode: spec.cullMode }
         multisample: { count: 1 as UInt32, mask: 4294967295 as UInt32 }
         fragment: fragments.data
@@ -274,7 +288,7 @@ func createRenderPipeline(resources: mod GpuResources, wgsl: view String, vertex
       handle = wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: descriptor)
     } else {
       let descriptor: WGPURenderPipelineDescriptor = {
-        vertex: { module: shaderModule, entryPoint: { data: vertexC, length: WGPU_STRLEN }, bufferCount: 1 as UInt64, buffers: layouts.data }
+        vertex: { module: shaderModule, entryPoint: { data: vertexC, length: WGPU_STRLEN }, bufferCount: bufferCount as UInt64, buffers: layouts.data }
         primitive: { topology: WGPUPrimitiveTopology_TriangleList, frontFace: WGPUFrontFace_CCW, cullMode: spec.cullMode }
         depthStencil: depths.data
         multisample: { count: 1 as UInt32, mask: 4294967295 as UInt32 }
@@ -509,5 +523,43 @@ func recordCopyTextureToBuffer(recording: mod Recording, resources: view GpuReso
   }
   recordUse(recording: recording, kind: kindTexture, slot: texture.slot, generation: texture.generation)
   recordUse(recording: recording, kind: kindBuffer, slot: buffer.slot, generation: buffer.generation)
+  ret true
+}
+
+# ----- draws into an EXTERNAL render pass ------------------------------------
+#
+# The legacy gbuffer opens its geometry pass in C; grass and sprites draw INTO
+# that pass. These record on a raw pass encoder the caller obtained from the
+# renderer (hence `unsafe`: the pass's validity and submission are the
+# renderer's), resolving manager IDs with the usual checks. Nothing is pinned
+# — the foreign submission is not tracked here — and retiring a used ID after
+# the draw is a Release, never a Destroy: wgpu's own command tracking keeps the
+# native alive until that command buffer completes.
+
+func recordDrawIndirectInPass(resources: view GpuResources, pass: copy Ptr, pipeline: view RenderPipelineId, bindGroup: view BindGroupId, indirect: view ResourceRef) unsafe ret Bool {
+  if isValidRenderPipeline(resources: resources, id: pipeline) is false { ret false }
+  if bindGroupIsUsable(resources: resources, id: bindGroup) is false { ret false }
+  if isValidRef(resources: resources, ref: indirect) is false or refIsBuffer(resources: resources, ref: indirect) is false { ret false }
+  if indirect.refKind is refBuffer and hasUsageFlag(usage: refBufferUsage(resources: resources, ref: indirect), flag: WGPUBufferUsage_Indirect) is false { ret false }
+  if refBufferSize(resources: resources, ref: indirect) < 16 { ret false }
+  unsafe {
+    if pass is webgpuNull() { ret false }
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: slotHandle(table: resources.renderPipelines, slot: pipeline.slot))
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32, group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+    wgpuRenderPassEncoderDrawIndirect(renderPassEncoder: pass, indirectBuffer: refHandle(resources: resources, ref: indirect), indirectOffset: 0 as UInt64)
+  }
+  ret true
+}
+
+func recordDrawInPass(resources: view GpuResources, pass: copy Ptr, pipeline: view RenderPipelineId, bindGroup: view BindGroupId, vertexCount: view Int, instanceCount: view Int, firstVertex: view Int, firstInstance: view Int) unsafe ret Bool {
+  if isValidRenderPipeline(resources: resources, id: pipeline) is false { ret false }
+  if bindGroupIsUsable(resources: resources, id: bindGroup) is false { ret false }
+  if vertexCount < 1 or instanceCount < 1 or firstVertex < 0 or firstInstance < 0 { ret false }
+  unsafe {
+    if pass is webgpuNull() { ret false }
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: slotHandle(table: resources.renderPipelines, slot: pipeline.slot))
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32, group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+    wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: vertexCount as UInt32, instanceCount: instanceCount as UInt32, firstVertex: firstVertex as UInt32, firstInstance: firstInstance as UInt32)
+  }
   ret true
 }
