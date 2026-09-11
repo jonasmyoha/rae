@@ -3153,11 +3153,18 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           // with the real one (our ABI-compat void*/int32_t view of the types
           // differs from WGPUInstance/WGPUStatus/const-qualified pointers), so
           // let the header be the single source of truth (general FFI, #497).
-          if (d->as.func_decl.extern_symbol) continue;
+          // #877: an explicit symbol in the runtime's OWN `rae_ext_` namespace is a
+          // Rae-facing intrinsic (a safe wrapper's renamed native, e.g.
+          // `nativeSqrt` -> "rae_ext_Math_sqrt"). Its prototype used to be
+          // generated here when it was a bare extern, and platform-guarded
+          // headers (gpu2d, filesystem) do not declare it in every build, so
+          // keep generating it — same ABI-compat conventions as before.
+          if (d->as.func_decl.extern_symbol
+              && strncmp(d->as.func_decl.extern_symbol, "rae_ext_", 8) != 0) continue;
           // Skip functions already declared in runtime header (rae_ext_rae_* and known builtins)
-          if (str_starts_with_cstr(d->as.func_decl.name, "rae_ext_") ||
+          if (!d->as.func_decl.extern_symbol && (str_starts_with_cstr(d->as.func_decl.name, "rae_ext_") ||
               str_starts_with_cstr(d->as.func_decl.name, "rae_") ||
-              str_starts_with_cstr(d->as.func_decl.name, "__buf_")) continue;
+              str_starts_with_cstr(d->as.func_decl.name, "__buf_"))) continue;
           CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .func_decl = &d->as.func_decl};
           fprintf(out, "%s %s(", c_return_type(&tctx, &d->as.func_decl), mangled);
           emit_param_list(&tctx, d->as.func_decl.params, out, true);

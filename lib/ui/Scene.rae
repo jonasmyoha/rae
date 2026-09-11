@@ -80,7 +80,9 @@ func sceneNodeIndex(this: view Scene, nodeId: view String) ret Int {
 }
 
 func nodeAt(this: view Scene, idx: view Int) ret view SceneNode {
-  ret view rae_ext_rae_buf_get(buf: this.nodes.data, index: idx)
+  unsafe {
+    ret view rae_ext_rae_buf_get(buf: this.nodes.data, index: idx)
+  }
 }
 
 # `Children` is the only authoring key whose value is an array of

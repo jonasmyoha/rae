@@ -11,7 +11,7 @@
 import String
 import Sys
 
-func rae_ext_rae_mem_stats_unknown_frees() extern ret Int
+func rae_ext_rae_mem_stats_unknown_frees() unsafe extern ret Int
 
 type Box { n: Int, tag: String }
 
@@ -26,18 +26,20 @@ func roundOnce() {
 }
 
 func main() {
-  let warmups: Int = 50
-  var i: Int = 0
-  loop i < warmups { roundOnce()  i = i + 1 }
-  let baseUnknown: Int = rae_ext_rae_mem_stats_unknown_frees()
+  unsafe {
+    let warmups: Int = 50
+    var i: Int = 0
+    loop i < warmups { roundOnce()  i = i + 1 }
+    let baseUnknown: Int = rae_ext_rae_mem_stats_unknown_frees()
 
-  let iterations: Int = 5000
-  i = 0
-  loop i < iterations { roundOnce()  i = i + 1 }
-  let overFrees: Int = rae_ext_rae_mem_stats_unknown_frees() - baseUnknown
+    let iterations: Int = 5000
+    i = 0
+    loop i < iterations { roundOnce()  i = i + 1 }
+    let overFrees: Int = rae_ext_rae_mem_stats_unknown_frees() - baseUnknown
 
-  log("iterations: {iterations}")
-  # The double-free logged ~1 untracked free per iteration (~5000). A clean
-  # idiom logs none.
-  if overFrees < 100 { log("verdict: OK") } else { log("verdict: OVERFREE frees={overFrees}") }
+    log("iterations: {iterations}")
+    # The double-free logged ~1 untracked free per iteration (~5000). A clean
+    # idiom logs none.
+    if overFrees < 100 { log("verdict: OK") } else { log("verdict: OVERFREE frees={overFrees}") }
+  }
 }

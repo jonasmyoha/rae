@@ -44,20 +44,20 @@ func timingBytes(maxPasses: view Int) ret Int {
 # Returns an inert, unavailable GpuTiming (no device resources) — the fallback.
 func unavailableTiming(resources: view GpuResources) ret GpuTiming {
   unsafe {
-    ret GpuTiming {
-      available: false
-      managerTag: resources.managerTag
-      maxPasses: 0
-      querySet: webgpuNull()
-      resolve: { managerTag: 0, slot: 0 - 1, generation: 0 }
-      readback: { managerTag: 0, slot: 0 - 1, generation: 0 }
-      periodNs: 1.0
-      writes: List.create(WGPUPassTimestampWrites, cap: 1)
-      passCount: 0
-      sampling: false
-      current: { managerTag: 0, slot: 0 - 1, generation: 0 }
-      lastTotalUs: 0 - 1
-    }
+      ret GpuTiming {
+        available: false
+        managerTag: resources.managerTag
+        maxPasses: 0
+        querySet: webgpuNull()
+        resolve: { managerTag: 0, slot: 0 - 1, generation: 0 }
+        readback: { managerTag: 0, slot: 0 - 1, generation: 0 }
+        periodNs: 1.0
+        writes: List.create(WGPUPassTimestampWrites, cap: 1)
+        passCount: 0
+        sampling: false
+        current: { managerTag: 0, slot: 0 - 1, generation: 0 }
+        lastTotalUs: 0 - 1
+      }
   }
 }
 
@@ -106,10 +106,10 @@ func createGpuTiming(resources: mod GpuResources, maxPasses: view Int) ret GpuTi
 
 func drop(this: mod GpuTiming) {
   unsafe {
-    if this.querySet is not webgpuNull() {
-      wgpuQuerySetRelease(querySet: this.querySet)
-      this.querySet = webgpuNull()
-    }
+      if this.querySet is not webgpuNull() {
+        wgpuQuerySetRelease(querySet: this.querySet)
+        this.querySet = webgpuNull()
+      }
   }
 }
 

@@ -166,27 +166,29 @@ func checkScopeExit(issuer: mod IdIssuer) ret Bool {
 }
 
 func main() ret Int {
-  if webgpuBootstrap() is not 1 {
-    log("no GPU")
-    ret 1
-  }
-  var issuer: IdIssuer = IdIssuer.create()
-  if let resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 4) {
-    if checkKnownContents(resources: resources) is false { ret 1 }
-    if liveBufferCount(resources: resources) is not 0 {
-      log("FAIL: buffers leaked")
+  unsafe {
+    if webgpuBootstrap() is not 1 {
+      log("no GPU")
       ret 1
     }
-  } else {
-    log("FAIL: manager creation")
-    ret 1
+    var issuer: IdIssuer = IdIssuer.create()
+    if let resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 4) {
+      if checkKnownContents(resources: resources) is false { ret 1 }
+      if liveBufferCount(resources: resources) is not 0 {
+        log("FAIL: buffers leaked")
+        ret 1
+      }
+    } else {
+      log("FAIL: manager creation")
+      ret 1
+    }
+    log("known contents, authoritative size, refused misuse OK")
+    if checkIdentity(issuer: issuer) is false { ret 1 }
+    log("two managers, wrong owner, stale copies, reuse, exhaustion, textures/views/samplers OK")
+    if checkFailures(issuer: issuer) is false { ret 1 }
+    log("construction and descriptor failures OK")
+    if checkScopeExit(issuer: issuer) is false { ret 1 }
+    log("scope-exit cleanup and recreation OK")
+    ret 0
   }
-  log("known contents, authoritative size, refused misuse OK")
-  if checkIdentity(issuer: issuer) is false { ret 1 }
-  log("two managers, wrong owner, stale copies, reuse, exhaustion, textures/views/samplers OK")
-  if checkFailures(issuer: issuer) is false { ret 1 }
-  log("construction and descriptor failures OK")
-  if checkScopeExit(issuer: issuer) is false { ret 1 }
-  log("scope-exit cleanup and recreation OK")
-  ret 0
 }

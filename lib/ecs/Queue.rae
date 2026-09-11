@@ -49,8 +49,10 @@ func queueIsEmpty(T: type, this: view Queue(T)) pub ret Bool {
 # Read the item at FIFO position `i` (0 = oldest). Iterate a drain in
 # order: `loop i < queueCount { apply(queueAt(q, i)); i++ }`.
 func queueAt(T: type, this: view Queue(T), i: view Int) pub ret T {
-  let v: T = rae_ext_rae_buf_get(buf: this.items.data, index: i)
-  ret v
+  unsafe {
+    let v: T = rae_ext_rae_buf_get(buf: this.items.data, index: i)
+    ret v
+  }
 }
 
 # Empty the queue (drop every item). Call after a drain pass.

@@ -35,186 +35,188 @@ func loadScene(world: mod UiWorld, scene: view Scene) ret EntityId {
 # also tagged with `PageRoot { id: pageId }` when `pageId` is non-empty,
 # so `pageOf(world, entity)` can walk back up to find the owning page.
 func loadSceneIntoPage(world: mod UiWorld, scene: view Scene, pageId: view String) pub ret EntityId {
-  if scene.ok is false {
-    ret noEntity()
-  }
-
-  # ---------- pass 0: reachability from root ----------
-  # Compute the set of nodes reachable from `scene.rootNodeId` via
-  # `Children` references. Orphan nodes (authored in the file but
-  # never referenced) get skipped in subsequent passes — otherwise
-  # they'd allocate parentless entities that render at their absolute
-  # canvas coords. The pixi editor sometimes serialises a flattened
-  # copy of a SceneInstance's children alongside the SceneInstance
-  # itself; without this filter we mount both copies (once via the
-  # SceneInstance resolver, once as orphans here).
-  let nodeCount: Int = scene.nodes.length
-  let reachable: List(Bool) = List.create(Bool, cap: nodeCount)
-  var ri: Int = 0
-  loop ri < nodeCount {
-    reachable.add(value: false)
-    ri = ri + 1
-  }
-  let rootIdxR: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId)
-  if rootIdxR < 0 {
-    ret noEntity()
-  }
-  let stack: List(Int) = List.create(Int, cap: 32)
-  stack.add(value: rootIdxR)
-  loop stack.length > 0 {
-    let popAt: Int = stack.length - 1
-    var cur: Int = 0
-    var haveCur: Bool = false
-    if let curVal: Int = stack.copyAt(index: popAt) {
-      cur = curVal
-      haveCur = true
+  unsafe {
+    if scene.ok is false {
+      ret noEntity()
     }
-    stack.remove(index: popAt)
-    if haveCur {
-      var alreadySeen: Bool = true
-      if let seen: Bool = reachable.copyAt(index: cur) {
-        alreadySeen = seen
+
+    # ---------- pass 0: reachability from root ----------
+    # Compute the set of nodes reachable from `scene.rootNodeId` via
+    # `Children` references. Orphan nodes (authored in the file but
+    # never referenced) get skipped in subsequent passes — otherwise
+    # they'd allocate parentless entities that render at their absolute
+    # canvas coords. The pixi editor sometimes serialises a flattened
+    # copy of a SceneInstance's children alongside the SceneInstance
+    # itself; without this filter we mount both copies (once via the
+    # SceneInstance resolver, once as orphans here).
+    let nodeCount: Int = scene.nodes.length
+    let reachable: List(Bool) = List.create(Bool, cap: nodeCount)
+    var ri: Int = 0
+    loop ri < nodeCount {
+      reachable.add(value: false)
+      ri = ri + 1
+    }
+    let rootIdxR: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId)
+    if rootIdxR < 0 {
+      ret noEntity()
+    }
+    let stack: List(Int) = List.create(Int, cap: 32)
+    stack.add(value: rootIdxR)
+    loop stack.length > 0 {
+      let popAt: Int = stack.length - 1
+      var cur: Int = 0
+      var haveCur: Bool = false
+      if let curVal: Int = stack.copyAt(index: popAt) {
+        cur = curVal
+        haveCur = true
       }
-      if alreadySeen is false {
-        reachable.set(index: cur, value: true)
-        let n: view SceneNode => nodeAt(this: scene, idx: cur)
-        let cn: Int = n.childrenIds.length
-        var ci: Int = 0
-        loop ci < cn {
-          if let childId: String = n.childrenIds.copyAt(index: ci) {
-            let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
-            if childIdx >= 0 {
-              stack.add(value: childIdx)
+      stack.remove(index: popAt)
+      if haveCur {
+        var alreadySeen: Bool = true
+        if let seen: Bool = reachable.copyAt(index: cur) {
+          alreadySeen = seen
+        }
+        if alreadySeen is false {
+          reachable.set(index: cur, value: true)
+          let n: view SceneNode => nodeAt(this: scene, idx: cur)
+          let cn: Int = n.childrenIds.length
+          var ci: Int = 0
+          loop ci < cn {
+            if let childId: String = n.childrenIds.copyAt(index: ci) {
+              let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
+              if childIdx >= 0 {
+                stack.add(value: childIdx)
+              }
             }
+            ci = ci + 1
           }
-          ci = ci + 1
         }
       }
     }
-  }
 
-  # ---------- pass 1: allocate entities, populate nodeIds map ----------
-  # Non-reachable slots keep a noEntity() sentinel so later passes
-  # can detect + skip them while keeping the index-by-nodeIndex map
-  # intact for sceneNodeIndex lookups.
-  let entitiesByNodeIndex: List(EntityId) = List.create(EntityId, cap: nodeCount)
-  let nodeIdsMap: mod StringMap(Int) => world.nodeIds
-  var i: Int = 0
-  loop i < nodeCount {
-    var isReachable: Bool = false
-    if let reach: Bool = reachable.copyAt(index: i) {
-      isReachable = reach
-    }
-    if isReachable {
-      let node: view SceneNode => nodeAt(this: scene, idx: i)
-      let entity: EntityId = createEntity(world: world)
-      appendEntityListSL(lst: entitiesByNodeIndex, value: entity)
-      if pageId.length() is 0 {
-        nodeIdsMap.set(k: node.nodeId, value: entity.index)
-      } else {
-        let key: String = pageScopedKey(pageId: pageId, nodeId: node.nodeId)
-        nodeIdsMap.set(k: key, value: entity.index)
+    # ---------- pass 1: allocate entities, populate nodeIds map ----------
+    # Non-reachable slots keep a noEntity() sentinel so later passes
+    # can detect + skip them while keeping the index-by-nodeIndex map
+    # intact for sceneNodeIndex lookups.
+    let entitiesByNodeIndex: List(EntityId) = List.create(EntityId, cap: nodeCount)
+    let nodeIdsMap: mod StringMap(Int) => world.nodeIds
+    var i: Int = 0
+    loop i < nodeCount {
+      var isReachable: Bool = false
+      if let reach: Bool = reachable.copyAt(index: i) {
+        isReachable = reach
       }
-    } else {
-      let placeholder: EntityId = noEntity()
-      appendEntityListSL(lst: entitiesByNodeIndex, value: placeholder)
+      if isReachable {
+        let node: view SceneNode => nodeAt(this: scene, idx: i)
+        let entity: EntityId = createEntity(world: world)
+        appendEntityListSL(lst: entitiesByNodeIndex, value: entity)
+        if pageId.length() is 0 {
+          nodeIdsMap.set(k: node.nodeId, value: entity.index)
+        } else {
+          let key: String = pageScopedKey(pageId: pageId, nodeId: node.nodeId)
+          nodeIdsMap.set(k: key, value: entity.index)
+        }
+      } else {
+        let placeholder: EntityId = noEntity()
+        appendEntityListSL(lst: entitiesByNodeIndex, value: placeholder)
+      }
+      i = i + 1
     }
-    i = i + 1
-  }
 
-  # ---------- pass 2: apply components ----------
-  let docView: view JsonDoc => scene.doc
-  var j: Int = 0
-  loop j < nodeCount {
-    var jReach: Bool = false
-    if let reach: Bool = reachable.copyAt(index: j) {
-      jReach = reach
-    }
-    if jReach is false {
+    # ---------- pass 2: apply components ----------
+    let docView: view JsonDoc => scene.doc
+    var j: Int = 0
+    loop j < nodeCount {
+      var jReach: Bool = false
+      if let reach: Bool = reachable.copyAt(index: j) {
+        jReach = reach
+      }
+      if jReach is false {
+        j = j + 1
+      } else {
+      let node: view SceneNode => nodeAt(this: scene, idx: j)
+      let entity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: j)
+
+      # Always tag the entity with NodeId + Name (label = nodeId by default)
+      # so the dump and overrides can identify it without reading the
+      # component bag. NodeId from the bag (if present) wins.
+      let defaultNodeId: NodeId = { id: node.nodeId }
+      componentSet(this: world.nodeIdComponents, entity: entity, data: defaultNodeId)
+      let defaultName: Name = { label: node.nodeId }
+      componentSet(this: world.names, entity: entity, data: defaultName)
+
+      # Walk the node's component bag in declaration order.
+      let bag: JsonValue = Json.jsonValueAt(doc: docView, idx: node.componentsValueIdx)
+      let keyCount: Int = Json.objectLen(this: bag)
+      var k: Int = 0
+      loop k < keyCount {
+        let key: String = Json.objectKeyAt(doc: docView, this: bag, idx: k)
+        # Children is hierarchy, not a component — handled in pass 3.
+        let childrenKey: String = "Children"
+        if key is childrenKey {
+          k = k + 1
+        } else {
+          let valueAtKey: JsonValue = Json.objectValueAt(doc: docView, this: bag, idx: k)
+          applyComponentByName(
+            world: world
+            entity: entity
+            name: key
+            doc: docView
+            val: valueAtKey
+          )
+          k = k + 1
+        }
+      }
       j = j + 1
-    } else {
-    let node: view SceneNode => nodeAt(this: scene, idx: j)
-    let entity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: j)
+      }
+    }
 
-    # Always tag the entity with NodeId + Name (label = nodeId by default)
-    # so the dump and overrides can identify it without reading the
-    # component bag. NodeId from the bag (if present) wins.
-    let defaultNodeId: NodeId = { id: node.nodeId }
-    componentSet(this: world.nodeIdComponents, entity: entity, data: defaultNodeId)
-    let defaultName: Name = { label: node.nodeId }
-    componentSet(this: world.names, entity: entity, data: defaultName)
-
-    # Walk the node's component bag in declaration order.
-    let bag: JsonValue = Json.jsonValueAt(doc: docView, idx: node.componentsValueIdx)
-    let keyCount: Int = Json.objectLen(this: bag)
-    var k: Int = 0
-    loop k < keyCount {
-      let key: String = Json.objectKeyAt(doc: docView, this: bag, idx: k)
-      # Children is hierarchy, not a component — handled in pass 3.
-      let childrenKey: String = "Children"
-      if key is childrenKey {
-        k = k + 1
+    # ---------- pass 3: hierarchy (Children + Parent) ----------
+    var p: Int = 0
+    loop p < nodeCount {
+      var pReach: Bool = false
+      if let reach: Bool = reachable.copyAt(index: p) {
+        pReach = reach
+      }
+      if pReach is false {
+        p = p + 1
       } else {
-        let valueAtKey: JsonValue = Json.objectValueAt(doc: docView, this: bag, idx: k)
-        applyComponentByName(
-          world: world
-          entity: entity
-          name: key
-          doc: docView
-          val: valueAtKey
-        )
-        k = k + 1
-      }
-    }
-    j = j + 1
-    }
-  }
-
-  # ---------- pass 3: hierarchy (Children + Parent) ----------
-  var p: Int = 0
-  loop p < nodeCount {
-    var pReach: Bool = false
-    if let reach: Bool = reachable.copyAt(index: p) {
-      pReach = reach
-    }
-    if pReach is false {
-      p = p + 1
-    } else {
-    let node: view SceneNode => nodeAt(this: scene, idx: p)
-    let parentEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
-    let kn: Int = node.childrenIds.length
-    var q: Int = 0
-    loop q < kn {
-      if let childId: String = node.childrenIds.copyAt(index: q) {
-        let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
-        if childIdx >= 0 {
-          let childEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: childIdx)
-          # #726: set ONLY the authoritative Parent link; HierarchySystem.setParent
-          # maintains the derived Children cache, appending in call (= authored)
-          # order so the child order matches the old hand-built Children list.
-          setParent(parents: world.parents, childrens: world.childrens,
-                    child: childEntity, parent: parentEntity)
+      let node: view SceneNode => nodeAt(this: scene, idx: p)
+      let parentEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: p)
+      let kn: Int = node.childrenIds.length
+      var q: Int = 0
+      loop q < kn {
+        if let childId: String = node.childrenIds.copyAt(index: q) {
+          let childIdx: Int = sceneNodeIndex(this: scene, nodeId: childId)
+          if childIdx >= 0 {
+            let childEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: childIdx)
+            # #726: set ONLY the authoritative Parent link; HierarchySystem.setParent
+            # maintains the derived Children cache, appending in call (= authored)
+            # order so the child order matches the old hand-built Children list.
+            setParent(parents: world.parents, childrens: world.childrens,
+                      child: childEntity, parent: parentEntity)
+          }
         }
+        q = q + 1
       }
-      q = q + 1
+      p = p + 1
+      }
     }
-    p = p + 1
-    }
-  }
 
-  # Root entity = the entity allocated for `scene.rootNodeId`.
-  let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId)
-  if rootIdx < 0 {
-    ret noEntity()
+    # Root entity = the entity allocated for `scene.rootNodeId`.
+    let rootIdx: Int = sceneNodeIndex(this: scene, nodeId: scene.rootNodeId)
+    if rootIdx < 0 {
+      ret noEntity()
+    }
+    let rootEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: rootIdx)
+    if pageId.length() > 0 {
+      var copiedId: String = ""
+      copiedId = copiedId.concat(other: pageId)
+      let pr: PageRoot = { id: own copiedId }
+      componentSet(this: world.pageRoots, entity: rootEntity, data: own pr)
+    }
+    ret rootEntity
   }
-  let rootEntity: EntityId = rae_ext_rae_buf_get(buf: entitiesByNodeIndex.data, index: rootIdx)
-  if pageId.length() > 0 {
-    var copiedId: String = ""
-    copiedId = copiedId.concat(other: pageId)
-    let pr: PageRoot = { id: own copiedId }
-    componentSet(this: world.pageRoots, entity: rootEntity, data: own pr)
-  }
-  ret rootEntity
 }
 
 # Phase 1f scene-instance resolver.

@@ -96,15 +96,15 @@ func pinDep(resources: mod GpuResources, kind: view Int, slot: view Int) {
 
 func unpinDep(resources: mod GpuResources, kind: view Int, slot: view Int) {
   unsafe {
-    let empty: Ptr = webgpuNull()
-    if kind is kindBuffer { unpinSlot(table: resources.buffers, slot: slot, kind: kind, empty: empty) }
-    if kind is kindTexture { unpinSlot(table: resources.textures, slot: slot, kind: kind, empty: empty) }
-    if kind is kindTextureView { unpinSlot(table: resources.textureViews, slot: slot, kind: kind, empty: empty) }
-    if kind is kindSampler { unpinSlot(table: resources.samplers, slot: slot, kind: kind, empty: empty) }
-    if kind is kindPipeline { unpinSlot(table: resources.pipelines, slot: slot, kind: kind, empty: empty) }
-    if kind is kindBindGroup { unpinSlot(table: resources.bindGroups, slot: slot, kind: kind, empty: empty) }
-    if kind is kindRenderPipeline { unpinSlot(table: resources.renderPipelines, slot: slot, kind: kind, empty: empty) }
-    if kind is kindExternal { unpinSlot(table: resources.externals, slot: slot, kind: kind, empty: empty) }
+      let empty: Ptr = webgpuNull()
+      if kind is kindBuffer { unpinSlot(table: resources.buffers, slot: slot, kind: kind, empty: empty) }
+      if kind is kindTexture { unpinSlot(table: resources.textures, slot: slot, kind: kind, empty: empty) }
+      if kind is kindTextureView { unpinSlot(table: resources.textureViews, slot: slot, kind: kind, empty: empty) }
+      if kind is kindSampler { unpinSlot(table: resources.samplers, slot: slot, kind: kind, empty: empty) }
+      if kind is kindPipeline { unpinSlot(table: resources.pipelines, slot: slot, kind: kind, empty: empty) }
+      if kind is kindBindGroup { unpinSlot(table: resources.bindGroups, slot: slot, kind: kind, empty: empty) }
+      if kind is kindRenderPipeline { unpinSlot(table: resources.renderPipelines, slot: slot, kind: kind, empty: empty) }
+      if kind is kindExternal { unpinSlot(table: resources.externals, slot: slot, kind: kind, empty: empty) }
   }
 }
 
@@ -273,16 +273,16 @@ type Recording {
 
 func beginRecording(resources: view GpuResources) ret opt Recording {
   unsafe {
-    let descriptor: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
-    let encoder: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: descriptor)
-    if encoder is webgpuNull() { ret none }
-    ret Recording {
-      managerTag: resources.managerTag
-      encoder: encoder
-      useKinds: List.create(Int, cap: 8)
-      useSlots: List.create(Int, cap: 8)
-      useGenerations: List.create(Int, cap: 8)
-    }
+      let descriptor: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
+      let encoder: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: descriptor)
+      if encoder is webgpuNull() { ret none }
+      ret Recording {
+        managerTag: resources.managerTag
+        encoder: encoder
+        useKinds: List.create(Int, cap: 8)
+        useSlots: List.create(Int, cap: 8)
+        useGenerations: List.create(Int, cap: 8)
+      }
   }
 }
 
@@ -291,10 +291,10 @@ func beginRecording(resources: view GpuResources) ret opt Recording {
 # handed its encoder over and holds nothing.
 func drop(this: mod Recording) {
   unsafe {
-    if this.encoder is not webgpuNull() {
-      wgpuCommandEncoderRelease(commandEncoder: this.encoder)
-      this.encoder = webgpuNull()
-    }
+      if this.encoder is not webgpuNull() {
+        wgpuCommandEncoderRelease(commandEncoder: this.encoder)
+        this.encoder = webgpuNull()
+      }
   }
 }
 

@@ -15,7 +15,9 @@ type StringMap(V: type) {
 }
 
 func createStringMap(V: type, cap: view Int) ret StringMap(V) {
-  ret StringMap(V) { data: rae_ext_rae_buf_alloc(size: cap, elemSize: sizeof(StringMapEntry(V))), length: 0, cap: cap, isGrowing: false }
+  unsafe {
+    ret StringMap(V) { data: rae_ext_rae_buf_alloc(size: cap, elemSize: sizeof(StringMapEntry(V))), length: 0, cap: cap, isGrowing: false }
+  }
 }
 
 # The constructor by name (#880): `var m: StringMap(Int) = create(cap: 8)`.
@@ -24,46 +26,48 @@ func create(V: type, cap: view Int) ret StringMap(V) {
 }
 
 func set(V: type, this: mod StringMap(V), k: view String, value: own V) {
-  if this.cap is 0 {
-    this.cap = 8
-    this.data = rae_ext_rae_buf_alloc(size: this.cap, elemSize: sizeof(StringMapEntry(V)))
-  }
-  if not this.isGrowing and this.length * 2 > this.cap {
-    growStringMap(this)
-  }
-  let h: Int = rae_str_hash(s: k)
-  var idx: Int = h % this.cap
-  if idx < 0 {
-    idx = -idx
-  }
-  loop true {
-    let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: idx)
-    if not entry.occupied {
-      # Deep-copy the key so the map owns its own heap copy. Without
-      # this, world.nodeIds-style maps shallow-alias the caller's
-      # `k` (e.g. scene.nodes[i].nodeId) and the map's drop frees
-      # those pointers, corrupting the source storage on the next
-      # rebuild. The struct-literal codegen's per-field deep-copy
-      # (Phase 2) does this automatically for non-generic structs
-      # but not yet for generic StringMapEntry(V).
-      let keyCopy: String = rae_ext_rae_string_copy(s: k)
-      rae_ext_rae_buf_set(buf: this.data, index: idx, value: { k: keyCopy, value: value, occupied: true })
-      this.length = this.length + 1
-      ret
+  unsafe {
+    if this.cap is 0 {
+      this.cap = 8
+      this.data = rae_ext_rae_buf_alloc(size: this.cap, elemSize: sizeof(StringMapEntry(V)))
     }
-    if rae_str_eq(a: entry.k, b: k) {
-      entry.value = value
-      # Drop the existing entry's owned-heap fields before overwriting
-      # the slot. Without this, replacing an existing map entry leaks
-      # whichever cascade-droppable fields V's struct (and the entry
-      # key) owns. `entry.value = value` already handled the value
-      # field via the field-assign drop, but the entry struct copy
-      # still aliases the key — drop the slot, then overwrite.
-      rae_ext_rae_buf_drop_at(buf: this.data, index: idx)
-      rae_ext_rae_buf_set(buf: this.data, index: idx, value: entry)
-      ret
+    if not this.isGrowing and this.length * 2 > this.cap {
+      growStringMap(this)
     }
-    idx = (idx + 1) % this.cap
+    let h: Int = rae_str_hash(s: k)
+    var idx: Int = h % this.cap
+    if idx < 0 {
+      idx = -idx
+    }
+    loop true {
+      let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: idx)
+      if not entry.occupied {
+        # Deep-copy the key so the map owns its own heap copy. Without
+        # this, world.nodeIds-style maps shallow-alias the caller's
+        # `k` (e.g. scene.nodes[i].nodeId) and the map's drop frees
+        # those pointers, corrupting the source storage on the next
+        # rebuild. The struct-literal codegen's per-field deep-copy
+        # (Phase 2) does this automatically for non-generic structs
+        # but not yet for generic StringMapEntry(V).
+        let keyCopy: String = rae_ext_rae_string_copy(s: k)
+        rae_ext_rae_buf_set(buf: this.data, index: idx, value: { k: keyCopy, value: value, occupied: true })
+        this.length = this.length + 1
+        ret
+      }
+      if rae_str_eq(a: entry.k, b: k) {
+        entry.value = value
+        # Drop the existing entry's owned-heap fields before overwriting
+        # the slot. Without this, replacing an existing map entry leaks
+        # whichever cascade-droppable fields V's struct (and the entry
+        # key) owns. `entry.value = value` already handled the value
+        # field via the field-assign drop, but the entry struct copy
+        # still aliases the key — drop the slot, then overwrite.
+        rae_ext_rae_buf_drop_at(buf: this.data, index: idx)
+        rae_ext_rae_buf_set(buf: this.data, index: idx, value: entry)
+        ret
+      }
+      idx = (idx + 1) % this.cap
+    }
   }
 }
 
@@ -71,28 +75,30 @@ func set(V: type, this: mod StringMap(V), k: view String, value: own V) {
 # `get`; the difference is only what comes back. `none` when the key is
 # absent — the reference has no empty state of its own.
 func viewGet(V: type, this: view StringMap(V), key: view String) ret opt view V {
-  if this.cap is 0 {
-    ret none
-  }
-  let hash: Int = rae_str_hash(s: key)
-  var idx: Int = hash % this.cap
-  if idx < 0 {
-    idx = -idx
-  }
-  let startIdx: Int = idx
-  loop true {
-    let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: idx)
-    if not entry.occupied {
+  unsafe {
+    if this.cap is 0 {
       ret none
     }
-    if rae_str_eq(a: entry.k, b: key) {
-      # Read the slot again as a reference: `entry` above is a copy, so a
-      # view of ITS field would name a local that dies with this function.
-      ret view rae_ext_rae_buf_get(buf: this.data, index: idx).value
+    let hash: Int = rae_str_hash(s: key)
+    var idx: Int = hash % this.cap
+    if idx < 0 {
+      idx = -idx
     }
-    idx = (idx + 1) % this.cap
-    if idx is startIdx {
-      ret none
+    let startIdx: Int = idx
+    loop true {
+      let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: idx)
+      if not entry.occupied {
+        ret none
+      }
+      if rae_str_eq(a: entry.k, b: key) {
+        # Read the slot again as a reference: `entry` above is a copy, so a
+        # view of ITS field would name a local that dies with this function.
+        ret view rae_ext_rae_buf_get(buf: this.data, index: idx).value
+      }
+      idx = (idx + 1) % this.cap
+      if idx is startIdx {
+        ret none
+      }
     }
   }
 }
@@ -100,51 +106,55 @@ func viewGet(V: type, this: view StringMap(V), key: view String) ret opt view V 
 # Mutable window into the stored value. Writing through it updates the map
 # in place, with no drop-and-reinsert of the value's owned fields.
 func modGet(V: type, this: mod StringMap(V), key: view String) ret opt mod V {
-  if this.cap is 0 {
-    ret none
-  }
-  let hash: Int = rae_str_hash(s: key)
-  var idx: Int = hash % this.cap
-  if idx < 0 {
-    idx = -idx
-  }
-  let startIdx: Int = idx
-  loop true {
-    let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: idx)
-    if not entry.occupied {
+  unsafe {
+    if this.cap is 0 {
       ret none
     }
-    if rae_str_eq(a: entry.k, b: key) {
-      ret mod rae_ext_rae_buf_get(buf: this.data, index: idx).value
+    let hash: Int = rae_str_hash(s: key)
+    var idx: Int = hash % this.cap
+    if idx < 0 {
+      idx = -idx
     }
-    idx = (idx + 1) % this.cap
-    if idx is startIdx {
-      ret none
+    let startIdx: Int = idx
+    loop true {
+      let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: idx)
+      if not entry.occupied {
+        ret none
+      }
+      if rae_str_eq(a: entry.k, b: key) {
+        ret mod rae_ext_rae_buf_get(buf: this.data, index: idx).value
+      }
+      idx = (idx + 1) % this.cap
+      if idx is startIdx {
+        ret none
+      }
     }
   }
 }
 
 func get(V: type, this: view StringMap(V), k: view String) ret opt V {
-  if this.cap is 0 {
-    ret none
-  }
-  let h: Int = rae_str_hash(s: k)
-  var idx: Int = h % this.cap
-  if idx < 0 {
-    idx = -idx
-  }
-  let startIdx: Int = idx
-  loop true {
-    let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: idx)
-    if not entry.occupied {
+  unsafe {
+    if this.cap is 0 {
       ret none
     }
-    if rae_str_eq(a: entry.k, b: k) {
-      ret entry.value
+    let h: Int = rae_str_hash(s: k)
+    var idx: Int = h % this.cap
+    if idx < 0 {
+      idx = -idx
     }
-    idx = (idx + 1) % this.cap
-    if idx is startIdx {
-      ret none
+    let startIdx: Int = idx
+    loop true {
+      let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: idx)
+      if not entry.occupied {
+        ret none
+      }
+      if rae_str_eq(a: entry.k, b: k) {
+        ret entry.value
+      }
+      idx = (idx + 1) % this.cap
+      if idx is startIdx {
+        ret none
+      }
     }
   }
 }
@@ -154,80 +164,88 @@ func has(V: type, this: view StringMap(V), k: view String) ret Bool {
 }
 
 func remove(V: type, this: mod StringMap(V), k: view String) {
-  if this.cap is 0 {
-    ret
-  }
-  let h: Int = rae_str_hash(s: k)
-  var idx: Int = h % this.cap
-  if idx < 0 {
-    idx = -idx
-  }
-  let startIdx: Int = idx
-  loop true {
-    let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: idx)
-    if not entry.occupied {
+  unsafe {
+    if this.cap is 0 {
       ret
     }
-    if rae_str_eq(a: entry.k, b: k) {
-      entry.occupied = false
-      rae_ext_rae_buf_set(buf: this.data, index: idx, value: entry)
-      this.length = this.length - 1
-      ret
+    let h: Int = rae_str_hash(s: k)
+    var idx: Int = h % this.cap
+    if idx < 0 {
+      idx = -idx
     }
-    idx = (idx + 1) % this.cap
-    if idx is startIdx {
-      ret
+    let startIdx: Int = idx
+    loop true {
+      let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: idx)
+      if not entry.occupied {
+        ret
+      }
+      if rae_str_eq(a: entry.k, b: k) {
+        entry.occupied = false
+        rae_ext_rae_buf_set(buf: this.data, index: idx, value: entry)
+        this.length = this.length - 1
+        ret
+      }
+      idx = (idx + 1) % this.cap
+      if idx is startIdx {
+        ret
+      }
     }
   }
 }
 
 func keys(V: type, this: view StringMap(V)) ret List(String) {
-  let result: List(String) = List.create(String, cap: this.length)
-  var i: Int = 0
-  loop i < this.cap {
-    let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: i)
-    if entry.occupied {
-      add(result, value: entry.k)
+  unsafe {
+    let result: List(String) = List.create(String, cap: this.length)
+    var i: Int = 0
+    loop i < this.cap {
+      let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: i)
+      if entry.occupied {
+        add(result, value: entry.k)
+      }
+      i = i + 1
     }
-    i = i + 1
+    ret result
   }
-  ret result
 }
 
 func values(V: type, this: view StringMap(V)) ret List(V) {
-  let result: List(V) = List.create(V, cap: this.length)
-  var i: Int = 0
-  loop i < this.cap {
-    let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: i)
-    if entry.occupied {
-      add(result, value: entry.value)
+  unsafe {
+    let result: List(V) = List.create(V, cap: this.length)
+    var i: Int = 0
+    loop i < this.cap {
+      let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: i)
+      if entry.occupied {
+        add(result, value: entry.value)
+      }
+      i = i + 1
     }
-    i = i + 1
+    ret result
   }
-  ret result
 }
 
 func growStringMap(V: type, this: mod StringMap(V)) {
-  this.isGrowing = true
-  let oldCap: Int = this.cap
-  let oldData: Buffer(StringMapEntry(V)) = this.data
-  this.cap = oldCap * 2
-  if this.cap is 0 {
-    this.cap = 8
-  }
-  this.data = rae_ext_rae_buf_alloc(size: this.cap, elemSize: sizeof(StringMapEntry(V)))
-  this.length = 0
-  
-  var i: Int = 0
-  loop i < oldCap {
-    let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: oldData, index: i)
-    if entry.occupied {
-      set(this, k: entry.k, value: entry.value)
+  unsafe {
+    this.isGrowing = true
+    let oldCap: Int = this.cap
+    let oldData: Buffer(StringMapEntry(V)) = this.data
+    this.cap = oldCap * 2
+    if this.cap is 0 {
+      this.cap = 8
     }
-    i = i + 1
+    this.data = rae_ext_rae_buf_alloc(size: this.cap, elemSize: sizeof(StringMapEntry(V)))
+    this.length = 0
+  
+    var i: Int = 0
+    loop i < oldCap {
+      let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: oldData, index: i)
+      if entry.occupied {
+        set(this, k: entry.k, value: entry.value)
+      }
+      i = i + 1
+    }
+    rae_ext_rae_buf_free(buf: oldData)
+    this.isGrowing = false
   }
-  rae_ext_rae_buf_free(buf: oldData)
-  this.isGrowing = false
 }
 
 # Canonical scope-exit dealloc name per docs/scope-exit-dealloc.md.
@@ -235,7 +253,9 @@ func growStringMap(V: type, this: mod StringMap(V)) {
 # emitting `drop()` calls automatically, `free()` becomes dead and
 # can be removed in a cleanup pass.
 func drop(V: type, this: mod StringMap(V)) {
-  rae_ext_rae_buf_free(buf: this.data)
-  this.length = 0
-  this.cap = 0
+  unsafe {
+    rae_ext_rae_buf_free(buf: this.data)
+    this.length = 0
+    this.cap = 0
+  }
 }

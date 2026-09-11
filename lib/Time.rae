@@ -1,8 +1,14 @@
 # Time and Timer library for Rae
 
-func formatTimestamp(epochMs: Int) unsafe extern ret String
+func nativeFormatTimestamp(epochMs: Int) unsafe extern("rae_ext_Time_formatTimestamp") ret String
+func formatTimestamp(epochMs: copy Int) ret String {
+  unsafe { ret nativeFormatTimestamp(epochMs: epochMs) }
+}
 
-func formatDate(epochMs: Int) unsafe extern ret String
+func nativeFormatDate(epochMs: Int) unsafe extern("rae_ext_Time_formatDate") ret String
+func formatDate(epochMs: copy Int) ret String {
+  unsafe { ret nativeFormatDate(epochMs: epochMs) }
+}
 
 type Timer {
   startTime: Int

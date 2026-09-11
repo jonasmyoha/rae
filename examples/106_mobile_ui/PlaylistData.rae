@@ -92,20 +92,22 @@ func makeTrackItem(stem: view String, trackIndex: view Int) ret PlaylistItem {
 # Return the index of the `track` ref matching (stem, trackIndex), or
 # -1 if absent. Linear scan; even a heavy Liked playlist is small.
 func playlistFindTrack(playlist: view Playlist, stem: view String, trackIndex: view Int) pub ret Int {
-  let n: Int = playlist.items.length
-  var i: Int = 0
-  loop i < n {
-    let it: PlaylistItem = rae_ext_rae_buf_get(buf: playlist.items.data, index: i)
-    if it.kind is playlistKindTrack {
-      if it.trackIndex is trackIndex {
-        if it.albumStem is stem {
-          ret i
+  unsafe {
+    let n: Int = playlist.items.length
+    var i: Int = 0
+    loop i < n {
+      let it: PlaylistItem = rae_ext_rae_buf_get(buf: playlist.items.data, index: i)
+      if it.kind is playlistKindTrack {
+        if it.trackIndex is trackIndex {
+          if it.albumStem is stem {
+            ret i
+          }
         }
       }
+      i = i + 1
     }
-    i = i + 1
+    ret -1
   }
-  ret -1
 }
 
 func playlistContains(playlist: view Playlist, stem: view String, trackIndex: view Int) pub ret Bool {
@@ -131,35 +133,37 @@ func playlistToggleTrack(playlist: mod Playlist, stem: view String, trackIndex: 
 # links are skipped (no recursion — avoids cycles, and a nested
 # playlist's own cover would be a grid-of-grids).
 func playlistCoverStems(playlist: view Playlist, max: view Int) pub ret List(String) {
-  let result: List(String) = List.create(String, cap: max)
-  let n: Int = playlist.items.length
-  var i: Int = 0
-  loop i < n {
-    if result.length >= max {
-      ret result
-    }
-    let it: PlaylistItem = rae_ext_rae_buf_get(buf: playlist.items.data, index: i)
-    let isTrack: Bool = it.kind is playlistKindTrack
-    let isAlbum: Bool = it.kind is playlistKindAlbum
-    if isTrack or isAlbum {
-      if it.albumStem.length() > 0 {
-        # Dedup so a playlist of many songs from one album still
-        # contributes a single cover to the grid.
-        var already: Bool = false
-        loop let existing: view String in result {
-          if existing is it.albumStem {
-            already = true
+  unsafe {
+    let result: List(String) = List.create(String, cap: max)
+    let n: Int = playlist.items.length
+    var i: Int = 0
+    loop i < n {
+      if result.length >= max {
+        ret result
+      }
+      let it: PlaylistItem = rae_ext_rae_buf_get(buf: playlist.items.data, index: i)
+      let isTrack: Bool = it.kind is playlistKindTrack
+      let isAlbum: Bool = it.kind is playlistKindAlbum
+      if isTrack or isAlbum {
+        if it.albumStem.length() > 0 {
+          # Dedup so a playlist of many songs from one album still
+          # contributes a single cover to the grid.
+          var already: Bool = false
+          loop let existing: view String in result {
+            if existing is it.albumStem {
+              already = true
+            }
+          }
+          if already is false {
+            let copied: String = "{it.albumStem}"
+            result.add(value: own copied)
           }
         }
-        if already is false {
-          let copied: String = "{it.albumStem}"
-          result.add(value: own copied)
-        }
       }
+      i = i + 1
     }
-    i = i + 1
+    ret result
   }
-  ret result
 }
 
 # Path the user-mutable copy lives at.
@@ -273,30 +277,32 @@ func parsePlaylist(source: view String, id: view String) pub ret Playlist {
 # back to the old temp path, then the read-only asset default; finally creates
 # an empty one with the given title if none exists.
 func loadPlaylist(id: view String, defaultTitle: view String) pub ret Playlist {
-  let tempPath: String = playlistTempPath(id: id)
-  let tempSource: String = rae_ext_rae_sys_read_file(path: tempPath)
-  if tempSource.length() > 0 {
-    log("[playlist] restored '{id}' from {tempPath}")
-    ret parsePlaylist(source: tempSource, id: id)
+  unsafe {
+    let tempPath: String = playlistTempPath(id: id)
+    let tempSource: String = rae_ext_rae_sys_read_file(path: tempPath)
+    if tempSource.length() > 0 {
+      log("[playlist] restored '{id}' from {tempPath}")
+      ret parsePlaylist(source: tempSource, id: id)
+    }
+    let legacyPath: String = legacyPlaylistPath(id: id)
+    let legacySource: String = rae_ext_rae_sys_read_file(path: legacyPath)
+    if legacySource.length() > 0 {
+      log("[playlist] restored '{id}' from {legacyPath}")
+      let migrated: Playlist = parsePlaylist(source: legacySource, id: id)
+      savePlaylist(playlist: migrated)
+      ret migrated
+    }
+    let assetPath: String = playlistAssetPath(id: id)
+    let assetSource: String = rae_ext_rae_sys_read_file(path: assetPath)
+    if assetSource.length() > 0 {
+      log("[playlist] using ship default for '{id}' at {assetPath}")
+      ret parsePlaylist(source: assetSource, id: id)
+    }
+    log("[playlist] no asset or cache for '{id}' — starting empty")
+    let copiedId: String = "{id}"
+    let copiedTitle: String = "{defaultTitle}"
+    ret createPlaylist(id: own copiedId, title: own copiedTitle)
   }
-  let legacyPath: String = legacyPlaylistPath(id: id)
-  let legacySource: String = rae_ext_rae_sys_read_file(path: legacyPath)
-  if legacySource.length() > 0 {
-    log("[playlist] restored '{id}' from {legacyPath}")
-    let migrated: Playlist = parsePlaylist(source: legacySource, id: id)
-    savePlaylist(playlist: migrated)
-    ret migrated
-  }
-  let assetPath: String = playlistAssetPath(id: id)
-  let assetSource: String = rae_ext_rae_sys_read_file(path: assetPath)
-  if assetSource.length() > 0 {
-    log("[playlist] using ship default for '{id}' at {assetPath}")
-    ret parsePlaylist(source: assetSource, id: id)
-  }
-  log("[playlist] no asset or cache for '{id}' — starting empty")
-  let copiedId: String = "{id}"
-  let copiedTitle: String = "{defaultTitle}"
-  ret createPlaylist(id: own copiedId, title: own copiedTitle)
 }
 
 # Convenience: load the canonical "Liked Songs" playlist.
@@ -309,60 +315,62 @@ func loadDefaultLiked() pub ret Playlist {
 # Persist `playlist` to its user-mutable app_cache path. Hand-rolled JSON
 # emit — mirrors `saveLibraryToJson` / `saveHistoryToJson`.
 func savePlaylist(playlist: view Playlist) pub {
-  ensureAppCacheDirs()
-  let path: String = playlistTempPath(id: playlist.id)
-  let openBrace: String = "\u{007B}"
-  let closeBrace: String = "\u{007D}"
-  let openBracket: String = "["
-  let closeBracket: String = "]"
-  let nl: String = "\n"
-  let q: String = "\""
-  let colon: String = ":"
-  let comma: String = ","
-  let escapedId: String = Json.escape(text: playlist.id)
-  let escapedTitle: String = Json.escape(text: playlist.title)
+  unsafe {
+    ensureAppCacheDirs()
+    let path: String = playlistTempPath(id: playlist.id)
+    let openBrace: String = "\u{007B}"
+    let closeBrace: String = "\u{007D}"
+    let openBracket: String = "["
+    let closeBracket: String = "]"
+    let nl: String = "\n"
+    let q: String = "\""
+    let colon: String = ":"
+    let comma: String = ","
+    let escapedId: String = Json.escape(text: playlist.id)
+    let escapedTitle: String = Json.escape(text: playlist.title)
 
-  var content: String = ""
-  content = content.concat(other: openBrace).concat(other: nl)
-  content = content.concat(other: "  ").concat(other: q).concat(other: "type").concat(other: q)
-  content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(other: "playlist").concat(other: q).concat(other: comma).concat(other: nl)
-  content = content.concat(other: "  ").concat(other: q).concat(other: "id").concat(other: q)
-  content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(other: escapedId).concat(other: q).concat(other: comma).concat(other: nl)
-  content = content.concat(other: "  ").concat(other: q).concat(other: "title").concat(other: q)
-  content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(other: escapedTitle).concat(other: q).concat(other: comma).concat(other: nl)
-  content = content.concat(other: "  ").concat(other: q).concat(other: "items").concat(other: q)
-  content = content.concat(other: colon).concat(other: " ").concat(other: openBracket).concat(other: nl)
-  let n: Int = playlist.items.length
-  var i: Int = 0
-  loop i < n {
-    let it: PlaylistItem = rae_ext_rae_buf_get(buf: playlist.items.data, index: i)
-    let escapedKind: String = Json.escape(text: it.kind)
-    let escapedPlaylistId: String = Json.escape(text: it.playlistId)
-    let escapedAlbumStem: String = Json.escape(text: it.albumStem)
-    content = content.concat(other: "    ").concat(other: openBrace).concat(other: " ")
-    content = content.concat(other: q).concat(other: "kind").concat(other: q).concat(other: colon).concat(other: " ")
-    content = content.concat(other: q).concat(other: escapedKind).concat(other: q).concat(other: comma).concat(other: " ")
-    if it.kind is playlistKindPlaylist {
-      content = content.concat(other: q).concat(other: "playlistId").concat(other: q).concat(other: colon).concat(other: " ")
-      content = content.concat(other: q).concat(other: escapedPlaylistId).concat(other: q).concat(other: " ")
-    } else {
-      content = content.concat(other: q).concat(other: "albumStem").concat(other: q).concat(other: colon).concat(other: " ")
-      content = content.concat(other: q).concat(other: escapedAlbumStem).concat(other: q).concat(other: comma).concat(other: " ")
-      content = content.concat(other: q).concat(other: "trackIndex").concat(other: q).concat(other: colon).concat(other: " ")
-      content = content.concat(other: "{it.trackIndex}").concat(other: " ")
+    var content: String = ""
+    content = content.concat(other: openBrace).concat(other: nl)
+    content = content.concat(other: "  ").concat(other: q).concat(other: "type").concat(other: q)
+    content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(other: "playlist").concat(other: q).concat(other: comma).concat(other: nl)
+    content = content.concat(other: "  ").concat(other: q).concat(other: "id").concat(other: q)
+    content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(other: escapedId).concat(other: q).concat(other: comma).concat(other: nl)
+    content = content.concat(other: "  ").concat(other: q).concat(other: "title").concat(other: q)
+    content = content.concat(other: colon).concat(other: " ").concat(other: q).concat(other: escapedTitle).concat(other: q).concat(other: comma).concat(other: nl)
+    content = content.concat(other: "  ").concat(other: q).concat(other: "items").concat(other: q)
+    content = content.concat(other: colon).concat(other: " ").concat(other: openBracket).concat(other: nl)
+    let n: Int = playlist.items.length
+    var i: Int = 0
+    loop i < n {
+      let it: PlaylistItem = rae_ext_rae_buf_get(buf: playlist.items.data, index: i)
+      let escapedKind: String = Json.escape(text: it.kind)
+      let escapedPlaylistId: String = Json.escape(text: it.playlistId)
+      let escapedAlbumStem: String = Json.escape(text: it.albumStem)
+      content = content.concat(other: "    ").concat(other: openBrace).concat(other: " ")
+      content = content.concat(other: q).concat(other: "kind").concat(other: q).concat(other: colon).concat(other: " ")
+      content = content.concat(other: q).concat(other: escapedKind).concat(other: q).concat(other: comma).concat(other: " ")
+      if it.kind is playlistKindPlaylist {
+        content = content.concat(other: q).concat(other: "playlistId").concat(other: q).concat(other: colon).concat(other: " ")
+        content = content.concat(other: q).concat(other: escapedPlaylistId).concat(other: q).concat(other: " ")
+      } else {
+        content = content.concat(other: q).concat(other: "albumStem").concat(other: q).concat(other: colon).concat(other: " ")
+        content = content.concat(other: q).concat(other: escapedAlbumStem).concat(other: q).concat(other: comma).concat(other: " ")
+        content = content.concat(other: q).concat(other: "trackIndex").concat(other: q).concat(other: colon).concat(other: " ")
+        content = content.concat(other: "{it.trackIndex}").concat(other: " ")
+      }
+      content = content.concat(other: closeBrace)
+      if i < n - 1 {
+        content = content.concat(other: comma)
+      }
+      content = content.concat(other: nl)
+      i = i + 1
     }
-    content = content.concat(other: closeBrace)
-    if i < n - 1 {
-      content = content.concat(other: comma)
+    content = content.concat(other: "  ").concat(other: closeBracket).concat(other: nl)
+    content = content.concat(other: closeBrace).concat(other: nl)
+    let ok: Bool = rae_ext_rae_sys_write_file(path: path, content: content)
+    if ok is false {
+      log("[playlist] save failed: {path}")
     }
-    content = content.concat(other: nl)
-    i = i + 1
-  }
-  content = content.concat(other: "  ").concat(other: closeBracket).concat(other: nl)
-  content = content.concat(other: closeBrace).concat(other: nl)
-  let ok: Bool = rae_ext_rae_sys_write_file(path: path, content: content)
-  if ok is false {
-    log("[playlist] save failed: {path}")
   }
 }
 

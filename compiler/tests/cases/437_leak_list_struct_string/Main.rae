@@ -19,7 +19,7 @@ type Entity {
   active: Bool
 }
 
-func rae_ext_rae_mem_stats_outstanding() extern ret Int
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
 
 func makeEntity(entId: own String, entKind: own String) ret Entity {
   let e: Entity = { id: entId, kind: entKind, active: true }
@@ -45,27 +45,29 @@ func buildList() {
 }
 
 func main() {
-  let warmups: Int = 50
-  var i: Int = 0
-  loop i < warmups {
-    buildList()
-    i = i + 1
-  }
-  let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+  unsafe {
+    let warmups: Int = 50
+    var i: Int = 0
+    loop i < warmups {
+      buildList()
+      i = i + 1
+    }
+    let baseline: Int = rae_ext_rae_mem_stats_outstanding()
 
-  let iterations: Int = 5000
-  i = 0
-  loop i < iterations {
-    buildList()
-    i = i + 1
-  }
-  let final: Int = rae_ext_rae_mem_stats_outstanding()
-  let leaked: Int = final - baseline
+    let iterations: Int = 5000
+    i = 0
+    loop i < iterations {
+      buildList()
+      i = i + 1
+    }
+    let final: Int = rae_ext_rae_mem_stats_outstanding()
+    let leaked: Int = final - baseline
 
-  log("iterations: {iterations}")
-  if leaked < 100 {
-    log("verdict: OK")
-  } else {
-    log("verdict: LEAK outstanding={leaked}")
+    log("iterations: {iterations}")
+    if leaked < 100 {
+      log("verdict: OK")
+    } else {
+      log("verdict: LEAK outstanding={leaked}")
+    }
   }
 }

@@ -123,73 +123,75 @@ func writeSlotTransform(renderState: mod TetrisRenderState, entity: view Int, tr
 }
 
 func extractTetrisScene(renderState: mod TetrisRenderState, world: view World) {
-  let hidden: Transform3d = hiddenTransform()
-  var gridY: Int = 0
-  loop gridY < gridHeight {
-    var gridX: Int = 0
-    loop gridX < gridWidth {
-      let slot: Int = gridY * gridWidth + gridX
-      let entity: Int = renderState.gridBase + slot
-      let colorId: Int = gridGet(world: world, x: gridX, y: gridY)
-      if colorId > 0 {
+  unsafe {
+    let hidden: Transform3d = hiddenTransform()
+    var gridY: Int = 0
+    loop gridY < gridHeight {
+      var gridX: Int = 0
+      loop gridX < gridWidth {
+        let slot: Int = gridY * gridWidth + gridX
+        let entity: Int = renderState.gridBase + slot
+        let colorId: Int = gridGet(world: world, x: gridX, y: gridY)
+        if colorId > 0 {
+          writeSlotTransform(
+            renderState: renderState, entity: entity
+            transform: blockTransform(gridX: gridX, gridY: gridY, size: 0.94))
+          setEntityMaterial(world: renderState.world, entity: entity, colorIdx: colorId - 1)
+        } else {
+          writeSlotTransform(renderState: renderState, entity: entity, transform: hidden)
+        }
+        gridX = gridX + 1
+      }
+      gridY = gridY + 1
+    }
+
+    var activeSlot: Int = 0
+    if world.state is not GameState.gameOver {
+      let piece: view Piece => world.currentPiece
+      let colorId: Int = getKindId(kind: piece.kind)
+      var pieceY: Int = 0
+      loop pieceY < 4 {
+        var pieceX: Int = 0
+        loop pieceX < 4 {
+          if getShapeCell(kind: piece.kind, rot: piece.rotation, px: pieceX, py: pieceY) is 1 {
+            let entity: Int = renderState.currentBase + activeSlot
+            writeSlotTransform(
+              renderState: renderState, entity: entity
+              transform: blockTransform(
+                gridX: piece.x + pieceX, gridY: piece.y + pieceY, size: 0.96))
+            setEntityMaterial(world: renderState.world, entity: entity, colorIdx: colorId - 1)
+            activeSlot = activeSlot + 1
+          }
+          pieceX = pieceX + 1
+        }
+        pieceY = pieceY + 1
+      }
+    }
+    loop activeSlot < 4 {
+      writeSlotTransform(
+        renderState: renderState, entity: renderState.currentBase + activeSlot
+        transform: hidden)
+      activeSlot = activeSlot + 1
+    }
+
+    var particleIndex: Int = 0
+    loop particleIndex < maxParticles {
+      let particle: Particle = rae_ext_rae_buf_get(
+        buf: world.particles.data, index: particleIndex)
+      let entity: Int = renderState.particleBase + particleIndex
+      if particle.active {
         writeSlotTransform(
           renderState: renderState, entity: entity
-          transform: blockTransform(gridX: gridX, gridY: gridY, size: 0.94))
-        setEntityMaterial(world: renderState.world, entity: entity, colorIdx: colorId - 1)
+          transform: Transform3d {
+            position: Vec3.create(
+              x: particle.px - 5.0, y: particle.pz, z: 20.0 + particle.py)
+            rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+            scale: Vec3.create(x: particle.size, y: particle.size, z: particle.size)
+          })
       } else {
         writeSlotTransform(renderState: renderState, entity: entity, transform: hidden)
       }
-      gridX = gridX + 1
+      particleIndex = particleIndex + 1
     }
-    gridY = gridY + 1
-  }
-
-  var activeSlot: Int = 0
-  if world.state is not GameState.gameOver {
-    let piece: view Piece => world.currentPiece
-    let colorId: Int = getKindId(kind: piece.kind)
-    var pieceY: Int = 0
-    loop pieceY < 4 {
-      var pieceX: Int = 0
-      loop pieceX < 4 {
-        if getShapeCell(kind: piece.kind, rot: piece.rotation, px: pieceX, py: pieceY) is 1 {
-          let entity: Int = renderState.currentBase + activeSlot
-          writeSlotTransform(
-            renderState: renderState, entity: entity
-            transform: blockTransform(
-              gridX: piece.x + pieceX, gridY: piece.y + pieceY, size: 0.96))
-          setEntityMaterial(world: renderState.world, entity: entity, colorIdx: colorId - 1)
-          activeSlot = activeSlot + 1
-        }
-        pieceX = pieceX + 1
-      }
-      pieceY = pieceY + 1
-    }
-  }
-  loop activeSlot < 4 {
-    writeSlotTransform(
-      renderState: renderState, entity: renderState.currentBase + activeSlot
-      transform: hidden)
-    activeSlot = activeSlot + 1
-  }
-
-  var particleIndex: Int = 0
-  loop particleIndex < maxParticles {
-    let particle: Particle = rae_ext_rae_buf_get(
-      buf: world.particles.data, index: particleIndex)
-    let entity: Int = renderState.particleBase + particleIndex
-    if particle.active {
-      writeSlotTransform(
-        renderState: renderState, entity: entity
-        transform: Transform3d {
-          position: Vec3.create(
-            x: particle.px - 5.0, y: particle.pz, z: 20.0 + particle.py)
-          rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
-          scale: Vec3.create(x: particle.size, y: particle.size, z: particle.size)
-        })
-    } else {
-      writeSlotTransform(renderState: renderState, entity: entity, transform: hidden)
-    }
-    particleIndex = particleIndex + 1
   }
 }

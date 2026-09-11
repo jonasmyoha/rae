@@ -322,24 +322,28 @@ func uiActionCount(input: view UiInput) ret Int {
 }
 
 func uiActionAt(input: view UiInput, index: view Int) ret String {
-  if index < 0 or index >= input.events.length {
-    ret ""
+  unsafe {
+    if index < 0 or index >= input.events.length {
+      ret ""
+    }
+    let event: UiActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: index)
+    ret "{event.actionId}"
   }
-  let event: UiActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: index)
-  ret "{event.actionId}"
 }
 
 # True when `actionId` fired this frame. The common case is a handful of
 # buttons, so a scan per button is cheaper than building a set — and it
 # reads as a list of things the app responds to, which is the point.
 func uiActionFired(input: view UiInput, actionId: view String) ret Bool {
-  var i: Int = 0
-  loop i < input.events.length {
-    let event: UiActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
-    if event.actionId is actionId {
-      ret true
+  unsafe {
+    var i: Int = 0
+    loop i < input.events.length {
+      let event: UiActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
+      if event.actionId is actionId {
+        ret true
+      }
+      i = i + 1
     }
-    i = i + 1
+    ret false
   }
-  ret false
 }

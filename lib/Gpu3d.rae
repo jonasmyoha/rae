@@ -61,78 +61,129 @@ open webgpu/Webgpu
 open webgpu/Context
 
 # ----- raw C ABI (implementation detail; prefer the typed API below) ---
-func meshCreate(verts: view Buffer(Float), vertCount: Int, indices: view Buffer(Int), indexCount: Int) extern ret Int
-func meshUpdate(mesh: Int, verts: view Buffer(Float), vertCount: Int) extern
+func nativeMeshCreate(verts: view Buffer(Float), vertCount: Int, indices: view Buffer(Int), indexCount: Int) unsafe extern("rae_ext_Gpu3d_meshCreate") ret Int
+func meshCreate(verts: view Buffer(Float), vertCount: copy Int, indices: view Buffer(Int), indexCount: copy Int) ret Int {
+  unsafe { ret nativeMeshCreate(verts: verts, vertCount: vertCount, indices: indices, indexCount: indexCount) }
+}
+func nativeMeshUpdate(mesh: Int, verts: view Buffer(Float), vertCount: Int) unsafe extern("rae_ext_Gpu3d_meshUpdate")
+func meshUpdate(mesh: copy Int, verts: view Buffer(Float), vertCount: copy Int) {
+  unsafe { nativeMeshUpdate(mesh: mesh, verts: verts, vertCount: vertCount) }
+}
 # Frame prepare (#514): C packs+uploads the per-frame uniform and returns 1 when
 # the device/targets are ready; the render pass is then built in Rae below.
-func g3dFramePrepare(frame: view Buffer(Float), count: Int) extern("rae_g3d_frame_prepare") ret Int
+func nativeG3dFramePrepare(frame: view Buffer(Float), count: Int) unsafe extern("rae_g3d_frame_prepare") ret Int
+func g3dFramePrepare(frame: view Buffer(Float), count: copy Int) ret Int {
+  unsafe { ret nativeG3dFramePrepare(frame: frame, count: count) }
+}
 # Forward target-view + pipeline handle accessors (ungated platform ABI,
 # mirroring the deferred rae_gb_* accessors).
-func g3dHdrView() extern("rae_g3d_hdr_view") ret Ptr
-func g3dNormalView() extern("rae_g3d_normal_view") ret Ptr
-func g3dVelocityView() extern("rae_g3d_velocity_view") ret Ptr
-func g3dAmbientView() extern("rae_g3d_ambient_view") ret Ptr
-func g3dDepthView() extern("rae_g3d_depth_view") ret Ptr
-func g3dPipeline() extern("rae_g3d_pipeline") ret Ptr
-func g3dBind() extern("rae_g3d_bind") ret Ptr
+func g3dHdrView() unsafe extern("rae_g3d_hdr_view") ret Ptr
+func g3dNormalView() unsafe extern("rae_g3d_normal_view") ret Ptr
+func g3dVelocityView() unsafe extern("rae_g3d_velocity_view") ret Ptr
+func g3dAmbientView() unsafe extern("rae_g3d_ambient_view") ret Ptr
+func g3dDepthView() unsafe extern("rae_g3d_depth_view") ret Ptr
+func g3dPipeline() unsafe extern("rae_g3d_pipeline") ret Ptr
+func g3dBind() unsafe extern("rae_g3d_bind") ret Ptr
 # Hand the Rae-built encoder + render pass back to C so the still-C end/submit
 # path (and metaballs/skinned draws) encode into them.
-func g3dSetFrame(enc: Ptr, pass: Ptr) extern("rae_g3d_set_frame")
+func g3dSetFrame(enc: Ptr, pass: Ptr) unsafe extern("rae_g3d_set_frame")
 # Forward mesh draw (#514): C does the shared CPU bookkeeping (validate mesh +
 # draw limit, pack the 40-float record, return the firstInstance slot or -1);
 # Rae encodes the instanced DrawIndexed below.
-func g3dPushDrawRecord(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, emR: Float, emG: Float, emB: Float, roughness: Float) extern("rae_g3d_push_draw_record") ret Int
-func g3dMeshVbuf(mesh: Int) extern("rae_g3d_mesh_vbuf") ret Ptr
-func g3dMeshIbuf(mesh: Int) extern("rae_g3d_mesh_ibuf") ret Ptr
-func g3dMeshIcount(mesh: Int) extern("rae_g3d_mesh_icount") ret Int
+func nativeG3dPushDrawRecord(mesh: Int, model: view Mat4, prevModel: view Mat4, r: Float, g: Float, b: Float, metallic: Float, emR: Float, emG: Float, emB: Float, roughness: Float) unsafe extern("rae_g3d_push_draw_record") ret Int
+func g3dPushDrawRecord(mesh: copy Int, model: view Mat4, prevModel: view Mat4, r: copy Float, g: copy Float, b: copy Float, metallic: copy Float, emR: copy Float, emG: copy Float, emB: copy Float, roughness: copy Float) ret Int {
+  unsafe { ret nativeG3dPushDrawRecord(mesh: mesh, model: model, prevModel: prevModel, r: r, g: g, b: b, metallic: metallic, emR: emR, emG: emG, emB: emB, roughness: roughness) }
+}
+func g3dMeshVbuf(mesh: Int) unsafe extern("rae_g3d_mesh_vbuf") ret Ptr
+func g3dMeshIbuf(mesh: Int) unsafe extern("rae_g3d_mesh_ibuf") ret Ptr
+func nativeG3dMeshIcount(mesh: Int) unsafe extern("rae_g3d_mesh_icount") ret Int
+func g3dMeshIcount(mesh: copy Int) ret Int {
+  unsafe { ret nativeG3dMeshIcount(mesh: mesh) }
+}
 # The current scene pass (set by beginForward via g3dSetFrame). draw() reads it
 # to encode; the still-C end/submit/skinned path reads the same global.
-func g3dPass() extern("rae_g3d_pass") ret Ptr
+func g3dPass() unsafe extern("rae_g3d_pass") ret Ptr
 # Metaball cluster (#514): C ensures the SDF pipeline, takes a per-frame group
 # slot, packs+uploads the balls/colors/params, and returns the slot (or -1);
 # Rae encodes the SDF fullscreen draw and restores the geometry pipeline/bind.
-func g3dPushMetaballCluster(packedBalls: view Buffer(Float), count: Int, packedColors: view Buffer(Float), smoothing: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) extern("rae_g3d_push_metaball_cluster") ret Int
-func g3dSdfPipeline() extern("rae_g3d_sdf_pipeline") ret Ptr
-func g3dSdfBind(slot: Int) extern("rae_g3d_sdf_bind") ret Ptr
+func nativeG3dPushMetaballCluster(packedBalls: view Buffer(Float), count: Int, packedColors: view Buffer(Float), smoothing: Float, metallic: Float, roughness: Float, emR: Float, emG: Float, emB: Float) unsafe extern("rae_g3d_push_metaball_cluster") ret Int
+func g3dPushMetaballCluster(packedBalls: view Buffer(Float), count: copy Int, packedColors: view Buffer(Float), smoothing: copy Float, metallic: copy Float, roughness: copy Float, emR: copy Float, emG: copy Float, emB: copy Float) ret Int {
+  unsafe { ret nativeG3dPushMetaballCluster(packedBalls: packedBalls, count: count, packedColors: packedColors, smoothing: smoothing, metallic: metallic, roughness: roughness, emR: emR, emG: emG, emB: emB) }
+}
+func g3dSdfPipeline() unsafe extern("rae_g3d_sdf_pipeline") ret Ptr
+func g3dSdfBind(slot: Int) unsafe extern("rae_g3d_sdf_bind") ret Ptr
 # Scene-pass finish primitives (#514): Rae ends the pass + finishes the command
 # buffer over the bindings; g3dSubmitCmd is the one thin C call (Rae cannot yet
 # take the address of a single handle for wgpuQueueSubmit).
-func g3dEncoder() extern("rae_g3d_encoder") ret Ptr
-func g3dFrameActive() extern("rae_g3d_frame_active") ret Int
-func g3dClearFrame() extern("rae_g3d_clear_frame")
-func g3dSubmitCmd(cmd: Ptr) extern("rae_g3d_submit_cmd")
+func g3dEncoder() unsafe extern("rae_g3d_encoder") ret Ptr
+func nativeG3dFrameActive() unsafe extern("rae_g3d_frame_active") ret Int
+func g3dFrameActive() ret Int {
+  unsafe { ret nativeG3dFrameActive() }
+}
+func nativeG3dClearFrame() unsafe extern("rae_g3d_clear_frame")
+func g3dClearFrame() {
+  unsafe { nativeG3dClearFrame() }
+}
+func g3dSubmitCmd(cmd: Ptr) unsafe extern("rae_g3d_submit_cmd")
 # The LDR offscreen the window presents (shared with the deferred/2D path).
-func g2dOffView() extern("rae_g2d_off_view") ret Ptr
+func g2dOffView() unsafe extern("rae_g2d_off_view") ret Ptr
 # Tonemap (#514): C ensures the pipeline/bind and returns the source slot (the
 # TAA slot when TAA is on), or -1; Rae encodes the fullscreen resolve into the
 # offscreen. present-frame advances the virtual clock + copies to the drawable.
-func g3dTonemapPrepare() extern("rae_g3d_tonemap_prepare") ret Int
-func g3dTonemapPipeline() extern("rae_g3d_tonemap_pipeline") ret Ptr
-func g3dTonemapBind(slot: Int) extern("rae_g3d_tonemap_bind") ret Ptr
-func g3dTonemapPending() extern("rae_g3d_tonemap_pending") ret Int
-func g3dPresentFrame() extern("rae_g3d_present_frame")
+func nativeG3dTonemapPrepare() unsafe extern("rae_g3d_tonemap_prepare") ret Int
+func g3dTonemapPrepare() ret Int {
+  unsafe { ret nativeG3dTonemapPrepare() }
+}
+func g3dTonemapPipeline() unsafe extern("rae_g3d_tonemap_pipeline") ret Ptr
+func g3dTonemapBind(slot: Int) unsafe extern("rae_g3d_tonemap_bind") ret Ptr
+func nativeG3dTonemapPending() unsafe extern("rae_g3d_tonemap_pending") ret Int
+func g3dTonemapPending() ret Int {
+  unsafe { ret nativeG3dTonemapPending() }
+}
+func nativeG3dPresentFrame() unsafe extern("rae_g3d_present_frame")
+func g3dPresentFrame() {
+  unsafe { nativeG3dPresentFrame() }
+}
 # TAA (#514): C ensures the pipeline/bind, uploads the blend params, flips
 # history-valid and returns the current history slot (or -1); Rae encodes the
 # fullscreen resolve into taa_view[cur].
-func g3dTaaPrepare() extern("rae_g3d_taa_prepare") ret Int
-func g3dTaaPipeline() extern("rae_g3d_taa_pipeline") ret Ptr
-func g3dTaaBind(slot: Int) extern("rae_g3d_taa_bind") ret Ptr
-func g3dTaaView(slot: Int) extern("rae_g3d_taa_view") ret Ptr
+func nativeG3dTaaPrepare() unsafe extern("rae_g3d_taa_prepare") ret Int
+func g3dTaaPrepare() ret Int {
+  unsafe { ret nativeG3dTaaPrepare() }
+}
+func g3dTaaPipeline() unsafe extern("rae_g3d_taa_pipeline") ret Ptr
+func g3dTaaBind(slot: Int) unsafe extern("rae_g3d_taa_bind") ret Ptr
+func g3dTaaView(slot: Int) unsafe extern("rae_g3d_taa_view") ret Ptr
 # SSAO (#514): C ensures the pipelines/binds/targets + uploads the params
 # (returns 1 to proceed, 0 to skip); Rae runs the two fullscreen passes — AO
 # generation into ao_view, then the ambient*AO composite into hdrColor (Load).
-func g3dSsaoPrepare() extern("rae_g3d_ssao_prepare") ret Int
-func g3dSsaoEnabled() extern("rae_g3d_ssao_enabled") ret Int
-func g3dAoDebugOn() extern("rae_g3d_ao_debug_on") ret Int
-func g3dSsaoPipeline() extern("rae_g3d_ssao_pipeline") ret Ptr
-func g3dSsaoBind() extern("rae_g3d_ssao_bind") ret Ptr
-func g3dAoView() extern("rae_g3d_ao_view") ret Ptr
-func g3dAoApplyPipeline() extern("rae_g3d_ao_apply_pipeline") ret Ptr
-func g3dAoApplyBind() extern("rae_g3d_ao_apply_bind") ret Ptr
-func g3dAoDebugPipeline() extern("rae_g3d_ao_debug_pipeline") ret Ptr
-func g3dAoDebugBind() extern("rae_g3d_ao_debug_bind") ret Ptr
-func g3dClearAo() extern("rae_g3d_clear_ao")
-func shutdown() extern
+func nativeG3dSsaoPrepare() unsafe extern("rae_g3d_ssao_prepare") ret Int
+func g3dSsaoPrepare() ret Int {
+  unsafe { ret nativeG3dSsaoPrepare() }
+}
+func nativeG3dSsaoEnabled() unsafe extern("rae_g3d_ssao_enabled") ret Int
+func g3dSsaoEnabled() ret Int {
+  unsafe { ret nativeG3dSsaoEnabled() }
+}
+func nativeG3dAoDebugOn() unsafe extern("rae_g3d_ao_debug_on") ret Int
+func g3dAoDebugOn() ret Int {
+  unsafe { ret nativeG3dAoDebugOn() }
+}
+func g3dSsaoPipeline() unsafe extern("rae_g3d_ssao_pipeline") ret Ptr
+func g3dSsaoBind() unsafe extern("rae_g3d_ssao_bind") ret Ptr
+func g3dAoView() unsafe extern("rae_g3d_ao_view") ret Ptr
+func g3dAoApplyPipeline() unsafe extern("rae_g3d_ao_apply_pipeline") ret Ptr
+func g3dAoApplyBind() unsafe extern("rae_g3d_ao_apply_bind") ret Ptr
+func g3dAoDebugPipeline() unsafe extern("rae_g3d_ao_debug_pipeline") ret Ptr
+func g3dAoDebugBind() unsafe extern("rae_g3d_ao_debug_bind") ret Ptr
+func nativeG3dClearAo() unsafe extern("rae_g3d_clear_ao")
+func g3dClearAo() {
+  unsafe { nativeG3dClearAo() }
+}
+func nativeShutdown() unsafe extern("rae_ext_Gpu3d_shutdown")
+func shutdown() {
+  unsafe { nativeShutdown() }
+}
 
 # ----- frame parameter block (internal encoding) ----------------------
 # `begin` takes a packed 36-Float block:
@@ -193,31 +244,33 @@ func setTime(frame: mod Frame3d, t: view Float) pub {
 # fullscreen passes. `loadOp` is WGPULoadOp_Clear for passes that overwrite every
 # pixel, or WGPULoadOp_Load to blend into the existing target (the SSAO composite).
 func fullscreenPostPass(target: copy Ptr, pipeline: copy Ptr, bind: copy Ptr, loadOp: copy Int32) {
-  let att: WGPURenderPassColorAttachment = {
-    view_: target, depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32,
-    loadOp: loadOp, storeOp: WGPUStoreOp_Store,
-    clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }
+  unsafe {
+    let att: WGPURenderPassColorAttachment = {
+      view_: target, depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32,
+      loadOp: loadOp, storeOp: WGPUStoreOp_Store,
+      clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }
+    }
+    var postAtt: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 1)
+    postAtt.add(value: att)
+    let rpDesc: WGPURenderPassDescriptor = {
+      colorAttachmentCount: 1 as UInt64, colorAttachments: postAtt.data
+    }
+    let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
+    let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
+    let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: pipeline)
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+      group: bind, dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+    wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: 3 as UInt32,
+      instanceCount: 1 as UInt32, firstVertex: 0 as UInt32, firstInstance: 0 as UInt32)
+    wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
+    let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
+    let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
+    g3dSubmitCmd(cmd: cmd)
+    wgpuCommandBufferRelease(commandBuffer: cmd)
+    wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
+    wgpuCommandEncoderRelease(commandEncoder: enc)
   }
-  var postAtt: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 1)
-  postAtt.add(value: att)
-  let rpDesc: WGPURenderPassDescriptor = {
-    colorAttachmentCount: 1 as UInt64, colorAttachments: postAtt.data
-  }
-  let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
-  let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
-  let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
-  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: pipeline)
-  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
-    group: bind, dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
-  wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: 3 as UInt32,
-    instanceCount: 1 as UInt32, firstVertex: 0 as UInt32, firstInstance: 0 as UInt32)
-  wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
-  let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
-  let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
-  g3dSubmitCmd(cmd: cmd)
-  wgpuCommandBufferRelease(commandBuffer: cmd)
-  wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
-  wgpuCommandEncoderRelease(commandEncoder: enc)
 }
 # Build the forward scene pass in Rae over the WebGPU bindings (#514). C has
 # already packed+uploaded the frame uniform (g3dFramePrepare); here we open the
@@ -227,62 +280,64 @@ func fullscreenPostPass(target: copy Ptr, pipeline: copy Ptr, bind: copy Ptr, lo
 # 1.0). clearR/G/B are the frame's clearColor (frame[33..35]).
 func beginForward(frame: view Buffer(Float), count: copy Int,
                   clearR: copy Float, clearG: copy Float, clearB: copy Float) {
-  if g3dFramePrepare(frame: frame, count: count) is 0 { ret }
+  unsafe {
+    if g3dFramePrepare(frame: frame, count: count) is 0 { ret }
 
-  let undefinedSlice: UInt32 = WGPU_DEPTH_SLICE_UNDEFINED as UInt32
+    let undefinedSlice: UInt32 = WGPU_DEPTH_SLICE_UNDEFINED as UInt32
 
-  # 0: linear HDR; tonemap writes the offscreen (#334). Clear to the bg colour.
-  let att0: WGPURenderPassColorAttachment = {
-    view_: g3dHdrView(), depthSlice: undefinedSlice,
-    loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store,
-    clearValue: { r: clearR as Float64, g: clearG as Float64, b: clearB as Float64, a: 1.0 }
-  }
-  # 1: world normal (sampled by SSAO/GI). Clear to zero.
-  let att1: WGPURenderPassColorAttachment = {
-    view_: g3dNormalView(), depthSlice: undefinedSlice,
-    loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store,
-    clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }
-  }
-  # 2: velocity (sampled by TAA). Clear to zero motion.
-  let att2: WGPURenderPassColorAttachment = {
-    view_: g3dVelocityView(), depthSlice: undefinedSlice,
-    loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store,
-    clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }
-  }
-  # 3: ambient (sampled by the SSAO composite). Clear to zero.
-  let att3: WGPURenderPassColorAttachment = {
-    view_: g3dAmbientView(), depthSlice: undefinedSlice,
-    loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store,
-    clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }
-  }
-  var colorAtts: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 4)
-  colorAtts.add(value: att0)
-  colorAtts.add(value: att1)
-  colorAtts.add(value: att2)
-  colorAtts.add(value: att3)
+    # 0: linear HDR; tonemap writes the offscreen (#334). Clear to the bg colour.
+    let att0: WGPURenderPassColorAttachment = {
+      view_: g3dHdrView(), depthSlice: undefinedSlice,
+      loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store,
+      clearValue: { r: clearR as Float64, g: clearG as Float64, b: clearB as Float64, a: 1.0 }
+    }
+    # 1: world normal (sampled by SSAO/GI). Clear to zero.
+    let att1: WGPURenderPassColorAttachment = {
+      view_: g3dNormalView(), depthSlice: undefinedSlice,
+      loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store,
+      clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }
+    }
+    # 2: velocity (sampled by TAA). Clear to zero motion.
+    let att2: WGPURenderPassColorAttachment = {
+      view_: g3dVelocityView(), depthSlice: undefinedSlice,
+      loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store,
+      clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }
+    }
+    # 3: ambient (sampled by the SSAO composite). Clear to zero.
+    let att3: WGPURenderPassColorAttachment = {
+      view_: g3dAmbientView(), depthSlice: undefinedSlice,
+      loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store,
+      clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }
+    }
+    var colorAtts: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 4)
+    colorAtts.add(value: att0)
+    colorAtts.add(value: att1)
+    colorAtts.add(value: att2)
+    colorAtts.add(value: att3)
 
-  # Depth: standard Z here (forward), so the far plane clears to 1.0. (#333:
-  # stored so it is sampleable by SSAO/TAA.)
-  let depthAtt: WGPURenderPassDepthStencilAttachment = {
-    view_: g3dDepthView(),
-    depthLoadOp: WGPULoadOp_Clear, depthStoreOp: WGPUStoreOp_Store,
-    depthClearValue: 1.0
-  }
-  var depthAtts: List(WGPURenderPassDepthStencilAttachment) = List.create(WGPURenderPassDepthStencilAttachment, cap: 1)
-  depthAtts.add(value: depthAtt)
+    # Depth: standard Z here (forward), so the far plane clears to 1.0. (#333:
+    # stored so it is sampleable by SSAO/TAA.)
+    let depthAtt: WGPURenderPassDepthStencilAttachment = {
+      view_: g3dDepthView(),
+      depthLoadOp: WGPULoadOp_Clear, depthStoreOp: WGPUStoreOp_Store,
+      depthClearValue: 1.0
+    }
+    var depthAtts: List(WGPURenderPassDepthStencilAttachment) = List.create(WGPURenderPassDepthStencilAttachment, cap: 1)
+    depthAtts.add(value: depthAtt)
 
-  let rpDesc: WGPURenderPassDescriptor = {
-    colorAttachmentCount: 4 as UInt64,
-    colorAttachments: colorAtts.data,
-    depthStencilAttachment: depthAtts.data
+    let rpDesc: WGPURenderPassDescriptor = {
+      colorAttachmentCount: 4 as UInt64,
+      colorAttachments: colorAtts.data,
+      depthStencilAttachment: depthAtts.data
+    }
+    let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
+    let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
+    let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dPipeline())
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+      group: g3dBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+    g3dSetFrame(enc: enc, pass: pass)
   }
-  let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
-  let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
-  let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
-  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dPipeline())
-  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
-    group: g3dBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
-  g3dSetFrame(enc: enc, pass: pass)
 }
 
 # Forward mesh draw (#514): encode one instanced DrawIndexed into the scene
@@ -294,20 +349,22 @@ func draw(mesh: copy Int, model: view Mat4, prevModel: view Mat4,
           r: copy Float, g: copy Float, b: copy Float,
           metallic: copy Float, roughness: copy Float,
           emR: copy Float, emG: copy Float, emB: copy Float) {
-  let slot: Int = g3dPushDrawRecord(mesh: mesh, model: model, prevModel: prevModel,
-    r: r, g: g, b: b, metallic: metallic, emR: emR, emG: emG, emB: emB, roughness: roughness)
-  if slot < 0 { ret }
-  let pass: Ptr = g3dPass()
-  let vbuf: Ptr = g3dMeshVbuf(mesh: mesh)
-  let ibuf: Ptr = g3dMeshIbuf(mesh: mesh)
-  let icount: Int = g3dMeshIcount(mesh: mesh)
-  wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder: pass, slot: 0 as UInt32,
-    buffer: vbuf, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: vbuf))
-  wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder: pass, buffer: ibuf,
-    format: WGPUIndexFormat_Uint32, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: ibuf))
-  wgpuRenderPassEncoderDrawIndexed(renderPassEncoder: pass, indexCount: icount as UInt32,
-    instanceCount: 1 as UInt32, firstIndex: 0 as UInt32, baseVertex: 0 as Int32,
-    firstInstance: slot as UInt32)
+  unsafe {
+    let slot: Int = g3dPushDrawRecord(mesh: mesh, model: model, prevModel: prevModel,
+      r: r, g: g, b: b, metallic: metallic, emR: emR, emG: emG, emB: emB, roughness: roughness)
+    if slot < 0 { ret }
+    let pass: Ptr = g3dPass()
+    let vbuf: Ptr = g3dMeshVbuf(mesh: mesh)
+    let ibuf: Ptr = g3dMeshIbuf(mesh: mesh)
+    let icount: Int = g3dMeshIcount(mesh: mesh)
+    wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder: pass, slot: 0 as UInt32,
+      buffer: vbuf, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: vbuf))
+    wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder: pass, buffer: ibuf,
+      format: WGPUIndexFormat_Uint32, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: ibuf))
+    wgpuRenderPassEncoderDrawIndexed(renderPassEncoder: pass, indexCount: icount as UInt32,
+      instanceCount: 1 as UInt32, firstIndex: 0 as UInt32, baseVertex: 0 as Int32,
+      firstInstance: slot as UInt32)
+  }
 }
 
 # Forward metaball cluster draw (#514): encode the SDF raymarch fullscreen draw
@@ -318,19 +375,21 @@ func draw(mesh: copy Int, model: view Mat4, prevModel: view Mat4,
 func drawMetaballs(packedBalls: view Buffer(Float), count: copy Int, packedColors: view Buffer(Float),
                    smoothing: copy Float, metallic: copy Float, roughness: copy Float,
                    emR: copy Float, emG: copy Float, emB: copy Float) {
-  let slot: Int = g3dPushMetaballCluster(packedBalls: packedBalls, count: count, packedColors: packedColors,
-    smoothing: smoothing, metallic: metallic, roughness: roughness, emR: emR, emG: emG, emB: emB)
-  if slot < 0 { ret }
-  let pass: Ptr = g3dPass()
-  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dSdfPipeline())
-  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
-    group: g3dSdfBind(slot: slot), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
-  wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: 3 as UInt32,
-    instanceCount: 1 as UInt32, firstVertex: 0 as UInt32, firstInstance: 0 as UInt32)
-  # Restore the geometry pipeline/bind for subsequent mesh draws.
-  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dPipeline())
-  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
-    group: g3dBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  unsafe {
+    let slot: Int = g3dPushMetaballCluster(packedBalls: packedBalls, count: count, packedColors: packedColors,
+      smoothing: smoothing, metallic: metallic, roughness: roughness, emR: emR, emG: emG, emB: emB)
+    if slot < 0 { ret }
+    let pass: Ptr = g3dPass()
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dSdfPipeline())
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+      group: g3dSdfBind(slot: slot), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+    wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: 3 as UInt32,
+      instanceCount: 1 as UInt32, firstVertex: 0 as UInt32, firstInstance: 0 as UInt32)
+    # Restore the geometry pipeline/bind for subsequent mesh draws.
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dPipeline())
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+      group: g3dBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  }
 }
 
 func beginScene(camera: view Camera3d, light: view Light3d, aspect: view Float, time: view Float) pub {
@@ -372,7 +431,10 @@ func beginScene(camera: view Camera3d, light: view Light3d, aspect: view Float, 
 #     renderScene(scene: scene)
 #
 # An app that does not write that line keeps the flat clear colour.
-func skyHosekPush(index: Int, value: Float) extern
+func nativeSkyHosekPush(index: Int, value: Float) unsafe extern("rae_ext_Gpu3d_skyHosekPush")
+func skyHosekPush(index: copy Int, value: copy Float) {
+  unsafe { nativeSkyHosekPush(index: index, value: value) }
+}
 # Sky (#514): C ensures the pipeline, packs+uploads the sky uniform (with the
 # Hosek table Rae pushed), returns 1 to proceed / 0 to skip; Rae encodes the
 # fullscreen sky draw into the scene pass and restores the geometry pipeline.
@@ -381,31 +443,33 @@ func g3dSkyPrepare(skyKind: Float, turbidity: Float, skyExposure: Float, sunSize
                    sunR: Float, sunG: Float, sunB: Float,
                    zenR: Float, zenG: Float, zenB: Float, bands: Float,
                    horR: Float, horG: Float, horB: Float, discI: Float,
-                   clearR: Float, clearG: Float, clearB: Float) extern("rae_g3d_sky_prepare") ret Int
-func g3dSkyPipeline() extern("rae_g3d_sky_pipeline") ret Ptr
-func g3dSkyBind() extern("rae_g3d_sky_bind") ret Ptr
+                   clearR: Float, clearG: Float, clearB: Float) unsafe extern("rae_g3d_sky_prepare") ret Int
+func g3dSkyPipeline() unsafe extern("rae_g3d_sky_pipeline") ret Ptr
+func g3dSkyBind() unsafe extern("rae_g3d_sky_bind") ret Ptr
 func skyDraw(skyKind: copy Float, turbidity: copy Float, skyExposure: copy Float, sunSizeRad: copy Float,
              sunX: copy Float, sunY: copy Float, sunZ: copy Float,
              sunR: copy Float, sunG: copy Float, sunB: copy Float,
              zenR: copy Float, zenG: copy Float, zenB: copy Float, bands: copy Float,
              horR: copy Float, horG: copy Float, horB: copy Float, discI: copy Float,
              clearR: copy Float, clearG: copy Float, clearB: copy Float) {
-  let ok: Int = g3dSkyPrepare(skyKind: skyKind, turbidity: turbidity, skyExposure: skyExposure, sunSizeRad: sunSizeRad,
-    sunX: sunX, sunY: sunY, sunZ: sunZ, sunR: sunR, sunG: sunG, sunB: sunB,
-    zenR: zenR, zenG: zenG, zenB: zenB, bands: bands,
-    horR: horR, horG: horG, horB: horB, discI: discI,
-    clearR: clearR, clearG: clearG, clearB: clearB)
-  if ok is 0 { ret }
-  let pass: Ptr = g3dPass()
-  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dSkyPipeline())
-  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
-    group: g3dSkyBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
-  wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: 3 as UInt32,
-    instanceCount: 1 as UInt32, firstVertex: 0 as UInt32, firstInstance: 0 as UInt32)
-  # Restore the geometry pipeline/bind so the scene draws after the sky are correct.
-  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dPipeline())
-  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
-    group: g3dBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  unsafe {
+    let ok: Int = g3dSkyPrepare(skyKind: skyKind, turbidity: turbidity, skyExposure: skyExposure, sunSizeRad: sunSizeRad,
+      sunX: sunX, sunY: sunY, sunZ: sunZ, sunR: sunR, sunG: sunG, sunB: sunB,
+      zenR: zenR, zenG: zenG, zenB: zenB, bands: bands,
+      horR: horR, horG: horG, horB: horB, discI: discI,
+      clearR: clearR, clearG: clearG, clearB: clearB)
+    if ok is 0 { ret }
+    let pass: Ptr = g3dPass()
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dSkyPipeline())
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+      group: g3dSkyBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+    wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: 3 as UInt32,
+      instanceCount: 1 as UInt32, firstVertex: 0 as UInt32, firstInstance: 0 as UInt32)
+    # Restore the geometry pipeline/bind so the scene draws after the sky are correct.
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dPipeline())
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+      group: g3dBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  }
 }
 
 # Three vec4 per channel: [A B C D][E F G H][I radiance _ _], matching `hosek`
@@ -538,18 +602,20 @@ func endFrame() pub {
 # safe to call from more than one place (submit, and later the post-process
 # wrappers). Records already uploaded per-draw, so nothing bulk-uploads here.
 func finishForward() ret Int {
-  if g3dFrameActive() is 0 { ret 0 }
-  let pass: Ptr = g3dPass()
-  let enc: Ptr = g3dEncoder()
-  wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
-  let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
-  let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
-  g3dSubmitCmd(cmd: cmd)
-  wgpuCommandBufferRelease(commandBuffer: cmd)
-  wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
-  wgpuCommandEncoderRelease(commandEncoder: enc)
-  g3dClearFrame()
-  ret 1
+  unsafe {
+    if g3dFrameActive() is 0 { ret 0 }
+    let pass: Ptr = g3dPass()
+    let enc: Ptr = g3dEncoder()
+    wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
+    let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
+    let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
+    g3dSubmitCmd(cmd: cmd)
+    wgpuCommandBufferRelease(commandBuffer: cmd)
+    wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
+    wgpuCommandEncoderRelease(commandEncoder: enc)
+    g3dClearFrame()
+    ret 1
+  }
 }
 
 # Submit the 3D pass without screenshot or present (#514, was the C submit).
@@ -557,8 +623,10 @@ func finishForward() ret Int {
 # Gpu2d.endFrame() so the composed frame is presented exactly once. Poll only
 # when something was actually submitted.
 func submit() pub {
-  if finishForward() is not 0 {
-    webgpuPoll(wait: 0)
+  unsafe {
+    if finishForward() is not 0 {
+      webgpuPoll(wait: 0)
+    }
   }
 }
 
@@ -571,10 +639,12 @@ func endPass() pub {
 # render graph dispatches this between the scene pass and any LDR
 # composition (UI overlay, present). Ends the scene pass if still open.
 func tonemapPass() pub {
-  finishForward()
-  let slot: Int = g3dTonemapPrepare()
-  if slot < 0 { ret }
-  fullscreenPostPass(target: g2dOffView(), pipeline: g3dTonemapPipeline(), bind: g3dTonemapBind(slot: slot), loadOp: WGPULoadOp_Clear)
+  unsafe {
+    finishForward()
+    let slot: Int = g3dTonemapPrepare()
+    if slot < 0 { ret }
+    fullscreenPostPass(target: g2dOffView(), pipeline: g3dTonemapPipeline(), bind: g3dTonemapBind(slot: slot), loadOp: WGPULoadOp_Clear)
+  }
 }
 
 # Ambient occlusion (#337): horizon-search AO with a visibility bitmask,
@@ -582,20 +652,22 @@ func tonemapPass() pub {
 # Runs before TAA so the half-res noise resolves temporally, and before
 # tonemap so it modulates linear radiance.
 func ssaoPass() pub {
-  finishForward()
-  if g3dSsaoPrepare() is 0 { ret }
-  # Generation: write AO into ao_view (or clear it to unoccluded when AO is off).
-  if g3dSsaoEnabled() is not 0 {
-    fullscreenPostPass(target: g3dAoView(), pipeline: g3dSsaoPipeline(), bind: g3dSsaoBind(), loadOp: WGPULoadOp_Clear)
-  } else {
-    g3dClearAo()
-  }
-  # Composite: add ambient*AO back into hdrColor (Load — it blends, not overwrites).
-  # A debug build paints the raw AO over hdrColor instead.
-  if g3dAoDebugOn() is not 0 {
-    fullscreenPostPass(target: g3dHdrView(), pipeline: g3dAoDebugPipeline(), bind: g3dAoDebugBind(), loadOp: WGPULoadOp_Clear)
-  } else {
-    fullscreenPostPass(target: g3dHdrView(), pipeline: g3dAoApplyPipeline(), bind: g3dAoApplyBind(), loadOp: WGPULoadOp_Load)
+  unsafe {
+    finishForward()
+    if g3dSsaoPrepare() is 0 { ret }
+    # Generation: write AO into ao_view (or clear it to unoccluded when AO is off).
+    if g3dSsaoEnabled() is not 0 {
+      fullscreenPostPass(target: g3dAoView(), pipeline: g3dSsaoPipeline(), bind: g3dSsaoBind(), loadOp: WGPULoadOp_Clear)
+    } else {
+      g3dClearAo()
+    }
+    # Composite: add ambient*AO back into hdrColor (Load — it blends, not overwrites).
+    # A debug build paints the raw AO over hdrColor instead.
+    if g3dAoDebugOn() is not 0 {
+      fullscreenPostPass(target: g3dHdrView(), pipeline: g3dAoDebugPipeline(), bind: g3dAoDebugBind(), loadOp: WGPULoadOp_Clear)
+    } else {
+      fullscreenPostPass(target: g3dHdrView(), pipeline: g3dAoApplyPipeline(), bind: g3dAoApplyBind(), loadOp: WGPULoadOp_Load)
+    }
   }
 }
 
@@ -603,10 +675,12 @@ func ssaoPass() pub {
 # through the velocity buffer, clamp it to the current neighbourhood and
 # blend. Runs on HDR, BEFORE tonemap, so accumulation stays linear.
 func taaPass() pub {
-  finishForward()
-  let slot: Int = g3dTaaPrepare()
-  if slot < 0 { ret }
-  fullscreenPostPass(target: g3dTaaView(slot: slot), pipeline: g3dTaaPipeline(), bind: g3dTaaBind(slot: slot), loadOp: WGPULoadOp_Clear)
+  unsafe {
+    finishForward()
+    let slot: Int = g3dTaaPrepare()
+    if slot < 0 { ret }
+    fullscreenPostPass(target: g3dTaaView(slot: slot), pipeline: g3dTaaPipeline(), bind: g3dTaaBind(slot: slot), loadOp: WGPULoadOp_Clear)
+  }
 }
 
 # Upload interleaved mesh data and get a typed handle back.
@@ -633,19 +707,36 @@ func updateMeshVerts(mesh: view MeshHandle, verts: view List(Float), vertCount: 
 # same prefix the shadow accessors already use.
 func shadowBegin(cascades: view Buffer(Float), count: Int, resolution: Int,
                  splits: view Buffer(Float), texelWorld: view Buffer(Float),
-                 depthRange: view Buffer(Float)) extern("rae_sm_begin")
-func shadowDraw(mesh: Int, model: view Mat4) extern("rae_sm_queue_mesh")
-func shadowDrawSkinned(mesh: Int, model: view Mat4, paletteBase: Int) extern("rae_sm_queue_skinned")
-func shadowMetaballs(packedBalls: view Buffer(Float), count: Int, smoothing: Float) extern("rae_sm_record_metaballs")
-func shadowDrawCount() extern("rae_sm_draw_count") ret Int
-func shadowShutdown() extern("rae_sm_shutdown")
+                 depthRange: view Buffer(Float)) unsafe extern("rae_sm_begin")
+func nativeShadowDraw(mesh: Int, model: view Mat4) unsafe extern("rae_sm_queue_mesh")
+func shadowDraw(mesh: copy Int, model: view Mat4) {
+  unsafe { nativeShadowDraw(mesh: mesh, model: model) }
+}
+func nativeShadowDrawSkinned(mesh: Int, model: view Mat4, paletteBase: Int) unsafe extern("rae_sm_queue_skinned")
+func shadowDrawSkinned(mesh: copy Int, model: view Mat4, paletteBase: copy Int) {
+  unsafe { nativeShadowDrawSkinned(mesh: mesh, model: model, paletteBase: paletteBase) }
+}
+func nativeShadowMetaballs(packedBalls: view Buffer(Float), count: Int, smoothing: Float) unsafe extern("rae_sm_record_metaballs")
+func shadowMetaballs(packedBalls: view Buffer(Float), count: copy Int, smoothing: copy Float) {
+  unsafe { nativeShadowMetaballs(packedBalls: packedBalls, count: count, smoothing: smoothing) }
+}
+func nativeShadowDrawCount() unsafe extern("rae_sm_draw_count") ret Int
+func shadowDrawCount() ret Int {
+  unsafe { ret nativeShadowDrawCount() }
+}
+func nativeShadowShutdown() unsafe extern("rae_sm_shutdown")
+func shadowShutdown() {
+  unsafe { nativeShadowShutdown() }
+}
 
 # Open the shadow pass for a fitted cascade set. Everything drawn between
 # this and `endShadowPass` casts.
 func beginShadowPass(c: view ShadowCascades) pub {
-  shadowBegin(cascades: c.viewProj.data, count: c.count, resolution: c.resolution,
-              splits: c.splitFar.data, texelWorld: c.texelWorld.data,
-              depthRange: c.depthRange.data)
+  unsafe {
+    shadowBegin(cascades: c.viewProj.data, count: c.count, resolution: c.resolution,
+                splits: c.splitFar.data, texelWorld: c.texelWorld.data,
+                depthRange: c.depthRange.data)
+  }
 }
 
 func drawShadowCaster(mesh: view MeshHandle, model: view Mat4) pub {
@@ -681,20 +772,41 @@ func shadowCasterCount() pub ret Int {
 # A second vertex format and pipeline for skeletally animated geometry.
 # Separate from the static path because a ground plane should not carry
 # joint indices it can never read — see runtime_gpu3d_skin.c.
-func skinnedMeshCreate(verts: view Buffer(Float), vertCount: Int, indices: view Buffer(Int), indexCount: Int) extern ret Int
-func setPalette(rows: view Buffer(Float), jointCount: Int) extern
+func nativeSkinnedMeshCreate(verts: view Buffer(Float), vertCount: Int, indices: view Buffer(Int), indexCount: Int) unsafe extern("rae_ext_Gpu3d_skinnedMeshCreate") ret Int
+func skinnedMeshCreate(verts: view Buffer(Float), vertCount: copy Int, indices: view Buffer(Int), indexCount: copy Int) ret Int {
+  unsafe { ret nativeSkinnedMeshCreate(verts: verts, vertCount: vertCount, indices: indices, indexCount: indexCount) }
+}
+func nativeSetPalette(rows: view Buffer(Float), jointCount: Int) unsafe extern("rae_ext_Gpu3d_setPalette")
+func setPalette(rows: view Buffer(Float), jointCount: copy Int) {
+  unsafe { nativeSetPalette(rows: rows, jointCount: jointCount) }
+}
 # Skinned draw (#514): C validates the mesh + draw limit, uploads the per-frame
 # palette (if dirty) and the per-draw record, and returns the firstInstance slot
 # (or -1); Rae encodes the instanced DrawIndexed below.
-func g3dPushSkinnedDraw(mesh: Int, model: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float) extern("rae_g3d_push_skinned_draw") ret Int
-func g3dSkinPipeline() extern("rae_g3d_skin_pipeline") ret Ptr
-func g3dSkinBind() extern("rae_g3d_skin_bind") ret Ptr
-func g3dSkinVbuf(mesh: Int) extern("rae_g3d_skin_vbuf") ret Ptr
-func g3dSkinIbuf(mesh: Int) extern("rae_g3d_skin_ibuf") ret Ptr
-func g3dSkinIcount(mesh: Int) extern("rae_g3d_skin_icount") ret Int
-func skinFrameBegin() extern
-func skinDrawCount() extern ret Int
-func skinShutdown() extern
+func nativeG3dPushSkinnedDraw(mesh: Int, model: view Mat4, r: Float, g: Float, b: Float, metallic: Float, roughness: Float) unsafe extern("rae_g3d_push_skinned_draw") ret Int
+func g3dPushSkinnedDraw(mesh: copy Int, model: view Mat4, r: copy Float, g: copy Float, b: copy Float, metallic: copy Float, roughness: copy Float) ret Int {
+  unsafe { ret nativeG3dPushSkinnedDraw(mesh: mesh, model: model, r: r, g: g, b: b, metallic: metallic, roughness: roughness) }
+}
+func g3dSkinPipeline() unsafe extern("rae_g3d_skin_pipeline") ret Ptr
+func g3dSkinBind() unsafe extern("rae_g3d_skin_bind") ret Ptr
+func g3dSkinVbuf(mesh: Int) unsafe extern("rae_g3d_skin_vbuf") ret Ptr
+func g3dSkinIbuf(mesh: Int) unsafe extern("rae_g3d_skin_ibuf") ret Ptr
+func nativeG3dSkinIcount(mesh: Int) unsafe extern("rae_g3d_skin_icount") ret Int
+func g3dSkinIcount(mesh: copy Int) ret Int {
+  unsafe { ret nativeG3dSkinIcount(mesh: mesh) }
+}
+func nativeSkinFrameBegin() unsafe extern("rae_ext_Gpu3d_skinFrameBegin")
+func skinFrameBegin() {
+  unsafe { nativeSkinFrameBegin() }
+}
+func nativeSkinDrawCount() unsafe extern("rae_ext_Gpu3d_skinDrawCount") ret Int
+func skinDrawCount() ret Int {
+  unsafe { ret nativeSkinDrawCount() }
+}
+func nativeSkinShutdown() unsafe extern("rae_ext_Gpu3d_skinShutdown")
+func skinShutdown() {
+  unsafe { nativeSkinShutdown() }
+}
 
 # Upload a skinned mesh. `verts` is 20 Floats per vertex: pos3, nrm3, uv2,
 # four joint indices (as Floats), four weights and an RGBA vertex colour
@@ -711,7 +823,9 @@ func uploadSkinnedMesh(verts: view List(Float), vertCount: view Int, indices: vi
 # rows of an affine transform. Per FRAME, not per draw — every part of a
 # character shares one skeleton.
 func uploadPalette(rows: view List(Float), jointCount: view Int) pub {
-  setPalette(rows: rows.data, jointCount: jointCount)
+  unsafe {
+    setPalette(rows: rows.data, jointCount: jointCount)
+  }
 }
 
 # Per-character palette uploads (#547) live in gbuffer.rae, done directly over
@@ -727,27 +841,29 @@ func uploadPalette(rows: view List(Float), jointCount: view Int) pub {
 func drawSkinned(mesh: copy Int, model: view Mat4,
                  r: copy Float, g: copy Float, b: copy Float,
                  metallic: copy Float, roughness: copy Float) {
-  let slot: Int = g3dPushSkinnedDraw(mesh: mesh, model: model, r: r, g: g, b: b,
-    metallic: metallic, roughness: roughness)
-  if slot < 0 { ret }
-  let pass: Ptr = g3dPass()
-  let vbuf: Ptr = g3dSkinVbuf(mesh: mesh)
-  let ibuf: Ptr = g3dSkinIbuf(mesh: mesh)
-  let icount: Int = g3dSkinIcount(mesh: mesh)
-  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dSkinPipeline())
-  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
-    group: g3dSkinBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
-  wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder: pass, slot: 0 as UInt32,
-    buffer: vbuf, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: vbuf))
-  wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder: pass, buffer: ibuf,
-    format: WGPUIndexFormat_Uint32, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: ibuf))
-  wgpuRenderPassEncoderDrawIndexed(renderPassEncoder: pass, indexCount: icount as UInt32,
-    instanceCount: 1 as UInt32, firstIndex: 0 as UInt32, baseVertex: 0 as Int32,
-    firstInstance: slot as UInt32)
-  # Restore the geometry pipeline/bind for subsequent static draws.
-  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dPipeline())
-  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
-    group: g3dBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  unsafe {
+    let slot: Int = g3dPushSkinnedDraw(mesh: mesh, model: model, r: r, g: g, b: b,
+      metallic: metallic, roughness: roughness)
+    if slot < 0 { ret }
+    let pass: Ptr = g3dPass()
+    let vbuf: Ptr = g3dSkinVbuf(mesh: mesh)
+    let ibuf: Ptr = g3dSkinIbuf(mesh: mesh)
+    let icount: Int = g3dSkinIcount(mesh: mesh)
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dSkinPipeline())
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+      group: g3dSkinBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+    wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder: pass, slot: 0 as UInt32,
+      buffer: vbuf, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: vbuf))
+    wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder: pass, buffer: ibuf,
+      format: WGPUIndexFormat_Uint32, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: ibuf))
+    wgpuRenderPassEncoderDrawIndexed(renderPassEncoder: pass, indexCount: icount as UInt32,
+      instanceCount: 1 as UInt32, firstIndex: 0 as UInt32, baseVertex: 0 as Int32,
+      firstInstance: slot as UInt32)
+    # Restore the geometry pipeline/bind for subsequent static draws.
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: g3dPipeline())
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+      group: g3dBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+  }
 }
 
 func drawSkinnedInstance(mesh: view MeshHandle, model: view Mat4, material: view Material3d) pub {

@@ -74,20 +74,22 @@ func fitWriteRect(world: mod UiWorld, entity: view EntityId, x: view Float, y: v
 # ComputedRect coordinates are parent-local, so uniform scaling per
 # level composes to a uniform subtree scale.
 func fitScaleSubtree(world: mod UiWorld, entity: view EntityId, s: view Float) {
-  if componentHas(this: world.childrens, entity: entity) is false {
-    ret
-  }
-  let ch: view Children => componentView(this: world.childrens, entity: entity)
-  let n: Int = ch.ids.length
-  var i: Int = 0
-  loop i < n {
-    let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
-    if componentHas(this: world.rects, entity: cid) {
-      let r: Rect = componentGet(this: world.rects, entity: cid)
-      fitWriteRect(world: world, entity: cid, x: r.position.x * s, y: r.position.y * s, w: r.size.x * s, h: r.size.y * s)
+  unsafe {
+    if componentHas(this: world.childrens, entity: entity) is false {
+      ret
     }
-    fitScaleSubtree(world: world, entity: cid, s: s)
-    i = i + 1
+    let ch: view Children => componentView(this: world.childrens, entity: entity)
+    let n: Int = ch.ids.length
+    var i: Int = 0
+    loop i < n {
+      let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+      if componentHas(this: world.rects, entity: cid) {
+        let r: Rect = componentGet(this: world.rects, entity: cid)
+        fitWriteRect(world: world, entity: cid, x: r.position.x * s, y: r.position.y * s, w: r.size.x * s, h: r.size.y * s)
+      }
+      fitScaleSubtree(world: world, entity: cid, s: s)
+      i = i + 1
+    }
   }
 }
 

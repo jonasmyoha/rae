@@ -100,44 +100,48 @@ func createDebugSystem() pub ret DebugSystem {
 # always starts closed. Same concat-built JSON + brace-escape trick as
 # saveAppState (a bare `{` in a string literal would start interpolation).
 func saveDebugFlags(debug: view DebugSystem, path: view String) pub {
-  let q: String = "\""
-  let openBrace: String = "\u{007B}"
-  let closeBrace: String = "\u{007D}"
-  let nl: String = "\n"
-  var content: String = ""
-  content = content.concat(other: openBrace).concat(other: nl)
-  content = content.concat(other: "  ").concat(other: q).concat(other: "showLabels").concat(other: q).concat(other: ": ").concat(other: boolStr(b: debug.showLabels)).concat(other: ",").concat(other: nl)
-  content = content.concat(other: "  ").concat(other: q).concat(other: "showInputOutlines").concat(other: q).concat(other: ": ").concat(other: boolStr(b: debug.showInputOutlines)).concat(other: nl)
-  content = content.concat(other: closeBrace).concat(other: nl)
-  let ok: Bool = rae_ext_rae_sys_write_file(path: path, content: content)
-  if ok is false {
-    log("[debug] flag save failed: {path}")
+  unsafe {
+    let q: String = "\""
+    let openBrace: String = "\u{007B}"
+    let closeBrace: String = "\u{007D}"
+    let nl: String = "\n"
+    var content: String = ""
+    content = content.concat(other: openBrace).concat(other: nl)
+    content = content.concat(other: "  ").concat(other: q).concat(other: "showLabels").concat(other: q).concat(other: ": ").concat(other: boolStr(b: debug.showLabels)).concat(other: ",").concat(other: nl)
+    content = content.concat(other: "  ").concat(other: q).concat(other: "showInputOutlines").concat(other: q).concat(other: ": ").concat(other: boolStr(b: debug.showInputOutlines)).concat(other: nl)
+    content = content.concat(other: closeBrace).concat(other: nl)
+    let ok: Bool = rae_ext_rae_sys_write_file(path: path, content: content)
+    if ok is false {
+      log("[debug] flag save failed: {path}")
+    }
   }
 }
 
 # Restore persisted debug flags at boot. Best-effort: a missing file or a
 # missing field leaves the in-memory default (false).
 func restoreDebugFlags(debug: mod DebugSystem, path: view String) pub {
-  let source: String = rae_ext_rae_sys_read_file(path: path)
-  if source.length() is 0 {
-    ret
+  unsafe {
+    let source: String = rae_ext_rae_sys_read_file(path: path)
+    if source.length() is 0 {
+      ret
+    }
+    let doc: JsonDoc = Json.parseJson(source: source)
+    if doc.ok is false {
+      ret
+    }
+    let root: JsonValue = Json.root(doc: doc)
+    let labelsKey: String = "showLabels"
+    let labelsIdx: Int = Json.field(doc: doc, this: root, key: labelsKey)
+    if labelsIdx >= 0 {
+      debug.showLabels = Json.jsonBool(this: Json.jsonValueAt(doc: doc, idx: labelsIdx), fallback: false)
+    }
+    let outlinesKey: String = "showInputOutlines"
+    let outlinesIdx: Int = Json.field(doc: doc, this: root, key: outlinesKey)
+    if outlinesIdx >= 0 {
+      debug.showInputOutlines = Json.jsonBool(this: Json.jsonValueAt(doc: doc, idx: outlinesIdx), fallback: false)
+    }
+    log("[debug] restored flags labels={debug.showLabels} outlines={debug.showInputOutlines}")
   }
-  let doc: JsonDoc = Json.parseJson(source: source)
-  if doc.ok is false {
-    ret
-  }
-  let root: JsonValue = Json.root(doc: doc)
-  let labelsKey: String = "showLabels"
-  let labelsIdx: Int = Json.field(doc: doc, this: root, key: labelsKey)
-  if labelsIdx >= 0 {
-    debug.showLabels = Json.jsonBool(this: Json.jsonValueAt(doc: doc, idx: labelsIdx), fallback: false)
-  }
-  let outlinesKey: String = "showInputOutlines"
-  let outlinesIdx: Int = Json.field(doc: doc, this: root, key: outlinesKey)
-  if outlinesIdx >= 0 {
-    debug.showInputOutlines = Json.jsonBool(this: Json.jsonValueAt(doc: doc, idx: outlinesIdx), fallback: false)
-  }
-  log("[debug] restored flags labels={debug.showLabels} outlines={debug.showInputOutlines}")
 }
 
 func setDebugScreenSize(debug: mod DebugSystem, w: view Float, h: view Float) pub {
@@ -423,12 +427,14 @@ func dbgSetPaddingAll(world: mod UiWorld, entity: view EntityId, n: view Float) 
 }
 
 func attachKids(world: mod UiWorld, parent: view EntityId, kids: view List(EntityId)) {
-  # #726: set only Parent; HierarchySystem.setParent maintains Children.
-  var i: Int = 0
-  loop i < kids.length {
-    let k: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
-    setParent(parents: world.parents, childrens: world.childrens, child: k, parent: parent)
-    i = i + 1
+  unsafe {
+    # #726: set only Parent; HierarchySystem.setParent maintains Children.
+    var i: Int = 0
+    loop i < kids.length {
+      let k: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
+      setParent(parents: world.parents, childrens: world.childrens, child: k, parent: parent)
+      i = i + 1
+    }
   }
 }
 
@@ -651,45 +657,47 @@ func addDebugLayer(world: mod UiWorld, debug: mod DebugSystem) pub {
 }
 
 func dispatchDebugAction(state: mod AppState, input: view InputSystem, debug: mod DebugSystem) pub ret Bool {
-  var needsRemount: Bool = false
-  let n: Int = input.events.length
-  var i: Int = 0
-  loop i < n {
-    let ev: ActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
-    let actionId: String = ev.actionId
-    if actionId is debugActionToggleMenu {
-      debug.menuOpen = debug.menuOpen is false
-      needsRemount = true
-    }
-    if actionId is debugActionDismiss {
-      if debug.menuOpen {
-        debug.menuOpen = false
+  unsafe {
+    var needsRemount: Bool = false
+    let n: Int = input.events.length
+    var i: Int = 0
+    loop i < n {
+      let ev: ActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
+      let actionId: String = ev.actionId
+      if actionId is debugActionToggleMenu {
+        debug.menuOpen = debug.menuOpen is false
         needsRemount = true
       }
-    }
-    if actionId is debugActionToggleTheme {
-      # #764: the theme lives on AppState (106 rebuilds its world per frame); the
-      # remount below reseeds the new world from it.
-      let cur: Theme = state.theme.active
-      if cur.mode is ThemeMode.dark {
-        state.theme.active = lightTheme()
-      } else {
-        state.theme.active = darkTheme()
+      if actionId is debugActionDismiss {
+        if debug.menuOpen {
+          debug.menuOpen = false
+          needsRemount = true
+        }
       }
-      state.theme.generation = state.theme.generation + 1
-      needsRemount = true
+      if actionId is debugActionToggleTheme {
+        # #764: the theme lives on AppState (106 rebuilds its world per frame); the
+        # remount below reseeds the new world from it.
+        let cur: Theme = state.theme.active
+        if cur.mode is ThemeMode.dark {
+          state.theme.active = lightTheme()
+        } else {
+          state.theme.active = darkTheme()
+        }
+        state.theme.generation = state.theme.generation + 1
+        needsRemount = true
+      }
+      if actionId is debugActionToggleLabels {
+        debug.showLabels = debug.showLabels is false
+        saveDebugFlags(debug: debug, path: debugFlagsFilePath)
+      }
+      if actionId is debugActionToggleInputOutlines {
+        debug.showInputOutlines = debug.showInputOutlines is false
+        saveDebugFlags(debug: debug, path: debugFlagsFilePath)
+      }
+      i = i + 1
     }
-    if actionId is debugActionToggleLabels {
-      debug.showLabels = debug.showLabels is false
-      saveDebugFlags(debug: debug, path: debugFlagsFilePath)
-    }
-    if actionId is debugActionToggleInputOutlines {
-      debug.showInputOutlines = debug.showInputOutlines is false
-      saveDebugFlags(debug: debug, path: debugFlagsFilePath)
-    }
-    i = i + 1
+    ret needsRemount
   }
-  ret needsRemount
 }
 
 func selectedForDebugAction(world: view UiWorld, actionId: view String, debug: view DebugSystem) ret Bool {

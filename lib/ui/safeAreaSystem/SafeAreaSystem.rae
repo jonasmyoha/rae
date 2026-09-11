@@ -16,38 +16,40 @@
 open ecs/ComponentTable
 
 func safeAreaSystem(world: mod UiWorld, insets: view Insets) {
-  let alive: view List(EntityId) => world.allocator.alive
-  let n: Int = alive.length
-  var i: Int = 0
-  loop i < n {
-    let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
-    if componentHas(this: world.safeAreas, entity: e) {
-      # Idempotent: only write when the entity has no SafeInsets yet or
-      # its stored value differs. `SafeInsets` is not a layout dirty
-      # input (see layout.rae ifDirty), so an unconditional
-      # write would be invisible to the dirty-check anyway — but this
-      # keeps the component generation stable so any future tracking,
-      # and the render caches, stay clean at idle.
-      var changed: Bool = true
-      if componentHas(this: world.safeInsets, entity: e) {
-        let cur: SafeInsets = componentGet(this: world.safeInsets, entity: e)
-        if insetsEqual(a: cur.insets, b: insets) {
-          changed = false
-        }
-      }
-      if changed {
-        let payload: SafeInsets = {
-          insets: Insets {
-            l: insets.l
-            t: insets.t
-            r: insets.r
-            b: insets.b
+  unsafe {
+    let alive: view List(EntityId) => world.allocator.alive
+    let n: Int = alive.length
+    var i: Int = 0
+    loop i < n {
+      let e: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: i)
+      if componentHas(this: world.safeAreas, entity: e) {
+        # Idempotent: only write when the entity has no SafeInsets yet or
+        # its stored value differs. `SafeInsets` is not a layout dirty
+        # input (see layout.rae ifDirty), so an unconditional
+        # write would be invisible to the dirty-check anyway — but this
+        # keeps the component generation stable so any future tracking,
+        # and the render caches, stay clean at idle.
+        var changed: Bool = true
+        if componentHas(this: world.safeInsets, entity: e) {
+          let cur: SafeInsets = componentGet(this: world.safeInsets, entity: e)
+          if insetsEqual(a: cur.insets, b: insets) {
+            changed = false
           }
         }
-        componentSet(this: world.safeInsets, entity: e, data: payload)
+        if changed {
+          let payload: SafeInsets = {
+            insets: Insets {
+              l: insets.l
+              t: insets.t
+              r: insets.r
+              b: insets.b
+            }
+          }
+          componentSet(this: world.safeInsets, entity: e, data: payload)
+        }
       }
+      i = i + 1
     }
-    i = i + 1
   }
 }
 

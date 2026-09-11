@@ -189,30 +189,32 @@ func syncDemoUi(world: mod UiWorld, state: mod DemoUiResource) ret Bool {
 }
 
 func dispatchUiActions(input: view UiInput, state: mod DemoUiResource, rig: mod CameraRig, camera: mod Camera3d) {
-  var i: Int = 0
-  loop i < input.events.length {
-    let event: UiActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
-    if event.actionId is "ui.debug" {
-      state.debugOpen = not state.debugOpen
-      state.revision = state.revision + 1
+  unsafe {
+    var i: Int = 0
+    loop i < input.events.length {
+      let event: UiActionEvent = rae_ext_rae_buf_get(buf: input.events.data, index: i)
+      if event.actionId is "ui.debug" {
+        state.debugOpen = not state.debugOpen
+        state.revision = state.revision + 1
+      }
+      if event.actionId is "animation.speed" {
+        state.fullSpeed = not state.fullSpeed
+        state.revision = state.revision + 1
+      }
+      if event.actionId is "scene.select.1" {
+        state.activeScene = 1
+        state.revision = state.revision + 1
+      }
+      if event.actionId is "scene.select.2" {
+        state.activeScene = 2
+        state.revision = state.revision + 1
+      }
+      if event.actionId is "scene.select.3" {
+        state.activeScene = 3
+        state.revision = state.revision + 1
+      }
+      i = i + 1
     }
-    if event.actionId is "animation.speed" {
-      state.fullSpeed = not state.fullSpeed
-      state.revision = state.revision + 1
-    }
-    if event.actionId is "scene.select.1" {
-      state.activeScene = 1
-      state.revision = state.revision + 1
-    }
-    if event.actionId is "scene.select.2" {
-      state.activeScene = 2
-      state.revision = state.revision + 1
-    }
-    if event.actionId is "scene.select.3" {
-      state.activeScene = 3
-      state.revision = state.revision + 1
-    }
-    i = i + 1
   }
 }
 
