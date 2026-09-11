@@ -5,13 +5,14 @@ is the DEFAULT runner for `make test` (see "Status" below; #846). It does NOT
 re-implement any test logic: each case is one
 `tools/run_tests.sh <case>` invocation (same discovery, same `config.cmd`
 handling, same `expected.txt` comparison), writing its own log; the verdicts
-are aggregated afterwards. The example smoke tests (`run_examples.sh`) still
-run sequentially after the cases — they open real SDL/GPU windows and take
-screenshots, and were never the target of this.
+are aggregated afterwards. The example smoke tests (`run_examples.sh`) are
+NOT part of the default run: they open real SDL/GPU windows and take
+screenshots, and run only with `RAE_RUN_EXAMPLES=1` (`make test-examples`).
 
 ```bash
 bash compiler/tools/run_tests_parallel.sh                 # JOBS = CPU count
-JOBS=4 RAE_SKIP_EXAMPLES=1 bash compiler/tools/run_tests_parallel.sh
+JOBS=4 bash compiler/tools/run_tests_parallel.sh              # unit suite only (the default)
+RAE_RUN_EXAMPLES=1 bash compiler/tools/run_tests_parallel.sh  # + the visual example gates
 ```
 
 ## Measured (10-core Apple Silicon, cases only, `RAE_SKIP_EXAMPLES=1`)
