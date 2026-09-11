@@ -87,6 +87,10 @@ const kindPipeline: Int = 4
 const kindBindGroup: Int = 5
 const kindSubmission: Int = 6
 const kindReadback: Int = 7
+const kindRenderPipeline: Int = 8
+# An adopted external handle: referenced (bound, attached, pinned) but NEVER
+# owned or released by the manager — releaseHandle deliberately has no branch.
+const kindExternal: Int = 9
 
 # One table per kind. `generations`/`live` are the authoritative slot record;
 # `handles` holds the native reference this manager owns. The lifetime fields:
@@ -212,6 +216,7 @@ func releaseHandle(kind: view Int, handle: copy Ptr) {
     if kind is kindSampler { wgpuSamplerRelease(sampler: handle) }
     if kind is kindPipeline { wgpuComputePipelineRelease(computePipeline: handle) }
     if kind is kindBindGroup { wgpuBindGroupRelease(bindGroup: handle) }
+    if kind is kindRenderPipeline { wgpuRenderPipelineRelease(renderPipeline: handle) }
     if kind is kindReadback {
       let released: Ptr = releaseRead(request: handle)
     }
@@ -298,6 +303,8 @@ type GpuResources {
   bindGroups: SlotTable
   submissions: SlotTable
   readbacks: SlotTable
+  renderPipelines: SlotTable
+  externals: SlotTable
   depKinds: List(Int)
   depSlots: List(Int)
   depGenerations: List(Int)
@@ -318,6 +325,8 @@ func create(issuer: mod IdIssuer, capacity: view Int) ret opt GpuResources {
     let bindGroups: SlotTable = createSlotTable(capacity: capacity, empty: empty)
     let submissions: SlotTable = createSlotTable(capacity: capacity, empty: empty)
     let readbacks: SlotTable = createSlotTable(capacity: capacity, empty: empty)
+    let renderPipelines: SlotTable = createSlotTable(capacity: capacity, empty: empty)
+    let externals: SlotTable = createSlotTable(capacity: capacity, empty: empty)
     let tag: Int = issue(this: issuer)
     ret GpuResources {
       managerTag: tag
@@ -330,6 +339,8 @@ func create(issuer: mod IdIssuer, capacity: view Int) ret opt GpuResources {
       bindGroups: own bindGroups
       submissions: own submissions
       readbacks: own readbacks
+      renderPipelines: own renderPipelines
+      externals: own externals
       depKinds: List.create(Int, cap: 16)
       depSlots: List.create(Int, cap: 16)
       depGenerations: List.create(Int, cap: 16)
@@ -348,10 +359,13 @@ func drop(this: mod GpuResources) {
     releaseAll(table: this.submissions, capacity: this.capacity, kind: kindSubmission, empty: empty)
     releaseAll(table: this.bindGroups, capacity: this.capacity, kind: kindBindGroup, empty: empty)
     releaseAll(table: this.pipelines, capacity: this.capacity, kind: kindPipeline, empty: empty)
+    releaseAll(table: this.renderPipelines, capacity: this.capacity, kind: kindRenderPipeline, empty: empty)
     releaseAll(table: this.textureViews, capacity: this.capacity, kind: kindTextureView, empty: empty)
     releaseAll(table: this.textures, capacity: this.capacity, kind: kindTexture, empty: empty)
     releaseAll(table: this.buffers, capacity: this.capacity, kind: kindBuffer, empty: empty)
     releaseAll(table: this.samplers, capacity: this.capacity, kind: kindSampler, empty: empty)
+    # Adopted externals: slots are cleared, the native handles are the adopter's.
+    releaseAll(table: this.externals, capacity: this.capacity, kind: kindExternal, empty: empty)
   }
 }
 
@@ -363,6 +377,8 @@ func tableFor(resources: view GpuResources, kind: view Int) ret view SlotTable {
   if kind is kindPipeline { ret resources.pipelines }
   if kind is kindBindGroup { ret resources.bindGroups }
   if kind is kindReadback { ret resources.readbacks }
+  if kind is kindRenderPipeline { ret resources.renderPipelines }
+  if kind is kindExternal { ret resources.externals }
   ret resources.submissions
 }
 
