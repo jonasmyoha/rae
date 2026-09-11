@@ -45,6 +45,7 @@ open Vec3
 open Scene3d
 open Sky
 open Math3d
+open GbufferRecord
 open ecs/Entity          # #793: World3d render path reads entities/components
 open ecs/ComponentTable
 # The instanced draw path (#502) runs in Rae directly on the WebGPU bindings.
@@ -54,6 +55,10 @@ open ecs/ComponentTable
 # C definition, colliding with the real enumerators from the cheader.
 open webgpu/Webgpu
 open webgpu/Context
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuIds
 
 # ----- geometry-pass begin: frame prep (C) + render pass (Rae) (#503) --------
 # C preps the frame — lazily creates pipeline/targets, resets counters, builds
@@ -169,7 +174,6 @@ func nativeGbDrawsSize() unsafe extern("rae_gb_draws_size") ret Int
 func gbDrawsSize() ret Int {
   unsafe { ret nativeGbDrawsSize() }
 }
-func gbSetStaticBind(bind: Ptr) unsafe extern("rae_gb_set_static_bind")
 
 
 # Create the frame uniform + draws storage buffers once, over the bindings, and
@@ -181,28 +185,46 @@ func gbSetStaticBind(bind: Ptr) unsafe extern("rae_gb_set_static_bind")
 # globals. They are per-frame state a deferred renderer owns, so they live in a
 # GbufferCache on RenderPasses, threaded from DeferredRenderer through beginPass /
 # renderSceneWorld and the draw entry points.
+# #912: the geometry pass's objects are typed IDs in the DeferredRenderer-owned
+# manager — the static / skin / terrain pipelines and their bind groups —
+# with the frame uniform, draws buffer and skin palette (still C-stored, created
+# here or by the skin uploader) adopted as externals in `adopted`.
 type GbufferCache {
   buffersMade: Bool
-  staticBindMade: Bool
   colorAtts: List(WGPURenderPassColorAttachment)
   depthAtt: List(WGPURenderPassDepthStencilAttachment)
   pipelinesMade: Bool
-  skinBindMade: Bool
+  staticPipeline: RenderPipelineId
+  skinPipeline: RenderPipelineId
+  staticBind: BindGroupId
+  skinBind: BindGroupId
+  adopted: List(ExternalId)
   drawScratch: List(Float)
   # terrain-splat pass pipeline/bind cache (#764: was gbuffer_terrain gTerrain* globals)
   terrainPipeMade: Bool
   terrainBindGen: Int
+  terrainPipeline: RenderPipelineId
+  terrainBind: BindGroupId
+  terrainSampler: SamplerId
+  terrainAdopted: List(ExternalId)
+  terrainBlend: Float
 }
 
 func createGbufferCache() pub ret GbufferCache {
   unsafe {
     ret GbufferCache {
-      buffersMade: false, staticBindMade: false,
+      buffersMade: false,
       colorAtts: List.create(WGPURenderPassColorAttachment, cap: 3),
       depthAtt: List.create(WGPURenderPassDepthStencilAttachment, cap: 1),
-      pipelinesMade: false, skinBindMade: false,
+      pipelinesMade: false,
+      staticPipeline: noRenderPipelineId(), skinPipeline: noRenderPipelineId(),
+      staticBind: noBindGroupId(), skinBind: noBindGroupId(),
+      adopted: List.create(ExternalId, cap: 6),
       drawScratch: List.create(Float, cap: instanceRecordFloats),
-      terrainPipeMade: false, terrainBindGen: 0 - 1
+      terrainPipeMade: false, terrainBindGen: 0 - 1,
+      terrainPipeline: noRenderPipelineId(), terrainBind: noBindGroupId(),
+      terrainSampler: noSamplerId(), terrainAdopted: List.create(ExternalId, cap: 4),
+      terrainBlend: 0.0
     }
   }
 }
@@ -225,23 +247,23 @@ func ensureGbBuffers(cache: mod GbufferCache) {
 }
 
 
-# Create the static geometry bind group once, over the bindings. Safe to call
+# Create the static geometry bind group once (frame uniform @0, draws storage
+# @1 — both created once and surviving resizes, adopted here). Safe to call
 # only after gbPrepare returned 1 and the buffers exist.
-func ensureStaticBind(cache: mod GbufferCache) {
+func ensureStaticBind(cache: mod GbufferCache, resources: mod GpuResources) {
+  if bindGroupIsUsable(resources: resources, id: cache.staticBind) { ret }
+  let entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
   unsafe {
-    if cache.staticBindMade { ret }
-    cache.staticBindMade = true
-    let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbStaticPipeline(), groupIndex: 0 as UInt32)
-    var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 2)
-    entries.add(value: { binding: 0 as UInt32, buffer: gbFrameUbuf(), size: gbFrameBytes() as UInt64 })
-    entries.add(value: { binding: 1 as UInt32, buffer: gbDrawsBuffer(), size: gbDrawsSize() as UInt64 })
-    let desc: WGPUBindGroupDescriptor = {
-      layout: layout, entryCount: 2 as UInt64, entries: entries.data
-    }
-    let bind: Ptr = wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc)
-    wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
-    gbSetStaticBind(bind: bind)
+    entries.add(value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbFrameUbuf()))
+    entries.add(value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbDrawsBuffer()))
   }
+  var made: Bool = false
+  if let bind: BindGroupId = createRenderBindGroup(resources: resources, pipeline: cache.staticPipeline, entries: entries) {
+    cache.staticBind = bind
+    made = true
+  }
+  # A failed build drops this attempt's adoptions so a retry does not accumulate slots.
+  if not made { releaseExternalIds(resources: resources, list: cache.adopted) }
 }
 
 
@@ -255,118 +277,73 @@ func ensureGbAttachments(cache: mod GbufferCache) {
 # ----- render pipelines + WGSL shader modules (#503) -------------------------
 # The shaders stay as source: C exposes the WGSL text + entry-point names, Rae
 # builds the modules and pipelines over the bindings.
-func gbWgsl() unsafe extern("rae_gb_wgsl") ret Ptr
-func gbSkinWgsl() unsafe extern("rae_gb_skin_wgsl") ret Ptr
-# #533 terrain-splat pipeline (static vertex layout; shader samples the biome).
-func gbSetTerrainPipeline(pipeline: Ptr) unsafe extern("rae_gb_set_terrain_pipeline")
-func gbTerrainPipeline() unsafe extern("rae_gb_terrain_pipeline") ret Ptr
-func gbSetTerrainBind(bind: Ptr) unsafe extern("rae_gb_set_terrain_bind")
-func gbTerrainBind() unsafe extern("rae_gb_terrain_bind") ret Ptr
+func gbWgsl() unsafe extern("rae_gb_wgsl") ret Buffer(Any)
+func gbSkinWgsl() unsafe extern("rae_gb_skin_wgsl") ret Buffer(Any)
 func nativeGbReadWgsl(path: String) unsafe extern("rae_ext_rae_sys_read_file") ret String
 func gbReadWgsl(path: copy String) ret String {
   unsafe { ret nativeGbReadWgsl(path: path) }
 }
-func gbEntryVs() unsafe extern("rae_gb_entry_vs") ret Ptr
-func gbEntryFs() unsafe extern("rae_gb_entry_fs") ret Ptr
-func gbSetPipeline(pipeline: Ptr) unsafe extern("rae_gb_set_pipeline")
-func gbSetSkinPipeline(pipeline: Ptr) unsafe extern("rae_gb_set_skin_pipeline")
 
 
-# WGSL text -> shader module. The chained WGPUShaderSourceWGSL lives in a
-# one-element List so .data gives its address for nextInChain (chain is the
-# struct's first field, so &struct == &chain). createShaderModule is
-# synchronous, so the List outlives the call.
-func makeShaderModule(wgsl: copy Ptr) ret Ptr {
-  unsafe {
-    var srcList: List(WGPUShaderSourceWGSL) = List.create(WGPUShaderSourceWGSL, cap: 1)
-    srcList.add(value: {
-      chain: { sType: WGPUSType_ShaderSourceWGSL },
-      code: { data: wgsl, length: WGPU_STRLEN }
-    })
-    let desc: WGPUShaderModuleDescriptor = { nextInChain: srcList.data }
-    ret wgpuDeviceCreateShaderModule(device: webgpuDevice(), descriptor: desc)
+# One G-buffer render pipeline spec: the shared 3 colour targets + reverse-Z
+# depth (write, Greater), back-face culled, over the caller's vertex layout.
+# The static and terrain pipelines use the 32-byte layout; skin adds the joint
+# indices/weights (80 bytes).
+func gbufferPipelineSpec(stride: copy Int, attributes: own List(VertexAttributeSpec)) pub ret RenderPipelineSpec {
+  let colorFormats: List(Int32) = List.create(Int32, cap: 3)
+  colorFormats.add(value: WGPUTextureFormat_RGB10A2Unorm)
+  colorFormats.add(value: WGPUTextureFormat_RGBA8Unorm)
+  colorFormats.add(value: WGPUTextureFormat_RGBA8Unorm)
+  ret RenderPipelineSpec {
+    vertexStride: stride, attributes: own attributes, colorFormats: own colorFormats,
+    alphaBlend: false, depthFormat: WGPUTextureFormat_Depth32Float, depthWrite: true,
+    depthCompare: WGPUCompareFunction_Greater, cullMode: WGPUCullMode_Back
   }
 }
 
-# One G-buffer render pipeline: shared 3 colour targets + reverse-Z depth, with
-# the caller's shader module and vertex layout. Every array/pointer descriptor
-# member is a List; .data gives the pointer, and the Lists outlive the
-# synchronous createRenderPipeline.
-func makeGbPipeline(shaderMod: copy Ptr, attrs: mod List(WGPUVertexAttribute), stride: copy Int) ret Ptr {
-  unsafe {
-    var vbls: List(WGPUVertexBufferLayout) = List.create(WGPUVertexBufferLayout, cap: 1)
-    vbls.add(value: {
-      stepMode: WGPUVertexStepMode_Vertex, arrayStride: stride as UInt64,
-      attributeCount: attrs.length as UInt64, attributes: attrs.data
-    })
-    var targets: List(WGPUColorTargetState) = List.create(WGPUColorTargetState, cap: 3)
-    targets.add(value: { format: WGPUTextureFormat_RGB10A2Unorm, writeMask: WGPUColorWriteMask_All })
-    targets.add(value: { format: WGPUTextureFormat_RGBA8Unorm, writeMask: WGPUColorWriteMask_All })
-    targets.add(value: { format: WGPUTextureFormat_RGBA8Unorm, writeMask: WGPUColorWriteMask_All })
-    var frags: List(WGPUFragmentState) = List.create(WGPUFragmentState, cap: 1)
-    frags.add(value: {
-      module: shaderMod, entryPoint: { data: gbEntryFs(), length: WGPU_STRLEN },
-      targetCount: 3 as UInt64, targets: targets.data
-    })
-    var depths: List(WGPUDepthStencilState) = List.create(WGPUDepthStencilState, cap: 1)
-    depths.add(value: {
-      format: WGPUTextureFormat_Depth32Float,
-      depthWriteEnabled: WGPUOptionalBool_True,
-      depthCompare: WGPUCompareFunction_Greater,
-      stencilFront: { compare: WGPUCompareFunction_Always, failOp: WGPUStencilOperation_Keep, depthFailOp: WGPUStencilOperation_Keep, passOp: WGPUStencilOperation_Keep },
-      stencilBack: { compare: WGPUCompareFunction_Always, failOp: WGPUStencilOperation_Keep, depthFailOp: WGPUStencilOperation_Keep, passOp: WGPUStencilOperation_Keep },
-      stencilReadMask: 4294967295 as UInt32, stencilWriteMask: 4294967295 as UInt32
-    })
-    let desc: WGPURenderPipelineDescriptor = {
-      vertex: {
-        module: shaderMod, entryPoint: { data: gbEntryVs(), length: WGPU_STRLEN },
-        bufferCount: 1 as UInt64, buffers: vbls.data
-      },
-      primitive: {
-        topology: WGPUPrimitiveTopology_TriangleList,
-        frontFace: WGPUFrontFace_CCW, cullMode: WGPUCullMode_Back
-      },
-      depthStencil: depths.data,
-      multisample: { count: 1 as UInt32, mask: 4294967295 as UInt32 },
-      fragment: frags.data
-    }
-    ret wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: desc)
-  }
+# The static vertex layout: position, normal, uv.
+func gbufferStaticAttributes() pub ret List(VertexAttributeSpec) {
+  let attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 3)
+  attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0, location: 0 })
+  attributes.add(value: { format: WGPUVertexFormat_Float32x3, offset: 12, location: 1 })
+  attributes.add(value: { format: WGPUVertexFormat_Float32x2, offset: 24, location: 2 })
+  ret attributes
 }
 
-func ensurePipelines(cache: mod GbufferCache) {
-  unsafe {
-    if cache.pipelinesMade { ret }
-    cache.pipelinesMade = true
-    let staticMod: Ptr = makeShaderModule(wgsl: gbWgsl())
-    var staticAttrs: List(WGPUVertexAttribute) = List.create(WGPUVertexAttribute, cap: 3)
-    staticAttrs.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0 as UInt64, shaderLocation: 0 as UInt32 })
-    staticAttrs.add(value: { format: WGPUVertexFormat_Float32x3, offset: 12 as UInt64, shaderLocation: 1 as UInt32 })
-    staticAttrs.add(value: { format: WGPUVertexFormat_Float32x2, offset: 24 as UInt64, shaderLocation: 2 as UInt32 })
-    gbSetPipeline(pipeline: makeGbPipeline(shaderMod: staticMod, attrs: staticAttrs, stride: 32))
-    wgpuShaderModuleRelease(shaderModule: staticMod)
-
-    let skinMod: Ptr = makeShaderModule(wgsl: gbSkinWgsl())
-    var skinAttrs: List(WGPUVertexAttribute) = List.create(WGPUVertexAttribute, cap: 6)
-    skinAttrs.add(value: { format: WGPUVertexFormat_Float32x3, offset: 0 as UInt64, shaderLocation: 0 as UInt32 })
-    skinAttrs.add(value: { format: WGPUVertexFormat_Float32x3, offset: 12 as UInt64, shaderLocation: 1 as UInt32 })
-    skinAttrs.add(value: { format: WGPUVertexFormat_Float32x2, offset: 24 as UInt64, shaderLocation: 2 as UInt32 })
-    skinAttrs.add(value: { format: WGPUVertexFormat_Float32x4, offset: 32 as UInt64, shaderLocation: 3 as UInt32 })
-    skinAttrs.add(value: { format: WGPUVertexFormat_Float32x4, offset: 48 as UInt64, shaderLocation: 4 as UInt32 })
-    skinAttrs.add(value: { format: WGPUVertexFormat_Float32x4, offset: 64 as UInt64, shaderLocation: 5 as UInt32 })
-    gbSetSkinPipeline(pipeline: makeGbPipeline(shaderMod: skinMod, attrs: skinAttrs, stride: 80))
-    wgpuShaderModuleRelease(shaderModule: skinMod)
+# A G-buffer pipeline from WGSL source (entry points vs / fs) — the manager
+# owns it; an invalid ID comes back when creation failed.
+func createGbufferPipeline(resources: mod GpuResources, wgsl: view String, stride: copy Int, attributes: own List(VertexAttributeSpec)) pub ret RenderPipelineId {
+  if let pipeline: RenderPipelineId = createRenderPipeline(resources: resources, wgsl: wgsl, vertexEntry: "vs", fragmentEntry: "fs", spec: gbufferPipelineSpec(stride: stride, attributes: attributes)) {
+    ret pipeline
   }
+  ret noRenderPipelineId()
 }
 
-func begin(cache: mod GbufferCache, viewProj: view Mat4, clearR: copy Float, clearG: copy Float, clearB: copy Float) pub {
+func ensurePipelines(cache: mod GbufferCache, resources: mod GpuResources) {
+  if cache.pipelinesMade { ret }
+  cache.pipelinesMade = true
+  var staticSource: String = ""
+  var skinSource: String = ""
+  unsafe {
+    staticSource = String.fromCStr(s: gbWgsl())
+    skinSource = String.fromCStr(s: gbSkinWgsl())
+  }
+  cache.staticPipeline = createGbufferPipeline(resources: resources, wgsl: staticSource, stride: 32, attributes: gbufferStaticAttributes())
+  let skinAttributes: List(VertexAttributeSpec) = gbufferStaticAttributes()
+  skinAttributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 32, location: 3 })
+  skinAttributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 48, location: 4 })
+  skinAttributes.add(value: { format: WGPUVertexFormat_Float32x4, offset: 64, location: 5 })
+  cache.skinPipeline = createGbufferPipeline(resources: resources, wgsl: skinSource, stride: 80, attributes: skinAttributes)
+}
+
+func begin(cache: mod GbufferCache, resources: mod GpuResources, viewProj: view Mat4, clearR: copy Float, clearG: copy Float, clearB: copy Float) pub {
   unsafe {
     if gbPrepare() is 0 { ret }
-    ensurePipelines(cache: cache)
+    ensurePipelines(cache: cache, resources: resources)
     ensureTargets()
     if gbTargetsReady() is 0 { ret }
     ensureGbBuffers(cache: cache)
-    ensureStaticBind(cache: cache)
+    ensureStaticBind(cache: cache, resources: resources)
     if gbFrameUniform(viewProj: viewProj, clearR: clearR, clearG: clearG, clearB: clearB) is 0 { ret }
     ensureGbAttachments(cache: cache)
 
@@ -411,9 +388,8 @@ func begin(cache: mod GbufferCache, viewProj: view Mat4, clearR: copy Float, cle
     let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
     let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
     let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
-    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: gbStaticPipeline())
-    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
-      group: gbStaticBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+    # Every draw binds its own pipeline + group (gbIssueInstanced), so the pass
+    # opens with nothing bound; the C-prepared SDF draw binds its own too.
     gbSetFrame(enc: enc, pass: pass)
   }
 }
@@ -423,7 +399,7 @@ func begin(cache: mod GbufferCache, viewProj: view Mat4, clearR: copy Float, cle
 # given pipeline / bind group / mesh buffers, and issue one instanced
 # DrawIndexed. Every draw — static, skinned, instanced — funnels through here,
 # so the whole encoding lives in Rae over the generated bindings, no C shim.
-func gbIssueInstanced(pass: copy Ptr, pipeline: copy Ptr, bind: copy Ptr,
+func gbIssueInstanced(resources: mod GpuResources, pass: copy Ptr, pipeline: view RenderPipelineId, bind: view BindGroupId,
                       vbuf: copy Ptr, ibuf: copy Ptr, icount: copy Int,
                       base: copy Int, count: copy Int, records: copy Ptr) {
   unsafe {
@@ -431,17 +407,10 @@ func gbIssueInstanced(pass: copy Ptr, pipeline: copy Ptr, bind: copy Ptr,
     wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: gbDrawsBuffer(),
       bufferOffset: (base * strideBytes) as UInt64, data: records,
       size: (count * strideBytes) as UInt64)
-    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: pipeline)
-    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
-      group: bind, dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
-    wgpuRenderPassEncoderSetVertexBuffer(renderPassEncoder: pass, slot: 0 as UInt32,
-      buffer: vbuf, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: vbuf))
-    wgpuRenderPassEncoderSetIndexBuffer(renderPassEncoder: pass, buffer: ibuf,
-      format: WGPUIndexFormat_Uint32, offset: 0 as UInt64, size: wgpuBufferGetSize(buffer: ibuf))
-    wgpuRenderPassEncoderDrawIndexed(renderPassEncoder: pass,
-      indexCount: icount as UInt32, instanceCount: count as UInt32,
-      firstIndex: 0 as UInt32, baseVertex: 0 as Int32, firstInstance: base as UInt32)
-    gbAdvanceDraws(count: count)
+    if recordDrawIndexedInPass(resources: resources, pass: pass, pipeline: pipeline, bindGroup: bind,
+         vertexBuffer: vbuf, indexBuffer: ibuf, indexCount: icount, instanceCount: count, firstInstance: base) {
+      gbAdvanceDraws(count: count)
+    }
   }
 }
 
@@ -452,7 +421,7 @@ func gbIssueInstanced(pass: copy Ptr, pipeline: copy Ptr, bind: copy Ptr,
 # into the draws storage buffer and issues one instanced DrawIndexed on the
 # static pipeline — no C shim. A skinned draw may have left its pipeline bound,
 # so gbIssueInstanced re-binds the static one.
-func drawRecords(mesh: copy Int, records: copy Ptr, count: copy Int) pub {
+func drawRecords(cache: mod GbufferCache, resources: mod GpuResources, mesh: copy Int, records: copy Ptr, count: copy Int) pub {
   unsafe {
     if gbMeshReady(mesh: mesh) is 0 { ret }
     let base: Int = gbDrawCount()
@@ -460,7 +429,7 @@ func drawRecords(mesh: copy Int, records: copy Ptr, count: copy Int) pub {
     var n: Int = count
     if n > remaining { n = remaining }
     if n <= 0 { ret }
-    gbIssueInstanced(pass: gbPass(), pipeline: gbStaticPipeline(), bind: gbStaticBind(),
+    gbIssueInstanced(resources: resources, pass: gbPass(), pipeline: cache.staticPipeline, bind: cache.staticBind,
       vbuf: gbMeshVbuf(mesh: mesh), ibuf: gbMeshIbuf(mesh: mesh),
       icount: gbMeshIcount(mesh: mesh), base: base, count: n, records: records)
   }
@@ -469,8 +438,6 @@ func drawRecords(mesh: copy Int, records: copy Ptr, count: copy Int) pub {
 # Context accessors for the instanced draw (#502) — opaque frame handles + the
 # shared instance cursor, from the C geometry pass. See runtime_gpu3d_gbuffer.c.
 func gbPass() unsafe extern("rae_gb_pass") ret Ptr
-func gbStaticPipeline() unsafe extern("rae_gb_static_pipeline") ret Ptr
-func gbStaticBind() unsafe extern("rae_gb_static_bind") ret Ptr
 func gbDrawsBuffer() unsafe extern("rae_gb_draws_buffer") ret Ptr
 func nativeGbMaxDraws() unsafe extern("rae_gb_max_draws") ret Int
 func gbMaxDraws() ret Int {
@@ -497,8 +464,6 @@ func gbMeshIcount(mesh: copy Int) ret Int {
 # Skinned-draw accessors (#503). The skin bind group (frame uniform + draws +
 # joint palette) is still created lazily in C — it needs the pipeline layout and
 # the palette storage buffer — but the draw itself is issued from Rae.
-func gbSkinPipeline() unsafe extern("rae_gb_skin_pipeline") ret Ptr
-func gbSkinBind() unsafe extern("rae_gb_skin_bind") ret Ptr
 func nativeGbSkinReady(mesh: Int) unsafe extern("rae_gb_skin_ready") ret Int
 func gbSkinReady(mesh: copy Int) ret Int {
   unsafe { ret nativeGbSkinReady(mesh: mesh) }
@@ -512,7 +477,6 @@ func gbSkinIcount(mesh: copy Int) ret Int {
 # Skin bind group creation (#503): built in Rae from the skin pipeline's layout
 # + the frame uniform, draws buffer and joint palette. The palette comes up
 # asynchronously, so a readiness check defers creation until it exists.
-func gbSetSkinBind(bind: Ptr) unsafe extern("rae_gb_set_skin_bind")
 func gbSkinPalette() unsafe extern("rae_gb_skin_palette") ret Ptr
 func nativeGbSkinPaletteSize() unsafe extern("rae_gb_skin_palette_size") ret Int
 func gbSkinPaletteSize() ret Int {
@@ -524,23 +488,21 @@ func gbSkinPaletteReady() ret Int {
 }
 
 
-func ensureSkinBind(cache: mod GbufferCache) {
+func ensureSkinBind(cache: mod GbufferCache, resources: mod GpuResources) {
+  if bindGroupIsUsable(resources: resources, id: cache.skinBind) { ret }
+  if gbSkinPaletteReady() is 0 { ret }
+  let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
   unsafe {
-    if cache.skinBindMade { ret }
-    if gbSkinPaletteReady() is 0 { ret }
-    cache.skinBindMade = true
-    let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbSkinPipeline(), groupIndex: 0 as UInt32)
-    var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 3)
-    entries.add(value: { binding: 0 as UInt32, buffer: gbFrameUbuf(), size: gbFrameBytes() as UInt64 })
-    entries.add(value: { binding: 1 as UInt32, buffer: gbDrawsBuffer(), size: gbDrawsSize() as UInt64 })
-    entries.add(value: { binding: 2 as UInt32, buffer: gbSkinPalette(), size: gbSkinPaletteSize() as UInt64 })
-    let desc: WGPUBindGroupDescriptor = {
-      layout: layout, entryCount: 3 as UInt64, entries: entries.data
-    }
-    let bind: Ptr = wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc)
-    wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
-    gbSetSkinBind(bind: bind)
+    entries.add(value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbFrameUbuf()))
+    entries.add(value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbDrawsBuffer()))
+    entries.add(value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbSkinPalette()))
   }
+  var made: Bool = false
+  if let bind: BindGroupId = createRenderBindGroup(resources: resources, pipeline: cache.skinPipeline, entries: entries) {
+    cache.skinBind = bind
+    made = true
+  }
+  if not made { releaseExternalIds(resources: resources, list: cache.adopted) }
 }
 # Metaball cluster into the G-buffer (#392, ported to Rae #504): a fullscreen
 # raymarch that writes packed G-buffer attributes + depth into the OPEN geometry
@@ -567,10 +529,7 @@ func drawMetaballs(packedBalls: copy Ptr, count: copy Int, packedColors: copy Pt
       group: gbSdfBind(gi: gi), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
     wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: 3 as UInt32,
       instanceCount: 1 as UInt32, firstVertex: 0 as UInt32, firstInstance: 0 as UInt32)
-    # Hand the pass back to the static pipeline for any following draw.
-    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: gbStaticPipeline())
-    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
-      group: gbStaticBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+    # No restore: every G-buffer draw binds its own pipeline + group (#912).
   }
 }
 func nativeSdfShutdown() unsafe extern("rae_ext_Gbuffer_sdfShutdown")
@@ -626,7 +585,7 @@ const viewDepth: Int = 4     # linearised for display
 # the whole chain is stack traffic. The forward path packs an equivalent
 # block into a List(Float) — one allocation per frame — which this
 # deliberately does not inherit.
-func beginPass(cache: mod GbufferCache, camera: view Camera3d, light: view Light3d, aspect: view Float) pub {
+func beginPass(cache: mod GbufferCache, resources: mod GpuResources, camera: view Camera3d, light: view Light3d, aspect: view Float) pub {
   let worldUp: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
   let viewM: Mat4 = mat4LookAt(
     eyeX: camera.position.x, eyeY: camera.position.y, eyeZ: camera.position.z,
@@ -638,127 +597,9 @@ func beginPass(cache: mod GbufferCache, camera: view Camera3d, light: view Light
   # mat4Perspective — the two conventions must not be mixed.
   let proj: Mat4 = mat4PerspectiveReverseZ(fovYDeg: camera.fovYDeg, aspect: aspect, near: camera.nearZ, far: camera.farZ)
   let viewProj: Mat4 = mat4Mul(a: proj, b: viewM)
-  begin(cache: cache, viewProj: viewProj, clearR: light.clearColor.x, clearG: light.clearColor.y, clearB: light.clearColor.z)
+  begin(cache: cache, resources: resources, viewProj: viewProj, clearR: light.clearColor.x, clearG: light.clearColor.y, clearB: light.clearColor.z)
 }
 
-# Model matrix for a typed transform: M = T * Rz * Ry * Rx * S, Euler XYZ
-# radians, right-handed. Same construction as the forward path's — the two
-# frames must agree about where an object IS, whatever they disagree about
-# in how it is shaded.
-func modelMatrixOf(t: view Transform3d) pub ret Mat4 {
-  let s: Mat4 = mat4ScaleXYZ(x: t.scale.x, y: t.scale.y, z: t.scale.z)
-  let rx: Mat4 = mat4RotateX(angle: t.rotation.x)
-  let ry: Mat4 = mat4RotateY(angle: t.rotation.y)
-  let rz: Mat4 = mat4RotateZ(angle: t.rotation.z)
-  let tr: Mat4 = mat4Translate(x: t.position.x, y: t.position.y, z: t.position.z)
-  let rxs: Mat4 = mat4Mul(a: rx, b: s)
-  let ryrxs: Mat4 = mat4Mul(a: ry, b: rxs)
-  let rot: Mat4 = mat4Mul(a: rz, b: ryrxs)
-  ret mat4Mul(a: tr, b: rot)
-}
-
-# ----- instanced draw: DrawU records built in Rae (grass epic #485) --------
-#
-# The instanced path hands the GPU seam ready-made DrawU records, the same way
-# `drawInstance` hands it a ready-made Mat4. The matrix and the G-buffer's
-# packed wire format both live HERE, in Rae — C's `drawRecords` only copies and
-# draws. One DrawU record is `instanceRecordFloats` floats:
-#   [0..15]  model         [16..31] prevModel
-#   [32..34] albedo rgb    [35] metallic
-#   [36] roughness  [37] emissive-or-occlusion  [38] shading mode  [39] spare
-# mirroring the C staging layout (GB_DRAW_FLOATS). Kept in one Rae place so a
-# caller never touches raw offsets.
-const instanceRecordFloats: Int = 40
-
-# Shading-mode field values, mirroring GB_MODE_* in the runtime. The 2-bit
-# field is stored as a Float in 0..1 so it survives the rgb10a2 target.
-const gbModeLit: Float = 0.0
-const gbModeEmissive: Float = 0.3333333
-const gbModeToon: Float = 1.0
-# Emissive is log-encoded into the 8-bit channel it shares with occlusion;
-# lighting decodes with the matching constant (GB_EMISSIVE_LOG_K).
-const gbEmissiveLogK: Float = 6.91
-
-# Position + yaw + two wind-driven tilt angles + uniform scale -> a model
-# matrix, as T * Rz(yaw) * Rx(tiltX) * Ry(tiltY) * S(scale). This is what the C
-# `gb_sway_model` used to compute; it is plain Mat4 composition, so it belongs
-# in Rae like every other transform the renderer builds.
-func swayModel(x: view Float, y: view Float, z: view Float, yaw: view Float,
-               tiltX: view Float, tiltY: view Float, scale: view Float) pub ret Mat4 {
-  let scaleM: Mat4 = mat4Scale(s: scale)
-  let ry: Mat4 = mat4RotateY(angle: tiltY)
-  let rx: Mat4 = mat4RotateX(angle: tiltX)
-  let rz: Mat4 = mat4RotateZ(angle: yaw)
-  let tr: Mat4 = mat4Translate(x: x, y: y, z: z)
-  let rys: Mat4 = mat4Mul(a: ry, b: scaleM)
-  let rxrys: Mat4 = mat4Mul(a: rx, b: rys)
-  let rot: Mat4 = mat4Mul(a: rz, b: rxrys)
-  ret mat4Mul(a: tr, b: rot)
-}
-
-# The shared param encode both draw paths need: emissive log-encoded into the
-# channel it shares with occlusion, plus the shading-mode flag. A non-emitter
-# stores 1.0 there — "unoccluded", the right default until AO writes something.
-func encodeEmissive(emissive: view Float, toon: view Int) ret Float {
-  if toon is 1 { ret 1.0 }
-  if emissive > 0.0 {
-    let e: Float = Math.naturalLog(x: 1.0 + emissive) / gbEmissiveLogK
-    if e > 1.0 { ret 1.0 }
-    ret e
-  }
-  ret 1.0
-}
-
-func encodeMode(emissive: view Float, toon: view Int) ret Float {
-  if toon is 1 { ret gbModeToon }
-  if emissive > 0.0 { ret gbModeEmissive }
-  ret gbModeLit
-}
-
-# Pack one fully-built DrawU record into `records` at instance `slot`. Writes
-# `instanceRecordFloats` floats; callers size the buffer by that constant and
-# never see the layout.
-# `paletteBase` is the instance's start offset into the shared skin palette
-# buffer, in vec4 units (`characterPaletteBase(slot, jointCount)`), read by the
-# skinned shader as `d.params.w`. 0 for non-skinned instances and for skinned
-# instances that use palette slot 0 — every current caller, so behaviour is
-# unchanged until a caller passes a non-zero base (#547 per-character crowd).
-func packInstanceRecord(records: mod List(Float), slot: view Int,
-                        model: view Mat4, prevModel: view Mat4,
-                        r: view Float, g: view Float, b: view Float,
-                        metallic: view Float, roughness: view Float,
-                        emissive: view Float, toon: view Int, paletteBase: view Int) pub {
-  let base: Int = slot * instanceRecordFloats
-  var i: Int = 0
-  loop i < 16 {
-    records.set(index: base + i, value: mat4Get(m: model, i: i))
-    records.set(index: base + 16 + i, value: mat4Get(m: prevModel, i: i))
-    i = i + 1
-  }
-  records.set(index: base + 32, value: r)
-  records.set(index: base + 33, value: g)
-  records.set(index: base + 34, value: b)
-  records.set(index: base + 35, value: metallic)
-  records.set(index: base + 36, value: roughness)
-  records.set(index: base + 37, value: encodeEmissive(emissive: emissive, toon: toon))
-  records.set(index: base + 38, value: encodeMode(emissive: emissive, toon: toon))
-  records.set(index: base + 39, value: paletteBase.toFloat())
-}
-
-# Write one mesh instance's surface attributes. Note what is NOT passed:
-# no light, no camera, no emission. A geometry pass that needed any of
-# those would not be a geometry pass.
-# `prevTransform` is where the instance was LAST frame; it drives the
-# G-buffer's motion channel, which TAA reads (#390). Pass the same
-# transform when an object did not move.
-# Bool -> Int at the extern boundary, where Rae's Bool has no defined
-# representation. One place to cross it, so both draw paths agree.
-func toonFlag(material: view Material3d) ret Int {
-  if material.toon {
-    ret 1
-  }
-  ret 0
-}
 
 # Reusable one-record scratch for the single-draw paths (#503), so a static or
 # skinned draw builds its DrawU entry without allocating per call — the grass
@@ -779,7 +620,7 @@ func ensureDrawScratch(cache: mod GbufferCache) {
 # single DrawU record in Rae (packInstanceRecord) and issues it through the same
 # Rae upload+draw path as the instanced grass — the static pipeline reads
 # draws[instance_index], so one record at firstInstance=base is this draw.
-func draw(cache: mod GbufferCache, mesh: copy Int, model: view Mat4, prevModel: view Mat4,
+func draw(cache: mod GbufferCache, resources: mod GpuResources, mesh: copy Int, model: view Mat4, prevModel: view Mat4,
           r: copy Float, g: copy Float, b: copy Float,
           metallic: copy Float, roughness: copy Float, emissive: copy Float,
           toon: copy Int) pub {
@@ -790,7 +631,7 @@ func draw(cache: mod GbufferCache, mesh: copy Int, model: view Mat4, prevModel: 
     ensureDrawScratch(cache: cache)
     packInstanceRecord(records: cache.drawScratch, slot: 0, model: model, prevModel: prevModel,
       r: r, g: g, b: b, metallic: metallic, roughness: roughness, emissive: emissive, toon: toon, paletteBase: 0)
-    gbIssueInstanced(pass: gbPass(), pipeline: gbStaticPipeline(), bind: gbStaticBind(),
+    gbIssueInstanced(resources: resources, pass: gbPass(), pipeline: cache.staticPipeline, bind: cache.staticBind,
       vbuf: gbMeshVbuf(mesh: mesh), ibuf: gbMeshIbuf(mesh: mesh),
       icount: gbMeshIcount(mesh: mesh), base: base, count: 1, records: cache.drawScratch.data)
   }
@@ -800,25 +641,21 @@ func draw(cache: mod GbufferCache, mesh: copy Int, model: view Mat4, prevModel: 
 # and G-buffer layout as a static draw; only the pipeline differs (the skin
 # vertex stage poses the mesh by the joint palette). After issuing, the static
 # pipeline/bind are restored so a following static draw is unaffected.
-func drawSkinned(cache: mod GbufferCache, mesh: copy Int, model: view Mat4, prevModel: view Mat4,
+func drawSkinned(cache: mod GbufferCache, resources: mod GpuResources, mesh: copy Int, model: view Mat4, prevModel: view Mat4,
                  r: copy Float, g: copy Float, b: copy Float,
                  metallic: copy Float, roughness: copy Float, emissive: copy Float,
                  toon: copy Int) pub {
   unsafe {
-    ensureSkinBind(cache: cache)
+    ensureSkinBind(cache: cache, resources: resources)
     if gbSkinReady(mesh: mesh) is 0 { ret }
     let base: Int = gbDrawCount()
     if base >= gbMaxDraws() { ret }
     ensureDrawScratch(cache: cache)
     packInstanceRecord(records: cache.drawScratch, slot: 0, model: model, prevModel: prevModel,
       r: r, g: g, b: b, metallic: metallic, roughness: roughness, emissive: emissive, toon: toon, paletteBase: 0)
-    gbIssueInstanced(pass: gbPass(), pipeline: gbSkinPipeline(), bind: gbSkinBind(),
+    gbIssueInstanced(resources: resources, pass: gbPass(), pipeline: cache.skinPipeline, bind: cache.skinBind,
       vbuf: gbSkinVbuf(mesh: mesh), ibuf: gbSkinIbuf(mesh: mesh),
       icount: gbSkinIcount(mesh: mesh), base: base, count: 1, records: cache.drawScratch.data)
-    # Hand the pass back to the static pipeline for any following static draw.
-    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: gbPass(), pipeline: gbStaticPipeline())
-    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: gbPass(), groupIndex: 0 as UInt32,
-      group: gbStaticBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
   }
 }
 
@@ -829,26 +666,22 @@ func drawSkinned(cache: mod GbufferCache, mesh: copy Int, model: view Mat4, prev
 # crowds playing the same animation. `records` is `count` DrawU entries built by
 # packInstanceRecord, exactly like drawRecords. Restores the static pipeline after,
 # as drawSkinned does.
-func drawSkinnedRecords(cache: mod GbufferCache, mesh: copy Int, records: copy Ptr, count: copy Int) pub {
+func drawSkinnedRecords(cache: mod GbufferCache, resources: mod GpuResources, mesh: copy Int, records: copy Ptr, count: copy Int) pub {
   unsafe {
-    ensureSkinBind(cache: cache)
+    ensureSkinBind(cache: cache, resources: resources)
     if gbSkinReady(mesh: mesh) is 0 { ret }
     let base: Int = gbDrawCount()
     let remaining: Int = gbMaxDraws() - base
     var n: Int = count
     if n > remaining { n = remaining }
     if n <= 0 { ret }
-    gbIssueInstanced(pass: gbPass(), pipeline: gbSkinPipeline(), bind: gbSkinBind(),
+    gbIssueInstanced(resources: resources, pass: gbPass(), pipeline: cache.skinPipeline, bind: cache.skinBind,
       vbuf: gbSkinVbuf(mesh: mesh), ibuf: gbSkinIbuf(mesh: mesh),
       icount: gbSkinIcount(mesh: mesh), base: base, count: n, records: records)
-    # Hand the pass back to the static pipeline for any following static draw.
-    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: gbPass(), pipeline: gbStaticPipeline())
-    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: gbPass(), groupIndex: 0 as UInt32,
-      group: gbStaticBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
   }
 }
 
-func drawInstance(cache: mod GbufferCache, mesh: view MeshHandle, transform: view Transform3d, prevTransform: view Transform3d, material: view Material3d) pub {
+func drawInstance(cache: mod GbufferCache, resources: mod GpuResources, mesh: view MeshHandle, transform: view Transform3d, prevTransform: view Transform3d, material: view Material3d) pub {
   if not meshHandleIsValid(h: mesh) {
     ret
   }
@@ -866,7 +699,7 @@ func drawInstance(cache: mod GbufferCache, mesh: view MeshHandle, transform: vie
     emissive = material.emission.z
   }
   draw(
-    cache: cache, mesh: mesh.id, model: model, prevModel: prevModel,
+    cache: cache, resources: resources, mesh: mesh.id, model: model, prevModel: prevModel,
     r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
     metallic: material.metallic, roughness: material.roughness, emissive: emissive,
     toon: toonFlag(material: material)
@@ -878,7 +711,7 @@ func drawInstance(cache: mod GbufferCache, mesh: view MeshHandle, transform: vie
 # poses the mesh by the joint palette first. The palette is uploaded once
 # per frame by Gpu3d.uploadPalette and shared by every pipeline that
 # reads it.
-func drawSkinnedInstance(cache: mod GbufferCache, mesh: view MeshHandle, model: view Mat4, prevModel: view Mat4,
+func drawSkinnedInstance(cache: mod GbufferCache, resources: mod GpuResources, mesh: view MeshHandle, model: view Mat4, prevModel: view Mat4,
                          material: view Material3d) pub {
   if not meshHandleIsValid(h: mesh) {
     ret
@@ -891,7 +724,7 @@ func drawSkinnedInstance(cache: mod GbufferCache, mesh: view MeshHandle, model: 
     emissive = material.emission.z
   }
   drawSkinned(
-    cache: cache, mesh: mesh.id, model: model, prevModel: prevModel,
+    cache: cache, resources: resources, mesh: mesh.id, model: model, prevModel: prevModel,
     r: material.baseColor.x, g: material.baseColor.y, b: material.baseColor.z,
     metallic: material.metallic, roughness: material.roughness, emissive: emissive,
     toon: toonFlag(material: material)
@@ -988,3 +821,20 @@ func shutdownAll() pub {
   deferredShutdown()
   shutdown()
 }
+
+# Retire the geometry pass's manager objects (renderer shutdown, BEFORE the C
+# shutdown releases the adopted frame/draws/palette buffers). The terrain
+# objects are GbufferTerrain's; the renderer shutdown retires them there.
+func gbufferShutdown(cache: mod GbufferCache, resources: mod GpuResources) pub {
+  retireBindGroup(resources: resources, id: cache.staticBind)
+  retireBindGroup(resources: resources, id: cache.skinBind)
+  releaseExternalIds(resources: resources, list: cache.adopted)
+  retireRenderPipeline(resources: resources, id: cache.staticPipeline)
+  retireRenderPipeline(resources: resources, id: cache.skinPipeline)
+  cache.staticBind = noBindGroupId()
+  cache.skinBind = noBindGroupId()
+  cache.staticPipeline = noRenderPipelineId()
+  cache.skinPipeline = noRenderPipelineId()
+  cache.pipelinesMade = false
+}
+

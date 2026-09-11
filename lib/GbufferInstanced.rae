@@ -18,6 +18,8 @@
 # (packInstanceRecord), never add() — so an instanced field stays inside the
 # walker's zero-alloc frame budget (test 573).
 open Gbuffer
+open GbufferRecord
+open gpu/GpuResources
 open Scene3d
 open Math3d
 # Per-character palette uploads go straight over the WebGPU bindings (#547).
@@ -286,16 +288,16 @@ func addInstanceTransformEmblem(batch: mod InstanceBatch, transform: view Transf
 
 # Draw the whole batch in one instanced DrawIndexed. Must be called inside the
 # geometry pass (between Gbuffer.begin and Gbuffer.end), like any other draw.
-func drawInstances(batch: view InstanceBatch) pub {
+func drawInstances(cache: mod GbufferCache, resources: mod GpuResources, batch: view InstanceBatch) pub {
   if batch.count <= 0 { ret }
-  drawRecords(mesh: batch.meshId, records: batch.records.data, count: batch.count)
+  drawRecords(cache: cache, resources: resources, mesh: batch.meshId, records: batch.records.data, count: batch.count)
 }
 
 # Draw the batch as one instanced SKINNED DrawIndexed. All copies share the one
 # joint palette (one pose) — see drawSkinnedRecords. Set the batch mesh to the
 # skinned part being drawn (setInstanceBatchMesh) before calling; a multi-part
 # character is one drawSkinnedInstances per part.
-func drawSkinnedInstances(cache: mod GbufferCache, batch: view InstanceBatch) pub {
+func drawSkinnedInstances(cache: mod GbufferCache, resources: mod GpuResources, batch: view InstanceBatch) pub {
   if batch.count <= 0 { ret }
-  drawSkinnedRecords(cache: cache, mesh: batch.meshId, records: batch.records.data, count: batch.count)
+  drawSkinnedRecords(cache: cache, resources: resources, mesh: batch.meshId, records: batch.records.data, count: batch.count)
 }

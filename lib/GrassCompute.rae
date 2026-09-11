@@ -35,8 +35,6 @@ import WorldBiome
 # Reused gbuffer ABI-seam accessors (the same C symbols Gbuffer.rae binds): the
 # frame uniform (adopted as an external), the live geometry pass, and the
 # static pipeline + bind group restored after the grass draw.
-func gbStaticPipeline() unsafe extern("rae_gb_static_pipeline") ret Ptr
-func gbStaticBind() unsafe extern("rae_gb_static_bind") ret Ptr
 func gbFrameUbuf() unsafe extern("rae_gb_frame_ubuf") ret Ptr
 func gbPass() unsafe extern("rae_gb_pass") ret Ptr
 
@@ -286,10 +284,8 @@ func grassDraw(grass: mod GrassCompute, resources: mod GpuResources) {
   unsafe {
     let pass: Ptr = gbPass()
     if pass is webgpuNull() { ret }
+    # No static re-bind after: every G-buffer draw binds its own pipeline (#912).
     recordDrawIndirectInPass(resources: resources, pass: pass, pipeline: grass.renderPipeline, bindGroup: grass.drawBind, indirect: bufferRef(id: grass.indirect))
-    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: gbStaticPipeline())
-    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
-      group: gbStaticBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
   }
 }
 

@@ -32,6 +32,7 @@ import Sdl3
 import Vec3
 open Gpu3d
 open RendererDeferred
+open gpu/GpuResources
 open Sky
 open SkyHosek
 open Gbuffer
@@ -792,20 +793,24 @@ func main() ret Int {
           # example opens both, so an unqualified call silently picks the
           # forward path's — which leaves the G-buffer unsubmitted and
           # renders a black frame with a working UI (found in 113).
-          Gbuffer.beginPass(cache: renderer.passes.gbuffer, camera: camera, light: light, aspect: aspect)
-          if uiState.activeScene is 1 {
-            GbufferWorld.renderSceneWorld(cache: renderer.passes.gbuffer, world: asset1.world)
-            renderSdfGbuffer(world: asset1.world, tags: clusters1, camera: camera)
+          # #912: the geometry pass draws from the renderer-owned GPU manager.
+          ensureRendererResources(renderer: renderer)
+          if let resources: mod GpuResources => renderer.gpuResources {
+            Gbuffer.beginPass(cache: renderer.passes.gbuffer, resources: resources, camera: camera, light: light, aspect: aspect)
+            if uiState.activeScene is 1 {
+              GbufferWorld.renderSceneWorld(cache: renderer.passes.gbuffer, resources: resources, world: asset1.world)
+              renderSdfGbuffer(world: asset1.world, tags: clusters1, camera: camera)
+            }
+            if uiState.activeScene is 2 {
+              GbufferWorld.renderSceneWorld(cache: renderer.passes.gbuffer, resources: resources, world: asset2.world)
+              renderSdfGbuffer(world: asset2.world, tags: clusters2, camera: camera)
+            }
+            if uiState.activeScene is 3 {
+              GbufferWorld.renderSceneWorld(cache: renderer.passes.gbuffer, resources: resources, world: asset3.world)
+              renderSdfGbuffer(world: asset3.world, tags: clusters3, camera: camera)
+            }
+            Gbuffer.endPass()
           }
-          if uiState.activeScene is 2 {
-            GbufferWorld.renderSceneWorld(cache: renderer.passes.gbuffer, world: asset2.world)
-            renderSdfGbuffer(world: asset2.world, tags: clusters2, camera: camera)
-          }
-          if uiState.activeScene is 3 {
-            GbufferWorld.renderSceneWorld(cache: renderer.passes.gbuffer, world: asset3.world)
-            renderSdfGbuffer(world: asset3.world, tags: clusters3, camera: camera)
-          }
-          Gbuffer.endPass()
         }
         if tag is RenderTag.ssao or tag is RenderTag.depthPyramid or tag is RenderTag.lighting
           or tag is RenderTag.transparentForward or tag is RenderTag.taa or tag is RenderTag.composite {
