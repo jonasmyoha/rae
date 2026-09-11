@@ -82,13 +82,13 @@ func generationPath() pub ret String {
 # wrong runtime helper (see lib/fileWatch.rae and tests/415). Going
 # through the raw extern gives us a plain `String` and lets us use
 # the empty-string-means-missing convention.
-func rae_ext_rae_sys_read_file(path: String) extern ret String
+func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
 
 # Read whatever bytes the previous run saved. Returns `""` when
 # there's nothing to restore; apps check `.length() > 0` before
 # deserializing. The app owns the schema (typically JSON).
 func readHotReloadState() pub ret String {
-  ret rae_ext_rae_sys_read_file(path: statePath())
+  unsafe { ret rae_ext_rae_sys_read_file(path: statePath()) }
 }
 
 # Save state for the next run. Apps should call this just before
@@ -112,7 +112,7 @@ func statePathFor(appId: view String) pub ret String {
 }
 
 func readHotReloadStateFor(appId: view String) pub ret String {
-  ret rae_ext_rae_sys_read_file(path: statePathFor(appId: appId))
+  unsafe { ret rae_ext_rae_sys_read_file(path: statePathFor(appId: appId)) }
 }
 
 func writeHotReloadStateFor(appId: view String, state: view String) pub ret Bool {
@@ -134,7 +134,8 @@ func writeHotReloadStateFor(appId: view String, state: view String) pub ret Bool
 # missing file restarts at 1 rather than failing: this is a diagnostic,
 # and it should never be the reason an app does not boot.
 func nextReloadGeneration() pub ret Int {
-  let raw: String = rae_ext_rae_sys_read_file(path: generationPath())
+  var raw: String = ""
+  unsafe { raw = rae_ext_rae_sys_read_file(path: generationPath()) }
   var n: Int = 0
   if raw.length() > 0 {
     n = raw.trim().toInt()
@@ -276,7 +277,8 @@ func readBuildStatus() pub ret BuildStatus {
   if exists(path: path) is false {
     ret emptyBuildStatus()
   }
-  let raw: String = rae_ext_rae_sys_read_file(path: path)
+  var raw: String = ""
+  unsafe { raw = rae_ext_rae_sys_read_file(path: path) }
   ret parseBuildStatus(raw: raw)
 }
 
@@ -308,7 +310,8 @@ func pollReloadSignal(w: mod ReloadSignalWatcher) pub ret ReloadSignal {
     ret emptySignal()
   }
   w.lastMtime = mt
-  let raw: String = rae_ext_rae_sys_read_file(path: w.path)
+  var raw: String = ""
+  unsafe { raw = rae_ext_rae_sys_read_file(path: w.path) }
   if raw.length() is 0 {
     ret emptySignal()
   }

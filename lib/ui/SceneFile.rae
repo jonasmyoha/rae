@@ -3,9 +3,10 @@ import ui/Scene
 
 # The runtime returns an empty String on failure. Keep this non-optional bridge
 # until the C backend's opt-String return path is representation-safe.
-func rae_ext_rae_sys_read_file(path: String) extern ret String
+func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
 
 func loadSceneFile(path: view String) pub ret Scene {
-  let source: String = rae_ext_rae_sys_read_file(path: path)
+  var source: String = ""
+  unsafe { source = rae_ext_rae_sys_read_file(path: path) }
   ret parseScene(source: source)
 }

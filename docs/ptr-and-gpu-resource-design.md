@@ -744,6 +744,19 @@ pretending repository-wide enforcement is complete:
    migrations; final unconditional enforcement waits for those migrations and
    maintained example gates.
 
+   Migration progress: generated WebGPU bindings adopted the boundary (#893).
+   The bounded non-renderer interop surface adopted it too (#894): `core`,
+   `String`, `Math`, `Time`, `Io`, `Sys`, `Channel`, `Filesystem`/`Fs`, `Image`,
+   `Tinyexpr`, `compress/Oracle`, `sys/Spotify`, `HotReload` and the
+   `ui/SceneFile` / `Scene3dFile` serialization bridges. Every extern in those
+   modules now spells `unsafe extern`; each safe wrapper keeps its ordinary
+   signature and wraps its foreign call in the smallest `unsafe { ... }` block,
+   while wrappers that hand out or accept a raw pointer without validating it
+   (`String.toCStr`/`fromCStr`, `Sys.encrypt`/`decrypt`) are themselves `unsafe`.
+   `ui/WindowGeometry` keeps declaration-only marking: it is coupled to the
+   `Gpu2d` renderer externs, so its full adoption lands with the GPU consumers
+   (#876). Legacy platform surfaces (Raylib, Sdl3, Msdf) remain queued (#895).
+
 Positive tests must include the same native-buffer module authored outside
 stdlib, safe wrapper use, direct `if let` owners, owner fields, returns,
 `List(NativeBuffer)`, optional failure and explicit drop.

@@ -1,53 +1,53 @@
 # System utilities for Rae
 
-func rae_sys_exit(code: Int) extern
+func rae_sys_exit(code: Int) unsafe extern
 
-func rae_sys_get_env(name: String) extern ret String
+func rae_sys_get_env(name: String) unsafe extern ret String
 
-func rae_sys_read_file(path: String) extern ret opt String
+func rae_sys_read_file(path: String) unsafe extern ret opt String
 
-func rae_sys_write_file(path: String, content: String) extern ret Bool
+func rae_sys_write_file(path: String, content: String) unsafe extern ret Bool
 
-func rae_sys_rename(oldPath: String, newPath: String) extern ret Bool
+func rae_sys_rename(oldPath: String, newPath: String) unsafe extern ret Bool
 
-func rae_sys_delete(path: String) extern ret Bool
+func rae_sys_delete(path: String) unsafe extern ret Bool
 
-func rae_sys_make_dir(path: String) extern ret Bool
+func rae_sys_make_dir(path: String) unsafe extern ret Bool
 
-func rae_sys_exists(path: String) extern ret Bool
+func rae_sys_exists(path: String) unsafe extern ret Bool
 
-func rae_sys_lock_file(path: String) extern ret Bool
+func rae_sys_lock_file(path: String) unsafe extern ret Bool
 
-func rae_sys_unlock_file(path: String) extern ret Bool
+func rae_sys_unlock_file(path: String) unsafe extern ret Bool
 
 # Epoch seconds. Float64 deliberately: a ~1.7e9 timestamp in f32 has ~128s
 # granularity, which would make file-watching useless.
-func rae_sys_file_mtime(path: String) extern ret Float64
+func rae_sys_file_mtime(path: String) unsafe extern ret Float64
 
-func rae_sys_rss_kb() extern ret Int
+func rae_sys_rss_kb() unsafe extern ret Int
 
-func rae_crypto_argon2i(password: String, salt: String, nb_blocks: Int, nb_iterations: Int, hash_buf: Any, hash_len: Int) extern
+func rae_crypto_argon2i(password: String, salt: String, nb_blocks: Int, nb_iterations: Int, hash_buf: Any, hash_len: Int) unsafe extern
 
-func rae_crypto_lock(key: Any, nonce: Any, plain: Any, plain_len: Int, mac: Any, cipher: Any) extern
+func rae_crypto_lock(key: Any, nonce: Any, plain: Any, plain_len: Int, mac: Any, cipher: Any) unsafe extern
 
-func rae_crypto_unlock(key: Any, nonce: Any, mac: Any, cipher: Any, cipher_len: Int, plain: Any) extern ret Int
+func rae_crypto_unlock(key: Any, nonce: Any, mac: Any, cipher: Any, cipher_len: Int, plain: Any) unsafe extern ret Int
 
 func exit(code: view Int) {
-  rae_sys_exit(code: code)
+  unsafe { rae_sys_exit(code: code) }
 }
 
 func getEnv(name: view String) ret String {
-  ret rae_sys_get_env(name: name)
+  unsafe { ret rae_sys_get_env(name: name) }
 }
 
-func rae_sys_read_file_bytes(path: String, outLen: mod Int) extern ret Buffer(Int)
-func rae_sys_read_file_text(path: String, offset: Int, len: Int) extern ret String
+func rae_sys_read_file_bytes(path: String, outLen: mod Int) unsafe extern ret Buffer(Int)
+func rae_sys_read_file_text(path: String, offset: Int, len: Int) unsafe extern ret String
 
 # Read a byte range of a file as text. For text chunks embedded in binary
 # containers — a .glb's JSON chunk, for instance — where the caller has
 # already located the range.
 func readFileTextRange(path: view String, offset: view Int, len: view Int) pub ret String {
-  ret rae_sys_read_file_text(path: path, offset: offset, len: len)
+  unsafe { ret rae_sys_read_file_text(path: path, offset: offset, len: len) }
 }
 
 # Read a file as raw bytes.
@@ -61,34 +61,40 @@ func readFileTextRange(path: view String, offset: view Int, len: view Int) pub r
 # separately rather than have every caller pay for an opt.
 func readFileBytes(path: view String) pub ret List(Int) {
   var count: Int = 0
-  let raw: Buffer(Int) = rae_sys_read_file_bytes(path: path, outLen: count)
-  let out: List(Int) = List.create(Int, cap: count)
-  if count is 0 {
+  # The native returns a freshly-allocated raw Buffer(Int) whose length is
+  # written through `count`; reading and freeing it are raw pointer operations,
+  # so the whole buffer lifetime stays inside one unsafe block. The returned
+  # List(Int) is an ordinary owned value.
+  unsafe {
+    let raw: Buffer(Int) = rae_sys_read_file_bytes(path: path, outLen: count)
+    let out: List(Int) = List.create(Int, cap: count)
+    if count is 0 {
+      ret own out
+    }
+    var i: Int = 0
+    loop i < count {
+      out.add(value: rae_ext_rae_buf_get(V: Int, buf: raw, index: i))
+      i = i + 1
+    }
+    rae_ext_rae_buf_free(buf: raw)
     ret own out
   }
-  var i: Int = 0
-  loop i < count {
-    out.add(value: rae_ext_rae_buf_get(V: Int, buf: raw, index: i))
-    i = i + 1
-  }
-  rae_ext_rae_buf_free(buf: raw)
-  ret own out
 }
 
 func readFile(path: view String) ret opt String {
-  ret rae_sys_read_file(path: path)
+  unsafe { ret rae_sys_read_file(path: path) }
 }
 
 func writeFile(path: view String, content: view String) ret Bool {
-  ret rae_sys_write_file(path: path, content: content)
+  unsafe { ret rae_sys_write_file(path: path, content: content) }
 }
 
 func rename(oldPath: view String, newPath: view String) ret Bool {
-  ret rae_sys_rename(oldPath: oldPath, newPath: newPath)
+  unsafe { ret rae_sys_rename(oldPath: oldPath, newPath: newPath) }
 }
 
 func delete(path: view String) ret Bool {
-  ret rae_sys_delete(path: path)
+  unsafe { ret rae_sys_delete(path: path) }
 }
 
 # Create a single directory at `path` with mode 0755. Idempotent —
@@ -96,19 +102,19 @@ func delete(path: view String) ret Bool {
 # intermediate parents (no `mkdir -p`); call this once per level if
 # you need a nested path.
 func makeDir(path: view String) ret Bool {
-  ret rae_sys_make_dir(path: path)
+  unsafe { ret rae_sys_make_dir(path: path) }
 }
 
 func exists(path: view String) ret Bool {
-  ret rae_sys_exists(path: path)
+  unsafe { ret rae_sys_exists(path: path) }
 }
 
 func lockFile(path: view String) ret Bool {
-  ret rae_sys_lock_file(path: path)
+  unsafe { ret rae_sys_lock_file(path: path) }
 }
 
 func unlockFile(path: view String) ret Bool {
-  ret rae_sys_unlock_file(path: path)
+  unsafe { ret rae_sys_unlock_file(path: path) }
 }
 
 # Last modification time of `path` in seconds since the Unix epoch
@@ -116,7 +122,7 @@ func unlockFile(path: view String) ret Bool {
 # Returns 0.0 if `path` does not exist or stat fails — callers should
 # treat 0.0 as "missing / unknown" rather than a real timestamp.
 func fileModTime(path: view String) ret Float64 {
-  ret rae_sys_file_mtime(path: path)
+  unsafe { ret rae_sys_file_mtime(path: path) }
 }
 
 # Current process's resident set size (RSS) in KB, reported by the
@@ -125,17 +131,20 @@ func fileModTime(path: view String) ret Float64 {
 # Implementation: `task_info(MACH_TASK_BASIC_INFO)` on macOS,
 # `/proc/self/status` VmRSS line on Linux.
 func processRssKb() ret Int {
-  ret rae_sys_rss_kb()
+  unsafe { ret rae_sys_rss_kb() }
 }
 
 # The crypto helpers take raw Buffer(Any) pointers; the C ABI is
 # `void*` and adding `view` here breaks the conversion through
 # rae_any(). Leave bare until the buffer helpers grow proper
 # Buffer(T) types we can annotate.
-func encrypt(key: Any, nonce: Any, plain: Any, len: view Int, mac: Any, cipher: Any) {
-  rae_crypto_lock(key: key, nonce: nonce, plain: plain, plain_len: len, mac: mac, cipher: cipher)
+# The crypto helpers pass raw `Any` (void*) buffers and separate lengths whose
+# validity and sizing the caller must guarantee — an unchecked memory-safety
+# obligation this wrapper cannot verify — so it is itself unsafe.
+func encrypt(key: Any, nonce: Any, plain: Any, len: view Int, mac: Any, cipher: Any) unsafe {
+  unsafe { rae_crypto_lock(key: key, nonce: nonce, plain: plain, plain_len: len, mac: mac, cipher: cipher) }
 }
 
-func decrypt(key: Any, nonce: Any, mac: Any, cipher: Any, len: view Int, plain: Any) ret Bool {
-  ret rae_crypto_unlock(key: key, nonce: nonce, mac: mac, cipher: cipher, cipher_len: len, plain: plain) is 0
+func decrypt(key: Any, nonce: Any, mac: Any, cipher: Any, len: view Int, plain: Any) unsafe ret Bool {
+  unsafe { ret rae_crypto_unlock(key: key, nonce: nonce, mac: mac, cipher: cipher, cipher_len: len, plain: plain) is 0 }
 }
