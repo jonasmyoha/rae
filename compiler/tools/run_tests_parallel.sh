@@ -17,12 +17,15 @@
 #   * RAE_TEST_APPLY_SKIPS=1 makes the filtered per-case run skip EXACTLY what
 #     the full loop skips (deprecated Live-only / hot-reload cases), so the
 #     verdict set is identical to the sequential run.
-# NOT parallelised: the example smoke tests (run_examples.sh) open real SDL/GPU
-# windows and take screenshots; they run sequentially afterwards, unchanged.
+# NOT part of the default run: the example smoke tests (run_examples.sh) open
+# real SDL/GPU windows and take screenshots, and take minutes. They are OFF
+# unless RAE_RUN_EXAMPLES=1 is exported (`make test-examples` does that); the
+# default `make test` is the non-visual unit suite only. RAE_SKIP_EXAMPLES=1
+# is still accepted and always wins.
 #
-# Usage:  RAE_TEST_PARALLEL=1 bash tools/watch-tests.sh     # visible in devtools
+# Usage:  bash tools/watch-tests.sh                        # visible in devtools
 #         bash tools/run_tests_parallel.sh                  # direct; JOBS = CPU count
-#         JOBS=4 RAE_SKIP_EXAMPLES=1 bash tools/run_tests_parallel.sh
+#         RAE_RUN_EXAMPLES=1 bash tools/run_tests_parallel.sh   # + the visual example gates
 # Exit code: 1 if any case (or example) failed.
 set -u
 cd "$(dirname "$0")/.."
@@ -77,8 +80,10 @@ echo "=========================================="
 if [ "${RAE_TEST_KEEP_LOGS:-0}" = "1" ]; then echo "(per-case logs kept in $OUT)"; else rm -rf "$OUT"; fi
 RC=0; [ "$FAILED" -gt 0 ] && RC=1
 
-if [ "${RAE_SKIP_EXAMPLES:-0}" != "1" ]; then
+if [ "${RAE_RUN_EXAMPLES:-0}" = "1" ] && [ "${RAE_SKIP_EXAMPLES:-0}" != "1" ]; then
   echo; echo "Example smoke tests run SEQUENTIALLY (windows/screenshots):"
   ./tools/run_examples.sh || RC=1
+else
+  echo; echo "Example smoke tests (visual) not run — RAE_RUN_EXAMPLES=1 or 'make test-examples' runs them."
 fi
 exit $RC

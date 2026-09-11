@@ -468,10 +468,22 @@ perl -e 'alarm shift; exec @ARGV' 600 bash compiler/tools/watch-tests.sh
 ```
 
 **The unit cases run in PARALLEL by default** (`tools/run_tests_parallel.sh`,
-#824/#846 — byte-identical verdicts to the serial runner at ~2.7x on 10 cores;
-the example gate still runs sequentially afterwards). You do not need any flag.
-The old sequential runner is a debugging-only fallback: `RAE_TEST_SEQUENTIAL=1
-… watch-tests.sh` forces it. See `docs/parallel-tests.md`.
+#824/#846 — byte-identical verdicts to the serial runner at ~2.7x on 10 cores).
+You do not need any flag. The old sequential runner is a debugging-only
+fallback: `RAE_TEST_SEQUENTIAL=1 … watch-tests.sh` forces it. See
+`docs/parallel-tests.md`.
+
+**The VISUAL example smoke tests are NOT part of the suite. Never run them
+from a queue task.** `run_examples.sh` builds and renders every example in a
+real SDL/GPU window and takes screenshots — minutes of wall time, and a window
+stealing focus on the user's screen. `make test` / `watch-tests.sh` run the
+non-visual unit suite only and print "Example smoke tests (visual) not run".
+Do NOT export `RAE_RUN_EXAMPLES=1`, do NOT call `make test-examples`, do NOT
+run `run_examples.sh` or any `bin/rae run examples/...` with a window, and do
+NOT invoke a screenshot gate — not to "verify" a renderer change, not for a
+task that says so in older wording. The user runs the visual gates by hand
+(`make test-examples`) when they choose to. A task that needs a visual check
+ends with a note asking the user to run it, and stops there.
 
 **Only ONE test run at a time.** Concurrent `make test` / `watch-tests.sh`
 processes corrupt each other's build cache and interleave the shared log, which
