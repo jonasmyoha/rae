@@ -110,9 +110,8 @@ static float gb_prev_viewproj[16];
 static bool  gb_have_prev_vp = false;
 static float gb_clear[3];
 
-static WGPURenderPipeline gb_view_pipeline = NULL;
-static WGPUBindGroup      gb_view_bind = NULL;
-static WGPUBuffer         gb_view_ubuf = NULL;
+/* #904: the inspector pipeline / uniform / bind are manager IDs on the Rae
+ * side (lib/GbufferInspector.rae); C exposes only the inspector WGSL. */
 
 /* Octahedral normal encoding. A unit vector has two degrees of freedom;
  * this is the area-preserving map onto two channels. The lower hemisphere
@@ -571,7 +570,6 @@ GB_OCT_WGSL
 "}\n";
 
 static void gb_release_targets(void) {
-    if (gb_view_bind)    { wgpuBindGroupRelease(gb_view_bind); gb_view_bind = NULL; }
     if (gb_a_view) { wgpuTextureViewRelease(gb_a_view); gb_a_view = NULL; }
     if (gb_a_tex)  { wgpuTextureRelease(gb_a_tex); gb_a_tex = NULL; }
     if (gb_b_view) { wgpuTextureViewRelease(gb_b_view); gb_b_view = NULL; }
@@ -624,21 +622,14 @@ void rae_gb_set_frame_ubuf(void* buf)   { gb_frame_ubuf = (WGPUBuffer)buf; }
 void rae_gb_set_draws_buffer(void* buf) { gb_draw_sbuf = (WGPUBuffer)buf; }
 
 /* The G-buffer inspector (pipeline + uniform + bind group + the fullscreen
- * pass) is now built in Rae (lib/gbuffer.rae: ensureViewPipeline / ensureViewBind
- * / debugView, #503). C exposes the inspector WGSL, the presentable target's
- * format + view, and the handles/setters. The inspector bind references the
- * G-buffer views, so gb_release_targets nulls gb_view_bind on resize and Rae
- * re-creates it (its ensureViewBind flag is reset when the targets rebuild). */
+ * pass) is built in Rae (lib/GbufferInspector.rae, #503) and, since #904, its
+ * objects are manager IDs there. C exposes the inspector WGSL and the
+ * presentable target's format + view; Rae rebuilds the bind (which samples the
+ * G-buffer views) when gb_targets_gen changes. */
 const char* rae_gb_view_wgsl(void)  { return GB_VIEW_WGSL; }
 int64_t rae_g2d_format(void)        { return (int64_t)g_g2d_fmt; }
 void* rae_g2d_off_view(void)        { return (void*)g_g2d_off_view; }
 int64_t rae_g2d_off_view_ready(void){ return (g_wgpu_dev && g_g2d_off_view) ? 1 : 0; }
-void* rae_gb_view_pipeline(void)    { return (void*)gb_view_pipeline; }
-void* rae_gb_view_ubuf(void)        { return (void*)gb_view_ubuf; }
-void* rae_gb_view_bind(void)        { return (void*)gb_view_bind; }
-void rae_gb_set_view_pipeline(void* p) { gb_view_pipeline = (WGPURenderPipeline)p; }
-void rae_gb_set_view_ubuf(void* b)     { gb_view_ubuf = (WGPUBuffer)b; }
-void rae_gb_set_view_bind(void* b)     { gb_view_bind = (WGPUBindGroup)b; }
 
 /* Mirror of the Rae-side `Mat4` layout for the extern boundary; see the
  * long note in runtime_gpu3d.c. The include guard makes this a no-op when
@@ -1054,8 +1045,6 @@ void rae_ext_Gbuffer_present(void) {
 
 void rae_ext_Gbuffer_shutdown(void) {
     gb_release_targets();
-    if (gb_view_pipeline) { wgpuRenderPipelineRelease(gb_view_pipeline); gb_view_pipeline = NULL; }
-    if (gb_view_ubuf)     { wgpuBufferRelease(gb_view_ubuf); gb_view_ubuf = NULL; }
     if (gb_bind)          { wgpuBindGroupRelease(gb_bind); gb_bind = NULL; }
     if (gb_draw_sbuf)     { wgpuBufferRelease(gb_draw_sbuf); gb_draw_sbuf = NULL; }
     if (gb_frame_ubuf)    { wgpuBufferRelease(gb_frame_ubuf); gb_frame_ubuf = NULL; }

@@ -936,8 +936,6 @@ int64_t rae_gb_offscreen_h(void);
 /* Dynamic resolution (#530). */
 void   rae_gb_set_render_scale(double s);
 double rae_gb_render_scale(void);
-void*  rae_gb_composite_sampler(void);
-void   rae_gb_set_composite_sampler(void* s);
 int64_t rae_gb_targets_match(int64_t w, int64_t h);
 int64_t rae_gb_targets_ready(void);
 void rae_gb_release_targets_ext(void);
@@ -956,33 +954,17 @@ const char* rae_gb_view_wgsl(void);
 int64_t rae_g2d_format(void);
 void* rae_g2d_off_view(void);
 int64_t rae_g2d_off_view_ready(void);
-void* rae_gb_view_pipeline(void);
-void* rae_gb_view_ubuf(void);
-void* rae_gb_view_bind(void);
-void rae_gb_set_view_pipeline(void* p);
-void rae_gb_set_view_ubuf(void* b);
-void rae_gb_set_view_bind(void* b);
 /* Deferred passes migrated to Rae (#504): composite first. */
 int64_t rae_gb_deferred_prepare(void);
 const char* rae_gb_composite_wgsl(void);
 void* rae_gb_composite_source_view(void);
 int64_t rae_gb_composite_source_index(void);
-void* rae_gb_composite_pipeline(void);
-void* rae_gb_composite_ubuf(void);
-void* rae_gb_composite_bind(int64_t idx);
-void rae_gb_set_composite_pipeline(void* p);
-void rae_gb_set_composite_ubuf(void* b);
-void rae_gb_set_composite_bind(int64_t idx, void* b);
 /* SSAO pass in Rae (#504). */
 void rae_gb_ssao_upload(float camX, float camY, float camZ);
 const char* rae_gb_ao_wgsl(void);
 void* rae_gb_ao_view(void);
-void* rae_gb_ao_pipeline(void);
-void* rae_gb_ao_bind(void);
 void* rae_gb_light_ubuf(void);
 int64_t rae_gb_light_bytes(void);
-void rae_gb_set_ao_pipeline(void* p);
-void rae_gb_set_ao_bind(void* b);
 /* Lighting pass in Rae (#504). */
 void rae_gb_light_upload(float camX, float camY, float camZ, float exposure,
                          float sunX, float sunY, float sunZ,
@@ -998,12 +980,6 @@ void* rae_gb_lit_texture(void);
 void* rae_gb_lit_copy_texture(void);
 void* rae_gb_lit_copy_view(void);
 int64_t rae_gb_lit_format(void);
-void* rae_gb_transparent_pipeline(void);
-void  rae_gb_set_transparent_pipeline(void* p);
-void* rae_gb_transparent_bind(void);
-void  rae_gb_set_transparent_bind(void* b);
-void* rae_gb_light_bind(void);
-void rae_gb_set_light_bind(void* b);
 void* rae_gb_shadow_frame_ubuf(void);
 int64_t rae_gb_shadow_frame_bytes(void);
 void* rae_gb_shadow_array_view(void);
@@ -1017,8 +993,6 @@ void* rae_gb_taa_pipeline(void);
 void* rae_gb_taa_ubuf(void);
 void* rae_gb_taa_target_view(void);
 void* rae_gb_taa_history_view(void);
-void* rae_gb_taa_bind(int64_t idx);
-void rae_gb_set_taa_bind(int64_t idx, void* b);
 int64_t rae_gb_taa_is_enabled(void);
 void rae_gb_set_taa_enabled(int64_t e);
 void rae_gb_set_fog(int64_t on, float r, float g, float b, float start, float end);
@@ -1028,8 +1002,6 @@ void* rae_gb_pyr_from_depth_pipeline(void);
 void* rae_gb_pyr_reduce_pipeline(void);
 void* rae_gb_pyr_src_view(int64_t i);
 void* rae_gb_pyr_rt_view(int64_t i);
-void* rae_gb_pyr_bind(int64_t i);
-void rae_gb_set_pyr_bind(int64_t i, void* b);
 /* Shadow cascade render in Rae (#504). The feed (cascade uniforms + draw queue)
  * is shadow-map bookkeeping, reclassified from rae_ext_Gpu3d_shadow* (#514). */
 void rae_sm_begin(const float* cascades, int64_t count, int64_t resolution,
