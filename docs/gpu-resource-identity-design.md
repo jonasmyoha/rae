@@ -264,10 +264,15 @@ and are implemented by #870/#871 over this ID layout.
   dependencies are #870.
 - Failed creates (invalid descriptor, exhaustion, null native handle) consume no
   slot: a slot is marked live only after the native allocation succeeded.
-- The manager's native handles are read and written through the raw
-  `rae_ext_rae_buf_get`/`rae_ext_rae_buf_set(V: Ptr, ...)` accessors inside
-  `unsafe` blocks, because `List(Ptr).copyAt` miscompiles today (#901): it emits
-  the struct-rep optional form for `opt Ptr`, which lowers to a bare `void*`.
+- The manager's native handles are read through the checked `List(Ptr).copyAt`
+  (inside `unsafe` blocks; writes still go through the raw
+  `rae_ext_rae_buf_set(V: Ptr, ...)` setter, which List has no checked
+  equivalent for). `copyAt`'s `opt Ptr` result used to miscompile — the
+  name-mangler's `Ptr -> Buffer(void)` shortcut fired before its `is_opt`
+  check, so `opt Ptr` mangled to the same bare-`void*` name as plain `Ptr`,
+  and the struct-rep `.has`/`.value` access on that name was invalid C —
+  fixed by #901 (`opt Ptr` is now consistently struct-rep everywhere the
+  representation is decided).
 - Everything routes through the generated WebGPU bindings; no renderer C
   helper was added (C-surface gate unchanged).
 

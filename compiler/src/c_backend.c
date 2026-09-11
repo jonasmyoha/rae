@@ -80,6 +80,14 @@ bool rae_typeinfo_opt_is_struct_rep(const TypeInfo* base) {
         case TYPE_CHAR:
         case TYPE_STRING:
             return true;
+        // #901: Ptr (Buffer(Void)) and any other Buffer(T) — a pointer
+        // payload is cheap to box in the fixed `{ has; value: T* }` struct,
+        // and the name-mangler's fallback already treated it as struct-rep
+        // (it only excludes the literal, un-parameterized name "Buffer");
+        // this brings the resolved-TypeInfo path into agreement so the
+        // struct-rep DECISION and the emitted TYPE NAME never disagree.
+        case TYPE_BUFFER:
+            return true;
         default:
             return false;
     }
