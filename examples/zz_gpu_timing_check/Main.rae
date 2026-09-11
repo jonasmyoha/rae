@@ -7,6 +7,7 @@ open webgpu/Context
 open webgpu/Webgpu
 
 func main() ret Int {
+  unsafe {
   let profiler: Profiler = Profile.createProfiler()
   var timing: GpuTiming = GpuTiming.createGpuTiming()
   if webgpuBootstrap() is 0 { log("no wgpu device") ret 1 }
@@ -65,6 +66,7 @@ func main() ret Int {
     frame = frame + 1
   }
   ret 0
+  }
 }
 
-func gtSubmitTest(cmd: Ptr) extern("rae_gb_submit")
+func gtSubmitTest(cmd: Ptr) unsafe extern("rae_gb_submit")

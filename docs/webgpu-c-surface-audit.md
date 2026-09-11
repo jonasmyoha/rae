@@ -121,3 +121,65 @@ commit with a one-line justification.
 on the list. Run it via `make c-surface-gate` (from `compiler/`). Removing a
 symbol (e.g. finishing #513/#514) means deleting its allowlist line; that is
 always allowed. Adding one is the reviewable event.
+
+---
+
+## #868 unsafe-boundary audit of GPU/render/water foreign consumers (#876)
+
+Ahead of #877 (which makes the #868 pointer-operation boundary UNCONDITIONAL:
+every `extern` must be `unsafe extern`, every unsafe call / raw-Ptr op must sit
+in an `unsafe { ... }` block), this records the disposition of every remaining
+hand-written GPU/render/water foreign consumer. No silent module exemptions.
+
+**Migrated in #876 (done, verified):**
+- `examples/zz_readback_check` and `examples/zz_gpu_timing_check` — the raw
+  (pre-manager) readback and GPU-timing hardware checks: extern → `unsafe
+  extern`, every webgpu call / raw-Ptr op wrapped at its source site. Both run
+  green on hardware.
+- Positive compiler fixtures `626_extern_symbol` and `776_ptr_c_lowering` →
+  `unsafe extern` + wrapped raw-Ptr ops (776 uses the safe-factory pattern for
+  its Ptr-field struct, since `let x = unsafe {}` is rejected). The negative
+  cases `779`/`780`/`781`/`786`/`789` are retained unchanged — they lock in the
+  order/placement diagnostics #877 turns on.
+
+**Callback userdata / delayed callbacks — nothing to migrate.** The only
+delayed-callback path is `wgpuBufferMapAsync` (already `unsafe extern`, takes
+`WGPUBufferMapCallbackInfo{callback, userdata1, userdata2}`). It has NO Rae
+caller: the async map, its callback and its userdata are owned entirely by the
+C bridge `runtime_webgpu_readback.c` (`rae_wgpu_read_start/poll/copy/release`),
+which the #887 `ReadRequest` and the manager `ReadbackId` wrap. `gpu/GpuLifetime`
+is explicitly "no callbacks and no callback-reachable state in this layer." No
+unsafe Rae callback-userdata consumer exists.
+
+**Water — already clean** (#873/#874): zero non-`unsafe` extern declarations;
+`water/WaterGpuBridge` is the one opted-in unsafe module and is fully wrapped.
+
+**Recorded remaining consumer migrations (prerequisites for #877).** These
+modules still declare plain `extern` and call webgpu externs unwrapped; they are
+being REWRITTEN onto the manager by already-filed slices, so their #868
+migration folds into those slices rather than churning code about to be
+replaced. Each slice must leave its module unsafe-clean (extern → `unsafe
+extern`, every unsafe call / raw-Ptr op wrapped) as part of its work:
+
+| module | plain externs | migrates via |
+|---|---|---|
+| `lib/Gbuffer.rae` | 63 | #905/#906 (mesh store, frame/targets/pass/submit) |
+| `lib/Gpu3d.rae` | 57 | #905/#906 |
+| `lib/GbufferPasses.rae` | 52 | #904 (ao/light/composite/taa/pyramid/fog) |
+| `lib/GbufferShadow.rae` | 13 | #906 (shadow maps) |
+| `lib/Gpu2d.rae` | 13 | #907–#910 (2D renderer C→Rae) |
+| `lib/GbufferTerrain.rae` | 10 | #904 |
+| `lib/webgpu/Context.rae` | 9 | #906 (device/queue/bootstrap accessors) |
+| `lib/TransparentForward.rae` | 8 | #904 |
+| `lib/GbufferInspector.rae` | 8 | #904 |
+| `lib/GpuTiming.rae` | 3 | #906 (legacy blocking timing folds into gpu/GpuTiming) |
+| `lib/app3d/RenderScale.rae` | 2 | #906 (DRS/thermal setters) |
+| `lib/Shadow3d.rae` | 1 | #906 |
+
+Note: a bare `unsafe extern` DECLARATION compiles today without opting a file in
+or forcing call-site wrapping, so these declarations could be flipped early; the
+COST is the call-site wrapping, which is why it is folded into the rewrites (a
+module that becomes manager-owned wraps its remaining genuine-platform calls
+naturally, as water/grass did). `#877` must therefore run only after #904/#905/
+#906 and #907–#910. One dead adapter noted for removal there: `setShadowAmbient`
+(`rae_sm_set_shadow_ambient`) has zero call sites.
