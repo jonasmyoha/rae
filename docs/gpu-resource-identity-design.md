@@ -1,7 +1,8 @@
 # GPU resource identity: manager IDs and the public resource API (#892)
 
 Status: **approved contract (maintainer approval 2026-09-11: all four
-recommendations taken as written); implementation is #869.** Executable model:
+recommendations taken as written). Implemented by #869 in
+`lib/gpu/GpuResources.rae`; hardware check `examples/zz_gpu_resources_check`.** Executable model:
 `compiler/tests/cases/794_gpu_identity_model` (deterministic, no GPU).
 
 This is library design over the shipped lifecycle (`create`/`drop`/`copy`,
@@ -234,3 +235,38 @@ This settles the "GPU manager identity remains under review" item of
 the deferred identity representation in the pointer design. Async native holds,
 retirement-with-in-flight-uses and manager-owned groups keep their meaning there
 and are implemented by #870/#871 over this ID layout.
+
+## Implementation notes (#869)
+
+`lib/gpu/GpuResources.rae` implements the contract exactly as approved:
+
+- `IdIssuer` (`create`/`issue`), four ID types over one `{managerTag, slot,
+  generation}` layout, and `GpuResources` with `create(issuer:, capacity:)` ->
+  `opt`, `drop`, no `copy`. One `SlotTable` (generations, live flags, native
+  handles) per kind; the capacity applies to every kind.
+- Authoritative state: buffer size/usage and texture width/height/format are
+  RE-QUERIED from the native object at validation time (`wgpuBufferGetSize`,
+  `wgpuBufferGetUsage`, `wgpuTextureGet*`), never taken from a field a caller can
+  write. `bufferRangeIsValid` checks both bounds in unsigned space so no sum can
+  wrap; `writeBuffer` additionally requires 4-byte alignment and `CopyDst`.
+- Usage flags are tested with power-of-two arithmetic (`(usage / flag)` odd),
+  since Rae has no bitwise operator.
+- `writeBuffer` flushes the queue write with an empty `wgpuQueueSubmit`: wgpu
+  stages `writeBuffer` data until the next submit, and a readback maps the
+  source buffer directly, so without the flush a subsequent read sees stale
+  bytes. After `writeBuffer` returns, the bytes are durable.
+- `readBuffer(...) ret opt ReadRequest` is the minimal safe readback seam over
+  the #887/#897 request; the request retains its own native reference, so the
+  manager may retire the buffer while a read is pending. #871 replaces this with
+  a manager-owned `ReadbackId`.
+- A texture view keeps its own native reference to its texture (wgpu reference
+  counting), so retiring the texture first leaves the view valid; recording
+  dependencies are #870.
+- Failed creates (invalid descriptor, exhaustion, null native handle) consume no
+  slot: a slot is marked live only after the native allocation succeeded.
+- The manager's native handles are read and written through the raw
+  `rae_ext_rae_buf_get`/`rae_ext_rae_buf_set(V: Ptr, ...)` accessors inside
+  `unsafe` blocks, because `List(Ptr).copyAt` miscompiles today (#901): it emits
+  the struct-rep optional form for `opt Ptr`, which lowers to a bare `void*`.
+- Everything routes through the generated WebGPU bindings; no renderer C
+  helper was added (C-surface gate unchanged).
