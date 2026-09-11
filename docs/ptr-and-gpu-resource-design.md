@@ -623,8 +623,10 @@ It does not change the callback-owned request state or cancellation protocol.
 
 The GPU library uses the same lifecycle functions. Typed IDs are copyable
 identities; `GpuResources` owns allocations and has `create`/`drop` with no
-`copy`. The exact manager identity representation is intentionally deferred to
-the separate GPU identity review.
+`copy`. The manager identity representation is proposed in
+[gpu-resource-identity-design.md](gpu-resource-identity-design.md) (#892, pending
+approval): a copyable `{managerTag, slot, generation}` value per kind, the tag
+drawn from an explicitly shared issuer.
 
 ```rae
 open gpu/GpuResources
@@ -688,7 +690,7 @@ func main() {
 
 `gpu/GpuResources` supplies `GpuResources`, `TextureId`, `loadTexture`,
 `drawTexture` and `shouldClose`. Their ownership roles are fixed here; the
-fields and bit layout of `TextureId` wait for the manager-identity review. The
+fields and bit layout of `TextureId` are settled by the #892 identity design (pending approval). The
 application does not depend on that representation.
 
 There is one persistent ownership tree:
