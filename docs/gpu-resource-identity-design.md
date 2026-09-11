@@ -367,3 +367,41 @@ renderer C was added; everything is Rae over the generated bindings and the
   busy-defer, byte-exact copies, deferred release, reuse, cancellation,
   exact-once shutdown) and `examples/zz_gpu_manager_timing` (five frames of
   nonblocking two-pass GPU timing with real timestamps, then shutdown).
+
+## Implementation notes (#872): checked argument packing
+
+`gpu/GpuArgs` centralizes packing Rae scalar/vector/matrix values into
+GPU-uploadable bytes with correct WGSL layout, and adds a compact snapshotted
+compute command. No renderer C; pure Rae over the manager and the generated
+bindings, with no new reflection syntax or bindless promises.
+
+- `ArgWriter` accumulates a `List(UInt8)`. `pushU32`/`pushI32`/`pushF32`,
+  `pushVec2F`/`pushVec3F`/`pushVec4F`, `pushVec2U`/`pushVec4U` and `pushMat4`
+  each pad to the member's WGSL alignment first (scalar 4, vec2 8,
+  vec3/vec4/mat4x4 16), so offsets always match the shader struct.
+  `finalizeArgs` rounds a uniform (std140) buffer's size up to 16;
+  `uploadArgs` writes the packed bytes into a manager buffer (a queue write —
+  a snapshot that lands before submit).
+- f32 bytes are the exact IEEE-754 representation: Rae has no bitcast, so an
+  f32 is reinterpreted by a raw byte copy from a one-element `List(Float)` into
+  the stream (`rae_ext_rae_buf_copy` is a memmove with an explicit element
+  size), while u32/i32 words are peeled into little-endian bytes arithmetically
+  (there are no bitwise operators).
+- The safety rule is structural: the API accepts only NUMBERS, so a Rae owner,
+  `List`, `String` or a CPU validation identity (a `BufferId`/`TextureId`
+  manager tag) can never be uploaded as shader data. Resource IDs are resolved
+  to native handles on the CPU when a bind group is built (#870), never
+  serialized; the native holds are preserved by the manager's pins.
+- `ComputeCommand` snapshots its workgroup counts and its (copyable) pipeline
+  and bind-group IDs at build time, so a later CPU write to the source cannot
+  change work already recorded; `recordComputeCommand` records it over #870's
+  checked `recordCompute` (which re-validates the resolved IDs and pins the
+  dependencies). The manager is compute-only, so this is the dispatch input; a
+  draw command follows a render-pipeline surface on the manager.
+- The water consumer's uniforms are the motivating case (today a bare
+  `List(Float)` with hand-counted offsets); it adopts this packer when it moves
+  onto the manager. Checks: `compiler/tests/cases/797_gpu_args_layout`
+  (deterministic offsets and exact bytes for scalar/vec2/vec3/vec4/mat4/u32/i32)
+  and on hardware `examples/zz_gpu_args_check` (pack a known struct, upload,
+  read every field back through the shader's own std140 layout, and confirm the
+  bit patterns match — a mismatch between the Rae offsets and WGSL would fail).
