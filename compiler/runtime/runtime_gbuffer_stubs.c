@@ -100,12 +100,6 @@ const char* rae_gb_view_wgsl(void)  { return ""; }
 int64_t rae_g2d_format(void)        { return 0; }
 void* rae_g2d_off_view(void)        { return (void*)0; }
 int64_t rae_g2d_off_view_ready(void){ return 0; }
-void* rae_gb_view_pipeline(void)    { return (void*)0; }
-void* rae_gb_view_ubuf(void)        { return (void*)0; }
-void* rae_gb_view_bind(void)        { return (void*)0; }
-void rae_gb_set_view_pipeline(void* p) { (void)p; }
-void rae_gb_set_view_ubuf(void* b)     { (void)b; }
-void rae_gb_set_view_bind(void* b)     { (void)b; }
 void rae_ext_Gbuffer_present(void) {}
 void rae_ext_Gbuffer_shutdown(void) {}
 
@@ -117,8 +111,6 @@ void* rae_gb_pyr_from_depth_pipeline(void) { return (void*)0; }
 void* rae_gb_pyr_reduce_pipeline(void)     { return (void*)0; }
 void* rae_gb_pyr_src_view(int64_t i)       { (void)i; return (void*)0; }
 void* rae_gb_pyr_rt_view(int64_t i)        { (void)i; return (void*)0; }
-void* rae_gb_pyr_bind(int64_t i)           { (void)i; return (void*)0; }
-void rae_gb_set_pyr_bind(int64_t i, void* b){ (void)i; (void)b; }
 void rae_gb_light_upload(float camX, float camY, float camZ, float exposure,
                               float sunX, float sunY, float sunZ,
                               float sunR, float sunG, float sunB,
@@ -139,8 +131,6 @@ void rae_gb_light_upload(float camX, float camY, float camZ, float exposure,
 }
 void* rae_gb_light_pipeline(void)      { return (void*)0; }
 void* rae_gb_lit_view(void)            { return (void*)0; }
-void* rae_gb_light_bind(void)          { return (void*)0; }
-void rae_gb_set_light_bind(void* b)    { (void)b; }
 void* rae_gb_shadow_frame_ubuf(void)   { return (void*)0; }
 int64_t rae_gb_shadow_frame_bytes(void){ return 320; }
 void* rae_gb_shadow_array_view(void)   { return (void*)0; }
@@ -148,12 +138,8 @@ void* rae_gb_shadow_sampler(void)      { return (void*)0; }
 void rae_gb_ssao_upload(float camX, float camY, float camZ){ (void)camX; (void)camY; (void)camZ; }
 const char* rae_gb_ao_wgsl(void)   { return ""; }
 void* rae_gb_ao_view(void)         { return (void*)0; }
-void* rae_gb_ao_pipeline(void)     { return (void*)0; }
-void* rae_gb_ao_bind(void)         { return (void*)0; }
 void* rae_gb_light_ubuf(void)      { return (void*)0; }
 int64_t rae_gb_light_bytes(void)   { return 0; }
-void rae_gb_set_ao_pipeline(void* p) { (void)p; }
-void rae_gb_set_ao_bind(void* b)     { (void)b; }
 int64_t rae_gb_taa_ready(void)       { return 0; }
 int64_t rae_gb_taa_begin(void)       { return 0; }
 void rae_gb_taa_end(void)            {}
@@ -161,20 +147,12 @@ void* rae_gb_taa_pipeline(void)      { return (void*)0; }
 void* rae_gb_taa_ubuf(void)          { return (void*)0; }
 void* rae_gb_taa_target_view(void)   { return (void*)0; }
 void* rae_gb_taa_history_view(void)  { return (void*)0; }
-void* rae_gb_taa_bind(int64_t idx)   { (void)idx; return (void*)0; }
-void rae_gb_set_taa_bind(int64_t idx, void* b) { (void)idx; (void)b; }
 int64_t rae_gb_taa_is_enabled(void)  { return 0; }
 void rae_gb_set_taa_enabled(int64_t e) { (void)e; }
 int64_t rae_gb_deferred_prepare(void)        { return 0; }
 const char* rae_gb_composite_wgsl(void)      { return ""; }
 void* rae_gb_composite_source_view(void)     { return (void*)0; }
 int64_t rae_gb_composite_source_index(void)  { return 2; }
-void* rae_gb_composite_pipeline(void)        { return (void*)0; }
-void* rae_gb_composite_ubuf(void)            { return (void*)0; }
-void* rae_gb_composite_bind(int64_t idx)     { (void)idx; return (void*)0; }
-void rae_gb_set_composite_pipeline(void* p)  { (void)p; }
-void rae_gb_set_composite_ubuf(void* b)      { (void)b; }
-void rae_gb_set_composite_bind(int64_t idx, void* b) { (void)idx; (void)b; }
 int64_t rae_ext_Gbuffer_pyramidMips(void) { return 0; }
 void rae_ext_Gbuffer_deferredShutdown(void) {}
 

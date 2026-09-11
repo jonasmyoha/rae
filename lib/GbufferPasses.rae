@@ -1,17 +1,27 @@
 # gbuffer_passes — the passes that consume the G-buffer, in Rae (#504).
 #
-# These are the deferred post-passes (composite first; lighting / ssao / taa /
-# depth-pyramid to follow). Each is a fullscreen pass built over the WebGPU
-# bindings. It reuses gbuffer's low-level helpers (makeShaderModule, the shader
-# entry points, the one-command-buffer submit) via `open gbuffer`. The shared
-# intermediate render targets and their generation counter stay C for now (they
-# are produced by passes not yet migrated); Rae reads them through accessors.
+# These are the deferred post-passes (composite, lighting, ssao, taa, depth
+# pyramid). Each is a fullscreen pass built over the WebGPU bindings. Since
+# #904 every Rae-created object here (the composite / ssao pipelines, the
+# composite uniform + upscale sampler, every bind group) is a typed ID in the
+# DeferredRenderer-owned gpu/GpuResources manager, threaded in as `resources`;
+# the C-owned inputs (the G-buffer views, the light / taa / shadow uniforms,
+# the lighting / taa / pyramid pipelines and the pass targets) are ADOPTED as
+# externals per targets generation and re-adopted when it changes. The pass is
+# still opened in Rae over the bindings and submitted on the shared queue
+# (gbSubmit) so graph order is preserved; the draw is recorded from the IDs.
+import String
 open Gbuffer
 open Scene3d
 open Vec3
 open Sky
 open webgpu/Webgpu
 open webgpu/Context
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuArgs
+open gpu/GpuIds
 
 # Presentable target + resize generation (also declared in gbuffer_inspector;
 # these bind the same C symbols).
@@ -21,7 +31,9 @@ func nativeGbDeferredPrepare() unsafe extern("rae_gb_deferred_prepare") ret Int
 func gbDeferredPrepare() ret Int {
   unsafe { ret nativeGbDeferredPrepare() }
 }
-func gbCompositeWgsl() unsafe extern("rae_gb_composite_wgsl") ret Ptr
+# The pass WGSL sources stay C string constants; read as NUL-terminated C
+# strings and copied into a String for the manager's createRenderPipeline.
+func gbCompositeWgsl() unsafe extern("rae_gb_composite_wgsl") ret Buffer(Any)
 func gbCompositeSourceView() unsafe extern("rae_gb_composite_source_view") ret Ptr
 func nativeGbCompositeSourceIndex() unsafe extern("rae_gb_composite_source_index") ret Int
 func gbCompositeSourceIndex() ret Int {
@@ -42,49 +54,41 @@ func nativeGbSetFog(on: Int, r: Float, g: Float, b: Float, start: Float, end: Fl
 func gbSetFog(on: copy Int, r: copy Float, g: copy Float, b: copy Float, start: copy Float, end: copy Float) {
   unsafe { nativeGbSetFog(on: on, r: r, g: g, b: b, start: start, end: end) }
 }
-func gbCompositePipeline() unsafe extern("rae_gb_composite_pipeline") ret Ptr
-func gbCompositeUbuf() unsafe extern("rae_gb_composite_ubuf") ret Ptr
-func gbCompositeBind(idx: Int) unsafe extern("rae_gb_composite_bind") ret Ptr
-func gbSetCompositePipeline(pipeline: Ptr) unsafe extern("rae_gb_set_composite_pipeline")
-func gbSetCompositeUbuf(buf: Ptr) unsafe extern("rae_gb_set_composite_ubuf")
-func gbSetCompositeBind(idx: Int, bind: Ptr) unsafe extern("rae_gb_set_composite_bind")
-# Dynamic resolution (#530): the upscale sampler + current render scale.
-func gbCompositeSampler() unsafe extern("rae_gb_composite_sampler") ret Ptr
-func gbSetCompositeSampler(samp: Ptr) unsafe extern("rae_gb_set_composite_sampler")
+# Dynamic resolution (#530): the current render scale (the upscale sampler is
+# a manager sampler on the composite cache).
 func nativeGbRenderScale() unsafe extern("rae_gb_render_scale") ret Float64
 func gbRenderScale() ret Float64 {
   unsafe { ret nativeGbRenderScale() }
 }
 
-# A fullscreen pipeline: no vertex buffers, no depth, one colour target. The
-# reusable primitive every deferred post-pass builds on.
-func makeFullscreenPipeline(wgsl: copy Ptr, format: copy Int32) ret Ptr {
-  unsafe {
-    let shaderMod: Ptr = makeShaderModule(wgsl: wgsl)
-    var targets: List(WGPUColorTargetState) = List.create(WGPUColorTargetState, cap: 1)
-    targets.add(value: { format: format, writeMask: WGPUColorWriteMask_All })
-    var frags: List(WGPUFragmentState) = List.create(WGPUFragmentState, cap: 1)
-    frags.add(value: {
-      module: shaderMod, entryPoint: { data: gbEntryFs(), length: WGPU_STRLEN },
-      targetCount: 1 as UInt64, targets: targets.data
-    })
-    let desc: WGPURenderPipelineDescriptor = {
-      vertex: { module: shaderMod, entryPoint: { data: gbEntryVs(), length: WGPU_STRLEN } },
-      primitive: {
-        topology: WGPUPrimitiveTopology_TriangleList,
-        frontFace: WGPUFrontFace_CCW, cullMode: WGPUCullMode_None
-      },
-      multisample: { count: 1 as UInt32, mask: 4294967295 as UInt32 },
-      fragment: frags.data
-    }
-    let pipeline: Ptr = wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: desc)
-    wgpuShaderModuleRelease(shaderModule: shaderMod)
-    ret pipeline
+# A fullscreen pipeline: no vertex buffer, no depth, no cull, one colour
+# target. The reusable primitive every deferred post-pass builds on.
+func fullscreenPipelineSpec(format: copy Int32) ret RenderPipelineSpec {
+  let colorFormats: List(Int32) = List.create(Int32, cap: 1)
+  colorFormats.add(value: format)
+  let attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 1)
+  ret RenderPipelineSpec {
+    vertexStride: 0, attributes: own attributes, colorFormats: own colorFormats,
+    alphaBlend: false, depthFormat: 0 as Int32, depthWrite: false,
+    depthCompare: WGPUCompareFunction_Always, cullMode: WGPUCullMode_None
   }
 }
 
-# One fullscreen pass (clear + draw 3) into `target` with `pipeline` + `bind`.
-func runFullscreen(pipeline: copy Ptr, bind: copy Ptr, target: copy Ptr) {
+func createFullscreenPipeline(resources: mod GpuResources, wgsl: view Buffer(Any), format: copy Int32) ret RenderPipelineId {
+  var source: String = ""
+  unsafe { source = String.fromCStr(s: wgsl) }
+  if let pipeline: RenderPipelineId = createRenderPipeline(resources: resources, wgsl: source, vertexEntry: "vs", fragmentEntry: "fs", spec: fullscreenPipelineSpec(format: format)) {
+    ret pipeline
+  }
+  ret noRenderPipelineId()
+}
+
+# One fullscreen pass (clear + draw 3) into a C-owned `target` view, opened in
+# Rae and submitted on the shared queue. The draw is recorded from manager IDs
+# (a manager pipeline, or an adopted C pipeline via runFullscreenExternal).
+type FullscreenPass { encoder: Ptr, pass: Ptr }
+
+func beginFullscreen(target: copy Ptr) unsafe ret FullscreenPass {
   unsafe {
     let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
     let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
@@ -97,34 +101,115 @@ func runFullscreen(pipeline: copy Ptr, bind: copy Ptr, target: copy Ptr) {
       colorAttachmentCount: 1 as UInt64, colorAttachments: atts.data
     }
     let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
-    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: pipeline)
-    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
-      group: bind, dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
-    wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: 3 as UInt32,
-      instanceCount: 1 as UInt32, firstVertex: 0 as UInt32, firstInstance: 0 as UInt32)
-    wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
-    let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
-    let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
-    gbSubmit(cmd: cmd)
-    wgpuCommandBufferRelease(commandBuffer: cmd)
-    wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
-    wgpuCommandEncoderRelease(commandEncoder: enc)
+    ret FullscreenPass { encoder: enc, pass: pass }
   }
 }
 
-# #764: the deferred pass caches (pipeline/bind "made" flags + the target
-# generation each bind was built at) were module-level globals. They are
-# per-frame state a deferred renderer owns, so they now live in RenderPasses,
-# threaded from DeferredRenderer through renderDeferredPassWorld. createRenderPasses()
-# builds them at their old defaults; #771 finds RenderPasses instead of globals.
-type CompositePassCache { pipeMade: Bool, bindGen: Int, bindMade: List(Bool), uniform: List(Float) }
-type AoPassCache { pipeMade: Bool, bindGen: Int, bindMade: Bool }
-type LightPassCache { bindGen: Int, bindMade: Bool }
-type TaaPassCache { bindGen: Int, bindMade: List(Bool) }
-type PyrPassCache { bindGen: Int }
+func endFullscreen(fullscreen: view FullscreenPass) unsafe {
+  unsafe {
+    wgpuRenderPassEncoderEnd(renderPassEncoder: fullscreen.pass)
+    let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
+    let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: fullscreen.encoder, descriptor: cbDesc)
+    gbSubmit(cmd: cmd)
+    wgpuCommandBufferRelease(commandBuffer: cmd)
+    wgpuRenderPassEncoderRelease(renderPassEncoder: fullscreen.pass)
+    wgpuCommandEncoderRelease(commandEncoder: fullscreen.encoder)
+  }
+}
 
-func compositeSlotMade(cache: view CompositePassCache, idx: copy Int) ret Bool {
-  if let made: Bool = cache.bindMade.copyAt(index: idx) { ret made }
+func runFullscreen(resources: view GpuResources, pipeline: view RenderPipelineId, bind: view BindGroupId, target: copy Ptr) {
+  unsafe {
+    if target is webgpuNull() { ret }
+    let fullscreen: FullscreenPass = beginFullscreen(target: target)
+    let drawn: Bool = recordDrawInPass(resources: resources, pass: fullscreen.pass, pipeline: pipeline, bindGroup: bind, vertexCount: 3, instanceCount: 1, firstVertex: 0, firstInstance: 0)
+    endFullscreen(fullscreen: fullscreen)
+  }
+}
+
+func runFullscreenExternal(resources: view GpuResources, pipeline: view ExternalId, bind: view BindGroupId, target: copy Ptr) {
+  unsafe {
+    if target is webgpuNull() { ret }
+    let fullscreen: FullscreenPass = beginFullscreen(target: target)
+    let drawn: Bool = recordDrawInPassExternal(resources: resources, pass: fullscreen.pass, pipeline: pipeline, bindGroup: bind, vertexCount: 3, instanceCount: 1, firstVertex: 0, firstInstance: 0)
+    endFullscreen(fullscreen: fullscreen)
+  }
+}
+
+# #764: the deferred pass caches were module-level globals; they are per-frame
+# state a deferred renderer owns, so they live in RenderPasses, threaded from
+# DeferredRenderer through renderDeferredPassWorld. #904: each holds its manager
+# IDs — the pass's own objects, the bind groups (rebuilt at `bindGen`, the
+# targets generation they were built at) and `adopted`, the C-owned inputs
+# adopted for that generation and released with the binds.
+type CompositePassCache {
+  pipeMade: Bool
+  pipeline: RenderPipelineId
+  uniform: BufferId
+  sampler: SamplerId
+  binds: List(BindGroupId)      # per source slot: TAA 0/1, no-TAA lit 2
+  adopted: List(ExternalId)
+  bindGen: Int
+  args: ArgWriter
+}
+type AoPassCache {
+  pipeMade: Bool
+  pipeline: RenderPipelineId
+  bindGroup: BindGroupId
+  adopted: List(ExternalId)
+  bindGen: Int
+}
+type LightPassCache {
+  pipeline: ExternalId          # the C-owned lighting pipeline, adopted
+  bindGroup: BindGroupId
+  adopted: List(ExternalId)
+  bindGen: Int
+}
+type TaaPassCache {
+  pipeline: ExternalId          # the C-owned resolve pipeline, adopted
+  binds: List(BindGroupId)      # per ping-pong slot
+  adopted: List(ExternalId)
+  bindGen: Int
+}
+type PyrPassCache {
+  fromDepth: ExternalId         # the C-owned level-0 pipeline, adopted
+  reduce: ExternalId            # the C-owned reduce pipeline, adopted
+  binds: List(BindGroupId)      # per mip
+  adopted: List(ExternalId)
+  bindGen: Int
+}
+
+func createCompositePassCache() ret CompositePassCache {
+  ret CompositePassCache {
+    pipeMade: false, pipeline: noRenderPipelineId(), uniform: noBufferId(), sampler: noSamplerId(),
+    binds: fillBindGroupIds(count: 3), adopted: List.create(ExternalId, cap: 4), bindGen: 0 - 1,
+    args: createArgs(uniform: true)
+  }
+}
+func createAoPassCache() ret AoPassCache {
+  ret AoPassCache { pipeMade: false, pipeline: noRenderPipelineId(), bindGroup: noBindGroupId(), adopted: List.create(ExternalId, cap: 4), bindGen: 0 - 1 }
+}
+func createLightPassCache() ret LightPassCache {
+  ret LightPassCache { pipeline: noExternalId(), bindGroup: noBindGroupId(), adopted: List.create(ExternalId, cap: 10), bindGen: 0 - 1 }
+}
+func createTaaPassCache() ret TaaPassCache {
+  ret TaaPassCache { pipeline: noExternalId(), binds: fillBindGroupIds(count: 2), adopted: List.create(ExternalId, cap: 10), bindGen: 0 - 1 }
+}
+func createPyrPassCache() ret PyrPassCache {
+  ret PyrPassCache { fromDepth: noExternalId(), reduce: noExternalId(), binds: List.create(BindGroupId, cap: 16), adopted: List.create(ExternalId, cap: 20), bindGen: 0 - 1 }
+}
+
+# A failed bind build (a C input not up yet) resets the pass's generation
+# state — binds retired, adoptions released — so the retry next frame starts
+# clean instead of accumulating adopted slots.
+func failPassGeneration(resources: mod GpuResources, binds: mod List(BindGroupId), adopted: mod List(ExternalId)) {
+  retireBindGroupIds(resources: resources, list: binds)
+  releaseExternalIds(resources: resources, list: adopted)
+}
+
+# A bind slot is usable when its group is live AND its adopted inputs still
+# are (the generation check above retires both together).
+func bindSlotUsable(resources: view GpuResources, binds: view List(BindGroupId), idx: copy Int) ret Bool {
+  if let bind: BindGroupId = binds.copyAt(index: idx) { ret bindGroupIsUsable(resources: resources, id: bind) }
   ret false
 }
 
@@ -163,93 +248,76 @@ func neutralGrade() pub ret ColorGrade {
   }
 }
 
+# The composite's own objects, created once: the fullscreen pipeline in the
+# presentable format, the 64-byte CompositeU uniform and the linear clamp
+# sampler for the dynamic-resolution upscale (#530).
+func ensureCompositeObjects(cache: mod CompositePassCache, resources: mod GpuResources) {
+  if cache.pipeMade { ret }
+  cache.pipeMade = true
+  unsafe { cache.pipeline = createFullscreenPipeline(resources: resources, wgsl: gbCompositeWgsl(), format: g2dFormat() as Int32) }
+  if let uniform: BufferId = createBuffer(resources: resources, size: 64, usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst) { cache.uniform = uniform }
+  if let sampler: SamplerId = createSampler(resources: resources) { cache.sampler = sampler }
+}
+
 # Composite the lit/TAA result into the presentable target with exposure.
-func composite(cache: mod CompositePassCache, exposure: copy Float, grade: view ColorGrade) pub {
-  unsafe {
-    if gbDeferredPrepare() is 0 { ret }
+func composite(cache: mod CompositePassCache, resources: mod GpuResources, exposure: copy Float, grade: view ColorGrade) pub {
+  if gbDeferredPrepare() is 0 { ret }
+  ensureCompositeObjects(cache: cache, resources: resources)
 
-    if not cache.pipeMade {
-      cache.pipeMade = true
-      gbSetCompositePipeline(pipeline: makeFullscreenPipeline(wgsl: gbCompositeWgsl(), format: g2dFormat() as Int32))
-      let ud: WGPUBufferDescriptor = {
-        usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst, size: 64 as UInt64
-      }
-      gbSetCompositeUbuf(buf: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: ud))
-      # Linear sampler for the dynamic-resolution upscale (#530).
-      let sd: WGPUSamplerDescriptor = {
-        addressModeU: WGPUAddressMode_ClampToEdge, addressModeV: WGPUAddressMode_ClampToEdge,
-        addressModeW: WGPUAddressMode_ClampToEdge,
-        magFilter: WGPUFilterMode_Linear, minFilter: WGPUFilterMode_Linear,
-        mipmapFilter: WGPUMipmapFilterMode_Nearest,
-        lodMinClamp: 0.0 as Float32, lodMaxClamp: 1.0 as Float32, maxAnisotropy: 1 as UInt16
-      }
-      gbSetCompositeSampler(samp: wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: sd))
+  # The source bind is per TAA slot (0/1) or the no-TAA lit slot (2), rebuilt
+  # when the targets change (the source views were re-created then).
+  let gen: Int = gbTargetsGen()
+  if not (gen is cache.bindGen) {
+    cache.bindGen = gen
+    retireBindGroupIds(resources: resources, list: cache.binds)
+    releaseExternalIds(resources: resources, list: cache.adopted)
+  }
+  let idx: Int = gbCompositeSourceIndex()
+  if not bindSlotUsable(resources: resources, binds: cache.binds, idx: idx) {
+    let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
+    entries.add(value: bufferRef(id: cache.uniform))
+    unsafe { entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbCompositeSourceView())) }
+    entries.add(value: samplerRef(id: cache.sampler))
+    var made: Bool = false
+    if let bind: BindGroupId = createRenderBindGroup(resources: resources, pipeline: cache.pipeline, entries: entries) {
+      cache.binds.set(index: idx, value: bind)
+      made = true
     }
+    # A failed build (an input not up yet) drops this generation's adoptions
+    # so a retry next frame does not accumulate slots.
+    if not made { failPassGeneration(resources: resources, binds: cache.binds, adopted: cache.adopted) }
+  }
 
-    # The source bind is per TAA slot (0/1) or the no-TAA lit slot (2), rebuilt
-    # when the targets change (C released the old handle then).
-    loop cache.bindMade.length < 3 { cache.bindMade.add(value: false) }
-    let gen: Int = gbTargetsGen()
-    if not (gen is cache.bindGen) {
-      cache.bindGen = gen
-      cache.bindMade.set(index: 0, value: false)
-      cache.bindMade.set(index: 1, value: false)
-      cache.bindMade.set(index: 2, value: false)
-    }
-    let idx: Int = gbCompositeSourceIndex()
-    if not compositeSlotMade(cache: cache, idx: idx) {
-      let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbCompositePipeline(), groupIndex: 0 as UInt32)
-      var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 3)
-      entries.add(value: { binding: 0 as UInt32, buffer: gbCompositeUbuf(), size: 64 as UInt64 })
-      entries.add(value: { binding: 1 as UInt32, textureView: gbCompositeSourceView() })
-      entries.add(value: { binding: 2 as UInt32, sampler: gbCompositeSampler() })
-      let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 3 as UInt64, entries: entries.data }
-      gbSetCompositeBind(idx: idx, bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
-      wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
-      cache.bindMade.set(index: idx, value: true)
-    }
+  # Four vec4s, matching CompositeU in the shader. Order is load-bearing. The
+  # writer is held on the cache (allocated once) so the hot path stays
+  # zero-alloc (#573).
+  var opFlag: Float = 0.0
+  if grade.pbrNeutral { opFlag = 1.0 }
+  # p2.w = FXAA flag (#20): on exactly when TAA is off, so the aliasing TAA used
+  # to resolve gets a spatial pass instead. Identity when TAA is enabled.
+  var fxaaFlag: Float = 0.0
+  if gbTaaIsEnabled() is 0 { fxaaFlag = 1.0 }
+  resetArgs(writer: cache.args)
+  pushVec4F(writer: cache.args, x: exposure, y: gbRenderScale() as Float, z: opFlag, w: grade.contrast)   # y: #530 upscale ratio
+  pushVec4F(writer: cache.args, x: grade.vibrance, y: grade.saturation, z: grade.shadowTintStrength, w: grade.highlightTintStrength)
+  pushVec4F(writer: cache.args, x: grade.shadowTint.x, y: grade.shadowTint.y, z: grade.shadowTint.z, w: fxaaFlag)
+  pushVec4F(writer: cache.args, x: grade.highlightTint.x, y: grade.highlightTint.y, z: grade.highlightTint.z, w: 0.0)
+  let uploaded: Bool = uploadArgs(writer: cache.args, resources: resources, buffer: cache.uniform, offset: 0)
 
-    # Four vec4s, matching CompositeU in the shader. Order is load-bearing. Held on
-    # the cache (created once) so the hot path stays zero-alloc (#573).
-    loop cache.uniform.length < 16 { cache.uniform.add(value: 0.0) }
-    var opFlag: Float = 0.0
-    if grade.pbrNeutral { opFlag = 1.0 }
-    cache.uniform.set(index: 0, value: exposure)
-    cache.uniform.set(index: 1, value: gbRenderScale() as Float)   # #530: upscale ratio
-    cache.uniform.set(index: 2, value: opFlag)
-    cache.uniform.set(index: 3, value: grade.contrast)
-    cache.uniform.set(index: 4, value: grade.vibrance)
-    cache.uniform.set(index: 5, value: grade.saturation)
-    cache.uniform.set(index: 6, value: grade.shadowTintStrength)
-    cache.uniform.set(index: 7, value: grade.highlightTintStrength)
-    cache.uniform.set(index: 8, value: grade.shadowTint.x)
-    cache.uniform.set(index: 9, value: grade.shadowTint.y)
-    cache.uniform.set(index: 10, value: grade.shadowTint.z)
-    # p2.w = FXAA flag (#20): on exactly when TAA is off, so the aliasing TAA used
-    # to resolve gets a spatial pass instead. Identity when TAA is enabled.
-    var fxaaFlag: Float = 0.0
-    if gbTaaIsEnabled() is 0 { fxaaFlag = 1.0 }
-    cache.uniform.set(index: 11, value: fxaaFlag)
-    cache.uniform.set(index: 12, value: grade.highlightTint.x)
-    cache.uniform.set(index: 13, value: grade.highlightTint.y)
-    cache.uniform.set(index: 14, value: grade.highlightTint.z)
-    cache.uniform.set(index: 15, value: 0.0)
-    wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: gbCompositeUbuf(),
-      bufferOffset: 0 as UInt64, data: cache.uniform.data, size: 64 as UInt64)
-
-    runFullscreen(pipeline: gbCompositePipeline(), bind: gbCompositeBind(idx: idx), target: g2dOffView())
+  if let bind: BindGroupId = cache.binds.copyAt(index: idx) {
+    unsafe { runFullscreen(resources: resources, pipeline: cache.pipeline, bind: bind, target: g2dOffView()) }
   }
 }
 
 # Public wrapper: the render graph's composite step (was gbuffer.compositePass).
 # Ungraded, so every existing caller keeps the look it was calibrated against.
-func compositePass(cache: mod CompositePassCache, exposure: view Float) pub {
-  composite(cache: cache, exposure: exposure, grade: neutralGrade())
+func compositePass(cache: mod CompositePassCache, resources: mod GpuResources, exposure: view Float) pub {
+  composite(cache: cache, resources: resources, exposure: exposure, grade: neutralGrade())
 }
 
 # Composite with a look. See ColorGrade.
-func compositePassGraded(cache: mod CompositePassCache, exposure: view Float, grade: view ColorGrade) pub {
-  composite(cache: cache, exposure: exposure, grade: grade)
+func compositePassGraded(cache: mod CompositePassCache, resources: mod GpuResources, exposure: view Float, grade: view ColorGrade) pub {
+  composite(cache: cache, resources: resources, exposure: exposure, grade: grade)
 }
 
 # ----- SSAO: screen-space ambient occlusion (#504) ---------------------------
@@ -260,49 +328,48 @@ func nativeGbSsaoUpload(camX: Float, camY: Float, camZ: Float) unsafe extern("ra
 func gbSsaoUpload(camX: copy Float, camY: copy Float, camZ: copy Float) {
   unsafe { nativeGbSsaoUpload(camX: camX, camY: camY, camZ: camZ) }
 }
-func gbAoWgsl() unsafe extern("rae_gb_ao_wgsl") ret Ptr
+func gbAoWgsl() unsafe extern("rae_gb_ao_wgsl") ret Buffer(Any)
 func gbAoView() unsafe extern("rae_gb_ao_view") ret Ptr
-func gbAoPipeline() unsafe extern("rae_gb_ao_pipeline") ret Ptr
-func gbAoBind() unsafe extern("rae_gb_ao_bind") ret Ptr
 func gbLightUbuf() unsafe extern("rae_gb_light_ubuf") ret Ptr
 func nativeGbLightBytes() unsafe extern("rae_gb_light_bytes") ret Int
 func gbLightBytes() ret Int {
   unsafe { ret nativeGbLightBytes() }
 }
-func gbSetAoPipeline(pipeline: Ptr) unsafe extern("rae_gb_set_ao_pipeline")
-func gbSetAoBind(bind: Ptr) unsafe extern("rae_gb_set_ao_bind")
 
-func ssao(cache: mod AoPassCache, camX: copy Float, camY: copy Float, camZ: copy Float) pub {
-  unsafe {
-    if gbDeferredPrepare() is 0 { ret }
-    if not cache.pipeMade {
-      cache.pipeMade = true
-      gbSetAoPipeline(pipeline: makeFullscreenPipeline(wgsl: gbAoWgsl(), format: WGPUTextureFormat_R8Unorm))
-    }
-    gbSsaoUpload(camX: camX, camY: camY, camZ: camZ)
-    let gen: Int = gbTargetsGen()
-    if not (gen is cache.bindGen) {
-      cache.bindGen = gen
-      cache.bindMade = false
-    }
-    if not cache.bindMade {
-      cache.bindMade = true
-      let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbAoPipeline(), groupIndex: 0 as UInt32)
-      var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 3)
-      entries.add(value: { binding: 0 as UInt32, buffer: gbLightUbuf(), size: gbLightBytes() as UInt64 })
-      entries.add(value: { binding: 1 as UInt32, textureView: gbViewA() })
-      entries.add(value: { binding: 2 as UInt32, textureView: gbViewDepth() })
-      let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 3 as UInt64, entries: entries.data }
-      gbSetAoBind(bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
-      wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
-    }
-    runFullscreen(pipeline: gbAoPipeline(), bind: gbAoBind(), target: gbAoView())
+func ssao(cache: mod AoPassCache, resources: mod GpuResources, camX: copy Float, camY: copy Float, camZ: copy Float) pub {
+  if gbDeferredPrepare() is 0 { ret }
+  if not cache.pipeMade {
+    cache.pipeMade = true
+    unsafe { cache.pipeline = createFullscreenPipeline(resources: resources, wgsl: gbAoWgsl(), format: WGPUTextureFormat_R8Unorm) }
   }
+  gbSsaoUpload(camX: camX, camY: camY, camZ: camZ)
+  let gen: Int = gbTargetsGen()
+  if not (gen is cache.bindGen) {
+    cache.bindGen = gen
+    retireBindGroup(resources: resources, id: cache.bindGroup)
+    cache.bindGroup = noBindGroupId()
+    releaseExternalIds(resources: resources, list: cache.adopted)
+  }
+  if not bindGroupIsUsable(resources: resources, id: cache.bindGroup) {
+    let entries: List(ResourceRef) = List.create(ResourceRef, cap: 3)
+    unsafe {
+      entries.add(value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbLightUbuf()))
+      entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbViewA()))
+      entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbViewDepth()))
+    }
+    var made: Bool = false
+    if let bind: BindGroupId = createRenderBindGroup(resources: resources, pipeline: cache.pipeline, entries: entries) {
+      cache.bindGroup = bind
+      made = true
+    }
+    if not made { releaseExternalIds(resources: resources, list: cache.adopted) }
+  }
+  unsafe { runFullscreen(resources: resources, pipeline: cache.pipeline, bind: cache.bindGroup, target: gbAoView()) }
 }
 
 # Public wrapper: the render graph's SSAO step (was gbuffer.ssaoPass).
-func ssaoPass(cache: mod AoPassCache, camera: view Camera3d) pub {
-  ssao(cache: cache, camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z)
+func ssaoPass(cache: mod AoPassCache, resources: mod GpuResources, camera: view Camera3d) pub {
+  ssao(cache: cache, resources: resources, camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z)
 }
 
 # ----- lighting: the deferred shading pass (#504) ----------------------------
@@ -321,8 +388,6 @@ func skyHosekPush(index: copy Int, value: copy Float) {
 }
 func gbLightPipeline() unsafe extern("rae_gb_light_pipeline") ret Ptr
 func gbLitView() unsafe extern("rae_gb_lit_view") ret Ptr
-func gbLightBind() unsafe extern("rae_gb_light_bind") ret Ptr
-func gbSetLightBind(bind: Ptr) unsafe extern("rae_gb_set_light_bind")
 func gbShadowFrameUbuf() unsafe extern("rae_gb_shadow_frame_ubuf") ret Ptr
 func nativeGbShadowFrameBytes() unsafe extern("rae_gb_shadow_frame_bytes") ret Int
 func gbShadowFrameBytes() ret Int {
@@ -349,9 +414,9 @@ func pushHosekChannel(c: view HosekChannel, base: view Int) {
   }
 }
 
-# Low-level lighting: upload the uniform (C), build the bind (rebuilt on resize),
-# run the fullscreen pass into the lit target.
-func lighting(cache: mod LightPassCache, camX: copy Float, camY: copy Float, camZ: copy Float, exposure: copy Float,
+# Low-level lighting: upload the uniform (C), build the bind (rebuilt on resize)
+# over the adopted C pipeline, run the fullscreen pass into the lit target.
+func lighting(cache: mod LightPassCache, resources: mod GpuResources, camX: copy Float, camY: copy Float, camZ: copy Float, exposure: copy Float,
               sunX: copy Float, sunY: copy Float, sunZ: copy Float,
               sunR: copy Float, sunG: copy Float, sunB: copy Float,
               skyR: copy Float, skyG: copy Float, skyB: copy Float,
@@ -360,41 +425,52 @@ func lighting(cache: mod LightPassCache, camX: copy Float, camY: copy Float, cam
               sunSizeRad: copy Float, zenR: copy Float, zenG: copy Float, zenB: copy Float,
               bands: copy Float, horR: copy Float, horG: copy Float, horB: copy Float,
               discI: copy Float) {
-  unsafe {
-    if gbDeferredPrepare() is 0 { ret }
-    gbLightUpload(camX: camX, camY: camY, camZ: camZ, exposure: exposure,
-      sunX: sunX, sunY: sunY, sunZ: sunZ, sunR: sunR, sunG: sunG, sunB: sunB,
-      skyR: skyR, skyG: skyG, skyB: skyB, gndR: gndR, gndG: gndG, gndB: gndB,
-      skyKind: skyKind, turbidity: turbidity, skyExposure: skyExposure, sunSizeRad: sunSizeRad,
-      zenR: zenR, zenG: zenG, zenB: zenB, bands: bands, horR: horR, horG: horG, horB: horB, discI: discI)
-    let gen: Int = gbTargetsGen()
-    if not (gen is cache.bindGen) {
-      cache.bindGen = gen
-      cache.bindMade = false
-    }
-    if not cache.bindMade {
-      cache.bindMade = true
-      let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbLightPipeline(), groupIndex: 0 as UInt32)
-      var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 9)
-      entries.add(value: { binding: 0 as UInt32, buffer: gbLightUbuf(), size: gbLightBytes() as UInt64 })
-      entries.add(value: { binding: 1 as UInt32, textureView: gbViewA() })
-      entries.add(value: { binding: 2 as UInt32, textureView: gbViewB() })
-      entries.add(value: { binding: 3 as UInt32, textureView: gbViewC() })
-      entries.add(value: { binding: 4 as UInt32, textureView: gbViewDepth() })
-      entries.add(value: { binding: 5 as UInt32, textureView: gbAoView() })
-      entries.add(value: { binding: 6 as UInt32, buffer: gbShadowFrameUbuf(), size: gbShadowFrameBytes() as UInt64 })
-      entries.add(value: { binding: 7 as UInt32, textureView: gbShadowArrayView() })
-      entries.add(value: { binding: 8 as UInt32, sampler: gbShadowSampler() })
-      let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 9 as UInt64, entries: entries.data }
-      gbSetLightBind(bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
-      wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
-    }
-    runFullscreen(pipeline: gbLightPipeline(), bind: gbLightBind(), target: gbLitView())
+  if gbDeferredPrepare() is 0 { ret }
+  gbLightUpload(camX: camX, camY: camY, camZ: camZ, exposure: exposure,
+    sunX: sunX, sunY: sunY, sunZ: sunZ, sunR: sunR, sunG: sunG, sunB: sunB,
+    skyR: skyR, skyG: skyG, skyB: skyB, gndR: gndR, gndG: gndG, gndB: gndB,
+    skyKind: skyKind, turbidity: turbidity, skyExposure: skyExposure, sunSizeRad: sunSizeRad,
+    zenR: zenR, zenG: zenG, zenB: zenB, bands: bands, horR: horR, horG: horG, horB: horB, discI: discI)
+  let gen: Int = gbTargetsGen()
+  if not (gen is cache.bindGen) {
+    cache.bindGen = gen
+    retireBindGroup(resources: resources, id: cache.bindGroup)
+    cache.bindGroup = noBindGroupId()
+    releaseExternalIds(resources: resources, list: cache.adopted)
+    cache.pipeline = noExternalId()
   }
+  if not bindGroupIsUsable(resources: resources, id: cache.bindGroup) {
+    let entries: List(ResourceRef) = List.create(ResourceRef, cap: 9)
+    unsafe {
+      if let pipeline: ExternalId = adoptExternalRenderPipeline(resources: resources, handle: gbLightPipeline()) {
+        cache.adopted.add(value: pipeline)
+        cache.pipeline = pipeline
+      }
+      entries.add(value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbLightUbuf()))
+      entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbViewA()))
+      entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbViewB()))
+      entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbViewC()))
+      entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbViewDepth()))
+      entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbAoView()))
+      entries.add(value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbShadowFrameUbuf()))
+      entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbShadowArrayView()))
+      entries.add(value: adoptSamplerRef(resources: resources, adopted: cache.adopted, handle: gbShadowSampler()))
+    }
+    var made: Bool = false
+    if let bind: BindGroupId = createRenderBindGroupExternal(resources: resources, pipeline: cache.pipeline, entries: entries) {
+      cache.bindGroup = bind
+      made = true
+    }
+    if not made {
+      releaseExternalIds(resources: resources, list: cache.adopted)
+      cache.pipeline = noExternalId()
+    }
+  }
+  unsafe { runFullscreenExternal(resources: resources, pipeline: cache.pipeline, bind: cache.bindGroup, target: gbLitView()) }
 }
 
 # Public: lighting with a bound sky environment (Hosek ambient + background).
-func lightingPassSky(cache: mod LightPassCache, camera: view Camera3d, light: view Light3d, sky: view Sky) pub {
+func lightingPassSky(cache: mod LightPassCache, resources: mod GpuResources, camera: view Camera3d, light: view Light3d, sky: view Sky) pub {
   let up: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
   let down: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0 - 1.0)
   # DESATURATED BY THE SKY'S OWN SETTING. The sky's irradiance is THE ambient
@@ -407,7 +483,7 @@ func lightingPassSky(cache: mod LightPassCache, camera: view Camera3d, light: vi
   pushHosekChannel(c: sky.hosek.r, base: 0)
   pushHosekChannel(c: sky.hosek.g, base: 12)
   pushHosekChannel(c: sky.hosek.b, base: 24)
-  lighting(cache: cache,
+  lighting(cache: cache, resources: resources,
     camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z,
     exposure: light.exposure,
     sunX: light.sunDir.x, sunY: light.sunDir.y, sunZ: light.sunDir.z,
@@ -424,8 +500,8 @@ func lightingPassSky(cache: mod LightPassCache, camera: view Camera3d, light: vi
 }
 
 # Public: lighting with the authored ambient hemisphere, no sky.
-func lightingPass(cache: mod LightPassCache, camera: view Camera3d, light: view Light3d) pub {
-  lighting(cache: cache,
+func lightingPass(cache: mod LightPassCache, resources: mod GpuResources, camera: view Camera3d, light: view Light3d) pub {
+  lighting(cache: cache, resources: resources,
     camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z,
     exposure: light.exposure,
     sunX: light.sunDir.x, sunY: light.sunDir.y, sunZ: light.sunDir.z,
@@ -459,45 +535,52 @@ func gbTaaPipeline() unsafe extern("rae_gb_taa_pipeline") ret Ptr
 func gbTaaUbuf() unsafe extern("rae_gb_taa_ubuf") ret Ptr
 func gbTaaTargetView() unsafe extern("rae_gb_taa_target_view") ret Ptr
 func gbTaaHistoryView() unsafe extern("rae_gb_taa_history_view") ret Ptr
-func gbTaaBind(idx: Int) unsafe extern("rae_gb_taa_bind") ret Ptr
-func gbSetTaaBind(idx: Int, bind: Ptr) unsafe extern("rae_gb_set_taa_bind")
 
-func taaSlotMade(cache: view TaaPassCache, idx: copy Int) ret Bool {
-  if let made: Bool = cache.bindMade.copyAt(index: idx) { ret made }
-  ret false
-}
-
-func taa(cache: mod TaaPassCache) pub {
-  unsafe {
-    if gbTaaReady() is 0 { ret }
-    let cur: Int = gbTaaBegin()
-    loop cache.bindMade.length < 2 { cache.bindMade.add(value: false) }
-    let gen: Int = gbTargetsGen()
-    if not (gen is cache.bindGen) {
-      cache.bindGen = gen
-      cache.bindMade.set(index: 0, value: false)
-      cache.bindMade.set(index: 1, value: false)
-    }
-    if not taaSlotMade(cache: cache, idx: cur) {
-      let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbTaaPipeline(), groupIndex: 0 as UInt32)
-      var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 4)
-      entries.add(value: { binding: 0 as UInt32, textureView: gbLitView() })
-      entries.add(value: { binding: 1 as UInt32, textureView: gbTaaHistoryView() })
-      entries.add(value: { binding: 2 as UInt32, textureView: gbViewC() })
-      entries.add(value: { binding: 3 as UInt32, buffer: gbTaaUbuf(), size: 16 as UInt64 })
-      let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 4 as UInt64, entries: entries.data }
-      gbSetTaaBind(idx: cur, bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
-      wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
-      cache.bindMade.set(index: cur, value: true)
-    }
-    runFullscreen(pipeline: gbTaaPipeline(), bind: gbTaaBind(idx: cur), target: gbTaaTargetView())
-    gbTaaEnd()
+func taa(cache: mod TaaPassCache, resources: mod GpuResources) pub {
+  if gbTaaReady() is 0 { ret }
+  let cur: Int = gbTaaBegin()
+  let gen: Int = gbTargetsGen()
+  if not (gen is cache.bindGen) {
+    cache.bindGen = gen
+    retireBindGroupIds(resources: resources, list: cache.binds)
+    releaseExternalIds(resources: resources, list: cache.adopted)
+    cache.pipeline = noExternalId()
   }
+  if not isExternalRenderPipeline(resources: resources, id: cache.pipeline) {
+    unsafe {
+      if let pipeline: ExternalId = adoptExternalRenderPipeline(resources: resources, handle: gbTaaPipeline()) {
+        cache.adopted.add(value: pipeline)
+        cache.pipeline = pipeline
+      }
+    }
+  }
+  if not bindSlotUsable(resources: resources, binds: cache.binds, idx: cur) {
+    let entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
+    unsafe {
+      entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbLitView()))
+      entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbTaaHistoryView()))
+      entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbViewC()))
+      entries.add(value: adoptBufferRef(resources: resources, adopted: cache.adopted, handle: gbTaaUbuf()))
+    }
+    var made: Bool = false
+    if let bind: BindGroupId = createRenderBindGroupExternal(resources: resources, pipeline: cache.pipeline, entries: entries) {
+      cache.binds.set(index: cur, value: bind)
+      made = true
+    }
+    if not made {
+      failPassGeneration(resources: resources, binds: cache.binds, adopted: cache.adopted)
+      cache.pipeline = noExternalId()
+    }
+  }
+  if let bind: BindGroupId = cache.binds.copyAt(index: cur) {
+    unsafe { runFullscreenExternal(resources: resources, pipeline: cache.pipeline, bind: bind, target: gbTaaTargetView()) }
+  }
+  gbTaaEnd()
 }
 
 # Public wrapper: the render graph's TAA step (was gbuffer.taaPass).
-func taaPass(cache: mod TaaPassCache) pub {
-  taa(cache: cache)
+func taaPass(cache: mod TaaPassCache, resources: mod GpuResources) pub {
+  taa(cache: cache, resources: resources)
 }
 
 # ----- depth pyramid: a Hi-Z mip chain (#504) --------------------------------
@@ -513,41 +596,88 @@ func gbPyrFromDepthPipeline() unsafe extern("rae_gb_pyr_from_depth_pipeline") re
 func gbPyrReducePipeline() unsafe extern("rae_gb_pyr_reduce_pipeline") ret Ptr
 func gbPyrSrcView(i: Int) unsafe extern("rae_gb_pyr_src_view") ret Ptr
 func gbPyrRtView(i: Int) unsafe extern("rae_gb_pyr_rt_view") ret Ptr
-func gbPyrBind(i: Int) unsafe extern("rae_gb_pyr_bind") ret Ptr
-func gbSetPyrBind(i: Int, bind: Ptr) unsafe extern("rae_gb_set_pyr_bind")
 func nativeGbPyramidMips() unsafe extern("rae_ext_Gbuffer_pyramidMips") ret Int
 func gbPyramidMips() ret Int {
   unsafe { ret nativeGbPyramidMips() }
 }
 
-func depthPyramid(cache: mod PyrPassCache) pub {
-  unsafe {
-    if gbPyramidReady() is 0 { ret }
-    let gen: Int = gbTargetsGen()
-    let bindsStale: Bool = not (gen is cache.bindGen)
-    if bindsStale { cache.bindGen = gen }
-    let mips: Int = gbPyramidMips()
-    var i: Int = 0
-    loop i < mips {
-      # Level 0 reduces the G-buffer depth; every later level reduces the one above.
-      var pipeline: Ptr = gbPyrReducePipeline()
-      if i is 0 { pipeline = gbPyrFromDepthPipeline() }
-      # C nulls the per-mip binds on resize; also rebuild when the gen changed.
-      if bindsStale {
-        let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: pipeline, groupIndex: 0 as UInt32)
-        var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 1)
-        entries.add(value: { binding: 0 as UInt32, textureView: gbPyrSrcView(i: i) })
-        let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 1 as UInt64, entries: entries.data }
-        gbSetPyrBind(i: i, bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
-        wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+func depthPyramid(cache: mod PyrPassCache, resources: mod GpuResources) pub {
+  if gbPyramidReady() is 0 { ret }
+  let gen: Int = gbTargetsGen()
+  if not (gen is cache.bindGen) {
+    cache.bindGen = gen
+    retireBindGroupIds(resources: resources, list: cache.binds)
+    releaseExternalIds(resources: resources, list: cache.adopted)
+    cache.fromDepth = noExternalId()
+    cache.reduce = noExternalId()
+  }
+  if not isExternalRenderPipeline(resources: resources, id: cache.reduce) {
+    unsafe {
+      if let pipeline: ExternalId = adoptExternalRenderPipeline(resources: resources, handle: gbPyrFromDepthPipeline()) {
+        cache.adopted.add(value: pipeline)
+        cache.fromDepth = pipeline
       }
-      runFullscreen(pipeline: pipeline, bind: gbPyrBind(i: i), target: gbPyrRtView(i: i))
-      i = i + 1
+      if let pipeline: ExternalId = adoptExternalRenderPipeline(resources: resources, handle: gbPyrReducePipeline()) {
+        cache.adopted.add(value: pipeline)
+        cache.reduce = pipeline
+      }
     }
+  }
+  let mips: Int = gbPyramidMips()
+  loop cache.binds.length < mips { cache.binds.add(value: noBindGroupId()) }
+  var i: Int = 0
+  loop i < mips {
+    # Level 0 reduces the G-buffer depth; every later level reduces the one above.
+    var pipeline: ExternalId = cache.reduce
+    if i is 0 { pipeline = cache.fromDepth }
+    if not bindSlotUsable(resources: resources, binds: cache.binds, idx: i) {
+      let entries: List(ResourceRef) = List.create(ResourceRef, cap: 1)
+      unsafe { entries.add(value: adoptTextureViewRef(resources: resources, adopted: cache.adopted, handle: gbPyrSrcView(i: i))) }
+      var made: Bool = false
+      if let bind: BindGroupId = createRenderBindGroupExternal(resources: resources, pipeline: pipeline, entries: entries) {
+        cache.binds.set(index: i, value: bind)
+        made = true
+      }
+      if not made {
+        failPassGeneration(resources: resources, binds: cache.binds, adopted: cache.adopted)
+        cache.fromDepth = noExternalId()
+        cache.reduce = noExternalId()
+        ret
+      }
+    }
+    if let bind: BindGroupId = cache.binds.copyAt(index: i) {
+      unsafe { runFullscreenExternal(resources: resources, pipeline: pipeline, bind: bind, target: gbPyrRtView(i: i)) }
+    }
+    i = i + 1
   }
 }
 
 # Public wrapper: the render graph's depth-pyramid step (was gbuffer.buildDepthPyramid).
-func buildDepthPyramid(cache: mod PyrPassCache) pub {
-  depthPyramid(cache: cache)
+func buildDepthPyramid(cache: mod PyrPassCache, resources: mod GpuResources) pub {
+  depthPyramid(cache: cache, resources: resources)
+}
+
+# Retire every manager object the post-passes hold (renderer shutdown): the
+# bind groups first (dropping their pins), then the adopted inputs, then the
+# composite / ssao objects. The C-owned inputs are released by C's shutdown.
+func postPassesShutdown(composite: mod CompositePassCache, ao: mod AoPassCache, light: mod LightPassCache, taa: mod TaaPassCache, pyr: mod PyrPassCache, resources: mod GpuResources) {
+  retireBindGroupIds(resources: resources, list: composite.binds)
+  releaseExternalIds(resources: resources, list: composite.adopted)
+  retireRenderPipeline(resources: resources, id: composite.pipeline)
+  retireBuffer(resources: resources, id: composite.uniform)
+  retireSampler(resources: resources, id: composite.sampler)
+  composite = createCompositePassCache()
+  retireBindGroup(resources: resources, id: ao.bindGroup)
+  releaseExternalIds(resources: resources, list: ao.adopted)
+  retireRenderPipeline(resources: resources, id: ao.pipeline)
+  ao = createAoPassCache()
+  retireBindGroup(resources: resources, id: light.bindGroup)
+  releaseExternalIds(resources: resources, list: light.adopted)
+  light = createLightPassCache()
+  retireBindGroupIds(resources: resources, list: taa.binds)
+  releaseExternalIds(resources: resources, list: taa.adopted)
+  taa = createTaaPassCache()
+  retireBindGroupIds(resources: resources, list: pyr.binds)
+  releaseExternalIds(resources: resources, list: pyr.adopted)
+  pyr = createPyrPassCache()
 }
