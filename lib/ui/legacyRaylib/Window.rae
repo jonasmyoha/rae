@@ -69,10 +69,11 @@ func uiCloseWindow(backend: view UiBackend) pub {
   }
 }
 
-func uiBeginFrame(backend: view UiBackend, clear: view RgbaColor) pub {
+func uiBeginFrame(backend: view UiBackend, canvas: mod Gpu2dCanvas, clear: view RgbaColor) pub {
   unsafe {
     if backend is UiBackend.gpu2d {
       Gpu2d.beginFrame(
+        canvas: canvas,
         r: colorChannel(v: clear.r),
         g: colorChannel(v: clear.g),
         b: colorChannel(v: clear.b),

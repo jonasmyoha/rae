@@ -30,7 +30,7 @@ func renderFrame(
   loop passIndex < deferredOrderLength(renderer: renderer) {
     let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
     if tag is RenderTag.uiOverlay {
-      Gpu2d.beginFrameLoad()
+      Gpu2d.beginFrameLoad(canvas: renderer.canvas)
       renderSystemGpu2d(world: uiWorld, res: uiResources, canvas: renderer.canvas)
       drawNextPiecePreview(kind: game.nextKind)
       drawDebugOverlay(debugOverlay: debug, font: uiResources.textFont, didRealWork: true)

@@ -1008,10 +1008,6 @@ int64_t rae_sm_caster_key(int64_t i);
 void rae_sm_draw_metaballs(int64_t c, void* passptr);
 /* gpu2d frame lifecycle in Rae (#504). */
 void rae_g2d_frame_reset(void);
-void rae_g2d_set_frame(void* enc, void* pass);
-void* rae_g2d_pass_get(void);
-void* rae_g2d_encoder_get(void);
-int64_t rae_g2d_frame_active(void);
 void rae_g2d_present_and_cleanup(void);
 void rae_g2d_tick(void);
 /* #907: the box pass runs in Rae (lib/Gpu2dBox.rae) over a manager; C keeps the
@@ -1022,8 +1018,8 @@ int64_t rae_g2d_prim_floats(void);
 void* rae_g2d_prim_data(void);
 int64_t rae_g2d_prim_clip_at(int64_t i);
 void rae_g2d_prim_reset(void);
-void* rae_g2d_clip_frame_uniform(int64_t clip);
-void rae_g2d_scissor(int64_t clip);
+void rae_g2d_scissor(int64_t clip, void* pass);
+void rae_g2d_clip_uniform_at(int64_t clip, float* out);
 void rae_g2d_prepare_flush(int64_t images_pending);
 int64_t rae_g2d_current_clip(void);
 /* #908: CPU image decode for the Rae image pass (textures + upload are manager objects). */
