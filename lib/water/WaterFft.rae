@@ -20,6 +20,7 @@ open water/WaterSystem
 open water/WaterPerf
 open water/WaterSchedule
 open water/WaterGpuIds
+open gpu/GpuIds
 open water/WaterGpuBridge
 open gpu/GpuResources
 open gpu/GpuLifetime
@@ -248,28 +249,6 @@ func readbackRowFloats(width: view Int) ret Int {
   ret readbackRowBytes(width: width) / 4
 }
 
-func awaitSubmission(resources: mod GpuResources, id: view SubmissionId) ret Bool {
-  var spins: Int = 0
-  loop spins < 100000000 {
-    let status: Int = pollSubmission(resources: resources, id: id)
-    if status is 1 { ret true }
-    if status < 0 { ret false }
-    spins = spins + 1
-  }
-  ret false
-}
-
-func awaitReadback(resources: mod GpuResources, id: view ReadbackId) ret Bool {
-  var spins: Int = 0
-  loop spins < 100000000 {
-    let status: Int = pollReadback(resources: resources, id: id)
-    if status is 1 { ret true }
-    if status is not 0 { ret false }
-    spins = spins + 1
-  }
-  ret false
-}
-
 func readbackFloat4(waterSystem: mod WaterSystem, resources: mod GpuResources, texture: view TextureId, width: copy Int, height: copy Int) ret Bool {
   if not isValidTexture(resources: resources, id: texture) { ret false }
   let rowBytes: Int = readbackRowBytes(width: width)
@@ -278,7 +257,7 @@ func readbackFloat4(waterSystem: mod WaterSystem, resources: mod GpuResources, t
   if let recording: Recording = beginRecording(resources: resources) {
     if recordCopyTextureToBuffer(recording: recording, resources: resources, texture: texture, buffer: waterSystem.fft.readback, bytesPerRow: rowBytes) {
       if let submission: SubmissionId = waterSubmit(waterSystem: waterSystem, resources: resources, recording: recording) {
-        copied = awaitSubmission(resources: resources, id: submission)
+        copied = waitSubmission(resources: resources, id: submission)
       }
     }
   }
@@ -286,7 +265,7 @@ func readbackFloat4(waterSystem: mod WaterSystem, resources: mod GpuResources, t
   waterPollSubmissions(waterSystem: waterSystem, resources: resources)
   var ok: Bool = false
   if let read: ReadbackId = startReadback(resources: resources, buffer: waterSystem.fft.readback, offset: 0, size: bytes) {
-    if awaitReadback(resources: resources, id: read) {
+    if waitReadback(resources: resources, id: read) {
       let raw: List(UInt8) = List.create(UInt8, cap: bytes)
       loop raw.length < bytes { raw.add(value: 0 as UInt8) }
       if copyReadback(resources: resources, id: read, destination: raw) {

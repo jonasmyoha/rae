@@ -510,3 +510,56 @@ of the water package is a typed ID in an App-owned `gpu/GpuResources`.
 - Manager additions made for this: `createSamplerWith(addressMode)`,
   `createComputeBindGroupOrdered` + `skipRef`, format-aware
   `recordCopyTextureToBuffer`, `recordComputeCommands`.
+
+## Implementation notes (#874): grass and sprites on the manager; renderer inventory
+
+- **Grass** (`lib/GrassCompute.rae`): `g_grass_ptrs[8]`, `rae_gb_grass_set /
+  _get / _release` and the C-embedded grass shaders are gone. `GrassCompute`
+  holds typed IDs (compute + render pipeline, instance / uniform / indirect /
+  staging buffers, compute + draw bind groups, the adopted frame-uniform
+  external, its in-flight submissions); the App owns it and passes the manager
+  explicitly. The compute is a manager recording submitted before the geometry
+  pass; the draw goes INTO the gbuffer's C-owned geometry pass through the new
+  `recordDrawIndirectInPass` (see below). The render shader moved verbatim to
+  `lib/grass_render.wgsl` (extracted with the C compiler, macros included);
+  the compute shader was already composed from files. `grassReadVisible` reads
+  the culled count through a `ReadbackId`; `grassShutdown` retires and drains.
+- **Sprites** (`lib/GbufferSprite.rae`): `g_sprite_ptrs[6]` is gone; the
+  `SpriteCache` holds the pipeline / bind group / uniform / sampler IDs and the
+  adopted array-view, frame-uniform and draws-buffer externals (re-adopted when
+  the array generation changes). The sprite image ARRAY stays a C asset-upload
+  ABI (`rae_gb_sprite_array_init/_write`, its view via
+  `rae_gb_sprite_array_view`). No active example calls the sprite pass, so it
+  is compile-verified only.
+- **Manager additions**: `RenderPipelineSpec.colorFormats` (several targets,
+  the G-buffer's three) and vertex-buffer-less pipelines (empty attributes);
+  `recordDrawIndirectInPass` / `recordDrawInPass` — `unsafe` draws on a raw
+  pass encoder the renderer owns (IDs validated, nothing pinned: the foreign
+  submission is not tracked, and a retire after the draw is a Release that
+  wgpu's own command tracking keeps alive until completion);
+  `waitSubmission` / `waitReadback` (blocking, diagnostics only);
+  `resetArgs`; and `gpu/GpuIds.rae` — the no-ID constructors, ID-list retire
+  helpers and the per-consumer in-flight submission helpers
+  (`trackSubmission` / `pollSubmissions` / `drainSubmissions`) water, grass
+  and sprites share.
+- **Shared 3D renderer — inventory, NOT migrated here.** What is still C-owned
+  and why it is a different-sized job than water/grass:
+  - Parked Rae-created objects behind `rae_gb_set_*` slots: Gbuffer (static /
+    skin pipelines + binds, terrain pipeline + bind, frame ubuf, draws buffer,
+    targets), GbufferPasses (ao, light, composite (+ sampler, ubuf), taa,
+    pyramid, fog — 11 setters), GbufferTerrain (blend, sampler, tex view),
+    GbufferInspector (view pipeline / bind / ubuf), TransparentForward
+    (pipeline / bind). These are the water-shaped part: each becomes typed IDs
+    on the RenderSystem-owned manager with the C-owned targets adopted as
+    externals per targets generation (#904).
+  - C-owned FRAME state (26 statics in runtime_gpu3d_gbuffer.c): the render
+    targets (`rae_gb_set_target / commit / targets_gen`), the frame uniform
+    and draws buffer, the mesh store (`rae_gb_mesh_*` vbuf / ibuf / icount),
+    the skin palette, the encoder / pass / submit (`rae_gb_encoder / pass /
+    submit / set_frame`), shadow maps (`rae_sm_*`) and SDF. Moving these means
+    the manager owns the geometry pass (a multi-target pass opened in Rae) and
+    every consumer binds manager IDs instead of adopted externals (#905 for the
+    geometry-pass owners and mesh store, #906 for targets / frame / submit /
+    shadow / SDF and the end-of-main `shutdownAll()` replacement).
+  - The legacy blocking `lib/GpuTiming.rae` (`rae_gt_set / get`) is the last
+    slot store; it folds into `gpu/GpuTiming` with #906.
