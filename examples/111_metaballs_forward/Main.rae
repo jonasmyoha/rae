@@ -67,6 +67,7 @@ open ui/LogOverlay
 open ui/WindowGeometry
 open ui/ScrollPanel
 open ui/DebugOverlay
+open ui/CornerMenuButton
 open HotReload
 import String
 import ui/Scene
@@ -350,6 +351,9 @@ func main() ret Int {
   let uiRoot: EntityId = loadScene(world: uiWorld, scene: uiScene)
   # The camera readout bar is the SHARED component; this scene supplies
   # only the slot it mounts into. Example 113 mounts the same one.
+  # The menu button is an ECS node in the same top row as the camera bar, so
+  # the two hug to one height and resize together (lib/ui/CornerMenuButton).
+  mountCornerMenuButton(world: uiWorld, res: gpuUi, hostNodeId: "CornerMenuSlot")
   mountCameraBar(world: uiWorld, res: gpuUi, hostNodeId: "CameraBarSlot")
   anchorUiToExtent(world: uiWorld, res: gpuUi, w: extentW, h: extentH)
   layoutSystem(world: uiWorld)
@@ -571,6 +575,11 @@ func main() ret Int {
     dispatchUiActions(input: uiInput, state: uiState, rig: cameraRig, camera: camera)
     # The shared dialog sees every action and ignores what it does not own.
     var settingsChanged: Bool = false
+    # Shared corner menu button, mounted beside the camera bar (same as 112/114).
+    if menuToggleTapped(input: uiInput) {
+      settings.open = settings.open is false
+      settingsChanged = true
+    }
     var sa: Int = 0
     loop sa < uiActionCount(input: uiInput) {
       if settingsHandleAction(settingsState: settings, actionId: uiActionAt(input: uiInput, index: sa)) {
@@ -631,7 +640,10 @@ func main() ret Int {
     # `settingsChanged` too: a slider DRAG produces no action and does not dirty
     # the demo UI, so without it the knob's new rect only reached the screen when
     # the release finally produced one (see 113 for the same gate).
-    if uiLayoutDirty or extentChanged or settingsChanged {
+    # `scrolled` too: updateScrollPanel writes the new offset into an Offset
+    # component, and only transformSystem turns that into screen positions —
+    # without it the wheel moved nothing until the next relayout.
+    if uiLayoutDirty or extentChanged or settingsChanged or scrolled {
       layoutSystem(world: uiWorld)
       transformSystem(world: uiWorld)
       visualBoundsSystem(world: uiWorld, res: gpuUi)
