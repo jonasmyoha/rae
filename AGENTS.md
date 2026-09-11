@@ -397,6 +397,32 @@ Hard-won lesson (full postmortem: `rae/docs/ui-render-loop-performance.md`):
 
 ---
 
+## Source formatting: `rae format` owns layout (#911)
+
+Rae has ONE canonical layout and the compiler is its authority — there is no
+style configuration. The policy (full design: `docs/rae-format-design.md`):
+
+- 2-space indent, 100 columns, LF, one final newline, no trailing whitespace,
+  braces on the declaration line; the 1,000-line file cap is unchanged.
+- Function parameters and call arguments: 1–3 items may share the line if the
+  whole header/call fits in 100 columns; from FOUR items, or whenever it does
+  not fit, every item goes on its own line (two spaces deeper, no commas, `)`
+  back at the declaration's indentation). Type fields, object and collection
+  literals: the same from FIVE items. Never hand-align, never keep personal
+  wrapping.
+- The compiler formats first: `rae run` / `rae build` / `rae watch` rewrite the
+  project's changed `.rae` files canonically BEFORE compiling (atomic, in
+  place); `--check-format` / `RAE_FORMAT=check` refuse to write and fail instead
+  (what the test suite and the example gate use). A file whose canonical form
+  would exceed 1,000 lines is an error to split, never a rewrite.
+- Until #916–#919 land, `rae format <file>` prints to stdout and `rae format
+  --write <file>` rewrites one file; it crashes on char literals and is not yet
+  idempotent around comments after multi-line calls, so do NOT bulk-format the
+  tree by hand — the migration is one mechanical commit (#918). When you edit a
+  `.rae` file, keep it within the policy above by hand in the meantime.
+
+---
+
 ## Renderer C-surface gate (#505 — WebGPU bindings)
 
 The renderer is **Rae over the generated low-level WebGPU bindings**
