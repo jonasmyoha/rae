@@ -826,31 +826,39 @@ func themePaddingInsets(theme: view ResolvedTheme, name: view String) pub ret Th
 # the old setActiveThemeTokens, retargeted from module globals to `dst`. Idempotent
 # via `dst.ok`: a world seeded once is not re-copied.
 func applyResolvedTokens(dst: mod ResolvedTheme, src: view ResolvedTheme) pub {
-  unsafe {
-    if dst.ok {
-      ret
-    }
-    var i: Int = 0
-    loop i < src.spaceNames.length {
-      let n: String = rae_ext_rae_buf_get(buf: src.spaceNames.data, index: i)
+  if dst.ok {
+    ret
+  }
+  # #899: `rae_ext_rae_buf_get` returns a shallow alias of `src`'s String
+  # storage; adding that alias directly to `dst` would leave `dst` and `src`
+  # sharing the same heap, and dropping both frees it twice (the same shape
+  # as the Files.rae `listDirByExt` bug). `copyAt` + `if let` is the safe
+  # accessor already used by the container loop below: unwrapping the
+  # optional deep-copies the String payload, so `dst` owns independent
+  # storage.
+  var i: Int = 0
+  loop i < src.spaceNames.length {
+    if let n: String = src.spaceNames.copyAt(index: i) {
       if let value: Float = src.spaceVals.copyAt(index: i) {
         dst.spaceNames.add(value: n)
         dst.spaceVals.add(value: value)
       }
-      i = i + 1
     }
-    i = 0
-    loop i < src.radiusNames.length {
-      let n: String = rae_ext_rae_buf_get(buf: src.radiusNames.data, index: i)
+    i = i + 1
+  }
+  i = 0
+  loop i < src.radiusNames.length {
+    if let n: String = src.radiusNames.copyAt(index: i) {
       if let value: Float = src.radiusVals.copyAt(index: i) {
         dst.radiusNames.add(value: n)
         dst.radiusVals.add(value: value)
       }
-      i = i + 1
     }
-    i = 0
-    loop i < src.padNames.length {
-      let n: String = rae_ext_rae_buf_get(buf: src.padNames.data, index: i)
+    i = i + 1
+  }
+  i = 0
+  loop i < src.padNames.length {
+    if let n: String = src.padNames.copyAt(index: i) {
       var l: Float = 0.0
       var t: Float = 0.0
       var r: Float = 0.0
@@ -864,27 +872,27 @@ func applyResolvedTokens(dst: mod ResolvedTheme, src: view ResolvedTheme) pub {
       dst.padT.add(value: t)
       dst.padR.add(value: r)
       dst.padB.add(value: b)
-      i = i + 1
     }
-    i = 0
-    loop i < src.containerNames.length {
-      if let containerName: String = src.containerNames.copyAt(index: i) {
-        dst.containerNames.add(value: containerName)
-      }
-      if let containerBgSlot: String = src.containerBgSlots.copyAt(index: i) {
-        dst.containerBgSlots.add(value: containerBgSlot)
-      }
-      if let containerRadiusToken: String = src.containerRadiusTokens.copyAt(index: i) {
-        dst.containerRadiusTokens.add(value: containerRadiusToken)
-      }
-      if let containerPadToken: String = src.containerPadTokens.copyAt(index: i) {
-        dst.containerPadTokens.add(value: containerPadToken)
-      }
-      if let containerTextStyle: String = src.containerTextStyles.copyAt(index: i) {
-        dst.containerTextStyles.add(value: containerTextStyle)
-      }
-      i = i + 1
-    }
-    dst.ok = true
+    i = i + 1
   }
+  i = 0
+  loop i < src.containerNames.length {
+    if let containerName: String = src.containerNames.copyAt(index: i) {
+      dst.containerNames.add(value: containerName)
+    }
+    if let containerBgSlot: String = src.containerBgSlots.copyAt(index: i) {
+      dst.containerBgSlots.add(value: containerBgSlot)
+    }
+    if let containerRadiusToken: String = src.containerRadiusTokens.copyAt(index: i) {
+      dst.containerRadiusTokens.add(value: containerRadiusToken)
+    }
+    if let containerPadToken: String = src.containerPadTokens.copyAt(index: i) {
+      dst.containerPadTokens.add(value: containerPadToken)
+    }
+    if let containerTextStyle: String = src.containerTextStyles.copyAt(index: i) {
+      dst.containerTextStyles.add(value: containerTextStyle)
+    }
+    i = i + 1
+  }
+  dst.ok = true
 }

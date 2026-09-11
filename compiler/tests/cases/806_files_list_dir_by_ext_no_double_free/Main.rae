@@ -1,0 +1,45 @@
+# #899 regression: `Files.listDirByExt` used to add the ALIAS `rae_ext_rae_buf_get`
+# hands back into the returned list, so the returned `List(File)` shared its
+# `name`/`folder` String heap with the local `all` list `listDirByExt` builds
+# internally. Dropping both (here: falling out of scope at the end of `main`)
+# freed the same buffers twice and aborted the process.
+#
+# `all.length` isn't hard-coded (a stray file such as macOS's `.DS_Store` would
+# make a fixed count flaky); instead the expected filtered count is computed by
+# scanning `all` with the same `hasExtension` check `listDirByExt` uses, so the
+# test still catches a wrong filter result on top of the double-free.
+open Files
+
+func main() ret Int {
+  let dir: String = "tests/cases/806_files_list_dir_by_ext_no_double_free/fixtures"
+  let all: List(File) = listDir(folder: dir)
+  let filtered: List(File) = listDirByExt(folder: dir, ext: "txt")
+
+  var expectedCount: Int = 0
+  var i: Int = 0
+  loop i < all.length {
+    if let f: File = all.copyAt(index: i) {
+      if f.hasExtension(ext: "txt") {
+        expectedCount = expectedCount + 1
+      }
+    }
+    i = i + 1
+  }
+
+  var everyFilteredMatches: Bool = true
+  i = 0
+  loop i < filtered.length {
+    if let f: File = filtered.copyAt(index: i) {
+      if not f.hasExtension(ext: "txt") {
+        everyFilteredMatches = false
+      }
+    }
+    i = i + 1
+  }
+
+  log("filtered count matches: {filtered.length is expectedCount}")
+  log("every filtered entry has .txt: {everyFilteredMatches}")
+  # `all` and `filtered` both fall out of scope here (implicit drop) — the
+  # exact double-free shape #899 fixed.
+  ret 0
+}
