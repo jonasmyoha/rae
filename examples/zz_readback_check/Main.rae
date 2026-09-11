@@ -5,8 +5,10 @@ open webgpu/Webgpu
 open webgpu/ReadRequest
 
 func createBuffer(usage: copy UInt64) ret Ptr {
+  unsafe {
   let descriptor: WGPUBufferDescriptor = { size: 32 as UInt64, usage: usage }
   ret wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: descriptor)
+  }
 }
 
 type ReadPair {
@@ -15,12 +17,14 @@ type ReadPair {
 }
 
 func createReadPair(firstBuffer: copy Ptr, secondBuffer: copy Ptr) ret opt ReadPair {
+  unsafe {
   if let first: ReadRequest = ReadRequest.create(buffer: firstBuffer, range: { offset: 8 as UInt64, size: 16 as UInt64 }) {
     if let second: ReadRequest = ReadRequest.create(buffer: secondBuffer, range: { offset: 0 as UInt64, size: 32 as UInt64 }) {
       ret ReadPair { first: own first, second: own second }
     }
   }
   ret none
+  }
 }
 
 func waitForRead(request: view ReadRequest) ret Int {
@@ -38,6 +42,7 @@ func consumeCompleted(request: own ReadRequest) ret Bool {
 }
 
 func checkListCleanup() ret Bool {
+  unsafe {
   let firstBuffer: Ptr = createBuffer(usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst)
   let secondBuffer: Ptr = createBuffer(usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst)
   let requests: List(ReadRequest) = List.create(ReadRequest, cap: 2)
@@ -71,9 +76,11 @@ func checkListCleanup() ret Bool {
   }
   # List cleanup consumes each element and invokes ReadRequest.drop exactly once.
   ret correct
+  }
 }
 
 func checkCycle() ret Bool {
+  unsafe {
   let source: Ptr = createBuffer(usage: WGPUBufferUsage_CopySrc + WGPUBufferUsage_CopyDst)
   let first: Ptr = createBuffer(usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst)
   let second: Ptr = createBuffer(usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst)
@@ -116,9 +123,11 @@ func checkCycle() ret Bool {
   wgpuBufferRelease(buffer: first)
   wgpuBufferRelease(buffer: second)
   ret false
+  }
 }
 
 func main() ret Int {
+  unsafe {
   if webgpuBootstrap() is not 1 {
     log("no GPU")
     ret 1
@@ -172,7 +181,8 @@ func main() ret Int {
   wgpuBufferRelease(buffer: buffer)
   log("failure, cancellation, repeated map/unmap and destroyed-buffer callback OK")
   ret 0
+  }
 }
 
 # Existing generic single-command submission ABI.
-func submitCommand(command: Ptr) extern("rae_gb_submit")
+func submitCommand(command: Ptr) unsafe extern("rae_gb_submit")
