@@ -405,3 +405,57 @@ bindings, with no new reflection syntax or bindless promises.
   and on hardware `examples/zz_gpu_args_check` (pack a known struct, upload,
   read every field back through the shader's own std140 layout, and confirm the
   bit patterns match — a mismatch between the Rae offsets and WGSL would fail).
+
+## Implementation notes (#903): render support and adopted externals
+
+`lib/gpu/GpuRender.rae` is the render-pipeline surface #870 deferred, on the
+same owner, validation, pinning and deferred-release rules as the compute
+surface. It exists so a render surface such as water's can be manager-owned
+(#873) without first migrating the whole legacy gbuffer renderer.
+
+- **Kinds 8 and 9.** `kindRenderPipeline` (a `renderPipelines` table, released
+  with `wgpuRenderPipelineRelease` in the usual drop order, after compute
+  pipelines) and `kindExternal` (an `externals` table whose native handles the
+  manager NEVER releases: `releaseHandle` deliberately has no branch for it, so
+  `drop`, retire and slot reuse only clear the slot).
+- **`RenderPipelineId`** from `createRenderPipeline(resources, wgsl,
+  vertexEntry, fragmentEntry, spec)`: one interleaved vertex buffer layout
+  (`RenderPipelineSpec.vertexStride` + ordered `VertexAttributeSpec`s), one
+  colour target with optional straight alpha blend (water's blend), and an
+  optional depth state (`depthFormat` 0 = none; water's reverse-Z read-only
+  test is `Depth32Float`, no write, `Greater`). The shader module is released
+  right after pipeline creation, as for compute.
+- **`ExternalId`** from `adoptExternalBuffer` / `adoptExternalTextureView`
+  (both `unsafe`: the adopter guarantees the handle stays valid while adopted,
+  and re-adopts when e.g. the gbuffer's targets generation changes).
+  `releaseExternal` bumps the generation and frees the slot once nothing pins
+  it — the native handle is untouched. This is the "adopted-external" kind:
+  referenced (bound, attached, pinned) but never owned.
+- **`ResourceRef`** (`bufferRef` / `textureViewRef` / `samplerRef` /
+  `externalRef`) is the one way to name a manager resource OR an external where
+  the render surface needs one: ordered bind entries, attachments, vertex and
+  index buffers. Validation goes through the same tag → kind → live →
+  generation chain, an external's sub-kind (buffer vs view) is checked against
+  the binding it is used for, and buffer sizes come from the native re-query.
+- **`createRenderBindGroup(resources, pipeline, entries)`** binds group 0 of the
+  render pipeline (`wgpuRenderPipelineGetBindGroupLayout`) with `entries` at
+  consecutive binding numbers in list order, buffers bound whole, and yields an
+  ordinary `BindGroupId` that pins every entry (and a manager view's texture)
+  for its lifetime.
+- **`recordDrawIndexed(recording, resources, target, pipeline, bindGroup,
+  vertexBuffer, indexBuffer, indexCount)`** records one render pass with one
+  indexed draw over #870's `Recording`: `RenderTarget` is a colour view (clear or
+  load) and an optional depth view (read-only or read-write); u32 indices; the
+  index buffer must hold `indexCount` indices; manager buffers must carry
+  Vertex / Index usage. Every referenced resource (including the bind group's
+  dependencies) becomes a use of the recording, re-validated at submit and
+  pinned until completion. `recordCopyTextureToBuffer` is the pixel path back
+  into a buffer (row pitch a multiple of 256) for readbacks and screenshots.
+- **Verified on hardware** by `examples/zz_gpu_render_check`: a manager render
+  pipeline draws a clip-space triangle over a 4x4 RGBA8 manager texture, the
+  fragment colour comes from an ADOPTED uniform buffer the check owns, the
+  texture is copied to a buffer and read through a `ReadbackId`, every pixel
+  equals the packed colour; then the pipeline retires, the external is released
+  while the adopter still owns and releases its buffer, and a released
+  external, a retired pipeline and a misaligned row pitch are refused.
+- No new C: generated bindings only; the C-surface gate is unchanged.
