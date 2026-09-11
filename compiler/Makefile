@@ -103,7 +103,7 @@ else
 TEST_RUNNER = tools/run_tests_parallel.sh
 endif
 
-.PHONY: all build test clean smoke install uninstall c-surface-gate
+.PHONY: all build test test-examples clean smoke install uninstall c-surface-gate
 
 all: build
 
@@ -165,6 +165,12 @@ test: build
 	@chmod +x $(TEST_RUNNER)
 	@if [ -z "$(TEST)" ] || [ "$(TEST)" = "webgpuReadback" ]; then bash tools/test-webgpu-readback.sh; fi
 	@if [ "$(TEST)" != "webgpuReadback" ]; then $(TEST_RUNNER) $(TEST); fi
+
+# The VISUAL example gates (real SDL/GPU windows, screenshots, minutes of wall
+# time). Deliberately NOT part of `make test`: run them on purpose, by hand.
+test-examples: build
+	@chmod +x tools/run_examples.sh
+	@RAE_RUN_EXAMPLES=1 ./tools/run_examples.sh
 
 smoke: build
 	@chmod +x tools/smoke.sh

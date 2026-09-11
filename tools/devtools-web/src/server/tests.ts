@@ -136,10 +136,10 @@ export class TestRunner {
       env.RAE_SKIP_TESTS = this.activeRun.disabledTests;
     }
     // Graphical example smoke tests are OFF unless the client opted in — they
-    // build + render every 3D example and take minutes. run_tests.sh honours
-    // RAE_SKIP_EXAMPLES=1 by running the unit cases only.
-    if (!this.activeRun.includeExamples) {
-      env.RAE_SKIP_EXAMPLES = "1";
+    // build + render every 3D example and take minutes. The runners leave
+    // them off by default and run them only with RAE_RUN_EXAMPLES=1.
+    if (this.activeRun.includeExamples) {
+      env.RAE_RUN_EXAMPLES = "1";
     }
     // #824/#846: the Makefile runs the unit cases in parallel BY DEFAULT, so
     // the common (ticked) case needs no env at all. When the user unticks the
