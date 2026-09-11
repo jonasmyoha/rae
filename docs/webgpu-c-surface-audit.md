@@ -251,3 +251,23 @@ the text pipeline / sampler / atlas texture globals, `G2D_TEXT_WGSL`, and
 `rae_ext_Gpu2d_flush` itself — `Gpu2d.flush` is now entirely Rae (boxes,
 images, text), C only uploads the viewport transform in `rae_g2d_prepare_flush`.
 
+**#910 update (2D renderer slice 4 — the frame):** the frame's command encoder
+and render pass are owned by the `Gpu2dCanvas` (`beginFrame` / `beginFrameLoad`
+take the canvas and open the pass into the C offscreen target; the box / image
+/ text passes draw into `canvas.framePass`; `endFrame` closes, submits and
+clears it) — nothing is parked in C any more (`rae_g2d_set_frame` /
+`pass_get` / `encoder_get` / `frame_active` removed). The per-run clip
+uniforms are manager buffers on the canvas (a per-run-slot pool, filled by
+`rae_g2d_clip_uniform_at`); the C frame-kept buffer / bind-group lists
+(`rae_g2d_keep_frame_buf` / `keep_frame_bind`, `rae_g2d_clip_frame_uniform`)
+are gone, and the scissor takes the pass (`rae_g2d_scissor(clip, pass)`).
+Still C, deliberately: the offscreen presentable target + surface configure,
+present (drawable acquire / copy / present / poll) and the headless screenshot
+readback (`rae_g2d_present_and_cleanup`) — surface/platform glue whose
+in-flight teardown equivalence can only be verified in a window run; the clip
+stack + design→physical transform (CPU state behind the stateless
+`pushClipRect` / `popClipRect` API, the same owner-threading question as the
+batches, #913); and the viewport uniform (adopted). The canvas's pass is a
+Rae-opened raw pass, not yet a manager `Recording` — that, the present/teardown
+replacement and the clip stack are #915.
+

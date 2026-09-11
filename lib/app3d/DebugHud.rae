@@ -2,6 +2,7 @@
 # Create the renderer with createDeferredRendererWithUi; update before camera
 # input, then draw at RenderTag.uiOverlay. The renderer handles presentation.
 import Gpu2d
+open Gpu2dCanvas
 import SdfText
 open ui/DebugOverlay
 
@@ -24,7 +25,7 @@ func updateDebugHud(debugHud: mod DebugHud, now: copy Float64, rendered: copy Bo
   ret tookPointer or debugHud.debugOverlay.open
 }
 
-func drawDebugHud(debugHud: mod DebugHud) {
-  Gpu2d.beginFrameLoad()
+func drawDebugHud(debugHud: mod DebugHud, canvas: mod Gpu2dCanvas) {
+  Gpu2d.beginFrameLoad(canvas: canvas)
   drawDebugOverlay(debugOverlay: debugHud.debugOverlay, font: debugHud.font, didRealWork: true)
 }
