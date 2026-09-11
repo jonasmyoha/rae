@@ -215,21 +215,23 @@ func entityOffset(world: view UiWorld, entity: view EntityId) ret Vec2 {
 # Returns the active children of `entity` in declaration order. List
 # is fresh; safe for the caller to mutate if needed.
 func activeChildren(world: view UiWorld, entity: view EntityId) ret List(EntityId) {
-  let out: List(EntityId) = List.create(EntityId, cap: 4)
-  if componentHas(this: world.childrens, entity: entity) is false {
+  unsafe {
+    let out: List(EntityId) = List.create(EntityId, cap: 4)
+    if componentHas(this: world.childrens, entity: entity) is false {
+      ret out
+    }
+    let ch: view Children => componentView(this: world.childrens, entity: entity)
+    let n: Int = ch.ids.length
+    var i: Int = 0
+    loop i < n {
+      let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+      if layoutActive(world: world, entity: cid) {
+        out.add(value: cid)
+      }
+      i = i + 1
+    }
     ret out
   }
-  let ch: view Children => componentView(this: world.childrens, entity: entity)
-  let n: Int = ch.ids.length
-  var i: Int = 0
-  loop i < n {
-    let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
-    if layoutActive(world: world, entity: cid) {
-      out.add(value: cid)
-    }
-    i = i + 1
-  }
-  ret out
 }
 
 # -----------------------------------------------------------------
@@ -242,84 +244,86 @@ func activeChildren(world: view UiWorld, entity: view EntityId) ret List(EntityI
 # -----------------------------------------------------------------
 
 func measureNode(world: mod UiWorld, entity: view EntityId) {
-  let kids: List(EntityId) = activeChildren(world: world, entity: entity)
-  let n: Int = kids.length
+  unsafe {
+    let kids: List(EntityId) = activeChildren(world: world, entity: entity)
+    let n: Int = kids.length
 
-  # Compute the container's measured size from its children.
-  let layout: Layout = entityLayout(world: world, entity: entity)
-  let pad: Insets = entityPadding(world: world, entity: entity)
-  let rect: Rect = entityRect(world: world, entity: entity)
+    # Compute the container's measured size from its children.
+    let layout: Layout = entityLayout(world: world, entity: entity)
+    let pad: Insets = entityPadding(world: world, entity: entity)
+    let rect: Rect = entityRect(world: world, entity: entity)
 
-  var measuredW: Float = rect.size.x
-  var measuredH: Float = rect.size.y
+    var measuredW: Float = rect.size.x
+    var measuredH: Float = rect.size.y
 
-  if n > 0 {
-    var sumMain: Float = 0.0
-    var maxCross: Float = 0.0
-    var j: Int = 0
-    loop j < n {
-      let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: j)
-      let cw: Float = childMeasuredW(world: world, entity: cid)
-      let ch: Float = childMeasuredH(world: world, entity: cid)
-      if layout.kind is LayoutType.horizontal {
-        sumMain = sumMain + cw
-        if ch > maxCross {
-          maxCross = ch
-        }
-      } else {
-        if layout.kind is LayoutType.vertical {
-          sumMain = sumMain + ch
-          if cw > maxCross {
-            maxCross = cw
-          }
-        } else {
-          # Stack / None: max child extents on both axes.
-          if cw > sumMain {
-            sumMain = cw
-          }
+    if n > 0 {
+      var sumMain: Float = 0.0
+      var maxCross: Float = 0.0
+      var j: Int = 0
+      loop j < n {
+        let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: j)
+        let cw: Float = childMeasuredW(world: world, entity: cid)
+        let ch: Float = childMeasuredH(world: world, entity: cid)
+        if layout.kind is LayoutType.horizontal {
+          sumMain = sumMain + cw
           if ch > maxCross {
             maxCross = ch
           }
+        } else {
+          if layout.kind is LayoutType.vertical {
+            sumMain = sumMain + ch
+            if cw > maxCross {
+              maxCross = cw
+            }
+          } else {
+            # Stack / None: max child extents on both axes.
+            if cw > sumMain {
+              sumMain = cw
+            }
+            if ch > maxCross {
+              maxCross = ch
+            }
+          }
         }
+        j = j + 1
       }
-      j = j + 1
-    }
-    if layout.kind is LayoutType.horizontal {
-      var gapTotal: Float = layout.gap * (n - 1).toFloat()
-      if gapTotal < 0.0 {
-        gapTotal = 0.0
+      if layout.kind is LayoutType.horizontal {
+        var gapTotal: Float = layout.gap * (n - 1).toFloat()
+        if gapTotal < 0.0 {
+          gapTotal = 0.0
+        }
+        measuredW = sumMain + gapTotal + pad.l + pad.r
+        measuredH = maxCross + pad.t + pad.b
       }
-      measuredW = sumMain + gapTotal + pad.l + pad.r
-      measuredH = maxCross + pad.t + pad.b
-    }
-    if layout.kind is LayoutType.vertical {
-      var gapTotal: Float = layout.gap * (n - 1).toFloat()
-      if gapTotal < 0.0 {
-        gapTotal = 0.0
+      if layout.kind is LayoutType.vertical {
+        var gapTotal: Float = layout.gap * (n - 1).toFloat()
+        if gapTotal < 0.0 {
+          gapTotal = 0.0
+        }
+        measuredH = sumMain + gapTotal + pad.t + pad.b
+        measuredW = maxCross + pad.l + pad.r
       }
-      measuredH = sumMain + gapTotal + pad.t + pad.b
-      measuredW = maxCross + pad.l + pad.r
+      if layout.kind is LayoutType.stack {
+        measuredW = sumMain + pad.l + pad.r
+        measuredH = maxCross + pad.t + pad.b
+      }
+      if layout.kind is LayoutType.none {
+        # `Layout: None` falls back to max child extents per RUICS § 7.5.
+        measuredW = sumMain + pad.l + pad.r
+        measuredH = maxCross + pad.t + pad.b
+      }
+    } else {
+      # Leaf nodes: their authored rect IS their measure.
+      measuredW = rect.size.x
+      measuredH = rect.size.y
     }
-    if layout.kind is LayoutType.stack {
-      measuredW = sumMain + pad.l + pad.r
-      measuredH = maxCross + pad.t + pad.b
-    }
-    if layout.kind is LayoutType.none {
-      # `Layout: None` falls back to max child extents per RUICS § 7.5.
-      measuredW = sumMain + pad.l + pad.r
-      measuredH = maxCross + pad.t + pad.b
-    }
-  } else {
-    # Leaf nodes: their authored rect IS their measure.
-    measuredW = rect.size.x
-    measuredH = rect.size.y
+
+    measuredW = applyConstraintsW(world: world, entity: entity, w: measuredW)
+    measuredH = applyConstraintsH(world: world, entity: entity, h: measuredH)
+
+    let ms: MeasuredSize = { w: measuredW, h: measuredH }
+    componentSet(this: world.measuredSizes, entity: entity, data: ms)
   }
-
-  measuredW = applyConstraintsW(world: world, entity: entity, w: measuredW)
-  measuredH = applyConstraintsH(world: world, entity: entity, h: measuredH)
-
-  let ms: MeasuredSize = { w: measuredW, h: measuredH }
-  componentSet(this: world.measuredSizes, entity: entity, data: ms)
 }
 
 # Bottom-up measure over the cached parent-before-child depth order (#713),
@@ -328,20 +332,22 @@ func measureNode(world: mod UiWorld, entity: view EntityId) {
 # no hierarchy (no Parent AND no Children) are absent from the depth order;
 # measure them directly so a lone root still gets a MeasuredSize for compute.
 func measureLinear(world: mod UiWorld) {
-  let order: view List(EntityId) => depthOrder(state: world.hierarchyOrder, parents: world.parents, childrens: world.childrens)
-  var i: Int = order.length - 1
-  loop i >= 0 {
-    if let entity: EntityId = order.copyAt(index: i) {
-      measureNode(world: world, entity: entity)
-    }
-    i = i - 1
-  }
-  let alive: view List(EntityId) => world.allocator.alive
-  loop var k: Int = 0, k < alive.length, ++k {
-    let entity: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: k)
-    if componentHas(this: world.parents, entity: entity) is false {
-      if componentHas(this: world.childrens, entity: entity) is false {
+  unsafe {
+    let order: view List(EntityId) => depthOrder(state: world.hierarchyOrder, parents: world.parents, childrens: world.childrens)
+    var i: Int = order.length - 1
+    loop i >= 0 {
+      if let entity: EntityId = order.copyAt(index: i) {
         measureNode(world: world, entity: entity)
+      }
+      i = i - 1
+    }
+    let alive: view List(EntityId) => world.allocator.alive
+    loop var k: Int = 0, k < alive.length, ++k {
+      let entity: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: k)
+      if componentHas(this: world.parents, entity: entity) is false {
+        if componentHas(this: world.childrens, entity: entity) is false {
+          measureNode(world: world, entity: entity)
+        }
       }
     }
   }

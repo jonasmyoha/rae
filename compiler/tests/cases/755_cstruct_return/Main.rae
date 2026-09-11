@@ -3,7 +3,9 @@
 open webgpu/WebgpuTypes
 
 func literalEntry() ret WGPUBindGroupEntry {
-  ret WGPUBindGroupEntry { binding: 3, offset: 16, size: 64 }
+  unsafe {
+    ret WGPUBindGroupEntry { binding: 3, offset: 16, size: 64 }
+  }
 }
 
 func localEntry() ret WGPUBindGroupEntry {
@@ -12,10 +14,12 @@ func localEntry() ret WGPUBindGroupEntry {
 }
 
 func selectedEntry(entries: view List(WGPUBindGroupEntry), index: copy Int) ret WGPUBindGroupEntry {
-  if let entry: WGPUBindGroupEntry = entries.copyAt(index: index) {
-    ret entry
+  unsafe {
+    if let entry: WGPUBindGroupEntry = entries.copyAt(index: index) {
+      ret entry
+    }
+    ret WGPUBindGroupEntry { binding: 7, offset: 48, size: 256 }
   }
-  ret WGPUBindGroupEntry { binding: 7, offset: 48, size: 256 }
 }
 
 func copyEntry(T: type, value: copy T) ret T {

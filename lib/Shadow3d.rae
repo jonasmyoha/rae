@@ -34,7 +34,10 @@ open Math3d
 # small value so the shadow ALSO dims the indirect term and reads. Default 0 leaves
 # every other client's lighting byte-identical. Published to the lighting pass as
 # shadowCfg.z; see runtime_gpu3d_shadow.c / the deferred shader.
-func setShadowAmbient(strength: Float) extern("rae_sm_set_shadow_ambient")
+func nativeSetShadowAmbient(strength: Float) unsafe extern("rae_sm_set_shadow_ambient")
+func setShadowAmbient(strength: copy Float) {
+  unsafe { nativeSetShadowAmbient(strength: strength) }
+}
 
 # A fitted cascade set. `viewProj` is `count` matrices flattened, because
 # a List of Mat4 would copy 64 bytes per element access on every lookup.

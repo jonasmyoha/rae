@@ -104,18 +104,24 @@ func stringValue(v: own String) ret JsonValue {
 # ---------- pool primitives (raw buf calls; List.get returns RaeAny for struct types in compiled) ----------
 
 func valueAt(doc: view JsonDoc, idx: view Int) ret JsonValue {
-  let v: JsonValue = rae_ext_rae_buf_get(buf: doc.values.data, index: idx)
-  ret v
+  unsafe {
+    let v: JsonValue = rae_ext_rae_buf_get(buf: doc.values.data, index: idx)
+    ret v
+  }
 }
 
 func childAt(doc: view JsonDoc, idx: view Int) ret Int {
-  let v: Int = rae_ext_rae_buf_get(buf: doc.children.data, index: idx)
-  ret v
+  unsafe {
+    let v: Int = rae_ext_rae_buf_get(buf: doc.children.data, index: idx)
+    ret v
+  }
 }
 
 func fieldAt(doc: view JsonDoc, idx: view Int) ret JsonField {
-  let v: JsonField = rae_ext_rae_buf_get(buf: doc.fields.data, index: idx)
-  ret v
+  unsafe {
+    let v: JsonField = rae_ext_rae_buf_get(buf: doc.fields.data, index: idx)
+    ret v
+  }
 }
 
 # ---------- public accessors ----------
@@ -142,16 +148,18 @@ func jsonFloat(this: view JsonValue, fallback: view Float) ret Float {
 }
 
 func jsonString(this: view JsonValue, fallback: view String) ret String {
-  # Deep-copy on the way out: `this.asString` aliases the JsonDoc's
-  # internal storage, and the fallback aliases the caller's local.
-  # Returning either as-is would make the caller's binding (or any
-  # struct field it lands in) share heap ownership with the source,
-  # which conflicts with cascade-drop. The independent copy means
-  # callers can drop their result freely without double-freeing.
-  if this.kind is JsonKind.string {
-    ret rae_ext_rae_string_copy(s: this.asString)
+  unsafe {
+    # Deep-copy on the way out: `this.asString` aliases the JsonDoc's
+    # internal storage, and the fallback aliases the caller's local.
+    # Returning either as-is would make the caller's binding (or any
+    # struct field it lands in) share heap ownership with the source,
+    # which conflicts with cascade-drop. The independent copy means
+    # callers can drop their result freely without double-freeing.
+    if this.kind is JsonKind.string {
+      ret rae_ext_rae_string_copy(s: this.asString)
+    }
+    ret rae_ext_rae_string_copy(s: fallback)
   }
-  ret rae_ext_rae_string_copy(s: fallback)
 }
 
 func jsonBool(this: view JsonValue, fallback: view Bool) ret Bool {
@@ -473,195 +481,197 @@ func parseValue(
   kids: mod List(Int)
   fields: mod List(JsonField)
 ) ret Int {
-  Json.skipWhitespace(jsonParser)
-  if jsonParser.pos >= jsonParser.source.length() {
-    jsonParser.ok = false
-    ret -1
-  }
-  let c: Char32 = Json.peek(jsonParser: jsonParser)
-
-  if c is '{' {
-    jsonParser.pos = jsonParser.pos + 1
+  unsafe {
     Json.skipWhitespace(jsonParser)
-    # Collect this object's fields into a *local* list and bulk-append
-    # to the shared `fields` pool only when the object closes. Without
-    # this, a nested object's fields would be interleaved into the outer
-    # object's range, and the start/len pair would no longer point at a
-    # contiguous slice.
-    let localFields: List(JsonField) = List.create(JsonField, cap: 4)
-    if Json.peek(jsonParser: jsonParser) is '}' {
+    if jsonParser.pos >= jsonParser.source.length() {
+      jsonParser.ok = false
+      ret -1
+    }
+    let c: Char32 = Json.peek(jsonParser: jsonParser)
+
+    if c is '{' {
       jsonParser.pos = jsonParser.pos + 1
-    } else {
-      loop true {
-        Json.skipWhitespace(jsonParser)
-        let key: String = Json.parseString(jsonParser)
-        if jsonParser.ok is false {
-          ret -1
-        }
-        Json.skipWhitespace(jsonParser)
-        if not Json.consume(jsonParser: jsonParser, c: ':') {
-          jsonParser.ok = false
-          ret -1
-        }
-        let valIdx: Int = Json.parseValue(jsonParser, vals: vals, kids: kids, fields: fields)
-        if jsonParser.ok is false {
-          ret -1
-        }
-        let f: JsonField = { key: key, valueIdx: valIdx }
-        localFields.add(value: f)
-        Json.skipWhitespace(jsonParser)
-        if Json.consume(jsonParser: jsonParser, c: ',') {
-          # Continue, parse next field.
-        } else {
-          if Json.consume(jsonParser: jsonParser, c: '}') {
-            # Exit loop by jumping out via a sentinel value of -2.
-            # Rae has no `break`, so we use a flag and re-check below.
-            jsonParser.pos = jsonParser.pos
-            let firstField: Int = fields.length
-            let count: Int = localFields.length
-            var i: Int = 0
-            loop i < count {
-              let f2: JsonField = rae_ext_rae_buf_get(buf: localFields.data, index: i)
-              fields.add(value: f2)
-              i = i + 1
-            }
-            # Bulk-transfer hand-off: the byte-copies above made
-            # `fields` the canonical owner of every JsonField.key
-            # heap. Clearing `localFields.length` makes its eventual
-            # drop iteration skip every slot, so we don't double-free
-            # the Strings. The backing buffer is still freed by the
-            # per-T list drop. See the matching note in c_backend.c
-            # on why the per-T element iteration stays STRICT until
-            # cross-list ownership transfer has a proper primitive.
-            localFields.length = 0
-            let v: JsonValue = {
-              kind: JsonKind.object
-              asBool: false
-              asNumber: 0.0
-              asString: ""
-              rangeStart: firstField
-              rangeLen: count
-            }
-            ret Json.pushValue(vals: vals, v: v)
-          } else {
+      Json.skipWhitespace(jsonParser)
+      # Collect this object's fields into a *local* list and bulk-append
+      # to the shared `fields` pool only when the object closes. Without
+      # this, a nested object's fields would be interleaved into the outer
+      # object's range, and the start/len pair would no longer point at a
+      # contiguous slice.
+      let localFields: List(JsonField) = List.create(JsonField, cap: 4)
+      if Json.peek(jsonParser: jsonParser) is '}' {
+        jsonParser.pos = jsonParser.pos + 1
+      } else {
+        loop true {
+          Json.skipWhitespace(jsonParser)
+          let key: String = Json.parseString(jsonParser)
+          if jsonParser.ok is false {
+            ret -1
+          }
+          Json.skipWhitespace(jsonParser)
+          if not Json.consume(jsonParser: jsonParser, c: ':') {
             jsonParser.ok = false
             ret -1
           }
-        }
-      }
-    }
-    # Empty object: still bulk-append (no-op) and return.
-    let firstField: Int = fields.length
-    let v: JsonValue = {
-      kind: JsonKind.object
-      asBool: false
-      asNumber: 0.0
-      asString: ""
-      rangeStart: firstField
-      rangeLen: 0
-    }
-    ret Json.pushValue(vals: vals, v: v)
-  }
-
-  if c is '[' {
-    jsonParser.pos = jsonParser.pos + 1
-    Json.skipWhitespace(jsonParser)
-    # Same trick as for objects — collect into a local list first so a
-    # nested array's children don't interleave with the outer array's.
-    let localKids: List(Int) = List.create(Int, cap: 4)
-    if Json.peek(jsonParser: jsonParser) is ']' {
-      jsonParser.pos = jsonParser.pos + 1
-    } else {
-      loop true {
-        Json.skipWhitespace(jsonParser)
-        let elemIdx: Int = Json.parseValue(jsonParser, vals: vals, kids: kids, fields: fields)
-        if jsonParser.ok is false {
-          ret -1
-        }
-        localKids.add(value: elemIdx)
-        Json.skipWhitespace(jsonParser)
-        if Json.consume(jsonParser: jsonParser, c: ',') {
-          # Continue, parse next element.
-        } else {
-          if Json.consume(jsonParser: jsonParser, c: ']') {
-            let firstChild: Int = kids.length
-            let count: Int = localKids.length
-            var i: Int = 0
-            loop i < count {
-              let kidIdx: Int = rae_ext_rae_buf_get(buf: localKids.data, index: i)
-              kids.add(value: kidIdx)
-              i = i + 1
-            }
-            let v: JsonValue = {
-              kind: JsonKind.array
-              asBool: false
-              asNumber: 0.0
-              asString: ""
-              rangeStart: firstChild
-              rangeLen: count
-            }
-            ret Json.pushValue(vals: vals, v: v)
-          } else {
-            jsonParser.ok = false
+          let valIdx: Int = Json.parseValue(jsonParser, vals: vals, kids: kids, fields: fields)
+          if jsonParser.ok is false {
             ret -1
+          }
+          let f: JsonField = { key: key, valueIdx: valIdx }
+          localFields.add(value: f)
+          Json.skipWhitespace(jsonParser)
+          if Json.consume(jsonParser: jsonParser, c: ',') {
+            # Continue, parse next field.
+          } else {
+            if Json.consume(jsonParser: jsonParser, c: '}') {
+              # Exit loop by jumping out via a sentinel value of -2.
+              # Rae has no `break`, so we use a flag and re-check below.
+              jsonParser.pos = jsonParser.pos
+              let firstField: Int = fields.length
+              let count: Int = localFields.length
+              var i: Int = 0
+              loop i < count {
+                let f2: JsonField = rae_ext_rae_buf_get(buf: localFields.data, index: i)
+                fields.add(value: f2)
+                i = i + 1
+              }
+              # Bulk-transfer hand-off: the byte-copies above made
+              # `fields` the canonical owner of every JsonField.key
+              # heap. Clearing `localFields.length` makes its eventual
+              # drop iteration skip every slot, so we don't double-free
+              # the Strings. The backing buffer is still freed by the
+              # per-T list drop. See the matching note in c_backend.c
+              # on why the per-T element iteration stays STRICT until
+              # cross-list ownership transfer has a proper primitive.
+              localFields.length = 0
+              let v: JsonValue = {
+                kind: JsonKind.object
+                asBool: false
+                asNumber: 0.0
+                asString: ""
+                rangeStart: firstField
+                rangeLen: count
+              }
+              ret Json.pushValue(vals: vals, v: v)
+            } else {
+              jsonParser.ok = false
+              ret -1
+            }
           }
         }
       }
+      # Empty object: still bulk-append (no-op) and return.
+      let firstField: Int = fields.length
+      let v: JsonValue = {
+        kind: JsonKind.object
+        asBool: false
+        asNumber: 0.0
+        asString: ""
+        rangeStart: firstField
+        rangeLen: 0
+      }
+      ret Json.pushValue(vals: vals, v: v)
     }
-    let firstChild: Int = kids.length
-    let v: JsonValue = {
-      kind: JsonKind.array
-      asBool: false
-      asNumber: 0.0
-      asString: ""
-      rangeStart: firstChild
-      rangeLen: 0
-    }
-    ret Json.pushValue(vals: vals, v: v)
-  }
 
-  if c is '"' {
-    let s: String = Json.parseString(jsonParser)
-    if jsonParser.ok is false {
+    if c is '[' {
+      jsonParser.pos = jsonParser.pos + 1
+      Json.skipWhitespace(jsonParser)
+      # Same trick as for objects — collect into a local list first so a
+      # nested array's children don't interleave with the outer array's.
+      let localKids: List(Int) = List.create(Int, cap: 4)
+      if Json.peek(jsonParser: jsonParser) is ']' {
+        jsonParser.pos = jsonParser.pos + 1
+      } else {
+        loop true {
+          Json.skipWhitespace(jsonParser)
+          let elemIdx: Int = Json.parseValue(jsonParser, vals: vals, kids: kids, fields: fields)
+          if jsonParser.ok is false {
+            ret -1
+          }
+          localKids.add(value: elemIdx)
+          Json.skipWhitespace(jsonParser)
+          if Json.consume(jsonParser: jsonParser, c: ',') {
+            # Continue, parse next element.
+          } else {
+            if Json.consume(jsonParser: jsonParser, c: ']') {
+              let firstChild: Int = kids.length
+              let count: Int = localKids.length
+              var i: Int = 0
+              loop i < count {
+                let kidIdx: Int = rae_ext_rae_buf_get(buf: localKids.data, index: i)
+                kids.add(value: kidIdx)
+                i = i + 1
+              }
+              let v: JsonValue = {
+                kind: JsonKind.array
+                asBool: false
+                asNumber: 0.0
+                asString: ""
+                rangeStart: firstChild
+                rangeLen: count
+              }
+              ret Json.pushValue(vals: vals, v: v)
+            } else {
+              jsonParser.ok = false
+              ret -1
+            }
+          }
+        }
+      }
+      let firstChild: Int = kids.length
+      let v: JsonValue = {
+        kind: JsonKind.array
+        asBool: false
+        asNumber: 0.0
+        asString: ""
+        rangeStart: firstChild
+        rangeLen: 0
+      }
+      ret Json.pushValue(vals: vals, v: v)
+    }
+
+    if c is '"' {
+      let s: String = Json.parseString(jsonParser)
+      if jsonParser.ok is false {
+        ret -1
+      }
+      ret Json.pushValue(vals: vals, v: Json.stringValue(v: s))
+    }
+
+    if c is 't' {
+      if Json.consumeKeyword(jsonParser: jsonParser, kw: "true") {
+        ret Json.pushValue(vals: vals, v: Json.boolValue(v: true))
+      }
+      jsonParser.ok = false
       ret -1
     }
-    ret Json.pushValue(vals: vals, v: Json.stringValue(v: s))
-  }
 
-  if c is 't' {
-    if Json.consumeKeyword(jsonParser: jsonParser, kw: "true") {
-      ret Json.pushValue(vals: vals, v: Json.boolValue(v: true))
-    }
-    jsonParser.ok = false
-    ret -1
-  }
-
-  if c is 'f' {
-    if Json.consumeKeyword(jsonParser: jsonParser, kw: "false") {
-      ret Json.pushValue(vals: vals, v: Json.boolValue(v: false))
-    }
-    jsonParser.ok = false
-    ret -1
-  }
-
-  if c is 'n' {
-    if Json.consumeKeyword(jsonParser: jsonParser, kw: "null") {
-      ret Json.pushValue(vals: vals, v: Json.jsonNull())
-    }
-    jsonParser.ok = false
-    ret -1
-  }
-
-  if c is '-' or c.isDigit() {
-    let n: Float = Json.parseNumber(jsonParser)
-    if jsonParser.ok is false {
+    if c is 'f' {
+      if Json.consumeKeyword(jsonParser: jsonParser, kw: "false") {
+        ret Json.pushValue(vals: vals, v: Json.boolValue(v: false))
+      }
+      jsonParser.ok = false
       ret -1
     }
-    ret Json.pushValue(vals: vals, v: Json.numberValue(value: n))
-  }
 
-  jsonParser.ok = false
-  ret -1
+    if c is 'n' {
+      if Json.consumeKeyword(jsonParser: jsonParser, kw: "null") {
+        ret Json.pushValue(vals: vals, v: Json.jsonNull())
+      }
+      jsonParser.ok = false
+      ret -1
+    }
+
+    if c is '-' or c.isDigit() {
+      let n: Float = Json.parseNumber(jsonParser)
+      if jsonParser.ok is false {
+        ret -1
+      }
+      ret Json.pushValue(vals: vals, v: Json.numberValue(value: n))
+    }
+
+    jsonParser.ok = false
+    ret -1
+  }
 }
 
 # Parse a UTF-8 / ASCII JSON document. On error returns a doc with

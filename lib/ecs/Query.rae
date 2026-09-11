@@ -31,15 +31,19 @@ open ecs/ComponentTable
 # entity's per-entity change stamp so change-detection sees the mutation — the
 # same bookkeeping componentMod does (we assume the caller writes through it).
 func queryModAt(T: type, table: mod ComponentTable(T), denseIndex: view Int) ret mod T {
-  table.generation = table.generation + 1
-  rae_ext_rae_buf_set(buf: table.denseStamps.data, index: denseIndex, value: table.generation)
-  ret mod rae_ext_rae_buf_get(buf: table.denseData.data, index: denseIndex)
+  unsafe {
+    table.generation = table.generation + 1
+    rae_ext_rae_buf_set(buf: table.denseStamps.data, index: denseIndex, value: table.generation)
+    ret mod rae_ext_rae_buf_get(buf: table.denseData.data, index: denseIndex)
+  }
 }
 
 # Borrow a READ-ONLY reference to the component at a table's dense index. No
 # generation bump — a read never dirties the table.
 func queryViewAt(T: type, table: view ComponentTable(T), denseIndex: view Int) ret view T {
-  ret view rae_ext_rae_buf_get(buf: table.denseData.data, index: denseIndex)
+  unsafe {
+    ret view rae_ext_rae_buf_get(buf: table.denseData.data, index: denseIndex)
+  }
 }
 
 # ----- query2 ----------------------------------------------------------------
@@ -164,28 +168,40 @@ func forEach(T: type, table: view ComponentTable(T)) ret List(QueryMatch) {
 # maps to which table.
 
 func query2ViewA(A: type, tableA: view ComponentTable(A), hit: view Query2Match) ret view A {
-  ret view rae_ext_rae_buf_get(buf: tableA.denseData.data, index: hit.indexA)
+  unsafe {
+    ret view rae_ext_rae_buf_get(buf: tableA.denseData.data, index: hit.indexA)
+  }
 }
 
 func query2ViewB(B: type, tableB: view ComponentTable(B), hit: view Query2Match) ret view B {
-  ret view rae_ext_rae_buf_get(buf: tableB.denseData.data, index: hit.indexB)
+  unsafe {
+    ret view rae_ext_rae_buf_get(buf: tableB.denseData.data, index: hit.indexB)
+  }
 }
 
 func query3ViewA(A: type, tableA: view ComponentTable(A), hit: view Query3Match) ret view A {
-  ret view rae_ext_rae_buf_get(buf: tableA.denseData.data, index: hit.indexA)
+  unsafe {
+    ret view rae_ext_rae_buf_get(buf: tableA.denseData.data, index: hit.indexA)
+  }
 }
 
 func query3ViewB(B: type, tableB: view ComponentTable(B), hit: view Query3Match) ret view B {
-  ret view rae_ext_rae_buf_get(buf: tableB.denseData.data, index: hit.indexB)
+  unsafe {
+    ret view rae_ext_rae_buf_get(buf: tableB.denseData.data, index: hit.indexB)
+  }
 }
 
 func query3ViewC(C: type, tableC: view ComponentTable(C), hit: view Query3Match) ret view C {
-  ret view rae_ext_rae_buf_get(buf: tableC.denseData.data, index: hit.indexC)
+  unsafe {
+    ret view rae_ext_rae_buf_get(buf: tableC.denseData.data, index: hit.indexC)
+  }
 }
 
 # Read the component for a single-table forEach match through a `view` ref.
 func forEachView(T: type, table: view ComponentTable(T), hit: view QueryMatch) ret view T {
-  ret view rae_ext_rae_buf_get(buf: table.denseData.data, index: hit.index)
+  unsafe {
+    ret view rae_ext_rae_buf_get(buf: table.denseData.data, index: hit.index)
+  }
 }
 
 # ----- query-by-tag (#752) --------------------------------------------------
@@ -269,19 +285,27 @@ func query4(A: type, B: type, C: type, D: type,
 }
 
 func query4ViewA(A: type, tableA: view ComponentTable(A), hit: view Query4Match) ret view A {
-  ret view rae_ext_rae_buf_get(buf: tableA.denseData.data, index: hit.indexA)
+  unsafe {
+    ret view rae_ext_rae_buf_get(buf: tableA.denseData.data, index: hit.indexA)
+  }
 }
 
 func query4ViewB(B: type, tableB: view ComponentTable(B), hit: view Query4Match) ret view B {
-  ret view rae_ext_rae_buf_get(buf: tableB.denseData.data, index: hit.indexB)
+  unsafe {
+    ret view rae_ext_rae_buf_get(buf: tableB.denseData.data, index: hit.indexB)
+  }
 }
 
 func query4ViewC(C: type, tableC: view ComponentTable(C), hit: view Query4Match) ret view C {
-  ret view rae_ext_rae_buf_get(buf: tableC.denseData.data, index: hit.indexC)
+  unsafe {
+    ret view rae_ext_rae_buf_get(buf: tableC.denseData.data, index: hit.indexC)
+  }
 }
 
 func query4ViewD(D: type, tableD: view ComponentTable(D), hit: view Query4Match) ret view D {
-  ret view rae_ext_rae_buf_get(buf: tableD.denseData.data, index: hit.indexD)
+  unsafe {
+    ret view rae_ext_rae_buf_get(buf: tableD.denseData.data, index: hit.indexD)
+  }
 }
 
 # ----- query5 (#807) --------------------------------------------------------
@@ -367,23 +391,33 @@ func query5(A: type, B: type, C: type, D: type, E: type,
 }
 
 func query5ViewA(A: type, tableA: view ComponentTable(A), hit: view Query5Match) ret view A {
-  ret view rae_ext_rae_buf_get(buf: tableA.denseData.data, index: hit.indexA)
+  unsafe {
+    ret view rae_ext_rae_buf_get(buf: tableA.denseData.data, index: hit.indexA)
+  }
 }
 
 func query5ViewB(B: type, tableB: view ComponentTable(B), hit: view Query5Match) ret view B {
-  ret view rae_ext_rae_buf_get(buf: tableB.denseData.data, index: hit.indexB)
+  unsafe {
+    ret view rae_ext_rae_buf_get(buf: tableB.denseData.data, index: hit.indexB)
+  }
 }
 
 func query5ViewC(C: type, tableC: view ComponentTable(C), hit: view Query5Match) ret view C {
-  ret view rae_ext_rae_buf_get(buf: tableC.denseData.data, index: hit.indexC)
+  unsafe {
+    ret view rae_ext_rae_buf_get(buf: tableC.denseData.data, index: hit.indexC)
+  }
 }
 
 func query5ViewD(D: type, tableD: view ComponentTable(D), hit: view Query5Match) ret view D {
-  ret view rae_ext_rae_buf_get(buf: tableD.denseData.data, index: hit.indexD)
+  unsafe {
+    ret view rae_ext_rae_buf_get(buf: tableD.denseData.data, index: hit.indexD)
+  }
 }
 
 func query5ViewE(E: type, tableE: view ComponentTable(E), hit: view Query5Match) ret view E {
-  ret view rae_ext_rae_buf_get(buf: tableE.denseData.data, index: hit.indexE)
+  unsafe {
+    ret view rae_ext_rae_buf_get(buf: tableE.denseData.data, index: hit.indexE)
+  }
 }
 
 # ----- filters as plain functions (#807) -----------------------------------
@@ -429,13 +463,15 @@ func without(D: type, T: type, dataTable: view ComponentTable(D),
 # the ENTITY-level filter ("which ones?"). O(n) over the table with no sparse
 # lookups — the stamps are dense, aligned 1:1 with the data.
 func changedSince(T: type, table: view ComponentTable(T), sinceGeneration: view Int) ret List(QueryMatch) {
-  let count: Int = componentCount(this: table)
-  let matches: List(QueryMatch) = List.create(QueryMatch, cap: 16)
-  loop var i: Int = 0, i < count, ++i {
-    let stamp: Int = rae_ext_rae_buf_get(buf: table.denseStamps.data, index: i)
-    if stamp > sinceGeneration {
-      matches.add(value: QueryMatch { entity: componentEntityAt(this: table, i: i), index: i })
+  unsafe {
+    let count: Int = componentCount(this: table)
+    let matches: List(QueryMatch) = List.create(QueryMatch, cap: 16)
+    loop var i: Int = 0, i < count, ++i {
+      let stamp: Int = rae_ext_rae_buf_get(buf: table.denseStamps.data, index: i)
+      if stamp > sinceGeneration {
+        matches.add(value: QueryMatch { entity: componentEntityAt(this: table, i: i), index: i })
+      }
     }
+    ret matches
   }
-  ret matches
 }

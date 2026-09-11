@@ -22,76 +22,80 @@ type Node {
 }
 
 func nodeIndex(nodes: view List(Node), target: view String) ret Int {
-  let n: Int = nodes.length
-  var i: Int = 0
-  loop i < n {
-    let nd: Node = rae_ext_rae_buf_get(buf: nodes.data, index: i)
-    if nd.nodeId is target {
-      ret i
+  unsafe {
+    let n: Int = nodes.length
+    var i: Int = 0
+    loop i < n {
+      let nd: Node = rae_ext_rae_buf_get(buf: nodes.data, index: i)
+      if nd.nodeId is target {
+        ret i
+      }
+      i = i + 1
     }
-    i = i + 1
+    ret -1
   }
-  ret -1
 }
 
 func main() {
-  let nodes: List(Node) = List.create(Node, cap: 8)
+  unsafe {
+    let nodes: List(Node) = List.create(Node, cap: 8)
 
-  # Build 5 nodes with siblings of different lengths to maximize
-  # chance of torn-read pattern.
-  let rootKids: List(String) = List.create(String, cap: 4)
-  rootKids.add(value: "TopBar")
-  rootKids.add(value: "AlbumHero")
-  rootKids.add(value: "PlayButton")
-  nodes.add(value: { nodeId: "AlbumRoot", childIds: own rootKids })
+    # Build 5 nodes with siblings of different lengths to maximize
+    # chance of torn-read pattern.
+    let rootKids: List(String) = List.create(String, cap: 4)
+    rootKids.add(value: "TopBar")
+    rootKids.add(value: "AlbumHero")
+    rootKids.add(value: "PlayButton")
+    nodes.add(value: { nodeId: "AlbumRoot", childIds: own rootKids })
 
-  let topKids: List(String) = List.create(String, cap: 1)
-  topKids.add(value: "BackButton")
-  nodes.add(value: { nodeId: "TopBar", childIds: own topKids })
+    let topKids: List(String) = List.create(String, cap: 1)
+    topKids.add(value: "BackButton")
+    nodes.add(value: { nodeId: "TopBar", childIds: own topKids })
 
-  let backKids: List(String) = List.create(String, cap: 0)
-  nodes.add(value: { nodeId: "BackButton", childIds: own backKids })
+    let backKids: List(String) = List.create(String, cap: 0)
+    nodes.add(value: { nodeId: "BackButton", childIds: own backKids })
 
-  let heroKids: List(String) = List.create(String, cap: 0)
-  nodes.add(value: { nodeId: "AlbumHero", childIds: own heroKids })
+    let heroKids: List(String) = List.create(String, cap: 0)
+    nodes.add(value: { nodeId: "AlbumHero", childIds: own heroKids })
 
-  let playKids: List(String) = List.create(String, cap: 0)
-  nodes.add(value: { nodeId: "PlayButton", childIds: own playKids })
+    let playKids: List(String) = List.create(String, cap: 0)
+    nodes.add(value: { nodeId: "PlayButton", childIds: own playKids })
 
-  # Build a parallel map of nodeId → index, mirroring world.nodeIds.
-  let map: StringMap(Int) = StringMap.create(Int, cap: 16)
-  var s: Int = 0
-  loop s < nodes.length {
-    let nd: Node = rae_ext_rae_buf_get(buf: nodes.data, index: s)
-    map.set(k: nd.nodeId, value: s)
-    s = s + 1
-  }
-
-  # Pass mirroring scene_loader pass 3 EXACTLY: nested loop, view-
-  # String helper, componentSet-like side effect, all in the same
-  # enclosing block.
-  var p: Int = 0
-  loop p < nodes.length {
-    var parent: Node = rae_ext_rae_buf_get(buf: nodes.data, index: p)
-    let kn: Int = parent.childIds.length
-    if kn > 0 {
-      let kidsAssembly: List(Int) = List.create(Int, cap: kn)
-      var q: Int = 0
-      loop q < kn {
-        if let childId: String = parent.childIds.copyAt(index: q) {
-          # Two view-String calls per iter, mirroring the multiple-wrap
-          # pattern (nodeIndex + map.get).
-          let idx: Int = nodeIndex(nodes: nodes, target: childId)
-          var entityVal: Int = -1
-          if let entityRaw: Int = map.get(k: childId) {
-            entityVal = entityRaw
-          }
-          log("parent={parent.nodeId} child=[{childId}] childLen={childId.length()} nodeIndex={idx} mapEntity={entityVal}")
-          kidsAssembly.add(value: idx)
-        }
-        q = q + 1
-      }
+    # Build a parallel map of nodeId → index, mirroring world.nodeIds.
+    let map: StringMap(Int) = StringMap.create(Int, cap: 16)
+    var s: Int = 0
+    loop s < nodes.length {
+      let nd: Node = rae_ext_rae_buf_get(buf: nodes.data, index: s)
+      map.set(k: nd.nodeId, value: s)
+      s = s + 1
     }
-    p = p + 1
+
+    # Pass mirroring scene_loader pass 3 EXACTLY: nested loop, view-
+    # String helper, componentSet-like side effect, all in the same
+    # enclosing block.
+    var p: Int = 0
+    loop p < nodes.length {
+      var parent: Node = rae_ext_rae_buf_get(buf: nodes.data, index: p)
+      let kn: Int = parent.childIds.length
+      if kn > 0 {
+        let kidsAssembly: List(Int) = List.create(Int, cap: kn)
+        var q: Int = 0
+        loop q < kn {
+          if let childId: String = parent.childIds.copyAt(index: q) {
+            # Two view-String calls per iter, mirroring the multiple-wrap
+            # pattern (nodeIndex + map.get).
+            let idx: Int = nodeIndex(nodes: nodes, target: childId)
+            var entityVal: Int = -1
+            if let entityRaw: Int = map.get(k: childId) {
+              entityVal = entityRaw
+            }
+            log("parent={parent.nodeId} child=[{childId}] childLen={childId.length()} nodeIndex={idx} mapEntity={entityVal}")
+            kidsAssembly.add(value: idx)
+          }
+          q = q + 1
+        }
+      }
+      p = p + 1
+    }
   }
 }

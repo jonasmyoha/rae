@@ -11,43 +11,47 @@ type Score {
 # sort over a struct list is straightforward today (built on the existing
 # get / set / swap from core.rae).
 func sortScoresDesc(xs: mod List(Score)) {
-  let n: Int = xs.length
-  var i: Int = 0
-  loop i < n - 1 {
-    var max: Int = i
-    var j: Int = i + 1
-    loop j < n {
-      let a: Score = rae_ext_rae_buf_get(buf: xs.data, index: max)
-      let b: Score = rae_ext_rae_buf_get(buf: xs.data, index: j)
-      if b.points > a.points {
-        max = j
+  unsafe {
+    let n: Int = xs.length
+    var i: Int = 0
+    loop i < n - 1 {
+      var max: Int = i
+      var j: Int = i + 1
+      loop j < n {
+        let a: Score = rae_ext_rae_buf_get(buf: xs.data, index: max)
+        let b: Score = rae_ext_rae_buf_get(buf: xs.data, index: j)
+        if b.points > a.points {
+          max = j
+        }
+        j = j + 1
       }
-      j = j + 1
+      if not (max is i) {
+        swap(xs, i: i, j: max)
+      }
+      i = i + 1
     }
-    if not (max is i) {
-      swap(xs, i: i, j: max)
-    }
-    i = i + 1
   }
 }
 
 func main() {
-  let board: List(Score) = List.create(Score, cap: 4)
-  let s1: Score = { name: "ada", points: 120 }
-  let s2: Score = { name: "lin", points: 350 }
-  let s3: Score = { name: "tom", points: 80 }
-  let s4: Score = { name: "kim", points: 240 }
-  add(board, value: s1)
-  add(board, value: s2)
-  add(board, value: s3)
-  add(board, value: s4)
+  unsafe {
+    let board: List(Score) = List.create(Score, cap: 4)
+    let s1: Score = { name: "ada", points: 120 }
+    let s2: Score = { name: "lin", points: 350 }
+    let s3: Score = { name: "tom", points: 80 }
+    let s4: Score = { name: "kim", points: 240 }
+    add(board, value: s1)
+    add(board, value: s2)
+    add(board, value: s3)
+    add(board, value: s4)
 
-  sortScoresDesc(board)
+    sortScoresDesc(board)
 
-  var i: Int = 0
-  loop i < board.length {
-    let s: Score = rae_ext_rae_buf_get(buf: board.data, index: i)
-    log("{i + 1}. {s.name} {s.points}")
-    i = i + 1
+    var i: Int = 0
+    loop i < board.length {
+      let s: Score = rae_ext_rae_buf_get(buf: board.data, index: i)
+      log("{i + 1}. {s.name} {s.points}")
+      i = i + 1
+    }
   }
 }

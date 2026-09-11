@@ -11,11 +11,26 @@ import Files
 
 # Extern bindings — clean names, namespace-mangled to rae_ext_filesystem_* and
 # implemented in the RAE_HAS_SDL3 block of the runtime.
-func userFolder(kind: view Int) unsafe extern ret String
-func prefDir(org: view String, app: view String) unsafe extern ret String
-func makeDir(path: view String) unsafe extern ret Bool
-func exists(path: view String) unsafe extern ret Bool
-func today() unsafe extern ret String
+func nativeUserFolder(kind: view Int) unsafe extern("rae_ext_Filesystem_userFolder") ret String
+func userFolder(kind: view Int) ret String {
+  unsafe { ret nativeUserFolder(kind: kind) }
+}
+func nativePrefDir(org: view String, app: view String) unsafe extern("rae_ext_Filesystem_prefDir") ret String
+func prefDir(org: view String, app: view String) ret String {
+  unsafe { ret nativePrefDir(org: org, app: app) }
+}
+func nativeMakeDir(path: view String) unsafe extern("rae_ext_Filesystem_makeDir") ret Bool
+func makeDir(path: view String) ret Bool {
+  unsafe { ret nativeMakeDir(path: path) }
+}
+func nativeExists(path: view String) unsafe extern("rae_ext_Filesystem_exists") ret Bool
+func exists(path: view String) ret Bool {
+  unsafe { ret nativeExists(path: path) }
+}
+func nativeToday() unsafe extern("rae_ext_Filesystem_today") ret String
+func today() ret String {
+  unsafe { ret nativeToday() }
+}
 
 # Platform "known" folders. Each returns "" when the platform has no such folder
 # (e.g. there is no Desktop on mobile) — callers fall back accordingly.

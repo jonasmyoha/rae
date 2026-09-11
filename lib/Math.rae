@@ -10,33 +10,75 @@ func rae_popcount(x: Int) unsafe extern ret Int
 func rae_leading_zeros(x: Int) unsafe extern ret Int
 func rae_trailing_zeros(x: Int) unsafe extern ret Int
 
-func sin(x: Float) unsafe extern ret Float
+func nativeSin(x: Float) unsafe extern("rae_ext_Math_sin") ret Float
+func sin(x: copy Float) ret Float {
+  unsafe { ret nativeSin(x: x) }
+}
 
-func cos(x: Float) unsafe extern ret Float
+func nativeCos(x: Float) unsafe extern("rae_ext_Math_cos") ret Float
+func cos(x: copy Float) ret Float {
+  unsafe { ret nativeCos(x: x) }
+}
 
-func tan(x: Float) unsafe extern ret Float
+func nativeTan(x: Float) unsafe extern("rae_ext_Math_tan") ret Float
+func tan(x: copy Float) ret Float {
+  unsafe { ret nativeTan(x: x) }
+}
 
-func asin(x: Float) unsafe extern ret Float
+func nativeAsin(x: Float) unsafe extern("rae_ext_Math_asin") ret Float
+func asin(x: copy Float) ret Float {
+  unsafe { ret nativeAsin(x: x) }
+}
 
-func acos(x: Float) unsafe extern ret Float
+func nativeAcos(x: Float) unsafe extern("rae_ext_Math_acos") ret Float
+func acos(x: copy Float) ret Float {
+  unsafe { ret nativeAcos(x: x) }
+}
 
-func atan(x: Float) unsafe extern ret Float
+func nativeAtan(x: Float) unsafe extern("rae_ext_Math_atan") ret Float
+func atan(x: copy Float) ret Float {
+  unsafe { ret nativeAtan(x: x) }
+}
 
-func atan2(y: Float, x: Float) unsafe extern ret Float
+func nativeAtan2(y: Float, x: Float) unsafe extern("rae_ext_Math_atan2") ret Float
+func atan2(y: copy Float, x: copy Float) ret Float {
+  unsafe { ret nativeAtan2(y: y, x: x) }
+}
 
-func sqrt(x: Float) unsafe extern ret Float
+func nativeSqrt(x: Float) unsafe extern("rae_ext_Math_sqrt") ret Float
+func sqrt(x: copy Float) ret Float {
+  unsafe { ret nativeSqrt(x: x) }
+}
 
-func pow(base: Float, exp: Float) unsafe extern ret Float
+func nativePow(base: Float, exp: Float) unsafe extern("rae_ext_Math_pow") ret Float
+func pow(base: copy Float, exp: copy Float) ret Float {
+  unsafe { ret nativePow(base: base, exp: exp) }
+}
 
-func exp(x: Float) unsafe extern ret Float
+func nativeExp(x: Float) unsafe extern("rae_ext_Math_exp") ret Float
+func exp(x: copy Float) ret Float {
+  unsafe { ret nativeExp(x: x) }
+}
 
-func math_log(x: Float) unsafe extern ret Float
+func nativeNaturalLog(x: Float) unsafe extern("rae_ext_Math_math_log") ret Float
+func naturalLog(x: copy Float) ret Float {
+  unsafe { ret nativeNaturalLog(x: x) }
+}
 
-func floor(x: Float) unsafe extern ret Float
+func nativeFloor(x: Float) unsafe extern("rae_ext_Math_floor") ret Float
+func floor(x: copy Float) ret Float {
+  unsafe { ret nativeFloor(x: x) }
+}
 
-func ceil(x: Float) unsafe extern ret Float
+func nativeCeil(x: Float) unsafe extern("rae_ext_Math_ceil") ret Float
+func ceil(x: copy Float) ret Float {
+  unsafe { ret nativeCeil(x: x) }
+}
 
-func round(x: Float) unsafe extern ret Float
+func nativeRound(x: Float) unsafe extern("rae_ext_Math_round") ret Float
+func round(x: copy Float) ret Float {
+  unsafe { ret nativeRound(x: x) }
+}
 
 # pi, and tau = 2*pi (one full turn in radians). Compile-time constants, used
 # directly (no call): `random() * tau`.
@@ -44,15 +86,21 @@ const pi: Float = 3.14159265358979323846
 const tau: Float = pi * 2.0
 
 func seed(value: view Int) {
-  rae_seed(value: value)
+  unsafe {
+    rae_seed(value: value)
+  }
 }
 
 func random() ret Float {
-  ret rae_random()
+  unsafe {
+    ret rae_random()
+  }
 }
 
 func random(min: view Int, max: view Int) ret Int {
-  ret rae_random_int(min: min, max: max)
+  unsafe {
+    ret rae_random_int(min: min, max: max)
+  }
 }
 
 # Bit intrinsics over the 64-bit two's-complement Int. popcount = number of set
@@ -60,15 +108,21 @@ func random(min: view Int, max: view Int) ret Int {
 # lowest set bit, and are 64 for an input of 0 (the CPU instructions are
 # undefined on 0, so this pins a defined answer).
 func popcount(x: view Int) ret Int {
-  ret rae_popcount(x: x)
+  unsafe {
+    ret rae_popcount(x: x)
+  }
 }
 
 func leadingZeros(x: view Int) ret Int {
-  ret rae_leading_zeros(x: x)
+  unsafe {
+    ret rae_leading_zeros(x: x)
+  }
 }
 
 func trailingZeros(x: view Int) ret Int {
-  ret rae_trailing_zeros(x: x)
+  unsafe {
+    ret rae_trailing_zeros(x: x)
+  }
 }
 
 func abs(value: view Int) ret Int {
@@ -138,11 +192,15 @@ func lerp(a: view Float, b: view Float, t: view Float) ret Float {
 }
 
 func randomFloat(min: view Float, max: view Float) ret Float {
-  ret min + rae_random() * (max - min)
+  unsafe {
+    ret min + rae_random() * (max - min)
+  }
 }
 
 # Alias: prefer the explicit `randomInt` name in new code. The existing
 # overloaded `random(min, max)` stays for backward compatibility.
 func randomInt(min: view Int, max: view Int) ret Int {
-  ret rae_random_int(min: min, max: max)
+  unsafe {
+    ret rae_random_int(min: min, max: max)
+  }
 }

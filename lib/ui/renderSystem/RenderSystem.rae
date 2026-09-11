@@ -427,66 +427,70 @@ func entityClipsChildrenG(world: view UiWorld, entity: view EntityId) ret Bool {
 }
 
 func paintSubtreeG(world: view UiWorld, entity: view EntityId, res: view Gpu2dUi) {
-  paintEntityG(world: world, entity: entity, res: res)
-  if componentHas(this: world.childrens, entity: entity) is false {
-    ret
-  }
-  # Clip descendants to this entity's box when it opts in via
-  # OverflowPolicy.clip (#115). The container's own fill was already
-  # painted above (unclipped); only its children are scissored. A rounded
-  # container clips with rounded corners (#118), else a plain rect (#144).
-  # gpu2d's clip is runtime state that persists across the per-entity
-  # flushes, so pushing here and popping after the children walk scopes it.
-  var clipped: Bool = false
-  if entityClipsChildrenG(world: world, entity: entity) {
-    if componentHas(this: world.computedRects, entity: entity) {
-      if componentHas(this: world.worldTransforms, entity: entity) {
-        let ccr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
-        let cwt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
-        let crad: Float = g2dRadius(world: world, entity: entity, fallback: 0.0)
-        if crad > 0.0 {
-          Gpu2d.pushClipRoundedRect(x: cwt.position.x, y: cwt.position.y, w: ccr.size.x, h: ccr.size.y, radius: crad)
-        } else {
-          Gpu2d.pushClipRect(x: cwt.position.x, y: cwt.position.y, w: ccr.size.x, h: ccr.size.y)
+  unsafe {
+    paintEntityG(world: world, entity: entity, res: res)
+    if componentHas(this: world.childrens, entity: entity) is false {
+      ret
+    }
+    # Clip descendants to this entity's box when it opts in via
+    # OverflowPolicy.clip (#115). The container's own fill was already
+    # painted above (unclipped); only its children are scissored. A rounded
+    # container clips with rounded corners (#118), else a plain rect (#144).
+    # gpu2d's clip is runtime state that persists across the per-entity
+    # flushes, so pushing here and popping after the children walk scopes it.
+    var clipped: Bool = false
+    if entityClipsChildrenG(world: world, entity: entity) {
+      if componentHas(this: world.computedRects, entity: entity) {
+        if componentHas(this: world.worldTransforms, entity: entity) {
+          let ccr: ComputedRect = componentGet(this: world.computedRects, entity: entity)
+          let cwt: WorldTransform2D = componentGet(this: world.worldTransforms, entity: entity)
+          let crad: Float = g2dRadius(world: world, entity: entity, fallback: 0.0)
+          if crad > 0.0 {
+            Gpu2d.pushClipRoundedRect(x: cwt.position.x, y: cwt.position.y, w: ccr.size.x, h: ccr.size.y, radius: crad)
+          } else {
+            Gpu2d.pushClipRect(x: cwt.position.x, y: cwt.position.y, w: ccr.size.x, h: ccr.size.y)
+          }
+          clipped = true
         }
-        clipped = true
       }
     }
-  }
-  let ch: view Children => componentView(this: world.childrens, entity: entity)
-  let n: Int = ch.ids.length
-  var pass: Int = 0
-  loop pass < 3 {
-    var i: Int = 0
-    loop i < n {
-      let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
-      if subtreeHoverPaintRank(world: world, entity: cid) is pass {
-        paintSubtreeG(world: world, entity: cid, res: res)
+    let ch: view Children => componentView(this: world.childrens, entity: entity)
+    let n: Int = ch.ids.length
+    var pass: Int = 0
+    loop pass < 3 {
+      var i: Int = 0
+      loop i < n {
+        let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+        if subtreeHoverPaintRank(world: world, entity: cid) is pass {
+          paintSubtreeG(world: world, entity: cid, res: res)
+        }
+        i = i + 1
       }
-      i = i + 1
+      pass = pass + 1
     }
-    pass = pass + 1
-  }
-  if clipped {
-    Gpu2d.popClipRect()
+    if clipped {
+      Gpu2d.popClipRect()
+    }
   }
 }
 
 func gpu2dLayerRange(world: view UiWorld, res: view Gpu2dUi, minOrder: view Int, maxOrder: view Int) pub {
-  let roots: List(EntityId) = collectPaintableRoots(world: world)
-  let m: Int = roots.length
-  var p: Int = 0
-  loop p < m {
-    let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: p)
-    if componentHas(this: world.layerRoots, entity: root) is false {
-      let ord: Int = entityLayerOrder(world: world, entity: root)
-      if ord >= minOrder {
-        if ord < maxOrder {
-          paintSubtreeG(world: world, entity: root, res: res)
+  unsafe {
+    let roots: List(EntityId) = collectPaintableRoots(world: world)
+    let m: Int = roots.length
+    var p: Int = 0
+    loop p < m {
+      let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: p)
+      if componentHas(this: world.layerRoots, entity: root) is false {
+        let ord: Int = entityLayerOrder(world: world, entity: root)
+        if ord >= minOrder {
+          if ord < maxOrder {
+            paintSubtreeG(world: world, entity: root, res: res)
+          }
         }
       }
+      p = p + 1
     }
-    p = p + 1
   }
 }
 

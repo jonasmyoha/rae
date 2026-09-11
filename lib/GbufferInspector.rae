@@ -10,14 +10,17 @@ open webgpu/Webgpu
 open webgpu/Context
 
 # C exposes the inspector WGSL, the presentable format/view, and the handles.
-func gbViewWgsl() extern("rae_gb_view_wgsl") ret Ptr
-func g2dOffViewReady() extern("rae_g2d_off_view_ready") ret Int
-func gbViewPipeline() extern("rae_gb_view_pipeline") ret Ptr
-func gbViewUbuf() extern("rae_gb_view_ubuf") ret Ptr
-func gbViewBind() extern("rae_gb_view_bind") ret Ptr
-func gbSetViewPipeline(pipeline: Ptr) extern("rae_gb_set_view_pipeline")
-func gbSetViewUbuf(buf: Ptr) extern("rae_gb_set_view_ubuf")
-func gbSetViewBind(bind: Ptr) extern("rae_gb_set_view_bind")
+func gbViewWgsl() unsafe extern("rae_gb_view_wgsl") ret Ptr
+func nativeG2dOffViewReady() unsafe extern("rae_g2d_off_view_ready") ret Int
+func g2dOffViewReady() ret Int {
+  unsafe { ret nativeG2dOffViewReady() }
+}
+func gbViewPipeline() unsafe extern("rae_gb_view_pipeline") ret Ptr
+func gbViewUbuf() unsafe extern("rae_gb_view_ubuf") ret Ptr
+func gbViewBind() unsafe extern("rae_gb_view_bind") ret Ptr
+func gbSetViewPipeline(pipeline: Ptr) unsafe extern("rae_gb_set_view_pipeline")
+func gbSetViewUbuf(buf: Ptr) unsafe extern("rae_gb_set_view_ubuf")
+func gbSetViewBind(bind: Ptr) unsafe extern("rae_gb_set_view_bind")
 # Bumped in C when the targets are recreated (resize); the inspector rebuilds its
 # bind group (which samples the G-buffer views) when it changes.
 
@@ -29,92 +32,98 @@ type ViewPassCache { pipeMade: Bool, bindMade: Bool, lastTargetsGen: Int, unifor
 # Inspector pipeline: a fullscreen triangle (no vertex buffers, no cull) writing
 # to the presentable format, plus its 16-byte uniform (mode, zNear, zFar).
 func ensureViewPipeline(cache: mod ViewPassCache) {
-  if cache.pipeMade { ret }
-  cache.pipeMade = true
-  let shaderMod: Ptr = makeShaderModule(wgsl: gbViewWgsl())
-  var targets: List(WGPUColorTargetState) = List.create(WGPUColorTargetState, cap: 1)
-  targets.add(value: { format: g2dFormat() as Int32, writeMask: WGPUColorWriteMask_All })
-  var frags: List(WGPUFragmentState) = List.create(WGPUFragmentState, cap: 1)
-  frags.add(value: {
-    module: shaderMod, entryPoint: { data: gbEntryFs(), length: WGPU_STRLEN },
-    targetCount: 1 as UInt64, targets: targets.data
-  })
-  let desc: WGPURenderPipelineDescriptor = {
-    vertex: { module: shaderMod, entryPoint: { data: gbEntryVs(), length: WGPU_STRLEN } },
-    primitive: {
-      topology: WGPUPrimitiveTopology_TriangleList,
-      frontFace: WGPUFrontFace_CCW, cullMode: WGPUCullMode_None
-    },
-    multisample: { count: 1 as UInt32, mask: 4294967295 as UInt32 },
-    fragment: frags.data
+  unsafe {
+    if cache.pipeMade { ret }
+    cache.pipeMade = true
+    let shaderMod: Ptr = makeShaderModule(wgsl: gbViewWgsl())
+    var targets: List(WGPUColorTargetState) = List.create(WGPUColorTargetState, cap: 1)
+    targets.add(value: { format: g2dFormat() as Int32, writeMask: WGPUColorWriteMask_All })
+    var frags: List(WGPUFragmentState) = List.create(WGPUFragmentState, cap: 1)
+    frags.add(value: {
+      module: shaderMod, entryPoint: { data: gbEntryFs(), length: WGPU_STRLEN },
+      targetCount: 1 as UInt64, targets: targets.data
+    })
+    let desc: WGPURenderPipelineDescriptor = {
+      vertex: { module: shaderMod, entryPoint: { data: gbEntryVs(), length: WGPU_STRLEN } },
+      primitive: {
+        topology: WGPUPrimitiveTopology_TriangleList,
+        frontFace: WGPUFrontFace_CCW, cullMode: WGPUCullMode_None
+      },
+      multisample: { count: 1 as UInt32, mask: 4294967295 as UInt32 },
+      fragment: frags.data
+    }
+    gbSetViewPipeline(pipeline: wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: desc))
+    wgpuShaderModuleRelease(shaderModule: shaderMod)
+    let ud: WGPUBufferDescriptor = {
+      usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst, size: 16 as UInt64
+    }
+    gbSetViewUbuf(buf: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: ud))
   }
-  gbSetViewPipeline(pipeline: wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: desc))
-  wgpuShaderModuleRelease(shaderModule: shaderMod)
-  let ud: WGPUBufferDescriptor = {
-    usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst, size: 16 as UInt64
-  }
-  gbSetViewUbuf(buf: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: ud))
 }
 
 # Inspector bind group: the uniform + the four G-buffer views. Rebuilt after a
 # resize — the targets-generation counter changing forces a fresh bind.
 func ensureViewBind(cache: mod ViewPassCache) {
-  let gen: Int = gbTargetsGen()
-  if cache.bindMade and gen is cache.lastTargetsGen { ret }
-  if gbTargetsReady() is 0 { ret }
-  cache.bindMade = true
-  cache.lastTargetsGen = gen
-  let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbViewPipeline(), groupIndex: 0 as UInt32)
-  var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 5)
-  entries.add(value: { binding: 0 as UInt32, buffer: gbViewUbuf(), size: 16 as UInt64 })
-  entries.add(value: { binding: 1 as UInt32, textureView: gbViewA() })
-  entries.add(value: { binding: 2 as UInt32, textureView: gbViewB() })
-  entries.add(value: { binding: 3 as UInt32, textureView: gbViewC() })
-  entries.add(value: { binding: 4 as UInt32, textureView: gbViewDepth() })
-  let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 5 as UInt64, entries: entries.data }
-  gbSetViewBind(bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
-  wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+  unsafe {
+    let gen: Int = gbTargetsGen()
+    if cache.bindMade and gen is cache.lastTargetsGen { ret }
+    if gbTargetsReady() is 0 { ret }
+    cache.bindMade = true
+    cache.lastTargetsGen = gen
+    let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbViewPipeline(), groupIndex: 0 as UInt32)
+    var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 5)
+    entries.add(value: { binding: 0 as UInt32, buffer: gbViewUbuf(), size: 16 as UInt64 })
+    entries.add(value: { binding: 1 as UInt32, textureView: gbViewA() })
+    entries.add(value: { binding: 2 as UInt32, textureView: gbViewB() })
+    entries.add(value: { binding: 3 as UInt32, textureView: gbViewC() })
+    entries.add(value: { binding: 4 as UInt32, textureView: gbViewDepth() })
+    let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 5 as UInt64, entries: entries.data }
+    gbSetViewBind(bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
+    wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+  }
 }
 
 # Write one G-buffer channel into the presentable target with a fullscreen pass.
 func debugView(cache: mod ViewPassCache, mode: copy Int, zNear: copy Float, zFar: copy Float) pub {
-  if g2dOffViewReady() is 0 { ret }
-  ensureViewPipeline(cache: cache)
-  ensureViewBind(cache: cache)
-  if cache.bindMade is 0 { ret }
+  unsafe {
+    if g2dOffViewReady() is 0 { ret }
+    ensureViewPipeline(cache: cache)
+    ensureViewBind(cache: cache)
+    if cache.bindMade is 0 { ret }
 
-  # Uniform held on the cache (created once) to keep the path zero-alloc.
-  loop cache.uniform.length < 4 { cache.uniform.add(value: 0.0) }
-  cache.uniform.set(index: 0, value: mode.toFloat())
-  cache.uniform.set(index: 1, value: zNear)
-  cache.uniform.set(index: 2, value: zFar)
-  cache.uniform.set(index: 3, value: 0.0)
-  wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: gbViewUbuf(),
-    bufferOffset: 0 as UInt64, data: cache.uniform.data, size: 16 as UInt64)
+    # Uniform held on the cache (created once) to keep the path zero-alloc.
+    loop cache.uniform.length < 4 { cache.uniform.add(value: 0.0) }
+    cache.uniform.set(index: 0, value: mode.toFloat())
+    cache.uniform.set(index: 1, value: zNear)
+    cache.uniform.set(index: 2, value: zFar)
+    cache.uniform.set(index: 3, value: 0.0)
+    wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: gbViewUbuf(),
+      bufferOffset: 0 as UInt64, data: cache.uniform.data, size: 16 as UInt64)
 
-  let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
-  let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
-  var atts: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 1)
-  atts.add(value: {
-    view_: g2dOffView(), depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32,
-    loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store
-  })
-  let rpDesc: WGPURenderPassDescriptor = {
-    colorAttachmentCount: 1 as UInt64, colorAttachments: atts.data
+    let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
+    let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
+    var atts: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 1)
+    atts.add(value: {
+      view_: g2dOffView(), depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32,
+      loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store
+    })
+    let rpDesc: WGPURenderPassDescriptor = {
+      colorAttachmentCount: 1 as UInt64, colorAttachments: atts.data
+    }
+    let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: gbViewPipeline())
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+      group: gbViewBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+    wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: 3 as UInt32,
+      instanceCount: 1 as UInt32, firstVertex: 0 as UInt32, firstInstance: 0 as UInt32)
+    wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
+    let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
+    let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
+    gbSubmit(cmd: cmd)
+    wgpuCommandBufferRelease(commandBuffer: cmd)
+    wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
+    wgpuCommandEncoderRelease(commandEncoder: enc)
   }
-  let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
-  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: gbViewPipeline())
-  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
-    group: gbViewBind(), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
-  wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: 3 as UInt32,
-    instanceCount: 1 as UInt32, firstVertex: 0 as UInt32, firstInstance: 0 as UInt32)
-  wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
-  let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
-  let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
-  gbSubmit(cmd: cmd)
-  wgpuCommandBufferRelease(commandBuffer: cmd)
-  wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
-  wgpuCommandEncoderRelease(commandEncoder: enc)
 }
 
 # Paint the chosen channel into the frame (see gbuffer.view*).

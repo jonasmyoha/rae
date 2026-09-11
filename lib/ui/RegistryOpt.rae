@@ -73,15 +73,17 @@ func optInt(doc: view JsonDoc, container: view JsonValue, key: view String, fall
 }
 
 func optString(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view String) ret String {
-  # Always return an independently-owned String (see jsonString
-  # for the why) so callers can hand the result to a struct field
-  # and rely on cascade drop to free it.
-  let idx: Int = Json.field(doc: doc, this: container, key: key)
-  if idx < 0 {
-    ret rae_ext_rae_string_copy(s: fallback)
+  unsafe {
+    # Always return an independently-owned String (see jsonString
+    # for the why) so callers can hand the result to a struct field
+    # and rely on cascade drop to free it.
+    let idx: Int = Json.field(doc: doc, this: container, key: key)
+    if idx < 0 {
+      ret rae_ext_rae_string_copy(s: fallback)
+    }
+    let v: JsonValue = Json.jsonValueAt(doc: doc, idx: idx)
+    ret Json.jsonString(this: v, fallback: fallback)
   }
-  let v: JsonValue = Json.jsonValueAt(doc: doc, idx: idx)
-  ret Json.jsonString(this: v, fallback: fallback)
 }
 
 func optBool(doc: view JsonDoc, container: view JsonValue, key: view String, fallback: view Bool) ret Bool {

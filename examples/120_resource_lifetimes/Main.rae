@@ -14,9 +14,9 @@
 # Headless CLI: prints the mixer's bookkeeping and ends with the line the
 # example gate asserts, `[lifetimes] live voices: 0`.
 
-func mixerAcquire() extern ret Int
-func mixerRelease(slot: Int) extern
-func mixerLive() extern ret Int
+func mixerAcquire() unsafe extern ret Int
+func mixerRelease(slot: Int) unsafe extern
+func mixerLive() unsafe extern ret Int
 
 # A voice: the mixer slot it holds and the note it plays.
 type Voice {
@@ -28,16 +28,20 @@ type Voice {
 # `create(note: 60)` is chosen by the type of the binding, field or argument it
 # lands in; `Voice.create(...)` names the type where nothing expects one.
 func create(note: view Int) ret Voice {
-  let slot: Int = mixerAcquire()
-  log("[voice] start note {note} on slot {slot}")
-  ret Voice { slot: slot, note: note }
+  unsafe {
+    let slot: Int = mixerAcquire()
+    log("[voice] start note {note} on slot {slot}")
+    ret Voice { slot: slot, note: note }
+  }
 }
 
 # The destructor. The compiler calls it once for every Voice that is released;
 # user code never has to, but may (`lead.drop()` below consumes the binding).
 func drop(this: mod Voice) {
-  log("[voice] release slot {this.slot} (note {this.note})")
-  mixerRelease(slot: this.slot)
+  unsafe {
+    log("[voice] release slot {this.slot} (note {this.note})")
+    mixerRelease(slot: this.slot)
+  }
 }
 
 # A chord owns its voices. Dropping the chord runs the chord's destructor
@@ -65,9 +69,11 @@ func playChord(name: view String) ret Chord {
 # binding would be a compile error, because the compiler cannot duplicate a
 # mixer slot by itself.
 func copy(this: view Voice) ret Voice {
-  let slot: Int = mixerAcquire()
-  log("[voice] double note {this.note} on slot {slot}")
-  ret Voice { slot: slot, note: this.note }
+  unsafe {
+    let slot: Int = mixerAcquire()
+    log("[voice] double note {this.note} on slot {slot}")
+    ret Voice { slot: slot, note: this.note }
+  }
 }
 
 func handOver(voice: own Voice) {
@@ -75,32 +81,34 @@ func handOver(voice: own Voice) {
 }
 
 func main() ret Int {
-  log("[lifetimes] mixer live voices: {mixerLive()}")
+  unsafe {
+    log("[lifetimes] mixer live voices: {mixerLive()}")
 
-  log("-- a chord in its own scope")
-  loop var round: Int = 0, round < 1, ++round {
-    let chord: Chord = playChord(name: "C major")
-    log("[chord] {chord.name} has {chord.voices.length} voices, live {mixerLive()}")
+    log("-- a chord in its own scope")
+    loop var round: Int = 0, round < 1, ++round {
+      let chord: Chord = playChord(name: "C major")
+      log("[chord] {chord.name} has {chord.voices.length} voices, live {mixerLive()}")
+    }
+    log("[lifetimes] after the chord: live {mixerLive()}")
+
+    log("-- a lead voice, stopped early, then a new one on the same binding")
+    var lead: Voice = create(note: 72)
+    lead.drop()
+    lead = Voice.create(note: 74)
+
+    log("-- ownership moves, the callee releases")
+    let bass: Voice = create(note: 36)
+    handOver(voice: own bass)
+
+    log("-- a copy is a second voice on its own slot")
+    loop var pass: Int = 0, pass < 1, ++pass {
+      let doubled: Voice = lead
+      log("[voice] lead on slot {lead.slot}, doubled on slot {doubled.slot}, live {mixerLive()}")
+    }
+
+    log("-- stop the lead explicitly so the count can be printed")
+    lead.drop()
+    log("[lifetimes] live voices: {mixerLive()}")
+    ret 0
   }
-  log("[lifetimes] after the chord: live {mixerLive()}")
-
-  log("-- a lead voice, stopped early, then a new one on the same binding")
-  var lead: Voice = create(note: 72)
-  lead.drop()
-  lead = Voice.create(note: 74)
-
-  log("-- ownership moves, the callee releases")
-  let bass: Voice = create(note: 36)
-  handOver(voice: own bass)
-
-  log("-- a copy is a second voice on its own slot")
-  loop var pass: Int = 0, pass < 1, ++pass {
-    let doubled: Voice = lead
-    log("[voice] lead on slot {lead.slot}, doubled on slot {doubled.slot}, live {mixerLive()}")
-  }
-
-  log("-- stop the lead explicitly so the count can be printed")
-  lead.drop()
-  log("[lifetimes] live voices: {mixerLive()}")
-  ret 0
 }

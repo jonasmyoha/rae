@@ -11,17 +11,19 @@
 # Compiled-target only (the extern has no Live VM binding).
 import Gpu2d
 
-func rae_ext_rae_sys_write_file(path: String, content: String) extern ret Bool
+func rae_ext_rae_sys_write_file(path: String, content: String) unsafe extern ret Bool
 
 func main() {
-  # Garbage bytes with a .jpg name: no JPEG/PNG magic -> unsupported,
-  # decode fails cleanly (no cascade into another decoder).
-  let junkPath: String = "/tmp/rae_532_junk.jpg"
-  let wrote: Bool = rae_ext_rae_sys_write_file(path: junkPath, content: "definitely not an image")
-  let okJunk: Int = Gpu2d.decodeImageProbe(path: junkPath)
-  log("junk wrote={wrote} decode={okJunk}")
+  unsafe {
+    # Garbage bytes with a .jpg name: no JPEG/PNG magic -> unsupported,
+    # decode fails cleanly (no cascade into another decoder).
+    let junkPath: String = "/tmp/rae_532_junk.jpg"
+    let wrote: Bool = rae_ext_rae_sys_write_file(path: junkPath, content: "definitely not an image")
+    let okJunk: Int = Gpu2d.decodeImageProbe(path: junkPath)
+    log("junk wrote={wrote} decode={okJunk}")
 
-  # Missing file -> unreadable, decode fails cleanly.
-  let okMissing: Int = Gpu2d.decodeImageProbe(path: "/tmp/rae_532_missing.xyz")
-  log("missing decode={okMissing}")
+    # Missing file -> unreadable, decode fails cleanly.
+    let okMissing: Int = Gpu2d.decodeImageProbe(path: "/tmp/rae_532_missing.xyz")
+    log("missing decode={okMissing}")
+  }
 }

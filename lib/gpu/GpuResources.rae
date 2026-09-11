@@ -210,16 +210,16 @@ func storeHandle(table: mod SlotTable, slot: view Int, handle: copy Ptr) {
 
 func releaseHandle(kind: view Int, handle: copy Ptr) {
   unsafe {
-    if kind is kindBuffer { wgpuBufferRelease(buffer: handle) }
-    if kind is kindTexture { wgpuTextureRelease(texture: handle) }
-    if kind is kindTextureView { wgpuTextureViewRelease(textureView: handle) }
-    if kind is kindSampler { wgpuSamplerRelease(sampler: handle) }
-    if kind is kindPipeline { wgpuComputePipelineRelease(computePipeline: handle) }
-    if kind is kindBindGroup { wgpuBindGroupRelease(bindGroup: handle) }
-    if kind is kindRenderPipeline { wgpuRenderPipelineRelease(renderPipeline: handle) }
-    if kind is kindReadback {
-      let released: Ptr = releaseRead(request: handle)
-    }
+      if kind is kindBuffer { wgpuBufferRelease(buffer: handle) }
+      if kind is kindTexture { wgpuTextureRelease(texture: handle) }
+      if kind is kindTextureView { wgpuTextureViewRelease(textureView: handle) }
+      if kind is kindSampler { wgpuSamplerRelease(sampler: handle) }
+      if kind is kindPipeline { wgpuComputePipelineRelease(computePipeline: handle) }
+      if kind is kindBindGroup { wgpuBindGroupRelease(bindGroup: handle) }
+      if kind is kindRenderPipeline { wgpuRenderPipelineRelease(renderPipeline: handle) }
+      if kind is kindReadback {
+        let released: Ptr = releaseRead(request: handle)
+      }
   }
 }
 
@@ -354,18 +354,18 @@ func create(issuer: mod IdIssuer, capacity: view Int) ret opt GpuResources {
 # pending ReadRequest) is untouched — it owns its own references.
 func drop(this: mod GpuResources) {
   unsafe {
-    let empty: Ptr = webgpuNull()
-    releaseAll(table: this.readbacks, capacity: this.capacity, kind: kindReadback, empty: empty)
-    releaseAll(table: this.submissions, capacity: this.capacity, kind: kindSubmission, empty: empty)
-    releaseAll(table: this.bindGroups, capacity: this.capacity, kind: kindBindGroup, empty: empty)
-    releaseAll(table: this.pipelines, capacity: this.capacity, kind: kindPipeline, empty: empty)
-    releaseAll(table: this.renderPipelines, capacity: this.capacity, kind: kindRenderPipeline, empty: empty)
-    releaseAll(table: this.textureViews, capacity: this.capacity, kind: kindTextureView, empty: empty)
-    releaseAll(table: this.textures, capacity: this.capacity, kind: kindTexture, empty: empty)
-    releaseAll(table: this.buffers, capacity: this.capacity, kind: kindBuffer, empty: empty)
-    releaseAll(table: this.samplers, capacity: this.capacity, kind: kindSampler, empty: empty)
-    # Adopted externals: slots are cleared, the native handles are the adopter's.
-    releaseAll(table: this.externals, capacity: this.capacity, kind: kindExternal, empty: empty)
+      let empty: Ptr = webgpuNull()
+      releaseAll(table: this.readbacks, capacity: this.capacity, kind: kindReadback, empty: empty)
+      releaseAll(table: this.submissions, capacity: this.capacity, kind: kindSubmission, empty: empty)
+      releaseAll(table: this.bindGroups, capacity: this.capacity, kind: kindBindGroup, empty: empty)
+      releaseAll(table: this.pipelines, capacity: this.capacity, kind: kindPipeline, empty: empty)
+      releaseAll(table: this.renderPipelines, capacity: this.capacity, kind: kindRenderPipeline, empty: empty)
+      releaseAll(table: this.textureViews, capacity: this.capacity, kind: kindTextureView, empty: empty)
+      releaseAll(table: this.textures, capacity: this.capacity, kind: kindTexture, empty: empty)
+      releaseAll(table: this.buffers, capacity: this.capacity, kind: kindBuffer, empty: empty)
+      releaseAll(table: this.samplers, capacity: this.capacity, kind: kindSampler, empty: empty)
+      # Adopted externals: slots are cleared, the native handles are the adopter's.
+      releaseAll(table: this.externals, capacity: this.capacity, kind: kindExternal, empty: empty)
   }
 }
 

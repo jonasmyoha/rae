@@ -21,32 +21,65 @@ open webgpu/Context
 # configure its swapchain. Replaces sdl3.initWindow for the GPU render path —
 # do not also call sdl3.initWindow (that one attaches an SDL_Renderer that
 # fights wgpu for the drawable).
-func initWindow(width: Int, height: Int, title: String) extern
+func nativeInitWindow(width: Int, height: Int, title: String) unsafe extern("rae_ext_Gpu2d_initWindow")
+func initWindow(width: copy Int, height: copy Int, title: copy String) {
+  unsafe { nativeInitWindow(width: width, height: height, title: title) }
+}
 
 # Pump the OS event queue; returns true once the user has asked to close the
 # window (or a headless time budget elapsed). Call once per frame.
-func pollClose() extern ret Bool
+func nativePollClose() unsafe extern("rae_ext_Gpu2d_pollClose") ret Bool
+func pollClose() ret Bool {
+  unsafe { ret nativePollClose() }
+}
 
 # Drawable size in physical pixels (HiDPI-aware; may exceed the logical size).
-func windowWidth() extern ret Int
-func windowHeight() extern ret Int
-func setWindowPosition(x: Int, y: Int) extern
-func setWindowSize(w: Int, h: Int) extern
-func windowPositionX() extern ret Int
-func windowPositionY() extern ret Int
+func nativeWindowWidth() unsafe extern("rae_ext_Gpu2d_windowWidth") ret Int
+func windowWidth() ret Int {
+  unsafe { ret nativeWindowWidth() }
+}
+func nativeWindowHeight() unsafe extern("rae_ext_Gpu2d_windowHeight") ret Int
+func windowHeight() ret Int {
+  unsafe { ret nativeWindowHeight() }
+}
+func nativeSetWindowPosition(x: Int, y: Int) unsafe extern("rae_ext_Gpu2d_setWindowPosition")
+func setWindowPosition(x: copy Int, y: copy Int) {
+  unsafe { nativeSetWindowPosition(x: x, y: y) }
+}
+func nativeSetWindowSize(w: Int, h: Int) unsafe extern("rae_ext_Gpu2d_setWindowSize")
+func setWindowSize(w: copy Int, h: copy Int) {
+  unsafe { nativeSetWindowSize(w: w, h: h) }
+}
+func nativeWindowPositionX() unsafe extern("rae_ext_Gpu2d_windowPositionX") ret Int
+func windowPositionX() ret Int {
+  unsafe { ret nativeWindowPositionX() }
+}
+func nativeWindowPositionY() unsafe extern("rae_ext_Gpu2d_windowPositionY") ret Int
+func windowPositionY() ret Int {
+  unsafe { ret nativeWindowPositionY() }
+}
 # True once after the OS reports a window resize (edge-triggered; the flag
 # is cleared on read). The app recomputes its viewport/extent and rebuilds.
-func windowResized() extern ret Bool
+func nativeWindowResized() unsafe extern("rae_ext_Gpu2d_windowResized") ret Bool
+func windowResized() ret Bool {
+  unsafe { ret nativeWindowResized() }
+}
 # One-shot, like windowResized: reading it clears it. Persisting where the user
 # put the window is built ON these in Rae (lib/ui/WindowGeometry.rae), not down
 # in the runtime.
-func windowMoved() extern ret Bool
+func nativeWindowMoved() unsafe extern("rae_ext_Gpu2d_windowMoved") ret Bool
+func windowMoved() ret Bool {
+  unsafe { ret nativeWindowMoved() }
+}
 # False while the window is hidden / minimized / occluded (app switched away or
 # fully covered). Apps should skip their render and park in waitEvents when this
 # is false: rendering while dark wastes power and, on macOS, leaks GPU memory
 # (the Metal layer stops recycling drawables while backgrounded). Not edge-
 # triggered — reflects the current state every call.
-func windowVisible() extern("rae_g2d_window_visible") ret Bool
+func nativeWindowVisible() unsafe extern("rae_g2d_window_visible") ret Bool
+func windowVisible() ret Bool {
+  unsafe { ret nativeWindowVisible() }
+}
 
 # The universal per-frame render decision, so no app has to hand-roll it. Render
 # this frame only if the app wants to AND the window is actually visible. NEVER
@@ -84,63 +117,132 @@ func renderGate() ret Bool {
 #   design units  --(scale + offset / fit)-->  physical px  --> clip space.
 # fit: 0 = fit (contain, letterboxed), 1 = fill (cover, cropped), 2 = stretch.
 # Pass width/height <= 0 to return to identity (physical-pixel) coordinates.
-func setDesignResolution(width: Float, height: Float, fit: Int) extern
+func nativeSetDesignResolution(width: Float, height: Float, fit: Int) unsafe extern("rae_ext_Gpu2d_setDesignResolution")
+func setDesignResolution(width: copy Float, height: copy Float, fit: copy Int) {
+  unsafe { nativeSetDesignResolution(width: width, height: height, fit: fit) }
+}
 
 # Current design-canvas size in design units (the window's physical size when
 # no design resolution is set). Lay out against these.
-func designWidth() extern ret Float
-func designHeight() extern ret Float
+func nativeDesignWidth() unsafe extern("rae_ext_Gpu2d_designWidth") ret Float
+func designWidth() ret Float {
+  unsafe { ret nativeDesignWidth() }
+}
+func nativeDesignHeight() unsafe extern("rae_ext_Gpu2d_designHeight") ret Float
+func designHeight() ret Float {
+  unsafe { ret nativeDesignHeight() }
+}
 
 # Device pixel ratio: physical pixels per logical point (2.0 on retina).
-func dpr() extern ret Float
+func nativeDpr() unsafe extern("rae_ext_Gpu2d_dpr") ret Float
+func dpr() ret Float {
+  unsafe { ret nativeDpr() }
+}
 
 # --- Input (valid after pollClose each frame) ----------------------------
 # pollClose records mouse/keyboard/wheel state while it pumps the event queue,
 # so these read this frame's input. Coordinates are in DESIGN units (the same
 # space drawRect etc. take), so hit-testing lines up with what was drawn.
-func pointerX() extern ret Float
-func pointerY() extern ret Float
+func nativePointerX() unsafe extern("rae_ext_Gpu2d_pointerX") ret Float
+func pointerX() ret Float {
+  unsafe { ret nativePointerX() }
+}
+func nativePointerY() unsafe extern("rae_ext_Gpu2d_pointerY") ret Float
+func pointerY() ret Float {
+  unsafe { ret nativePointerY() }
+}
 # Multitouch (#526): active finger count + per-finger position in design units.
 # On desktop this is 0 (use the mouse pointer); on iOS every touch is reported so
 # a UI can drive a joystick with one finger and the camera with another.
-func touchCount() extern ret Int
-func touchX(index: Int) extern ret Float
-func touchY(index: Int) extern ret Float
+func nativeTouchCount() unsafe extern("rae_ext_Gpu2d_touchCount") ret Int
+func touchCount() ret Int {
+  unsafe { ret nativeTouchCount() }
+}
+func nativeTouchX(index: Int) unsafe extern("rae_ext_Gpu2d_touchX") ret Float
+func touchX(index: copy Int) ret Float {
+  unsafe { ret nativeTouchX(index: index) }
+}
+func nativeTouchY(index: Int) unsafe extern("rae_ext_Gpu2d_touchY") ret Float
+func touchY(index: copy Int) ret Float {
+  unsafe { ret nativeTouchY(index: index) }
+}
 # Stable finger id (grab a finger at press, hold it for the whole drag) + whether
 # it went down this frame (edge). id is -1 out of range.
-func touchId(index: Int) extern ret Int
-func touchPressed(index: Int) extern ret Bool
+func nativeTouchId(index: Int) unsafe extern("rae_ext_Gpu2d_touchId") ret Int
+func touchId(index: copy Int) ret Int {
+  unsafe { ret nativeTouchId(index: index) }
+}
+func nativeTouchPressed(index: Int) unsafe extern("rae_ext_Gpu2d_touchPressed") ret Bool
+func touchPressed(index: copy Int) ret Bool {
+  unsafe { ret nativeTouchPressed(index: index) }
+}
 # OS safe-area insets (notch / home indicator / rounded corners) in design units.
 # 0 on platforms without insets. Lay HUD + UI chrome inside these.
-func safeTop() extern ret Float
-func safeBottom() extern ret Float
-func safeLeft() extern ret Float
-func safeRight() extern ret Float
+func nativeSafeTop() unsafe extern("rae_ext_Gpu2d_safeTop") ret Float
+func safeTop() ret Float {
+  unsafe { ret nativeSafeTop() }
+}
+func nativeSafeBottom() unsafe extern("rae_ext_Gpu2d_safeBottom") ret Float
+func safeBottom() ret Float {
+  unsafe { ret nativeSafeBottom() }
+}
+func nativeSafeLeft() unsafe extern("rae_ext_Gpu2d_safeLeft") ret Float
+func safeLeft() ret Float {
+  unsafe { ret nativeSafeLeft() }
+}
+func nativeSafeRight() unsafe extern("rae_ext_Gpu2d_safeRight") ret Float
+func safeRight() ret Float {
+  unsafe { ret nativeSafeRight() }
+}
 # Left mouse button held this frame.
-func pointerDown() extern ret Bool
-func pointerPressed() extern ret Bool
-func pointerReleased() extern ret Bool
+func nativePointerDown() unsafe extern("rae_ext_Gpu2d_pointerDown") ret Bool
+func pointerDown() ret Bool {
+  unsafe { ret nativePointerDown() }
+}
+func nativePointerPressed() unsafe extern("rae_ext_Gpu2d_pointerPressed") ret Bool
+func pointerPressed() ret Bool {
+  unsafe { ret nativePointerPressed() }
+}
+func nativePointerReleased() unsafe extern("rae_ext_Gpu2d_pointerReleased") ret Bool
+func pointerReleased() ret Bool {
+  unsafe { ret nativePointerReleased() }
+}
 # Per-frame mouse-wheel / trackpad delta (positive = scrolled up), matching
 # raylib's getMouseWheelMove semantics.
-func wheelMove() extern ret Float
+func nativeWheelMove() unsafe extern("rae_ext_Gpu2d_wheelMove") ret Float
+func wheelMove() ret Float {
+  unsafe { ret nativeWheelMove() }
+}
 # Desktop cursor kind. 0=arrow, 1=pointer/hand, 2=text, 3=horizontal resize,
 # 4=vertical resize, 5=crosshair, 6=not-allowed.
-func setMouseCursor(kind: Int) extern
+func nativeSetMouseCursor(kind: Int) unsafe extern("rae_ext_Gpu2d_setMouseCursor")
+func setMouseCursor(kind: copy Int) {
+  unsafe { nativeSetMouseCursor(kind: kind) }
+}
 # Monotonic wall-clock seconds since process start (for scroll/animation timing).
 # Epoch seconds. Float64 deliberately: as f32 two calls one frame apart
 # return the SAME value (~1.7e9 has ~128s granularity), so every frame delta
 # would be exactly 0.0. See docs/primitive-types.md.
-func nowSeconds() extern ret Float64
+func nativeNowSeconds() unsafe extern("rae_ext_Gpu2d_nowSeconds") ret Float64
+func nowSeconds() ret Float64 {
+  unsafe { ret nativeNowSeconds() }
+}
 
 # --- Idle wait (hybrid loop) ---------------------------------------------
 # Block up to `timeoutSec` for the next OS event (returns immediately if one is
 # already queued), without dequeuing it — the following pollClose drains it.
 # Park here when idle so the app sits at ~0% CPU; busy-render (timeout 0) while
 # animating. See docs/ui-render-loop-performance.md.
-func waitEvents(timeoutSec: Float) extern
+func nativeWaitEvents(timeoutSec: Float) unsafe extern("rae_ext_Gpu2d_waitEvents")
+func waitEvents(timeoutSec: copy Float) {
+  unsafe { nativeWaitEvents(timeoutSec: timeoutSec) }
+}
 
 # Release the surface + window. The wgpu device stays cached for reuse.
-func closeWindow() extern
+func nativeCloseWindow() unsafe extern("rae_ext_Gpu2d_closeWindow")
+func closeWindow() {
+  unsafe { nativeCloseWindow() }
+}
 
 # --- Frame ---------------------------------------------------------------
 # The frame command lifecycle runs here in Rae (#504): create the encoder +
@@ -148,41 +250,58 @@ func closeWindow() extern
 # hand the platform present/screenshot tail back to C. C keeps the per-frame
 # batch-counter reset (g2dFrameReset), owns the persistent offscreen colour
 # target (g2dOffView), packs primitives (flush), and does the present tail.
-func g2dFrameReset() extern("rae_g2d_frame_reset")
-func g2dSetFrame(enc: Ptr, pass: Ptr) extern("rae_g2d_set_frame")
-func g2dPass() extern("rae_g2d_pass_get") ret Ptr
-func g2dEncoder() extern("rae_g2d_encoder_get") ret Ptr
-func g2dFrameActive() extern("rae_g2d_frame_active") ret Int
-func g2dPresentCleanup() extern("rae_g2d_present_and_cleanup")
-func g2dTick() extern("rae_g2d_tick")
-func g2dOffView() extern("rae_g2d_off_view") ret Ptr
-func g2dOffViewReady() extern("rae_g2d_off_view_ready") ret Int
-func g2dSubmit(cmd: Ptr) extern("rae_gb_submit")
+func nativeG2dFrameReset() unsafe extern("rae_g2d_frame_reset")
+func g2dFrameReset() {
+  unsafe { nativeG2dFrameReset() }
+}
+func g2dSetFrame(enc: Ptr, pass: Ptr) unsafe extern("rae_g2d_set_frame")
+func g2dPass() unsafe extern("rae_g2d_pass_get") ret Ptr
+func g2dEncoder() unsafe extern("rae_g2d_encoder_get") ret Ptr
+func nativeG2dFrameActive() unsafe extern("rae_g2d_frame_active") ret Int
+func g2dFrameActive() ret Int {
+  unsafe { ret nativeG2dFrameActive() }
+}
+func nativeG2dPresentCleanup() unsafe extern("rae_g2d_present_and_cleanup")
+func g2dPresentCleanup() {
+  unsafe { nativeG2dPresentCleanup() }
+}
+func nativeG2dTick() unsafe extern("rae_g2d_tick")
+func g2dTick() {
+  unsafe { nativeG2dTick() }
+}
+func g2dOffView() unsafe extern("rae_g2d_off_view") ret Ptr
+func nativeG2dOffViewReady() unsafe extern("rae_g2d_off_view_ready") ret Int
+func g2dOffViewReady() ret Int {
+  unsafe { ret nativeG2dOffViewReady() }
+}
+func g2dSubmit(cmd: Ptr) unsafe extern("rae_gb_submit")
 
 # Shared: create the command encoder and begin the offscreen colour pass with
 # the given load op + clear colour, then hand the encoder/pass to C so flush()
 # and the present tail see the live frame.
 func g2dOpenPass(loadOp: copy Int32, r: copy Float, g: copy Float, b: copy Float, a: copy Float) {
-  let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
-  let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
-  let att: WGPURenderPassColorAttachment = {
-    view_: g2dOffView(), depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32,
-    loadOp: loadOp, storeOp: WGPUStoreOp_Store,
-    clearValue: { r: r as Float64, g: g as Float64, b: b as Float64, a: a as Float64 }
+  unsafe {
+    let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
+    let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
+    let att: WGPURenderPassColorAttachment = {
+      view_: g2dOffView(), depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32,
+      loadOp: loadOp, storeOp: WGPUStoreOp_Store,
+      clearValue: { r: r as Float64, g: g as Float64, b: b as Float64, a: a as Float64 }
+    }
+    # Pure per-call scratch (#764: was a module-level global). Its .data is the C
+    # array the pass descriptor points at; WebGPU copies the attachments during
+    # BeginRenderPass below, so the local only needs to outlive that call. set() is
+    # a no-op past the length, so grow to one slot first (as gbuffer.rae does).
+    var g2dColorAtts: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 1)
+    loop g2dColorAtts.length < 1 { g2dColorAtts.add(value: { depthSlice: 0 as UInt32 }) }
+    g2dColorAtts.set(index: 0, value: att)
+    let rpDesc: WGPURenderPassDescriptor = {
+      colorAttachmentCount: 1 as UInt64,
+      colorAttachments: g2dColorAtts.data
+    }
+    let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
+    g2dSetFrame(enc: enc, pass: pass)
   }
-  # Pure per-call scratch (#764: was a module-level global). Its .data is the C
-  # array the pass descriptor points at; WebGPU copies the attachments during
-  # BeginRenderPass below, so the local only needs to outlive that call. set() is
-  # a no-op past the length, so grow to one slot first (as gbuffer.rae does).
-  var g2dColorAtts: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 1)
-  loop g2dColorAtts.length < 1 { g2dColorAtts.add(value: { depthSlice: 0 as UInt32 }) }
-  g2dColorAtts.set(index: 0, value: att)
-  let rpDesc: WGPURenderPassDescriptor = {
-    colorAttachmentCount: 1 as UInt64,
-    colorAttachments: g2dColorAtts.data
-  }
-  let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
-  g2dSetFrame(enc: enc, pass: pass)
 }
 
 # Acquire the next surface texture and begin a render pass that clears it to
@@ -204,31 +323,39 @@ func beginFrameLoad() {
 
 # Finish the render pass, submit the command buffer, and present the frame.
 func endFrame() {
-  # Advance the deterministic clock every frame, even one with no drawable yet.
-  g2dTick()
-  if g2dFrameActive() is 0 { ret }
-  flush()
-  let pass: Ptr = g2dPass()
-  let enc: Ptr = g2dEncoder()
-  wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
-  let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
-  let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
-  g2dSubmit(cmd: cmd)
-  wgpuCommandBufferRelease(commandBuffer: cmd)
-  wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
-  wgpuCommandEncoderRelease(commandEncoder: enc)
-  g2dPresentCleanup()
+  unsafe {
+    # Advance the deterministic clock every frame, even one with no drawable yet.
+    g2dTick()
+    if g2dFrameActive() is 0 { ret }
+    flush()
+    let pass: Ptr = g2dPass()
+    let enc: Ptr = g2dEncoder()
+    wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
+    let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
+    let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
+    g2dSubmit(cmd: cmd)
+    wgpuCommandBufferRelease(commandBuffer: cmd)
+    wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
+    wgpuCommandEncoderRelease(commandEncoder: enc)
+    g2dPresentCleanup()
+  }
 }
 
 # True when the most recent endFrame copied to a surface drawable and presented.
 # Startup can render offscreen before the OS has a drawable; apps that skip idle
 # frames should keep their first frame dirty until this reports true.
-func lastPresentOk() extern ret Bool
+func nativeLastPresentOk() unsafe extern("rae_ext_Gpu2d_lastPresentOk") ret Bool
+func lastPresentOk() ret Bool {
+  unsafe { ret nativeLastPresentOk() }
+}
 
 # Flush queued primitives into the active render pass without ending the
 # frame. Use this when painter order must be preserved across primitive
 # pipelines (for example: image, then later shape, then text).
-func flush() extern
+func nativeFlush() unsafe extern("rae_ext_Gpu2d_flush")
+func flush() {
+  unsafe { nativeFlush() }
+}
 
 # --- 2D primitives (#110, Box uber-shader) -------------------------------
 # Submit primitives between beginFrame and endFrame; they are batched and
@@ -238,22 +365,37 @@ func flush() extern
 # Rounded corners and borders are antialiased analytically (no MSAA).
 
 # Filled axis-aligned rectangle.
-func drawRect(x: Float, y: Float, w: Float, h: Float, color: Int) extern
+func nativeDrawRect(x: Float, y: Float, w: Float, h: Float, color: Int) unsafe extern("rae_ext_Gpu2d_drawRect")
+func drawRect(x: copy Float, y: copy Float, w: copy Float, h: copy Float, color: copy Int) {
+  unsafe { nativeDrawRect(x: x, y: y, w: w, h: h, color: color) }
+}
 
 # Filled rounded rectangle (uniform corner radius).
-func drawRoundedRect(x: Float, y: Float, w: Float, h: Float, radius: Float, color: Int) extern
+func nativeDrawRoundedRect(x: Float, y: Float, w: Float, h: Float, radius: Float, color: Int) unsafe extern("rae_ext_Gpu2d_drawRoundedRect")
+func drawRoundedRect(x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, color: copy Int) {
+  unsafe { nativeDrawRoundedRect(x: x, y: y, w: w, h: h, radius: radius, color: color) }
+}
 
 # Rounded rectangle with a fill and a stroked border `borderWidth` px wide
 # (drawn inset from the edge). radius 0 gives a sharp-cornered box.
-func drawBox(x: Float, y: Float, w: Float, h: Float, radius: Float, fill: Int, borderWidth: Float, border: Int) extern
+func nativeDrawBox(x: Float, y: Float, w: Float, h: Float, radius: Float, fill: Int, borderWidth: Float, border: Int) unsafe extern("rae_ext_Gpu2d_drawBox")
+func drawBox(x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, fill: copy Int, borderWidth: copy Float, border: copy Int) {
+  unsafe { nativeDrawBox(x: x, y: y, w: w, h: h, radius: radius, fill: fill, borderWidth: borderWidth, border: border) }
+}
 
 # Filled rounded rectangle with a linear gradient. `angleDeg` follows the UI
 # GradientFill convention: 0 = left-to-right, 90 = top-to-bottom.
-func drawGradientRect(x: Float, y: Float, w: Float, h: Float, radius: Float, from: Int, to: Int, angleDeg: Float) extern
+func nativeDrawGradientRect(x: Float, y: Float, w: Float, h: Float, radius: Float, from: Int, to: Int, angleDeg: Float) unsafe extern("rae_ext_Gpu2d_drawGradientRect")
+func drawGradientRect(x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, from: copy Int, to: copy Int, angleDeg: copy Float) {
+  unsafe { nativeDrawGradientRect(x: x, y: y, w: w, h: h, radius: radius, from: from, to: to, angleDeg: angleDeg) }
+}
 
 # Antialiased line from (x0,y0) to (x1,y1), `thickness` units wide, with
 # rounded caps (a rotated capsule). Works at any angle.
-func drawLine(x0: Float, y0: Float, x1: Float, y1: Float, thickness: Float, color: Int) extern
+func nativeDrawLine(x0: Float, y0: Float, x1: Float, y1: Float, thickness: Float, color: Int) unsafe extern("rae_ext_Gpu2d_drawLine")
+func drawLine(x0: copy Float, y0: copy Float, x1: copy Float, y1: copy Float, thickness: copy Float, color: copy Int) {
+  unsafe { nativeDrawLine(x0: x0, y0: y0, x1: x1, y1: y1, thickness: thickness, color: color) }
+}
 
 # --- Clipping (#144, axis-aligned scissor) -------------------------------
 # Push a rectangular clip region (design units); subsequent draws are
@@ -263,51 +405,87 @@ func drawLine(x0: Float, y0: Float, x1: Float, y1: Float, thickness: Float, colo
 # draws, preserving the box→image→text batch order. `popClipRect` restores
 # the previous region; an unmatched pop clears to no-clip. (The rounded /
 # per-instance clip variant is #118.)
-func pushClipRect(x: Float, y: Float, w: Float, h: Float) extern
+func nativePushClipRect(x: Float, y: Float, w: Float, h: Float) unsafe extern("rae_ext_Gpu2d_pushClipRect")
+func pushClipRect(x: copy Float, y: copy Float, w: copy Float, h: copy Float) {
+  unsafe { nativePushClipRect(x: x, y: y, w: w, h: h) }
+}
 # Rounded clip (#118): same as pushClipRect but the corners are rounded by
 # `radius` (design units). The box pipeline rounds the corners via a
 # fragment-shader SDF; the axis-aligned scissor still bounds every pipeline
 # to the clip bbox. Use for a rounded card that contains a scroll list.
-func pushClipRoundedRect(x: Float, y: Float, w: Float, h: Float, radius: Float) extern
-func popClipRect() extern
+func nativePushClipRoundedRect(x: Float, y: Float, w: Float, h: Float, radius: Float) unsafe extern("rae_ext_Gpu2d_pushClipRoundedRect")
+func pushClipRoundedRect(x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float) {
+  unsafe { nativePushClipRoundedRect(x: x, y: y, w: w, h: h, radius: radius) }
+}
+func nativePopClipRect() unsafe extern("rae_ext_Gpu2d_popClipRect")
+func popClipRect() {
+  unsafe { nativePopClipRect() }
+}
 
 # --- Images (#143, textured rounded quads) -------------------------------
 # Decode a PNG file and upload it as a GPU texture; returns a 1-based handle
 # (0 on failure). PNG only (lodepng) — convert JPEG assets to PNG. Load once,
 # at startup; the texture is cached for the window's lifetime.
-func loadImage(path: String) extern ret Int
+func nativeLoadImage(path: String) unsafe extern("rae_ext_Gpu2d_loadImage") ret Int
+func loadImage(path: copy String) ret Int {
+  unsafe { ret nativeLoadImage(path: path) }
+}
 
 # Device-free decode probe (#228): runs loadImage's exact decode +
 # error policy (magic-sniff dispatch, one decoder per format) without
 # uploading a texture, so decode behaviour is testable headless and
 # assets can be validated from tooling. 1 = decodes, 0 = failed
 # (with the standard stderr line). Compiled target only.
-func decodeImageProbe(path: String) extern ret Int
+func nativeDecodeImageProbe(path: String) unsafe extern("rae_ext_Gpu2d_decodeImageProbe") ret Int
+func decodeImageProbe(path: copy String) ret Int {
+  unsafe { ret nativeDecodeImageProbe(path: path) }
+}
 
 # Decode+upload `path` and register it under `key` (returns the handle, 0 on
 # failure). Lets a renderer resolve a Sprite.textureKey to an image without a
 # Rae-side map. drawImageKey draws a registered key; hasImageKey tests one.
-func loadImageKey(key: String, path: String) extern ret Int
+func nativeLoadImageKey(key: String, path: String) unsafe extern("rae_ext_Gpu2d_loadImageKey") ret Int
+func loadImageKey(key: copy String, path: copy String) ret Int {
+  unsafe { ret nativeLoadImageKey(key: key, path: path) }
+}
 # Register an image straight from RGBA pixels generated in Rae (#539) — no file.
 # `pixels` is one packed int per pixel: r | g<<8 | b<<16 | a<<24 (order R,G,B,A).
-func g2dRegisterImageRgba(pixels: view Buffer(Int), w: Int, h: Int) extern("rae_ext_Gpu2d_registerImageRgba") ret Int
-func g2dRegisterImageKeyHandle(key: String, handle: Int) extern("rae_ext_Gpu2d_registerImageKeyHandle")
+func nativeG2dRegisterImageRgba(pixels: view Buffer(Int), w: Int, h: Int) unsafe extern("rae_ext_Gpu2d_registerImageRgba") ret Int
+func g2dRegisterImageRgba(pixels: view Buffer(Int), w: copy Int, h: copy Int) ret Int {
+  unsafe { ret nativeG2dRegisterImageRgba(pixels: pixels, w: w, h: h) }
+}
+func nativeG2dRegisterImageKeyHandle(key: String, handle: Int) unsafe extern("rae_ext_Gpu2d_registerImageKeyHandle")
+func g2dRegisterImageKeyHandle(key: copy String, handle: copy Int) {
+  unsafe { nativeG2dRegisterImageKeyHandle(key: key, handle: handle) }
+}
 func registerImageRgba(key: copy String, pixels: view Buffer(Int), w: copy Int, h: copy Int) pub ret Int {
   let handle: Int = g2dRegisterImageRgba(pixels: pixels, w: w, h: h)
   if handle > 0 { g2dRegisterImageKeyHandle(key: key, handle: handle) }
   ret handle
 }
-func hasImageKey(key: String) extern ret Bool
-func drawImageKey(key: String, x: Float, y: Float, w: Float, h: Float, radius: Float, tint: Int) extern
+func nativeHasImageKey(key: String) unsafe extern("rae_ext_Gpu2d_hasImageKey") ret Bool
+func hasImageKey(key: copy String) ret Bool {
+  unsafe { ret nativeHasImageKey(key: key) }
+}
+func nativeDrawImageKey(key: String, x: Float, y: Float, w: Float, h: Float, radius: Float, tint: Int) unsafe extern("rae_ext_Gpu2d_drawImageKey")
+func drawImageKey(key: copy String, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, tint: copy Int) {
+  unsafe { nativeDrawImageKey(key: key, x: x, y: y, w: w, h: h, radius: radius, tint: tint) }
+}
 # Draw a registered image with ScaleMode semantics:
 # 0 = fit, 1 = fill/cover-crop, 2 = stretch.
-func drawImageKeyScaled(key: String, x: Float, y: Float, w: Float, h: Float, radius: Float, tint: Int, scaleMode: Int) extern
+func nativeDrawImageKeyScaled(key: String, x: Float, y: Float, w: Float, h: Float, radius: Float, tint: Int, scaleMode: Int) unsafe extern("rae_ext_Gpu2d_drawImageKeyScaled")
+func drawImageKeyScaled(key: copy String, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, tint: copy Int, scaleMode: copy Int) {
+  unsafe { nativeDrawImageKeyScaled(key: key, x: x, y: y, w: w, h: h, radius: radius, tint: tint, scaleMode: scaleMode) }
+}
 
 # Draw image `handle` into the rect at (x,y) sized w×h, with optional corner
 # `radius`. `tint` is 0xAARRGGBB applied multiplicatively — 0xFFFFFFFF draws
 # the image unchanged; a solid color tints a white/alpha icon to that color.
 # Submitted between beginFrame/endFrame; drawn above boxes, below text.
-func drawImage(x: Float, y: Float, w: Float, h: Float, radius: Float, handle: Int, tint: Int) extern
+func nativeDrawImage(x: Float, y: Float, w: Float, h: Float, radius: Float, handle: Int, tint: Int) unsafe extern("rae_ext_Gpu2d_drawImage")
+func drawImage(x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, handle: copy Int, tint: copy Int) {
+  unsafe { nativeDrawImage(x: x, y: y, w: w, h: h, radius: radius, handle: handle, tint: tint) }
+}
 
 # --- Text (#111, MSDF glyph quads) ---------------------------------------
 # Low-level: submit one MSDF glyph quad. Screen rect is (sx0,sy0)-(sx1,sy1)
@@ -317,7 +495,7 @@ func drawImage(x: Float, y: Float, w: Float, h: Float, radius: Float, handle: In
 # One atlas/font per frame. Layout helper: lib/gpu2dText.rae drawText.
 func drawGlyph(sx0: Float, sy0: Float, sx1: Float, sy1: Float,
                u0: Float, v0: Float, u1: Float, v1: Float,
-               atlas: Int, pxRange: Float, color: Int) extern
+               atlas: Int, pxRange: Float, color: Int) unsafe extern
 
 # Glyph with an outline: `outlineWidth` px of `outlineColor` (0xAARRGGBB) grown
 # outward from the glyph edge (MSDF dilation), body composited over it. Used by
@@ -325,4 +503,4 @@ func drawGlyph(sx0: Float, sy0: Float, sx1: Float, sy1: Float,
 func drawGlyphEx(sx0: Float, sy0: Float, sx1: Float, sy1: Float,
                  u0: Float, v0: Float, u1: Float, v1: Float,
                  atlas: Int, pxRange: Float, color: Int,
-                 outlineWidth: Float, outlineColor: Int, softness: Float) extern
+                 outlineWidth: Float, outlineColor: Int, softness: Float) unsafe extern

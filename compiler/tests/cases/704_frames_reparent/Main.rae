@@ -55,19 +55,21 @@ func kidsCount(world: view UiWorld, pageId: view String, parentName: view String
 }
 
 func moverUnder(world: view UiWorld, pageId: view String, parentName: view String) ret Bool {
-  let parent: EntityId = nodeEnt(world: world, pageId: pageId, name: parentName)
-  let mover: EntityId = nodeEnt(world: world, pageId: pageId, name: "Mover")
-  if componentHas(this: world.childrens, entity: parent) is false {
+  unsafe {
+    let parent: EntityId = nodeEnt(world: world, pageId: pageId, name: parentName)
+    let mover: EntityId = nodeEnt(world: world, pageId: pageId, name: "Mover")
+    if componentHas(this: world.childrens, entity: parent) is false {
+      ret false
+    }
+    let ch: view Children => componentView(this: world.childrens, entity: parent)
+    loop var i: Int = 0, i < ch.ids.length, ++i {
+      let k: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+      if k is mover {
+        ret true
+      }
+    }
     ret false
   }
-  let ch: view Children => componentView(this: world.childrens, entity: parent)
-  loop var i: Int = 0, i < ch.ids.length, ++i {
-    let k: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
-    if k is mover {
-      ret true
-    }
-  }
-  ret false
 }
 
 func dump(world: view UiWorld, pageId: view String, label: view String) {

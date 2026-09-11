@@ -10,15 +10,17 @@ func randomRange(minimum: view Float, maximum: view Float) ret Float {
 }
 
 func findFreeParticle(world: mod World) ret Int {
-  var i: Int = 0
-  loop i < maxParticles {
-    let cur: Particle = rae_ext_rae_buf_get(buf: world.particles.data, index: i)
-    if cur.active is false {
-      ret i
+  unsafe {
+    var i: Int = 0
+    loop i < maxParticles {
+      let cur: Particle = rae_ext_rae_buf_get(buf: world.particles.data, index: i)
+      if cur.active is false {
+        ret i
+      }
+      i = i + 1
     }
-    i = i + 1
+    ret -1
   }
-  ret -1
 }
 
 func spawnParticle(
@@ -89,38 +91,40 @@ func spawnLineClearParticles(world: mod World, row: view Int) {
 # Update + cull active particles. Main's fixed-step accumulator drives this
 # exactly at 60 Hz, independently from the deferred render rate.
 func particleSystem(world: mod World) {
-  let deltaTime: Float = 0.016
-  var i: Int = 0
-  loop i < maxParticles {
-    let p: Particle = rae_ext_rae_buf_get(buf: world.particles.data, index: i)
-    if p.active {
-      let newLife: Float = p.life - deltaTime
-      if newLife <= 0.0 {
-        let dead: Particle = makeEmptyParticle()
-        let particles: mod List(Particle) => world.particles
-        particles.set(index: i, value: dead)
-      } else {
-        let nx: Float = p.px + p.vx * deltaTime
-        let ny: Float = p.py + p.vy * deltaTime
-        let nz: Float = p.pz + p.vz * deltaTime
-        # Simple gravity.
-        let nvy: Float = p.vy - 9.8 * deltaTime
-        let updated: Particle = {
-          active: true
-          px: nx
-          py: ny
-          pz: nz
-          vx: p.vx
-          vy: nvy
-          vz: p.vz
-          life: newLife
-          size: p.size
-          color: p.color
+  unsafe {
+    let deltaTime: Float = 0.016
+    var i: Int = 0
+    loop i < maxParticles {
+      let p: Particle = rae_ext_rae_buf_get(buf: world.particles.data, index: i)
+      if p.active {
+        let newLife: Float = p.life - deltaTime
+        if newLife <= 0.0 {
+          let dead: Particle = makeEmptyParticle()
+          let particles: mod List(Particle) => world.particles
+          particles.set(index: i, value: dead)
+        } else {
+          let nx: Float = p.px + p.vx * deltaTime
+          let ny: Float = p.py + p.vy * deltaTime
+          let nz: Float = p.pz + p.vz * deltaTime
+          # Simple gravity.
+          let nvy: Float = p.vy - 9.8 * deltaTime
+          let updated: Particle = {
+            active: true
+            px: nx
+            py: ny
+            pz: nz
+            vx: p.vx
+            vy: nvy
+            vz: p.vz
+            life: newLife
+            size: p.size
+            color: p.color
+          }
+          let particles: mod List(Particle) => world.particles
+          particles.set(index: i, value: updated)
         }
-        let particles: mod List(Particle) => world.particles
-        particles.set(index: i, value: updated)
       }
+      i = i + 1
     }
-    i = i + 1
   }
 }

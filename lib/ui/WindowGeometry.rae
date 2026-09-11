@@ -76,36 +76,38 @@ func createWindowGeometry(dir: view String, name: view String) ret WindowGeometr
 #
 # CALL AFTER initWindow. There is no window to place before that.
 func restoreWindowGeometry(g: mod WindowGeometry) ret Bool {
-  # Declaration-only marking for now: this module is coupled to the Gpu2d
-  # renderer externs (window position/size/dpr), whose unsafe migration lands
-  # with the GPU consumers (#876). Opting this file in here would require
-  # wrapping those renderer calls too, so the raw read stays unwrapped until
-  # then. The extern is still marked `unsafe extern`.
-  let raw: String = rae_ext_rae_sys_read_file(path: g.path)
-  if raw.length() < 1 {
-    ret false
+  unsafe {
+    # Declaration-only marking for now: this module is coupled to the Gpu2d
+    # renderer externs (window position/size/dpr), whose unsafe migration lands
+    # with the GPU consumers (#876). Opting this file in here would require
+    # wrapping those renderer calls too, so the raw read stays unwrapped until
+    # then. The extern is still marked `unsafe extern`.
+    let raw: String = rae_ext_rae_sys_read_file(path: g.path)
+    if raw.length() < 1 {
+      ret false
+    }
+    let parts: List(String) = raw.trim().split(sep: " ")
+    if parts.length < 4 {
+      ret false
+    }
+    let x: Int = parts.copyAt(index: 0).trim().toInt()
+    let y: Int = parts.copyAt(index: 1).trim().toInt()
+    let w: Int = parts.copyAt(index: 2).trim().toInt()
+    let h: Int = parts.copyAt(index: 3).trim().toInt()
+    # A zero or negative size is a corrupt or truncated line. Changing nothing is
+    # the right answer: a bad file must not be able to strand the window at 0x0 or
+    # off-screen, where the user cannot get at it to fix it.
+    if w <= 0 or h <= 0 {
+      ret false
+    }
+    Gpu2d.setWindowSize(w: w, h: h)
+    Gpu2d.setWindowPosition(x: x, y: y)
+    g.lastX = x
+    g.lastY = y
+    g.lastW = w
+    g.lastH = h
+    ret true
   }
-  let parts: List(String) = raw.trim().split(sep: " ")
-  if parts.length < 4 {
-    ret false
-  }
-  let x: Int = parts.copyAt(index: 0).trim().toInt()
-  let y: Int = parts.copyAt(index: 1).trim().toInt()
-  let w: Int = parts.copyAt(index: 2).trim().toInt()
-  let h: Int = parts.copyAt(index: 3).trim().toInt()
-  # A zero or negative size is a corrupt or truncated line. Changing nothing is
-  # the right answer: a bad file must not be able to strand the window at 0x0 or
-  # off-screen, where the user cannot get at it to fix it.
-  if w <= 0 or h <= 0 {
-    ret false
-  }
-  Gpu2d.setWindowSize(w: w, h: h)
-  Gpu2d.setWindowPosition(x: x, y: y)
-  g.lastX = x
-  g.lastY = y
-  g.lastW = w
-  g.lastH = h
-  ret true
 }
 
 # UNITS MATTER HERE, and getting them wrong is not obvious from a screenshot.

@@ -63,23 +63,25 @@ func resolveTextLineHeight(theme: view ResolvedTheme, styleId: view String) pub 
 }
 
 func resolveTextColor(theme: view ResolvedTheme, styleId: view String, active: view Theme) pub ret RgbaColor {
-  let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
-  if i < 0 {
-    ret colorByName(theme: active, name: "textPrimary")
+  unsafe {
+    let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
+    if i < 0 {
+      ret colorByName(theme: active, name: "textPrimary")
+    }
+    let slot: String = rae_ext_rae_buf_get(buf: theme.textColorSlots.data, index: i)
+    if slot.length() > 0 {
+      ret colorByName(theme: active, name: slot)
+    }
+    var r: Int = 0
+    var g: Int = 0
+    var b: Int = 0
+    var a: Int = 255
+    if let colorRVal: Int = theme.textColorR.copyAt(index: i) { r = colorRVal }
+    if let colorGVal: Int = theme.textColorG.copyAt(index: i) { g = colorGVal }
+    if let colorBVal: Int = theme.textColorB.copyAt(index: i) { b = colorBVal }
+    if let colorAVal: Int = theme.textColorA.copyAt(index: i) { a = colorAVal }
+    ret RgbaColor { r: r, g: g, b: b, a: a }
   }
-  let slot: String = rae_ext_rae_buf_get(buf: theme.textColorSlots.data, index: i)
-  if slot.length() > 0 {
-    ret colorByName(theme: active, name: slot)
-  }
-  var r: Int = 0
-  var g: Int = 0
-  var b: Int = 0
-  var a: Int = 255
-  if let colorRVal: Int = theme.textColorR.copyAt(index: i) { r = colorRVal }
-  if let colorGVal: Int = theme.textColorG.copyAt(index: i) { g = colorGVal }
-  if let colorBVal: Int = theme.textColorB.copyAt(index: i) { b = colorBVal }
-  if let colorAVal: Int = theme.textColorA.copyAt(index: i) { a = colorAVal }
-  ret RgbaColor { r: r, g: g, b: b, a: a }
 }
 
 func resolveTextIsCentered(theme: view ResolvedTheme, styleId: view String) pub ret Bool {
@@ -111,12 +113,14 @@ func resolveTextIsRightAligned(theme: view ResolvedTheme, styleId: view String) 
 # component. Repairs e39a378, where the shadow was authored inline on
 # every entity.
 func resolveTextShadowName(theme: view ResolvedTheme, styleId: view String) pub ret String {
-  let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
-  if i < 0 {
-    ret ""
+  unsafe {
+    let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId)
+    if i < 0 {
+      ret ""
+    }
+    let name: String = rae_ext_rae_buf_get(buf: theme.textShadowNames.data, index: i)
+    ret name
   }
-  let name: String = rae_ext_rae_buf_get(buf: theme.textShadowNames.data, index: i)
-  ret name
 }
 
 # Tier-2 override application (#236, theme §7). Layer a sparse

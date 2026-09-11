@@ -18,40 +18,44 @@ type Score {
 # because Score has no `<` / `>` for the whole struct, only for the
 # field we care about.
 func sortByPointsDesc(xs: mod List(Score)) {
-  let n: Int = xs.length
-  loop var i: Int = 0, i < n - 1, ++i {
-    var max: Int = i
-    loop var j: Int = i + 1, j < n, ++j {
-      let a: Score = rae_ext_rae_buf_get(buf: xs.data, index: max)
-      let b: Score = rae_ext_rae_buf_get(buf: xs.data, index: j)
-      if b.points > a.points {
-        max = j
+  unsafe {
+    let n: Int = xs.length
+    loop var i: Int = 0, i < n - 1, ++i {
+      var max: Int = i
+      loop var j: Int = i + 1, j < n, ++j {
+        let a: Score = rae_ext_rae_buf_get(buf: xs.data, index: max)
+        let b: Score = rae_ext_rae_buf_get(buf: xs.data, index: j)
+        if b.points > a.points {
+          max = j
+        }
       }
-    }
-    if not (max is i) {
-      swap(xs, i: i, j: max)
+      if not (max is i) {
+        swap(xs, i: i, j: max)
+      }
     }
   }
 }
 
 func main() {
-  let board: List(Score) = List.create(Score, cap: 5)
-  let s1: Score = { name: "ada", points: 120, whenMs: 1700000000000 }
-  let s2: Score = { name: "lin", points: 350, whenMs: 1700086400000 }
-  let s3: Score = { name: "tom", points: 80,  whenMs: 1700172800000 }
-  let s4: Score = { name: "kim", points: 240, whenMs: 1700259200000 }
-  let s5: Score = { name: "jay", points: 400, whenMs: 1700345600000 }
-  add(board, value: s1)
-  add(board, value: s2)
-  add(board, value: s3)
-  add(board, value: s4)
-  add(board, value: s5)
+  unsafe {
+    let board: List(Score) = List.create(Score, cap: 5)
+    let s1: Score = { name: "ada", points: 120, whenMs: 1700000000000 }
+    let s2: Score = { name: "lin", points: 350, whenMs: 1700086400000 }
+    let s3: Score = { name: "tom", points: 80,  whenMs: 1700172800000 }
+    let s4: Score = { name: "kim", points: 240, whenMs: 1700259200000 }
+    let s5: Score = { name: "jay", points: 400, whenMs: 1700345600000 }
+    add(board, value: s1)
+    add(board, value: s2)
+    add(board, value: s3)
+    add(board, value: s4)
+    add(board, value: s5)
 
-  sortByPointsDesc(board)
+    sortByPointsDesc(board)
 
-  log("== HIGHSCORES ==")
-  loop var i: Int = 0, i < board.length, ++i {
-    let s: Score = rae_ext_rae_buf_get(buf: board.data, index: i)
-    log("{i + 1}. {s.name} - {s.points} pts ({Time.formatDate(epochMs: s.whenMs)})")
+    log("== HIGHSCORES ==")
+    loop var i: Int = 0, i < board.length, ++i {
+      let s: Score = rae_ext_rae_buf_get(buf: board.data, index: i)
+      log("{i + 1}. {s.name} - {s.points} pts ({Time.formatDate(epochMs: s.whenMs)})")
+    }
   }
 }

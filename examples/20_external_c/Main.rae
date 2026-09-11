@@ -1,7 +1,9 @@
-func external_c_func(a: Int, b: Int) extern ret Int
+func external_c_func(a: Int, b: Int) unsafe extern ret Int
 
 func main() {
-  let result: Int = external_c_func(a: 10, b: 20)
-  log("Result: ")
-  log(result)
+  unsafe {
+    let result: Int = external_c_func(a: 10, b: 20)
+    log("Result: ")
+    log(result)
+  }
 }

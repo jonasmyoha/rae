@@ -8,36 +8,38 @@
 import String
 import Sys
 
-func rae_ext_rae_mem_stats_outstanding() extern ret Int
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
 
 func main() {
-  let warmups: Int = 50
-  var i: Int = 0
-  loop i < warmups {
-    let xs: List(String) = List.create(String, cap: 4)
-    xs.add(value: "alpha-".concat(other: "x"))
-    xs.add(value: "beta-".concat(other: "y"))
-    xs.add(value: "gamma-".concat(other: "z"))
-    i = i + 1
-  }
-  let baseline: Int = rae_ext_rae_mem_stats_outstanding()
+  unsafe {
+    let warmups: Int = 50
+    var i: Int = 0
+    loop i < warmups {
+      let xs: List(String) = List.create(String, cap: 4)
+      xs.add(value: "alpha-".concat(other: "x"))
+      xs.add(value: "beta-".concat(other: "y"))
+      xs.add(value: "gamma-".concat(other: "z"))
+      i = i + 1
+    }
+    let baseline: Int = rae_ext_rae_mem_stats_outstanding()
 
-  let iterations: Int = 5000
-  i = 0
-  loop i < iterations {
-    let xs: List(String) = List.create(String, cap: 4)
-    xs.add(value: "alpha-".concat(other: "x"))
-    xs.add(value: "beta-".concat(other: "y"))
-    xs.add(value: "gamma-".concat(other: "z"))
-    i = i + 1
-  }
-  let final: Int = rae_ext_rae_mem_stats_outstanding()
-  let leaked: Int = final - baseline
+    let iterations: Int = 5000
+    i = 0
+    loop i < iterations {
+      let xs: List(String) = List.create(String, cap: 4)
+      xs.add(value: "alpha-".concat(other: "x"))
+      xs.add(value: "beta-".concat(other: "y"))
+      xs.add(value: "gamma-".concat(other: "z"))
+      i = i + 1
+    }
+    let final: Int = rae_ext_rae_mem_stats_outstanding()
+    let leaked: Int = final - baseline
 
-  log("iterations: {iterations}")
-  if leaked < 100 {
-    log("verdict: OK")
-  } else {
-    log("verdict: LEAK outstanding={leaked}")
+    log("iterations: {iterations}")
+    if leaked < 100 {
+      log("verdict: OK")
+    } else {
+      log("verdict: LEAK outstanding={leaked}")
+    }
   }
 }

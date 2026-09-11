@@ -13,39 +13,43 @@ import Vec3
 import Scene
 import Camera
 
-func emitFloat(v: Float) extern
+func emitFloat(v: Float) unsafe extern
 
 func emitVec3(a: view Vec3) {
-    emitFloat(v: a.x)
-    emitFloat(v: a.y)
-    emitFloat(v: a.z)
+  unsafe {
+      emitFloat(v: a.x)
+      emitFloat(v: a.y)
+      emitFloat(v: a.z)
+  }
 }
 
 func main() {
-    # Must match the dispatch size in the host (devtools display): 768x432 (16:9).
-    let width: Int = 768
-    let height: Int = 432
-    let aspect: Float = width.toFloat() / height.toFloat()
+  unsafe {
+      # Must match the dispatch size in the host (devtools display): 768x432 (16:9).
+      let width: Int = 768
+      let height: Int = 432
+      let aspect: Float = width.toFloat() / height.toFloat()
 
-    let camPos: Vec3 = Vec3.create(x: -1.6, y: -1.2, z: 0.6)
-    let camTarget: Vec3 = Vec3.create(x: 0.0, y: 1.0, z: 0.0)
-    let cam: Camera = buildCamera(pos: camPos, target: camTarget, vfovDeg: 45.0, aperture: 0.06, aspect: aspect)
+      let camPos: Vec3 = Vec3.create(x: -1.6, y: -1.2, z: 0.6)
+      let camTarget: Vec3 = Vec3.create(x: 0.0, y: 1.0, z: 0.0)
+      let cam: Camera = buildCamera(pos: camPos, target: camTarget, vfovDeg: 45.0, aperture: 0.06, aspect: aspect)
 
-    emitVec3(a: cam.origin)
-    emitVec3(a: cam.lowerLeft)
-    emitVec3(a: cam.horizontal)
-    emitVec3(a: cam.vertical)
-    emitVec3(a: cam.right)
-    emitVec3(a: cam.up)
-    emitFloat(v: cam.lensRadius)
+      emitVec3(a: cam.origin)
+      emitVec3(a: cam.lowerLeft)
+      emitVec3(a: cam.horizontal)
+      emitVec3(a: cam.vertical)
+      emitVec3(a: cam.right)
+      emitVec3(a: cam.up)
+      emitFloat(v: cam.lensRadius)
 
-    let world: List(Sphere) = buildScene()
-    loop let sphere: view Sphere in world {
-        emitVec3(a: sphere.center)
-        emitFloat(v: sphere.radius)
-        emitVec3(a: sphere.material.albedo)
-        emitFloat(v: sphere.material.kind.toFloat())
-        emitFloat(v: sphere.material.fuzz)
-        emitFloat(v: sphere.material.ior)
-    }
+      let world: List(Sphere) = buildScene()
+      loop let sphere: view Sphere in world {
+          emitVec3(a: sphere.center)
+          emitFloat(v: sphere.radius)
+          emitVec3(a: sphere.material.albedo)
+          emitFloat(v: sphere.material.kind.toFloat())
+          emitFloat(v: sphere.material.fuzz)
+          emitFloat(v: sphere.material.ior)
+      }
+  }
 }

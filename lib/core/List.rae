@@ -8,7 +8,9 @@ type List(T: type) {
 }
 
 func createList(T: type, cap: view Int) ret List(T) {
-  ret List(T) { data: rae_ext_rae_buf_alloc(size: cap, elemSize: sizeof(T)), length: 0, cap: cap }
+  unsafe {
+    ret List(T) { data: rae_ext_rae_buf_alloc(size: cap, elemSize: sizeof(T)), length: 0, cap: cap }
+  }
 }
 
 # The constructor by name (#880): `let names: List(String) = create(cap: 4)`
@@ -18,30 +20,34 @@ func create(T: type, cap: view Int) ret List(T) {
 }
 
 func grow(T: type, this: mod List(T)) {
-  var newCap: Int = this.cap * 2
-  if newCap is 0 {
-    newCap = 4
+  unsafe {
+    var newCap: Int = this.cap * 2
+    if newCap is 0 {
+      newCap = 4
+    }
+    let newData: Buffer(T) = rae_ext_rae_buf_alloc(size: newCap, elemSize: sizeof(T))
+    rae_ext_rae_buf_copy(
+      src: this.data
+      src_off: 0
+      dst: newData
+      dst_off: 0
+      len: this.length
+      elemSize: sizeof(T)
+    )
+    rae_ext_rae_buf_free(buf: this.data)
+    this.data = newData
+    this.cap = newCap
   }
-  let newData: Buffer(T) = rae_ext_rae_buf_alloc(size: newCap, elemSize: sizeof(T))
-  rae_ext_rae_buf_copy(
-    src: this.data
-    src_off: 0
-    dst: newData
-    dst_off: 0
-    len: this.length
-    elemSize: sizeof(T)
-  )
-  rae_ext_rae_buf_free(buf: this.data)
-  this.data = newData
-  this.cap = newCap
 }
 
 func add(T: type, this: mod List(T), value: own T) {
-  if this.length is this.cap {
-    grow(this)
+  unsafe {
+    if this.length is this.cap {
+      grow(this)
+    }
+    rae_ext_rae_buf_set(buf: this.data, index: this.length, value: value)
+    this.length = this.length + 1
   }
-  rae_ext_rae_buf_set(buf: this.data, index: this.length, value: value)
-  this.length = this.length + 1
 }
 
 # Copy the element out of the list. Indexed List access is always optional
@@ -49,10 +55,12 @@ func add(T: type, this: mod List(T), value: own T) {
 # a COPY of the element (a whole-struct copy, including deep copies of any heap
 # fields) — reach for `viewAt`/`modAt` to alias the list's storage instead.
 func copyAt(T: type, this: view List(T), index: view Int) ret opt T {
-  if index < 0 or index >= this.length {
-    ret none
+  unsafe {
+    if index < 0 or index >= this.length {
+      ret none
+    }
+    ret rae_ext_rae_buf_get(buf: this.data, index: index)
   }
-  ret rae_ext_rae_buf_get(buf: this.data, index: index)
 }
 
 # TOTAL (non-optional) reads for the structure-of-arrays pattern: several
@@ -63,10 +71,12 @@ func copyAt(T: type, this: view List(T), index: view Int) ret opt T {
 # rule (the else branch is a value the PROGRAMMER wrote). Prefer it when a
 # meaningful sentinel exists.
 func copyAtFallback(T: type, this: view List(T), index: view Int, fallback: T) ret T {
-  if index < 0 or index >= this.length {
-    ret fallback
+  unsafe {
+    if index < 0 or index >= this.length {
+      ret fallback
+    }
+    ret rae_ext_rae_buf_get(buf: this.data, index: index)
   }
-  ret rae_ext_rae_buf_get(buf: this.data, index: index)
 }
 
 # `copyAtDefault` returns the type's zero value out of range (0, 0.0, false,
@@ -75,11 +85,13 @@ func copyAtFallback(T: type, this: view List(T), index: view Int, fallback: T) r
 # `copyAt` + `if let` when absence must be handled distinctly from a real
 # zero, or `copyAtFallback` when the sentinel matters.
 func copyAtDefault(T: type, this: view List(T), index: view Int) ret T {
-  if index < 0 or index >= this.length {
-    var defaultValue: T
-    ret defaultValue
+  unsafe {
+    if index < 0 or index >= this.length {
+      var defaultValue: T
+      ret defaultValue
+    }
+    ret rae_ext_rae_buf_get(buf: this.data, index: index)
   }
-  ret rae_ext_rae_buf_get(buf: this.data, index: index)
 }
 
 # A read-only window INTO the list's own storage, rather than a copy of the
@@ -87,133 +99,153 @@ func copyAtDefault(T: type, this: view List(T), index: view Int) ret T {
 # big struct copies the whole struct — including a deep copy of every heap
 # field it owns. `viewAt` costs a pointer.
 func viewAt(T: type, this: view List(T), index: view Int) ret opt view T {
-  if index < 0 or index >= this.length {
-    ret none
+  unsafe {
+    if index < 0 or index >= this.length {
+      ret none
+    }
+    ret view rae_ext_rae_buf_get(buf: this.data, index: index)
   }
-  ret view rae_ext_rae_buf_get(buf: this.data, index: index)
 }
 
 # Mutable window into the list's storage. Writing through the returned
 # reference writes the element in place — no read-modify-`set` round trip,
 # and no drop/re-add of the element's owned fields.
 func modAt(T: type, this: mod List(T), index: view Int) ret opt mod T {
-  if index < 0 or index >= this.length {
-    ret none
+  unsafe {
+    if index < 0 or index >= this.length {
+      ret none
+    }
+    ret mod rae_ext_rae_buf_get(buf: this.data, index: index)
   }
-  ret mod rae_ext_rae_buf_get(buf: this.data, index: index)
 }
 
 func set(T: type, this: mod List(T), index: view Int, value: own T) {
-  if index < 0 or index >= this.length {
-    ret
+  unsafe {
+    if index < 0 or index >= this.length {
+      ret
+    }
+    rae_ext_rae_buf_drop_at(buf: this.data, index: index)
+    rae_ext_rae_buf_set(buf: this.data, index: index, value: value)
   }
-  rae_ext_rae_buf_drop_at(buf: this.data, index: index)
-  rae_ext_rae_buf_set(buf: this.data, index: index, value: value)
 }
 
 func insert(T: type, this: mod List(T), index: view Int, value: own T) {
-  if index < 0 or index > this.length {
-    ret
+  unsafe {
+    if index < 0 or index > this.length {
+      ret
+    }
+    if this.length is this.cap {
+      grow(this)
+    }
+    # Shift elements to the right
+    if index < this.length {
+      rae_ext_rae_buf_copy(
+        src: this.data
+        src_off: index
+        dst: this.data
+        dst_off: index + 1
+        len: this.length - index
+        elemSize: sizeof(T)
+      )
+    }
+    rae_ext_rae_buf_set(buf: this.data, index: index, value: value)
+    this.length = this.length + 1
   }
-  if this.length is this.cap {
-    grow(this)
-  }
-  # Shift elements to the right
-  if index < this.length {
-    rae_ext_rae_buf_copy(
-      src: this.data
-      src_off: index
-      dst: this.data
-      dst_off: index + 1
-      len: this.length - index
-      elemSize: sizeof(T)
-    )
-  }
-  rae_ext_rae_buf_set(buf: this.data, index: index, value: value)
-  this.length = this.length + 1
 }
 
 func pop(T: type, this: mod List(T)) ret T {
-  if this.length is 0 {
-    ret none
+  unsafe {
+    if this.length is 0 {
+      ret none
+    }
+    let val: T = rae_ext_rae_buf_get(buf: this.data, index: this.length - 1)
+    this.length = this.length - 1
+    ret val
   }
-  let val: T = rae_ext_rae_buf_get(buf: this.data, index: this.length - 1)
-  this.length = this.length - 1
-  ret val
 }
 
 func remove(T: type, this: mod List(T), index: view Int) {
-  if index < 0 or index >= this.length {
-    ret
+  unsafe {
+    if index < 0 or index >= this.length {
+      ret
+    }
+    rae_ext_rae_buf_drop_at(buf: this.data, index: index)
+    # Shift elements to the left
+    if index < this.length - 1 {
+      rae_ext_rae_buf_copy(
+        src: this.data
+        src_off: index + 1
+        dst: this.data
+        dst_off: index
+        len: this.length - index - 1
+        elemSize: sizeof(T)
+      )
+    }
+    this.length = this.length - 1
   }
-  rae_ext_rae_buf_drop_at(buf: this.data, index: index)
-  # Shift elements to the left
-  if index < this.length - 1 {
-    rae_ext_rae_buf_copy(
-      src: this.data
-      src_off: index + 1
-      dst: this.data
-      dst_off: index
-      len: this.length - index - 1
-      elemSize: sizeof(T)
-    )
-  }
-  this.length = this.length - 1
 }
 
 # Unordered remove. Drops the removed slot; if it is not the tail, moves the
 # tail payload into its place and shrinks without dropping the moved tail bytes.
 func swapRemove(T: type, this: mod List(T), index: view Int) {
-  if index < 0 or index >= this.length {
-    ret
+  unsafe {
+    if index < 0 or index >= this.length {
+      ret
+    }
+    let last: Int = this.length - 1
+    if index is last {
+      this.remove(index: index)
+      ret
+    }
+    rae_ext_rae_buf_drop_at(buf: this.data, index: index)
+    let lastVal: T = rae_ext_rae_buf_get(buf: this.data, index: last)
+    rae_ext_rae_buf_set(buf: this.data, index: index, value: lastVal)
+    this.length = this.length - 1
   }
-  let last: Int = this.length - 1
-  if index is last {
-    this.remove(index: index)
-    ret
-  }
-  rae_ext_rae_buf_drop_at(buf: this.data, index: index)
-  let lastVal: T = rae_ext_rae_buf_get(buf: this.data, index: last)
-  rae_ext_rae_buf_set(buf: this.data, index: index, value: lastVal)
-  this.length = this.length - 1
 }
 
 func clear(T: type, this: mod List(T)) {
-  var i: Int = 0
-  loop i < this.length {
-    rae_ext_rae_buf_drop_at(buf: this.data, index: i)
-    i = i + 1
+  unsafe {
+    var i: Int = 0
+    loop i < this.length {
+      rae_ext_rae_buf_drop_at(buf: this.data, index: i)
+      i = i + 1
+    }
+    this.length = 0
   }
-  this.length = 0
 }
 
 # Drop the last element (no return). Use pop() when you need the value; this is
 # for discarding it — one buffer drop, no shift. A no-op on an empty list.
 func removeLast(T: type, this: mod List(T)) {
-  if this.length is 0 {
-    ret
+  unsafe {
+    if this.length is 0 {
+      ret
+    }
+    rae_ext_rae_buf_drop_at(buf: this.data, index: this.length - 1)
+    this.length = this.length - 1
   }
-  rae_ext_rae_buf_drop_at(buf: this.data, index: this.length - 1)
-  this.length = this.length - 1
 }
 
 # Drop every element from index `len` to the end, keeping the first `len`. A
 # `len` at or past the current length is a no-op; a negative `len` empties the
 # list. Cheaper than repeated removeLast() and drops each discarded element.
 func truncate(T: type, this: mod List(T), len: view Int) {
-  var target: Int = len
-  if target < 0 {
-    target = 0
+  unsafe {
+    var target: Int = len
+    if target < 0 {
+      target = 0
+    }
+    if target >= this.length {
+      ret
+    }
+    var i: Int = target
+    loop i < this.length {
+      rae_ext_rae_buf_drop_at(buf: this.data, index: i)
+      i = i + 1
+    }
+    this.length = target
   }
-  if target >= this.length {
-    ret
-  }
-  var i: Int = target
-  loop i < this.length {
-    rae_ext_rae_buf_drop_at(buf: this.data, index: i)
-    i = i + 1
-  }
-  this.length = target
 }
 
 # Ordered remove at `index`: drop the element there and shift the tail left.
@@ -239,56 +271,64 @@ func length(T: type, this: view List(T)) ret Int {
 # example, where `T` is always a value type or a struct with no
 # heap fields of its own.
 func drop(T: type, this: mod List(T)) {
-  rae_ext_rae_buf_free(buf: this.data)
-  this.length = 0
-  this.cap = 0
+  unsafe {
+    rae_ext_rae_buf_free(buf: this.data)
+    this.length = 0
+    this.cap = 0
+  }
 }
 
 func swap(T: type, this: mod List(T), i: view Int, j: view Int) {
-  let temp: T = rae_ext_rae_buf_get(buf: this.data, index: i)
-  rae_ext_rae_buf_set(buf: this.data, index: i, value: rae_ext_rae_buf_get(buf: this.data, index: j))
-  rae_ext_rae_buf_set(buf: this.data, index: j, value: temp)
+  unsafe {
+    let temp: T = rae_ext_rae_buf_get(buf: this.data, index: i)
+    rae_ext_rae_buf_set(buf: this.data, index: i, value: rae_ext_rae_buf_get(buf: this.data, index: j))
+    rae_ext_rae_buf_set(buf: this.data, index: j, value: temp)
+  }
 }
 
 # In-place insertion sort, ascending. Works for any numeric T (Int / Float)
 # where `<` is defined. For String / struct types, write a custom sort or
 # use `sortByDesc` once a comparator API lands.
 func sort(T: type, this: mod List(T)) {
-  var i: Int = 1
-  loop i < this.length {
-    var j: Int = i
-    loop j > 0 {
-      let a: T = rae_ext_rae_buf_get(buf: this.data, index: j - 1)
-      let b: T = rae_ext_rae_buf_get(buf: this.data, index: j)
-      if a < b {
-        # already in order
-        j = 0
-      } else {
-        swap(this, i: j - 1, j: j)
-        j = j - 1
+  unsafe {
+    var i: Int = 1
+    loop i < this.length {
+      var j: Int = i
+      loop j > 0 {
+        let a: T = rae_ext_rae_buf_get(buf: this.data, index: j - 1)
+        let b: T = rae_ext_rae_buf_get(buf: this.data, index: j)
+        if a < b {
+          # already in order
+          j = 0
+        } else {
+          swap(this, i: j - 1, j: j)
+          j = j - 1
+        }
       }
+      i = i + 1
     }
-    i = i + 1
   }
 }
 
 # In-place insertion sort, descending. Useful for highscore tables and
 # anything that wants the largest values first.
 func sortDesc(T: type, this: mod List(T)) {
-  var i: Int = 1
-  loop i < this.length {
-    var j: Int = i
-    loop j > 0 {
-      let a: T = rae_ext_rae_buf_get(buf: this.data, index: j - 1)
-      let b: T = rae_ext_rae_buf_get(buf: this.data, index: j)
-      if a > b {
-        j = 0
-      } else {
-        swap(this, i: j - 1, j: j)
-        j = j - 1
+  unsafe {
+    var i: Int = 1
+    loop i < this.length {
+      var j: Int = i
+      loop j > 0 {
+        let a: T = rae_ext_rae_buf_get(buf: this.data, index: j - 1)
+        let b: T = rae_ext_rae_buf_get(buf: this.data, index: j)
+        if a > b {
+          j = 0
+        } else {
+          swap(this, i: j - 1, j: j)
+          j = j - 1
+        }
       }
+      i = i + 1
     }
-    i = i + 1
   }
 }
 
@@ -309,27 +349,31 @@ func isEmpty(T: type, this: view List(T)) ret Bool {
 
 # Linear search for `value`. Works for any T where `is` is defined.
 func contains(T: type, this: view List(T), value: view T) ret Bool {
-  var i: Int = 0
-  loop i < this.length {
-    let cur: T = rae_ext_rae_buf_get(buf: this.data, index: i)
-    if cur is value {
-      ret true
+  unsafe {
+    var i: Int = 0
+    loop i < this.length {
+      let cur: T = rae_ext_rae_buf_get(buf: this.data, index: i)
+      if cur is value {
+        ret true
+      }
+      i = i + 1
     }
-    i = i + 1
+    ret false
   }
-  ret false
 }
 
 # Returns the first index of `value`, or -1 if not found.
 func indexOf(T: type, this: view List(T), value: view T) ret Int {
-  var i: Int = 0
-  loop i < this.length {
-    let cur: T = rae_ext_rae_buf_get(buf: this.data, index: i)
-    if cur is value {
-      ret i
+  unsafe {
+    var i: Int = 0
+    loop i < this.length {
+      let cur: T = rae_ext_rae_buf_get(buf: this.data, index: i)
+      if cur is value {
+        ret i
+      }
+      i = i + 1
     }
-    i = i + 1
+    ret -1
   }
-  ret -1
 }
 

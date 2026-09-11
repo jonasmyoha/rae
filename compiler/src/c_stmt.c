@@ -520,6 +520,13 @@ static bool stmt_block_returns_alias_v(CompilerContext* cctx, const AstStmt* fir
     } else if (s->kind == AST_STMT_LOOP) {
       if (s->as.loop_stmt.body &&
           stmt_block_returns_alias_v(cctx, s->as.loop_stmt.body->first, v)) return true;
+    } else if (s->kind == AST_STMT_UNSAFE) {
+      // #877: an `unsafe { }` block is a transparent scope for escape
+      // analysis — a `ret <buf_get local>` inside it aliases exactly as it
+      // would at function scope (missing this made the caller own, and
+      // double-free, the container's heap).
+      if (s->as.unsafe_stmt.block &&
+          stmt_block_returns_alias_v(cctx, s->as.unsafe_stmt.block->first, v)) return true;
     }
   }
   return false;

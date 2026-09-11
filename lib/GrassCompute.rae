@@ -97,15 +97,15 @@ func createGrassCompute() ret GrassCompute {
 # itself. Mirrors how the terrain splat pipeline composes its shader.
 func wgsl(surfaceShader: view String) ret String {
   unsafe {
-    if surfaceShader.length() > 0 {
-      ret surfaceShader.concat(other: "\n").concat(other: Gbuffer.gbReadWgsl(path: "lib/grass_compute.wgsl"))
-    }
-    let islandSrc: String = WorldBiome.islandParamsWgsl()
-    let noiseSrc: String = Gbuffer.gbReadWgsl(path: "lib/noise.wgsl")
-    let biomeSrc: String = Gbuffer.gbReadWgsl(path: "lib/world_biome.wgsl")
-    let grassSrc: String = Gbuffer.gbReadWgsl(path: "lib/grass_compute.wgsl")
-    ret islandSrc.concat(other: noiseSrc).concat(other: "\n").concat(other: biomeSrc)
-      .concat(other: "\n").concat(other: grassSrc)
+      if surfaceShader.length() > 0 {
+        ret surfaceShader.concat(other: "\n").concat(other: Gbuffer.gbReadWgsl(path: "lib/grass_compute.wgsl"))
+      }
+      let islandSrc: String = WorldBiome.islandParamsWgsl()
+      let noiseSrc: String = Gbuffer.gbReadWgsl(path: "lib/noise.wgsl")
+      let biomeSrc: String = Gbuffer.gbReadWgsl(path: "lib/world_biome.wgsl")
+      let grassSrc: String = Gbuffer.gbReadWgsl(path: "lib/grass_compute.wgsl")
+      ret islandSrc.concat(other: noiseSrc).concat(other: "\n").concat(other: biomeSrc)
+        .concat(other: "\n").concat(other: grassSrc)
   }
 }
 

@@ -66,28 +66,30 @@ func hoverPaintRank(world: view UiWorld, entity: view EntityId) pub ret Int {
 # pass and lands above sibling rows whose tiles would otherwise
 # overdraw the popped tile's vertical overflow.
 func subtreeHoverPaintRank(world: view UiWorld, entity: view EntityId) pub ret Int {
-  var best: Int = hoverPaintRank(world: world, entity: entity)
-  if best is 2 {
-    ret 2
-  }
-  if componentHas(this: world.childrens, entity: entity) is false {
-    ret best
-  }
-  let ch: view Children => componentView(this: world.childrens, entity: entity)
-  let n: Int = ch.ids.length
-  var i: Int = 0
-  loop i < n {
-    let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
-    let r: Int = subtreeHoverPaintRank(world: world, entity: cid)
-    if r > best {
-      best = r
-    }
+  unsafe {
+    var best: Int = hoverPaintRank(world: world, entity: entity)
     if best is 2 {
       ret 2
     }
-    i = i + 1
+    if componentHas(this: world.childrens, entity: entity) is false {
+      ret best
+    }
+    let ch: view Children => componentView(this: world.childrens, entity: entity)
+    let n: Int = ch.ids.length
+    var i: Int = 0
+    loop i < n {
+      let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+      let r: Int = subtreeHoverPaintRank(world: world, entity: cid)
+      if r > best {
+        best = r
+      }
+      if best is 2 {
+        ret 2
+      }
+      i = i + 1
+    }
+    ret best
   }
-  ret best
 }
 
 # True when `entity` is `ancestor` itself or sits anywhere below it in

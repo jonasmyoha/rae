@@ -25,41 +25,45 @@ func profileAvatarKey() pub ret String {
 
 # Load every album cover into gpu2d under its stem key. Idempotent.
 func loadAlbumCovers(reg: mod TextureRegistry, albums: view List(Album)) pub {
-  var i: Int = 0
-  var loaded: Int = 0
-  loop i < albums.length {
-    let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
-    let key: String = albumCoverKey(stem: a.stem)
-    if textureHas(reg: reg, key: key) is false {
-      # Two fresh String allocations — neither aliases `a`'s storage,
-      # so the cover keeps loading even if `albums` is dropped before
-      # the next refresh.
-      let copiedKey: String = key
-      let copiedPath: String = a.coverPath
-      let h: Int = textureLoad(reg: reg, key: copiedKey, path: copiedPath)
-      loaded = loaded + 1
+  unsafe {
+    var i: Int = 0
+    var loaded: Int = 0
+    loop i < albums.length {
+      let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
+      let key: String = albumCoverKey(stem: a.stem)
+      if textureHas(reg: reg, key: key) is false {
+        # Two fresh String allocations — neither aliases `a`'s storage,
+        # so the cover keeps loading even if `albums` is dropped before
+        # the next refresh.
+        let copiedKey: String = key
+        let copiedPath: String = a.coverPath
+        let h: Int = textureLoad(reg: reg, key: copiedKey, path: copiedPath)
+        loaded = loaded + 1
+      }
+      i = i + 1
     }
-    i = i + 1
+    log("[asset_loader] loaded {loaded} album covers")
   }
-  log("[asset_loader] loaded {loaded} album covers")
 }
 
 # Load the profile avatar image key from whichever album stem `config.rae`
 # points at. The GPU2D renderer clips it with the authored rounded/circle
 # shape; no CPU-side pre-crop is used in 106.
 func loadAvatar(reg: mod TextureRegistry, albums: view List(Album)) pub {
-  let avatarStem: String = avatarAlbumStem
-  let idx: Int = findAlbumIndex(albums: albums, stem: avatarStem)
-  if idx < 0 {
-    log("[asset_loader] avatar album stem '{avatarStem}' not found — using placeholder")
-    ret
+  unsafe {
+    let avatarStem: String = avatarAlbumStem
+    let idx: Int = findAlbumIndex(albums: albums, stem: avatarStem)
+    if idx < 0 {
+      log("[asset_loader] avatar album stem '{avatarStem}' not found — using placeholder")
+      ret
+    }
+    let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: idx)
+    let avatarKey: String = profileAvatarKey()
+    let avatarPath: String = a.coverPath
+    let copiedKey: String = "{avatarKey}"
+    let copiedPath: String = "{avatarPath}"
+    let h: Int = textureLoad(reg: reg, key: copiedKey, path: copiedPath)
   }
-  let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: idx)
-  let avatarKey: String = profileAvatarKey()
-  let avatarPath: String = a.coverPath
-  let copiedKey: String = "{avatarKey}"
-  let copiedPath: String = "{avatarPath}"
-  let h: Int = textureLoad(reg: reg, key: copiedKey, path: copiedPath)
 }
 
 # Aggregate boot loader. Kept for screenshot/stress compatibility.
@@ -101,48 +105,50 @@ func createAssetLoad() pub ret AssetLoad {
 # once every cover (and the avatar) is registered it becomes a cheap no-op
 # until the album list changes.
 func cascadeGpu2dAssets(reg: mod TextureRegistry, albums: view List(Album), budget: view Int, load: mod AssetLoad) pub ret Bool {
-  if albums.length is not load.coversSeenLen {
-    load.coversSeenLen = albums.length
-    load.coversLoaded = false
-    load.avatarLoaded = false
-  }
-  var busy: Bool = false
-  if load.coversLoaded is false {
-    var i: Int = 0
-    var loaded: Int = 0
-    loop i < albums.length {
-      if loaded >= budget {
-        ret true
-      }
-      let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
-      # Inline the key builder as a call arg (don't bind a `let`) so its
-      # heap stays a pool temp freed by this function's scope flush.
-      if textureHas(reg: reg, key: albumCoverKey(stem: a.stem)) is false {
-        let h: Int = textureLoad(reg: reg, key: albumCoverKey(stem: a.stem), path: a.coverPath)
-        loaded = loaded + 1
-      }
-      i = i + 1
+  unsafe {
+    if albums.length is not load.coversSeenLen {
+      load.coversSeenLen = albums.length
+      load.coversLoaded = false
+      load.avatarLoaded = false
     }
-    # A full pass that registered nothing means every cover is present —
-    # latch so future frames skip the scan entirely.
-    if loaded is 0 {
-      load.coversLoaded = true
-    } else {
-      busy = true
+    var busy: Bool = false
+    if load.coversLoaded is false {
+      var i: Int = 0
+      var loaded: Int = 0
+      loop i < albums.length {
+        if loaded >= budget {
+          ret true
+        }
+        let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
+        # Inline the key builder as a call arg (don't bind a `let`) so its
+        # heap stays a pool temp freed by this function's scope flush.
+        if textureHas(reg: reg, key: albumCoverKey(stem: a.stem)) is false {
+          let h: Int = textureLoad(reg: reg, key: albumCoverKey(stem: a.stem), path: a.coverPath)
+          loaded = loaded + 1
+        }
+        i = i + 1
+      }
+      # A full pass that registered nothing means every cover is present —
+      # latch so future frames skip the scan entirely.
+      if loaded is 0 {
+        load.coversLoaded = true
+      } else {
+        busy = true
+      }
     }
-  }
 
-  if load.avatarLoaded is false {
-    if textureHas(reg: reg, key: profileAvatarKey()) is false {
-      let idx: Int = findAlbumIndex(albums: albums, stem: avatarAlbumStem)
-      if idx >= 0 {
-        let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: idx)
-        let h: Int = textureLoad(reg: reg, key: profileAvatarKey(), path: a.coverPath)
+    if load.avatarLoaded is false {
+      if textureHas(reg: reg, key: profileAvatarKey()) is false {
+        let idx: Int = findAlbumIndex(albums: albums, stem: avatarAlbumStem)
+        if idx >= 0 {
+          let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: idx)
+          let h: Int = textureLoad(reg: reg, key: profileAvatarKey(), path: a.coverPath)
+        }
+        busy = true
+      } else {
+        load.avatarLoaded = true
       }
-      busy = true
-    } else {
-      load.avatarLoaded = true
     }
+    ret busy
   }
-  ret busy
 }

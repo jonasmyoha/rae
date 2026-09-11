@@ -33,7 +33,7 @@ import Json
 # Native: read whole file as a String. Empty string on error /
 # missing. We reach for the extern directly because lib/fs is
 # deliberately discovery-only (see its module doc).
-func rae_ext_rae_sys_read_file(path: String) extern ret String
+func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
 
 # ----- types ---------------------------------------------------------
 
@@ -110,23 +110,27 @@ func createMediaLibrary(albums: own List(Album)) pub ret MediaLibrarySystem {
 # write `track.title` / `track.durationMs` without per-call-site
 # bounds checking. Stub fields: `number=0 title="" durationMs=0`.
 func trackAt(album: view Album, idx: view Int) pub ret Track {
-  if idx < 0 or idx >= album.tracks.length {
-    let empty: String = ""
-    ret Track { number: 0, title: empty, durationMs: 0 }
+  unsafe {
+    if idx < 0 or idx >= album.tracks.length {
+      let empty: String = ""
+      ret Track { number: 0, title: empty, durationMs: 0 }
+    }
+    ret rae_ext_rae_buf_get(buf: album.tracks.data, index: idx)
   }
-  ret rae_ext_rae_buf_get(buf: album.tracks.data, index: idx)
 }
 
 func findAlbumIndex(albums: view List(Album), stem: view String) pub ret Int {
-  var i: Int = 0
-  loop i < albums.length {
-    let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
-    if a.stem is stem {
-      ret i
+  unsafe {
+    var i: Int = 0
+    loop i < albums.length {
+      let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: i)
+      if a.stem is stem {
+        ret i
+      }
+      i = i + 1
     }
-    i = i + 1
+    ret -1
   }
-  ret -1
 }
 
 # "3:24" / "67:12" / "1:23:45". durationSec is derived from ms so
@@ -244,15 +248,17 @@ func parseAlbum(source: view String, stem: view String, coverPath: view String) 
 # Load a single album by stem from disk. Convenience for the
 # "active album" path that reads one entry at a time.
 func loadAlbum(folder: view String, stem: view String) pub ret Album {
-  let copiedStem: String = stem
-  let jsonPath: String = "{folder}/{copiedStem}/album.json"
-  let coverPath: String = "{folder}/{copiedStem}/cover.jpg"
-  let source: String = rae_ext_rae_sys_read_file(path: jsonPath)
-  if source.length() is 0 {
-    log("[album-loader] {jsonPath} missing or empty")
-    ret stubAlbum(stem: copiedStem, coverPath: coverPath)
+  unsafe {
+    let copiedStem: String = stem
+    let jsonPath: String = "{folder}/{copiedStem}/album.json"
+    let coverPath: String = "{folder}/{copiedStem}/cover.jpg"
+    let source: String = rae_ext_rae_sys_read_file(path: jsonPath)
+    if source.length() is 0 {
+      log("[album-loader] {jsonPath} missing or empty")
+      ret stubAlbum(stem: copiedStem, coverPath: coverPath)
+    }
+    ret parseAlbum(source: source, stem: copiedStem, coverPath: coverPath)
   }
-  ret parseAlbum(source: source, stem: copiedStem, coverPath: coverPath)
 }
 
 # Walk the albums/ folder; one Album per subdirectory that has an
@@ -260,28 +266,30 @@ func loadAlbum(folder: view String, stem: view String) pub ret Album {
 # on APFS). Callers can sort by stem / artist / year on the Rae
 # side if a stable display order is needed.
 func loadAllAlbums(folder: view String) pub ret List(Album) {
-  let copiedFolder: String = folder
-  let result: List(Album) = List.create(Album, cap: 32)
-  let entries: List(File) = listDir(folder: copiedFolder)
-  var i: Int = 0
-  loop i < entries.length {
-    let f: File = rae_ext_rae_buf_get(buf: entries.data, index: i)
-    if f.isHidden() is false {
-      # We don't have an `isDir` predicate on File. Use the
-      # "does it have an album.json inside" probe instead — that
-      # filters out stray loose files alongside the album folders
-      # (e.g. a leftover .txt or .DS_Store) for free.
-      let stem: String = f.name
-      let jsonPath: String = "{copiedFolder}/{stem}/album.json"
-      let source: String = rae_ext_rae_sys_read_file(path: jsonPath)
-      if source.length() > 0 {
-        let coverPath: String = "{copiedFolder}/{stem}/cover.jpg"
-        let a: Album = parseAlbum(source: source, stem: stem, coverPath: coverPath)
-        result.add(value: a)
+  unsafe {
+    let copiedFolder: String = folder
+    let result: List(Album) = List.create(Album, cap: 32)
+    let entries: List(File) = listDir(folder: copiedFolder)
+    var i: Int = 0
+    loop i < entries.length {
+      let f: File = rae_ext_rae_buf_get(buf: entries.data, index: i)
+      if f.isHidden() is false {
+        # We don't have an `isDir` predicate on File. Use the
+        # "does it have an album.json inside" probe instead — that
+        # filters out stray loose files alongside the album folders
+        # (e.g. a leftover .txt or .DS_Store) for free.
+        let stem: String = f.name
+        let jsonPath: String = "{copiedFolder}/{stem}/album.json"
+        let source: String = rae_ext_rae_sys_read_file(path: jsonPath)
+        if source.length() > 0 {
+          let coverPath: String = "{copiedFolder}/{stem}/cover.jpg"
+          let a: Album = parseAlbum(source: source, stem: stem, coverPath: coverPath)
+          result.add(value: a)
+        }
       }
+      i = i + 1
     }
-    i = i + 1
+    log("[album-loader] loaded {result.length} albums from {copiedFolder}")
+    ret result
   }
-  log("[album-loader] loaded {result.length} albums from {copiedFolder}")
-  ret result
 }

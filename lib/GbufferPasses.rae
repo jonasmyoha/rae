@@ -17,77 +17,99 @@ open webgpu/Context
 # these bind the same C symbols).
 
 # Composite: tonemap the last radiometric result into the presentable target.
-func gbDeferredPrepare() extern("rae_gb_deferred_prepare") ret Int
-func gbCompositeWgsl() extern("rae_gb_composite_wgsl") ret Ptr
-func gbCompositeSourceView() extern("rae_gb_composite_source_view") ret Ptr
-func gbCompositeSourceIndex() extern("rae_gb_composite_source_index") ret Int
+func nativeGbDeferredPrepare() unsafe extern("rae_gb_deferred_prepare") ret Int
+func gbDeferredPrepare() ret Int {
+  unsafe { ret nativeGbDeferredPrepare() }
+}
+func gbCompositeWgsl() unsafe extern("rae_gb_composite_wgsl") ret Ptr
+func gbCompositeSourceView() unsafe extern("rae_gb_composite_source_view") ret Ptr
+func nativeGbCompositeSourceIndex() unsafe extern("rae_gb_composite_source_index") ret Int
+func gbCompositeSourceIndex() ret Int {
+  unsafe { ret nativeGbCompositeSourceIndex() }
+}
 # TAA on/off (#20). Off routes composite to raw lit and turns on FXAA instead.
-func gbTaaIsEnabled() extern("rae_gb_taa_is_enabled") ret Int
-func gbSetTaaEnabled(on: Int) extern("rae_gb_set_taa_enabled")
+func nativeGbTaaIsEnabled() unsafe extern("rae_gb_taa_is_enabled") ret Int
+func gbTaaIsEnabled() ret Int {
+  unsafe { ret nativeGbTaaIsEnabled() }
+}
+func nativeGbSetTaaEnabled(on: Int) unsafe extern("rae_gb_set_taa_enabled")
+func gbSetTaaEnabled(on: copy Int) {
+  unsafe { nativeGbSetTaaEnabled(on: on) }
+}
 # Distance fog (#57, per-app). on=1 fades geometry to (r,g,b) over [start,end]
 # world units and paints that colour as the background; on=0 keeps the sky.
-func gbSetFog(on: Int, r: Float, g: Float, b: Float, start: Float, end: Float) extern("rae_gb_set_fog")
-func gbCompositePipeline() extern("rae_gb_composite_pipeline") ret Ptr
-func gbCompositeUbuf() extern("rae_gb_composite_ubuf") ret Ptr
-func gbCompositeBind(idx: Int) extern("rae_gb_composite_bind") ret Ptr
-func gbSetCompositePipeline(pipeline: Ptr) extern("rae_gb_set_composite_pipeline")
-func gbSetCompositeUbuf(buf: Ptr) extern("rae_gb_set_composite_ubuf")
-func gbSetCompositeBind(idx: Int, bind: Ptr) extern("rae_gb_set_composite_bind")
+func nativeGbSetFog(on: Int, r: Float, g: Float, b: Float, start: Float, end: Float) unsafe extern("rae_gb_set_fog")
+func gbSetFog(on: copy Int, r: copy Float, g: copy Float, b: copy Float, start: copy Float, end: copy Float) {
+  unsafe { nativeGbSetFog(on: on, r: r, g: g, b: b, start: start, end: end) }
+}
+func gbCompositePipeline() unsafe extern("rae_gb_composite_pipeline") ret Ptr
+func gbCompositeUbuf() unsafe extern("rae_gb_composite_ubuf") ret Ptr
+func gbCompositeBind(idx: Int) unsafe extern("rae_gb_composite_bind") ret Ptr
+func gbSetCompositePipeline(pipeline: Ptr) unsafe extern("rae_gb_set_composite_pipeline")
+func gbSetCompositeUbuf(buf: Ptr) unsafe extern("rae_gb_set_composite_ubuf")
+func gbSetCompositeBind(idx: Int, bind: Ptr) unsafe extern("rae_gb_set_composite_bind")
 # Dynamic resolution (#530): the upscale sampler + current render scale.
-func gbCompositeSampler() extern("rae_gb_composite_sampler") ret Ptr
-func gbSetCompositeSampler(samp: Ptr) extern("rae_gb_set_composite_sampler")
-func gbRenderScale() extern("rae_gb_render_scale") ret Float64
+func gbCompositeSampler() unsafe extern("rae_gb_composite_sampler") ret Ptr
+func gbSetCompositeSampler(samp: Ptr) unsafe extern("rae_gb_set_composite_sampler")
+func nativeGbRenderScale() unsafe extern("rae_gb_render_scale") ret Float64
+func gbRenderScale() ret Float64 {
+  unsafe { ret nativeGbRenderScale() }
+}
 
 # A fullscreen pipeline: no vertex buffers, no depth, one colour target. The
 # reusable primitive every deferred post-pass builds on.
 func makeFullscreenPipeline(wgsl: copy Ptr, format: copy Int32) ret Ptr {
-  let shaderMod: Ptr = makeShaderModule(wgsl: wgsl)
-  var targets: List(WGPUColorTargetState) = List.create(WGPUColorTargetState, cap: 1)
-  targets.add(value: { format: format, writeMask: WGPUColorWriteMask_All })
-  var frags: List(WGPUFragmentState) = List.create(WGPUFragmentState, cap: 1)
-  frags.add(value: {
-    module: shaderMod, entryPoint: { data: gbEntryFs(), length: WGPU_STRLEN },
-    targetCount: 1 as UInt64, targets: targets.data
-  })
-  let desc: WGPURenderPipelineDescriptor = {
-    vertex: { module: shaderMod, entryPoint: { data: gbEntryVs(), length: WGPU_STRLEN } },
-    primitive: {
-      topology: WGPUPrimitiveTopology_TriangleList,
-      frontFace: WGPUFrontFace_CCW, cullMode: WGPUCullMode_None
-    },
-    multisample: { count: 1 as UInt32, mask: 4294967295 as UInt32 },
-    fragment: frags.data
+  unsafe {
+    let shaderMod: Ptr = makeShaderModule(wgsl: wgsl)
+    var targets: List(WGPUColorTargetState) = List.create(WGPUColorTargetState, cap: 1)
+    targets.add(value: { format: format, writeMask: WGPUColorWriteMask_All })
+    var frags: List(WGPUFragmentState) = List.create(WGPUFragmentState, cap: 1)
+    frags.add(value: {
+      module: shaderMod, entryPoint: { data: gbEntryFs(), length: WGPU_STRLEN },
+      targetCount: 1 as UInt64, targets: targets.data
+    })
+    let desc: WGPURenderPipelineDescriptor = {
+      vertex: { module: shaderMod, entryPoint: { data: gbEntryVs(), length: WGPU_STRLEN } },
+      primitive: {
+        topology: WGPUPrimitiveTopology_TriangleList,
+        frontFace: WGPUFrontFace_CCW, cullMode: WGPUCullMode_None
+      },
+      multisample: { count: 1 as UInt32, mask: 4294967295 as UInt32 },
+      fragment: frags.data
+    }
+    let pipeline: Ptr = wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: desc)
+    wgpuShaderModuleRelease(shaderModule: shaderMod)
+    ret pipeline
   }
-  let pipeline: Ptr = wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: desc)
-  wgpuShaderModuleRelease(shaderModule: shaderMod)
-  ret pipeline
 }
 
 # One fullscreen pass (clear + draw 3) into `target` with `pipeline` + `bind`.
 func runFullscreen(pipeline: copy Ptr, bind: copy Ptr, target: copy Ptr) {
-  let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
-  let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
-  var atts: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 1)
-  atts.add(value: {
-    view_: target, depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32,
-    loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store
-  })
-  let rpDesc: WGPURenderPassDescriptor = {
-    colorAttachmentCount: 1 as UInt64, colorAttachments: atts.data
+  unsafe {
+    let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
+    let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
+    var atts: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 1)
+    atts.add(value: {
+      view_: target, depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32,
+      loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store
+    })
+    let rpDesc: WGPURenderPassDescriptor = {
+      colorAttachmentCount: 1 as UInt64, colorAttachments: atts.data
+    }
+    let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
+    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: pipeline)
+    wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
+      group: bind, dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+    wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: 3 as UInt32,
+      instanceCount: 1 as UInt32, firstVertex: 0 as UInt32, firstInstance: 0 as UInt32)
+    wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
+    let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
+    let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
+    gbSubmit(cmd: cmd)
+    wgpuCommandBufferRelease(commandBuffer: cmd)
+    wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
+    wgpuCommandEncoderRelease(commandEncoder: enc)
   }
-  let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
-  wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: pipeline)
-  wgpuRenderPassEncoderSetBindGroup(renderPassEncoder: pass, groupIndex: 0 as UInt32,
-    group: bind, dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
-  wgpuRenderPassEncoderDraw(renderPassEncoder: pass, vertexCount: 3 as UInt32,
-    instanceCount: 1 as UInt32, firstVertex: 0 as UInt32, firstInstance: 0 as UInt32)
-  wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
-  let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
-  let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: enc, descriptor: cbDesc)
-  gbSubmit(cmd: cmd)
-  wgpuCommandBufferRelease(commandBuffer: cmd)
-  wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
-  wgpuCommandEncoderRelease(commandEncoder: enc)
 }
 
 # #764: the deferred pass caches (pipeline/bind "made" flags + the target
@@ -143,78 +165,80 @@ func neutralGrade() pub ret ColorGrade {
 
 # Composite the lit/TAA result into the presentable target with exposure.
 func composite(cache: mod CompositePassCache, exposure: copy Float, grade: view ColorGrade) pub {
-  if gbDeferredPrepare() is 0 { ret }
+  unsafe {
+    if gbDeferredPrepare() is 0 { ret }
 
-  if not cache.pipeMade {
-    cache.pipeMade = true
-    gbSetCompositePipeline(pipeline: makeFullscreenPipeline(wgsl: gbCompositeWgsl(), format: g2dFormat() as Int32))
-    let ud: WGPUBufferDescriptor = {
-      usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst, size: 64 as UInt64
+    if not cache.pipeMade {
+      cache.pipeMade = true
+      gbSetCompositePipeline(pipeline: makeFullscreenPipeline(wgsl: gbCompositeWgsl(), format: g2dFormat() as Int32))
+      let ud: WGPUBufferDescriptor = {
+        usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst, size: 64 as UInt64
+      }
+      gbSetCompositeUbuf(buf: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: ud))
+      # Linear sampler for the dynamic-resolution upscale (#530).
+      let sd: WGPUSamplerDescriptor = {
+        addressModeU: WGPUAddressMode_ClampToEdge, addressModeV: WGPUAddressMode_ClampToEdge,
+        addressModeW: WGPUAddressMode_ClampToEdge,
+        magFilter: WGPUFilterMode_Linear, minFilter: WGPUFilterMode_Linear,
+        mipmapFilter: WGPUMipmapFilterMode_Nearest,
+        lodMinClamp: 0.0 as Float32, lodMaxClamp: 1.0 as Float32, maxAnisotropy: 1 as UInt16
+      }
+      gbSetCompositeSampler(samp: wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: sd))
     }
-    gbSetCompositeUbuf(buf: wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: ud))
-    # Linear sampler for the dynamic-resolution upscale (#530).
-    let sd: WGPUSamplerDescriptor = {
-      addressModeU: WGPUAddressMode_ClampToEdge, addressModeV: WGPUAddressMode_ClampToEdge,
-      addressModeW: WGPUAddressMode_ClampToEdge,
-      magFilter: WGPUFilterMode_Linear, minFilter: WGPUFilterMode_Linear,
-      mipmapFilter: WGPUMipmapFilterMode_Nearest,
-      lodMinClamp: 0.0 as Float32, lodMaxClamp: 1.0 as Float32, maxAnisotropy: 1 as UInt16
+
+    # The source bind is per TAA slot (0/1) or the no-TAA lit slot (2), rebuilt
+    # when the targets change (C released the old handle then).
+    loop cache.bindMade.length < 3 { cache.bindMade.add(value: false) }
+    let gen: Int = gbTargetsGen()
+    if not (gen is cache.bindGen) {
+      cache.bindGen = gen
+      cache.bindMade.set(index: 0, value: false)
+      cache.bindMade.set(index: 1, value: false)
+      cache.bindMade.set(index: 2, value: false)
     }
-    gbSetCompositeSampler(samp: wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: sd))
-  }
+    let idx: Int = gbCompositeSourceIndex()
+    if not compositeSlotMade(cache: cache, idx: idx) {
+      let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbCompositePipeline(), groupIndex: 0 as UInt32)
+      var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 3)
+      entries.add(value: { binding: 0 as UInt32, buffer: gbCompositeUbuf(), size: 64 as UInt64 })
+      entries.add(value: { binding: 1 as UInt32, textureView: gbCompositeSourceView() })
+      entries.add(value: { binding: 2 as UInt32, sampler: gbCompositeSampler() })
+      let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 3 as UInt64, entries: entries.data }
+      gbSetCompositeBind(idx: idx, bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
+      wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+      cache.bindMade.set(index: idx, value: true)
+    }
 
-  # The source bind is per TAA slot (0/1) or the no-TAA lit slot (2), rebuilt
-  # when the targets change (C released the old handle then).
-  loop cache.bindMade.length < 3 { cache.bindMade.add(value: false) }
-  let gen: Int = gbTargetsGen()
-  if not (gen is cache.bindGen) {
-    cache.bindGen = gen
-    cache.bindMade.set(index: 0, value: false)
-    cache.bindMade.set(index: 1, value: false)
-    cache.bindMade.set(index: 2, value: false)
-  }
-  let idx: Int = gbCompositeSourceIndex()
-  if not compositeSlotMade(cache: cache, idx: idx) {
-    let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbCompositePipeline(), groupIndex: 0 as UInt32)
-    var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 3)
-    entries.add(value: { binding: 0 as UInt32, buffer: gbCompositeUbuf(), size: 64 as UInt64 })
-    entries.add(value: { binding: 1 as UInt32, textureView: gbCompositeSourceView() })
-    entries.add(value: { binding: 2 as UInt32, sampler: gbCompositeSampler() })
-    let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 3 as UInt64, entries: entries.data }
-    gbSetCompositeBind(idx: idx, bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
-    wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
-    cache.bindMade.set(index: idx, value: true)
-  }
+    # Four vec4s, matching CompositeU in the shader. Order is load-bearing. Held on
+    # the cache (created once) so the hot path stays zero-alloc (#573).
+    loop cache.uniform.length < 16 { cache.uniform.add(value: 0.0) }
+    var opFlag: Float = 0.0
+    if grade.pbrNeutral { opFlag = 1.0 }
+    cache.uniform.set(index: 0, value: exposure)
+    cache.uniform.set(index: 1, value: gbRenderScale() as Float)   # #530: upscale ratio
+    cache.uniform.set(index: 2, value: opFlag)
+    cache.uniform.set(index: 3, value: grade.contrast)
+    cache.uniform.set(index: 4, value: grade.vibrance)
+    cache.uniform.set(index: 5, value: grade.saturation)
+    cache.uniform.set(index: 6, value: grade.shadowTintStrength)
+    cache.uniform.set(index: 7, value: grade.highlightTintStrength)
+    cache.uniform.set(index: 8, value: grade.shadowTint.x)
+    cache.uniform.set(index: 9, value: grade.shadowTint.y)
+    cache.uniform.set(index: 10, value: grade.shadowTint.z)
+    # p2.w = FXAA flag (#20): on exactly when TAA is off, so the aliasing TAA used
+    # to resolve gets a spatial pass instead. Identity when TAA is enabled.
+    var fxaaFlag: Float = 0.0
+    if gbTaaIsEnabled() is 0 { fxaaFlag = 1.0 }
+    cache.uniform.set(index: 11, value: fxaaFlag)
+    cache.uniform.set(index: 12, value: grade.highlightTint.x)
+    cache.uniform.set(index: 13, value: grade.highlightTint.y)
+    cache.uniform.set(index: 14, value: grade.highlightTint.z)
+    cache.uniform.set(index: 15, value: 0.0)
+    wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: gbCompositeUbuf(),
+      bufferOffset: 0 as UInt64, data: cache.uniform.data, size: 64 as UInt64)
 
-  # Four vec4s, matching CompositeU in the shader. Order is load-bearing. Held on
-  # the cache (created once) so the hot path stays zero-alloc (#573).
-  loop cache.uniform.length < 16 { cache.uniform.add(value: 0.0) }
-  var opFlag: Float = 0.0
-  if grade.pbrNeutral { opFlag = 1.0 }
-  cache.uniform.set(index: 0, value: exposure)
-  cache.uniform.set(index: 1, value: gbRenderScale() as Float)   # #530: upscale ratio
-  cache.uniform.set(index: 2, value: opFlag)
-  cache.uniform.set(index: 3, value: grade.contrast)
-  cache.uniform.set(index: 4, value: grade.vibrance)
-  cache.uniform.set(index: 5, value: grade.saturation)
-  cache.uniform.set(index: 6, value: grade.shadowTintStrength)
-  cache.uniform.set(index: 7, value: grade.highlightTintStrength)
-  cache.uniform.set(index: 8, value: grade.shadowTint.x)
-  cache.uniform.set(index: 9, value: grade.shadowTint.y)
-  cache.uniform.set(index: 10, value: grade.shadowTint.z)
-  # p2.w = FXAA flag (#20): on exactly when TAA is off, so the aliasing TAA used
-  # to resolve gets a spatial pass instead. Identity when TAA is enabled.
-  var fxaaFlag: Float = 0.0
-  if gbTaaIsEnabled() is 0 { fxaaFlag = 1.0 }
-  cache.uniform.set(index: 11, value: fxaaFlag)
-  cache.uniform.set(index: 12, value: grade.highlightTint.x)
-  cache.uniform.set(index: 13, value: grade.highlightTint.y)
-  cache.uniform.set(index: 14, value: grade.highlightTint.z)
-  cache.uniform.set(index: 15, value: 0.0)
-  wgpuQueueWriteBuffer(queue: webgpuQueue(), buffer: gbCompositeUbuf(),
-    bufferOffset: 0 as UInt64, data: cache.uniform.data, size: 64 as UInt64)
-
-  runFullscreen(pipeline: gbCompositePipeline(), bind: gbCompositeBind(idx: idx), target: g2dOffView())
+    runFullscreen(pipeline: gbCompositePipeline(), bind: gbCompositeBind(idx: idx), target: g2dOffView())
+  }
 }
 
 # Public wrapper: the render graph's composite step (was gbuffer.compositePass).
@@ -232,40 +256,48 @@ func compositePassGraded(cache: mod CompositePassCache, exposure: view Float, gr
 # Reads the G-buffer normal (A) + depth, writes the R8 AO target. The uniform
 # (inverse jittered viewProj + camera pos) is C math, uploaded into the shared
 # light uniform by gbSsaoUpload.
-func gbSsaoUpload(camX: Float, camY: Float, camZ: Float) extern("rae_gb_ssao_upload")
-func gbAoWgsl() extern("rae_gb_ao_wgsl") ret Ptr
-func gbAoView() extern("rae_gb_ao_view") ret Ptr
-func gbAoPipeline() extern("rae_gb_ao_pipeline") ret Ptr
-func gbAoBind() extern("rae_gb_ao_bind") ret Ptr
-func gbLightUbuf() extern("rae_gb_light_ubuf") ret Ptr
-func gbLightBytes() extern("rae_gb_light_bytes") ret Int
-func gbSetAoPipeline(pipeline: Ptr) extern("rae_gb_set_ao_pipeline")
-func gbSetAoBind(bind: Ptr) extern("rae_gb_set_ao_bind")
+func nativeGbSsaoUpload(camX: Float, camY: Float, camZ: Float) unsafe extern("rae_gb_ssao_upload")
+func gbSsaoUpload(camX: copy Float, camY: copy Float, camZ: copy Float) {
+  unsafe { nativeGbSsaoUpload(camX: camX, camY: camY, camZ: camZ) }
+}
+func gbAoWgsl() unsafe extern("rae_gb_ao_wgsl") ret Ptr
+func gbAoView() unsafe extern("rae_gb_ao_view") ret Ptr
+func gbAoPipeline() unsafe extern("rae_gb_ao_pipeline") ret Ptr
+func gbAoBind() unsafe extern("rae_gb_ao_bind") ret Ptr
+func gbLightUbuf() unsafe extern("rae_gb_light_ubuf") ret Ptr
+func nativeGbLightBytes() unsafe extern("rae_gb_light_bytes") ret Int
+func gbLightBytes() ret Int {
+  unsafe { ret nativeGbLightBytes() }
+}
+func gbSetAoPipeline(pipeline: Ptr) unsafe extern("rae_gb_set_ao_pipeline")
+func gbSetAoBind(bind: Ptr) unsafe extern("rae_gb_set_ao_bind")
 
 func ssao(cache: mod AoPassCache, camX: copy Float, camY: copy Float, camZ: copy Float) pub {
-  if gbDeferredPrepare() is 0 { ret }
-  if not cache.pipeMade {
-    cache.pipeMade = true
-    gbSetAoPipeline(pipeline: makeFullscreenPipeline(wgsl: gbAoWgsl(), format: WGPUTextureFormat_R8Unorm))
+  unsafe {
+    if gbDeferredPrepare() is 0 { ret }
+    if not cache.pipeMade {
+      cache.pipeMade = true
+      gbSetAoPipeline(pipeline: makeFullscreenPipeline(wgsl: gbAoWgsl(), format: WGPUTextureFormat_R8Unorm))
+    }
+    gbSsaoUpload(camX: camX, camY: camY, camZ: camZ)
+    let gen: Int = gbTargetsGen()
+    if not (gen is cache.bindGen) {
+      cache.bindGen = gen
+      cache.bindMade = false
+    }
+    if not cache.bindMade {
+      cache.bindMade = true
+      let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbAoPipeline(), groupIndex: 0 as UInt32)
+      var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 3)
+      entries.add(value: { binding: 0 as UInt32, buffer: gbLightUbuf(), size: gbLightBytes() as UInt64 })
+      entries.add(value: { binding: 1 as UInt32, textureView: gbViewA() })
+      entries.add(value: { binding: 2 as UInt32, textureView: gbViewDepth() })
+      let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 3 as UInt64, entries: entries.data }
+      gbSetAoBind(bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
+      wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+    }
+    runFullscreen(pipeline: gbAoPipeline(), bind: gbAoBind(), target: gbAoView())
   }
-  gbSsaoUpload(camX: camX, camY: camY, camZ: camZ)
-  let gen: Int = gbTargetsGen()
-  if not (gen is cache.bindGen) {
-    cache.bindGen = gen
-    cache.bindMade = false
-  }
-  if not cache.bindMade {
-    cache.bindMade = true
-    let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbAoPipeline(), groupIndex: 0 as UInt32)
-    var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 3)
-    entries.add(value: { binding: 0 as UInt32, buffer: gbLightUbuf(), size: gbLightBytes() as UInt64 })
-    entries.add(value: { binding: 1 as UInt32, textureView: gbViewA() })
-    entries.add(value: { binding: 2 as UInt32, textureView: gbViewDepth() })
-    let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 3 as UInt64, entries: entries.data }
-    gbSetAoBind(bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
-    wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
-  }
-  runFullscreen(pipeline: gbAoPipeline(), bind: gbAoBind(), target: gbAoView())
 }
 
 # Public wrapper: the render graph's SSAO step (was gbuffer.ssaoPass).
@@ -279,31 +311,42 @@ func ssaoPass(cache: mod AoPassCache, camera: view Camera3d) pub {
 # sun/sky params + the Rae-cooked Hosek state) is C frame-math, uploaded by
 # gbLightUpload; Rae builds the 9-entry bind and runs the pass. The lighting
 # pipeline stays C for now (its creation guards the shared init block).
-func gbLightUpload(camX: Float, camY: Float, camZ: Float, exposure: Float, sunX: Float, sunY: Float, sunZ: Float, sunR: Float, sunG: Float, sunB: Float, skyR: Float, skyG: Float, skyB: Float, gndR: Float, gndG: Float, gndB: Float, skyKind: Float, turbidity: Float, skyExposure: Float, sunSizeRad: Float, zenR: Float, zenG: Float, zenB: Float, bands: Float, horR: Float, horG: Float, horB: Float, discI: Float) extern("rae_gb_light_upload")
-func skyHosekPush(index: Int, value: Float) extern("rae_ext_Gbuffer_skyHosekPush")
-func gbLightPipeline() extern("rae_gb_light_pipeline") ret Ptr
-func gbLitView() extern("rae_gb_lit_view") ret Ptr
-func gbLightBind() extern("rae_gb_light_bind") ret Ptr
-func gbSetLightBind(bind: Ptr) extern("rae_gb_set_light_bind")
-func gbShadowFrameUbuf() extern("rae_gb_shadow_frame_ubuf") ret Ptr
-func gbShadowFrameBytes() extern("rae_gb_shadow_frame_bytes") ret Int
-func gbShadowArrayView() extern("rae_gb_shadow_array_view") ret Ptr
-func gbShadowSampler() extern("rae_gb_shadow_sampler") ret Ptr
+func nativeGbLightUpload(camX: Float, camY: Float, camZ: Float, exposure: Float, sunX: Float, sunY: Float, sunZ: Float, sunR: Float, sunG: Float, sunB: Float, skyR: Float, skyG: Float, skyB: Float, gndR: Float, gndG: Float, gndB: Float, skyKind: Float, turbidity: Float, skyExposure: Float, sunSizeRad: Float, zenR: Float, zenG: Float, zenB: Float, bands: Float, horR: Float, horG: Float, horB: Float, discI: Float) unsafe extern("rae_gb_light_upload")
+func gbLightUpload(camX: copy Float, camY: copy Float, camZ: copy Float, exposure: copy Float, sunX: copy Float, sunY: copy Float, sunZ: copy Float, sunR: copy Float, sunG: copy Float, sunB: copy Float, skyR: copy Float, skyG: copy Float, skyB: copy Float, gndR: copy Float, gndG: copy Float, gndB: copy Float, skyKind: copy Float, turbidity: copy Float, skyExposure: copy Float, sunSizeRad: copy Float, zenR: copy Float, zenG: copy Float, zenB: copy Float, bands: copy Float, horR: copy Float, horG: copy Float, horB: copy Float, discI: copy Float) {
+  unsafe { nativeGbLightUpload(camX: camX, camY: camY, camZ: camZ, exposure: exposure, sunX: sunX, sunY: sunY, sunZ: sunZ, sunR: sunR, sunG: sunG, sunB: sunB, skyR: skyR, skyG: skyG, skyB: skyB, gndR: gndR, gndG: gndG, gndB: gndB, skyKind: skyKind, turbidity: turbidity, skyExposure: skyExposure, sunSizeRad: sunSizeRad, zenR: zenR, zenG: zenG, zenB: zenB, bands: bands, horR: horR, horG: horG, horB: horB, discI: discI) }
+}
+func nativeSkyHosekPush(index: Int, value: Float) unsafe extern("rae_ext_Gbuffer_skyHosekPush")
+func skyHosekPush(index: copy Int, value: copy Float) {
+  unsafe { nativeSkyHosekPush(index: index, value: value) }
+}
+func gbLightPipeline() unsafe extern("rae_gb_light_pipeline") ret Ptr
+func gbLitView() unsafe extern("rae_gb_lit_view") ret Ptr
+func gbLightBind() unsafe extern("rae_gb_light_bind") ret Ptr
+func gbSetLightBind(bind: Ptr) unsafe extern("rae_gb_set_light_bind")
+func gbShadowFrameUbuf() unsafe extern("rae_gb_shadow_frame_ubuf") ret Ptr
+func nativeGbShadowFrameBytes() unsafe extern("rae_gb_shadow_frame_bytes") ret Int
+func gbShadowFrameBytes() ret Int {
+  unsafe { ret nativeGbShadowFrameBytes() }
+}
+func gbShadowArrayView() unsafe extern("rae_gb_shadow_array_view") ret Ptr
+func gbShadowSampler() unsafe extern("rae_gb_shadow_sampler") ret Ptr
 
 
 # Cooked Hosek-Wilkie coefficients pushed before lighting; three vec4 per
 # channel, matching the WGSL `hosek` layout.
 func pushHosekChannel(c: view HosekChannel, base: view Int) {
-  skyHosekPush(index: base + 0, value: c.a)
-  skyHosekPush(index: base + 1, value: c.b)
-  skyHosekPush(index: base + 2, value: c.c)
-  skyHosekPush(index: base + 3, value: c.d)
-  skyHosekPush(index: base + 4, value: c.e)
-  skyHosekPush(index: base + 5, value: c.f)
-  skyHosekPush(index: base + 6, value: c.g)
-  skyHosekPush(index: base + 7, value: c.h)
-  skyHosekPush(index: base + 8, value: c.i)
-  skyHosekPush(index: base + 9, value: c.radiance)
+  unsafe {
+    skyHosekPush(index: base + 0, value: c.a)
+    skyHosekPush(index: base + 1, value: c.b)
+    skyHosekPush(index: base + 2, value: c.c)
+    skyHosekPush(index: base + 3, value: c.d)
+    skyHosekPush(index: base + 4, value: c.e)
+    skyHosekPush(index: base + 5, value: c.f)
+    skyHosekPush(index: base + 6, value: c.g)
+    skyHosekPush(index: base + 7, value: c.h)
+    skyHosekPush(index: base + 8, value: c.i)
+    skyHosekPush(index: base + 9, value: c.radiance)
+  }
 }
 
 # Low-level lighting: upload the uniform (C), build the bind (rebuilt on resize),
@@ -317,35 +360,37 @@ func lighting(cache: mod LightPassCache, camX: copy Float, camY: copy Float, cam
               sunSizeRad: copy Float, zenR: copy Float, zenG: copy Float, zenB: copy Float,
               bands: copy Float, horR: copy Float, horG: copy Float, horB: copy Float,
               discI: copy Float) {
-  if gbDeferredPrepare() is 0 { ret }
-  gbLightUpload(camX: camX, camY: camY, camZ: camZ, exposure: exposure,
-    sunX: sunX, sunY: sunY, sunZ: sunZ, sunR: sunR, sunG: sunG, sunB: sunB,
-    skyR: skyR, skyG: skyG, skyB: skyB, gndR: gndR, gndG: gndG, gndB: gndB,
-    skyKind: skyKind, turbidity: turbidity, skyExposure: skyExposure, sunSizeRad: sunSizeRad,
-    zenR: zenR, zenG: zenG, zenB: zenB, bands: bands, horR: horR, horG: horG, horB: horB, discI: discI)
-  let gen: Int = gbTargetsGen()
-  if not (gen is cache.bindGen) {
-    cache.bindGen = gen
-    cache.bindMade = false
+  unsafe {
+    if gbDeferredPrepare() is 0 { ret }
+    gbLightUpload(camX: camX, camY: camY, camZ: camZ, exposure: exposure,
+      sunX: sunX, sunY: sunY, sunZ: sunZ, sunR: sunR, sunG: sunG, sunB: sunB,
+      skyR: skyR, skyG: skyG, skyB: skyB, gndR: gndR, gndG: gndG, gndB: gndB,
+      skyKind: skyKind, turbidity: turbidity, skyExposure: skyExposure, sunSizeRad: sunSizeRad,
+      zenR: zenR, zenG: zenG, zenB: zenB, bands: bands, horR: horR, horG: horG, horB: horB, discI: discI)
+    let gen: Int = gbTargetsGen()
+    if not (gen is cache.bindGen) {
+      cache.bindGen = gen
+      cache.bindMade = false
+    }
+    if not cache.bindMade {
+      cache.bindMade = true
+      let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbLightPipeline(), groupIndex: 0 as UInt32)
+      var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 9)
+      entries.add(value: { binding: 0 as UInt32, buffer: gbLightUbuf(), size: gbLightBytes() as UInt64 })
+      entries.add(value: { binding: 1 as UInt32, textureView: gbViewA() })
+      entries.add(value: { binding: 2 as UInt32, textureView: gbViewB() })
+      entries.add(value: { binding: 3 as UInt32, textureView: gbViewC() })
+      entries.add(value: { binding: 4 as UInt32, textureView: gbViewDepth() })
+      entries.add(value: { binding: 5 as UInt32, textureView: gbAoView() })
+      entries.add(value: { binding: 6 as UInt32, buffer: gbShadowFrameUbuf(), size: gbShadowFrameBytes() as UInt64 })
+      entries.add(value: { binding: 7 as UInt32, textureView: gbShadowArrayView() })
+      entries.add(value: { binding: 8 as UInt32, sampler: gbShadowSampler() })
+      let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 9 as UInt64, entries: entries.data }
+      gbSetLightBind(bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
+      wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+    }
+    runFullscreen(pipeline: gbLightPipeline(), bind: gbLightBind(), target: gbLitView())
   }
-  if not cache.bindMade {
-    cache.bindMade = true
-    let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbLightPipeline(), groupIndex: 0 as UInt32)
-    var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 9)
-    entries.add(value: { binding: 0 as UInt32, buffer: gbLightUbuf(), size: gbLightBytes() as UInt64 })
-    entries.add(value: { binding: 1 as UInt32, textureView: gbViewA() })
-    entries.add(value: { binding: 2 as UInt32, textureView: gbViewB() })
-    entries.add(value: { binding: 3 as UInt32, textureView: gbViewC() })
-    entries.add(value: { binding: 4 as UInt32, textureView: gbViewDepth() })
-    entries.add(value: { binding: 5 as UInt32, textureView: gbAoView() })
-    entries.add(value: { binding: 6 as UInt32, buffer: gbShadowFrameUbuf(), size: gbShadowFrameBytes() as UInt64 })
-    entries.add(value: { binding: 7 as UInt32, textureView: gbShadowArrayView() })
-    entries.add(value: { binding: 8 as UInt32, sampler: gbShadowSampler() })
-    let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 9 as UInt64, entries: entries.data }
-    gbSetLightBind(bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
-    wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
-  }
-  runFullscreen(pipeline: gbLightPipeline(), bind: gbLightBind(), target: gbLitView())
 }
 
 # Public: lighting with a bound sky environment (Hosek ambient + background).
@@ -398,15 +443,24 @@ func lightingPass(cache: mod LightPassCache, camera: view Camera3d, light: view 
 # resolved image into the slot the composite then reads. The ping-pong slot and
 # history flag are C frame state (taaBegin flips + uploads, taaEnd marks
 # history); Rae builds the per-slot bind and runs the pass. Pipeline stays C.
-func gbTaaReady() extern("rae_gb_taa_ready") ret Int
-func gbTaaBegin() extern("rae_gb_taa_begin") ret Int
-func gbTaaEnd() extern("rae_gb_taa_end")
-func gbTaaPipeline() extern("rae_gb_taa_pipeline") ret Ptr
-func gbTaaUbuf() extern("rae_gb_taa_ubuf") ret Ptr
-func gbTaaTargetView() extern("rae_gb_taa_target_view") ret Ptr
-func gbTaaHistoryView() extern("rae_gb_taa_history_view") ret Ptr
-func gbTaaBind(idx: Int) extern("rae_gb_taa_bind") ret Ptr
-func gbSetTaaBind(idx: Int, bind: Ptr) extern("rae_gb_set_taa_bind")
+func nativeGbTaaReady() unsafe extern("rae_gb_taa_ready") ret Int
+func gbTaaReady() ret Int {
+  unsafe { ret nativeGbTaaReady() }
+}
+func nativeGbTaaBegin() unsafe extern("rae_gb_taa_begin") ret Int
+func gbTaaBegin() ret Int {
+  unsafe { ret nativeGbTaaBegin() }
+}
+func nativeGbTaaEnd() unsafe extern("rae_gb_taa_end")
+func gbTaaEnd() {
+  unsafe { nativeGbTaaEnd() }
+}
+func gbTaaPipeline() unsafe extern("rae_gb_taa_pipeline") ret Ptr
+func gbTaaUbuf() unsafe extern("rae_gb_taa_ubuf") ret Ptr
+func gbTaaTargetView() unsafe extern("rae_gb_taa_target_view") ret Ptr
+func gbTaaHistoryView() unsafe extern("rae_gb_taa_history_view") ret Ptr
+func gbTaaBind(idx: Int) unsafe extern("rae_gb_taa_bind") ret Ptr
+func gbSetTaaBind(idx: Int, bind: Ptr) unsafe extern("rae_gb_set_taa_bind")
 
 func taaSlotMade(cache: view TaaPassCache, idx: copy Int) ret Bool {
   if let made: Bool = cache.bindMade.copyAt(index: idx) { ret made }
@@ -414,29 +468,31 @@ func taaSlotMade(cache: view TaaPassCache, idx: copy Int) ret Bool {
 }
 
 func taa(cache: mod TaaPassCache) pub {
-  if gbTaaReady() is 0 { ret }
-  let cur: Int = gbTaaBegin()
-  loop cache.bindMade.length < 2 { cache.bindMade.add(value: false) }
-  let gen: Int = gbTargetsGen()
-  if not (gen is cache.bindGen) {
-    cache.bindGen = gen
-    cache.bindMade.set(index: 0, value: false)
-    cache.bindMade.set(index: 1, value: false)
+  unsafe {
+    if gbTaaReady() is 0 { ret }
+    let cur: Int = gbTaaBegin()
+    loop cache.bindMade.length < 2 { cache.bindMade.add(value: false) }
+    let gen: Int = gbTargetsGen()
+    if not (gen is cache.bindGen) {
+      cache.bindGen = gen
+      cache.bindMade.set(index: 0, value: false)
+      cache.bindMade.set(index: 1, value: false)
+    }
+    if not taaSlotMade(cache: cache, idx: cur) {
+      let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbTaaPipeline(), groupIndex: 0 as UInt32)
+      var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 4)
+      entries.add(value: { binding: 0 as UInt32, textureView: gbLitView() })
+      entries.add(value: { binding: 1 as UInt32, textureView: gbTaaHistoryView() })
+      entries.add(value: { binding: 2 as UInt32, textureView: gbViewC() })
+      entries.add(value: { binding: 3 as UInt32, buffer: gbTaaUbuf(), size: 16 as UInt64 })
+      let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 4 as UInt64, entries: entries.data }
+      gbSetTaaBind(idx: cur, bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
+      wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+      cache.bindMade.set(index: cur, value: true)
+    }
+    runFullscreen(pipeline: gbTaaPipeline(), bind: gbTaaBind(idx: cur), target: gbTaaTargetView())
+    gbTaaEnd()
   }
-  if not taaSlotMade(cache: cache, idx: cur) {
-    let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: gbTaaPipeline(), groupIndex: 0 as UInt32)
-    var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 4)
-    entries.add(value: { binding: 0 as UInt32, textureView: gbLitView() })
-    entries.add(value: { binding: 1 as UInt32, textureView: gbTaaHistoryView() })
-    entries.add(value: { binding: 2 as UInt32, textureView: gbViewC() })
-    entries.add(value: { binding: 3 as UInt32, buffer: gbTaaUbuf(), size: 16 as UInt64 })
-    let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 4 as UInt64, entries: entries.data }
-    gbSetTaaBind(idx: cur, bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
-    wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
-    cache.bindMade.set(index: cur, value: true)
-  }
-  runFullscreen(pipeline: gbTaaPipeline(), bind: gbTaaBind(idx: cur), target: gbTaaTargetView())
-  gbTaaEnd()
 }
 
 # Public wrapper: the render graph's TAA step (was gbuffer.taaPass).
@@ -449,37 +505,45 @@ func taaPass(cache: mod TaaPassCache) pub {
 # each later mip reduces the one above. C keeps the per-mip targets + the two
 # pipelines; Rae drives the loop, building one bind per level (reading the
 # previous mip) and running each pass into that mip's target.
-func gbPyramidReady() extern("rae_gb_pyramid_ready") ret Int
-func gbPyrFromDepthPipeline() extern("rae_gb_pyr_from_depth_pipeline") ret Ptr
-func gbPyrReducePipeline() extern("rae_gb_pyr_reduce_pipeline") ret Ptr
-func gbPyrSrcView(i: Int) extern("rae_gb_pyr_src_view") ret Ptr
-func gbPyrRtView(i: Int) extern("rae_gb_pyr_rt_view") ret Ptr
-func gbPyrBind(i: Int) extern("rae_gb_pyr_bind") ret Ptr
-func gbSetPyrBind(i: Int, bind: Ptr) extern("rae_gb_set_pyr_bind")
-func gbPyramidMips() extern("rae_ext_Gbuffer_pyramidMips") ret Int
+func nativeGbPyramidReady() unsafe extern("rae_gb_pyramid_ready") ret Int
+func gbPyramidReady() ret Int {
+  unsafe { ret nativeGbPyramidReady() }
+}
+func gbPyrFromDepthPipeline() unsafe extern("rae_gb_pyr_from_depth_pipeline") ret Ptr
+func gbPyrReducePipeline() unsafe extern("rae_gb_pyr_reduce_pipeline") ret Ptr
+func gbPyrSrcView(i: Int) unsafe extern("rae_gb_pyr_src_view") ret Ptr
+func gbPyrRtView(i: Int) unsafe extern("rae_gb_pyr_rt_view") ret Ptr
+func gbPyrBind(i: Int) unsafe extern("rae_gb_pyr_bind") ret Ptr
+func gbSetPyrBind(i: Int, bind: Ptr) unsafe extern("rae_gb_set_pyr_bind")
+func nativeGbPyramidMips() unsafe extern("rae_ext_Gbuffer_pyramidMips") ret Int
+func gbPyramidMips() ret Int {
+  unsafe { ret nativeGbPyramidMips() }
+}
 
 func depthPyramid(cache: mod PyrPassCache) pub {
-  if gbPyramidReady() is 0 { ret }
-  let gen: Int = gbTargetsGen()
-  let bindsStale: Bool = not (gen is cache.bindGen)
-  if bindsStale { cache.bindGen = gen }
-  let mips: Int = gbPyramidMips()
-  var i: Int = 0
-  loop i < mips {
-    # Level 0 reduces the G-buffer depth; every later level reduces the one above.
-    var pipeline: Ptr = gbPyrReducePipeline()
-    if i is 0 { pipeline = gbPyrFromDepthPipeline() }
-    # C nulls the per-mip binds on resize; also rebuild when the gen changed.
-    if bindsStale {
-      let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: pipeline, groupIndex: 0 as UInt32)
-      var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 1)
-      entries.add(value: { binding: 0 as UInt32, textureView: gbPyrSrcView(i: i) })
-      let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 1 as UInt64, entries: entries.data }
-      gbSetPyrBind(i: i, bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
-      wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+  unsafe {
+    if gbPyramidReady() is 0 { ret }
+    let gen: Int = gbTargetsGen()
+    let bindsStale: Bool = not (gen is cache.bindGen)
+    if bindsStale { cache.bindGen = gen }
+    let mips: Int = gbPyramidMips()
+    var i: Int = 0
+    loop i < mips {
+      # Level 0 reduces the G-buffer depth; every later level reduces the one above.
+      var pipeline: Ptr = gbPyrReducePipeline()
+      if i is 0 { pipeline = gbPyrFromDepthPipeline() }
+      # C nulls the per-mip binds on resize; also rebuild when the gen changed.
+      if bindsStale {
+        let layout: Ptr = wgpuRenderPipelineGetBindGroupLayout(renderPipeline: pipeline, groupIndex: 0 as UInt32)
+        var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 1)
+        entries.add(value: { binding: 0 as UInt32, textureView: gbPyrSrcView(i: i) })
+        let desc: WGPUBindGroupDescriptor = { layout: layout, entryCount: 1 as UInt64, entries: entries.data }
+        gbSetPyrBind(i: i, bind: wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: desc))
+        wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+      }
+      runFullscreen(pipeline: pipeline, bind: gbPyrBind(i: i), target: gbPyrRtView(i: i))
+      i = i + 1
     }
-    runFullscreen(pipeline: pipeline, bind: gbPyrBind(i: i), target: gbPyrRtView(i: i))
-    i = i + 1
   }
 }
 
