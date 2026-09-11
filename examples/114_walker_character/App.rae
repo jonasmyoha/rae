@@ -53,6 +53,7 @@ open Png
 open app3d/CameraRig
 open app3d/CharacterController
 open app3d/SettingsDialog
+open ui/CornerMenuButton
 open SkyHosek
 open app3d/UiShell
 open app3d/ControlPanel
@@ -466,6 +467,12 @@ func createApp() ret App {
   runUiSystems(world: uiWorld, res: gpuUi)
 
   var panelScroll: EntityId = createScrollPanel(world: uiWorld, viewportId: "SidePanelBody", contentId: "SidePanelContent")
+  # The menu button is an ECS node in the same top row as the camera bar, so the
+  # two hug to one height and resize together (lib/ui/CornerMenuButton).
+  let menuOk: Bool = mountCornerMenuButton(world: uiWorld, res: gpuUi, hostNodeId: "CornerMenuSlot")
+  if menuOk is false {
+    logWarnLine(ov: logView, text: "corner menu button failed to mount")
+  }
   let barOk: Bool = mountCameraBar(world: uiWorld, res: gpuUi, hostNodeId: "CameraBarSlot")
   walkerHideCameraChrome(world: uiWorld)
   var settings: SettingsState = createSettingsState(scene: 1, sceneCount: 1,

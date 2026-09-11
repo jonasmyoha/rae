@@ -63,7 +63,13 @@ type UiTick {
 
 func uiUpdate(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSystem, frame: mod Frame, inputSystem: mod InputSystem, persist: mod PersistState, players: mod PlayerRoster, renderSystem: mod RenderSystem, terrainSystem: mod TerrainSystem, world: view GameWorld, deltaTime: copy Float, now: copy Float64) ret UiTick {
   updateUiInput(input: inputSystem.ui, world: inputSystem.world)
-  if walkerMenuTapped() { toggleWalkerPanel(settings: inputSystem.settings, world: inputSystem.world) suppressUiPress(input: inputSystem.ui) }
+  # The corner menu is a UI-world node, so its press is an action and the
+  # action->layout gate below lays out the panel it toggles. (As an overlay
+  # button its toggle ran no layout; that only went unnoticed because the
+  # time-of-day animation flags settingsChanged every frame while it is on.)
+  if walkerMenuTapped(input: inputSystem.ui) {
+    toggleWalkerPanel(settings: inputSystem.settings, world: inputSystem.world)
+  }
   let scrolled: Bool = updateScrollPanel(world: inputSystem.world, viewport: inputSystem.panelScroll, input: inputSystem.ui)
   if updateDebugOverlay(debugOverlay: inputSystem.dbg, screenW: windowExtentW(), screenH: windowExtentH(),
                         now: now, didRealWork: frame.dbgDidWork) {
@@ -150,7 +156,11 @@ func uiUpdate(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSyst
   if terrainSystem.toon is not characterSystem.toon {
     setInfiniteTerrainToon(terrainSystem: terrainSystem, toon: characterSystem.toon)
   }
-  if uiActionCount(input: inputSystem.ui) > 0 or settingsChanged {
+  # `scrolled`: updateScrollPanel writes the new offset into an Offset
+  # component, and only transformSystem (inside runUiSystems) turns that into
+  # screen positions. Without it the wheel moved nothing until the next
+  # relayout — again masked by the time-of-day animation while it runs.
+  if uiActionCount(input: inputSystem.ui) > 0 or settingsChanged or scrolled {
     runUiSystems(world: inputSystem.world, res: inputSystem.gpuUi)
   }
   ret UiTick { settingsChanged: settingsChanged, scrolled: scrolled }
