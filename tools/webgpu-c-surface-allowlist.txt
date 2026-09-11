@@ -14,11 +14,12 @@
 # rae_gb_lit_texture: borrowed source texture for a Rae-encoded HDR copy.
 # rae_gb_lit_copy_texture: borrowed destination, owned by deferred target lifecycle.
 # rae_gb_lit_copy_view: borrowed sampled snapshot view for transparent materials.
-# #843 platform ABI (same handle-slot idiom as the AO/composite passes):
+# #843 platform ABI:
 # rae_gb_lit_format: the HDR target's runtime-chosen format (rg11b10 vs rgba16f), so the
 #   Rae-built transparent blend pipeline targets exactly what lighting wrote.
-# rae_gb_transparent_pipeline / rae_gb_set_transparent_pipeline: parked Rae-created blend pipeline.
-# rae_gb_transparent_bind / rae_gb_set_transparent_bind: parked Rae-created bind group.
+# (#843's rae_gb_transparent_{pipeline,bind} / rae_gb_set_* slot stores, and the AO / composite /
+#   light / taa / pyramid / inspector parked slots, were REMOVED by #904: those objects are typed
+#   IDs in the DeferredRenderer-owned gpu/GpuResources manager; the C-owned inputs are adopted.)
 # (#830's rae_gb_water_set / _get / _release slot store was REMOVED by #873: water's GPU objects are
 #   typed IDs in the App-owned gpu/GpuResources manager; the gbuffer frame resources it draws with are
 #   adopted externals, not C slots.)

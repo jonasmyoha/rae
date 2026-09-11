@@ -568,3 +568,47 @@ of the water package is a typed ID in an App-owned `gpu/GpuResources`.
     shadow / SDF and the end-of-main `shutdownAll()` replacement).
   - The legacy blocking `lib/GpuTiming.rae` (`rae_gt_set / get`) is the last
     slot store; it folds into `gpu/GpuTiming` with #906.
+
+## Implementation notes (#904): the deferred post-passes on the manager
+
+- **Owner.** `DeferredRenderer` (lib/RendererDeferred.rae) carries its own
+  `IdIssuer` + `opt GpuResources` (capacity 128), created lazily at the first
+  `renderDeferredPassWorld` (the device must be up) and released by
+  `shutdownDeferredRenderer(renderer:)`, which every deferred example calls
+  BEFORE `Gbuffer.shutdownAll()` / `Gpu3d.shutdown()` — the adopted C handles
+  must still be valid while the bind groups over them are released. The
+  example call surface is otherwise unchanged: the manager is threaded from
+  the renderer into each pass as `resources`, next to the pass cache.
+- **Migrated (the C `rae_gb_set_* / get` slots are gone, allowlist note
+  updated):** GbufferPasses — composite pipeline / 64-byte uniform / linear
+  clamp sampler / 3 source binds, ssao pipeline / bind, light bind, the 2 taa
+  binds, the per-mip pyramid binds; GbufferInspector — view pipeline / 16-byte
+  uniform / bind; TransparentForward — blend pipeline / bind. Each pass cache
+  holds its IDs plus `adopted: List(ExternalId)`, the C-owned inputs adopted
+  for the targets generation the binds were built at; a generation change
+  retires the binds first (dropping their pins) and then the adoptions
+  (`releaseExternalIds`), re-adopting on rebuild. The fullscreen pass is still
+  opened in Rae over the bindings and submitted on the shared queue (graph
+  order preserved); the draw is `recordDrawInPass` / `recordDrawInPassExternal`
+  from the IDs, and the transparent draw is `recordDrawIndexedInPass` over the
+  C mesh buffers.
+- **Manager additions (gpu/GpuRender):** external sub-kinds
+  `externalRenderPipeline` / `externalSampler` with `adoptExternalRenderPipeline`
+  / `adoptExternalSampler` (the lighting / taa / pyramid pipelines and the shadow
+  sampler stay C-created; the bind groups over them are manager objects built
+  by `createRenderBindGroupExternal`, which pins the external pipeline slot),
+  the adopt-and-collect helpers `adoptBufferRef` / `adoptTextureViewRef` /
+  `adoptSamplerRef` + `releaseExternalIds`, and the in-pass draws
+  `recordDrawInPassExternal` / `recordDrawIndexedInPass`.
+- **Not objects, left in C:** `rae_gb_set_fog` and `rae_gb_set_taa_enabled`
+  are scalar frame-math inputs (fog goes into the C-built light uniform; the
+  TAA flag gates the C jitter and the composite source) — they migrate with
+  the light / frame uniform math, not with a slot store.
+- **Still parked for the next slice (#912):** Gbuffer's static / skin /
+  terrain pipelines + binds and GbufferTerrain's blend / sampler / tex view —
+  geometry-pass objects drawn from many call sites (GbufferWorld, GrassCompute,
+  GbufferSprite, 114's TerrainSystem) and checked by C's `rae_gb_skin_ready`.
+- The composite sampler moved from a hand-built descriptor (lodMaxClamp 1) to
+  `createSampler` (lodMaxClamp 32): both sample a single-mip target, so the
+  result is identical.
+

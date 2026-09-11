@@ -224,6 +224,7 @@ func main() ret Int {
     waterShutdown(waterSystem: waterSystem, resources: resources)
     shutdown(resources: resources)
   }
+  shutdownDeferredRenderer(renderer: renderer)   # #904: the renderer-owned GPU manager, before the C shutdown
   Gbuffer.shutdownAll()
   Gpu2d.closeWindow()
   ret 0

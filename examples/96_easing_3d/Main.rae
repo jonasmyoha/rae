@@ -121,6 +121,7 @@ func main() ret Int {
   }
 
   if fixedTestFrame { log("[easing3d] deterministic deferred frame rendered") }
+  shutdownDeferredRenderer(renderer: renderer)   # #904: the renderer-owned GPU manager, before the C shutdown
   Gbuffer.shutdownAll()
   Gpu2d.closeWindow()
   ret 0
