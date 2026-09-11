@@ -61,57 +61,57 @@ type Rectangle: c_struct {
 # picks a sub-region of `texture`, `dest` is where it lands, and
 # `origin` is the pivot point relative to dest (use 0,0 for the
 # standard top-left). Tint multiplies the sampled colour.
-func drawTexturePro(texture: Texture, source: Rectangle, dest: Rectangle, origin: Vector2, rotation: Float, tint: Color) extern
+func drawTexturePro(texture: Texture, source: Rectangle, dest: Rectangle, origin: Vector2, rotation: Float, tint: Color) unsafe extern
 
-func initWindow(width: Int, height: Int, title: String) extern
+func initWindow(width: Int, height: Int, title: String) unsafe extern
 
-func setConfigFlags(flags: Int) extern
+func setConfigFlags(flags: Int) unsafe extern
 
-func windowShouldClose() extern ret Bool
+func windowShouldClose() unsafe extern ret Bool
 
-func closeWindow() extern
+func closeWindow() unsafe extern
 
-func beginDrawing() extern
+func beginDrawing() unsafe extern
 
-func endDrawing() extern
+func endDrawing() unsafe extern
 
-func clearBackground(color: Color) extern
+func clearBackground(color: Color) unsafe extern
 
-func loadTexture(fileName: String) extern ret Texture
+func loadTexture(fileName: String) unsafe extern ret Texture
 
 # Streaming textures for CPU-rendered images (raytracers, fractals, etc.).
 # `loadStreamTexture` makes a blank RGBA8 texture of the given size; each
 # frame, `updateStreamTexture` uploads `count` packed 0xRRGGBB pixels
 # (row-major, expanded to opaque RGBA8) so the image can be shown as it is
 # computed. Draw it with the usual drawTexture/drawTextureEx.
-func loadStreamTexture(width: Int, height: Int) extern ret Texture
-func updateStreamTexture(texture: Texture, pixels: view Buffer(Int), count: Int) extern
+func loadStreamTexture(width: Int, height: Int) unsafe extern ret Texture
+func updateStreamTexture(texture: Texture, pixels: view Buffer(Int), count: Int) unsafe extern
 
 # Set a texture's GPU sampling filter. `filter` matches raylib's
 # TextureFilter enum: 0=POINT, 1=BILINEAR, 2=TRILINEAR. MSDF atlases
 # must use BILINEAR (1) or glyph edges stair-step badly.
-func setTextureFilter(texture: Texture, filter: Int) extern
+func setTextureFilter(texture: Texture, filter: Int) unsafe extern
 
 # Load a square / rect image and zero the alpha of every pixel
 # outside the inscribed circle. Returns a Texture suitable for
 # round-avatar use. Rectangular sources still produce a centered
 # circular crop (the inscribed circle's radius = min(w,h)/2).
-func loadCircleCroppedTexture(fileName: String) extern ret Texture
+func loadCircleCroppedTexture(fileName: String) unsafe extern ret Texture
 
 # Load an image and zero the alpha of every pixel outside the rounded
 # rectangle of the given corner radius. Same pre-baked-mask pattern as
 # `loadCircleCroppedTexture` — the renderer can then `DrawTexture` with
 # no per-frame clipping logic, just on the rounded silhouette.
-func loadRoundedCroppedTexture(fileName: String, radius: Float) extern ret Texture
+func loadRoundedCroppedTexture(fileName: String, radius: Float) unsafe extern ret Texture
 
-func unloadTexture(texture: Texture) extern
+func unloadTexture(texture: Texture) unsafe extern
 
 # Raylib trace-log levels — pass to `raylibSetLogLevel` to control
 # console noise. `LOG_INFO`=3, `LOG_WARNING`=4, `LOG_ERROR`=5,
 # `LOG_NONE`=7. Drop to WARNING at boot to suppress per-frame
 # `TEXTURE: [ID N] Texture loaded successfully` spam from blur
 # textures that re-allocate every frame.
-func raylibSetLogLevel(level: Int) extern
+func raylibSetLogLevel(level: Int) unsafe extern
 
 # Bracket a `drawTextureEx` (or any textured draw) with these two
 # calls to render the texture clipped to a rounded rectangle. Width
@@ -119,8 +119,8 @@ func raylibSetLogLevel(level: Int) extern
 # radius, all three in pixels. One fragment shader masks the alpha
 # at the curve with one-pixel smoothstep AA — no pre-baked variants,
 # any size, any radius, any texture.
-func roundedSpriteBegin(width: Float, height: Float, radius: Float) extern
-func roundedSpriteEnd() extern
+func roundedSpriteBegin(width: Float, height: Float, radius: Float) unsafe extern
+func roundedSpriteEnd() unsafe extern
 
 # Bracket a sequence of `drawTexturePro` calls against an MTSDF atlas
 # (see lib/ui/msdf.rae). The shader samples the atlas's RGB MSDF for
@@ -133,8 +133,8 @@ func roundedSpriteEnd() extern
 #   * shadowColor   — shadow tint (a = 0 disables)
 #   * shadowOffX/Y  — shadow displacement in atlas-UV space
 #   * shadowSoftness — falloff width in screen px (1 = hard)
-func msdfBegin(pxRange: Float, textColor: Color, outlineColor: Color, outlineWidth: Float, shadowColor: Color, shadowOffX: Float, shadowOffY: Float, shadowSoftness: Float) extern
-func msdfEnd() extern
+func msdfBegin(pxRange: Float, textColor: Color, outlineColor: Color, outlineWidth: Float, shadowColor: Color, shadowOffX: Float, shadowOffY: Float, shadowSoftness: Float) unsafe extern
+func msdfEnd() unsafe extern
 
 # Draw a rounded rectangle filled with a linear gradient. One atomic
 # call — shader does the gradient + corner-rounding + AA. Angle is in
@@ -155,7 +155,7 @@ func drawGradientRect(
   toB: Int
   toA: Int
   angleDeg: Float
-) extern
+) unsafe extern
 
 # Capture the current back-buffer, run a Gaussian blur over it on the
 # CPU, and upload the result as a Texture. The temporary Image is
@@ -165,7 +165,7 @@ func drawGradientRect(
 # Must be called between `beginDrawing`/`endDrawing` cycles — typically
 # right after `endDrawing` returns, so the back buffer holds the just-
 # rendered frame.
-func captureAndBlurBackdrop(blurSize: Int) extern ret Texture
+func captureAndBlurBackdrop(blurSize: Int) unsafe extern ret Texture
 
 # Same as `captureAndBlurBackdrop` but for a sub-region. `x/y/w/h`
 # are in logical (DPI-independent) coordinates; the implementation
@@ -179,9 +179,9 @@ func captureAndBlurRegion(
   w: Float
   h: Float
   blurSize: Int
-) extern ret Texture
+) unsafe extern ret Texture
 
-func drawTexture(texture: Texture, x: Float, y: Float, tint: Color) extern
+func drawTexture(texture: Texture, x: Float, y: Float, tint: Color) unsafe extern
 
 func drawTextureEx(
   texture: Texture
@@ -189,7 +189,7 @@ func drawTextureEx(
   rotation: Float
   scale: Float
   tint: Color
-) extern
+) unsafe extern
 
 func drawRectangle(
   x: Float
@@ -197,7 +197,7 @@ func drawRectangle(
   width: Float
   height: Float
   color: Color
-) extern
+) unsafe extern
 
 func drawRectangleLines(
   x: Float
@@ -205,7 +205,7 @@ func drawRectangleLines(
   width: Float
   height: Float
   color: Color
-) extern
+) unsafe extern
 
 # Rounded rectangle. `roundness` is the corner radius as a fraction of
 # the smaller side (0.0 = square, 1.0 = pill). `segments` is the number
@@ -219,15 +219,15 @@ func drawRectangleRounded(
   roundness: Float
   segments: Int
   color: Color
-) extern
+) unsafe extern
 
-func drawCircle(x: Float, y: Float, radius: Float, color: Color) extern
+func drawCircle(x: Float, y: Float, radius: Float, color: Color) unsafe extern
 
-func drawCircleGradient(x: Int, y: Int, radius: Float, color1: Color, color2: Color) extern
+func drawCircleGradient(x: Int, y: Int, radius: Float, color1: Color, color2: Color) unsafe extern
 
-func drawRectangleGradientV(x: Int, y: Int, width: Int, height: Int, color1: Color, color2: Color) extern
+func drawRectangleGradientV(x: Int, y: Int, width: Int, height: Int, color1: Color, color2: Color) unsafe extern
 
-func drawRectangleGradientH(x: Int, y: Int, width: Int, height: Int, color1: Color, color2: Color) extern
+func drawRectangleGradientH(x: Int, y: Int, width: Int, height: Int, color1: Color, color2: Color) unsafe extern
 
 func drawText(
   text: String
@@ -235,14 +235,14 @@ func drawText(
   y: Float
   fontSize: Float
   color: Color
-) extern
+) unsafe extern
 
 # Default-font text width measurement, in pixels. Useful for `Hug` text
 # nodes that want to size themselves to their content. Use the slot-
 # aware `measureTextWithFont` below when the text is rendered in a
 # custom font (icon glyphs etc.) — default-font measurement gives the
 # wrong width for codepoints the default font doesn't carry.
-func measureText(text: String, fontSize: Int) extern ret Int
+func measureText(text: String, fontSize: Int) unsafe extern ret Int
 
 # Slot-aware companion to `drawTextWithFont`. Returns the rendered
 # width in pixels at `fontSize` with `spacing` between glyphs. Falls
@@ -252,20 +252,20 @@ func measureTextWithFont(
   text: String
   fontSize: Float
   spacing: Float
-) extern ret Int
+) unsafe extern ret Int
 
 # Custom font support — addresses fonts by integer slot (0..7) instead of
 # exposing raylib's Font struct directly. Slots are global; load once and
 # reuse. `drawTextWithFont` falls back to the default font if the slot
 # isn't loaded, so a missing TTF doesn't blank out the screen.
-func loadFontInto(slot: Int, path: String, fontSize: Int) extern
+func loadFontInto(slot: Int, path: String, fontSize: Int) unsafe extern
 
 # Returns true when `slot` currently has a loaded font. Used by the
 # stdlib's auto-load to avoid clobbering a font the app already
 # loaded manually.
-func isFontSlotLoaded(slot: Int) extern ret Bool
+func isFontSlotLoaded(slot: Int) unsafe extern ret Bool
 
-func unloadFontSlot(slot: Int) extern
+func unloadFontSlot(slot: Int) unsafe extern
 
 func drawTextWithFont(
   slot: Int
@@ -275,7 +275,7 @@ func drawTextWithFont(
   fontSize: Float
   spacing: Float
   color: Color
-) extern
+) unsafe extern
 
 func drawCube(
   pos: Vector3
@@ -283,7 +283,7 @@ func drawCube(
   height: Float
   length: Float
   color: Color
-) extern
+) unsafe extern
 
 func drawCubeWires(
   pos: Vector3
@@ -291,9 +291,9 @@ func drawCubeWires(
   height: Float
   length: Float
   color: Color
-) extern
+) unsafe extern
 
-func drawSphere(centerPos: Vector3, radius: Float, color: Color) extern
+func drawSphere(centerPos: Vector3, radius: Float, color: Color) unsafe extern
 
 func drawCylinder(
   position: Vector3
@@ -302,36 +302,36 @@ func drawCylinder(
   height: Float
   slices: Int
   color: Color
-) extern
+) unsafe extern
 
-func drawGrid(slices: Int, spacing: Float) extern
+func drawGrid(slices: Int, spacing: Float) unsafe extern
 
-func beginMode3D(camera: Camera3D) extern
+func beginMode3D(camera: Camera3D) unsafe extern
 
-func endMode3D() extern
+func endMode3D() unsafe extern
 
-func beginMode2D(camera: Camera2D) extern
+func beginMode2D(camera: Camera2D) unsafe extern
 
-func endMode2D() extern
+func endMode2D() unsafe extern
 
-func setTargetFPS(fps: Int) extern
+func setTargetFPS(fps: Int) unsafe extern
 
 # GLFW wait-events bindings. The current thread blocks until an OS
 # event (input, window, etc.) arrives or `seconds` elapses. Must be
 # called only after `initWindow()` — GLFW must be initialised.
 # Pass `0.0` to poll once and return immediately; pass a small value
 # (e.g. `0.016`) to cap the wait to one animation frame.
-func waitEventsTimeout(seconds: Float) extern
+func waitEventsTimeout(seconds: Float) unsafe extern
 
 # Block until a window/input event arrives. No timeout. Use this only
 # when the app has no running animations; otherwise prefer the
 # timeout-bounded form so animation frames can advance.
-func waitEvents() extern
+func waitEvents() unsafe extern
 
 # Wakes any thread currently blocked in `waitEvents` /
 # `waitEventsTimeout`. Safe to call from any thread (but Rae is
 # single-threaded today, so practical use is limited).
-func postEmptyEvent() extern
+func postEmptyEvent() unsafe extern
 
 # Install a GLFW window-close callback that also calls
 # `postEmptyEvent` so a wait-events main loop wakes immediately when
@@ -340,7 +340,7 @@ func postEmptyEvent() extern
 # NOT post an empty event on macOS, so the wait keeps sleeping until
 # some unrelated event arrives (mouse move into the window, key
 # press, etc.). Call once after `initWindow`.
-func installWindowCloseWaker() extern
+func installWindowCloseWaker() unsafe extern
 
 # Install a GLFW mouse-button callback chained below raylib's. raylib's
 # `isMouseButtonPressed` / `isMouseButtonReleased` compare the previous
@@ -354,20 +354,20 @@ func installWindowCloseWaker() extern
 # take press/release SOLELY from the drains below (gated on
 # `mouseHookActive`), not OR'd with raylib's fragile poll edges. Call
 # once after `initWindow`.
-func installMouseButtonHook() extern
+func installMouseButtonHook() unsafe extern
 
 # Returns true iff at least one left-mouse-button PRESS arrived since
 # the previous call, and resets the flag. Safe to call every frame.
-func mouseHookDrainPressed() extern ret Bool
+func mouseHookDrainPressed() unsafe extern ret Bool
 
 # Symmetric counterpart for RELEASE events.
-func mouseHookDrainReleased() extern ret Bool
+func mouseHookDrainReleased() unsafe extern ret Bool
 
 # True once `installMouseButtonHook` has chained the GLFW callback.
 # Lets the input layer trust the drains as the sole edge source and
 # skip raylib's poll-to-poll edges, falling back to polling only on
 # hosts that never installed the hook.
-func mouseHookActive() extern ret Bool
+func mouseHookActive() unsafe extern ret Bool
 
 # Opt this process out of macOS App Nap. Without this, apps with
 # low idle CPU — exactly what an event-driven wait-events loop
@@ -378,30 +378,30 @@ func mouseHookActive() extern ret Bool
 # `[[NSProcessInfo processInfo] beginActivityWithOptions:reason:]`
 # and stashes the returned activity for the process lifetime.
 # No-op on non-macOS targets.
-func disableAppNap() extern
+func disableAppNap() unsafe extern
 
-func isKeyDown(key: Int) extern ret Bool
+func isKeyDown(key: Int) unsafe extern ret Bool
 
-func isKeyPressed(key: Int) extern ret Bool
+func isKeyPressed(key: Int) unsafe extern ret Bool
 
 # Mouse-wheel delta for the current frame. Returns the accumulated
 # wheel-Y movement since the last poll (positive = scroll up,
 # negative = scroll down on macOS by default). Returns 0.0 when the
 # wheel hasn't moved.
-func getMouseWheelMove() extern ret Float
+func getMouseWheelMove() unsafe extern ret Float
 
 # Mouse input. Coordinates are in logical (point) units, matching the
 # coordinate space used by `drawRectangle` etc. Button is a raylib
 # `MouseButton` enum: 0 = left, 1 = right, 2 = middle.
-func getMouseX() extern ret Int
+func getMouseX() unsafe extern ret Int
 
-func getMouseY() extern ret Int
+func getMouseY() unsafe extern ret Int
 
-func isMouseButtonDown(button: Int) extern ret Bool
+func isMouseButtonDown(button: Int) unsafe extern ret Bool
 
-func isMouseButtonPressed(button: Int) extern ret Bool
+func isMouseButtonPressed(button: Int) unsafe extern ret Bool
 
-func isMouseButtonReleased(button: Int) extern ret Bool
+func isMouseButtonReleased(button: Int) unsafe extern ret Bool
 
 # Override raylib's automatic mouse-coordinate scaling.
 #
@@ -414,51 +414,51 @@ func isMouseButtonReleased(button: Int) extern ret Bool
 # `setMouseScale(1.0, 1.0)` after `initWindow` disables the
 # scaling so `getMouseX`/`getMouseY` report cursor positions in the
 # same coordinate space as `drawRectangle` and friends.
-func setMouseScale(scaleX: Float, scaleY: Float) extern
+func setMouseScale(scaleX: Float, scaleY: Float) unsafe extern
 
-func getScreenWidth() extern ret Int
+func getScreenWidth() unsafe extern ret Int
 
-func getScreenHeight() extern ret Int
+func getScreenHeight() unsafe extern ret Int
 
 # Framebuffer / render-target size, which can differ from
 # `getScreenWidth/Height` on HiDPI displays or when the window has
 # been resized by the OS. Returns the actual number of pixels raylib
 # is drawing into.
-func getRenderWidth() extern ret Int
+func getRenderWidth() unsafe extern ret Int
 
-func getRenderHeight() extern ret Int
+func getRenderHeight() unsafe extern ret Int
 
 # True on the frame the OS window was resized. Drives live re-layout
 # so the UI tracks the real window size (resize, monitor move, un-clamp).
-func isWindowResized() extern ret Bool
+func isWindowResized() unsafe extern ret Bool
 
 # Monitor info + window sizing/positioning. Useful for picking a window
 # size relative to the current display (e.g. "80% of screen height").
-func getCurrentMonitor() extern ret Int
+func getCurrentMonitor() unsafe extern ret Int
 
-func getMonitorWidth(monitor: Int) extern ret Int
+func getMonitorWidth(monitor: Int) unsafe extern ret Int
 
-func getMonitorHeight(monitor: Int) extern ret Int
+func getMonitorHeight(monitor: Int) unsafe extern ret Int
 
 # Display refresh rate in Hz (e.g. 60, 120). 0 if unknown. Used to
 # pace/cap rendering to the display cadence.
-func getMonitorRefreshRate(monitor: Int) extern ret Int
+func getMonitorRefreshRate(monitor: Int) unsafe extern ret Int
 
-func setWindowSize(width: Int, height: Int) extern
+func setWindowSize(width: Int, height: Int) unsafe extern
 
-func setWindowPosition(x: Int, y: Int) extern
-func getWindowPositionX() extern ret Int
-func getWindowPositionY() extern ret Int
+func setWindowPosition(x: Int, y: Int) unsafe extern
+func getWindowPositionX() unsafe extern ret Int
+func getWindowPositionY() unsafe extern ret Int
 
 # Seconds since window init. Float64 like the other clock sources: f32
 # seconds degrade to ~8ms steps after a few hours of uptime, which is
 # visible in frame timing. See docs/primitive-types.md.
-func getTime() extern ret Float64
+func getTime() unsafe extern ret Float64
 
-func colorFromHSV(hue: Float, saturation: Float, value: Float) extern ret Color
+func colorFromHSV(hue: Float, saturation: Float, value: Float) unsafe extern ret Color
 
 # Save a screenshot of the current framebuffer to `fileName`. Must be
 # called between `beginDrawing()` / `endDrawing()` (raylib reads the
 # back-buffer). The path is resolved relative to the working directory
 # at launch time, like `loadTexture`.
-func takeScreenshot(fileName: String) extern
+func takeScreenshot(fileName: String) unsafe extern
