@@ -1,0 +1,24 @@
+# Escape analysis treats `unsafe { }` as a transparent scope: a value aliased
+# out of a container with rae_ext_rae_buf_get and RETURNED from inside the
+# block is an alias, not a fresh owner — the caller must not free the
+# container's heap (#877 owner/escape regression).
+type Item {
+  name: String
+  count: Int
+}
+
+func pick(items: view List(Item), index: view Int) ret Item {
+  unsafe {
+      let found: Item = rae_ext_rae_buf_get(buf: items.data, index: index)
+      ret found
+  }
+}
+
+func main() {
+  let items: List(Item) = List.create(Item, cap: 2)
+  items.add(value: { name: "first", count: 1 })
+  items.add(value: { name: "second", count: 2 })
+  let chosen: Item = pick(items: items, index: 1)
+  log("{chosen.name} {chosen.count}")
+  log("items {items.length}")
+}

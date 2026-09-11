@@ -476,15 +476,17 @@ func destroyEntity(world: mod UiWorld, entity: view EntityId) pub {
 # stores the standard ecs `Children` cache, so there is no UI-local
 # tree walk to duplicate it.
 func destroyEntitySubtree(world: mod UiWorld, root: view EntityId) pub {
-  let collected: List(EntityId) = List.create(EntityId, cap: 32)
-  collectSubtree(childrens: world.childrens, node: root, out: collected)
-  # Destroy in reverse (children before parents).
-  let n: Int = collected.length
-  var i: Int = n - 1
-  loop i >= 0 {
-    let e: EntityId = rae_ext_rae_buf_get(buf: collected.data, index: i)
-    destroyEntity(world: world, entity: e)
-    i = i - 1
+  unsafe {
+    let collected: List(EntityId) = List.create(EntityId, cap: 32)
+    collectSubtree(childrens: world.childrens, node: root, out: collected)
+    # Destroy in reverse (children before parents).
+    let n: Int = collected.length
+    var i: Int = n - 1
+    loop i >= 0 {
+      let e: EntityId = rae_ext_rae_buf_get(buf: collected.data, index: i)
+      destroyEntity(world: world, entity: e)
+      i = i - 1
+    }
   }
 }
 
@@ -493,46 +495,48 @@ func destroyEntitySubtree(world: mod UiWorld, root: view EntityId) pub {
 # prefix so a future page with the same id starts clean. No-op when
 # no page with that id is mounted.
 func unmountPage(world: mod UiWorld, pageId: view String) pub {
-  let root: EntityId = findPageRootEntity(world: world, pageId: pageId)
-  if isNone(this: root) {
-    ret
-  }
-  destroyEntitySubtree(world: world, root: root)
-  # Sweep nodeIds keyed under `"<pageId>/"`. The pageOf walk
-  # already knows about nested PageRoot ancestors but we only
-  # remove the directly-named prefix here; nested pages that share
-  # an ancestor with this page get cleaned by their own unmount.
-  #
-  # Iterates the StringMap's raw buffer directly instead of calling
-  # `keys()` — the generic `keys(V)` doesn't monomorphise cleanly
-  # in the C backend when V is a non-trivial type (the inner
-  # `createList(V)` substitution leaks the type variable). Two
-  # passes: collect matching keys, then remove. Removing during
-  # iteration would shift entries under the cursor.
-  var prefix: String = ""
-  prefix = prefix.concat(other: pageId)
-  let sep: String = "/"
-  prefix = prefix.concat(other: sep)
-  let cap: Int = world.nodeIds.cap
-  let matches: List(String) = List.create(String, cap: 8)
-  var i: Int = 0
-  loop i < cap {
-    let entry: StringMapEntry(Int) = rae_ext_rae_buf_get(buf: world.nodeIds.data, index: i)
-    if entry.occupied {
-      if entry.k.startsWith(prefix: prefix) {
-        var kCopy: String = ""
-        kCopy = kCopy.concat(other: entry.k)
-        matches.add(value: own kCopy)
+  unsafe {
+    let root: EntityId = findPageRootEntity(world: world, pageId: pageId)
+    if isNone(this: root) {
+      ret
+    }
+    destroyEntitySubtree(world: world, root: root)
+    # Sweep nodeIds keyed under `"<pageId>/"`. The pageOf walk
+    # already knows about nested PageRoot ancestors but we only
+    # remove the directly-named prefix here; nested pages that share
+    # an ancestor with this page get cleaned by their own unmount.
+    #
+    # Iterates the StringMap's raw buffer directly instead of calling
+    # `keys()` — the generic `keys(V)` doesn't monomorphise cleanly
+    # in the C backend when V is a non-trivial type (the inner
+    # `createList(V)` substitution leaks the type variable). Two
+    # passes: collect matching keys, then remove. Removing during
+    # iteration would shift entries under the cursor.
+    var prefix: String = ""
+    prefix = prefix.concat(other: pageId)
+    let sep: String = "/"
+    prefix = prefix.concat(other: sep)
+    let cap: Int = world.nodeIds.cap
+    let matches: List(String) = List.create(String, cap: 8)
+    var i: Int = 0
+    loop i < cap {
+      let entry: StringMapEntry(Int) = rae_ext_rae_buf_get(buf: world.nodeIds.data, index: i)
+      if entry.occupied {
+        if entry.k.startsWith(prefix: prefix) {
+          var kCopy: String = ""
+          kCopy = kCopy.concat(other: entry.k)
+          matches.add(value: own kCopy)
+        }
       }
+      i = i + 1
     }
-    i = i + 1
-  }
-  let m: Int = matches.length
-  var j: Int = 0
-  loop j < m {
-    if let k: String = matches.copyAt(index: j) {
-      world.nodeIds.remove(k: k)
+    let m: Int = matches.length
+    var j: Int = 0
+    loop j < m {
+      if let k: String = matches.copyAt(index: j) {
+        world.nodeIds.remove(k: k)
+      }
+      j = j + 1
     }
-    j = j + 1
   }
 }

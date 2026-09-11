@@ -49,28 +49,32 @@ func appendPath(haystack: view String, path: view String) ret String {
 }
 
 func index(reg: view ImageRegistry, key: view String) pub ret Int {
-  var i: Int = 0
-  loop i < reg.items.length {
-    let item: ImageResource = rae_ext_rae_buf_get(buf: reg.items.data, index: i)
-    if item.key is key {
-      ret i
+  unsafe {
+    var i: Int = 0
+    loop i < reg.items.length {
+      let item: ImageResource = rae_ext_rae_buf_get(buf: reg.items.data, index: i)
+      if item.key is key {
+        ret i
+      }
+      i = i + 1
     }
-    i = i + 1
+    ret 0 - 1
   }
-  ret 0 - 1
 }
 
 func imageRegistryHas(reg: view ImageRegistry, key: view String) pub ret Bool {
-  let idx: Int = index(reg: reg, key: key)
-  if idx >= 0 {
-    let item: ImageResource = rae_ext_rae_buf_get(buf: reg.items.data, index: idx)
-    if item.status is ImageLoadStatus.loaded {
-      ret true
+  unsafe {
+    let idx: Int = index(reg: reg, key: key)
+    if idx >= 0 {
+      let item: ImageResource = rae_ext_rae_buf_get(buf: reg.items.data, index: idx)
+      if item.status is ImageLoadStatus.loaded {
+        ret true
+      }
     }
+    # Raw gpu2d still owns the render-time key table for now; consult it as a
+    # compatibility bridge while policy moves to Rae.
+    ret Gpu2d.hasImageKey(key: key)
   }
-  # Raw gpu2d still owns the render-time key table for now; consult it as a
-  # compatibility bridge while policy moves to Rae.
-  ret Gpu2d.hasImageKey(key: key)
 }
 
 func isFailedPath(reg: view ImageRegistry, path: view String) pub ret Bool {
@@ -98,87 +102,93 @@ func markFired(reg: mod ImageRegistry, path: view String) pub {
 }
 
 func markPending(reg: mod ImageRegistry, key: view String, path: view String) pub {
-  let idx: Int = index(reg: reg, key: key)
-  if idx >= 0 {
-    let item: ImageResource = rae_ext_rae_buf_get(buf: reg.items.data, index: idx)
-    let updated: ImageResource = {
-      key: "{item.key}"
-      path: "{path}"
-      status: ImageLoadStatus.pending
-      handle: item.handle
-      attempts: item.attempts
-    }
-    reg.items.set(index: idx, value: own updated)
-    reg.revision = reg.revision + 1
-    ret
-  }
-  let res: ImageResource = {
-    key: "{key}"
-    path: "{path}"
-    status: ImageLoadStatus.pending
-    handle: 0
-    attempts: 0
-  }
-  reg.items.add(value: own res)
-  reg.revision = reg.revision + 1
-}
-
-func upsertResult(reg: mod ImageRegistry, key: view String, path: view String, handle: view Int) {
-  var status: ImageLoadStatus = ImageLoadStatus.failed
-  if handle > 0 {
-    status = ImageLoadStatus.loaded
-  }
-  let idx: Int = index(reg: reg, key: key)
-  if idx >= 0 {
-    let item: ImageResource = rae_ext_rae_buf_get(buf: reg.items.data, index: idx)
-    var attempts: Int = item.attempts
-    if handle <= 0 {
-      attempts = attempts + 1
-    }
-    let updated: ImageResource = {
-      key: "{key}"
-      path: "{path}"
-      status: status
-      handle: handle
-      attempts: attempts
-    }
-    reg.items.set(index: idx, value: own updated)
-  } else {
-    var attempts: Int = 0
-    if handle <= 0 {
-      attempts = 1
+  unsafe {
+    let idx: Int = index(reg: reg, key: key)
+    if idx >= 0 {
+      let item: ImageResource = rae_ext_rae_buf_get(buf: reg.items.data, index: idx)
+      let updated: ImageResource = {
+        key: "{item.key}"
+        path: "{path}"
+        status: ImageLoadStatus.pending
+        handle: item.handle
+        attempts: item.attempts
+      }
+      reg.items.set(index: idx, value: own updated)
+      reg.revision = reg.revision + 1
+      ret
     }
     let res: ImageResource = {
       key: "{key}"
       path: "{path}"
-      status: status
-      handle: handle
-      attempts: attempts
+      status: ImageLoadStatus.pending
+      handle: 0
+      attempts: 0
     }
     reg.items.add(value: own res)
-  }
-  if handle <= 0 {
-    markFailedPath(reg: reg, path: path)
-  } else {
     reg.revision = reg.revision + 1
   }
 }
 
-func load(reg: mod ImageRegistry, key: view String, path: view String) pub ret Int {
-  if imageRegistryHas(reg: reg, key: key) {
+func upsertResult(reg: mod ImageRegistry, key: view String, path: view String, handle: view Int) {
+  unsafe {
+    var status: ImageLoadStatus = ImageLoadStatus.failed
+    if handle > 0 {
+      status = ImageLoadStatus.loaded
+    }
     let idx: Int = index(reg: reg, key: key)
     if idx >= 0 {
       let item: ImageResource = rae_ext_rae_buf_get(buf: reg.items.data, index: idx)
-      ret item.handle
+      var attempts: Int = item.attempts
+      if handle <= 0 {
+        attempts = attempts + 1
+      }
+      let updated: ImageResource = {
+        key: "{key}"
+        path: "{path}"
+        status: status
+        handle: handle
+        attempts: attempts
+      }
+      reg.items.set(index: idx, value: own updated)
+    } else {
+      var attempts: Int = 0
+      if handle <= 0 {
+        attempts = 1
+      }
+      let res: ImageResource = {
+        key: "{key}"
+        path: "{path}"
+        status: status
+        handle: handle
+        attempts: attempts
+      }
+      reg.items.add(value: own res)
     }
-    ret 1
+    if handle <= 0 {
+      markFailedPath(reg: reg, path: path)
+    } else {
+      reg.revision = reg.revision + 1
+    }
   }
-  if isFailedPath(reg: reg, path: path) {
-    ret 0
+}
+
+func load(reg: mod ImageRegistry, key: view String, path: view String) pub ret Int {
+  unsafe {
+    if imageRegistryHas(reg: reg, key: key) {
+      let idx: Int = index(reg: reg, key: key)
+      if idx >= 0 {
+        let item: ImageResource = rae_ext_rae_buf_get(buf: reg.items.data, index: idx)
+        ret item.handle
+      }
+      ret 1
+    }
+    if isFailedPath(reg: reg, path: path) {
+      ret 0
+    }
+    let copiedKey: String = "{key}"
+    let copiedPath: String = "{path}"
+    let handle: Int = Gpu2d.loadImageKey(key: copiedKey, path: copiedPath)
+    upsertResult(reg: reg, key: key, path: path, handle: handle)
+    ret handle
   }
-  let copiedKey: String = "{key}"
-  let copiedPath: String = "{path}"
-  let handle: Int = Gpu2d.loadImageKey(key: copiedKey, path: copiedPath)
-  upsertResult(reg: reg, key: key, path: path, handle: handle)
-  ret handle
 }

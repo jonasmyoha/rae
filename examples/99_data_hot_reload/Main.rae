@@ -19,14 +19,16 @@ import FileWatch
 # declare the
 # extern with a non-opt return so we get a plain `rae_String` (empty
 # on miss).
-func rae_ext_rae_sys_read_file(path: String) extern ret String
+func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
 
 func loadConfig(path: view String) ret String {
-  let contents: String = rae_ext_rae_sys_read_file(path: path)
-  if contents.length() is 0 {
-    ret "<missing>"
+  unsafe {
+    let contents: String = rae_ext_rae_sys_read_file(path: path)
+    if contents.length() is 0 {
+      ret "<missing>"
+    }
+    ret contents
   }
-  ret contents
 }
 
 func main() {

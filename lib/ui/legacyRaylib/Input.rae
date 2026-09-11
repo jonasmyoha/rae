@@ -111,33 +111,35 @@ func pointInEntity(world: view UiWorld, entity: view EntityId, x: view Float, y:
 # layout (union of own bounds + every descendant's bounds) and check
 # those — not the entity's own visual bounds.
 func hitTestEntity(world: view UiWorld, entity: view EntityId, x: view Float, y: view Float) ret EntityId {
-  # Children first, in reverse declaration order — visually-topmost
-  # child wins. Recurse regardless of own bounds (see comment above).
-  if componentHas(this: world.childrens, entity: entity) {
-    let ch: view Children => componentView(this: world.childrens, entity: entity)
-    let n: Int = ch.ids.length
-    var i: Int = n - 1
-    loop i >= 0 {
-      let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
-      let hit: EntityId = hitTestEntity(world: world, entity: cid, x: x, y: y)
-      if isNone(this: hit) is false {
-        ret hit
+  unsafe {
+    # Children first, in reverse declaration order — visually-topmost
+    # child wins. Recurse regardless of own bounds (see comment above).
+    if componentHas(this: world.childrens, entity: entity) {
+      let ch: view Children => componentView(this: world.childrens, entity: entity)
+      let n: Int = ch.ids.length
+      var i: Int = n - 1
+      loop i >= 0 {
+        let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+        let hit: EntityId = hitTestEntity(world: world, entity: cid, x: x, y: y)
+        if isNone(this: hit) is false {
+          ret hit
+        }
+        i = i - 1
       }
-      i = i - 1
     }
-  }
 
-  # Self: only register a hit if this entity actually carries an
-  # `OnClick` AND its own rect contains the cursor. `pointInEntity`
-  # also checks `wt.visible`, so subtrees that the TransformSystem
-  # marked invisible (inactive ancestor, hidden hero target during
-  # a transition, etc.) won't fire.
-  if componentHas(this: world.onClicks, entity: entity) {
-    if pointInEntity(world: world, entity: entity, x: x, y: y) {
-      ret entity
+    # Self: only register a hit if this entity actually carries an
+    # `OnClick` AND its own rect contains the cursor. `pointInEntity`
+    # also checks `wt.visible`, so subtrees that the TransformSystem
+    # marked invisible (inactive ancestor, hidden hero target during
+    # a transition, etc.) won't fire.
+    if componentHas(this: world.onClicks, entity: entity) {
+      if pointInEntity(world: world, entity: entity, x: x, y: y) {
+        ret entity
+      }
     }
+    ret inputNoEntity
   }
-  ret inputNoEntity
 }
 
 # Walk every alive root and return the topmost entity at (x, y) that
@@ -147,27 +149,29 @@ func hitTestEntity(world: view UiWorld, entity: view EntityId, x: view Float, y:
 # subtree without pruning on intermediate ancestor bounds — see its
 # comment.
 func hitTest(world: view UiWorld, x: view Float, y: view Float) ret EntityId {
-  # Walk roots top-down by Layer order — overlays (higher-order
-  # layers) get first crack at the click. `collectPaintableRoots`
-  # gives the same ordering the renderer uses; we iterate it in
-  # reverse so the last-painted (= top-most) root is hit-tested
-  # first. Without this the dock (a high-layer overlay) would lose
-  # all taps to the album page underneath it, even though the dock
-  # is what's visible.
-  let roots: List(EntityId) = collectPaintableRoots(world: world)
-  let n: Int = roots.length
-  var i: Int = n - 1
-  loop i >= 0 {
-    let e: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
-    if componentHas(this: world.layerRoots, entity: e) is false {
-      let hit: EntityId = hitTestEntity(world: world, entity: e, x: x, y: y)
-      if isNone(this: hit) is false {
-        ret hit
+  unsafe {
+    # Walk roots top-down by Layer order — overlays (higher-order
+    # layers) get first crack at the click. `collectPaintableRoots`
+    # gives the same ordering the renderer uses; we iterate it in
+    # reverse so the last-painted (= top-most) root is hit-tested
+    # first. Without this the dock (a high-layer overlay) would lose
+    # all taps to the album page underneath it, even though the dock
+    # is what's visible.
+    let roots: List(EntityId) = collectPaintableRoots(world: world)
+    let n: Int = roots.length
+    var i: Int = n - 1
+    loop i >= 0 {
+      let e: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
+      if componentHas(this: world.layerRoots, entity: e) is false {
+        let hit: EntityId = hitTestEntity(world: world, entity: e, x: x, y: y)
+        if isNone(this: hit) is false {
+          ret hit
+        }
       }
+      i = i - 1
     }
-    i = i - 1
+    ret inputNoEntity
   }
-  ret inputNoEntity
 }
 
 # Append an `ActionEvent` to the input system's queue.

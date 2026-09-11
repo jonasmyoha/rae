@@ -12,28 +12,28 @@
 
 # Create the instance/adapter/device/queue once (idempotent). Returns 1 on
 # success, 0 if no GPU is available. Call before any accessor below.
-func webgpuBootstrap() extern("rae_wgpu_ctx_bootstrap") ret Int
+func webgpuBootstrap() unsafe extern("rae_wgpu_ctx_bootstrap") ret Int
 
 # Handles from the bootstrap, as opaque Ptr. Valid only after webgpuBootstrap()
 # returned 1. Feed these straight into the generated wgpu* bindings.
-func webgpuDevice() extern("rae_wgpu_ctx_device") ret Ptr
-func webgpuQueue() extern("rae_wgpu_ctx_queue") ret Ptr
-func webgpuAdapter() extern("rae_wgpu_ctx_adapter") ret Ptr
-func webgpuInstance() extern("rae_wgpu_ctx_instance") ret Ptr
+func webgpuDevice() unsafe extern("rae_wgpu_ctx_device") ret Ptr
+func webgpuQueue() unsafe extern("rae_wgpu_ctx_queue") ret Ptr
+func webgpuAdapter() unsafe extern("rae_wgpu_ctx_adapter") ret Ptr
+func webgpuInstance() unsafe extern("rae_wgpu_ctx_instance") ret Ptr
 
 # Advance the device event queue (map/submit callbacks). wait != 0 blocks until
 # there is work; wait == 0 polls. Needed until Rae can pass callbacks to C.
-func webgpuPoll(wait: Int) extern("rae_wgpu_ctx_poll")
+func webgpuPoll(wait: Int) unsafe extern("rae_wgpu_ctx_poll")
 
 # A null opaque pointer, for WebGPU params that take an optional pointer/array
 # (e.g. dynamicOffsets when the count is 0). Rae has no null-Ptr literal yet.
-func webgpuNull() extern("rae_wgpu_null_ptr") ret Ptr
+func webgpuNull() unsafe extern("rae_wgpu_null_ptr") ret Ptr
 
 # 1 if the device got the GPU timestamp-query features at creation (#528), else 0.
 # Timestamp timing is skipped when this is 0 (adapter didn't offer them).
-func webgpuHaveTimestamp() extern("rae_wgpu_have_timestamp") ret Int
+func webgpuHaveTimestamp() unsafe extern("rae_wgpu_have_timestamp") ret Int
 
 # Blocking read of a MapRead buffer's [0,size) bytes into `dst` (#528). The map
 # callback must be C (Rae can't synthesize a function pointer yet); everything
 # else is done from Rae. Returns 1 on success. `dst` is typically a List's .data.
-func webgpuMapRead(buffer: Ptr, size: UInt64, dst: Ptr) extern("rae_wgpu_map_read") ret Int
+func webgpuMapRead(buffer: Ptr, size: UInt64, dst: Ptr) unsafe extern("rae_wgpu_map_read") ret Int

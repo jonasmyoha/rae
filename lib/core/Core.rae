@@ -5,7 +5,10 @@
 # auto-loaded and auto-opened together as the prelude.
 # Everything here is bare-callable everywhere; no import needed.
 
-func nextTick() unsafe extern ret Int
+func nativeNextTick() unsafe extern("rae_ext_nextTick") ret Int
+func nextTick() ret Int {
+  unsafe { ret nativeNextTick() }
+}
 
 # Console output — a core essential (globally visible, callable bare), so
 # everyday code writes `log(x)` not `io.log(x)`. (docs/module-namespacing.md)
@@ -20,11 +23,20 @@ func logS(value: Any) {
     unsafe { rae_ext_rae_log_stream_any(value: value) }
 }
 
-func nowMs() unsafe extern ret Int
+func nativeNowMs() unsafe extern("rae_ext_nowMs") ret Int
+func nowMs() ret Int {
+  unsafe { ret nativeNowMs() }
+}
 
-func nowNs() unsafe extern ret Int
+func nativeNowNs() unsafe extern("rae_ext_nowNs") ret Int
+func nowNs() ret Int {
+  unsafe { ret nativeNowNs() }
+}
 
-func sleep(ms: Int) unsafe extern
+func nativeSleep(ms: Int) unsafe extern("rae_ext_rae_sleep")
+func sleep(ms: copy Int) {
+  unsafe { nativeSleep(ms: ms) }
+}
 
 func rae_int_to_float(i: Int) unsafe extern ret Float
 

@@ -176,38 +176,40 @@ func checkRepeated(resources: mod GpuResources) ret Bool {
 }
 
 func main() ret Int {
-  if webgpuBootstrap() is not 1 {
-    log("no GPU")
+  unsafe {
+    if webgpuBootstrap() is not 1 {
+      log("no GPU")
+      ret 1
+    }
+    var issuer: IdIssuer = IdIssuer.create()
+    if let managerA: GpuResources = GpuResources.create(issuer: issuer, capacity: 8) {
+      if let managerB: GpuResources = GpuResources.create(issuer: issuer, capacity: 8) {
+        if checkComputeAndCopy(resources: managerA) is false { ret 1 }
+        log("compute + copy, known contents, nonblocking polling, early retirement, old bind group, abandoned and refused recordings OK")
+        if checkRepeated(resources: managerB) is false { ret 1 }
+        log("repeated submissions OK")
+        # Independent managers: a submission of one is unknown to the other.
+        if let storage: BufferId = createBuffer(resources: managerA, size: 64, usage: WGPUBufferUsage_CopySrc + WGPUBufferUsage_CopyDst) {
+          if let recording: Recording = beginRecording(resources: managerA) {
+            # A self-copy is invalid WebGPU; the manager refuses it before wgpu sees it.
+            if recordCopyBuffer(recording: recording, resources: managerA, source: storage, sourceOffset: 0, destination: storage, destinationOffset: 32, size: 32) { ret 1 }
+            if let other: BufferId = createBuffer(resources: managerA, size: 64, usage: WGPUBufferUsage_CopyDst) {
+              if recordCopyBuffer(recording: recording, resources: managerA, source: storage, sourceOffset: 0, destination: other, destinationOffset: 0, size: 64) is false { ret 1 }
+            } else { ret 1 }
+            if let submission: SubmissionId = submit(resources: managerA, recording: recording) {
+              if pollSubmission(resources: managerB, id: submission) is not (0 - 1) { ret 1 }
+              if awaitSubmission(resources: managerA, id: submission) is not 1 { ret 1 }
+            } else { ret 1 }
+          }
+        }
+        shutdown(resources: managerA)
+        shutdown(resources: managerB)
+        if liveSubmissionCount(resources: managerA) is not 0 or pendingReleaseCount(resources: managerA) is not 0 { ret 1 }
+        log("independent managers and shutdown OK")
+        ret 0
+      }
+    }
+    log("FAIL: manager creation")
     ret 1
   }
-  var issuer: IdIssuer = IdIssuer.create()
-  if let managerA: GpuResources = GpuResources.create(issuer: issuer, capacity: 8) {
-    if let managerB: GpuResources = GpuResources.create(issuer: issuer, capacity: 8) {
-      if checkComputeAndCopy(resources: managerA) is false { ret 1 }
-      log("compute + copy, known contents, nonblocking polling, early retirement, old bind group, abandoned and refused recordings OK")
-      if checkRepeated(resources: managerB) is false { ret 1 }
-      log("repeated submissions OK")
-      # Independent managers: a submission of one is unknown to the other.
-      if let storage: BufferId = createBuffer(resources: managerA, size: 64, usage: WGPUBufferUsage_CopySrc + WGPUBufferUsage_CopyDst) {
-        if let recording: Recording = beginRecording(resources: managerA) {
-          # A self-copy is invalid WebGPU; the manager refuses it before wgpu sees it.
-          if recordCopyBuffer(recording: recording, resources: managerA, source: storage, sourceOffset: 0, destination: storage, destinationOffset: 32, size: 32) { ret 1 }
-          if let other: BufferId = createBuffer(resources: managerA, size: 64, usage: WGPUBufferUsage_CopyDst) {
-            if recordCopyBuffer(recording: recording, resources: managerA, source: storage, sourceOffset: 0, destination: other, destinationOffset: 0, size: 64) is false { ret 1 }
-          } else { ret 1 }
-          if let submission: SubmissionId = submit(resources: managerA, recording: recording) {
-            if pollSubmission(resources: managerB, id: submission) is not (0 - 1) { ret 1 }
-            if awaitSubmission(resources: managerA, id: submission) is not 1 { ret 1 }
-          } else { ret 1 }
-        }
-      }
-      shutdown(resources: managerA)
-      shutdown(resources: managerB)
-      if liveSubmissionCount(resources: managerA) is not 0 or pendingReleaseCount(resources: managerA) is not 0 { ret 1 }
-      log("independent managers and shutdown OK")
-      ret 0
-    }
-  }
-  log("FAIL: manager creation")
-  ret 1
 }

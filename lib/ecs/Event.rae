@@ -50,8 +50,10 @@ func eventIsEmpty(T: type, this: view EventQueue(T)) pub ret Bool {
 # Read the i-th event this frame (0 = first sent). Drain in order:
 #   loop i < eventCount { handle(eventAt(events, i)); i++ }
 func eventAt(T: type, this: view EventQueue(T), i: view Int) pub ret T {
-  let value: T = rae_ext_rae_buf_get(buf: this.events.data, index: i)
-  ret value
+  unsafe {
+    let value: T = rae_ext_rae_buf_get(buf: this.events.data, index: i)
+    ret value
+  }
 }
 
 # Advance the frame: recycle the channel so the next frame starts empty. Call

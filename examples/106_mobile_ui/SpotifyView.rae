@@ -179,42 +179,44 @@ func saveHistoryArtworkMetadata(track: view SpotifyTrack, imageHash: view String
 }
 
 func refreshSpotifyArt(state: view SpotifyState, track: view SpotifyTrack, reg: mod TextureRegistry) ret Bool {
-  ensureAppCacheDirs()
-  var outPath: String = ""
-  if track.artworkUrl.length() > 0 {
-    let h: String = cachedArtworkHashFromUrl(url: track.artworkUrl)
-    if h.length() > 0 {
-      outPath = cachedArtworkPath(imageHash: h)
+  unsafe {
+    ensureAppCacheDirs()
+    var outPath: String = ""
+    if track.artworkUrl.length() > 0 {
+      let h: String = cachedArtworkHashFromUrl(url: track.artworkUrl)
+      if h.length() > 0 {
+        outPath = cachedArtworkPath(imageHash: h)
+      }
     }
-  }
-  if outPath.length() is 0 {
-    outPath = "{appCacheAlbumArtDir}/spotify-current.jpg"
-  }
-  var primaryOk: Bool = false
-  if track.artworkUrl.length() > 0 {
-    primaryOk = Sys.exists(path: outPath)
+    if outPath.length() is 0 {
+      outPath = "{appCacheAlbumArtDir}/spotify-current.jpg"
+    }
+    var primaryOk: Bool = false
+    if track.artworkUrl.length() > 0 {
+      primaryOk = Sys.exists(path: outPath)
+      if primaryOk is false {
+        primaryOk = Spotify.fetchArtwork(url: track.artworkUrl, outPath: outPath)
+      }
+    }
     if primaryOk is false {
-      primaryOk = Spotify.fetchArtwork(url: track.artworkUrl, outPath: outPath)
+      # iTunes fallback. Build "<artist> <track>" as the search term;
+      # iTunes returns the closest match.
+      let term: String = "{track.artistName} {track.trackName}"
+      let fallbackUrl: String = itunesSearchArtworkUrl(term: term)
+      if fallbackUrl.length() is 0 {
+        ret false
+      }
+      let fbOk: Bool = Spotify.fetchArtwork(url: fallbackUrl, outPath: outPath)
+      if fbOk is false {
+        ret false
+      }
     }
+    # Drop any prior registration so the new file lands cleanly.
+    let copiedKey: String = "{state.artKey}"
+    let copiedPath: String = "{outPath}"
+    let h: Int = textureLoad(reg: reg, key: copiedKey, path: copiedPath)
+    ret h > 0
   }
-  if primaryOk is false {
-    # iTunes fallback. Build "<artist> <track>" as the search term;
-    # iTunes returns the closest match.
-    let term: String = "{track.artistName} {track.trackName}"
-    let fallbackUrl: String = itunesSearchArtworkUrl(term: term)
-    if fallbackUrl.length() is 0 {
-      ret false
-    }
-    let fbOk: Bool = Spotify.fetchArtwork(url: fallbackUrl, outPath: outPath)
-    if fbOk is false {
-      ret false
-    }
-  }
-  # Drop any prior registration so the new file lands cleanly.
-  let copiedKey: String = "{state.artKey}"
-  let copiedPath: String = "{outPath}"
-  let h: Int = textureLoad(reg: reg, key: copiedKey, path: copiedPath)
-  ret h > 0
 }
 
 # Per-frame entry point. Cheap when disabled / when not enough time

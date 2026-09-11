@@ -111,10 +111,10 @@ func bytesToFloats(bytes: view List(UInt8), floats: mod List(Float), count: view
 # performance capture when `timed` (untimed otherwise).
 func recordWaterCompute(recording: mod Recording, resources: view GpuResources, commands: view List(ComputeCommand), performance: view WaterPerf, timed: view Bool) ret Bool {
   unsafe {
-    var writes: Ptr = webgpuNull()
-    if timed and performance.enabled {
-      if let timing: view GpuTiming => performance.timing { writes = timingWrites(timing: timing) }
-    }
-    ret recordComputeCommands(recording: recording, resources: resources, commands: commands, timestampWrites: writes)
+      var writes: Ptr = webgpuNull()
+      if timed and performance.enabled {
+        if let timing: view GpuTiming => performance.timing { writes = timingWrites(timing: timing) }
+      }
+      ret recordComputeCommands(recording: recording, resources: resources, commands: commands, timestampWrites: writes)
   }
 }

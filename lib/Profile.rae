@@ -68,16 +68,18 @@ func capturing(profiler: view Profiler) pub ret Bool { ret profiler.capturing }
 # Begin a capture of `seconds`, writing to `outPath` when it ends. Reallocates the
 # event buffers up front so recording never allocates.
 func startCapture(profiler: mod Profiler, seconds: view Float, outPath: view String) pub {
-  profiler.names = List.create(String, cap: profMaxEvents)
-  profiler.phases = List.create(Int, cap: profMaxEvents)
-  profiler.times = List.create(Int, cap: profMaxEvents)
-  profiler.tids = List.create(Int, cap: profMaxEvents)
-  profiler.values = List.create(Int, cap: profMaxEvents)
-  profiler.startNs = nowNs()
-  profiler.endNs = profiler.startNs + rae_float_to_int(f: seconds * 1000000000.0)
-  profiler.outPath = "{outPath}"
-  profiler.dropped = false
-  profiler.capturing = true
+  unsafe {
+    profiler.names = List.create(String, cap: profMaxEvents)
+    profiler.phases = List.create(Int, cap: profMaxEvents)
+    profiler.times = List.create(Int, cap: profMaxEvents)
+    profiler.tids = List.create(Int, cap: profMaxEvents)
+    profiler.values = List.create(Int, cap: profMaxEvents)
+    profiler.startNs = nowNs()
+    profiler.endNs = profiler.startNs + rae_float_to_int(f: seconds * 1000000000.0)
+    profiler.outPath = "{outPath}"
+    profiler.dropped = false
+    profiler.capturing = true
+  }
 }
 
 # Start a capture from the environment if RAE_PROFILE is set. Call once at startup.
@@ -157,52 +159,56 @@ func profFragment(name: view String, ph: view Int, ts: view Int, tid: view Int, 
 # O(n*sqrt(n)) — sub-second for tens of thousands of events instead of tens of
 # seconds. Deferred to stop time, so it never touches a measured frame.
 func joinBlocked(frags: view List(String), blockSize: view Int) ret String {
-  let n: Int = frags.length
-  if n is 0 { ret "" }
-  let blocks: List(String) = List.create(String, cap: n / blockSize + 2)
-  var i: Int = 0
-  loop i < n {
-    var stop: Int = i + blockSize
-    if stop > n { stop = n }
-    var block: String = rae_ext_rae_buf_get(V: String, buf: frags.data, index: i)
-    var j: Int = i + 1
-    loop j < stop {
-      block = block.concat(other: ",").concat(
-        other: rae_ext_rae_buf_get(V: String, buf: frags.data, index: j))
-      j = j + 1
+  unsafe {
+    let n: Int = frags.length
+    if n is 0 { ret "" }
+    let blocks: List(String) = List.create(String, cap: n / blockSize + 2)
+    var i: Int = 0
+    loop i < n {
+      var stop: Int = i + blockSize
+      if stop > n { stop = n }
+      var block: String = rae_ext_rae_buf_get(V: String, buf: frags.data, index: i)
+      var j: Int = i + 1
+      loop j < stop {
+        block = block.concat(other: ",").concat(
+          other: rae_ext_rae_buf_get(V: String, buf: frags.data, index: j))
+        j = j + 1
+      }
+      blocks.add(value: block)
+      i = stop
     }
-    blocks.add(value: block)
-    i = stop
+    ret blocks.join(sep: ",")
   }
-  ret blocks.join(sep: ",")
 }
 
 func write(profiler: view Profiler, path: view String) ret Bool {
-  let n: Int = profiler.names.length
-  let frags: List(String) = List.create(String, cap: n + 2)
-  # Label the CPU track; a second thread_name for tid 1 (GPU) lands here once GPU
-  # timestamp events exist (phase 2).
-  frags.add(value: "\{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":1,\"tid\":0,\"args\":\{\"name\":\"CPU main loop\"\}\}")
-  var i: Int = 0
-  loop i < n {
-    let nm: String = rae_ext_rae_buf_get(V: String, buf: profiler.names.data, index: i)
-    let ph: Int = rae_ext_rae_buf_get(V: Int, buf: profiler.phases.data, index: i)
-    let ts: Int = rae_ext_rae_buf_get(V: Int, buf: profiler.times.data, index: i)
-    let tid: Int = rae_ext_rae_buf_get(V: Int, buf: profiler.tids.data, index: i)
-    let value: Int = rae_ext_rae_buf_get(V: Int, buf: profiler.values.data, index: i)
-    frags.add(value: profFragment(name: nm, ph: ph, ts: ts, tid: tid, value: value))
-    i = i + 1
+  unsafe {
+    let n: Int = profiler.names.length
+    let frags: List(String) = List.create(String, cap: n + 2)
+    # Label the CPU track; a second thread_name for tid 1 (GPU) lands here once GPU
+    # timestamp events exist (phase 2).
+    frags.add(value: "\{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":1,\"tid\":0,\"args\":\{\"name\":\"CPU main loop\"\}\}")
+    var i: Int = 0
+    loop i < n {
+      let nm: String = rae_ext_rae_buf_get(V: String, buf: profiler.names.data, index: i)
+      let ph: Int = rae_ext_rae_buf_get(V: Int, buf: profiler.phases.data, index: i)
+      let ts: Int = rae_ext_rae_buf_get(V: Int, buf: profiler.times.data, index: i)
+      let tid: Int = rae_ext_rae_buf_get(V: Int, buf: profiler.tids.data, index: i)
+      let value: Int = rae_ext_rae_buf_get(V: Int, buf: profiler.values.data, index: i)
+      frags.add(value: profFragment(name: nm, ph: ph, ts: ts, tid: tid, value: value))
+      i = i + 1
+    }
+    let body: String = joinBlocked(frags: frags, blockSize: 256)
+    let json: String = "\{\"traceEvents\":[".concat(other: body).concat(other: "]\}")
+    let ok: Bool = Sys.writeFile(path: path, content: json)
+    if ok {
+      log("profile: wrote {n} events to {path}")
+    } else {
+      log("profile: FAILED to write {path}")
+    }
+    if profiler.dropped {
+      log("profile: WARNING event cap {profMaxEvents} hit — trace truncated")
+    }
+    ret ok
   }
-  let body: String = joinBlocked(frags: frags, blockSize: 256)
-  let json: String = "\{\"traceEvents\":[".concat(other: body).concat(other: "]\}")
-  let ok: Bool = Sys.writeFile(path: path, content: json)
-  if ok {
-    log("profile: wrote {n} events to {path}")
-  } else {
-    log("profile: FAILED to write {path}")
-  }
-  if profiler.dropped {
-    log("profile: WARNING event cap {profMaxEvents} hit — trace truncated")
-  }
-  ret ok
 }

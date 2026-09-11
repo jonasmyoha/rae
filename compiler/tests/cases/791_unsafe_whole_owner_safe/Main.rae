@@ -14,14 +14,14 @@ type NativeBuffer {
 
 func create(byteCount: view Int) ret opt NativeBuffer {
   unsafe {
-    let pointer: Ptr = nativeAllocate(byteCount: byteCount as UInt64)
-    ret NativeBuffer { pointer: pointer, byteCount: byteCount }
+      let pointer: Ptr = nativeAllocate(byteCount: byteCount as UInt64)
+      ret NativeBuffer { pointer: pointer, byteCount: byteCount }
   }
 }
 
 func drop(this: mod NativeBuffer) {
   unsafe {
-    nativeRelease(pointer: this.pointer)
+      nativeRelease(pointer: this.pointer)
   }
 }
 

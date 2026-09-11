@@ -33,77 +33,81 @@ type CollectionView {
 # playlist reference just drops out of the list rather than rendering a
 # blank row.
 func collectionAppendSong(rows: mod List(CollectionRow), albums: view List(Album), stem: view String, trackIndex: view Int) {
-  let ai: Int = findAlbumIndex(albums: albums, stem: stem)
-  if ai < 0 {
-    ret
+  unsafe {
+    let ai: Int = findAlbumIndex(albums: albums, stem: stem)
+    if ai < 0 {
+      ret
+    }
+    let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: ai)
+    if trackIndex < 0 {
+      ret
+    }
+    if trackIndex >= a.tracks.length {
+      ret
+    }
+    let t: Track = rae_ext_rae_buf_get(buf: a.tracks.data, index: trackIndex)
+    let num: Int = rows.length + 1
+    let dur: String = formatDurationMs(ms: t.durationMs)
+    let subtitle: String = "{a.artist} · {dur}"
+    let title: String = "{t.title}"
+    let stemCopy: String = "{stem}"
+    let row: CollectionRow = {
+      number: num
+      title: own title
+      subtitle: own subtitle
+      albumStem: own stemCopy
+      trackIndex: trackIndex
+    }
+    rows.add(value: own row)
   }
-  let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: ai)
-  if trackIndex < 0 {
-    ret
-  }
-  if trackIndex >= a.tracks.length {
-    ret
-  }
-  let t: Track = rae_ext_rae_buf_get(buf: a.tracks.data, index: trackIndex)
-  let num: Int = rows.length + 1
-  let dur: String = formatDurationMs(ms: t.durationMs)
-  let subtitle: String = "{a.artist} · {dur}"
-  let title: String = "{t.title}"
-  let stemCopy: String = "{stem}"
-  let row: CollectionRow = {
-    number: num
-    title: own title
-    subtitle: own subtitle
-    albumStem: own stemCopy
-    trackIndex: trackIndex
-  }
-  rows.add(value: own row)
 }
 
 # One row per album track.
 func collectionFromAlbum(album: view Album) pub ret CollectionView {
-  let n: Int = album.tracks.length
-  var tracksPart: String = ""
-  if n > 0 {
-    tracksPart = " · {n} songs"
-  }
-  var yearPart: String = ""
-  if album.year > 0 {
-    yearPart = " · {album.year}"
-  }
-  let caption: String = "Album{tracksPart}{yearPart}"
-  let title: String = "{album.album}"
-  let artist: String = "{album.artist}"
-  let coverStem: String = "{album.stem}"
+  unsafe {
+    let n: Int = album.tracks.length
+    var tracksPart: String = ""
+    if n > 0 {
+      tracksPart = " · {n} songs"
+    }
+    var yearPart: String = ""
+    if album.year > 0 {
+      yearPart = " · {album.year}"
+    }
+    let caption: String = "Album{tracksPart}{yearPart}"
+    let title: String = "{album.album}"
+    let artist: String = "{album.artist}"
+    let coverStem: String = "{album.stem}"
 
-  let rows: List(CollectionRow) = List.create(CollectionRow, cap: n)
-  var i: Int = 0
-  loop i < n {
-    let t: Track = rae_ext_rae_buf_get(buf: album.tracks.data, index: i)
-    var num: Int = t.number
-    if num <= 0 {
-      num = i + 1
+    let rows: List(CollectionRow) = List.create(CollectionRow, cap: n)
+    var i: Int = 0
+    loop i < n {
+      let t: Track = rae_ext_rae_buf_get(buf: album.tracks.data, index: i)
+      var num: Int = t.number
+      if num <= 0 {
+        num = i + 1
+      }
+      let dur: String = formatDurationMs(ms: t.durationMs)
+      let subtitle: String = "{album.artist} · {dur}"
+      let rowTitle: String = "{t.title}"
+      let stemCopy: String = "{album.stem}"
+      let row: CollectionRow = {
+        number: num
+        title: own rowTitle
+        subtitle: own subtitle
+        albumStem: own stemCopy
+        trackIndex: i
+      }
+      rows.add(value: own row)
+      i = i + 1
     }
-    let dur: String = formatDurationMs(ms: t.durationMs)
-    let subtitle: String = "{album.artist} · {dur}"
-    let rowTitle: String = "{t.title}"
-    let stemCopy: String = "{album.stem}"
-    let row: CollectionRow = {
-      number: num
-      title: own rowTitle
-      subtitle: own subtitle
-      albumStem: own stemCopy
-      trackIndex: i
+    ret CollectionView {
+      title: own title
+      caption: own caption
+      artist: own artist
+      coverStem: own coverStem
+      rows: own rows
     }
-    rows.add(value: own row)
-    i = i + 1
-  }
-  ret CollectionView {
-    title: own title
-    caption: own caption
-    artist: own artist
-    coverStem: own coverStem
-    rows: own rows
   }
 }
 
@@ -111,48 +115,50 @@ func collectionFromAlbum(album: view Album) pub ret CollectionView {
 # song; `album` items expand to all of that album's tracks; `playlist`
 # links are skipped (no recursion — avoids cycles).
 func collectionFromPlaylist(playlist: view Playlist, albums: view List(Album)) pub ret CollectionView {
-  let rows: List(CollectionRow) = List.create(CollectionRow, cap: playlist.items.length)
-  let n: Int = playlist.items.length
-  var i: Int = 0
-  loop i < n {
-    let it: PlaylistItem = rae_ext_rae_buf_get(buf: playlist.items.data, index: i)
-    let isTrack: Bool = it.kind is "track"
-    let isAlbum: Bool = it.kind is "album"
-    if isTrack {
-      collectionAppendSong(rows: rows, albums: albums, stem: it.albumStem, trackIndex: it.trackIndex)
-    }
-    if isAlbum {
-      let ai: Int = findAlbumIndex(albums: albums, stem: it.albumStem)
-      if ai >= 0 {
-        let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: ai)
-        let tn: Int = a.tracks.length
-        var tj: Int = 0
-        loop tj < tn {
-          collectionAppendSong(rows: rows, albums: albums, stem: it.albumStem, trackIndex: tj)
-          tj = tj + 1
+  unsafe {
+    let rows: List(CollectionRow) = List.create(CollectionRow, cap: playlist.items.length)
+    let n: Int = playlist.items.length
+    var i: Int = 0
+    loop i < n {
+      let it: PlaylistItem = rae_ext_rae_buf_get(buf: playlist.items.data, index: i)
+      let isTrack: Bool = it.kind is "track"
+      let isAlbum: Bool = it.kind is "album"
+      if isTrack {
+        collectionAppendSong(rows: rows, albums: albums, stem: it.albumStem, trackIndex: it.trackIndex)
+      }
+      if isAlbum {
+        let ai: Int = findAlbumIndex(albums: albums, stem: it.albumStem)
+        if ai >= 0 {
+          let a: Album = rae_ext_rae_buf_get(buf: albums.data, index: ai)
+          let tn: Int = a.tracks.length
+          var tj: Int = 0
+          loop tj < tn {
+            collectionAppendSong(rows: rows, albums: albums, stem: it.albumStem, trackIndex: tj)
+            tj = tj + 1
+          }
         }
       }
+      i = i + 1
     }
-    i = i + 1
-  }
-  let count: Int = rows.length
-  var tracksPart: String = ""
-  if count > 0 {
-    tracksPart = " · {count} songs"
-  }
-  let caption: String = "Playlist{tracksPart}"
-  let title: String = "{playlist.title}"
-  let artist: String = ""
-  var coverStem: String = ""
-  if rows.length > 0 {
-    let first: CollectionRow = rae_ext_rae_buf_get(buf: rows.data, index: 0)
-    coverStem = "{first.albumStem}"
-  }
-  ret CollectionView {
-    title: own title
-    caption: own caption
-    artist: own artist
-    coverStem: own coverStem
-    rows: own rows
+    let count: Int = rows.length
+    var tracksPart: String = ""
+    if count > 0 {
+      tracksPart = " · {count} songs"
+    }
+    let caption: String = "Playlist{tracksPart}"
+    let title: String = "{playlist.title}"
+    let artist: String = ""
+    var coverStem: String = ""
+    if rows.length > 0 {
+      let first: CollectionRow = rae_ext_rae_buf_get(buf: rows.data, index: 0)
+      coverStem = "{first.albumStem}"
+    }
+    ret CollectionView {
+      title: own title
+      caption: own caption
+      artist: own artist
+      coverStem: own coverStem
+      rows: own rows
+    }
   }
 }

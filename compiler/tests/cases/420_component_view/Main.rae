@@ -15,37 +15,39 @@ open ecs/Entity
 open ecs/ComponentTable
 
 func main() {
-  let world: UiWorld = createUiWorld()
-  let parent: EntityId = createEntity(world: world)
+  unsafe {
+    let world: UiWorld = createUiWorld()
+    let parent: EntityId = createEntity(world: world)
 
-  let kids: List(EntityId) = List.create(EntityId, cap: 3)
-  kids.add(value: id(v: 100))
-  kids.add(value: id(v: 200))
-  kids.add(value: id(v: 300))
+    let kids: List(EntityId) = List.create(EntityId, cap: 3)
+    kids.add(value: id(v: 100))
+    kids.add(value: id(v: 200))
+    kids.add(value: id(v: 300))
 
-  # Build Children in place so the heap is genuinely owned by the
-  # struct literal, then transfer ownership of `kids` into the field.
-  let ch: Children = { ids: own kids }
-  componentSet(this: world.childrens, entity: parent, data: own ch)
+    # Build Children in place so the heap is genuinely owned by the
+    # struct literal, then transfer ownership of `kids` into the field.
+    let ch: Children = { ids: own kids }
+    componentSet(this: world.childrens, entity: parent, data: own ch)
 
-  # Read back via componentView — borrow, no copy, no auto-drop.
-  let chv: view Children => componentView(this: world.childrens, entity: parent)
-  log("via componentView:")
-  let chv0: EntityId = rae_ext_rae_buf_get(buf: chv.ids.data, index: 0)
-  let chv1: EntityId = rae_ext_rae_buf_get(buf: chv.ids.data, index: 1)
-  let chv2: EntityId = rae_ext_rae_buf_get(buf: chv.ids.data, index: 2)
-  log("  [0]={chv0.index}")
-  log("  [1]={chv1.index}")
-  log("  [2]={chv2.index}")
+    # Read back via componentView — borrow, no copy, no auto-drop.
+    let chv: view Children => componentView(this: world.childrens, entity: parent)
+    log("via componentView:")
+    let chv0: EntityId = rae_ext_rae_buf_get(buf: chv.ids.data, index: 0)
+    let chv1: EntityId = rae_ext_rae_buf_get(buf: chv.ids.data, index: 1)
+    let chv2: EntityId = rae_ext_rae_buf_get(buf: chv.ids.data, index: 2)
+    log("  [0]={chv0.index}")
+    log("  [1]={chv1.index}")
+    log("  [2]={chv2.index}")
 
-  # Second read pretending we lost the first ref — value should still
-  # be intact (no corruption from the first borrow going out of scope).
-  let chv2v: view Children => componentView(this: world.childrens, entity: parent)
-  log("second read:")
-  let r0: EntityId = rae_ext_rae_buf_get(buf: chv2v.ids.data, index: 0)
-  let r1: EntityId = rae_ext_rae_buf_get(buf: chv2v.ids.data, index: 1)
-  let r2: EntityId = rae_ext_rae_buf_get(buf: chv2v.ids.data, index: 2)
-  log("  [0]={r0.index}")
-  log("  [1]={r1.index}")
-  log("  [2]={r2.index}")
+    # Second read pretending we lost the first ref — value should still
+    # be intact (no corruption from the first borrow going out of scope).
+    let chv2v: view Children => componentView(this: world.childrens, entity: parent)
+    log("second read:")
+    let r0: EntityId = rae_ext_rae_buf_get(buf: chv2v.ids.data, index: 0)
+    let r1: EntityId = rae_ext_rae_buf_get(buf: chv2v.ids.data, index: 1)
+    let r2: EntityId = rae_ext_rae_buf_get(buf: chv2v.ids.data, index: 2)
+    log("  [0]={r0.index}")
+    log("  [1]={r1.index}")
+    log("  [2]={r2.index}")
+  }
 }

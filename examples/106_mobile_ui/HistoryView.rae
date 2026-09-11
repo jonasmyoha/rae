@@ -234,62 +234,64 @@ func buildHistoryBody(world: mod UiWorld, history: view PlayHistory, rounded: vi
 # `historyContentHeight`, so row positions and the scroll extent match a
 # fully-built list.
 func attachHistoryWindow(world: mod UiWorld, body: view EntityId, history: view PlayHistory, rounded: view Bool, scrollY: view Float, bodyW: view Float, bodyH: view Float) pub {
-  let n: Int = history.entries.length
-  if n is 0 {
-    let empty: EntityId = createEntity(world: world)
-    setRectFixed(world: world, entity: empty, w: bodyW, h: 40.0)
-    let style: String = "muted"
-    let text: String = "Nothing played yet."
-    setText(world: world, entity: empty, text: text, styleId: style)
-    let kids: List(EntityId) = List.create(EntityId, cap: 1)
-    kids.add(value: empty)
-    attachChildren(world: world, parent: body, kids: kids)
-    ret
+  unsafe {
+    let n: Int = history.entries.length
+    if n is 0 {
+      let empty: EntityId = createEntity(world: world)
+      setRectFixed(world: world, entity: empty, w: bodyW, h: 40.0)
+      let style: String = "muted"
+      let text: String = "Nothing played yet."
+      setText(world: world, entity: empty, text: text, styleId: style)
+      let kids: List(EntityId) = List.create(EntityId, cap: 1)
+      kids.add(value: empty)
+      attachChildren(world: world, parent: body, kids: kids)
+      ret
+    }
+
+    let pitch: Float = historyRowH + historyRowGap
+    let fv: Int = historyWindowFirstVisual(scrollY: scrollY, count: n)
+    let wc: Int = historyWindowCount(bodyH: bodyH)
+    var lv: Int = fv + wc - 1
+    if lv > n - 1 {
+      lv = n - 1
+    }
+
+    let rowKids: List(EntityId) = List.create(EntityId, cap: wc + 2)
+
+    # Top spacer reserves the height of the `fv` rows above the window so the
+    # first built row lands at its true position under vertical layout (minus
+    # the gap the layout inserts after the spacer).
+    if fv > 0 {
+      let topSpacer: EntityId = createEntity(world: world)
+      let topH: Float = fv.toFloat() * pitch - historyRowGap
+      setRectFixed(world: world, entity: topSpacer, w: bodyW, h: topH)
+      rowKids.add(value: topSpacer)
+    }
+
+    # Window rows. Visual v (0 = top = newest) maps to entry index n-1-v;
+    # entries are oldest-first, and the user expects most-recent at the top.
+    var v: Int = fv
+    loop v <= lv {
+      let i: Int = n - 1 - v
+      let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
+      let row: EntityId = buildHistoryRow(world: world, entry: e, entryIndex: i, rounded: rounded)
+      rowKids.add(value: row)
+      v = v + 1
+    }
+
+    # Bottom spacer pads the laid-out content to the full n-row height so the
+    # scroll extent matches historyContentHeight; rows below the window are
+    # revealed by a rewindow as the user scrolls.
+    if lv < n - 1 {
+      let below: Int = n - 1 - lv
+      let bottomSpacer: EntityId = createEntity(world: world)
+      let botH: Float = below.toFloat() * pitch - historyRowGap
+      setRectFixed(world: world, entity: bottomSpacer, w: bodyW, h: botH)
+      rowKids.add(value: bottomSpacer)
+    }
+
+    attachChildren(world: world, parent: body, kids: rowKids)
   }
-
-  let pitch: Float = historyRowH + historyRowGap
-  let fv: Int = historyWindowFirstVisual(scrollY: scrollY, count: n)
-  let wc: Int = historyWindowCount(bodyH: bodyH)
-  var lv: Int = fv + wc - 1
-  if lv > n - 1 {
-    lv = n - 1
-  }
-
-  let rowKids: List(EntityId) = List.create(EntityId, cap: wc + 2)
-
-  # Top spacer reserves the height of the `fv` rows above the window so the
-  # first built row lands at its true position under vertical layout (minus
-  # the gap the layout inserts after the spacer).
-  if fv > 0 {
-    let topSpacer: EntityId = createEntity(world: world)
-    let topH: Float = fv.toFloat() * pitch - historyRowGap
-    setRectFixed(world: world, entity: topSpacer, w: bodyW, h: topH)
-    rowKids.add(value: topSpacer)
-  }
-
-  # Window rows. Visual v (0 = top = newest) maps to entry index n-1-v;
-  # entries are oldest-first, and the user expects most-recent at the top.
-  var v: Int = fv
-  loop v <= lv {
-    let i: Int = n - 1 - v
-    let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: i)
-    let row: EntityId = buildHistoryRow(world: world, entry: e, entryIndex: i, rounded: rounded)
-    rowKids.add(value: row)
-    v = v + 1
-  }
-
-  # Bottom spacer pads the laid-out content to the full n-row height so the
-  # scroll extent matches historyContentHeight; rows below the window are
-  # revealed by a rewindow as the user scrolls.
-  if lv < n - 1 {
-    let below: Int = n - 1 - lv
-    let bottomSpacer: EntityId = createEntity(world: world)
-    let botH: Float = below.toFloat() * pitch - historyRowGap
-    setRectFixed(world: world, entity: bottomSpacer, w: bodyW, h: botH)
-    rowKids.add(value: bottomSpacer)
-  }
-
-  attachChildren(world: world, parent: body, kids: rowKids)
 }
 
 # In-place window swap (#270c): rebuild `body`'s child rows for a new scroll
@@ -298,31 +300,33 @@ func attachHistoryWindow(world: mod UiWorld, body: view EntityId, history: view 
 # velocity when the scroll-target ENTITY changes). Destroys the current
 # window's row subtrees, then attaches the new window.
 func rewindowHistoryBody(world: mod UiWorld, body: view EntityId, history: view PlayHistory, rounded: view Bool, scrollY: view Float) pub {
-  # Snapshot the current child ids into a local list BEFORE destroying:
-  # destroyEntitySubtree swap-removes from world.childrens, which can
-  # relocate `body`'s own entry — so we must not hold a view/copy into that
-  # table across the destroy loop (a view would dangle; a componentGet copy
-  # would also auto-drop the aliased ids buffer). EntityIds are plain
-  # values, so the local snapshot is independent of the table.
-  let old: List(EntityId) = List.create(EntityId, cap: 32)
-  if componentHas(this: world.childrens, entity: body) {
-    let ch: view Children => componentView(this: world.childrens, entity: body)
-    let kn: Int = ch.ids.length
-    var k: Int = 0
-    loop k < kn {
-      let child: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: k)
-      old.add(value: child)
-      k = k + 1
+  unsafe {
+    # Snapshot the current child ids into a local list BEFORE destroying:
+    # destroyEntitySubtree swap-removes from world.childrens, which can
+    # relocate `body`'s own entry — so we must not hold a view/copy into that
+    # table across the destroy loop (a view would dangle; a componentGet copy
+    # would also auto-drop the aliased ids buffer). EntityIds are plain
+    # values, so the local snapshot is independent of the table.
+    let old: List(EntityId) = List.create(EntityId, cap: 32)
+    if componentHas(this: world.childrens, entity: body) {
+      let ch: view Children => componentView(this: world.childrens, entity: body)
+      let kn: Int = ch.ids.length
+      var k: Int = 0
+      loop k < kn {
+        let child: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: k)
+        old.add(value: child)
+        k = k + 1
+      }
     }
+    let on: Int = old.length
+    var j: Int = 0
+    loop j < on {
+      let child: EntityId = rae_ext_rae_buf_get(buf: old.data, index: j)
+      destroyEntitySubtree(world: world, root: child)
+      j = j + 1
+    }
+    attachHistoryWindow(world: world, body: body, history: history, rounded: rounded, scrollY: scrollY, bodyW: historyBodyW(), bodyH: historyBodyH())
   }
-  let on: Int = old.length
-  var j: Int = 0
-  loop j < on {
-    let child: EntityId = rae_ext_rae_buf_get(buf: old.data, index: j)
-    destroyEntitySubtree(world: world, root: child)
-    j = j + 1
-  }
-  attachHistoryWindow(world: world, body: body, history: history, rounded: rounded, scrollY: scrollY, bodyW: historyBodyW(), bodyH: historyBodyH())
 }
 
 func mountHistoryPage(
@@ -387,21 +391,23 @@ func buildHistoryWorld(
 # dispatcher logic stays index-stable whether the user taps from
 # Home or from the full History page).
 func fillRecentlyPlayedStrip(world: mod UiWorld, strip: view EntityId, history: view PlayHistory, rounded: view Bool) pub {
-  let n: Int = history.entries.length
-  var kidsCount: Int = recentlyPlayedPreviewMax
-  if n < kidsCount {
-    kidsCount = n
+  unsafe {
+    let n: Int = history.entries.length
+    var kidsCount: Int = recentlyPlayedPreviewMax
+    if n < kidsCount {
+      kidsCount = n
+    }
+    let kids: List(EntityId) = List.create(EntityId, cap: kidsCount)
+    var visual: Int = 0
+    loop visual < kidsCount {
+      let entryIdx: Int = n - 1 - visual
+      let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: entryIdx)
+      let tile: EntityId = buildHistoryThumb(world: world, entry: e, size: recentlyPlayedThumbSize, rounded: rounded)
+      let replayAction: String = "history.replay.{entryIdx}"
+      setOnClick(world: world, entity: tile, actionId: replayAction)
+      kids.add(value: tile)
+      visual = visual + 1
+    }
+    attachChildren(world: world, parent: strip, kids: kids)
   }
-  let kids: List(EntityId) = List.create(EntityId, cap: kidsCount)
-  var visual: Int = 0
-  loop visual < kidsCount {
-    let entryIdx: Int = n - 1 - visual
-    let e: PlayHistoryEntry = rae_ext_rae_buf_get(buf: history.entries.data, index: entryIdx)
-    let tile: EntityId = buildHistoryThumb(world: world, entry: e, size: recentlyPlayedThumbSize, rounded: rounded)
-    let replayAction: String = "history.replay.{entryIdx}"
-    setOnClick(world: world, entity: tile, actionId: replayAction)
-    kids.add(value: tile)
-    visual = visual + 1
-  }
-  attachChildren(world: world, parent: strip, kids: kids)
 }

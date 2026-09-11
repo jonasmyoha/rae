@@ -133,34 +133,36 @@ func readChannel(doc: view JsonDoc, root: view JsonValue, key: view String, chan
 # known bug comparing those against `none`; lib/hot_reload declares the same raw
 # extern for the same reason. `rae_sys_read_file_text` is not a substitute — it
 # takes a byte RANGE, so it reads nothing without a length.
-func rae_ext_rae_sys_read_file(path: String) extern ret String
+func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
 
 func loadHosekDataset(path: view String) pub ret HosekDataset {
-  let raw: String = rae_ext_rae_sys_read_file(path: path)
-  if raw.length() is 0 {
-    ret emptyHosekDataset()
-  }
-  let doc: JsonDoc = parseJson(source: raw)
-  let root: JsonValue = root(doc: doc)
-  let cR: List(Float) = readChannel(doc: doc, root: root, key: "coefficients", channel: 0)
-  let cG: List(Float) = readChannel(doc: doc, root: root, key: "coefficients", channel: 1)
-  let cB: List(Float) = readChannel(doc: doc, root: root, key: "coefficients", channel: 2)
-  let rR: List(Float) = readChannel(doc: doc, root: root, key: "radiances", channel: 0)
-  let rG: List(Float) = readChannel(doc: doc, root: root, key: "radiances", channel: 1)
-  let rB: List(Float) = readChannel(doc: doc, root: root, key: "radiances", channel: 2)
-  # Sizes are fixed by the fit: 2 albedos x 10 turbidities x 6 control points,
-  # times 9 coefficients. A short array means a truncated or wrong file, and
-  # cooking from one would read past the end.
-  if cR.length < 1080 or cG.length < 1080 or cB.length < 1080 {
-    ret emptyHosekDataset()
-  }
-  if rR.length < 120 or rG.length < 120 or rB.length < 120 {
-    ret emptyHosekDataset()
-  }
-  ret HosekDataset {
-    loaded: true
-    coeffR: cR, coeffG: cG, coeffB: cB
-    radR: rR, radG: rG, radB: rB
+  unsafe {
+    let raw: String = rae_ext_rae_sys_read_file(path: path)
+    if raw.length() is 0 {
+      ret emptyHosekDataset()
+    }
+    let doc: JsonDoc = parseJson(source: raw)
+    let root: JsonValue = root(doc: doc)
+    let cR: List(Float) = readChannel(doc: doc, root: root, key: "coefficients", channel: 0)
+    let cG: List(Float) = readChannel(doc: doc, root: root, key: "coefficients", channel: 1)
+    let cB: List(Float) = readChannel(doc: doc, root: root, key: "coefficients", channel: 2)
+    let rR: List(Float) = readChannel(doc: doc, root: root, key: "radiances", channel: 0)
+    let rG: List(Float) = readChannel(doc: doc, root: root, key: "radiances", channel: 1)
+    let rB: List(Float) = readChannel(doc: doc, root: root, key: "radiances", channel: 2)
+    # Sizes are fixed by the fit: 2 albedos x 10 turbidities x 6 control points,
+    # times 9 coefficients. A short array means a truncated or wrong file, and
+    # cooking from one would read past the end.
+    if cR.length < 1080 or cG.length < 1080 or cB.length < 1080 {
+      ret emptyHosekDataset()
+    }
+    if rR.length < 120 or rG.length < 120 or rB.length < 120 {
+      ret emptyHosekDataset()
+    }
+    ret HosekDataset {
+      loaded: true
+      coeffR: cR, coeffG: cG, coeffB: cB
+      radR: rR, radG: rG, radB: rB
+    }
   }
 }
 

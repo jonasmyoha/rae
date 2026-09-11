@@ -47,11 +47,11 @@ static bool s_in_if_let_binding = false;
  * 0 between top-level function analyses. */
 static int s_loop_depth = 0;
 
-/* #868 staged unsafe boundary. A source file opts in by containing an unsafe
- * block or unsafe Rae function; #877 removes the compatibility staging after
- * legacy consumers migrate. Unsafe function bodies intentionally start at
- * depth zero: their raw operations still need local unsafe blocks. */
-static bool s_unsafe_checks_enabled = false;
+/* #868/#877 unsafe boundary, unconditional for every source file (the staged
+ * source-file adoption bypass was removed by #877). Unsafe function bodies
+ * intentionally start at depth zero: their raw operations still need local
+ * unsafe blocks. */
+static bool s_unsafe_checks_enabled = true;
 static int s_unsafe_depth = 0;
 
 static bool sema_is_raw_ptr_type(const TypeInfo* type) {
@@ -1087,7 +1087,19 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
         }
         spec->as.func_decl.body = clone_block(ctx->ast_arena, generic_decl->as.func_decl.body);
 
-        // Re-analyze body with concrete types
+        // Re-analyze body with concrete types. #877: the specialized body is
+        // analysed INSIDE the caller's analysis, so it must not inherit the
+        // caller's diagnostic origin, unsafe depth or loop depth — a generic
+        // instantiated from within an `unsafe { }` block would otherwise have
+        // its whole body treated as unsafe (obligations erased through
+        // generics), its bare calls resolved against the caller's opens, and
+        // stdlib-origin checks judged by the caller's file.
+        const char* saved_spec_origin = s_current_decl_origin;
+        int saved_spec_unsafe_depth = s_unsafe_depth;
+        int saved_spec_loop_depth = s_loop_depth;
+        if (generic_decl->origin_file) s_current_decl_origin = generic_decl->origin_file;
+        s_unsafe_depth = 0;
+        s_loop_depth = 0;
         if (spec->as.func_decl.body && symbols) {
             symbol_table_push_scope(symbols);
 
@@ -1115,6 +1127,9 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
             sema_lifecycle_post_pass(ctx, module, sema_diag_file(module), &spec->as.func_decl);
             symbol_table_pop_scope(symbols);
         }
+        s_current_decl_origin = saved_spec_origin;
+        s_unsafe_depth = saved_spec_unsafe_depth;
+        s_loop_depth = saved_spec_loop_depth;
     } else if (generic_decl->kind == AST_DECL_TYPE) {
         spec->as.type_decl.specialization_args = args_tr;
         AstTypeField* head = NULL; AstTypeField* tail = NULL; AstTypeField* f = generic_decl->as.type_decl.fields;
@@ -1612,6 +1627,134 @@ static AstDecl* resolve_qualified_function(CompilerContext* ctx, AstModule* modu
 
 static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl);
 
+
+// ===== #877: unsafe-obligation scan of GENERIC TEMPLATE bodies ===============
+//
+// Generic templates are never analysed as such — their specializations are,
+// when sema resolves the call — and a call with a positional `T: type`
+// argument is bound by NAME in the backend with no sema specialization at all.
+// A raw operation written inside such a template would therefore escape the
+// boundary. This is a purely syntactic, by-name scan of the template body
+// (the same rule as the #897 fallback: a call is unsafe when EVERY visible
+// function of that name is unsafe or extern), with `unsafe { }` depth tracked
+// through the statement tree. Type-dependent raw-Ptr checks cannot run on a
+// template and are enforced in specializations.
+static bool sema_scan_name_is_unsafe(AstModule* module, Str cname, bool qualified) {
+    AstModule* scan[64]; size_t sn = 0; scan[sn++] = module;
+    for (const AstImport* imp = module->imports; imp && sn < 64; imp = imp->next)
+        if (imp->module) scan[sn++] = imp->module;
+    int matches = 0, unsafe_matches = 0;
+    for (size_t si = 0; si < sn; si++)
+        for (AstDecl* d = scan[si]->decls; d; d = d->next) {
+            if (d->kind != AST_DECL_FUNC) continue;
+            const AstFuncDecl* fd = &d->as.func_decl;
+            if (fd->specialization_args) continue;
+            if (!str_eq(fd->name, cname)) continue;
+            if (!qualified && !sema_decl_opened(s_current_decl_origin, d)) continue;
+            matches++;
+            if (fd->is_unsafe || fd->is_extern) unsafe_matches++;
+        }
+    return matches > 0 && matches == unsafe_matches;
+}
+static void sema_scan_unsafe_block(AstModule* m, const AstBlock* b, int depth);
+static void sema_scan_unsafe_expr(AstModule* m, const AstExpr* e, int depth) {
+    if (!e) return;
+    switch (e->kind) {
+        case AST_EXPR_CALL:
+            if (depth == 0 && e->as.call.callee && e->as.call.callee->kind == AST_EXPR_IDENT
+                && sema_scan_name_is_unsafe(m, e->as.call.callee->as.ident, false))
+                sema_unsafe_error(m, e->line, e->column,
+                    "calling an unsafe function or extern requires an enclosing 'unsafe { ... }' block");
+            sema_scan_unsafe_expr(m, e->as.call.callee, depth);
+            for (const AstCallArg* a = e->as.call.args; a; a = a->next) sema_scan_unsafe_expr(m, a->value, depth);
+            break;
+        case AST_EXPR_METHOD_CALL:
+            if (depth == 0 && sema_scan_name_is_unsafe(m, e->as.method_call.method_name, true))
+                sema_unsafe_error(m, e->line, e->column,
+                    "calling an unsafe function or extern requires an enclosing 'unsafe { ... }' block");
+            sema_scan_unsafe_expr(m, e->as.method_call.object, depth);
+            for (const AstCallArg* a = e->as.method_call.args; a; a = a->next) sema_scan_unsafe_expr(m, a->value, depth);
+            break;
+        case AST_EXPR_BINARY:
+            sema_scan_unsafe_expr(m, e->as.binary.lhs, depth); sema_scan_unsafe_expr(m, e->as.binary.rhs, depth); break;
+        case AST_EXPR_UNARY: case AST_EXPR_BOX: case AST_EXPR_UNBOX: case AST_EXPR_OWN:
+            sema_scan_unsafe_expr(m, e->as.unary.operand, depth); break;
+        case AST_EXPR_CAST: sema_scan_unsafe_expr(m, e->as.cast.operand, depth); break;
+        case AST_EXPR_MEMBER: sema_scan_unsafe_expr(m, e->as.member.object, depth); break;
+        case AST_EXPR_OBJECT:
+            for (const AstObjectField* f = e->as.object_literal.fields; f; f = f->next) sema_scan_unsafe_expr(m, f->value, depth);
+            break;
+        case AST_EXPR_LIST:
+            for (const AstExprList* l = e->as.list; l; l = l->next) sema_scan_unsafe_expr(m, l->value, depth);
+            break;
+        case AST_EXPR_INDEX:
+            sema_scan_unsafe_expr(m, e->as.index.target, depth); sema_scan_unsafe_expr(m, e->as.index.index, depth); break;
+        case AST_EXPR_COLLECTION_LITERAL:
+            for (const AstCollectionElement* el = e->as.collection.elements; el; el = el->next) sema_scan_unsafe_expr(m, el->value, depth);
+            break;
+        case AST_EXPR_INTERP:
+            for (const AstInterpPart* pp = e->as.interp.parts; pp; pp = pp->next) sema_scan_unsafe_expr(m, pp->value, depth);
+            break;
+        case AST_EXPR_MATCH:
+            sema_scan_unsafe_expr(m, e->as.match_expr.subject, depth);
+            for (const AstMatchArm* a = e->as.match_expr.arms; a; a = a->next) {
+                sema_scan_unsafe_expr(m, a->pattern, depth); sema_scan_unsafe_expr(m, a->value, depth);
+            }
+            break;
+        default: break;
+    }
+}
+static void sema_scan_unsafe_stmt(AstModule* m, const AstStmt* s, int depth) {
+    if (!s) return;
+    switch (s->kind) {
+        case AST_STMT_LET: sema_scan_unsafe_expr(m, s->as.let_stmt.value, depth); break;
+        case AST_STMT_DESTRUCT: sema_scan_unsafe_expr(m, s->as.destruct_stmt.call, depth); break;
+        case AST_STMT_EXPR: sema_scan_unsafe_expr(m, s->as.expr_stmt, depth); break;
+        case AST_STMT_RET:
+            for (const AstReturnArg* r = s->as.ret_stmt.values; r; r = r->next) sema_scan_unsafe_expr(m, r->value, depth);
+            break;
+        case AST_STMT_IF:
+            sema_scan_unsafe_stmt(m, s->as.if_stmt.binding, depth);
+            sema_scan_unsafe_expr(m, s->as.if_stmt.condition, depth);
+            sema_scan_unsafe_block(m, s->as.if_stmt.then_block, depth);
+            sema_scan_unsafe_block(m, s->as.if_stmt.else_block, depth);
+            break;
+        case AST_STMT_LOOP:
+            sema_scan_unsafe_stmt(m, s->as.loop_stmt.init, depth);
+            sema_scan_unsafe_expr(m, s->as.loop_stmt.condition, depth);
+            sema_scan_unsafe_expr(m, s->as.loop_stmt.increment, depth);
+            sema_scan_unsafe_block(m, s->as.loop_stmt.body, depth);
+            break;
+        case AST_STMT_MATCH:
+            sema_scan_unsafe_expr(m, s->as.match_stmt.subject, depth);
+            for (const AstMatchCase* c = s->as.match_stmt.cases; c; c = c->next) {
+                sema_scan_unsafe_expr(m, c->pattern, depth);
+                for (const AstCasePattern* op = c->or_patterns; op; op = op->next) sema_scan_unsafe_expr(m, op->expr, depth);
+                sema_scan_unsafe_block(m, c->block, depth);
+            }
+            break;
+        case AST_STMT_ASSIGN:
+            sema_scan_unsafe_expr(m, s->as.assign_stmt.target, depth); sema_scan_unsafe_expr(m, s->as.assign_stmt.value, depth); break;
+        case AST_STMT_DEFER: sema_scan_unsafe_block(m, s->as.defer_stmt.block, depth); break;
+        case AST_STMT_UNSAFE: sema_scan_unsafe_block(m, s->as.unsafe_stmt.block, depth + 1); break;
+        default: break;
+    }
+}
+static void sema_scan_unsafe_block(AstModule* m, const AstBlock* b, int depth) {
+    if (!b) return;
+    for (const AstStmt* s = b->first; s; s = s->next) sema_scan_unsafe_stmt(m, s, depth);
+}
+static void sema_scan_unsafe_template(AstModule* module, AstDecl* decl) {
+    if (!decl || decl->kind != AST_DECL_FUNC || !decl->as.func_decl.body) return;
+    const char* saved_origin = s_current_decl_origin;
+    int saved_depth = s_unsafe_depth;
+    if (decl->origin_file) s_current_decl_origin = decl->origin_file;
+    s_unsafe_depth = 0;
+    sema_scan_unsafe_block(module, decl->as.func_decl.body, 0);
+    s_current_decl_origin = saved_origin;
+    s_unsafe_depth = saved_depth;
+}
+
 // #815: every diagnostic raised while analysing a decl — a function body, a
 // global let initializer, a type — names THAT decl's file (see sema_diag_file).
 static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl) {
@@ -1619,7 +1762,7 @@ static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTab
     bool saved_unsafe_checks = s_unsafe_checks_enabled;
     int saved_unsafe_depth = s_unsafe_depth;
     if (decl && decl->origin_file) s_current_decl_origin = decl->origin_file;
-    s_unsafe_checks_enabled = decl && decl->unsafe_checks_enabled;
+    s_unsafe_checks_enabled = true;
     s_unsafe_depth = 0;
     sema_analyze_decl_inner(ctx, module, symbols, decl);
     s_current_decl_origin = saved_origin;
@@ -2164,6 +2307,15 @@ static bool sema_stmt_mutates_collection(const AstStmt* stmt,
             if (sema_expr_mutates_collection(stmt->as.loop_stmt.condition, collection)) return true;
             for (const AstStmt* body = stmt->as.loop_stmt.body
                      ? stmt->as.loop_stmt.body->first : NULL;
+                 body; body = body->next) {
+                if (sema_stmt_mutates_collection(body, collection)) return true;
+            }
+            return false;
+        case AST_STMT_UNSAFE:
+            // #877: an unsafe block is a transparent scope — a structural
+            // mutation inside it invalidates a live element reference too.
+            for (const AstStmt* body = stmt->as.unsafe_stmt.block
+                     ? stmt->as.unsafe_stmt.block->first : NULL;
                  body; body = body->next) {
                 if (sema_stmt_mutates_collection(body, collection)) return true;
             }
@@ -5823,7 +5975,9 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
 
                 sema_analyze_decl(ctx, module, &symbols, d);
             } else {
-                // Templates are marked as processed but not analyzed
+                // Templates are marked as processed but not analyzed — except for
+                // the #877 by-name unsafe-obligation scan of their bodies.
+                sema_scan_unsafe_template(module, d);
                 if (processed_count < 8192) processed[processed_count++] = d;
             }
             d = d->next;

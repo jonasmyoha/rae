@@ -20,10 +20,12 @@ type WaterPerf {
 }
 
 func createWaterPerf() ret WaterPerf {
-  ret WaterPerf {
-    enabled: false, timing: none, timingMade: false, samples: 0,
-    resolvePending: false, submission: { managerTag: 0, slot: 0 - 1, generation: 0 },
-    passTimes: List.create(Int, cap: 2)
+  unsafe {
+    ret WaterPerf {
+      enabled: false, timing: none, timingMade: false, samples: 0,
+      resolvePending: false, submission: { managerTag: 0, slot: 0 - 1, generation: 0 },
+      passTimes: List.create(Int, cap: 2)
+    }
   }
 }
 
