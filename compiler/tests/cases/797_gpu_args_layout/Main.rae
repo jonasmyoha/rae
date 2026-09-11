@@ -1,0 +1,58 @@
+# #872: the checked WGSL packing in gpu/GpuArgs lays scalars, vectors and
+# matrices at exactly the std140/std430 offsets a shader expects. It logs the
+# running byte size after each push (which, with the alignment rules, pins every
+# field's offset), the finalized uniform size (rounded to 16), and the exact
+# little-endian bytes of a u32, an i32 and an f32 — all deterministic, no GPU.
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuArgs
+
+func byteAt(writer: view ArgWriter, index: view Int) ret Int {
+  if let b: UInt8 = writer.bytes.copyAt(index: index) { ret b as Int }
+  ret 0 - 1
+}
+
+func main() {
+  var writer: ArgWriter = createArgs(uniform: true)
+  # f32 -> [0,4)
+  pushF32(writer: writer, value: 1.0)
+  log("after f32:  size {argsLength(writer: writer)}")
+  # vec2 aligns to 8 -> [8,16)
+  pushVec2F(writer: writer, x: 2.0, y: 3.0)
+  log("after vec2: size {argsLength(writer: writer)}")
+  # f32 -> [16,20)
+  pushF32(writer: writer, value: 4.0)
+  log("after f32:  size {argsLength(writer: writer)}")
+  # vec3 aligns to 16 -> [32,44)
+  pushVec3F(writer: writer, x: 5.0, y: 6.0, z: 7.0)
+  log("after vec3: size {argsLength(writer: writer)}")
+  # f32 fills the vec3 tail pad -> [44,48)
+  pushF32(writer: writer, value: 8.0)
+  log("after f32:  size {argsLength(writer: writer)}")
+  # vec4 aligns to 16 -> [48,64)
+  pushVec4F(writer: writer, x: 9.0, y: 10.0, z: 11.0, w: 12.0)
+  log("after vec4: size {argsLength(writer: writer)}")
+  # mat4 aligns to 16 -> [64,128)
+  let identity: List(Float) = List.create(Float, cap: 16)
+  var i: Int = 0
+  loop i < 16 {
+    if i is 0 or i is 5 or i is 10 or i is 15 { identity.add(value: 1.0) } else { identity.add(value: 0.0) }
+    i = i + 1
+  }
+  log("mat4 pushed: {pushMat4(writer: writer, columns: identity)}")
+  log("after mat4: size {argsLength(writer: writer)}")
+  # u32 -> [128,132)
+  pushU32(writer: writer, value: 305419896)
+  log("after u32:  size {argsLength(writer: writer)}")
+  finalizeArgs(writer: writer)
+  log("finalized uniform size {argsLength(writer: writer)}")
+
+  # A fresh writer for exact little-endian byte checks.
+  var raw: ArgWriter = createArgs(uniform: false)
+  pushU32(writer: raw, value: 305419896)   # 0x12345678
+  pushI32(writer: raw, value: 0 - 2)       # 0xFFFFFFFE
+  pushF32(writer: raw, value: 1.0)         # 0x3F800000
+  log("u32 bytes {byteAt(writer: raw, index: 0)} {byteAt(writer: raw, index: 1)} {byteAt(writer: raw, index: 2)} {byteAt(writer: raw, index: 3)}")
+  log("i32 bytes {byteAt(writer: raw, index: 4)} {byteAt(writer: raw, index: 5)} {byteAt(writer: raw, index: 6)} {byteAt(writer: raw, index: 7)}")
+  log("f32 bytes {byteAt(writer: raw, index: 8)} {byteAt(writer: raw, index: 9)} {byteAt(writer: raw, index: 10)} {byteAt(writer: raw, index: 11)}")
+}
