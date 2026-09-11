@@ -5,7 +5,8 @@ create/drop/copy lifecycle, with staged source-file enforcement implemented;
 GPU manager identity contract proposed in
 [gpu-resource-identity-design.md](gpu-resource-identity-design.md) (#892), approved 2026-09-11; the instance-owned `gpu/GpuResources` manager is
 implemented (#869) and recording/submission lifetime tracking is implemented
-(#870, `gpu/GpuLifetime`).**
+(#870), and manager-owned readbacks + nonblocking GPU timing are implemented
+(#871, `gpu/GpuLifetime` ReadbackId, `gpu/GpuTiming`).**
 
 The active [GPU and C-interop design](ptr-and-gpu-resource-design.md) has been
 rewritten. Use ordinary lifecycle functions from
