@@ -43,14 +43,9 @@ void rae_g2d_frame_reset(void) {}
 void rae_g2d_present_and_cleanup(void) {}
 void rae_g2d_tick(void) {}
 void* rae_g2d_viewport_uniform(void) { return (void*)0; }
-int64_t rae_g2d_prim_count(void) { return 0; }
-int64_t rae_g2d_prim_floats(void) { return 24; }
-void* rae_g2d_prim_data(void) { return (void*)0; }
-int64_t rae_g2d_prim_clip_at(int64_t i) { (void)i; return 0; }
-void rae_g2d_prim_reset(void) {}
 void rae_g2d_scissor(int64_t clip, void* pass) { (void)clip; (void)pass; }
 void rae_g2d_clip_uniform_at(int64_t clip, float* out) { (void)clip; if (out) { for (int i = 0; i < 8; i++) out[i] = 0.0f; } }
-void rae_g2d_prepare_flush(int64_t images_pending) { (void)images_pending; }
+void rae_g2d_prepare_flush(int64_t pending) { (void)pending; }
 int64_t rae_g2d_current_clip(void) { return 0; }
 void* rae_g2d_decode_image(rae_String path) { (void)path; return (void*)0; }
 int64_t rae_g2d_decoded_width(void) { return 0; }
@@ -67,10 +62,5 @@ void* rae_sdf_atlas_pixels(int64_t handle) { (void)handle; return (void*)0; }
 int64_t rae_sdf_atlas_width(int64_t handle) { (void)handle; return 0; }
 int64_t rae_sdf_atlas_height(int64_t handle) { (void)handle; return 0; }
 void rae_ext_Gpu2d_closeWindow(void) {}
-void rae_ext_Gpu2d_drawRect(float x, float y, float w, float h, int64_t color){ (void)x; (void)y; (void)w; (void)h; (void)color; }
-void rae_ext_Gpu2d_drawRoundedRect(float x, float y, float w, float h, float radius, int64_t color){ (void)x; (void)y; (void)w; (void)h; (void)radius; (void)color; }
-void rae_ext_Gpu2d_drawBox(float x, float y, float w, float h, float radius, int64_t fill, float borderWidth, int64_t border){ (void)x; (void)y; (void)w; (void)h; (void)radius; (void)fill; (void)borderWidth; (void)border; }
-void rae_ext_Gpu2d_drawGradientRect(float x, float y, float w, float h, float radius, int64_t from, int64_t to, float angleDeg){ (void)x; (void)y; (void)w; (void)h; (void)radius; (void)from; (void)to; (void)angleDeg; }
-void rae_ext_Gpu2d_drawLine(float x0, float y0, float x1, float y1, float thickness, int64_t color){ (void)x0; (void)y0; (void)x1; (void)y1; (void)thickness; (void)color; }
 void rae_ext_Gpu2d_drawGlyph(float sx0, float sy0, float sx1, float sy1, float u0, float v0, float u1, float v1, int64_t atlas, float pxRange, int64_t color){ (void)sx0; (void)sy0; (void)sx1; (void)sy1; (void)u0; (void)v0; (void)u1; (void)v1; (void)atlas; (void)pxRange; (void)color; }
 void rae_ext_Gpu2d_drawGlyphEx(float sx0, float sy0, float sx1, float sy1, float u0, float v0, float u1, float v1, int64_t atlas, float pxRange, int64_t color, float outlineWidth, int64_t outlineColor, float softness){ (void)sx0; (void)sy0; (void)sx1; (void)sy1; (void)u0; (void)v0; (void)u1; (void)v1; (void)atlas; (void)pxRange; (void)color; (void)outlineWidth; (void)outlineColor; (void)softness; }

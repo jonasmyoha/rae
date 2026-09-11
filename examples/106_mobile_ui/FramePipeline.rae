@@ -248,10 +248,10 @@ func renderGpu2dFrame(
   if (busyAnimating or active or forceRender or now < renderUntil) and frameDue and switching is false {
     uiBeginFrame(canvas: canvas, clear: bg)
     renderSystemGpu2d(world: world, res: gpuUi, canvas: canvas)
-    updateAndRenderDebugOverlayGpu2d(debug: debug, now: now, didRealWork: active, font: gpuUi.textFont)
+    updateAndRenderDebugOverlayGpu2d(debug: debug, canvas: canvas, now: now, didRealWork: active, font: gpuUi.textFont)
     # Shared log overlay (lib/ui/LogOverlay.rae) — top-left here, bottom-left
     # in the 3D example. Drawn last so it is never covered by app UI.
-    drawLogOverlay(ov: logView, font: gpuUi.textFont, screenW: logW, screenH: logH)
+    drawLogOverlay(ov: logView, canvas: canvas, font: gpuUi.textFont, screenW: logW, screenH: logH)
     uiEndFrame(canvas: canvas)
     cacheDirty(world: world, cache: renderCache)
     ret FrameRenderResult {

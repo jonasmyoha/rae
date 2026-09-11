@@ -91,7 +91,6 @@ static void rae_present_recover(const char* which, int status) {
  * see the live frame. */
 void rae_g2d_frame_reset(void) {
     g_g2d_last_present_ok = 0;
-    g_g2d_prim_count = 0;
     for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) g_g2d_text_count[i] = 0;
     rae_g2d_clip_reset();
 }
@@ -266,13 +265,13 @@ void rae_g2d_clip_uniform_at(int64_t clip, float* out) {
 void rae_g2d_scissor(int64_t clip, void* pass) { rae_g2d_set_scissor((int)clip, (WGPURenderPassEncoder)pass); }
 
 /* Upload this flush's viewport transform when anything is queued (the Rae
- * image queue's pending count comes in as an argument). Called by the Rae
- * flush BEFORE it draws boxes and images; the C flush below then draws text. */
-void rae_g2d_prepare_flush(int64_t images_pending) {
+ * box + image queues' pending count comes in as an argument, the text batch is
+ * still counted here). Called by the Rae flush BEFORE it draws. */
+void rae_g2d_prepare_flush(int64_t pending) {
     if (!g_wgpu_dev) return;
     int have_text = 0;
     for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) if (g_g2d_text_count[i] > 0) have_text = 1;
-    if (g_g2d_prim_count > 0 || have_text || images_pending > 0) {
+    if (pending > 0 || have_text) {
         rae_g2d_ensure_viewport_uniform();
         float xf[8]; rae_g2d_compute_xform(xf);
         wgpuQueueWriteBuffer(g_wgpu_queue, g_g2d_uniform, 0, xf, sizeof(xf));
@@ -288,8 +287,6 @@ void rae_ext_Gpu2d_closeWindow(void) {
         g_g2d_text_count[ai] = 0;
     }
     if (g_g2d_uniform) { wgpuBufferRelease(g_g2d_uniform); g_g2d_uniform = NULL; }
-    if (g_g2d_prims) { free(g_g2d_prims); g_g2d_prims = NULL; g_g2d_prim_capf = 0; }
-    g_g2d_prim_count = 0;
     if (g_g2d_surface) { wgpuSurfaceRelease(g_g2d_surface); g_g2d_surface = NULL; }
     for (int i = 0; i < 7; i++) {
         if (g_g2d_cursors[i]) { SDL_DestroyCursor(g_g2d_cursors[i]); g_g2d_cursors[i] = NULL; }
