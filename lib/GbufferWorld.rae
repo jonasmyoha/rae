@@ -9,6 +9,7 @@
 # (GbufferCache, drawInstance, drawMetaballs) still lives there and is reached
 # through `import gbuffer`.
 open Gbuffer
+open gpu/GpuResources
 open Scene3d
 open Vec3
 open ecs/Entity
@@ -20,7 +21,7 @@ open ecs/ComponentTable
 # (#736) that 112/114 open-coded in their RenderSystems, lifted into lib so every
 # 3D example shares one renderer. Order-independent for the deferred G-buffer
 # (depth-resolved), so query order vs the old list order does not change the image.
-func renderSceneWorld(cache: mod GbufferCache, world: view World3d) pub {
+func renderSceneWorld(cache: mod GbufferCache, resources: mod GpuResources, world: view World3d) pub {
   loop var j: Int = 0, j < componentCount(this: world.meshRenderers), ++j {
     let entity: EntityId = componentEntityAt(this: world.meshRenderers, i: j)
     let renderer: MeshRenderer = componentGet(this: world.meshRenderers, entity: entity)
@@ -28,7 +29,7 @@ func renderSceneWorld(cache: mod GbufferCache, world: view World3d) pub {
       let t: Transform3d = componentGet(this: world.transforms, entity: entity)
       let pt: Transform3d = componentGet(this: world.prevTransforms, entity: entity)
       let m: Material3d = componentGet(this: world.materials, entity: entity)
-      drawInstance(cache: cache, mesh: renderer.mesh, transform: t, prevTransform: pt, material: m)
+      drawInstance(cache: cache, resources: resources, mesh: renderer.mesh, transform: t, prevTransform: pt, material: m)
     }
   }
 }

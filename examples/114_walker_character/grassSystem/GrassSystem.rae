@@ -25,12 +25,15 @@ open ecs/ComponentTable
 open Math3d
 open Gltf
 open Gpu3d
+open GbufferRecord
+open Gbuffer
+open gpu/GpuResources
 open Scene3d
 open Mesh3d
 
 const grassPerCell: Int = 10
 const grassBladeCount: Int = 490
-const grassRecordFloats: Int = 19600   # grassBladeCount * Gbuffer.instanceRecordFloats (40)
+const grassRecordFloats: Int = 19600   # grassBladeCount * GbufferRecord.instanceRecordFloats (40)
 const grassWindTau: Float = 6.283185307179586
 
 # One clump descriptor, stored as a per-blade COMPONENT: the planted base it
@@ -52,7 +55,7 @@ type GrassSystem {
   centreCellY: Int
   groundZ: Float
   meshId: Int
-  # DERIVED DrawU staging buffer: grassBladeCount * Gbuffer.instanceRecordFloats,
+  # DERIVED DrawU staging buffer: grassBladeCount * GbufferRecord.instanceRecordFloats,
   # rebuilt from the GrassBlade components each frame and handed to
   # Gbuffer.drawRecords. Never reallocated, never a source of truth.
   records: List(Float)
@@ -120,26 +123,26 @@ func grassGust(phase: view Float, baseX: view Float, time: view Float) ret Float
 # (so TAA gets correct motion while the field waves), plus a per-blade green —
 # then one instanced draw for the whole field. The matrices and the record
 # layout are gbuffer's Rae helpers; nothing here touches raw float offsets.
-func drawGrassField(grassSystem: mod GrassSystem, world: view GameWorld,
+func drawGrassField(cache: mod GbufferCache, resources: mod GpuResources, grassSystem: mod GrassSystem, world: view GameWorld,
                     time: view Float, deltaTime: view Float, toon: view Int) {
   loop var index: Int = 0, index < componentCount(this: world.grassBlades), ++index {
     let blade: GrassBlade = componentDataAt(this: world.grassBlades, i: index)
     let gust: Float = grassGust(phase: blade.phase, baseX: blade.baseX, time: time)
     let prevGust: Float = grassGust(phase: blade.phase, baseX: blade.baseX, time: time - deltaTime)
-    let model: Mat4 = Gbuffer.swayModel(
+    let model: Mat4 = GbufferRecord.swayModel(
       x: blade.baseX, y: blade.baseY, z: blade.baseZ, yaw: blade.yaw,
       tiltX: gust * 0.6, tiltY: gust, scale: blade.scale)
-    let prevModel: Mat4 = Gbuffer.swayModel(
+    let prevModel: Mat4 = GbufferRecord.swayModel(
       x: blade.baseX, y: blade.baseY, z: blade.baseZ, yaw: blade.yaw,
       tiltX: prevGust * 0.6, tiltY: prevGust, scale: blade.scale)
     # Per-blade green: a small deterministic spread off the base colour.
     let cvar: Float = blade.phase / grassWindTau
-    Gbuffer.packInstanceRecord(records: grassSystem.records, slot: index,
+    GbufferRecord.packInstanceRecord(records: grassSystem.records, slot: index,
       model: model, prevModel: prevModel,
       r: 0.13 + cvar * 0.09, g: 0.33 + cvar * 0.16, b: 0.05 + cvar * 0.05,
       metallic: 0.0, roughness: 0.95, emissive: 0.0, toon: toon, paletteBase: 0)
   }
-  Gbuffer.drawRecords(mesh: grassSystem.meshId, records: grassSystem.records.data,
+  Gbuffer.drawRecords(cache: cache, resources: resources, mesh: grassSystem.meshId, records: grassSystem.records.data,
                       count: grassBladeCount)
 }
 
