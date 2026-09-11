@@ -303,6 +303,7 @@ func g2dOpenPass(canvas: mod Gpu2dCanvas, loadOp: copy Int32, r: copy Float, g: 
 # the given linear RGBA colour (components 0..1). Must be paired with endFrame.
 func beginFrame(canvas: mod Gpu2dCanvas, r: copy Float, g: copy Float, b: copy Float, a: copy Float) {
   g2dFrameReset()
+  canvasFrameBegin(canvas: canvas)
   if g2dOffViewReady() is 0 { ret }
   g2dOpenPass(canvas: canvas, loadOp: WGPULoadOp_Clear, r: r, g: g, b: b, a: a)
 }
@@ -312,6 +313,7 @@ func beginFrame(canvas: mod Gpu2dCanvas, r: copy Float, g: copy Float, b: copy F
 # only pass that should screenshot/present the composed frame.
 func beginFrameLoad(canvas: mod Gpu2dCanvas) {
   g2dFrameReset()
+  canvasFrameBegin(canvas: canvas)
   if g2dOffViewReady() is 0 { ret }
   g2dOpenPass(canvas: canvas, loadOp: WGPULoadOp_Load, r: 0.0, g: 0.0, b: 0.0, a: 0.0)
 }
@@ -355,7 +357,7 @@ func lastPresentOk() ret Bool {
 # pipelines (for example: image, then later shape, then text). Order within a
 # flush: boxes (the Rae box pass, #907), then images (#908), then text (#909).
 func flush(canvas: mod Gpu2dCanvas) {
-  g2dPrepareFlush(imagesPending: canvas.imageCommandHandles.length)
+  g2dPrepareFlush(pending: canvasBoxCount(canvas: canvas) + canvas.imageCommandHandles.length)
   boxFlush(canvas: canvas)
   imageFlush(canvas: canvas)
   textFlush(canvas: canvas)
@@ -369,36 +371,33 @@ func flush(canvas: mod Gpu2dCanvas) {
 # Rounded corners and borders are antialiased analytically (no MSAA).
 
 # Filled axis-aligned rectangle.
-func nativeDrawRect(x: Float, y: Float, w: Float, h: Float, color: Int) unsafe extern("rae_ext_Gpu2d_drawRect")
-func drawRect(x: copy Float, y: copy Float, w: copy Float, h: copy Float, color: copy Int) {
-  unsafe { nativeDrawRect(x: x, y: y, w: w, h: h, color: color) }
+# The primitives are queued on the app's Gpu2dCanvas (#913) — the CPU batch
+# and its GPU pass both live there; these are the Gpu2d-spelled entry points.
+func drawRect(canvas: mod Gpu2dCanvas, x: copy Float, y: copy Float, w: copy Float, h: copy Float, color: copy Int) {
+  canvasDrawRect(canvas: canvas, x: x, y: y, w: w, h: h, color: color)
 }
 
 # Filled rounded rectangle (uniform corner radius).
-func nativeDrawRoundedRect(x: Float, y: Float, w: Float, h: Float, radius: Float, color: Int) unsafe extern("rae_ext_Gpu2d_drawRoundedRect")
-func drawRoundedRect(x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, color: copy Int) {
-  unsafe { nativeDrawRoundedRect(x: x, y: y, w: w, h: h, radius: radius, color: color) }
+func drawRoundedRect(canvas: mod Gpu2dCanvas, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, color: copy Int) {
+  canvasDrawRoundedRect(canvas: canvas, x: x, y: y, w: w, h: h, radius: radius, color: color)
 }
 
 # Rounded rectangle with a fill and a stroked border `borderWidth` px wide
 # (drawn inset from the edge). radius 0 gives a sharp-cornered box.
-func nativeDrawBox(x: Float, y: Float, w: Float, h: Float, radius: Float, fill: Int, borderWidth: Float, border: Int) unsafe extern("rae_ext_Gpu2d_drawBox")
-func drawBox(x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, fill: copy Int, borderWidth: copy Float, border: copy Int) {
-  unsafe { nativeDrawBox(x: x, y: y, w: w, h: h, radius: radius, fill: fill, borderWidth: borderWidth, border: border) }
+func drawBox(canvas: mod Gpu2dCanvas, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, fill: copy Int, borderWidth: copy Float, border: copy Int) {
+  canvasDrawBox(canvas: canvas, x: x, y: y, w: w, h: h, radius: radius, fill: fill, borderWidth: borderWidth, border: border)
 }
 
 # Filled rounded rectangle with a linear gradient. `angleDeg` follows the UI
 # GradientFill convention: 0 = left-to-right, 90 = top-to-bottom.
-func nativeDrawGradientRect(x: Float, y: Float, w: Float, h: Float, radius: Float, from: Int, to: Int, angleDeg: Float) unsafe extern("rae_ext_Gpu2d_drawGradientRect")
-func drawGradientRect(x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, from: copy Int, to: copy Int, angleDeg: copy Float) {
-  unsafe { nativeDrawGradientRect(x: x, y: y, w: w, h: h, radius: radius, from: from, to: to, angleDeg: angleDeg) }
+func drawGradientRect(canvas: mod Gpu2dCanvas, x: copy Float, y: copy Float, w: copy Float, h: copy Float, radius: copy Float, from: copy Int, to: copy Int, angleDeg: copy Float) {
+  canvasDrawGradientRect(canvas: canvas, x: x, y: y, w: w, h: h, radius: radius, from: from, to: to, angleDeg: angleDeg)
 }
 
 # Antialiased line from (x0,y0) to (x1,y1), `thickness` units wide, with
 # rounded caps (a rotated capsule). Works at any angle.
-func nativeDrawLine(x0: Float, y0: Float, x1: Float, y1: Float, thickness: Float, color: Int) unsafe extern("rae_ext_Gpu2d_drawLine")
-func drawLine(x0: copy Float, y0: copy Float, x1: copy Float, y1: copy Float, thickness: copy Float, color: copy Int) {
-  unsafe { nativeDrawLine(x0: x0, y0: y0, x1: x1, y1: y1, thickness: thickness, color: color) }
+func drawLine(canvas: mod Gpu2dCanvas, x0: copy Float, y0: copy Float, x1: copy Float, y1: copy Float, thickness: copy Float, color: copy Int) {
+  canvasDrawLine(canvas: canvas, x0: x0, y0: y0, x1: x1, y1: y1, thickness: thickness, color: color)
 }
 
 # --- Clipping (#144, axis-aligned scissor) -------------------------------
