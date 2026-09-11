@@ -626,7 +626,8 @@ identities; `GpuResources` owns allocations and has `create`/`drop` with no
 `copy`. The manager identity representation is proposed in
 [gpu-resource-identity-design.md](gpu-resource-identity-design.md) (#892, approved
 2026-09-11): a copyable `{managerTag, slot, generation}` value per kind, the tag
-drawn from an explicitly shared issuer.
+drawn from an explicitly shared issuer. `gpu/GpuResources` now exists (#869):
+`GpuResources.create(issuer: issuer, capacity: N)`.
 
 ```rae
 open gpu/GpuResources

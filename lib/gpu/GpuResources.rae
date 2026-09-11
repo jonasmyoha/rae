@@ -1,0 +1,477 @@
+# gpu/GpuResources — the instance-owned GPU resource manager (#869) under the
+# approved identity contract (docs/gpu-resource-identity-design.md).
+#
+# Ownership: `GpuResources` owns native WebGPU resources through `create`/`drop`
+# and has no `copy`. `BufferId`, `TextureId`, `TextureViewId` and `SamplerId` are
+# copyable identities — three Ints, no pointer — so ordinary systems can store,
+# copy and log them freely. Every kind is a distinct Rae type over one layout,
+# so kind confusion is a compile error.
+#
+# Identity: the manager's `managerTag` comes from an `IdIssuer` the root owns and
+# passes explicitly; one issuer never hands out the same tag twice, so two
+# managers built from it reject each other's IDs, and a recreated manager never
+# accepts an ID of the manager it replaced. There is no hidden registry, no
+# global slot table and nothing injected into main.
+#
+# Validation (every safe operation): owner tag -> kind (the Rae type) -> slot
+# range -> live slot -> generation -> operation-specific usage/range, where size
+# and usage are RE-QUERIED from the native object, never taken from a field a
+# caller can write. A rejected ID is a plain false/none; it never reaches native
+# state. Retiring bumps the slot's generation, so every copy of the ID goes
+# stale at once; a double retire is a harmless false.
+#
+# This module adopts the unsafe boundary: raw handles live behind `unsafe`
+# blocks and only the safe wrappers below are the public surface. Lifetime
+# tracking across recording/submission (#870) and the ReadbackId integration
+# (#871) build on these tables; `readBuffer` is the minimal safe seam until then.
+open webgpu/Context
+open webgpu/Webgpu
+open webgpu/WebgpuEnums
+open webgpu/WebgpuTypes
+open webgpu/ReadRequest
+
+# ----- identities ------------------------------------------------------
+
+type IdIssuer {
+  nextTag: Int
+}
+
+func create() ret IdIssuer {
+  ret IdIssuer { nextTag: 1 }
+}
+
+# Tag 0 means "no manager"; issued tags start at 1 and never repeat.
+func issue(this: mod IdIssuer) ret Int {
+  let tag: Int = this.nextTag
+  this.nextTag = this.nextTag + 1
+  ret tag
+}
+
+type BufferId {
+  managerTag: Int
+  slot: Int
+  generation: Int
+}
+
+type TextureId {
+  managerTag: Int
+  slot: Int
+  generation: Int
+}
+
+type TextureViewId {
+  managerTag: Int
+  slot: Int
+  generation: Int
+}
+
+type SamplerId {
+  managerTag: Int
+  slot: Int
+  generation: Int
+}
+
+# ----- slot tables -----------------------------------------------------
+
+const kindBuffer: Int = 0
+const kindTexture: Int = 1
+const kindTextureView: Int = 2
+const kindSampler: Int = 3
+
+# One table per kind: the generation and live flag are the authoritative slot
+# record; `handles` holds the native reference the manager owns for the slot.
+type SlotTable {
+  generations: List(Int)
+  live: List(Int)
+  handles: List(Ptr)
+}
+
+func createSlotTable(capacity: view Int, empty: copy Ptr) ret SlotTable {
+  let generations: List(Int) = List.create(Int, cap: capacity)
+  let live: List(Int) = List.create(Int, cap: capacity)
+  let handles: List(Ptr) = List.create(Ptr, cap: capacity)
+  var i: Int = 0
+  loop i < capacity {
+    generations.add(value: 0)
+    live.add(value: 0)
+    unsafe { handles.add(value: empty) }
+    i = i + 1
+  }
+  unsafe { ret SlotTable { generations: own generations, live: own live, handles: own handles } }
+}
+
+# First free slot, or -1 when every slot is live (exhaustion). Does not mark
+# the slot: a create marks it live only after the native allocation succeeded.
+func findFreeSlot(table: view SlotTable, capacity: view Int) ret Int {
+  var slot: Int = 0
+  loop slot < capacity {
+    if let liveFlag: Int = table.live.copyAt(index: slot) {
+      if liveFlag is 0 { ret slot }
+    }
+    slot = slot + 1
+  }
+  ret 0 - 1
+}
+
+func slotIsLive(table: view SlotTable, capacity: view Int, slot: view Int, generation: view Int) ret Bool {
+  if slot < 0 or slot >= capacity { ret false }
+  if let liveFlag: Int = table.live.copyAt(index: slot) {
+    if liveFlag is 0 { ret false }
+  } else {
+    ret false
+  }
+  if let current: Int = table.generations.copyAt(index: slot) {
+    ret current is generation
+  }
+  ret false
+}
+
+func slotGeneration(table: view SlotTable, slot: view Int) ret Int {
+  if let current: Int = table.generations.copyAt(index: slot) { ret current }
+  ret 0
+}
+
+func liveCount(table: view SlotTable, capacity: view Int) ret Int {
+  var count: Int = 0
+  var slot: Int = 0
+  loop slot < capacity {
+    if let liveFlag: Int = table.live.copyAt(index: slot) {
+      if liveFlag is 1 { count = count + 1 }
+    }
+    slot = slot + 1
+  }
+  ret count
+}
+
+# Hands out the raw native handle of a slot: an unchecked pointer, so the
+# caller takes the obligation (internal use, always inside unsafe blocks).
+func slotHandle(table: view SlotTable, slot: view Int) unsafe ret Ptr {
+  unsafe { ret rae_ext_rae_buf_get(V: Ptr, buf: table.handles.data, index: slot) }
+}
+
+func storeHandle(table: mod SlotTable, slot: view Int, handle: copy Ptr) {
+  unsafe { rae_ext_rae_buf_set(V: Ptr, buf: table.handles.data, index: slot, value: handle) }
+  table.live.set(index: slot, value: 1)
+}
+
+# Frees the slot and bumps its generation, so every copy of the old ID is stale
+# at once and the next occupant is a new identity.
+func retireSlot(table: mod SlotTable, slot: view Int, empty: copy Ptr) {
+  let generation: Int = slotGeneration(table: table, slot: slot)
+  table.generations.set(index: slot, value: generation + 1)
+  table.live.set(index: slot, value: 0)
+  unsafe { rae_ext_rae_buf_set(V: Ptr, buf: table.handles.data, index: slot, value: empty) }
+}
+
+func releaseHandle(kind: view Int, handle: copy Ptr) {
+  unsafe {
+    if kind is kindBuffer { wgpuBufferRelease(buffer: handle) }
+    if kind is kindTexture { wgpuTextureRelease(texture: handle) }
+    if kind is kindTextureView { wgpuTextureViewRelease(textureView: handle) }
+    if kind is kindSampler { wgpuSamplerRelease(sampler: handle) }
+  }
+}
+
+func releaseAll(table: mod SlotTable, capacity: view Int, kind: view Int) ret Int {
+  var released: Int = 0
+  var slot: Int = 0
+  loop slot < capacity {
+    if let liveFlag: Int = table.live.copyAt(index: slot) {
+      if liveFlag is 1 {
+        unsafe { releaseHandle(kind: kind, handle: slotHandle(table: table, slot: slot)) }
+        table.live.set(index: slot, value: 0)
+        released = released + 1
+      }
+    }
+    slot = slot + 1
+  }
+  ret released
+}
+
+# A power-of-two usage flag is tested with integer arithmetic (Rae has no
+# bitwise operator): the flag's bit is set when (usage / flag) is odd.
+func hasUsageFlag(usage: view UInt64, flag: view UInt64) ret Bool {
+  let quotient: UInt64 = usage / flag
+  ret (quotient - (quotient / 2) * 2) is (1 as UInt64)
+}
+
+# ----- the manager -----------------------------------------------------
+
+type GpuResources {
+  managerTag: Int
+  capacity: Int
+  buffers: SlotTable
+  textures: SlotTable
+  textureViews: SlotTable
+  samplers: SlotTable
+}
+
+# Fails (none) for a nonsensical capacity, when no device is available (the
+# app bootstraps the context first) or when the tables cannot be built.
+func create(issuer: mod IdIssuer, capacity: view Int) ret opt GpuResources {
+  if capacity < 1 { ret none }
+  unsafe {
+    let empty: Ptr = webgpuNull()
+    if webgpuDevice() is empty { ret none }
+    let buffers: SlotTable = createSlotTable(capacity: capacity, empty: empty)
+    let textures: SlotTable = createSlotTable(capacity: capacity, empty: empty)
+    let textureViews: SlotTable = createSlotTable(capacity: capacity, empty: empty)
+    let samplers: SlotTable = createSlotTable(capacity: capacity, empty: empty)
+    let tag: Int = issue(this: issuer)
+    ret GpuResources {
+      managerTag: tag
+      capacity: capacity
+      buffers: own buffers
+      textures: own textures
+      textureViews: own textureViews
+      samplers: own samplers
+    }
+  }
+}
+
+# Releases every live native reference exactly once. Views are released before
+# the textures they reference; wgpu reference counting keeps a texture alive
+# while any view or pending readback still holds it.
+func drop(this: mod GpuResources) {
+  releaseAll(table: this.textureViews, capacity: this.capacity, kind: kindTextureView)
+  releaseAll(table: this.textures, capacity: this.capacity, kind: kindTexture)
+  releaseAll(table: this.buffers, capacity: this.capacity, kind: kindBuffer)
+  releaseAll(table: this.samplers, capacity: this.capacity, kind: kindSampler)
+}
+
+func liveBufferCount(resources: view GpuResources) ret Int {
+  ret liveCount(table: resources.buffers, capacity: resources.capacity)
+}
+
+func liveTextureCount(resources: view GpuResources) ret Int {
+  ret liveCount(table: resources.textures, capacity: resources.capacity)
+}
+
+func liveTextureViewCount(resources: view GpuResources) ret Int {
+  ret liveCount(table: resources.textureViews, capacity: resources.capacity)
+}
+
+func liveSamplerCount(resources: view GpuResources) ret Int {
+  ret liveCount(table: resources.samplers, capacity: resources.capacity)
+}
+
+# ----- validation ------------------------------------------------------
+
+func isValidBuffer(resources: view GpuResources, id: view BufferId) ret Bool {
+  if id.managerTag is not resources.managerTag { ret false }
+  ret slotIsLive(table: resources.buffers, capacity: resources.capacity, slot: id.slot, generation: id.generation)
+}
+
+func isValidTexture(resources: view GpuResources, id: view TextureId) ret Bool {
+  if id.managerTag is not resources.managerTag { ret false }
+  ret slotIsLive(table: resources.textures, capacity: resources.capacity, slot: id.slot, generation: id.generation)
+}
+
+func isValidTextureView(resources: view GpuResources, id: view TextureViewId) ret Bool {
+  if id.managerTag is not resources.managerTag { ret false }
+  ret slotIsLive(table: resources.textureViews, capacity: resources.capacity, slot: id.slot, generation: id.generation)
+}
+
+func isValidSampler(resources: view GpuResources, id: view SamplerId) ret Bool {
+  if id.managerTag is not resources.managerTag { ret false }
+  ret slotIsLive(table: resources.samplers, capacity: resources.capacity, slot: id.slot, generation: id.generation)
+}
+
+# ----- buffers ---------------------------------------------------------
+
+# none on an invalid descriptor (size < 1, no usage), exhaustion (no free
+# slot) or a failed native allocation. The slot is consumed only on success.
+func createBuffer(resources: mod GpuResources, size: view Int, usage: view UInt64) ret opt BufferId {
+  if size < 1 { ret none }
+  if usage is (0 as UInt64) { ret none }
+  let slot: Int = findFreeSlot(table: resources.buffers, capacity: resources.capacity)
+  if slot < 0 { ret none }
+  unsafe {
+    let descriptor: WGPUBufferDescriptor = { size: size as UInt64, usage: usage }
+    let handle: Ptr = wgpuDeviceCreateBuffer(device: webgpuDevice(), descriptor: descriptor)
+    if handle is webgpuNull() { ret none }
+    storeHandle(table: resources.buffers, slot: slot, handle: handle)
+  }
+  ret BufferId { managerTag: resources.managerTag, slot: slot, generation: slotGeneration(table: resources.buffers, slot: slot) }
+}
+
+# The authoritative size, re-queried from the native buffer. -1 for an invalid ID.
+func bufferSize(resources: view GpuResources, id: view BufferId) ret Int {
+  if isValidBuffer(resources: resources, id: id) is false { ret 0 - 1 }
+  unsafe { ret wgpuBufferGetSize(buffer: slotHandle(table: resources.buffers, slot: id.slot)) as Int }
+}
+
+func bufferUsage(resources: view GpuResources, id: view BufferId) ret UInt64 {
+  if isValidBuffer(resources: resources, id: id) is false { ret 0 as UInt64 }
+  unsafe { ret wgpuBufferGetUsage(buffer: slotHandle(table: resources.buffers, slot: id.slot)) }
+}
+
+# Overflow-safe containment of [offset, offset + size) in the authoritative
+# native size: both bounds are checked in unsigned space, so no sum can wrap.
+func bufferRangeIsValid(resources: view GpuResources, id: view BufferId, offset: view Int, size: view Int) ret Bool {
+  if isValidBuffer(resources: resources, id: id) is false { ret false }
+  if offset < 0 or size < 0 { ret false }
+  let nativeSize: UInt64 = bufferSize(resources: resources, id: id) as UInt64
+  let offsetBytes: UInt64 = offset as UInt64
+  if offsetBytes > nativeSize { ret false }
+  ret (size as UInt64) <= nativeSize - offsetBytes
+}
+
+# Copies `bytes` into the buffer through the queue, which consumes the data
+# synchronously, so the List is only borrowed for the call. Requires CopyDst
+# usage on the NATIVE buffer and the 4-byte alignment WebGPU demands. wgpu only
+# stages a queue write until the next submit, and a readback maps the source
+# buffer directly (no copy, no submit), so the write is flushed here with an
+# empty submit: after `writeBuffer` returns, the bytes are durable for any later
+# map or copy. Uses the generated binding, not a renderer C helper.
+func writeBuffer(resources: view GpuResources, id: view BufferId, offset: view Int, bytes: view List(UInt8)) ret Bool {
+  if bytes.length < 0 or bytes.cap < bytes.length { ret false }
+  if bufferRangeIsValid(resources: resources, id: id, offset: offset, size: bytes.length) is false { ret false }
+  if offset - (offset / 4) * 4 is not 0 { ret false }
+  if bytes.length - (bytes.length / 4) * 4 is not 0 { ret false }
+  if hasUsageFlag(usage: bufferUsage(resources: resources, id: id), flag: WGPUBufferUsage_CopyDst) is false { ret false }
+  unsafe {
+    wgpuQueueWriteBuffer(
+      queue: webgpuQueue()
+      buffer: slotHandle(table: resources.buffers, slot: id.slot)
+      bufferOffset: offset as UInt64
+      data: bytes.data
+      size: bytes.length as UInt64
+    )
+    wgpuQueueSubmit(queue: webgpuQueue(), commandCount: 0 as UInt64, commands: webgpuNull())
+  }
+  ret true
+}
+
+# Starts a readback of a validated range. The request retains its own native
+# reference to the buffer, so retiring the buffer while a read is pending is
+# safe at the native level; #871 gives this a manager-owned ReadbackId.
+func readBuffer(resources: view GpuResources, id: view BufferId, offset: view Int, size: view Int) ret opt ReadRequest {
+  if bufferRangeIsValid(resources: resources, id: id, offset: offset, size: size) is false { ret none }
+  if hasUsageFlag(usage: bufferUsage(resources: resources, id: id), flag: WGPUBufferUsage_MapRead) is false { ret none }
+  unsafe {
+    ret ReadRequest.create(
+      buffer: slotHandle(table: resources.buffers, slot: id.slot)
+      range: { offset: offset as UInt64, size: size as UInt64 }
+    )
+  }
+}
+
+func retireBuffer(resources: mod GpuResources, id: view BufferId) ret Bool {
+  if isValidBuffer(resources: resources, id: id) is false { ret false }
+  unsafe {
+    releaseHandle(kind: kindBuffer, handle: slotHandle(table: resources.buffers, slot: id.slot))
+    retireSlot(table: resources.buffers, slot: id.slot, empty: webgpuNull())
+  }
+  ret true
+}
+
+# ----- textures, views, samplers ---------------------------------------
+
+func createTexture(resources: mod GpuResources, width: view Int, height: view Int, format: view Int32, usage: view UInt64) ret opt TextureId {
+  if width < 1 or height < 1 { ret none }
+  if usage is (0 as UInt64) { ret none }
+  let slot: Int = findFreeSlot(table: resources.textures, capacity: resources.capacity)
+  if slot < 0 { ret none }
+  unsafe {
+    let descriptor: WGPUTextureDescriptor = {
+      usage: usage
+      dimension: WGPUTextureDimension_2D
+      size: { width: width as UInt32, height: height as UInt32, depthOrArrayLayers: 1 as UInt32 }
+      format: format
+      mipLevelCount: 1 as UInt32
+      sampleCount: 1 as UInt32
+    }
+    let handle: Ptr = wgpuDeviceCreateTexture(device: webgpuDevice(), descriptor: descriptor)
+    if handle is webgpuNull() { ret none }
+    storeHandle(table: resources.textures, slot: slot, handle: handle)
+  }
+  ret TextureId { managerTag: resources.managerTag, slot: slot, generation: slotGeneration(table: resources.textures, slot: slot) }
+}
+
+func textureWidth(resources: view GpuResources, id: view TextureId) ret Int {
+  if isValidTexture(resources: resources, id: id) is false { ret 0 - 1 }
+  unsafe { ret wgpuTextureGetWidth(texture: slotHandle(table: resources.textures, slot: id.slot)) as Int }
+}
+
+func textureHeight(resources: view GpuResources, id: view TextureId) ret Int {
+  if isValidTexture(resources: resources, id: id) is false { ret 0 - 1 }
+  unsafe { ret wgpuTextureGetHeight(texture: slotHandle(table: resources.textures, slot: id.slot)) as Int }
+}
+
+func retireTexture(resources: mod GpuResources, id: view TextureId) ret Bool {
+  if isValidTexture(resources: resources, id: id) is false { ret false }
+  unsafe {
+    releaseHandle(kind: kindTexture, handle: slotHandle(table: resources.textures, slot: id.slot))
+    retireSlot(table: resources.textures, slot: id.slot, empty: webgpuNull())
+  }
+  ret true
+}
+
+# A default 2D view over the whole texture; the format is the texture's own,
+# read from the native object. The view keeps its own native reference to the
+# texture, so it stays valid if the texture is retired first (dependency
+# tracking across recording is #870).
+func createTextureView(resources: mod GpuResources, texture: view TextureId) ret opt TextureViewId {
+  if isValidTexture(resources: resources, id: texture) is false { ret none }
+  let slot: Int = findFreeSlot(table: resources.textureViews, capacity: resources.capacity)
+  if slot < 0 { ret none }
+  unsafe {
+    let textureHandle: Ptr = slotHandle(table: resources.textures, slot: texture.slot)
+    let descriptor: WGPUTextureViewDescriptor = {
+      format: wgpuTextureGetFormat(texture: textureHandle)
+      dimension: WGPUTextureViewDimension_2D
+      baseMipLevel: 0 as UInt32
+      mipLevelCount: 1 as UInt32
+      baseArrayLayer: 0 as UInt32
+      arrayLayerCount: 1 as UInt32
+      aspect: WGPUTextureAspect_All
+    }
+    let handle: Ptr = wgpuTextureCreateView(texture: textureHandle, descriptor: descriptor)
+    if handle is webgpuNull() { ret none }
+    storeHandle(table: resources.textureViews, slot: slot, handle: handle)
+  }
+  ret TextureViewId { managerTag: resources.managerTag, slot: slot, generation: slotGeneration(table: resources.textureViews, slot: slot) }
+}
+
+func retireTextureView(resources: mod GpuResources, id: view TextureViewId) ret Bool {
+  if isValidTextureView(resources: resources, id: id) is false { ret false }
+  unsafe {
+    releaseHandle(kind: kindTextureView, handle: slotHandle(table: resources.textureViews, slot: id.slot))
+    retireSlot(table: resources.textureViews, slot: id.slot, empty: webgpuNull())
+  }
+  ret true
+}
+
+# A default clamp-to-edge, linear sampler.
+func createSampler(resources: mod GpuResources) ret opt SamplerId {
+  let slot: Int = findFreeSlot(table: resources.samplers, capacity: resources.capacity)
+  if slot < 0 { ret none }
+  unsafe {
+    let descriptor: WGPUSamplerDescriptor = {
+      addressModeU: WGPUAddressMode_ClampToEdge
+      addressModeV: WGPUAddressMode_ClampToEdge
+      addressModeW: WGPUAddressMode_ClampToEdge
+      magFilter: WGPUFilterMode_Linear
+      minFilter: WGPUFilterMode_Linear
+      mipmapFilter: WGPUMipmapFilterMode_Nearest
+      lodMinClamp: 0.0
+      lodMaxClamp: 32.0
+      compare: WGPUCompareFunction_Undefined
+      maxAnisotropy: 1 as UInt16
+    }
+    let handle: Ptr = wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: descriptor)
+    if handle is webgpuNull() { ret none }
+    storeHandle(table: resources.samplers, slot: slot, handle: handle)
+  }
+  ret SamplerId { managerTag: resources.managerTag, slot: slot, generation: slotGeneration(table: resources.samplers, slot: slot) }
+}
+
+func retireSampler(resources: mod GpuResources, id: view SamplerId) ret Bool {
+  if isValidSampler(resources: resources, id: id) is false { ret false }
+  unsafe {
+    releaseHandle(kind: kindSampler, handle: slotHandle(table: resources.samplers, slot: id.slot))
+    retireSlot(table: resources.samplers, slot: id.slot, empty: webgpuNull())
+  }
+  ret true
+}
