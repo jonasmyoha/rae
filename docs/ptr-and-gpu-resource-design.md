@@ -755,7 +755,20 @@ pretending repository-wide enforcement is complete:
    (`String.toCStr`/`fromCStr`, `Sys.encrypt`/`decrypt`) are themselves `unsafe`.
    `ui/WindowGeometry` keeps declaration-only marking: it is coupled to the
    `Gpu2d` renderer externs, so its full adoption lands with the GPU consumers
-   (#876). Legacy platform surfaces (Raylib, Sdl3, Msdf) remain queued (#895).
+   (#876).
+
+   The legacy window/media boundary adopted the declarations too (#895): every
+   foreign declaration in `Raylib` (83), `Sdl3` (14) and `ui/legacyRaylib/Msdf`
+   spells `unsafe extern`. These are pure declaration modules (no wrappers of
+   their own). Consumer-side `unsafe { ... }` block wrapping in the
+   `ui/legacyRaylib/*` shell modules is deferred (#900): those modules are the
+   dual-backend raylib/`Gpu2d` shell — they call `Gpu2d` externs directly, so
+   their block wrapping is entangled with the GPU-consumer migration (#876), and
+   the only examples that exercise them live under `examples/legacy/` which the
+   maintained example gate prunes (and which carry pre-existing compile errors),
+   so there is no maintained verification path for that wrapping in isolation.
+   `#877`'s final sweep enforces the remaining declaration-only files. `Sdl3`'s
+   consumers are the maintained raytracer examples, which stay green.
 
 Positive tests must include the same native-buffer module authored outside
 stdlib, safe wrapper use, direct `if let` owners, owner fields, returns,
