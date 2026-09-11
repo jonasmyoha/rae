@@ -321,3 +321,49 @@ flat dependency arena and a view's texture as its recorded indirect dependency.
   shutdown). #871 layers `ReadbackId` on `readBuffer`; explicit `.drop()` of a
   `Recording` local hits a compiler codegen bug (#902), so abandon by scope
   exit for now.
+
+## Implementation notes (#871): manager-owned readbacks and nonblocking timing
+
+`gpu/GpuLifetime` adds `ReadbackId` and `gpu/GpuTiming` adds nonblocking GPU
+timing, both over the same slot tables (a new readback table per manager). No
+renderer C was added; everything is Rae over the generated bindings and the
+#887 readback bridge.
+
+- A `ReadbackId` is a copyable handle to one in-flight MapRead of a manager
+  buffer, integrating the #887 request lifecycle and the hardened #897 copy.
+  `startReadback` validates the buffer (owner, live, generation, MapRead, range),
+  refuses a buffer already being read (WebGPU allows one active map per buffer;
+  wgpu-native aborts on a double map, so this is enforced in Rae), and returns
+  none when every readback slot is busy — **bounded staging**: the consumer
+  defers and retries. The manager owns the native request and releases it
+  exactly once (in `retireReadback` and in the destructor, through the #887
+  bridge), and pins the source buffer for the map's lifetime; the buffer may be
+  retired meanwhile (no new use, deferred release) but is never destroyed under
+  the map.
+- `pollReadback` is nonblocking (`-1/0/1/2` = invalid/pending/success/failure)
+  and caches the terminal state. `copyReadback` copies the completed bytes into
+  a temporary borrow (a caller `List(UInt8)`); the native copy is bounded by the
+  destination's real allocation (#897) and never retains it, so the List may
+  grow between poll and copy. `retireReadback` releases safely whether pending
+  (cancel) or complete — the pending callback keeps its own native reference
+  until it arrives.
+- `gpu/GpuTiming` writes pass-boundary timestamps (Metal only supports those),
+  resolves them into a manager QueryResolve buffer, copies to a MapRead buffer
+  and reads them back through a `ReadbackId`, so collection **never blocks** on
+  the GPU. `recordComputeTimed` records a compute pass with `timestampWrites`;
+  `recordTimingResolve` records the resolve+copy; `startTimingSample` /
+  `collectTiming` drive the nonblocking read and convert ticks→microseconds via
+  the queue's timestamp period. The legacy `lib/GpuTiming.rae` keeps its
+  blocking `webgpuMapRead` diagnostic for captures; this is the nonblocking
+  production path and does no adaptive scheduling.
+- Unavailable-timestamps fallback: when the adapter has no timestamp queries,
+  `createGpuTiming` returns an inert `GpuTiming` with `available` false — every
+  call is a no-op, `timingWrites` is null (a pass with null timestampWrites runs
+  untimed), and `lastTotalUs` returns -1, the documented "unavailable" sentinel.
+- Checks: `compiler/tests/cases/796_readback_lifetime_model` (deterministic, no
+  GPU: success/failure/cancel, exclusive mapping, bounded staging, reuse, device
+  loss and exact-once release counting) and on hardware
+  `examples/zz_gpu_readback_check` (two concurrent requests, exclusive mapping,
+  busy-defer, byte-exact copies, deferred release, reuse, cancellation,
+  exact-once shutdown) and `examples/zz_gpu_manager_timing` (five frames of
+  nonblocking two-pass GPU timing with real timestamps, then shutdown).

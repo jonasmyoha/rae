@@ -34,6 +34,7 @@ open webgpu/Webgpu
 open webgpu/WebgpuEnums
 open webgpu/WebgpuTypes
 open webgpu/ReadRequest
+open webgpu/Readback
 
 # ----- identities ------------------------------------------------------
 
@@ -85,6 +86,7 @@ const kindSampler: Int = 3
 const kindPipeline: Int = 4
 const kindBindGroup: Int = 5
 const kindSubmission: Int = 6
+const kindReadback: Int = 7
 
 # One table per kind. `generations`/`live` are the authoritative slot record;
 # `handles` holds the native reference this manager owns. The lifetime fields:
@@ -210,6 +212,9 @@ func releaseHandle(kind: view Int, handle: copy Ptr) {
     if kind is kindSampler { wgpuSamplerRelease(sampler: handle) }
     if kind is kindPipeline { wgpuComputePipelineRelease(computePipeline: handle) }
     if kind is kindBindGroup { wgpuBindGroupRelease(bindGroup: handle) }
+    if kind is kindReadback {
+      let released: Ptr = releaseRead(request: handle)
+    }
   }
 }
 
@@ -292,6 +297,7 @@ type GpuResources {
   pipelines: SlotTable
   bindGroups: SlotTable
   submissions: SlotTable
+  readbacks: SlotTable
   depKinds: List(Int)
   depSlots: List(Int)
   depGenerations: List(Int)
@@ -311,6 +317,7 @@ func create(issuer: mod IdIssuer, capacity: view Int) ret opt GpuResources {
     let pipelines: SlotTable = createSlotTable(capacity: capacity, empty: empty)
     let bindGroups: SlotTable = createSlotTable(capacity: capacity, empty: empty)
     let submissions: SlotTable = createSlotTable(capacity: capacity, empty: empty)
+    let readbacks: SlotTable = createSlotTable(capacity: capacity, empty: empty)
     let tag: Int = issue(this: issuer)
     ret GpuResources {
       managerTag: tag
@@ -322,6 +329,7 @@ func create(issuer: mod IdIssuer, capacity: view Int) ret opt GpuResources {
       pipelines: own pipelines
       bindGroups: own bindGroups
       submissions: own submissions
+      readbacks: own readbacks
       depKinds: List.create(Int, cap: 16)
       depSlots: List.create(Int, cap: 16)
       depGenerations: List.create(Int, cap: 16)
@@ -336,6 +344,7 @@ func create(issuer: mod IdIssuer, capacity: view Int) ret opt GpuResources {
 func drop(this: mod GpuResources) {
   unsafe {
     let empty: Ptr = webgpuNull()
+    releaseAll(table: this.readbacks, capacity: this.capacity, kind: kindReadback, empty: empty)
     releaseAll(table: this.submissions, capacity: this.capacity, kind: kindSubmission, empty: empty)
     releaseAll(table: this.bindGroups, capacity: this.capacity, kind: kindBindGroup, empty: empty)
     releaseAll(table: this.pipelines, capacity: this.capacity, kind: kindPipeline, empty: empty)
@@ -353,6 +362,7 @@ func tableFor(resources: view GpuResources, kind: view Int) ret view SlotTable {
   if kind is kindSampler { ret resources.samplers }
   if kind is kindPipeline { ret resources.pipelines }
   if kind is kindBindGroup { ret resources.bindGroups }
+  if kind is kindReadback { ret resources.readbacks }
   ret resources.submissions
 }
 
