@@ -74,8 +74,6 @@ static void rae_g2d_compute_xform(float* out) {
     out[4] = offX;  out[5] = offY;  out[6] = 0.0f;   out[7] = 0.0f;
 }
 /* per-frame transient handles */
-static WGPUCommandEncoder    g_g2d_enc = NULL;
-static WGPURenderPassEncoder g_g2d_pass = NULL;
 
 /* ---- Clip / scissor (#144) --------------------------------------------
  * A clip-rect stack in DESIGN units. Each queued box primitive, glyph, and
@@ -133,8 +131,8 @@ static void rae_g2d_text_clip_ensure(int ai, int glyphs) {
 
 /* Resolve a clip index to a framebuffer-pixel scissor rect (via the design→
  * physical xform) and set it on the active pass, clamped to the attachment. */
-static void rae_g2d_set_scissor(int clipidx) {
-    if (!g_g2d_pass) return;
+static void rae_g2d_set_scissor(int clipidx, WGPURenderPassEncoder pass) {
+    if (!pass) return;
     float xf[8]; rae_g2d_compute_xform(xf);
     float physW = xf[0], physH = xf[1], sx = xf[2], sy = xf[3], ox = xf[4], oy = xf[5];
     float x0, y0, x1, y1;
@@ -156,7 +154,7 @@ static void rae_g2d_set_scissor(int clipidx) {
     if (iy > ph) iy = ph;
     if (ix + iw > pw) iw = pw - ix;
     if (iy + ih > ph) ih = ph - iy;
-    wgpuRenderPassEncoderSetScissorRect(g_g2d_pass, ix, iy, iw, ih);
+    wgpuRenderPassEncoderSetScissorRect(pass, ix, iy, iw, ih);
 }
 
 static void rae_g2d_push_clip(double x, double y, double w, double h, double radius) {

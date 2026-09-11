@@ -18,32 +18,7 @@
 /* #908: image textures + views, the image pipeline, sampler, per-draw uniforms
  * and bind groups, the draw queue and the key registry are all Rae now
  * (lib/Gpu2dCanvas.rae over a manager). C keeps CPU decode only. */
-static WGPUBuffer* g_g2d_frame_bufs = NULL;          /* transient per-flush buffers */
-static int g_g2d_frame_buf_n = 0;
-static int g_g2d_frame_buf_cap = 0;
-static WGPUBindGroup* g_g2d_frame_binds = NULL;      /* transient per-flush bind groups */
-static int g_g2d_frame_bind_n = 0;
-static int g_g2d_frame_bind_cap = 0;
 
-static void rae_g2d_keep_frame_buf(WGPUBuffer b) {
-    if (!b) return;
-    if (g_g2d_frame_buf_n + 1 > g_g2d_frame_buf_cap) {
-        int cap = g_g2d_frame_buf_cap ? g_g2d_frame_buf_cap * 2 : 64;
-        g_g2d_frame_bufs = (WGPUBuffer*)realloc(g_g2d_frame_bufs, (size_t)cap * sizeof(WGPUBuffer));
-        g_g2d_frame_buf_cap = cap;
-    }
-    g_g2d_frame_bufs[g_g2d_frame_buf_n++] = b;
-}
-
-static void rae_g2d_keep_frame_bind(WGPUBindGroup b) {
-    if (!b) return;
-    if (g_g2d_frame_bind_n + 1 > g_g2d_frame_bind_cap) {
-        int cap = g_g2d_frame_bind_cap ? g_g2d_frame_bind_cap * 2 : 64;
-        g_g2d_frame_binds = (WGPUBindGroup*)realloc(g_g2d_frame_binds, (size_t)cap * sizeof(WGPUBindGroup));
-        g_g2d_frame_bind_cap = cap;
-    }
-    g_g2d_frame_binds[g_g2d_frame_bind_n++] = b;
-}
 
 
 

@@ -94,16 +94,9 @@ void rae_g2d_frame_reset(void) {
     g_g2d_prim_count = 0;
     for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) g_g2d_text_count[i] = 0;
     rae_g2d_clip_reset();
-    g_g2d_frame_buf_n = 0;
-    g_g2d_frame_bind_n = 0;
 }
-void rae_g2d_set_frame(void* enc, void* pass) {
-    g_g2d_enc = (WGPUCommandEncoder)enc;
-    g_g2d_pass = (WGPURenderPassEncoder)pass;
-}
-void* rae_g2d_pass_get(void)    { return (void*)g_g2d_pass; }
-void* rae_g2d_encoder_get(void) { return (void*)g_g2d_enc; }
-int64_t rae_g2d_frame_active(void) { return g_g2d_pass ? 1 : 0; }
+/* #910: the frame's encoder + pass are owned by the Rae canvas (Gpu2dCanvas);
+ * nothing is parked here any more. */
 
 /* Headless verification: copy the just-rendered surface texture back to a
  * mapped buffer and save it as a BMP. Called from endFrame after submit while
@@ -180,14 +173,8 @@ void rae_g2d_present_and_cleanup(void) {
           rae_wgpu_report(tag);
       }
     }
-    for (int i = 0; i < g_g2d_frame_bind_n; i++) wgpuBindGroupRelease(g_g2d_frame_binds[i]);
-    g_g2d_frame_bind_n = 0;
-    for (int i = 0; i < g_g2d_frame_buf_n; i++) wgpuBufferRelease(g_g2d_frame_bufs[i]);
-    g_g2d_frame_buf_n = 0;
-    /* Per-image bind groups are cached by draw slot + texture handle.
-     * They stay alive across frames and are released at gpu2d shutdown. */
-    g_g2d_pass = NULL;
-    g_g2d_enc = NULL;
+    /* Per-frame GPU objects (bind groups, clip uniforms) are the Rae canvas's
+     * (#907-#910) and are retired there at frame end. */
 
     /* Headless screenshot reads the offscreen target — works even when the
      * surface can't vend a drawable. */
@@ -270,25 +257,19 @@ rae_Bool rae_ext_Gpu2d_lastPresentOk(void) {
     return g_g2d_last_present_ok != 0;
 }
 
-/* Per-run clip support for the Rae box pass (#907): a frame-kept 32-byte clip
- * uniform for `clip` (released with the frame's transient buffers, like the C
- * box path made) and the scissor for it on the active pass. */
-void* rae_g2d_clip_frame_uniform(int64_t clip) {
-    float cu[8]; rae_g2d_fill_clip_uniform((int)clip, cu);
-    WGPUBufferDescriptor cbd; memset(&cbd, 0, sizeof(cbd));
-    cbd.size = sizeof(cu); cbd.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
-    WGPUBuffer cub = wgpuDeviceCreateBuffer(g_wgpu_dev, &cbd);
-    wgpuQueueWriteBuffer(g_wgpu_queue, cub, 0, cu, sizeof(cu));
-    rae_g2d_keep_frame_buf(cub);
-    return (void*)cub;
+/* Per-run clip support for the Rae passes (#907/#910): fill the 8-float clip
+ * uniform for `clip` into a Rae-owned buffer (the manager uniform is the
+ * canvas's) and set the scissor for it on the pass the canvas opened. */
+void rae_g2d_clip_uniform_at(int64_t clip, float* out) {
+    if (out) rae_g2d_fill_clip_uniform((int)clip, out);
 }
-void rae_g2d_scissor(int64_t clip) { rae_g2d_set_scissor((int)clip); }
+void rae_g2d_scissor(int64_t clip, void* pass) { rae_g2d_set_scissor((int)clip, (WGPURenderPassEncoder)pass); }
 
 /* Upload this flush's viewport transform when anything is queued (the Rae
  * image queue's pending count comes in as an argument). Called by the Rae
  * flush BEFORE it draws boxes and images; the C flush below then draws text. */
 void rae_g2d_prepare_flush(int64_t images_pending) {
-    if (!g_g2d_pass) return;
+    if (!g_wgpu_dev) return;
     int have_text = 0;
     for (int i = 0; i < RAE_SDF_MAX_ATLAS; i++) if (g_g2d_text_count[i] > 0) have_text = 1;
     if (g_g2d_prim_count > 0 || have_text || images_pending > 0) {
@@ -309,12 +290,6 @@ void rae_ext_Gpu2d_closeWindow(void) {
     if (g_g2d_uniform) { wgpuBufferRelease(g_g2d_uniform); g_g2d_uniform = NULL; }
     if (g_g2d_prims) { free(g_g2d_prims); g_g2d_prims = NULL; g_g2d_prim_capf = 0; }
     g_g2d_prim_count = 0;
-    for (int i = 0; i < g_g2d_frame_bind_n; i++) wgpuBindGroupRelease(g_g2d_frame_binds[i]);
-    g_g2d_frame_bind_n = 0;
-    if (g_g2d_frame_binds) { free(g_g2d_frame_binds); g_g2d_frame_binds = NULL; g_g2d_frame_bind_cap = 0; }
-    for (int i = 0; i < g_g2d_frame_buf_n; i++) wgpuBufferRelease(g_g2d_frame_bufs[i]);
-    g_g2d_frame_buf_n = 0;
-    if (g_g2d_frame_bufs) { free(g_g2d_frame_bufs); g_g2d_frame_bufs = NULL; g_g2d_frame_buf_cap = 0; }
     if (g_g2d_surface) { wgpuSurfaceRelease(g_g2d_surface); g_g2d_surface = NULL; }
     for (int i = 0; i < 7; i++) {
         if (g_g2d_cursors[i]) { SDL_DestroyCursor(g_g2d_cursors[i]); g_g2d_cursors[i] = NULL; }
