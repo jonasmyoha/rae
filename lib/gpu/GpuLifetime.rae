@@ -1,0 +1,455 @@
+# gpu/GpuLifetime — recording and submission lifetime over gpu/GpuResources
+# (#870): PipelineId, BindGroupId, SubmissionId, a `Recording` owner, and
+# nonblocking completion polling. Pure Rae over the generated bindings: a
+# submission's completion is tracked with wgpu's submission index
+# (`wgpuQueueSubmitForIndex` + `wgpuDevicePoll(wait: 0)`), so there are no
+# callbacks and no callback-reachable state in this layer.
+#
+# Retention has two levels. NATIVELY, a command encoder and a bind group hold
+# references to everything they record or bind, and wgpu keeps a submission's
+# resources alive until it completes. At the MANAGER level, a use is validated
+# when it is recorded (a retired resource never enters a recording), validated
+# again at submit (a resource retired in between refuses the whole submission),
+# and pinned (`useCount`) from submit through completion; a bind group pins its
+# direct dependencies (buffers, views, samplers, its pipeline) and their
+# indirect ones (a view's texture) for as long as it lives. Retiring a pinned
+# resource bumps its generation at once — no new use — and releases the native
+# reference when the last pin drops.
+#
+# A `Recording` is an ordinary owner: dropping it unsubmitted releases its
+# encoder (abandonment needs no manager access, so nothing can leak); `submit`
+# consumes it. Normal polling never waits.
+open webgpu/Context
+open webgpu/Webgpu
+open webgpu/WebgpuEnums
+open webgpu/WebgpuTypes
+open gpu/GpuResources
+
+type PipelineId {
+  managerTag: Int
+  slot: Int
+  generation: Int
+}
+
+type BindGroupId {
+  managerTag: Int
+  slot: Int
+  generation: Int
+}
+
+type SubmissionId {
+  managerTag: Int
+  slot: Int
+  generation: Int
+}
+
+func isValidPipeline(resources: view GpuResources, id: view PipelineId) ret Bool {
+  if id.managerTag is not resources.managerTag { ret false }
+  ret slotIsLive(table: resources.pipelines, capacity: resources.capacity, slot: id.slot, generation: id.generation)
+}
+
+func isValidBindGroup(resources: view GpuResources, id: view BindGroupId) ret Bool {
+  if id.managerTag is not resources.managerTag { ret false }
+  ret slotIsLive(table: resources.bindGroups, capacity: resources.capacity, slot: id.slot, generation: id.generation)
+}
+
+func isValidSubmission(resources: view GpuResources, id: view SubmissionId) ret Bool {
+  if id.managerTag is not resources.managerTag { ret false }
+  ret slotIsLive(table: resources.submissions, capacity: resources.capacity, slot: id.slot, generation: id.generation)
+}
+
+func livePipelineCount(resources: view GpuResources) ret Int {
+  ret liveCount(table: resources.pipelines, capacity: resources.capacity)
+}
+
+func liveBindGroupCount(resources: view GpuResources) ret Int {
+  ret liveCount(table: resources.bindGroups, capacity: resources.capacity)
+}
+
+func liveSubmissionCount(resources: view GpuResources) ret Int {
+  ret liveCount(table: resources.submissions, capacity: resources.capacity)
+}
+
+# ----- dependency arena ------------------------------------------------
+
+func depIsLive(resources: view GpuResources, kind: view Int, slot: view Int, generation: view Int) ret Bool {
+  ret slotIsLive(table: tableFor(resources: resources, kind: kind), capacity: resources.capacity, slot: slot, generation: generation)
+}
+
+func appendDep(resources: mod GpuResources, kind: view Int, slot: view Int, generation: view Int) {
+  resources.depKinds.add(value: kind)
+  resources.depSlots.add(value: slot)
+  resources.depGenerations.add(value: generation)
+}
+
+func pinDep(resources: mod GpuResources, kind: view Int, slot: view Int) {
+  if kind is kindBuffer { pinSlot(table: resources.buffers, slot: slot) }
+  if kind is kindTexture { pinSlot(table: resources.textures, slot: slot) }
+  if kind is kindTextureView { pinSlot(table: resources.textureViews, slot: slot) }
+  if kind is kindSampler { pinSlot(table: resources.samplers, slot: slot) }
+  if kind is kindPipeline { pinSlot(table: resources.pipelines, slot: slot) }
+  if kind is kindBindGroup { pinSlot(table: resources.bindGroups, slot: slot) }
+}
+
+func unpinDep(resources: mod GpuResources, kind: view Int, slot: view Int) {
+  unsafe {
+    let empty: Ptr = webgpuNull()
+    if kind is kindBuffer { unpinSlot(table: resources.buffers, slot: slot, kind: kind, empty: empty) }
+    if kind is kindTexture { unpinSlot(table: resources.textures, slot: slot, kind: kind, empty: empty) }
+    if kind is kindTextureView { unpinSlot(table: resources.textureViews, slot: slot, kind: kind, empty: empty) }
+    if kind is kindSampler { unpinSlot(table: resources.samplers, slot: slot, kind: kind, empty: empty) }
+    if kind is kindPipeline { unpinSlot(table: resources.pipelines, slot: slot, kind: kind, empty: empty) }
+    if kind is kindBindGroup { unpinSlot(table: resources.bindGroups, slot: slot, kind: kind, empty: empty) }
+  }
+}
+
+# Every dependency in an arena slice is still live at its recorded generation.
+func sliceIsLive(resources: view GpuResources, start: view Int, count: view Int) ret Bool {
+  var i: Int = start
+  loop i < start + count {
+    if depIsLive(resources: resources, kind: intAt(list: resources.depKinds, index: i), slot: intAt(list: resources.depSlots, index: i), generation: intAt(list: resources.depGenerations, index: i)) is false { ret false }
+    i = i + 1
+  }
+  ret true
+}
+
+func pinSlice(resources: mod GpuResources, start: view Int, count: view Int) {
+  var i: Int = start
+  loop i < start + count {
+    pinDep(resources: resources, kind: intAt(list: resources.depKinds, index: i), slot: intAt(list: resources.depSlots, index: i))
+    i = i + 1
+  }
+}
+
+func unpinSlice(resources: mod GpuResources, start: view Int, count: view Int) {
+  var i: Int = start
+  loop i < start + count {
+    unpinDep(resources: resources, kind: intAt(list: resources.depKinds, index: i), slot: intAt(list: resources.depSlots, index: i))
+    i = i + 1
+  }
+}
+
+# ----- pipelines -------------------------------------------------------
+
+# A compute pipeline from inline WGSL with an auto layout. The shader module is
+# released once the pipeline holds it.
+func createComputePipeline(resources: mod GpuResources, wgsl: view String, entryPoint: view String) ret opt PipelineId {
+  if wgsl.length() is 0 or entryPoint.length() is 0 { ret none }
+  let slot: Int = findFreeSlot(table: resources.pipelines, capacity: resources.capacity)
+  if slot < 0 { ret none }
+  unsafe {
+    let sourceC: Buffer(Any) = wgsl.toCStr()
+    var sourceList: List(WGPUShaderSourceWGSL) = List.create(WGPUShaderSourceWGSL, cap: 1)
+    sourceList.add(value: {
+      chain: { sType: WGPUSType_ShaderSourceWGSL }
+      code: { data: sourceC, length: WGPU_STRLEN }
+    })
+    let moduleDescriptor: WGPUShaderModuleDescriptor = { nextInChain: sourceList.data }
+    let shaderModule: Ptr = wgpuDeviceCreateShaderModule(device: webgpuDevice(), descriptor: moduleDescriptor)
+    if shaderModule is webgpuNull() { ret none }
+    let entryC: Buffer(Any) = entryPoint.toCStr()
+    let pipelineDescriptor: WGPUComputePipelineDescriptor = {
+      compute: { module: shaderModule, entryPoint: { data: entryC, length: WGPU_STRLEN } }
+    }
+    let handle: Ptr = wgpuDeviceCreateComputePipeline(device: webgpuDevice(), descriptor: pipelineDescriptor)
+    wgpuShaderModuleRelease(shaderModule: shaderModule)
+    if handle is webgpuNull() { ret none }
+    storeHandle(table: resources.pipelines, slot: slot, handle: handle)
+  }
+  ret PipelineId { managerTag: resources.managerTag, slot: slot, generation: slotGeneration(table: resources.pipelines, slot: slot) }
+}
+
+func retirePipeline(resources: mod GpuResources, id: view PipelineId) ret Bool {
+  if isValidPipeline(resources: resources, id: id) is false { ret false }
+  unsafe { retireSlot(table: resources.pipelines, slot: id.slot, kind: kindPipeline, empty: webgpuNull()) }
+  ret true
+}
+
+# ----- bind groups -----------------------------------------------------
+
+# Group 0 of `pipeline`, binding the buffers, then the views, then the samplers
+# at consecutive binding numbers (each buffer bound whole). Every dependency
+# must be live; the group pins its direct dependencies and each view's texture
+# (indirect) for its lifetime, and records them so a later use can re-check.
+func createBindGroup(resources: mod GpuResources, pipeline: view PipelineId, buffers: view List(BufferId), textureViews: view List(TextureViewId), samplers: view List(SamplerId)) ret opt BindGroupId {
+  if isValidPipeline(resources: resources, id: pipeline) is false { ret none }
+  let slot: Int = findFreeSlot(table: resources.bindGroups, capacity: resources.capacity)
+  if slot < 0 { ret none }
+  let start: Int = resources.depKinds.length
+  appendDep(resources: resources, kind: kindPipeline, slot: pipeline.slot, generation: pipeline.generation)
+  var entries: List(WGPUBindGroupEntry) = List.create(WGPUBindGroupEntry, cap: 4)
+  var binding: Int = 0
+  var i: Int = 0
+  loop i < buffers.length {
+    if let buffer: BufferId = buffers.copyAt(index: i) {
+      if isValidBuffer(resources: resources, id: buffer) is false { ret none }
+      appendDep(resources: resources, kind: kindBuffer, slot: buffer.slot, generation: buffer.generation)
+      unsafe {
+        entries.add(value: { binding: binding as UInt32, buffer: slotHandle(table: resources.buffers, slot: buffer.slot), size: bufferSize(resources: resources, id: buffer) as UInt64 })
+      }
+      binding = binding + 1
+    }
+    i = i + 1
+  }
+  i = 0
+  loop i < textureViews.length {
+    if let textureView: TextureViewId = textureViews.copyAt(index: i) {
+      if isValidTextureView(resources: resources, id: textureView) is false { ret none }
+      appendDep(resources: resources, kind: kindTextureView, slot: textureView.slot, generation: textureView.generation)
+      let parent: Int = intAt(list: resources.textureViews.parentSlot, index: textureView.slot)
+      if parent >= 0 {
+        appendDep(resources: resources, kind: kindTexture, slot: parent, generation: intAt(list: resources.textureViews.parentGeneration, index: textureView.slot))
+      }
+      unsafe {
+        entries.add(value: { binding: binding as UInt32, textureView: slotHandle(table: resources.textureViews, slot: textureView.slot) })
+      }
+      binding = binding + 1
+    }
+    i = i + 1
+  }
+  i = 0
+  loop i < samplers.length {
+    if let sampler: SamplerId = samplers.copyAt(index: i) {
+      if isValidSampler(resources: resources, id: sampler) is false { ret none }
+      appendDep(resources: resources, kind: kindSampler, slot: sampler.slot, generation: sampler.generation)
+      unsafe {
+        entries.add(value: { binding: binding as UInt32, sampler: slotHandle(table: resources.samplers, slot: sampler.slot) })
+      }
+      binding = binding + 1
+    }
+    i = i + 1
+  }
+  let count: Int = resources.depKinds.length - start
+  if sliceIsLive(resources: resources, start: start, count: count) is false { ret none }
+  unsafe {
+    let layout: Ptr = wgpuComputePipelineGetBindGroupLayout(computePipeline: slotHandle(table: resources.pipelines, slot: pipeline.slot), groupIndex: 0 as UInt32)
+    let descriptor: WGPUBindGroupDescriptor = { layout: layout, entryCount: entries.length as UInt64, entries: entries.data }
+    let handle: Ptr = wgpuDeviceCreateBindGroup(device: webgpuDevice(), descriptor: descriptor)
+    wgpuBindGroupLayoutRelease(bindGroupLayout: layout)
+    if handle is webgpuNull() { ret none }
+    storeHandle(table: resources.bindGroups, slot: slot, handle: handle)
+  }
+  resources.bindGroups.depStart.set(index: slot, value: start)
+  resources.bindGroups.depCount.set(index: slot, value: count)
+  pinSlice(resources: resources, start: start, count: count)
+  ret BindGroupId { managerTag: resources.managerTag, slot: slot, generation: slotGeneration(table: resources.bindGroups, slot: slot) }
+}
+
+# A bind group is usable only while every dependency is still live: a group
+# whose buffer was retired is an "old bind group" and refuses new recordings.
+func bindGroupIsUsable(resources: view GpuResources, id: view BindGroupId) ret Bool {
+  if isValidBindGroup(resources: resources, id: id) is false { ret false }
+  ret sliceIsLive(resources: resources, start: intAt(list: resources.bindGroups.depStart, index: id.slot), count: intAt(list: resources.bindGroups.depCount, index: id.slot))
+}
+
+# Retiring a bind group drops its pins on its dependencies (releasing any that
+# were retired behind it) and releases the group itself when no submission
+# still uses it.
+func retireBindGroup(resources: mod GpuResources, id: view BindGroupId) ret Bool {
+  if isValidBindGroup(resources: resources, id: id) is false { ret false }
+  let start: Int = intAt(list: resources.bindGroups.depStart, index: id.slot)
+  let count: Int = intAt(list: resources.bindGroups.depCount, index: id.slot)
+  unsafe { retireSlot(table: resources.bindGroups, slot: id.slot, kind: kindBindGroup, empty: webgpuNull()) }
+  unpinSlice(resources: resources, start: start, count: count)
+  ret true
+}
+
+# ----- recordings ------------------------------------------------------
+
+# An owner over a native command encoder plus the uses it recorded (kind,
+# slot, generation triples). Dropping it unsubmitted releases the encoder.
+type Recording {
+  managerTag: Int
+  encoder: Ptr
+  useKinds: List(Int)
+  useSlots: List(Int)
+  useGenerations: List(Int)
+}
+
+func beginRecording(resources: view GpuResources) ret opt Recording {
+  unsafe {
+    let descriptor: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
+    let encoder: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: descriptor)
+    if encoder is webgpuNull() { ret none }
+    ret Recording {
+      managerTag: resources.managerTag
+      encoder: encoder
+      useKinds: List.create(Int, cap: 8)
+      useSlots: List.create(Int, cap: 8)
+      useGenerations: List.create(Int, cap: 8)
+    }
+  }
+}
+
+# Abandonment: an unsubmitted recording releases its encoder (and with it the
+# native references the encoder took). A submitted recording has already
+# handed its encoder over and holds nothing.
+func drop(this: mod Recording) {
+  unsafe {
+    if this.encoder is not webgpuNull() {
+      wgpuCommandEncoderRelease(commandEncoder: this.encoder)
+      this.encoder = webgpuNull()
+    }
+  }
+}
+
+func recordUse(recording: mod Recording, kind: view Int, slot: view Int, generation: view Int) {
+  recording.useKinds.add(value: kind)
+  recording.useSlots.add(value: slot)
+  recording.useGenerations.add(value: generation)
+}
+
+func recordingIsOpen(recording: view Recording, resources: view GpuResources) ret Bool {
+  if recording.managerTag is not resources.managerTag { ret false }
+  unsafe { ret recording.encoder is not webgpuNull() }
+}
+
+# A buffer-to-buffer copy: both ranges validated against authoritative sizes,
+# CopySrc/CopyDst usage on the native buffers, 4-byte alignment.
+func recordCopyBuffer(recording: mod Recording, resources: view GpuResources, source: view BufferId, sourceOffset: view Int, destination: view BufferId, destinationOffset: view Int, size: view Int) ret Bool {
+  if recordingIsOpen(recording: recording, resources: resources) is false { ret false }
+  # WebGPU forbids copying a buffer onto itself, and wgpu-native turns a
+  # validation error into a process abort — so every rule wgpu would enforce at
+  # Finish must be refused here first, in Rae.
+  if source.slot is destination.slot { ret false }
+  if bufferRangeIsValid(resources: resources, id: source, offset: sourceOffset, size: size) is false { ret false }
+  if bufferRangeIsValid(resources: resources, id: destination, offset: destinationOffset, size: size) is false { ret false }
+  if size - (size / 4) * 4 is not 0 { ret false }
+  if hasUsageFlag(usage: bufferUsage(resources: resources, id: source), flag: WGPUBufferUsage_CopySrc) is false { ret false }
+  if hasUsageFlag(usage: bufferUsage(resources: resources, id: destination), flag: WGPUBufferUsage_CopyDst) is false { ret false }
+  unsafe {
+    wgpuCommandEncoderCopyBufferToBuffer(
+      commandEncoder: recording.encoder
+      source: slotHandle(table: resources.buffers, slot: source.slot)
+      sourceOffset: sourceOffset as UInt64
+      destination: slotHandle(table: resources.buffers, slot: destination.slot)
+      destinationOffset: destinationOffset as UInt64
+      size: size as UInt64
+    )
+  }
+  recordUse(recording: recording, kind: kindBuffer, slot: source.slot, generation: source.generation)
+  recordUse(recording: recording, kind: kindBuffer, slot: destination.slot, generation: destination.generation)
+  ret true
+}
+
+# One compute dispatch. The bind group must be usable (every direct and
+# indirect dependency live); the pipeline, the group and all its dependencies
+# become uses of the recording.
+func recordCompute(recording: mod Recording, resources: view GpuResources, pipeline: view PipelineId, bindGroup: view BindGroupId, workgroupsX: view Int, workgroupsY: view Int, workgroupsZ: view Int) ret Bool {
+  if recordingIsOpen(recording: recording, resources: resources) is false { ret false }
+  if isValidPipeline(resources: resources, id: pipeline) is false { ret false }
+  if bindGroupIsUsable(resources: resources, id: bindGroup) is false { ret false }
+  if workgroupsX < 1 or workgroupsY < 1 or workgroupsZ < 1 { ret false }
+  unsafe {
+    let passDescriptor: WGPUComputePassDescriptor = { nextInChain: webgpuNull() }
+    let pass: Ptr = wgpuCommandEncoderBeginComputePass(commandEncoder: recording.encoder, descriptor: passDescriptor)
+    if pass is webgpuNull() { ret false }
+    wgpuComputePassEncoderSetPipeline(computePassEncoder: pass, pipeline: slotHandle(table: resources.pipelines, slot: pipeline.slot))
+    wgpuComputePassEncoderSetBindGroup(computePassEncoder: pass, groupIndex: 0 as UInt32, group: slotHandle(table: resources.bindGroups, slot: bindGroup.slot), dynamicOffsetCount: 0 as UInt64, dynamicOffsets: webgpuNull())
+    wgpuComputePassEncoderDispatchWorkgroups(computePassEncoder: pass, workgroupCountX: workgroupsX as UInt32, workgroupCountY: workgroupsY as UInt32, workgroupCountZ: workgroupsZ as UInt32)
+    wgpuComputePassEncoderEnd(computePassEncoder: pass)
+    wgpuComputePassEncoderRelease(computePassEncoder: pass)
+  }
+  recordUse(recording: recording, kind: kindPipeline, slot: pipeline.slot, generation: pipeline.generation)
+  recordUse(recording: recording, kind: kindBindGroup, slot: bindGroup.slot, generation: bindGroup.generation)
+  let start: Int = intAt(list: resources.bindGroups.depStart, index: bindGroup.slot)
+  let count: Int = intAt(list: resources.bindGroups.depCount, index: bindGroup.slot)
+  var i: Int = start
+  loop i < start + count {
+    recordUse(recording: recording, kind: intAt(list: resources.depKinds, index: i), slot: intAt(list: resources.depSlots, index: i), generation: intAt(list: resources.depGenerations, index: i))
+    i = i + 1
+  }
+  ret true
+}
+
+# ----- submissions -----------------------------------------------------
+
+# Spends the recording (its encoder is handed over and nulled, so dropping it
+# afterwards is a no-op and a second submit returns none). Every recorded use
+# is validated again — a resource
+# retired since it was recorded refuses the submission (none) and the
+# recording is released. On success the uses are pinned until completion, the
+# command buffer and encoder are released (wgpu keeps the submission alive)
+# and the wgpu submission index is kept for nonblocking polling.
+func submit(resources: mod GpuResources, recording: mod Recording) ret opt SubmissionId {
+  if recordingIsOpen(recording: recording, resources: resources) is false { ret none }
+  var i: Int = 0
+  loop i < recording.useKinds.length {
+    if depIsLive(resources: resources, kind: intAt(list: recording.useKinds, index: i), slot: intAt(list: recording.useSlots, index: i), generation: intAt(list: recording.useGenerations, index: i)) is false { ret none }
+    i = i + 1
+  }
+  let slot: Int = findFreeSlot(table: resources.submissions, capacity: resources.capacity)
+  if slot < 0 { ret none }
+  let start: Int = resources.depKinds.length
+  i = 0
+  loop i < recording.useKinds.length {
+    appendDep(resources: resources, kind: intAt(list: recording.useKinds, index: i), slot: intAt(list: recording.useSlots, index: i), generation: intAt(list: recording.useGenerations, index: i))
+    i = i + 1
+  }
+  let count: Int = recording.useKinds.length
+  var nativeIndex: Int = 0
+  unsafe {
+    let bufferDescriptor: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
+    let commandBuffer: Ptr = wgpuCommandEncoderFinish(commandEncoder: recording.encoder, descriptor: bufferDescriptor)
+    wgpuCommandEncoderRelease(commandEncoder: recording.encoder)
+    recording.encoder = webgpuNull()
+    if commandBuffer is webgpuNull() { ret none }
+    var commands: List(Ptr) = List.create(Ptr, cap: 1)
+    commands.add(value: commandBuffer)
+    nativeIndex = wgpuQueueSubmitForIndex(queue: webgpuQueue(), commandCount: 1 as UInt64, commands: commands.data) as Int
+    wgpuCommandBufferRelease(commandBuffer: commandBuffer)
+    storeHandle(table: resources.submissions, slot: slot, handle: webgpuNull())
+  }
+  resources.submissions.nativeIndex.set(index: slot, value: nativeIndex)
+  resources.submissions.depStart.set(index: slot, value: start)
+  resources.submissions.depCount.set(index: slot, value: count)
+  pinSlice(resources: resources, start: start, count: count)
+  ret SubmissionId { managerTag: resources.managerTag, slot: slot, generation: slotGeneration(table: resources.submissions, slot: slot) }
+}
+
+# Nonblocking: -1 for an invalid ID, 0 while in flight, 1 once complete. The
+# first observation of completion drops the submission's pins (releasing any
+# resource retired behind it); the ID stays valid and keeps answering 1 until
+# retired, so repeated polling is safe.
+func pollSubmission(resources: mod GpuResources, id: view SubmissionId) ret Int {
+  if isValidSubmission(resources: resources, id: id) is false { ret 0 - 1 }
+  if intAt(list: resources.submissions.completed, index: id.slot) is 1 { ret 1 }
+  var done: UInt32 = 0 as UInt32
+  unsafe {
+    var indexList: List(UInt64) = List.create(UInt64, cap: 1)
+    indexList.add(value: intAt(list: resources.submissions.nativeIndex, index: id.slot) as UInt64)
+    done = wgpuDevicePoll(device: webgpuDevice(), wait: 0 as UInt32, submissionIndex: indexList.data)
+  }
+  if done is (0 as UInt32) { ret 0 }
+  resources.submissions.completed.set(index: id.slot, value: 1)
+  unpinSlice(resources: resources, start: intAt(list: resources.submissions.depStart, index: id.slot), count: intAt(list: resources.submissions.depCount, index: id.slot))
+  ret 1
+}
+
+# Frees a completed submission's slot. An in-flight submission cannot be
+# retired: its pins are still accounting for GPU work.
+func retireSubmission(resources: mod GpuResources, id: view SubmissionId) ret Bool {
+  if isValidSubmission(resources: resources, id: id) is false { ret false }
+  if intAt(list: resources.submissions.completed, index: id.slot) is 0 { ret false }
+  unsafe { retireSlot(table: resources.submissions, slot: id.slot, kind: kindSubmission, empty: webgpuNull()) }
+  ret true
+}
+
+# Explicit shutdown, also the device-loss path: one nonblocking poll of every
+# live submission (nothing waits), then every remaining submission is treated
+# as finished so deferred releases proceed, and the manager's references are
+# dropped by its destructor. Nothing callback-reachable is freed here.
+func shutdown(resources: mod GpuResources) {
+  var slot: Int = 0
+  loop slot < resources.capacity {
+    if intAt(list: resources.submissions.live, index: slot) is 1 {
+      let id: SubmissionId = { managerTag: resources.managerTag, slot: slot, generation: slotGeneration(table: resources.submissions, slot: slot) }
+      if pollSubmission(resources: resources, id: id) is 0 {
+        resources.submissions.completed.set(index: slot, value: 1)
+        unpinSlice(resources: resources, start: intAt(list: resources.submissions.depStart, index: slot), count: intAt(list: resources.submissions.depCount, index: slot))
+      }
+      retireSubmission(resources: resources, id: id)
+    }
+    slot = slot + 1
+  }
+}
