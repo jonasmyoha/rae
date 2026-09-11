@@ -1,0 +1,7 @@
+# #898 gap (a): `Array(Ptr, cap: N)` is a value CONSTRUCTOR that zero-inits raw
+# Ptr storage (like a struct literal), not a factory function, so it needs an
+# `unsafe { ... }` block just as an object literal with a Ptr field does.
+func main() {
+  var slots: Array(Ptr, cap: 4) = Array(Ptr, cap: 4)
+  log("made")
+}
