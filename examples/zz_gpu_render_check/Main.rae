@@ -119,7 +119,9 @@ func main() ret Int {
               # Pipeline: float32x2 position at location 0, RGBA8 target, no blend, no depth.
               let attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 1)
               attributes.add(value: { format: WGPUVertexFormat_Float32x2, offset: 0, location: 0 })
-              let spec: RenderPipelineSpec = { vertexStride: 8, attributes: own attributes, colorFormat: WGPUTextureFormat_RGBA8Unorm, alphaBlend: false, depthFormat: 0 as Int32, depthWrite: false, depthCompare: WGPUCompareFunction_Always, cullMode: WGPUCullMode_None }
+              let colorFormats: List(Int32) = List.create(Int32, cap: 1)
+              colorFormats.add(value: WGPUTextureFormat_RGBA8Unorm)
+              let spec: RenderPipelineSpec = { vertexStride: 8, attributes: own attributes, colorFormats: own colorFormats, alphaBlend: false, depthFormat: 0 as Int32, depthWrite: false, depthCompare: WGPUCompareFunction_Always, cullMode: WGPUCullMode_None }
               if let pipeline: RenderPipelineId = createRenderPipeline(resources: resources, wgsl: shaderSource(), vertexEntry: "vs", fragmentEntry: "fs", spec: spec) {
                 let entries: List(ResourceRef) = List.create(ResourceRef, cap: 1)
                 entries.add(value: externalRef(id: adopted))

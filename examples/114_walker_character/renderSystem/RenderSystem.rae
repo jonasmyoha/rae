@@ -105,12 +105,12 @@ func renderShadowPass(cameraSystem: mod CameraSystem, characterSystem: mod Chara
 # The G-buffer pass: grass compute first, then the geometry — biome-splat ground,
 # scene, instanced props, and the character's skinned parts + idle crowd — then
 # the grass draw, all into one G-buffer pass.
-func renderGbufferPass(cache: mod GbufferCache, cameraSystem: mod CameraSystem, characterSystem: mod CharacterSystem, splashes: mod ParticleSystem, terrainSystem: mod TerrainSystem, world: mod GameWorld, aspect: copy Float, palette: view List(Float), t: copy Float, deltaTime: copy Float, profiler: mod Profiler, grassCompute: mod GrassCompute) {
+func renderGbufferPass(cache: mod GbufferCache, cameraSystem: mod CameraSystem, characterSystem: mod CharacterSystem, splashes: mod ParticleSystem, terrainSystem: mod TerrainSystem, world: mod GameWorld, aspect: copy Float, palette: view List(Float), t: copy Float, deltaTime: copy Float, profiler: mod Profiler, grassCompute: mod GrassCompute, resources: mod GpuResources) {
   var grassToonGen: Int = 0
   if characterSystem.toon { grassToonGen = 1 }
   let grassView: GrassViewSettings = GrassConfig.grassThirdPersonSettings(groundColor: walkerGroundColor())
   let heroPos: Vec3 = controllerOf(world: world, entity: characterSystem.heroEntity).position
-  grassGenerate(grass: grassCompute, playerX: heroPos.x,
+  grassGenerate(grass: grassCompute, resources: resources, playerX: heroPos.x,
                 playerY: heroPos.y,
                 groundZ: characterSystem.groundZ, time: t, deltaTime: deltaTime, toon: grassToonGen,
                 camX: cameraSystem.camera.position.x, camY: cameraSystem.camera.position.y, camZ: cameraSystem.camera.position.z,
@@ -118,7 +118,7 @@ func renderGbufferPass(cache: mod GbufferCache, cameraSystem: mod CameraSystem, 
                 fwdY: cameraSystem.camera.target.y - cameraSystem.camera.position.y,
                 fwdZ: cameraSystem.camera.target.z - cameraSystem.camera.position.z,
                 settings: grassView)
-  grassDiagTick(grass: grassCompute, profiler: profiler)
+  grassDiagTick(grass: grassCompute, resources: resources, profiler: profiler)
   Gbuffer.beginPass(cache: cache, camera: cameraSystem.camera, light: cameraSystem.light, aspect: aspect)
   drawTerrainGround(cache: cache, terrainSystem: terrainSystem, world: world, time: t)
   drawTerrainProps(terrainSystem: terrainSystem, world: world)
@@ -152,7 +152,7 @@ func renderGbufferPass(cache: mod GbufferCache, cameraSystem: mod CameraSystem, 
     }
     drawSkinnedInstances(cache: cache, batch: characterSystem.crowdBatch)
   }
-  grassDraw(grass: grassCompute)
+  grassDraw(grass: grassCompute, resources: resources)
   # Water splashes for anything wading this frame (#84): advance + emit here; the
   # droplets are DRAWN later, at the transparentForward tag, as alpha-fading
   # cubes (#844) — they no longer go into this G-buffer pass.
@@ -227,7 +227,7 @@ func renderApp(cameraSystem: mod CameraSystem, characterSystem: mod CharacterSys
     # defer to renderDeferredPass (or-patterns, #622, will merge them into one arm).
     match tag {
       case RenderTag.shadow { renderShadowPass(cameraSystem: cameraSystem, characterSystem: characterSystem, inputSystem: inputSystem, renderSystem: renderSystem, terrainSystem: terrainSystem, world: world, aspect: aspect, palette: palette) }
-      case RenderTag.gbuffer { renderGbufferPass(cache: renderSystem.renderer.passes.gbuffer, cameraSystem: cameraSystem, characterSystem: characterSystem, splashes: splashes, terrainSystem: terrainSystem, world: world, aspect: aspect, palette: palette, t: t, deltaTime: deltaTime, profiler: profiler, grassCompute: grassCompute) }
+      case RenderTag.gbuffer { renderGbufferPass(cache: renderSystem.renderer.passes.gbuffer, cameraSystem: cameraSystem, characterSystem: characterSystem, splashes: splashes, terrainSystem: terrainSystem, world: world, aspect: aspect, palette: palette, t: t, deltaTime: deltaTime, profiler: profiler, grassCompute: grassCompute, resources: resources) }
       case RenderTag.ssao {
         renderDeferredPassWorld(renderer: renderSystem.renderer, tag: tag, world: emptyWorld,
                                 camera: cameraSystem.camera, light: cameraSystem.light, aspect: aspect)
