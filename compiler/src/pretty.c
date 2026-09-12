@@ -101,7 +101,13 @@ void pretty_print_module(const AstModule* module, const char* source, FILE* out)
     imp = imp->next;
   }
 
-  for (const AstCHeader* hdr = module->c_headers; hdr; hdr = hdr->next) {
+  /* `cheader` lines carry no position; they sit in the file's directive block.
+   * When that block is inside a verbatim range (a file-wide `# raefmt: off`),
+   * the range already copied them — printing them again would duplicate. */
+  size_t header_line = module->decls ? module->decls->line : 0;
+  if (module->imports && (header_line == 0 || module->imports->line < header_line)) header_line = module->imports->line;
+  bool header_verbatim = header_line > 0 && pp_find_verbatim_range(&pp, header_line) != NULL;
+  for (const AstCHeader* hdr = header_verbatim ? NULL : module->c_headers; hdr; hdr = hdr->next) {
     pp_write(&pp, "cheader ");
     pp_write_string_literal(&pp, hdr->path);
     pp_newline(&pp);

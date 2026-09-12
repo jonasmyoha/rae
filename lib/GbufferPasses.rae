@@ -22,118 +22,26 @@ open gpu/GpuLifetime
 open gpu/GpuRender
 open gpu/GpuArgs
 open gpu/GpuIds
+open GbufferPassesNative
+open GbufferFullscreen
 
 # Presentable target + resize generation (also declared in gbuffer_inspector;
 # these bind the same C symbols).
 
 # Composite: tonemap the last radiometric result into the presentable target.
-func nativeGbDeferredPrepare() unsafe extern("rae_gb_deferred_prepare") ret Int
 func gbDeferredPrepare() ret Int {
   unsafe { ret nativeGbDeferredPrepare() }
 }
-# The pass WGSL sources stay C string constants; read as NUL-terminated C
-# strings and copied into a String for the manager's createRenderPipeline.
-func gbCompositeWgsl() unsafe extern("rae_gb_composite_wgsl") ret Buffer(Any)
-func gbCompositeSourceView() unsafe extern("rae_gb_composite_source_view") ret Ptr
-func nativeGbCompositeSourceIndex() unsafe extern("rae_gb_composite_source_index") ret Int
-func gbCompositeSourceIndex() ret Int {
-  unsafe { ret nativeGbCompositeSourceIndex() }
-}
-# TAA on/off (#20). Off routes composite to raw lit and turns on FXAA instead.
-func nativeGbTaaIsEnabled() unsafe extern("rae_gb_taa_is_enabled") ret Int
-func gbTaaIsEnabled() ret Int {
-  unsafe { ret nativeGbTaaIsEnabled() }
-}
-func nativeGbSetTaaEnabled(on: Int) unsafe extern("rae_gb_set_taa_enabled")
 func gbSetTaaEnabled(on: copy Int) {
   unsafe { nativeGbSetTaaEnabled(on: on) }
 }
-# Distance fog (#57, per-app). on=1 fades geometry to (r,g,b) over [start,end]
-# world units and paints that colour as the background; on=0 keeps the sky.
-func nativeGbSetFog(on: Int, r: Float, g: Float, b: Float, start: Float, end: Float) unsafe extern("rae_gb_set_fog")
 func gbSetFog(on: copy Int, r: copy Float, g: copy Float, b: copy Float, start: copy Float, end: copy Float) {
   unsafe { nativeGbSetFog(on: on, r: r, g: g, b: b, start: start, end: end) }
 }
-# Dynamic resolution (#530): the current render scale (the upscale sampler is
-# a manager sampler on the composite cache).
-func nativeGbRenderScale() unsafe extern("rae_gb_render_scale") ret Float64
-func gbRenderScale() ret Float64 {
-  unsafe { ret nativeGbRenderScale() }
-}
-
-# A fullscreen pipeline: no vertex buffer, no depth, no cull, one colour
-# target. The reusable primitive every deferred post-pass builds on.
-func fullscreenPipelineSpec(format: copy Int32) ret RenderPipelineSpec {
-  let colorFormats: List(Int32) = List.create(Int32, cap: 1)
-  colorFormats.add(value: format)
-  let attributes: List(VertexAttributeSpec) = List.create(VertexAttributeSpec, cap: 1)
-  ret RenderPipelineSpec {
-    vertexStride: 0, attributes: own attributes, colorFormats: own colorFormats,
-    alphaBlend: false, premultiplied: false, depthFormat: 0 as Int32, depthWrite: false,
-    depthCompare: WGPUCompareFunction_Always, cullMode: WGPUCullMode_None
-  }
-}
-
-func createFullscreenPipeline(resources: mod GpuResources, wgsl: view Buffer(Any), format: copy Int32) ret RenderPipelineId {
-  var source: String = ""
-  unsafe { source = String.fromCStr(s: wgsl) }
-  if let pipeline: RenderPipelineId = createRenderPipeline(resources: resources, wgsl: source, vertexEntry: "vs", fragmentEntry: "fs", spec: fullscreenPipelineSpec(format: format)) {
-    ret pipeline
-  }
-  ret noRenderPipelineId()
-}
-
 # One fullscreen pass (clear + draw 3) into a C-owned `target` view, opened in
 # Rae and submitted on the shared queue. The draw is recorded from manager IDs
 # (a manager pipeline, or an adopted C pipeline via runFullscreenExternal).
 type FullscreenPass { encoder: Ptr, pass: Ptr }
-
-func beginFullscreen(target: copy Ptr) unsafe ret FullscreenPass {
-  unsafe {
-    let encDesc: WGPUCommandEncoderDescriptor = { nextInChain: webgpuNull() }
-    let enc: Ptr = wgpuDeviceCreateCommandEncoder(device: webgpuDevice(), descriptor: encDesc)
-    var atts: List(WGPURenderPassColorAttachment) = List.create(WGPURenderPassColorAttachment, cap: 1)
-    atts.add(value: {
-      view_: target, depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32,
-      loadOp: WGPULoadOp_Clear, storeOp: WGPUStoreOp_Store
-    })
-    let rpDesc: WGPURenderPassDescriptor = {
-      colorAttachmentCount: 1 as UInt64, colorAttachments: atts.data
-    }
-    let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
-    ret FullscreenPass { encoder: enc, pass: pass }
-  }
-}
-
-func endFullscreen(fullscreen: view FullscreenPass) unsafe {
-  unsafe {
-    wgpuRenderPassEncoderEnd(renderPassEncoder: fullscreen.pass)
-    let cbDesc: WGPUCommandBufferDescriptor = { nextInChain: webgpuNull() }
-    let cmd: Ptr = wgpuCommandEncoderFinish(commandEncoder: fullscreen.encoder, descriptor: cbDesc)
-    gbSubmit(cmd: cmd)
-    wgpuCommandBufferRelease(commandBuffer: cmd)
-    wgpuRenderPassEncoderRelease(renderPassEncoder: fullscreen.pass)
-    wgpuCommandEncoderRelease(commandEncoder: fullscreen.encoder)
-  }
-}
-
-func runFullscreen(resources: view GpuResources, pipeline: view RenderPipelineId, bind: view BindGroupId, target: copy Ptr) {
-  unsafe {
-    if target is webgpuNull() { ret }
-    let fullscreen: FullscreenPass = beginFullscreen(target: target)
-    let drawn: Bool = recordDrawInPass(resources: resources, pass: fullscreen.pass, pipeline: pipeline, bindGroup: bind, vertexCount: 3, instanceCount: 1, firstVertex: 0, firstInstance: 0)
-    endFullscreen(fullscreen: fullscreen)
-  }
-}
-
-func runFullscreenExternal(resources: view GpuResources, pipeline: view ExternalId, bind: view BindGroupId, target: copy Ptr) {
-  unsafe {
-    if target is webgpuNull() { ret }
-    let fullscreen: FullscreenPass = beginFullscreen(target: target)
-    let drawn: Bool = recordDrawInPassExternal(resources: resources, pass: fullscreen.pass, pipeline: pipeline, bindGroup: bind, vertexCount: 3, instanceCount: 1, firstVertex: 0, firstInstance: 0)
-    endFullscreen(fullscreen: fullscreen)
-  }
-}
 
 # #764: the deferred pass caches were module-level globals; they are per-frame
 # state a deferred renderer owns, so they live in RenderPasses, threaded from
@@ -176,41 +84,6 @@ type PyrPassCache {
   binds: List(BindGroupId)      # per mip
   adopted: List(ExternalId)
   bindGen: Int
-}
-
-func createCompositePassCache() ret CompositePassCache {
-  ret CompositePassCache {
-    pipeMade: false, pipeline: noRenderPipelineId(), uniform: noBufferId(), sampler: noSamplerId(),
-    binds: fillBindGroupIds(count: 3), adopted: List.create(ExternalId, cap: 4), bindGen: 0 - 1,
-    args: createArgs(uniform: true)
-  }
-}
-func createAoPassCache() ret AoPassCache {
-  ret AoPassCache { pipeMade: false, pipeline: noRenderPipelineId(), bindGroup: noBindGroupId(), adopted: List.create(ExternalId, cap: 4), bindGen: 0 - 1 }
-}
-func createLightPassCache() ret LightPassCache {
-  ret LightPassCache { pipeline: noExternalId(), bindGroup: noBindGroupId(), adopted: List.create(ExternalId, cap: 10), bindGen: 0 - 1 }
-}
-func createTaaPassCache() ret TaaPassCache {
-  ret TaaPassCache { pipeline: noExternalId(), binds: fillBindGroupIds(count: 2), adopted: List.create(ExternalId, cap: 10), bindGen: 0 - 1 }
-}
-func createPyrPassCache() ret PyrPassCache {
-  ret PyrPassCache { fromDepth: noExternalId(), reduce: noExternalId(), binds: List.create(BindGroupId, cap: 16), adopted: List.create(ExternalId, cap: 20), bindGen: 0 - 1 }
-}
-
-# A failed bind build (a C input not up yet) resets the pass's generation
-# state — binds retired, adoptions released — so the retry next frame starts
-# clean instead of accumulating adopted slots.
-func failPassGeneration(resources: mod GpuResources, binds: mod List(BindGroupId), adopted: mod List(ExternalId)) {
-  retireBindGroupIds(resources: resources, list: binds)
-  releaseExternalIds(resources: resources, list: adopted)
-}
-
-# A bind slot is usable when its group is live AND its adopted inputs still
-# are (the generation check above retires both together).
-func bindSlotUsable(resources: view GpuResources, binds: view List(BindGroupId), idx: copy Int) ret Bool {
-  if let bind: BindGroupId = binds.copyAt(index: idx) { ret bindGroupIsUsable(resources: resources, id: bind) }
-  ret false
 }
 
 # ----- colour grade (#556) --------------------------------------------------
@@ -320,22 +193,6 @@ func compositePassGraded(cache: mod CompositePassCache, resources: mod GpuResour
   composite(cache: cache, resources: resources, exposure: exposure, grade: grade)
 }
 
-# ----- SSAO: screen-space ambient occlusion (#504) ---------------------------
-# Reads the G-buffer normal (A) + depth, writes the R8 AO target. The uniform
-# (inverse jittered viewProj + camera pos) is C math, uploaded into the shared
-# light uniform by gbSsaoUpload.
-func nativeGbSsaoUpload(camX: Float, camY: Float, camZ: Float) unsafe extern("rae_gb_ssao_upload")
-func gbSsaoUpload(camX: copy Float, camY: copy Float, camZ: copy Float) {
-  unsafe { nativeGbSsaoUpload(camX: camX, camY: camY, camZ: camZ) }
-}
-func gbAoWgsl() unsafe extern("rae_gb_ao_wgsl") ret Buffer(Any)
-func gbAoView() unsafe extern("rae_gb_ao_view") ret Ptr
-func gbLightUbuf() unsafe extern("rae_gb_light_ubuf") ret Ptr
-func nativeGbLightBytes() unsafe extern("rae_gb_light_bytes") ret Int
-func gbLightBytes() ret Int {
-  unsafe { ret nativeGbLightBytes() }
-}
-
 func ssao(cache: mod AoPassCache, resources: mod GpuResources, camX: copy Float, camY: copy Float, camZ: copy Float) pub {
   if gbDeferredPrepare() is 0 { ret }
   if not cache.pipeMade {
@@ -372,31 +229,11 @@ func ssaoPass(cache: mod AoPassCache, resources: mod GpuResources, camera: view 
   ssao(cache: cache, resources: resources, camX: camera.position.x, camY: camera.position.y, camZ: camera.position.z)
 }
 
-# ----- lighting: the deferred shading pass (#504) ----------------------------
-# Reads the whole G-buffer + AO + the shadow cascades, writes linear HDR
-# radiance into the lit target. The large uniform (inverse viewProj + camera/
-# sun/sky params + the Rae-cooked Hosek state) is C frame-math, uploaded by
-# gbLightUpload; Rae builds the 9-entry bind and runs the pass. The lighting
-# pipeline stays C for now (its creation guards the shared init block).
-func nativeGbLightUpload(camX: Float, camY: Float, camZ: Float, exposure: Float, sunX: Float, sunY: Float, sunZ: Float, sunR: Float, sunG: Float, sunB: Float, skyR: Float, skyG: Float, skyB: Float, gndR: Float, gndG: Float, gndB: Float, skyKind: Float, turbidity: Float, skyExposure: Float, sunSizeRad: Float, zenR: Float, zenG: Float, zenB: Float, bands: Float, horR: Float, horG: Float, horB: Float, discI: Float) unsafe extern("rae_gb_light_upload")
-func gbLightUpload(camX: copy Float, camY: copy Float, camZ: copy Float, exposure: copy Float, sunX: copy Float, sunY: copy Float, sunZ: copy Float, sunR: copy Float, sunG: copy Float, sunB: copy Float, skyR: copy Float, skyG: copy Float, skyB: copy Float, gndR: copy Float, gndG: copy Float, gndB: copy Float, skyKind: copy Float, turbidity: copy Float, skyExposure: copy Float, sunSizeRad: copy Float, zenR: copy Float, zenG: copy Float, zenB: copy Float, bands: copy Float, horR: copy Float, horG: copy Float, horB: copy Float, discI: copy Float) {
-  unsafe { nativeGbLightUpload(camX: camX, camY: camY, camZ: camZ, exposure: exposure, sunX: sunX, sunY: sunY, sunZ: sunZ, sunR: sunR, sunG: sunG, sunB: sunB, skyR: skyR, skyG: skyG, skyB: skyB, gndR: gndR, gndG: gndG, gndB: gndB, skyKind: skyKind, turbidity: turbidity, skyExposure: skyExposure, sunSizeRad: sunSizeRad, zenR: zenR, zenG: zenG, zenB: zenB, bands: bands, horR: horR, horG: horG, horB: horB, discI: discI) }
-}
 func nativeSkyHosekPush(index: Int, value: Float) unsafe extern("rae_ext_Gbuffer_skyHosekPush")
 func skyHosekPush(index: copy Int, value: copy Float) {
   unsafe { nativeSkyHosekPush(index: index, value: value) }
 }
-func gbLightPipeline() unsafe extern("rae_gb_light_pipeline") ret Ptr
 func gbLitView() unsafe extern("rae_gb_lit_view") ret Ptr
-func gbShadowFrameUbuf() unsafe extern("rae_gb_shadow_frame_ubuf") ret Ptr
-func nativeGbShadowFrameBytes() unsafe extern("rae_gb_shadow_frame_bytes") ret Int
-func gbShadowFrameBytes() ret Int {
-  unsafe { ret nativeGbShadowFrameBytes() }
-}
-func gbShadowArrayView() unsafe extern("rae_gb_shadow_array_view") ret Ptr
-func gbShadowSampler() unsafe extern("rae_gb_shadow_sampler") ret Ptr
-
-
 # Cooked Hosek-Wilkie coefficients pushed before lighting; three vec4 per
 # channel, matching the WGSL `hosek` layout.
 func pushHosekChannel(c: view HosekChannel, base: view Int) {
@@ -514,28 +351,6 @@ func lightingPass(cache: mod LightPassCache, resources: mod GpuResources, camera
   )
 }
 
-# ----- TAA: temporal resolve (#504) ------------------------------------------
-# Reads this frame's radiance + last frame's history + motion, writes the
-# resolved image into the slot the composite then reads. The ping-pong slot and
-# history flag are C frame state (taaBegin flips + uploads, taaEnd marks
-# history); Rae builds the per-slot bind and runs the pass. Pipeline stays C.
-func nativeGbTaaReady() unsafe extern("rae_gb_taa_ready") ret Int
-func gbTaaReady() ret Int {
-  unsafe { ret nativeGbTaaReady() }
-}
-func nativeGbTaaBegin() unsafe extern("rae_gb_taa_begin") ret Int
-func gbTaaBegin() ret Int {
-  unsafe { ret nativeGbTaaBegin() }
-}
-func nativeGbTaaEnd() unsafe extern("rae_gb_taa_end")
-func gbTaaEnd() {
-  unsafe { nativeGbTaaEnd() }
-}
-func gbTaaPipeline() unsafe extern("rae_gb_taa_pipeline") ret Ptr
-func gbTaaUbuf() unsafe extern("rae_gb_taa_ubuf") ret Ptr
-func gbTaaTargetView() unsafe extern("rae_gb_taa_target_view") ret Ptr
-func gbTaaHistoryView() unsafe extern("rae_gb_taa_history_view") ret Ptr
-
 func taa(cache: mod TaaPassCache, resources: mod GpuResources) pub {
   if gbTaaReady() is 0 { ret }
   let cur: Int = gbTaaBegin()
@@ -581,24 +396,6 @@ func taa(cache: mod TaaPassCache, resources: mod GpuResources) pub {
 # Public wrapper: the render graph's TAA step (was gbuffer.taaPass).
 func taaPass(cache: mod TaaPassCache, resources: mod GpuResources) pub {
   taa(cache: cache, resources: resources)
-}
-
-# ----- depth pyramid: a Hi-Z mip chain (#504) --------------------------------
-# A loop of single-entry fullscreen passes: mip 0 reduces the G-buffer depth,
-# each later mip reduces the one above. C keeps the per-mip targets + the two
-# pipelines; Rae drives the loop, building one bind per level (reading the
-# previous mip) and running each pass into that mip's target.
-func nativeGbPyramidReady() unsafe extern("rae_gb_pyramid_ready") ret Int
-func gbPyramidReady() ret Int {
-  unsafe { ret nativeGbPyramidReady() }
-}
-func gbPyrFromDepthPipeline() unsafe extern("rae_gb_pyr_from_depth_pipeline") ret Ptr
-func gbPyrReducePipeline() unsafe extern("rae_gb_pyr_reduce_pipeline") ret Ptr
-func gbPyrSrcView(i: Int) unsafe extern("rae_gb_pyr_src_view") ret Ptr
-func gbPyrRtView(i: Int) unsafe extern("rae_gb_pyr_rt_view") ret Ptr
-func nativeGbPyramidMips() unsafe extern("rae_ext_Gbuffer_pyramidMips") ret Int
-func gbPyramidMips() ret Int {
-  unsafe { ret nativeGbPyramidMips() }
 }
 
 func depthPyramid(cache: mod PyrPassCache, resources: mod GpuResources) pub {
