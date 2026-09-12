@@ -282,10 +282,10 @@ func soundBars(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view Fl
     # current height so taller bars reveal more of the highlight.
     let topCol: Int = hsv(hue: hue - 0.06, sat: 0.68, val: 1.0, alpha: 255)
     let botCol: Int = hsv(hue: hue, sat: 0.88, val: 0.82, alpha: 255)
-    Gpu2d.pushClipRect(x: barX, y: baseline - barH, w: barW, h: barH)
+    Gpu2d.pushClipRect(canvas: canvas, x: barX, y: baseline - barH, w: barW, h: barH)
     Gpu2d.drawGradientRect(canvas: canvas, x: barX, y: baseline - maxH, w: barW, h: maxH, radius: 3.0,
                            from: topCol, to: botCol, angleDeg: 90.0)
-    Gpu2d.popClipRect()
+    Gpu2d.popClipRect(canvas: canvas)
     # Bright, hue-tinted peak marker.
     let capCol: Int = hsv(hue: hue - 0.06, sat: 0.30, val: 1.0, alpha: 255)
     Gpu2d.drawRoundedRect(canvas: canvas, x: barX, y: baseline - barH - 4.0, w: barW, h: 4.0, radius: 2.0, color: capCol)
@@ -330,7 +330,7 @@ func panelGlass(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view F
 # A full-width header whose diagonal stripes scroll, dots pulse, and a bright
 # marker bounces across — all clipped to a rounded rectangle.
 func heroBand(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view Float, h: view Float, t: view Float) {
-  Gpu2d.pushClipRoundedRect(x: x, y: y, w: w, h: h, radius: 20.0)
+  Gpu2d.pushClipRoundedRect(canvas: canvas, x: x, y: y, w: w, h: h, radius: 20.0)
   Gpu2d.drawGradientRect(canvas: canvas, x: x, y: y, w: w, h: h, radius: 0.0, from: 0xFF141E30, to: 0xFF243B55, angleDeg: 0.0)
   # Diagonal stripes marching across (scroll by a fraction of the spacing).
   let spacing: Float = 46.0
@@ -364,7 +364,7 @@ func heroBand(canvas: mod Gpu2dCanvas, x: view Float, y: view Float, w: view Flo
   Gpu2d.drawRoundedRect(canvas: canvas, x: markX - 11.0, y: markY - 11.0, w: 22.0, h: 22.0, radius: 11.0, color: 0xFFFFFFFF)
   # A gradient pill on the right whose sweep rotates.
   Gpu2d.drawGradientRect(canvas: canvas, x: x + w - 220.0, y: y + h * 0.5 - 18.0, w: 190.0, h: 36.0, radius: 18.0, from: 0xFF6A11CB, to: 0xFF2575FC, angleDeg: t * 60.0)
-  Gpu2d.popClipRect()
+  Gpu2d.popClipRect(canvas: canvas)
 }
 
 func main() ret Int {
