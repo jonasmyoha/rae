@@ -1,22 +1,14 @@
 # Compiler versioning, toolchain pinning, and the road to a package manager
 
-**Status:** design, agreed direction. §1 (#930), §2 (#931), §3 (#932) and the
-resolution half of §4 (#933) are implemented: `compiler/VERSION`,
+**Status:** design, implemented. §1 (#930), §2 (#931), §3 (#932) and §4
+(#933 resolution + #934 CLI) are all in the compiler: `compiler/VERSION`,
 `rae --version`/`-v`/`--json`, the bump discipline, the `v0.1.0` tag; the
-`rae: { version }` pack requirement, the run/build/watch toolchain check
-(before the format preflight), `--check-toolchain`, `RAE_TOOLCHAIN_CHECK=off`,
-the `rae init` requirement; `rae toolchain status`/`list`/`use`; and the pack's
-`dependencies: { dep x: { path } | { git, rev } }` resolved into the module
-search (a dep named `x` owns the `import x/...` prefix), git deps cloned into
-`.rae/deps/<name>` and pinned by the generated `rae.lock` (`toolchain` block +
-`dep` records with commit and `git-tree` content hash — the lock's commit wins
-over the pack's `rev`, so a build is reproducible from the lockfile alone).
-The stdlib is the lock's first `dep lib` record, resolved through the
-toolchain rather than a project-local `lib` symlink. Only the §4 CLI
-(#934: `rae add`/`fetch`/`update`/`tree`) remains. Extends
-`docs/raepack-v2-and-packages.md` §12 (dependencies + `rae.lock`), which
-already covers *package* versions and dependency pins but says nothing about
-the **compiler's own version** — the gap this doc closes.
+`rae: { version }` pack requirement + run/build/watch toolchain check;
+`rae toolchain status`/`list`/`use`; `dependencies: { dep x: { path } | { git, rev } }`
+resolved into the module search with git deps cloned into `.rae/deps/<name>`
+and pinned by the generated `rae.lock`; and the package CLI
+`rae add`/`fetch`/`update`/`tree`. A registry is deliberately out of scope
+(packages doc §15). Extends `docs/raepack-v2-and-packages.md` §12.
 
 ## 0. The problem
 
