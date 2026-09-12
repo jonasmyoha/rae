@@ -37,6 +37,8 @@ const underwaterCrossingMargin: Float = 0.03  # metres of hysteresis at the surf
 
 const underwaterFftMaxAge: Float = 0.5  # seconds a cached FFT sample may lag the wave clock
 
+const underwaterCausticStrength: Float = 0.5  # peak added radiance of the caustic ridges
+
 # Fog tuning shared by every body: the body's own absorption drives the
 # colour; these shape how fast it saturates and the near-surface tint.
 const underwaterDensity: Float = 0.25
@@ -102,7 +104,11 @@ func waterSurfaceAtCamera(
 
 # Decide for this frame. Pure over the system's bodies + cache and the last
 # decision (`waterSystem.underwater` / `underwaterBody`, for the hysteresis).
-func underwaterSelect(waterSystem: mod WaterSystem, camera: view Camera3d) ret UnderwaterParams {
+func underwaterSelect(
+  waterSystem: mod WaterSystem
+  camera: view Camera3d
+  light: view Light3d
+) ret UnderwaterParams {
   var best: Int = 0 - 1
   var bestSurface: Float = 0.0
   var bestSubmersion: Float = 0.0
@@ -144,6 +150,15 @@ func underwaterSelect(waterSystem: mod WaterSystem, camera: view Camera3d) ret U
     waterSystem.underwaterStillFrames = waterSystem.underwaterStillFrames + 1
   }
   if let body: WaterBody = waterSystem.bodies.copyAt(index: best) {
+    # Caustics: the body's toggle, lit by the frame's sun. sunDir is the
+    # direction TOWARD the sun (the shader zeroes the effect when it is below
+    # the horizon or the sun colour is black), so negate Light3d.sunDir (which
+    # points the way the light travels) and normalise.
+    var toSun: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    let sunLength: Float = Vec3.vlen(a: light.sunDir)
+    if sunLength > 0.0001 {
+      toSun = Vec3.vscale(a: light.sunDir, s: 0.0 - 1.0 / sunLength)
+    }
     ret UnderwaterParams {
       active: true
       surfaceZ: bestSurface
@@ -153,6 +168,11 @@ func underwaterSelect(waterSystem: mod WaterSystem, camera: view Camera3d) ret U
       farDistance: underwaterFarDistance
       tintStrength: underwaterTintStrength
       tintDepth: underwaterTintDepth
+      causticsOn: body.caustics > 0
+      sunDir: toSun
+      sunColor: light.sunColor
+      causticStrength: underwaterCausticStrength
+      time: waterSystem.time
     }
   }
   ret noUnderwater()
@@ -163,8 +183,9 @@ func waterUnderwaterUpdate(
   waterSystem: mod WaterSystem
   renderer: mod DeferredRenderer
   camera: view Camera3d
+  light: view Light3d
 ) {
-  waterSystem.underwater = underwaterSelect(waterSystem: waterSystem, camera: camera)
+  waterSystem.underwater = underwaterSelect(waterSystem: waterSystem, camera: camera, light: light)
   setUnderwater(renderer: renderer, params: waterSystem.underwater)
 }
 

@@ -415,7 +415,12 @@ func main() ret Int {
         if tag is RenderTag.underwater {
           # Underwater fog (#855): the FFT surface under the camera comes from
           # the #858 readback cache (the still level until it is fresh).
-          waterUnderwaterUpdate(waterSystem: waterSystem, renderer: renderer, camera: camera)
+          waterUnderwaterUpdate(
+            waterSystem: waterSystem
+            renderer: renderer
+            camera: camera
+            light: light
+          )
           if waterIsUnderwater(waterSystem: waterSystem) {
             underwaterFrames = underwaterFrames + 1
           }
