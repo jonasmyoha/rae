@@ -348,6 +348,10 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             ((FAILED++))
           fi
         elif [ "$EXAMPLE_NAME" = "112_metaballs_deferred" ]; then
+          # The free-camera shot must also be a SHADED SCENE (thousands of
+          # colours): a black viewport under an intact UI passed the UI-only
+          # check for the #920..#921 slices (the UI drew on a canvas the scene
+          # was never composited into).
           SCREENSHOT="$TMP_OUT/gpu3d-ui.bmp"
           FREE_SCREENSHOT="$TMP_OUT/gpu3d-ui-free.bmp"
           PAUSE_SCREENSHOT="$TMP_OUT/gpu3d-ui-pause.bmp"
@@ -362,6 +366,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && (cd .. && RAE_GPU3D_UI_TEST_STATE=free RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$FREE_SCREENSHOT" \
                 perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/free-render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$FREE_SCREENSHOT" --gpu3d-ui > "$TMP_OUT/free-screenshot.log" 2>&1 \
+             && python3 tools/assert_nonblank_bmp.py "$FREE_SCREENSHOT" --min-colors=2000 >> "$TMP_OUT/free-screenshot.log" 2>&1 \
              && (cd .. && RAE_GPU3D_UI_TEST_STATE=pause RAE_SDL_HEADLESS_MS=1000 RAE_GPU2D_SCREENSHOT="$PAUSE_SCREENSHOT" \
                 perl -e 'alarm shift; exec @ARGV' 20 "$TMP_OUT/app") > "$TMP_OUT/pause-render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$PAUSE_SCREENSHOT" --gpu3d-ui > "$TMP_OUT/pause-screenshot.log" 2>&1 \
@@ -379,6 +384,20 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
           else
             echo "FAIL: $EXAMPLE_NAME (3D/UI screenshot)"
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" "$TMP_OUT/free-render.log" "$TMP_OUT/free-screenshot.log" "$TMP_OUT/pause-render.log" "$TMP_OUT/pause-screenshot.log" "$TMP_OUT/settings-render.log" "$TMP_OUT/settings-screenshot.log" "$TMP_OUT/scene2-render.log" "$TMP_OUT/scene2-screenshot.log" "$TMP_OUT/scene3-render.log" "$TMP_OUT/scene3-screenshot.log" 2>/dev/null | sed 's/^/  /'
+            ((FAILED++))
+          fi
+        elif [ "$EXAMPLE_NAME" = "115_procgen_showcase" ]; then
+          # The procgen scene (trees, rocks, the texture swatches over it) must
+          # come out SHADED: thousands of colours, not a swatch strip over black.
+          SCREENSHOT="$TMP_OUT/procgen.bmp"
+          if (cd .. && RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+             && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=2000 > "$TMP_OUT/screenshot.log" 2>&1; then
+            echo "PASS: $EXAMPLE_NAME (shaded procgen scene + texture swatches)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (procgen screenshot)"
+            cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
         else
