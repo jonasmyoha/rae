@@ -97,6 +97,9 @@ type WaterBody {
   # Near-camera sea spray (#859, desktop): 1 = the app's SprayEmitter bursts
   # droplets where the cached FFT Jacobian says a crest is breaking; 0 = none.
   spray: Int
+  # Sun caustics on submerged surfaces (#860, desktop): 1 = the underwater fog
+  # pass adds a rippling light network when the camera is under this body; 0 = none.
+  caustics: Int
 }
 
 # A stylised lake with the surface at `surfaceZ`: pale turquoise shallows, a deep
@@ -158,6 +161,7 @@ func createLakeToon(surfaceZ: copy Float, extent: copy Float) ret WaterBody {
     ssr: 0
     ssrSteps: 0
     spray: 0
+    caustics: 0
   }
 }
 
@@ -298,5 +302,6 @@ func createOceanRealistic(surfaceZ: copy Float) ret WaterBody {
   body.ssr = 1
   body.ssrSteps = 24
   body.spray = 1
+  body.caustics = 1
   ret body
 }
