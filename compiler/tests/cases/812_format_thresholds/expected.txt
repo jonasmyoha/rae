@@ -1,0 +1,121 @@
+# #916: ONE list policy over exact widths — parameters/arguments go vertical
+# from FOUR items or when the one-line form exceeds 100 columns; object /
+# collection / list literals and enum members from FIVE; a lone nested list
+# hugs its delimiters; a type declaration is always one field per line.
+type Vec2 {
+  x: Float
+  y: Float
+}
+
+type Four {
+  a: Int
+  b: Int
+  c: Int
+  d: Int
+}
+
+type Five {
+  a: Int
+  b: Int
+  c: Int
+  d: Int
+  e: Int
+}
+
+enum Small { one, two, three, four }
+
+enum Big {
+  one
+  two
+  three
+  four
+  five
+}
+
+func three(a: Int, b: Int, c: Int) ret Int {
+  ret a + b + c
+}
+
+func four(
+  a: Int
+  b: Int
+  c: Int
+  d: Int
+) ret Int {
+  ret a + b + c + d
+}
+
+func wide(
+  firstParameterWithALongName: Int
+  secondParameterWithALongName: Int
+  thirdParameter: Int
+) ret Int {
+  ret firstParameterWithALongName + secondParameterWithALongName + thirdParameter
+}
+
+func longReturn(a: Int) ret opt List(List(Map(String, List(Int)))) {
+  var out: opt List(List(Map(String, List(Int)))) = none
+  ret out
+}
+
+func namedReturns(a: Int) ret sum: Int, product: Int {
+  ret sum: a, product: a
+}
+
+func nested(items: view List(List(Map(String, Int)))) ret Int {
+  ret items.length()
+}
+
+func consume(five: view Five) ret Int {
+  ret five.a
+}
+
+func main() {
+  let t: Int = three(a: 1, b: 2, c: 3)
+  let f: Int = four(
+    a: 1
+    b: 2
+    c: 3
+    d: 4
+  )
+  let w: Int = wide(
+    firstParameterWithALongName: 1
+    secondParameterWithALongName: 2
+    thirdParameter: 3
+  )
+  let fourFields: Four = { a: 1, b: 2, c: 3, d: 4 }
+  let fiveFields: Five = {
+    a: 1
+    b: 2
+    c: 3
+    d: 4
+    e: 5
+  }
+  let list4: List(Int) = [1, 2, 3, 4]
+  let list5: List(Int) = [
+    1
+    2
+    3
+    4
+    5
+  ]
+  let hugged: Int = three(
+    a: four(
+      a: 1
+      b: 2
+      c: 3
+      d: 4
+    )
+    b: 2
+    c: 3
+  )
+  let lone: Int = three(a: 1, b: 2, c: 3).absolute()
+  let hugLiteral: Int = consume(five: {
+    a: 1
+    b: 2
+    c: 3
+    d: 4
+    e: 5
+  })
+  ret Vec2 { x: 1.0, y: 2.0 }
+}

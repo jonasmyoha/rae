@@ -1,0 +1,21 @@
+# #916: char literals used to SIGSEGV the formatter (the AST union aliased the
+# spelling and the decoded value); escapes, raw and interpolated strings must
+# round-trip byte for byte.
+func main() {
+  let a: Char = 'a'
+  let quote: Char = '\''
+  let newline: Char = '\n'
+  let tab: Char = '\t'
+  let backslash: Char = '\\'
+  let unicode: Char = '\u{1F600}'
+  let plain: String = "quote \" backslash \\ newline \n tab \t brace \{ \}"
+  let raw: String = r"no \escapes\ here"
+  let rawQuoted: String = r#"a "quoted" word"#
+  let rawHashes: String = r##"a "# inside"##
+  let interp: String = "value {a} and {quote} then \{literal\} end"
+  let nested: String = "sum {1 + 2} text {plain.length()} tail"
+  let zero: String = "nul \0 byte"
+  log(
+    "{a}{quote}{newline}{tab}{backslash}{unicode}{plain}{raw}{rawQuoted}{rawHashes}{interp}{nested}{zero}"
+  )
+}

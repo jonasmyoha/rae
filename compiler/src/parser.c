@@ -500,7 +500,8 @@ static AstImport* parse_import_clause(Parser* parser, bool is_export, bool is_op
   }
   // Optional `as <alias>` — contextual; `as` is not a reserved keyword.
   Str alias = (Str){0};
-  if (parser_check(parser, TOK_IDENT) && str_eq_cstr(parser_peek(parser)->lexeme, "as")) {
+  if (parser_check(parser, TOK_KW_AS)
+      || (parser_check(parser, TOK_IDENT) && str_eq_cstr(parser_peek(parser)->lexeme, "as"))) {
     parser_advance(parser); // consume `as`
     if (parser_check(parser, TOK_IDENT)) {
       alias = parser_copy_str(parser, parser_advance(parser)->lexeme);
@@ -1023,6 +1024,7 @@ AstCollectionElement* append_collection_element(AstCollectionElement* head, AstC
 
 static AstExpr* parse_list_literal(Parser* parser, const Token* start_token) {
   AstExpr* expr = new_expr(parser, AST_EXPR_COLLECTION_LITERAL, start_token);
+  expr->as.collection.is_bracketed = true;
   AstCollectionElement* head = NULL;
   AstCollectionElement* tail = NULL;
 
@@ -2185,14 +2187,12 @@ static AstStmt* parse_if_statement(Parser* parser, const Token* if_token) {
       }
     }
     stmt->as.if_stmt.then_block = parse_block(parser);
-    if (parser_match(parser, TOK_KW_ELSE)) {
-      stmt->as.if_stmt.else_block = parse_block(parser);
-    }
-    return stmt;
+  } else {
+    stmt->as.if_stmt.condition = parse_expression(parser);
+    stmt->as.if_stmt.then_block = parse_block(parser);
   }
-
-  stmt->as.if_stmt.condition = parse_expression(parser);
-  stmt->as.if_stmt.then_block = parse_block(parser);
+  /* `else` / `else if` — the same for a plain `if` and an `if let` (#916:
+   * the `if let` arm used to accept only a plain `else` block). */
   if (parser_match(parser, TOK_KW_ELSE)) {
     if (parser_match(parser, TOK_KW_IF)) {
       // Synthesize a block for the nested 'if' to keep AST consistent
@@ -2455,7 +2455,25 @@ static AstStmt* parse_query_loop(Parser* parser, AstStmt* stmt, bool has_let,
   hoist->as.let_stmt.is_bind = false;
   hoist->as.let_stmt.is_var = false;
   hoist->as.let_stmt.is_const = false;
+  hoist->is_synthetic = true;
   hoist->next = stmt;
+
+  // Keep the source spelling of the bindings + iterable on the loop so the
+  // formatter prints the sugar, not the expansion (#916).
+  {
+    AstQueryLoopBinding* qhead = NULL;
+    AstQueryLoopBinding* qtail = NULL;
+    for (int i = 0; i < count; i++) {
+      AstQueryLoopBinding* qb = parser_alloc(parser, sizeof(AstQueryLoopBinding));
+      qb->name = bindings[i].name;
+      qb->type = bindings[i].type;
+      qb->next = NULL;
+      if (qtail) qtail->next = qb; else qhead = qb;
+      qtail = qb;
+    }
+    stmt->as.loop_stmt.query_bindings = qhead;
+    stmt->as.loop_stmt.query_iterable = iterable;
+  }
 
   AstStmt* init = new_stmt(parser, AST_STMT_LET, first_name);
   init->as.let_stmt.name = hidden;
@@ -2484,6 +2502,7 @@ static AstStmt* parse_query_loop(Parser* parser, AstStmt* stmt, bool has_let,
     es->as.let_stmt.is_bind = false;
     es->as.let_stmt.is_var = false;
     es->as.let_stmt.is_const = false;
+    es->is_synthetic = true;
     RAE_QUERY_LOOP_APPEND(es);
   }
   static const char* index_fields[5] = { "indexA", "indexB", "indexC", "indexD", "indexE" };
@@ -2501,6 +2520,7 @@ static AstStmt* parse_query_loop(Parser* parser, AstStmt* stmt, bool has_let,
     ls->as.let_stmt.is_bind = true;
     ls->as.let_stmt.is_var = false;
     ls->as.let_stmt.is_const = false;
+    ls->is_synthetic = true;
     RAE_QUERY_LOOP_APPEND(ls);
   }
   #undef RAE_QUERY_LOOP_APPEND
@@ -2768,9 +2788,17 @@ static AstStmt* parse_statement(Parser* parser) {
     stmt->as.if_stmt.condition = cond;
     stmt->as.if_stmt.then_block = parse_block(parser);
     stmt->as.if_stmt.else_block = NULL;
+    stmt->as.if_stmt.is_task_scope = true;
     return stmt;
   }
   
+  /* An expression statement's position is its FIRST token. (It used to be
+   * the token AFTER the expression, which put a multi-line call's statement
+   * line at its closing paren and made the formatter re-attach a trailing
+   * comment before the call on the second pass — #916.) An assignment keeps
+   * the `=` as its anchor: diagnostics point at it, and it is on the
+   * statement's first line. */
+  const Token* stmt_start = parser_peek(parser);
   AstExpr* expr = parse_expression(parser);
   if (parser_match(parser, TOK_ASSIGN)) {
     AstStmt* stmt = new_stmt(parser, AST_STMT_ASSIGN, parser_previous(parser));
@@ -2784,7 +2812,7 @@ static AstStmt* parse_statement(Parser* parser) {
     return NULL;
   }
 
-  AstStmt* stmt = new_stmt(parser, AST_STMT_EXPR, parser_peek(parser));
+  AstStmt* stmt = new_stmt(parser, AST_STMT_EXPR, stmt_start);
   stmt->as.expr_stmt = expr;
   return stmt;
 }
@@ -2810,7 +2838,8 @@ static AstBlock* parse_block(Parser* parser) {
       parser_advance(parser); // Force progress
     }
   }
-  parser_consume(parser, TOK_RBRACE, "expected '}' to close block");
+  const Token* close = parser_consume(parser, TOK_RBRACE, "expected '}' to close block");
+  block->end_line = close ? close->line : 0;
   return block;
 }
 

@@ -348,7 +348,32 @@ for TARGET in "${TARGETS[@]}"; do
     fi
     
     EXPECTED_OUTPUT=$(cat "$EXPECT_FILE")
-    
+
+    # #916: every `format` case is ALSO checked for idempotence (formatting
+    # the output again changes nothing) and AST equivalence (`rae parse` of
+    # the input and of the output dump identically — the formatter moved
+    # layout, never meaning). A failure of either is reported as the case's
+    # failure, so a fixture's expected.txt cannot bless a broken layout.
+    FORMAT_CHECK_MSG=""
+    if [ "${CMD_ARGS[0]}" = "format" ] && [ "${EXPECTED_OUTPUT:0:6}" != "REGEX:" ]; then
+        FMT_TMP_DIR=$(mktemp -d)
+        printf '%s\n' "$ACTUAL_OUTPUT" > "$FMT_TMP_DIR/Main.rae"
+        FMT_SECOND=$("$BIN" format "$FMT_TMP_DIR/Main.rae" 2>&1 || true)
+        if [ "$FMT_SECOND" != "$ACTUAL_OUTPUT" ]; then
+            FORMAT_CHECK_MSG="format is not idempotent: a second pass changed the output"
+        fi
+        # The input may lack the final newline the strict lexer demands (the
+        # formatter is lenient about it); compare the dumps of two temp copies.
+        cp "$TEST_FILE" "$FMT_TMP_DIR/Input.rae"
+        [ -n "$(tail -c 1 "$FMT_TMP_DIR/Input.rae")" ] && printf '\n' >> "$FMT_TMP_DIR/Input.rae"
+        FMT_AST_IN=$("$BIN" parse "$FMT_TMP_DIR/Input.rae" 2>&1 | sed "s#$FMT_TMP_DIR/Input.rae#FILE#g" | grep -v '^warning' || true)
+        FMT_AST_OUT=$("$BIN" parse "$FMT_TMP_DIR/Main.rae" 2>&1 | sed "s#$FMT_TMP_DIR/Main.rae#FILE#g" | grep -v '^warning' || true)
+        if [ "$FMT_AST_IN" != "$FMT_AST_OUT" ]; then
+            FORMAT_CHECK_MSG="${FORMAT_CHECK_MSG:+$FORMAT_CHECK_MSG; }format changed the AST (rae parse of input and output differ)"
+        fi
+        rm -rf "$FMT_TMP_DIR"
+    fi
+
     IS_MATCH=0
     if [ "${EXPECTED_OUTPUT:0:6}" = "REGEX:" ]; then
         PATTERN="${EXPECTED_OUTPUT:6}"
@@ -363,7 +388,11 @@ for TARGET in "${TARGETS[@]}"; do
         DISPLAY_NAME="$DISPLAY_NAME (binary match skipped)"
     fi
 
-    if [ $IS_MATCH -eq 1 ]; then
+    if [ $IS_MATCH -eq 1 ] && [ -n "$FORMAT_CHECK_MSG" ]; then
+      IS_MATCH=0
+      echo "FAIL: $DISPLAY_NAME ($FORMAT_CHECK_MSG)"
+      ((FAILED++))
+    elif [ $IS_MATCH -eq 1 ]; then
       echo "PASS: $DISPLAY_NAME"
       ((PASSED++))
       PASSED_TEST_NAMES="$PASSED_TEST_NAMES $TEST_NAME.rae"
