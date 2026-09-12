@@ -52,6 +52,11 @@
 #   the Rae buffer (frame-derived uniform math, the rae_g2d_xform pattern), rae_gb_commit_targets
 #   hands C the BORROWED views + size for its still-C post passes (forget_targets at shutdown),
 #   rae_gb_set_frame_open flags the pass for the C metaball prep — for the record.)
+# (#922 slice b-i: the deferred METABALL clusters are Rae manager objects on the GbufferCache
+#   (lib/GbufferSdf.rae: pipeline over the C-kept rae_gb_sdf_wgsl, frame uniform from the cache's frame
+#   data — inverse of the JITTERED viewProj computed in Rae — per-cluster ball/colour/param buffers +
+#   binds); rae_gb_sdf_prepare/pipeline/bind, rae_ext_Gbuffer_sdfShutdown and rae_gb_set_frame_open
+#   (the last C coupling to the open geometry pass) are gone — for the record.)
 # (#921: the SKINNED meshes + the joint palette are the Rae SkinStore (lib/SkinStore.rae) on the
 #   renderer (GbufferCache.skins / Renderer3d.skins); rae_ext_Gpu3d_skinnedMeshCreate/setPalette, the
 #   rae_gb_skin_{ready,vbuf,ibuf,icount,palette,palette_size,palette_ready} and rae_g3d_skin_{vbuf,ibuf,
@@ -73,7 +78,6 @@ rae_ext_Gbuffer_deferredShutdown
 # of the CANVAS-owned offscreen texture it is handed (#920); C owns nothing of the target.
 rae_ext_Gbuffer_present
 rae_ext_Gbuffer_pyramidMips
-rae_ext_Gbuffer_sdfShutdown
 rae_ext_Gbuffer_shutdown
 rae_ext_Gbuffer_skyHosekPush
 rae_ext_Gpu3d_shutdown

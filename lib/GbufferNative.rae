@@ -1,8 +1,9 @@
 # GbufferNative — the C-ABI accessor layer of Gbuffer (#918 split for the
 # 1000-line cap): every `native*` extern and the thin `gb*` wrappers that hand
-# the Rae geometry pass what is still C-owned (the WGSL sources, the SDF
-# prepare, the frame-derived uniform math, the offscreen size; the skin
-# buffers + palette are the SkinStore's since #921) — since #906 the targets, frame uniform, draws
+# the Rae geometry pass what is still C-owned (the WGSL sources, the
+# frame-derived uniform math, the offscreen size; the skin buffers + palette
+# are the SkinStore's since #921, the metaball prep the SdfPassCache's since
+# #922) — since #906 the targets, frame uniform, draws
 # buffer and
 # the frame's encoder / pass are the GbufferCache's manager objects. Nothing
 # here is app-facing; the frame API (begin / draw / end / present) stays in Gbuffer.
@@ -107,14 +108,6 @@ func gbForgetTargets() {
   }
 }
 
-func nativeGbSetFrameOpen(open: Int) unsafe extern("rae_gb_set_frame_open")
-
-func gbSetFrameOpen(open: copy Int) {
-  unsafe {
-    nativeGbSetFrameOpen(open: open)
-  }
-}
-
 # Shared by the inspector and the deferred post-passes (declared here so both
 # get them via `open gbuffer` without redeclaring): the presentable target's
 # format/view and the targets-resize generation counter.
@@ -164,38 +157,10 @@ func gbufferPipelineSpec(
   }
 }
 
-# Metaball cluster into the G-buffer (#392, ported to Rae #504): a fullscreen
-# raymarch that writes packed G-buffer attributes + depth into the OPEN geometry
-# pass, so a metaball surface is shaded by the same lighting as every triangle.
-# C does the dense per-cluster prep (inverse-viewProj frame uniform, ball/colour
-# uploads, params, bind) and returns the group index; Rae issues the draw into
-# the pass and restores the static pipeline after, like drawSkinned does.
-func gbSdfPrepare(
-  packedBalls: Ptr
-  count: Int
-  packedColors: Ptr
-  smoothing: Float
-  camX: Float
-  camY: Float
-  camZ: Float
-  metallic: Float
-  roughness: Float
-  emR: Float
-  emG: Float
-  emB: Float
-) unsafe extern("rae_gb_sdf_prepare") ret Int
-
-func gbSdfPipeline() unsafe extern("rae_gb_sdf_pipeline") ret Ptr
-
-func gbSdfBind(gi: Int) unsafe extern("rae_gb_sdf_bind") ret Ptr
-
-func nativeSdfShutdown() unsafe extern("rae_ext_Gbuffer_sdfShutdown")
-
-func sdfShutdown() {
-  unsafe {
-    nativeSdfShutdown()
-  }
-}
+# The metaball cluster shader (#392): its WGSL stays C source like every
+# other shader; the pipeline, uniforms, buffers and binds are the Rae
+# SdfPassCache's (GbufferSdf.rae, #922).
+func gbSdfWgsl() unsafe extern("rae_gb_sdf_wgsl") ret Buffer(Any)
 
 func nativePyramidMips() unsafe extern("rae_ext_Gbuffer_pyramidMips") ret Int
 

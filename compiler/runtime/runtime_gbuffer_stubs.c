@@ -44,24 +44,13 @@ void* rae_gb_view_b(void)     { return (void*)0; }
 void* rae_gb_view_c(void)     { return (void*)0; }
 void* rae_gb_view_depth(void) { return (void*)0; }
 float rae_gb_motion_zero(void){ return 128.0f / 255.0f; }
-void rae_gb_set_frame_open(int64_t open){ (void)open; }
 /* The static AND skinned single draws, plus the instanced draw, now run in Rae
  * (lib/gbuffer.rae: draw / drawSkinned / drawRecords, #502/#503); they call
  * these context accessors, so builds without the real geometry pass need no-op
  * versions. mesh_ready / skin_ready return 0, so the Rae draws early-return and
  * issue no GPU work. */
 void rae_gb_submit(void* cmd)           { (void)cmd; }
-int64_t rae_gb_sdf_prepare(void* packedBalls, int64_t count, void* packedColors,
-                           float smoothing, float camX, float camY, float camZ,
-                           float metallic, float roughness,
-                           float emR, float emG, float emB){
-    (void)packedBalls; (void)count; (void)packedColors; (void)smoothing;
-    (void)camX; (void)camY; (void)camZ; (void)metallic; (void)roughness;
-    (void)emR; (void)emG; (void)emB; return -1;
-}
-void* rae_gb_sdf_pipeline(void)   { return (void*)0; }
-void* rae_gb_sdf_bind(int64_t gi) { (void)gi; return (void*)0; }
-void rae_ext_Gbuffer_sdfShutdown(void) {}
+const char* rae_gb_sdf_wgsl(void) { return ""; }
 const char* rae_gb_view_wgsl(void)  { return ""; }
 int64_t rae_g2d_format(void)        { return 0; }
 void rae_ext_Gbuffer_present(void* texture, int64_t width, int64_t height) { (void)texture; (void)width; (void)height; }

@@ -64,6 +64,7 @@ open gpu/GpuIds
 open Gpu2dCanvas
 open MeshStore
 open SkinStore
+open GbufferSdf
 open GbufferNative
 open GbufferResources
 
@@ -144,6 +145,7 @@ type GbufferCache {
   terrainBlend: Float
   meshes: MeshStore  # #905: the static mesh store (vertex/index buffers per MeshHandle)
   skins: SkinStore  # #921: the skinned meshes + the joint palette buffer
+  sdf: SdfPassCache  # #922: the metaball clusters' pipeline / uniforms / binds
 }
 
 func createGbufferCache() pub ret GbufferCache {
@@ -176,6 +178,7 @@ func createGbufferCache() pub ret GbufferCache {
       terrainBlend: 0.0
       meshes: createMeshStore()
       skins: createSkinStore()
+      sdf: createSdfPassCache()
     }
   }
 }
@@ -227,6 +230,7 @@ func begin(
     ret
   }
   cache.drawCount = 0
+  sdfFrameReset(sdf: cache.sdf)
   # A: octahedral normal + shading mode. (0.5, 0.5) decodes to +Z, mode 0 = lit.
   # B: albedo, cleared to the sky/background colour.
   # C: material/motion. Motion clears to the biased zero (no movement).
@@ -272,10 +276,7 @@ func begin(
     cache.recording = own opened
   }
   # Every draw binds its own pipeline + group (gbIssueInstanced), so the pass
-  # opens with nothing bound; the C-prepared SDF draw binds its own too.
-  if gbufferFrameActive(cache: cache) {
-    gbSetFrameOpen(open: 1)
-  }
+  # opens with nothing bound; the SDF draw binds its own too.
 }
 
 # The frame uniform's data is C math (jitter + previous view-projection,
@@ -459,61 +460,8 @@ func gbMeshIcount(cache: view GbufferCache, mesh: copy Int) ret Int {
   ret meshStoreIndexCount(store: cache.meshes, mesh: mesh)
 }
 
-func drawMetaballs(
-  cache: view GbufferCache
-  packedBalls: copy Ptr
-  count: copy Int
-  packedColors: copy Ptr
-  smoothing: copy Float
-  camX: copy Float
-  camY: copy Float
-  camZ: copy Float
-  metallic: copy Float
-  roughness: copy Float
-  emR: copy Float
-  emG: copy Float
-  emB: copy Float
-) pub {
-  unsafe {
-    let gi: Int = gbSdfPrepare(
-      packedBalls: packedBalls
-      count: count
-      packedColors: packedColors
-      smoothing: smoothing
-      camX: camX
-      camY: camY
-      camZ: camZ
-      metallic: metallic
-      roughness: roughness
-      emR: emR
-      emG: emG
-      emB: emB
-    )
-    if gi < 0 {
-      ret
-    }
-    let pass: Ptr = cache.pass
-    if pass is webgpuNull() {
-      ret
-    }
-    wgpuRenderPassEncoderSetPipeline(renderPassEncoder: pass, pipeline: gbSdfPipeline())
-    wgpuRenderPassEncoderSetBindGroup(
-      renderPassEncoder: pass
-      groupIndex: 0 as UInt32
-      group: gbSdfBind(gi: gi)
-      dynamicOffsetCount: 0 as UInt64
-      dynamicOffsets: webgpuNull()
-    )
-    wgpuRenderPassEncoderDraw(
-      renderPassEncoder: pass
-      vertexCount: 3 as UInt32
-      instanceCount: 1 as UInt32
-      firstVertex: 0 as UInt32
-      firstInstance: 0 as UInt32
-    )
-    # No restore: every G-buffer draw binds its own pipeline + group (#912).
-  }
-}
+# drawMetaballs (the metaball clusters into the open pass) lives in
+# GbufferSdf.rae since #922, over the cache's SdfPassCache.
 
 # #920: present copies the canvas-owned offscreen texture (borrowed by C).
 func nativePresent(texture: Ptr, width: Int, height: Int) unsafe extern("rae_ext_Gbuffer_present")
@@ -724,7 +672,6 @@ func end(cache: mod GbufferCache, resources: mod GpuResources) pub {
     endRenderPass(pass: cache.pass)
     cache.pass = webgpuNull()
   }
-  gbSetFrameOpen(open: 0)
   if let recording: mod Recording => cache.recording {
     recordRenderPipelineUse(recording: recording, resources: resources, id: cache.staticPipeline)
     recordRenderPipelineUse(recording: recording, resources: resources, id: cache.skinPipeline)
@@ -732,6 +679,7 @@ func end(cache: mod GbufferCache, resources: mod GpuResources) pub {
     recordBindGroupUse(recording: recording, resources: resources, id: cache.staticBind)
     recordBindGroupUse(recording: recording, resources: resources, id: cache.skinBind)
     recordBindGroupUse(recording: recording, resources: resources, id: cache.terrainBind)
+    sdfRecordUses(sdf: cache.sdf, recording: recording, resources: resources)
     let tracked: opt SubmissionId = trackSubmission(
       inFlight: cache.inFlight
       resources: resources
@@ -827,6 +775,7 @@ func gbufferShutdown(cache: mod GbufferCache, resources: mod GpuResources) pub {
   retireBuffer(resources: resources, id: cache.frameUniform)
   retireBuffer(resources: resources, id: cache.draws)
   retireTargets(cache: cache, resources: resources)
+  sdfShutdown(sdf: cache.sdf, resources: resources)
   cache.staticBind = noBindGroupId()
   cache.skinBind = noBindGroupId()
   cache.staticPipeline = noRenderPipelineId()
