@@ -11,6 +11,7 @@
 # still opened in Rae over the bindings and submitted on the shared queue
 # (gbSubmit) so graph order is preserved; the draw is recorded from the IDs.
 import String
+open Gpu2dCanvas
 open Gbuffer
 open Scene3d
 open Vec3
@@ -187,10 +188,14 @@ func ensureCompositeObjects(cache: mod CompositePassCache, resources: mod GpuRes
 func composite(
   cache: mod CompositePassCache
   resources: mod GpuResources
+  canvas: mod Gpu2dCanvas
   exposure: copy Float
   grade: view ColorGrade
 ) pub {
   if gbDeferredPrepare() is 0 {
+    ret
+  }
+  if not canvasEnsureOffscreen(canvas: canvas) {
     ret
   }
   ensureCompositeObjects(cache: cache, resources: resources)
@@ -289,7 +294,7 @@ func composite(
         resources: resources
         pipeline: cache.pipeline
         bind: bind
-        target: g2dOffView()
+        target: canvasOffscreenView(canvas: canvas)
       )
     }
   }
@@ -300,11 +305,13 @@ func composite(
 func compositePass(
   cache: mod CompositePassCache
   resources: mod GpuResources
+  canvas: mod Gpu2dCanvas
   exposure: view Float
 ) pub {
   composite(
     cache: cache
     resources: resources
+    canvas: canvas
     exposure: exposure
     grade: neutralGrade()
   )
@@ -314,12 +321,14 @@ func compositePass(
 func compositePassGraded(
   cache: mod CompositePassCache
   resources: mod GpuResources
+  canvas: mod Gpu2dCanvas
   exposure: view Float
   grade: view ColorGrade
 ) pub {
   composite(
     cache: cache
     resources: resources
+    canvas: canvas
     exposure: exposure
     grade: grade
   )

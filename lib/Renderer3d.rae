@@ -26,6 +26,7 @@
 # headless screenshots (RAE_FIXED_DT + RAE_HEADLESS_FRAMES).
 open Rendergraph
 open Scene3d
+open Gpu2dCanvas
 open Gpu3d
 
 # ----- pass tags (renderer-owned; opaque to the graph) ----------------
@@ -601,6 +602,7 @@ func compileRenderer(r: mod Renderer3d) pub ret Int {
 # this call rather than captured state, because passes cannot carry closures.
 func renderFrameWorld(
   r: view Renderer3d
+  canvas: mod Gpu2dCanvas
   world: view World3d
   camera: view Camera3d
   light: view Light3d
@@ -627,10 +629,10 @@ func renderFrameWorld(
       taaPass()
     }
     if tag is tagTonemap {
-      tonemapPass()
+      tonemapPass(canvas: canvas)
     }
     if tag is tagPresent {
-      endFrame()
+      endFrame(canvas: canvas)
     }
     i = i + 1
   }

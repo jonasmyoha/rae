@@ -238,11 +238,16 @@ func g3dTonemapPending() ret Int {
   }
 }
 
-func nativeG3dPresentFrame() unsafe extern("rae_g3d_present_frame")
+# #920: present copies the canvas-owned offscreen texture (borrowed here).
+func nativeG3dPresentFrame(
+  texture: Ptr
+  width: Int
+  height: Int
+) unsafe extern("rae_g3d_present_frame")
 
-func g3dPresentFrame() {
+func g3dPresentFrame(texture: copy Ptr, width: copy Int, height: copy Int) {
   unsafe {
-    nativeG3dPresentFrame()
+    nativeG3dPresentFrame(texture: texture, width: width, height: height)
   }
 }
 

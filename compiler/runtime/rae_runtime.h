@@ -934,8 +934,11 @@ const char* rae_gb_skin_wgsl(void);
 /* G-buffer inspector built in Rae (#503). */
 const char* rae_gb_view_wgsl(void);
 int64_t rae_g2d_format(void);
-void* rae_g2d_off_view(void);
-int64_t rae_g2d_off_view_ready(void);
+/* #920: the presentable target is the Rae canvas's texture; C reports the
+ * configured surface and borrows the texture for present / readback. */
+int64_t rae_g2d_surface_ready(void);
+int64_t rae_g2d_surface_width(void);
+int64_t rae_g2d_surface_height(void);
 /* Deferred passes migrated to Rae (#504): composite first. */
 int64_t rae_gb_deferred_prepare(void);
 const char* rae_gb_composite_wgsl(void);
@@ -1008,7 +1011,7 @@ int64_t rae_sm_caster_key(int64_t i);
 void rae_sm_draw_metaballs(int64_t c, void* passptr);
 /* gpu2d frame lifecycle in Rae (#504). */
 void rae_g2d_frame_reset(void);
-void rae_g2d_present_and_cleanup(void);
+void rae_g2d_present(void* texture, int64_t width, int64_t height);
 void rae_g2d_tick(void);
 /* #915: the design->physical transform (8 floats = 2*vec4) the canvas writes
  * into its viewport uniform each flush; batches, clips and scissor are Rae. */
@@ -1050,7 +1053,7 @@ int   rae_g3d_tonemap_prepare(void);
 void* rae_g3d_tonemap_pipeline(void);
 void* rae_g3d_tonemap_bind(int64_t slot);
 int64_t rae_g3d_tonemap_pending(void);
-void  rae_g3d_present_frame(void);
+void  rae_g3d_present_frame(void* texture, int64_t width, int64_t height);
 int   rae_g3d_taa_prepare(void);
 void* rae_g3d_taa_pipeline(void);
 void* rae_g3d_taa_bind(int64_t slot);
