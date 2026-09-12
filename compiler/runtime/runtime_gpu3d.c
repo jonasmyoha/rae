@@ -54,17 +54,25 @@
  * live in that slot. `RAE_NO_TAA=1` disables it for A/B comparison.
  */
 
-/* Shadows (#382) live in runtime_gpu3d_shadow.c, which is included AFTER
- * this file because it reads this file's mesh tables. The scene pipeline
- * needs its texture and sampler at bind-group creation time, hence these
- * forward declarations. */
-static void g3d_shadow_init(void);
-static void g3d_shadow_ensure_targets(int res, int layers);
-static WGPUTextureView g3d_sm_array_view;
-static WGPUSampler     g3d_sm_sampler;
-static WGPUBuffer      g3d_sm_frame_ubuf;
-#define G3D_SHADOW_DEFAULT_RES 2048
-#define G3D_SHADOW_DEFAULT_CASCADES 3
+/* The shadow cascades are the renderer's Rae ShadowCache (#925). The forward
+ * scene + skin binds sample them, so Rae hands the three handles (the 320-byte
+ * shadow frame uniform, the cascade array view, the comparison sampler) to C
+ * BORROWED — the ShadowCache owns them and pushes them again whenever its
+ * targets are recreated; a bind built over the old ones is rebuilt (gen). */
+static WGPUBuffer      g3d_shadow_in_ubuf = NULL;
+static WGPUTextureView g3d_shadow_in_view = NULL;
+static WGPUSampler     g3d_shadow_in_sampler = NULL;
+static int             g3d_shadow_in_gen = 0;
+static void g3d_skin_drop_bind(void);
+void rae_g3d_set_shadow_inputs(void* frame_ubuf, void* array_view, void* sampler) {
+    if ((WGPUBuffer)frame_ubuf == g3d_shadow_in_ubuf && (WGPUTextureView)array_view == g3d_shadow_in_view
+        && (WGPUSampler)sampler == g3d_shadow_in_sampler) return;
+    g3d_shadow_in_ubuf = (WGPUBuffer)frame_ubuf;
+    g3d_shadow_in_view = (WGPUTextureView)array_view;
+    g3d_shadow_in_sampler = (WGPUSampler)sampler;
+    g3d_shadow_in_gen++;
+    g3d_skin_drop_bind();
+}
 
 #define G3D_MAX_DRAWS  4096
 #define G3D_DRAW_FLOATS 40  /* mat4 model + mat4 prevModel + baseColor+metallic + emissive+roughness */
@@ -614,24 +622,30 @@ static void g3d_init_pipeline(void) {
     sd.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
     g3d_draw_sbuf = wgpuDeviceCreateBuffer(g_wgpu_dev, &sd);
 
-    /* Shadow targets are created EAGERLY at a fixed size, before the bind
-     * group that references them. Recreating them later would invalidate
-     * this bind group, and resolution is a tier knob (#385) rather than
-     * something that changes mid-run. */
-    g3d_shadow_init();
-    g3d_shadow_ensure_targets(G3D_SHADOW_DEFAULT_RES, G3D_SHADOW_DEFAULT_CASCADES);
+}
 
+/* The scene bind over the borrowed shadow inputs (#925): built once they are
+ * set, rebuilt when the ShadowCache hands over new ones (its targets were
+ * recreated), absent — and the frame not ready — until then. */
+static int g3d_bind_gen = -1;
+static void g3d_ensure_bind(void) {
+    if (!g3d_pipeline || !g3d_frame_ubuf || !g3d_draw_sbuf) return;
+    if (g3d_bind && g3d_bind_gen == g3d_shadow_in_gen) return;
+    if (g3d_bind) { wgpuBindGroupRelease(g3d_bind); g3d_bind = NULL; }
+    if (!g3d_shadow_in_ubuf || !g3d_shadow_in_view || !g3d_shadow_in_sampler) return;
     WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g3d_pipeline, 0);
     WGPUBindGroupEntry e[5]; memset(e, 0, sizeof(e));
     e[0].binding = 0; e[0].buffer = g3d_frame_ubuf; e[0].size = 288;
-    e[1].binding = 1; e[1].buffer = g3d_draw_sbuf;  e[1].size = sd.size;
-    e[2].binding = 2; e[2].buffer = g3d_sm_frame_ubuf; e[2].size = 320;
-    e[3].binding = 3; e[3].textureView = g3d_sm_array_view;
-    e[4].binding = 4; e[4].sampler = g3d_sm_sampler;
+    e[1].binding = 1; e[1].buffer = g3d_draw_sbuf;
+    e[1].size = (uint64_t)G3D_MAX_DRAWS * G3D_DRAW_FLOATS * sizeof(float);
+    e[2].binding = 2; e[2].buffer = g3d_shadow_in_ubuf; e[2].size = 320;
+    e[3].binding = 3; e[3].textureView = g3d_shadow_in_view;
+    e[4].binding = 4; e[4].sampler = g3d_shadow_in_sampler;
     WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
     bgd.layout = bgl; bgd.entryCount = 5; bgd.entries = e;
     g3d_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
     wgpuBindGroupLayoutRelease(bgl);
+    g3d_bind_gen = g3d_shadow_in_gen;
 }
 
 static void g3d_init_tonemap_pipeline(void) {
@@ -808,6 +822,8 @@ static void g3d_ensure_targets(void) {
 int rae_g3d_frame_prepare(const float* frame, int64_t count){
     if (!g_wgpu_dev || !g_g2d_surface || !frame || count < 36) return 0;
     g3d_init_pipeline();
+    g3d_ensure_bind();
+    if (!g3d_bind) return 0;   /* the ShadowCache has not handed over its inputs yet */
     g3d_ensure_targets();
     if (!g3d_hdr_view || !g3d_depth_view || !g3d_normal_view || !g3d_velocity_view || !g3d_ambient_view) return 0;
     /* Halton offsets are in [0,1); recentre to [-0.5,0.5) pixels, then

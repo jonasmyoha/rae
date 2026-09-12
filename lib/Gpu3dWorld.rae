@@ -11,6 +11,9 @@
 # encoding (drawMetaballs / shadowMetaballs) still lives there, reached through
 # `import gpu3d`. #795 (111_metaballs_forward) is the first consumer.
 open Gpu3d
+open ShadowMaps
+open ShadowMapsSdf
+open gpu/GpuResources
 open Scene3d
 open Vec3
 open ecs/Entity
@@ -91,7 +94,11 @@ func renderSceneSdfWorld(world: view World3d) pub {
 # The World3d twin of renderSceneShadowSdf: fill the shadow cascades with the same
 # metaball clusters, so a blob casts a shadow that matches the shape the scene pass
 # raymarched. Cluster discovery mirrors renderSceneSdfWorld exactly.
-func renderSceneShadowSdfWorld(world: view World3d) pub {
+func renderSceneShadowSdfWorld(
+  shadow: mod ShadowCache
+  resources: mod GpuResources
+  world: view World3d
+) pub {
   let count: Int = componentCount(this: world.sdfs)
   if count is 0 {
     ret
@@ -135,7 +142,13 @@ func renderSceneShadowSdfWorld(world: view World3d) pub {
           }
         }
         if ballCount > 0 {
-          shadowMetaballs(packedBalls: packed.data, count: ballCount, smoothing: head.smoothing)
+          shadowMetaballs(
+            shadow: shadow
+            resources: resources
+            packedBalls: packed
+            count: ballCount
+            smoothing: head.smoothing
+          )
         }
       }
     }

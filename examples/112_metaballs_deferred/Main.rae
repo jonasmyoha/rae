@@ -77,17 +77,6 @@ type DemoUiResource {
   appliedRevision: Int
 }
 
-# The shadow casters resolve their meshes in the renderer's store (#905).
-func renderSceneShadowWorldWith(renderer: mod DeferredRenderer, world: view World3d) {
-  if let resources: view GpuResources => renderer.gpuResources {
-    Gpu3d.renderSceneShadowWorld(
-      meshes: renderer.passes.gbuffer.meshes
-      resources: resources
-      world: world
-    )
-  }
-}
-
 func uploadMeshData(renderer: mod DeferredRenderer, mesh: view MeshData) ret MeshHandle {
   ret uploadMesh(
     renderer: renderer
@@ -736,7 +725,7 @@ func main() ret Int {
             lambda: 0.7
             backExtent: 30.0
           )
-          beginShadowPass(c: cascades)
+          beginShadowPass(renderer: renderer, c: cascades)
           # SHADOWS OFF means filling no cascades. renderer_deferred's note says
           # an app that skips the shadow pass renders unshadowed, which is what a
           # frame with no shadow pass should look like — so the toggle is simply
@@ -744,21 +733,21 @@ func main() ret Int {
           if settings.shadows {
             if uiState.activeScene is 1 {
               renderSceneShadowWorldWith(renderer: renderer, world: asset1.world)
-              renderSdfShadow(world: asset1.world, tags: clusters1)
+              renderSdfShadow(renderer: renderer, world: asset1.world, tags: clusters1)
             }
             if uiState.activeScene is 2 {
               renderSceneShadowWorldWith(renderer: renderer, world: asset2.world)
-              renderSdfShadow(world: asset2.world, tags: clusters2)
+              renderSdfShadow(renderer: renderer, world: asset2.world, tags: clusters2)
             }
             if uiState.activeScene is 3 {
               renderSceneShadowWorldWith(renderer: renderer, world: asset3.world)
-              renderSdfShadow(world: asset3.world, tags: clusters3)
+              renderSdfShadow(renderer: renderer, world: asset3.world, tags: clusters3)
             }
           }
-          endShadowPass()
+          endShadowPass(renderer: renderer)
           if shadowLogged is false {
             log(
-              "[shadow] casters {shadowCasterCount()}, {cascades.count} cascades at {cascades.resolution}"
+              "[shadow] casters {shadowCasterCount(renderer: renderer)}, {cascades.count} cascades at {cascades.resolution}"
             )
             shadowLogged = true
           }

@@ -63,6 +63,18 @@
 #   rae_gb_deferred_prepare keeps only the device/surface check + the shadow defaults, the WGSL sources
 #   are read through rae_gb_{light,taa,pyr_from_depth,pyr_reduce}_wgsl, rae_wgpu_have_rg11b10 is the lit
 #   format capability, and rae_gb_shadow_{frame_ubuf,array_view,sampler} stay until #925 — for the record.)
+# (#925 slice 3b-ii: the cascaded SHADOW MAPS are the renderer's Rae ShadowCache (lib/ShadowMaps.rae +
+#   lib/ShadowMapsSdf.rae on RenderPasses.shadow / Renderer3d.shadow): the depth array texture + layer /
+#   array views + comparison sampler (new manager support in gpu/GpuTextures), the static / skinned /
+#   metaball depth-only pipelines (gpu/GpuRenderDepth over the C-kept rae_sm_wgsl_{static,skinned,sdf}
+#   sources), the per-cascade uniforms, binds, caster queue, the 320-byte shadow frame uniform (incl.
+#   shadowCfg + the ambient knob) and the per-cascade depth passes (beginRenderPassMulti, depth-only);
+#   the lighting bind names its IDs. rae_sm_{begin,queue_mesh,queue_skinned,record_metaballs,shutdown,
+#   ready,upload_models,set_shadow_ambient,cascade_count,draw_count,layer_view,caster_*,draw_metaballs},
+#   rae_gb_shadow_{frame_ubuf,frame_bytes,array_view,sampler} and C's g3d_sm_* state are gone;
+#   rae_g3d_set_shadow_inputs(ubuf, view, sampler) hands the FORWARD scene / skin binds the three
+#   inputs BORROWED (the Renderer3d pushes them before its scene pass; C rebuilds the binds on change)
+#   and rae_gb_deferred_prepare is the device/surface check only — for the record.)
 # (#922 slice b-i: the deferred METABALL clusters are Rae manager objects on the GbufferCache
 #   (lib/GbufferSdf.rae: pipeline over the C-kept rae_gb_sdf_wgsl, frame uniform from the cache's frame
 #   data — inverse of the JITTERED viewProj computed in Rae — per-cluster ball/colour/param buffers +
