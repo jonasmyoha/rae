@@ -36,6 +36,7 @@
 #include "ast.h"
 #include "pretty.h"
 #include "rae_format.h"
+#include "../build/version_gen.h"
 #include "c_backend.h"
 #include "sema.h"
 #include "mangler.h"
@@ -2258,6 +2259,7 @@ static void print_usage(const char* prog) {
           "                  current directory and download Roboto-Regular.ttf into\n");
   fprintf(stderr,
           "                  assets/. Idempotent — never overwrites existing files.\n");
+  fprintf(stderr, "  --version, -v   Print the compiler version (--json for tooling)\n");
 }
 
 static void dump_tokens(const TokenList* tokens) {
@@ -2305,6 +2307,39 @@ static void print_json_string(Str value) {
     }
   }
   putchar('"');
+}
+
+/* #930: `rae --version` / `-v`, plain and `--json`. RAE_* come from the
+ * generated build/version_gen.h (VERSION file + git state at build time —
+ * see tools/gen-version-header.sh and docs/versioning-and-toolchain.md §1). */
+static void print_version(bool json) {
+  char version[160];
+  const char* dirty_suffix = RAE_GIT_DIRTY ? "+dirty" : "";
+  if (RAE_IS_RELEASE) {
+    snprintf(version, sizeof(version), "%s%s", RAE_VERSION_BASE, dirty_suffix);
+  } else {
+    snprintf(version, sizeof(version), "%s-dev.%d%s", RAE_VERSION_BASE, RAE_COMMITS_SINCE_TAG,
+             dirty_suffix);
+  }
+  if (json) {
+    printf("{\n");
+    printf("  \"version\": ");
+    print_json_string(str_from_cstr(version));
+    printf(",\n");
+    printf("  \"tag\": ");
+    print_json_string(str_from_cstr(RAE_GIT_TAG));
+    printf(",\n");
+    printf("  \"commit\": ");
+    print_json_string(str_from_cstr(RAE_GIT_COMMIT));
+    printf(",\n");
+    printf("  \"date\": ");
+    print_json_string(str_from_cstr(RAE_GIT_DATE));
+    printf(",\n");
+    printf("  \"dirty\": %s\n", RAE_GIT_DIRTY ? "true" : "false");
+    printf("}\n");
+  } else {
+    printf("rae %s (%s %s)\n", version, RAE_GIT_COMMIT, RAE_GIT_DATE);
+  }
 }
 
 static void dump_raepack(const RaePack* pack) {
@@ -4303,6 +4338,11 @@ int main(int argc, char** argv) {
   }
 
   const char* cmd = argv[1];
+  if (strcmp(cmd, "--version") == 0 || strcmp(cmd, "-v") == 0) {
+    bool json = (argc >= 3 && strcmp(argv[2], "--json") == 0);
+    print_version(json);
+    return 0;
+  }
   if ((strcmp(cmd, "lex") == 0 || strcmp(cmd, "parse") == 0 || strcmp(cmd, "format") == 0 ||
        strcmp(cmd, "run") == 0 || strcmp(cmd, "pack") == 0 || strcmp(cmd, "build") == 0 ||
        strcmp(cmd, "watch") == 0)) {
