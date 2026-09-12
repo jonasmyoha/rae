@@ -47,19 +47,3 @@ func gbRenderScale() ret Float64 {
     ret nativeGbRenderScale()
   }
 }
-
-# The shadow cascades (still C until #925): the 320-byte shadow frame uniform,
-# the depth array view and the comparison sampler the lighting pass adopts.
-func gbShadowFrameUbuf() unsafe extern("rae_gb_shadow_frame_ubuf") ret Ptr
-
-func nativeGbShadowFrameBytes() unsafe extern("rae_gb_shadow_frame_bytes") ret Int
-
-func gbShadowFrameBytes() ret Int {
-  unsafe {
-    ret nativeGbShadowFrameBytes()
-  }
-}
-
-func gbShadowArrayView() unsafe extern("rae_gb_shadow_array_view") ret Ptr
-
-func gbShadowSampler() unsafe extern("rae_gb_shadow_sampler") ret Ptr

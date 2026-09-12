@@ -36,12 +36,8 @@ int64_t rae_g2d_format(void)        { return 0; }
 void rae_ext_Gbuffer_present(void* texture, int64_t width, int64_t height) { (void)texture; (void)width; (void)height; }
 void rae_ext_Gbuffer_shutdown(void) {}
 
-/* The post passes are Rae manager objects (#923); C keeps the WGSL sources,
- * the deferred prepare and the shadow inputs (until #925). */
-void* rae_gb_shadow_frame_ubuf(void)   { return (void*)0; }
-int64_t rae_gb_shadow_frame_bytes(void){ return 320; }
-void* rae_gb_shadow_array_view(void)   { return (void*)0; }
-void* rae_gb_shadow_sampler(void)      { return (void*)0; }
+/* The post passes are Rae manager objects (#923); C keeps the WGSL sources
+ * and the deferred prepare. */
 const char* rae_gb_ao_wgsl(void)   { return ""; }
 const char* rae_gb_light_wgsl(void)          { return ""; }
 const char* rae_gb_taa_wgsl(void)            { return ""; }
@@ -50,36 +46,14 @@ const char* rae_gb_pyr_reduce_wgsl(void)     { return ""; }
 int64_t rae_gb_deferred_prepare(void)        { return 0; }
 const char* rae_gb_composite_wgsl(void)      { return ""; }
 
-/* Shadows (#382). Stubbed for builds without the GPU backend. */
-void rae_sm_begin(const float* cascades, int64_t count, int64_t resolution,
-                               const float* splits, const float* texelWorld,
-                               const float* depthRange){
-    (void)cascades; (void)count; (void)resolution; (void)splits; (void)texelWorld;
-    (void)depthRange;
+/* Shadows (#382/#925): the ShadowCache is Rae; C keeps the WGSL and the forward
+ * binds' borrowed inputs. Stubbed for builds without the GPU backend. */
+const char* rae_sm_wgsl_static(void)  { return ""; }
+const char* rae_sm_wgsl_skinned(void) { return ""; }
+const char* rae_sm_wgsl_sdf(void)     { return ""; }
+void rae_g3d_set_shadow_inputs(void* frame_ubuf, void* array_view, void* sampler) {
+    (void)frame_ubuf; (void)array_view; (void)sampler;
 }
-void rae_sm_queue_mesh(int64_t mesh, void* vbuf, void* ibuf, int64_t icount, rae_Mat4* model){ (void)mesh; (void)vbuf; (void)ibuf; (void)icount; (void)model; }
-void rae_sm_queue_skinned(int64_t mesh, void* vbuf, void* ibuf, int64_t icount, void* palette, rae_Mat4* model, int64_t paletteBase){
-    (void)mesh; (void)vbuf; (void)ibuf; (void)icount; (void)palette; (void)model; (void)paletteBase;
-}
-void rae_sm_record_metaballs(const float* packedBalls, int64_t count, float smoothing){
-    (void)packedBalls; (void)count; (void)smoothing;
-}
-/* draw count exposed via rae_sm_draw_count (#514). */
-/* Shadow cascade render moved to Rae (#504); accessors no-op without a GPU. */
-int64_t rae_sm_ready(void)               { return 0; }
-void rae_sm_upload_models(void)          {}
-int64_t rae_sm_cascade_count(void)       { return 0; }
-int64_t rae_sm_draw_count(void)          { return 0; }
-void* rae_sm_layer_view(int64_t c)       { (void)c; return (void*)0; }
-int64_t rae_sm_caster_ready(int64_t i, int64_t c) { (void)i; (void)c; return 0; }
-void* rae_sm_caster_pipeline(int64_t i)  { (void)i; return (void*)0; }
-void* rae_sm_caster_bind(int64_t i, int64_t c) { (void)i; (void)c; return (void*)0; }
-void* rae_sm_caster_vbuf(int64_t i)      { (void)i; return (void*)0; }
-void* rae_sm_caster_ibuf(int64_t i)      { (void)i; return (void*)0; }
-int64_t rae_sm_caster_icount(int64_t i)  { (void)i; return 0; }
-int64_t rae_sm_caster_key(int64_t i)     { (void)i; return -1; }
-void rae_sm_draw_metaballs(int64_t c, void* passptr) { (void)c; (void)passptr; }
-void rae_sm_shutdown(void) {}
 
 /* Skinning (#374). Stubbed for builds without the GPU backend. */
 int rae_g3d_push_skinned_draw(int64_t mesh, rae_Mat4* model,

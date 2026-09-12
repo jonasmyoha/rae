@@ -3,8 +3,6 @@
 # skin wrappers that hand the Rae passes their C-owned handles (views,
 # pipelines, bind groups, buffers, counters). Nothing here is app-facing; the
 # frame API (beginScene / draw / end / submit, the passes) stays in Gpu3d.
-open Shadow3d
-import GbufferShadow
 open Sky
 import Math
 open Vec3
@@ -302,101 +300,20 @@ func g3dSkyPipeline() unsafe extern("rae_g3d_sky_pipeline") ret Ptr
 func g3dSkyBind() unsafe extern("rae_g3d_sky_bind") ret Ptr
 
 # ----- shadows (#382) -------------------------------------------------
-# Cascaded shadow maps for the sun. The cascade FIT is in lib/shadow3d.rae
-# (pure arithmetic, unit-tested); these only move it to the GPU and
-# rasterise the casters.
-# The shadow-map feed (cascade uniforms + draw queue) is bookkeeping, not a pass
-# encoder — the shadow render itself is in Rae (GbufferShadow.shadowEnd, #504).
-# So these bind the shadow-map C helpers under the rae_sm_* prefix (#514), the
-# same prefix the shadow accessors already use.
-func shadowBegin(
-  cascades: view Buffer(Float)
-  count: Int
-  resolution: Int
-  splits: view Buffer(Float)
-  texelWorld: view Buffer(Float)
-  depthRange: view Buffer(Float)
-) unsafe extern("rae_sm_begin")
+# The cascades are the renderer's Rae ShadowCache (lib/ShadowMaps.rae, #925).
+# The forward scene / skin binds still sample them from C, so Rae hands the
+# three inputs over BORROWED: the shadow frame uniform, the cascade array view
+# and the comparison sampler. Pushed each frame (Renderer3d.beginSceneWith); C
+# rebuilds its binds when they change.
+func nativeSetShadowInputs(
+  frameUbuf: Ptr
+  arrayView: Ptr
+  sampler: Ptr
+) unsafe extern("rae_g3d_set_shadow_inputs")
 
-func nativeShadowDraw(
-  mesh: Int
-  vbuf: Ptr
-  ibuf: Ptr
-  icount: Int
-  model: view Mat4
-) unsafe extern("rae_sm_queue_mesh")
-
-func shadowDraw(
-  mesh: copy Int
-  vbuf: copy Ptr
-  ibuf: copy Ptr
-  icount: copy Int
-  model: view Mat4
-) {
+func setShadowInputs(frameUbuf: copy Ptr, arrayView: copy Ptr, sampler: copy Ptr) unsafe {
   unsafe {
-    nativeShadowDraw(
-      mesh: mesh
-      vbuf: vbuf
-      ibuf: ibuf
-      icount: icount
-      model: model
-    )
-  }
-}
-
-# #921: a skinned caster by its SkinStore handles; `palette` is the store's
-# palette buffer, borrowed by the C shadow pass for its skin bind.
-func nativeShadowDrawSkinned(
-  mesh: Int
-  vbuf: Ptr
-  ibuf: Ptr
-  icount: Int
-  palette: Ptr
-  model: view Mat4
-  paletteBase: Int
-) unsafe extern("rae_sm_queue_skinned")
-
-func shadowDrawSkinned(
-  mesh: copy Int
-  vbuf: copy Ptr
-  ibuf: copy Ptr
-  icount: copy Int
-  palette: copy Ptr
-  model: view Mat4
-  paletteBase: copy Int
-) unsafe {
-  unsafe {
-    nativeShadowDrawSkinned(
-      mesh: mesh
-      vbuf: vbuf
-      ibuf: ibuf
-      icount: icount
-      palette: palette
-      model: model
-      paletteBase: paletteBase
-    )
-  }
-}
-
-func nativeShadowMetaballs(
-  packedBalls: view Buffer(Float)
-  count: Int
-  smoothing: Float
-) unsafe extern("rae_sm_record_metaballs")
-
-func nativeShadowDrawCount() unsafe extern("rae_sm_draw_count") ret Int
-
-func shadowDrawCount() ret Int {
-  unsafe {
-    ret nativeShadowDrawCount()
-  }
-}
-
-func nativeShadowShutdown() unsafe extern("rae_sm_shutdown")
-
-func shadowShutdown() {
-  unsafe {
-    nativeShadowShutdown()
+    nativeSetShadowInputs(frameUbuf: frameUbuf, arrayView: arrayView, sampler: sampler)
   }
 }
 

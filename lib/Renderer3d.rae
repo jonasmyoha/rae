@@ -31,7 +31,12 @@ open MeshStore
 open SkinStore
 open gpu/GpuResources
 open gpu/GpuIds
+open gpu/GpuRender
 open Gpu3d
+open Gpu3dWorld
+open Gpu3dNative
+open Shadow3d
+open ShadowMaps
 
 # ----- pass tags (renderer-owned; opaque to the graph) ----------------
 const tagScenePass: Int = 1  # 3D raster + depth-integrated SDF geometry
@@ -65,6 +70,7 @@ type Renderer3d {
   gpuResources: opt GpuResources
   meshes: MeshStore
   skins: SkinStore  # #921: the skinned meshes + joint palette of the forward path
+  shadow: ShadowCache  # #925: the sun cascades — targets, pipelines, caster queue, passes
 }
 
 const forwardManagerCapacity: Int = 512
@@ -143,13 +149,83 @@ func renderSceneWorldWith(r: mod Renderer3d, world: view World3d) pub {
 func renderSceneShadowWorldWith(r: mod Renderer3d, world: view World3d) pub {
   ensureRenderer3dResources(r: r)
   if let resources: view GpuResources => r.gpuResources {
-    renderSceneShadowWorld(meshes: r.meshes, resources: resources, world: world)
+    renderSceneShadowWorld(
+      shadow: r.shadow
+      meshes: r.meshes
+      resources: resources
+      world: world
+    )
   }
 }
 
-# Retire the meshes and drop the manager (app shutdown, BEFORE Gpu3d.shutdown).
+# ----- the shadow pass (#925) ------------------------------------------
+# The sun cascades are the renderer's ShadowCache; the app fits them
+# (Shadow3d.fitShadowCascades) and, at tagShadow, opens the pass, queues its
+# casters and closes it.
+func beginShadowPass(r: mod Renderer3d, c: view ShadowCascades) pub {
+  ensureRenderer3dResources(r: r)
+  if let resources: mod GpuResources => r.gpuResources {
+    shadowBegin(shadow: r.shadow, resources: resources, cascades: c)
+  }
+}
+
+func endShadowPass(r: mod Renderer3d) pub {
+  if let resources: mod GpuResources => r.gpuResources {
+    shadowEnd(shadow: r.shadow, resources: resources)
+  }
+}
+
+func shadowCasterCount(r: view Renderer3d) pub ret Int {
+  ret ShadowMaps.shadowCasterCount(shadow: r.shadow)
+}
+
+func setShadowAmbient(r: mod Renderer3d, strength: copy Float) pub {
+  ShadowMaps.setShadowAmbient(shadow: r.shadow, strength: strength)
+}
+
+# The World3d's metaball clusters as casters.
+func renderSceneShadowSdfWorldWith(r: mod Renderer3d, world: view World3d) pub {
+  if let resources: mod GpuResources => r.gpuResources {
+    renderSceneShadowSdfWorld(shadow: r.shadow, resources: resources, world: world)
+  }
+}
+
+# The forward scene + skin binds (still C) SAMPLE the cascades, so before the
+# scene pass the ShadowCache's three inputs are handed to C, borrowed: the
+# default cascade array when no shadow pass ran (never sampled while
+# shadowCfg.x is 0). Pushed every frame — a pointer compare in C — so a
+# recreated cascade array (a resolution change) reaches the binds.
+func beginSceneWith(
+  r: mod Renderer3d
+  camera: view Camera3d
+  light: view Light3d
+  aspect: view Float
+  time: view Float
+) pub {
+  ensureRenderer3dResources(r: r)
+  if let resources: mod GpuResources => r.gpuResources {
+    ensureShadowDefaults(shadow: r.shadow, resources: resources)
+    unsafe {
+      setShadowInputs(
+        frameUbuf: refHandle(resources: resources, ref: bufferRef(id: r.shadow.frameUniform))
+        arrayView: refHandle(resources: resources, ref: textureViewRef(id: r.shadow.arrayView))
+        sampler: refHandle(resources: resources, ref: samplerRef(id: r.shadow.sampler))
+      )
+    }
+  }
+  beginScene(
+    camera: camera
+    light: light
+    aspect: aspect
+    time: time
+  )
+}
+
+# Retire the meshes, the cascades and drop the manager (app shutdown, BEFORE
+# Gpu3d.shutdown).
 func shutdownRenderer3d(r: mod Renderer3d) pub {
   if let resources: mod GpuResources => r.gpuResources {
+    shadowShutdown(shadow: r.shadow, resources: resources)
     meshStoreShutdown(store: r.meshes, resources: resources)
     skinStoreShutdown(store: r.skins, resources: resources)
     meshStoreDropManager(resources: resources)
@@ -428,6 +504,7 @@ func createRenderer3d() pub ret Renderer3d {
       gpuResources: none
       meshes: createMeshStore()
       skins: createSkinStore()
+      shadow: createShadowCache()
     }
   }
 }
@@ -697,6 +774,7 @@ func createRenderer3dWithUi() pub ret Renderer3d {
       gpuResources: none
       meshes: createMeshStore()
       skins: createSkinStore()
+      shadow: createShadowCache()
     }
   }
 }
@@ -713,7 +791,7 @@ func compileRenderer(r: mod Renderer3d) pub ret Int {
 # other tag is scene-independent post-processing. Per-pass inputs arrive through
 # this call rather than captured state, because passes cannot carry closures.
 func renderFrameWorld(
-  r: view Renderer3d
+  r: mod Renderer3d
   canvas: mod Gpu2dCanvas
   world: view World3d
   camera: view Camera3d
@@ -726,7 +804,8 @@ func renderFrameWorld(
     let p: Int = graphIntAt(values: r.graph.order, index: i)
     let tag: Int = graphPassAt(values: r.graph.passes, index: p).tag
     if tag is tagScenePass {
-      beginScene(
+      beginSceneWith(
+        r: r
         camera: camera
         light: light
         aspect: aspect

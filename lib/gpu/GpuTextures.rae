@@ -1,4 +1,5 @@
-# GpuTextures — mip-chained textures and per-mip views on the manager (#923),
+# GpuTextures — mip-chained textures, per-mip views, array textures + layer views
+# and the comparison sampler on the manager (#923, #925),
 # split from gpu/GpuResources for the 1000-line cap. `createTexture` makes a
 # single-mip 2D texture and `createTextureView` its level-0 view; a depth
 # pyramid needs a chain of mips written one level at a time, so this adds a
@@ -112,5 +113,162 @@ func textureViewHandle(resources: view GpuResources, id: view TextureViewId) uns
       ret webgpuNull()
     }
     ret slotHandle(table: resources.textureViews, slot: id.slot)
+  }
+}
+
+# ----- array textures (#925) ------------------------------------------
+# A 2D texture with `layers` array layers (the shadow cascades: one depth
+# layer per cascade), single mip. Rendered into one layer at a time through
+# createTextureViewLayer and sampled as a whole through createTextureViewArray.
+func createTextureArray(
+  resources: mod GpuResources
+  width: view Int
+  height: view Int
+  layers: view Int
+  format: view Int32
+  usage: view UInt64
+) ret opt TextureId {
+  if width < 1 or height < 1 or layers < 1 {
+    ret none
+  }
+  if usage is (0 as UInt64) {
+    ret none
+  }
+  let slot: Int = findFreeSlot(table: resources.textures, capacity: resources.capacity)
+  if slot < 0 {
+    ret none
+  }
+  unsafe {
+    let descriptor: WGPUTextureDescriptor = {
+      usage: usage
+      dimension: WGPUTextureDimension_2D
+      size: {
+        width: width as UInt32
+        height: height as UInt32
+        depthOrArrayLayers: layers as UInt32
+      }
+      format: format
+      mipLevelCount: 1 as UInt32
+      sampleCount: 1 as UInt32
+    }
+    let handle: Ptr = wgpuDeviceCreateTexture(device: webgpuDevice(), descriptor: descriptor)
+    if handle is webgpuNull() {
+      ret none
+    }
+    storeHandle(table: resources.textures, slot: slot, handle: handle)
+  }
+  ret TextureId {
+    managerTag: resources.managerTag
+    slot: slot
+    generation: slotGeneration(table: resources.textures, slot: slot)
+  }
+}
+
+# The view descriptor both array views share; `dimension` is 2D (one layer,
+# a render target) or 2DArray (every layer from `baseLayer`, sampled).
+func makeLayerView(
+  resources: mod GpuResources
+  texture: view TextureId
+  baseLayer: view Int
+  layerCount: view Int
+  dimension: view Int32
+) ret opt TextureViewId {
+  if isValidTexture(resources: resources, id: texture) is false or baseLayer < 0 or layerCount < 1 {
+    ret none
+  }
+  let slot: Int = findFreeSlot(table: resources.textureViews, capacity: resources.capacity)
+  if slot < 0 {
+    ret none
+  }
+  unsafe {
+    let textureHandle: Ptr = slotHandle(table: resources.textures, slot: texture.slot)
+    if baseLayer + layerCount > (wgpuTextureGetDepthOrArrayLayers(texture: textureHandle) as Int) {
+      ret none
+    }
+    let descriptor: WGPUTextureViewDescriptor = {
+      format: wgpuTextureGetFormat(texture: textureHandle)
+      dimension: dimension
+      baseMipLevel: 0 as UInt32
+      mipLevelCount: 1 as UInt32
+      baseArrayLayer: baseLayer as UInt32
+      arrayLayerCount: layerCount as UInt32
+      aspect: WGPUTextureAspect_All
+    }
+    let handle: Ptr = wgpuTextureCreateView(texture: textureHandle, descriptor: descriptor)
+    if handle is webgpuNull() {
+      ret none
+    }
+    storeHandle(table: resources.textureViews, slot: slot, handle: handle)
+  }
+  resources.textureViews.parentSlot.set(index: slot, value: texture.slot)
+  resources.textureViews.parentGeneration.set(index: slot, value: texture.generation)
+  ret TextureViewId {
+    managerTag: resources.managerTag
+    slot: slot
+    generation: slotGeneration(table: resources.textureViews, slot: slot)
+  }
+}
+
+# A 2D view over ONE array layer (a render attachment).
+func createTextureViewLayer(
+  resources: mod GpuResources
+  texture: view TextureId
+  layer: view Int
+) ret opt TextureViewId {
+  ret makeLayerView(
+    resources: resources
+    texture: texture
+    baseLayer: layer
+    layerCount: 1
+    dimension: WGPUTextureViewDimension_2D
+  )
+}
+
+# A 2DArray view over the first `layers` layers (texture_depth_2d_array).
+func createTextureViewArray(
+  resources: mod GpuResources
+  texture: view TextureId
+  layers: view Int
+) ret opt TextureViewId {
+  ret makeLayerView(
+    resources: resources
+    texture: texture
+    baseLayer: 0
+    layerCount: layers
+    dimension: WGPUTextureViewDimension_2DArray
+  )
+}
+
+# A COMPARISON sampler (sampler_comparison, compare Less): the hardware does
+# the depth test and the bilinear filter together, so one
+# textureSampleCompare is a 2x2 PCF tap. Clamp to edge, no mips.
+func createComparisonSampler(resources: mod GpuResources) ret opt SamplerId {
+  let slot: Int = findFreeSlot(table: resources.samplers, capacity: resources.capacity)
+  if slot < 0 {
+    ret none
+  }
+  unsafe {
+    let descriptor: WGPUSamplerDescriptor = {
+      addressModeU: WGPUAddressMode_ClampToEdge
+      addressModeV: WGPUAddressMode_ClampToEdge
+      addressModeW: WGPUAddressMode_ClampToEdge
+      magFilter: WGPUFilterMode_Linear
+      minFilter: WGPUFilterMode_Linear
+      mipmapFilter: WGPUMipmapFilterMode_Nearest
+      lodMinClamp: 0.0
+      lodMaxClamp: 1.0
+      compare: WGPUCompareFunction_Less
+      maxAnisotropy: 1 as UInt16
+    }
+    let handle: Ptr = wgpuDeviceCreateSampler(device: webgpuDevice(), descriptor: descriptor)
+    if handle is webgpuNull() {
+      ret none
+    }
+    storeHandle(table: resources.samplers, slot: slot, handle: handle)
+  }
+  ret SamplerId {
+    managerTag: resources.managerTag
+    slot: slot
+    generation: slotGeneration(table: resources.samplers, slot: slot)
   }
 }
