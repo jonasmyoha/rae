@@ -47,6 +47,12 @@ type UnderwaterParams {
   farDistance: Float  # metres past which the fog is fully saturated
   tintStrength: Float  # near-surface whole-screen tint (0..1)
   tintDepth: Float  # camera depth (m) at which the tint reaches full strength
+  # Sun caustics (#860): the rippling light network on submerged surfaces.
+  causticsOn: Bool  # the body's quality toggle (off -> no caustic contribution)
+  sunDir: Vec3  # direction TOWARD the sun (unit); z <= 0 (below horizon) adds nothing
+  sunColor: Vec3  # the sun colour that tints the caustics (dark sun -> nothing)
+  causticStrength: Float  # peak added radiance of the caustic ridges
+  time: Float  # the wave clock, so the pattern shimmers deterministically
 }
 
 func noUnderwater() ret UnderwaterParams {
@@ -59,6 +65,11 @@ func noUnderwater() ret UnderwaterParams {
     farDistance: 200.0
     tintStrength: 0.0
     tintDepth: 1.0
+    causticsOn: false
+    sunDir: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    sunColor: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+    causticStrength: 0.0
+    time: 0.0
   }
 }
 
@@ -88,8 +99,8 @@ func createUnderwaterPassCache() ret UnderwaterPassCache {
   }
 }
 
-# The uniform: a mat4 (64 B) + four vec4 (64 B).
-const underwaterUniformBytes: Int = 128
+# The uniform: a mat4 (64 B) + six vec4 (96 B) — the last two are #860 caustics.
+const underwaterUniformBytes: Int = 160
 
 func ensureUnderwaterObjects(cache: mod UnderwaterPassCache, resources: mod GpuResources) {
   if cache.pipeMade {
@@ -255,8 +266,26 @@ func underwaterPass(
     writer: cache.args
     x: params.tintStrength
     y: params.tintDepth
-    z: 0.0
+    z: params.time
     w: 0.0
+  )
+  var causticsFlag: Float = 0.0
+  if params.causticsOn {
+    causticsFlag = 1.0
+  }
+  pushVec4F(
+    writer: cache.args
+    x: params.sunDir.x
+    y: params.sunDir.y
+    z: params.sunDir.z
+    w: causticsFlag
+  )
+  pushVec4F(
+    writer: cache.args
+    x: params.sunColor.x
+    y: params.sunColor.y
+    z: params.sunColor.z
+    w: params.causticStrength
   )
   let uploaded: Bool = uploadArgs(
     writer: cache.args

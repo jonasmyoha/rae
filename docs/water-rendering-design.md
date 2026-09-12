@@ -51,7 +51,7 @@ the surface under the camera = `waterHeightAt` (Gerstner) for toon water, the #8
 readback cache (`sampleFftSurface`, 0.5 s max age) for FFT water falling back to the
 STILL level when the sample is unavailable or stale (first frames, a tier change that
 invalidated the cache, a non-primary FFT body); overlap = the body the camera is
-deepest under; crossing = a 3 cm hysteresis band. Caustics are #860. Desktop SSR is in
+deepest under; crossing = a 3 cm hysteresis band. Sun caustics are in (#860): the underwater fog pass (lib/underwaterFog.wgsl) adds a rippling light network on the SUBMERGED reconstructed surfaces — a two-octave ridged value noise (self-contained in the shader) sampled at each submerged world point projected UP the sun ray onto the surface plane (so the pattern sits in world space and every point one refracted shaft lights shares a coordinate), panned by the wave clock, faded by the depth of water above the point and by the Beer-Lambert transmittance to the eye, tinted by the sun colour. It adds nothing where the sun is below the horizon (toSun.z <= 0), on a sky pixel, or on a surface at/above the water line, and is gated by WaterBody.caustics (createOceanRealistic on, useMobileWaterTier and toon lakes off; 118 defaults the lake on and takes RAE_WATER_CAUSTICS=0/1 + RAE_WATER_HOUR). No new pass or resource — a branch in the existing fog fullscreen pass; measured worst case ~2 ms/frame at 2560x1600 with the whole screen submerged. Desktop SSR is in
 (#854): `waterSurface.wgsl` `ssrTrace` marches the reflected view ray (from a normal
 flattened 60% toward up, so the mirror is not shattered by the FFT facets) in world space
 with quadratically growing steps, projects each step through the frame's view-projection

@@ -164,7 +164,13 @@ func main() ret Int {
   toggleCameraRigMode(rig: cameraRig, camera: camera)
   var light: Light3d = defaultLight3d()
 
+  # RAE_WATER_HOUR overrides the start hour (#860): a night hour puts the sun
+  # below the horizon, so the caustics get no light and add nothing.
   var hour: Float = 10.5
+  let hourSetting: String = Sys.getEnv(name: "RAE_WATER_HOUR")
+  if hourSetting.length() > 0 {
+    hour = hourSetting.toFloat()
+  }
   var sky: Sky = skyForHour(hour: hour)
   # Reuse the existing shared-widget font atlas; no per-example asset copies.
   var debugHud: DebugHud = createDebugHud(
@@ -185,6 +191,13 @@ func main() ret Int {
   lake.refraction = 0
   if Sys.getEnv(name: "RAE_WATER_REFRACTION") is "1" {
     lake.refraction = 1
+  }
+  # Sun caustics on submerged surfaces (#860): default ON for the lake so the
+  # underwater screenshot shows the rippling light network; RAE_WATER_CAUSTICS=0
+  # forces it off for the on/off comparison.
+  lake.caustics = 1
+  if Sys.getEnv(name: "RAE_WATER_CAUSTICS") is "0" {
+    lake.caustics = 0
   }
   var waterSystem: WaterSystem = createWaterSystem(renderer: renderer, body: lake)
   # The App-owned GPU manager (#873): water's pipelines, maps and readbacks are
@@ -301,7 +314,12 @@ func main() ret Int {
         if tag is RenderTag.underwater {
           # Underwater fog (#855): which body the camera is in, its surface
           # under the camera (Gerstner here), hysteresis — then the renderer's pass.
-          waterUnderwaterUpdate(waterSystem: waterSystem, renderer: renderer, camera: camera)
+          waterUnderwaterUpdate(
+            waterSystem: waterSystem
+            renderer: renderer
+            camera: camera
+            light: light
+          )
           if waterIsUnderwater(waterSystem: waterSystem) {
             underwaterFrames = underwaterFrames + 1
           }
@@ -325,7 +343,7 @@ func main() ret Int {
 
   if fixedTestFrame {
     log(
-      "[water example] deterministic deferred frame rendered: hour {hour}, 1 island, {cubeCount} boxes, {waterFrames} water frames, {underwaterFrames} underwater frames"
+      "[water example] deterministic deferred frame rendered: hour {hour}, 1 island, {cubeCount} boxes, {waterFrames} water frames, {underwaterFrames} underwater frames, caustics {lake.caustics}"
     )
   }
   if let resources: mod GpuResources => gpuManager {
