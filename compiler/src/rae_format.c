@@ -439,11 +439,12 @@ static void print_rules_json(void) {
 
 /* ---- argument parsing ---- */
 
-static bool parse_cli(int argc, char** argv, FormatCliOptions* options, bool* want_rules) {
+static bool parse_cli(int argc, char** argv, FormatCliOptions* options, bool* want_rules, bool* want_help) {
   memset(options, 0, sizeof(*options));
   options->mode = MODE_WRITE;
   options->check_ast = true;
   *want_rules = false;
+  *want_help = false;
   bool mode_set = false;
 
   options->inputs = malloc((size_t)(argc > 0 ? argc : 1) * sizeof(char*));
@@ -464,6 +465,8 @@ static bool parse_cli(int argc, char** argv, FormatCliOptions* options, bool* wa
       *want_rules = true;
     } else if (strcmp(arg, "--no-ast-check") == 0) {
       options->check_ast = false;
+    } else if (strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0) {
+      *want_help = true;
     } else if (arg[0] == '-') {
       fprintf(stderr, "error: unknown format option '%s'\n", arg);
       return false;
@@ -523,9 +526,28 @@ int rae_format_cli(int argc, char** argv) {
 
   FormatCliOptions options;
   bool want_rules = false;
-  if (!parse_cli(argc, argv, &options, &want_rules)) {
+  bool want_help = false;
+  if (!parse_cli(argc, argv, &options, &want_rules, &want_help)) {
     free((void*)options.inputs);
     return 1;
+  }
+
+  if (want_help) {
+    printf("rae format: canonically format Rae source\n");
+    printf("\n");
+    printf("Usage: rae format [options] <files|dirs>\n");
+    printf("\n");
+    printf("Options:\n");
+    printf("  --check              List unformatted files, exit non-zero if any found\n");
+    printf("  --stdout             Print canonical form to stdout (single input only)\n");
+    printf("  --write, -w          Write canonical form in place (default)\n");
+    printf("  --stdin              Read from stdin, write to stdout\n");
+    printf("  --json               Output results as JSON\n");
+    printf("  --rules --json       Print formatting rules as JSON and exit\n");
+    printf("  --no-ast-check       Skip AST validation during formatting\n");
+    printf("  -h, --help           Show this help message\n");
+    free((void*)options.inputs);
+    return 0;
   }
 
   if (want_rules) {
