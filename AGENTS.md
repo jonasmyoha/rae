@@ -514,6 +514,15 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   release, cannot be silenced by the env var). No pack, or a pack without a
   `rae` block, means no check. A verified build writes the project's `rae.lock`
   `toolchain { version commit }` block. `rae init` scaffolds the requirement.
+- **`rae toolchain` (#932) manages the sibling checkout.** `status` prints this
+  compiler's version + checkout and, inside a project, the pack requirement with
+  a satisfied/UNSATISFIED verdict (exit 1 on unsatisfied — a scriptable
+  `make doctor`); `list` shows the release tags, marking the current one;
+  `use <req>` resolves the newest tag matching `<req>` (or `use main`) in the
+  checkout the compiler was built from — or `$RAE_ROOT` — `git checkout`s it and
+  reruns `make -C compiler build`, refusing when the checkout has uncommitted
+  tracked changes. One checkout moved between tags; side-by-side toolchains are
+  out of scope.
 
 ---
 ## Interaction rules
