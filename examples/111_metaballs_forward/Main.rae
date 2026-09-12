@@ -708,26 +708,26 @@ func main() ret Int {
             lambda: 0.7
             backExtent: 30.0
           )
-          beginShadowPass(c: cascades)
+          beginShadowPass(r: renderer, c: cascades)
           # SHADOWS OFF means filling no cascades — an empty cascade set renders
           # unshadowed, which is what a frame with no shadow pass should look
           # like, and needs no renderer flag.
           if settings.shadows and uiState.activeScene is 1 {
             renderSceneShadowWorldWith(r: renderer, world: scene1.world)
-            renderSceneShadowSdfWorld(world: scene1.world)
+            renderSceneShadowSdfWorldWith(r: renderer, world: scene1.world)
           }
           if settings.shadows and uiState.activeScene is 2 {
             renderSceneShadowWorldWith(r: renderer, world: scene2.world)
-            renderSceneShadowSdfWorld(world: scene2.world)
+            renderSceneShadowSdfWorldWith(r: renderer, world: scene2.world)
           }
           if settings.shadows and uiState.activeScene is 3 {
             renderSceneShadowWorldWith(r: renderer, world: scene3.world)
-            renderSceneShadowSdfWorld(world: scene3.world)
+            renderSceneShadowSdfWorldWith(r: renderer, world: scene3.world)
           }
-          endShadowPass()
+          endShadowPass(r: renderer)
           if shadowLogged is false {
             log(
-              "[shadow] casters {shadowCasterCount()}, {cascades.count} cascades at {cascades.resolution}"
+              "[shadow] casters {shadowCasterCount(r: renderer)}, {cascades.count} cascades at {cascades.resolution}"
             )
             shadowLogged = true
           }
@@ -743,7 +743,8 @@ func main() ret Int {
           # into the same forward pass — the World3d split of what the Scene3d
           # renderScene did in one call. The deferred twin instead writes SDFs to
           # its G-buffer via renderSceneSdfWorld in gbufferWorld.
-          beginScene(
+          beginSceneWith(
+            r: renderer
             camera: camera
             light: light
             aspect: aspect

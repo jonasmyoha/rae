@@ -289,11 +289,16 @@ static void g3d_skin_init_pipeline(void) {
 /* The forward skin bind over the SkinStore palette Rae hands the draw (#921):
  * frame uniform, the per-draw records, ONE palette's worth of the buffer from
  * offset 0 (the forward path never uses per-instance palette bases), and the
- * shadow inputs. Rebuilt when the palette handle changes (a new renderer). */
+ * BORROWED shadow inputs (#925). Rebuilt when the palette handle changes (a new
+ * renderer) and dropped when the ShadowCache hands over new inputs. */
+static void g3d_skin_drop_bind(void) {
+    if (g3d_skin_bind) { wgpuBindGroupRelease(g3d_skin_bind); g3d_skin_bind = NULL; }
+}
 static void g3d_skin_ensure_bind(WGPUBuffer palette) {
     if (!g3d_skin_pipeline || !palette) return;
     if (g3d_skin_bind && g3d_skin_palette_borrowed == palette) return;
-    if (g3d_skin_bind) { wgpuBindGroupRelease(g3d_skin_bind); g3d_skin_bind = NULL; }
+    g3d_skin_drop_bind();
+    if (!g3d_shadow_in_ubuf || !g3d_shadow_in_view || !g3d_shadow_in_sampler) return;
     g3d_skin_palette_borrowed = palette;
     WGPUBindGroupLayout bgl = wgpuRenderPipelineGetBindGroupLayout(g3d_skin_pipeline, 0);
     WGPUBindGroupEntry e[6]; memset(e, 0, sizeof(e));
@@ -302,9 +307,9 @@ static void g3d_skin_ensure_bind(WGPUBuffer palette) {
     e[1].size = (uint64_t)G3D_SKIN_MAX_DRAWS * G3D_SKIN_DRAW_FLOATS * sizeof(float);
     e[2].binding = 2; e[2].buffer = palette;
     e[2].size = (uint64_t)G3D_SKIN_MAX_JOINTS * 12 * sizeof(float);
-    e[3].binding = 3; e[3].buffer = g3d_sm_frame_ubuf; e[3].size = 320;
-    e[4].binding = 4; e[4].textureView = g3d_sm_array_view;
-    e[5].binding = 5; e[5].sampler = g3d_sm_sampler;
+    e[3].binding = 3; e[3].buffer = g3d_shadow_in_ubuf; e[3].size = 320;
+    e[4].binding = 4; e[4].textureView = g3d_shadow_in_view;
+    e[5].binding = 5; e[5].sampler = g3d_shadow_in_sampler;
     WGPUBindGroupDescriptor bgd; memset(&bgd, 0, sizeof(bgd));
     bgd.layout = bgl; bgd.entryCount = 6; bgd.entries = e;
     g3d_skin_bind = wgpuDeviceCreateBindGroup(g_wgpu_dev, &bgd);
