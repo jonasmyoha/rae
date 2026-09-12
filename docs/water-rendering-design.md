@@ -68,7 +68,19 @@ switch is `WaterBody.ssr` / `ssrSteps` (on, 24 steps, for `createOceanRealistic`
 `RAE_WATER_PERF=1` through the new render-pass timestamps (`recordDrawIndexedTimed`,
 `WaterSystem.surfacePerf`) at 2560x1600, 3 cascades of 256, matched camera and sea state:
 the surface draw goes from ~3.6 ms to ~6.0 ms GPU (about +2.4 ms), the FFT compute is
-unchanged (~4 ms). #849 (slice 2) is in: `lib/water/waterFft.wgsl` bakes, once per sea state, the
+unchanged (~4 ms). Jacobian spray is in (#859): `lib/water/Spray.rae`, an app-owned
+`SprayEmitter` over the #858 readback cache and `lib/Particles.rae` (drawn by the
+#844 transparent pass, next to the water). Once per NEW cache snapshot — identified by
+(generation, newest cascade sample time), never per render frame, so a stale sample
+seen again emits nothing — it scans a 12x12 lattice of 56 m ahead of the camera,
+reads the summed signed Jacobian (`fftCacheSumJacobian`, J ~ 1 - sum(1 - J_i), no
+inversion) and bursts 4 droplets (0.9 s life, alpha fade) at up to 6 folded points
+(J < 0.3); the pool is capped at 160, a new generation (tier / sea-state change)
+clears it, and `WaterBody.spray` gates it (desktop ocean on, mobile tier and toon
+off). Measured in 119: the rough default sea emits ~15 bursts/s with ~30-45 live
+droplets, the 2 m/s calm sea none, the frozen test frame one burst then only stale
+frames; a scan costs ~35-40 us CPU and the droplets ride the existing transparent
+batch. #849 (slice 2) is in: `lib/water/waterFft.wgsl` bakes, once per sea state, the
 h0 spectrum per cascade (JONSWAP with the TMA depth factor, Hasselmann directional
 spreading, the k-plane Jacobian, hash-seeded Gaussians, packed as (h0(k), h0(-k)),
 per-cascade k bands handed over where the next, finer tile resolves a wave with ~6
